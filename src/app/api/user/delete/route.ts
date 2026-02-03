@@ -21,11 +21,10 @@ export async function DELETE() {
     return bad(500, "SUPABASE_SERVICE_ROLE_KEY missing");
   }
 
-  const cookieStore = await cookies();
   const supabase = createRouteHandlerClient({
     supabaseUrl,
     supabaseKey: supabaseAnon,
-    cookies: () => cookieStore,
+    cookies,
   });
   const { data } = await supabase.auth.getUser();
   const userId = data.user?.id ?? "";
