@@ -1,107 +1,57 @@
+import { createClient } from "@supabase/supabase-js";
+
 type UserStateRow = {
   userId: string;
   payload: any;
   updatedAt: number;
 };
 
-async function getPgPool() {
-  const url =
-    process.env.SUPABASE_DATABASE_URL ??
-    process.env.SUPABASE_DB_URL ??
-    process.env.DATABASE_URL;
-  if (!url) return null;
-
-  let Pool: any;
-  try {
-    ({ Pool } = await import("pg"));
-  } catch {
-    return null;
-  }
+function getAdminClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url) throw new Error("NEXT_PUBLIC_SUPABASE_URL missing");
+  if (!serviceKey) throw new Error("SUPABASE_SERVICE_ROLE_KEY missing");
   const g = globalThis as any;
-  if (!g.__wnlUserPgPool) {
-    const useSsl = Boolean(process.env.SUPABASE_DATABASE_URL || process.env.SUPABASE_DB_URL);
-    g.__wnlUserPgPool = new Pool({
-      connectionString: url,
-      ssl: useSsl ? { rejectUnauthorized: false } : undefined,
+  if (!g.__wnlSupabaseAdmin) {
+    g.__wnlSupabaseAdmin = createClient(url, serviceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
     });
   }
-  return g.__wnlUserPgPool as import("pg").Pool;
-}
-
-async function ensureSchema() {
-  const pool = await getPgPool();
-  if (!pool) return;
-  const g = globalThis as any;
-  if (g.__wnlUserSchemaReady) return;
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS wnl_users (
-      user_id TEXT PRIMARY KEY,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS wnl_user_state (
-      user_id TEXT PRIMARY KEY,
-      payload JSONB NOT NULL,
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-  `);
-  g.__wnlUserSchemaReady = true;
+  return g.__wnlSupabaseAdmin as ReturnType<typeof createClient>;
 }
 
 async function upsertUser(userId: string) {
-  const pool = await getPgPool();
-  if (!pool) throw new Error("SUPABASE_DATABASE_URL not set");
-  await ensureSchema();
-  await pool.query(
-    `
-      INSERT INTO wnl_users (user_id)
-      VALUES ($1)
-      ON CONFLICT (user_id)
-      DO UPDATE SET last_seen = NOW();
-    `,
-    [userId]
-  );
+  const admin = getAdminClient();
+  const now = new Date().toISOString();
+  const { error } = await admin
+    .from("wnl_users")
+    .upsert({ user_id: userId, last_seen: now }, { onConflict: "user_id" });
+  if (error) throw new Error(error.message);
 }
 
-async function saveToPostgres(row: UserStateRow): Promise<void> {
-  const pool = await getPgPool();
-  if (!pool) throw new Error("SUPABASE_DATABASE_URL not set");
-  await ensureSchema();
+async function saveToSupabase(row: UserStateRow): Promise<void> {
+  const admin = getAdminClient();
   await upsertUser(row.userId);
-  await pool.query(
-    `
-      INSERT INTO wnl_user_state (user_id, payload)
-      VALUES ($1, $2)
-      ON CONFLICT (user_id)
-      DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW();
-    `,
-    [row.userId, row.payload]
-  );
+  const { error } = await admin
+    .from("wnl_user_state")
+    .upsert({ user_id: row.userId, payload: row.payload }, { onConflict: "user_id" });
+  if (error) throw new Error(error.message);
 }
 
-async function loadFromPostgres(userId: string): Promise<UserStateRow | null> {
-  const pool = await getPgPool();
-  if (!pool) throw new Error("SUPABASE_DATABASE_URL not set");
-  await ensureSchema();
+async function loadFromSupabase(userId: string): Promise<UserStateRow | null> {
+  const admin = getAdminClient();
   await upsertUser(userId);
-
-  const res = await pool.query(
-    `
-      SELECT user_id, payload, EXTRACT(EPOCH FROM updated_at)*1000 AS updated_ms
-      FROM wnl_user_state
-      WHERE user_id = $1
-      LIMIT 1;
-    `,
-    [userId]
-  );
-
-  if (!res.rows?.length) return null;
-  const row = res.rows[0];
+  const { data, error } = await admin
+    .from("wnl_user_state")
+    .select("user_id,payload,updated_at")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return null;
   return {
-    userId: row.user_id,
-    payload: row.payload,
-    updatedAt: Math.round(Number(row.updated_ms) || Date.now()),
+    userId: data.user_id,
+    payload: data.payload,
+    updatedAt: data.updated_at ? new Date(data.updated_at).getTime() : Date.now(),
   };
 }
 
@@ -112,9 +62,9 @@ export async function saveUserState(input: { userId: string; payload: any }): Pr
     updatedAt: Date.now(),
   };
 
-  await saveToPostgres(row);
+  await saveToSupabase(row);
 }
 
 export async function loadUserState(userId: string): Promise<UserStateRow | null> {
-  return loadFromPostgres(userId);
+  return loadFromSupabase(userId);
 }

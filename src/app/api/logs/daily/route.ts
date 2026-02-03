@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { listDailyLogs, saveDailyLog, verifySignedToken } from "@/lib/server/logStore";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 function bad(status: number, message: string) {
@@ -29,7 +29,7 @@ export async function POST(req: Request) {
   const maybeToken = req.headers.get("x-log-token") || "";
   const secret = process.env.LOG_SIGNING_SECRET;
   if (secret) {
-    if (!verifySignedToken(deviceId, maybeToken)) {
+    if (!(await verifySignedToken(maybeToken, deviceId))) {
       return bad(401, "invalid token");
     }
   }

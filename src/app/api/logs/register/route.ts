@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { makeSignedToken } from "@/lib/server/logStore";
 
+export const runtime = "edge";
+
 /**
  * POST /api/logs/register
  *
@@ -17,7 +19,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "deviceId is required" }, { status: 400 });
   }
 
-  const token = makeSignedToken(deviceId);
+  const token = await makeSignedToken(deviceId);
   return NextResponse.json({ ok: true, deviceId, token });
 }
 

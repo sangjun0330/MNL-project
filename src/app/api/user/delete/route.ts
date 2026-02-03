@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { createClient } from "@supabase/supabase-js";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 
 function bad(status: number, message: string) {
   return NextResponse.json({ ok: false, error: message }, { status });
