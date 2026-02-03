@@ -25,6 +25,7 @@ type Props = {
   ordersSummary: OrdersSummary;
   className?: string;
   showSummary?: boolean;
+  showShift?: boolean;
 };
 
 function pct(p: number) {
@@ -38,6 +39,7 @@ export function OrdersDetailBlocks({
   ordersSummary,
   className,
   showSummary = true,
+  showShift = true,
 }: Props) {
   const { orderOneLiners, orders, nextDuty } = useRecoveryPlanData(state, pivotISO);
 
@@ -58,8 +60,12 @@ export function OrdersDetailBlocks({
           detail="작은 오더부터 실행하면 회복 효율이 올라갑니다."
           chips={(
             <>
-              <DetailChip color={DETAIL_ACCENTS.navy}>{shiftKo(todayShift)}</DetailChip>
-              <DetailChip color={DETAIL_ACCENTS.navy}>내일 {shiftKo(nextDuty)}</DetailChip>
+              {showShift ? (
+                <>
+                  <DetailChip color={DETAIL_ACCENTS.navy}>{shiftKo(todayShift)}</DetailChip>
+                  <DetailChip color={DETAIL_ACCENTS.navy}>내일 {shiftKo(nextDuty)}</DetailChip>
+                </>
+              ) : null}
             </>
           )}
         />
@@ -84,7 +90,7 @@ export function OrdersDetailBlocks({
                     <div className="text-[14px] font-bold text-ios-text">{o.title}</div>
                     <div className="text-[12px] text-ios-muted">{pct(o.pct)}</div>
                   </div>
-                  <DetailChip color={DETAIL_ACCENTS.navy}>내일 {shiftKo(nextDuty)}</DetailChip>
+                  {showShift ? <DetailChip color={DETAIL_ACCENTS.navy}>내일 {shiftKo(nextDuty)}</DetailChip> : null}
                 </div>
                 <div className="mt-2 text-[13px] text-ios-sub">{o.line.text}</div>
               </div>
@@ -114,7 +120,7 @@ export function OrdersDetailBlocks({
                       <div className="text-[12px] text-ios-muted">{pct(o.pct)}</div>
                     </div>
                   </div>
-                  <DetailChip color={DETAIL_ACCENTS.navy}>내일 {shiftKo(nextDuty)}</DetailChip>
+                  {showShift ? <DetailChip color={DETAIL_ACCENTS.navy}>내일 {shiftKo(nextDuty)}</DetailChip> : null}
                 </div>
 
                 <ul className="mt-3 list-disc space-y-2 pl-5 text-[13px] text-ios-sub">

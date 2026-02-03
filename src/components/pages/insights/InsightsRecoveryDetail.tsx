@@ -15,7 +15,7 @@ function pct(p: number) {
 }
 
 export function InsightsRecoveryDetail() {
-  const { end, top1, top3, syncLabel, todayShift, ordersSummary } = useInsightsData();
+  const { end, top1, top3, syncLabel, todayShift, ordersSummary, hasTodayShift } = useInsightsData();
 
   const recoverySummary = top1
     ? `회복 포커스 · ${top1.label}`
@@ -56,9 +56,11 @@ export function InsightsRecoveryDetail() {
             </span>
           </div>
           <div className="mt-1 text-[13px] text-ios-sub">작은 오더부터 실행하면 회복 효율이 올라갑니다.</div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <DetailChip color={DETAIL_ACCENTS.navy}>{shiftKo(todayShift)}</DetailChip>
-          </div>
+          {hasTodayShift ? (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <DetailChip color={DETAIL_ACCENTS.navy}>{shiftKo(todayShift)}</DetailChip>
+            </div>
+          ) : null}
         </Link>
 
         <Link
@@ -92,7 +94,7 @@ export function InsightsRecoveryDetail() {
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <DetailChip color={DETAIL_ACCENTS.mint}>{syncLabel}</DetailChip>
-            <DetailChip color={DETAIL_ACCENTS.mint}>{shiftKo(todayShift)}</DetailChip>
+            {hasTodayShift ? <DetailChip color={DETAIL_ACCENTS.mint}>{shiftKo(todayShift)}</DetailChip> : null}
             {top3?.map((t) => (
               <DetailChip key={t.key} color={DETAIL_ACCENTS.mint}>
                 TOP · {t.label} {pct(t.pct)}

@@ -26,7 +26,7 @@ function pct(n: number) {
 }
 
 export function InsightsVitalDetail() {
-  const { end, todayShift, todayVital, syncLabel, fastCharge, accuracy, todayDisplay, top3 } = useInsightsData();
+  const { end, todayShift, todayVital, syncLabel, fastCharge, accuracy, todayDisplay, top3, hasTodayShift } = useInsightsData();
   const [openSync, setOpenSync] = useState(false);
 
   const body = useMemo(() => Math.round(todayVital?.body.value ?? 0), [todayVital]);
@@ -48,7 +48,7 @@ export function InsightsVitalDetail() {
     <InsightDetailShell
       title="WNL Vital"
       subtitle={formatKoreanDate(end)}
-      meta={`${shiftKo(todayShift)} · 오늘 바이탈 분석`}
+      meta={hasTodayShift ? `${shiftKo(todayShift)} · 오늘 바이탈 분석` : "오늘 바이탈 분석"}
       right={(
         <button
           type="button"
@@ -76,7 +76,7 @@ export function InsightsVitalDetail() {
         chips={(
           <>
             <DetailChip color={DETAIL_ACCENTS.mint}>{syncLabel}</DetailChip>
-            <DetailChip color={DETAIL_ACCENTS.mint}>{shiftKo(todayShift)}</DetailChip>
+            {hasTodayShift ? <DetailChip color={DETAIL_ACCENTS.mint}>{shiftKo(todayShift)}</DetailChip> : null}
           </>
         )}
       />
