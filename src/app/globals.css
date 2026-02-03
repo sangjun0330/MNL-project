@@ -1,0 +1,181 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --wnl-bg: #F7F7F8;
+  --wnl-text: #1C1C1E;
+  --wnl-sub: rgba(28, 28, 30, 0.72);
+  --wnl-muted: rgba(28, 28, 30, 0.56);
+  --wnl-card: #FFFFFF;
+  --wnl-sep: rgba(60, 60, 67, 0.18);
+  --wnl-accent: #007AFF;
+  --wnl-selection: rgba(0, 122, 255, 0.16);
+  --wnl-ease-smooth: cubic-bezier(0.16, 1, 0.3, 1);
+  --wnl-ease-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --wnl-dur-fast: 180ms;
+  --wnl-dur-med: 320ms;
+  --wnl-dur-slow: 420ms;
+  --wnl-dur-page: 520ms;
+  --wnl-dur-sheet: 420ms;
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  background-color: var(--wnl-bg);
+  color: var(--wnl-text);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+    "Apple SD Gothic Neo", "Noto Sans KR", "Helvetica Neue", "Segoe UI", Roboto, Helvetica, Arial,
+    "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
+  letter-spacing: -0.01em;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color var(--wnl-dur-page) var(--wnl-ease-smooth),
+    color var(--wnl-dur-page) var(--wnl-ease-smooth);
+}
+
+/* ✅ iOS-like tap behaviour */
+* { -webkit-tap-highlight-color: transparent; }
+
+/* ✅ Page transition (bottom tab 이동 시) */
+@keyframes wnlPageEnter {
+  from { opacity: 0; transform: translate3d(0, 14px, 0) scale(0.985); }
+  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+
+.wnl-page-enter {
+  animation: wnlPageEnter var(--wnl-dur-page) var(--wnl-ease-smooth);
+  will-change: transform, opacity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wnl-page-enter { animation: none; }
+  .wnl-breathe,
+  .wnl-wave,
+  .wnl-pulse-soft,
+  .wnl-float-up { animation: none; }
+  body { transition: none; }
+}
+
+::selection {
+  background: var(--wnl-selection);
+}
+
+/* iOS safe-area helper */
+.safe-top { padding-top: env(safe-area-inset-top); }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+
+/* Subtle scrollbars for desktop */
+*::-webkit-scrollbar { height: 8px; width: 8px; }
+*::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.14); border-radius: 999px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* =========================
+   WNL Insight v2.0 motion
+   ========================= */
+
+@keyframes wnlBreathe {
+  0%, 100% { transform: scale(0.99); opacity: 0.6; }
+  50% { transform: scale(1.01); opacity: 0.95; }
+}
+
+@keyframes wnlWave {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-160px); }
+}
+
+@keyframes wnlPulseSoft {
+  0%, 100% { opacity: 0.75; }
+  50% { opacity: 1; }
+}
+
+@keyframes wnlFloatUp {
+  0% { opacity: 0; transform: translateY(8px); }
+  20% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-16px); }
+}
+
+.wnl-breathe {
+  animation: wnlBreathe 3.6s ease-in-out infinite;
+}
+
+.wnl-wave {
+  animation: wnlWave 4.4s linear infinite;
+}
+
+.wnl-pulse-soft {
+  animation: wnlPulseSoft 1.6s ease-in-out infinite;
+}
+
+.wnl-float-up {
+  animation: wnlFloatUp 1.2s ease-out forwards;
+}
+
+/* =========================
+   WNL Night Mode (auto)
+   Trigger: night_streak >= 3
+   ========================= */
+
+html.wnl-night {
+  color-scheme: dark;
+  --wnl-bg: #0B1220;
+  --wnl-text: rgba(255,255,255,0.92);
+  --wnl-sub: rgba(255,255,255,0.64);
+  --wnl-muted: rgba(255,255,255,0.52);
+  --wnl-card: #111A2E;
+  --wnl-sep: rgba(255,255,255,0.12);
+  --wnl-accent: #6CDAC3;
+  --wnl-selection: rgba(108,218,195,0.22);
+}
+
+html.wnl-night body {
+  background-color: var(--wnl-bg);
+  color: var(--wnl-text);
+}
+
+html.wnl-night *::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.18);
+}
+
+/* Tailwind token overrides (best-effort) */
+html.wnl-night .bg-ios-bg { background-color: #0B1220 !important; }
+html.wnl-night .bg-ios-card { background-color: #111A2E !important; }
+html.wnl-night .border-ios-sep { border-color: rgba(255,255,255,0.12) !important; }
+html.wnl-night .text-ios-text { color: rgba(255,255,255,0.92) !important; }
+html.wnl-night .text-ios-sub { color: rgba(255,255,255,0.62) !important; }
+html.wnl-night .text-ios-muted { color: rgba(255,255,255,0.55) !important; }
+
+/* Common utility colors used across the app */
+html.wnl-night .bg-white { background-color: #111A2E !important; }
+html.wnl-night .bg-white\/90 { background-color: rgba(17,26,46,0.90) !important; }
+html.wnl-night .bg-white\/85 { background-color: rgba(17,26,46,0.85) !important; }
+html.wnl-night .bg-white\/80 { background-color: rgba(17,26,46,0.80) !important; }
+html.wnl-night .bg-white\/70 { background-color: rgba(17,26,46,0.70) !important; }
+html.wnl-night .bg-white\/60 { background-color: rgba(17,26,46,0.60) !important; }
+html.wnl-night .bg-white\/50 { background-color: rgba(17,26,46,0.50) !important; }
+
+html.wnl-night .text-black { color: rgba(255,255,255,0.92) !important; }
+html.wnl-night .text-black\/80 { color: rgba(255,255,255,0.80) !important; }
+html.wnl-night .text-black\/70 { color: rgba(255,255,255,0.70) !important; }
+html.wnl-night .text-black\/60 { color: rgba(255,255,255,0.60) !important; }
+html.wnl-night .text-black\/50 { color: rgba(255,255,255,0.50) !important; }
+
+html.wnl-night .bg-black\/5 { background-color: rgba(255,255,255,0.08) !important; }
+html.wnl-night .bg-black\/7 { background-color: rgba(255,255,255,0.10) !important; }
+html.wnl-night .bg-black\/10 { background-color: rgba(255,255,255,0.12) !important; }
+
+html.wnl-night .focus\:ring-black\/10:focus { --tw-ring-color: rgba(255,255,255,0.18) !important; }
+
+/* BottomNav active tab (Design Spec request): Black -> Mint in night mode */
+html.wnl-night .wnl-nav-active {
+  background-color: #6CDAC3 !important;
+  color: #0B1220 !important;
+}
+
+html.wnl-night .wnl-nav-active:hover {
+  background-color: #6CDAC3 !important;
+}
