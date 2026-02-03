@@ -1,4 +1,5 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/types/supabase";
 
 type UserStateRow = {
   userId: string;
@@ -13,11 +14,11 @@ function getAdminClient() {
   if (!serviceKey) throw new Error("SUPABASE_SERVICE_ROLE_KEY missing");
   const g = globalThis as any;
   if (!g.__wnlSupabaseAdmin) {
-    g.__wnlSupabaseAdmin = createClient(url, serviceKey, {
+    g.__wnlSupabaseAdmin = createClient<Database>(url, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
   }
-  return g.__wnlSupabaseAdmin as ReturnType<typeof createClient>;
+  return g.__wnlSupabaseAdmin as SupabaseClient<Database>;
 }
 
 async function upsertUser(userId: string) {
