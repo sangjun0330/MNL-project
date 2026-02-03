@@ -15,11 +15,7 @@ async function readUserId(): Promise<string> {
   const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!supabaseUrl || !supabaseAnon) return "";
 
-  const supabase = createRouteHandlerClient({
-    supabaseUrl,
-    supabaseKey: supabaseAnon,
-    cookies,
-  });
+  const supabase = createRouteHandlerClient({ cookies });
   const { data } = await supabase.auth.getUser();
   return data.user?.id ?? "";
 }
