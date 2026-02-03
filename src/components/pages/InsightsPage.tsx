@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { formatKoreanDate } from "@/lib/date";
-import type { AppState, BioInputs } from "@/lib/model";
+import type { AppState } from "@/lib/model";
+import { countHealthRecordedDays } from "@/lib/healthRecords";
 import { statusColor, statusLabel } from "@/lib/wnlInsight";
 import { useInsightsData, shiftKo } from "@/components/insights/useInsightsData";
 import { HeroDashboard } from "@/components/insights/v2/HeroDashboard";
@@ -120,43 +121,8 @@ function formatPct(p: number) {
   return `${Math.round(p * 100)}%`;
 }
 
-function hasBioInput(bio?: BioInputs) {
-  if (!bio) return false;
-  const values = [
-    bio.sleepHours,
-    (bio as any).napHours,
-    (bio as any).sleepQuality,
-    (bio as any).sleepTiming,
-    bio.stress,
-    bio.activity,
-    bio.caffeineMg,
-    (bio as any).caffeineLastAt,
-    (bio as any).fatigueLevel,
-    (bio as any).symptomSeverity,
-    (bio as any).menstrualStatus,
-    (bio as any).menstrualFlow,
-    (bio as any).shiftOvertimeHours,
-  ];
-  return values.some((v) => v !== null && v !== undefined);
-}
-
 function countRecordedDays(state: AppState) {
-  const dates = new Set<string>();
-  const notes = state.notes ?? {};
-  const emotions = state.emotions ?? {};
-  const bio = state.bio ?? {};
-
-  for (const [iso, note] of Object.entries(notes)) {
-    if (typeof note === "string" && note.trim().length > 0) dates.add(iso);
-  }
-  for (const [iso, entry] of Object.entries(emotions)) {
-    if ((entry as any)?.mood !== null && (entry as any)?.mood !== undefined) dates.add(iso);
-  }
-  for (const [iso, entry] of Object.entries(bio)) {
-    if (hasBioInput(entry as any)) dates.add(iso);
-  }
-
-  return dates.size;
+  return countHealthRecordedDays(state);
 }
 
 export function InsightsPage() {
@@ -164,6 +130,7 @@ export function InsightsPage() {
     state,
     end,
     todayShift,
+    hasTodayShift,
     menstrual,
     todayDisplay,
     status,
@@ -196,7 +163,7 @@ export function InsightsPage() {
             현재 {recordedDays}일 기록됨 · {remaining}일 더 기록하면 열려요
           </div>
           <div className="mt-4 text-[12px] text-ios-muted">
-            수면/스트레스/활동/기분/메모 중 하나라도 입력된 날짜가 기록일로 집계됩니다.
+            수면/스트레스/활동/카페인/기분 등 건강 기록이 입력된 날짜만 집계됩니다.
           </div>
         </div>
       </div>
@@ -247,8 +214,12 @@ export function InsightsPage() {
         <div className="mt-2 flex flex-wrap items-center gap-2 text-[12.5px] text-ios-sub">
           <span>{formatKoreanDate(end)}</span>
           <span className="opacity-40">·</span>
-          <span>{shiftKo(todayShift)}</span>
-          <span className="opacity-40">·</span>
+          {hasTodayShift ? (
+            <>
+              <span>{shiftKo(todayShift)}</span>
+              <span className="opacity-40">·</span>
+            </>
+          ) : null}
           <span>{menstrual.enabled ? menstrual.label : "주기"}</span>
           <span className="opacity-40">·</span>
           <span>Vital {todayDisplay}</span>
@@ -304,27 +275,29 @@ export function InsightsPage() {
         />
       </Section>
 
-      <Section title="Plan">
-        <SummaryCard
-          href="/insights/timeline"
-          accent="navy"
-          label="Timeline Forecast"
-          title="타임라인 예보"
-          metric={shiftKo(todayShift)}
-          metricLabel="Shift"
-          summary={(
-            <>
-              <Bold>{isRestDay ? "휴식일 회복 추천" : "알고리즘 회복 추천"}</Bold> · {shiftKo(todayShift)} 기준
-            </>
-          )}
-          detail={
-            isRestDay
-              ? "근무 없이 회복을 최적화하는 휴식 루틴을 안내합니다."
-              : "출근 전 · 근무 중 · 퇴근 후 회복 루틴을 안내합니다."
-          }
-          chips={<AccentPill color={ACCENTS.navy}>{isRestDay ? "휴식 최적화" : "근무 단계별"}</AccentPill>}
-        />
-      </Section>
+      {hasTodayShift ? (
+        <Section title="Plan">
+          <SummaryCard
+            href="/insights/timeline"
+            accent="navy"
+            label="Timeline Forecast"
+            title="타임라인 예보"
+            metric={shiftKo(todayShift)}
+            metricLabel="Shift"
+            summary={(
+              <>
+                <Bold>{isRestDay ? "휴식일 회복 추천" : "알고리즘 회복 추천"}</Bold> · {shiftKo(todayShift)} 기준
+              </>
+            )}
+            detail={
+              isRestDay
+                ? "근무 없이 회복을 최적화하는 휴식 루틴을 안내합니다."
+                : "출근 전 · 근무 중 · 퇴근 후 회복 루틴을 안내합니다."
+            }
+            chips={<AccentPill color={ACCENTS.navy}>{isRestDay ? "휴식 최적화" : "근무 단계별"}</AccentPill>}
+          />
+        </Section>
+      ) : null}
 
       <Section title="Vitals">
         <SummaryCard

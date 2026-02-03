@@ -15,7 +15,7 @@ function pct(p: number) {
 }
 
 export function InsightsRecoveryPlanDetail() {
-  const { end, state, top1, top3, syncLabel, todayShift } = useInsightsData();
+  const { end, state, top1, top3, syncLabel, todayShift, hasTodayShift } = useInsightsData();
 
   const summary = top1 ? (
     <>
@@ -47,7 +47,7 @@ export function InsightsRecoveryPlanDetail() {
         chips={(
           <>
             <DetailChip color={DETAIL_ACCENTS.mint}>{syncLabel}</DetailChip>
-            <DetailChip color={DETAIL_ACCENTS.mint}>{shiftKo(todayShift)}</DetailChip>
+            {hasTodayShift ? <DetailChip color={DETAIL_ACCENTS.mint}>{shiftKo(todayShift)}</DetailChip> : null}
             {top3?.map((t) => (
               <DetailChip key={t.key} color={DETAIL_ACCENTS.mint}>
                 TOP · {t.label} {pct(t.pct)}

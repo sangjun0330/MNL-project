@@ -14,6 +14,7 @@ import {
 import { useAppStoreSelector } from "@/lib/store";
 import { computeVitalsRange, vitalMapByISO } from "@/lib/vitals";
 import { menstrualContextForDate } from "@/lib/menstrual";
+import { countHealthRecordedDays } from "@/lib/healthRecords";
 
 import { MonthCalendar } from "@/components/home/MonthCalendar";
 import { BatteryGauge } from "@/components/home/BatteryGauge";
@@ -175,6 +176,12 @@ export default function Home() {
   const menstrual = store.settings.menstrual;
   const mctx = useMemo(() => menstrualContextForDate(selected, menstrual), [selected, menstrual]);
 
+  const healthRecordedDays = useMemo(
+    () => countHealthRecordedDays({ bio: store.bio, emotions: store.emotions }),
+    [store.bio, store.emotions]
+  );
+  const isInsightsUnlocked = healthRecordedDays >= 3;
+
   const inputItems = useMemo(() => {
     const sleep = selBio?.sleepHours;
     const nap = (selBio as any)?.napHours ?? null;
@@ -261,7 +268,7 @@ export default function Home() {
             </div>
           </div>
 
-          {selVital ? (
+          {selVital && isInsightsUnlocked ? (
             <div className="mt-4 grid grid-cols-2 gap-3">
               <div className="rounded-2xl border border-ios-sep bg-white p-3 shadow-apple-sm sm:p-4">
                 <BatteryGauge value={selVital.body.value} label="Body" tone={selVital.body.tone} kind="body" />
@@ -280,7 +287,7 @@ export default function Home() {
             </div>
           ) : (
             <div className="mt-4 rounded-2xl border border-ios-sep bg-white p-4 text-[12.5px] text-ios-muted shadow-apple-sm">
-              기록이 아직 없어서 오늘 지표가 비어 있어. <span className="font-semibold text-black">일정</span> 탭에서 날짜를 눌러 입력해줘.
+              건강 기록을 3일 이상 입력하면 바디·멘탈 배터리가 열려요.
             </div>
           )}
 

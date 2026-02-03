@@ -9,6 +9,7 @@ import { useAppStore } from "@/lib/store";
 import { computeVitalsRange, type DailyVital } from "@/lib/vitals";
 import { computePersonalizationAccuracy, topFactors } from "@/lib/insightsV2";
 import { shiftWindow, statusFromScore, type OrderKey } from "@/lib/wnlInsight";
+import { hasHealthInput } from "@/lib/healthRecords";
 
 type OrdersSummary = {
   count: number;
@@ -115,7 +116,9 @@ export function useInsightsData() {
   const vmap = useMemo(() => new Map(vitals.map((v) => [v.dateISO, v])), [vitals]);
   const todayVital = vmap.get(end) ?? (vitals.length ? vitals[vitals.length - 1] : null);
 
-  const todayShift: Shift = (state.schedule?.[end] as Shift | undefined) ?? todayVital?.shift ?? "OFF";
+  const todayShiftFromSchedule = state.schedule?.[end] as Shift | undefined;
+  const hasTodayShift = typeof todayShiftFromSchedule === "string";
+  const todayShift: Shift = todayShiftFromSchedule ?? todayVital?.shift ?? "OFF";
   const menstrual = useMemo(
     () => menstrualContextForDate(end, state.settings?.menstrual ?? null),
     [end, state.settings]
@@ -132,19 +135,7 @@ export function useInsightsData() {
       const iso = toISODate(addDays(fromISODate(start), i));
       const b = (state.bio ?? {})[iso];
       const e = (state.emotions ?? {})[iso];
-      const s = (state.schedule ?? {})[iso];
-
-      const anyBio = Boolean(
-        b &&
-          ((b.sleepHours !== null && b.sleepHours !== undefined) ||
-            (b.stress !== null && b.stress !== undefined) ||
-            (b.activity !== null && b.activity !== undefined) ||
-            (b.caffeineMg !== null && b.caffeineMg !== undefined) ||
-            ((b as any).symptomSeverity !== null && (b as any).symptomSeverity !== undefined))
-      );
-      const anyEmo = Boolean(e && e.mood !== null && e.mood !== undefined);
-      const anySch = Boolean(s);
-      if (anyBio || anyEmo || anySch) c += 1;
+      if (hasHealthInput(b, e)) c += 1;
     }
     return c;
   }, [state, start]);
@@ -206,6 +197,7 @@ export function useInsightsData() {
     vitals,
     todayVital,
     todayShift,
+    hasTodayShift,
     menstrual,
     accuracy,
     syncLabel,
