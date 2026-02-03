@@ -4,7 +4,7 @@ import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { emptyState } from "@/lib/model";
 import { loadUserState, saveUserState } from "@/lib/server/userStateStore";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
