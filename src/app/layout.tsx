@@ -4,12 +4,12 @@ import { PWARegister } from "@/components/PWARegister";
 import { AuthProvider } from "@/components/system/AuthProvider";
 
 export const metadata: Metadata = {
-  title: "WNL • Within Nurse's Life",
-  description: "교대근무의 끝, 일상의 시작. 당신의 삶을 WNL(정상 범위)로",
-  applicationName: "WNL",
+  title: "RNest",
+  description: "교대근무의 끝, 일상의 시작. RNest로 회복 리듬을 설계하세요.",
+  applicationName: "RNest",
   appleWebApp: {
     capable: true,
-    title: "WNL",
+    title: "RNest",
     statusBarStyle: "default",
   },
   formatDetection: {

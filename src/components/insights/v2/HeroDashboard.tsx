@@ -81,7 +81,7 @@ export function HeroDashboard({
 
         <div className="flex items-start justify-between gap-3 px-5 pt-5">
           <div className="min-w-0">
-            <div className="text-[13px] font-semibold text-ios-sub">WNL Vital</div>
+            <div className="text-[13px] font-semibold text-ios-sub">RNest Vital</div>
             <div className="mt-3 flex items-end gap-3">
               <div className="text-[52px] font-extrabold leading-none tracking-[-0.03em]" style={{ color }}>
                 {displayScore}

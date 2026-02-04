@@ -303,7 +303,7 @@ export function InsightsPage() {
         <SummaryCard
           href="/insights/vital"
           accent="mint"
-          label="WNL Vital"
+          label="RNest Vital"
           title="오늘 바이탈 요약"
           metric={todayDisplay}
           metricLabel="/ 100"

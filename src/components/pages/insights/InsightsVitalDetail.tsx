@@ -46,7 +46,7 @@ export function InsightsVitalDetail() {
 
   return (
     <InsightDetailShell
-      title="WNL Vital"
+      title="RNest Vital"
       subtitle={formatKoreanDate(end)}
       meta={hasTodayShift ? `${shiftKo(todayShift)} · 오늘 바이탈 분석` : "오늘 바이탈 분석"}
       right={(
