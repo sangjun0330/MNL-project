@@ -22,7 +22,9 @@ export async function DELETE() {
   }
 
   const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: async () => cookieStore });
+  const supabase = createRouteHandlerClient({
+    cookies: (() => cookieStore) as any,
+  });
   const { data } = await supabase.auth.getUser();
   const userId = data.user?.id ?? "";
   if (!userId) return bad(401, "login required");
