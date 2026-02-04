@@ -38,26 +38,9 @@ export function AutoHealthLogger({ userId }: { userId?: string | null }) {
   const prevStateRef = useRef<ReturnType<typeof store.getState> | null>(null);
   const dirtyRef = useRef<Set<ISODate>>(new Set());
   const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const endOfDayTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastSeenDayRef = useRef<ISODate | null>(null);
 
   // ✅ dev/fast refresh/route 전환 등에서 초기 effect가 중복 실행되며 폭주하는 걸 방지
   const didInitRef = useRef(false);
-
-  const scheduleEndOfDayFlush = useCallback(() => {
-    if (typeof window === "undefined") return;
-    const now = new Date();
-    const flushAt = new Date(now);
-    // 하루 끝나기 5분 전에 1회 업로드
-    flushAt.setHours(23, 55, 0, 0);
-    if (flushAt <= now) {
-      // 이미 시간이 지나면 다음날 기준으로 예약
-      flushAt.setDate(flushAt.getDate() + 1);
-    }
-    const delay = flushAt.getTime() - now.getTime();
-    if (endOfDayTimer.current) clearTimeout(endOfDayTimer.current);
-    endOfDayTimer.current = setTimeout(() => void flushOutbox(), delay);
-  }, []);
 
   const markDirtyAndScheduleFlush = useCallback((dates: Iterable<ISODate>) => {
     const today = todayISO();
@@ -82,10 +65,10 @@ export function AutoHealthLogger({ userId }: { userId?: string | null }) {
         enqueueDailyLog(iso, payload, deviceId);
       }
 
-      // ✅ 하루 끝나기 전에 한 번에 업로드하도록 예약
-      scheduleEndOfDayFlush();
-    }, 2_000);
-  }, [deviceId, scheduleEndOfDayFlush, store]);
+      // 네트워크 상태 좋으면 즉시 업로드 시도(실패해도 outbox에 남음)
+      void flushOutbox();
+    }, 500);
+  }, [deviceId, store]);
 
   // ✅ 최초 1회: 최근 기록이 있는 날짜만 스냅샷으로 enqueue
   useEffect(() => {
@@ -106,40 +89,18 @@ export function AutoHealthLogger({ userId }: { userId?: string | null }) {
 
     markDirtyAndScheduleFlush(Array.from(dates) as ISODate[]);
 
-    // ✅ 하루 끝나기 전에 1회 업로드 + 날짜 변경 시 전날 데이터 업로드
-    lastSeenDayRef.current = today;
-    scheduleEndOfDayFlush();
-
-    const maybeFlushOnRollover = () => {
-      const nowDay = todayISO();
-      if (lastSeenDayRef.current && nowDay !== lastSeenDayRef.current) {
-        lastSeenDayRef.current = nowDay;
-        // 날짜가 바뀌었으면 전날 기록을 서버로 전송
-        void flushOutbox();
-      }
-    };
-
-    const onOnline = () => {
-      // 온라인 복귀 시, 날짜가 바뀌었으면 전날 기록 전송
-      maybeFlushOnRollover();
-    };
-
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") {
-        maybeFlushOnRollover();
-      }
-    };
+    // ✅ 주기적 outbox flush (너무 잦은 호출 방지)
+    // - 즉시 flushOutbox()는 markDirty에서 이미 수행
+    // - 백업성 재시도는 2분 정도면 충분
+    const t = setInterval(() => void flushOutbox(), 120_000);
+    const onOnline = () => void flushOutbox();
 
     window.addEventListener("online", onOnline);
-    document.addEventListener("visibilitychange", onVisibility);
-
     return () => {
-      if (flushTimer.current) clearTimeout(flushTimer.current);
-      if (endOfDayTimer.current) clearTimeout(endOfDayTimer.current);
+      clearInterval(t);
       window.removeEventListener("online", onOnline);
-      document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [markDirtyAndScheduleFlush, scheduleEndOfDayFlush, store]);
+  }, [markDirtyAndScheduleFlush, store]);
 
   // ✅ store 업데이트 감지: 변경된 날짜만 dirty로 수집
   useEffect(() => {

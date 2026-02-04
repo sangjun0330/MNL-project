@@ -1,34 +1,32 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
-import { emptyState } from "@/lib/model";
-import { loadUserState, saveUserState } from "@/lib/server/userStateStore";
+import { ensureUserRow } from "@/lib/server/userStateStore";
+import { getRouteSupabaseClient } from "@/lib/server/supabaseRouteClient";
 
 export const runtime = "edge";
+export const dynamic = "force-dynamic";
 
-export async function GET(request: Request) {
-  const requestUrl = new URL(request.url);
-  const code = requestUrl.searchParams.get("code");
+export async function GET(req: Request) {
+  const url = new URL(req.url);
+  const code = url.searchParams.get("code");
+  const next = url.searchParams.get("next") || "/settings";
+  const origin = url.origin;
 
   if (code) {
-    const cookieStore = await cookies();
-    const supabase = createRouteHandlerClient({
-      cookies: (() => cookieStore) as any,
-    });
-    await supabase.auth.exchangeCodeForSession(code);
-    const { data } = await supabase.auth.getUser();
-    const userId = data.user?.id ?? "";
-    if (userId) {
-      try {
-        const existing = await loadUserState(userId);
-        if (!existing?.payload) {
-          await saveUserState({ userId, payload: emptyState() });
+    const supabase = await getRouteSupabaseClient();
+
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+    if (!error) {
+      const userId = data.user?.id;
+      if (userId) {
+        try {
+          await ensureUserRow(userId);
+        } catch {
+          // ignore user bootstrap errors (do not block login)
         }
-      } catch (err) {
-        console.error("Failed to init user state after login", err);
       }
     }
   }
 
-  return NextResponse.redirect(new URL("/settings", requestUrl.origin));
+  const safeNext = next.startsWith("/") ? next : "/settings";
+  return NextResponse.redirect(new URL(safeNext, origin));
 }

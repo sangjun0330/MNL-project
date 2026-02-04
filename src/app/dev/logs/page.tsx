@@ -1,6 +1,6 @@
 import { listDailyLogs } from "@/lib/server/logStore";
 
-export const runtime = "edge";
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export default async function DevLogsPage({

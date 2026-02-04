@@ -1,7 +1,7 @@
 {
-  "name": "RNest",
-  "short_name": "RNest",
-  "description": "교대근무 회복 리듬을 설계하는 RNest",
+  "name": "WNL",
+  "short_name": "WNL",
+  "description": "일정 기반 바디 배터리(피로 예보)",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#F5F5F7",

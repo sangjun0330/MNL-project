@@ -117,7 +117,7 @@ export function useInsightsData() {
   const todayVital = vmap.get(end) ?? (vitals.length ? vitals[vitals.length - 1] : null);
 
   const todayShiftFromSchedule = state.schedule?.[end] as Shift | undefined;
-  const hasTodayShift = typeof todayShiftFromSchedule === "string";
+  const hasTodayShift = Boolean(todayShiftFromSchedule);
   const todayShift: Shift = todayShiftFromSchedule ?? todayVital?.shift ?? "OFF";
   const menstrual = useMemo(
     () => menstrualContextForDate(end, state.settings?.menstrual ?? null),
@@ -133,8 +133,8 @@ export function useInsightsData() {
     let c = 0;
     for (let i = 0; i < 7; i++) {
       const iso = toISODate(addDays(fromISODate(start), i));
-      const b = (state.bio ?? {})[iso];
-      const e = (state.emotions ?? {})[iso];
+      const b = (state.bio ?? {})[iso] ?? null;
+      const e = (state.emotions ?? {})[iso] ?? null;
       if (hasHealthInput(b, e)) c += 1;
     }
     return c;

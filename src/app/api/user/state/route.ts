@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { loadUserState, saveUserState } from "@/lib/server/userStateStore";
+import { getRouteSupabaseClient } from "@/lib/server/supabaseRouteClient";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -15,10 +14,7 @@ async function readUserId(): Promise<string> {
   const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!supabaseUrl || !supabaseAnon) return "";
 
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({
-    cookies: (() => cookieStore) as any,
-  });
+  const supabase = await getRouteSupabaseClient();
   const { data } = await supabase.auth.getUser();
   return data.user?.id ?? "";
 }

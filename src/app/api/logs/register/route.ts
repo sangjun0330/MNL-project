@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { makeSignedToken } from "@/lib/server/logStore";
 
 export const runtime = "edge";
+export const dynamic = "force-dynamic";
 
 /**
  * POST /api/logs/register
