@@ -16,7 +16,9 @@ async function readUserId(): Promise<string> {
   if (!supabaseUrl || !supabaseAnon) return "";
 
   const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: async () => cookieStore });
+  const supabase = createRouteHandlerClient({
+    cookies: (() => cookieStore) as any,
+  });
   const { data } = await supabase.auth.getUser();
   return data.user?.id ?? "";
 }
