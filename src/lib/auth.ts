@@ -36,8 +36,20 @@ export function signInWithProvider(provider: "google" | "kakao") {
       skipBrowserRedirect: true,
     };
     if (provider === "kakao") {
-      // Only request nickname to avoid KOE205 when email/profile scopes aren't enabled.
-      options.scopes = "profile_nickname";
+      // Force Kakao to request nickname only (avoid account_email/profile_image).
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      if (!supabaseUrl) {
+        if (typeof window !== "undefined") {
+          alert("Supabase URL이 설정되지 않았어요. NEXT_PUBLIC_SUPABASE_URL을 확인해 주세요.");
+        }
+        return { data: null, error: new Error("Missing NEXT_PUBLIC_SUPABASE_URL") };
+      }
+      if (typeof window !== "undefined") {
+        const params = new URLSearchParams({ provider: "kakao", scope: "profile_nickname", prompt: "consent" });
+        if (redirectTo) params.set("redirect_to", redirectTo);
+        window.location.href = `${supabaseUrl}/auth/v1/authorize?${params.toString()}`;
+      }
+      return { data: { url: `${supabaseUrl}/auth/v1/authorize` }, error: null };
     }
     const { data, error } = await supabase.auth.signInWithOAuth({ provider, options });
 
