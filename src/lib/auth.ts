@@ -27,7 +27,7 @@ export function useAuth(): AuthUser | null {
   return user ?? null;
 }
 
-export function signInWithProvider(provider: "google" | "kakao") {
+export function signInWithProvider(provider: "google" | "apple") {
   const supabase = createClientComponentClient();
   return (async () => {
     const redirectTo = typeof window !== "undefined" ? `${window.location.origin}/auth/callback` : undefined;

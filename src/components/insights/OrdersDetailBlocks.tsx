@@ -48,7 +48,7 @@ export function OrdersDetailBlocks({
       {showSummary ? (
         <DetailSummaryCard
           accent="navy"
-          label="Dr. WNL's Orders"
+          label="Dr. RNest's Orders"
           title="오늘 오더"
           metric={ordersSummary.count}
           metricLabel="Orders"
