@@ -31,13 +31,15 @@ export function signInWithProvider(provider: "google" | "kakao") {
   const supabase = createClientComponentClient();
   return (async () => {
     const redirectTo = typeof window !== "undefined" ? `${window.location.origin}/auth/callback` : undefined;
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider,
-      options: {
-        redirectTo,
-        skipBrowserRedirect: true,
-      },
-    });
+    const options: { redirectTo?: string; skipBrowserRedirect?: boolean; scopes?: string } = {
+      redirectTo,
+      skipBrowserRedirect: true,
+    };
+    if (provider === "kakao") {
+      // Only request nickname to avoid KOE205 when email/profile scopes aren't enabled.
+      options.scopes = "profile_nickname";
+    }
+    const { data, error } = await supabase.auth.signInWithOAuth({ provider, options });
 
     if (error) {
       if (typeof window !== "undefined") {
