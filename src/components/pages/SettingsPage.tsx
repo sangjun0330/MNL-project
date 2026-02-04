@@ -5,7 +5,7 @@ import { signInWithProvider, signOut, useAuthState } from "@/lib/auth";
 
 function providerLabel(provider: string | null | undefined) {
   if (provider === "google") return "Google";
-  if (provider === "apple") return "Apple";
+  if (provider === "kakao") return "Kakao";
   return "알 수 없음";
 }
 
@@ -80,7 +80,7 @@ export function SettingsPage() {
         ) : (
           <div className="mt-4 space-y-4">
             <div className="text-[13px] text-ios-sub">
-              Google · Apple 계정으로 로그인하면 기록이 계정에 저장되어 앱을 지우거나
+              Google · Kakao 계정으로 로그인하면 기록이 계정에 저장되어 앱을 지우거나
               기기를 바꿔도 복원할 수 있습니다.
             </div>
 
@@ -90,10 +90,10 @@ export function SettingsPage() {
               </Button>
               <Button
                 variant="secondary"
-                onClick={() => signInWithProvider("apple")}
+                onClick={() => signInWithProvider("kakao")}
                 disabled={isLoading}
               >
-                Apple로 계속
+                Kakao로 계속
               </Button>
             </div>
             <div className="text-[12px] text-ios-muted">
@@ -102,7 +102,7 @@ export function SettingsPage() {
                 : "로그인 후 모든 기능(일정, 기록, 인사이트)을 사용할 수 있어요."}
             </div>
             <div className="text-[12px] text-ios-muted">
-              Apple 로그인은 설정된 리디렉션 URI와 도메인이 일치해야 합니다.
+              Kakao 로그인은 설정된 리디렉션 URI와 도메인이 일치해야 합니다.
             </div>
           </div>
         )}
