@@ -35,7 +35,7 @@ export type DailyHealthSnapshot = {
   mood?: number | null;
 };
 
-let cachedDeviceId: string | null = null;
+const DEVICE_KEY = "wnl_device_id_v1";
 
 /**
  * 개발/테스트 환경: 브라우저마다 고유한 deviceId를 만들어 사용
@@ -43,9 +43,11 @@ let cachedDeviceId: string | null = null;
  */
 export function getOrCreateDeviceId() {
   if (typeof window === "undefined") return "server";
-  if (cachedDeviceId) return cachedDeviceId;
-  cachedDeviceId = `dev-${Math.random().toString(16).slice(2)}-${Date.now()}`;
-  return cachedDeviceId;
+  const prev = window.localStorage.getItem(DEVICE_KEY);
+  if (prev) return prev;
+  const id = `dev-${Math.random().toString(16).slice(2)}-${Date.now()}`;
+  window.localStorage.setItem(DEVICE_KEY, id);
+  return id;
 }
 
 /**
@@ -56,13 +58,23 @@ export function getOrCreateDeviceId() {
  * 내용이 바뀔 때만 updatedAt을 갱신합니다.
  */
 type Meta = { createdAt: number; updatedAt: number; hash: string };
-let metaCache: Record<string, Meta> = {};
+const META_KEY = "wnl_daily_meta_v1";
 
 function readMeta(): Record<string, Meta> {
-  return metaCache;
+  if (typeof window === "undefined") return {};
+  try {
+    return JSON.parse(window.localStorage.getItem(META_KEY) ?? "{}") as Record<string, Meta>;
+  } catch {
+    return {};
+  }
 }
 function writeMeta(next: Record<string, Meta>) {
-  metaCache = next;
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(META_KEY, JSON.stringify(next));
+  } catch {
+    // ignore quota errors in dev
+  }
 }
 
 function stableHash(obj: any) {

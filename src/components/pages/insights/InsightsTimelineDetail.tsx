@@ -10,19 +10,17 @@ export function InsightsTimelineDetail() {
   const isRestDay = todayShift === "OFF" || todayShift === "VAC";
 
   const metaCopy = hasTodayShift
-    ? (isRestDay
-        ? "휴식일 컨디션 기반으로 회복 루틴을 추천합니다."
-        : `${shiftKo(todayShift)} 기준으로 출근 전 · 근무 중 · 퇴근 후 회복 추천을 제공합니다.`)
-    : "오늘 근무가 아직 설정되지 않아 타임라인 추천이 잠겨 있어요.";
+    ? isRestDay
+      ? "휴식일 컨디션 기반으로 회복 루틴을 추천합니다."
+      : `${shiftKo(todayShift)} 기준으로 출근 전 · 근무 중 · 퇴근 후 회복 추천을 제공합니다.`
+    : "오늘 근무가 설정되지 않았어요. 일정에서 근무를 입력하면 타임라인 예보가 열립니다.";
 
-  const summaryLabel = hasTodayShift
-    ? (isRestDay ? "휴식일 회복 추천" : "알고리즘 회복 추천")
-    : "근무 미설정";
+  const summaryLabel = isRestDay ? "휴식일 회복 추천" : "알고리즘 회복 추천";
   const detailCopy = hasTodayShift
-    ? (isRestDay
-        ? "근무 없이 회복을 최적화하는 휴식 루틴을 제공합니다."
-        : "출근 전 · 근무 중 · 퇴근 후 회복 루틴을 제공합니다.")
-    : "일정에서 오늘 근무를 먼저 설정해주세요.";
+    ? isRestDay
+      ? "근무 없이 회복을 최적화하는 휴식 루틴을 제공합니다."
+      : "출근 전 · 근무 중 · 퇴근 후 회복 루틴을 제공합니다."
+    : "근무가 입력되면 출근 전 · 근무 중 · 퇴근 후 회복 루틴을 제공합니다.";
 
   return (
     <InsightDetailShell title="타임라인 예보" subtitle={formatKoreanDate(end)} meta={metaCopy}>
@@ -31,7 +29,7 @@ export function InsightsTimelineDetail() {
         label="Timeline Forecast"
         title="오늘의 회복 흐름"
         metric={hasTodayShift ? shiftKo(todayShift) : "—"}
-        metricLabel={hasTodayShift ? "Shift" : ""}
+        metricLabel="Shift"
         summary={(
           <>
             <span className="font-bold">{summaryLabel}</span>

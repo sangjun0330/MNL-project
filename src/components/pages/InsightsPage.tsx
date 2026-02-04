@@ -4,10 +4,10 @@ import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { formatKoreanDate } from "@/lib/date";
 import type { AppState } from "@/lib/model";
-import { countHealthRecordedDays } from "@/lib/healthRecords";
 import { statusColor, statusLabel } from "@/lib/wnlInsight";
 import { useInsightsData, shiftKo } from "@/components/insights/useInsightsData";
 import { HeroDashboard } from "@/components/insights/v2/HeroDashboard";
+import { countHealthRecordedDays } from "@/lib/healthRecords";
 
 const GRADIENTS = {
   mint: "linear-gradient(135deg, rgba(108,218,195,0.35), rgba(255,255,255,0.95))",
@@ -122,7 +122,7 @@ function formatPct(p: number) {
 }
 
 function countRecordedDays(state: AppState) {
-  return countHealthRecordedDays(state);
+  return countHealthRecordedDays({ bio: state.bio, emotions: state.emotions });
 }
 
 export function InsightsPage() {
@@ -130,12 +130,12 @@ export function InsightsPage() {
     state,
     end,
     todayShift,
-    hasTodayShift,
     menstrual,
     todayDisplay,
     status,
     syncLabel,
     todayVital,
+    hasTodayShift,
     fastCharge,
     avgDisplay,
     avgBody,
@@ -162,8 +162,8 @@ export function InsightsPage() {
           <div className="mt-4 rounded-2xl border border-ios-sep bg-black/[0.03] px-4 py-3 text-[14px] text-ios-text">
             현재 {recordedDays}일 기록됨 · {remaining}일 더 기록하면 열려요
           </div>
-          <div className="mt-4 text-[12px] text-ios-muted">
-            수면/스트레스/활동/카페인/기분 등 건강 기록이 입력된 날짜만 집계됩니다.
+        <div className="mt-4 text-[12px] text-ios-muted">
+            수면/스트레스/활동/기분/낮잠/증상/카페인 중 하나라도 입력된 날짜가 기록일로 집계됩니다.
           </div>
         </div>
       </div>
@@ -213,13 +213,13 @@ export function InsightsPage() {
         </Link>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-[12.5px] text-ios-sub">
           <span>{formatKoreanDate(end)}</span>
-          <span className="opacity-40">·</span>
           {hasTodayShift ? (
             <>
-              <span>{shiftKo(todayShift)}</span>
               <span className="opacity-40">·</span>
+              <span>{shiftKo(todayShift)}</span>
             </>
           ) : null}
+          <span className="opacity-40">·</span>
           <span>{menstrual.enabled ? menstrual.label : "주기"}</span>
           <span className="opacity-40">·</span>
           <span>Vital {todayDisplay}</span>
@@ -303,7 +303,7 @@ export function InsightsPage() {
         <SummaryCard
           href="/insights/vital"
           accent="mint"
-          label="RNest Vital"
+          label="WNL Vital"
           title="오늘 바이탈 요약"
           metric={todayDisplay}
           metricLabel="/ 100"

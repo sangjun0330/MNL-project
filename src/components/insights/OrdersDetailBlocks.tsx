@@ -48,7 +48,7 @@ export function OrdersDetailBlocks({
       {showSummary ? (
         <DetailSummaryCard
           accent="navy"
-          label="Dr. RNest's Orders"
+          label="Dr. WNL's Orders"
           title="오늘 오더"
           metric={ordersSummary.count}
           metricLabel="Orders"
@@ -58,16 +58,14 @@ export function OrdersDetailBlocks({
             </>
           )}
           detail="작은 오더부터 실행하면 회복 효율이 올라갑니다."
-          chips={(
-            <>
-              {showShift ? (
-                <>
-                  <DetailChip color={DETAIL_ACCENTS.navy}>{shiftKo(todayShift)}</DetailChip>
-                  <DetailChip color={DETAIL_ACCENTS.navy}>내일 {shiftKo(nextDuty)}</DetailChip>
-                </>
-              ) : null}
-            </>
-          )}
+          chips={
+            showShift ? (
+              <>
+                <DetailChip color={DETAIL_ACCENTS.navy}>{shiftKo(todayShift)}</DetailChip>
+                <DetailChip color={DETAIL_ACCENTS.navy}>내일 {shiftKo(nextDuty)}</DetailChip>
+              </>
+            ) : null
+          }
         />
       ) : null}
 

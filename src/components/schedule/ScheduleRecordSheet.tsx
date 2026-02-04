@@ -33,14 +33,6 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, v));
 }
 
-function pad2(n: number) {
-  return String(n).padStart(2, "0");
-}
-
-function localISO(date: Date): ISODate {
-  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}` as ISODate;
-}
-
 function moodEmoji(m: MoodScore) {
   return m === 1 ? "☹️" : m === 2 ? "😕" : m === 3 ? "😐" : m === 4 ? "🙂" : "😄";
 }
@@ -97,18 +89,8 @@ export function ScheduleRecordSheet({
   const saveTimer = useRef<any>(null);
   const noteDebounce = useRef<any>(null);
   const skipNoteSync = useRef(true);
-  const prevOpenRef = useRef(false);
 
   const dateLabel = useMemo(() => formatKoreanDate(iso), [iso]);
-
-  const now = new Date();
-  const todayLocalISO = localISO(now);
-  const yesterdayDate = new Date(now);
-  yesterdayDate.setDate(now.getDate() - 1);
-  const yesterdayLocalISO = localISO(yesterdayDate);
-
-  const canEditFull = iso === todayLocalISO || iso === yesterdayLocalISO;
-  const isFuture = iso > todayLocalISO;
 
   const markSaved = () => {
     setSaveState("saving");
@@ -155,12 +137,7 @@ export function ScheduleRecordSheet({
   };
 
   useEffect(() => {
-    if (!open) {
-      prevOpenRef.current = false;
-      return;
-    }
-    const isFirstOpen = !prevOpenRef.current;
-    prevOpenRef.current = true;
+    if (!open) return;
 
     setShift(curShift);
     setShiftNameText(curShiftName ?? "");
@@ -182,7 +159,7 @@ export function ScheduleRecordSheet({
     // 메모
     setNote(curNote);
     skipNoteSync.current = true;
-    if (isFirstOpen) setShowMore(false);
+    setShowMore(false);
 
     setSaveState("idle");
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -288,26 +265,53 @@ export function ScheduleRecordSheet({
     markSaved();
   };
 
+  const saveAndClose = () => {
+    if (noteDebounce.current) {
+      clearTimeout(noteDebounce.current);
+      noteDebounce.current = null;
+      saveNoteNow(note);
+    }
+    if (shiftNameDebounce.current) {
+      clearTimeout(shiftNameDebounce.current);
+      shiftNameDebounce.current = null;
+      saveShiftNameNow(shiftNameText);
+    }
+    saveSleepNow(sleepText);
+    saveCaffeineNow(caffeineText);
+    saveNapNow(napText);
+
+    setSaveState("saved");
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => onClose(), 250);
+  };
+
   const savedLabel = saveState === "saving" ? "저장 중…" : saveState === "saved" ? "저장됨 ✓" : "";
+  const saveButtonLabel = saveState === "saving" ? "저장 중…" : saveState === "saved" ? "저장됨 ✓" : "저장";
 
   return (
     <BottomSheet
       open={open}
       onClose={onClose}
-      title={canEditFull ? "기록" : "메모"}
+      title="기록"
       subtitle={dateLabel}
       variant="appstore"
       maxHeightClassName="max-h-[82dvh]"
+      footer={
+        <div className="flex gap-2">
+          <Button onClick={saveAndClose} className="flex-1">
+            {saveButtonLabel}
+          </Button>
+          <Button variant="ghost" onClick={onClose}>
+            닫기
+          </Button>
+        </div>
+      }
     >
       <div className="space-y-4">
         {/* 상단 안내 + 저장 상태 */}
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 text-[12.5px] text-ios-muted break-words">
-            {canEditFull
-              ? "입력할수록 내 패턴에 맞게 더 정확해져요."
-              : isFuture
-                ? "미래 날짜는 근무와 메모만 기록할 수 있어요."
-                : "오늘·어제만 건강 기록이 가능해요. 이 날짜는 근무와 메모만 남길 수 있습니다."}
+            입력할수록 내 패턴에 맞게 더 정확해져요.
           </div>
           {savedLabel ? (
             <div className="shrink-0 rounded-full border border-ios-sep bg-white px-2 py-1 text-[11px] font-semibold text-ios-muted">
@@ -316,7 +320,6 @@ export function ScheduleRecordSheet({
           ) : null}
         </div>
 
-        <>
         {/* 근무 */}
         <div className="rounded-2xl border border-ios-sep bg-white p-4">
           <div className="mb-3 flex items-center justify-between gap-3">
@@ -363,20 +366,6 @@ export function ScheduleRecordSheet({
           </div>
         </div>
 
-        {!canEditFull ? (
-          <div className="rounded-2xl border border-ios-sep bg-white p-4">
-            <div className="text-[13px] font-semibold">메모</div>
-            <div className="mt-2">
-              <Textarea
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                placeholder="예: 해당 날짜에 기억해야 할 일정 메모"
-                rows={3}
-              />
-            </div>
-          </div>
-        ) : (
-          <>
         {/* ✅ 필수 기록 4개 */}
         <div className="rounded-2xl border border-ios-sep bg-white p-4">
           <div className="flex items-center justify-between gap-3">
@@ -424,11 +413,8 @@ export function ScheduleRecordSheet({
               <Input
                 inputMode="decimal"
                 value={sleepText}
-                onChange={(e) => {
-                  const next = e.target.value;
-                  setSleepText(next);
-                  saveSleepNow(next);
-                }}
+                onChange={(e) => setSleepText(e.target.value)}
+                onBlur={() => saveSleepNow(sleepText)}
                 placeholder="예: 6.5"
               />
             </div>
@@ -474,11 +460,8 @@ export function ScheduleRecordSheet({
               <Input
                 inputMode="numeric"
                 value={caffeineText}
-                onChange={(e) => {
-                  const next = e.target.value;
-                  setCaffeineText(next);
-                  saveCaffeineNow(next);
-                }}
+                onChange={(e) => setCaffeineText(e.target.value)}
+                onBlur={() => saveCaffeineNow(caffeineText)}
                 placeholder="mg 직접 입력(예: 150)"
               />
             </div>
@@ -527,16 +510,14 @@ export function ScheduleRecordSheet({
           <button type="button" onClick={() => setShowMore((v) => !v)} className="flex w-full items-center justify-between">
             <div className="min-w-0">
               <div className="text-[13px] font-semibold">추가 기록</div>
-              <div className="mt-0.5 text-[12.5px] text-ios-muted">
-                낮잠 · 활동량{menstrualEnabled ? " · 생리 증상" : ""}
-              </div>
+              <div className="mt-0.5 text-[12.5px] text-ios-muted">활동량{menstrualEnabled ? " · 생리 증상" : ""}</div>
             </div>
             <div className="shrink-0 text-[14px] font-semibold">{showMore ? "▲" : "▼"}</div>
           </button>
 
           {showMore ? (
             <div className="mt-4 space-y-4">
-              {/* 낮잠 */}
+              {/* 활동량 */}
               <div>
                 <div className="mb-2 text-[12px] font-semibold text-ios-muted">낮잠 시간</div>
                 <div className="flex flex-wrap gap-2">
@@ -561,11 +542,8 @@ export function ScheduleRecordSheet({
                   <Input
                     inputMode="decimal"
                     value={napText}
-                    onChange={(e) => {
-                      const next = e.target.value;
-                      setNapText(next);
-                      saveNapNow(next);
-                    }}
+                    onChange={(e) => setNapText(e.target.value)}
+                    onBlur={() => saveNapNow(napText)}
                     placeholder="낮잠 시간 입력(예: 0.5)"
                   />
                 </div>
@@ -607,9 +585,6 @@ export function ScheduleRecordSheet({
             </div>
           ) : null}
         </div>
-          </>
-        )}
-          </>
       </div>
     </BottomSheet>
   );

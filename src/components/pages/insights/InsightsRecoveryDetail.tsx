@@ -38,7 +38,7 @@ export function InsightsRecoveryDetail() {
         >
           <div className="flex items-start justify-between gap-4">
             <div>
-              <div className="text-[12px] font-semibold text-ios-sub">Dr. RNest&apos;s Orders</div>
+              <div className="text-[12px] font-semibold text-ios-sub">Dr. WNL&apos;s Orders</div>
               <div className="mt-1 text-[18px] font-bold tracking-[-0.01em] text-ios-text">오늘 오더</div>
             </div>
             <div className="text-[22px] text-ios-muted transition group-hover:text-ios-text">›</div>

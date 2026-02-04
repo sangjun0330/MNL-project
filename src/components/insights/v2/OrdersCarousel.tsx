@@ -155,7 +155,7 @@ export function OrdersCarousel({ vital, pivotISO }: { vital: DailyVital | null; 
       <div className="relative overflow-hidden rounded-apple border border-ios-sep bg-white shadow-apple">
         <div className="pointer-events-none absolute inset-0 opacity-55" style={overlayStyle} />
         <div className="relative px-5 pt-5">
-          <div className="text-[12px] font-semibold text-ios-sub">Dr. RNest&apos;s Orders</div>
+          <div className="text-[12px] font-semibold text-ios-sub">Dr. WNL&apos;s Orders</div>
           <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-ios-text">오늘 오더</div>
         </div>
         <div className="relative px-5 pb-5 pt-3 text-[13px] text-ios-sub">
@@ -169,7 +169,7 @@ export function OrdersCarousel({ vital, pivotISO }: { vital: DailyVital | null; 
     <div className="relative overflow-hidden rounded-apple border border-ios-sep bg-white shadow-apple">
       <div className="pointer-events-none absolute inset-0 opacity-55" style={overlayStyle} />
       <div className="relative px-5 pt-5">
-        <div className="text-[12px] font-semibold text-ios-sub">Dr. RNest&apos;s Orders</div>
+        <div className="text-[12px] font-semibold text-ios-sub">Dr. WNL&apos;s Orders</div>
         <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-ios-text">지금 당장 실행할 처방</div>
       </div>
 

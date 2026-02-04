@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
-import { useAuthState } from "@/lib/auth";
 
 const SHEET_DURATION_MS = 420;
 const SHEET_EASE = "cubic-bezier(0.16, 1, 0.3, 1)";
@@ -42,8 +41,6 @@ export function BottomSheet({
   maxHeightClassName,
   variant = "default",
 }: Props) {
-  const { user: auth, status } = useAuthState();
-  const blockForLogin = open && status !== "loading" && !auth?.userId;
   // unmount 시점 제어(닫힐 때 애니메이션 종료 후 제거)
   const [mounted, setMounted] = useState(open);
   const [visible, setVisible] = useState(open);
@@ -60,12 +57,6 @@ export function BottomSheet({
 
   const maxH = useMemo(() => maxHeightClassName ?? "max-h-[68dvh]", [maxHeightClassName]);
   const isAppStore = variant === "appstore";
-
-  useEffect(() => {
-    if (!blockForLogin) return;
-    window.dispatchEvent(new CustomEvent("wnl:login-required"));
-    onClose();
-  }, [blockForLogin, onClose]);
 
   useEffect(() => {
     // open/close 상태에 맞춰 mount/visible을 동기화
@@ -167,7 +158,7 @@ export function BottomSheet({
     applyTranslate(0, true);
   };
 
-  if (blockForLogin || !mounted || !portalEl) return null;
+  if (!mounted || !portalEl) return null;
 
   return createPortal(
     <div className="fixed inset-0 z-[80]">
@@ -254,8 +245,6 @@ export function BottomSheet({
                   type="button"
                   aria-label="Close"
                   className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-black/10 bg-white/80 text-[16px] text-ios-text"
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onPointerUp={(e) => e.stopPropagation()}
                   onClick={closeWithAnimation}
                 >
                   ✕

@@ -46,36 +46,6 @@ export function SettingsPage() {
                 로그아웃
               </Button>
             </div>
-            <div className="mt-6 rounded-2xl border border-red-200 bg-red-50/40 p-4">
-              <div className="text-[13px] font-semibold text-red-600">회원 탈퇴</div>
-              <div className="mt-1 text-[12px] text-red-600/80">
-                탈퇴 시 모든 기록과 계정 데이터가 삭제되며 복구할 수 없습니다.
-              </div>
-              <div className="mt-3">
-                <Button
-                  variant="secondary"
-                  className="border border-red-300 text-red-600 hover:bg-red-50"
-                  onClick={async () => {
-                    const ok = window.confirm("정말 탈퇴할까요? 모든 데이터가 삭제됩니다.");
-                    if (!ok) return;
-                    try {
-                      const res = await fetch("/api/user/delete", { method: "DELETE" });
-                      if (!res.ok) {
-                        const json = await res.json().catch(() => ({}));
-                        alert(json?.error || "회원 탈퇴에 실패했어요.");
-                        return;
-                      }
-                      await signOut();
-                      window.location.href = "/settings";
-                    } catch {
-                      alert("네트워크 오류로 탈퇴에 실패했어요.");
-                    }
-                  }}
-                >
-                  계정 삭제
-                </Button>
-              </div>
-            </div>
           </div>
         ) : (
           <div className="mt-4 space-y-4">

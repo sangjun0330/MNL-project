@@ -3,8 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { hydrateState, useAppStore } from "@/lib/store";
+import { emptyState } from "@/lib/model";
 
 const SAVE_DEBOUNCE_MS = 900;
+const RESET_VERSION_KEY = "mnl_reset_version";
 
 export function CloudStateSync() {
   const auth = useAuth();
@@ -27,10 +29,34 @@ export function CloudStateSync() {
 
     let active = true;
     (async () => {
+      const resetVersion = typeof window !== "undefined" ? window.localStorage.getItem(RESET_VERSION_KEY) : null;
+      if (resetVersion) {
+        const doneKey = `mnl_reset_done_${userId}`;
+        const done = typeof window !== "undefined" ? window.localStorage.getItem(doneKey) : null;
+        if (done !== resetVersion) {
+          const fresh = emptyState();
+          hydrateState(fresh);
+          skipNextSave.current = true;
+          try {
+            await fetch("/api/user/state", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ userId, state: fresh }),
+            });
+          } catch {
+            // ignore network errors
+          }
+          if (typeof window !== "undefined") {
+            window.localStorage.setItem(doneKey, resetVersion);
+          }
+          if (active) setHydrated(true);
+          return;
+        }
+      }
+
       try {
-        const res = await fetch("/api/user/state", { credentials: "include" });
+        const res = await fetch(`/api/user/state?userId=${encodeURIComponent(userId)}`);
         if (!res.ok) {
-          console.warn("state sync load failed", res.status);
           if (active) setHydrated(true);
           return;
         }
@@ -43,9 +69,8 @@ export function CloudStateSync() {
         } else {
           await fetch("/api/user/state", {
             method: "POST",
-            credentials: "include",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ state: storeRef.current.getState() }),
+            body: JSON.stringify({ userId, state: storeRef.current.getState() }),
           });
         }
       } catch {
@@ -72,9 +97,8 @@ export function CloudStateSync() {
       const state = store.getState();
       void fetch("/api/user/state", {
         method: "POST",
-        credentials: "include",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ state }),
+        body: JSON.stringify({ userId, state }),
       });
     }, SAVE_DEBOUNCE_MS);
 

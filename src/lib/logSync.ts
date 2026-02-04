@@ -14,15 +14,28 @@ type OutboxItem = {
   updatedAt: number;
 };
 
-let inMemoryOutbox: OutboxItem[] = [];
-let cachedToken: string | null = null;
+const OUTBOX_KEY = "wnl_log_outbox_v1";
+const TOKEN_KEY = "wnl_log_token_v1";
 
 function readOutbox(): OutboxItem[] {
-  return inMemoryOutbox;
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(OUTBOX_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 function writeOutbox(items: OutboxItem[]) {
-  inMemoryOutbox = items;
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(OUTBOX_KEY, JSON.stringify(items));
+  } catch {
+    // ignore
+  }
 }
 
 export function enqueueDailyLog(date: ISODate, payload: any, deviceIdOverride?: string) {
@@ -39,7 +52,9 @@ export function enqueueDailyLog(date: ISODate, payload: any, deviceIdOverride?: 
 }
 
 async function ensureLogToken(deviceId: string): Promise<string | null> {
-  if (cachedToken) return cachedToken;
+  if (typeof window === "undefined") return null;
+  const existing = localStorage.getItem(TOKEN_KEY);
+  if (existing) return existing;
   try {
     const res = await fetch(`/api/logs/register?deviceId=${encodeURIComponent(deviceId)}`, {
       method: "GET",
@@ -48,8 +63,8 @@ async function ensureLogToken(deviceId: string): Promise<string | null> {
     if (!res.ok) return null;
     const json = (await res.json()) as { token?: string };
     if (!json?.token) return null;
-    cachedToken = json.token;
-    return cachedToken;
+    localStorage.setItem(TOKEN_KEY, json.token);
+    return json.token;
   } catch {
     return null;
   }

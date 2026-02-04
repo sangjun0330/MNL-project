@@ -23,13 +23,6 @@ const nextConfig = {
   allowedDevOrigins,
 
   // PWA is handled via public/manifest + public/sw.js + runtime registration (no extra deps).
-  webpack: (config, { dev }) => {
-    if (dev) {
-      // Dev 환경에서 webpack cache 파일 오류 방지
-      config.cache = false;
-    }
-    return config;
-  },
 };
 
 export default nextConfig;
