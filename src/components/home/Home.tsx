@@ -122,20 +122,17 @@ export default function Home() {
       a.setSelected === b.setSelected
   );
 
-  // ✅ 폰에 남아있는 1970 selected를 자동으로 오늘로 복구
-  const selected: ISODate = useMemo(() => {
-    const raw = (store.selected as any) ?? null;
-    return isReasonableISODate(raw) ? raw : todayISO();
-  }, [store.selected]);
+  // ✅ 홈에서는 진입 시 항상 "오늘"을 기본 선택
+  const [homeSelected, setHomeSelected] = useState<ISODate>(() => todayISO());
 
-  // ✅ month는 selected 기반으로 안전 초기화
-  const [month, setMonth] = useState<Date>(() => startOfMonth(fromISODate(selected)));
+  // ✅ month는 홈 선택값 기반으로 초기화
+  const [month, setMonth] = useState<Date>(() => startOfMonth(fromISODate(homeSelected)));
 
-  // ✅ selected가 바뀌면 month도 동기화 (엇갈림 방지)
+  // ✅ 홈 선택이 바뀌면 month도 동기화
   useEffect(() => {
-    const next = startOfMonth(fromISODate(selected));
+    const next = startOfMonth(fromISODate(homeSelected));
     setMonth((prev) => (sameMonthUTC(prev, next) ? prev : next));
-  }, [selected]);
+  }, [homeSelected]);
 
   // ✅ (옵션) 폰에서 selected가 1970으로 저장돼 있던 경우, 앱이 뜨자마자 store도 정상값으로 덮어쓰기
   useEffect(() => {
@@ -184,17 +181,17 @@ export default function Home() {
     return m;
   }, [vitals, canShowVitals]);
 
-  const selVital = canShowVitals ? vmap.get(selected) : null;
-  const selShift = store.schedule[selected];
-  const selNote = store.notes[selected];
-  const selEmotion = store.emotions[selected];
-  const selBio = useMemo(() => (store.bio?.[selected] ?? null), [store.bio, selected]);
-  const selShiftName = store.shiftNames?.[selected];
+  const selVital = canShowVitals ? vmap.get(homeSelected) : null;
+  const selShift = store.schedule[homeSelected];
+  const selNote = store.notes[homeSelected];
+  const selEmotion = store.emotions[homeSelected];
+  const selBio = useMemo(() => (store.bio?.[homeSelected] ?? null), [store.bio, homeSelected]);
+  const selShiftName = store.shiftNames?.[homeSelected];
 
-  const selDateLabel = useMemo(() => formatKoreanDate(selected), [selected]);
+  const selDateLabel = useMemo(() => formatKoreanDate(homeSelected), [homeSelected]);
 
   const menstrual = store.settings.menstrual;
-  const mctx = useMemo(() => menstrualContextForDate(selected, menstrual), [selected, menstrual]);
+  const mctx = useMemo(() => menstrualContextForDate(homeSelected, menstrual), [homeSelected, menstrual]);
 
   const inputItems = useMemo(() => {
     const sleep = selBio?.sleepHours;
@@ -345,9 +342,9 @@ export default function Home() {
         scheduleAppliedFrom={(store.settings as any).schedulePatternAppliedFrom ?? null}
         riskColorByDate={riskColorByDate}
         lowScoreByDate={lowScoreByDate}
-        selected={selected}
+        selected={homeSelected}
         onSelect={(iso) => {
-          store.setSelected(iso);
+          setHomeSelected(iso);
           const d = fromISODate(iso);
           if (!sameMonthUTC(d, month)) setMonth(startOfMonth(d));
         }}
