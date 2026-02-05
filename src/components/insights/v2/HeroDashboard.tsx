@@ -94,8 +94,8 @@ export function HeroDashboard({
                 </div>
               ) : null}
             </div>
-            <div className="mt-2 text-[16px] font-semibold">{statusLabel(status)}</div>
-            <div className="mt-1 text-[13px] text-ios-sub">{statusCopy(status)}</div>
+            <div className="mt-2 text-[16px] font-semibold">{t(statusLabel(status))}</div>
+            <div className="mt-1 text-[13px] text-ios-sub">{t(statusCopy(status))}</div>
           </div>
 
           <div className="shrink-0 text-right">
