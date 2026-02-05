@@ -74,11 +74,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [auth?.userId, status]);
 
   useEffect(() => {
-    if (status === "unauthenticated" && !auth?.userId && !hasSession) {
-      hydrateState(emptyState());
-      setCloudReady(false);
-    }
-  }, [status, auth?.userId, hasSession]);
+    const onAuthEvent = (event: Event) => {
+      const detail = (event as CustomEvent).detail as { event?: string };
+      if (detail?.event === "SIGNED_OUT") {
+        hydrateState(emptyState());
+        setCloudReady(false);
+      }
+    };
+    window.addEventListener("wnl:auth-event", onAuthEvent);
+    return () => window.removeEventListener("wnl:auth-event", onAuthEvent);
+  }, []);
 
   useEffect(() => {
     if (!allowPrompt && loginPromptOpen) {
