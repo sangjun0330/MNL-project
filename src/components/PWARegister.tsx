@@ -21,7 +21,12 @@ export function PWARegister() {
           return;
         }
 
-        await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+        const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+        try {
+          await reg.update();
+        } catch {
+          // ignore update errors
+        }
       } catch (e) {
         // Silent fail: app still works.
         console.warn("SW registration failed", e);

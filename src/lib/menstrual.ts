@@ -38,15 +38,15 @@ function statusOf(bio?: BioInputs | null) {
 function labelFromPhase(phase: MenstrualPhase) {
   switch (phase) {
     case "period":
-      return "생리";
+      return "생리 기간";
     case "pms":
-      return "PMS";
+      return "생리 직전 기간";
     case "ovulation":
-      return "배란";
+      return "컨디션 안정 기간";
     case "follicular":
-      return "난포기";
+      return "컨디션 안정 기간";
     case "luteal":
-      return "황체기";
+      return "컨디션 변화가 큰 날";
     default:
       return "주기";
   }

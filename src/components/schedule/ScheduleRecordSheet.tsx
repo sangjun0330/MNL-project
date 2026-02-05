@@ -55,13 +55,8 @@ export function ScheduleRecordSheet({
   iso: ISODate;
 }) {
   const store = useAppStore();
+  const storeRef = useRef(store);
   const menstrualEnabled = Boolean(store.settings.menstrual?.enabled);
-
-  const curShift: Shift = store.schedule?.[iso] ?? "OFF";
-  const curShiftName = store.shiftNames?.[iso] ?? "";
-  const curNote = store.notes?.[iso] ?? "";
-  const curBio = useMemo(() => (store.bio?.[iso] ?? null), [store.bio, iso]);
-  const curEmotion: EmotionEntry | undefined = store.emotions?.[iso];
 
   const [shift, setShift] = useState<Shift>("OFF");
   const [shiftNameText, setShiftNameText] = useState<string>("");
@@ -89,6 +84,12 @@ export function ScheduleRecordSheet({
   const saveTimer = useRef<any>(null);
   const noteDebounce = useRef<any>(null);
   const skipNoteSync = useRef(true);
+  const sleepDebounce = useRef<any>(null);
+  const skipSleepSync = useRef(true);
+  const caffeineDebounce = useRef<any>(null);
+  const skipCaffeineSync = useRef(true);
+  const napDebounce = useRef<any>(null);
+  const skipNapSync = useRef(true);
 
   const dateLabel = useMemo(() => formatKoreanDate(iso), [iso]);
   const canEditHealth = useMemo(() => {
@@ -141,7 +142,18 @@ export function ScheduleRecordSheet({
   };
 
   useEffect(() => {
+    storeRef.current = store;
+  }, [store]);
+
+  useEffect(() => {
     if (!open) return;
+
+    const st = storeRef.current;
+    const curShift: Shift = st.schedule?.[iso] ?? "OFF";
+    const curShiftName = st.shiftNames?.[iso] ?? "";
+    const curNote = st.notes?.[iso] ?? "";
+    const curBio = st.bio?.[iso] ?? null;
+    const curEmotion: EmotionEntry | undefined = st.emotions?.[iso];
 
     setShift(curShift);
     setShiftNameText(curShiftName ?? "");
@@ -154,22 +166,29 @@ export function ScheduleRecordSheet({
     setStress((bio.stress ?? 1) as StressLevel);
     setCaffeineText(bio.caffeineMg == null ? "" : String(bio.caffeineMg));
     setMood((curEmotion?.mood ?? 3) as MoodScore);
+    skipSleepSync.current = true;
+    skipCaffeineSync.current = true;
 
     // 추가 기록
     setNapText((bio as any).napHours == null ? "" : String((bio as any).napHours));
     setActivity((bio.activity ?? 1) as ActivityLevel);
     setSymptomSeverity((Number((bio as any).symptomSeverity ?? 0) as any) as 0 | 1 | 2 | 3);
+    skipNapSync.current = true;
 
     // 메모
     setNote(curNote);
     skipNoteSync.current = true;
-    setShowMore(false);
 
     setSaveState("idle");
     if (saveTimer.current) clearTimeout(saveTimer.current);
     if (noteDebounce.current) clearTimeout(noteDebounce.current);
     if (shiftNameDebounce.current) clearTimeout(shiftNameDebounce.current);
-  }, [open, iso, curShift, curShiftName, curBio, curEmotion?.mood, curNote]);
+    if (sleepDebounce.current) clearTimeout(sleepDebounce.current);
+    if (caffeineDebounce.current) clearTimeout(caffeineDebounce.current);
+    if (napDebounce.current) clearTimeout(napDebounce.current);
+    setShowMore(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, iso]);
 
   // ✅ 메모 디바운스
   useEffect(() => {
@@ -185,6 +204,48 @@ export function ScheduleRecordSheet({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note]);
+
+  useEffect(() => {
+    if (!open || !canEditHealth) return;
+    if (skipSleepSync.current) {
+      skipSleepSync.current = false;
+      return;
+    }
+    if (sleepDebounce.current) clearTimeout(sleepDebounce.current);
+    sleepDebounce.current = setTimeout(() => saveSleepNow(sleepText), 450);
+    return () => {
+      if (sleepDebounce.current) clearTimeout(sleepDebounce.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sleepText, canEditHealth, open]);
+
+  useEffect(() => {
+    if (!open || !canEditHealth) return;
+    if (skipCaffeineSync.current) {
+      skipCaffeineSync.current = false;
+      return;
+    }
+    if (caffeineDebounce.current) clearTimeout(caffeineDebounce.current);
+    caffeineDebounce.current = setTimeout(() => saveCaffeineNow(caffeineText), 450);
+    return () => {
+      if (caffeineDebounce.current) clearTimeout(caffeineDebounce.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [caffeineText, canEditHealth, open]);
+
+  useEffect(() => {
+    if (!open || !canEditHealth) return;
+    if (skipNapSync.current) {
+      skipNapSync.current = false;
+      return;
+    }
+    if (napDebounce.current) clearTimeout(napDebounce.current);
+    napDebounce.current = setTimeout(() => saveNapNow(napText), 450);
+    return () => {
+      if (napDebounce.current) clearTimeout(napDebounce.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [napText, canEditHealth, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -269,7 +330,9 @@ export function ScheduleRecordSheet({
     markSaved();
   };
 
-  const saveAndClose = () => {
+  const savedLabel = saveState === "saving" ? "저장 중…" : saveState === "saved" ? "저장됨 ✓" : "";
+
+  const handleClose = () => {
     if (noteDebounce.current) {
       clearTimeout(noteDebounce.current);
       noteDebounce.current = null;
@@ -285,33 +348,17 @@ export function ScheduleRecordSheet({
       saveCaffeineNow(caffeineText);
       saveNapNow(napText);
     }
-
-    setSaveState("saved");
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => onClose(), 250);
+    onClose();
   };
-
-  const savedLabel = saveState === "saving" ? "저장 중…" : saveState === "saved" ? "저장됨 ✓" : "";
-  const saveButtonLabel = saveState === "saving" ? "저장 중…" : saveState === "saved" ? "저장됨 ✓" : "저장";
 
   return (
     <BottomSheet
       open={open}
-      onClose={onClose}
+      onClose={handleClose}
       title="기록"
       subtitle={dateLabel}
       variant="appstore"
       maxHeightClassName="max-h-[82dvh]"
-      footer={
-        <div className="flex gap-2">
-          <Button onClick={saveAndClose} className="flex-1">
-            {saveButtonLabel}
-          </Button>
-          <Button variant="ghost" onClick={onClose}>
-            닫기
-          </Button>
-        </div>
-      }
     >
       <div className="space-y-4">
         {/* 상단 안내 + 저장 상태 */}
@@ -523,7 +570,7 @@ export function ScheduleRecordSheet({
             <button type="button" onClick={() => setShowMore((v) => !v)} className="flex w-full items-center justify-between">
               <div className="min-w-0">
                 <div className="text-[13px] font-semibold">추가 기록</div>
-                <div className="mt-0.5 text-[12.5px] text-ios-muted">활동량{menstrualEnabled ? " · 생리 증상" : ""}</div>
+                <div className="mt-0.5 text-[12.5px] text-ios-muted">낮잠 · 활동량{menstrualEnabled ? " · 생리 증상" : ""}</div>
               </div>
               <div className="shrink-0 text-[14px] font-semibold">{showMore ? "▲" : "▼"}</div>
             </button>

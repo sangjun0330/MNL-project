@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { cn } from "@/lib/cn";
 import type { DailyVital } from "@/lib/vitals";
-import { statusColor, statusCopy, statusFromScore, statusLabel } from "@/lib/wnlInsight";
+import { statusColor, statusCopy, statusFromScore, statusLabel, vitalDisplayScore } from "@/lib/wnlInsight";
 
 function clamp(n: number, min: number, max: number) {
   const v = Number.isFinite(n) ? n : min;
@@ -50,8 +50,7 @@ export function HeroDashboard({
   className?: string;
 }) {
   const displayScore = useMemo(() => {
-    if (!vital) return 0;
-    return Math.round(Math.min(vital.body.value, vital.mental.ema));
+    return vitalDisplayScore(vital);
   }, [vital]);
 
   const status = useMemo(() => statusFromScore(displayScore), [displayScore]);

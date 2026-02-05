@@ -1,5 +1,5 @@
 /* RNest minimal service worker (cache-first for static assets) */
-const CACHE = "rnest-cache-v3";
+const CACHE = "rnest-cache-v4";
 const CORE = ["/", "/manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {

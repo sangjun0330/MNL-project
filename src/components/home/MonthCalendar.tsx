@@ -27,6 +27,7 @@ type Props = {
   scheduleAppliedFrom?: ISODate | null;
 
   riskColorByDate?: Record<ISODate, RiskTone>;
+  lowScoreByDate?: Record<ISODate, boolean>;
   selected: ISODate;
   onSelect: (iso: ISODate) => void;
 };
@@ -63,6 +64,7 @@ export function MonthCalendar({
   menstrual,
   scheduleAppliedFrom,
   riskColorByDate: _riskColorByDate,
+  lowScoreByDate,
   selected,
   onSelect,
 }: Props) {
@@ -213,6 +215,7 @@ export function MonthCalendar({
         {grid.map((cell) => {
           const iso = cell.iso;
           const isSelected = iso === selected;
+          const isLowScore = Boolean(cell.inMonth && lowScoreByDate?.[iso]);
 
           const shift = schedule[iso];
           const shiftName = shiftNames?.[iso];
@@ -287,6 +290,7 @@ export function MonthCalendar({
                 "h-[92px] sm:h-[104px]",
                 "touch-manipulation select-none",
                 !cell.inMonth && "bg-white/70",
+                isLowScore && "bg-rose-50/80",
                 isSelected ? "z-10" : "hover:bg-ios-bg/60"
               )}
             >
