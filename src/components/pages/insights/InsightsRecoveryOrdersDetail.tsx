@@ -4,9 +4,23 @@ import { InsightDetailShell } from "@/components/pages/insights/InsightDetailShe
 import { OrdersDetailBlocks } from "@/components/insights/OrdersDetailBlocks";
 import { useInsightsData, shiftKo } from "@/components/insights/useInsightsData";
 import { formatKoreanDate } from "@/lib/date";
+import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 
 export function InsightsRecoveryOrdersDetail() {
-  const { state, end, todayShift, ordersSummary, hasTodayShift } = useInsightsData();
+  const { state, end, todayShift, ordersSummary, hasTodayShift, recordedDays } = useInsightsData();
+
+  if (recordedDays < 7) {
+    return (
+      <InsightDetailShell
+        title="오늘 오더"
+        subtitle={formatKoreanDate(end)}
+        meta="건강 기록 7일 이상부터 오더가 열립니다."
+        backHref="/insights/recovery"
+      >
+        <InsightsLockedNotice recordedDays={recordedDays} />
+      </InsightDetailShell>
+    );
+  }
 
   return (
     <InsightDetailShell

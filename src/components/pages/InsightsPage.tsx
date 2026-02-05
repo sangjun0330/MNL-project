@@ -3,11 +3,10 @@
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { formatKoreanDate } from "@/lib/date";
-import type { AppState } from "@/lib/model";
 import { statusColor, statusLabel } from "@/lib/wnlInsight";
 import { useInsightsData, shiftKo } from "@/components/insights/useInsightsData";
 import { HeroDashboard } from "@/components/insights/v2/HeroDashboard";
-import { countHealthRecordedDays } from "@/lib/healthRecords";
+import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 
 const GRADIENTS = {
   mint: "linear-gradient(135deg, rgba(108,218,195,0.35), rgba(255,255,255,0.95))",
@@ -121,13 +120,8 @@ function formatPct(p: number) {
   return `${Math.round(p * 100)}%`;
 }
 
-function countRecordedDays(state: AppState) {
-  return countHealthRecordedDays({ bio: state.bio, emotions: state.emotions });
-}
-
 export function InsightsPage() {
   const {
-    state,
     end,
     todayShift,
     menstrual,
@@ -141,12 +135,11 @@ export function InsightsPage() {
     avgBody,
     avgMental,
     top1,
+    recordedDays,
   } = useInsightsData();
   const isRestDay = todayShift === "OFF" || todayShift === "VAC";
-  const recordedDays = countRecordedDays(state);
 
   if (recordedDays < 7) {
-    const remaining = Math.max(7 - recordedDays, 0);
     return (
       <div className="mx-auto w-full max-w-[920px] px-4 pb-24 pt-6 sm:px-6">
         <div className="mb-4">
@@ -154,18 +147,7 @@ export function InsightsPage() {
           <div className="mt-1 text-[13px] text-ios-sub">맞춤 회복 중심 인사이트</div>
         </div>
 
-        <div className="rounded-apple border border-ios-sep bg-white p-6 shadow-apple">
-          <div className="text-[18px] font-bold text-ios-text">인사이트가 아직 잠겨 있어요</div>
-          <div className="mt-2 text-[13px] text-ios-sub">
-            건강 정보를 최소 7일 이상 기록해야 인사이트가 열립니다.
-          </div>
-          <div className="mt-4 rounded-2xl border border-ios-sep bg-black/[0.03] px-4 py-3 text-[14px] text-ios-text">
-            현재 {recordedDays}일 기록됨 · {remaining}일 더 기록하면 열려요
-          </div>
-        <div className="mt-4 text-[12px] text-ios-muted">
-            수면/스트레스/활동/기분/낮잠/증상/카페인 중 하나라도 입력된 날짜가 기록일로 집계됩니다.
-          </div>
-        </div>
+        <InsightsLockedNotice recordedDays={recordedDays} />
       </div>
     );
   }

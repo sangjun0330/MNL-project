@@ -9,7 +9,7 @@ import { useAppStore } from "@/lib/store";
 import { computeVitalsRange, type DailyVital } from "@/lib/vitals";
 import { computePersonalizationAccuracy, topFactors } from "@/lib/insightsV2";
 import { shiftWindow, statusFromScore, type OrderKey } from "@/lib/wnlInsight";
-import { hasHealthInput } from "@/lib/healthRecords";
+import { countHealthRecordedDays, hasHealthInput } from "@/lib/healthRecords";
 
 type OrdersSummary = {
   count: number;
@@ -145,6 +145,11 @@ export function useInsightsData() {
     [accuracy.percent, daysWithAnyInput]
   );
 
+  const recordedDays = useMemo(
+    () => countHealthRecordedDays({ bio: state.bio, emotions: state.emotions }),
+    [state.bio, state.emotions]
+  );
+
   const displayScores = useMemo(
     () => vitals.map((v) => Math.min(v.body.value, v.mental.ema)),
     [vitals]
@@ -202,6 +207,7 @@ export function useInsightsData() {
     accuracy,
     syncLabel,
     daysWithAnyInput,
+    recordedDays,
     avgDisplay,
     avgBody,
     avgMental,

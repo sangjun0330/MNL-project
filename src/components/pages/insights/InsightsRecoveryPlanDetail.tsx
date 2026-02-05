@@ -9,13 +9,27 @@ import {
 import { useInsightsData, shiftKo } from "@/components/insights/useInsightsData";
 import { formatKoreanDate } from "@/lib/date";
 import { RecoveryPrescription } from "@/components/insights/RecoveryPrescription";
+import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 
 function pct(p: number) {
   return `${Math.round(p * 100)}%`;
 }
 
 export function InsightsRecoveryPlanDetail() {
-  const { end, state, top1, top3, syncLabel, todayShift, hasTodayShift } = useInsightsData();
+  const { end, state, top1, top3, syncLabel, todayShift, hasTodayShift, recordedDays } = useInsightsData();
+
+  if (recordedDays < 7) {
+    return (
+      <InsightDetailShell
+        title="다음 듀티까지 회복 처방"
+        subtitle={formatKoreanDate(end)}
+        meta="건강 기록 7일 이상부터 회복 처방이 열립니다."
+        backHref="/insights/recovery"
+      >
+        <InsightsLockedNotice recordedDays={recordedDays} />
+      </InsightDetailShell>
+    );
+  }
 
   const summary = top1 ? (
     <>

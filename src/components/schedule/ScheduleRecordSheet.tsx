@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ISODate } from "@/lib/date";
-import { formatKoreanDate } from "@/lib/date";
+import { diffDays, formatKoreanDate, todayISO } from "@/lib/date";
 import type { ActivityLevel, MoodScore, StressLevel, BioInputs, EmotionEntry } from "@/lib/model";
 import type { Shift } from "@/lib/types";
 import { SHIFT_LABELS, shiftColor } from "@/lib/types";
@@ -91,6 +91,10 @@ export function ScheduleRecordSheet({
   const skipNoteSync = useRef(true);
 
   const dateLabel = useMemo(() => formatKoreanDate(iso), [iso]);
+  const canEditHealth = useMemo(() => {
+    const delta = diffDays(todayISO(), iso);
+    return delta >= 0 && delta <= 1;
+  }, [iso]);
 
   const markSaved = () => {
     setSaveState("saving");
@@ -276,9 +280,11 @@ export function ScheduleRecordSheet({
       shiftNameDebounce.current = null;
       saveShiftNameNow(shiftNameText);
     }
-    saveSleepNow(sleepText);
-    saveCaffeineNow(caffeineText);
-    saveNapNow(napText);
+    if (canEditHealth) {
+      saveSleepNow(sleepText);
+      saveCaffeineNow(caffeineText);
+      saveNapNow(napText);
+    }
 
     setSaveState("saved");
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -311,7 +317,7 @@ export function ScheduleRecordSheet({
         {/* 상단 안내 + 저장 상태 */}
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 text-[12.5px] text-ios-muted break-words">
-            입력할수록 내 패턴에 맞게 더 정확해져요.
+            {canEditHealth ? "입력할수록 내 패턴에 맞게 더 정확해져요." : "건강 기록은 오늘과 전날만 입력할 수 있어요."}
           </div>
           {savedLabel ? (
             <div className="shrink-0 rounded-full border border-ios-sep bg-white px-2 py-1 text-[11px] font-semibold text-ios-muted">
@@ -367,135 +373,141 @@ export function ScheduleRecordSheet({
         </div>
 
         {/* ✅ 필수 기록 4개 */}
-        <div className="rounded-2xl border border-ios-sep bg-white p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0 text-[13px] font-semibold">필수 기록</div>
-            <div className="shrink-0 text-[11px] font-semibold text-ios-muted">수면 · 스트레스 · 카페인 · 기분</div>
-          </div>
-
-          {/* 수면 */}
-          <div className="mt-4 rounded-2xl border border-ios-sep bg-ios-bg p-4">
+        {canEditHealth ? (
+          <div className="rounded-2xl border border-ios-sep bg-white p-4">
             <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-[12px] font-semibold text-ios-muted">수면 시간</div>
-                <div className="mt-1 text-[16px] font-semibold">{sleepText.trim() === "" ? "—" : `${sleepText}h`}</div>
+              <div className="min-w-0 text-[13px] font-semibold">필수 기록</div>
+              <div className="shrink-0 text-[11px] font-semibold text-ios-muted">수면 · 스트레스 · 카페인 · 기분</div>
+            </div>
+
+            {/* 수면 */}
+            <div className="mt-4 rounded-2xl border border-ios-sep bg-ios-bg p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[12px] font-semibold text-ios-muted">수면 시간</div>
+                  <div className="mt-1 text-[16px] font-semibold">{sleepText.trim() === "" ? "—" : `${sleepText}h`}</div>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <Button variant="secondary" onClick={() => adjustSleep(-0.5)}>
+                    -
+                  </Button>
+                  <Button variant="secondary" onClick={() => adjustSleep(0.5)}>
+                    +
+                  </Button>
+                </div>
               </div>
-              <div className="flex shrink-0 gap-2">
-                <Button variant="secondary" onClick={() => adjustSleep(-0.5)}>
-                  -
-                </Button>
-                <Button variant="secondary" onClick={() => adjustSleep(0.5)}>
-                  +
-                </Button>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                {[4, 6, 7, 8, 9].map((h) => {
+                  const active = Number(sleepText) === h;
+                  return (
+                    <button
+                      key={h}
+                      type="button"
+                      onClick={() => setSleepChip(h)}
+                      className={cn(
+                        "rounded-full border px-3 py-1 text-[12px] font-semibold",
+                        active ? "border-black bg-black text-white" : "border-ios-sep bg-white"
+                      )}
+                    >
+                      {h}h
+                    </button>
+                  );
+                })}
               </div>
-            </div>
 
-            <div className="mt-3 flex flex-wrap gap-2">
-              {[4, 6, 7, 8, 9].map((h) => {
-                const active = Number(sleepText) === h;
-                return (
-                  <button
-                    key={h}
-                    type="button"
-                    onClick={() => setSleepChip(h)}
-                    className={cn(
-                      "rounded-full border px-3 py-1 text-[12px] font-semibold",
-                      active ? "border-black bg-black text-white" : "border-ios-sep bg-white"
-                    )}
-                  >
-                    {h}h
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="mt-3">
-              <Input
-                inputMode="decimal"
-                value={sleepText}
-                onChange={(e) => setSleepText(e.target.value)}
-                onBlur={() => saveSleepNow(sleepText)}
-                placeholder="예: 6.5"
-              />
-            </div>
-          </div>
-
-          {/* 스트레스 */}
-          <div className="mt-4">
-            <div className="mb-2 text-[12px] font-semibold text-ios-muted">스트레스</div>
-            <Segmented value={String(stress) as any} options={stressOptions as any} onChange={setStressQuick} />
-          </div>
-
-          {/* 카페인 */}
-          <div className="mt-4 rounded-2xl border border-ios-sep bg-ios-bg p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-[12px] font-semibold text-ios-muted">카페인</div>
-                <div className="mt-1 text-[16px] font-semibold">{caffeineText.trim() === "" ? "—" : `${caffeineText}mg`}</div>
-              </div>
-              <div className="shrink-0 text-[11px] font-semibold text-ios-muted">대략 1잔 ≈ 120mg</div>
-            </div>
-
-            <div className="mt-3 flex flex-wrap gap-2">
-              {[0, 1, 2, 3, 4].map((cups) => {
-                const mg = cups * 120;
-                const active = Number(caffeineText) === mg;
-                return (
-                  <button
-                    key={cups}
-                    type="button"
-                    onClick={() => quickCaffeine(cups)}
-                    className={cn(
-                      "rounded-full border px-3 py-1 text-[12px] font-semibold",
-                      active ? "border-black bg-black text-white" : "border-ios-sep bg-white"
-                    )}
-                  >
-                    {cups === 0 ? "0" : `${cups}잔`}
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="mt-3">
-              <Input
-                inputMode="numeric"
-                value={caffeineText}
-                onChange={(e) => setCaffeineText(e.target.value)}
-                onBlur={() => saveCaffeineNow(caffeineText)}
-                placeholder="mg 직접 입력(예: 150)"
-              />
-            </div>
-          </div>
-
-          {/* 기분 */}
-          <div className="mt-4">
-            <div className="mb-2 flex items-center justify-between gap-3">
-              <div className="min-w-0 text-[12px] font-semibold text-ios-muted">기분</div>
-              <div className="shrink-0 text-[12px] font-semibold">
-                {moodEmoji(mood)} {mood}/5
+              <div className="mt-3">
+                <Input
+                  inputMode="decimal"
+                  value={sleepText}
+                  onChange={(e) => setSleepText(e.target.value)}
+                  onBlur={() => saveSleepNow(sleepText)}
+                  placeholder="예: 6.5"
+                />
               </div>
             </div>
-            <div className="grid grid-cols-5 gap-2">
-              {([1, 2, 3, 4, 5] as MoodScore[]).map((m) => {
-                const active = mood === m;
-                return (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => setMoodQuick(m)}
-                    className={cn(
-                      "rounded-2xl border px-2 py-2 text-center",
-                      active ? "border-black bg-black text-white" : "border-ios-sep bg-white"
-                    )}
-                  >
-                    <div className="text-[18px] leading-none">{moodEmoji(m)}</div>
-                    <div className={cn("mt-1 text-[10.5px] font-semibold", active ? "text-white/80" : "text-ios-muted")}>{m}</div>
-                  </button>
-                );
-              })}
+
+            {/* 스트레스 */}
+            <div className="mt-4">
+              <div className="mb-2 text-[12px] font-semibold text-ios-muted">스트레스</div>
+              <Segmented value={String(stress) as any} options={stressOptions as any} onChange={setStressQuick} />
+            </div>
+
+            {/* 카페인 */}
+            <div className="mt-4 rounded-2xl border border-ios-sep bg-ios-bg p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[12px] font-semibold text-ios-muted">카페인</div>
+                  <div className="mt-1 text-[16px] font-semibold">{caffeineText.trim() === "" ? "—" : `${caffeineText}mg`}</div>
+                </div>
+                <div className="shrink-0 text-[11px] font-semibold text-ios-muted">대략 1잔 ≈ 120mg</div>
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                {[0, 1, 2, 3, 4].map((cups) => {
+                  const mg = cups * 120;
+                  const active = Number(caffeineText) === mg;
+                  return (
+                    <button
+                      key={cups}
+                      type="button"
+                      onClick={() => quickCaffeine(cups)}
+                      className={cn(
+                        "rounded-full border px-3 py-1 text-[12px] font-semibold",
+                        active ? "border-black bg-black text-white" : "border-ios-sep bg-white"
+                      )}
+                    >
+                      {cups === 0 ? "0" : `${cups}잔`}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="mt-3">
+                <Input
+                  inputMode="numeric"
+                  value={caffeineText}
+                  onChange={(e) => setCaffeineText(e.target.value)}
+                  onBlur={() => saveCaffeineNow(caffeineText)}
+                  placeholder="mg 직접 입력(예: 150)"
+                />
+              </div>
+            </div>
+
+            {/* 기분 */}
+            <div className="mt-4">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="min-w-0 text-[12px] font-semibold text-ios-muted">기분</div>
+                <div className="shrink-0 text-[12px] font-semibold">
+                  {moodEmoji(mood)} {mood}/5
+                </div>
+              </div>
+              <div className="grid grid-cols-5 gap-2">
+                {([1, 2, 3, 4, 5] as MoodScore[]).map((m) => {
+                  const active = mood === m;
+                  return (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setMoodQuick(m)}
+                      className={cn(
+                        "rounded-2xl border px-2 py-2 text-center",
+                        active ? "border-black bg-black text-white" : "border-ios-sep bg-white"
+                      )}
+                    >
+                      <div className="text-[18px] leading-none">{moodEmoji(m)}</div>
+                      <div className={cn("mt-1 text-[10.5px] font-semibold", active ? "text-white/80" : "text-ios-muted")}>{m}</div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
-        </div>
+        ) : (
+          <div className="rounded-2xl border border-ios-sep bg-white p-4 text-[12.5px] text-ios-muted">
+            건강 기록은 오늘/전날만 입력할 수 있어요. 다른 날짜는 근무/메모만 가능합니다.
+          </div>
+        )}
 
         {/* 메모 */}
         <div className="rounded-2xl border border-ios-sep bg-white p-4">
@@ -506,85 +518,87 @@ export function ScheduleRecordSheet({
         </div>
 
         {/* 추가 기록 */}
-        <div className="rounded-2xl border border-ios-sep bg-white p-4">
-          <button type="button" onClick={() => setShowMore((v) => !v)} className="flex w-full items-center justify-between">
-            <div className="min-w-0">
-              <div className="text-[13px] font-semibold">추가 기록</div>
-              <div className="mt-0.5 text-[12.5px] text-ios-muted">활동량{menstrualEnabled ? " · 생리 증상" : ""}</div>
-            </div>
-            <div className="shrink-0 text-[14px] font-semibold">{showMore ? "▲" : "▼"}</div>
-          </button>
-
-          {showMore ? (
-            <div className="mt-4 space-y-4">
-              {/* 활동량 */}
-              <div>
-                <div className="mb-2 text-[12px] font-semibold text-ios-muted">낮잠 시간</div>
-                <div className="flex flex-wrap gap-2">
-                  {[0, 0.5, 1, 1.5, 2, 3, 4].map((h) => {
-                    const active = Number(napText) === h;
-                    return (
-                      <button
-                        key={h}
-                        type="button"
-                        onClick={() => setNapQuick(h)}
-                        className={cn(
-                          "rounded-full border px-3 py-1 text-[12px] font-semibold",
-                          active ? "border-black bg-black text-white" : "border-ios-sep bg-white"
-                        )}
-                      >
-                        {h === 0 ? "0" : `${h}h`}
-                      </button>
-                    );
-                  })}
-                </div>
-                <div className="mt-3">
-                  <Input
-                    inputMode="decimal"
-                    value={napText}
-                    onChange={(e) => setNapText(e.target.value)}
-                    onBlur={() => saveNapNow(napText)}
-                    placeholder="낮잠 시간 입력(예: 0.5)"
-                  />
-                </div>
+        {canEditHealth ? (
+          <div className="rounded-2xl border border-ios-sep bg-white p-4">
+            <button type="button" onClick={() => setShowMore((v) => !v)} className="flex w-full items-center justify-between">
+              <div className="min-w-0">
+                <div className="text-[13px] font-semibold">추가 기록</div>
+                <div className="mt-0.5 text-[12.5px] text-ios-muted">활동량{menstrualEnabled ? " · 생리 증상" : ""}</div>
               </div>
+              <div className="shrink-0 text-[14px] font-semibold">{showMore ? "▲" : "▼"}</div>
+            </button>
 
-              {/* 활동량 */}
-              <div>
-                <div className="mb-2 text-[12px] font-semibold text-ios-muted">활동량</div>
-                <Segmented value={String(activity) as any} options={activityOptions as any} onChange={setActivityQuick} />
-              </div>
-
-              {/* 생리 증상 강도 */}
-              {menstrualEnabled ? (
+            {showMore ? (
+              <div className="mt-4 space-y-4">
+                {/* 활동량 */}
                 <div>
-                  <div className="mb-2 flex items-center justify-between">
-                    <div className="text-[12px] font-semibold text-ios-muted">생리 증상 강도</div>
-                    <div className="text-[11px] font-semibold text-ios-muted">불규칙해도 매일 기록 가능</div>
-                  </div>
-                  <div className="grid grid-cols-4 gap-2">
-                    {([0, 1, 2, 3] as const).map((v) => {
-                      const active = symptomSeverity === v;
+                  <div className="mb-2 text-[12px] font-semibold text-ios-muted">낮잠 시간</div>
+                  <div className="flex flex-wrap gap-2">
+                    {[0, 0.5, 1, 1.5, 2, 3, 4].map((h) => {
+                      const active = Number(napText) === h;
                       return (
                         <button
-                          key={v}
+                          key={h}
                           type="button"
-                          onClick={() => setSymptomQuick(v)}
+                          onClick={() => setNapQuick(h)}
                           className={cn(
-                            "rounded-2xl border px-2 py-2 text-center",
+                            "rounded-full border px-3 py-1 text-[12px] font-semibold",
                             active ? "border-black bg-black text-white" : "border-ios-sep bg-white"
                           )}
                         >
-                          <div className="text-[12px] font-semibold">{v === 0 ? "없음" : v}</div>
+                          {h === 0 ? "0" : `${h}h`}
                         </button>
                       );
                     })}
                   </div>
+                  <div className="mt-3">
+                    <Input
+                      inputMode="decimal"
+                      value={napText}
+                      onChange={(e) => setNapText(e.target.value)}
+                      onBlur={() => saveNapNow(napText)}
+                      placeholder="낮잠 시간 입력(예: 0.5)"
+                    />
+                  </div>
                 </div>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
+
+                {/* 활동량 */}
+                <div>
+                  <div className="mb-2 text-[12px] font-semibold text-ios-muted">활동량</div>
+                  <Segmented value={String(activity) as any} options={activityOptions as any} onChange={setActivityQuick} />
+                </div>
+
+                {/* 생리 증상 강도 */}
+                {menstrualEnabled ? (
+                  <div>
+                    <div className="mb-2 flex items-center justify-between">
+                      <div className="text-[12px] font-semibold text-ios-muted">생리 증상 강도</div>
+                      <div className="text-[11px] font-semibold text-ios-muted">불규칙해도 매일 기록 가능</div>
+                    </div>
+                    <div className="grid grid-cols-4 gap-2">
+                      {([0, 1, 2, 3] as const).map((v) => {
+                        const active = symptomSeverity === v;
+                        return (
+                          <button
+                            key={v}
+                            type="button"
+                            onClick={() => setSymptomQuick(v)}
+                            className={cn(
+                              "rounded-2xl border px-2 py-2 text-center",
+                              active ? "border-black bg-black text-white" : "border-ios-sep bg-white"
+                            )}
+                          >
+                            <div className="text-[12px] font-semibold">{v === 0 ? "없음" : v}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </BottomSheet>
   );

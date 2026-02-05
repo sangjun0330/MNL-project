@@ -9,13 +9,26 @@ import {
 } from "@/components/pages/insights/InsightDetailShell";
 import { useInsightsData, shiftKo } from "@/components/insights/useInsightsData";
 import { formatKoreanDate } from "@/lib/date";
+import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 
 function pct(p: number) {
   return `${Math.round(p * 100)}%`;
 }
 
 export function InsightsRecoveryDetail() {
-  const { end, top1, top3, syncLabel, todayShift, ordersSummary, hasTodayShift } = useInsightsData();
+  const { end, top1, top3, syncLabel, todayShift, ordersSummary, hasTodayShift, recordedDays } = useInsightsData();
+
+  if (recordedDays < 7) {
+    return (
+      <InsightDetailShell
+        title="맞춤 회복 처방"
+        subtitle={formatKoreanDate(end)}
+        meta="건강 기록 7일 이상부터 회복 처방이 열립니다."
+      >
+        <InsightsLockedNotice recordedDays={recordedDays} />
+      </InsightDetailShell>
+    );
+  }
 
   const recoverySummary = top1
     ? `회복 포커스 · ${top1.label}`

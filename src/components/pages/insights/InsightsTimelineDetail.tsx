@@ -4,10 +4,23 @@ import { InsightDetailShell, DetailSummaryCard, DetailChip, DETAIL_ACCENTS } fro
 import { useInsightsData, shiftKo } from "@/components/insights/useInsightsData";
 import { formatKoreanDate } from "@/lib/date";
 import { TimelineForecast } from "@/components/insights/v2/TimelineForecast";
+import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 
 export function InsightsTimelineDetail() {
-  const { end, todayShift, todayVital, hasTodayShift } = useInsightsData();
+  const { end, todayShift, todayVital, hasTodayShift, recordedDays } = useInsightsData();
   const isRestDay = todayShift === "OFF" || todayShift === "VAC";
+
+  if (recordedDays < 7) {
+    return (
+      <InsightDetailShell
+        title="타임라인 예보"
+        subtitle={formatKoreanDate(end)}
+        meta="건강 기록 7일 이상부터 타임라인이 열립니다."
+      >
+        <InsightsLockedNotice recordedDays={recordedDays} />
+      </InsightDetailShell>
+    );
+  }
 
   const metaCopy = hasTodayShift
     ? isRestDay
