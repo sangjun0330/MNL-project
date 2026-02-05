@@ -5,8 +5,7 @@ import { BottomNav } from "@/components/shell/BottomNav";
 import { AutoHealthLogger } from "@/components/system/AutoHealthLogger";
 import { CloudStateSync } from "@/components/system/CloudStateSync";
 import { useAuthState } from "@/lib/auth";
-import { hydrateState, purgeAllLocalStateIfNeeded, setLocalSaveEnabled, setStorageScope } from "@/lib/store";
-import { emptyState } from "@/lib/model";
+import { purgeAllLocalStateIfNeeded, setLocalSaveEnabled, setStorageScope } from "@/lib/store";
 import type { SyntheticEvent } from "react";
 import { useCallback, useEffect, useState } from "react";
 
@@ -25,23 +24,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [router, pathname]);
 
   useEffect(() => {
-    // ✅ 로컬 저장 완전 비활성화 + 로컬 데이터 즉시 삭제
-    setLocalSaveEnabled(false);
+    // ✅ 로컬 저장은 기본 활성 (로그인 여부와 무관하게 기록 유지)
+    setLocalSaveEnabled(true);
     purgeAllLocalStateIfNeeded();
   }, []);
 
   useEffect(() => {
     if (status === "loading") return;
     const uid = auth?.userId ?? null;
-    if (!uid || status !== "authenticated") {
-      setLocalSaveEnabled(false);
-      setStorageScope(null);
-      hydrateState(emptyState());
-      return;
-    }
-    // 로그인해도 로컬 저장은 사용하지 않음 (서버 저장만 사용)
-    setLocalSaveEnabled(false);
-    setStorageScope(uid);
+    setLocalSaveEnabled(true);
+    setStorageScope(uid ?? null);
   }, [auth?.userId, status]);
 
   useEffect(() => {

@@ -107,6 +107,11 @@ export function BottomSheet({
     onClose();
   };
 
+  const closeWithSlide = () => {
+    applyTranslate(600, true);
+    onClose();
+  };
+
   const applyTranslate = (y: number, withTransition: boolean) => {
     const el = panelRef.current;
     if (!el) return;
@@ -246,7 +251,7 @@ export function BottomSheet({
                   type="button"
                   aria-label="Close"
                   className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-black/10 bg-white/80 text-[16px] text-ios-text"
-                  onClick={closeWithAnimation}
+                  onClick={closeWithSlide}
                   data-auth-allow
                 >
                   ✕

@@ -14,7 +14,8 @@ import {
 import { useAppStoreSelector } from "@/lib/store";
 import { computeVitalsRange, vitalMapByISO } from "@/lib/vitals";
 import { menstrualContextForDate } from "@/lib/menstrual";
-import { countHealthRecordedDays } from "@/lib/healthRecords";
+import { countHealthRecordedDays, hasHealthInput } from "@/lib/healthRecords";
+import { vitalDisplayScore } from "@/lib/wnlInsight";
 
 import { MonthCalendar } from "@/components/home/MonthCalendar";
 import { BatteryGauge } from "@/components/home/BatteryGauge";
@@ -162,6 +163,19 @@ export default function Home() {
     [store.bio, store.emotions]
   );
   const canShowVitals = recordedDays >= 3;
+  const canHighlightWorst = recordedDays >= 7;
+
+  const lowScoreByDate = useMemo(() => {
+    if (!canHighlightWorst) return {} as Record<ISODate, boolean>;
+    const items = vitals
+      .filter((v) => hasHealthInput(store.bio?.[v.dateISO] ?? null, store.emotions?.[v.dateISO] ?? null))
+      .map((v) => ({ iso: v.dateISO, score: vitalDisplayScore(v) }));
+    items.sort((a, b) => a.score - b.score);
+    const pick = items.slice(0, 5);
+    const out: Record<ISODate, boolean> = {} as any;
+    for (const it of pick) out[it.iso] = true;
+    return out;
+  }, [vitals, store.bio, store.emotions, canHighlightWorst]);
 
   const riskColorByDate = useMemo(() => {
     if (!canShowVitals) return {} as Record<ISODate, "green" | "orange" | "red">;
@@ -330,6 +344,7 @@ export default function Home() {
         menstrual={store.settings.menstrual}
         scheduleAppliedFrom={(store.settings as any).schedulePatternAppliedFrom ?? null}
         riskColorByDate={riskColorByDate}
+        lowScoreByDate={lowScoreByDate}
         selected={selected}
         onSelect={(iso) => {
           store.setSelected(iso);

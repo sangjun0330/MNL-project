@@ -8,7 +8,7 @@ import { menstrualContextForDate } from "@/lib/menstrual";
 import { useAppStore } from "@/lib/store";
 import { computeVitalsRange, type DailyVital } from "@/lib/vitals";
 import { computePersonalizationAccuracy, topFactors } from "@/lib/insightsV2";
-import { shiftWindow, statusFromScore, type OrderKey } from "@/lib/wnlInsight";
+import { shiftWindow, statusFromScore, vitalDisplayScore, type OrderKey } from "@/lib/wnlInsight";
 import { countHealthRecordedDays, hasHealthInput } from "@/lib/healthRecords";
 
 type OrdersSummary = {
@@ -150,10 +150,7 @@ export function useInsightsData() {
     [state.bio, state.emotions]
   );
 
-  const displayScores = useMemo(
-    () => vitals.map((v) => Math.min(v.body.value, v.mental.ema)),
-    [vitals]
-  );
+  const displayScores = useMemo(() => vitals.map((v) => vitalDisplayScore(v)), [vitals]);
   const avgDisplay = useMemo(() => Math.round(avg(displayScores)), [displayScores]);
   const avgBody = useMemo(() => Math.round(avg(vitals.map((v) => v.body.value))), [vitals]);
   const avgMental = useMemo(() => Math.round(avg(vitals.map((v) => v.mental.ema))), [vitals]);
@@ -182,10 +179,7 @@ export function useInsightsData() {
   const top3 = useMemo(() => topFactors(vitals, 3), [vitals]);
   const top1 = top3?.[0] ?? null;
 
-  const todayDisplay = useMemo(() => {
-    if (!todayVital) return 0;
-    return Math.round(Math.min(todayVital.body.value, todayVital.mental.ema));
-  }, [todayVital]);
+  const todayDisplay = useMemo(() => vitalDisplayScore(todayVital), [todayVital]);
 
   const status = useMemo(() => statusFromScore(todayDisplay), [todayDisplay]);
   const fastCharge = useMemo(() => todayDisplay < 30, [todayDisplay]);

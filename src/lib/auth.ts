@@ -95,7 +95,19 @@ export function useAuth(): AuthUser | null {
 export function signInWithProvider(provider: "google" = "google") {
   const supabase = getSupabaseBrowserClient();
   const isBrowser = typeof window !== "undefined";
-  const origin = isBrowser ? window.location.origin : "";
+  const resolveOrigin = () => {
+    const raw = process.env.NEXT_PUBLIC_SITE_URL;
+    if (raw) {
+      try {
+        const url = new URL(raw);
+        return url.origin;
+      } catch {
+        // ignore invalid env
+      }
+    }
+    return isBrowser ? window.location.origin : "";
+  };
+  const origin = resolveOrigin();
   const next = isBrowser
     ? `${window.location.pathname}${window.location.search}${window.location.hash}`
     : "/settings";

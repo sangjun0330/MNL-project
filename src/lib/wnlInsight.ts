@@ -47,6 +47,11 @@ export function statusFromScore(score: number): VitalStatus {
   return "warning";
 }
 
+export function vitalDisplayScore(vital?: { body: { value: number }; mental: { ema: number } } | null): number {
+  if (!vital) return 0;
+  return Math.round(Math.min(vital.body.value, vital.mental.ema));
+}
+
 export function statusLabel(status: VitalStatus) {
   const s = normalizeStatus(status);
   if (s === "stable") return "Stable";

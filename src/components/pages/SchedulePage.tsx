@@ -5,6 +5,7 @@ import type { ISODate } from "@/lib/date";
 import { endOfMonth, startOfMonth, toISODate, fromISODate, todayISO } from "@/lib/date";
 import { useAppStore } from "@/lib/store";
 import { computeVitalsRange } from "@/lib/vitals";
+import { countHealthRecordedDays, hasHealthInput } from "@/lib/healthRecords";
 
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -36,11 +37,22 @@ export function SchedulePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store.schedule, store.notes, store.bio, store.emotions, store.settings, range.start, range.end]);
 
+  const recordedDays = useMemo(
+    () => countHealthRecordedDays({ bio: store.bio, emotions: store.emotions }),
+    [store.bio, store.emotions]
+  );
+  const canShowVitals = recordedDays >= 3;
+
   const riskColorByDate = useMemo(() => {
+    if (!canShowVitals) return {} as Record<ISODate, "green" | "orange" | "red">;
     const m: Record<ISODate, "green" | "orange" | "red"> = {} as any;
-    for (const v of vitals) m[v.dateISO] = v.mental.tone;
+    for (const v of vitals) {
+      const bio = store.bio?.[v.dateISO] ?? null;
+      const emo = store.emotions?.[v.dateISO] ?? null;
+      if (hasHealthInput(bio as any, emo as any)) m[v.dateISO] = v.mental.tone;
+    }
     return m;
-  }, [vitals]);
+  }, [vitals, store.bio, store.emotions, canShowVitals]);
 
   const selShift = store.schedule[selected];
   const selShiftName = store.shiftNames?.[selected];
