@@ -30,18 +30,6 @@ export function InsightsVitalDetail() {
   const { end, todayShift, todayVital, syncLabel, fastCharge, accuracy, todayDisplay, top3, hasTodayShift, recordedDays } = useInsightsData();
   const [openSync, setOpenSync] = useState(false);
 
-  if (recordedDays < 7) {
-    return (
-      <InsightDetailShell
-        title="WNL Vital"
-        subtitle={formatKoreanDate(end)}
-        meta="건강 기록 7일 이상부터 바이탈이 열립니다."
-      >
-        <InsightsLockedNotice recordedDays={recordedDays} />
-      </InsightDetailShell>
-    );
-  }
-
   const body = useMemo(() => Math.round(todayVital?.body.value ?? 0), [todayVital]);
   const mental = useMemo(() => Math.round(todayVital?.mental.ema ?? 0), [todayVital]);
   const debt = useMemo(() => Math.round((todayVital?.engine?.sleepDebtHours ?? 0) * 10) / 10, [todayVital]);
@@ -56,6 +44,18 @@ export function InsightsVitalDetail() {
   const night = useMemo(() => todayVital?.engine?.nightStreak ?? 0, [todayVital]);
 
   const vitalColor = useMemo(() => statusColor(statusFromScore(todayDisplay)), [todayDisplay]);
+
+  if (recordedDays < 7) {
+    return (
+      <InsightDetailShell
+        title="WNL Vital"
+        subtitle={formatKoreanDate(end)}
+        meta="건강 기록 7일 이상부터 바이탈이 열립니다."
+      >
+        <InsightsLockedNotice recordedDays={recordedDays} />
+      </InsightDetailShell>
+    );
+  }
 
   return (
     <InsightDetailShell

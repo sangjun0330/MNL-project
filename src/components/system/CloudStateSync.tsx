@@ -325,7 +325,7 @@ export function CloudStateSync() {
       active = false;
       if (retryTimer.current) clearTimeout(retryTimer.current);
     };
-  }, [userId, status, loadRemoteState, saveState, hasAnyUserData]);
+  }, [userId, status, hydrated, loadRemoteState, saveState, hasAnyUserData, mergeState]);
 
   useEffect(() => {
     if (!userId || !hydrated) return;
