@@ -104,7 +104,7 @@ export function signInWithProvider(provider: "google" | "kakao") {
     : undefined;
   const isKakao = provider === "kakao";
   const scopes = isKakao ? "profile_nickname" : undefined;
-  const queryParams = isKakao ? { scope: "profile_nickname", prompt: "login" } : undefined;
+  const queryParams = isKakao ? { prompt: "login" } : undefined;
 
   return supabase.auth.signInWithOAuth({
     provider,

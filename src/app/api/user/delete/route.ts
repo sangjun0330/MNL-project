@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
-import { createClient } from "@supabase/supabase-js";
+import { getRouteSupabaseClient } from "@/lib/server/supabaseRouteClient";
+import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 
 export const runtime = "edge";
 
@@ -10,28 +9,12 @@ function bad(status: number, message: string) {
 }
 
 export async function DELETE() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!supabaseUrl || !supabaseAnon) {
-    return bad(500, "supabase env missing");
-  }
-  if (!serviceKey) {
-    return bad(500, "SUPABASE_SERVICE_ROLE_KEY missing");
-  }
-
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({
-    cookies: (() => cookieStore) as any,
-  });
+  const supabase = await getRouteSupabaseClient();
   const { data } = await supabase.auth.getUser();
   const userId = data.user?.id ?? "";
   if (!userId) return bad(401, "login required");
 
-  const admin = createClient(supabaseUrl, serviceKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+  const admin = getSupabaseAdmin();
 
   try {
     // 사용자 데이터 삭제

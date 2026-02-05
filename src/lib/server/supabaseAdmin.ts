@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/supabase";
 
 export function getSupabaseAdmin() {
@@ -20,5 +21,5 @@ export function getSupabaseAdmin() {
     });
   }
 
-  return g.__wnlSupabaseAdmin as ReturnType<typeof createClient<Database>>;
+  return g.__wnlSupabaseAdmin as SupabaseClient<Database>;
 }
