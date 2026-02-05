@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ISODate } from "@/lib/date";
 import { endOfMonth, startOfMonth, toISODate, fromISODate, todayISO } from "@/lib/date";
 import { useAppStore } from "@/lib/store";
@@ -17,7 +17,7 @@ import { MenstrualSettingsForm } from "@/components/settings/MenstrualSettingsFo
 
 export function SchedulePage() {
   const store = useAppStore();
-  const selected = (store.selected ?? todayISO()) as ISODate;
+  const [selected, setSelected] = useState<ISODate>(() => todayISO());
 
   const [month, setMonth] = useState<Date>(() => startOfMonth(fromISODate(selected)));
   const [openLog, setOpenLog] = useState(false);
@@ -25,6 +25,11 @@ export function SchedulePage() {
   // ✅ 3교대 패턴 팝업
   const [openPattern, setOpenPattern] = useState(false);
   const [openMenstrual, setOpenMenstrual] = useState(false);
+
+  useEffect(() => {
+    const next = startOfMonth(fromISODate(selected));
+    setMonth((prev) => (prev.getMonth() === next.getMonth() && prev.getFullYear() === next.getFullYear() ? prev : next));
+  }, [selected]);
 
   const range = useMemo(() => {
     const start = toISODate(startOfMonth(month));
@@ -88,7 +93,7 @@ export function SchedulePage() {
         riskColorByDate={riskColorByDate}
         selected={selected}
         onSelect={(iso) => {
-          store.setSelected(iso);
+          setSelected(iso);
           setOpenLog(true);
 
           const d = fromISODate(iso);
