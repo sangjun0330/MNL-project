@@ -1,15 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getSupabaseBrowserClient, useAuth } from "@/lib/auth";
+import { getSupabaseBrowserClient, useAuth, useAuthState } from "@/lib/auth";
 import { hydrateState, useAppStore } from "@/lib/store";
 
 const SAVE_DEBOUNCE_MS = 120;
+const RETRY_BASE_MS = 800;
+const RETRY_MAX_MS = 8000;
 
 export function CloudStateSync() {
   const auth = useAuth();
+  const { status } = useAuthState();
   const store = useAppStore();
-  const userId = auth?.userId ?? null;
+  const [sessionUserId, setSessionUserId] = useState<string | null>(null);
+  const userId = auth?.userId ?? sessionUserId ?? null;
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const [hydrated, setHydrated] = useState(false);
   const skipNextSave = useRef(false);
@@ -18,6 +22,8 @@ export function CloudStateSync() {
   const saveInFlight = useRef(false);
   const pendingSave = useRef(false);
   const latestStateRef = useRef<any>(null);
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryCount = useRef(0);
 
   const getAuthHeaders = useCallback(async (): Promise<Record<string, string>> => {
     try {
@@ -27,6 +33,22 @@ export function CloudStateSync() {
     } catch {
       return {};
     }
+  }, [supabase]);
+
+  useEffect(() => {
+    let active = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (!active) return;
+      setSessionUserId(data.session?.user?.id ?? null);
+    });
+    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      if (!active) return;
+      setSessionUserId(nextSession?.user?.id ?? null);
+    });
+    return () => {
+      active = false;
+      data.subscription?.unsubscribe();
+    };
   }, [supabase]);
 
   const saveStateViaApi = useCallback(
@@ -67,28 +89,58 @@ export function CloudStateSync() {
     [saveStateViaSupabase, saveStateViaApi]
   );
 
-  const loadStateViaApi = useCallback(async () => {
+  const loadStateViaApi = useCallback(async (): Promise<{ ok: boolean; state: any | null }> => {
     const authHeaders = await getAuthHeaders();
     const res = await fetch("/api/user/state", {
       method: "GET",
       headers: { "content-type": "application/json", ...authHeaders },
     });
-    if (!res.ok) return null;
+    if (!res.ok) return { ok: false, state: null };
     const json = await res.json();
-    return json?.state ?? null;
+    return { ok: true, state: json?.state ?? null };
   }, [getAuthHeaders]);
 
-  const loadStateViaSupabase = useCallback(async () => {
-    if (!userId) return null;
+  const loadStateViaSupabase = useCallback(async (): Promise<{ ok: boolean; state: any | null }> => {
+    if (!userId) return { ok: false, state: null };
     const client = supabase as any;
     const { data, error } = await client
       .from("wnl_user_state")
       .select("payload, updated_at")
       .eq("user_id", userId)
       .maybeSingle();
-    if (error) throw error;
-    return data?.payload ?? null;
+    if (error) return { ok: false, state: null };
+    return { ok: true, state: data?.payload ?? null };
   }, [supabase, userId]);
+
+  const loadRemoteState = useCallback(async (): Promise<{ ok: boolean; state: any | null }> => {
+    try {
+      const supa = await loadStateViaSupabase();
+      if (supa && supa.ok) return supa;
+    } catch {
+      // ignore
+    }
+    try {
+      const api = await loadStateViaApi();
+      return api;
+    } catch {
+      return { ok: false, state: null };
+    }
+  }, [loadStateViaSupabase, loadStateViaApi]);
+
+  const hasAnyUserData = useCallback((s: ReturnType<typeof store.getState>) => {
+    const scheduleKeys = Object.keys(s.schedule ?? {});
+    const noteKeys = Object.keys(s.notes ?? {});
+    const emotionKeys = Object.keys(s.emotions ?? {});
+    const bioKeys = Object.keys(s.bio ?? {});
+    const shiftNameKeys = Object.keys(s.shiftNames ?? {});
+    return (
+      scheduleKeys.length ||
+      noteKeys.length ||
+      emotionKeys.length ||
+      bioKeys.length ||
+      shiftNameKeys.length
+    );
+  }, [store]);
 
   const queueSave = useCallback(
     (state: any) => {
@@ -121,41 +173,59 @@ export function CloudStateSync() {
   }, [store]);
 
   useEffect(() => {
+    if (status === "loading" && !userId) return;
     if (!userId) {
       setHydrated(false);
       return;
     }
 
     let active = true;
-    (async () => {
+    const tryLoad = async () => {
+      let ready = false;
       try {
-        let remoteState: any = null;
-        try {
-          remoteState = await loadStateViaSupabase();
-        } catch {
-          remoteState = await loadStateViaApi();
-        }
-
+        const result = await loadRemoteState();
         if (!active) return;
 
-        if (remoteState) {
-          hydrateState(remoteState);
+        if (!result.ok) {
+          retryCount.current += 1;
+          const delay = Math.min(RETRY_MAX_MS, RETRY_BASE_MS * Math.pow(2, retryCount.current - 1));
+          if (retryTimer.current) clearTimeout(retryTimer.current);
+          retryTimer.current = setTimeout(() => {
+            if (active) void tryLoad();
+          }, delay);
+          return;
+        }
+
+        retryCount.current = 0;
+        if (result.state) {
+          hydrateState(result.state);
           skipNextSave.current = true;
         } else {
           const fresh = storeRef.current.getState();
-          await saveState(fresh);
+          if (hasAnyUserData(fresh)) {
+            await saveState(fresh);
+          }
         }
+        ready = true;
       } catch {
         // ignore network errors
       } finally {
-        if (active) setHydrated(true);
+        if (active && ready) {
+          setHydrated(true);
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(new CustomEvent("wnl:cloud-ready", { detail: { userId } }));
+          }
+        }
       }
-    })();
+    };
+
+    void tryLoad();
 
     return () => {
       active = false;
+      if (retryTimer.current) clearTimeout(retryTimer.current);
     };
-  }, [userId, loadStateViaSupabase, loadStateViaApi, saveState]);
+  }, [userId, status, loadRemoteState, saveState, hasAnyUserData]);
 
   useEffect(() => {
     if (!userId || !hydrated) return;

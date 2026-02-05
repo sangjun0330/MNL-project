@@ -4,8 +4,9 @@ import { usePathname, useRouter } from "next/navigation";
 import { BottomNav } from "@/components/shell/BottomNav";
 import { AutoHealthLogger } from "@/components/system/AutoHealthLogger";
 import { CloudStateSync } from "@/components/system/CloudStateSync";
-import { useAuthState } from "@/lib/auth";
-import { setLocalSaveEnabled, setStorageScope } from "@/lib/store";
+import { getSupabaseBrowserClient, useAuthState } from "@/lib/auth";
+import { hydrateState, setLocalSaveEnabled, setStorageScope } from "@/lib/store";
+import { emptyState } from "@/lib/model";
 import type { SyntheticEvent } from "react";
 import { useCallback, useEffect, useState } from "react";
 
@@ -13,7 +14,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { user: auth, status } = useAuthState();
-  const isAuthed = Boolean(auth?.userId);
+  const [hasSession, setHasSession] = useState<boolean | null>(null);
+  const isAuthed = Boolean(auth?.userId) || hasSession === true;
+  const [cloudReady, setCloudReady] = useState(false);
   const allowPrompt = !isAuthed && status === "unauthenticated" && !pathname?.startsWith("/settings");
   const [loginPromptOpen, setLoginPromptOpen] = useState(false);
   const goToSettings = useCallback(() => {
@@ -29,11 +32,50 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    const supabase = getSupabaseBrowserClient();
+    let active = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (!active) return;
+      setHasSession(Boolean(data.session));
+    });
+    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      if (!active) return;
+      setHasSession(Boolean(nextSession));
+    });
+    return () => {
+      active = false;
+      data.subscription?.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthed) {
+      setCloudReady(false);
+      return;
+    }
+    const onReady = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (!detail?.userId || !auth?.userId || detail.userId === auth?.userId) {
+        setCloudReady(true);
+      }
+    };
+    window.addEventListener("wnl:cloud-ready", onReady);
+    return () => window.removeEventListener("wnl:cloud-ready", onReady);
+  }, [isAuthed, auth?.userId]);
+
+  useEffect(() => {
     if (status === "loading") return;
     const uid = auth?.userId ?? null;
     setLocalSaveEnabled(false);
     setStorageScope(uid ?? null);
   }, [auth?.userId, status]);
+
+  useEffect(() => {
+    if (status === "unauthenticated" && !auth?.userId && !hasSession) {
+      hydrateState(emptyState());
+      setCloudReady(false);
+    }
+  }, [status, auth?.userId, hasSession]);
 
   useEffect(() => {
     if (!allowPrompt && loginPromptOpen) {
@@ -100,6 +142,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 설정으로 이동
               </button>
             </div>
+          </div>
+        </div>
+      ) : null}
+      {isAuthed && !cloudReady ? (
+        <div className="fixed inset-0 z-[55] flex items-center justify-center bg-white/70 backdrop-blur-sm px-6">
+          <div className="w-full max-w-[320px] rounded-apple border border-ios-sep bg-white p-5 shadow-apple">
+            <div className="text-[15px] font-semibold text-ios-text">데이터 동기화 중…</div>
+            <div className="mt-2 text-[12.5px] text-ios-sub">로그인 데이터를 불러오는 중입니다.</div>
           </div>
         </div>
       ) : null}
