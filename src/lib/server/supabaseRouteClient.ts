@@ -1,4 +1,5 @@
 import { createServerClient } from "@supabase/ssr";
+import type { CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import type { Database } from "@/types/supabase";
 
@@ -10,19 +11,22 @@ export async function getRouteSupabaseClient() {
     throw new Error("Supabase env missing (NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY)");
   }
 
-  const nextCookies = cookies() as any;
-  const cookieStore = typeof nextCookies?.then === "function" ? await nextCookies : nextCookies;
+  const cookieStore = await cookies();
 
   return createServerClient<Database>(supabaseUrl, supabaseAnon, {
     cookies: {
-      get(name) {
-        return cookieStore.get(name)?.value;
+      get(name: string) {
+        return cookieStore.get(name)?.value ?? null;
       },
-      set(name, value, options) {
-        cookieStore.set({ name, value, ...options });
+      set(name: string, value: string, options: CookieOptions) {
+        const store: any = cookieStore;
+        if (typeof store.set !== "function") return;
+        store.set({ name, value, ...options });
       },
-      remove(name, options) {
-        cookieStore.set({ name, value: "", ...options, maxAge: 0 });
+      remove(name: string, options: CookieOptions) {
+        const store: any = cookieStore;
+        if (typeof store.set !== "function") return;
+        store.set({ name, value: "", ...options });
       },
     },
   });
