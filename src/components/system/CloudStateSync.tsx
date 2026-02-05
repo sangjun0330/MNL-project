@@ -27,6 +27,7 @@ export function CloudStateSync() {
   const dirtyBeforeHydrate = useRef(false);
   const lastVersionRef = useRef<number>((store as any).__v ?? 0);
   const isHydratingRef = useRef(false);
+  const lastLoadedUserIdRef = useRef<string | null>(null);
 
   const getAuthHeaders = useCallback(async (): Promise<Record<string, string>> => {
     try {
@@ -209,10 +210,17 @@ export function CloudStateSync() {
     if (status === "loading" && !userId) return;
     if (!userId) {
       setHydrated(false);
+      lastLoadedUserIdRef.current = null;
       return;
     }
 
     let active = true;
+    if (hydrated && lastLoadedUserIdRef.current === userId) {
+      return () => {
+        active = false;
+      };
+    }
+    lastLoadedUserIdRef.current = userId;
     const tryLoad = async () => {
       let ready = false;
       try {

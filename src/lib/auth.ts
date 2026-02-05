@@ -52,9 +52,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
     });
 
-    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession ?? null);
       setLoading(false);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("wnl:auth-event", {
+            detail: {
+              event,
+              userId: nextSession?.user?.id ?? null,
+            },
+          })
+        );
+      }
     });
 
     return () => {
