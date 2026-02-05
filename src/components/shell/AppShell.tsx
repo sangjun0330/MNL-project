@@ -24,7 +24,7 @@ function LoginGate() {
         >
           설정에서 로그인하기
         </Link>
-        <div className="text-[12px] text-ios-muted">Google · Kakao 로그인 지원</div>
+        <div className="text-[12px] text-ios-muted">Google 로그인 지원</div>
       </div>
     </div>
   );
