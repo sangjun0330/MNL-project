@@ -82,15 +82,45 @@ export function CloudStateSync() {
     [supabase, userId]
   );
 
+  const normalizeStateForSave = useCallback((state: any) => {
+    const bio = state?.bio ?? {};
+    const nextBio: Record<string, any> = {};
+    for (const [iso, value] of Object.entries(bio)) {
+      if (value && typeof value === "object") {
+        const stressRaw = (value as any).stress;
+        const activityRaw = (value as any).activity;
+        nextBio[iso] = {
+          ...(value as any),
+          stress:
+            stressRaw === undefined || stressRaw === null
+              ? stressRaw
+              : Number.isFinite(Number(stressRaw))
+                ? Number(stressRaw)
+                : stressRaw,
+          activity:
+            activityRaw === undefined || activityRaw === null
+              ? activityRaw
+              : Number.isFinite(Number(activityRaw))
+                ? Number(activityRaw)
+                : activityRaw,
+        };
+      } else {
+        nextBio[iso] = value;
+      }
+    }
+    return { ...state, bio: nextBio };
+  }, []);
+
   const saveState = useCallback(
     async (state: any) => {
+      const normalized = normalizeStateForSave(state);
       try {
-        await saveStateViaSupabase(state);
+        await saveStateViaSupabase(normalized);
       } catch {
-        await saveStateViaApi(state);
+        await saveStateViaApi(normalized);
       }
     },
-    [saveStateViaSupabase, saveStateViaApi]
+    [saveStateViaSupabase, saveStateViaApi, normalizeStateForSave]
   );
 
   const loadStateViaApi = useCallback(async (): Promise<{ ok: boolean; state: any | null }> => {
@@ -146,6 +176,18 @@ export function CloudStateSync() {
     );
   }, [store]);
 
+  const mergeByDate = useCallback((remoteMap: Record<string, any> = {}, localMap: Record<string, any> = {}) => {
+    const out: Record<string, any> = { ...remoteMap };
+    for (const [iso, value] of Object.entries(localMap)) {
+      if (value && typeof value === "object") {
+        out[iso] = { ...(remoteMap as any)[iso], ...(value as any) };
+      } else {
+        out[iso] = value;
+      }
+    }
+    return out;
+  }, []);
+
   const mergeState = useCallback((remote: any, local: any) => {
     const r = remote ?? {};
     const l = local ?? {};
@@ -156,8 +198,8 @@ export function CloudStateSync() {
       schedule: { ...(r.schedule ?? {}), ...(l.schedule ?? {}) },
       shiftNames: { ...(r.shiftNames ?? {}), ...(l.shiftNames ?? {}) },
       notes: { ...(r.notes ?? {}), ...(l.notes ?? {}) },
-      emotions: { ...(r.emotions ?? {}), ...(l.emotions ?? {}) },
-      bio: { ...(r.bio ?? {}), ...(l.bio ?? {}) },
+      emotions: mergeByDate(r.emotions ?? {}, l.emotions ?? {}),
+      bio: mergeByDate(r.bio ?? {}, l.bio ?? {}),
       settings: {
         ...(r.settings ?? {}),
         ...(l.settings ?? {}),
@@ -165,7 +207,7 @@ export function CloudStateSync() {
         profile: { ...(r.settings?.profile ?? {}), ...(l.settings?.profile ?? {}) },
       },
     };
-  }, []);
+  }, [mergeByDate]);
 
   const queueSave = useCallback(
     (state: any) => {
@@ -177,7 +219,7 @@ export function CloudStateSync() {
       saveInFlight.current = true;
       void (async () => {
         try {
-          await saveState(state);
+        await saveState(state);
         } catch {
           // ignore save errors
         } finally {
