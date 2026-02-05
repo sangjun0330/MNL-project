@@ -5,7 +5,7 @@ import { useInsightsData, fmtMD, shiftKo, isInsightsLocked, INSIGHTS_MIN_DAYS } 
 import { formatKoreanDate } from "@/lib/date";
 import { TrendChart } from "@/components/insights/TrendChart";
 import { Pill } from "@/components/ui/Pill";
-import { WNL_COLORS, statusFromScore } from "@/lib/wnlInsight";
+import { statusFromScore } from "@/lib/wnlInsight";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { useI18n } from "@/lib/useI18n";
 
@@ -68,10 +68,10 @@ export function InsightsTrendsDetail() {
         )}
         valueColor={
           status === "stable"
-            ? WNL_COLORS.mint
+            ? DETAIL_ACCENTS.mint
             : status === "caution" || status === "observation"
-            ? WNL_COLORS.yellow
-            : WNL_COLORS.pink
+            ? DETAIL_ACCENTS.navy
+            : DETAIL_ACCENTS.pink
         }
       />
 
