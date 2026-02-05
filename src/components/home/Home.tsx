@@ -14,6 +14,7 @@ import {
 import { useAppStoreSelector } from "@/lib/store";
 import { computeVitalsRange, vitalMapByISO } from "@/lib/vitals";
 import { menstrualContextForDate } from "@/lib/menstrual";
+import { countHealthRecordedDays } from "@/lib/healthRecords";
 
 import { MonthCalendar } from "@/components/home/MonthCalendar";
 import { BatteryGauge } from "@/components/home/BatteryGauge";
@@ -156,14 +157,20 @@ export default function Home() {
   }, [store.schedule, store.notes, store.bio, store.emotions, store.settings, range.start, range.end]);
 
   const vmap = useMemo(() => vitalMapByISO(vitals), [vitals]);
+  const recordedDays = useMemo(
+    () => countHealthRecordedDays({ bio: store.bio, emotions: store.emotions }),
+    [store.bio, store.emotions]
+  );
+  const canShowVitals = recordedDays >= 3;
 
   const riskColorByDate = useMemo(() => {
+    if (!canShowVitals) return {} as Record<ISODate, "green" | "orange" | "red">;
     const m: Record<ISODate, "green" | "orange" | "red"> = {} as any;
     for (const v of vitals) m[v.dateISO] = v.mental.tone;
     return m;
-  }, [vitals]);
+  }, [vitals, canShowVitals]);
 
-  const selVital = vmap.get(selected);
+  const selVital = canShowVitals ? vmap.get(selected) : null;
   const selShift = store.schedule[selected];
   const selNote = store.notes[selected];
   const selEmotion = store.emotions[selected];
@@ -280,7 +287,17 @@ export default function Home() {
             </div>
           ) : (
             <div className="mt-4 rounded-2xl border border-ios-sep bg-white p-4 text-[12.5px] text-ios-muted shadow-apple-sm">
-              기록이 아직 없어서 오늘 지표가 비어 있어. <span className="font-semibold text-black">일정</span> 탭에서 날짜를 눌러 입력해줘.
+              {canShowVitals ? (
+                <>
+                  기록이 아직 없어서 오늘 지표가 비어 있어.{" "}
+                  <span className="font-semibold text-black">일정</span> 탭에서 날짜를 눌러 입력해줘.
+                </>
+              ) : (
+                <>
+                  건강 기록을 최소 3일 이상 입력해야 바디/멘탈 배터리가 보여요.{" "}
+                  <span className="font-semibold text-black">현재 {recordedDays}일 기록됨</span>
+                </>
+              )}
             </div>
           )}
 

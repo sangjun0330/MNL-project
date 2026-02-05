@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { getRouteSupabaseClient } from "@/lib/server/supabaseRouteClient";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
+import { readUserIdFromRequest } from "@/lib/server/readUserId";
 
 export const runtime = "edge";
 
@@ -8,10 +8,8 @@ function bad(status: number, message: string) {
   return NextResponse.json({ ok: false, error: message }, { status });
 }
 
-export async function DELETE() {
-  const supabase = await getRouteSupabaseClient();
-  const { data } = await supabase.auth.getUser();
-  const userId = data.user?.id ?? "";
+export async function DELETE(req: Request) {
+  const userId = await readUserIdFromRequest(req);
   if (!userId) return bad(401, "login required");
 
   const admin = getSupabaseAdmin();

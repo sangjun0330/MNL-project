@@ -8,7 +8,7 @@ import { CloudStateSync } from "@/components/system/CloudStateSync";
 import { useAuthState } from "@/lib/auth";
 import { hydrateState, purgeAllLocalState, purgeAllLocalStateIfNeeded, setLocalSaveEnabled, setStorageScope } from "@/lib/store";
 import { emptyState } from "@/lib/model";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 function LoginGate() {
   return (
@@ -37,6 +37,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const isAuthed = Boolean(auth?.userId);
   const allowPrompt = !isAuthed && status !== "loading" && !pathname?.startsWith("/settings");
   const [loginPromptOpen, setLoginPromptOpen] = useState(false);
+  const goToSettings = useCallback(() => {
+    setLoginPromptOpen(false);
+    router.push("/settings");
+  }, [router]);
 
   useEffect(() => {
     // ✅ 로컬 저장 완전 비활성화 + 로컬 데이터 즉시 삭제
@@ -62,10 +66,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!loginPromptOpen) return;
     const t = window.setTimeout(() => {
-      router.push("/settings");
+      goToSettings();
     }, 900);
     return () => window.clearTimeout(t);
-  }, [loginPromptOpen, router]);
+  }, [loginPromptOpen, goToSettings]);
+
+  useEffect(() => {
+    if (!allowPrompt && loginPromptOpen) {
+      setLoginPromptOpen(false);
+    }
+  }, [allowPrompt, loginPromptOpen]);
 
   return (
     <div className="min-h-dvh w-full bg-ios-bg">
@@ -106,7 +116,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <button
                 type="button"
                 className="h-9 rounded-full bg-black px-4 text-[12px] font-semibold text-white"
-                onClick={() => router.push("/settings")}
+                onClick={() => goToSettings()}
               >
                 설정으로 이동
               </button>

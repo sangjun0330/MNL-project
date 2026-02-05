@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { cn } from "@/lib/cn";
 import { useAuthState } from "@/lib/auth";
 
@@ -22,6 +22,11 @@ export function BottomNav() {
   const [pendingHref, setPendingHref] = useState<string | null>(null);
   const [loginPromptOpen, setLoginPromptOpen] = useState(false);
   const [, startTransition] = useTransition();
+  const goToSettings = useCallback((skipNavigate?: boolean) => {
+    setLoginPromptOpen(false);
+    setPendingHref(null);
+    if (!skipNavigate) router.push("/settings");
+  }, [router]);
 
   useEffect(() => {
     if (typeof document !== "undefined") {
@@ -42,11 +47,22 @@ export function BottomNav() {
 
   useEffect(() => {
     if (!loginPromptOpen) return;
+    if (pathname?.startsWith("/settings")) {
+      goToSettings(true);
+      return;
+    }
     const t = window.setTimeout(() => {
-      router.push("/settings");
+      goToSettings();
     }, 900);
     return () => window.clearTimeout(t);
-  }, [loginPromptOpen, router]);
+  }, [loginPromptOpen, pathname, goToSettings]);
+
+  useEffect(() => {
+    if (!loginPromptOpen) return;
+    if (isAuthed || pathname?.startsWith("/settings")) {
+      goToSettings(true);
+    }
+  }, [loginPromptOpen, isAuthed, pathname, goToSettings]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -83,13 +99,13 @@ export function BottomNav() {
               모든 기능을 사용하려면 로그인해야 합니다. 지금 설정으로 이동할게요.
             </div>
             <div className="mt-4 flex justify-end">
-              <button
-                type="button"
-                className="h-9 rounded-full bg-black px-4 text-[12px] font-semibold text-white"
-                onClick={() => router.push("/settings")}
-              >
-                설정으로 이동
-              </button>
+                <button
+                  type="button"
+                  className="h-9 rounded-full bg-black px-4 text-[12px] font-semibold text-white"
+                  onClick={() => goToSettings()}
+                >
+                  설정으로 이동
+                </button>
             </div>
           </div>
         </div>
@@ -107,6 +123,7 @@ export function BottomNav() {
             <div className="grid grid-cols-4 gap-1 p-1.5">
               {ITEMS.map((it) => {
                 const active = selectedHref === it.href;
+                const blocked = !isAuthed && status !== "loading" && it.href !== "/settings";
                 return (
                   <Link
                     key={it.href}
@@ -119,14 +136,15 @@ export function BottomNav() {
                         : "text-ios-muted hover:bg-black/5"
                     )}
                     onPointerDown={() => {
-                      if (activeHref !== it.href) setPendingHref(it.href);
+                      if (activeHref !== it.href && !blocked) setPendingHref(it.href);
                       router.prefetch(it.href);
                     }}
                     onClick={(event) => {
                       if (activeHref === it.href) return;
                       event.preventDefault();
-                      if (!isAuthed && status !== "loading" && it.href !== "/settings") {
+                      if (blocked) {
                         setLoginPromptOpen(true);
+                        setPendingHref(null);
                         return;
                       }
                       setPendingHref(it.href);
