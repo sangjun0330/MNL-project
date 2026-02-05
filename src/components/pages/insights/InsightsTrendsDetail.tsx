@@ -25,6 +25,7 @@ export function InsightsTrendsDetail() {
         title={t("최근 7일 통계")}
         subtitle={formatKoreanDate(end)}
         meta={t("건강 기록 7일 이상부터 통계가 열립니다.")}
+        tone="mint"
       >
         <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />
       </InsightDetailShell>
@@ -35,7 +36,15 @@ export function InsightsTrendsDetail() {
     <InsightDetailShell
       title={t("최근 7일 통계")}
       subtitle={formatKoreanDate(end)}
+      chips={(
+        <>
+          <DetailChip color={DETAIL_ACCENTS.mint}>Vital {avgDisplay}</DetailChip>
+          <DetailChip color={DETAIL_ACCENTS.mint}>Body {avgBody}</DetailChip>
+          <DetailChip color={DETAIL_ACCENTS.mint}>Mental {avgMental}</DetailChip>
+        </>
+      )}
       meta={t("최근 7일의 리듬/바이탈 변화와 핵심 요인을 정리했습니다.")}
+      tone="mint"
     >
       <DetailSummaryCard
         accent="mint"

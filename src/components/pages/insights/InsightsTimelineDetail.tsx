@@ -18,6 +18,7 @@ export function InsightsTimelineDetail() {
         title={t("타임라인 예보")}
         subtitle={formatKoreanDate(end)}
         meta={t("건강 기록 7일 이상부터 타임라인이 열립니다.")}
+        tone="navy"
       >
         <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />
       </InsightDetailShell>
@@ -38,7 +39,18 @@ export function InsightsTimelineDetail() {
     : t("근무가 입력되면 출근 전 · 근무 중 · 퇴근 후 회복 루틴을 제공합니다.");
 
   return (
-    <InsightDetailShell title={t("타임라인 예보")} subtitle={formatKoreanDate(end)} meta={metaCopy}>
+    <InsightDetailShell
+      title={t("타임라인 예보")}
+      subtitle={formatKoreanDate(end)}
+      chips={(
+        <>
+          <DetailChip color={DETAIL_ACCENTS.navy}>{hasTodayShift ? shiftKo(todayShift) : t("근무 미설정")}</DetailChip>
+          <DetailChip color={DETAIL_ACCENTS.navy}>{summaryLabel}</DetailChip>
+        </>
+      )}
+      meta={metaCopy}
+      tone="navy"
+    >
       <DetailSummaryCard
         accent="navy"
         label="Timeline Forecast"

@@ -17,17 +17,19 @@ function StatsHubItem({
   title,
   metric,
   detail,
+  className,
 }: {
   href: string;
   label: string;
   title: string;
   metric: string;
   detail: string;
+  className?: string;
 }) {
   return (
     <Link
       href={href}
-      className="group rounded-2xl border border-ios-sep bg-white p-4 transition-shadow duration-300 hover:shadow-apple"
+      className={`group rounded-2xl border border-ios-sep bg-white p-4 transition-shadow duration-300 hover:shadow-apple ${className ?? ""}`}
       aria-label={title}
     >
       <div className="flex items-start justify-between gap-3">
@@ -80,13 +82,6 @@ export function InsightsPage() {
       })
     : t("방전 요인을 분석할 데이터가 부족해요.");
 
-  const timelineMetric = hasTodayShift ? shiftKo(todayShift) : "—";
-  const timelineDetail = hasTodayShift
-    ? t("{shift} 기준으로 출근 전 · 근무 중 · 퇴근 후 회복 추천을 제공합니다.", {
-        shift: shiftKo(todayShift),
-      })
-    : t("오늘 근무가 설정되지 않았어요. 일정에서 근무를 입력하면 타임라인 예보가 열립니다.");
-
   return (
     <div className="mx-auto w-full max-w-[920px] px-4 pb-24 pt-6 sm:px-6">
       <div className="mb-4">
@@ -117,18 +112,12 @@ export function InsightsPage() {
 
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <StatsHubItem
-            href="/insights/trends"
-            label="Stats"
-            title={t("최근 7일 통계")}
-            metric={`Vital ${avgDisplay}`}
-            detail={`Body ${avgBody} · Mental ${avgMental}`}
-          />
-          <StatsHubItem
             href="/insights/vital"
             label="WNL Vital"
             title={t("오늘 바이탈 요약")}
             metric={`${todayDisplay} / 100`}
             detail={t(statusLabel(status))}
+            className="sm:col-span-2"
           />
           <StatsHubItem
             href="/insights/thieves"
@@ -138,11 +127,11 @@ export function InsightsPage() {
             detail={thievesDetail}
           />
           <StatsHubItem
-            href="/insights/timeline"
-            label="Timeline Forecast"
-            title={t("타임라인 예보")}
-            metric={timelineMetric}
-            detail={timelineDetail}
+            href="/insights/trends"
+            label="Stats"
+            title={t("최근 7일 통계")}
+            metric={`Vital ${avgDisplay}`}
+            detail={`Body ${avgBody} · Mental ${avgMental}`}
           />
         </div>
       </section>

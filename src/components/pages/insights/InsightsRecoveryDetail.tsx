@@ -26,6 +26,7 @@ export function InsightsRecoveryDetail() {
         title={t("맞춤 회복 처방")}
         subtitle={formatKoreanDate(end)}
         meta={t("건강 기록 7일 이상부터 회복 처방이 열립니다.")}
+        tone="mint"
       >
         <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />
       </InsightDetailShell>
@@ -43,7 +44,15 @@ export function InsightsRecoveryDetail() {
     <InsightDetailShell
       title={t("맞춤 회복 처방")}
       subtitle={formatKoreanDate(end)}
+      chips={(
+        <>
+          <DetailChip color={DETAIL_ACCENTS.mint}>{hasTodayShift ? shiftKo(todayShift) : t("근무 미설정")}</DetailChip>
+          <DetailChip color={DETAIL_ACCENTS.mint}>{top1 ? top1.label : t("회복 포커스")}</DetailChip>
+          {top1 ? <DetailChip color={DETAIL_ACCENTS.mint}>{pct(top1.pct)}</DetailChip> : null}
+        </>
+      )}
       meta={t("기록(수면/스트레스/활동/카페인/기분/주기)을 근거로 회복 플랜을 제공합니다.")}
+      tone="mint"
     >
       <div className="space-y-4">
         <Link
