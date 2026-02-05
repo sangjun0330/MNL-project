@@ -5,6 +5,7 @@ import { cn } from "@/lib/cn";
 import type { DailyVital } from "@/lib/vitals";
 import { aggregateFactors, FACTOR_LABEL_KO, topFactors, type FactorKey } from "@/lib/insightsV2";
 import { WNL_COLORS } from "@/lib/wnlInsight";
+import { useI18n } from "@/lib/useI18n";
 
 type Segment = {
   key: FactorKey;
@@ -81,18 +82,19 @@ function Donut({ segments }: { segments: Segment[] }) {
 }
 
 export function BatteryThieves({ vitals, periodLabel, className }: { vitals: DailyVital[]; periodLabel?: string; className?: string }) {
+  const { t } = useI18n();
   const segments = useMemo(() => {
     const agg = aggregateFactors(vitals);
     const keys = Object.keys(agg) as FactorKey[];
     return keys
       .map((k) => ({
         key: k,
-        label: FACTOR_LABEL_KO[k],
+        label: t(FACTOR_LABEL_KO[k]),
         pct: clamp(agg[k] ?? 0, 0, 1),
         color: colorForFactor(k),
       }))
       .sort((a, b) => b.pct - a.pct);
-  }, [vitals]);
+  }, [vitals, t]);
 
   const top3 = useMemo(() => topFactors(vitals, 3), [vitals]);
   const top1 = top3?.[0];
@@ -104,13 +106,19 @@ export function BatteryThieves({ vitals, periodLabel, className }: { vitals: Dai
   }, [vitals]);
 
   const message = useMemo(() => {
-    if (!top1) return "방전 요인을 계산할 데이터가 없어요.";
-    const base = `${top1.label}이(가) 전체 소모의 ${pctLabel(top1.pct)}를 차지했어요.`;
+    if (!top1) return t("방전 요인을 계산할 데이터가 없어요.");
+    const base = t("{label}이(가) 전체 소모의 {pct}를 차지했어요.", {
+      label: top1.label,
+      pct: pctLabel(top1.pct),
+    });
     if (top1.key === "sleep") {
-      return `${base} · 평균 수면부채 ${Math.round(avgDebt * 10) / 10}h.`;
+      return t("{base} · 평균 수면부채 {debt}h.", {
+        base,
+        debt: Math.round(avgDebt * 10) / 10,
+      });
     }
     return base;
-  }, [top1, avgDebt]);
+  }, [top1, avgDebt, t]);
 
   return (
     <div className={cn("relative overflow-hidden rounded-apple border border-ios-sep bg-white shadow-apple", className)}>
@@ -121,9 +129,9 @@ export function BatteryThieves({ vitals, periodLabel, className }: { vitals: Dai
       <div className="relative flex items-start justify-between gap-3 px-5 pt-5">
         <div>
           <div className="text-[12px] font-semibold text-ios-sub">Battery Thieves</div>
-          <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-ios-text">에너지 도둑 분석</div>
+          <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-ios-text">{t("에너지 도둑 분석")}</div>
         </div>
-        <div className="text-[12.5px] text-ios-muted">{periodLabel ?? "최근 7일 기준"}</div>
+        <div className="text-[12.5px] text-ios-muted">{periodLabel ?? t("최근 7일 기준")}</div>
       </div>
 
       <div className="relative px-5 pb-5 pt-4">
@@ -150,7 +158,7 @@ export function BatteryThieves({ vitals, periodLabel, className }: { vitals: Dai
           </div>
         </div>
 
-        <div className="mt-4 text-[12.5px] text-ios-muted">팁: 도둑 1~2개만 잡아도 체감 피로가 크게 줄어요.</div>
+        <div className="mt-4 text-[12.5px] text-ios-muted">{t("팁: 도둑 1~2개만 잡아도 체감 피로가 크게 줄어요.")}</div>
       </div>
     </div>
   );

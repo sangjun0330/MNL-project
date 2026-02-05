@@ -5,6 +5,7 @@ import { cn } from "@/lib/cn";
 import type { Shift } from "@/lib/types";
 import type { DailyVital } from "@/lib/vitals";
 import { round1, statusColor, statusFromScore, type VitalStatus, WNL_COLORS } from "@/lib/wnlInsight";
+import { useI18n } from "@/lib/useI18n";
 
 type PhaseItem = {
   title: string;
@@ -35,6 +36,7 @@ export function TimelineForecast({
   vital: DailyVital | null;
   className?: string;
 }) {
+  const { t } = useI18n();
   const displayScore = useMemo(() => {
     if (!vital) return 50;
     return Math.round(Math.min(vital.body.value, vital.mental.ema));
@@ -55,82 +57,82 @@ export function TimelineForecast({
   const mif = vital?.engine?.MIF ?? 1;
 
   const analysisDetail = useMemo(() => {
-    if (!vital) return "입력 데이터가 부족해 기본 회복 루틴으로 안내합니다.";
+    if (!vital) return t("입력 데이터가 부족해 기본 회복 루틴으로 안내합니다.");
     const factors: string[] = [];
-    if (sleepDebt >= 2) factors.push(`수면 부채 ${sleepDebt}h`);
+    if (sleepDebt >= 2) factors.push(t("수면 부채 {hours}h", { hours: sleepDebt }));
     if (sri <= 0.6) factors.push(`SRI ${Math.round(sri * 100)}%`);
     if (csi >= 0.6) factors.push(`CSI ${Math.round(csi * 100)}%`);
     if (cif <= 0.75) factors.push(`CIF ${Math.round(cif * 100)}%`);
-    if (slf >= 0.7) factors.push(`스트레스 ${Math.round(slf * 100)}%`);
-    if (mif <= 0.8) factors.push(`주기 영향 ${Math.round(mif * 100)}%`);
-    if (nightStreak >= 3) factors.push(`야간 연속 ${nightStreak}일`);
+    if (slf >= 0.7) factors.push(t("스트레스 {percent}%", { percent: Math.round(slf * 100) }));
+    if (mif <= 0.8) factors.push(t("주기 영향 {percent}%", { percent: Math.round(mif * 100) }));
+    if (nightStreak >= 3) factors.push(t("야간 연속 {days}일", { days: nightStreak }));
     if (factors.length) return factors.slice(0, 2).join(" · ");
-    return isRestDay ? "근무 없이 회복 루틴을 최적화했어요." : "근무 단계에 맞춰 회복 루틴을 최적화했어요.";
-  }, [cif, csi, isRestDay, mif, nightStreak, sleepDebt, slf, sri, vital]);
+    return isRestDay ? t("근무 없이 회복 루틴을 최적화했어요.") : t("근무 단계에 맞춰 회복 루틴을 최적화했어요.");
+  }, [cif, csi, isRestDay, mif, nightStreak, sleepDebt, slf, sri, vital, t]);
 
   const items = useMemo<PhaseItem[]>(() => {
     if (isRestDay) {
       const restDetail1 =
         sleepDebt >= 2
-          ? `수면 부채 ${sleepDebt}h 해소가 최우선. 90분 단위로 보충하세요.`
-          : "수면 루틴을 유지하고 충분히 쉬어 주세요.";
+          ? t("수면 부채 {hours}h 해소가 최우선. 90분 단위로 보충하세요.", { hours: sleepDebt })
+          : t("수면 루틴을 유지하고 충분히 쉬어 주세요.");
 
       const restDetail2Parts: string[] = [];
-      if (nightStreak >= 3) restDetail2Parts.push("야간 연속으로 리듬이 흔들렸어요.");
-      restDetail2Parts.push("기상/취침 시간을 일정하게 유지하세요.");
-      if (cif <= 0.75) restDetail2Parts.push("카페인 컷오프를 앞당기세요.");
+      if (nightStreak >= 3) restDetail2Parts.push(t("야간 연속으로 리듬이 흔들렸어요."));
+      restDetail2Parts.push(t("기상/취침 시간을 일정하게 유지하세요."));
+      if (cif <= 0.75) restDetail2Parts.push(t("카페인 컷오프를 앞당기세요."));
       const restDetail2 = restDetail2Parts.join(" ");
 
       const restDetail3 =
         displayScore < 30
-          ? "가벼운 스트레칭과 햇빛 산책으로 회복을 돕습니다."
-          : "20~30분 가벼운 활동으로 에너지 순환을 높이세요.";
+          ? t("가벼운 스트레칭과 햇빛 산책으로 회복을 돕습니다.")
+          : t("20~30분 가벼운 활동으로 에너지 순환을 높이세요.");
 
       return [
-        { title: "휴식 중심 회복", detail: restDetail1, icon: "🛌", tone: "mint" },
-        { title: "리듬 유지", detail: restDetail2, icon: "🌿", tone: "yellow" },
-        { title: "가벼운 활동", detail: restDetail3, icon: "🚶‍♀️", tone: "pink" },
+        { title: t("휴식 중심 회복"), detail: restDetail1, icon: "🛌", tone: "mint" },
+        { title: t("리듬 유지"), detail: restDetail2, icon: "🌿", tone: "yellow" },
+        { title: t("가벼운 활동"), detail: restDetail3, icon: "🚶‍♀️", tone: "pink" },
       ];
     }
 
     const preDetailParts: string[] = [];
-    if (displayScore < 30) preDetailParts.push("에너지 보존이 우선입니다.");
-    else if (displayScore < 70) preDetailParts.push("리듬 보정을 시작하세요.");
-    else preDetailParts.push("현재 루틴을 유지하세요.");
-    if (sleepDebt >= 2) preDetailParts.push("20분 파워냅으로 집중력을 보정하세요.");
+    if (displayScore < 30) preDetailParts.push(t("에너지 보존이 우선입니다."));
+    else if (displayScore < 70) preDetailParts.push(t("리듬 보정을 시작하세요."));
+    else preDetailParts.push(t("현재 루틴을 유지하세요."));
+    if (sleepDebt >= 2) preDetailParts.push(t("20분 파워냅으로 집중력을 보정하세요."));
     preDetailParts.push(
       shift === "N"
-        ? "야간 근무 전 밝은 빛 노출과 수분 보충이 도움 됩니다."
-        : "출근 1~2시간 전 가벼운 스트레칭과 수분 보충을 권장합니다."
+        ? t("야간 근무 전 밝은 빛 노출과 수분 보충이 도움 됩니다.")
+        : t("출근 1~2시간 전 가벼운 스트레칭과 수분 보충을 권장합니다.")
     );
     const preDetail = preDetailParts.join(" ");
 
     const duringDetailParts: string[] = [];
-    if (displayScore < 30) duringDetailParts.push("업무를 단순화하고 휴식 시간을 확보하세요.");
-    else duringDetailParts.push("90분마다 3분 리셋으로 피로를 분산하세요.");
+    if (displayScore < 30) duringDetailParts.push(t("업무를 단순화하고 휴식 시간을 확보하세요."));
+    else duringDetailParts.push(t("90분마다 3분 리셋으로 피로를 분산하세요."));
     if (cif <= 0.75) {
-      duringDetailParts.push("카페인은 근무 초반에만.");
+      duringDetailParts.push(t("카페인은 근무 초반에만."));
     } else {
-      duringDetailParts.push("카페인 컷오프는 근무 종료 4시간 전.");
+      duringDetailParts.push(t("카페인 컷오프는 근무 종료 4시간 전."));
     }
     const duringDetail = duringDetailParts.join(" ");
 
     const postDetailParts: string[] = [];
     if (shift === "N") {
-      postDetailParts.push("퇴근 직후 빛 차단 후 90분 내 수면 진입을 목표로.");
+      postDetailParts.push(t("퇴근 직후 빛 차단 후 90분 내 수면 진입을 목표로."));
     } else {
-      postDetailParts.push("퇴근 후 2시간은 저조도/저자극으로 전환.");
+      postDetailParts.push(t("퇴근 후 2시간은 저조도/저자극으로 전환."));
     }
-    if (sleepDebt >= 2) postDetailParts.push("수면 부채 해소를 위해 90분 단위로 보충하세요.");
-    else postDetailParts.push("가벼운 스트레칭으로 회복 모드 전환.");
+    if (sleepDebt >= 2) postDetailParts.push(t("수면 부채 해소를 위해 90분 단위로 보충하세요."));
+    else postDetailParts.push(t("가벼운 스트레칭으로 회복 모드 전환."));
     const postDetail = postDetailParts.join(" ");
 
     return [
-      { title: "출근 전 회복 세팅", detail: preDetail, icon: "⚡️", tone: "mint" },
-      { title: "근무 중 컨디션 유지", detail: duringDetail, icon: "🏥", tone: "yellow" },
-      { title: "퇴근 후 회복 전환", detail: postDetail, icon: "🌙", tone: "pink" },
+      { title: t("출근 전 회복 세팅"), detail: preDetail, icon: "⚡️", tone: "mint" },
+      { title: t("근무 중 컨디션 유지"), detail: duringDetail, icon: "🏥", tone: "yellow" },
+      { title: t("퇴근 후 회복 전환"), detail: postDetail, icon: "🌙", tone: "pink" },
     ];
-  }, [cif, displayScore, isRestDay, nightStreak, shift, sleepDebt]);
+  }, [cif, displayScore, isRestDay, nightStreak, shift, sleepDebt, t]);
 
   const badgeLabel = useMemo(() => {
     if (isRestDay) return shift === "VAC" ? "VA" : "OFF";
@@ -146,7 +148,7 @@ export function TimelineForecast({
       <div className="relative flex items-start justify-between gap-3 px-5 pt-5">
         <div>
           <div className="text-[12px] font-semibold text-ios-sub">Timeline Forecast</div>
-          <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-ios-text">타임라인 예보</div>
+          <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-ios-text">{t("타임라인 예보")}</div>
         </div>
         <div className="text-[12.5px] font-semibold" style={{ color: indicatorColor }}>
           {badgeLabel}
@@ -157,16 +159,16 @@ export function TimelineForecast({
         <div className="rounded-apple border border-ios-sep bg-white/90 p-4">
           <div className="rounded-xl border border-ios-sep bg-white p-3">
             <div className="flex items-center justify-between gap-2">
-              <div className="text-[12px] font-semibold text-ios-sub">알고리즘 분석</div>
+              <div className="text-[12px] font-semibold text-ios-sub">{t("알고리즘 분석")}</div>
               <div className="text-[12px] font-semibold" style={{ color: indicatorColor }}>
-                {focus.label} · {displayScore}%
+                {t(focus.label)} · {displayScore}%
               </div>
             </div>
             <div className="mt-1 text-[14px] font-semibold text-ios-text">
-              {isRestDay ? "휴식일 회복 추천" : "근무 단계별 회복 추천"}
+              {isRestDay ? t("휴식일 회복 추천") : t("근무 단계별 회복 추천")}
             </div>
             <div className="mt-1 text-[12.5px] text-ios-sub">{analysisDetail}</div>
-            <div className="mt-2 text-[12px] text-ios-muted">{focus.hint}</div>
+            <div className="mt-2 text-[12px] text-ios-muted">{t(focus.hint)}</div>
           </div>
 
           <div className="mt-3 space-y-2">
@@ -196,7 +198,7 @@ export function TimelineForecast({
           </div>
         </div>
 
-        <div className="mt-3 text-[12.5px] text-ios-muted">* 추천은 입력 데이터 기반으로 조정됩니다.</div>
+        <div className="mt-3 text-[12.5px] text-ios-muted">{t("* 추천은 입력 데이터 기반으로 조정됩니다.")}</div>
       </div>
     </div>
   );

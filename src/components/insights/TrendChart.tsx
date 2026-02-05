@@ -1,6 +1,7 @@
 "use client";
 
 import type { Shift } from "@/lib/types";
+import { useI18n } from "@/lib/useI18n";
 
 export type TrendPoint = {
   label: string; // e.g. 01/24
@@ -39,6 +40,7 @@ function buildPath(xs: number[], ys: number[]) {
 }
 
 export function TrendChart({ data }: { data: TrendPoint[] }) {
+  const { t } = useI18n();
   const W = 680;
   const H = 220;
   const padX = 14;
@@ -48,7 +50,7 @@ export function TrendChart({ data }: { data: TrendPoint[] }) {
 
   const n = data.length;
   if (n === 0) {
-    return <div className="rounded-2xl border border-ios-sep bg-white p-4 text-[12.5px] text-ios-muted">데이터가 없어요</div>;
+    return <div className="rounded-2xl border border-ios-sep bg-white p-4 text-[12.5px] text-ios-muted">{t("데이터가 없어요")}</div>;
   }
 
   const xs = data.map((_, i) => padX + (n === 1 ? innerW / 2 : (i * innerW) / (n - 1)));
@@ -66,15 +68,15 @@ export function TrendChart({ data }: { data: TrendPoint[] }) {
     <div className="rounded-2xl border border-ios-sep bg-white p-4">
       <div className="flex items-center justify-between">
         <div>
-          <div className="text-[13px] font-semibold">에너지 흐름</div>
-          <div className="mt-1 text-[12.5px] text-ios-muted">배경 색은 근무 유형을 의미해요</div>
+          <div className="text-[13px] font-semibold">{t("에너지 흐름")}</div>
+          <div className="mt-1 text-[12.5px] text-ios-muted">{t("배경 색은 근무 유형을 의미해요")}</div>
         </div>
         <div className="flex items-center gap-3 text-[12px] text-ios-muted">
           <span className="inline-flex items-center gap-1">
-            <span className="inline-block h-2 w-2 rounded-full bg-[#00C7BE]" /> 신체
+            <span className="inline-block h-2 w-2 rounded-full bg-[#00C7BE]" /> {t("신체")}
           </span>
           <span className="inline-flex items-center gap-1">
-            <span className="inline-block h-2 w-2 rounded-full bg-[#FF8A80]" /> 멘탈
+            <span className="inline-block h-2 w-2 rounded-full bg-[#FF8A80]" /> {t("멘탈")}
           </span>
         </div>
       </div>

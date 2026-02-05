@@ -7,12 +7,14 @@ import { TrendChart } from "@/components/insights/TrendChart";
 import { Pill } from "@/components/ui/Pill";
 import { WNL_COLORS, statusFromScore } from "@/lib/wnlInsight";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
+import { useI18n } from "@/lib/useI18n";
 
 function pct(p: number) {
   return `${Math.round(p * 100)}%`;
 }
 
 export function InsightsTrendsDetail() {
+  const { t } = useI18n();
   const { end, avgDisplay, avgBody, avgMental, bestWorst, shiftCounts, trend, top3, recordedDays } = useInsightsData();
 
   const status = statusFromScore(avgDisplay);
@@ -20,9 +22,9 @@ export function InsightsTrendsDetail() {
   if (recordedDays < 7) {
     return (
       <InsightDetailShell
-        title="최근 7일 통계"
+        title={t("최근 7일 통계")}
         subtitle={formatKoreanDate(end)}
-        meta="건강 기록 7일 이상부터 통계가 열립니다."
+        meta={t("건강 기록 7일 이상부터 통계가 열립니다.")}
       >
         <InsightsLockedNotice recordedDays={recordedDays} />
       </InsightDetailShell>
@@ -31,19 +33,19 @@ export function InsightsTrendsDetail() {
 
   return (
     <InsightDetailShell
-      title="최근 7일 통계"
+      title={t("최근 7일 통계")}
       subtitle={formatKoreanDate(end)}
-      meta="최근 7일의 리듬/바이탈 변화와 핵심 요인을 정리했습니다."
+      meta={t("최근 7일의 리듬/바이탈 변화와 핵심 요인을 정리했습니다.")}
     >
       <DetailSummaryCard
         accent="mint"
         label="Stats"
-        title="주간 요약"
+        title={t("주간 요약")}
         metric={avgDisplay}
         metricLabel="Avg Vital"
         summary={(
           <>
-            <span className="font-bold">최근 7일 평균</span> · Vital {avgDisplay}
+            <span className="font-bold">{t("최근 7일 평균")}</span> · Vital {avgDisplay}
           </>
         )}
         detail={`Body ${avgBody} · Mental ${avgMental}`}
@@ -51,8 +53,8 @@ export function InsightsTrendsDetail() {
           <>
             <DetailChip color={DETAIL_ACCENTS.mint}>Body {avgBody}</DetailChip>
             <DetailChip color={DETAIL_ACCENTS.mint}>Mental {avgMental}</DetailChip>
-            <DetailChip color={DETAIL_ACCENTS.mint}>근무 D {shiftCounts.D}</DetailChip>
-            <DetailChip color={DETAIL_ACCENTS.mint}>근무 E {shiftCounts.E}</DetailChip>
+            <DetailChip color={DETAIL_ACCENTS.mint}>{t("근무 D")} {shiftCounts.D}</DetailChip>
+            <DetailChip color={DETAIL_ACCENTS.mint}>{t("근무 E")} {shiftCounts.E}</DetailChip>
           </>
         )}
         valueColor={
@@ -67,7 +69,7 @@ export function InsightsTrendsDetail() {
       <DetailCard className="mt-4">
         <div className="px-5 pt-5">
           <div className="text-[13px] font-semibold text-ios-sub">Top Factors</div>
-          <div className="mt-1 text-[18px] font-bold tracking-[-0.01em] text-ios-text">핵심 요인</div>
+          <div className="mt-1 text-[18px] font-bold tracking-[-0.01em] text-ios-text">{t("핵심 요인")}</div>
         </div>
         <div className="px-5 pb-5 pt-4">
           <div className="flex flex-wrap items-center gap-2">
@@ -109,7 +111,7 @@ export function InsightsTrendsDetail() {
       <DetailCard className="mt-4">
         <div className="px-5 pt-5">
           <div className="text-[13px] font-semibold text-ios-sub">Trend</div>
-          <div className="mt-1 text-[18px] font-bold tracking-[-0.01em] text-ios-text">에너지 흐름</div>
+          <div className="mt-1 text-[18px] font-bold tracking-[-0.01em] text-ios-text">{t("에너지 흐름")}</div>
         </div>
         <div className="px-5 pb-5 pt-4">
           <TrendChart data={trend} />

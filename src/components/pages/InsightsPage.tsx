@@ -221,7 +221,7 @@ export function InsightsPage() {
           href="/insights/recovery"
           accent="mint"
           label="Personalized Recovery"
-          title="맞춤 회복 처방"
+          title={t("맞춤 회복 처방")}
           metric={top1 ? formatPct(top1.pct) : "—"}
           metricLabel={top1 ? top1.label : t("핵심 요인")}
           summary={recoverySummary}
