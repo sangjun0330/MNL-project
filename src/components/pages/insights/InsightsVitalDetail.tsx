@@ -9,7 +9,7 @@ import {
   DETAIL_ACCENTS,
   DETAIL_GRADIENTS,
 } from "@/components/pages/insights/InsightDetailShell";
-import { useInsightsData, shiftKo } from "@/components/insights/useInsightsData";
+import { useInsightsData, shiftKo, isInsightsLocked, INSIGHTS_MIN_DAYS } from "@/components/insights/useInsightsData";
 import { formatKoreanDate } from "@/lib/date";
 import { HeroDashboard } from "@/components/insights/v2/HeroDashboard";
 import { BottomSheet } from "@/components/ui/BottomSheet";
@@ -47,14 +47,14 @@ export function InsightsVitalDetail() {
 
   const vitalColor = useMemo(() => statusColor(statusFromScore(todayDisplay)), [todayDisplay]);
 
-  if (recordedDays < 7) {
+  if (isInsightsLocked(recordedDays)) {
     return (
       <InsightDetailShell
         title="WNL Vital"
         subtitle={formatKoreanDate(end)}
         meta={t("건강 기록 7일 이상부터 바이탈이 열립니다.")}
       >
-        <InsightsLockedNotice recordedDays={recordedDays} />
+        <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />
       </InsightDetailShell>
     );
   }

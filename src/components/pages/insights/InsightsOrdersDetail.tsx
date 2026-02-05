@@ -1,7 +1,7 @@
 "use client";
 
 import { InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
-import { useInsightsData, shiftKo } from "@/components/insights/useInsightsData";
+import { useInsightsData, shiftKo, isInsightsLocked, INSIGHTS_MIN_DAYS } from "@/components/insights/useInsightsData";
 import { formatKoreanDate } from "@/lib/date";
 import { OrdersDetailBlocks } from "@/components/insights/OrdersDetailBlocks";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
@@ -11,14 +11,14 @@ export function InsightsOrdersDetail() {
   const { t } = useI18n();
   const { state, end, todayShift, ordersSummary, hasTodayShift, recordedDays } = useInsightsData();
 
-  if (recordedDays < 7) {
+  if (isInsightsLocked(recordedDays)) {
     return (
       <InsightDetailShell
         title={t("오늘 오더")}
         subtitle={formatKoreanDate(end)}
         meta={t("건강 기록 7일 이상부터 오더가 열립니다.")}
       >
-        <InsightsLockedNotice recordedDays={recordedDays} />
+        <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />
       </InsightDetailShell>
     );
   }

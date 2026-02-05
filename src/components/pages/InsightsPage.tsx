@@ -4,7 +4,7 @@ import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { formatKoreanDate } from "@/lib/date";
 import { statusColor, statusLabel } from "@/lib/wnlInsight";
-import { useInsightsData, shiftKo } from "@/components/insights/useInsightsData";
+import { useInsightsData, shiftKo, isInsightsLocked, INSIGHTS_MIN_DAYS } from "@/components/insights/useInsightsData";
 import { HeroDashboard } from "@/components/insights/v2/HeroDashboard";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { useI18n } from "@/lib/useI18n";
@@ -141,7 +141,7 @@ export function InsightsPage() {
   } = useInsightsData();
   const isRestDay = todayShift === "OFF" || todayShift === "VAC";
 
-  if (recordedDays < 7) {
+  if (isInsightsLocked(recordedDays)) {
     return (
       <div className="mx-auto w-full max-w-[920px] px-4 pb-24 pt-6 sm:px-6">
         <div className="mb-4">
@@ -149,7 +149,7 @@ export function InsightsPage() {
           <div className="mt-1 text-[13px] text-ios-sub">{t("맞춤 회복 중심 인사이트")}</div>
         </div>
 
-        <InsightsLockedNotice recordedDays={recordedDays} />
+        <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />
       </div>
     );
   }
