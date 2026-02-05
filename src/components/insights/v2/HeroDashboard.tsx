@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { cn } from "@/lib/cn";
 import type { DailyVital } from "@/lib/vitals";
 import { statusColor, statusCopy, statusFromScore, statusLabel, vitalDisplayScore } from "@/lib/wnlInsight";
+import { useI18n } from "@/lib/useI18n";
 
 function clamp(n: number, min: number, max: number) {
   const v = Number.isFinite(n) ? n : min;
@@ -49,6 +50,7 @@ export function HeroDashboard({
   fastCharge?: boolean;
   className?: string;
 }) {
+  const { t } = useI18n();
   const displayScore = useMemo(() => {
     return vitalDisplayScore(vital);
   }, [vital]);
@@ -88,7 +90,7 @@ export function HeroDashboard({
               {fastCharge ? (
                 <div className="mb-2 rounded-full border border-ios-sep bg-white px-2.5 py-1 text-[12px] font-semibold">
                   <span className="mr-1">⚡️</span>
-                  급속 회복
+                  {t("급속 회복")}
                 </div>
               ) : null}
             </div>
