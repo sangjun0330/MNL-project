@@ -1,7 +1,7 @@
 "use client";
 
 import { InsightDetailShell, DetailSummaryCard, DetailCard, DetailChip, DETAIL_ACCENTS } from "@/components/pages/insights/InsightDetailShell";
-import { useInsightsData, fmtMD, shiftKo } from "@/components/insights/useInsightsData";
+import { useInsightsData, fmtMD, shiftKo, isInsightsLocked, INSIGHTS_MIN_DAYS } from "@/components/insights/useInsightsData";
 import { formatKoreanDate } from "@/lib/date";
 import { TrendChart } from "@/components/insights/TrendChart";
 import { Pill } from "@/components/ui/Pill";
@@ -19,14 +19,14 @@ export function InsightsTrendsDetail() {
 
   const status = statusFromScore(avgDisplay);
 
-  if (recordedDays < 7) {
+  if (isInsightsLocked(recordedDays)) {
     return (
       <InsightDetailShell
         title={t("최근 7일 통계")}
         subtitle={formatKoreanDate(end)}
         meta={t("건강 기록 7일 이상부터 통계가 열립니다.")}
       >
-        <InsightsLockedNotice recordedDays={recordedDays} />
+        <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />
       </InsightDetailShell>
     );
   }

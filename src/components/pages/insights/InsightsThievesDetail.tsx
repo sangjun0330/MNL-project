@@ -1,7 +1,7 @@
 "use client";
 
 import { InsightDetailShell, DetailSummaryCard, DetailChip, DETAIL_ACCENTS } from "@/components/pages/insights/InsightDetailShell";
-import { useInsightsData } from "@/components/insights/useInsightsData";
+import { useInsightsData, isInsightsLocked, INSIGHTS_MIN_DAYS } from "@/components/insights/useInsightsData";
 import { formatKoreanDate } from "@/lib/date";
 import { BatteryThieves } from "@/components/insights/v2/BatteryThieves";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
@@ -15,14 +15,14 @@ export function InsightsThievesDetail() {
   const { t } = useI18n();
   const { end, vitals, top1, recordedDays } = useInsightsData();
 
-  if (recordedDays < 7) {
+  if (isInsightsLocked(recordedDays)) {
     return (
       <InsightDetailShell
         title={t("에너지 도둑")}
         subtitle={formatKoreanDate(end)}
         meta={t("건강 기록 7일 이상부터 분석이 열립니다.")}
       >
-        <InsightsLockedNotice recordedDays={recordedDays} />
+        <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />
       </InsightDetailShell>
     );
   }

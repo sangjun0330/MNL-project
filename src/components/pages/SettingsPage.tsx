@@ -53,18 +53,6 @@ export function SettingsPage() {
           <div className="mt-2 text-[12.5px] text-ios-sub">{t("로그인과 계정 관리를 설정합니다.")}</div>
         </Link>
       </div>
-
-      <div className="mt-6 rounded-2xl border border-ios-sep bg-white p-4 text-[12.5px] text-ios-sub">
-        <div className="mb-2 flex items-center gap-2 font-semibold text-ios-text">
-          <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10" />
-            <path d="M12 8v4" />
-            <path d="M12 16h.01" />
-          </svg>
-          {t("언어")}
-        </div>
-        {t("영어로 바꾸면 상세 설명, 기록 칸, 팝업 문구까지 영어로 표시됩니다.")}
-      </div>
     </div>
   );
 }

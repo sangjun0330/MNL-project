@@ -2,7 +2,7 @@
 
 import { InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
 import { OrdersDetailBlocks } from "@/components/insights/OrdersDetailBlocks";
-import { useInsightsData, shiftKo } from "@/components/insights/useInsightsData";
+import { useInsightsData, shiftKo, isInsightsLocked, INSIGHTS_MIN_DAYS } from "@/components/insights/useInsightsData";
 import { formatKoreanDate } from "@/lib/date";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { useI18n } from "@/lib/useI18n";
@@ -11,7 +11,7 @@ export function InsightsRecoveryOrdersDetail() {
   const { t } = useI18n();
   const { state, end, todayShift, ordersSummary, hasTodayShift, recordedDays } = useInsightsData();
 
-  if (recordedDays < 7) {
+  if (isInsightsLocked(recordedDays)) {
     return (
       <InsightDetailShell
         title={t("오늘 오더")}
@@ -19,7 +19,7 @@ export function InsightsRecoveryOrdersDetail() {
         meta={t("건강 기록 7일 이상부터 오더가 열립니다.")}
         backHref="/insights/recovery"
       >
-        <InsightsLockedNotice recordedDays={recordedDays} />
+        <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />
       </InsightDetailShell>
     );
   }

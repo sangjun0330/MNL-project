@@ -7,7 +7,7 @@ import {
   DETAIL_ACCENTS,
   DETAIL_GRADIENTS,
 } from "@/components/pages/insights/InsightDetailShell";
-import { useInsightsData, shiftKo } from "@/components/insights/useInsightsData";
+import { useInsightsData, shiftKo, isInsightsLocked, INSIGHTS_MIN_DAYS } from "@/components/insights/useInsightsData";
 import { formatKoreanDate } from "@/lib/date";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { useI18n } from "@/lib/useI18n";
@@ -20,14 +20,14 @@ export function InsightsRecoveryDetail() {
   const { t } = useI18n();
   const { end, top1, top3, syncLabel, todayShift, ordersSummary, hasTodayShift, recordedDays } = useInsightsData();
 
-  if (recordedDays < 7) {
+  if (isInsightsLocked(recordedDays)) {
     return (
       <InsightDetailShell
         title={t("맞춤 회복 처방")}
         subtitle={formatKoreanDate(end)}
         meta={t("건강 기록 7일 이상부터 회복 처방이 열립니다.")}
       >
-        <InsightsLockedNotice recordedDays={recordedDays} />
+        <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />
       </InsightDetailShell>
     );
   }

@@ -18,6 +18,14 @@ type OrdersSummary = {
   items: { key: OrderKey; title: string }[];
 };
 
+export const INSIGHTS_MIN_DAYS = 7;
+// Toggle back to true when you want to re-enable the 7-day insights lock.
+export const INSIGHTS_LOCK_ENABLED = false;
+
+export function isInsightsLocked(recordedDays: number) {
+  return INSIGHTS_LOCK_ENABLED && recordedDays < INSIGHTS_MIN_DAYS;
+}
+
 export function shiftKo(shift: Shift) {
   switch (shift) {
     case "D":
