@@ -5,7 +5,7 @@ import { BottomNav } from "@/components/shell/BottomNav";
 import { AutoHealthLogger } from "@/components/system/AutoHealthLogger";
 import { CloudStateSync } from "@/components/system/CloudStateSync";
 import { useAuthState } from "@/lib/auth";
-import { purgeAllLocalStateIfNeeded, setLocalSaveEnabled, setStorageScope } from "@/lib/store";
+import { setLocalSaveEnabled, setStorageScope } from "@/lib/store";
 import type { SyntheticEvent } from "react";
 import { useCallback, useEffect, useState } from "react";
 
@@ -24,15 +24,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [router, pathname]);
 
   useEffect(() => {
-    // ✅ 로컬 저장은 기본 활성 (로그인 여부와 무관하게 기록 유지)
-    setLocalSaveEnabled(true);
-    purgeAllLocalStateIfNeeded();
+    // ✅ 로컬 저장 비활성: Supabase만 사용
+    setLocalSaveEnabled(false);
   }, []);
 
   useEffect(() => {
     if (status === "loading") return;
     const uid = auth?.userId ?? null;
-    setLocalSaveEnabled(true);
+    setLocalSaveEnabled(false);
     setStorageScope(uid ?? null);
   }, [auth?.userId, status]);
 
