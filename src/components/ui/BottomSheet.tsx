@@ -177,6 +177,7 @@ export function BottomSheet({
             ? "bg-black/45 backdrop-blur-[10px]"
             : "bg-black/35 backdrop-blur-[6px]",
           "transition-opacity duration-[520ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+          "wnl-backdrop",
           visible ? "opacity-100" : "opacity-0"
         )}
         onClick={closeWithAnimation}
