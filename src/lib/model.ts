@@ -76,6 +76,9 @@ export type AppSettings = {
 
   // v2.0 personalization
   profile?: ProfileSettings;
+  // UI preferences
+  theme?: "light" | "dark";
+  language?: "ko" | "en";
 };
 
 export type AppState = {
@@ -138,6 +141,8 @@ export function defaultSettings(): AppSettings {
       chronotype: 0.5,
       caffeineSensitivity: 1.0,
     },
+    theme: "light",
+    language: "ko",
   };
 }
 

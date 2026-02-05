@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import type { ReactElement, SVGProps } from "react";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { cn } from "@/lib/cn";
+import { useI18n } from "@/lib/useI18n";
 
 type NavItem = {
   href: string;
@@ -54,6 +55,7 @@ export function BottomNav() {
   const [hide, setHide] = useState(false);
   const [pendingHref, setPendingHref] = useState<string | null>(null);
   const [, startTransition] = useTransition();
+  const { t } = useI18n();
 
   useEffect(() => {
     if (typeof document !== "undefined") {
@@ -134,7 +136,7 @@ export function BottomNav() {
                     aria-current={active ? "page" : undefined}
                   >
                     <Icon className="wnl-nav-icon" aria-hidden="true" focusable="false" />
-                    <span className="wnl-nav-label">{it.label}</span>
+                    <span className="wnl-nav-label">{t(it.label)}</span>
                   </Link>
                 );
               })}

@@ -88,6 +88,8 @@ function normalizeSettings(raw: any): AppSettings {
         Math.min(1.5, Number((loaded?.profile ?? {}).caffeineSensitivity ?? base.profile?.caffeineSensitivity ?? 1.0))
       ),
     },
+    theme: loaded?.theme === "dark" ? "dark" : "light",
+    language: loaded?.language === "en" ? "en" : "ko",
   };
 }
 

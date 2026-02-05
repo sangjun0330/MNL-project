@@ -13,20 +13,8 @@ import { Input } from "@/components/ui/Input";
 import { Segmented } from "@/components/ui/Segmented";
 import { Textarea } from "@/components/ui/Textarea";
 import { cn } from "@/lib/cn";
+import { useI18n } from "@/lib/useI18n";
 
-const stressOptions = [
-  { value: "0", label: "낮음" },
-  { value: "1", label: "보통" },
-  { value: "2", label: "높음" },
-  { value: "3", label: "매우" },
-] as const;
-
-const activityOptions = [
-  { value: "0", label: "가벼움" },
-  { value: "1", label: "보통" },
-  { value: "2", label: "많음" },
-  { value: "3", label: "빡셈" },
-] as const;
 
 function clamp(n: number, min: number, max: number) {
   const v = Number.isFinite(n) ? n : min;
@@ -54,6 +42,7 @@ export function ScheduleRecordSheet({
   onClose: () => void;
   iso: ISODate;
 }) {
+  const { t } = useI18n();
   const store = useAppStore();
   const storeRef = useRef(store);
   const menstrualEnabled = Boolean(store.settings.menstrual?.enabled);
@@ -90,6 +79,26 @@ export function ScheduleRecordSheet({
   const skipCaffeineSync = useRef(true);
   const napDebounce = useRef<any>(null);
   const skipNapSync = useRef(true);
+
+  const stressOptions = useMemo(
+    () => [
+      { value: "0", label: t("낮음") },
+      { value: "1", label: t("보통") },
+      { value: "2", label: t("높음") },
+      { value: "3", label: t("매우") },
+    ],
+    [t]
+  );
+
+  const activityOptions = useMemo(
+    () => [
+      { value: "0", label: t("가벼움") },
+      { value: "1", label: t("보통") },
+      { value: "2", label: t("많음") },
+      { value: "3", label: t("빡셈") },
+    ],
+    [t]
+  );
 
   const dateLabel = useMemo(() => formatKoreanDate(iso), [iso]);
   const canEditHealth = useMemo(() => {
@@ -330,7 +339,8 @@ export function ScheduleRecordSheet({
     markSaved();
   };
 
-  const savedLabel = saveState === "saving" ? "저장 중…" : saveState === "saved" ? "저장됨 ✓" : "";
+  const savedLabel =
+    saveState === "saving" ? t("저장 중…") : saveState === "saved" ? t("저장됨 ✓") : "";
 
   const handleClose = () => {
     if (noteDebounce.current) {
@@ -355,7 +365,7 @@ export function ScheduleRecordSheet({
     <BottomSheet
       open={open}
       onClose={handleClose}
-      title="기록"
+      title={t("기록")}
       subtitle={dateLabel}
       variant="appstore"
       maxHeightClassName="max-h-[82dvh]"
@@ -364,7 +374,9 @@ export function ScheduleRecordSheet({
         {/* 상단 안내 + 저장 상태 */}
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 text-[12.5px] text-ios-muted break-words">
-            {canEditHealth ? "입력할수록 내 패턴에 맞게 더 정확해져요." : "건강 기록은 오늘과 전날만 입력할 수 있어요."}
+            {canEditHealth
+              ? t("입력할수록 내 패턴에 맞게 더 정확해져요.")
+              : t("건강 기록은 오늘과 전날만 입력할 수 있어요.")}
           </div>
           {savedLabel ? (
             <div className="shrink-0 rounded-full border border-ios-sep bg-white px-2 py-1 text-[11px] font-semibold text-ios-muted">
@@ -376,7 +388,7 @@ export function ScheduleRecordSheet({
         {/* 근무 */}
         <div className="rounded-2xl border border-ios-sep bg-white p-4">
           <div className="mb-3 flex items-center justify-between gap-3">
-            <div className="min-w-0 text-[13px] font-semibold">근무</div>
+            <div className="min-w-0 text-[13px] font-semibold">{t("근무")}</div>
             <div className={cn("shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold", shiftColor(shift))}>
               {shift === "VAC" ? "VA" : shift}
             </div>
@@ -396,13 +408,15 @@ export function ScheduleRecordSheet({
                   )}
                 >
                   <div className="text-[12px] font-semibold">{shortLabel}</div>
-                  <div className={cn("mt-0.5 text-[10.5px] font-semibold", active ? "text-white/80" : "text-ios-muted")}>{s.hint}</div>
+                  <div className={cn("mt-0.5 text-[10.5px] font-semibold", active ? "text-white/80" : "text-ios-muted")}>
+                    {t(s.hint)}
+                  </div>
                 </button>
               );
             })}
           </div>
           <div className="mt-3">
-            <div className="mb-2 text-[12px] font-semibold text-ios-muted">근무 이름 (직접 입력)</div>
+            <div className="mb-2 text-[12px] font-semibold text-ios-muted">{t("근무 이름 (직접 입력)")}</div>
             <Input
               value={shiftNameText}
               onChange={(e) => {
@@ -413,7 +427,7 @@ export function ScheduleRecordSheet({
               onBlur={(e) => {
                 if (!e.target.value.trim()) setCustomShiftMode(false);
               }}
-              placeholder="예: 특근, 교육, 회의"
+              placeholder={t("예: 특근, 교육, 회의")}
               className="w-full"
             />
           </div>
@@ -423,15 +437,17 @@ export function ScheduleRecordSheet({
         {canEditHealth ? (
           <div className="rounded-2xl border border-ios-sep bg-white p-4">
             <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0 text-[13px] font-semibold">필수 기록</div>
-              <div className="shrink-0 text-[11px] font-semibold text-ios-muted">수면 · 스트레스 · 카페인 · 기분</div>
+              <div className="min-w-0 text-[13px] font-semibold">{t("필수 기록")}</div>
+              <div className="shrink-0 text-[11px] font-semibold text-ios-muted">
+                {t("수면 · 스트레스 · 카페인 · 기분")}
+              </div>
             </div>
 
             {/* 수면 */}
             <div className="mt-4 rounded-2xl border border-ios-sep bg-ios-bg p-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-[12px] font-semibold text-ios-muted">수면 시간</div>
+                  <div className="text-[12px] font-semibold text-ios-muted">{t("수면 시간")}</div>
                   <div className="mt-1 text-[16px] font-semibold">{sleepText.trim() === "" ? "—" : `${sleepText}h`}</div>
                 </div>
                 <div className="flex shrink-0 gap-2">
@@ -469,14 +485,14 @@ export function ScheduleRecordSheet({
                   value={sleepText}
                   onChange={(e) => setSleepText(e.target.value)}
                   onBlur={() => saveSleepNow(sleepText)}
-                  placeholder="예: 6.5"
+                  placeholder={t("예: 6.5")}
                 />
               </div>
             </div>
 
             {/* 스트레스 */}
             <div className="mt-4">
-              <div className="mb-2 text-[12px] font-semibold text-ios-muted">스트레스</div>
+              <div className="mb-2 text-[12px] font-semibold text-ios-muted">{t("스트레스")}</div>
               <Segmented value={String(stress) as any} options={stressOptions as any} onChange={setStressQuick} />
             </div>
 
@@ -484,10 +500,10 @@ export function ScheduleRecordSheet({
             <div className="mt-4 rounded-2xl border border-ios-sep bg-ios-bg p-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-[12px] font-semibold text-ios-muted">카페인</div>
+                  <div className="text-[12px] font-semibold text-ios-muted">{t("카페인")}</div>
                   <div className="mt-1 text-[16px] font-semibold">{caffeineText.trim() === "" ? "—" : `${caffeineText}mg`}</div>
                 </div>
-                <div className="shrink-0 text-[11px] font-semibold text-ios-muted">대략 1잔 ≈ 120mg</div>
+                <div className="shrink-0 text-[11px] font-semibold text-ios-muted">{t("대략 1잔 ≈ 120mg")}</div>
               </div>
 
               <div className="mt-3 flex flex-wrap gap-2">
@@ -504,7 +520,7 @@ export function ScheduleRecordSheet({
                         active ? "border-black bg-black text-white" : "border-ios-sep bg-white"
                       )}
                     >
-                      {cups === 0 ? "0" : `${cups}잔`}
+                      {cups === 0 ? "0" : t("{count}잔", { count: cups })}
                     </button>
                   );
                 })}
@@ -516,7 +532,7 @@ export function ScheduleRecordSheet({
                   value={caffeineText}
                   onChange={(e) => setCaffeineText(e.target.value)}
                   onBlur={() => saveCaffeineNow(caffeineText)}
-                  placeholder="mg 직접 입력(예: 150)"
+                  placeholder={t("mg 직접 입력(예: 150)")}
                 />
               </div>
             </div>
@@ -524,7 +540,7 @@ export function ScheduleRecordSheet({
             {/* 기분 */}
             <div className="mt-4">
               <div className="mb-2 flex items-center justify-between gap-3">
-                <div className="min-w-0 text-[12px] font-semibold text-ios-muted">기분</div>
+                <div className="min-w-0 text-[12px] font-semibold text-ios-muted">{t("기분")}</div>
                 <div className="shrink-0 text-[12px] font-semibold">
                   {moodEmoji(mood)} {mood}/5
                 </div>
@@ -552,15 +568,20 @@ export function ScheduleRecordSheet({
           </div>
         ) : (
           <div className="rounded-2xl border border-ios-sep bg-white p-4 text-[12.5px] text-ios-muted">
-            건강 기록은 오늘/전날만 입력할 수 있어요. 다른 날짜는 근무/메모만 가능합니다.
+            {t("건강 기록은 오늘/전날만 입력할 수 있어요. 다른 날짜는 근무/메모만 가능합니다.")}
           </div>
         )}
 
         {/* 메모 */}
         <div className="rounded-2xl border border-ios-sep bg-white p-4">
-          <div className="text-[13px] font-semibold">메모(선택)</div>
+          <div className="text-[13px] font-semibold">{t("메모(선택)")}</div>
           <div className="mt-2">
-            <Textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="예: 컨퍼런스 / OT / 오늘 있었던 일" rows={2} />
+            <Textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder={t("예: 컨퍼런스 / OT / 오늘 있었던 일")}
+              rows={2}
+            />
           </div>
         </div>
 
@@ -569,8 +590,11 @@ export function ScheduleRecordSheet({
           <div className="rounded-2xl border border-ios-sep bg-white p-4">
             <button type="button" onClick={() => setShowMore((v) => !v)} className="flex w-full items-center justify-between">
               <div className="min-w-0">
-                <div className="text-[13px] font-semibold">추가 기록</div>
-                <div className="mt-0.5 text-[12.5px] text-ios-muted">낮잠 · 활동량{menstrualEnabled ? " · 생리 증상" : ""}</div>
+                <div className="text-[13px] font-semibold">{t("추가 기록")}</div>
+                <div className="mt-0.5 text-[12.5px] text-ios-muted">
+                  {t("낮잠 · 활동량")}
+                  {menstrualEnabled ? ` · ${t("생리 증상")}` : ""}
+                </div>
               </div>
               <div className="shrink-0 text-[14px] font-semibold">{showMore ? "▲" : "▼"}</div>
             </button>
@@ -579,7 +603,7 @@ export function ScheduleRecordSheet({
               <div className="mt-4 space-y-4">
                 {/* 활동량 */}
                 <div>
-                  <div className="mb-2 text-[12px] font-semibold text-ios-muted">낮잠 시간</div>
+                  <div className="mb-2 text-[12px] font-semibold text-ios-muted">{t("낮잠 시간")}</div>
                   <div className="flex flex-wrap gap-2">
                     {[0, 0.5, 1, 1.5, 2, 3, 4].map((h) => {
                       const active = Number(napText) === h;
@@ -604,14 +628,14 @@ export function ScheduleRecordSheet({
                       value={napText}
                       onChange={(e) => setNapText(e.target.value)}
                       onBlur={() => saveNapNow(napText)}
-                      placeholder="낮잠 시간 입력(예: 0.5)"
+                      placeholder={t("낮잠 시간 입력(예: 0.5)")}
                     />
                   </div>
                 </div>
 
                 {/* 활동량 */}
                 <div>
-                  <div className="mb-2 text-[12px] font-semibold text-ios-muted">활동량</div>
+                  <div className="mb-2 text-[12px] font-semibold text-ios-muted">{t("활동량")}</div>
                   <Segmented value={String(activity) as any} options={activityOptions as any} onChange={setActivityQuick} />
                 </div>
 
@@ -619,8 +643,8 @@ export function ScheduleRecordSheet({
                 {menstrualEnabled ? (
                   <div>
                     <div className="mb-2 flex items-center justify-between">
-                      <div className="text-[12px] font-semibold text-ios-muted">생리 증상 강도</div>
-                      <div className="text-[11px] font-semibold text-ios-muted">불규칙해도 매일 기록 가능</div>
+                      <div className="text-[12px] font-semibold text-ios-muted">{t("생리 증상 강도")}</div>
+                      <div className="text-[11px] font-semibold text-ios-muted">{t("불규칙해도 매일 기록 가능")}</div>
                     </div>
                     <div className="grid grid-cols-4 gap-2">
                       {([0, 1, 2, 3] as const).map((v) => {
@@ -635,7 +659,7 @@ export function ScheduleRecordSheet({
                               active ? "border-black bg-black text-white" : "border-ios-sep bg-white"
                             )}
                           >
-                            <div className="text-[12px] font-semibold">{v === 0 ? "없음" : v}</div>
+                            <div className="text-[12px] font-semibold">{v === 0 ? t("없음") : v}</div>
                           </button>
                         );
                       })}

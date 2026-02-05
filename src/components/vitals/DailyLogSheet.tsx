@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/Input";
 import { Segmented } from "@/components/ui/Segmented";
 import { Textarea } from "@/components/ui/Textarea";
 import { cn } from "@/lib/cn";
+import { useI18n } from "@/lib/useI18n";
 
 const stressOptions = [
   { value: "0", label: "낮음" },
@@ -82,12 +83,24 @@ export function DailyLogSheet({
   iso: ISODate;
 }) {
   const store = useAppStore();
+  const { t } = useI18n();
 
   const presets = useMemo(() => {
     const pos = store.settings.emotionTagsPositive ?? [];
     const neg = store.settings.emotionTagsNegative ?? [];
     return { pos, neg };
   }, [store.settings.emotionTagsPositive, store.settings.emotionTagsNegative]);
+
+  const stressOptionsT = useMemo(() => stressOptions.map((o) => ({ ...o, label: t(o.label) })), [t]);
+  const activityOptionsT = useMemo(() => activityOptions.map((o) => ({ ...o, label: t(o.label) })), [t]);
+  const sleepQualityOptionsT = useMemo(() => sleepQualityOptions.map((o) => ({ ...o, label: t(o.label) })), [t]);
+  const sleepTimingOptionsT = useMemo(() => sleepTimingOptions.map((o) => ({ ...o, label: t(o.label) })), [t]);
+  const symptomOptionsT = useMemo(() => symptomOptions.map((o) => ({ ...o, label: t(o.label) })), [t]);
+  const menstrualStatusOptionsT = useMemo(
+    () => menstrualStatusOptions.map((o) => ({ ...o, label: o.label === "PMS" ? "PMS" : t(o.label) })),
+    [t]
+  );
+  const menstrualFlowOptionsT = useMemo(() => menstrualFlowOptions.map((o) => ({ ...o, label: t(o.label) })), [t]);
 
   const curShift: Shift = store.schedule[iso] ?? "OFF";
   const curNote = store.notes[iso] ?? "";
@@ -235,18 +248,18 @@ export function DailyLogSheet({
     <BottomSheet
       open={open}
       onClose={onClose}
-      title="오늘 기록"
+      title={t("오늘 기록")}
       subtitle={`${dateLabel}`}
       footer={(
         <div className="flex gap-2">
           <Button onClick={saveAll} className="flex-1">
-            저장
+            {t("저장")}
           </Button>
           <Button variant="ghost" onClick={onClose}>
-            닫기
+            {t("닫기")}
           </Button>
           <Button variant="danger" onClick={clearAll}>
-            초기화
+            {t("초기화")}
           </Button>
         </div>
       )}
@@ -255,7 +268,7 @@ export function DailyLogSheet({
         <div className="space-y-5 pb-6">
         {/* Shift */}
         <div className="rounded-2xl border border-ios-sep bg-white p-4">
-          <div className="text-[13px] font-semibold">근무</div>
+          <div className="text-[13px] font-semibold">{t("근무")}</div>
           <div className="mt-3 grid grid-cols-3 gap-2">
             {SHIFT_LABELS.map((s) => {
               const active = shift === s.id;
@@ -271,7 +284,7 @@ export function DailyLogSheet({
                 >
                   <div className="text-[13px] font-semibold">{shortLabel}</div>
                   <div className={cn("mt-0.5 inline-flex rounded-full border px-2 py-0.5 text-[11px]", active ? "border-white/25" : shiftColor(s.id))}>
-                    {s.hint}
+                    {t(s.hint)}
                   </div>
                 </button>
               );
@@ -281,11 +294,11 @@ export function DailyLogSheet({
 
         {/* Memo */}
         <div className="rounded-2xl border border-ios-sep bg-white p-4">
-          <div className="text-[13px] font-semibold">메모</div>
+          <div className="text-[13px] font-semibold">{t("메모")}</div>
           <div className="mt-2">
-            <Textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="예: 컨퍼런스 / OT / 무슨 일이 있었는지" rows={3} />
+            <Textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder={t("예: 컨퍼런스 / OT / 무슨 일이 있었는지")} rows={3} />
           </div>
-          <div className="mt-2 text-[12px] text-ios-muted">캘린더에는 첫 줄만 깔끔하게 표시돼.</div>
+          <div className="mt-2 text-[12px] text-ios-muted">{t("캘린더에는 첫 줄만 깔끔하게 표시돼.")}</div>
         </div>
 
         {/* Bio */}

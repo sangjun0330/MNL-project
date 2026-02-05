@@ -1,4 +1,5 @@
 // src/lib/date.ts
+import { getCurrentLanguage } from "@/lib/i18n";
 export type ISODate = `${number}-${string}-${string}`;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -95,13 +96,31 @@ export function endOfWeekSunday(d: Date): Date {
 }
 
 export function formatMonthTitle(d: Date): string {
+  const lang = getCurrentLanguage();
+  if (lang === "en") {
+    return new Intl.DateTimeFormat("en-US", {
+      year: "numeric",
+      month: "long",
+      timeZone: "UTC",
+    }).format(d);
+  }
   const y = d.getUTCFullYear();
   const m = d.getUTCMonth() + 1;
   return `${y}년 ${m}월`;
 }
 
 export function formatKoreanDate(iso: ISODate): string {
+  const lang = getCurrentLanguage();
   const [y, m, d] = iso.split("-");
+  if (lang === "en") {
+    const date = new Date(Date.UTC(Number(y), Number(m) - 1, Number(d), 12, 0, 0, 0));
+    return new Intl.DateTimeFormat("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+      timeZone: "UTC",
+    }).format(date);
+  }
   return `${y}. ${m}. ${d}.`;
 }
 

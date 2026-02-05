@@ -3,10 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore } from "@/lib/store";
 import type { ISODate } from "@/lib/date";
-import { todayISO, fromISODate, toISODate, addDays, addMonths, startOfMonth } from "@/lib/date";
+import { todayISO, fromISODate, toISODate, addDays, addMonths, startOfMonth, formatMonthTitle, formatKoreanDate } from "@/lib/date";
 
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { useI18n } from "@/lib/useI18n";
 
 type MenstrualDraft = {
   enabled: boolean;
@@ -27,17 +28,10 @@ function parseIntOrNaN(s: string) {
   return Number.isFinite(n) ? Math.trunc(n) : Number.NaN;
 }
 
-function prettyKorean(iso: ISODate) {
-  const [y, m, d] = iso.split("-");
-  const mm = String(Number(m));
-  const dd = String(Number(d));
-  return `${y}. ${mm}. ${dd}.`;
-}
-
-const weekdays = ["일", "월", "화", "수", "목", "금", "토"];
-
 export function MenstrualSettingsForm() {
   const store = useAppStore();
+  const { t } = useI18n();
+  const weekdays = useMemo(() => [t("일"), t("월"), t("화"), t("수"), t("목"), t("금"), t("토")], [t]);
 
   // =========================
   // ✅ 생리주기: "적용" 방식 (draft -> apply)
@@ -158,11 +152,7 @@ export function MenstrualSettingsForm() {
     setViewMonth(startOfMonth(base));
   }, [draft.lastPeriodStart]);
 
-  const monthTitle = useMemo(() => {
-    const y = viewMonth.getUTCFullYear();
-    const m = viewMonth.getUTCMonth() + 1;
-    return `${y}년 ${m}월`;
-  }, [viewMonth]);
+  const monthTitle = useMemo(() => formatMonthTitle(viewMonth), [viewMonth]);
 
   const calendarGrid = useMemo(() => {
     const start = startOfMonth(viewMonth);
@@ -183,14 +173,14 @@ export function MenstrualSettingsForm() {
 
   return (
     <>
-      <div className="text-[16px] font-bold">생리주기</div>
+      <div className="text-[16px] font-bold">{t("생리주기")}</div>
       <div className="mt-1 text-[12.5px] text-ios-muted">
-        시작일과 평균 주기/기간을 기준으로 캘린더에 자동 표시돼요.
+        {t("시작일과 평균 주기/기간을 기준으로 캘린더에 자동 표시돼요.")}
       </div>
 
       <div className="mt-4 space-y-4 rounded-2xl border border-ios-sep bg-white p-4">
         <div className="flex items-center justify-between">
-          <div className="text-[14px] font-semibold">사용</div>
+          <div className="text-[14px] font-semibold">{t("사용")}</div>
           <Button
             variant={draft.enabled ? "primary" : "secondary"}
             onClick={() => setDraft((d) => ({ ...d, enabled: !d.enabled }))}
@@ -202,7 +192,7 @@ export function MenstrualSettingsForm() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {/* ✅ 시작일: 모바일=네이티브 date, PC=커스텀 캘린더 */}
           <div className="min-w-0">
-            <div className="mb-2 text-[13px] font-semibold">마지막 생리 시작일</div>
+            <div className="mb-2 text-[13px] font-semibold">{t("마지막 생리 시작일")}</div>
 
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative" style={{ width: "fit-content", minWidth: 150 }}>
@@ -215,7 +205,7 @@ export function MenstrualSettingsForm() {
                   }}
                   className="flex h-12 items-center rounded-2xl border border-ios-sep bg-white px-4 text-[14px] font-semibold"
                 >
-                  {draft.lastPeriodStart ? prettyKorean(draft.lastPeriodStart) : "날짜 선택"}
+                  {draft.lastPeriodStart ? formatKoreanDate(draft.lastPeriodStart) : t("날짜 선택")}
                 </button>
 
                 {/* 모바일/터치: 네이티브 date picker */}
@@ -225,7 +215,7 @@ export function MenstrualSettingsForm() {
                     value={draft.lastPeriodStart ?? ""}
                     onChange={(e) => updateLastStart((e.target.value || null) as any)}
                     className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                    aria-label="마지막 생리 시작일 선택"
+                    aria-label={t("마지막 생리 시작일 선택")}
                   />
                 ) : null}
 
@@ -241,7 +231,7 @@ export function MenstrualSettingsForm() {
                         className="rounded-xl border border-ios-sep px-2 py-1 text-[12px] font-semibold"
                         onClick={() => setViewMonth((m) => addMonths(m, -1))}
                       >
-                        이전
+                        {t("이전")}
                       </button>
 
                       <div className="text-[13px] font-semibold">{monthTitle}</div>
@@ -251,7 +241,7 @@ export function MenstrualSettingsForm() {
                         className="rounded-xl border border-ios-sep px-2 py-1 text-[12px] font-semibold"
                         onClick={() => setViewMonth((m) => addMonths(m, 1))}
                       >
-                        다음
+                        {t("다음")}
                       </button>
                     </div>
 
@@ -296,7 +286,7 @@ export function MenstrualSettingsForm() {
                           setDateOpen(false);
                         }}
                       >
-                        비우기
+                        {t("비우기")}
                       </button>
                       <button
                         type="button"
@@ -306,7 +296,7 @@ export function MenstrualSettingsForm() {
                           setDateOpen(false);
                         }}
                       >
-                        오늘
+                        {t("오늘")}
                       </button>
                     </div>
                   </div>
@@ -315,10 +305,10 @@ export function MenstrualSettingsForm() {
 
               <div className="flex flex-wrap gap-2">
                 <Button variant="secondary" onClick={setTodayAsStart}>
-                  오늘로 설정
+                  {t("오늘로 설정")}
                 </Button>
                 <Button variant="secondary" onClick={() => updateLastStart(null)}>
-                  비우기
+                  {t("비우기")}
                 </Button>
               </div>
             </div>
@@ -326,7 +316,7 @@ export function MenstrualSettingsForm() {
 
           {/* ✅ 주기/기간: 폭 반 정도 */}
           <div className="min-w-0">
-            <div className="mb-2 text-[13px] font-semibold">평균 주기(일)</div>
+            <div className="mb-2 text-[13px] font-semibold">{t("평균 주기(일)")}</div>
             <div className="flex items-center gap-2">
               <div className="w-[140px] max-w-[55vw]">
                 <Input
@@ -335,13 +325,13 @@ export function MenstrualSettingsForm() {
                   pattern="\\d*"
                   value={cycleText}
                   onChange={(e) => setCycleText(e.target.value)}
-                  placeholder="예: 28"
+                  placeholder={t("예: 28")}
                 />
               </div>
-              <div className="text-[12px] text-ios-muted">20~45일</div>
+              <div className="text-[12px] text-ios-muted">{t("20~45일")}</div>
             </div>
 
-            <div className="mt-4 mb-2 text-[13px] font-semibold">생리 기간(일)</div>
+            <div className="mt-4 mb-2 text-[13px] font-semibold">{t("생리 기간(일)")}</div>
             <div className="flex items-center gap-2">
               <div className="w-[140px] max-w-[55vw]">
                 <Input
@@ -350,10 +340,10 @@ export function MenstrualSettingsForm() {
                   pattern="\\d*"
                   value={periodText}
                   onChange={(e) => setPeriodText(e.target.value)}
-                  placeholder="예: 5"
+                  placeholder={t("예: 5")}
                 />
               </div>
-              <div className="text-[12px] text-ios-muted">2~10일</div>
+              <div className="text-[12px] text-ios-muted">{t("2~10일")}</div>
             </div>
           </div>
         </div>
@@ -361,77 +351,79 @@ export function MenstrualSettingsForm() {
         {/* ✅ 적용/되돌리기 */}
         <div className="mt-2 flex flex-wrap justify-end gap-3">
           <Button variant="secondary" onClick={resetMenstrual} disabled={!dirty}>
-            되돌리기
+            {t("되돌리기")}
           </Button>
           <Button onClick={applyMenstrual} disabled={!dirty}>
-            적용
+            {t("적용")}
           </Button>
         </div>
 
         {!draft.lastPeriodStart ? (
           <div className="text-[12.5px] text-ios-muted">
-            시작일을 입력하면 캘린더에{" "}
-            <span className="font-semibold text-black">생리 / 생리 직전 / 컨디션 안정 / 컨디션 변화</span>가
-            표시돼요.
+            {t("시작일을 입력하면 캘린더에")}{" "}
+            <span className="font-semibold text-black">{t("생리 / 생리 직전 / 컨디션 안정 / 컨디션 변화")}</span>{" "}
+            {t("가 표시돼요.")}
           </div>
         ) : null}
       </div>
 
       {/* ✅ 설명 박스 그대로 */}
       <div className="mt-4 rounded-2xl border border-ios-sep bg-white p-4">
-        <div className="text-[14px] font-semibold">캘린더 색상 안내</div>
+        <div className="text-[14px] font-semibold">{t("캘린더 색상 안내")}</div>
         <div className="mt-1 text-[12.5px] text-ios-muted">
-          생리 주기에 따라 컨디션 흐름을 한눈에 볼 수 있도록 색상 막대가 표시돼요.
+          {t("생리 주기에 따라 컨디션 흐름을 한눈에 볼 수 있도록 색상 막대가 표시돼요.")}
         </div>
 
         <div className="mt-4 grid gap-2">
           <div className="flex items-center gap-3">
             <span className="h-[6px] w-10 rounded-full bg-rose-500" />
             <div className="text-[13px]">
-              <span className="font-semibold">생리 기간</span>{" "}
-              <span className="text-black/60">(피로도가 높을 수 있어요)</span>
+              <span className="font-semibold">{t("생리 기간")}</span>{" "}
+              <span className="text-black/60">{t("(피로도가 높을 수 있어요)")}</span>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
             <span className="h-[6px] w-10 rounded-full bg-amber-500" />
             <div className="text-[13px]">
-              <span className="font-semibold">생리 직전 기간</span>{" "}
-              <span className="text-black/60">(예민함/피로감이 생기기 쉬워요)</span>
+              <span className="font-semibold">{t("생리 직전 기간")}</span>{" "}
+              <span className="text-black/60">{t("(예민함/피로감이 생기기 쉬워요)")}</span>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
             <span className="h-[6px] w-10 rounded-full bg-sky-500" />
             <div className="text-[13px]">
-              <span className="font-semibold">컨디션 안정 기간</span>{" "}
-              <span className="text-black/60">(회복이 잘 되는 편이에요)</span>
+              <span className="font-semibold">{t("컨디션 안정 기간")}</span>{" "}
+              <span className="text-black/60">{t("(회복이 잘 되는 편이에요)")}</span>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
             <span className="h-[6px] w-10 rounded-full bg-sky-600" />
             <div className="text-[13px]">
-              <span className="font-semibold">컨디션 변화가 큰 날</span>{" "}
-              <span className="text-black/60">(변동이 클 수 있어요)</span>
+              <span className="font-semibold">{t("컨디션 변화가 큰 날")}</span>{" "}
+              <span className="text-black/60">{t("(변동이 클 수 있어요)")}</span>
             </div>
           </div>
         </div>
 
         <div className="mt-4 rounded-xl bg-black/[0.03] p-3">
-          <div className="text-[13px] font-semibold">어떻게 계산되나요?</div>
+          <div className="text-[13px] font-semibold">{t("어떻게 계산되나요?")}</div>
           <div className="mt-1 text-[12.5px] leading-5 text-black/65">
-            마지막 생리 시작일과 평균 주기를 기준으로 몸의 리듬을 자동 계산해요.
+            {t("마지막 생리 시작일과 평균 주기를 기준으로 몸의 리듬을 자동 계산해요.")}
             <br />
-            <span className="font-semibold text-black/70">✔ 생리 중</span>에는 피로가 높게,
-            <span className="font-semibold text-black/70"> ✔ 생리 직전</span>에는 컨디션 저하 가능성이 있는
-            기간으로 표시돼요.
+            <span className="font-semibold text-black/70">{t("✔ 생리 중")}</span>
+            {t("에는 피로가 높게,")}{" "}
+            <span className="font-semibold text-black/70">{t("✔ 생리 직전")}</span>
+            {t("에는 컨디션 저하 가능성이 있는 기간으로 표시돼요.")}
             <br />
-            이 표시는 건강 상태를 진단하기 위한 것이 아니라{" "}
-            <span className="font-semibold text-black/70">일정/컨디션 관리 참고용</span>이에요.
+            {t("이 표시는 건강 상태를 진단하기 위한 것이 아니라")}{" "}
+            <span className="font-semibold text-black/70">{t("일정/컨디션 관리 참고용")}</span>
+            {t("이에요.")}
           </div>
 
-          <div className="mt-2 text-[12px] text-black/45">※ 의료적 판단을 대신하지 않아요.</div>
+          <div className="mt-2 text-[12px] text-black/45">{t("※ 의료적 판단을 대신하지 않아요.")}</div>
         </div>
       </div>
     </>

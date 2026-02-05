@@ -16,13 +16,14 @@ import { computeVitalsRange, vitalMapByISO } from "@/lib/vitals";
 import { menstrualContextForDate } from "@/lib/menstrual";
 import { countHealthRecordedDays, hasHealthInput } from "@/lib/healthRecords";
 import { vitalDisplayScore } from "@/lib/wnlInsight";
+import { useI18n } from "@/lib/useI18n";
 
 import { MonthCalendar } from "@/components/home/MonthCalendar";
 import { BatteryGauge } from "@/components/home/BatteryGauge";
 import { Card } from "@/components/ui/Card";
 
-function toneLabel(t: "green" | "orange" | "red") {
-  return t === "green" ? "안정" : t === "orange" ? "주의" : "경고";
+function toneLabel(label: "green" | "orange" | "red", t: (key: string) => string) {
+  return label === "green" ? t("안정") : label === "orange" ? t("주의") : t("경고");
 }
 
 function toneChipClass(t?: "green" | "orange" | "red") {
@@ -100,6 +101,7 @@ function sameMonthUTC(a: Date, b: Date) {
 }
 
 export default function Home() {
+  const { t } = useI18n();
   const store = useAppStoreSelector(
     (s) => ({
       selected: s.selected,
@@ -201,44 +203,46 @@ export default function Home() {
     const caffeine = selBio?.caffeineMg;
     const symptom = (selBio as any)?.symptomSeverity ?? null;
 
-    const stressLabel = stress == null ? null : ["낮음", "보통", "높음", "매우"][Number(stress)] ?? null;
-    const activityLabel = activity == null ? null : ["가벼움", "보통", "많음", "빡셈"][Number(activity)] ?? null;
+    const stressLabel =
+      stress == null ? null : [t("낮음"), t("보통"), t("높음"), t("매우")][Number(stress)] ?? null;
+    const activityLabel =
+      activity == null ? null : [t("가벼움"), t("보통"), t("많음"), t("빡셈")][Number(activity)] ?? null;
     const sleepLabel = sleep == null ? null : formatHours(sleep);
     const napLabel = nap && Number(nap) > 0 ? formatHours(Number(nap)) : null;
 
     return [
       {
         key: "sleep",
-        label: "수면",
+        label: t("수면"),
         value: sleepLabel ? `${sleepLabel}h` : null,
       },
       {
         key: "nap",
-        label: "낮잠",
+        label: t("낮잠"),
         value: napLabel ? `${napLabel}h` : null,
       },
       {
         key: "stress",
-        label: "스트레스",
+        label: t("스트레스"),
         value: stressLabel,
       },
       {
         key: "activity",
-        label: "활동",
+        label: t("활동"),
         value: activityLabel,
       },
       {
         key: "caffeine",
-        label: "카페인",
+        label: t("카페인"),
         value: caffeine && Number(caffeine) > 0 ? `${Math.round(Number(caffeine))}mg` : null,
       },
       {
         key: "symptom",
-        label: "증상",
+        label: t("증상"),
         value: symptom && Number(symptom) > 0 ? `${Number(symptom)}/3` : null,
       },
     ];
-  }, [selBio]);
+  }, [selBio, t]);
 
   const visibleInputs = inputItems.filter((item) => item.value);
 
@@ -255,8 +259,8 @@ export default function Home() {
                 )}`}
               >
                 {selShift
-                  ? `근무 ${selShiftName?.trim() || (selShift === "VAC" ? "VA" : selShift)}`
-                  : "근무 미설정"}
+                  ? `${t("근무")} ${selShiftName?.trim() || (selShift === "VAC" ? "VA" : selShift)}`
+                  : t("근무 미설정")}
               </span>
               {menstrual.enabled && menstrual.lastPeriodStart ? (
                 <span
@@ -264,7 +268,7 @@ export default function Home() {
                     mctx.phase
                   )}`}
                 >
-                  {mctx.label}
+                  {t(mctx.label)}
                 </span>
               ) : null}
               {selVital ? (
@@ -273,7 +277,7 @@ export default function Home() {
                     selVital.mental.tone
                   )}`}
                 >
-                  멘탈 {toneLabel(selVital.mental.tone)}
+                  {t("멘탈")} {toneLabel(selVital.mental.tone, t)}
                 </span>
               ) : null}
             </div>
@@ -284,14 +288,14 @@ export default function Home() {
               <div className="rounded-2xl border border-ios-sep bg-white p-3 shadow-apple-sm sm:p-4">
                 <BatteryGauge value={selVital.body.value} label="Body" tone={selVital.body.tone} kind="body" />
                 <div className="mt-3 flex items-center justify-between text-[12px] text-black/45">
-                  <span>Body 변화</span>
+                  <span>{t("Body 변화")}</span>
                   <span className="font-semibold text-black/70">{formatDelta(selVital.body.change)}</span>
                 </div>
               </div>
               <div className="rounded-2xl border border-ios-sep bg-white p-3 shadow-apple-sm sm:p-4">
                 <BatteryGauge value={selVital.mental.ema} label="Mental" tone={selVital.mental.tone} kind="mental" />
                 <div className="mt-3 flex items-center justify-between text-[12px] text-black/45">
-                  <span>Mental 변화</span>
+                  <span>{t("Mental 변화")}</span>
                   <span className="font-semibold text-black/70">{formatDelta(selVital.mental.change)}</span>
                 </div>
               </div>
@@ -300,13 +304,16 @@ export default function Home() {
             <div className="mt-4 rounded-2xl border border-ios-sep bg-white p-4 text-[12.5px] text-ios-muted shadow-apple-sm">
               {canShowVitals ? (
                 <>
-                  기록이 아직 없어서 오늘 지표가 비어 있어.{" "}
-                  <span className="font-semibold text-black">일정</span> 탭에서 날짜를 눌러 입력해줘.
+                  {t("기록이 아직 없어서 오늘 지표가 비어 있어.")}{" "}
+                  <span className="font-semibold text-black">{t("일정")}</span>{" "}
+                  {t("탭에서 날짜를 눌러 입력해줘.")}
                 </>
               ) : (
                 <>
-                  건강 기록을 최소 3일 이상 입력해야 바디/멘탈 배터리가 보여요.{" "}
-                  <span className="font-semibold text-black">현재 {recordedDays}일 기록됨</span>
+                  {t("건강 기록을 최소 3일 이상 입력해야 바디/멘탈 배터리가 보여요.")}{" "}
+                  <span className="font-semibold text-black">
+                    {t("현재 {count}일 기록됨", { count: recordedDays })}
+                  </span>
                 </>
               )}
             </div>
@@ -315,15 +322,15 @@ export default function Home() {
           {selVital?.engine ? (
             <div className="mt-3 hidden flex-wrap gap-2 sm:flex">
               <div className="inline-flex items-center gap-2 rounded-full border border-black/5 bg-white/85 px-3 py-1 text-[12px] font-semibold text-black/70 shadow-apple-sm">
-                <span className="text-black/45">수면 부채</span>
+                <span className="text-black/45">{t("수면 부채")}</span>
                 <span>{formatHours(selVital.engine.sleepDebtHours) ?? "0"}h</span>
               </div>
               <div className="inline-flex items-center gap-2 rounded-full border border-black/5 bg-white/85 px-3 py-1 text-[12px] font-semibold text-black/70 shadow-apple-sm">
-                <span className="text-black/45">리듬</span>
+                <span className="text-black/45">{t("리듬")}</span>
                 <span>{formatPct(selVital.engine.CMF) ?? "0"}%</span>
               </div>
               <div className="inline-flex items-center gap-2 rounded-full border border-black/5 bg-white/85 px-3 py-1 text-[12px] font-semibold text-black/70 shadow-apple-sm">
-                <span className="text-black/45">카페인</span>
+                <span className="text-black/45">{t("카페인")}</span>
                 <span>{formatPct(selVital.engine.CSD) ?? "0"}%</span>
               </div>
             </div>
@@ -352,8 +359,8 @@ export default function Home() {
 
       <details className="rounded-apple border border-ios-sep bg-white shadow-apple">
         <summary className="flex cursor-pointer list-none items-center justify-between px-5 py-4 text-[14px] font-semibold">
-          오늘 기록
-          <span className="text-[12px] font-semibold text-black/40">열기</span>
+          {t("오늘 기록")}
+          <span className="text-[12px] font-semibold text-black/40">{t("열기")}</span>
         </summary>
         <div className="border-t border-ios-sep px-5 py-4">
           {visibleInputs.length ? (
@@ -370,7 +377,9 @@ export default function Home() {
             </div>
           ) : (
             <div className="rounded-2xl border border-ios-sep bg-white/90 p-4 text-[12.5px] text-ios-muted shadow-apple-sm">
-              아직 기록이 없어요. <span className="font-semibold text-black">일정</span>에서 오늘 데이터를 입력해 주세요.
+              {t("아직 기록이 없어요.")}{" "}
+              <span className="font-semibold text-black">{t("일정")}</span>{" "}
+              {t("에서 오늘 데이터를 입력해 주세요.")}
             </div>
           )}
 
@@ -378,13 +387,13 @@ export default function Home() {
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               {selNote ? (
                 <div className="rounded-2xl border border-ios-sep bg-white/90 p-4 shadow-apple-sm">
-                  <div className="text-[12.5px] text-ios-muted">오늘 메모</div>
+                  <div className="text-[12.5px] text-ios-muted">{t("오늘 메모")}</div>
                   <div className="mt-2 text-[14px] font-semibold leading-relaxed">{selNote}</div>
                 </div>
               ) : null}
               {selEmotion ? (
                 <div className="rounded-2xl border border-ios-sep bg-white/90 p-4 shadow-apple-sm">
-                  <div className="text-[12.5px] text-ios-muted">오늘 기분</div>
+                  <div className="text-[12.5px] text-ios-muted">{t("오늘 기분")}</div>
                   <div className="mt-2 text-[18px] font-semibold">
                     {selEmotion.mood}/5
                     <span className="ml-2 text-[14px] font-semibold text-black/60">

@@ -10,6 +10,7 @@ import { computeVitalsRange, type DailyVital } from "@/lib/vitals";
 import { computePersonalizationAccuracy, topFactors } from "@/lib/insightsV2";
 import { shiftWindow, statusFromScore, vitalDisplayScore, type OrderKey } from "@/lib/wnlInsight";
 import { countHealthRecordedDays, hasHealthInput } from "@/lib/healthRecords";
+import { translate } from "@/lib/i18n";
 
 type OrdersSummary = {
   count: number;
@@ -20,13 +21,13 @@ type OrdersSummary = {
 export function shiftKo(shift: Shift) {
   switch (shift) {
     case "D":
-      return "근무 D";
+      return translate("근무 D");
     case "E":
-      return "근무 E";
+      return translate("근무 E");
     case "N":
-      return "근무 N";
+      return translate("근무 N");
     case "M":
-      return "근무 M";
+      return translate("근무 M");
     case "OFF":
       return "OFF";
     case "VAC":
@@ -55,12 +56,12 @@ function countShift(vitals: DailyVital[]) {
 }
 
 function buildSyncLabel(percent: number, daysWithAnyInput: number) {
-  if (percent >= 88) return `싱크 완료: 예측 정확도 ${percent}%`;
-  return `프리셉터 싱크(Sync): ${Math.max(1, daysWithAnyInput)}일차`;
+  if (percent >= 88) return translate("싱크 완료: 예측 정확도 {percent}%", { percent });
+  return translate("프리셉터 싱크(Sync): {count}일차", { count: Math.max(1, daysWithAnyInput) });
 }
 
 function summarizeOrders(vital: DailyVital | null, pivotISO: ISODate): OrdersSummary {
-  if (!vital) return { count: 0, headline: "오늘 오더 없음", items: [] };
+  if (!vital) return { count: 0, headline: translate("오늘 오더 없음"), items: [] };
 
   const shift = vital.shift;
   const now = new Date();
@@ -79,29 +80,29 @@ function summarizeOrders(vital: DailyVital | null, pivotISO: ISODate): OrdersSum
   const list: { key: OrderKey; title: string }[] = [];
 
   if (sleepDebt > 2.0 || sri < 0.6) {
-    list.push({ key: "sleep_debt", title: "수면 부채 경고" });
+    list.push({ key: "sleep_debt", title: translate("수면 부채 경고") });
   }
 
   if (shift === "D" || shift === "E" || shift === "N" || shift === "M") {
     const cutoff = new Date(end.getTime() - 4 * 60 * 60 * 1000);
     const inWindow = now.getTime() >= cutoff.getTime() && now.getTime() <= end.getTime();
     if (inWindow || cif <= 0.75) {
-      list.push({ key: "caffeine_npo", title: "카페인 금지 (NPO)" });
+      list.push({ key: "caffeine_npo", title: translate("카페인 금지 (NPO)") });
     }
   }
 
   if (shift === "N" && (phase === "pms" || phase === "period" || mif <= 0.85)) {
-    list.push({ key: "hormone_duty", title: "호르몬 & 듀티 이중고" });
+    list.push({ key: "hormone_duty", title: translate("호르몬 & 듀티 이중고") });
   }
 
   if (nightStreak >= 3 || csi >= 0.6 || slf >= 0.7) {
-    list.push({ key: "night_adapt", title: "야행성 적응 완료" });
+    list.push({ key: "night_adapt", title: translate("야행성 적응 완료") });
   }
 
   const count = list.length;
   const headline = count
-    ? `${list[0].title}${count > 1 ? ` 외 ${count - 1}개` : ""}`
-    : "현재 오더 없음";
+    ? `${list[0].title}${count > 1 ? translate(" 외 {count}개", { count: count - 1 }) : ""}`
+    : translate("현재 오더 없음");
 
   return { count, headline, items: list };
 }
