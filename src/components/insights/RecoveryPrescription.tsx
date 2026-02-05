@@ -98,15 +98,15 @@ function toneLabel(t: Tone) {
 }
 
 function toneChipCls(t: Tone) {
-  if (t === "warning") return "border-red-600/20 bg-red-500/10 text-red-700";
-  if (t === "noti") return "border-amber-600/20 bg-amber-500/10 text-amber-800";
-  return "border-emerald-600/20 bg-emerald-500/10 text-emerald-800";
+  if (t === "warning") return "border-[#E87485]/25 bg-[#E87485]/10 text-[#E87485]";
+  if (t === "noti") return "border-[#1B2747]/20 bg-[#1B2747]/10 text-[#1B2747]";
+  return "border-[#007AFF]/20 bg-[#007AFF]/10 text-[#007AFF]";
 }
 
 function barCls(t: Tone) {
-  if (t === "warning") return "bg-red-600";
-  if (t === "noti") return "bg-amber-600";
-  return "bg-emerald-600";
+  if (t === "warning") return "bg-[#E87485]";
+  if (t === "noti") return "bg-[#1B2747]";
+  return "bg-[#007AFF]";
 }
 
 function calcTone(v: DailyVital | null): Tone {
@@ -865,11 +865,11 @@ export function RecoveryPrescription({ state, pivotISO }: Props) {
         {mustWatch.map((x) => {
           const cls =
             x.kind === "warning"
-              ? "bg-red-500/10 text-red-700"
+              ? "bg-[#E87485]/10 text-[#E87485]"
               : x.kind === "noti"
-                ? "bg-amber-500/10 text-amber-800"
+                ? "bg-[#1B2747]/10 text-[#1B2747]"
                 : x.kind === "stable"
-                  ? "bg-emerald-500/10 text-emerald-800"
+                  ? "bg-[#007AFF]/10 text-[#007AFF]"
                   : "bg-white/80 text-ios-text";
           return (
             <Chip key={`${x.label}:${x.value}`} className={cn("border-0", cls)}>

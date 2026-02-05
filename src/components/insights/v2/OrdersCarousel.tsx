@@ -11,8 +11,11 @@ import {
   shiftWindow,
   writeOrdersDone,
   type OrderKey,
-  WNL_COLORS,
 } from "@/lib/wnlInsight";
+
+const INSIGHT_BLUE = "#007AFF";
+const INSIGHT_NAVY = "#1B2747";
+const INSIGHT_PINK = "#E87485";
 
 type OrderTone = "mint" | "pink" | "yellow" | "grey";
 
@@ -27,10 +30,10 @@ type OrderCard = {
 };
 
 function toneColor(t: OrderTone) {
-  if (t === "mint") return WNL_COLORS.mint;
-  if (t === "yellow") return WNL_COLORS.yellow;
-  if (t === "pink") return WNL_COLORS.pink;
-  return WNL_COLORS.grey;
+  if (t === "mint") return INSIGHT_BLUE;
+  if (t === "yellow") return INSIGHT_NAVY;
+  if (t === "pink") return INSIGHT_PINK;
+  return INSIGHT_NAVY;
 }
 
 function shiftKo(shift: Shift) {

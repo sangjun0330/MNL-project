@@ -4,8 +4,12 @@ import { useMemo } from "react";
 import { cn } from "@/lib/cn";
 import type { Shift } from "@/lib/types";
 import type { DailyVital } from "@/lib/vitals";
-import { round1, statusColor, statusFromScore, type VitalStatus, WNL_COLORS } from "@/lib/wnlInsight";
+import { round1, statusFromScore, type VitalStatus } from "@/lib/wnlInsight";
 import { useI18n } from "@/lib/useI18n";
+
+const INSIGHT_BLUE = "#007AFF";
+const INSIGHT_NAVY = "#1B2747";
+const INSIGHT_PINK = "#E87485";
 
 type PhaseItem = {
   title: string;
@@ -15,10 +19,16 @@ type PhaseItem = {
 };
 
 function toneColor(t: PhaseItem["tone"]) {
-  if (t === "mint") return WNL_COLORS.mint;
-  if (t === "yellow") return WNL_COLORS.yellow;
-  if (t === "pink") return WNL_COLORS.pink;
-  return WNL_COLORS.grey;
+  if (t === "mint") return INSIGHT_BLUE;
+  if (t === "yellow") return INSIGHT_NAVY;
+  if (t === "pink") return INSIGHT_PINK;
+  return INSIGHT_NAVY;
+}
+
+function statusAccent(status: VitalStatus) {
+  if (status === "stable") return INSIGHT_BLUE;
+  if (status === "caution" || status === "observation") return INSIGHT_NAVY;
+  return INSIGHT_PINK;
 }
 
 function focusFromScore(score: number) {
@@ -43,7 +53,7 @@ export function TimelineForecast({
   }, [vital]);
 
   const status: VitalStatus = useMemo(() => statusFromScore(displayScore), [displayScore]);
-  const indicatorColor = useMemo(() => statusColor(status), [status]);
+  const indicatorColor = useMemo(() => statusAccent(status), [status]);
 
   const isRestDay = shift === "OFF" || shift === "VAC";
   const focus = useMemo(() => focusFromScore(displayScore), [displayScore]);
@@ -140,12 +150,8 @@ export function TimelineForecast({
   }, [isRestDay, shift]);
 
   return (
-    <div className={cn("relative overflow-hidden rounded-apple border border-ios-sep bg-white shadow-apple", className)}>
-      <div
-        className="pointer-events-none absolute inset-0 opacity-55"
-        style={{ backgroundImage: "linear-gradient(135deg, rgba(27,39,71,0.20), rgba(255,255,255,0.98))" }}
-      />
-      <div className="relative flex items-start justify-between gap-3 px-5 pt-5">
+    <div className={cn("rounded-apple border border-ios-sep bg-white shadow-apple", className)}>
+      <div className="flex items-start justify-between gap-3 px-5 pt-5">
         <div>
           <div className="text-[12px] font-semibold text-ios-sub">Timeline Forecast</div>
           <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-ios-text">{t("타임라인 예보")}</div>
@@ -155,7 +161,7 @@ export function TimelineForecast({
         </div>
       </div>
 
-      <div className="relative px-5 pb-5 pt-4">
+      <div className="px-5 pb-5 pt-4">
         <div className="rounded-apple border border-ios-sep bg-white/90 p-4">
           <div className="rounded-xl border border-ios-sep bg-white p-3">
             <div className="flex items-center justify-between gap-2">

@@ -3,8 +3,18 @@
 import { useMemo } from "react";
 import { cn } from "@/lib/cn";
 import type { DailyVital } from "@/lib/vitals";
-import { statusColor, statusCopy, statusFromScore, statusLabel, vitalDisplayScore } from "@/lib/wnlInsight";
+import { statusCopy, statusFromScore, statusLabel, vitalDisplayScore } from "@/lib/wnlInsight";
 import { useI18n } from "@/lib/useI18n";
+
+const INSIGHT_BLUE = "#007AFF";
+const INSIGHT_NAVY = "#1B2747";
+const INSIGHT_PINK = "#E87485";
+
+function statusAccent(status: ReturnType<typeof statusFromScore>) {
+  if (status === "stable") return INSIGHT_BLUE;
+  if (status === "caution" || status === "observation") return INSIGHT_NAVY;
+  return INSIGHT_PINK;
+}
 
 function clamp(n: number, min: number, max: number) {
   const v = Number.isFinite(n) ? n : min;
@@ -56,7 +66,7 @@ export function HeroDashboard({
   }, [vital]);
 
   const status = useMemo(() => statusFromScore(displayScore), [displayScore]);
-  const color = useMemo(() => statusColor(status), [status]);
+  const color = useMemo(() => statusAccent(status), [status]);
 
   return (
     <div className={cn("rounded-apple border border-ios-sep bg-white shadow-apple", className)}>
@@ -65,9 +75,9 @@ export function HeroDashboard({
         style={{
           background:
             status === "stable"
-              ? "linear-gradient(180deg, rgba(108,218,195,0.18), rgba(255,255,255,1) 55%)"
+              ? "linear-gradient(180deg, rgba(0,122,255,0.14), rgba(255,255,255,1) 55%)"
               : status === "caution"
-              ? "linear-gradient(180deg, rgba(255,217,61,0.20), rgba(255,255,255,1) 55%)"
+              ? "linear-gradient(180deg, rgba(27,39,71,0.14), rgba(255,255,255,1) 55%)"
               : "linear-gradient(180deg, rgba(255,158,170,0.22), rgba(255,255,255,1) 55%)",
         }}
       >

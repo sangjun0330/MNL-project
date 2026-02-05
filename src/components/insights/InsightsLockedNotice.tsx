@@ -6,7 +6,7 @@ export function InsightsLockedNotice({ recordedDays, minDays = 7 }: { recordedDa
   const remaining = Math.max(minDays - recordedDays, 0);
   const { t } = useI18n();
   return (
-    <div className="rounded-apple border border-ios-sep bg-[linear-gradient(135deg,rgba(160,187,243,0.14),rgba(255,255,255,0.98))] p-6 shadow-apple-sm">
+    <div className="rounded-apple border border-ios-sep bg-white p-6 shadow-apple">
       <div className="text-[18px] font-bold text-ios-text">{t("인사이트가 아직 잠겨 있어요")}</div>
       <div className="mt-2 text-[13px] text-ios-sub">
         {t("건강 정보를 최소 {minDays}일 이상 기록해야 인사이트가 열립니다.", { minDays })}

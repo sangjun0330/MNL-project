@@ -4,8 +4,11 @@ import { useMemo } from "react";
 import { cn } from "@/lib/cn";
 import type { DailyVital } from "@/lib/vitals";
 import { aggregateFactors, FACTOR_LABEL_KO, topFactors, type FactorKey } from "@/lib/insightsV2";
-import { WNL_COLORS } from "@/lib/wnlInsight";
 import { useI18n } from "@/lib/useI18n";
+
+const INSIGHT_BLUE = "#007AFF";
+const INSIGHT_NAVY = "#1B2747";
+const INSIGHT_PINK = "#E87485";
 
 type Segment = {
   key: FactorKey;
@@ -27,20 +30,20 @@ function pctLabel(p01: number) {
 function colorForFactor(k: FactorKey) {
   switch (k) {
     case "activity":
-      return WNL_COLORS.mint;
+      return INSIGHT_BLUE;
     case "stress":
-      return WNL_COLORS.pink;
+      return INSIGHT_PINK;
     case "mood":
-      return WNL_COLORS.pink;
+      return INSIGHT_PINK;
     case "menstrual":
-      return WNL_COLORS.pink;
+      return INSIGHT_PINK;
     case "caffeine":
-      return WNL_COLORS.yellow;
+      return INSIGHT_NAVY;
     case "shift":
-      return "#A29BFE"; // soft violet (리듬)
+      return INSIGHT_NAVY;
     case "sleep":
     default:
-      return "#B2BEC3"; // debt
+      return INSIGHT_BLUE;
   }
 }
 
@@ -121,12 +124,8 @@ export function BatteryThieves({ vitals, periodLabel, className }: { vitals: Dai
   }, [top1, avgDebt, t]);
 
   return (
-    <div className={cn("relative overflow-hidden rounded-apple border border-ios-sep bg-white shadow-apple", className)}>
-      <div
-        className="pointer-events-none absolute inset-0 opacity-55"
-        style={{ backgroundImage: "linear-gradient(135deg, rgba(255,158,170,0.28), rgba(255,255,255,0.98))" }}
-      />
-      <div className="relative flex items-start justify-between gap-3 px-5 pt-5">
+    <div className={cn("rounded-apple border border-ios-sep bg-white shadow-apple", className)}>
+      <div className="flex items-start justify-between gap-3 px-5 pt-5">
         <div>
           <div className="text-[12px] font-semibold text-ios-sub">Battery Thieves</div>
           <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-ios-text">{t("에너지 도둑 분석")}</div>
@@ -134,7 +133,7 @@ export function BatteryThieves({ vitals, periodLabel, className }: { vitals: Dai
         <div className="text-[12.5px] text-ios-muted">{periodLabel ?? t("최근 7일 기준")}</div>
       </div>
 
-      <div className="relative px-5 pb-5 pt-4">
+      <div className="px-5 pb-5 pt-4">
         <div className="text-center text-[15px] font-semibold tracking-[-0.01em]">{message}</div>
 
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-[140px_1fr] sm:items-center">
