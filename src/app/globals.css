@@ -21,20 +21,6 @@
   --wnl-dur-sheet: 520ms;
   --wnl-dur-modal: 420ms;
   --wnl-ease-apple: cubic-bezier(0.22, 1, 0.36, 1);
-
-  /* Liquid Glass 기본 튜닝값 */
-  --lg-radius: 24px;
-  --lg-tint: rgba(255, 255, 255, 0.08);
-  --lg-border: rgba(255, 255, 255, 0.18);
-  --lg-blur: 16px;
-  --lg-saturate: 1.15;
-  --lg-brightness: 1.15;
-  --lg-highlight: rgba(255, 255, 255, 0.55);
-  --lg-noise-opacity: 0.06;
-  --lg-shadow:
-    0 4px 8px rgba(0, 0, 0, 0.25),
-    0 -10px 25px inset rgba(0, 0, 0, 0.15),
-    0 -1px 4px 1px inset rgba(255, 255, 255, 0.74);
 }
 
 html, body {
@@ -87,125 +73,47 @@ body {
   will-change: transform, opacity, filter;
 }
 
-/* ========= Liquid Glass (Apple-ish) Drop-in ========= */
-.liquid-glass {
-  position: relative;
-  overflow: hidden;
-  border-radius: var(--lg-radius);
-  background: var(--lg-tint);
-  border: 1px solid var(--lg-border);
-  box-shadow: var(--lg-shadow);
-  -webkit-backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate))
-    brightness(var(--lg-brightness));
-  backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate))
-    brightness(var(--lg-brightness));
-  transform: translateZ(0);
-  backface-visibility: hidden;
-}
-
-.liquid-glass::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  border-radius: inherit;
-  background: radial-gradient(
-      120% 80% at 20% 0%,
-      var(--lg-highlight),
-      transparent 55%
-    ),
-    linear-gradient(
-      to bottom,
-      rgba(255, 255, 255, 0.16),
-      transparent 35%
-    );
-  mix-blend-mode: screen;
-  opacity: 0.9;
-}
-
-.liquid-glass::after {
-  content: "";
-  position: absolute;
-  inset: -20%;
-  pointer-events: none;
-  border-radius: inherit;
-  background-image:
-    repeating-linear-gradient(
-      0deg,
-      rgba(255, 255, 255, 0.035) 0px,
-      rgba(255, 255, 255, 0.035) 1px,
-      transparent 2px,
-      transparent 4px
-    );
-  opacity: var(--lg-noise-opacity);
-  transform: rotate(8deg);
-}
-
-.liquid-glass:hover {
-  -webkit-backdrop-filter: blur(calc(var(--lg-blur) + 2px)) saturate(calc(var(--lg-saturate) + 0.05))
-    brightness(calc(var(--lg-brightness) + 0.05));
-  backdrop-filter: blur(calc(var(--lg-blur) + 2px)) saturate(calc(var(--lg-saturate) + 0.05))
-    brightness(calc(var(--lg-brightness) + 0.05));
-}
-
-.liquid-glass--pill { --lg-radius: 999px; }
-.liquid-glass--strong {
-  --lg-tint: rgba(255, 255, 255, 0.12);
-  --lg-border: rgba(255, 255, 255, 0.24);
-  --lg-blur: 20px;
-}
-.liquid-glass--subtle {
-  --lg-tint: rgba(255, 255, 255, 0.06);
-  --lg-border: rgba(255, 255, 255, 0.14);
-  --lg-blur: 12px;
-}
-
-/* BottomNav glass shell (Apple-ish) */
-.wnl-bottom-nav {
-  --lg-radius: 999px;
-  --lg-tint: rgba(255, 255, 255, 0.22);
-  --lg-border: rgba(255, 255, 255, 0.4);
-  --lg-blur: 24px;
-  --lg-saturate: 1.35;
-  --lg-brightness: 1.08;
-  --lg-highlight: rgba(255, 255, 255, 0.7);
-  --lg-noise-opacity: 0.035;
-  --lg-shadow:
-    0 18px 36px rgba(0, 0, 0, 0.18),
-    0 1px 0 rgba(255, 255, 255, 0.55) inset,
-    0 -12px 26px inset rgba(0, 0, 0, 0.12);
+/* BottomNav (Simple Apple style) */
+.wnl-nav-bar {
+  border-radius: 999px;
+  background: #ffffff;
+  border: 1px solid rgba(60, 60, 67, 0.12);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.08);
 }
 
 .wnl-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 44px;
+  padding: 6px 8px;
+  border-radius: 999px;
   transition:
-    transform 260ms var(--wnl-ease-apple),
-    color 260ms var(--wnl-ease-apple),
-    background-color 260ms var(--wnl-ease-apple);
-  transform: translateZ(0);
+    transform 220ms var(--wnl-ease-apple),
+    color 220ms var(--wnl-ease-apple),
+    background-color 220ms var(--wnl-ease-apple);
 }
 
-/* BottomNav active pill glass tuning */
+.wnl-nav-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.wnl-nav-label {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+
 .wnl-nav-active {
-  --lg-tint: rgba(255, 255, 255, 0.45);
-  --lg-border: rgba(255, 255, 255, 0.65);
-  --lg-blur: 26px;
-  --lg-saturate: 1.45;
-  --lg-brightness: 1.2;
-  --lg-highlight: rgba(255, 255, 255, 0.9);
-  --lg-noise-opacity: 0.02;
-  --lg-shadow:
-    0 12px 22px rgba(0, 0, 0, 0.18),
-    0 1px 0 rgba(255, 255, 255, 0.75) inset,
-    0 -8px 16px inset rgba(0, 0, 0, 0.1);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.35)),
-    var(--lg-tint);
-  color: #0F0F10;
+  background: #F2F2F7;
+  color: var(--wnl-accent);
 }
 
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .liquid-glass {
-    background: rgba(255, 255, 255, 0.12);
-  }
+.wnl-nav-inactive {
+  color: rgba(60, 60, 67, 0.6);
 }
 
 @keyframes wnlPageEnterMobile {
@@ -225,9 +133,6 @@ body {
     -webkit-backdrop-filter: blur(3px) saturate(1);
     backdrop-filter: blur(3px) saturate(1);
   }
-  .liquid-glass { --lg-blur: 16px; --lg-saturate: 1.2; }
-  .wnl-bottom-nav { --lg-blur: 20px; }
-  .wnl-nav-active { --lg-blur: 22px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -350,34 +255,18 @@ html.wnl-night .bg-black\/10 { background-color: rgba(255,255,255,0.12) !importa
 
 html.wnl-night .focus\:ring-black\/10:focus { --tw-ring-color: rgba(255,255,255,0.18) !important; }
 
-/* BottomNav active tab (Design Spec request): Black -> Mint in night mode */
-html.wnl-night .wnl-bottom-nav {
-  --lg-tint: rgba(18, 20, 28, 0.55);
-  --lg-border: rgba(255, 255, 255, 0.12);
-  --lg-blur: 22px;
-  --lg-saturate: 1.05;
-  --lg-brightness: 0.95;
-  --lg-highlight: rgba(255, 255, 255, 0.2);
-  --lg-noise-opacity: 0.02;
-  --lg-shadow:
-    0 18px 36px rgba(0, 0, 0, 0.5),
-    0 1px 0 rgba(255, 255, 255, 0.08) inset,
-    0 -12px 22px inset rgba(0, 0, 0, 0.35);
+/* BottomNav in night mode */
+html.wnl-night .wnl-nav-bar {
+  background: #111A2E;
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.35);
 }
 
 html.wnl-night .wnl-nav-active {
-  --lg-tint: rgba(108, 218, 195, 0.32);
-  --lg-border: rgba(108, 218, 195, 0.6);
-  --lg-blur: 24px;
-  --lg-saturate: 1.15;
-  --lg-brightness: 1.05;
-  --lg-highlight: rgba(214, 255, 245, 0.75);
-  --lg-noise-opacity: 0.02;
-  --lg-shadow:
-    0 12px 22px rgba(0, 0, 0, 0.45),
-    0 1px 0 rgba(255, 255, 255, 0.3) inset,
-    0 -8px 16px inset rgba(0, 0, 0, 0.25);
-  background: linear-gradient(180deg, rgba(200, 255, 242, 0.4), rgba(108, 218, 195, 0.22)),
-    var(--lg-tint);
-  color: #0B1220 !important;
+  background: rgba(255, 255, 255, 0.08);
+  color: #6CDAC3;
+}
+
+html.wnl-night .wnl-nav-inactive {
+  color: rgba(255, 255, 255, 0.6);
 }

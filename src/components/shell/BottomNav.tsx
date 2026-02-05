@@ -2,14 +2,50 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import type { SVGProps } from "react";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { cn } from "@/lib/cn";
 
-const ITEMS = [
-  { href: "/", label: "홈" },
-  { href: "/schedule", label: "일정" },
-  { href: "/insights", label: "인사이트" },
-  { href: "/settings", label: "설정" },
+type NavItem = {
+  href: string;
+  label: string;
+  Icon: (props: SVGProps<SVGSVGElement>) => JSX.Element;
+};
+
+const HomeIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...props}>
+    <path d="M4 10.5L12 4l8 6.5" />
+    <path d="M6.5 9.5V20h11V9.5" />
+  </svg>
+);
+
+const CalendarIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...props}>
+    <rect x="4" y="5" width="16" height="15" rx="3" />
+    <path d="M8 3v4M16 3v4M4 9h16" />
+  </svg>
+);
+
+const InsightsIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...props}>
+    <path d="M4 18h16" />
+    <path d="M6 15l4-4 3 3 5-6" />
+  </svg>
+);
+
+const SettingsIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...props}>
+    <path d="M4 7h16M4 17h16" />
+    <circle cx="9" cy="7" r="2" />
+    <circle cx="15" cy="17" r="2" />
+  </svg>
+);
+
+const ITEMS: NavItem[] = [
+  { href: "/", label: "홈", Icon: HomeIcon },
+  { href: "/schedule", label: "일정", Icon: CalendarIcon },
+  { href: "/insights", label: "인사이트", Icon: InsightsIcon },
+  { href: "/settings", label: "설정", Icon: SettingsIcon },
 ];
 
 export function BottomNav() {
@@ -68,24 +104,20 @@ export function BottomNav() {
           <nav
             className={cn(
               "pointer-events-auto",
-              "liquid-glass liquid-glass--pill wnl-bottom-nav"
+              "wnl-nav-bar"
             )}
           >
             <div className="grid grid-cols-4 gap-1 p-1.5">
               {ITEMS.map((it) => {
                 const active = selectedHref === it.href;
+                const Icon = it.Icon;
                 return (
                   <Link
                     key={it.href}
                     href={it.href}
                     className={cn(
-                      "flex h-11 items-center justify-center rounded-full text-[13px] font-semibold transition duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] touch-manipulation wnl-nav-item",
-                      active
-                        ? "wnl-nav-active liquid-glass liquid-glass--pill liquid-glass--subtle"
-                        : "wnl-nav-inactive",
-                      active
-                        ? "text-ios-text"
-                        : "text-ios-muted hover:bg-black/5"
+                      "touch-manipulation wnl-nav-item",
+                      active ? "wnl-nav-active" : "wnl-nav-inactive"
                     )}
                     onPointerDown={() => {
                       if (activeHref !== it.href) setPendingHref(it.href);
@@ -101,7 +133,8 @@ export function BottomNav() {
                     }}
                     aria-current={active ? "page" : undefined}
                   >
-                    {it.label}
+                    <Icon className="wnl-nav-icon" aria-hidden="true" focusable="false" />
+                    <span className="wnl-nav-label">{it.label}</span>
                   </Link>
                 );
               })}
