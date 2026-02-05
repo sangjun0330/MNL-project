@@ -2,14 +2,14 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import type { SVGProps } from "react";
+import type { ReactElement, SVGProps } from "react";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { cn } from "@/lib/cn";
 
 type NavItem = {
   href: string;
   label: string;
-  Icon: (props: SVGProps<SVGSVGElement>) => JSX.Element;
+  Icon: (props: SVGProps<SVGSVGElement>) => ReactElement;
 };
 
 const HomeIcon = (props: SVGProps<SVGSVGElement>) => (
