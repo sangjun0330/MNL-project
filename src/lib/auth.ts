@@ -73,13 +73,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [supabase]);
 
-  const user: AuthUser | null = session?.user
-    ? {
-        userId: session.user.id,
-        email: session.user.email ?? null,
-        provider: (session.user as { app_metadata?: { provider?: string } })?.app_metadata?.provider,
-      }
-    : null;
+  const user: AuthUser | null = useMemo(() => {
+    if (!session?.user) return null;
+    return {
+      userId: session.user.id,
+      email: session.user.email ?? null,
+      provider: (session.user as { app_metadata?: { provider?: string } })?.app_metadata?.provider,
+    };
+  }, [session]);
 
   const status: AuthState["status"] = loading
     ? "loading"
