@@ -24,6 +24,9 @@ export function CloudStateSync() {
   const latestStateRef = useRef<any>(null);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryCount = useRef(0);
+  const dirtyBeforeHydrate = useRef(false);
+  const lastVersionRef = useRef<number>((store as any).__v ?? 0);
+  const isHydratingRef = useRef(false);
 
   const getAuthHeaders = useCallback(async (): Promise<Record<string, string>> => {
     try {
@@ -142,6 +145,27 @@ export function CloudStateSync() {
     );
   }, [store]);
 
+  const mergeState = useCallback((remote: any, local: any) => {
+    const r = remote ?? {};
+    const l = local ?? {};
+    return {
+      ...r,
+      ...l,
+      selected: l.selected ?? r.selected,
+      schedule: { ...(r.schedule ?? {}), ...(l.schedule ?? {}) },
+      shiftNames: { ...(r.shiftNames ?? {}), ...(l.shiftNames ?? {}) },
+      notes: { ...(r.notes ?? {}), ...(l.notes ?? {}) },
+      emotions: { ...(r.emotions ?? {}), ...(l.emotions ?? {}) },
+      bio: { ...(r.bio ?? {}), ...(l.bio ?? {}) },
+      settings: {
+        ...(r.settings ?? {}),
+        ...(l.settings ?? {}),
+        menstrual: { ...(r.settings?.menstrual ?? {}), ...(l.settings?.menstrual ?? {}) },
+        profile: { ...(r.settings?.profile ?? {}), ...(l.settings?.profile ?? {}) },
+      },
+    };
+  }, []);
+
   const queueSave = useCallback(
     (state: any) => {
       latestStateRef.current = state;
@@ -173,6 +197,15 @@ export function CloudStateSync() {
   }, [store]);
 
   useEffect(() => {
+    const nextV = (store as any).__v ?? 0;
+    if (nextV === lastVersionRef.current) return;
+    lastVersionRef.current = nextV;
+    if (!userId || hydrated) return;
+    if (isHydratingRef.current) return;
+    dirtyBeforeHydrate.current = true;
+  }, [store, hydrated, userId]);
+
+  useEffect(() => {
     if (status === "loading" && !userId) return;
     if (!userId) {
       setHydrated(false);
@@ -198,8 +231,25 @@ export function CloudStateSync() {
 
         retryCount.current = 0;
         if (result.state) {
-          hydrateState(result.state);
-          skipNextSave.current = true;
+          const local = storeRef.current.getState();
+          if (dirtyBeforeHydrate.current) {
+            const merged = mergeState(result.state, local);
+            isHydratingRef.current = true;
+            hydrateState(merged);
+            setTimeout(() => {
+              isHydratingRef.current = false;
+            }, 0);
+            skipNextSave.current = true;
+            dirtyBeforeHydrate.current = false;
+            await saveState(merged);
+          } else {
+            isHydratingRef.current = true;
+            hydrateState(result.state);
+            setTimeout(() => {
+              isHydratingRef.current = false;
+            }, 0);
+            skipNextSave.current = true;
+          }
         } else {
           const fresh = storeRef.current.getState();
           if (hasAnyUserData(fresh)) {
