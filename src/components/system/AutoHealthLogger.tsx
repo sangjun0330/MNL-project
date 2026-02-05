@@ -81,7 +81,8 @@ export function AutoHealthLogger({ userId }: { userId?: string | null }) {
 
       if (!rows.length) return;
       try {
-        await supabase.from("wnl_daily_logs").upsert(rows, { onConflict: "device_id,date_iso" });
+        const client = supabase as any;
+        await client.from("wnl_daily_logs").upsert(rows, { onConflict: "device_id,date_iso" });
       } catch {
         // ignore network errors
       }

@@ -46,11 +46,12 @@ export function CloudStateSync() {
     async (state: any) => {
       if (!userId) return;
       const now = new Date().toISOString();
-      const { error } = await supabase
+      const client = supabase as any;
+      const { error } = await client
         .from("wnl_user_state")
         .upsert({ user_id: userId, payload: state, updated_at: now }, { onConflict: "user_id" });
       if (error) throw error;
-      await supabase.from("wnl_users").upsert({ user_id: userId, last_seen: now }, { onConflict: "user_id" });
+      await client.from("wnl_users").upsert({ user_id: userId, last_seen: now }, { onConflict: "user_id" });
     },
     [supabase, userId]
   );
@@ -79,7 +80,8 @@ export function CloudStateSync() {
 
   const loadStateViaSupabase = useCallback(async () => {
     if (!userId) return null;
-    const { data, error } = await supabase
+    const client = supabase as any;
+    const { data, error } = await client
       .from("wnl_user_state")
       .select("payload, updated_at")
       .eq("user_id", userId)
