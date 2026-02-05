@@ -21,6 +21,7 @@ export function InsightsThievesDetail() {
         title={t("에너지 도둑")}
         subtitle={formatKoreanDate(end)}
         meta={t("건강 기록 7일 이상부터 분석이 열립니다.")}
+        tone="pink"
       >
         <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />
       </InsightDetailShell>
@@ -45,7 +46,19 @@ export function InsightsThievesDetail() {
     <InsightDetailShell
       title={t("에너지 도둑")}
       subtitle={formatKoreanDate(end)}
+      chips={
+        top1 ? (
+          <>
+            <DetailChip color={DETAIL_ACCENTS.pink}>{t("방전 1순위")}</DetailChip>
+            <DetailChip color={DETAIL_ACCENTS.pink}>{top1.label}</DetailChip>
+            <DetailChip color={DETAIL_ACCENTS.pink}>{pct(top1.pct)}</DetailChip>
+          </>
+        ) : (
+          <DetailChip color={DETAIL_ACCENTS.pink}>{t("최근 7일 기준")}</DetailChip>
+        )
+      }
       meta={t("회복을 방해하는 핵심 요인을 비율로 분석합니다.")}
+      tone="pink"
     >
       <DetailSummaryCard
         accent="pink"
