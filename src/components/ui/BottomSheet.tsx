@@ -4,9 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
 
-const SHEET_DURATION_MS = 420;
-const SHEET_EASE = "cubic-bezier(0.16, 1, 0.3, 1)";
-const SHEET_CLOSE_DELAY_MS = 180;
+const SHEET_DURATION_MS = 520;
+const SHEET_EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
+const SHEET_CLOSE_DELAY_MS = 220;
 
 type Props = {
   open: boolean;
@@ -176,7 +176,7 @@ export function BottomSheet({
           isAppStore
             ? "bg-black/45 backdrop-blur-[10px]"
             : "bg-black/35 backdrop-blur-[6px]",
-          "transition-opacity duration-[420ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+          "transition-opacity duration-[520ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
           visible ? "opacity-100" : "opacity-0"
         )}
         onClick={closeWithAnimation}
@@ -194,8 +194,8 @@ export function BottomSheet({
             maxH,
             "overflow-hidden flex flex-col",
             // enter/exit (slide up)
-            "transition-[transform,opacity] duration-[420ms] ease-[cubic-bezier(0.16,1,0.3,1)] will-change-transform",
-            visible ? "translate-y-0 opacity-100" : "translate-y-[26px] opacity-0"
+            "transition-[transform,opacity] duration-[520ms] ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform",
+            visible ? "translate-y-0 opacity-100" : "translate-y-[20px] opacity-0"
           )}
           role="dialog"
           aria-modal="true"
