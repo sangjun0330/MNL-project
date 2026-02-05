@@ -7,6 +7,7 @@ import { statusColor, statusLabel } from "@/lib/wnlInsight";
 import { useInsightsData, shiftKo } from "@/components/insights/useInsightsData";
 import { HeroDashboard } from "@/components/insights/v2/HeroDashboard";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
+import { useI18n } from "@/lib/useI18n";
 
 const GRADIENTS = {
   mint: "linear-gradient(135deg, rgba(108,218,195,0.35), rgba(255,255,255,0.95))",
@@ -121,6 +122,7 @@ function formatPct(p: number) {
 }
 
 export function InsightsPage() {
+  const { t } = useI18n();
   const {
     end,
     todayShift,
@@ -144,7 +146,7 @@ export function InsightsPage() {
       <div className="mx-auto w-full max-w-[920px] px-4 pb-24 pt-6 sm:px-6">
         <div className="mb-4">
           <div className="text-[32px] font-extrabold tracking-[-0.03em]">Summary</div>
-          <div className="mt-1 text-[13px] text-ios-sub">맞춤 회복 중심 인사이트</div>
+          <div className="mt-1 text-[13px] text-ios-sub">{t("맞춤 회복 중심 인사이트")}</div>
         </div>
 
         <InsightsLockedNotice recordedDays={recordedDays} />
@@ -154,31 +156,37 @@ export function InsightsPage() {
 
   const recoverySummary = top1 ? (
     <>
-      <Bold>회복 포커스</Bold> · {top1.label}
+      <Bold>{t("회복 포커스")}</Bold> · {top1.label}
     </>
   ) : (
-    <Bold>맞춤 회복 처방</Bold>
+    <Bold>{t("맞춤 회복 처방")}</Bold>
   );
 
   const recoveryDetail = top1
-    ? `${top1.label} 비중 ${formatPct(top1.pct)} · 오늘의 오더를 함께 확인하세요.`
-    : "오늘의 오더까지 함께 확인할 수 있어요.";
+    ? t("{label} 비중 {pct} · 오늘의 오더를 함께 확인하세요.", {
+        label: top1.label,
+        pct: formatPct(top1.pct),
+      })
+    : t("오늘의 오더까지 함께 확인할 수 있어요.");
 
   const thievesSummary = top1 ? (
     <>
-      <Bold>방전 1순위</Bold> · {top1.label}
+      <Bold>{t("방전 1순위")}</Bold> · {top1.label}
     </>
   ) : (
-    <Bold>에너지 도둑 분석</Bold>
+    <Bold>{t("에너지 도둑 분석")}</Bold>
   );
 
   const thievesDetail = top1
-    ? `${top1.label} 비중 ${formatPct(top1.pct)} · 피로 요인을 줄여보세요.`
-    : "방전 요인을 분석할 데이터가 부족해요.";
+    ? t("{label} 비중 {pct} · 피로 요인을 줄여보세요.", {
+        label: top1.label,
+        pct: formatPct(top1.pct),
+      })
+    : t("방전 요인을 분석할 데이터가 부족해요.");
 
   const trendSummary = (
     <>
-      <Bold>최근 7일 평균</Bold> · Vital {avgDisplay}
+      <Bold>{t("최근 7일 평균")}</Bold> · Vital {avgDisplay}
     </>
   );
 
@@ -186,7 +194,7 @@ export function InsightsPage() {
     <div className="mx-auto w-full max-w-[920px] px-4 pb-24 pt-6 sm:px-6">
       <div className="mb-4">
         <div className="text-[32px] font-extrabold tracking-[-0.03em]">Summary</div>
-        <div className="mt-1 text-[13px] text-ios-sub">맞춤 회복 중심 인사이트</div>
+        <div className="mt-1 text-[13px] text-ios-sub">{t("맞춤 회복 중심 인사이트")}</div>
       </div>
 
       <div className="mt-4">
@@ -202,7 +210,7 @@ export function InsightsPage() {
             </>
           ) : null}
           <span className="opacity-40">·</span>
-          <span>{menstrual.enabled ? menstrual.label : "주기"}</span>
+          <span>{menstrual.enabled ? t(menstrual.label) : t("주기")}</span>
           <span className="opacity-40">·</span>
           <span>Vital {todayDisplay}</span>
         </div>
@@ -215,13 +223,13 @@ export function InsightsPage() {
           label="Personalized Recovery"
           title="맞춤 회복 처방"
           metric={top1 ? formatPct(top1.pct) : "—"}
-          metricLabel={top1 ? top1.label : "핵심 요인"}
+          metricLabel={top1 ? top1.label : t("핵심 요인")}
           summary={recoverySummary}
           detail={recoveryDetail}
           chips={(
             <>
-              <AccentPill color={ACCENTS.mint}>오늘의 오더 포함</AccentPill>
-              <AccentPill color={ACCENTS.mint}>맞춤 처방</AccentPill>
+              <AccentPill color={ACCENTS.mint}>{t("오늘의 오더 포함")}</AccentPill>
+              <AccentPill color={ACCENTS.mint}>{t("맞춤 처방")}</AccentPill>
             </>
           )}
         />
@@ -232,7 +240,7 @@ export function InsightsPage() {
           href="/insights/trends"
           accent="mint"
           label="Stats"
-          title="최근 7일 통계"
+          title={t("최근 7일 통계")}
           metric={avgDisplay}
           metricLabel="Avg Vital"
           summary={trendSummary}
@@ -248,12 +256,12 @@ export function InsightsPage() {
           href="/insights/thieves"
           accent="pink"
           label="Battery Thieves"
-          title="에너지 도둑"
+          title={t("에너지 도둑")}
           metric={top1 ? formatPct(top1.pct) : "—"}
-          metricLabel={top1 ? top1.label : "핵심 요인"}
+          metricLabel={top1 ? top1.label : t("핵심 요인")}
           summary={thievesSummary}
           detail={thievesDetail}
-          chips={<AccentPill color={ACCENTS.pink}>피로 요인 집중 분석</AccentPill>}
+          chips={<AccentPill color={ACCENTS.pink}>{t("피로 요인 집중 분석")}</AccentPill>}
         />
       </Section>
 
@@ -263,20 +271,20 @@ export function InsightsPage() {
             href="/insights/timeline"
             accent="navy"
             label="Timeline Forecast"
-            title="타임라인 예보"
+            title={t("타임라인 예보")}
             metric={shiftKo(todayShift)}
             metricLabel="Shift"
             summary={(
               <>
-                <Bold>{isRestDay ? "휴식일 회복 추천" : "알고리즘 회복 추천"}</Bold> · {shiftKo(todayShift)} 기준
+                <Bold>{isRestDay ? t("휴식일 회복 추천") : t("알고리즘 회복 추천")}</Bold> · {shiftKo(todayShift)} {t("기준")}
               </>
             )}
             detail={
               isRestDay
-                ? "근무 없이 회복을 최적화하는 휴식 루틴을 안내합니다."
-                : "출근 전 · 근무 중 · 퇴근 후 회복 루틴을 안내합니다."
+                ? t("근무 없이 회복을 최적화하는 휴식 루틴을 안내합니다.")
+                : t("출근 전 · 근무 중 · 퇴근 후 회복 루틴을 안내합니다.")
             }
-            chips={<AccentPill color={ACCENTS.navy}>{isRestDay ? "휴식 최적화" : "근무 단계별"}</AccentPill>}
+            chips={<AccentPill color={ACCENTS.navy}>{isRestDay ? t("휴식 최적화") : t("근무 단계별")}</AccentPill>}
           />
         </Section>
       ) : null}
@@ -286,11 +294,11 @@ export function InsightsPage() {
           href="/insights/vital"
           accent="mint"
           label="WNL Vital"
-          title="오늘 바이탈 요약"
+          title={t("오늘 바이탈 요약")}
           metric={todayDisplay}
           metricLabel="/ 100"
           summary={<Bold>{statusLabel(status)}</Bold>}
-          detail="상단 바이탈 카드에서 자세히 확인할 수 있어요."
+          detail={t("상단 바이탈 카드에서 자세히 확인할 수 있어요.")}
           chips={<Chip>{syncLabel}</Chip>}
           valueColor={statusColor(status)}
         />

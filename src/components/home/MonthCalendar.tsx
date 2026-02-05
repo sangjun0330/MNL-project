@@ -10,6 +10,7 @@ import type { Shift } from "@/lib/types";
 import type { EmotionEntry, MenstrualSettings } from "@/lib/model";
 import { menstrualContextForDate } from "@/lib/menstrual";
 import { useAppStoreSelector } from "@/lib/store";
+import { useI18n } from "@/lib/useI18n";
 
 type RiskTone = "green" | "orange" | "red";
 
@@ -31,8 +32,6 @@ type Props = {
   selected: ISODate;
   onSelect: (iso: ISODate) => void;
 };
-
-const weekdays = ["일", "월", "화", "수", "목", "금", "토"];
 
 function firstLine(note?: string) {
   if (!note) return "";
@@ -68,9 +67,12 @@ export function MonthCalendar({
   selected,
   onSelect,
 }: Props) {
+  const { t } = useI18n();
   // ✅ menstrual prop이 안 넘어오는 화면에서도 표시되도록 store fallback
   const menstrualFallback = useAppStoreSelector((s) => s.settings.menstrual);
   const menstrualEffective: MenstrualSettings | undefined = menstrual ?? (menstrualFallback as any);
+
+  const weekdays = useMemo(() => [t("일"), t("월"), t("화"), t("수"), t("목"), t("금"), t("토")], [t]);
 
   const start = useMemo(() => startOfMonth(month), [month]);
 
@@ -178,7 +180,7 @@ export function MonthCalendar({
       <div className="flex items-center justify-between">
         <div>
           <div className="text-[18px] font-semibold">{formatMonthTitle(month)}</div>
-          <div className="mt-1 text-[12.5px] text-ios-muted">날짜를 눌러 기록/편집</div>
+          <div className="mt-1 text-[12.5px] text-ios-muted">{t("날짜를 눌러 기록/편집")}</div>
         </div>
 
         {onMonthChange ? (
@@ -188,14 +190,14 @@ export function MonthCalendar({
               className="rounded-2xl border border-ios-sep bg-white px-3 py-2 text-[12.5px] font-semibold"
               onClick={() => onMonthChange(addMonths(month, -1))}
             >
-              이전
+              {t("이전")}
             </button>
             <button
               type="button"
               className="rounded-2xl border border-ios-sep bg-white px-3 py-2 text-[12.5px] font-semibold"
               onClick={() => onMonthChange(addMonths(month, 1))}
             >
-              다음
+              {t("다음")}
             </button>
           </div>
         ) : null}

@@ -14,9 +14,11 @@ import { MonthCalendar } from "@/components/home/MonthCalendar";
 import { ScheduleRecordSheet } from "@/components/schedule/ScheduleRecordSheet";
 import { ShiftPatternQuickApplyCard } from "@/components/schedule/ShiftPatternQuickApplyCard";
 import { MenstrualSettingsForm } from "@/components/settings/MenstrualSettingsForm";
+import { useI18n } from "@/lib/useI18n";
 
 export function SchedulePage() {
   const store = useAppStore();
+  const { t } = useI18n();
   const [selected, setSelected] = useState<ISODate>(() => todayISO());
 
   const [month, setMonth] = useState<Date>(() => startOfMonth(fromISODate(selected)));
@@ -69,13 +71,13 @@ export function SchedulePage() {
       <Card className="p-5">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <div className="text-[16px] font-semibold">일정</div>
-            <div className="mt-1 text-[12.5px] text-ios-muted">날짜를 누르면 바로 기록이 열려요</div>
+            <div className="text-[16px] font-semibold">{t("일정")}</div>
+            <div className="mt-1 text-[12.5px] text-ios-muted">{t("날짜를 누르면 바로 기록이 열려요")}</div>
           </div>
         </div>
 
         <div className="mt-3 text-[12.5px] text-ios-muted">
-          {selected} · {selShift ? `근무 ${selShiftName?.trim() || (selShift === "VAC" ? "VA" : selShift)}` : "근무 미설정"}
+          {selected} · {selShift ? `${t("근무")} ${selShiftName?.trim() || (selShift === "VAC" ? "VA" : selShift)}` : t("근무 미설정")}
           {selEmotion ? ` · ${selEmotion.mood}/5` : ""}
         </div>
       </Card>
@@ -107,12 +109,12 @@ export function SchedulePage() {
       <Card className="p-5">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="text-[14px] font-semibold">3교대 패턴 적용</div>
-            <div className="mt-1 text-[12.5px] text-ios-muted">선택한 날짜부터 자동 채우기</div>
+            <div className="text-[14px] font-semibold">{t("3교대 패턴 적용")}</div>
+            <div className="mt-1 text-[12.5px] text-ios-muted">{t("선택한 날짜부터 자동 채우기")}</div>
           </div>
 
           <Button variant="secondary" onClick={() => setOpenPattern(true)}>
-            설정
+            {t("설정")}
           </Button>
         </div>
       </Card>
@@ -121,12 +123,12 @@ export function SchedulePage() {
       <Card className="p-5">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="text-[14px] font-semibold">생리주기 설정</div>
-            <div className="mt-1 text-[12.5px] text-ios-muted">캘린더에 주기 표시를 설정합니다.</div>
+            <div className="text-[14px] font-semibold">{t("생리주기 설정")}</div>
+            <div className="mt-1 text-[12.5px] text-ios-muted">{t("캘린더에 주기 표시를 설정합니다.")}</div>
           </div>
 
           <Button variant="secondary" onClick={() => setOpenMenstrual(true)}>
-            설정
+            {t("설정")}
           </Button>
         </div>
       </Card>
@@ -138,8 +140,8 @@ export function SchedulePage() {
       <BottomSheet
         open={openPattern}
         onClose={() => setOpenPattern(false)}
-        title="3교대 패턴"
-        subtitle="선택한 날짜부터 자동 채우기"
+        title={t("3교대 패턴")}
+        subtitle={t("선택한 날짜부터 자동 채우기")}
         variant="appstore"
       >
         <div className="pb-4">
@@ -152,8 +154,8 @@ export function SchedulePage() {
       <BottomSheet
         open={openMenstrual}
         onClose={() => setOpenMenstrual(false)}
-        title="생리주기 설정"
-        subtitle="시작일과 평균 주기/기간 입력"
+        title={t("생리주기 설정")}
+        subtitle={t("시작일과 평균 주기/기간 입력")}
         variant="appstore"
         maxHeightClassName="max-h-[80dvh]"
       >
