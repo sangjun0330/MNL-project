@@ -22,11 +22,14 @@ const AuthContext = createContext<AuthState | null>(null);
 
 let browserClient: ReturnType<typeof createBrowserClient<Database>> | null = null;
 
-export function getSupabaseBrowserClient() {
+export function getSupabaseBrowserClient(): ReturnType<typeof createBrowserClient<Database>> {
   if (browserClient) return browserClient;
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!supabaseUrl || !supabaseAnon) {
+    if (typeof window === "undefined") {
+      return {} as ReturnType<typeof createBrowserClient<Database>>;
+    }
     throw new Error(
       "Supabase env missing. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY."
     );
