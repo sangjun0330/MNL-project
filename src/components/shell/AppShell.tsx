@@ -1,58 +1,39 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { BottomNav } from "@/components/shell/BottomNav";
 import { AutoHealthLogger } from "@/components/system/AutoHealthLogger";
 import { CloudStateSync } from "@/components/system/CloudStateSync";
 import { useAuthState } from "@/lib/auth";
-import { hydrateState, purgeAllLocalState, purgeAllLocalStateIfNeeded, setLocalSaveEnabled, setStorageScope } from "@/lib/store";
+import { hydrateState, purgeAllLocalStateIfNeeded, setLocalSaveEnabled, setStorageScope } from "@/lib/store";
 import { emptyState } from "@/lib/model";
+import type { SyntheticEvent } from "react";
 import { useCallback, useEffect, useState } from "react";
-
-function LoginGate() {
-  return (
-    <div className="mx-auto mt-10 max-w-[520px] rounded-apple border border-ios-sep bg-white p-6 shadow-apple">
-      <div className="text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">로그인이 필요해요</div>
-      <div className="mt-2 text-[13px] text-ios-sub">
-        모든 기능을 사용하려면 로그인해야 합니다. 로그인하면 기록이 계정에 안전하게 저장됩니다.
-      </div>
-      <div className="mt-5 flex flex-wrap items-center gap-2">
-        <Link
-          href="/settings"
-          className="inline-flex h-10 items-center justify-center rounded-full bg-black px-4 text-[13px] font-semibold text-white"
-        >
-          설정에서 로그인하기
-        </Link>
-        <div className="text-[12px] text-ios-muted">Google 로그인 지원</div>
-      </div>
-    </div>
-  );
-}
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { user: auth, status } = useAuthState();
   const isAuthed = Boolean(auth?.userId);
-  const allowPrompt = !isAuthed && status !== "loading" && !pathname?.startsWith("/settings");
+  const allowPrompt = !isAuthed && status === "unauthenticated" && !pathname?.startsWith("/settings");
   const [loginPromptOpen, setLoginPromptOpen] = useState(false);
   const goToSettings = useCallback(() => {
     setLoginPromptOpen(false);
-    router.push("/settings");
-  }, [router]);
+    if (!pathname?.startsWith("/settings")) {
+      router.push("/settings");
+    }
+  }, [router, pathname]);
 
   useEffect(() => {
     // ✅ 로컬 저장 완전 비활성화 + 로컬 데이터 즉시 삭제
     setLocalSaveEnabled(false);
-    purgeAllLocalState();
     purgeAllLocalStateIfNeeded();
   }, []);
 
   useEffect(() => {
+    if (status === "loading") return;
     const uid = auth?.userId ?? null;
-    if (!uid) {
-      purgeAllLocalState();
+    if (!uid || status !== "authenticated") {
       setLocalSaveEnabled(false);
       setStorageScope(null);
       hydrateState(emptyState());
@@ -61,21 +42,37 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     // 로그인해도 로컬 저장은 사용하지 않음 (서버 저장만 사용)
     setLocalSaveEnabled(false);
     setStorageScope(uid);
-  }, [auth?.userId]);
-
-  useEffect(() => {
-    if (!loginPromptOpen) return;
-    const t = window.setTimeout(() => {
-      goToSettings();
-    }, 900);
-    return () => window.clearTimeout(t);
-  }, [loginPromptOpen, goToSettings]);
+  }, [auth?.userId, status]);
 
   useEffect(() => {
     if (!allowPrompt && loginPromptOpen) {
       setLoginPromptOpen(false);
     }
   }, [allowPrompt, loginPromptOpen]);
+
+  useEffect(() => {
+    if (!loginPromptOpen) return;
+    if (isAuthed || pathname?.startsWith("/settings")) {
+      setLoginPromptOpen(false);
+    }
+  }, [loginPromptOpen, isAuthed, pathname]);
+
+  const shouldBlockInteraction = useCallback((target: EventTarget | null) => {
+    if (!allowPrompt) return false;
+    if (!(target instanceof Element)) return false;
+    if (target.closest("[data-auth-modal]")) return false;
+    if (target.closest("[data-auth-allow]")) return false;
+    if (target.closest("a[href]")) return false;
+    const interactive = target.closest("button, input, textarea, select, [role='button']");
+    return Boolean(interactive);
+  }, [allowPrompt]);
+
+  const handleGuardedInteraction = useCallback((event: SyntheticEvent) => {
+    if (!shouldBlockInteraction(event.target)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setLoginPromptOpen(true);
+  }, [shouldBlockInteraction]);
 
   return (
     <div className="min-h-dvh w-full bg-ios-bg">
@@ -88,35 +85,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       */}
       <div
         className="mx-auto max-w-[720px] px-4 pb-[calc(96px+env(safe-area-inset-bottom))]"
-        onPointerDownCapture={(event) => {
-          if (!allowPrompt) return;
-          event.preventDefault();
-          event.stopPropagation();
-          setLoginPromptOpen(true);
-        }}
-        onKeyDownCapture={(event) => {
-          if (!allowPrompt) return;
-          event.preventDefault();
-          event.stopPropagation();
-          setLoginPromptOpen(true);
-        }}
+        onPointerDownCapture={handleGuardedInteraction}
+        onKeyDownCapture={handleGuardedInteraction}
       >
         <div key={pathname} className="wnl-page-enter">
           {children}
         </div>
       </div>
       {allowPrompt && loginPromptOpen ? (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-6">
-          <div className="w-full max-w-[360px] rounded-apple border border-ios-sep bg-white p-5 shadow-apple">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-6" data-auth-modal>
+          <div className="w-full max-w-[360px] rounded-apple border border-ios-sep bg-white p-5 shadow-apple" data-auth-modal>
             <div className="text-[16px] font-bold text-ios-text">로그인이 필요해요</div>
             <div className="mt-2 text-[13px] text-ios-sub">
-              로그인 후에 모든 기능을 사용할 수 있어요. 설정으로 이동합니다.
+              모든 기능을 사용하려면 로그인해야 합니다. 설정으로 이동해 주세요.
             </div>
             <div className="mt-4 flex justify-end">
               <button
                 type="button"
                 className="h-9 rounded-full bg-black px-4 text-[12px] font-semibold text-white"
-                onClick={() => goToSettings()}
+                onClick={goToSettings}
+                data-auth-allow
               >
                 설정으로 이동
               </button>
@@ -124,7 +112,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       ) : null}
-      {allowPrompt && !loginPromptOpen ? <LoginGate /> : null}
       {isAuthed ? <CloudStateSync /> : null}
       {/* 자동 건강 기록/동기화(백그라운드): 매일/실시간 스냅샷 저장 */}
       {isAuthed ? <AutoHealthLogger userId={auth?.userId} /> : null}

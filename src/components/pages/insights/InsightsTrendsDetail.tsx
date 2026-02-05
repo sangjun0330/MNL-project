@@ -6,15 +6,28 @@ import { formatKoreanDate } from "@/lib/date";
 import { TrendChart } from "@/components/insights/TrendChart";
 import { Pill } from "@/components/ui/Pill";
 import { WNL_COLORS, statusFromScore } from "@/lib/wnlInsight";
+import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 
 function pct(p: number) {
   return `${Math.round(p * 100)}%`;
 }
 
 export function InsightsTrendsDetail() {
-  const { end, avgDisplay, avgBody, avgMental, bestWorst, shiftCounts, trend, top3 } = useInsightsData();
+  const { end, avgDisplay, avgBody, avgMental, bestWorst, shiftCounts, trend, top3, recordedDays } = useInsightsData();
 
   const status = statusFromScore(avgDisplay);
+
+  if (recordedDays < 7) {
+    return (
+      <InsightDetailShell
+        title="최근 7일 통계"
+        subtitle={formatKoreanDate(end)}
+        meta="건강 기록 7일 이상부터 통계가 열립니다."
+      >
+        <InsightsLockedNotice recordedDays={recordedDays} />
+      </InsightDetailShell>
+    );
+  }
 
   return (
     <InsightDetailShell

@@ -4,13 +4,26 @@ import { InsightDetailShell, DetailSummaryCard, DetailChip, DETAIL_ACCENTS } fro
 import { useInsightsData } from "@/components/insights/useInsightsData";
 import { formatKoreanDate } from "@/lib/date";
 import { BatteryThieves } from "@/components/insights/v2/BatteryThieves";
+import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 
 function pct(p: number) {
   return `${Math.round(p * 100)}%`;
 }
 
 export function InsightsThievesDetail() {
-  const { end, vitals, top1 } = useInsightsData();
+  const { end, vitals, top1, recordedDays } = useInsightsData();
+
+  if (recordedDays < 7) {
+    return (
+      <InsightDetailShell
+        title="에너지 도둑"
+        subtitle={formatKoreanDate(end)}
+        meta="건강 기록 7일 이상부터 분석이 열립니다."
+      >
+        <InsightsLockedNotice recordedDays={recordedDays} />
+      </InsightDetailShell>
+    );
+  }
 
   const summary = top1
     ? (

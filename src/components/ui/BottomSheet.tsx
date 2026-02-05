@@ -175,6 +175,7 @@ export function BottomSheet({
           visible ? "opacity-100" : "opacity-0"
         )}
         onClick={closeWithAnimation}
+        data-auth-allow
       />
       <div className="absolute bottom-0 left-0 right-0 mx-auto max-w-[460px]">
         <div
@@ -246,6 +247,7 @@ export function BottomSheet({
                   aria-label="Close"
                   className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-black/10 bg-white/80 text-[16px] text-ios-text"
                   onClick={closeWithAnimation}
+                  data-auth-allow
                 >
                   ✕
                 </button>

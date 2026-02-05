@@ -15,6 +15,7 @@ import { HeroDashboard } from "@/components/insights/v2/HeroDashboard";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { FACTOR_LABEL_KO, type FactorKey } from "@/lib/insightsV2";
 import { WNL_COLORS, statusColor, statusFromScore } from "@/lib/wnlInsight";
+import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 
 function clamp01(n: number) {
   const v = Number.isFinite(n) ? n : 0;
@@ -26,8 +27,20 @@ function pct(n: number) {
 }
 
 export function InsightsVitalDetail() {
-  const { end, todayShift, todayVital, syncLabel, fastCharge, accuracy, todayDisplay, top3, hasTodayShift } = useInsightsData();
+  const { end, todayShift, todayVital, syncLabel, fastCharge, accuracy, todayDisplay, top3, hasTodayShift, recordedDays } = useInsightsData();
   const [openSync, setOpenSync] = useState(false);
+
+  if (recordedDays < 7) {
+    return (
+      <InsightDetailShell
+        title="WNL Vital"
+        subtitle={formatKoreanDate(end)}
+        meta="건강 기록 7일 이상부터 바이탈이 열립니다."
+      >
+        <InsightsLockedNotice recordedDays={recordedDays} />
+      </InsightDetailShell>
+    );
+  }
 
   const body = useMemo(() => Math.round(todayVital?.body.value ?? 0), [todayVital]);
   const mental = useMemo(() => Math.round(todayVital?.mental.ema ?? 0), [todayVital]);
