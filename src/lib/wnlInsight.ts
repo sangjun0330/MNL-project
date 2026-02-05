@@ -54,9 +54,9 @@ export function vitalDisplayScore(vital?: { body: { value: number }; mental: { e
 
 export function statusLabel(status: VitalStatus) {
   const s = normalizeStatus(status);
-  if (s === "stable") return "Stable";
-  if (s === "caution") return "Observation Needed";
-  return "Critical - Rest Needed";
+  if (s === "stable") return "안정";
+  if (s === "caution") return "관찰 필요";
+  return "위험 - 휴식 필요";
 }
 
 export function statusColor(status: VitalStatus) {
@@ -68,9 +68,9 @@ export function statusColor(status: VitalStatus) {
 
 export function statusCopy(status: VitalStatus) {
   const s = normalizeStatus(status);
-  if (s === "stable") return "선생님, 현재 바이탈은 아주 Stable 합니다.";
-  if (s === "caution") return "관찰이 필요합니다. 휴식 오더를 한 번 확인해 주세요.";
-  return "배터리가 Critical 수준입니다. 오프(OFF)가 절실해요.";
+  if (s === "stable") return "현재 바이탈은 안정적이에요.";
+  if (s === "caution") return "관찰이 필요해요. 회복 루틴을 확인해 주세요.";
+  return "배터리가 위험 수준이에요. 충분한 휴식이 필요해요.";
 }
 
 export function clamp(n: number, min: number, max: number) {

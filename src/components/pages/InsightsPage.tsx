@@ -1,124 +1,46 @@
 "use client";
 
 import Link from "next/link";
-import { cn } from "@/lib/cn";
 import { formatKoreanDate } from "@/lib/date";
-import { statusColor, statusLabel } from "@/lib/wnlInsight";
+import { statusLabel } from "@/lib/wnlInsight";
 import { useInsightsData, shiftKo, isInsightsLocked, INSIGHTS_MIN_DAYS } from "@/components/insights/useInsightsData";
-import { HeroDashboard } from "@/components/insights/v2/HeroDashboard";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { useI18n } from "@/lib/useI18n";
 
-const GRADIENTS = {
-  mint: "linear-gradient(135deg, rgba(108,218,195,0.35), rgba(255,255,255,0.95))",
-  pink: "linear-gradient(135deg, rgba(255,158,170,0.35), rgba(255,255,255,0.95))",
-  navy: "linear-gradient(135deg, rgba(27,39,71,0.20), rgba(255,255,255,0.96))",
-} as const;
-
-const ACCENTS = {
-  mint: "#2FB8A3",
-  pink: "#E87485",
-  navy: "#1B2747",
-} as const;
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="mt-7">
-      <div className="mb-2 text-[15px] font-bold tracking-[-0.01em] text-ios-text">{title}</div>
-      <div className="space-y-3">{children}</div>
-    </div>
-  );
+function formatPct(p: number) {
+  return `${Math.round(p * 100)}%`;
 }
 
-function SummaryCard({
+function StatsHubItem({
   href,
-  accent,
   label,
   title,
   metric,
-  metricLabel,
-  summary,
   detail,
-  chips,
-  valueColor,
 }: {
   href: string;
-  accent: keyof typeof GRADIENTS;
   label: string;
   title: string;
-  metric: string | number;
-  metricLabel: string;
-  summary: React.ReactNode;
-  detail?: string;
-  chips?: React.ReactNode;
-  valueColor?: string;
+  metric: string;
+  detail: string;
 }) {
-  const accentColor = ACCENTS[accent];
   return (
     <Link
       href={href}
-      className={cn(
-        "group block rounded-apple border border-ios-sep p-5",
-        "transition-shadow duration-300 hover:shadow-apple"
-      )}
-      style={{ backgroundImage: GRADIENTS[accent] }}
+      className="group rounded-2xl border border-ios-sep bg-white p-4 transition-shadow duration-300 hover:shadow-apple"
+      aria-label={title}
     >
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
+      <div className="flex items-start justify-between gap-3">
+        <div>
           <div className="text-[12px] font-semibold text-ios-sub">{label}</div>
-          <div className="mt-1 text-[18px] font-bold tracking-[-0.01em] text-ios-text">{title}</div>
+          <div className="mt-1 text-[16px] font-bold tracking-[-0.01em] text-ios-text">{title}</div>
         </div>
-        <div className="mt-0.5 text-[22px] text-ios-muted transition group-hover:text-ios-text">›</div>
+        <div className="text-[20px] text-ios-muted transition group-hover:text-ios-text">›</div>
       </div>
-
-      <div className="mt-4 flex items-end gap-2">
-        <div
-          className="text-[34px] font-extrabold tracking-[-0.02em]"
-          style={{ color: valueColor ?? accentColor }}
-        >
-          {metric}
-        </div>
-        <div className="pb-1 text-[14px] font-bold text-ios-text">{metricLabel}</div>
-      </div>
-
-      <div className="mt-2 text-[14px] text-ios-text">
-        <span className="font-bold" style={{ color: accentColor }}>
-          {summary}
-        </span>
-      </div>
-
-      {detail ? <div className="mt-1 text-[13px] text-ios-sub">{detail}</div> : null}
-
-      {chips ? <div className="mt-3 flex flex-wrap items-center gap-2">{chips}</div> : null}
+      <div className="mt-3 text-[28px] font-extrabold tracking-[-0.02em] text-ios-text">{metric}</div>
+      <div className="mt-1 text-[13px] text-ios-sub">{detail}</div>
     </Link>
   );
-}
-
-function Chip({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="rounded-full border border-ios-sep bg-white/80 px-3 py-1 text-[12px] font-semibold text-ios-sub">
-      {children}
-    </span>
-  );
-}
-
-function AccentPill({ children, color }: { children: React.ReactNode; color: string }) {
-  return (
-    <span
-      className="rounded-full border border-ios-sep bg-white/80 px-3 py-1 text-[12px] font-semibold"
-      style={{ color }}
-    >
-      {children}
-    </span>
-  );
-}
-
-function Bold({ children }: { children: React.ReactNode }) {
-  return <span className="font-bold">{children}</span>;
-}
-
-function formatPct(p: number) {
-  return `${Math.round(p * 100)}%`;
 }
 
 export function InsightsPage() {
@@ -129,24 +51,20 @@ export function InsightsPage() {
     menstrual,
     todayDisplay,
     status,
-    syncLabel,
-    todayVital,
-    hasTodayShift,
-    fastCharge,
     avgDisplay,
     avgBody,
     avgMental,
     top1,
+    hasTodayShift,
     recordedDays,
   } = useInsightsData();
-  const isRestDay = todayShift === "OFF" || todayShift === "VAC";
 
   if (isInsightsLocked(recordedDays)) {
     return (
       <div className="mx-auto w-full max-w-[920px] px-4 pb-24 pt-6 sm:px-6">
         <div className="mb-4">
           <div className="text-[32px] font-extrabold tracking-[-0.03em]">Summary</div>
-          <div className="mt-1 text-[13px] text-ios-sub">{t("맞춤 회복 중심 인사이트")}</div>
+          <div className="mt-1 text-[13px] text-ios-sub">{t("통계 중심 인사이트")}</div>
         </div>
 
         <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />
@@ -154,29 +72,7 @@ export function InsightsPage() {
     );
   }
 
-  const recoverySummary = top1 ? (
-    <>
-      <Bold>{t("회복 포커스")}</Bold> · {top1.label}
-    </>
-  ) : (
-    <Bold>{t("맞춤 회복 처방")}</Bold>
-  );
-
-  const recoveryDetail = top1
-    ? t("{label} 비중 {pct} · 오늘의 오더를 함께 확인하세요.", {
-        label: top1.label,
-        pct: formatPct(top1.pct),
-      })
-    : t("오늘의 오더까지 함께 확인할 수 있어요.");
-
-  const thievesSummary = top1 ? (
-    <>
-      <Bold>{t("방전 1순위")}</Bold> · {top1.label}
-    </>
-  ) : (
-    <Bold>{t("에너지 도둑 분석")}</Bold>
-  );
-
+  const thievesMetric = top1 ? formatPct(top1.pct) : "—";
   const thievesDetail = top1
     ? t("{label} 비중 {pct} · 피로 요인을 줄여보세요.", {
         label: top1.label,
@@ -184,125 +80,72 @@ export function InsightsPage() {
       })
     : t("방전 요인을 분석할 데이터가 부족해요.");
 
-  const trendSummary = (
-    <>
-      <Bold>{t("최근 7일 평균")}</Bold> · Vital {avgDisplay}
-    </>
-  );
+  const timelineMetric = hasTodayShift ? shiftKo(todayShift) : "—";
+  const timelineDetail = hasTodayShift
+    ? t("{shift} 기준으로 출근 전 · 근무 중 · 퇴근 후 회복 추천을 제공합니다.", {
+        shift: shiftKo(todayShift),
+      })
+    : t("오늘 근무가 설정되지 않았어요. 일정에서 근무를 입력하면 타임라인 예보가 열립니다.");
 
   return (
     <div className="mx-auto w-full max-w-[920px] px-4 pb-24 pt-6 sm:px-6">
       <div className="mb-4">
         <div className="text-[32px] font-extrabold tracking-[-0.03em]">Summary</div>
-        <div className="mt-1 text-[13px] text-ios-sub">{t("맞춤 회복 중심 인사이트")}</div>
+        <div className="mt-1 text-[13px] text-ios-sub">{t("통계 중심 인사이트")}</div>
       </div>
 
-      <div className="mt-4">
-        <Link href="/insights/vital" className="block transition-shadow duration-300 hover:shadow-apple">
-          <HeroDashboard vital={todayVital} syncLabel={syncLabel} fastCharge={fastCharge} />
-        </Link>
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-[12.5px] text-ios-sub">
-          <span>{formatKoreanDate(end)}</span>
-          {hasTodayShift ? (
-            <>
-              <span className="opacity-40">·</span>
-              <span>{shiftKo(todayShift)}</span>
-            </>
-          ) : null}
-          <span className="opacity-40">·</span>
-          <span>{menstrual.enabled ? t(menstrual.label) : t("주기")}</span>
-          <span className="opacity-40">·</span>
-          <span>Vital {todayDisplay}</span>
+      <div className="flex flex-wrap items-center gap-2 text-[12.5px] text-ios-sub">
+        <span>{formatKoreanDate(end)}</span>
+        {hasTodayShift ? (
+          <>
+            <span className="opacity-40">·</span>
+            <span>{shiftKo(todayShift)}</span>
+          </>
+        ) : null}
+        <span className="opacity-40">·</span>
+        <span>{menstrual.enabled ? t(menstrual.label) : t("주기")}</span>
+        <span className="opacity-40">·</span>
+        <span>Vital {todayDisplay}</span>
+      </div>
+
+      <section className="mt-4 rounded-apple border border-ios-sep bg-[linear-gradient(135deg,rgba(108,218,195,0.16),rgba(255,255,255,0.96))] p-5 shadow-apple">
+        <div>
+          <div className="text-[12px] font-semibold text-ios-sub">{t("통계 허브")}</div>
+          <div className="mt-1 text-[22px] font-extrabold tracking-[-0.02em] text-ios-text">{t("통계")}</div>
+          <div className="mt-1 text-[13px] text-ios-sub">{t("통계와 알고리즘 결과를 한 곳에서 확인하세요.")}</div>
         </div>
-      </div>
 
-      <Section title="Pinned">
-        <SummaryCard
-          href="/insights/recovery"
-          accent="mint"
-          label="Personalized Recovery"
-          title={t("맞춤 회복 처방")}
-          metric={top1 ? formatPct(top1.pct) : "—"}
-          metricLabel={top1 ? top1.label : t("핵심 요인")}
-          summary={recoverySummary}
-          detail={recoveryDetail}
-          chips={(
-            <>
-              <AccentPill color={ACCENTS.mint}>{t("오늘의 오더 포함")}</AccentPill>
-              <AccentPill color={ACCENTS.mint}>{t("맞춤 처방")}</AccentPill>
-            </>
-          )}
-        />
-      </Section>
-
-      <Section title="Trends">
-        <SummaryCard
-          href="/insights/trends"
-          accent="mint"
-          label="Stats"
-          title={t("최근 7일 통계")}
-          metric={avgDisplay}
-          metricLabel="Avg Vital"
-          summary={trendSummary}
-          detail={`Body ${avgBody} · Mental ${avgMental}`}
-          chips={(
-            <>
-              <AccentPill color={ACCENTS.mint}>Body {avgBody}</AccentPill>
-              <AccentPill color={ACCENTS.mint}>Mental {avgMental}</AccentPill>
-            </>
-          )}
-        />
-        <SummaryCard
-          href="/insights/thieves"
-          accent="pink"
-          label="Battery Thieves"
-          title={t("에너지 도둑")}
-          metric={top1 ? formatPct(top1.pct) : "—"}
-          metricLabel={top1 ? top1.label : t("핵심 요인")}
-          summary={thievesSummary}
-          detail={thievesDetail}
-          chips={<AccentPill color={ACCENTS.pink}>{t("피로 요인 집중 분석")}</AccentPill>}
-        />
-      </Section>
-
-      {hasTodayShift ? (
-        <Section title="Plan">
-          <SummaryCard
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <StatsHubItem
+            href="/insights/trends"
+            label="Stats"
+            title={t("최근 7일 통계")}
+            metric={`Vital ${avgDisplay}`}
+            detail={`Body ${avgBody} · Mental ${avgMental}`}
+          />
+          <StatsHubItem
+            href="/insights/vital"
+            label="WNL Vital"
+            title={t("오늘 바이탈 요약")}
+            metric={`${todayDisplay} / 100`}
+            detail={t(statusLabel(status))}
+          />
+          <StatsHubItem
+            href="/insights/thieves"
+            label="Battery Thieves"
+            title={t("에너지 도둑")}
+            metric={thievesMetric}
+            detail={thievesDetail}
+          />
+          <StatsHubItem
             href="/insights/timeline"
-            accent="navy"
             label="Timeline Forecast"
             title={t("타임라인 예보")}
-            metric={shiftKo(todayShift)}
-            metricLabel="Shift"
-            summary={(
-              <>
-                <Bold>{isRestDay ? t("휴식일 회복 추천") : t("알고리즘 회복 추천")}</Bold> · {shiftKo(todayShift)} {t("기준")}
-              </>
-            )}
-            detail={
-              isRestDay
-                ? t("근무 없이 회복을 최적화하는 휴식 루틴을 안내합니다.")
-                : t("출근 전 · 근무 중 · 퇴근 후 회복 루틴을 안내합니다.")
-            }
-            chips={<AccentPill color={ACCENTS.navy}>{isRestDay ? t("휴식 최적화") : t("근무 단계별")}</AccentPill>}
+            metric={timelineMetric}
+            detail={timelineDetail}
           />
-        </Section>
-      ) : null}
-
-      <Section title="Vitals">
-        <SummaryCard
-          href="/insights/vital"
-          accent="mint"
-          label="WNL Vital"
-          title={t("오늘 바이탈 요약")}
-          metric={todayDisplay}
-          metricLabel="/ 100"
-          summary={<Bold>{statusLabel(status)}</Bold>}
-          detail={t("상단 바이탈 카드에서 자세히 확인할 수 있어요.")}
-          chips={<Chip>{syncLabel}</Chip>}
-          valueColor={statusColor(status)}
-        />
-      </Section>
+        </div>
+      </section>
     </div>
   );
 }
