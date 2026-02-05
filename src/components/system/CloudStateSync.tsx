@@ -18,7 +18,7 @@ export function CloudStateSync() {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const storeRef = useRef(store);
 
-  const getAuthHeaders = useCallback(async () => {
+  const getAuthHeaders = useCallback(async (): Promise<Record<string, string>> => {
     try {
       const { data } = await supabase.auth.getSession();
       const token = data.session?.access_token;
