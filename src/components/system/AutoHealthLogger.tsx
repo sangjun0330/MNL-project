@@ -4,8 +4,8 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { ISODate } from "@/lib/date";
 import { addDays, fromISODate, toISODate, todayISO } from "@/lib/date";
 import { useAppStore } from "@/lib/store";
-import { buildDailyHealthSnapshot, getOrCreateDeviceId } from "@/lib/healthLog";
-import { enqueueDailyLog, flushOutbox } from "@/lib/logSync";
+import { buildDailyHealthSnapshot } from "@/lib/healthLog";
+import { getSupabaseBrowserClient } from "@/lib/auth";
 
 // 서로 다른 타입의 map들을 섞어도 날짜 키만 모을 수 있도록 unknown 기반으로 처리
 function unionKeys(...maps: Array<Record<string, unknown> | undefined>): Set<string> {
@@ -33,11 +33,13 @@ const MAX_LOOKBACK_DAYS = 14;
 
 export function AutoHealthLogger({ userId }: { userId?: string | null }) {
   const store = useAppStore(); // AppStore snapshot (store.getState 포함)
-  const deviceId = useMemo(() => userId ?? getOrCreateDeviceId(), [userId]);
+  const deviceId = useMemo(() => userId ?? "", [userId]);
+  const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 
   const prevStateRef = useRef<ReturnType<typeof store.getState> | null>(null);
   const dirtyRef = useRef<Set<ISODate>>(new Set());
   const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const metaRef = useRef<Record<string, { createdAt: number; updatedAt: number; hash: string }>>({});
 
   // ✅ dev/fast refresh/route 전환 등에서 초기 effect가 중복 실행되며 폭주하는 걸 방지
   const didInitRef = useRef(false);
@@ -55,20 +57,36 @@ export function AutoHealthLogger({ userId }: { userId?: string | null }) {
 
     // ✅ 변경 감지 디바운스: 입력 중에는 모아서 1번만 전송
     flushTimer.current = setTimeout(async () => {
+      if (!deviceId) return;
       const batch = Array.from(dirtyRef.current);
       dirtyRef.current.clear();
       if (!batch.length) return;
 
       const state = store.getState();
-      for (const iso of batch) {
-        const payload = buildDailyHealthSnapshot({ state, deviceId, dateISO: iso });
-        enqueueDailyLog(iso, payload, deviceId);
-      }
+      const rows = batch.map((iso) => {
+        const payload = buildDailyHealthSnapshot({
+          state,
+          deviceId,
+          dateISO: iso,
+          metaStore: metaRef.current,
+        });
+        return {
+          device_id: deviceId,
+          date_iso: iso,
+          payload,
+          client_updated_at: payload.updatedAt,
+          updated_at: new Date(payload.updatedAt).toISOString(),
+        };
+      });
 
-      // 네트워크 상태 좋으면 즉시 업로드 시도(실패해도 outbox에 남음)
-      void flushOutbox();
+      if (!rows.length) return;
+      try {
+        await supabase.from("wnl_daily_logs").upsert(rows, { onConflict: "device_id,date_iso" });
+      } catch {
+        // ignore network errors
+      }
     }, 500);
-  }, [deviceId, store]);
+  }, [deviceId, store, supabase]);
 
   // ✅ 최초 1회: 최근 기록이 있는 날짜만 스냅샷으로 enqueue
   useEffect(() => {
@@ -88,18 +106,6 @@ export function AutoHealthLogger({ userId }: { userId?: string | null }) {
     dates.add(today);
 
     markDirtyAndScheduleFlush(Array.from(dates) as ISODate[]);
-
-    // ✅ 주기적 outbox flush (너무 잦은 호출 방지)
-    // - 즉시 flushOutbox()는 markDirty에서 이미 수행
-    // - 백업성 재시도는 2분 정도면 충분
-    const t = setInterval(() => void flushOutbox(), 120_000);
-    const onOnline = () => void flushOutbox();
-
-    window.addEventListener("online", onOnline);
-    return () => {
-      clearInterval(t);
-      window.removeEventListener("online", onOnline);
-    };
   }, [markDirtyAndScheduleFlush, store]);
 
   // ✅ store 업데이트 감지: 변경된 날짜만 dirty로 수집

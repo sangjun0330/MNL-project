@@ -54,28 +54,12 @@ export function getOrCreateDeviceId() {
  * ✅ 동일한 상태에서 매 렌더마다 updatedAt이 변해버리면
  * AutoHealthLogger가 변경으로 인식해서 POST를 계속 보냅니다.
  *
- * 그래서 날짜별로 "내용 해시"를 localStorage에 저장해두고,
+ * 로컬 저장 없이(메모리) 날짜별 "내용 해시"를 저장하고,
  * 내용이 바뀔 때만 updatedAt을 갱신합니다.
  */
 type Meta = { createdAt: number; updatedAt: number; hash: string };
-const META_KEY = "wnl_daily_meta_v1";
-
-function readMeta(): Record<string, Meta> {
-  if (typeof window === "undefined") return {};
-  try {
-    return JSON.parse(window.localStorage.getItem(META_KEY) ?? "{}") as Record<string, Meta>;
-  } catch {
-    return {};
-  }
-}
-function writeMeta(next: Record<string, Meta>) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(META_KEY, JSON.stringify(next));
-  } catch {
-    // ignore quota errors in dev
-  }
-}
+type MetaStore = Record<string, Meta>;
+const MEMORY_META: MetaStore = {};
 
 function stableHash(obj: any) {
   const s = JSON.stringify(obj);
@@ -88,6 +72,7 @@ export function buildDailyHealthSnapshot(opts: {
   state: AppState;
   deviceId: string;
   dateISO: ISODate;
+  metaStore?: MetaStore;
 }): DailyHealthSnapshot {
   const { state, deviceId, dateISO } = opts;
 
@@ -124,7 +109,7 @@ export function buildDailyHealthSnapshot(opts: {
   const content = { dateISO, shift, note: note ?? null, bio: bio ?? null, mood };
 
   const now = Date.now();
-  const all = readMeta();
+  const all = opts.metaStore ?? MEMORY_META;
   const prev = all[dateISO];
   const nextHash = stableHash(content);
 
@@ -138,7 +123,6 @@ export function buildDailyHealthSnapshot(opts: {
   }
 
   all[dateISO] = { createdAt, updatedAt, hash: nextHash };
-  writeMeta(all);
 
   return {
     version: 1,
