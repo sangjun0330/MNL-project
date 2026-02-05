@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useAuth } from "@/lib/auth";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getSupabaseBrowserClient, useAuth } from "@/lib/auth";
 import { hydrateState, useAppStore } from "@/lib/store";
 import { emptyState } from "@/lib/model";
 
@@ -12,10 +12,21 @@ export function CloudStateSync() {
   const auth = useAuth();
   const store = useAppStore();
   const userId = auth?.userId ?? null;
+  const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const [hydrated, setHydrated] = useState(false);
   const skipNextSave = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const storeRef = useRef(store);
+
+  const getAuthHeaders = useCallback(async () => {
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      return token ? { Authorization: `Bearer ${token}` } : {};
+    } catch {
+      return {};
+    }
+  }, [supabase]);
 
   useEffect(() => {
     storeRef.current = store;
@@ -38,9 +49,10 @@ export function CloudStateSync() {
           hydrateState(fresh);
           skipNextSave.current = true;
           try {
+            const authHeaders = await getAuthHeaders();
             await fetch("/api/user/state", {
               method: "POST",
-              headers: { "content-type": "application/json" },
+              headers: { "content-type": "application/json", ...authHeaders },
               body: JSON.stringify({ userId, state: fresh }),
             });
           } catch {
@@ -55,7 +67,11 @@ export function CloudStateSync() {
       }
 
       try {
-        const res = await fetch(`/api/user/state?userId=${encodeURIComponent(userId)}`);
+        const authHeaders = await getAuthHeaders();
+        const res = await fetch("/api/user/state", {
+          method: "GET",
+          headers: { "content-type": "application/json", ...authHeaders },
+        });
         if (!res.ok) {
           if (active) setHydrated(true);
           return;
@@ -67,9 +83,10 @@ export function CloudStateSync() {
           hydrateState(json.state);
           skipNextSave.current = true;
         } else {
+          const authHeaders = await getAuthHeaders();
           await fetch("/api/user/state", {
             method: "POST",
-            headers: { "content-type": "application/json" },
+            headers: { "content-type": "application/json", ...authHeaders },
             body: JSON.stringify({ userId, state: storeRef.current.getState() }),
           });
         }
@@ -83,7 +100,7 @@ export function CloudStateSync() {
     return () => {
       active = false;
     };
-  }, [userId]);
+  }, [userId, getAuthHeaders]);
 
   useEffect(() => {
     if (!userId || !hydrated) return;
@@ -95,17 +112,20 @@ export function CloudStateSync() {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       const state = store.getState();
-      void fetch("/api/user/state", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ userId, state }),
-      });
+      void (async () => {
+        const authHeaders = await getAuthHeaders();
+        await fetch("/api/user/state", {
+          method: "POST",
+          headers: { "content-type": "application/json", ...authHeaders },
+          body: JSON.stringify({ userId, state }),
+        });
+      })();
     }, SAVE_DEBOUNCE_MS);
 
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
-  }, [userId, hydrated, store]);
+  }, [userId, hydrated, store, getAuthHeaders]);
 
   return null;
 }

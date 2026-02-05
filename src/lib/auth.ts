@@ -22,7 +22,7 @@ const AuthContext = createContext<AuthState | null>(null);
 
 let browserClient: ReturnType<typeof createBrowserClient<Database>> | null = null;
 
-function getSupabaseBrowserClient() {
+export function getSupabaseBrowserClient() {
   if (browserClient) return browserClient;
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;

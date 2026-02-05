@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { loadUserState, saveUserState } from "@/lib/server/userStateStore";
-import { getRouteSupabaseClient } from "@/lib/server/supabaseRouteClient";
+import { readUserIdFromRequest } from "@/lib/server/readUserId";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -9,18 +9,8 @@ function bad(status: number, message: string) {
   return NextResponse.json({ ok: false, error: message }, { status });
 }
 
-async function readUserId(): Promise<string> {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!supabaseUrl || !supabaseAnon) return "";
-
-  const supabase = await getRouteSupabaseClient();
-  const { data } = await supabase.auth.getUser();
-  return data.user?.id ?? "";
-}
-
 export async function GET(req: Request) {
-  const userId = await readUserId();
+  const userId = await readUserIdFromRequest(req);
   if (!userId) return bad(401, "login required");
 
   try {
@@ -43,7 +33,7 @@ export async function POST(req: Request) {
     return bad(400, "invalid json");
   }
 
-  const userId = await readUserId();
+  const userId = await readUserIdFromRequest(req);
   const state = body?.state;
 
   if (!userId) return bad(401, "login required");
