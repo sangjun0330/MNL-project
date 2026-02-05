@@ -134,8 +134,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </div>
       {allowPrompt && loginPromptOpen ? (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-6" data-auth-modal>
-          <div className="w-full max-w-[360px] rounded-apple border border-ios-sep bg-white p-5 shadow-apple" data-auth-modal>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-6 wnl-backdrop" data-auth-modal>
+          <div className="w-full max-w-[360px] rounded-apple border border-ios-sep bg-white p-5 shadow-apple wnl-modal" data-auth-modal>
             <div className="text-[16px] font-bold text-ios-text">로그인이 필요해요</div>
             <div className="mt-2 text-[13px] text-ios-sub">
               모든 기능을 사용하려면 로그인해야 합니다. 설정으로 이동해 주세요.
@@ -154,8 +154,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       ) : null}
       {isAuthed && !cloudReady ? (
-        <div className="fixed inset-0 z-[55] flex items-center justify-center bg-white/70 backdrop-blur-sm px-6">
-          <div className="w-full max-w-[320px] rounded-apple border border-ios-sep bg-white p-5 shadow-apple">
+        <div className="fixed inset-0 z-[55] flex items-center justify-center bg-white/70 backdrop-blur-sm px-6 wnl-backdrop">
+          <div className="w-full max-w-[320px] rounded-apple border border-ios-sep bg-white p-5 shadow-apple wnl-modal">
             <div className="text-[15px] font-semibold text-ios-text">데이터 동기화 중…</div>
             <div className="mt-2 text-[12.5px] text-ios-sub">로그인 데이터를 불러오는 중입니다.</div>
           </div>

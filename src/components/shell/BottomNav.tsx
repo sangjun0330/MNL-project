@@ -68,9 +68,7 @@ export function BottomNav() {
           <nav
             className={cn(
               "pointer-events-auto",
-              "rounded-full border border-ios-sep bg-white/85",
-              "shadow-[0_12px_36px_rgba(0,0,0,0.12)]",
-              "backdrop-blur-xl"
+              "liquid-glass liquid-glass--pill"
             )}
           >
             <div className="grid grid-cols-4 gap-1 p-1.5">
@@ -81,10 +79,12 @@ export function BottomNav() {
                     key={it.href}
                     href={it.href}
                     className={cn(
-                      "flex h-11 items-center justify-center rounded-full text-[13px] font-semibold transition touch-manipulation",
-                      active ? "wnl-nav-active" : "wnl-nav-inactive",
+                      "flex h-11 items-center justify-center rounded-full text-[13px] font-semibold transition duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] touch-manipulation",
                       active
-                        ? "bg-black text-white"
+                        ? "wnl-nav-active liquid-glass liquid-glass--pill liquid-glass--subtle"
+                        : "wnl-nav-inactive",
+                      active
+                        ? "text-ios-text"
                         : "text-ios-muted hover:bg-black/5"
                     )}
                     onPointerDown={() => {
