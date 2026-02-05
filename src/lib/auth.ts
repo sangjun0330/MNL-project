@@ -92,7 +92,7 @@ export function useAuth(): AuthUser | null {
   return useAuthState().user ?? null;
 }
 
-export function signInWithProvider(provider: "google" | "kakao") {
+export function signInWithProvider(provider: "google" = "google") {
   const supabase = getSupabaseBrowserClient();
   const isBrowser = typeof window !== "undefined";
   const origin = isBrowser ? window.location.origin : "";
@@ -102,16 +102,10 @@ export function signInWithProvider(provider: "google" | "kakao") {
   const redirectTo = origin
     ? `${origin}/auth/callback?next=${encodeURIComponent(next)}`
     : undefined;
-  const isKakao = provider === "kakao";
-  const scopes = isKakao ? "profile_nickname" : undefined;
-  const queryParams = isKakao ? { prompt: "login" } : undefined;
-
   return supabase.auth.signInWithOAuth({
     provider,
     options: {
       redirectTo,
-      scopes,
-      queryParams,
     },
   });
 }
