@@ -6,8 +6,8 @@ import { formatKoreanDate } from "@/lib/date";
 import { useInsightsData, shiftKo, isInsightsLocked, INSIGHTS_MIN_DAYS } from "@/components/insights/useInsightsData";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { HeroDashboard } from "@/components/insights/v2/HeroDashboard";
-import { TrendChart } from "@/components/insights/TrendChart";
-import { BatteryThieves } from "@/components/insights/v2/BatteryThieves";
+import { DetailSummaryCard, DetailChip, DETAIL_ACCENTS } from "@/components/pages/insights/InsightDetailShell";
+import { statusFromScore } from "@/lib/wnlInsight";
 import { useI18n } from "@/lib/useI18n";
 
 function MetricCard({
@@ -82,7 +82,7 @@ export function InsightsPage() {
     avgDisplay,
     avgBody,
     avgMental,
-    trend,
+    shiftCounts,
     top1,
     hasTodayShift,
     recordedDays,
@@ -97,6 +97,7 @@ export function InsightsPage() {
     return Math.round(raw * 100);
   }, [todayVital]);
   const night = useMemo(() => todayVital?.engine?.nightStreak ?? 0, [todayVital]);
+  const weeklyStatus = useMemo(() => statusFromScore(avgDisplay), [avgDisplay]);
 
   if (isInsightsLocked(recordedDays)) {
     return (
@@ -181,9 +182,36 @@ export function InsightsPage() {
             <span className="text-[20px] text-ios-muted">›</span>
           </div>
         </Link>
-        <div className="mt-3">
-          <TrendChart data={trend} />
-        </div>
+        <Link href="/insights/trends" className="mt-3 block">
+          <DetailSummaryCard
+            accent="mint"
+            label="Stats"
+            title={t("주간 요약")}
+            metric={avgDisplay}
+            metricLabel="Avg Vital"
+            summary={(
+              <>
+                <span className="font-bold">{t("최근 7일 평균")}</span> · Vital {avgDisplay}
+              </>
+            )}
+            detail={`Body ${avgBody} · Mental ${avgMental}`}
+            chips={(
+              <>
+                <DetailChip color={DETAIL_ACCENTS.mint}>Body {avgBody}</DetailChip>
+                <DetailChip color={DETAIL_ACCENTS.mint}>Mental {avgMental}</DetailChip>
+                <DetailChip color={DETAIL_ACCENTS.mint}>{t("근무 D")} {shiftCounts.D}</DetailChip>
+                <DetailChip color={DETAIL_ACCENTS.mint}>{t("근무 E")} {shiftCounts.E}</DetailChip>
+              </>
+            )}
+            valueColor={
+              weeklyStatus === "stable"
+                ? DETAIL_ACCENTS.mint
+                : weeklyStatus === "caution" || weeklyStatus === "observation"
+                ? DETAIL_ACCENTS.navy
+                : DETAIL_ACCENTS.pink
+            }
+          />
+        </Link>
       </section>
 
       {/* Battery Thieves inline */}
@@ -201,9 +229,34 @@ export function InsightsPage() {
             <span className="text-[20px] text-ios-muted">›</span>
           </div>
         </Link>
-        <div className="mt-3">
-          <BatteryThieves vitals={vitals} periodLabel={t("최근 7일 기준")} />
-        </div>
+        <Link href="/insights/thieves" className="mt-3 block">
+          <DetailSummaryCard
+            accent="pink"
+            label="Battery Thieves"
+            title={t("에너지 소모 분해")}
+            metric={top1 ? formatPct(top1.pct) : "—"}
+            metricLabel={top1 ? t(top1.label) : t("핵심 요인")}
+            summary={
+              top1 ? (
+                <>
+                  <span className="font-bold">{t("방전 1순위")}</span> · {t(top1.label)}
+                </>
+              ) : (
+                <span className="font-bold">{t("에너지 도둑 분석")}</span>
+              )
+            }
+            detail={
+              top1
+                ? t("{label} 비중 {pct} · 피로 요인을 줄여보세요.", {
+                    label: t(top1.label),
+                    pct: formatPct(top1.pct),
+                  })
+                : t("방전 요인을 분석할 데이터가 부족해요.")
+            }
+            chips={<DetailChip color={DETAIL_ACCENTS.pink}>{t("최근 7일 기준")}</DetailChip>}
+            valueColor={DETAIL_ACCENTS.pink}
+          />
+        </Link>
       </section>
     </div>
   );
