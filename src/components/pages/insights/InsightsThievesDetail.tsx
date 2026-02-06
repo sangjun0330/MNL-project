@@ -31,7 +31,7 @@ export function InsightsThievesDetail() {
   const summary = top1
     ? (
         <>
-          <span className="font-bold">{t("방전 1순위")}</span> · {top1.label}
+          <span className="font-bold">{t("방전 1순위")}</span> · {t(top1.label)}
         </>
       )
     : (
@@ -39,7 +39,7 @@ export function InsightsThievesDetail() {
       );
 
   const detail = top1
-    ? t("{label} 비중 {pct} · 피로 요인을 줄여보세요.", { label: top1.label, pct: pct(top1.pct) })
+    ? t("{label} 비중 {pct} · 피로 요인을 줄여보세요.", { label: t(top1.label), pct: pct(top1.pct) })
     : t("방전 요인을 분석할 데이터가 부족해요.");
 
   return (
@@ -50,7 +50,7 @@ export function InsightsThievesDetail() {
         top1 ? (
           <>
             <DetailChip color={DETAIL_ACCENTS.pink}>{t("방전 1순위")}</DetailChip>
-            <DetailChip color={DETAIL_ACCENTS.pink}>{top1.label}</DetailChip>
+            <DetailChip color={DETAIL_ACCENTS.pink}>{t(top1.label)}</DetailChip>
             <DetailChip color={DETAIL_ACCENTS.pink}>{pct(top1.pct)}</DetailChip>
           </>
         ) : (
@@ -65,7 +65,7 @@ export function InsightsThievesDetail() {
         label="Battery Thieves"
         title={t("에너지 소모 분해")}
         metric={top1 ? pct(top1.pct) : "—"}
-        metricLabel={top1 ? top1.label : t("핵심 요인")}
+        metricLabel={top1 ? t(top1.label) : t("핵심 요인")}
         summary={summary}
         detail={detail}
         chips={<DetailChip color={DETAIL_ACCENTS.pink}>{t("최근 7일 기준")}</DetailChip>}

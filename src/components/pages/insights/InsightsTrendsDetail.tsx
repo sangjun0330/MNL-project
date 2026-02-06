@@ -82,12 +82,12 @@ export function InsightsTrendsDetail() {
         </div>
         <div className="px-5 pb-5 pt-4">
           <div className="flex flex-wrap items-center gap-2">
-            {(top3 ?? []).map((t) => (
-              <Pill key={t.key} className="bg-white">
+            {(top3 ?? []).map((factor) => (
+              <Pill key={factor.key} className="bg-white">
                 <span className="text-ios-sub">TOP</span>
                 <span className="mx-1 opacity-30">·</span>
-                <span className="font-semibold">{t.label}</span>
-                <span className="ml-2 text-ios-muted">{pct(t.pct)}</span>
+                <span className="font-semibold">{t(factor.label)}</span>
+                <span className="ml-2 text-ios-muted">{pct(factor.pct)}</span>
               </Pill>
             ))}
           </div>

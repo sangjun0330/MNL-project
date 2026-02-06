@@ -17,6 +17,7 @@ function StatsHubItem({
   title,
   metric,
   detail,
+  accent,
   className,
 }: {
   href: string;
@@ -24,8 +25,16 @@ function StatsHubItem({
   title: string;
   metric: string;
   detail: string;
+  accent: "blue" | "navy" | "pink";
   className?: string;
 }) {
+  const ACCENT = {
+    blue: { strong: "#3A8DFF", soft: "rgba(58,141,255,0.72)" },
+    navy: { strong: "#41517A", soft: "rgba(65,81,122,0.72)" },
+    pink: { strong: "#E88F9C", soft: "rgba(232,143,156,0.74)" },
+  } as const;
+  const tone = ACCENT[accent];
+
   return (
     <Link
       href={href}
@@ -34,13 +43,13 @@ function StatsHubItem({
     >
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-[12px] font-semibold text-ios-sub">{label}</div>
-          <div className="mt-1 text-[16px] font-bold tracking-[-0.01em] text-ios-text">{title}</div>
+          <div className="text-[12px] font-semibold" style={{ color: tone.soft }}>{label}</div>
+          <div className="mt-1 text-[16px] font-bold tracking-[-0.01em]" style={{ color: tone.strong }}>{title}</div>
         </div>
-        <div className="text-[20px] text-ios-muted transition group-hover:text-ios-text">›</div>
+        <div className="text-[20px] transition group-hover:opacity-90" style={{ color: tone.soft }}>›</div>
       </div>
-      <div className="mt-3 text-[28px] font-extrabold tracking-[-0.02em] text-ios-text">{metric}</div>
-      <div className="mt-1 text-[13px] text-ios-sub">{detail}</div>
+      <div className="mt-3 text-[28px] font-extrabold tracking-[-0.02em]" style={{ color: tone.strong }}>{metric}</div>
+      <div className="mt-1 text-[13px]" style={{ color: tone.soft }}>{detail}</div>
     </Link>
   );
 }
@@ -77,7 +86,7 @@ export function InsightsPage() {
   const thievesMetric = top1 ? formatPct(top1.pct) : "—";
   const thievesDetail = top1
     ? t("{label} 비중 {pct} · 피로 요인을 줄여보세요.", {
-        label: top1.label,
+        label: t(top1.label),
         pct: formatPct(top1.pct),
       })
     : t("방전 요인을 분석할 데이터가 부족해요.");
@@ -117,6 +126,7 @@ export function InsightsPage() {
             title={t("오늘 바이탈 요약")}
             metric={`${todayDisplay} / 100`}
             detail={t(statusLabel(status))}
+            accent="blue"
             className="sm:col-span-2"
           />
           <StatsHubItem
@@ -125,6 +135,7 @@ export function InsightsPage() {
             title={t("에너지 도둑")}
             metric={thievesMetric}
             detail={thievesDetail}
+            accent="pink"
           />
           <StatsHubItem
             href="/insights/trends"
@@ -132,6 +143,7 @@ export function InsightsPage() {
             title={t("최근 7일 통계")}
             metric={`Vital ${avgDisplay}`}
             detail={`Body ${avgBody} · Mental ${avgMental}`}
+            accent="navy"
           />
         </div>
       </section>
