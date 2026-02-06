@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo } from "react";
 import { formatKoreanDate } from "@/lib/date";
 import { useInsightsData, shiftKo, isInsightsLocked, INSIGHTS_MIN_DAYS } from "@/components/insights/useInsightsData";
+import { useAIRecoveryInsights } from "@/components/insights/useAIRecoveryInsights";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { HeroDashboard } from "@/components/insights/v2/HeroDashboard";
 import { DetailSummaryCard, DetailChip, DETAIL_ACCENTS } from "@/components/pages/insights/InsightDetailShell";
@@ -68,8 +69,15 @@ function formatPct(p: number) {
   return `${Math.round(p * 100)}%`;
 }
 
+function compactText(text: string, max = 80) {
+  const normalized = text.trim().replace(/\s+/g, " ");
+  if (normalized.length <= max) return normalized;
+  return `${normalized.slice(0, max - 1)}…`;
+}
+
 export function InsightsPage() {
   const { t } = useI18n();
+  const { data: aiRecovery, loading: aiRecoveryLoading, fromSupabase } = useAIRecoveryInsights();
   const {
     end,
     vitals,
@@ -98,6 +106,12 @@ export function InsightsPage() {
   }, [todayVital]);
   const night = useMemo(() => todayVital?.engine?.nightStreak ?? 0, [todayVital]);
   const weeklyStatus = useMemo(() => statusFromScore(avgDisplay), [avgDisplay]);
+  const aiHeadline = useMemo(() => compactText(aiRecovery.result.headline, 90), [aiRecovery.result.headline]);
+  const aiTopSection = aiRecovery.result.sections.length ? aiRecovery.result.sections[0] : null;
+  const aiSummary = useMemo(
+    () => (aiTopSection ? compactText(aiTopSection.description, 86) : t("기록이 쌓이면 회복 처방이 더 정교해져요.")),
+    [aiTopSection, t]
+  );
 
   if (isInsightsLocked(recordedDays)) {
     return (
@@ -133,6 +147,37 @@ export function InsightsPage() {
         <span className="opacity-40">·</span>
         <span>Vital {todayDisplay}</span>
       </div>
+
+      {/* AI Recovery summary */}
+      <section className="mt-6">
+        <Link href="/insights/recovery" className="block">
+          <DetailSummaryCard
+            accent="navy"
+            label="AI Recovery"
+            title={t("AI 맞춤회복")}
+            metric={aiRecoveryLoading ? "…" : aiRecovery.result.sections.length}
+            metricLabel={t("오늘 처방")}
+            summary={aiRecoveryLoading ? t("분석 중...") : aiHeadline}
+            detail={aiSummary}
+            chips={(
+              <>
+                {(aiRecovery.result.sections ?? []).slice(0, 2).map((section) => (
+                  <DetailChip key={`${section.category}-${section.title}`} color={DETAIL_ACCENTS.navy}>
+                    {section.title}
+                  </DetailChip>
+                ))}
+                <DetailChip color={aiRecovery.engine === "openai" ? DETAIL_ACCENTS.mint : DETAIL_ACCENTS.navy}>
+                  {aiRecovery.engine === "openai" ? t("OpenAI 생성 분석") : t("규칙 기반 분석")}
+                </DetailChip>
+                <DetailChip color={fromSupabase ? DETAIL_ACCENTS.mint : DETAIL_ACCENTS.pink}>
+                  {fromSupabase ? t("Supabase 실시간 분석") : t("기기 내 임시 분석")}
+                </DetailChip>
+              </>
+            )}
+            valueColor={DETAIL_ACCENTS.navy}
+          />
+        </Link>
+      </section>
 
       {/* Hero: HeroDashboard */}
       <section className="mt-6">
