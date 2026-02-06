@@ -48,11 +48,7 @@ export function InsightsThievesDetail() {
       subtitle={formatKoreanDate(end)}
       chips={
         top1 ? (
-          <>
-            <DetailChip color={DETAIL_ACCENTS.pink}>{t("방전 1순위")}</DetailChip>
-            <DetailChip color={DETAIL_ACCENTS.pink}>{t(top1.label)}</DetailChip>
-            <DetailChip color={DETAIL_ACCENTS.pink}>{pct(top1.pct)}</DetailChip>
-          </>
+          <DetailChip color={DETAIL_ACCENTS.pink}>{t("방전 1순위")} · {t(top1.label)} {pct(top1.pct)}</DetailChip>
         ) : (
           <DetailChip color={DETAIL_ACCENTS.pink}>{t("최근 7일 기준")}</DetailChip>
         )

@@ -6,7 +6,6 @@ import {
   DetailCard,
   DetailChip,
   DETAIL_ACCENTS,
-  DETAIL_GRADIENTS,
 } from "@/components/pages/insights/InsightDetailShell";
 import { useInsightsData, shiftKo, isInsightsLocked, INSIGHTS_MIN_DAYS } from "@/components/insights/useInsightsData";
 import { formatKoreanDate } from "@/lib/date";
@@ -51,6 +50,49 @@ function Gauge({ value, color, label }: { value: number; color: string; label: s
   );
 }
 
+function metricColor(value: number, thresholdGood: number, thresholdBad: number, invert = false) {
+  if (invert) {
+    if (value <= thresholdGood) return DETAIL_ACCENTS.mint;
+    if (value >= thresholdBad) return DETAIL_ACCENTS.pink;
+    return DETAIL_ACCENTS.navy;
+  }
+  if (value >= thresholdGood) return DETAIL_ACCENTS.mint;
+  if (value <= thresholdBad) return DETAIL_ACCENTS.pink;
+  return DETAIL_ACCENTS.navy;
+}
+
+function MetricRow({
+  label,
+  value,
+  unit,
+  barPct,
+  barColor,
+}: {
+  label: string;
+  value: string | number;
+  unit?: string;
+  barPct: number;
+  barColor: string;
+}) {
+  const safeBar = Math.max(0, Math.min(100, barPct));
+  return (
+    <div className="flex items-center gap-3">
+      <div className="w-[100px] shrink-0 text-[13px] font-semibold text-ios-sub">{label}</div>
+      <div className="flex-1">
+        <div className="h-2 w-full rounded-full bg-ios-bg">
+          <div
+            className="h-2 rounded-full transition-all"
+            style={{ width: `${safeBar}%`, backgroundColor: barColor }}
+          />
+        </div>
+      </div>
+      <div className="w-[52px] shrink-0 text-right text-[14px] font-extrabold text-ios-text">
+        {value}{unit ?? ""}
+      </div>
+    </div>
+  );
+}
+
 export function InsightsVitalDetail() {
   const { t } = useI18n();
   const {
@@ -62,7 +104,6 @@ export function InsightsVitalDetail() {
     todayDisplay,
     top3,
     hasTodayShift,
-    menstrual,
     avgBody,
     avgMental,
     recordedDays,
@@ -82,7 +123,6 @@ export function InsightsVitalDetail() {
   const mif = useMemo(() => Math.round(((todayVital?.engine?.MIF ?? 1) as number) * 100), [todayVital]);
   const night = useMemo(() => todayVital?.engine?.nightStreak ?? 0, [todayVital]);
   const status = useMemo(() => statusFromScore(todayDisplay), [todayDisplay]);
-  const vitalColor = useMemo(() => statusAccent(status), [status]);
 
   const bodyDelta = useMemo(() => body - avgBody, [body, avgBody]);
   const mentalDelta = useMemo(() => mental - avgMental, [mental, avgMental]);
@@ -107,9 +147,7 @@ export function InsightsVitalDetail() {
       chips={(
         <>
           <DetailChip color={DETAIL_ACCENTS.navy}>{hasTodayShift ? shiftKo(todayShift) : t("근무 미설정")}</DetailChip>
-          <DetailChip color={DETAIL_ACCENTS.mint}>{menstrual.enabled ? t(menstrual.label) : t("주기")}</DetailChip>
           <DetailChip color={DETAIL_ACCENTS.pink}>{t(statusLabel(status))}</DetailChip>
-          <DetailChip color={DETAIL_ACCENTS.mint}>{syncLabel}</DetailChip>
         </>
       )}
       meta={hasTodayShift ? `${shiftKo(todayShift)} · ${t("오늘 바이탈 분석")}` : t("오늘 바이탈 분석")}
@@ -124,6 +162,7 @@ export function InsightsVitalDetail() {
         </button>
       )}
     >
+      {/* Body & Mental gauges */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <DetailCard className="p-5">
           <div className="flex items-start justify-between gap-4">
@@ -146,115 +185,70 @@ export function InsightsVitalDetail() {
         </DetailCard>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <DetailChip color={DETAIL_ACCENTS.navy}>
-          {t("수면부채")} {debt}h
-        </DetailChip>
-        <DetailChip color={DETAIL_ACCENTS.mint}>
-          {t("리듬 부담")} {csi}%
-        </DetailChip>
-        <DetailChip color={DETAIL_ACCENTS.pink}>
-          {t("카페인 영향")} {cif}%
-        </DetailChip>
-      </div>
-
-      <DetailCard className="p-5" style={{ backgroundImage: DETAIL_GRADIENTS.mint }}>
-        <div className="text-[12px] font-semibold text-ios-sub">Vital Snapshot</div>
-        <div className="mt-1 text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">{t("오늘 상태 디테일")}</div>
-
-        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <div className="rounded-2xl border border-ios-sep bg-white/92 p-3">
-            <div className="text-[12px] font-semibold text-ios-sub">{t("바이탈(Vital)")}</div>
-            <div className="mt-1 text-[22px] font-extrabold" style={{ color: vitalColor }}>
-              {todayDisplay}
-            </div>
-          </div>
-          <div className="rounded-2xl border border-ios-sep bg-white/92 p-3">
-            <div className="text-[12px] font-semibold text-ios-sub">{t("연속 나이트")}</div>
-            <div className="mt-1 text-[22px] font-extrabold">{night}</div>
-          </div>
-          <div className="rounded-2xl border border-ios-sep bg-white/92 p-3">
-            <div className="text-[12px] font-semibold text-ios-sub">{t("스트레스 부하")}</div>
-            <div className="mt-1 text-[22px] font-extrabold">{slf}%</div>
-          </div>
-          <div className="rounded-2xl border border-ios-sep bg-white/92 p-3">
-            <div className="text-[12px] font-semibold text-ios-sub">{t("주기 영향")}</div>
-            <div className="mt-1 text-[22px] font-extrabold">{mif}%</div>
-          </div>
+      {/* Key metrics - Apple Health style */}
+      <DetailCard className="p-5">
+        <div className="text-[16px] font-bold tracking-[-0.01em] text-ios-text">{t("오늘의 주요 지표")}</div>
+        <div className="mt-1 text-[12.5px] text-ios-sub">
+          {t("연속 나이트")} {night}
         </div>
-
-        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="rounded-2xl border border-ios-sep bg-white/92 p-4">
-            <div className="text-[12px] font-semibold text-ios-sub">{t("리듬/수면/카페인")}</div>
-            <div className="mt-2 text-[15px] font-semibold text-ios-text">CSI {pct(csi)} · SRI {pct(sri)} · CIF {pct(cif)}</div>
-            <div className="mt-1 text-[12.5px] text-ios-sub">{t("CSI는 리듬 부담, SRI는 회복, CIF는 카페인 영향(낮을수록 방해↑) 지표입니다.")}</div>
-          </div>
-          <div className="rounded-2xl border border-ios-sep bg-white/92 p-4">
-            <div className="text-[12px] font-semibold text-ios-sub">{t("연속 나이트")}</div>
-            <div className="mt-2 text-[26px] font-extrabold">{night}</div>
-            <div className="mt-1 text-[12.5px] text-ios-sub">{t("연속 나이트가 쌓이면 회복 우선순위를 더 높입니다.")}</div>
-          </div>
+        <div className="mt-4 space-y-3">
+          <MetricRow
+            label={t("수면부채")}
+            value={debt}
+            unit="h"
+            barPct={Math.min(debt / 5 * 100, 100)}
+            barColor={metricColor(debt, 1, 3, true)}
+          />
+          <MetricRow
+            label={t("회복 지수")}
+            value={sri}
+            unit="%"
+            barPct={sri}
+            barColor={metricColor(sri, 70, 40)}
+          />
+          <MetricRow
+            label={t("리듬 부담")}
+            value={csi}
+            unit="%"
+            barPct={csi}
+            barColor={metricColor(csi, 30, 60, true)}
+          />
+          <MetricRow
+            label={t("카페인 영향")}
+            value={cif}
+            unit="%"
+            barPct={cif}
+            barColor={metricColor(cif, 30, 70, true)}
+          />
+          <MetricRow
+            label={t("스트레스 부하")}
+            value={slf}
+            unit="%"
+            barPct={slf}
+            barColor={metricColor(slf, 30, 60, true)}
+          />
+          <MetricRow
+            label={t("주기 영향")}
+            value={mif}
+            unit="%"
+            barPct={mif}
+            barColor={metricColor(mif, 30, 70, true)}
+          />
         </div>
+      </DetailCard>
 
-        <div className="mt-4 flex flex-wrap gap-2">
-          {top3?.map((item) => (
+      {/* Top drivers (simplified chips) */}
+      {top3?.length ? (
+        <div className="flex flex-wrap gap-2">
+          {top3.map((item) => (
             <DetailChip key={item.key} color={DETAIL_ACCENTS.mint}>
-              {t("드라이버 · {label}", { label: `${t(FACTOR_LABEL_KO[item.key as FactorKey])} ${pct(item.pct * 100)}` })}
+              {t(FACTOR_LABEL_KO[item.key as FactorKey])} {pct(item.pct * 100)}
             </DetailChip>
           ))}
         </div>
-      </DetailCard>
+      ) : null}
 
-      <DetailCard className="p-5">
-        <div className="text-[13px] font-semibold text-ios-sub">{t("오늘 상태")}</div>
-        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <div className="rounded-2xl border border-ios-sep bg-ios-bg p-3">
-            <div className="text-[12px] font-semibold text-ios-sub">Body</div>
-            <div className="mt-1 text-[22px] font-extrabold">{body}</div>
-          </div>
-          <div className="rounded-2xl border border-ios-sep bg-ios-bg p-3">
-            <div className="text-[12px] font-semibold text-ios-sub">Mental</div>
-            <div className="mt-1 text-[22px] font-extrabold">{mental}</div>
-          </div>
-          <div className="rounded-2xl border border-ios-sep bg-ios-bg p-3">
-            <div className="text-[12px] font-semibold text-ios-sub">Sleep Debt</div>
-            <div className="mt-1 text-[22px] font-extrabold">{debt}h</div>
-          </div>
-          <div className="rounded-2xl border border-ios-sep bg-ios-bg p-3">
-            <div className="text-[12px] font-semibold text-ios-sub">SRI / CSI</div>
-            <div className="mt-1 text-[18px] font-extrabold">
-              {sri}% · {csi}%
-            </div>
-          </div>
-        </div>
-      </DetailCard>
-
-      <DetailCard className="p-5">
-        <div className="text-[13px] font-semibold text-ios-sub">{t("부가 지표")}</div>
-        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <div className="rounded-2xl border border-ios-sep bg-ios-bg p-3">
-            <div className="text-[12px] font-semibold text-ios-sub">SLF</div>
-            <div className="mt-1 text-[22px] font-extrabold">{slf}%</div>
-            <div className="mt-1 text-[11.5px] text-ios-muted">{t("스트레스 부하")}</div>
-          </div>
-          <div className="rounded-2xl border border-ios-sep bg-ios-bg p-3">
-            <div className="text-[12px] font-semibold text-ios-sub">MIF</div>
-            <div className="mt-1 text-[22px] font-extrabold">{mif}%</div>
-            <div className="mt-1 text-[11.5px] text-ios-muted">{t("주기 영향")}</div>
-          </div>
-          <div className="rounded-2xl border border-ios-sep bg-ios-bg p-3">
-            <div className="text-[12px] font-semibold text-ios-sub">CIF</div>
-            <div className="mt-1 text-[22px] font-extrabold">{cif}%</div>
-            <div className="mt-1 text-[11.5px] text-ios-muted">{t("카페인 영향")}</div>
-          </div>
-          <div className="rounded-2xl border border-ios-sep bg-ios-bg p-3">
-            <div className="text-[12px] font-semibold text-ios-sub">CSI</div>
-            <div className="mt-1 text-[22px] font-extrabold">{csi}%</div>
-            <div className="mt-1 text-[11.5px] text-ios-muted">{t("리듬 부담")}</div>
-          </div>
-        </div>
-      </DetailCard>
-
+      {/* Sync BottomSheet */}
       <BottomSheet
         open={openSync}
         onClose={() => setOpenSync(false)}
@@ -332,7 +326,7 @@ export function InsightsVitalDetail() {
           </div>
 
           <div className="text-[12.5px] text-ios-muted">
-            {t("* Sync는 “최근 7일” 기준입니다. 입력이 쌓이면 Recovery 처방의 근거(수치)가 더 단단해져요.")}
+            {t("* Sync는 \u201C최근 7일\u201D 기준입니다. 입력이 쌓이면 Recovery 처방의 근거(수치)가 더 단단해져요.")}
           </div>
         </div>
       </BottomSheet>

@@ -36,13 +36,6 @@ export function InsightsTrendsDetail() {
     <InsightDetailShell
       title={t("최근 7일 통계")}
       subtitle={formatKoreanDate(end)}
-      chips={(
-        <>
-          <DetailChip color={DETAIL_ACCENTS.mint}>Vital {avgDisplay}</DetailChip>
-          <DetailChip color={DETAIL_ACCENTS.mint}>Body {avgBody}</DetailChip>
-          <DetailChip color={DETAIL_ACCENTS.mint}>Mental {avgMental}</DetailChip>
-        </>
-      )}
       meta={t("최근 7일의 리듬/바이탈 변화와 핵심 요인을 정리했습니다.")}
       tone="mint"
     >

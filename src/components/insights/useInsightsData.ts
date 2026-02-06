@@ -8,15 +8,9 @@ import { menstrualContextForDate } from "@/lib/menstrual";
 import { useAppStore } from "@/lib/store";
 import { computeVitalsRange, type DailyVital } from "@/lib/vitals";
 import { computePersonalizationAccuracy, topFactors } from "@/lib/insightsV2";
-import { shiftWindow, statusFromScore, vitalDisplayScore, type OrderKey } from "@/lib/wnlInsight";
+import { statusFromScore, vitalDisplayScore } from "@/lib/wnlInsight";
 import { countHealthRecordedDays, hasHealthInput } from "@/lib/healthRecords";
 import { translate } from "@/lib/i18n";
-
-type OrdersSummary = {
-  count: number;
-  headline: string;
-  items: { key: OrderKey; title: string }[];
-};
 
 export const INSIGHTS_MIN_DAYS = 7;
 // Toggle back to true when you want to re-enable the 7-day insights lock.
@@ -66,53 +60,6 @@ function countShift(vitals: DailyVital[]) {
 function buildSyncLabel(percent: number, daysWithAnyInput: number) {
   if (percent >= 88) return translate("싱크 완료: 예측 정확도 {percent}%", { percent });
   return translate("프리셉터 싱크(Sync): {count}일차", { count: Math.max(1, daysWithAnyInput) });
-}
-
-function summarizeOrders(vital: DailyVital | null, pivotISO: ISODate): OrdersSummary {
-  if (!vital) return { count: 0, headline: translate("오늘 오더 없음"), items: [] };
-
-  const shift = vital.shift;
-  const now = new Date();
-  const pivotDate = fromISODate(pivotISO);
-  const { end } = shiftWindow(shift, pivotDate);
-
-  const sleepDebt = vital.engine?.sleepDebtHours ?? 0;
-  const nightStreak = vital.engine?.nightStreak ?? 0;
-  const phase = vital.menstrual?.phase ?? "none";
-  const sri = vital.engine?.SRI ?? vital.engine?.SRS ?? 1;
-  const csi = vital.engine?.CSI ?? vital.engine?.CMF ?? 0;
-  const cif = vital.engine?.CIF ?? (1 - (vital.engine?.CSD ?? 0));
-  const slf = vital.engine?.SLF ?? 0;
-  const mif = vital.engine?.MIF ?? 1;
-
-  const list: { key: OrderKey; title: string }[] = [];
-
-  if (sleepDebt > 2.0 || sri < 0.6) {
-    list.push({ key: "sleep_debt", title: translate("수면 부채 경고") });
-  }
-
-  if (shift === "D" || shift === "E" || shift === "N" || shift === "M") {
-    const cutoff = new Date(end.getTime() - 4 * 60 * 60 * 1000);
-    const inWindow = now.getTime() >= cutoff.getTime() && now.getTime() <= end.getTime();
-    if (inWindow || cif <= 0.75) {
-      list.push({ key: "caffeine_npo", title: translate("카페인 금지 (NPO)") });
-    }
-  }
-
-  if (shift === "N" && (phase === "pms" || phase === "period" || mif <= 0.85)) {
-    list.push({ key: "hormone_duty", title: translate("호르몬 & 듀티 이중고") });
-  }
-
-  if (nightStreak >= 3 || csi >= 0.6 || slf >= 0.7) {
-    list.push({ key: "night_adapt", title: translate("야행성 적응 완료") });
-  }
-
-  const count = list.length;
-  const headline = count
-    ? `${list[0].title}${count > 1 ? translate(" 외 {count}개", { count: count - 1 }) : ""}`
-    : translate("현재 오더 없음");
-
-  return { count, headline, items: list };
 }
 
 export function useInsightsData() {
@@ -193,11 +140,6 @@ export function useInsightsData() {
   const status = useMemo(() => statusFromScore(todayDisplay), [todayDisplay]);
   const fastCharge = useMemo(() => todayDisplay < 30, [todayDisplay]);
 
-  const ordersSummary = useMemo(
-    () => summarizeOrders(todayVital, end),
-    [todayVital, end]
-  );
-
   return {
     state,
     start,
@@ -222,6 +164,5 @@ export function useInsightsData() {
     todayDisplay,
     status,
     fastCharge,
-    ordersSummary,
   };
 }
