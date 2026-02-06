@@ -297,7 +297,7 @@ export function InsightsVitalDetail() {
             </div>
             {accuracy.missingTop?.length ? (
               <div className="mt-3 text-[12.5px] text-ios-sub">
-                {t("우선 입력 추천: {items}", { items: accuracy.missingTop.map((m) => m.label).join(" · ") })}
+                {t("우선 입력 추천: {items}", { items: accuracy.missingTop.map((m) => t(m.label)).join(" · ") })}
               </div>
             ) : (
               <div className="mt-3 text-[12.5px] text-ios-sub">

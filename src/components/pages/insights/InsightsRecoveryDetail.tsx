@@ -34,10 +34,10 @@ export function InsightsRecoveryDetail() {
   }
 
   const recoverySummary = top1
-    ? `${t("회복 포커스")} · ${top1.label}`
+    ? `${t("회복 포커스")} · ${t(top1.label)}`
     : `${t("회복 포커스")} · ${t("맞춤 회복")}`;
   const recoveryDetail = top1
-    ? t("{label} 비중 {pct} · 회복 처방을 가장 먼저 확인하세요.", { label: top1.label, pct: pct(top1.pct) })
+    ? t("{label} 비중 {pct} · 회복 처방을 가장 먼저 확인하세요.", { label: t(top1.label), pct: pct(top1.pct) })
     : t("기록이 쌓이면 회복 처방이 더 정교해져요.");
 
   return (
@@ -47,7 +47,7 @@ export function InsightsRecoveryDetail() {
       chips={(
         <>
           <DetailChip color={DETAIL_ACCENTS.mint}>{hasTodayShift ? shiftKo(todayShift) : t("근무 미설정")}</DetailChip>
-          <DetailChip color={DETAIL_ACCENTS.mint}>{top1 ? top1.label : t("회복 포커스")}</DetailChip>
+          <DetailChip color={DETAIL_ACCENTS.mint}>{top1 ? t(top1.label) : t("회복 포커스")}</DetailChip>
           {top1 ? <DetailChip color={DETAIL_ACCENTS.mint}>{pct(top1.pct)}</DetailChip> : null}
         </>
       )}
@@ -106,7 +106,7 @@ export function InsightsRecoveryDetail() {
             <div className="text-[36px] font-extrabold tracking-[-0.02em]" style={{ color: DETAIL_ACCENTS.mint }}>
               {top1 ? pct(top1.pct) : "—"}
             </div>
-            <div className="pb-1 text-[14px] font-bold text-ios-text">{top1 ? top1.label : t("핵심 요인")}</div>
+            <div className="pb-1 text-[14px] font-bold text-ios-text">{top1 ? t(top1.label) : t("핵심 요인")}</div>
           </div>
 
           <div className="mt-2 text-[14px] text-ios-text">
@@ -119,9 +119,9 @@ export function InsightsRecoveryDetail() {
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <DetailChip color={DETAIL_ACCENTS.mint}>{syncLabel}</DetailChip>
             {hasTodayShift ? <DetailChip color={DETAIL_ACCENTS.mint}>{shiftKo(todayShift)}</DetailChip> : null}
-            {top3?.map((t) => (
-              <DetailChip key={t.key} color={DETAIL_ACCENTS.mint}>
-                TOP · {t.label} {pct(t.pct)}
+            {top3?.map((factor) => (
+              <DetailChip key={factor.key} color={DETAIL_ACCENTS.mint}>
+                TOP · {t(factor.label)} {pct(factor.pct)}
               </DetailChip>
             ))}
           </div>

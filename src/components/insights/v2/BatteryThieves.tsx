@@ -111,7 +111,7 @@ export function BatteryThieves({ vitals, periodLabel, className }: { vitals: Dai
   const message = useMemo(() => {
     if (!top1) return t("방전 요인을 계산할 데이터가 없어요.");
     const base = t("{label}이(가) 전체 소모의 {pct}를 차지했어요.", {
-      label: top1.label,
+      label: t(top1.label),
       pct: pctLabel(top1.pct),
     });
     if (top1.key === "sleep") {
@@ -149,7 +149,7 @@ export function BatteryThieves({ vitals, periodLabel, className }: { vitals: Dai
               >
                 <div className="flex items-center gap-3">
                   <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: colorForFactor(r.key) }} />
-                  <div className="text-[13px] font-semibold">{r.label}</div>
+                  <div className="text-[13px] font-semibold">{t(r.label)}</div>
                 </div>
                 <div className="text-[13px] font-semibold text-ios-sub">{pctLabel(r.pct)}</div>
               </div>
