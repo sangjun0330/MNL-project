@@ -3,7 +3,6 @@ import type { ISODate } from "@/lib/date";
 import { addDays, diffDays, fromISODate, toISODate } from "@/lib/date";
 import { menstrualContextForDate } from "@/lib/menstrual";
 import type { AppState, BioInputs, EmotionEntry } from "@/lib/model";
-import { defaultBio } from "@/lib/model";
 import type { Shift } from "@/lib/types";
 import { defaultMNLState, stepMNLBatteryEngine } from "@/lib/mnlBatteryEngine";
 import { shiftTimes } from "@/lib/wnlInsight";
@@ -103,22 +102,21 @@ function defaultShiftFallback(): Shift {
   return "OFF";
 }
 
-function normalizeBio(bio?: BioInputs | null): Required<BioInputs> {
-  const base = defaultBio();
+function normalizeBio(bio?: BioInputs | null): BioInputs {
   return {
-    sleepHours: bio?.sleepHours ?? base.sleepHours ?? null,
-    napHours: (bio as any)?.napHours ?? (base as any).napHours ?? 0,
-    sleepQuality: (bio as any)?.sleepQuality ?? (base as any).sleepQuality ?? null,
-    sleepTiming: (bio as any)?.sleepTiming ?? (base as any).sleepTiming ?? "auto",
-    stress: (bio?.stress ?? base.stress ?? null) as any,
-    activity: (bio?.activity ?? base.activity ?? null) as any,
-    caffeineMg: bio?.caffeineMg ?? base.caffeineMg ?? null,
-    caffeineLastAt: (bio as any)?.caffeineLastAt ?? (base as any).caffeineLastAt ?? null,
-    fatigueLevel: (bio as any)?.fatigueLevel ?? (base as any).fatigueLevel ?? null,
-    symptomSeverity: (bio as any)?.symptomSeverity ?? (base as any).symptomSeverity ?? 0,
-    menstrualStatus: (bio as any)?.menstrualStatus ?? (base as any).menstrualStatus ?? "none",
-    menstrualFlow: (bio as any)?.menstrualFlow ?? (base as any).menstrualFlow ?? 0,
-    shiftOvertimeHours: (bio as any)?.shiftOvertimeHours ?? (base as any).shiftOvertimeHours ?? 0,
+    sleepHours: bio?.sleepHours ?? null,
+    napHours: (bio as any)?.napHours ?? null,
+    sleepQuality: (bio as any)?.sleepQuality ?? null,
+    sleepTiming: (bio as any)?.sleepTiming ?? null,
+    stress: (bio?.stress ?? null) as any,
+    activity: (bio?.activity ?? null) as any,
+    caffeineMg: bio?.caffeineMg ?? null,
+    caffeineLastAt: (bio as any)?.caffeineLastAt ?? null,
+    fatigueLevel: (bio as any)?.fatigueLevel ?? null,
+    symptomSeverity: (bio as any)?.symptomSeverity ?? null,
+    menstrualStatus: (bio as any)?.menstrualStatus ?? null,
+    menstrualFlow: (bio as any)?.menstrualFlow ?? null,
+    shiftOvertimeHours: (bio as any)?.shiftOvertimeHours ?? null,
   };
 }
 
@@ -235,6 +233,7 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
 
   const computeDays = Math.max(0, diffDays(end, computeStart));
   let engineState = defaultMNLState();
+  let hasSleepHistory = false;
 
   const computed = new Map<ISODate, DailyVital>();
 
@@ -248,8 +247,9 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
 
     const menstrual = menstrualContextForDate(iso, menstrualSettings);
 
-    const stressLvl = clamp(Number((bio.stress ?? 1) as any) + 1, 1, 4);
-    const activityLvl = clamp(Number((bio.activity ?? 1) as any) + 1, 1, 4);
+    const hasSleepDurationLog = bio.sleepHours != null || (bio as any).napHours != null;
+    const stressLvl = clamp(Number((bio.stress ?? 0) as any) + 1, 1, 4);
+    const activityLvl = clamp(Number((bio.activity ?? 0) as any) + 1, 1, 4);
     const moodLvl = clamp(Number(emotion?.mood ?? 3), 1, 5);
 
     const lmp = menstrualSettings?.enabled ? (menstrualSettings?.lastPeriodStart ?? null) : null;
@@ -276,11 +276,11 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
       {
         dateISO: iso,
         shift,
-        sleepHours: clamp(Number(bio.sleepHours ?? 0), 0, 14),
-        napHours: clamp(Number((bio as any).napHours ?? 0), 0, 4),
+        sleepHours: bio.sleepHours ?? null,
+        napHours: (bio as any).napHours ?? null,
         sleepQuality,
         sleepTiming,
-        caffeineMg: clamp(Number(bio.caffeineMg ?? 0), 0, 1200),
+        caffeineMg: bio.caffeineMg ?? null,
         caffeineLastAt,
         stressLvl,
         activityLvl,
@@ -297,12 +297,15 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
         quickReturnHours,
         shiftLengthHours: shiftHours,
         overtimeHours,
+        hasPriorSleepLog: hasSleepHistory,
       },
       {
         chronotype: profile?.chronotype ?? 0.5,
         caffeineSensitivity: profile?.caffeineSensitivity ?? 1.0,
       }
     );
+
+    if (hasSleepDurationLog) hasSleepHistory = true;
 
     const prevBB = engineState.BB;
     const prevMB = engineState.MB;
