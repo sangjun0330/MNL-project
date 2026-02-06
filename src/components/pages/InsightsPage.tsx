@@ -1,74 +1,102 @@
 "use client";
 
 import Link from "next/link";
+import { useMemo } from "react";
 import { formatKoreanDate } from "@/lib/date";
-import { statusLabel } from "@/lib/wnlInsight";
 import { useInsightsData, shiftKo, isInsightsLocked, INSIGHTS_MIN_DAYS } from "@/components/insights/useInsightsData";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
+import { HeroDashboard } from "@/components/insights/v2/HeroDashboard";
+import { TrendChart } from "@/components/insights/TrendChart";
+import { BatteryThieves } from "@/components/insights/v2/BatteryThieves";
 import { useI18n } from "@/lib/useI18n";
+
+function MetricCard({
+  label,
+  value,
+  avg,
+  color,
+}: {
+  label: string;
+  value: number;
+  avg: number;
+  color: string;
+}) {
+  const delta = value - avg;
+  const sign = delta > 0 ? "+" : "";
+  return (
+    <div className="rounded-2xl border border-ios-sep bg-white p-4">
+      <div className="text-[12px] font-semibold text-ios-sub">{label}</div>
+      <div className="mt-2 flex items-end gap-2">
+        <span className="text-[28px] font-extrabold tracking-[-0.02em]" style={{ color }}>
+          {value}
+        </span>
+        <span className="pb-1 text-[13px] font-semibold text-ios-muted">
+          avg {sign}{delta}
+        </span>
+      </div>
+      <div className="mt-2 h-2 w-full rounded-full bg-ios-bg">
+        <div
+          className="h-2 rounded-full"
+          style={{ width: `${Math.max(0, Math.min(100, value))}%`, backgroundColor: color }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function MiniMetric({
+  label,
+  value,
+  unit,
+}: {
+  label: string;
+  value: string | number;
+  unit?: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-ios-sep bg-white p-3">
+      <div className="text-[11.5px] font-semibold text-ios-sub">{label}</div>
+      <div className="mt-1 text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">
+        {value}
+        {unit ? <span className="text-[13px] font-semibold text-ios-muted">{unit}</span> : null}
+      </div>
+    </div>
+  );
+}
 
 function formatPct(p: number) {
   return `${Math.round(p * 100)}%`;
-}
-
-function StatsHubItem({
-  href,
-  label,
-  title,
-  metric,
-  detail,
-  accent,
-  className,
-}: {
-  href: string;
-  label: string;
-  title: string;
-  metric: string;
-  detail: string;
-  accent: "blue" | "navy" | "pink";
-  className?: string;
-}) {
-  const ACCENT = {
-    blue: { strong: "#3A8DFF", soft: "rgba(58,141,255,0.72)" },
-    navy: { strong: "#41517A", soft: "rgba(65,81,122,0.72)" },
-    pink: { strong: "#E88F9C", soft: "rgba(232,143,156,0.74)" },
-  } as const;
-  const tone = ACCENT[accent];
-
-  return (
-    <Link
-      href={href}
-      className={`group rounded-2xl border border-ios-sep bg-white p-4 transition-shadow duration-300 hover:shadow-apple ${className ?? ""}`}
-      aria-label={title}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-[12px] font-semibold" style={{ color: tone.soft }}>{label}</div>
-          <div className="mt-1 text-[16px] font-bold tracking-[-0.01em]" style={{ color: tone.strong }}>{title}</div>
-        </div>
-        <div className="text-[20px] transition group-hover:opacity-90" style={{ color: tone.soft }}>›</div>
-      </div>
-      <div className="mt-3 text-[28px] font-extrabold tracking-[-0.02em]" style={{ color: tone.strong }}>{metric}</div>
-      <div className="mt-1 text-[13px]" style={{ color: tone.soft }}>{detail}</div>
-    </Link>
-  );
 }
 
 export function InsightsPage() {
   const { t } = useI18n();
   const {
     end,
+    vitals,
+    todayVital,
     todayShift,
     menstrual,
     todayDisplay,
-    status,
+    syncLabel,
+    fastCharge,
     avgDisplay,
     avgBody,
     avgMental,
+    trend,
     top1,
     hasTodayShift,
     recordedDays,
   } = useInsightsData();
+
+  const body = useMemo(() => Math.round(todayVital?.body.value ?? 0), [todayVital]);
+  const mental = useMemo(() => Math.round(todayVital?.mental.ema ?? 0), [todayVital]);
+  const debt = useMemo(() => Math.round((todayVital?.engine?.sleepDebtHours ?? 0) * 10) / 10, [todayVital]);
+  const csi = useMemo(() => Math.round(((todayVital?.engine?.CSI ?? todayVital?.engine?.CMF ?? 0) as number) * 100), [todayVital]);
+  const cif = useMemo(() => {
+    const raw = (todayVital?.engine?.CIF ?? (1 - (todayVital?.engine?.CSD ?? 0))) as number;
+    return Math.round(raw * 100);
+  }, [todayVital]);
+  const night = useMemo(() => todayVital?.engine?.nightStreak ?? 0, [todayVital]);
 
   if (isInsightsLocked(recordedDays)) {
     return (
@@ -77,27 +105,20 @@ export function InsightsPage() {
           <div className="text-[32px] font-extrabold tracking-[-0.03em]">Summary</div>
           <div className="mt-1 text-[13px] text-ios-sub">{t("통계 중심 인사이트")}</div>
         </div>
-
         <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />
       </div>
     );
   }
 
-  const thievesMetric = top1 ? formatPct(top1.pct) : "—";
-  const thievesDetail = top1
-    ? t("{label} 비중 {pct} · 피로 요인을 줄여보세요.", {
-        label: t(top1.label),
-        pct: formatPct(top1.pct),
-      })
-    : t("방전 요인을 분석할 데이터가 부족해요.");
-
   return (
     <div className="mx-auto w-full max-w-[920px] px-4 pb-24 pt-6 sm:px-6">
+      {/* Header */}
       <div className="mb-4">
         <div className="text-[32px] font-extrabold tracking-[-0.03em]">Summary</div>
         <div className="mt-1 text-[13px] text-ios-sub">{t("통계 중심 인사이트")}</div>
       </div>
 
+      {/* Context chips */}
       <div className="flex flex-wrap items-center gap-2 text-[12.5px] text-ios-sub">
         <span>{formatKoreanDate(end)}</span>
         {hasTodayShift ? (
@@ -112,39 +133,76 @@ export function InsightsPage() {
         <span>Vital {todayDisplay}</span>
       </div>
 
-      <section className="mt-4 rounded-apple border border-ios-sep bg-[linear-gradient(135deg,rgba(108,218,195,0.16),rgba(255,255,255,0.96))] p-5 shadow-apple">
-        <div>
-          <div className="text-[12px] font-semibold text-ios-sub">{t("통계 허브")}</div>
-          <div className="mt-1 text-[22px] font-extrabold tracking-[-0.02em] text-ios-text">{t("통계")}</div>
-          <div className="mt-1 text-[13px] text-ios-sub">{t("통계와 알고리즘 결과를 한 곳에서 확인하세요.")}</div>
-        </div>
+      {/* Hero: HeroDashboard */}
+      <section className="mt-6">
+        <Link href="/insights/vital" aria-label={t("오늘 바이탈 요약")}>
+          <HeroDashboard
+            vital={todayVital}
+            syncLabel={syncLabel}
+            fastCharge={fastCharge}
+          />
+        </Link>
+      </section>
 
-        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <StatsHubItem
-            href="/insights/vital"
-            label="WNL Vital"
-            title={t("오늘 바이탈 요약")}
-            metric={`${todayDisplay} / 100`}
-            detail={t(statusLabel(status))}
-            accent="blue"
-            className="sm:col-span-2"
-          />
-          <StatsHubItem
-            href="/insights/thieves"
-            label="Battery Thieves"
-            title={t("에너지 도둑")}
-            metric={thievesMetric}
-            detail={thievesDetail}
-            accent="pink"
-          />
-          <StatsHubItem
-            href="/insights/trends"
-            label="Stats"
-            title={t("최근 7일 통계")}
-            metric={`Vital ${avgDisplay}`}
-            detail={`Body ${avgBody} · Mental ${avgMental}`}
-            accent="navy"
-          />
+      {/* Body & Mental 2-column cards */}
+      <section className="mt-6 grid grid-cols-2 gap-4">
+        <MetricCard
+          label="Body"
+          value={body}
+          avg={avgBody}
+          color="#007AFF"
+        />
+        <MetricCard
+          label="Mental"
+          value={mental}
+          avg={avgMental}
+          color="#E87485"
+        />
+      </section>
+
+      {/* Mini metrics 2x2 grid */}
+      <section className="mt-4 grid grid-cols-2 gap-3">
+        <MiniMetric label={t("수면부채")} value={debt} unit="h" />
+        <MiniMetric label={t("리듬 부담")} value={`${csi}`} unit="%" />
+        <MiniMetric label={t("카페인 영향")} value={`${cif}`} unit="%" />
+        <MiniMetric label={t("연속 나이트")} value={night} />
+      </section>
+
+      {/* 7-day trends inline */}
+      <section className="mt-6">
+        <Link href="/insights/trends" className="block">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-[16px] font-bold tracking-[-0.01em] text-ios-text">{t("최근 7일 통계")}</div>
+              <div className="mt-1 text-[13px] text-ios-sub">
+                Vital {avgDisplay} · Body {avgBody} · Mental {avgMental}
+              </div>
+            </div>
+            <span className="text-[20px] text-ios-muted">›</span>
+          </div>
+        </Link>
+        <div className="mt-3">
+          <TrendChart data={trend} />
+        </div>
+      </section>
+
+      {/* Battery Thieves inline */}
+      <section className="mt-6">
+        <Link href="/insights/thieves" className="block">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-[16px] font-bold tracking-[-0.01em] text-ios-text">{t("에너지 도둑")}</div>
+              <div className="mt-1 text-[13px] text-ios-sub">
+                {top1
+                  ? `${t(top1.label)} ${formatPct(top1.pct)}`
+                  : t("방전 요인을 분석할 데이터가 부족해요.")}
+              </div>
+            </div>
+            <span className="text-[20px] text-ios-muted">›</span>
+          </div>
+        </Link>
+        <div className="mt-3">
+          <BatteryThieves vitals={vitals} periodLabel={t("최근 7일 기준")} />
         </div>
       </section>
     </div>
