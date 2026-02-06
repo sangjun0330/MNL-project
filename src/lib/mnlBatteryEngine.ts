@@ -23,11 +23,11 @@ export type MNLHiddenState = {
 export type MNLDailyInputs = {
   dateISO: ISODate;
   shift: Shift; // {D,E,N,M,OFF,VAC}
-  sleepHours: number; // 0..14
-  napHours: number; // 0..4
+  sleepHours: number | null; // 0..14
+  napHours: number | null; // 0..4
   sleepQuality?: 1 | 2 | 3 | 4 | 5 | null;
   sleepTiming?: "auto" | "night" | "day" | "mixed" | null;
-  caffeineMg: number; // 0..1200
+  caffeineMg: number | null; // 0..1200
   caffeineLastAt?: string | null; // HH:mm
   stressLvl: number; // 1..4
   activityLvl: number; // 1..4
@@ -46,6 +46,7 @@ export type MNLDailyInputs = {
   quickReturnHours?: number | null;
   shiftLengthHours?: number | null;
   overtimeHours?: number | null;
+  hasPriorSleepLog?: boolean;
 };
 
 export type MNLDailyDiagnostics = {
@@ -173,9 +174,26 @@ function caffeineAtSleep(opts: {
   return Math.max(0, remaining);
 }
 
-function updateSleepDebt(opts: { shift: Shift; sleep_eff: number; sleepDebtPrev: number }) {
-  const { shift, sleep_eff, sleepDebtPrev } = opts;
-  const target_sleep = 7.0 + (shift === "N" ? 0.5 : shift === "E" ? 0.25 : shift === "M" ? 0.15 : 0.0);
+function targetSleepHours(shift: Shift) {
+  return 7.0 + (shift === "N" ? 0.5 : shift === "E" ? 0.25 : shift === "M" ? 0.15 : 0.0);
+}
+
+function updateSleepDebt(opts: {
+  shift: Shift;
+  sleep_eff: number;
+  sleepDebtPrev: number;
+  hasSleepDurationLog: boolean;
+  hasPriorSleepLog: boolean;
+}) {
+  const { shift, sleep_eff, sleepDebtPrev, hasSleepDurationLog, hasPriorSleepLog } = opts;
+  if (!hasSleepDurationLog) {
+    const debt = clamp(sleepDebtPrev, 0, 20);
+    return { sleep_debt_next: debt, debt_n: clamp(debt / 10, 0, 1) };
+  }
+  if (!hasPriorSleepLog && sleepDebtPrev <= 0.01) {
+    return { sleep_debt_next: 0, debt_n: 0 };
+  }
+  const target_sleep = targetSleepHours(shift);
   const deficit = target_sleep - sleep_eff;
   const sleep_debt_next = clamp(
     sleepDebtPrev * 0.85 + Math.max(0, deficit) - 0.35 * Math.max(0, -deficit),
@@ -257,7 +275,9 @@ export function stepMNLBatteryEngine(state: MNLHiddenState, inputs: MNLDailyInpu
   const caffeineSensitivity = clamp(Number(profile.caffeineSensitivity ?? 1.0), 0.5, 1.5);
 
   const shift = inputs.shift;
-  const sleep_hours = clamp(Number(inputs.sleepHours), 0, 14);
+  const hasSleepDurationLog = inputs.sleepHours != null || inputs.napHours != null;
+  const hasPriorSleepLog = Boolean(inputs.hasPriorSleepLog);
+  const sleep_hours = clamp(Number(inputs.sleepHours ?? 0), 0, 14);
   const nap_hours = clamp(Number(inputs.napHours ?? 0), 0, 4);
   const sleep_quality = inputs.sleepQuality ?? null;
   const sleep_timing = resolveSleepTiming(inputs.sleepTiming ?? "auto", shift);
@@ -281,7 +301,7 @@ export function stepMNLBatteryEngine(state: MNLHiddenState, inputs: MNLDailyInpu
 
   const total_sleep = clamp(sleep_hours + 0.6 * nap_hours, 0, 14);
   const hours_norm = clamp(total_sleep / 8, 0, 1.2);
-  const quality_norm = sleep_quality == null ? 0.8 : clamp(Number(sleep_quality) / 5, 0.4, 1);
+  const quality_norm = sleep_quality == null ? 1 : clamp(Number(sleep_quality) / 5, 0.4, 1);
   const circadian_factor = circadianFactor(sleep_timing);
 
   const caf_remaining = caffeineAtSleep({
@@ -295,14 +315,20 @@ export function stepMNLBatteryEngine(state: MNLHiddenState, inputs: MNLDailyInpu
   const CIF = clamp(1 - 0.5 * (caf_remaining / 100), 0.4, 1);
   const CSD = clamp(1 - CIF, 0, 1);
 
-  const SRI_raw = clamp(hours_norm * quality_norm * circadian_factor, 0, 1);
-  const SRI = clamp(SRI_raw * CIF, 0, 1);
+  const SRI_raw = hasSleepDurationLog ? clamp(hours_norm * quality_norm * circadian_factor, 0, 1) : 1;
+  const SRI = hasSleepDurationLog ? clamp(SRI_raw * CIF, 0, 1) : 1;
 
-  const sleep_eff = clamp(SRI * 8, 0, 14);
-  const sleep_n = clamp(SRI, 0, 1);
+  const sleep_eff = hasSleepDurationLog ? clamp(SRI * 8, 0, 14) : targetSleepHours(shift);
+  const sleep_n = hasSleepDurationLog ? clamp(SRI, 0, 1) : 1;
   const caf_n = clamp(caffeine_mg / 400, 0, 3);
 
-  const { sleep_debt_next, debt_n } = updateSleepDebt({ shift, sleep_eff, sleepDebtPrev: state.sleepDebt });
+  const { sleep_debt_next, debt_n } = updateSleepDebt({
+    shift,
+    sleep_eff,
+    sleepDebtPrev: state.sleepDebt,
+    hasSleepDurationLog,
+    hasPriorSleepLog,
+  });
 
   const CSI = computeCSI({
     shift,
