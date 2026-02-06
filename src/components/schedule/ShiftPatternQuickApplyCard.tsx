@@ -137,9 +137,11 @@ export function ShiftPatternQuickApplyCard({ selectedISO }: { selectedISO: ISODa
         </div>
       </div>
 
-      <div className="mt-4 flex gap-2">
-        <Button onClick={apply}>{t("선택 시작일 적용")}</Button>
-        <Button variant="secondary" onClick={() => store.setSelected(selectedISO)}>
+      <div className="mt-4 grid grid-cols-2 gap-2">
+        <Button onClick={apply} className="w-full justify-center px-3 text-center text-[12.5px]">
+          {t("선택 시작일 적용")}
+        </Button>
+        <Button variant="secondary" onClick={() => store.setSelected(selectedISO)} className="w-full justify-center px-3 text-center text-[12.5px]">
           {t("선택일 유지")}
         </Button>
       </div>
