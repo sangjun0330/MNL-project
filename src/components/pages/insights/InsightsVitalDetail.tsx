@@ -14,6 +14,7 @@ import { FACTOR_LABEL_KO, type FactorKey } from "@/lib/insightsV2";
 import { statusFromScore, statusLabel } from "@/lib/wnlInsight";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { useI18n } from "@/lib/useI18n";
+import { BatteryGauge } from "@/components/home/BatteryGauge";
 
 function clamp01(n: number) {
   const v = Number.isFinite(n) ? n : 0;
@@ -33,57 +34,6 @@ function statusAccent(status: ReturnType<typeof statusFromScore>) {
   if (status === "stable") return DETAIL_ACCENTS.mint;
   if (status === "caution" || status === "observation") return DETAIL_ACCENTS.navy;
   return DETAIL_ACCENTS.pink;
-}
-
-function Gauge({ value, color, label }: { value: number; color: string; label: string }) {
-  const safe = Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
-  const size = 136;
-  const center = size / 2;
-  const radius = 48;
-  const stroke = 14;
-  const circumference = 2 * Math.PI * radius;
-  const arcDeg = 300;
-  const startDeg = 120;
-  const arcLen = (arcDeg / 360) * circumference;
-  const progressLen = safe <= 0 ? 0 : Math.max((safe / 100) * arcLen, 5);
-  return (
-    <div className="relative grid h-[136px] w-[136px] place-items-center">
-      <svg
-        width={size}
-        height={size}
-        viewBox={`0 0 ${size} ${size}`}
-        className="drop-shadow-[0_12px_22px_rgba(15,23,42,0.08)]"
-        aria-hidden
-      >
-        <circle
-          cx={center}
-          cy={center}
-          r={radius}
-          fill="none"
-          stroke="rgba(17,24,39,0.08)"
-          strokeWidth={stroke}
-          strokeLinecap="round"
-          strokeDasharray={`${arcLen} ${circumference}`}
-          transform={`rotate(${startDeg} ${center} ${center})`}
-        />
-        <circle
-          cx={center}
-          cy={center}
-          r={radius}
-          fill="none"
-          stroke={color}
-          strokeWidth={stroke}
-          strokeLinecap="round"
-          strokeDasharray={`${progressLen} ${circumference}`}
-          transform={`rotate(${startDeg} ${center} ${center})`}
-        />
-      </svg>
-      <div className="absolute inset-[22px] flex flex-col items-center justify-center rounded-full border border-ios-sep/80 bg-white shadow-apple-sm">
-        <div className="text-[52px] font-extrabold leading-none tracking-[-0.03em] text-ios-text">{safe}</div>
-        <div className="text-[14px] font-semibold text-ios-sub">{label}</div>
-      </div>
-    </div>
-  );
 }
 
 function metricColor(value: number, thresholdGood: number, thresholdBad: number, invert = false) {
@@ -201,8 +151,8 @@ export function InsightsVitalDetail() {
       {/* Body & Mental gauges */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <DetailCard className="p-5">
-          <div className="flex items-start justify-between gap-4">
-            <Gauge value={body} color={DETAIL_ACCENTS.mint} label="Body" />
+          <div className="flex items-center justify-between gap-4">
+            <BatteryGauge value={body} label="Body" kind="body" />
             <div className="text-right">
               <div className="text-[13px] font-semibold text-ios-sub">{t("Body 변화")}</div>
               <div className="mt-2 text-[42px] font-extrabold tracking-[-0.03em] text-ios-text">{signed(bodyDelta)}</div>
@@ -211,8 +161,8 @@ export function InsightsVitalDetail() {
         </DetailCard>
 
         <DetailCard className="p-5">
-          <div className="flex items-start justify-between gap-4">
-            <Gauge value={mental} color={DETAIL_ACCENTS.pink} label="Mental" />
+          <div className="flex items-center justify-between gap-4">
+            <BatteryGauge value={mental} label="Mental" kind="mental" />
             <div className="text-right">
               <div className="text-[13px] font-semibold text-ios-sub">{t("Mental 변화")}</div>
               <div className="mt-2 text-[42px] font-extrabold tracking-[-0.03em] text-ios-text">{signed(mentalDelta)}</div>
