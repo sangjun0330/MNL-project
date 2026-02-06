@@ -85,6 +85,7 @@ export function InsightsVitalDetail() {
     end,
     todayShift,
     todayVital,
+    todayHasInput,
     syncLabel,
     accuracy,
     todayDisplay,
@@ -93,6 +94,7 @@ export function InsightsVitalDetail() {
     avgBody,
     avgMental,
     recordedDays,
+    hasInsightData,
   } = useInsightsData();
   const [openSync, setOpenSync] = useState(false);
 
@@ -108,7 +110,7 @@ export function InsightsVitalDetail() {
   const slf = useMemo(() => Math.round(((todayVital?.engine?.SLF ?? 0) as number) * 100), [todayVital]);
   const mif = useMemo(() => Math.round(((todayVital?.engine?.MIF ?? 1) as number) * 100), [todayVital]);
   const night = useMemo(() => todayVital?.engine?.nightStreak ?? 0, [todayVital]);
-  const status = useMemo(() => statusFromScore(todayDisplay), [todayDisplay]);
+  const status = useMemo(() => statusFromScore(todayDisplay ?? 0), [todayDisplay]);
 
   const bodyDelta = useMemo(() => body - avgBody, [body, avgBody]);
   const mentalDelta = useMemo(() => mental - avgMental, [mental, avgMental]);
@@ -122,6 +124,25 @@ export function InsightsVitalDetail() {
         tone="mint"
       >
         <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />
+      </InsightDetailShell>
+    );
+  }
+
+  if (!hasInsightData || !todayHasInput || !todayVital || todayDisplay == null) {
+    return (
+      <InsightDetailShell
+        title="RNest Vital"
+        subtitle={formatKoreanDate(end)}
+        meta={t("오늘 바이탈 분석")}
+        tone="mint"
+      >
+        <DetailCard className="p-5">
+          <div className="text-[18px] font-bold tracking-[-0.01em] text-ios-text">{t("데이터가 없어요")}</div>
+          <div className="mt-2 text-[14px] text-ios-sub">{t("기록 입력 시 자세한 정보 제공")}</div>
+          <div className="mt-3 text-[13px] text-ios-muted">
+            {t("오늘 기록을 입력하면 바이탈과 주요 지표를 정확하게 보여드려요.")}
+          </div>
+        </DetailCard>
       </InsightDetailShell>
     );
   }

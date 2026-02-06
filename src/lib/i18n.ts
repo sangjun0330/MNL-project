@@ -432,6 +432,11 @@ const EN_EXTRA: Record<string, string> = {
   "급속 회복": "Fast recovery",
   "기상/취침 시간을 일정하게 유지하세요.": "Keep wake-up and bedtime consistent.",
   "데이터가 없어요": "No data yet.",
+  "기록 입력 시 자세한 정보 제공": "Detailed insights appear after you add records.",
+  "수면/스트레스/활동/카페인/기분 중 1개만 입력해도 인사이트가 시작됩니다.":
+    "Insights start as soon as you log at least one of sleep/stress/activity/caffeine/mood.",
+  "오늘 기록을 입력하면 바이탈과 주요 지표를 정확하게 보여드려요.":
+    "Log today's record to show accurate vital and key metrics.",
   "리듬 보정을 시작하세요.": "Start rhythm correction.",
   "리듬 유지": "Maintain rhythm",
   "방전 요인을 계산할 데이터가 없어요.": "Not enough data to calculate drain factors.",

@@ -227,6 +227,7 @@ export function topFactors(vitals: DailyVital[], topN = 3) {
   const agg = aggregateFactors(vitals);
   const rows = (Object.keys(agg) as FactorKey[])
     .map((k) => ({ key: k, label: FACTOR_LABEL_KO[k], pct: agg[k] }))
+    .filter((row) => row.pct > 0)
     .sort((a, b) => b.pct - a.pct)
     .slice(0, topN);
   return rows;

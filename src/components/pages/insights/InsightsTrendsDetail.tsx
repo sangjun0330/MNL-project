@@ -15,7 +15,7 @@ function pct(p: number) {
 
 export function InsightsTrendsDetail() {
   const { t } = useI18n();
-  const { end, avgDisplay, avgBody, avgMental, bestWorst, shiftCounts, trend, top3, recordedDays } = useInsightsData();
+  const { end, avgDisplay, avgBody, avgMental, bestWorst, shiftCounts, trend, top3, recordedDays, hasInsightData } = useInsightsData();
 
   const status = statusFromScore(avgDisplay);
 
@@ -28,6 +28,25 @@ export function InsightsTrendsDetail() {
         tone="mint"
       >
         <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />
+      </InsightDetailShell>
+    );
+  }
+
+  if (!hasInsightData) {
+    return (
+      <InsightDetailShell
+        title={t("최근 7일 통계")}
+        subtitle={formatKoreanDate(end)}
+        meta={t("최근 7일의 리듬/바이탈 변화와 핵심 요인을 정리했습니다.")}
+        tone="mint"
+      >
+        <DetailCard className="p-5">
+          <div className="text-[18px] font-bold tracking-[-0.01em] text-ios-text">{t("데이터가 없어요")}</div>
+          <div className="mt-2 text-[14px] text-ios-sub">{t("기록 입력 시 자세한 정보 제공")}</div>
+          <div className="mt-3 text-[13px] text-ios-muted">
+            {t("수면/스트레스/활동/카페인/기분 중 1개만 입력해도 인사이트가 시작됩니다.")}
+          </div>
+        </DetailCard>
       </InsightDetailShell>
     );
   }

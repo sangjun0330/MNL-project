@@ -58,8 +58,9 @@ function countShift(vitals: DailyVital[]) {
 }
 
 function buildSyncLabel(percent: number, daysWithAnyInput: number) {
+  if (daysWithAnyInput <= 0) return translate("기록 입력 시 자세한 정보 제공");
   if (percent >= 88) return translate("싱크 완료: 예측 정확도 {percent}%", { percent });
-  return translate("프리셉터 싱크(Sync): {count}일차", { count: Math.max(1, daysWithAnyInput) });
+  return translate("프리셉터 싱크(Sync): {count}일차", { count: daysWithAnyInput });
 }
 
 export function useInsightsData() {
@@ -70,7 +71,19 @@ export function useInsightsData() {
 
   const vitals = useMemo(() => computeVitalsRange({ state, start, end }), [state, start, end]);
   const vmap = useMemo(() => new Map(vitals.map((v) => [v.dateISO, v])), [vitals]);
-  const todayVital = vmap.get(end) ?? (vitals.length ? vitals[vitals.length - 1] : null);
+  const recordedDateSet = useMemo(() => {
+    const set = new Set<ISODate>();
+    for (let i = 0; i < 7; i++) {
+      const iso = toISODate(addDays(fromISODate(start), i));
+      const b = (state.bio ?? {})[iso] ?? null;
+      const e = (state.emotions ?? {})[iso] ?? null;
+      if (hasHealthInput(b, e)) set.add(iso);
+    }
+    return set;
+  }, [state.bio, state.emotions, start]);
+  const vitalsRecorded = useMemo(() => vitals.filter((v) => recordedDateSet.has(v.dateISO)), [vitals, recordedDateSet]);
+  const todayHasInput = useMemo(() => recordedDateSet.has(end), [recordedDateSet, end]);
+  const todayVital = useMemo(() => (todayHasInput ? vmap.get(end) ?? null : null), [todayHasInput, vmap, end]);
 
   const todayShiftFromSchedule = state.schedule?.[end] as Shift | undefined;
   const hasTodayShift = Boolean(todayShiftFromSchedule);
@@ -105,47 +118,53 @@ export function useInsightsData() {
     () => countHealthRecordedDays({ bio: state.bio, emotions: state.emotions }),
     [state.bio, state.emotions]
   );
+  const hasInsightData = useMemo(() => vitalsRecorded.length > 0, [vitalsRecorded]);
 
-  const displayScores = useMemo(() => vitals.map((v) => vitalDisplayScore(v)), [vitals]);
+  const displayScores = useMemo(() => vitalsRecorded.map((v) => vitalDisplayScore(v)), [vitalsRecorded]);
   const avgDisplay = useMemo(() => Math.round(avg(displayScores)), [displayScores]);
-  const avgBody = useMemo(() => Math.round(avg(vitals.map((v) => v.body.value))), [vitals]);
-  const avgMental = useMemo(() => Math.round(avg(vitals.map((v) => v.mental.ema))), [vitals]);
+  const avgBody = useMemo(() => Math.round(avg(vitalsRecorded.map((v) => v.body.value))), [vitalsRecorded]);
+  const avgMental = useMemo(() => Math.round(avg(vitalsRecorded.map((v) => v.mental.ema))), [vitalsRecorded]);
 
   const bestWorst = useMemo(() => {
-    if (!vitals.length) return { best: null as DailyVital | null, worst: null as DailyVital | null };
-    const sorted = [...vitals].sort(
+    if (!vitalsRecorded.length) return { best: null as DailyVital | null, worst: null as DailyVital | null };
+    const sorted = [...vitalsRecorded].sort(
       (a, b) => Math.min(b.body.value, b.mental.ema) - Math.min(a.body.value, a.mental.ema)
     );
     return { best: sorted[0] ?? null, worst: sorted[sorted.length - 1] ?? null };
-  }, [vitals]);
+  }, [vitalsRecorded]);
 
-  const shiftCounts = useMemo(() => countShift(vitals), [vitals]);
+  const shiftCounts = useMemo(() => countShift(vitalsRecorded), [vitalsRecorded]);
 
   const trend = useMemo(
-    () =>
-      vitals.map((v) => ({
+    () => {
+      if (!vitalsRecorded.length) return [];
+      return vitalsRecorded.map((v) => ({
         label: fmtMD(v.dateISO),
         body: Math.round(v.body.value),
         mental: Math.round(v.mental.ema),
         shift: v.shift,
-      })),
-    [vitals]
+      }));
+    },
+    [vitalsRecorded]
   );
 
-  const top3 = useMemo(() => topFactors(vitals, 3), [vitals]);
+  const top3 = useMemo(() => topFactors(vitalsRecorded, 3), [vitalsRecorded]);
   const top1 = top3?.[0] ?? null;
 
-  const todayDisplay = useMemo(() => vitalDisplayScore(todayVital), [todayVital]);
+  const todayDisplay = useMemo(() => (todayVital ? vitalDisplayScore(todayVital) : null), [todayVital]);
 
-  const status = useMemo(() => statusFromScore(todayDisplay), [todayDisplay]);
-  const fastCharge = useMemo(() => todayDisplay < 30, [todayDisplay]);
+  const status = useMemo(() => statusFromScore(todayDisplay ?? 0), [todayDisplay]);
+  const fastCharge = useMemo(() => (todayDisplay == null ? false : todayDisplay < 30), [todayDisplay]);
 
   return {
     state,
     start,
     end,
     vitals,
+    vitalsRecorded,
     todayVital,
+    todayHasInput,
+    hasInsightData,
     todayShift,
     hasTodayShift,
     menstrual,
