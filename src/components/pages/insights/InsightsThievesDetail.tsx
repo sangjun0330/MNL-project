@@ -13,7 +13,7 @@ function pct(p: number) {
 
 export function InsightsThievesDetail() {
   const { t } = useI18n();
-  const { end, vitals, top1, recordedDays } = useInsightsData();
+  const { end, vitalsRecorded, top1, recordedDays, hasInsightData } = useInsightsData();
 
   if (isInsightsLocked(recordedDays)) {
     return (
@@ -24,6 +24,28 @@ export function InsightsThievesDetail() {
         tone="pink"
       >
         <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />
+      </InsightDetailShell>
+    );
+  }
+
+  if (!hasInsightData) {
+    return (
+      <InsightDetailShell
+        title={t("에너지 도둑")}
+        subtitle={formatKoreanDate(end)}
+        meta={t("회복을 방해하는 핵심 요인을 비율로 분석합니다.")}
+        tone="pink"
+      >
+        <DetailSummaryCard
+          accent="pink"
+          label="Battery Thieves"
+          title={t("에너지 소모 분해")}
+          metric="—"
+          metricLabel={t("핵심 요인")}
+          summary={<span className="font-bold">{t("데이터가 없어요")}</span>}
+          detail={t("기록 입력 시 자세한 정보 제공")}
+          chips={<DetailChip color={DETAIL_ACCENTS.pink}>{t("최근 7일 기준")}</DetailChip>}
+        />
       </InsightDetailShell>
     );
   }
@@ -68,7 +90,7 @@ export function InsightsThievesDetail() {
       />
 
       <div className="mt-4">
-        <BatteryThieves vitals={vitals} periodLabel={t("최근 7일 기준")} />
+        <BatteryThieves vitals={vitalsRecorded} periodLabel={t("최근 7일 기준")} />
       </div>
     </InsightDetailShell>
   );

@@ -80,7 +80,6 @@ export function InsightsPage() {
   const { data: aiRecovery, loading: aiRecoveryLoading, fromSupabase } = useAIRecoveryInsights();
   const {
     end,
-    vitals,
     todayVital,
     todayShift,
     menstrual,
@@ -94,6 +93,7 @@ export function InsightsPage() {
     top1,
     hasTodayShift,
     recordedDays,
+    hasInsightData,
   } = useInsightsData();
 
   const body = useMemo(() => Math.round(todayVital?.body.value ?? 0), [todayVital]);
@@ -145,7 +145,7 @@ export function InsightsPage() {
         <span className="opacity-40">·</span>
         <span>{menstrual.enabled ? t(menstrual.label) : t("주기")}</span>
         <span className="opacity-40">·</span>
-        <span>Vital {todayDisplay}</span>
+        <span>Vital {todayDisplay ?? "—"}</span>
       </div>
 
       {/* AI Recovery summary */}
@@ -189,6 +189,21 @@ export function InsightsPage() {
           />
         </Link>
       </section>
+
+      {!hasInsightData ? (
+        <section className="mt-6 rounded-apple border border-ios-sep bg-white p-5 shadow-apple">
+          <div className="text-[18px] font-bold tracking-[-0.01em] text-ios-text">{t("데이터가 없어요")}</div>
+          <div className="mt-2 text-[14px] leading-relaxed text-ios-sub">
+            {t("기록 입력 시 자세한 정보 제공")}
+          </div>
+          <div className="mt-3 text-[13px] text-ios-muted">
+            {t("수면/스트레스/활동/카페인/기분 중 1개만 입력해도 인사이트가 시작됩니다.")}
+          </div>
+        </section>
+      ) : null}
+
+      {!hasInsightData ? null : (
+        <>
 
       {/* Body & Mental 2-column cards */}
       <section className="mt-6 grid grid-cols-2 gap-4">
@@ -303,6 +318,8 @@ export function InsightsPage() {
           />
         </Link>
       </section>
+        </>
+      )}
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { addDays, fromISODate, toISODate, todayISO, type ISODate } from "@/lib/d
 import { generateAIRecovery } from "@/lib/aiRecovery";
 import type { AIRecoveryApiError, AIRecoveryApiSuccess } from "@/lib/aiRecoveryContract";
 import type { Language } from "@/lib/i18n";
+import { hasHealthInput } from "@/lib/healthRecords";
 import { defaultSettings, emptyState, type AppState } from "@/lib/model";
 import { generateAIRecoveryWithOpenAI } from "@/lib/server/openaiRecovery";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
@@ -101,12 +102,47 @@ export async function GET(req: Request) {
     const end = todayISO();
     const start = toISODate(addDays(fromISODate(end), -13));
     const vitals14 = computeVitalsRange({ state, start, end });
-    const vitals7 = vitals14.slice(-7);
-    const prevWeek = vitals14.slice(-14, -7);
-    const todayVital = vitals7.length ? vitals7[vitals7.length - 1] : null;
+    const inputDateSet = new Set<ISODate>();
+    for (let i = 0; i < 14; i++) {
+      const iso = toISODate(addDays(fromISODate(start), i));
+      const bio = state.bio?.[iso] ?? null;
+      const emotion = state.emotions?.[iso] ?? null;
+      if (hasHealthInput(bio, emotion)) inputDateSet.add(iso);
+    }
+
+    const start7 = toISODate(addDays(fromISODate(end), -6));
+    const vitals7 = vitals14.filter((v) => v.dateISO >= start7 && inputDateSet.has(v.dateISO));
+    const prevWeek = vitals14.filter((v) => v.dateISO < start7 && inputDateSet.has(v.dateISO));
+    const todayVital = inputDateSet.has(end) ? vitals14.find((v) => v.dateISO === end) ?? null : null;
     const tomorrowISO = toISODate(addDays(fromISODate(end), 1));
     const nextShift = readShift(state.schedule, tomorrowISO);
     const todayShift = (todayVital?.shift ?? readShift(state.schedule, end) ?? "OFF") as Shift;
+
+    if (!vitals7.length) {
+      const body: AIRecoveryApiSuccess = {
+        ok: true,
+        data: {
+          dateISO: end,
+          language: lang,
+          todayShift,
+          nextShift,
+          todayVitalScore: null,
+          source: "supabase",
+          engine: "rule",
+          model: null,
+          result: {
+            headline:
+              lang === "en"
+                ? "Log your health records to unlock personalized recovery guidance."
+                : "건강 기록을 입력하면 맞춤 회복 처방을 자세히 제공해드려요.",
+            compoundAlert: null,
+            sections: [],
+            weeklySummary: null,
+          },
+        },
+      };
+      return NextResponse.json(body);
+    }
 
     const fallbackResult = generateAIRecovery(todayVital, vitals7, prevWeek, nextShift, lang);
     const aiOutput = await generateAIRecoveryWithOpenAI({
