@@ -160,7 +160,7 @@ body {
 *::-webkit-scrollbar-track { background: transparent; }
 
 /* =========================
-   WNL Insight v2.0 motion
+   RNest Insight v2.0 motion
    ========================= */
 
 @keyframes wnlBreathe {
@@ -201,7 +201,7 @@ body {
 }
 
 /* =========================
-   WNL Night Mode (auto)
+   RNest Night Mode (auto)
    Trigger: night_streak >= 3
    ========================= */
 

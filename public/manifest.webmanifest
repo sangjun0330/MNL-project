@@ -1,6 +1,6 @@
 {
-  "name": "WNL",
-  "short_name": "WNL",
+  "name": "RNest",
+  "short_name": "RNest",
   "description": "일정 기반 바디 배터리(피로 예보)",
   "start_url": "/",
   "display": "standalone",

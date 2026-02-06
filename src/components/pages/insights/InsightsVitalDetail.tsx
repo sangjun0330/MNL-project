@@ -37,12 +37,48 @@ function statusAccent(status: ReturnType<typeof statusFromScore>) {
 
 function Gauge({ value, color, label }: { value: number; color: string; label: string }) {
   const safe = Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
+  const size = 136;
+  const center = size / 2;
+  const radius = 48;
+  const stroke = 14;
+  const circumference = 2 * Math.PI * radius;
+  const arcDeg = 300;
+  const startDeg = 120;
+  const arcLen = (arcDeg / 360) * circumference;
+  const progressLen = safe <= 0 ? 0 : Math.max((safe / 100) * arcLen, 5);
   return (
-    <div
-      className="relative h-32 w-32 rounded-full"
-      style={{ background: `conic-gradient(${color} ${safe * 3.6}deg, rgba(0,0,0,0.08) 0)` }}
-    >
-      <div className="absolute inset-[11px] flex flex-col items-center justify-center rounded-full bg-white">
+    <div className="relative grid h-[136px] w-[136px] place-items-center">
+      <svg
+        width={size}
+        height={size}
+        viewBox={`0 0 ${size} ${size}`}
+        className="drop-shadow-[0_12px_22px_rgba(15,23,42,0.08)]"
+        aria-hidden
+      >
+        <circle
+          cx={center}
+          cy={center}
+          r={radius}
+          fill="none"
+          stroke="rgba(17,24,39,0.08)"
+          strokeWidth={stroke}
+          strokeLinecap="round"
+          strokeDasharray={`${arcLen} ${circumference}`}
+          transform={`rotate(${startDeg} ${center} ${center})`}
+        />
+        <circle
+          cx={center}
+          cy={center}
+          r={radius}
+          fill="none"
+          stroke={color}
+          strokeWidth={stroke}
+          strokeLinecap="round"
+          strokeDasharray={`${progressLen} ${circumference}`}
+          transform={`rotate(${startDeg} ${center} ${center})`}
+        />
+      </svg>
+      <div className="absolute inset-[22px] flex flex-col items-center justify-center rounded-full border border-ios-sep/80 bg-white shadow-apple-sm">
         <div className="text-[52px] font-extrabold leading-none tracking-[-0.03em] text-ios-text">{safe}</div>
         <div className="text-[14px] font-semibold text-ios-sub">{label}</div>
       </div>
@@ -130,7 +166,7 @@ export function InsightsVitalDetail() {
   if (isInsightsLocked(recordedDays)) {
     return (
       <InsightDetailShell
-        title="WNL Vital"
+        title="RNest Vital"
         subtitle={formatKoreanDate(end)}
         meta={t("건강 기록 7일 이상부터 바이탈이 열립니다.")}
         tone="mint"
@@ -142,7 +178,7 @@ export function InsightsVitalDetail() {
 
   return (
     <InsightDetailShell
-      title="WNL Vital"
+      title="RNest Vital"
       subtitle={formatKoreanDate(end)}
       chips={(
         <>

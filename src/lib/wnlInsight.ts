@@ -14,7 +14,7 @@ import type { ISODate } from "@/lib/date";
 import { addDays, fromISODate, toISODate } from "@/lib/date";
 import type { Shift } from "@/lib/types";
 
-export const WNL_COLORS = {
+export const RNEST_COLORS = {
   // theme
   mint: "#6CDAC3", // Stable
   pink: "#FF9EAA", // Care/Warn
@@ -61,9 +61,9 @@ export function statusLabel(status: VitalStatus) {
 
 export function statusColor(status: VitalStatus) {
   const s = normalizeStatus(status);
-  if (s === "stable") return WNL_COLORS.mint;
-  if (s === "caution") return WNL_COLORS.yellow;
-  return WNL_COLORS.pink;
+  if (s === "stable") return RNEST_COLORS.mint;
+  if (s === "caution") return RNEST_COLORS.yellow;
+  return RNEST_COLORS.pink;
 }
 
 export function statusCopy(status: VitalStatus) {
