@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getSupabaseBrowserClient, useAuth, useAuthState } from "@/lib/auth";
 import { hydrateState, useAppStore } from "@/lib/store";
+import { sanitizeStatePayload } from "@/lib/stateSanitizer";
 
 const SAVE_DEBOUNCE_MS = 120;
 const RETRY_BASE_MS = 800;
@@ -82,34 +83,7 @@ export function CloudStateSync() {
     [supabase, userId]
   );
 
-  const normalizeStateForSave = useCallback((state: any) => {
-    const bio = state?.bio ?? {};
-    const nextBio: Record<string, any> = {};
-    for (const [iso, value] of Object.entries(bio)) {
-      if (value && typeof value === "object") {
-        const stressRaw = (value as any).stress;
-        const activityRaw = (value as any).activity;
-        nextBio[iso] = {
-          ...(value as any),
-          stress:
-            stressRaw === undefined || stressRaw === null
-              ? stressRaw
-              : Number.isFinite(Number(stressRaw))
-                ? Number(stressRaw)
-                : stressRaw,
-          activity:
-            activityRaw === undefined || activityRaw === null
-              ? activityRaw
-              : Number.isFinite(Number(activityRaw))
-                ? Number(activityRaw)
-                : activityRaw,
-        };
-      } else {
-        nextBio[iso] = value;
-      }
-    }
-    return { ...state, bio: nextBio };
-  }, []);
+  const normalizeStateForSave = useCallback((state: any) => sanitizeStatePayload(state), []);
 
   const saveState = useCallback(
     async (state: any) => {
@@ -281,9 +255,11 @@ export function CloudStateSync() {
 
         retryCount.current = 0;
         if (result.state) {
-          const local = storeRef.current.getState();
+          const remoteState = sanitizeStatePayload(result.state);
+          const remoteWasSanitized = JSON.stringify(remoteState) !== JSON.stringify(result.state);
+          const local = sanitizeStatePayload(storeRef.current.getState());
           if (dirtyBeforeHydrate.current) {
-            const merged = mergeState(result.state, local);
+            const merged = sanitizeStatePayload(mergeState(remoteState, local));
             isHydratingRef.current = true;
             hydrateState(merged);
             setTimeout(() => {
@@ -294,11 +270,14 @@ export function CloudStateSync() {
             await saveState(merged);
           } else {
             isHydratingRef.current = true;
-            hydrateState(result.state);
+            hydrateState(remoteState);
             setTimeout(() => {
               isHydratingRef.current = false;
             }, 0);
             skipNextSave.current = true;
+            if (remoteWasSanitized) {
+              await saveState(remoteState);
+            }
           }
         } else {
           const fresh = storeRef.current.getState();

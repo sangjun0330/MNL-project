@@ -324,13 +324,28 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
     const slf = Number(d.SLF ?? d.stress_n ?? 0);
     const mif = Number(d.MIF ?? 1);
     const mf = Number(d.MF ?? 1);
-    const sleepImpact = clamp((1 - sri) + Number(d.debt_n ?? 0), 0, 2);
-    const stressImpact = clamp(slf, 0, 1);
-    const activityImpact = clamp(Number(d.activity_n ?? 0), 0, 1);
-    const shiftImpact = clamp(csi, 0, 1);
-    const caffeineImpact = clamp(1 - cif, 0, 1);
-    const menstrualImpact = clamp(1 - mif, 0, 1);
-    const moodImpact = clamp(Number(d.mood_bad_n ?? 0) + (1 - mf), 0, 1);
+    const hasShiftSignal = schedule[iso] != null;
+    const hasSleepSignal =
+      hasSleepDurationLog ||
+      hasSleepHistory ||
+      Number(d.debt_n ?? 0) > 0;
+    const hasStressSignal = bio.stress != null;
+    const hasActivitySignal = bio.activity != null;
+    const hasCaffeineSignal = bio.caffeineMg != null || caffeineLastAt != null;
+    const hasMenstrualSignal =
+      Boolean(menstrual.enabled) ||
+      Number((bio as any).symptomSeverity ?? 0) > 0 ||
+      menstrualStatus != null ||
+      Number(menstrualFlow ?? 0) > 0;
+    const hasMoodSignal = emotion?.mood != null;
+
+    const sleepImpact = hasSleepSignal ? clamp((1 - sri) + Number(d.debt_n ?? 0), 0, 2) : 0;
+    const stressImpact = hasStressSignal ? clamp(slf, 0, 1) : 0;
+    const activityImpact = hasActivitySignal ? clamp(Number(d.activity_n ?? 0), 0, 1) : 0;
+    const shiftImpact = hasShiftSignal ? clamp(csi, 0, 1) : 0;
+    const caffeineImpact = hasCaffeineSignal ? clamp(1 - cif, 0, 1) : 0;
+    const menstrualImpact = hasMenstrualSignal ? clamp(1 - mif, 0, 1) : 0;
+    const moodImpact = hasMoodSignal ? clamp(Number(d.mood_bad_n ?? 0) + (1 - mf), 0, 1) : 0;
     const sum = sleepImpact + stressImpact + activityImpact + shiftImpact + caffeineImpact + menstrualImpact + moodImpact;
     const factors = sum > 0
       ? {

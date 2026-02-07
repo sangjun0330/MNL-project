@@ -9,6 +9,7 @@ import type { AppState, AppStore, AppSettings, BioInputs, EmotionEntry } from "@
 import { defaultSettings, emptyState } from "@/lib/model";
 import type { Shift } from "@/lib/types";
 import { autoAdjustMenstrualSettings } from "@/lib/menstrual";
+import { sanitizeStatePayload } from "@/lib/stateSanitizer";
 
 const STORAGE_KEY_BASE = "mnl_app_state_v1";
 const RESET_VERSION_KEY = "mnl_reset_version";
@@ -94,16 +95,17 @@ function normalizeSettings(raw: any): AppSettings {
 }
 
 function applyLoadedState(loaded: AppState) {
+  const sanitized = sanitizeStatePayload(loaded);
   state = {
     ...ssrSafeInitialState(),
-    ...loaded,
-    selected: (loaded as any)?.selected ?? SSR_SELECTED,
-    schedule: (loaded as any)?.schedule ?? {},
-    shiftNames: (loaded as any)?.shiftNames ?? {},
-    notes: (loaded as any)?.notes ?? {},
-    emotions: (loaded as any)?.emotions ?? {},
-    bio: (loaded as any)?.bio ?? {},
-    settings: normalizeSettings((loaded as any)?.settings),
+    ...sanitized,
+    selected: (sanitized as any)?.selected ?? SSR_SELECTED,
+    schedule: (sanitized as any)?.schedule ?? {},
+    shiftNames: (sanitized as any)?.shiftNames ?? {},
+    notes: (sanitized as any)?.notes ?? {},
+    emotions: (sanitized as any)?.emotions ?? {},
+    bio: (sanitized as any)?.bio ?? {},
+    settings: normalizeSettings((sanitized as any)?.settings),
   };
 
   if (state.selected === SSR_SELECTED) {

@@ -126,7 +126,7 @@ export function useInsightsData() {
   const avgMental = useMemo(() => Math.round(avg(vitalsRecorded.map((v) => v.mental.ema))), [vitalsRecorded]);
 
   const bestWorst = useMemo(() => {
-    if (!vitalsRecorded.length) return { best: null as DailyVital | null, worst: null as DailyVital | null };
+    if (vitalsRecorded.length < 2) return { best: null as DailyVital | null, worst: null as DailyVital | null };
     const sorted = [...vitalsRecorded].sort(
       (a, b) => Math.min(b.body.value, b.mental.ema) - Math.min(a.body.value, a.mental.ema)
     );
@@ -148,7 +148,7 @@ export function useInsightsData() {
     [vitalsRecorded]
   );
 
-  const top3 = useMemo(() => topFactors(vitalsRecorded, 3), [vitalsRecorded]);
+  const top3 = useMemo(() => (vitalsRecorded.length >= 3 ? topFactors(vitalsRecorded, 3) : []), [vitalsRecorded]);
   const top1 = top3?.[0] ?? null;
 
   const todayDisplay = useMemo(() => (todayVital ? vitalDisplayScore(todayVital) : null), [todayVital]);

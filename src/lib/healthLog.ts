@@ -18,17 +18,11 @@ export type DailyHealthSnapshot = {
   bio?: {
     sleepHours?: number | null;
     napHours?: number | null;
-    sleepQuality?: number | null;
-    sleepTiming?: "auto" | "night" | "day" | "mixed" | null;
     stress?: number | null;
     caffeineMg?: number | null;
     caffeineLastAt?: string | null;
     activity?: number | null;
-    fatigueLevel?: number | null;
     symptomSeverity?: number | null;
-    menstrualStatus?: "none" | "pms" | "period" | null;
-    menstrualFlow?: number | null;
-    shiftOvertimeHours?: number | null;
   };
 
   // 기분은 emotions에 저장되므로 따로 넣어도 됨(서버 분석 편의)
@@ -91,17 +85,11 @@ export function buildDailyHealthSnapshot(opts: {
     ? {
         sleepHours: bioRaw.sleepHours ?? null,
         napHours: (bioRaw as any).napHours ?? null,
-        sleepQuality: (bioRaw as any).sleepQuality ?? null,
-        sleepTiming: (bioRaw as any).sleepTiming ?? null,
         stress: bioRaw.stress ?? null,
         caffeineMg: bioRaw.caffeineMg ?? null,
         caffeineLastAt: (bioRaw as any).caffeineLastAt ?? null,
         activity: bioRaw.activity ?? null,
-        fatigueLevel: (bioRaw as any).fatigueLevel ?? null,
         symptomSeverity: (bioRaw as any).symptomSeverity ?? null,
-        menstrualStatus: (bioRaw as any).menstrualStatus ?? null,
-        menstrualFlow: (bioRaw as any).menstrualFlow ?? null,
-        shiftOvertimeHours: (bioRaw as any).shiftOvertimeHours ?? null,
       }
     : undefined;
 

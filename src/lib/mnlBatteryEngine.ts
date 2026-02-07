@@ -187,31 +187,27 @@ function updateSleepDebt(opts: {
 }) {
   const { shift, sleep_for_debt, sleepDebtPrev, hasSleepDurationLog, hasPriorSleepLog } = opts;
 
-  // ✅ 수면 기록이 없는 날: 빚이 자연감소(decay)되도록 수정
-  // 기록이 없으면 "평균 수면을 했다"고 가정하되 약간의 decay 적용
+  // 기록이 없는 날은 임의로 debt를 변경하지 않습니다.
+  // (기록 부재를 "충분히 잤다"로 해석하면 실제 누적 피로를 과소평가함)
   if (!hasSleepDurationLog) {
-    const decayed = clamp(sleepDebtPrev * 0.92, 0, 20);
-    return { sleep_debt_next: decayed, debt_n: clamp(decayed / 10, 0, 1) };
-  }
-
-  // ✅ 첫 수면 기록: 이전 기록이 없고 빚도 0에 가까우면 깨끗한 시작
-  if (!hasPriorSleepLog && sleepDebtPrev <= 0.01) {
-    // 첫 기록인데 수면이 부족하면 바로 빚 시작, 충분하면 0 유지
-    const target_sleep = targetSleepHours(shift);
-    const deficit = target_sleep - sleep_for_debt;
-    if (deficit > 0) {
-      return { sleep_debt_next: clamp(deficit, 0, 20), debt_n: clamp(deficit / 10, 0, 1) };
-    }
-    return { sleep_debt_next: 0, debt_n: 0 };
+    const hold = clamp(sleepDebtPrev, 0, 20);
+    return { sleep_debt_next: hold, debt_n: clamp(hold / 10, 0, 1) };
   }
 
   const target_sleep = targetSleepHours(shift);
-  const deficit = target_sleep - sleep_for_debt;
-  const sleep_debt_next = clamp(
-    sleepDebtPrev * 0.85 + Math.max(0, deficit) - 0.35 * Math.max(0, -deficit),
-    0,
-    20
-  );
+  const deficit = target_sleep - sleep_for_debt; // +: 부족, -: 초과 수면
+
+  // 첫 유효 수면 기록은 보수적으로 초기화(단일 입력으로 과도한 debt 방지)
+  if (!hasPriorSleepLog && sleepDebtPrev <= 0.01) {
+    const seeded = clamp(Math.max(0, deficit) * 0.8, 0, 4.5);
+    return { sleep_debt_next: seeded, debt_n: clamp(seeded / 10, 0, 1) };
+  }
+
+  // 실측 수면이 있는 날만 누적/회복을 반영
+  const carry = 0.72;
+  const add = Math.max(0, deficit) * 0.85;
+  const recover = Math.max(0, -deficit) * 1.15;
+  const sleep_debt_next = clamp(sleepDebtPrev * carry + add - recover, 0, 20);
   const debt_n = clamp(sleep_debt_next / 10, 0, 1);
   return { sleep_debt_next, debt_n };
 }

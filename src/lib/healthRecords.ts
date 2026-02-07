@@ -18,10 +18,10 @@ export function hasHealthInput(bio?: BioInputs | null, emotion?: EmotionEntry | 
   if (hasValue(bio.caffeineMg)) return true;
   if (hasValue(bio.caffeineLastAt)) return true;
   if (hasValue(bio.fatigueLevel)) return true;
-  if (hasValue(bio.symptomSeverity)) return true;
+  if (typeof bio.symptomSeverity === "number" && bio.symptomSeverity > 0) return true;
   if (bio.menstrualStatus && bio.menstrualStatus !== "none") return true;
-  if (hasValue(bio.menstrualFlow)) return true;
-  if (hasValue(bio.shiftOvertimeHours)) return true;
+  if (typeof bio.menstrualFlow === "number" && bio.menstrualFlow > 0) return true;
+  if (typeof bio.shiftOvertimeHours === "number" && bio.shiftOvertimeHours > 0) return true;
 
   return false;
 }

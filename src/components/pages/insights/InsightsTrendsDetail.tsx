@@ -93,39 +93,43 @@ export function InsightsTrendsDetail() {
           <div className="mt-1 text-[18px] font-bold tracking-[-0.01em] text-ios-text">{t("핵심 요인")}</div>
         </div>
         <div className="px-5 pb-5 pt-4">
-          <div className="flex flex-wrap items-center gap-2">
-            {(top3 ?? []).map((factor) => (
-              <Pill key={factor.key} className="bg-white">
-                <span className="text-ios-sub">TOP</span>
-                <span className="mx-1 opacity-30">·</span>
-                <span className="font-semibold">{t(factor.label)}</span>
-                <span className="ml-2 text-ios-muted">{pct(factor.pct)}</span>
-              </Pill>
-            ))}
-          </div>
+          {top3?.length ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {top3.map((factor) => (
+                <Pill key={factor.key} className="bg-white">
+                  <span className="text-ios-sub">TOP</span>
+                  <span className="mx-1 opacity-30">·</span>
+                  <span className="font-semibold">{t(factor.label)}</span>
+                  <span className="ml-2 text-ios-muted">{pct(factor.pct)}</span>
+                </Pill>
+              ))}
+            </div>
+          ) : (
+            <div className="text-[13px] text-ios-sub">{t("기록 3일 이상부터 핵심 요인을 계산해요.")}</div>
+          )}
 
-          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <div className="rounded-2xl border border-ios-sep bg-ios-bg p-4">
-              <div className="text-[12px] font-semibold text-ios-sub">Best</div>
-              <div className="mt-1 text-[15px] font-semibold">
-                {bestWorst.best
-                  ? `${fmtMD(bestWorst.best.dateISO)} · ${shiftKo(bestWorst.best.shift)} · Vital ${Math.round(
-                      Math.min(bestWorst.best.body.value, bestWorst.best.mental.ema)
-                    )}`
-                  : "-"}
+          {bestWorst.best && bestWorst.worst ? (
+            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div className="rounded-2xl border border-ios-sep bg-ios-bg p-4">
+                <div className="text-[12px] font-semibold text-ios-sub">Best</div>
+                <div className="mt-1 text-[15px] font-semibold">
+                  {`${fmtMD(bestWorst.best.dateISO)} · ${shiftKo(bestWorst.best.shift)} · Vital ${Math.round(
+                    Math.min(bestWorst.best.body.value, bestWorst.best.mental.ema)
+                  )}`}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-ios-sep bg-ios-bg p-4">
+                <div className="text-[12px] font-semibold text-ios-sub">Worst</div>
+                <div className="mt-1 text-[15px] font-semibold">
+                  {`${fmtMD(bestWorst.worst.dateISO)} · ${shiftKo(bestWorst.worst.shift)} · Vital ${Math.round(
+                    Math.min(bestWorst.worst.body.value, bestWorst.worst.mental.ema)
+                  )}`}
+                </div>
               </div>
             </div>
-            <div className="rounded-2xl border border-ios-sep bg-ios-bg p-4">
-              <div className="text-[12px] font-semibold text-ios-sub">Worst</div>
-              <div className="mt-1 text-[15px] font-semibold">
-                {bestWorst.worst
-                  ? `${fmtMD(bestWorst.worst.dateISO)} · ${shiftKo(bestWorst.worst.shift)} · Vital ${Math.round(
-                      Math.min(bestWorst.worst.body.value, bestWorst.worst.mental.ema)
-                    )}`
-                  : "-"}
-              </div>
-            </div>
-          </div>
+          ) : (
+            <div className="mt-3 text-[13px] text-ios-sub">{t("기록이 더 쌓이면 Best/Worst day를 보여드려요.")}</div>
+          )}
         </div>
       </DetailCard>
 
