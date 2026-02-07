@@ -172,6 +172,8 @@ export async function GET(req: NextRequest) {
     };
     return NextResponse.json(body);
   } catch (error: any) {
-    return bad(502, error?.message || "openai_generation_failed");
+    // 502 is sometimes replaced by Cloudflare HTML error pages.
+    // Use 500 so client can read JSON error details.
+    return bad(500, error?.message || "openai_generation_failed");
   }
 }
