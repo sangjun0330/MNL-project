@@ -81,6 +81,13 @@ export type AppSettings = {
   language?: "ko" | "en";
 };
 
+export type AIRecoveryDailyCacheEntry = {
+  dateISO: ISODate;
+  language: "ko" | "en";
+  payload: unknown;
+  generatedAt: number;
+};
+
 export type AppState = {
   selected?: ISODate;
   schedule: Record<ISODate, Shift | undefined>;
@@ -89,6 +96,7 @@ export type AppState = {
   emotions: Record<ISODate, EmotionEntry | undefined>;
   bio: Record<ISODate, BioInputs | undefined>;
   settings: AppSettings;
+  aiRecoveryDaily?: Partial<Record<"ko" | "en", AIRecoveryDailyCacheEntry>> | null;
 };
 
 export type AppStore = AppState & {
@@ -173,5 +181,6 @@ export function emptyState(): AppState {
     emotions: {},
     bio: {},
     settings: defaultSettings(),
+    aiRecoveryDaily: {},
   };
 }

@@ -213,10 +213,13 @@ function buildUserContext(params: GenerateOpenAIRecoveryParams) {
           napHours: todayVital.inputs.napHours ?? null,
           stress: todayVital.inputs.stress ?? null,
           activity: todayVital.inputs.activity ?? null,
+          mood: todayVital.emotion?.mood ?? null,
           caffeineMg: todayVital.inputs.caffeineMg ?? null,
           caffeineLastAt: todayVital.inputs.caffeineLastAt ?? null,
           symptomSeverity: todayVital.inputs.symptomSeverity ?? null,
           menstrualStatus: todayVital.inputs.menstrualStatus ?? null,
+          menstrualLabel: todayVital.menstrual?.label ?? null,
+          menstrualTracking: Boolean(todayVital.menstrual?.enabled),
           sleepDebtHours: todayVital.engine?.sleepDebtHours ?? null,
           nightStreak: todayVital.engine?.nightStreak ?? null,
           csi: todayVital.engine?.CSI ?? null,
@@ -230,6 +233,17 @@ function buildUserContext(params: GenerateOpenAIRecoveryParams) {
       avgVital7: avg7,
       avgVitalPrev7: avgPrev,
       recordsIn7Days: vitals7.length,
+      recentVitals7: vitals7.map((vital) => ({
+        dateISO: vital.dateISO,
+        shift: vital.shift,
+        sleepHours: vital.inputs.sleepHours ?? null,
+        napHours: vital.inputs.napHours ?? null,
+        stress: vital.inputs.stress ?? null,
+        activity: vital.inputs.activity ?? null,
+        mood: vital.emotion?.mood ?? null,
+        caffeineMg: vital.inputs.caffeineMg ?? null,
+        symptomSeverity: vital.inputs.symptomSeverity ?? null,
+      })),
     },
     ruleFallback: fallback,
   };
@@ -239,22 +253,27 @@ function buildSystemPrompt(language: Language) {
   const ko = language === "ko";
   return ko
     ? [
-        "너는 RNest의 회복 처방 생성기다.",
-        "반드시 JSON으로만 답하고 설명 텍스트를 추가하지 마라.",
-        "간호사 동료처럼 따뜻하지만 간결하게 작성해라.",
-        "각 섹션은 상황 설명 1-2문장 + 구체 행동 가이드 2-3개로 작성해라.",
-        "자책/비난/의학적 진단 표현을 피하고 실무에서 즉시 실행 가능한 문장으로 작성해라.",
-        "카테고리 우선순위는 sleep > shift > caffeine > menstrual > stress > activity를 따른다.",
-        "조건이 약하면 섹션 수를 줄이고 핵심만 작성한다.",
+        "너는 RNest의 AI 맞춤회복 생성기다.",
+        "반드시 JSON으로만 답하고, JSON 외 텍스트를 절대 출력하지 마라.",
+        "출력은 A/B/C/D 틀을 채우는 데이터다: headline(A), compoundAlert(B), sections(C), weeklySummary(D).",
+        "톤은 '간호사 동료'처럼 따뜻하고 짧게, 자책 유도 금지, 실행 가능한 행동 위주로 작성한다.",
+        "섹션 C는 해당되는 카테고리만 포함한다. 우선순위는 sleep > shift > caffeine > menstrual > stress > activity.",
+        "각 섹션은 설명 1-2문장 + 행동 가이드 2-3개(tips)로 작성한다.",
+        "복합 위험(B)은 위험요소 2개 이상일 때만 compoundAlert를 채우고, 아니면 null로 둔다.",
+        "생리 관련 문구는 쉬운 표현만 사용한다: '생리 기간', '생리 직전 기간', '컨디션 안정 기간', '컨디션 변화가 큰 날'.",
+        "전문 용어(예: 황체기, 여포기, 배란기, luteal/follicular/ovulation)는 쓰지 마라.",
       ].join("\n")
     : [
         "You generate RNest recovery prescriptions.",
         "Return JSON only without extra text.",
+        "Fill A/B/C/D structure through fields: headline(A), compoundAlert(B), sections(C), weeklySummary(D).",
         "Use warm, concise peer-to-peer tone for nurses.",
         "Each section: 1-2 sentence situation summary + 2-3 actionable tips.",
         "No blame, no diagnosis language, no vague statements.",
         "Category priority: sleep > shift > caffeine > menstrual > stress > activity.",
-        "If evidence is weak, reduce section count and keep only high-signal guidance.",
+        "Include only relevant categories and skip low-signal categories.",
+        "Use simple menstrual wording only: 'period phase', 'pre-period phase', 'stable phase', 'sensitive phase'.",
+        "Do not use technical cycle terms (luteal/follicular/ovulation).",
       ].join("\n");
 }
 

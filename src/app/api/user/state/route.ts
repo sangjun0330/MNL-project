@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { loadUserState, saveUserState } from "@/lib/server/userStateStore";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { sanitizeStatePayload } from "@/lib/stateSanitizer";
+import { serializeStateForSupabase } from "@/lib/statePersistence";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -42,8 +43,8 @@ export async function POST(req: Request) {
   if (!state) return bad(400, "state required");
 
   try {
-    const sanitized = sanitizeStatePayload(state);
-    await saveUserState({ userId, payload: sanitized });
+    const serialized = serializeStateForSupabase(state);
+    await saveUserState({ userId, payload: serialized });
     return NextResponse.json({ ok: true });
   } catch (e: any) {
     return bad(500, e?.message || "failed to save");

@@ -3,7 +3,6 @@
 import { usePathname, useRouter } from "next/navigation";
 import { BottomNav } from "@/components/shell/BottomNav";
 import { UiPreferencesBridge } from "@/components/system/UiPreferencesBridge";
-import { AutoHealthLogger } from "@/components/system/AutoHealthLogger";
 import { CloudStateSync } from "@/components/system/CloudStateSync";
 import { getSupabaseBrowserClient, useAuthState } from "@/lib/auth";
 import { hydrateState, setLocalSaveEnabled, setStorageScope } from "@/lib/store";
@@ -18,7 +17,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { t } = useI18n();
   const { user: auth, status } = useAuthState();
   const [hasSession, setHasSession] = useState<boolean | null>(null);
-  const [sessionUserId, setSessionUserId] = useState<string | null>(null);
   const isAuthed = Boolean(auth?.userId) || hasSession === true;
   const [cloudReady, setCloudReady] = useState(false);
   const allowPrompt = !isAuthed && status === "unauthenticated" && !pathname?.startsWith("/settings");
@@ -41,12 +39,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     supabase.auth.getSession().then(({ data }) => {
       if (!active) return;
       setHasSession(Boolean(data.session));
-      setSessionUserId(data.session?.user?.id ?? null);
     });
     const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       if (!active) return;
       setHasSession(Boolean(nextSession));
-      setSessionUserId(nextSession?.user?.id ?? null);
     });
     return () => {
       active = false;
@@ -180,8 +176,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       ) : null}
       {isAuthed ? <CloudStateSync /> : null}
-      {/* 자동 건강 기록/동기화(백그라운드): 매일/실시간 스냅샷 저장 */}
-      {isAuthed ? <AutoHealthLogger userId={auth?.userId ?? sessionUserId} /> : null}
       <div className="safe-bottom" />
       <BottomNav />
     </div>

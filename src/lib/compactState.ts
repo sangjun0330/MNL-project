@@ -6,7 +6,7 @@ function compactEmotion(entry?: EmotionEntry) {
   const mood = entry.mood;
   const tags = Array.isArray(entry.tags) && entry.tags.length ? entry.tags : undefined;
   const note = typeof entry.note === "string" && entry.note.trim().length ? entry.note.trim() : undefined;
-  if (!mood && !tags && !note) return undefined;
+  if (mood == null && !tags && !note) return undefined;
   const next: EmotionEntry = { mood } as EmotionEntry;
   if (tags) next.tags = tags;
   if (note) next.note = note;
