@@ -1,13 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { formatKoreanDate } from "@/lib/date";
 import { useInsightsData, shiftKo, isInsightsLocked, INSIGHTS_MIN_DAYS } from "@/components/insights/useInsightsData";
 import { useAIRecoveryInsights } from "@/components/insights/useAIRecoveryInsights";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { HeroDashboard } from "@/components/insights/v2/HeroDashboard";
 import { DetailSummaryCard, DetailChip, DETAIL_ACCENTS } from "@/components/pages/insights/InsightDetailShell";
+import { TodaySleepRequiredSheet } from "@/components/insights/TodaySleepRequiredSheet";
 import { statusFromScore } from "@/lib/wnlInsight";
 import { useI18n } from "@/lib/useI18n";
 
@@ -77,7 +79,9 @@ function compactText(text: string, max = 80) {
 
 export function InsightsPage() {
   const { t } = useI18n();
-  const { data: aiRecovery, loading: aiRecoveryLoading, fromSupabase } = useAIRecoveryInsights();
+  const router = useRouter();
+  const { data: aiRecovery, loading: aiRecoveryLoading, fromSupabase, requiresTodaySleep } = useAIRecoveryInsights();
+  const [openSleepGuide, setOpenSleepGuide] = useState(false);
   const {
     end,
     todayVital,
@@ -95,6 +99,10 @@ export function InsightsPage() {
     recordedDays,
     hasInsightData,
   } = useInsightsData();
+
+  useEffect(() => {
+    if (requiresTodaySleep) setOpenSleepGuide(true);
+  }, [requiresTodaySleep]);
 
   const body = useMemo(() => Math.round(todayVital?.body.value ?? 0), [todayVital]);
   const mental = useMemo(() => Math.round(todayVital?.mental.ema ?? 0), [todayVital]);
@@ -121,9 +129,16 @@ export function InsightsPage() {
   const aiHeadline = useMemo(() => compactText(aiRecovery.result.headline, 90), [aiRecovery.result.headline]);
   const aiTopSection = aiRecovery.result.sections.length ? aiRecovery.result.sections[0] : null;
   const aiSummary = useMemo(
-    () => (aiTopSection ? compactText(aiTopSection.description, 86) : t("기록이 쌓이면 회복 처방이 더 정교해져요.")),
-    [aiTopSection, t]
+    () =>
+      requiresTodaySleep
+        ? t("오늘 수면 입력 후 AI 맞춤회복을 바로 분석합니다.")
+        : (aiTopSection ? compactText(aiTopSection.description, 86) : t("기록이 쌓이면 회복 처방이 더 정교해져요.")),
+    [aiTopSection, requiresTodaySleep, t]
   );
+  const moveToTodaySleepLog = () => {
+    setOpenSleepGuide(false);
+    router.push("/schedule?openHealthLog=today&focus=sleep");
+  };
 
   if (isInsightsLocked(recordedDays)) {
     return (
@@ -162,28 +177,42 @@ export function InsightsPage() {
 
       {/* AI Recovery summary */}
       <section className="mt-6">
-        <Link href="/insights/recovery" className="block">
+        <Link
+          href="/insights/recovery"
+          className="block"
+          onClick={(e) => {
+            if (!requiresTodaySleep) return;
+            e.preventDefault();
+            setOpenSleepGuide(true);
+          }}
+        >
           <DetailSummaryCard
             accent="navy"
             label="AI Recovery"
             title={t("AI 맞춤회복")}
-            metric={aiRecoveryLoading ? "…" : aiRecovery.result.sections.length}
+            metric={requiresTodaySleep ? "!" : (aiRecoveryLoading ? "…" : aiRecovery.result.sections.length)}
             metricLabel={t("오늘 처방")}
-            summary={aiRecoveryLoading ? t("분석 중...") : aiHeadline}
+            summary={requiresTodaySleep ? t("오늘 수면 기록을 먼저 입력해 주세요.") : (aiRecoveryLoading ? t("분석 중...") : aiHeadline)}
             detail={aiSummary}
             chips={(
               <>
-                {(aiRecovery.result.sections ?? []).slice(0, 2).map((section) => (
-                  <DetailChip key={`${section.category}-${section.title}`} color={DETAIL_ACCENTS.navy}>
-                    {section.title}
-                  </DetailChip>
-                ))}
-                <DetailChip color={aiRecovery.engine === "openai" ? DETAIL_ACCENTS.mint : DETAIL_ACCENTS.navy}>
-                  {aiRecovery.engine === "openai" ? t("OpenAI 생성 분석") : t("규칙 기반 분석")}
-                </DetailChip>
-                <DetailChip color={fromSupabase ? DETAIL_ACCENTS.mint : DETAIL_ACCENTS.pink}>
-                  {fromSupabase ? t("Supabase 실시간 분석") : t("기기 내 임시 분석")}
-                </DetailChip>
+                {requiresTodaySleep ? (
+                  <DetailChip color={DETAIL_ACCENTS.pink}>{t("오늘 수면 입력 필요")}</DetailChip>
+                ) : (
+                  <>
+                    {(aiRecovery.result.sections ?? []).slice(0, 2).map((section) => (
+                      <DetailChip key={`${section.category}-${section.title}`} color={DETAIL_ACCENTS.navy}>
+                        {section.title}
+                      </DetailChip>
+                    ))}
+                    <DetailChip color={aiRecovery.engine === "openai" ? DETAIL_ACCENTS.mint : DETAIL_ACCENTS.navy}>
+                      {aiRecovery.engine === "openai" ? t("OpenAI 생성 분석") : t("규칙 기반 분석")}
+                    </DetailChip>
+                    <DetailChip color={fromSupabase ? DETAIL_ACCENTS.mint : DETAIL_ACCENTS.pink}>
+                      {fromSupabase ? t("Supabase 실시간 분석") : t("기기 내 임시 분석")}
+                    </DetailChip>
+                  </>
+                )}
               </>
             )}
             valueColor={DETAIL_ACCENTS.navy}
@@ -332,6 +361,12 @@ export function InsightsPage() {
       </section>
         </>
       )}
+
+      <TodaySleepRequiredSheet
+        open={openSleepGuide}
+        onClose={() => setOpenSleepGuide(false)}
+        onConfirm={moveToTodaySleepLog}
+      />
     </div>
   );
 }

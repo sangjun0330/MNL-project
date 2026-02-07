@@ -187,26 +187,28 @@ function updateSleepDebt(opts: {
 }) {
   const { shift, sleep_for_debt, sleepDebtPrev, hasSleepDurationLog, hasPriorSleepLog } = opts;
 
-  // 기록이 없는 날은 임의로 debt를 변경하지 않습니다.
-  // (기록 부재를 "충분히 잤다"로 해석하면 실제 누적 피로를 과소평가함)
+  // 기록이 없는 날: 과거 부채를 완만하게 유지하되, 장기 고착을 막기 위해
+  // 아주 느린 자연 회복(감쇠)을 반영합니다.
   if (!hasSleepDurationLog) {
-    const hold = clamp(sleepDebtPrev, 0, 20);
-    return { sleep_debt_next: hold, debt_n: clamp(hold / 10, 0, 1) };
+    const carry = shift === "N" ? 0.985 : 0.965;
+    const passiveRecover = shift === "OFF" || shift === "VAC" ? 0.35 : 0.15;
+    const next = clamp(sleepDebtPrev * carry - passiveRecover, 0, 20);
+    return { sleep_debt_next: next, debt_n: clamp(next / 10, 0, 1) };
   }
 
   const target_sleep = targetSleepHours(shift);
   const deficit = target_sleep - sleep_for_debt; // +: 부족, -: 초과 수면
 
-  // 첫 유효 수면 기록은 보수적으로 초기화(단일 입력으로 과도한 debt 방지)
+  // 첫 유효 수면 기록은 "그날 부족분" 중심으로 보수적으로 시작
   if (!hasPriorSleepLog && sleepDebtPrev <= 0.01) {
-    const seeded = clamp(Math.max(0, deficit) * 0.8, 0, 4.5);
+    const seeded = clamp(Math.max(0, deficit), 0, 4.5);
     return { sleep_debt_next: seeded, debt_n: clamp(seeded / 10, 0, 1) };
   }
 
-  // 실측 수면이 있는 날만 누적/회복을 반영
-  const carry = 0.72;
-  const add = Math.max(0, deficit) * 0.85;
-  const recover = Math.max(0, -deficit) * 1.15;
+  // 실측 수면이 있는 날: 이전 부채를 일정 비율 유지 + 금일 부족분 누적 - 초과수면 회복
+  const carry = 0.88;
+  const add = Math.max(0, deficit) * 1.0;
+  const recover = Math.max(0, -deficit) * 0.75;
   const sleep_debt_next = clamp(sleepDebtPrev * carry + add - recover, 0, 20);
   const debt_n = clamp(sleep_debt_next / 10, 0, 1);
   return { sleep_debt_next, debt_n };

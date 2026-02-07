@@ -37,10 +37,12 @@ export function ScheduleRecordSheet({
   open,
   onClose,
   iso,
+  sleepFirstMode = false,
 }: {
   open: boolean;
   onClose: () => void;
   iso: ISODate;
+  sleepFirstMode?: boolean;
 }) {
   const { t } = useI18n();
   const store = useAppStore();
@@ -79,6 +81,7 @@ export function ScheduleRecordSheet({
   const skipCaffeineSync = useRef(true);
   const napDebounce = useRef<any>(null);
   const skipNapSync = useRef(true);
+  const sleepInputRef = useRef<HTMLInputElement | null>(null);
 
   const stressOptions = useMemo(
     () => [
@@ -198,6 +201,14 @@ export function ScheduleRecordSheet({
     setShowMore(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, iso]);
+
+  useEffect(() => {
+    if (!open || !sleepFirstMode || !canEditHealth) return;
+    const timer = setTimeout(() => {
+      sleepInputRef.current?.focus();
+    }, 180);
+    return () => clearTimeout(timer);
+  }, [open, sleepFirstMode, canEditHealth]);
 
   // ✅ 메모 디바운스
   useEffect(() => {
@@ -384,6 +395,11 @@ export function ScheduleRecordSheet({
             </div>
           ) : null}
         </div>
+        {sleepFirstMode && canEditHealth ? (
+          <div className="rounded-2xl border border-[#1B274733] bg-[#1B27470F] px-4 py-3 text-[12.5px] font-semibold text-[#1B2747]">
+            {t("AI 맞춤회복 분석 전, 오늘 수면 기록을 먼저 입력해 주세요.")}
+          </div>
+        ) : null}
 
         {/* 근무 */}
         <div className="rounded-2xl border border-ios-sep bg-white p-4">
@@ -444,7 +460,12 @@ export function ScheduleRecordSheet({
             </div>
 
             {/* 수면 */}
-            <div className="mt-4 rounded-2xl border border-ios-sep bg-ios-bg p-4">
+            <div
+              className={cn(
+                "mt-4 rounded-2xl border bg-ios-bg p-4",
+                sleepFirstMode ? "border-[#1B274766] shadow-[0_0_0_1px_rgba(27,39,71,0.14)]" : "border-ios-sep"
+              )}
+            >
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className="text-[12px] font-semibold text-ios-muted">{t("수면 시간")}</div>
@@ -481,6 +502,7 @@ export function ScheduleRecordSheet({
 
               <div className="mt-3">
                 <Input
+                  ref={sleepInputRef}
                   inputMode="decimal"
                   value={sleepText}
                   onChange={(e) => setSleepText(e.target.value)}

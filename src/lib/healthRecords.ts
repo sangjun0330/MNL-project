@@ -15,7 +15,7 @@ export function hasHealthInput(bio?: BioInputs | null, emotion?: EmotionEntry | 
   if (bio.sleepTiming && bio.sleepTiming !== "auto") return true;
   if (hasValue(bio.stress)) return true;
   if (hasValue(bio.activity)) return true;
-  if (hasValue(bio.caffeineMg)) return true;
+  if (typeof bio.caffeineMg === "number" && bio.caffeineMg > 0) return true;
   if (hasValue(bio.caffeineLastAt)) return true;
   if (hasValue(bio.fatigueLevel)) return true;
   if (typeof bio.symptomSeverity === "number" && bio.symptomSeverity > 0) return true;

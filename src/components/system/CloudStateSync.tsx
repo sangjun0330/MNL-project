@@ -237,6 +237,14 @@ export function CloudStateSync() {
       };
     }
     lastLoadedUserIdRef.current = userId;
+    const markReady = () => {
+      setHydrated(true);
+      if (typeof window !== "undefined") {
+        (window as any).__wnlCloudReadyUserId = userId;
+        window.dispatchEvent(new CustomEvent("wnl:cloud-ready", { detail: { userId } }));
+      }
+    };
+
     const tryLoad = async () => {
       let ready = false;
       try {
@@ -246,14 +254,18 @@ export function CloudStateSync() {
         if (!result.ok) {
           retryCount.current += 1;
           const delay = Math.min(RETRY_MAX_MS, RETRY_BASE_MS * Math.pow(2, retryCount.current - 1));
+          // 동기화 실패가 계속되면 화면 잠금은 해제하고 앱 사용은 가능하게 둡니다.
+          if (retryCount.current >= 4) {
+            ready = true;
+          }
           if (retryTimer.current) clearTimeout(retryTimer.current);
           retryTimer.current = setTimeout(() => {
             if (active) void tryLoad();
           }, delay);
-          return;
+          if (!ready) return;
         }
 
-        retryCount.current = 0;
+        if (result.ok) retryCount.current = 0;
         if (result.state) {
           const remoteState = sanitizeStatePayload(result.state);
           const remoteWasSanitized = JSON.stringify(remoteState) !== JSON.stringify(result.state);
@@ -267,7 +279,9 @@ export function CloudStateSync() {
             }, 0);
             skipNextSave.current = true;
             dirtyBeforeHydrate.current = false;
-            await saveState(merged);
+            void saveState(merged).catch(() => {
+              // 동기화 저장 실패는 화면 블로킹 원인이 되지 않게 무시
+            });
           } else {
             isHydratingRef.current = true;
             hydrateState(remoteState);
@@ -276,24 +290,30 @@ export function CloudStateSync() {
             }, 0);
             skipNextSave.current = true;
             if (remoteWasSanitized) {
-              await saveState(remoteState);
+              void saveState(remoteState).catch(() => {
+                // sanitize 반영 저장 실패는 치명적이지 않음
+              });
             }
           }
+          ready = true;
         } else {
           const fresh = storeRef.current.getState();
           if (hasAnyUserData(fresh)) {
-            await saveState(fresh);
+            void saveState(fresh).catch(() => {
+              // 초기 시드 저장 실패해도 UI를 막지 않음
+            });
           }
+          ready = true;
         }
-        ready = true;
       } catch {
-        // ignore network errors
+        // 네트워크 오류도 반복되면 UI 잠금을 해제
+        retryCount.current += 1;
+        if (retryCount.current >= 4) {
+          ready = true;
+        }
       } finally {
         if (active && ready) {
-          setHydrated(true);
-          if (typeof window !== "undefined") {
-            window.dispatchEvent(new CustomEvent("wnl:cloud-ready", { detail: { userId } }));
-          }
+          markReady();
         }
       }
     };
