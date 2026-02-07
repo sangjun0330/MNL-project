@@ -301,6 +301,14 @@ export function InsightsAIRecoveryDetail() {
                     key={`${meta.key}-${section?.title}`}
                     className="rounded-2xl border border-ios-sep bg-white p-4 shadow-apple-sm"
                   >
+                    {(() => {
+                      const descriptionText = normalizeNarrativeText(section?.description || "", lang);
+                      const tips = (section?.tips ?? [])
+                        .map((tip) => normalizeNarrativeText(tip, lang))
+                        .filter(Boolean);
+
+                      return (
+                        <>
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
                         <div className="flex h-6 w-6 items-center justify-center rounded-full bg-ios-bg text-[12px] font-bold text-ios-sub">
@@ -312,22 +320,22 @@ export function InsightsAIRecoveryDetail() {
                         {severityLabel(section?.severity ?? "info", t)}
                       </DetailChip>
                     </div>
-                    <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
-                      {highlightKeySentence(
-                        normalizeNarrativeText(section?.description || t("오늘 상태에 맞춘 회복 가이드입니다."), lang),
-                        "plan"
-                      )}
-                    </p>
-                    {section?.tips?.length ? (
+                    {descriptionText ? (
+                      <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">{descriptionText}</p>
+                    ) : null}
+                    {tips.length ? (
                       <ol className="mt-3 space-y-2 text-[14px] leading-relaxed text-ios-text">
-                        {section.tips.map((tip, idx) => (
+                        {tips.map((tip, idx) => (
                           <li key={`${meta.key}-${idx}`} className="flex gap-2">
                             <span className="font-semibold text-ios-sub">{idx + 1}.</span>
-                            <span>{normalizeNarrativeText(tip, lang)}</span>
+                            <span>{idx === 0 ? highlightKeySentence(tip, "plan") : tip}</span>
                           </li>
                         ))}
                       </ol>
                     ) : null}
+                        </>
+                      );
+                    })()}
                   </div>
                 ))}
               </div>
