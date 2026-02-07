@@ -35,10 +35,6 @@ function readShift(schedule: AppState["schedule"], iso: ISODate): Shift | null {
   return shift ?? null;
 }
 
-function hasSleepHours(v: unknown): v is number {
-  return typeof v === "number" && Number.isFinite(v);
-}
-
 function hasReliableEstimatedSignal(v: { engine?: { inputReliability?: number; daysSinceAnyInput?: number | null } } | null) {
   if (!v) return false;
   const reliability = v.engine?.inputReliability ?? 0;
@@ -158,16 +154,15 @@ export async function GET(req: NextRequest) {
     const state = normalizePayloadToState(row.payload, langHint);
     const lang = (state.settings.language ?? "ko") as Language;
 
-    // ── 3. 추천 기준일: 오늘 추천, 분석 데이터는 "어제까지" ──
+    // ── 3. 추천/분석 기준일: 오늘 (인사이트 통계와 동일 기준) ──
     const today = todayISO();
     const cached = readServerCachedAI(row.payload, today, lang);
     if (cached) {
       return NextResponse.json({ ok: true, data: cached } satisfies AIRecoveryApiSuccess);
     }
 
-    const analysisEnd = toISODate(addDays(fromISODate(today), -1));
-    const start = toISODate(addDays(fromISODate(analysisEnd), -13));
-    const vitals14 = computeVitalsRange({ state, start, end: analysisEnd });
+    const start = toISODate(addDays(fromISODate(today), -13));
+    const vitals14 = computeVitalsRange({ state, start, end: today });
     const inputDateSet = new Set<ISODate>();
     for (let i = 0; i < 14; i++) {
       const iso = toISODate(addDays(fromISODate(start), i));
@@ -176,29 +171,22 @@ export async function GET(req: NextRequest) {
       if (hasHealthInput(bio, emotion)) inputDateSet.add(iso);
     }
 
-    const start7 = toISODate(addDays(fromISODate(analysisEnd), -6));
+    const start7 = toISODate(addDays(fromISODate(today), -6));
     const vitals7 = vitals14.filter(
       (v) => v.dateISO >= start7 && (inputDateSet.has(v.dateISO) || hasReliableEstimatedSignal(v))
     );
     const prevWeek = vitals14.filter(
       (v) => v.dateISO < start7 && (inputDateSet.has(v.dateISO) || hasReliableEstimatedSignal(v))
     );
-    const anchorVital = vitals14.find((v) => v.dateISO === analysisEnd) ?? vitals14[vitals14.length - 1] ?? null;
-    const todayShift = (readShift(state.schedule, today) ?? anchorVital?.shift ?? "OFF") as Shift;
+    const todayVitalCandidate = vitals14.find((v) => v.dateISO === today) ?? null;
+    const todayHasInput = inputDateSet.has(today) || hasReliableEstimatedSignal(todayVitalCandidate);
+    const todayShift = (readShift(state.schedule, today) ?? todayVitalCandidate?.shift ?? "OFF") as Shift;
     const tomorrowISO = toISODate(addDays(fromISODate(today), 1));
     const nextShift = readShift(state.schedule, tomorrowISO);
-    const todaySleepRaw = state.bio?.[today]?.sleepHours;
-    const hasTodaySleep = hasSleepHours(todaySleepRaw);
-
-    const todayVital = anchorVital
+    const todayVital = todayHasInput && todayVitalCandidate
       ? {
-          ...anchorVital,
-          dateISO: today,
+          ...todayVitalCandidate,
           shift: todayShift,
-          inputs: {
-            ...anchorVital.inputs,
-            sleepHours: hasTodaySleep ? todaySleepRaw : (anchorVital.inputs.sleepHours ?? null),
-          },
         }
       : null;
 
