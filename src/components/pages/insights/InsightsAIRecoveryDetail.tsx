@@ -31,11 +31,18 @@ function presentError(error: string, t: (key: string) => string) {
   return [t("AI 호출에 실패했어요. 잠시 후 다시 시도해 주세요.")];
 }
 
+function compactErrorCode(error: string) {
+  if (!error) return "";
+  const code = error.split("{")[0]?.trim() || error;
+  return code.length > 90 ? `${code.slice(0, 89)}…` : code;
+}
+
 export function InsightsAIRecoveryDetail() {
   const { t } = useI18n();
-  const { data, loading, error } = useAIRecoveryInsights();
+  const { data, loading, error } = useAIRecoveryInsights({ mode: "generate" });
   const topDrains = useMemo(() => data?.result.weeklySummary?.topDrains ?? [], [data]);
   const errorLines = useMemo(() => (error ? presentError(error, t) : []), [error, t]);
+  const errorCode = useMemo(() => (error ? compactErrorCode(error) : ""), [error]);
 
   return (
     <InsightDetailShell
@@ -45,9 +52,12 @@ export function InsightsAIRecoveryDetail() {
       tone="navy"
       backHref="/insights"
     >
-      {loading ? (
+      {loading && !data ? (
         <DetailCard className="p-5">
-          <div className="text-[14px] font-semibold text-ios-sub">{t("OpenAI 분석 중...")}</div>
+          <div className="text-[15px] font-semibold text-ios-sub">{t("OpenAI 생성 분석")}</div>
+          <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
+            {t("AI가 현재 상태에 맞춘 맞춤회복을 분석하고 있습니다.")}
+          </p>
         </DetailCard>
       ) : null}
 
@@ -59,7 +69,7 @@ export function InsightsAIRecoveryDetail() {
               <p key={`${line}-${idx}`}>{line}</p>
             ))}
           </div>
-          {error ? <div className="mt-3 text-[12px] text-ios-muted">[debug] {error}</div> : null}
+          {errorCode ? <div className="mt-3 text-[12px] text-ios-muted">[{errorCode}]</div> : null}
         </DetailCard>
       ) : null}
 
@@ -145,6 +155,17 @@ export function InsightsAIRecoveryDetail() {
             )}
           </DetailCard>
         </>
+      ) : null}
+
+      {loading && !data ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/10 px-6 backdrop-blur-[1px]">
+          <div className="w-full max-w-[320px] rounded-3xl border border-ios-sep bg-white px-5 py-4 shadow-apple-lg">
+            <div className="text-[16px] font-bold tracking-[-0.01em] text-ios-text">{t("맞춤회복 분석 중")}</div>
+            <p className="mt-2 text-[13px] leading-relaxed text-ios-sub">
+              {t("AI가 현재 상태에 맞춘 맞춤회복을 분석하고 있습니다.")}
+            </p>
+          </div>
+        </div>
       ) : null}
     </InsightDetailShell>
   );
