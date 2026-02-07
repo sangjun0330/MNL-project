@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { Fragment, useMemo } from "react";
 import { DetailCard, DetailChip, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
 import { useAIRecoveryInsights } from "@/components/insights/useAIRecoveryInsights";
 import { formatKoreanDate } from "@/lib/date";
@@ -37,12 +37,102 @@ function compactErrorCode(error: string) {
   return code.length > 90 ? `${code.slice(0, 89)}…` : code;
 }
 
+function findSectionStart(text: string, label: "A" | "B" | "C" | "D") {
+  const patterns = [new RegExp(`(?:^|\\n)\\s*\\[${label}\\]`, "i"), new RegExp(`(?:^|\\n)\\s*${label}\\s*[).:\\-]`, "i")];
+  for (const pattern of patterns) {
+    const match = pattern.exec(text);
+    if (match) return match.index + (match[0].startsWith("\n") ? 1 : 0);
+  }
+  return -1;
+}
+
+function extractSection(text: string, label: "A" | "B" | "C" | "D") {
+  const start = findSectionStart(text, label);
+  if (start < 0) return "";
+  const ends = (["A", "B", "C", "D"] as const)
+    .filter((v) => v !== label)
+    .map((v) => findSectionStart(text.slice(start + 1), v))
+    .filter((idx) => idx >= 0)
+    .map((idx) => idx + start + 1);
+  const end = ends.length ? Math.min(...ends) : text.length;
+  return text.slice(start, end).trim();
+}
+
+function normalizeBlock(block: string, label: "A" | "B" | "C" | "D") {
+  return block
+    .replace(new RegExp(`^\\s*\\[${label}\\]\\s*`, "i"), "")
+    .replace(new RegExp(`^\\s*${label}\\s*[).:\\-]\\s*`, "i"), "")
+    .trim();
+}
+
+function toLines(text: string) {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function highlightInline(text: string) {
+  const tokens = text.split(/(\d+(?:\.\d+)?(?:h|시간|mg|%|점)?|수면부채|카페인|스트레스|기분|수면)/g);
+  return tokens.map((token, idx) => {
+    if (!token) return null;
+    const emph = /^(?:\d+(?:\.\d+)?(?:h|시간|mg|%|점)?|수면부채|카페인|스트레스|기분|수면)$/u.test(token);
+    if (!emph) return <Fragment key={`${token}-${idx}`}>{token}</Fragment>;
+    return (
+      <span key={`${token}-${idx}`} className="font-extrabold text-ios-text">
+        {token}
+      </span>
+    );
+  });
+}
+
+function renderBlockLines(lines: string[], tone: "normal" | "strong" = "normal") {
+  if (!lines.length) return null;
+  return (
+    <div className="mt-2 space-y-2">
+      {lines.map((line, idx) => {
+        const cleaned = line.replace(/^[\-•·]\s*/, "").trim();
+        const isBullet = /^[\-•·]/.test(line);
+        if (isBullet) {
+          return (
+            <div key={`${line}-${idx}`} className="flex gap-2 text-[14px] leading-relaxed text-ios-text">
+              <span className="pt-[2px] text-[14px]">•</span>
+              <p className="flex-1">{highlightInline(cleaned)}</p>
+            </div>
+          );
+        }
+        return (
+          <p
+            key={`${line}-${idx}`}
+            className={tone === "strong" ? "text-[16px] font-semibold leading-relaxed text-ios-text" : "text-[14px] leading-relaxed text-ios-sub"}
+          >
+            {highlightInline(cleaned)}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
 export function InsightsAIRecoveryDetail() {
   const { t } = useI18n();
-  const { data, loading, error } = useAIRecoveryInsights({ mode: "generate" });
+  const { data, loading, generating, error } = useAIRecoveryInsights({ mode: "generate" });
   const topDrains = useMemo(() => data?.result.weeklySummary?.topDrains ?? [], [data]);
   const errorLines = useMemo(() => (error ? presentError(error, t) : []), [error, t]);
   const errorCode = useMemo(() => (error ? compactErrorCode(error) : ""), [error]);
+  const rawBlocks = useMemo(() => {
+    const text = data?.generatedText ?? "";
+    if (!text) return { a: "", b: "", c: "", d: "" };
+    return {
+      a: normalizeBlock(extractSection(text, "A"), "A"),
+      b: normalizeBlock(extractSection(text, "B"), "B"),
+      c: normalizeBlock(extractSection(text, "C"), "C"),
+      d: normalizeBlock(extractSection(text, "D"), "D"),
+    };
+  }, [data?.generatedText]);
+  const blockBLines = useMemo(() => toLines(rawBlocks.b), [rawBlocks.b]);
+  const blockCLines = useMemo(() => toLines(rawBlocks.c), [rawBlocks.c]);
+  const blockDLines = useMemo(() => toLines(rawBlocks.d), [rawBlocks.d]);
 
   return (
     <InsightDetailShell
@@ -77,9 +167,10 @@ export function InsightsAIRecoveryDetail() {
         <>
           <DetailCard className="p-5">
             <div className="text-[13px] font-semibold text-ios-sub">A · {t("한줄 요약")}</div>
-            <p className="mt-2 text-[22px] font-extrabold leading-snug tracking-[-0.02em] text-ios-text">
-              {data.result.headline || t("요약이 비어 있어요.")}
+            <p className="mt-2 text-[18px] font-semibold leading-relaxed tracking-[-0.01em] text-ios-text">
+              {highlightInline(data.result.headline || t("요약이 비어 있어요."))}
             </p>
+            {rawBlocks.a && rawBlocks.a !== data.result.headline ? renderBlockLines(toLines(rawBlocks.a), "normal") : null}
           </DetailCard>
 
           <DetailCard className="p-5">
@@ -94,9 +185,10 @@ export function InsightsAIRecoveryDetail() {
                     </DetailChip>
                   ))}
                 </div>
+                {blockBLines.length ? renderBlockLines(blockBLines) : null}
               </>
             ) : (
-              <p className="mt-2 text-[14px] text-ios-sub">{t("오늘은 복합 위험 알림이 없어요.")}</p>
+              blockBLines.length ? renderBlockLines(blockBLines) : <p className="mt-2 text-[14px] text-ios-sub">{t("오늘은 복합 위험 알림이 없어요.")}</p>
             )}
           </DetailCard>
 
@@ -127,6 +219,12 @@ export function InsightsAIRecoveryDetail() {
             ) : (
               <p className="mt-2 text-[14px] text-ios-sub">{t("오늘은 추가 처방이 없어요.")}</p>
             )}
+            {blockCLines.length ? (
+              <div className="mt-4 rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3">
+                <div className="text-[12px] font-semibold text-ios-sub">{t("AI 원문 전체")}</div>
+                {renderBlockLines(blockCLines)}
+              </div>
+            ) : null}
           </DetailCard>
 
           <DetailCard className="p-5">
@@ -140,6 +238,7 @@ export function InsightsAIRecoveryDetail() {
                 </p>
                 <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">{data.result.weeklySummary.personalInsight}</p>
                 <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">{data.result.weeklySummary.nextWeekPreview}</p>
+                {blockDLines.length ? renderBlockLines(blockDLines) : null}
                 {topDrains.length ? (
                   <div className="mt-3 flex flex-wrap gap-2">
                     {topDrains.map((drain) => (
@@ -151,13 +250,13 @@ export function InsightsAIRecoveryDetail() {
                 ) : null}
               </>
             ) : (
-              <p className="mt-2 text-[14px] text-ios-sub">{t("주간 요약은 데이터가 더 쌓이면 표시돼요.")}</p>
+              blockDLines.length ? renderBlockLines(blockDLines) : <p className="mt-2 text-[14px] text-ios-sub">{t("주간 요약은 데이터가 더 쌓이면 표시돼요.")}</p>
             )}
           </DetailCard>
         </>
       ) : null}
 
-      {loading && !data ? (
+      {generating && !data ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/10 px-6 backdrop-blur-[1px]">
           <div className="w-full max-w-[320px] rounded-3xl border border-ios-sep bg-white px-5 py-4 shadow-apple-lg">
             <div className="text-[16px] font-bold tracking-[-0.01em] text-ios-text">{t("맞춤회복 분석 중")}</div>

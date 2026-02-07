@@ -97,19 +97,55 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+function asLanguage(value: unknown): Language | null {
+  return value === "ko" || value === "en" ? value : null;
+}
+
+function asPayload(candidate: unknown, fallbackLang: Language): AIRecoveryPayload | null {
+  if (!isRecord(candidate) || !isRecord(candidate.result)) return null;
+  if (typeof candidate.dateISO !== "string") return null;
+  const language = asLanguage(candidate.language) ?? fallbackLang;
+  return {
+    dateISO: candidate.dateISO as ISODate,
+    language,
+    todayShift: (typeof candidate.todayShift === "string" ? candidate.todayShift : "OFF") as Shift,
+    nextShift: (typeof candidate.nextShift === "string" ? candidate.nextShift : null) as Shift | null,
+    todayVitalScore: typeof candidate.todayVitalScore === "number" ? candidate.todayVitalScore : null,
+    source: candidate.source === "local" ? "local" : "supabase",
+    engine: candidate.engine === "rule" ? "rule" : "openai",
+    model: typeof candidate.model === "string" ? candidate.model : null,
+    debug: typeof candidate.debug === "string" ? candidate.debug : null,
+    generatedText: typeof candidate.generatedText === "string" ? candidate.generatedText : undefined,
+    result: candidate.result as AIRecoveryPayload["result"],
+  };
+}
+
 function readServerCachedAI(rawPayload: unknown, today: ISODate, lang: Language): AIRecoveryPayload | null {
   if (!isRecord(rawPayload)) return null;
   const node = rawPayload.aiRecoveryDaily;
   if (!isRecord(node)) return null;
-  const dateISO = typeof node.dateISO === "string" ? node.dateISO : "";
-  const language = node.language === "ko" || node.language === "en" ? node.language : null;
-  const data = (node as Record<string, unknown>).data;
-  if (!data || !isRecord(data)) return null;
-  if (dateISO !== today || language !== lang) return null;
-  const payload = data as AIRecoveryPayload;
-  if (payload.engine !== "openai") return null;
-  if (!payload.generatedText || typeof payload.generatedText !== "string") return null;
-  return payload;
+
+  const candidates: unknown[] = [];
+  candidates.push(node);
+
+  if (isRecord(node.data)) candidates.push(node.data);
+  if (isRecord(node.payload)) candidates.push(node.payload);
+
+  const legacyByLang = node[lang];
+  if (isRecord(legacyByLang)) {
+    candidates.push(legacyByLang);
+    if (isRecord(legacyByLang.data)) candidates.push(legacyByLang.data);
+    if (isRecord(legacyByLang.payload)) candidates.push(legacyByLang.payload);
+  }
+
+  for (const candidate of candidates) {
+    const payload = asPayload(candidate, lang);
+    if (!payload) continue;
+    if (payload.dateISO !== today) continue;
+    if (payload.engine !== "openai") continue;
+    return payload;
+  }
+  return null;
 }
 
 function withServerCachedAI(rawPayload: unknown, cacheEntry: { dateISO: ISODate; language: Language; data: AIRecoveryPayload }) {

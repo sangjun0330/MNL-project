@@ -391,7 +391,7 @@ function parseCategoryBlocks(cBlock: string, language: Language): RecoverySectio
         severity: parseSeverity(`${title} ${descriptionText} ${current.tips.join(" ")}`),
         title,
         description: descriptionText || (language === "ko" ? "오늘 컨디션에 맞춘 보정 조언입니다." : "Adjusted guidance for today."),
-        tips: current.tips.slice(0, 3),
+        tips: current.tips,
       });
     }
     current = null;
@@ -453,8 +453,7 @@ function parseCategoryBlocks(cBlock: string, language: Language): RecoverySectio
       tips: fallbackLines
         .slice(2)
         .map((line) => line.replace(/^(?:[-*•·]|\d+\.)\s*/, "").trim())
-        .filter(Boolean)
-        .slice(0, 3),
+        .filter(Boolean),
     },
   ];
 }
@@ -546,6 +545,96 @@ function parseResultFromGeneratedText(text: string, language: Language): AIRecov
   };
 }
 
+function roundToInt(value: number | null) {
+  if (value == null || !Number.isFinite(value)) return 0;
+  return Math.round(clamp(value, 0, 100));
+}
+
+function avgVitalScore(vitals: DailyVital[]) {
+  if (!vitals.length) return null;
+  const sum = vitals.reduce((acc, vital) => acc + Math.min(vital.body.value, vital.mental.ema), 0);
+  return sum / vitals.length;
+}
+
+function buildFallbackWeeklySummary(params: GenerateOpenAIRecoveryParams): WeeklySummary | null {
+  const avg7Raw = avgVitalScore(params.vitals7);
+  if (avg7Raw == null) return null;
+  const prevRaw = avgVitalScore(params.prevWeekVitals);
+  const avgBattery = roundToInt(avg7Raw);
+  const prevAvgBattery = roundToInt(prevRaw ?? avg7Raw);
+
+  const total = Math.max(params.vitals7.length, 1);
+  const sleepLowDays = params.vitals7.filter((v) => (v.inputs.sleepHours ?? 0) < 6).length;
+  const caffeineHighDays = params.vitals7.filter((v) => (v.inputs.caffeineMg ?? 0) > 200).length;
+  const stressHighDays = params.vitals7.filter((v) => {
+    const stress = v.inputs.stress ?? 0;
+    const mood = v.inputs.mood ?? v.emotion?.mood ?? 3;
+    return stress >= 2 || mood <= 2;
+  }).length;
+
+  const drains = [
+    { label: params.language === "ko" ? "수면 부족" : "Sleep debt", days: sleepLowDays },
+    { label: params.language === "ko" ? "카페인 부담" : "Caffeine load", days: caffeineHighDays },
+    { label: params.language === "ko" ? "스트레스/감정" : "Stress & mood", days: stressHighDays },
+  ]
+    .filter((item) => item.days > 0)
+    .map((item) => ({ label: item.label, pct: roundToInt((item.days / total) * 100) }))
+    .sort((a, b) => b.pct - a.pct)
+    .slice(0, 3);
+
+  if (params.language === "ko") {
+    return {
+      avgBattery,
+      prevAvgBattery,
+      topDrains: drains,
+      personalInsight:
+        sleepLowDays >= 2
+          ? "이번 주에는 수면이 흔들린 날 이후 컨디션 하락이 반복됐어요. 수면 먼저 회복하면 전체 점수가 같이 올라가는 패턴입니다."
+          : "이번 주는 비교적 안정적인 흐름이지만, 피로가 올라가는 날엔 휴식 시간을 먼저 확보할 때 회복이 빨랐어요.",
+      nextWeekPreview:
+        "다음 주에는 교대 전환일 주변에 수면·카페인 루틴을 먼저 고정하면 배터리 하락 폭을 줄이는 데 도움이 됩니다.",
+    };
+  }
+
+  return {
+    avgBattery,
+    prevAvgBattery,
+    topDrains: drains,
+    personalInsight:
+      sleepLowDays >= 2
+        ? "This week, low-sleep days were followed by lower condition scores. Prioritizing sleep first appears to lift overall recovery."
+        : "This week was relatively stable, and recovery improved when rest was protected early on demanding days.",
+    nextWeekPreview:
+      "Next week, locking sleep and caffeine timing around shift-transition days should reduce battery dips.",
+  };
+}
+
+function mergeWeeklySummary(
+  parsed: WeeklySummary | null,
+  fallback: WeeklySummary | null
+): WeeklySummary | null {
+  if (!parsed && !fallback) return null;
+  if (!parsed) return fallback;
+  if (!fallback) return parsed;
+
+  const avgBattery = parsed.avgBattery > 0 ? parsed.avgBattery : fallback.avgBattery;
+  const prevAvgBattery =
+    parsed.prevAvgBattery > 0 ? parsed.prevAvgBattery : fallback.prevAvgBattery;
+  const topDrains = parsed.topDrains.length ? parsed.topDrains : fallback.topDrains;
+  const personalInsight =
+    parsed.personalInsight?.trim() ? parsed.personalInsight : fallback.personalInsight;
+  const nextWeekPreview =
+    parsed.nextWeekPreview?.trim() ? parsed.nextWeekPreview : fallback.nextWeekPreview;
+
+  return {
+    avgBattery: roundToInt(avgBattery),
+    prevAvgBattery: roundToInt(prevAvgBattery),
+    topDrains,
+    personalInsight,
+    nextWeekPreview,
+  };
+}
+
 export async function generateAIRecoveryWithOpenAI(
   params: GenerateOpenAIRecoveryParams
 ): Promise<OpenAIRecoveryOutput> {
@@ -576,8 +665,14 @@ export async function generateAIRecoveryWithOpenAI(
     }
 
     const generatedText = attempt.text.trim();
+    const parsed = parseResultFromGeneratedText(generatedText, params.language);
+    const weeklyFallback = buildFallbackWeeklySummary(params);
+    const mergedResult: AIRecoveryResult = {
+      ...parsed,
+      weeklySummary: mergeWeeklySummary(parsed.weeklySummary, weeklyFallback),
+    };
     return {
-      result: parseResultFromGeneratedText(generatedText, params.language),
+      result: mergedResult,
       generatedText,
       engine: "openai",
       model,
