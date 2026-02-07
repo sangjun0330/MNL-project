@@ -44,6 +44,16 @@ export async function POST(req: Request) {
 
   try {
     const serialized = serializeStateForSupabase(state);
+    // Preserve server-managed AI daily cache across normal state saves.
+    const existing = await loadUserState(userId);
+    const existingPayload =
+      existing?.payload && typeof existing.payload === "object"
+        ? (existing.payload as Record<string, unknown>)
+        : null;
+    if (existingPayload?.aiRecoveryDaily) {
+      (serialized as Record<string, unknown>).aiRecoveryDaily = existingPayload.aiRecoveryDaily;
+    }
+
     await saveUserState({ userId, payload: serialized });
     return NextResponse.json({ ok: true });
   } catch (e: any) {

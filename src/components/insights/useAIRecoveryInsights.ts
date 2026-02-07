@@ -5,6 +5,7 @@ import type { AIRecoveryPayload } from "@/lib/aiRecoveryContract";
 import { todayISO } from "@/lib/date";
 import { useInsightsData } from "@/components/insights/useInsightsData";
 import { useI18n } from "@/lib/useI18n";
+import { useAuth } from "@/lib/auth";
 
 type HookResult = {
   data: AIRecoveryPayload | null;
@@ -23,14 +24,14 @@ type LocalDailyCache = {
   savedAt: number;
 };
 
-function cacheKey(lang: "ko" | "en", dateISO: string) {
-  return `${AI_DAILY_CACHE_PREFIX}:${lang}:${dateISO}`;
+function cacheKey(userId: string, lang: "ko" | "en", dateISO: string) {
+  return `${AI_DAILY_CACHE_PREFIX}:${userId}:${lang}:${dateISO}`;
 }
 
-function readDailyCache(lang: "ko" | "en", dateISO: string): AIRecoveryPayload | null {
+function readDailyCache(userId: string, lang: "ko" | "en", dateISO: string): AIRecoveryPayload | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(cacheKey(lang, dateISO));
+    const raw = window.localStorage.getItem(cacheKey(userId, lang, dateISO));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as LocalDailyCache;
     if (!parsed || typeof parsed !== "object") return null;
@@ -43,7 +44,7 @@ function readDailyCache(lang: "ko" | "en", dateISO: string): AIRecoveryPayload |
   }
 }
 
-function writeDailyCache(lang: "ko" | "en", dateISO: string, payload: AIRecoveryPayload) {
+function writeDailyCache(userId: string, lang: "ko" | "en", dateISO: string, payload: AIRecoveryPayload) {
   if (typeof window === "undefined") return;
   try {
     const entry: LocalDailyCache = {
@@ -52,7 +53,7 @@ function writeDailyCache(lang: "ko" | "en", dateISO: string, payload: AIRecovery
       payload,
       savedAt: Date.now(),
     };
-    window.localStorage.setItem(cacheKey(lang, dateISO), JSON.stringify(entry));
+    window.localStorage.setItem(cacheKey(userId, lang, dateISO), JSON.stringify(entry));
   } catch {
     // ignore localStorage quota/parse issues
   }
@@ -60,6 +61,8 @@ function writeDailyCache(lang: "ko" | "en", dateISO: string, payload: AIRecovery
 
 export function useAIRecoveryInsights(): HookResult {
   const { lang } = useI18n();
+  const auth = useAuth();
+  const cacheUserId = auth?.userId ?? "anon";
   const { state } = useInsightsData();
   const [remoteData, setRemoteData] = useState<AIRecoveryPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -102,20 +105,20 @@ export function useAIRecoveryInsights(): HookResult {
           throw new Error(`invalid_engine:${String(payload.engine ?? "unknown")}`);
         }
         setRemoteData(payload);
-        writeDailyCache(lang, dateISO, payload);
+        writeDailyCache(cacheUserId, lang, dateISO, payload);
         setError(null);
         return;
       }
 
       throw new Error(json?.error ?? `http_${res.status}`);
     },
-    [lang]
+    [cacheUserId, lang]
   );
 
   useEffect(() => {
     if (!isStoreHydrated) return;
     const dateISO = todayISO();
-    const cached = readDailyCache(lang, dateISO);
+    const cached = readDailyCache(cacheUserId, lang, dateISO);
     const controller = new AbortController();
     setLoading(true);
     setError(null);
@@ -144,7 +147,7 @@ export function useAIRecoveryInsights(): HookResult {
 
     void run();
     return () => controller.abort();
-  }, [fetchRecovery, isStoreHydrated, lang]);
+  }, [cacheUserId, fetchRecovery, isStoreHydrated, lang]);
 
   return useMemo(
     () => ({

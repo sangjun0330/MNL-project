@@ -83,6 +83,49 @@ async function safeLoadUserState(userId: string): Promise<{ payload: unknown } |
   }
 }
 
+async function safeSaveUserState(userId: string, payload: unknown): Promise<void> {
+  try {
+    const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!serviceRole || !supabaseUrl) return;
+
+    const { saveUserState } = await import("@/lib/server/userStateStore");
+    await saveUserState({ userId, payload });
+  } catch {
+    // cache save errors should not block response
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function readServerCachedAI(rawPayload: unknown, today: ISODate, lang: Language): AIRecoveryPayload | null {
+  if (!isRecord(rawPayload)) return null;
+  const node = rawPayload.aiRecoveryDaily;
+  if (!isRecord(node)) return null;
+  const dateISO = typeof node.dateISO === "string" ? node.dateISO : "";
+  const language = node.language === "ko" || node.language === "en" ? node.language : null;
+  const data = (node as Record<string, unknown>).data;
+  if (!data || !isRecord(data)) return null;
+  if (dateISO !== today || language !== lang) return null;
+  const payload = data as AIRecoveryPayload;
+  if (payload.engine !== "openai") return null;
+  if (!payload.generatedText || typeof payload.generatedText !== "string") return null;
+  return payload;
+}
+
+function withServerCachedAI(rawPayload: unknown, cacheEntry: { dateISO: ISODate; language: Language; data: AIRecoveryPayload }) {
+  const next = isRecord(rawPayload) ? { ...rawPayload } : {};
+  next.aiRecoveryDaily = {
+    dateISO: cacheEntry.dateISO,
+    language: cacheEntry.language,
+    generatedAt: Date.now(),
+    data: cacheEntry.data,
+  };
+  return next;
+}
+
 export async function GET(req: NextRequest) {
   const langHint = toLanguage(new URL(req.url).searchParams.get("lang"));
 
@@ -104,6 +147,11 @@ export async function GET(req: NextRequest) {
 
     // ── 3. 추천 기준일: 오늘 추천, 분석 데이터는 "어제까지" ──
     const today = todayISO();
+    const cached = readServerCachedAI(row.payload, today, lang);
+    if (cached) {
+      return NextResponse.json({ ok: true, data: cached } satisfies AIRecoveryApiSuccess);
+    }
+
     const analysisEnd = toISODate(addDays(fromISODate(today), -1));
     const start = toISODate(addDays(fromISODate(analysisEnd), -13));
     const vitals14 = computeVitalsRange({ state, start, end: analysisEnd });
@@ -171,6 +219,14 @@ export async function GET(req: NextRequest) {
         result: aiOutput.result,
       },
     };
+
+    const mergedPayload = withServerCachedAI(row.payload, {
+      dateISO: today,
+      language: lang,
+      data: body.data,
+    });
+    await safeSaveUserState(userId, mergedPayload);
+
     return NextResponse.json(body);
   } catch (error: any) {
     // 502 is sometimes replaced by Cloudflare HTML error pages.
