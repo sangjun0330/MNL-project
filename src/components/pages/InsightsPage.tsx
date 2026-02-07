@@ -107,12 +107,15 @@ export function InsightsPage() {
   const body = useMemo(() => Math.round(todayVital?.body.value ?? 0), [todayVital]);
   const mental = useMemo(() => Math.round(todayVital?.mental.ema ?? 0), [todayVital]);
   const debt = useMemo(() => Math.round((todayVital?.engine?.sleepDebtHours ?? 0) * 10) / 10, [todayVital]);
+  const recoveryIndex = useMemo(
+    () => Math.round(((todayVital?.engine?.SRI ?? todayVital?.engine?.SRS ?? 1) as number) * 100),
+    [todayVital]
+  );
   const csi = useMemo(() => Math.round(((todayVital?.engine?.CSI ?? todayVital?.engine?.CMF ?? 0) as number) * 100), [todayVital]);
   const caffeineImpact = useMemo(() => {
     const raw = (todayVital?.engine?.CSD ?? (1 - (todayVital?.engine?.CIF ?? 1))) as number;
     return Math.round(Math.max(0, Math.min(1, raw)) * 100);
   }, [todayVital]);
-  const night = useMemo(() => todayVital?.engine?.nightStreak ?? 0, [todayVital]);
   const hasSleepRecord = useMemo(
     () => Boolean(todayVital && (todayVital.inputs.sleepHours != null || todayVital.inputs.napHours != null)),
     [todayVital]
@@ -267,7 +270,7 @@ export function InsightsPage() {
         <MiniMetric label={t("수면부채")} value={hasSleepDebtSignal ? debt : "—"} unit={hasSleepDebtSignal ? "h" : undefined} />
         <MiniMetric label={t("리듬 부담")} value={`${csi}`} unit="%" />
         <MiniMetric label={t("카페인 영향")} value={hasCaffeineRecord ? `${caffeineImpact}` : "—"} unit={hasCaffeineRecord ? "%" : undefined} />
-        <MiniMetric label={t("연속 나이트")} value={hasTodayShift ? night : "—"} />
+        <MiniMetric label={t("회복 지수")} value={hasSleepDebtSignal ? `${recoveryIndex}` : "—"} unit={hasSleepDebtSignal ? "%" : undefined} />
       </section>
 
       {/* 7-day trends inline */}
