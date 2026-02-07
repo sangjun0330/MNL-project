@@ -386,15 +386,24 @@ export function stepMNLBatteryEngine(state: MNLHiddenState, inputs: MNLDailyInpu
     periodLen: inputs.periodLen,
   });
 
-  const periodSignal = (inputs.menstrualFlow ?? 0) > 0 || inputs.menstrualStatus === "period";
+  const menstrualFlow = clamp(Number(inputs.menstrualFlow ?? 0), 0, 3);
+  const periodSignal = menstrualFlow > 0 || inputs.menstrualStatus === "period";
   const pmsSignal = inputs.menstrualStatus === "pms";
   const phase = periodSignal ? "period" : pmsSignal ? "pms" : predicted.phase;
 
-  let MIF = 1.0;
-  if (phase === "period" || phase === "pms") MIF = 0.8;
-  MIF -= 0.05 * sym_n * 3;
-  if (shift === "N" && (phase === "period" || phase === "pms")) MIF -= 0.05;
-  MIF = clamp(MIF, 0.6, 1.0);
+  // Fuse predicted cycle phase + daily symptoms/flow into menstrual impact.
+  const phaseBaseImpact =
+    phase === "period" ? 0.16 :
+    phase === "pms" ? 0.11 :
+    phase === "luteal" ? 0.06 :
+    phase === "follicular" ? 0.02 :
+    phase === "ovulation" ? 0.01 :
+    0.0;
+  const symptomImpact = sym_n * 0.2;
+  const flowImpact = menstrualFlow * 0.03;
+  const nightPhaseImpact = shift === "N" && (phase === "period" || phase === "pms") ? 0.04 : 0;
+  const menstrualImpactRaw = clamp(phaseBaseImpact + symptomImpact + flowImpact + nightPhaseImpact, 0, 0.45);
+  const MIF = clamp(1 - menstrualImpactRaw, 0.55, 1.0);
 
   const menstrualImpact = clamp(1 - MIF, 0, 0.6);
   const MEN_PHYS = clamp(menstrualImpact * 0.6, 0, 0.6);

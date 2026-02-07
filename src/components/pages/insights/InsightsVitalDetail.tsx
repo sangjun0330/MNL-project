@@ -114,7 +114,6 @@ export function InsightsVitalDetail() {
     const raw = 1 - ((todayVital?.engine?.MIF ?? 1) as number);
     return Math.round(Math.max(0, Math.min(1, raw)) * 100);
   }, [todayVital]);
-  const night = useMemo(() => todayVital?.engine?.nightStreak ?? 0, [todayVital]);
   const status = useMemo(() => statusFromScore(todayDisplay ?? 0), [todayDisplay]);
   const hasSleepRecord = useMemo(
     () => Boolean(todayVital && (todayVital.inputs.sleepHours != null || todayVital.inputs.napHours != null)),
@@ -129,15 +128,12 @@ export function InsightsVitalDetail() {
     [todayVital]
   );
   const hasStressRecord = useMemo(() => Boolean(todayVital && todayVital.inputs.stress != null), [todayVital]);
-  const hasMenstrualRecord = useMemo(
+  const hasMenstrualSignal = useMemo(
     () =>
       Boolean(
         todayVital &&
-        (
-          (todayVital.inputs.symptomSeverity ?? 0) > 0 ||
-          ((todayVital.inputs.menstrualStatus ?? null) != null && todayVital.inputs.menstrualStatus !== "none") ||
-          (todayVital.inputs.menstrualFlow ?? 0) > 0
-        )
+        todayVital.menstrual.enabled &&
+        todayVital.menstrual.phase !== "none"
       ),
     [todayVital]
   );
@@ -226,7 +222,7 @@ export function InsightsVitalDetail() {
       <DetailCard className="p-5">
         <div className="text-[16px] font-bold tracking-[-0.01em] text-ios-text">{t("오늘의 주요 지표")}</div>
         <div className="mt-1 text-[12.5px] text-ios-sub">
-          {t("연속 나이트")} {night}
+          {t("회복 지수")} {sri}%
         </div>
         <div className="mt-4 space-y-3">
           <MetricRow
@@ -273,9 +269,9 @@ export function InsightsVitalDetail() {
             label={t("주기 영향")}
             value={cycleImpact}
             unit="%"
-            barPct={hasMenstrualRecord ? cycleImpact : 0}
-            barColor={hasMenstrualRecord ? metricColor(cycleImpact, 30, 70, true) : "#D8D9DE"}
-            empty={!hasMenstrualRecord}
+            barPct={hasMenstrualSignal ? cycleImpact : 0}
+            barColor={hasMenstrualSignal ? metricColor(cycleImpact, 30, 70, true) : "#D8D9DE"}
+            empty={!hasMenstrualSignal}
           />
         </div>
       </DetailCard>

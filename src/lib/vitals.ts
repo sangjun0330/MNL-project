@@ -2,6 +2,7 @@
 import type { ISODate } from "@/lib/date";
 import { addDays, diffDays, fromISODate, toISODate } from "@/lib/date";
 import { menstrualContextForDate } from "@/lib/menstrual";
+import type { MenstrualPhase } from "@/lib/menstrual";
 import type { AppState, BioInputs, EmotionEntry } from "@/lib/model";
 import { hasHealthInput } from "@/lib/healthRecords";
 import type { Shift } from "@/lib/types";
@@ -113,6 +114,15 @@ function defaultCaffeineTimeForShift(shift: Shift) {
   if (shift === "N") return "01:30";
   if (shift === "E") return "18:00";
   return "14:00";
+}
+
+function baselineSymptomByPhase(phase: MenstrualPhase) {
+  if (phase === "period") return 1.4;
+  if (phase === "pms") return 1.0;
+  if (phase === "luteal") return 0.45;
+  if (phase === "follicular") return 0.2;
+  if (phase === "ovulation") return 0.1;
+  return 0;
 }
 
 type NumericObservation = { value: number; iso: ISODate; shift: Shift };
@@ -273,6 +283,7 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
   const recentStressObs: NumericObservation[] = [];
   const recentActivityObs: NumericObservation[] = [];
   const recentMoodObs: NumericObservation[] = [];
+  const recentSymptomObs: NumericObservation[] = [];
 
   const computed = new Map<ISODate, DailyVital>();
 
@@ -303,7 +314,9 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
     const rawMenstrualStatus = (bio as any).menstrualStatus ?? null;
     const rawMenstrualFlow = (bio as any).menstrualFlow ?? null;
     const rawOvertimeHours = (bio as any).shiftOvertimeHours ?? null;
-    const rawSymptomSeverity = clamp(Number((bio as any).symptomSeverity ?? 0), 0, 3);
+    const rawSymptomSeverityInput = (bio as any).symptomSeverity;
+    const rawSymptomSeverity =
+      rawSymptomSeverityInput == null ? null : clamp(Number(rawSymptomSeverityInput), 0, 3);
 
     const hasAnyRawInput = hasHealthInput(bio, emotion ?? null);
     if (hasAnyRawInput) lastAnyInputISO = iso;
@@ -316,6 +329,7 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
     if (rawStress != null) pushRecentObs(recentStressObs, { value: rawStress, iso, shift });
     if (rawActivity != null) pushRecentObs(recentActivityObs, { value: rawActivity, iso, shift });
     if (rawMood != null) pushRecentObs(recentMoodObs, { value: rawMood, iso, shift });
+    if (rawSymptomSeverity != null) pushRecentObs(recentSymptomObs, { value: rawSymptomSeverity, iso, shift });
 
     let effectiveSleepHours = rawSleep;
     let effectiveNapHours = rawNap;
@@ -324,6 +338,7 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
     let effectiveMood = rawMood;
     let effectiveCaffeineMg = rawCaffeineMg;
     let effectiveCaffeineLastAt = rawCaffeineLastAt;
+    let effectiveSymptomSeverity = rawSymptomSeverity;
 
     let estimatedSleep = false;
     let estimatedCaffeine = false;
@@ -412,6 +427,23 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
       estimatedCaffeine = true;
     }
 
+    if (effectiveSymptomSeverity == null && menstrual.enabled) {
+      const phaseBaseline = baselineSymptomByPhase(menstrual.phase);
+      const flowBaseline = clamp(Number(rawMenstrualFlow ?? 0), 0, 3) * 0.25;
+      const cycleBaseline = clamp(phaseBaseline + flowBaseline, 0, 3);
+      if (recentSymptomObs.length) {
+        const prev = recentSymptomObs[0];
+        const gap = diffDays(iso, prev.iso);
+        if (gap >= 1 && gap <= 2) {
+          const carry = gap === 1 ? 0.58 : 0.34;
+          effectiveSymptomSeverity = round1(clamp(prev.value * carry + cycleBaseline * (1 - carry), 0, 3));
+        }
+      }
+      if (effectiveSymptomSeverity == null) {
+        effectiveSymptomSeverity = round1(cycleBaseline);
+      }
+    }
+
     const hasSleepDurationSignal = effectiveSleepHours != null || effectiveNapHours != null;
 
     const observedSleep = rawSleep != null || rawNap != null ? 1 : 0;
@@ -420,7 +452,7 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
     const observedMood = rawMood != null ? 1 : 0;
     const observedCaffeine = rawCaffeineMg != null || rawCaffeineLastAt != null ? 1 : 0;
     const observedMenstrual =
-      rawSymptomSeverity > 0 ||
+      rawSymptomSeverity != null ||
       (rawMenstrualStatus != null && rawMenstrualStatus !== "none") ||
       Number(rawMenstrualFlow ?? 0) > 0
         ? 1
@@ -498,7 +530,7 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
         lmpDateISO: lmp,
         cycleLenAvg: cycleLen,
         periodLen,
-        symptomSeverity: rawSymptomSeverity,
+        symptomSeverity: effectiveSymptomSeverity ?? 0,
         menstrualStatus,
         menstrualFlow,
         nightStreak,
@@ -549,9 +581,7 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
     const hasActivitySignal = effectiveActivity != null;
     const hasCaffeineSignal = (effectiveCaffeineMg != null && Number(effectiveCaffeineMg) > 0) || caffeineLastAt != null;
     const hasMenstrualSignal =
-      rawSymptomSeverity > 0 ||
-      menstrualStatus != null ||
-      Number(menstrualFlow ?? 0) > 0;
+      Boolean(menstrual.enabled) && menstrual.phase !== "none";
     const hasMoodSignal = effectiveMood != null;
 
     const sleepImpact = hasSleepSignal ? clamp((1 - sri) + Number(d.debt_n ?? 0), 0, 2) : 0;
@@ -591,7 +621,7 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
         caffeineMg: effectiveCaffeineMg,
         caffeineLastAt,
         fatigueLevel: (bio as any).fatigueLevel ?? null,
-        symptomSeverity: (bio as any).symptomSeverity ?? null,
+        symptomSeverity: effectiveSymptomSeverity,
         menstrualStatus: (bio as any).menstrualStatus ?? null,
         menstrualFlow: (bio as any).menstrualFlow ?? null,
         shiftOvertimeHours: (bio as any).shiftOvertimeHours ?? null,
