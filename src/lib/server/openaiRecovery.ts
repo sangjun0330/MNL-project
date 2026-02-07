@@ -27,6 +27,11 @@ type OpenAIParsedResult = {
   weeklySummary?: unknown;
 };
 
+type ParsedAttempt = {
+  parsed: AIRecoveryResult | null;
+  error: string | null;
+};
+
 function clamp(value: number, min: number, max: number) {
   const n = Number.isFinite(value) ? value : min;
   return Math.max(min, Math.min(max, n));
@@ -111,9 +116,10 @@ function parseWeeklySummary(value: unknown): WeeklySummary | null {
 function parseRecoveryResult(value: unknown): AIRecoveryResult | null {
   if (!isObject(value)) return null;
   const parsed = value as OpenAIParsedResult;
-  const headline = typeof parsed.headline === "string" ? parsed.headline.trim() : "";
+  const rawHeadline = typeof parsed.headline === "string" ? parsed.headline.trim() : "";
   const sectionsRaw = Array.isArray(parsed.sections) ? parsed.sections : [];
   const sections = sectionsRaw.map(parseSection).filter((item): item is RecoverySection => Boolean(item));
+  const headline = rawHeadline || (sections.length ? sections[0].description : "");
   if (!headline) return null;
   return {
     headline,
@@ -160,14 +166,25 @@ function normalizeApiKey() {
   const key =
     process.env.OPENAI_API_KEY ??
     process.env.OPENAI_KEY ??
+    process.env.OPENAI_API_TOKEN ??
+    process.env.OPENAI_SECRET_KEY ??
     process.env.NEXT_PUBLIC_OPENAI_API_KEY ??
     "";
   return String(key).trim();
 }
 
 function modelCandidates(primary: string | null | undefined) {
-  const model = String(primary ?? "").trim();
-  return model ? [model] : [];
+  const out: string[] = [];
+  const push = (value?: string | null) => {
+    const model = String(value ?? "").trim();
+    if (!model) return;
+    if (!out.includes(model)) out.push(model);
+  };
+  push(primary);
+  // 모델 오설정/권한 이슈 대비 최소 안전 후보
+  push("gpt-4o-mini");
+  push("gpt-4o");
+  return out;
 }
 
 function buildUserContext(params: GenerateOpenAIRecoveryParams) {
@@ -287,6 +304,126 @@ function buildUserPrompt(context: ReturnType<typeof buildUserContext>) {
   );
 }
 
+function truncateError(raw: string, size = 180) {
+  const clean = String(raw ?? "")
+    .replace(/\s+/g, " ")
+    .replace(/[^\x20-\x7E가-힣ㄱ-ㅎㅏ-ㅣ.,:;!?()[\]{}'"`~@#$%^&*_\-+=/\\|<>]/g, "")
+    .trim();
+  return clean.length > size ? clean.slice(0, size) : clean;
+}
+
+function parseAttemptFromContent(content: string, model: string, source: "chat" | "responses"): ParsedAttempt {
+  const parsedUnknown = parseLooseJson(content);
+  if (!parsedUnknown) {
+    return { parsed: null, error: `openai_invalid_json_${source}_model:${model}` };
+  }
+  const parsed = parseRecoveryResult(parsedUnknown);
+  if (!parsed) {
+    return { parsed: null, error: `openai_invalid_schema_${source}_model:${model}` };
+  }
+  return { parsed, error: null };
+}
+
+function extractResponsesContent(json: any): string {
+  const direct = json?.output_text;
+  if (typeof direct === "string" && direct.trim()) return direct.trim();
+  const output = Array.isArray(json?.output) ? json.output : [];
+  const chunks: string[] = [];
+  for (const item of output) {
+    const content = Array.isArray(item?.content) ? item.content : [];
+    for (const part of content) {
+      const text = typeof part?.text === "string" ? part.text : "";
+      if (text) chunks.push(text);
+    }
+  }
+  return chunks.join("").trim();
+}
+
+async function tryChatCompletions(args: {
+  apiKey: string;
+  model: string;
+  systemPrompt: string;
+  userPrompt: string;
+  signal: AbortSignal;
+}): Promise<ParsedAttempt> {
+  const { apiKey, model, systemPrompt, userPrompt, signal } = args;
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.35,
+      max_tokens: 2200,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      response_format: { type: "json_object" },
+    }),
+    signal,
+  });
+
+  if (!response.ok) {
+    const raw = await response.text().catch(() => "");
+    return {
+      parsed: null,
+      error: `openai_chat_${response.status}_model:${model}_${truncateError(raw || "unknown_error")}`,
+    };
+  }
+
+  const json = await response.json().catch(() => null);
+  const content = extractChatContent(json);
+  return parseAttemptFromContent(content, model, "chat");
+}
+
+async function tryResponsesApi(args: {
+  apiKey: string;
+  model: string;
+  systemPrompt: string;
+  userPrompt: string;
+  signal: AbortSignal;
+}): Promise<ParsedAttempt> {
+  const { apiKey, model, systemPrompt, userPrompt, signal } = args;
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.35,
+      max_output_tokens: 2200,
+      input: [
+        {
+          role: "system",
+          content: [{ type: "input_text", text: systemPrompt }],
+        },
+        {
+          role: "user",
+          content: [{ type: "input_text", text: userPrompt }],
+        },
+      ],
+    }),
+    signal,
+  });
+
+  if (!response.ok) {
+    const raw = await response.text().catch(() => "");
+    return {
+      parsed: null,
+      error: `openai_responses_${response.status}_model:${model}_${truncateError(raw || "unknown_error")}`,
+    };
+  }
+
+  const json = await response.json().catch(() => null);
+  const content = extractResponsesContent(json);
+  return parseAttemptFromContent(content, model, "responses");
+}
+
 export async function generateAIRecoveryWithOpenAI(
   params: GenerateOpenAIRecoveryParams
 ): Promise<OpenAIRecoveryOutput> {
@@ -304,58 +441,43 @@ export async function generateAIRecoveryWithOpenAI(
 
   try {
     for (const candidate of candidates) {
-      // ✅ 15초 timeout으로 무한 대기 방지
+      // 네트워크 상황이 느릴 수 있어 30초로 확장
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 15_000);
+      const timer = setTimeout(() => controller.abort(), 30_000);
       try {
-        const response = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model: candidate,
-            temperature: 0.35,
-            max_tokens: 2000,
-            messages: [
-              { role: "system", content: systemPrompt },
-              { role: "user", content: userPrompt },
-            ],
-            response_format: { type: "json_object" },
-          }),
+        const chatAttempt = await tryChatCompletions({
+          apiKey,
+          model: candidate,
+          systemPrompt,
+          userPrompt,
           signal: controller.signal,
         });
-
-        if (!response.ok) {
-          let raw = "";
-          try { raw = await response.text(); } catch { /* ignore */ }
-          const errPrefix = raw ? raw.slice(0, 160) : "unknown_error";
-          lastError = `openai_${response.status}_model:${candidate}_${errPrefix}`;
-          // ✅ 401/403은 API 키 문제 → 다른 모델로 재시도해도 의미 없음
-          if (response.status === 401 || response.status === 403) break;
-          continue;
+        if (chatAttempt.parsed) {
+          return {
+            result: chatAttempt.parsed,
+            engine: "openai",
+            model: candidate,
+            debug: null,
+          };
         }
+        lastError = chatAttempt.error ?? lastError;
 
-        const json = (await response.json()) as unknown;
-        const content = extractChatContent(json);
-        const parsedUnknown = parseLooseJson(content);
-        if (!parsedUnknown) {
-          lastError = `openai_invalid_json_model:${candidate}`;
-          continue;
-        }
-
-        const parsed = parseRecoveryResult(parsedUnknown);
-        if (!parsed) {
-          lastError = `openai_invalid_schema_model:${candidate}`;
-          continue;
-        }
-        return {
-          result: parsed,
-          engine: "openai",
+        const responsesAttempt = await tryResponsesApi({
+          apiKey,
           model: candidate,
-          debug: null,
-        };
+          systemPrompt,
+          userPrompt,
+          signal: controller.signal,
+        });
+        if (responsesAttempt.parsed) {
+          return {
+            result: responsesAttempt.parsed,
+            engine: "openai",
+            model: candidate,
+            debug: null,
+          };
+        }
+        lastError = responsesAttempt.error ?? lastError;
       } catch (innerErr: any) {
         if (innerErr?.name === "AbortError") {
           lastError = `openai_timeout_model:${candidate}`;

@@ -47,7 +47,11 @@ function hasReliableEstimatedSignal(v: { engine?: { inputReliability?: number; d
 }
 
 function bad(status: number, error: string) {
-  const body: AIRecoveryApiError = { ok: false, error };
+  const safeError = String(error ?? "unknown_error")
+    .replace(/\s+/g, " ")
+    .replace(/[^\x20-\x7E가-힣ㄱ-ㅎㅏ-ㅣ.,:;!?()[\]{}'"`~@#$%^&*_\-+=/\\|<>]/g, "")
+    .slice(0, 220);
+  const body: AIRecoveryApiError = { ok: false, error: safeError || "unknown_error" };
   return NextResponse.json(body, { status });
 }
 
