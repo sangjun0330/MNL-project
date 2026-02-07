@@ -516,6 +516,7 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
         symptomSeverity: effectiveSymptomSeverity ?? 0,
         menstrualStatus,
         menstrualFlow,
+        prevShift,
         nightStreak,
         nightsIn30,
         quickReturnHours,
