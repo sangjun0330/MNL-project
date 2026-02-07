@@ -17,6 +17,13 @@ type AnalysisContext = {
   anchorVital: DailyVital | null;
 };
 
+function hasReliableEstimatedSignal(v: DailyVital | null) {
+  if (!v) return false;
+  const reliability = v.engine?.inputReliability ?? 0;
+  const gap = v.engine?.daysSinceAnyInput ?? 99;
+  return reliability >= 0.45 && gap <= 2;
+}
+
 function hasSleepHours(v: unknown): v is number {
   return typeof v === "number" && Number.isFinite(v);
 }
@@ -39,8 +46,12 @@ function buildAnalysisContext(params: {
   }
 
   const start7 = toISODate(addDays(fromISODate(analysisEnd), -6));
-  const vitals7 = vitals14.filter((v) => v.dateISO >= start7 && inputDateSet.has(v.dateISO));
-  const prevWeek = vitals14.filter((v) => v.dateISO < start7 && inputDateSet.has(v.dateISO));
+  const vitals7 = vitals14.filter(
+    (v) => v.dateISO >= start7 && (inputDateSet.has(v.dateISO) || hasReliableEstimatedSignal(v))
+  );
+  const prevWeek = vitals14.filter(
+    (v) => v.dateISO < start7 && (inputDateSet.has(v.dateISO) || hasReliableEstimatedSignal(v))
+  );
   const anchorVital = vitals14.find((v) => v.dateISO === analysisEnd) ?? vitals14[vitals14.length - 1] ?? null;
 
   return { analysisEnd, vitals7, prevWeek, anchorVital };

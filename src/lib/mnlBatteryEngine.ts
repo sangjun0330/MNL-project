@@ -47,6 +47,14 @@ export type MNLDailyInputs = {
   shiftLengthHours?: number | null;
   overtimeHours?: number | null;
   hasPriorSleepLog?: boolean;
+  // imputation / confidence
+  inputReliability?: number; // 0..1
+  daysSinceAnyInput?: number | null;
+  estimatedSleep?: boolean;
+  estimatedCaffeine?: boolean;
+  estimatedStress?: boolean;
+  estimatedActivity?: boolean;
+  estimatedMood?: boolean;
 };
 
 export type MNLDailyDiagnostics = {
@@ -89,6 +97,9 @@ export type MNLDailyDiagnostics = {
   // deltas
   dBB: number;
   dMB: number;
+  inputReliability: number;
+  uncertaintyPenalty: number;
+  stalePenalty: number;
 };
 
 export type MNLDailyResult = {
@@ -190,8 +201,9 @@ function updateSleepDebt(opts: {
   // 기록이 없는 날: 과거 부채를 완만하게 유지하되, 장기 고착을 막기 위해
   // 아주 느린 자연 회복(감쇠)을 반영합니다.
   if (!hasSleepDurationLog) {
-    const carry = shift === "N" ? 0.985 : 0.965;
-    const passiveRecover = shift === "OFF" || shift === "VAC" ? 0.35 : 0.15;
+    // Sleep debt recovery is usually incomplete after one missed/short cycle.
+    const carry = shift === "N" ? 0.992 : 0.978;
+    const passiveRecover = shift === "OFF" || shift === "VAC" ? 0.22 : 0.08;
     const next = clamp(sleepDebtPrev * carry - passiveRecover, 0, 20);
     return { sleep_debt_next: next, debt_n: clamp(next / 10, 0, 1) };
   }
@@ -287,6 +299,8 @@ export function stepMNLBatteryEngine(state: MNLHiddenState, inputs: MNLDailyInpu
   const shift = inputs.shift;
   const hasSleepDurationLog = inputs.sleepHours != null || inputs.napHours != null;
   const hasPriorSleepLog = Boolean(inputs.hasPriorSleepLog);
+  const inputReliability = clamp(Number(inputs.inputReliability ?? 1), 0.35, 1);
+  const daysSinceAnyInput = inputs.daysSinceAnyInput == null ? null : Math.max(0, Number(inputs.daysSinceAnyInput));
   const sleep_hours = clamp(Number(inputs.sleepHours ?? 0), 0, 14);
   const nap_hours = clamp(Number(inputs.napHours ?? 0), 0, 4);
   const sleep_quality = inputs.sleepQuality ?? null;
@@ -325,11 +339,22 @@ export function stepMNLBatteryEngine(state: MNLHiddenState, inputs: MNLDailyInpu
   const CIF = clamp(1 - 0.5 * (caf_remaining / 100), 0.4, 1);
   const CSD = clamp(1 - CIF, 0, 1);
 
-  const SRI_raw = hasSleepDurationLog ? clamp(hours_norm * quality_norm * circadian_factor, 0, 1) : 1;
-  const SRI = hasSleepDurationLog ? clamp(SRI_raw * CIF, 0, 1) : 1;
+  // Missing sleep logs should not be treated as perfect recovery.
+  const debtDrag = clamp(state.sleepDebt / 16, 0, 0.25);
+  const missingSleepBase =
+    shift === "N" ? 0.64 :
+    shift === "E" ? 0.7 :
+    shift === "M" ? 0.72 :
+    0.75;
+  const SRI_raw = hasSleepDurationLog
+    ? clamp(hours_norm * quality_norm * circadian_factor, 0, 1)
+    : clamp(missingSleepBase - debtDrag, 0.5, 0.82);
+  const SRI = clamp(SRI_raw * CIF, 0, 1);
 
-  const sleep_eff = hasSleepDurationLog ? clamp(SRI * 8, 0, 14) : targetSleepHours(shift);
-  const sleep_n = hasSleepDurationLog ? clamp(SRI, 0, 1) : 1;
+  const sleep_eff = hasSleepDurationLog
+    ? clamp(SRI * 8, 0, 14)
+    : clamp(targetSleepHours(shift) * (0.82 - debtDrag * 0.3), 3.5, 10);
+  const sleep_n = clamp(SRI, 0, 1);
   const caf_n = clamp(caffeine_mg / 400, 0, 3);
 
   const sleep_for_debt = total_sleep;
@@ -377,18 +402,47 @@ export function stepMNLBatteryEngine(state: MNLHiddenState, inputs: MNLDailyInpu
 
   // Recovery score (0..100)
   const sleepPenalty = (1 - SRI) * 100;
-  const debtPenalty = debt_n * 15;
+  const debtPenalty = debt_n * 18;
   const csiPenalty = CSI * 20;
   const stressPenalty = SLF * 15;
   const menstrualPenalty = (1 - MIF) * 100;
   const moodPenalty = mood_bad_n * 5;
   const activityPenalty = activity_n * 5;
+  const uncertaintyPenalty = clamp((1 - inputReliability) * 14, 0, 10);
+  const stalePenalty =
+    daysSinceAnyInput != null && daysSinceAnyInput > 2
+      ? clamp((daysSinceAnyInput - 2) * 1.2, 0, 8)
+      : 0;
 
-  const totalPenalty = sleepPenalty + debtPenalty + csiPenalty + stressPenalty + menstrualPenalty + moodPenalty + activityPenalty;
+  const totalPenalty =
+    sleepPenalty +
+    debtPenalty +
+    csiPenalty +
+    stressPenalty +
+    menstrualPenalty +
+    moodPenalty +
+    activityPenalty +
+    uncertaintyPenalty +
+    stalePenalty;
   const recoveryScore = clamp(100 - totalPenalty, 0, 100);
 
-  const bodyPenalty = sleepPenalty * 0.6 + debtPenalty * 0.6 + csiPenalty * 0.6 + activityPenalty * 1.2 + menstrualPenalty * 0.8;
-  const mentalPenalty = sleepPenalty * 0.5 + debtPenalty * 0.5 + csiPenalty * 0.7 + stressPenalty * 1.0 + moodPenalty * 1.5 + menstrualPenalty * 0.5;
+  const bodyPenalty =
+    sleepPenalty * 0.6 +
+    debtPenalty * 0.6 +
+    csiPenalty * 0.6 +
+    activityPenalty * 1.2 +
+    menstrualPenalty * 0.8 +
+    uncertaintyPenalty * 0.8 +
+    stalePenalty * 0.7;
+  const mentalPenalty =
+    sleepPenalty * 0.5 +
+    debtPenalty * 0.5 +
+    csiPenalty * 0.7 +
+    stressPenalty * 1.0 +
+    moodPenalty * 1.5 +
+    menstrualPenalty * 0.5 +
+    uncertaintyPenalty * 0.9 +
+    stalePenalty * 0.9;
 
   const bodyTarget = clamp(100 - bodyPenalty, 0, 100);
   const mentalTarget = clamp(100 - mentalPenalty, 0, 100);
@@ -451,6 +505,9 @@ export function stepMNLBatteryEngine(state: MNLHiddenState, inputs: MNLDailyInpu
 
       dBB: BB - state.BB,
       dMB: MB - state.MB,
+      inputReliability,
+      uncertaintyPenalty,
+      stalePenalty,
     },
   };
 }
