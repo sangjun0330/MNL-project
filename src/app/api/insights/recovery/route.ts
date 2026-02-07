@@ -9,9 +9,8 @@ import { generateAIRecoveryWithOpenAI } from "@/lib/server/openaiRecovery";
 import type { Shift } from "@/lib/types";
 import { computeVitalsRange } from "@/lib/vitals";
 
-// ✅ Node.js runtime: cookies() + @supabase/ssr가 안정적으로 동작
-// Edge runtime에서는 cookies()가 제한적이라 Supabase 인증이 실패함
-export const runtime = "nodejs";
+// Cloudflare Pages requires Edge runtime for non-static routes.
+export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 function toLanguage(value: string | null): Language | null {
