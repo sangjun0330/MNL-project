@@ -62,6 +62,9 @@ function extractCSection(text: string) {
 
 function normalizeNarrativeText(text: string, lang: "ko" | "en") {
   let out = text;
+  out = out.replace(/오늘\s*컨디션에\s*맞춘\s*보정\s*조언입니다\.?/g, "");
+  out = out.replace(/오늘\s*컨디션\s*기준\s*핵심\s*조언입니다\.?/g, "");
+  out = out.replace(/Tailored adjustment guidance for today'?s condition\.?/gi, "");
 
   out = out.replace(/스트레스\s*\(?\s*([0-3])\s*\)?/g, (_, raw) => {
     const n = Number(raw);
@@ -88,14 +91,14 @@ function normalizeNarrativeText(text: string, lang: "ko" | "en") {
     return `커피 약 ${cups}잔(${Math.round(mg)}mg)`;
   });
 
-  out = out.replace(/\s{2,}/g, " ").trim();
+  out = out.replace(/[^\S\r\n]{2,}/g, " ").trim();
   return out;
 }
 
 type HighlightTone = "summary" | "alert" | "plan";
 
 function highlightClass(tone: HighlightTone) {
-  if (tone === "alert") return "rounded-[6px] bg-[#FFE7EA] px-[4px] py-[1px] font-semibold text-ios-text";
+  if (tone === "alert") return "rounded-[6px] bg-[#FFD2DA] px-[4px] py-[1px] font-semibold text-[#5F1322]";
   if (tone === "plan") return "rounded-[6px] bg-[#E4ECFF] px-[4px] py-[1px] font-semibold text-ios-text";
   return "rounded-[6px] bg-[#FFF6CC] px-[4px] py-[1px] font-semibold text-ios-text";
 }
@@ -133,18 +136,24 @@ function normalizeLineBreaks(text: string) {
   return text
     .replace(/\s+-\s+/g, "\n- ")
     .replace(/\.\s+-\s+/g, ".\n- ")
-    .replace(/\s{2,}/g, " ")
+    .replace(/[^\S\r\n]{2,}/g, " ")
     .trim();
 }
 
 function splitBulletLines(text: string) {
   const source = text.trim();
   if (!source) return [];
-  const items = source
-    .split(/\s+-\s+/)
+  const normalized = normalizeLineBreaks(source);
+  const items = normalized
+    .split(/\n+|\s+-\s+/)
     .map((line) => line.replace(/^\-\s*/, "").trim())
     .filter(Boolean);
-  return items.length > 1 ? items : [source];
+  if (items.length > 1) return items;
+  const sentenceItems = normalized
+    .split(/(?<=[.!?]|다\.|요\.)\s+|\n+/)
+    .map((line) => line.replace(/^\-\s*/, "").trim())
+    .filter(Boolean);
+  return sentenceItems.length > 1 ? sentenceItems : [normalized];
 }
 
 const CATEGORIES: Array<{
@@ -304,12 +313,10 @@ export function InsightsAIRecoveryDetail() {
                       </DetailChip>
                     </div>
                     <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
-                      {index === 0
-                        ? highlightKeySentence(
-                            normalizeNarrativeText(section?.description || t("오늘 컨디션 기준 핵심 조언입니다."), lang),
-                            "plan"
-                          )
-                        : normalizeNarrativeText(section?.description || t("오늘 컨디션 기준 핵심 조언입니다."), lang)}
+                      {highlightKeySentence(
+                        normalizeNarrativeText(section?.description || t("오늘 상태에 맞춘 회복 가이드입니다."), lang),
+                        "plan"
+                      )}
                     </p>
                     {section?.tips?.length ? (
                       <ol className="mt-3 space-y-2 text-[14px] leading-relaxed text-ios-text">
@@ -345,23 +352,25 @@ export function InsightsAIRecoveryDetail() {
                 </div>
                 <div className="rounded-xl border border-ios-sep bg-ios-bg px-3 py-2">
                   <p className="text-[12px] font-semibold text-ios-sub">{t("개인 패턴")}</p>
-                  <div className="mt-1 space-y-1">
+                  <ol className="mt-1 space-y-1">
                     {weeklyPersonalLines.map((line, idx) => (
-                      <p key={`personal-${idx}`} className="text-[14px] leading-relaxed text-ios-text">
-                        {line}
-                      </p>
+                      <li key={`personal-${idx}`} className="flex gap-2 text-[14px] leading-relaxed text-ios-text">
+                        <span className="font-semibold text-ios-sub">{idx + 1}.</span>
+                        <span>{line}</span>
+                      </li>
                     ))}
-                  </div>
+                  </ol>
                 </div>
                 <div className="rounded-xl border border-ios-sep bg-ios-bg px-3 py-2">
                   <p className="text-[12px] font-semibold text-ios-sub">{t("다음 주 예측")}</p>
-                  <div className="mt-1 space-y-1">
+                  <ol className="mt-1 space-y-1">
                     {weeklyPreviewLines.map((line, idx) => (
-                      <p key={`preview-${idx}`} className="text-[14px] leading-relaxed text-ios-text">
-                        {line}
-                      </p>
+                      <li key={`preview-${idx}`} className="flex gap-2 text-[14px] leading-relaxed text-ios-text">
+                        <span className="font-semibold text-ios-sub">{idx + 1}.</span>
+                        <span>{line}</span>
+                      </li>
                     ))}
-                  </div>
+                  </ol>
                 </div>
               </div>
             ) : (
