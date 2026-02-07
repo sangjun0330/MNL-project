@@ -41,6 +41,7 @@ export type MNLDailyInputs = {
   menstrualStatus?: "none" | "pms" | "period" | null;
   menstrualFlow?: number | null; // 0..3
   // shift/circadian derived
+  prevShift?: Shift;
   nightStreak?: number;
   nightsIn30?: number;
   quickReturnHours?: number | null;
@@ -227,6 +228,7 @@ function updateSleepDebt(opts: {
 }
 
 function computeCSI(opts: {
+  prevShift: Shift;
   shift: Shift;
   nightStreak: number;
   nightsIn30: number;
@@ -236,6 +238,7 @@ function computeCSI(opts: {
   chronotype: number;
 }) {
   const {
+    prevShift,
     shift,
     nightStreak,
     nightsIn30,
@@ -245,22 +248,46 @@ function computeCSI(opts: {
     chronotype,
   } = opts;
 
-  const nightFlag = shift === "N";
-  const consecFactor = 1 + 0.2 * Math.max(0, nightStreak - 1);
-  const quickPenalty = quickReturnHours != null && quickReturnHours < 11 ? 0.2 : 0;
-  const monthlyPenalty = nightsIn30 > 15 ? 0.2 : nightsIn30 > 8 ? 0.1 : 0;
-  const longPenalty = (shiftLengthHours ?? 0) + (overtimeHours ?? 0) >= 12 ? 0.1 : 0;
-  const scheduleFactor = 1 + quickPenalty + monthlyPenalty + longPenalty;
+  const shiftBase =
+    shift === "N" ? 0.42 :
+    shift === "E" ? 0.18 :
+    shift === "M" ? 0.12 :
+    shift === "D" ? 0.08 :
+    0.02;
 
-  let csi = 0;
-  if (nightFlag) {
-    csi = 0.5 * consecFactor * scheduleFactor;
-  } else {
-    csi = quickPenalty * 0.5 + longPenalty * 0.4;
-  }
+  const nightConsecLoad = shift === "N" ? 0.09 * Math.max(0, nightStreak - 1) : 0;
+  const quickPenalty = quickReturnHours != null && quickReturnHours < 11 ? 0.16 : 0;
+  const monthlyPenalty = nightsIn30 > 15 ? 0.12 : nightsIn30 > 8 ? 0.06 : 0;
+  const longPenalty = (shiftLengthHours ?? 0) + (overtimeHours ?? 0) >= 12 ? 0.08 : 0;
 
-  const chronoAdj = 1.1 - 0.2 * clamp(chronotype, 0, 1); // morning ↑, evening ↓
-  return clamp(csi * chronoAdj, 0, 1);
+  // Shift-transition load (e.g., N->M, E->D) should reflect rhythm disturbance.
+  const transitionPenalty = (() => {
+    if (!prevShift || prevShift === shift) return 0;
+    const hourMap: Record<Shift, number> = { D: 11, M: 15, E: 19, N: 3, OFF: 13, VAC: 13 };
+    const a = hourMap[prevShift];
+    const b = hourMap[shift];
+    const rawDiff = Math.abs(a - b);
+    const circularDiff = Math.min(rawDiff, 24 - rawDiff); // 0..12
+    let base = (circularDiff / 12) * 0.14;
+
+    if (prevShift === "N" && (shift === "M" || shift === "D" || shift === "E")) base += 0.08;
+    if (prevShift === "E" && shift === "D") base += 0.05;
+    if (prevShift === "N" && shift === "OFF") base += 0.04;
+
+    return clamp(base, 0, 0.25);
+  })();
+
+  // Chronotype mismatch: morning type suffers nights, evening type suffers early day shift.
+  const chronoMismatch =
+    shift === "N"
+      ? 1 - clamp(chronotype, 0, 1)
+      : shift === "D"
+        ? clamp(chronotype, 0, 1)
+        : Math.abs(clamp(chronotype, 0, 1) - 0.5) * 0.6;
+  const chronoPenalty = 0.07 * chronoMismatch;
+
+  const csi = shiftBase + nightConsecLoad + quickPenalty + monthlyPenalty + longPenalty + transitionPenalty + chronoPenalty;
+  return clamp(csi, 0, 1);
 }
 
 function menstrualPhase(opts: {
@@ -367,6 +394,7 @@ export function stepMNLBatteryEngine(state: MNLHiddenState, inputs: MNLDailyInpu
   });
 
   const CSI = computeCSI({
+    prevShift: inputs.prevShift ?? state.prevShift,
     shift,
     nightStreak,
     nightsIn30,
