@@ -12,9 +12,8 @@ import { statusFromScore, vitalDisplayScore } from "@/lib/wnlInsight";
 import { countHealthRecordedDays, hasHealthInput } from "@/lib/healthRecords";
 import { translate } from "@/lib/i18n";
 
-export const INSIGHTS_MIN_DAYS = 7;
-// Toggle back to true when you want to re-enable the 7-day insights lock.
-export const INSIGHTS_LOCK_ENABLED = false;
+export const INSIGHTS_MIN_DAYS = 3;
+export const INSIGHTS_LOCK_ENABLED = true;
 
 export function isInsightsLocked(recordedDays: number) {
   return INSIGHTS_LOCK_ENABLED && recordedDays < INSIGHTS_MIN_DAYS;

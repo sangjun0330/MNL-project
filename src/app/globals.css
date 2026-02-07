@@ -178,6 +178,22 @@ body {
   50% { opacity: 1; }
 }
 
+@keyframes wnlRecoveryProgress {
+  0% { transform: translateX(-40%); opacity: 0.5; }
+  50% { opacity: 1; }
+  100% { transform: translateX(40%); opacity: 0.5; }
+}
+
+@keyframes wnlLogoBreathe {
+  0%, 100% { transform: scale(0.98); opacity: 0.55; }
+  50% { transform: scale(1.03); opacity: 1; }
+}
+
+@keyframes wnlDotPulse {
+  0%, 80%, 100% { transform: scale(0.7); opacity: 0.35; }
+  40% { transform: scale(1); opacity: 1; }
+}
+
 @keyframes wnlFloatUp {
   0% { opacity: 0; transform: translateY(8px); }
   20% { opacity: 1; }
@@ -194,6 +210,18 @@ body {
 
 .wnl-pulse-soft {
   animation: wnlPulseSoft 1.6s ease-in-out infinite;
+}
+
+.wnl-recovery-progress {
+  animation: wnlRecoveryProgress 1.8s linear infinite;
+}
+
+.wnl-logo-breathe {
+  animation: wnlLogoBreathe 2.4s ease-in-out infinite;
+}
+
+.wnl-dot-pulse {
+  animation: wnlDotPulse 1.2s ease-in-out infinite;
 }
 
 .wnl-float-up {

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { addDays, fromISODate, toISODate, todayISO, type ISODate } from "@/lib/date";
 import type { AIRecoveryApiError, AIRecoveryApiSuccess, AIRecoveryPayload } from "@/lib/aiRecoveryContract";
 import type { Language } from "@/lib/i18n";
-import { hasHealthInput } from "@/lib/healthRecords";
+import { countHealthRecordedDays, hasHealthInput } from "@/lib/healthRecords";
 import type { AppState } from "@/lib/model";
 import { sanitizeStatePayload } from "@/lib/stateSanitizer";
 import { generateAIRecoveryWithOpenAI, translateAIRecoveryToEnglish } from "@/lib/server/openaiRecovery";
@@ -218,6 +218,10 @@ export async function GET(req: NextRequest) {
     const state = normalizePayloadToState(row.payload, langHint);
     const lang = (state.settings.language ?? "ko") as Language;
     const today = todayISO();
+    const recordedDays = countHealthRecordedDays({ bio: state.bio, emotions: state.emotions });
+    if (recordedDays < 3) {
+      return bad(403, "insights_locked_min_3_days");
+    }
 
     // ── 3. Supabase ai_content 캐시 우선 조회 ──
     const aiContent = await safeLoadAIContent(userId);
