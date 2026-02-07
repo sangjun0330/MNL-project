@@ -21,11 +21,6 @@ export type OpenAIRecoveryOutput = {
   debug: string | null;
 };
 
-export type OpenAIRecoveryPairOutput = {
-  ko: OpenAIRecoveryOutput;
-  en: OpenAIRecoveryOutput;
-};
-
 type TextAttempt = {
   text: string | null;
   error: string | null;
@@ -659,6 +654,77 @@ function mergeWeeklySummary(
   };
 }
 
+function buildStructuredTextFromResult(result: AIRecoveryResult, language: Language): string {
+  const lines: string[] = [];
+  const sectionTitle = language === "ko" ? "오늘의 회복 처방" : "Today's Recovery Plan";
+  const weeklyTitle = language === "ko" ? "이번 주 AI 한마디" : "Weekly AI Note";
+  const noAlert = language === "ko" ? "없음" : "none";
+
+  lines.push("[A] 한줄 요약");
+  lines.push(result.headline || (language === "ko" ? "오늘의 핵심 회복 포인트를 확인해요." : "Check today's key recovery focus."));
+  lines.push("");
+
+  lines.push("[B] 긴급 알림");
+  if (result.compoundAlert?.message?.trim()) {
+    lines.push(result.compoundAlert.message.trim());
+    if (result.compoundAlert.factors?.length) {
+      lines.push(result.compoundAlert.factors.map((factor) => `[${factor}]`).join(" "));
+    }
+  } else {
+    lines.push(noAlert);
+  }
+  lines.push("");
+
+  lines.push("[C] " + sectionTitle);
+  for (const section of result.sections ?? []) {
+    lines.push(`[${section.title}]`);
+    if (section.description?.trim()) lines.push(section.description.trim());
+    for (const tip of section.tips ?? []) {
+      const clean = String(tip ?? "").trim();
+      if (clean) lines.push(`- ${clean}`);
+    }
+    lines.push("");
+  }
+  if (!result.sections?.length) {
+    lines.push(language === "ko" ? "오늘은 추가 처방이 없어요." : "No additional prescription for today.");
+    lines.push("");
+  }
+
+  lines.push("[D] " + weeklyTitle);
+  if (result.weeklySummary) {
+    lines.push(
+      `${language === "ko" ? "평균 배터리" : "Average battery"} ${result.weeklySummary.avgBattery} · ${
+        language === "ko" ? "지난주 대비" : "vs last week"
+      } ${result.weeklySummary.avgBattery - result.weeklySummary.prevAvgBattery}`
+    );
+    if (result.weeklySummary.personalInsight?.trim()) {
+      lines.push(`- ${result.weeklySummary.personalInsight.trim()}`);
+    }
+    if (result.weeklySummary.nextWeekPreview?.trim()) {
+      lines.push(`- ${result.weeklySummary.nextWeekPreview.trim()}`);
+    }
+  } else {
+    lines.push(language === "ko" ? "데이터 부족" : "not enough data");
+  }
+
+  return lines.join("\n").trim();
+}
+
+function translateFallbackResult(source: AIRecoveryResult): AIRecoveryResult {
+  return {
+    headline: source.headline,
+    compoundAlert: source.compoundAlert,
+    sections: (source.sections ?? []).map((section) => {
+      const meta = CATEGORY_ORDER.find((item) => item.category === section.category);
+      return {
+        ...section,
+        title: meta?.titleEn ?? section.title,
+      };
+    }),
+    weeklySummary: source.weeklySummary,
+  };
+}
+
 export async function generateAIRecoveryWithOpenAI(
   params: GenerateOpenAIRecoveryParams
 ): Promise<OpenAIRecoveryOutput> {
@@ -714,56 +780,37 @@ export async function generateAIRecoveryWithOpenAI(
     clearTimeout(timer);
   }
 }
-
-function buildBilingualDeveloperPrompt() {
-  return "You are a nurse wellness and burnout-prevention specialist. Generate concise, practical daily recovery guidance.";
-}
-
-function buildBilingualUserPrompt(context: ReturnType<typeof buildUserContext>) {
-  return [
-    "Using DATA(JSON), create two versions of the same recovery guidance.",
-    "Return plain text in this exact order with exact markers and no extra commentary:",
-    "[KO]",
-    "[A] ...",
-    "[B] ...",
-    "[C] ...",
-    "[D] ...",
-    "[EN]",
-    "[A] ...",
-    "[B] ...",
-    "[C] ...",
-    "[D] ...",
-    "",
-    "Rules:",
-    "- Keep both versions concise and scannable.",
-    "- Avoid duplicate sentences.",
-    "- In Korean, avoid tag format like stress(2), mood4. Rewrite as plain language.",
-    "- Include caffeine as cups + mg (e.g., 약 1잔(120mg) / about 1 cup (120mg)).",
-    "- Keep sleep-related numbers as-is from data.",
-    "",
-    "[DATA JSON]",
-    JSON.stringify(context, null, 2),
-  ].join("\n");
-}
-
-function extractLanguageBlock(text: string, marker: "KO" | "EN") {
-  const regex = new RegExp(`(?:^|\\n)\\s*\\[${marker}\\]\\s*([\\s\\S]*?)(?=\\n\\s*\\[(?:KO|EN)\\]\\s*|$)`, "i");
-  const match = regex.exec(text);
-  return (match?.[1] ?? "").trim();
-}
-
-export async function generateAIRecoveryPairWithOpenAI(
-  params: GenerateOpenAIRecoveryParams
-): Promise<OpenAIRecoveryPairOutput> {
+export async function translateAIRecoveryToEnglish(
+  source: OpenAIRecoveryOutput
+): Promise<OpenAIRecoveryOutput> {
   const apiKey = normalizeApiKey();
   const model = resolveModel();
   if (!apiKey) {
     throw new Error("missing_openai_api_key");
   }
 
-  const context = buildUserContext({ ...params, language: "ko" });
-  const developerPrompt = buildBilingualDeveloperPrompt();
-  const userPrompt = buildBilingualUserPrompt(context);
+  const koreanText = source.generatedText?.trim()
+    ? source.generatedText.trim()
+    : buildStructuredTextFromResult(source.result, "ko");
+  const developerPrompt =
+    "You are a professional Korean-to-English translator for nurse wellness coaching content.";
+  const userPrompt = [
+    "Translate the Korean recovery guidance into natural, concise English.",
+    "Output plain text only with the exact structure below:",
+    "[A] ...",
+    "[B] ...",
+    "[C] ...",
+    "[D] ...",
+    "",
+    "Rules:",
+    "- Keep all numbers and units unchanged.",
+    "- Do not add or remove sections.",
+    "- Keep each [category] heading in [C] translated to English in square brackets.",
+    "- No markdown code fences.",
+    "",
+    "[SOURCE_KOREAN]",
+    koreanText,
+  ].join("\n");
   const maxOutputTokens = resolveMaxOutputTokens();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 35_000);
@@ -781,36 +828,22 @@ export async function generateAIRecoveryPairWithOpenAI(
       throw new Error(attempt.error ?? `openai_request_failed_model:${model}`);
     }
 
-    const fullText = attempt.text.trim();
-    const koText = extractLanguageBlock(fullText, "KO") || fullText;
-    const enText = extractLanguageBlock(fullText, "EN") || fullText;
-
-    const koParsed = parseResultFromGeneratedText(koText, "ko");
-    const enParsed = parseResultFromGeneratedText(enText, "en");
-    const koWeeklyFallback = buildFallbackWeeklySummary({ ...params, language: "ko" });
-    const enWeeklyFallback = buildFallbackWeeklySummary({ ...params, language: "en" });
+    const translatedText = attempt.text.trim();
+    const parsed = parseResultFromGeneratedText(translatedText, "en");
+    const fallback = translateFallbackResult(source.result);
+    const mergedResult: AIRecoveryResult = {
+      headline: parsed.headline?.trim() ? parsed.headline : fallback.headline,
+      compoundAlert: parsed.compoundAlert ?? fallback.compoundAlert,
+      sections: parsed.sections.length ? parsed.sections : fallback.sections,
+      weeklySummary: mergeWeeklySummary(parsed.weeklySummary, fallback.weeklySummary),
+    };
 
     return {
-      ko: {
-        result: {
-          ...koParsed,
-          weeklySummary: mergeWeeklySummary(koParsed.weeklySummary, koWeeklyFallback),
-        },
-        generatedText: koText,
-        engine: "openai",
-        model,
-        debug: null,
-      },
-      en: {
-        result: {
-          ...enParsed,
-          weeklySummary: mergeWeeklySummary(enParsed.weeklySummary, enWeeklyFallback),
-        },
-        generatedText: enText,
-        engine: "openai",
-        model,
-        debug: null,
-      },
+      result: mergedResult,
+      generatedText: translatedText,
+      engine: "openai",
+      model,
+      debug: null,
     };
   } catch (err: any) {
     if (err?.name === "AbortError") {

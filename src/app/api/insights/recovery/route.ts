@@ -5,7 +5,7 @@ import type { Language } from "@/lib/i18n";
 import { hasHealthInput } from "@/lib/healthRecords";
 import type { AppState } from "@/lib/model";
 import { sanitizeStatePayload } from "@/lib/stateSanitizer";
-import { generateAIRecoveryPairWithOpenAI } from "@/lib/server/openaiRecovery";
+import { generateAIRecoveryWithOpenAI, translateAIRecoveryToEnglish } from "@/lib/server/openaiRecovery";
 import type { Shift } from "@/lib/types";
 import { computeVitalsRange } from "@/lib/vitals";
 import type { Json } from "@/types/supabase";
@@ -163,13 +163,7 @@ function readAIContentVariants(raw: unknown, today: ISODate): Partial<Record<Lan
 
   const single = asPayload(raw, "ko");
   if (single && single.dateISO === today) {
-    if (single.language === "en") {
-      variants.en = variants.en ?? single;
-      variants.ko = variants.ko ?? single;
-    } else {
-      variants.ko = variants.ko ?? single;
-      variants.en = variants.en ?? single;
-    }
+    variants[single.language] = variants[single.language] ?? single;
   }
 
   return variants;
@@ -229,9 +223,44 @@ export async function GET(req: NextRequest) {
     const aiContent = await safeLoadAIContent(userId);
     if (aiContent && aiContent.dateISO === today) {
       const variants = readAIContentVariants(aiContent.data, today);
-      const payload = variants[lang] ?? variants.ko ?? variants.en ?? null;
-      if (payload && payload.engine === "openai") {
-        return NextResponse.json({ ok: true, data: payload } satisfies AIRecoveryApiSuccess);
+      const direct = variants[lang] ?? null;
+      if (direct && direct.engine === "openai") {
+        return NextResponse.json({ ok: true, data: direct } satisfies AIRecoveryApiSuccess);
+      }
+      if (lang === "en" && variants.ko && variants.ko.engine === "openai") {
+        try {
+          const translated = await translateAIRecoveryToEnglish({
+            result: variants.ko.result,
+            generatedText: variants.ko.generatedText ?? "",
+            engine: "openai",
+            model: variants.ko.model,
+            debug: variants.ko.debug ?? null,
+          });
+          const translatedPayload: AIRecoveryPayload = {
+            ...variants.ko,
+            language: "en",
+            model: translated.model ?? variants.ko.model,
+            debug: translated.debug,
+            generatedText: translated.generatedText,
+            result: translated.result,
+          };
+          const saveError = await safeSaveAIContent(userId, today, "ko", {
+            dateISO: today,
+            generatedAt: Date.now(),
+            variants: {
+              ko: variants.ko,
+              en: translatedPayload,
+            },
+          });
+          if (saveError) {
+            translatedPayload.debug = translatedPayload.debug
+              ? `${translatedPayload.debug}|${saveError}`
+              : saveError;
+          }
+          return NextResponse.json({ ok: true, data: translatedPayload } satisfies AIRecoveryApiSuccess);
+        } catch {
+          return NextResponse.json({ ok: true, data: variants.ko } satisfies AIRecoveryApiSuccess);
+        }
       }
     }
 
@@ -243,7 +272,6 @@ export async function GET(req: NextRequest) {
         generatedAt: Date.now(),
         variants: {
           ko: legacyCached,
-          en: legacyCached,
         },
       });
       return NextResponse.json({ ok: true, data: legacyCached } satisfies AIRecoveryApiSuccess);
@@ -282,9 +310,9 @@ export async function GET(req: NextRequest) {
         }
       : null;
 
-    // ── 4. OpenAI만 사용(규칙 fallback 없음) ──
-    const aiPair = await generateAIRecoveryPairWithOpenAI({
-      language: lang,
+    // ── 4. OpenAI 한국어 단일 생성(영어는 번역 캐시) ──
+    const aiKo = await generateAIRecoveryWithOpenAI({
+      language: "ko",
       todayISO: today,
       todayShift,
       nextShift,
@@ -303,40 +331,46 @@ export async function GET(req: NextRequest) {
       nextShift,
       todayVitalScore,
       source: "supabase",
-      engine: aiPair.ko.engine,
-      model: aiPair.ko.model,
-      debug: aiPair.ko.debug,
-      generatedText: aiPair.ko.generatedText,
-      result: aiPair.ko.result,
-    };
-    const payloadEn: AIRecoveryPayload = {
-      dateISO: today,
-      language: "en",
-      todayShift,
-      nextShift,
-      todayVitalScore,
-      source: "supabase",
-      engine: aiPair.en.engine,
-      model: aiPair.en.model,
-      debug: aiPair.en.debug,
-      generatedText: aiPair.en.generatedText,
-      result: aiPair.en.result,
+      engine: aiKo.engine,
+      model: aiKo.model,
+      debug: aiKo.debug,
+      generatedText: aiKo.generatedText,
+      result: aiKo.result,
     };
 
-    const saveError = await safeSaveAIContent(userId, today, lang, {
+    let payloadEn: AIRecoveryPayload | null = null;
+    if (lang === "en") {
+      try {
+        const translated = await translateAIRecoveryToEnglish(aiKo);
+        payloadEn = {
+          ...payloadKo,
+          language: "en",
+          model: translated.model ?? payloadKo.model,
+          debug: translated.debug,
+          generatedText: translated.generatedText,
+          result: translated.result,
+        };
+      } catch {
+        payloadEn = null;
+      }
+    }
+
+    const saveError = await safeSaveAIContent(userId, today, "ko", {
       dateISO: today,
       generatedAt: Date.now(),
       variants: {
         ko: payloadKo,
-        en: payloadEn,
+        ...(payloadEn ? { en: payloadEn } : {}),
       },
     });
     if (saveError) {
       payloadKo.debug = payloadKo.debug ? `${payloadKo.debug}|${saveError}` : saveError;
-      payloadEn.debug = payloadEn.debug ? `${payloadEn.debug}|${saveError}` : saveError;
+      if (payloadEn) {
+        payloadEn.debug = payloadEn.debug ? `${payloadEn.debug}|${saveError}` : saveError;
+      }
     }
 
-    const body: AIRecoveryApiSuccess = { ok: true, data: lang === "en" ? payloadEn : payloadKo };
+    const body: AIRecoveryApiSuccess = { ok: true, data: lang === "en" ? payloadEn ?? payloadKo : payloadKo };
 
     return NextResponse.json(body);
   } catch (error: any) {
