@@ -33,6 +33,8 @@ type CategoryMeta = {
   hints: string[];
 };
 
+const DEFAULT_MAX_OUTPUT_TOKENS = 5200;
+
 const CATEGORY_ORDER: CategoryMeta[] = [
   { category: "sleep", titleKo: "수면", titleEn: "Sleep", hints: ["수면", "sleep", "sleep debt"] },
   { category: "shift", titleKo: "교대근무", titleEn: "Shift", hints: ["교대", "나이트", "근무", "shift", "night"] },
@@ -50,6 +52,12 @@ const CATEGORY_ORDER: CategoryMeta[] = [
 function clamp(value: number, min: number, max: number) {
   const n = Number.isFinite(value) ? value : min;
   return Math.max(min, Math.min(max, n));
+}
+
+function resolveMaxOutputTokens() {
+  const raw = Number(process.env.OPENAI_MAX_OUTPUT_TOKENS ?? DEFAULT_MAX_OUTPUT_TOKENS);
+  if (!Number.isFinite(raw)) return DEFAULT_MAX_OUTPUT_TOKENS;
+  return Math.round(clamp(raw, 1200, 10000));
 }
 
 function normalizeApiKey() {
@@ -181,6 +189,7 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
       "- 간호사 동료처럼 부드러운 말투",
       "- 자책 유도 금지",
       "- 추상적인 말 대신 바로 실행 가능한 행동",
+      "- 수치(예: 수면부채/카페인/기분)는 input JSON 값을 그대로 사용하고 임의 수치를 만들지 말 것",
       "",
       "[데이터(JSON)]",
       JSON.stringify(context, null, 2),
@@ -231,8 +240,9 @@ async function callResponsesApi(args: {
   userPrompt: string;
   signal: AbortSignal;
   strictMode: boolean;
+  maxOutputTokens: number;
 }): Promise<TextAttempt> {
-  const { apiKey, model, developerPrompt, userPrompt, signal, strictMode } = args;
+  const { apiKey, model, developerPrompt, userPrompt, signal, strictMode, maxOutputTokens } = args;
 
   const payload = strictMode
     ? {
@@ -254,7 +264,7 @@ async function callResponsesApi(args: {
         reasoning: {
           effort: "medium",
         },
-        max_output_tokens: 2200,
+        max_output_tokens: maxOutputTokens,
         tools: [],
         store: true,
         include: ["reasoning.encrypted_content", "web_search_call.action.sources"],
@@ -277,7 +287,7 @@ async function callResponsesApi(args: {
         reasoning: {
           effort: "medium",
         },
-        max_output_tokens: 2200,
+        max_output_tokens: maxOutputTokens,
       };
 
   const response = await fetch("https://api.openai.com/v1/responses", {
@@ -563,6 +573,7 @@ export async function generateAIRecoveryWithOpenAI(
   const context = buildUserContext(params);
   const developerPrompt = buildDeveloperPrompt(params.language);
   const userPrompt = buildUserPrompt(params.language, context);
+  const maxOutputTokens = resolveMaxOutputTokens();
   const candidates = modelCandidates(configuredModel);
   let lastError = "openai_request_failed";
 
@@ -577,6 +588,7 @@ export async function generateAIRecoveryWithOpenAI(
         userPrompt,
         signal: controller.signal,
         strictMode: true,
+        maxOutputTokens,
       });
 
       if (strictAttempt.text) {
@@ -591,7 +603,7 @@ export async function generateAIRecoveryWithOpenAI(
       }
 
       lastError = strictAttempt.error ?? lastError;
-      if (lastError.includes("_401_") || lastError.includes("_403_")) {
+      if (lastError.includes("_401_")) {
         break;
       }
 
@@ -602,6 +614,7 @@ export async function generateAIRecoveryWithOpenAI(
         userPrompt,
         signal: controller.signal,
         strictMode: false,
+        maxOutputTokens,
       });
 
       if (safeAttempt.text) {
@@ -616,7 +629,7 @@ export async function generateAIRecoveryWithOpenAI(
       }
 
       lastError = safeAttempt.error ?? lastError;
-      if (lastError.includes("_401_") || lastError.includes("_403_")) {
+      if (lastError.includes("_401_")) {
         break;
       }
     } catch (err: any) {
