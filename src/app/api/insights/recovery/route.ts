@@ -79,17 +79,45 @@ async function safeLoadUserState(userId: string): Promise<{ payload: unknown } |
   }
 }
 
-async function safeSaveUserState(userId: string, payload: unknown): Promise<string | null> {
+async function safeLoadAIContent(userId: string): Promise<{
+  dateISO: ISODate;
+  language: Language;
+  data: AIRecoveryPayload;
+} | null> {
+  try {
+    const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!serviceRole || !supabaseUrl) return null;
+
+    const { loadAIContent } = await import("@/lib/server/aiContentStore");
+    const row = await loadAIContent(userId);
+    if (!row) return null;
+    return {
+      dateISO: row.dateISO,
+      language: row.language,
+      data: row.data,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function safeSaveAIContent(
+  userId: string,
+  dateISO: ISODate,
+  language: Language,
+  data: AIRecoveryPayload
+): Promise<string | null> {
   try {
     const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     if (!serviceRole || !supabaseUrl) return "missing_supabase_env";
 
-    const { saveUserState } = await import("@/lib/server/userStateStore");
-    await saveUserState({ userId, payload });
+    const { saveAIContent } = await import("@/lib/server/aiContentStore");
+    await saveAIContent({ userId, dateISO, language, data });
     return null;
   } catch {
-    return "save_user_state_failed";
+    return "save_ai_content_failed";
   }
 }
 
@@ -148,17 +176,6 @@ function readServerCachedAI(rawPayload: unknown, today: ISODate, lang: Language)
   return null;
 }
 
-function withServerCachedAI(rawPayload: unknown, cacheEntry: { dateISO: ISODate; language: Language; data: AIRecoveryPayload }) {
-  const next = isRecord(rawPayload) ? { ...rawPayload } : {};
-  next.aiRecoveryDaily = {
-    dateISO: cacheEntry.dateISO,
-    language: cacheEntry.language,
-    generatedAt: Date.now(),
-    data: cacheEntry.data,
-  };
-  return next;
-}
-
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const langHint = toLanguage(url.searchParams.get("lang"));
@@ -179,13 +196,24 @@ export async function GET(req: NextRequest) {
 
     const state = normalizePayloadToState(row.payload, langHint);
     const lang = (state.settings.language ?? "ko") as Language;
-
-    // ── 3. 추천/분석 기준일: 오늘 (인사이트 통계와 동일 기준) ──
     const today = todayISO();
-    const cached = readServerCachedAI(row.payload, today, lang);
-    if (cached) {
-      return NextResponse.json({ ok: true, data: cached } satisfies AIRecoveryApiSuccess);
+
+    // ── 3. Supabase ai_content 캐시 우선 조회 ──
+    const aiContent = await safeLoadAIContent(userId);
+    if (aiContent && aiContent.dateISO === today) {
+      const payload = asPayload(aiContent.data, aiContent.language);
+      if (payload && payload.engine === "openai") {
+        return NextResponse.json({ ok: true, data: payload } satisfies AIRecoveryApiSuccess);
+      }
     }
+
+    // legacy fallback: wnl_user_state.payload.aiRecoveryDaily
+    const legacyCached = readServerCachedAI(row.payload, today, lang);
+    if (legacyCached) {
+      void safeSaveAIContent(userId, today, legacyCached.language, legacyCached);
+      return NextResponse.json({ ok: true, data: legacyCached } satisfies AIRecoveryApiSuccess);
+    }
+
     if (cacheOnly) {
       return NextResponse.json({ ok: true, data: null } satisfies AIRecoveryApiSuccess);
     }
@@ -247,12 +275,7 @@ export async function GET(req: NextRequest) {
       result: aiOutput.result,
     };
 
-    const mergedPayload = withServerCachedAI(row.payload, {
-      dateISO: today,
-      language: lang,
-      data: payload,
-    });
-    const saveError = await safeSaveUserState(userId, mergedPayload);
+    const saveError = await safeSaveAIContent(userId, today, lang, payload);
     if (saveError) {
       payload.debug = payload.debug ? `${payload.debug}|${saveError}` : saveError;
     }

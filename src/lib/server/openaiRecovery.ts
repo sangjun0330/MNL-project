@@ -33,7 +33,7 @@ type CategoryMeta = {
   hints: string[];
 };
 
-const DEFAULT_MAX_OUTPUT_TOKENS = 5200;
+const DEFAULT_MAX_OUTPUT_TOKENS = 1800;
 
 const CATEGORY_ORDER: CategoryMeta[] = [
   { category: "sleep", titleKo: "수면", titleEn: "Sleep", hints: ["수면", "sleep", "sleep debt"] },
@@ -70,7 +70,7 @@ function roundInteger(value: unknown): number | "-" {
 function resolveMaxOutputTokens() {
   const raw = Number(process.env.OPENAI_MAX_OUTPUT_TOKENS ?? DEFAULT_MAX_OUTPUT_TOKENS);
   if (!Number.isFinite(raw)) return DEFAULT_MAX_OUTPUT_TOKENS;
-  return Math.round(clamp(raw, 1200, 10000));
+  return Math.round(clamp(raw, 700, 3500));
 }
 
 function normalizeApiKey() {
@@ -183,9 +183,11 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
       "[C] 오늘의 회복 처방",
       "- 해당되는 항목만 작성",
       "- 우선순위: 수면 > 교대근무 > 카페인 > 생리주기 > 스트레스&감정 > 신체활동",
-      "- 각 항목은 설명 1-2문장 + 행동 2-3개",
+      "- 각 항목은 '[카테고리명]' 헤더로 시작",
+      "- 각 항목은 설명 1문장 + 행동 2개로 짧게 작성",
       "- 생리주기는 전문용어 없이 쉬운 단어 사용",
-      "- 한 항목이 너무 길어지지 않게 간결하게 작성",
+      "- 중복 문장 금지, 같은 의미 반복 금지",
+      "- C 전체는 20줄 이내로 간결하게 작성",
       "",
       "[D] 이번 주 AI 한마디",
       "- 이번 주 요약 -> 개인 패턴 -> 다음 주 예측 순서",
@@ -196,6 +198,7 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
       "- 추상적인 말 대신 바로 실행 가능한 행동",
       "- 수치(예: 수면부채/카페인/기분)는 input JSON 값을 그대로 사용하고 임의 수치를 만들지 말 것",
       "- 수치는 소수점 1자리까지만 사용 (예: 1.6h, 42.3%)",
+      "- 전체 답변은 한눈에 읽히게 짧은 문장 위주로 작성",
       "",
       "[데이터(JSON)]",
       JSON.stringify(context, null, 2),
@@ -207,9 +210,10 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
     "Output plain text in this exact structure:",
     "[A] One-line summary",
     "[B] Urgent alert (only if 2+ risks, otherwise write 'none')",
-    "[C] Today's recovery plan (only relevant categories, prioritized sleep > shift > caffeine > menstrual > stress > activity)",
+    "[C] Today's recovery plan (only relevant categories, prioritized sleep > shift > caffeine > menstrual > stress > activity). Each category must start with [Category].",
     "[D] Weekly AI note (weekly summary -> personal pattern -> next week preview)",
     "Tone: warm peer nurse voice, no medical jargon, no blame, concrete actions.",
+    "No duplicated sentences.",
     "Keep numbers at one decimal place max.",
     "",
     "[Data JSON]",
@@ -264,15 +268,14 @@ async function callResponsesApi(args: {
     ],
     text: {
       format: { type: "text" },
-      verbosity: "medium",
+      verbosity: "low",
     },
     reasoning: {
-      effort: "medium",
+      effort: "low",
     },
     max_output_tokens: maxOutputTokens,
     tools: [],
-    store: true,
-    include: ["reasoning.encrypted_content", "web_search_call.action.sources"],
+    store: false,
   };
 
   const response = await fetch("https://api.openai.com/v1/responses", {
@@ -417,6 +420,18 @@ function parseCategoryBlocks(cBlock: string, language: Language): RecoverySectio
         current = { meta, description: [], tips: [] };
         if (numberedHeading[2]) current.description.push(numberedHeading[2].trim());
       }
+      continue;
+    }
+
+    const plainCandidate = line
+      .replace(/^[\d.\-•·\s]+/, "")
+      .replace(/[()[\]]/g, "")
+      .trim();
+    const plainMeta = parseCategoryFromLabel(plainCandidate);
+    const shortHeading = plainCandidate.length > 0 && plainCandidate.length <= 16 && !/[.!?]/.test(plainCandidate);
+    if (plainMeta && shortHeading) {
+      flush();
+      current = { meta: plainMeta, description: [], tips: [] };
       continue;
     }
 
@@ -649,7 +664,7 @@ export async function generateAIRecoveryWithOpenAI(
   const userPrompt = buildUserPrompt(params.language, context);
   const maxOutputTokens = resolveMaxOutputTokens();
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 45_000);
+  const timer = setTimeout(() => controller.abort(), 35_000);
   try {
     const attempt = await callResponsesApi({
       apiKey,
