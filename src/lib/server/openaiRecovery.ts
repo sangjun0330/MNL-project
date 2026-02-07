@@ -15,7 +15,7 @@ type GenerateOpenAIRecoveryParams = {
 
 export type OpenAIRecoveryOutput = {
   result: AIRecoveryResult;
-  engine: "openai" | "rule";
+  engine: "openai";
   model: string | null;
   debug: string | null;
 };
@@ -430,13 +430,7 @@ export async function generateAIRecoveryWithOpenAI(
   const apiKey = normalizeApiKey();
   const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
   if (!apiKey) {
-    // ✅ throw 대신 rule-based fallback 반환 → route에서 502 방지
-    const { generateAIRecovery } = await import("@/lib/aiRecovery");
-    const fallback = generateAIRecovery(
-      params.todayVital, params.vitals7, params.prevWeekVitals,
-      params.nextShift, params.language,
-    );
-    return { result: fallback, engine: "rule", model: null, debug: "missing_openai_api_key" };
+    throw new Error("missing_openai_api_key");
   }
 
   const context = buildUserContext(params);
@@ -506,11 +500,5 @@ export async function generateAIRecoveryWithOpenAI(
     lastError = `openai_outer_${error?.message ?? "unknown"}`;
   }
 
-  // ✅ 모든 모델 실패 시: throw 대신 rule-based fallback → UI에 결과 표시
-  const { generateAIRecovery } = await import("@/lib/aiRecovery");
-  const fallback = generateAIRecovery(
-    params.todayVital, params.vitals7, params.prevWeekVitals,
-    params.nextShift, params.language,
-  );
-  return { result: fallback, engine: "rule", model: null, debug: lastError };
+  throw new Error(lastError);
 }
