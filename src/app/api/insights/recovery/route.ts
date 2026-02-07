@@ -5,9 +5,10 @@ import type { Language } from "@/lib/i18n";
 import { hasHealthInput } from "@/lib/healthRecords";
 import type { AppState } from "@/lib/model";
 import { sanitizeStatePayload } from "@/lib/stateSanitizer";
-import { generateAIRecoveryWithOpenAI } from "@/lib/server/openaiRecovery";
+import { generateAIRecoveryPairWithOpenAI } from "@/lib/server/openaiRecovery";
 import type { Shift } from "@/lib/types";
 import { computeVitalsRange } from "@/lib/vitals";
+import type { Json } from "@/types/supabase";
 
 // Cloudflare Pages requires Edge runtime for non-static routes.
 export const runtime = "edge";
@@ -82,7 +83,7 @@ async function safeLoadUserState(userId: string): Promise<{ payload: unknown } |
 async function safeLoadAIContent(userId: string): Promise<{
   dateISO: ISODate;
   language: Language;
-  data: AIRecoveryPayload;
+  data: Json;
 } | null> {
   try {
     const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -106,7 +107,7 @@ async function safeSaveAIContent(
   userId: string,
   dateISO: ISODate,
   language: Language,
-  data: AIRecoveryPayload
+  data: Json
 ): Promise<string | null> {
   try {
     const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -146,6 +147,32 @@ function asPayload(candidate: unknown, fallbackLang: Language): AIRecoveryPayloa
     generatedText: typeof candidate.generatedText === "string" ? candidate.generatedText : undefined,
     result: candidate.result as AIRecoveryPayload["result"],
   };
+}
+
+function readAIContentVariants(raw: unknown, today: ISODate): Partial<Record<Language, AIRecoveryPayload>> {
+  if (!isRecord(raw)) return {};
+  const variants: Partial<Record<Language, AIRecoveryPayload>> = {};
+
+  const nodeVariants = isRecord(raw.variants) ? raw.variants : null;
+  if (nodeVariants) {
+    const ko = asPayload(nodeVariants.ko, "ko");
+    const en = asPayload(nodeVariants.en, "en");
+    if (ko && ko.dateISO === today) variants.ko = ko;
+    if (en && en.dateISO === today) variants.en = en;
+  }
+
+  const single = asPayload(raw, "ko");
+  if (single && single.dateISO === today) {
+    if (single.language === "en") {
+      variants.en = variants.en ?? single;
+      variants.ko = variants.ko ?? single;
+    } else {
+      variants.ko = variants.ko ?? single;
+      variants.en = variants.en ?? single;
+    }
+  }
+
+  return variants;
 }
 
 function readServerCachedAI(rawPayload: unknown, today: ISODate, lang: Language): AIRecoveryPayload | null {
@@ -201,8 +228,9 @@ export async function GET(req: NextRequest) {
     // ── 3. Supabase ai_content 캐시 우선 조회 ──
     const aiContent = await safeLoadAIContent(userId);
     if (aiContent && aiContent.dateISO === today) {
-      const payload = asPayload(aiContent.data, aiContent.language);
-      if (payload && payload.engine === "openai" && payload.language === lang) {
+      const variants = readAIContentVariants(aiContent.data, today);
+      const payload = variants[lang] ?? variants.ko ?? variants.en ?? null;
+      if (payload && payload.engine === "openai") {
         return NextResponse.json({ ok: true, data: payload } satisfies AIRecoveryApiSuccess);
       }
     }
@@ -210,7 +238,14 @@ export async function GET(req: NextRequest) {
     // legacy fallback: wnl_user_state.payload.aiRecoveryDaily
     const legacyCached = readServerCachedAI(row.payload, today, lang);
     if (legacyCached) {
-      void safeSaveAIContent(userId, today, legacyCached.language, legacyCached);
+      void safeSaveAIContent(userId, today, legacyCached.language, {
+        dateISO: today,
+        generatedAt: Date.now(),
+        variants: {
+          ko: legacyCached,
+          en: legacyCached,
+        },
+      });
       return NextResponse.json({ ok: true, data: legacyCached } satisfies AIRecoveryApiSuccess);
     }
 
@@ -248,7 +283,7 @@ export async function GET(req: NextRequest) {
       : null;
 
     // ── 4. OpenAI만 사용(규칙 fallback 없음) ──
-    const aiOutput = await generateAIRecoveryWithOpenAI({
+    const aiPair = await generateAIRecoveryPairWithOpenAI({
       language: lang,
       todayISO: today,
       todayShift,
@@ -261,26 +296,47 @@ export async function GET(req: NextRequest) {
       ? Math.round(Math.min(todayVital.body.value, todayVital.mental.ema))
       : null;
 
-    const payload: AIRecoveryPayload = {
+    const payloadKo: AIRecoveryPayload = {
       dateISO: today,
-      language: lang,
+      language: "ko",
       todayShift,
       nextShift,
       todayVitalScore,
       source: "supabase",
-      engine: aiOutput.engine,
-      model: aiOutput.model,
-      debug: aiOutput.debug,
-      generatedText: aiOutput.generatedText,
-      result: aiOutput.result,
+      engine: aiPair.ko.engine,
+      model: aiPair.ko.model,
+      debug: aiPair.ko.debug,
+      generatedText: aiPair.ko.generatedText,
+      result: aiPair.ko.result,
+    };
+    const payloadEn: AIRecoveryPayload = {
+      dateISO: today,
+      language: "en",
+      todayShift,
+      nextShift,
+      todayVitalScore,
+      source: "supabase",
+      engine: aiPair.en.engine,
+      model: aiPair.en.model,
+      debug: aiPair.en.debug,
+      generatedText: aiPair.en.generatedText,
+      result: aiPair.en.result,
     };
 
-    const saveError = await safeSaveAIContent(userId, today, lang, payload);
+    const saveError = await safeSaveAIContent(userId, today, lang, {
+      dateISO: today,
+      generatedAt: Date.now(),
+      variants: {
+        ko: payloadKo,
+        en: payloadEn,
+      },
+    });
     if (saveError) {
-      payload.debug = payload.debug ? `${payload.debug}|${saveError}` : saveError;
+      payloadKo.debug = payloadKo.debug ? `${payloadKo.debug}|${saveError}` : saveError;
+      payloadEn.debug = payloadEn.debug ? `${payloadEn.debug}|${saveError}` : saveError;
     }
 
-    const body: AIRecoveryApiSuccess = { ok: true, data: payload };
+    const body: AIRecoveryApiSuccess = { ok: true, data: lang === "en" ? payloadEn : payloadKo };
 
     return NextResponse.json(body);
   } catch (error: any) {

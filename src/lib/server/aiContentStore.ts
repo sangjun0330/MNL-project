@@ -1,13 +1,13 @@
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
-import type { AIRecoveryPayload } from "@/lib/aiRecoveryContract";
 import type { ISODate } from "@/lib/date";
 import type { Language } from "@/lib/i18n";
+import type { Json } from "@/types/supabase";
 
 type AIContentRow = {
   userId: string;
   dateISO: ISODate;
   language: Language;
-  data: AIRecoveryPayload;
+  data: Json;
   updatedAt: number;
 };
 
@@ -29,7 +29,7 @@ export async function loadAIContent(userId: string): Promise<AIContentRow | null
     userId: data.user_id,
     dateISO: data.date_iso as ISODate,
     language: (data.language === "en" ? "en" : "ko") as Language,
-    data: data.data as AIRecoveryPayload,
+    data: data.data as Json,
     updatedAt: data.updated_at ? new Date(data.updated_at).getTime() : Date.now(),
   };
 }
@@ -38,7 +38,7 @@ export async function saveAIContent(input: {
   userId: string;
   dateISO: ISODate;
   language: Language;
-  data: AIRecoveryPayload;
+  data: Json;
 }): Promise<void> {
   const admin = getSupabaseAdmin();
   const now = new Date().toISOString();

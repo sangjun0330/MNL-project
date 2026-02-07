@@ -21,6 +21,11 @@ export type OpenAIRecoveryOutput = {
   debug: string | null;
 };
 
+export type OpenAIRecoveryPairOutput = {
+  ko: OpenAIRecoveryOutput;
+  en: OpenAIRecoveryOutput;
+};
+
 type TextAttempt = {
   text: string | null;
   error: string | null;
@@ -696,6 +701,116 @@ export async function generateAIRecoveryWithOpenAI(
       engine: "openai",
       model,
       debug: null,
+    };
+  } catch (err: any) {
+    if (err?.name === "AbortError") {
+      throw new Error(`openai_timeout_model:${model}`);
+    }
+    if (typeof err?.message === "string" && err.message.trim()) {
+      throw new Error(err.message.trim());
+    }
+    throw new Error(`openai_fetch_model:${model}_${truncateError(err?.message ?? "unknown")}`);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function buildBilingualDeveloperPrompt() {
+  return "You are a nurse wellness and burnout-prevention specialist. Generate concise, practical daily recovery guidance.";
+}
+
+function buildBilingualUserPrompt(context: ReturnType<typeof buildUserContext>) {
+  return [
+    "Using DATA(JSON), create two versions of the same recovery guidance.",
+    "Return plain text in this exact order with exact markers and no extra commentary:",
+    "[KO]",
+    "[A] ...",
+    "[B] ...",
+    "[C] ...",
+    "[D] ...",
+    "[EN]",
+    "[A] ...",
+    "[B] ...",
+    "[C] ...",
+    "[D] ...",
+    "",
+    "Rules:",
+    "- Keep both versions concise and scannable.",
+    "- Avoid duplicate sentences.",
+    "- In Korean, avoid tag format like stress(2), mood4. Rewrite as plain language.",
+    "- Include caffeine as cups + mg (e.g., 약 1잔(120mg) / about 1 cup (120mg)).",
+    "- Keep sleep-related numbers as-is from data.",
+    "",
+    "[DATA JSON]",
+    JSON.stringify(context, null, 2),
+  ].join("\n");
+}
+
+function extractLanguageBlock(text: string, marker: "KO" | "EN") {
+  const regex = new RegExp(`(?:^|\\n)\\s*\\[${marker}\\]\\s*([\\s\\S]*?)(?=\\n\\s*\\[(?:KO|EN)\\]\\s*|$)`, "i");
+  const match = regex.exec(text);
+  return (match?.[1] ?? "").trim();
+}
+
+export async function generateAIRecoveryPairWithOpenAI(
+  params: GenerateOpenAIRecoveryParams
+): Promise<OpenAIRecoveryPairOutput> {
+  const apiKey = normalizeApiKey();
+  const model = resolveModel();
+  if (!apiKey) {
+    throw new Error("missing_openai_api_key");
+  }
+
+  const context = buildUserContext({ ...params, language: "ko" });
+  const developerPrompt = buildBilingualDeveloperPrompt();
+  const userPrompt = buildBilingualUserPrompt(context);
+  const maxOutputTokens = resolveMaxOutputTokens();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 35_000);
+  try {
+    const attempt = await callResponsesApi({
+      apiKey,
+      model,
+      developerPrompt,
+      userPrompt,
+      signal: controller.signal,
+      maxOutputTokens,
+    });
+
+    if (!attempt.text) {
+      throw new Error(attempt.error ?? `openai_request_failed_model:${model}`);
+    }
+
+    const fullText = attempt.text.trim();
+    const koText = extractLanguageBlock(fullText, "KO") || fullText;
+    const enText = extractLanguageBlock(fullText, "EN") || fullText;
+
+    const koParsed = parseResultFromGeneratedText(koText, "ko");
+    const enParsed = parseResultFromGeneratedText(enText, "en");
+    const koWeeklyFallback = buildFallbackWeeklySummary({ ...params, language: "ko" });
+    const enWeeklyFallback = buildFallbackWeeklySummary({ ...params, language: "en" });
+
+    return {
+      ko: {
+        result: {
+          ...koParsed,
+          weeklySummary: mergeWeeklySummary(koParsed.weeklySummary, koWeeklyFallback),
+        },
+        generatedText: koText,
+        engine: "openai",
+        model,
+        debug: null,
+      },
+      en: {
+        result: {
+          ...enParsed,
+          weeklySummary: mergeWeeklySummary(enParsed.weeklySummary, enWeeklyFallback),
+        },
+        generatedText: enText,
+        engine: "openai",
+        model,
+        debug: null,
+      },
     };
   } catch (err: any) {
     if (err?.name === "AbortError") {
