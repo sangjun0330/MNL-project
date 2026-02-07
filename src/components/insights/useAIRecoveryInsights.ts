@@ -1,13 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { generateAIRecovery } from "@/lib/aiRecovery";
 import type { AIRecoveryPayload } from "@/lib/aiRecoveryContract";
+import { addDays, fromISODate, toISODate, todayISO } from "@/lib/date";
 import { useInsightsData } from "@/components/insights/useInsightsData";
-import { todayISO } from "@/lib/date";
 import { useI18n } from "@/lib/useI18n";
+import type { Shift } from "@/lib/types";
 
 type HookResult = {
-  data: AIRecoveryPayload | null;
+  data: AIRecoveryPayload;
   loading: boolean;
   fromSupabase: boolean;
   error: string | null;
@@ -59,12 +61,35 @@ function writeDailyCache(lang: "ko" | "en", dateISO: string, payload: AIRecovery
 
 export function useAIRecoveryInsights(): HookResult {
   const { lang } = useI18n();
-  const { state } = useInsightsData();
+  const { end, vitalsRecorded, todayVital, todayShift, state } = useInsightsData();
   const [remoteData, setRemoteData] = useState<AIRecoveryPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const isStoreHydrated = state.selected !== ("1970-01-01" as any);
+
+  // ✅ API 실패 시 항상 보여줄 로컬 rule-based fallback 생성
+  const localFallback = useMemo((): AIRecoveryPayload => {
+    const nextISO = toISODate(addDays(fromISODate(end), 1));
+    const nextShift = (state.schedule?.[nextISO] as Shift | undefined) ?? null;
+    const fallbackResult = generateAIRecovery(todayVital, vitalsRecorded, [], nextShift, lang);
+    const todayVitalScore = todayVital
+      ? Math.round(Math.min(todayVital.body.value, todayVital.mental.ema))
+      : null;
+
+    return {
+      dateISO: end,
+      language: lang,
+      todayShift,
+      nextShift,
+      todayVitalScore,
+      source: "local",
+      engine: "rule",
+      model: null,
+      debug: null,
+      result: fallbackResult,
+    };
+  }, [end, vitalsRecorded, todayVital, todayShift, state.schedule, lang]);
 
   const fetchRecovery = useCallback(
     async (signal: AbortSignal, dateISO: string) => {
@@ -142,14 +167,15 @@ export function useAIRecoveryInsights(): HookResult {
     return () => controller.abort();
   }, [fetchRecovery, isStoreHydrated, lang]);
 
+  // ✅ 핵심: remoteData가 있으면 사용, 없으면 localFallback → data는 절대 null이 아님
   return useMemo(
     () => ({
-      data: remoteData,
-      loading,
+      data: remoteData ?? localFallback,
+      loading: loading && !remoteData,
       fromSupabase: Boolean(remoteData),
       error,
       requiresTodaySleep: false,
     }),
-    [remoteData, loading, error]
+    [remoteData, localFallback, loading, error]
   );
 }
