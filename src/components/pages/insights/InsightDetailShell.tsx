@@ -91,8 +91,8 @@ export function DetailSummaryCard({
   accent: keyof typeof DETAIL_GRADIENTS;
   label: string;
   title: string;
-  metric: string | number;
-  metricLabel: string;
+  metric?: string | number | null;
+  metricLabel?: string;
   summary: React.ReactNode;
   detail?: string;
   chips?: React.ReactNode;
@@ -108,17 +108,19 @@ export function DetailSummaryCard({
       <div className="text-[12px] font-semibold text-ios-sub">{label}</div>
       <div className="mt-1 text-[18px] font-bold tracking-[-0.01em] text-ios-text">{title}</div>
 
-      <div className="mt-4 flex items-end gap-2">
-        <div
-          className="text-[36px] font-extrabold tracking-[-0.02em]"
-          style={{ color: valueColor ?? accentColor }}
-        >
-          {metric}
+      {metric != null && metricLabel ? (
+        <div className="mt-4 flex items-end gap-2">
+          <div
+            className="text-[36px] font-extrabold tracking-[-0.02em]"
+            style={{ color: valueColor ?? accentColor }}
+          >
+            {metric}
+          </div>
+          <div className="pb-1 text-[14px] font-bold text-ios-text">{metricLabel}</div>
         </div>
-        <div className="pb-1 text-[14px] font-bold text-ios-text">{metricLabel}</div>
-      </div>
+      ) : null}
 
-      <div className="mt-2 text-[14px] text-ios-text">
+      <div className={`${metric != null && metricLabel ? "mt-2" : "mt-4"} text-[14px] text-ios-text`}>
         <span className="font-bold" style={{ color: accentColor }}>
           {summary}
         </span>

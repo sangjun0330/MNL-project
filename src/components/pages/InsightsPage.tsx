@@ -77,6 +77,10 @@ function compactText(text: string, max = 80) {
   return `${normalized.slice(0, max - 1)}…`;
 }
 
+function stripLeadingDash(text: string) {
+  return text.replace(/^\s*[-•·]\s*/, "").trim();
+}
+
 export function InsightsPage() {
   const { t } = useI18n();
   const router = useRouter();
@@ -137,7 +141,7 @@ export function InsightsPage() {
   );
   const weeklyStatus = useMemo(() => statusFromScore(avgDisplay), [avgDisplay]);
   const aiHeadline = useMemo(() => {
-    if (aiRecovery) return compactText(aiRecovery.result.headline, 90);
+    if (aiRecovery) return compactText(stripLeadingDash(aiRecovery.result.headline), 90);
     if (aiRecoveryLoading) return t("AI 데이터 확인 중...");
     if (aiRecoveryError) return t("AI 호출 상태를 확인해 주세요.");
     return t("오늘의 맞춤회복을 받아보세요.");
@@ -211,22 +215,18 @@ export function InsightsPage() {
             accent="navy"
             label="AI Recovery"
             title={t("AI 맞춤회복")}
-            metric={
-              requiresTodaySleep
-                ? "!"
-                : aiRecoveryLoading
-                  ? "…"
-                  : aiRecovery
-                    ? aiRecovery.result.sections.length
-                    : "NEW"
-            }
-            metricLabel={t("오늘 처방")}
             summary={
               requiresTodaySleep
                 ? t("오늘 수면 기록을 먼저 입력해 주세요.")
                 : aiHeadline
             }
-            detail={aiSummary}
+            detail={
+              requiresTodaySleep
+                ? t("오늘 수면 입력 후 바로 개인 맞춤 회복 가이드를 시작해요.")
+                : aiRecovery
+                  ? t("내 기록을 반영한 오늘의 개인 맞춤 회복 가이드")
+                  : aiSummary
+            }
             chips={(
               <>
                 {requiresTodaySleep ? (
@@ -239,6 +239,9 @@ export function InsightsPage() {
                           {section.title}
                         </DetailChip>
                       ))}
+                      <DetailChip color={DETAIL_ACCENTS.navy}>
+                        {t("내 기록 기반 맞춤 분석")}
+                      </DetailChip>
                       <DetailChip color={DETAIL_ACCENTS.mint}>
                         {t("OpenAI 생성 분석")}
                       </DetailChip>
