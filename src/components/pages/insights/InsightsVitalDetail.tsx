@@ -53,12 +53,14 @@ function MetricRow({
   unit,
   barPct,
   barColor,
+  empty = false,
 }: {
   label: string;
   value: string | number;
   unit?: string;
   barPct: number;
   barColor: string;
+  empty?: boolean;
 }) {
   const safeBar = Math.max(0, Math.min(100, barPct));
   return (
@@ -73,7 +75,7 @@ function MetricRow({
         </div>
       </div>
       <div className="w-[52px] shrink-0 text-right text-[14px] font-extrabold text-ios-text">
-        {value}{unit ?? ""}
+        {empty ? "—" : <>{value}{unit ?? ""}</>}
       </div>
     </div>
   );
@@ -103,14 +105,31 @@ export function InsightsVitalDetail() {
   const debt = useMemo(() => Math.round((todayVital?.engine?.sleepDebtHours ?? 0) * 10) / 10, [todayVital]);
   const sri = useMemo(() => Math.round(((todayVital?.engine?.SRI ?? todayVital?.engine?.SRS ?? 1) as number) * 100), [todayVital]);
   const csi = useMemo(() => Math.round(((todayVital?.engine?.CSI ?? todayVital?.engine?.CMF ?? 0) as number) * 100), [todayVital]);
-  const cif = useMemo(() => {
-    const raw = (todayVital?.engine?.CIF ?? (1 - (todayVital?.engine?.CSD ?? 0))) as number;
-    return Math.round(raw * 100);
+  const caffeineImpact = useMemo(() => {
+    const raw = (todayVital?.engine?.CSD ?? (1 - (todayVital?.engine?.CIF ?? 1))) as number;
+    return Math.round(Math.max(0, Math.min(1, raw)) * 100);
   }, [todayVital]);
   const slf = useMemo(() => Math.round(((todayVital?.engine?.SLF ?? 0) as number) * 100), [todayVital]);
   const mif = useMemo(() => Math.round(((todayVital?.engine?.MIF ?? 1) as number) * 100), [todayVital]);
   const night = useMemo(() => todayVital?.engine?.nightStreak ?? 0, [todayVital]);
   const status = useMemo(() => statusFromScore(todayDisplay ?? 0), [todayDisplay]);
+  const hasSleepRecord = useMemo(
+    () => Boolean(todayVital && (todayVital.inputs.sleepHours != null || todayVital.inputs.napHours != null)),
+    [todayVital]
+  );
+  const hasSleepDebtSignal = useMemo(
+    () => Boolean(todayVital && (hasSleepRecord || debt > 0 || (todayVital.engine?.debt_n ?? 0) > 0)),
+    [todayVital, hasSleepRecord, debt]
+  );
+  const hasCaffeineRecord = useMemo(
+    () => Boolean(todayVital && (todayVital.inputs.caffeineMg != null || todayVital.inputs.caffeineLastAt)),
+    [todayVital]
+  );
+  const hasStressRecord = useMemo(() => Boolean(todayVital && todayVital.inputs.stress != null), [todayVital]);
+  const hasMenstrualRecord = useMemo(
+    () => Boolean(todayVital && (todayVital.menstrual?.enabled || (todayVital.inputs.symptomSeverity ?? 0) > 0)),
+    [todayVital]
+  );
 
   const bodyDelta = useMemo(() => body - avgBody, [body, avgBody]);
   const mentalDelta = useMemo(() => mental - avgMental, [mental, avgMental]);
@@ -203,43 +222,49 @@ export function InsightsVitalDetail() {
             label={t("수면부채")}
             value={debt}
             unit="h"
-            barPct={Math.min(debt / 5 * 100, 100)}
-            barColor={metricColor(debt, 1, 3, true)}
+            barPct={hasSleepDebtSignal ? Math.min((debt / 5) * 100, 100) : 0}
+            barColor={hasSleepDebtSignal ? metricColor(debt, 1, 3, true) : "#D8D9DE"}
+            empty={!hasSleepDebtSignal}
           />
           <MetricRow
             label={t("회복 지수")}
             value={sri}
             unit="%"
-            barPct={sri}
-            barColor={metricColor(sri, 70, 40)}
+            barPct={hasSleepDebtSignal ? sri : 0}
+            barColor={hasSleepDebtSignal ? metricColor(sri, 70, 40) : "#D8D9DE"}
+            empty={!hasSleepDebtSignal}
           />
           <MetricRow
             label={t("리듬 부담")}
             value={csi}
             unit="%"
-            barPct={csi}
-            barColor={metricColor(csi, 30, 60, true)}
+            barPct={hasTodayShift ? csi : 0}
+            barColor={hasTodayShift ? metricColor(csi, 30, 60, true) : "#D8D9DE"}
+            empty={!hasTodayShift}
           />
           <MetricRow
             label={t("카페인 영향")}
-            value={cif}
+            value={caffeineImpact}
             unit="%"
-            barPct={cif}
-            barColor={metricColor(cif, 30, 70, true)}
+            barPct={hasCaffeineRecord ? caffeineImpact : 0}
+            barColor={hasCaffeineRecord ? metricColor(caffeineImpact, 30, 70, true) : "#D8D9DE"}
+            empty={!hasCaffeineRecord}
           />
           <MetricRow
             label={t("스트레스 부하")}
             value={slf}
             unit="%"
-            barPct={slf}
-            barColor={metricColor(slf, 30, 60, true)}
+            barPct={hasStressRecord ? slf : 0}
+            barColor={hasStressRecord ? metricColor(slf, 30, 60, true) : "#D8D9DE"}
+            empty={!hasStressRecord}
           />
           <MetricRow
             label={t("주기 영향")}
             value={mif}
             unit="%"
-            barPct={mif}
-            barColor={metricColor(mif, 30, 70, true)}
+            barPct={hasMenstrualRecord ? mif : 0}
+            barColor={hasMenstrualRecord ? metricColor(mif, 30, 70, true) : "#D8D9DE"}
+            empty={!hasMenstrualRecord}
           />
         </div>
       </DetailCard>

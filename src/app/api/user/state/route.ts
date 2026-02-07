@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { loadUserState, saveUserState } from "@/lib/server/userStateStore";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import { sanitizeStatePayload } from "@/lib/stateSanitizer";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -15,9 +16,10 @@ export async function GET(req: Request) {
 
   try {
     const row = await loadUserState(userId);
+    const sanitized = row?.payload ? sanitizeStatePayload(row.payload) : null;
     return NextResponse.json({
       ok: true,
-      state: row?.payload ?? null,
+      state: sanitized,
       updatedAt: row?.updatedAt ?? null,
     });
   } catch (e: any) {
@@ -40,7 +42,8 @@ export async function POST(req: Request) {
   if (!state) return bad(400, "state required");
 
   try {
-    await saveUserState({ userId, payload: state });
+    const sanitized = sanitizeStatePayload(state);
+    await saveUserState({ userId, payload: sanitized });
     return NextResponse.json({ ok: true });
   } catch (e: any) {
     return bad(500, e?.message || "failed to save");

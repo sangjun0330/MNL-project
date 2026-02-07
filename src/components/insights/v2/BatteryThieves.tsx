@@ -86,7 +86,9 @@ function Donut({ segments }: { segments: Segment[] }) {
 
 export function BatteryThieves({ vitals, periodLabel, className }: { vitals: DailyVital[]; periodLabel?: string; className?: string }) {
   const { t } = useI18n();
+  const hasEnoughData = vitals.length >= 3;
   const segments = useMemo(() => {
+    if (!hasEnoughData) return [] as Segment[];
     const agg = aggregateFactors(vitals);
     const keys = Object.keys(agg) as FactorKey[];
     return keys
@@ -97,9 +99,9 @@ export function BatteryThieves({ vitals, periodLabel, className }: { vitals: Dai
         color: colorForFactor(k),
       }))
       .sort((a, b) => b.pct - a.pct);
-  }, [vitals, t]);
+  }, [vitals, t, hasEnoughData]);
 
-  const top3 = useMemo(() => topFactors(vitals, 3), [vitals]);
+  const top3 = useMemo(() => (hasEnoughData ? topFactors(vitals, 3) : []), [vitals, hasEnoughData]);
   const top1 = top3?.[0];
 
   const avgDebt = useMemo(() => {
@@ -109,7 +111,7 @@ export function BatteryThieves({ vitals, periodLabel, className }: { vitals: Dai
   }, [vitals]);
 
   const message = useMemo(() => {
-    if (!top1) return t("방전 요인을 계산할 데이터가 없어요.");
+    if (!top1) return t("기록 입력 시 자세한 정보 제공");
     const base = t("{label}이(가) 전체 소모의 {pct}를 차지했어요.", {
       label: t(top1.label),
       pct: pctLabel(top1.pct),
@@ -157,7 +159,9 @@ export function BatteryThieves({ vitals, periodLabel, className }: { vitals: Dai
           </div>
         </div>
 
-        <div className="mt-4 text-[12.5px] text-ios-muted">{t("팁: 도둑 1~2개만 잡아도 체감 피로가 크게 줄어요.")}</div>
+        <div className="mt-4 text-[12.5px] text-ios-muted">
+          {top1 ? t("팁: 도둑 1~2개만 잡아도 체감 피로가 크게 줄어요.") : t("최근 3일 이상 기록하면 요인 분해 정확도가 올라가요.")}
+        </div>
       </div>
     </div>
   );

@@ -4,7 +4,8 @@ import { generateAIRecovery } from "@/lib/aiRecovery";
 import type { AIRecoveryApiError, AIRecoveryApiSuccess } from "@/lib/aiRecoveryContract";
 import type { Language } from "@/lib/i18n";
 import { hasHealthInput } from "@/lib/healthRecords";
-import { defaultSettings, emptyState, type AppState } from "@/lib/model";
+import type { AppState } from "@/lib/model";
+import { sanitizeStatePayload } from "@/lib/stateSanitizer";
 import { generateAIRecoveryWithOpenAI } from "@/lib/server/openaiRecovery";
 import type { Shift } from "@/lib/types";
 import { computeVitalsRange } from "@/lib/vitals";
@@ -18,60 +19,15 @@ function toLanguage(value: string | null): Language | null {
   return null;
 }
 
-function normalizeSettings(raw: unknown, languageHint: Language | null): AppState["settings"] {
-  const loaded = (raw ?? {}) as Record<string, unknown>;
-  const defaults = defaultSettings();
-  const loadedMenstrual = (loaded.menstrual ?? {}) as Record<string, unknown>;
-  const loadedProfile = (loaded.profile ?? {}) as Record<string, unknown>;
-  const lastPeriodStart = (loadedMenstrual.lastPeriodStart ?? loadedMenstrual.startISO ?? null) as ISODate | null;
-
-  const normalizedLanguage =
-    languageHint ?? (loaded.language === "en" ? "en" : loaded.language === "ko" ? "ko" : defaults.language ?? "ko");
-
-  return {
-    ...defaults,
-    ...loaded,
-    menstrual: {
-      ...defaults.menstrual,
-      ...loadedMenstrual,
-      lastPeriodStart,
-    },
-    profile: {
-      chronotype: Math.max(
-        0,
-        Math.min(
-          1,
-          Number((loadedProfile.chronotype as number | undefined) ?? defaults.profile?.chronotype ?? 0.5)
-        )
-      ),
-      caffeineSensitivity: Math.max(
-        0.5,
-        Math.min(
-          1.5,
-          Number(
-            (loadedProfile.caffeineSensitivity as number | undefined) ?? defaults.profile?.caffeineSensitivity ?? 1.0
-          )
-        )
-      ),
-    },
-    theme: loaded.theme === "dark" ? "dark" : "light",
-    language: normalizedLanguage,
-  };
-}
-
 function normalizePayloadToState(payload: unknown, languageHint: Language | null): AppState {
-  const loaded = (payload ?? {}) as Record<string, unknown>;
-  const base = emptyState();
+  const sanitized = sanitizeStatePayload(payload);
+  if (!languageHint) return sanitized;
   return {
-    ...base,
-    ...loaded,
-    selected: (loaded.selected as AppState["selected"] | undefined) ?? base.selected,
-    schedule: (loaded.schedule as AppState["schedule"] | undefined) ?? {},
-    shiftNames: (loaded.shiftNames as AppState["shiftNames"] | undefined) ?? {},
-    notes: (loaded.notes as AppState["notes"] | undefined) ?? {},
-    emotions: (loaded.emotions as AppState["emotions"] | undefined) ?? {},
-    bio: (loaded.bio as AppState["bio"] | undefined) ?? {},
-    settings: normalizeSettings(loaded.settings, languageHint),
+    ...sanitized,
+    settings: {
+      ...sanitized.settings,
+      language: languageHint,
+    },
   };
 }
 
