@@ -15,11 +15,6 @@ export async function DELETE(req: Request) {
   const admin = getSupabaseAdmin();
 
   try {
-    const dailyLogsDelete = await admin.from("wnl_daily_logs").delete().eq("device_id", userId);
-    if (dailyLogsDelete.error) {
-      return bad(500, `Failed to delete daily logs: ${dailyLogsDelete.error.message}`);
-    }
-
     const userStateDelete = await admin.from("wnl_user_state").delete().eq("user_id", userId);
     if (userStateDelete.error) {
       return bad(500, `Failed to delete user state: ${userStateDelete.error.message}`);

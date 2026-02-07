@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { generateAIRecovery, type AIRecoveryResult } from "@/lib/aiRecovery";
 import type { AIRecoveryPayload, AIRecoveryApiSuccess } from "@/lib/aiRecoveryContract";
 import { addDays, fromISODate, toISODate, type ISODate } from "@/lib/date";
 import { useInsightsData } from "@/components/insights/useInsightsData";
@@ -98,23 +97,15 @@ function buildFallbackData(params: {
     todaySleepHours,
     anchorVital: analysis.anchorVital,
   });
-  const fallbackResult: AIRecoveryResult = !analysis.vitals7.length
-    ? {
-        headline:
-          lang === "en"
-            ? "Log your health records to unlock personalized recovery guidance."
-            : "건강 기록을 입력하면 맞춤 회복 처방을 자세히 제공해드려요.",
-        compoundAlert: null,
-        sections: [],
-        weeklySummary: null,
-      }
-    : generateAIRecovery(
-        pseudoTodayVital,
-        analysis.vitals7,
-        analysis.prevWeek,
-        nextShift,
-        lang
-      );
+  const fallbackResult = {
+    headline:
+      lang === "en"
+        ? "AI recovery is loading. Please try again shortly."
+        : "AI 맞춤회복을 불러오는 중입니다. 잠시 후 다시 확인해 주세요.",
+    compoundAlert: null,
+    sections: [],
+    weeklySummary: null,
+  };
   const todayVitalScore = pseudoTodayVital
     ? Math.round(Math.min(pseudoTodayVital.body.value, pseudoTodayVital.mental.ema))
     : null;

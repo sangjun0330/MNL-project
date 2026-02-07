@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { addDays, fromISODate, toISODate, todayISO, type ISODate } from "@/lib/date";
 import { generateAIRecovery } from "@/lib/aiRecovery";
-import type { AIRecoveryApiError, AIRecoveryApiSuccess } from "@/lib/aiRecoveryContract";
+import type { AIRecoveryApiError, AIRecoveryApiSuccess, AIRecoveryPayload } from "@/lib/aiRecoveryContract";
 import type { Language } from "@/lib/i18n";
 import { hasHealthInput } from "@/lib/healthRecords";
 import type { AppState } from "@/lib/model";
@@ -78,6 +78,46 @@ async function safeLoadUserState(userId: string): Promise<{ payload: unknown } |
   } catch {
     return null;
   }
+}
+
+async function safeSaveUserState(userId: string, payload: unknown): Promise<boolean> {
+  try {
+    const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!serviceRole || !supabaseUrl) return false;
+    const { saveUserState } = await import("@/lib/server/userStateStore");
+    await saveUserState({ userId, payload });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function readCachedDailyRecovery(payload: unknown, today: ISODate, lang: Language): AIRecoveryPayload | null {
+  const entry = (payload as any)?.aiRecoveryDaily?.[lang];
+  if (!entry || typeof entry !== "object") return null;
+  if (entry.dateISO !== today) return null;
+  const cached = entry.payload as AIRecoveryPayload | null;
+  if (!cached || typeof cached !== "object") return null;
+  if (cached.dateISO !== today || cached.language !== lang) return null;
+  return cached;
+}
+
+function withDailyRecoveryCache(basePayload: unknown, lang: Language, today: ISODate, data: AIRecoveryPayload): AppState {
+  const sanitizedBase = sanitizeStatePayload(basePayload);
+  const prev = (sanitizedBase.aiRecoveryDaily ?? {}) as Record<string, any>;
+  return {
+    ...sanitizedBase,
+    aiRecoveryDaily: {
+      ...prev,
+      [lang]: {
+        dateISO: today,
+        language: lang,
+        payload: data,
+        generatedAt: Date.now(),
+      },
+    },
+  };
 }
 
 export async function GET(req: NextRequest) {
@@ -166,6 +206,16 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(body);
     }
 
+    // ── 4-1. 하루 1회 고정: 당일 캐시가 있으면 그대로 반환 ──
+    const cached = readCachedDailyRecovery(row.payload, today, lang);
+    if (cached) {
+      const body: AIRecoveryApiSuccess = {
+        ok: true,
+        data: cached,
+      };
+      return NextResponse.json(body);
+    }
+
     // ── 5. 기록 없으면 안내 메시지 ──
     if (!vitals7.length) {
       const body: AIRecoveryApiSuccess = {
@@ -225,6 +275,11 @@ export async function GET(req: NextRequest) {
         result: aiOutput.result,
       },
     };
+
+    // ── 7. 당일 결과 캐시 저장(유저별 wnl_user_state payload 내부) ──
+    const cachedPayload = withDailyRecoveryCache(row.payload, lang, today, body.data);
+    await safeSaveUserState(userId, cachedPayload);
+
     return NextResponse.json(body);
   } catch (error: any) {
     return bad(500, error?.message || "failed to build recovery data");

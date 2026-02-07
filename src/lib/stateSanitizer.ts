@@ -35,6 +35,10 @@ function asFiniteNumber(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function hasOwn(obj: Record<string, unknown>, key: string) {
+  return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
 function sanitizeEmotion(entry: unknown): EmotionEntry | undefined {
   if (!entry || typeof entry !== "object") return undefined;
   const moodNum = asFiniteNumber((entry as any).mood);
@@ -56,49 +60,152 @@ function sanitizeEmotion(entry: unknown): EmotionEntry | undefined {
 
 function sanitizeBio(entry: unknown): BioInputs | undefined {
   if (!entry || typeof entry !== "object") return undefined;
+  const source = entry as Record<string, unknown>;
   const out: BioInputs = {};
+  let touched = false;
 
-  const sleepHours = asFiniteNumber((entry as any).sleepHours);
-  if (sleepHours != null) out.sleepHours = Math.round(clamp(sleepHours, 0, 16) * 2) / 2;
-
-  const napHours = asFiniteNumber((entry as any).napHours);
-  if (napHours != null) out.napHours = Math.round(clamp(napHours, 0, 4) * 2) / 2;
-
-  const stress = asFiniteNumber((entry as any).stress);
-  if (stress != null) out.stress = clamp(Math.round(stress), 0, 3) as BioInputs["stress"];
-
-  const activity = asFiniteNumber((entry as any).activity);
-  if (activity != null) out.activity = clamp(Math.round(activity), 0, 3) as BioInputs["activity"];
-
-  const caffeineMg = asFiniteNumber((entry as any).caffeineMg);
-  if (caffeineMg != null) out.caffeineMg = clamp(Math.round(caffeineMg), 0, 1000);
-
-  const caffeineLastAt = asTime((entry as any).caffeineLastAt);
-  if (caffeineLastAt) out.caffeineLastAt = caffeineLastAt;
-
-  const symptomSeverity = asFiniteNumber((entry as any).symptomSeverity);
-  if (symptomSeverity != null) {
-    out.symptomSeverity = clamp(Math.round(symptomSeverity), 0, 3) as BioInputs["symptomSeverity"];
+  if (hasOwn(source, "sleepHours")) {
+    touched = true;
+    if (source.sleepHours == null) out.sleepHours = null;
+    else {
+      const sleepHours = asFiniteNumber(source.sleepHours);
+      if (sleepHours != null) out.sleepHours = Math.round(clamp(sleepHours, 0, 16) * 2) / 2;
+    }
   }
 
-  if (out.caffeineMg === 0 && !out.caffeineLastAt) {
-    delete (out as any).caffeineMg;
-  }
-  if (out.symptomSeverity === 0) {
-    delete (out as any).symptomSeverity;
-  }
-
-  const hasPrimarySignal =
-    out.sleepHours != null ||
-    out.napHours != null ||
-    out.caffeineMg != null ||
-    out.caffeineLastAt != null ||
-    out.symptomSeverity != null;
-  if (!hasPrimarySignal) {
-    if (out.stress === 1) delete (out as any).stress;
-    if (out.activity === 1) delete (out as any).activity;
+  if (hasOwn(source, "napHours")) {
+    touched = true;
+    if (source.napHours == null) out.napHours = null;
+    else {
+      const napHours = asFiniteNumber(source.napHours);
+      if (napHours != null) out.napHours = Math.round(clamp(napHours, 0, 4) * 2) / 2;
+    }
   }
 
+  if (hasOwn(source, "sleepQuality")) {
+    touched = true;
+    if (source.sleepQuality == null) out.sleepQuality = null;
+    else {
+      const sleepQuality = asFiniteNumber(source.sleepQuality);
+      if (sleepQuality != null) out.sleepQuality = clamp(Math.round(sleepQuality), 1, 5) as BioInputs["sleepQuality"];
+    }
+  }
+
+  if (hasOwn(source, "sleepTiming")) {
+    touched = true;
+    const timing = source.sleepTiming;
+    if (timing == null) out.sleepTiming = null;
+    else if (timing === "auto" || timing === "night" || timing === "day" || timing === "mixed") {
+      out.sleepTiming = timing;
+    }
+  }
+
+  if (hasOwn(source, "stress")) {
+    touched = true;
+    if (source.stress == null) out.stress = null;
+    else {
+      const stress = asFiniteNumber(source.stress);
+      if (stress != null) out.stress = clamp(Math.round(stress), 0, 3) as BioInputs["stress"];
+    }
+  }
+
+  if (hasOwn(source, "activity")) {
+    touched = true;
+    if (source.activity == null) out.activity = null;
+    else {
+      const activity = asFiniteNumber(source.activity);
+      if (activity != null) out.activity = clamp(Math.round(activity), 0, 3) as BioInputs["activity"];
+    }
+  }
+
+  if (hasOwn(source, "caffeineMg")) {
+    touched = true;
+    if (source.caffeineMg == null) out.caffeineMg = null;
+    else {
+      const caffeineMg = asFiniteNumber(source.caffeineMg);
+      if (caffeineMg != null) out.caffeineMg = clamp(Math.round(caffeineMg), 0, 1000);
+    }
+  }
+
+  if (hasOwn(source, "caffeineLastAt")) {
+    touched = true;
+    if (source.caffeineLastAt == null) out.caffeineLastAt = null;
+    else {
+      const caffeineLastAt = asTime(source.caffeineLastAt);
+      if (caffeineLastAt) out.caffeineLastAt = caffeineLastAt;
+    }
+  }
+
+  if (hasOwn(source, "fatigueLevel")) {
+    touched = true;
+    if (source.fatigueLevel == null) out.fatigueLevel = null;
+    else {
+      const fatigueLevel = asFiniteNumber(source.fatigueLevel);
+      if (fatigueLevel != null) out.fatigueLevel = clamp(Math.round(fatigueLevel), 0, 10);
+    }
+  }
+
+  if (hasOwn(source, "symptomSeverity")) {
+    touched = true;
+    if (source.symptomSeverity == null) out.symptomSeverity = null;
+    else {
+      const symptomSeverity = asFiniteNumber(source.symptomSeverity);
+      if (symptomSeverity != null) {
+        out.symptomSeverity = clamp(Math.round(symptomSeverity), 0, 3) as BioInputs["symptomSeverity"];
+      }
+    }
+  }
+
+  if (hasOwn(source, "menstrualStatus")) {
+    touched = true;
+    const status = source.menstrualStatus;
+    if (status == null) out.menstrualStatus = null;
+    else if (status === "none" || status === "pms" || status === "period") {
+      out.menstrualStatus = status;
+    }
+  }
+
+  if (hasOwn(source, "menstrualFlow")) {
+    touched = true;
+    if (source.menstrualFlow == null) out.menstrualFlow = null;
+    else {
+      const menstrualFlow = asFiniteNumber(source.menstrualFlow);
+      if (menstrualFlow != null) {
+        out.menstrualFlow = clamp(Math.round(menstrualFlow), 0, 3) as BioInputs["menstrualFlow"];
+      }
+    }
+  }
+
+  if (hasOwn(source, "shiftOvertimeHours")) {
+    touched = true;
+    if (source.shiftOvertimeHours == null) out.shiftOvertimeHours = null;
+    else {
+      const overtime = asFiniteNumber(source.shiftOvertimeHours);
+      if (overtime != null) out.shiftOvertimeHours = clamp(Math.round(overtime * 10) / 10, 0, 24);
+    }
+  }
+
+  return touched ? out : undefined;
+}
+
+function sanitizeAIRecoveryDailyCache(raw: unknown) {
+  if (!raw || typeof raw !== "object") return undefined;
+  const input = raw as Record<string, unknown>;
+  const out: Record<"ko" | "en", any> = {} as any;
+  for (const lang of ["ko", "en"] as const) {
+    const entry = input[lang];
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry as Record<string, unknown>;
+    const dateISO = asIso(e.dateISO);
+    const generatedAtNum = asFiniteNumber(e.generatedAt);
+    if (!dateISO || generatedAtNum == null || !e.payload || typeof e.payload !== "object") continue;
+    out[lang] = {
+      dateISO,
+      language: lang,
+      payload: e.payload,
+      generatedAt: Math.round(generatedAtNum),
+    };
+  }
   return Object.keys(out).length ? out : undefined;
 }
 
@@ -203,5 +310,6 @@ export function sanitizeStatePayload(raw: unknown): AppState {
     emotions,
     bio,
     settings: sanitizeSettings(loaded.settings),
+    aiRecoveryDaily: sanitizeAIRecoveryDailyCache(loaded.aiRecoveryDaily) ?? {},
   };
 }

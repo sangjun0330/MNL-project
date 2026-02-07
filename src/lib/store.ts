@@ -256,8 +256,23 @@ function clearEmotionForDate(iso: ISODate) {
 }
 
 function setBioForDate(iso: ISODate, patch: Partial<BioInputs>) {
-  const prev = (state.bio ?? {})[iso] ?? {};
-  const nextBio = { ...prev, ...patch };
+  const emptyBioRecord: BioInputs = {
+    sleepHours: null,
+    napHours: null,
+    sleepQuality: null,
+    sleepTiming: null,
+    stress: null,
+    activity: null,
+    caffeineMg: null,
+    caffeineLastAt: null,
+    fatigueLevel: null,
+    symptomSeverity: null,
+    menstrualStatus: null,
+    menstrualFlow: null,
+    shiftOvertimeHours: null,
+  };
+  const prev = (state.bio ?? {})[iso] ?? emptyBioRecord;
+  const nextBio = { ...emptyBioRecord, ...prev, ...patch };
 
   const prevISO = toISODate(addDays(fromISODate(iso), -1));
   const prevBio = (state.bio ?? {})[prevISO] ?? null;

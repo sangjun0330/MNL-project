@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getSupabaseBrowserClient, useAuth, useAuthState } from "@/lib/auth";
 import { hydrateState, useAppStore } from "@/lib/store";
 import { sanitizeStatePayload } from "@/lib/stateSanitizer";
+import { serializeStateForSupabase } from "@/lib/statePersistence";
 
 const SAVE_DEBOUNCE_MS = 120;
 const RETRY_BASE_MS = 800;
@@ -83,7 +84,7 @@ export function CloudStateSync() {
     [supabase, userId]
   );
 
-  const normalizeStateForSave = useCallback((state: any) => sanitizeStatePayload(state), []);
+  const normalizeStateForSave = useCallback((state: any) => serializeStateForSupabase(state), []);
 
   const saveState = useCallback(
     async (state: any) => {
