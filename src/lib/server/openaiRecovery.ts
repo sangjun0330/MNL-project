@@ -15,7 +15,7 @@ type GenerateOpenAIRecoveryParams = {
 
 export type OpenAIRecoveryOutput = {
   result: AIRecoveryResult;
-  engine: "openai";
+  engine: "openai" | "rule";
   model: string | null;
   debug: string | null;
 };
@@ -430,7 +430,13 @@ export async function generateAIRecoveryWithOpenAI(
   const apiKey = normalizeApiKey();
   const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
   if (!apiKey) {
-    throw new Error("missing_openai_api_key");
+    // ✅ throw 대신 rule-based fallback 반환 → route에서 502 방지
+    const { generateAIRecovery } = await import("@/lib/aiRecovery");
+    const fallback = generateAIRecovery(
+      params.todayVital, params.vitals7, params.prevWeekVitals,
+      params.nextShift, params.language,
+    );
+    return { result: fallback, engine: "rule", model: null, debug: "missing_openai_api_key" };
   }
 
   const context = buildUserContext(params);
@@ -445,6 +451,7 @@ export async function generateAIRecoveryWithOpenAI(
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 30_000);
       try {
+        // ✅ 401/403은 API 키 문제 → 다른 모델/방식 재시도 무의미
         const chatAttempt = await tryChatCompletions({
           apiKey,
           model: candidate,
@@ -462,6 +469,9 @@ export async function generateAIRecoveryWithOpenAI(
         }
         lastError = chatAttempt.error ?? lastError;
 
+        // 401/403이면 바로 중단 (다른 API endpoint 시도해도 같은 key라 무의미)
+        if (lastError.includes("_401_") || lastError.includes("_403_")) break;
+
         const responsesAttempt = await tryResponsesApi({
           apiKey,
           model: candidate,
@@ -478,6 +488,8 @@ export async function generateAIRecoveryWithOpenAI(
           };
         }
         lastError = responsesAttempt.error ?? lastError;
+
+        if (lastError.includes("_401_") || lastError.includes("_403_")) break;
       } catch (innerErr: any) {
         if (innerErr?.name === "AbortError") {
           lastError = `openai_timeout_model:${candidate}`;
@@ -494,5 +506,11 @@ export async function generateAIRecoveryWithOpenAI(
     lastError = `openai_outer_${error?.message ?? "unknown"}`;
   }
 
-  throw new Error(lastError);
+  // ✅ 모든 모델 실패 시: throw 대신 rule-based fallback → UI에 결과 표시
+  const { generateAIRecovery } = await import("@/lib/aiRecovery");
+  const fallback = generateAIRecovery(
+    params.todayVital, params.vitals7, params.prevWeekVitals,
+    params.nextShift, params.language,
+  );
+  return { result: fallback, engine: "rule", model: null, debug: lastError };
 }
