@@ -9,6 +9,33 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      ai_content: {
+        Row: {
+          user_id: string;
+          date_iso: string;
+          language: string;
+          data: Json;
+          created_at: string | null;
+          updated_at: string | null;
+        };
+        Insert: {
+          user_id: string;
+          date_iso: string;
+          language: string;
+          data: Json;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Update: {
+          user_id?: string;
+          date_iso?: string;
+          language?: string;
+          data?: Json;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Relationships: [];
+      };
       wnl_daily_logs: {
         Row: {
           device_id: string;

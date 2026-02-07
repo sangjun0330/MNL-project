@@ -1,10 +1,11 @@
 "use client";
 
-import { Fragment, useMemo } from "react";
+import { useMemo } from "react";
 import { DetailCard, DetailChip, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
 import { useAIRecoveryInsights } from "@/components/insights/useAIRecoveryInsights";
 import { formatKoreanDate } from "@/lib/date";
 import { useI18n } from "@/lib/useI18n";
+import type { RecoverySection } from "@/lib/aiRecovery";
 
 function severityLabel(severity: "info" | "caution" | "warning", t: (key: string) => string) {
   if (severity === "warning") return t("경고");
@@ -22,7 +23,7 @@ function presentError(error: string, t: (key: string) => string) {
   if (error.includes("unsupported_country_region_territory")) {
     return [
       t("OpenAI 요청이 지역 정책으로 거절됐어요."),
-      t("서버에서 사용하는 OPENAI_API_KEY의 프로젝트/지역 정책을 확인해 주세요."),
+      t("네트워크(와이파이/모바일) 경로를 바꿔 다시 시도해 주세요."),
     ];
   }
   if (error.includes("openai_timeout")) {
@@ -46,30 +47,14 @@ function findSectionStart(text: string, label: "A" | "B" | "C" | "D") {
   return -1;
 }
 
-function extractSection(text: string, label: "A" | "B" | "C" | "D") {
-  const start = findSectionStart(text, label);
+function extractCSection(text: string) {
+  const start = findSectionStart(text, "C");
   if (start < 0) return "";
-  const ends = (["A", "B", "C", "D"] as const)
-    .filter((v) => v !== label)
-    .map((v) => findSectionStart(text.slice(start + 1), v))
-    .filter((idx) => idx >= 0)
-    .map((idx) => idx + start + 1);
-  const end = ends.length ? Math.min(...ends) : text.length;
+  const tail = text.slice(start + 1);
+  const dPos = findSectionStart(tail, "D");
+  const endRelative = [dPos].filter((idx) => idx >= 0);
+  const end = endRelative.length ? start + 1 + Math.min(...endRelative) : text.length;
   return text.slice(start, end).trim();
-}
-
-function normalizeBlock(block: string, label: "A" | "B" | "C" | "D") {
-  return block
-    .replace(new RegExp(`^\\s*\\[${label}\\]\\s*`, "i"), "")
-    .replace(new RegExp(`^\\s*${label}\\s*[).:\\-]\\s*`, "i"), "")
-    .trim();
-}
-
-function toLines(text: string) {
-  return text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
 }
 
 function highlightInline(text: string) {
@@ -77,7 +62,7 @@ function highlightInline(text: string) {
   return tokens.map((token, idx) => {
     if (!token) return null;
     const emph = /^(?:\d+(?:\.\d+)?(?:h|시간|mg|%|점)?|수면부채|카페인|스트레스|기분|수면)$/u.test(token);
-    if (!emph) return <Fragment key={`${token}-${idx}`}>{token}</Fragment>;
+    if (!emph) return token;
     return (
       <span key={`${token}-${idx}`} className="font-extrabold text-ios-text">
         {token}
@@ -86,53 +71,45 @@ function highlightInline(text: string) {
   });
 }
 
-function renderBlockLines(lines: string[], tone: "normal" | "strong" = "normal") {
-  if (!lines.length) return null;
-  return (
-    <div className="mt-2 space-y-2">
-      {lines.map((line, idx) => {
-        const cleaned = line.replace(/^[\-•·]\s*/, "").trim();
-        const isBullet = /^[\-•·]/.test(line);
-        if (isBullet) {
-          return (
-            <div key={`${line}-${idx}`} className="flex gap-2 text-[14px] leading-relaxed text-ios-text">
-              <span className="pt-[2px] text-[14px]">•</span>
-              <p className="flex-1">{highlightInline(cleaned)}</p>
-            </div>
-          );
-        }
-        return (
-          <p
-            key={`${line}-${idx}`}
-            className={tone === "strong" ? "text-[16px] font-semibold leading-relaxed text-ios-text" : "text-[14px] leading-relaxed text-ios-sub"}
-          >
-            {highlightInline(cleaned)}
-          </p>
-        );
-      })}
-    </div>
-  );
-}
+const CATEGORIES: Array<{
+  key: RecoverySection["category"];
+  titleKo: string;
+  icon: string;
+}> = [
+  { key: "sleep", titleKo: "수면", icon: "1" },
+  { key: "shift", titleKo: "교대근무", icon: "2" },
+  { key: "caffeine", titleKo: "카페인", icon: "3" },
+  { key: "menstrual", titleKo: "생리주기", icon: "4" },
+  { key: "stress", titleKo: "스트레스 & 감정", icon: "5" },
+  { key: "activity", titleKo: "신체활동", icon: "6" },
+];
 
 export function InsightsAIRecoveryDetail() {
   const { t } = useI18n();
   const { data, loading, generating, error } = useAIRecoveryInsights({ mode: "generate" });
-  const topDrains = useMemo(() => data?.result.weeklySummary?.topDrains ?? [], [data]);
   const errorLines = useMemo(() => (error ? presentError(error, t) : []), [error, t]);
   const errorCode = useMemo(() => (error ? compactErrorCode(error) : ""), [error]);
-  const rawBlocks = useMemo(() => {
-    const text = data?.generatedText ?? "";
-    if (!text) return { a: "", b: "", c: "", d: "" };
-    return {
-      a: normalizeBlock(extractSection(text, "A"), "A"),
-      b: normalizeBlock(extractSection(text, "B"), "B"),
-      c: normalizeBlock(extractSection(text, "C"), "C"),
-      d: normalizeBlock(extractSection(text, "D"), "D"),
-    };
-  }, [data?.generatedText]);
-  const blockBLines = useMemo(() => toLines(rawBlocks.b), [rawBlocks.b]);
-  const blockCLines = useMemo(() => toLines(rawBlocks.c), [rawBlocks.c]);
-  const blockDLines = useMemo(() => toLines(rawBlocks.d), [rawBlocks.d]);
+  const weekly = data?.result.weeklySummary ?? null;
+
+  const sectionsByCategory = useMemo(() => {
+    const map = new Map<RecoverySection["category"], RecoverySection>();
+    for (const section of data?.result.sections ?? []) {
+      if (!map.has(section.category)) {
+        map.set(section.category, section);
+      }
+    }
+    return map;
+  }, [data?.result.sections]);
+
+  const orderedSections = useMemo(
+    () => CATEGORIES.map((meta) => ({ meta, section: sectionsByCategory.get(meta.key) ?? null })).filter((item) => item.section),
+    [sectionsByCategory]
+  );
+
+  const cFallbackText = useMemo(() => {
+    if (!data?.generatedText || orderedSections.length > 0) return "";
+    return extractCSection(data.generatedText);
+  }, [data?.generatedText, orderedSections.length]);
 
   return (
     <InsightDetailShell
@@ -167,17 +144,16 @@ export function InsightsAIRecoveryDetail() {
         <>
           <DetailCard className="p-5">
             <div className="text-[13px] font-semibold text-ios-sub">A · {t("한줄 요약")}</div>
-            <p className="mt-2 text-[18px] font-semibold leading-relaxed tracking-[-0.01em] text-ios-text">
+            <p className="mt-2 text-[17px] font-semibold leading-relaxed tracking-[-0.01em] text-ios-text">
               {highlightInline(data.result.headline || t("요약이 비어 있어요."))}
             </p>
-            {rawBlocks.a && rawBlocks.a !== data.result.headline ? renderBlockLines(toLines(rawBlocks.a), "normal") : null}
           </DetailCard>
 
           <DetailCard className="p-5">
             <div className="text-[13px] font-semibold text-ios-sub">B · {t("긴급 알림")}</div>
             {data.result.compoundAlert ? (
               <>
-                <p className="mt-2 text-[15px] leading-relaxed text-ios-text">{data.result.compoundAlert.message}</p>
+                <p className="mt-2 text-[14px] leading-relaxed text-ios-text">{data.result.compoundAlert.message}</p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {data.result.compoundAlert.factors.map((factor) => (
                     <DetailChip key={factor} color="#E87485">
@@ -185,72 +161,87 @@ export function InsightsAIRecoveryDetail() {
                     </DetailChip>
                   ))}
                 </div>
-                {blockBLines.length ? renderBlockLines(blockBLines) : null}
               </>
             ) : (
-              blockBLines.length ? renderBlockLines(blockBLines) : <p className="mt-2 text-[14px] text-ios-sub">{t("오늘은 복합 위험 알림이 없어요.")}</p>
+              <p className="mt-2 text-[14px] text-ios-sub">{t("오늘은 복합 위험 알림이 없어요.")}</p>
             )}
           </DetailCard>
 
           <DetailCard className="p-5">
             <div className="text-[13px] font-semibold text-ios-sub">C · {t("오늘의 회복 처방")}</div>
-            {data.result.sections.length ? (
+            {orderedSections.length ? (
               <div className="mt-3 space-y-3">
-                {data.result.sections.map((section) => (
+                {orderedSections.map(({ meta, section }) => (
                   <div
-                    key={`${section.category}-${section.title}`}
-                    className="rounded-2xl border border-ios-sep bg-white/85 p-4 shadow-apple-sm"
+                    key={`${meta.key}-${section?.title}`}
+                    className="rounded-2xl border border-ios-sep bg-white p-4 shadow-apple-sm"
                   >
-                    <div className="flex items-center gap-2">
-                      <span className="text-[19px] font-extrabold tracking-[-0.02em] text-ios-text">{section.title}</span>
-                      <DetailChip color={severityColor(section.severity)}>
-                        {severityLabel(section.severity, t)}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <div className="flex h-6 w-6 items-center justify-center rounded-full bg-ios-bg text-[12px] font-bold text-ios-sub">
+                          {meta.icon}
+                        </div>
+                        <span className="text-[17px] font-bold text-ios-text">{section?.title || meta.titleKo}</span>
+                      </div>
+                      <DetailChip color={severityColor(section?.severity ?? "info")}>
+                        {severityLabel(section?.severity ?? "info", t)}
                       </DetailChip>
                     </div>
-                    <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">{section.description}</p>
-                    <ul className="mt-3 list-disc space-y-1.5 pl-5 text-[14px] leading-relaxed text-ios-text">
-                      {section.tips.map((tip, idx) => (
-                        <li key={`${section.category}-tip-${idx}`}>{tip}</li>
-                      ))}
-                    </ul>
+                    <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
+                      {section?.description || t("오늘 컨디션 기준 핵심 조언입니다.")}
+                    </p>
+                    {section?.tips?.length ? (
+                      <ol className="mt-3 space-y-2 text-[14px] leading-relaxed text-ios-text">
+                        {section.tips.map((tip, idx) => (
+                          <li key={`${meta.key}-${idx}`} className="flex gap-2">
+                            <span className="font-semibold text-ios-sub">{idx + 1}.</span>
+                            <span>{tip}</span>
+                          </li>
+                        ))}
+                      </ol>
+                    ) : null}
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="mt-2 text-[14px] text-ios-sub">{t("오늘은 추가 처방이 없어요.")}</p>
+              <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
+                {cFallbackText || t("오늘은 추가 처방이 없어요.")}
+              </p>
             )}
-            {blockCLines.length ? (
-              <div className="mt-4 rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3">
-                <div className="text-[12px] font-semibold text-ios-sub">{t("AI 원문 전체")}</div>
-                {renderBlockLines(blockCLines)}
-              </div>
-            ) : null}
           </DetailCard>
 
           <DetailCard className="p-5">
             <div className="text-[13px] font-semibold text-ios-sub">D · {t("이번 주 AI 한마디")}</div>
-            {data.result.weeklySummary ? (
-              <>
-                <p className="mt-2 text-[14px] leading-relaxed text-ios-text">
-                  {t("이번 주 평균 배터리")} {data.result.weeklySummary.avgBattery}
-                  {" · "}
-                  {t("지난주 대비")} {data.result.weeklySummary.avgBattery - data.result.weeklySummary.prevAvgBattery}
-                </p>
-                <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">{data.result.weeklySummary.personalInsight}</p>
-                <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">{data.result.weeklySummary.nextWeekPreview}</p>
-                {blockDLines.length ? renderBlockLines(blockDLines) : null}
-                {topDrains.length ? (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {topDrains.map((drain) => (
+            {weekly ? (
+              <div className="mt-3 space-y-3">
+                <div className="rounded-xl border border-ios-sep bg-ios-bg px-3 py-2">
+                  <p className="text-[12px] font-semibold text-ios-sub">{t("이번 주 요약")}</p>
+                  <p className="mt-1 text-[14px] text-ios-text">
+                    {t("평균 배터리")} <span className="font-extrabold">{weekly.avgBattery}</span>
+                    {" · "}
+                    {t("지난주 대비")} <span className="font-extrabold">{weekly.avgBattery - weekly.prevAvgBattery}</span>
+                  </p>
+                </div>
+                <div className="rounded-xl border border-ios-sep bg-ios-bg px-3 py-2">
+                  <p className="text-[12px] font-semibold text-ios-sub">{t("개인 패턴")}</p>
+                  <p className="mt-1 text-[14px] leading-relaxed text-ios-text">{weekly.personalInsight}</p>
+                </div>
+                <div className="rounded-xl border border-ios-sep bg-ios-bg px-3 py-2">
+                  <p className="text-[12px] font-semibold text-ios-sub">{t("다음 주 예측")}</p>
+                  <p className="mt-1 text-[14px] leading-relaxed text-ios-text">{weekly.nextWeekPreview}</p>
+                </div>
+                {weekly.topDrains.length ? (
+                  <div className="flex flex-wrap gap-2">
+                    {weekly.topDrains.map((drain) => (
                       <DetailChip key={`${drain.label}-${drain.pct}`} color="#1B2747">
                         {drain.label} {drain.pct}%
                       </DetailChip>
                     ))}
                   </div>
                 ) : null}
-              </>
+              </div>
             ) : (
-              blockDLines.length ? renderBlockLines(blockDLines) : <p className="mt-2 text-[14px] text-ios-sub">{t("주간 요약은 데이터가 더 쌓이면 표시돼요.")}</p>
+              <p className="mt-2 text-[14px] text-ios-sub">{t("주간 요약은 데이터가 더 쌓이면 표시돼요.")}</p>
             )}
           </DetailCard>
         </>
