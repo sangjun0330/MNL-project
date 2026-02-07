@@ -15,12 +15,14 @@ type HookOptions = {
 type HookResult = {
   data: AIRecoveryPayload | null;
   loading: boolean;
+  generating: boolean;
   fromSupabase: boolean;
   error: string | null;
   requiresTodaySleep: boolean;
 };
 
 const inFlightGenerate = new Map<string, Promise<AIRecoveryPayload | null>>();
+const sessionDailyCache = new Map<string, AIRecoveryPayload>();
 
 function requestKey(lang: "ko" | "en", dateISO: string) {
   return `${lang}:${dateISO}`;
@@ -49,6 +51,7 @@ async function fetchAIRecovery(lang: "ko" | "en", dateISO: string, cacheOnly: bo
   const payload = (json?.data ?? null) as AIRecoveryPayload | null;
   if (!payload) return null;
   if (payload.engine !== "openai") {
+    if (cacheOnly) return null;
     throw new Error(`invalid_engine:${String(payload.engine ?? "unknown")}`);
   }
   return payload;
@@ -77,6 +80,7 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
   const { state } = useInsightsData();
   const [remoteData, setRemoteData] = useState<AIRecoveryPayload | null>(null);
   const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const isStoreHydrated = state.selected !== ("1970-01-01" as any);
@@ -84,9 +88,22 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
   useEffect(() => {
     if (!isStoreHydrated) return;
     const dateISO = todayISO();
+    const key = requestKey(lang, dateISO);
     let active = true;
 
+    const fromSession = sessionDailyCache.get(key) ?? null;
+    if (fromSession) {
+      setRemoteData(fromSession);
+      setError(null);
+      setGenerating(false);
+      setLoading(false);
+      return () => {
+        active = false;
+      };
+    }
+
     setLoading(true);
+    setGenerating(false);
     setError(null);
 
     const run = async () => {
@@ -95,6 +112,7 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
         if (!active) return;
 
         if (cached) {
+          sessionDailyCache.set(key, cached);
           setRemoteData(cached);
           return;
         }
@@ -103,14 +121,21 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
 
         if (mode === "cache") return;
 
+        setGenerating(true);
         const generated = await getOrStartGenerate(lang, dateISO);
         if (!active) return;
-        setRemoteData(generated);
+        if (generated) {
+          sessionDailyCache.set(key, generated);
+        }
+        setRemoteData(generated ?? null);
       } catch (err: any) {
         if (!active) return;
         setError(err?.message ?? "network_error");
       } finally {
-        if (active) setLoading(false);
+        if (active) {
+          setGenerating(false);
+          setLoading(false);
+        }
       }
     };
 
@@ -124,10 +149,11 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
     () => ({
       data: remoteData,
       loading,
+      generating,
       fromSupabase: Boolean(remoteData),
       error,
       requiresTodaySleep: false,
     }),
-    [remoteData, loading, error]
+    [remoteData, loading, generating, error]
   );
 }
