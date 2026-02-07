@@ -234,7 +234,6 @@ function buildShiftSection(
   const shift = today.shift;
   const nightStreak = today.engine?.nightStreak ?? 0;
   const csi = today.engine?.CSI ?? 0;
-  const overtime = today.inputs.shiftOvertimeHours ?? 0;
 
   // Find tomorrow's shift from vitals or infer
   const todayIdx = vitals7.findIndex((v) => v.dateISO === today.dateISO);
@@ -244,8 +243,8 @@ function buildShiftSection(
   const tomorrowShift = tomorrowVital?.shift ?? null;
 
   // Don't show if shift impact is minimal
-  if ((shift === "OFF" || shift === "VAC") && nightStreak === 0 && overtime === 0) return null;
-  if (shift === "D" && nightStreak === 0 && csi < 0.2 && overtime === 0) return null;
+  if ((shift === "OFF" || shift === "VAC") && nightStreak === 0) return null;
+  if (shift === "D" && nightStreak === 0 && csi < 0.2) return null;
 
   const severity: RecoverySeverity =
     nightStreak >= 3 ? "warning" : nightStreak >= 2 || csi >= 0.5 ? "caution" : "info";
@@ -260,8 +259,6 @@ function buildShiftSection(
       desc = `Night shift today. Your circadian rhythm is under extra strain (CSI ${Math.round(csi * 100)}%).`;
     } else if (shift === "E") {
       desc = `Evening shift today. Late-ending shifts can push back your sleep time.`;
-    } else if (overtime > 0) {
-      desc = `${round1(overtime)} hours of overtime today. Extended shifts increase fatigue significantly.`;
     } else {
       desc = `Shift rhythm load is at ${Math.round(csi * 100)}%. Be mindful of recovery between shifts.`;
     }
@@ -271,9 +268,6 @@ function buildShiftSection(
     }
     if (tomorrowShift === "OFF" && shift === "N") {
       tips.push("Tomorrow is OFF after nights: sleep 4h in the morning, then resume normal bedtime to reset your rhythm.");
-    }
-    if (overtime > 1) {
-      tips.push("After extended shifts, take at least 30 minutes of complete rest before any activity.");
     }
     if (shift === "E" && tomorrowShift === "D") {
       tips.push("Evening-to-Day quick return: prioritize at least 5 hours of core sleep tonight.");
@@ -290,8 +284,6 @@ function buildShiftSection(
     desc = `오늘 나이트 근무예요. 생체리듬에 부담이 가는 상태입니다 (리듬 부담 ${Math.round(csi * 100)}%).`;
   } else if (shift === "E") {
     desc = `오늘 이브닝 근무예요. 퇴근이 늦어지면서 수면 시간이 밀릴 수 있어요.`;
-  } else if (overtime > 0) {
-    desc = `오늘 초과근무 ${round1(overtime)}시간이에요. 연장 근무는 피로를 크게 높입니다.`;
   } else {
     desc = `교대 리듬 부담이 ${Math.round(csi * 100)}%예요. 근무 간 회복에 신경 쓰세요.`;
   }
@@ -301,9 +293,6 @@ function buildShiftSection(
   }
   if (tomorrowShift === "OFF" && shift === "N") {
     tips.push("내일 OFF 전환: 오전에 짧게 4시간 자고, 저녁에 정상 시간 취침하면 리듬이 빨리 돌아와요.");
-  }
-  if (overtime > 1) {
-    tips.push("연장 근무 후에는 다음 활동 전 최소 30분 완전휴식을 취하세요.");
   }
   if (shift === "E" && tomorrowShift === "D") {
     tips.push("이브닝→데이 빠른 교대: 오늘 밤 최소 5시간 핵심수면을 확보하세요.");
@@ -316,9 +305,7 @@ function buildCaffeineSection(
   today: DailyVital,
   lang: Language,
 ): RecoverySection | null {
-  const caffeineMg = today.inputs.caffeineLastAt ? (today.inputs.caffeineMg ?? 0) : (today.inputs.caffeineMg ?? 0);
-  const caffeineLastAt = today.inputs.caffeineLastAt;
-  const cif = today.engine?.CIF ?? 1;
+  const caffeineMg = today.inputs.caffeineMg ?? 0;
   const csd = today.engine?.CSD ?? 0;
   const shift = today.shift;
 
@@ -329,9 +316,7 @@ function buildCaffeineSection(
   const tips: string[] = [];
 
   if (lang === "en") {
-    let desc = `Today's caffeine intake: ${Math.round(caffeineMg)}mg`;
-    if (caffeineLastAt) desc += ` (last at ${caffeineLastAt})`;
-    desc += ".";
+    let desc = `Today's caffeine intake: ${Math.round(caffeineMg)}mg.`;
 
     if (csd >= 0.3) {
       desc += ` Estimated caffeine residual at sleep time may delay falling asleep.`;
@@ -356,9 +341,7 @@ function buildCaffeineSection(
   }
 
   // Korean
-  let desc = `오늘 카페인 ${Math.round(caffeineMg)}mg 섭취`;
-  if (caffeineLastAt) desc += `, 마지막 섭취 ${caffeineLastAt}`;
-  desc += "했어요.";
+  let desc = `오늘 카페인 ${Math.round(caffeineMg)}mg 섭취했어요.`;
 
   if (csd >= 0.3) {
     desc += " 수면 시 잔류 카페인이 입면을 방해할 수 있어요.";
@@ -390,10 +373,8 @@ function buildMenstrualSection(
   if (!mc.enabled) return null;
 
   const phase = mc.phase;
-  const flow = today.inputs.menstrualFlow ?? 0;
   const symptom = today.inputs.symptomSeverity ?? 0;
   const shift = today.shift;
-  const mif = today.engine?.MIF ?? 1;
 
   // Skip if phase has minimal impact
   if (phase === "follicular" || phase === "ovulation") {
@@ -424,8 +405,6 @@ function buildMenstrualSection(
 
   if (phase === "none" || phase === "luteal") {
     // Luteal: show if approaching PMS
-    const daysUntilPms = mc.cycleLength - (mc.dayInCycle ?? 0) - (mc.cycleLength - (mc.cycleLength - (mc as any).periodLength));
-    // Simple check: if day is close to PMS window
     const pmsDays = 5; // default
     const pmsStart = mc.cycleLength - pmsDays;
     const daysToGo = pmsStart - (mc.dayIndexInCycle ?? 0);
@@ -459,7 +438,7 @@ function buildMenstrualSection(
   }
 
   // PMS or Period
-  const severity: RecoverySeverity = (phase === "period" && flow >= 2) || symptom >= 2 ? "warning" : "caution";
+  const severity: RecoverySeverity = symptom >= 2 ? "warning" : "caution";
   const tips: string[] = [];
 
   if (lang === "en") {
@@ -467,7 +446,7 @@ function buildMenstrualSection(
     if (phase === "pms") {
       desc = `Currently in the PMS phase (Day ${mc.dayInCycle ?? "?"} of cycle). You may feel more fatigued and sensitive.`;
     } else {
-      desc = `Currently on your period (Day ${mc.dayInCycle ?? "?"} of cycle)${flow >= 2 ? " with moderate to heavy flow" : ""}.`;
+      desc = `Currently on your period (Day ${mc.dayInCycle ?? "?"} of cycle).`;
     }
 
     if (phase === "period" && shift === "N") {
@@ -475,9 +454,6 @@ function buildMenstrualSection(
     }
     if (phase === "pms") {
       tips.push("During PMS, prioritize sleep (+30 min) and magnesium-rich foods.");
-    }
-    if (flow >= 2) {
-      tips.push("With heavier flow, avoid intense exercise and focus on hydration + iron intake.");
     }
     if (symptom >= 2) {
       tips.push("Symptom severity is elevated. Don't push through — rest when you can.");
@@ -494,7 +470,7 @@ function buildMenstrualSection(
   if (phase === "pms") {
     desc = `현재 PMS 기간 (주기 ${mc.dayInCycle ?? "?"}일차)이에요. 평소보다 피로감과 예민함이 높아질 수 있어요.`;
   } else {
-    desc = `현재 생리 중 (주기 ${mc.dayInCycle ?? "?"}일차)${flow >= 2 ? "이고 출혈이 보통~많음 수준" : ""}이에요.`;
+    desc = `현재 생리 중 (주기 ${mc.dayInCycle ?? "?"}일차)이에요.`;
   }
 
   if (phase === "period" && shift === "N") {
@@ -502,9 +478,6 @@ function buildMenstrualSection(
   }
   if (phase === "pms") {
     tips.push("PMS 기간에는 수면 시간 +30분, 마그네슘이 풍부한 음식을 챙기세요.");
-  }
-  if (flow >= 2) {
-    tips.push("출혈이 많을 때는 격렬한 활동을 자제하고 수분+철분 섭취에 집중하세요.");
   }
   if (symptom >= 2) {
     tips.push("증상 강도가 높은 상태예요. 무리하지 말고 쉴 수 있을 때 쉬세요.");
@@ -522,13 +495,13 @@ function buildStressSection(
   lang: Language,
 ): RecoverySection | null {
   const stress = today.inputs.stress ?? 1;
-  const mood = today.emotion?.mood ?? 3;
+  const mood = today.inputs.mood ?? today.emotion?.mood ?? 3;
   const shift = today.shift;
   const mentalBattery = today.mental.ema;
 
   // Count consecutive high-stress days
   const recentHighStress = vitals7.filter((v) => (v.inputs.stress ?? 1) >= 2).length;
-  const recentLowMood = vitals7.filter((v) => (v.emotion?.mood ?? 3) <= 2).length;
+  const recentLowMood = vitals7.filter((v) => ((v.inputs.mood ?? v.emotion?.mood ?? 3) <= 2)).length;
 
   // Don't show if stress and mood are fine
   if (stress <= 1 && mood >= 4 && mentalBattery >= 60) return null;
@@ -602,8 +575,6 @@ function buildActivitySection(
   const sleepH = today.inputs.sleepHours ?? 7;
   const shift = today.shift;
   const bodyBattery = today.body.value;
-  const menstrualStatus = today.inputs.menstrualStatus;
-  const flow = today.inputs.menstrualFlow ?? 0;
 
   // Don't show unless noteworthy
   if (activity <= 1 && bodyBattery >= 50 && shift !== "OFF") return null;
@@ -637,10 +608,6 @@ function buildActivitySection(
     if (activity >= 3 && sleepH < 6) {
       tips.push("Tone it down tomorrow. High exertion + sleep deficit = higher risk.");
     }
-    if (menstrualStatus === "period" && flow >= 2) {
-      tips.push("During heavy flow, swap high-intensity workouts for yoga or stretching.");
-    }
-
     return { category: "activity", severity, title: "Physical Activity", description: desc, tips };
   }
 
@@ -668,10 +635,6 @@ function buildActivitySection(
   if (activity >= 3 && sleepH < 6) {
     tips.push("내일은 활동량을 줄이세요. 고강도 활동 + 수면 부족 = 부상 위험 증가.");
   }
-  if (menstrualStatus === "period" && flow >= 2) {
-    tips.push("출혈이 많을 때는 고강도 운동 대신 요가나 스트레칭으로 대체하세요.");
-  }
-
   return { category: "activity", severity, title: "신체 활동", description: desc, tips };
 }
 

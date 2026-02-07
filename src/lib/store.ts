@@ -241,35 +241,49 @@ function clearNoteForDate(iso: ISODate) {
 }
 
 function setEmotionForDate(iso: ISODate, emo: EmotionEntry) {
+  const emptyBioRecord: BioInputs = {
+    sleepHours: null,
+    napHours: null,
+    stress: null,
+    activity: null,
+    caffeineMg: null,
+    mood: null,
+    symptomSeverity: null,
+  };
+  const prevBio = (state.bio ?? {})[iso] ?? emptyBioRecord;
+  const nextBio = { ...emptyBioRecord, ...prevBio, mood: emo.mood };
   setState({
     emotions: {
       ...(state.emotions ?? {}),
       [iso]: emo,
     },
+    bio: {
+      ...(state.bio ?? {}),
+      [iso]: nextBio,
+    },
   });
 }
 
 function clearEmotionForDate(iso: ISODate) {
-  const next = { ...(state.emotions ?? {}) };
-  delete next[iso];
-  setState({ emotions: next });
+  const nextEmotions = { ...(state.emotions ?? {}) };
+  delete nextEmotions[iso];
+  const nextBioMap = { ...(state.bio ?? {}) };
+  const currentBio = nextBioMap[iso];
+  if (currentBio) {
+    nextBioMap[iso] = { ...currentBio, mood: null };
+  }
+  setState({ emotions: nextEmotions, bio: nextBioMap });
 }
 
 function setBioForDate(iso: ISODate, patch: Partial<BioInputs>) {
   const emptyBioRecord: BioInputs = {
     sleepHours: null,
     napHours: null,
-    sleepQuality: null,
-    sleepTiming: null,
     stress: null,
     activity: null,
     caffeineMg: null,
-    caffeineLastAt: null,
-    fatigueLevel: null,
+    mood: null,
     symptomSeverity: null,
-    menstrualStatus: null,
-    menstrualFlow: null,
-    shiftOvertimeHours: null,
   };
   const prev = (state.bio ?? {})[iso] ?? emptyBioRecord;
   const nextBio = { ...emptyBioRecord, ...prev, ...patch };
@@ -285,12 +299,23 @@ function setBioForDate(iso: ISODate, patch: Partial<BioInputs>) {
   });
 
   const nextSettings = adjusted ? { ...state.settings, menstrual: adjusted } : state.settings;
+  const shouldSyncMood = patch.mood !== undefined;
+  const nextEmotions = shouldSyncMood
+    ? {
+        ...(state.emotions ?? {}),
+        [iso]: {
+          ...((state.emotions ?? {})[iso] ?? { mood: 3 as any }),
+          mood: (patch.mood == null ? 3 : patch.mood) as any,
+        },
+      }
+    : (state.emotions ?? {});
 
   setState({
     bio: {
       ...(state.bio ?? {}),
       [iso]: nextBio,
     },
+    emotions: nextEmotions,
     settings: nextSettings,
   });
 }

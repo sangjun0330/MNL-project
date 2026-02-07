@@ -20,17 +20,11 @@ export type DailyVital = {
   inputs: {
     sleepHours?: number | null;
     napHours?: number | null;
-    sleepQuality?: number | null;
-    sleepTiming?: "auto" | "night" | "day" | "mixed" | null;
     stress?: number | null; // 0..3
     activity?: number | null; // 0..3
+    mood?: number | null; // 1..5
     caffeineMg?: number | null;
-    caffeineLastAt?: string | null;
-    fatigueLevel?: number | null;
     symptomSeverity?: number | null; // 0..3
-    menstrualStatus?: "none" | "pms" | "period" | null;
-    menstrualFlow?: number | null;
-    shiftOvertimeHours?: number | null;
   };
 
   menstrual: ReturnType<typeof menstrualContextForDate>;
@@ -147,17 +141,11 @@ function normalizeBio(bio?: BioInputs | null): BioInputs {
   return {
     sleepHours: bio?.sleepHours ?? null,
     napHours: (bio as any)?.napHours ?? null,
-    sleepQuality: (bio as any)?.sleepQuality ?? null,
-    sleepTiming: (bio as any)?.sleepTiming ?? null,
     stress: (bio?.stress ?? null) as any,
     activity: (bio?.activity ?? null) as any,
+    mood: (bio as any)?.mood ?? null,
     caffeineMg: bio?.caffeineMg ?? null,
-    caffeineLastAt: (bio as any)?.caffeineLastAt ?? null,
-    fatigueLevel: (bio as any)?.fatigueLevel ?? null,
     symptomSeverity: (bio as any)?.symptomSeverity ?? null,
-    menstrualStatus: (bio as any)?.menstrualStatus ?? null,
-    menstrualFlow: (bio as any)?.menstrualFlow ?? null,
-    shiftOvertimeHours: (bio as any)?.shiftOvertimeHours ?? null,
   };
 }
 
@@ -305,15 +293,15 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
     const rawNap = (bio as any).napHours ?? null;
     const rawStress = (bio.stress ?? null) as number | null;
     const rawActivity = (bio.activity ?? null) as number | null;
-    const rawMood = emotion?.mood ?? null;
+    const rawMood = (bio as any).mood ?? emotion?.mood ?? null;
     const rawCaffeineMg = bio.caffeineMg ?? null;
-    const rawCaffeineLastAt = (bio as any).caffeineLastAt ?? null;
-    const rawSleepQuality = (bio as any).sleepQuality ?? null;
-    const rawSleepTiming = (bio as any).sleepTiming ?? "auto";
-    const rawFatigueLevel = (bio as any).fatigueLevel ?? null;
-    const rawMenstrualStatus = (bio as any).menstrualStatus ?? null;
-    const rawMenstrualFlow = (bio as any).menstrualFlow ?? null;
-    const rawOvertimeHours = (bio as any).shiftOvertimeHours ?? null;
+    const rawCaffeineLastAt: string | null = null;
+    const rawSleepQuality = null;
+    const rawSleepTiming = "auto";
+    const rawFatigueLevel = null;
+    const rawMenstrualStatus = null;
+    const rawMenstrualFlow = null;
+    const rawOvertimeHours = null;
     const rawSymptomSeverityInput = (bio as any).symptomSeverity;
     const rawSymptomSeverity =
       rawSymptomSeverityInput == null ? null : clamp(Number(rawSymptomSeverityInput), 0, 3);
@@ -337,7 +325,7 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
     let effectiveActivity = rawActivity;
     let effectiveMood = rawMood;
     let effectiveCaffeineMg = rawCaffeineMg;
-    let effectiveCaffeineLastAt = rawCaffeineLastAt;
+    let effectiveCaffeineLastAt: string | null = rawCaffeineLastAt;
     let effectiveSymptomSeverity = rawSymptomSeverity;
 
     let estimatedSleep = false;
@@ -451,12 +439,7 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
     const observedActivity = rawActivity != null ? 1 : 0;
     const observedMood = rawMood != null ? 1 : 0;
     const observedCaffeine = rawCaffeineMg != null || rawCaffeineLastAt != null ? 1 : 0;
-    const observedMenstrual =
-      rawSymptomSeverity != null ||
-      (rawMenstrualStatus != null && rawMenstrualStatus !== "none") ||
-      Number(rawMenstrualFlow ?? 0) > 0
-        ? 1
-        : 0;
+    const observedMenstrual = rawSymptomSeverity != null ? 1 : 0;
 
     const estimatedSignals =
       (estimatedSleep ? 1 : 0) +
@@ -579,7 +562,7 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
       Number(d.debt_n ?? 0) > 0;
     const hasStressSignal = effectiveStress != null;
     const hasActivitySignal = effectiveActivity != null;
-    const hasCaffeineSignal = (effectiveCaffeineMg != null && Number(effectiveCaffeineMg) > 0) || caffeineLastAt != null;
+    const hasCaffeineSignal = effectiveCaffeineMg != null && Number(effectiveCaffeineMg) > 0;
     const hasMenstrualSignal =
       Boolean(menstrual.enabled) && menstrual.phase !== "none";
     const hasMoodSignal = effectiveMood != null;
@@ -614,17 +597,11 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
       inputs: {
         sleepHours: effectiveSleepHours,
         napHours: effectiveNapHours,
-        sleepQuality: (bio as any).sleepQuality ?? null,
-        sleepTiming: (bio as any).sleepTiming ?? null,
         stress: (effectiveStress ?? null) as any,
         activity: (effectiveActivity ?? null) as any,
+        mood: effectiveMood,
         caffeineMg: effectiveCaffeineMg,
-        caffeineLastAt,
-        fatigueLevel: (bio as any).fatigueLevel ?? null,
         symptomSeverity: effectiveSymptomSeverity,
-        menstrualStatus: (bio as any).menstrualStatus ?? null,
-        menstrualFlow: (bio as any).menstrualFlow ?? null,
-        shiftOvertimeHours: (bio as any).shiftOvertimeHours ?? null,
       },
       menstrual,
       body: {

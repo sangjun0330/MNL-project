@@ -5,23 +5,18 @@ function hasValue(v: unknown) {
 }
 
 export function hasHealthInput(bio?: BioInputs | null, emotion?: EmotionEntry | null) {
+  // backward compatibility: old records may still keep mood in emotions
   if (emotion && hasValue(emotion.mood)) return true;
 
   if (!bio) return false;
 
   if (hasValue(bio.sleepHours)) return true;
   if (hasValue(bio.napHours)) return true;
-  if (hasValue(bio.sleepQuality)) return true;
-  if (bio.sleepTiming && bio.sleepTiming !== "auto") return true;
   if (hasValue(bio.stress)) return true;
   if (hasValue(bio.activity)) return true;
+  if (hasValue(bio.mood)) return true;
   if (typeof bio.caffeineMg === "number" && bio.caffeineMg > 0) return true;
-  if (hasValue(bio.caffeineLastAt)) return true;
-  if (hasValue(bio.fatigueLevel)) return true;
   if (typeof bio.symptomSeverity === "number" && bio.symptomSeverity > 0) return true;
-  if (bio.menstrualStatus && bio.menstrualStatus !== "none") return true;
-  if (typeof bio.menstrualFlow === "number" && bio.menstrualFlow > 0) return true;
-  if (typeof bio.shiftOvertimeHours === "number" && bio.shiftOvertimeHours > 0) return true;
 
   return false;
 }

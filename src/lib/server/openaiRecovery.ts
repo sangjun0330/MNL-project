@@ -11,12 +11,11 @@ type GenerateOpenAIRecoveryParams = {
   todayVital: DailyVital | null;
   vitals7: DailyVital[];
   prevWeekVitals: DailyVital[];
-  fallback: AIRecoveryResult;
 };
 
 export type OpenAIRecoveryOutput = {
   result: AIRecoveryResult;
-  engine: "openai" | "rule";
+  engine: "openai";
   model: string | null;
   debug: string | null;
 };
@@ -79,11 +78,14 @@ function parseSection(value: unknown): RecoverySection | null {
   };
 }
 
-function parseWeeklySummary(value: unknown, fallback: WeeklySummary | null): WeeklySummary | null {
-  if (!isObject(value)) return fallback;
-  const avgBattery = clamp(Number(value.avgBattery ?? fallback?.avgBattery ?? 0), 0, 100);
-  const prevAvgBattery = clamp(Number(value.prevAvgBattery ?? fallback?.prevAvgBattery ?? avgBattery), 0, 100);
-  const topDrainsRaw = Array.isArray(value.topDrains) ? value.topDrains : fallback?.topDrains ?? [];
+function parseWeeklySummary(value: unknown): WeeklySummary | null {
+  if (!isObject(value)) return null;
+  const avgBatteryRaw = Number(value.avgBattery);
+  const prevAvgBatteryRaw = Number(value.prevAvgBattery);
+  if (!Number.isFinite(avgBatteryRaw) || !Number.isFinite(prevAvgBatteryRaw)) return null;
+  const avgBattery = clamp(avgBatteryRaw, 0, 100);
+  const prevAvgBattery = clamp(prevAvgBatteryRaw, 0, 100);
+  const topDrainsRaw = Array.isArray(value.topDrains) ? value.topDrains : [];
   const topDrains = topDrainsRaw
     .map((item) => {
       if (!isObject(item)) return null;
@@ -94,15 +96,9 @@ function parseWeeklySummary(value: unknown, fallback: WeeklySummary | null): Wee
     })
     .filter((item): item is { label: string; pct: number } => Boolean(item))
     .slice(0, 3);
-  const personalInsight =
-    typeof value.personalInsight === "string" && value.personalInsight.trim()
-      ? value.personalInsight.trim()
-      : fallback?.personalInsight ?? "";
-  const nextWeekPreview =
-    typeof value.nextWeekPreview === "string" && value.nextWeekPreview.trim()
-      ? value.nextWeekPreview.trim()
-      : fallback?.nextWeekPreview ?? "";
-  if (!personalInsight || !nextWeekPreview) return fallback;
+  const personalInsight = typeof value.personalInsight === "string" ? value.personalInsight.trim() : "";
+  const nextWeekPreview = typeof value.nextWeekPreview === "string" ? value.nextWeekPreview.trim() : "";
+  if (!personalInsight || !nextWeekPreview) return null;
   return {
     avgBattery: Math.round(avgBattery),
     prevAvgBattery: Math.round(prevAvgBattery),
@@ -112,18 +108,18 @@ function parseWeeklySummary(value: unknown, fallback: WeeklySummary | null): Wee
   };
 }
 
-function parseRecoveryResult(value: unknown, fallback: AIRecoveryResult): AIRecoveryResult | null {
+function parseRecoveryResult(value: unknown): AIRecoveryResult | null {
   if (!isObject(value)) return null;
   const parsed = value as OpenAIParsedResult;
   const headline = typeof parsed.headline === "string" ? parsed.headline.trim() : "";
   const sectionsRaw = Array.isArray(parsed.sections) ? parsed.sections : [];
   const sections = sectionsRaw.map(parseSection).filter((item): item is RecoverySection => Boolean(item));
-  if (!headline || !sections.length) return null;
+  if (!headline) return null;
   return {
     headline,
     compoundAlert: parseCompoundAlert(parsed.compoundAlert),
     sections,
-    weeklySummary: parseWeeklySummary(parsed.weeklySummary, fallback.weeklySummary),
+    weeklySummary: parseWeeklySummary(parsed.weeklySummary),
   };
 }
 
@@ -170,21 +166,12 @@ function normalizeApiKey() {
 }
 
 function modelCandidates(primary: string | null | undefined) {
-  const out: string[] = [];
-  const push = (v?: string | null) => {
-    const name = String(v ?? "").trim();
-    if (!name) return;
-    if (!out.includes(name)) out.push(name);
-  };
-  push(primary);
-  // ✅ gpt-4.1-mini 제거 (존재하지 않는 모델) → 유효한 fallback만
-  push("gpt-4o-mini");
-  push("gpt-4o");
-  return out;
+  const model = String(primary ?? "").trim();
+  return model ? [model] : [];
 }
 
 function buildUserContext(params: GenerateOpenAIRecoveryParams) {
-  const { todayISO, language, todayShift, nextShift, todayVital, vitals7, prevWeekVitals, fallback } = params;
+  const { todayISO, language, todayShift, nextShift, todayVital, vitals7, prevWeekVitals } = params;
   const avg7 = vitals7.length
     ? Math.round(
         vitals7.reduce((sum, vital) => sum + Math.min(vital.body.value, vital.mental.ema), 0) / vitals7.length
@@ -213,11 +200,9 @@ function buildUserContext(params: GenerateOpenAIRecoveryParams) {
           napHours: todayVital.inputs.napHours ?? null,
           stress: todayVital.inputs.stress ?? null,
           activity: todayVital.inputs.activity ?? null,
-          mood: todayVital.emotion?.mood ?? null,
+          mood: todayVital.inputs.mood ?? todayVital.emotion?.mood ?? null,
           caffeineMg: todayVital.inputs.caffeineMg ?? null,
-          caffeineLastAt: todayVital.inputs.caffeineLastAt ?? null,
           symptomSeverity: todayVital.inputs.symptomSeverity ?? null,
-          menstrualStatus: todayVital.inputs.menstrualStatus ?? null,
           menstrualLabel: todayVital.menstrual?.label ?? null,
           menstrualTracking: Boolean(todayVital.menstrual?.enabled),
           sleepDebtHours: todayVital.engine?.sleepDebtHours ?? null,
@@ -240,12 +225,11 @@ function buildUserContext(params: GenerateOpenAIRecoveryParams) {
         napHours: vital.inputs.napHours ?? null,
         stress: vital.inputs.stress ?? null,
         activity: vital.inputs.activity ?? null,
-        mood: vital.emotion?.mood ?? null,
+        mood: vital.inputs.mood ?? vital.emotion?.mood ?? null,
         caffeineMg: vital.inputs.caffeineMg ?? null,
         symptomSeverity: vital.inputs.symptomSeverity ?? null,
       })),
     },
-    ruleFallback: fallback,
   };
 }
 
@@ -309,12 +293,7 @@ export async function generateAIRecoveryWithOpenAI(
   const apiKey = normalizeApiKey();
   const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
   if (!apiKey) {
-    return {
-      result: params.fallback,
-      engine: "rule",
-      model: null,
-      debug: "missing_openai_api_key",
-    };
+    throw new Error("missing_openai_api_key");
   }
 
   const context = buildUserContext(params);
@@ -366,7 +345,7 @@ export async function generateAIRecoveryWithOpenAI(
           continue;
         }
 
-        const parsed = parseRecoveryResult(parsedUnknown, params.fallback);
+        const parsed = parseRecoveryResult(parsedUnknown);
         if (!parsed) {
           lastError = `openai_invalid_schema_model:${candidate}`;
           continue;
@@ -393,10 +372,5 @@ export async function generateAIRecoveryWithOpenAI(
     lastError = `openai_outer_${error?.message ?? "unknown"}`;
   }
 
-  return {
-    result: params.fallback,
-    engine: "rule",
-    model: null,
-    debug: lastError,
-  };
+  throw new Error(lastError);
 }

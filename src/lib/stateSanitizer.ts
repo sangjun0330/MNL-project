@@ -3,7 +3,6 @@ import { defaultSettings, emptyState, type AppSettings, type AppState, type BioI
 import type { Shift } from "@/lib/types";
 
 const ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
-const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const SHIFT_SET = new Set<Shift>(["D", "E", "N", "M", "OFF", "VAC"]);
 
 function clamp(value: number, min: number, max: number) {
@@ -24,12 +23,6 @@ function asShift(value: unknown): Shift | null {
   return SHIFT_SET.has(trimmed) ? trimmed : null;
 }
 
-function asTime(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return TIME_RE.test(trimmed) ? trimmed : null;
-}
-
 function asFiniteNumber(value: unknown): number | null {
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
@@ -39,11 +32,8 @@ function hasOwn(obj: Record<string, unknown>, key: string) {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
-function sanitizeEmotion(entry: unknown): EmotionEntry | undefined {
+function sanitizeEmotion(entry: unknown, fallbackMood: number | null = null): EmotionEntry | undefined {
   if (!entry || typeof entry !== "object") return undefined;
-  const moodNum = asFiniteNumber((entry as any).mood);
-  if (moodNum == null) return undefined;
-  const mood = clamp(Math.round(moodNum), 1, 5) as EmotionEntry["mood"];
   const tagsRaw = Array.isArray((entry as any).tags) ? (entry as any).tags : [];
   const tags = tagsRaw
     .map((tag: unknown) => (typeof tag === "string" ? tag.trim() : ""))
@@ -51,6 +41,9 @@ function sanitizeEmotion(entry: unknown): EmotionEntry | undefined {
     .slice(0, 12);
   const noteRaw = typeof (entry as any).note === "string" ? (entry as any).note.trim() : "";
   const createdAtNum = asFiniteNumber((entry as any).createdAt);
+  const moodNum = asFiniteNumber((entry as any).mood) ?? fallbackMood;
+  if (moodNum == null && !tags.length && !noteRaw && createdAtNum == null) return undefined;
+  const mood = clamp(Math.round(moodNum ?? 3), 1, 5) as EmotionEntry["mood"];
   const out: EmotionEntry = { mood };
   if (tags.length) out.tags = tags;
   if (noteRaw) out.note = noteRaw.slice(0, 500);
@@ -127,21 +120,12 @@ function sanitizeBio(entry: unknown): BioInputs | undefined {
     }
   }
 
-  if (hasOwn(source, "caffeineLastAt")) {
+  if (hasOwn(source, "mood")) {
     touched = true;
-    if (source.caffeineLastAt == null) out.caffeineLastAt = null;
+    if (source.mood == null) out.mood = null;
     else {
-      const caffeineLastAt = asTime(source.caffeineLastAt);
-      if (caffeineLastAt) out.caffeineLastAt = caffeineLastAt;
-    }
-  }
-
-  if (hasOwn(source, "fatigueLevel")) {
-    touched = true;
-    if (source.fatigueLevel == null) out.fatigueLevel = null;
-    else {
-      const fatigueLevel = asFiniteNumber(source.fatigueLevel);
-      if (fatigueLevel != null) out.fatigueLevel = clamp(Math.round(fatigueLevel), 0, 10);
+      const mood = asFiniteNumber(source.mood);
+      if (mood != null) out.mood = clamp(Math.round(mood), 1, 5) as BioInputs["mood"];
     }
   }
 
@@ -156,57 +140,7 @@ function sanitizeBio(entry: unknown): BioInputs | undefined {
     }
   }
 
-  if (hasOwn(source, "menstrualStatus")) {
-    touched = true;
-    const status = source.menstrualStatus;
-    if (status == null) out.menstrualStatus = null;
-    else if (status === "none" || status === "pms" || status === "period") {
-      out.menstrualStatus = status;
-    }
-  }
-
-  if (hasOwn(source, "menstrualFlow")) {
-    touched = true;
-    if (source.menstrualFlow == null) out.menstrualFlow = null;
-    else {
-      const menstrualFlow = asFiniteNumber(source.menstrualFlow);
-      if (menstrualFlow != null) {
-        out.menstrualFlow = clamp(Math.round(menstrualFlow), 0, 3) as BioInputs["menstrualFlow"];
-      }
-    }
-  }
-
-  if (hasOwn(source, "shiftOvertimeHours")) {
-    touched = true;
-    if (source.shiftOvertimeHours == null) out.shiftOvertimeHours = null;
-    else {
-      const overtime = asFiniteNumber(source.shiftOvertimeHours);
-      if (overtime != null) out.shiftOvertimeHours = clamp(Math.round(overtime * 10) / 10, 0, 24);
-    }
-  }
-
   return touched ? out : undefined;
-}
-
-function sanitizeAIRecoveryDailyCache(raw: unknown) {
-  if (!raw || typeof raw !== "object") return undefined;
-  const input = raw as Record<string, unknown>;
-  const out: Record<"ko" | "en", any> = {} as any;
-  for (const lang of ["ko", "en"] as const) {
-    const entry = input[lang];
-    if (!entry || typeof entry !== "object") continue;
-    const e = entry as Record<string, unknown>;
-    const dateISO = asIso(e.dateISO);
-    const generatedAtNum = asFiniteNumber(e.generatedAt);
-    if (!dateISO || generatedAtNum == null || !e.payload || typeof e.payload !== "object") continue;
-    out[lang] = {
-      dateISO,
-      language: lang,
-      payload: e.payload,
-      generatedAt: Math.round(generatedAtNum),
-    };
-  }
-  return Object.keys(out).length ? out : undefined;
 }
 
 function sanitizeSettings(raw: unknown): AppSettings {
@@ -280,17 +214,6 @@ export function sanitizeStatePayload(raw: unknown): AppState {
     shiftNames[iso] = name.slice(0, 40);
   }
 
-  const emotionsRaw =
-    loaded.emotions && typeof loaded.emotions === "object" ? (loaded.emotions as Record<string, unknown>) : {};
-  const emotions: Record<ISODate, EmotionEntry | undefined> = {};
-  for (const [isoRaw, emoRaw] of Object.entries(emotionsRaw)) {
-    const iso = asIso(isoRaw);
-    if (!iso) continue;
-    const emotion = sanitizeEmotion(emoRaw);
-    if (!emotion) continue;
-    emotions[iso] = emotion;
-  }
-
   const bioRaw = loaded.bio && typeof loaded.bio === "object" ? (loaded.bio as Record<string, unknown>) : {};
   const bio: Record<ISODate, BioInputs | undefined> = {};
   for (const [isoRaw, bioEntryRaw] of Object.entries(bioRaw)) {
@@ -299,6 +222,18 @@ export function sanitizeStatePayload(raw: unknown): AppState {
     const bioEntry = sanitizeBio(bioEntryRaw);
     if (!bioEntry) continue;
     bio[iso] = bioEntry;
+  }
+
+  const emotionsRaw =
+    loaded.emotions && typeof loaded.emotions === "object" ? (loaded.emotions as Record<string, unknown>) : {};
+  const emotions: Record<ISODate, EmotionEntry | undefined> = {};
+  for (const [isoRaw, emoRaw] of Object.entries(emotionsRaw)) {
+    const iso = asIso(isoRaw);
+    if (!iso) continue;
+    const fallbackMood = bio[iso]?.mood ?? null;
+    const emotion = sanitizeEmotion(emoRaw, fallbackMood);
+    if (!emotion) continue;
+    emotions[iso] = emotion;
   }
 
   return {
@@ -310,6 +245,5 @@ export function sanitizeStatePayload(raw: unknown): AppState {
     emotions,
     bio,
     settings: sanitizeSettings(loaded.settings),
-    aiRecoveryDaily: sanitizeAIRecoveryDailyCache(loaded.aiRecoveryDaily) ?? {},
   };
 }

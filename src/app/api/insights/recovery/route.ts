@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { addDays, fromISODate, toISODate, todayISO, type ISODate } from "@/lib/date";
-import { generateAIRecovery } from "@/lib/aiRecovery";
 import type { AIRecoveryApiError, AIRecoveryApiSuccess, AIRecoveryPayload } from "@/lib/aiRecoveryContract";
 import type { Language } from "@/lib/i18n";
 import { hasHealthInput } from "@/lib/healthRecords";
@@ -80,46 +79,6 @@ async function safeLoadUserState(userId: string): Promise<{ payload: unknown } |
   }
 }
 
-async function safeSaveUserState(userId: string, payload: unknown): Promise<boolean> {
-  try {
-    const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    if (!serviceRole || !supabaseUrl) return false;
-    const { saveUserState } = await import("@/lib/server/userStateStore");
-    await saveUserState({ userId, payload });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function readCachedDailyRecovery(payload: unknown, today: ISODate, lang: Language): AIRecoveryPayload | null {
-  const entry = (payload as any)?.aiRecoveryDaily?.[lang];
-  if (!entry || typeof entry !== "object") return null;
-  if (entry.dateISO !== today) return null;
-  const cached = entry.payload as AIRecoveryPayload | null;
-  if (!cached || typeof cached !== "object") return null;
-  if (cached.dateISO !== today || cached.language !== lang) return null;
-  return cached;
-}
-
-function withDailyRecoveryCache(basePayload: unknown, lang: Language, today: ISODate, data: AIRecoveryPayload): AppState {
-  const sanitizedBase = sanitizeStatePayload(basePayload);
-  const prev = (sanitizedBase.aiRecoveryDaily ?? {}) as Record<string, any>;
-  return {
-    ...sanitizedBase,
-    aiRecoveryDaily: {
-      ...prev,
-      [lang]: {
-        dateISO: today,
-        language: lang,
-        payload: data,
-        generatedAt: Date.now(),
-      },
-    },
-  };
-}
-
 export async function GET(req: NextRequest) {
   const langHint = toLanguage(new URL(req.url).searchParams.get("lang"));
 
@@ -178,74 +137,7 @@ export async function GET(req: NextRequest) {
         }
       : null;
 
-    // ── 4. 예외: 오늘 수면 미입력 시 분석 중단 ──
-    if (!hasTodaySleep) {
-      const body: AIRecoveryApiSuccess = {
-        ok: true,
-        data: {
-          dateISO: today,
-          language: lang,
-          todayShift,
-          nextShift,
-          todayVitalScore: null,
-          source: "supabase",
-          engine: "rule",
-          model: null,
-          debug: "today_sleep_required",
-          result: {
-            headline:
-              lang === "en"
-                ? "Please log today's sleep first. Recovery analysis will start right after."
-                : "오늘 수면 기록을 먼저 입력해 주세요. 입력 후 바로 맞춤 회복 분석이 시작됩니다.",
-            compoundAlert: null,
-            sections: [],
-            weeklySummary: null,
-          },
-        },
-      };
-      return NextResponse.json(body);
-    }
-
-    // ── 4-1. 하루 1회 고정: 당일 캐시가 있으면 그대로 반환 ──
-    const cached = readCachedDailyRecovery(row.payload, today, lang);
-    if (cached) {
-      const body: AIRecoveryApiSuccess = {
-        ok: true,
-        data: cached,
-      };
-      return NextResponse.json(body);
-    }
-
-    // ── 5. 기록 없으면 안내 메시지 ──
-    if (!vitals7.length) {
-      const body: AIRecoveryApiSuccess = {
-        ok: true,
-        data: {
-          dateISO: today,
-          language: lang,
-          todayShift,
-          nextShift,
-          todayVitalScore: null,
-          source: "supabase",
-          engine: "rule",
-          model: null,
-          debug: "no_recorded_inputs_in_last_7_days",
-          result: {
-            headline:
-              lang === "en"
-                ? "Log your health records to unlock personalized recovery guidance."
-                : "건강 기록을 입력하면 맞춤 회복 처방을 자세히 제공해드려요.",
-            compoundAlert: null,
-            sections: [],
-            weeklySummary: null,
-          },
-        },
-      };
-      return NextResponse.json(body);
-    }
-
-    // ── 6. Rule-based fallback 생성 + OpenAI 시도 ──
-    const fallbackResult = generateAIRecovery(todayVital, vitals7, prevWeek, nextShift, lang);
+    // ── 4. OpenAI만 사용(규칙 fallback 없음) ──
     const aiOutput = await generateAIRecoveryWithOpenAI({
       language: lang,
       todayISO: today,
@@ -254,7 +146,6 @@ export async function GET(req: NextRequest) {
       todayVital,
       vitals7,
       prevWeekVitals: prevWeek,
-      fallback: fallbackResult,
     });
     const todayVitalScore = todayVital
       ? Math.round(Math.min(todayVital.body.value, todayVital.mental.ema))
@@ -275,13 +166,8 @@ export async function GET(req: NextRequest) {
         result: aiOutput.result,
       },
     };
-
-    // ── 7. 당일 결과 캐시 저장(유저별 wnl_user_state payload 내부) ──
-    const cachedPayload = withDailyRecoveryCache(row.payload, lang, today, body.data);
-    await safeSaveUserState(userId, cachedPayload);
-
     return NextResponse.json(body);
   } catch (error: any) {
-    return bad(500, error?.message || "failed to build recovery data");
+    return bad(502, error?.message || "openai_generation_failed");
   }
 }
