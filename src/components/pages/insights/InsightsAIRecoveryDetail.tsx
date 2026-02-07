@@ -1,214 +1,78 @@
 "use client";
 
-import {
-  DetailCard,
-  DetailChip,
-  DETAIL_ACCENTS,
-  InsightDetailShell,
-} from "@/components/pages/insights/InsightDetailShell";
+import { useMemo } from "react";
+import { InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
 import { useAIRecoveryInsights } from "@/components/insights/useAIRecoveryInsights";
-import { shiftKo } from "@/components/insights/useInsightsData";
-import {
-  CATEGORY_COLORS,
-  CATEGORY_ICONS,
-  type RecoveryCategory,
-  type RecoverySeverity,
-} from "@/lib/aiRecovery";
 import { formatKoreanDate } from "@/lib/date";
 import { useI18n } from "@/lib/useI18n";
 
-function severityColor(severity: RecoverySeverity) {
-  if (severity === "warning") return DETAIL_ACCENTS.pink;
-  if (severity === "caution") return DETAIL_ACCENTS.navy;
-  return DETAIL_ACCENTS.mint;
-}
-
-function severityLabel(severity: RecoverySeverity, t: (key: string) => string) {
-  if (severity === "warning") return t("경고");
-  if (severity === "caution") return t("주의");
-  return t("안정");
-}
-
-function categoryLabel(category: RecoveryCategory, t: (key: string) => string) {
-  switch (category) {
-    case "sleep":
-      return t("수면");
-    case "shift":
-      return t("교대근무");
-    case "caffeine":
-      return t("카페인");
-    case "menstrual":
-      return t("생리주기");
-    case "stress":
-      return t("스트레스 & 감정");
-    case "activity":
-      return t("신체 활동");
-  }
-}
-
 export function InsightsAIRecoveryDetail() {
   const { t } = useI18n();
-  const { data, loading, fromSupabase, error } = useAIRecoveryInsights();
+  const { data, loading, error } = useAIRecoveryInsights();
 
-  if (!data) {
-    return (
-      <InsightDetailShell
-        title={t("AI 맞춤회복")}
-        subtitle={""}
-        chips={
-          <>
-            <DetailChip color={DETAIL_ACCENTS.navy}>{t("OpenAI 생성 분석")}</DetailChip>
-            <DetailChip color={DETAIL_ACCENTS.pink}>{loading ? t("분석 중...") : t("AI 호출 실패")}</DetailChip>
-          </>
-        }
-        meta={t("AI가 수면/교대근무/카페인/주기/스트레스/활동을 통합해 오늘의 회복 처방을 제안합니다.")}
-        tone="navy"
-        backHref="/insights"
-      >
-        <DetailCard className="p-5" style={{ backgroundImage: "linear-gradient(135deg, rgba(27,39,71,0.12), rgba(255,255,255,0.98))" }}>
-          <div className="text-[12.5px] font-semibold text-ios-sub">A · {t("한줄 요약")}</div>
-          <div className="mt-2 text-[20px] font-bold tracking-[-0.02em] text-ios-text">
-            {loading ? t("OpenAI 분석 중...") : t("AI 호출에 실패했어요. 잠시 후 다시 시도해 주세요.")}
-          </div>
-        </DetailCard>
-        {error ? <div className="text-[12px] text-ios-muted">{error}</div> : null}
-      </InsightDetailShell>
-    );
-  }
+  const text = useMemo(() => {
+    if (loading) return t("OpenAI 분석 중...");
+    if (!data) {
+      if (error) return `${t("AI 호출에 실패했어요. 잠시 후 다시 시도해 주세요.")}\n\n${error}`;
+      return t("AI 호출 대기 중...");
+    }
 
-  const { result } = data;
-  const weeklyDelta = result.weeklySummary
-    ? result.weeklySummary.avgBattery - result.weeklySummary.prevAvgBattery
-    : 0;
-  const weeklyDeltaText = weeklyDelta > 0 ? `+${weeklyDelta}` : `${weeklyDelta}`;
+    const lines: string[] = [];
+    const result = data.result;
+
+    lines.push(`A. ${t("한줄 요약")}`);
+    lines.push(result.headline || "-");
+
+    if (result.compoundAlert) {
+      lines.push("");
+      lines.push(`B. ${t("긴급 알림")}`);
+      lines.push(result.compoundAlert.message || "-");
+      if (result.compoundAlert.factors?.length) {
+        lines.push(`[${result.compoundAlert.factors.join("] [")}]`);
+      }
+    }
+
+    lines.push("");
+    lines.push(`C. ${t("오늘의 회복 처방")}`);
+    if (result.sections.length) {
+      for (const section of result.sections) {
+        lines.push("");
+        lines.push(`${section.title}`);
+        lines.push(section.description);
+        for (const tip of section.tips) lines.push(`- ${tip}`);
+      }
+    } else {
+      lines.push(t("처방 섹션이 아직 없어요. 기록이 쌓이면 자동으로 생성돼요."));
+    }
+
+    if (result.weeklySummary) {
+      lines.push("");
+      lines.push(`D. ${t("이번 주 AI 한마디")}`);
+      lines.push(
+        `${t("이번 주 평균 배터리")}: ${result.weeklySummary.avgBattery} (${t("지난주 대비")} ${
+          result.weeklySummary.avgBattery - result.weeklySummary.prevAvgBattery
+        })`
+      );
+      lines.push(result.weeklySummary.personalInsight);
+      lines.push(result.weeklySummary.nextWeekPreview);
+    }
+
+    return lines.join("\n");
+  }, [data, error, loading, t]);
 
   return (
     <InsightDetailShell
       title={t("AI 맞춤회복")}
-      subtitle={formatKoreanDate(data.dateISO)}
-      chips={
-        <>
-          <DetailChip color={DETAIL_ACCENTS.navy}>{shiftKo(data.todayShift)}</DetailChip>
-          {data.nextShift ? (
-            <DetailChip color={DETAIL_ACCENTS.navy}>
-              {t("내일")} · {shiftKo(data.nextShift)}
-            </DetailChip>
-          ) : null}
-          <DetailChip color={fromSupabase ? DETAIL_ACCENTS.mint : DETAIL_ACCENTS.pink}>
-            {fromSupabase ? t("Supabase 실시간 분석") : t("AI 호출 실패")}
-          </DetailChip>
-          <DetailChip color={DETAIL_ACCENTS.mint}>{t("OpenAI 생성 분석")}</DetailChip>
-          {data.model ? <DetailChip color={DETAIL_ACCENTS.navy}>{data.model}</DetailChip> : null}
-        </>
-      }
-      meta={t("AI가 수면/교대근무/카페인/주기/스트레스/활동을 통합해 오늘의 회복 처방을 제안합니다.")}
+      subtitle={data ? formatKoreanDate(data.dateISO) : ""}
+      meta={t("AI가 생성한 텍스트 결과")}
       tone="navy"
       backHref="/insights"
     >
-      <DetailCard className="p-5" style={{ backgroundImage: "linear-gradient(135deg, rgba(27,39,71,0.12), rgba(255,255,255,0.98))" }}>
-        <div className="text-[12.5px] font-semibold text-ios-sub">A · {t("한줄 요약")}</div>
-        <div className="mt-2 text-[20px] font-bold tracking-[-0.02em] text-ios-text">
-          {loading ? t("분석 중...") : result.headline}
-        </div>
-      </DetailCard>
-
-      {result.compoundAlert ? (
-        <DetailCard className="p-5">
-          <div className="text-[12.5px] font-semibold text-ios-sub">B · {t("긴급 알림")}</div>
-          <div className="mt-3 rounded-2xl border p-4" style={{ borderColor: "#E8748533", backgroundColor: "#E8748512" }}>
-            <div className="text-[18px] font-bold tracking-[-0.01em]" style={{ color: DETAIL_ACCENTS.pink }}>
-              {t("주의")}
-            </div>
-            <div className="mt-2 text-[15px] leading-relaxed text-ios-text">{result.compoundAlert.message}</div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {result.compoundAlert.factors.map((factor) => (
-                <DetailChip key={factor} color={DETAIL_ACCENTS.pink}>
-                  {factor}
-                </DetailChip>
-              ))}
-            </div>
-          </div>
-        </DetailCard>
-      ) : null}
-
-      <DetailCard className="p-5">
-        <div className="text-[12.5px] font-semibold text-ios-sub">C · {t("오늘의 회복 처방")}</div>
-        {result.sections.length ? (
-          <div className="mt-4 space-y-3">
-            {result.sections.map((section) => {
-              const color = CATEGORY_COLORS[section.category];
-              return (
-                <div
-                  key={`${section.category}-${section.title}`}
-                  className="rounded-2xl border border-ios-sep p-4"
-                  style={{
-                    backgroundImage: `linear-gradient(135deg, ${color}12, rgba(255,255,255,0.98))`,
-                  }}
-                >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[18px]" aria-hidden="true">
-                      {CATEGORY_ICONS[section.category]}
-                    </span>
-                    <div className="text-[17px] font-bold tracking-[-0.01em]" style={{ color }}>
-                      {categoryLabel(section.category, t)}
-                    </div>
-                    <DetailChip color={severityColor(section.severity)}>
-                      {severityLabel(section.severity, t)}
-                    </DetailChip>
-                  </div>
-
-                  <div className="mt-2 text-[15px] leading-relaxed text-ios-text">{section.description}</div>
-
-                  <ul className="mt-3 space-y-1.5 text-[14px] leading-relaxed text-ios-sub">
-                    {section.tips.map((tip) => (
-                      <li key={tip}>· {tip}</li>
-                    ))}
-                  </ul>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="mt-3 text-[14px] text-ios-sub">{t("처방 섹션이 아직 없어요. 기록이 쌓이면 자동으로 생성돼요.")}</div>
-        )}
-      </DetailCard>
-
-      {result.weeklySummary ? (
-        <DetailCard
-          className="p-5"
-          style={{ backgroundImage: "linear-gradient(135deg, rgba(10,10,10,0.03), rgba(255,255,255,0.98))" }}
-        >
-          <div className="text-[12.5px] font-semibold text-ios-sub">D · {t("이번 주 AI 한마디")}</div>
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div className="rounded-2xl border border-ios-sep bg-white p-4">
-              <div className="text-[12px] font-semibold text-ios-sub">{t("이번 주 평균 배터리")}</div>
-              <div className="mt-1 text-[30px] font-extrabold tracking-[-0.02em] text-ios-text">
-                {result.weeklySummary.avgBattery}
-              </div>
-              <div className="text-[12px] text-ios-sub">
-                {t("지난주 대비")} {weeklyDeltaText}
-              </div>
-            </div>
-            <div className="rounded-2xl border border-ios-sep bg-white p-4 sm:col-span-2">
-              <div className="text-[12px] font-semibold text-ios-sub">{t("개인 패턴")}</div>
-              <div className="mt-1 text-[14px] leading-relaxed text-ios-text">{result.weeklySummary.personalInsight}</div>
-              <div className="mt-3 text-[12px] font-semibold text-ios-sub">{t("다음 주 예측")}</div>
-              <div className="mt-1 text-[14px] leading-relaxed text-ios-text">{result.weeklySummary.nextWeekPreview}</div>
-            </div>
-          </div>
-          {result.weeklySummary.topDrains.length ? (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {result.weeklySummary.topDrains.map((drain) => (
-                <DetailChip key={`${drain.label}-${drain.pct}`} color={DETAIL_ACCENTS.navy}>
-                  {drain.label} {drain.pct}%
-                </DetailChip>
-              ))}
-            </div>
-          ) : null}
-        </DetailCard>
-      ) : null}
-
-      {error ? <div className="text-[12px] text-ios-muted">{error}</div> : null}
+      <textarea
+        readOnly
+        value={text}
+        className="min-h-[520px] w-full resize-none rounded-2xl border border-ios-sep bg-white p-4 text-[15px] leading-relaxed text-ios-text shadow-apple"
+      />
     </InsightDetailShell>
   );
 }
