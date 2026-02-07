@@ -6,7 +6,6 @@ import { formatKoreanDate } from "@/lib/date";
 import type { Shift } from "@/lib/types";
 import { shiftColor, SHIFT_LABELS } from "@/lib/types";
 import type { ActivityLevel, BioInputs, EmotionEntry, MoodScore, StressLevel } from "@/lib/model";
-import { defaultBio } from "@/lib/model";
 import { useAppStore } from "@/lib/store";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Button } from "@/components/ui/Button";
@@ -104,7 +103,7 @@ export function DailyLogSheet({
 
   const curShift: Shift = store.schedule[iso] ?? "OFF";
   const curNote = store.notes[iso] ?? "";
-  const curBio: BioInputs = store.bio[iso] ?? defaultBio();
+  const curBio: BioInputs = store.bio[iso] ?? {};
   const curEmotion: EmotionEntry | undefined = store.emotions[iso];
 
   const [shift, setShift] = useState<Shift>("OFF");
@@ -122,6 +121,13 @@ export function DailyLogSheet({
   const [menstrualStatus, setMenstrualStatus] = useState<string>("none");
   const [menstrualFlow, setMenstrualFlow] = useState<string>("0");
   const [overtime, setOvertime] = useState<string>("");
+  const [sleepQualityTouched, setSleepQualityTouched] = useState(false);
+  const [sleepTimingTouched, setSleepTimingTouched] = useState(false);
+  const [stressTouched, setStressTouched] = useState(false);
+  const [activityTouched, setActivityTouched] = useState(false);
+  const [symptomTouched, setSymptomTouched] = useState(false);
+  const [menstrualStatusTouched, setMenstrualStatusTouched] = useState(false);
+  const [menstrualFlowTouched, setMenstrualFlowTouched] = useState(false);
   const [enableEmotion, setEnableEmotion] = useState(false);
   const [mood, setMood] = useState<MoodScore>(3);
   const [tags, setTags] = useState<string[]>([]);
@@ -147,6 +153,13 @@ export function DailyLogSheet({
     setMenstrualStatus(String((curBio as any).menstrualStatus ?? "none"));
     setMenstrualFlow(String((curBio as any).menstrualFlow ?? 0));
     setOvertime((curBio as any).shiftOvertimeHours == null ? "" : String((curBio as any).shiftOvertimeHours));
+    setSleepQualityTouched(false);
+    setSleepTimingTouched(false);
+    setStressTouched(false);
+    setActivityTouched(false);
+    setSymptomTouched(false);
+    setMenstrualStatusTouched(false);
+    setMenstrualFlowTouched(false);
 
     const hasEmotion = !!curEmotion;
     setEnableEmotion(hasEmotion);
@@ -190,20 +203,33 @@ export function DailyLogSheet({
     const menstrualStatusN = menstrualStatus === "none" ? null : menstrualStatus;
     const menstrualFlowN = menstrualFlow.trim() === "" ? null : Number(menstrualFlow);
     const overtimeN = overtime.trim() === "" ? null : Number(overtime);
+    const keepSleepQuality = sleepQualityTouched || (curBio as any).sleepQuality != null;
+    const keepSleepTiming = sleepTimingTouched || (curBio as any).sleepTiming != null;
+    const keepStress = stressTouched || curBio.stress != null;
+    const keepActivity = activityTouched || curBio.activity != null;
+    const keepSymptom = symptomTouched || (curBio as any).symptomSeverity != null;
+    const keepMenstrualStatus = menstrualStatusTouched || (curBio as any).menstrualStatus != null;
+    const keepMenstrualFlow = menstrualFlowTouched || (curBio as any).menstrualFlow != null;
 
     const bioPatch: Partial<BioInputs> = {
       sleepHours: sleepN == null || Number.isNaN(sleepN) ? null : clamp(sleepN, 0, 16),
       napHours: napN == null || Number.isNaN(napN) ? null : clamp(napN, 0, 4),
-      sleepQuality: sleepQualityN == null || Number.isNaN(sleepQualityN) ? null : (clamp(sleepQualityN, 1, 5) as any),
-      sleepTiming: (sleepTimingN ?? null) as any,
-      stress,
-      activity,
+      sleepQuality: keepSleepQuality && sleepQualityN != null && !Number.isNaN(sleepQualityN)
+        ? (clamp(sleepQualityN, 1, 5) as any)
+        : null,
+      sleepTiming: keepSleepTiming ? ((sleepTimingN ?? null) as any) : null,
+      stress: keepStress ? stress : null,
+      activity: keepActivity ? activity : null,
       caffeineMg: caffeineN == null || Number.isNaN(caffeineN) ? null : clamp(Math.round(caffeineN), 0, 1000),
       caffeineLastAt: caffeineLastAtN,
       fatigueLevel: fatigueN == null || Number.isNaN(fatigueN) ? null : clamp(fatigueN, 0, 10),
-      symptomSeverity: symptomN == null || Number.isNaN(symptomN) ? null : (clamp(Math.round(symptomN), 0, 3) as any),
-      menstrualStatus: (menstrualStatusN ?? null) as any,
-      menstrualFlow: menstrualFlowN == null || Number.isNaN(menstrualFlowN) ? null : (clamp(Math.round(menstrualFlowN), 0, 3) as any),
+      symptomSeverity: keepSymptom && symptomN != null && !Number.isNaN(symptomN)
+        ? (clamp(Math.round(symptomN), 0, 3) as any)
+        : null,
+      menstrualStatus: keepMenstrualStatus ? ((menstrualStatusN ?? null) as any) : null,
+      menstrualFlow: keepMenstrualFlow && menstrualFlowN != null && !Number.isNaN(menstrualFlowN)
+        ? (clamp(Math.round(menstrualFlowN), 0, 3) as any)
+        : null,
       shiftOvertimeHours: overtimeN == null || Number.isNaN(overtimeN) ? null : clamp(overtimeN, 0, 8),
     };
 
@@ -328,12 +354,26 @@ export function DailyLogSheet({
 
           <div className="mt-4">
             <div className="mb-2 text-[12px] font-semibold text-ios-muted">수면 품질</div>
-            <Segmented value={sleepQuality as any} options={sleepQualityOptions as any} onChange={(v) => setSleepQuality(String(v))} />
+            <Segmented
+              value={sleepQuality as any}
+              options={sleepQualityOptions as any}
+              onChange={(v) => {
+                setSleepQualityTouched(true);
+                setSleepQuality(String(v));
+              }}
+            />
           </div>
 
           <div className="mt-4">
             <div className="mb-2 text-[12px] font-semibold text-ios-muted">수면 타이밍</div>
-            <Segmented value={sleepTiming as any} options={sleepTimingOptions as any} onChange={(v) => setSleepTiming(String(v))} />
+            <Segmented
+              value={sleepTiming as any}
+              options={sleepTimingOptions as any}
+              onChange={(v) => {
+                setSleepTimingTouched(true);
+                setSleepTiming(String(v));
+              }}
+            />
           </div>
 
           <div className="mt-4">
@@ -346,7 +386,10 @@ export function DailyLogSheet({
             <Segmented
               value={String(stress) as any}
               options={stressOptions as any}
-              onChange={(v) => setStress(Number(v) as StressLevel)}
+              onChange={(v) => {
+                setStressTouched(true);
+                setStress(Number(v) as StressLevel);
+              }}
             />
           </div>
 
@@ -355,13 +398,23 @@ export function DailyLogSheet({
             <Segmented
               value={String(activity) as any}
               options={activityOptions as any}
-              onChange={(v) => setActivity(Number(v) as ActivityLevel)}
+              onChange={(v) => {
+                setActivityTouched(true);
+                setActivity(Number(v) as ActivityLevel);
+              }}
             />
           </div>
 
           <div className="mt-4">
             <div className="mb-2 text-[12px] font-semibold text-ios-muted">증상 강도</div>
-            <Segmented value={symptom as any} options={symptomOptions as any} onChange={(v) => setSymptom(String(v))} />
+            <Segmented
+              value={symptom as any}
+              options={symptomOptions as any}
+              onChange={(v) => {
+                setSymptomTouched(true);
+                setSymptom(String(v));
+              }}
+            />
           </div>
 
           <div className="mt-4">
@@ -369,13 +422,23 @@ export function DailyLogSheet({
             <Segmented
               value={menstrualStatus as any}
               options={menstrualStatusOptions as any}
-              onChange={(v) => setMenstrualStatus(String(v))}
+              onChange={(v) => {
+                setMenstrualStatusTouched(true);
+                setMenstrualStatus(String(v));
+              }}
             />
           </div>
 
           <div className="mt-4">
             <div className="mb-2 text-[12px] font-semibold text-ios-muted">출혈 강도</div>
-            <Segmented value={menstrualFlow as any} options={menstrualFlowOptions as any} onChange={(v) => setMenstrualFlow(String(v))} />
+            <Segmented
+              value={menstrualFlow as any}
+              options={menstrualFlowOptions as any}
+              onChange={(v) => {
+                setMenstrualFlowTouched(true);
+                setMenstrualFlow(String(v));
+              }}
+            />
           </div>
 
           <div className="mt-4">

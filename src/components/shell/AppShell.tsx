@@ -59,6 +59,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       setCloudReady(false);
       return;
     }
+    if (typeof window !== "undefined") {
+      const cachedReadyUserId = (window as any).__wnlCloudReadyUserId as string | undefined;
+      if (cachedReadyUserId && (!auth?.userId || cachedReadyUserId === auth.userId)) {
+        setCloudReady(true);
+      }
+    }
     const onReady = (event: Event) => {
       const detail = (event as CustomEvent).detail;
       if (!detail?.userId || !auth?.userId || detail.userId === auth?.userId) {
@@ -68,6 +74,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     window.addEventListener("wnl:cloud-ready", onReady);
     return () => window.removeEventListener("wnl:cloud-ready", onReady);
   }, [isAuthed, auth?.userId]);
+
+  useEffect(() => {
+    if (!isAuthed || cloudReady) return;
+    const timer = window.setTimeout(() => {
+      setCloudReady(true);
+    }, 8000);
+    return () => window.clearTimeout(timer);
+  }, [isAuthed, cloudReady]);
 
   useEffect(() => {
     if (status === "loading") return;

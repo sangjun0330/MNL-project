@@ -110,7 +110,10 @@ export function InsightsVitalDetail() {
     return Math.round(Math.max(0, Math.min(1, raw)) * 100);
   }, [todayVital]);
   const slf = useMemo(() => Math.round(((todayVital?.engine?.SLF ?? 0) as number) * 100), [todayVital]);
-  const mif = useMemo(() => Math.round(((todayVital?.engine?.MIF ?? 1) as number) * 100), [todayVital]);
+  const cycleImpact = useMemo(() => {
+    const raw = 1 - ((todayVital?.engine?.MIF ?? 1) as number);
+    return Math.round(Math.max(0, Math.min(1, raw)) * 100);
+  }, [todayVital]);
   const night = useMemo(() => todayVital?.engine?.nightStreak ?? 0, [todayVital]);
   const status = useMemo(() => statusFromScore(todayDisplay ?? 0), [todayDisplay]);
   const hasSleepRecord = useMemo(
@@ -127,7 +130,15 @@ export function InsightsVitalDetail() {
   );
   const hasStressRecord = useMemo(() => Boolean(todayVital && todayVital.inputs.stress != null), [todayVital]);
   const hasMenstrualRecord = useMemo(
-    () => Boolean(todayVital && (todayVital.menstrual?.enabled || (todayVital.inputs.symptomSeverity ?? 0) > 0)),
+    () =>
+      Boolean(
+        todayVital &&
+        (
+          (todayVital.inputs.symptomSeverity ?? 0) > 0 ||
+          ((todayVital.inputs.menstrualStatus ?? null) != null && todayVital.inputs.menstrualStatus !== "none") ||
+          (todayVital.inputs.menstrualFlow ?? 0) > 0
+        )
+      ),
     [todayVital]
   );
 
@@ -260,10 +271,10 @@ export function InsightsVitalDetail() {
           />
           <MetricRow
             label={t("주기 영향")}
-            value={mif}
+            value={cycleImpact}
             unit="%"
-            barPct={hasMenstrualRecord ? mif : 0}
-            barColor={hasMenstrualRecord ? metricColor(mif, 30, 70, true) : "#D8D9DE"}
+            barPct={hasMenstrualRecord ? cycleImpact : 0}
+            barColor={hasMenstrualRecord ? metricColor(cycleImpact, 30, 70, true) : "#D8D9DE"}
             empty={!hasMenstrualRecord}
           />
         </div>

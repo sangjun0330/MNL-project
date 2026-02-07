@@ -331,9 +331,8 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
       Number(d.debt_n ?? 0) > 0;
     const hasStressSignal = bio.stress != null;
     const hasActivitySignal = bio.activity != null;
-    const hasCaffeineSignal = bio.caffeineMg != null || caffeineLastAt != null;
+    const hasCaffeineSignal = (bio.caffeineMg != null && Number(bio.caffeineMg) > 0) || caffeineLastAt != null;
     const hasMenstrualSignal =
-      Boolean(menstrual.enabled) ||
       Number((bio as any).symptomSeverity ?? 0) > 0 ||
       menstrualStatus != null ||
       Number(menstrualFlow ?? 0) > 0;

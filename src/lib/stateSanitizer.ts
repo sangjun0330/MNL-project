@@ -81,6 +81,24 @@ function sanitizeBio(entry: unknown): BioInputs | undefined {
     out.symptomSeverity = clamp(Math.round(symptomSeverity), 0, 3) as BioInputs["symptomSeverity"];
   }
 
+  if (out.caffeineMg === 0 && !out.caffeineLastAt) {
+    delete (out as any).caffeineMg;
+  }
+  if (out.symptomSeverity === 0) {
+    delete (out as any).symptomSeverity;
+  }
+
+  const hasPrimarySignal =
+    out.sleepHours != null ||
+    out.napHours != null ||
+    out.caffeineMg != null ||
+    out.caffeineLastAt != null ||
+    out.symptomSeverity != null;
+  if (!hasPrimarySignal) {
+    if (out.stress === 1) delete (out as any).stress;
+    if (out.activity === 1) delete (out as any).activity;
+  }
+
   return Object.keys(out).length ? out : undefined;
 }
 

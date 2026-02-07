@@ -36,6 +36,10 @@ function readShift(schedule: AppState["schedule"], iso: ISODate): Shift | null {
   return shift ?? null;
 }
 
+function hasSleepHours(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v);
+}
+
 function bad(status: number, error: string) {
   const body: AIRecoveryApiError = { ok: false, error };
   return NextResponse.json(body, { status });
@@ -88,10 +92,11 @@ export async function GET(req: NextRequest) {
     const state = normalizePayloadToState(row.payload, langHint);
     const lang = (state.settings.language ?? "ko") as Language;
 
-    // ── 3. 14일치 vitals 계산 ──
-    const end = todayISO();
-    const start = toISODate(addDays(fromISODate(end), -13));
-    const vitals14 = computeVitalsRange({ state, start, end });
+    // ── 3. 추천 기준일: 오늘 추천, 분석 데이터는 "어제까지" ──
+    const today = todayISO();
+    const analysisEnd = toISODate(addDays(fromISODate(today), -1));
+    const start = toISODate(addDays(fromISODate(analysisEnd), -13));
+    const vitals14 = computeVitalsRange({ state, start, end: analysisEnd });
     const inputDateSet = new Set<ISODate>();
     for (let i = 0; i < 14; i++) {
       const iso = toISODate(addDays(fromISODate(start), i));
@@ -100,20 +105,62 @@ export async function GET(req: NextRequest) {
       if (hasHealthInput(bio, emotion)) inputDateSet.add(iso);
     }
 
-    const start7 = toISODate(addDays(fromISODate(end), -6));
+    const start7 = toISODate(addDays(fromISODate(analysisEnd), -6));
     const vitals7 = vitals14.filter((v) => v.dateISO >= start7 && inputDateSet.has(v.dateISO));
     const prevWeek = vitals14.filter((v) => v.dateISO < start7 && inputDateSet.has(v.dateISO));
-    const todayVital = inputDateSet.has(end) ? vitals14.find((v) => v.dateISO === end) ?? null : null;
-    const tomorrowISO = toISODate(addDays(fromISODate(end), 1));
+    const anchorVital = vitals14.find((v) => v.dateISO === analysisEnd) ?? vitals14[vitals14.length - 1] ?? null;
+    const todayShift = (readShift(state.schedule, today) ?? anchorVital?.shift ?? "OFF") as Shift;
+    const tomorrowISO = toISODate(addDays(fromISODate(today), 1));
     const nextShift = readShift(state.schedule, tomorrowISO);
-    const todayShift = (todayVital?.shift ?? readShift(state.schedule, end) ?? "OFF") as Shift;
+    const todaySleepRaw = state.bio?.[today]?.sleepHours;
+    const hasTodaySleep = hasSleepHours(todaySleepRaw);
 
-    // ── 4. 기록 없으면 안내 메시지 ──
+    const todayVital = anchorVital
+      ? {
+          ...anchorVital,
+          dateISO: today,
+          shift: todayShift,
+          inputs: {
+            ...anchorVital.inputs,
+            sleepHours: hasTodaySleep ? todaySleepRaw : (anchorVital.inputs.sleepHours ?? null),
+          },
+        }
+      : null;
+
+    // ── 4. 예외: 오늘 수면 미입력 시 분석 중단 ──
+    if (!hasTodaySleep) {
+      const body: AIRecoveryApiSuccess = {
+        ok: true,
+        data: {
+          dateISO: today,
+          language: lang,
+          todayShift,
+          nextShift,
+          todayVitalScore: null,
+          source: "supabase",
+          engine: "rule",
+          model: null,
+          debug: "today_sleep_required",
+          result: {
+            headline:
+              lang === "en"
+                ? "Please log today's sleep first. Recovery analysis will start right after."
+                : "오늘 수면 기록을 먼저 입력해 주세요. 입력 후 바로 맞춤 회복 분석이 시작됩니다.",
+            compoundAlert: null,
+            sections: [],
+            weeklySummary: null,
+          },
+        },
+      };
+      return NextResponse.json(body);
+    }
+
+    // ── 5. 기록 없으면 안내 메시지 ──
     if (!vitals7.length) {
       const body: AIRecoveryApiSuccess = {
         ok: true,
         data: {
-          dateISO: end,
+          dateISO: today,
           language: lang,
           todayShift,
           nextShift,
@@ -136,11 +183,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(body);
     }
 
-    // ── 5. Rule-based fallback 생성 + OpenAI 시도 ──
+    // ── 6. Rule-based fallback 생성 + OpenAI 시도 ──
     const fallbackResult = generateAIRecovery(todayVital, vitals7, prevWeek, nextShift, lang);
     const aiOutput = await generateAIRecoveryWithOpenAI({
       language: lang,
-      todayISO: end,
+      todayISO: today,
       todayShift,
       nextShift,
       todayVital,
@@ -155,7 +202,7 @@ export async function GET(req: NextRequest) {
     const body: AIRecoveryApiSuccess = {
       ok: true,
       data: {
-        dateISO: end,
+        dateISO: today,
         language: lang,
         todayShift,
         nextShift,

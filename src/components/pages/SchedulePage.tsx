@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { ISODate } from "@/lib/date";
 import { endOfMonth, startOfMonth, toISODate, fromISODate, todayISO } from "@/lib/date";
 import { useAppStore } from "@/lib/store";
@@ -19,10 +20,13 @@ import { useI18n } from "@/lib/useI18n";
 export function SchedulePage() {
   const store = useAppStore();
   const { t } = useI18n();
+  const router = useRouter();
   const [selected, setSelected] = useState<ISODate>(() => todayISO());
 
   const [month, setMonth] = useState<Date>(() => startOfMonth(fromISODate(selected)));
   const [openLog, setOpenLog] = useState(false);
+  const [sleepFirstMode, setSleepFirstMode] = useState(false);
+  const autoOpenGuard = useRef<string | null>(null);
 
   // ✅ 3교대 패턴 팝업
   const [openPattern, setOpenPattern] = useState(false);
@@ -32,6 +36,24 @@ export function SchedulePage() {
     const next = startOfMonth(fromISODate(selected));
     setMonth((prev) => (prev.getMonth() === next.getMonth() && prev.getFullYear() === next.getFullYear() ? prev : next));
   }, [selected]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const openHealthLog = params.get("openHealthLog");
+    if (openHealthLog !== "today") return;
+
+    const focus = params.get("focus");
+    const guardKey = `${openHealthLog}:${focus ?? ""}`;
+    if (autoOpenGuard.current === guardKey) return;
+    autoOpenGuard.current = guardKey;
+
+    const iso = todayISO();
+    setSelected(iso);
+    setSleepFirstMode(focus === "sleep");
+    setOpenLog(true);
+    router.replace("/schedule", { scroll: false });
+  }, [router]);
 
   const range = useMemo(() => {
     const start = toISODate(startOfMonth(month));
@@ -96,6 +118,7 @@ export function SchedulePage() {
         selected={selected}
         onSelect={(iso) => {
           setSelected(iso);
+          setSleepFirstMode(false);
           setOpenLog(true);
 
           const d = fromISODate(iso);
@@ -134,7 +157,15 @@ export function SchedulePage() {
       </Card>
 
       {/* 기록 시트 */}
-      <ScheduleRecordSheet open={openLog} onClose={() => setOpenLog(false)} iso={selected} />
+      <ScheduleRecordSheet
+        open={openLog}
+        onClose={() => {
+          setOpenLog(false);
+          setSleepFirstMode(false);
+        }}
+        iso={selected}
+        sleepFirstMode={sleepFirstMode}
+      />
 
       {/* ✅ 3교대 패턴 팝업(시트) */}
       <BottomSheet
