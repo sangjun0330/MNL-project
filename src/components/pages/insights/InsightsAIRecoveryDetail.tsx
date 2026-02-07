@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, type ReactNode } from "react";
+import { useMemo } from "react";
 import Image from "next/image";
 import { DetailCard, DetailChip, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
@@ -92,54 +92,49 @@ function normalizeNarrativeText(text: string, lang: "ko" | "en") {
   return out;
 }
 
-function pickHighlightPhrases(text: string) {
-  const sentenceList = text
+type HighlightTone = "summary" | "alert" | "plan";
+
+function highlightClass(tone: HighlightTone) {
+  if (tone === "alert") return "rounded-[6px] bg-[#FFE7EA] px-[4px] py-[1px] font-semibold text-ios-text";
+  if (tone === "plan") return "rounded-[6px] bg-[#E4ECFF] px-[4px] py-[1px] font-semibold text-ios-text";
+  return "rounded-[6px] bg-[#FFF6CC] px-[4px] py-[1px] font-semibold text-ios-text";
+}
+
+function pickKeySentence(text: string) {
+  const sentences = text
     .split(/(?<=[.!?]|다\.|요\.)\s+|\n+/)
     .map((sentence) => sentence.trim())
     .filter(Boolean);
-  const strongKeyword = /(핵심|최우선|주의|경고|위험|중요|필수|회복|수면|카페인|스트레스|기분|priority|warning|critical|recovery|sleep|caffeine|stress|mood)/i;
-  const numericSignal = /\d+(?:\.\d+)?\s*(?:h|시간|%|mg|잔|점)/i;
-  const picked: string[] = [];
-
-  for (const sentence of sentenceList) {
-    if (sentence.length < 10) continue;
-    if ((strongKeyword.test(sentence) && numericSignal.test(sentence)) || /최우선|반드시|critical|must|warning/i.test(sentence)) {
-      picked.push(sentence);
-    }
-    if (picked.length >= 2) break;
-  }
-
-  if (!picked.length) {
-    const fallback = sentenceList.find((sentence) => strongKeyword.test(sentence));
-    if (fallback) picked.push(fallback);
-  }
-  return picked;
+  const priorityRegex = /(핵심|최우선|주의|경고|위험|중요|필수|회복|수면부채|카페인|스트레스|기분|priority|warning|critical|must|important)/i;
+  return (
+    sentences.find((sentence) => sentence.length >= 10 && priorityRegex.test(sentence)) ??
+    sentences.find((sentence) => sentence.length >= 10) ??
+    ""
+  );
 }
 
-function highlightInline(text: string) {
-  const phrases = pickHighlightPhrases(text);
-  if (!phrases.length) return text;
+function highlightKeySentence(text: string, tone: HighlightTone) {
+  const target = pickKeySentence(text);
+  if (!target) return text;
+  const index = text.indexOf(target);
+  if (index < 0) return text;
+  const before = text.slice(0, index);
+  const after = text.slice(index + target.length);
+  return (
+    <>
+      {before}
+      <mark className={highlightClass(tone)}>{target}</mark>
+      {after}
+    </>
+  );
+}
 
-  const nodes: ReactNode[] = [];
-  let cursor = 0;
-
-  for (const phrase of phrases) {
-    const index = text.indexOf(phrase, cursor);
-    if (index < 0) continue;
-    if (index > cursor) nodes.push(text.slice(cursor, index));
-    nodes.push(
-      <mark
-        key={`${index}-${phrase.slice(0, 20)}`}
-        className="rounded-[6px] bg-yellow-100/90 px-[4px] py-[1px] font-semibold text-ios-text"
-      >
-        {phrase}
-      </mark>
-    );
-    cursor = index + phrase.length;
-  }
-
-  if (cursor < text.length) nodes.push(text.slice(cursor));
-  return nodes.length ? nodes : text;
+function normalizeLineBreaks(text: string) {
+  return text
+    .replace(/\s+-\s+/g, "\n- ")
+    .replace(/\.\s+-\s+/g, ".\n- ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 function splitBulletLines(text: string) {
@@ -211,6 +206,14 @@ export function InsightsAIRecoveryDetail() {
     if (!data?.generatedText || orderedSections.length > 0) return "";
     return normalizeNarrativeText(extractCSection(data.generatedText), lang);
   }, [data?.generatedText, lang, orderedSections.length]);
+  const alertLines = useMemo(() => {
+    const raw = data?.result.compoundAlert?.message ?? "";
+    if (!raw) return [];
+    return normalizeLineBreaks(normalizeNarrativeText(raw, lang))
+      .split(/\n+/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+  }, [data?.result.compoundAlert?.message, lang]);
 
   return (
     <InsightDetailShell
@@ -250,7 +253,7 @@ export function InsightsAIRecoveryDetail() {
           <DetailCard className="p-5">
             <div className="text-[13px] font-semibold text-ios-sub">{t("한줄 요약")}</div>
             <p className="mt-2 text-[17px] font-semibold leading-relaxed tracking-[-0.01em] text-ios-text">
-              {highlightInline(normalizeNarrativeText(data.result.headline || t("요약이 비어 있어요."), lang))}
+              {highlightKeySentence(normalizeNarrativeText(data.result.headline || t("요약이 비어 있어요."), lang), "summary")}
             </p>
           </DetailCard>
 
@@ -258,9 +261,15 @@ export function InsightsAIRecoveryDetail() {
             <div className="text-[13px] font-semibold text-ios-sub">{t("긴급 알림")}</div>
             {data.result.compoundAlert ? (
               <>
-                <p className="mt-2 text-[14px] leading-relaxed text-ios-text">
-                  {highlightInline(normalizeNarrativeText(data.result.compoundAlert.message, lang))}
-                </p>
+                <div className="mt-2 space-y-1">
+                  {(alertLines.length
+                    ? alertLines
+                    : [normalizeNarrativeText(data.result.compoundAlert.message, lang)]).map((line, idx) => (
+                    <p key={`alert-line-${idx}`} className="text-[14px] leading-relaxed text-ios-text">
+                      {idx === 0 ? highlightKeySentence(line, "alert") : line}
+                    </p>
+                  ))}
+                </div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {data.result.compoundAlert.factors.map((factor) => (
                     <DetailChip key={factor} color="#E87485">
@@ -295,14 +304,19 @@ export function InsightsAIRecoveryDetail() {
                       </DetailChip>
                     </div>
                     <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
-                      {highlightInline(normalizeNarrativeText(section?.description || t("오늘 컨디션 기준 핵심 조언입니다."), lang))}
+                      {index === 0
+                        ? highlightKeySentence(
+                            normalizeNarrativeText(section?.description || t("오늘 컨디션 기준 핵심 조언입니다."), lang),
+                            "plan"
+                          )
+                        : normalizeNarrativeText(section?.description || t("오늘 컨디션 기준 핵심 조언입니다."), lang)}
                     </p>
                     {section?.tips?.length ? (
                       <ol className="mt-3 space-y-2 text-[14px] leading-relaxed text-ios-text">
                         {section.tips.map((tip, idx) => (
                           <li key={`${meta.key}-${idx}`} className="flex gap-2">
                             <span className="font-semibold text-ios-sub">{idx + 1}.</span>
-                            <span>{highlightInline(normalizeNarrativeText(tip, lang))}</span>
+                            <span>{normalizeNarrativeText(tip, lang)}</span>
                           </li>
                         ))}
                       </ol>
@@ -334,7 +348,7 @@ export function InsightsAIRecoveryDetail() {
                   <div className="mt-1 space-y-1">
                     {weeklyPersonalLines.map((line, idx) => (
                       <p key={`personal-${idx}`} className="text-[14px] leading-relaxed text-ios-text">
-                        {highlightInline(line)}
+                        {line}
                       </p>
                     ))}
                   </div>
@@ -344,7 +358,7 @@ export function InsightsAIRecoveryDetail() {
                   <div className="mt-1 space-y-1">
                     {weeklyPreviewLines.map((line, idx) => (
                       <p key={`preview-${idx}`} className="text-[14px] leading-relaxed text-ios-text">
-                        {highlightInline(line)}
+                        {line}
                       </p>
                     ))}
                   </div>
