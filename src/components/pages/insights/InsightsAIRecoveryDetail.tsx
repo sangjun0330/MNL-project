@@ -16,48 +16,8 @@ export function InsightsAIRecoveryDetail() {
       if (error) return `${t("AI 호출에 실패했어요. 잠시 후 다시 시도해 주세요.")}\n\n${error}`;
       return t("AI 호출 대기 중...");
     }
-
-    const lines: string[] = [];
-    const result = data.result;
-
-    lines.push(`A. ${t("한줄 요약")}`);
-    lines.push(result.headline || "-");
-
-    if (result.compoundAlert) {
-      lines.push("");
-      lines.push(`B. ${t("긴급 알림")}`);
-      lines.push(result.compoundAlert.message || "-");
-      if (result.compoundAlert.factors?.length) {
-        lines.push(`[${result.compoundAlert.factors.join("] [")}]`);
-      }
-    }
-
-    lines.push("");
-    lines.push(`C. ${t("오늘의 회복 처방")}`);
-    if (result.sections.length) {
-      for (const section of result.sections) {
-        lines.push("");
-        lines.push(`${section.title}`);
-        lines.push(section.description);
-        for (const tip of section.tips) lines.push(`- ${tip}`);
-      }
-    } else {
-      lines.push(t("처방 섹션이 아직 없어요. 기록이 쌓이면 자동으로 생성돼요."));
-    }
-
-    if (result.weeklySummary) {
-      lines.push("");
-      lines.push(`D. ${t("이번 주 AI 한마디")}`);
-      lines.push(
-        `${t("이번 주 평균 배터리")}: ${result.weeklySummary.avgBattery} (${t("지난주 대비")} ${
-          result.weeklySummary.avgBattery - result.weeklySummary.prevAvgBattery
-        })`
-      );
-      lines.push(result.weeklySummary.personalInsight);
-      lines.push(result.weeklySummary.nextWeekPreview);
-    }
-
-    return lines.join("\n");
+    if (data.generatedText && data.generatedText.trim()) return data.generatedText.trim();
+    return data.result.headline || t("AI 텍스트가 비어 있어요.");
   }, [data, error, loading, t]);
 
   return (
