@@ -1,249 +1,145 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AIRecoveryPayload, AIRecoveryApiSuccess } from "@/lib/aiRecoveryContract";
-import { addDays, fromISODate, toISODate, type ISODate } from "@/lib/date";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { AIRecoveryPayload } from "@/lib/aiRecoveryContract";
 import { useInsightsData } from "@/components/insights/useInsightsData";
+import { todayISO } from "@/lib/date";
 import { useI18n } from "@/lib/useI18n";
-import type { Shift } from "@/lib/types";
-import { computeVitalsRange, type DailyVital } from "@/lib/vitals";
-import { hasHealthInput } from "@/lib/healthRecords";
 
-type AnalysisContext = {
-  analysisEnd: ISODate;
-  vitals7: DailyVital[];
-  prevWeek: DailyVital[];
-  anchorVital: DailyVital | null;
+type HookResult = {
+  data: AIRecoveryPayload | null;
+  loading: boolean;
+  fromSupabase: boolean;
+  error: string | null;
+  requiresTodaySleep: boolean;
 };
 
-function hasReliableEstimatedSignal(v: DailyVital | null) {
-  if (!v) return false;
-  const reliability = v.engine?.inputReliability ?? 0;
-  const gap = v.engine?.daysSinceAnyInput ?? 99;
-  return reliability >= 0.45 && gap <= 2;
+const AI_DAILY_CACHE_PREFIX = "wnl_ai_recovery_daily_v1";
+
+type LocalDailyCache = {
+  dateISO: string;
+  language: "ko" | "en";
+  payload: AIRecoveryPayload;
+  savedAt: number;
+};
+
+function cacheKey(lang: "ko" | "en", dateISO: string) {
+  return `${AI_DAILY_CACHE_PREFIX}:${lang}:${dateISO}`;
 }
 
-function hasSleepHours(v: unknown): v is number {
-  return typeof v === "number" && Number.isFinite(v);
-}
-
-function buildAnalysisContext(params: {
-  todayISO: ISODate;
-  state: ReturnType<typeof useInsightsData>["state"];
-}): AnalysisContext {
-  const { todayISO, state } = params;
-  const analysisEnd = toISODate(addDays(fromISODate(todayISO), -1));
-  const start14 = toISODate(addDays(fromISODate(analysisEnd), -13));
-  const vitals14 = computeVitalsRange({ state, start: start14, end: analysisEnd });
-
-  const inputDateSet = new Set<ISODate>();
-  for (let i = 0; i < 14; i += 1) {
-    const iso = toISODate(addDays(fromISODate(start14), i));
-    const bio = state.bio?.[iso] ?? null;
-    const emotion = state.emotions?.[iso] ?? null;
-    if (hasHealthInput(bio, emotion)) inputDateSet.add(iso);
+function readDailyCache(lang: "ko" | "en", dateISO: string): AIRecoveryPayload | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(cacheKey(lang, dateISO));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as LocalDailyCache;
+    if (!parsed || typeof parsed !== "object") return null;
+    if (parsed.dateISO !== dateISO || parsed.language !== lang) return null;
+    if (!parsed.payload || parsed.payload.dateISO !== dateISO || parsed.payload.language !== lang) return null;
+    return parsed.payload;
+  } catch {
+    return null;
   }
-
-  const start7 = toISODate(addDays(fromISODate(analysisEnd), -6));
-  const vitals7 = vitals14.filter(
-    (v) => v.dateISO >= start7 && (inputDateSet.has(v.dateISO) || hasReliableEstimatedSignal(v))
-  );
-  const prevWeek = vitals14.filter(
-    (v) => v.dateISO < start7 && (inputDateSet.has(v.dateISO) || hasReliableEstimatedSignal(v))
-  );
-  const anchorVital = vitals14.find((v) => v.dateISO === analysisEnd) ?? vitals14[vitals14.length - 1] ?? null;
-
-  return { analysisEnd, vitals7, prevWeek, anchorVital };
 }
 
-function buildPseudoTodayVital(params: {
-  todayISO: ISODate;
-  todayShift: Shift;
-  todaySleepHours: number | null;
-  anchorVital: DailyVital | null;
-}): DailyVital | null {
-  const { todayISO, todayShift, todaySleepHours, anchorVital } = params;
-  if (!anchorVital) return null;
-
-  const sleepHours = hasSleepHours(todaySleepHours)
-    ? todaySleepHours
-    : (anchorVital.inputs.sleepHours ?? null);
-
-  return {
-    ...anchorVital,
-    dateISO: todayISO,
-    shift: todayShift,
-    inputs: {
-      ...anchorVital.inputs,
-      sleepHours,
-    },
-  };
+function writeDailyCache(lang: "ko" | "en", dateISO: string, payload: AIRecoveryPayload) {
+  if (typeof window === "undefined") return;
+  try {
+    const entry: LocalDailyCache = {
+      dateISO,
+      language: lang,
+      payload,
+      savedAt: Date.now(),
+    };
+    window.localStorage.setItem(cacheKey(lang, dateISO), JSON.stringify(entry));
+  } catch {
+    // ignore localStorage quota/parse issues
+  }
 }
 
-function buildFallbackData(params: {
-  todayISO: ReturnType<typeof useInsightsData>["end"];
-  analysis: AnalysisContext;
-  todayShift: Shift;
-  stateSchedule: ReturnType<typeof useInsightsData>["state"]["schedule"];
-  todaySleepHours: number | null;
-  lang: "ko" | "en";
-}): AIRecoveryPayload {
-  const { todayISO, analysis, todayShift, stateSchedule, todaySleepHours, lang } = params;
-  const nextISO = toISODate(addDays(fromISODate(todayISO), 1));
-  const nextShift = (stateSchedule?.[nextISO] as Shift | undefined) ?? null;
-  const pseudoTodayVital = buildPseudoTodayVital({
-    todayISO,
-    todayShift,
-    todaySleepHours,
-    anchorVital: analysis.anchorVital,
-  });
-  const fallbackResult = {
-    headline:
-      lang === "en"
-        ? "AI recovery is loading. Please try again shortly."
-        : "AI 맞춤회복을 불러오는 중입니다. 잠시 후 다시 확인해 주세요.",
-    compoundAlert: null,
-    sections: [],
-    weeklySummary: null,
-  };
-  const todayVitalScore = pseudoTodayVital
-    ? Math.round(Math.min(pseudoTodayVital.body.value, pseudoTodayVital.mental.ema))
-    : null;
-
-  return {
-    dateISO: todayISO,
-    language: lang,
-    todayShift,
-    nextShift,
-    todayVitalScore,
-    source: "local",
-    engine: "rule",
-    model: null,
-    debug: null,
-    result: fallbackResult,
-  };
-}
-
-function buildSleepRequiredPayload(base: AIRecoveryPayload, lang: "ko" | "en"): AIRecoveryPayload {
-  return {
-    ...base,
-    engine: "rule",
-    debug: "today_sleep_required",
-    result: {
-      headline:
-        lang === "en"
-          ? "Please log today's sleep first. Recovery analysis will start right after."
-          : "오늘 수면 기록을 먼저 입력해 주세요. 입력 후 바로 맞춤 회복 분석이 시작됩니다.",
-      compoundAlert: null,
-      sections: [],
-      weeklySummary: null,
-    },
-  };
-}
-
-export function useAIRecoveryInsights() {
+export function useAIRecoveryInsights(): HookResult {
   const { lang } = useI18n();
-  const { end, todayShift, state } = useInsightsData();
-  const isStoreHydrated = state.selected !== ("1970-01-01" as ISODate);
-  const todaySleepRaw = state.bio?.[end]?.sleepHours;
-  const todaySleepHours = hasSleepHours(todaySleepRaw) ? todaySleepRaw : null;
-  const requiresTodaySleep = isStoreHydrated && !hasSleepHours(todaySleepRaw);
-  const analysis = useMemo(() => buildAnalysisContext({ todayISO: end, state }), [end, state]);
-  const fallback = useMemo(
-    () =>
-      buildFallbackData({
-        todayISO: end,
-        analysis,
-        todayShift,
-        stateSchedule: state.schedule,
-        todaySleepHours,
-        lang,
-      }),
-    [end, analysis, todayShift, state.schedule, todaySleepHours, lang]
-  );
-  const sleepRequiredPayload = useMemo(
-    () => buildSleepRequiredPayload(fallback, lang),
-    [fallback, lang]
-  );
-
+  const { state } = useInsightsData();
   const [remoteData, setRemoteData] = useState<AIRecoveryPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const retryCount = useRef(0);
+
+  const isStoreHydrated = state.selected !== ("1970-01-01" as any);
 
   const fetchRecovery = useCallback(
-    async (signal: AbortSignal) => {
+    async (signal: AbortSignal, dateISO: string) => {
+      const res = await fetch(`/api/insights/recovery?lang=${lang}`, {
+        method: "GET",
+        cache: "no-store",
+        signal,
+      });
+
+      if (signal.aborted) return;
+
+      let json: any;
       try {
-        const res = await fetch(`/api/insights/recovery?lang=${lang}`, {
-          method: "GET",
-          cache: "no-store",
-          signal,
-        });
-
-        if (signal.aborted) return;
-
-        // ✅ JSON 파싱 실패 방지
-        let json: any;
-        try {
-          json = await res.json();
-        } catch {
-          throw new Error("invalid_json_response");
-        }
-
-        if (signal.aborted) return;
-
-        if (res.ok && json?.ok && json.data) {
-          setRemoteData(json.data as AIRecoveryPayload);
-          setError(null);
-          retryCount.current = 0;
-          return;
-        }
-
-        // ✅ 401/404는 재시도하지 않음 (로그인 필요 / 데이터 없음)
-        const errMsg = json?.error ?? `http_${res.status}`;
-        setRemoteData(null);
-        setError(errMsg);
-      } catch (err: any) {
-        if (signal.aborted || err?.name === "AbortError") return;
-        setRemoteData(null);
-        setError(err?.message || "network_error");
+        json = await res.json();
+      } catch {
+        throw new Error("invalid_json_response");
       }
+
+      if (signal.aborted) return;
+
+      if (res.ok && json?.ok && json.data) {
+        const payload = json.data as AIRecoveryPayload;
+        setRemoteData(payload);
+        writeDailyCache(lang, dateISO, payload);
+        setError(null);
+        return;
+      }
+
+      throw new Error(json?.error ?? `http_${res.status}`);
     },
     [lang]
   );
 
   useEffect(() => {
-    if (requiresTodaySleep) {
-      setRemoteData(null);
-      setError(null);
-      setLoading(false);
-      retryCount.current = 0;
-      return;
-    }
-
+    if (!isStoreHydrated) return;
+    const dateISO = todayISO();
+    const cached = readDailyCache(lang, dateISO);
     const controller = new AbortController();
     setLoading(true);
     setError(null);
 
+    if (cached) {
+      setRemoteData(cached);
+      setLoading(false);
+      return () => controller.abort();
+    }
+
+    setRemoteData(null);
+
     const run = async () => {
-      await fetchRecovery(controller.signal);
-      if (!controller.signal.aborted) {
-        setLoading(false);
+      try {
+        await fetchRecovery(controller.signal, dateISO);
+      } catch (err: any) {
+        if (!controller.signal.aborted && err?.name !== "AbortError") {
+          setError(err?.message ?? "network_error");
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
       }
     };
 
     void run();
+    return () => controller.abort();
+  }, [fetchRecovery, isStoreHydrated, lang]);
 
-    return () => {
-      controller.abort();
-    };
-  }, [fetchRecovery, requiresTodaySleep]);
-
-  return {
-    data: requiresTodaySleep ? sleepRequiredPayload : remoteData ?? fallback,
-    loading: requiresTodaySleep ? false : loading && !remoteData,
-    fromSupabase: requiresTodaySleep ? false : Boolean(remoteData),
-    error: requiresTodaySleep ? null : error,
-    requiresTodaySleep,
-  };
+  return useMemo(
+    () => ({
+      data: remoteData,
+      loading,
+      fromSupabase: Boolean(remoteData),
+      error,
+      requiresTodaySleep: false,
+    }),
+    [remoteData, loading, error]
+  );
 }

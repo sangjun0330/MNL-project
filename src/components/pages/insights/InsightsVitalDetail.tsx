@@ -124,7 +124,7 @@ export function InsightsVitalDetail() {
     [todayVital, hasSleepRecord, debt]
   );
   const hasCaffeineRecord = useMemo(
-    () => Boolean(todayVital && (todayVital.inputs.caffeineMg != null || todayVital.inputs.caffeineLastAt)),
+    () => Boolean(todayVital && todayVital.inputs.caffeineMg != null),
     [todayVital]
   );
   const hasStressRecord = useMemo(() => Boolean(todayVital && todayVital.inputs.stress != null), [todayVital]);

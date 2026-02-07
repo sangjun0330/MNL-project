@@ -21,24 +21,27 @@ export type BioInputs = {
   sleepHours?: number | null; // 0..16
   // v2.0: 낮잠(쪽잠) 시간
   napHours?: number | null; // 0..4
-  // v3.0: 수면 품질(1..5, 5가 최고)
+  // deprecated: 저장/알고리즘 미사용 (UI 호환용 타입만 유지)
   sleepQuality?: 1 | 2 | 3 | 4 | 5 | null;
-  // v3.0: 수면 타이밍 (auto = 미입력/자동 추정)
+  // deprecated: 저장/알고리즘 미사용 (UI 호환용 타입만 유지)
   sleepTiming?: "auto" | "night" | "day" | "mixed" | null;
   stress?: StressLevel | null; // 0..3
   activity?: ActivityLevel | null; // 0..3
   caffeineMg?: number | null; // 0..1000
-  // v3.0: 마지막 카페인 섭취 시각 (HH:mm)
+  // deprecated: 저장/알고리즘 미사용 (UI 호환용 타입만 유지)
   caffeineLastAt?: string | null;
-  // v3.0: 주관적 피로도 (0..10)
+  // deprecated: 저장/알고리즘 미사용 (UI 호환용 타입만 유지)
   fatigueLevel?: number | null;
+  // mood는 emotions 분리 저장 대신 bio에 저장
+  mood?: MoodScore | null; // 1..5
   // v2.0: (여성) 통증/증상 강도
   // 0=없음, 1~3=강도
   symptomSeverity?: 0 | 1 | 2 | 3 | null;
-  // v3.0: 생리 상태/출혈 강도
+  // deprecated: 저장/알고리즘 미사용 (UI 호환용 타입만 유지)
   menstrualStatus?: "none" | "pms" | "period" | null;
+  // deprecated: 저장/알고리즘 미사용 (UI 호환용 타입만 유지)
   menstrualFlow?: 0 | 1 | 2 | 3 | null;
-  // v3.0: 근무 연장 시간(시간 단위)
+  // deprecated: 저장/알고리즘 미사용 (UI 호환용 타입만 유지)
   shiftOvertimeHours?: number | null;
 };
 
@@ -81,13 +84,6 @@ export type AppSettings = {
   language?: "ko" | "en";
 };
 
-export type AIRecoveryDailyCacheEntry = {
-  dateISO: ISODate;
-  language: "ko" | "en";
-  payload: unknown;
-  generatedAt: number;
-};
-
 export type AppState = {
   selected?: ISODate;
   schedule: Record<ISODate, Shift | undefined>;
@@ -96,7 +92,6 @@ export type AppState = {
   emotions: Record<ISODate, EmotionEntry | undefined>;
   bio: Record<ISODate, BioInputs | undefined>;
   settings: AppSettings;
-  aiRecoveryDaily?: Partial<Record<"ko" | "en", AIRecoveryDailyCacheEntry>> | null;
 };
 
 export type AppStore = AppState & {
@@ -158,17 +153,11 @@ export function defaultBio(): BioInputs {
   return {
     sleepHours: 7,
     napHours: 0,
-    sleepQuality: null,
-    sleepTiming: "auto",
     stress: 1,
     activity: 1,
     caffeineMg: 0,
-    caffeineLastAt: null,
-    fatigueLevel: null,
+    mood: 3,
     symptomSeverity: 0,
-    menstrualStatus: "none",
-    menstrualFlow: 0,
-    shiftOvertimeHours: 0,
   };
 }
 
@@ -181,6 +170,5 @@ export function emptyState(): AppState {
     emotions: {},
     bio: {},
     settings: defaultSettings(),
-    aiRecoveryDaily: {},
   };
 }

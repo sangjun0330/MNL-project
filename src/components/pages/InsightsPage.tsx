@@ -80,7 +80,7 @@ function compactText(text: string, max = 80) {
 export function InsightsPage() {
   const { t } = useI18n();
   const router = useRouter();
-  const { data: aiRecovery, loading: aiRecoveryLoading, fromSupabase, requiresTodaySleep } = useAIRecoveryInsights();
+  const { data: aiRecovery, loading: aiRecoveryLoading, fromSupabase, requiresTodaySleep, error: aiRecoveryError } = useAIRecoveryInsights();
   const [openSleepGuide, setOpenSleepGuide] = useState(false);
   const {
     end,
@@ -125,18 +125,23 @@ export function InsightsPage() {
     [todayVital, hasSleepRecord, debt]
   );
   const hasCaffeineRecord = useMemo(
-    () => Boolean(todayVital && (todayVital.inputs.caffeineMg != null || todayVital.inputs.caffeineLastAt)),
+    () => Boolean(todayVital && todayVital.inputs.caffeineMg != null),
     [todayVital]
   );
   const weeklyStatus = useMemo(() => statusFromScore(avgDisplay), [avgDisplay]);
-  const aiHeadline = useMemo(() => compactText(aiRecovery.result.headline, 90), [aiRecovery.result.headline]);
-  const aiTopSection = aiRecovery.result.sections.length ? aiRecovery.result.sections[0] : null;
+  const aiHeadline = useMemo(
+    () => (aiRecovery ? compactText(aiRecovery.result.headline, 90) : t("AI 호출 실패")),
+    [aiRecovery, t]
+  );
+  const aiTopSection = aiRecovery?.result.sections.length ? aiRecovery.result.sections[0] : null;
   const aiSummary = useMemo(
     () =>
       requiresTodaySleep
         ? t("오늘 수면 입력 후 AI 맞춤회복을 바로 분석합니다.")
-        : (aiTopSection ? compactText(aiTopSection.description, 86) : t("기록이 쌓이면 회복 처방이 더 정교해져요.")),
-    [aiTopSection, requiresTodaySleep, t]
+        : (aiRecoveryLoading
+            ? t("OpenAI 분석 중...")
+            : (aiTopSection ? compactText(aiTopSection.description, 86) : t("AI 호출 상태를 확인해 주세요."))),
+    [aiTopSection, requiresTodaySleep, aiRecoveryLoading, t]
   );
   const moveToTodaySleepLog = () => {
     setOpenSleepGuide(false);
@@ -193,28 +198,38 @@ export function InsightsPage() {
             accent="navy"
             label="AI Recovery"
             title={t("AI 맞춤회복")}
-            metric={requiresTodaySleep ? "!" : (aiRecoveryLoading ? "…" : aiRecovery.result.sections.length)}
+            metric={requiresTodaySleep ? "!" : (aiRecoveryLoading ? "…" : (aiRecovery ? aiRecovery.result.sections.length : "!"))}
             metricLabel={t("오늘 처방")}
-            summary={requiresTodaySleep ? t("오늘 수면 기록을 먼저 입력해 주세요.") : (aiRecoveryLoading ? t("분석 중...") : aiHeadline)}
+            summary={
+              requiresTodaySleep
+                ? t("오늘 수면 기록을 먼저 입력해 주세요.")
+                : (aiRecoveryLoading ? t("분석 중...") : aiHeadline)
+            }
             detail={aiSummary}
             chips={(
               <>
                 {requiresTodaySleep ? (
                   <DetailChip color={DETAIL_ACCENTS.pink}>{t("오늘 수면 입력 필요")}</DetailChip>
                 ) : (
-                  <>
-                    {(aiRecovery.result.sections ?? []).slice(0, 2).map((section) => (
-                      <DetailChip key={`${section.category}-${section.title}`} color={DETAIL_ACCENTS.navy}>
-                        {section.title}
+                  aiRecovery ? (
+                    <>
+                      {(aiRecovery.result.sections ?? []).slice(0, 2).map((section) => (
+                        <DetailChip key={`${section.category}-${section.title}`} color={DETAIL_ACCENTS.navy}>
+                          {section.title}
+                        </DetailChip>
+                      ))}
+                      <DetailChip color={DETAIL_ACCENTS.mint}>
+                        {t("OpenAI 생성 분석")}
                       </DetailChip>
-                    ))}
-                    <DetailChip color={aiRecovery.engine === "openai" ? DETAIL_ACCENTS.mint : DETAIL_ACCENTS.navy}>
-                      {aiRecovery.engine === "openai" ? t("OpenAI 생성 분석") : t("규칙 기반 분석")}
+                      <DetailChip color={fromSupabase ? DETAIL_ACCENTS.mint : DETAIL_ACCENTS.pink}>
+                        {fromSupabase ? t("Supabase 실시간 분석") : t("AI 호출 실패")}
+                      </DetailChip>
+                    </>
+                  ) : (
+                    <DetailChip color={DETAIL_ACCENTS.pink}>
+                      {aiRecoveryError ? t("AI 호출 실패") : t("AI 호출 대기")}
                     </DetailChip>
-                    <DetailChip color={fromSupabase ? DETAIL_ACCENTS.mint : DETAIL_ACCENTS.pink}>
-                      {fromSupabase ? t("Supabase 실시간 분석") : t("기기 내 임시 분석")}
-                    </DetailChip>
-                  </>
+                  )
                 )}
               </>
             )}
