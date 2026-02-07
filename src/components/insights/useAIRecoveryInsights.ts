@@ -1,10 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { AIRecoveryPayload } from "@/lib/aiRecoveryContract";
 import { todayISO } from "@/lib/date";
 import { useInsightsData } from "@/components/insights/useInsightsData";
 import { useI18n } from "@/lib/useI18n";
+
+type FetchMode = "cache" | "generate";
+
+type HookOptions = {
+  mode?: FetchMode;
+};
 
 type HookResult = {
   data: AIRecoveryPayload | null;
@@ -14,7 +20,59 @@ type HookResult = {
   requiresTodaySleep: boolean;
 };
 
-export function useAIRecoveryInsights(): HookResult {
+const inFlightGenerate = new Map<string, Promise<AIRecoveryPayload | null>>();
+
+function requestKey(lang: "ko" | "en", dateISO: string) {
+  return `${lang}:${dateISO}`;
+}
+
+async function fetchAIRecovery(lang: "ko" | "en", dateISO: string, cacheOnly: boolean): Promise<AIRecoveryPayload | null> {
+  const cacheOnlyQuery = cacheOnly ? "&cacheOnly=1" : "";
+  const res = await fetch(`/api/insights/recovery?lang=${lang}${cacheOnlyQuery}`, {
+    method: "GET",
+    cache: "no-store",
+  });
+
+  const text = await res.text().catch(() => "");
+  let json: any = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    const snippet = text.slice(0, 180).replace(/\s+/g, " ").trim();
+    throw new Error(`http_${res.status}_non_json:${snippet || "empty"}`);
+  }
+
+  if (!res.ok || !json?.ok) {
+    throw new Error(json?.error ?? `http_${res.status}`);
+  }
+
+  const payload = (json?.data ?? null) as AIRecoveryPayload | null;
+  if (!payload) return null;
+  if (payload.engine !== "openai") {
+    throw new Error(`invalid_engine:${String(payload.engine ?? "unknown")}`);
+  }
+  return payload;
+}
+
+function getOrStartGenerate(lang: "ko" | "en", dateISO: string) {
+  const key = requestKey(lang, dateISO);
+  const existing = inFlightGenerate.get(key);
+  if (existing) return existing;
+
+  const promise = fetchAIRecovery(lang, dateISO, false)
+    .catch((err) => {
+      throw err;
+    })
+    .finally(() => {
+      inFlightGenerate.delete(key);
+    });
+
+  inFlightGenerate.set(key, promise);
+  return promise;
+}
+
+export function useAIRecoveryInsights(options?: HookOptions): HookResult {
+  const mode = options?.mode ?? "cache";
   const { lang } = useI18n();
   const { state } = useInsightsData();
   const [remoteData, setRemoteData] = useState<AIRecoveryPayload | null>(null);
@@ -23,75 +81,44 @@ export function useAIRecoveryInsights(): HookResult {
 
   const isStoreHydrated = state.selected !== ("1970-01-01" as any);
 
-  const fetchRecovery = useCallback(
-    async (signal: AbortSignal, dateISO: string) => {
-      const res = await fetch(`/api/insights/recovery?lang=${lang}`, {
-        method: "GET",
-        cache: "no-store",
-        signal,
-      });
-
-      if (signal.aborted) return;
-
-      let text = "";
-      try {
-        text = await res.text();
-      } catch {
-        throw new Error(`http_${res.status}_empty_response`);
-      }
-
-      if (signal.aborted) return;
-
-      let json: any = null;
-      try {
-        json = text ? JSON.parse(text) : null;
-      } catch {
-        const snippet = text.slice(0, 160).replace(/\s+/g, " ").trim();
-        throw new Error(`http_${res.status}_non_json:${snippet || "empty"}`);
-      }
-
-      if (signal.aborted) return;
-
-      if (res.ok && json?.ok && json.data) {
-        const payload = json.data as AIRecoveryPayload;
-        if (payload.engine !== "openai") {
-          throw new Error(`invalid_engine:${String(payload.engine ?? "unknown")}`);
-        }
-        setRemoteData(payload);
-        setError(null);
-        return;
-      }
-
-      throw new Error(json?.error ?? `http_${res.status}`);
-    },
-    [lang]
-  );
-
   useEffect(() => {
     if (!isStoreHydrated) return;
     const dateISO = todayISO();
-    const controller = new AbortController();
+    let active = true;
+
     setLoading(true);
     setError(null);
-    setRemoteData(null);
 
     const run = async () => {
       try {
-        await fetchRecovery(controller.signal, dateISO);
+        const cached = await fetchAIRecovery(lang, dateISO, true);
+        if (!active) return;
+
+        if (cached) {
+          setRemoteData(cached);
+          return;
+        }
+
+        setRemoteData(null);
+
+        if (mode === "cache") return;
+
+        const generated = await getOrStartGenerate(lang, dateISO);
+        if (!active) return;
+        setRemoteData(generated);
       } catch (err: any) {
-        if (!controller.signal.aborted && err?.name !== "AbortError") {
-          setError(err?.message ?? "network_error");
-        }
+        if (!active) return;
+        setError(err?.message ?? "network_error");
       } finally {
-        if (!controller.signal.aborted) {
-          setLoading(false);
-        }
+        if (active) setLoading(false);
       }
     };
 
     void run();
-    return () => controller.abort();
-  }, [fetchRecovery, isStoreHydrated, lang]);
+    return () => {
+      active = false;
+    };
+  }, [isStoreHydrated, lang, mode]);
 
   return useMemo(
     () => ({

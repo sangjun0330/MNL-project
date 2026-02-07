@@ -80,7 +80,13 @@ function compactText(text: string, max = 80) {
 export function InsightsPage() {
   const { t } = useI18n();
   const router = useRouter();
-  const { data: aiRecovery, loading: aiRecoveryLoading, fromSupabase, requiresTodaySleep, error: aiRecoveryError } = useAIRecoveryInsights();
+  const {
+    data: aiRecovery,
+    loading: aiRecoveryLoading,
+    fromSupabase,
+    requiresTodaySleep,
+    error: aiRecoveryError,
+  } = useAIRecoveryInsights({ mode: "cache" });
   const [openSleepGuide, setOpenSleepGuide] = useState(false);
   const {
     end,
@@ -129,19 +135,25 @@ export function InsightsPage() {
     [todayVital]
   );
   const weeklyStatus = useMemo(() => statusFromScore(avgDisplay), [avgDisplay]);
-  const aiHeadline = useMemo(
-    () => (aiRecovery ? compactText(aiRecovery.result.headline, 90) : t("AI 호출 실패")),
-    [aiRecovery, t]
-  );
+  const aiHeadline = useMemo(() => {
+    if (aiRecovery) return compactText(aiRecovery.result.headline, 90);
+    if (aiRecoveryLoading) return t("AI 데이터 확인 중...");
+    if (aiRecoveryError) return t("AI 호출 상태를 확인해 주세요.");
+    return t("오늘의 맞춤회복을 받아보세요.");
+  }, [aiRecovery, aiRecoveryError, aiRecoveryLoading, t]);
   const aiTopSection = aiRecovery?.result.sections.length ? aiRecovery.result.sections[0] : null;
   const aiSummary = useMemo(
     () =>
       requiresTodaySleep
         ? t("오늘 수면 입력 후 AI 맞춤회복을 바로 분석합니다.")
-        : (aiRecoveryLoading
-            ? t("OpenAI 분석 중...")
-            : (aiTopSection ? compactText(aiTopSection.description, 86) : t("AI 호출 상태를 확인해 주세요."))),
-    [aiTopSection, requiresTodaySleep, aiRecoveryLoading, t]
+        : aiRecoveryLoading
+          ? t("저장된 맞춤회복을 확인하고 있어요...")
+          : aiTopSection
+            ? compactText(aiTopSection.description, 86)
+            : aiRecoveryError
+              ? t("AI 호출 상태를 확인해 주세요.")
+              : t("상세 페이지에서 오늘 맞춤회복 분석을 시작할 수 있어요."),
+    [aiTopSection, requiresTodaySleep, aiRecoveryLoading, aiRecoveryError, t]
   );
   const moveToTodaySleepLog = () => {
     setOpenSleepGuide(false);
@@ -198,12 +210,20 @@ export function InsightsPage() {
             accent="navy"
             label="AI Recovery"
             title={t("AI 맞춤회복")}
-            metric={requiresTodaySleep ? "!" : (aiRecoveryLoading ? "…" : (aiRecovery ? aiRecovery.result.sections.length : "!"))}
+            metric={
+              requiresTodaySleep
+                ? "!"
+                : aiRecoveryLoading
+                  ? "…"
+                  : aiRecovery
+                    ? aiRecovery.result.sections.length
+                    : "NEW"
+            }
             metricLabel={t("오늘 처방")}
             summary={
               requiresTodaySleep
                 ? t("오늘 수면 기록을 먼저 입력해 주세요.")
-                : (aiRecoveryLoading ? t("분석 중...") : aiHeadline)
+                : aiHeadline
             }
             detail={aiSummary}
             chips={(
@@ -227,7 +247,7 @@ export function InsightsPage() {
                     </>
                   ) : (
                     <DetailChip color={DETAIL_ACCENTS.pink}>
-                      {aiRecoveryError ? t("AI 호출 실패") : t("AI 호출 대기")}
+                      {aiRecoveryError ? t("AI 호출 실패") : t("오늘 맞춤회복 받기")}
                     </DetailChip>
                   )
                 )}

@@ -112,19 +112,6 @@ function readServerCachedAI(rawPayload: unknown, today: ISODate, lang: Language)
   return payload;
 }
 
-function readAnyServerCachedAI(rawPayload: unknown, lang: Language): AIRecoveryPayload | null {
-  if (!isRecord(rawPayload)) return null;
-  const node = rawPayload.aiRecoveryDaily;
-  if (!isRecord(node)) return null;
-  const data = (node as Record<string, unknown>).data;
-  if (!data || !isRecord(data)) return null;
-  const payload = data as AIRecoveryPayload;
-  if (payload.engine !== "openai") return null;
-  if (!payload.generatedText || typeof payload.generatedText !== "string") return null;
-  if (payload.language !== lang) return null;
-  return payload;
-}
-
 function withServerCachedAI(rawPayload: unknown, cacheEntry: { dateISO: ISODate; language: Language; data: AIRecoveryPayload }) {
   const next = isRecord(rawPayload) ? { ...rawPayload } : {};
   next.aiRecoveryDaily = {
@@ -137,7 +124,9 @@ function withServerCachedAI(rawPayload: unknown, cacheEntry: { dateISO: ISODate;
 }
 
 export async function GET(req: NextRequest) {
-  const langHint = toLanguage(new URL(req.url).searchParams.get("lang"));
+  const url = new URL(req.url);
+  const langHint = toLanguage(url.searchParams.get("lang"));
+  const cacheOnly = url.searchParams.get("cacheOnly") === "1";
 
   // ── 1. 사용자 인증 시도 (실패해도 계속 진행) ──
   const userId = await safeReadUserId(req);
@@ -160,6 +149,9 @@ export async function GET(req: NextRequest) {
     const cached = readServerCachedAI(row.payload, today, lang);
     if (cached) {
       return NextResponse.json({ ok: true, data: cached } satisfies AIRecoveryApiSuccess);
+    }
+    if (cacheOnly) {
+      return NextResponse.json({ ok: true, data: null } satisfies AIRecoveryApiSuccess);
     }
 
     const start = toISODate(addDays(fromISODate(today), -13));
@@ -192,54 +184,44 @@ export async function GET(req: NextRequest) {
       : null;
 
     // ── 4. OpenAI만 사용(규칙 fallback 없음) ──
-    let aiOutput;
-    try {
-      aiOutput = await generateAIRecoveryWithOpenAI({
-        language: lang,
-        todayISO: today,
-        todayShift,
-        nextShift,
-        todayVital,
-        vitals7,
-        prevWeekVitals: prevWeek,
-      });
-    } catch (openaiError: any) {
-      const previous = readAnyServerCachedAI(row.payload, lang);
-      if (previous) {
-        return NextResponse.json({ ok: true, data: previous } satisfies AIRecoveryApiSuccess);
-      }
-      throw openaiError;
-    }
+    const aiOutput = await generateAIRecoveryWithOpenAI({
+      language: lang,
+      todayISO: today,
+      todayShift,
+      nextShift,
+      todayVital,
+      vitals7,
+      prevWeekVitals: prevWeek,
+    });
     const todayVitalScore = todayVital
       ? Math.round(Math.min(todayVital.body.value, todayVital.mental.ema))
       : null;
 
-    const body: AIRecoveryApiSuccess = {
-      ok: true,
-      data: {
-        dateISO: today,
-        language: lang,
-        todayShift,
-        nextShift,
-        todayVitalScore,
-        source: "supabase",
-        engine: aiOutput.engine,
-        model: aiOutput.model,
-        debug: aiOutput.debug,
-        generatedText: aiOutput.generatedText,
-        result: aiOutput.result,
-      },
+    const payload: AIRecoveryPayload = {
+      dateISO: today,
+      language: lang,
+      todayShift,
+      nextShift,
+      todayVitalScore,
+      source: "supabase",
+      engine: aiOutput.engine,
+      model: aiOutput.model,
+      debug: aiOutput.debug,
+      generatedText: aiOutput.generatedText,
+      result: aiOutput.result,
     };
 
     const mergedPayload = withServerCachedAI(row.payload, {
       dateISO: today,
       language: lang,
-      data: body.data,
+      data: payload,
     });
     const saveError = await safeSaveUserState(userId, mergedPayload);
     if (saveError) {
-      body.data.debug = body.data.debug ? `${body.data.debug}|${saveError}` : saveError;
+      payload.debug = payload.debug ? `${payload.debug}|${saveError}` : saveError;
     }
+
+    const body: AIRecoveryApiSuccess = { ok: true, data: payload };
 
     return NextResponse.json(body);
   } catch (error: any) {

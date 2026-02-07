@@ -19,7 +19,7 @@ export type AIRecoveryPayload = {
 
 export type AIRecoveryApiSuccess = {
   ok: true;
-  data: AIRecoveryPayload;
+  data: AIRecoveryPayload | null;
 };
 
 export type AIRecoveryApiError = {
