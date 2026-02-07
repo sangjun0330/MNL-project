@@ -79,16 +79,17 @@ async function safeLoadUserState(userId: string): Promise<{ payload: unknown } |
   }
 }
 
-async function safeSaveUserState(userId: string, payload: unknown): Promise<void> {
+async function safeSaveUserState(userId: string, payload: unknown): Promise<string | null> {
   try {
     const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    if (!serviceRole || !supabaseUrl) return;
+    if (!serviceRole || !supabaseUrl) return "missing_supabase_env";
 
     const { saveUserState } = await import("@/lib/server/userStateStore");
     await saveUserState({ userId, payload });
+    return null;
   } catch {
-    // cache save errors should not block response
+    return "save_user_state_failed";
   }
 }
 
@@ -235,7 +236,10 @@ export async function GET(req: NextRequest) {
       language: lang,
       data: body.data,
     });
-    await safeSaveUserState(userId, mergedPayload);
+    const saveError = await safeSaveUserState(userId, mergedPayload);
+    if (saveError) {
+      body.data.debug = body.data.debug ? `${body.data.debug}|${saveError}` : saveError;
+    }
 
     return NextResponse.json(body);
   } catch (error: any) {

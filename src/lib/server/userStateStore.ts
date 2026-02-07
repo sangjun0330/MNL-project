@@ -6,6 +6,10 @@ type UserStateRow = {
   updatedAt: number;
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
 export async function ensureUserRow(userId: string): Promise<void> {
   const admin = getSupabaseAdmin();
   const { error } = await admin
@@ -26,12 +30,30 @@ export async function ensureUserRow(userId: string): Promise<void> {
 export async function saveUserState(input: { userId: string; payload: any }): Promise<void> {
   const admin = getSupabaseAdmin();
   const now = new Date().toISOString();
+  let nextPayload = input.payload;
+
+  // Preserve server-managed daily AI cache unless caller explicitly set/updated it.
+  if (isRecord(nextPayload) && !Object.prototype.hasOwnProperty.call(nextPayload, "aiRecoveryDaily")) {
+    const { data: existing } = await admin
+      .from("wnl_user_state")
+      .select("payload")
+      .eq("user_id", input.userId)
+      .maybeSingle();
+
+    if (isRecord(existing?.payload) && Object.prototype.hasOwnProperty.call(existing.payload, "aiRecoveryDaily")) {
+      nextPayload = {
+        ...nextPayload,
+        aiRecoveryDaily: existing.payload.aiRecoveryDaily,
+      };
+    }
+  }
+
   const { error } = await admin
     .from("wnl_user_state")
     .upsert(
       {
         user_id: input.userId,
-        payload: input.payload,
+        payload: nextPayload,
         updated_at: now,
       },
       { onConflict: "user_id" }

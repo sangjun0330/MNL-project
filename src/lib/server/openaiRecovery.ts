@@ -54,6 +54,19 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
+function roundNumber(value: unknown, digits = 1): number | "-" {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  const factor = 10 ** digits;
+  return Math.round(n * factor) / factor;
+}
+
+function roundInteger(value: unknown): number | "-" {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  return Math.round(n);
+}
+
 function resolveMaxOutputTokens() {
   const raw = Number(process.env.OPENAI_MAX_OUTPUT_TOKENS ?? DEFAULT_MAX_OUTPUT_TOKENS);
   if (!Number.isFinite(raw)) return DEFAULT_MAX_OUTPUT_TOKENS;
@@ -71,18 +84,9 @@ function normalizeApiKey() {
   return String(key).trim();
 }
 
-function modelCandidates(primary: string | null | undefined) {
-  const out: string[] = [];
-  const push = (value?: string | null) => {
-    const model = String(value ?? "").trim();
-    if (!model) return;
-    if (!out.includes(model)) out.push(model);
-  };
-  push(primary);
-  push("gpt-5-mini");
-  push("gpt-4o-mini");
-  push("gpt-4o");
-  return out;
+function resolveModel() {
+  const model = String(process.env.OPENAI_MODEL ?? "gpt-5.1").trim();
+  return model || "gpt-5.1";
 }
 
 function truncateError(raw: string, size = 220) {
@@ -116,25 +120,25 @@ function buildUserContext(params: GenerateOpenAIRecoveryParams) {
     },
     today: todayVital
       ? {
-          vitalScore: Math.round(Math.min(todayVital.body.value, todayVital.mental.ema)),
-          body: Math.round(todayVital.body.value),
-          mental: Math.round(todayVital.mental.ema),
-          sleepHours: todayVital.inputs.sleepHours ?? "-",
-          napHours: todayVital.inputs.napHours ?? "-",
-          stress: todayVital.inputs.stress ?? "-",
-          activity: todayVital.inputs.activity ?? "-",
-          mood: todayVital.inputs.mood ?? todayVital.emotion?.mood ?? "-",
-          caffeineMg: todayVital.inputs.caffeineMg ?? "-",
-          symptomSeverity: todayVital.inputs.symptomSeverity ?? "-",
+          vitalScore: roundInteger(Math.min(todayVital.body.value, todayVital.mental.ema)),
+          body: roundInteger(todayVital.body.value),
+          mental: roundInteger(todayVital.mental.ema),
+          sleepHours: roundNumber(todayVital.inputs.sleepHours, 1),
+          napHours: roundNumber(todayVital.inputs.napHours, 1),
+          stress: roundInteger(todayVital.inputs.stress),
+          activity: roundInteger(todayVital.inputs.activity),
+          mood: roundInteger(todayVital.inputs.mood ?? todayVital.emotion?.mood),
+          caffeineMg: roundInteger(todayVital.inputs.caffeineMg),
+          symptomSeverity: roundInteger(todayVital.inputs.symptomSeverity),
           menstrualLabel: todayVital.menstrual?.label ?? "-",
           menstrualTracking: Boolean(todayVital.menstrual?.enabled),
-          sleepDebtHours: todayVital.engine?.sleepDebtHours ?? "-",
-          nightStreak: todayVital.engine?.nightStreak ?? "-",
-          csi: todayVital.engine?.CSI ?? "-",
-          sri: todayVital.engine?.SRI ?? "-",
-          cif: todayVital.engine?.CIF ?? "-",
-          slf: todayVital.engine?.SLF ?? "-",
-          mif: todayVital.engine?.MIF ?? "-",
+          sleepDebtHours: roundNumber(todayVital.engine?.sleepDebtHours, 1),
+          nightStreak: roundInteger(todayVital.engine?.nightStreak),
+          csi: roundNumber(todayVital.engine?.CSI, 2),
+          sri: roundNumber(todayVital.engine?.SRI, 2),
+          cif: roundNumber(todayVital.engine?.CIF, 2),
+          slf: roundNumber(todayVital.engine?.SLF, 2),
+          mif: roundNumber(todayVital.engine?.MIF, 2),
         }
       : null,
     weekly: {
@@ -144,13 +148,13 @@ function buildUserContext(params: GenerateOpenAIRecoveryParams) {
       recentVitals7: vitals7.map((vital) => ({
         dateISO: vital.dateISO,
         shift: vital.shift,
-        sleepHours: vital.inputs.sleepHours ?? "-",
-        napHours: vital.inputs.napHours ?? "-",
-        stress: vital.inputs.stress ?? "-",
-        activity: vital.inputs.activity ?? "-",
-        mood: vital.inputs.mood ?? vital.emotion?.mood ?? "-",
-        caffeineMg: vital.inputs.caffeineMg ?? "-",
-        symptomSeverity: vital.inputs.symptomSeverity ?? "-",
+        sleepHours: roundNumber(vital.inputs.sleepHours, 1),
+        napHours: roundNumber(vital.inputs.napHours, 1),
+        stress: roundInteger(vital.inputs.stress),
+        activity: roundInteger(vital.inputs.activity),
+        mood: roundInteger(vital.inputs.mood ?? vital.emotion?.mood),
+        caffeineMg: roundInteger(vital.inputs.caffeineMg),
+        symptomSeverity: roundInteger(vital.inputs.symptomSeverity),
       })),
     },
   };
@@ -179,8 +183,9 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
       "[C] 오늘의 회복 처방",
       "- 해당되는 항목만 작성",
       "- 우선순위: 수면 > 교대근무 > 카페인 > 생리주기 > 스트레스&감정 > 신체활동",
-      "- 각 항목은 2-3문장 설명 + 행동 2-3개",
+      "- 각 항목은 설명 1-2문장 + 행동 2-3개",
       "- 생리주기는 전문용어 없이 쉬운 단어 사용",
+      "- 한 항목이 너무 길어지지 않게 간결하게 작성",
       "",
       "[D] 이번 주 AI 한마디",
       "- 이번 주 요약 -> 개인 패턴 -> 다음 주 예측 순서",
@@ -190,6 +195,7 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
       "- 자책 유도 금지",
       "- 추상적인 말 대신 바로 실행 가능한 행동",
       "- 수치(예: 수면부채/카페인/기분)는 input JSON 값을 그대로 사용하고 임의 수치를 만들지 말 것",
+      "- 수치는 소수점 1자리까지만 사용 (예: 1.6h, 42.3%)",
       "",
       "[데이터(JSON)]",
       JSON.stringify(context, null, 2),
@@ -204,6 +210,7 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
     "[C] Today's recovery plan (only relevant categories, prioritized sleep > shift > caffeine > menstrual > stress > activity)",
     "[D] Weekly AI note (weekly summary -> personal pattern -> next week preview)",
     "Tone: warm peer nurse voice, no medical jargon, no blame, concrete actions.",
+    "Keep numbers at one decimal place max.",
     "",
     "[Data JSON]",
     JSON.stringify(context, null, 2),
@@ -239,56 +246,34 @@ async function callResponsesApi(args: {
   developerPrompt: string;
   userPrompt: string;
   signal: AbortSignal;
-  strictMode: boolean;
   maxOutputTokens: number;
 }): Promise<TextAttempt> {
-  const { apiKey, model, developerPrompt, userPrompt, signal, strictMode, maxOutputTokens } = args;
+  const { apiKey, model, developerPrompt, userPrompt, signal, maxOutputTokens } = args;
 
-  const payload = strictMode
-    ? {
-        model,
-        input: [
-          {
-            role: "developer",
-            content: [{ type: "input_text", text: developerPrompt }],
-          },
-          {
-            role: "user",
-            content: [{ type: "input_text", text: userPrompt }],
-          },
-        ],
-        text: {
-          format: { type: "text" },
-          verbosity: "medium",
-        },
-        reasoning: {
-          effort: "medium",
-        },
-        max_output_tokens: maxOutputTokens,
-        tools: [],
-        store: true,
-        include: ["reasoning.encrypted_content", "web_search_call.action.sources"],
-      }
-    : {
-        model,
-        input: [
-          {
-            role: "developer",
-            content: [{ type: "input_text", text: developerPrompt }],
-          },
-          {
-            role: "user",
-            content: [{ type: "input_text", text: userPrompt }],
-          },
-        ],
-        text: {
-          format: { type: "text" },
-        },
-        reasoning: {
-          effort: "medium",
-        },
-        max_output_tokens: maxOutputTokens,
-      };
+  const payload = {
+    model,
+    input: [
+      {
+        role: "developer",
+        content: [{ type: "input_text", text: developerPrompt }],
+      },
+      {
+        role: "user",
+        content: [{ type: "input_text", text: userPrompt }],
+      },
+    ],
+    text: {
+      format: { type: "text" },
+      verbosity: "medium",
+    },
+    reasoning: {
+      effort: "medium",
+    },
+    max_output_tokens: maxOutputTokens,
+    tools: [],
+    store: true,
+    include: ["reasoning.encrypted_content", "web_search_call.action.sources"],
+  };
 
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -565,7 +550,7 @@ export async function generateAIRecoveryWithOpenAI(
   params: GenerateOpenAIRecoveryParams
 ): Promise<OpenAIRecoveryOutput> {
   const apiKey = normalizeApiKey();
-  const configuredModel = process.env.OPENAI_MODEL || "gpt-5-mini";
+  const model = resolveModel();
   if (!apiKey) {
     throw new Error("missing_openai_api_key");
   }
@@ -574,74 +559,39 @@ export async function generateAIRecoveryWithOpenAI(
   const developerPrompt = buildDeveloperPrompt(params.language);
   const userPrompt = buildUserPrompt(params.language, context);
   const maxOutputTokens = resolveMaxOutputTokens();
-  const candidates = modelCandidates(configuredModel);
-  let lastError = "openai_request_failed";
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 45_000);
+  try {
+    const attempt = await callResponsesApi({
+      apiKey,
+      model,
+      developerPrompt,
+      userPrompt,
+      signal: controller.signal,
+      maxOutputTokens,
+    });
 
-  for (const model of candidates) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 45_000);
-    try {
-      const strictAttempt = await callResponsesApi({
-        apiKey,
-        model,
-        developerPrompt,
-        userPrompt,
-        signal: controller.signal,
-        strictMode: true,
-        maxOutputTokens,
-      });
-
-      if (strictAttempt.text) {
-        const generatedText = strictAttempt.text.trim();
-        return {
-          result: parseResultFromGeneratedText(generatedText, params.language),
-          generatedText,
-          engine: "openai",
-          model,
-          debug: null,
-        };
-      }
-
-      lastError = strictAttempt.error ?? lastError;
-      if (lastError.includes("_401_")) {
-        break;
-      }
-
-      const safeAttempt = await callResponsesApi({
-        apiKey,
-        model,
-        developerPrompt,
-        userPrompt,
-        signal: controller.signal,
-        strictMode: false,
-        maxOutputTokens,
-      });
-
-      if (safeAttempt.text) {
-        const generatedText = safeAttempt.text.trim();
-        return {
-          result: parseResultFromGeneratedText(generatedText, params.language),
-          generatedText,
-          engine: "openai",
-          model,
-          debug: null,
-        };
-      }
-
-      lastError = safeAttempt.error ?? lastError;
-      if (lastError.includes("_401_")) {
-        break;
-      }
-    } catch (err: any) {
-      if (err?.name === "AbortError") {
-        lastError = `openai_timeout_model:${model}`;
-      } else {
-        lastError = `openai_fetch_model:${model}_${truncateError(err?.message ?? "unknown")}`;
-      }
-    } finally {
-      clearTimeout(timer);
+    if (!attempt.text) {
+      throw new Error(attempt.error ?? `openai_request_failed_model:${model}`);
     }
-  }
 
-  throw new Error(lastError);
+    const generatedText = attempt.text.trim();
+    return {
+      result: parseResultFromGeneratedText(generatedText, params.language),
+      generatedText,
+      engine: "openai",
+      model,
+      debug: null,
+    };
+  } catch (err: any) {
+    if (err?.name === "AbortError") {
+      throw new Error(`openai_timeout_model:${model}`);
+    }
+    if (typeof err?.message === "string" && err.message.trim()) {
+      throw new Error(err.message.trim());
+    }
+    throw new Error(`openai_fetch_model:${model}_${truncateError(err?.message ?? "unknown")}`);
+  } finally {
+    clearTimeout(timer);
+  }
 }
