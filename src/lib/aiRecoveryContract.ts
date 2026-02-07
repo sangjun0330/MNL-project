@@ -13,6 +13,7 @@ export type AIRecoveryPayload = {
   engine: "openai" | "rule";
   model: string | null;
   debug?: string | null;
+  generatedText?: string;
   result: AIRecoveryResult;
 };
 

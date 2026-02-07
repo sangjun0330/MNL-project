@@ -167,6 +167,7 @@ export async function GET(req: NextRequest) {
         engine: aiOutput.engine,
         model: aiOutput.model,
         debug: aiOutput.debug,
+        generatedText: aiOutput.generatedText,
         result: aiOutput.result,
       },
     };

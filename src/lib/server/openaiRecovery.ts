@@ -15,151 +15,41 @@ type GenerateOpenAIRecoveryParams = {
 
 export type OpenAIRecoveryOutput = {
   result: AIRecoveryResult;
+  generatedText: string;
   engine: "openai";
   model: string | null;
   debug: string | null;
 };
 
-type OpenAIParsedResult = {
-  headline?: unknown;
-  compoundAlert?: unknown;
-  sections?: unknown;
-  weeklySummary?: unknown;
-};
-
-type ParsedAttempt = {
-  parsed: AIRecoveryResult | null;
+type TextAttempt = {
+  text: string | null;
   error: string | null;
 };
+
+type CategoryMeta = {
+  category: RecoverySection["category"];
+  titleKo: string;
+  titleEn: string;
+  hints: string[];
+};
+
+const CATEGORY_ORDER: CategoryMeta[] = [
+  { category: "sleep", titleKo: "수면", titleEn: "Sleep", hints: ["수면", "sleep", "sleep debt"] },
+  { category: "shift", titleKo: "교대근무", titleEn: "Shift", hints: ["교대", "나이트", "근무", "shift", "night"] },
+  { category: "caffeine", titleKo: "카페인", titleEn: "Caffeine", hints: ["카페인", "coffee", "caffeine"] },
+  { category: "menstrual", titleKo: "생리주기", titleEn: "Menstrual", hints: ["생리", "주기", "period", "pms"] },
+  {
+    category: "stress",
+    titleKo: "스트레스 & 감정",
+    titleEn: "Stress & Mood",
+    hints: ["스트레스", "감정", "기분", "stress", "mood", "emotion"],
+  },
+  { category: "activity", titleKo: "신체활동", titleEn: "Activity", hints: ["활동", "운동", "activity", "exercise"] },
+];
 
 function clamp(value: number, min: number, max: number) {
   const n = Number.isFinite(value) ? value : min;
   return Math.max(min, Math.min(max, n));
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function parseCompoundAlert(value: unknown): CompoundAlert | null {
-  if (value == null) return null;
-  if (!isObject(value)) return null;
-  const factorsRaw = Array.isArray(value.factors) ? value.factors : [];
-  const factors = factorsRaw
-    .map((item) => (typeof item === "string" ? item.trim() : ""))
-    .filter(Boolean)
-    .slice(0, 5);
-  const message = typeof value.message === "string" ? value.message.trim() : "";
-  if (!message || !factors.length) return null;
-  return { factors, message };
-}
-
-function parseSection(value: unknown): RecoverySection | null {
-  if (!isObject(value)) return null;
-  const category = value.category;
-  const severity = value.severity;
-  const title = typeof value.title === "string" ? value.title.trim() : "";
-  const description = typeof value.description === "string" ? value.description.trim() : "";
-  const tipsRaw = Array.isArray(value.tips) ? value.tips : [];
-  const tips = tipsRaw
-    .map((tip) => (typeof tip === "string" ? tip.trim() : ""))
-    .filter(Boolean)
-    .slice(0, 4);
-  const validCategory =
-    category === "sleep" ||
-    category === "shift" ||
-    category === "caffeine" ||
-    category === "menstrual" ||
-    category === "stress" ||
-    category === "activity";
-  const validSeverity = severity === "info" || severity === "caution" || severity === "warning";
-  if (!validCategory || !validSeverity || !title || !description || !tips.length) return null;
-  return {
-    category,
-    severity,
-    title,
-    description,
-    tips,
-  };
-}
-
-function parseWeeklySummary(value: unknown): WeeklySummary | null {
-  if (!isObject(value)) return null;
-  const avgBatteryRaw = Number(value.avgBattery);
-  const prevAvgBatteryRaw = Number(value.prevAvgBattery);
-  if (!Number.isFinite(avgBatteryRaw) || !Number.isFinite(prevAvgBatteryRaw)) return null;
-  const avgBattery = clamp(avgBatteryRaw, 0, 100);
-  const prevAvgBattery = clamp(prevAvgBatteryRaw, 0, 100);
-  const topDrainsRaw = Array.isArray(value.topDrains) ? value.topDrains : [];
-  const topDrains = topDrainsRaw
-    .map((item) => {
-      if (!isObject(item)) return null;
-      const label = typeof item.label === "string" ? item.label.trim() : "";
-      const pct = clamp(Number(item.pct), 0, 100);
-      if (!label) return null;
-      return { label, pct };
-    })
-    .filter((item): item is { label: string; pct: number } => Boolean(item))
-    .slice(0, 3);
-  const personalInsight = typeof value.personalInsight === "string" ? value.personalInsight.trim() : "";
-  const nextWeekPreview = typeof value.nextWeekPreview === "string" ? value.nextWeekPreview.trim() : "";
-  if (!personalInsight || !nextWeekPreview) return null;
-  return {
-    avgBattery: Math.round(avgBattery),
-    prevAvgBattery: Math.round(prevAvgBattery),
-    topDrains,
-    personalInsight,
-    nextWeekPreview,
-  };
-}
-
-function parseRecoveryResult(value: unknown): AIRecoveryResult | null {
-  if (!isObject(value)) return null;
-  const parsed = value as OpenAIParsedResult;
-  const rawHeadline = typeof parsed.headline === "string" ? parsed.headline.trim() : "";
-  const sectionsRaw = Array.isArray(parsed.sections) ? parsed.sections : [];
-  const sections = sectionsRaw.map(parseSection).filter((item): item is RecoverySection => Boolean(item));
-  const headline = rawHeadline || (sections.length ? sections[0].description : "");
-  if (!headline) return null;
-  return {
-    headline,
-    compoundAlert: parseCompoundAlert(parsed.compoundAlert),
-    sections,
-    weeklySummary: parseWeeklySummary(parsed.weeklySummary),
-  };
-}
-
-function extractChatContent(json: any): string {
-  const msg = json?.choices?.[0]?.message?.content;
-  if (typeof msg === "string") return msg;
-  if (Array.isArray(msg)) {
-    const text = msg
-      .map((part) => (typeof part?.text === "string" ? part.text : ""))
-      .join("")
-      .trim();
-    return text;
-  }
-  return "";
-}
-
-function parseLooseJson(content: string): unknown {
-  const trimmed = content.trim();
-  if (!trimmed) return null;
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    const first = trimmed.indexOf("{");
-    const last = trimmed.lastIndexOf("}");
-    if (first >= 0 && last > first) {
-      const candidate = trimmed.slice(first, last + 1);
-      try {
-        return JSON.parse(candidate);
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  }
 }
 
 function normalizeApiKey() {
@@ -181,10 +71,18 @@ function modelCandidates(primary: string | null | undefined) {
     if (!out.includes(model)) out.push(model);
   };
   push(primary);
-  // 모델 오설정/권한 이슈 대비 최소 안전 후보
+  push("gpt-5-mini");
   push("gpt-4o-mini");
   push("gpt-4o");
   return out;
+}
+
+function truncateError(raw: string, size = 220) {
+  const clean = String(raw ?? "")
+    .replace(/\s+/g, " ")
+    .replace(/[^\x20-\x7E가-힣ㄱ-ㅎㅏ-ㅣ.,:;!?()[\]{}'"`~@#$%^&*_\-+=/\\|<>]/g, "")
+    .trim();
+  return clean.length > size ? clean.slice(0, size) : clean;
 }
 
 function buildUserContext(params: GenerateOpenAIRecoveryParams) {
@@ -197,7 +95,7 @@ function buildUserContext(params: GenerateOpenAIRecoveryParams) {
   const avgPrev = prevWeekVitals.length
     ? Math.round(
         prevWeekVitals.reduce((sum, vital) => sum + Math.min(vital.body.value, vital.mental.ema), 0) /
-            prevWeekVitals.length
+          prevWeekVitals.length
       )
     : null;
 
@@ -213,22 +111,22 @@ function buildUserContext(params: GenerateOpenAIRecoveryParams) {
           vitalScore: Math.round(Math.min(todayVital.body.value, todayVital.mental.ema)),
           body: Math.round(todayVital.body.value),
           mental: Math.round(todayVital.mental.ema),
-          sleepHours: todayVital.inputs.sleepHours ?? null,
-          napHours: todayVital.inputs.napHours ?? null,
-          stress: todayVital.inputs.stress ?? null,
-          activity: todayVital.inputs.activity ?? null,
-          mood: todayVital.inputs.mood ?? todayVital.emotion?.mood ?? null,
-          caffeineMg: todayVital.inputs.caffeineMg ?? null,
-          symptomSeverity: todayVital.inputs.symptomSeverity ?? null,
-          menstrualLabel: todayVital.menstrual?.label ?? null,
+          sleepHours: todayVital.inputs.sleepHours ?? "-",
+          napHours: todayVital.inputs.napHours ?? "-",
+          stress: todayVital.inputs.stress ?? "-",
+          activity: todayVital.inputs.activity ?? "-",
+          mood: todayVital.inputs.mood ?? todayVital.emotion?.mood ?? "-",
+          caffeineMg: todayVital.inputs.caffeineMg ?? "-",
+          symptomSeverity: todayVital.inputs.symptomSeverity ?? "-",
+          menstrualLabel: todayVital.menstrual?.label ?? "-",
           menstrualTracking: Boolean(todayVital.menstrual?.enabled),
-          sleepDebtHours: todayVital.engine?.sleepDebtHours ?? null,
-          nightStreak: todayVital.engine?.nightStreak ?? null,
-          csi: todayVital.engine?.CSI ?? null,
-          sri: todayVital.engine?.SRI ?? null,
-          cif: todayVital.engine?.CIF ?? null,
-          slf: todayVital.engine?.SLF ?? null,
-          mif: todayVital.engine?.MIF ?? null,
+          sleepDebtHours: todayVital.engine?.sleepDebtHours ?? "-",
+          nightStreak: todayVital.engine?.nightStreak ?? "-",
+          csi: todayVital.engine?.CSI ?? "-",
+          sri: todayVital.engine?.SRI ?? "-",
+          cif: todayVital.engine?.CIF ?? "-",
+          slf: todayVital.engine?.SLF ?? "-",
+          mif: todayVital.engine?.MIF ?? "-",
         }
       : null,
     weekly: {
@@ -238,95 +136,82 @@ function buildUserContext(params: GenerateOpenAIRecoveryParams) {
       recentVitals7: vitals7.map((vital) => ({
         dateISO: vital.dateISO,
         shift: vital.shift,
-        sleepHours: vital.inputs.sleepHours ?? null,
-        napHours: vital.inputs.napHours ?? null,
-        stress: vital.inputs.stress ?? null,
-        activity: vital.inputs.activity ?? null,
-        mood: vital.inputs.mood ?? vital.emotion?.mood ?? null,
-        caffeineMg: vital.inputs.caffeineMg ?? null,
-        symptomSeverity: vital.inputs.symptomSeverity ?? null,
+        sleepHours: vital.inputs.sleepHours ?? "-",
+        napHours: vital.inputs.napHours ?? "-",
+        stress: vital.inputs.stress ?? "-",
+        activity: vital.inputs.activity ?? "-",
+        mood: vital.inputs.mood ?? vital.emotion?.mood ?? "-",
+        caffeineMg: vital.inputs.caffeineMg ?? "-",
+        symptomSeverity: vital.inputs.symptomSeverity ?? "-",
       })),
     },
   };
 }
 
-function buildSystemPrompt(language: Language) {
-  const ko = language === "ko";
-  return ko
-    ? [
-        "너는 RNest의 AI 맞춤회복 생성기다.",
-        "반드시 JSON으로만 답하고, JSON 외 텍스트를 절대 출력하지 마라.",
-        "출력은 A/B/C/D 틀을 채우는 데이터다: headline(A), compoundAlert(B), sections(C), weeklySummary(D).",
-        "톤은 '간호사 동료'처럼 따뜻하고 짧게, 자책 유도 금지, 실행 가능한 행동 위주로 작성한다.",
-        "섹션 C는 해당되는 카테고리만 포함한다. 우선순위는 sleep > shift > caffeine > menstrual > stress > activity.",
-        "각 섹션은 설명 1-2문장 + 행동 가이드 2-3개(tips)로 작성한다.",
-        "복합 위험(B)은 위험요소 2개 이상일 때만 compoundAlert를 채우고, 아니면 null로 둔다.",
-        "생리 관련 문구는 쉬운 표현만 사용한다: '생리 기간', '생리 직전 기간', '컨디션 안정 기간', '컨디션 변화가 큰 날'.",
-        "전문 용어(예: 황체기, 여포기, 배란기, luteal/follicular/ovulation)는 쓰지 마라.",
-      ].join("\n")
-    : [
-        "You generate RNest recovery prescriptions.",
-        "Return JSON only without extra text.",
-        "Fill A/B/C/D structure through fields: headline(A), compoundAlert(B), sections(C), weeklySummary(D).",
-        "Use warm, concise peer-to-peer tone for nurses.",
-        "Each section: 1-2 sentence situation summary + 2-3 actionable tips.",
-        "No blame, no diagnosis language, no vague statements.",
-        "Category priority: sleep > shift > caffeine > menstrual > stress > activity.",
-        "Include only relevant categories and skip low-signal categories.",
-        "Use simple menstrual wording only: 'period phase', 'pre-period phase', 'stable phase', 'sensitive phase'.",
-        "Do not use technical cycle terms (luteal/follicular/ovulation).",
-      ].join("\n");
-}
-
-function buildUserPrompt(context: ReturnType<typeof buildUserContext>) {
-  return JSON.stringify(
-    {
-      task: "Generate personalized recovery output in the target schema.",
-      schema: {
-        headline: "string",
-        compoundAlert: "{ factors: string[], message: string } | null",
-        sections: [
-          {
-            category: "sleep|shift|caffeine|menstrual|stress|activity",
-            severity: "info|caution|warning",
-            title: "string",
-            description: "string",
-            tips: ["string", "string"],
-          },
-        ],
-        weeklySummary:
-          "{ avgBattery: number, prevAvgBattery: number, topDrains: {label:string,pct:number}[], personalInsight: string, nextWeekPreview: string } | null",
-      },
-      input: context,
-    },
-    null,
-    2
-  );
-}
-
-function truncateError(raw: string, size = 180) {
-  const clean = String(raw ?? "")
-    .replace(/\s+/g, " ")
-    .replace(/[^\x20-\x7E가-힣ㄱ-ㅎㅏ-ㅣ.,:;!?()[\]{}'"`~@#$%^&*_\-+=/\\|<>]/g, "")
-    .trim();
-  return clean.length > size ? clean.slice(0, size) : clean;
-}
-
-function parseAttemptFromContent(content: string, model: string, source: "chat" | "responses"): ParsedAttempt {
-  const parsedUnknown = parseLooseJson(content);
-  if (!parsedUnknown) {
-    return { parsed: null, error: `openai_invalid_json_${source}_model:${model}` };
+function buildDeveloperPrompt(language: Language) {
+  if (language === "ko") {
+    return "너는 간호사의 건강회복과 번아웃방지, 데이터를 통한 개인 맞춤 건강회복 전문가야. 맞춤 건강 회복을 위한 자세한 지시들 자세한 행동들을 알려주는 역할이야.";
   }
-  const parsed = parseRecoveryResult(parsedUnknown);
-  if (!parsed) {
-    return { parsed: null, error: `openai_invalid_schema_${source}_model:${model}` };
-  }
-  return { parsed, error: null };
+  return "You are a nurse wellness and burnout-prevention specialist who gives data-driven, personalized recovery guidance with specific actionable steps.";
 }
 
-function extractResponsesContent(json: any): string {
+function buildUserPrompt(language: Language, context: ReturnType<typeof buildUserContext>) {
+  if (language === "ko") {
+    return [
+      "supabase를 통한 데이터와 유저의 기록 기반 알고리즘/통계 데이터를 총합해 회복 조언을 작성하세요.",
+      "아래 형식을 반드시 지켜서 한국어 텍스트로 출력하세요.",
+      "",
+      "[A] 한줄 요약",
+      "- 전체 데이터를 종합해서 오늘 가장 중요한 것 한 문장",
+      "",
+      "[B] 긴급 알림",
+      "- 위험 요소 2개 이상 동시 발생 시에만 작성",
+      "- 없으면 정확히 '없음'이라고 작성",
+      "",
+      "[C] 오늘의 회복 처방",
+      "- 해당되는 항목만 작성",
+      "- 우선순위: 수면 > 교대근무 > 카페인 > 생리주기 > 스트레스&감정 > 신체활동",
+      "- 각 항목은 2-3문장 설명 + 행동 2-3개",
+      "- 생리주기는 전문용어 없이 쉬운 단어 사용",
+      "",
+      "[D] 이번 주 AI 한마디",
+      "- 이번 주 요약 -> 개인 패턴 -> 다음 주 예측 순서",
+      "",
+      "[톤 가이드]",
+      "- 간호사 동료처럼 부드러운 말투",
+      "- 자책 유도 금지",
+      "- 추상적인 말 대신 바로 실행 가능한 행동",
+      "",
+      "[데이터(JSON)]",
+      JSON.stringify(context, null, 2),
+    ].join("\n");
+  }
+
+  return [
+    "Create personalized recovery guidance from the user's Supabase-backed records and computed trends.",
+    "Output plain text in this exact structure:",
+    "[A] One-line summary",
+    "[B] Urgent alert (only if 2+ risks, otherwise write 'none')",
+    "[C] Today's recovery plan (only relevant categories, prioritized sleep > shift > caffeine > menstrual > stress > activity)",
+    "[D] Weekly AI note (weekly summary -> personal pattern -> next week preview)",
+    "Tone: warm peer nurse voice, no medical jargon, no blame, concrete actions.",
+    "",
+    "[Data JSON]",
+    JSON.stringify(context, null, 2),
+  ].join("\n");
+}
+
+function extractResponsesText(json: any): string {
   const direct = json?.output_text;
   if (typeof direct === "string" && direct.trim()) return direct.trim();
+  if (Array.isArray(direct)) {
+    const joined = direct
+      .map((item) => (typeof item === "string" ? item : ""))
+      .join("")
+      .trim();
+    if (joined) return joined;
+  }
+
   const output = Array.isArray(json?.output) ? json.output : [];
   const chunks: string[] = [];
   for (const item of output) {
@@ -339,165 +224,410 @@ function extractResponsesContent(json: any): string {
   return chunks.join("").trim();
 }
 
-async function tryChatCompletions(args: {
+async function callResponsesApi(args: {
   apiKey: string;
   model: string;
-  systemPrompt: string;
+  developerPrompt: string;
   userPrompt: string;
   signal: AbortSignal;
-}): Promise<ParsedAttempt> {
-  const { apiKey, model, systemPrompt, userPrompt, signal } = args;
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0.35,
-      max_tokens: 2200,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      response_format: { type: "json_object" },
-    }),
-    signal,
-  });
+  strictMode: boolean;
+}): Promise<TextAttempt> {
+  const { apiKey, model, developerPrompt, userPrompt, signal, strictMode } = args;
 
-  if (!response.ok) {
-    const raw = await response.text().catch(() => "");
-    return {
-      parsed: null,
-      error: `openai_chat_${response.status}_model:${model}_${truncateError(raw || "unknown_error")}`,
-    };
-  }
+  const payload = strictMode
+    ? {
+        model,
+        input: [
+          {
+            role: "developer",
+            content: [{ type: "input_text", text: developerPrompt }],
+          },
+          {
+            role: "user",
+            content: [{ type: "input_text", text: userPrompt }],
+          },
+        ],
+        text: {
+          format: { type: "text" },
+          verbosity: "medium",
+        },
+        reasoning: {
+          effort: "medium",
+        },
+        max_output_tokens: 2200,
+        tools: [],
+        store: true,
+        include: ["reasoning.encrypted_content", "web_search_call.action.sources"],
+      }
+    : {
+        model,
+        input: [
+          {
+            role: "developer",
+            content: [{ type: "input_text", text: developerPrompt }],
+          },
+          {
+            role: "user",
+            content: [{ type: "input_text", text: userPrompt }],
+          },
+        ],
+        text: {
+          format: { type: "text" },
+        },
+        reasoning: {
+          effort: "medium",
+        },
+        max_output_tokens: 2200,
+      };
 
-  const json = await response.json().catch(() => null);
-  const content = extractChatContent(json);
-  return parseAttemptFromContent(content, model, "chat");
-}
-
-async function tryResponsesApi(args: {
-  apiKey: string;
-  model: string;
-  systemPrompt: string;
-  userPrompt: string;
-  signal: AbortSignal;
-}): Promise<ParsedAttempt> {
-  const { apiKey, model, systemPrompt, userPrompt, signal } = args;
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({
-      model,
-      temperature: 0.35,
-      max_output_tokens: 2200,
-      input: [
-        {
-          role: "system",
-          content: [{ type: "input_text", text: systemPrompt }],
-        },
-        {
-          role: "user",
-          content: [{ type: "input_text", text: userPrompt }],
-        },
-      ],
-    }),
+    body: JSON.stringify(payload),
     signal,
   });
 
   if (!response.ok) {
     const raw = await response.text().catch(() => "");
     return {
-      parsed: null,
+      text: null,
       error: `openai_responses_${response.status}_model:${model}_${truncateError(raw || "unknown_error")}`,
     };
   }
 
   const json = await response.json().catch(() => null);
-  const content = extractResponsesContent(json);
-  return parseAttemptFromContent(content, model, "responses");
+  const text = extractResponsesText(json);
+  if (!text) {
+    return {
+      text: null,
+      error: `openai_empty_text_model:${model}`,
+    };
+  }
+
+  return { text, error: null };
+}
+
+function cleanLines(text: string) {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function stripHeadingPrefix(line: string) {
+  return line
+    .replace(/^\[(?:A|B|C|D)\]\s*/i, "")
+    .replace(/^(?:A|B|C|D)\s*[).:\-]\s*/i, "")
+    .replace(/^\d\s*[).:\-]\s*/, "")
+    .trim();
+}
+
+function findSectionStart(text: string, label: "A" | "B" | "C" | "D") {
+  const patterns = [new RegExp(`(?:^|\\n)\\s*\\[${label}\\]`, "i"), new RegExp(`(?:^|\\n)\\s*${label}\\s*[).:\\-]`, "i")];
+  for (const pattern of patterns) {
+    const match = pattern.exec(text);
+    if (match) return match.index + (match[0].startsWith("\n") ? 1 : 0);
+  }
+  return -1;
+}
+
+function extractSection(text: string, label: "A" | "B" | "C" | "D") {
+  const start = findSectionStart(text, label);
+  if (start < 0) return "";
+
+  const ends = (["A", "B", "C", "D"] as const)
+    .filter((v) => v !== label)
+    .map((v) => findSectionStart(text.slice(start + 1), v))
+    .filter((idx) => idx >= 0)
+    .map((idx) => idx + start + 1);
+
+  const end = ends.length ? Math.min(...ends) : text.length;
+  return text.slice(start, end).trim();
+}
+
+function parseCategoryFromLabel(label: string): CategoryMeta | null {
+  const normalized = label.toLowerCase();
+  for (const meta of CATEGORY_ORDER) {
+    if (meta.hints.some((hint) => normalized.includes(hint.toLowerCase()))) {
+      return meta;
+    }
+  }
+  return null;
+}
+
+function parseSeverity(text: string): RecoverySection["severity"] {
+  const n = text.toLowerCase();
+  if (
+    n.includes("위험") ||
+    n.includes("경고") ||
+    n.includes("주의가 필요") ||
+    n.includes("urgent") ||
+    n.includes("warning") ||
+    n.includes("critical")
+  ) {
+    return "warning";
+  }
+  if (n.includes("주의") || n.includes("부담") || n.includes("caution")) return "caution";
+  return "info";
+}
+
+function parseCategoryBlocks(cBlock: string, language: Language): RecoverySection[] {
+  const lines = cleanLines(cBlock);
+  const sections: RecoverySection[] = [];
+
+  type Builder = {
+    meta: CategoryMeta;
+    description: string[];
+    tips: string[];
+  };
+
+  let current: Builder | null = null;
+
+  const flush = () => {
+    if (!current) return;
+    const descriptionText = current.description.join(" ").trim();
+    const title = language === "ko" ? current.meta.titleKo : current.meta.titleEn;
+    if (descriptionText || current.tips.length) {
+      sections.push({
+        category: current.meta.category,
+        severity: parseSeverity(`${title} ${descriptionText} ${current.tips.join(" ")}`),
+        title,
+        description: descriptionText || (language === "ko" ? "오늘 컨디션에 맞춘 보정 조언입니다." : "Adjusted guidance for today."),
+        tips: current.tips.slice(0, 3),
+      });
+    }
+    current = null;
+  };
+
+  for (const line of lines) {
+    const blockHeading = line.match(/^\[(.+?)\]\s*$/);
+    if (blockHeading) {
+      const meta = parseCategoryFromLabel(blockHeading[1]);
+      if (meta) {
+        flush();
+        current = { meta, description: [], tips: [] };
+      }
+      continue;
+    }
+
+    const numberedHeading = line.match(/^3\s*[-.]\s*([1-6])\s*[).:\-]?\s*(.+)$/);
+    if (numberedHeading) {
+      const idx = Number(numberedHeading[1]) - 1;
+      const meta = CATEGORY_ORDER[idx] ?? null;
+      if (meta) {
+        flush();
+        current = { meta, description: [], tips: [] };
+        if (numberedHeading[2]) current.description.push(numberedHeading[2].trim());
+      }
+      continue;
+    }
+
+    if (!current) {
+      continue;
+    }
+
+    const tipMatch = line.match(/^(?:[-*•·]|\d+\.)\s*(.+)$/);
+    if (tipMatch) {
+      const tip = tipMatch[1].trim();
+      if (tip) current.tips.push(tip);
+      continue;
+    }
+
+    const plain = stripHeadingPrefix(line);
+    if (plain && !/^\[C\]/i.test(plain)) {
+      current.description.push(plain);
+    }
+  }
+
+  flush();
+
+  if (sections.length) return sections;
+
+  const fallbackLines = lines.filter((line) => !/^\[(?:C|D)\]/i.test(line));
+  if (!fallbackLines.length) return [];
+
+  return [
+    {
+      category: "sleep",
+      severity: parseSeverity(fallbackLines.join(" ")),
+      title: language === "ko" ? "오늘의 회복 처방" : "Recovery Plan",
+      description: fallbackLines.slice(0, 2).map(stripHeadingPrefix).join(" ").trim() || (language === "ko" ? "맞춤 처방을 확인하세요." : "Check your tailored plan."),
+      tips: fallbackLines
+        .slice(2)
+        .map((line) => line.replace(/^(?:[-*•·]|\d+\.)\s*/, "").trim())
+        .filter(Boolean)
+        .slice(0, 3),
+    },
+  ];
+}
+
+function parseCompoundAlertFromText(bBlock: string): CompoundAlert | null {
+  const lines = cleanLines(bBlock)
+    .map(stripHeadingPrefix)
+    .filter((line) => !/^긴급\s*알림/i.test(line) && !/^urgent/i.test(line));
+
+  if (!lines.length) return null;
+  if (lines.some((line) => /^없음$/i.test(line) || /^none$/i.test(line))) return null;
+
+  const factors: string[] = [];
+  const factorRegex = /\[([^\]]+)\]/g;
+  const joined = lines.join(" ");
+  let m: RegExpExecArray | null = null;
+  while ((m = factorRegex.exec(joined)) !== null) {
+    const tag = m[1].trim();
+    if (tag && !factors.includes(tag)) factors.push(tag);
+  }
+
+  const message = joined.replace(/\[[^\]]+\]/g, "").replace(/\s+/g, " ").trim();
+  if (!message) return null;
+  return {
+    factors: factors.slice(0, 5),
+    message,
+  };
+}
+
+function parseWeeklySummaryFromText(dBlock: string): WeeklySummary | null {
+  const lines = cleanLines(dBlock)
+    .map(stripHeadingPrefix)
+    .filter((line) => !/^이번\s*주\s*AI\s*한마디/i.test(line) && !/^weekly/i.test(line));
+
+  if (!lines.length) return null;
+
+  const joined = lines.join(" ");
+  const avgMatch = joined.match(/(?:평균\s*배터리|average\s*battery)\D*(\d{1,3})/i);
+  const deltaMatch = joined.match(/(?:지난주\D*|vs\s*last\s*week\D*)([-+]?\d{1,3})/i);
+  const avgBattery = clamp(Number(avgMatch?.[1] ?? 0), 0, 100);
+  const delta = Number(deltaMatch?.[1] ?? 0);
+  const prevAvgBattery = clamp(avgBattery - delta, 0, 100);
+
+  const drainMatches = [...joined.matchAll(/([가-힣A-Za-z\s&]+?)\s*(\d{1,3})%/g)];
+  const topDrains = drainMatches
+    .map((hit) => ({ label: hit[1].trim(), pct: clamp(Number(hit[2]), 0, 100) }))
+    .filter((v) => v.label)
+    .slice(0, 3);
+
+  const personalInsight = lines.slice(0, Math.min(2, lines.length)).join(" ").trim();
+  const nextWeekPreview = lines.slice(-2).join(" ").trim() || lines[lines.length - 1];
+
+  if (!personalInsight || !nextWeekPreview) return null;
+
+  return {
+    avgBattery: Math.round(avgBattery),
+    prevAvgBattery: Math.round(prevAvgBattery),
+    topDrains,
+    personalInsight,
+    nextWeekPreview,
+  };
+}
+
+function parseHeadlineFromText(aBlock: string, wholeText: string): string {
+  const candidateLines = cleanLines(aBlock)
+    .map(stripHeadingPrefix)
+    .filter((line) => !/^한줄\s*요약/i.test(line) && !/^one-line\s*summary/i.test(line));
+  if (candidateLines.length) {
+    return candidateLines[0].replace(/^"|"$/g, "").trim();
+  }
+
+  const wholeLines = cleanLines(wholeText)
+    .map(stripHeadingPrefix)
+    .filter((line) => !/^\[[A-D]\]/i.test(line));
+  return wholeLines[0] ?? "오늘 회복 체크인을 진행해요.";
+}
+
+function parseResultFromGeneratedText(text: string, language: Language): AIRecoveryResult {
+  const aBlock = extractSection(text, "A");
+  const bBlock = extractSection(text, "B");
+  const cBlock = extractSection(text, "C");
+  const dBlock = extractSection(text, "D");
+
+  return {
+    headline: parseHeadlineFromText(aBlock, text),
+    compoundAlert: parseCompoundAlertFromText(bBlock),
+    sections: parseCategoryBlocks(cBlock, language),
+    weeklySummary: parseWeeklySummaryFromText(dBlock),
+  };
 }
 
 export async function generateAIRecoveryWithOpenAI(
   params: GenerateOpenAIRecoveryParams
 ): Promise<OpenAIRecoveryOutput> {
   const apiKey = normalizeApiKey();
-  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+  const configuredModel = process.env.OPENAI_MODEL || "gpt-5-mini";
   if (!apiKey) {
     throw new Error("missing_openai_api_key");
   }
 
   const context = buildUserContext(params);
-  const systemPrompt = buildSystemPrompt(params.language);
-  const userPrompt = buildUserPrompt(context);
-  const candidates = modelCandidates(model);
+  const developerPrompt = buildDeveloperPrompt(params.language);
+  const userPrompt = buildUserPrompt(params.language, context);
+  const candidates = modelCandidates(configuredModel);
   let lastError = "openai_request_failed";
 
-  try {
-    for (const candidate of candidates) {
-      // 네트워크 상황이 느릴 수 있어 30초로 확장
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 30_000);
-      try {
-        // ✅ 401/403은 API 키 문제 → 다른 모델/방식 재시도 무의미
-        const chatAttempt = await tryChatCompletions({
-          apiKey,
-          model: candidate,
-          systemPrompt,
-          userPrompt,
-          signal: controller.signal,
-        });
-        if (chatAttempt.parsed) {
-          return {
-            result: chatAttempt.parsed,
-            engine: "openai",
-            model: candidate,
-            debug: null,
-          };
-        }
-        lastError = chatAttempt.error ?? lastError;
+  for (const model of candidates) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 45_000);
+    try {
+      const strictAttempt = await callResponsesApi({
+        apiKey,
+        model,
+        developerPrompt,
+        userPrompt,
+        signal: controller.signal,
+        strictMode: true,
+      });
 
-        // 401/403이면 바로 중단 (다른 API endpoint 시도해도 같은 key라 무의미)
-        if (lastError.includes("_401_") || lastError.includes("_403_")) break;
-
-        const responsesAttempt = await tryResponsesApi({
-          apiKey,
-          model: candidate,
-          systemPrompt,
-          userPrompt,
-          signal: controller.signal,
-        });
-        if (responsesAttempt.parsed) {
-          return {
-            result: responsesAttempt.parsed,
-            engine: "openai",
-            model: candidate,
-            debug: null,
-          };
-        }
-        lastError = responsesAttempt.error ?? lastError;
-
-        if (lastError.includes("_401_") || lastError.includes("_403_")) break;
-      } catch (innerErr: any) {
-        if (innerErr?.name === "AbortError") {
-          lastError = `openai_timeout_model:${candidate}`;
-        } else {
-          lastError = `openai_fetch_model:${candidate}_${innerErr?.message ?? "unknown"}`;
-        }
-        continue;
-      } finally {
-        // ✅ 항상 timer 정리 (memory leak 방지)
-        clearTimeout(timer);
+      if (strictAttempt.text) {
+        const generatedText = strictAttempt.text.trim();
+        return {
+          result: parseResultFromGeneratedText(generatedText, params.language),
+          generatedText,
+          engine: "openai",
+          model,
+          debug: null,
+        };
       }
+
+      lastError = strictAttempt.error ?? lastError;
+      if (lastError.includes("_401_") || lastError.includes("_403_")) {
+        break;
+      }
+
+      const safeAttempt = await callResponsesApi({
+        apiKey,
+        model,
+        developerPrompt,
+        userPrompt,
+        signal: controller.signal,
+        strictMode: false,
+      });
+
+      if (safeAttempt.text) {
+        const generatedText = safeAttempt.text.trim();
+        return {
+          result: parseResultFromGeneratedText(generatedText, params.language),
+          generatedText,
+          engine: "openai",
+          model,
+          debug: null,
+        };
+      }
+
+      lastError = safeAttempt.error ?? lastError;
+      if (lastError.includes("_401_") || lastError.includes("_403_")) {
+        break;
+      }
+    } catch (err: any) {
+      if (err?.name === "AbortError") {
+        lastError = `openai_timeout_model:${model}`;
+      } else {
+        lastError = `openai_fetch_model:${model}_${truncateError(err?.message ?? "unknown")}`;
+      }
+    } finally {
+      clearTimeout(timer);
     }
-  } catch (error: any) {
-    lastError = `openai_outer_${error?.message ?? "unknown"}`;
   }
 
   throw new Error(lastError);
