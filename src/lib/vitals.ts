@@ -3,6 +3,7 @@ import type { ISODate } from "@/lib/date";
 import { addDays, diffDays, fromISODate, toISODate } from "@/lib/date";
 import { menstrualContextForDate } from "@/lib/menstrual";
 import type { AppState, BioInputs, EmotionEntry } from "@/lib/model";
+import { hasHealthInput } from "@/lib/healthRecords";
 import type { Shift } from "@/lib/types";
 import { defaultMNLState, stepMNLBatteryEngine } from "@/lib/mnlBatteryEngine";
 import { shiftTimes } from "@/lib/wnlInsight";
@@ -84,12 +85,42 @@ export type DailyVital = {
     caf_sleep: number; // normalized caffeine residual used for sleep
     debt_n: number; // 0..1
     sleep_eff: number; // 0..14 (sleep_eff hours)
+    inputReliability?: number; // 0..1
+    dataCoverage?: number; // 0..1
+    daysSinceAnyInput?: number | null;
+    estimatedSleep?: boolean;
+    estimatedCaffeine?: boolean;
+    estimatedStress?: boolean;
+    estimatedActivity?: boolean;
+    estimatedMood?: boolean;
   };
 };
 
 function clamp(n: number, min: number, max: number) {
   const v = Number.isFinite(n) ? n : min;
   return Math.max(min, Math.min(max, v));
+}
+
+function round1(n: number) {
+  return Math.round(n * 10) / 10;
+}
+
+function targetSleepHoursForShift(shift: Shift) {
+  return 7.0 + (shift === "N" ? 0.5 : shift === "E" ? 0.25 : shift === "M" ? 0.15 : 0);
+}
+
+function defaultCaffeineTimeForShift(shift: Shift) {
+  if (shift === "N") return "01:30";
+  if (shift === "E") return "18:00";
+  return "14:00";
+}
+
+type NumericObservation = { value: number; iso: ISODate; shift: Shift };
+type TimeObservation = { value: string; iso: ISODate; shift: Shift };
+
+function pushRecentObs<T>(arr: T[], item: T, limit = 4) {
+  arr.unshift(item);
+  if (arr.length > limit) arr.length = limit;
 }
 
 function toneFromScore(score01: number): RiskTone {
@@ -234,6 +265,14 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
   const computeDays = Math.max(0, diffDays(end, computeStart));
   let engineState = defaultMNLState();
   let hasSleepHistory = false;
+  let lastAnyInputISO: ISODate | null = null;
+  const recentSleepObs: NumericObservation[] = [];
+  const recentNapObs: NumericObservation[] = [];
+  const recentCaffeineObs: NumericObservation[] = [];
+  const recentCaffeineTimeObs: TimeObservation[] = [];
+  const recentStressObs: NumericObservation[] = [];
+  const recentActivityObs: NumericObservation[] = [];
+  const recentMoodObs: NumericObservation[] = [];
 
   const computed = new Map<ISODate, DailyVital>();
 
@@ -247,22 +286,192 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
 
     const menstrual = menstrualContextForDate(iso, menstrualSettings);
 
-    const hasSleepDurationLog = bio.sleepHours != null || (bio as any).napHours != null;
-    const stressLvl = clamp(Number((bio.stress ?? 0) as any) + 1, 1, 4);
-    const activityLvl = clamp(Number((bio.activity ?? 0) as any) + 1, 1, 4);
-    const moodLvl = clamp(Number(emotion?.mood ?? 5), 1, 5);
-
     const lmp = menstrualSettings?.enabled ? (menstrualSettings?.lastPeriodStart ?? null) : null;
     const cycleLen = menstrualSettings?.cycleLength ?? 28;
     const periodLen = menstrualSettings?.periodLength ?? 5;
 
-    const sleepQuality = (bio as any).sleepQuality ?? null;
-    const sleepTiming = (bio as any).sleepTiming ?? "auto";
-    const caffeineLastAt = (bio as any).caffeineLastAt ?? null;
-    const fatigueLevel = (bio as any).fatigueLevel ?? null;
-    const menstrualStatus = (bio as any).menstrualStatus ?? null;
-    const menstrualFlow = (bio as any).menstrualFlow ?? null;
-    const overtimeHours = (bio as any).shiftOvertimeHours ?? null;
+    const rawSleep = bio.sleepHours ?? null;
+    const rawNap = (bio as any).napHours ?? null;
+    const rawStress = (bio.stress ?? null) as number | null;
+    const rawActivity = (bio.activity ?? null) as number | null;
+    const rawMood = emotion?.mood ?? null;
+    const rawCaffeineMg = bio.caffeineMg ?? null;
+    const rawCaffeineLastAt = (bio as any).caffeineLastAt ?? null;
+    const rawSleepQuality = (bio as any).sleepQuality ?? null;
+    const rawSleepTiming = (bio as any).sleepTiming ?? "auto";
+    const rawFatigueLevel = (bio as any).fatigueLevel ?? null;
+    const rawMenstrualStatus = (bio as any).menstrualStatus ?? null;
+    const rawMenstrualFlow = (bio as any).menstrualFlow ?? null;
+    const rawOvertimeHours = (bio as any).shiftOvertimeHours ?? null;
+    const rawSymptomSeverity = clamp(Number((bio as any).symptomSeverity ?? 0), 0, 3);
+
+    const hasAnyRawInput = hasHealthInput(bio, emotion ?? null);
+    if (hasAnyRawInput) lastAnyInputISO = iso;
+    const daysSinceAnyInput = lastAnyInputISO ? diffDays(iso, lastAnyInputISO) : null;
+
+    if (rawSleep != null) pushRecentObs(recentSleepObs, { value: rawSleep, iso, shift });
+    if (rawNap != null) pushRecentObs(recentNapObs, { value: rawNap, iso, shift });
+    if (rawCaffeineMg != null) pushRecentObs(recentCaffeineObs, { value: rawCaffeineMg, iso, shift });
+    if (rawCaffeineLastAt) pushRecentObs(recentCaffeineTimeObs, { value: rawCaffeineLastAt, iso, shift });
+    if (rawStress != null) pushRecentObs(recentStressObs, { value: rawStress, iso, shift });
+    if (rawActivity != null) pushRecentObs(recentActivityObs, { value: rawActivity, iso, shift });
+    if (rawMood != null) pushRecentObs(recentMoodObs, { value: rawMood, iso, shift });
+
+    let effectiveSleepHours = rawSleep;
+    let effectiveNapHours = rawNap;
+    let effectiveStress = rawStress;
+    let effectiveActivity = rawActivity;
+    let effectiveMood = rawMood;
+    let effectiveCaffeineMg = rawCaffeineMg;
+    let effectiveCaffeineLastAt = rawCaffeineLastAt;
+
+    let estimatedSleep = false;
+    let estimatedCaffeine = false;
+    let estimatedStress = false;
+    let estimatedActivity = false;
+    let estimatedMood = false;
+
+    if (effectiveSleepHours == null && effectiveNapHours == null && recentSleepObs.length) {
+      const prev = recentSleepObs[0];
+      const gap = diffDays(iso, prev.iso);
+      if (gap >= 1 && gap <= 2) {
+        const baseline = targetSleepHoursForShift(shift);
+        const carry = gap === 1 ? 0.72 : 0.48;
+        const shiftAdj = prev.shift === shift ? 0.06 : -0.04;
+        const weight = clamp(carry + shiftAdj, 0.35, 0.86);
+        effectiveSleepHours = round1(clamp(prev.value * weight + baseline * (1 - weight), 4.5, 10));
+        estimatedSleep = true;
+
+        if (effectiveNapHours == null && recentNapObs.length) {
+          const napPrev = recentNapObs[0];
+          const napGap = diffDays(iso, napPrev.iso);
+          if (napGap >= 1 && napGap <= 2) {
+            const napCarry = napGap === 1 ? 0.55 : 0.32;
+            const napEst = round1(clamp(napPrev.value * napCarry, 0, 2));
+            effectiveNapHours = napEst >= 0.25 ? napEst : null;
+          }
+        }
+      }
+    }
+
+    if (effectiveStress == null && recentStressObs.length) {
+      const prev = recentStressObs[0];
+      const gap = diffDays(iso, prev.iso);
+      if (gap >= 1 && gap <= 2) {
+        const carry = gap === 1 ? 0.62 : 0.38;
+        effectiveStress = Math.round(clamp(prev.value * carry + 1 * (1 - carry), 0, 3));
+        estimatedStress = true;
+      }
+    }
+
+    if (effectiveActivity == null && recentActivityObs.length) {
+      const prev = recentActivityObs[0];
+      const gap = diffDays(iso, prev.iso);
+      if (gap >= 1 && gap <= 2) {
+        const carry = gap === 1 ? 0.58 : 0.34;
+        effectiveActivity = Math.round(clamp(prev.value * carry + 1 * (1 - carry), 0, 3));
+        estimatedActivity = true;
+      }
+    }
+
+    if (effectiveMood == null && recentMoodObs.length) {
+      const prev = recentMoodObs[0];
+      const gap = diffDays(iso, prev.iso);
+      if (gap >= 1 && gap <= 2) {
+        const carry = gap === 1 ? 0.65 : 0.4;
+        effectiveMood = Math.round(clamp(prev.value * carry + 3 * (1 - carry), 1, 5)) as 1 | 2 | 3 | 4 | 5;
+        estimatedMood = true;
+      }
+    }
+
+    if (effectiveCaffeineMg == null && effectiveCaffeineLastAt == null && recentCaffeineObs.length) {
+      const prev = recentCaffeineObs[0];
+      const gap = diffDays(iso, prev.iso);
+      if (gap >= 1 && gap <= 2) {
+        const carry = gap === 1 ? 0.45 : 0.25;
+        const estMg = Math.round(clamp(prev.value * carry, 0, 450));
+        if (estMg >= 25) {
+          effectiveCaffeineMg = estMg;
+          estimatedCaffeine = true;
+          if (recentCaffeineTimeObs.length && diffDays(iso, recentCaffeineTimeObs[0].iso) <= 2) {
+            effectiveCaffeineLastAt = recentCaffeineTimeObs[0].value;
+          } else {
+            effectiveCaffeineLastAt = defaultCaffeineTimeForShift(shift);
+          }
+        }
+      }
+    } else if (effectiveCaffeineMg == null && effectiveCaffeineLastAt != null) {
+      // If time is logged without mg, infer a conservative one-cup baseline.
+      const prev = recentCaffeineObs[0];
+      const prevGap = prev ? diffDays(iso, prev.iso) : null;
+      if (prev && prevGap != null && prevGap >= 1 && prevGap <= 2) {
+        effectiveCaffeineMg = Math.round(clamp(prev.value * 0.7, 60, 300));
+      } else {
+        effectiveCaffeineMg = 120;
+      }
+      estimatedCaffeine = true;
+    }
+
+    const hasSleepDurationSignal = effectiveSleepHours != null || effectiveNapHours != null;
+
+    const observedSleep = rawSleep != null || rawNap != null ? 1 : 0;
+    const observedStress = rawStress != null ? 1 : 0;
+    const observedActivity = rawActivity != null ? 1 : 0;
+    const observedMood = rawMood != null ? 1 : 0;
+    const observedCaffeine = rawCaffeineMg != null || rawCaffeineLastAt != null ? 1 : 0;
+    const observedMenstrual =
+      rawSymptomSeverity > 0 ||
+      (rawMenstrualStatus != null && rawMenstrualStatus !== "none") ||
+      Number(rawMenstrualFlow ?? 0) > 0
+        ? 1
+        : 0;
+
+    const estimatedSignals =
+      (estimatedSleep ? 1 : 0) +
+      (estimatedStress ? 1 : 0) +
+      (estimatedActivity ? 1 : 0) +
+      (estimatedMood ? 1 : 0) +
+      (estimatedCaffeine ? 1 : 0);
+    const observedSignals =
+      observedSleep +
+      observedStress +
+      observedActivity +
+      observedMood +
+      observedCaffeine +
+      observedMenstrual;
+    const dataCoverage = clamp((observedSignals + estimatedSignals) / 6, 0, 1);
+    let inputReliability = clamp(
+      0.35 +
+      (observedSleep ? 0.25 : 0) +
+      (observedCaffeine ? 0.1 : 0) +
+      (observedStress ? 0.1 : 0) +
+      (observedActivity ? 0.08 : 0) +
+      (observedMood ? 0.08 : 0) +
+      (observedMenstrual ? 0.04 : 0) +
+      (estimatedSleep ? 0.15 : 0) +
+      (estimatedCaffeine ? 0.06 : 0) +
+      (estimatedStress ? 0.05 : 0) +
+      (estimatedActivity ? 0.04 : 0) +
+      (estimatedMood ? 0.04 : 0),
+      0.35,
+      1
+    );
+    if (daysSinceAnyInput != null && daysSinceAnyInput > 2) {
+      const staleFactor = clamp(1 - 0.08 * (daysSinceAnyInput - 2), 0.5, 1);
+      inputReliability = clamp(inputReliability * staleFactor, 0.35, 1);
+    }
+
+    const sleepQuality = rawSleepQuality;
+    const sleepTiming = rawSleepTiming;
+    const caffeineLastAt = effectiveCaffeineLastAt;
+    const fatigueLevel = rawFatigueLevel;
+    const menstrualStatus = rawMenstrualStatus;
+    const menstrualFlow = rawMenstrualFlow;
+    const overtimeHours = rawOvertimeHours;
+
+    const stressLvl = clamp(Number((effectiveStress ?? 1) as any) + 1, 1, 4);
+    const activityLvl = clamp(Number((effectiveActivity ?? 1) as any) + 1, 1, 4);
+    const moodLvl = clamp(Number(effectiveMood ?? 3), 1, 5);
 
     const prevISO = toISODate(addDays(fromISODate(iso), -1));
     const prevShift = (schedule[prevISO] ?? defaultShiftFallback()) as Shift;
@@ -276,11 +485,11 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
       {
         dateISO: iso,
         shift,
-        sleepHours: bio.sleepHours ?? null,
-        napHours: (bio as any).napHours ?? null,
+        sleepHours: effectiveSleepHours,
+        napHours: effectiveNapHours,
         sleepQuality,
         sleepTiming,
-        caffeineMg: bio.caffeineMg ?? null,
+        caffeineMg: effectiveCaffeineMg,
         caffeineLastAt,
         stressLvl,
         activityLvl,
@@ -289,7 +498,7 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
         lmpDateISO: lmp,
         cycleLenAvg: cycleLen,
         periodLen,
-        symptomSeverity: clamp(Number((bio as any).symptomSeverity ?? 0), 0, 3),
+        symptomSeverity: rawSymptomSeverity,
         menstrualStatus,
         menstrualFlow,
         nightStreak,
@@ -298,6 +507,13 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
         shiftLengthHours: shiftHours,
         overtimeHours,
         hasPriorSleepLog: hasSleepHistory,
+        inputReliability,
+        daysSinceAnyInput,
+        estimatedSleep,
+        estimatedCaffeine,
+        estimatedStress,
+        estimatedActivity,
+        estimatedMood,
       },
       {
         chronotype: profile?.chronotype ?? 0.5,
@@ -305,7 +521,7 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
       }
     );
 
-    if (hasSleepDurationLog) hasSleepHistory = true;
+    if (hasSleepDurationSignal) hasSleepHistory = true;
 
     const prevBB = engineState.BB;
     const prevMB = engineState.MB;
@@ -326,17 +542,17 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
     const mf = Number(d.MF ?? 1);
     const hasShiftSignal = schedule[iso] != null;
     const hasSleepSignal =
-      hasSleepDurationLog ||
+      hasSleepDurationSignal ||
       hasSleepHistory ||
       Number(d.debt_n ?? 0) > 0;
-    const hasStressSignal = bio.stress != null;
-    const hasActivitySignal = bio.activity != null;
-    const hasCaffeineSignal = (bio.caffeineMg != null && Number(bio.caffeineMg) > 0) || caffeineLastAt != null;
+    const hasStressSignal = effectiveStress != null;
+    const hasActivitySignal = effectiveActivity != null;
+    const hasCaffeineSignal = (effectiveCaffeineMg != null && Number(effectiveCaffeineMg) > 0) || caffeineLastAt != null;
     const hasMenstrualSignal =
-      Number((bio as any).symptomSeverity ?? 0) > 0 ||
+      rawSymptomSeverity > 0 ||
       menstrualStatus != null ||
       Number(menstrualFlow ?? 0) > 0;
-    const hasMoodSignal = emotion?.mood != null;
+    const hasMoodSignal = effectiveMood != null;
 
     const sleepImpact = hasSleepSignal ? clamp((1 - sri) + Number(d.debt_n ?? 0), 0, 2) : 0;
     const stressImpact = hasStressSignal ? clamp(slf, 0, 1) : 0;
@@ -366,14 +582,14 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
       note,
       emotion,
       inputs: {
-        sleepHours: bio.sleepHours ?? null,
-        napHours: (bio as any).napHours ?? null,
+        sleepHours: effectiveSleepHours,
+        napHours: effectiveNapHours,
         sleepQuality: (bio as any).sleepQuality ?? null,
         sleepTiming: (bio as any).sleepTiming ?? null,
-        stress: (bio.stress ?? null) as any,
-        activity: (bio.activity ?? null) as any,
-        caffeineMg: bio.caffeineMg ?? null,
-        caffeineLastAt: (bio as any).caffeineLastAt ?? null,
+        stress: (effectiveStress ?? null) as any,
+        activity: (effectiveActivity ?? null) as any,
+        caffeineMg: effectiveCaffeineMg,
+        caffeineLastAt,
         fatigueLevel: (bio as any).fatigueLevel ?? null,
         symptomSeverity: (bio as any).symptomSeverity ?? null,
         menstrualStatus: (bio as any).menstrualStatus ?? null,
@@ -409,6 +625,14 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
         caf_sleep: clamp(d.caf_sleep ?? 0, 0, 1),
         debt_n: clamp(d.debt_n ?? 0, 0, 1),
         sleep_eff: clamp(d.sleep_eff ?? 0, 0, 14),
+        inputReliability: clamp(Number(d.inputReliability ?? inputReliability), 0, 1),
+        dataCoverage,
+        daysSinceAnyInput,
+        estimatedSleep,
+        estimatedCaffeine,
+        estimatedStress,
+        estimatedActivity,
+        estimatedMood,
       },
       factors,
     });

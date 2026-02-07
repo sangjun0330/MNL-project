@@ -81,9 +81,31 @@ export function useInsightsData() {
     }
     return set;
   }, [state.bio, state.emotions, start]);
-  const vitalsRecorded = useMemo(() => vitals.filter((v) => recordedDateSet.has(v.dateISO)), [vitals, recordedDateSet]);
-  const todayHasInput = useMemo(() => recordedDateSet.has(end), [recordedDateSet, end]);
-  const todayVital = useMemo(() => (todayHasInput ? vmap.get(end) ?? null : null), [todayHasInput, vmap, end]);
+  const vitalsRecorded = useMemo(
+    () =>
+      vitals.filter((v) => {
+        if (recordedDateSet.has(v.dateISO)) return true;
+        const gap = v.engine?.daysSinceAnyInput ?? 99;
+        const reliability = v.engine?.inputReliability ?? 0;
+        return gap <= 2 && reliability >= 0.45;
+      }),
+    [vitals, recordedDateSet]
+  );
+  const todayVitalCandidate = useMemo(() => vmap.get(end) ?? null, [vmap, end]);
+  const todayHasInput = useMemo(
+    () => {
+      if (recordedDateSet.has(end)) return true;
+      if (!todayVitalCandidate) return false;
+      const gap = todayVitalCandidate.engine?.daysSinceAnyInput ?? 99;
+      const reliability = todayVitalCandidate.engine?.inputReliability ?? 0;
+      return gap <= 2 && reliability >= 0.45;
+    },
+    [recordedDateSet, end, todayVitalCandidate]
+  );
+  const todayVital = useMemo(
+    () => (todayHasInput ? todayVitalCandidate : null),
+    [todayHasInput, todayVitalCandidate]
+  );
 
   const todayShiftFromSchedule = state.schedule?.[end] as Shift | undefined;
   const hasTodayShift = Boolean(todayShiftFromSchedule);

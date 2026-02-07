@@ -40,6 +40,13 @@ function hasSleepHours(v: unknown): v is number {
   return typeof v === "number" && Number.isFinite(v);
 }
 
+function hasReliableEstimatedSignal(v: { engine?: { inputReliability?: number; daysSinceAnyInput?: number | null } } | null) {
+  if (!v) return false;
+  const reliability = v.engine?.inputReliability ?? 0;
+  const gap = v.engine?.daysSinceAnyInput ?? 99;
+  return reliability >= 0.45 && gap <= 2;
+}
+
 function bad(status: number, error: string) {
   const body: AIRecoveryApiError = { ok: false, error };
   return NextResponse.json(body, { status });
@@ -106,8 +113,12 @@ export async function GET(req: NextRequest) {
     }
 
     const start7 = toISODate(addDays(fromISODate(analysisEnd), -6));
-    const vitals7 = vitals14.filter((v) => v.dateISO >= start7 && inputDateSet.has(v.dateISO));
-    const prevWeek = vitals14.filter((v) => v.dateISO < start7 && inputDateSet.has(v.dateISO));
+    const vitals7 = vitals14.filter(
+      (v) => v.dateISO >= start7 && (inputDateSet.has(v.dateISO) || hasReliableEstimatedSignal(v))
+    );
+    const prevWeek = vitals14.filter(
+      (v) => v.dateISO < start7 && (inputDateSet.has(v.dateISO) || hasReliableEstimatedSignal(v))
+    );
     const anchorVital = vitals14.find((v) => v.dateISO === analysisEnd) ?? vitals14[vitals14.length - 1] ?? null;
     const todayShift = (readShift(state.schedule, today) ?? anchorVital?.shift ?? "OFF") as Shift;
     const tomorrowISO = toISODate(addDays(fromISODate(today), 1));
