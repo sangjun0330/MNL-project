@@ -76,11 +76,21 @@ export function useAIRecoveryInsights(): HookResult {
 
       if (signal.aborted) return;
 
-      let json: any;
+      let text = "";
       try {
-        json = await res.json();
+        text = await res.text();
       } catch {
-        throw new Error("invalid_json_response");
+        throw new Error(`http_${res.status}_empty_response`);
+      }
+
+      if (signal.aborted) return;
+
+      let json: any = null;
+      try {
+        json = text ? JSON.parse(text) : null;
+      } catch {
+        const snippet = text.slice(0, 160).replace(/\s+/g, " ").trim();
+        throw new Error(`http_${res.status}_non_json:${snippet || "empty"}`);
       }
 
       if (signal.aborted) return;
