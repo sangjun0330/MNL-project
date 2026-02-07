@@ -13,7 +13,19 @@ export function InsightsAIRecoveryDetail() {
   const text = useMemo(() => {
     if (loading) return t("OpenAI 분석 중...");
     if (!data) {
-      if (error) return `${t("AI 호출에 실패했어요. 잠시 후 다시 시도해 주세요.")}\n\n${error}`;
+      if (error) {
+        if (error.includes("unsupported_country_region_territory")) {
+          return [
+            t("AI 호출에 실패했어요. 잠시 후 다시 시도해 주세요."),
+            "",
+            t("OpenAI가 현재 서버 지역을 지원하지 않아 요청이 거절됐어요."),
+            t("Cloudflare에 설정한 OPENAI_API_KEY가 지원 지역의 키인지 확인해 주세요."),
+            "",
+            `[debug] ${error}`,
+          ].join("\n");
+        }
+        return `${t("AI 호출에 실패했어요. 잠시 후 다시 시도해 주세요.")}\n\n${error}`;
+      }
       return t("AI 호출 대기 중...");
     }
     if (data.generatedText && data.generatedText.trim()) return data.generatedText.trim();
