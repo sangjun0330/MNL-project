@@ -80,13 +80,6 @@ function compactText(text: string, max = 80) {
 export function InsightsPage() {
   const { t } = useI18n();
   const router = useRouter();
-  const {
-    data: aiRecovery,
-    loading: aiRecoveryLoading,
-    fromSupabase,
-    requiresTodaySleep,
-    error: aiRecoveryError,
-  } = useAIRecoveryInsights({ mode: "cache" });
   const [openSleepGuide, setOpenSleepGuide] = useState(false);
   const {
     end,
@@ -105,6 +98,14 @@ export function InsightsPage() {
     recordedDays,
     hasInsightData,
   } = useInsightsData();
+  const insightsLocked = isInsightsLocked(recordedDays);
+  const {
+    data: aiRecovery,
+    loading: aiRecoveryLoading,
+    fromSupabase,
+    requiresTodaySleep,
+    error: aiRecoveryError,
+  } = useAIRecoveryInsights({ mode: "cache", enabled: !insightsLocked });
 
   useEffect(() => {
     if (requiresTodaySleep) setOpenSleepGuide(true);
@@ -160,7 +161,7 @@ export function InsightsPage() {
     router.push("/schedule?openHealthLog=today&focus=sleep");
   };
 
-  if (isInsightsLocked(recordedDays)) {
+  if (insightsLocked) {
     return (
       <div className="mx-auto w-full max-w-[920px] px-3 pb-24 pt-6 sm:px-4">
         <div className="mb-4">

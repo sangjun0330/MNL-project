@@ -99,6 +99,12 @@ function truncateError(raw: string, size = 220) {
 
 function buildUserContext(params: GenerateOpenAIRecoveryParams) {
   const { todayISO, language, todayShift, nextShift, todayVital, vitals7, prevWeekVitals } = params;
+  const menstrualTrackingEnabled =
+    typeof todayVital?.menstrual?.enabled === "boolean"
+      ? todayVital.menstrual.enabled
+      : (vitals7.find((vital) => typeof vital.menstrual?.enabled === "boolean")?.menstrual?.enabled ??
+        prevWeekVitals.find((vital) => typeof vital.menstrual?.enabled === "boolean")?.menstrual?.enabled ??
+        false);
   const avg7 = vitals7.length
     ? Math.round(
         vitals7.reduce((sum, vital) => sum + Math.min(vital.body.value, vital.mental.ema), 0) / vitals7.length
@@ -114,6 +120,7 @@ function buildUserContext(params: GenerateOpenAIRecoveryParams) {
   return {
     language,
     dateISO: todayISO,
+    menstrualTrackingEnabled,
     shift: {
       today: todayShift,
       next: nextShift,
@@ -183,6 +190,8 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
       "[C] 오늘의 회복 처방",
       "- 해당되는 항목만 작성",
       "- 우선순위: 수면 > 교대근무 > 카페인 > 생리주기 > 스트레스&감정 > 신체활동",
+      "- menstrualTrackingEnabled가 false면 [생리주기] 섹션을 절대 출력하지 말 것 (번호도 1~5만 사용)",
+      "- menstrualTrackingEnabled가 true면 [생리주기] 포함 가능 (번호 1~6 사용 가능)",
       "- 각 항목은 '[카테고리명]' 헤더로 시작",
       "- 각 항목은 설명 1문장 + 행동 2개로 짧게 작성",
       "- 생리주기는 전문용어 없이 쉬운 단어 사용",
@@ -213,6 +222,8 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
     "[A] One-line summary",
     "[B] Urgent alert (only if 2+ risks, otherwise write 'none')",
     "[C] Today's recovery plan (only relevant categories, prioritized sleep > shift > caffeine > menstrual > stress > activity). Each category must start with [Category].",
+    "If menstrualTrackingEnabled is false, do not include any menstrual section in [C] and use only 1-5 category numbering.",
+    "If menstrualTrackingEnabled is true, menstrual section may be included and 1-6 numbering is allowed.",
     "[D] Weekly AI note (weekly summary -> personal pattern -> next week preview)",
     "Tone: warm peer nurse voice, no medical jargon, no blame, concrete actions.",
     "No duplicated sentences.",
@@ -756,9 +767,13 @@ export async function generateAIRecoveryWithOpenAI(
 
     const generatedText = attempt.text.trim();
     const parsed = parseResultFromGeneratedText(generatedText, params.language);
+    const safeSections = context.menstrualTrackingEnabled
+      ? parsed.sections
+      : parsed.sections.filter((section) => section.category !== "menstrual");
     const weeklyFallback = buildFallbackWeeklySummary(params);
     const mergedResult: AIRecoveryResult = {
       ...parsed,
+      sections: safeSections,
       weeklySummary: mergeWeeklySummary(parsed.weeklySummary, weeklyFallback),
     };
     return {
@@ -831,10 +846,15 @@ export async function translateAIRecoveryToEnglish(
     const translatedText = attempt.text.trim();
     const parsed = parseResultFromGeneratedText(translatedText, "en");
     const fallback = translateFallbackResult(source.result);
+    const menstrualAllowed = source.result.sections.some((section) => section.category === "menstrual");
+    const translatedSections = parsed.sections.length ? parsed.sections : fallback.sections;
+    const safeSections = menstrualAllowed
+      ? translatedSections
+      : translatedSections.filter((section) => section.category !== "menstrual");
     const mergedResult: AIRecoveryResult = {
       headline: parsed.headline?.trim() ? parsed.headline : fallback.headline,
       compoundAlert: parsed.compoundAlert ?? fallback.compoundAlert,
-      sections: parsed.sections.length ? parsed.sections : fallback.sections,
+      sections: safeSections,
       weeklySummary: mergeWeeklySummary(parsed.weeklySummary, fallback.weeklySummary),
     };
 

@@ -10,6 +10,7 @@ type FetchMode = "cache" | "generate";
 
 type HookOptions = {
   mode?: FetchMode;
+  enabled?: boolean;
 };
 
 type HookResult = {
@@ -76,6 +77,7 @@ function getOrStartGenerate(lang: "ko" | "en", dateISO: string) {
 
 export function useAIRecoveryInsights(options?: HookOptions): HookResult {
   const mode = options?.mode ?? "cache";
+  const enabled = options?.enabled ?? true;
   const { lang } = useI18n();
   const { state } = useInsightsData();
   const [remoteData, setRemoteData] = useState<AIRecoveryPayload | null>(null);
@@ -86,6 +88,13 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
   const isStoreHydrated = state.selected !== ("1970-01-01" as any);
 
   useEffect(() => {
+    if (!enabled) {
+      setRemoteData(null);
+      setError(null);
+      setGenerating(false);
+      setLoading(false);
+      return;
+    }
     if (!isStoreHydrated) return;
     const dateISO = todayISO();
     const key = requestKey(lang, dateISO);
@@ -143,7 +152,7 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
     return () => {
       active = false;
     };
-  }, [isStoreHydrated, lang, mode]);
+  }, [enabled, isStoreHydrated, lang, mode]);
 
   return useMemo(
     () => ({

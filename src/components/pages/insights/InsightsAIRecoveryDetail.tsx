@@ -1,8 +1,11 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
+import Image from "next/image";
 import { DetailCard, DetailChip, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
+import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { useAIRecoveryInsights } from "@/components/insights/useAIRecoveryInsights";
+import { INSIGHTS_MIN_DAYS, isInsightsLocked, useInsightsData } from "@/components/insights/useInsightsData";
 import { formatKoreanDate } from "@/lib/date";
 import { useI18n } from "@/lib/useI18n";
 import type { RecoverySection } from "@/lib/aiRecovery";
@@ -89,23 +92,54 @@ function normalizeNarrativeText(text: string, lang: "ko" | "en") {
   return out;
 }
 
+function pickHighlightPhrases(text: string) {
+  const sentenceList = text
+    .split(/(?<=[.!?]|다\.|요\.)\s+|\n+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+  const strongKeyword = /(핵심|최우선|주의|경고|위험|중요|필수|회복|수면|카페인|스트레스|기분|priority|warning|critical|recovery|sleep|caffeine|stress|mood)/i;
+  const numericSignal = /\d+(?:\.\d+)?\s*(?:h|시간|%|mg|잔|점)/i;
+  const picked: string[] = [];
+
+  for (const sentence of sentenceList) {
+    if (sentence.length < 10) continue;
+    if ((strongKeyword.test(sentence) && numericSignal.test(sentence)) || /최우선|반드시|critical|must|warning/i.test(sentence)) {
+      picked.push(sentence);
+    }
+    if (picked.length >= 2) break;
+  }
+
+  if (!picked.length) {
+    const fallback = sentenceList.find((sentence) => strongKeyword.test(sentence));
+    if (fallback) picked.push(fallback);
+  }
+  return picked;
+}
+
 function highlightInline(text: string) {
-  const tokens = text.split(
-    /(\d+(?:\.\d+)?(?:h|시간|%|점)?|수면부채|수면|회복|핵심|우선|주의|경고|카페인|스트레스|기분|OFF|N|E|D|M)/g
-  );
-  return tokens.map((token, idx) => {
-    if (!token) return null;
-    const emph =
-      /^(?:\d+(?:\.\d+)?(?:h|시간|%|점)?|수면부채|수면|회복|핵심|우선|주의|경고|카페인|스트레스|기분|OFF|N|E|D|M)$/u.test(
-        token
-      );
-    if (!emph) return token;
-    return (
-      <mark key={`${token}-${idx}`} className="rounded-[4px] bg-yellow-200/75 px-[2px] font-extrabold text-ios-text">
-        {token}
+  const phrases = pickHighlightPhrases(text);
+  if (!phrases.length) return text;
+
+  const nodes: ReactNode[] = [];
+  let cursor = 0;
+
+  for (const phrase of phrases) {
+    const index = text.indexOf(phrase, cursor);
+    if (index < 0) continue;
+    if (index > cursor) nodes.push(text.slice(cursor, index));
+    nodes.push(
+      <mark
+        key={`${index}-${phrase.slice(0, 20)}`}
+        className="rounded-[6px] bg-yellow-100/90 px-[4px] py-[1px] font-semibold text-ios-text"
+      >
+        {phrase}
       </mark>
     );
-  });
+    cursor = index + phrase.length;
+  }
+
+  if (cursor < text.length) nodes.push(text.slice(cursor));
+  return nodes.length ? nodes : text;
 }
 
 function splitBulletLines(text: string) {
@@ -133,7 +167,9 @@ const CATEGORIES: Array<{
 
 export function InsightsAIRecoveryDetail() {
   const { t } = useI18n();
-  const { data, loading, generating, error } = useAIRecoveryInsights({ mode: "generate" });
+  const { recordedDays } = useInsightsData();
+  const insightsLocked = isInsightsLocked(recordedDays);
+  const { data, loading, generating, error } = useAIRecoveryInsights({ mode: "generate", enabled: !insightsLocked });
   const lang = data?.language ?? "ko";
   const errorLines = useMemo(() => (error ? presentError(error, t) : []), [error, t]);
   const errorCode = useMemo(() => (error ? compactErrorCode(error) : ""), [error]);
@@ -184,7 +220,11 @@ export function InsightsAIRecoveryDetail() {
       tone="navy"
       backHref="/insights"
     >
-      {loading && !data ? (
+      {insightsLocked ? (
+        <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />
+      ) : null}
+
+      {!insightsLocked && loading && !data ? (
         <DetailCard className="p-5">
           <div className="text-[15px] font-semibold text-ios-sub">{t("OpenAI 생성 분석")}</div>
           <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
@@ -193,7 +233,7 @@ export function InsightsAIRecoveryDetail() {
         </DetailCard>
       ) : null}
 
-      {!loading && !data ? (
+      {!insightsLocked && !loading && !data ? (
         <DetailCard className="p-5">
           <div className="text-[17px] font-bold tracking-[-0.01em] text-ios-text">{t("AI 호출에 실패했어요.")}</div>
           <div className="mt-2 space-y-1 text-[14px] leading-relaxed text-ios-sub">
@@ -205,7 +245,7 @@ export function InsightsAIRecoveryDetail() {
         </DetailCard>
       ) : null}
 
-      {!loading && data ? (
+      {!insightsLocked && !loading && data ? (
         <>
           <DetailCard className="p-5">
             <div className="text-[13px] font-semibold text-ios-sub">{t("한줄 요약")}</div>
@@ -238,7 +278,7 @@ export function InsightsAIRecoveryDetail() {
             <div className="text-[13px] font-semibold text-ios-sub">{t("오늘의 회복 처방")}</div>
             {orderedSections.length ? (
               <div className="mt-3 space-y-3">
-                {orderedSections.map(({ meta, section }) => (
+                {orderedSections.map(({ meta, section }, index) => (
                   <div
                     key={`${meta.key}-${section?.title}`}
                     className="rounded-2xl border border-ios-sep bg-white p-4 shadow-apple-sm"
@@ -246,7 +286,7 @@ export function InsightsAIRecoveryDetail() {
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
                         <div className="flex h-6 w-6 items-center justify-center rounded-full bg-ios-bg text-[12px] font-bold text-ios-sub">
-                          {meta.icon}
+                          {index + 1}
                         </div>
                         <span className="text-[17px] font-bold text-ios-text">{section?.title || meta.titleKo}</span>
                       </div>
@@ -317,13 +357,35 @@ export function InsightsAIRecoveryDetail() {
         </>
       ) : null}
 
-      {generating && !data ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/10 px-6 backdrop-blur-[1px]">
-          <div className="w-full max-w-[320px] rounded-3xl border border-ios-sep bg-white px-5 py-4 shadow-apple-lg">
-            <div className="text-[16px] font-bold tracking-[-0.01em] text-ios-text">{t("맞춤회복 분석 중")}</div>
-            <p className="mt-2 text-[13px] leading-relaxed text-ios-sub">
-              {t("AI가 현재 상태에 맞춘 맞춤회복을 분석하고 있습니다.")}
-            </p>
+      {generating && !data && !insightsLocked ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden px-6">
+          <div className="absolute inset-0 bg-[radial-gradient(80%_60%_at_50%_15%,rgba(0,122,255,0.16),transparent),linear-gradient(180deg,rgba(18,20,24,0.42),rgba(18,20,24,0.58))] backdrop-blur-[6px]" />
+          <div className="wnl-modal relative w-full max-w-[340px] overflow-hidden rounded-[30px] border border-white/35 bg-white/92 px-6 py-6 shadow-[0_30px_90px_rgba(0,0,0,0.32)]">
+            <div className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-transparent via-[#007AFF] to-transparent wnl-recovery-progress" />
+            <div className="flex items-start gap-3">
+              <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-2xl border border-black/5 bg-[#eef4ff] p-2">
+                <div className="absolute inset-0 wnl-logo-breathe rounded-2xl bg-[radial-gradient(80%_70%_at_50%_40%,rgba(0,122,255,0.22),transparent)]" />
+                <Image
+                  src="/icons/icon-192.png"
+                  alt="RNest"
+                  width={40}
+                  height={40}
+                  className="relative mx-auto mt-[4px] h-10 w-10 object-contain"
+                  priority
+                />
+              </div>
+              <div className="min-w-0">
+                <div className="text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">{t("맞춤회복 분석 중")}</div>
+                <p className="mt-1 text-[13px] leading-relaxed text-ios-sub">
+                  {t("AI가 현재 상태에 맞춘 맞춤회복을 분석하고 있습니다.")}
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-[#007AFF] wnl-dot-pulse" />
+              <span className="h-2 w-2 rounded-full bg-[#007AFF] wnl-dot-pulse [animation-delay:180ms]" />
+              <span className="h-2 w-2 rounded-full bg-[#007AFF] wnl-dot-pulse [animation-delay:360ms]" />
+            </div>
           </div>
         </div>
       ) : null}

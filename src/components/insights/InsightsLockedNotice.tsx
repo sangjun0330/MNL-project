@@ -2,7 +2,7 @@
 
 import { useI18n } from "@/lib/useI18n";
 
-export function InsightsLockedNotice({ recordedDays, minDays = 7 }: { recordedDays: number; minDays?: number }) {
+export function InsightsLockedNotice({ recordedDays, minDays = 3 }: { recordedDays: number; minDays?: number }) {
   const remaining = Math.max(minDays - recordedDays, 0);
   const { t } = useI18n();
   return (
