@@ -32,6 +32,9 @@ export const RNEST_COLORS = {
   nightCard: "#111A2E",
 } as const;
 
+// Backward compatibility alias for older insight components.
+export const WNL_COLORS = RNEST_COLORS;
+
 export type VitalStatus = "stable" | "caution" | "warning" | "observation" | "critical";
 
 function normalizeStatus(status: VitalStatus): "stable" | "caution" | "warning" {
