@@ -57,18 +57,65 @@ function extractCSection(text: string) {
   return text.slice(start, end).trim();
 }
 
+function normalizeNarrativeText(text: string, lang: "ko" | "en") {
+  let out = text;
+
+  out = out.replace(/스트레스\s*\(?\s*([0-3])\s*\)?/g, (_, raw) => {
+    const n = Number(raw);
+    if (n <= 0) return "스트레스가 거의 없는 편";
+    if (n === 1) return "스트레스가 조금 있는 편";
+    if (n === 2) return "스트레스가 꽤 있는 편";
+    return "스트레스가 높은 편";
+  });
+
+  out = out.replace(/기분\s*\(?\s*([1-5])\s*\)?/g, (_, raw) => {
+    const n = Number(raw);
+    if (n <= 1) return "기분이 많이 가라앉은 상태";
+    if (n === 2) return "기분이 다소 가라앉은 상태";
+    if (n === 3) return "기분이 보통인 상태";
+    if (n === 4) return "기분이 좋은 편";
+    return "기분이 매우 좋은 편";
+  });
+
+  out = out.replace(/(\d+(?:\.\d+)?)\s*mg/gi, (_, raw) => {
+    const mg = Number(raw);
+    if (!Number.isFinite(mg)) return `${raw}mg`;
+    const cups = Math.max(0.5, Math.round((mg / 120) * 10) / 10);
+    if (lang === "en") return `about ${cups} cup(s) (${Math.round(mg)}mg)`;
+    return `커피 약 ${cups}잔(${Math.round(mg)}mg)`;
+  });
+
+  out = out.replace(/\s{2,}/g, " ").trim();
+  return out;
+}
+
 function highlightInline(text: string) {
-  const tokens = text.split(/(\d+(?:\.\d+)?(?:h|시간|mg|%|점)?|수면부채|카페인|스트레스|기분|수면)/g);
+  const tokens = text.split(
+    /(\d+(?:\.\d+)?(?:h|시간|%|점)?|수면부채|수면|회복|핵심|우선|주의|경고|카페인|스트레스|기분|OFF|N|E|D|M)/g
+  );
   return tokens.map((token, idx) => {
     if (!token) return null;
-    const emph = /^(?:\d+(?:\.\d+)?(?:h|시간|mg|%|점)?|수면부채|카페인|스트레스|기분|수면)$/u.test(token);
+    const emph =
+      /^(?:\d+(?:\.\d+)?(?:h|시간|%|점)?|수면부채|수면|회복|핵심|우선|주의|경고|카페인|스트레스|기분|OFF|N|E|D|M)$/u.test(
+        token
+      );
     if (!emph) return token;
     return (
-      <span key={`${token}-${idx}`} className="font-extrabold text-ios-text">
+      <mark key={`${token}-${idx}`} className="rounded-[4px] bg-yellow-200/75 px-[2px] font-extrabold text-ios-text">
         {token}
-      </span>
+      </mark>
     );
   });
+}
+
+function splitBulletLines(text: string) {
+  const source = text.trim();
+  if (!source) return [];
+  const items = source
+    .split(/\s+-\s+/)
+    .map((line) => line.replace(/^\-\s*/, "").trim())
+    .filter(Boolean);
+  return items.length > 1 ? items : [source];
 }
 
 const CATEGORIES: Array<{
@@ -87,9 +134,18 @@ const CATEGORIES: Array<{
 export function InsightsAIRecoveryDetail() {
   const { t } = useI18n();
   const { data, loading, generating, error } = useAIRecoveryInsights({ mode: "generate" });
+  const lang = data?.language ?? "ko";
   const errorLines = useMemo(() => (error ? presentError(error, t) : []), [error, t]);
   const errorCode = useMemo(() => (error ? compactErrorCode(error) : ""), [error]);
-  const weekly = data?.result.weeklySummary ?? null;
+  const weekly = useMemo(() => {
+    const w = data?.result.weeklySummary ?? null;
+    if (!w) return null;
+    return {
+      ...w,
+      personalInsight: normalizeNarrativeText(w.personalInsight, lang),
+      nextWeekPreview: normalizeNarrativeText(w.nextWeekPreview, lang),
+    };
+  }, [data?.result.weeklySummary, lang]);
 
   const sectionsByCategory = useMemo(() => {
     const map = new Map<RecoverySection["category"], RecoverySection>();
@@ -106,10 +162,19 @@ export function InsightsAIRecoveryDetail() {
     [sectionsByCategory]
   );
 
+  const weeklyPersonalLines = useMemo(
+    () => splitBulletLines(weekly?.personalInsight ?? ""),
+    [weekly?.personalInsight]
+  );
+  const weeklyPreviewLines = useMemo(
+    () => splitBulletLines(weekly?.nextWeekPreview ?? ""),
+    [weekly?.nextWeekPreview]
+  );
+
   const cFallbackText = useMemo(() => {
     if (!data?.generatedText || orderedSections.length > 0) return "";
-    return extractCSection(data.generatedText);
-  }, [data?.generatedText, orderedSections.length]);
+    return normalizeNarrativeText(extractCSection(data.generatedText), lang);
+  }, [data?.generatedText, lang, orderedSections.length]);
 
   return (
     <InsightDetailShell
@@ -143,17 +208,19 @@ export function InsightsAIRecoveryDetail() {
       {!loading && data ? (
         <>
           <DetailCard className="p-5">
-            <div className="text-[13px] font-semibold text-ios-sub">A · {t("한줄 요약")}</div>
+            <div className="text-[13px] font-semibold text-ios-sub">{t("한줄 요약")}</div>
             <p className="mt-2 text-[17px] font-semibold leading-relaxed tracking-[-0.01em] text-ios-text">
-              {highlightInline(data.result.headline || t("요약이 비어 있어요."))}
+              {highlightInline(normalizeNarrativeText(data.result.headline || t("요약이 비어 있어요."), lang))}
             </p>
           </DetailCard>
 
           <DetailCard className="p-5">
-            <div className="text-[13px] font-semibold text-ios-sub">B · {t("긴급 알림")}</div>
+            <div className="text-[13px] font-semibold text-ios-sub">{t("긴급 알림")}</div>
             {data.result.compoundAlert ? (
               <>
-                <p className="mt-2 text-[14px] leading-relaxed text-ios-text">{data.result.compoundAlert.message}</p>
+                <p className="mt-2 text-[14px] leading-relaxed text-ios-text">
+                  {highlightInline(normalizeNarrativeText(data.result.compoundAlert.message, lang))}
+                </p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {data.result.compoundAlert.factors.map((factor) => (
                     <DetailChip key={factor} color="#E87485">
@@ -168,7 +235,7 @@ export function InsightsAIRecoveryDetail() {
           </DetailCard>
 
           <DetailCard className="p-5">
-            <div className="text-[13px] font-semibold text-ios-sub">C · {t("오늘의 회복 처방")}</div>
+            <div className="text-[13px] font-semibold text-ios-sub">{t("오늘의 회복 처방")}</div>
             {orderedSections.length ? (
               <div className="mt-3 space-y-3">
                 {orderedSections.map(({ meta, section }) => (
@@ -188,14 +255,14 @@ export function InsightsAIRecoveryDetail() {
                       </DetailChip>
                     </div>
                     <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
-                      {section?.description || t("오늘 컨디션 기준 핵심 조언입니다.")}
+                      {highlightInline(normalizeNarrativeText(section?.description || t("오늘 컨디션 기준 핵심 조언입니다."), lang))}
                     </p>
                     {section?.tips?.length ? (
                       <ol className="mt-3 space-y-2 text-[14px] leading-relaxed text-ios-text">
                         {section.tips.map((tip, idx) => (
                           <li key={`${meta.key}-${idx}`} className="flex gap-2">
                             <span className="font-semibold text-ios-sub">{idx + 1}.</span>
-                            <span>{tip}</span>
+                            <span>{highlightInline(normalizeNarrativeText(tip, lang))}</span>
                           </li>
                         ))}
                       </ol>
@@ -211,7 +278,7 @@ export function InsightsAIRecoveryDetail() {
           </DetailCard>
 
           <DetailCard className="p-5">
-            <div className="text-[13px] font-semibold text-ios-sub">D · {t("이번 주 AI 한마디")}</div>
+            <div className="text-[13px] font-semibold text-ios-sub">{t("이번 주 AI 한마디")}</div>
             {weekly ? (
               <div className="mt-3 space-y-3">
                 <div className="rounded-xl border border-ios-sep bg-ios-bg px-3 py-2">
@@ -224,21 +291,24 @@ export function InsightsAIRecoveryDetail() {
                 </div>
                 <div className="rounded-xl border border-ios-sep bg-ios-bg px-3 py-2">
                   <p className="text-[12px] font-semibold text-ios-sub">{t("개인 패턴")}</p>
-                  <p className="mt-1 text-[14px] leading-relaxed text-ios-text">{weekly.personalInsight}</p>
+                  <div className="mt-1 space-y-1">
+                    {weeklyPersonalLines.map((line, idx) => (
+                      <p key={`personal-${idx}`} className="text-[14px] leading-relaxed text-ios-text">
+                        {highlightInline(line)}
+                      </p>
+                    ))}
+                  </div>
                 </div>
                 <div className="rounded-xl border border-ios-sep bg-ios-bg px-3 py-2">
                   <p className="text-[12px] font-semibold text-ios-sub">{t("다음 주 예측")}</p>
-                  <p className="mt-1 text-[14px] leading-relaxed text-ios-text">{weekly.nextWeekPreview}</p>
-                </div>
-                {weekly.topDrains.length ? (
-                  <div className="flex flex-wrap gap-2">
-                    {weekly.topDrains.map((drain) => (
-                      <DetailChip key={`${drain.label}-${drain.pct}`} color="#1B2747">
-                        {drain.label} {drain.pct}%
-                      </DetailChip>
+                  <div className="mt-1 space-y-1">
+                    {weeklyPreviewLines.map((line, idx) => (
+                      <p key={`preview-${idx}`} className="text-[14px] leading-relaxed text-ios-text">
+                        {highlightInline(line)}
+                      </p>
                     ))}
                   </div>
-                ) : null}
+                </div>
               </div>
             ) : (
               <p className="mt-2 text-[14px] text-ios-sub">{t("주간 요약은 데이터가 더 쌓이면 표시돼요.")}</p>

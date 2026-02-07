@@ -36,7 +36,7 @@ export function InsightDetailShell({
   className?: string;
 }) {
   return (
-    <div className={cn("mx-auto w-full max-w-[920px] px-4 pb-24 pt-6 sm:px-6", className)}>
+    <div className={cn("mx-auto w-full max-w-[920px] px-3 pb-24 pt-6 sm:px-4", className)}>
       <div className="mb-4 flex items-center justify-between gap-3">
         <Link
           href={backHref}

@@ -202,7 +202,7 @@ export async function GET(req: NextRequest) {
     const aiContent = await safeLoadAIContent(userId);
     if (aiContent && aiContent.dateISO === today) {
       const payload = asPayload(aiContent.data, aiContent.language);
-      if (payload && payload.engine === "openai") {
+      if (payload && payload.engine === "openai" && payload.language === lang) {
         return NextResponse.json({ ok: true, data: payload } satisfies AIRecoveryApiSuccess);
       }
     }

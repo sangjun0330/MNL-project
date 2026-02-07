@@ -162,7 +162,7 @@ export function InsightsPage() {
 
   if (isInsightsLocked(recordedDays)) {
     return (
-      <div className="mx-auto w-full max-w-[920px] px-4 pb-24 pt-6 sm:px-6">
+      <div className="mx-auto w-full max-w-[920px] px-3 pb-24 pt-6 sm:px-4">
         <div className="mb-4">
           <div className="text-[32px] font-extrabold tracking-[-0.03em]">Summary</div>
           <div className="mt-1 text-[13px] text-ios-sub">{t("통계 중심 인사이트")}</div>
@@ -173,7 +173,7 @@ export function InsightsPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-[920px] px-4 pb-24 pt-6 sm:px-6">
+    <div className="mx-auto w-full max-w-[920px] px-3 pb-24 pt-6 sm:px-4">
       {/* Header */}
       <div className="mb-4">
         <div className="text-[32px] font-extrabold tracking-[-0.03em]">Summary</div>
