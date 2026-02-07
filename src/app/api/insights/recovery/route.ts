@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { addDays, fromISODate, toISODate, todayISO, type ISODate } from "@/lib/date";
 import { generateAIRecovery } from "@/lib/aiRecovery";
 import type { AIRecoveryApiError, AIRecoveryApiSuccess } from "@/lib/aiRecoveryContract";
@@ -6,12 +6,11 @@ import type { Language } from "@/lib/i18n";
 import { hasHealthInput } from "@/lib/healthRecords";
 import { defaultSettings, emptyState, type AppState } from "@/lib/model";
 import { generateAIRecoveryWithOpenAI } from "@/lib/server/openaiRecovery";
-import { readUserIdFromRequest } from "@/lib/server/readUserId";
-import { loadUserState } from "@/lib/server/userStateStore";
 import type { Shift } from "@/lib/types";
 import { computeVitalsRange } from "@/lib/vitals";
 
-export const runtime = "edge";
+// ✅ Node.js runtime: cookies() / supabase-ssr가 안정적으로 동작
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function toLanguage(value: string | null): Language | null {
@@ -86,19 +85,54 @@ function bad(status: number, error: string) {
   return NextResponse.json(body, { status });
 }
 
-export async function GET(req: Request) {
-  const userId = await readUserIdFromRequest(req);
-  if (!userId) return bad(401, "login required");
+// ✅ 안전하게 userId 읽기 - Supabase 환경변수 없어도 crash 안 됨
+async function safeReadUserId(req: NextRequest): Promise<string> {
+  try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!supabaseUrl || !supabaseAnon) return "";
 
+    const { readUserIdFromRequest } = await import("@/lib/server/readUserId");
+    return await readUserIdFromRequest(req);
+  } catch {
+    return "";
+  }
+}
+
+// ✅ 안전하게 user state 로드 - Supabase service role key 없어도 crash 안 됨
+async function safeLoadUserState(userId: string): Promise<{ payload: unknown } | null> {
+  try {
+    const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!serviceRole || !supabaseUrl) return null;
+
+    const { loadUserState } = await import("@/lib/server/userStateStore");
+    return await loadUserState(userId);
+  } catch {
+    return null;
+  }
+}
+
+export async function GET(req: NextRequest) {
   const langHint = toLanguage(new URL(req.url).searchParams.get("lang"));
 
+  // ── 1. 사용자 인증 시도 (실패해도 계속 진행) ──
+  const userId = await safeReadUserId(req);
+  if (!userId) {
+    return bad(401, "login_required");
+  }
+
   try {
-    const row = await loadUserState(userId);
-    if (!row?.payload) return bad(404, "state not found");
+    // ── 2. Supabase에서 사용자 데이터 로드 시도 ──
+    const row = await safeLoadUserState(userId);
+    if (!row?.payload) {
+      return bad(404, "state_not_found");
+    }
 
     const state = normalizePayloadToState(row.payload, langHint);
     const lang = (state.settings.language ?? "ko") as Language;
 
+    // ── 3. 14일치 vitals 계산 ──
     const end = todayISO();
     const start = toISODate(addDays(fromISODate(end), -13));
     const vitals14 = computeVitalsRange({ state, start, end });
@@ -118,6 +152,7 @@ export async function GET(req: Request) {
     const nextShift = readShift(state.schedule, tomorrowISO);
     const todayShift = (todayVital?.shift ?? readShift(state.schedule, end) ?? "OFF") as Shift;
 
+    // ── 4. 기록 없으면 안내 메시지 ──
     if (!vitals7.length) {
       const body: AIRecoveryApiSuccess = {
         ok: true,
@@ -130,6 +165,7 @@ export async function GET(req: Request) {
           source: "supabase",
           engine: "rule",
           model: null,
+          debug: "no_recorded_inputs_in_last_7_days",
           result: {
             headline:
               lang === "en"
@@ -144,6 +180,7 @@ export async function GET(req: Request) {
       return NextResponse.json(body);
     }
 
+    // ── 5. Rule-based fallback 생성 + OpenAI 시도 ──
     const fallbackResult = generateAIRecovery(todayVital, vitals7, prevWeek, nextShift, lang);
     const aiOutput = await generateAIRecoveryWithOpenAI({
       language: lang,
@@ -170,6 +207,7 @@ export async function GET(req: Request) {
         source: "supabase",
         engine: aiOutput.engine,
         model: aiOutput.model,
+        debug: aiOutput.debug,
         result: aiOutput.result,
       },
     };

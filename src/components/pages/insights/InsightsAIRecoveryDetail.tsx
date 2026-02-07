@@ -188,6 +188,11 @@ export function InsightsAIRecoveryDetail() {
           {error}
         </div>
       ) : null}
+      {data.engine !== "openai" && data.debug ? (
+        <div className="text-[12px] text-ios-muted">
+          {t("AI 연결 디버그")}: {data.debug}
+        </div>
+      ) : null}
     </InsightDetailShell>
   );
 }

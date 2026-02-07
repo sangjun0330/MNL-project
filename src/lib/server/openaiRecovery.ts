@@ -18,6 +18,7 @@ export type OpenAIRecoveryOutput = {
   result: AIRecoveryResult;
   engine: "openai" | "rule";
   model: string | null;
+  debug: string | null;
 };
 
 type OpenAIParsedResult = {
@@ -111,19 +112,75 @@ function parseWeeklySummary(value: unknown, fallback: WeeklySummary | null): Wee
   };
 }
 
-function parseRecoveryResult(value: unknown, fallback: AIRecoveryResult): AIRecoveryResult {
-  if (!isObject(value)) return fallback;
+function parseRecoveryResult(value: unknown, fallback: AIRecoveryResult): AIRecoveryResult | null {
+  if (!isObject(value)) return null;
   const parsed = value as OpenAIParsedResult;
   const headline = typeof parsed.headline === "string" ? parsed.headline.trim() : "";
   const sectionsRaw = Array.isArray(parsed.sections) ? parsed.sections : [];
   const sections = sectionsRaw.map(parseSection).filter((item): item is RecoverySection => Boolean(item));
-  if (!headline || !sections.length) return fallback;
+  if (!headline || !sections.length) return null;
   return {
     headline,
     compoundAlert: parseCompoundAlert(parsed.compoundAlert),
     sections,
     weeklySummary: parseWeeklySummary(parsed.weeklySummary, fallback.weeklySummary),
   };
+}
+
+function extractChatContent(json: any): string {
+  const msg = json?.choices?.[0]?.message?.content;
+  if (typeof msg === "string") return msg;
+  if (Array.isArray(msg)) {
+    const text = msg
+      .map((part) => (typeof part?.text === "string" ? part.text : ""))
+      .join("")
+      .trim();
+    return text;
+  }
+  return "";
+}
+
+function parseLooseJson(content: string): unknown {
+  const trimmed = content.trim();
+  if (!trimmed) return null;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    const first = trimmed.indexOf("{");
+    const last = trimmed.lastIndexOf("}");
+    if (first >= 0 && last > first) {
+      const candidate = trimmed.slice(first, last + 1);
+      try {
+        return JSON.parse(candidate);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+}
+
+function normalizeApiKey() {
+  const key =
+    process.env.OPENAI_API_KEY ??
+    process.env.OPENAI_KEY ??
+    process.env.NEXT_PUBLIC_OPENAI_API_KEY ??
+    "";
+  return String(key).trim();
+}
+
+function modelCandidates(primary: string | null | undefined) {
+  const out: string[] = [];
+  const push = (v?: string | null) => {
+    const name = String(v ?? "").trim();
+    if (!name) return;
+    if (!out.includes(name)) out.push(name);
+  };
+  push(primary);
+  // ✅ gpt-4.1-mini 제거 (존재하지 않는 모델) → 유효한 fallback만
+  push("gpt-4o-mini");
+  push("gpt-4o");
+  return out;
 }
 
 function buildUserContext(params: GenerateOpenAIRecoveryParams) {
@@ -230,150 +287,97 @@ function buildUserPrompt(context: ReturnType<typeof buildUserContext>) {
 export async function generateAIRecoveryWithOpenAI(
   params: GenerateOpenAIRecoveryParams
 ): Promise<OpenAIRecoveryOutput> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+  const apiKey = normalizeApiKey();
+  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
   if (!apiKey) {
     return {
       result: params.fallback,
       engine: "rule",
       model: null,
+      debug: "missing_openai_api_key",
     };
   }
 
   const context = buildUserContext(params);
   const systemPrompt = buildSystemPrompt(params.language);
   const userPrompt = buildUserPrompt(context);
+  const candidates = modelCandidates(model);
+  let lastError = "openai_request_failed";
 
   try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        temperature: 0.35,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        response_format: {
-          type: "json_schema",
-          json_schema: {
-            name: "ai_recovery_result",
-            strict: true,
-            schema: {
-              type: "object",
-              additionalProperties: false,
-              properties: {
-                headline: { type: "string" },
-                compoundAlert: {
-                  anyOf: [
-                    {
-                      type: "object",
-                      additionalProperties: false,
-                      properties: {
-                        factors: { type: "array", items: { type: "string" } },
-                        message: { type: "string" },
-                      },
-                      required: ["factors", "message"],
-                    },
-                    { type: "null" },
-                  ],
-                },
-                sections: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    additionalProperties: false,
-                    properties: {
-                      category: {
-                        type: "string",
-                        enum: ["sleep", "shift", "caffeine", "menstrual", "stress", "activity"],
-                      },
-                      severity: { type: "string", enum: ["info", "caution", "warning"] },
-                      title: { type: "string" },
-                      description: { type: "string" },
-                      tips: { type: "array", items: { type: "string" } },
-                    },
-                    required: ["category", "severity", "title", "description", "tips"],
-                  },
-                },
-                weeklySummary: {
-                  anyOf: [
-                    {
-                      type: "object",
-                      additionalProperties: false,
-                      properties: {
-                        avgBattery: { type: "number" },
-                        prevAvgBattery: { type: "number" },
-                        topDrains: {
-                          type: "array",
-                          items: {
-                            type: "object",
-                            additionalProperties: false,
-                            properties: {
-                              label: { type: "string" },
-                              pct: { type: "number" },
-                            },
-                            required: ["label", "pct"],
-                          },
-                        },
-                        personalInsight: { type: "string" },
-                        nextWeekPreview: { type: "string" },
-                      },
-                      required: ["avgBattery", "prevAvgBattery", "topDrains", "personalInsight", "nextWeekPreview"],
-                    },
-                    { type: "null" },
-                  ],
-                },
-              },
-              required: ["headline", "compoundAlert", "sections", "weeklySummary"],
-            },
+    for (const candidate of candidates) {
+      // ✅ 15초 timeout으로 무한 대기 방지
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 15_000);
+      try {
+        const response = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
           },
-        },
-      }),
-    });
+          body: JSON.stringify({
+            model: candidate,
+            temperature: 0.35,
+            max_tokens: 2000,
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userPrompt },
+            ],
+            response_format: { type: "json_object" },
+          }),
+          signal: controller.signal,
+        });
 
-    if (!response.ok) {
-      return {
-        result: params.fallback,
-        engine: "rule",
-        model: null,
-      };
-    }
+        if (!response.ok) {
+          let raw = "";
+          try { raw = await response.text(); } catch { /* ignore */ }
+          const errPrefix = raw ? raw.slice(0, 160) : "unknown_error";
+          lastError = `openai_${response.status}_model:${candidate}_${errPrefix}`;
+          // ✅ 401/403은 API 키 문제 → 다른 모델로 재시도해도 의미 없음
+          if (response.status === 401 || response.status === 403) break;
+          continue;
+        }
 
-    const json = (await response.json()) as {
-      choices?: Array<{
-        message?: {
-          content?: string;
+        const json = (await response.json()) as unknown;
+        const content = extractChatContent(json);
+        const parsedUnknown = parseLooseJson(content);
+        if (!parsedUnknown) {
+          lastError = `openai_invalid_json_model:${candidate}`;
+          continue;
+        }
+
+        const parsed = parseRecoveryResult(parsedUnknown, params.fallback);
+        if (!parsed) {
+          lastError = `openai_invalid_schema_model:${candidate}`;
+          continue;
+        }
+        return {
+          result: parsed,
+          engine: "openai",
+          model: candidate,
+          debug: null,
         };
-      }>;
-    };
-    const content = json.choices?.[0]?.message?.content;
-    if (!content) {
-      return {
-        result: params.fallback,
-        engine: "rule",
-        model: null,
-      };
+      } catch (innerErr: any) {
+        if (innerErr?.name === "AbortError") {
+          lastError = `openai_timeout_model:${candidate}`;
+        } else {
+          lastError = `openai_fetch_model:${candidate}_${innerErr?.message ?? "unknown"}`;
+        }
+        continue;
+      } finally {
+        // ✅ 항상 timer 정리 (memory leak 방지)
+        clearTimeout(timer);
+      }
     }
-
-    const parsedUnknown = JSON.parse(content) as unknown;
-    const parsed = parseRecoveryResult(parsedUnknown, params.fallback);
-
-    return {
-      result: parsed,
-      engine: "openai",
-      model,
-    };
-  } catch {
-    return {
-      result: params.fallback,
-      engine: "rule",
-      model: null,
-    };
+  } catch (error: any) {
+    lastError = `openai_outer_${error?.message ?? "unknown"}`;
   }
-}
 
+  return {
+    result: params.fallback,
+    engine: "rule",
+    model: null,
+    debug: lastError,
+  };
+}

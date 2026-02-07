@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { generateAIRecovery, type AIRecoveryResult } from "@/lib/aiRecovery";
 import type { AIRecoveryPayload, AIRecoveryApiSuccess } from "@/lib/aiRecoveryContract";
 import { addDays, fromISODate, toISODate } from "@/lib/date";
@@ -33,6 +33,7 @@ function buildFallbackData(params: {
     source: "local",
     engine: "rule",
     model: null,
+    debug: null,
     result: fallbackResult,
   };
 }
@@ -56,46 +57,67 @@ export function useAIRecoveryInsights() {
   const [remoteData, setRemoteData] = useState<AIRecoveryPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const retryCount = useRef(0);
 
-  useEffect(() => {
-    let cancelled = false;
-    const controller = new AbortController();
-    setLoading(true);
-    setError(null);
-
-    const load = async () => {
+  const fetchRecovery = useCallback(
+    async (signal: AbortSignal) => {
       try {
         const res = await fetch(`/api/insights/recovery?lang=${lang}`, {
           method: "GET",
           cache: "no-store",
-          signal: controller.signal,
+          signal,
         });
-        const json = (await res.json()) as AIRecoveryApiSuccess | { ok: false; error?: string };
-        if (cancelled) return;
 
-        if (res.ok && json.ok) {
-          setRemoteData(json.data);
+        if (signal.aborted) return;
+
+        // ✅ JSON 파싱 실패 방지
+        let json: any;
+        try {
+          json = await res.json();
+        } catch {
+          throw new Error("invalid_json_response");
+        }
+
+        if (signal.aborted) return;
+
+        if (res.ok && json?.ok && json.data) {
+          setRemoteData(json.data as AIRecoveryPayload);
           setError(null);
+          retryCount.current = 0;
           return;
         }
 
+        // ✅ 401/404는 재시도하지 않음 (로그인 필요 / 데이터 없음)
+        const errMsg = json?.error ?? `http_${res.status}`;
         setRemoteData(null);
-        setError(!json.ok ? json.error ?? "failed to load recovery data" : "failed to load recovery data");
+        setError(errMsg);
       } catch (err: any) {
-        if (cancelled || err?.name === "AbortError") return;
+        if (signal.aborted || err?.name === "AbortError") return;
         setRemoteData(null);
-        setError(err?.message || "failed to load recovery data");
-      } finally {
-        if (!cancelled) setLoading(false);
+        setError(err?.message || "network_error");
+      }
+    },
+    [lang]
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true);
+    setError(null);
+
+    const run = async () => {
+      await fetchRecovery(controller.signal);
+      if (!controller.signal.aborted) {
+        setLoading(false);
       }
     };
 
-    void load();
+    void run();
+
     return () => {
-      cancelled = true;
       controller.abort();
     };
-  }, [lang]);
+  }, [fetchRecovery]);
 
   return {
     data: remoteData ?? fallback,
