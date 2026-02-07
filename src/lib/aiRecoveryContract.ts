@@ -12,6 +12,7 @@ export type AIRecoveryPayload = {
   source: "supabase" | "local";
   engine: "openai" | "rule";
   model: string | null;
+  debug?: string | null;
   result: AIRecoveryResult;
 };
 

@@ -250,7 +250,7 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
     const hasSleepDurationLog = bio.sleepHours != null || (bio as any).napHours != null;
     const stressLvl = clamp(Number((bio.stress ?? 0) as any) + 1, 1, 4);
     const activityLvl = clamp(Number((bio.activity ?? 0) as any) + 1, 1, 4);
-    const moodLvl = clamp(Number(emotion?.mood ?? 3), 1, 5);
+    const moodLvl = clamp(Number(emotion?.mood ?? 5), 1, 5);
 
     const lmp = menstrualSettings?.enabled ? (menstrualSettings?.lastPeriodStart ?? null) : null;
     const cycleLen = menstrualSettings?.cycleLength ?? 28;
