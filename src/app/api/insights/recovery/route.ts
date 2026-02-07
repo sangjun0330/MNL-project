@@ -115,6 +115,19 @@ function readServerCachedAI(rawPayload: unknown, today: ISODate, lang: Language)
   return payload;
 }
 
+function readAnyServerCachedAI(rawPayload: unknown, lang: Language): AIRecoveryPayload | null {
+  if (!isRecord(rawPayload)) return null;
+  const node = rawPayload.aiRecoveryDaily;
+  if (!isRecord(node)) return null;
+  const data = (node as Record<string, unknown>).data;
+  if (!data || !isRecord(data)) return null;
+  const payload = data as AIRecoveryPayload;
+  if (payload.engine !== "openai") return null;
+  if (!payload.generatedText || typeof payload.generatedText !== "string") return null;
+  if (payload.language !== lang) return null;
+  return payload;
+}
+
 function withServerCachedAI(rawPayload: unknown, cacheEntry: { dateISO: ISODate; language: Language; data: AIRecoveryPayload }) {
   const next = isRecord(rawPayload) ? { ...rawPayload } : {};
   next.aiRecoveryDaily = {
@@ -190,15 +203,24 @@ export async function GET(req: NextRequest) {
       : null;
 
     // ── 4. OpenAI만 사용(규칙 fallback 없음) ──
-    const aiOutput = await generateAIRecoveryWithOpenAI({
-      language: lang,
-      todayISO: today,
-      todayShift,
-      nextShift,
-      todayVital,
-      vitals7,
-      prevWeekVitals: prevWeek,
-    });
+    let aiOutput;
+    try {
+      aiOutput = await generateAIRecoveryWithOpenAI({
+        language: lang,
+        todayISO: today,
+        todayShift,
+        nextShift,
+        todayVital,
+        vitals7,
+        prevWeekVitals: prevWeek,
+      });
+    } catch (openaiError: any) {
+      const previous = readAnyServerCachedAI(row.payload, lang);
+      if (previous) {
+        return NextResponse.json({ ok: true, data: previous } satisfies AIRecoveryApiSuccess);
+      }
+      throw openaiError;
+    }
     const todayVitalScore = todayVital
       ? Math.round(Math.min(todayVital.body.value, todayVital.mental.ema))
       : null;
