@@ -228,7 +228,7 @@ export function InsightsAIRecoveryDetail() {
     <InsightDetailShell
       title={t("AI 맞춤회복")}
       subtitle={data ? formatKoreanDate(data.dateISO) : ""}
-      meta={t("AI가 생성한 텍스트 결과")}
+      meta={undefined}
       tone="navy"
       backHref="/insights"
     >
@@ -389,19 +389,18 @@ export function InsightsAIRecoveryDetail() {
       ) : null}
 
       {generating && !data && !insightsLocked ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden px-6">
-          <div className="absolute inset-0 bg-[radial-gradient(80%_60%_at_50%_15%,rgba(0,122,255,0.16),transparent),linear-gradient(180deg,rgba(18,20,24,0.42),rgba(18,20,24,0.58))] backdrop-blur-[6px]" />
-          <div className="wnl-modal relative w-full max-w-[340px] overflow-hidden rounded-[30px] border border-white/35 bg-white/92 px-6 py-6 shadow-[0_30px_90px_rgba(0,0,0,0.32)]">
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-[#F2F2F7] px-6">
+          <div className="wnl-modal relative w-full max-w-[340px] overflow-hidden rounded-[30px] border border-ios-sep bg-white px-6 py-6 shadow-[0_30px_90px_rgba(0,0,0,0.12)]">
             <div className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-transparent via-[#007AFF] to-transparent wnl-recovery-progress" />
-            <div className="flex items-start gap-3">
-              <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-2xl border border-black/5 bg-[#eef4ff] p-2">
+            <div className="flex items-start gap-4">
+              <div className="relative h-[56px] w-[56px] shrink-0 overflow-hidden rounded-2xl border border-black/5 bg-[#eef4ff]">
                 <div className="absolute inset-0 wnl-logo-breathe rounded-2xl bg-[radial-gradient(80%_70%_at_50%_40%,rgba(0,122,255,0.22),transparent)]" />
                 <Image
                   src="/icons/icon-192.png"
                   alt="RNest"
-                  width={40}
-                  height={40}
-                  className="relative mx-auto mt-[4px] h-10 w-10 object-contain"
+                  width={56}
+                  height={56}
+                  className="relative h-[56px] w-[56px] object-contain p-2"
                   priority
                 />
               </div>
