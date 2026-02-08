@@ -20,7 +20,7 @@ export function InsightsThievesDetail() {
       <InsightDetailShell
         title={t("에너지 도둑")}
         subtitle={formatKoreanDate(end)}
-        meta={t("건강 기록 7일 이상부터 분석이 열립니다.")}
+        meta={t("건강 기록 3일 이상부터 분석이 열립니다.")}
         tone="pink"
       >
         <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />
