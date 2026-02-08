@@ -736,6 +736,209 @@ function translateFallbackResult(source: AIRecoveryResult): AIRecoveryResult {
   };
 }
 
+type TranslationBundle = {
+  headline: string;
+  compoundAlert: {
+    factors: string[];
+    message: string;
+  } | null;
+  sections: Array<{
+    category: RecoverySection["category"];
+    title: string;
+    description: string;
+    tips: string[];
+  }>;
+  weeklySummary: {
+    topDrains: Array<{ label: string; pct: number }>;
+    personalInsight: string;
+    nextWeekPreview: string;
+  } | null;
+};
+
+function parseJsonObject(raw: string): Record<string, unknown> | null {
+  const text = raw.trim();
+  if (!text) return null;
+
+  const direct = (() => {
+    try {
+      const parsed = JSON.parse(text);
+      return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : null;
+    } catch {
+      return null;
+    }
+  })();
+  if (direct) return direct;
+
+  const fenced = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
+  try {
+    const parsed = JSON.parse(fenced);
+    return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function asString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => asString(item)).filter(Boolean);
+}
+
+function shapeMatches(source: TranslationBundle, translated: TranslationBundle) {
+  if (source.sections.length !== translated.sections.length) return false;
+  for (let i = 0; i < source.sections.length; i++) {
+    if (source.sections[i].tips.length !== translated.sections[i].tips.length) return false;
+  }
+  const srcAlert = source.compoundAlert;
+  const trAlert = translated.compoundAlert;
+  if (Boolean(srcAlert) !== Boolean(trAlert)) return false;
+  if (srcAlert && trAlert && srcAlert.factors.length !== trAlert.factors.length) return false;
+  const srcWeekly = source.weeklySummary;
+  const trWeekly = translated.weeklySummary;
+  if (Boolean(srcWeekly) !== Boolean(trWeekly)) return false;
+  if (srcWeekly && trWeekly && srcWeekly.topDrains.length !== trWeekly.topDrains.length) return false;
+  return true;
+}
+
+function bundleFromResult(result: AIRecoveryResult): TranslationBundle {
+  return {
+    headline: result.headline ?? "",
+    compoundAlert: result.compoundAlert
+      ? {
+          factors: result.compoundAlert.factors ?? [],
+          message: result.compoundAlert.message ?? "",
+        }
+      : null,
+    sections: (result.sections ?? []).map((section) => ({
+      category: section.category,
+      title: section.title ?? "",
+      description: section.description ?? "",
+      tips: section.tips ?? [],
+    })),
+    weeklySummary: result.weeklySummary
+      ? {
+          topDrains: result.weeklySummary.topDrains ?? [],
+          personalInsight: result.weeklySummary.personalInsight ?? "",
+          nextWeekPreview: result.weeklySummary.nextWeekPreview ?? "",
+        }
+      : null,
+  };
+}
+
+function parseTranslatedBundle(candidate: Record<string, unknown>): TranslationBundle | null {
+  const sectionsRaw = candidate.sections;
+  const sections = Array.isArray(sectionsRaw)
+    ? sectionsRaw.map((item) => {
+        const row = (typeof item === "object" && item !== null ? item : {}) as Record<string, unknown>;
+        const categoryRaw = row.category;
+        const category =
+          categoryRaw === "sleep" ||
+          categoryRaw === "shift" ||
+          categoryRaw === "caffeine" ||
+          categoryRaw === "menstrual" ||
+          categoryRaw === "stress" ||
+          categoryRaw === "activity"
+            ? categoryRaw
+            : "sleep";
+        return {
+          category: category as RecoverySection["category"],
+          title: asString(row.title),
+          description: asString(row.description),
+          tips: asStringArray(row.tips),
+        };
+      })
+    : [];
+
+  const compoundRaw =
+    typeof candidate.compoundAlert === "object" && candidate.compoundAlert !== null
+      ? (candidate.compoundAlert as Record<string, unknown>)
+      : null;
+  const weeklyRaw =
+    typeof candidate.weeklySummary === "object" && candidate.weeklySummary !== null
+      ? (candidate.weeklySummary as Record<string, unknown>)
+      : null;
+
+  const topDrains = Array.isArray(weeklyRaw?.topDrains)
+    ? weeklyRaw.topDrains
+        .map((item) => {
+          const row = (typeof item === "object" && item !== null ? item : {}) as Record<string, unknown>;
+          const pct = Number(row.pct);
+          return {
+            label: asString(row.label),
+            pct: Number.isFinite(pct) ? Math.round(clamp(pct, 0, 100)) : 0,
+          };
+        })
+        .filter((item) => item.label)
+    : [];
+
+  return {
+    headline: asString(candidate.headline),
+    compoundAlert: compoundRaw
+      ? {
+          factors: asStringArray(compoundRaw.factors),
+          message: asString(compoundRaw.message),
+        }
+      : null,
+    sections,
+    weeklySummary: weeklyRaw
+      ? {
+          topDrains,
+          personalInsight: asString(weeklyRaw.personalInsight),
+          nextWeekPreview: asString(weeklyRaw.nextWeekPreview),
+        }
+      : null,
+  };
+}
+
+function mergeTranslatedResult(source: AIRecoveryResult, translated: TranslationBundle): AIRecoveryResult {
+  const fallback = translateFallbackResult(source);
+  const mergedSections = source.sections.map((sourceSection, idx) => {
+    const translatedSection = translated.sections[idx];
+    const meta = CATEGORY_ORDER.find((item) => item.category === sourceSection.category);
+    const translatedTips = sourceSection.tips.map((tip, tipIdx) => {
+      const translatedTip = translatedSection?.tips?.[tipIdx] ?? "";
+      return translatedTip.trim() || tip;
+    });
+
+    return {
+      ...sourceSection,
+      title: translatedSection?.title?.trim() || meta?.titleEn || sourceSection.title,
+      description: translatedSection?.description?.trim() || sourceSection.description,
+      tips: translatedTips,
+    };
+  });
+
+  const mergedCompoundAlert = source.compoundAlert
+    ? {
+        factors: source.compoundAlert.factors.map((factor, idx) => translated.compoundAlert?.factors?.[idx]?.trim() || factor),
+        message: translated.compoundAlert?.message?.trim() || source.compoundAlert.message,
+      }
+    : null;
+
+  const mergedWeeklySummary = source.weeklySummary
+    ? {
+        avgBattery: source.weeklySummary.avgBattery,
+        prevAvgBattery: source.weeklySummary.prevAvgBattery,
+        topDrains: source.weeklySummary.topDrains.map((drain, idx) => ({
+          label: translated.weeklySummary?.topDrains?.[idx]?.label?.trim() || drain.label,
+          pct: drain.pct,
+        })),
+        personalInsight: translated.weeklySummary?.personalInsight?.trim() || source.weeklySummary.personalInsight,
+        nextWeekPreview: translated.weeklySummary?.nextWeekPreview?.trim() || source.weeklySummary.nextWeekPreview,
+      }
+    : null;
+
+  return {
+    headline: translated.headline?.trim() || fallback.headline,
+    compoundAlert: mergedCompoundAlert,
+    sections: mergedSections,
+    weeklySummary: mergedWeeklySummary,
+  };
+}
+
 export async function generateAIRecoveryWithOpenAI(
   params: GenerateOpenAIRecoveryParams
 ): Promise<OpenAIRecoveryOutput> {
@@ -804,27 +1007,16 @@ export async function translateAIRecoveryToEnglish(
     throw new Error("missing_openai_api_key");
   }
 
-  const koreanText = source.generatedText?.trim()
-    ? source.generatedText.trim()
-    : buildStructuredTextFromResult(source.result, "ko");
-  const developerPrompt =
-    "You are a professional Korean-to-English translator for nurse wellness coaching content.";
+  const translationSource = bundleFromResult(source.result);
+  const developerPrompt = "You are a precise Korean-to-English translator for structured nurse recovery coaching JSON.";
   const userPrompt = [
-    "Translate the Korean recovery guidance into natural, concise English.",
-    "Output plain text only with the exact structure below:",
-    "[A] ...",
-    "[B] ...",
-    "[C] ...",
-    "[D] ...",
+    "Translate all Korean string values in this JSON to natural English.",
+    "Return JSON only (no markdown, no extra text).",
+    "Do not change structure, ordering, number of sections, or number of tips.",
+    "Do not alter numeric values or units.",
+    "Keep category keys unchanged.",
     "",
-    "Rules:",
-    "- Keep all numbers and units unchanged.",
-    "- Do not add or remove sections.",
-    "- Keep each [category] heading in [C] translated to English in square brackets.",
-    "- No markdown code fences.",
-    "",
-    "[SOURCE_KOREAN]",
-    koreanText,
+    JSON.stringify(translationSource, null, 2),
   ].join("\n");
   const maxOutputTokens = resolveMaxOutputTokens();
   const controller = new AbortController();
@@ -843,20 +1035,22 @@ export async function translateAIRecoveryToEnglish(
       throw new Error(attempt.error ?? `openai_request_failed_model:${model}`);
     }
 
-    const translatedText = attempt.text.trim();
-    const parsed = parseResultFromGeneratedText(translatedText, "en");
-    const fallback = translateFallbackResult(source.result);
-    const menstrualAllowed = source.result.sections.some((section) => section.category === "menstrual");
-    const translatedSections = parsed.sections.length ? parsed.sections : fallback.sections;
-    const safeSections = menstrualAllowed
-      ? translatedSections
-      : translatedSections.filter((section) => section.category !== "menstrual");
-    const mergedResult: AIRecoveryResult = {
-      headline: parsed.headline?.trim() ? parsed.headline : fallback.headline,
-      compoundAlert: parsed.compoundAlert ?? fallback.compoundAlert,
-      sections: safeSections,
-      weeklySummary: mergeWeeklySummary(parsed.weeklySummary, fallback.weeklySummary),
-    };
+    const parsedJson = parseJsonObject(attempt.text);
+    if (!parsedJson) {
+      throw new Error(`openai_translate_non_json_model:${model}`);
+    }
+
+    const translatedBundle = parseTranslatedBundle(parsedJson);
+    if (!translatedBundle) {
+      throw new Error(`openai_translate_invalid_shape_model:${model}`);
+    }
+
+    if (!shapeMatches(translationSource, translatedBundle)) {
+      throw new Error(`openai_translate_shape_mismatch_model:${model}`);
+    }
+
+    const mergedResult = mergeTranslatedResult(source.result, translatedBundle);
+    const translatedText = buildStructuredTextFromResult(mergedResult, "en");
 
     return {
       result: mergedResult,
