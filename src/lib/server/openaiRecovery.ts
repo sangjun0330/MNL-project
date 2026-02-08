@@ -1007,49 +1007,209 @@ export async function translateAIRecoveryToEnglish(
     throw new Error("missing_openai_api_key");
   }
 
-  const translationSource = bundleFromResult(source.result);
-  const developerPrompt = "You are a precise Korean-to-English translator for structured nurse recovery coaching JSON.";
-  const userPrompt = [
-    "Translate all Korean string values in this JSON to natural English.",
-    "Return JSON only (no markdown, no extra text).",
-    "Do not change structure, ordering, number of sections, or number of tips.",
-    "Do not alter numeric values or units.",
-    "Keep category keys unchanged.",
-    "",
-    JSON.stringify(translationSource, null, 2),
-  ].join("\n");
-  const maxOutputTokens = resolveMaxOutputTokens();
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 35_000);
-  try {
-    const attempt = await callResponsesApi({
-      apiKey,
+  type Pointer =
+    | { kind: "headline" }
+    | { kind: "alertMessage" }
+    | { kind: "alertFactor"; factorIndex: number }
+    | { kind: "sectionTitle"; sectionIndex: number }
+    | { kind: "sectionDescription"; sectionIndex: number }
+    | { kind: "sectionTip"; sectionIndex: number; tipIndex: number }
+    | { kind: "weeklyDrainLabel"; drainIndex: number }
+    | { kind: "weeklyPersonalInsight" }
+    | { kind: "weeklyNextWeekPreview" };
+
+  const lines: string[] = [];
+  const pointers: Pointer[] = [];
+  const push = (value: string, pointer: Pointer) => {
+    const text = String(value ?? "").trim();
+    if (!text) return;
+    lines.push(text);
+    pointers.push(pointer);
+  };
+
+  push(source.result.headline, { kind: "headline" });
+  if (source.result.compoundAlert) {
+    push(source.result.compoundAlert.message, { kind: "alertMessage" });
+    source.result.compoundAlert.factors.forEach((factor, factorIndex) =>
+      push(factor, { kind: "alertFactor", factorIndex })
+    );
+  }
+  source.result.sections.forEach((section, sectionIndex) => {
+    push(section.title, { kind: "sectionTitle", sectionIndex });
+    push(section.description, { kind: "sectionDescription", sectionIndex });
+    section.tips.forEach((tip, tipIndex) =>
+      push(tip, { kind: "sectionTip", sectionIndex, tipIndex })
+    );
+  });
+  if (source.result.weeklySummary) {
+    source.result.weeklySummary.topDrains.forEach((drain, drainIndex) =>
+      push(drain.label, { kind: "weeklyDrainLabel", drainIndex })
+    );
+    push(source.result.weeklySummary.personalInsight, { kind: "weeklyPersonalInsight" });
+    push(source.result.weeklySummary.nextWeekPreview, { kind: "weeklyNextWeekPreview" });
+  }
+
+  if (!lines.length) {
+    return {
+      result: translateFallbackResult(source.result),
+      generatedText: buildStructuredTextFromResult(translateFallbackResult(source.result), "en"),
+      engine: "openai",
       model,
-      developerPrompt,
-      userPrompt,
-      signal: controller.signal,
-      maxOutputTokens,
+      debug: "translate_empty_source",
+    };
+  }
+
+  const parseArray = (raw: string): string[] | null => {
+    const text = raw.trim();
+    const tryParse = (candidate: string) => {
+      try {
+        const parsed = JSON.parse(candidate);
+        if (!Array.isArray(parsed)) return null;
+        return parsed.map((item) => String(item ?? "").trim());
+      } catch {
+        return null;
+      }
+    };
+    const direct = tryParse(text);
+    if (direct) return direct;
+
+    const fenced = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
+    const fencedParsed = tryParse(fenced);
+    if (fencedParsed) return fencedParsed;
+
+    const first = text.indexOf("[");
+    const last = text.lastIndexOf("]");
+    if (first >= 0 && last > first) {
+      return tryParse(text.slice(first, last + 1));
+    }
+    return null;
+  };
+
+  const buildTranslatePrompt = (strictNoKorean = false) =>
+    [
+      "Translate each input string from Korean to natural English.",
+      "Return ONLY a JSON array of strings.",
+      `Array length must be exactly ${lines.length}.`,
+      "Keep order exactly the same.",
+      "Do not merge or split lines.",
+      "Do not alter numbers, units, dates, or punctuation meaning.",
+      strictNoKorean ? "Final output must contain no Korean characters." : "",
+      "",
+      JSON.stringify(lines, null, 2),
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+  const translateOnce = async (strictNoKorean = false) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 35_000);
+    try {
+      const attempt = await callResponsesApi({
+        apiKey,
+        model,
+        developerPrompt: "You are a professional Korean-to-English translator for nurse wellness content.",
+        userPrompt: buildTranslatePrompt(strictNoKorean),
+        signal: controller.signal,
+        maxOutputTokens: resolveMaxOutputTokens(),
+      });
+      if (!attempt.text) {
+        throw new Error(attempt.error ?? `openai_request_failed_model:${model}`);
+      }
+      const parsed = parseArray(attempt.text);
+      if (!parsed) throw new Error(`openai_translate_non_json_array_model:${model}`);
+      if (parsed.length !== lines.length) {
+        throw new Error(`openai_translate_count_mismatch_model:${model}_${parsed.length}/${lines.length}`);
+      }
+      return parsed;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  const hangulRatio = (arr: string[]) => {
+    const text = arr.join(" ");
+    const total = (text.match(/[A-Za-z가-힣]/g) ?? []).length;
+    if (!total) return 0;
+    const hangul = (text.match(/[가-힣]/g) ?? []).length;
+    return hangul / total;
+  };
+
+  const maxOutputTokens = resolveMaxOutputTokens();
+  try {
+    let translatedLines = await translateOnce(false);
+    if (hangulRatio(translatedLines) > 0.08) {
+      translatedLines = await translateOnce(true);
+    }
+
+    const mergedResult: AIRecoveryResult = {
+      ...source.result,
+      compoundAlert: source.result.compoundAlert
+        ? {
+            ...source.result.compoundAlert,
+            factors: [...source.result.compoundAlert.factors],
+          }
+        : null,
+      sections: source.result.sections.map((section) => ({
+        ...section,
+        tips: [...section.tips],
+      })),
+      weeklySummary: source.result.weeklySummary
+        ? {
+            ...source.result.weeklySummary,
+            topDrains: source.result.weeklySummary.topDrains.map((drain) => ({ ...drain })),
+          }
+        : null,
+    };
+
+    pointers.forEach((pointer, idx) => {
+      const value = translatedLines[idx]?.trim();
+      if (!value) return;
+      if (pointer.kind === "headline") {
+        mergedResult.headline = value;
+        return;
+      }
+      if (pointer.kind === "alertMessage") {
+        if (mergedResult.compoundAlert) mergedResult.compoundAlert.message = value;
+        return;
+      }
+      if (pointer.kind === "alertFactor") {
+        if (mergedResult.compoundAlert && mergedResult.compoundAlert.factors[pointer.factorIndex] != null) {
+          mergedResult.compoundAlert.factors[pointer.factorIndex] = value;
+        }
+        return;
+      }
+      if (pointer.kind === "sectionTitle") {
+        if (mergedResult.sections[pointer.sectionIndex]) mergedResult.sections[pointer.sectionIndex].title = value;
+        return;
+      }
+      if (pointer.kind === "sectionDescription") {
+        if (mergedResult.sections[pointer.sectionIndex]) mergedResult.sections[pointer.sectionIndex].description = value;
+        return;
+      }
+      if (pointer.kind === "sectionTip") {
+        if (
+          mergedResult.sections[pointer.sectionIndex] &&
+          mergedResult.sections[pointer.sectionIndex].tips[pointer.tipIndex] != null
+        ) {
+          mergedResult.sections[pointer.sectionIndex].tips[pointer.tipIndex] = value;
+        }
+        return;
+      }
+      if (pointer.kind === "weeklyDrainLabel") {
+        if (mergedResult.weeklySummary?.topDrains[pointer.drainIndex]) {
+          mergedResult.weeklySummary.topDrains[pointer.drainIndex].label = value;
+        }
+        return;
+      }
+      if (pointer.kind === "weeklyPersonalInsight") {
+        if (mergedResult.weeklySummary) mergedResult.weeklySummary.personalInsight = value;
+        return;
+      }
+      if (pointer.kind === "weeklyNextWeekPreview") {
+        if (mergedResult.weeklySummary) mergedResult.weeklySummary.nextWeekPreview = value;
+      }
     });
 
-    if (!attempt.text) {
-      throw new Error(attempt.error ?? `openai_request_failed_model:${model}`);
-    }
-
-    const parsedJson = parseJsonObject(attempt.text);
-    if (!parsedJson) {
-      throw new Error(`openai_translate_non_json_model:${model}`);
-    }
-
-    const translatedBundle = parseTranslatedBundle(parsedJson);
-    if (!translatedBundle) {
-      throw new Error(`openai_translate_invalid_shape_model:${model}`);
-    }
-
-    if (!shapeMatches(translationSource, translatedBundle)) {
-      throw new Error(`openai_translate_shape_mismatch_model:${model}`);
-    }
-
-    const mergedResult = mergeTranslatedResult(source.result, translatedBundle);
     const translatedText = buildStructuredTextFromResult(mergedResult, "en");
 
     return {
@@ -1060,14 +1220,8 @@ export async function translateAIRecoveryToEnglish(
       debug: null,
     };
   } catch (err: any) {
-    if (err?.name === "AbortError") {
-      throw new Error(`openai_timeout_model:${model}`);
-    }
-    if (typeof err?.message === "string" && err.message.trim()) {
-      throw new Error(err.message.trim());
-    }
+    if (err?.name === "AbortError") throw new Error(`openai_timeout_model:${model}`);
+    if (typeof err?.message === "string" && err.message.trim()) throw new Error(err.message.trim());
     throw new Error(`openai_fetch_model:${model}_${truncateError(err?.message ?? "unknown")}`);
-  } finally {
-    clearTimeout(timer);
   }
 }

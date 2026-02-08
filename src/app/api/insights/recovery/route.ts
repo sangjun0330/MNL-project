@@ -190,6 +190,33 @@ function hasSameStructure(ko: AIRecoveryPayload, en: AIRecoveryPayload) {
   return true;
 }
 
+function looksKoreanPayload(payload: AIRecoveryPayload) {
+  const chunks: string[] = [];
+  chunks.push(payload.result.headline ?? "");
+  chunks.push(payload.generatedText ?? "");
+  if (payload.result.compoundAlert) {
+    chunks.push(payload.result.compoundAlert.message ?? "");
+    chunks.push(...(payload.result.compoundAlert.factors ?? []));
+  }
+  for (const section of payload.result.sections ?? []) {
+    chunks.push(section.title ?? "");
+    chunks.push(section.description ?? "");
+    chunks.push(...(section.tips ?? []));
+  }
+  if (payload.result.weeklySummary) {
+    chunks.push(payload.result.weeklySummary.personalInsight ?? "");
+    chunks.push(payload.result.weeklySummary.nextWeekPreview ?? "");
+    for (const drain of payload.result.weeklySummary.topDrains ?? []) {
+      chunks.push(drain.label ?? "");
+    }
+  }
+  const text = chunks.join(" ");
+  const total = (text.match(/[A-Za-z가-힣]/g) ?? []).length;
+  if (!total) return false;
+  const hangul = (text.match(/[가-힣]/g) ?? []).length;
+  return hangul / total > 0.08;
+}
+
 function readServerCachedAI(rawPayload: unknown, today: ISODate, lang: Language): AIRecoveryPayload | null {
   if (!isRecord(rawPayload)) return null;
   const node = rawPayload.aiRecoveryDaily;
@@ -250,7 +277,12 @@ export async function GET(req: NextRequest) {
       const variants = readAIContentVariants(aiContent.data, today);
       const koVariant = variants.ko ?? null;
       const direct = variants[lang] ?? null;
-      if (direct && direct.engine === "openai" && (lang !== "en" || !koVariant || hasSameStructure(koVariant, direct))) {
+      if (
+        direct &&
+        direct.engine === "openai" &&
+        (lang !== "en" ||
+          (!looksKoreanPayload(direct) && (!koVariant || hasSameStructure(koVariant, direct))))
+      ) {
         return NextResponse.json({ ok: true, data: direct } satisfies AIRecoveryApiSuccess);
       }
       if (lang === "en" && koVariant && koVariant.engine === "openai") {
