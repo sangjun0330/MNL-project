@@ -106,7 +106,6 @@ export function InsightsPage() {
   const {
     data: aiRecovery,
     loading: aiRecoveryLoading,
-    fromSupabase,
     requiresTodaySleep,
     error: aiRecoveryError,
   } = useAIRecoveryInsights({ mode: "cache", enabled: !insightsLocked });
@@ -239,15 +238,6 @@ export function InsightsPage() {
                           {section.title}
                         </DetailChip>
                       ))}
-                      <DetailChip color={DETAIL_ACCENTS.navy}>
-                        {t("내 기록 기반 맞춤 분석")}
-                      </DetailChip>
-                      <DetailChip color={DETAIL_ACCENTS.mint}>
-                        {t("OpenAI 생성 분석")}
-                      </DetailChip>
-                      <DetailChip color={fromSupabase ? DETAIL_ACCENTS.mint : DETAIL_ACCENTS.pink}>
-                        {fromSupabase ? t("Supabase 실시간 분석") : t("AI 호출 실패")}
-                      </DetailChip>
                     </>
                   ) : (
                     <DetailChip color={DETAIL_ACCENTS.pink}>
