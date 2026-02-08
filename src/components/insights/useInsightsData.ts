@@ -171,6 +171,15 @@ export function useInsightsData() {
 
   const top3 = useMemo(() => (vitalsRecorded.length >= 3 ? topFactors(vitalsRecorded, 3) : []), [vitalsRecorded]);
   const top1 = top3?.[0] ?? null;
+  const ordersSummary = useMemo(
+    () => ({
+      count: top3.length ? Math.max(1, top3.length) : 0,
+      headline: top1
+        ? `${top1.label} ${Math.round(top1.pct * 100)}%`
+        : translate("기록을 더 입력하면 오더가 정교해집니다."),
+    }),
+    [top1, top3]
+  );
 
   const todayDisplay = useMemo(() => (todayVital ? vitalDisplayScore(todayVital) : null), [todayVital]);
 
@@ -201,6 +210,7 @@ export function useInsightsData() {
     trend,
     top3,
     top1,
+    ordersSummary,
     todayDisplay,
     status,
     fastCharge,
