@@ -82,6 +82,8 @@ export type AppSettings = {
   // UI preferences
   theme?: "light" | "dark";
   language?: "ko" | "en";
+  // onboarding
+  hasSeenOnboarding?: boolean;
 };
 
 export type AppState = {

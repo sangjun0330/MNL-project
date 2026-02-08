@@ -146,7 +146,7 @@ export function InsightsVitalDetail() {
       <InsightDetailShell
         title="RNest Vital"
         subtitle={formatKoreanDate(end)}
-        meta={t("건강 기록 7일 이상부터 바이탈이 열립니다.")}
+        meta={t("건강 기록 3일 이상부터 바이탈이 열립니다.")}
         tone="mint"
       >
         <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />

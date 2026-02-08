@@ -24,7 +24,7 @@ export function InsightsTrendsDetail() {
       <InsightDetailShell
         title={t("최근 7일 통계")}
         subtitle={formatKoreanDate(end)}
-        meta={t("건강 기록 7일 이상부터 통계가 열립니다.")}
+        meta={t("건강 기록 3일 이상부터 통계가 열립니다.")}
         tone="mint"
       >
         <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />

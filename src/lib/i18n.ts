@@ -325,12 +325,12 @@ const EN_EXTRA: Record<string, string> = {
     "Based on {shift}, recovery tips are provided for before, during, and after your shift.",
   "* Sync는 “최근 7일” 기준입니다. 입력이 쌓이면 Recovery 처방의 근거(수치)가 더 단단해져요.":
     "* Sync is based on the last 7 days. As you log more, recovery recommendations become more reliable.",
-  "건강 기록 7일 이상부터 바이탈이 열립니다.": "Vital unlocks after 7+ days of health records.",
-  "건강 기록 7일 이상부터 분석이 열립니다.": "Analysis unlocks after 7+ days of health records.",
-  "건강 기록 7일 이상부터 오더가 열립니다.": "Orders unlock after 7+ days of health records.",
-  "건강 기록 7일 이상부터 타임라인이 열립니다.": "Timeline unlocks after 7+ days of health records.",
-  "건강 기록 7일 이상부터 통계가 열립니다.": "Stats unlock after 7+ days of health records.",
-  "건강 기록 7일 이상부터 회복 처방이 열립니다.": "Recovery prescriptions unlock after 7+ days of health records.",
+  "건강 기록 3일 이상부터 바이탈이 열립니다.": "Vital unlocks after 3+ days of health records.",
+  "건강 기록 3일 이상부터 분석이 열립니다.": "Analysis unlocks after 3+ days of health records.",
+  "건강 기록 3일 이상부터 오더가 열립니다.": "Orders unlock after 3+ days of health records.",
+  "건강 기록 3일 이상부터 타임라인이 열립니다.": "Timeline unlocks after 3+ days of health records.",
+  "건강 기록 3일 이상부터 통계가 열립니다.": "Stats unlock after 3+ days of health records.",
+  "건강 기록 3일 이상부터 회복 처방이 열립니다.": "Recovery prescriptions unlock after 3+ days of health records.",
   "근무 설정 필요": "Shift setup needed",
   "근무 없이 회복을 최적화하는 휴식 루틴을 제공합니다.": "Provides a rest routine that optimizes recovery without a shift.",
   "근무 D": "Shift D",
@@ -490,6 +490,18 @@ const EN_EXTRA: Record<string, string> = {
     "If fatigue is high, lower workload intensity and add short recovery breaks every 60-90 minutes.",
   "연속 야간 근무 중이라면 회복 우선으로 일정 밀도를 줄여 주세요.":
     "If you're on consecutive night shifts, prioritize recovery and reduce schedule density.",
+  // Onboarding
+  "캘린더에 근무를 입력하세요": "Schedule your shifts",
+  "매일 건강 상태를 기록하세요": "Log your daily health",
+  "맞춤 인사이트를 받아보세요": "Get personalized insights",
+  "캘린더에서 날짜를 누르고 근무를 설정하세요.\n근무 패턴이 회복 분석의 기반이 됩니다.":
+    "Tap a date on the calendar and set your shift.\nYour work pattern becomes the foundation for recovery analysis.",
+  "일정 탭에서 날짜를 누르고 수면, 스트레스, 기분 등을 입력하세요.\n하루에 하나만 입력해도 충분합니다.":
+    "Go to the Schedule tab, tap a date, and fill in sleep, stress, mood, and more.\nJust one field a day is enough to get started.",
+  "3일 이상 기록하면 Body·Mental 배터리가 나타납니다.\n기록할수록 회복 처방이 더 정교해져요.":
+    "After 3+ days of records, Body & Mental batteries appear.\nThe more you log, the more precise your recovery plan becomes.",
+  "건너뛰기": "Skip",
+  "시작하기": "Get Started",
 };
 
 const EN: Record<string, string> = { ...EN_BASE, ...EN_EXTRA };
