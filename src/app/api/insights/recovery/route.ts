@@ -169,6 +169,27 @@ function readAIContentVariants(raw: unknown, today: ISODate): Partial<Record<Lan
   return variants;
 }
 
+function hasSameStructure(ko: AIRecoveryPayload, en: AIRecoveryPayload) {
+  const koSections = ko.result.sections ?? [];
+  const enSections = en.result.sections ?? [];
+  if (koSections.length !== enSections.length) return false;
+  for (let i = 0; i < koSections.length; i++) {
+    if (koSections[i].category !== enSections[i].category) return false;
+    if ((koSections[i].tips ?? []).length !== (enSections[i].tips ?? []).length) return false;
+  }
+
+  const koAlert = ko.result.compoundAlert;
+  const enAlert = en.result.compoundAlert;
+  if (Boolean(koAlert) !== Boolean(enAlert)) return false;
+  if (koAlert && enAlert && (koAlert.factors ?? []).length !== (enAlert.factors ?? []).length) return false;
+
+  const koWeekly = ko.result.weeklySummary;
+  const enWeekly = en.result.weeklySummary;
+  if (Boolean(koWeekly) !== Boolean(enWeekly)) return false;
+  if (koWeekly && enWeekly && (koWeekly.topDrains ?? []).length !== (enWeekly.topDrains ?? []).length) return false;
+  return true;
+}
+
 function readServerCachedAI(rawPayload: unknown, today: ISODate, lang: Language): AIRecoveryPayload | null {
   if (!isRecord(rawPayload)) return null;
   const node = rawPayload.aiRecoveryDaily;
@@ -227,23 +248,24 @@ export async function GET(req: NextRequest) {
     const aiContent = await safeLoadAIContent(userId);
     if (aiContent && aiContent.dateISO === today) {
       const variants = readAIContentVariants(aiContent.data, today);
+      const koVariant = variants.ko ?? null;
       const direct = variants[lang] ?? null;
-      if (direct && direct.engine === "openai") {
+      if (direct && direct.engine === "openai" && (lang !== "en" || !koVariant || hasSameStructure(koVariant, direct))) {
         return NextResponse.json({ ok: true, data: direct } satisfies AIRecoveryApiSuccess);
       }
-      if (lang === "en" && variants.ko && variants.ko.engine === "openai") {
+      if (lang === "en" && koVariant && koVariant.engine === "openai") {
         try {
           const translated = await translateAIRecoveryToEnglish({
-            result: variants.ko.result,
-            generatedText: variants.ko.generatedText ?? "",
+            result: koVariant.result,
+            generatedText: koVariant.generatedText ?? "",
             engine: "openai",
-            model: variants.ko.model,
-            debug: variants.ko.debug ?? null,
+            model: koVariant.model,
+            debug: koVariant.debug ?? null,
           });
           const translatedPayload: AIRecoveryPayload = {
-            ...variants.ko,
+            ...koVariant,
             language: "en",
-            model: translated.model ?? variants.ko.model,
+            model: translated.model ?? koVariant.model,
             debug: translated.debug,
             generatedText: translated.generatedText,
             result: translated.result,
@@ -252,7 +274,7 @@ export async function GET(req: NextRequest) {
             dateISO: today,
             generatedAt: Date.now(),
             variants: {
-              ko: variants.ko,
+              ko: koVariant,
               en: translatedPayload,
             },
           });
@@ -263,7 +285,7 @@ export async function GET(req: NextRequest) {
           }
           return NextResponse.json({ ok: true, data: translatedPayload } satisfies AIRecoveryApiSuccess);
         } catch {
-          return NextResponse.json({ ok: true, data: variants.ko } satisfies AIRecoveryApiSuccess);
+          return NextResponse.json({ ok: true, data: koVariant } satisfies AIRecoveryApiSuccess);
         }
       }
     }
