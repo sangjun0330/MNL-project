@@ -199,7 +199,12 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
       "- C 전체는 20줄 이내로 간결하게 작성",
       "",
       "[D] 이번 주 AI 한마디",
-      "- 이번 주 요약 -> 개인 패턴 -> 다음 주 예측 순서",
+      "- 아래 세 항목을 반드시 각각의 레이블로 구분해서 출력하세요:",
+      "  이번 주 요약: (평균 배터리 수치 + 지난주 대비 변화 한 문장)",
+      "  개인 패턴: (이번 주에 실제로 관찰된 수면·카페인·기분 패턴 서술. 과거/현재 시제. 1~2문장)",
+      "  다음 주 예측: (다음 주에 예상되는 변화 또는 권장 행동. 반드시 미래 시제로. 개인 패턴과 내용이 겹치면 안 됨. 1~2문장)",
+      "- 개인 패턴과 다음 주 예측은 절대 같은 문장이나 같은 의미를 반복하지 말 것",
+      "- 다음 주 예측은 '~할 가능성이 있어요', '~하면 좋을 것 같아요', '~을 시도해 보세요' 같은 미래/권장형으로만 작성",
       "",
       "[톤 가이드]",
       "- 간호사 동료처럼 부드러운 말투",
@@ -210,6 +215,8 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
       "- '스트레스(2)', '기분4'처럼 숫자 태그 형태 금지. 반드시 자연어로 풀어쓰기 (예: 스트레스가 조금 높은 편, 기분이 좋은 편)",
       "- 카페인 mg는 잔 수로 같이 표현 (예: 120mg -> 약 1잔)",
       "- 전체 답변은 한눈에 읽히게 짧은 문장 위주로 작성",
+      "- 한국어 문법을 정확하게 지킬 것: 조사 오류(예: '편가' → '편이', '편로' → '편으로') 및 어색한 표현 금지",
+      "- 단어 선택 주의: '후날' 대신 '후반', '편가' 대신 '편이', '편로' 대신 '편으로' 등 올바른 형태 사용",
       "",
       "[데이터(JSON)]",
       JSON.stringify(context, null, 2),
@@ -224,9 +231,12 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
     "[C] Today's recovery plan (only relevant categories, prioritized sleep > shift > caffeine > menstrual > stress > activity). Each category must start with [Category].",
     "If menstrualTrackingEnabled is false, do not include any menstrual section in [C] and use only 1-5 category numbering.",
     "If menstrualTrackingEnabled is true, menstrual section may be included and 1-6 numbering is allowed.",
-    "[D] Weekly AI note (weekly summary -> personal pattern -> next week preview)",
+    "[D] Weekly AI note - output exactly these three labeled sub-sections:",
+    "  이번 주 요약: (one sentence with avg battery and vs last week)",
+    "  개인 패턴: (1-2 sentences describing patterns observed this week - past/present tense only)",
+    "  다음 주 예측: (1-2 sentences with forward-looking prediction or recommendation - future tense only, must NOT repeat content from 개인 패턴)",
     "Tone: warm peer nurse voice, no medical jargon, no blame, concrete actions.",
-    "No duplicated sentences.",
+    "No duplicated sentences. 개인 패턴 and 다음 주 예측 must have completely different content.",
     "Keep numbers at one decimal place max.",
     "Do not use score tags like stress(2) or mood4. Rewrite them in plain language.",
     "Express caffeine both as cups and mg (e.g., about 1 cup / 120mg).",
@@ -533,8 +543,17 @@ function parseWeeklySummaryFromText(dBlock: string): WeeklySummary | null {
     .filter((v) => v.label)
     .slice(0, 3);
 
-  const personalInsight = lines.slice(0, Math.min(2, lines.length)).join(" ").trim();
-  const nextWeekPreview = lines.slice(-2).join(" ").trim() || lines[lines.length - 1];
+  // Try to extract by explicit labels first (preferred output format)
+  const fullText = lines.join(" ");
+  const patternMatch = fullText.match(/개인\s*패턴\s*[:：]\s*(.+?)(?=다음\s*주\s*예측\s*[:：]|$)/);
+  const previewMatch = fullText.match(/다음\s*주\s*예측\s*[:：]\s*(.+?)$/);
+
+  const personalInsight = patternMatch
+    ? patternMatch[1].trim()
+    : lines.slice(0, Math.min(2, lines.length)).join(" ").trim();
+  const nextWeekPreview = previewMatch
+    ? previewMatch[1].trim()
+    : lines.slice(Math.max(0, lines.length - 2)).join(" ").trim() || lines[lines.length - 1];
 
   if (!personalInsight || !nextWeekPreview) return null;
 
