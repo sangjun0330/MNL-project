@@ -490,16 +490,30 @@ const EN_EXTRA: Record<string, string> = {
     "If fatigue is high, lower workload intensity and add short recovery breaks every 60-90 minutes.",
   "연속 야간 근무 중이라면 회복 우선으로 일정 밀도를 줄여 주세요.":
     "If you're on consecutive night shifts, prioritize recovery and reduce schedule density.",
-  // Onboarding
-  "캘린더에 근무를 입력하세요": "Schedule your shifts",
-  "매일 건강 상태를 기록하세요": "Log your daily health",
-  "맞춤 인사이트를 받아보세요": "Get personalized insights",
-  "캘린더에서 날짜를 누르고 근무를 설정하세요.\n근무 패턴이 회복 분석의 기반이 됩니다.":
-    "Tap a date on the calendar and set your shift.\nYour work pattern becomes the foundation for recovery analysis.",
-  "일정 탭에서 날짜를 누르고 수면, 스트레스, 기분 등을 입력하세요.\n하루에 하나만 입력해도 충분합니다.":
-    "Go to the Schedule tab, tap a date, and fill in sleep, stress, mood, and more.\nJust one field a day is enough to get started.",
-  "3일 이상 기록하면 Body·Mental 배터리가 나타납니다.\n기록할수록 회복 처방이 더 정교해져요.":
-    "After 3+ days of records, Body & Mental batteries appear.\nThe more you log, the more precise your recovery plan becomes.",
+  // Onboarding (4-step guide for new users)
+  "근무 일정을 등록하세요": "Register your shifts",
+  "캘린더에서 날짜를 탭하고 근무 유형을 선택하세요": "Tap a date on the calendar and choose your shift type",
+  "Day · Eve · Night · Off 중 선택할 수 있어요": "Choose from Day · Eve · Night · Off",
+  "길게 눌러 여러 날을 한번에 설정할 수 있어요": "Long-press to set multiple days at once",
+  "근무 패턴이 회복 분석의 기반이 됩니다": "Your shift pattern is the foundation of recovery analysis",
+
+  "매일 건강을 기록하세요": "Log your health daily",
+  "하루 1분, 오늘의 컨디션만 입력하면 돼요": "Just 1 minute a day — record how you feel",
+  "수면 시간 · 수면 질 · 스트레스 · 기분을 기록해요": "Track sleep hours, sleep quality, stress, and mood",
+  "카페인, 운동, 음주 등 세부 항목도 추가 가능해요": "You can also add caffeine, exercise, alcohol, and more",
+  "하루에 하나만 입력해도 분석이 시작돼요": "Even one entry a day is enough to start analysis",
+
+  "나만의 통계를 확인하세요": "Check your personal insights",
+  "3일 이상 기록하면 맞춤 인사이트가 열려요": "Unlock personalized insights after 3+ days of records",
+  "Body · Mental 배터리로 회복 상태를 한눈에 봐요": "See your recovery status at a glance with Body & Mental batteries",
+  "근무 유형별 컨디션 변화를 그래프로 비교해요": "Compare condition changes by shift type with charts",
+  "기록이 쌓일수록 분석이 더 정교해져요": "The more you log, the more precise your analysis becomes",
+
+  "맞춤 회복 처방을 받으세요": "Get your personalized recovery plan",
+  "AI가 당신의 패턴을 분석해 회복 방법을 알려줘요": "AI analyzes your patterns and suggests recovery methods",
+  "다음 근무 전 수면·수분·카페인 타이밍을 추천해요": "Get sleep, hydration, and caffeine timing before your next shift",
+  "연속 야간 근무 시 맞춤 회복 전략을 제공해요": "Receive tailored recovery strategies for consecutive night shifts",
+
   "건너뛰기": "Skip",
   "시작하기": "Get Started",
 };

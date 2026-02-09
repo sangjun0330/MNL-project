@@ -5,12 +5,12 @@ import { BottomNav } from "@/components/shell/BottomNav";
 import { UiPreferencesBridge } from "@/components/system/UiPreferencesBridge";
 import { CloudStateSync } from "@/components/system/CloudStateSync";
 import { getSupabaseBrowserClient, useAuthState } from "@/lib/auth";
-import { hydrateState, setLocalSaveEnabled, setStorageScope, useAppStoreSelector } from "@/lib/store";
+import { hydrateState, setLocalSaveEnabled, setStorageScope } from "@/lib/store";
 import { emptyState } from "@/lib/model";
 import { useI18n } from "@/lib/useI18n";
 import { OnboardingGuide } from "@/components/system/OnboardingGuide";
 import type { SyntheticEvent } from "react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -129,15 +129,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setLoginPromptOpen(true);
   }, [shouldBlockInteraction]);
 
-  // Onboarding
-  const { hasSeenOnboarding, setSettings } = useAppStoreSelector(
-    (s) => ({ hasSeenOnboarding: s.settings.hasSeenOnboarding, setSettings: s.setSettings }),
-    (a, b) => a.hasSeenOnboarding === b.hasSeenOnboarding && a.setSettings === b.setSettings
-  );
-  const showOnboarding = isAuthed && cloudReady && !hasSeenOnboarding;
+  // ── Onboarding: CloudStateSync가 "완전 새 유저"일 때만 이벤트를 발행 ──
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const onboardingTriggeredRef = useRef(false);
+
+  useEffect(() => {
+    const handler = () => {
+      if (onboardingTriggeredRef.current) return; // 세션 내 1회만
+      onboardingTriggeredRef.current = true;
+      setShowOnboarding(true);
+    };
+    window.addEventListener("wnl:show-onboarding", handler);
+    return () => window.removeEventListener("wnl:show-onboarding", handler);
+  }, []);
+
   const handleOnboardingComplete = useCallback(() => {
-    setSettings({ hasSeenOnboarding: true });
-  }, [setSettings]);
+    setShowOnboarding(false);
+  }, []);
 
   return (
     <div className="min-h-dvh w-full bg-ios-bg">
