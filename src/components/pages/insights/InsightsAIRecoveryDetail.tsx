@@ -37,7 +37,10 @@ function presentError(error: string, t: (key: string) => string) {
 
 function compactErrorCode(error: string) {
   if (!error) return "";
-  const code = error.split("{")[0]?.trim() || error;
+  // 모델명(model:xxx) 제거
+  let code = error.split("{")[0]?.trim() || error;
+  code = code.replace(/_?model:[^\s_]*/gi, "");
+  code = code.replace(/__+/g, "_").replace(/^_|_$/g, "");
   return code.length > 90 ? `${code.slice(0, 89)}…` : code;
 }
 
@@ -173,7 +176,7 @@ export function InsightsAIRecoveryDetail() {
   const { t } = useI18n();
   const { recordedDays } = useInsightsData();
   const insightsLocked = isInsightsLocked(recordedDays);
-  const { data, loading, generating, error } = useAIRecoveryInsights({ mode: "generate", enabled: !insightsLocked });
+  const { data, loading, generating, error, retry } = useAIRecoveryInsights({ mode: "generate", enabled: !insightsLocked });
   const lang = data?.language ?? "ko";
   const errorLines = useMemo(() => (error ? presentError(error, t) : []), [error, t]);
   const errorCode = useMemo(() => (error ? compactErrorCode(error) : ""), [error]);
@@ -253,7 +256,13 @@ export function InsightsAIRecoveryDetail() {
               <p key={`${line}-${idx}`}>{line}</p>
             ))}
           </div>
-          {errorCode ? <div className="mt-3 text-[12px] text-ios-muted">[{errorCode}]</div> : null}
+          <button
+            type="button"
+            onClick={retry}
+            className="mt-4 w-full rounded-xl bg-[#007AFF] py-3 text-[15px] font-semibold text-white active:bg-[#0062CC] transition-colors"
+          >
+            {t("다시 시도")}
+          </button>
         </DetailCard>
       ) : null}
 
@@ -293,7 +302,7 @@ export function InsightsAIRecoveryDetail() {
           </DetailCard>
 
           <DetailCard className="p-5">
-            <div className="text-[13px] font-semibold text-ios-sub">{t("오늘의 회복 처방")}</div>
+            <div className="text-[13px] font-semibold text-ios-sub">{t("오늘의 회복 추천")}</div>
             {orderedSections.length ? (
               <div className="mt-3 space-y-3">
                 {orderedSections.map(({ meta, section }, index) => (
@@ -341,7 +350,7 @@ export function InsightsAIRecoveryDetail() {
               </div>
             ) : (
               <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
-                {cFallbackText || t("오늘은 추가 처방이 없어요.")}
+                {cFallbackText || t("오늘은 추가 추천이 없어요.")}
               </p>
             )}
           </DetailCard>
@@ -385,6 +394,11 @@ export function InsightsAIRecoveryDetail() {
               <p className="mt-2 text-[14px] text-ios-sub">{t("주간 요약은 데이터가 더 쌓이면 표시돼요.")}</p>
             )}
           </DetailCard>
+
+          {/* 면책 문구 */}
+          <p className="mt-4 px-1 text-center text-[12px] leading-[1.6] text-black/30">
+            {t("본 콘텐츠는 의료 행위가 아닌 건강 관리 참고용 추천입니다. 의학적 판단이나 치료를 대체하지 않으며, 건강에 대한 결정은 반드시 전문 의료인과 상담하세요.")}
+          </p>
         </>
       ) : null}
 
@@ -400,7 +414,7 @@ export function InsightsAIRecoveryDetail() {
                   alt="RNest"
                   width={56}
                   height={56}
-                  className="relative h-[56px] w-[56px] object-contain p-2"
+                  className="relative h-full w-full object-cover"
                   priority
                 />
               </div>

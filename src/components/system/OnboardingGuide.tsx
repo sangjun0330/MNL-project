@@ -147,7 +147,7 @@ export function OnboardingGuide({ open, onComplete }: Props) {
       ],
     },
     {
-      title: t("맞춤 회복 처방을 받으세요"),
+      title: t("맞춤 회복 추천을 받으세요"),
       desc: t("AI가 당신의 패턴을 분석해 회복 방법을 알려줘요"),
       tips: [
         t("다음 근무 전 수면·수분·카페인 타이밍을 추천해요"),
