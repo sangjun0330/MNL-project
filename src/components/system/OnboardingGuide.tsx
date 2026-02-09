@@ -31,11 +31,17 @@ function Dots({ current, total }: { current: number; total: number }) {
 /* ────────────────────────────────────────────
    Large SF-Symbol-style emoji icons
    ──────────────────────────────────────────── */
-function StepVisual({ step }: { step: number }) {
+function StepVisual({ step, animKey }: { step: number; animKey: number }) {
   const emojis = ["📅", "✏️", "📊", "💡"];
   return (
     <div className="flex h-[88px] w-[88px] items-center justify-center rounded-[26px] bg-black/[0.03]">
-      <span className="text-[44px] leading-none">{emojis[step]}</span>
+      <span
+        key={`icon-${animKey}`}
+        className="text-[44px] leading-none animate-[onb-icon-pop_0.5s_cubic-bezier(0.175,0.885,0.32,1.1)_both]"
+        style={{ animationDelay: "100ms" }}
+      >
+        {emojis[step]}
+      </span>
     </div>
   );
 }
@@ -161,26 +167,33 @@ export function OnboardingGuide({ open, onComplete }: Props) {
 
   const slideClass =
     direction === "next"
-      ? "animate-[onb-slide-in-right_0.35s_ease-out_both]"
-      : "animate-[onb-slide-in-left_0.35s_ease-out_both]";
+      ? "animate-[onb-slide-in-right_0.45s_cubic-bezier(0.22,1,0.36,1)_both]"
+      : "animate-[onb-slide-in-left_0.45s_cubic-bezier(0.22,1,0.36,1)_both]";
 
   return createPortal(
     <>
       {/* keyframe injection (only once) */}
       <style>{`
         @keyframes onb-slide-in-right {
-          from { opacity: 0; transform: translateX(40px); }
-          to   { opacity: 1; transform: translateX(0); }
+          from { opacity: 0; transform: translateX(50px) scale(0.96); filter: blur(4px); }
+          40%  { filter: blur(0); }
+          to   { opacity: 1; transform: translateX(0) scale(1); filter: blur(0); }
         }
         @keyframes onb-slide-in-left {
-          from { opacity: 0; transform: translateX(-40px); }
-          to   { opacity: 1; transform: translateX(0); }
+          from { opacity: 0; transform: translateX(-50px) scale(0.96); filter: blur(4px); }
+          40%  { filter: blur(0); }
+          to   { opacity: 1; transform: translateX(0) scale(1); filter: blur(0); }
+        }
+        @keyframes onb-icon-pop {
+          0%   { transform: scale(0.6); opacity: 0; }
+          60%  { transform: scale(1.05); }
+          100% { transform: scale(1); opacity: 1; }
         }
       `}</style>
 
       <div
         className={cn(
-          "fixed inset-0 z-[100] bg-white transition-opacity duration-500 ease-[cubic-bezier(.4,0,.2,1)]",
+          "fixed inset-0 z-[100] bg-white transition-opacity duration-[600ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
           visible ? "opacity-100" : "opacity-0"
         )}
       >
@@ -212,7 +225,7 @@ export function OnboardingGuide({ open, onComplete }: Props) {
             <div key={animKey.current} className={slideClass}>
               {/* Icon */}
               <div className="flex justify-center">
-                <StepVisual step={step} />
+                <StepVisual step={step} animKey={animKey.current} />
               </div>
 
               {/* Title */}

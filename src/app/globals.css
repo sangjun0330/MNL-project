@@ -12,15 +12,24 @@
   --wnl-sep: rgba(60, 60, 67, 0.18);
   --wnl-accent: #007AFF;
   --wnl-selection: rgba(0, 122, 255, 0.16);
+
+  /* ── Apple-grade easing functions ── */
   --wnl-ease-smooth: cubic-bezier(0.16, 1, 0.3, 1);
   --wnl-ease-soft: cubic-bezier(0.22, 1, 0.36, 1);
-  --wnl-dur-fast: 180ms;
-  --wnl-dur-med: 320ms;
-  --wnl-dur-slow: 420ms;
-  --wnl-dur-page: 520ms;
-  --wnl-dur-sheet: 520ms;
-  --wnl-dur-modal: 420ms;
   --wnl-ease-apple: cubic-bezier(0.22, 1, 0.36, 1);
+  --wnl-ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.1);     /* subtle overshoot */
+  --wnl-ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);          /* playful bounce */
+  --wnl-ease-decel: cubic-bezier(0, 0, 0.2, 1);                   /* iOS deceleration */
+  --wnl-ease-accel: cubic-bezier(0.4, 0, 1, 1);                   /* exit acceleration */
+
+  /* ── Duration tokens ── */
+  --wnl-dur-micro: 120ms;   /* tap feedback, icon toggle */
+  --wnl-dur-fast: 180ms;    /* quick interactions */
+  --wnl-dur-med: 300ms;     /* medium transitions */
+  --wnl-dur-slow: 420ms;    /* slower animations */
+  --wnl-dur-page: 480ms;    /* page transitions */
+  --wnl-dur-sheet: 500ms;   /* bottom sheet slide */
+  --wnl-dur-modal: 400ms;   /* modal/dialog animations */
 }
 
 html, body {
@@ -43,42 +52,87 @@ body {
 /* ✅ iOS-like tap behaviour */
 * { -webkit-tap-highlight-color: transparent; }
 
-/* ✅ Page transition (bottom tab 이동 시) */
+/* ===================================
+   Page Transitions (route changes)
+   =================================== */
+
 @keyframes wnlPageEnter {
-  from { opacity: 0; transform: translate3d(0, 10px, 0) scale(0.985); filter: blur(3px); }
-  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); filter: blur(0); }
+  from {
+    opacity: 0;
+    transform: translate3d(0, 16px, 0) scale(0.97);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes wnlPageExit {
+  from {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+    filter: blur(0);
+  }
+  to {
+    opacity: 0;
+    transform: translate3d(0, -8px, 0) scale(0.985);
+    filter: blur(2px);
+  }
 }
 
 .wnl-page-enter {
-  animation: wnlPageEnter var(--wnl-dur-page) var(--wnl-ease-apple);
+  animation: wnlPageEnter var(--wnl-dur-page) var(--wnl-ease-apple) both;
   will-change: transform, opacity, filter;
 }
 
+/* ===================================
+   Modal & Backdrop
+   =================================== */
+
 @keyframes wnlBackdropIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from { opacity: 0; backdrop-filter: blur(0); }
+  to { opacity: 1; backdrop-filter: blur(8px); }
 }
 
 @keyframes wnlModalIn {
-  from { opacity: 0; transform: translate3d(0, 12px, 0) scale(0.985); filter: blur(4px); }
-  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); filter: blur(0); }
+  from {
+    opacity: 0;
+    transform: translate3d(0, 18px, 0) scale(0.96);
+    filter: blur(6px);
+  }
+  60% {
+    opacity: 1;
+    filter: blur(0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+    filter: blur(0);
+  }
 }
 
 .wnl-backdrop {
-  animation: wnlBackdropIn var(--wnl-dur-modal) var(--wnl-ease-apple);
+  animation: wnlBackdropIn var(--wnl-dur-modal) var(--wnl-ease-apple) both;
 }
 
 .wnl-modal {
-  animation: wnlModalIn var(--wnl-dur-modal) var(--wnl-ease-apple);
+  animation: wnlModalIn var(--wnl-dur-modal) var(--wnl-ease-spring) both;
   will-change: transform, opacity, filter;
 }
 
-/* BottomNav (Simple Apple style) */
+/* ===================================
+   Bottom Navigation
+   =================================== */
+
 .wnl-nav-bar {
   border-radius: 999px;
   background: #ffffff;
   border: 1px solid rgba(60, 60, 67, 0.12);
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.08);
+  transition: transform var(--wnl-dur-med) var(--wnl-ease-apple),
+    opacity var(--wnl-dur-med) var(--wnl-ease-apple);
 }
 
 .wnl-nav-item {
@@ -91,14 +145,23 @@ body {
   padding: 6px 8px;
   border-radius: 999px;
   transition:
-    transform 220ms var(--wnl-ease-apple),
-    color 220ms var(--wnl-ease-apple),
-    background-color 220ms var(--wnl-ease-apple);
+    transform var(--wnl-dur-fast) var(--wnl-ease-spring),
+    color var(--wnl-dur-med) var(--wnl-ease-apple),
+    background-color var(--wnl-dur-med) var(--wnl-ease-apple);
+}
+
+.wnl-nav-item:active {
+  transform: scale(0.92);
 }
 
 .wnl-nav-icon {
   width: 20px;
   height: 20px;
+  transition: transform var(--wnl-dur-fast) var(--wnl-ease-spring);
+}
+
+.wnl-nav-active .wnl-nav-icon {
+  transform: scale(1.08);
 }
 
 .wnl-nav-label {
@@ -116,24 +179,114 @@ body {
   color: rgba(60, 60, 67, 0.6);
 }
 
+/* ===================================
+   Staggered Card / List Animations
+   =================================== */
+
+@keyframes wnlCardEnter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+/* Apply to cards in page content — auto-stagger */
+.wnl-page-enter > div > div,
+.wnl-page-enter > section,
+.wnl-page-enter > div > section {
+  animation: wnlCardEnter var(--wnl-dur-med) var(--wnl-ease-apple) both;
+}
+
+.wnl-page-enter > div > div:nth-child(1),
+.wnl-page-enter > section:nth-child(1),
+.wnl-page-enter > div > section:nth-child(1) { animation-delay: 60ms; }
+
+.wnl-page-enter > div > div:nth-child(2),
+.wnl-page-enter > section:nth-child(2),
+.wnl-page-enter > div > section:nth-child(2) { animation-delay: 120ms; }
+
+.wnl-page-enter > div > div:nth-child(3),
+.wnl-page-enter > section:nth-child(3),
+.wnl-page-enter > div > section:nth-child(3) { animation-delay: 180ms; }
+
+.wnl-page-enter > div > div:nth-child(4),
+.wnl-page-enter > section:nth-child(4),
+.wnl-page-enter > div > section:nth-child(4) { animation-delay: 240ms; }
+
+.wnl-page-enter > div > div:nth-child(n+5),
+.wnl-page-enter > section:nth-child(n+5),
+.wnl-page-enter > div > section:nth-child(n+5) { animation-delay: 300ms; }
+
+/* ===================================
+   Interactive Press Feedback
+   =================================== */
+
+/* Tapable cards/buttons — Apple spring press */
+.wnl-pressable {
+  transition: transform var(--wnl-dur-micro) var(--wnl-ease-spring),
+    box-shadow var(--wnl-dur-fast) var(--wnl-ease-apple);
+  will-change: transform;
+}
+.wnl-pressable:active {
+  transform: scale(0.975);
+}
+
+/* Links & interactive list items */
+a[class*="rounded-apple"],
+div[class*="shadow-apple"]:active,
+button:not([class*="wnl-nav"]):active {
+  transition: transform var(--wnl-dur-micro) var(--wnl-ease-spring);
+}
+
+/* ===================================
+   Mobile Optimizations
+   =================================== */
+
 @keyframes wnlPageEnterMobile {
-  from { opacity: 0; transform: translate3d(0, 8px, 0) scale(0.99); }
-  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+  from {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
 }
 
 @keyframes wnlModalInMobile {
-  from { opacity: 0; transform: translate3d(0, 10px, 0) scale(0.99); }
-  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+  from {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0) scale(0.97);
+  }
+  60% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
 }
 
 @media (hover: none) and (pointer: coarse) {
-  .wnl-page-enter { animation: wnlPageEnterMobile var(--wnl-dur-page) var(--wnl-ease-apple); }
-  .wnl-modal { animation: wnlModalInMobile var(--wnl-dur-modal) var(--wnl-ease-apple); }
+  .wnl-page-enter {
+    animation: wnlPageEnterMobile var(--wnl-dur-page) var(--wnl-ease-apple) both;
+  }
+  .wnl-modal {
+    animation: wnlModalInMobile var(--wnl-dur-modal) var(--wnl-ease-spring) both;
+  }
   .wnl-backdrop {
-    -webkit-backdrop-filter: blur(3px) saturate(1);
-    backdrop-filter: blur(3px) saturate(1);
+    -webkit-backdrop-filter: blur(4px) saturate(1.1);
+    backdrop-filter: blur(4px) saturate(1.1);
   }
 }
+
+/* ===================================
+   Reduced Motion
+   =================================== */
 
 @media (prefers-reduced-motion: reduce) {
   .wnl-page-enter { animation: none; }
@@ -143,7 +296,11 @@ body {
   .wnl-wave,
   .wnl-pulse-soft,
   .wnl-float-up { animation: none; }
+  .wnl-page-enter > div > div,
+  .wnl-page-enter > section,
+  .wnl-page-enter > div > section { animation: none; }
   body { transition: none; }
+  * { transition-duration: 0ms !important; }
 }
 
 ::selection {
@@ -159,9 +316,9 @@ body {
 *::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.14); border-radius: 999px; }
 *::-webkit-scrollbar-track { background: transparent; }
 
-/* =========================
+/* ===================================
    RNest Insight v2.0 motion
-   ========================= */
+   =================================== */
 
 @keyframes wnlBreathe {
   0%, 100% { transform: scale(0.99); opacity: 0.6; }
@@ -200,6 +357,12 @@ body {
   100% { opacity: 0; transform: translateY(-16px); }
 }
 
+/* Shimmer for skeleton loading */
+@keyframes wnlShimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
 .wnl-breathe {
   animation: wnlBreathe 3.6s ease-in-out infinite;
 }
@@ -228,10 +391,51 @@ body {
   animation: wnlFloatUp 1.2s ease-out forwards;
 }
 
-/* =========================
+.wnl-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.wnl-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+  animation: wnlShimmer 1.8s var(--wnl-ease-decel) infinite;
+}
+
+/* ===================================
+   Smooth content transitions
+   =================================== */
+
+/* Cards, sections, and list items fade/slide smoothly */
+.space-y-4 > * {
+  transition: transform var(--wnl-dur-med) var(--wnl-ease-apple),
+    opacity var(--wnl-dur-med) var(--wnl-ease-apple);
+}
+
+/* Back button hover */
+a[aria-label="Back"] {
+  transition: transform var(--wnl-dur-fast) var(--wnl-ease-spring),
+    background-color var(--wnl-dur-fast) var(--wnl-ease-apple);
+}
+a[aria-label="Back"]:active {
+  transform: scale(0.9);
+}
+
+/* Detail page summary cards */
+.rounded-apple {
+  transition: transform var(--wnl-dur-fast) var(--wnl-ease-spring),
+    box-shadow var(--wnl-dur-med) var(--wnl-ease-apple);
+}
+.rounded-apple:active {
+  transform: scale(0.98);
+}
+
+/* ===================================
    RNest Night Mode (auto)
    Trigger: night_streak >= 3
-   ========================= */
+   =================================== */
 
 html.wnl-night {
   color-scheme: dark;

@@ -4,9 +4,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
 
-const SHEET_DURATION_MS = 520;
+const SHEET_DURATION_MS = 500;
 const SHEET_EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
-const SHEET_CLOSE_DELAY_MS = 220;
+const SHEET_EASE_SNAP = "cubic-bezier(0.175, 0.885, 0.32, 1.05)";  // spring snap-back
+const SHEET_CLOSE_DELAY_MS = 180;
 
 type Props = {
   open: boolean;
@@ -132,7 +133,9 @@ export function BottomSheet({
     if (!drag.current.active) return;
     const dy = clientY - drag.current.startY;
     if (dy < 0) {
-      applyTranslate(0, false);
+      // rubber-band resistance when dragging up
+      const resistance = Math.max(0, dy) * 0.2;
+      applyTranslate(resistance, false);
       return;
     }
     drag.current.translate = dy;
@@ -159,8 +162,12 @@ export function BottomSheet({
       setTimeout(() => closeWithAnimation(), SHEET_CLOSE_DELAY_MS);
       return;
     }
-    // 원위치 스냅
-    applyTranslate(0, true);
+    // 원위치 스프링 스냅
+    const el = panelRef.current;
+    if (el) {
+      el.style.transition = `transform ${SHEET_DURATION_MS}ms ${SHEET_EASE_SNAP}`;
+      el.style.transform = `translate3d(0, 0, 0)`;
+    }
   };
 
   if (!mounted || !portalEl) return null;
@@ -176,7 +183,7 @@ export function BottomSheet({
           isAppStore
             ? "bg-black/45 backdrop-blur-[10px]"
             : "bg-black/35 backdrop-blur-[6px]",
-          "transition-opacity duration-[520ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+          "transition-[opacity,backdrop-filter] duration-[500ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
           "wnl-backdrop",
           visible ? "opacity-100" : "opacity-0"
         )}
@@ -195,8 +202,8 @@ export function BottomSheet({
             maxH,
             "overflow-hidden flex flex-col",
             // enter/exit (slide up)
-            "transition-[transform,opacity] duration-[520ms] ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform",
-            visible ? "translate-y-0 opacity-100" : "translate-y-[20px] opacity-0"
+            "transition-[transform,opacity] duration-[500ms] ease-[cubic-bezier(0.175,0.885,0.32,1.05)] will-change-transform",
+            visible ? "translate-y-0 opacity-100" : "translate-y-full opacity-0"
           )}
           role="dialog"
           aria-modal="true"
