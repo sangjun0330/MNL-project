@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useI18n } from "@/lib/useI18n";
+import { PWAInstallButton } from "@/components/system/PWAInstallButton";
 
 export function SettingsPage() {
   const { t } = useI18n();
@@ -11,6 +12,11 @@ export function SettingsPage() {
       <div className="mb-4">
         <div className="text-[28px] font-extrabold tracking-[-0.02em]">{t("설정")}</div>
         <div className="mt-1 text-[13px] text-ios-sub">{t("모든 기능을 사용하려면 로그인해야 합니다.")}</div>
+      </div>
+
+      {/* PWA 앱 설치 */}
+      <div className="mb-4">
+        <PWAInstallButton />
       </div>
 
       <div className="mb-3 text-[13px] text-ios-sub">{t("설정 항목을 선택해 주세요.")}</div>

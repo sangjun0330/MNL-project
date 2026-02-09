@@ -524,6 +524,22 @@ const EN_EXTRA: Record<string, string> = {
 
   "건너뛰기": "Skip",
   "시작하기": "Get Started",
+
+  // PWA install
+  "앱으로 설치하기": "Install as App",
+  "홈 화면에 추가하면 앱처럼 빠르게 실행할 수 있어요.": "Add to your home screen for a native app experience.",
+  "앱으로 실행 중": "Running as App",
+  "홈 화면에서 앱으로 실행되고 있어요.": "You're running from the home screen.",
+  "아래 안내를 따라 홈 화면에 추가해 주세요.": "Follow the steps below to add to your home screen.",
+  "하단 공유 버튼(□↑)을 탭하세요": "Tap the Share button (□↑) at the bottom",
+  "'홈 화면에 추가'를 선택하세요": "Select 'Add to Home Screen'",
+  "'추가' 버튼을 눌러 완료하세요": "Tap 'Add' to finish",
+  "오른쪽 하단 메뉴(≡)를 탭하세요": "Tap the menu (≡) at the bottom right",
+  "주소창 오른쪽 메뉴(⋯)를 탭하세요": "Tap the menu (⋯) next to the address bar",
+  "'홈 화면에 추가' 또는 '설치'를 선택하세요": "Select 'Add to Home Screen' or 'Install'",
+  "주소창 오른쪽 메뉴(⋮)를 탭하세요": "Tap the menu (⋮) next to the address bar",
+  "'홈 화면에 추가' 또는 '앱 설치'를 선택하세요": "Select 'Add to Home Screen' or 'Install App'",
+  "'설치' 버튼을 눌러 완료하세요": "Tap 'Install' to finish",
 };
 
 const EN: Record<string, string> = { ...EN_BASE, ...EN_EXTRA };
