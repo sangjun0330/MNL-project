@@ -15,16 +15,31 @@ export async function DELETE(req: Request) {
   const admin = getSupabaseAdmin();
 
   try {
+    // 1. wnl_daily_logs (device_id = userId)
+    const dailyLogsDelete = await admin.from("wnl_daily_logs").delete().eq("device_id", userId);
+    if (dailyLogsDelete.error) {
+      return bad(500, `Failed to delete daily logs: ${dailyLogsDelete.error.message}`);
+    }
+
+    // 2. ai_content (AI 회복 캐시)
+    const aiContentDelete = await admin.from("ai_content").delete().eq("user_id", userId);
+    if (aiContentDelete.error) {
+      return bad(500, `Failed to delete AI content: ${aiContentDelete.error.message}`);
+    }
+
+    // 3. wnl_user_state (사용자 상태 데이터)
     const userStateDelete = await admin.from("wnl_user_state").delete().eq("user_id", userId);
     if (userStateDelete.error) {
       return bad(500, `Failed to delete user state: ${userStateDelete.error.message}`);
     }
 
+    // 4. wnl_users (사용자 프로필)
     const usersDelete = await admin.from("wnl_users").delete().eq("user_id", userId);
     if (usersDelete.error) {
       return bad(500, `Failed to delete user profile: ${usersDelete.error.message}`);
     }
 
+    // 5. Supabase Auth 유저 삭제
     const authDelete = await admin.auth.admin.deleteUser(userId);
     if (authDelete.error) {
       return bad(500, `Failed to delete auth user: ${authDelete.error.message}`);
