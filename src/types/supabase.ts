@@ -36,30 +36,6 @@ export type Database = {
         };
         Relationships: [];
       };
-      wnl_daily_logs: {
-        Row: {
-          device_id: string;
-          date_iso: string;
-          payload: Json;
-          client_updated_at: number | null;
-          updated_at: string | null;
-        };
-        Insert: {
-          device_id: string;
-          date_iso: string;
-          payload: Json;
-          client_updated_at?: number | null;
-          updated_at?: string | null;
-        };
-        Update: {
-          device_id?: string;
-          date_iso?: string;
-          payload?: Json;
-          client_updated_at?: number | null;
-          updated_at?: string | null;
-        };
-        Relationships: [];
-      };
       wnl_user_state: {
         Row: {
           user_id: string;
