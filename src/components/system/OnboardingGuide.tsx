@@ -1,21 +1,26 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
 import { useI18n } from "@/lib/useI18n";
 
-const STEPS = 3;
+const TOTAL_STEPS = 4;
 
-function StepIndicator({ current, total }: { current: number; total: number }) {
+/* ────────────────────────────────────────────
+   Step dot indicator (Apple style)
+   ──────────────────────────────────────────── */
+function Dots({ current, total }: { current: number; total: number }) {
   return (
-    <div className="flex items-center justify-center gap-2">
+    <div className="flex items-center justify-center gap-[6px]">
       {Array.from({ length: total }, (_, i) => (
-        <div
+        <span
           key={i}
           className={cn(
-            "h-2 rounded-full transition-all duration-300",
-            i === current ? "w-6 bg-black" : "w-2 bg-black/20"
+            "block rounded-full transition-all duration-500 ease-[cubic-bezier(.4,0,.2,1)]",
+            i === current
+              ? "h-[7px] w-[7px] bg-black/80"
+              : "h-[6px] w-[6px] bg-black/15"
           )}
         />
       ))}
@@ -23,53 +28,33 @@ function StepIndicator({ current, total }: { current: number; total: number }) {
   );
 }
 
-function StepIcon({ step }: { step: number }) {
-  if (step === 0) {
-    // Calendar icon
-    return (
-      <div className="flex h-20 w-20 items-center justify-center rounded-[22px] bg-gradient-to-br from-blue-400 to-blue-600 shadow-lg">
-        <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
-          <rect x="6" y="10" width="28" height="24" rx="4" stroke="white" strokeWidth="2.5" fill="none" />
-          <line x1="6" y1="18" x2="34" y2="18" stroke="white" strokeWidth="2" />
-          <line x1="14" y1="6" x2="14" y2="14" stroke="white" strokeWidth="2.5" strokeLinecap="round" />
-          <line x1="26" y1="6" x2="26" y2="14" stroke="white" strokeWidth="2.5" strokeLinecap="round" />
-          <circle cx="15" cy="24" r="2" fill="white" />
-          <circle cx="20" cy="24" r="2" fill="white" />
-          <circle cx="25" cy="24" r="2" fill="white" />
-          <circle cx="15" cy="30" r="2" fill="white" />
-          <circle cx="20" cy="30" r="2" fill="white" />
-        </svg>
-      </div>
-    );
-  }
-  if (step === 1) {
-    // Health record icon
-    return (
-      <div className="flex h-20 w-20 items-center justify-center rounded-[22px] bg-gradient-to-br from-emerald-400 to-teal-600 shadow-lg">
-        <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
-          <rect x="8" y="6" width="24" height="28" rx="4" stroke="white" strokeWidth="2.5" fill="none" />
-          <line x1="14" y1="14" x2="26" y2="14" stroke="white" strokeWidth="2" strokeLinecap="round" />
-          <line x1="14" y1="20" x2="24" y2="20" stroke="white" strokeWidth="2" strokeLinecap="round" />
-          <line x1="14" y1="26" x2="20" y2="26" stroke="white" strokeWidth="2" strokeLinecap="round" />
-          <path d="M24 24 L26 26.5 L30 22" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </div>
-    );
-  }
-  // Insights icon
+/* ────────────────────────────────────────────
+   Large SF-Symbol-style emoji icons
+   ──────────────────────────────────────────── */
+function StepVisual({ step }: { step: number }) {
+  const emojis = ["📅", "✏️", "📊", "💡"];
   return (
-    <div className="flex h-20 w-20 items-center justify-center rounded-[22px] bg-gradient-to-br from-violet-400 to-purple-600 shadow-lg">
-      <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
-        <rect x="8" y="28" width="5" height="8" rx="1.5" fill="white" opacity="0.7" transform="rotate(180 10.5 32)" />
-        <rect x="15.5" y="22" width="5" height="14" rx="1.5" fill="white" opacity="0.85" transform="rotate(180 18 29)" />
-        <rect x="23" y="16" width="5" height="20" rx="1.5" fill="white" transform="rotate(180 25.5 26)" />
-        <circle cx="28" cy="12" r="4" stroke="white" strokeWidth="2" fill="none" />
-        <path d="M30.5 9.5L33 7" stroke="white" strokeWidth="2" strokeLinecap="round" />
-      </svg>
+    <div className="flex h-[88px] w-[88px] items-center justify-center rounded-[26px] bg-black/[0.03]">
+      <span className="text-[44px] leading-none">{emojis[step]}</span>
     </div>
   );
 }
 
+/* ────────────────────────────────────────────
+   Feature bullet
+   ──────────────────────────────────────────── */
+function Tip({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-start gap-2.5">
+      <span className="mt-[3px] block h-[5px] w-[5px] shrink-0 rounded-full bg-black/30" />
+      <span className="text-[13.5px] leading-[1.55] text-black/55">{children}</span>
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────
+   Main
+   ──────────────────────────────────────────── */
 type Props = {
   open: boolean;
   onComplete: () => void;
@@ -78,9 +63,11 @@ type Props = {
 export function OnboardingGuide({ open, onComplete }: Props) {
   const { t } = useI18n();
   const [step, setStep] = useState(0);
-  const [mounted, setMounted] = useState(open);
+  const [mounted, setMounted] = useState(false);
   const [visible, setVisible] = useState(false);
   const [portalEl, setPortalEl] = useState<HTMLElement | null>(null);
+  const [direction, setDirection] = useState<"next" | "prev">("next");
+  const animKey = useRef(0);
 
   useEffect(() => {
     setPortalEl(typeof document !== "undefined" ? document.body : null);
@@ -90,15 +77,15 @@ export function OnboardingGuide({ open, onComplete }: Props) {
     if (open) {
       setMounted(true);
       setStep(0);
-      const timer = setTimeout(() => setVisible(true), 30);
-      return () => clearTimeout(timer);
+      animKey.current = 0;
+      const t1 = setTimeout(() => setVisible(true), 40);
+      return () => clearTimeout(t1);
     }
     setVisible(false);
-    const timer = setTimeout(() => setMounted(false), 400);
-    return () => clearTimeout(timer);
+    const t2 = setTimeout(() => setMounted(false), 500);
+    return () => clearTimeout(t2);
   }, [open]);
 
-  // Lock body scroll
   useEffect(() => {
     if (!mounted) return;
     const prev = document.body.style.overflow;
@@ -108,83 +95,164 @@ export function OnboardingGuide({ open, onComplete }: Props) {
     };
   }, [mounted]);
 
-  const handleNext = useCallback(() => {
-    if (step < STEPS - 1) {
+  const goNext = useCallback(() => {
+    if (step < TOTAL_STEPS - 1) {
+      setDirection("next");
+      animKey.current += 1;
       setStep((s) => s + 1);
     } else {
       onComplete();
     }
   }, [step, onComplete]);
 
-  const handleSkip = useCallback(() => {
-    onComplete();
-  }, [onComplete]);
+  const goBack = useCallback(() => {
+    if (step > 0) {
+      setDirection("prev");
+      animKey.current += 1;
+      setStep((s) => s - 1);
+    }
+  }, [step]);
+
+  const skip = useCallback(() => onComplete(), [onComplete]);
 
   if (!mounted || !portalEl) return null;
 
-  const titles = [
-    t("캘린더에 근무를 입력하세요"),
-    t("매일 건강 상태를 기록하세요"),
-    t("맞춤 인사이트를 받아보세요"),
-  ];
-  const descriptions = [
-    t("캘린더에서 날짜를 누르고 근무를 설정하세요.\n근무 패턴이 회복 분석의 기반이 됩니다."),
-    t("일정 탭에서 날짜를 누르고 수면, 스트레스, 기분 등을 입력하세요.\n하루에 하나만 입력해도 충분합니다."),
-    t("3일 이상 기록하면 Body·Mental 배터리가 나타납니다.\n기록할수록 회복 처방이 더 정교해져요."),
+  /* ── Content per step ── */
+  const steps = [
+    {
+      title: t("근무 일정을 등록하세요"),
+      desc: t("캘린더에서 날짜를 탭하고 근무 유형을 선택하세요"),
+      tips: [
+        t("Day · Eve · Night · Off 중 선택할 수 있어요"),
+        t("길게 눌러 여러 날을 한번에 설정할 수 있어요"),
+        t("근무 패턴이 회복 분석의 기반이 됩니다"),
+      ],
+    },
+    {
+      title: t("매일 건강을 기록하세요"),
+      desc: t("하루 1분, 오늘의 컨디션만 입력하면 돼요"),
+      tips: [
+        t("수면 시간 · 수면 질 · 스트레스 · 기분을 기록해요"),
+        t("카페인, 운동, 음주 등 세부 항목도 추가 가능해요"),
+        t("하루에 하나만 입력해도 분석이 시작돼요"),
+      ],
+    },
+    {
+      title: t("나만의 통계를 확인하세요"),
+      desc: t("3일 이상 기록하면 맞춤 인사이트가 열려요"),
+      tips: [
+        t("Body · Mental 배터리로 회복 상태를 한눈에 봐요"),
+        t("근무 유형별 컨디션 변화를 그래프로 비교해요"),
+        t("기록이 쌓일수록 분석이 더 정교해져요"),
+      ],
+    },
+    {
+      title: t("맞춤 회복 처방을 받으세요"),
+      desc: t("AI가 당신의 패턴을 분석해 회복 방법을 알려줘요"),
+      tips: [
+        t("다음 근무 전 수면·수분·카페인 타이밍을 추천해요"),
+        t("연속 야간 근무 시 맞춤 회복 전략을 제공해요"),
+      ],
+    },
   ];
 
-  const isLast = step === STEPS - 1;
+  const cur = steps[step];
+  const isLast = step === TOTAL_STEPS - 1;
+
+  const slideClass =
+    direction === "next"
+      ? "animate-[onb-slide-in-right_0.35s_ease-out_both]"
+      : "animate-[onb-slide-in-left_0.35s_ease-out_both]";
 
   return createPortal(
-    <div
-      className={cn(
-        "fixed inset-0 z-[100] flex items-center justify-center bg-white transition-opacity duration-400",
-        visible ? "opacity-100" : "opacity-0"
-      )}
-    >
-      <div className="relative flex h-full w-full max-w-[460px] flex-col items-center justify-between px-6 py-safe">
-        {/* Skip button */}
-        <div className="flex w-full justify-end pt-4">
-          <button
-            type="button"
-            onClick={handleSkip}
-            className="rounded-full px-4 py-2 text-[13px] font-semibold text-ios-muted transition-colors active:bg-black/5"
-          >
-            {t("건너뛰기")}
-          </button>
-        </div>
+    <>
+      {/* keyframe injection (only once) */}
+      <style>{`
+        @keyframes onb-slide-in-right {
+          from { opacity: 0; transform: translateX(40px); }
+          to   { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes onb-slide-in-left {
+          from { opacity: 0; transform: translateX(-40px); }
+          to   { opacity: 1; transform: translateX(0); }
+        }
+      `}</style>
 
-        {/* Content */}
-        <div className="flex flex-1 flex-col items-center justify-center gap-6 px-2">
-          <div
-            key={step}
-            className="flex flex-col items-center gap-5 animate-in fade-in slide-in-from-right-4 duration-300"
-          >
-            <StepIcon step={step} />
-            <div className="text-center">
-              <h2 className="text-[22px] font-bold tracking-[-0.02em] text-ios-text">
-                {titles[step]}
-              </h2>
-              <p className="mt-3 text-[14px] leading-relaxed text-ios-sub">
-                {descriptions[step]}
+      <div
+        className={cn(
+          "fixed inset-0 z-[100] bg-white transition-opacity duration-500 ease-[cubic-bezier(.4,0,.2,1)]",
+          visible ? "opacity-100" : "opacity-0"
+        )}
+      >
+        <div className="mx-auto flex h-full max-w-[400px] flex-col px-7 pb-[env(safe-area-inset-bottom)]">
+          {/* ── Top bar ── */}
+          <div className="flex h-14 items-center justify-between pt-[env(safe-area-inset-top)]">
+            {step > 0 ? (
+              <button
+                type="button"
+                onClick={goBack}
+                className="text-[15px] font-medium text-black/40 active:text-black/60"
+              >
+                {t("이전")}
+              </button>
+            ) : (
+              <span />
+            )}
+            <button
+              type="button"
+              onClick={skip}
+              className="text-[15px] font-medium text-black/40 active:text-black/60"
+            >
+              {t("건너뛰기")}
+            </button>
+          </div>
+
+          {/* ── Content (animated) ── */}
+          <div className="flex flex-1 flex-col justify-center">
+            <div key={animKey.current} className={slideClass}>
+              {/* Icon */}
+              <div className="flex justify-center">
+                <StepVisual step={step} />
+              </div>
+
+              {/* Title */}
+              <h1 className="mt-7 text-center text-[26px] font-bold tracking-[-0.03em] text-black/90 leading-[1.25]">
+                {cur.title}
+              </h1>
+
+              {/* Description */}
+              <p className="mt-3 text-center text-[15px] leading-[1.6] text-black/50">
+                {cur.desc}
               </p>
+
+              {/* Tips */}
+              <div className="mx-auto mt-7 flex max-w-[320px] flex-col gap-2.5">
+                {cur.tips.map((tip, i) => (
+                  <Tip key={i}>{tip}</Tip>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Bottom controls */}
-        <div className="flex w-full flex-col items-center gap-4 pb-8">
-          <StepIndicator current={step} total={STEPS} />
-          <button
-            type="button"
-            onClick={handleNext}
-            className="h-12 w-full rounded-2xl bg-black text-[15px] font-semibold text-white shadow-apple transition-transform active:scale-[0.97]"
-          >
-            {isLast ? t("시작하기") : t("다음")}
-          </button>
+          {/* ── Bottom ── */}
+          <div className="flex flex-col items-center gap-5 pb-8">
+            <Dots current={step} total={TOTAL_STEPS} />
+            <button
+              type="button"
+              onClick={goNext}
+              className={cn(
+                "h-[52px] w-full rounded-[14px] text-[16px] font-semibold transition-all duration-200 active:scale-[0.97]",
+                isLast
+                  ? "bg-black text-white shadow-[0_2px_12px_rgba(0,0,0,0.18)]"
+                  : "bg-black/[0.06] text-black/80"
+              )}
+            >
+              {isLast ? t("시작하기") : t("다음")}
+            </button>
+          </div>
         </div>
       </div>
-    </div>,
+    </>,
     portalEl
   );
 }

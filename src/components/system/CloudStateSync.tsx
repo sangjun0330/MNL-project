@@ -298,11 +298,16 @@ export function CloudStateSync() {
           }
           ready = true;
         } else {
+          // ✅ remote state가 null → 완전 새 유저 (첫 소셜 로그인)
           const fresh = storeRef.current.getState();
           if (hasAnyUserData(fresh)) {
             void saveState(fresh).catch(() => {
               // 초기 시드 저장 실패해도 UI를 막지 않음
             });
+          }
+          // 온보딩 표시 이벤트 (세션당 1회, AppShell에서 수신)
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(new CustomEvent("wnl:show-onboarding"));
           }
           ready = true;
         }
