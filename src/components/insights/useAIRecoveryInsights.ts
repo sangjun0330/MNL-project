@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AIRecoveryPayload } from "@/lib/aiRecoveryContract";
 import { todayISO } from "@/lib/date";
 import { useInsightsData } from "@/components/insights/useInsightsData";
@@ -20,6 +20,7 @@ type HookResult = {
   fromSupabase: boolean;
   error: string | null;
   requiresTodaySleep: boolean;
+  retry: () => void;
 };
 
 const inFlightGenerate = new Map<string, Promise<AIRecoveryPayload | null>>();
@@ -84,6 +85,18 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+
+  const retry = useCallback(() => {
+    // 세션 캐시 클리어 후 재시도
+    const dateISO = todayISO();
+    const key = requestKey(lang, dateISO);
+    sessionDailyCache.delete(key);
+    inFlightGenerate.delete(key);
+    setError(null);
+    setRemoteData(null);
+    setRetryCount((c) => c + 1);
+  }, [lang]);
 
   const isStoreHydrated = state.selected !== ("1970-01-01" as any);
 
@@ -152,7 +165,7 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
     return () => {
       active = false;
     };
-  }, [enabled, isStoreHydrated, lang, mode]);
+  }, [enabled, isStoreHydrated, lang, mode, retryCount]);
 
   return useMemo(
     () => ({
@@ -162,7 +175,8 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
       fromSupabase: Boolean(remoteData),
       error,
       requiresTodaySleep: false,
+      retry,
     }),
-    [remoteData, loading, generating, error]
+    [remoteData, loading, generating, error, retry]
   );
 }

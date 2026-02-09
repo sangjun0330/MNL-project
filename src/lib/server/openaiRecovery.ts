@@ -187,7 +187,7 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
       "- 위험 요소 2개 이상 동시 발생 시에만 작성",
       "- 없으면 정확히 '없음'이라고 작성",
       "",
-      "[C] 오늘의 회복 처방",
+      "[C] 오늘의 회복 추천",
       "- 해당되는 항목만 작성",
       "- 우선순위: 수면 > 교대근무 > 카페인 > 생리주기 > 스트레스&감정 > 신체활동",
       "- menstrualTrackingEnabled가 false면 [생리주기] 섹션을 절대 출력하지 말 것 (번호도 1~5만 사용)",
@@ -478,8 +478,8 @@ function parseCategoryBlocks(cBlock: string, language: Language): RecoverySectio
     {
       category: "sleep",
       severity: parseSeverity(fallbackLines.join(" ")),
-      title: language === "ko" ? "오늘의 회복 처방" : "Recovery Plan",
-      description: fallbackLines.slice(0, 2).map(stripHeadingPrefix).join(" ").trim() || (language === "ko" ? "맞춤 처방을 확인하세요." : "Check your tailored plan."),
+      title: language === "ko" ? "오늘의 회복 추천" : "Recovery Recommendations",
+      description: fallbackLines.slice(0, 2).map(stripHeadingPrefix).join(" ").trim() || (language === "ko" ? "맞춤 추천을 확인하세요." : "Check your tailored recommendations."),
       tips: fallbackLines
         .slice(2)
         .map((line) => line.replace(/^(?:[-*•·]|\d+\.)\s*/, "").trim())
@@ -667,7 +667,7 @@ function mergeWeeklySummary(
 
 function buildStructuredTextFromResult(result: AIRecoveryResult, language: Language): string {
   const lines: string[] = [];
-  const sectionTitle = language === "ko" ? "오늘의 회복 처방" : "Today's Recovery Plan";
+  const sectionTitle = language === "ko" ? "오늘의 회복 추천" : "Today's Recovery Recommendations";
   const weeklyTitle = language === "ko" ? "이번 주 AI 한마디" : "Weekly AI Note";
   const noAlert = language === "ko" ? "없음" : "none";
 
@@ -697,7 +697,7 @@ function buildStructuredTextFromResult(result: AIRecoveryResult, language: Langu
     lines.push("");
   }
   if (!result.sections?.length) {
-    lines.push(language === "ko" ? "오늘은 추가 처방이 없어요." : "No additional prescription for today.");
+    lines.push(language === "ko" ? "오늘은 추가 추천이 없어요." : "No additional recommendations for today.");
     lines.push("");
   }
 
