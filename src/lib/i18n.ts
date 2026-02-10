@@ -432,7 +432,7 @@ const EN_EXTRA: Record<string, string> = {
   "근무 M": "Shift M",
   "근무 N": "Shift N",
   "수면 부채 경고": "Sleep debt warning",
-  "싱크 완료: 예측 정확도 {percent}%": "Sync complete: prediction accuracy {percent}%",
+  "싱크 완료: 예측 정확도 {percent}%": "Sync: {percent}% accuracy",
   "야행성 적응 완료": "Night-mode adaptation complete",
   "오늘 오더 없음": "No orders today",
   "카페인 금지 (NPO)": "No caffeine (NPO)",

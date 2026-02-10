@@ -81,14 +81,14 @@ export function HeroDashboard({
               <div className="mt-1 text-[13px] text-ios-sub">{t("기록 입력 시 자세한 정보 제공")}</div>
             </div>
 
-            <div className="shrink-0 text-right">
-              {syncLabel ? (
-                <div className="inline-flex items-center rounded-full border border-ios-sep bg-white px-3 py-1 text-[12px] font-semibold text-ios-sub">
-                  {syncLabel}
-                </div>
-              ) : null}
-              <div className="mt-2 flex justify-end">
-                <CircleGauge value={0} color="rgba(0,0,0,0.2)" />
+          <div className="shrink-0 text-right">
+            {syncLabel ? (
+              <div className="inline-flex max-w-[168px] items-center justify-end rounded-full border border-ios-sep bg-white px-3 py-1 text-[12px] font-semibold leading-tight text-ios-sub whitespace-normal text-right">
+                {syncLabel}
+              </div>
+            ) : null}
+            <div className="mt-2 flex justify-end">
+              <CircleGauge value={0} color="rgba(0,0,0,0.2)" />
               </div>
             </div>
           </div>
@@ -149,7 +149,7 @@ export function HeroDashboard({
 
           <div className="shrink-0 text-right">
             {syncLabel ? (
-              <div className="inline-flex items-center rounded-full border border-ios-sep bg-white px-3 py-1 text-[12px] font-semibold text-ios-sub">
+              <div className="inline-flex max-w-[168px] items-center justify-end rounded-full border border-ios-sep bg-white px-3 py-1 text-[12px] font-semibold leading-tight text-ios-sub whitespace-normal text-right">
                 {syncLabel}
               </div>
             ) : null}
