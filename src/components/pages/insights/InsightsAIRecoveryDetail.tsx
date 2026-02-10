@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { createPortal } from "react-dom";
 import Image from "next/image";
 import { DetailCard, DetailChip, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
@@ -172,6 +173,51 @@ const CATEGORIES: Array<{
   { key: "activity", titleKo: "신체활동", icon: "6" },
 ];
 
+function RecoveryGeneratingOverlay({
+  open,
+  title,
+  message,
+}: {
+  open: boolean;
+  title: string;
+  message: string;
+}) {
+  if (!open || typeof document === "undefined") return null;
+  return createPortal(
+    <div
+      className="fixed left-0 top-0 z-[2147483000] flex h-[100dvh] w-[100vw] items-center justify-center bg-[#F2F2F7] px-5"
+      style={{ position: "fixed", inset: 0 }}
+    >
+      <div className="relative w-full max-w-[420px] overflow-hidden rounded-[30px] border border-ios-sep bg-white px-6 py-6 shadow-[0_30px_90px_rgba(0,0,0,0.12)]">
+        <div className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-transparent via-[#007AFF] to-transparent wnl-recovery-progress" />
+        <div className="flex items-start gap-4">
+          <div className="relative h-[60px] w-[60px] shrink-0 overflow-hidden rounded-2xl border border-black/5 bg-[#eef4ff]">
+            <div className="absolute inset-0 wnl-logo-breathe rounded-2xl bg-[radial-gradient(80%_70%_at_50%_40%,rgba(0,122,255,0.22),transparent)]" />
+            <Image
+              src="/icons/icon-192.png"
+              alt="RNest"
+              width={60}
+              height={60}
+              className="relative h-full w-full object-cover"
+              priority
+            />
+          </div>
+          <div className="min-w-0">
+            <div className="text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">{title}</div>
+            <p className="mt-1 text-[13px] leading-relaxed text-ios-sub">{message}</p>
+          </div>
+        </div>
+        <div className="mt-4 flex items-center gap-2">
+          <span className="h-2 w-2 rounded-full bg-[#007AFF] wnl-dot-pulse" />
+          <span className="h-2 w-2 rounded-full bg-[#007AFF] wnl-dot-pulse [animation-delay:180ms]" />
+          <span className="h-2 w-2 rounded-full bg-[#007AFF] wnl-dot-pulse [animation-delay:360ms]" />
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 export function InsightsAIRecoveryDetail() {
   const { t } = useI18n();
   const { recordedDays } = useInsightsData();
@@ -237,15 +283,6 @@ export function InsightsAIRecoveryDetail() {
     >
       {insightsLocked ? (
         <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />
-      ) : null}
-
-      {!insightsLocked && loading && !data ? (
-        <DetailCard className="p-5">
-          <div className="text-[15px] font-semibold text-ios-sub">{t("OpenAI 생성 분석")}</div>
-          <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
-            {t("AI가 현재 상태에 맞춘 맞춤회복을 분석하고 있습니다.")}
-          </p>
-        </DetailCard>
       ) : null}
 
       {!insightsLocked && !loading && !data ? (
@@ -402,37 +439,11 @@ export function InsightsAIRecoveryDetail() {
         </>
       ) : null}
 
-      {generating && !data && !insightsLocked ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-[#F2F2F7] px-6">
-          <div className="wnl-modal relative w-full max-w-[340px] overflow-hidden rounded-[30px] border border-ios-sep bg-white px-6 py-6 shadow-[0_30px_90px_rgba(0,0,0,0.12)]">
-            <div className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-transparent via-[#007AFF] to-transparent wnl-recovery-progress" />
-            <div className="flex items-start gap-4">
-              <div className="relative h-[56px] w-[56px] shrink-0 overflow-hidden rounded-2xl border border-black/5 bg-[#eef4ff]">
-                <div className="absolute inset-0 wnl-logo-breathe rounded-2xl bg-[radial-gradient(80%_70%_at_50%_40%,rgba(0,122,255,0.22),transparent)]" />
-                <Image
-                  src="/icons/icon-192.png"
-                  alt="RNest"
-                  width={56}
-                  height={56}
-                  className="relative h-full w-full object-cover"
-                  priority
-                />
-              </div>
-              <div className="min-w-0">
-                <div className="text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">{t("맞춤회복 분석 중")}</div>
-                <p className="mt-1 text-[13px] leading-relaxed text-ios-sub">
-                  {t("AI가 현재 상태에 맞춘 맞춤회복을 분석하고 있습니다.")}
-                </p>
-              </div>
-            </div>
-            <div className="mt-4 flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-[#007AFF] wnl-dot-pulse" />
-              <span className="h-2 w-2 rounded-full bg-[#007AFF] wnl-dot-pulse [animation-delay:180ms]" />
-              <span className="h-2 w-2 rounded-full bg-[#007AFF] wnl-dot-pulse [animation-delay:360ms]" />
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <RecoveryGeneratingOverlay
+        open={Boolean(generating && !data && !insightsLocked)}
+        title={t("맞춤회복 분석 중")}
+        message={t("AI가 현재 상태에 맞춘 맞춤회복을 분석하고 있습니다.")}
+      />
     </InsightDetailShell>
   );
 }
