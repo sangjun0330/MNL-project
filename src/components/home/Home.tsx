@@ -21,7 +21,6 @@ import { useI18n } from "@/lib/useI18n";
 import { MonthCalendar } from "@/components/home/MonthCalendar";
 import { BatteryGauge } from "@/components/home/BatteryGauge";
 import { Card } from "@/components/ui/Card";
-import { PWAInstallButton } from "@/components/system/PWAInstallButton";
 
 function toneLabel(label: "green" | "orange" | "red", t: (key: string) => string) {
   return label === "green" ? t("안정") : label === "orange" ? t("주의") : t("경고");
@@ -249,8 +248,6 @@ export default function Home() {
 
   return (
     <div className="space-y-3">
-      <PWAInstallButton />
-
       <Card className="bg-white">
         <div className="p-5">
           <div>
