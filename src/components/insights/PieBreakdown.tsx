@@ -24,22 +24,22 @@ function arcPath(cx: number, cy: number, r: number, a0: number, a1: number) {
 }
 
 function colorFor(k: FactorKey) {
-  // 의미 기반 (고정 팔레트)
+  // 요인별 고유 팔레트(그래프/범례 동일)
   switch (k) {
     case "sleep":
-      return "#3B82F6";
+      return "#0A84FF";
     case "stress":
-      return "#EF4444";
+      return "#FF6B6B";
     case "activity":
-      return "#10B981";
+      return "#34C759";
     case "shift":
-      return "#A855F7";
+      return "#8E6CFF";
     case "caffeine":
-      return "#F59E0B";
+      return "#FF9F0A";
     case "menstrual":
-      return "#EC4899";
+      return "#FF5FA2";
     case "mood":
-      return "#64748B";
+      return "#2EC4D6";
   }
 }
 
