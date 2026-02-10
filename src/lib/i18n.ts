@@ -528,11 +528,23 @@ const EN_EXTRA: Record<string, string> = {
   // PWA install
   "앱으로 설치하기": "Install as App",
   "홈 화면에 추가하면 앱처럼 빠르게 실행할 수 있어요.": "Add to your home screen for a native app experience.",
+  "한 번 탭하면 바로 설치할 수 있어요.": "Install in one tap.",
+  "한 번 탭하면 홈 화면 추가 방법을 바로 안내해요.": "One tap opens quick add-to-home instructions.",
   "앱으로 실행 중": "Running as App",
   "홈 화면에서 앱으로 실행되고 있어요.": "You're running from the home screen.",
   "아래 안내를 따라 홈 화면에 추가해 주세요.": "Follow the steps below to add to your home screen.",
   "하단 공유 버튼(□↑)을 탭하세요": "Tap the Share button (□↑) at the bottom",
+  "브라우저 메뉴(⋯) 또는 공유 버튼을 탭하세요": "Tap the browser menu (⋯) or Share button",
   "'홈 화면에 추가'를 선택하세요": "Select 'Add to Home Screen'",
+  "메뉴에 없으면 Safari에서 같은 주소를 열어 추가하세요":
+    "If you don't see it, open the same URL in Safari and add it there",
+  "화면 하단의 '설치' 버튼이 보이면 먼저 탭하세요":
+    "If an 'Install' button appears at the bottom, tap it first",
+  "보이지 않으면 주소창 오른쪽 메뉴(⋮)를 탭하세요":
+    "If not, tap the menu (⋮) next to the address bar",
+  "'앱 설치' 또는 '홈 화면에 추가'를 선택하세요": "Select 'Install app' or 'Add to Home Screen'",
+  "브라우저 메뉴(⋮)를 탭하세요": "Tap the browser menu (⋮)",
+  "'설치' 또는 '추가' 버튼을 눌러 완료하세요": "Tap 'Install' or 'Add' to finish",
   "'추가' 버튼을 눌러 완료하세요": "Tap 'Add' to finish",
   "오른쪽 하단 메뉴(≡)를 탭하세요": "Tap the menu (≡) at the bottom right",
   "주소창 오른쪽 메뉴(⋯)를 탭하세요": "Tap the menu (⋯) next to the address bar",
