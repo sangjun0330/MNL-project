@@ -6,9 +6,15 @@ import type { DailyVital } from "@/lib/vitals";
 import { aggregateFactors, FACTOR_LABEL_KO, topFactors, type FactorKey } from "@/lib/insightsV2";
 import { useI18n } from "@/lib/useI18n";
 
-const INSIGHT_BLUE = "#007AFF";
-const INSIGHT_NAVY = "#1B2747";
-const INSIGHT_PINK = "#E87485";
+const FACTOR_COLORS: Record<FactorKey, string> = {
+  sleep: "#0A84FF",
+  stress: "#FF6B6B",
+  activity: "#34C759",
+  shift: "#8E6CFF",
+  caffeine: "#FF9F0A",
+  menstrual: "#FF5FA2",
+  mood: "#2EC4D6",
+};
 
 type Segment = {
   key: FactorKey;
@@ -28,23 +34,7 @@ function pctLabel(p01: number) {
 }
 
 function colorForFactor(k: FactorKey) {
-  switch (k) {
-    case "activity":
-      return INSIGHT_BLUE;
-    case "stress":
-      return INSIGHT_PINK;
-    case "mood":
-      return INSIGHT_PINK;
-    case "menstrual":
-      return INSIGHT_PINK;
-    case "caffeine":
-      return INSIGHT_NAVY;
-    case "shift":
-      return INSIGHT_NAVY;
-    case "sleep":
-    default:
-      return INSIGHT_BLUE;
-  }
+  return FACTOR_COLORS[k];
 }
 
 function Donut({ segments }: { segments: Segment[] }) {
