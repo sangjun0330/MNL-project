@@ -133,7 +133,7 @@ export function InsightsTrendsDetail() {
         </div>
       </DetailCard>
 
-      <DetailCard className="mt-4">
+      <DetailCard className="mt-4 wnl-no-press">
         <div className="px-5 pt-5">
           <div className="text-[13px] font-semibold text-ios-sub">Trend</div>
           <div className="mt-1 text-[18px] font-bold tracking-[-0.01em] text-ios-text">{t("에너지 흐름")}</div>

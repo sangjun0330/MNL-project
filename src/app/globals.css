@@ -432,6 +432,12 @@ a[aria-label="Back"]:active {
   transform: scale(0.98);
 }
 
+.wnl-no-press,
+.wnl-no-press:active {
+  transform: none !important;
+  transition: none !important;
+}
+
 /* ===================================
    RNest Night Mode (auto)
    Trigger: night_streak >= 3
