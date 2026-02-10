@@ -114,7 +114,7 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
     let active = true;
 
     const fromSession = sessionDailyCache.get(key) ?? null;
-    if (fromSession) {
+    if (fromSession && fromSession.language === lang) {
       setRemoteData(fromSession);
       setError(null);
       setGenerating(false);
@@ -122,6 +122,9 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
       return () => {
         active = false;
       };
+    }
+    if (fromSession && fromSession.language !== lang) {
+      sessionDailyCache.delete(key);
     }
 
     setLoading(true);
@@ -133,7 +136,7 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
         const cached = await fetchAIRecovery(lang, dateISO, true);
         if (!active) return;
 
-        if (cached) {
+        if (cached && cached.language === lang) {
           sessionDailyCache.set(key, cached);
           setRemoteData(cached);
           return;
@@ -146,7 +149,7 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
         setGenerating(true);
         const generated = await getOrStartGenerate(lang, dateISO);
         if (!active) return;
-        if (generated) {
+        if (generated && generated.language === lang) {
           sessionDailyCache.set(key, generated);
         }
         setRemoteData(generated ?? null);

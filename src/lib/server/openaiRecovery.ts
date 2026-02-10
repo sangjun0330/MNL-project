@@ -1085,22 +1085,22 @@ export async function translateAIRecoveryToEnglish(
     return null;
   };
 
-  const buildTranslatePrompt = (strictNoKorean = false) =>
+  const buildTranslatePrompt = (targetLines: string[], strictNoKorean = false) =>
     [
       "Translate each input string from Korean to natural English.",
       "Return ONLY a JSON array of strings.",
-      `Array length must be exactly ${lines.length}.`,
+      `Array length must be exactly ${targetLines.length}.`,
       "Keep order exactly the same.",
       "Do not merge or split lines.",
       "Do not alter numbers, units, dates, or punctuation meaning.",
       strictNoKorean ? "Final output must contain no Korean characters." : "",
       "",
-      JSON.stringify(lines, null, 2),
+      JSON.stringify(targetLines, null, 2),
     ]
       .filter(Boolean)
       .join("\n");
 
-  const translateOnce = async (strictNoKorean = false) => {
+  const translateChunk = async (targetLines: string[], strictNoKorean = false) => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 35_000);
     try {
@@ -1108,17 +1108,18 @@ export async function translateAIRecoveryToEnglish(
         apiKey,
         model,
         developerPrompt: "You are a professional Korean-to-English translator for nurse wellness content.",
-        userPrompt: buildTranslatePrompt(strictNoKorean),
+        userPrompt: buildTranslatePrompt(targetLines, strictNoKorean),
         signal: controller.signal,
-        maxOutputTokens: resolveMaxOutputTokens(),
+        // 번역은 길이가 길어지기 쉬워 생성보다 넉넉하게 허용
+        maxOutputTokens: Math.max(resolveMaxOutputTokens(), 2600),
       });
       if (!attempt.text) {
         throw new Error(attempt.error ?? `openai_request_failed_model:${model}`);
       }
       const parsed = parseArray(attempt.text);
       if (!parsed) throw new Error(`openai_translate_non_json_array_model:${model}`);
-      if (parsed.length !== lines.length) {
-        throw new Error(`openai_translate_count_mismatch_model:${model}_${parsed.length}/${lines.length}`);
+      if (parsed.length !== targetLines.length) {
+        throw new Error(`openai_translate_count_mismatch_model:${model}_${parsed.length}/${targetLines.length}`);
       }
       return parsed;
     } finally {
@@ -1134,12 +1135,32 @@ export async function translateAIRecoveryToEnglish(
     return hangul / total;
   };
 
-  const maxOutputTokens = resolveMaxOutputTokens();
-  try {
-    let translatedLines = await translateOnce(false);
-    if (hangulRatio(translatedLines) > 0.08) {
-      translatedLines = await translateOnce(true);
+  const splitChunks = <T,>(arr: T[], size: number): T[][] => {
+    if (size <= 0) return [arr];
+    const out: T[][] = [];
+    for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+    return out;
+  };
+
+  const translateInBatches = async () => {
+    // 섹션이 길어도 실패하지 않도록 분할 번역
+    const chunks = splitChunks(lines, 12);
+    const output: string[] = [];
+    for (const chunk of chunks) {
+      let translated = await translateChunk(chunk, false);
+      if (hangulRatio(translated) > 0.08) {
+        translated = await translateChunk(chunk, true);
+      }
+      output.push(...translated);
     }
+    if (output.length !== lines.length) {
+      throw new Error(`openai_translate_count_mismatch_model:${model}_${output.length}/${lines.length}`);
+    }
+    return output;
+  };
+
+  try {
+    const translatedLines = await translateInBatches();
 
     const mergedResult: AIRecoveryResult = {
       ...source.result,
