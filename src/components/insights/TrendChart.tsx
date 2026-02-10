@@ -81,7 +81,10 @@ export function TrendChart({ data }: { data: TrendPoint[] }) {
         </div>
       </div>
 
-      <div className="mt-3 overflow-x-auto">
+      <div
+        className="mt-3 overflow-x-auto touch-pan-x [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+        style={{ touchAction: "pan-x", WebkitOverflowScrolling: "touch", overscrollBehaviorX: "contain" }}
+      >
         <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="block">
           {/* background bands */}
           {data.map((p, i) => {
