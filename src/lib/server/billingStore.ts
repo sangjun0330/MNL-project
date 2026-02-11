@@ -36,6 +36,80 @@ export type BillingOrderSummary = {
   createdAt: string | null;
 };
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+const OPTIONAL_CANCEL_COLUMNS = [
+  "subscription_cancel_at_period_end",
+  "subscription_cancel_scheduled_at",
+  "subscription_canceled_at",
+  "subscription_cancel_reason",
+] as const;
+const BASE_SUBSCRIPTION_SELECT =
+  "subscription_tier, subscription_status, subscription_started_at, subscription_current_period_end, subscription_updated_at, toss_customer_key";
+const FULL_SUBSCRIPTION_SELECT = `${BASE_SUBSCRIPTION_SELECT}, ${OPTIONAL_CANCEL_COLUMNS.join(", ")}`;
+
+function isSchemaCacheMissingColumnError(error: any, column: string) {
+  const message = String(error?.message ?? "");
+  const code = String(error?.code ?? "");
+  if (!message) return false;
+  if (!message.includes(`'${column}'`)) return false;
+  if (!message.includes("wnl_users")) return false;
+  if (!message.toLowerCase().includes("schema cache")) return false;
+  return code === "PGRST204" || message.includes("Could not find the");
+}
+
+function isOptionalCancelColumnError(error: any) {
+  return OPTIONAL_CANCEL_COLUMNS.some((column) => isSchemaCacheMissingColumnError(error, column));
+}
+
+function stripOptionalCancelColumns(values: Record<string, unknown>) {
+  const next = { ...values } as Record<string, unknown>;
+  for (const column of OPTIONAL_CANCEL_COLUMNS) {
+    delete next[column];
+  }
+  return next;
+}
+
+async function updateUserWithOptionalCancelFallback(userId: string, values: Record<string, unknown>) {
+  const admin = getSupabaseAdmin();
+  const { error } = await admin.from("wnl_users").update(values).eq("user_id", userId);
+  if (!error) return;
+
+  if (!isOptionalCancelColumnError(error)) {
+    throw error;
+  }
+
+  const fallbackValues = stripOptionalCancelColumns(values);
+  if (Object.keys(fallbackValues).length === 0) {
+    throw new Error("billing_schema_outdated_optional_columns");
+  }
+
+  const { error: fallbackError } = await admin.from("wnl_users").update(fallbackValues).eq("user_id", userId);
+  if (fallbackError) throw fallbackError;
+}
+
+async function readUserSubscriptionRow(userId: string): Promise<{ data: any; supportsCancelColumns: boolean }> {
+  const admin = getSupabaseAdmin();
+  const fullRes = await admin.from("wnl_users").select(FULL_SUBSCRIPTION_SELECT).eq("user_id", userId).maybeSingle();
+  if (!fullRes.error) {
+    return {
+      data: fullRes.data,
+      supportsCancelColumns: true,
+    };
+  }
+
+  if (!isOptionalCancelColumnError(fullRes.error)) {
+    throw fullRes.error;
+  }
+
+  const fallbackRes = await admin.from("wnl_users").select(BASE_SUBSCRIPTION_SELECT).eq("user_id", userId).maybeSingle();
+  if (fallbackRes.error) throw fallbackRes.error;
+
+  return {
+    data: fallbackRes.data,
+    supportsCancelColumns: false,
+  };
+}
+
 function asPlanTier(value: unknown): PlanTier {
   if (value === "basic" || value === "pro") return value;
   return "free";
@@ -91,61 +165,134 @@ function toBillingOrderSummary(row: any): BillingOrderSummary {
   };
 }
 
+async function readLatestPaidDoneOrder(userId: string): Promise<BillingOrderSummary | null> {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("billing_orders")
+    .select("order_id, plan_tier, amount, currency, status, order_name, payment_key, fail_code, fail_message, approved_at, created_at")
+    .eq("user_id", userId)
+    .eq("status", "DONE")
+    .in("plan_tier", ["basic", "pro"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+  return toBillingOrderSummary(data);
+}
+
+async function readLatestCanceledOrderUpdatedAt(userId: string): Promise<Date | null> {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("billing_orders")
+    .select("updated_at, created_at")
+    .eq("user_id", userId)
+    .eq("status", "CANCELED")
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return parseDate(data.updated_at ?? data.created_at ?? null);
+}
+
+async function maybeRecoverSubscriptionFromLatestPaidOrder(
+  userId: string,
+  snapshot: SubscriptionSnapshot
+): Promise<SubscriptionSnapshot | null> {
+  if (snapshot.hasPaidAccess) return null;
+  if (snapshot.cancelAtPeriodEnd) return null;
+
+  const latestPaid = await readLatestPaidDoneOrder(userId);
+  if (!latestPaid) return null;
+  if (latestPaid.planTier !== "basic" && latestPaid.planTier !== "pro") return null;
+
+  const paidBaseDate = parseDate(latestPaid.approvedAt ?? latestPaid.createdAt);
+  if (!paidBaseDate) return null;
+
+  const latestCanceledAt = await readLatestCanceledOrderUpdatedAt(userId);
+  if (latestCanceledAt && latestCanceledAt.getTime() >= paidBaseDate.getTime()) {
+    return null;
+  }
+
+  const canceledAt = parseDate(snapshot.canceledAt);
+  if (canceledAt && canceledAt.getTime() >= paidBaseDate.getTime()) {
+    return null;
+  }
+
+  const plan = getPlanDefinition(latestPaid.planTier);
+  const recoveredPeriodEnd = new Date(paidBaseDate.getTime() + plan.periodDays * DAY_MS);
+  if (!Number.isFinite(recoveredPeriodEnd.getTime()) || recoveredPeriodEnd.getTime() <= Date.now()) {
+    return null;
+  }
+
+  const startedAt = snapshot.tier === latestPaid.planTier && snapshot.startedAt ? snapshot.startedAt : paidBaseDate.toISOString();
+  const nowIso = new Date().toISOString();
+  await updateUserWithOptionalCancelFallback(userId, {
+    subscription_tier: latestPaid.planTier,
+    subscription_status: "active",
+    subscription_started_at: startedAt,
+    subscription_current_period_end: recoveredPeriodEnd.toISOString(),
+    subscription_updated_at: nowIso,
+    subscription_cancel_at_period_end: false,
+    subscription_cancel_scheduled_at: null,
+    subscription_cancel_reason: null,
+    subscription_canceled_at: null,
+    toss_customer_key: createCustomerKey(userId),
+    toss_last_order_id: latestPaid.orderId,
+    last_seen: nowIso,
+  });
+
+  return readSubscription(userId, { skipReconcile: true });
+}
+
 export function createCustomerKey(userId: string) {
   return `wnl_${userId.replace(/[^A-Za-z0-9_-]/g, "")}`;
 }
 
-export async function readSubscription(userId: string): Promise<SubscriptionSnapshot> {
+export async function readSubscription(
+  userId: string,
+  options?: { skipReconcile?: boolean }
+): Promise<SubscriptionSnapshot> {
   await ensureUserRow(userId);
-  const admin = getSupabaseAdmin();
-  const { data } = await admin
-    .from("wnl_users")
-    .select(
-      "subscription_tier, subscription_status, subscription_started_at, subscription_current_period_end, subscription_updated_at, toss_customer_key, subscription_cancel_at_period_end, subscription_cancel_scheduled_at, subscription_canceled_at, subscription_cancel_reason"
-    )
-    .eq("user_id", userId)
-    .maybeSingle();
+
+  const { data } = await readUserSubscriptionRow(userId);
 
   let tier = asPlanTier(data?.subscription_tier);
   let status = asSubscriptionStatus(data?.subscription_status);
-  let startedAt = data?.subscription_started_at ?? null;
-  let currentPeriodEnd = data?.subscription_current_period_end ?? null;
+  const startedAt = data?.subscription_started_at ?? null;
+  const currentPeriodEnd = data?.subscription_current_period_end ?? null;
   let updatedAt = data?.subscription_updated_at ?? null;
   let cancelAtPeriodEnd = Boolean(data?.subscription_cancel_at_period_end);
   let cancelScheduledAt = data?.subscription_cancel_scheduled_at ?? null;
-  let canceledAt = data?.subscription_canceled_at ?? null;
-  let cancelReason = sanitizeCancelReason(data?.subscription_cancel_reason);
+  const canceledAt = data?.subscription_canceled_at ?? null;
+  const cancelReason = sanitizeCancelReason(data?.subscription_cancel_reason);
 
   const endDate = parseDate(currentPeriodEnd);
   const now = Date.now();
   const shouldExpire = tier !== "free" && status === "active" && endDate && endDate.getTime() <= now;
   if (shouldExpire) {
     const nowIso = new Date(now).toISOString();
-    const { error } = await admin
-      .from("wnl_users")
-      .update({
+    try {
+      await updateUserWithOptionalCancelFallback(userId, {
         subscription_tier: "free",
         subscription_status: "expired",
         subscription_updated_at: nowIso,
         subscription_cancel_at_period_end: false,
         subscription_cancel_scheduled_at: null,
-      })
-      .eq("user_id", userId);
-    if (!error) {
+      });
       tier = "free";
       status = "expired";
       updatedAt = nowIso;
       cancelAtPeriodEnd = false;
       cancelScheduledAt = null;
-      // Preserve canceledAt/cancelReason for history.
-      startedAt = startedAt ?? null;
-      currentPeriodEnd = currentPeriodEnd ?? null;
-      canceledAt = canceledAt ?? null;
-      cancelReason = cancelReason ?? null;
+    } catch {
+      // Keep current snapshot if expiration write fails.
     }
   }
 
-  return {
+  const snapshot: SubscriptionSnapshot = {
     tier,
     status,
     startedAt,
@@ -158,6 +305,17 @@ export async function readSubscription(userId: string): Promise<SubscriptionSnap
     cancelReason,
     hasPaidAccess: hasPaidAccessFromSnapshot({ tier, status, currentPeriodEnd }),
   };
+
+  if (options?.skipReconcile) {
+    return snapshot;
+  }
+
+  try {
+    const recovered = await maybeRecoverSubscriptionFromLatestPaidOrder(userId, snapshot);
+    return recovered ?? snapshot;
+  } catch {
+    return snapshot;
+  }
 }
 
 export async function createBillingOrder(input: {
@@ -174,18 +332,14 @@ export async function createBillingOrder(input: {
 
   await ensureUserRow(input.userId);
 
-  const { error: userErr } = await admin
-    .from("wnl_users")
-    .update({
-      toss_customer_key: createCustomerKey(input.userId),
-      toss_last_order_id: input.orderId,
-      subscription_cancel_at_period_end: false,
-      subscription_cancel_scheduled_at: null,
-      subscription_cancel_reason: null,
-      last_seen: now,
-    })
-    .eq("user_id", input.userId);
-  if (userErr) throw userErr;
+  await updateUserWithOptionalCancelFallback(input.userId, {
+    toss_customer_key: createCustomerKey(input.userId),
+    toss_last_order_id: input.orderId,
+    subscription_cancel_at_period_end: false,
+    subscription_cancel_scheduled_at: null,
+    subscription_cancel_reason: null,
+    last_seen: now,
+  });
 
   const { error } = await admin.from("billing_orders").insert({
     order_id: input.orderId,
@@ -292,8 +446,7 @@ export async function markBillingOrderCanceled(input: {
       updated_at: now,
     })
     .eq("order_id", input.orderId)
-    .eq("user_id", input.userId)
-    .neq("status", "DONE");
+    .eq("user_id", input.userId);
 
   if (error) throw error;
 }
@@ -324,37 +477,27 @@ export async function scheduleSubscriptionCancelAtPeriodEnd(input: {
   const current = await readSubscription(input.userId);
   if (!current.hasPaidAccess) throw new Error("no_active_paid_subscription");
 
-  const admin = getSupabaseAdmin();
   const nowIso = new Date().toISOString();
-  const { error } = await admin
-    .from("wnl_users")
-    .update({
-      subscription_cancel_at_period_end: true,
-      subscription_cancel_scheduled_at: nowIso,
-      subscription_cancel_reason: sanitizeCancelReason(input.reason),
-      subscription_updated_at: nowIso,
-      last_seen: nowIso,
-    })
-    .eq("user_id", input.userId);
-  if (error) throw error;
+  await updateUserWithOptionalCancelFallback(input.userId, {
+    subscription_cancel_at_period_end: true,
+    subscription_cancel_scheduled_at: nowIso,
+    subscription_cancel_reason: sanitizeCancelReason(input.reason),
+    subscription_updated_at: nowIso,
+    last_seen: nowIso,
+  });
 
   return readSubscription(input.userId);
 }
 
 export async function resumeScheduledSubscription(input: { userId: string }): Promise<SubscriptionSnapshot> {
-  const admin = getSupabaseAdmin();
   const nowIso = new Date().toISOString();
-  const { error } = await admin
-    .from("wnl_users")
-    .update({
-      subscription_cancel_at_period_end: false,
-      subscription_cancel_scheduled_at: null,
-      subscription_cancel_reason: null,
-      subscription_updated_at: nowIso,
-      last_seen: nowIso,
-    })
-    .eq("user_id", input.userId);
-  if (error) throw error;
+  await updateUserWithOptionalCancelFallback(input.userId, {
+    subscription_cancel_at_period_end: false,
+    subscription_cancel_scheduled_at: null,
+    subscription_cancel_reason: null,
+    subscription_updated_at: nowIso,
+    last_seen: nowIso,
+  });
 
   return readSubscription(input.userId);
 }
@@ -363,23 +506,18 @@ export async function downgradeToFreeNow(input: {
   userId: string;
   reason?: string | null;
 }): Promise<SubscriptionSnapshot> {
-  const admin = getSupabaseAdmin();
   const nowIso = new Date().toISOString();
-  const { error } = await admin
-    .from("wnl_users")
-    .update({
-      subscription_tier: "free",
-      subscription_status: "inactive",
-      subscription_current_period_end: nowIso,
-      subscription_updated_at: nowIso,
-      subscription_cancel_at_period_end: false,
-      subscription_cancel_scheduled_at: null,
-      subscription_canceled_at: nowIso,
-      subscription_cancel_reason: sanitizeCancelReason(input.reason),
-      last_seen: nowIso,
-    })
-    .eq("user_id", input.userId);
-  if (error) throw error;
+  await updateUserWithOptionalCancelFallback(input.userId, {
+    subscription_tier: "free",
+    subscription_status: "inactive",
+    subscription_current_period_end: nowIso,
+    subscription_updated_at: nowIso,
+    subscription_cancel_at_period_end: false,
+    subscription_cancel_scheduled_at: null,
+    subscription_canceled_at: nowIso,
+    subscription_cancel_reason: sanitizeCancelReason(input.reason),
+    last_seen: nowIso,
+  });
   return readSubscription(input.userId);
 }
 
@@ -410,6 +548,9 @@ export async function markBillingOrderDoneAndApplyPlan(input: {
   if (order.status === "DONE") {
     return readSubscription(input.userId);
   }
+  if (order.status === "CANCELED") {
+    throw new Error("order_canceled");
+  }
 
   const paidPlanTier = asPlanTier(order.plan_tier);
   if (paidPlanTier === "free") {
@@ -420,13 +561,13 @@ export async function markBillingOrderDoneAndApplyPlan(input: {
   const nowIso = now.toISOString();
   const plan = getPlanDefinition(paidPlanTier);
 
-  const current = await readSubscription(input.userId);
-  const currentEnd = current.currentPeriodEnd ? new Date(current.currentPeriodEnd) : null;
+  const current = await readSubscription(input.userId, { skipReconcile: true });
+  const currentEnd = parseDate(current.currentPeriodEnd);
 
   const isSamePlan = current.tier === paidPlanTier;
   const hasRemaining = Boolean(currentEnd && Number.isFinite(currentEnd.getTime()) && currentEnd.getTime() > now.getTime());
   const baseDate = isSamePlan && hasRemaining && currentEnd ? currentEnd : now;
-  const nextEnd = new Date(baseDate.getTime() + plan.periodDays * 24 * 60 * 60 * 1000);
+  const nextEnd = new Date(baseDate.getTime() + plan.periodDays * DAY_MS);
 
   const startedAt = isSamePlan && current.startedAt ? current.startedAt : nowIso;
 
@@ -452,24 +593,20 @@ export async function markBillingOrderDoneAndApplyPlan(input: {
     return readSubscription(input.userId);
   }
 
-  const { error: userErr } = await admin
-    .from("wnl_users")
-    .update({
-      subscription_tier: paidPlanTier,
-      subscription_status: "active",
-      subscription_started_at: startedAt,
-      subscription_current_period_end: nextEnd.toISOString(),
-      subscription_updated_at: nowIso,
-      subscription_cancel_at_period_end: false,
-      subscription_cancel_scheduled_at: null,
-      subscription_cancel_reason: null,
-      subscription_canceled_at: null,
-      toss_customer_key: createCustomerKey(input.userId),
-      toss_last_order_id: input.orderId,
-      last_seen: nowIso,
-    })
-    .eq("user_id", input.userId);
-  if (userErr) throw userErr;
+  await updateUserWithOptionalCancelFallback(input.userId, {
+    subscription_tier: paidPlanTier,
+    subscription_status: "active",
+    subscription_started_at: startedAt,
+    subscription_current_period_end: nextEnd.toISOString(),
+    subscription_updated_at: nowIso,
+    subscription_cancel_at_period_end: false,
+    subscription_cancel_scheduled_at: null,
+    subscription_cancel_reason: null,
+    subscription_canceled_at: null,
+    toss_customer_key: createCustomerKey(input.userId),
+    toss_last_order_id: input.orderId,
+    last_seen: nowIso,
+  });
 
   return readSubscription(input.userId);
 }
