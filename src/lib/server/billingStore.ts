@@ -51,10 +51,25 @@ function isSchemaCacheMissingColumnError(error: any, column: string) {
   const message = String(error?.message ?? "");
   const code = String(error?.code ?? "");
   if (!message) return false;
-  if (!message.includes(`'${column}'`)) return false;
-  if (!message.includes("wnl_users")) return false;
-  if (!message.toLowerCase().includes("schema cache")) return false;
-  return code === "PGRST204" || message.includes("Could not find the");
+  const lower = message.toLowerCase();
+  const mentionsColumn =
+    message.includes(`'${column}'`) ||
+    message.includes(`.${column}`) ||
+    new RegExp(`\\b${column}\\b`).test(message);
+
+  if (!mentionsColumn) return false;
+
+  // PostgREST schema cache mismatch
+  if (lower.includes("schema cache") && (code === "PGRST204" || message.includes("Could not find the"))) {
+    return true;
+  }
+
+  // PostgreSQL unknown-column error (ex: "column wnl_users.xxx does not exist")
+  if (code === "42703" && lower.includes("does not exist")) {
+    return true;
+  }
+
+  return false;
 }
 
 function isOptionalCancelColumnError(error: any) {
