@@ -58,6 +58,25 @@ export function SettingsPage() {
           </div>
           <div className="mt-2 text-[12.5px] text-ios-sub">{t("로그인과 계정 관리를 설정합니다.")}</div>
         </Link>
+
+        <Link
+          href="/settings/billing"
+          className="rounded-apple border border-ios-sep bg-white p-4 shadow-apple transition hover:translate-y-[-1px]"
+          aria-label="구독 설정 열기"
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-[17px] font-bold text-ios-text">
+              <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="5" width="18" height="14" rx="3" />
+                <path d="M3 10h18" />
+                <path d="M7.5 14h3" />
+              </svg>
+              구독
+            </div>
+            <span className="text-ios-muted">›</span>
+          </div>
+          <div className="mt-2 text-[12.5px] text-ios-sub">플랜 결제 및 구독 상태를 관리합니다.</div>
+        </Link>
       </div>
     </div>
   );
