@@ -9,6 +9,7 @@ import { generateAIRecoveryWithOpenAI, translateAIRecoveryToEnglish } from "@/li
 import type { Shift } from "@/lib/types";
 import { computeVitalsRange } from "@/lib/vitals";
 import type { Json } from "@/types/supabase";
+import type { SubscriptionSnapshot } from "@/lib/server/billingStore";
 
 // Cloudflare Pages requires Edge runtime for non-static routes.
 export const runtime = "edge";
@@ -98,6 +99,18 @@ async function safeLoadAIContent(userId: string): Promise<{
       language: row.language,
       data: row.data,
     };
+  } catch {
+    return null;
+  }
+}
+
+async function safeLoadSubscription(userId: string): Promise<SubscriptionSnapshot | null> {
+  try {
+    const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!serviceRole || !supabaseUrl) return null;
+    const { readSubscription } = await import("@/lib/server/billingStore");
+    return await readSubscription(userId);
   } catch {
     return null;
   }
@@ -254,6 +267,11 @@ export async function GET(req: NextRequest) {
   const userId = await safeReadUserId(req);
   if (!userId) {
     return bad(401, "login_required");
+  }
+
+  const subscription = await safeLoadSubscription(userId);
+  if (!subscription?.hasPaidAccess) {
+    return bad(402, "paid_plan_required_ai_recovery");
   }
 
   try {

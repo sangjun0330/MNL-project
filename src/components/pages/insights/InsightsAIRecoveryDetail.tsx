@@ -3,10 +3,13 @@
 import { useMemo } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { DetailCard, DetailChip, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { useAIRecoveryInsights } from "@/components/insights/useAIRecoveryInsights";
 import { INSIGHTS_MIN_DAYS, isInsightsLocked, useInsightsData } from "@/components/insights/useInsightsData";
+import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { formatKoreanDate } from "@/lib/date";
 import { useI18n } from "@/lib/useI18n";
 import type { RecoverySection } from "@/lib/aiRecovery";
@@ -220,9 +223,14 @@ function RecoveryGeneratingOverlay({
 
 export function InsightsAIRecoveryDetail() {
   const { t } = useI18n();
+  const router = useRouter();
   const { recordedDays } = useInsightsData();
   const insightsLocked = isInsightsLocked(recordedDays);
-  const { data, loading, generating, error, retry } = useAIRecoveryInsights({ mode: "generate", enabled: !insightsLocked });
+  const { hasPaidAccess, loading: billingLoading } = useBillingAccess();
+  const { data, loading, generating, error, retry } = useAIRecoveryInsights({
+    mode: "generate",
+    enabled: !insightsLocked && hasPaidAccess,
+  });
   const lang = data?.language ?? "ko";
   const errorLines = useMemo(() => (error ? presentError(error, t) : []), [error, t]);
   const errorCode = useMemo(() => (error ? compactErrorCode(error) : ""), [error]);
@@ -285,7 +293,34 @@ export function InsightsAIRecoveryDetail() {
         <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />
       ) : null}
 
-      {!insightsLocked && !loading && !data ? (
+      {!insightsLocked && !billingLoading && !hasPaidAccess ? (
+        <DetailCard className="p-5">
+          <div className="text-[17px] font-bold tracking-[-0.01em] text-ios-text">{t("유료 플랜 전용 기능")}</div>
+          <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
+            {t("AI 맞춤회복은 Basic 또는 Pro 플랜에서 사용할 수 있어요.")}
+          </p>
+          <div className="mt-4 flex gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                const confirmed = window.confirm("AI 맞춤회복은 유료 플랜 전용 기능입니다.\n플랜 업그레이드 페이지로 이동할까요?");
+                if (confirmed) router.push("/settings/billing/upgrade");
+              }}
+              className="inline-flex h-10 items-center justify-center rounded-full bg-black px-5 text-[13px] font-semibold text-white"
+            >
+              확인
+            </button>
+            <Link
+              href="/settings/billing/upgrade"
+              className="inline-flex h-10 items-center justify-center rounded-full border border-ios-sep bg-white px-5 text-[13px] font-semibold text-ios-text"
+            >
+              플랜 보기
+            </Link>
+          </div>
+        </DetailCard>
+      ) : null}
+
+      {!insightsLocked && hasPaidAccess && !loading && !data ? (
         <DetailCard className="p-5">
           <div className="text-[17px] font-bold tracking-[-0.01em] text-ios-text">{t("AI 호출에 실패했어요.")}</div>
           <div className="mt-2 space-y-1 text-[14px] leading-relaxed text-ios-sub">
@@ -303,7 +338,7 @@ export function InsightsAIRecoveryDetail() {
         </DetailCard>
       ) : null}
 
-      {!insightsLocked && !loading && data ? (
+      {!insightsLocked && hasPaidAccess && !loading && data ? (
         <>
           <DetailCard className="p-5">
             <div className="text-[13px] font-semibold text-ios-sub">{t("한줄 요약")}</div>

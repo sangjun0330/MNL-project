@@ -10,6 +10,7 @@ import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice
 import { HeroDashboard } from "@/components/insights/v2/HeroDashboard";
 import { DetailSummaryCard, DetailChip, DETAIL_ACCENTS } from "@/components/pages/insights/InsightDetailShell";
 import { TodaySleepRequiredSheet } from "@/components/insights/TodaySleepRequiredSheet";
+import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { statusFromScore } from "@/lib/wnlInsight";
 import { useI18n } from "@/lib/useI18n";
 
@@ -103,12 +104,13 @@ export function InsightsPage() {
     hasInsightData,
   } = useInsightsData();
   const insightsLocked = isInsightsLocked(recordedDays);
+  const { hasPaidAccess, loading: billingLoading } = useBillingAccess();
   const {
     data: aiRecovery,
     loading: aiRecoveryLoading,
     requiresTodaySleep,
     error: aiRecoveryError,
-  } = useAIRecoveryInsights({ mode: "cache", enabled: !insightsLocked });
+  } = useAIRecoveryInsights({ mode: "cache", enabled: !insightsLocked && hasPaidAccess });
 
   useEffect(() => {
     if (requiresTodaySleep) setOpenSleepGuide(true);
@@ -140,16 +142,19 @@ export function InsightsPage() {
   );
   const weeklyStatus = useMemo(() => statusFromScore(avgDisplay), [avgDisplay]);
   const aiHeadline = useMemo(() => {
+    if (!billingLoading && !hasPaidAccess) return t("유료 플랜 전용 기능");
     if (aiRecovery) return compactText(stripLeadingDash(aiRecovery.result.headline), 90);
     if (aiRecoveryLoading) return t("AI 데이터 확인 중...");
     if (aiRecoveryError) return t("AI 호출 상태를 확인해 주세요.");
     return t("오늘의 맞춤회복을 받아보세요.");
-  }, [aiRecovery, aiRecoveryError, aiRecoveryLoading, t]);
+  }, [aiRecovery, aiRecoveryError, aiRecoveryLoading, billingLoading, hasPaidAccess, t]);
   const aiTopSection = aiRecovery?.result.sections.length ? aiRecovery.result.sections[0] : null;
   const aiSummary = useMemo(
     () =>
       requiresTodaySleep
         ? t("오늘 수면 입력 후 AI 맞춤회복을 바로 분석합니다.")
+        : !billingLoading && !hasPaidAccess
+          ? t("AI 맞춤회복은 Basic/Pro에서 사용할 수 있어요.")
         : aiRecoveryLoading
           ? t("저장된 맞춤회복을 확인하고 있어요...")
           : aiTopSection
@@ -157,7 +162,7 @@ export function InsightsPage() {
             : aiRecoveryError
               ? t("AI 호출 상태를 확인해 주세요.")
               : t("상세 페이지에서 오늘 맞춤회복 분석을 시작할 수 있어요."),
-    [aiTopSection, requiresTodaySleep, aiRecoveryLoading, aiRecoveryError, t]
+    [aiTopSection, requiresTodaySleep, billingLoading, hasPaidAccess, aiRecoveryLoading, aiRecoveryError, t]
   );
   const moveToTodaySleepLog = () => {
     setOpenSleepGuide(false);
@@ -205,6 +210,12 @@ export function InsightsPage() {
           href="/insights/recovery"
           className="block"
           onClick={(e) => {
+            if (!hasPaidAccess && !billingLoading) {
+              e.preventDefault();
+              const confirmed = window.confirm("AI 맞춤회복은 유료 플랜 전용 기능입니다.\n플랜 업그레이드 페이지로 이동할까요?");
+              if (confirmed) router.push("/settings/billing/upgrade");
+              return;
+            }
             if (!requiresTodaySleep) return;
             e.preventDefault();
             setOpenSleepGuide(true);
@@ -217,11 +228,15 @@ export function InsightsPage() {
             summary={
               requiresTodaySleep
                 ? t("오늘 수면 기록을 먼저 입력해 주세요.")
+                : !billingLoading && !hasPaidAccess
+                  ? t("유료 플랜 전용 기능")
                 : aiHeadline
             }
             detail={
               requiresTodaySleep
                 ? t("오늘 수면 입력 후 바로 개인 맞춤 회복 가이드를 시작해요.")
+                : !billingLoading && !hasPaidAccess
+                  ? t("확인 버튼을 누르면 플랜 업그레이드 페이지로 이동합니다.")
                 : aiRecovery
                   ? t("내 기록을 반영한 오늘의 개인 맞춤 회복 가이드")
                   : aiSummary
@@ -231,7 +246,9 @@ export function InsightsPage() {
                 {requiresTodaySleep ? (
                   <DetailChip color={DETAIL_ACCENTS.pink}>{t("오늘 수면 입력 필요")}</DetailChip>
                 ) : (
-                  aiRecovery ? (
+                  !billingLoading && !hasPaidAccess ? (
+                    <DetailChip color={DETAIL_ACCENTS.pink}>{t("유료 플랜 전용")}</DetailChip>
+                  ) : aiRecovery ? (
                     <>
                       {(aiRecovery.result.sections ?? []).slice(0, 2).map((section) => (
                         <DetailChip key={`${section.category}-${section.title}`} color={DETAIL_ACCENTS.navy}>

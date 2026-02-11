@@ -2,140 +2,33 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { asCheckoutPlanTier, formatKrw, getPlanDefinition, listPlans, type PlanTier } from "@/lib/billing/plans";
-import { getSupabaseBrowserClient, signInWithProvider, useAuthState } from "@/lib/auth";
-import { useI18n } from "@/lib/useI18n";
+import { formatKrw, getPlanDefinition } from "@/lib/billing/plans";
+import {
+  fetchSubscriptionSnapshot,
+  formatDateLabel,
+  statusLabel,
+  subscriptionStatusLabel,
+  type SubscriptionResponse,
+  authHeaders,
+} from "@/lib/billing/client";
+import { signInWithProvider, useAuthState } from "@/lib/auth";
 
-type SubscriptionApi = {
-  tier: PlanTier;
-  status: "inactive" | "active" | "expired";
-  startedAt: string | null;
-  currentPeriodEnd: string | null;
-  updatedAt: string | null;
-  customerKey: string;
-};
+type CancelMode = "period_end" | "resume" | "now_refund";
 
-type BillingOrderApi = {
-  orderId: string;
-  planTier: PlanTier;
-  amount: number;
-  currency: string;
-  status: "READY" | "DONE" | "FAILED" | "CANCELED";
-  orderName: string;
-  paymentKey: string | null;
-  failCode: string | null;
-  failMessage: string | null;
-  approvedAt: string | null;
-  createdAt: string | null;
-};
-
-type SubscriptionResponse = {
-  subscription: SubscriptionApi;
-  orders: BillingOrderApi[];
-};
-
-type CheckoutResponse = {
-  planTier: "basic" | "pro";
-  orderId: string;
-  orderName: string;
-  amount: number;
-  currency: "KRW";
-  customerKey: string;
-  customerEmail: string | null;
-  customerName: string | null;
-  clientKey: string;
-  successUrl: string;
-  failUrl: string;
-};
-
-type TossPaymentsFactory = (clientKey: string) => {
-  payment: (options: { customerKey: string }) => {
-    requestPayment: (params: {
-      method: "CARD";
-      amount: {
-        currency: string;
-        value: number;
-      };
-      orderId: string;
-      orderName: string;
-      successUrl: string;
-      failUrl: string;
-      customerEmail?: string;
-      customerName?: string;
-      card?: {
-        useEscrow?: boolean;
-        useCardPoint?: boolean;
-        useAppCardOnly?: boolean;
-      };
-    }) => Promise<void>;
-  };
-};
-
-declare global {
-  interface Window {
-    TossPayments?: TossPaymentsFactory;
-  }
-}
-
-let tossScriptPromise: Promise<void> | null = null;
-
-function ensureTossScript() {
-  if (typeof window === "undefined") return Promise.reject(new Error("browser_only"));
-  if (window.TossPayments) return Promise.resolve();
-  if (tossScriptPromise) return tossScriptPromise;
-
-  tossScriptPromise = new Promise<void>((resolve, reject) => {
-    const existing = document.querySelector<HTMLScriptElement>("script[data-toss='v2-standard']");
-    if (existing) {
-      existing.addEventListener("load", () => resolve(), { once: true });
-      existing.addEventListener("error", () => reject(new Error("toss_script_load_failed")), { once: true });
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.src = "https://js.tosspayments.com/v2/standard";
-    script.async = true;
-    script.dataset.toss = "v2-standard";
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("toss_script_load_failed"));
-    document.head.appendChild(script);
-  });
-
-  return tossScriptPromise;
-}
-
-function formatDateLabel(value: string | null) {
-  if (!value) return "-";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")}`;
-}
-
-function statusLabel(status: BillingOrderApi["status"]) {
-  if (status === "DONE") return "결제 완료";
-  if (status === "FAILED") return "결제 실패";
-  if (status === "CANCELED") return "결제 취소";
-  return "결제 대기";
-}
-
-async function authHeaders(): Promise<Record<string, string>> {
-  const supabase = getSupabaseBrowserClient();
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
-  return token ? { Authorization: `Bearer ${token}` } : {};
+function orderStatusTone(status: string) {
+  if (status === "DONE") return "text-[#0B7A3E]";
+  if (status === "FAILED") return "text-[#B3261E]";
+  if (status === "CANCELED") return "text-[#6B7280]";
+  return "text-ios-sub";
 }
 
 export function SettingsBillingPage() {
   const { status, user } = useAuthState();
-  const { lang } = useI18n();
-
-  const [selectedPlan, setSelectedPlan] = useState<"basic" | "pro">("basic");
   const [loading, setLoading] = useState(true);
   const [subData, setSubData] = useState<SubscriptionResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [paying, setPaying] = useState(false);
-
-  const planRows = useMemo(() => listPlans(), []);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<CancelMode | null>(null);
 
   const loadSubscription = useCallback(async () => {
     if (!user?.userId) {
@@ -143,25 +36,13 @@ export function SettingsBillingPage() {
       setLoading(false);
       return;
     }
-
     setLoading(true);
     setError(null);
     try {
-      const headers = await authHeaders();
-      const res = await fetch("/api/billing/subscription", {
-        method: "GET",
-        headers: {
-          "content-type": "application/json",
-          ...headers,
-        },
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok || !json?.ok) {
-        throw new Error(String(json?.error ?? `http_${res.status}`));
-      }
-      setSubData(json.data as SubscriptionResponse);
+      const data = await fetchSubscriptionSnapshot();
+      setSubData(data);
     } catch (e: any) {
-      setError(e?.message ?? "구독 정보를 불러오지 못했습니다.");
+      setError(String(e?.message ?? "구독 정보를 불러오지 못했습니다."));
     } finally {
       setLoading(false);
     }
@@ -171,69 +52,66 @@ export function SettingsBillingPage() {
     void loadSubscription();
   }, [loadSubscription]);
 
-  useEffect(() => {
-    const activeTier = subData?.subscription.tier;
-    const checkoutTier = asCheckoutPlanTier(activeTier);
-    if (checkoutTier) setSelectedPlan(checkoutTier);
-  }, [subData?.subscription.tier]);
+  const subscription = subData?.subscription ?? null;
+  const activeTier = subscription?.tier ?? "free";
+  const hasPaidAccess = Boolean(subscription?.hasPaidAccess);
+  const latestRefundableOrder = useMemo(
+    () => (subData?.orders ?? []).find((o) => o.status === "DONE" && !!o.paymentKey) ?? null,
+    [subData?.orders]
+  );
 
-  const startCheckout = useCallback(async () => {
-    if (!user?.userId || paying) return;
-    setPaying(true);
-    setError(null);
+  const submitCancel = useCallback(
+    async (mode: CancelMode) => {
+      if (!user?.userId || actionLoading) return;
 
-    try {
-      const headers = await authHeaders();
-      const checkoutRes = await fetch("/api/billing/checkout", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...headers,
-        },
-        body: JSON.stringify({ plan: selectedPlan }),
-      });
-      const checkoutJson = await checkoutRes.json().catch(() => null);
-      if (!checkoutRes.ok || !checkoutJson?.ok) {
-        throw new Error(String(checkoutJson?.error ?? `checkout_http_${checkoutRes.status}`));
+      let reason = "사용자 요청";
+      if (mode === "period_end") {
+        const confirmed = window.confirm("현재 기간이 끝나면 Free 플랜으로 전환할까요?");
+        if (!confirmed) return;
+      }
+      if (mode === "resume") {
+        const confirmed = window.confirm("예약된 해지를 취소하고 현재 플랜을 유지할까요?");
+        if (!confirmed) return;
+      }
+      if (mode === "now_refund") {
+        const confirmed = window.confirm(
+          "즉시 해지 및 환불을 진행할까요?\n환불 성공 시 지금 바로 Free 플랜으로 전환됩니다."
+        );
+        if (!confirmed) return;
+        const entered = window.prompt("환불 사유를 입력해 주세요.", "사용자 요청");
+        if (entered === null) return;
+        reason = entered.trim() || "사용자 요청";
       }
 
-      const data = checkoutJson.data as CheckoutResponse;
-      await ensureTossScript();
-      if (!window.TossPayments) throw new Error("missing_toss_sdk");
-
-      const tossPayments = window.TossPayments(data.clientKey);
-      const payment = tossPayments.payment({ customerKey: data.customerKey });
-
-      await payment.requestPayment({
-        method: "CARD",
-        amount: {
-          currency: data.currency,
-          value: data.amount,
-        },
-        orderId: data.orderId,
-        orderName: data.orderName,
-        successUrl: data.successUrl,
-        failUrl: data.failUrl,
-        customerEmail: data.customerEmail ?? undefined,
-        customerName: data.customerName ?? undefined,
-        card: {
-          useEscrow: false,
-          useCardPoint: false,
-          useAppCardOnly: false,
-        },
-      });
-    } catch (e: any) {
-      const msg = String(e?.message ?? "결제창을 열지 못했습니다.");
-      if (!msg.includes("USER_CANCEL")) {
-        setError(msg);
+      setActionLoading(mode);
+      setActionError(null);
+      try {
+        const headers = await authHeaders();
+        const res = await fetch("/api/billing/cancel", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...headers,
+          },
+          body: JSON.stringify({
+            mode,
+            reason,
+            orderId: mode === "now_refund" ? latestRefundableOrder?.orderId ?? undefined : undefined,
+          }),
+        });
+        const json = await res.json().catch(() => null);
+        if (!res.ok || !json?.ok) {
+          throw new Error(String(json?.error ?? `http_${res.status}`));
+        }
+        await loadSubscription();
+      } catch (e: any) {
+        setActionError(String(e?.message ?? "구독 처리에 실패했습니다."));
+      } finally {
+        setActionLoading(null);
       }
-    } finally {
-      setPaying(false);
-    }
-  }, [paying, selectedPlan, user?.userId]);
-
-  const activeTier = subData?.subscription.tier ?? "free";
-  const periodEnd = subData?.subscription.currentPeriodEnd ?? null;
+    },
+    [actionLoading, latestRefundableOrder?.orderId, loadSubscription, user?.userId]
+  );
 
   return (
     <div className="mx-auto w-full max-w-[760px] px-4 pb-24 pt-6">
@@ -263,111 +141,118 @@ export function SettingsBillingPage() {
 
       {status === "authenticated" ? (
         <>
-          <div className="rounded-apple border border-ios-sep bg-white p-5 shadow-apple">
+          <section className="rounded-[28px] border border-ios-sep bg-white p-5 shadow-apple">
             <div className="text-[13px] font-semibold text-ios-sub">현재 플랜</div>
-            <div className="mt-2 text-[24px] font-extrabold tracking-[-0.02em] text-ios-text">
-              {getPlanDefinition(activeTier).title}
+            <div className="mt-2 flex items-end justify-between gap-3">
+              <div className="text-[42px] font-extrabold tracking-[-0.03em] text-ios-text">
+                {getPlanDefinition(activeTier).title}
+              </div>
+              {hasPaidAccess ? (
+                <div className="rounded-full border border-[#007AFF30] bg-[#007AFF10] px-3 py-1 text-[12px] font-semibold text-[#007AFF]">
+                  유료 이용 중
+                </div>
+              ) : (
+                <div className="rounded-full border border-ios-sep bg-ios-bg px-3 py-1 text-[12px] font-semibold text-ios-sub">
+                  무료 플랜
+                </div>
+              )}
             </div>
-            <div className="mt-1 text-[13px] text-ios-sub">
-              상태: {subData?.subscription.status ?? "inactive"}
-              {" · "}
-              만료일: {formatDateLabel(periodEnd)}
-            </div>
-          </div>
-
-          <div className="mt-4 grid gap-3">
-            {planRows.map((plan) => {
-              const paidTier = asCheckoutPlanTier(plan.tier);
-              const selected = paidTier ? selectedPlan === paidTier : activeTier === "free";
-              const active = activeTier === plan.tier;
-
-              return (
-                <button
-                  key={plan.tier}
-                  type="button"
-                  disabled={!paidTier}
-                  onClick={() => {
-                    if (paidTier) setSelectedPlan(paidTier);
-                  }}
-                  className={`rounded-apple border bg-white p-4 text-left shadow-apple-sm transition ${
-                    selected ? "border-black" : "border-ios-sep"
-                  } ${!paidTier ? "opacity-85" : "hover:translate-y-[-1px]"}`}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="text-[17px] font-bold text-ios-text">{plan.title}</div>
-                      <div className="mt-1 text-[13px] text-ios-sub">{plan.description}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-[16px] font-extrabold text-ios-text">
-                        {plan.priceKrw > 0 ? formatKrw(plan.priceKrw) : "무료"}
-                      </div>
-                      <div className="mt-1 text-[12px] text-ios-muted">/ 30일</div>
-                    </div>
-                  </div>
-                  <ul className="mt-3 list-disc space-y-1 pl-5 text-[12.5px] text-ios-sub">
-                    {plan.features.map((feature) => (
-                      <li key={feature}>{feature}</li>
-                    ))}
-                  </ul>
-                  {active ? (
-                    <div className="mt-3 inline-flex rounded-full border border-[#007AFF44] bg-[#007AFF10] px-2.5 py-1 text-[11px] font-semibold text-[#007AFF]">
-                      현재 사용 중
-                    </div>
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="mt-4 rounded-apple border border-ios-sep bg-white p-5 shadow-apple">
-            <div className="text-[13px] text-ios-sub">선택 플랜</div>
-            <div className="mt-1 text-[17px] font-bold text-ios-text">{getPlanDefinition(selectedPlan).title}</div>
             <div className="mt-2 text-[13px] text-ios-sub">
-              {lang === "en"
-                ? "Payment is processed via TossPayments payment window and applied after server-side confirmation."
-                : "토스페이먼츠 결제창으로 진행되며, 서버 승인 완료 후 플랜이 적용됩니다."}
+              상태: {subscriptionStatusLabel(subscription?.status ?? "inactive")}
+              {" · "}
+              만료일: {formatDateLabel(subscription?.currentPeriodEnd ?? null)}
             </div>
 
-            <button
-              type="button"
-              onClick={() => void startCheckout()}
-              disabled={paying || loading}
-              className="mt-4 inline-flex h-10 items-center justify-center rounded-full bg-black px-5 text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:bg-black/40"
-            >
-              {paying ? "결제창 준비 중..." : `${getPlanDefinition(selectedPlan).title} 결제하기`}
-            </button>
+            {subscription?.cancelAtPeriodEnd ? (
+              <div className="mt-3 rounded-2xl border border-[#EAB30855] bg-[#FEF9C3] px-3 py-2 text-[12.5px] text-[#7C5E10]">
+                기간 종료 해지 예약됨 · {formatDateLabel(subscription.cancelScheduledAt)}
+              </div>
+            ) : null}
+
+            <div className="mt-4 border-t border-ios-sep pt-4">
+              <div className="text-[13px] font-semibold text-ios-sub">결제 정보</div>
+              <div className="mt-2 rounded-2xl border border-ios-sep bg-ios-bg px-3 py-3">
+                <div className="flex items-center justify-between text-[13px]">
+                  <span className="text-ios-sub">현재 요금</span>
+                  <span className="font-semibold text-ios-text">
+                    {activeTier === "free" ? "무료" : `${formatKrw(getPlanDefinition(activeTier).priceKrw)} / 30일`}
+                  </span>
+                </div>
+                <div className="mt-1 flex items-center justify-between text-[13px]">
+                  <span className="text-ios-sub">결제 수단</span>
+                  <span className="font-semibold text-ios-text">TossPayments 카드</span>
+                </div>
+              </div>
+            </div>
+
+            {hasPaidAccess ? (
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  disabled={actionLoading !== null}
+                  onClick={() => void submitCancel(subscription?.cancelAtPeriodEnd ? "resume" : "period_end")}
+                  className="inline-flex h-11 items-center justify-center rounded-full border border-ios-sep bg-white px-4 text-[13px] font-semibold text-ios-text transition hover:bg-ios-bg disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {subscription?.cancelAtPeriodEnd ? "해지 예약 취소" : "기간 종료 시 해지 (권장)"}
+                </button>
+                <button
+                  type="button"
+                  disabled={actionLoading !== null || !latestRefundableOrder}
+                  onClick={() => void submitCancel("now_refund")}
+                  className="inline-flex h-11 items-center justify-center rounded-full bg-black px-4 text-[13px] font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:bg-black/40"
+                >
+                  즉시 해지 및 환불
+                </button>
+              </div>
+            ) : null}
+
+            {hasPaidAccess ? (
+              <p className="mt-2 text-[11.5px] leading-relaxed text-ios-muted">
+                기간 종료 해지는 서비스는 만료일까지 유지되고 자동으로 Free 전환됩니다. 즉시 해지는 환불 성공 즉시 Free로 바뀝니다.
+              </p>
+            ) : null}
+
+            <div className="mt-4 text-center">
+              <Link
+                href="/settings/billing/upgrade"
+                className="text-[13px] font-semibold text-ios-sub underline-offset-4 transition hover:underline hover:text-ios-text"
+              >
+                플랜 업그레이드하기
+              </Link>
+            </div>
 
             {error ? <div className="mt-3 text-[12px] text-red-600">{error}</div> : null}
-          </div>
+            {actionError ? <div className="mt-2 text-[12px] text-red-600">{actionError}</div> : null}
+          </section>
 
-          <div className="mt-4 rounded-apple border border-ios-sep bg-white p-5 shadow-apple">
-            <div className="text-[14px] font-semibold text-ios-text">최근 결제 이력</div>
+          <section className="mt-4 rounded-[28px] border border-ios-sep bg-white p-5 shadow-apple">
+            <div className="text-[15px] font-bold text-ios-text">최근 결제 이력</div>
             {loading ? (
               <div className="mt-3 text-[12.5px] text-ios-muted">불러오는 중...</div>
             ) : (
-              <div className="mt-3 space-y-2">
+              <div className="mt-3 space-y-2.5">
                 {(subData?.orders ?? []).length === 0 ? (
                   <div className="text-[12.5px] text-ios-muted">결제 이력이 아직 없습니다.</div>
                 ) : (
                   (subData?.orders ?? []).map((order) => (
-                    <div key={order.orderId} className="rounded-2xl border border-ios-sep bg-ios-bg px-3 py-2">
+                    <div key={order.orderId} className="rounded-2xl border border-ios-sep bg-ios-bg px-3 py-3">
                       <div className="flex items-center justify-between gap-2">
-                        <div className="text-[12.5px] font-semibold text-ios-text">{order.orderName}</div>
-                        <div className="text-[11.5px] text-ios-sub">{statusLabel(order.status)}</div>
+                        <div className="text-[14px] font-semibold text-ios-text">{order.orderName}</div>
+                        <div className={`text-[11.5px] font-semibold ${orderStatusTone(order.status)}`}>
+                          {statusLabel(order.status)}
+                        </div>
                       </div>
-                      <div className="mt-1 text-[11.5px] text-ios-muted">
-                        {formatDateLabel(order.createdAt)} · {formatKrw(order.amount)} · {order.orderId}
+                      <div className="mt-1 text-[12px] text-ios-sub">
+                        {formatDateLabel(order.createdAt)} · {formatKrw(order.amount)}
                       </div>
-                      {order.failMessage ? (
-                        <div className="mt-1 text-[11.5px] text-red-600">{order.failMessage}</div>
-                      ) : null}
+                      <div className="mt-0.5 break-all text-[11.5px] text-ios-muted">{order.orderId}</div>
+                      {order.failMessage ? <div className="mt-1 text-[11.5px] text-red-600">{order.failMessage}</div> : null}
                     </div>
                   ))
                 )}
               </div>
             )}
-          </div>
+          </section>
         </>
       ) : null}
     </div>

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  downgradeToFreeNow,
   markBillingOrderCanceled,
   markBillingOrderDoneAndApplyPlan,
   markBillingOrderFailed,
@@ -176,6 +177,12 @@ export async function POST(req: Request) {
           orderId,
           message: `Webhook status: ${status || "CANCELED"}`,
         });
+        if (status === "CANCELED") {
+          await downgradeToFreeNow({
+            userId,
+            reason: `Webhook cancel: ${status}`,
+          });
+        }
         return ok({ accepted: true, action: "canceled", orderId });
       }
 
@@ -198,6 +205,12 @@ export async function POST(req: Request) {
         orderId,
         message: `Webhook cancel status: ${status || "CANCELED"}`,
       });
+      if (status === "CANCELED") {
+        await downgradeToFreeNow({
+          userId,
+          reason: `Webhook cancel: ${status}`,
+        });
+      }
       return ok({ accepted: true, action: "canceled", orderId });
     }
 
