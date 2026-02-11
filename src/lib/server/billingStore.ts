@@ -18,6 +18,7 @@ export type SubscriptionSnapshot = {
 
 export type BillingOrderSummary = {
   orderId: string;
+  userId?: string;
   planTier: PlanTier;
   amount: number;
   currency: string;
@@ -43,6 +44,23 @@ function asSubscriptionStatus(value: unknown): SubscriptionStatus {
 function asOrderStatus(value: unknown): BillingOrderStatus {
   if (value === "DONE" || value === "FAILED" || value === "CANCELED") return value;
   return "READY";
+}
+
+function toBillingOrderSummary(row: any): BillingOrderSummary {
+  return {
+    orderId: row?.order_id ?? "",
+    userId: row?.user_id ?? undefined,
+    planTier: asPlanTier(row?.plan_tier),
+    amount: Number(row?.amount ?? 0),
+    currency: row?.currency ?? "KRW",
+    status: asOrderStatus(row?.status),
+    orderName: row?.order_name ?? "",
+    paymentKey: row?.payment_key ?? null,
+    failCode: row?.fail_code ?? null,
+    failMessage: row?.fail_message ?? null,
+    approvedAt: row?.approved_at ?? null,
+    createdAt: row?.created_at ?? null,
+  };
 }
 
 export function createCustomerKey(userId: string) {
@@ -126,19 +144,22 @@ export async function readBillingOrderByOrderId(input: {
   if (error) throw error;
   if (!data) return null;
 
-  return {
-    orderId: data.order_id,
-    planTier: asPlanTier(data.plan_tier),
-    amount: Number(data.amount ?? 0),
-    currency: data.currency ?? "KRW",
-    status: asOrderStatus(data.status),
-    orderName: data.order_name ?? "",
-    paymentKey: data.payment_key ?? null,
-    failCode: data.fail_code ?? null,
-    failMessage: data.fail_message ?? null,
-    approvedAt: data.approved_at ?? null,
-    createdAt: data.created_at ?? null,
-  };
+  return toBillingOrderSummary(data);
+}
+
+export async function readBillingOrderByOrderIdAny(orderId: string): Promise<BillingOrderSummary | null> {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("billing_orders")
+    .select(
+      "order_id, user_id, plan_tier, amount, currency, status, order_name, payment_key, fail_code, fail_message, approved_at, created_at"
+    )
+    .eq("order_id", orderId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+  return toBillingOrderSummary(data);
 }
 
 export async function listRecentBillingOrders(userId: string, limit = 12): Promise<BillingOrderSummary[]> {
@@ -154,19 +175,7 @@ export async function listRecentBillingOrders(userId: string, limit = 12): Promi
 
   if (error) throw error;
 
-  return (data ?? []).map((row) => ({
-    orderId: row.order_id,
-    planTier: asPlanTier(row.plan_tier),
-    amount: Number(row.amount ?? 0),
-    currency: row.currency ?? "KRW",
-    status: asOrderStatus(row.status),
-    orderName: row.order_name ?? "",
-    paymentKey: row.payment_key ?? null,
-    failCode: row.fail_code ?? null,
-    failMessage: row.fail_message ?? null,
-    approvedAt: row.approved_at ?? null,
-    createdAt: row.created_at ?? null,
-  }));
+  return (data ?? []).map((row) => toBillingOrderSummary(row));
 }
 
 export async function markBillingOrderFailed(input: {
@@ -186,7 +195,30 @@ export async function markBillingOrderFailed(input: {
       updated_at: now,
     })
     .eq("order_id", input.orderId)
-    .eq("user_id", input.userId);
+    .eq("user_id", input.userId)
+    .neq("status", "DONE");
+
+  if (error) throw error;
+}
+
+export async function markBillingOrderCanceled(input: {
+  userId: string;
+  orderId: string;
+  message?: string;
+}): Promise<void> {
+  const admin = getSupabaseAdmin();
+  const now = new Date().toISOString();
+  const { error } = await admin
+    .from("billing_orders")
+    .update({
+      status: "CANCELED",
+      fail_code: "canceled",
+      fail_message: input.message?.slice(0, 220) ?? "Payment was canceled.",
+      updated_at: now,
+    })
+    .eq("order_id", input.orderId)
+    .eq("user_id", input.userId)
+    .neq("status", "DONE");
 
   if (error) throw error;
 }
@@ -215,6 +247,10 @@ export async function markBillingOrderDoneAndApplyPlan(input: {
     throw new Error("amount_mismatch");
   }
 
+  if (order.status === "DONE") {
+    return readSubscription(input.userId);
+  }
+
   const paidPlanTier = asPlanTier(order.plan_tier);
   if (paidPlanTier === "free") {
     throw new Error("invalid_plan");
@@ -234,7 +270,7 @@ export async function markBillingOrderDoneAndApplyPlan(input: {
 
   const startedAt = isSamePlan && current.startedAt ? current.startedAt : nowIso;
 
-  const { error: orderUpdateErr } = await admin
+  const { data: updatedOrderRow, error: orderUpdateErr } = await admin
     .from("billing_orders")
     .update({
       status: "DONE",
@@ -246,8 +282,15 @@ export async function markBillingOrderDoneAndApplyPlan(input: {
       updated_at: nowIso,
     })
     .eq("order_id", input.orderId)
-    .eq("user_id", input.userId);
+    .eq("user_id", input.userId)
+    .neq("status", "DONE")
+    .select("order_id")
+    .maybeSingle();
   if (orderUpdateErr) throw orderUpdateErr;
+  if (!updatedOrderRow) {
+    // Another request already finalized this order.
+    return readSubscription(input.userId);
+  }
 
   const { error: userErr } = await admin
     .from("wnl_users")
