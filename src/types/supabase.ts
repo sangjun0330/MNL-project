@@ -139,6 +139,10 @@ export type Database = {
           subscription_started_at: string | null;
           subscription_current_period_end: string | null;
           subscription_updated_at: string | null;
+          subscription_cancel_at_period_end: boolean;
+          subscription_cancel_scheduled_at: string | null;
+          subscription_canceled_at: string | null;
+          subscription_cancel_reason: string | null;
           toss_customer_key: string | null;
           toss_last_order_id: string | null;
         };
@@ -151,6 +155,10 @@ export type Database = {
           subscription_started_at?: string | null;
           subscription_current_period_end?: string | null;
           subscription_updated_at?: string | null;
+          subscription_cancel_at_period_end?: boolean;
+          subscription_cancel_scheduled_at?: string | null;
+          subscription_canceled_at?: string | null;
+          subscription_cancel_reason?: string | null;
           toss_customer_key?: string | null;
           toss_last_order_id?: string | null;
         };
@@ -163,6 +171,10 @@ export type Database = {
           subscription_started_at?: string | null;
           subscription_current_period_end?: string | null;
           subscription_updated_at?: string | null;
+          subscription_cancel_at_period_end?: boolean;
+          subscription_cancel_scheduled_at?: string | null;
+          subscription_canceled_at?: string | null;
+          subscription_cancel_reason?: string | null;
           toss_customer_key?: string | null;
           toss_last_order_id?: string | null;
         };

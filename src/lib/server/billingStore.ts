@@ -14,6 +14,11 @@ export type SubscriptionSnapshot = {
   currentPeriodEnd: string | null;
   updatedAt: string | null;
   customerKey: string;
+  cancelAtPeriodEnd: boolean;
+  cancelScheduledAt: string | null;
+  canceledAt: string | null;
+  cancelReason: string | null;
+  hasPaidAccess: boolean;
 };
 
 export type BillingOrderSummary = {
@@ -39,6 +44,29 @@ function asPlanTier(value: unknown): PlanTier {
 function asSubscriptionStatus(value: unknown): SubscriptionStatus {
   if (value === "active" || value === "expired") return value;
   return "inactive";
+}
+
+function parseDate(value: string | null): Date | null {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isFinite(d.getTime()) ? d : null;
+}
+
+function hasPaidAccessFromSnapshot(input: {
+  tier: PlanTier;
+  status: SubscriptionStatus;
+  currentPeriodEnd: string | null;
+}) {
+  if (input.tier === "free") return false;
+  if (input.status !== "active") return false;
+  const end = parseDate(input.currentPeriodEnd);
+  if (!end) return true;
+  return end.getTime() > Date.now();
+}
+
+function sanitizeCancelReason(value: string | null | undefined) {
+  const text = String(value ?? "").trim();
+  return text ? text.slice(0, 220) : null;
 }
 
 function asOrderStatus(value: unknown): BillingOrderStatus {
@@ -73,18 +101,62 @@ export async function readSubscription(userId: string): Promise<SubscriptionSnap
   const { data } = await admin
     .from("wnl_users")
     .select(
-      "subscription_tier, subscription_status, subscription_started_at, subscription_current_period_end, subscription_updated_at, toss_customer_key"
+      "subscription_tier, subscription_status, subscription_started_at, subscription_current_period_end, subscription_updated_at, toss_customer_key, subscription_cancel_at_period_end, subscription_cancel_scheduled_at, subscription_canceled_at, subscription_cancel_reason"
     )
     .eq("user_id", userId)
     .maybeSingle();
 
+  let tier = asPlanTier(data?.subscription_tier);
+  let status = asSubscriptionStatus(data?.subscription_status);
+  let startedAt = data?.subscription_started_at ?? null;
+  let currentPeriodEnd = data?.subscription_current_period_end ?? null;
+  let updatedAt = data?.subscription_updated_at ?? null;
+  let cancelAtPeriodEnd = Boolean(data?.subscription_cancel_at_period_end);
+  let cancelScheduledAt = data?.subscription_cancel_scheduled_at ?? null;
+  let canceledAt = data?.subscription_canceled_at ?? null;
+  let cancelReason = sanitizeCancelReason(data?.subscription_cancel_reason);
+
+  const endDate = parseDate(currentPeriodEnd);
+  const now = Date.now();
+  const shouldExpire = tier !== "free" && status === "active" && endDate && endDate.getTime() <= now;
+  if (shouldExpire) {
+    const nowIso = new Date(now).toISOString();
+    const { error } = await admin
+      .from("wnl_users")
+      .update({
+        subscription_tier: "free",
+        subscription_status: "expired",
+        subscription_updated_at: nowIso,
+        subscription_cancel_at_period_end: false,
+        subscription_cancel_scheduled_at: null,
+      })
+      .eq("user_id", userId);
+    if (!error) {
+      tier = "free";
+      status = "expired";
+      updatedAt = nowIso;
+      cancelAtPeriodEnd = false;
+      cancelScheduledAt = null;
+      // Preserve canceledAt/cancelReason for history.
+      startedAt = startedAt ?? null;
+      currentPeriodEnd = currentPeriodEnd ?? null;
+      canceledAt = canceledAt ?? null;
+      cancelReason = cancelReason ?? null;
+    }
+  }
+
   return {
-    tier: asPlanTier(data?.subscription_tier),
-    status: asSubscriptionStatus(data?.subscription_status),
-    startedAt: data?.subscription_started_at ?? null,
-    currentPeriodEnd: data?.subscription_current_period_end ?? null,
-    updatedAt: data?.subscription_updated_at ?? null,
+    tier,
+    status,
+    startedAt,
+    currentPeriodEnd,
+    updatedAt,
     customerKey: data?.toss_customer_key || createCustomerKey(userId),
+    cancelAtPeriodEnd,
+    cancelScheduledAt,
+    canceledAt,
+    cancelReason,
+    hasPaidAccess: hasPaidAccessFromSnapshot({ tier, status, currentPeriodEnd }),
   };
 }
 
@@ -107,6 +179,9 @@ export async function createBillingOrder(input: {
     .update({
       toss_customer_key: createCustomerKey(input.userId),
       toss_last_order_id: input.orderId,
+      subscription_cancel_at_period_end: false,
+      subscription_cancel_scheduled_at: null,
+      subscription_cancel_reason: null,
       last_seen: now,
     })
     .eq("user_id", input.userId);
@@ -223,6 +298,91 @@ export async function markBillingOrderCanceled(input: {
   if (error) throw error;
 }
 
+export async function readLatestRefundableOrder(userId: string): Promise<BillingOrderSummary | null> {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("billing_orders")
+    .select(
+      "order_id, user_id, plan_tier, amount, currency, status, order_name, payment_key, fail_code, fail_message, approved_at, created_at"
+    )
+    .eq("user_id", userId)
+    .eq("status", "DONE")
+    .not("payment_key", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+  return toBillingOrderSummary(data);
+}
+
+export async function scheduleSubscriptionCancelAtPeriodEnd(input: {
+  userId: string;
+  reason?: string | null;
+}): Promise<SubscriptionSnapshot> {
+  const current = await readSubscription(input.userId);
+  if (!current.hasPaidAccess) throw new Error("no_active_paid_subscription");
+
+  const admin = getSupabaseAdmin();
+  const nowIso = new Date().toISOString();
+  const { error } = await admin
+    .from("wnl_users")
+    .update({
+      subscription_cancel_at_period_end: true,
+      subscription_cancel_scheduled_at: nowIso,
+      subscription_cancel_reason: sanitizeCancelReason(input.reason),
+      subscription_updated_at: nowIso,
+      last_seen: nowIso,
+    })
+    .eq("user_id", input.userId);
+  if (error) throw error;
+
+  return readSubscription(input.userId);
+}
+
+export async function resumeScheduledSubscription(input: { userId: string }): Promise<SubscriptionSnapshot> {
+  const admin = getSupabaseAdmin();
+  const nowIso = new Date().toISOString();
+  const { error } = await admin
+    .from("wnl_users")
+    .update({
+      subscription_cancel_at_period_end: false,
+      subscription_cancel_scheduled_at: null,
+      subscription_cancel_reason: null,
+      subscription_updated_at: nowIso,
+      last_seen: nowIso,
+    })
+    .eq("user_id", input.userId);
+  if (error) throw error;
+
+  return readSubscription(input.userId);
+}
+
+export async function downgradeToFreeNow(input: {
+  userId: string;
+  reason?: string | null;
+}): Promise<SubscriptionSnapshot> {
+  const admin = getSupabaseAdmin();
+  const nowIso = new Date().toISOString();
+  const { error } = await admin
+    .from("wnl_users")
+    .update({
+      subscription_tier: "free",
+      subscription_status: "inactive",
+      subscription_current_period_end: nowIso,
+      subscription_updated_at: nowIso,
+      subscription_cancel_at_period_end: false,
+      subscription_cancel_scheduled_at: null,
+      subscription_canceled_at: nowIso,
+      subscription_cancel_reason: sanitizeCancelReason(input.reason),
+      last_seen: nowIso,
+    })
+    .eq("user_id", input.userId);
+  if (error) throw error;
+  return readSubscription(input.userId);
+}
+
 export async function markBillingOrderDoneAndApplyPlan(input: {
   userId: string;
   orderId: string;
@@ -300,6 +460,10 @@ export async function markBillingOrderDoneAndApplyPlan(input: {
       subscription_started_at: startedAt,
       subscription_current_period_end: nextEnd.toISOString(),
       subscription_updated_at: nowIso,
+      subscription_cancel_at_period_end: false,
+      subscription_cancel_scheduled_at: null,
+      subscription_cancel_reason: null,
+      subscription_canceled_at: null,
       toss_customer_key: createCustomerKey(input.userId),
       toss_last_order_id: input.orderId,
       last_seen: nowIso,

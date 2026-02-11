@@ -45,6 +45,11 @@ export function buildConfirmIdempotencyKey(orderId: string) {
   return `confirm_${normalized}`.slice(0, 120);
 }
 
+export function buildCancelIdempotencyKey(orderId: string) {
+  const normalized = String(orderId).replace(/[^A-Za-z0-9_-]/g, "");
+  return `cancel_${normalized}`.slice(0, 120);
+}
+
 export function readTossAcceptLanguage(reqHeader: string | null): string | null {
   const requestValue = clean(reqHeader);
   const fallback = clean(process.env.TOSS_API_ACCEPT_LANGUAGE) || "ko-KR";
