@@ -22,6 +22,20 @@ const nextConfig = {
   // 개발 환경에서 LAN/프록시/리버스프록시로 접속할 때 dev overlay / _next 리소스 차단을 방지합니다.
   allowedDevOrigins,
 
+  async headers() {
+    return [
+      {
+        source: "/settings/billing/:path*",
+        headers: [
+          {
+            key: "Cross-Origin-Opener-Policy",
+            value: "same-origin-allow-popups",
+          },
+        ],
+      },
+    ];
+  },
+
   // PWA is handled via public/manifest + public/sw.js + runtime registration (no extra deps).
 };
 

@@ -3,6 +3,7 @@ import { asCheckoutPlanTier, getPlanDefinition } from "@/lib/billing/plans";
 import { createBillingOrder, createCustomerKey } from "@/lib/server/billingStore";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { getRouteSupabaseClient } from "@/lib/server/supabaseRouteClient";
+import { readTossClientKeyFromEnv, readTossSecretKeyFromEnv } from "@/lib/server/tossConfig";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -52,8 +53,13 @@ export async function POST(req: Request) {
   const userId = await readUserIdFromRequest(req);
   if (!userId) return bad(401, "login_required");
 
-  const clientKey = String(process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY ?? "").trim();
-  if (!clientKey) return bad(500, "missing_toss_client_key");
+  const client = readTossClientKeyFromEnv();
+  if (!client.ok) return bad(500, client.error);
+
+  // Checkout 단계에서 키 짝(테스트/라이브)까지 미리 검증해 운영 오류를 줄입니다.
+  const secret = readTossSecretKeyFromEnv();
+  if (!secret.ok) return bad(500, secret.error);
+  if (client.mode !== secret.mode) return bad(500, "toss_key_mode_mismatch");
 
   let body: any;
   try {
@@ -97,7 +103,7 @@ export async function POST(req: Request) {
       customerKey: createCustomerKey(userId),
       customerEmail: customer.email,
       customerName: customer.name,
-      clientKey,
+      clientKey: client.clientKey,
       successUrl: `${origin}/settings/billing/success`,
       failUrl: `${origin}/settings/billing/fail`,
     },
