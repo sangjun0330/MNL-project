@@ -42,7 +42,7 @@ export function SettingsBillingFailPage() {
 
   return (
     <div className="mx-auto w-full max-w-[720px] px-4 pb-24 pt-6">
-      <div className="rounded-apple border border-ios-sep bg-white p-6 shadow-apple">
+      <div className="wnl-surface p-6">
         <div className="text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">결제 실패</div>
         <div className="mt-3 text-[14px] font-semibold text-red-600">{code}</div>
         <div className="mt-1 text-[12.5px] text-ios-sub break-all">{message}</div>
@@ -51,13 +51,13 @@ export function SettingsBillingFailPage() {
         <div className="mt-6 flex gap-2">
           <Link
             href="/settings/billing"
-            className="inline-flex h-10 items-center justify-center rounded-full bg-black px-5 text-[13px] font-semibold text-white"
+            className="wnl-btn-primary inline-flex h-10 items-center justify-center px-5 text-[13px]"
           >
             다시 시도
           </Link>
           <Link
             href="/settings"
-            className="inline-flex h-10 items-center justify-center rounded-full border border-ios-sep bg-white px-5 text-[13px] font-semibold text-ios-text"
+            className="wnl-btn-secondary inline-flex h-10 items-center justify-center px-5 text-[13px]"
           >
             설정으로 이동
           </Link>

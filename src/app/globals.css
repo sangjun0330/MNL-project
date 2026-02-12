@@ -10,8 +10,11 @@
   --wnl-muted: rgba(28, 28, 30, 0.56);
   --wnl-card: #FFFFFF;
   --wnl-sep: rgba(60, 60, 67, 0.18);
-  --wnl-accent: #007AFF;
-  --wnl-selection: rgba(0, 122, 255, 0.16);
+  --wnl-accent: #163B73;
+  --wnl-accent-strong: #0F2A54;
+  --wnl-accent-soft: rgba(22, 59, 115, 0.12);
+  --wnl-accent-border: rgba(22, 59, 115, 0.28);
+  --wnl-selection: rgba(22, 59, 115, 0.16);
 
   /* ── Apple-grade easing functions ── */
   --wnl-ease-smooth: cubic-bezier(0.16, 1, 0.3, 1);
@@ -177,6 +180,92 @@ body {
 
 .wnl-nav-inactive {
   color: rgba(60, 60, 67, 0.6);
+}
+
+/* ===================================
+   Billing/Admin UI System
+   =================================== */
+
+.wnl-surface {
+  border-radius: 28px;
+  border: 1px solid var(--wnl-sep);
+  background: linear-gradient(180deg, #FFFFFF 0%, #FCFDFF 100%);
+  box-shadow: 0 14px 36px rgba(16, 24, 40, 0.06);
+}
+
+.wnl-sub-surface {
+  border-radius: 18px;
+  border: 1px solid var(--wnl-sep);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.wnl-chip-accent {
+  border-radius: 999px;
+  border: 1px solid var(--wnl-accent-border);
+  background: var(--wnl-accent-soft);
+  color: var(--wnl-accent);
+  font-weight: 600;
+}
+
+.wnl-chip-muted {
+  border-radius: 999px;
+  border: 1px solid var(--wnl-sep);
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--wnl-sub);
+  font-weight: 600;
+}
+
+.wnl-btn-primary {
+  border-radius: 999px;
+  border: 1px solid var(--wnl-accent-strong);
+  background: linear-gradient(180deg, var(--wnl-accent) 0%, var(--wnl-accent-strong) 100%);
+  color: #FFFFFF;
+  font-weight: 700;
+  transition: transform var(--wnl-dur-fast) var(--wnl-ease-spring),
+    opacity var(--wnl-dur-fast) var(--wnl-ease-apple),
+    box-shadow var(--wnl-dur-fast) var(--wnl-ease-apple);
+  box-shadow: 0 8px 20px rgba(22, 59, 115, 0.26);
+}
+
+.wnl-btn-primary:hover {
+  opacity: 0.96;
+}
+
+.wnl-btn-primary:active {
+  transform: scale(0.97);
+}
+
+.wnl-btn-secondary {
+  border-radius: 999px;
+  border: 1px solid var(--wnl-sep);
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--wnl-text);
+  font-weight: 600;
+  transition: transform var(--wnl-dur-fast) var(--wnl-ease-spring),
+    background-color var(--wnl-dur-fast) var(--wnl-ease-apple),
+    border-color var(--wnl-dur-fast) var(--wnl-ease-apple);
+}
+
+.wnl-btn-secondary:hover {
+  border-color: var(--wnl-accent-border);
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.wnl-btn-secondary:active {
+  transform: scale(0.97);
+}
+
+.wnl-link-accent {
+  color: var(--wnl-accent);
+  text-decoration: none;
+  transition: color var(--wnl-dur-fast) var(--wnl-ease-apple),
+    text-decoration-color var(--wnl-dur-fast) var(--wnl-ease-apple);
+}
+
+.wnl-link-accent:hover {
+  color: var(--wnl-accent-strong);
+  text-decoration: underline;
+  text-underline-offset: 4px;
 }
 
 /* ===================================
@@ -451,8 +540,11 @@ html.wnl-night {
   --wnl-muted: rgba(255,255,255,0.52);
   --wnl-card: #111A2E;
   --wnl-sep: rgba(255,255,255,0.12);
-  --wnl-accent: #6CDAC3;
-  --wnl-selection: rgba(108,218,195,0.22);
+  --wnl-accent: #90AFE7;
+  --wnl-accent-strong: #7A9BD9;
+  --wnl-accent-soft: rgba(144, 175, 231, 0.18);
+  --wnl-accent-border: rgba(144, 175, 231, 0.32);
+  --wnl-selection: rgba(144, 175, 231, 0.22);
 }
 
 html.wnl-night body {
@@ -502,9 +594,21 @@ html.wnl-night .wnl-nav-bar {
 
 html.wnl-night .wnl-nav-active {
   background: rgba(255, 255, 255, 0.08);
-  color: #6CDAC3;
+  color: var(--wnl-accent);
 }
 
 html.wnl-night .wnl-nav-inactive {
   color: rgba(255, 255, 255, 0.6);
+}
+
+html.wnl-night .wnl-surface {
+  background: linear-gradient(180deg, #121D34 0%, #10192D 100%);
+}
+
+html.wnl-night .wnl-sub-surface {
+  background: rgba(17, 26, 46, 0.75);
+}
+
+html.wnl-night .wnl-btn-secondary {
+  background: rgba(17, 26, 46, 0.92);
 }

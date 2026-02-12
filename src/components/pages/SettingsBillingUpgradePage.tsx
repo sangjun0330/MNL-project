@@ -67,7 +67,7 @@ export function SettingsBillingUpgradePage() {
       <div className="mb-4 flex items-center gap-2">
         <Link
           href="/settings/billing"
-          className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-ios-sep bg-white text-[18px] text-ios-text"
+          className="wnl-btn-secondary inline-flex h-9 w-9 items-center justify-center text-[18px] text-ios-text"
         >
           ←
         </Link>
@@ -78,13 +78,13 @@ export function SettingsBillingUpgradePage() {
       </div>
 
       {status !== "authenticated" ? (
-        <div className="rounded-apple border border-ios-sep bg-white p-5 shadow-apple">
+        <div className="wnl-surface p-5">
           <div className="text-[16px] font-bold text-ios-text">로그인이 필요해요</div>
           <p className="mt-2 text-[13px] text-ios-sub">플랜 업그레이드는 로그인 후 가능합니다.</p>
           <button
             type="button"
             onClick={() => signInWithProvider("google")}
-            className="mt-4 rounded-full bg-black px-4 py-2 text-[13px] font-semibold text-white"
+            className="wnl-btn-primary mt-4 px-4 py-2 text-[13px]"
           >
             Google로 로그인
           </button>
@@ -93,7 +93,7 @@ export function SettingsBillingUpgradePage() {
 
       {status === "authenticated" ? (
         <>
-          <section className="rounded-[28px] border border-ios-sep bg-white p-5 shadow-apple">
+          <section className="wnl-surface p-6">
             <div className="text-[13px] font-semibold text-ios-sub">현재 플랜</div>
             <div className="mt-2 text-[30px] font-extrabold tracking-[-0.03em] text-ios-text">
               {getPlanDefinition(activeTier).title}
@@ -116,8 +116,10 @@ export function SettingsBillingUpgradePage() {
                   onClick={() => {
                     if (paidTier) setSelectedPlan(paidTier);
                   }}
-                  className={`rounded-[26px] border bg-white p-4 text-left shadow-apple-sm transition ${
-                    selected ? "border-black" : "border-ios-sep"
+                  className={`rounded-[26px] border bg-white p-4 text-left transition ${
+                    selected
+                      ? "border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] shadow-[0_10px_24px_rgba(22,59,115,0.16)]"
+                      : "border-ios-sep shadow-apple-sm"
                   } ${!isPaidPlan ? "opacity-90" : "hover:translate-y-[-1px]"}`}
                 >
                   <div className="flex items-start justify-between gap-3">
@@ -138,7 +140,7 @@ export function SettingsBillingUpgradePage() {
                     ))}
                   </ul>
                   {active ? (
-                    <div className="mt-3 inline-flex rounded-full border border-[#007AFF40] bg-[#007AFF10] px-2.5 py-1 text-[11px] font-semibold text-[#007AFF]">
+                    <div className="wnl-chip-accent mt-3 inline-flex px-2.5 py-1 text-[11px]">
                       현재 사용 중
                     </div>
                   ) : null}
@@ -147,7 +149,7 @@ export function SettingsBillingUpgradePage() {
             })}
           </section>
 
-          <section className="mt-4 rounded-[28px] border border-ios-sep bg-white p-5 shadow-apple">
+          <section className="wnl-surface mt-4 p-6">
             <div className="text-[13px] text-ios-sub">선택 플랜</div>
             <div className="mt-1 text-[20px] font-bold text-ios-text">{getPlanDefinition(selectedPlan).title}</div>
             <div className="mt-2 text-[13px] text-ios-sub">
@@ -157,7 +159,7 @@ export function SettingsBillingUpgradePage() {
               type="button"
               onClick={() => void startCheckout()}
               disabled={paying || loading || isAlreadySelectedPlanActive}
-              className="mt-4 inline-flex h-11 items-center justify-center rounded-full bg-black px-5 text-[14px] font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:bg-black/35"
+              className="wnl-btn-primary mt-4 inline-flex h-11 items-center justify-center px-5 text-[14px] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isAlreadySelectedPlanActive ? "현재 플랜 사용 중" : paying ? "결제창 준비 중..." : `${getPlanDefinition(selectedPlan).title} 결제하기`}
             </button>

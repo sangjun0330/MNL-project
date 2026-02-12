@@ -36,6 +36,59 @@ export type BillingOrderSummary = {
   createdAt: string | null;
 };
 
+export type BillingRefundRequestStatus =
+  | "REQUESTED"
+  | "UNDER_REVIEW"
+  | "APPROVED"
+  | "REJECTED"
+  | "EXECUTING"
+  | "REFUNDED"
+  | "FAILED_RETRYABLE"
+  | "FAILED_FINAL"
+  | "WITHDRAWN";
+
+export type BillingRefundRequestSummary = {
+  id: number;
+  userId: string;
+  orderId: string;
+  reason: string;
+  status: BillingRefundRequestStatus;
+  adminNote: string | null;
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  reviewNote: string | null;
+  executedBy: string | null;
+  executedAt: string | null;
+  cancelAmount: number | null;
+  currency: string;
+  tossPaymentKeySnapshot: string | null;
+  tossCancelTransactionKey: string | null;
+  gatewayResponse: Json | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  retryCount: number;
+  nextRetryAt: string | null;
+  requestedAt: string | null;
+  updatedAt: string | null;
+  notifiedAt: string | null;
+  notifyUserSentAt: string | null;
+};
+
+export type BillingRefundEventSummary = {
+  id: number;
+  requestId: number;
+  userId: string;
+  orderId: string;
+  actorUserId: string | null;
+  actorRole: "user" | "admin" | "system";
+  eventType: string;
+  fromStatus: string | null;
+  toStatus: string | null;
+  message: string | null;
+  metadata: Json | null;
+  createdAt: string | null;
+};
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const OPTIONAL_CANCEL_COLUMNS = [
   "subscription_cancel_at_period_end",
@@ -46,6 +99,33 @@ const OPTIONAL_CANCEL_COLUMNS = [
 const BASE_SUBSCRIPTION_SELECT =
   "subscription_tier, subscription_status, subscription_started_at, subscription_current_period_end, subscription_updated_at, toss_customer_key";
 const FULL_SUBSCRIPTION_SELECT = `${BASE_SUBSCRIPTION_SELECT}, ${OPTIONAL_CANCEL_COLUMNS.join(", ")}`;
+const REFUND_REQUEST_SELECT = [
+  "id",
+  "user_id",
+  "order_id",
+  "reason",
+  "status",
+  "admin_note",
+  "reviewed_by",
+  "reviewed_at",
+  "review_note",
+  "executed_by",
+  "executed_at",
+  "cancel_amount",
+  "currency",
+  "toss_payment_key_snapshot",
+  "toss_cancel_transaction_key",
+  "gateway_response",
+  "error_code",
+  "error_message",
+  "retry_count",
+  "next_retry_at",
+  "requested_at",
+  "updated_at",
+  "notified_at",
+  "notify_user_sent_at",
+].join(", ");
+const OPEN_REFUND_STATUSES = ["REQUESTED", "UNDER_REVIEW", "APPROVED", "EXECUTING", "FAILED_RETRYABLE", "PENDING"];
 
 function isSchemaCacheMissingColumnError(error: any, column: string) {
   const message = String(error?.message ?? "");
@@ -178,6 +258,240 @@ function toBillingOrderSummary(row: any): BillingOrderSummary {
     approvedAt: row?.approved_at ?? null,
     createdAt: row?.created_at ?? null,
   };
+}
+
+function asRefundRequestStatus(value: unknown): BillingRefundRequestStatus {
+  if (value === "REQUESTED") return "REQUESTED";
+  if (value === "UNDER_REVIEW") return "UNDER_REVIEW";
+  if (value === "APPROVED") return "APPROVED";
+  if (value === "REJECTED") return "REJECTED";
+  if (value === "EXECUTING") return "EXECUTING";
+  if (value === "REFUNDED") return "REFUNDED";
+  if (value === "FAILED_RETRYABLE") return "FAILED_RETRYABLE";
+  if (value === "FAILED_FINAL") return "FAILED_FINAL";
+  if (value === "WITHDRAWN") return "WITHDRAWN";
+  if (value === "PENDING") return "REQUESTED";
+  if (value === "CANCELED") return "WITHDRAWN";
+  return "REQUESTED";
+}
+
+function sanitizeRefundReason(value: unknown) {
+  const text = String(value ?? "").trim().replace(/\s+/g, " ");
+  if (!text) return "사용자 요청";
+  return text.slice(0, 500);
+}
+
+function sanitizeShortText(value: unknown, limit = 220) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  return text.slice(0, limit);
+}
+
+function toRefundAmount(value: unknown): number | null {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, Math.round(n));
+}
+
+function toRefundRequestSummary(row: any): BillingRefundRequestSummary {
+  return {
+    id: Number(row?.id ?? 0),
+    userId: String(row?.user_id ?? ""),
+    orderId: String(row?.order_id ?? ""),
+    reason: sanitizeRefundReason(row?.reason),
+    status: asRefundRequestStatus(row?.status),
+    adminNote: row?.admin_note ?? null,
+    reviewedBy: row?.reviewed_by ?? null,
+    reviewedAt: row?.reviewed_at ?? null,
+    reviewNote: row?.review_note ?? null,
+    executedBy: row?.executed_by ?? null,
+    executedAt: row?.executed_at ?? null,
+    cancelAmount: toRefundAmount(row?.cancel_amount),
+    currency: String(row?.currency ?? "KRW"),
+    tossPaymentKeySnapshot: row?.toss_payment_key_snapshot ?? null,
+    tossCancelTransactionKey: row?.toss_cancel_transaction_key ?? null,
+    gatewayResponse: (row?.gateway_response ?? null) as Json | null,
+    errorCode: row?.error_code ?? null,
+    errorMessage: row?.error_message ?? null,
+    retryCount: Number(row?.retry_count ?? 0),
+    nextRetryAt: row?.next_retry_at ?? null,
+    requestedAt: row?.requested_at ?? null,
+    updatedAt: row?.updated_at ?? null,
+    notifiedAt: row?.notified_at ?? null,
+    notifyUserSentAt: row?.notify_user_sent_at ?? null,
+  };
+}
+
+function asRefundActorRole(value: unknown): "user" | "admin" | "system" {
+  if (value === "user" || value === "admin") return value;
+  return "system";
+}
+
+function toRefundEventSummary(row: any): BillingRefundEventSummary {
+  return {
+    id: Number(row?.id ?? 0),
+    requestId: Number(row?.request_id ?? 0),
+    userId: String(row?.user_id ?? ""),
+    orderId: String(row?.order_id ?? ""),
+    actorUserId: row?.actor_user_id ?? null,
+    actorRole: asRefundActorRole(row?.actor_role),
+    eventType: String(row?.event_type ?? ""),
+    fromStatus: row?.from_status ?? null,
+    toStatus: row?.to_status ?? null,
+    message: row?.message ?? null,
+    metadata: (row?.metadata ?? null) as Json | null,
+    createdAt: row?.created_at ?? null,
+  };
+}
+
+async function appendRefundEvent(input: {
+  requestId: number;
+  userId: string;
+  orderId: string;
+  actorUserId?: string | null;
+  actorRole: "user" | "admin" | "system";
+  eventType: string;
+  fromStatus?: string | null;
+  toStatus?: string | null;
+  message?: string | null;
+  metadata?: Json | null;
+}): Promise<void> {
+  const admin = getSupabaseAdmin();
+  const { error } = await admin.from("billing_refund_events").insert({
+    request_id: input.requestId,
+    user_id: input.userId,
+    order_id: input.orderId,
+    actor_user_id: input.actorUserId ?? null,
+    actor_role: input.actorRole,
+    event_type: input.eventType.slice(0, 80),
+    from_status: sanitizeShortText(input.fromStatus, 40),
+    to_status: sanitizeShortText(input.toStatus, 40),
+    message: sanitizeShortText(input.message, 500),
+    metadata: (input.metadata ?? null) as Json | null,
+    created_at: new Date().toISOString(),
+  });
+  if (error) throw error;
+}
+
+async function transitionRefundRequestStatus(input: {
+  requestId: number;
+  expectedStatuses: string[];
+  toStatus: BillingRefundRequestStatus;
+  actorRole: "user" | "admin" | "system";
+  actorUserId?: string | null;
+  eventType: string;
+  message?: string | null;
+  metadata?: Json | null;
+  patch?: Record<string, unknown>;
+}): Promise<BillingRefundRequestSummary> {
+  const admin = getSupabaseAdmin();
+  const nowIso = new Date().toISOString();
+
+  const current = await readRefundRequestById(input.requestId);
+  if (!current) throw new Error("refund_request_not_found");
+  if (!input.expectedStatuses.includes(current.status)) {
+    if (current.status === input.toStatus) return current;
+    throw new Error(`invalid_refund_request_state:${current.status}`);
+  }
+
+  const payload = {
+    status: input.toStatus,
+    updated_at: nowIso,
+    ...input.patch,
+  } as Record<string, unknown>;
+
+  const { data, error } = await admin
+    .from("billing_refund_requests")
+    .update(payload)
+    .eq("id", input.requestId)
+    .in("status", input.expectedStatuses)
+    .select(REFUND_REQUEST_SELECT)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) {
+    const latest = await readRefundRequestById(input.requestId);
+    if (latest && latest.status === input.toStatus) return latest;
+    throw new Error("refund_request_conflict");
+  }
+
+  const next = toRefundRequestSummary(data);
+  await appendRefundEvent({
+    requestId: next.id,
+    userId: next.userId,
+    orderId: next.orderId,
+    actorRole: input.actorRole,
+    actorUserId: input.actorUserId ?? null,
+    eventType: input.eventType,
+    fromStatus: current.status,
+    toStatus: next.status,
+    message: input.message ?? null,
+    metadata: input.metadata ?? null,
+  });
+  return next;
+}
+
+export async function readRefundRequestById(id: number): Promise<BillingRefundRequestSummary | null> {
+  if (!Number.isInteger(id) || id <= 0) return null;
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("billing_refund_requests")
+    .select(REFUND_REQUEST_SELECT)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return toRefundRequestSummary(data);
+}
+
+export async function listRefundRequestsForUser(userId: string, limit = 20): Promise<BillingRefundRequestSummary[]> {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("billing_refund_requests")
+    .select(REFUND_REQUEST_SELECT)
+    .eq("user_id", userId)
+    .order("requested_at", { ascending: false })
+    .limit(Math.max(1, Math.min(50, Math.round(limit))));
+  if (error) throw error;
+  return (data ?? []).map((row) => toRefundRequestSummary(row));
+}
+
+export async function listRefundRequestsForAdmin(input?: {
+  status?: string | null;
+  userId?: string | null;
+  limit?: number;
+}): Promise<BillingRefundRequestSummary[]> {
+  const admin = getSupabaseAdmin();
+  const limit = Math.max(1, Math.min(200, Math.round(input?.limit ?? 50)));
+
+  let query = admin
+    .from("billing_refund_requests")
+    .select(REFUND_REQUEST_SELECT)
+    .order("requested_at", { ascending: false })
+    .limit(limit);
+
+  if (input?.status) {
+    query = query.eq("status", String(input.status).trim().toUpperCase());
+  }
+  if (input?.userId) {
+    query = query.eq("user_id", String(input.userId).trim());
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data ?? []).map((row) => toRefundRequestSummary(row));
+}
+
+export async function listRefundEventsByRequestId(requestId: number, limit = 50): Promise<BillingRefundEventSummary[]> {
+  if (!Number.isInteger(requestId) || requestId <= 0) return [];
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("billing_refund_events")
+    .select("id, request_id, user_id, order_id, actor_user_id, actor_role, event_type, from_status, to_status, message, metadata, created_at")
+    .eq("request_id", requestId)
+    .order("created_at", { ascending: false })
+    .limit(Math.max(1, Math.min(200, Math.round(limit))));
+  if (error) throw error;
+  return (data ?? []).map((row) => toRefundEventSummary(row));
 }
 
 async function readLatestPaidDoneOrder(userId: string): Promise<BillingOrderSummary | null> {
@@ -475,7 +789,6 @@ export async function readLatestRefundableOrder(userId: string): Promise<Billing
     )
     .eq("user_id", userId)
     .eq("status", "DONE")
-    .not("payment_key", "is", null)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -483,6 +796,358 @@ export async function readLatestRefundableOrder(userId: string): Promise<Billing
   if (error) throw error;
   if (!data) return null;
   return toBillingOrderSummary(data);
+}
+
+export async function readPendingRefundRequestByOrder(input: {
+  userId: string;
+  orderId: string;
+}): Promise<BillingRefundRequestSummary | null> {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("billing_refund_requests")
+    .select(REFUND_REQUEST_SELECT)
+    .eq("user_id", input.userId)
+    .eq("order_id", input.orderId)
+    .in("status", OPEN_REFUND_STATUSES)
+    .order("requested_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return toRefundRequestSummary(data);
+}
+
+export async function createRefundRequest(input: {
+  userId: string;
+  orderId: string;
+  reason: string;
+  cancelAmount?: number | null;
+  currency?: string | null;
+  paymentKeySnapshot?: string | null;
+}): Promise<BillingRefundRequestSummary> {
+  const admin = getSupabaseAdmin();
+  const nowIso = new Date().toISOString();
+  const cancelAmount = toRefundAmount(input.cancelAmount);
+  const currency = sanitizeShortText(input.currency, 12) ?? "KRW";
+  const paymentKeySnapshot = sanitizeShortText(input.paymentKeySnapshot, 220);
+  const { data, error } = await admin
+    .from("billing_refund_requests")
+    .insert({
+      user_id: input.userId,
+      order_id: input.orderId,
+      reason: sanitizeRefundReason(input.reason),
+      status: "REQUESTED",
+      cancel_amount: cancelAmount,
+      currency,
+      toss_payment_key_snapshot: paymentKeySnapshot,
+      requested_at: nowIso,
+      updated_at: nowIso,
+    })
+    .select(REFUND_REQUEST_SELECT)
+    .single();
+  if (error) {
+    if (String((error as any)?.code ?? "") === "23505") {
+      const existing = await readPendingRefundRequestByOrder({
+        userId: input.userId,
+        orderId: input.orderId,
+      });
+      if (existing) return existing;
+    }
+    throw error;
+  }
+  const created = toRefundRequestSummary(data);
+  await appendRefundEvent({
+    requestId: created.id,
+    userId: created.userId,
+    orderId: created.orderId,
+    actorRole: "user",
+    actorUserId: created.userId,
+    eventType: "refund.requested",
+    fromStatus: null,
+    toStatus: created.status,
+    message: "환불 요청이 접수되었습니다.",
+    metadata: {
+      reason: created.reason,
+      cancelAmount: created.cancelAmount,
+      currency: created.currency,
+    },
+  });
+  return created;
+}
+
+export async function markRefundRequestNotified(input: { id: number }): Promise<void> {
+  const admin = getSupabaseAdmin();
+  const nowIso = new Date().toISOString();
+  const current = await readRefundRequestById(input.id);
+  if (!current) throw new Error("refund_request_not_found");
+  const { error } = await admin
+    .from("billing_refund_requests")
+    .update({
+      notified_at: nowIso,
+      updated_at: nowIso,
+    })
+    .eq("id", input.id);
+  if (error) throw error;
+  await appendRefundEvent({
+    requestId: current.id,
+    userId: current.userId,
+    orderId: current.orderId,
+    actorRole: "system",
+    eventType: "refund.admin_notified",
+    fromStatus: current.status,
+    toStatus: current.status,
+    message: "관리자 알림 메일이 발송되었습니다.",
+  });
+}
+
+export async function approveRefundRequest(input: {
+  id: number;
+  adminUserId: string;
+  note?: string | null;
+}): Promise<BillingRefundRequestSummary> {
+  const note = sanitizeShortText(input.note, 500);
+  return transitionRefundRequestStatus({
+    requestId: input.id,
+    expectedStatuses: ["REQUESTED", "UNDER_REVIEW", "FAILED_RETRYABLE", "PENDING"],
+    toStatus: "APPROVED",
+    actorRole: "admin",
+    actorUserId: input.adminUserId,
+    eventType: "refund.approved",
+    message: note ?? "환불 요청 승인",
+    patch: {
+      reviewed_by: input.adminUserId,
+      reviewed_at: new Date().toISOString(),
+      review_note: note,
+      admin_note: note,
+      error_code: null,
+      error_message: null,
+      next_retry_at: null,
+    },
+  });
+}
+
+export async function markRefundRequestUnderReview(input: {
+  id: number;
+  adminUserId: string;
+  note?: string | null;
+}): Promise<BillingRefundRequestSummary> {
+  const note = sanitizeShortText(input.note, 500);
+  return transitionRefundRequestStatus({
+    requestId: input.id,
+    expectedStatuses: ["REQUESTED", "FAILED_RETRYABLE"],
+    toStatus: "UNDER_REVIEW",
+    actorRole: "admin",
+    actorUserId: input.adminUserId,
+    eventType: "refund.under_review",
+    message: note ?? "환불 요청 검토 시작",
+    patch: {
+      reviewed_by: input.adminUserId,
+      reviewed_at: new Date().toISOString(),
+      review_note: note,
+      admin_note: note,
+    },
+  });
+}
+
+export async function rejectRefundRequest(input: {
+  id: number;
+  adminUserId: string;
+  reason: string;
+  note?: string | null;
+}): Promise<BillingRefundRequestSummary> {
+  const reason = sanitizeRefundReason(input.reason);
+  const note = sanitizeShortText(input.note, 500);
+  return transitionRefundRequestStatus({
+    requestId: input.id,
+    expectedStatuses: ["REQUESTED", "UNDER_REVIEW", "APPROVED", "FAILED_RETRYABLE", "PENDING"],
+    toStatus: "REJECTED",
+    actorRole: "admin",
+    actorUserId: input.adminUserId,
+    eventType: "refund.rejected",
+    message: reason,
+    metadata: {
+      reason,
+    },
+    patch: {
+      reviewed_by: input.adminUserId,
+      reviewed_at: new Date().toISOString(),
+      review_note: note ?? reason,
+      admin_note: note ?? reason,
+      error_code: null,
+      error_message: null,
+      next_retry_at: null,
+    },
+  });
+}
+
+export async function markRefundRequestExecuting(input: {
+  id: number;
+  adminUserId: string;
+  note?: string | null;
+}): Promise<BillingRefundRequestSummary> {
+  const note = sanitizeShortText(input.note, 500);
+  return transitionRefundRequestStatus({
+    requestId: input.id,
+    expectedStatuses: ["APPROVED", "FAILED_RETRYABLE"],
+    toStatus: "EXECUTING",
+    actorRole: "admin",
+    actorUserId: input.adminUserId,
+    eventType: "refund.executing",
+    message: note ?? "환불 실행 시작",
+    patch: {
+      executed_by: input.adminUserId,
+      executed_at: new Date().toISOString(),
+      admin_note: note,
+      next_retry_at: null,
+    },
+  });
+}
+
+export async function markRefundRequestRefunded(input: {
+  id: number;
+  adminUserId: string;
+  transactionKey?: string | null;
+  gatewayResponse?: Json | null;
+  note?: string | null;
+}): Promise<BillingRefundRequestSummary> {
+  const note = sanitizeShortText(input.note, 500);
+  return transitionRefundRequestStatus({
+    requestId: input.id,
+    expectedStatuses: ["EXECUTING", "APPROVED"],
+    toStatus: "REFUNDED",
+    actorRole: "admin",
+    actorUserId: input.adminUserId,
+    eventType: "refund.refunded",
+    message: note ?? "환불 처리 완료",
+    metadata: {
+      transactionKey: sanitizeShortText(input.transactionKey, 220),
+    },
+    patch: {
+      toss_cancel_transaction_key: sanitizeShortText(input.transactionKey, 220),
+      gateway_response: (input.gatewayResponse ?? null) as Json | null,
+      error_code: null,
+      error_message: null,
+      next_retry_at: null,
+      admin_note: note,
+      executed_by: input.adminUserId,
+      executed_at: new Date().toISOString(),
+    },
+  });
+}
+
+export async function markRefundRequestRefundedBySystem(input: {
+  id: number;
+  reason?: string | null;
+  transactionKey?: string | null;
+  gatewayResponse?: Json | null;
+}): Promise<BillingRefundRequestSummary> {
+  const reason = sanitizeShortText(input.reason, 500) ?? "Webhook cancel sync";
+  return transitionRefundRequestStatus({
+    requestId: input.id,
+    expectedStatuses: ["REQUESTED", "UNDER_REVIEW", "APPROVED", "EXECUTING", "FAILED_RETRYABLE", "PENDING"],
+    toStatus: "REFUNDED",
+    actorRole: "system",
+    actorUserId: null,
+    eventType: "refund.refunded_by_webhook",
+    message: reason,
+    metadata: {
+      transactionKey: sanitizeShortText(input.transactionKey, 220),
+    },
+    patch: {
+      toss_cancel_transaction_key: sanitizeShortText(input.transactionKey, 220),
+      gateway_response: (input.gatewayResponse ?? null) as Json | null,
+      error_code: null,
+      error_message: null,
+      next_retry_at: null,
+      admin_note: reason,
+      executed_by: "system:webhook",
+      executed_at: new Date().toISOString(),
+    },
+  });
+}
+
+export async function markRefundRequestFailed(input: {
+  id: number;
+  adminUserId: string;
+  code: string;
+  message: string;
+  retryable: boolean;
+  gatewayResponse?: Json | null;
+}): Promise<BillingRefundRequestSummary> {
+  const current = await readRefundRequestById(input.id);
+  if (!current) throw new Error("refund_request_not_found");
+
+  const retryCount = Math.max(0, current.retryCount) + 1;
+  const nextRetryAt = input.retryable ? new Date(Date.now() + 15 * 60 * 1000).toISOString() : null;
+  return transitionRefundRequestStatus({
+    requestId: input.id,
+    expectedStatuses: ["EXECUTING", "APPROVED", "FAILED_RETRYABLE"],
+    toStatus: input.retryable ? "FAILED_RETRYABLE" : "FAILED_FINAL",
+    actorRole: "admin",
+    actorUserId: input.adminUserId,
+    eventType: input.retryable ? "refund.failed_retryable" : "refund.failed_final",
+    message: sanitizeShortText(input.message, 500) ?? "환불 처리 실패",
+    metadata: {
+      code: sanitizeShortText(input.code, 120),
+      retryCount,
+    },
+    patch: {
+      error_code: sanitizeShortText(input.code, 120),
+      error_message: sanitizeShortText(input.message, 500),
+      gateway_response: (input.gatewayResponse ?? null) as Json | null,
+      retry_count: retryCount,
+      next_retry_at: nextRetryAt,
+      admin_note: sanitizeShortText(input.message, 500),
+      executed_by: input.adminUserId,
+      executed_at: new Date().toISOString(),
+    },
+  });
+}
+
+export async function withdrawRefundRequestByUser(input: {
+  id: number;
+  userId: string;
+  note?: string | null;
+}): Promise<BillingRefundRequestSummary> {
+  const current = await readRefundRequestById(input.id);
+  if (!current) throw new Error("refund_request_not_found");
+  if (current.userId !== input.userId) throw new Error("refund_request_forbidden");
+
+  const note = sanitizeShortText(input.note, 500) ?? "사용자 요청 철회";
+  return transitionRefundRequestStatus({
+    requestId: input.id,
+    expectedStatuses: ["REQUESTED", "PENDING"],
+    toStatus: "WITHDRAWN",
+    actorRole: "user",
+    actorUserId: input.userId,
+    eventType: "refund.withdrawn",
+    message: note,
+    patch: {
+      admin_note: note,
+      next_retry_at: null,
+    },
+  });
+}
+
+export async function listDueRetryableRefundRequests(limit = 20): Promise<BillingRefundRequestSummary[]> {
+  const admin = getSupabaseAdmin();
+  const safeLimit = Math.max(1, Math.min(200, Math.round(limit)));
+  const { data, error } = await admin
+    .from("billing_refund_requests")
+    .select(REFUND_REQUEST_SELECT)
+    .eq("status", "FAILED_RETRYABLE")
+    .order("next_retry_at", { ascending: true, nullsFirst: true })
+    .limit(safeLimit);
+  if (error) throw error;
+
+  const now = Date.now();
+  return (data ?? [])
+    .map((row) => toRefundRequestSummary(row))
+    .filter((row) => {
+      if (!row.nextRetryAt) return true;
+      const next = parseDate(row.nextRetryAt);
+      return Boolean(next && next.getTime() <= now);
+    });
 }
 
 export async function scheduleSubscriptionCancelAtPeriodEnd(input: {

@@ -4,7 +4,9 @@ import {
   markBillingOrderCanceled,
   markBillingOrderDoneAndApplyPlan,
   markBillingOrderFailed,
+  markRefundRequestRefundedBySystem,
   readBillingOrderByOrderIdAny,
+  readPendingRefundRequestByOrder,
 } from "@/lib/server/billingStore";
 import type { Json } from "@/types/supabase";
 
@@ -111,6 +113,39 @@ function isWebhookIpAllowed(req: Request): boolean {
   return rules.some((rule) => matchesIpv4Rule(ip, rule));
 }
 
+async function syncRefundRequestFromWebhookCancel(input: {
+  userId: string;
+  orderId: string;
+  status: string;
+  payload: unknown;
+}): Promise<number | null> {
+  if (input.status !== "CANCELED") return null;
+
+  const pending = await readPendingRefundRequestByOrder({
+    userId: input.userId,
+    orderId: input.orderId,
+  });
+  if (!pending) return null;
+
+  const data: any = (input.payload as any)?.data ?? {};
+  const transactionKey = clean(data?.cancels?.[0]?.transactionKey ?? data?.lastTransactionKey ?? "", 220) || null;
+  try {
+    const synced = await markRefundRequestRefundedBySystem({
+      id: pending.id,
+      reason: `Webhook cancel sync: ${input.status || "CANCELED"}`,
+      transactionKey,
+      gatewayResponse: asJson(input.payload),
+    });
+    return synced.id;
+  } catch (error: any) {
+    const message = String(error?.message ?? "");
+    if (message.startsWith("invalid_refund_request_state:") || message === "refund_request_conflict") {
+      return null;
+    }
+    throw error;
+  }
+}
+
 export async function POST(req: Request) {
   if (!isWebhookAuthorized(req)) {
     return bad(401, "unauthorized_webhook");
@@ -177,13 +212,19 @@ export async function POST(req: Request) {
           orderId,
           message: `Webhook status: ${status || "CANCELED"}`,
         });
+        const syncedRefundId = await syncRefundRequestFromWebhookCancel({
+          userId,
+          orderId,
+          status,
+          payload,
+        });
         if (status === "CANCELED") {
           await downgradeToFreeNow({
             userId,
             reason: `Webhook cancel: ${status}`,
           });
         }
-        return ok({ accepted: true, action: "canceled", orderId });
+        return ok({ accepted: true, action: "canceled", orderId, syncedRefundId });
       }
 
       if (FAILED_STATUSES.has(status)) {
@@ -205,13 +246,19 @@ export async function POST(req: Request) {
         orderId,
         message: `Webhook cancel status: ${status || "CANCELED"}`,
       });
+      const syncedRefundId = await syncRefundRequestFromWebhookCancel({
+        userId,
+        orderId,
+        status,
+        payload,
+      });
       if (status === "CANCELED") {
         await downgradeToFreeNow({
           userId,
           reason: `Webhook cancel: ${status}`,
         });
       }
-      return ok({ accepted: true, action: "canceled", orderId });
+      return ok({ accepted: true, action: "canceled", orderId, syncedRefundId });
     }
 
     return ok({ accepted: false, reason: "ignored_event", eventType, orderId });
