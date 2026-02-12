@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { getSupabaseBrowserClient, useAuthState } from "@/lib/auth";
 import { formatKrw, getPlanDefinition, type PlanTier } from "@/lib/billing/plans";
+import { useI18n } from "@/lib/useI18n";
 
 type ConfirmResult = {
   order: {
@@ -36,6 +37,7 @@ function formatDateLabel(value: string | null) {
 }
 
 export function SettingsBillingSuccessPage() {
+  const { t } = useI18n();
   const params = useSearchParams();
   const { status } = useAuthState();
 
@@ -56,13 +58,13 @@ export function SettingsBillingSuccessPage() {
   useEffect(() => {
     if (status !== "authenticated") {
       setLoading(false);
-      setError("로그인이 필요합니다.");
+      setError(t("로그인이 필요합니다."));
       return;
     }
 
     if (!paymentKey || !orderId || parsedAmount == null) {
       setLoading(false);
-      setError("결제 승인 파라미터가 올바르지 않습니다.");
+      setError(t("결제 승인 파라미터가 올바르지 않습니다."));
       return;
     }
 
@@ -94,27 +96,27 @@ export function SettingsBillingSuccessPage() {
 
         setResult(json.data as ConfirmResult);
       } catch (e: any) {
-        setError(String(e?.message ?? "결제 승인에 실패했습니다."));
+        setError(String(e?.message ?? t("결제 승인에 실패했습니다.")));
       } finally {
         setLoading(false);
       }
     };
 
     void run();
-  }, [status, paymentKey, orderId, parsedAmount]);
+  }, [status, paymentKey, orderId, parsedAmount, t]);
 
   const planTier = result?.subscription?.tier ?? result?.order?.planTier ?? "free";
 
   return (
     <div className="mx-auto w-full max-w-[720px] px-4 pb-24 pt-6">
       <div className="wnl-surface p-6">
-        <div className="text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">결제 결과</div>
+        <div className="text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">{t("결제 결과")}</div>
 
-        {loading ? <div className="mt-3 text-[13px] text-ios-sub">결제 승인 처리 중입니다...</div> : null}
+        {loading ? <div className="mt-3 text-[13px] text-ios-sub">{t("결제 승인 처리 중입니다...")}</div> : null}
 
         {!loading && error ? (
           <>
-            <div className="mt-3 text-[14px] font-semibold text-red-600">승인 실패</div>
+            <div className="mt-3 text-[14px] font-semibold text-red-600">{t("승인 실패")}</div>
             <div className="mt-1 text-[12.5px] text-ios-sub break-all">{error}</div>
             <div className="mt-3 text-[12px] text-ios-muted">orderId: {orderId}</div>
           </>
@@ -123,17 +125,17 @@ export function SettingsBillingSuccessPage() {
         {!loading && !error && result ? (
           <>
             <div className="wnl-chip-accent mt-3 inline-flex px-3 py-1 text-[12px]">
-              결제 완료
+              {t("결제 완료")}
             </div>
 
             <div className="wnl-sub-surface mt-4 p-4">
-              <div className="text-[13px] text-ios-sub">적용 플랜</div>
+              <div className="text-[13px] text-ios-sub">{t("적용 플랜")}</div>
               <div className="mt-1 text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">{getPlanDefinition(planTier).title}</div>
               <div className="mt-2 text-[12.5px] text-ios-sub">
-                결제 금액: {formatKrw(result.order?.amount ?? parsedAmount ?? 0)}
+                {t("결제 금액")}: {formatKrw(result.order?.amount ?? parsedAmount ?? 0)}
               </div>
               <div className="mt-1 text-[12.5px] text-ios-sub">
-                만료일: {formatDateLabel(result.subscription?.currentPeriodEnd ?? null)}
+                {t("만료일")}: {formatDateLabel(result.subscription?.currentPeriodEnd ?? null)}
               </div>
               <div className="mt-1 text-[11.5px] text-ios-muted break-all">orderId: {result.order?.orderId ?? orderId}</div>
             </div>
@@ -145,13 +147,13 @@ export function SettingsBillingSuccessPage() {
             href="/settings/billing"
             className="wnl-btn-primary inline-flex h-10 items-center justify-center px-5 text-[13px]"
           >
-            구독으로 돌아가기
+            {t("구독으로 돌아가기")}
           </Link>
           <Link
             href="/insights"
             className="wnl-btn-secondary inline-flex h-10 items-center justify-center px-5 text-[13px]"
           >
-            인사이트 보기
+            {t("인사이트 보기")}
           </Link>
         </div>
       </div>

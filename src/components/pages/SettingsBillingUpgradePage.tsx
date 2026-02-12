@@ -5,8 +5,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { asCheckoutPlanTier, formatKrw, getPlanDefinition, listPlans } from "@/lib/billing/plans";
 import { fetchSubscriptionSnapshot, formatDateLabel, requestPlanCheckout, type SubscriptionResponse } from "@/lib/billing/client";
 import { signInWithProvider, useAuthState } from "@/lib/auth";
+import { useI18n } from "@/lib/useI18n";
 
 export function SettingsBillingUpgradePage() {
+  const { t } = useI18n();
   const { status, user } = useAuthState();
   const [selectedPlan, setSelectedPlan] = useState<"basic" | "pro">("basic");
   const [loading, setLoading] = useState(true);
@@ -28,11 +30,11 @@ export function SettingsBillingUpgradePage() {
       const data = await fetchSubscriptionSnapshot();
       setSubData(data);
     } catch (e: any) {
-      setError(String(e?.message ?? "구독 정보를 불러오지 못했습니다."));
+      setError(String(e?.message ?? t("구독 정보를 불러오지 못했습니다.")));
     } finally {
       setLoading(false);
     }
-  }, [user?.userId]);
+  }, [t, user?.userId]);
 
   useEffect(() => {
     void loadSubscription();
@@ -51,12 +53,12 @@ export function SettingsBillingUpgradePage() {
     try {
       await requestPlanCheckout(selectedPlan);
     } catch (e: any) {
-      const msg = String(e?.message ?? "결제창을 열지 못했습니다.");
+      const msg = String(e?.message ?? t("결제창을 열지 못했습니다."));
       if (!msg.includes("USER_CANCEL")) setError(msg);
     } finally {
       setPaying(false);
     }
-  }, [paying, selectedPlan, user?.userId]);
+  }, [paying, selectedPlan, t, user?.userId]);
 
   const activeTier = subData?.subscription.tier ?? "free";
   const activePeriodEnd = subData?.subscription.currentPeriodEnd ?? null;
@@ -72,21 +74,21 @@ export function SettingsBillingUpgradePage() {
           ←
         </Link>
         <div>
-          <div className="text-[24px] font-extrabold tracking-[-0.02em] text-ios-text">플랜 업그레이드</div>
-          <div className="text-[12px] text-ios-sub">결제창 승인 완료 즉시 플랜이 적용됩니다.</div>
+          <div className="text-[24px] font-extrabold tracking-[-0.02em] text-ios-text">{t("플랜 업그레이드")}</div>
+          <div className="text-[12px] text-ios-sub">{t("결제창 승인 완료 즉시 플랜이 적용됩니다.")}</div>
         </div>
       </div>
 
       {status !== "authenticated" ? (
         <div className="wnl-surface p-5">
-          <div className="text-[16px] font-bold text-ios-text">로그인이 필요해요</div>
-          <p className="mt-2 text-[13px] text-ios-sub">플랜 업그레이드는 로그인 후 가능합니다.</p>
+          <div className="text-[16px] font-bold text-ios-text">{t("로그인이 필요해요")}</div>
+          <p className="mt-2 text-[13px] text-ios-sub">{t("플랜 업그레이드는 로그인 후 가능합니다.")}</p>
           <button
             type="button"
             onClick={() => signInWithProvider("google")}
             className="wnl-btn-primary mt-4 px-4 py-2 text-[13px]"
           >
-            Google로 로그인
+            {t("Google로 로그인")}
           </button>
         </div>
       ) : null}
@@ -94,11 +96,11 @@ export function SettingsBillingUpgradePage() {
       {status === "authenticated" ? (
         <>
           <section className="wnl-surface p-6">
-            <div className="text-[13px] font-semibold text-ios-sub">현재 플랜</div>
+            <div className="text-[13px] font-semibold text-ios-sub">{t("현재 플랜")}</div>
             <div className="mt-2 text-[30px] font-extrabold tracking-[-0.03em] text-ios-text">
               {getPlanDefinition(activeTier).title}
             </div>
-            <div className="mt-1 text-[13px] text-ios-sub">만료일: {formatDateLabel(activePeriodEnd)}</div>
+            <div className="mt-1 text-[13px] text-ios-sub">{t("만료일")}: {formatDateLabel(activePeriodEnd)}</div>
           </section>
 
           <section className="mt-4 grid gap-3">
@@ -129,9 +131,9 @@ export function SettingsBillingUpgradePage() {
                     </div>
                     <div className="text-right">
                       <div className="text-[22px] font-extrabold tracking-[-0.02em] text-ios-text">
-                        {plan.priceKrw > 0 ? formatKrw(plan.priceKrw).replace(" KRW", "") : "무료"}
+                        {plan.priceKrw > 0 ? formatKrw(plan.priceKrw).replace(" KRW", "") : t("무료")}
                       </div>
-                      <div className="mt-1 text-[12px] text-ios-muted">/ 30일</div>
+                      <div className="mt-1 text-[12px] text-ios-muted">/ {t("30일")}</div>
                     </div>
                   </div>
                   <ul className="mt-3 list-disc space-y-1 pl-5 text-[13px] text-ios-sub">
@@ -141,7 +143,7 @@ export function SettingsBillingUpgradePage() {
                   </ul>
                   {active ? (
                     <div className="wnl-chip-accent mt-3 inline-flex px-2.5 py-1 text-[11px]">
-                      현재 사용 중
+                      {t("현재 사용 중")}
                     </div>
                   ) : null}
                 </button>
@@ -150,10 +152,10 @@ export function SettingsBillingUpgradePage() {
           </section>
 
           <section className="wnl-surface mt-4 p-6">
-            <div className="text-[13px] text-ios-sub">선택 플랜</div>
+            <div className="text-[13px] text-ios-sub">{t("선택 플랜")}</div>
             <div className="mt-1 text-[20px] font-bold text-ios-text">{getPlanDefinition(selectedPlan).title}</div>
             <div className="mt-2 text-[13px] text-ios-sub">
-              토스페이먼츠 결제창으로 진행되며, 서버 승인 완료 후 플랜이 적용됩니다.
+              {t("토스페이먼츠 결제창으로 진행되며, 서버 승인 완료 후 플랜이 적용됩니다.")}
             </div>
             <button
               type="button"
@@ -161,9 +163,13 @@ export function SettingsBillingUpgradePage() {
               disabled={paying || loading || isAlreadySelectedPlanActive}
               className="wnl-btn-primary mt-4 inline-flex h-11 items-center justify-center px-5 text-[14px] disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isAlreadySelectedPlanActive ? "현재 플랜 사용 중" : paying ? "결제창 준비 중..." : `${getPlanDefinition(selectedPlan).title} 결제하기`}
+              {isAlreadySelectedPlanActive
+                ? t("현재 플랜 사용 중")
+                : paying
+                  ? t("결제창 준비 중...")
+                  : `${getPlanDefinition(selectedPlan).title} ${t("결제하기")}`}
             </button>
-            <p className="mt-2 text-[11.5px] text-ios-muted">결제 후 서버 승인 완료 시 결제 이력에 즉시 반영됩니다.</p>
+            <p className="mt-2 text-[11.5px] text-ios-muted">{t("결제 후 서버 승인 완료 시 결제 이력에 즉시 반영됩니다.")}</p>
             {error ? <div className="mt-3 text-[12px] text-red-600">{error}</div> : null}
           </section>
         </>

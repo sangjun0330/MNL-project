@@ -1,11 +1,51 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { useI18n } from "@/lib/useI18n";
 import { PWAInstallButton } from "@/components/system/PWAInstallButton";
+import { useAuthState } from "@/lib/auth";
+import { authHeaders } from "@/lib/billing/client";
 
 export function SettingsPage() {
   const { t } = useI18n();
+  const { status, user } = useAuthState();
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    if (status !== "authenticated" || !user?.userId) {
+      setIsAdmin(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    const run = async () => {
+      try {
+        const headers = await authHeaders();
+        const res = await fetch("/api/admin/billing/access", {
+          method: "GET",
+          headers: {
+            "content-type": "application/json",
+            ...headers,
+          },
+          cache: "no-store",
+        });
+        const json = await res.json().catch(() => null);
+        if (!active) return;
+        setIsAdmin(Boolean(json?.ok && json?.data?.isAdmin));
+      } catch {
+        if (!active) return;
+        setIsAdmin(false);
+      }
+    };
+
+    void run();
+    return () => {
+      active = false;
+    };
+  }, [status, user?.userId]);
 
   return (
     <div className="mx-auto w-full max-w-[720px] px-4 pb-24 pt-6">
@@ -66,7 +106,7 @@ export function SettingsPage() {
         <Link
           href="/settings/billing"
           className="rounded-apple border border-ios-sep bg-white/95 p-4 shadow-apple-sm transition hover:translate-y-[-1px] hover:border-[color:var(--wnl-accent-border)]"
-          aria-label="구독 설정 열기"
+          aria-label={t("구독 설정 열기")}
         >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-[17px] font-bold text-ios-text">
@@ -77,32 +117,34 @@ export function SettingsPage() {
                   <path d="M7.5 14h3" />
                 </svg>
               </span>
-              구독
+              {t("구독")}
             </div>
             <span className="text-[color:var(--wnl-accent)]">›</span>
           </div>
-          <div className="mt-2 text-[12.5px] text-ios-sub">플랜 결제 및 구독 상태를 관리합니다.</div>
+          <div className="mt-2 text-[12.5px] text-ios-sub">{t("플랜 결제 및 구독 상태를 관리합니다.")}</div>
         </Link>
 
-        <Link
-          href="/settings/admin"
-          className="rounded-apple border border-ios-sep bg-white/95 p-4 shadow-apple-sm transition hover:translate-y-[-1px] hover:border-[color:var(--wnl-accent-border)]"
-          aria-label="운영 관리자 페이지 열기"
-        >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-[17px] font-bold text-ios-text">
-              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]">
-                <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 3l8 4v6c0 4.2-3.1 7.9-8 9-4.9-1.1-8-4.8-8-9V7l8-4z" />
-                  <path d="M9 12l2 2 4-4" />
-                </svg>
-              </span>
-              운영
+        {isAdmin ? (
+          <Link
+            href="/settings/admin"
+            className="rounded-apple border border-ios-sep bg-white/95 p-4 shadow-apple-sm transition hover:translate-y-[-1px] hover:border-[color:var(--wnl-accent-border)]"
+            aria-label={t("운영 관리자 페이지 열기")}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-[17px] font-bold text-ios-text">
+                <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]">
+                  <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 3l8 4v6c0 4.2-3.1 7.9-8 9-4.9-1.1-8-4.8-8-9V7l8-4z" />
+                    <path d="M9 12l2 2 4-4" />
+                  </svg>
+                </span>
+                {t("운영")}
+              </div>
+              <span className="text-[color:var(--wnl-accent)]">›</span>
             </div>
-            <span className="text-[color:var(--wnl-accent)]">›</span>
-          </div>
-          <div className="mt-2 text-[12.5px] text-ios-sub">관리자 계정에서 환불/취소 요청을 검토하고 실행합니다.</div>
-        </Link>
+            <div className="mt-2 text-[12.5px] text-ios-sub">{t("관리자 계정에서 환불/취소 요청을 검토하고 실행합니다.")}</div>
+          </Link>
+        ) : null}
       </div>
     </div>
   );

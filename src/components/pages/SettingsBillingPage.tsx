@@ -18,22 +18,24 @@ import {
   withdrawMyRefundRequest,
   type AdminRefundRequest,
 } from "@/lib/billing/adminClient";
+import { useI18n } from "@/lib/useI18n";
 
 type CancelMode = "period_end" | "resume" | "now_refund";
 
-function parseBillingActionError(input: string | null) {
+function parseBillingActionError(input: string | null, t: (key: string) => string) {
   const text = String(input ?? "");
-  if (!text) return "요청 처리 중 오류가 발생했습니다.";
-  if (text.includes("login_required")) return "로그인이 필요합니다.";
-  if (text.includes("refundable_order_not_found")) return "환불 가능한 결제 건을 찾지 못했습니다.";
-  if (text.includes("order_not_refundable")) return "현재 결제 건은 환불 요청을 접수할 수 없습니다.";
-  if (text.includes("invalid_refund_request_state:")) return "이미 처리 중이거나 철회할 수 없는 상태입니다.";
-  if (text.includes("refund_request_forbidden")) return "본인 요청만 처리할 수 있습니다.";
-  if (text.includes("refund_request_not_found")) return "환불 요청을 찾지 못했습니다.";
+  if (!text) return t("요청 처리 중 오류가 발생했습니다.");
+  if (text.includes("login_required")) return t("로그인이 필요합니다.");
+  if (text.includes("refundable_order_not_found")) return t("환불 가능한 결제 건을 찾지 못했습니다.");
+  if (text.includes("order_not_refundable")) return t("현재 결제 건은 환불 요청을 접수할 수 없습니다.");
+  if (text.includes("invalid_refund_request_state:")) return t("이미 처리 중이거나 철회할 수 없는 상태입니다.");
+  if (text.includes("refund_request_forbidden")) return t("본인 요청만 처리할 수 있습니다.");
+  if (text.includes("refund_request_not_found")) return t("환불 요청을 찾지 못했습니다.");
   return text;
 }
 
 export function SettingsBillingPage() {
+  const { t } = useI18n();
   const { status, user } = useAuthState();
   const [subData, setSubData] = useState<SubscriptionResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -54,9 +56,9 @@ export function SettingsBillingPage() {
       const data = await fetchSubscriptionSnapshot();
       setSubData(data);
     } catch (e: any) {
-      setError(String(e?.message ?? "구독 정보를 불러오지 못했습니다."));
+      setError(String(e?.message ?? t("구독 정보를 불러오지 못했습니다.")));
     }
-  }, [user?.userId]);
+  }, [t, user?.userId]);
 
   const loadRefunds = useCallback(async () => {
     if (!user?.userId) {
@@ -86,23 +88,23 @@ export function SettingsBillingPage() {
     async (mode: CancelMode) => {
       if (!user?.userId || actionLoading) return;
 
-      let reason = "사용자 요청";
+      let reason = t("사용자 요청");
       if (mode === "period_end") {
-        const confirmed = window.confirm("현재 기간이 끝나면 Free 플랜으로 전환할까요?");
+        const confirmed = window.confirm(t("현재 기간이 끝나면 Free 플랜으로 전환할까요?"));
         if (!confirmed) return;
       }
       if (mode === "resume") {
-        const confirmed = window.confirm("예약된 해지를 취소하고 현재 플랜을 유지할까요?");
+        const confirmed = window.confirm(t("예약된 해지를 취소하고 현재 플랜을 유지할까요?"));
         if (!confirmed) return;
       }
       if (mode === "now_refund") {
         const confirmed = window.confirm(
-          "환불 요청을 접수할까요?\n자동 환불은 진행되지 않으며, 관리자가 사유를 검토한 뒤 수동 처리합니다."
+          t("환불 요청을 접수할까요?\n자동 환불은 진행되지 않으며, 관리자가 사유를 검토한 뒤 수동 처리합니다.")
         );
         if (!confirmed) return;
-        const entered = window.prompt("환불 요청 사유를 입력해 주세요. (관리자 검토용)", "사용자 요청");
+        const entered = window.prompt(t("환불 요청 사유를 입력해 주세요. (관리자 검토용)"), t("사용자 요청"));
         if (entered === null) return;
-        reason = entered.trim() || "사용자 요청";
+        reason = entered.trim() || t("사용자 요청");
       }
 
       setActionLoading(mode);
@@ -130,20 +132,20 @@ export function SettingsBillingPage() {
         await loadSubscription();
         await loadRefunds();
       } catch (e: any) {
-        setActionError(parseBillingActionError(String(e?.message ?? "구독 처리에 실패했습니다.")));
+        setActionError(parseBillingActionError(String(e?.message ?? t("구독 처리에 실패했습니다.")), t));
       } finally {
         setActionLoading(null);
       }
     },
-    [actionLoading, loadRefunds, loadSubscription, user?.userId]
+    [actionLoading, loadRefunds, loadSubscription, t, user?.userId]
   );
 
   const submitWithdrawRefund = useCallback(
     async (refundId: number) => {
       if (!user?.userId || refundActionLoadingId !== null) return;
-      const confirmed = window.confirm("환불 요청을 철회할까요?");
+      const confirmed = window.confirm(t("환불 요청을 철회할까요?"));
       if (!confirmed) return;
-      const note = window.prompt("철회 사유(선택)", "사용자 요청 철회");
+      const note = window.prompt(t("철회 사유(선택)"), t("사용자 요청 철회"));
       if (note === null) return;
 
       setRefundActionLoadingId(refundId);
@@ -154,15 +156,15 @@ export function SettingsBillingPage() {
           refundId,
           note: note.trim() || null,
         });
-        setActionNotice("환불 요청을 철회했습니다.");
+        setActionNotice(t("환불 요청을 철회했습니다."));
         await loadRefunds();
       } catch (e: any) {
-        setActionError(parseBillingActionError(String(e?.message ?? "환불 요청 철회에 실패했습니다.")));
+        setActionError(parseBillingActionError(String(e?.message ?? t("환불 요청 철회에 실패했습니다.")), t));
       } finally {
         setRefundActionLoadingId(null);
       }
     },
-    [loadRefunds, refundActionLoadingId, user?.userId]
+    [loadRefunds, refundActionLoadingId, t, user?.userId]
   );
 
   return (
@@ -174,19 +176,19 @@ export function SettingsBillingPage() {
         >
           ←
         </Link>
-        <div className="text-[24px] font-extrabold tracking-[-0.02em] text-ios-text">구독</div>
+        <div className="text-[24px] font-extrabold tracking-[-0.02em] text-ios-text">{t("구독")}</div>
       </div>
 
       {status !== "authenticated" ? (
         <div className="wnl-surface p-5">
-          <div className="text-[16px] font-bold text-ios-text">로그인이 필요해요</div>
-          <p className="mt-2 text-[13px] text-ios-sub">구독 결제와 플랜 적용은 로그인 후 사용할 수 있습니다.</p>
+          <div className="text-[16px] font-bold text-ios-text">{t("로그인이 필요해요")}</div>
+          <p className="mt-2 text-[13px] text-ios-sub">{t("구독 결제와 플랜 적용은 로그인 후 사용할 수 있습니다.")}</p>
           <button
             type="button"
             onClick={() => signInWithProvider("google")}
             className="wnl-btn-primary mt-4 px-4 py-2 text-[13px]"
           >
-            Google로 로그인
+            {t("Google로 로그인")}
           </button>
         </div>
       ) : null}
@@ -194,45 +196,45 @@ export function SettingsBillingPage() {
       {status === "authenticated" ? (
         <>
           <section className="wnl-surface p-6">
-            <div className="text-[13px] font-semibold text-ios-sub">현재 플랜</div>
+            <div className="text-[13px] font-semibold text-ios-sub">{t("현재 플랜")}</div>
             <div className="mt-2 flex items-end justify-between gap-3">
               <div className="text-[42px] font-extrabold tracking-[-0.03em] text-ios-text">
                 {getPlanDefinition(activeTier).title}
               </div>
               {hasPaidAccess ? (
                 <div className="wnl-chip-accent px-3 py-1 text-[12px]">
-                  유료 이용 중
+                  {t("유료 이용 중")}
                 </div>
               ) : (
                 <div className="wnl-chip-muted px-3 py-1 text-[12px]">
-                  무료 플랜
+                  {t("무료 플랜")}
                 </div>
               )}
             </div>
             <div className="mt-2 text-[13px] text-ios-sub">
-              상태: {subscriptionStatusLabel(subscription?.status ?? "inactive")}
+              {t("상태")}: {subscriptionStatusLabel(subscription?.status ?? "inactive")}
               {" · "}
-              만료일: {formatDateLabel(subscription?.currentPeriodEnd ?? null)}
+              {t("만료일")}: {formatDateLabel(subscription?.currentPeriodEnd ?? null)}
             </div>
 
             {subscription?.cancelAtPeriodEnd ? (
               <div className="mt-3 rounded-2xl border border-[#EAB30855] bg-[#FEF9C3] px-3 py-2 text-[12.5px] text-[#7C5E10]">
-                기간 종료 해지 예약됨 · {formatDateLabel(subscription.cancelScheduledAt)}
+                {t("기간 종료 해지 예약됨")} · {formatDateLabel(subscription.cancelScheduledAt)}
               </div>
             ) : null}
 
             <div className="mt-4 border-t border-ios-sep pt-4">
-              <div className="text-[13px] font-semibold text-ios-sub">결제 정보</div>
+              <div className="text-[13px] font-semibold text-ios-sub">{t("결제 정보")}</div>
               <div className="wnl-sub-surface mt-2 px-3 py-3">
                 <div className="flex items-center justify-between text-[13px]">
-                  <span className="text-ios-sub">현재 요금</span>
+                  <span className="text-ios-sub">{t("현재 요금")}</span>
                   <span className="font-semibold text-ios-text">
-                    {activeTier === "free" ? "무료" : `${formatKrw(getPlanDefinition(activeTier).priceKrw)} / 30일`}
+                    {activeTier === "free" ? t("무료") : `${formatKrw(getPlanDefinition(activeTier).priceKrw)} / ${t("30일")}`}
                   </span>
                 </div>
                 <div className="mt-1 flex items-center justify-between text-[13px]">
-                  <span className="text-ios-sub">결제 수단</span>
-                  <span className="font-semibold text-ios-text">TossPayments 카드</span>
+                  <span className="text-ios-sub">{t("결제 수단")}</span>
+                  <span className="font-semibold text-ios-text">{t("TossPayments 카드")}</span>
                 </div>
               </div>
             </div>
@@ -245,7 +247,7 @@ export function SettingsBillingPage() {
                   onClick={() => void submitCancel(subscription?.cancelAtPeriodEnd ? "resume" : "period_end")}
                   className="wnl-btn-secondary inline-flex h-11 items-center justify-center px-4 text-[13px] disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {subscription?.cancelAtPeriodEnd ? "해지 예약 취소" : "기간 종료 시 해지 (권장)"}
+                  {subscription?.cancelAtPeriodEnd ? t("해지 예약 취소") : t("기간 종료 시 해지 (권장)")}
                 </button>
                 <button
                   type="button"
@@ -253,14 +255,14 @@ export function SettingsBillingPage() {
                   onClick={() => void submitCancel("now_refund")}
                   className="wnl-btn-primary inline-flex h-11 items-center justify-center px-4 text-[13px] disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  환불 요청(관리자 검토)
+                  {t("환불 요청(관리자 검토)")}
                 </button>
               </div>
             ) : null}
 
             {hasPaidAccess ? (
               <p className="mt-2 text-[11.5px] leading-relaxed text-ios-muted">
-                기간 종료 해지는 서비스가 만료일까지 유지됩니다. 환불 요청은 관리자 검토 후 수동으로 처리됩니다.
+                {t("기간 종료 해지는 서비스가 만료일까지 유지됩니다. 환불 요청은 관리자 검토 후 수동으로 처리됩니다.")}
               </p>
             ) : null}
 
@@ -269,25 +271,25 @@ export function SettingsBillingPage() {
                 href="/settings/billing/upgrade"
                 className="wnl-link-accent text-[13px] font-semibold"
               >
-                플랜 업그레이드하기
+                {t("플랜 업그레이드하기")}
               </Link>
             </div>
 
             <div className="mt-5 border-t border-ios-sep pt-4">
               <div className="flex items-center justify-between">
-                <div className="text-[13px] font-semibold text-ios-sub">내 환불 요청</div>
+                <div className="text-[13px] font-semibold text-ios-sub">{t("내 환불 요청")}</div>
                 <button
                   type="button"
                   onClick={() => void loadRefunds()}
                   className="wnl-link-accent text-[12px] font-semibold"
                 >
-                  새로고침
+                  {t("새로고침")}
                 </button>
               </div>
               {refundLoading ? (
-                <div className="mt-2 text-[12px] text-ios-muted">불러오는 중...</div>
+                <div className="mt-2 text-[12px] text-ios-muted">{t("불러오는 중...")}</div>
               ) : refunds.length === 0 ? (
-                <div className="mt-2 text-[12px] text-ios-muted">환불 요청이 없습니다.</div>
+                <div className="mt-2 text-[12px] text-ios-muted">{t("환불 요청이 없습니다.")}</div>
               ) : (
                 <div className="mt-2 space-y-2">
                   {refunds.map((item) => (
@@ -309,7 +311,7 @@ export function SettingsBillingPage() {
                             onClick={() => void submitWithdrawRefund(item.id)}
                             className="wnl-btn-secondary inline-flex h-8 items-center justify-center px-3 text-[11.5px] disabled:opacity-40"
                           >
-                            {refundActionLoadingId === item.id ? "철회 중..." : "요청 철회"}
+                            {refundActionLoadingId === item.id ? t("철회 중...") : t("요청 철회")}
                           </button>
                         </div>
                       ) : null}

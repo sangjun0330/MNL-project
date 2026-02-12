@@ -165,15 +165,15 @@ function splitBulletLines(text: string) {
 
 const CATEGORIES: Array<{
   key: RecoverySection["category"];
-  titleKo: string;
+  titleKey: string;
   icon: string;
 }> = [
-  { key: "sleep", titleKo: "수면", icon: "1" },
-  { key: "shift", titleKo: "교대근무", icon: "2" },
-  { key: "caffeine", titleKo: "카페인", icon: "3" },
-  { key: "menstrual", titleKo: "생리주기", icon: "4" },
-  { key: "stress", titleKo: "스트레스 & 감정", icon: "5" },
-  { key: "activity", titleKo: "신체활동", icon: "6" },
+  { key: "sleep", titleKey: "수면", icon: "1" },
+  { key: "shift", titleKey: "교대근무", icon: "2" },
+  { key: "caffeine", titleKey: "카페인", icon: "3" },
+  { key: "menstrual", titleKey: "생리주기", icon: "4" },
+  { key: "stress", titleKey: "스트레스 & 감정", icon: "5" },
+  { key: "activity", titleKey: "신체 활동", icon: "6" },
 ];
 
 function RecoveryGeneratingOverlay({
@@ -303,18 +303,20 @@ export function InsightsAIRecoveryDetail() {
             <button
               type="button"
               onClick={() => {
-                const confirmed = window.confirm("AI 맞춤회복은 유료 플랜 전용 기능입니다.\n플랜 업그레이드 페이지로 이동할까요?");
+                const confirmed = window.confirm(
+                  t("AI 맞춤회복은 유료 플랜 전용 기능입니다.\n플랜 업그레이드 페이지로 이동할까요?")
+                );
                 if (confirmed) router.push("/settings/billing/upgrade");
               }}
               className="inline-flex h-10 items-center justify-center rounded-full bg-black px-5 text-[13px] font-semibold text-white"
             >
-              확인
+              {t("확인")}
             </button>
             <Link
               href="/settings/billing/upgrade"
               className="inline-flex h-10 items-center justify-center rounded-full border border-ios-sep bg-white px-5 text-[13px] font-semibold text-ios-text"
             >
-              플랜 보기
+              {t("플랜 보기")}
             </Link>
           </div>
         </DetailCard>
@@ -395,7 +397,7 @@ export function InsightsAIRecoveryDetail() {
                         <div className="flex h-6 w-6 items-center justify-center rounded-full bg-ios-bg text-[12px] font-bold text-ios-sub">
                           {index + 1}
                         </div>
-                        <span className="text-[17px] font-bold text-ios-text">{section?.title || meta.titleKo}</span>
+                        <span className="text-[17px] font-bold text-ios-text">{section?.title || t(meta.titleKey)}</span>
                       </div>
                       <DetailChip color={severityColor(section?.severity ?? "info")}>
                         {severityLabel(section?.severity ?? "info", t)}

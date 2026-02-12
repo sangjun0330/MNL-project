@@ -212,7 +212,9 @@ export function InsightsPage() {
           onClick={(e) => {
             if (!hasPaidAccess && !billingLoading) {
               e.preventDefault();
-              const confirmed = window.confirm("AI 맞춤회복은 유료 플랜 전용 기능입니다.\n플랜 업그레이드 페이지로 이동할까요?");
+              const confirmed = window.confirm(
+                t("AI 맞춤회복은 유료 플랜 전용 기능입니다.\n플랜 업그레이드 페이지로 이동할까요?")
+              );
               if (confirmed) router.push("/settings/billing/upgrade");
               return;
             }
