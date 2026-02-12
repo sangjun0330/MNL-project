@@ -107,7 +107,7 @@ export function SettingsBillingSuccessPage() {
 
   return (
     <div className="mx-auto w-full max-w-[720px] px-4 pb-24 pt-6">
-      <div className="rounded-apple border border-ios-sep bg-white p-6 shadow-apple">
+      <div className="wnl-surface p-6">
         <div className="text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">결제 결과</div>
 
         {loading ? <div className="mt-3 text-[13px] text-ios-sub">결제 승인 처리 중입니다...</div> : null}
@@ -122,11 +122,11 @@ export function SettingsBillingSuccessPage() {
 
         {!loading && !error && result ? (
           <>
-            <div className="mt-3 inline-flex rounded-full border border-[#007AFF44] bg-[#007AFF10] px-3 py-1 text-[12px] font-semibold text-[#007AFF]">
+            <div className="wnl-chip-accent mt-3 inline-flex px-3 py-1 text-[12px]">
               결제 완료
             </div>
 
-            <div className="mt-4 rounded-2xl border border-ios-sep bg-ios-bg p-4">
+            <div className="wnl-sub-surface mt-4 p-4">
               <div className="text-[13px] text-ios-sub">적용 플랜</div>
               <div className="mt-1 text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">{getPlanDefinition(planTier).title}</div>
               <div className="mt-2 text-[12.5px] text-ios-sub">
@@ -143,13 +143,13 @@ export function SettingsBillingSuccessPage() {
         <div className="mt-6 flex gap-2">
           <Link
             href="/settings/billing"
-            className="inline-flex h-10 items-center justify-center rounded-full bg-black px-5 text-[13px] font-semibold text-white"
+            className="wnl-btn-primary inline-flex h-10 items-center justify-center px-5 text-[13px]"
           >
             구독으로 돌아가기
           </Link>
           <Link
             href="/insights"
-            className="inline-flex h-10 items-center justify-center rounded-full border border-ios-sep bg-white px-5 text-[13px] font-semibold text-ios-text"
+            className="wnl-btn-secondary inline-flex h-10 items-center justify-center px-5 text-[13px]"
           >
             인사이트 보기
           </Link>
