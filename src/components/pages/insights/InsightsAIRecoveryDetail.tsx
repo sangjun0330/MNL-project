@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
 import Link from "next/link";
@@ -10,7 +10,9 @@ import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice
 import { useAIRecoveryInsights } from "@/components/insights/useAIRecoveryInsights";
 import { INSIGHTS_MIN_DAYS, isInsightsLocked, useInsightsData } from "@/components/insights/useInsightsData";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
-import { formatKoreanDate } from "@/lib/date";
+import { TodaySleepRequiredSheet } from "@/components/insights/TodaySleepRequiredSheet";
+import { addDays, formatKoreanDate, fromISODate, toISODate, todayISO } from "@/lib/date";
+import { hasHealthInput } from "@/lib/healthRecords";
 import { useI18n } from "@/lib/useI18n";
 import type { RecoverySection } from "@/lib/aiRecovery";
 
@@ -221,17 +223,79 @@ function RecoveryGeneratingOverlay({
   );
 }
 
+function EnglishTranslationPendingPopup({
+  open,
+  title,
+  message,
+}: {
+  open: boolean;
+  title: string;
+  message: string;
+}) {
+  if (!open || typeof document === "undefined") return null;
+  return createPortal(
+    <div className="fixed inset-0 z-[2147483100] flex items-start justify-center bg-[rgba(242,242,247,0.56)] px-4 pt-[max(72px,env(safe-area-inset-top)+20px)] backdrop-blur-[2px]">
+      <div className="w-full max-w-[360px] rounded-[24px] border border-[#D7DEEB] bg-white/96 p-4 shadow-[0_20px_56px_rgba(15,36,74,0.16)]">
+        <div className="flex items-start gap-3">
+          <div className="mt-[1px] flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#C7D5F0] bg-[#EDF3FF]">
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#163B73] border-r-transparent" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[14px] font-bold tracking-[-0.01em] text-ios-text">{title}</p>
+            <p className="mt-1 text-[12.5px] leading-relaxed text-ios-sub">{message}</p>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 export function InsightsAIRecoveryDetail() {
-  const { t } = useI18n();
+  const { t, lang: uiLang } = useI18n();
   const router = useRouter();
-  const { recordedDays } = useInsightsData();
+  const [openSleepGuide, setOpenSleepGuide] = useState(false);
+  const { recordedDays, state } = useInsightsData();
   const insightsLocked = isInsightsLocked(recordedDays);
   const { hasPaidAccess, loading: billingLoading } = useBillingAccess();
-  const { data, loading, generating, error, retry } = useAIRecoveryInsights({
+  const { data, loading, generating, error, retry, startGenerate } = useAIRecoveryInsights({
     mode: "generate",
     enabled: !insightsLocked && hasPaidAccess,
+    autoGenerate: false,
   });
+  const today = useMemo(() => todayISO(), []);
+  const yesterday = useMemo(() => toISODate(addDays(fromISODate(today), -1)), [today]);
+  const todayBio = state.bio?.[today] ?? null;
+  const todayEmotion = state.emotions?.[today] ?? null;
+  const yesterdayBio = state.bio?.[yesterday] ?? null;
+  const yesterdayEmotion = state.emotions?.[yesterday] ?? null;
+  const hasTodayRecord = hasHealthInput(todayBio, todayEmotion);
+  const hasYesterdayRecord = hasHealthInput(yesterdayBio, yesterdayEmotion);
+  const hasTodaySleep = todayBio?.sleepHours != null;
+  const needsHealthInputGuide = !hasTodayRecord || !hasYesterdayRecord || !hasTodaySleep;
+
+  const moveToTodaySleepLog = useCallback(() => {
+    setOpenSleepGuide(false);
+    router.push("/schedule?openHealthLog=today&focus=sleep");
+  }, [router]);
+
+  const startAnalysis = useCallback(() => {
+    if (needsHealthInputGuide) {
+      setOpenSleepGuide(true);
+      return;
+    }
+    startGenerate();
+  }, [needsHealthInputGuide, startGenerate]);
+
   const lang = data?.language ?? "ko";
+  const englishTranslationPending =
+    uiLang === "en" &&
+    !insightsLocked &&
+    !billingLoading &&
+    hasPaidAccess &&
+    !data &&
+    !error &&
+    generating;
   const errorLines = useMemo(() => (error ? presentError(error, t) : []), [error, t]);
   const errorCode = useMemo(() => (error ? compactErrorCode(error) : ""), [error]);
   const weekly = useMemo(() => {
@@ -293,6 +357,15 @@ export function InsightsAIRecoveryDetail() {
         <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />
       ) : null}
 
+      {!insightsLocked && !billingLoading && hasPaidAccess ? (
+        <DetailCard className="p-5">
+          <div className="text-[13px] font-semibold text-ios-sub">{t("AI 맞춤회복 안내")}</div>
+          <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
+            {t("AI 맞춤회복은 오늘 컨디션과 최근 기록을 바탕으로 실행 우선순위 회복 루틴을 제안합니다.")}
+          </p>
+        </DetailCard>
+      ) : null}
+
       {!insightsLocked && !billingLoading && !hasPaidAccess ? (
         <DetailCard className="p-5">
           <div className="text-[17px] font-bold tracking-[-0.01em] text-ios-text">{t("유료 플랜 전용 기능")}</div>
@@ -322,7 +395,48 @@ export function InsightsAIRecoveryDetail() {
         </DetailCard>
       ) : null}
 
-      {!insightsLocked && hasPaidAccess && !loading && !data ? (
+      {!insightsLocked && hasPaidAccess && !loading && !generating && !data && !error ? (
+        <DetailCard className="p-5">
+          <div className="text-[17px] font-bold tracking-[-0.01em] text-ios-text">{t("AI 분석 준비 완료")}</div>
+          <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
+            {t("분석 시작 전에 기록 상태를 확인해 주세요.")}
+          </p>
+          <div className="mt-3 rounded-2xl border border-ios-sep bg-ios-bg px-3 py-3">
+            <div className="flex items-center justify-between text-[13px] text-ios-text">
+              <span>{t("오늘 건강 기록")}</span>
+              <span className={hasTodayRecord ? "text-[#0B7A3E]" : "text-[#B45309]"}>
+                {hasTodayRecord ? t("입력 완료") : t("입력 필요")}
+              </span>
+            </div>
+            <div className="mt-2 flex items-center justify-between text-[13px] text-ios-text">
+              <span>{t("전날 건강 기록")}</span>
+              <span className={hasYesterdayRecord ? "text-[#0B7A3E]" : "text-[#B45309]"}>
+                {hasYesterdayRecord ? t("입력 완료") : t("입력 필요")}
+              </span>
+            </div>
+            <div className="mt-2 flex items-center justify-between text-[13px] text-ios-text">
+              <span>{t("오늘 수면 시간")}</span>
+              <span className={hasTodaySleep ? "text-[#0B7A3E]" : "text-[#B45309]"}>
+                {hasTodaySleep ? t("입력 완료") : t("입력 필요")}
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={startAnalysis}
+            className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-full border border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] text-[14px] font-semibold text-[color:var(--wnl-accent)]"
+          >
+            {needsHealthInputGuide ? t("오늘 건강 기록 입력하러 가기") : t("AI 분석 시작하기")}
+          </button>
+          {!hasTodaySleep ? (
+            <p className="mt-2 text-[12px] leading-relaxed text-ios-muted">
+              {t("정확한 분석을 위해 최소 오늘 수면 시간은 꼭 입력해 주세요.")}
+            </p>
+          ) : null}
+        </DetailCard>
+      ) : null}
+
+      {!insightsLocked && hasPaidAccess && !loading && !generating && !data && Boolean(error) ? (
         <DetailCard className="p-5">
           <div className="text-[17px] font-bold tracking-[-0.01em] text-ios-text">{t("AI 호출에 실패했어요.")}</div>
           <div className="mt-2 space-y-1 text-[14px] leading-relaxed text-ios-sub">
@@ -332,7 +446,14 @@ export function InsightsAIRecoveryDetail() {
           </div>
           <button
             type="button"
-            onClick={retry}
+            onClick={() => {
+              if (needsHealthInputGuide) {
+                setOpenSleepGuide(true);
+                return;
+              }
+              retry();
+              startGenerate();
+            }}
             className="mt-4 w-full rounded-xl bg-[#007AFF] py-3 text-[15px] font-semibold text-white active:bg-[#0062CC] transition-colors"
           >
             {t("다시 시도")}
@@ -477,9 +598,19 @@ export function InsightsAIRecoveryDetail() {
       ) : null}
 
       <RecoveryGeneratingOverlay
-        open={Boolean(generating && !data && !insightsLocked)}
+        open={Boolean(generating && !data && !insightsLocked && !englishTranslationPending)}
         title={t("맞춤회복 분석 중")}
         message={t("AI가 현재 상태에 맞춘 맞춤회복을 분석하고 있습니다.")}
+      />
+      <EnglishTranslationPendingPopup
+        open={englishTranslationPending}
+        title={t("영어 번역 적용 중")}
+        message={t("영어로 표시하는 중이에요. 조금만 기다려 주세요.")}
+      />
+      <TodaySleepRequiredSheet
+        open={openSleepGuide}
+        onClose={() => setOpenSleepGuide(false)}
+        onConfirm={moveToTodaySleepLog}
       />
     </InsightDetailShell>
   );
