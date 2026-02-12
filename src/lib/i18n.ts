@@ -670,6 +670,23 @@ const EN_EXTRA: Record<string, string> = {
   "AI 호출에 실패했어요. 잠시 후 다시 시도해 주세요.":
     "AI request failed. Please try again shortly.",
   "AI 호출 실패": "AI request failed",
+  "AI 맞춤회복 안내": "AI recovery guide",
+  "AI 맞춤회복은 오늘 컨디션과 최근 기록을 바탕으로 실행 우선순위 회복 루틴을 제안합니다.":
+    "AI recovery suggests prioritized routines based on today's condition and recent logs.",
+  "AI 분석 준비 완료": "Ready for AI analysis",
+  "분석 시작 전에 기록 상태를 확인해 주세요.":
+    "Please check your logging status before starting analysis.",
+  "오늘 건강 기록": "Today's health log",
+  "전날 건강 기록": "Yesterday's health log",
+  "오늘 수면 시간": "Today's sleep time",
+  "입력 완료": "Completed",
+  "입력 필요": "Required",
+  "오늘 건강 기록 입력하러 가기": "Go to today's health log",
+  "AI 분석 시작하기": "Start AI analysis",
+  "정확한 분석을 위해 최소 오늘 수면 시간은 꼭 입력해 주세요.":
+    "For accurate analysis, please enter at least today's sleep time.",
+  "영어 번역 적용 중": "Applying English translation",
+  "영어로 표시하는 중이에요. 조금만 기다려 주세요.": "Showing in English now. Please wait a moment.",
 };
 
 const EN: Record<string, string> = { ...EN_BASE, ...EN_EXTRA };
