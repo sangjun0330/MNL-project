@@ -1,4 +1,4 @@
-export type PlanTier = "free" | "basic" | "pro";
+export type PlanTier = "free" | "pro";
 
 export type PlanDefinition = {
   tier: PlanTier;
@@ -22,17 +22,7 @@ const PLAN_MAP: Record<PlanTier, PlanDefinition> = {
     periodDays: DEFAULT_PERIOD_DAYS,
     orderName: "RNest Free Plan",
     checkoutEnabled: false,
-    features: ["Vital/Trend/Thieves statistics", "Basic schedule and health logging"],
-  },
-  basic: {
-    tier: "basic",
-    title: "Basic",
-    description: "AI recovery guidance and daily coaching.",
-    priceKrw: 5900,
-    periodDays: DEFAULT_PERIOD_DAYS,
-    orderName: "RNest Basic Monthly",
-    checkoutEnabled: true,
-    features: ["AI recovery guidance", "Daily personalized coaching", "Weekly AI note"],
+    features: ["Vital/Trend/Thieves statistics", "Core schedule and health logging"],
   },
   pro: {
     tier: "pro",
@@ -51,16 +41,17 @@ export function getPlanDefinition(tier: PlanTier): PlanDefinition {
 }
 
 export function listPlans(): PlanDefinition[] {
-  return [PLAN_MAP.free, PLAN_MAP.basic, PLAN_MAP.pro];
+  return [PLAN_MAP.free, PLAN_MAP.pro];
 }
 
 export function asPlanTier(value: unknown): PlanTier | null {
-  if (value === "free" || value === "basic" || value === "pro") return value;
+  if (value === "free") return "free";
+  if (value === "pro") return "pro";
   return null;
 }
 
 export function asCheckoutPlanTier(value: unknown): Exclude<PlanTier, "free"> | null {
-  if (value === "basic" || value === "pro") return value;
+  if (value === "pro") return "pro";
   return null;
 }
 

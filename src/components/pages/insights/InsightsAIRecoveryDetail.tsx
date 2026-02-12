@@ -297,7 +297,7 @@ export function InsightsAIRecoveryDetail() {
         <DetailCard className="p-5">
           <div className="text-[17px] font-bold tracking-[-0.01em] text-ios-text">{t("유료 플랜 전용 기능")}</div>
           <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
-            {t("AI 맞춤회복은 Basic 또는 Pro 플랜에서 사용할 수 있어요.")}
+            {t("AI 맞춤회복은 Pro 플랜에서 사용할 수 있어요.")}
           </p>
           <div className="mt-4 flex gap-2">
             <button

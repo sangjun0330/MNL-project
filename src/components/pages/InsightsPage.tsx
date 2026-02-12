@@ -154,7 +154,7 @@ export function InsightsPage() {
       requiresTodaySleep
         ? t("오늘 수면 입력 후 AI 맞춤회복을 바로 분석합니다.")
         : !billingLoading && !hasPaidAccess
-          ? t("AI 맞춤회복은 Basic/Pro에서 사용할 수 있어요.")
+          ? t("AI 맞춤회복은 Pro 플랜에서 사용할 수 있어요.")
         : aiRecoveryLoading
           ? t("저장된 맞춤회복을 확인하고 있어요...")
           : aiTopSection

@@ -37,7 +37,7 @@ export type SubscriptionResponse = {
 };
 
 export type CheckoutResponse = {
-  planTier: "basic" | "pro";
+  planTier: "pro";
   orderId: string;
   orderName: string;
   amount: number;
@@ -150,7 +150,7 @@ export async function ensureTossScript() {
   return tossScriptPromise;
 }
 
-export async function requestPlanCheckout(plan: "basic" | "pro") {
+export async function requestPlanCheckout(plan: "pro" = "pro") {
   const headers = await authHeaders();
   const checkoutRes = await fetch("/api/billing/checkout", {
     method: "POST",
