@@ -618,6 +618,7 @@ const EN_EXTRA: Record<string, string> = {
   "플랜 업그레이드는 로그인 후 가능합니다.": "Plan upgrade is available after login.",
   "현재 사용 중": "Current plan",
   "선택 플랜": "Selected plan",
+  "업그레이드 플랜": "Upgrade plan",
   "토스페이먼츠 결제창으로 진행되며, 서버 승인 완료 후 플랜이 적용됩니다.":
     "Checkout proceeds in TossPayments, and your plan is applied after server confirmation.",
   "현재 플랜 사용 중": "Using current plan",
@@ -655,10 +656,8 @@ const EN_EXTRA: Record<string, string> = {
     "Tap Confirm to move to the plan upgrade page.",
   "AI가 현재 상태에 맞춘 맞춤회복을 분석하고 있습니다.":
     "AI is analyzing personalized recovery for your current condition.",
-  "AI 맞춤회복은 Basic 또는 Pro 플랜에서 사용할 수 있어요.":
-    "AI recovery is available on Basic or Pro plans.",
-  "AI 맞춤회복은 Basic/Pro에서 사용할 수 있어요.":
-    "AI recovery is available on Basic/Pro plans.",
+  "AI 맞춤회복은 Pro 플랜에서 사용할 수 있어요.":
+    "AI recovery is available on the Pro plan.",
   "오늘 수면 입력 후 AI 맞춤회복을 바로 분석합니다.":
     "AI recovery analysis starts right after you log today's sleep.",
   "OpenAI 요청이 지역 정책으로 거절됐어요.":

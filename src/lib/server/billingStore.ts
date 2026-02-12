@@ -206,7 +206,8 @@ async function readUserSubscriptionRow(userId: string): Promise<{ data: any; sup
 }
 
 function asPlanTier(value: unknown): PlanTier {
-  if (value === "basic" || value === "pro") return value;
+  if (value === "free") return "free";
+  if (typeof value === "string" && value.trim()) return "pro";
   return "free";
 }
 
@@ -501,7 +502,6 @@ async function readLatestPaidDoneOrder(userId: string): Promise<BillingOrderSumm
     .select("order_id, plan_tier, amount, currency, status, order_name, payment_key, fail_code, fail_message, approved_at, created_at")
     .eq("user_id", userId)
     .eq("status", "DONE")
-    .in("plan_tier", ["basic", "pro"])
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -535,7 +535,7 @@ async function maybeRecoverSubscriptionFromLatestPaidOrder(
 
   const latestPaid = await readLatestPaidDoneOrder(userId);
   if (!latestPaid) return null;
-  if (latestPaid.planTier !== "basic" && latestPaid.planTier !== "pro") return null;
+  if (latestPaid.planTier !== "pro") return null;
 
   const paidBaseDate = parseDate(latestPaid.approvedAt ?? latestPaid.createdAt);
   if (!paidBaseDate) return null;

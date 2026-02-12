@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { asCheckoutPlanTier, formatKrw, getPlanDefinition, listPlans } from "@/lib/billing/plans";
+import { useCallback, useEffect, useState } from "react";
+import { formatKrw, getPlanDefinition } from "@/lib/billing/plans";
 import { fetchSubscriptionSnapshot, formatDateLabel, requestPlanCheckout, type SubscriptionResponse } from "@/lib/billing/client";
 import { signInWithProvider, useAuthState } from "@/lib/auth";
 import { useI18n } from "@/lib/useI18n";
@@ -10,13 +10,15 @@ import { useI18n } from "@/lib/useI18n";
 export function SettingsBillingUpgradePage() {
   const { t } = useI18n();
   const { status, user } = useAuthState();
-  const [selectedPlan, setSelectedPlan] = useState<"basic" | "pro">("basic");
   const [loading, setLoading] = useState(true);
   const [subData, setSubData] = useState<SubscriptionResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
-
-  const planRows = useMemo(() => listPlans(), []);
+  const proPlan = getPlanDefinition("pro");
+  const flatButtonBase =
+    "inline-flex h-11 items-center justify-center rounded-full border px-5 text-[14px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50";
+  const flatButtonPrimary = `${flatButtonBase} border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]`;
+  const flatButtonSecondary = `${flatButtonBase} border-ios-sep bg-[#F2F2F7] text-ios-text`;
 
   const loadSubscription = useCallback(async () => {
     if (!user?.userId) {
@@ -40,29 +42,23 @@ export function SettingsBillingUpgradePage() {
     void loadSubscription();
   }, [loadSubscription]);
 
-  useEffect(() => {
-    const activeTier = subData?.subscription.tier;
-    const checkoutTier = asCheckoutPlanTier(activeTier);
-    if (checkoutTier) setSelectedPlan(checkoutTier);
-  }, [subData?.subscription.tier]);
-
   const startCheckout = useCallback(async () => {
     if (!user?.userId || paying) return;
     setPaying(true);
     setError(null);
     try {
-      await requestPlanCheckout(selectedPlan);
+      await requestPlanCheckout("pro");
     } catch (e: any) {
       const msg = String(e?.message ?? t("결제창을 열지 못했습니다."));
       if (!msg.includes("USER_CANCEL")) setError(msg);
     } finally {
       setPaying(false);
     }
-  }, [paying, selectedPlan, t, user?.userId]);
+  }, [paying, t, user?.userId]);
 
   const activeTier = subData?.subscription.tier ?? "free";
   const activePeriodEnd = subData?.subscription.currentPeriodEnd ?? null;
-  const isAlreadySelectedPlanActive = activeTier === selectedPlan && Boolean(subData?.subscription.hasPaidAccess);
+  const isProActive = activeTier === "pro" && Boolean(subData?.subscription.hasPaidAccess);
 
   return (
     <div className="mx-auto w-full max-w-[760px] px-4 pb-24 pt-6">
@@ -86,7 +82,7 @@ export function SettingsBillingUpgradePage() {
           <button
             type="button"
             onClick={() => signInWithProvider("google")}
-            className="wnl-btn-primary mt-4 px-4 py-2 text-[13px]"
+            className={`${flatButtonPrimary} mt-4 text-[13px]`}
           >
             {t("Google로 로그인")}
           </button>
@@ -103,73 +99,40 @@ export function SettingsBillingUpgradePage() {
             <div className="mt-1 text-[13px] text-ios-sub">{t("만료일")}: {formatDateLabel(activePeriodEnd)}</div>
           </section>
 
-          <section className="mt-4 grid gap-3">
-            {planRows.map((plan) => {
-              const paidTier = asCheckoutPlanTier(plan.tier);
-              const selected = paidTier ? selectedPlan === paidTier : activeTier === "free";
-              const active = activeTier === plan.tier;
-              const isPaidPlan = Boolean(paidTier);
-
-              return (
-                <button
-                  key={plan.tier}
-                  type="button"
-                  disabled={!isPaidPlan}
-                  onClick={() => {
-                    if (paidTier) setSelectedPlan(paidTier);
-                  }}
-                  className={`rounded-[26px] border bg-white p-4 text-left transition ${
-                    selected
-                      ? "border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] shadow-[0_10px_24px_rgba(22,59,115,0.16)]"
-                      : "border-ios-sep shadow-apple-sm"
-                  } ${!isPaidPlan ? "opacity-90" : "hover:translate-y-[-1px]"}`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-[34px] font-extrabold tracking-[-0.03em] text-ios-text">{plan.title}</div>
-                      <div className="mt-1 max-w-[460px] text-[14px] leading-relaxed text-ios-sub">{plan.description}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-[22px] font-extrabold tracking-[-0.02em] text-ios-text">
-                        {plan.priceKrw > 0 ? formatKrw(plan.priceKrw).replace(" KRW", "") : t("무료")}
-                      </div>
-                      <div className="mt-1 text-[12px] text-ios-muted">/ {t("30일")}</div>
-                    </div>
-                  </div>
-                  <ul className="mt-3 list-disc space-y-1 pl-5 text-[13px] text-ios-sub">
-                    {plan.features.map((feature) => (
-                      <li key={feature}>{feature}</li>
-                    ))}
-                  </ul>
-                  {active ? (
-                    <div className="wnl-chip-accent mt-3 inline-flex px-2.5 py-1 text-[11px]">
-                      {t("현재 사용 중")}
-                    </div>
-                  ) : null}
-                </button>
-              );
-            })}
-          </section>
-
           <section className="wnl-surface mt-4 p-6">
-            <div className="text-[13px] text-ios-sub">{t("선택 플랜")}</div>
-            <div className="mt-1 text-[20px] font-bold text-ios-text">{getPlanDefinition(selectedPlan).title}</div>
-            <div className="mt-2 text-[13px] text-ios-sub">
-              {t("토스페이먼츠 결제창으로 진행되며, 서버 승인 완료 후 플랜이 적용됩니다.")}
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-[13px] text-ios-sub">{t("업그레이드 플랜")}</div>
+                <div className="mt-1 text-[34px] font-extrabold tracking-[-0.03em] text-ios-text">{proPlan.title}</div>
+                <div className="mt-1 max-w-[480px] text-[14px] leading-relaxed text-ios-sub">{proPlan.description}</div>
+              </div>
+              <div className="text-right">
+                <div className="text-[24px] font-extrabold tracking-[-0.02em] text-ios-text">
+                  {formatKrw(proPlan.priceKrw).replace(" KRW", "")}
+                </div>
+                <div className="text-[12px] text-ios-muted">/ {t("30일")}</div>
+              </div>
             </div>
+            <ul className="mt-4 list-disc space-y-1 pl-5 text-[13px] text-ios-sub">
+              {proPlan.features.map((feature) => (
+                <li key={feature}>{feature}</li>
+              ))}
+            </ul>
             <button
               type="button"
               onClick={() => void startCheckout()}
-              disabled={paying || loading || isAlreadySelectedPlanActive}
-              className="wnl-btn-primary mt-4 inline-flex h-11 items-center justify-center px-5 text-[14px] disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={paying || loading || isProActive}
+              className={`${isProActive ? flatButtonSecondary : flatButtonPrimary} mt-4 w-full`}
             >
-              {isAlreadySelectedPlanActive
+              {isProActive
                 ? t("현재 플랜 사용 중")
                 : paying
                   ? t("결제창 준비 중...")
-                  : `${getPlanDefinition(selectedPlan).title} ${t("결제하기")}`}
+                  : `${proPlan.title} ${t("결제하기")}`}
             </button>
-            <p className="mt-2 text-[11.5px] text-ios-muted">{t("결제 후 서버 승인 완료 시 결제 이력에 즉시 반영됩니다.")}</p>
+            <p className="mt-2 text-[11.5px] text-ios-muted">
+              {t("토스페이먼츠 결제창으로 진행되며, 서버 승인 완료 후 플랜이 적용됩니다.")}
+            </p>
             {error ? <div className="mt-3 text-[12px] text-red-600">{error}</div> : null}
           </section>
         </>

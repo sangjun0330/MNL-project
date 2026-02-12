@@ -12,7 +12,7 @@ function bad(status: number, message: string) {
   return NextResponse.json({ ok: false, error: message }, { status });
 }
 
-function buildOrderId(plan: "basic" | "pro") {
+function buildOrderId(plan: "pro") {
   const stamp = Date.now().toString(36);
   const rand = Math.random().toString(36).slice(2, 10);
   return `wnl_${plan}_${stamp}_${rand}`.slice(0, 64);
@@ -68,8 +68,7 @@ export async function POST(req: Request) {
     return bad(400, "invalid_json");
   }
 
-  const planTier = asCheckoutPlanTier(body?.plan);
-  if (!planTier) return bad(400, "invalid_plan");
+  const planTier = asCheckoutPlanTier(body?.plan) ?? "pro";
 
   const plan = getPlanDefinition(planTier);
   const orderId = buildOrderId(planTier);
