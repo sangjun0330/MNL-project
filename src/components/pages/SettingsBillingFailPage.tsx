@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { getSupabaseBrowserClient, useAuthState } from "@/lib/auth";
+import { useI18n } from "@/lib/useI18n";
 
 async function authHeaders(): Promise<Record<string, string>> {
   const supabase = getSupabaseBrowserClient();
@@ -13,10 +14,11 @@ async function authHeaders(): Promise<Record<string, string>> {
 }
 
 export function SettingsBillingFailPage() {
+  const { t } = useI18n();
   const params = useSearchParams();
   const { status } = useAuthState();
   const code = params.get("code") ?? "unknown_error";
-  const message = params.get("message") ?? "결제가 취소되었거나 실패했습니다.";
+  const message = params.get("message") ?? t("결제가 취소되었거나 실패했습니다.");
   const orderId = params.get("orderId") ?? "-";
   const sentRef = useRef(false);
 
@@ -43,7 +45,7 @@ export function SettingsBillingFailPage() {
   return (
     <div className="mx-auto w-full max-w-[720px] px-4 pb-24 pt-6">
       <div className="wnl-surface p-6">
-        <div className="text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">결제 실패</div>
+        <div className="text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">{t("결제 실패")}</div>
         <div className="mt-3 text-[14px] font-semibold text-red-600">{code}</div>
         <div className="mt-1 text-[12.5px] text-ios-sub break-all">{message}</div>
         <div className="mt-3 text-[11.5px] text-ios-muted break-all">orderId: {orderId}</div>
@@ -53,13 +55,13 @@ export function SettingsBillingFailPage() {
             href="/settings/billing"
             className="wnl-btn-primary inline-flex h-10 items-center justify-center px-5 text-[13px]"
           >
-            다시 시도
+            {t("다시 시도")}
           </Link>
           <Link
             href="/settings"
             className="wnl-btn-secondary inline-flex h-10 items-center justify-center px-5 text-[13px]"
           >
-            설정으로 이동
+            {t("설정으로 이동")}
           </Link>
         </div>
       </div>

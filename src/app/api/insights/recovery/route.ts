@@ -253,6 +253,7 @@ function readServerCachedAI(rawPayload: unknown, today: ISODate, lang: Language)
     if (!payload) continue;
     if (payload.dateISO !== today) continue;
     if (payload.engine !== "openai") continue;
+    if (lang === "en" && (payload.language !== "en" || looksKoreanPayload(payload))) continue;
     return payload;
   }
   return null;
@@ -281,8 +282,8 @@ export async function GET(req: NextRequest) {
       return bad(404, "state_not_found");
     }
 
-    const state = normalizePayloadToState(row.payload, langHint);
-    const lang = (state.settings.language ?? "ko") as Language;
+    const state = normalizePayloadToState(row.payload, null);
+    const lang = (langHint ?? state.settings.language ?? "ko") as Language;
     const today = todayISO();
     const recordedDays = countHealthRecordedDays({ bio: state.bio, emotions: state.emotions });
     if (recordedDays < 3) {
@@ -335,7 +336,9 @@ export async function GET(req: NextRequest) {
           }
           return NextResponse.json({ ok: true, data: translatedPayload } satisfies AIRecoveryApiSuccess);
         } catch {
-          return NextResponse.json({ ok: true, data: koVariant } satisfies AIRecoveryApiSuccess);
+          if (cacheOnly) {
+            return NextResponse.json({ ok: true, data: null } satisfies AIRecoveryApiSuccess);
+          }
         }
       }
     }
@@ -427,7 +430,27 @@ export async function GET(req: NextRequest) {
           result: translated.result,
         };
       } catch {
-        payloadEn = null;
+        try {
+          const aiEn = await generateAIRecoveryWithOpenAI({
+            language: "en",
+            todayISO: today,
+            todayShift,
+            nextShift,
+            todayVital,
+            vitals7,
+            prevWeekVitals: prevWeek,
+          });
+          payloadEn = {
+            ...payloadKo,
+            language: "en",
+            model: aiEn.model ?? payloadKo.model,
+            debug: aiEn.debug ? `en_direct:${aiEn.debug}` : "en_direct",
+            generatedText: aiEn.generatedText,
+            result: aiEn.result,
+          };
+        } catch {
+          payloadEn = null;
+        }
       }
     }
 

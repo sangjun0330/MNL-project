@@ -552,6 +552,124 @@ const EN_EXTRA: Record<string, string> = {
   "주소창 오른쪽 메뉴(⋮)를 탭하세요": "Tap the menu (⋮) next to the address bar",
   "'홈 화면에 추가' 또는 '앱 설치'를 선택하세요": "Select 'Add to Home Screen' or 'Install App'",
   "'설치' 버튼을 눌러 완료하세요": "Tap 'Install' to finish",
+
+  // Settings / Billing / Admin cards
+  "구독": "Subscription",
+  "구독 설정 열기": "Open Subscription Settings",
+  "플랜 결제 및 구독 상태를 관리합니다.": "Manage plan payments and subscription status.",
+  "운영": "Operations",
+  "운영 관리자 페이지 열기": "Open Operations Admin",
+  "관리자 계정에서 환불/취소 요청을 검토하고 실행합니다.":
+    "Admin accounts can review and execute refund/cancel requests.",
+
+  // Billing pages
+  "요청 처리 중 오류가 발생했습니다.": "An error occurred while processing your request.",
+  "로그인이 필요합니다.": "Please log in first.",
+  "현재 플랜": "Current plan",
+  "새로고침": "Refresh",
+  "불러오는 중...": "Loading...",
+  "환불 가능한 결제 건을 찾지 못했습니다.": "No refundable payment was found.",
+  "현재 결제 건은 환불 요청을 접수할 수 없습니다.": "This payment is not eligible for a refund request.",
+  "이미 처리 중이거나 철회할 수 없는 상태입니다.": "This request is already being processed or cannot be withdrawn.",
+  "본인 요청만 처리할 수 있습니다.": "You can only manage your own request.",
+  "환불 요청을 찾지 못했습니다.": "Refund request not found.",
+  "구독 정보를 불러오지 못했습니다.": "Failed to load subscription details.",
+  "사용자 요청": "User request",
+  "현재 기간이 끝나면 Free 플랜으로 전환할까요?":
+    "Switch to the Free plan when the current period ends?",
+  "예약된 해지를 취소하고 현재 플랜을 유지할까요?":
+    "Cancel the scheduled cancellation and keep your current plan?",
+  "환불 요청을 접수할까요?\n자동 환불은 진행되지 않으며, 관리자가 사유를 검토한 뒤 수동 처리합니다.":
+    "Submit a refund request?\nNo automatic refund is processed. An admin reviews the reason and handles it manually.",
+  "환불 요청 사유를 입력해 주세요. (관리자 검토용)":
+    "Please enter a reason for the refund request. (For admin review)",
+  "구독 처리에 실패했습니다.": "Failed to process subscription request.",
+  "환불 요청을 철회할까요?": "Withdraw this refund request?",
+  "철회 사유(선택)": "Withdrawal reason (optional)",
+  "사용자 요청 철회": "User withdrew request",
+  "환불 요청을 철회했습니다.": "Refund request withdrawn.",
+  "환불 요청 철회에 실패했습니다.": "Failed to withdraw refund request.",
+  "구독 결제와 플랜 적용은 로그인 후 사용할 수 있습니다.":
+    "Subscription payment and plan activation are available after login.",
+  "유료 이용 중": "Paid plan active",
+  "무료 플랜": "Free plan",
+  "상태": "Status",
+  "만료일": "Expires on",
+  "기간 종료 해지 예약됨": "Cancellation scheduled at period end",
+  "결제 정보": "Payment details",
+  "현재 요금": "Current charge",
+  "무료": "Free",
+  "결제 수단": "Payment method",
+  "TossPayments 카드": "TossPayments Card",
+  "해지 예약 취소": "Cancel scheduled cancellation",
+  "기간 종료 시 해지 (권장)": "Cancel at period end (Recommended)",
+  "환불 요청(관리자 검토)": "Request refund (Admin review)",
+  "기간 종료 해지는 서비스가 만료일까지 유지됩니다. 환불 요청은 관리자 검토 후 수동으로 처리됩니다.":
+    "Period-end cancellation keeps service until expiration. Refund requests are reviewed and processed manually by admin.",
+  "플랜 업그레이드하기": "Upgrade plan",
+  "내 환불 요청": "My refund requests",
+  "환불 요청이 없습니다.": "No refund requests.",
+  "철회 중...": "Withdrawing...",
+  "요청 철회": "Withdraw request",
+  "플랜 업그레이드": "Upgrade Plan",
+  "결제창 승인 완료 즉시 플랜이 적용됩니다.":
+    "Your plan is applied immediately after payment approval.",
+  "플랜 업그레이드는 로그인 후 가능합니다.": "Plan upgrade is available after login.",
+  "현재 사용 중": "Current plan",
+  "선택 플랜": "Selected plan",
+  "토스페이먼츠 결제창으로 진행되며, 서버 승인 완료 후 플랜이 적용됩니다.":
+    "Checkout proceeds in TossPayments, and your plan is applied after server confirmation.",
+  "현재 플랜 사용 중": "Using current plan",
+  "결제창 준비 중...": "Preparing checkout...",
+  "결제하기": "Pay",
+  "결제 후 서버 승인 완료 시 결제 이력에 즉시 반영됩니다.":
+    "After payment, the history is updated immediately once server confirmation is complete.",
+  "결제창을 열지 못했습니다.": "Could not open the payment window.",
+  "결제 승인 파라미터가 올바르지 않습니다.": "Payment approval parameters are invalid.",
+  "결제 승인에 실패했습니다.": "Payment approval failed.",
+  "결제 결과": "Payment result",
+  "결제 승인 처리 중입니다...": "Processing payment approval...",
+  "승인 실패": "Approval failed",
+  "결제 완료": "Payment completed",
+  "적용 플랜": "Applied plan",
+  "결제 금액": "Payment amount",
+  "구독으로 돌아가기": "Back to subscription",
+  "인사이트 보기": "View insights",
+  "결제가 취소되었거나 실패했습니다.": "Payment was canceled or failed.",
+  "결제 실패": "Payment failed",
+
+  // AI recovery paywall & loading
+  "유료 플랜 전용": "Paid plans only",
+  "유료 플랜 전용 기능": "Paid plan feature",
+  "AI 데이터 확인 중...": "Checking AI data...",
+  "AI 호출 상태를 확인해 주세요.": "Please check AI request status.",
+  "오늘의 맞춤회복을 받아보세요.": "Get today's personalized recovery.",
+  "저장된 맞춤회복을 확인하고 있어요...": "Checking saved recovery analysis...",
+  "상세 페이지에서 오늘 맞춤회복 분석을 시작할 수 있어요.":
+    "You can start today's personalized recovery analysis from the detail page.",
+  "AI 맞춤회복은 유료 플랜 전용 기능입니다.\n플랜 업그레이드 페이지로 이동할까요?":
+    "AI recovery is a paid-plan feature.\nMove to the plan upgrade page?",
+  "플랜 보기": "View plans",
+  "확인 버튼을 누르면 플랜 업그레이드 페이지로 이동합니다.":
+    "Tap Confirm to move to the plan upgrade page.",
+  "AI가 현재 상태에 맞춘 맞춤회복을 분석하고 있습니다.":
+    "AI is analyzing personalized recovery for your current condition.",
+  "AI 맞춤회복은 Basic 또는 Pro 플랜에서 사용할 수 있어요.":
+    "AI recovery is available on Basic or Pro plans.",
+  "AI 맞춤회복은 Basic/Pro에서 사용할 수 있어요.":
+    "AI recovery is available on Basic/Pro plans.",
+  "오늘 수면 입력 후 AI 맞춤회복을 바로 분석합니다.":
+    "AI recovery analysis starts right after you log today's sleep.",
+  "OpenAI 요청이 지역 정책으로 거절됐어요.":
+    "OpenAI request was blocked by regional policy.",
+  "네트워크(와이파이/모바일) 경로를 바꿔 다시 시도해 주세요.":
+    "Please change your network path (Wi-Fi/mobile) and try again.",
+  "AI 응답 시간이 길어졌어요.": "AI response is taking longer than usual.",
+  "잠시 후 다시 시도해 주세요.": "Please try again shortly.",
+  "AI 호출에 실패했어요.": "AI request failed.",
+  "AI 호출에 실패했어요. 잠시 후 다시 시도해 주세요.":
+    "AI request failed. Please try again shortly.",
+  "AI 호출 실패": "AI request failed",
 };
 
 const EN: Record<string, string> = { ...EN_BASE, ...EN_EXTRA };
