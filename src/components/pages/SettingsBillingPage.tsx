@@ -11,13 +11,6 @@ import {
   authHeaders,
 } from "@/lib/billing/client";
 import { signInWithProvider, useAuthState } from "@/lib/auth";
-import {
-  fetchMyRefundRequests,
-  refundStatusLabel,
-  refundStatusTone,
-  withdrawMyRefundRequest,
-  type AdminRefundRequest,
-} from "@/lib/billing/adminClient";
 import { useI18n } from "@/lib/useI18n";
 
 type CancelMode = "period_end" | "resume" | "now_refund";
@@ -42,9 +35,10 @@ export function SettingsBillingPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<CancelMode | null>(null);
-  const [refunds, setRefunds] = useState<AdminRefundRequest[]>([]);
-  const [refundLoading, setRefundLoading] = useState(false);
-  const [refundActionLoadingId, setRefundActionLoadingId] = useState<number | null>(null);
+  const flatButtonBase =
+    "inline-flex h-11 items-center justify-center rounded-full border px-4 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50";
+  const flatButtonSecondary = `${flatButtonBase} border-ios-sep bg-[#F2F2F7] text-ios-text`;
+  const flatButtonPrimary = `${flatButtonBase} border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]`;
 
   const loadSubscription = useCallback(async () => {
     if (!user?.userId) {
@@ -60,26 +54,9 @@ export function SettingsBillingPage() {
     }
   }, [t, user?.userId]);
 
-  const loadRefunds = useCallback(async () => {
-    if (!user?.userId) {
-      setRefunds([]);
-      return;
-    }
-    setRefundLoading(true);
-    try {
-      const rows = await fetchMyRefundRequests(8);
-      setRefunds(rows);
-    } catch {
-      setRefunds([]);
-    } finally {
-      setRefundLoading(false);
-    }
-  }, [user?.userId]);
-
   useEffect(() => {
     void loadSubscription();
-    void loadRefunds();
-  }, [loadRefunds, loadSubscription]);
+  }, [loadSubscription]);
 
   const subscription = subData?.subscription ?? null;
   const activeTier = subscription?.tier ?? "free";
@@ -130,41 +107,13 @@ export function SettingsBillingPage() {
         const message = String(json?.data?.message ?? "");
         if (message) setActionNotice(message);
         await loadSubscription();
-        await loadRefunds();
       } catch (e: any) {
         setActionError(parseBillingActionError(String(e?.message ?? t("구독 처리에 실패했습니다.")), t));
       } finally {
         setActionLoading(null);
       }
     },
-    [actionLoading, loadRefunds, loadSubscription, t, user?.userId]
-  );
-
-  const submitWithdrawRefund = useCallback(
-    async (refundId: number) => {
-      if (!user?.userId || refundActionLoadingId !== null) return;
-      const confirmed = window.confirm(t("환불 요청을 철회할까요?"));
-      if (!confirmed) return;
-      const note = window.prompt(t("철회 사유(선택)"), t("사용자 요청 철회"));
-      if (note === null) return;
-
-      setRefundActionLoadingId(refundId);
-      setActionError(null);
-      setActionNotice(null);
-      try {
-        await withdrawMyRefundRequest({
-          refundId,
-          note: note.trim() || null,
-        });
-        setActionNotice(t("환불 요청을 철회했습니다."));
-        await loadRefunds();
-      } catch (e: any) {
-        setActionError(parseBillingActionError(String(e?.message ?? t("환불 요청 철회에 실패했습니다.")), t));
-      } finally {
-        setRefundActionLoadingId(null);
-      }
-    },
-    [loadRefunds, refundActionLoadingId, t, user?.userId]
+    [actionLoading, loadSubscription, t, user?.userId]
   );
 
   return (
@@ -186,7 +135,7 @@ export function SettingsBillingPage() {
           <button
             type="button"
             onClick={() => signInWithProvider("google")}
-            className="wnl-btn-primary mt-4 px-4 py-2 text-[13px]"
+            className={`${flatButtonPrimary} mt-4`}
           >
             {t("Google로 로그인")}
           </button>
@@ -223,29 +172,13 @@ export function SettingsBillingPage() {
               </div>
             ) : null}
 
-            <div className="mt-4 border-t border-ios-sep pt-4">
-              <div className="text-[13px] font-semibold text-ios-sub">{t("결제 정보")}</div>
-              <div className="wnl-sub-surface mt-2 px-3 py-3">
-                <div className="flex items-center justify-between text-[13px]">
-                  <span className="text-ios-sub">{t("현재 요금")}</span>
-                  <span className="font-semibold text-ios-text">
-                    {activeTier === "free" ? t("무료") : `${formatKrw(getPlanDefinition(activeTier).priceKrw)} / ${t("30일")}`}
-                  </span>
-                </div>
-                <div className="mt-1 flex items-center justify-between text-[13px]">
-                  <span className="text-ios-sub">{t("결제 수단")}</span>
-                  <span className="font-semibold text-ios-text">{t("TossPayments 카드")}</span>
-                </div>
-              </div>
-            </div>
-
             {hasPaidAccess ? (
-              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+              <div className="mt-4 grid gap-2">
                 <button
                   type="button"
                   disabled={actionLoading !== null}
                   onClick={() => void submitCancel(subscription?.cancelAtPeriodEnd ? "resume" : "period_end")}
-                  className="wnl-btn-secondary inline-flex h-11 items-center justify-center px-4 text-[13px] disabled:cursor-not-allowed disabled:opacity-50"
+                  className={flatButtonSecondary}
                 >
                   {subscription?.cancelAtPeriodEnd ? t("해지 예약 취소") : t("기간 종료 시 해지 (권장)")}
                 </button>
@@ -253,9 +186,9 @@ export function SettingsBillingPage() {
                   type="button"
                   disabled={actionLoading !== null}
                   onClick={() => void submitCancel("now_refund")}
-                  className="wnl-btn-primary inline-flex h-11 items-center justify-center px-4 text-[13px] disabled:cursor-not-allowed disabled:opacity-50"
+                  className={flatButtonPrimary}
                 >
-                  {t("환불 요청(관리자 검토)")}
+                  {t("환불 요청")}
                 </button>
               </div>
             ) : null}
@@ -273,52 +206,6 @@ export function SettingsBillingPage() {
               >
                 {t("플랜 업그레이드하기")}
               </Link>
-            </div>
-
-            <div className="mt-5 border-t border-ios-sep pt-4">
-              <div className="flex items-center justify-between">
-                <div className="text-[13px] font-semibold text-ios-sub">{t("내 환불 요청")}</div>
-                <button
-                  type="button"
-                  onClick={() => void loadRefunds()}
-                  className="wnl-link-accent text-[12px] font-semibold"
-                >
-                  {t("새로고침")}
-                </button>
-              </div>
-              {refundLoading ? (
-                <div className="mt-2 text-[12px] text-ios-muted">{t("불러오는 중...")}</div>
-              ) : refunds.length === 0 ? (
-                <div className="mt-2 text-[12px] text-ios-muted">{t("환불 요청이 없습니다.")}</div>
-              ) : (
-                <div className="mt-2 space-y-2">
-                  {refunds.map((item) => (
-                    <div key={item.id} className="wnl-sub-surface px-3 py-2.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="text-[12px] font-semibold text-ios-text">
-                          #{item.id} · {item.orderId}
-                        </div>
-                        <div className={`text-[11.5px] font-semibold ${refundStatusTone(item.status)}`}>
-                          {refundStatusLabel(item.status)}
-                        </div>
-                      </div>
-                      <div className="mt-1 text-[11.5px] text-ios-sub line-clamp-2">{item.reason}</div>
-                      {item.status === "REQUESTED" ? (
-                        <div className="mt-2">
-                          <button
-                            type="button"
-                            disabled={refundActionLoadingId !== null}
-                            onClick={() => void submitWithdrawRefund(item.id)}
-                            className="wnl-btn-secondary inline-flex h-8 items-center justify-center px-3 text-[11.5px] disabled:opacity-40"
-                          >
-                            {refundActionLoadingId === item.id ? t("철회 중...") : t("요청 철회")}
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
 
             {error ? <div className="mt-3 text-[12px] text-red-600">{error}</div> : null}

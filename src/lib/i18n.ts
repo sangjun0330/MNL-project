@@ -604,6 +604,7 @@ const EN_EXTRA: Record<string, string> = {
   "해지 예약 취소": "Cancel scheduled cancellation",
   "기간 종료 시 해지 (권장)": "Cancel at period end (Recommended)",
   "환불 요청(관리자 검토)": "Request refund (Admin review)",
+  "환불 요청": "Request refund",
   "기간 종료 해지는 서비스가 만료일까지 유지됩니다. 환불 요청은 관리자 검토 후 수동으로 처리됩니다.":
     "Period-end cancellation keeps service until expiration. Refund requests are reviewed and processed manually by admin.",
   "플랜 업그레이드하기": "Upgrade plan",
