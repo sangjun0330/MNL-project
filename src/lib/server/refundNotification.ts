@@ -32,6 +32,13 @@ function isEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
+function parseRecipients(value: string) {
+  return value
+    .split(/[,\n;]/)
+    .map((item) => clean(item).toLowerCase())
+    .filter((item) => isEmail(item));
+}
+
 export async function sendRefundRequestNotification(input: RefundNotifyInput): Promise<{
   sent: boolean;
   message: string;
@@ -49,6 +56,14 @@ export async function sendRefundRequestNotification(input: RefundNotifyInput): P
   const requestedAt = clean(input.requestedAt) || new Date().toISOString();
   const requesterEmail = clean(input.requesterEmail);
   const hasRequesterEmail = isEmail(requesterEmail);
+  const recipients = parseRecipients(to);
+  const filteredRecipients = hasRequesterEmail
+    ? recipients.filter((email) => email !== requesterEmail.toLowerCase())
+    : recipients;
+
+  if (!filteredRecipients.length) {
+    return { sent: false, message: "missing_refund_notify_recipients" };
+  }
 
   const text = [
     "RNest 환불 요청이 접수되었습니다.",
@@ -95,7 +110,7 @@ export async function sendRefundRequestNotification(input: RefundNotifyInput): P
     },
     body: JSON.stringify({
       from,
-      to: [to],
+      to: filteredRecipients,
       reply_to: hasRequesterEmail ? requesterEmail : undefined,
       subject,
       text,

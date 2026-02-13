@@ -255,6 +255,7 @@ export function InsightsAIRecoveryDetail() {
   const { t, lang: uiLang } = useI18n();
   const router = useRouter();
   const [openSleepGuide, setOpenSleepGuide] = useState(false);
+  const [analysisRequested, setAnalysisRequested] = useState(false);
   const { recordedDays, state } = useInsightsData();
   const insightsLocked = isInsightsLocked(recordedDays);
   const { hasPaidAccess, loading: billingLoading } = useBillingAccess();
@@ -284,6 +285,7 @@ export function InsightsAIRecoveryDetail() {
       setOpenSleepGuide(true);
       return;
     }
+    setAnalysisRequested(true);
     startGenerate();
   }, [needsHealthInputGuide, startGenerate]);
 
@@ -293,9 +295,10 @@ export function InsightsAIRecoveryDetail() {
     !insightsLocked &&
     !billingLoading &&
     hasPaidAccess &&
+    analysisRequested &&
     !data &&
     !error &&
-    generating;
+    (loading || generating);
   const errorLines = useMemo(() => (error ? presentError(error, t) : []), [error, t]);
   const errorCode = useMemo(() => (error ? compactErrorCode(error) : ""), [error]);
   const weekly = useMemo(() => {
@@ -357,6 +360,15 @@ export function InsightsAIRecoveryDetail() {
         <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />
       ) : null}
 
+      {!insightsLocked && billingLoading ? (
+        <DetailCard className="p-5">
+          <div className="text-[13px] font-semibold text-ios-sub">{t("구독 상태 확인 중...")}</div>
+          <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
+            {t("AI 맞춤회복 사용 가능 여부를 확인하고 있어요.")}
+          </p>
+        </DetailCard>
+      ) : null}
+
       {!insightsLocked && !billingLoading && hasPaidAccess ? (
         <DetailCard className="p-5">
           <div className="text-[13px] font-semibold text-ios-sub">{t("AI 맞춤회복 안내")}</div>
@@ -395,7 +407,7 @@ export function InsightsAIRecoveryDetail() {
         </DetailCard>
       ) : null}
 
-      {!insightsLocked && hasPaidAccess && !loading && !generating && !data && !error ? (
+      {!insightsLocked && hasPaidAccess && !generating && !data && !error ? (
         <DetailCard className="p-5">
           <div className="text-[17px] font-bold tracking-[-0.01em] text-ios-text">{t("AI 분석 준비 완료")}</div>
           <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
@@ -451,6 +463,7 @@ export function InsightsAIRecoveryDetail() {
                 setOpenSleepGuide(true);
                 return;
               }
+              setAnalysisRequested(true);
               retry();
               startGenerate();
             }}

@@ -25,6 +25,29 @@ function moodEmoji(m: MoodScore) {
   return m === 1 ? "☹️" : m === 2 ? "😕" : m === 3 ? "😐" : m === 4 ? "🙂" : "😄";
 }
 
+const WORK_EVENT_PRESET_TAGS = [
+  "코드블루 대응",
+  "중증 환자 집중 케어",
+  "인계 지연",
+  "휴게시간 부족",
+  "연장근무",
+] as const;
+const WORK_EVENT_PRESET_SET = new Set<string>(WORK_EVENT_PRESET_TAGS);
+
+function normalizeWorkEventTags(tags: string[]) {
+  const seen = new Set<string>();
+  const next: string[] = [];
+  for (const raw of tags) {
+    const normalized = String(raw ?? "").replace(/\s+/g, " ").trim().slice(0, 28);
+    if (!normalized) continue;
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    next.push(normalized);
+    if (next.length >= 8) break;
+  }
+  return next;
+}
+
 type SaveState = "idle" | "saving" | "saved";
 
 /**
@@ -66,6 +89,9 @@ export function ScheduleRecordSheet({
   const [napText, setNapText] = useState<string>("");
   const [activity, setActivity] = useState<ActivityLevel>(1);
   const [symptomSeverity, setSymptomSeverity] = useState<0 | 1 | 2 | 3>(0);
+  const [workEventTags, setWorkEventTags] = useState<string[]>([]);
+  const [workEventCustomTag, setWorkEventCustomTag] = useState<string>("");
+  const [workEventNote, setWorkEventNote] = useState<string>("");
 
   // ✅ 메모
   const [note, setNote] = useState<string>("");
@@ -81,6 +107,8 @@ export function ScheduleRecordSheet({
   const skipCaffeineSync = useRef(true);
   const napDebounce = useRef<any>(null);
   const skipNapSync = useRef(true);
+  const workEventNoteDebounce = useRef<any>(null);
+  const skipWorkEventNoteSync = useRef(true);
   const sleepInputRef = useRef<HTMLInputElement | null>(null);
 
   const stressOptions = useMemo(
@@ -100,6 +128,10 @@ export function ScheduleRecordSheet({
       { value: "2", label: t("많음") },
       { value: "3", label: t("빡셈") },
     ],
+    [t]
+  );
+  const workEventPresetTags = useMemo(
+    () => WORK_EVENT_PRESET_TAGS.map((tag) => ({ key: tag, label: t(tag) })),
     [t]
   );
 
@@ -146,6 +178,16 @@ export function ScheduleRecordSheet({
     markSaved();
   };
 
+  const saveWorkEventsNow = (tagsInput: string[], noteInput: string) => {
+    const tags = normalizeWorkEventTags(tagsInput);
+    const note = noteInput.replace(/\s+/g, " ").trim().slice(0, 280);
+    store.setBioForDate(iso, {
+      workEventTags: tags.length ? tags : null,
+      workEventNote: note ? note : null,
+    });
+    markSaved();
+  };
+
   const saveShiftNameNow = (raw: string) => {
     const cleaned = raw.replace(/\s+/g, " ").trim();
     if (cleaned) store.setShiftNameForDate(iso, cleaned);
@@ -185,7 +227,11 @@ export function ScheduleRecordSheet({
     setNapText((bio as any).napHours == null ? "" : String((bio as any).napHours));
     setActivity((bio.activity ?? 1) as ActivityLevel);
     setSymptomSeverity((Number((bio as any).symptomSeverity ?? 0) as any) as 0 | 1 | 2 | 3);
+    setWorkEventTags(Array.isArray((bio as any).workEventTags) ? normalizeWorkEventTags((bio as any).workEventTags as string[]) : []);
+    setWorkEventCustomTag("");
+    setWorkEventNote(typeof (bio as any).workEventNote === "string" ? String((bio as any).workEventNote) : "");
     skipNapSync.current = true;
+    skipWorkEventNoteSync.current = true;
 
     // 메모
     setNote(curNote);
@@ -198,6 +244,7 @@ export function ScheduleRecordSheet({
     if (sleepDebounce.current) clearTimeout(sleepDebounce.current);
     if (caffeineDebounce.current) clearTimeout(caffeineDebounce.current);
     if (napDebounce.current) clearTimeout(napDebounce.current);
+    if (workEventNoteDebounce.current) clearTimeout(workEventNoteDebounce.current);
     setShowMore(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, iso]);
@@ -268,6 +315,20 @@ export function ScheduleRecordSheet({
   }, [napText, canEditHealth, open]);
 
   useEffect(() => {
+    if (!open || !canEditHealth) return;
+    if (skipWorkEventNoteSync.current) {
+      skipWorkEventNoteSync.current = false;
+      return;
+    }
+    if (workEventNoteDebounce.current) clearTimeout(workEventNoteDebounce.current);
+    workEventNoteDebounce.current = setTimeout(() => saveWorkEventsNow(workEventTags, workEventNote), 450);
+    return () => {
+      if (workEventNoteDebounce.current) clearTimeout(workEventNoteDebounce.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workEventNote, canEditHealth, open]);
+
+  useEffect(() => {
     if (!open) return;
     if (skipShiftNameSync.current) {
       skipShiftNameSync.current = false;
@@ -336,6 +397,26 @@ export function ScheduleRecordSheet({
     markSaved();
   };
 
+  const toggleWorkEventTag = (tag: string) => {
+    setWorkEventTags((prev) => {
+      const exists = prev.includes(tag);
+      const next = normalizeWorkEventTags(exists ? prev.filter((item) => item !== tag) : [...prev, tag]);
+      saveWorkEventsNow(next, workEventNote);
+      return next;
+    });
+  };
+
+  const addCustomWorkEventTag = () => {
+    const normalized = workEventCustomTag.replace(/\s+/g, " ").trim().slice(0, 28);
+    if (!normalized) return;
+    setWorkEventCustomTag("");
+    setWorkEventTags((prev) => {
+      const next = normalizeWorkEventTags([...prev, normalized]);
+      saveWorkEventsNow(next, workEventNote);
+      return next;
+    });
+  };
+
   const setShiftQuick = (s: Shift) => {
     setShift(s);
     setCustomShiftMode(false);
@@ -352,6 +433,10 @@ export function ScheduleRecordSheet({
 
   const savedLabel =
     saveState === "saving" ? t("저장 중…") : saveState === "saved" ? t("저장됨 ✓") : "";
+  const customWorkEventTags = useMemo(
+    () => workEventTags.filter((tag) => !WORK_EVENT_PRESET_SET.has(tag)),
+    [workEventTags]
+  );
 
   const handleClose = () => {
     if (noteDebounce.current) {
@@ -368,6 +453,11 @@ export function ScheduleRecordSheet({
       saveSleepNow(sleepText);
       saveCaffeineNow(caffeineText);
       saveNapNow(napText);
+      if (workEventNoteDebounce.current) {
+        clearTimeout(workEventNoteDebounce.current);
+        workEventNoteDebounce.current = null;
+      }
+      saveWorkEventsNow(workEventTags, workEventNote);
     }
     onClose();
   };
@@ -593,6 +683,79 @@ export function ScheduleRecordSheet({
             {t("건강 기록은 오늘/전날만 입력할 수 있어요. 다른 날짜는 근무/메모만 가능합니다.")}
           </div>
         )}
+
+        {canEditHealth ? (
+          <div className="rounded-2xl border border-ios-sep bg-white p-4">
+            <div className="text-[13px] font-semibold">{t("근무 이벤트")}</div>
+            <div className="mt-1 text-[12.5px] text-ios-muted">{t("오늘 근무에서 있었던 상황을 태그로 남겨 주세요.")}</div>
+            <div className="mt-1 text-[11px] font-semibold text-ios-muted">{t("태그는 여러 개 선택할 수 있어요.")}</div>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              {workEventPresetTags.map((item) => {
+                const active = workEventTags.includes(item.key);
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => toggleWorkEventTag(item.key)}
+                    className={cn(
+                      "rounded-full border px-3 py-1 text-[12px] font-semibold",
+                      active ? "border-black bg-black text-white" : "border-ios-sep bg-white"
+                    )}
+                  >
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-3 flex items-center gap-2">
+              <Input
+                value={workEventCustomTag}
+                onChange={(e) => setWorkEventCustomTag(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addCustomWorkEventTag();
+                  }
+                }}
+                placeholder={t("직접 태그 추가")}
+                className="w-full"
+              />
+              <Button variant="secondary" onClick={addCustomWorkEventTag}>
+                {t("추가")}
+              </Button>
+            </div>
+
+            {customWorkEventTags.length ? (
+              <div className="mt-3">
+                <div className="mb-2 text-[12px] font-semibold text-ios-muted">{t("직접 추가한 태그")}</div>
+                <div className="flex flex-wrap gap-2">
+                  {customWorkEventTags.map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => toggleWorkEventTag(tag)}
+                      className="rounded-full border border-ios-sep bg-ios-bg px-3 py-1 text-[12px] font-semibold text-ios-text"
+                    >
+                      {tag} ×
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="mt-3">
+              <div className="mb-2 text-[12px] font-semibold text-ios-muted">{t("이벤트 상세 메모 (선택)")}</div>
+              <Textarea
+                value={workEventNote}
+                onChange={(e) => setWorkEventNote(e.target.value)}
+                placeholder={t("예: 코드블루 1건 대응, 인계 지연 30분")}
+                rows={2}
+              />
+            </div>
+          </div>
+        ) : null}
 
         {/* 메모 */}
         <div className="rounded-2xl border border-ios-sep bg-white p-4">

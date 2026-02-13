@@ -23,6 +23,8 @@ export type DailyHealthSnapshot = {
     caffeineLastAt?: string | null;
     activity?: number | null;
     symptomSeverity?: number | null;
+    workEventTags?: string[] | null;
+    workEventNote?: string | null;
   };
 
   // 기분은 emotions에 저장되므로 따로 넣어도 됨(서버 분석 편의)
@@ -90,6 +92,16 @@ export function buildDailyHealthSnapshot(opts: {
         caffeineLastAt: (bioRaw as any).caffeineLastAt ?? null,
         activity: bioRaw.activity ?? null,
         symptomSeverity: (bioRaw as any).symptomSeverity ?? null,
+        workEventTags: Array.isArray((bioRaw as any).workEventTags)
+          ? ((bioRaw as any).workEventTags as unknown[])
+              .map((item) => (typeof item === "string" ? item.replace(/\s+/g, " ").trim() : ""))
+              .filter(Boolean)
+              .slice(0, 8)
+          : null,
+        workEventNote:
+          typeof (bioRaw as any).workEventNote === "string"
+            ? (bioRaw as any).workEventNote.replace(/\s+/g, " ").trim().slice(0, 280)
+            : null,
       }
     : undefined;
 

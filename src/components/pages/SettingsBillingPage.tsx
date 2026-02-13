@@ -35,6 +35,7 @@ export function SettingsBillingPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<CancelMode | null>(null);
+  const flatSurface = "rounded-[24px] border border-ios-sep bg-white";
   const flatButtonBase =
     "inline-flex h-11 items-center justify-center rounded-full border px-4 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50";
   const flatButtonSecondary = `${flatButtonBase} border-ios-sep bg-[#F2F2F7] text-ios-text`;
@@ -129,7 +130,7 @@ export function SettingsBillingPage() {
       </div>
 
       {status !== "authenticated" ? (
-        <div className="wnl-surface p-5">
+        <div className={`${flatSurface} p-5`}>
           <div className="text-[16px] font-bold text-ios-text">{t("로그인이 필요해요")}</div>
           <p className="mt-2 text-[13px] text-ios-sub">{t("구독 결제와 플랜 적용은 로그인 후 사용할 수 있습니다.")}</p>
           <button
@@ -144,7 +145,7 @@ export function SettingsBillingPage() {
 
       {status === "authenticated" ? (
         <>
-          <section className="wnl-surface p-6">
+          <section className={`${flatSurface} p-6`}>
             <div className="text-[13px] font-semibold text-ios-sub">{t("현재 플랜")}</div>
             <div className="mt-2 flex items-end justify-between gap-3">
               <div className="text-[42px] font-extrabold tracking-[-0.03em] text-ios-text">

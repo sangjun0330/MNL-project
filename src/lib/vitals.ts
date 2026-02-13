@@ -6,7 +6,7 @@ import type { MenstrualPhase } from "@/lib/menstrual";
 import type { AppState, BioInputs, EmotionEntry } from "@/lib/model";
 import { hasHealthInput } from "@/lib/healthRecords";
 import type { Shift } from "@/lib/types";
-import { defaultMNLState, stepMNLBatteryEngine } from "@/lib/mnlBatteryEngine";
+import { defaultRNestState, stepRNestBatteryEngine } from "@/lib/rnestBatteryEngine";
 import { shiftTimes } from "@/lib/wnlInsight";
 
 export type RiskTone = "green" | "orange" | "red";
@@ -25,6 +25,8 @@ export type DailyVital = {
     mood?: number | null; // 1..5
     caffeineMg?: number | null;
     symptomSeverity?: number | null; // 0..3
+    workEventTags?: string[] | null;
+    workEventNote?: string | null;
   };
 
   menstrual: ReturnType<typeof menstrualContextForDate>;
@@ -146,6 +148,16 @@ function normalizeBio(bio?: BioInputs | null): BioInputs {
     mood: (bio as any)?.mood ?? null,
     caffeineMg: bio?.caffeineMg ?? null,
     symptomSeverity: (bio as any)?.symptomSeverity ?? null,
+    workEventTags: Array.isArray((bio as any)?.workEventTags)
+      ? ((bio as any).workEventTags as unknown[])
+          .map((item) => (typeof item === "string" ? item.replace(/\s+/g, " ").trim() : ""))
+          .filter(Boolean)
+          .slice(0, 8)
+      : null,
+    workEventNote:
+      typeof (bio as any)?.workEventNote === "string"
+        ? String((bio as any).workEventNote).replace(/\s+/g, " ").trim().slice(0, 280)
+        : null,
   };
 }
 
@@ -261,7 +273,7 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
   const computeStart = earliestISO < start ? earliestISO : start;
 
   const computeDays = Math.max(0, diffDays(end, computeStart));
-  let engineState = defaultMNLState();
+  let engineState = defaultRNestState();
   let hasSleepHistory = false;
   let lastAnyInputISO: ISODate | null = null;
   const recentSleepObs: NumericObservation[] = [];
@@ -305,6 +317,16 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
     const rawSymptomSeverityInput = (bio as any).symptomSeverity;
     const rawSymptomSeverity =
       rawSymptomSeverityInput == null ? null : clamp(Number(rawSymptomSeverityInput), 0, 3);
+    const rawWorkEventTags = Array.isArray((bio as any).workEventTags)
+      ? ((bio as any).workEventTags as unknown[])
+          .map((item) => (typeof item === "string" ? item.replace(/\s+/g, " ").trim() : ""))
+          .filter(Boolean)
+          .slice(0, 8)
+      : null;
+    const rawWorkEventNote =
+      typeof (bio as any).workEventNote === "string"
+        ? String((bio as any).workEventNote).replace(/\s+/g, " ").trim().slice(0, 280)
+        : null;
 
     const hasAnyRawInput = hasHealthInput(bio, emotion ?? null);
     if (hasAnyRawInput) lastAnyInputISO = iso;
@@ -495,7 +517,7 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
     const quickReturnHours = hoursBetweenShifts(prevISO, prevShift, iso, shift);
     const shiftHours = shiftLengthHours(iso, shift);
 
-    const res = stepMNLBatteryEngine(
+    const res = stepRNestBatteryEngine(
       engineState,
       {
         dateISO: iso,
@@ -603,6 +625,8 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
         mood: effectiveMood,
         caffeineMg: effectiveCaffeineMg,
         symptomSeverity: effectiveSymptomSeverity,
+        workEventTags: rawWorkEventTags,
+        workEventNote: rawWorkEventNote,
       },
       menstrual,
       body: {

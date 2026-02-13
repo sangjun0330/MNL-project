@@ -11,8 +11,8 @@ import type { Shift } from "@/lib/types";
 import { autoAdjustMenstrualSettings } from "@/lib/menstrual";
 import { sanitizeStatePayload } from "@/lib/stateSanitizer";
 
-const STORAGE_KEY_BASE = "mnl_app_state_v1";
-const RESET_VERSION_KEY = "mnl_reset_version";
+const STORAGE_KEY_BASE = "rnest_app_state_v1";
+const RESET_VERSION_KEY = "rnest_reset_version";
 const RESET_VERSION = "2026-02-03-2";
 const SSR_SELECTED = "1970-01-01" as ISODate;
 let currentStorageKey = STORAGE_KEY_BASE;
@@ -249,6 +249,8 @@ function setEmotionForDate(iso: ISODate, emo: EmotionEntry) {
     caffeineMg: null,
     mood: null,
     symptomSeverity: null,
+    workEventTags: null,
+    workEventNote: null,
   };
   const prevBio = (state.bio ?? {})[iso] ?? emptyBioRecord;
   const nextBio = { ...emptyBioRecord, ...prevBio, mood: emo.mood };
@@ -284,6 +286,8 @@ function setBioForDate(iso: ISODate, patch: Partial<BioInputs>) {
     caffeineMg: null,
     mood: null,
     symptomSeverity: null,
+    workEventTags: null,
+    workEventNote: null,
   };
   const prev = (state.bio ?? {})[iso] ?? emptyBioRecord;
   const nextBio = { ...emptyBioRecord, ...prev, ...patch };

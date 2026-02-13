@@ -49,6 +49,12 @@ export function SettingsBillingSuccessPage() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ConfirmResult | null>(null);
   const requestedRef = useRef(false);
+  const flatSurface = "rounded-[24px] border border-ios-sep bg-white";
+  const flatSubSurface = "rounded-[18px] border border-ios-sep bg-[#F7F7FA]";
+  const flatButtonBase =
+    "inline-flex h-10 items-center justify-center rounded-full border px-5 text-[13px] font-semibold transition-colors";
+  const flatButtonPrimary = `${flatButtonBase} border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]`;
+  const flatButtonSecondary = `${flatButtonBase} border-ios-sep bg-[#F2F2F7] text-ios-text`;
 
   const parsedAmount = useMemo(() => {
     const n = Number(amount);
@@ -109,7 +115,7 @@ export function SettingsBillingSuccessPage() {
 
   return (
     <div className="mx-auto w-full max-w-[720px] px-4 pb-24 pt-6">
-      <div className="wnl-surface p-6">
+      <div className={`${flatSurface} p-6`}>
         <div className="text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">{t("결제 결과")}</div>
 
         {loading ? <div className="mt-3 text-[13px] text-ios-sub">{t("결제 승인 처리 중입니다...")}</div> : null}
@@ -128,7 +134,7 @@ export function SettingsBillingSuccessPage() {
               {t("결제 완료")}
             </div>
 
-            <div className="wnl-sub-surface mt-4 p-4">
+            <div className={`${flatSubSurface} mt-4 p-4`}>
               <div className="text-[13px] text-ios-sub">{t("적용 플랜")}</div>
               <div className="mt-1 text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">{getPlanDefinition(planTier).title}</div>
               <div className="mt-2 text-[12.5px] text-ios-sub">
@@ -145,13 +151,13 @@ export function SettingsBillingSuccessPage() {
         <div className="mt-6 flex gap-2">
           <Link
             href="/settings/billing"
-            className="wnl-btn-primary inline-flex h-10 items-center justify-center px-5 text-[13px]"
+            className={flatButtonPrimary}
           >
             {t("구독으로 돌아가기")}
           </Link>
           <Link
             href="/insights"
-            className="wnl-btn-secondary inline-flex h-10 items-center justify-center px-5 text-[13px]"
+            className={flatButtonSecondary}
           >
             {t("인사이트 보기")}
           </Link>
