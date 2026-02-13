@@ -29,6 +29,16 @@ function compactBio(bio?: BioInputs) {
   if (bio.menstrualStatus && bio.menstrualStatus !== "none") next.menstrualStatus = bio.menstrualStatus;
   if (bio.menstrualFlow != null) next.menstrualFlow = bio.menstrualFlow;
   if (bio.shiftOvertimeHours != null) next.shiftOvertimeHours = bio.shiftOvertimeHours;
+  if (Array.isArray(bio.workEventTags) && bio.workEventTags.length) {
+    const tags = bio.workEventTags
+      .map((tag) => (typeof tag === "string" ? tag.replace(/\s+/g, " ").trim() : ""))
+      .filter(Boolean)
+      .slice(0, 8);
+    if (tags.length) next.workEventTags = tags;
+  }
+  if (typeof bio.workEventNote === "string" && bio.workEventNote.trim()) {
+    next.workEventNote = bio.workEventNote.replace(/\s+/g, " ").trim().slice(0, 280);
+  }
 
   return Object.keys(next).length ? next : undefined;
 }

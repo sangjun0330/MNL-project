@@ -67,6 +67,49 @@ function roundInteger(value: unknown): number | "-" {
   return Math.round(n);
 }
 
+function normalizeWorkEventTags(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === "string" ? item.replace(/\s+/g, " ").trim() : ""))
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+function summarizeWorkEvents(vitals: DailyVital[]) {
+  const tagCount = new Map<string, number>();
+  const notes: Array<{ dateISO: string; note: string }> = [];
+  let daysWithEvents = 0;
+
+  for (const vital of vitals) {
+    const tags = normalizeWorkEventTags(vital.inputs.workEventTags);
+    for (const tag of tags) {
+      tagCount.set(tag, (tagCount.get(tag) ?? 0) + 1);
+    }
+    const note =
+      typeof vital.inputs.workEventNote === "string"
+        ? vital.inputs.workEventNote.replace(/\s+/g, " ").trim()
+        : "";
+    if (note) {
+      notes.push({
+        dateISO: vital.dateISO,
+        note: note.slice(0, 180),
+      });
+    }
+    if (tags.length || note) daysWithEvents += 1;
+  }
+
+  const topTags = Array.from(tagCount.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([tag, count]) => ({ tag, count }));
+
+  return {
+    daysWithEvents,
+    topTags,
+    notes: notes.slice(-7),
+  };
+}
+
 function resolveMaxOutputTokens() {
   const raw = Number(process.env.OPENAI_MAX_OUTPUT_TOKENS ?? DEFAULT_MAX_OUTPUT_TOKENS);
   if (!Number.isFinite(raw)) return DEFAULT_MAX_OUTPUT_TOKENS;
@@ -116,6 +159,7 @@ function buildUserContext(params: GenerateOpenAIRecoveryParams) {
           prevWeekVitals.length
       )
     : null;
+  const eventSummary7 = summarizeWorkEvents(vitals7);
 
   return {
     language,
@@ -137,6 +181,12 @@ function buildUserContext(params: GenerateOpenAIRecoveryParams) {
           mood: roundInteger(todayVital.inputs.mood ?? todayVital.emotion?.mood),
           caffeineMg: roundInteger(todayVital.inputs.caffeineMg),
           symptomSeverity: roundInteger(todayVital.inputs.symptomSeverity),
+          workEventTags: normalizeWorkEventTags(todayVital.inputs.workEventTags),
+          workEventNote:
+            typeof todayVital.inputs.workEventNote === "string"
+              ? todayVital.inputs.workEventNote.replace(/\s+/g, " ").trim().slice(0, 180)
+              : "-",
+          note: typeof todayVital.note === "string" ? todayVital.note.replace(/\s+/g, " ").trim().slice(0, 180) : "-",
           menstrualLabel: todayVital.menstrual?.label ?? "-",
           menstrualTracking: Boolean(todayVital.menstrual?.enabled),
           sleepDebtHours: roundNumber(todayVital.engine?.sleepDebtHours, 1),
@@ -152,6 +202,7 @@ function buildUserContext(params: GenerateOpenAIRecoveryParams) {
       avgVital7: avg7,
       avgVitalPrev7: avgPrev,
       recordsIn7Days: vitals7.length,
+      workEvents: eventSummary7,
       recentVitals7: vitals7.map((vital) => ({
         dateISO: vital.dateISO,
         shift: vital.shift,
@@ -162,6 +213,12 @@ function buildUserContext(params: GenerateOpenAIRecoveryParams) {
         mood: roundInteger(vital.inputs.mood ?? vital.emotion?.mood),
         caffeineMg: roundInteger(vital.inputs.caffeineMg),
         symptomSeverity: roundInteger(vital.inputs.symptomSeverity),
+        workEventTags: normalizeWorkEventTags(vital.inputs.workEventTags),
+        workEventNote:
+          typeof vital.inputs.workEventNote === "string"
+            ? vital.inputs.workEventNote.replace(/\s+/g, " ").trim().slice(0, 160)
+            : "-",
+        note: typeof vital.note === "string" ? vital.note.replace(/\s+/g, " ").trim().slice(0, 160) : "-",
       })),
     },
   };
@@ -195,6 +252,7 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
       "- 각 항목은 '[카테고리명]' 헤더로 시작",
       "- 각 항목은 설명 1문장 + 행동 2개로 짧게 작성",
       "- 생리주기는 전문용어 없이 쉬운 단어 사용",
+      "- [Data JSON]에 workEventTags/workEventNote/note가 있으면 해당 근무 이벤트 맥락을 반영해 우선순위를 조정할 것",
       "- 중복 문장 금지, 같은 의미 반복 금지",
       "- C 전체는 20줄 이내로 간결하게 작성",
       "",
@@ -226,6 +284,7 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
     "If menstrualTrackingEnabled is true, menstrual section may be included and 1-6 numbering is allowed.",
     "[D] Weekly AI note (weekly summary -> personal pattern -> next week preview)",
     "Tone: warm peer nurse voice, no medical jargon, no blame, concrete actions.",
+    "When workEventTags/workEventNote/note exist in Data JSON, reflect those shift events in prioritization.",
     "No duplicated sentences.",
     "Keep numbers at one decimal place max.",
     "Do not use score tags like stress(2) or mood4. Rewrite them in plain language.",

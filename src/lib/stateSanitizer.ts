@@ -32,6 +32,22 @@ function hasOwn(obj: Record<string, unknown>, key: string) {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
+function sanitizeTagList(value: unknown, maxItems = 8, maxLength = 28) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const tags: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string") continue;
+    const normalized = item.replace(/\s+/g, " ").trim().slice(0, maxLength);
+    if (!normalized) continue;
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    tags.push(normalized);
+    if (tags.length >= maxItems) break;
+  }
+  return tags;
+}
+
 function sanitizeEmotion(entry: unknown, fallbackMood: number | null = null): EmotionEntry | undefined {
   if (!entry || typeof entry !== "object") return undefined;
   const tagsRaw = Array.isArray((entry as any).tags) ? (entry as any).tags : [];
@@ -137,6 +153,24 @@ function sanitizeBio(entry: unknown): BioInputs | undefined {
       if (symptomSeverity != null) {
         out.symptomSeverity = clamp(Math.round(symptomSeverity), 0, 3) as BioInputs["symptomSeverity"];
       }
+    }
+  }
+
+  if (hasOwn(source, "workEventTags")) {
+    touched = true;
+    if (source.workEventTags == null) out.workEventTags = null;
+    else {
+      const tags = sanitizeTagList(source.workEventTags);
+      out.workEventTags = tags.length ? tags : null;
+    }
+  }
+
+  if (hasOwn(source, "workEventNote")) {
+    touched = true;
+    if (source.workEventNote == null) out.workEventNote = null;
+    else if (typeof source.workEventNote === "string") {
+      const note = source.workEventNote.replace(/\s+/g, " ").trim().slice(0, 280);
+      out.workEventNote = !note || note === "-" ? null : note;
     }
   }
 

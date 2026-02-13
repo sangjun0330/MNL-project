@@ -14,6 +14,7 @@ export function SettingsBillingUpgradePage() {
   const [subData, setSubData] = useState<SubscriptionResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
+  const flatSurface = "rounded-[24px] border border-ios-sep bg-white";
   const proPlan = getPlanDefinition("pro");
   const flatButtonBase =
     "inline-flex h-11 items-center justify-center rounded-full border px-5 text-[14px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50";
@@ -76,7 +77,7 @@ export function SettingsBillingUpgradePage() {
       </div>
 
       {status !== "authenticated" ? (
-        <div className="wnl-surface p-5">
+        <div className={`${flatSurface} p-5`}>
           <div className="text-[16px] font-bold text-ios-text">{t("로그인이 필요해요")}</div>
           <p className="mt-2 text-[13px] text-ios-sub">{t("플랜 업그레이드는 로그인 후 가능합니다.")}</p>
           <button
@@ -91,7 +92,7 @@ export function SettingsBillingUpgradePage() {
 
       {status === "authenticated" ? (
         <>
-          <section className="wnl-surface p-6">
+          <section className={`${flatSurface} p-6`}>
             <div className="text-[13px] font-semibold text-ios-sub">{t("현재 플랜")}</div>
             <div className="mt-2 text-[30px] font-extrabold tracking-[-0.03em] text-ios-text">
               {getPlanDefinition(activeTier).title}
@@ -99,7 +100,7 @@ export function SettingsBillingUpgradePage() {
             <div className="mt-1 text-[13px] text-ios-sub">{t("만료일")}: {formatDateLabel(activePeriodEnd)}</div>
           </section>
 
-          <section className="wnl-surface mt-4 p-6">
+          <section className={`${flatSurface} mt-4 p-6`}>
             <div className="flex items-start justify-between gap-4">
               <div>
                 <div className="text-[13px] text-ios-sub">{t("업그레이드 플랜")}</div>

@@ -43,6 +43,10 @@ export type BioInputs = {
   menstrualFlow?: 0 | 1 | 2 | 3 | null;
   // deprecated: 저장/알고리즘 미사용 (UI 호환용 타입만 유지)
   shiftOvertimeHours?: number | null;
+  // v3.0: 근무 이벤트 태그(다중 선택 + 직접 입력)
+  workEventTags?: string[] | null;
+  // v3.0: 근무 이벤트 상세 메모
+  workEventNote?: string | null;
 };
 
 export type ProfileSettings = {

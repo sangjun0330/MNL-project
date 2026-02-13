@@ -9,10 +9,27 @@ const BIO_FIELDS = [
   "caffeineMg",
   "mood",
   "symptomSeverity",
+  "workEventTags",
+  "workEventNote",
 ] as const;
 
 function valueOrDash(value: unknown) {
   return value == null ? "-" : value;
+}
+
+function normalizeWorkEventTags(value: unknown) {
+  if (!Array.isArray(value)) return "-";
+  const tags = value
+    .map((item) => (typeof item === "string" ? item.replace(/\s+/g, " ").trim() : ""))
+    .filter(Boolean)
+    .slice(0, 8);
+  return tags.length ? tags : "-";
+}
+
+function normalizeWorkEventNote(value: unknown) {
+  if (typeof value !== "string") return "-";
+  const note = value.replace(/\s+/g, " ").trim().slice(0, 280);
+  return note || "-";
 }
 
 export function serializeStateForSupabase(raw: unknown): AppState {
@@ -34,7 +51,19 @@ export function serializeStateForSupabase(raw: unknown): AppState {
     const mergedMood = bio.mood ?? emotion.mood ?? null;
     const fullBio: Record<string, unknown> = {};
     for (const key of BIO_FIELDS) {
-      fullBio[key] = key === "mood" ? valueOrDash(mergedMood) : valueOrDash(bio[key]);
+      if (key === "mood") {
+        fullBio[key] = valueOrDash(mergedMood);
+        continue;
+      }
+      if (key === "workEventTags") {
+        fullBio[key] = normalizeWorkEventTags(bio[key]);
+        continue;
+      }
+      if (key === "workEventNote") {
+        fullBio[key] = normalizeWorkEventNote(bio[key]);
+        continue;
+      }
+      fullBio[key] = valueOrDash(bio[key]);
     }
     (next.bio as Record<string, any>)[iso] = fullBio;
 

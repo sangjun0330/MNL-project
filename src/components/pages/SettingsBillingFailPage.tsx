@@ -21,6 +21,11 @@ export function SettingsBillingFailPage() {
   const message = params.get("message") ?? t("결제가 취소되었거나 실패했습니다.");
   const orderId = params.get("orderId") ?? "-";
   const sentRef = useRef(false);
+  const flatSurface = "rounded-[24px] border border-ios-sep bg-white";
+  const flatButtonBase =
+    "inline-flex h-10 items-center justify-center rounded-full border px-5 text-[13px] font-semibold transition-colors";
+  const flatButtonPrimary = `${flatButtonBase} border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]`;
+  const flatButtonSecondary = `${flatButtonBase} border-ios-sep bg-[#F2F2F7] text-ios-text`;
 
   useEffect(() => {
     if (status !== "authenticated" || sentRef.current) return;
@@ -44,7 +49,7 @@ export function SettingsBillingFailPage() {
 
   return (
     <div className="mx-auto w-full max-w-[720px] px-4 pb-24 pt-6">
-      <div className="wnl-surface p-6">
+      <div className={`${flatSurface} p-6`}>
         <div className="text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">{t("결제 실패")}</div>
         <div className="mt-3 text-[14px] font-semibold text-red-600">{code}</div>
         <div className="mt-1 text-[12.5px] text-ios-sub break-all">{message}</div>
@@ -53,13 +58,13 @@ export function SettingsBillingFailPage() {
         <div className="mt-6 flex gap-2">
           <Link
             href="/settings/billing"
-            className="wnl-btn-primary inline-flex h-10 items-center justify-center px-5 text-[13px]"
+            className={flatButtonPrimary}
           >
             {t("다시 시도")}
           </Link>
           <Link
             href="/settings"
-            className="wnl-btn-secondary inline-flex h-10 items-center justify-center px-5 text-[13px]"
+            className={flatButtonSecondary}
           >
             {t("설정으로 이동")}
           </Link>
