@@ -2,6 +2,8 @@ import { AppShell } from "@/components/shell/AppShell";
 import { HandoffSessionDetailPage } from "@/components/pages/tools/HandoffSessionDetailPage";
 import type { Metadata } from "next";
 
+export const runtime = "edge";
+
 export const metadata: Metadata = {
   robots: {
     index: false,
