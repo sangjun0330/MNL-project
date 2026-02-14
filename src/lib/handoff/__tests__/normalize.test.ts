@@ -29,6 +29,20 @@ test("normalizeSegments expands bilingual clinical terms and suppresses routine 
   );
 });
 
+test("normalizeSegments maps Korean pronunciations from lexicon to canonical clinical terms", () => {
+  const [normalized] = normalizeSegments([
+    rawSegment("s1", "에스피오투 88로 떨어져 엔알비 쓰고 브이에스 q2h로 다시 보자"),
+  ]);
+
+  assert.match(normalized.normalizedText, /산소포화도 88/);
+  assert.match(normalized.normalizedText, /비재호흡 마스크/);
+  assert.match(normalized.normalizedText, /활력징후/);
+  assert.equal(
+    normalized.uncertainties.some((item: { kind: string }) => item.kind === "unresolved_abbreviation"),
+    false
+  );
+});
+
 test("normalizeSegments only flags unknown abbreviations", () => {
   const [normalized] = normalizeSegments([
     rawSegment("s1", "환자A XYZ 오더 다시 확인 필요"),
@@ -36,6 +50,28 @@ test("normalizeSegments only flags unknown abbreviations", () => {
 
   assert.equal(
     normalized.uncertainties.some((item: { kind: string }) => item.kind === "unresolved_abbreviation"),
+    true
+  );
+});
+
+test("normalizeSegments flags confusion-pair context mismatch (HR/RR)", () => {
+  const [normalized] = normalizeSegments([
+    rawSegment("s1", "환자A HR 24회/분으로 호흡수 빠르고 재확인 필요"),
+  ]);
+
+  assert.equal(
+    normalized.uncertainties.some((item: { kind: string }) => item.kind === "confusable_abbreviation"),
+    true
+  );
+});
+
+test("normalizeSegments flags confusion-pair context mismatch (DC/D-C)", () => {
+  const [normalized] = normalizeSegments([
+    rawSegment("s1", "환자A D/C 오더인데 오늘 퇴원인지 약 중단인지 확인 필요"),
+  ]);
+
+  assert.equal(
+    normalized.uncertainties.some((item: { kind: string }) => item.kind === "confusable_abbreviation"),
     true
   );
 });

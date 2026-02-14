@@ -25,6 +25,8 @@
 - Pipeline
   - normalize -> PHI mask -> split -> structure -> priority
   - `src/lib/handoff/pipeline.ts`
+  - medical pronunciation lexicon auto-merge pipeline (`scripts/handoff/build-medical-lexicon.mjs`)
+  - confusion-pair context warning (HR/RR, DC/D-C, Cr/CRP, PR/PRN, PE/PEA)
 - Storage
   - raw/evidence: encrypted local vault (`TTL=24h`)
   - de-identified structured result: local storage (`TTL=7d`)
@@ -72,10 +74,12 @@
 - ASR continuous failure rule: every 2 consecutive ASR errors adds manual uncertainty item
 - Chunk coverage rule: if a recorded chunk has no matched transcript window, add manual uncertainty for review
 - Missing value/time/ambiguous patient -> uncertainty list (no hallucinated completion)
+- Confusable abbreviation in wrong context -> `confusable_abbreviation` uncertainty
 - 10-second review lock: save actions remain disabled while review timer is active
 - De-identification guard: structured payload is re-sanitized before save/load/list
 - Local storage fault tolerance: storage/quota/security exceptions fail closed without crashing UI
 - Session cleanup runs on app load, visibility resume, and periodic interval
+- Transcript segment hard cap for web stability (`MAX_TRANSCRIPT_SEGMENT_COUNT`): overflow lines are merged into one tail segment
 
 ## 7. Feature Flags (Web)
 Recommended defaults (`.env.local`):

@@ -1,3 +1,4 @@
+import { normalizeRoomMentions } from "./clinicalNlu";
 import { normalizeSegments } from "./normalize";
 import { applyPhiGuard } from "./phiGuard";
 import { splitSegmentsByPatient } from "./split";
@@ -14,18 +15,22 @@ import type {
 
 const DEFAULT_SEGMENT_MS = 5000;
 const MAX_UNCERTAINTY_ITEM_COUNT = 24;
+const MAX_TRANSCRIPT_SEGMENT_COUNT = 360;
 
 const UNCERTAINTY_KIND_ORDER: Record<UncertaintyKind, number> = {
   manual_review: 0,
   missing_value: 1,
   missing_time: 2,
-  unresolved_abbreviation: 3,
-  ambiguous_patient: 4,
+  confusable_abbreviation: 3,
+  unresolved_abbreviation: 4,
+  ambiguous_patient: 5,
 };
 
 const AMBIGUOUS_PATIENT_CANDIDATE_PATTERN =
   /(혈당|헤모글로빈|체온|소변량|활력징후|투약|검사|오더|재측정|재검|체크|확인|콜|모니터|통증|호흡|산소|어지럽|흑변|출혈|항생제|항응고|의식|낙상|쇼크)/i;
 const NON_PATIENT_CONTEXT_PATTERN = /(퇴원|입원|회진|병동|신규|가능|예정|\d+\s*명)/;
+const INLINE_PATIENT_ANCHOR_PATTERN = /(\d{3,4}\s*호|환자[A-Z]{1,2}|[가-힣]{1,3}[O○0]{2}|[가-힣]{2,4}\s*환자)/g;
+const INLINE_TRANSITION_CUE_PATTERN = /(다음\s*환자|그다음|한편|반면|또한|그리고)/;
 
 type TranscriptOptions = {
   startOffsetMs?: number;
@@ -42,20 +47,67 @@ export type ManualUncertaintyInput = {
 };
 
 function splitTranscriptLines(text: string) {
-  return text
+  const baseLines = text
     .split(/\n+/)
     .flatMap((line) => line.split(/(?<=[.!?。])\s+/))
     .map((line) => line.trim())
     .filter(Boolean);
+
+  const segmented: string[] = [];
+  baseLines.forEach((line) => {
+    const normalizedLine = normalizeRoomMentions(line);
+    const anchors = [...normalizedLine.matchAll(INLINE_PATIENT_ANCHOR_PATTERN)];
+    if (anchors.length < 2) {
+      segmented.push(normalizedLine);
+      return;
+    }
+
+    const cuts = [0];
+    for (let index = 1; index < anchors.length; index += 1) {
+      const anchorIndex = anchors[index].index ?? 0;
+      const previousCut = cuts[cuts.length - 1] ?? 0;
+      if (anchorIndex - previousCut < 16) continue;
+
+      const between = normalizedLine.slice(previousCut, anchorIndex);
+      const punctuationCut = Math.max(between.lastIndexOf(","), between.lastIndexOf(";"), between.lastIndexOf("·"));
+      if (punctuationCut >= 4) {
+        cuts.push(previousCut + punctuationCut + 1);
+        continue;
+      }
+
+      const transition = between.match(INLINE_TRANSITION_CUE_PATTERN);
+      if (transition?.index != null && transition.index >= 4) {
+        cuts.push(previousCut + transition.index);
+        continue;
+      }
+
+      cuts.push(anchorIndex);
+    }
+
+    cuts.push(normalizedLine.length);
+    for (let i = 0; i < cuts.length - 1; i += 1) {
+      const chunk = normalizedLine.slice(cuts[i], cuts[i + 1]).trim();
+      if (chunk) segmented.push(chunk);
+    }
+  });
+
+  return segmented.filter(Boolean);
 }
 
 export function transcriptToRawSegments(text: string, options?: TranscriptOptions): RawSegment[] {
   const lines = splitTranscriptLines(text);
+  const boundedLines =
+    lines.length <= MAX_TRANSCRIPT_SEGMENT_COUNT
+      ? lines
+      : [
+          ...lines.slice(0, MAX_TRANSCRIPT_SEGMENT_COUNT - 1),
+          `초과분 통합: ${lines.slice(MAX_TRANSCRIPT_SEGMENT_COUNT - 1).join(" ")}`.trim(),
+        ];
   const segmentDurationMs = options?.segmentDurationMs ?? DEFAULT_SEGMENT_MS;
   const startOffsetMs = options?.startOffsetMs ?? 0;
   const prefix = options?.idPrefix ?? "seg";
 
-  return lines.map((line, index) => {
+  return boundedLines.map((line, index) => {
     const startMs = startOffsetMs + index * segmentDurationMs;
     return {
       segmentId: `${prefix}-${String(index + 1).padStart(3, "0")}`,

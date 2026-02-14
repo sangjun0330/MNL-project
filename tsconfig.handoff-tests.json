@@ -22,6 +22,7 @@
     "src/lib/safeParse.ts",
     "src/lib/handoff/types.ts",
     "src/lib/handoff/clinicalNlu.ts",
+    "src/lib/handoff/medicalPronunciationLexicon.ts",
     "src/lib/handoff/deidGuard.ts",
     "src/lib/handoff/featureFlags.ts",
     "src/lib/handoff/normalize.ts",

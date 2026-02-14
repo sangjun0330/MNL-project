@@ -96,3 +96,56 @@ test("splitSegmentsByPatient does not force carry-forward after transition cue",
   assert.equal(out.patientSegments["환자A"]?.length, 1);
   assert.equal(out.unmatchedSegments.length, 1);
 });
+
+test("splitSegmentsByPatient backfills unmatched continuation between same patient anchors", () => {
+  const segments: MaskedSegment[] = [
+    seg({
+      id: "s1",
+      text: "환자A 폐렴으로 산소 필요",
+      startMs: 0,
+      endMs: 5000,
+      patientAlias: "환자A",
+    }),
+    seg({
+      id: "s2",
+      text: "산소포화도 94로 유지 중, 모니터링 필요",
+      startMs: 5000,
+      endMs: 10000,
+      patientAlias: null,
+    }),
+    seg({
+      id: "s3",
+      text: "환자A 항생제 10시 투약 예정",
+      startMs: 10000,
+      endMs: 15000,
+      patientAlias: "환자A",
+    }),
+  ];
+
+  const out = splitSegmentsByPatient(segments);
+  assert.equal(out.patientSegments["환자A"]?.length, 3);
+  assert.equal(out.unmatchedSegments.length, 0);
+});
+
+test("splitSegmentsByPatient keeps pronoun continuation with active patient", () => {
+  const segments: MaskedSegment[] = [
+    seg({
+      id: "s1",
+      text: "환자A 폐렴으로 산소 필요",
+      startMs: 0,
+      endMs: 5000,
+      patientAlias: "환자A",
+    }),
+    seg({
+      id: "s2",
+      text: "해당 환자 새벽에 호흡수 재확인 필요",
+      startMs: 5000,
+      endMs: 10000,
+      patientAlias: null,
+    }),
+  ];
+
+  const out = splitSegmentsByPatient(segments);
+  assert.equal(out.patientSegments["환자A"]?.length, 2);
+  assert.equal(out.unmatchedSegments.length, 0);
+});

@@ -1,4 +1,5 @@
 import {
+  detectConfusableAbbreviationWarnings,
   detectUnknownClinicalAbbreviations,
   normalizeClinicalNarrative,
 } from "./clinicalNlu";
@@ -102,6 +103,14 @@ function detectUncertainties(originalText: string, normalizedText: string): Segm
       reason: `미해석 약어(${unresolved.join(", ")})가 포함되어 확인이 필요합니다.`,
     });
   }
+
+  const confusable = detectConfusableAbbreviationWarnings(originalText, 2);
+  confusable.forEach((item) => {
+    list.push({
+      kind: "confusable_abbreviation",
+      reason: `${item.reason} (${item.token})`,
+    });
+  });
 
   return list;
 }
