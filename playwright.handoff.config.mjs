@@ -6,6 +6,7 @@ const BASE_URL = process.env.HANDOFF_E2E_BASE_URL ?? `http://${HOST}:${PORT}`;
 
 export default defineConfig({
   testDir: "./e2e/handoff",
+  workers: 1,
   timeout: 120_000,
   expect: {
     timeout: 20_000,
@@ -23,7 +24,7 @@ export default defineConfig({
   webServer: {
     command: `npm run dev -- --hostname ${HOST} --port ${PORT}`,
     port: PORT,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: process.env.HANDOFF_E2E_REUSE_SERVER === "true",
     timeout: 180_000,
     env: {
       NEXT_PUBLIC_HANDOFF_ENABLED: "true",

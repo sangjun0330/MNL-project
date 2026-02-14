@@ -74,6 +74,58 @@ type ChunkLog = {
 
 const MAX_SEGMENT_COUNT = 480;
 const MAX_SEGMENT_TOTAL_TEXT_LENGTH = 120_000;
+const LIVE_MEMORY_ONLY =
+  String(process.env.NEXT_PUBLIC_HANDOFF_LIVE_MEMORY_ONLY ?? "true").trim().toLowerCase() !== "false";
+const HANDOFF_FLAT_CARD_CLASS = "border-[color:var(--wnl-accent-border)] bg-white shadow-none";
+
+function parseMsValue(raw: string | undefined, fallback: number, min: number, max: number) {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return fallback;
+  const rounded = Math.floor(parsed);
+  if (rounded < min) return min;
+  if (rounded > max) return max;
+  return rounded;
+}
+
+const LIVE_ALIAS_REVEAL_MS = parseMsValue(
+  process.env.NEXT_PUBLIC_HANDOFF_LIVE_ALIAS_REVEAL_MS,
+  8_000,
+  800,
+  30_000
+);
+const LIVE_AUTO_LOCK_MS = parseMsValue(
+  process.env.NEXT_PUBLIC_HANDOFF_LIVE_AUTO_LOCK_MS,
+  90_000,
+  2_000,
+  10 * 60_000
+);
+const LIVE_MEMORY_PURGE_MS = parseMsValue(
+  process.env.NEXT_PUBLIC_HANDOFF_LIVE_MEMORY_PURGE_MS,
+  15 * 60_000,
+  4_000,
+  60 * 60_000
+);
+
+function sortAliasTokens(tokens: string[]) {
+  return [...tokens].sort((a, b) => {
+    const roomA = /\d{3,4}\s*호/.test(a);
+    const roomB = /\d{3,4}\s*호/.test(b);
+    if (roomA !== roomB) return roomA ? -1 : 1;
+    return a.localeCompare(b, "ko");
+  });
+}
+
+function buildAliasTokenIndex(aliasMap: Record<string, string>) {
+  const grouped: Record<string, string[]> = {};
+  Object.entries(aliasMap).forEach(([token, alias]) => {
+    if (!grouped[alias]) grouped[alias] = [];
+    if (!grouped[alias].includes(token)) grouped[alias].push(token);
+  });
+  Object.keys(grouped).forEach((alias) => {
+    grouped[alias] = sortAliasTokens(grouped[alias]);
+  });
+  return grouped;
+}
 
 function levelTone(level: HandoffRiskLevel) {
   if (level === "high") return "bg-red-50 text-red-700 border-red-200";
@@ -147,7 +199,7 @@ function ResultSection({
 
   return (
     <div className="space-y-4">
-      <Card className="p-5">
+      <Card className={`p-5 ${HANDOFF_FLAT_CARD_CLASS}`}>
         <div data-testid="handoff-global-top-section" className="flex items-center justify-between gap-3">
           <div>
             <div className="text-[15px] font-semibold text-ios-text">Global Top</div>
@@ -162,7 +214,9 @@ function ResultSection({
             result.globalTop.map((item, idx) => (
               <div key={item.id} className="rounded-2xl border border-ios-sep bg-white p-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full bg-black px-2 py-1 text-[11px] font-semibold text-white">TOP {idx + 1}</span>
+                  <span className="rounded-full border border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] px-2 py-1 text-[11px] font-semibold text-[color:var(--wnl-accent)]">
+                    TOP {idx + 1}
+                  </span>
                   <span className="rounded-full border border-ios-sep px-2 py-1 text-[11px] font-semibold text-ios-sub">{item.alias}</span>
                   <span className={`rounded-full border px-2 py-1 text-[11px] font-semibold ${scoreTone(item.score)}`}>{item.badge}</span>
                   <span className="text-[11px] font-semibold text-ios-sub">score {item.score}</span>
@@ -185,7 +239,7 @@ function ResultSection({
         </div>
       </Card>
 
-      <Card className="p-5">
+      <Card className={`p-5 ${HANDOFF_FLAT_CARD_CLASS}`}>
         <div className="text-[15px] font-semibold text-ios-text">Ward Events</div>
         <div className="mt-1 text-[12.5px] text-ios-sub">퇴원/입원/회진/장비/민원 등 병동 단위 이벤트</div>
         <div className="mt-3 space-y-2">
@@ -211,7 +265,7 @@ function ResultSection({
         </div>
       </Card>
 
-      <Card className="p-5">
+      <Card className={`p-5 ${HANDOFF_FLAT_CARD_CLASS}`}>
         <div className="text-[15px] font-semibold text-ios-text">Patient Cards</div>
         <div className="mt-1 text-[12.5px] text-ios-sub">환자별 Top/To-do/리스크를 1화면에 표시</div>
         <div className="mt-3 space-y-3">
@@ -314,7 +368,7 @@ function ResultSection({
         </div>
       </Card>
 
-      <Card className="p-5">
+      <Card className={`p-5 ${HANDOFF_FLAT_CARD_CLASS}`}>
         <div className="text-[15px] font-semibold text-ios-text">Uncertainties</div>
         <div className="mt-1 text-[12.5px] text-ios-sub">미기재/애매 항목 10초 검수 리스트</div>
         <div className="mt-3 space-y-2">
@@ -342,7 +396,7 @@ function ResultSection({
       </Card>
 
       {evidenceEnabled && activeEvidence ? (
-        <Card className="p-4">
+        <Card className={`p-4 ${HANDOFF_FLAT_CARD_CLASS}`}>
           <div className="flex items-center justify-between gap-2">
             <div>
               <div className="text-[13px] font-semibold text-ios-text">Local Evidence</div>
@@ -388,10 +442,16 @@ export function ToolHandoffPage() {
   const [sessionSaved, setSessionSaved] = useState(false);
   const [manualUncertainties, setManualUncertainties] = useState<ManualUncertaintyInput[]>([]);
   const [draftRecoveredAt, setDraftRecoveredAt] = useState<number | null>(null);
-  const [draftSaveState, setDraftSaveState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
+  const [draftSaveState, setDraftSaveState] = useState<"idle" | "saving" | "saved" | "failed" | "memory_only">(
+    LIVE_MEMORY_ONLY ? "memory_only" : "idle"
+  );
   const [deidIssueCount, setDeidIssueCount] = useState(0);
   const [residualIssueCount, setResidualIssueCount] = useState(0);
   const [showAllUncertainties, setShowAllUncertainties] = useState(false);
+  const [liveAliasTokens, setLiveAliasTokens] = useState<Record<string, string[]>>({});
+  const [revealedAliasUntil, setRevealedAliasUntil] = useState<Record<string, number>>({});
+  const [screenLocked, setScreenLocked] = useState(false);
+  const [activityPulse, setActivityPulse] = useState(Date.now());
 
   const recorderRef = useRef<HandoffRecorderController | null>(null);
   const asrRef = useRef<LocalAsrController | null>(null);
@@ -403,6 +463,13 @@ export function ToolHandoffPage() {
   const chunkUncertaintyKeysRef = useRef(new Set<string>());
   const asrPolicyBlockLoggedRef = useRef(false);
   const remotePolicyBlockLoggedRef = useRef(false);
+  const lastActivityRef = useRef(Date.now());
+  const screenLockedRef = useRef(false);
+  const revealHoldTimerRef = useRef<number | null>(null);
+  const chunkInputRef = useRef(chunkInput);
+  const manualUncertaintiesRef = useRef<ManualUncertaintyInput[]>(manualUncertainties);
+  const liveAliasTokensRef = useRef<Record<string, string[]>>(liveAliasTokens);
+  const liveAsrPreviewRef = useRef(liveAsrPreview);
 
   const segmentStats = useMemo(() => {
     if (!rawSegments.length) return { count: 0, sec: 0 };
@@ -428,6 +495,18 @@ export function ToolHandoffPage() {
     if (!result?.uncertainties.length) return [];
     return showAllUncertainties ? result.uncertainties : result.uncertainties.slice(0, 12);
   }, [result, showAllUncertainties]);
+  const revealedAliasSet = useMemo(() => {
+    const now = activityPulse;
+    return new Set(
+      Object.entries(revealedAliasUntil)
+        .filter(([, expiresAt]) => expiresAt > now)
+        .map(([alias]) => alias)
+    );
+  }, [revealedAliasUntil, activityPulse]);
+  const idleRemainingSec = useMemo(() => {
+    const remainMs = LIVE_AUTO_LOCK_MS - (activityPulse - lastActivityRef.current);
+    return Math.max(0, Math.ceil(remainMs / 1000));
+  }, [activityPulse]);
 
   const privacyPolicy = evaluateHandoffPrivacyPolicy(HANDOFF_FLAGS);
   const authPending = privacyPolicy.authRequired && authStatus === "loading";
@@ -451,16 +530,71 @@ export function ToolHandoffPage() {
     webAudioCaptureEnabled &&
     recorderSupported &&
     (asrProvider === "manual" || (liveAsrEnabled && asrProviderReady)) &&
-    !actionBlocked;
+    !actionBlocked &&
+    !screenLocked;
   const reviewLockActive = Boolean(result?.uncertainties.length) && !sessionSaved && reviewCountdown > 0;
   const flatButtonBase =
     "inline-flex h-11 items-center justify-center rounded-full border px-4 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50";
   const flatButtonSecondary = `${flatButtonBase} border-ios-sep bg-[#F2F2F7] text-ios-text`;
   const flatButtonPrimary = `${flatButtonBase} border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]`;
   const flatButtonDanger = `${flatButtonBase} border-[#F3C1C1] bg-[#FFECEC] text-[#B3261E]`;
+  const flatCardClass = HANDOFF_FLAT_CARD_CLASS;
+  const sensitiveBlockClass = screenLocked ? "pointer-events-none select-none blur-[6px] opacity-60" : "";
 
   const refreshStoredLists = useCallback(() => {
     setSavedSessions(listStructuredSessions());
+  }, []);
+
+  const clearRevealHoldTimer = useCallback(() => {
+    if (revealHoldTimerRef.current == null) return;
+    window.clearTimeout(revealHoldTimerRef.current);
+    revealHoldTimerRef.current = null;
+  }, []);
+
+  const revealAlias = useCallback(
+    (alias: string) => {
+      if (screenLockedRef.current) return;
+      if (!liveAliasTokens[alias]?.length) return;
+      const now = Date.now();
+      setRevealedAliasUntil((prev) => ({
+        ...prev,
+        [alias]: now + LIVE_ALIAS_REVEAL_MS,
+      }));
+      appendHandoffAuditEvent({
+        action: "field_revealed",
+        sessionId: sessionIdRef.current,
+        detail: `alias=${alias}|ms=${LIVE_ALIAS_REVEAL_MS}`,
+      });
+    },
+    [liveAliasTokens]
+  );
+
+  const onRevealPressStart = useCallback(
+    (alias: string) => {
+      if (screenLockedRef.current) return;
+      clearRevealHoldTimer();
+      revealHoldTimerRef.current = window.setTimeout(() => {
+        revealAlias(alias);
+      }, 380);
+    },
+    [clearRevealHoldTimer, revealAlias]
+  );
+
+  const onRevealPressEnd = useCallback(() => {
+    clearRevealHoldTimer();
+  }, [clearRevealHoldTimer]);
+
+  const unlockScreen = useCallback(() => {
+    setScreenLocked(false);
+    setRevealedAliasUntil({});
+    const now = Date.now();
+    lastActivityRef.current = now;
+    setActivityPulse(now);
+    appendHandoffAuditEvent({
+      action: "screen_unlocked",
+      sessionId: sessionIdRef.current,
+      detail: "manual_unlock",
+    });
   }, []);
 
   useEffect(() => {
@@ -482,12 +616,119 @@ export function ToolHandoffPage() {
   }, [privacyPolicy.remoteSyncConfigured, privacyPolicy.remoteSyncEffective]);
 
   useEffect(() => {
+    screenLockedRef.current = screenLocked;
+    if (!screenLocked) return;
+    setRevealedAliasUntil({});
+  }, [screenLocked]);
+
+  useEffect(() => {
+    appendHandoffAuditEvent({
+      action: "view_opened",
+      detail: "tool_handoff",
+    });
+  }, []);
+
+  useEffect(() => {
+    if (authBlocked || secureContextBlocked) return;
+
+    const onActivity = () => {
+      if (screenLockedRef.current) return;
+      const now = Date.now();
+      lastActivityRef.current = now;
+      setActivityPulse(now);
+    };
+
+    const lockCheckTimer = window.setInterval(() => {
+      const idleMs = Date.now() - lastActivityRef.current;
+      const hasVolatileData =
+        rawSegmentsRef.current.length > 0 ||
+        chunkInputRef.current.trim().length > 0 ||
+        manualUncertaintiesRef.current.length > 0 ||
+        Boolean(liveAsrPreviewRef.current) ||
+        Object.keys(liveAliasTokensRef.current).length > 0;
+
+      if (LIVE_MEMORY_ONLY && idleMs >= LIVE_MEMORY_PURGE_MS && hasVolatileData) {
+        setRawSegments([]);
+        setChunkLogs([]);
+        setChunkInput("");
+        setManualUncertainties([]);
+        setLiveAsrPreview("");
+        setLiveAliasTokens({});
+        setRevealedAliasUntil({});
+        clearHandoffDraftMeta(sessionIdRef.current);
+        appendHandoffAuditEvent({
+          action: "session_shred",
+          sessionId: sessionIdRef.current,
+          detail: "memory_ttl_purge",
+        });
+      }
+
+      if (screenLockedRef.current) return;
+      if (idleMs < LIVE_AUTO_LOCK_MS) {
+        setActivityPulse(Date.now());
+        return;
+      }
+      setScreenLocked(true);
+      appendHandoffAuditEvent({
+        action: "screen_locked",
+        sessionId: sessionIdRef.current,
+        detail: `idle_ms=${idleMs}`,
+      });
+    }, 1_000);
+
+    window.addEventListener("pointerdown", onActivity, { passive: true });
+    window.addEventListener("keydown", onActivity);
+    window.addEventListener("touchstart", onActivity, { passive: true });
+    window.addEventListener("focusin", onActivity);
+
+    return () => {
+      window.clearInterval(lockCheckTimer);
+      window.removeEventListener("pointerdown", onActivity);
+      window.removeEventListener("keydown", onActivity);
+      window.removeEventListener("touchstart", onActivity);
+      window.removeEventListener("focusin", onActivity);
+    };
+  }, [authBlocked, secureContextBlocked]);
+
+  useEffect(() => {
+    if (!Object.keys(revealedAliasUntil).length) return;
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      setRevealedAliasUntil((prev) => {
+        const next: Record<string, number> = {};
+        Object.entries(prev).forEach(([alias, expiresAt]) => {
+          if (expiresAt > now) next[alias] = expiresAt;
+        });
+        return next;
+      });
+      setActivityPulse(now);
+    }, 1_000);
+    return () => window.clearInterval(timer);
+  }, [revealedAliasUntil]);
+
+  useEffect(() => {
     sessionIdRef.current = sessionId;
   }, [sessionId]);
 
   useEffect(() => {
     rawSegmentsRef.current = rawSegments;
   }, [rawSegments]);
+
+  useEffect(() => {
+    chunkInputRef.current = chunkInput;
+  }, [chunkInput]);
+
+  useEffect(() => {
+    manualUncertaintiesRef.current = manualUncertainties;
+  }, [manualUncertainties]);
+
+  useEffect(() => {
+    liveAliasTokensRef.current = liveAliasTokens;
+  }, [liveAliasTokens]);
+
+  useEffect(() => {
+    liveAsrPreviewRef.current = liveAsrPreview;
+  }, [liveAsrPreview]);
 
   useEffect(() => {
     if (authBlocked || secureContextBlocked) {
@@ -498,6 +739,9 @@ export function ToolHandoffPage() {
       setChunkLogs([]);
       setManualUncertainties([]);
       setShowAllUncertainties(false);
+      setLiveAliasTokens({});
+      setRevealedAliasUntil({});
+      setScreenLocked(false);
       setDraftRecoveredAt(null);
       return;
     }
@@ -513,6 +757,12 @@ export function ToolHandoffPage() {
         })
       );
       setRecorderSupported(isHandoffRecorderSupported());
+      setDraftSaveState(LIVE_MEMORY_ONLY ? "memory_only" : "idle");
+
+      if (LIVE_MEMORY_ONLY) {
+        setDraftRecoveredAt(null);
+        return;
+      }
 
       const draft = loadHandoffDraftMeta();
       if (!draft) return;
@@ -546,6 +796,7 @@ export function ToolHandoffPage() {
 
   useEffect(() => {
     return () => {
+      clearRevealHoldTimer();
       asrRef.current?.destroy();
       asrRef.current = null;
       void wasmAsrRef.current?.destroy();
@@ -553,7 +804,7 @@ export function ToolHandoffPage() {
       void recorderRef.current?.destroy();
       recorderRef.current = null;
     };
-  }, []);
+  }, [clearRevealHoldTimer]);
 
   useEffect(() => {
     if (!result || sessionSaved) {
@@ -574,6 +825,13 @@ export function ToolHandoffPage() {
   }, [result, sessionSaved]);
 
   useEffect(() => {
+    if (LIVE_MEMORY_ONLY) {
+      clearHandoffDraftMeta(sessionId);
+      setDraftRecoveredAt(null);
+      setDraftSaveState("memory_only");
+      return;
+    }
+
     if (!rawSegments.length) {
       clearHandoffDraftMeta(sessionId);
       setDraftSaveState("idle");
@@ -640,6 +898,10 @@ export function ToolHandoffPage() {
   };
 
   const pushChunk = () => {
+    if (screenLocked) {
+      setError("화면 잠금 상태에서는 전사 입력을 추가할 수 없습니다.");
+      return;
+    }
     const text = chunkInput.trim();
     if (!text) return;
 
@@ -810,6 +1072,11 @@ export function ToolHandoffPage() {
     if (recordingState !== "idle") return;
     setRecordingError(null);
 
+    if (screenLocked) {
+      setRecordingError("화면 잠금 상태입니다. 잠금 해제 후 녹음을 시작해 주세요.");
+      return;
+    }
+
     if (authBlocked) {
       setRecordingError("strict 정책으로 로그인 사용자인 경우에만 녹음을 시작할 수 있습니다.");
       return;
@@ -952,6 +1219,10 @@ export function ToolHandoffPage() {
   };
 
   const run = async () => {
+    if (screenLocked) {
+      setError("화면 잠금 상태에서는 분석을 실행할 수 없습니다. 잠금 해제 후 다시 시도해 주세요.");
+      return;
+    }
     if (authBlocked) {
       setError("strict 정책으로 로그인 사용자만 분석을 실행할 수 있습니다.");
       return;
@@ -1003,14 +1274,16 @@ export function ToolHandoffPage() {
         );
       }
 
-      let stored = false;
-      try {
-        stored = await vaultSaveRawSegments(sessionId, mergedSegments);
-      } catch {
-        stored = false;
-      }
-      if (!stored) {
-        setError("로컬 Vault 저장에 실패했습니다. 브라우저 보안 설정(저장소/프라이빗 모드)을 확인해 주세요.");
+      if (!LIVE_MEMORY_ONLY) {
+        let stored = false;
+        try {
+          stored = await vaultSaveRawSegments(sessionId, mergedSegments);
+        } catch {
+          stored = false;
+        }
+        if (!stored) {
+          setError("로컬 Vault 저장에 실패했습니다. 브라우저 보안 설정(저장소/프라이빗 모드)을 확인해 주세요.");
+        }
       }
 
       const nextReviewMap: Record<string, ReviewState> = {};
@@ -1023,6 +1296,8 @@ export function ToolHandoffPage() {
       setRawSegments(mergedSegments);
       setResult(sanitized.result);
       setShowAllUncertainties(false);
+      setLiveAliasTokens(buildAliasTokenIndex(output.local.aliasMap));
+      setRevealedAliasUntil({});
       setEvidenceMap(buildEvidenceMap(output.local.maskedSegments));
       setSessionSaved(false);
       appendHandoffAuditEvent({
@@ -1038,6 +1313,10 @@ export function ToolHandoffPage() {
 
   const finalizeSession = async () => {
     if (!result) return;
+    if (screenLocked) {
+      setError("화면 잠금 상태에서는 저장할 수 없습니다. 잠금 해제 후 다시 시도해 주세요.");
+      return;
+    }
     if (authBlocked) {
       setError("strict 정책으로 로그인 사용자만 저장할 수 있습니다.");
       return;
@@ -1096,6 +1375,10 @@ export function ToolHandoffPage() {
 
   const saveWithoutReview = () => {
     if (!result) return;
+    if (screenLocked) {
+      setError("화면 잠금 상태에서는 저장할 수 없습니다. 잠금 해제 후 다시 시도해 주세요.");
+      return;
+    }
     if (authBlocked) {
       setError("strict 정책으로 로그인 사용자만 저장할 수 있습니다.");
       return;
@@ -1131,6 +1414,10 @@ export function ToolHandoffPage() {
   const startNewSession = async () => {
     await stopRecording();
     clearHandoffDraftMeta(sessionId);
+    const now = Date.now();
+    lastActivityRef.current = now;
+    setActivityPulse(now);
+    setScreenLocked(false);
     setSessionId(createHandoffSessionId());
     liveSegmentSeqRef.current = 0;
     setChunkInput("");
@@ -1140,6 +1427,8 @@ export function ToolHandoffPage() {
     setReviewMap({});
     setEvidenceMap({});
     setShowAllUncertainties(false);
+    setLiveAliasTokens({});
+    setRevealedAliasUntil({});
     setLiveAsrPreview("");
     setError(null);
     setRecordingError(null);
@@ -1173,6 +1462,8 @@ export function ToolHandoffPage() {
     setRawSegments([]);
     setChunkLogs([]);
     setLiveAsrPreview("");
+    setLiveAliasTokens({});
+    setRevealedAliasUntil({});
     setSessionSaved(false);
     setManualUncertainties([]);
     setDraftRecoveredAt(null);
@@ -1199,11 +1490,14 @@ export function ToolHandoffPage() {
     setReviewMap({});
     setEvidenceMap({});
     setShowAllUncertainties(false);
+    setLiveAliasTokens({});
+    setRevealedAliasUntil({});
     setRawSegments([]);
     setChunkLogs([]);
     setChunkInput("");
     setLiveAsrPreview("");
     setSessionId(createHandoffSessionId());
+    setScreenLocked(false);
     setRecordingError(null);
     setSessionSaved(false);
     setManualUncertainties([]);
@@ -1212,6 +1506,8 @@ export function ToolHandoffPage() {
     setResidualIssueCount(0);
     setError(null);
     liveSegmentSeqRef.current = 0;
+    lastActivityRef.current = Date.now();
+    setActivityPulse(Date.now());
     chunkUncertaintyKeysRef.current.clear();
     asrErrorCountRef.current = 0;
   };
@@ -1238,10 +1534,16 @@ export function ToolHandoffPage() {
     setSessionSaved(false);
   };
 
+  const openSessionDetail = useCallback((targetSessionId: string) => {
+    if (typeof window === "undefined") return;
+    const encoded = encodeURIComponent(targetSessionId);
+    window.location.assign(`/tools/handoff/session/${encoded}`);
+  }, []);
+
   if (!HANDOFF_FLAGS.handoffEnabled) {
     return (
-      <div className="mx-auto w-full max-w-[760px] px-4 pb-24 pt-6">
-        <Card className="p-5">
+      <div className="mx-auto w-full max-w-[980px] px-2 pb-24 pt-4 sm:px-4 sm:pt-6">
+        <Card className={`p-5 ${HANDOFF_FLAT_CARD_CLASS}`}>
           <div className="text-[16px] font-semibold text-ios-text">{t("AI 인계 기능이 비활성화되어 있습니다.")}</div>
           <div className="mt-2 text-[13px] text-ios-sub">NEXT_PUBLIC_HANDOFF_ENABLED=true 설정 후 다시 확인해 주세요.</div>
           <div className="mt-4">
@@ -1256,8 +1558,8 @@ export function ToolHandoffPage() {
 
   if (authPending) {
     return (
-      <div className="mx-auto w-full max-w-[760px] px-4 pb-24 pt-6">
-        <Card className="p-5">
+      <div className="mx-auto w-full max-w-[980px] px-2 pb-24 pt-4 sm:px-4 sm:pt-6">
+        <Card className={`p-5 ${HANDOFF_FLAT_CARD_CLASS}`}>
           <div className="text-[16px] font-semibold text-ios-text">인증 상태 확인 중입니다.</div>
           <div className="mt-2 text-[13px] text-ios-sub">strict 정책 적용을 위해 로그인 상태를 검증하고 있습니다.</div>
         </Card>
@@ -1267,8 +1569,8 @@ export function ToolHandoffPage() {
 
   if (authBlocked) {
     return (
-      <div className="mx-auto w-full max-w-[760px] px-4 pb-24 pt-6">
-        <Card className="p-5">
+      <div className="mx-auto w-full max-w-[980px] px-2 pb-24 pt-4 sm:px-4 sm:pt-6">
+        <Card className={`p-5 ${HANDOFF_FLAT_CARD_CLASS}`}>
           <div className="text-[16px] font-semibold text-ios-text">로그인 후 접근 가능합니다.</div>
           <div className="mt-2 text-[13px] text-ios-sub">strict 정책으로 AI 인계 기능은 인증 사용자에게만 허용됩니다.</div>
           <div className="mt-4">
@@ -1283,8 +1585,8 @@ export function ToolHandoffPage() {
 
   if (secureContextBlocked) {
     return (
-      <div className="mx-auto w-full max-w-[760px] px-4 pb-24 pt-6">
-        <Card className="p-5">
+      <div className="mx-auto w-full max-w-[980px] px-2 pb-24 pt-4 sm:px-4 sm:pt-6">
+        <Card className={`p-5 ${HANDOFF_FLAT_CARD_CLASS}`}>
           <div className="text-[16px] font-semibold text-ios-text">보안 컨텍스트가 필요합니다.</div>
           <div className="mt-2 text-[13px] text-ios-sub">
             strict 정책으로 AI 인계는 HTTPS secure context(개발 localhost 예외)에서만 허용됩니다.
@@ -1295,7 +1597,10 @@ export function ToolHandoffPage() {
   }
 
   return (
-    <div data-testid="handoff-page-root" className="mx-auto w-full max-w-[860px] space-y-4 px-4 pb-24 pt-6">
+    <div
+      data-testid="handoff-page-root"
+      className="mx-auto w-full max-w-[980px] space-y-3 px-2 pb-24 pt-4 sm:px-4 sm:pt-6"
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-[30px] font-extrabold tracking-[-0.02em]">{t("AI 인계")}</div>
@@ -1308,12 +1613,12 @@ export function ToolHandoffPage() {
         </Link>
       </div>
 
-      <Card className="p-6">
+      <Card className={`p-6 ${flatCardClass}`}>
         <div className="grid gap-4 md:grid-cols-2">
           <div>
             <div className="text-[12px] font-semibold text-ios-sub">Session ID</div>
             <Input value={sessionId} readOnly className="mt-1 bg-ios-bg" />
-            <div className="mt-2 text-[11.5px] text-ios-sub">
+            <div data-testid="handoff-segment-stats" className="mt-2 text-[11.5px] text-ios-sub">
               {segmentStats.count} segments · {segmentStats.sec}s
             </div>
           </div>
@@ -1343,7 +1648,7 @@ export function ToolHandoffPage() {
             data-testid="handoff-run-pipeline"
             className={flatButtonPrimary}
             onClick={run}
-            disabled={running || recordingState !== "idle" || actionBlocked}
+            disabled={running || recordingState !== "idle" || actionBlocked || screenLocked}
           >
             {running ? t("분석 중...") : t("분석 실행")}
           </Button>
@@ -1373,7 +1678,7 @@ export function ToolHandoffPage() {
         </details>
 
         <div className="mt-3 text-[12px] text-ios-sub">
-          draft 상태: {draftSaveState}
+          draft 상태: {draftSaveState === "memory_only" ? "memory_only (원문 비저장)" : draftSaveState}
           {draftRecoveredAt ? ` · 복구됨 ${formatTime(draftRecoveredAt)}` : ""}
         </div>
         {deidIssueCount > 0 ? (
@@ -1393,7 +1698,78 @@ export function ToolHandoffPage() {
         ) : null}
       </Card>
 
-      <Card className="p-5">
+      <Card data-testid="handoff-live-view" className={`p-5 ${flatCardClass}`}>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[14.5px] font-semibold text-ios-text">Live Care View</div>
+            <div className="mt-1 text-[12.5px] text-ios-sub">
+              식별 필드는 화면에서만 잠깐 확인하고, 저장본은 비식별 결과만 유지합니다.
+            </div>
+          </div>
+          <span
+            data-testid="handoff-live-lock-badge"
+            className="rounded-full border border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] px-2 py-1 text-[11px] font-semibold text-[color:var(--wnl-accent)]"
+          >
+            {screenLocked ? "잠금" : `자동잠금 ${idleRemainingSec}s`}
+          </span>
+        </div>
+
+        <div className="mt-2 text-[12px] text-ios-sub">
+          raw/evidence 저장: {LIVE_MEMORY_ONLY ? "메모리 전용(자동 폐기)" : "로컬 Vault(TTL 24h)"} · structured 저장: 비식별만
+        </div>
+
+        {screenLocked ? (
+          <div className="mt-3 rounded-2xl border border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] p-3">
+            <div className="text-[12.5px] font-semibold text-[color:var(--wnl-accent)]">화면이 자동 잠금되었습니다.</div>
+            <div className="mt-1 text-[12px] text-ios-sub">식별 정보가 포함된 라이브 표시를 보호하기 위해 블러 처리했습니다.</div>
+            <Button className={`${flatButtonPrimary} mt-3`} onClick={unlockScreen}>
+              잠금 해제
+            </Button>
+          </div>
+        ) : null}
+
+        {result?.patients.length ? (
+          <div className={`mt-3 space-y-2 ${sensitiveBlockClass}`}>
+            {result.patients.slice(0, 8).map((patient, idx) => {
+              const tokens = liveAliasTokens[patient.alias] ?? [];
+              const revealed = revealedAliasSet.has(patient.alias);
+              return (
+                <div
+                  key={patient.alias}
+                  data-testid={`handoff-live-patient-${idx}`}
+                  className="rounded-2xl border border-ios-sep bg-white px-3 py-2"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-[13.5px] font-semibold text-ios-text">{patient.alias}</div>
+                    <button
+                      type="button"
+                      data-testid={`handoff-live-reveal-${idx}`}
+                      className="rounded-full border border-ios-sep bg-[#F2F2F7] px-3 py-1 text-[11px] font-semibold text-ios-sub disabled:opacity-40"
+                      onPointerDown={() => onRevealPressStart(patient.alias)}
+                      onPointerUp={onRevealPressEnd}
+                      onPointerLeave={onRevealPressEnd}
+                      onPointerCancel={onRevealPressEnd}
+                      onTouchEnd={onRevealPressEnd}
+                      disabled={!tokens.length}
+                    >
+                      길게 눌러 표시
+                    </button>
+                  </div>
+                  <div data-testid={`handoff-live-token-${idx}`} className="mt-1 text-[12px] text-ios-sub">
+                    {revealed ? (tokens.length ? tokens.join(" · ") : "매핑 없음") : `${tokens.length}개 식별 필드 숨김`}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="mt-3 rounded-2xl border border-dashed border-ios-sep bg-white p-3 text-[12px] text-ios-sub">
+            분석 결과가 생성되면 환자별 라이브 표시가 나타납니다.
+          </div>
+        )}
+      </Card>
+
+      <Card className={`p-5 ${flatCardClass}`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="text-[14px] font-semibold text-ios-text">{t("실시간 녹음 + 로컬 전사")}</div>
@@ -1465,7 +1841,7 @@ export function ToolHandoffPage() {
         ) : null}
       </Card>
 
-      <Card className="p-5">
+      <Card className={`p-5 ${flatCardClass}`}>
         <div className="flex items-center justify-between gap-2">
           <div>
             <div className="text-[14px] font-semibold text-ios-text">{t("수동 전사 입력")}</div>
@@ -1478,32 +1854,43 @@ export function ToolHandoffPage() {
             variant="secondary"
             className={flatButtonSecondary}
             onClick={pushChunk}
-            disabled={actionBlocked}
+            disabled={actionBlocked || screenLocked}
           >
             {t("청크 추가")}
           </Button>
         </div>
 
-        <div className="mt-3">
-          <Textarea
-            data-testid="handoff-manual-input"
-            value={chunkInput}
-            onChange={(e) => setChunkInput(e.target.value)}
-            placeholder="예: 701호 최OO 폐렴이고 ABx 10시에 들어갔고..."
-            className="min-h-[160px]"
-          />
+        <div className={sensitiveBlockClass}>
+          <div className="mt-3">
+            <Textarea
+              data-testid="handoff-manual-input"
+              value={chunkInput}
+              onChange={(e) => setChunkInput(e.target.value)}
+              placeholder="예: 701호 최OO 폐렴이고 ABx 10시에 들어갔고..."
+              className="min-h-[160px]"
+            />
+          </div>
+
+          {rawSegments.length ? (
+            <div className="mt-3 rounded-2xl border border-ios-sep bg-white p-3">
+              <div className="text-[12px] font-semibold text-ios-sub">{t("수집된 전사 세그먼트")}</div>
+              <ul className="mt-2 space-y-1 text-[12.5px] text-ios-text">
+                {rawSegments.slice(-8).map((segment) => (
+                  <li key={segment.segmentId}>
+                    <span className="font-semibold text-ios-sub">{segment.segmentId}</span> · {formatEvidenceRange({ segmentId: segment.segmentId, startMs: segment.startMs, endMs: segment.endMs })} · {segment.rawText}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
 
-        {rawSegments.length ? (
-          <div className="mt-3 rounded-2xl border border-ios-sep bg-white p-3">
-            <div className="text-[12px] font-semibold text-ios-sub">{t("수집된 전사 세그먼트")}</div>
-            <ul className="mt-2 space-y-1 text-[12.5px] text-ios-text">
-              {rawSegments.slice(-8).map((segment) => (
-                <li key={segment.segmentId}>
-                  <span className="font-semibold text-ios-sub">{segment.segmentId}</span> · {formatEvidenceRange({ segmentId: segment.segmentId, startMs: segment.startMs, endMs: segment.endMs })} · {segment.rawText}
-                </li>
-              ))}
-            </ul>
+        {screenLocked ? (
+          <div className="mt-3 rounded-2xl border border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] p-3">
+            <div className="text-[12px] font-semibold text-[color:var(--wnl-accent)]">잠금 상태에서는 원문 입력/미리보기가 비활성화됩니다.</div>
+            <Button className={`${flatButtonPrimary} mt-2`} onClick={unlockScreen}>
+              잠금 해제
+            </Button>
           </div>
         ) : null}
 
@@ -1511,7 +1898,7 @@ export function ToolHandoffPage() {
       </Card>
 
       {result ? (
-        <Card className="p-5">
+        <Card className={`p-5 ${flatCardClass}`}>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <div className="text-[15px] font-semibold text-ios-text">{t("10초 검수")}</div>
@@ -1584,7 +1971,7 @@ export function ToolHandoffPage() {
               data-testid="handoff-save-reviewed"
               className={flatButtonPrimary}
               onClick={() => { void finalizeSession(); }}
-              disabled={finalizing || running || reviewLockActive || actionBlocked}
+              disabled={finalizing || running || reviewLockActive || actionBlocked || screenLocked}
             >
               {finalizing ? "저장 중..." : sessionSaved ? "검수 반영 저장 완료" : "검수 반영 저장"}
             </Button>
@@ -1593,7 +1980,7 @@ export function ToolHandoffPage() {
               variant="secondary"
               className={flatButtonSecondary}
               onClick={saveWithoutReview}
-              disabled={finalizing || running || reviewLockActive || actionBlocked}
+              disabled={finalizing || running || reviewLockActive || actionBlocked || screenLocked}
             >
               검수 생략 즉시 저장
             </Button>
@@ -1602,7 +1989,7 @@ export function ToolHandoffPage() {
       ) : null}
 
       {savedSessions.length ? (
-        <Card className="p-5">
+        <Card className={`p-5 ${flatCardClass}`}>
           <div className="text-[14px] font-semibold text-ios-text">{t("저장된 세션")}</div>
           <div className="mt-2 space-y-2">
             {savedSessions.slice(0, 8).map((session) => (
@@ -1611,13 +1998,14 @@ export function ToolHandoffPage() {
                   <div className="text-[12.5px] font-semibold text-ios-text">{session.id}</div>
                   <div className="text-[11.5px] text-ios-sub">{formatTime(session.createdAt)} · {session.result.dutyType}</div>
                 </div>
-                <Link
+                <button
+                  type="button"
                   data-testid="handoff-saved-session-link"
-                  href={`/tools/handoff/session/${session.id}`}
+                  onClick={() => openSessionDetail(session.id)}
                   className="text-[12px] font-semibold text-[color:var(--wnl-accent)]"
                 >
                   상세 보기
-                </Link>
+                </button>
               </div>
             ))}
           </div>
