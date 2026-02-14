@@ -82,7 +82,7 @@ function parseErrorMessage(raw: string) {
   if (raw.includes("query_or_image_required")) return "텍스트를 입력하거나 사진을 업로드해 주세요.";
   if (raw.includes("image_too_large")) return "이미지 용량이 너무 큽니다. 6MB 이하로 다시 업로드해 주세요.";
   if (raw.includes("image_type_invalid")) return "이미지 파일만 업로드할 수 있습니다.";
-  if (raw.includes("openai_timeout") || raw.includes("aborted"))
+  if (raw.includes("openai_timeout") || raw.includes("aborted") || raw.includes("attempt_timeout"))
     return "AI 응답 시간이 길어 요청이 중단되었습니다. 잠시 후 다시 시도하거나 네트워크를 변경해 주세요.";
   if (raw.includes("unsupported_country_region_territory"))
     return "현재 네트워크 경로에서 OpenAI가 지역 정책으로 차단되었습니다. 모바일 데이터 또는 다른 네트워크로 다시 시도해 주세요.";
@@ -114,6 +114,21 @@ function readMedSafetyCache(cacheKey: string): MedSafetyAnalyzeResult | null {
     const hit = parsed?.[cacheKey];
     if (!hit?.data) return null;
     return hit.data;
+  } catch {
+    return null;
+  }
+}
+
+function readLatestMedSafetyCache(): MedSafetyAnalyzeResult | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(MED_SAFETY_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Record<string, MedSafetyCacheRecord>;
+    const latest = Object.values(parsed)
+      .filter((item) => item?.data)
+      .sort((a, b) => (b?.savedAt ?? 0) - (a?.savedAt ?? 0))[0];
+    return latest?.data ?? null;
   } catch {
     return null;
   }
@@ -440,9 +455,10 @@ export function ToolMedSafetyPage() {
           setError(null);
         } else {
           const cached = readMedSafetyCache(cacheKey);
-          if (fallbackBlockedByRegion && cached) {
-            setResult(cached);
-            setError("현재 네트워크에서 OpenAI가 차단되어 최근 성공한 결과를 대신 표시합니다. 네트워크 변경 후 다시 분석하면 최신 결과로 갱신됩니다.");
+          const latestCached = fallbackBlockedByRegion ? cached ?? readLatestMedSafetyCache() : null;
+          if (fallbackBlockedByRegion && latestCached) {
+            setResult(latestCached);
+            setError(null);
           } else {
             setResult(data);
             setError(
@@ -606,7 +622,6 @@ export function ToolMedSafetyPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   <span className={`rounded-full border px-3 py-1 text-[14px] font-bold ${statusTone(result.quick.status)}`}>{statusLabel(result.quick.status)}</span>
                   <span className="rounded-full border border-ios-sep px-3 py-1 text-[13px] font-semibold text-ios-text">{itemTypeLabel(result.item.type)}</span>
-                  <span className="rounded-full border border-ios-sep px-3 py-1 text-[13px] font-semibold text-ios-text">신뢰도 {result.item.confidence}%</span>
                 </div>
                 <div className="mt-3 text-[42px] font-bold leading-[1.05] tracking-[-0.03em] text-ios-text">{result.item.name}</div>
                 <div className="mt-2 text-[20px] leading-8 text-ios-text">{result.item.primaryUse}</div>
@@ -682,8 +697,8 @@ export function ToolMedSafetyPage() {
             </div>
           )}
 
-          <div className="mt-4 border-t border-ios-sep pt-3 text-[14px] text-ios-sub">
-            개인 보조용 결과입니다. 최종 판단은 병원 지침/처방/의료진 지시를 우선하세요.
+          <div className="mt-4 border-t border-ios-sep pt-3 text-[14px] leading-6 text-ios-sub">
+            본 결과는 참고용 자동 생성 정보이며 의료행위 판단의 근거로 사용할 수 없습니다. 제공자는 본 결과의 사용으로 발생한 진단·치료·투약 결정 및 결과에 대해 책임을 지지 않습니다. 모든 처치는 병원 지침, 처방, 의료진 확인을 우선해 결정해 주세요.
           </div>
         </Card>
       </div>
