@@ -93,8 +93,26 @@ function normalizeApiKey() {
 }
 
 function resolveModel() {
-  const model = String(process.env.OPENAI_MED_SAFETY_MODEL ?? "gpt-4.1-mini").trim();
+  const model = String(process.env.OPENAI_MED_SAFETY_MODEL ?? process.env.OPENAI_MODEL ?? "gpt-4.1-mini").trim();
   return model || "gpt-4.1-mini";
+}
+
+function normalizeApiBaseUrl(raw: string) {
+  const trimmed = String(raw ?? "").trim();
+  if (!trimmed) return "";
+  return trimmed.replace(/\/+$/, "");
+}
+
+function resolveApiBaseCandidates() {
+  const primary = normalizeApiBaseUrl(
+    process.env.OPENAI_MED_SAFETY_BASE_URL ?? process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1"
+  );
+  const secondary = normalizeApiBaseUrl(
+    process.env.OPENAI_MED_SAFETY_FALLBACK_BASE_URL ?? process.env.OPENAI_FALLBACK_BASE_URL ?? ""
+  );
+  const candidates = [primary];
+  if (secondary && secondary !== primary) candidates.push(secondary);
+  return candidates.filter(Boolean);
 }
 
 function extractResponsesText(json: any): string {
@@ -278,6 +296,33 @@ function parseAnalysisResultFromResponseJson(json: unknown): MedSafetyAnalysisRe
     }
   }
   return null;
+}
+
+function fallbackNoteFromOpenAiError(error: string | null, locale: "ko" | "en") {
+  const code = String(error ?? "").toLowerCase();
+  if (code.includes("unsupported_country_region_territory")) {
+    return locale === "ko"
+      ? "현재 서버 네트워크 경로에서 OpenAI 호출이 지역 정책으로 차단되어 기본 안전 모드로 전환되었습니다."
+      : "OpenAI was blocked by regional policy on the current server network path. Showing safe fallback mode.";
+  }
+  if (code.includes("openai_responses_403")) {
+    return locale === "ko"
+      ? "OpenAI 접근 권한 문제로 기본 안전 모드로 전환되었습니다."
+      : "OpenAI access was denied. Showing safe fallback mode.";
+  }
+  if (code.includes("timeout")) {
+    return locale === "ko"
+      ? "AI 응답 시간이 길어 기본 안전 모드로 전환되었습니다."
+      : "AI response timed out. Showing safe fallback mode.";
+  }
+  if (code.includes("network")) {
+    return locale === "ko"
+      ? "네트워크 연결 문제로 기본 안전 모드로 전환되었습니다."
+      : "Network instability detected. Showing safe fallback mode.";
+  }
+  return locale === "ko"
+    ? "AI 연결이 불안정해 기본 안전 모드로 전환되었습니다."
+    : "AI connection was unstable. Showing safe fallback mode.";
 }
 
 function toTextArray(value: unknown, limit: number, minLength = 1) {
@@ -550,10 +595,11 @@ async function callResponsesApi(args: {
   model: string;
   developerPrompt: string;
   userPrompt: string;
+  apiBaseUrl: string;
   imageDataUrl?: string;
   signal: AbortSignal;
 }): Promise<ResponsesAttempt> {
-  const { apiKey, model, developerPrompt, userPrompt, imageDataUrl, signal } = args;
+  const { apiKey, model, developerPrompt, userPrompt, apiBaseUrl, imageDataUrl, signal } = args;
 
   const userContent: Array<Record<string, unknown>> = [{ type: "input_text", text: userPrompt }];
   if (imageDataUrl) {
@@ -646,7 +692,7 @@ async function callResponsesApi(args: {
 
   let response: Response;
   try {
-    response = await fetch("https://api.openai.com/v1/responses", {
+    response = await fetch(`${apiBaseUrl}/responses`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -726,29 +772,33 @@ async function repairAnalysisFromRawText(args: {
   model: string;
   rawText: string;
   locale: "ko" | "en";
+  apiBaseCandidates: string[];
   signal: AbortSignal;
 }) {
-  const { apiKey, model, rawText, locale, signal } = args;
+  const { apiKey, model, rawText, locale, apiBaseCandidates, signal } = args;
   const fallbackModel = "gpt-4.1-mini";
   const modelCandidates = model === fallbackModel ? [model] : [model, fallbackModel];
   const developerPrompt = buildRepairDeveloperPrompt(locale);
   const userPrompt = buildRepairUserPrompt(rawText, locale);
 
   for (const candidateModel of modelCandidates) {
-    const repaired = await callResponsesApi({
-      apiKey,
-      model: candidateModel,
-      developerPrompt,
-      userPrompt,
-      signal,
-    });
-    const parsed = parseAttemptResult(repaired);
-    if (parsed) {
-      return {
-        parsed,
+    for (const apiBaseUrl of apiBaseCandidates) {
+      const repaired = await callResponsesApi({
+        apiKey,
         model: candidateModel,
-        rawText: repaired.text ?? rawText,
-      };
+        developerPrompt,
+        userPrompt,
+        apiBaseUrl,
+        signal,
+      });
+      const parsed = parseAttemptResult(repaired);
+      if (parsed) {
+        return {
+          parsed,
+          model: candidateModel,
+          rawText: repaired.text ?? rawText,
+        };
+      }
     }
   }
 
@@ -759,11 +809,13 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
   result: MedSafetyAnalysisResult;
   model: string;
   rawText: string;
+  fallbackReason: string | null;
 }> {
   const apiKey = normalizeApiKey();
   if (!apiKey) throw new Error("missing_openai_api_key");
 
   const model = resolveModel();
+  const apiBaseCandidates = resolveApiBaseCandidates();
   const developerPrompt = buildDeveloperPrompt(params.locale);
   const userPrompt = buildUserPrompt({
     query: params.query,
@@ -774,28 +826,34 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
     imageName: params.imageName,
   });
 
-  const attempt = await callResponsesApi({
-    apiKey,
-    model,
-    developerPrompt,
-    userPrompt,
-    imageDataUrl: params.imageDataUrl,
-    signal: params.signal,
-  });
+  const callLive = async () => {
+    let last: ResponsesAttempt = { text: null, error: "openai_request_failed", json: null };
+    for (const apiBaseUrl of apiBaseCandidates) {
+      const attempt = await callResponsesApi({
+        apiKey,
+        model,
+        developerPrompt,
+        userPrompt,
+        apiBaseUrl,
+        imageDataUrl: params.imageDataUrl,
+        signal: params.signal,
+      });
+      last = attempt;
+      const blockedRegion = String(attempt.error ?? "").includes("unsupported_country_region_territory");
+      if (blockedRegion) continue;
+      return attempt;
+    }
+    return last;
+  };
+
+  const attempt = await callLive();
 
   let selectedModel = model;
   let parsed = parseAttemptResult(attempt);
   let rawText = attempt.text ?? "";
 
   if (!parsed && !attempt.text && shouldRetryOpenAiError(attempt.error)) {
-    const retry = await callResponsesApi({
-      apiKey,
-      model,
-      developerPrompt,
-      userPrompt,
-      imageDataUrl: params.imageDataUrl,
-      signal: params.signal,
-    });
+    const retry = await callLive();
     parsed = parseAttemptResult(retry);
     if (retry.text) rawText = retry.text;
   }
@@ -806,6 +864,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
       model,
       rawText: attempt.text,
       locale: params.locale,
+      apiBaseCandidates,
       signal: params.signal,
     });
     if (repaired) {
@@ -818,12 +877,13 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
   if (!parsed && !attempt.text) {
     const fallback = buildFallbackAnalysisResult(
       params,
-      `OpenAI 연결이 불안정해 기본 안전 모드로 전환되었습니다. (${String(attempt.error ?? "unknown_error").slice(0, 90)})`
+      fallbackNoteFromOpenAiError(attempt.error, params.locale)
     );
     return {
       result: fallback,
       model,
       rawText: "",
+      fallbackReason: attempt.error ?? "openai_request_failed",
     };
   }
 
@@ -833,6 +893,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
       result: fallback,
       model,
       rawText,
+      fallbackReason: "openai_invalid_json_payload",
     };
   }
 
@@ -840,5 +901,6 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
     result: parsed,
     model: selectedModel,
     rawText,
+    fallbackReason: null,
   };
 }
