@@ -86,10 +86,12 @@ function parseErrorMessage(raw: string) {
     return "AI 응답 시간이 길어 요청이 중단되었습니다. 잠시 후 다시 시도하거나 네트워크를 변경해 주세요.";
   if (raw.includes("unsupported_country_region_territory"))
     return "현재 네트워크 경로에서 OpenAI가 지역 정책으로 차단되었습니다. 모바일 데이터 또는 다른 네트워크로 다시 시도해 주세요.";
+  if (raw.includes("unsupported_parameter")) return "서버 파라미터 호환성 자동 조정 중입니다. 다시 시도해 주세요.";
   if (raw.includes("openai_responses_")) return "OpenAI 요청이 실패했습니다. 잠시 후 다시 시도해 주세요.";
+  if (raw.includes("openai_chat_")) return "OpenAI 요청이 실패했습니다. 잠시 후 다시 시도해 주세요.";
   if (raw.includes("openai_invalid_json_payload"))
     return "AI 응답이 비정형으로 와서 자동 정리 결과로 표시했습니다.";
-  return raw;
+  return "분석 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.";
 }
 
 function buildAnalyzeCacheKey(args: {
@@ -456,8 +458,8 @@ export function ToolMedSafetyPage() {
         } else {
           const cached = readMedSafetyCache(cacheKey);
           const latestCached = fallbackBlockedByRegion ? cached ?? readLatestMedSafetyCache() : null;
-          if (fallbackBlockedByRegion && latestCached) {
-            setResult(latestCached);
+          if (fallbackBlockedByRegion) {
+            setResult(latestCached ?? data);
             setError(null);
           } else {
             setResult(data);
