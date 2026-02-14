@@ -439,14 +439,14 @@ export function ToolMedSafetyPage() {
             <Textarea
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              className="min-h-[120px] bg-white text-[19px] leading-8 text-ios-text"
+              className="min-h-[120px] bg-white text-[16px] leading-7 text-ios-text"
               placeholder="약물명/도구명/상황을 입력하세요. 예: 인슐린 투여 직전 혈당 78일 때 즉시 투여 가능한가요?"
             />
 
             <Textarea
               value={patientSummary}
               onChange={(event) => setPatientSummary(event.target.value)}
-              className="min-h-[84px] bg-white text-[17px] leading-7 text-ios-text"
+              className="min-h-[84px] bg-white text-[15px] leading-6 text-ios-text"
               placeholder="(선택) 환자 요약: 활력징후, 신장/간 기능, 알레르기, 임신/수유, 라인 상태"
             />
 

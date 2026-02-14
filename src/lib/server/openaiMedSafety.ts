@@ -47,6 +47,7 @@ type AnalyzeParams = {
 type ResponsesAttempt = {
   text: string | null;
   error: string | null;
+  json: unknown | null;
 };
 
 function shouldRetryOpenAiError(error: string | null) {
@@ -92,8 +93,8 @@ function normalizeApiKey() {
 }
 
 function resolveModel() {
-  const model = String(process.env.OPENAI_MED_SAFETY_MODEL ?? process.env.OPENAI_MODEL ?? "gpt-5.1").trim();
-  return model || "gpt-5.1";
+  const model = String(process.env.OPENAI_MED_SAFETY_MODEL ?? "gpt-4.1-mini").trim();
+  return model || "gpt-4.1-mini";
 }
 
 function extractResponsesText(json: any): string {
@@ -110,19 +111,89 @@ function extractResponsesText(json: any): string {
   const output = Array.isArray(json?.output) ? json.output : [];
   const chunks: string[] = [];
   for (const item of output) {
+    const outputText = typeof item?.output_text === "string" ? item.output_text : "";
+    if (outputText) chunks.push(outputText);
     const content = Array.isArray(item?.content) ? item.content : [];
     for (const part of content) {
       const text = typeof part?.text === "string" ? part.text : "";
       if (text) chunks.push(text);
+      const altText = typeof part?.output_text === "string" ? part.output_text : "";
+      if (altText) chunks.push(altText);
+      const args = typeof part?.arguments === "string" ? part.arguments : "";
+      if (args) chunks.push(args);
     }
   }
   return chunks.join("").trim();
 }
 
+function parseBalancedJsonObject<T>(input: string): T | null {
+  if (!input) return null;
+  const text = input.trim();
+  for (let start = 0; start < text.length; start++) {
+    if (text[start] !== "{") continue;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let idx = start; idx < text.length; idx++) {
+      const ch = text[idx];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (ch === "\\") {
+          escaped = true;
+          continue;
+        }
+        if (ch === '"') {
+          inString = false;
+        }
+        continue;
+      }
+      if (ch === '"') {
+        inString = true;
+        continue;
+      }
+      if (ch === "{") {
+        depth += 1;
+        continue;
+      }
+      if (ch === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          const candidate = text.slice(start, idx + 1);
+          try {
+            return JSON.parse(candidate) as T;
+          } catch {
+            break;
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
 function safeJsonParse<T>(input: string): T | null {
+  if (!input) return null;
   try {
     return JSON.parse(input) as T;
   } catch {
+    const fencedBlocks = Array.from(input.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi));
+    for (const block of fencedBlocks) {
+      const body = String(block?.[1] ?? "").trim();
+      if (!body) continue;
+      try {
+        return JSON.parse(body) as T;
+      } catch {
+        const balanced = parseBalancedJsonObject<T>(body);
+        if (balanced) return balanced;
+      }
+    }
+
+    const balanced = parseBalancedJsonObject<T>(input);
+    if (balanced) return balanced;
+
     const start = input.indexOf("{");
     const end = input.lastIndexOf("}");
     if (start >= 0 && end > start) {
@@ -134,6 +205,79 @@ function safeJsonParse<T>(input: string): T | null {
     }
     return null;
   }
+}
+
+function collectStructuredCandidates(json: unknown): unknown[] {
+  const out: unknown[] = [];
+  const push = (value: unknown) => {
+    if (value && typeof value === "object") out.push(value);
+  };
+
+  if (!json || typeof json !== "object") return out;
+  const root = json as Record<string, unknown>;
+  push(root.output_parsed);
+  push(root.parsed);
+
+  const directText = root.output_text;
+  if (typeof directText === "string") {
+    const parsed = safeJsonParse<unknown>(directText);
+    if (parsed) out.push(parsed);
+  }
+  if (Array.isArray(directText)) {
+    const joined = directText.map((item) => (typeof item === "string" ? item : "")).join("\n");
+    const parsed = safeJsonParse<unknown>(joined);
+    if (parsed) out.push(parsed);
+  }
+
+  const output = Array.isArray(root.output) ? root.output : [];
+  for (const item of output) {
+    if (!item || typeof item !== "object") continue;
+    const node = item as Record<string, unknown>;
+    push(node.parsed);
+    push(node.output_parsed);
+    push(node.json);
+    const outputText = node.output_text;
+    if (typeof outputText === "string") {
+      const parsed = safeJsonParse<unknown>(outputText);
+      if (parsed) out.push(parsed);
+    }
+    const content = Array.isArray(node.content) ? node.content : [];
+    for (const part of content) {
+      if (!part || typeof part !== "object") continue;
+      const cell = part as Record<string, unknown>;
+      push(cell.parsed);
+      push(cell.output_parsed);
+      push(cell.json);
+      const text = typeof cell.text === "string" ? cell.text : "";
+      if (text) {
+        const parsed = safeJsonParse<unknown>(text);
+        if (parsed) out.push(parsed);
+      }
+      const args = typeof cell.arguments === "string" ? cell.arguments : "";
+      if (args) {
+        const parsed = safeJsonParse<unknown>(args);
+        if (parsed) out.push(parsed);
+      }
+    }
+  }
+
+  return out;
+}
+
+function parseAnalysisResultFromResponseJson(json: unknown): MedSafetyAnalysisResult | null {
+  const candidates = collectStructuredCandidates(json);
+  for (const candidate of candidates) {
+    const queue: unknown[] = [candidate];
+    if (candidate && typeof candidate === "object") {
+      const node = candidate as Record<string, unknown>;
+      queue.push(node.result, node.data, node.payload);
+    }
+    for (const current of queue) {
+      const parsed = parseAnalysisResult(current);
+      if (parsed) return parsed;
+    }
+  }
+  return null;
 }
 
 function toTextArray(value: unknown, limit: number, minLength = 1) {
@@ -513,7 +657,7 @@ async function callResponsesApi(args: {
     });
   } catch (cause: any) {
     const reason = truncateError(String(cause?.message ?? cause ?? "fetch_failed"));
-    return { text: null, error: `openai_network_${reason}` };
+    return { text: null, error: `openai_network_${reason}`, json: null };
   }
 
   if (!response.ok) {
@@ -521,15 +665,94 @@ async function callResponsesApi(args: {
     return {
       text: null,
       error: `openai_responses_${response.status}_${truncateError(raw || "unknown_error")}`,
+      json: null,
     };
   }
 
   const json = await response.json().catch(() => null);
+  const parsedFromJson = parseAnalysisResultFromResponseJson(json);
   const text = extractResponsesText(json);
-  if (!text) {
-    return { text: null, error: "openai_empty_text" };
+  if (!text && !parsedFromJson) {
+    return { text: null, error: "openai_empty_text", json };
   }
-  return { text, error: null };
+  return { text: text || null, error: null, json };
+}
+
+function parseAttemptResult(attempt: ResponsesAttempt): MedSafetyAnalysisResult | null {
+  const fromJson = parseAnalysisResultFromResponseJson(attempt.json);
+  if (fromJson) return fromJson;
+  if (!attempt.text) return null;
+  const parsed = safeJsonParse<unknown>(attempt.text);
+  return parseAnalysisResult(parsed);
+}
+
+function buildRepairDeveloperPrompt(locale: "ko" | "en") {
+  if (locale === "ko") {
+    return [
+      "너는 간호 실행 보조 JSON 정규화기다.",
+      "입력 원문에서 정보를 추출해 스키마 JSON으로만 반환한다.",
+      "모호하면 보수적으로 채운다: quick.status=CHECK, item.type=unknown.",
+      "중요 필드 누락 금지(item/quick/do/safety/patientScript20s/modePriority/confidenceNote).",
+      "JSON 외 텍스트를 출력하지 마라.",
+    ].join(" ");
+  }
+  return [
+    "You are a JSON normalizer for bedside nursing safety output.",
+    "Convert the source text into the required schema JSON only.",
+    "If ambiguous, be conservative: quick.status=CHECK and item.type=unknown.",
+    "Never omit required fields.",
+    "Return JSON only.",
+  ].join(" ");
+}
+
+function buildRepairUserPrompt(rawText: string, locale: "ko" | "en") {
+  const source = rawText.replace(/\u0000/g, "").slice(0, 7000);
+  if (locale === "ko") {
+    return [
+      "아래는 이전 모델 출력 원문이다. 유효한 스키마 JSON으로 정규화해라.",
+      "원문:",
+      source || "(empty)",
+    ].join("\n");
+  }
+  return [
+    "Below is raw model output. Normalize it into valid schema JSON.",
+    "Source:",
+    source || "(empty)",
+  ].join("\n");
+}
+
+async function repairAnalysisFromRawText(args: {
+  apiKey: string;
+  model: string;
+  rawText: string;
+  locale: "ko" | "en";
+  signal: AbortSignal;
+}) {
+  const { apiKey, model, rawText, locale, signal } = args;
+  const fallbackModel = "gpt-4.1-mini";
+  const modelCandidates = model === fallbackModel ? [model] : [model, fallbackModel];
+  const developerPrompt = buildRepairDeveloperPrompt(locale);
+  const userPrompt = buildRepairUserPrompt(rawText, locale);
+
+  for (const candidateModel of modelCandidates) {
+    const repaired = await callResponsesApi({
+      apiKey,
+      model: candidateModel,
+      developerPrompt,
+      userPrompt,
+      signal,
+    });
+    const parsed = parseAttemptResult(repaired);
+    if (parsed) {
+      return {
+        parsed,
+        model: candidateModel,
+        rawText: repaired.text ?? rawText,
+      };
+    }
+  }
+
+  return null;
 }
 
 export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise<{
@@ -560,7 +783,11 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
     signal: params.signal,
   });
 
-  if (!attempt.text && shouldRetryOpenAiError(attempt.error)) {
+  let selectedModel = model;
+  let parsed = parseAttemptResult(attempt);
+  let rawText = attempt.text ?? "";
+
+  if (!parsed && !attempt.text && shouldRetryOpenAiError(attempt.error)) {
     const retry = await callResponsesApi({
       apiKey,
       model,
@@ -569,21 +796,26 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
       imageDataUrl: params.imageDataUrl,
       signal: params.signal,
     });
+    parsed = parseAttemptResult(retry);
+    if (retry.text) rawText = retry.text;
+  }
 
-    if (retry.text) {
-      const retryParsed = safeJsonParse<unknown>(retry.text);
-      const retryResult = parseAnalysisResult(retryParsed);
-      if (retryResult) {
-        return {
-          result: retryResult,
-          model,
-          rawText: retry.text,
-        };
-      }
+  if (!parsed && attempt.text) {
+    const repaired = await repairAnalysisFromRawText({
+      apiKey,
+      model,
+      rawText: attempt.text,
+      locale: params.locale,
+      signal: params.signal,
+    });
+    if (repaired) {
+      parsed = repaired.parsed;
+      rawText = repaired.rawText;
+      selectedModel = repaired.model;
     }
   }
 
-  if (!attempt.text) {
+  if (!parsed && !attempt.text) {
     const fallback = buildFallbackAnalysisResult(
       params,
       `OpenAI 연결이 불안정해 기본 안전 모드로 전환되었습니다. (${String(attempt.error ?? "unknown_error").slice(0, 90)})`
@@ -595,20 +827,18 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
     };
   }
 
-  const parsed = safeJsonParse<unknown>(attempt.text);
-  const result = parseAnalysisResult(parsed);
-  if (!result) {
+  if (!parsed) {
     const fallback = buildFallbackAnalysisResult(params, "AI 응답이 불완전해 안전 기본 모드로 복구되었습니다.");
     return {
       result: fallback,
       model,
-      rawText: attempt.text,
+      rawText,
     };
   }
 
   return {
-    result,
-    model,
-    rawText: attempt.text,
+    result: parsed,
+    model: selectedModel,
+    rawText,
   };
 }
