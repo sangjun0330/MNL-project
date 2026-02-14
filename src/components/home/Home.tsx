@@ -202,13 +202,20 @@ export default function Home() {
     const activity = selBio?.activity;
     const caffeine = selBio?.caffeineMg;
     const symptom = (selBio as any)?.symptomSeverity ?? null;
+    const workEventTags = Array.isArray((selBio as any)?.workEventTags)
+      ? ((selBio as any).workEventTags as unknown[])
+          .map((tag) => (typeof tag === "string" ? tag.trim() : ""))
+          .filter(Boolean)
+          .join(", ")
+      : null;
 
     const stressLabel =
       stress == null ? null : [t("낮음"), t("보통"), t("높음"), t("매우")][Number(stress)] ?? null;
     const activityLabel =
       activity == null ? null : [t("가벼움"), t("보통"), t("많음"), t("빡셈")][Number(activity)] ?? null;
     const sleepLabel = sleep == null ? null : formatHours(sleep);
-    const napLabel = nap && Number(nap) > 0 ? formatHours(Number(nap)) : null;
+    const napLabel = nap == null ? null : formatHours(Number(nap));
+    const symptomLabel = symptom == null ? null : Number(symptom) === 0 ? t("없음") : `${Number(symptom)}/3`;
 
     return [
       {
@@ -239,12 +246,21 @@ export default function Home() {
       {
         key: "symptom",
         label: t("증상"),
-        value: symptom && Number(symptom) > 0 ? `${Number(symptom)}/3` : null,
+        value: symptomLabel,
+      },
+      {
+        key: "work_events",
+        label: t("근무 이벤트"),
+        value: workEventTags,
       },
     ];
   }, [selBio, t]);
 
   const visibleInputs = inputItems.filter((item) => item.value);
+  const workEventNote =
+    typeof (selBio as any)?.workEventNote === "string" && (selBio as any).workEventNote.trim()
+      ? String((selBio as any).workEventNote).trim()
+      : null;
 
   return (
     <div className="space-y-3">
@@ -383,7 +399,7 @@ export default function Home() {
             </div>
           )}
 
-          {selNote || selEmotion ? (
+          {selNote || selEmotion || workEventNote ? (
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               {selNote ? (
                 <div className="rounded-2xl border border-ios-sep bg-white/90 p-4 shadow-apple-sm">
@@ -400,6 +416,12 @@ export default function Home() {
                       {(selEmotion.tags ?? []).slice(0, 3).join(" ")}
                     </span>
                   </div>
+                </div>
+              ) : null}
+              {workEventNote ? (
+                <div className="rounded-2xl border border-ios-sep bg-white/90 p-4 shadow-apple-sm">
+                  <div className="text-[12.5px] text-ios-muted">{t("근무 이벤트 메모")}</div>
+                  <div className="mt-2 text-[14px] font-semibold leading-relaxed">{workEventNote}</div>
                 </div>
               ) : null}
             </div>

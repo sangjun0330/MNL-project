@@ -54,6 +54,7 @@ const EN_BASE: Record<string, string> = {
   "홈": "Home",
   "일정": "Schedule",
   "인사이트": "Insights",
+  "툴": "Tools",
 };
 
 const EN_EXTRA: Record<string, string> = {
@@ -260,6 +261,7 @@ const EN_EXTRA: Record<string, string> = {
   "입력할수록 내 패턴에 맞게 더 정확해져요.": "The more you log, the better it matches your personal pattern.",
   "오늘 근무에서 있었던 상황을 태그로 남겨 주세요.": "Tag what happened during today's shift.",
   "태그는 여러 개 선택할 수 있어요.": "You can select multiple tags.",
+  "근무 이벤트 메모": "Shift event note",
   "직접 태그 추가": "Add custom tag",
   "직접 추가한 태그": "Custom tags",
   "이벤트 상세 메모 (선택)": "Event details (optional)",

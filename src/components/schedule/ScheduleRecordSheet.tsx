@@ -110,6 +110,10 @@ export function ScheduleRecordSheet({
   const workEventNoteDebounce = useRef<any>(null);
   const skipWorkEventNoteSync = useRef(true);
   const sleepInputRef = useRef<HTMLInputElement | null>(null);
+  const showMoreOpenedRef = useRef(false);
+  const activityTouchedRef = useRef(false);
+  const symptomTouchedRef = useRef(false);
+  const napTouchedRef = useRef(false);
 
   const stressOptions = useMemo(
     () => [
@@ -171,10 +175,21 @@ export function ScheduleRecordSheet({
     markSaved();
   };
 
-  const saveNapNow = (raw: string) => {
-    const n = raw.trim() === "" ? null : Number(raw);
+  const saveNapNow = (raw: string, opts?: { forceZero?: boolean }) => {
+    const trimmed = raw.trim();
+    const n = trimmed === "" ? (opts?.forceZero ? 0 : null) : Number(raw);
     const v = n == null || Number.isNaN(n) ? null : clamp(Math.round(n * 2) / 2, 0, 4);
     store.setBioForDate(iso, { napHours: v });
+    markSaved();
+  };
+
+  const saveStressNow = (value: StressLevel) => {
+    store.setBioForDate(iso, { stress: value });
+    markSaved();
+  };
+
+  const saveSymptomNow = (value: 0 | 1 | 2 | 3) => {
+    store.setBioForDate(iso, { symptomSeverity: value });
     markSaved();
   };
 
@@ -232,6 +247,10 @@ export function ScheduleRecordSheet({
     setWorkEventNote(typeof (bio as any).workEventNote === "string" ? String((bio as any).workEventNote) : "");
     skipNapSync.current = true;
     skipWorkEventNoteSync.current = true;
+    showMoreOpenedRef.current = false;
+    activityTouchedRef.current = false;
+    symptomTouchedRef.current = false;
+    napTouchedRef.current = false;
 
     // 메모
     setNote(curNote);
@@ -386,12 +405,14 @@ export function ScheduleRecordSheet({
 
   const setActivityQuick = (v: string) => {
     const a = Number(v) as ActivityLevel;
+    activityTouchedRef.current = true;
     setActivity(a);
     store.setBioForDate(iso, { activity: a });
     markSaved();
   };
 
   const setSymptomQuick = (v: 0 | 1 | 2 | 3) => {
+    symptomTouchedRef.current = true;
     setSymptomSeverity(v);
     store.setBioForDate(iso, { symptomSeverity: v });
     markSaved();
@@ -426,6 +447,7 @@ export function ScheduleRecordSheet({
 
   const setNapQuick = (hours: number) => {
     const next = clamp(Math.round(hours * 2) / 2, 0, 4);
+    napTouchedRef.current = true;
     setNapText(String(next));
     store.setBioForDate(iso, { napHours: next });
     markSaved();
@@ -452,7 +474,13 @@ export function ScheduleRecordSheet({
     if (canEditHealth) {
       saveSleepNow(sleepText);
       saveCaffeineNow(caffeineText);
-      saveNapNow(napText);
+      saveStressNow(stress);
+      if (menstrualEnabled && showMoreOpenedRef.current) {
+        saveSymptomNow(symptomSeverity);
+      }
+      const hasAdditionalInput =
+        activityTouchedRef.current || symptomTouchedRef.current || napTouchedRef.current;
+      saveNapNow(napText, { forceZero: hasAdditionalInput && napText.trim() === "" });
       if (workEventNoteDebounce.current) {
         clearTimeout(workEventNoteDebounce.current);
         workEventNoteDebounce.current = null;
@@ -773,7 +801,17 @@ export function ScheduleRecordSheet({
         {/* 추가 기록 */}
         {canEditHealth ? (
           <div className="rounded-2xl border border-ios-sep bg-white p-4">
-            <button type="button" onClick={() => setShowMore((v) => !v)} className="flex w-full items-center justify-between">
+            <button
+              type="button"
+              onClick={() =>
+                setShowMore((v) => {
+                  const next = !v;
+                  if (next) showMoreOpenedRef.current = true;
+                  return next;
+                })
+              }
+              className="flex w-full items-center justify-between"
+            >
               <div className="min-w-0">
                 <div className="text-[13px] font-semibold">{t("추가 기록")}</div>
                 <div className="mt-0.5 text-[12.5px] text-ios-muted">
@@ -811,7 +849,10 @@ export function ScheduleRecordSheet({
                     <Input
                       inputMode="decimal"
                       value={napText}
-                      onChange={(e) => setNapText(e.target.value)}
+                      onChange={(e) => {
+                        napTouchedRef.current = true;
+                        setNapText(e.target.value);
+                      }}
                       onBlur={() => saveNapNow(napText)}
                       placeholder={t("낮잠 시간 입력(예: 0.5)")}
                     />
