@@ -11,6 +11,9 @@ export const dynamic = "force-dynamic";
 const MAX_QUERY_LENGTH = 1800;
 const MAX_PATIENT_SUMMARY_LENGTH = 1400;
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
+const DEFAULT_ANALYZE_TIMEOUT_MS = 90_000;
+const MIN_ANALYZE_TIMEOUT_MS = 30_000;
+const MAX_ANALYZE_TIMEOUT_MS = 180_000;
 
 function bad(status: number, error: string) {
   const safeError = String(error ?? "unknown_error")
@@ -62,6 +65,13 @@ function bytesToBase64(input: Uint8Array) {
   return btoa(binary);
 }
 
+function resolveAnalyzeTimeoutMs() {
+  const raw = Number(process.env.OPENAI_MED_SAFETY_TIMEOUT_MS ?? process.env.OPENAI_TIMEOUT_MS ?? DEFAULT_ANALYZE_TIMEOUT_MS);
+  if (!Number.isFinite(raw)) return DEFAULT_ANALYZE_TIMEOUT_MS;
+  const rounded = Math.round(raw);
+  return Math.max(MIN_ANALYZE_TIMEOUT_MS, Math.min(MAX_ANALYZE_TIMEOUT_MS, rounded));
+}
+
 async function fileToDataUrl(file: File) {
   const mime = file.type || "application/octet-stream";
   const buffer = await file.arrayBuffer();
@@ -105,7 +115,8 @@ export async function POST(req: NextRequest) {
     }
 
     const abort = new AbortController();
-    const timeout = setTimeout(() => abort.abort(), 45_000);
+    const timeoutMs = resolveAnalyzeTimeoutMs();
+    const timeout = setTimeout(() => abort.abort(), timeoutMs);
 
     try {
       const analyzed = await analyzeMedSafetyWithOpenAI({
