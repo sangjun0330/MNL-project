@@ -1,4 +1,4 @@
-import type { DutyType, HandoffRiskLevel } from "@/lib/handoff/types";
+import type { DutyType, HandoffRiskLevel } from "./types";
 
 type Rule = {
   pattern: RegExp;

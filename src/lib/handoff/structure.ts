@@ -1,4 +1,4 @@
-import { scorePriority } from "@/lib/handoff/priority";
+import { scorePriority } from "./priority";
 import type {
   DutyType,
   GlobalTopItem,
@@ -8,7 +8,7 @@ import type {
   PatientRisk,
   PatientTodo,
   PatientTopItem,
-} from "@/lib/handoff/types";
+} from "./types";
 
 type StructureInput = {
   patientSegments: Record<string, MaskedSegment[]>;
