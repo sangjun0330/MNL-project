@@ -111,7 +111,7 @@ function resolveApiBaseCandidates() {
   const dedicatedFallback = normalizeApiBaseUrl(process.env.OPENAI_MED_SAFETY_FALLBACK_BASE_URL ?? "");
   const sharedFallback = normalizeApiBaseUrl(process.env.OPENAI_FALLBACK_BASE_URL ?? "");
 
-  const ordered = [dedicatedPrimary, direct, sharedPrimary, dedicatedFallback, sharedFallback].filter(Boolean);
+  const ordered = [direct, dedicatedPrimary, sharedPrimary, dedicatedFallback, sharedFallback].filter(Boolean);
   const unique: string[] = [];
   const seen = new Set<string>();
   for (const candidate of ordered) {
@@ -127,6 +127,41 @@ function resolveMaxOutputTokens() {
   if (!Number.isFinite(raw)) return 1400;
   const rounded = Math.round(raw);
   return Math.max(700, Math.min(3000, rounded));
+}
+
+function resolvePerAttemptTimeoutMs() {
+  const raw = Number(
+    process.env.OPENAI_MED_SAFETY_PER_ATTEMPT_TIMEOUT_MS ?? process.env.OPENAI_PER_ATTEMPT_TIMEOUT_MS ?? 12000
+  );
+  if (!Number.isFinite(raw)) return 12000;
+  const rounded = Math.round(raw);
+  return Math.max(4000, Math.min(45000, rounded));
+}
+
+function createAttemptSignal(parent: AbortSignal, timeoutMs: number) {
+  const controller = new AbortController();
+  const onAbort = () => {
+    controller.abort((parent as any).reason ?? new DOMException("Aborted", "AbortError"));
+  };
+
+  if (parent.aborted) {
+    onAbort();
+  } else {
+    parent.addEventListener("abort", onAbort, { once: true });
+  }
+
+  const timer = setTimeout(() => {
+    if (!controller.signal.aborted) {
+      controller.abort(new DOMException("Attempt timed out", "AbortError"));
+    }
+  }, timeoutMs);
+
+  const dispose = () => {
+    clearTimeout(timer);
+    parent.removeEventListener("abort", onAbort);
+  };
+
+  return { signal: controller.signal, dispose };
 }
 
 function buildMedSafetyJsonSchema() {
@@ -940,8 +975,9 @@ async function callResponsesApi(args: {
   imageDataUrl?: string;
   signal: AbortSignal;
   maxOutputTokens: number;
+  perAttemptTimeoutMs: number;
 }): Promise<ResponsesAttempt> {
-  const { apiKey, model, developerPrompt, userPrompt, apiBaseUrl, imageDataUrl, signal, maxOutputTokens } = args;
+  const { apiKey, model, developerPrompt, userPrompt, apiBaseUrl, imageDataUrl, signal, maxOutputTokens, perAttemptTimeoutMs } = args;
 
   const userContent: Array<Record<string, unknown>> = [{ type: "input_text", text: userPrompt }];
   if (imageDataUrl) {
@@ -980,6 +1016,7 @@ async function callResponsesApi(args: {
   };
 
   let response: Response;
+  const request = createAttemptSignal(signal, perAttemptTimeoutMs);
   try {
     response = await fetch(`${apiBaseUrl}/responses`, {
       method: "POST",
@@ -988,12 +1025,17 @@ async function callResponsesApi(args: {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify(payload),
-      signal,
+      signal: request.signal,
     });
   } catch (cause: any) {
+    request.dispose();
+    if (String(cause?.name ?? "") === "AbortError" && !signal.aborted) {
+      return { text: null, error: `openai_attempt_timeout_${perAttemptTimeoutMs}ms`, json: null };
+    }
     const reason = truncateError(String(cause?.message ?? cause ?? "fetch_failed"));
     return { text: null, error: `openai_network_${reason}`, json: null };
   }
+  request.dispose();
 
   if (!response.ok) {
     const raw = await response.text().catch(() => "");
@@ -1022,8 +1064,9 @@ async function callChatCompletionsApi(args: {
   imageDataUrl?: string;
   signal: AbortSignal;
   maxOutputTokens: number;
+  perAttemptTimeoutMs: number;
 }): Promise<ResponsesAttempt> {
-  const { apiKey, model, developerPrompt, userPrompt, apiBaseUrl, imageDataUrl, signal, maxOutputTokens } = args;
+  const { apiKey, model, developerPrompt, userPrompt, apiBaseUrl, imageDataUrl, signal, maxOutputTokens, perAttemptTimeoutMs } = args;
 
   const userContent: Array<Record<string, unknown>> = [{ type: "text", text: userPrompt }];
   if (imageDataUrl) {
@@ -1060,6 +1103,7 @@ async function callChatCompletionsApi(args: {
   };
 
   let response: Response;
+  const request = createAttemptSignal(signal, perAttemptTimeoutMs);
   try {
     response = await fetch(`${apiBaseUrl}/chat/completions`, {
       method: "POST",
@@ -1068,12 +1112,17 @@ async function callChatCompletionsApi(args: {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify(payload),
-      signal,
+      signal: request.signal,
     });
   } catch (cause: any) {
+    request.dispose();
+    if (String(cause?.name ?? "") === "AbortError" && !signal.aborted) {
+      return { text: null, error: `openai_attempt_timeout_${perAttemptTimeoutMs}ms`, json: null };
+    }
     const reason = truncateError(String(cause?.message ?? cause ?? "fetch_failed"));
     return { text: null, error: `openai_chat_network_${reason}`, json: null };
   }
+  request.dispose();
 
   if (!response.ok) {
     const raw = await response.text().catch(() => "");
@@ -1155,9 +1204,10 @@ async function repairAnalysisFromRawText(args: {
   locale: "ko" | "en";
   apiBaseCandidates: string[];
   maxOutputTokens: number;
+  perAttemptTimeoutMs: number;
   signal: AbortSignal;
 }) {
-  const { apiKey, model, rawText, locale, apiBaseCandidates, maxOutputTokens, signal } = args;
+  const { apiKey, model, rawText, locale, apiBaseCandidates, maxOutputTokens, perAttemptTimeoutMs, signal } = args;
   const fallbackModel = "gpt-4.1-mini";
   const modelCandidates = model === fallbackModel ? [model] : [model, fallbackModel];
   const developerPrompt = buildRepairDeveloperPrompt(locale);
@@ -1173,6 +1223,7 @@ async function repairAnalysisFromRawText(args: {
         apiBaseUrl,
         signal,
         maxOutputTokens,
+        perAttemptTimeoutMs,
       });
       const parsed = parseAttemptResult(repaired);
       if (parsed) {
@@ -1191,6 +1242,7 @@ async function repairAnalysisFromRawText(args: {
         apiBaseUrl,
         signal,
         maxOutputTokens,
+        perAttemptTimeoutMs,
       });
       const parsedChat = parseAttemptResult(repairedChat);
       if (parsedChat) {
@@ -1218,6 +1270,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
   const model = resolveModel();
   const apiBaseCandidates = resolveApiBaseCandidates();
   const maxOutputTokens = resolveMaxOutputTokens();
+  const perAttemptTimeoutMs = resolvePerAttemptTimeoutMs();
   const developerPrompt = buildDeveloperPrompt(params.locale);
   const userPrompt = buildUserPrompt({
     query: params.query,
@@ -1240,6 +1293,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         imageDataUrl: params.imageDataUrl,
         signal: params.signal,
         maxOutputTokens,
+        perAttemptTimeoutMs,
       });
       last = attempt;
       if (!attempt.error) return attempt;
@@ -1259,6 +1313,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         imageDataUrl: params.imageDataUrl,
         signal: params.signal,
         maxOutputTokens,
+        perAttemptTimeoutMs,
       });
       last = attempt;
       if (!attempt.error) return attempt;
@@ -1310,6 +1365,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
       locale: params.locale,
       apiBaseCandidates,
       maxOutputTokens,
+      perAttemptTimeoutMs,
       signal: params.signal,
     });
     if (repaired) {
