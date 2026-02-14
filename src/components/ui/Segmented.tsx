@@ -26,7 +26,7 @@ export function Segmented<T extends string>({
   const handler = onValueChange ?? onChange;
 
   return (
-    <div className={cn("flex w-full rounded-2xl border border-ios-sep bg-white p-1", className)}>
+    <div className={cn("flex w-full rounded-2xl border border-ios-sep bg-[#F8F8FB] p-1", className)}>
       {options.map((opt) => {
         const active = opt.value === value;
         return (
@@ -35,8 +35,10 @@ export function Segmented<T extends string>({
             type="button"
             onClick={() => handler?.(opt.value)}
             className={cn(
-              "flex-1 rounded-xl px-3 py-2 text-[14px] font-semibold transition whitespace-nowrap",
-              active ? "bg-black text-white" : "text-ios-muted hover:bg-black/5"
+              "flex-1 rounded-xl border px-3 py-2 text-[14px] font-semibold transition whitespace-nowrap",
+              active
+                ? "border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]"
+                : "border-transparent bg-transparent text-ios-muted hover:bg-white"
             )}
           >
             {opt.label}

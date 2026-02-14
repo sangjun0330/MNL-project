@@ -45,8 +45,9 @@
    - Uncertainties
 4. 10-second review step (resolve/check + note)
 5. Save de-identified result (7d TTL)
-6. Keep raw/evidence encrypted local-only (24h TTL)
-7. Purge on TTL or manual crypto-shred
+6. Runtime live view can expose alias mapping only as short-lived on-screen reveal (hold-to-reveal)
+7. Keep raw/evidence local-only (`memory_only` runtime default or encrypted vault)
+8. Purge on inactivity TTL/manual crypto-shred
 
 ## 5. Security Model
 - No server API path for raw audio/transcript/evidence
@@ -91,6 +92,7 @@ Recommended defaults (`.env.local`):
 - `NEXT_PUBLIC_HANDOFF_WASM_ASR_WORKER_URL=/workers/handoff-whisper.worker.js`
 - `NEXT_PUBLIC_HANDOFF_WASM_ASR_MODEL_URL=`
 - `NEXT_PUBLIC_HANDOFF_WASM_ASR_RUNTIME_URL=`
+- `NEXT_PUBLIC_HANDOFF_LIVE_MEMORY_ONLY=true`
 
 ## 8. Deployment Notes
 - HTTPS required for browser microphone APIs in production

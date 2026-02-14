@@ -31,7 +31,7 @@ export const Input = React.forwardRef<HTMLInputElement, Props>(function Input(
         className={cn(
           "h-11 w-full rounded-2xl border border-ios-sep bg-white px-4 text-[15px] text-ios-text",
           "placeholder:text-ios-muted/70",
-          "focus:outline-none focus:ring-2 focus:ring-black/10",
+          "focus:outline-none focus:ring-2 focus:ring-[color:var(--wnl-accent-border)]",
           className
         )}
         {...props}

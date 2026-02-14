@@ -10,7 +10,11 @@ export type HandoffAuditAction =
   | "pipeline_run"
   | "session_saved"
   | "session_shred"
-  | "all_data_purged";
+  | "all_data_purged"
+  | "view_opened"
+  | "field_revealed"
+  | "screen_locked"
+  | "screen_unlocked";
 
 export type HandoffAuditEvent = {
   id: string;
