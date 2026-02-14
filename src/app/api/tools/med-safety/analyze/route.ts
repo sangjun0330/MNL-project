@@ -125,7 +125,8 @@ export async function POST(req: NextRequest) {
           ...analyzed.result,
           model: analyzed.model,
           analyzedAt: Date.now(),
-          source: "openai",
+          source: analyzed.fallbackReason ? "openai_fallback" : "openai_live",
+          fallbackReason: analyzed.fallbackReason,
         },
       });
     } finally {

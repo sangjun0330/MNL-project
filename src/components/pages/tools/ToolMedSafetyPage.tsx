@@ -51,8 +51,16 @@ type MedSafetyAnalyzeResult = {
   confidenceNote: string;
   model: string;
   analyzedAt: number;
-  source: string;
+  source: "openai_live" | "openai_fallback";
+  fallbackReason?: string | null;
 };
+
+type MedSafetyCacheRecord = {
+  savedAt: number;
+  data: MedSafetyAnalyzeResult;
+};
+
+const MED_SAFETY_CACHE_KEY = "med_safety_cache_v1";
 
 const MODE_OPTIONS: Array<{ value: ClinicalMode; label: string }> = [
   { value: "ward", label: "병동" },
@@ -74,9 +82,60 @@ function parseErrorMessage(raw: string) {
   if (raw.includes("query_or_image_required")) return "텍스트를 입력하거나 사진을 업로드해 주세요.";
   if (raw.includes("image_too_large")) return "이미지 용량이 너무 큽니다. 6MB 이하로 다시 업로드해 주세요.";
   if (raw.includes("image_type_invalid")) return "이미지 파일만 업로드할 수 있습니다.";
+  if (raw.includes("unsupported_country_region_territory"))
+    return "현재 네트워크 경로에서 OpenAI가 지역 정책으로 차단되었습니다. 모바일 데이터 또는 다른 네트워크로 다시 시도해 주세요.";
   if (raw.includes("openai_responses_")) return "OpenAI 요청이 실패했습니다. 잠시 후 다시 시도해 주세요.";
   if (raw.includes("openai_invalid_json_payload")) return "AI 응답 형식 파싱에 실패했습니다. 다시 시도해 주세요.";
   return raw;
+}
+
+function buildAnalyzeCacheKey(args: {
+  query: string;
+  patientSummary: string;
+  mode: ClinicalMode;
+  situation: ClinicalSituation;
+  imageFile: File | null;
+}) {
+  const query = args.query.replace(/\s+/g, " ").trim().toLowerCase();
+  const summary = args.patientSummary.replace(/\s+/g, " ").trim().toLowerCase();
+  const imageSig = args.imageFile ? `${args.imageFile.name}:${args.imageFile.size}:${args.imageFile.type}` : "";
+  return [args.mode, args.situation, query, summary, imageSig].join("|");
+}
+
+function readMedSafetyCache(cacheKey: string): MedSafetyAnalyzeResult | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(MED_SAFETY_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Record<string, MedSafetyCacheRecord>;
+    const hit = parsed?.[cacheKey];
+    if (!hit?.data) return null;
+    return hit.data;
+  } catch {
+    return null;
+  }
+}
+
+function writeMedSafetyCache(cacheKey: string, data: MedSafetyAnalyzeResult) {
+  if (typeof window === "undefined") return;
+  try {
+    const raw = window.localStorage.getItem(MED_SAFETY_CACHE_KEY);
+    const parsed = raw ? (JSON.parse(raw) as Record<string, MedSafetyCacheRecord>) : {};
+    const next: Record<string, MedSafetyCacheRecord> = {
+      ...parsed,
+      [cacheKey]: {
+        savedAt: Date.now(),
+        data,
+      },
+    };
+    const entries = Object.entries(next)
+      .sort((a, b) => (b[1]?.savedAt ?? 0) - (a[1]?.savedAt ?? 0))
+      .slice(0, 30);
+    const trimmed = Object.fromEntries(entries);
+    window.localStorage.setItem(MED_SAFETY_CACHE_KEY, JSON.stringify(trimmed));
+  } catch {
+    // ignore cache write failure
+  }
 }
 
 function parseCameraStartError(cause: unknown) {
@@ -332,6 +391,13 @@ export function ToolMedSafetyPage() {
         setError("텍스트를 입력하거나 사진을 업로드해 주세요.");
         return;
       }
+      const cacheKey = buildAnalyzeCacheKey({
+        query: normalized,
+        patientSummary: patientSummary.trim(),
+        mode,
+        situation,
+        imageFile,
+      });
 
       setIsLoading(true);
       setError(null);
@@ -361,8 +427,26 @@ export function ToolMedSafetyPage() {
           setError(parseErrorMessage(String((payload as any)?.error ?? "med_safety_analyze_failed")));
           return;
         }
+        const data = payload.data;
+        const fallbackReason = String(data.fallbackReason ?? "");
+        const fallbackBlockedByRegion = fallbackReason.includes("unsupported_country_region_territory");
 
-        setResult(payload.data);
+        if (data.source === "openai_live") {
+          writeMedSafetyCache(cacheKey, data);
+          setResult(data);
+          setError(null);
+        } else {
+          const cached = readMedSafetyCache(cacheKey);
+          if (fallbackBlockedByRegion && cached) {
+            setResult(cached);
+            setError("현재 네트워크에서 OpenAI가 차단되어 최근 성공한 결과를 대신 표시합니다. 네트워크 변경 후 다시 분석하면 최신 결과로 갱신됩니다.");
+          } else {
+            setResult(data);
+            setError(
+              `${parseErrorMessage(fallbackReason || "openai_fallback")} 기본 안전 모드 결과를 표시합니다.`
+            );
+          }
+        }
         setResultTab("quick");
         if (forcedQuery) setQuery(forcedQuery);
       } catch {
