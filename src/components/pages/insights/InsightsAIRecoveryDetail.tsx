@@ -254,7 +254,7 @@ function EnglishTranslationPendingPopup({
 export function InsightsAIRecoveryDetail() {
   const { t, lang: uiLang } = useI18n();
   const router = useRouter();
-  const [openSleepGuide, setOpenSleepGuide] = useState(false);
+  const [openInputGuide, setOpenInputGuide] = useState(false);
   const [analysisRequested, setAnalysisRequested] = useState(false);
   const { recordedDays, state } = useInsightsData();
   const insightsLocked = isInsightsLocked(recordedDays);
@@ -267,22 +267,58 @@ export function InsightsAIRecoveryDetail() {
   const today = useMemo(() => todayISO(), []);
   const yesterday = useMemo(() => toISODate(addDays(fromISODate(today), -1)), [today]);
   const todayBio = state.bio?.[today] ?? null;
-  const todayEmotion = state.emotions?.[today] ?? null;
   const yesterdayBio = state.bio?.[yesterday] ?? null;
   const yesterdayEmotion = state.emotions?.[yesterday] ?? null;
-  const hasTodayRecord = hasHealthInput(todayBio, todayEmotion);
   const hasYesterdayRecord = hasHealthInput(yesterdayBio, yesterdayEmotion);
   const hasTodaySleep = todayBio?.sleepHours != null;
-  const needsHealthInputGuide = !hasTodayRecord || !hasYesterdayRecord || !hasTodaySleep;
+  const needsHealthInputGuide = !hasYesterdayRecord || !hasTodaySleep;
+  const missingGuide = useMemo(() => {
+    const missingTodaySleep = !hasTodaySleep;
+    const missingYesterdayHealth = !hasYesterdayRecord;
 
-  const moveToTodaySleepLog = useCallback(() => {
-    setOpenSleepGuide(false);
-    router.push("/schedule?openHealthLog=today&focus=sleep");
-  }, [router]);
+    if (!missingTodaySleep && !missingYesterdayHealth) return null;
+
+    if (missingTodaySleep && missingYesterdayHealth) {
+      return {
+        title: t("필수 기록 2개가 필요해요"),
+        subtitle: `${formatKoreanDate(today)} · ${formatKoreanDate(yesterday)} · ${t("AI 맞춤회복 분석 전 필수")}`,
+        primary: t("오늘 수면 기록과 전날 건강 기록을 먼저 입력해 주세요."),
+        description: t("두 항목이 있어야 맞춤회복 우선순위를 정확하게 계산할 수 있어요."),
+        hint: t("확인을 누르면 오늘 기록 화면(수면 우선)으로 이동합니다."),
+        route: "/schedule?openHealthLog=today&focus=sleep",
+      } as const;
+    }
+
+    if (missingTodaySleep) {
+      return {
+        title: t("오늘 수면 기록이 필요해요"),
+        subtitle: `${formatKoreanDate(today)} · ${t("AI 맞춤회복 분석 전 필수")}`,
+        primary: t("먼저 오늘 수면 시간을 입력해 주세요."),
+        description: t("오늘 수면 기록이 있어야 맞춤회복 분석 정확도가 올라갑니다."),
+        hint: t("확인을 누르면 오늘 기록 화면으로 이동합니다."),
+        route: "/schedule?openHealthLog=today&focus=sleep",
+      } as const;
+    }
+
+    return {
+      title: t("전날 건강 기록이 필요해요"),
+      subtitle: `${formatKoreanDate(yesterday)} · ${t("AI 맞춤회복 분석 전 필수")}`,
+      primary: t("먼저 전날 건강 기록을 입력해 주세요."),
+      description: t("전날 기록이 있어야 추세 기반 맞춤회복 추천을 정확히 계산할 수 있어요."),
+      hint: t("확인을 누르면 전날 기록 화면으로 이동합니다."),
+      route: "/schedule?openHealthLog=yesterday",
+    } as const;
+  }, [hasTodaySleep, hasYesterdayRecord, t, today, yesterday]);
+
+  const moveToRequiredHealthLog = useCallback(() => {
+    setOpenInputGuide(false);
+    if (!missingGuide) return;
+    router.push(missingGuide.route);
+  }, [missingGuide, router]);
 
   const startAnalysis = useCallback(() => {
     if (needsHealthInputGuide) {
-      setOpenSleepGuide(true);
+      setOpenInputGuide(true);
       return;
     }
     setAnalysisRequested(true);
@@ -411,13 +447,13 @@ export function InsightsAIRecoveryDetail() {
         <DetailCard className="p-5">
           <div className="text-[17px] font-bold tracking-[-0.01em] text-ios-text">{t("AI 분석 준비 완료")}</div>
           <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
-            {t("분석 시작 전에 기록 상태를 확인해 주세요.")}
+            {t("분석 시작 전에 필수 기록 2개(오늘 수면, 전날 건강)를 확인해 주세요.")}
           </p>
           <div className="mt-3 rounded-2xl border border-ios-sep bg-ios-bg px-3 py-3">
             <div className="flex items-center justify-between text-[13px] text-ios-text">
-              <span>{t("오늘 건강 기록")}</span>
-              <span className={hasTodayRecord ? "text-[#0B7A3E]" : "text-[#B45309]"}>
-                {hasTodayRecord ? t("입력 완료") : t("입력 필요")}
+              <span>{t("오늘 수면 시간")}</span>
+              <span className={hasTodaySleep ? "text-[#0B7A3E]" : "text-[#B45309]"}>
+                {hasTodaySleep ? t("입력 완료") : t("입력 필요")}
               </span>
             </div>
             <div className="mt-2 flex items-center justify-between text-[13px] text-ios-text">
@@ -426,23 +462,17 @@ export function InsightsAIRecoveryDetail() {
                 {hasYesterdayRecord ? t("입력 완료") : t("입력 필요")}
               </span>
             </div>
-            <div className="mt-2 flex items-center justify-between text-[13px] text-ios-text">
-              <span>{t("오늘 수면 시간")}</span>
-              <span className={hasTodaySleep ? "text-[#0B7A3E]" : "text-[#B45309]"}>
-                {hasTodaySleep ? t("입력 완료") : t("입력 필요")}
-              </span>
-            </div>
           </div>
           <button
             type="button"
             onClick={startAnalysis}
             className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-full border border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] text-[14px] font-semibold text-[color:var(--wnl-accent)]"
           >
-            {needsHealthInputGuide ? t("오늘 건강 기록 입력하러 가기") : t("AI 분석 시작하기")}
+            {needsHealthInputGuide ? t("필수 기록 입력하러 가기") : t("AI 분석 시작하기")}
           </button>
-          {!hasTodaySleep ? (
+          {needsHealthInputGuide ? (
             <p className="mt-2 text-[12px] leading-relaxed text-ios-muted">
-              {t("정확한 분석을 위해 최소 오늘 수면 시간은 꼭 입력해 주세요.")}
+              {t("누르면 누락된 기록 날짜로 이동해 바로 입력할 수 있어요.")}
             </p>
           ) : null}
         </DetailCard>
@@ -460,7 +490,7 @@ export function InsightsAIRecoveryDetail() {
             type="button"
             onClick={() => {
               if (needsHealthInputGuide) {
-                setOpenSleepGuide(true);
+                setOpenInputGuide(true);
                 return;
               }
               setAnalysisRequested(true);
@@ -621,9 +651,14 @@ export function InsightsAIRecoveryDetail() {
         message={t("영어로 표시하는 중이에요. 조금만 기다려 주세요.")}
       />
       <TodaySleepRequiredSheet
-        open={openSleepGuide}
-        onClose={() => setOpenSleepGuide(false)}
-        onConfirm={moveToTodaySleepLog}
+        open={openInputGuide}
+        onClose={() => setOpenInputGuide(false)}
+        onConfirm={moveToRequiredHealthLog}
+        titleText={missingGuide?.title}
+        subtitleText={missingGuide?.subtitle}
+        primaryText={missingGuide?.primary}
+        descriptionText={missingGuide?.description}
+        hintText={missingGuide?.hint}
       />
     </InsightDetailShell>
   );

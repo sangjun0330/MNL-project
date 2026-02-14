@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { formatKoreanDate } from "@/lib/date";
+import { addDays, formatKoreanDate, fromISODate, toISODate, todayISO } from "@/lib/date";
 import { useInsightsData, shiftKo, isInsightsLocked, INSIGHTS_MIN_DAYS } from "@/components/insights/useInsightsData";
 import { useAIRecoveryInsights } from "@/components/insights/useAIRecoveryInsights";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
@@ -13,6 +13,7 @@ import { TodaySleepRequiredSheet } from "@/components/insights/TodaySleepRequire
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { statusFromScore } from "@/lib/wnlInsight";
 import { useI18n } from "@/lib/useI18n";
+import { hasHealthInput } from "@/lib/healthRecords";
 
 function MetricCard({
   label,
@@ -85,8 +86,9 @@ function stripLeadingDash(text: string) {
 export function InsightsPage() {
   const { t } = useI18n();
   const router = useRouter();
-  const [openSleepGuide, setOpenSleepGuide] = useState(false);
+  const [openInputGuide, setOpenInputGuide] = useState(false);
   const {
+    state,
     end,
     todayVital,
     todayShift,
@@ -108,13 +110,50 @@ export function InsightsPage() {
   const {
     data: aiRecovery,
     loading: aiRecoveryLoading,
-    requiresTodaySleep,
     error: aiRecoveryError,
   } = useAIRecoveryInsights({ mode: "cache", enabled: !insightsLocked && hasPaidAccess });
+  const today = useMemo(() => todayISO(), []);
+  const yesterday = useMemo(() => toISODate(addDays(fromISODate(today), -1)), [today]);
+  const todayBio = state.bio?.[today] ?? null;
+  const yesterdayBio = state.bio?.[yesterday] ?? null;
+  const yesterdayEmotion = state.emotions?.[yesterday] ?? null;
+  const hasTodaySleep = todayBio?.sleepHours != null;
+  const hasYesterdayHealth = hasHealthInput(yesterdayBio, yesterdayEmotion);
+  const requiresRecoveryInputs = !hasTodaySleep || !hasYesterdayHealth;
+  const missingGuide = useMemo(() => {
+    if (!requiresRecoveryInputs) return null;
 
-  useEffect(() => {
-    if (requiresTodaySleep) setOpenSleepGuide(true);
-  }, [requiresTodaySleep]);
+    if (!hasTodaySleep && !hasYesterdayHealth) {
+      return {
+        title: t("필수 기록 2개가 필요해요"),
+        subtitle: `${formatKoreanDate(today)} · ${formatKoreanDate(yesterday)} · ${t("AI 맞춤회복 분석 전 필수")}`,
+        primary: t("오늘 수면 기록과 전날 건강 기록을 먼저 입력해 주세요."),
+        description: t("두 항목이 있어야 AI 맞춤회복 정확도가 올라갑니다."),
+        hint: t("확인을 누르면 오늘 기록 화면(수면 우선)으로 이동합니다."),
+        route: "/schedule?openHealthLog=today&focus=sleep",
+      } as const;
+    }
+
+    if (!hasTodaySleep) {
+      return {
+        title: t("오늘 수면 기록이 필요해요"),
+        subtitle: `${formatKoreanDate(today)} · ${t("AI 맞춤회복 분석 전 필수")}`,
+        primary: t("먼저 오늘 수면 시간을 입력해 주세요."),
+        description: t("오늘 수면 기록이 있어야 AI 맞춤회복을 시작할 수 있어요."),
+        hint: t("확인을 누르면 오늘 기록 화면으로 이동합니다."),
+        route: "/schedule?openHealthLog=today&focus=sleep",
+      } as const;
+    }
+
+    return {
+      title: t("전날 건강 기록이 필요해요"),
+      subtitle: `${formatKoreanDate(yesterday)} · ${t("AI 맞춤회복 분석 전 필수")}`,
+      primary: t("먼저 전날 건강 기록을 입력해 주세요."),
+      description: t("전날 기록이 있어야 추세 기반 추천을 정확히 계산할 수 있어요."),
+      hint: t("확인을 누르면 전날 기록 화면으로 이동합니다."),
+      route: "/schedule?openHealthLog=yesterday",
+    } as const;
+  }, [hasTodaySleep, hasYesterdayHealth, requiresRecoveryInputs, t, today, yesterday]);
 
   const body = useMemo(() => Math.round(todayVital?.body.value ?? 0), [todayVital]);
   const mental = useMemo(() => Math.round(todayVital?.mental.ema ?? 0), [todayVital]);
@@ -151,8 +190,8 @@ export function InsightsPage() {
   const aiTopSection = aiRecovery?.result.sections.length ? aiRecovery.result.sections[0] : null;
   const aiSummary = useMemo(
     () =>
-      requiresTodaySleep
-        ? t("오늘 수면 입력 후 AI 맞춤회복을 바로 분석합니다.")
+      requiresRecoveryInputs
+        ? t("오늘 수면 기록 + 전날 건강 기록 입력 후 AI 맞춤회복을 시작할 수 있어요.")
         : !billingLoading && !hasPaidAccess
           ? t("AI 맞춤회복은 Pro 플랜에서 사용할 수 있어요.")
         : aiRecoveryLoading
@@ -162,11 +201,12 @@ export function InsightsPage() {
             : aiRecoveryError
               ? t("AI 호출 상태를 확인해 주세요.")
               : t("상세 페이지에서 오늘 맞춤회복 분석을 시작할 수 있어요."),
-    [aiTopSection, requiresTodaySleep, billingLoading, hasPaidAccess, aiRecoveryLoading, aiRecoveryError, t]
+    [aiTopSection, requiresRecoveryInputs, billingLoading, hasPaidAccess, aiRecoveryLoading, aiRecoveryError, t]
   );
-  const moveToTodaySleepLog = () => {
-    setOpenSleepGuide(false);
-    router.push("/schedule?openHealthLog=today&focus=sleep");
+  const moveToRequiredHealthLog = () => {
+    setOpenInputGuide(false);
+    if (!missingGuide) return;
+    router.push(missingGuide.route);
   };
 
   if (insightsLocked) {
@@ -218,9 +258,9 @@ export function InsightsPage() {
               if (confirmed) router.push("/settings/billing/upgrade");
               return;
             }
-            if (!requiresTodaySleep) return;
+            if (!requiresRecoveryInputs) return;
             e.preventDefault();
-            setOpenSleepGuide(true);
+            setOpenInputGuide(true);
           }}
         >
           <DetailSummaryCard
@@ -228,25 +268,25 @@ export function InsightsPage() {
             label="AI Recovery"
             title={t("AI 맞춤회복")}
             summary={
-              requiresTodaySleep
-                ? t("오늘 수면 기록을 먼저 입력해 주세요.")
+              requiresRecoveryInputs
+                ? t("오늘 수면 기록 + 전날 건강 기록을 먼저 입력해 주세요.")
                 : !billingLoading && !hasPaidAccess
                   ? t("유료 플랜 전용 기능")
                 : aiHeadline
             }
             detail={
-              requiresTodaySleep
-                ? t("오늘 수면 입력 후 바로 개인 맞춤 회복 가이드를 시작해요.")
+              requiresRecoveryInputs
+                ? t("누락된 기록 날짜로 바로 이동해 입력할 수 있어요.")
                 : !billingLoading && !hasPaidAccess
-                  ? t("확인 버튼을 누르면 플랜 업그레이드 페이지로 이동합니다.")
+                ? t("확인 버튼을 누르면 플랜 업그레이드 페이지로 이동합니다.")
                 : aiRecovery
                   ? t("내 기록을 반영한 오늘의 개인 맞춤 회복 가이드")
                   : aiSummary
             }
             chips={(
               <>
-                {requiresTodaySleep ? (
-                  <DetailChip color={DETAIL_ACCENTS.pink}>{t("오늘 수면 입력 필요")}</DetailChip>
+                {requiresRecoveryInputs ? (
+                  <DetailChip color={DETAIL_ACCENTS.pink}>{t("필수 기록 입력 필요")}</DetailChip>
                 ) : (
                   !billingLoading && !hasPaidAccess ? (
                     <DetailChip color={DETAIL_ACCENTS.pink}>{t("유료 플랜 전용")}</DetailChip>
@@ -414,9 +454,14 @@ export function InsightsPage() {
       )}
 
       <TodaySleepRequiredSheet
-        open={openSleepGuide}
-        onClose={() => setOpenSleepGuide(false)}
-        onConfirm={moveToTodaySleepLog}
+        open={openInputGuide}
+        onClose={() => setOpenInputGuide(false)}
+        onConfirm={moveToRequiredHealthLog}
+        titleText={missingGuide?.title}
+        subtitleText={missingGuide?.subtitle}
+        primaryText={missingGuide?.primary}
+        descriptionText={missingGuide?.description}
+        hintText={missingGuide?.hint}
       />
     </div>
   );

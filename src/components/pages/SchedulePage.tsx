@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ISODate } from "@/lib/date";
-import { endOfMonth, startOfMonth, toISODate, fromISODate, todayISO } from "@/lib/date";
+import { addDays, endOfMonth, startOfMonth, toISODate, fromISODate, todayISO } from "@/lib/date";
 import { useAppStore } from "@/lib/store";
 import { computeVitalsRange } from "@/lib/vitals";
 import { countHealthRecordedDays, hasHealthInput } from "@/lib/healthRecords";
@@ -41,16 +41,27 @@ export function SchedulePage() {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     const openHealthLog = params.get("openHealthLog");
-    if (openHealthLog !== "today") return;
+    if (!openHealthLog) return;
 
     const focus = params.get("focus");
     const guardKey = `${openHealthLog}:${focus ?? ""}`;
     if (autoOpenGuard.current === guardKey) return;
     autoOpenGuard.current = guardKey;
 
-    const iso = todayISO();
+    const today = todayISO();
+    const yesterday = toISODate(addDays(fromISODate(today), -1));
+    const iso =
+      openHealthLog === "today"
+        ? today
+        : openHealthLog === "yesterday"
+          ? yesterday
+          : /^\d{4}-\d{2}-\d{2}$/.test(openHealthLog)
+            ? (openHealthLog as ISODate)
+            : null;
+
+    if (!iso) return;
     setSelected(iso);
-    setSleepFirstMode(focus === "sleep");
+    setSleepFirstMode(iso === today && focus === "sleep");
     setOpenLog(true);
     router.replace("/schedule", { scroll: false });
   }, [router]);

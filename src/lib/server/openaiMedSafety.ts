@@ -49,6 +49,24 @@ type ResponsesAttempt = {
   error: string | null;
 };
 
+function shouldRetryOpenAiError(error: string | null) {
+  if (!error) return false;
+  const code = String(error).toLowerCase();
+  return (
+    code.includes("openai_empty_text") ||
+    code.includes("_408_") ||
+    code.includes("_409_") ||
+    code.includes("_425_") ||
+    code.includes("_429_") ||
+    code.includes("_500_") ||
+    code.includes("_502_") ||
+    code.includes("_503_") ||
+    code.includes("_504_") ||
+    code.includes("timeout") ||
+    code.includes("network")
+  );
+}
+
 function clamp(value: number, min: number, max: number) {
   if (!Number.isFinite(value)) return min;
   return Math.max(min, Math.min(max, value));
@@ -147,19 +165,17 @@ function coerceQuickStatus(value: unknown): MedSafetyQuickStatus {
 function parseAnalysisResult(raw: unknown): MedSafetyAnalysisResult | null {
   if (!raw || typeof raw !== "object") return null;
   const data = raw as Record<string, unknown>;
-  const itemRaw = data.item as Record<string, unknown> | undefined;
-  const quickRaw = data.quick as Record<string, unknown> | undefined;
-  const doRaw = data.do as Record<string, unknown> | undefined;
-  const safetyRaw = data.safety as Record<string, unknown> | undefined;
-
-  if (!itemRaw || !quickRaw || !doRaw || !safetyRaw) return null;
+  const itemRaw = (data.item as Record<string, unknown> | undefined) ?? {};
+  const quickRaw = (data.quick as Record<string, unknown> | undefined) ?? {};
+  const doRaw = (data.do as Record<string, unknown> | undefined) ?? {};
+  const safetyRaw = (data.safety as Record<string, unknown> | undefined) ?? {};
 
   const itemName = String(itemRaw.name ?? "").trim();
   const primaryUse = String(itemRaw.primaryUse ?? "").trim();
   const patientScript20s = String(data.patientScript20s ?? "").trim();
   const confidenceNote = String(data.confidenceNote ?? "").trim();
 
-  if (!itemName || !primaryUse || !patientScript20s) return null;
+  if (!itemName) return null;
 
   const confidence = Math.round(clamp(Number(itemRaw.confidence ?? 0), 0, 100));
 
@@ -169,7 +185,7 @@ function parseAnalysisResult(raw: unknown): MedSafetyAnalysisResult | null {
       type: coerceItemType(itemRaw.type),
       aliases: toTextArray(itemRaw.aliases, 6),
       highRiskBadges: toTextArray(itemRaw.highRiskBadges, 4),
-      primaryUse,
+      primaryUse: primaryUse || "약물/의료도구 안전 확인",
       confidence,
     },
     quick: {
@@ -188,14 +204,16 @@ function parseAnalysisResult(raw: unknown): MedSafetyAnalysisResult | null {
       monitor: toTextArray(safetyRaw.monitor, 6),
       escalateWhen: toTextArray(safetyRaw.escalateWhen, 6),
     },
-    patientScript20s: patientScript20s.slice(0, 220),
+    patientScript20s: (patientScript20s || "현재 확인된 정보를 바탕으로 안전 기준을 먼저 점검하고 필요 시 즉시 보고하겠습니다.").slice(0, 220),
     modePriority: toTextArray(data.modePriority, 6),
     confidenceNote,
   };
 
-  if (!parsed.quick.topActions.length || !parsed.do.steps.length || !parsed.safety.escalateWhen.length) {
-    return null;
-  }
+  if (!parsed.quick.topActions.length) parsed.quick.topActions = ["정보가 제한되어 있어 먼저 처방/환자 상태를 재확인하세요."];
+  if (!parsed.quick.topNumbers.length) parsed.quick.topNumbers = ["핵심 수치(혈압·맥박·SpO2·체온)를 최신값으로 확인"];
+  if (!parsed.quick.topRisks.length) parsed.quick.topRisks = ["정보 부족 상태에서 즉시 투여/조작 시 위험 가능성"];
+  if (!parsed.do.steps.length) parsed.do.steps = ["처방/오더 재확인", "환자 상태 재평가", "기록 후 필요 시 보고"];
+  if (!parsed.safety.escalateWhen.length) parsed.safety.escalateWhen = ["기준치 이탈 또는 증상 악화 시 즉시 담당의/당직 보고"];
 
   if (parsed.quick.status === "OK" && parsed.item.confidence < 65) {
     parsed.quick.status = "CHECK";
@@ -205,6 +223,77 @@ function parseAnalysisResult(raw: unknown): MedSafetyAnalysisResult | null {
   }
 
   return parsed;
+}
+
+function buildFallbackAnalysisResult(params: AnalyzeParams, note: string): MedSafetyAnalysisResult {
+  const rawName = String(params.query || params.imageName || "입력 항목")
+    .replace(/\s+/g, " ")
+    .trim();
+  const name = rawName.slice(0, 40) || "입력 항목";
+
+  const situationActions: Record<ClinicalSituation, string[]> = {
+    pre_admin: [
+      "지금 투여 전 5R(대상자/약물/용량/시간/경로)부터 재확인",
+      "최신 활력징후·핵심 수치·알레르기 확인",
+      "기준 이탈 또는 불확실 시 즉시 담당의/당직 확인",
+    ],
+    during_admin: [
+      "현재 투여/주입 속도와 라인 상태 즉시 확인",
+      "증상 또는 이상 반응 시 일시 중지 후 상태 재평가",
+      "처치 내용과 보고 사항을 즉시 기록",
+    ],
+    alarm: [
+      "알람 종류와 라인 연결 상태를 먼저 확인",
+      "환자 상태를 즉시 재평가하고 위험 신호 확인",
+      "해결 안 되면 투여 중지 후 담당의/엔지니어 보고",
+    ],
+    adverse_suspect: [
+      "의심 약물/기구 사용을 즉시 중단 또는 홀드",
+      "환자 증상·징후 우선 안정화",
+      "응급 기준 충족 시 즉시 보고 및 추가 지시 수령",
+    ],
+    general: [
+      "현재 상황에서 가장 먼저 필요한 안전 확인부터 수행",
+      "핵심 수치와 처방 조건이 맞는지 재확인",
+      "불확실하면 CHECK 기준으로 보고 후 진행",
+    ],
+  };
+
+  const modePriority: Record<ClinicalMode, string[]> = {
+    ward: ["투여 여부 판단", "핵심 수치 확인", "보고/기록"],
+    er: ["즉시 위험 배제", "응급 처치 순서", "보고/협진"],
+    icu: ["중단/홀드 기준", "모니터링 강화", "라인/호환 확인"],
+  };
+
+  return {
+    item: {
+      name,
+      type: "unknown",
+      aliases: [],
+      highRiskBadges: [],
+      primaryUse: "출력 안정화용 기본 안전 안내",
+      confidence: 35,
+    },
+    quick: {
+      status: "CHECK",
+      topActions: situationActions[params.situation],
+      topNumbers: ["혈압·맥박·SpO2·체온 최신값", "최근 검사값/알레르기/라인 상태", "기관 지침 기준 범위 이탈 여부"],
+      topRisks: ["정보 불충분 상태에서 즉시 투여/조작", "단위·농도·시간 오인", "라인/호환성 미확인"],
+    },
+    do: {
+      steps: ["처방/오더 재확인", "환자 상태 재평가", "필요 시 중지 후 보고", "지시 반영 후 기록"],
+      calculatorsNeeded: ["체중 기반 용량 또는 속도 계산 필요 시 확인"],
+      compatibilityChecks: ["라인 연결/혼합 금기/동시 주입 약물 확인"],
+    },
+    safety: {
+      holdRules: ["중요 기준치 이탈, 급격한 증상 악화, 알레르기 의심 시 홀드"],
+      monitor: ["활력징후·의식·호흡·주입부 상태를 짧은 간격으로 재평가"],
+      escalateWhen: ["호흡곤란/저혈압/의식저하/지속 악화 시 즉시 보고"],
+    },
+    patientScript20s: "지금은 안전 확인이 우선이라 수치와 상태를 먼저 점검한 뒤, 필요한 경우 즉시 보고하고 안전하게 진행하겠습니다.",
+    modePriority: modePriority[params.mode],
+    confidenceNote: note.slice(0, 180),
+  };
 }
 
 function modeLabel(mode: ClinicalMode, locale: "ko" | "en") {
@@ -246,6 +335,7 @@ function buildDeveloperPrompt(locale: "ko" | "en") {
       "약물/도구 혼동 가능성, 단위/농도 오인 가능성, 라인 호환성 위험은 우선 경고에 반영한다.",
       "확신이 낮으면 confidence를 낮추고 confidenceNote/follow-up 성격 정보를 포함한다.",
       "진단/처방 대체 표현 금지. 최종 판단은 병원 지침/처방 우선으로 유지한다.",
+      "각 문장은 짧게, 항목은 간결하게 작성한다(장문 금지).",
       "출력은 JSON만 반환한다.",
     ].join(" ");
   }
@@ -259,6 +349,7 @@ function buildDeveloperPrompt(locale: "ko" | "en") {
     "If the input is ambiguous, avoid overclaiming and keep status as CHECK with explicit verification actions.",
     "If uncertain, lower confidence and state what to verify.",
     "Do not replace diagnosis/order decisions.",
+    "Keep each line concise; avoid long prose.",
     "Return JSON only.",
   ].join(" ");
 }
@@ -288,6 +379,7 @@ function buildUserPrompt(params: {
       "- OK: 현재 정보 기준 즉시 실행 가능",
       "modePriority는 모드별 상단 고정 탭 순서를 3~6개로 제시한다.",
       "topNumbers는 실제 투여/관찰에 바로 쓰는 수치/조건만 간결히 쓴다.",
+      "모든 배열 항목은 짧은 한 문장으로 작성한다.",
       "JSON 외 텍스트 금지.",
       "\n[Context JSON]",
       JSON.stringify(context, null, 2),
@@ -302,6 +394,7 @@ function buildUserPrompt(params: {
     "- OK: executable with current context",
     "modePriority should list 3-6 top tabs by mode.",
     "topNumbers must include practical thresholds/values only.",
+    "Keep each array item short and practical.",
     "No text outside JSON.",
     "\n[Context JSON]",
     JSON.stringify(context, null, 2),
@@ -353,11 +446,11 @@ async function callResponsesApi(args: {
               additionalProperties: false,
               required: ["name", "type", "aliases", "highRiskBadges", "primaryUse", "confidence"],
               properties: {
-                name: { type: "string" },
+                name: { type: "string", maxLength: 80 },
                 type: { type: "string", enum: ["medication", "device", "unknown"] },
-                aliases: { type: "array", items: { type: "string" } },
-                highRiskBadges: { type: "array", items: { type: "string" } },
-                primaryUse: { type: "string" },
+                aliases: { type: "array", maxItems: 4, items: { type: "string", maxLength: 40 } },
+                highRiskBadges: { type: "array", maxItems: 3, items: { type: "string", maxLength: 30 } },
+                primaryUse: { type: "string", maxLength: 120 },
                 confidence: { type: "number", minimum: 0, maximum: 100 },
               },
             },
@@ -367,9 +460,9 @@ async function callResponsesApi(args: {
               required: ["status", "topActions", "topNumbers", "topRisks"],
               properties: {
                 status: { type: "string", enum: ["OK", "CHECK", "STOP"] },
-                topActions: { type: "array", items: { type: "string" } },
-                topNumbers: { type: "array", items: { type: "string" } },
-                topRisks: { type: "array", items: { type: "string" } },
+                topActions: { type: "array", minItems: 1, maxItems: 3, items: { type: "string", maxLength: 120 } },
+                topNumbers: { type: "array", maxItems: 4, items: { type: "string", maxLength: 90 } },
+                topRisks: { type: "array", maxItems: 3, items: { type: "string", maxLength: 110 } },
               },
             },
             do: {
@@ -377,9 +470,9 @@ async function callResponsesApi(args: {
               additionalProperties: false,
               required: ["steps", "calculatorsNeeded", "compatibilityChecks"],
               properties: {
-                steps: { type: "array", items: { type: "string" } },
-                calculatorsNeeded: { type: "array", items: { type: "string" } },
-                compatibilityChecks: { type: "array", items: { type: "string" } },
+                steps: { type: "array", minItems: 1, maxItems: 5, items: { type: "string", maxLength: 120 } },
+                calculatorsNeeded: { type: "array", maxItems: 3, items: { type: "string", maxLength: 90 } },
+                compatibilityChecks: { type: "array", maxItems: 3, items: { type: "string", maxLength: 110 } },
               },
             },
             safety: {
@@ -387,14 +480,14 @@ async function callResponsesApi(args: {
               additionalProperties: false,
               required: ["holdRules", "monitor", "escalateWhen"],
               properties: {
-                holdRules: { type: "array", items: { type: "string" } },
-                monitor: { type: "array", items: { type: "string" } },
-                escalateWhen: { type: "array", items: { type: "string" } },
+                holdRules: { type: "array", maxItems: 4, items: { type: "string", maxLength: 120 } },
+                monitor: { type: "array", maxItems: 4, items: { type: "string", maxLength: 100 } },
+                escalateWhen: { type: "array", minItems: 1, maxItems: 4, items: { type: "string", maxLength: 120 } },
               },
             },
-            patientScript20s: { type: "string" },
-            modePriority: { type: "array", items: { type: "string" } },
-            confidenceNote: { type: "string" },
+            patientScript20s: { type: "string", maxLength: 220 },
+            modePriority: { type: "array", maxItems: 5, items: { type: "string", maxLength: 40 } },
+            confidenceNote: { type: "string", maxLength: 180 },
           },
         },
       },
@@ -403,19 +496,25 @@ async function callResponsesApi(args: {
     reasoning: {
       effort: "low",
     },
-    max_output_tokens: 1500,
+    max_output_tokens: 900,
     store: false,
   };
 
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(payload),
-    signal,
-  });
+  let response: Response;
+  try {
+    response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(payload),
+      signal,
+    });
+  } catch (cause: any) {
+    const reason = truncateError(String(cause?.message ?? cause ?? "fetch_failed"));
+    return { text: null, error: `openai_network_${reason}` };
+  }
 
   if (!response.ok) {
     const raw = await response.text().catch(() => "");
@@ -461,14 +560,50 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
     signal: params.signal,
   });
 
+  if (!attempt.text && shouldRetryOpenAiError(attempt.error)) {
+    const retry = await callResponsesApi({
+      apiKey,
+      model,
+      developerPrompt,
+      userPrompt,
+      imageDataUrl: params.imageDataUrl,
+      signal: params.signal,
+    });
+
+    if (retry.text) {
+      const retryParsed = safeJsonParse<unknown>(retry.text);
+      const retryResult = parseAnalysisResult(retryParsed);
+      if (retryResult) {
+        return {
+          result: retryResult,
+          model,
+          rawText: retry.text,
+        };
+      }
+    }
+  }
+
   if (!attempt.text) {
-    throw new Error(attempt.error ?? "openai_request_failed");
+    const fallback = buildFallbackAnalysisResult(
+      params,
+      `OpenAI 연결이 불안정해 기본 안전 모드로 전환되었습니다. (${String(attempt.error ?? "unknown_error").slice(0, 90)})`
+    );
+    return {
+      result: fallback,
+      model,
+      rawText: "",
+    };
   }
 
   const parsed = safeJsonParse<unknown>(attempt.text);
   const result = parseAnalysisResult(parsed);
   if (!result) {
-    throw new Error("openai_invalid_json_payload");
+    const fallback = buildFallbackAnalysisResult(params, "AI 응답이 불완전해 안전 기본 모드로 복구되었습니다.");
+    return {
+      result: fallback,
+      model,
+      rawText: attempt.text,
+    };
   }
 
   return {

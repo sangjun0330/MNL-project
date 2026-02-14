@@ -24,16 +24,16 @@ function toOrigin(input) {
 }
 
 const supabaseOrigin = toOrigin(process.env.NEXT_PUBLIC_SUPABASE_URL);
-const connectSources = ["'self'"];
+const connectSources = ["'self'", "https://cloudflareinsights.com"];
 if (supabaseOrigin) {
   connectSources.push(supabaseOrigin);
   connectSources.push(supabaseOrigin.replace(/^http/i, "ws"));
 }
 
 const isDev = process.env.NODE_ENV === "development";
-const scriptSources = isDev
-  ? "'self' 'unsafe-inline' 'unsafe-eval'"
-  : "'self' 'unsafe-inline'";
+const scriptSourceParts = ["'self'", "'unsafe-inline'", "https://static.cloudflareinsights.com"];
+if (isDev) scriptSourceParts.push("'unsafe-eval'");
+const scriptSources = Array.from(new Set(scriptSourceParts)).join(" ");
 
 const contentSecurityPolicy = [
   "default-src 'self'",
@@ -43,9 +43,9 @@ const contentSecurityPolicy = [
   "object-src 'none'",
   `script-src ${scriptSources}`,
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
+  "img-src 'self' data: blob: https://cloudflareinsights.com",
   "font-src 'self' data:",
-  `connect-src ${connectSources.join(" ")}`,
+  `connect-src ${Array.from(new Set(connectSources)).join(" ")}`,
   "media-src 'self' blob:",
   "worker-src 'self' blob:",
 ].join("; ");
