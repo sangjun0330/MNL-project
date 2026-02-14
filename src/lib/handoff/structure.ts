@@ -15,9 +15,9 @@ type StructureInput = {
   dutyType: DutyType;
 };
 
-const TODO_PATTERN = /(오더|확인|재확인|재측정|재검|투약|검사|콜|모니터|체크)/;
+const TODO_PATTERN = /(오더|확인|재확인|재측정|재검|투약|검사|콜|모니터|체크|다시\s*보|recheck|repeat|follow\s*up)/i;
 const DUE_HINT_PATTERN = /(\d{1,2}:\d{2}|\d{1,2}\s*시|새벽\s*\d{0,2}\s*시?|오전|오후|저녁|밤|내일\s*오전|내일\s*오후)/;
-const PENDING_TODO_PATTERN = /(필요|예정|대기|부탁|계획|재평가|follow\s*up)/i;
+const PENDING_TODO_PATTERN = /(필요|예정|대기|부탁|계획|재평가|follow\s*up|보자|보라|다시)/i;
 const ABNORMAL_PROBLEM_PATTERN =
   /(저혈압|고혈압|혈압\s*\d{2,3}\s*\/\s*\d{2,3}|저산소|호흡곤란|출혈|흑변|어지럽|통증|발열|고열|저체온|저혈당|고혈당|감염|쇼크|섬망|의식\s*저하|소변량\s*감소)/i;
 

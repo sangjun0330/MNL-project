@@ -566,6 +566,7 @@ export function detectUnknownClinicalAbbreviations(text: string, maxCount = 2) {
 
   for (const token of hits) {
     if (!isStrictAbbreviationToken(token)) continue;
+    if (/^[OX]{2,4}$/i.test(token)) continue;
     const lower = token.toLowerCase();
     if (SAFE_ENGLISH_TOKENS.has(lower)) continue;
     if (/^q\\d+h$/i.test(token)) continue;
