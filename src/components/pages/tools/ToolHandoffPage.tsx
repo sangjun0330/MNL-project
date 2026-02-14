@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/Input";
 import { Segmented } from "@/components/ui/Segmented";
 import { Textarea } from "@/components/ui/Textarea";
 import { createLocalSpeechAsr, isLocalSpeechAsrSupported, type LocalAsrController } from "@/lib/handoff/asr";
-import { appendHandoffAuditEvent, listHandoffAuditEvents, type HandoffAuditEvent } from "@/lib/handoff/auditLog";
+import { appendHandoffAuditEvent } from "@/lib/handoff/auditLog";
 import { detectResidualStructuredPhi, sanitizeStructuredSession } from "@/lib/handoff/deidGuard";
 import {
   clearAllHandoffDraftMeta,
@@ -31,7 +31,6 @@ import {
 } from "@/lib/handoff/sessionStore";
 import { purgeHandoffLocalScope } from "@/lib/handoff/storageScope";
 import {
-  isVaultKeyLoaded,
   purgeAllVaultRecords,
   purgeExpiredVaultRecords,
   vaultLoadRawSegments,
@@ -43,8 +42,6 @@ import {
   isWasmLocalAsrSupported,
   type WasmAsrController,
 } from "@/lib/handoff/wasmAsr";
-import type { HandoffDiagnosticReport } from "@/lib/handoff/webDiagnostics";
-import { runHandoffWebDiagnostics } from "@/lib/handoff/webDiagnostics";
 import type {
   DutyType,
   EvidenceRef,
@@ -104,16 +101,6 @@ function formatEvidenceRange(evidenceRef: EvidenceRef) {
   const startSec = Math.max(0, Math.floor(evidenceRef.startMs / 1000));
   const endSec = Math.max(startSec, Math.ceil(evidenceRef.endMs / 1000));
   return `${startSec}s-${endSec}s`;
-}
-
-function formatSegmentDuration(ms: number) {
-  return `${(Math.max(0, ms) / 1000).toFixed(1)}s`;
-}
-
-function diagnosticTone(status: "ok" | "warn" | "fail") {
-  if (status === "ok") return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  if (status === "warn") return "border-amber-200 bg-amber-50 text-amber-700";
-  return "border-red-200 bg-red-50 text-red-700";
 }
 
 function sortSegments(segments: RawSegment[]) {
@@ -402,10 +389,9 @@ export function ToolHandoffPage() {
   const [manualUncertainties, setManualUncertainties] = useState<ManualUncertaintyInput[]>([]);
   const [draftRecoveredAt, setDraftRecoveredAt] = useState<number | null>(null);
   const [draftSaveState, setDraftSaveState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
-  const [diagnostics, setDiagnostics] = useState<HandoffDiagnosticReport | null>(null);
   const [deidIssueCount, setDeidIssueCount] = useState(0);
   const [residualIssueCount, setResidualIssueCount] = useState(0);
-  const [auditEvents, setAuditEvents] = useState<HandoffAuditEvent[]>([]);
+  const [showAllUncertainties, setShowAllUncertainties] = useState(false);
 
   const recorderRef = useRef<HandoffRecorderController | null>(null);
   const asrRef = useRef<LocalAsrController | null>(null);
@@ -428,23 +414,28 @@ export function ToolHandoffPage() {
     if (!result?.uncertainties.length) return 0;
     return result.uncertainties.filter((item) => !reviewMap[item.id]?.resolved).length;
   }, [result, reviewMap]);
+  const uncertaintySummary = useMemo(() => {
+    if (!result?.uncertainties.length) return [] as Array<{ kind: string; count: number }>;
+    const counter = new Map<string, number>();
+    result.uncertainties.forEach((item) => {
+      counter.set(item.kind, (counter.get(item.kind) ?? 0) + 1);
+    });
+    return [...counter.entries()]
+      .map(([kind, count]) => ({ kind, count }))
+      .sort((a, b) => b.count - a.count);
+  }, [result]);
+  const visibleUncertainties = useMemo(() => {
+    if (!result?.uncertainties.length) return [];
+    return showAllUncertainties ? result.uncertainties : result.uncertainties.slice(0, 12);
+  }, [result, showAllUncertainties]);
 
   const privacyPolicy = evaluateHandoffPrivacyPolicy(HANDOFF_FLAGS);
   const authPending = privacyPolicy.authRequired && authStatus === "loading";
   const authBlocked = privacyPolicy.authRequired && authStatus !== "authenticated";
   const secureContextBlocked = privacyPolicy.secureContextRequired && !privacyPolicy.secureContextSatisfied;
   const actionBlocked = authBlocked || secureContextBlocked;
-  const executionMode = privacyPolicy.executionMode;
   const configuredAsrProvider = privacyPolicy.configuredAsrProvider;
   const asrProvider = privacyPolicy.effectiveAsrProvider;
-  const remoteSyncConfigured = privacyPolicy.remoteSyncConfigured;
-  const remoteSyncEffective = privacyPolicy.remoteSyncEffective;
-  const remoteSyncBlockedReason = privacyPolicy.remoteSyncBlockedReason;
-  const serverTransmissionLabel = privacyPolicy.networkEgressAllowed
-    ? "enabled (hybrid_opt_in / 정책 게이트)"
-    : executionMode === "local_only"
-      ? "disabled (local_only)"
-      : "disabled (hybrid_opt_in configured off)";
   const webSpeechAsrEnabled = HANDOFF_FLAGS.handoffLocalAsrEnabled && asrProvider === "web_speech";
   const wasmLocalAsrEnabled = HANDOFF_FLAGS.handoffWasmAsrEnabled && asrProvider === "wasm_local";
   const liveAsrEnabled = webSpeechAsrEnabled || wasmLocalAsrEnabled;
@@ -459,19 +450,17 @@ export function ToolHandoffPage() {
     recordingState === "idle" &&
     webAudioCaptureEnabled &&
     recorderSupported &&
-    liveAsrEnabled &&
-    asrProviderReady &&
+    (asrProvider === "manual" || (liveAsrEnabled && asrProviderReady)) &&
     !actionBlocked;
   const reviewLockActive = Boolean(result?.uncertainties.length) && !sessionSaved && reviewCountdown > 0;
-
-  const runDiagnostics = useCallback(async () => {
-    const report = await runHandoffWebDiagnostics(HANDOFF_FLAGS);
-    setDiagnostics(report);
-  }, []);
+  const flatButtonBase =
+    "inline-flex h-11 items-center justify-center rounded-full border px-4 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50";
+  const flatButtonSecondary = `${flatButtonBase} border-ios-sep bg-[#F2F2F7] text-ios-text`;
+  const flatButtonPrimary = `${flatButtonBase} border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]`;
+  const flatButtonDanger = `${flatButtonBase} border-[#F3C1C1] bg-[#FFECEC] text-[#B3261E]`;
 
   const refreshStoredLists = useCallback(() => {
     setSavedSessions(listStructuredSessions());
-    setAuditEvents(listHandoffAuditEvents(8));
   }, []);
 
   useEffect(() => {
@@ -481,18 +470,16 @@ export function ToolHandoffPage() {
       action: "policy_blocked",
       detail: `provider ${configuredAsrProvider} -> ${asrProvider}`,
     });
-    setAuditEvents(listHandoffAuditEvents(8));
   }, [asrProvider, configuredAsrProvider, privacyPolicy.asrProviderDowngraded]);
 
   useEffect(() => {
-    if (!remoteSyncConfigured || remoteSyncEffective || remotePolicyBlockLoggedRef.current) return;
+    if (!privacyPolicy.remoteSyncConfigured || privacyPolicy.remoteSyncEffective || remotePolicyBlockLoggedRef.current) return;
     remotePolicyBlockLoggedRef.current = true;
     appendHandoffAuditEvent({
       action: "policy_blocked",
       detail: "remote_sync configured but blocked by local_only policy",
     });
-    setAuditEvents(listHandoffAuditEvents(8));
-  }, [remoteSyncConfigured, remoteSyncEffective]);
+  }, [privacyPolicy.remoteSyncConfigured, privacyPolicy.remoteSyncEffective]);
 
   useEffect(() => {
     sessionIdRef.current = sessionId;
@@ -510,6 +497,7 @@ export function ToolHandoffPage() {
       setRawSegments([]);
       setChunkLogs([]);
       setManualUncertainties([]);
+      setShowAllUncertainties(false);
       setDraftRecoveredAt(null);
       return;
     }
@@ -525,7 +513,6 @@ export function ToolHandoffPage() {
         })
       );
       setRecorderSupported(isHandoffRecorderSupported());
-      await runDiagnostics();
 
       const draft = loadHandoffDraftMeta();
       if (!draft) return;
@@ -541,7 +528,7 @@ export function ToolHandoffPage() {
       setDraftRecoveredAt(Date.now());
     };
     void bootstrap();
-  }, [authBlocked, secureContextBlocked, refreshStoredLists, runDiagnostics]);
+  }, [authBlocked, secureContextBlocked, refreshStoredLists]);
 
   useEffect(() => {
     if (authBlocked || secureContextBlocked) return;
@@ -550,13 +537,12 @@ export function ToolHandoffPage() {
         purgeExpiredStructuredSessions();
         await purgeExpiredVaultRecords();
         refreshStoredLists();
-        await runDiagnostics();
       };
       void run();
     }, 60_000);
 
     return () => window.clearInterval(timer);
-  }, [authBlocked, secureContextBlocked, refreshStoredLists, runDiagnostics]);
+  }, [authBlocked, secureContextBlocked, refreshStoredLists]);
 
   useEffect(() => {
     return () => {
@@ -720,6 +706,11 @@ export function ToolHandoffPage() {
     }, 7_000);
   };
 
+  const handleManualRecordedChunk = (chunk: RecorderChunk) => {
+    // manual 모드에서는 자동 전사를 하지 않으므로 chunk 로그만 남긴다.
+    appendChunkLog(chunk, false);
+  };
+
   const handleWasmRecordedChunk = async (chunk: RecorderChunk) => {
     const chunkSessionId = sessionIdRef.current;
     const controller = wasmAsrRef.current;
@@ -839,13 +830,11 @@ export function ToolHandoffPage() {
       return;
     }
 
-    if (!liveAsrEnabled) {
+    if (asrProvider !== "manual" && !liveAsrEnabled) {
       setRecordingError(
-        asrProvider === "manual"
-          ? "웹 안전 모드(manual)에서는 자동 전사가 비활성화됩니다. 수동 전사를 사용해 주세요."
-          : asrProvider === "web_speech"
-            ? "handoff_local_asr_enabled 플래그가 비활성화되어 있습니다."
-            : "handoff_wasm_asr_enabled 플래그가 비활성화되어 있습니다."
+        asrProvider === "web_speech"
+          ? "handoff_local_asr_enabled 플래그가 비활성화되어 있습니다."
+          : "handoff_wasm_asr_enabled 플래그가 비활성화되어 있습니다."
       );
       return;
     }
@@ -882,7 +871,12 @@ export function ToolHandoffPage() {
     const recorder = createHandoffRecorder({
       chunkMs: 30_000,
       overlapMs: 800,
-      onChunk: asrProvider === "wasm_local" ? handleWasmRecordedChunk : handleRecordedChunk,
+      onChunk:
+        asrProvider === "wasm_local"
+          ? handleWasmRecordedChunk
+          : asrProvider === "web_speech"
+            ? handleRecordedChunk
+            : handleManualRecordedChunk,
       onError: (cause) => {
         setRecordingError(`녹음 오류: ${String(cause)}`);
       },
@@ -1028,6 +1022,7 @@ export function ToolHandoffPage() {
       setChunkInput("");
       setRawSegments(mergedSegments);
       setResult(sanitized.result);
+      setShowAllUncertainties(false);
       setEvidenceMap(buildEvidenceMap(output.local.maskedSegments));
       setSessionSaved(false);
       appendHandoffAuditEvent({
@@ -1144,6 +1139,7 @@ export function ToolHandoffPage() {
     setResult(null);
     setReviewMap({});
     setEvidenceMap({});
+    setShowAllUncertainties(false);
     setLiveAsrPreview("");
     setError(null);
     setRecordingError(null);
@@ -1202,6 +1198,7 @@ export function ToolHandoffPage() {
     setResult(null);
     setReviewMap({});
     setEvidenceMap({});
+    setShowAllUncertainties(false);
     setRawSegments([]);
     setChunkLogs([]);
     setChunkInput("");
@@ -1311,12 +1308,14 @@ export function ToolHandoffPage() {
         </Link>
       </div>
 
-      <Card className="p-5">
+      <Card className="p-6">
         <div className="grid gap-4 md:grid-cols-2">
           <div>
             <div className="text-[12px] font-semibold text-ios-sub">Session ID</div>
             <Input value={sessionId} readOnly className="mt-1 bg-ios-bg" />
-            <div className="mt-2 text-[11.5px] text-ios-sub">{segmentStats.count} segments · {segmentStats.sec}s</div>
+            <div className="mt-2 text-[11.5px] text-ios-sub">
+              {segmentStats.count} segments · {segmentStats.sec}s
+            </div>
           </div>
 
           <div>
@@ -1331,36 +1330,47 @@ export function ToolHandoffPage() {
           </div>
         </div>
 
-        <div className="mt-4 flex flex-wrap gap-2">
-          <span className="rounded-full border border-ios-sep px-2 py-1 text-[11px] font-semibold text-ios-sub">handoff_enabled: {String(HANDOFF_FLAGS.handoffEnabled)}</span>
-          <span className="rounded-full border border-ios-sep px-2 py-1 text-[11px] font-semibold text-ios-sub">handoff_execution_mode: {executionMode}</span>
-          <span className="rounded-full border border-ios-sep px-2 py-1 text-[11px] font-semibold text-ios-sub">handoff_privacy_profile: {privacyPolicy.profile}</span>
-          <span className="rounded-full border border-ios-sep px-2 py-1 text-[11px] font-semibold text-ios-sub">handoff_require_auth: {String(privacyPolicy.authRequired)}</span>
-          <span className="rounded-full border border-ios-sep px-2 py-1 text-[11px] font-semibold text-ios-sub">handoff_remote_sync_configured: {String(remoteSyncConfigured)}</span>
-          <span className="rounded-full border border-ios-sep px-2 py-1 text-[11px] font-semibold text-ios-sub">handoff_remote_sync_effective: {String(remoteSyncEffective)}</span>
-          <span className="rounded-full border border-ios-sep px-2 py-1 text-[11px] font-semibold text-ios-sub">handoff_local_asr_enabled: {String(HANDOFF_FLAGS.handoffLocalAsrEnabled)}</span>
-          <span className="rounded-full border border-ios-sep px-2 py-1 text-[11px] font-semibold text-ios-sub">handoff_wasm_asr_enabled: {String(HANDOFF_FLAGS.handoffWasmAsrEnabled)}</span>
-          <span className="rounded-full border border-ios-sep px-2 py-1 text-[11px] font-semibold text-ios-sub">handoff_evidence_enabled: {String(HANDOFF_FLAGS.handoffEvidenceEnabled)}</span>
-          <span className="rounded-full border border-ios-sep px-2 py-1 text-[11px] font-semibold text-ios-sub">configured_asr_provider: {configuredAsrProvider}</span>
-          <span className="rounded-full border border-ios-sep px-2 py-1 text-[11px] font-semibold text-ios-sub">effective_asr_provider: {asrProvider}</span>
-          <span className="rounded-full border border-ios-sep px-2 py-1 text-[11px] font-semibold text-ios-sub">handoff_web_audio_capture_enabled: {String(webAudioCaptureEnabled)}</span>
-          <span className="rounded-full border border-ios-sep px-2 py-1 text-[11px] font-semibold text-ios-sub">recorder: {String(recorderSupported)}</span>
-          <span className="rounded-full border border-ios-sep px-2 py-1 text-[11px] font-semibold text-ios-sub">web speech: {String(webSpeechSupported)}</span>
-          <span className="rounded-full border border-ios-sep px-2 py-1 text-[11px] font-semibold text-ios-sub">wasm local: {String(wasmAsrSupported)}</span>
-        </div>
-
-        <div className="mt-4 grid gap-2 md:grid-cols-4">
-          <Button data-testid="handoff-new-session" variant="secondary" onClick={() => { void startNewSession(); }}>{t("새 세션")}</Button>
-          <Button data-testid="handoff-run-pipeline" onClick={run} disabled={running || recordingState !== "idle" || actionBlocked}>{running ? t("분석 중...") : t("분석 실행")}</Button>
-          <Button data-testid="handoff-shred-session" variant="danger" onClick={() => { void shredCurrentSession(); }}>{t("세션 파기")}</Button>
+        <div className="mt-4 grid gap-2 md:grid-cols-2">
           <Button
-            variant="danger"
-            onClick={() => { void purgeAllHandoffData(); }}
-            disabled={running || finalizing || recordingState !== "idle"}
+            data-testid="handoff-new-session"
+            variant="secondary"
+            className={flatButtonSecondary}
+            onClick={() => { void startNewSession(); }}
           >
-            전체 완전 파기
+            {t("새 세션")}
+          </Button>
+          <Button
+            data-testid="handoff-run-pipeline"
+            className={flatButtonPrimary}
+            onClick={run}
+            disabled={running || recordingState !== "idle" || actionBlocked}
+          >
+            {running ? t("분석 중...") : t("분석 실행")}
           </Button>
         </div>
+
+        <details className="mt-3 rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3">
+          <summary className="cursor-pointer text-[12.5px] font-semibold text-ios-sub">고급 데이터 관리</summary>
+          <div className="mt-3 grid gap-2 md:grid-cols-2">
+            <Button
+              data-testid="handoff-shred-session"
+              variant="danger"
+              className={flatButtonDanger}
+              onClick={() => { void shredCurrentSession(); }}
+              disabled={running || finalizing || recordingState !== "idle"}
+            >
+              세션 파기
+            </Button>
+            <Button
+              variant="danger"
+              className={flatButtonDanger}
+              onClick={() => { void purgeAllHandoffData(); }}
+              disabled={running || finalizing || recordingState !== "idle"}
+            >
+              전체 완전 파기
+            </Button>
+          </div>
+        </details>
 
         <div className="mt-3 text-[12px] text-ios-sub">
           draft 상태: {draftSaveState}
@@ -1378,41 +1388,9 @@ export function ToolHandoffPage() {
         ) : null}
         {privacyPolicy.asrProviderDowngraded ? (
           <div className="mt-2 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-[12.5px] text-amber-800">
-            정책 강제 적용: {configuredAsrProvider} → {asrProvider} ({privacyPolicy.downgradeReason})
+            개인정보 보호 정책으로 자동 전사 제공자가 조정되었습니다: {configuredAsrProvider} → {asrProvider}
           </div>
         ) : null}
-        {remoteSyncConfigured && !remoteSyncEffective ? (
-          <div className="mt-2 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-[12.5px] text-amber-800">
-            원격 동기화 차단: {remoteSyncBlockedReason ?? "local_only 정책으로 비활성화되었습니다."}
-          </div>
-        ) : null}
-      </Card>
-
-      <Card className="p-5">
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <div className="text-[14px] font-semibold text-ios-text">웹 환경 진단</div>
-            <div className="mt-1 text-[12.5px] text-ios-sub">
-              마이크/암호화/저장소/ASR 제공자 상태를 점검합니다.
-            </div>
-          </div>
-          <Button variant="secondary" onClick={() => { void runDiagnostics(); }}>
-            다시 점검
-          </Button>
-        </div>
-
-        <div className="mt-3 space-y-2">
-          {diagnostics?.items?.length ? (
-            diagnostics.items.map((item) => (
-              <div key={item.id} className={`rounded-xl border p-2 ${diagnosticTone(item.status)}`}>
-                <div className="text-[12px] font-semibold">{item.label}</div>
-                <div className="mt-0.5 text-[11.5px]">{item.detail}</div>
-              </div>
-            ))
-          ) : (
-            <div className="rounded-xl border border-ios-sep p-3 text-[12px] text-ios-sub">진단 정보를 수집 중입니다.</div>
-          )}
-        </div>
       </Card>
 
       <Card className="p-5">
@@ -1420,19 +1398,34 @@ export function ToolHandoffPage() {
           <div>
             <div className="text-[14px] font-semibold text-ios-text">{t("실시간 녹음 + 로컬 전사")}</div>
             <div className="mt-1 text-[12.5px] text-ios-sub">
-              {t("실행 모드/프라이버시 정책에 따라 effective provider로 강제 동작합니다(local_only 우선).")}
+              {t("로컬 전용 모드로 동작합니다. 자동 전사가 없으면 수동 입력과 함께 사용하세요.")}
             </div>
           </div>
           {recordingState === "recording" ? (
-            <Button data-testid="handoff-stop-recording" variant="danger" onClick={() => { void stopRecording(); }}>{t("녹음 중지")}</Button>
+            <Button
+              data-testid="handoff-stop-recording"
+              variant="danger"
+              className={flatButtonDanger}
+              onClick={() => { void stopRecording(); }}
+            >
+              {t("녹음 중지")}
+            </Button>
           ) : (
-            <Button data-testid="handoff-start-recording" onClick={() => { void startRecording(); }} disabled={!canStartRecording}>{t("녹음 시작")}</Button>
+            <Button
+              data-testid="handoff-start-recording"
+              className={flatButtonPrimary}
+              onClick={() => { void startRecording(); }}
+              disabled={!canStartRecording}
+            >
+              {t("녹음 시작")}
+            </Button>
           )}
         </div>
 
         <div className="mt-3 text-[12px] text-ios-sub">
           상태: <span className="font-semibold text-ios-text">{recordingState}</span>
           {liveAsrPreview ? <span> · 최신 전사: {liveAsrPreview}</span> : null}
+          {chunkLogs.length ? <span> · 최근 chunk {chunkLogs.length}개</span> : null}
         </div>
 
         {asrProvider === "manual" ? (
@@ -1466,21 +1459,8 @@ export function ToolHandoffPage() {
         ) : null}
 
         {chunkLogs.length ? (
-          <div className="mt-3 rounded-2xl border border-ios-sep bg-white p-3">
-            <div className="text-[12px] font-semibold text-ios-sub">최근 녹음 chunk</div>
-            <div className="mt-2 space-y-1 text-[12.5px] text-ios-text">
-              {chunkLogs.map((log) => (
-                <div key={log.chunkId} className="flex flex-wrap items-center gap-2">
-                  <span className="font-semibold text-ios-sub">{log.chunkId}</span>
-                  <span>{log.rangeText}</span>
-                  <span>{formatSegmentDuration(log.durationMs)}</span>
-                  <span>{Math.round(log.sizeBytes / 1024)}KB</span>
-                  <span className={log.hasTranscript ? "text-emerald-700" : "text-amber-700"}>
-                    {log.hasTranscript ? "전사 확인" : "전사 검수 필요"}
-                  </span>
-                </div>
-              ))}
-            </div>
+          <div className="mt-3 rounded-2xl border border-ios-sep bg-ios-bg p-3 text-[12px] text-ios-sub">
+            최근 녹음 {chunkLogs.length}개 조각이 수집되었습니다.
           </div>
         ) : null}
       </Card>
@@ -1493,7 +1473,15 @@ export function ToolHandoffPage() {
               {t("ASR 미지원 환경에서는 전사를 직접 붙여넣어 동일 파이프라인으로 분석할 수 있습니다.")}
             </div>
           </div>
-          <Button data-testid="handoff-add-chunk" variant="secondary" onClick={pushChunk} disabled={actionBlocked}>{t("청크 추가")}</Button>
+          <Button
+            data-testid="handoff-add-chunk"
+            variant="secondary"
+            className={flatButtonSecondary}
+            onClick={pushChunk}
+            disabled={actionBlocked}
+          >
+            {t("청크 추가")}
+          </Button>
         </div>
 
         <div className="mt-3">
@@ -1522,44 +1510,6 @@ export function ToolHandoffPage() {
         {error ? <div className="mt-3 text-[12.5px] font-semibold text-red-600">{error}</div> : null}
       </Card>
 
-      <Card className="p-5">
-        <div className="text-[14px] font-semibold text-ios-text">{t("보안/저장 상태")}</div>
-        <ul className="mt-2 list-disc space-y-1 pl-5 text-[12.5px] text-ios-sub">
-          <li>{t("Raw transcript/evidence: 로컬 암호화 Vault (TTL 24h)")}</li>
-          <li>{t("Structured summary(de-identified): 로컬 저장 (TTL 7d)")}</li>
-          <li>{t("Execution mode")}: {executionMode}</li>
-          <li>{t("Privacy profile")}: {privacyPolicy.profile}</li>
-          <li>{t("Auth required")}: {String(privacyPolicy.authRequired)}</li>
-          <li>{t("Secure context required")}: {String(privacyPolicy.secureContextRequired)}</li>
-          <li>{t("현재 세션 키 로드 상태")}: {isVaultKeyLoaded(sessionId) ? "loaded" : "not loaded"}</li>
-          <li>{t("오디오 chunk 저장")}: {t("미저장(전사 확인 후 메모리에서 즉시 해제)")}</li>
-          <li>{t("원격 sync 설정값")}: {String(remoteSyncConfigured)}</li>
-          <li>{t("원격 sync 실제 동작값")}: {String(remoteSyncEffective)}</li>
-          <li>{t("서버 전송")}: {serverTransmissionLabel}</li>
-        </ul>
-      </Card>
-
-      <Card className="p-5">
-        <div className="text-[14px] font-semibold text-ios-text">로컬 감사 로그</div>
-        <div className="mt-1 text-[12.5px] text-ios-sub">저장/파기/정책차단 이벤트(비식별 메타데이터)만 기록합니다.</div>
-        <div className="mt-3 space-y-2">
-          {auditEvents.length ? (
-            auditEvents.map((event) => (
-              <div key={event.id} className="rounded-xl border border-ios-sep bg-white p-3 text-[12px] text-ios-sub">
-                <div className="font-semibold text-ios-text">{event.action}</div>
-                <div className="mt-0.5">
-                  {formatTime(event.at)}
-                  {event.sessionId ? ` · ${event.sessionId}` : ""}
-                </div>
-                {event.detail ? <div className="mt-0.5">{event.detail}</div> : null}
-              </div>
-            ))
-          ) : (
-            <div className="rounded-xl border border-ios-sep bg-white p-3 text-[12px] text-ios-sub">기록 없음</div>
-          )}
-        </div>
-      </Card>
-
       {result ? (
         <Card className="p-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1581,7 +1531,14 @@ export function ToolHandoffPage() {
 
           {result.uncertainties.length ? (
             <div className="mt-3 space-y-2">
-              {result.uncertainties.map((item) => {
+              <div className="flex flex-wrap items-center gap-2">
+                {uncertaintySummary.map((item) => (
+                  <span key={item.kind} className="rounded-full border border-ios-sep bg-ios-bg px-2 py-1 text-[11px] font-semibold text-ios-sub">
+                    {item.kind}: {item.count}
+                  </span>
+                ))}
+              </div>
+              {visibleUncertainties.map((item) => {
                 const review = reviewMap[item.id] ?? { resolved: false, note: "" };
                 return (
                   <div key={item.id} className="rounded-2xl border border-ios-sep bg-white p-3">
@@ -1606,14 +1563,38 @@ export function ToolHandoffPage() {
                   </div>
                 );
               })}
+              {result.uncertainties.length > 12 ? (
+                <div className="pt-1">
+                  <Button
+                    variant="secondary"
+                    className={flatButtonSecondary}
+                    onClick={() => setShowAllUncertainties((prev) => !prev)}
+                  >
+                    {showAllUncertainties
+                      ? "핵심 항목만 보기"
+                      : `전체 보기 (+${result.uncertainties.length - visibleUncertainties.length}건)`}
+                  </Button>
+                </div>
+              ) : null}
             </div>
           ) : null}
 
           <div className="mt-4 grid gap-2 md:grid-cols-2">
-            <Button data-testid="handoff-save-reviewed" onClick={() => { void finalizeSession(); }} disabled={finalizing || running || reviewLockActive || actionBlocked}>
+            <Button
+              data-testid="handoff-save-reviewed"
+              className={flatButtonPrimary}
+              onClick={() => { void finalizeSession(); }}
+              disabled={finalizing || running || reviewLockActive || actionBlocked}
+            >
               {finalizing ? "저장 중..." : sessionSaved ? "검수 반영 저장 완료" : "검수 반영 저장"}
             </Button>
-            <Button data-testid="handoff-save-without-review" variant="secondary" onClick={saveWithoutReview} disabled={finalizing || running || reviewLockActive || actionBlocked}>
+            <Button
+              data-testid="handoff-save-without-review"
+              variant="secondary"
+              className={flatButtonSecondary}
+              onClick={saveWithoutReview}
+              disabled={finalizing || running || reviewLockActive || actionBlocked}
+            >
               검수 생략 즉시 저장
             </Button>
           </div>
