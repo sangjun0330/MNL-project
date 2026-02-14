@@ -1,4 +1,8 @@
-import type { NormalizedSegment, RawSegment, SegmentUncertainty } from "@/lib/handoff/types";
+import {
+  detectUnknownClinicalAbbreviations,
+  normalizeClinicalNarrative,
+} from "./clinicalNlu";
+import type { NormalizedSegment, RawSegment, SegmentUncertainty } from "./types";
 
 const ABBREVIATION_RULES: Array<{ pattern: RegExp; replacement: string }> = [
   { pattern: /\bV\/?S\b/gi, replacement: "활력징후" },
@@ -19,78 +23,36 @@ const ABBREVIATION_RULES: Array<{ pattern: RegExp; replacement: string }> = [
   { pattern: /\bI\/?O\b/gi, replacement: "수분출납" },
   { pattern: /\bLabs?\b/gi, replacement: "검사" },
   { pattern: /\bCBC\b/gi, replacement: "혈액검사" },
+  { pattern: /\bCRP\b/gi, replacement: "염증수치" },
+  { pattern: /\bNRS\b/gi, replacement: "통증척도" },
 ];
 
-const KNOWN_ABBREVIATIONS = new Set([
-  "V",
-  "VS",
-  "BST",
-  "SPO",
-  "SPO2",
-  "BP",
-  "HR",
-  "RR",
-  "PCA",
-  "ABX",
-  "PRN",
-  "UO",
-  "NPO",
-  "IV",
-  "PO",
-  "RA",
-  "HB",
-  "IO",
-  "LAB",
-  "LABS",
-  "CBC",
-  "MRI",
-  "CT",
-  "ABGA",
-  "ECG",
-  "EKG",
-  "K",
-  "DM",
-  "POD",
-]);
-
-const TIME_PATTERN = /(\d{1,2}\s*시|\d{1,2}:\d{2}|새벽\s*\d{0,2}\s*시?|오전|오후|저녁|밤|금일|오늘|내일|익일)/;
-const VALUE_PATTERN = /(\d+(?:\.\d+)?(?:\s*(?:mg|ml|l|mmhg|bpm|%|회|명|시간|h|도))?)/i;
-const TASK_HINT_PATTERN = /(투약|검사|오더|재측정|재검|체크|확인|콜|모니터|처치|드레싱|추적|보고)/;
+const TIME_PATTERN =
+  /(\d{1,2}\s*시(?:\s*\d{1,2}\s*분)?|\d{1,2}:\d{2}|새벽\s*\d{0,2}\s*시?|오전|오후|저녁|밤|금일|오늘|내일|익일|매\s*\d+\s*시간|q\d+h)/i;
+const VALUE_PATTERN = /(\d+(?:\.\d+)?(?:\s*(?:mg|ml|l|mmhg|bpm|%|회|명|시간|h|도|점|l))?)/i;
+const TASK_HINT_PATTERN = /(투약|검사|오더|재측정|재검|체크|확인|콜|처치|드레싱|추적|보고|재평가|follow\s*up)/i;
 const TASK_PENDING_HINT_PATTERN = /(필요|예정|다시|마다|전|후|내일|익일|오전|오후|밤|새벽|즉시|지금)/;
 const TASK_COMPLETED_HINT_PATTERN = /(완료|종료|시행됨|시행|진행됨|들어갔|투약됨|투약했고|처치함|했다|했음)/;
-const VALUE_TOPIC_PATTERN = /(혈당|헤모글로빈|체온|소변량|활력징후|혈압|맥박|호흡수|산소포화도|검사수치|수분출납|산소)/i;
+const ROUTINE_OBSERVATION_PATTERN = /(모니터링|관찰|유지)\s*(필요|중|부탁)?/;
+const LAB_PENDING_PATTERN = /(결과\s*확인\s*필요|검사\s*나갔|검사\s*대기|pending)/i;
+const VALUE_TOPIC_PATTERN = /(혈당|헤모글로빈|체온|소변량|활력징후|혈압|맥박|호흡수|산소포화도|검사수치|수분출납|산소|염증수치|혈액검사)/i;
 const VALUE_PRESENT_PATTERN = /((혈당|헤모글로빈|체온|소변량|활력징후|혈압|맥박|호흡수|산소포화도|산소)[^.!?\n]{0,14}\d+(?:\.\d+)?|\d+(?:\.\d+)?\s*(mg|ml|l|mmhg|bpm|%|회|도))/i;
-const VALUE_QUALITATIVE_HINT_PATTERN = /(정상|안정|유지|양호|무변화|호전|악화\s*없|특이\s*없|음성|양성)/;
+const VALUE_QUALITATIVE_HINT_PATTERN = /(정상|안정|유지|양호|무변화|호전|악화\s*없|특이\s*없|음성|양성|소량|감소\s*경향|증가\s*경향|황색|명료)/;
 const UNCERTAINTY_HINT_PATTERN = /(확인\s*부탁|미정|미기재|불명|애매|추후|나중|기억\s*안|모름|확실치)/;
 
 function normalizeWhitespace(text: string) {
   return text.replace(/\s+/g, " ").replace(/\s*([,.;!?])\s*/g, "$1 ").trim();
 }
 
-function isAbbreviationLike(token: string) {
-  const letters = token.replace(/[^A-Za-z]/g, "");
-  if (letters.length < 2) return false;
-  const hasDigit = /\d/.test(token);
-  const upperCount = (token.match(/[A-Z]/g) ?? []).length;
-  return hasDigit || token === token.toUpperCase() || upperCount >= 2;
-}
-
-function detectUnresolvedAbbreviations(text: string) {
-  const hits = text.match(/\b[A-Za-z][A-Za-z0-9]{1,7}\b/g) ?? [];
-  const unknown = new Set<string>();
-  hits.forEach((token) => {
-    if (!isAbbreviationLike(token)) return;
-    const upper = token.toUpperCase();
-    const lettersOnly = upper.replace(/[0-9]/g, "");
-    if (KNOWN_ABBREVIATIONS.has(upper) || KNOWN_ABBREVIATIONS.has(lettersOnly)) return;
-    unknown.add(upper);
-  });
-  return [...unknown];
-}
-
 function shouldFlagMissingTime(normalizedText: string) {
   if (!TASK_HINT_PATTERN.test(normalizedText)) return false;
   if (TIME_PATTERN.test(normalizedText)) return false;
+  if (LAB_PENDING_PATTERN.test(normalizedText)) return false;
+
+  const routineOnly =
+    ROUTINE_OBSERVATION_PATTERN.test(normalizedText) &&
+    !/(재측정|재검|다시|오더|투약|콜|처치|드레싱|보고)/.test(normalizedText);
+  if (routineOnly) return false;
 
   const hasPendingCue = TASK_PENDING_HINT_PATTERN.test(normalizedText);
   const looksCompleted =
@@ -105,6 +67,7 @@ function shouldFlagMissingValue(normalizedText: string) {
   if (!VALUE_TOPIC_PATTERN.test(normalizedText)) return false;
   if (VALUE_PRESENT_PATTERN.test(normalizedText)) return false;
   if (VALUE_QUALITATIVE_HINT_PATTERN.test(normalizedText)) return false;
+  if (LAB_PENDING_PATTERN.test(normalizedText)) return false;
   return !VALUE_PATTERN.test(normalizedText);
 }
 
@@ -132,7 +95,7 @@ function detectUncertainties(originalText: string, normalizedText: string): Segm
     });
   }
 
-  const unresolved = detectUnresolvedAbbreviations(originalText);
+  const unresolved = detectUnknownClinicalAbbreviations(originalText, 2);
   if (unresolved.length) {
     list.push({
       kind: "unresolved_abbreviation",
@@ -145,10 +108,13 @@ function detectUncertainties(originalText: string, normalizedText: string): Segm
 
 export function normalizeSegments(segments: RawSegment[]): NormalizedSegment[] {
   return segments.map((segment) => {
-    let normalized = normalizeWhitespace(segment.rawText);
+    const preNormalized = normalizeWhitespace(segment.rawText);
+    const clinicalNormalized = normalizeClinicalNarrative(preNormalized);
+    let normalized = clinicalNormalized.text;
     ABBREVIATION_RULES.forEach((rule) => {
       normalized = normalized.replace(rule.pattern, rule.replacement);
     });
+    normalized = normalizeWhitespace(normalized);
 
     return {
       segmentId: segment.segmentId,

@@ -1,7 +1,7 @@
-import { normalizeSegments } from "@/lib/handoff/normalize";
-import { applyPhiGuard } from "@/lib/handoff/phiGuard";
-import { splitSegmentsByPatient } from "@/lib/handoff/split";
-import { buildGlobalTop, buildPatientCards } from "@/lib/handoff/structure";
+import { normalizeSegments } from "./normalize";
+import { applyPhiGuard } from "./phiGuard";
+import { splitSegmentsByPatient } from "./split";
+import { buildGlobalTop, buildPatientCards } from "./structure";
 import type {
   DutyType,
   HandoffPipelineOutput,
@@ -10,7 +10,7 @@ import type {
   SegmentUncertainty,
   UncertaintyKind,
   UncertaintyItem,
-} from "@/lib/handoff/types";
+} from "./types";
 
 const DEFAULT_SEGMENT_MS = 5000;
 const MAX_UNCERTAINTY_ITEM_COUNT = 24;

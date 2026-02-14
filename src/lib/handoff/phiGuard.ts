@@ -1,12 +1,6 @@
+import { extractPatientTokens, normalizeRoomMentions } from "./clinicalNlu";
 import type { MaskedSegment, NormalizedSegment } from "./types";
 
-const NAME_PATTERNS = [
-  /([가-힣]{2,4})(?=\s*(?:님|씨|환자))/g,
-  /([가-힣]{1,3}O{2})/g,
-  /([가-힣]{1,3}○{2})/g,
-];
-
-const ROOM_PATTERN = /(?:^|\s)(\d{3,4}\s*호)(?=$|\s|[,.])/g;
 const PHONE_PATTERN = /(01[0-9]-?\d{3,4}-?\d{4})/g;
 const RRN_PATTERN = /(\d{6}-?[1-4]\d{6})/g;
 const CHART_PATTERN = /(차트번호|등록번호|MRN)\s*[:#]?\s*\d{6,}/gi;
@@ -49,12 +43,11 @@ export function applyPhiGuard(segments: NormalizedSegment[]) {
   const tokenToAlias = new Map<string, string>();
 
   const maskedSegments: MaskedSegment[] = segments.map((segment) => {
-    const nameTokens = NAME_PATTERNS.flatMap((pattern) => collectPatternTokens(segment.normalizedText, pattern));
-    const roomTokens = collectPatternTokens(segment.normalizedText, ROOM_PATTERN);
-    const patientTokens = [...new Set([...nameTokens, ...roomTokens])];
+    const sourceText = normalizeRoomMentions(segment.normalizedText);
+    const patientTokens = extractPatientTokens(sourceText);
 
     const patientAlias = patientTokens.length ? getOrCreateAlias(patientTokens, tokenToAlias) : null;
-    let maskedText = segment.normalizedText;
+    let maskedText = sourceText;
     const phiHits: string[] = [];
 
     if (patientAlias) {

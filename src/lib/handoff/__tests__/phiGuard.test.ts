@@ -59,3 +59,27 @@ test("applyPhiGuard assigns next alias for another patient token", () => {
   assert.equal(out.segments[0].patientAlias, "환자A");
   assert.equal(out.segments[1].patientAlias, "환자B");
 });
+
+test("applyPhiGuard normalizes spaced and Korean room mentions into one patient alias", () => {
+  const segments: NormalizedSegment[] = [
+    {
+      segmentId: "s1",
+      normalizedText: "7 0 1호 김민준 환자 인계",
+      startMs: 0,
+      endMs: 5_000,
+      uncertainties: [],
+    },
+    {
+      segmentId: "s2",
+      normalizedText: "칠공일호 김민준 혈당 280",
+      startMs: 5_000,
+      endMs: 10_000,
+      uncertainties: [],
+    },
+  ];
+
+  const out = applyPhiGuard(segments);
+  assert.equal(out.segments[0].patientAlias, "환자A");
+  assert.equal(out.segments[1].patientAlias, "환자A");
+  assert.equal(out.aliasMap["701호"], "환자A");
+});
