@@ -681,6 +681,11 @@ function fallbackNoteFromOpenAiError(error: string | null, locale: "ko" | "en") 
       ? "OpenAI 접근 권한 문제로 기본 안전 모드로 전환되었습니다."
       : "OpenAI access was denied. Showing safe fallback mode.";
   }
+  if (code.includes("openai_chat_403")) {
+    return locale === "ko"
+      ? "OpenAI 접근 권한 문제로 기본 안전 모드로 전환되었습니다."
+      : "OpenAI access was denied. Showing safe fallback mode.";
+  }
   if (code.includes("timeout")) {
     return locale === "ko"
       ? "AI 응답 시간이 길어 기본 안전 모드로 전환되었습니다."
@@ -1078,80 +1083,91 @@ async function callChatCompletionsApi(args: {
     });
   }
 
-  const payload = {
-    model,
-    messages: [
-      {
-        role: "system",
-        content: developerPrompt,
+  const sendChatRequest = async (tokenParam: "max_completion_tokens" | "max_tokens"): Promise<ResponsesAttempt> => {
+    const payload = {
+      model,
+      messages: [
+        {
+          role: "system",
+          content: developerPrompt,
+        },
+        {
+          role: "user",
+          content: userContent,
+        },
+      ],
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "nurse_med_tool_action_card",
+          strict: true,
+          schema: buildMedSafetyJsonSchema(),
+        },
       },
-      {
-        role: "user",
-        content: userContent,
-      },
-    ],
-    response_format: {
-      type: "json_schema",
-      json_schema: {
-        name: "nurse_med_tool_action_card",
-        strict: true,
-        schema: buildMedSafetyJsonSchema(),
-      },
-    },
-    max_tokens: maxOutputTokens,
-    temperature: 0.1,
+      [tokenParam]: maxOutputTokens,
+    };
+
+    let response: Response;
+    const request = createAttemptSignal(signal, perAttemptTimeoutMs);
+    try {
+      response = await fetch(`${apiBaseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(payload),
+        signal: request.signal,
+      });
+    } catch (cause: any) {
+      request.dispose();
+      if (String(cause?.name ?? "") === "AbortError" && !signal.aborted) {
+        return { text: null, error: `openai_attempt_timeout_${perAttemptTimeoutMs}ms`, json: null };
+      }
+      const reason = truncateError(String(cause?.message ?? cause ?? "fetch_failed"));
+      return { text: null, error: `openai_chat_network_${reason}`, json: null };
+    }
+    request.dispose();
+
+    if (!response.ok) {
+      const raw = await response.text().catch(() => "");
+      return {
+        text: null,
+        error: `openai_chat_${response.status}_${truncateError(raw || "unknown_error")}`,
+        json: null,
+      };
+    }
+
+    const json = await response.json().catch(() => null);
+    const parsedFromJson = parseAnalysisResultFromResponseJson(json);
+    const choices = Array.isArray((json as any)?.choices) ? (json as any).choices : [];
+    let text = "";
+    const message = choices[0]?.message;
+    if (typeof message?.content === "string") {
+      text = message.content.trim();
+    } else if (Array.isArray(message?.content)) {
+      text = message.content
+        .map((part: any) => (typeof part?.text === "string" ? part.text : ""))
+        .join(" ")
+        .trim();
+    }
+
+    if (!text && !parsedFromJson) {
+      return { text: null, error: "openai_chat_empty_text", json };
+    }
+    return { text: text || null, error: null, json };
   };
 
-  let response: Response;
-  const request = createAttemptSignal(signal, perAttemptTimeoutMs);
-  try {
-    response = await fetch(`${apiBaseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(payload),
-      signal: request.signal,
-    });
-  } catch (cause: any) {
-    request.dispose();
-    if (String(cause?.name ?? "") === "AbortError" && !signal.aborted) {
-      return { text: null, error: `openai_attempt_timeout_${perAttemptTimeoutMs}ms`, json: null };
-    }
-    const reason = truncateError(String(cause?.message ?? cause ?? "fetch_failed"));
-    return { text: null, error: `openai_chat_network_${reason}`, json: null };
-  }
-  request.dispose();
+  const first = await sendChatRequest("max_completion_tokens");
+  if (!first.error) return first;
 
-  if (!response.ok) {
-    const raw = await response.text().catch(() => "");
-    return {
-      text: null,
-      error: `openai_chat_${response.status}_${truncateError(raw || "unknown_error")}`,
-      json: null,
-    };
-  }
+  const firstErr = String(first.error ?? "");
+  const needLegacyRetry =
+    firstErr.includes("unsupported_parameter") &&
+    (firstErr.includes("max_completion_tokens") || firstErr.includes("max completion tokens"));
 
-  const json = await response.json().catch(() => null);
-  const parsedFromJson = parseAnalysisResultFromResponseJson(json);
-  const choices = Array.isArray((json as any)?.choices) ? (json as any).choices : [];
-  let text = "";
-  const message = choices[0]?.message;
-  if (typeof message?.content === "string") {
-    text = message.content.trim();
-  } else if (Array.isArray(message?.content)) {
-    text = message.content
-      .map((part: any) => (typeof part?.text === "string" ? part.text : ""))
-      .join(" ")
-      .trim();
-  }
-
-  if (!text && !parsedFromJson) {
-    return { text: null, error: "openai_chat_empty_text", json };
-  }
-
-  return { text: text || null, error: null, json };
+  if (!needLegacyRetry) return first;
+  return await sendChatRequest("max_tokens");
 }
 
 function parseAttemptResult(attempt: ResponsesAttempt): MedSafetyAnalysisResult | null {
