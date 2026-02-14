@@ -83,3 +83,59 @@ test("applyPhiGuard normalizes spaced and Korean room mentions into one patient 
   assert.equal(out.segments[1].patientAlias, "환자A");
   assert.equal(out.aliasMap["701호"], "환자A");
 });
+
+test("applyPhiGuard separates patients when same real name appears in different rooms", () => {
+  const segments: NormalizedSegment[] = [
+    {
+      segmentId: "s1",
+      normalizedText: "701호 김민준 환자 혈압 90/60",
+      startMs: 0,
+      endMs: 5_000,
+      uncertainties: [],
+    },
+    {
+      segmentId: "s2",
+      normalizedText: "702호 김민준 환자 혈당 240",
+      startMs: 5_000,
+      endMs: 10_000,
+      uncertainties: [],
+    },
+    {
+      segmentId: "s3",
+      normalizedText: "701호 김민준은 소변량 감소",
+      startMs: 10_000,
+      endMs: 15_000,
+      uncertainties: [],
+    },
+  ];
+
+  const out = applyPhiGuard(segments);
+  assert.equal(out.segments[0].patientAlias, "환자A");
+  assert.equal(out.segments[1].patientAlias, "환자B");
+  assert.equal(out.segments[2].patientAlias, "환자A");
+  assert.equal(out.aliasMap["701호"], "환자A");
+  assert.equal(out.aliasMap["702호"], "환자B");
+});
+
+test("applyPhiGuard keeps active alias on continuation segment without explicit identifiers", () => {
+  const segments: NormalizedSegment[] = [
+    {
+      segmentId: "s1",
+      normalizedText: "703호 박지훈 환자 폐렴으로 항생제 시작",
+      startMs: 0,
+      endMs: 5_000,
+      uncertainties: [],
+    },
+    {
+      segmentId: "s2",
+      normalizedText: "새벽 2시에 혈당 재측정 필요",
+      startMs: 5_000,
+      endMs: 10_000,
+      uncertainties: [],
+    },
+  ];
+
+  const out = applyPhiGuard(segments);
+  assert.equal(out.segments[0].patientAlias, "환자A");
+  assert.equal(out.segments[1].patientAlias, "환자A");
+});

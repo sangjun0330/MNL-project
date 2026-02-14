@@ -16,6 +16,7 @@ export type RawSegment = {
 export type UncertaintyKind =
   | "missing_time"
   | "missing_value"
+  | "confusable_abbreviation"
   | "ambiguous_patient"
   | "unresolved_abbreviation"
   | "manual_review";

@@ -1,3 +1,4 @@
+import { hasPatientTransitionCue, isLikelyClinicalContinuation } from "./clinicalNlu";
 import type { MaskedSegment, WardEvent, WardEventCategory } from "./types";
 
 const WARD_RULES: Array<{ category: WardEventCategory; patterns: RegExp[] }> = [
@@ -24,15 +25,12 @@ function extractAliasFromText(text: string) {
   return hit ? hit[0] : null;
 }
 
-function hasTransitionCue(text: string) {
-  return /(다음|그다음|이어서|한편|반면|또\b|또는)/.test(text);
-}
-
-function isLikelyPatientContinuation(text: string) {
-  if (extractAliasFromText(text)) return true;
-  return /(오더|투약|검사|혈당|헤모글로빈|항생제|필요시|소변량|통증|호흡|SpO2|흑변|어지럽|확인|콜|모니터|POD|PCA)/i.test(
-    text
-  );
+function assignToPatientBucket(store: Record<string, MaskedSegment[]>, alias: string, segment: MaskedSegment) {
+  if (!store[alias]) store[alias] = [];
+  store[alias].push({
+    ...segment,
+    patientAlias: alias,
+  });
 }
 
 export type SplitOutput = {
@@ -45,58 +43,97 @@ export function splitSegmentsByPatient(segments: MaskedSegment[]): SplitOutput {
   const wardEvents: WardEvent[] = [];
   const patientSegments: Record<string, MaskedSegment[]> = {};
   const unmatchedSegments: MaskedSegment[] = [];
+  const wardSegmentIds = new Set<string>();
   const ordered = [...segments].sort((a, b) => {
     if (a.startMs !== b.startMs) return a.startMs - b.startMs;
     return a.segmentId.localeCompare(b.segmentId);
   });
 
+  const timeline: Array<{ segment: MaskedSegment; alias: string | null }> = [];
+
   let activeAlias: string | null = null;
   let transitionPending = false;
 
   ordered.forEach((segment) => {
-    const transitionCue = hasTransitionCue(segment.maskedText);
+    const transitionCue = hasPatientTransitionCue(segment.maskedText);
     const aliasFromText = extractAliasFromText(segment.maskedText);
     const segmentAlias = segment.patientAlias ?? aliasFromText;
     const category = classifyWardEvent(segment.maskedText);
-    if (category && (!segmentAlias || isWardLevelContext(segment.maskedText))) {
+    const continuationLike = isLikelyClinicalContinuation(segment.maskedText);
+    const wardCandidate =
+      category != null &&
+      (segmentAlias
+        ? isWardLevelContext(segment.maskedText)
+        : isWardLevelContext(segment.maskedText) || (!activeAlias && !continuationLike));
+    if (category && wardCandidate) {
       wardEvents.push({
         id: `ward-${segment.segmentId}`,
         category,
         text: segment.maskedText,
         evidenceRef: segment.evidenceRef,
       });
+      wardSegmentIds.add(segment.segmentId);
+      timeline.push({ segment, alias: null });
       transitionPending = transitionCue;
       return;
     }
 
     if (segmentAlias) {
-      if (!patientSegments[segmentAlias]) {
-        patientSegments[segmentAlias] = [];
-      }
-      patientSegments[segmentAlias].push({
-        ...segment,
-        patientAlias: segmentAlias,
-      });
+      assignToPatientBucket(patientSegments, segmentAlias, segment);
+      timeline.push({ segment, alias: segmentAlias });
       activeAlias = segmentAlias;
       transitionPending = transitionCue;
       return;
     }
 
-    if (!transitionPending && !transitionCue && activeAlias && isLikelyPatientContinuation(segment.maskedText)) {
-      if (!patientSegments[activeAlias]) {
-        patientSegments[activeAlias] = [];
-      }
-      patientSegments[activeAlias].push({
-        ...segment,
-        patientAlias: activeAlias,
-      });
+    if (!transitionPending && !transitionCue && activeAlias && isLikelyClinicalContinuation(segment.maskedText)) {
+      assignToPatientBucket(patientSegments, activeAlias, segment);
+      timeline.push({ segment, alias: activeAlias });
       transitionPending = transitionCue;
       return;
     }
 
     unmatchedSegments.push(segment);
+    timeline.push({ segment, alias: null });
     transitionPending = transitionCue;
   });
 
-  return { wardEvents, patientSegments, unmatchedSegments };
+  const unmatchedIds = new Set(unmatchedSegments.map((segment) => segment.segmentId));
+  const adoptedIds = new Set<string>();
+
+  timeline.forEach((entry, index) => {
+    if (entry.alias || wardSegmentIds.has(entry.segment.segmentId)) return;
+    if (!unmatchedIds.has(entry.segment.segmentId)) return;
+    if (hasPatientTransitionCue(entry.segment.maskedText)) return;
+    if (!isLikelyClinicalContinuation(entry.segment.maskedText)) return;
+
+    let previousAlias: string | null = null;
+    for (let i = index - 1; i >= 0; i -= 1) {
+      if (!timeline[i].alias) continue;
+      previousAlias = timeline[i].alias;
+      break;
+    }
+
+    let nextAlias: string | null = null;
+    for (let i = index + 1; i < timeline.length; i += 1) {
+      if (!timeline[i].alias) continue;
+      nextAlias = timeline[i].alias;
+      break;
+    }
+
+    if (previousAlias && nextAlias && previousAlias === nextAlias) {
+      assignToPatientBucket(patientSegments, previousAlias, entry.segment);
+      adoptedIds.add(entry.segment.segmentId);
+      return;
+    }
+
+    if (previousAlias && !nextAlias) {
+      assignToPatientBucket(patientSegments, previousAlias, entry.segment);
+      adoptedIds.add(entry.segment.segmentId);
+    }
+  });
+
+  const finalUnmatched = unmatchedSegments.filter((segment) => !adoptedIds.has(segment.segmentId));
+
+  return { wardEvents, patientSegments, unmatchedSegments: finalUnmatched };
 }
