@@ -14,6 +14,58 @@ const allowedDevOrigins =
     ? Array.from(new Set([...devDefaults, ...allowedFromEnv]))
     : allowedFromEnv;
 
+function toOrigin(input) {
+  if (!input) return null;
+  try {
+    return new URL(input).origin;
+  } catch {
+    return null;
+  }
+}
+
+const supabaseOrigin = toOrigin(process.env.NEXT_PUBLIC_SUPABASE_URL);
+const connectSources = ["'self'"];
+if (supabaseOrigin) {
+  connectSources.push(supabaseOrigin);
+  connectSources.push(supabaseOrigin.replace(/^http/i, "ws"));
+}
+
+const isDev = process.env.NODE_ENV === "development";
+const scriptSources = isDev
+  ? "'self' 'unsafe-inline' 'unsafe-eval'"
+  : "'self' 'unsafe-inline'";
+
+const contentSecurityPolicy = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+  "object-src 'none'",
+  `script-src ${scriptSources}`,
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  `connect-src ${connectSources.join(" ")}`,
+  "media-src 'self' blob:",
+  "worker-src 'self' blob:",
+].join("; ");
+
+const securityHeaders = [
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "Referrer-Policy", value: "no-referrer" },
+  { key: "Permissions-Policy", value: "microphone=(self), camera=(), geolocation=(), browsing-topics=()" },
+  { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+  { key: "Cross-Origin-Resource-Policy", value: "same-site" },
+  { key: "Content-Security-Policy", value: contentSecurityPolicy },
+];
+
+const handoffNoStoreHeaders = [
+  { key: "Cache-Control", value: "no-store, max-age=0" },
+  { key: "Pragma", value: "no-cache" },
+  { key: "X-Robots-Tag", value: "noindex, nofollow, noarchive, nosnippet" },
+];
+
 const nextConfig = {
   eslint: { ignoreDuringBuilds: true },
   reactStrictMode: true,
@@ -24,6 +76,26 @@ const nextConfig = {
 
   async headers() {
     return [
+      {
+        source: "/:path*",
+        headers: securityHeaders,
+      },
+      {
+        source: "/tools/handoff",
+        headers: handoffNoStoreHeaders,
+      },
+      {
+        source: "/tools/handoff/:path*",
+        headers: handoffNoStoreHeaders,
+      },
+      {
+        source: "/handoff",
+        headers: handoffNoStoreHeaders,
+      },
+      {
+        source: "/handoff/:path*",
+        headers: handoffNoStoreHeaders,
+      },
       {
         source: "/settings/billing/:path*",
         headers: [

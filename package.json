@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:handoff": "rm -rf .tmp/handoff-tests && tsc -p tsconfig.handoff-tests.json && node --test .tmp/handoff-tests/handoff/__tests__/*.test.js",
+    "test:e2e:handoff:install": "node scripts/run-playwright.mjs install chromium",
+    "test:e2e:handoff": "node scripts/run-playwright.mjs test -c playwright.handoff.config.mjs",
+    "test:e2e:handoff:headed": "node scripts/run-playwright.mjs test -c playwright.handoff.config.mjs --headed"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
@@ -17,6 +21,7 @@
     "zustand": "^5.0.10"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
@@ -24,6 +29,7 @@
     "eslint": "^8.57.0",
     "eslint-config-next": "15.5.9",
     "picomatch": "^4.0.3",
+    "playwright": "^1.58.2",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2"

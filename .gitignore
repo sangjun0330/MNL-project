@@ -2,8 +2,11 @@ node_modules
 .next
 out
 dist
+.tmp
 .env
 .env.local
 .DS_Store
 .wnl_logs
 .wnl_users
+playwright-report
+test-results

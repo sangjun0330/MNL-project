@@ -3,12 +3,13 @@ import { cn } from "@/lib/cn";
 export function Card({
   className,
   children,
-}: {
+  ...props
+}: React.HTMLAttributes<HTMLDivElement> & {
   className?: string;
   children: React.ReactNode;
 }) {
   return (
-    <div className={cn("rounded-apple border border-ios-sep bg-ios-card shadow-apple", className)}>
+    <div className={cn("rounded-apple border border-ios-sep bg-ios-card shadow-apple", className)} {...props}>
       {children}
     </div>
   );

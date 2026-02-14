@@ -34,6 +34,15 @@ const InsightsIcon = (props: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
+const ToolIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...props}>
+    <path d="M8 7h8" />
+    <path d="M6 11h12" />
+    <path d="M9 15h6" />
+    <rect x="4" y="4" width="16" height="16" rx="3" />
+  </svg>
+);
+
 const SettingsIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...props}>
     <path d="M4 7h16M4 17h16" />
@@ -46,6 +55,7 @@ const ITEMS: NavItem[] = [
   { href: "/", label: "홈", Icon: HomeIcon },
   { href: "/schedule", label: "일정", Icon: CalendarIcon },
   { href: "/insights", label: "인사이트", Icon: InsightsIcon },
+  { href: "/tools", label: "툴", Icon: ToolIcon },
   { href: "/settings", label: "설정", Icon: SettingsIcon },
 ];
 
@@ -109,7 +119,7 @@ export function BottomNav() {
               "wnl-nav-bar"
             )}
           >
-            <div className="grid grid-cols-4 gap-1 p-1.5">
+            <div className="grid grid-cols-5 gap-1 p-1.5">
               {ITEMS.map((it) => {
                 const active = selectedHref === it.href;
                 const Icon = it.Icon;
