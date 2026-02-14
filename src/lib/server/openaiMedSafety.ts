@@ -64,6 +64,7 @@ function shouldRetryOpenAiError(error: string | null) {
     code.includes("_503_") ||
     code.includes("_504_") ||
     code.includes("timeout") ||
+    code.includes("aborted") ||
     code.includes("network")
   );
 }
@@ -314,6 +315,11 @@ function fallbackNoteFromOpenAiError(error: string | null, locale: "ko" | "en") 
     return locale === "ko"
       ? "AI 응답 시간이 길어 기본 안전 모드로 전환되었습니다."
       : "AI response timed out. Showing safe fallback mode.";
+  }
+  if (code.includes("aborted")) {
+    return locale === "ko"
+      ? "요청 제한 시간 내 응답을 받지 못해 기본 안전 모드로 전환되었습니다."
+      : "Request exceeded allowed time. Showing safe fallback mode.";
   }
   if (code.includes("network")) {
     return locale === "ko"
