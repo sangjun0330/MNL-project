@@ -87,7 +87,8 @@ function parseErrorMessage(raw: string) {
   if (raw.includes("unsupported_country_region_territory"))
     return "현재 네트워크 경로에서 OpenAI가 지역 정책으로 차단되었습니다. 모바일 데이터 또는 다른 네트워크로 다시 시도해 주세요.";
   if (raw.includes("openai_responses_")) return "OpenAI 요청이 실패했습니다. 잠시 후 다시 시도해 주세요.";
-  if (raw.includes("openai_invalid_json_payload")) return "AI 응답 형식 파싱에 실패했습니다. 다시 시도해 주세요.";
+  if (raw.includes("openai_invalid_json_payload"))
+    return "AI 응답이 비정형으로 와서 자동 정리 결과로 표시했습니다.";
   return raw;
 }
 
