@@ -94,8 +94,8 @@ function normalizeApiKey() {
 }
 
 function resolveModel() {
-  const model = String(process.env.OPENAI_MED_SAFETY_MODEL ?? process.env.OPENAI_MODEL ?? "gpt-4o-mini").trim();
-  return model || "gpt-4o-mini";
+  const model = String(process.env.OPENAI_MED_SAFETY_MODEL ?? process.env.OPENAI_MODEL ?? "gpt-5.1").trim();
+  return model || "gpt-5.1";
 }
 
 function normalizeApiBaseUrl(raw: string) {
@@ -1067,7 +1067,7 @@ async function repairAnalysisFromRawText(args: {
   signal: AbortSignal;
 }) {
   const { apiKey, model, rawText, locale, apiBaseUrl, maxOutputTokens, signal } = args;
-  const fallbackModel = "gpt-4o-mini";
+  const fallbackModel = "gpt-5.1";
   const modelCandidates = model === fallbackModel ? [model] : [model, fallbackModel];
   const developerPrompt = buildRepairDeveloperPrompt(locale);
   const userPrompt = buildRepairUserPrompt(rawText, locale);
