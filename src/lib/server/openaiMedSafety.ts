@@ -60,6 +60,16 @@ type ResponsesAttempt = {
   json: unknown | null;
 };
 
+type ExpectedInputClassification = {
+  expectedResultKind: "medication" | "device" | "scenario";
+  expectedItemType: MedSafetyItemType;
+  confidence: "high" | "medium" | "low";
+  reason: string;
+  medScore: number;
+  deviceScore: number;
+  scenarioScore: number;
+};
+
 function shouldRetryOpenAiError(error: string | null) {
   if (!error) return false;
   const code = String(error).toLowerCase();
@@ -457,6 +467,91 @@ function parseAnalysisResultFromResponseJson(json: unknown): MedSafetyAnalysisRe
   return null;
 }
 
+function countPatternHits(text: string, patterns: RegExp[]) {
+  let score = 0;
+  for (const pattern of patterns) {
+    if (pattern.test(text)) score += 1;
+  }
+  return score;
+}
+
+function inferExpectedInputClassification(params: Pick<AnalyzeParams, "query" | "patientSummary" | "imageName" | "situation">): ExpectedInputClassification {
+  const source = `${params.query ?? ""} ${params.patientSummary ?? ""} ${params.imageName ?? ""}`
+    .replace(/\s+/g, " ")
+    .trim();
+  const lower = source.toLowerCase();
+  const query = String(params.query ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const medKeywords = [
+    /승압제|혈압상승제|vasopressor|norepinephrine|noradrenaline|epinephrine|dopamine|dobutamine|vasopressin/i,
+    /약물|투약|약제|용량|희석|항생제|인슐린|헤파린|진통제|진정제|수액|주사/i,
+    /\b(?:mg|mcg|g|iu|unit|units|mEq|mmol|ml\/h|mg\/kg|mcg\/kg\/min)\b/i,
+    /\b(?:tab|cap|inj|amp|vial|iv|po|im|sc)\b/i,
+  ];
+  const deviceKeywords = [
+    /도구|장비|기구|펌프|주입기|인퓨전|주사기펌프|인공호흡기|카테터|캐뉼라|라인|중심정맥관|cvc|piv/i,
+    /iv\s*pump|infusion\s*pump|syringe\s*pump|ventilator|flowmeter|defibrillator|monitor/i,
+    /알람|occlusion|폐색|누출|침윤|외유출|infiltration|extravasation/i,
+  ];
+  const scenarioKeywords = [
+    /상황|케이스|증상|악화|이상|알람|경보|발생|의심|대응|조치|보고|응급|재평가|중단|보류|홀드/i,
+    /저혈압|저혈당|호흡곤란|의식저하|통증|부종|발적|오한|발열|쇼크/i,
+    /how|what to do|when to stop|manage|response|event|adverse/i,
+    /어떻게|순서|절차|해줘|알려줘|가능 여부|기준/i,
+  ];
+
+  let medScore = countPatternHits(lower, medKeywords);
+  let deviceScore = countPatternHits(lower, deviceKeywords);
+  let scenarioScore = countPatternHits(lower, scenarioKeywords);
+
+  const shortNounLikeQuery =
+    query.length > 0 &&
+    query.split(" ").length <= 3 &&
+    !/[?？]/.test(query) &&
+    !/(어떻게|순서|절차|대응|기준|보고|중단|보류|how|when|what|manage)/i.test(query);
+
+  if (shortNounLikeQuery && (medScore > 0 || deviceScore > 0)) {
+    scenarioScore = Math.max(0, scenarioScore - 2);
+  }
+
+  if (params.situation === "event_response") scenarioScore += 3;
+  if (params.situation === "during_admin") scenarioScore += 1;
+
+  let expectedResultKind: "medication" | "device" | "scenario" = "scenario";
+  if (params.situation === "event_response") {
+    expectedResultKind = "scenario";
+  } else if (medScore === 0 && deviceScore === 0) {
+    expectedResultKind = "scenario";
+  } else if (scenarioScore >= Math.max(medScore, deviceScore) + 2) {
+    expectedResultKind = "scenario";
+  } else if (medScore >= deviceScore) {
+    expectedResultKind = "medication";
+  } else {
+    expectedResultKind = "device";
+  }
+
+  const expectedItemType: MedSafetyItemType =
+    expectedResultKind === "medication" ? "medication" : expectedResultKind === "device" ? "device" : "unknown";
+
+  const ordered = [medScore, deviceScore, scenarioScore].sort((a, b) => b - a);
+  const lead = ordered[0] ?? 0;
+  const gap = lead - (ordered[1] ?? 0);
+  const confidence: "high" | "medium" | "low" = lead >= 3 || gap >= 2 ? "high" : gap >= 1 ? "medium" : "low";
+  const reason = `med:${medScore}, device:${deviceScore}, scenario:${scenarioScore}, situation:${params.situation}`;
+
+  return {
+    expectedResultKind,
+    expectedItemType,
+    confidence,
+    reason,
+    medScore,
+    deviceScore,
+    scenarioScore,
+  };
+}
+
 function cleanLine(line: string) {
   return String(line ?? "")
     .replace(/\s+/g, " ")
@@ -508,10 +603,18 @@ function detectQuickStatus(text: string): MedSafetyQuickStatus {
 }
 
 function looksLikeJsonBlob(value: string) {
-  const text = String(value ?? "").trim();
+  const text = String(value ?? "")
+    .replace(/^(?:[-*•·]|\d+[).])\s*/, "")
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .trim();
   if (!text) return false;
+  if (/^[\[\]{}]+,?$/.test(text)) return true;
+  if (/^[A-Za-z_][A-Za-z0-9_]{2,}"?\s*:\s*/.test(text)) return true;
+  if (/^"[^"]{3,}"\s*:\s*/.test(text)) return true;
   if (/^[{\[]/.test(text)) return true;
-  if (/"(?:item|quick|do|safety|patientScript20s|modePriority|confidenceNote)"\s*:/i.test(text)) return true;
+  if (/(?:^|["\s])(?:resultKind|riskLevel|oneLineConclusion|item|quick|topActions|topNumbers|topRisks|do|steps|calculatorsNeeded|compatibilityChecks|safety|holdRules|monitor|escalateWhen|patientScript20s|modePriority|confidenceNote|status|sbar|institutionalChecks)\s*[:"]/i.test(text)) return true;
+  if (/:\s*(?:\{|\[|"[^"]*"|true|false|null|-?\d+(?:\.\d+)?)(?:\s*,)?$/.test(text) && /["{}_:\[\],]/.test(text)) return true;
+  if (/^(?:high|medium|low|ok|check|stop|medication|device|scenario)"?,?$/i.test(text)) return true;
   const punctuation = (text.match(/[{}[\]":,]/g) ?? []).length;
   return punctuation >= Math.max(12, Math.floor(text.length * 0.12));
 }
@@ -524,6 +627,8 @@ function sanitizeModelLine(value: string, maxLength = 180) {
     .trim();
   if (!collapsed) return "";
   if (looksLikeJsonBlob(collapsed)) return "";
+  if (/^[A-Za-z_][A-Za-z0-9_]*"?\s*,?$/.test(collapsed)) return "";
+  if (/^".*",?$/.test(collapsed) && !/[가-힣A-Za-z0-9]{4,}\s+[가-힣A-Za-z0-9]{2,}/.test(collapsed)) return "";
   const clipped = collapsed.length > maxLength ? `${collapsed.slice(0, maxLength - 1)}…` : collapsed;
   return clipped.replace(/^\d+[).]\s*/, "").trim();
 }
@@ -906,7 +1011,91 @@ function parseAnalysisResult(raw: unknown): MedSafetyAnalysisResult | null {
   return parsed;
 }
 
-function buildFallbackAnalysisResult(params: AnalyzeParams, note: string): MedSafetyAnalysisResult {
+function alignAnalysisResultToInputKind(
+  input: MedSafetyAnalysisResult,
+  expected: ExpectedInputClassification,
+  params: Pick<AnalyzeParams, "query" | "situation" | "locale">
+): MedSafetyAnalysisResult {
+  const result: MedSafetyAnalysisResult = {
+    ...input,
+    item: { ...input.item },
+    quick: {
+      ...input.quick,
+      topActions: [...input.quick.topActions],
+      topNumbers: [...input.quick.topNumbers],
+      topRisks: [...input.quick.topRisks],
+    },
+    do: {
+      ...input.do,
+      steps: [...input.do.steps],
+      calculatorsNeeded: [...input.do.calculatorsNeeded],
+      compatibilityChecks: [...input.do.compatibilityChecks],
+    },
+    safety: {
+      ...input.safety,
+      holdRules: [...input.safety.holdRules],
+      monitor: [...input.safety.monitor],
+      escalateWhen: [...input.safety.escalateWhen],
+    },
+    institutionalChecks: [...input.institutionalChecks],
+    sbar: { ...input.sbar },
+    modePriority: [...input.modePriority],
+  };
+
+  const shouldForceKind =
+    expected.confidence !== "low" &&
+    expected.expectedResultKind !== "scenario" &&
+    result.resultKind === "scenario";
+
+  if (shouldForceKind) {
+    result.resultKind = expected.expectedResultKind;
+    if (result.item.type === "unknown") {
+      result.item.type = expected.expectedItemType;
+    }
+    result.confidenceNote = result.confidenceNote
+      ? `${result.confidenceNote} 입력 분류 규칙에 따라 ${expected.expectedResultKind} 형식으로 보정되었습니다.`
+      : `입력 분류 규칙에 따라 ${expected.expectedResultKind} 형식으로 보정되었습니다.`;
+  }
+
+  if (result.resultKind !== "scenario" && result.item.type === "unknown") {
+    result.item.type = result.resultKind;
+  }
+
+  if (params.situation === "general" && result.resultKind !== "scenario") {
+    const genericPrimaryUse = /(출력 안정화용|자동 정규화|약물\/의료도구 안전 확인|입력 항목)/i.test(result.item.primaryUse);
+    if (genericPrimaryUse || !result.item.primaryUse) {
+      result.item.primaryUse =
+        result.resultKind === "medication"
+          ? `${result.item.name}의 목적·핵심 작용·주요 주의점을 빠르게 확인`
+          : `${result.item.name}의 용도·핵심 기능·알람/오작동 대응 포인트를 빠르게 확인`;
+    }
+
+    if (result.resultKind === "medication" && /^((GO|STOP|HOLD\/CHECK):|GO:|STOP:|HOLD\/CHECK:)/.test(result.oneLineConclusion)) {
+      result.oneLineConclusion = `${result.item.name}은(는) 환자 상태에 따라 용량·속도·라인 호환을 먼저 확인해야 하는 약물입니다.`;
+    }
+    if (result.resultKind === "device" && /^((GO|STOP|HOLD\/CHECK):|GO:|STOP:|HOLD\/CHECK:)/.test(result.oneLineConclusion)) {
+      result.oneLineConclusion = `${result.item.name}은(는) 사용 목적과 세팅, 알람 대응 순서를 먼저 확인해야 하는 의료도구입니다.`;
+    }
+  }
+
+  if (!result.modePriority.length) {
+    if (result.resultKind === "medication") {
+      result.modePriority = params.locale === "ko" ? ["개요", "투여", "모니터링", "주의/보고"] : ["Overview", "Admin", "Monitor", "Escalate"];
+    } else if (result.resultKind === "device") {
+      result.modePriority = params.locale === "ko" ? ["개요", "세팅", "알람/문제", "유지관리"] : ["Overview", "Setup", "Alarms", "Maintenance"];
+    } else {
+      result.modePriority = params.locale === "ko" ? ["즉시행동", "체크", "처치", "보고"] : ["Immediate", "Checks", "Actions", "SBAR"];
+    }
+  }
+
+  return result;
+}
+
+function buildFallbackAnalysisResult(
+  params: AnalyzeParams,
+  note: string,
+  expected: ExpectedInputClassification
+): MedSafetyAnalysisResult {
   const rawName = String(params.query || params.imageName || "입력 항목")
     .replace(/\s+/g, " ")
     .trim();
@@ -936,7 +1125,25 @@ function buildFallbackAnalysisResult(params: AnalyzeParams, note: string): MedSa
   };
   const fallbackStatus: MedSafetyQuickStatus = params.situation === "event_response" ? "STOP" : "CHECK";
   const fallbackKind: "medication" | "device" | "scenario" =
-    params.situation === "general" ? "scenario" : params.situation === "event_response" ? "scenario" : "medication";
+    params.situation === "general" ? expected.expectedResultKind : params.situation === "event_response" ? "scenario" : expected.expectedResultKind;
+
+  const generalActionsByKind: Record<"medication" | "device" | "scenario", string[]> = {
+    medication: [
+      "이 약물이 무엇이며 어떤 환자 상태에서 사용하는지 먼저 확인",
+      "용량·단위·투여 경로와 희석/속도를 처방·라벨로 대조 확인",
+      "금기·알레르기·라인 호환성 미확인 시 CHECK 후 재확인",
+    ],
+    device: [
+      "도구의 사용 목적과 현재 필요한 모드를 먼저 확인",
+      "세팅값·연결 상태·알람 기준을 기관 기준과 대조 확인",
+      "오작동·알람 반복 시 STOP/HOLD 기준에 따라 즉시 대응",
+    ],
+    scenario: [
+      "현재 상황의 위험 신호와 우선 조치를 먼저 확인",
+      "핵심 수치·라인·증상 변화를 짧은 간격으로 재평가",
+      "기준 이탈 또는 해결 실패 시 즉시 보고",
+    ],
+  };
 
   const modePriority: Record<ClinicalMode, string[]> = {
     ward: ["투여 여부 판단", "핵심 수치 확인", "보고/기록"],
@@ -950,15 +1157,20 @@ function buildFallbackAnalysisResult(params: AnalyzeParams, note: string): MedSa
     riskLevel: coerceRiskLevel(null, fallbackStatus),
     item: {
       name,
-      type: "unknown",
+      type: fallbackKind === "medication" ? "medication" : fallbackKind === "device" ? "device" : "unknown",
       aliases: [],
       highRiskBadges: [],
-      primaryUse: "출력 안정화용 기본 안전 안내",
+      primaryUse:
+        fallbackKind === "medication"
+          ? "약물의 역할·투여 확인·주의사항을 빠르게 정리"
+          : fallbackKind === "device"
+            ? "의료도구의 기능·세팅·알람 대응을 빠르게 정리"
+            : "출력 안정화용 기본 안전 안내",
       confidence: 35,
     },
     quick: {
       status: fallbackStatus,
-      topActions: situationActions[params.situation],
+      topActions: params.situation === "general" ? generalActionsByKind[fallbackKind] : situationActions[params.situation],
       topNumbers: ["혈압·맥박·SpO2·체온 최신값", "최근 검사값/알레르기/라인 상태", "기관 지침 기준 범위 이탈 여부"],
       topRisks: ["정보 불충분 상태에서 즉시 투여/조작", "단위·농도·시간 오인", "라인/호환성 미확인"],
     },
@@ -1080,6 +1292,60 @@ function buildSituationPromptLines(situation: ClinicalSituation, locale: "ko" | 
   ];
 }
 
+function buildKindPromptLines(kind: "medication" | "device" | "scenario", locale: "ko" | "en") {
+  if (locale === "ko") {
+    if (kind === "medication") {
+      return [
+        "[입력 분류: 약물]",
+        "- item.primaryUse에는 '무엇인지/핵심 역할'을 한 문장으로 먼저 작성",
+        "- do.steps는 실제 사용/투여 순서를 간결하게 제시",
+        "- quick.topRisks + safety.holdRules에는 부작용/금기/중단 기준을 명확히 작성",
+        "- JSON 키 문자열(resultKind:, status:)을 값 배열에 절대 노출하지 말 것",
+      ];
+    }
+    if (kind === "device") {
+      return [
+        "[입력 분류: 의료도구]",
+        "- item.primaryUse에는 도구의 기능/역할을 한 문장으로 작성",
+        "- do.steps에는 세팅/사용 순서, do.compatibilityChecks에는 연결/호환 점검을 작성",
+        "- quick.topRisks와 safety.holdRules에는 알람/오작동/중단 기준을 분리해 작성",
+        "- JSON 키 문자열(resultKind:, status:)을 값 배열에 절대 노출하지 말 것",
+      ];
+    }
+    return [
+      "[입력 분류: 상황]",
+      "- 즉시 행동 → 확인 → 분기/보고 순서로 작성",
+      "- 추정 원인을 나열할 때도 먼저 환자 안전 행동을 우선 제시",
+      "- JSON 키 문자열(resultKind:, status:)을 값 배열에 절대 노출하지 말 것",
+    ];
+  }
+
+  if (kind === "medication") {
+    return [
+      "[Input class: Medication]",
+      "- item.primaryUse must explain what it is and its core role in one sentence.",
+      "- do.steps should show practical administration sequence.",
+      "- quick.topRisks + safety.holdRules must highlight adverse risks, contraindications, and hold criteria.",
+      "- Never leak JSON key strings inside array values.",
+    ];
+  }
+  if (kind === "device") {
+    return [
+      "[Input class: Device]",
+      "- item.primaryUse should summarize purpose and function in one sentence.",
+      "- do.steps should cover setup/use; compatibilityChecks should cover connection/compatibility checks.",
+      "- quick.topRisks and holdRules should clearly separate alarm/failure stop criteria.",
+      "- Never leak JSON key strings inside array values.",
+    ];
+  }
+  return [
+    "[Input class: Scenario]",
+    "- Use sequence: immediate action -> checks -> branch/escalation.",
+    "- Prioritize patient-safety actions before root-cause details.",
+    "- Never leak JSON key strings inside array values.",
+  ];
+}
+
 function buildDeveloperPrompt(locale: "ko" | "en") {
   if (locale === "ko") {
     return [
@@ -1093,7 +1359,7 @@ function buildDeveloperPrompt(locale: "ko" | "en") {
       "약물/도구 혼동, 단위/농도 오인, 라인 호환성 위험은 우선 경고에 반영한다.",
       "근거 없는 임의 수치(예: 비현실적 NRS/용량/속도) 생성 금지. 입력 근거가 없으면 '병원 프로토콜 기준 확인'으로 표현한다.",
       "각 배열 항목은 순수 문장으로만 작성하고 JSON 키/중괄호/따옴표를 절대 포함하지 않는다.",
-      "resultKind는 medication/device/scenario 중 하나로 채운다(모호하면 scenario).",
+      "resultKind는 먼저 입력을 분류해 medication/device/scenario 중 하나로 채운다. 일반 검색의 약물/도구 질의는 scenario로 돌리지 않는다.",
       "oneLineConclusion은 Go/Hold/Stop 성격을 한 줄로 작성하고, riskLevel(low/medium/high)을 함께 판단한다.",
       "sbar는 situation/background/assessment/recommendation 각각 1문장으로 작성한다.",
       "institutionalChecks는 기관 확인이 필요한 항목만 2~4개로 요약한다.",
@@ -1113,7 +1379,7 @@ function buildDeveloperPrompt(locale: "ko" | "en") {
     "If the input is ambiguous, avoid overclaiming and keep status as CHECK with explicit verification actions.",
     "Do not invent unsupported numeric thresholds. If no reliable number is present, state protocol-based verification.",
     "Array items must be plain sentences only. Never include JSON keys/braces/quotes inside field values.",
-    "Set resultKind to medication/device/scenario (scenario when uncertain).",
+    "Set resultKind via input classification first. Do not map clear medication/device general queries into scenario.",
     "Write oneLineConclusion as a single Go/Hold/Stop style sentence and set riskLevel(low/medium/high).",
     "Fill sbar with one concise sentence for each field and summarize institutionalChecks in 2-4 bullets.",
     "confidence must be an integer between 0-100 (e.g., 85). If uncertain, lower confidence and explain in confidenceNote.",
@@ -1131,6 +1397,7 @@ function buildUserPrompt(params: {
   patientSummary?: string;
   locale: "ko" | "en";
   imageName?: string;
+  expected: ExpectedInputClassification;
 }) {
   const context = {
     mode: modeLabel(params.mode, params.locale),
@@ -1138,6 +1405,10 @@ function buildUserPrompt(params: {
     query: params.query || "(없음)",
     patient_summary: params.patientSummary || "(없음)",
     image_name: params.imageName || "(없음)",
+    expected_result_kind: params.expected.expectedResultKind,
+    expected_item_type: params.expected.expectedItemType,
+    classification_confidence: params.expected.confidence,
+    classification_reason: params.expected.reason,
   };
 
   if (params.locale === "ko") {
@@ -1150,7 +1421,9 @@ function buildUserPrompt(params: {
       "modePriority는 모드별 상단 고정 탭 순서를 3~6개로 제시한다.",
       "topNumbers는 실제 입력 근거가 있는 수치/조건만 작성한다. 근거가 없으면 '기관 프로토콜 기준 확인' 문구를 사용한다.",
       "모든 배열 항목은 짧은 한 문장으로 작성한다.",
+      "expected_result_kind를 우선 따르고, 명백한 모순이 있을 때만 변경한다.",
       "필수 출력 보강: resultKind, oneLineConclusion, riskLevel, institutionalChecks, sbar(situation/background/assessment/recommendation).",
+      ...buildKindPromptLines(params.expected.expectedResultKind, "ko"),
       ...buildSituationPromptLines(params.situation, "ko"),
       "JSON 외 텍스트 금지.",
       "\n[Context JSON]",
@@ -1167,7 +1440,9 @@ function buildUserPrompt(params: {
     "modePriority should list 3-6 top tabs by mode.",
     "topNumbers must use only reliable numbers from the input context; otherwise use protocol-check wording.",
     "Keep each array item short and practical.",
+    "Prioritize expected_result_kind unless there is a clear contradiction.",
     "Include resultKind, oneLineConclusion, riskLevel, institutionalChecks, and sbar fields.",
+    ...buildKindPromptLines(params.expected.expectedResultKind, "en"),
     ...buildSituationPromptLines(params.situation, "en"),
     "No text outside JSON.",
     "\n[Context JSON]",
@@ -1393,6 +1668,12 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
   const primaryModel = modelCandidates[0] ?? "gpt-4.1-mini";
   const apiBaseUrl = resolveApiBaseUrl();
   const maxOutputTokens = resolveMaxOutputTokens();
+  const expected = inferExpectedInputClassification({
+    query: params.query,
+    patientSummary: params.patientSummary,
+    imageName: params.imageName,
+    situation: params.situation,
+  });
   const developerPrompt = buildDeveloperPrompt(params.locale);
   const userPrompt = buildUserPrompt({
     query: params.query,
@@ -1401,6 +1682,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
     patientSummary: params.patientSummary,
     locale: params.locale,
     imageName: params.imageName,
+    expected,
   });
 
   let parsed: MedSafetyAnalysisResult | null = null;
@@ -1424,6 +1706,13 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
     if (attempt.text) rawText = attempt.text;
 
     let candidateParsed = parseAttemptResult(attempt);
+    if (candidateParsed) {
+      candidateParsed = alignAnalysisResultToInputKind(candidateParsed, expected, {
+        query: params.query,
+        situation: params.situation,
+        locale: params.locale,
+      });
+    }
 
     if (!candidateParsed && !attempt.text && shouldRetryOpenAiError(attempt.error)) {
       const retry = await callResponsesApi({
@@ -1440,6 +1729,13 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
       if (retry.error) lastError = retry.error;
       if (retry.text) rawText = retry.text;
       candidateParsed = parseAttemptResult(retry);
+      if (candidateParsed) {
+        candidateParsed = alignAnalysisResultToInputKind(candidateParsed, expected, {
+          query: params.query,
+          situation: params.situation,
+          locale: params.locale,
+        });
+      }
     }
 
     if (candidateParsed) {
@@ -1458,7 +1754,11 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         signal: params.signal,
       });
       if (repaired) {
-        parsed = repaired.parsed;
+        parsed = alignAnalysisResultToInputKind(repaired.parsed, expected, {
+          query: params.query,
+          situation: params.situation,
+          locale: params.locale,
+        });
         rawText = repaired.rawText;
         selectedModel = repaired.model;
         break;
@@ -1470,7 +1770,11 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
     const normalizedFromNarrative = parseAnalysisResultFromNarrativeText(rawText, params);
     if (normalizedFromNarrative) {
       return {
-        result: normalizedFromNarrative,
+        result: alignAnalysisResultToInputKind(normalizedFromNarrative, expected, {
+          query: params.query,
+          situation: params.situation,
+          locale: params.locale,
+        }),
         model: selectedModel,
         rawText,
         fallbackReason: null,
@@ -1481,7 +1785,8 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
   if (!parsed && !rawText) {
     const fallback = buildFallbackAnalysisResult(
       params,
-      fallbackNoteFromOpenAiError(lastError, params.locale)
+      fallbackNoteFromOpenAiError(lastError, params.locale),
+      expected
     );
     return {
       result: fallback,
@@ -1492,7 +1797,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
   }
 
   if (!parsed) {
-    const fallback = buildFallbackAnalysisResult(params, "AI 응답이 불완전해 안전 기본 모드로 복구되었습니다.");
+    const fallback = buildFallbackAnalysisResult(params, "AI 응답이 불완전해 안전 기본 모드로 복구되었습니다.", expected);
     return {
       result: fallback,
       model: selectedModel,
@@ -1502,7 +1807,11 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
   }
 
   return {
-    result: parsed,
+    result: alignAnalysisResultToInputKind(parsed, expected, {
+      query: params.query,
+      situation: params.situation,
+      locale: params.locale,
+    }),
     model: selectedModel,
     rawText,
     fallbackReason: null,
