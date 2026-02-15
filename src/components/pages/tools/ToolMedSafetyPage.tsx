@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 
 const FLAT_CARD_CLASS = "border-[color:var(--wnl-accent-border)] bg-white shadow-none";
@@ -88,9 +89,9 @@ const SITUATION_OPTIONS: Array<{ value: ClinicalSituation; label: string }> = [
 ];
 
 const QUERY_INTENT_OPTIONS: Array<{ value: QueryIntent; label: string; hint: string }> = [
-  { value: "medication", label: "약물", hint: "약물 정의/투여/모니터링 중심" },
-  { value: "device", label: "의료기구", hint: "세팅/정상기준/알람 대응 중심" },
-  { value: "scenario", label: "상황질문", hint: "0-60초 행동/분기/보고 중심" },
+  { value: "medication", label: "약물", hint: "약물명 단답 입력 (예: norepinephrine)" },
+  { value: "device", label: "의료기구", hint: "기구명 단답 입력 (예: IV infusion pump)" },
+  { value: "scenario", label: "상황질문", hint: "질문 중심으로 자유 답변" },
 ];
 
 const SITUATION_INPUT_GUIDE: Record<
@@ -130,6 +131,32 @@ const SITUATION_INPUT_GUIDE: Record<
     cue: "이상/알람 대응: 알람 종류와 환자 증상을 같이 입력하면, 중단/홀드 우선순위와 에스컬레이션 기준을 명확히 제시합니다.",
   },
 };
+
+const NAME_ONLY_INPUT_GUIDE: Record<Exclude<QueryIntent, "scenario">, { placeholder: string; helper: string }> = {
+  medication: {
+    placeholder: "예: norepinephrine",
+    helper: "약물명만 단답으로 입력하세요. 예: norepinephrine, furosemide, vancomycin",
+  },
+  device: {
+    placeholder: "예: IV infusion pump",
+    helper: "의료기구명만 단답으로 입력하세요. 예: syringe pump, Foley catheter, central line",
+  },
+};
+
+function isNameOnlyInput(value: string) {
+  const normalized = String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) return false;
+  if (normalized.length > 80) return false;
+  if (/[?？!]/.test(normalized)) return false;
+  if (/[{}[\]<>]/.test(normalized)) return false;
+  if (/(어떻게|무엇|왜|언제|순서|절차|대응|기준|알려줘|해줘|질문|what|how|when|why|please)/i.test(normalized)) {
+    return false;
+  }
+  const words = normalized.split(" ").filter(Boolean).length;
+  return words <= 6;
+}
 
 function parseErrorMessage(raw: string) {
   if (!raw) return "분석 중 오류가 발생했습니다.";
@@ -360,7 +387,10 @@ export function ToolMedSafetyPage() {
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraStarting, setCameraStarting] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
-  const situationInputGuide = SITUATION_INPUT_GUIDE[situation];
+  const isScenarioIntent = queryIntent === "scenario";
+  const activeSituation: ClinicalSituation = isScenarioIntent ? situation : "general";
+  const situationInputGuide = SITUATION_INPUT_GUIDE[activeSituation];
+  const nameOnlyGuide = queryIntent === "scenario" ? null : NAME_ONLY_INPUT_GUIDE[queryIntent];
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -385,6 +415,12 @@ export function ToolMedSafetyPage() {
       stopCamera();
     };
   }, [previewUrl, stopCamera]);
+
+  useEffect(() => {
+    if (isScenarioIntent) return;
+    setSituation("general");
+    setPatientSummary("");
+  }, [isScenarioIntent]);
 
   useEffect(() => {
     if (!cameraOpen) return;
@@ -501,12 +537,20 @@ export function ToolMedSafetyPage() {
         setError("텍스트를 입력하거나 사진을 업로드해 주세요.");
         return;
       }
+      if (!isScenarioIntent && normalized && !isNameOnlyInput(normalized)) {
+        setError(
+          queryIntent === "medication"
+            ? "약물 모드에서는 약물명만 단답으로 입력해 주세요. 예: norepinephrine"
+            : "의료기구 모드에서는 기구명만 단답으로 입력해 주세요. 예: IV infusion pump"
+        );
+        return;
+      }
       const cacheKey = buildAnalyzeCacheKey({
         query: normalized,
-        patientSummary: patientSummary.trim(),
+        patientSummary: isScenarioIntent ? patientSummary.trim() : "",
         mode,
         queryIntent,
-        situation,
+        situation: activeSituation,
         imageFile,
       });
 
@@ -516,10 +560,10 @@ export function ToolMedSafetyPage() {
       try {
         const form = new FormData();
         if (normalized) form.set("query", normalized);
-        if (patientSummary.trim()) form.set("patientSummary", patientSummary.trim());
+        if (isScenarioIntent && patientSummary.trim()) form.set("patientSummary", patientSummary.trim());
         form.set("mode", mode);
         form.set("queryIntent", queryIntent);
-        form.set("situation", situation);
+        form.set("situation", activeSituation);
         form.set("locale", "ko");
         if (imageFile) form.set("image", imageFile);
 
@@ -559,7 +603,7 @@ export function ToolMedSafetyPage() {
         setIsLoading(false);
       }
     },
-    [imageFile, mode, patientSummary, query, queryIntent, situation]
+    [activeSituation, imageFile, isScenarioIntent, mode, patientSummary, query, queryIntent]
   );
 
   const immediateActions = result ? mergeUniqueLists(result.quick.topActions).slice(0, 7) : [];
@@ -584,7 +628,11 @@ export function ToolMedSafetyPage() {
   const headerPrimaryUse = result ? normalizeDisplayLine(result.item.primaryUse) : "";
   const oneLineSummary = headerConclusion || headerPrimaryUse || "핵심 안전 확인 필요";
   const overviewTitle =
-    queryIntent === "medication" ? "약물 핵심 정보" : queryIntent === "device" ? "의료기구 핵심 정보" : "상황 핵심 정보";
+    queryIntent === "medication"
+      ? "이 약이 무엇이고 언제 쓰나"
+      : queryIntent === "device"
+        ? "기구가 무엇이고 언제 쓰나"
+        : "질문 중심 핵심 요약";
   const overviewItems = result
     ? mergeUniqueLists(
         headerPrimaryUse ? [headerPrimaryUse] : [],
@@ -593,6 +641,7 @@ export function ToolMedSafetyPage() {
         queryIntent === "scenario" ? result.quick.topRisks.slice(0, 2) : []
       ).slice(0, 6)
     : [];
+  const teachItems = result ? mergeUniqueLists(result.patientScript20s ? [result.patientScript20s] : []).slice(0, 2) : [];
   const summaryItems = result
     ? mergeUniqueLists(
         [`한 줄 결론: ${oneLineSummary}`],
@@ -602,17 +651,41 @@ export function ToolMedSafetyPage() {
     : [];
 
   const dynamicCards: DynamicResultCard[] = result
-    ? [
-        { key: "summary", title: "핵심 요약", items: summaryItems, compact: true },
-        { key: "overview", title: overviewTitle, items: overviewItems },
-        { key: "actions", title: "즉시 행동 우선순위", items: immediateActions },
-        { key: "checks", title: "확인해야 할 핵심 관찰/수치", items: checks1to5 },
-        { key: "adjust", title: "실행/조치", items: adjustmentPlan },
-        { key: "risks", title: "위험 신호 및 에스컬레이션 기준", items: branchRules },
-        { key: "prevent", title: "실수 방지 포인트", items: preventionPoints },
-        { key: "recheck", title: "재평가 타이밍", items: reassessmentPoints },
-        { key: "sbar", title: "보고(SBAR)", items: sbarLines },
-      ].filter((card) => card.items.length > 0)
+    ? queryIntent === "medication"
+      ? [
+          { key: "summary", title: "한 줄 결론", items: summaryItems, compact: true },
+          { key: "overview", title: overviewTitle, items: overviewItems },
+          { key: "how", title: "어떻게 투여하나", items: adjustmentPlan },
+          { key: "precheck", title: "반드시 확인할 금기/주의", items: checks1to5 },
+          { key: "monitor", title: "반드시 모니터할 것", items: reassessmentPoints },
+          { key: "risk", title: "위험 신호·즉시 대응", items: branchRules },
+          { key: "line", title: "라인·호환·상호작용", items: preventionPoints },
+          { key: "teach", title: "환자 설명 포인트", items: teachItems },
+          { key: "sbar", title: "보고(SBAR)", items: sbarLines },
+        ].filter((card) => card.items.length > 0)
+      : queryIntent === "device"
+        ? [
+            { key: "summary", title: "한 줄 결론", items: summaryItems, compact: true },
+            { key: "overview", title: overviewTitle, items: overviewItems },
+            { key: "setup", title: "준비물·셋업·사용 절차", items: adjustmentPlan },
+            { key: "normal", title: "정상 작동 기준", items: checks1to5 },
+            { key: "alarm", title: "알람/트러블슈팅", items: branchRules },
+            { key: "watch", title: "합병증·중단 기준", items: preventionPoints },
+            { key: "maintenance", title: "유지관리·기관 확인", items: reassessmentPoints },
+            { key: "teach", title: "환자 설명 포인트", items: teachItems },
+            { key: "sbar", title: "보고(SBAR)", items: sbarLines },
+          ].filter((card) => card.items.length > 0)
+        : [
+            { key: "summary", title: "질문 중심 핵심", items: summaryItems, compact: true },
+            { key: "overview", title: overviewTitle, items: overviewItems },
+            { key: "actions", title: "지금 해야 할 행동", items: immediateActions },
+            { key: "checks", title: "확인해야 할 핵심 관찰/수치", items: checks1to5 },
+            { key: "adjust", title: "처치/조정", items: adjustmentPlan },
+            { key: "risks", title: "위험 신호·에스컬레이션", items: branchRules },
+            { key: "prevent", title: "실수 방지 포인트", items: preventionPoints },
+            { key: "recheck", title: "재평가 타이밍", items: reassessmentPoints },
+            { key: "sbar", title: "보고(SBAR)", items: sbarLines },
+          ].filter((card) => card.items.length > 0)
     : [];
 
   return (
@@ -667,7 +740,14 @@ export function ToolMedSafetyPage() {
                           ? "border border-[color:var(--wnl-accent)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]"
                           : "text-ios-sub"
                       }`}
-                      onClick={() => setQueryIntent(option.value)}
+                      onClick={() => {
+                        setQueryIntent(option.value);
+                        setError(null);
+                        if (option.value !== "scenario") {
+                          setSituation("general");
+                          setPatientSummary("");
+                        }
+                      }}
                     >
                       {option.label}
                     </button>
@@ -679,45 +759,62 @@ export function ToolMedSafetyPage() {
               </div>
             </div>
 
-            <div className="space-y-2">
-              <div className="text-[13px] font-semibold text-ios-text">현재 상황</div>
-              <div className="flex flex-wrap gap-2">
-                {SITUATION_OPTIONS.map((option) => {
-                  const active = situation === option.value;
-                  return (
-                    <button
-                      key={option.value}
-                      type="button"
-                      className={`h-9 rounded-xl border px-3 text-[12px] font-semibold ${
-                        active
-                          ? "border-[color:var(--wnl-accent)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]"
-                          : "border-ios-sep bg-white text-ios-sub"
-                      }`}
-                      onClick={() => setSituation(option.value)}
-                    >
-                      {option.label}
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="rounded-xl border border-ios-sep bg-ios-bg px-3 py-2 text-[12px] leading-5 text-ios-sub">
-                {situationInputGuide.cue}
-              </div>
-            </div>
+            {isScenarioIntent ? (
+              <>
+                <div className="space-y-2">
+                  <div className="text-[13px] font-semibold text-ios-text">현재 상황</div>
+                  <div className="flex flex-wrap gap-2">
+                    {SITUATION_OPTIONS.map((option) => {
+                      const active = situation === option.value;
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          className={`h-9 rounded-xl border px-3 text-[12px] font-semibold ${
+                            active
+                              ? "border-[color:var(--wnl-accent)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]"
+                              : "border-ios-sep bg-white text-ios-sub"
+                          }`}
+                          onClick={() => setSituation(option.value)}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="rounded-xl border border-ios-sep bg-ios-bg px-3 py-2 text-[12px] leading-5 text-ios-sub">
+                    {situationInputGuide.cue}
+                  </div>
+                </div>
 
-            <Textarea
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              className="min-h-[120px] bg-white text-[16px] leading-7 text-ios-text"
-              placeholder={situationInputGuide.queryPlaceholder}
-            />
+                <Textarea
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  className="min-h-[120px] bg-white text-[16px] leading-7 text-ios-text"
+                  placeholder={situationInputGuide.queryPlaceholder}
+                />
 
-            <Textarea
-              value={patientSummary}
-              onChange={(event) => setPatientSummary(event.target.value)}
-              className="min-h-[84px] bg-white text-[15px] leading-6 text-ios-text"
-              placeholder={situationInputGuide.summaryPlaceholder}
-            />
+                <Textarea
+                  value={patientSummary}
+                  onChange={(event) => setPatientSummary(event.target.value)}
+                  className="min-h-[84px] bg-white text-[15px] leading-6 text-ios-text"
+                  placeholder={situationInputGuide.summaryPlaceholder}
+                />
+              </>
+            ) : (
+              <div className="space-y-2">
+                <Input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  className="h-12 text-[16px]"
+                  placeholder={nameOnlyGuide?.placeholder}
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                />
+                <div className="text-[12px] leading-5 text-ios-sub">{nameOnlyGuide?.helper}</div>
+              </div>
+            )}
 
             <div className="flex flex-wrap items-center gap-2">
               <input
@@ -799,7 +896,7 @@ export function ToolMedSafetyPage() {
                   <div className="mt-1 text-[17px] leading-7 text-ios-sub">{headerPrimaryUse}</div>
                 ) : null}
                 <div className="mt-2 text-[15px] text-ios-sub">
-                  모드: {modeLabel(mode)} · 유형: {queryIntentLabel(queryIntent)} · 상황: {situationLabel(situation)} · 분석:{" "}
+                  모드: {modeLabel(mode)} · 유형: {queryIntentLabel(queryIntent)} · 상황: {situationLabel(activeSituation)} · 분석:{" "}
                   {formatDateTime(result.analyzedAt)}
                 </div>
               </div>
