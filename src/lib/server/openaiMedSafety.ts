@@ -950,8 +950,7 @@ function parseAnalysisResult(raw: unknown): MedSafetyAnalysisResult | null {
   const patientScript20s = sanitizeModelLine(String(data.patientScript20s ?? "").trim(), 220);
   const confidenceNote = sanitizeModelLine(String(data.confidenceNote ?? "").trim(), 180);
   const oneLineConclusionInput = sanitizeModelLine(String(data.oneLineConclusion ?? "").trim(), 180);
-
-  if (!itemName) return null;
+  const safeItemName = itemName || "입력 항목";
 
   const confidence = Math.round(clamp(Number(itemRaw.confidence ?? 0), 0, 100));
   const itemType = coerceItemType(itemRaw.type);
@@ -973,7 +972,7 @@ function parseAnalysisResult(raw: unknown): MedSafetyAnalysisResult | null {
     oneLineConclusion: oneLineConclusionInput || defaultOneLineConclusion(quickStatus, "ko"),
     riskLevel,
     item: {
-      name: itemName,
+      name: safeItemName,
       type: itemType,
       aliases: toTextArray(itemRaw.aliases, 6),
       highRiskBadges: toTextArray(itemRaw.highRiskBadges, 4),
@@ -1059,6 +1058,7 @@ function alignAnalysisResultToInputKind(
   };
 
   const shouldForceKind = expected.confidence === "high" && result.resultKind !== expected.expectedResultKind;
+  const queryName = sanitizeModelLine(String(params.query ?? "").replace(/\s+/g, " ").trim(), 40);
 
   if (shouldForceKind) {
     result.resultKind = expected.expectedResultKind;
@@ -1072,6 +1072,18 @@ function alignAnalysisResultToInputKind(
 
   if (result.resultKind !== "scenario" && result.item.type === "unknown") {
     result.item.type = result.resultKind;
+  }
+
+  if (queryName) {
+    if (/^(입력 항목|input item|unknown|미상)$/i.test(result.item.name) || result.item.name.length < 2) {
+      result.item.name = queryName;
+    }
+    if (/입력 항목|input item/gi.test(result.item.primaryUse)) {
+      result.item.primaryUse = result.item.primaryUse.replace(/입력 항목|input item/gi, queryName);
+    }
+    if (/입력 항목|input item/gi.test(result.oneLineConclusion)) {
+      result.oneLineConclusion = result.oneLineConclusion.replace(/입력 항목|input item/gi, queryName);
+    }
   }
 
   if (params.situation === "general" && result.resultKind !== "scenario") {
@@ -1240,23 +1252,18 @@ function situationLabel(situation: ClinicalSituation, locale: "ko" | "en") {
 function buildDeveloperPrompt(locale: "ko" | "en") {
   if (locale === "ko") {
     return [
-      "너는 임상 간호사 개인용 임상 의사결정 보조 AI다.",
-      "사용자는 바쁜 현장에서 즉시 실행 가능한 답을 원한다.",
-      "답은 처방/진단을 대체하지 않으며, 기관 프로토콜·의사 지시·제조사 IFU가 최종 기준이다.",
-      "근거 없는 수치/용량/속도/기준은 생성하지 않는다.",
-      "불확실하면 단정하지 말고 확인 포인트를 제시한다.",
-      "실무적으로 짧고 명확한 문장으로 작성한다.",
-      "필드 값에는 JSON 키/중괄호/따옴표 조각을 넣지 않는다.",
-      "반드시 유효한 JSON만 반환한다.",
+      "너는 간호사를 위한 임상 검색엔진 AI다.",
+      "입력된 약물/의료기구에 대해 현장에서 바로 쓰는 핵심 정보를 우선 제공한다.",
+      "안전과 실무 적용을 최우선으로 하며 불확실한 내용은 확인 필요로 표시한다.",
+      "답변은 과도한 템플릿이나 장황한 서론 없이 핵심 중심으로 작성한다.",
+      "진단/처방을 대체하지 않으며 기관 프로토콜과 IFU를 최종 기준으로 둔다.",
     ].join("\n");
   }
   return [
-    "You are a bedside nursing clinical decision support assistant.",
-    "Provide immediate, safety-first, action-ready guidance aligned with trusted references and local protocols.",
-    "Do not fabricate unsupported numbers or claims.",
-    "Mark verification points when uncertain.",
-    "Keep output concise and practical.",
-    "Return valid JSON only.",
+    "You are a clinical search engine AI for bedside nurses.",
+    "Prioritize practical, safety-first, high-value information for medication and device lookup.",
+    "Keep answers concise, actionable, and free from unnecessary template rigidity.",
+    "Do not replace diagnosis or prescribing decisions. Use protocol/IFU checks for uncertain or variable items.",
   ].join("\n");
 }
 
@@ -1266,14 +1273,6 @@ function departmentFromMode(mode: ClinicalMode) {
   if (mode === "ward") return "WARD";
   return "unknown";
 }
-
-function timepointFromSituation(situation: ClinicalSituation) {
-  if (situation === "pre_admin") return "pre";
-  if (situation === "during_admin") return "during";
-  if (situation === "event_response") return "alarm";
-  return "unknown";
-}
-
 
 function buildUserPrompt(params: {
   query: string;
@@ -1288,6 +1287,7 @@ function buildUserPrompt(params: {
   const context = {
     mode: modeLabel(params.mode, params.locale),
     department: departmentFromMode(params.mode),
+    situation: situationLabel(params.situation, params.locale),
     query: params.query || "(없음)",
     patient_summary: params.patientSummary || "(없음)",
     image_name: params.imageName || "(없음)",
@@ -1299,7 +1299,9 @@ function buildUserPrompt(params: {
   if (params.locale === "ko") {
     if (intent === "medication") {
       return [
-        "너는 간호사를 위한 약물 검색엔진이다. 아래 항목을 우선 포함해 답한다.",
+        "너는 간호사를 위한 약물 검색엔진이다.",
+        "고정 형식/정해진 틀 없이, 질문 약물에 대해 간호사가 바로 써먹을 수 있는 핵심 정보를 우선 제공한다.",
+        "약물 답변에는 아래 내용을 반드시 포함한다:",
         "- 이 약이 무엇인지(분류/역할 1줄)",
         "- 언제 쓰는지(적응증 핵심)",
         "- 어떻게 주는지(경로/IV push 여부/희석·속도는 원칙+기관확인)",
@@ -1308,7 +1310,7 @@ function buildUserPrompt(params: {
         "- 위험 신호/즉시 대응",
         "- 라인/호환/상호작용(치명적인 것 중심)",
         "- 환자 교육 포인트(필요 시)",
-        "반드시 JSON 스키마 필드에 맞춰서만 반환한다.",
+        "근거가 약하거나 기관마다 다른 값은 단정하지 말고 확인 포인트로 안내한다.",
         "질문:",
         params.query || "(없음)",
         "맥락:",
@@ -1318,14 +1320,16 @@ function buildUserPrompt(params: {
 
     if (intent === "device") {
       return [
-        "너는 간호사를 위한 의료기구 검색엔진이다. 아래 항목을 우선 포함해 답한다.",
+        "너는 간호사를 위한 의료기구 검색엔진이다.",
+        "고정 형식/정해진 틀 없이, 질문 기구에 대해 현장에서 바로 적용 가능한 정보를 우선 제공한다.",
+        "의료기구 답변에는 아래 내용을 반드시 포함한다:",
         "- 기구가 무엇인지/언제 쓰는지",
         "- 준비물/셋업/사용 절차(현장 단계 중심)",
         "- 정상 작동 기준(“정상은 어떤 상태인지”)",
         "- 알람/트러블슈팅: 의미→먼저 볼 것→해결→안되면 보고",
         "- 합병증/Stop rules",
         "- 유지관리(기관 확인 필요한 부분은 표시)",
-        "반드시 JSON 스키마 필드에 맞춰서만 반환한다.",
+        "기기·기관마다 달라지는 세팅값/교체주기/알람 임계는 IFU/기관 프로토콜 확인을 명확히 표시한다.",
         "질문:",
         params.query || "(없음)",
         "맥락:",
@@ -1335,7 +1339,7 @@ function buildUserPrompt(params: {
 
     return [
       "너는 간호사를 위한 약물/의료기구 검색엔진이다.",
-      "입력을 약물 또는 의료기구로 해석해 아래 항목만 반영한다.",
+      "입력을 약물 또는 의료기구로 해석하고, 고정 형식 없이 핵심 실무 정보 중심으로 답한다.",
       "[약물]",
       "- 이 약이 무엇인지(분류/역할 1줄)",
       "- 언제 쓰는지(적응증 핵심)",
@@ -1352,7 +1356,6 @@ function buildUserPrompt(params: {
       "- 알람/트러블슈팅: 의미→먼저 볼 것→해결→안되면 보고",
       "- 합병증/Stop rules",
       "- 유지관리(기관 확인 필요한 부분은 표시)",
-      "반드시 JSON 스키마 필드에 맞춰서만 반환한다.",
       "질문:",
       params.query || "(없음)",
       "맥락:",
@@ -1363,8 +1366,8 @@ function buildUserPrompt(params: {
   if (intent === "medication") {
     return [
       "You are a medication search engine for bedside nurses.",
-      "Prioritize these sections only: what it is, indications, administration, top contraindications/cautions, top monitoring, danger signs/immediate response, line compatibility/interactions, patient teaching.",
-      "Return schema JSON only.",
+      "Do not force rigid templates. Provide high-value practical nursing guidance for the queried medication.",
+      "Must include: what it is, indications, administration principles, top contraindications/cautions, top monitoring, danger signs/immediate response, line compatibility/interactions, and patient teaching.",
       "Question:",
       params.query || "(none)",
       "Context:",
@@ -1375,8 +1378,8 @@ function buildUserPrompt(params: {
   if (intent === "device") {
     return [
       "You are a medical device search engine for bedside nurses.",
-      "Prioritize these sections only: what/when to use, setup workflow, normal operation criteria, alarm troubleshooting, complications/stop rules, maintenance with protocol checks.",
-      "Return schema JSON only.",
+      "Do not force rigid templates. Provide high-value practical nursing guidance for the queried device.",
+      "Must include: what/when to use, setup workflow, normal operation criteria, alarm troubleshooting, complications/stop rules, and maintenance with protocol checks.",
       "Question:",
       params.query || "(none)",
       "Context:",
@@ -1386,8 +1389,7 @@ function buildUserPrompt(params: {
 
   return [
     "You are a medication/device search engine for bedside nurses.",
-    "Interpret input as medication or device and use only those section priorities.",
-    "Return schema JSON only.",
+    "Interpret input as medication or device and provide practical bedside guidance without rigid format constraints.",
     "Question:",
     params.query || "(none)",
     "Context:",
