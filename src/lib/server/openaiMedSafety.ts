@@ -1241,67 +1241,53 @@ function buildSituationPromptLines(situation: ClinicalSituation, locale: "ko" | 
   if (locale === "ko") {
     if (situation === "general") {
       return [
-        "[상황별 출력 규칙: 일반 검색]",
-        "- 특정 단계가 불명확하면 약물/도구 식별 + 가장 보편적인 안전 확인 순서를 제시",
-        "- quick.topActions는 지금 바로 확인 가능한 항목(용도, 금기, 라인/장비 상태) 중심으로 작성",
-        "- 불확실 정보는 단정하지 말고 CHECK와 재확인 포인트를 제시",
+        "[상황 맥락: 일반 검색]",
+        "- 기본 조회 질문으로 보고, 정의/역할/사용법/주의점/현장 체크를 균형 있게 작성",
+        "- 즉시 실행보다 정확한 이해가 우선이므로 핵심 위험과 확인 포인트를 명확히 제시",
       ];
     }
     if (situation === "pre_admin") {
       return [
-        "[상황별 출력 규칙: 투여 전 확인]",
-        "- 환자식별(2개 식별자), 알레르기, 금기/중복 가능성, 처방-라벨 일치 여부를 quick.topActions에 우선 배치",
-        "- 고위험 약물/고위험 기구 가능성이 있으면 independent double-check 필요 여부를 포함",
-        "- 주사/주입 처치면 무균 원칙, 약물 라벨 명확성, 스마트펌프 guardrail(가능 시) 확인 항목을 반영",
-        "- topNumbers는 입력에 있는 수치/단위 중심으로 작성하고, 근거 없는 임의 수치 생성 금지",
+        "[상황 맥락: 투여 전 확인]",
+        "- 투여/사용 전 필수 확인(환자식별, 금기, 처방-라벨 일치, 라인/장비 적합성)을 우선 제시",
+        "- 진행 가능 여부 판단에 필요한 보수적 체크포인트를 강조",
       ];
     }
     if (situation === "during_admin") {
       return [
-        "[상황별 출력 규칙: 투여 중 모니터]",
-        "- 현재 주입속도/장비설정/라인 상태/주입부 소견 확인 순서를 quick.topActions로 제시",
-        "- monitor에는 재평가해야 할 항목(V/S, 의식, 호흡, 주입부)과 관찰 간격 제안을 포함",
-        "- 이상 징후 발생 시 중지/감속/지속 여부 판단 조건을 holdRules와 escalateWhen에 명확히 작성",
+        "[상황 맥락: 투여 중 모니터]",
+        "- 변화 감지와 악화 예방이 목적이므로 재평가 항목, 빈도, 중단/보고 기준을 명확히 제시",
+        "- 진행 중 발생 가능한 문제를 우선순위로 정리",
       ];
     }
     return [
-      "[상황별 출력 규칙: 이상/알람 대응]",
-      "- 환자 안전 우선: 즉시 STOP/HOLD 필요성, ABC/V/S 재평가를 첫 행동으로 제시",
-      "- 라인 폐색/침윤/누출/기기 설정 오류를 단계적으로 분류해 do.steps에 작성",
-      "- 상태 악화, 해결 실패, 고위험 약물 관련이면 즉시 보고 기준을 구체적으로 제시",
+      "[상황 맥락: 이상/알람 대응]",
+      "- 환자 안전을 최우선으로 즉시 행동, 빠른 확인, 분기, 보고 기준을 명확히 제시",
+      "- 해결 실패/악화 시 즉시 에스컬레이션 기준을 구체적으로 작성",
     ];
   }
 
   if (situation === "general") {
     return [
-      "[Situation Output Rules: General search]",
-      "- If stage is unclear, provide broad but practical safety-first checks.",
-      "- Keep quick.topActions focused on immediate checks (purpose, contraindications, line/device status).",
-      "- Avoid overclaiming; keep uncertain parts in CHECK with clear verification points.",
+      "[Situation context: General]",
+      "- Provide balanced explanation for definition, role, usage, cautions, and practical checks.",
     ];
   }
   if (situation === "pre_admin") {
     return [
-      "[Situation Output Rules: Pre-administration]",
-      "- Prioritize two-patient-identifiers, allergy/contraindication checks, and order-label-route-rate matching.",
-      "- If potentially high-alert medication/device, include need for an independent double-check.",
-      "- For injections/infusions, include aseptic checks, label clarity checks, and smart-pump guardrail checks when applicable.",
-      "- topNumbers must use only numbers present in user context; do not invent thresholds.",
+      "[Situation context: Pre-administration]",
+      "- Prioritize go/no-go safety checks before administration or setup.",
     ];
   }
   if (situation === "during_admin") {
     return [
-      "[Situation Output Rules: During administration]",
-      "- Prioritize infusion/device settings, line patency/site findings, and current symptom trend.",
-      "- In monitor, include explicit reassessment targets (vitals, mental status, breathing, site findings).",
-      "- In holdRules/escalateWhen, define when to stop, hold, or urgently escalate.",
+      "[Situation context: During administration]",
+      "- Emphasize monitoring priorities, early warning signals, and escalation triggers.",
     ];
   }
   return [
-    "[Situation Output Rules: Alarm/adverse response]",
-    "- Patient safety first: immediate stop/hold decision and ABC/vitals reassessment first.",
-    "- Separate likely causes stepwise (occlusion, infiltration/extravasation, leakage, device setup error).",
-    "- Provide explicit urgent escalation triggers for unresolved alarms or deterioration.",
+    "[Situation context: Alarm/adverse response]",
+    "- Prioritize immediate stabilization actions and clear escalation criteria.",
   ];
 }
 
@@ -1309,126 +1295,70 @@ function buildKindPromptLines(kind: "medication" | "device" | "scenario", locale
   if (locale === "ko") {
     if (kind === "medication") {
       return [
-        "[출력 템플릿: 약물 검색 결과(Drug)]",
-        "- 한 화면 요약(Quick): item.primaryUse=한 줄 정의(분류/기전+적응증), oneLineConclusion=즉시 결론(Go/Hold/Stop), quick.topActions=현장 포인트 Top3",
-        "- 기본 정보(What): item.aliases에 '분류:', '작용/역할:', '효과 시간대:' 접두어로 2~4개 작성",
-        "- 사용법(How to give): do.steps에 경로/투여방식/희석·농도·속도·시간/필터·차광·flush/라인 선택을 순서형으로 작성",
-        "- Pre-check: do.calculatorsNeeded에 금기·주의 Top3, 필수 데이터(vital/lab/알레르기) 작성",
-        "- 모니터링(While): safety.monitor에 핵심 모니터 3개 + 재평가 타이머(5/15/30/60분) 작성",
-        "- 이상반응/주의: quick.topRisks=흔한 부작용+위험 신호, safety.holdRules=중단 기준, safety.escalateWhen=즉시 대응/보고 기준",
-        "- 상호작용/호환성: do.compatibilityChecks에 Y-site/혼합 금지/치명 조합/전용라인 필요를 작성",
-        "- 환자 설명(Teach): patientScript20s=20초 설명, sbar.recommendation 끝에 teach-back 질문 1개를 포함",
-        "- 모든 문장은 짧은 한국어 문장으로 작성, JSON 키 문자열(resultKind:, status:) 노출 금지",
+        "[선택 카테고리: 약물]",
+        "- 간호사가 가장 먼저 알아야 할 내용 위주로 작성: 이 약이 무엇인지, 왜 쓰는지, 어떻게 투여하는지, 무엇을 주의해야 하는지",
+        "- 금기/상호작용/고위험 조건/중단·보고 기준을 실무적으로 구체화",
+        "- 신뢰된 근거(가이드라인, 약물정보서, 기관 프로토콜)에 맞는 보수적 표현으로 작성",
       ];
     }
     if (kind === "device") {
       return [
-        "[출력 템플릿: 의료기구 검색 결과(Device)]",
-        "- 한 화면 요약(Quick): item.primaryUse=한 줄 정의(용도/원리), oneLineConclusion=언제 쓰는지+즉시 결론, quick.topActions=Setup→Start→Check 3단계",
-        "- 기구 정체(What): item.aliases에 정식명칭/별칭, 구성품, 규격(Fr/G/connector), 역할을 접두어 포함 작성",
-        "- 사용법(How to use): do.steps에 준비물 체크→셋업(6~12단계)→시작→정상 작동 확인 순서 작성",
-        "- 정상 기준/사용 중 체크: safety.monitor에 정상 표시/파형/압력/누출·피부·고정·통증 점검 작성",
-        "- 주의/금기: quick.topRisks에 금기·주의·합병증 Top5 요약, safety.holdRules에 즉시 중단 기준 작성",
-        "- 알람/트러블슈팅: do.compatibilityChecks에 알람 의미/원인 Top3/먼저 볼 것 Top3/해결 Top3/안되면 보고 기준 작성",
-        "- 유지관리: institutionalChecks에 교체·점검주기, 감염예방, 기록 항목(시간·세팅·반응·조치) 작성",
-        "- 환자 설명(Teach): patientScript20s에 협조 문구, safety.escalateWhen에 '즉시 말해야 할 증상 3개' 작성",
-        "- 모든 문장은 짧은 한국어 문장으로 작성, JSON 키 문자열(resultKind:, status:) 노출 금지",
+        "[선택 카테고리: 의료기구]",
+        "- 간호사가 가장 먼저 알아야 할 내용 위주로 작성: 기구 정의/용도, 세팅·사용 핵심, 정상 기준, 알람·트러블 대응",
+        "- 환자안전과 직결되는 중단 기준, 합병증 신호, 보고 기준을 구체화",
+        "- 신뢰된 근거(장비 IFU, 가이드라인, 기관 프로토콜)에 맞는 보수적 표현으로 작성",
       ];
     }
     return [
-      "[출력 템플릿: 상황 검색 결과(Scenario)]",
-      "- 한 화면 요약(Quick): oneLineConclusion=Go/Hold/Stop+위험도, quick.topActions=즉시 행동 3개(0-60초)",
-      "- ①즉시 행동(0-60초): quick.topActions에 ABC/투여중단 여부/산소·체위·모니터 강화 중심 3개",
-      "- ②확인(1-5분): quick.topNumbers에 활력·의식·통증·SpO2·주사부위·라인·알람·빠른 데이터 작성",
-      "- ③원인 후보 Top3: quick.topRisks에 가능성 3개를 짧게 작성",
-      "- ④처치/조정: do.steps에 간호 처치 및 재평가 타임라인(5/15/30분) 작성",
-      "- ⑤악화 분기(If-Then): safety.holdRules + safety.escalateWhen을 If A -> Then B 형식으로 작성",
-      "- ⑥SBAR: sbar 4필드에 자동 보고 문안을 완성형 문장으로 작성",
-      "- 추가 정보(Related): institutionalChecks에 함께 확인할 약/기구 연결 포인트 작성",
-      "- 모든 문장은 짧은 한국어 문장으로 작성, JSON 키 문자열(resultKind:, status:) 노출 금지",
+      "[선택 카테고리: 상황질문]",
+      "- 지식 설명보다 현장 우선순위(즉시행동, 확인, 분기, 보고)를 먼저 제시",
+      "- 가장 위험한 신호와 즉시 호출 기준을 명확히 작성",
+      "- 신뢰된 근거(응급/중환자 가이드라인, 기관 프로토콜)에 맞는 보수적 표현으로 작성",
     ];
   }
 
   if (kind === "medication") {
     return [
-      "[Output template: Drug search]",
-      "- Quick: item.primaryUse=one-line identity/use, oneLineConclusion=Go/Hold/Stop, quick.topActions=top 3 bedside points.",
-      "- What: item.aliases should include class, role/mechanism, expected onset window with clear labels.",
-      "- How to give: do.steps should cover route, administration mode, dilution/rate/time, filter/light/flush, line choice.",
-      "- Pre-check: do.calculatorsNeeded should include contraindications and required bedside/lab checks.",
-      "- While: safety.monitor should include top monitoring targets and 5/15/30/60 reassessment timers.",
-      "- Watch-outs: quick.topRisks + holdRules + escalateWhen should cover common effects, danger signs, stop/report criteria.",
-      "- Interactions/line: do.compatibilityChecks should include Y-site/mixture restrictions and critical combinations.",
-      "- Teach: patientScript20s + a teach-back question in sbar.recommendation.",
-      "- Never leak JSON key strings inside array values.",
+      "[Selected category: Medication]",
+      "- Focus on nurse-critical content: what it is, why used, how to administer, key cautions and escalation triggers.",
+      "- Use conservative wording aligned with trusted sources and protocols.",
     ];
   }
   if (kind === "device") {
     return [
-      "[Output template: Device search]",
-      "- Quick: item.primaryUse=one-line purpose/principle, oneLineConclusion=when to use + immediate conclusion, quick.topActions=Setup->Start->Check.",
-      "- What: item.aliases should include name/aliases/components/specs/function with labels.",
-      "- How: do.steps should provide practical setup sequence and normal operation confirmation points.",
-      "- Watch-outs: quick.topRisks + holdRules should include contraindications/complications/stop rules.",
-      "- Troubleshooting: do.compatibilityChecks should include alarm meaning, top causes, first checks, fixes, escalation.",
-      "- Maintenance: institutionalChecks should include replacement interval, infection prevention, documentation items.",
-      "- Teach: patientScript20s + escalateWhen should include what to report immediately.",
-      "- Never leak JSON key strings inside array values.",
+      "[Selected category: Device]",
+      "- Focus on nurse-critical content: purpose, setup/use, normal operation, troubleshooting, and escalation triggers.",
+      "- Use conservative wording aligned with trusted sources and protocols.",
     ];
   }
   return [
-    "[Output template: Scenario search]",
-    "- Quick: oneLineConclusion=Go/Hold/Stop + risk, quick.topActions=0-60s actions.",
-    "- 0-60s: quick.topActions should prioritize ABC and immediate safety actions.",
-    "- 1-5m: quick.topNumbers should include core checks and immediate data points.",
-    "- Causes: quick.topRisks should list top 3 likely causes only.",
-    "- Actions: do.steps should include nursing actions and 5/15/30 reassessment timeline.",
-    "- If-Then: holdRules + escalateWhen should be explicit trigger/action branching.",
-    "- SBAR: fill all sbar fields with concise actionable sentences.",
-    "- Related: institutionalChecks should mention linked meds/devices to verify.",
-    "- Never leak JSON key strings inside array values.",
+    "[Selected category: Scenario]",
+    "- Prioritize immediate actions, focused checks, branching decisions, and SBAR escalation.",
+    "- Use conservative wording aligned with trusted sources and protocols.",
   ];
 }
 
 function buildDeveloperPrompt(locale: "ko" | "en") {
   if (locale === "ko") {
     return [
-      "너는 간호사 개인용 약물/의료도구 안전 실행 보조 AI다.",
-      "반드시 실행 중심으로 답하고, 설명보다 행동을 먼저 제시한다.",
-      "30초 내 행동 결정을 돕는 구조로 작성한다: step-first, hold/stop 조건, 보고 기준, 라인/호환 점검 우선.",
-      "quick.topActions는 2~3개 핵심 행동만 제시한다(경고 과다 금지).",
-      "quick.topRisks도 최대 3개만 제시한다. 과한 경고 나열 금지.",
-      "모드(병동/ER/ICU)와 상황(일반 검색/투여 전 확인/투여 중 모니터/이상·알람 대응)에 따라 우선순위를 다르게 제시한다.",
-      "질의/이미지가 모호하면 무리한 단정 금지: CHECK로 두고 재확인 포인트를 행동으로 제시한다.",
-      "약물/도구 혼동, 단위/농도 오인, 라인 호환성 위험은 우선 경고에 반영한다.",
-      "근거 없는 임의 수치(예: 비현실적 NRS/용량/속도) 생성 금지. 입력 근거가 없으면 '병원 프로토콜 기준 확인'으로 표현한다.",
-      "각 배열 항목은 순수 문장으로만 작성하고 JSON 키/중괄호/따옴표를 절대 포함하지 않는다.",
-      "resultKind는 먼저 입력을 분류해 medication/device/scenario 중 하나로 채운다. 일반 검색의 약물/도구 질의는 scenario로 돌리지 않는다.",
-      "oneLineConclusion은 Go/Hold/Stop 성격을 한 줄로 작성하고, riskLevel(low/medium/high)을 함께 판단한다.",
-      "sbar는 situation/background/assessment/recommendation 각각 1문장으로 작성한다.",
-      "institutionalChecks는 기관 확인이 필요한 항목만 2~4개로 요약한다.",
-      "confidence는 반드시 0~100 사이 정수값으로 설정한다(예: 85). 확신이 낮으면 confidence를 낮추고 confidenceNote에 이유를 작성한다.",
-      "진단/처방 대체 표현 금지. 최종 판단은 병원 지침/처방 우선으로 유지한다.",
-      "각 문장은 짧게, 항목은 간결하게 작성한다(장문 금지).",
+      "너는 간호사 실무 지원 AI다.",
+      "선택된 카테고리(약물/의료기구/상황질문)와 검색 내용에 맞춰 간호사가 지금 가장 필요하고 알아야 하며 주의해야 할 정보를 우선 제시한다.",
+      "정보는 신뢰된 임상 근거(가이드라인, 약물 정보서, 장비 IFU, 기관 프로토콜)에 부합하도록 작성한다.",
+      "불확실한 내용은 단정하지 말고 재확인 필요를 명확히 표기한다.",
+      "근거 없는 수치/용량/속도/기준은 생성하지 않는다.",
+      "실무적으로 바로 쓸 수 있는 짧은 문장으로 작성한다.",
+      "필드 값에 JSON 키/중괄호/따옴표 조각을 넣지 않는다.",
       "출력은 반드시 유효한 JSON 형식으로만 반환한다.",
     ].join(" ");
   }
   return [
-    "You are a bedside medication/device safety action assistant for nurses.",
-    "Prioritize action over explanation and optimize for 30-second decision support.",
-    "Use step-first workflow, hold/stop criteria, escalation triggers, and line/compatibility checks.",
-    "Keep quick.topActions to 2-3 high-impact actions only.",
-    "Keep quick.topRisks to at most 3 concise items.",
-    "Adapt priorities by mode (Ward/ER/ICU) and situation.",
-    "If the input is ambiguous, avoid overclaiming and keep status as CHECK with explicit verification actions.",
-    "Do not invent unsupported numeric thresholds. If no reliable number is present, state protocol-based verification.",
-    "Array items must be plain sentences only. Never include JSON keys/braces/quotes inside field values.",
-    "Set resultKind via input classification first. Do not map clear medication/device general queries into scenario.",
-    "Write oneLineConclusion as a single Go/Hold/Stop style sentence and set riskLevel(low/medium/high).",
-    "Fill sbar with one concise sentence for each field and summarize institutionalChecks in 2-4 bullets.",
-    "confidence must be an integer between 0-100 (e.g., 85). If uncertain, lower confidence and explain in confidenceNote.",
-    "Do not replace diagnosis/order decisions.",
-    "Keep each line concise; avoid long prose.",
+    "You are a bedside nursing support AI.",
+    "Prioritize the most necessary, must-know, and caution-critical content for the selected category (medication/device/scenario).",
+    "Align statements with trusted clinical references and institutional protocols.",
+    "Do not fabricate unsupported thresholds, doses, rates, or claims.",
+    "When uncertain, explicitly mark verification needed.",
+    "Keep content concise, practical, and actionable.",
+    "Do not leak JSON key fragments into field values.",
     "Return valid JSON only.",
   ].join(" ");
 }
@@ -1460,16 +1390,11 @@ function buildUserPrompt(params: {
 
   if (params.locale === "ko") {
     return [
-      "아래 맥락으로 약물/도구를 식별하고 간호 실행 중심 JSON을 생성해줘.",
-      "quick.status 규칙:",
-      "- STOP: 즉시 중단/홀드 또는 긴급 보고 조건이 충족되거나 강하게 의심됨",
-      "- CHECK: 추가 확인이 필요한 상태",
-      "- OK: 현재 정보 기준 즉시 실행 가능",
-      "modePriority는 모드별 상단 고정 탭 순서를 3~6개로 제시한다.",
-      "topNumbers는 실제 입력 근거가 있는 수치/조건만 작성한다. 근거가 없으면 '기관 프로토콜 기준 확인' 문구를 사용한다.",
-      "모든 배열 항목은 짧은 한 문장으로 작성한다.",
-      "expected_result_kind를 우선 따르고, 명백한 모순이 있을 때만 변경한다.",
-      "필수 출력 보강: resultKind, oneLineConclusion, riskLevel, institutionalChecks, sbar(situation/background/assessment/recommendation).",
+      "아래 맥락과 선택 카테고리를 기준으로 간호사에게 실제로 필요한 정보를 작성해줘.",
+      "형식 설명보다 내용 품질을 우선한다: 핵심 이해, 실제 사용/적용, 주의점, 위험 신호, 보고 기준.",
+      "신뢰된 정보에 근거해 보수적으로 작성하고, 불확실하면 재확인 필요를 명확히 표시한다.",
+      "resultKind는 expected_result_kind를 우선 반영한다.",
+      "스키마의 필수 필드를 모두 채우되, 값은 실질 정보 중심으로 작성한다.",
       ...buildKindPromptLines(params.expected.expectedResultKind, "ko"),
       ...buildSituationPromptLines(params.situation, "ko"),
       "JSON 외 텍스트 금지.",
@@ -1479,16 +1404,11 @@ function buildUserPrompt(params: {
   }
 
   return [
-    "Generate action-first bedside JSON based on this context.",
-    "quick.status rules:",
-    "- STOP: immediate hold/stop or urgent escalation is met/suspected",
-    "- CHECK: additional verification needed",
-    "- OK: executable with current context",
-    "modePriority should list 3-6 top tabs by mode.",
-    "topNumbers must use only reliable numbers from the input context; otherwise use protocol-check wording.",
-    "Keep each array item short and practical.",
-    "Prioritize expected_result_kind unless there is a clear contradiction.",
-    "Include resultKind, oneLineConclusion, riskLevel, institutionalChecks, and sbar fields.",
+    "Generate nurse-focused JSON using the selected category and context.",
+    "Prioritize must-know, safety-critical, and caution-critical bedside information over formatting language.",
+    "Use conservative evidence-aligned wording and mark verification when uncertain.",
+    "Prioritize expected_result_kind unless clearly contradicted.",
+    "Fill all required schema fields with practical content.",
     ...buildKindPromptLines(params.expected.expectedResultKind, "en"),
     ...buildSituationPromptLines(params.situation, "en"),
     "No text outside JSON.",
