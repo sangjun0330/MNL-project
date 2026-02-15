@@ -878,10 +878,16 @@ export function ToolMedSafetyPage() {
           const cached = readMedSafetyCache(cacheKey);
           if (cached) {
             setResult(cached);
+            if (isScenarioIntent) {
+              setScenarioState({ previousResponseId: undefined, conversationId: undefined });
+            }
             setError(`${parseErrorMessage(finalError)} 최근 저장된 결과를 표시합니다.`);
             return;
           }
           setResult(null);
+          if (isScenarioIntent) {
+            setScenarioState({ previousResponseId: undefined, conversationId: undefined });
+          }
           setError(parseErrorMessage(finalError));
           return;
         }
@@ -907,6 +913,9 @@ export function ToolMedSafetyPage() {
           }
         } else {
           setResult(data);
+          if (isScenarioIntent) {
+            setScenarioState({ previousResponseId: undefined, conversationId: undefined });
+          }
           setError(
             `${parseErrorMessage(String(data.fallbackReason ?? "openai_fallback"))} 기본 안전 모드 결과를 표시합니다.`
           );
@@ -916,9 +925,15 @@ export function ToolMedSafetyPage() {
         const cached = readMedSafetyCache(cacheKey);
         if (cached) {
           setResult(cached);
+          if (isScenarioIntent) {
+            setScenarioState({ previousResponseId: undefined, conversationId: undefined });
+          }
           setError(`${RETRY_WITH_DATA_MESSAGE} 최근 저장된 결과를 표시합니다.`);
         } else {
           setResult(null);
+          if (isScenarioIntent) {
+            setScenarioState({ previousResponseId: undefined, conversationId: undefined });
+          }
           setError(RETRY_WITH_DATA_MESSAGE);
         }
       } finally {

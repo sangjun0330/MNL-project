@@ -635,6 +635,7 @@ async function callResponsesApi(args: {
   upstreamTimeoutMs: number;
   verbosity: ResponseVerbosity;
   storeResponses: boolean;
+  compatMode?: boolean;
 }): Promise<ResponsesAttempt> {
   const {
     apiKey,
@@ -650,6 +651,7 @@ async function callResponsesApi(args: {
     upstreamTimeoutMs,
     verbosity,
     storeResponses,
+    compatMode,
   } = args;
 
   const userContent: Array<Record<string, unknown>> = [{ type: "input_text", text: userPrompt }];
@@ -660,27 +662,36 @@ async function callResponsesApi(args: {
     });
   }
 
-  const body: Record<string, unknown> = {
-    model,
-    input: [
-      {
-        role: "developer",
-        content: [{ type: "input_text", text: developerPrompt }],
-      },
-      {
-        role: "user",
-        content: userContent,
-      },
-    ],
-    text: {
-      format: { type: "text" as const },
-      verbosity,
+  const baseInput = [
+    {
+      role: "developer",
+      content: [{ type: "input_text", text: developerPrompt }],
     },
-    reasoning: { effort: "medium" as const },
-    max_output_tokens: maxOutputTokens,
-    tools: [],
-    store: storeResponses,
-  };
+    {
+      role: "user",
+      content: userContent,
+    },
+  ];
+
+  const body: Record<string, unknown> = compatMode
+    ? {
+        // 400/게이트웨이 호환 이슈를 피하기 위한 최소 요청 바디
+        model,
+        input: baseInput,
+        max_output_tokens: maxOutputTokens,
+      }
+    : {
+        model,
+        input: baseInput,
+        text: {
+          format: { type: "text" as const },
+          verbosity,
+        },
+        reasoning: { effort: "medium" as const },
+        max_output_tokens: maxOutputTokens,
+        tools: [],
+        store: storeResponses,
+      };
   // conversation state는 동시에 2개 키를 보내지 않고 하나만 사용한다.
   if (previousResponseId) body.previous_response_id = previousResponseId;
   else if (conversationId) body.conversation = conversationId;
@@ -1108,6 +1119,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
               upstreamTimeoutMs,
               verbosity: responseVerbosity,
               storeResponses,
+              compatMode: true,
             });
             if (!statelessRetry.error && statelessRetry.text) {
               rawText = statelessRetry.text;
