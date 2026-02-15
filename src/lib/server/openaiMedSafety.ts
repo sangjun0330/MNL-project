@@ -42,6 +42,7 @@ export type MedSafetyAnalysisResult = {
   patientScript20s: string;
   modePriority: string[];
   confidenceNote: string;
+  searchAnswer?: string;
 };
 
 type AnalyzeParams = {
@@ -59,50 +60,7 @@ type AnalyzeParams = {
 type ResponsesAttempt = {
   text: string | null;
   error: string | null;
-  json: unknown | null;
 };
-
-type ExpectedInputClassification = {
-  expectedResultKind: "medication" | "device" | "scenario";
-  expectedItemType: MedSafetyItemType;
-  confidence: "high" | "medium" | "low";
-  reason: string;
-  medScore: number;
-  deviceScore: number;
-  scenarioScore: number;
-};
-
-function shouldRetryOpenAiError(error: string | null) {
-  if (!error) return false;
-  const code = String(error).toLowerCase();
-  return (
-    code.includes("openai_empty_text") ||
-    code.includes("_408_") ||
-    code.includes("_409_") ||
-    code.includes("_425_") ||
-    code.includes("_429_") ||
-    code.includes("_500_") ||
-    code.includes("_502_") ||
-    code.includes("_503_") ||
-    code.includes("_504_") ||
-    code.includes("timeout") ||
-    code.includes("aborted") ||
-    code.includes("network")
-  );
-}
-
-function clamp(value: number, min: number, max: number) {
-  if (!Number.isFinite(value)) return min;
-  return Math.max(min, Math.min(max, value));
-}
-
-function truncateError(raw: string, size = 220) {
-  const clean = String(raw ?? "")
-    .replace(/\s+/g, " ")
-    .replace(/[^\x20-\x7E가-힣ㄱ-ㅎㅏ-ㅣ.,:;!?()[\]{}'"`~@#$%^&*_\-+=/\\|<>]/g, "")
-    .trim();
-  return clean.length > size ? clean.slice(0, size) : clean;
-}
 
 function normalizeApiKey() {
   const key =
@@ -158,507 +116,41 @@ function resolveApiBaseUrl() {
 }
 
 function resolveMaxOutputTokens() {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_MAX_OUTPUT_TOKENS ?? process.env.OPENAI_MAX_OUTPUT_TOKENS ?? 1400);
-  if (!Number.isFinite(raw)) return 1400;
+  const raw = Number(process.env.OPENAI_MED_SAFETY_MAX_OUTPUT_TOKENS ?? process.env.OPENAI_MAX_OUTPUT_TOKENS ?? 2200);
+  if (!Number.isFinite(raw)) return 2200;
   const rounded = Math.round(raw);
-  return Math.max(700, Math.min(3000, rounded));
+  return Math.max(1000, Math.min(4000, rounded));
 }
 
-function buildMedSafetyJsonSchema() {
-  return {
-    type: "object",
-    required: ["item", "quick", "do", "safety", "patientScript20s", "modePriority", "confidenceNote"],
-    additionalProperties: false,
-    properties: {
-      resultKind: { type: "string", enum: ["medication", "device", "scenario"] },
-      oneLineConclusion: { type: "string" },
-      riskLevel: { type: "string", enum: ["low", "medium", "high"] },
-      item: {
-        type: "object",
-        required: ["name", "type", "aliases", "highRiskBadges", "primaryUse", "confidence"],
-        additionalProperties: false,
-        properties: {
-          name: { type: "string" },
-          type: { type: "string", enum: ["medication", "device", "unknown"] },
-          aliases: { type: "array", items: { type: "string" } },
-          highRiskBadges: { type: "array", items: { type: "string" } },
-          primaryUse: { type: "string" },
-          confidence: { type: "number" },
-        },
-      },
-      quick: {
-        type: "object",
-        required: ["status", "topActions", "topNumbers", "topRisks"],
-        additionalProperties: false,
-        properties: {
-          status: { type: "string", enum: ["OK", "CHECK", "STOP"] },
-          topActions: { type: "array", items: { type: "string" } },
-          topNumbers: { type: "array", items: { type: "string" } },
-          topRisks: { type: "array", items: { type: "string" } },
-        },
-      },
-      do: {
-        type: "object",
-        required: ["steps", "calculatorsNeeded", "compatibilityChecks"],
-        additionalProperties: false,
-        properties: {
-          steps: { type: "array", items: { type: "string" } },
-          calculatorsNeeded: { type: "array", items: { type: "string" } },
-          compatibilityChecks: { type: "array", items: { type: "string" } },
-        },
-      },
-      safety: {
-        type: "object",
-        required: ["holdRules", "monitor", "escalateWhen"],
-        additionalProperties: false,
-        properties: {
-          holdRules: { type: "array", items: { type: "string" } },
-          monitor: { type: "array", items: { type: "string" } },
-          escalateWhen: { type: "array", items: { type: "string" } },
-        },
-      },
-      institutionalChecks: { type: "array", items: { type: "string" } },
-      sbar: {
-        type: "object",
-        required: ["situation", "background", "assessment", "recommendation"],
-        additionalProperties: false,
-        properties: {
-          situation: { type: "string" },
-          background: { type: "string" },
-          assessment: { type: "string" },
-          recommendation: { type: "string" },
-        },
-      },
-      patientScript20s: { type: "string" },
-      modePriority: { type: "array", items: { type: "string" } },
-      confidenceNote: { type: "string" },
-    },
-  };
-}
-
-function extractResponsesText(json: any): string {
-  // Extract from standard Chat Completions API response
-  const content = json?.choices?.[0]?.message?.content;
-  if (typeof content === "string" && content.trim()) return content.trim();
-
-  // Fallback to legacy format if needed
-  const direct = json?.output_text;
-  if (typeof direct === "string" && direct.trim()) return direct.trim();
-  if (Array.isArray(direct)) {
-    const joined = direct
-      .map((item) => (typeof item === "string" ? item : ""))
-      .join("")
-      .trim();
-    if (joined) return joined;
-  }
-
-  const output = Array.isArray(json?.output) ? json.output : [];
-  const chunks: string[] = [];
-  for (const item of output) {
-    const outputText = typeof item?.output_text === "string" ? item.output_text : "";
-    if (outputText) chunks.push(outputText);
-    const content = Array.isArray(item?.content) ? item.content : [];
-    for (const part of content) {
-      const text = typeof part?.text === "string" ? part.text : "";
-      if (text) chunks.push(text);
-      const altText = typeof part?.output_text === "string" ? part.output_text : "";
-      if (altText) chunks.push(altText);
-      const args = typeof part?.arguments === "string" ? part.arguments : "";
-      if (args) chunks.push(args);
-    }
-  }
-  return chunks.join("").trim();
-}
-
-function parseBalancedJsonObject<T>(input: string): T | null {
-  if (!input) return null;
-  const text = input.trim();
-  for (let start = 0; start < text.length; start++) {
-    if (text[start] !== "{") continue;
-    let depth = 0;
-    let inString = false;
-    let escaped = false;
-    for (let idx = start; idx < text.length; idx++) {
-      const ch = text[idx];
-      if (inString) {
-        if (escaped) {
-          escaped = false;
-          continue;
-        }
-        if (ch === "\\") {
-          escaped = true;
-          continue;
-        }
-        if (ch === '"') {
-          inString = false;
-        }
-        continue;
-      }
-      if (ch === '"') {
-        inString = true;
-        continue;
-      }
-      if (ch === "{") {
-        depth += 1;
-        continue;
-      }
-      if (ch === "}") {
-        depth -= 1;
-        if (depth === 0) {
-          const candidate = text.slice(start, idx + 1);
-          try {
-            return JSON.parse(candidate) as T;
-          } catch {
-            break;
-          }
-        }
-      }
-    }
-  }
-  return null;
-}
-
-function safeJsonParse<T>(input: string): T | null {
-  if (!input) return null;
-  try {
-    return JSON.parse(input) as T;
-  } catch {
-    const fencedBlocks = Array.from(input.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi));
-    for (const block of fencedBlocks) {
-      const body = String(block?.[1] ?? "").trim();
-      if (!body) continue;
-      try {
-        return JSON.parse(body) as T;
-      } catch {
-        const balanced = parseBalancedJsonObject<T>(body);
-        if (balanced) return balanced;
-      }
-    }
-
-    const balanced = parseBalancedJsonObject<T>(input);
-    if (balanced) return balanced;
-
-    const start = input.indexOf("{");
-    const end = input.lastIndexOf("}");
-    if (start >= 0 && end > start) {
-      try {
-        return JSON.parse(input.slice(start, end + 1)) as T;
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  }
-}
-
-function collectStructuredCandidates(json: unknown): unknown[] {
-  const out: unknown[] = [];
-  const push = (value: unknown) => {
-    if (!value) return;
-    if (typeof value === "object") {
-      out.push(value);
-      return;
-    }
-    if (typeof value === "string") {
-      const parsed = safeJsonParse<unknown>(value);
-      if (!parsed) return;
-      if (typeof parsed === "string") {
-        const nested = safeJsonParse<unknown>(parsed);
-        if (nested) {
-          if (typeof nested === "object") out.push(nested);
-          return;
-        }
-      }
-      if (typeof parsed === "object") out.push(parsed);
-    }
-  };
-
-  if (!json || typeof json !== "object") return out;
-  const root = json as Record<string, unknown>;
-
-  // Try standard Chat Completions API format first
-  const choices = Array.isArray(root.choices) ? root.choices : [];
-  for (const choice of choices) {
-    if (!choice || typeof choice !== "object") continue;
-    const node = choice as Record<string, unknown>;
-    const message = (node.message ?? null) as Record<string, unknown> | null;
-    if (!message) continue;
-
-    // Parse content from message
-    const content = message.content;
-    if (typeof content === "string") {
-      const parsed = safeJsonParse<unknown>(content);
-      if (parsed) out.push(parsed);
-    }
-
-    push(message.parsed);
-    push(message.output_parsed);
-    push(message.json);
-    const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
-    for (const tc of toolCalls) {
-      if (!tc || typeof tc !== "object") continue;
-      const fn = (tc as Record<string, unknown>).function as Record<string, unknown> | undefined;
-      if (!fn) continue;
-      push(fn.arguments);
-    }
-  }
-
-  // Legacy format support
-  push(root.output_parsed);
-  push(root.parsed);
-
-  const directText = root.output_text;
-  if (typeof directText === "string") {
-    const parsed = safeJsonParse<unknown>(directText);
-    if (parsed) out.push(parsed);
-  }
-  if (Array.isArray(directText)) {
-    const joined = directText.map((item) => (typeof item === "string" ? item : "")).join("\n");
-    const parsed = safeJsonParse<unknown>(joined);
-    if (parsed) out.push(parsed);
-  }
-
-  const output = Array.isArray(root.output) ? root.output : [];
-  for (const item of output) {
-    if (!item || typeof item !== "object") continue;
-    const node = item as Record<string, unknown>;
-    push(node.parsed);
-    push(node.output_parsed);
-    push(node.json);
-    const outputText = node.output_text;
-    if (typeof outputText === "string") {
-      const parsed = safeJsonParse<unknown>(outputText);
-      if (parsed) out.push(parsed);
-    }
-    const content = Array.isArray(node.content) ? node.content : [];
-    for (const part of content) {
-      if (!part || typeof part !== "object") continue;
-      const cell = part as Record<string, unknown>;
-      push(cell.parsed);
-      push(cell.output_parsed);
-      push(cell.json);
-      const text = typeof cell.text === "string" ? cell.text : "";
-      if (text) {
-        const parsed = safeJsonParse<unknown>(text);
-        if (parsed) out.push(parsed);
-      }
-      const args = typeof cell.arguments === "string" ? cell.arguments : "";
-      if (args) {
-        const parsed = safeJsonParse<unknown>(args);
-        if (parsed) out.push(parsed);
-      }
-    }
-  }
-
-  return out;
-}
-
-function parseAnalysisResultFromResponseJson(json: unknown): MedSafetyAnalysisResult | null {
-  const candidates = collectStructuredCandidates(json);
-  for (const candidate of candidates) {
-    const queue: unknown[] = [candidate];
-    if (candidate && typeof candidate === "object") {
-      const node = candidate as Record<string, unknown>;
-      queue.push(node.result, node.data, node.payload);
-    }
-    for (const current of queue) {
-      const parsed = parseAnalysisResult(current);
-      if (parsed) return parsed;
-    }
-  }
-  return null;
-}
-
-function countPatternHits(text: string, patterns: RegExp[]) {
-  let score = 0;
-  for (const pattern of patterns) {
-    if (pattern.test(text)) score += 1;
-  }
-  return score;
-}
-
-function inferExpectedInputClassification(
-  params: Pick<AnalyzeParams, "query" | "patientSummary" | "imageName" | "situation" | "queryIntent">
-): ExpectedInputClassification {
-  if (params.queryIntent === "medication" || params.queryIntent === "device" || params.queryIntent === "scenario") {
-    return {
-      expectedResultKind: params.queryIntent,
-      expectedItemType: params.queryIntent === "scenario" ? "unknown" : params.queryIntent,
-      confidence: "high",
-      reason: `forced_by_query_intent:${params.queryIntent}`,
-      medScore: params.queryIntent === "medication" ? 99 : 0,
-      deviceScore: params.queryIntent === "device" ? 99 : 0,
-      scenarioScore: params.queryIntent === "scenario" ? 99 : 0,
-    };
-  }
-
-  const source = `${params.query ?? ""} ${params.patientSummary ?? ""} ${params.imageName ?? ""}`
+function truncateError(raw: string, size = 220) {
+  const clean = String(raw ?? "")
     .replace(/\s+/g, " ")
+    .replace(/[^\x20-\x7E가-힣ㄱ-ㅎㅏ-ㅣ.,:;!?()[\]{}'"`~@#$%^&*_\-+=/\\|<>]/g, "")
     .trim();
-  const lower = source.toLowerCase();
-  const query = String(params.query ?? "")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  const medKeywords = [
-    /승압제|혈압상승제|vasopressor|norepinephrine|noradrenaline|epinephrine|dopamine|dobutamine|vasopressin/i,
-    /약물|투약|약제|용량|희석|항생제|인슐린|헤파린|진통제|진정제|수액|주사/i,
-    /\b(?:mg|mcg|g|iu|unit|units|mEq|mmol|ml\/h|mg\/kg|mcg\/kg\/min)\b/i,
-    /\b(?:tab|cap|inj|amp|vial|iv|po|im|sc)\b/i,
-  ];
-  const deviceKeywords = [
-    /도구|장비|기구|펌프|주입기|인퓨전|주사기펌프|인공호흡기|카테터|캐뉼라|라인|중심정맥관|cvc|piv/i,
-    /iv\s*pump|infusion\s*pump|syringe\s*pump|ventilator|flowmeter|defibrillator|monitor/i,
-    /알람|occlusion|폐색|누출|침윤|외유출|infiltration|extravasation/i,
-  ];
-  const scenarioKeywords = [
-    /상황|케이스|증상|악화|이상|알람|경보|발생|의심|대응|조치|보고|응급|재평가|중단|보류|홀드/i,
-    /저혈압|저혈당|호흡곤란|의식저하|통증|부종|발적|오한|발열|쇼크/i,
-    /how|what to do|when to stop|manage|response|event|adverse/i,
-    /어떻게|순서|절차|해줘|알려줘|가능 여부|기준/i,
-  ];
-
-  let medScore = countPatternHits(lower, medKeywords);
-  let deviceScore = countPatternHits(lower, deviceKeywords);
-  let scenarioScore = countPatternHits(lower, scenarioKeywords);
-
-  const shortNounLikeQuery =
-    query.length > 0 &&
-    query.split(" ").length <= 3 &&
-    !/[?？]/.test(query) &&
-    !/(어떻게|순서|절차|대응|기준|보고|중단|보류|how|when|what|manage)/i.test(query);
-
-  if (shortNounLikeQuery && (medScore > 0 || deviceScore > 0)) {
-    scenarioScore = Math.max(0, scenarioScore - 2);
-  }
-
-  if (params.situation === "event_response") scenarioScore += 3;
-  if (params.situation === "during_admin") scenarioScore += 1;
-
-  let expectedResultKind: "medication" | "device" | "scenario" = "scenario";
-  if (params.situation === "event_response") {
-    expectedResultKind = "scenario";
-  } else if (medScore === 0 && deviceScore === 0) {
-    expectedResultKind = "scenario";
-  } else if (scenarioScore >= Math.max(medScore, deviceScore) + 2) {
-    expectedResultKind = "scenario";
-  } else if (medScore >= deviceScore) {
-    expectedResultKind = "medication";
-  } else {
-    expectedResultKind = "device";
-  }
-
-  const expectedItemType: MedSafetyItemType =
-    expectedResultKind === "medication" ? "medication" : expectedResultKind === "device" ? "device" : "unknown";
-
-  const ordered = [medScore, deviceScore, scenarioScore].sort((a, b) => b - a);
-  const lead = ordered[0] ?? 0;
-  const gap = lead - (ordered[1] ?? 0);
-  const confidence: "high" | "medium" | "low" = lead >= 3 || gap >= 2 ? "high" : gap >= 1 ? "medium" : "low";
-  const reason = `med:${medScore}, device:${deviceScore}, scenario:${scenarioScore}, situation:${params.situation}`;
-
-  return {
-    expectedResultKind,
-    expectedItemType,
-    confidence,
-    reason,
-    medScore,
-    deviceScore,
-    scenarioScore,
-  };
+  return clean.length > size ? clean.slice(0, size) : clean;
 }
 
-function cleanLine(line: string) {
-  return String(line ?? "")
-    .replace(/\s+/g, " ")
+function normalizeText(value: string) {
+  return String(value ?? "")
+    .replace(/\r/g, "")
+    .replace(/\u0000/g, "")
+    .trim();
+}
+
+function cleanLine(value: string) {
+  return normalizeText(value)
+    .replace(/^[-*•·]\s*/, "")
+    .replace(/^\d+[).]\s*/, "")
     .replace(/^["'`]+|["'`]+$/g, "")
-    .trim();
-}
-
-function pickFirstSentence(text: string) {
-  const normalized = text.replace(/\s+/g, " ").trim();
-  if (!normalized) return "";
-  const parts = normalized.split(/(?<=[.!?]|다\.|요\.)\s+/).filter(Boolean);
-  return (parts[0] ?? normalized).slice(0, 220).trim();
-}
-
-function pickSentences(text: string, limit: number) {
-  const normalized = text.replace(/\s+/g, " ").trim();
-  if (!normalized) return [];
-  const parts = normalized
-    .split(/(?<=[.!?]|다\.|요\.)\s+/)
-    .map((line) => cleanLine(line))
-    .filter(Boolean);
-  return dedupeLimit(parts, limit);
-}
-
-function inferItemTypeFromText(text: string): MedSafetyItemType {
-  const n = text.toLowerCase();
-  const medHit =
-    /(insulin|heparin|vancomycin|meropenem|cef|triazole|정주|투여|약물|용량|mg|ml|항생제|인슐린|헤파린|반코마이신)/i.test(
-      n
-    );
-  const deviceHit = /(pump|ventilator|iv\s*pump|라인|카테터|중심정맥관|호흡기|기구|알람|주입기)/i.test(n);
-  if (medHit && !deviceHit) return "medication";
-  if (deviceHit && !medHit) return "device";
-  return "unknown";
-}
-
-function detectQuickStatus(text: string): MedSafetyQuickStatus {
-  const raw = text.toLowerCase();
-  const explicit = raw.match(/(?:status|상태)\s*[:：]\s*(ok|check|stop|확인 필요|중단|보류)/i)?.[1] ?? "";
-  const explicitNorm = explicit.toLowerCase();
-  if (explicitNorm.includes("stop") || explicitNorm.includes("중단") || explicitNorm.includes("보류")) return "STOP";
-  if (explicitNorm.includes("check") || explicitNorm.includes("확인")) return "CHECK";
-  if (explicitNorm.includes("ok")) return "OK";
-
-  if (/\bSTOP\b|즉시\s*(중단|보류)|투여\s*보류|사용\s*중단/i.test(text)) return "STOP";
-  if (/\bCHECK\b|확인\s*필요|재확인|판단\s*필요/i.test(text)) return "CHECK";
-  if (/\bOK\b|즉시\s*가능|실행\s*가능/i.test(text)) return "OK";
-  return "CHECK";
-}
-
-function looksLikeJsonBlob(value: string) {
-  const text = String(value ?? "")
-    .replace(/^(?:[-*•·]|\d+[).])\s*/, "")
-    .replace(/^["'`]+|["'`]+$/g, "")
-    .trim();
-  if (!text) return false;
-  if (/^[\[\]{}]+,?$/.test(text)) return true;
-  if (/^[A-Za-z_][A-Za-z0-9_]{2,}"?\s*:\s*/.test(text)) return true;
-  if (/^"[^"]{3,}"\s*:\s*/.test(text)) return true;
-  if (/^[{\[]/.test(text)) return true;
-  if (/(?:^|["\s])(?:resultKind|riskLevel|oneLineConclusion|item|quick|topActions|topNumbers|topRisks|do|steps|calculatorsNeeded|compatibilityChecks|safety|holdRules|monitor|escalateWhen|patientScript20s|modePriority|confidenceNote|status|sbar|institutionalChecks)\s*[:"]/i.test(text)) return true;
-  if (/:\s*(?:\{|\[|"[^"]*"|true|false|null|-?\d+(?:\.\d+)?)(?:\s*,)?$/.test(text) && /["{}_:\[\],]/.test(text)) return true;
-  if (/^(?:high|medium|low|ok|check|stop|medication|device|scenario)"?,?$/i.test(text)) return true;
-  const punctuation = (text.match(/[{}[\]":,]/g) ?? []).length;
-  return punctuation >= Math.max(12, Math.floor(text.length * 0.12));
-}
-
-function sanitizeModelLine(value: string, maxLength = 180) {
-  const collapsed = cleanLine(value)
-    .replace(/\\n/g, " ")
     .replace(/\s+/g, " ")
-    .replace(/^(?:json\s*:)?\s*/i, "")
     .trim();
-  if (!collapsed) return "";
-  if (looksLikeJsonBlob(collapsed)) return "";
-  if (/^[A-Za-z_][A-Za-z0-9_]*"?\s*,?$/.test(collapsed)) return "";
-  if (/^".*",?$/.test(collapsed) && !/[가-힣A-Za-z0-9]{4,}\s+[가-힣A-Za-z0-9]{2,}/.test(collapsed)) return "";
-  const clipped = collapsed.length > maxLength ? `${collapsed.slice(0, maxLength - 1)}…` : collapsed;
-  return clipped.replace(/^\d+[).]\s*/, "").trim();
 }
 
 function dedupeLimit(items: string[], limit: number) {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const raw of items) {
-    const clean = sanitizeModelLine(
-      cleanLine(raw)
-        .replace(/^(?:[-*•·]|\d+[).])\s*/, "")
-        .trim(),
-      180
-    );
+    const clean = cleanLine(raw);
     if (!clean) continue;
     const key = clean.toLowerCase();
     if (seen.has(key)) continue;
@@ -667,562 +159,6 @@ function dedupeLimit(items: string[], limit: number) {
     if (out.length >= limit) break;
   }
   return out;
-}
-
-function parseAnalysisResultFromNarrativeText(rawText: string, params: AnalyzeParams): MedSafetyAnalysisResult | null {
-  const text = String(rawText ?? "").replace(/\u0000/g, "").trim();
-  if (!text) return null;
-
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => cleanLine(line))
-    .filter(Boolean)
-    .filter((line) => !looksLikeJsonBlob(line));
-  if (!lines.length) return null;
-
-  const sections: Record<
-    "actions" | "numbers" | "risks" | "steps" | "calc" | "compat" | "hold" | "monitor" | "escalate" | "script",
-    string[]
-  > = {
-    actions: [],
-    numbers: [],
-    risks: [],
-    steps: [],
-    calc: [],
-    compat: [],
-    hold: [],
-    monitor: [],
-    escalate: [],
-    script: [],
-  };
-
-  const headingMap: Array<{ key: keyof typeof sections; pattern: RegExp }> = [
-    { key: "actions", pattern: /(30초|핵심\s*행동|top\s*actions?|first\s*actions?)/i },
-    { key: "numbers", pattern: /(핵심\s*수치|수치\/조건|numbers?|threshold)/i },
-    { key: "risks", pattern: /(핵심\s*위험|risk|주의\s*위험)/i },
-    { key: "steps", pattern: /(실행\s*단계|steps?|procedure|실행)/i },
-    { key: "calc", pattern: /(계산|dose\s*calc|calculators?)/i },
-    { key: "compat", pattern: /(호환|라인\s*점검|compatibility|line\s*check)/i },
-    { key: "hold", pattern: /(홀드|중단\s*기준|hold\s*rules?)/i },
-    { key: "monitor", pattern: /(모니터링|monitor)/i },
-    { key: "escalate", pattern: /(즉시\s*보고|보고\s*기준|escalate|report)/i },
-    { key: "script", pattern: /(환자\s*설명|스크립트|patient\s*script)/i },
-  ];
-
-  const pushAuto = (line: string) => {
-    const lower = line.toLowerCase();
-    if (/(혈압|맥박|spo2|체온|mg\/dl|mmhg|수치|검사)/i.test(lower)) {
-      sections.numbers.push(line);
-      return;
-    }
-    if (/(위험|부작용|오류|혼동|금기|risk|adverse)/i.test(lower)) {
-      sections.risks.push(line);
-      return;
-    }
-    if (/(중단|보류|hold|stop)/i.test(lower)) {
-      sections.hold.push(line);
-      return;
-    }
-    if (/(모니터|관찰|v\/s|vital|재평가)/i.test(lower)) {
-      sections.monitor.push(line);
-      return;
-    }
-    if (/(보고|의사|당직|콜|escalate|report)/i.test(lower)) {
-      sections.escalate.push(line);
-      return;
-    }
-    sections.actions.push(line);
-  };
-
-  let currentSection: keyof typeof sections | null = null;
-
-  for (const line of lines) {
-    let switched = false;
-    for (const map of headingMap) {
-      if (map.pattern.test(line)) {
-        currentSection = map.key;
-        const inline = line.split(/[:：]/).slice(1).join(":").trim();
-        if (inline) sections[currentSection].push(inline);
-        switched = true;
-        break;
-      }
-    }
-    if (switched) continue;
-
-    const bullet = line.match(/^(?:[-*•·]|\d+[).])\s*(.+)$/)?.[1]?.trim();
-    const content = bullet || line;
-    if (!content) continue;
-
-    if (currentSection) {
-      sections[currentSection].push(content);
-      continue;
-    }
-    pushAuto(content);
-  }
-
-  const queryName = sanitizeModelLine(cleanLine(params.query), 40) || "입력 항목";
-  const itemNameByLabel =
-    text.match(/(?:약물명|도구명|item|name)\s*[:：]\s*([^\n\r]+)/i)?.[1]?.trim() ??
-    text.match(/^\s*([A-Za-z][A-Za-z0-9\s\-]{2,40})\s*$/m)?.[1]?.trim() ??
-    "";
-  const itemName = (sanitizeModelLine(itemNameByLabel, 40) || queryName).slice(0, 40);
-
-  const actions = dedupeLimit(sections.actions, 3);
-  const numbers = dedupeLimit(sections.numbers, 4);
-  const risks = dedupeLimit(sections.risks, 3);
-  const steps = dedupeLimit([...sections.steps, ...actions], 5);
-  const calc = dedupeLimit(sections.calc, 3);
-  const compat = dedupeLimit(sections.compat, 3);
-  const hold = dedupeLimit(sections.hold, 4);
-  const monitor = dedupeLimit(sections.monitor, 4);
-  const escalate = dedupeLimit(sections.escalate, 4);
-  const quickStatus = detectQuickStatus(text);
-  if (!actions.length) {
-    actions.push(...pickSentences(text, 3));
-  }
-  if (!numbers.length) {
-    const numericHints = Array.from(
-      text.matchAll(/\d+(?:\.\d+)?\s?(?:mg\/dl|mmhg|bpm|%|℃|mmol\/l|ml\/h|mg|ml|mcg\/kg\/min)/gi)
-    )
-      .map((hit) => cleanLine(hit[0]))
-      .filter(Boolean);
-    if (numericHints.length) {
-      numbers.push(...dedupeLimit(numericHints.map((value) => `${value} 기준 재확인`), 4));
-    }
-  }
-  if (!risks.length) {
-    if (quickStatus === "STOP") {
-      risks.push("즉시 중단 또는 홀드가 필요한 고위험 상황 가능성");
-    } else if (quickStatus === "CHECK") {
-      risks.push("핵심 조건 미확인 상태에서 바로 진행 시 위험");
-    } else {
-      risks.push("정보가 제한된 상태에서 과신하고 진행하면 오류 가능");
-    }
-  }
-  if (!steps.length) {
-    steps.push(...actions.slice(0, 3));
-  }
-
-  const scriptBase = dedupeLimit(sections.script, 2).join(" ");
-  const script = (scriptBase || pickFirstSentence(text) || "먼저 안전 기준을 확인하고 필요 시 즉시 보고하겠습니다.")
-    .slice(0, 220)
-    .trim();
-
-  const inferredType = inferItemTypeFromText(`${itemName} ${text}`);
-  const confidenceBase = quickStatus === "OK" ? 74 : quickStatus === "STOP" ? 70 : 62;
-  const inferredKind: "medication" | "device" | "scenario" =
-    inferredType === "medication" ? "medication" : inferredType === "device" ? "device" : "scenario";
-
-  return {
-    resultKind: inferredKind,
-    oneLineConclusion: defaultOneLineConclusion(quickStatus, params.locale),
-    riskLevel: coerceRiskLevel(null, quickStatus),
-    item: {
-      name: itemName,
-      type: inferredType,
-      aliases: [],
-      highRiskBadges: quickStatus === "STOP" ? ["즉시 확인"] : quickStatus === "CHECK" ? ["확인 필요"] : [],
-      primaryUse: "AI 비정형 응답을 자동 정규화한 결과",
-      confidence: confidenceBase,
-    },
-    quick: {
-      status: quickStatus,
-      topActions: actions.length ? actions : ["핵심 안전 항목을 먼저 재확인하세요."],
-      topNumbers: numbers.length ? numbers : ["핵심 수치(혈압·맥박·SpO2·체온)를 최신값으로 확인"],
-      topRisks: risks.length ? risks : ["정보 불완전 상태에서 즉시 투여/조작 시 위험"],
-    },
-    do: {
-      steps: steps.length ? steps : ["처방/오더 재확인", "환자 상태 재평가", "기록 후 필요 시 보고"],
-      calculatorsNeeded: calc,
-      compatibilityChecks: compat.length ? compat : ["라인 연결/혼합 금기/동시 주입 약물 확인"],
-    },
-    safety: {
-      holdRules: hold.length ? hold : ["중요 기준치 이탈, 급격한 증상 악화 시 홀드"],
-      monitor: monitor.length ? monitor : ["활력징후·의식·호흡·주입부 상태를 짧은 간격으로 재평가"],
-      escalateWhen: escalate.length ? escalate : ["호흡곤란/저혈압/의식저하/지속 악화 시 즉시 보고"],
-    },
-    institutionalChecks: ["희석/속도/교체주기/알람 기준은 기관 프로토콜·장비 IFU 확인"],
-    sbar: {
-      situation: `${itemName} 관련 안전 이슈 확인 필요`,
-      background: "현재 투여/장비 상황과 최근 변화를 요약",
-      assessment: "활력·의식·주입부·알람 상태 재평가",
-      recommendation: "즉시 조치 후 기준 이탈 시 담당의/당직 보고",
-    },
-    patientScript20s: script,
-    modePriority: [],
-    confidenceNote: "비정형 AI 응답을 자동 정규화하여 구조화했습니다. 핵심 수치/처방은 다시 확인해 주세요.",
-  };
-}
-
-function fallbackNoteFromOpenAiError(error: string | null, locale: "ko" | "en") {
-  const code = String(error ?? "").toLowerCase();
-  if (code.includes("openai_responses_403")) {
-    return locale === "ko"
-      ? "OpenAI 접근 권한 문제로 기본 안전 모드로 전환되었습니다."
-      : "OpenAI access was denied. Showing safe fallback mode.";
-  }
-  if (code.includes("timeout")) {
-    return locale === "ko"
-      ? "AI 응답 시간이 길어 기본 안전 모드로 전환되었습니다."
-      : "AI response timed out. Showing safe fallback mode.";
-  }
-  if (code.includes("aborted")) {
-    return locale === "ko"
-      ? "요청 제한 시간 내 응답을 받지 못해 기본 안전 모드로 전환되었습니다."
-      : "Request exceeded allowed time. Showing safe fallback mode.";
-  }
-  if (code.includes("network")) {
-    return locale === "ko"
-      ? "네트워크 연결 문제로 기본 안전 모드로 전환되었습니다."
-      : "Network instability detected. Showing safe fallback mode.";
-  }
-  return locale === "ko"
-    ? "AI 연결이 불안정해 기본 안전 모드로 전환되었습니다."
-    : "AI connection was unstable. Showing safe fallback mode.";
-}
-
-function toTextArray(value: unknown, limit: number, minLength = 1) {
-  if (!Array.isArray(value)) return [];
-  const output: string[] = [];
-  const seen = new Set<string>();
-  for (const item of value) {
-    const clean = sanitizeModelLine(String(item ?? "").replace(/\s+/g, " ").trim());
-    if (clean.length < minLength) continue;
-    const key = clean.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    output.push(clean);
-    if (output.length >= limit) break;
-  }
-  return output;
-}
-
-function coerceItemType(value: unknown): MedSafetyItemType {
-  if (value === "medication" || value === "device" || value === "unknown") return value;
-  return "unknown";
-}
-
-function coerceQuickStatus(value: unknown): MedSafetyQuickStatus {
-  if (value === "OK" || value === "CHECK" || value === "STOP") return value;
-  return "CHECK";
-}
-
-function coerceResultKind(value: unknown, itemType: MedSafetyItemType): "medication" | "device" | "scenario" {
-  if (value === "medication" || value === "device" || value === "scenario") return value;
-  if (itemType === "medication") return "medication";
-  if (itemType === "device") return "device";
-  return "scenario";
-}
-
-function coerceRiskLevel(value: unknown, status: MedSafetyQuickStatus): "low" | "medium" | "high" {
-  if (value === "low" || value === "medium" || value === "high") return value;
-  if (status === "STOP") return "high";
-  if (status === "CHECK") return "medium";
-  return "low";
-}
-
-function defaultOneLineConclusion(status: MedSafetyQuickStatus, locale: "ko" | "en" = "ko") {
-  if (locale === "en") {
-    if (status === "STOP") return "STOP: Hold now and escalate after immediate reassessment.";
-    if (status === "CHECK") return "HOLD/CHECK: Verify key safety points before proceeding.";
-    return "GO: Executable now with ongoing monitoring.";
-  }
-  if (status === "STOP") return "STOP: 즉시 중단/홀드 후 환자 상태 재평가 및 보고.";
-  if (status === "CHECK") return "HOLD/CHECK: 핵심 안전 확인 후 진행 여부를 판단.";
-  return "GO: 현재 정보 기준 시행 가능, 모니터링 지속.";
-}
-
-function pickSbarValue(raw: unknown, fallback: string, maxLength: number) {
-  const clean = sanitizeModelLine(String(raw ?? "").trim(), maxLength);
-  return clean || fallback;
-}
-
-function parseAnalysisResult(raw: unknown): MedSafetyAnalysisResult | null {
-  if (!raw || typeof raw !== "object") return null;
-  const data = raw as Record<string, unknown>;
-  const itemRaw = (data.item as Record<string, unknown> | undefined) ?? {};
-  const quickRaw = (data.quick as Record<string, unknown> | undefined) ?? {};
-  const doRaw = (data.do as Record<string, unknown> | undefined) ?? {};
-  const safetyRaw = (data.safety as Record<string, unknown> | undefined) ?? {};
-
-  const itemName = sanitizeModelLine(String(itemRaw.name ?? "").trim(), 72);
-  const primaryUse = sanitizeModelLine(String(itemRaw.primaryUse ?? "").trim(), 160);
-  const patientScript20s = sanitizeModelLine(String(data.patientScript20s ?? "").trim(), 220);
-  const confidenceNote = sanitizeModelLine(String(data.confidenceNote ?? "").trim(), 180);
-  const oneLineConclusionInput = sanitizeModelLine(String(data.oneLineConclusion ?? "").trim(), 180);
-  const safeItemName = itemName || "입력 항목";
-
-  const confidence = Math.round(clamp(Number(itemRaw.confidence ?? 0), 0, 100));
-  const itemType = coerceItemType(itemRaw.type);
-  const quickStatus = coerceQuickStatus(quickRaw.status);
-  const resultKind = coerceResultKind(data.resultKind, itemType);
-  const riskLevel = coerceRiskLevel(data.riskLevel, quickStatus);
-
-  const sbarRaw = (data.sbar as Record<string, unknown> | undefined) ?? {};
-  const sbar = {
-    situation: pickSbarValue(sbarRaw.situation, "현재 문제와 위험 신호를 한 줄로 전달", 160),
-    background: pickSbarValue(sbarRaw.background, "투여 약물/도구와 최근 변화 요약", 160),
-    assessment: pickSbarValue(sbarRaw.assessment, "활력·의식·주입부·알람 상태 평가", 160),
-    recommendation: pickSbarValue(sbarRaw.recommendation, "실시한 조치와 추가 요청사항 전달", 160),
-  };
-  const institutionalChecks = toTextArray(data.institutionalChecks, 4);
-
-  const parsed: MedSafetyAnalysisResult = {
-    resultKind,
-    oneLineConclusion: oneLineConclusionInput || defaultOneLineConclusion(quickStatus, "ko"),
-    riskLevel,
-    item: {
-      name: safeItemName,
-      type: itemType,
-      aliases: toTextArray(itemRaw.aliases, 6),
-      highRiskBadges: toTextArray(itemRaw.highRiskBadges, 4),
-      primaryUse: primaryUse || "약물/의료도구 안전 확인",
-      confidence,
-    },
-    quick: {
-      status: quickStatus,
-      topActions: toTextArray(quickRaw.topActions, 3),
-      topNumbers: toTextArray(quickRaw.topNumbers, 4),
-      topRisks: toTextArray(quickRaw.topRisks, 3),
-    },
-    do: {
-      steps: toTextArray(doRaw.steps, 8),
-      calculatorsNeeded: toTextArray(doRaw.calculatorsNeeded, 4),
-      compatibilityChecks: toTextArray(doRaw.compatibilityChecks, 5),
-    },
-    safety: {
-      holdRules: toTextArray(safetyRaw.holdRules, 6),
-      monitor: toTextArray(safetyRaw.monitor, 6),
-      escalateWhen: toTextArray(safetyRaw.escalateWhen, 6),
-    },
-    institutionalChecks,
-    sbar,
-    patientScript20s: (patientScript20s || "현재 확인된 정보를 바탕으로 안전 기준을 먼저 점검하고 필요 시 즉시 보고하겠습니다.").slice(0, 220),
-    modePriority: toTextArray(data.modePriority, 6),
-    confidenceNote,
-  };
-
-  if (!parsed.quick.topActions.length) parsed.quick.topActions = ["정보가 제한되어 있어 먼저 처방/환자 상태를 재확인하세요."];
-  if (!parsed.quick.topNumbers.length) parsed.quick.topNumbers = ["핵심 수치(혈압·맥박·SpO2·체온)를 최신값으로 확인"];
-  if (!parsed.quick.topRisks.length) parsed.quick.topRisks = ["정보 부족 상태에서 즉시 투여/조작 시 위험 가능성"];
-  if (!parsed.do.steps.length) parsed.do.steps = ["처방/오더 재확인", "환자 상태 재평가", "기록 후 필요 시 보고"];
-  if (!parsed.safety.escalateWhen.length) parsed.safety.escalateWhen = ["기준치 이탈 또는 증상 악화 시 즉시 담당의/당직 보고"];
-  if (!parsed.institutionalChecks.length) {
-    parsed.institutionalChecks = [
-      "희석·주입속도·교체주기는 기관 프로토콜과 장비 IFU를 우선 확인",
-      "라인 호환성·필터·전용라인 필요 여부는 병동 표준에 맞춰 확인",
-    ];
-  }
-
-  if (parsed.quick.status === "OK" && parsed.item.confidence < 65) {
-    parsed.quick.status = "CHECK";
-    parsed.riskLevel = "medium";
-    parsed.oneLineConclusion = defaultOneLineConclusion("CHECK", "ko");
-    if (!parsed.confidenceNote) {
-      parsed.confidenceNote = "식별 확신이 낮아 CHECK로 전환되었습니다. 라벨/농도/라인을 재확인하세요.";
-    }
-  }
-
-  return parsed;
-}
-
-function alignAnalysisResultToInputKind(
-  input: MedSafetyAnalysisResult,
-  expected: ExpectedInputClassification,
-  params: Pick<AnalyzeParams, "query" | "situation" | "locale">
-): MedSafetyAnalysisResult {
-  const result: MedSafetyAnalysisResult = {
-    ...input,
-    item: { ...input.item },
-    quick: {
-      ...input.quick,
-      topActions: [...input.quick.topActions],
-      topNumbers: [...input.quick.topNumbers],
-      topRisks: [...input.quick.topRisks],
-    },
-    do: {
-      ...input.do,
-      steps: [...input.do.steps],
-      calculatorsNeeded: [...input.do.calculatorsNeeded],
-      compatibilityChecks: [...input.do.compatibilityChecks],
-    },
-    safety: {
-      ...input.safety,
-      holdRules: [...input.safety.holdRules],
-      monitor: [...input.safety.monitor],
-      escalateWhen: [...input.safety.escalateWhen],
-    },
-    institutionalChecks: [...input.institutionalChecks],
-    sbar: { ...input.sbar },
-    modePriority: [...input.modePriority],
-  };
-
-  const shouldForceKind = expected.confidence === "high" && result.resultKind !== expected.expectedResultKind;
-  const queryName = sanitizeModelLine(String(params.query ?? "").replace(/\s+/g, " ").trim(), 40);
-
-  if (shouldForceKind) {
-    result.resultKind = expected.expectedResultKind;
-    if (result.item.type === "unknown") {
-      result.item.type = expected.expectedItemType;
-    }
-    result.confidenceNote = result.confidenceNote
-      ? `${result.confidenceNote} 입력 분류 규칙에 따라 ${expected.expectedResultKind} 형식으로 보정되었습니다.`
-      : `입력 분류 규칙에 따라 ${expected.expectedResultKind} 형식으로 보정되었습니다.`;
-  }
-
-  if (result.resultKind !== "scenario" && result.item.type === "unknown") {
-    result.item.type = result.resultKind;
-  }
-
-  if (queryName) {
-    if (/^(입력 항목|input item|unknown|미상)$/i.test(result.item.name) || result.item.name.length < 2) {
-      result.item.name = queryName;
-    }
-    if (/입력 항목|input item/gi.test(result.item.primaryUse)) {
-      result.item.primaryUse = result.item.primaryUse.replace(/입력 항목|input item/gi, queryName);
-    }
-    if (/입력 항목|input item/gi.test(result.oneLineConclusion)) {
-      result.oneLineConclusion = result.oneLineConclusion.replace(/입력 항목|input item/gi, queryName);
-    }
-  }
-
-  if (params.situation === "general" && result.resultKind !== "scenario") {
-    const genericPrimaryUse = /(출력 안정화용|자동 정규화|약물\/의료도구 안전 확인|입력 항목)/i.test(result.item.primaryUse);
-    if (genericPrimaryUse || !result.item.primaryUse) {
-      result.item.primaryUse =
-        result.resultKind === "medication"
-          ? `${result.item.name}의 목적·핵심 작용·주요 주의점을 빠르게 확인`
-          : `${result.item.name}의 용도·핵심 기능·알람/오작동 대응 포인트를 빠르게 확인`;
-    }
-
-    if (result.resultKind === "medication" && /^((GO|STOP|HOLD\/CHECK):|GO:|STOP:|HOLD\/CHECK:)/.test(result.oneLineConclusion)) {
-      result.oneLineConclusion = `${result.item.name}은(는) 환자 상태에 따라 용량·속도·라인 호환을 먼저 확인해야 하는 약물입니다.`;
-    }
-    if (result.resultKind === "device" && /^((GO|STOP|HOLD\/CHECK):|GO:|STOP:|HOLD\/CHECK:)/.test(result.oneLineConclusion)) {
-      result.oneLineConclusion = `${result.item.name}은(는) 사용 목적과 세팅, 알람 대응 순서를 먼저 확인해야 하는 의료도구입니다.`;
-    }
-  }
-
-  if (!result.modePriority.length) {
-    if (result.resultKind === "medication") {
-      result.modePriority = params.locale === "ko" ? ["개요", "투여", "모니터링", "주의/보고"] : ["Overview", "Admin", "Monitor", "Escalate"];
-    } else if (result.resultKind === "device") {
-      result.modePriority = params.locale === "ko" ? ["개요", "세팅", "알람/문제", "유지관리"] : ["Overview", "Setup", "Alarms", "Maintenance"];
-    } else {
-      result.modePriority = params.locale === "ko" ? ["즉시행동", "체크", "처치", "보고"] : ["Immediate", "Checks", "Actions", "SBAR"];
-    }
-  }
-
-  return result;
-}
-
-function buildFallbackAnalysisResult(
-  params: AnalyzeParams,
-  note: string,
-  expected: ExpectedInputClassification
-): MedSafetyAnalysisResult {
-  const rawName = String(params.query || params.imageName || "입력 항목")
-    .replace(/\s+/g, " ")
-    .trim();
-  const name = rawName.slice(0, 40) || "입력 항목";
-
-  const situationActions: Record<ClinicalSituation, string[]> = {
-    general: [
-      "질문한 약물/도구의 목적과 현재 사용 맥락을 먼저 확인",
-      "즉시 확인이 필요한 안전 포인트(알레르기·라인·단위/농도)를 우선 점검",
-      "불명확 항목은 CHECK로 두고 병동 지침/처방 기준으로 재확인",
-    ],
-    pre_admin: [
-      "투여 전 5R(환자·약물·용량·시간·경로)과 환자식별 2개를 먼저 재확인",
-      "알레르기·금기·중복투여 가능성과 최신 활력징후/검사값을 확인",
-      "확신이 낮거나 기준 이탈 시 투여 보류 후 즉시 보고",
-    ],
-    during_admin: [
-      "현재 주입속도·누적량·펌프 설정과 라인 개방성/주입부 상태를 즉시 확인",
-      "환자 증상 변화가 있으면 일시중지 후 ABC/V/S 재평가를 우선 수행",
-      "중재 후 재개 조건과 보고 시점을 명확히 기록",
-    ],
-    event_response: [
-      "알람/이상 징후 발생 시 즉시 STOP/HOLD 여부를 먼저 판단하고 환자 상태를 우선 확인",
-      "라인 폐색·침윤·누출·장비 설정 오류를 순서대로 점검",
-      "해결 불가, 상태 악화, 고위험 약물 관련이면 즉시 보고 및 추가 지시를 받음",
-    ],
-  };
-  const fallbackStatus: MedSafetyQuickStatus = params.situation === "event_response" ? "STOP" : "CHECK";
-  const fallbackKind: "medication" | "device" | "scenario" =
-    params.situation === "general" ? expected.expectedResultKind : params.situation === "event_response" ? "scenario" : expected.expectedResultKind;
-
-  const generalActionsByKind: Record<"medication" | "device" | "scenario", string[]> = {
-    medication: [
-      "이 약물이 무엇이며 어떤 환자 상태에서 사용하는지 먼저 확인",
-      "용량·단위·투여 경로와 희석/속도를 처방·라벨로 대조 확인",
-      "금기·알레르기·라인 호환성 미확인 시 CHECK 후 재확인",
-    ],
-    device: [
-      "도구의 사용 목적과 현재 필요한 모드를 먼저 확인",
-      "세팅값·연결 상태·알람 기준을 기관 기준과 대조 확인",
-      "오작동·알람 반복 시 STOP/HOLD 기준에 따라 즉시 대응",
-    ],
-    scenario: [
-      "현재 상황의 위험 신호와 우선 조치를 먼저 확인",
-      "핵심 수치·라인·증상 변화를 짧은 간격으로 재평가",
-      "기준 이탈 또는 해결 실패 시 즉시 보고",
-    ],
-  };
-
-  const modePriority: Record<ClinicalMode, string[]> = {
-    ward: ["투여 여부 판단", "핵심 수치 확인", "보고/기록"],
-    er: ["즉시 위험 배제", "응급 처치 순서", "보고/협진"],
-    icu: ["중단/홀드 기준", "모니터링 강화", "라인/호환 확인"],
-  };
-
-  return {
-    resultKind: fallbackKind,
-    oneLineConclusion: defaultOneLineConclusion(fallbackStatus, params.locale),
-    riskLevel: coerceRiskLevel(null, fallbackStatus),
-    item: {
-      name,
-      type: fallbackKind === "medication" ? "medication" : fallbackKind === "device" ? "device" : "unknown",
-      aliases: [],
-      highRiskBadges: [],
-      primaryUse:
-        fallbackKind === "medication"
-          ? "약물의 역할·투여 확인·주의사항을 빠르게 정리"
-          : fallbackKind === "device"
-            ? "의료도구의 기능·세팅·알람 대응을 빠르게 정리"
-            : "출력 안정화용 기본 안전 안내",
-      confidence: 35,
-    },
-    quick: {
-      status: fallbackStatus,
-      topActions: params.situation === "general" ? generalActionsByKind[fallbackKind] : situationActions[params.situation],
-      topNumbers: ["혈압·맥박·SpO2·체온 최신값", "최근 검사값/알레르기/라인 상태", "기관 지침 기준 범위 이탈 여부"],
-      topRisks: ["정보 불충분 상태에서 즉시 투여/조작", "단위·농도·시간 오인", "라인/호환성 미확인"],
-    },
-    do: {
-      steps: ["처방/오더 재확인", "환자 상태 재평가", "필요 시 중지 후 보고", "지시 반영 후 기록"],
-      calculatorsNeeded: ["체중 기반 용량 또는 속도 계산 필요 시 확인"],
-      compatibilityChecks: ["라인 연결/혼합 금기/동시 주입 약물 확인"],
-    },
-    safety: {
-      holdRules: ["중요 기준치 이탈, 급격한 증상 악화, 알레르기 의심 시 홀드"],
-      monitor: ["활력징후·의식·호흡·주입부 상태를 짧은 간격으로 재평가"],
-      escalateWhen: ["호흡곤란/저혈압/의식저하/지속 악화 시 즉시 보고"],
-    },
-    institutionalChecks: [
-      "희석·속도·교체주기·알람 기준은 기관 프로토콜과 장비 IFU 확인",
-      "High-alert 약물/기구는 기관 정책에 따른 더블체크 시행",
-    ],
-    sbar: {
-      situation: "안전 우선 확인이 필요한 상황",
-      background: "관련 투여/장비 사용 정보와 최근 변화 정리",
-      assessment: "활력·의식·알람·주입부 상태를 재평가",
-      recommendation: "즉시 조치 후 기준 이탈 시 담당의/당직 보고",
-    },
-    patientScript20s: "지금은 안전 확인이 우선이라 수치와 상태를 먼저 점검한 뒤, 필요한 경우 즉시 보고하고 안전하게 진행하겠습니다.",
-    modePriority: modePriority[params.mode],
-    confidenceNote: note.slice(0, 180),
-  };
 }
 
 function modeLabel(mode: ClinicalMode, locale: "ko" | "en") {
@@ -1238,163 +174,208 @@ function modeLabel(mode: ClinicalMode, locale: "ko" | "en") {
 
 function situationLabel(situation: ClinicalSituation, locale: "ko" | "en") {
   if (locale === "en") {
-    if (situation === "general") return "General search";
-    if (situation === "pre_admin") return "Pre-administration safety check";
-    if (situation === "during_admin") return "During administration monitoring";
-    return "Alarm/adverse event response";
+    if (situation === "general") return "General";
+    if (situation === "pre_admin") return "Pre-administration";
+    if (situation === "during_admin") return "During administration";
+    return "Alarm/event response";
   }
-  if (situation === "general") return "일반 검색";
-  if (situation === "pre_admin") return "투여 전 확인";
-  if (situation === "during_admin") return "투여 중 모니터";
+  if (situation === "general") return "일반";
+  if (situation === "pre_admin") return "투여 전";
+  if (situation === "during_admin") return "투여 중";
   return "이상/알람 대응";
+}
+
+function departmentFromMode(mode: ClinicalMode) {
+  if (mode === "icu") return "ICU";
+  if (mode === "er") return "ER";
+  return "WARD";
+}
+
+function inferIntent(params: Pick<AnalyzeParams, "query" | "queryIntent" | "situation">): QueryIntent {
+  if (params.queryIntent === "medication" || params.queryIntent === "device" || params.queryIntent === "scenario") {
+    return params.queryIntent;
+  }
+  if (params.situation !== "general") return "scenario";
+  const q = String(params.query ?? "").toLowerCase();
+  if (/pump|카테터|기구|장비|ventilator|모니터|occlusion|라인|필터|stopcock|클램프/.test(q)) return "device";
+  if (/약|투여|약물|mg|mcg|mEq|IU|항생제|진정제|진통제|항응고|바소프레서/.test(q)) return "medication";
+  return "scenario";
 }
 
 function buildDeveloperPrompt(locale: "ko" | "en") {
   if (locale === "ko") {
     return [
       "너는 간호사를 위한 임상 검색엔진 AI다.",
-      "입력된 약물/의료기구에 대해 현장에서 바로 쓰는 핵심 정보를 우선 제공한다.",
-      "안전과 실무 적용을 최우선으로 하며 불확실한 내용은 확인 필요로 표시한다.",
-      "답변은 과도한 템플릿이나 장황한 서론 없이 핵심 중심으로 작성한다.",
-      "진단/처방을 대체하지 않으며 기관 프로토콜과 IFU를 최종 기준으로 둔다.",
+      "약물/의료기구/상황 질문에 대해 현장에서 즉시 쓸 수 있는 고품질 정보를 제공한다.",
+      "정해진 출력 템플릿을 강제하지 말고, 질문 성격에 맞는 최적의 구조로 답한다.",
+      "불확실하거나 기관별 차이가 큰 내용은 단정하지 말고 확인 포인트를 명확히 표시한다.",
+      "진단/처방 결정을 대체하지 않으며 기관 프로토콜·의사 지시·제조사 IFU를 최종 기준으로 둔다.",
     ].join("\n");
   }
   return [
     "You are a clinical search engine AI for bedside nurses.",
-    "Prioritize practical, safety-first, high-value information for medication and device lookup.",
-    "Keep answers concise, actionable, and free from unnecessary template rigidity.",
-    "Do not replace diagnosis or prescribing decisions. Use protocol/IFU checks for uncertain or variable items.",
+    "Provide high-quality, practical, safety-first guidance for medication, device, and scenario queries.",
+    "Do not force rigid output templates; structure response to best fit the query.",
+    "Mark uncertain or institution-dependent details as verification points.",
+    "Do not replace diagnosis/prescribing decisions; local protocol and IFU are final.",
   ].join("\n");
 }
 
-function departmentFromMode(mode: ClinicalMode) {
-  if (mode === "icu") return "ICU";
-  if (mode === "er") return "ER";
-  if (mode === "ward") return "WARD";
-  return "unknown";
-}
-
-function buildUserPrompt(params: {
-  query: string;
-  mode: ClinicalMode;
-  situation: ClinicalSituation;
-  patientSummary?: string;
-  locale: "ko" | "en";
-  imageName?: string;
-  expected: ExpectedInputClassification;
-}) {
-  const intent: QueryIntent = params.expected.expectedResultKind;
-  const context = {
-    mode: modeLabel(params.mode, params.locale),
-    department: departmentFromMode(params.mode),
-    situation: situationLabel(params.situation, params.locale),
-    query: params.query || "(없음)",
-    patient_summary: params.patientSummary || "(없음)",
-    image_name: params.imageName || "(없음)",
-    query_intent_selected: params.expected.confidence === "high" && params.expected.reason.startsWith("forced_by_query_intent")
-      ? params.expected.expectedResultKind
-      : "(auto)",
-  };
-
-  if (params.locale === "ko") {
-    if (intent === "medication") {
-      return [
-        "너는 간호사를 위한 약물 검색엔진이다.",
-        "고정 형식/정해진 틀 없이, 질문 약물에 대해 간호사가 바로 써먹을 수 있는 핵심 정보를 우선 제공한다.",
-        "약물 답변에는 아래 내용을 반드시 포함한다:",
-        "- 이 약이 무엇인지(분류/역할 1줄)",
-        "- 언제 쓰는지(적응증 핵심)",
-        "- 어떻게 주는지(경로/IV push 여부/희석·속도는 원칙+기관확인)",
-        "- 반드시 확인할 금기/주의(Top 3)",
-        "- 반드시 모니터할 것(Top 3)",
-        "- 위험 신호/즉시 대응",
-        "- 라인/호환/상호작용(치명적인 것 중심)",
-        "- 환자 교육 포인트(필요 시)",
-        "근거가 약하거나 기관마다 다른 값은 단정하지 말고 확인 포인트로 안내한다.",
-        "질문:",
-        params.query || "(없음)",
-        "맥락:",
-        JSON.stringify(context, null, 2),
-      ].join("\n");
-    }
-
-    if (intent === "device") {
-      return [
-        "너는 간호사를 위한 의료기구 검색엔진이다.",
-        "고정 형식/정해진 틀 없이, 질문 기구에 대해 현장에서 바로 적용 가능한 정보를 우선 제공한다.",
-        "의료기구 답변에는 아래 내용을 반드시 포함한다:",
-        "- 기구가 무엇인지/언제 쓰는지",
-        "- 준비물/셋업/사용 절차(현장 단계 중심)",
-        "- 정상 작동 기준(“정상은 어떤 상태인지”)",
-        "- 알람/트러블슈팅: 의미→먼저 볼 것→해결→안되면 보고",
-        "- 합병증/Stop rules",
-        "- 유지관리(기관 확인 필요한 부분은 표시)",
-        "기기·기관마다 달라지는 세팅값/교체주기/알람 임계는 IFU/기관 프로토콜 확인을 명확히 표시한다.",
-        "질문:",
-        params.query || "(없음)",
-        "맥락:",
-        JSON.stringify(context, null, 2),
-      ].join("\n");
-    }
-
-    return [
-      "너는 간호사를 위한 약물/의료기구 검색엔진이다.",
-      "입력을 약물 또는 의료기구로 해석하고, 고정 형식 없이 핵심 실무 정보 중심으로 답한다.",
-      "[약물]",
-      "- 이 약이 무엇인지(분류/역할 1줄)",
-      "- 언제 쓰는지(적응증 핵심)",
-      "- 어떻게 주는지(경로/IV push 여부/희석·속도는 원칙+기관확인)",
-      "- 반드시 확인할 금기/주의(Top 3)",
-      "- 반드시 모니터할 것(Top 3)",
-      "- 위험 신호/즉시 대응",
-      "- 라인/호환/상호작용(치명적인 것 중심)",
-      "- 환자 교육 포인트(필요 시)",
-      "[의료기구]",
-      "- 기구가 무엇인지/언제 쓰는지",
-      "- 준비물/셋업/사용 절차(현장 단계 중심)",
-      "- 정상 작동 기준(“정상은 어떤 상태인지”)",
-      "- 알람/트러블슈팅: 의미→먼저 볼 것→해결→안되면 보고",
-      "- 합병증/Stop rules",
-      "- 유지관리(기관 확인 필요한 부분은 표시)",
-      "질문:",
-      params.query || "(없음)",
-      "맥락:",
-      JSON.stringify(context, null, 2),
-    ].join("\n");
-  }
-
-  if (intent === "medication") {
-    return [
-      "You are a medication search engine for bedside nurses.",
-      "Do not force rigid templates. Provide high-value practical nursing guidance for the queried medication.",
-      "Must include: what it is, indications, administration principles, top contraindications/cautions, top monitoring, danger signs/immediate response, line compatibility/interactions, and patient teaching.",
-      "Question:",
-      params.query || "(none)",
-      "Context:",
-      JSON.stringify(context, null, 2),
-    ].join("\n");
-  }
-
-  if (intent === "device") {
-    return [
-      "You are a medical device search engine for bedside nurses.",
-      "Do not force rigid templates. Provide high-value practical nursing guidance for the queried device.",
-      "Must include: what/when to use, setup workflow, normal operation criteria, alarm troubleshooting, complications/stop rules, and maintenance with protocol checks.",
-      "Question:",
-      params.query || "(none)",
-      "Context:",
-      JSON.stringify(context, null, 2),
-    ].join("\n");
-  }
-
+function buildMedicationPrompt(query: string, contextJson: string) {
   return [
-    "You are a medication/device search engine for bedside nurses.",
-    "Interpret input as medication or device and provide practical bedside guidance without rigid format constraints.",
-    "Question:",
-    params.query || "(none)",
-    "Context:",
-    JSON.stringify(context, null, 2),
+    "질문 약물에 대해 간호사를 위한 검색엔진 답변을 작성하라.",
+    "절대 고정된 템플릿을 강제하지 말고, 질문에 맞게 가장 가독성 좋은 방식으로 답하라.",
+    "",
+    "[약물 질문 출력 필수 내용]",
+    "1) 이 약이 무엇인지(정의/분류/역할)",
+    "- 정의/분류(예: 항생제/항응고/진통·진정/바소프레서/이뇨제/전해질/항부정맥 등)",
+    "- 핵심 역할(무엇을 위해 쓰는지)",
+    "- 작용 특성(효과 발현 시간대 또는 주요 기전 1~2문장)",
+    "2) 언제 쓰는지(적응증/사용 맥락)",
+    "- 대표 적응증 1~3개",
+    "- 병동/ER/ICU 부서별 사용 포인트(해당 시)",
+    "3) 어떻게 주는지(경로/투여 방식/원칙)",
+    "- 경로(PO/IV/IM/SC/흡입/패치 등)",
+    "- IV push 가능/불가/주의와 이유",
+    "- 희석/농도/속도/시간: 대표 원칙 + 기관 프로토콜/약제부 확인 포인트",
+    "- 필터/차광/프라이밍/flush, 말초/중심라인 요구(원칙 수준)",
+    "4) 반드시 확인할 금기/주의 Top 3",
+    "- 환자 상태 기반 금기/주의",
+    "- 최소 확인 데이터: 알레르기/활력/의식 + 약물군별 핵심 lab/ECG",
+    "- High-alert/LASA 여부(있으면 강하게 표시)",
+    "5) 반드시 모니터할 것 Top 3",
+    "- Vitals 우선순위",
+    "- Labs/ECG 핵심 1~2개",
+    "- 기대 효과 + 위험 신호",
+    "- 재평가 타이밍(5/15/30/60분 중 현실적 제안)",
+    "6) 위험 신호/즉시 대응",
+    "- 진짜 위험 신호 2~4개",
+    "- 즉시 행동: 중단/보류 → ABC → 모니터 강화 → 보고",
+    "- 길항제/응급약은 준비/보고 수준으로",
+    "7) 라인/호환/상호작용(치명적 중심)",
+    "- Y-site/혼합 금지/전용라인 필요(대표 원칙 + 기관 확인)",
+    "- 치명적 상호작용 Top 2~3",
+    "- 라인 실수 포인트(클램프/stopcock 포함)",
+    "8) 환자 교육 포인트(필요 시)",
+    "- 20초 설명 + teach-back 질문 1개",
+    "9) 실수 방지 포인트(최소 2개)",
+    "- 단위/농도/LASA/주입속도/혼합/flush/알람무시/기록누락 등",
+    "",
+    "안전 원칙:",
+    "- 근거 없는 수치·용량·기준은 만들지 말 것",
+    "- 기관마다 다른 부분은 반드시 '기관 확인 필요'로 표기",
+    "- 한국 간호 현장 표현으로, 바쁜 상황에서 바로 실행 가능하게 작성",
+    "",
+    "질문:",
+    query || "(없음)",
+    "",
+    "맥락:",
+    contextJson,
   ].join("\n");
+}
+
+function buildDevicePrompt(query: string, contextJson: string) {
+  return [
+    "질문 의료기구에 대해 간호사를 위한 검색엔진 답변을 작성하라.",
+    "절대 고정된 템플릿을 강제하지 말고, 질문에 맞게 가장 가독성 좋은 방식으로 답하라.",
+    "",
+    "[의료기구 질문 출력 필수 내용]",
+    "1) 기구 정의/언제 쓰는지",
+    "- 정의(기구 역할 1줄), 적응증 2~3개, 금기/주의 1~2개(가능 시)",
+    "2) 준비물/셋업/사용 절차(현장 단계)",
+    "- 준비물 체크리스트",
+    "- Setup(연결→프라이밍/공기 제거→고정→설정값→시작→초기 확인)",
+    "- 적용 전 안전 확인(연결, clamp, 방향, 공기, 소모품 적합성)",
+    "3) 정상 작동 기준",
+    "- 정상 표시/정상 상태 특징 2~4개",
+    "- 시작 후 1~5분 내 확인 포인트",
+    "4) 알람/트러블슈팅(의미→먼저 볼 것→해결→보고)",
+    "- 알람 의미",
+    "- 원인 후보 Top 3",
+    "- 먼저 확인 Top 3(클램프/꺾임/연결/필터/위치/배터리)",
+    "- 해결 행동 Top 3",
+    "- 해결 안 되면 교체/대체 루트/전문팀/의사 보고 기준",
+    "5) 합병증/Stop rules",
+    "- 합병증 Top 3~5",
+    "- 즉시 중단/호출 위험 신호 2~4개",
+    "6) 유지관리(기관 확인 표기)",
+    "- 관찰 포인트(피부/고정/누출/통증/감염)",
+    "- 교체·점검 주기(기관/IFU 확인 항목 표시)",
+    "- 기록 포인트(시각, 세팅, 반응, 문제/조치)",
+    "7) 실수 방지 포인트(최소 2개)",
+    "- clamp/stopcock, 프라이밍/공기 제거, 소모품 호환, 알람 무시 등",
+    "",
+    "안전 원칙:",
+    "- 기기별 수치/주기는 제조사 IFU와 기관 프로토콜 확인 전제",
+    "- 단정이 어려운 항목은 확인 포인트로 안내",
+    "- 한국 간호 현장 표현으로, 바쁜 상황에서 바로 실행 가능하게 작성",
+    "",
+    "질문:",
+    query || "(없음)",
+    "",
+    "맥락:",
+    contextJson,
+  ].join("\n");
+}
+
+function buildScenarioPrompt(query: string, contextJson: string) {
+  return [
+    "상황 질문에 대해 간호사 행동 중심으로 매우 구체적으로 답하라.",
+    "형식은 자유이며 질문 맥락에 맞춰 가장 효과적인 구조로 작성하라.",
+    "핵심은 '지금 무엇을 먼저 해야 하는지', '무엇을 확인해야 하는지', '언제 중단/호출해야 하는지'다.",
+    "불확실하면 안전한 기본 행동과 확인 포인트를 우선 제시한다.",
+    "질문:",
+    query || "(없음)",
+    "",
+    "맥락:",
+    contextJson,
+  ].join("\n");
+}
+
+function buildUserPrompt(params: AnalyzeParams, intent: QueryIntent) {
+  const context = JSON.stringify(
+    {
+      mode: modeLabel(params.mode, params.locale),
+      department: departmentFromMode(params.mode),
+      situation: situationLabel(params.situation, params.locale),
+      query_intent: intent,
+      patient_summary: params.patientSummary || "(없음)",
+      image_name: params.imageName || "(없음)",
+    },
+    null,
+    2
+  );
+  if (intent === "medication") return buildMedicationPrompt(params.query, context);
+  if (intent === "device") return buildDevicePrompt(params.query, context);
+  return buildScenarioPrompt(params.query, context);
+}
+
+function extractResponsesText(json: any): string {
+  const content = json?.choices?.[0]?.message?.content;
+  if (typeof content === "string" && content.trim()) return content.trim();
+
+  const direct = json?.output_text;
+  if (typeof direct === "string" && direct.trim()) return direct.trim();
+  if (Array.isArray(direct)) {
+    const joined = direct
+      .map((item) => (typeof item === "string" ? item : ""))
+      .join("")
+      .trim();
+    if (joined) return joined;
+  }
+
+  const output = Array.isArray(json?.output) ? json.output : [];
+  const chunks: string[] = [];
+  for (const item of output) {
+    const outputText = typeof item?.output_text === "string" ? item.output_text : "";
+    if (outputText) chunks.push(outputText);
+    const cell = Array.isArray(item?.content) ? item.content : [];
+    for (const part of cell) {
+      const text = typeof part?.text === "string" ? part.text : "";
+      if (text) chunks.push(text);
+    }
+  }
+  return chunks.join("").trim();
 }
 
 async function callResponsesApi(args: {
@@ -1417,7 +398,7 @@ async function callResponsesApi(args: {
     });
   }
 
-  const strictPayload = {
+  const body = {
     model,
     input: [
       {
@@ -1430,37 +411,18 @@ async function callResponsesApi(args: {
       },
     ],
     text: {
-      format: {
-        type: "json_schema",
-        name: "nurse_med_tool_action_card",
-        strict: true,
-        schema: buildMedSafetyJsonSchema(),
-      },
-      verbosity: "low",
-    },
-    reasoning: {
-      effort: "low",
-    },
-    max_output_tokens: maxOutputTokens,
-    tools: [],
-    store: false,
-  };
-
-  const relaxedPayload = {
-    model,
-    input: strictPayload.input,
-    text: {
       format: { type: "text" as const },
-      verbosity: "low" as const,
+      verbosity: "medium" as const,
     },
-    reasoning: strictPayload.reasoning,
+    reasoning: { effort: "low" as const },
     max_output_tokens: maxOutputTokens,
     tools: [],
     store: false,
   };
 
-  const send = (body: unknown) =>
-    fetch(`${apiBaseUrl}/responses`, {
+  let response: Response;
+  try {
+    response = await fetch(`${apiBaseUrl}/responses`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -1469,137 +431,250 @@ async function callResponsesApi(args: {
       body: JSON.stringify(body),
       signal,
     });
-
-  const parseSuccess = async (response: Response): Promise<ResponsesAttempt> => {
-    const json = await response.json().catch(() => null);
-    const text = extractResponsesText(json);
-    if (!text) {
-      return { text: null, error: `openai_empty_text_model:${model}`, json };
-    }
-    return { text: text || null, error: null, json };
-  };
-
-  let response: Response;
-  try {
-    response = await send(strictPayload);
   } catch (cause: any) {
-    const reason = truncateError(String(cause?.message ?? cause ?? "fetch_failed"));
-    return { text: null, error: `openai_network_${reason}`, json: null };
+    return {
+      text: null,
+      error: `openai_network_${truncateError(String(cause?.message ?? cause ?? "fetch_failed"))}`,
+    };
   }
 
   if (!response.ok) {
     const raw = await response.text().catch(() => "");
-    const shouldRetryWithoutSchema =
-      response.status === 400 && /(json_schema|response_format|text\.format|strict|schema)/i.test(raw);
-    if (shouldRetryWithoutSchema) {
-      try {
-        const relaxed = await send(relaxedPayload);
-        if (!relaxed.ok) {
-          const relaxedRaw = await relaxed.text().catch(() => "");
-          return {
-            text: null,
-            error: `openai_responses_${relaxed.status}_model:${model}_${truncateError(relaxedRaw || "unknown_error")}`,
-            json: null,
-          };
-        }
-        return await parseSuccess(relaxed);
-      } catch (cause: any) {
-        const reason = truncateError(String(cause?.message ?? cause ?? "fetch_failed"));
-        return { text: null, error: `openai_network_${reason}`, json: null };
-      }
-    }
     return {
       text: null,
       error: `openai_responses_${response.status}_model:${model}_${truncateError(raw || "unknown_error")}`,
-      json: null,
     };
   }
 
-  return await parseSuccess(response);
+  const json = await response.json().catch(() => null);
+  const text = extractResponsesText(json);
+  if (!text) {
+    return { text: null, error: `openai_empty_text_model:${model}` };
+  }
+  return { text, error: null };
 }
 
-function parseAttemptResult(attempt: ResponsesAttempt): MedSafetyAnalysisResult | null {
-  const fromJson = parseAnalysisResultFromResponseJson(attempt.json);
-  if (fromJson) return fromJson;
-  if (!attempt.text) return null;
-  const parsed = safeJsonParse<unknown>(attempt.text);
-  if (typeof parsed === "string") {
-    const nested = safeJsonParse<unknown>(parsed);
-    return parseAnalysisResult(nested);
-  }
-  return parseAnalysisResult(parsed);
+function extractBullets(text: string) {
+  const lines = normalizeText(text)
+    .split("\n")
+    .map((line) => line.trim());
+  return lines
+    .map((line) => {
+      const hit = line.match(/^(?:[-*•·]|\d+[).])\s+(.+)$/);
+      if (hit?.[1]) return cleanLine(hit[1]);
+      return "";
+    })
+    .filter(Boolean);
 }
 
-function buildRepairDeveloperPrompt(locale: "ko" | "en") {
-  if (locale === "ko") {
-    return [
-      "너는 간호 실행 보조 JSON 정규화기다.",
-      "입력 원문에서 정보를 추출해 스키마 JSON으로만 반환한다.",
-      "모호하면 보수적으로 채운다: quick.status=CHECK, item.type=unknown.",
-      "중요 필드 누락 금지(item/quick/do/safety/patientScript20s/modePriority/confidenceNote).",
-      "JSON 외 텍스트를 출력하지 마라.",
-    ].join(" ");
-  }
-  return [
-    "You are a JSON normalizer for bedside nursing safety output.",
-    "Convert the source text into the required schema JSON only.",
-    "If ambiguous, be conservative: quick.status=CHECK and item.type=unknown.",
-    "Never omit required fields.",
-    "Return JSON only.",
-  ].join(" ");
+function extractSentences(text: string) {
+  const flat = normalizeText(text).replace(/\n+/g, " ");
+  const chunks = flat
+    .split(/(?<=[.!?]|다\.|요\.)\s+/)
+    .map((line) => cleanLine(line))
+    .filter(Boolean);
+  return chunks;
 }
 
-function buildRepairUserPrompt(rawText: string, locale: "ko" | "en") {
-  const source = rawText.replace(/\u0000/g, "").slice(0, 7000);
-  if (locale === "ko") {
-    return [
-      "아래는 이전 모델 출력 원문이다. 유효한 스키마 JSON으로 정규화해라.",
-      "원문:",
-      source || "(empty)",
-    ].join("\n");
-  }
-  return [
-    "Below is raw model output. Normalize it into valid schema JSON.",
-    "Source:",
-    source || "(empty)",
-  ].join("\n");
+function pickLinesByPattern(text: string, pattern: RegExp, limit: number) {
+  const lines = normalizeText(text)
+    .split("\n")
+    .map((line) => cleanLine(line))
+    .filter(Boolean)
+    .filter((line) => pattern.test(line));
+  return dedupeLimit(lines, limit);
 }
 
-async function repairAnalysisFromRawText(args: {
-  apiKey: string;
-  model: string;
-  rawText: string;
-  locale: "ko" | "en";
-  apiBaseUrl: string;
-  maxOutputTokens: number;
-  signal: AbortSignal;
-}) {
-  const { apiKey, model, rawText, locale, apiBaseUrl, maxOutputTokens, signal } = args;
-  const modelCandidates = resolveModelCandidates(model);
-  const developerPrompt = buildRepairDeveloperPrompt(locale);
-  const userPrompt = buildRepairUserPrompt(rawText, locale);
+function detectStatus(text: string): MedSafetyQuickStatus {
+  const t = text.toLowerCase();
+  if (/\b(stop|중단|즉시 중단|투여 금지|사용 금지)\b/i.test(t)) return "STOP";
+  if (/\b(hold|check|보류|확인 후|재확인)\b/i.test(t)) return "CHECK";
+  if (/\b(go|가능|진행 가능)\b/i.test(t)) return "OK";
+  return "CHECK";
+}
 
-  for (const candidateModel of modelCandidates) {
-    const repaired = await callResponsesApi({
-      apiKey,
-      model: candidateModel,
-      developerPrompt,
-      userPrompt,
-      apiBaseUrl,
-      signal,
-      maxOutputTokens,
-    });
-    const parsed = parseAttemptResult(repaired);
-    if (parsed) {
-      return {
-        parsed,
-        model: candidateModel,
-        rawText: repaired.text ?? rawText,
-      };
-    }
-  }
+function detectRiskLevel(text: string, status: MedSafetyQuickStatus): "low" | "medium" | "high" {
+  if (status === "STOP") return "high";
+  const t = text.toLowerCase();
+  if (/(고위험|위험도 높음|critical|life[- ]threatening|응급)/i.test(t)) return "high";
+  if (/(주의|위험|monitor closely|careful)/i.test(t)) return "medium";
+  if (status === "OK") return "low";
+  return "medium";
+}
 
-  return null;
+function buildSbar(text: string) {
+  const s = text.match(/(?:^|\n)\s*S\s*[:：]\s*(.+)/i)?.[1] ?? "";
+  const b = text.match(/(?:^|\n)\s*B\s*[:：]\s*(.+)/i)?.[1] ?? "";
+  const a = text.match(/(?:^|\n)\s*A\s*[:：]\s*(.+)/i)?.[1] ?? "";
+  const r = text.match(/(?:^|\n)\s*R\s*[:：]\s*(.+)/i)?.[1] ?? "";
+  const sent = extractSentences(text);
+  return {
+    situation: cleanLine(s) || sent[0] || "현재 핵심 상황 전달",
+    background: cleanLine(b) || sent[1] || "관련 배경/최근 변화 전달",
+    assessment: cleanLine(a) || sent[2] || "현재 평가 소견 전달",
+    recommendation: cleanLine(r) || sent[3] || "요청/다음 조치 전달",
+  };
+}
+
+function detectItemType(intent: QueryIntent, text: string): MedSafetyItemType {
+  if (intent === "medication") return "medication";
+  if (intent === "device") return "device";
+  const t = text.toLowerCase();
+  if (/pump|카테터|기구|장비|monitor|ventilator|line|필터/.test(t)) return "device";
+  if (/약물|투여|약|dose|mg|mcg|mEq|IU|항생제|진정제|진통제/.test(t)) return "medication";
+  return "unknown";
+}
+
+function buildFallbackResult(params: AnalyzeParams, intent: QueryIntent, note: string): MedSafetyAnalysisResult {
+  const safeName = cleanLine(params.query || params.imageName || "조회 항목").slice(0, 50) || "조회 항목";
+  return {
+    resultKind: intent === "scenario" ? "scenario" : intent,
+    oneLineConclusion: "AI 응답이 불안정해 기본 안내를 표시합니다. 핵심 항목을 다시 확인해 주세요.",
+    riskLevel: "medium",
+    item: {
+      name: safeName,
+      type: intent === "scenario" ? "unknown" : intent,
+      aliases: [],
+      highRiskBadges: ["확인 필요"],
+      primaryUse: "간호 현장 안전 확인",
+      confidence: 35,
+    },
+    quick: {
+      status: "CHECK",
+      topActions: ["처방/오더와 환자 상태를 먼저 재확인", "핵심 활력·라인·알레르기 정보를 먼저 점검", "기준 이탈 시 즉시 보고"],
+      topNumbers: ["혈압·맥박·SpO2·의식 최신값", "알레르기/주요 검사값", "라인 및 장비 상태"],
+      topRisks: ["정보 부족 상태에서 즉시 진행 시 위험", "단위·농도·속도 혼동", "라인/호환성 미확인"],
+    },
+    do: {
+      steps: ["핵심 정보 재확인", "안전 기준 충족 여부 판단", "필요 시 보류 후 보고"],
+      calculatorsNeeded: ["용량/속도 계산이 필요한지 확인"],
+      compatibilityChecks: ["라인/혼합/연결 상태 확인"],
+    },
+    safety: {
+      holdRules: ["중요 기준 이탈 또는 증상 악화 시 보류/중단"],
+      monitor: ["5-15-30-60분 내 상태 재평가"],
+      escalateWhen: ["호흡곤란·저혈압·의식저하·급격한 악화 시 즉시 보고"],
+    },
+    institutionalChecks: ["기관 프로토콜·약제부·IFU 확인 필요"],
+    sbar: {
+      situation: "안전 확인이 필요한 상태",
+      background: "현재 투여/장비 상황과 최근 변화 요약",
+      assessment: "핵심 활력·라인·증상 재평가",
+      recommendation: "즉시 조치 후 기준 이탈 시 담당의/당직 보고",
+    },
+    patientScript20s: "안전을 위해 지금 필요한 수치와 상태를 먼저 확인한 뒤 가장 안전한 방법으로 진행하겠습니다.",
+    modePriority: [],
+    confidenceNote: note.slice(0, 180),
+    searchAnswer: "",
+  };
+}
+
+function buildResultFromAnswer(params: AnalyzeParams, intent: QueryIntent, answer: string): MedSafetyAnalysisResult {
+  const normalized = normalizeText(answer);
+  const itemName = cleanLine(params.query || params.imageName || "").slice(0, 50) || "조회 항목";
+  const status = detectStatus(normalized);
+  const riskLevel = detectRiskLevel(normalized, status);
+  const sentences = extractSentences(normalized);
+  const bullets = extractBullets(normalized);
+
+  const topActions = dedupeLimit(
+    [
+      ...pickLinesByPattern(normalized, /(즉시|먼저|우선|first|immediate|초기 행동|시작)/i, 6),
+      ...bullets,
+      ...sentences,
+    ],
+    7
+  );
+  const topNumbers = dedupeLimit(
+    [
+      ...pickLinesByPattern(normalized, /(혈압|맵|map|맥박|spo2|rr|호흡|의식|통증|혈당|glucose|inr|aptt|qt|ecg|k\/mg|전해질|lab|검사)/i, 6),
+      ...pickLinesByPattern(normalized, /\d/, 6),
+    ],
+    6
+  );
+  const topRisks = dedupeLimit(
+    [
+      ...pickLinesByPattern(normalized, /(위험|금기|주의|경고|합병증|알람|stop|중단|보류|응급|호출)/i, 8),
+      ...bullets,
+    ],
+    7
+  );
+  const compatibilityChecks = dedupeLimit(
+    pickLinesByPattern(normalized, /(라인|호환|혼합|y-site|flush|clamp|stopcock|연결|전용 라인|compat)/i, 6),
+    6
+  );
+  const monitor = dedupeLimit(
+    [
+      ...pickLinesByPattern(normalized, /(모니터|재평가|vital|관찰|5분|15분|30분|60분)/i, 6),
+      ...topNumbers,
+    ],
+    6
+  );
+  const holdRules = dedupeLimit(pickLinesByPattern(normalized, /(중단|보류|hold|stop rule|즉시 중지)/i, 6), 6);
+  const escalateWhen = dedupeLimit(pickLinesByPattern(normalized, /(보고|호출|rtt|code|응급콜|전문팀)/i, 6), 6);
+  const calculatorsNeeded = dedupeLimit(
+    pickLinesByPattern(normalized, /(단위|농도|용량|속도|계산|mg|mcg|mEq|IU|drip)/i, 5),
+    5
+  );
+  const institutionalChecks = dedupeLimit(
+    pickLinesByPattern(normalized, /(기관|프로토콜|약제부|ifu|제조사|병원 지침|policy)/i, 4),
+    4
+  );
+  const sbar = buildSbar(normalized);
+
+  return {
+    resultKind: intent === "scenario" ? "scenario" : intent,
+    oneLineConclusion:
+      cleanLine(sentences[0] || "") ||
+      (intent === "medication"
+        ? `${itemName}의 핵심 목적·투여 원칙·위험 신호를 우선 확인하세요.`
+        : intent === "device"
+          ? `${itemName}의 셋업·정상 작동·알람 대응 순서를 우선 확인하세요.`
+          : `${itemName} 관련 상황에서 즉시 행동 우선순위와 중단/보고 기준을 우선 확인하세요.`),
+    riskLevel,
+    item: {
+      name: itemName,
+      type: detectItemType(intent, normalized),
+      aliases: dedupeLimit(
+        pickLinesByPattern(normalized, /(별칭|alias|aka|다른 이름)/i, 4).map((line) => line.replace(/^(별칭|alias)\s*[:：]\s*/i, "")),
+        4
+      ),
+      highRiskBadges:
+        status === "STOP"
+          ? ["즉시 중단/호출 검토"]
+          : status === "CHECK"
+            ? ["핵심 확인 필요"]
+            : ["진행 전 안전 확인"],
+      primaryUse: cleanLine(sentences.slice(0, 2).join(" ")) || `${itemName} 관련 핵심 임상 정보`,
+      confidence: Math.max(55, Math.min(95, Math.round(65 + Math.min(normalized.length, 1200) / 40))),
+    },
+    quick: {
+      status,
+      topActions: topActions.length ? topActions : ["핵심 정보 재확인 후 진행"],
+      topNumbers: topNumbers.length ? topNumbers : ["핵심 활력·의식·라인 상태 확인"],
+      topRisks: topRisks.length ? topRisks : ["위험 신호 확인 및 기준 이탈 시 즉시 보고"],
+    },
+    do: {
+      steps: dedupeLimit([...topActions, ...bullets], 9),
+      calculatorsNeeded,
+      compatibilityChecks,
+    },
+    safety: {
+      holdRules: holdRules.length ? holdRules : ["중요 기준 이탈 또는 급격한 악화 시 즉시 보류/중단"],
+      monitor: monitor.length ? monitor : ["상태에 따라 5-15-30-60분 간격 재평가"],
+      escalateWhen: escalateWhen.length ? escalateWhen : ["악화·응급 징후 발생 시 즉시 담당의/응급팀 호출"],
+    },
+    institutionalChecks: institutionalChecks.length ? institutionalChecks : ["기관 프로토콜·약제부·IFU 확인 필요"],
+    sbar,
+    patientScript20s:
+      cleanLine(
+        pickLinesByPattern(normalized, /(환자|설명|알려|teach|교육)/i, 1)[0] ||
+          "지금 처치는 안전 확인이 핵심이라, 목적과 주의 증상을 짧게 설명드리고 바로 상태를 다시 확인하겠습니다."
+      ).slice(0, 220),
+    modePriority: [],
+    confidenceNote: "고정 템플릿 없이 검색엔진형 응답을 바탕으로 요약했습니다. 기관 기준은 반드시 재확인해 주세요.",
+    searchAnswer: normalized,
+  };
 }
 
 export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise<{
@@ -1611,36 +686,20 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
   const apiKey = normalizeApiKey();
   if (!apiKey) throw new Error("missing_openai_api_key");
 
+  const intent = inferIntent(params);
   const modelCandidates = resolveModelCandidates();
-  const primaryModel = modelCandidates[0] ?? "gpt-4.1-mini";
   const apiBaseUrl = resolveApiBaseUrl();
   const maxOutputTokens = resolveMaxOutputTokens();
-  const expected = inferExpectedInputClassification({
-    query: params.query,
-    patientSummary: params.patientSummary,
-    imageName: params.imageName,
-    situation: params.situation,
-    queryIntent: params.queryIntent,
-  });
   const developerPrompt = buildDeveloperPrompt(params.locale);
-  const userPrompt = buildUserPrompt({
-    query: params.query,
-    mode: params.mode,
-    situation: params.situation,
-    patientSummary: params.patientSummary,
-    locale: params.locale,
-    imageName: params.imageName,
-    expected,
-  });
+  const userPrompt = buildUserPrompt(params, intent);
 
-  let parsed: MedSafetyAnalysisResult | null = null;
+  let selectedModel = modelCandidates[0] ?? "gpt-4.1-mini";
   let rawText = "";
-  let selectedModel = primaryModel;
   let lastError = "openai_request_failed";
 
   for (const candidateModel of modelCandidates) {
     selectedModel = candidateModel;
-    let attempt = await callResponsesApi({
+    const attempt = await callResponsesApi({
       apiKey,
       model: candidateModel,
       developerPrompt,
@@ -1650,118 +709,30 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
       signal: params.signal,
       maxOutputTokens,
     });
-    if (attempt.error) lastError = attempt.error;
-    if (attempt.text) rawText = attempt.text;
-
-    let candidateParsed = parseAttemptResult(attempt);
-    if (candidateParsed) {
-      candidateParsed = alignAnalysisResultToInputKind(candidateParsed, expected, {
-        query: params.query,
-        situation: params.situation,
-        locale: params.locale,
-      });
+    if (attempt.error) {
+      lastError = attempt.error;
+      continue;
     }
-
-    if (!candidateParsed && !attempt.text && shouldRetryOpenAiError(attempt.error)) {
-      const retry = await callResponsesApi({
-        apiKey,
-        model: candidateModel,
-        developerPrompt,
-        userPrompt,
-        apiBaseUrl,
-        imageDataUrl: params.imageDataUrl,
-        signal: params.signal,
-        maxOutputTokens,
-      });
-      attempt = retry;
-      if (retry.error) lastError = retry.error;
-      if (retry.text) rawText = retry.text;
-      candidateParsed = parseAttemptResult(retry);
-      if (candidateParsed) {
-        candidateParsed = alignAnalysisResultToInputKind(candidateParsed, expected, {
-          query: params.query,
-          situation: params.situation,
-          locale: params.locale,
-        });
-      }
-    }
-
-    if (candidateParsed) {
-      parsed = candidateParsed;
-      break;
-    }
-
     if (attempt.text) {
-      const repaired = await repairAnalysisFromRawText({
-        apiKey,
+      rawText = attempt.text;
+      const result = buildResultFromAnswer(params, intent, attempt.text);
+      return {
+        result,
         model: candidateModel,
         rawText: attempt.text,
-        locale: params.locale,
-        apiBaseUrl,
-        maxOutputTokens,
-        signal: params.signal,
-      });
-      if (repaired) {
-        parsed = alignAnalysisResultToInputKind(repaired.parsed, expected, {
-          query: params.query,
-          situation: params.situation,
-          locale: params.locale,
-        });
-        rawText = repaired.rawText;
-        selectedModel = repaired.model;
-        break;
-      }
-    }
-  }
-
-  if (!parsed && rawText) {
-    const normalizedFromNarrative = parseAnalysisResultFromNarrativeText(rawText, params);
-    if (normalizedFromNarrative) {
-      return {
-        result: alignAnalysisResultToInputKind(normalizedFromNarrative, expected, {
-          query: params.query,
-          situation: params.situation,
-          locale: params.locale,
-        }),
-        model: selectedModel,
-        rawText,
         fallbackReason: null,
       };
     }
   }
 
-  if (!parsed && !rawText) {
-    const fallback = buildFallbackAnalysisResult(
-      params,
-      fallbackNoteFromOpenAiError(lastError, params.locale),
-      expected
-    );
-    return {
-      result: fallback,
-      model: selectedModel,
-      rawText: "",
-      fallbackReason: lastError || "openai_request_failed",
-    };
-  }
-
-  if (!parsed) {
-    const fallback = buildFallbackAnalysisResult(params, "AI 응답이 불완전해 안전 기본 모드로 복구되었습니다.", expected);
-    return {
-      result: fallback,
-      model: selectedModel,
-      rawText,
-      fallbackReason: "openai_invalid_json_payload",
-    };
-  }
-
   return {
-    result: alignAnalysisResultToInputKind(parsed, expected, {
-      query: params.query,
-      situation: params.situation,
-      locale: params.locale,
-    }),
+    result: buildFallbackResult(
+      params,
+      intent,
+      `OpenAI 응답 실패로 기본 안전 모드로 전환되었습니다. (${truncateError(lastError)})`
+    ),
     model: selectedModel,
     rawText,
-    fallbackReason: null,
+    fallbackReason: lastError,
   };
 }
