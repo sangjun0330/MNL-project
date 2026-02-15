@@ -48,12 +48,13 @@ function pickSituation(raw: FormDataEntryValue | null): ClinicalSituation {
   const value = String(raw ?? "")
     .trim()
     .toLowerCase();
+  if (value === "general") return "general";
   if (value === "pre_admin") return "pre_admin";
   if (value === "during_admin") return "during_admin";
   if (value === "event_response") return "event_response";
   // legacy aliases from previous UI
   if (value === "alarm" || value === "adverse_suspect") return "event_response";
-  return "pre_admin";
+  return "general";
 }
 
 function bytesToBase64(input: Uint8Array) {

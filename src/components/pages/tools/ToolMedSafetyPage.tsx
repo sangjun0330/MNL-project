@@ -15,7 +15,7 @@ const SECONDARY_FLAT_BTN =
 const SEGMENT_WRAPPER_CLASS = "inline-flex rounded-2xl border border-ios-sep bg-ios-bg p-1";
 
 type ClinicalMode = "ward" | "er" | "icu";
-type ClinicalSituation = "pre_admin" | "during_admin" | "event_response";
+type ClinicalSituation = "general" | "pre_admin" | "during_admin" | "event_response";
 
 type MedSafetyItemType = "medication" | "device" | "unknown";
 type MedSafetyQuickStatus = "OK" | "CHECK" | "STOP";
@@ -69,6 +69,7 @@ const MODE_OPTIONS: Array<{ value: ClinicalMode; label: string }> = [
 ];
 
 const SITUATION_OPTIONS: Array<{ value: ClinicalSituation; label: string }> = [
+  { value: "general", label: "일반 검색" },
   { value: "pre_admin", label: "투여 전 확인" },
   { value: "during_admin", label: "투여 중 모니터" },
   { value: "event_response", label: "이상/알람 대응" },
@@ -82,6 +83,13 @@ const SITUATION_INPUT_GUIDE: Record<
     cue: string;
   }
 > = {
+  general: {
+    queryPlaceholder:
+      "예: heparin flush랑 혈액검사 채혈 라인 병행 시 주의점, 라인 잠금 순서, 즉시 확인해야 할 안전 항목 정리.",
+    summaryPlaceholder:
+      "(선택) 일반 검색 요약: 현재 처치 목적, 환자 상태 핵심(V/S, 알레르기), 사용 약물/기구, 확인이 필요한 포인트",
+    cue: "일반 검색: 특정 단계가 아니라도 약물·도구 안전 확인 질문을 자유롭게 입력하면, 핵심 행동 위주로 정리합니다.",
+  },
   pre_admin: {
     queryPlaceholder:
       "예: Piperacillin/Tazobactam 4.5g IV 투여 전. Cr 1.9, penicillin 발진 과거력, 현재 BP 92/58. 바로 투여 가능 여부와 확인 순서.",
@@ -210,7 +218,7 @@ function modeLabel(mode: ClinicalMode) {
 
 function situationLabel(situation: ClinicalSituation) {
   const hit = SITUATION_OPTIONS.find((option) => option.value === situation);
-  return hit?.label ?? "투여 전 확인";
+  return hit?.label ?? "일반 검색";
 }
 
 function formatDateTime(value: number) {
@@ -267,7 +275,7 @@ function MedSafetyAnalyzingOverlay({ open }: { open: boolean }) {
 export function ToolMedSafetyPage() {
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<ClinicalMode>("ward");
-  const [situation, setSituation] = useState<ClinicalSituation>("pre_admin");
+  const [situation, setSituation] = useState<ClinicalSituation>("general");
   const [patientSummary, setPatientSummary] = useState("");
   const [result, setResult] = useState<MedSafetyAnalyzeResult | null>(null);
   const [resultTab, setResultTab] = useState<ResultTab>("quick");

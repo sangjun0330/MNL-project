@@ -1,7 +1,7 @@
 export type MedSafetyItemType = "medication" | "device" | "unknown";
 export type MedSafetyQuickStatus = "OK" | "CHECK" | "STOP";
 export type ClinicalMode = "ward" | "er" | "icu";
-export type ClinicalSituation = "pre_admin" | "during_admin" | "event_response";
+export type ClinicalSituation = "general" | "pre_admin" | "during_admin" | "event_response";
 
 export type MedSafetyAnalysisResult = {
   item: {
@@ -819,6 +819,11 @@ function buildFallbackAnalysisResult(params: AnalyzeParams, note: string): MedSa
   const name = rawName.slice(0, 40) || "입력 항목";
 
   const situationActions: Record<ClinicalSituation, string[]> = {
+    general: [
+      "질문한 약물/도구의 목적과 현재 사용 맥락을 먼저 확인",
+      "즉시 확인이 필요한 안전 포인트(알레르기·라인·단위/농도)를 우선 점검",
+      "불명확 항목은 CHECK로 두고 병동 지침/처방 기준으로 재확인",
+    ],
     pre_admin: [
       "투여 전 5R(환자·약물·용량·시간·경로)과 환자식별 2개를 먼저 재확인",
       "알레르기·금기·중복투여 가능성과 최신 활력징후/검사값을 확인",
@@ -886,10 +891,12 @@ function modeLabel(mode: ClinicalMode, locale: "ko" | "en") {
 
 function situationLabel(situation: ClinicalSituation, locale: "ko" | "en") {
   if (locale === "en") {
+    if (situation === "general") return "General search";
     if (situation === "pre_admin") return "Pre-administration safety check";
     if (situation === "during_admin") return "During administration monitoring";
     return "Alarm/adverse event response";
   }
+  if (situation === "general") return "일반 검색";
   if (situation === "pre_admin") return "투여 전 확인";
   if (situation === "during_admin") return "투여 중 모니터";
   return "이상/알람 대응";
@@ -897,6 +904,14 @@ function situationLabel(situation: ClinicalSituation, locale: "ko" | "en") {
 
 function buildSituationPromptLines(situation: ClinicalSituation, locale: "ko" | "en") {
   if (locale === "ko") {
+    if (situation === "general") {
+      return [
+        "[상황별 출력 규칙: 일반 검색]",
+        "- 특정 단계가 불명확하면 약물/도구 식별 + 가장 보편적인 안전 확인 순서를 제시",
+        "- quick.topActions는 지금 바로 확인 가능한 항목(용도, 금기, 라인/장비 상태) 중심으로 작성",
+        "- 불확실 정보는 단정하지 말고 CHECK와 재확인 포인트를 제시",
+      ];
+    }
     if (situation === "pre_admin") {
       return [
         "[상황별 출력 규칙: 투여 전 확인]",
@@ -922,6 +937,14 @@ function buildSituationPromptLines(situation: ClinicalSituation, locale: "ko" | 
     ];
   }
 
+  if (situation === "general") {
+    return [
+      "[Situation Output Rules: General search]",
+      "- If stage is unclear, provide broad but practical safety-first checks.",
+      "- Keep quick.topActions focused on immediate checks (purpose, contraindications, line/device status).",
+      "- Avoid overclaiming; keep uncertain parts in CHECK with clear verification points.",
+    ];
+  }
   if (situation === "pre_admin") {
     return [
       "[Situation Output Rules: Pre-administration]",
@@ -955,7 +978,7 @@ function buildDeveloperPrompt(locale: "ko" | "en") {
       "30초 내 행동 결정을 돕는 구조로 작성한다: step-first, hold/stop 조건, 보고 기준, 라인/호환 점검 우선.",
       "quick.topActions는 2~3개 핵심 행동만 제시한다(경고 과다 금지).",
       "quick.topRisks도 최대 3개만 제시한다. 과한 경고 나열 금지.",
-      "모드(병동/ER/ICU)와 상황(투여 전 확인/투여 중 모니터/이상·알람 대응)에 따라 우선순위를 다르게 제시한다.",
+      "모드(병동/ER/ICU)와 상황(일반 검색/투여 전 확인/투여 중 모니터/이상·알람 대응)에 따라 우선순위를 다르게 제시한다.",
       "질의/이미지가 모호하면 무리한 단정 금지: CHECK로 두고 재확인 포인트를 행동으로 제시한다.",
       "약물/도구 혼동, 단위/농도 오인, 라인 호환성 위험은 우선 경고에 반영한다.",
       "근거 없는 임의 수치(예: 비현실적 NRS/용량/속도) 생성 금지. 입력 근거가 없으면 '병원 프로토콜 기준 확인'으로 표현한다.",
