@@ -84,21 +84,6 @@ export function BottomNav() {
     setPendingHref(null);
   }, [pathname]);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const prefetchAll = () => {
-      ITEMS.forEach((it) => router.prefetch(it.href));
-    };
-    const requestIdle = (window as any).requestIdleCallback as undefined | ((cb: () => void, opts?: { timeout: number }) => number);
-    const cancelIdle = (window as any).cancelIdleCallback as undefined | ((id: number) => void);
-    if (requestIdle) {
-      const id = requestIdle(prefetchAll, { timeout: 1200 });
-      return () => cancelIdle?.(id);
-    }
-    const id = window.setTimeout(prefetchAll, 0);
-    return () => window.clearTimeout(id);
-  }, [router]);
-
   const activeHref = useMemo(() => {
     const hit = ITEMS.find((it) =>
       it.href === "/" ? pathname === "/" : pathname?.startsWith(it.href)

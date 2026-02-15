@@ -115,11 +115,13 @@ function normalizeApiBaseUrl(raw: string) {
   return trimmed.replace(/\/+$/, "");
 }
 
-function resolveApiBaseUrl() {
-  const base = normalizeApiBaseUrl(
+function resolveApiBaseUrls() {
+  const listFromEnv = splitModelList(process.env.OPENAI_MED_SAFETY_BASE_URLS ?? "").map((item) => normalizeApiBaseUrl(item));
+  const single = normalizeApiBaseUrl(
     process.env.OPENAI_MED_SAFETY_BASE_URL ?? process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1"
   );
-  return base || "https://api.openai.com/v1";
+  const defaults = ["https://api.openai.com/v1"];
+  return dedupeModels([...listFromEnv, single, ...defaults]).filter(Boolean);
 }
 
 function resolveStoreResponses() {
@@ -152,6 +154,13 @@ function resolveNetworkRetryBaseMs() {
   if (!Number.isFinite(raw)) return 700;
   const rounded = Math.round(raw);
   return Math.max(200, Math.min(4000, rounded));
+}
+
+function resolveUpstreamTimeoutMs() {
+  const raw = Number(process.env.OPENAI_MED_SAFETY_UPSTREAM_TIMEOUT_MS ?? 35_000);
+  if (!Number.isFinite(raw)) return 35_000;
+  const rounded = Math.round(raw);
+  return Math.max(8_000, Math.min(90_000, rounded));
 }
 
 function truncateError(raw: string, size = 220) {
@@ -549,6 +558,7 @@ async function callResponsesApi(args: {
   conversationId?: string;
   signal: AbortSignal;
   maxOutputTokens: number;
+  upstreamTimeoutMs: number;
   verbosity: ResponseVerbosity;
   storeResponses: boolean;
 }): Promise<ResponsesAttempt> {
@@ -563,6 +573,7 @@ async function callResponsesApi(args: {
     conversationId,
     signal,
     maxOutputTokens,
+    upstreamTimeoutMs,
     verbosity,
     storeResponses,
   } = args;
@@ -600,6 +611,18 @@ async function callResponsesApi(args: {
   if (conversationId) body.conversation = conversationId;
 
   let response: Response;
+  let timedOut = false;
+  const requestAbort = new AbortController();
+  const onParentAbort = () => requestAbort.abort();
+  if (signal.aborted) {
+    onParentAbort();
+  } else {
+    signal.addEventListener("abort", onParentAbort);
+  }
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    requestAbort.abort();
+  }, upstreamTimeoutMs);
   try {
     response = await fetch(`${apiBaseUrl}/responses`, {
       method: "POST",
@@ -608,9 +631,19 @@ async function callResponsesApi(args: {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify(body),
-      signal,
+      signal: requestAbort.signal,
     });
   } catch (cause: any) {
+    clearTimeout(timeout);
+    signal.removeEventListener("abort", onParentAbort);
+    if (timedOut) {
+      return {
+        text: null,
+        error: `openai_timeout_upstream_model:${model}`,
+        responseId: null,
+        conversationId: null,
+      };
+    }
     return {
       text: null,
       error: `openai_network_${truncateError(String(cause?.message ?? cause ?? "fetch_failed"))}`,
@@ -618,6 +651,8 @@ async function callResponsesApi(args: {
       conversationId: null,
     };
   }
+  clearTimeout(timeout);
+  signal.removeEventListener("abort", onParentAbort);
 
   if (!response.ok) {
     const raw = await response.text().catch(() => "");
@@ -909,11 +944,12 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
 
   const intent = inferIntent(params);
   const modelCandidates = resolveModelCandidates(params.preferredModel);
-  const apiBaseUrl = resolveApiBaseUrl();
+  const apiBaseUrls = resolveApiBaseUrls();
   const maxOutputTokens = resolveMaxOutputTokens();
   const maxOutputTokensForIntent =
     intent === "scenario" ? Math.max(2200, Math.min(4800, maxOutputTokens)) : maxOutputTokens;
   const responseVerbosity: ResponseVerbosity = "high";
+  const upstreamTimeoutMs = resolveUpstreamTimeoutMs();
   const networkRetries = resolveNetworkRetryCount();
   const networkRetryBaseMs = resolveNetworkRetryBaseMs();
   const storeResponses = resolveStoreResponses();
@@ -926,37 +962,40 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
 
   for (const candidateModel of modelCandidates) {
     selectedModel = candidateModel;
-    const attempt = await callResponsesApiWithRetry({
-      apiKey,
-      model: candidateModel,
-      developerPrompt,
-      userPrompt,
-      apiBaseUrl,
-      imageDataUrl: params.imageDataUrl,
-      previousResponseId: params.previousResponseId,
-      conversationId: params.conversationId,
-      signal: params.signal,
-      maxOutputTokens: maxOutputTokensForIntent,
-      verbosity: responseVerbosity,
-      storeResponses,
-      retries: networkRetries,
-      retryBaseMs: networkRetryBaseMs,
-    });
-    if (attempt.error) {
-      lastError = attempt.error;
-      continue;
-    }
-    if (attempt.text) {
-      rawText = attempt.text;
-      const result = buildResultFromAnswer(params, intent, attempt.text);
-      return {
-        result,
+    for (const apiBaseUrl of apiBaseUrls) {
+      const attempt = await callResponsesApiWithRetry({
+        apiKey,
         model: candidateModel,
-        rawText: attempt.text,
-        fallbackReason: null,
-        openaiResponseId: attempt.responseId,
-        openaiConversationId: attempt.conversationId,
-      };
+        developerPrompt,
+        userPrompt,
+        apiBaseUrl,
+        imageDataUrl: params.imageDataUrl,
+        previousResponseId: params.previousResponseId,
+        conversationId: params.conversationId,
+        signal: params.signal,
+        maxOutputTokens: maxOutputTokensForIntent,
+        upstreamTimeoutMs,
+        verbosity: responseVerbosity,
+        storeResponses,
+        retries: networkRetries,
+        retryBaseMs: networkRetryBaseMs,
+      });
+      if (attempt.error) {
+        lastError = attempt.error;
+        continue;
+      }
+      if (attempt.text) {
+        rawText = attempt.text;
+        const result = buildResultFromAnswer(params, intent, attempt.text);
+        return {
+          result,
+          model: candidateModel,
+          rawText: attempt.text,
+          fallbackReason: null,
+          openaiResponseId: attempt.responseId,
+          openaiConversationId: attempt.conversationId,
+        };
+      }
     }
   }
 

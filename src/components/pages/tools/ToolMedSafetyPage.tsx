@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -924,52 +924,122 @@ export function ToolMedSafetyPage() {
     [activeSituation, imageFile, isScenarioIntent, mode, patientSummary, preferredModel, query, queryIntent, scenarioState]
   );
 
-  const immediateActions = result ? mergeUniqueLists(result.quick.topActions).slice(0, 7) : [];
-  const checks1to5 = result ? mergeUniqueLists(result.quick.topNumbers).slice(0, 6) : [];
-  const branchRules = result ? mergeUniqueLists(result.quick.topRisks, result.safety.holdRules, result.safety.escalateWhen).slice(0, 8) : [];
-  const adjustmentPlan = result ? mergeUniqueLists(result.do.steps).slice(0, 8) : [];
-  const preventionPoints = result ? mergeUniqueLists(result.do.compatibilityChecks, result.institutionalChecks).slice(0, 6) : [];
-  const reassessmentPoints = result ? mergeUniqueLists(result.safety.monitor).slice(0, 6) : [];
-  const headerConclusion = result
-    ? clampDisplayText(result.oneLineConclusion, result.resultKind === "scenario" ? 160 : 220)
-    : "";
-  const headerPrimaryUse = result
-    ? clampDisplayText(result.item.primaryUse, result.resultKind === "scenario" ? 170 : 220)
-    : "";
-  const dynamicCardsFromNarrative = result?.searchAnswer ? buildNarrativeCards(result.searchAnswer) : [];
-  const dynamicCardsFallback: DynamicResultCard[] = result
-    ? [
-        {
-          key: "fallback-core",
-          title: "핵심 요약",
-          items: pickCardItems(
-            mergeUniqueLists(
+  const resultViewState = useMemo(() => {
+    if (!result) {
+      return {
+        resultKindChip: "",
+        headerConclusion: "",
+        headerPrimaryUse: "",
+        showHeaderPrimaryUse: false,
+        displayCards: [] as DynamicResultCard[],
+      };
+    }
+
+    const immediateActions = mergeUniqueLists(result.quick.topActions).slice(0, 7);
+    const checks1to5 = mergeUniqueLists(result.quick.topNumbers).slice(0, 6);
+    const branchRules = mergeUniqueLists(result.quick.topRisks, result.safety.holdRules, result.safety.escalateWhen).slice(0, 8);
+    const adjustmentPlan = mergeUniqueLists(result.do.steps).slice(0, 8);
+    const preventionPoints = mergeUniqueLists(result.do.compatibilityChecks, result.institutionalChecks).slice(0, 6);
+    const reassessmentPoints = mergeUniqueLists(result.safety.monitor).slice(0, 6);
+    const headerConclusion = clampDisplayText(result.oneLineConclusion, result.resultKind === "scenario" ? 160 : 220);
+    const headerPrimaryUse = clampDisplayText(result.item.primaryUse, result.resultKind === "scenario" ? 170 : 220);
+
+    const dynamicCardsFromNarrative = result.searchAnswer ? buildNarrativeCards(result.searchAnswer) : [];
+    const dynamicCardsFallback: DynamicResultCard[] = [
+      {
+        key: "fallback-core",
+        title: "핵심 요약",
+        items: pickCardItems(
+          mergeUniqueLists(
             headerConclusion ? [headerConclusion] : [],
             headerPrimaryUse ? [headerPrimaryUse] : [],
             immediateActions.length ? [`가장 먼저: ${immediateActions[0]}`] : []
-            )
-          ),
-          compact: true,
-        },
-        { key: "fallback-action", title: "주요 행동", items: pickCardItems(immediateActions) },
-        { key: "fallback-check", title: "핵심 확인", items: pickCardItems(checks1to5) },
-        { key: "fallback-step", title: "실행 포인트", items: pickCardItems(adjustmentPlan) },
-        { key: "fallback-risk", title: "위험/에스컬레이션", items: pickCardItems(branchRules) },
-        { key: "fallback-prevent", title: "실수 방지", items: pickCardItems(preventionPoints) },
-        { key: "fallback-monitor", title: "모니터/재평가", items: pickCardItems(reassessmentPoints) },
-      ].filter((card) => card.items.length > 0)
-    : [];
-  const dynamicCards = dynamicCardsFromNarrative.length ? dynamicCardsFromNarrative : dynamicCardsFallback;
-  const displayCards =
-    result?.resultKind === "scenario"
-      ? dynamicCards
-      : dynamicCards.map((card) => ({
-          ...card,
-          items: card.items.slice(0, NON_SCENARIO_CARD_MAX_ITEMS),
-        }));
-  const showHeaderPrimaryUse =
-    !!result && result.resultKind !== "scenario" && !!headerPrimaryUse && !isNearDuplicateText(headerPrimaryUse, headerConclusion);
-  const resultKindChip = result ? kindLabel(result.resultKind) : "";
+          )
+        ),
+        compact: true,
+      },
+      { key: "fallback-action", title: "주요 행동", items: pickCardItems(immediateActions) },
+      { key: "fallback-check", title: "핵심 확인", items: pickCardItems(checks1to5) },
+      { key: "fallback-step", title: "실행 포인트", items: pickCardItems(adjustmentPlan) },
+      { key: "fallback-risk", title: "위험/에스컬레이션", items: pickCardItems(branchRules) },
+      { key: "fallback-prevent", title: "실수 방지", items: pickCardItems(preventionPoints) },
+      { key: "fallback-monitor", title: "모니터/재평가", items: pickCardItems(reassessmentPoints) },
+    ].filter((card) => card.items.length > 0);
+
+    const dynamicCards = dynamicCardsFromNarrative.length ? dynamicCardsFromNarrative : dynamicCardsFallback;
+    const displayCards =
+      result.resultKind === "scenario"
+        ? dynamicCards
+        : dynamicCards.map((card) => ({
+            ...card,
+            items: card.items.slice(0, NON_SCENARIO_CARD_MAX_ITEMS),
+          }));
+
+    return {
+      resultKindChip: kindLabel(result.resultKind),
+      headerConclusion,
+      headerPrimaryUse,
+      showHeaderPrimaryUse:
+        result.resultKind !== "scenario" && !!headerPrimaryUse && !isNearDuplicateText(headerPrimaryUse, headerConclusion),
+      displayCards,
+    };
+  }, [result]);
+
+  const resultPanel = useMemo(() => {
+    if (!result) {
+      return (
+        <div className="py-1">
+          <div className="text-[24px] font-bold text-ios-text">결과 대기</div>
+          <div className="mt-2 text-[17px] leading-7 text-ios-sub">입력 후 `AI 분석 실행`을 누르면, 먼저 읽어야 할 핵심 행동부터 표시됩니다.</div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-6">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-[color:var(--wnl-accent)] bg-[color:var(--wnl-accent-soft)] px-3 py-1 text-[13px] font-semibold text-[color:var(--wnl-accent)]">
+              {resultViewState.resultKindChip}
+            </span>
+          </div>
+          <div className="mt-2 text-[34px] font-bold leading-[1.08] tracking-[-0.03em] text-ios-text">{result.item.name}</div>
+          <div className="mt-1.5 text-[18px] leading-7 text-ios-text">
+            {resultViewState.headerConclusion || resultViewState.headerPrimaryUse || "핵심 안전 확인 필요"}
+          </div>
+          {resultViewState.showHeaderPrimaryUse ? (
+            <div className="mt-1 text-[16px] leading-6 text-ios-sub">{resultViewState.headerPrimaryUse}</div>
+          ) : null}
+          <div className="mt-2 text-[15px] text-ios-sub">
+            모드: {modeLabel(mode)} · 유형: {queryIntentLabel(queryIntent)} · 상황: {situationLabel(activeSituation)} · 분석:{" "}
+            {formatDateTime(result.analyzedAt)}
+          </div>
+        </div>
+
+        <div className="border-t border-ios-sep pt-2.5">
+          {resultViewState.displayCards.length ? (
+            <div className="space-y-2.5">
+              {resultViewState.displayCards.map((card) => (
+                <section
+                  key={card.key}
+                  className={`${card.compact ? "border-l-[3px] border-[color:var(--wnl-accent)] pl-3 py-1.5" : "border-b border-ios-sep pb-2.5"} last:border-b-0`}
+                >
+                  <div className="text-[15px] font-bold tracking-[-0.01em] text-[color:var(--wnl-accent)]">{card.title}</div>
+                  <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[15px] leading-6 text-ios-text">
+                    {card.items.map((item, index) => (
+                      <li key={`${card.key}-${index}`}>{renderHighlightedLine(item)}</li>
+                    ))}
+                  </ul>
+                </section>
+              ))}
+            </div>
+          ) : (
+            <div className="text-[15px] text-ios-sub">표시할 분석 정보가 없습니다.</div>
+          )}
+        </div>
+      </div>
+    );
+  }, [activeSituation, mode, queryIntent, result, resultViewState]);
 
   return (
     <>
@@ -1157,53 +1227,7 @@ export function ToolMedSafetyPage() {
         </Card>
 
         <Card className={`p-3 ${FLAT_CARD_CLASS}`}>
-          {!result ? (
-            <div className="py-1">
-              <div className="text-[24px] font-bold text-ios-text">결과 대기</div>
-              <div className="mt-2 text-[17px] leading-7 text-ios-sub">입력 후 `AI 분석 실행`을 누르면, 먼저 읽어야 할 핵심 행동부터 표시됩니다.</div>
-            </div>
-          ) : (
-            <div className="space-y-6">
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full border border-[color:var(--wnl-accent)] bg-[color:var(--wnl-accent-soft)] px-3 py-1 text-[13px] font-semibold text-[color:var(--wnl-accent)]">
-                    {resultKindChip}
-                  </span>
-                </div>
-                <div className="mt-2 text-[34px] font-bold leading-[1.08] tracking-[-0.03em] text-ios-text">{result.item.name}</div>
-                <div className="mt-1.5 text-[18px] leading-7 text-ios-text">{headerConclusion || headerPrimaryUse || "핵심 안전 확인 필요"}</div>
-                {showHeaderPrimaryUse ? (
-                  <div className="mt-1 text-[16px] leading-6 text-ios-sub">{headerPrimaryUse}</div>
-                ) : null}
-                <div className="mt-2 text-[15px] text-ios-sub">
-                  모드: {modeLabel(mode)} · 유형: {queryIntentLabel(queryIntent)} · 상황: {situationLabel(activeSituation)} · 분석:{" "}
-                  {formatDateTime(result.analyzedAt)}
-                </div>
-              </div>
-
-              <div className="border-t border-ios-sep pt-2.5">
-                {displayCards.length ? (
-                  <div className="space-y-2.5">
-                    {displayCards.map((card) => (
-                      <section
-                        key={card.key}
-                        className={`${card.compact ? "border-l-[3px] border-[color:var(--wnl-accent)] pl-3 py-1.5" : "border-b border-ios-sep pb-2.5"} last:border-b-0`}
-                      >
-                        <div className="text-[15px] font-bold tracking-[-0.01em] text-[color:var(--wnl-accent)]">{card.title}</div>
-                        <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[15px] leading-6 text-ios-text">
-                          {card.items.map((item, index) => (
-                            <li key={`${card.key}-${index}`}>{renderHighlightedLine(item)}</li>
-                          ))}
-                        </ul>
-                      </section>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-[15px] text-ios-sub">표시할 분석 정보가 없습니다.</div>
-                )}
-              </div>
-            </div>
-          )}
+          {resultPanel}
 
           <div className="mt-4 border-t border-ios-sep pt-3 text-[14px] leading-6 text-ios-sub">
             본 결과는 참고용 자동 생성 정보이며 의료행위 판단의 근거로 사용할 수 없습니다. 제공자는 본 결과의 사용으로 발생한 진단·치료·투약 결정 및 결과에 대해 책임을 지지 않습니다. 모든 처치는 병원 지침, 처방, 의료진 확인을 우선해 결정해 주세요.
