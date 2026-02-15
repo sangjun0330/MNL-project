@@ -94,8 +94,8 @@ function normalizeApiKey() {
 }
 
 function resolveModel() {
-  const model = String(process.env.OPENAI_MED_SAFETY_MODEL ?? process.env.OPENAI_MODEL ?? "gpt-4.1-mini").trim();
-  return model || "gpt-4.1-mini";
+  const model = String(process.env.OPENAI_MED_SAFETY_MODEL ?? process.env.OPENAI_MODEL ?? "gpt-4o-mini").trim();
+  return model || "gpt-4o-mini";
 }
 
 function normalizeApiBaseUrl(raw: string) {
@@ -104,22 +104,11 @@ function normalizeApiBaseUrl(raw: string) {
   return trimmed.replace(/\/+$/, "");
 }
 
-function resolveApiBaseCandidates() {
-  const direct = "https://api.openai.com/v1";
-  const dedicatedPrimary = normalizeApiBaseUrl(process.env.OPENAI_MED_SAFETY_BASE_URL ?? "");
-  const sharedPrimary = normalizeApiBaseUrl(process.env.OPENAI_BASE_URL ?? "");
-  const dedicatedFallback = normalizeApiBaseUrl(process.env.OPENAI_MED_SAFETY_FALLBACK_BASE_URL ?? "");
-  const sharedFallback = normalizeApiBaseUrl(process.env.OPENAI_FALLBACK_BASE_URL ?? "");
-
-  const ordered = [direct, dedicatedPrimary, sharedPrimary, dedicatedFallback, sharedFallback].filter(Boolean);
-  const unique: string[] = [];
-  const seen = new Set<string>();
-  for (const candidate of ordered) {
-    if (seen.has(candidate)) continue;
-    seen.add(candidate);
-    unique.push(candidate);
-  }
-  return unique;
+function resolveApiBaseUrl() {
+  const base = normalizeApiBaseUrl(
+    process.env.OPENAI_MED_SAFETY_BASE_URL ?? process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1"
+  );
+  return base || "https://api.openai.com/v1";
 }
 
 function resolveMaxOutputTokens() {
@@ -127,41 +116,6 @@ function resolveMaxOutputTokens() {
   if (!Number.isFinite(raw)) return 1400;
   const rounded = Math.round(raw);
   return Math.max(700, Math.min(3000, rounded));
-}
-
-function resolvePerAttemptTimeoutMs() {
-  const raw = Number(
-    process.env.OPENAI_MED_SAFETY_PER_ATTEMPT_TIMEOUT_MS ?? process.env.OPENAI_PER_ATTEMPT_TIMEOUT_MS ?? 12000
-  );
-  if (!Number.isFinite(raw)) return 12000;
-  const rounded = Math.round(raw);
-  return Math.max(4000, Math.min(45000, rounded));
-}
-
-function createAttemptSignal(parent: AbortSignal, timeoutMs: number) {
-  const controller = new AbortController();
-  const onAbort = () => {
-    controller.abort((parent as any).reason ?? new DOMException("Aborted", "AbortError"));
-  };
-
-  if (parent.aborted) {
-    onAbort();
-  } else {
-    parent.addEventListener("abort", onAbort, { once: true });
-  }
-
-  const timer = setTimeout(() => {
-    if (!controller.signal.aborted) {
-      controller.abort(new DOMException("Attempt timed out", "AbortError"));
-    }
-  }, timeoutMs);
-
-  const dispose = () => {
-    clearTimeout(timer);
-    parent.removeEventListener("abort", onAbort);
-  };
-
-  return { signal: controller.signal, dispose };
 }
 
 function buildMedSafetyJsonSchema() {
@@ -222,6 +176,11 @@ function buildMedSafetyJsonSchema() {
 }
 
 function extractResponsesText(json: any): string {
+  // Extract from standard Chat Completions API response
+  const content = json?.choices?.[0]?.message?.content;
+  if (typeof content === "string" && content.trim()) return content.trim();
+
+  // Fallback to legacy format if needed
   const direct = json?.output_text;
   if (typeof direct === "string" && direct.trim()) return direct.trim();
   if (Array.isArray(direct)) {
@@ -347,6 +306,35 @@ function collectStructuredCandidates(json: unknown): unknown[] {
 
   if (!json || typeof json !== "object") return out;
   const root = json as Record<string, unknown>;
+
+  // Try standard Chat Completions API format first
+  const choices = Array.isArray(root.choices) ? root.choices : [];
+  for (const choice of choices) {
+    if (!choice || typeof choice !== "object") continue;
+    const node = choice as Record<string, unknown>;
+    const message = (node.message ?? null) as Record<string, unknown> | null;
+    if (!message) continue;
+
+    // Parse content from message
+    const content = message.content;
+    if (typeof content === "string") {
+      const parsed = safeJsonParse<unknown>(content);
+      if (parsed) out.push(parsed);
+    }
+
+    push(message.parsed);
+    push(message.output_parsed);
+    push(message.json);
+    const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+    for (const tc of toolCalls) {
+      if (!tc || typeof tc !== "object") continue;
+      const fn = (tc as Record<string, unknown>).function as Record<string, unknown> | undefined;
+      if (!fn) continue;
+      push(fn.arguments);
+    }
+  }
+
+  // Legacy format support
   push(root.output_parsed);
   push(root.parsed);
 
@@ -390,25 +378,6 @@ function collectStructuredCandidates(json: unknown): unknown[] {
         const parsed = safeJsonParse<unknown>(args);
         if (parsed) out.push(parsed);
       }
-    }
-  }
-
-  const choices = Array.isArray(root.choices) ? root.choices : [];
-  for (const choice of choices) {
-    if (!choice || typeof choice !== "object") continue;
-    const node = choice as Record<string, unknown>;
-    const message = (node.message ?? null) as Record<string, unknown> | null;
-    if (!message) continue;
-    push(message.parsed);
-    push(message.output_parsed);
-    push(message.json);
-    push(message.content);
-    const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
-    for (const tc of toolCalls) {
-      if (!tc || typeof tc !== "object") continue;
-      const fn = (tc as Record<string, unknown>).function as Record<string, unknown> | undefined;
-      if (!fn) continue;
-      push(fn.arguments);
     }
   }
 
@@ -671,17 +640,7 @@ function parseAnalysisResultFromNarrativeText(rawText: string, params: AnalyzePa
 
 function fallbackNoteFromOpenAiError(error: string | null, locale: "ko" | "en") {
   const code = String(error ?? "").toLowerCase();
-  if (code.includes("unsupported_country_region_territory")) {
-    return locale === "ko"
-      ? "현재 서버 네트워크 경로에서 OpenAI 호출이 지역 정책으로 차단되어 기본 안전 모드로 전환되었습니다."
-      : "OpenAI was blocked by regional policy on the current server network path. Showing safe fallback mode.";
-  }
   if (code.includes("openai_responses_403")) {
-    return locale === "ko"
-      ? "OpenAI 접근 권한 문제로 기본 안전 모드로 전환되었습니다."
-      : "OpenAI access was denied. Showing safe fallback mode.";
-  }
-  if (code.includes("openai_chat_403")) {
     return locale === "ko"
       ? "OpenAI 접근 권한 문제로 기본 안전 모드로 전환되었습니다."
       : "OpenAI access was denied. Showing safe fallback mode.";
@@ -980,98 +939,8 @@ async function callResponsesApi(args: {
   imageDataUrl?: string;
   signal: AbortSignal;
   maxOutputTokens: number;
-  perAttemptTimeoutMs: number;
 }): Promise<ResponsesAttempt> {
-  const { apiKey, model, developerPrompt, userPrompt, apiBaseUrl, imageDataUrl, signal, maxOutputTokens, perAttemptTimeoutMs } = args;
-
-  const userContent: Array<Record<string, unknown>> = [{ type: "input_text", text: userPrompt }];
-  if (imageDataUrl) {
-    userContent.push({
-      type: "input_image",
-      image_url: imageDataUrl,
-    });
-  }
-
-  const payload = {
-    model,
-    input: [
-      {
-        role: "developer",
-        content: [{ type: "input_text", text: developerPrompt }],
-      },
-      {
-        role: "user",
-        content: userContent,
-      },
-    ],
-    text: {
-      format: {
-        type: "json_schema",
-        name: "nurse_med_tool_action_card",
-        strict: true,
-        schema: buildMedSafetyJsonSchema(),
-      },
-      verbosity: "low",
-    },
-    reasoning: {
-      effort: "low",
-    },
-    max_output_tokens: maxOutputTokens,
-    store: false,
-  };
-
-  let response: Response;
-  const request = createAttemptSignal(signal, perAttemptTimeoutMs);
-  try {
-    response = await fetch(`${apiBaseUrl}/responses`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(payload),
-      signal: request.signal,
-    });
-  } catch (cause: any) {
-    request.dispose();
-    if (String(cause?.name ?? "") === "AbortError" && !signal.aborted) {
-      return { text: null, error: `openai_attempt_timeout_${perAttemptTimeoutMs}ms`, json: null };
-    }
-    const reason = truncateError(String(cause?.message ?? cause ?? "fetch_failed"));
-    return { text: null, error: `openai_network_${reason}`, json: null };
-  }
-  request.dispose();
-
-  if (!response.ok) {
-    const raw = await response.text().catch(() => "");
-    return {
-      text: null,
-      error: `openai_responses_${response.status}_${truncateError(raw || "unknown_error")}`,
-      json: null,
-    };
-  }
-
-  const json = await response.json().catch(() => null);
-  const parsedFromJson = parseAnalysisResultFromResponseJson(json);
-  const text = extractResponsesText(json);
-  if (!text && !parsedFromJson) {
-    return { text: null, error: "openai_empty_text", json };
-  }
-  return { text: text || null, error: null, json };
-}
-
-async function callChatCompletionsApi(args: {
-  apiKey: string;
-  model: string;
-  developerPrompt: string;
-  userPrompt: string;
-  apiBaseUrl: string;
-  imageDataUrl?: string;
-  signal: AbortSignal;
-  maxOutputTokens: number;
-  perAttemptTimeoutMs: number;
-}): Promise<ResponsesAttempt> {
-  const { apiKey, model, developerPrompt, userPrompt, apiBaseUrl, imageDataUrl, signal, maxOutputTokens, perAttemptTimeoutMs } = args;
+  const { apiKey, model, developerPrompt, userPrompt, apiBaseUrl, imageDataUrl, signal, maxOutputTokens } = args;
 
   const userContent: Array<Record<string, unknown>> = [{ type: "text", text: userPrompt }];
   if (imageDataUrl) {
@@ -1083,91 +952,60 @@ async function callChatCompletionsApi(args: {
     });
   }
 
-  const sendChatRequest = async (tokenParam: "max_completion_tokens" | "max_tokens"): Promise<ResponsesAttempt> => {
-    const payload = {
-      model,
-      messages: [
-        {
-          role: "system",
-          content: developerPrompt,
-        },
-        {
-          role: "user",
-          content: userContent,
-        },
-      ],
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "nurse_med_tool_action_card",
-          strict: true,
-          schema: buildMedSafetyJsonSchema(),
-        },
+  const payload = {
+    model,
+    messages: [
+      {
+        role: "system",
+        content: developerPrompt,
       },
-      [tokenParam]: maxOutputTokens,
-    };
-
-    let response: Response;
-    const request = createAttemptSignal(signal, perAttemptTimeoutMs);
-    try {
-      response = await fetch(`${apiBaseUrl}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify(payload),
-        signal: request.signal,
-      });
-    } catch (cause: any) {
-      request.dispose();
-      if (String(cause?.name ?? "") === "AbortError" && !signal.aborted) {
-        return { text: null, error: `openai_attempt_timeout_${perAttemptTimeoutMs}ms`, json: null };
-      }
-      const reason = truncateError(String(cause?.message ?? cause ?? "fetch_failed"));
-      return { text: null, error: `openai_chat_network_${reason}`, json: null };
-    }
-    request.dispose();
-
-    if (!response.ok) {
-      const raw = await response.text().catch(() => "");
-      return {
-        text: null,
-        error: `openai_chat_${response.status}_${truncateError(raw || "unknown_error")}`,
-        json: null,
-      };
-    }
-
-    const json = await response.json().catch(() => null);
-    const parsedFromJson = parseAnalysisResultFromResponseJson(json);
-    const choices = Array.isArray((json as any)?.choices) ? (json as any).choices : [];
-    let text = "";
-    const message = choices[0]?.message;
-    if (typeof message?.content === "string") {
-      text = message.content.trim();
-    } else if (Array.isArray(message?.content)) {
-      text = message.content
-        .map((part: any) => (typeof part?.text === "string" ? part.text : ""))
-        .join(" ")
-        .trim();
-    }
-
-    if (!text && !parsedFromJson) {
-      return { text: null, error: "openai_chat_empty_text", json };
-    }
-    return { text: text || null, error: null, json };
+      {
+        role: "user",
+        content: userContent,
+      },
+    ],
+    response_format: {
+      type: "json_object",
+    },
+    max_tokens: maxOutputTokens,
+    temperature: 0.3,
   };
 
-  const first = await sendChatRequest("max_completion_tokens");
-  if (!first.error) return first;
+  let response: Response;
+  try {
+    response = await fetch(`${apiBaseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(payload),
+      signal,
+    });
+  } catch (cause: any) {
+    const reason = truncateError(String(cause?.message ?? cause ?? "fetch_failed"));
+    return { text: null, error: `openai_network_${reason}`, json: null };
+  }
 
-  const firstErr = String(first.error ?? "");
-  const needLegacyRetry =
-    firstErr.includes("unsupported_parameter") &&
-    (firstErr.includes("max_completion_tokens") || firstErr.includes("max completion tokens"));
+  if (!response.ok) {
+    const raw = await response.text().catch(() => "");
+    return {
+      text: null,
+      error: `openai_responses_${response.status}_${truncateError(raw || "unknown_error")}`,
+      json: null,
+    };
+  }
 
-  if (!needLegacyRetry) return first;
-  return await sendChatRequest("max_tokens");
+  const json = await response.json().catch(() => null);
+
+  // Extract text from standard Chat Completions response
+  const text = json?.choices?.[0]?.message?.content || "";
+
+  if (!text) {
+    return { text: null, error: "openai_empty_text", json };
+  }
+
+  return { text: text || null, error: null, json };
 }
 
 function parseAttemptResult(attempt: ResponsesAttempt): MedSafetyAnalysisResult | null {
@@ -1218,56 +1056,33 @@ async function repairAnalysisFromRawText(args: {
   model: string;
   rawText: string;
   locale: "ko" | "en";
-  apiBaseCandidates: string[];
+  apiBaseUrl: string;
   maxOutputTokens: number;
-  perAttemptTimeoutMs: number;
   signal: AbortSignal;
 }) {
-  const { apiKey, model, rawText, locale, apiBaseCandidates, maxOutputTokens, perAttemptTimeoutMs, signal } = args;
-  const fallbackModel = "gpt-4.1-mini";
+  const { apiKey, model, rawText, locale, apiBaseUrl, maxOutputTokens, signal } = args;
+  const fallbackModel = "gpt-4o-mini";
   const modelCandidates = model === fallbackModel ? [model] : [model, fallbackModel];
   const developerPrompt = buildRepairDeveloperPrompt(locale);
   const userPrompt = buildRepairUserPrompt(rawText, locale);
 
   for (const candidateModel of modelCandidates) {
-    for (const apiBaseUrl of apiBaseCandidates) {
-      const repaired = await callResponsesApi({
-        apiKey,
+    const repaired = await callResponsesApi({
+      apiKey,
+      model: candidateModel,
+      developerPrompt,
+      userPrompt,
+      apiBaseUrl,
+      signal,
+      maxOutputTokens,
+    });
+    const parsed = parseAttemptResult(repaired);
+    if (parsed) {
+      return {
+        parsed,
         model: candidateModel,
-        developerPrompt,
-        userPrompt,
-        apiBaseUrl,
-        signal,
-        maxOutputTokens,
-        perAttemptTimeoutMs,
-      });
-      const parsed = parseAttemptResult(repaired);
-      if (parsed) {
-        return {
-          parsed,
-          model: candidateModel,
-          rawText: repaired.text ?? rawText,
-        };
-      }
-
-      const repairedChat = await callChatCompletionsApi({
-        apiKey,
-        model: candidateModel,
-        developerPrompt,
-        userPrompt,
-        apiBaseUrl,
-        signal,
-        maxOutputTokens,
-        perAttemptTimeoutMs,
-      });
-      const parsedChat = parseAttemptResult(repairedChat);
-      if (parsedChat) {
-        return {
-          parsed: parsedChat,
-          model: candidateModel,
-          rawText: repairedChat.text ?? rawText,
-        };
-      }
+        rawText: repaired.text ?? rawText,
+      };
     }
   }
 
@@ -1284,9 +1099,8 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
   if (!apiKey) throw new Error("missing_openai_api_key");
 
   const model = resolveModel();
-  const apiBaseCandidates = resolveApiBaseCandidates();
+  const apiBaseUrl = resolveApiBaseUrl();
   const maxOutputTokens = resolveMaxOutputTokens();
-  const perAttemptTimeoutMs = resolvePerAttemptTimeoutMs();
   const developerPrompt = buildDeveloperPrompt(params.locale);
   const userPrompt = buildUserPrompt({
     query: params.query,
@@ -1297,47 +1111,16 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
     imageName: params.imageName,
   });
 
-  const callLiveResponses = async () => {
-    let last: ResponsesAttempt = { text: null, error: "openai_request_failed", json: null };
-    for (const apiBaseUrl of apiBaseCandidates) {
-      const attempt = await callResponsesApi({
-        apiKey,
-        model,
-        developerPrompt,
-        userPrompt,
-        apiBaseUrl,
-        imageDataUrl: params.imageDataUrl,
-        signal: params.signal,
-        maxOutputTokens,
-        perAttemptTimeoutMs,
-      });
-      last = attempt;
-      if (!attempt.error) return attempt;
-    }
-    return last;
-  };
-
-  const callLiveChat = async () => {
-    let last: ResponsesAttempt = { text: null, error: "openai_chat_request_failed", json: null };
-    for (const apiBaseUrl of apiBaseCandidates) {
-      const attempt = await callChatCompletionsApi({
-        apiKey,
-        model,
-        developerPrompt,
-        userPrompt,
-        apiBaseUrl,
-        imageDataUrl: params.imageDataUrl,
-        signal: params.signal,
-        maxOutputTokens,
-        perAttemptTimeoutMs,
-      });
-      last = attempt;
-      if (!attempt.error) return attempt;
-    }
-    return last;
-  };
-
-  let attempt = await callLiveResponses();
+  let attempt = await callResponsesApi({
+    apiKey,
+    model,
+    developerPrompt,
+    userPrompt,
+    apiBaseUrl,
+    imageDataUrl: params.imageDataUrl,
+    signal: params.signal,
+    maxOutputTokens,
+  });
   let lastError = attempt.error ?? "openai_request_failed";
 
   let selectedModel = model;
@@ -1345,32 +1128,19 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
   let rawText = attempt.text ?? "";
 
   if (!parsed && !attempt.text && shouldRetryOpenAiError(attempt.error)) {
-    const retry = await callLiveResponses();
+    const retry = await callResponsesApi({
+      apiKey,
+      model,
+      developerPrompt,
+      userPrompt,
+      apiBaseUrl,
+      imageDataUrl: params.imageDataUrl,
+      signal: params.signal,
+      maxOutputTokens,
+    });
     parsed = parseAttemptResult(retry);
     if (retry.text) rawText = retry.text;
     if (retry.error) lastError = retry.error;
-  }
-
-  if (!parsed) {
-    const chatAttempt = await callLiveChat();
-    attempt = chatAttempt;
-    const chatParsed = parseAttemptResult(chatAttempt);
-    if (chatParsed) {
-      parsed = chatParsed;
-      if (chatAttempt.text) rawText = chatAttempt.text;
-    } else {
-      if (chatAttempt.error) lastError = chatAttempt.error;
-      if (!chatAttempt.text && shouldRetryOpenAiError(chatAttempt.error)) {
-        const chatRetry = await callLiveChat();
-        const parsedRetry = parseAttemptResult(chatRetry);
-        if (parsedRetry) {
-          parsed = parsedRetry;
-          if (chatRetry.text) rawText = chatRetry.text;
-        } else if (chatRetry.error) {
-          lastError = chatRetry.error;
-        }
-      }
-    }
   }
 
   if (!parsed && attempt.text) {
@@ -1379,9 +1149,8 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
       model,
       rawText: attempt.text,
       locale: params.locale,
-      apiBaseCandidates,
+      apiBaseUrl,
       maxOutputTokens,
-      perAttemptTimeoutMs,
       signal: params.signal,
     });
     if (repaired) {
