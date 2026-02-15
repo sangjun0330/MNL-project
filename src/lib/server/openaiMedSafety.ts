@@ -121,56 +121,56 @@ function resolveMaxOutputTokens() {
 function buildMedSafetyJsonSchema() {
   return {
     type: "object",
-    additionalProperties: false,
     required: ["item", "quick", "do", "safety", "patientScript20s", "modePriority", "confidenceNote"],
+    additionalProperties: false,
     properties: {
       item: {
         type: "object",
-        additionalProperties: false,
         required: ["name", "type", "aliases", "highRiskBadges", "primaryUse", "confidence"],
+        additionalProperties: false,
         properties: {
-          name: { type: "string", maxLength: 80 },
+          name: { type: "string" },
           type: { type: "string", enum: ["medication", "device", "unknown"] },
-          aliases: { type: "array", maxItems: 4, items: { type: "string", maxLength: 40 } },
-          highRiskBadges: { type: "array", maxItems: 3, items: { type: "string", maxLength: 30 } },
-          primaryUse: { type: "string", maxLength: 120 },
-          confidence: { type: "number", minimum: 0, maximum: 100 },
+          aliases: { type: "array", items: { type: "string" } },
+          highRiskBadges: { type: "array", items: { type: "string" } },
+          primaryUse: { type: "string" },
+          confidence: { type: "number" },
         },
       },
       quick: {
         type: "object",
-        additionalProperties: false,
         required: ["status", "topActions", "topNumbers", "topRisks"],
+        additionalProperties: false,
         properties: {
           status: { type: "string", enum: ["OK", "CHECK", "STOP"] },
-          topActions: { type: "array", minItems: 1, maxItems: 3, items: { type: "string", maxLength: 120 } },
-          topNumbers: { type: "array", maxItems: 4, items: { type: "string", maxLength: 90 } },
-          topRisks: { type: "array", maxItems: 3, items: { type: "string", maxLength: 110 } },
+          topActions: { type: "array", items: { type: "string" } },
+          topNumbers: { type: "array", items: { type: "string" } },
+          topRisks: { type: "array", items: { type: "string" } },
         },
       },
       do: {
         type: "object",
-        additionalProperties: false,
         required: ["steps", "calculatorsNeeded", "compatibilityChecks"],
+        additionalProperties: false,
         properties: {
-          steps: { type: "array", minItems: 1, maxItems: 5, items: { type: "string", maxLength: 120 } },
-          calculatorsNeeded: { type: "array", maxItems: 3, items: { type: "string", maxLength: 90 } },
-          compatibilityChecks: { type: "array", maxItems: 3, items: { type: "string", maxLength: 110 } },
+          steps: { type: "array", items: { type: "string" } },
+          calculatorsNeeded: { type: "array", items: { type: "string" } },
+          compatibilityChecks: { type: "array", items: { type: "string" } },
         },
       },
       safety: {
         type: "object",
-        additionalProperties: false,
         required: ["holdRules", "monitor", "escalateWhen"],
+        additionalProperties: false,
         properties: {
-          holdRules: { type: "array", maxItems: 4, items: { type: "string", maxLength: 120 } },
-          monitor: { type: "array", maxItems: 4, items: { type: "string", maxLength: 100 } },
-          escalateWhen: { type: "array", minItems: 1, maxItems: 4, items: { type: "string", maxLength: 120 } },
+          holdRules: { type: "array", items: { type: "string" } },
+          monitor: { type: "array", items: { type: "string" } },
+          escalateWhen: { type: "array", items: { type: "string" } },
         },
       },
-      patientScript20s: { type: "string", maxLength: 220 },
-      modePriority: { type: "array", maxItems: 5, items: { type: "string", maxLength: 40 } },
-      confidenceNote: { type: "string", maxLength: 180 },
+      patientScript20s: { type: "string" },
+      modePriority: { type: "array", items: { type: "string" } },
+      confidenceNote: { type: "string" },
     },
   };
 }
@@ -862,10 +862,10 @@ function buildDeveloperPrompt(locale: "ko" | "en") {
       "모드(병동/ER/ICU)와 상황(투여직전/투여중/알람/부작용의심)에 따라 우선순위를 다르게 제시한다.",
       "질의/이미지가 모호하면 무리한 단정 금지: CHECK로 두고 재확인 포인트를 행동으로 제시한다.",
       "약물/도구 혼동 가능성, 단위/농도 오인 가능성, 라인 호환성 위험은 우선 경고에 반영한다.",
-      "확신이 낮으면 confidence를 낮추고 confidenceNote/follow-up 성격 정보를 포함한다.",
+      "confidence는 반드시 0~100 사이 정수값으로 설정한다(예: 85). 확신이 낮으면 confidence를 낮추고 confidenceNote에 이유를 작성한다.",
       "진단/처방 대체 표현 금지. 최종 판단은 병원 지침/처방 우선으로 유지한다.",
       "각 문장은 짧게, 항목은 간결하게 작성한다(장문 금지).",
-      "출력은 JSON만 반환한다.",
+      "출력은 반드시 유효한 JSON 형식으로만 반환한다.",
     ].join(" ");
   }
   return [
@@ -876,12 +876,13 @@ function buildDeveloperPrompt(locale: "ko" | "en") {
     "Keep quick.topRisks to at most 3 concise items.",
     "Adapt priorities by mode (Ward/ER/ICU) and situation.",
     "If the input is ambiguous, avoid overclaiming and keep status as CHECK with explicit verification actions.",
-    "If uncertain, lower confidence and state what to verify.",
+    "confidence must be an integer between 0-100 (e.g., 85). If uncertain, lower confidence and explain in confidenceNote.",
     "Do not replace diagnosis/order decisions.",
     "Keep each line concise; avoid long prose.",
-    "Return JSON only.",
+    "Return valid JSON only.",
   ].join(" ");
 }
+
 
 function buildUserPrompt(params: {
   query: string;
@@ -965,7 +966,12 @@ async function callResponsesApi(args: {
       },
     ],
     response_format: {
-      type: "json_object",
+      type: "json_schema",
+      json_schema: {
+        name: "nurse_med_tool_action_card",
+        strict: true,
+        schema: buildMedSafetyJsonSchema(),
+      },
     },
     max_tokens: maxOutputTokens,
     temperature: 0.3,
