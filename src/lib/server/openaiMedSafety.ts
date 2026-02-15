@@ -129,10 +129,10 @@ function resolveStoreResponses() {
 }
 
 function resolveMaxOutputTokens() {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_MAX_OUTPUT_TOKENS ?? process.env.OPENAI_MAX_OUTPUT_TOKENS ?? 2600);
-  if (!Number.isFinite(raw)) return 2600;
+  const raw = Number(process.env.OPENAI_MED_SAFETY_MAX_OUTPUT_TOKENS ?? process.env.OPENAI_MAX_OUTPUT_TOKENS ?? 3200);
+  if (!Number.isFinite(raw)) return 3200;
   const rounded = Math.round(raw);
-  return Math.max(1200, Math.min(4200, rounded));
+  return Math.max(1200, Math.min(12000, rounded));
 }
 
 function truncateError(raw: string, size = 220) {
