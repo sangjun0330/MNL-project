@@ -78,14 +78,27 @@ const SITUATION_OPTIONS: Array<{ value: ClinicalSituation; label: string }> = [
 
 function parseErrorMessage(raw: string) {
   if (!raw) return "분석 중 오류가 발생했습니다.";
-  if (raw.includes("missing_openai_api_key")) return "OPENAI_API_KEY가 설정되지 않았습니다.";
-  if (raw.includes("query_or_image_required")) return "텍스트를 입력하거나 사진을 업로드해 주세요.";
-  if (raw.includes("image_too_large")) return "이미지 용량이 너무 큽니다. 6MB 이하로 다시 업로드해 주세요.";
-  if (raw.includes("image_type_invalid")) return "이미지 파일만 업로드할 수 있습니다.";
-  if (raw.includes("openai_timeout") || raw.includes("aborted"))
+  const normalized = String(raw).toLowerCase();
+  if (normalized.includes("missing_openai_api_key")) return "OPENAI_API_KEY가 설정되지 않았습니다.";
+  if (normalized.includes("query_or_image_required")) return "텍스트를 입력하거나 사진을 업로드해 주세요.";
+  if (normalized.includes("image_too_large")) return "이미지 용량이 너무 큽니다. 6MB 이하로 다시 업로드해 주세요.";
+  if (normalized.includes("image_type_invalid")) return "이미지 파일만 업로드할 수 있습니다.";
+  if (normalized.includes("openai_timeout") || normalized.includes("aborted"))
     return "AI 응답 시간이 길어 요청이 중단되었습니다. 잠시 후 다시 시도하거나 네트워크를 변경해 주세요.";
-  if (raw.includes("openai_responses_")) return "OpenAI 요청이 실패했습니다. 잠시 후 다시 시도해 주세요.";
-  if (raw.includes("openai_invalid_json_payload"))
+  if (normalized.includes("openai_network_"))
+    return "OpenAI 서버 연결에 실패했습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.";
+  if (normalized.includes("openai_responses_401"))
+    return "OpenAI API 키가 유효하지 않거나 만료되었습니다. .env.local의 OPENAI_API_KEY를 확인해 주세요.";
+  if (normalized.includes("openai_responses_403"))
+    return "현재 계정에 해당 모델 접근 권한이 없습니다. 모델명을 변경해 다시 시도해 주세요.";
+  if (normalized.includes("openai_responses_404") || normalized.includes("model_not_found"))
+    return "요청한 모델을 찾을 수 없습니다. 모델명을 확인하거나 기본 fallback 모델로 다시 시도해 주세요.";
+  if (normalized.includes("openai_responses_429"))
+    return "요청 한도(속도/쿼터)를 초과했습니다. 잠시 후 다시 시도해 주세요.";
+  if (normalized.includes("openai_responses_400"))
+    return "OpenAI 요청 형식 오류가 발생했습니다. 입력 내용을 줄여 다시 시도해 주세요.";
+  if (normalized.includes("openai_responses_")) return "OpenAI 요청이 실패했습니다. 잠시 후 다시 시도해 주세요.";
+  if (normalized.includes("openai_invalid_json_payload"))
     return "AI 응답이 비정형으로 와서 자동 정리 결과로 표시했습니다.";
   return "분석 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.";
 }
