@@ -50,6 +50,7 @@ type AnalyzeParams = {
   mode: ClinicalMode;
   situation: ClinicalSituation;
   queryIntent?: QueryIntent;
+  preferredModel?: string;
   patientSummary?: string;
   locale: "ko" | "en";
   imageDataUrl?: string;
@@ -65,6 +66,8 @@ type ResponsesAttempt = {
   responseId: string | null;
   conversationId: string | null;
 };
+
+type ResponseVerbosity = "low" | "medium" | "high";
 
 function normalizeApiKey() {
   const key =
@@ -135,6 +138,20 @@ function resolveMaxOutputTokens() {
   if (!Number.isFinite(raw)) return 7000;
   const rounded = Math.round(raw);
   return Math.max(1800, Math.min(20000, rounded));
+}
+
+function resolveNetworkRetryCount() {
+  const raw = Number(process.env.OPENAI_MED_SAFETY_NETWORK_RETRIES ?? 2);
+  if (!Number.isFinite(raw)) return 2;
+  const rounded = Math.round(raw);
+  return Math.max(0, Math.min(5, rounded));
+}
+
+function resolveNetworkRetryBaseMs() {
+  const raw = Number(process.env.OPENAI_MED_SAFETY_NETWORK_RETRY_BASE_MS ?? 700);
+  if (!Number.isFinite(raw)) return 700;
+  const rounded = Math.round(raw);
+  return Math.max(200, Math.min(4000, rounded));
 }
 
 function truncateError(raw: string, size = 220) {
@@ -415,14 +432,16 @@ function buildDevicePrompt(query: string, contextJson: string) {
 
 function buildScenarioPrompt(query: string, contextJson: string) {
   return [
-    "상황 질문에 대해 간호사 행동 중심으로 매우 구체적으로 답하라.",
-    "형식은 자유이며 질문 맥락에 맞춰 가장 효과적인 구조로 작성하라.",
+    "상황 질문에 대해 질문 자체에 직접 답하라.",
+    "형식은 자유이되, 불필요한 배경 설명은 제외하고 핵심 행동 중심으로 매우 간결하게 작성하라.",
     "출력 규칙: 마크다운 기호(##, ###, **, ---, ``` )를 쓰지 말고 일반 텍스트로만 작성하라.",
-    "중복 문장/중복 단락을 반복하지 말고, 모바일 화면에서 읽기 쉽게 짧은 문장과 줄바꿈으로 작성하라.",
-    "핵심은 '지금 무엇을 먼저 해야 하는지', '무엇을 확인해야 하는지', '언제 중단/호출해야 하는지'다.",
-    "불확실하면 안전한 기본 행동과 확인 포인트를 우선 제시한다.",
-    "가능하면 즉시 행동, 5분 내 확인, 악화 시 분기, 보고 문구를 포함하라.",
-    "간호사가 새로 습득할 수 있는 근거 기반 포인트를 적절히 포함하라.",
+    "중복 문장/중복 단락을 반복하지 말고, 모바일 화면에서 읽기 쉽게 짧은 문장으로 작성하라.",
+    "전체 분량은 10~14문장 이내로 제한하라.",
+    "질문과 직접 관련된 내용만 남기고 일반론·교과서식 설명은 생략하라.",
+    "핵심은 '지금 할 일', '확인할 수치/관찰', '중단·호출 기준' 3가지다.",
+    "각 항목은 최대 3개로 제한하라.",
+    "불확실한 부분은 단정하지 말고 '기관 확인 필요'를 짧게 표기하라.",
+    "마지막에는 현장에서 바로 읽을 수 있는 짧은 보고 문구 1~2문장을 포함하라.",
     "질문:",
     query || "(없음)",
     "",
@@ -480,6 +499,37 @@ function extractResponsesText(json: any): string {
   return chunks.join("").trim();
 }
 
+function isRetryableOpenAIError(error: string) {
+  const e = String(error ?? "").toLowerCase();
+  if (!e) return false;
+  if (e.startsWith("openai_network_")) return true;
+  if (e.includes("openai_empty_text_")) return true;
+  if (/openai_responses_(408|409|425|429|500|502|503|504)/.test(e)) return true;
+  // 일부 병원 Wi-Fi/프록시가 OpenAI 응답을 403 HTML로 반환하는 케이스를 재시도 대상으로 포함
+  if (/openai_responses_403/.test(e) && /(html|forbidden|proxy|firewall|blocked|access denied|cloudflare)/.test(e)) return true;
+  return false;
+}
+
+async function sleepWithAbort(ms: number, signal: AbortSignal) {
+  if (ms <= 0) return;
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      reject(new Error("aborted"));
+    };
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    signal.addEventListener("abort", onAbort);
+  });
+}
+
 async function callResponsesApi(args: {
   apiKey: string;
   model: string;
@@ -491,6 +541,7 @@ async function callResponsesApi(args: {
   conversationId?: string;
   signal: AbortSignal;
   maxOutputTokens: number;
+  verbosity: ResponseVerbosity;
   storeResponses: boolean;
 }): Promise<ResponsesAttempt> {
   const {
@@ -504,6 +555,7 @@ async function callResponsesApi(args: {
     conversationId,
     signal,
     maxOutputTokens,
+    verbosity,
     storeResponses,
   } = args;
 
@@ -529,7 +581,7 @@ async function callResponsesApi(args: {
     ],
     text: {
       format: { type: "text" as const },
-      verbosity: "high" as const,
+      verbosity,
     },
     reasoning: { effort: "medium" as const },
     max_output_tokens: maxOutputTokens,
@@ -579,6 +631,38 @@ async function callResponsesApi(args: {
     return { text: null, error: `openai_empty_text_model:${model}`, responseId, conversationId: conversationResponseId };
   }
   return { text, error: null, responseId, conversationId: conversationResponseId };
+}
+
+async function callResponsesApiWithRetry(
+  args: Parameters<typeof callResponsesApi>[0] & {
+    retries: number;
+    retryBaseMs: number;
+  }
+): Promise<ResponsesAttempt> {
+  const { retries, retryBaseMs, ...rest } = args;
+  let attempt = 0;
+  let last: ResponsesAttempt = { text: null, error: "openai_request_failed", responseId: null, conversationId: null };
+
+  while (attempt <= retries) {
+    last = await callResponsesApi(rest);
+    if (!last.error) return last;
+    if (!isRetryableOpenAIError(last.error) || attempt >= retries) return last;
+
+    const backoff = Math.min(5000, retryBaseMs * (attempt + 1)) + Math.floor(Math.random() * 250);
+    try {
+      await sleepWithAbort(backoff, rest.signal);
+    } catch {
+      return {
+        text: null,
+        error: "openai_timeout_retry_aborted",
+        responseId: null,
+        conversationId: null,
+      };
+    }
+    attempt += 1;
+  }
+
+  return last;
 }
 
 function extractBullets(text: string) {
@@ -816,9 +900,14 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
   if (!apiKey) throw new Error("missing_openai_api_key");
 
   const intent = inferIntent(params);
-  const modelCandidates = resolveModelCandidates();
+  const modelCandidates = resolveModelCandidates(params.preferredModel);
   const apiBaseUrl = resolveApiBaseUrl();
   const maxOutputTokens = resolveMaxOutputTokens();
+  const maxOutputTokensForIntent =
+    intent === "scenario" ? Math.max(900, Math.min(1800, maxOutputTokens)) : maxOutputTokens;
+  const responseVerbosity: ResponseVerbosity = intent === "scenario" ? "medium" : "high";
+  const networkRetries = resolveNetworkRetryCount();
+  const networkRetryBaseMs = resolveNetworkRetryBaseMs();
   const storeResponses = resolveStoreResponses();
   const developerPrompt = buildDeveloperPrompt(params.locale);
   const userPrompt = buildUserPrompt(params, intent);
@@ -829,7 +918,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
 
   for (const candidateModel of modelCandidates) {
     selectedModel = candidateModel;
-    const attempt = await callResponsesApi({
+    const attempt = await callResponsesApiWithRetry({
       apiKey,
       model: candidateModel,
       developerPrompt,
@@ -839,8 +928,11 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
       previousResponseId: params.previousResponseId,
       conversationId: params.conversationId,
       signal: params.signal,
-      maxOutputTokens,
+      maxOutputTokens: maxOutputTokensForIntent,
+      verbosity: responseVerbosity,
       storeResponses,
+      retries: networkRetries,
+      retryBaseMs: networkRetryBaseMs,
     });
     if (attempt.error) {
       lastError = attempt.error;

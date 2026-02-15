@@ -77,6 +77,7 @@ type MedSafetyCacheRecord = {
 };
 
 const MED_SAFETY_CACHE_KEY = "med_safety_cache_v1";
+const MED_SAFETY_LAST_MODEL_KEY = "med_safety_last_model_v1";
 
 const MODE_OPTIONS: Array<{ value: ClinicalMode; label: string }> = [
   { value: "ward", label: "병동" },
@@ -166,8 +167,12 @@ function parseErrorMessage(raw: string) {
     return "AI 서버 연결에 실패했습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.";
   if (normalized.includes("openai_responses_401"))
     return "AI API 키가 유효하지 않거나 만료되었습니다. .env.local 환경변수를 확인해 주세요.";
-  if (normalized.includes("openai_responses_403"))
-    return "현재 계정에 해당 모델 접근 권한이 없습니다. 모델명을 변경해 다시 시도해 주세요.";
+  if (normalized.includes("openai_responses_403")) {
+    if (/(insufficient_permissions|does not have access|model_not_found|permission|access to model)/i.test(String(raw))) {
+      return "현재 계정에 해당 모델 접근 권한이 없습니다. 모델명을 변경해 다시 시도해 주세요.";
+    }
+    return "현재 네트워크(병원 Wi-Fi 포함)에서 AI 서버 접속이 제한될 수 있습니다. 잠시 후 재시도하거나 다른 네트워크로 확인해 주세요.";
+  }
   if (normalized.includes("openai_responses_404") || normalized.includes("model_not_found"))
     return "요청한 모델을 찾을 수 없습니다. 모델명을 확인하거나 기본 fallback 모델로 다시 시도해 주세요.";
   if (normalized.includes("openai_responses_429"))
@@ -213,6 +218,49 @@ function writeMedSafetyCache(cacheKey: string, data: MedSafetyAnalyzeResult) {
     window.localStorage.setItem(MED_SAFETY_CACHE_KEY, JSON.stringify(trimmed));
   } catch {
     // ignore cache write failure
+  }
+}
+
+function readMedSafetyCache(cacheKey: string): MedSafetyAnalyzeResult | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(MED_SAFETY_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Record<string, MedSafetyCacheRecord>;
+    const hit = parsed?.[cacheKey];
+    if (!hit?.data) return null;
+    return hit.data;
+  } catch {
+    return null;
+  }
+}
+
+function shouldRetryAnalyzeError(status: number, rawError: string) {
+  const error = String(rawError ?? "").toLowerCase();
+  if ([408, 409, 425, 429, 500, 502, 503, 504].includes(status)) return true;
+  if (/openai_network_|openai_timeout|openai_empty_text|openai_responses_(408|409|425|429|500|502|503|504)/.test(error)) return true;
+  if (/openai_responses_403/.test(error) && /(html|forbidden|proxy|firewall|blocked|access denied|cloudflare)/.test(error)) return true;
+  return false;
+}
+
+async function waitMs(ms: number) {
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function fetchAnalyzeWithTimeout(form: FormData, timeoutMs: number) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch("/api/tools/med-safety/analyze", {
+      method: "POST",
+      body: form,
+      cache: "no-store",
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -323,6 +371,8 @@ type DynamicResultCard = {
 
 const CARD_MAX_ITEMS = 4;
 const CARD_MAX_SECTIONS = 16;
+const SCENARIO_CARD_MAX_ITEMS = 3;
+const SCENARIO_CARD_MAX_SECTIONS = 8;
 const ITEM_PRIORITY_PATTERN =
   /(즉시|중단|보류|주의|금기|핵심|반드시|필수|우선|보고|호출|알람|모니터|재평가|용량|속도|농도|단위|라인|호환|상호작용|프로토콜|기관 확인 필요)/i;
 const TOPIC_LABEL_PATTERN =
@@ -542,6 +592,7 @@ export function ToolMedSafetyPage() {
     previousResponseId?: string;
     conversationId?: string;
   }>({});
+  const [preferredModel, setPreferredModel] = useState<string>("");
   const isScenarioIntent = queryIntent === "scenario";
   const activeSituation: ClinicalSituation = isScenarioIntent ? situation : "general";
   const situationInputGuide = SITUATION_INPUT_GUIDE[activeSituation];
@@ -570,6 +621,16 @@ export function ToolMedSafetyPage() {
       stopCamera();
     };
   }, [previewUrl, stopCamera]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const stored = String(window.localStorage.getItem(MED_SAFETY_LAST_MODEL_KEY) ?? "").trim();
+      if (stored) setPreferredModel(stored);
+    } catch {
+      // ignore storage read error
+    }
+  }, []);
 
   useEffect(() => {
     if (isScenarioIntent) return;
@@ -709,39 +770,75 @@ export function ToolMedSafetyPage() {
         imageFile,
       });
 
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        const cached = readMedSafetyCache(cacheKey);
+        if (cached) {
+          setResult(cached);
+          setError("오프라인 상태입니다. 최근 저장된 결과를 표시합니다.");
+        } else {
+          setResult(null);
+          setError("네트워크에 연결되어 있지 않습니다. 연결 후 다시 시도해 주세요.");
+        }
+        return;
+      }
+
       setIsLoading(true);
       setError(null);
 
       try {
-        const form = new FormData();
-        if (normalized) form.set("query", normalized);
-        if (isScenarioIntent && patientSummary.trim()) form.set("patientSummary", patientSummary.trim());
-        form.set("mode", mode);
-        form.set("queryIntent", queryIntent);
-        form.set("situation", activeSituation);
-        form.set("locale", "ko");
-        if (isScenarioIntent && scenarioState.previousResponseId) {
-          form.set("previousResponseId", scenarioState.previousResponseId);
-        }
-        if (isScenarioIntent && scenarioState.conversationId) {
-          form.set("conversationId", scenarioState.conversationId);
-        }
-        if (imageFile) form.set("image", imageFile);
-
-        const response = await fetch("/api/tools/med-safety/analyze", {
-          method: "POST",
-          body: form,
-          cache: "no-store",
-        });
-
-        const payload = (await response.json().catch(() => null)) as
+        const maxClientRetries = 2;
+        let response: Response | null = null;
+        let payload:
           | { ok: true; data: MedSafetyAnalyzeResult }
           | { ok: false; error?: string }
-          | null;
+          | null = null;
+        let finalError = "med_safety_analyze_failed";
 
-        if (!response.ok || !payload?.ok) {
+        for (let attempt = 0; attempt <= maxClientRetries; attempt += 1) {
+          try {
+            const form = new FormData();
+            if (normalized) form.set("query", normalized);
+            if (isScenarioIntent && patientSummary.trim()) form.set("patientSummary", patientSummary.trim());
+            form.set("mode", mode);
+            form.set("queryIntent", queryIntent);
+            form.set("situation", activeSituation);
+            form.set("locale", "ko");
+            if (isScenarioIntent && scenarioState.previousResponseId) {
+              form.set("previousResponseId", scenarioState.previousResponseId);
+            }
+            if (isScenarioIntent && scenarioState.conversationId) {
+              form.set("conversationId", scenarioState.conversationId);
+            }
+            if (preferredModel) form.set("preferredModel", preferredModel);
+            if (imageFile) form.set("image", imageFile);
+
+            response = await fetchAnalyzeWithTimeout(form, 95_000);
+
+            payload = (await response.json().catch(() => null)) as
+              | { ok: true; data: MedSafetyAnalyzeResult }
+              | { ok: false; error?: string }
+              | null;
+
+            if (response.ok && payload?.ok) break;
+            finalError = String((payload as any)?.error ?? "med_safety_analyze_failed");
+            if (!shouldRetryAnalyzeError(response.status, finalError) || attempt >= maxClientRetries) break;
+          } catch (cause: any) {
+            finalError = String(cause?.message ?? "network_error");
+            if (attempt >= maxClientRetries) break;
+          }
+
+          await waitMs(Math.min(2200, 500 * (attempt + 1)) + Math.floor(Math.random() * 180));
+        }
+
+        if (!response?.ok || !payload?.ok) {
+          const cached = readMedSafetyCache(cacheKey);
+          if (cached) {
+            setResult(cached);
+            setError(`${parseErrorMessage(finalError)} 최근 저장된 결과를 표시합니다.`);
+            return;
+          }
           setResult(null);
-          setError(parseErrorMessage(String((payload as any)?.error ?? "med_safety_analyze_failed")));
+          setError(parseErrorMessage(finalError));
           return;
         }
         const data = payload.data;
@@ -750,6 +847,14 @@ export function ToolMedSafetyPage() {
           writeMedSafetyCache(cacheKey, data);
           setResult(data);
           setError(null);
+          if (data.model) {
+            setPreferredModel(data.model);
+            try {
+              window.localStorage.setItem(MED_SAFETY_LAST_MODEL_KEY, data.model);
+            } catch {
+              // ignore storage write error
+            }
+          }
           if (isScenarioIntent) {
             setScenarioState({
               previousResponseId: data.openaiResponseId || undefined,
@@ -764,13 +869,19 @@ export function ToolMedSafetyPage() {
         }
         if (forcedQuery) setQuery(forcedQuery);
       } catch {
-        setResult(null);
-        setError("네트워크 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
+        const cached = readMedSafetyCache(cacheKey);
+        if (cached) {
+          setResult(cached);
+          setError("네트워크 오류가 발생해 최근 저장된 결과를 표시합니다.");
+        } else {
+          setResult(null);
+          setError("네트워크 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
+        }
       } finally {
         setIsLoading(false);
       }
     },
-    [activeSituation, imageFile, isScenarioIntent, mode, patientSummary, query, queryIntent, scenarioState]
+    [activeSituation, imageFile, isScenarioIntent, mode, patientSummary, preferredModel, query, queryIntent, scenarioState]
   );
 
   const immediateActions = result ? mergeUniqueLists(result.quick.topActions).slice(0, 7) : [];
@@ -805,6 +916,15 @@ export function ToolMedSafetyPage() {
       ].filter((card) => card.items.length > 0)
     : [];
   const dynamicCards = dynamicCardsFromNarrative.length ? dynamicCardsFromNarrative : dynamicCardsFallback;
+  const displayCards =
+    result?.resultKind === "scenario"
+      ? dynamicCards
+          .slice(0, SCENARIO_CARD_MAX_SECTIONS)
+          .map((card) => ({
+            ...card,
+            items: card.items.slice(0, SCENARIO_CARD_MAX_ITEMS),
+          }))
+      : dynamicCards;
   const resultKindChip = result ? kindLabel(result.resultKind) : "";
 
   return (
@@ -1018,9 +1138,9 @@ export function ToolMedSafetyPage() {
               </div>
 
               <div className="border-t border-ios-sep pt-2.5">
-                {dynamicCards.length ? (
+                {displayCards.length ? (
                   <div className="space-y-2.5">
-                    {dynamicCards.map((card) => (
+                    {displayCards.map((card) => (
                       <section
                         key={card.key}
                         className={`${card.compact ? "border-l-[3px] border-[color:var(--wnl-accent)] pl-3 py-1.5" : "border-b border-ios-sep pb-2.5"} last:border-b-0`}
