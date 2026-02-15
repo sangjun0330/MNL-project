@@ -68,6 +68,13 @@ function pickQueryIntent(raw: FormDataEntryValue | null): QueryIntent | undefine
   return undefined;
 }
 
+function pickOpenAIStateId(raw: FormDataEntryValue | null) {
+  const value = String(raw ?? "").trim();
+  if (!value) return undefined;
+  if (!/^[A-Za-z0-9_-]{8,220}$/.test(value)) return undefined;
+  return value;
+}
+
 function bytesToBase64(input: Uint8Array) {
   let binary = "";
   const chunkSize = 0x8000;
@@ -100,6 +107,8 @@ export async function POST(req: NextRequest) {
     const mode = pickMode(form.get("mode"));
     const situation = pickSituation(form.get("situation"));
     const queryIntent = pickQueryIntent(form.get("queryIntent"));
+    const previousResponseId = pickOpenAIStateId(form.get("previousResponseId"));
+    const conversationId = pickOpenAIStateId(form.get("conversationId"));
     const query = String(form.get("query") ?? "")
       .replace(/\s+/g, " ")
       .trim()
@@ -142,6 +151,8 @@ export async function POST(req: NextRequest) {
         locale,
         imageDataUrl: imageDataUrl || undefined,
         imageName: imageName || undefined,
+        previousResponseId,
+        conversationId,
         signal: abort.signal,
       });
 
@@ -153,6 +164,8 @@ export async function POST(req: NextRequest) {
           analyzedAt: Date.now(),
           source: analyzed.fallbackReason ? "openai_fallback" : "openai_live",
           fallbackReason: analyzed.fallbackReason,
+          openaiResponseId: analyzed.openaiResponseId,
+          openaiConversationId: analyzed.openaiConversationId,
         },
       });
     } finally {

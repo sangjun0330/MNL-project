@@ -54,12 +54,16 @@ type AnalyzeParams = {
   locale: "ko" | "en";
   imageDataUrl?: string;
   imageName?: string;
+  previousResponseId?: string;
+  conversationId?: string;
   signal: AbortSignal;
 };
 
 type ResponsesAttempt = {
   text: string | null;
   error: string | null;
+  responseId: string | null;
+  conversationId: string | null;
 };
 
 function normalizeApiKey() {
@@ -113,6 +117,15 @@ function resolveApiBaseUrl() {
     process.env.OPENAI_MED_SAFETY_BASE_URL ?? process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1"
   );
   return base || "https://api.openai.com/v1";
+}
+
+function resolveStoreResponses() {
+  const raw = String(process.env.OPENAI_MED_SAFETY_STORE ?? process.env.OPENAI_STORE ?? "true")
+    .trim()
+    .toLowerCase();
+  if (!raw) return true;
+  if (raw === "0" || raw === "false" || raw === "off" || raw === "no") return false;
+  return true;
 }
 
 function resolveMaxOutputTokens() {
@@ -470,10 +483,25 @@ async function callResponsesApi(args: {
   userPrompt: string;
   apiBaseUrl: string;
   imageDataUrl?: string;
+  previousResponseId?: string;
+  conversationId?: string;
   signal: AbortSignal;
   maxOutputTokens: number;
+  storeResponses: boolean;
 }): Promise<ResponsesAttempt> {
-  const { apiKey, model, developerPrompt, userPrompt, apiBaseUrl, imageDataUrl, signal, maxOutputTokens } = args;
+  const {
+    apiKey,
+    model,
+    developerPrompt,
+    userPrompt,
+    apiBaseUrl,
+    imageDataUrl,
+    previousResponseId,
+    conversationId,
+    signal,
+    maxOutputTokens,
+    storeResponses,
+  } = args;
 
   const userContent: Array<Record<string, unknown>> = [{ type: "input_text", text: userPrompt }];
   if (imageDataUrl) {
@@ -483,7 +511,7 @@ async function callResponsesApi(args: {
     });
   }
 
-  const body = {
+  const body: Record<string, unknown> = {
     model,
     input: [
       {
@@ -502,8 +530,10 @@ async function callResponsesApi(args: {
     reasoning: { effort: "medium" as const },
     max_output_tokens: maxOutputTokens,
     tools: [],
-    store: false,
+    store: storeResponses,
   };
+  if (previousResponseId) body.previous_response_id = previousResponseId;
+  if (conversationId) body.conversation = conversationId;
 
   let response: Response;
   try {
@@ -520,6 +550,8 @@ async function callResponsesApi(args: {
     return {
       text: null,
       error: `openai_network_${truncateError(String(cause?.message ?? cause ?? "fetch_failed"))}`,
+      responseId: null,
+      conversationId: null,
     };
   }
 
@@ -528,15 +560,21 @@ async function callResponsesApi(args: {
     return {
       text: null,
       error: `openai_responses_${response.status}_model:${model}_${truncateError(raw || "unknown_error")}`,
+      responseId: null,
+      conversationId: null,
     };
   }
 
   const json = await response.json().catch(() => null);
   const text = extractResponsesText(json);
+  const responseId = typeof json?.id === "string" ? json.id : null;
+  const conversationFromString = typeof json?.conversation === "string" ? json.conversation : "";
+  const conversationFromObject = typeof json?.conversation?.id === "string" ? json.conversation.id : "";
+  const conversationResponseId = conversationFromString || conversationFromObject || null;
   if (!text) {
-    return { text: null, error: `openai_empty_text_model:${model}` };
+    return { text: null, error: `openai_empty_text_model:${model}`, responseId, conversationId: conversationResponseId };
   }
-  return { text, error: null };
+  return { text, error: null, responseId, conversationId: conversationResponseId };
 }
 
 function extractBullets(text: string) {
@@ -767,6 +805,8 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
   model: string;
   rawText: string;
   fallbackReason: string | null;
+  openaiResponseId: string | null;
+  openaiConversationId: string | null;
 }> {
   const apiKey = normalizeApiKey();
   if (!apiKey) throw new Error("missing_openai_api_key");
@@ -775,6 +815,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
   const modelCandidates = resolveModelCandidates();
   const apiBaseUrl = resolveApiBaseUrl();
   const maxOutputTokens = resolveMaxOutputTokens();
+  const storeResponses = resolveStoreResponses();
   const developerPrompt = buildDeveloperPrompt(params.locale);
   const userPrompt = buildUserPrompt(params, intent);
 
@@ -791,8 +832,11 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
       userPrompt,
       apiBaseUrl,
       imageDataUrl: params.imageDataUrl,
+      previousResponseId: params.previousResponseId,
+      conversationId: params.conversationId,
       signal: params.signal,
       maxOutputTokens,
+      storeResponses,
     });
     if (attempt.error) {
       lastError = attempt.error;
@@ -806,6 +850,8 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         model: candidateModel,
         rawText: attempt.text,
         fallbackReason: null,
+        openaiResponseId: attempt.responseId,
+        openaiConversationId: attempt.conversationId,
       };
     }
   }
@@ -819,5 +865,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
     model: selectedModel,
     rawText,
     fallbackReason: lastError,
+    openaiResponseId: null,
+    openaiConversationId: null,
   };
 }
