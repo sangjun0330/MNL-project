@@ -106,32 +106,24 @@ const SITUATION_INPUT_GUIDE: Record<
   }
 > = {
   general: {
-    queryPlaceholder:
-      "예: heparin flush랑 혈액검사 채혈 라인 병행 시 주의점, 라인 잠금 순서, 즉시 확인해야 할 안전 항목 정리.",
-    summaryPlaceholder:
-      "(선택) 일반 검색 요약: 현재 처치 목적, 환자 상태 핵심(V/S, 알레르기), 사용 약물/기구, 확인이 필요한 포인트",
-    cue: "일반 검색: 특정 단계가 아니라도 약물·도구 안전 확인 질문을 자유롭게 입력하면, 핵심 행동 위주로 정리합니다.",
+    queryPlaceholder: "예: heparin flush 라인 주의점 요약.",
+    summaryPlaceholder: "(선택) 목적, 핵심 V/S, 사용 약물/기구",
+    cue: "일반 검색 질문을 짧게 입력하세요.",
   },
   pre_admin: {
-    queryPlaceholder:
-      "예: Piperacillin/Tazobactam 4.5g IV 투여 전. Cr 1.9, penicillin 발진 과거력, 현재 BP 92/58. 바로 투여 가능 여부와 확인 순서.",
-    summaryPlaceholder:
-      "(선택) 투여 전 핵심 요약: 환자식별 2개, 알레르기, 최신 V/S, Cr/eGFR·LFT, 금기·중복약, 라인/혼합 정보",
-    cue: "투여 전 확인: 환자식별, 알레르기/금기, 용량·속도·경로, 라인 호환성을 먼저 점검하는 질문으로 입력하세요.",
+    queryPlaceholder: "예: 투여 전 확인 순서 알려줘.",
+    summaryPlaceholder: "(선택) 알레르기, V/S, 주요 검사",
+    cue: "투여 전 확인 질문을 짧게 입력하세요.",
   },
   during_admin: {
-    queryPlaceholder:
-      "예: Vancomycin 주입 중 홍조/가려움 발생. infusion rate 조정·중지 기준과 즉시 모니터 항목, 보고 타이밍 정리.",
-    summaryPlaceholder:
-      "(선택) 투여 중 요약: 현재 주입속도/누적량, 증상 시작 시점, V/S 추이, 라인 상태, 병용 약물/최근 처치",
-    cue: "투여 중 모니터: 현재 증상과 주입 상태를 함께 적으면, 즉시 행동·재평가 간격·보고 기준이 더 정확해집니다.",
+    queryPlaceholder: "예: 주입 중 발진 발생, 먼저 뭘 할까?",
+    summaryPlaceholder: "(선택) 속도, 증상 시작 시점, V/S",
+    cue: "투여 중 상황을 짧게 입력하세요.",
   },
   event_response: {
-    queryPlaceholder:
-      "예: IV pump occlusion 알람 반복 + 주입부 통증/부종. 즉시 중단 기준, 라인/부위 체크 순서, 재가동 조건, 보고 기준.",
-    summaryPlaceholder:
-      "(선택) 이상/알람 요약: 알람 종류, 발생 시각, 환자증상, 주입부 소견(통증/발적/부종), 현재 투여약·농도·속도",
-    cue: "이상/알람 대응: 알람 종류와 환자 증상을 같이 입력하면, 중단/홀드 우선순위와 에스컬레이션 기준을 명확히 제시합니다.",
+    queryPlaceholder: "예: pump occlusion 알람 반복, 대처 순서?",
+    summaryPlaceholder: "(선택) 알람 종류, 증상, 현재 속도",
+    cue: "알람/이상 상황을 짧게 입력하세요.",
   },
 };
 
@@ -164,16 +156,16 @@ function isNameOnlyInput(value: string) {
 function parseErrorMessage(raw: string) {
   if (!raw) return "분석 중 오류가 발생했습니다.";
   const normalized = String(raw).toLowerCase();
-  if (normalized.includes("missing_openai_api_key")) return "OPENAI_API_KEY가 설정되지 않았습니다.";
+  if (normalized.includes("missing_openai_api_key")) return "AI API 키가 설정되지 않았습니다.";
   if (normalized.includes("query_or_image_required")) return "텍스트를 입력하거나 사진을 업로드해 주세요.";
   if (normalized.includes("image_too_large")) return "이미지 용량이 너무 큽니다. 6MB 이하로 다시 업로드해 주세요.";
   if (normalized.includes("image_type_invalid")) return "이미지 파일만 업로드할 수 있습니다.";
   if (normalized.includes("openai_timeout") || normalized.includes("aborted"))
     return "AI 응답 시간이 길어 요청이 중단되었습니다. 잠시 후 다시 시도하거나 네트워크를 변경해 주세요.";
   if (normalized.includes("openai_network_"))
-    return "OpenAI 서버 연결에 실패했습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.";
+    return "AI 서버 연결에 실패했습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.";
   if (normalized.includes("openai_responses_401"))
-    return "OpenAI API 키가 유효하지 않거나 만료되었습니다. .env.local의 OPENAI_API_KEY를 확인해 주세요.";
+    return "AI API 키가 유효하지 않거나 만료되었습니다. .env.local 환경변수를 확인해 주세요.";
   if (normalized.includes("openai_responses_403"))
     return "현재 계정에 해당 모델 접근 권한이 없습니다. 모델명을 변경해 다시 시도해 주세요.";
   if (normalized.includes("openai_responses_404") || normalized.includes("model_not_found"))
@@ -181,8 +173,8 @@ function parseErrorMessage(raw: string) {
   if (normalized.includes("openai_responses_429"))
     return "요청 한도(속도/쿼터)를 초과했습니다. 잠시 후 다시 시도해 주세요.";
   if (normalized.includes("openai_responses_400"))
-    return "OpenAI 요청 형식 오류가 발생했습니다. 입력 내용을 줄여 다시 시도해 주세요.";
-  if (normalized.includes("openai_responses_")) return "OpenAI 요청이 실패했습니다. 잠시 후 다시 시도해 주세요.";
+    return "AI 요청 형식 오류가 발생했습니다. 입력 내용을 줄여 다시 시도해 주세요.";
+  if (normalized.includes("openai_responses_")) return "AI 요청이 실패했습니다. 잠시 후 다시 시도해 주세요.";
   if (normalized.includes("openai_invalid_json_payload"))
     return "AI 응답이 비정형으로 와서 자동 정리 결과로 표시했습니다.";
   return "분석 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.";
@@ -330,11 +322,10 @@ type DynamicResultCard = {
 };
 
 const CARD_MAX_ITEMS = 4;
-const IMPORTANT_LINE_PATTERN =
-  /(즉시|중단|보류|주의|금기|위험|핵심|반드시|필수|우선|보고|호출|알람|트러블슈팅|재평가|모니터|용량|속도|농도|단위|라인|호환|상호작용|high-alert|lasa|y-site|IV push|flush|IFU|프로토콜|기관 확인 필요)/gi;
-const IMPORTANT_NUMBER_PATTERN = /\b\d+(?:\.\d+)?\s*(?:분|시간|mL\/hr|mg|mcg|mEq|IU|U|%)\b/gi;
-
-type TextRange = { start: number; end: number };
+const ITEM_PRIORITY_PATTERN =
+  /(즉시|중단|보류|주의|금기|핵심|반드시|필수|우선|보고|호출|알람|모니터|재평가|용량|속도|농도|단위|라인|호환|상호작용|프로토콜|기관 확인 필요)/i;
+const TOPIC_LABEL_PATTERN =
+  /(정의|분류|역할|특성|기전|포인트|적응증|경로|방식|주의|금기|확인|모니터|신호|대응|호환|상호작용|교육|체크|준비물|셋업|절차|정상|알람|트러블|합병증|유지관리|보고|원인|처치|재평가)/i;
 
 const CATEGORY_HEADING_PATTERN =
   /(핵심 요약|이 약이 무엇인지|언제 쓰는지|어떻게 주는지|기구 정의|준비물|셋업|사용 절차|정상 작동|알람|트러블슈팅|합병증|유지관리|실수 방지|금기|주의|모니터|위험 신호|즉시 대응|라인|호환|상호작용|환자 교육|체크리스트|보고|sbar|원인|재평가|처치|적응증|역할|정의|분류)/i;
@@ -389,10 +380,8 @@ function headingText(line: string) {
 
 function linePriorityScore(line: string) {
   let score = 0;
-  if (IMPORTANT_LINE_PATTERN.test(line)) score += 3;
-  IMPORTANT_LINE_PATTERN.lastIndex = 0;
-  if (IMPORTANT_NUMBER_PATTERN.test(line)) score += 2;
-  IMPORTANT_NUMBER_PATTERN.lastIndex = 0;
+  if (ITEM_PRIORITY_PATTERN.test(line)) score += 3;
+  if (/\b\d+(?:\.\d+)?\s*(?:분|시간|mL\/hr|mg|mcg|mEq|IU|U|%)\b/i.test(line)) score += 2;
   if (line.includes(":") || line.includes("·")) score += 1;
   if (line.length > 35 && line.length < 140) score += 1;
   return score;
@@ -412,72 +401,27 @@ function pickCardItems(items: string[]) {
   return mergeUniqueLists([first], picked).slice(0, CARD_MAX_ITEMS);
 }
 
-function mergeRanges(ranges: TextRange[]) {
-  if (!ranges.length) return [];
-  const sorted = [...ranges].sort((a, b) => a.start - b.start || a.end - b.end);
-  const merged: TextRange[] = [sorted[0]];
-  for (let i = 1; i < sorted.length; i += 1) {
-    const last = merged[merged.length - 1];
-    const current = sorted[i];
-    if (current.start <= last.end) {
-      last.end = Math.max(last.end, current.end);
-      continue;
-    }
-    merged.push(current);
-  }
-  return merged;
-}
-
-function collectHighlightRanges(text: string) {
-  const ranges: TextRange[] = [];
-  const headingSplit = text.indexOf(":");
-  if (headingSplit > 0 && headingSplit <= 18) {
-    ranges.push({ start: 0, end: headingSplit + 1 });
-  }
-
-  const patterns = [IMPORTANT_LINE_PATTERN, IMPORTANT_NUMBER_PATTERN];
-  for (const pattern of patterns) {
-    pattern.lastIndex = 0;
-    let match: RegExpExecArray | null = pattern.exec(text);
-    while (match) {
-      const raw = String(match[0] ?? "");
-      const clean = raw.trim();
-      const start = match.index + raw.indexOf(clean);
-      const end = start + clean.length;
-      if (clean.length >= 2 && start >= 0 && end <= text.length) {
-        ranges.push({ start, end });
-      }
-      if (ranges.length >= 12) break;
-      match = pattern.exec(text);
-    }
-    pattern.lastIndex = 0;
-  }
-
-  return mergeRanges(ranges).slice(0, 6);
+function topicPrefixRange(text: string) {
+  const colonIdx = text.search(/[:：]/);
+  if (colonIdx <= 0 || colonIdx > 26) return null;
+  const label = text.slice(0, colonIdx).trim();
+  if (!label || !TOPIC_LABEL_PATTERN.test(label)) return null;
+  return { start: 0, end: colonIdx + 1 };
 }
 
 function renderHighlightedLine(line: string): ReactNode {
   const text = normalizeDisplayLine(line);
   if (!text) return "";
-  const ranges = collectHighlightRanges(text);
-  if (!ranges.length) return text;
-
-  const nodes: ReactNode[] = [];
-  let cursor = 0;
-  ranges.forEach((range, index) => {
-    if (range.start > cursor) nodes.push(text.slice(cursor, range.start));
-    nodes.push(
-      <span
-        key={`hl-${index}-${range.start}-${range.end}`}
-        className="rounded-[6px] bg-[color:var(--wnl-accent-soft)] px-[3px] py-[1px] font-semibold text-[color:var(--wnl-accent)]"
-      >
+  const range = topicPrefixRange(text);
+  if (!range) return text;
+  return (
+    <>
+      <span className="rounded-[6px] bg-[color:var(--wnl-accent-soft)] px-[3px] py-[1px] font-semibold text-[color:var(--wnl-accent)]">
         {text.slice(range.start, range.end)}
       </span>
-    );
-    cursor = range.end;
-  });
-  if (cursor < text.length) nodes.push(text.slice(cursor));
-  return <>{nodes}</>;
+      {text.slice(range.end)}
+    </>
+  );
 }
 
 function buildNarrativeCards(answer: string): DynamicResultCard[] {
@@ -1076,12 +1020,6 @@ export function ToolMedSafetyPage() {
                   모드: {modeLabel(mode)} · 유형: {queryIntentLabel(queryIntent)} · 상황: {situationLabel(activeSituation)} · 분석:{" "}
                   {formatDateTime(result.analyzedAt)}
                 </div>
-                {result.openaiResponseId ? (
-                  <div className="mt-1 text-[12px] text-ios-sub">
-                    OpenAI trace: {result.openaiResponseId}
-                    {result.openaiConversationId ? ` · conv: ${result.openaiConversationId}` : ""}
-                  </div>
-                ) : null}
               </div>
 
               <div className="border-t border-ios-sep pt-2.5">

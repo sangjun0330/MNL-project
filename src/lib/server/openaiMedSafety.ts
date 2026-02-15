@@ -860,7 +860,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
     result: buildFallbackResult(
       params,
       intent,
-      `OpenAI 응답 실패로 기본 안전 모드로 전환되었습니다. (${truncateError(lastError)})`
+      `AI 응답 실패로 기본 안전 모드로 전환되었습니다. (${truncateError(lastError)})`
     ),
     model: selectedModel,
     rawText,
