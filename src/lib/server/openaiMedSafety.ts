@@ -116,10 +116,10 @@ function resolveApiBaseUrl() {
 }
 
 function resolveMaxOutputTokens() {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_MAX_OUTPUT_TOKENS ?? process.env.OPENAI_MAX_OUTPUT_TOKENS ?? 2200);
-  if (!Number.isFinite(raw)) return 2200;
+  const raw = Number(process.env.OPENAI_MED_SAFETY_MAX_OUTPUT_TOKENS ?? process.env.OPENAI_MAX_OUTPUT_TOKENS ?? 2600);
+  if (!Number.isFinite(raw)) return 2600;
   const rounded = Math.round(raw);
-  return Math.max(1000, Math.min(4000, rounded));
+  return Math.max(1200, Math.min(4200, rounded));
 }
 
 function truncateError(raw: string, size = 220) {
@@ -144,6 +144,47 @@ function cleanLine(value: string) {
     .replace(/^["'`]+|["'`]+$/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function sanitizeSearchAnswer(text: string) {
+  const replaced = normalizeText(text)
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/^#{1,6}\s*/gm, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^\s*---+\s*$/gm, "")
+    .replace(/\n{3,}/g, "\n\n");
+
+  const lines = replaced
+    .split("\n")
+    .map((line) => cleanLine(line))
+    .filter(Boolean);
+
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const line of lines) {
+    const key = line
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!key) continue;
+    if (seen.has(key) && line.length > 12) continue;
+    if (out.length) {
+      const prev = out[out.length - 1]
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s]/gu, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (prev && (key.includes(prev) || prev.includes(key)) && Math.min(prev.length, key.length) > 24) {
+        continue;
+      }
+    }
+    seen.add(key);
+    out.push(line);
+  }
+  return out.join("\n");
 }
 
 function dedupeLimit(items: string[], limit: number) {
@@ -210,6 +251,8 @@ function buildDeveloperPrompt(locale: "ko" | "en") {
       "정해진 출력 템플릿을 강제하지 말고, 질문 성격에 맞는 최적의 구조로 답한다.",
       "불확실하거나 기관별 차이가 큰 내용은 단정하지 말고 확인 포인트를 명확히 표시한다.",
       "진단/처방 결정을 대체하지 않으며 기관 프로토콜·의사 지시·제조사 IFU를 최종 기준으로 둔다.",
+      "품질 기준: 핵심 우선, 중복 제거, 실수 방지 포인트 포함, 모바일에서도 한눈에 읽히는 문장 길이 유지.",
+      "출력은 일반 텍스트 중심으로 작성하고 마크다운 장식(##, **, 코드블록)은 사용하지 않는다.",
     ].join("\n");
   }
   return [
@@ -218,6 +261,8 @@ function buildDeveloperPrompt(locale: "ko" | "en") {
     "Do not force rigid output templates; structure response to best fit the query.",
     "Mark uncertain or institution-dependent details as verification points.",
     "Do not replace diagnosis/prescribing decisions; local protocol and IFU are final.",
+    "Quality bar: action-first, concise, de-duplicated, mobile-readable, high signal-to-noise.",
+    "Use plain text and avoid markdown ornaments.",
   ].join("\n");
 }
 
@@ -225,6 +270,10 @@ function buildMedicationPrompt(query: string, contextJson: string) {
   return [
     "질문 약물에 대해 간호사를 위한 검색엔진 답변을 작성하라.",
     "절대 고정된 템플릿을 강제하지 말고, 질문에 맞게 가장 가독성 좋은 방식으로 답하라.",
+    "출력 규칙: 마크다운 기호(##, ###, **, ---, ``` )를 쓰지 말고 일반 텍스트로만 작성하라.",
+    "중복 문장/중복 단락을 반복하지 말고, 모바일 화면에서 읽기 쉽게 짧은 문장과 줄바꿈으로 작성하라.",
+    "답변 시작에 핵심 요약 1~2문장(가장 중요한 안전 포인트)을 먼저 제시하라.",
+    "실무에서 바로 행동 가능한 정보부터 우선순위로 제시하라.",
     "",
     "[약물 질문 출력 필수 내용]",
     "1) 이 약이 무엇인지(정의/분류/역할)",
@@ -265,6 +314,7 @@ function buildMedicationPrompt(query: string, contextJson: string) {
     "- 근거 없는 수치·용량·기준은 만들지 말 것",
     "- 기관마다 다른 부분은 반드시 '기관 확인 필요'로 표기",
     "- 한국 간호 현장 표현으로, 바쁜 상황에서 바로 실행 가능하게 작성",
+    "- 같은 정보를 다른 문장으로 반복하지 말 것",
     "",
     "질문:",
     query || "(없음)",
@@ -278,6 +328,10 @@ function buildDevicePrompt(query: string, contextJson: string) {
   return [
     "질문 의료기구에 대해 간호사를 위한 검색엔진 답변을 작성하라.",
     "절대 고정된 템플릿을 강제하지 말고, 질문에 맞게 가장 가독성 좋은 방식으로 답하라.",
+    "출력 규칙: 마크다운 기호(##, ###, **, ---, ``` )를 쓰지 말고 일반 텍스트로만 작성하라.",
+    "중복 문장/중복 단락을 반복하지 말고, 모바일 화면에서 읽기 쉽게 짧은 문장과 줄바꿈으로 작성하라.",
+    "답변 시작에 핵심 요약 1~2문장(가장 중요한 안전 포인트)을 먼저 제시하라.",
+    "현장 단계(준비→셋업→초기 확인→알람 대응)를 행동 중심으로 제시하라.",
     "",
     "[의료기구 질문 출력 필수 내용]",
     "1) 기구 정의/언제 쓰는지",
@@ -309,6 +363,7 @@ function buildDevicePrompt(query: string, contextJson: string) {
     "- 기기별 수치/주기는 제조사 IFU와 기관 프로토콜 확인 전제",
     "- 단정이 어려운 항목은 확인 포인트로 안내",
     "- 한국 간호 현장 표현으로, 바쁜 상황에서 바로 실행 가능하게 작성",
+    "- 같은 정보를 다른 문장으로 반복하지 말 것",
     "",
     "질문:",
     query || "(없음)",
@@ -322,8 +377,11 @@ function buildScenarioPrompt(query: string, contextJson: string) {
   return [
     "상황 질문에 대해 간호사 행동 중심으로 매우 구체적으로 답하라.",
     "형식은 자유이며 질문 맥락에 맞춰 가장 효과적인 구조로 작성하라.",
+    "출력 규칙: 마크다운 기호(##, ###, **, ---, ``` )를 쓰지 말고 일반 텍스트로만 작성하라.",
+    "중복 문장/중복 단락을 반복하지 말고, 모바일 화면에서 읽기 쉽게 짧은 문장과 줄바꿈으로 작성하라.",
     "핵심은 '지금 무엇을 먼저 해야 하는지', '무엇을 확인해야 하는지', '언제 중단/호출해야 하는지'다.",
     "불확실하면 안전한 기본 행동과 확인 포인트를 우선 제시한다.",
+    "가능하면 즉시 행동, 5분 내 확인, 악화 시 분기, 보고 문구를 포함하라.",
     "질문:",
     query || "(없음)",
     "",
@@ -368,7 +426,10 @@ function extractResponsesText(json: any): string {
   const chunks: string[] = [];
   for (const item of output) {
     const outputText = typeof item?.output_text === "string" ? item.output_text : "";
-    if (outputText) chunks.push(outputText);
+    if (outputText) {
+      chunks.push(outputText);
+      continue;
+    }
     const cell = Array.isArray(item?.content) ? item.content : [];
     for (const part of cell) {
       const text = typeof part?.text === "string" ? part.text : "";
@@ -412,9 +473,9 @@ async function callResponsesApi(args: {
     ],
     text: {
       format: { type: "text" as const },
-      verbosity: "medium" as const,
+      verbosity: "high" as const,
     },
-    reasoning: { effort: "low" as const },
+    reasoning: { effort: "medium" as const },
     max_output_tokens: maxOutputTokens,
     tools: [],
     store: false,
@@ -570,7 +631,7 @@ function buildFallbackResult(params: AnalyzeParams, intent: QueryIntent, note: s
 }
 
 function buildResultFromAnswer(params: AnalyzeParams, intent: QueryIntent, answer: string): MedSafetyAnalysisResult {
-  const normalized = normalizeText(answer);
+  const normalized = sanitizeSearchAnswer(answer);
   const itemName = cleanLine(params.query || params.imageName || "").slice(0, 50) || "조회 항목";
   const status = detectStatus(normalized);
   const riskLevel = detectRiskLevel(normalized, status);

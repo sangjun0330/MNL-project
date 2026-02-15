@@ -320,6 +320,10 @@ function isJsonFragmentLine(value: string) {
 function normalizeDisplayLine(value: string) {
   const collapsed = String(value ?? "")
     .replace(/\s+/g, " ")
+    .replace(/^#{1,6}\s*/, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
     .replace(/^["'`]+|["'`]+$/g, "")
     .replace(/\s+,/g, ",")
     .trim();
@@ -373,6 +377,11 @@ function headingText(line: string) {
 function buildNarrativeCards(answer: string): DynamicResultCard[] {
   const lines = String(answer ?? "")
     .replace(/\r/g, "")
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/\*\*/g, "")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\n{3,}/g, "\n\n")
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
@@ -384,12 +393,34 @@ function buildNarrativeCards(answer: string): DynamicResultCard[] {
   let currentItems: string[] = [];
 
   const flush = () => {
-    const items = currentItems.map((line) => normalizeDisplayLine(line)).filter((line) => line.length > 0);
+    const items = currentItems
+      .flatMap((line) => {
+        const clean = normalizeDisplayLine(line);
+        if (!clean) return [];
+        if (clean.length <= 150) return [clean];
+        return clean
+          .split(/(?<=[.!?]|다\.|요\.)\s+/)
+          .map((part) => normalizeDisplayLine(part))
+          .filter((part) => part.length > 0);
+      })
+      .filter((line) => line.length > 0);
     if (!items.length) return;
+    const title = normalizeDisplayLine(currentTitle) || "AI 답변";
+    const normalizedItems = mergeUniqueLists(items).slice(0, 10);
+    if (!normalizedItems.length) {
+      currentItems = [];
+      return;
+    }
+    if (cards.length > 0 && normalizedItems.length <= 1) {
+      const prev = cards[cards.length - 1];
+      prev.items = mergeUniqueLists(prev.items, normalizedItems).slice(0, 12);
+      currentItems = [];
+      return;
+    }
     cards.push({
       key: `narrative-${cards.length}`,
-      title: normalizeDisplayLine(currentTitle) || "AI 답변",
-      items: mergeUniqueLists(items),
+      title,
+      items: normalizedItems,
       compact: cards.length === 0,
     });
     currentItems = [];
@@ -405,7 +436,7 @@ function buildNarrativeCards(answer: string): DynamicResultCard[] {
   }
   flush();
 
-  if (cards.length) return cards.slice(0, 12);
+  if (cards.length) return cards.slice(0, 8);
 
   const paragraphs = String(answer ?? "")
     .split(/\n{2,}/)
@@ -714,10 +745,10 @@ export function ToolMedSafetyPage() {
 
   return (
     <>
-      <div className="mx-auto w-full max-w-[920px] space-y-4 px-4 pb-24 pt-6">
+      <div className="mx-auto w-full max-w-[920px] space-y-3 px-2 pb-24 pt-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-[31px] font-extrabold tracking-[-0.02em] text-ios-text">AI 약물·도구 검색기</div>
+            <div className="text-[31px] font-extrabold tracking-[-0.02em] text-[color:var(--wnl-accent)]">AI 약물·도구 검색기</div>
             <div className="mt-1 text-[13px] text-ios-sub">간호 현장에서 바로 쓰는 약물·의료기구·상황 대응 정보를 검색형으로 제공합니다.</div>
           </div>
           <Link href="/tools" className="pt-1 text-[12px] font-semibold text-[color:var(--wnl-accent)]">
@@ -725,7 +756,7 @@ export function ToolMedSafetyPage() {
           </Link>
         </div>
 
-        <Card className={`p-5 ${FLAT_CARD_CLASS}`}>
+        <Card className={`p-3 ${FLAT_CARD_CLASS}`}>
           <div className="space-y-4">
             <div className="space-y-2">
               <div className="text-[13px] font-semibold text-ios-text">근무 모드</div>
@@ -897,7 +928,7 @@ export function ToolMedSafetyPage() {
           </div>
         </Card>
 
-        <Card className={`p-5 ${FLAT_CARD_CLASS}`}>
+        <Card className={`p-3 ${FLAT_CARD_CLASS}`}>
           {!result ? (
             <div className="py-1">
               <div className="text-[24px] font-bold text-ios-text">결과 대기</div>
@@ -914,10 +945,10 @@ export function ToolMedSafetyPage() {
                     <span className="rounded-full border border-ios-sep px-3 py-1 text-[12px] font-semibold text-ios-sub">{itemTypeChip}</span>
                   ) : null}
                 </div>
-                <div className="mt-3 text-[40px] font-bold leading-[1.05] tracking-[-0.03em] text-ios-text">{result.item.name}</div>
-                <div className="mt-2 text-[20px] leading-8 text-ios-text">{headerConclusion || headerPrimaryUse || "핵심 안전 확인 필요"}</div>
+                <div className="mt-2 text-[34px] font-bold leading-[1.08] tracking-[-0.03em] text-ios-text">{result.item.name}</div>
+                <div className="mt-1.5 text-[18px] leading-7 text-ios-text">{headerConclusion || headerPrimaryUse || "핵심 안전 확인 필요"}</div>
                 {headerPrimaryUse && headerPrimaryUse !== headerConclusion ? (
-                  <div className="mt-1 text-[17px] leading-7 text-ios-sub">{headerPrimaryUse}</div>
+                  <div className="mt-1 text-[16px] leading-6 text-ios-sub">{headerPrimaryUse}</div>
                 ) : null}
                 <div className="mt-2 text-[15px] text-ios-sub">
                   모드: {modeLabel(mode)} · 유형: {queryIntentLabel(queryIntent)} · 상황: {situationLabel(activeSituation)} · 분석:{" "}
@@ -925,16 +956,16 @@ export function ToolMedSafetyPage() {
                 </div>
               </div>
 
-              <div className="border-t border-ios-sep pt-4">
+              <div className="border-t border-ios-sep pt-2.5">
                 {dynamicCards.length ? (
-                  <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2.5">
                     {dynamicCards.map((card) => (
                       <section
                         key={card.key}
-                        className={`rounded-2xl border border-ios-sep ${card.compact ? "bg-ios-bg/40" : "bg-white"} p-4`}
+                        className={`${card.compact ? "border-l-[3px] border-[color:var(--wnl-accent)] pl-3 py-1.5" : "border-b border-ios-sep pb-2.5"} last:border-b-0`}
                       >
-                        <div className="text-[17px] font-bold tracking-[-0.01em] text-ios-text">{card.title}</div>
-                        <ul className="mt-2 list-disc space-y-1.5 pl-5 text-[16px] leading-7 text-ios-text">
+                        <div className="text-[15px] font-bold tracking-[-0.01em] text-[color:var(--wnl-accent)]">{card.title}</div>
+                        <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[15px] leading-6 text-ios-text">
                           {card.items.map((item, index) => (
                             <li key={`${card.key}-${index}`}>{item}</li>
                           ))}
