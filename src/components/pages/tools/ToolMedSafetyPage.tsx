@@ -346,17 +346,70 @@ function normalizeDisplayLine(value: string) {
   return withoutTrailingComma;
 }
 
+function clampDisplayText(value: string, maxChars: number) {
+  const text = normalizeDisplayLine(value);
+  if (!text) return "";
+  if (text.length <= maxChars) return text;
+  const clipped = text.slice(0, maxChars);
+  const boundary = Math.max(
+    clipped.lastIndexOf(" "),
+    clipped.lastIndexOf(","),
+    clipped.lastIndexOf("·"),
+    clipped.lastIndexOf(")")
+  );
+  const base = (boundary > maxChars * 0.58 ? clipped.slice(0, boundary) : clipped).trim();
+  return `${base}…`;
+}
+
+function splitLongDisplayLine(value: string) {
+  const clean = normalizeDisplayLine(value);
+  if (!clean) return [];
+
+  const trySplit = (input: string, pattern: RegExp) =>
+    input
+      .split(pattern)
+      .map((part) => normalizeDisplayLine(part))
+      .filter((part) => part.length > 0);
+
+  const bySentence = trySplit(clean, /(?<=[.!?]|다\.|요\.)\s+|;\s+/);
+  if (bySentence.length > 1) return bySentence.map((line) => clampDisplayText(line, DISPLAY_ITEM_MAX_CHARS));
+
+  const byCommaCue = trySplit(
+    clean,
+    /,\s+(?=(?:지금|먼저|확인|중단|호출|보고|원인|분기|주의|금기|모니터|재평가|속도|용량|라인|수액|호환|SBAR|S:|B:|A:|R:))/i
+  );
+  if (byCommaCue.length > 1) return byCommaCue.map((line) => clampDisplayText(line, DISPLAY_ITEM_MAX_CHARS));
+
+  const byKeyword = trySplit(
+    clean,
+    /\s+(?=(?:지금|먼저|확인|중단|호출|보고|원인|분기|주의|금기|모니터|재평가|속도|용량|라인|수액|호환|SBAR|S:|B:|A:|R:))/i
+  );
+  if (byKeyword.length > 1) return byKeyword.map((line) => clampDisplayText(line, DISPLAY_ITEM_MAX_CHARS));
+
+  if (clean.length <= DISPLAY_ITEM_MAX_CHARS) return [clean];
+
+  const words = clean.split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const chunks: string[] = [];
+  for (let index = 0; index < words.length; index += 22) {
+    chunks.push(clampDisplayText(words.slice(index, index + 22).join(" "), DISPLAY_ITEM_MAX_CHARS));
+  }
+  return chunks.filter(Boolean);
+}
+
 function mergeUniqueLists(...lists: string[][]) {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const list of lists) {
     for (const item of list) {
-      const clean = normalizeDisplayLine(String(item ?? ""));
-      if (!clean) continue;
-      const key = clean.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push(clean);
+      const splitItems = splitLongDisplayLine(String(item ?? ""));
+      for (const clean of splitItems) {
+        if (!clean) continue;
+        const key = clean.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(clean);
+      }
     }
   }
   return out;
@@ -371,8 +424,10 @@ type DynamicResultCard = {
 
 const CARD_MAX_ITEMS = 4;
 const CARD_MAX_SECTIONS = 16;
+const NON_SCENARIO_CARD_MAX_ITEMS = 3;
 const SCENARIO_CARD_MAX_ITEMS = 4;
 const SCENARIO_CARD_MAX_SECTIONS = 12;
+const DISPLAY_ITEM_MAX_CHARS = 180;
 const ITEM_PRIORITY_PATTERN =
   /(즉시|중단|보류|주의|금기|핵심|반드시|필수|우선|보고|호출|알람|모니터|재평가|용량|속도|농도|단위|라인|호환|상호작용|프로토콜|기관 확인 필요)/i;
 const TOPIC_LABEL_PATTERN =
@@ -495,15 +550,7 @@ function buildNarrativeCards(answer: string): DynamicResultCard[] {
 
   const flush = () => {
     const items = currentItems
-      .flatMap((line) => {
-        const clean = normalizeDisplayLine(line);
-        if (!clean) return [];
-        if (clean.length <= 150) return [clean];
-        return clean
-          .split(/(?<=[.!?]|다\.|요\.|;)\s+|(?<=\))\s+(?=[가-힣A-Za-z])/)
-          .map((part) => normalizeDisplayLine(part))
-          .filter((part) => part.length > 0);
-      })
+      .flatMap((line) => splitLongDisplayLine(line))
       .filter((line) => line.length > 0);
     if (!items.length) return;
     const title = normalizeDisplayLine(currentTitle) || `핵심 정보 ${cards.length + 1}`;
@@ -546,7 +593,7 @@ function buildNarrativeCards(answer: string): DynamicResultCard[] {
     items: pickCardItems(
       block
         .split("\n")
-        .map((line) => normalizeDisplayLine(line))
+        .flatMap((line) => splitLongDisplayLine(line))
         .filter((line) => line.length > 0)
     ),
     compact: idx === 0,
@@ -890,8 +937,12 @@ export function ToolMedSafetyPage() {
   const adjustmentPlan = result ? mergeUniqueLists(result.do.steps).slice(0, 8) : [];
   const preventionPoints = result ? mergeUniqueLists(result.do.compatibilityChecks, result.institutionalChecks).slice(0, 6) : [];
   const reassessmentPoints = result ? mergeUniqueLists(result.safety.monitor).slice(0, 6) : [];
-  const headerConclusion = result ? normalizeDisplayLine(result.oneLineConclusion) : "";
-  const headerPrimaryUse = result ? normalizeDisplayLine(result.item.primaryUse) : "";
+  const headerConclusion = result
+    ? clampDisplayText(result.oneLineConclusion, result.resultKind === "scenario" ? 160 : 220)
+    : "";
+  const headerPrimaryUse = result
+    ? clampDisplayText(result.item.primaryUse, result.resultKind === "scenario" ? 170 : 220)
+    : "";
   const dynamicCardsFromNarrative = result?.searchAnswer ? buildNarrativeCards(result.searchAnswer) : [];
   const dynamicCardsFallback: DynamicResultCard[] = result
     ? [
@@ -924,7 +975,12 @@ export function ToolMedSafetyPage() {
             ...card,
             items: card.items.slice(0, SCENARIO_CARD_MAX_ITEMS),
           }))
-      : dynamicCards;
+      : dynamicCards.map((card) => ({
+          ...card,
+          items: card.items.slice(0, NON_SCENARIO_CARD_MAX_ITEMS),
+        }));
+  const showHeaderPrimaryUse =
+    !!result && result.resultKind !== "scenario" && !!headerPrimaryUse && !isNearDuplicateText(headerPrimaryUse, headerConclusion);
   const resultKindChip = result ? kindLabel(result.resultKind) : "";
 
   return (
@@ -1128,7 +1184,7 @@ export function ToolMedSafetyPage() {
                 </div>
                 <div className="mt-2 text-[34px] font-bold leading-[1.08] tracking-[-0.03em] text-ios-text">{result.item.name}</div>
                 <div className="mt-1.5 text-[18px] leading-7 text-ios-text">{headerConclusion || headerPrimaryUse || "핵심 안전 확인 필요"}</div>
-                {headerPrimaryUse && !isNearDuplicateText(headerPrimaryUse, headerConclusion) ? (
+                {showHeaderPrimaryUse ? (
                   <div className="mt-1 text-[16px] leading-6 text-ios-sub">{headerPrimaryUse}</div>
                 ) : null}
                 <div className="mt-2 text-[15px] text-ios-sub">
