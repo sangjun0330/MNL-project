@@ -687,6 +687,8 @@ export function ToolMedSafetyPage() {
             { key: "sbar", title: "보고(SBAR)", items: sbarLines },
           ].filter((card) => card.items.length > 0)
     : [];
+  const resultKindChip = result ? kindLabel(result.resultKind) : "";
+  const itemTypeChip = result ? itemTypeLabel(result.item.type) : "";
 
   return (
     <>
@@ -885,9 +887,9 @@ export function ToolMedSafetyPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   <span className={`rounded-full border px-3 py-1 text-[14px] font-bold ${statusTone(result.quick.status)}`}>{statusLabel(result.quick.status)}</span>
                   <span className={`rounded-full border px-3 py-1 text-[13px] font-semibold ${riskTone(result.riskLevel)}`}>위험도 {riskLabel(result.riskLevel)}</span>
-                  <span className="rounded-full border border-ios-sep px-3 py-1 text-[13px] font-semibold text-ios-text">{kindLabel(result.resultKind)}</span>
-                  {result.item.type !== "unknown" ? (
-                    <span className="rounded-full border border-ios-sep px-3 py-1 text-[12px] font-semibold text-ios-sub">{itemTypeLabel(result.item.type)}</span>
+                  <span className="rounded-full border border-ios-sep px-3 py-1 text-[13px] font-semibold text-ios-text">{resultKindChip}</span>
+                  {result.item.type !== "unknown" && itemTypeChip !== resultKindChip ? (
+                    <span className="rounded-full border border-ios-sep px-3 py-1 text-[12px] font-semibold text-ios-sub">{itemTypeChip}</span>
                   ) : null}
                 </div>
                 <div className="mt-3 text-[40px] font-bold leading-[1.05] tracking-[-0.03em] text-ios-text">{result.item.name}</div>
