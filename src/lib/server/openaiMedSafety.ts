@@ -1,7 +1,7 @@
 export type MedSafetyItemType = "medication" | "device" | "unknown";
 export type MedSafetyQuickStatus = "OK" | "CHECK" | "STOP";
 export type ClinicalMode = "ward" | "er" | "icu";
-export type ClinicalSituation = "pre_admin" | "during_admin" | "alarm" | "adverse_suspect" | "general";
+export type ClinicalSituation = "pre_admin" | "during_admin" | "event_response";
 
 export type MedSafetyAnalysisResult = {
   item: {
@@ -324,7 +324,15 @@ function collectStructuredCandidates(json: unknown): unknown[] {
     }
     if (typeof value === "string") {
       const parsed = safeJsonParse<unknown>(value);
-      if (parsed) out.push(parsed);
+      if (!parsed) return;
+      if (typeof parsed === "string") {
+        const nested = safeJsonParse<unknown>(parsed);
+        if (nested) {
+          if (typeof nested === "object") out.push(nested);
+          return;
+        }
+      }
+      if (typeof parsed === "object") out.push(parsed);
     }
   };
 
@@ -474,13 +482,37 @@ function detectQuickStatus(text: string): MedSafetyQuickStatus {
   return "CHECK";
 }
 
+function looksLikeJsonBlob(value: string) {
+  const text = String(value ?? "").trim();
+  if (!text) return false;
+  if (/^[{\[]/.test(text)) return true;
+  if (/"(?:item|quick|do|safety|patientScript20s|modePriority|confidenceNote)"\s*:/i.test(text)) return true;
+  const punctuation = (text.match(/[{}[\]":,]/g) ?? []).length;
+  return punctuation >= Math.max(12, Math.floor(text.length * 0.12));
+}
+
+function sanitizeModelLine(value: string, maxLength = 180) {
+  const collapsed = cleanLine(value)
+    .replace(/\\n/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^(?:json\s*:)?\s*/i, "")
+    .trim();
+  if (!collapsed) return "";
+  if (looksLikeJsonBlob(collapsed)) return "";
+  const clipped = collapsed.length > maxLength ? `${collapsed.slice(0, maxLength - 1)}…` : collapsed;
+  return clipped.replace(/^\d+[).]\s*/, "").trim();
+}
+
 function dedupeLimit(items: string[], limit: number) {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const raw of items) {
-    const clean = cleanLine(raw)
-      .replace(/^(?:[-*•·]|\d+[).])\s*/, "")
-      .trim();
+    const clean = sanitizeModelLine(
+      cleanLine(raw)
+        .replace(/^(?:[-*•·]|\d+[).])\s*/, "")
+        .trim(),
+      180
+    );
     if (!clean) continue;
     const key = clean.toLowerCase();
     if (seen.has(key)) continue;
@@ -498,7 +530,9 @@ function parseAnalysisResultFromNarrativeText(rawText: string, params: AnalyzePa
   const lines = text
     .split(/\r?\n/)
     .map((line) => cleanLine(line))
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter((line) => !looksLikeJsonBlob(line));
+  if (!lines.length) return null;
 
   const sections: Record<
     "actions" | "numbers" | "risks" | "steps" | "calc" | "compat" | "hold" | "monitor" | "escalate" | "script",
@@ -580,12 +614,12 @@ function parseAnalysisResultFromNarrativeText(rawText: string, params: AnalyzePa
     pushAuto(content);
   }
 
-  const queryName = cleanLine(params.query).slice(0, 40) || "입력 항목";
+  const queryName = sanitizeModelLine(cleanLine(params.query), 40) || "입력 항목";
   const itemNameByLabel =
     text.match(/(?:약물명|도구명|item|name)\s*[:：]\s*([^\n\r]+)/i)?.[1]?.trim() ??
     text.match(/^\s*([A-Za-z][A-Za-z0-9\s\-]{2,40})\s*$/m)?.[1]?.trim() ??
     "";
-  const itemName = (itemNameByLabel || queryName).slice(0, 40);
+  const itemName = (sanitizeModelLine(itemNameByLabel, 40) || queryName).slice(0, 40);
 
   const actions = dedupeLimit(sections.actions, 3);
   const numbers = dedupeLimit(sections.numbers, 4);
@@ -694,7 +728,7 @@ function toTextArray(value: unknown, limit: number, minLength = 1) {
   const output: string[] = [];
   const seen = new Set<string>();
   for (const item of value) {
-    const clean = String(item ?? "").replace(/\s+/g, " ").trim();
+    const clean = sanitizeModelLine(String(item ?? "").replace(/\s+/g, " ").trim());
     if (clean.length < minLength) continue;
     const key = clean.toLowerCase();
     if (seen.has(key)) continue;
@@ -723,10 +757,10 @@ function parseAnalysisResult(raw: unknown): MedSafetyAnalysisResult | null {
   const doRaw = (data.do as Record<string, unknown> | undefined) ?? {};
   const safetyRaw = (data.safety as Record<string, unknown> | undefined) ?? {};
 
-  const itemName = String(itemRaw.name ?? "").trim();
-  const primaryUse = String(itemRaw.primaryUse ?? "").trim();
-  const patientScript20s = String(data.patientScript20s ?? "").trim();
-  const confidenceNote = String(data.confidenceNote ?? "").trim();
+  const itemName = sanitizeModelLine(String(itemRaw.name ?? "").trim(), 72);
+  const primaryUse = sanitizeModelLine(String(itemRaw.primaryUse ?? "").trim(), 160);
+  const patientScript20s = sanitizeModelLine(String(data.patientScript20s ?? "").trim(), 220);
+  const confidenceNote = sanitizeModelLine(String(data.confidenceNote ?? "").trim(), 180);
 
   if (!itemName) return null;
 
@@ -786,29 +820,19 @@ function buildFallbackAnalysisResult(params: AnalyzeParams, note: string): MedSa
 
   const situationActions: Record<ClinicalSituation, string[]> = {
     pre_admin: [
-      "지금 투여 전 5R(대상자/약물/용량/시간/경로)부터 재확인",
-      "최신 활력징후·핵심 수치·알레르기 확인",
-      "기준 이탈 또는 불확실 시 즉시 담당의/당직 확인",
+      "투여 전 5R(환자·약물·용량·시간·경로)과 환자식별 2개를 먼저 재확인",
+      "알레르기·금기·중복투여 가능성과 최신 활력징후/검사값을 확인",
+      "확신이 낮거나 기준 이탈 시 투여 보류 후 즉시 보고",
     ],
     during_admin: [
-      "현재 투여/주입 속도와 라인 상태 즉시 확인",
-      "증상 또는 이상 반응 시 일시 중지 후 상태 재평가",
-      "처치 내용과 보고 사항을 즉시 기록",
+      "현재 주입속도·누적량·펌프 설정과 라인 개방성/주입부 상태를 즉시 확인",
+      "환자 증상 변화가 있으면 일시중지 후 ABC/V/S 재평가를 우선 수행",
+      "중재 후 재개 조건과 보고 시점을 명확히 기록",
     ],
-    alarm: [
-      "알람 종류와 라인 연결 상태를 먼저 확인",
-      "환자 상태를 즉시 재평가하고 위험 신호 확인",
-      "해결 안 되면 투여 중지 후 담당의/엔지니어 보고",
-    ],
-    adverse_suspect: [
-      "의심 약물/기구 사용을 즉시 중단 또는 홀드",
-      "환자 증상·징후 우선 안정화",
-      "응급 기준 충족 시 즉시 보고 및 추가 지시 수령",
-    ],
-    general: [
-      "현재 상황에서 가장 먼저 필요한 안전 확인부터 수행",
-      "핵심 수치와 처방 조건이 맞는지 재확인",
-      "불확실하면 CHECK 기준으로 보고 후 진행",
+    event_response: [
+      "알람/이상 징후 발생 시 즉시 STOP/HOLD 여부를 먼저 판단하고 환자 상태를 우선 확인",
+      "라인 폐색·침윤·누출·장비 설정 오류를 순서대로 점검",
+      "해결 불가, 상태 악화, 고위험 약물 관련이면 즉시 보고 및 추가 지시를 받음",
     ],
   };
 
@@ -862,17 +886,65 @@ function modeLabel(mode: ClinicalMode, locale: "ko" | "en") {
 
 function situationLabel(situation: ClinicalSituation, locale: "ko" | "en") {
   if (locale === "en") {
-    if (situation === "pre_admin") return "Before administration";
-    if (situation === "during_admin") return "During administration";
-    if (situation === "alarm") return "Alarm triggered";
-    if (situation === "adverse_suspect") return "Adverse event suspected";
-    return "General lookup";
+    if (situation === "pre_admin") return "Pre-administration safety check";
+    if (situation === "during_admin") return "During administration monitoring";
+    return "Alarm/adverse event response";
   }
-  if (situation === "pre_admin") return "투여 직전";
-  if (situation === "during_admin") return "투여 중";
-  if (situation === "alarm") return "알람 발생";
-  if (situation === "adverse_suspect") return "부작용 의심";
-  return "일반 조회";
+  if (situation === "pre_admin") return "투여 전 확인";
+  if (situation === "during_admin") return "투여 중 모니터";
+  return "이상/알람 대응";
+}
+
+function buildSituationPromptLines(situation: ClinicalSituation, locale: "ko" | "en") {
+  if (locale === "ko") {
+    if (situation === "pre_admin") {
+      return [
+        "[상황별 출력 규칙: 투여 전 확인]",
+        "- 환자식별(2개 식별자), 알레르기, 금기/중복 가능성, 처방-라벨 일치 여부를 quick.topActions에 우선 배치",
+        "- 고위험 약물/고위험 기구 가능성이 있으면 independent double-check 필요 여부를 포함",
+        "- 주사/주입 처치면 무균 원칙, 약물 라벨 명확성, 스마트펌프 guardrail(가능 시) 확인 항목을 반영",
+        "- topNumbers는 입력에 있는 수치/단위 중심으로 작성하고, 근거 없는 임의 수치 생성 금지",
+      ];
+    }
+    if (situation === "during_admin") {
+      return [
+        "[상황별 출력 규칙: 투여 중 모니터]",
+        "- 현재 주입속도/장비설정/라인 상태/주입부 소견 확인 순서를 quick.topActions로 제시",
+        "- monitor에는 재평가해야 할 항목(V/S, 의식, 호흡, 주입부)과 관찰 간격 제안을 포함",
+        "- 이상 징후 발생 시 중지/감속/지속 여부 판단 조건을 holdRules와 escalateWhen에 명확히 작성",
+      ];
+    }
+    return [
+      "[상황별 출력 규칙: 이상/알람 대응]",
+      "- 환자 안전 우선: 즉시 STOP/HOLD 필요성, ABC/V/S 재평가를 첫 행동으로 제시",
+      "- 라인 폐색/침윤/누출/기기 설정 오류를 단계적으로 분류해 do.steps에 작성",
+      "- 상태 악화, 해결 실패, 고위험 약물 관련이면 즉시 보고 기준을 구체적으로 제시",
+    ];
+  }
+
+  if (situation === "pre_admin") {
+    return [
+      "[Situation Output Rules: Pre-administration]",
+      "- Prioritize two-patient-identifiers, allergy/contraindication checks, and order-label-route-rate matching.",
+      "- If potentially high-alert medication/device, include need for an independent double-check.",
+      "- For injections/infusions, include aseptic checks, label clarity checks, and smart-pump guardrail checks when applicable.",
+      "- topNumbers must use only numbers present in user context; do not invent thresholds.",
+    ];
+  }
+  if (situation === "during_admin") {
+    return [
+      "[Situation Output Rules: During administration]",
+      "- Prioritize infusion/device settings, line patency/site findings, and current symptom trend.",
+      "- In monitor, include explicit reassessment targets (vitals, mental status, breathing, site findings).",
+      "- In holdRules/escalateWhen, define when to stop, hold, or urgently escalate.",
+    ];
+  }
+  return [
+    "[Situation Output Rules: Alarm/adverse response]",
+    "- Patient safety first: immediate stop/hold decision and ABC/vitals reassessment first.",
+    "- Separate likely causes stepwise (occlusion, infiltration/extravasation, leakage, device setup error).",
+    "- Provide explicit urgent escalation triggers for unresolved alarms or deterioration.",
+  ];
 }
 
 function buildDeveloperPrompt(locale: "ko" | "en") {
@@ -880,12 +952,14 @@ function buildDeveloperPrompt(locale: "ko" | "en") {
     return [
       "너는 간호사 개인용 약물/의료도구 안전 실행 보조 AI다.",
       "반드시 실행 중심으로 답하고, 설명보다 행동을 먼저 제시한다.",
-      "PDF 설계 원칙을 따른다: 30초 내 행동 결정, 수치/단계 우선, 중단 규칙은 숫자+조건, 라인/호환/알람 대응 중심.",
+      "30초 내 행동 결정을 돕는 구조로 작성한다: step-first, hold/stop 조건, 보고 기준, 라인/호환 점검 우선.",
       "quick.topActions는 2~3개 핵심 행동만 제시한다(경고 과다 금지).",
       "quick.topRisks도 최대 3개만 제시한다. 과한 경고 나열 금지.",
-      "모드(병동/ER/ICU)와 상황(투여직전/투여중/알람/부작용의심)에 따라 우선순위를 다르게 제시한다.",
+      "모드(병동/ER/ICU)와 상황(투여 전 확인/투여 중 모니터/이상·알람 대응)에 따라 우선순위를 다르게 제시한다.",
       "질의/이미지가 모호하면 무리한 단정 금지: CHECK로 두고 재확인 포인트를 행동으로 제시한다.",
-      "약물/도구 혼동 가능성, 단위/농도 오인 가능성, 라인 호환성 위험은 우선 경고에 반영한다.",
+      "약물/도구 혼동, 단위/농도 오인, 라인 호환성 위험은 우선 경고에 반영한다.",
+      "근거 없는 임의 수치(예: 비현실적 NRS/용량/속도) 생성 금지. 입력 근거가 없으면 '병원 프로토콜 기준 확인'으로 표현한다.",
+      "각 배열 항목은 순수 문장으로만 작성하고 JSON 키/중괄호/따옴표를 절대 포함하지 않는다.",
       "confidence는 반드시 0~100 사이 정수값으로 설정한다(예: 85). 확신이 낮으면 confidence를 낮추고 confidenceNote에 이유를 작성한다.",
       "진단/처방 대체 표현 금지. 최종 판단은 병원 지침/처방 우선으로 유지한다.",
       "각 문장은 짧게, 항목은 간결하게 작성한다(장문 금지).",
@@ -895,11 +969,13 @@ function buildDeveloperPrompt(locale: "ko" | "en") {
   return [
     "You are a bedside medication/device safety action assistant for nurses.",
     "Prioritize action over explanation and optimize for 30-second decision support.",
-    "Follow structure: numeric thresholds, step-first workflow, compatibility/alarm troubleshooting, hold/stop rules.",
+    "Use step-first workflow, hold/stop criteria, escalation triggers, and line/compatibility checks.",
     "Keep quick.topActions to 2-3 high-impact actions only.",
     "Keep quick.topRisks to at most 3 concise items.",
     "Adapt priorities by mode (Ward/ER/ICU) and situation.",
     "If the input is ambiguous, avoid overclaiming and keep status as CHECK with explicit verification actions.",
+    "Do not invent unsupported numeric thresholds. If no reliable number is present, state protocol-based verification.",
+    "Array items must be plain sentences only. Never include JSON keys/braces/quotes inside field values.",
     "confidence must be an integer between 0-100 (e.g., 85). If uncertain, lower confidence and explain in confidenceNote.",
     "Do not replace diagnosis/order decisions.",
     "Keep each line concise; avoid long prose.",
@@ -932,8 +1008,9 @@ function buildUserPrompt(params: {
       "- CHECK: 추가 확인이 필요한 상태",
       "- OK: 현재 정보 기준 즉시 실행 가능",
       "modePriority는 모드별 상단 고정 탭 순서를 3~6개로 제시한다.",
-      "topNumbers는 실제 투여/관찰에 바로 쓰는 수치/조건만 간결히 쓴다.",
+      "topNumbers는 실제 입력 근거가 있는 수치/조건만 작성한다. 근거가 없으면 '기관 프로토콜 기준 확인' 문구를 사용한다.",
       "모든 배열 항목은 짧은 한 문장으로 작성한다.",
+      ...buildSituationPromptLines(params.situation, "ko"),
       "JSON 외 텍스트 금지.",
       "\n[Context JSON]",
       JSON.stringify(context, null, 2),
@@ -947,8 +1024,9 @@ function buildUserPrompt(params: {
     "- CHECK: additional verification needed",
     "- OK: executable with current context",
     "modePriority should list 3-6 top tabs by mode.",
-    "topNumbers must include practical thresholds/values only.",
+    "topNumbers must use only reliable numbers from the input context; otherwise use protocol-check wording.",
     "Keep each array item short and practical.",
+    ...buildSituationPromptLines(params.situation, "en"),
     "No text outside JSON.",
     "\n[Context JSON]",
     JSON.stringify(context, null, 2),
@@ -1081,6 +1159,10 @@ function parseAttemptResult(attempt: ResponsesAttempt): MedSafetyAnalysisResult 
   if (fromJson) return fromJson;
   if (!attempt.text) return null;
   const parsed = safeJsonParse<unknown>(attempt.text);
+  if (typeof parsed === "string") {
+    const nested = safeJsonParse<unknown>(parsed);
+    return parseAnalysisResult(nested);
+  }
   return parseAnalysisResult(parsed);
 }
 

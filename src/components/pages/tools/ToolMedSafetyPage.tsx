@@ -15,7 +15,7 @@ const SECONDARY_FLAT_BTN =
 const SEGMENT_WRAPPER_CLASS = "inline-flex rounded-2xl border border-ios-sep bg-ios-bg p-1";
 
 type ClinicalMode = "ward" | "er" | "icu";
-type ClinicalSituation = "pre_admin" | "during_admin" | "alarm" | "adverse_suspect" | "general";
+type ClinicalSituation = "pre_admin" | "during_admin" | "event_response";
 
 type MedSafetyItemType = "medication" | "device" | "unknown";
 type MedSafetyQuickStatus = "OK" | "CHECK" | "STOP";
@@ -69,12 +69,41 @@ const MODE_OPTIONS: Array<{ value: ClinicalMode; label: string }> = [
 ];
 
 const SITUATION_OPTIONS: Array<{ value: ClinicalSituation; label: string }> = [
-  { value: "pre_admin", label: "투여 직전" },
-  { value: "during_admin", label: "투여 중" },
-  { value: "alarm", label: "알람 발생" },
-  { value: "adverse_suspect", label: "부작용 의심" },
-  { value: "general", label: "일반 조회" },
+  { value: "pre_admin", label: "투여 전 확인" },
+  { value: "during_admin", label: "투여 중 모니터" },
+  { value: "event_response", label: "이상/알람 대응" },
 ];
+
+const SITUATION_INPUT_GUIDE: Record<
+  ClinicalSituation,
+  {
+    queryPlaceholder: string;
+    summaryPlaceholder: string;
+    cue: string;
+  }
+> = {
+  pre_admin: {
+    queryPlaceholder:
+      "예: Piperacillin/Tazobactam 4.5g IV 투여 전. Cr 1.9, penicillin 발진 과거력, 현재 BP 92/58. 바로 투여 가능 여부와 확인 순서.",
+    summaryPlaceholder:
+      "(선택) 투여 전 핵심 요약: 환자식별 2개, 알레르기, 최신 V/S, Cr/eGFR·LFT, 금기·중복약, 라인/혼합 정보",
+    cue: "투여 전 확인: 환자식별, 알레르기/금기, 용량·속도·경로, 라인 호환성을 먼저 점검하는 질문으로 입력하세요.",
+  },
+  during_admin: {
+    queryPlaceholder:
+      "예: Vancomycin 주입 중 홍조/가려움 발생. infusion rate 조정·중지 기준과 즉시 모니터 항목, 보고 타이밍 정리.",
+    summaryPlaceholder:
+      "(선택) 투여 중 요약: 현재 주입속도/누적량, 증상 시작 시점, V/S 추이, 라인 상태, 병용 약물/최근 처치",
+    cue: "투여 중 모니터: 현재 증상과 주입 상태를 함께 적으면, 즉시 행동·재평가 간격·보고 기준이 더 정확해집니다.",
+  },
+  event_response: {
+    queryPlaceholder:
+      "예: IV pump occlusion 알람 반복 + 주입부 통증/부종. 즉시 중단 기준, 라인/부위 체크 순서, 재가동 조건, 보고 기준.",
+    summaryPlaceholder:
+      "(선택) 이상/알람 요약: 알람 종류, 발생 시각, 환자증상, 주입부 소견(통증/발적/부종), 현재 투여약·농도·속도",
+    cue: "이상/알람 대응: 알람 종류와 환자 증상을 같이 입력하면, 중단/홀드 우선순위와 에스컬레이션 기준을 명확히 제시합니다.",
+  },
+};
 
 function parseErrorMessage(raw: string) {
   if (!raw) return "분석 중 오류가 발생했습니다.";
@@ -181,7 +210,7 @@ function modeLabel(mode: ClinicalMode) {
 
 function situationLabel(situation: ClinicalSituation) {
   const hit = SITUATION_OPTIONS.find((option) => option.value === situation);
-  return hit?.label ?? "일반 조회";
+  return hit?.label ?? "투여 전 확인";
 }
 
 function formatDateTime(value: number) {
@@ -251,6 +280,7 @@ export function ToolMedSafetyPage() {
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraStarting, setCameraStarting] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const situationInputGuide = SITUATION_INPUT_GUIDE[situation];
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -510,20 +540,23 @@ export function ToolMedSafetyPage() {
                   );
                 })}
               </div>
+              <div className="rounded-xl border border-ios-sep bg-ios-bg px-3 py-2 text-[12px] leading-5 text-ios-sub">
+                {situationInputGuide.cue}
+              </div>
             </div>
 
             <Textarea
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               className="min-h-[120px] bg-white text-[16px] leading-7 text-ios-text"
-              placeholder="약물명/도구명/상황을 입력하세요. 예: 인슐린 투여 직전 혈당 78일 때 즉시 투여 가능한가요?"
+              placeholder={situationInputGuide.queryPlaceholder}
             />
 
             <Textarea
               value={patientSummary}
               onChange={(event) => setPatientSummary(event.target.value)}
               className="min-h-[84px] bg-white text-[15px] leading-6 text-ios-text"
-              placeholder="(선택) 환자 요약: 활력징후, 신장/간 기능, 알레르기, 임신/수유, 라인 상태"
+              placeholder={situationInputGuide.summaryPlaceholder}
             />
 
             <div className="flex flex-wrap items-center gap-2">
