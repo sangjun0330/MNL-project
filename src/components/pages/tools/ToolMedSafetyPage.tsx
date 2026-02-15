@@ -233,39 +233,9 @@ function parseCameraStartError(cause: unknown) {
   return "카메라를 시작하지 못했습니다. 권한/브라우저 환경을 확인해 주세요.";
 }
 
-function itemTypeLabel(itemType: MedSafetyItemType) {
-  if (itemType === "medication") return "약물";
-  if (itemType === "device") return "의료기구";
-  return "미확정";
-}
-
-function statusLabel(status: MedSafetyQuickStatus) {
-  if (status === "OK") return "GO";
-  if (status === "STOP") return "STOP";
-  return "HOLD/CHECK";
-}
-
-function statusTone(status: MedSafetyQuickStatus) {
-  if (status === "OK") return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  if (status === "STOP") return "border-red-200 bg-red-50 text-red-700";
-  return "border-amber-200 bg-amber-50 text-amber-700";
-}
-
-function riskLabel(level: MedSafetyRiskLevel) {
-  if (level === "high") return "높음";
-  if (level === "medium") return "중간";
-  return "낮음";
-}
-
-function riskTone(level: MedSafetyRiskLevel) {
-  if (level === "high") return "border-red-200 bg-red-50 text-red-700";
-  if (level === "medium") return "border-amber-200 bg-amber-50 text-amber-700";
-  return "border-emerald-200 bg-emerald-50 text-emerald-700";
-}
-
 function kindLabel(kind: MedSafetyResultKind) {
   if (kind === "medication") return "약물";
-  if (kind === "device") return "의료도구";
+  if (kind === "device") return "의료기구";
   return "상황";
 }
 
@@ -777,7 +747,6 @@ export function ToolMedSafetyPage() {
     : [];
   const dynamicCards = dynamicCardsFromNarrative.length ? dynamicCardsFromNarrative : dynamicCardsFallback;
   const resultKindChip = result ? kindLabel(result.resultKind) : "";
-  const itemTypeChip = result ? itemTypeLabel(result.item.type) : "";
 
   return (
     <>
@@ -974,12 +943,9 @@ export function ToolMedSafetyPage() {
             <div className="space-y-6">
               <div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className={`rounded-full border px-3 py-1 text-[14px] font-bold ${statusTone(result.quick.status)}`}>{statusLabel(result.quick.status)}</span>
-                  <span className={`rounded-full border px-3 py-1 text-[13px] font-semibold ${riskTone(result.riskLevel)}`}>위험도 {riskLabel(result.riskLevel)}</span>
-                  <span className="rounded-full border border-ios-sep px-3 py-1 text-[13px] font-semibold text-ios-text">{resultKindChip}</span>
-                  {result.item.type !== "unknown" && itemTypeChip !== resultKindChip ? (
-                    <span className="rounded-full border border-ios-sep px-3 py-1 text-[12px] font-semibold text-ios-sub">{itemTypeChip}</span>
-                  ) : null}
+                  <span className="rounded-full border border-[color:var(--wnl-accent)] bg-[color:var(--wnl-accent-soft)] px-3 py-1 text-[13px] font-semibold text-[color:var(--wnl-accent)]">
+                    {resultKindChip}
+                  </span>
                 </div>
                 <div className="mt-2 text-[34px] font-bold leading-[1.08] tracking-[-0.03em] text-ios-text">{result.item.name}</div>
                 <div className="mt-1.5 text-[18px] leading-7 text-ios-text">{headerConclusion || headerPrimaryUse || "핵심 안전 확인 필요"}</div>
