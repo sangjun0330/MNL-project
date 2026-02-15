@@ -93,9 +93,33 @@ function normalizeApiKey() {
   return String(key).trim();
 }
 
-function resolveModel() {
-  const model = String(process.env.OPENAI_MED_SAFETY_MODEL ?? process.env.OPENAI_MODEL ?? "gpt-5.1").trim();
-  return model || "gpt-5.1";
+function splitModelList(raw: string) {
+  return String(raw ?? "")
+    .split(/[,\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function dedupeModels(models: string[]) {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const model of models) {
+    const key = model.toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(model);
+  }
+  return out;
+}
+
+function resolveModelCandidates(preferredModel?: string) {
+  const configuredPrimary = String(process.env.OPENAI_MED_SAFETY_MODEL ?? process.env.OPENAI_MODEL ?? "").trim();
+  const configuredFallbacks = splitModelList(
+    process.env.OPENAI_MED_SAFETY_FALLBACK_MODELS ?? process.env.OPENAI_FALLBACK_MODELS ?? ""
+  );
+  const defaults = ["gpt-4.1-mini", "gpt-4o-mini"];
+  const merged = dedupeModels([String(preferredModel ?? "").trim(), configuredPrimary, ...configuredFallbacks, ...defaults]);
+  return merged.length ? merged : ["gpt-4.1-mini"];
 }
 
 function normalizeApiBaseUrl(raw: string) {
@@ -943,51 +967,79 @@ async function callResponsesApi(args: {
 }): Promise<ResponsesAttempt> {
   const { apiKey, model, developerPrompt, userPrompt, apiBaseUrl, imageDataUrl, signal, maxOutputTokens } = args;
 
-  const userContent: Array<Record<string, unknown>> = [{ type: "text", text: userPrompt }];
+  const userContent: Array<Record<string, unknown>> = [{ type: "input_text", text: userPrompt }];
   if (imageDataUrl) {
     userContent.push({
-      type: "image_url",
-      image_url: {
-        url: imageDataUrl,
-      },
+      type: "input_image",
+      image_url: imageDataUrl,
     });
   }
 
-  const payload = {
+  const strictPayload = {
     model,
-    messages: [
+    input: [
       {
-        role: "system",
-        content: developerPrompt,
+        role: "developer",
+        content: [{ type: "input_text", text: developerPrompt }],
       },
       {
         role: "user",
         content: userContent,
       },
     ],
-    response_format: {
-      type: "json_schema",
-      json_schema: {
+    text: {
+      format: {
+        type: "json_schema",
         name: "nurse_med_tool_action_card",
         strict: true,
         schema: buildMedSafetyJsonSchema(),
       },
+      verbosity: "low",
     },
-    max_tokens: maxOutputTokens,
-    temperature: 0.3,
+    reasoning: {
+      effort: "low",
+    },
+    max_output_tokens: maxOutputTokens,
+    tools: [],
+    store: false,
   };
 
-  let response: Response;
-  try {
-    response = await fetch(`${apiBaseUrl}/chat/completions`, {
+  const relaxedPayload = {
+    model,
+    input: strictPayload.input,
+    text: {
+      format: { type: "text" as const },
+      verbosity: "low" as const,
+    },
+    reasoning: strictPayload.reasoning,
+    max_output_tokens: maxOutputTokens,
+    tools: [],
+    store: false,
+  };
+
+  const send = (body: unknown) =>
+    fetch(`${apiBaseUrl}/responses`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
       signal,
     });
+
+  const parseSuccess = async (response: Response): Promise<ResponsesAttempt> => {
+    const json = await response.json().catch(() => null);
+    const text = extractResponsesText(json);
+    if (!text) {
+      return { text: null, error: `openai_empty_text_model:${model}`, json };
+    }
+    return { text: text || null, error: null, json };
+  };
+
+  let response: Response;
+  try {
+    response = await send(strictPayload);
   } catch (cause: any) {
     const reason = truncateError(String(cause?.message ?? cause ?? "fetch_failed"));
     return { text: null, error: `openai_network_${reason}`, json: null };
@@ -995,23 +1047,33 @@ async function callResponsesApi(args: {
 
   if (!response.ok) {
     const raw = await response.text().catch(() => "");
+    const shouldRetryWithoutSchema =
+      response.status === 400 && /(json_schema|response_format|text\.format|strict|schema)/i.test(raw);
+    if (shouldRetryWithoutSchema) {
+      try {
+        const relaxed = await send(relaxedPayload);
+        if (!relaxed.ok) {
+          const relaxedRaw = await relaxed.text().catch(() => "");
+          return {
+            text: null,
+            error: `openai_responses_${relaxed.status}_model:${model}_${truncateError(relaxedRaw || "unknown_error")}`,
+            json: null,
+          };
+        }
+        return await parseSuccess(relaxed);
+      } catch (cause: any) {
+        const reason = truncateError(String(cause?.message ?? cause ?? "fetch_failed"));
+        return { text: null, error: `openai_network_${reason}`, json: null };
+      }
+    }
     return {
       text: null,
-      error: `openai_responses_${response.status}_${truncateError(raw || "unknown_error")}`,
+      error: `openai_responses_${response.status}_model:${model}_${truncateError(raw || "unknown_error")}`,
       json: null,
     };
   }
 
-  const json = await response.json().catch(() => null);
-
-  // Extract text from standard Chat Completions response
-  const text = json?.choices?.[0]?.message?.content || "";
-
-  if (!text) {
-    return { text: null, error: "openai_empty_text", json };
-  }
-
-  return { text: text || null, error: null, json };
+  return await parseSuccess(response);
 }
 
 function parseAttemptResult(attempt: ResponsesAttempt): MedSafetyAnalysisResult | null {
@@ -1067,8 +1129,7 @@ async function repairAnalysisFromRawText(args: {
   signal: AbortSignal;
 }) {
   const { apiKey, model, rawText, locale, apiBaseUrl, maxOutputTokens, signal } = args;
-  const fallbackModel = "gpt-5.1";
-  const modelCandidates = model === fallbackModel ? [model] : [model, fallbackModel];
+  const modelCandidates = resolveModelCandidates(model);
   const developerPrompt = buildRepairDeveloperPrompt(locale);
   const userPrompt = buildRepairUserPrompt(rawText, locale);
 
@@ -1104,7 +1165,8 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
   const apiKey = normalizeApiKey();
   if (!apiKey) throw new Error("missing_openai_api_key");
 
-  const model = resolveModel();
+  const modelCandidates = resolveModelCandidates();
+  const primaryModel = modelCandidates[0] ?? "gpt-4.1-mini";
   const apiBaseUrl = resolveApiBaseUrl();
   const maxOutputTokens = resolveMaxOutputTokens();
   const developerPrompt = buildDeveloperPrompt(params.locale);
@@ -1117,26 +1179,16 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
     imageName: params.imageName,
   });
 
-  let attempt = await callResponsesApi({
-    apiKey,
-    model,
-    developerPrompt,
-    userPrompt,
-    apiBaseUrl,
-    imageDataUrl: params.imageDataUrl,
-    signal: params.signal,
-    maxOutputTokens,
-  });
-  let lastError = attempt.error ?? "openai_request_failed";
+  let parsed: MedSafetyAnalysisResult | null = null;
+  let rawText = "";
+  let selectedModel = primaryModel;
+  let lastError = "openai_request_failed";
 
-  let selectedModel = model;
-  let parsed = parseAttemptResult(attempt);
-  let rawText = attempt.text ?? "";
-
-  if (!parsed && !attempt.text && shouldRetryOpenAiError(attempt.error)) {
-    const retry = await callResponsesApi({
+  for (const candidateModel of modelCandidates) {
+    selectedModel = candidateModel;
+    let attempt = await callResponsesApi({
       apiKey,
-      model,
+      model: candidateModel,
       developerPrompt,
       userPrompt,
       apiBaseUrl,
@@ -1144,25 +1196,49 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
       signal: params.signal,
       maxOutputTokens,
     });
-    parsed = parseAttemptResult(retry);
-    if (retry.text) rawText = retry.text;
-    if (retry.error) lastError = retry.error;
-  }
+    if (attempt.error) lastError = attempt.error;
+    if (attempt.text) rawText = attempt.text;
 
-  if (!parsed && attempt.text) {
-    const repaired = await repairAnalysisFromRawText({
-      apiKey,
-      model,
-      rawText: attempt.text,
-      locale: params.locale,
-      apiBaseUrl,
-      maxOutputTokens,
-      signal: params.signal,
-    });
-    if (repaired) {
-      parsed = repaired.parsed;
-      rawText = repaired.rawText;
-      selectedModel = repaired.model;
+    let candidateParsed = parseAttemptResult(attempt);
+
+    if (!candidateParsed && !attempt.text && shouldRetryOpenAiError(attempt.error)) {
+      const retry = await callResponsesApi({
+        apiKey,
+        model: candidateModel,
+        developerPrompt,
+        userPrompt,
+        apiBaseUrl,
+        imageDataUrl: params.imageDataUrl,
+        signal: params.signal,
+        maxOutputTokens,
+      });
+      attempt = retry;
+      if (retry.error) lastError = retry.error;
+      if (retry.text) rawText = retry.text;
+      candidateParsed = parseAttemptResult(retry);
+    }
+
+    if (candidateParsed) {
+      parsed = candidateParsed;
+      break;
+    }
+
+    if (attempt.text) {
+      const repaired = await repairAnalysisFromRawText({
+        apiKey,
+        model: candidateModel,
+        rawText: attempt.text,
+        locale: params.locale,
+        apiBaseUrl,
+        maxOutputTokens,
+        signal: params.signal,
+      });
+      if (repaired) {
+        parsed = repaired.parsed;
+        rawText = repaired.rawText;
+        selectedModel = repaired.model;
+        break;
+      }
     }
   }
 
@@ -1178,14 +1254,14 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
     }
   }
 
-  if (!parsed && !attempt.text) {
+  if (!parsed && !rawText) {
     const fallback = buildFallbackAnalysisResult(
       params,
       fallbackNoteFromOpenAiError(lastError, params.locale)
     );
     return {
       result: fallback,
-      model,
+      model: selectedModel,
       rawText: "",
       fallbackReason: lastError || "openai_request_failed",
     };
@@ -1195,7 +1271,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
     const fallback = buildFallbackAnalysisResult(params, "AI 응답이 불완전해 안전 기본 모드로 복구되었습니다.");
     return {
       result: fallback,
-      model,
+      model: selectedModel,
       rawText,
       fallbackReason: "openai_invalid_json_payload",
     };
