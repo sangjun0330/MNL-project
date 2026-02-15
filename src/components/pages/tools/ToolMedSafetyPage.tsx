@@ -67,6 +67,8 @@ type MedSafetyAnalyzeResult = {
   analyzedAt: number;
   source: "openai_live" | "openai_fallback";
   fallbackReason?: string | null;
+  openaiResponseId?: string | null;
+  openaiConversationId?: string | null;
 };
 
 type MedSafetyCacheRecord = {
@@ -497,6 +499,10 @@ export function ToolMedSafetyPage() {
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraStarting, setCameraStarting] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [scenarioState, setScenarioState] = useState<{
+    previousResponseId?: string;
+    conversationId?: string;
+  }>({});
   const isScenarioIntent = queryIntent === "scenario";
   const activeSituation: ClinicalSituation = isScenarioIntent ? situation : "general";
   const situationInputGuide = SITUATION_INPUT_GUIDE[activeSituation];
@@ -675,6 +681,12 @@ export function ToolMedSafetyPage() {
         form.set("queryIntent", queryIntent);
         form.set("situation", activeSituation);
         form.set("locale", "ko");
+        if (isScenarioIntent && scenarioState.previousResponseId) {
+          form.set("previousResponseId", scenarioState.previousResponseId);
+        }
+        if (isScenarioIntent && scenarioState.conversationId) {
+          form.set("conversationId", scenarioState.conversationId);
+        }
         if (imageFile) form.set("image", imageFile);
 
         const response = await fetch("/api/tools/med-safety/analyze", {
@@ -699,6 +711,12 @@ export function ToolMedSafetyPage() {
           writeMedSafetyCache(cacheKey, data);
           setResult(data);
           setError(null);
+          if (isScenarioIntent) {
+            setScenarioState({
+              previousResponseId: data.openaiResponseId || undefined,
+              conversationId: data.openaiConversationId || undefined,
+            });
+          }
         } else {
           setResult(data);
           setError(
@@ -713,7 +731,7 @@ export function ToolMedSafetyPage() {
         setIsLoading(false);
       }
     },
-    [activeSituation, imageFile, isScenarioIntent, mode, patientSummary, query, queryIntent]
+    [activeSituation, imageFile, isScenarioIntent, mode, patientSummary, query, queryIntent, scenarioState]
   );
 
   const immediateActions = result ? mergeUniqueLists(result.quick.topActions).slice(0, 7) : [];
@@ -956,6 +974,12 @@ export function ToolMedSafetyPage() {
                   모드: {modeLabel(mode)} · 유형: {queryIntentLabel(queryIntent)} · 상황: {situationLabel(activeSituation)} · 분석:{" "}
                   {formatDateTime(result.analyzedAt)}
                 </div>
+                {result.openaiResponseId ? (
+                  <div className="mt-1 text-[12px] text-ios-sub">
+                    OpenAI trace: {result.openaiResponseId}
+                    {result.openaiConversationId ? ` · conv: ${result.openaiConversationId}` : ""}
+                  </div>
+                ) : null}
               </div>
 
               <div className="border-t border-ios-sep pt-2.5">
