@@ -254,8 +254,44 @@ function formatDateTime(value: number) {
   return `${yy}-${mm}-${dd} ${hh}:${min}`;
 }
 
+function isJsonFragmentLine(value: string) {
+  const text = String(value ?? "")
+    .replace(/\s+/g, " ")
+    .replace(/^(?:[-*•·]|\d+[).])\s*/, "")
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .trim();
+  if (!text) return true;
+  if (/^[\[\]{}]+,?$/.test(text)) return true;
+  if (/^[A-Za-z_][A-Za-z0-9_]{2,}"?\s*:\s*/.test(text)) return true;
+  if (/^"[^"]{3,}"\s*:\s*/.test(text)) return true;
+  if (/:\s*(?:\{|\[|"[^"]*"|true|false|null|-?\d+(?:\.\d+)?)(?:\s*,)?$/.test(text) && /["{}_:\[\],]/.test(text)) {
+    return true;
+  }
+  if (/(?:^|["\s])(?:resultKind|riskLevel|oneLineConclusion|item|quick|topActions|topNumbers|topRisks|do|steps|calculatorsNeeded|compatibilityChecks|safety|holdRules|monitor|escalateWhen|patientScript20s|modePriority|confidenceNote|status|sbar|institutionalChecks)\s*[:"]/i.test(text)) {
+    return true;
+  }
+  if (/^(?:high|medium|low|ok|check|stop|medication|device|scenario)"?,?$/i.test(text)) return true;
+  const punctuation = (text.match(/[{}[\]":,]/g) ?? []).length;
+  if (punctuation >= Math.max(12, Math.floor(text.length * 0.12))) return true;
+  return false;
+}
+
+function normalizeDisplayLine(value: string) {
+  const collapsed = String(value ?? "")
+    .replace(/\s+/g, " ")
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .replace(/\s+,/g, ",")
+    .trim();
+  const withoutListPrefix = collapsed.replace(/^(?:[-*•·]|\d+[).])\s*/, "").trim();
+  const withoutTrailingComma = withoutListPrefix.replace(/,$/, "").trim();
+  if (!withoutTrailingComma) return "";
+  if (isJsonFragmentLine(withoutTrailingComma)) return "";
+  return withoutTrailingComma;
+}
+
 function SectionList({ title, items }: { title: string; items: string[] }) {
-  if (!items.length) {
+  const safeItems = items.map((item) => normalizeDisplayLine(item)).filter(Boolean);
+  if (!safeItems.length) {
     return (
       <div>
         <div className="text-[18px] font-bold text-ios-text">{title}</div>
@@ -268,8 +304,8 @@ function SectionList({ title, items }: { title: string; items: string[] }) {
     <div>
       <div className="text-[18px] font-bold text-ios-text">{title}</div>
       <ul className="mt-2 list-disc space-y-2 pl-6 text-[17px] leading-7 text-ios-text">
-        {items.map((item) => (
-          <li key={item}>{item}</li>
+        {safeItems.map((item, index) => (
+          <li key={`${item}-${index}`}>{item}</li>
         ))}
       </ul>
     </div>
@@ -281,7 +317,7 @@ function mergeUniqueLists(...lists: string[][]) {
   const seen = new Set<string>();
   for (const list of lists) {
     for (const item of list) {
-      const clean = String(item ?? "").trim();
+      const clean = normalizeDisplayLine(String(item ?? ""));
       if (!clean) continue;
       const key = clean.toLowerCase();
       if (seen.has(key)) continue;
@@ -526,7 +562,7 @@ export function ToolMedSafetyPage() {
     [imageFile, mode, patientSummary, query, situation]
   );
 
-  const immediateActions = result?.quick.topActions.slice(0, 3) ?? [];
+  const immediateActions = result ? mergeUniqueLists(result.quick.topActions).slice(0, 3) : [];
   const checks1to5 = result
     ? mergeUniqueLists(result.quick.topNumbers, result.safety.monitor).slice(0, 4)
     : [];
@@ -542,7 +578,33 @@ export function ToolMedSafetyPage() {
         `B: ${result.sbar?.background ?? ""}`.trim(),
         `A: ${result.sbar?.assessment ?? ""}`.trim(),
         `R: ${result.sbar?.recommendation ?? ""}`.trim(),
-      ].filter((line) => line.length > 3)
+      ]
+        .map((line) => normalizeDisplayLine(line))
+        .filter((line) => line.length > 3)
+    : [];
+  const headerConclusion = result ? normalizeDisplayLine(result.oneLineConclusion) : "";
+  const headerPrimaryUse = result ? normalizeDisplayLine(result.item.primaryUse) : "";
+  const medicationOverview = result
+    ? mergeUniqueLists(
+        headerPrimaryUse ? [headerPrimaryUse] : [],
+        result.item.aliases.map((alias) => `별칭: ${alias}`),
+        result.item.highRiskBadges.map((badge) => `특징: ${badge}`)
+      ).slice(0, 5)
+    : [];
+  const medicationHow = result ? mergeUniqueLists(result.do.steps, result.do.calculatorsNeeded).slice(0, 6) : [];
+  const medicationCautions = result
+    ? mergeUniqueLists(result.quick.topRisks, result.safety.holdRules, result.safety.escalateWhen).slice(0, 6)
+    : [];
+  const deviceOverview = result
+    ? mergeUniqueLists(
+        headerPrimaryUse ? [headerPrimaryUse] : [],
+        result.item.aliases.map((alias) => `별칭: ${alias}`),
+        result.item.highRiskBadges.map((badge) => `주의: ${badge}`)
+      ).slice(0, 5)
+    : [];
+  const deviceUsage = result ? mergeUniqueLists(result.do.steps, result.do.compatibilityChecks).slice(0, 6) : [];
+  const deviceTroubleshooting = result
+    ? mergeUniqueLists(result.quick.topRisks, result.safety.holdRules, result.safety.escalateWhen).slice(0, 6)
     : [];
 
   return (
@@ -698,7 +760,10 @@ export function ToolMedSafetyPage() {
                   ) : null}
                 </div>
                 <div className="mt-3 text-[40px] font-bold leading-[1.05] tracking-[-0.03em] text-ios-text">{result.item.name}</div>
-                <div className="mt-2 text-[20px] leading-8 text-ios-text">{result.oneLineConclusion || result.item.primaryUse}</div>
+                <div className="mt-2 text-[20px] leading-8 text-ios-text">{headerConclusion || headerPrimaryUse || "핵심 안전 확인 필요"}</div>
+                {headerPrimaryUse && headerPrimaryUse !== headerConclusion ? (
+                  <div className="mt-1 text-[17px] leading-7 text-ios-sub">{headerPrimaryUse}</div>
+                ) : null}
                 <div className="mt-2 text-[15px] text-ios-sub">
                   모드: {modeLabel(mode)} · 상황: {situationLabel(situation)} · 분석: {formatDateTime(result.analyzedAt)}
                 </div>
@@ -707,7 +772,7 @@ export function ToolMedSafetyPage() {
               <div className="space-y-4 border-t border-ios-sep pt-5">
                 <div className="text-[22px] font-bold text-ios-text">즉시 행동 (0-60초)</div>
                 <ol className="space-y-2 text-[20px] leading-8 text-ios-text">
-                  {immediateActions.map((item, index) => (
+                  {(immediateActions.length ? immediateActions : ["핵심 안전 항목을 먼저 재확인하세요."]).map((item, index) => (
                     <li key={item}>
                       <span className="mr-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-[color:var(--wnl-accent-soft)] text-[14px] font-bold text-[color:var(--wnl-accent)]">
                         {index + 1}
@@ -726,18 +791,18 @@ export function ToolMedSafetyPage() {
               <div className="space-y-4 border-t border-ios-sep pt-4">
                 {result.resultKind === "medication" ? (
                   <>
-                    <SectionList title="투여 (How)" items={mergeUniqueLists(result.do.steps, result.do.calculatorsNeeded).slice(0, 6)} />
+                    <SectionList title="개요·역할" items={medicationOverview} />
+                    <SectionList title="사용/투여 방법" items={medicationHow} />
                     <SectionList title="라인·호환" items={result.do.compatibilityChecks.slice(0, 4)} />
-                    <SectionList title="모니터링" items={result.safety.monitor.slice(0, 4)} />
-                    <SectionList title="이상반응·대응" items={mergeUniqueLists(result.safety.holdRules, result.safety.escalateWhen).slice(0, 5)} />
+                    <SectionList title="주의·문제 대응" items={medicationCautions} />
                   </>
                 ) : null}
 
                 {result.resultKind === "device" ? (
                   <>
-                    <SectionList title="Identify" items={mergeUniqueLists(result.item.aliases, result.item.highRiskBadges).slice(0, 5)} />
-                    <SectionList title="세팅/절차" items={result.do.steps.slice(0, 6)} />
-                    <SectionList title="알람/트러블" items={mergeUniqueLists(result.quick.topRisks, result.safety.holdRules).slice(0, 5)} />
+                    <SectionList title="개요·기능" items={deviceOverview} />
+                    <SectionList title="사용/세팅" items={deviceUsage} />
+                    <SectionList title="알람·문제 대응" items={deviceTroubleshooting} />
                     <SectionList title="유지관리·점검" items={mergeUniqueLists(result.safety.monitor, result.do.compatibilityChecks).slice(0, 5)} />
                   </>
                 ) : null}
