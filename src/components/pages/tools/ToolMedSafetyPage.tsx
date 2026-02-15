@@ -78,6 +78,7 @@ type MedSafetyCacheRecord = {
 
 const MED_SAFETY_CACHE_KEY = "med_safety_cache_v1";
 const MED_SAFETY_LAST_MODEL_KEY = "med_safety_last_model_v1";
+const RETRY_WITH_DATA_MESSAGE = "네트워크가 불안정합니다. 데이터(모바일 네트워크)를 켠 뒤 다시 AI 분석 실행을 눌러 시도해 주세요.";
 
 const MODE_OPTIONS: Array<{ value: ClinicalMode; label: string }> = [
   { value: "ward", label: "병동" },
@@ -161,28 +162,26 @@ function parseErrorMessage(raw: string) {
   if (normalized.includes("query_or_image_required")) return "텍스트를 입력하거나 사진을 업로드해 주세요.";
   if (normalized.includes("image_too_large")) return "이미지 용량이 너무 큽니다. 6MB 이하로 다시 업로드해 주세요.";
   if (normalized.includes("image_type_invalid")) return "이미지 파일만 업로드할 수 있습니다.";
-  if (normalized.includes("openai_timeout") || normalized.includes("aborted"))
-    return "AI 응답 시간이 길어 요청이 중단되었습니다. 잠시 후 다시 시도하거나 네트워크를 변경해 주세요.";
-  if (normalized.includes("openai_network_"))
-    return "AI 서버 연결에 실패했습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.";
+  if (normalized.includes("openai_timeout") || normalized.includes("aborted")) return RETRY_WITH_DATA_MESSAGE;
+  if (normalized.includes("openai_network_")) return RETRY_WITH_DATA_MESSAGE;
   if (normalized.includes("openai_responses_401"))
     return "AI API 키가 유효하지 않거나 만료되었습니다. .env.local 환경변수를 확인해 주세요.";
   if (normalized.includes("openai_responses_403")) {
     if (/(insufficient_permissions|does not have access|model_not_found|permission|access to model)/i.test(String(raw))) {
       return "현재 계정에 해당 모델 접근 권한이 없습니다. 모델명을 변경해 다시 시도해 주세요.";
     }
-    return "현재 네트워크(병원 Wi-Fi 포함)에서 AI 서버 접속이 제한될 수 있습니다. 잠시 후 재시도하거나 다른 네트워크로 확인해 주세요.";
+    return RETRY_WITH_DATA_MESSAGE;
   }
   if (normalized.includes("openai_responses_404") || normalized.includes("model_not_found"))
     return "요청한 모델을 찾을 수 없습니다. 모델명을 확인하거나 기본 fallback 모델로 다시 시도해 주세요.";
-  if (normalized.includes("openai_responses_429"))
-    return "요청 한도(속도/쿼터)를 초과했습니다. 잠시 후 다시 시도해 주세요.";
+  if (normalized.includes("openai_responses_429")) return "요청 한도가 초과되었습니다. 잠시 후 다시 AI 분석 실행을 눌러 시도해 주세요.";
   if (normalized.includes("openai_responses_400"))
     return "AI 요청 형식 오류가 발생했습니다. 입력 내용을 줄여 다시 시도해 주세요.";
-  if (normalized.includes("openai_responses_")) return "AI 요청이 실패했습니다. 잠시 후 다시 시도해 주세요.";
+  if (/openai_responses_(408|409|425|500|502|503|504)/.test(normalized)) return RETRY_WITH_DATA_MESSAGE;
+  if (normalized.includes("openai_responses_")) return "AI 요청이 실패했습니다. 다시 AI 분석 실행을 눌러 시도해 주세요.";
   if (normalized.includes("openai_invalid_json_payload"))
     return "AI 응답이 비정형으로 와서 자동 정리 결과로 표시했습니다.";
-  return "분석 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.";
+  return "분석 중 오류가 발생했습니다. 다시 AI 분석 실행을 눌러 시도해 주세요.";
 }
 
 function buildAnalyzeCacheKey(args: {
@@ -814,10 +813,10 @@ export function ToolMedSafetyPage() {
         const cached = readMedSafetyCache(cacheKey);
         if (cached) {
           setResult(cached);
-          setError("오프라인 상태입니다. 최근 저장된 결과를 표시합니다.");
+          setError("오프라인 상태입니다. 데이터(모바일 네트워크)를 켠 뒤 다시 AI 분석 실행을 눌러 시도해 주세요. 최근 저장된 결과를 표시합니다.");
         } else {
           setResult(null);
-          setError("네트워크에 연결되어 있지 않습니다. 연결 후 다시 시도해 주세요.");
+          setError("네트워크에 연결되어 있지 않습니다. 데이터(모바일 네트워크)를 켠 뒤 다시 AI 분석 실행을 눌러 시도해 주세요.");
         }
         return;
       }
@@ -912,10 +911,10 @@ export function ToolMedSafetyPage() {
         const cached = readMedSafetyCache(cacheKey);
         if (cached) {
           setResult(cached);
-          setError("네트워크 오류가 발생해 최근 저장된 결과를 표시합니다.");
+          setError(`${RETRY_WITH_DATA_MESSAGE} 최근 저장된 결과를 표시합니다.`);
         } else {
           setResult(null);
-          setError("네트워크 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
+          setError(RETRY_WITH_DATA_MESSAGE);
         }
       } finally {
         setIsLoading(false);
