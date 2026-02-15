@@ -4,6 +4,9 @@ export type ClinicalMode = "ward" | "er" | "icu";
 export type ClinicalSituation = "general" | "pre_admin" | "during_admin" | "event_response";
 
 export type MedSafetyAnalysisResult = {
+  resultKind: "medication" | "device" | "scenario";
+  oneLineConclusion: string;
+  riskLevel: "low" | "medium" | "high";
   item: {
     name: string;
     type: MedSafetyItemType;
@@ -27,6 +30,13 @@ export type MedSafetyAnalysisResult = {
     holdRules: string[];
     monitor: string[];
     escalateWhen: string[];
+  };
+  institutionalChecks: string[];
+  sbar: {
+    situation: string;
+    background: string;
+    assessment: string;
+    recommendation: string;
   };
   patientScript20s: string;
   modePriority: string[];
@@ -148,6 +158,9 @@ function buildMedSafetyJsonSchema() {
     required: ["item", "quick", "do", "safety", "patientScript20s", "modePriority", "confidenceNote"],
     additionalProperties: false,
     properties: {
+      resultKind: { type: "string", enum: ["medication", "device", "scenario"] },
+      oneLineConclusion: { type: "string" },
+      riskLevel: { type: "string", enum: ["low", "medium", "high"] },
       item: {
         type: "object",
         required: ["name", "type", "aliases", "highRiskBadges", "primaryUse", "confidence"],
@@ -190,6 +203,18 @@ function buildMedSafetyJsonSchema() {
           holdRules: { type: "array", items: { type: "string" } },
           monitor: { type: "array", items: { type: "string" } },
           escalateWhen: { type: "array", items: { type: "string" } },
+        },
+      },
+      institutionalChecks: { type: "array", items: { type: "string" } },
+      sbar: {
+        type: "object",
+        required: ["situation", "background", "assessment", "recommendation"],
+        additionalProperties: false,
+        properties: {
+          situation: { type: "string" },
+          background: { type: "string" },
+          assessment: { type: "string" },
+          recommendation: { type: "string" },
         },
       },
       patientScript20s: { type: "string" },
@@ -664,8 +689,13 @@ function parseAnalysisResultFromNarrativeText(rawText: string, params: AnalyzePa
 
   const inferredType = inferItemTypeFromText(`${itemName} ${text}`);
   const confidenceBase = quickStatus === "OK" ? 74 : quickStatus === "STOP" ? 70 : 62;
+  const inferredKind: "medication" | "device" | "scenario" =
+    inferredType === "medication" ? "medication" : inferredType === "device" ? "device" : "scenario";
 
   return {
+    resultKind: inferredKind,
+    oneLineConclusion: defaultOneLineConclusion(quickStatus, params.locale),
+    riskLevel: coerceRiskLevel(null, quickStatus),
     item: {
       name: itemName,
       type: inferredType,
@@ -689,6 +719,13 @@ function parseAnalysisResultFromNarrativeText(rawText: string, params: AnalyzePa
       holdRules: hold.length ? hold : ["중요 기준치 이탈, 급격한 증상 악화 시 홀드"],
       monitor: monitor.length ? monitor : ["활력징후·의식·호흡·주입부 상태를 짧은 간격으로 재평가"],
       escalateWhen: escalate.length ? escalate : ["호흡곤란/저혈압/의식저하/지속 악화 시 즉시 보고"],
+    },
+    institutionalChecks: ["희석/속도/교체주기/알람 기준은 기관 프로토콜·장비 IFU 확인"],
+    sbar: {
+      situation: `${itemName} 관련 안전 이슈 확인 필요`,
+      background: "현재 투여/장비 상황과 최근 변화를 요약",
+      assessment: "활력·의식·주입부·알람 상태 재평가",
+      recommendation: "즉시 조치 후 기준 이탈 시 담당의/당직 보고",
     },
     patientScript20s: script,
     modePriority: [],
@@ -749,6 +786,36 @@ function coerceQuickStatus(value: unknown): MedSafetyQuickStatus {
   return "CHECK";
 }
 
+function coerceResultKind(value: unknown, itemType: MedSafetyItemType): "medication" | "device" | "scenario" {
+  if (value === "medication" || value === "device" || value === "scenario") return value;
+  if (itemType === "medication") return "medication";
+  if (itemType === "device") return "device";
+  return "scenario";
+}
+
+function coerceRiskLevel(value: unknown, status: MedSafetyQuickStatus): "low" | "medium" | "high" {
+  if (value === "low" || value === "medium" || value === "high") return value;
+  if (status === "STOP") return "high";
+  if (status === "CHECK") return "medium";
+  return "low";
+}
+
+function defaultOneLineConclusion(status: MedSafetyQuickStatus, locale: "ko" | "en" = "ko") {
+  if (locale === "en") {
+    if (status === "STOP") return "STOP: Hold now and escalate after immediate reassessment.";
+    if (status === "CHECK") return "HOLD/CHECK: Verify key safety points before proceeding.";
+    return "GO: Executable now with ongoing monitoring.";
+  }
+  if (status === "STOP") return "STOP: 즉시 중단/홀드 후 환자 상태 재평가 및 보고.";
+  if (status === "CHECK") return "HOLD/CHECK: 핵심 안전 확인 후 진행 여부를 판단.";
+  return "GO: 현재 정보 기준 시행 가능, 모니터링 지속.";
+}
+
+function pickSbarValue(raw: unknown, fallback: string, maxLength: number) {
+  const clean = sanitizeModelLine(String(raw ?? "").trim(), maxLength);
+  return clean || fallback;
+}
+
 function parseAnalysisResult(raw: unknown): MedSafetyAnalysisResult | null {
   if (!raw || typeof raw !== "object") return null;
   const data = raw as Record<string, unknown>;
@@ -761,22 +828,39 @@ function parseAnalysisResult(raw: unknown): MedSafetyAnalysisResult | null {
   const primaryUse = sanitizeModelLine(String(itemRaw.primaryUse ?? "").trim(), 160);
   const patientScript20s = sanitizeModelLine(String(data.patientScript20s ?? "").trim(), 220);
   const confidenceNote = sanitizeModelLine(String(data.confidenceNote ?? "").trim(), 180);
+  const oneLineConclusionInput = sanitizeModelLine(String(data.oneLineConclusion ?? "").trim(), 180);
 
   if (!itemName) return null;
 
   const confidence = Math.round(clamp(Number(itemRaw.confidence ?? 0), 0, 100));
+  const itemType = coerceItemType(itemRaw.type);
+  const quickStatus = coerceQuickStatus(quickRaw.status);
+  const resultKind = coerceResultKind(data.resultKind, itemType);
+  const riskLevel = coerceRiskLevel(data.riskLevel, quickStatus);
+
+  const sbarRaw = (data.sbar as Record<string, unknown> | undefined) ?? {};
+  const sbar = {
+    situation: pickSbarValue(sbarRaw.situation, "현재 문제와 위험 신호를 한 줄로 전달", 160),
+    background: pickSbarValue(sbarRaw.background, "투여 약물/도구와 최근 변화 요약", 160),
+    assessment: pickSbarValue(sbarRaw.assessment, "활력·의식·주입부·알람 상태 평가", 160),
+    recommendation: pickSbarValue(sbarRaw.recommendation, "실시한 조치와 추가 요청사항 전달", 160),
+  };
+  const institutionalChecks = toTextArray(data.institutionalChecks, 4);
 
   const parsed: MedSafetyAnalysisResult = {
+    resultKind,
+    oneLineConclusion: oneLineConclusionInput || defaultOneLineConclusion(quickStatus, "ko"),
+    riskLevel,
     item: {
       name: itemName,
-      type: coerceItemType(itemRaw.type),
+      type: itemType,
       aliases: toTextArray(itemRaw.aliases, 6),
       highRiskBadges: toTextArray(itemRaw.highRiskBadges, 4),
       primaryUse: primaryUse || "약물/의료도구 안전 확인",
       confidence,
     },
     quick: {
-      status: coerceQuickStatus(quickRaw.status),
+      status: quickStatus,
       topActions: toTextArray(quickRaw.topActions, 3),
       topNumbers: toTextArray(quickRaw.topNumbers, 4),
       topRisks: toTextArray(quickRaw.topRisks, 3),
@@ -791,6 +875,8 @@ function parseAnalysisResult(raw: unknown): MedSafetyAnalysisResult | null {
       monitor: toTextArray(safetyRaw.monitor, 6),
       escalateWhen: toTextArray(safetyRaw.escalateWhen, 6),
     },
+    institutionalChecks,
+    sbar,
     patientScript20s: (patientScript20s || "현재 확인된 정보를 바탕으로 안전 기준을 먼저 점검하고 필요 시 즉시 보고하겠습니다.").slice(0, 220),
     modePriority: toTextArray(data.modePriority, 6),
     confidenceNote,
@@ -801,9 +887,17 @@ function parseAnalysisResult(raw: unknown): MedSafetyAnalysisResult | null {
   if (!parsed.quick.topRisks.length) parsed.quick.topRisks = ["정보 부족 상태에서 즉시 투여/조작 시 위험 가능성"];
   if (!parsed.do.steps.length) parsed.do.steps = ["처방/오더 재확인", "환자 상태 재평가", "기록 후 필요 시 보고"];
   if (!parsed.safety.escalateWhen.length) parsed.safety.escalateWhen = ["기준치 이탈 또는 증상 악화 시 즉시 담당의/당직 보고"];
+  if (!parsed.institutionalChecks.length) {
+    parsed.institutionalChecks = [
+      "희석·주입속도·교체주기는 기관 프로토콜과 장비 IFU를 우선 확인",
+      "라인 호환성·필터·전용라인 필요 여부는 병동 표준에 맞춰 확인",
+    ];
+  }
 
   if (parsed.quick.status === "OK" && parsed.item.confidence < 65) {
     parsed.quick.status = "CHECK";
+    parsed.riskLevel = "medium";
+    parsed.oneLineConclusion = defaultOneLineConclusion("CHECK", "ko");
     if (!parsed.confidenceNote) {
       parsed.confidenceNote = "식별 확신이 낮아 CHECK로 전환되었습니다. 라벨/농도/라인을 재확인하세요.";
     }
@@ -840,6 +934,9 @@ function buildFallbackAnalysisResult(params: AnalyzeParams, note: string): MedSa
       "해결 불가, 상태 악화, 고위험 약물 관련이면 즉시 보고 및 추가 지시를 받음",
     ],
   };
+  const fallbackStatus: MedSafetyQuickStatus = params.situation === "event_response" ? "STOP" : "CHECK";
+  const fallbackKind: "medication" | "device" | "scenario" =
+    params.situation === "general" ? "scenario" : params.situation === "event_response" ? "scenario" : "medication";
 
   const modePriority: Record<ClinicalMode, string[]> = {
     ward: ["투여 여부 판단", "핵심 수치 확인", "보고/기록"],
@@ -848,6 +945,9 @@ function buildFallbackAnalysisResult(params: AnalyzeParams, note: string): MedSa
   };
 
   return {
+    resultKind: fallbackKind,
+    oneLineConclusion: defaultOneLineConclusion(fallbackStatus, params.locale),
+    riskLevel: coerceRiskLevel(null, fallbackStatus),
     item: {
       name,
       type: "unknown",
@@ -857,7 +957,7 @@ function buildFallbackAnalysisResult(params: AnalyzeParams, note: string): MedSa
       confidence: 35,
     },
     quick: {
-      status: "CHECK",
+      status: fallbackStatus,
       topActions: situationActions[params.situation],
       topNumbers: ["혈압·맥박·SpO2·체온 최신값", "최근 검사값/알레르기/라인 상태", "기관 지침 기준 범위 이탈 여부"],
       topRisks: ["정보 불충분 상태에서 즉시 투여/조작", "단위·농도·시간 오인", "라인/호환성 미확인"],
@@ -871,6 +971,16 @@ function buildFallbackAnalysisResult(params: AnalyzeParams, note: string): MedSa
       holdRules: ["중요 기준치 이탈, 급격한 증상 악화, 알레르기 의심 시 홀드"],
       monitor: ["활력징후·의식·호흡·주입부 상태를 짧은 간격으로 재평가"],
       escalateWhen: ["호흡곤란/저혈압/의식저하/지속 악화 시 즉시 보고"],
+    },
+    institutionalChecks: [
+      "희석·속도·교체주기·알람 기준은 기관 프로토콜과 장비 IFU 확인",
+      "High-alert 약물/기구는 기관 정책에 따른 더블체크 시행",
+    ],
+    sbar: {
+      situation: "안전 우선 확인이 필요한 상황",
+      background: "관련 투여/장비 사용 정보와 최근 변화 정리",
+      assessment: "활력·의식·알람·주입부 상태를 재평가",
+      recommendation: "즉시 조치 후 기준 이탈 시 담당의/당직 보고",
     },
     patientScript20s: "지금은 안전 확인이 우선이라 수치와 상태를 먼저 점검한 뒤, 필요한 경우 즉시 보고하고 안전하게 진행하겠습니다.",
     modePriority: modePriority[params.mode],
@@ -983,6 +1093,10 @@ function buildDeveloperPrompt(locale: "ko" | "en") {
       "약물/도구 혼동, 단위/농도 오인, 라인 호환성 위험은 우선 경고에 반영한다.",
       "근거 없는 임의 수치(예: 비현실적 NRS/용량/속도) 생성 금지. 입력 근거가 없으면 '병원 프로토콜 기준 확인'으로 표현한다.",
       "각 배열 항목은 순수 문장으로만 작성하고 JSON 키/중괄호/따옴표를 절대 포함하지 않는다.",
+      "resultKind는 medication/device/scenario 중 하나로 채운다(모호하면 scenario).",
+      "oneLineConclusion은 Go/Hold/Stop 성격을 한 줄로 작성하고, riskLevel(low/medium/high)을 함께 판단한다.",
+      "sbar는 situation/background/assessment/recommendation 각각 1문장으로 작성한다.",
+      "institutionalChecks는 기관 확인이 필요한 항목만 2~4개로 요약한다.",
       "confidence는 반드시 0~100 사이 정수값으로 설정한다(예: 85). 확신이 낮으면 confidence를 낮추고 confidenceNote에 이유를 작성한다.",
       "진단/처방 대체 표현 금지. 최종 판단은 병원 지침/처방 우선으로 유지한다.",
       "각 문장은 짧게, 항목은 간결하게 작성한다(장문 금지).",
@@ -999,6 +1113,9 @@ function buildDeveloperPrompt(locale: "ko" | "en") {
     "If the input is ambiguous, avoid overclaiming and keep status as CHECK with explicit verification actions.",
     "Do not invent unsupported numeric thresholds. If no reliable number is present, state protocol-based verification.",
     "Array items must be plain sentences only. Never include JSON keys/braces/quotes inside field values.",
+    "Set resultKind to medication/device/scenario (scenario when uncertain).",
+    "Write oneLineConclusion as a single Go/Hold/Stop style sentence and set riskLevel(low/medium/high).",
+    "Fill sbar with one concise sentence for each field and summarize institutionalChecks in 2-4 bullets.",
     "confidence must be an integer between 0-100 (e.g., 85). If uncertain, lower confidence and explain in confidenceNote.",
     "Do not replace diagnosis/order decisions.",
     "Keep each line concise; avoid long prose.",
@@ -1033,6 +1150,7 @@ function buildUserPrompt(params: {
       "modePriority는 모드별 상단 고정 탭 순서를 3~6개로 제시한다.",
       "topNumbers는 실제 입력 근거가 있는 수치/조건만 작성한다. 근거가 없으면 '기관 프로토콜 기준 확인' 문구를 사용한다.",
       "모든 배열 항목은 짧은 한 문장으로 작성한다.",
+      "필수 출력 보강: resultKind, oneLineConclusion, riskLevel, institutionalChecks, sbar(situation/background/assessment/recommendation).",
       ...buildSituationPromptLines(params.situation, "ko"),
       "JSON 외 텍스트 금지.",
       "\n[Context JSON]",
@@ -1049,6 +1167,7 @@ function buildUserPrompt(params: {
     "modePriority should list 3-6 top tabs by mode.",
     "topNumbers must use only reliable numbers from the input context; otherwise use protocol-check wording.",
     "Keep each array item short and practical.",
+    "Include resultKind, oneLineConclusion, riskLevel, institutionalChecks, and sbar fields.",
     ...buildSituationPromptLines(params.situation, "en"),
     "No text outside JSON.",
     "\n[Context JSON]",

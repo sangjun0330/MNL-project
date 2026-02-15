@@ -19,9 +19,13 @@ type ClinicalSituation = "general" | "pre_admin" | "during_admin" | "event_respo
 
 type MedSafetyItemType = "medication" | "device" | "unknown";
 type MedSafetyQuickStatus = "OK" | "CHECK" | "STOP";
-type ResultTab = "quick" | "do" | "safety";
+type MedSafetyResultKind = "medication" | "device" | "scenario";
+type MedSafetyRiskLevel = "low" | "medium" | "high";
 
 type MedSafetyAnalyzeResult = {
+  resultKind: MedSafetyResultKind;
+  oneLineConclusion: string;
+  riskLevel: MedSafetyRiskLevel;
   item: {
     name: string;
     type: MedSafetyItemType;
@@ -45,6 +49,13 @@ type MedSafetyAnalyzeResult = {
     holdRules: string[];
     monitor: string[];
     escalateWhen: string[];
+  };
+  institutionalChecks: string[];
+  sbar: {
+    situation: string;
+    background: string;
+    assessment: string;
+    recommendation: string;
   };
   patientScript20s: string;
   modePriority: string[];
@@ -193,9 +204,9 @@ function itemTypeLabel(itemType: MedSafetyItemType) {
 }
 
 function statusLabel(status: MedSafetyQuickStatus) {
-  if (status === "OK") return "OK 실행 가능";
-  if (status === "STOP") return "STOP 즉시 중단/보고";
-  return "CHECK 확인 필요";
+  if (status === "OK") return "GO";
+  if (status === "STOP") return "STOP";
+  return "HOLD/CHECK";
 }
 
 function statusTone(status: MedSafetyQuickStatus) {
@@ -204,10 +215,22 @@ function statusTone(status: MedSafetyQuickStatus) {
   return "border-amber-200 bg-amber-50 text-amber-700";
 }
 
-function tabLabel(tab: ResultTab) {
-  if (tab === "quick") return "빠르게";
-  if (tab === "do") return "실행";
-  return "안전";
+function riskLabel(level: MedSafetyRiskLevel) {
+  if (level === "high") return "높음";
+  if (level === "medium") return "중간";
+  return "낮음";
+}
+
+function riskTone(level: MedSafetyRiskLevel) {
+  if (level === "high") return "border-red-200 bg-red-50 text-red-700";
+  if (level === "medium") return "border-amber-200 bg-amber-50 text-amber-700";
+  return "border-emerald-200 bg-emerald-50 text-emerald-700";
+}
+
+function kindLabel(kind: MedSafetyResultKind) {
+  if (kind === "medication") return "약물";
+  if (kind === "device") return "의료도구";
+  return "상황";
 }
 
 function modeLabel(mode: ClinicalMode) {
@@ -253,6 +276,22 @@ function SectionList({ title, items }: { title: string; items: string[] }) {
   );
 }
 
+function mergeUniqueLists(...lists: string[][]) {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const list of lists) {
+    for (const item of list) {
+      const clean = String(item ?? "").trim();
+      if (!clean) continue;
+      const key = clean.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(clean);
+    }
+  }
+  return out;
+}
+
 function MedSafetyAnalyzingOverlay({ open }: { open: boolean }) {
   if (!open || typeof document === "undefined") return null;
   return createPortal(
@@ -278,7 +317,6 @@ export function ToolMedSafetyPage() {
   const [situation, setSituation] = useState<ClinicalSituation>("general");
   const [patientSummary, setPatientSummary] = useState("");
   const [result, setResult] = useState<MedSafetyAnalyzeResult | null>(null);
-  const [resultTab, setResultTab] = useState<ResultTab>("quick");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -477,7 +515,6 @@ export function ToolMedSafetyPage() {
             `${parseErrorMessage(String(data.fallbackReason ?? "openai_fallback"))} 기본 안전 모드 결과를 표시합니다.`
           );
         }
-        setResultTab("quick");
         if (forcedQuery) setQuery(forcedQuery);
       } catch {
         setResult(null);
@@ -488,6 +525,25 @@ export function ToolMedSafetyPage() {
     },
     [imageFile, mode, patientSummary, query, situation]
   );
+
+  const immediateActions = result?.quick.topActions.slice(0, 3) ?? [];
+  const checks1to5 = result
+    ? mergeUniqueLists(result.quick.topNumbers, result.safety.monitor).slice(0, 4)
+    : [];
+  const branchRules = result
+    ? mergeUniqueLists(result.quick.topRisks, result.safety.holdRules, result.safety.escalateWhen).slice(0, 4)
+    : [];
+  const adjustmentPlan = result
+    ? mergeUniqueLists(result.do.steps, result.do.compatibilityChecks, result.do.calculatorsNeeded).slice(0, 5)
+    : [];
+  const sbarLines = result
+    ? [
+        `S: ${result.sbar?.situation ?? ""}`.trim(),
+        `B: ${result.sbar?.background ?? ""}`.trim(),
+        `A: ${result.sbar?.assessment ?? ""}`.trim(),
+        `R: ${result.sbar?.recommendation ?? ""}`.trim(),
+      ].filter((line) => line.length > 3)
+    : [];
 
   return (
     <>
@@ -631,23 +687,27 @@ export function ToolMedSafetyPage() {
               <div className="mt-2 text-[17px] leading-7 text-ios-sub">입력 후 `AI 분석 실행`을 누르면, 먼저 읽어야 할 핵심 행동부터 표시됩니다.</div>
             </div>
           ) : (
-            <div className="space-y-5">
+            <div className="space-y-6">
               <div>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className={`rounded-full border px-3 py-1 text-[14px] font-bold ${statusTone(result.quick.status)}`}>{statusLabel(result.quick.status)}</span>
-                  <span className="rounded-full border border-ios-sep px-3 py-1 text-[13px] font-semibold text-ios-text">{itemTypeLabel(result.item.type)}</span>
+                  <span className={`rounded-full border px-3 py-1 text-[13px] font-semibold ${riskTone(result.riskLevel)}`}>위험도 {riskLabel(result.riskLevel)}</span>
+                  <span className="rounded-full border border-ios-sep px-3 py-1 text-[13px] font-semibold text-ios-text">{kindLabel(result.resultKind)}</span>
+                  {result.item.type !== "unknown" ? (
+                    <span className="rounded-full border border-ios-sep px-3 py-1 text-[12px] font-semibold text-ios-sub">{itemTypeLabel(result.item.type)}</span>
+                  ) : null}
                 </div>
-                <div className="mt-3 text-[42px] font-bold leading-[1.05] tracking-[-0.03em] text-ios-text">{result.item.name}</div>
-                <div className="mt-2 text-[20px] leading-8 text-ios-text">{result.item.primaryUse}</div>
+                <div className="mt-3 text-[40px] font-bold leading-[1.05] tracking-[-0.03em] text-ios-text">{result.item.name}</div>
+                <div className="mt-2 text-[20px] leading-8 text-ios-text">{result.oneLineConclusion || result.item.primaryUse}</div>
                 <div className="mt-2 text-[15px] text-ios-sub">
                   모드: {modeLabel(mode)} · 상황: {situationLabel(situation)} · 분석: {formatDateTime(result.analyzedAt)}
                 </div>
               </div>
 
-              <div className="space-y-3 border-t border-ios-sep pt-5">
-                <div className="text-[22px] font-bold text-ios-text">먼저 읽기: 30초 핵심 행동</div>
+              <div className="space-y-4 border-t border-ios-sep pt-5">
+                <div className="text-[22px] font-bold text-ios-text">즉시 행동 (0-60초)</div>
                 <ol className="space-y-2 text-[20px] leading-8 text-ios-text">
-                  {result.quick.topActions.slice(0, 3).map((item, index) => (
+                  {immediateActions.map((item, index) => (
                     <li key={item}>
                       <span className="mr-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-[color:var(--wnl-accent-soft)] text-[14px] font-bold text-[color:var(--wnl-accent)]">
                         {index + 1}
@@ -658,54 +718,43 @@ export function ToolMedSafetyPage() {
                 </ol>
               </div>
 
-              <div className={SEGMENT_WRAPPER_CLASS}>
-                {(["quick", "do", "safety"] as const).map((tab) => {
-                  const active = resultTab === tab;
-                  return (
-                    <button
-                      key={tab}
-                      type="button"
-                      className={`h-10 rounded-xl px-4 text-[15px] font-bold ${
-                        active
-                          ? "border border-[color:var(--wnl-accent)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]"
-                          : "text-ios-sub"
-                      }`}
-                      onClick={() => setResultTab(tab)}
-                    >
-                      {tabLabel(tab)}
-                    </button>
-                  );
-                })}
+              <div className="grid gap-4 border-t border-ios-sep pt-4 md:grid-cols-2">
+                <SectionList title="확인 (1-5분)" items={checks1to5} />
+                <SectionList title="악화 시 분기" items={branchRules} />
               </div>
 
               <div className="space-y-4 border-t border-ios-sep pt-4">
-                {resultTab === "quick" ? (
-                  <div className="space-y-3">
-                    <SectionList title="핵심 수치/조건" items={result.quick.topNumbers.slice(0, 3)} />
-                    <SectionList title="핵심 위험" items={result.quick.topRisks.slice(0, 3)} />
-                  </div>
-                ) : null}
-
-                {resultTab === "do" ? (
-                  <div className="space-y-3">
-                    <SectionList title="실행 단계" items={result.do.steps.slice(0, 5)} />
-                    <SectionList title="계산/보조 필요" items={result.do.calculatorsNeeded.slice(0, 3)} />
-                    <SectionList title="라인/호환 점검" items={result.do.compatibilityChecks.slice(0, 3)} />
-                  </div>
-                ) : null}
-
-                {resultTab === "safety" ? (
-                  <div className="space-y-3">
-                    <SectionList title="홀드/중단 기준" items={result.safety.holdRules.slice(0, 4)} />
+                {result.resultKind === "medication" ? (
+                  <>
+                    <SectionList title="투여 (How)" items={mergeUniqueLists(result.do.steps, result.do.calculatorsNeeded).slice(0, 6)} />
+                    <SectionList title="라인·호환" items={result.do.compatibilityChecks.slice(0, 4)} />
                     <SectionList title="모니터링" items={result.safety.monitor.slice(0, 4)} />
-                    <SectionList title="즉시 보고 기준" items={result.safety.escalateWhen.slice(0, 4)} />
-                  </div>
+                    <SectionList title="이상반응·대응" items={mergeUniqueLists(result.safety.holdRules, result.safety.escalateWhen).slice(0, 5)} />
+                  </>
+                ) : null}
+
+                {result.resultKind === "device" ? (
+                  <>
+                    <SectionList title="Identify" items={mergeUniqueLists(result.item.aliases, result.item.highRiskBadges).slice(0, 5)} />
+                    <SectionList title="세팅/절차" items={result.do.steps.slice(0, 6)} />
+                    <SectionList title="알람/트러블" items={mergeUniqueLists(result.quick.topRisks, result.safety.holdRules).slice(0, 5)} />
+                    <SectionList title="유지관리·점검" items={mergeUniqueLists(result.safety.monitor, result.do.compatibilityChecks).slice(0, 5)} />
+                  </>
+                ) : null}
+
+                {result.resultKind === "scenario" ? (
+                  <>
+                    <SectionList title="처치/조정" items={adjustmentPlan} />
+                    <SectionList title="보고 전 체크" items={mergeUniqueLists(result.quick.topNumbers, result.safety.monitor).slice(0, 5)} />
+                  </>
                 ) : null}
               </div>
 
               <div className="border-t border-ios-sep pt-4">
-                <div className="text-[18px] font-bold text-ios-text">환자 설명 20초 스크립트</div>
-                <div className="mt-2 text-[17px] leading-7 text-ios-text">{result.patientScript20s}</div>
+                <SectionList title="보고 (SBAR)" items={sbarLines} />
+                <div className="mt-4">
+                  <SectionList title="기관 확인" items={result.institutionalChecks.slice(0, 4)} />
+                </div>
                 {result.confidenceNote ? <div className="mt-3 text-[15px] font-semibold text-ios-sub">검증 메모: {result.confidenceNote}</div> : null}
               </div>
             </div>
