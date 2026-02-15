@@ -175,6 +175,8 @@ function parseErrorMessage(raw: string) {
   if (normalized.includes("openai_responses_404") || normalized.includes("model_not_found"))
     return "요청한 모델을 찾을 수 없습니다. 모델명을 확인하거나 기본 fallback 모델로 다시 시도해 주세요.";
   if (normalized.includes("openai_responses_429")) return "요청 한도가 초과되었습니다. 잠시 후 다시 AI 분석 실행을 눌러 시도해 주세요.";
+  if (normalized.includes("openai_responses_400") && /(previous_response|conversation)/i.test(String(raw)))
+    return "이전 대화 상태 동기화에 실패했습니다. 다시 AI 분석 실행을 눌러 새로 시도해 주세요.";
   if (normalized.includes("openai_responses_400"))
     return "AI 요청 형식 오류가 발생했습니다. 입력 내용을 줄여 다시 시도해 주세요.";
   if (/openai_responses_(408|409|425|500|502|503|504)/.test(normalized)) return RETRY_WITH_DATA_MESSAGE;
@@ -825,7 +827,7 @@ export function ToolMedSafetyPage() {
       setError(null);
 
       try {
-        const maxClientRetries = 2;
+        const maxClientRetries = 1;
         let response: Response | null = null;
         let payload:
           | { ok: true; data: MedSafetyAnalyzeResult }
@@ -851,7 +853,7 @@ export function ToolMedSafetyPage() {
             if (preferredModel) form.set("preferredModel", preferredModel);
             if (imageFile) form.set("image", imageFile);
 
-            response = await fetchAnalyzeWithTimeout(form, 95_000);
+            response = await fetchAnalyzeWithTimeout(form, 55_000);
 
             payload = (await response.json().catch(() => null)) as
               | { ok: true; data: MedSafetyAnalyzeResult }

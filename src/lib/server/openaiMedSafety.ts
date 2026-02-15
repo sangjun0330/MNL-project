@@ -163,6 +163,13 @@ function resolveUpstreamTimeoutMs() {
   return Math.max(8_000, Math.min(90_000, rounded));
 }
 
+function resolveTotalBudgetMs() {
+  const raw = Number(process.env.OPENAI_MED_SAFETY_TOTAL_BUDGET_MS ?? 45_000);
+  if (!Number.isFinite(raw)) return 45_000;
+  const rounded = Math.round(raw);
+  return Math.max(15_000, Math.min(120_000, rounded));
+}
+
 function truncateError(raw: string, size = 220) {
   const clean = String(raw ?? "")
     .replace(/\s+/g, " ")
@@ -607,8 +614,9 @@ async function callResponsesApi(args: {
     tools: [],
     store: storeResponses,
   };
+  // conversation state는 동시에 2개 키를 보내지 않고 하나만 사용한다.
   if (previousResponseId) body.previous_response_id = previousResponseId;
-  if (conversationId) body.conversation = conversationId;
+  else if (conversationId) body.conversation = conversationId;
 
   let response: Response;
   let timedOut = false;
@@ -950,19 +958,34 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
     intent === "scenario" ? Math.max(2200, Math.min(4800, maxOutputTokens)) : maxOutputTokens;
   const responseVerbosity: ResponseVerbosity = "high";
   const upstreamTimeoutMs = resolveUpstreamTimeoutMs();
+  const totalBudgetMs = resolveTotalBudgetMs();
   const networkRetries = resolveNetworkRetryCount();
   const networkRetryBaseMs = resolveNetworkRetryBaseMs();
   const storeResponses = resolveStoreResponses();
   const developerPrompt = buildDeveloperPrompt(params.locale);
   const userPrompt = buildUserPrompt(params, intent);
+  const startedAt = Date.now();
 
   let selectedModel = modelCandidates[0] ?? "gpt-4.1-mini";
   let rawText = "";
   let lastError = "openai_request_failed";
 
-  for (const candidateModel of modelCandidates) {
+  for (let modelIndex = 0; modelIndex < modelCandidates.length; modelIndex += 1) {
+    if (Date.now() - startedAt > totalBudgetMs) {
+      lastError = "openai_timeout_total_budget";
+      break;
+    }
+    const candidateModel = modelCandidates[modelIndex]!;
     selectedModel = candidateModel;
-    for (const apiBaseUrl of apiBaseUrls) {
+    for (let baseIndex = 0; baseIndex < apiBaseUrls.length; baseIndex += 1) {
+      if (Date.now() - startedAt > totalBudgetMs) {
+        lastError = "openai_timeout_total_budget";
+        break;
+      }
+      const apiBaseUrl = apiBaseUrls[baseIndex]!;
+      const useContinuationState = modelIndex === 0 && baseIndex === 0;
+      const previousResponseId = useContinuationState ? params.previousResponseId : undefined;
+      const conversationId = useContinuationState ? params.conversationId : undefined;
       const attempt = await callResponsesApiWithRetry({
         apiKey,
         model: candidateModel,
@@ -970,8 +993,8 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         userPrompt,
         apiBaseUrl,
         imageDataUrl: params.imageDataUrl,
-        previousResponseId: params.previousResponseId,
-        conversationId: params.conversationId,
+        previousResponseId,
+        conversationId,
         signal: params.signal,
         maxOutputTokens: maxOutputTokensForIntent,
         upstreamTimeoutMs,
@@ -981,6 +1004,41 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         retryBaseMs: networkRetryBaseMs,
       });
       if (attempt.error) {
+        // 상태 이어받기(previous/conversation) 포맷 문제면 같은 모델/베이스에서
+        // 상태 키를 제거하고 한 번 더 즉시 재시도한다.
+        if (
+          useContinuationState &&
+          /openai_responses_400/i.test(attempt.error) &&
+          /(previous_response|conversation)/i.test(attempt.error)
+        ) {
+          const statelessRetry = await callResponsesApi({
+            apiKey,
+            model: candidateModel,
+            developerPrompt,
+            userPrompt,
+            apiBaseUrl,
+            imageDataUrl: params.imageDataUrl,
+            signal: params.signal,
+            maxOutputTokens: maxOutputTokensForIntent,
+            upstreamTimeoutMs,
+            verbosity: responseVerbosity,
+            storeResponses,
+          });
+          if (!statelessRetry.error && statelessRetry.text) {
+            rawText = statelessRetry.text;
+            const result = buildResultFromAnswer(params, intent, statelessRetry.text);
+            return {
+              result,
+              model: candidateModel,
+              rawText: statelessRetry.text,
+              fallbackReason: null,
+              openaiResponseId: statelessRetry.responseId,
+              openaiConversationId: statelessRetry.conversationId,
+            };
+          }
+          lastError = statelessRetry.error ?? attempt.error;
+          continue;
+        }
         lastError = attempt.error;
         continue;
       }
