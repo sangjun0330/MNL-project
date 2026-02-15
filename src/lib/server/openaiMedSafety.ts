@@ -433,15 +433,16 @@ function buildDevicePrompt(query: string, contextJson: string) {
 function buildScenarioPrompt(query: string, contextJson: string) {
   return [
     "상황 질문에 대해 질문 자체에 직접 답하라.",
-    "형식은 자유이되, 불필요한 배경 설명은 제외하고 핵심 행동 중심으로 매우 간결하게 작성하라.",
+    "형식은 자유이되, 불필요한 배경 설명은 줄이고 핵심 행동 중심으로 정돈된 답변을 작성하라.",
     "출력 규칙: 마크다운 기호(##, ###, **, ---, ``` )를 쓰지 말고 일반 텍스트로만 작성하라.",
-    "중복 문장/중복 단락을 반복하지 말고, 모바일 화면에서 읽기 쉽게 짧은 문장으로 작성하라.",
-    "전체 분량은 10~14문장 이내로 제한하라.",
-    "질문과 직접 관련된 내용만 남기고 일반론·교과서식 설명은 생략하라.",
-    "핵심은 '지금 할 일', '확인할 수치/관찰', '중단·호출 기준' 3가지다.",
-    "각 항목은 최대 3개로 제한하라.",
+    "중복 문장/중복 단락을 반복하지 말고, 모바일 화면에서 읽기 쉽게 짧은 문장과 불릿 위주로 작성하라.",
+    "너무 짧게 요약하지 말고 임상적으로 필요한 맥락은 유지하라.",
+    "질문과 직접 관련된 내용만 남기고 일반론·교과서식 장문 설명은 생략하라.",
+    "권장 구성: 핵심 판단, 지금 할 일(즉시), 확인할 수치/관찰, 가능한 원인 Top 3, 조정/분기, 중단·호출 기준, 보고 문구.",
+    "각 구성은 2~4개 핵심 포인트로 정리하라.",
+    "전체 길이는 대략 18~32줄 내외로 작성하라.",
     "불확실한 부분은 단정하지 말고 '기관 확인 필요'를 짧게 표기하라.",
-    "마지막에는 현장에서 바로 읽을 수 있는 짧은 보고 문구 1~2문장을 포함하라.",
+    "마지막에는 현장에서 바로 읽을 수 있는 짧은 보고 문구(SBAR 형태) 2~4문장을 포함하라.",
     "질문:",
     query || "(없음)",
     "",
@@ -904,8 +905,8 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
   const apiBaseUrl = resolveApiBaseUrl();
   const maxOutputTokens = resolveMaxOutputTokens();
   const maxOutputTokensForIntent =
-    intent === "scenario" ? Math.max(900, Math.min(1800, maxOutputTokens)) : maxOutputTokens;
-  const responseVerbosity: ResponseVerbosity = intent === "scenario" ? "medium" : "high";
+    intent === "scenario" ? Math.max(2200, Math.min(4800, maxOutputTokens)) : maxOutputTokens;
+  const responseVerbosity: ResponseVerbosity = "high";
   const networkRetries = resolveNetworkRetryCount();
   const networkRetryBaseMs = resolveNetworkRetryBaseMs();
   const storeResponses = resolveStoreResponses();
