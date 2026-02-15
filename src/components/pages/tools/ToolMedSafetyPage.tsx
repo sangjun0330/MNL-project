@@ -374,26 +374,25 @@ function splitLongDisplayLine(value: string) {
   const bySentence = trySplit(clean, /(?<=[.!?]|다\.|요\.)\s+|;\s+/);
   if (bySentence.length > 1) return bySentence.map((line) => clampDisplayText(line, DISPLAY_ITEM_MAX_CHARS));
 
-  const byCommaCue = trySplit(
-    clean,
-    /,\s+(?=(?:지금|먼저|확인|중단|호출|보고|원인|분기|주의|금기|모니터|재평가|속도|용량|라인|수액|호환|SBAR|S:|B:|A:|R:))/i
-  );
-  if (byCommaCue.length > 1) return byCommaCue.map((line) => clampDisplayText(line, DISPLAY_ITEM_MAX_CHARS));
-
-  const byKeyword = trySplit(
-    clean,
-    /\s+(?=(?:지금|먼저|확인|중단|호출|보고|원인|분기|주의|금기|모니터|재평가|속도|용량|라인|수액|호환|SBAR|S:|B:|A:|R:))/i
-  );
-  if (byKeyword.length > 1) return byKeyword.map((line) => clampDisplayText(line, DISPLAY_ITEM_MAX_CHARS));
-
   if (clean.length <= DISPLAY_ITEM_MAX_CHARS) return [clean];
-
-  const words = clean.split(/\s+/).filter(Boolean);
-  if (!words.length) return [];
   const chunks: string[] = [];
-  for (let index = 0; index < words.length; index += 22) {
-    chunks.push(clampDisplayText(words.slice(index, index + 22).join(" "), DISPLAY_ITEM_MAX_CHARS));
+  let rest = clean;
+  while (rest.length > DISPLAY_ITEM_MAX_CHARS) {
+    const clipped = rest.slice(0, DISPLAY_ITEM_MAX_CHARS);
+    const boundary = Math.max(
+      clipped.lastIndexOf(". "),
+      clipped.lastIndexOf("; "),
+      clipped.lastIndexOf(", "),
+      clipped.lastIndexOf("· "),
+      clipped.lastIndexOf(") "),
+      clipped.lastIndexOf(" ")
+    );
+    const cutIndex = boundary > DISPLAY_ITEM_MAX_CHARS * 0.58 ? boundary + 1 : DISPLAY_ITEM_MAX_CHARS;
+    const piece = rest.slice(0, cutIndex).trim();
+    if (piece) chunks.push(clampDisplayText(piece, DISPLAY_ITEM_MAX_CHARS));
+    rest = rest.slice(cutIndex).trim();
   }
+  if (rest) chunks.push(clampDisplayText(rest, DISPLAY_ITEM_MAX_CHARS));
   return chunks.filter(Boolean);
 }
 
@@ -423,10 +422,7 @@ type DynamicResultCard = {
 };
 
 const CARD_MAX_ITEMS = 4;
-const CARD_MAX_SECTIONS = 16;
 const NON_SCENARIO_CARD_MAX_ITEMS = 3;
-const SCENARIO_CARD_MAX_ITEMS = 4;
-const SCENARIO_CARD_MAX_SECTIONS = 12;
 const DISPLAY_ITEM_MAX_CHARS = 180;
 const ITEM_PRIORITY_PATTERN =
   /(즉시|중단|보류|주의|금기|핵심|반드시|필수|우선|보고|호출|알람|모니터|재평가|용량|속도|농도|단위|라인|호환|상호작용|프로토콜|기관 확인 필요)/i;
@@ -554,9 +550,7 @@ function buildNarrativeCards(answer: string): DynamicResultCard[] {
       .filter((line) => line.length > 0);
     if (!items.length) return;
     const title = normalizeDisplayLine(currentTitle) || `핵심 정보 ${cards.length + 1}`;
-    const normalizedItems = pickCardItems(items)
-      .filter((item, index) => !(index === 0 && isNearDuplicateText(item, title)))
-      .slice(0, CARD_MAX_ITEMS);
+    const normalizedItems = mergeUniqueLists(items).filter((item, index) => !(index === 0 && isNearDuplicateText(item, title)));
     if (!normalizedItems.length) {
       currentItems = [];
       return;
@@ -580,17 +574,16 @@ function buildNarrativeCards(answer: string): DynamicResultCard[] {
   }
   flush();
 
-  if (cards.length) return cards.slice(0, CARD_MAX_SECTIONS);
+  if (cards.length) return cards;
 
   const paragraphs = String(answer ?? "")
     .split(/\n{2,}/)
     .map((block) => block.trim())
-    .filter(Boolean)
-    .slice(0, CARD_MAX_SECTIONS);
+    .filter(Boolean);
   return paragraphs.map((block, idx) => ({
     key: `paragraph-${idx}`,
     title: idx === 0 ? "핵심 요약" : `추가 정보 ${idx}`,
-    items: pickCardItems(
+    items: mergeUniqueLists(
       block
         .split("\n")
         .flatMap((line) => splitLongDisplayLine(line))
@@ -970,11 +963,6 @@ export function ToolMedSafetyPage() {
   const displayCards =
     result?.resultKind === "scenario"
       ? dynamicCards
-          .slice(0, SCENARIO_CARD_MAX_SECTIONS)
-          .map((card) => ({
-            ...card,
-            items: card.items.slice(0, SCENARIO_CARD_MAX_ITEMS),
-          }))
       : dynamicCards.map((card) => ({
           ...card,
           items: card.items.slice(0, NON_SCENARIO_CARD_MAX_ITEMS),
