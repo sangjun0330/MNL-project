@@ -3,6 +3,7 @@ import {
   analyzeMedSafetyWithOpenAI,
   type ClinicalMode,
   type ClinicalSituation,
+  type QueryIntent,
 } from "@/lib/server/openaiMedSafety";
 
 export const runtime = "edge";
@@ -57,6 +58,16 @@ function pickSituation(raw: FormDataEntryValue | null): ClinicalSituation {
   return "general";
 }
 
+function pickQueryIntent(raw: FormDataEntryValue | null): QueryIntent | undefined {
+  const value = String(raw ?? "")
+    .trim()
+    .toLowerCase();
+  if (value === "medication") return "medication";
+  if (value === "device") return "device";
+  if (value === "scenario") return "scenario";
+  return undefined;
+}
+
 function bytesToBase64(input: Uint8Array) {
   let binary = "";
   const chunkSize = 0x8000;
@@ -88,6 +99,7 @@ export async function POST(req: NextRequest) {
     const locale = pickLocale(form.get("locale"));
     const mode = pickMode(form.get("mode"));
     const situation = pickSituation(form.get("situation"));
+    const queryIntent = pickQueryIntent(form.get("queryIntent"));
     const query = String(form.get("query") ?? "")
       .replace(/\s+/g, " ")
       .trim()
@@ -125,6 +137,7 @@ export async function POST(req: NextRequest) {
         query,
         mode,
         situation,
+        queryIntent,
         patientSummary: patientSummary || undefined,
         locale,
         imageDataUrl: imageDataUrl || undefined,

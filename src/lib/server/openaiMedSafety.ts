@@ -2,6 +2,7 @@ export type MedSafetyItemType = "medication" | "device" | "unknown";
 export type MedSafetyQuickStatus = "OK" | "CHECK" | "STOP";
 export type ClinicalMode = "ward" | "er" | "icu";
 export type ClinicalSituation = "general" | "pre_admin" | "during_admin" | "event_response";
+export type QueryIntent = "medication" | "device" | "scenario";
 
 export type MedSafetyAnalysisResult = {
   resultKind: "medication" | "device" | "scenario";
@@ -47,6 +48,7 @@ type AnalyzeParams = {
   query: string;
   mode: ClinicalMode;
   situation: ClinicalSituation;
+  queryIntent?: QueryIntent;
   patientSummary?: string;
   locale: "ko" | "en";
   imageDataUrl?: string;
@@ -475,7 +477,21 @@ function countPatternHits(text: string, patterns: RegExp[]) {
   return score;
 }
 
-function inferExpectedInputClassification(params: Pick<AnalyzeParams, "query" | "patientSummary" | "imageName" | "situation">): ExpectedInputClassification {
+function inferExpectedInputClassification(
+  params: Pick<AnalyzeParams, "query" | "patientSummary" | "imageName" | "situation" | "queryIntent">
+): ExpectedInputClassification {
+  if (params.queryIntent === "medication" || params.queryIntent === "device" || params.queryIntent === "scenario") {
+    return {
+      expectedResultKind: params.queryIntent,
+      expectedItemType: params.queryIntent === "scenario" ? "unknown" : params.queryIntent,
+      confidence: "high",
+      reason: `forced_by_query_intent:${params.queryIntent}`,
+      medScore: params.queryIntent === "medication" ? 99 : 0,
+      deviceScore: params.queryIntent === "device" ? 99 : 0,
+      scenarioScore: params.queryIntent === "scenario" ? 99 : 0,
+    };
+  }
+
   const source = `${params.query ?? ""} ${params.patientSummary ?? ""} ${params.imageName ?? ""}`
     .replace(/\s+/g, " ")
     .trim();
@@ -1042,10 +1058,7 @@ function alignAnalysisResultToInputKind(
     modePriority: [...input.modePriority],
   };
 
-  const shouldForceKind =
-    expected.confidence !== "low" &&
-    expected.expectedResultKind !== "scenario" &&
-    result.resultKind === "scenario";
+  const shouldForceKind = expected.confidence === "high" && result.resultKind !== expected.expectedResultKind;
 
   if (shouldForceKind) {
     result.resultKind = expected.expectedResultKind;
@@ -1296,52 +1309,83 @@ function buildKindPromptLines(kind: "medication" | "device" | "scenario", locale
   if (locale === "ko") {
     if (kind === "medication") {
       return [
-        "[입력 분류: 약물]",
-        "- item.primaryUse에는 '무엇인지/핵심 역할'을 한 문장으로 먼저 작성",
-        "- do.steps는 실제 사용/투여 순서를 간결하게 제시",
-        "- quick.topRisks + safety.holdRules에는 부작용/금기/중단 기준을 명확히 작성",
-        "- JSON 키 문자열(resultKind:, status:)을 값 배열에 절대 노출하지 말 것",
+        "[출력 템플릿: 약물 검색 결과(Drug)]",
+        "- 한 화면 요약(Quick): item.primaryUse=한 줄 정의(분류/기전+적응증), oneLineConclusion=즉시 결론(Go/Hold/Stop), quick.topActions=현장 포인트 Top3",
+        "- 기본 정보(What): item.aliases에 '분류:', '작용/역할:', '효과 시간대:' 접두어로 2~4개 작성",
+        "- 사용법(How to give): do.steps에 경로/투여방식/희석·농도·속도·시간/필터·차광·flush/라인 선택을 순서형으로 작성",
+        "- Pre-check: do.calculatorsNeeded에 금기·주의 Top3, 필수 데이터(vital/lab/알레르기) 작성",
+        "- 모니터링(While): safety.monitor에 핵심 모니터 3개 + 재평가 타이머(5/15/30/60분) 작성",
+        "- 이상반응/주의: quick.topRisks=흔한 부작용+위험 신호, safety.holdRules=중단 기준, safety.escalateWhen=즉시 대응/보고 기준",
+        "- 상호작용/호환성: do.compatibilityChecks에 Y-site/혼합 금지/치명 조합/전용라인 필요를 작성",
+        "- 환자 설명(Teach): patientScript20s=20초 설명, sbar.recommendation 끝에 teach-back 질문 1개를 포함",
+        "- 모든 문장은 짧은 한국어 문장으로 작성, JSON 키 문자열(resultKind:, status:) 노출 금지",
       ];
     }
     if (kind === "device") {
       return [
-        "[입력 분류: 의료도구]",
-        "- item.primaryUse에는 도구의 기능/역할을 한 문장으로 작성",
-        "- do.steps에는 세팅/사용 순서, do.compatibilityChecks에는 연결/호환 점검을 작성",
-        "- quick.topRisks와 safety.holdRules에는 알람/오작동/중단 기준을 분리해 작성",
-        "- JSON 키 문자열(resultKind:, status:)을 값 배열에 절대 노출하지 말 것",
+        "[출력 템플릿: 의료기구 검색 결과(Device)]",
+        "- 한 화면 요약(Quick): item.primaryUse=한 줄 정의(용도/원리), oneLineConclusion=언제 쓰는지+즉시 결론, quick.topActions=Setup→Start→Check 3단계",
+        "- 기구 정체(What): item.aliases에 정식명칭/별칭, 구성품, 규격(Fr/G/connector), 역할을 접두어 포함 작성",
+        "- 사용법(How to use): do.steps에 준비물 체크→셋업(6~12단계)→시작→정상 작동 확인 순서 작성",
+        "- 정상 기준/사용 중 체크: safety.monitor에 정상 표시/파형/압력/누출·피부·고정·통증 점검 작성",
+        "- 주의/금기: quick.topRisks에 금기·주의·합병증 Top5 요약, safety.holdRules에 즉시 중단 기준 작성",
+        "- 알람/트러블슈팅: do.compatibilityChecks에 알람 의미/원인 Top3/먼저 볼 것 Top3/해결 Top3/안되면 보고 기준 작성",
+        "- 유지관리: institutionalChecks에 교체·점검주기, 감염예방, 기록 항목(시간·세팅·반응·조치) 작성",
+        "- 환자 설명(Teach): patientScript20s에 협조 문구, safety.escalateWhen에 '즉시 말해야 할 증상 3개' 작성",
+        "- 모든 문장은 짧은 한국어 문장으로 작성, JSON 키 문자열(resultKind:, status:) 노출 금지",
       ];
     }
     return [
-      "[입력 분류: 상황]",
-      "- 즉시 행동 → 확인 → 분기/보고 순서로 작성",
-      "- 추정 원인을 나열할 때도 먼저 환자 안전 행동을 우선 제시",
-      "- JSON 키 문자열(resultKind:, status:)을 값 배열에 절대 노출하지 말 것",
+      "[출력 템플릿: 상황 검색 결과(Scenario)]",
+      "- 한 화면 요약(Quick): oneLineConclusion=Go/Hold/Stop+위험도, quick.topActions=즉시 행동 3개(0-60초)",
+      "- ①즉시 행동(0-60초): quick.topActions에 ABC/투여중단 여부/산소·체위·모니터 강화 중심 3개",
+      "- ②확인(1-5분): quick.topNumbers에 활력·의식·통증·SpO2·주사부위·라인·알람·빠른 데이터 작성",
+      "- ③원인 후보 Top3: quick.topRisks에 가능성 3개를 짧게 작성",
+      "- ④처치/조정: do.steps에 간호 처치 및 재평가 타임라인(5/15/30분) 작성",
+      "- ⑤악화 분기(If-Then): safety.holdRules + safety.escalateWhen을 If A -> Then B 형식으로 작성",
+      "- ⑥SBAR: sbar 4필드에 자동 보고 문안을 완성형 문장으로 작성",
+      "- 추가 정보(Related): institutionalChecks에 함께 확인할 약/기구 연결 포인트 작성",
+      "- 모든 문장은 짧은 한국어 문장으로 작성, JSON 키 문자열(resultKind:, status:) 노출 금지",
     ];
   }
 
   if (kind === "medication") {
     return [
-      "[Input class: Medication]",
-      "- item.primaryUse must explain what it is and its core role in one sentence.",
-      "- do.steps should show practical administration sequence.",
-      "- quick.topRisks + safety.holdRules must highlight adverse risks, contraindications, and hold criteria.",
+      "[Output template: Drug search]",
+      "- Quick: item.primaryUse=one-line identity/use, oneLineConclusion=Go/Hold/Stop, quick.topActions=top 3 bedside points.",
+      "- What: item.aliases should include class, role/mechanism, expected onset window with clear labels.",
+      "- How to give: do.steps should cover route, administration mode, dilution/rate/time, filter/light/flush, line choice.",
+      "- Pre-check: do.calculatorsNeeded should include contraindications and required bedside/lab checks.",
+      "- While: safety.monitor should include top monitoring targets and 5/15/30/60 reassessment timers.",
+      "- Watch-outs: quick.topRisks + holdRules + escalateWhen should cover common effects, danger signs, stop/report criteria.",
+      "- Interactions/line: do.compatibilityChecks should include Y-site/mixture restrictions and critical combinations.",
+      "- Teach: patientScript20s + a teach-back question in sbar.recommendation.",
       "- Never leak JSON key strings inside array values.",
     ];
   }
   if (kind === "device") {
     return [
-      "[Input class: Device]",
-      "- item.primaryUse should summarize purpose and function in one sentence.",
-      "- do.steps should cover setup/use; compatibilityChecks should cover connection/compatibility checks.",
-      "- quick.topRisks and holdRules should clearly separate alarm/failure stop criteria.",
+      "[Output template: Device search]",
+      "- Quick: item.primaryUse=one-line purpose/principle, oneLineConclusion=when to use + immediate conclusion, quick.topActions=Setup->Start->Check.",
+      "- What: item.aliases should include name/aliases/components/specs/function with labels.",
+      "- How: do.steps should provide practical setup sequence and normal operation confirmation points.",
+      "- Watch-outs: quick.topRisks + holdRules should include contraindications/complications/stop rules.",
+      "- Troubleshooting: do.compatibilityChecks should include alarm meaning, top causes, first checks, fixes, escalation.",
+      "- Maintenance: institutionalChecks should include replacement interval, infection prevention, documentation items.",
+      "- Teach: patientScript20s + escalateWhen should include what to report immediately.",
       "- Never leak JSON key strings inside array values.",
     ];
   }
   return [
-    "[Input class: Scenario]",
-    "- Use sequence: immediate action -> checks -> branch/escalation.",
-    "- Prioritize patient-safety actions before root-cause details.",
+    "[Output template: Scenario search]",
+    "- Quick: oneLineConclusion=Go/Hold/Stop + risk, quick.topActions=0-60s actions.",
+    "- 0-60s: quick.topActions should prioritize ABC and immediate safety actions.",
+    "- 1-5m: quick.topNumbers should include core checks and immediate data points.",
+    "- Causes: quick.topRisks should list top 3 likely causes only.",
+    "- Actions: do.steps should include nursing actions and 5/15/30 reassessment timeline.",
+    "- If-Then: holdRules + escalateWhen should be explicit trigger/action branching.",
+    "- SBAR: fill all sbar fields with concise actionable sentences.",
+    "- Related: institutionalChecks should mention linked meds/devices to verify.",
     "- Never leak JSON key strings inside array values.",
   ];
 }
@@ -1409,6 +1453,9 @@ function buildUserPrompt(params: {
     expected_item_type: params.expected.expectedItemType,
     classification_confidence: params.expected.confidence,
     classification_reason: params.expected.reason,
+    query_intent_selected: params.expected.confidence === "high" && params.expected.reason.startsWith("forced_by_query_intent")
+      ? params.expected.expectedResultKind
+      : "(auto)",
   };
 
   if (params.locale === "ko") {
@@ -1673,6 +1720,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
     patientSummary: params.patientSummary,
     imageName: params.imageName,
     situation: params.situation,
+    queryIntent: params.queryIntent,
   });
   const developerPrompt = buildDeveloperPrompt(params.locale);
   const userPrompt = buildUserPrompt({
