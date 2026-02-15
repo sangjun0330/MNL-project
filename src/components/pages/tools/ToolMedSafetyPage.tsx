@@ -357,21 +357,55 @@ type DynamicResultCard = {
   compact?: boolean;
 };
 
+const CATEGORY_HEADING_PATTERN =
+  /(핵심 요약|이 약이 무엇인지|언제 쓰는지|어떻게 주는지|기구 정의|준비물|셋업|사용 절차|정상 작동|알람|트러블슈팅|합병증|유지관리|실수 방지|금기|주의|모니터|위험 신호|즉시 대응|라인|호환|상호작용|환자 교육|체크리스트|보고|sbar|원인|재평가|처치|적응증|역할|정의|분류)/i;
+
+function headingCandidate(line: string) {
+  return String(line ?? "")
+    .trim()
+    .replace(/^#{1,6}\s+/, "")
+    .replace(/^\*\*|\*\*$/g, "")
+    .replace(/^(?:[-*•·]|\d+[).])\s*/, "")
+    .replace(/^\[\s*|\s*\]$/g, "")
+    .trim();
+}
+
 function looksLikeHeading(line: string) {
   const raw = String(line ?? "").trim();
   if (!raw) return false;
+  const candidate = headingCandidate(raw).replace(/[:：]$/, "").trim();
+  if (!candidate) return false;
   if (/^#{1,6}\s+/.test(raw)) return true;
   if (/^\*\*[^*]{2,80}\*\*$/.test(raw)) return true;
-  if (/^[가-힣A-Za-z0-9][^]{0,60}[:：]$/.test(raw) && !/^\d+[).]/.test(raw)) return true;
+  if (/^\[[^\]]{2,70}\]$/.test(raw)) return true;
+  if (/^[가-힣A-Za-z0-9 /()·&+-]{2,72}[:：]$/u.test(headingCandidate(raw))) return true;
+  if (/^\d+[).]\s*[가-힣A-Za-z0-9 /()·&+-]{2,64}$/u.test(raw) && CATEGORY_HEADING_PATTERN.test(candidate)) return true;
+  if (candidate.length <= 42 && CATEGORY_HEADING_PATTERN.test(candidate) && !/[.!?]$/.test(candidate)) {
+    return true;
+  }
   return false;
 }
 
-function headingText(line: string) {
-  return String(line ?? "")
-    .replace(/^#{1,6}\s+/, "")
-    .replace(/^\*\*|\*\*$/g, "")
-    .replace(/[:：]$/, "")
+function isNearDuplicateText(a: string, b: string) {
+  const left = normalizeDisplayLine(a)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, "")
+    .replace(/\s+/g, " ")
     .trim();
+  const right = normalizeDisplayLine(b)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!left || !right) return false;
+  if (left === right) return true;
+  const minLen = Math.min(left.length, right.length);
+  if (minLen < 16) return false;
+  return left.includes(right) || right.includes(left);
+}
+
+function headingText(line: string) {
+  return headingCandidate(line).replace(/[:：]$/, "").trim();
 }
 
 function buildNarrativeCards(answer: string): DynamicResultCard[] {
@@ -389,7 +423,7 @@ function buildNarrativeCards(answer: string): DynamicResultCard[] {
   if (!lines.length) return [];
 
   const cards: DynamicResultCard[] = [];
-  let currentTitle = "AI 답변";
+  let currentTitle = "핵심 요약";
   let currentItems: string[] = [];
 
   const flush = () => {
@@ -399,14 +433,16 @@ function buildNarrativeCards(answer: string): DynamicResultCard[] {
         if (!clean) return [];
         if (clean.length <= 150) return [clean];
         return clean
-          .split(/(?<=[.!?]|다\.|요\.)\s+/)
+          .split(/(?<=[.!?]|다\.|요\.|;)\s+|(?<=\))\s+(?=[가-힣A-Za-z])/)
           .map((part) => normalizeDisplayLine(part))
           .filter((part) => part.length > 0);
       })
       .filter((line) => line.length > 0);
     if (!items.length) return;
-    const title = normalizeDisplayLine(currentTitle) || "AI 답변";
-    const normalizedItems = mergeUniqueLists(items).slice(0, 10);
+    const title = normalizeDisplayLine(currentTitle) || `핵심 정보 ${cards.length + 1}`;
+    const normalizedItems = mergeUniqueLists(items)
+      .filter((item, index) => !(index === 0 && isNearDuplicateText(item, title)))
+      .slice(0, 12);
     if (!normalizedItems.length) {
       currentItems = [];
       return;
@@ -429,7 +465,7 @@ function buildNarrativeCards(answer: string): DynamicResultCard[] {
   for (const rawLine of lines) {
     if (looksLikeHeading(rawLine)) {
       flush();
-      currentTitle = headingText(rawLine) || "AI 답변";
+      currentTitle = headingText(rawLine) || `핵심 정보 ${cards.length + 1}`;
       continue;
     }
     currentItems.push(rawLine);
@@ -947,7 +983,7 @@ export function ToolMedSafetyPage() {
                 </div>
                 <div className="mt-2 text-[34px] font-bold leading-[1.08] tracking-[-0.03em] text-ios-text">{result.item.name}</div>
                 <div className="mt-1.5 text-[18px] leading-7 text-ios-text">{headerConclusion || headerPrimaryUse || "핵심 안전 확인 필요"}</div>
-                {headerPrimaryUse && headerPrimaryUse !== headerConclusion ? (
+                {headerPrimaryUse && !isNearDuplicateText(headerPrimaryUse, headerConclusion) ? (
                   <div className="mt-1 text-[16px] leading-6 text-ios-sub">{headerPrimaryUse}</div>
                 ) : null}
                 <div className="mt-2 text-[15px] text-ios-sub">
@@ -977,8 +1013,6 @@ export function ToolMedSafetyPage() {
                   <div className="text-[15px] text-ios-sub">표시할 분석 정보가 없습니다.</div>
                 )}
               </div>
-
-              {result.confidenceNote ? <div className="text-[15px] font-semibold text-ios-sub">검증 메모: {result.confidenceNote}</div> : null}
             </div>
           )}
 
