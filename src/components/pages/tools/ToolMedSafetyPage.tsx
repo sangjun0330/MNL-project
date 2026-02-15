@@ -302,29 +302,6 @@ function normalizeDisplayLine(value: string) {
   return withoutTrailingComma;
 }
 
-function SectionList({ title, items }: { title: string; items: string[] }) {
-  const safeItems = items.map((item) => normalizeDisplayLine(item)).filter(Boolean);
-  if (!safeItems.length) {
-    return (
-      <div>
-        <div className="text-[18px] font-bold text-ios-text">{title}</div>
-        <div className="mt-1 text-[14px] text-ios-sub">정보 없음</div>
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      <div className="text-[18px] font-bold text-ios-text">{title}</div>
-      <ul className="mt-2 list-disc space-y-2 pl-6 text-[17px] leading-7 text-ios-text">
-        {safeItems.map((item, index) => (
-          <li key={`${item}-${index}`}>{item}</li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 function mergeUniqueLists(...lists: string[][]) {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -341,16 +318,12 @@ function mergeUniqueLists(...lists: string[][]) {
   return out;
 }
 
-type ResultTabSection = {
-  id: string;
-  label: string;
+type DynamicResultCard = {
+  key: string;
   title: string;
   items: string[];
+  compact?: boolean;
 };
-
-function withPrefix(prefix: string, items: string[]) {
-  return items.map((item) => `${prefix} ${item}`);
-}
 
 function MedSafetyAnalyzingOverlay({ open }: { open: boolean }) {
   if (!open || typeof document === "undefined") return null;
@@ -380,7 +353,6 @@ export function ToolMedSafetyPage() {
   const [result, setResult] = useState<MedSafetyAnalyzeResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [activeResultTab, setActiveResultTab] = useState("quick");
 
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -413,10 +385,6 @@ export function ToolMedSafetyPage() {
       stopCamera();
     };
   }, [previewUrl, stopCamera]);
-
-  useEffect(() => {
-    setActiveResultTab("quick");
-  }, [queryIntent, result?.analyzedAt]);
 
   useEffect(() => {
     if (!cameraOpen) return;
@@ -594,10 +562,14 @@ export function ToolMedSafetyPage() {
     [imageFile, mode, patientSummary, query, queryIntent, situation]
   );
 
-  const immediateActions = result ? mergeUniqueLists(result.quick.topActions).slice(0, 3) : [];
-  const checks1to5 = result ? mergeUniqueLists(result.quick.topNumbers, result.safety.monitor).slice(0, 5) : [];
-  const branchRules = result ? mergeUniqueLists(result.quick.topRisks, result.safety.holdRules, result.safety.escalateWhen).slice(0, 6) : [];
-  const adjustmentPlan = result ? mergeUniqueLists(result.do.steps, result.do.compatibilityChecks, result.do.calculatorsNeeded).slice(0, 6) : [];
+  const immediateActions = result ? mergeUniqueLists(result.quick.topActions).slice(0, 7) : [];
+  const checks1to5 = result ? mergeUniqueLists(result.quick.topNumbers).slice(0, 6) : [];
+  const branchRules = result ? mergeUniqueLists(result.quick.topRisks, result.safety.holdRules, result.safety.escalateWhen).slice(0, 8) : [];
+  const adjustmentPlan = result ? mergeUniqueLists(result.do.steps).slice(0, 8) : [];
+  const preventionPoints = result ? mergeUniqueLists(result.do.compatibilityChecks, result.institutionalChecks).slice(0, 6) : [];
+  const reassessmentPoints = result
+    ? mergeUniqueLists(result.safety.monitor, ["재평가 타이밍: 상태에 따라 5-15-30-60분 재평가"]).slice(0, 6)
+    : [];
   const sbarLines = result
     ? [
         `S: ${result.sbar?.situation ?? ""}`.trim(),
@@ -610,206 +582,38 @@ export function ToolMedSafetyPage() {
     : [];
   const headerConclusion = result ? normalizeDisplayLine(result.oneLineConclusion) : "";
   const headerPrimaryUse = result ? normalizeDisplayLine(result.item.primaryUse) : "";
-  const ifThenRules = result
+  const oneLineSummary = headerConclusion || headerPrimaryUse || "핵심 안전 확인 필요";
+  const overviewTitle =
+    queryIntent === "medication" ? "약물 핵심 정보" : queryIntent === "device" ? "의료기구 핵심 정보" : "상황 핵심 정보";
+  const overviewItems = result
     ? mergeUniqueLists(
-        result.safety.holdRules.map((line) => `If ${line} -> Then 즉시 중단/보류 후 재평가`),
-        result.safety.escalateWhen.map((line) => `If ${line} -> Then 즉시 호출 및 SBAR 보고`)
+        headerPrimaryUse ? [headerPrimaryUse] : [],
+        result.item.aliases,
+        result.item.highRiskBadges,
+        queryIntent === "scenario" ? result.quick.topRisks.slice(0, 2) : []
       ).slice(0, 6)
     : [];
-  const fieldChecklist = result
+  const summaryItems = result
     ? mergeUniqueLists(
-        withPrefix("전 ·", result.do.calculatorsNeeded),
-        withPrefix("중 ·", result.safety.monitor),
-        withPrefix("후/보고 ·", result.safety.escalateWhen)
-      ).slice(0, 9)
+        [`한 줄 결론: ${oneLineSummary}`],
+        [`상태: ${statusLabel(result.quick.status)} · 위험도: ${riskLabel(result.riskLevel)}`],
+        immediateActions.length ? [`가장 먼저: ${immediateActions[0]}`] : []
+      ).slice(0, 3)
     : [];
 
-  const drugSections: ResultTabSection[] = result
+  const dynamicCards: DynamicResultCard[] = result
     ? [
-        {
-          id: "quick",
-          label: "Quick",
-          title: "한 화면 요약(Quick)",
-          items: mergeUniqueLists(
-            [`한 줄 정의 · ${headerPrimaryUse || `${result.item.name}의 분류·기전·적응증을 먼저 확인`}`],
-            [`즉시 결론 · ${headerConclusion || statusLabel(result.quick.status)}`],
-            withPrefix("현장 포인트 ·", immediateActions.length ? immediateActions : result.quick.topRisks.slice(0, 3))
-          ).slice(0, 6),
-        },
-        {
-          id: "what",
-          label: "What",
-          title: "기본 정보(What)",
-          items: mergeUniqueLists(
-            result.item.aliases,
-            [`약물 분류/작용 · ${headerPrimaryUse || "기관 프로토콜 기준으로 확인"}`],
-            [`효과 시간대 · 즉시/수분/수시간 중 해당 군 기준으로 확인`]
-          ).slice(0, 6),
-        },
-        {
-          id: "how",
-          label: "How",
-          title: "사용법(How to give)",
-          items: mergeUniqueLists(result.do.steps, result.do.calculatorsNeeded, result.do.compatibilityChecks).slice(0, 8),
-        },
-        {
-          id: "pre",
-          label: "Pre",
-          title: "무엇을 확인해야 하나(Pre-check)",
-          items: mergeUniqueLists(result.do.calculatorsNeeded, result.quick.topNumbers, result.institutionalChecks).slice(0, 8),
-        },
-        {
-          id: "monitor",
-          label: "Monitor",
-          title: "모니터링(While)",
-          items: mergeUniqueLists(
-            result.safety.monitor,
-            withPrefix("재평가 타이머 ·", ["5분", "15분", "30분", "60분"])
-          ).slice(0, 8),
-        },
-        {
-          id: "risk",
-          label: "Risk",
-          title: "이상반응/주의(Watch-outs)",
-          items: mergeUniqueLists(result.quick.topRisks, result.safety.holdRules, result.safety.escalateWhen).slice(0, 8),
-        },
-        {
-          id: "line",
-          label: "Line",
-          title: "상호작용/호환성(Line & Interactions)",
-          items: mergeUniqueLists(result.do.compatibilityChecks, result.institutionalChecks).slice(0, 8),
-        },
-        {
-          id: "teach",
-          label: "Teach",
-          title: "환자 설명(Teach)",
-          items: mergeUniqueLists(
-            [`20초 설명 · ${result.patientScript20s}`],
-            ["Teach-back 질문 · 지금 설명드린 내용 중 즉시 알려야 할 증상 1가지를 말씀해 주세요."]
-          ).slice(0, 3),
-        },
-      ]
+        { key: "summary", title: "핵심 요약", items: summaryItems, compact: true },
+        { key: "overview", title: overviewTitle, items: overviewItems },
+        { key: "actions", title: "즉시 행동 우선순위", items: immediateActions },
+        { key: "checks", title: "확인해야 할 핵심 관찰/수치", items: checks1to5 },
+        { key: "adjust", title: "실행/조치", items: adjustmentPlan },
+        { key: "risks", title: "위험 신호 및 에스컬레이션 기준", items: branchRules },
+        { key: "prevent", title: "실수 방지 포인트", items: preventionPoints },
+        { key: "recheck", title: "재평가 타이밍", items: reassessmentPoints },
+        { key: "sbar", title: "보고(SBAR)", items: sbarLines },
+      ].filter((card) => card.items.length > 0)
     : [];
-
-  const deviceSections: ResultTabSection[] = result
-    ? [
-        {
-          id: "quick",
-          label: "Quick",
-          title: "한 화면 요약(Quick)",
-          items: mergeUniqueLists(
-            [`한 줄 정의 · ${headerPrimaryUse || `${result.item.name}의 용도와 원리를 먼저 확인`}`],
-            [`즉시 결론 · ${headerConclusion || statusLabel(result.quick.status)}`],
-            withPrefix("지금 할 일 ·", immediateActions.length ? immediateActions : result.do.steps.slice(0, 3)),
-            withPrefix("Stop rule ·", result.safety.holdRules.slice(0, 3))
-          ).slice(0, 8),
-        },
-        {
-          id: "what",
-          label: "What",
-          title: "기구 정체(What)",
-          items: mergeUniqueLists(
-            result.item.aliases,
-            result.item.highRiskBadges,
-            [`역할/기능 · ${headerPrimaryUse || "기구 목적과 적응증을 확인"}`]
-          ).slice(0, 8),
-        },
-        {
-          id: "how",
-          label: "How",
-          title: "사용법(How to use)",
-          items: mergeUniqueLists(result.do.steps, result.do.compatibilityChecks).slice(0, 10),
-        },
-        {
-          id: "watch",
-          label: "Watch",
-          title: "주의/금기(Watch-outs)",
-          items: mergeUniqueLists(result.quick.topRisks, result.safety.holdRules).slice(0, 8),
-        },
-        {
-          id: "alarm",
-          label: "Alarm",
-          title: "알람/트러블슈팅(Troubleshooting)",
-          items: mergeUniqueLists(result.quick.topRisks, result.do.compatibilityChecks, result.safety.escalateWhen).slice(0, 10),
-        },
-        {
-          id: "maintenance",
-          label: "Maintenance",
-          title: "유지관리(Maintenance)",
-          items: mergeUniqueLists(result.safety.monitor, result.institutionalChecks).slice(0, 8),
-        },
-        {
-          id: "teach",
-          label: "Teach",
-          title: "환자 설명(Teach)",
-          items: mergeUniqueLists(
-            [`환자 안내 · ${result.patientScript20s}`],
-            withPrefix("즉시 알림 ·", result.safety.escalateWhen.slice(0, 3))
-          ).slice(0, 5),
-        },
-      ]
-    : [];
-
-  const scenarioSections: ResultTabSection[] = result
-    ? [
-        {
-          id: "quick",
-          label: "Quick",
-          title: "한 화면 요약(Quick)",
-          items: mergeUniqueLists(
-            [`한 줄 결론 · ${headerConclusion || statusLabel(result.quick.status)}`],
-            [`위험도 · ${riskLabel(result.riskLevel)}`],
-            [`부서 분기 · ICU / ER / 병동 (현재 ${modeLabel(mode)})`],
-            withPrefix("즉시 행동 ·", immediateActions)
-          ).slice(0, 6),
-        },
-        {
-          id: "zero60",
-          label: "0-60s",
-          title: "즉시 행동(0-60초)",
-          items: mergeUniqueLists(immediateActions, result.safety.holdRules.slice(0, 2)).slice(0, 6),
-        },
-        {
-          id: "one5",
-          label: "1-5m",
-          title: "확인(1-5분)",
-          items: checks1to5,
-        },
-        {
-          id: "causes",
-          label: "Causes",
-          title: "원인 후보 Top 3",
-          items: branchRules.slice(0, 3),
-        },
-        {
-          id: "actions",
-          label: "Actions",
-          title: "처치/조정",
-          items: adjustmentPlan,
-        },
-        {
-          id: "ifthen",
-          label: "If-Then",
-          title: "악화 분기(If-Then)",
-          items: ifThenRules,
-        },
-        {
-          id: "sbar",
-          label: "SBAR",
-          title: "SBAR 자동 작성",
-          items: sbarLines,
-        },
-        {
-          id: "related",
-          label: "Related",
-          title: "연관 약물/기구 확인",
-          items: mergeUniqueLists(result.institutionalChecks, result.do.compatibilityChecks).slice(0, 6),
-        },
-      ]
-    : [];
-
-  const activeSections = queryIntent === "medication" ? drugSections : queryIntent === "device" ? deviceSections : scenarioSections;
-  const activeSection = activeSections.find((section) => section.id === activeResultTab) ?? activeSections[0];
 
   return (
     <>
@@ -1001,37 +805,25 @@ export function ToolMedSafetyPage() {
               </div>
 
               <div className="border-t border-ios-sep pt-4">
-                <div className="overflow-x-auto pb-1">
-                  <div className={`${SEGMENT_WRAPPER_CLASS} w-max`}>
-                    {activeSections.map((section) => {
-                      const active = activeSection?.id === section.id;
-                      return (
-                        <button
-                          key={section.id}
-                          type="button"
-                          className={`h-9 rounded-xl px-3 text-[12px] font-semibold ${
-                            active
-                              ? "border border-[color:var(--wnl-accent)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]"
-                              : "text-ios-sub"
-                          }`}
-                          onClick={() => setActiveResultTab(section.id)}
-                        >
-                          {section.label}
-                        </button>
-                      );
-                    })}
+                {dynamicCards.length ? (
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {dynamicCards.map((card) => (
+                      <section
+                        key={card.key}
+                        className={`rounded-2xl border border-ios-sep ${card.compact ? "bg-ios-bg/40" : "bg-white"} p-4`}
+                      >
+                        <div className="text-[17px] font-bold tracking-[-0.01em] text-ios-text">{card.title}</div>
+                        <ul className="mt-2 list-disc space-y-1.5 pl-5 text-[16px] leading-7 text-ios-text">
+                          {card.items.map((item, index) => (
+                            <li key={`${card.key}-${index}`}>{item}</li>
+                          ))}
+                        </ul>
+                      </section>
+                    ))}
                   </div>
-                </div>
-                {activeSection ? (
-                  <div className="mt-4">
-                    <SectionList title={activeSection.title} items={activeSection.items} />
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="grid gap-4 border-t border-ios-sep pt-4 md:grid-cols-2">
-                <SectionList title="현장 체크리스트(전/중/후 + 보고)" items={fieldChecklist} />
-                <SectionList title="보고 (SBAR)" items={sbarLines.length ? sbarLines : result.institutionalChecks} />
+                ) : (
+                  <div className="text-[15px] text-ios-sub">표시할 분석 정보가 없습니다.</div>
+                )}
               </div>
 
               {result.confidenceNote ? <div className="text-[15px] font-semibold text-ios-sub">검증 메모: {result.confidenceNote}</div> : null}
