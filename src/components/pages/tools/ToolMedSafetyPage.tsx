@@ -177,8 +177,11 @@ function parseErrorMessage(raw: string) {
   if (normalized.includes("openai_responses_429")) return "요청 한도가 초과되었습니다. 잠시 후 다시 AI 분석 실행을 눌러 시도해 주세요.";
   if (normalized.includes("openai_responses_400") && /(previous_response|conversation)/i.test(String(raw)))
     return "이전 대화 상태 동기화에 실패했습니다. 다시 AI 분석 실행을 눌러 새로 시도해 주세요.";
+  if (normalized.includes("openai_responses_400") && /(max_output|max output|token limit|too many tokens|context length)/i.test(String(raw)))
+    return "AI 응답 길이 제한으로 요청이 중단되었습니다. 잠시 후 다시 AI 분석 실행을 눌러 시도해 주세요.";
   if (normalized.includes("openai_responses_400"))
-    return "AI 요청 형식 오류가 발생했습니다. 입력 내용을 줄여 다시 시도해 주세요.";
+    return "AI 요청 처리 중 오류가 발생했습니다. 데이터(모바일 네트워크)를 켠 뒤 다시 AI 분석 실행을 눌러 시도해 주세요.";
+  if (normalized.includes("openai_empty_text")) return "AI 서버 응답 본문이 비어 다시 시도했습니다. 잠시 후 다시 AI 분석 실행을 눌러 주세요.";
   if (/openai_responses_(408|409|425|500|502|503|504)/.test(normalized)) return RETRY_WITH_DATA_MESSAGE;
   if (normalized.includes("openai_responses_")) return "AI 요청이 실패했습니다. 다시 AI 분석 실행을 눌러 시도해 주세요.";
   if (normalized.includes("openai_invalid_json_payload"))

@@ -142,9 +142,27 @@ function resolveMaxOutputTokens() {
   return Math.max(1800, Math.min(20000, rounded));
 }
 
+function buildOutputTokenCandidates(maxOutputTokens: number, intent: QueryIntent) {
+  const requested = Math.max(1200, Math.round(maxOutputTokens));
+  const steps =
+    intent === "scenario"
+      ? [requested, 3800, 3200, 2800, 2400, 2000, 1800]
+      : [requested, 3200, 2800, 2400, 2000, 1600, 1400];
+  const out: number[] = [];
+  const seen = new Set<number>();
+  for (const raw of steps) {
+    const value = Math.max(intent === "scenario" ? 1600 : 1200, Math.min(requested, Math.round(raw)));
+    if (!Number.isFinite(value) || seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+    if (out.length >= 5) break;
+  }
+  return out.length ? out : [requested];
+}
+
 function resolveNetworkRetryCount() {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_NETWORK_RETRIES ?? 2);
-  if (!Number.isFinite(raw)) return 2;
+  const raw = Number(process.env.OPENAI_MED_SAFETY_NETWORK_RETRIES ?? 1);
+  if (!Number.isFinite(raw)) return 1;
   const rounded = Math.round(raw);
   return Math.max(0, Math.min(5, rounded));
 }
@@ -176,6 +194,22 @@ function truncateError(raw: string, size = 220) {
     .replace(/[^\x20-\x7E가-힣ㄱ-ㅎㅏ-ㅣ.,:;!?()[\]{}'"`~@#$%^&*_\-+=/\\|<>]/g, "")
     .trim();
   return clean.length > size ? clean.slice(0, size) : clean;
+}
+
+function isBadRequestError(error: string) {
+  return /openai_responses_400/i.test(String(error ?? ""));
+}
+
+function isContinuationStateError(error: string) {
+  return /(previous_response|conversation)/i.test(String(error ?? ""));
+}
+
+function isTokenLimitError(error: string) {
+  const e = String(error ?? "").toLowerCase();
+  if (!isBadRequestError(e)) return false;
+  return /(max[_ -]?output[_ -]?tokens|max[_ -]?tokens|token limit|too many tokens|context length|incomplete_details|max_output_tokens)/i.test(
+    e
+  );
 }
 
 function normalizeText(value: string) {
@@ -493,34 +527,67 @@ function buildUserPrompt(params: AnalyzeParams, intent: QueryIntent) {
 }
 
 function extractResponsesText(json: any): string {
-  const content = json?.choices?.[0]?.message?.content;
-  if (typeof content === "string" && content.trim()) return content.trim();
+  const chunks: string[] = [];
+  const seen = new Set<string>();
+  const append = (raw: unknown) => {
+    if (typeof raw !== "string") return;
+    const value = raw.replace(/\r/g, "").trim();
+    if (!value) return;
+    const key = value.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    chunks.push(value);
+  };
+  const appendFromTextLike = (value: unknown) => {
+    if (!value) return;
+    if (typeof value === "string") {
+      append(value);
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) appendFromTextLike(item);
+      return;
+    }
+    if (typeof value !== "object") return;
+    const node = value as Record<string, unknown>;
+    append(node.value);
+    append(node.text);
+    if (typeof node.text === "object" && node.text) {
+      append((node.text as Record<string, unknown>).value);
+    }
+    append(node.output_text);
+    append(node.transcript);
+  };
 
-  const direct = json?.output_text;
-  if (typeof direct === "string" && direct.trim()) return direct.trim();
-  if (Array.isArray(direct)) {
-    const joined = direct
-      .map((item) => (typeof item === "string" ? item : ""))
-      .join("")
-      .trim();
-    if (joined) return joined;
-  }
+  // Legacy chat-completions style
+  appendFromTextLike(json?.choices?.[0]?.message?.content);
+  // Top-level Responses style
+  appendFromTextLike(json?.output_text);
 
   const output = Array.isArray(json?.output) ? json.output : [];
-  const chunks: string[] = [];
   for (const item of output) {
-    const outputText = typeof item?.output_text === "string" ? item.output_text : "";
-    if (outputText) {
-      chunks.push(outputText);
-      continue;
-    }
-    const cell = Array.isArray(item?.content) ? item.content : [];
-    for (const part of cell) {
-      const text = typeof part?.text === "string" ? part.text : "";
-      if (text) chunks.push(text);
+    appendFromTextLike(item?.output_text);
+    appendFromTextLike(item?.text);
+    appendFromTextLike(item?.transcript);
+    const content = Array.isArray(item?.content) ? item.content : [];
+    for (const part of content) {
+      appendFromTextLike(part?.output_text);
+      appendFromTextLike(part?.text);
+      appendFromTextLike(part?.transcript);
+      appendFromTextLike(part);
     }
   }
-  return chunks.join("").trim();
+
+  // Some providers wrap message content separately
+  const messageContent = Array.isArray(json?.message?.content) ? json.message.content : [];
+  for (const part of messageContent) {
+    appendFromTextLike(part?.text);
+    appendFromTextLike(part?.output_text);
+    appendFromTextLike(part?.transcript);
+    appendFromTextLike(part);
+  }
+
+  return chunks.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function isRetryableOpenAIError(error: string) {
@@ -956,6 +1023,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
   const maxOutputTokens = resolveMaxOutputTokens();
   const maxOutputTokensForIntent =
     intent === "scenario" ? Math.max(2200, Math.min(4800, maxOutputTokens)) : maxOutputTokens;
+  const outputTokenCandidates = buildOutputTokenCandidates(maxOutputTokensForIntent, intent);
   const responseVerbosity: ResponseVerbosity = "high";
   const upstreamTimeoutMs = resolveUpstreamTimeoutMs();
   const totalBudgetMs = resolveTotalBudgetMs();
@@ -986,73 +1054,84 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
       const useContinuationState = modelIndex === 0 && baseIndex === 0;
       const previousResponseId = useContinuationState ? params.previousResponseId : undefined;
       const conversationId = useContinuationState ? params.conversationId : undefined;
-      const attempt = await callResponsesApiWithRetry({
-        apiKey,
-        model: candidateModel,
-        developerPrompt,
-        userPrompt,
-        apiBaseUrl,
-        imageDataUrl: params.imageDataUrl,
-        previousResponseId,
-        conversationId,
-        signal: params.signal,
-        maxOutputTokens: maxOutputTokensForIntent,
-        upstreamTimeoutMs,
-        verbosity: responseVerbosity,
-        storeResponses,
-        retries: networkRetries,
-        retryBaseMs: networkRetryBaseMs,
-      });
-      if (attempt.error) {
-        // 상태 이어받기(previous/conversation) 포맷 문제면 같은 모델/베이스에서
-        // 상태 키를 제거하고 한 번 더 즉시 재시도한다.
-        if (
-          useContinuationState &&
-          /openai_responses_400/i.test(attempt.error) &&
-          /(previous_response|conversation)/i.test(attempt.error)
-        ) {
-          const statelessRetry = await callResponsesApi({
-            apiKey,
-            model: candidateModel,
-            developerPrompt,
-            userPrompt,
-            apiBaseUrl,
-            imageDataUrl: params.imageDataUrl,
-            signal: params.signal,
-            maxOutputTokens: maxOutputTokensForIntent,
-            upstreamTimeoutMs,
-            verbosity: responseVerbosity,
-            storeResponses,
-          });
-          if (!statelessRetry.error && statelessRetry.text) {
-            rawText = statelessRetry.text;
-            const result = buildResultFromAnswer(params, intent, statelessRetry.text);
-            return {
-              result,
-              model: candidateModel,
-              rawText: statelessRetry.text,
-              fallbackReason: null,
-              openaiResponseId: statelessRetry.responseId,
-              openaiConversationId: statelessRetry.conversationId,
-            };
-          }
-          lastError = statelessRetry.error ?? attempt.error;
-          continue;
+      for (let tokenIndex = 0; tokenIndex < outputTokenCandidates.length; tokenIndex += 1) {
+        if (Date.now() - startedAt > totalBudgetMs) {
+          lastError = "openai_timeout_total_budget";
+          break;
         }
-        lastError = attempt.error;
-        continue;
-      }
-      if (attempt.text) {
-        rawText = attempt.text;
-        const result = buildResultFromAnswer(params, intent, attempt.text);
-        return {
-          result,
+        const outputTokenLimit = outputTokenCandidates[tokenIndex]!;
+        const attempt = await callResponsesApiWithRetry({
+          apiKey,
           model: candidateModel,
-          rawText: attempt.text,
-          fallbackReason: null,
-          openaiResponseId: attempt.responseId,
-          openaiConversationId: attempt.conversationId,
-        };
+          developerPrompt,
+          userPrompt,
+          apiBaseUrl,
+          imageDataUrl: params.imageDataUrl,
+          previousResponseId,
+          conversationId,
+          signal: params.signal,
+          maxOutputTokens: outputTokenLimit,
+          upstreamTimeoutMs,
+          verbosity: responseVerbosity,
+          storeResponses,
+          retries: networkRetries,
+          retryBaseMs: networkRetryBaseMs,
+        });
+        if (!attempt.error && attempt.text) {
+          rawText = attempt.text;
+          const result = buildResultFromAnswer(params, intent, attempt.text);
+          return {
+            result,
+            model: candidateModel,
+            rawText: attempt.text,
+            fallbackReason: null,
+            openaiResponseId: attempt.responseId,
+            openaiConversationId: attempt.conversationId,
+          };
+        }
+        if (attempt.error) {
+          // 400 에러는 상태 키(previous/conversation) 문제 혹은 토큰 상한 문제일 수 있어
+          // 같은 모델/베이스에서 상태 키 제거 재시도 1회를 먼저 수행한다.
+          if (
+            isBadRequestError(attempt.error) &&
+            (tokenIndex === 0 || (useContinuationState && isContinuationStateError(attempt.error)))
+          ) {
+            const statelessRetry = await callResponsesApi({
+              apiKey,
+              model: candidateModel,
+              developerPrompt,
+              userPrompt,
+              apiBaseUrl,
+              imageDataUrl: params.imageDataUrl,
+              signal: params.signal,
+              maxOutputTokens: outputTokenLimit,
+              upstreamTimeoutMs,
+              verbosity: responseVerbosity,
+              storeResponses,
+            });
+            if (!statelessRetry.error && statelessRetry.text) {
+              rawText = statelessRetry.text;
+              const result = buildResultFromAnswer(params, intent, statelessRetry.text);
+              return {
+                result,
+                model: candidateModel,
+                rawText: statelessRetry.text,
+                fallbackReason: null,
+                openaiResponseId: statelessRetry.responseId,
+                openaiConversationId: statelessRetry.conversationId,
+              };
+            }
+            lastError = statelessRetry.error ?? attempt.error;
+            if (isTokenLimitError(lastError)) continue;
+            break;
+          }
+          lastError = attempt.error;
+          if (isTokenLimitError(attempt.error)) continue;
+          break;
+        }
+        lastError = "openai_empty_text";
+        if (tokenIndex + 1 < outputTokenCandidates.length) continue;
+        break;
       }
     }
   }
