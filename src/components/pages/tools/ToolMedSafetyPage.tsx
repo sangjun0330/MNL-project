@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -329,6 +329,13 @@ type DynamicResultCard = {
   compact?: boolean;
 };
 
+const CARD_MAX_ITEMS = 4;
+const IMPORTANT_LINE_PATTERN =
+  /(즉시|중단|보류|주의|금기|위험|핵심|반드시|필수|우선|보고|호출|알람|트러블슈팅|재평가|모니터|용량|속도|농도|단위|라인|호환|상호작용|high-alert|lasa|y-site|IV push|flush|IFU|프로토콜|기관 확인 필요)/gi;
+const IMPORTANT_NUMBER_PATTERN = /\b\d+(?:\.\d+)?\s*(?:분|시간|mL\/hr|mg|mcg|mEq|IU|U|%)\b/gi;
+
+type TextRange = { start: number; end: number };
+
 const CATEGORY_HEADING_PATTERN =
   /(핵심 요약|이 약이 무엇인지|언제 쓰는지|어떻게 주는지|기구 정의|준비물|셋업|사용 절차|정상 작동|알람|트러블슈팅|합병증|유지관리|실수 방지|금기|주의|모니터|위험 신호|즉시 대응|라인|호환|상호작용|환자 교육|체크리스트|보고|sbar|원인|재평가|처치|적응증|역할|정의|분류)/i;
 
@@ -380,6 +387,99 @@ function headingText(line: string) {
   return headingCandidate(line).replace(/[:：]$/, "").trim();
 }
 
+function linePriorityScore(line: string) {
+  let score = 0;
+  if (IMPORTANT_LINE_PATTERN.test(line)) score += 3;
+  IMPORTANT_LINE_PATTERN.lastIndex = 0;
+  if (IMPORTANT_NUMBER_PATTERN.test(line)) score += 2;
+  IMPORTANT_NUMBER_PATTERN.lastIndex = 0;
+  if (line.includes(":") || line.includes("·")) score += 1;
+  if (line.length > 35 && line.length < 140) score += 1;
+  return score;
+}
+
+function pickCardItems(items: string[]) {
+  const normalized = mergeUniqueLists(items);
+  if (normalized.length <= CARD_MAX_ITEMS) return normalized;
+  const first = normalized[0];
+  const rest = normalized.slice(1);
+  const picked = rest
+    .map((item, idx) => ({ item, idx, score: linePriorityScore(item) }))
+    .sort((a, b) => b.score - a.score || a.idx - b.idx)
+    .slice(0, CARD_MAX_ITEMS - 1)
+    .sort((a, b) => a.idx - b.idx)
+    .map((entry) => entry.item);
+  return mergeUniqueLists([first], picked).slice(0, CARD_MAX_ITEMS);
+}
+
+function mergeRanges(ranges: TextRange[]) {
+  if (!ranges.length) return [];
+  const sorted = [...ranges].sort((a, b) => a.start - b.start || a.end - b.end);
+  const merged: TextRange[] = [sorted[0]];
+  for (let i = 1; i < sorted.length; i += 1) {
+    const last = merged[merged.length - 1];
+    const current = sorted[i];
+    if (current.start <= last.end) {
+      last.end = Math.max(last.end, current.end);
+      continue;
+    }
+    merged.push(current);
+  }
+  return merged;
+}
+
+function collectHighlightRanges(text: string) {
+  const ranges: TextRange[] = [];
+  const headingSplit = text.indexOf(":");
+  if (headingSplit > 0 && headingSplit <= 18) {
+    ranges.push({ start: 0, end: headingSplit + 1 });
+  }
+
+  const patterns = [IMPORTANT_LINE_PATTERN, IMPORTANT_NUMBER_PATTERN];
+  for (const pattern of patterns) {
+    pattern.lastIndex = 0;
+    let match: RegExpExecArray | null = pattern.exec(text);
+    while (match) {
+      const raw = String(match[0] ?? "");
+      const clean = raw.trim();
+      const start = match.index + raw.indexOf(clean);
+      const end = start + clean.length;
+      if (clean.length >= 2 && start >= 0 && end <= text.length) {
+        ranges.push({ start, end });
+      }
+      if (ranges.length >= 12) break;
+      match = pattern.exec(text);
+    }
+    pattern.lastIndex = 0;
+  }
+
+  return mergeRanges(ranges).slice(0, 6);
+}
+
+function renderHighlightedLine(line: string): ReactNode {
+  const text = normalizeDisplayLine(line);
+  if (!text) return "";
+  const ranges = collectHighlightRanges(text);
+  if (!ranges.length) return text;
+
+  const nodes: ReactNode[] = [];
+  let cursor = 0;
+  ranges.forEach((range, index) => {
+    if (range.start > cursor) nodes.push(text.slice(cursor, range.start));
+    nodes.push(
+      <span
+        key={`hl-${index}-${range.start}-${range.end}`}
+        className="rounded-[6px] bg-[color:var(--wnl-accent-soft)] px-[3px] py-[1px] font-semibold text-[color:var(--wnl-accent)]"
+      >
+        {text.slice(range.start, range.end)}
+      </span>
+    );
+    cursor = range.end;
+  });
+  if (cursor < text.length) nodes.push(text.slice(cursor));
+  return <>{nodes}</>;
+}
+
 function buildNarrativeCards(answer: string): DynamicResultCard[] {
   const lines = String(answer ?? "")
     .replace(/\r/g, "")
@@ -412,16 +512,16 @@ function buildNarrativeCards(answer: string): DynamicResultCard[] {
       .filter((line) => line.length > 0);
     if (!items.length) return;
     const title = normalizeDisplayLine(currentTitle) || `핵심 정보 ${cards.length + 1}`;
-    const normalizedItems = mergeUniqueLists(items)
+    const normalizedItems = pickCardItems(items)
       .filter((item, index) => !(index === 0 && isNearDuplicateText(item, title)))
-      .slice(0, 12);
+      .slice(0, CARD_MAX_ITEMS);
     if (!normalizedItems.length) {
       currentItems = [];
       return;
     }
     if (cards.length > 0 && normalizedItems.length <= 1) {
       const prev = cards[cards.length - 1];
-      prev.items = mergeUniqueLists(prev.items, normalizedItems).slice(0, 12);
+      prev.items = pickCardItems([...prev.items, ...normalizedItems]).slice(0, CARD_MAX_ITEMS);
       currentItems = [];
       return;
     }
@@ -454,7 +554,7 @@ function buildNarrativeCards(answer: string): DynamicResultCard[] {
   return paragraphs.map((block, idx) => ({
     key: `paragraph-${idx}`,
     title: idx === 0 ? "핵심 요약" : `추가 정보 ${idx}`,
-    items: mergeUniqueLists(
+    items: pickCardItems(
       block
         .split("\n")
         .map((line) => normalizeDisplayLine(line))
@@ -748,19 +848,21 @@ export function ToolMedSafetyPage() {
         {
           key: "fallback-core",
           title: "핵심 요약",
-          items: mergeUniqueLists(
+          items: pickCardItems(
+            mergeUniqueLists(
             headerConclusion ? [headerConclusion] : [],
             headerPrimaryUse ? [headerPrimaryUse] : [],
             immediateActions.length ? [`가장 먼저: ${immediateActions[0]}`] : []
-          ).slice(0, 4),
+            )
+          ),
           compact: true,
         },
-        { key: "fallback-action", title: "주요 행동", items: immediateActions },
-        { key: "fallback-check", title: "핵심 확인", items: checks1to5 },
-        { key: "fallback-step", title: "실행 포인트", items: adjustmentPlan },
-        { key: "fallback-risk", title: "위험/에스컬레이션", items: branchRules },
-        { key: "fallback-prevent", title: "실수 방지", items: preventionPoints },
-        { key: "fallback-monitor", title: "모니터/재평가", items: reassessmentPoints },
+        { key: "fallback-action", title: "주요 행동", items: pickCardItems(immediateActions) },
+        { key: "fallback-check", title: "핵심 확인", items: pickCardItems(checks1to5) },
+        { key: "fallback-step", title: "실행 포인트", items: pickCardItems(adjustmentPlan) },
+        { key: "fallback-risk", title: "위험/에스컬레이션", items: pickCardItems(branchRules) },
+        { key: "fallback-prevent", title: "실수 방지", items: pickCardItems(preventionPoints) },
+        { key: "fallback-monitor", title: "모니터/재평가", items: pickCardItems(reassessmentPoints) },
       ].filter((card) => card.items.length > 0)
     : [];
   const dynamicCards = dynamicCardsFromNarrative.length ? dynamicCardsFromNarrative : dynamicCardsFallback;
@@ -993,7 +1095,7 @@ export function ToolMedSafetyPage() {
                         <div className="text-[15px] font-bold tracking-[-0.01em] text-[color:var(--wnl-accent)]">{card.title}</div>
                         <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[15px] leading-6 text-ios-text">
                           {card.items.map((item, index) => (
-                            <li key={`${card.key}-${index}`}>{item}</li>
+                            <li key={`${card.key}-${index}`}>{renderHighlightedLine(item)}</li>
                           ))}
                         </ul>
                       </section>
