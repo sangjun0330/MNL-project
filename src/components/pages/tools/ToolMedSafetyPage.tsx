@@ -62,6 +62,7 @@ type MedSafetyAnalyzeResult = {
   patientScript20s: string;
   modePriority: string[];
   confidenceNote: string;
+  searchAnswer?: string;
   model: string;
   analyzedAt: number;
   source: "openai_live" | "openai_fallback";
@@ -352,6 +353,78 @@ type DynamicResultCard = {
   compact?: boolean;
 };
 
+function looksLikeHeading(line: string) {
+  const raw = String(line ?? "").trim();
+  if (!raw) return false;
+  if (/^#{1,6}\s+/.test(raw)) return true;
+  if (/^\*\*[^*]{2,80}\*\*$/.test(raw)) return true;
+  if (/^[가-힣A-Za-z0-9][^]{0,60}[:：]$/.test(raw) && !/^\d+[).]/.test(raw)) return true;
+  return false;
+}
+
+function headingText(line: string) {
+  return String(line ?? "")
+    .replace(/^#{1,6}\s+/, "")
+    .replace(/^\*\*|\*\*$/g, "")
+    .replace(/[:：]$/, "")
+    .trim();
+}
+
+function buildNarrativeCards(answer: string): DynamicResultCard[] {
+  const lines = String(answer ?? "")
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (!lines.length) return [];
+
+  const cards: DynamicResultCard[] = [];
+  let currentTitle = "AI 답변";
+  let currentItems: string[] = [];
+
+  const flush = () => {
+    const items = currentItems.map((line) => normalizeDisplayLine(line)).filter((line) => line.length > 0);
+    if (!items.length) return;
+    cards.push({
+      key: `narrative-${cards.length}`,
+      title: normalizeDisplayLine(currentTitle) || "AI 답변",
+      items: mergeUniqueLists(items),
+      compact: cards.length === 0,
+    });
+    currentItems = [];
+  };
+
+  for (const rawLine of lines) {
+    if (looksLikeHeading(rawLine)) {
+      flush();
+      currentTitle = headingText(rawLine) || "AI 답변";
+      continue;
+    }
+    currentItems.push(rawLine);
+  }
+  flush();
+
+  if (cards.length) return cards.slice(0, 12);
+
+  const paragraphs = String(answer ?? "")
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+  return paragraphs.map((block, idx) => ({
+    key: `paragraph-${idx}`,
+    title: idx === 0 ? "핵심 요약" : `추가 정보 ${idx}`,
+    items: mergeUniqueLists(
+      block
+        .split("\n")
+        .map((line) => normalizeDisplayLine(line))
+        .filter((line) => line.length > 0)
+    ),
+    compact: idx === 0,
+  }));
+}
+
 function MedSafetyAnalyzingOverlay({ open }: { open: boolean }) {
   if (!open || typeof document === "undefined") return null;
   return createPortal(
@@ -611,82 +684,31 @@ export function ToolMedSafetyPage() {
   const branchRules = result ? mergeUniqueLists(result.quick.topRisks, result.safety.holdRules, result.safety.escalateWhen).slice(0, 8) : [];
   const adjustmentPlan = result ? mergeUniqueLists(result.do.steps).slice(0, 8) : [];
   const preventionPoints = result ? mergeUniqueLists(result.do.compatibilityChecks, result.institutionalChecks).slice(0, 6) : [];
-  const reassessmentPoints = result
-    ? mergeUniqueLists(result.safety.monitor, ["재평가 타이밍: 상태에 따라 5-15-30-60분 재평가"]).slice(0, 6)
-    : [];
-  const sbarLines = result
-    ? [
-        `S: ${result.sbar?.situation ?? ""}`.trim(),
-        `B: ${result.sbar?.background ?? ""}`.trim(),
-        `A: ${result.sbar?.assessment ?? ""}`.trim(),
-        `R: ${result.sbar?.recommendation ?? ""}`.trim(),
-      ]
-        .map((line) => normalizeDisplayLine(line))
-        .filter((line) => line.length > 3)
-    : [];
+  const reassessmentPoints = result ? mergeUniqueLists(result.safety.monitor).slice(0, 6) : [];
   const headerConclusion = result ? normalizeDisplayLine(result.oneLineConclusion) : "";
   const headerPrimaryUse = result ? normalizeDisplayLine(result.item.primaryUse) : "";
-  const oneLineSummary = headerConclusion || headerPrimaryUse || "핵심 안전 확인 필요";
-  const overviewTitle =
-    queryIntent === "medication"
-      ? "이 약이 무엇이고 언제 쓰나"
-      : queryIntent === "device"
-        ? "기구가 무엇이고 언제 쓰나"
-        : "질문 중심 핵심 요약";
-  const overviewItems = result
-    ? mergeUniqueLists(
-        headerPrimaryUse ? [headerPrimaryUse] : [],
-        result.item.aliases,
-        result.item.highRiskBadges,
-        queryIntent === "scenario" ? result.quick.topRisks.slice(0, 2) : []
-      ).slice(0, 6)
+  const dynamicCardsFromNarrative = result?.searchAnswer ? buildNarrativeCards(result.searchAnswer) : [];
+  const dynamicCardsFallback: DynamicResultCard[] = result
+    ? [
+        {
+          key: "fallback-core",
+          title: "핵심 요약",
+          items: mergeUniqueLists(
+            headerConclusion ? [headerConclusion] : [],
+            headerPrimaryUse ? [headerPrimaryUse] : [],
+            immediateActions.length ? [`가장 먼저: ${immediateActions[0]}`] : []
+          ).slice(0, 4),
+          compact: true,
+        },
+        { key: "fallback-action", title: "주요 행동", items: immediateActions },
+        { key: "fallback-check", title: "핵심 확인", items: checks1to5 },
+        { key: "fallback-step", title: "실행 포인트", items: adjustmentPlan },
+        { key: "fallback-risk", title: "위험/에스컬레이션", items: branchRules },
+        { key: "fallback-prevent", title: "실수 방지", items: preventionPoints },
+        { key: "fallback-monitor", title: "모니터/재평가", items: reassessmentPoints },
+      ].filter((card) => card.items.length > 0)
     : [];
-  const teachItems = result ? mergeUniqueLists(result.patientScript20s ? [result.patientScript20s] : []).slice(0, 2) : [];
-  const summaryItems = result
-    ? mergeUniqueLists(
-        [`한 줄 결론: ${oneLineSummary}`],
-        [`상태: ${statusLabel(result.quick.status)} · 위험도: ${riskLabel(result.riskLevel)}`],
-        immediateActions.length ? [`가장 먼저: ${immediateActions[0]}`] : []
-      ).slice(0, 3)
-    : [];
-
-  const dynamicCards: DynamicResultCard[] = result
-    ? queryIntent === "medication"
-      ? [
-          { key: "summary", title: "한 줄 결론", items: summaryItems, compact: true },
-          { key: "overview", title: overviewTitle, items: overviewItems },
-          { key: "how", title: "어떻게 투여하나", items: adjustmentPlan },
-          { key: "precheck", title: "반드시 확인할 금기/주의", items: checks1to5 },
-          { key: "monitor", title: "반드시 모니터할 것", items: reassessmentPoints },
-          { key: "risk", title: "위험 신호·즉시 대응", items: branchRules },
-          { key: "line", title: "라인·호환·상호작용", items: preventionPoints },
-          { key: "teach", title: "환자 설명 포인트", items: teachItems },
-          { key: "sbar", title: "보고(SBAR)", items: sbarLines },
-        ].filter((card) => card.items.length > 0)
-      : queryIntent === "device"
-        ? [
-            { key: "summary", title: "한 줄 결론", items: summaryItems, compact: true },
-            { key: "overview", title: overviewTitle, items: overviewItems },
-            { key: "setup", title: "준비물·셋업·사용 절차", items: adjustmentPlan },
-            { key: "normal", title: "정상 작동 기준", items: checks1to5 },
-            { key: "alarm", title: "알람/트러블슈팅", items: branchRules },
-            { key: "watch", title: "합병증·중단 기준", items: preventionPoints },
-            { key: "maintenance", title: "유지관리·기관 확인", items: reassessmentPoints },
-            { key: "teach", title: "환자 설명 포인트", items: teachItems },
-            { key: "sbar", title: "보고(SBAR)", items: sbarLines },
-          ].filter((card) => card.items.length > 0)
-        : [
-            { key: "summary", title: "질문 중심 핵심", items: summaryItems, compact: true },
-            { key: "overview", title: overviewTitle, items: overviewItems },
-            { key: "actions", title: "지금 해야 할 행동", items: immediateActions },
-            { key: "checks", title: "확인해야 할 핵심 관찰/수치", items: checks1to5 },
-            { key: "adjust", title: "처치/조정", items: adjustmentPlan },
-            { key: "risks", title: "위험 신호·에스컬레이션", items: branchRules },
-            { key: "prevent", title: "실수 방지 포인트", items: preventionPoints },
-            { key: "recheck", title: "재평가 타이밍", items: reassessmentPoints },
-            { key: "sbar", title: "보고(SBAR)", items: sbarLines },
-          ].filter((card) => card.items.length > 0)
-    : [];
+  const dynamicCards = dynamicCardsFromNarrative.length ? dynamicCardsFromNarrative : dynamicCardsFallback;
   const resultKindChip = result ? kindLabel(result.resultKind) : "";
   const itemTypeChip = result ? itemTypeLabel(result.item.type) : "";
 
@@ -696,7 +718,7 @@ export function ToolMedSafetyPage() {
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="text-[31px] font-extrabold tracking-[-0.02em] text-ios-text">AI 약물·도구 검색기</div>
-            <div className="mt-1 text-[13px] text-ios-sub">30초 안에 지금 해야 할 행동을 먼저 보여주고, 이어서 실행/안전 절차를 안내합니다.</div>
+            <div className="mt-1 text-[13px] text-ios-sub">간호 현장에서 바로 쓰는 약물·의료기구·상황 대응 정보를 검색형으로 제공합니다.</div>
           </div>
           <Link href="/tools" className="pt-1 text-[12px] font-semibold text-[color:var(--wnl-accent)]">
             Tool 목록
