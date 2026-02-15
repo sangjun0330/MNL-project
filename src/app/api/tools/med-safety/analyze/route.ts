@@ -50,9 +50,10 @@ function pickSituation(raw: FormDataEntryValue | null): ClinicalSituation {
     .toLowerCase();
   if (value === "pre_admin") return "pre_admin";
   if (value === "during_admin") return "during_admin";
-  if (value === "alarm") return "alarm";
-  if (value === "adverse_suspect") return "adverse_suspect";
-  return "general";
+  if (value === "event_response") return "event_response";
+  // legacy aliases from previous UI
+  if (value === "alarm" || value === "adverse_suspect") return "event_response";
+  return "pre_admin";
 }
 
 function bytesToBase64(input: Uint8Array) {
