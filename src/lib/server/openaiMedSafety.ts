@@ -129,10 +129,12 @@ function resolveStoreResponses() {
 }
 
 function resolveMaxOutputTokens() {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_MAX_OUTPUT_TOKENS ?? process.env.OPENAI_MAX_OUTPUT_TOKENS ?? 3200);
-  if (!Number.isFinite(raw)) return 3200;
+  // Med safety는 글로벌 토큰 제한(OPENAI_MAX_OUTPUT_TOKENS)과 분리해서 관리한다.
+  // 글로벌 값이 3200으로 고정된 환경에서도 이 엔드포인트는 더 길게 출력 가능해야 한다.
+  const raw = Number(process.env.OPENAI_MED_SAFETY_MAX_OUTPUT_TOKENS ?? 7000);
+  if (!Number.isFinite(raw)) return 7000;
   const rounded = Math.round(raw);
-  return Math.max(1200, Math.min(12000, rounded));
+  return Math.max(1800, Math.min(20000, rounded));
 }
 
 function truncateError(raw: string, size = 220) {

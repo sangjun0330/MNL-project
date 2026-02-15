@@ -322,6 +322,7 @@ type DynamicResultCard = {
 };
 
 const CARD_MAX_ITEMS = 4;
+const CARD_MAX_SECTIONS = 16;
 const ITEM_PRIORITY_PATTERN =
   /(즉시|중단|보류|주의|금기|핵심|반드시|필수|우선|보고|호출|알람|모니터|재평가|용량|속도|농도|단위|라인|호환|상호작용|프로토콜|기관 확인 필요)/i;
 const TOPIC_LABEL_PATTERN =
@@ -463,12 +464,6 @@ function buildNarrativeCards(answer: string): DynamicResultCard[] {
       currentItems = [];
       return;
     }
-    if (cards.length > 0 && normalizedItems.length <= 1) {
-      const prev = cards[cards.length - 1];
-      prev.items = pickCardItems([...prev.items, ...normalizedItems]).slice(0, CARD_MAX_ITEMS);
-      currentItems = [];
-      return;
-    }
     cards.push({
       key: `narrative-${cards.length}`,
       title,
@@ -488,13 +483,13 @@ function buildNarrativeCards(answer: string): DynamicResultCard[] {
   }
   flush();
 
-  if (cards.length) return cards.slice(0, 8);
+  if (cards.length) return cards.slice(0, CARD_MAX_SECTIONS);
 
   const paragraphs = String(answer ?? "")
     .split(/\n{2,}/)
     .map((block) => block.trim())
     .filter(Boolean)
-    .slice(0, 8);
+    .slice(0, CARD_MAX_SECTIONS);
   return paragraphs.map((block, idx) => ({
     key: `paragraph-${idx}`,
     title: idx === 0 ? "핵심 요약" : `추가 정보 ${idx}`,
