@@ -141,13 +141,16 @@ export async function ensureTossScript() {
         else reject(new Error(reason || "toss_script_load_failed"));
       };
 
-      const existing = document.querySelector<HTMLScriptElement>(TOSS_SCRIPT_SELECTOR);
+      let existing = document.querySelector<HTMLScriptElement>(TOSS_SCRIPT_SELECTOR);
+      // 이전 배포에서 crossorigin=anonymous로 생성된 노드는 CORS 실패를 유발할 수 있어 제거한다.
+      if (existing && existing.crossOrigin) {
+        existing.remove();
+        existing = null;
+      }
       const script = existing ?? document.createElement("script");
       if (!existing) {
         script.src = TOSS_SCRIPT_SRC;
         script.async = true;
-        script.crossOrigin = "anonymous";
-        script.referrerPolicy = "strict-origin-when-cross-origin";
         script.dataset.toss = "v2-standard";
       }
 
