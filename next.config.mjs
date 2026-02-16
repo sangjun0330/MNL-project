@@ -24,16 +24,23 @@ function toOrigin(input) {
 }
 
 const supabaseOrigin = toOrigin(process.env.NEXT_PUBLIC_SUPABASE_URL);
-const connectSources = ["'self'", "https://cloudflareinsights.com"];
+const tossScriptOrigin = "https://js.tosspayments.com";
+const tossApiOrigin = "https://api.tosspayments.com";
+const tossWildcard = "https://*.tosspayments.com";
+const tossLegacyPayOrigin = "https://pay.toss.im";
+
+const connectSources = ["'self'", "https://cloudflareinsights.com", tossApiOrigin, tossWildcard, tossLegacyPayOrigin];
 if (supabaseOrigin) {
   connectSources.push(supabaseOrigin);
   connectSources.push(supabaseOrigin.replace(/^http/i, "ws"));
 }
 
 const isDev = process.env.NODE_ENV === "development";
-const scriptSourceParts = ["'self'", "'unsafe-inline'", "https://static.cloudflareinsights.com"];
+const scriptSourceParts = ["'self'", "'unsafe-inline'", "https://static.cloudflareinsights.com", tossScriptOrigin, tossWildcard];
 if (isDev) scriptSourceParts.push("'unsafe-eval'");
 const scriptSources = Array.from(new Set(scriptSourceParts)).join(" ");
+const frameSources = Array.from(new Set(["'self'", tossWildcard, tossLegacyPayOrigin])).join(" ");
+const imgSources = Array.from(new Set(["'self'", "data:", "blob:", "https://cloudflareinsights.com", tossWildcard])).join(" ");
 
 const contentSecurityPolicy = [
   "default-src 'self'",
@@ -43,9 +50,10 @@ const contentSecurityPolicy = [
   "object-src 'none'",
   `script-src ${scriptSources}`,
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https://cloudflareinsights.com",
+  `img-src ${imgSources}`,
   "font-src 'self' data:",
   `connect-src ${Array.from(new Set(connectSources)).join(" ")}`,
+  `frame-src ${frameSources}`,
   "media-src 'self' blob:",
   "worker-src 'self' blob:",
 ].join("; ");

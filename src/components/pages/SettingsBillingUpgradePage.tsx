@@ -7,6 +7,21 @@ import { fetchSubscriptionSnapshot, formatDateLabel, requestPlanCheckout, type S
 import { signInWithProvider, useAuthState } from "@/lib/auth";
 import { useI18n } from "@/lib/useI18n";
 
+function mapCheckoutError(raw: unknown) {
+  const text = String(raw ?? "").toLowerCase();
+  if (!text) return "결제창을 열지 못했습니다.";
+  if (text.includes("user_cancel")) return "사용자가 결제를 취소했습니다.";
+  if (text.includes("toss_script_load_failed") || text.includes("toss_script_timeout") || text.includes("missing_toss_sdk"))
+    return "결제 모듈 로드에 실패했습니다. 네트워크 확인 후 다시 시도해 주세요.";
+  if (text.includes("missing_toss_client_key")) return "결제 환경변수(NEXT_PUBLIC_TOSS_CLIENT_KEY)가 설정되지 않았습니다.";
+  if (text.includes("missing_toss_secret_key")) return "결제 환경변수(TOSS_SECRET_KEY)가 설정되지 않았습니다.";
+  if (text.includes("toss_key_mode_mismatch")) return "토스 클라이언트키/시크릿키 모드(test/live)가 서로 다릅니다.";
+  if (text.includes("invalid_origin")) return "결제 리다이렉트 URL(origin) 설정이 올바르지 않습니다.";
+  if (text.includes("checkout_http_401") || text.includes("login_required")) return "로그인 세션이 만료되었습니다. 다시 로그인 후 시도해 주세요.";
+  if (text.includes("checkout_http_5") || text.includes("network")) return "결제 서버 연결이 불안정합니다. 잠시 후 다시 시도해 주세요.";
+  return "결제 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.";
+}
+
 export function SettingsBillingUpgradePage() {
   const { t } = useI18n();
   const { status, user } = useAuthState();
@@ -51,7 +66,7 @@ export function SettingsBillingUpgradePage() {
       await requestPlanCheckout("pro");
     } catch (e: any) {
       const msg = String(e?.message ?? t("결제창을 열지 못했습니다."));
-      if (!msg.includes("USER_CANCEL")) setError(msg);
+      if (!msg.includes("USER_CANCEL")) setError(mapCheckoutError(msg));
     } finally {
       setPaying(false);
     }

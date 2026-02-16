@@ -80,6 +80,10 @@ declare global {
 }
 
 let tossScriptPromise: Promise<void> | null = null;
+const TOSS_SCRIPT_SELECTOR = "script[data-toss='v2-standard']";
+const TOSS_SCRIPT_SRC = "https://js.tosspayments.com/v2/standard";
+const TOSS_SCRIPT_TIMEOUT_MS = 12_000;
+const TOSS_SCRIPT_RETRY_COUNT = 1;
 
 export function formatDateLabel(value: string | null) {
   if (!value) return "-";
@@ -130,22 +134,89 @@ export async function ensureTossScript() {
   if (window.TossPayments) return Promise.resolve();
   if (tossScriptPromise) return tossScriptPromise;
 
-  tossScriptPromise = new Promise<void>((resolve, reject) => {
-    const existing = document.querySelector<HTMLScriptElement>("script[data-toss='v2-standard']");
-    if (existing) {
-      existing.addEventListener("load", () => resolve(), { once: true });
-      existing.addEventListener("error", () => reject(new Error("toss_script_load_failed")), { once: true });
-      return;
-    }
+  const loadOnce = () =>
+    new Promise<void>((resolve, reject) => {
+      const settle = (ok: boolean, reason?: string) => {
+        if (ok) resolve();
+        else reject(new Error(reason || "toss_script_load_failed"));
+      };
 
-    const script = document.createElement("script");
-    script.src = "https://js.tosspayments.com/v2/standard";
-    script.async = true;
-    script.dataset.toss = "v2-standard";
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("toss_script_load_failed"));
-    document.head.appendChild(script);
-  });
+      const existing = document.querySelector<HTMLScriptElement>(TOSS_SCRIPT_SELECTOR);
+      const script = existing ?? document.createElement("script");
+      if (!existing) {
+        script.src = TOSS_SCRIPT_SRC;
+        script.async = true;
+        script.crossOrigin = "anonymous";
+        script.referrerPolicy = "strict-origin-when-cross-origin";
+        script.dataset.toss = "v2-standard";
+      }
+
+      let done = false;
+      const timeout = window.setTimeout(() => {
+        if (done) return;
+        done = true;
+        cleanup();
+        settle(false, "toss_script_timeout");
+      }, TOSS_SCRIPT_TIMEOUT_MS);
+
+      const cleanup = () => {
+        window.clearTimeout(timeout);
+        script.removeEventListener("load", onLoad);
+        script.removeEventListener("error", onError);
+      };
+
+      const onLoad = () => {
+        if (done) return;
+        done = true;
+        cleanup();
+        if (window.TossPayments) settle(true);
+        else settle(false, "missing_toss_sdk");
+      };
+
+      const onError = () => {
+        if (done) return;
+        done = true;
+        cleanup();
+        settle(false, "toss_script_load_failed");
+      };
+
+      script.addEventListener("load", onLoad, { once: true });
+      script.addEventListener("error", onError, { once: true });
+
+      if (!existing) {
+        document.head.appendChild(script);
+      } else if (window.TossPayments) {
+        onLoad();
+      }
+    });
+
+  tossScriptPromise = (async () => {
+    let lastError: unknown = new Error("toss_script_load_failed");
+    for (let attempt = 0; attempt <= TOSS_SCRIPT_RETRY_COUNT; attempt += 1) {
+      try {
+        await loadOnce();
+        if (!window.TossPayments) throw new Error("missing_toss_sdk");
+        return;
+      } catch (error) {
+        lastError = error;
+        const current = document.querySelector<HTMLScriptElement>(TOSS_SCRIPT_SELECTOR);
+        // 실패한 script 노드는 제거해서 다음 시도에서 깨끗하게 다시 로드한다.
+        if (current) current.remove();
+        if (attempt < TOSS_SCRIPT_RETRY_COUNT) {
+          await new Promise((r) => window.setTimeout(r, 350 * (attempt + 1)));
+          continue;
+        }
+      }
+    }
+    throw lastError;
+  })()
+    .catch((error) => {
+      tossScriptPromise = null;
+      throw error;
+    })
+    .finally(() => {
+      if (!window.TossPayments) tossScriptPromise = null;
+    });
 
   return tossScriptPromise;
 }
