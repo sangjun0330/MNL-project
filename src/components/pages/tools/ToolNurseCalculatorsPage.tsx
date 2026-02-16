@@ -228,6 +228,65 @@ const HISTORY_FIELD_LABEL: Record<string, string> = {
   differencePercent: "처방 대비 차이(%)",
 };
 
+const HISTORY_HIGHLIGHT_KEYS: Record<CalcHistory["calcType"], { inputs: string[]; outputs: string[] }> = {
+  pump_forward: {
+    inputs: [
+      "targetDose",
+      "targetUnit",
+      "targetTimeUnit",
+      "targetPerKg",
+      "weightKg",
+      "concentrationAmount",
+      "concentrationUnit",
+      "concentrationVolumeMl",
+    ],
+    outputs: ["rateMlHr", "verifyDose"],
+  },
+  pump_reverse: {
+    inputs: [
+      "rateMlHr",
+      "outputUnit",
+      "outputTimeUnit",
+      "outputPerKg",
+      "weightKg",
+      "concentrationAmount",
+      "concentrationUnit",
+      "concentrationVolumeMl",
+    ],
+    outputs: ["dose", "totalDosePerHour"],
+  },
+  ivpb: {
+    inputs: ["totalVolumeMl", "duration", "durationUnit"],
+    outputs: ["rateMlHr", "vtbiMl", "durationMinutes"],
+  },
+  drip_forward: {
+    inputs: ["mlHr", "dripFactor"],
+    outputs: ["gttPerMin", "roundedGttPerMin"],
+  },
+  drip_reverse: {
+    inputs: ["gttPerMin", "dripFactor"],
+    outputs: ["mlHr"],
+  },
+  dilution: {
+    inputs: ["totalAmount", "amountUnit", "totalVolumeMl", "outputUnit"],
+    outputs: ["concentrationPerMl"],
+  },
+  dose_check: {
+    inputs: [
+      "pumpRateMlHr",
+      "useWeight",
+      "weightKg",
+      "concentrationAmount",
+      "concentrationUnit",
+      "concentrationVolumeMl",
+      "outputUnit",
+      "outputTimeUnit",
+      "prescribedTargetDose",
+    ],
+    outputs: ["actualDose", "differencePercent", "totalDosePerHour"],
+  },
+};
+
 const MODULE_ORDER: ToolModule[] = ["pump", "ivpb", "drip", "dilution", "check"];
 
 const MODULE_GUIDE: Record<
@@ -479,6 +538,25 @@ function formatHistoryValue(value: string | number | boolean | null | undefined)
 
 function getHistoryLabel(key: string) {
   return HISTORY_FIELD_LABEL[key] ?? key;
+}
+
+function pickHistoryEntries(
+  entries: Array<{ key: string; label: string; value: string }>,
+  preferredKeys: string[],
+  fallbackCount = 6
+) {
+  const byKey = new Map(entries.map((entry) => [entry.key, entry]));
+  const picked: Array<{ key: string; label: string; value: string }> = [];
+  preferredKeys.forEach((key) => {
+    const hit = byKey.get(key);
+    if (hit) picked.push(hit);
+  });
+  if (picked.length >= fallbackCount) return picked.slice(0, fallbackCount);
+  entries.forEach((entry) => {
+    if (picked.some((item) => item.key === entry.key)) return;
+    picked.push(entry);
+  });
+  return picked.slice(0, fallbackCount);
 }
 
 function buildHistoryHeadline(item: CalcHistory) {
@@ -832,8 +910,8 @@ export function ToolNurseCalculatorsPage() {
         }
       }
 
-      const weightSummary = pumpForm.targetPerKg ? `체중 ${formatNumber(weightKg, 1)}kg, ` : "";
-      const summaryLine = `${weightSummary}농도 ${pumpForm.concentrationAmount}${pumpForm.concentrationUnit}/${pumpForm.concentrationVolumeMl}mL, 목표 ${pumpForm.targetDose}${pumpDoseLabel} → ${formatNumber(result.data.rateMlHr)}mL/hr`;
+      const weightSummary = pumpForm.targetPerKg ? ` | 체중 ${formatNumber(weightKg, 1)}kg` : "";
+      const summaryLine = `[펌프 계산] 목표 ${pumpForm.targetDose}${pumpDoseLabel}${weightSummary} | 농도 ${pumpForm.concentrationAmount}${pumpForm.concentrationUnit}/${pumpForm.concentrationVolumeMl}mL | 펌프 ${formatNumber(result.data.rateMlHr)}mL/hr | 검산 ${formatNumber(result.data.verifyDose)}${pumpDoseLabel}`;
       setPumpResult({
         mode: "forward",
         rateMlHr: result.data.rateMlHr,
@@ -884,8 +962,8 @@ export function ToolNurseCalculatorsPage() {
       return;
     }
 
-    const weightSummary = pumpForm.targetPerKg ? `체중 ${formatNumber(weightKg, 1)}kg, ` : "";
-    const summaryLine = `${weightSummary}농도 ${pumpForm.concentrationAmount}${pumpForm.concentrationUnit}/${pumpForm.concentrationVolumeMl}mL, 현재 ${pumpForm.rateMlHr}mL/hr → ${formatNumber(result.data.dose)}${pumpDoseLabel}`;
+    const weightSummary = pumpForm.targetPerKg ? ` | 체중 ${formatNumber(weightKg, 1)}kg` : "";
+    const summaryLine = `[펌프 검산] 현재 ${pumpForm.rateMlHr}mL/hr${weightSummary} | 농도 ${pumpForm.concentrationAmount}${pumpForm.concentrationUnit}/${pumpForm.concentrationVolumeMl}mL | 실제 ${formatNumber(result.data.dose)}${pumpDoseLabel} | 총 ${formatNumber(result.data.totalDosePerHour)}${pumpForm.targetUnit}/hr`;
     setPumpResult({
       mode: "reverse",
       dose: result.data.dose,
@@ -932,7 +1010,7 @@ export function ToolNurseCalculatorsPage() {
       return;
     }
 
-    const summaryLine = `${ivpbForm.totalVolumeMl}mL를 ${ivpbForm.duration}${ivpbForm.durationUnit} 주입 → ${formatNumber(result.data.rateMlHr)}mL/hr, VTBI ${formatNumber(result.data.vtbiMl)}mL`;
+    const summaryLine = `[IVPB 속도] ${ivpbForm.totalVolumeMl}mL / ${ivpbForm.duration}${ivpbForm.durationUnit} | 속도 ${formatNumber(result.data.rateMlHr)}mL/hr | VTBI ${formatNumber(result.data.vtbiMl)}mL | 총 ${formatNumber(result.data.durationMinutes)}분`;
     setIvpbResult({
       rateMlHr: result.data.rateMlHr,
       vtbiMl: result.data.vtbiMl,
@@ -972,7 +1050,7 @@ export function ToolNurseCalculatorsPage() {
         setDripErrors(result.errors);
         return;
       }
-      const summaryLine = `${dripForm.mlHr}mL/hr + ${dripFactor}gtt/mL → ${formatNumber(result.data.gttPerMin)}gtt/min`;
+      const summaryLine = `[드립 환산] ${dripForm.mlHr}mL/hr + ${dripFactor}gtt/mL | 결과 ${formatNumber(result.data.gttPerMin)}gtt/min | 현장 ${result.data.roundedGttPerMin}gtt/min`;
       setDripResult({
         mode: "forward",
         gttPerMin: result.data.gttPerMin,
@@ -1004,7 +1082,7 @@ export function ToolNurseCalculatorsPage() {
       setDripErrors(result.errors);
       return;
     }
-    const summaryLine = `${dripForm.gttPerMin}gtt/min + ${dripFactor}gtt/mL → ${formatNumber(result.data.mlHr)}mL/hr`;
+    const summaryLine = `[드립 역산] ${dripForm.gttPerMin}gtt/min + ${dripFactor}gtt/mL | 결과 ${formatNumber(result.data.mlHr)}mL/hr`;
     setDripResult({
       mode: "reverse",
       mlHr: result.data.mlHr,
@@ -1038,7 +1116,7 @@ export function ToolNurseCalculatorsPage() {
       return;
     }
 
-    const summaryLine = `총 ${dilutionForm.totalAmount}${dilutionForm.amountUnit} / ${dilutionForm.totalVolumeMl}mL → ${formatNumber(result.data.concentrationPerMl)}${dilutionForm.outputUnit}/mL`;
+    const summaryLine = `[희석/농도] 총 ${dilutionForm.totalAmount}${dilutionForm.amountUnit}/${dilutionForm.totalVolumeMl}mL | 농도 ${formatNumber(result.data.concentrationPerMl)}${dilutionForm.outputUnit}/mL`;
     setDilutionResult({
       concentrationPerMl: result.data.concentrationPerMl,
       outputUnit: dilutionForm.outputUnit,
@@ -1083,8 +1161,10 @@ export function ToolNurseCalculatorsPage() {
       return;
     }
 
-    const weightSummary = checkForm.useWeight ? `체중 ${formatNumber(weightKg, 1)}kg, ` : "";
-    const summaryLine = `${weightSummary}속도 ${checkForm.pumpRateMlHr}mL/hr, 농도 ${checkForm.concentrationAmount}${checkForm.concentrationUnit}/${checkForm.concentrationVolumeMl}mL → 실제 ${formatNumber(result.data.actualDose)}${checkDoseLabel}`;
+    const weightSummary = checkForm.useWeight ? ` | 체중 ${formatNumber(weightKg, 1)}kg` : "";
+    const differenceSummary =
+      result.data.differencePercent == null ? "" : ` | 처방차 ${formatNumber(result.data.differencePercent, 1)}%`;
+    const summaryLine = `[검산(역산)] 속도 ${checkForm.pumpRateMlHr}mL/hr${weightSummary} | 농도 ${checkForm.concentrationAmount}${checkForm.concentrationUnit}/${checkForm.concentrationVolumeMl}mL | 실제 ${formatNumber(result.data.actualDose)}${checkDoseLabel}${differenceSummary}`;
     setCheckResult({
       actualDose: result.data.actualDose,
       totalDosePerHour: result.data.totalDosePerHour,
@@ -1259,19 +1339,24 @@ export function ToolNurseCalculatorsPage() {
   const isBasicMode = uiMode === "basic";
   const historyDetail = useMemo(() => {
     if (!selectedHistory) return null;
+    const inputs = Object.entries(selectedHistory.inputs).map(([key, value]) => ({
+      key,
+      label: getHistoryLabel(key),
+      value: formatHistoryValue(value),
+    }));
+    const outputs = Object.entries(selectedHistory.outputs).map(([key, value]) => ({
+      key,
+      label: getHistoryLabel(key),
+      value: formatHistoryValue(value),
+    }));
+    const highlightKeys = HISTORY_HIGHLIGHT_KEYS[selectedHistory.calcType];
     return {
       title: CALC_TYPE_LABEL[selectedHistory.calcType],
       headline: buildHistoryHeadline(selectedHistory),
-      inputs: Object.entries(selectedHistory.inputs).map(([key, value]) => ({
-        key,
-        label: getHistoryLabel(key),
-        value: formatHistoryValue(value),
-      })),
-      outputs: Object.entries(selectedHistory.outputs).map(([key, value]) => ({
-        key,
-        label: getHistoryLabel(key),
-        value: formatHistoryValue(value),
-      })),
+      inputs,
+      outputs,
+      highlightInputs: pickHistoryEntries(inputs, highlightKeys.inputs),
+      highlightOutputs: pickHistoryEntries(outputs, highlightKeys.outputs),
       warnings: selectedHistory.flags.warnings,
     };
   }, [selectedHistory]);
@@ -2422,58 +2507,87 @@ export function ToolNurseCalculatorsPage() {
         {historyDetail ? (
           <div className="space-y-3 pb-2">
             <div className="rounded-2xl border border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] px-3 py-3">
-              <div className="text-[12px] font-semibold text-ios-sub">어떤 계산을 했나요?</div>
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-[12px] font-semibold text-ios-sub">요약</div>
+                <div
+                  className={`rounded-lg px-2 py-1 text-[10px] font-semibold ${
+                    historyDetail.warnings.length
+                      ? "border border-amber-300 bg-amber-50 text-amber-700"
+                      : "border border-emerald-200 bg-emerald-50 text-emerald-700"
+                  }`}
+                >
+                  {historyDetail.warnings.length ? `주의 ${historyDetail.warnings.length}건` : "주의 없음"}
+                </div>
+              </div>
               <div className="mt-1 text-[13px] leading-5 text-ios-text">{historyDetail.headline}</div>
-            </div>
 
-            <div className="rounded-2xl border border-ios-sep bg-white px-3 py-3">
-              <div className="text-[12px] font-semibold text-ios-sub">입력값</div>
-              <div className="mt-2 space-y-1.5">
-                {historyDetail.inputs.length ? (
-                  historyDetail.inputs.slice(0, 10).map((entry) => (
-                    <div key={`in-${entry.key}`} className="flex items-start justify-between gap-3 text-[12px]">
-                      <div className="text-ios-sub">{entry.label}</div>
-                      <div className="font-semibold text-ios-text">{entry.value}</div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-[12px] text-ios-sub">기록된 입력값이 없습니다.</div>
-                )}
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <div className="rounded-xl border border-ios-sep bg-white px-2.5 py-2">
+                  <div className="text-[11px] font-semibold text-[color:var(--wnl-accent)]">핵심 입력</div>
+                  <div className="mt-1.5 space-y-1">
+                    {historyDetail.highlightInputs.map((entry) => (
+                      <div key={`focus-in-${entry.key}`} className="flex items-start justify-between gap-2 text-[11.5px]">
+                        <div className="text-ios-sub">{entry.label}</div>
+                        <div className="font-semibold text-ios-text">{entry.value}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-ios-sep bg-white px-2.5 py-2">
+                  <div className="text-[11px] font-semibold text-[color:var(--wnl-accent)]">핵심 결과</div>
+                  <div className="mt-1.5 space-y-1">
+                    {historyDetail.highlightOutputs.map((entry) => (
+                      <div key={`focus-out-${entry.key}`} className="flex items-start justify-between gap-2 text-[11.5px]">
+                        <div className="text-ios-sub">{entry.label}</div>
+                        <div className="font-semibold text-ios-text">{entry.value}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
-            </div>
 
-            <div className="rounded-2xl border border-ios-sep bg-white px-3 py-3">
-              <div className="text-[12px] font-semibold text-ios-sub">결과값</div>
-              <div className="mt-2 space-y-1.5">
-                {historyDetail.outputs.length ? (
-                  historyDetail.outputs.slice(0, 10).map((entry) => (
-                    <div key={`out-${entry.key}`} className="flex items-start justify-between gap-3 text-[12px]">
-                      <div className="text-ios-sub">{entry.label}</div>
-                      <div className="font-semibold text-ios-text">{entry.value}</div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-[12px] text-ios-sub">기록된 결과값이 없습니다.</div>
-                )}
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-ios-sep bg-white px-3 py-3">
-              <div className="text-[12px] font-semibold text-ios-sub">경고/안내</div>
               {historyDetail.warnings.length ? (
                 <div className="mt-2 space-y-1.5">
-                  {historyDetail.warnings.slice(0, 6).map((warning) => (
-                    <div key={warning} className="rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-[11.5px] text-amber-700">
+                  {historyDetail.warnings.slice(0, 2).map((warning) => (
+                    <div key={warning} className="rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-700">
                       {warning}
                     </div>
                   ))}
                 </div>
-              ) : (
-                <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[11.5px] text-emerald-700">
-                  당시 저장된 주요 경고가 없었습니다.
-                </div>
-              )}
+              ) : null}
             </div>
+
+            <details className="rounded-2xl border border-ios-sep bg-white px-3 py-3">
+              <summary className="cursor-pointer text-[12px] font-semibold text-[color:var(--wnl-accent)]">
+                전체 기록 펼쳐보기
+              </summary>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <div className="rounded-xl border border-ios-sep bg-ios-bg px-2.5 py-2">
+                  <div className="text-[11px] font-semibold text-ios-sub">입력 전체</div>
+                  <div className="mt-1.5 space-y-1">
+                    {historyDetail.inputs.map((entry) => (
+                      <div key={`in-${entry.key}`} className="flex items-start justify-between gap-2 text-[11px]">
+                        <div className="text-ios-sub">{entry.label}</div>
+                        <div className="font-semibold text-ios-text">{entry.value}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-ios-sep bg-ios-bg px-2.5 py-2">
+                  <div className="text-[11px] font-semibold text-ios-sub">결과 전체</div>
+                  <div className="mt-1.5 space-y-1">
+                    {historyDetail.outputs.map((entry) => (
+                      <div key={`out-${entry.key}`} className="flex items-start justify-between gap-2 text-[11px]">
+                        <div className="text-ios-sub">{entry.label}</div>
+                        <div className="font-semibold text-ios-text">{entry.value}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </details>
           </div>
         ) : null}
       </BottomSheet>
