@@ -32,9 +32,13 @@ import { useI18n } from "@/lib/useI18n";
 
 const FLAT_CARD_CLASS = "border-[color:var(--wnl-accent-border)] bg-white shadow-none";
 const PRIMARY_FLAT_BTN =
-  "h-11 rounded-xl border border-[color:var(--wnl-accent)] bg-[color:var(--wnl-accent-soft)] px-4 text-[14px] font-semibold text-[color:var(--wnl-accent)] shadow-none hover:bg-[color:var(--wnl-accent-soft)]";
+  "h-11 rounded-xl !border !border-[color:var(--wnl-accent)] !bg-[color:var(--wnl-accent-soft)] px-4 !text-[14px] !font-semibold !text-[color:var(--wnl-accent)] shadow-none hover:!bg-[color:var(--wnl-accent-soft)]";
 const SECONDARY_FLAT_BTN =
-  "h-11 rounded-xl border border-ios-sep bg-white px-4 text-[14px] font-semibold text-ios-text shadow-none hover:bg-ios-bg";
+  "h-11 rounded-xl !border !border-[color:var(--wnl-accent-border)] !bg-white px-4 !text-[14px] !font-semibold !text-[color:var(--wnl-accent)] shadow-none hover:!bg-[color:var(--wnl-accent-soft)]";
+const TOP_ACTION_BTN =
+  "inline-flex h-11 items-center justify-center whitespace-nowrap rounded-xl border border-[color:var(--wnl-accent-border)] bg-white px-4 text-[14px] font-semibold text-[color:var(--wnl-accent)] hover:bg-[color:var(--wnl-accent-soft)]";
+const TOP_ACTION_BTN_SM =
+  "inline-flex h-8 items-center justify-center whitespace-nowrap rounded-lg border border-[color:var(--wnl-accent-border)] bg-white px-3 text-[12px] font-semibold text-[color:var(--wnl-accent)] hover:bg-[color:var(--wnl-accent-soft)]";
 
 const RECENT_KEY = "nurse_calc_recent_v1";
 const CUSTOM_PRESETS_KEY = "nurse_calc_custom_presets_v1";
@@ -541,20 +545,6 @@ function buildHistoryHeadline(item: CalcHistory) {
 
 function SmallLabel({ children }: { children: React.ReactNode }) {
   return <div className="mb-1 text-[12px] font-semibold text-ios-sub">{children}</div>;
-}
-
-function StepHeader({ step, title, desc }: { step: "1" | "2" | "3"; title: string; desc: string }) {
-  return (
-    <div className="rounded-2xl border border-ios-sep bg-ios-bg px-3 py-2">
-      <div className="flex items-center gap-2">
-        <div className="flex h-5 w-5 items-center justify-center rounded-full bg-[color:var(--wnl-accent-soft)] text-[11px] font-bold text-[color:var(--wnl-accent)]">
-          {step}
-        </div>
-        <div className="text-[12px] font-bold text-ios-text">{title}</div>
-      </div>
-      <div className="mt-1 text-[11px] text-ios-sub">{desc}</div>
-    </div>
-  );
 }
 
 function SafetyChecklist({
@@ -1267,91 +1257,6 @@ export function ToolNurseCalculatorsPage() {
 
   const activeGuide = MODULE_GUIDE[activeModule];
   const isBasicMode = uiMode === "basic";
-  const activeResultSummary = useMemo(() => {
-    if (activeModule === "pump") {
-      if (!pumpResult) return null;
-      if (pumpResult.mode === "forward") {
-        return {
-          title: "최신 결과 · 펌프 입력값",
-          main: `${formatNumber(pumpResult.rateMlHr)} mL/hr`,
-          sub: `검산 ${formatNumber(pumpResult.verifyDose)} ${pumpResult.doseLabel}`,
-          stale: pumpResultStale,
-          warnings: pumpResult.warnings.length,
-        };
-      }
-      return {
-        title: "최신 결과 · 역산 용량",
-        main: `${formatNumber(pumpResult.dose)} ${pumpResult.doseLabel}`,
-        sub: `시간당 총 투여량 ${formatNumber(pumpResult.totalDosePerHour)} ${pumpForm.targetUnit}/hr`,
-        stale: pumpResultStale,
-        warnings: pumpResult.warnings.length,
-      };
-    }
-    if (activeModule === "ivpb") {
-      if (!ivpbResult) return null;
-      return {
-        title: "최신 결과 · IVPB 속도",
-        main: `${formatNumber(ivpbResult.rateMlHr)} mL/hr`,
-        sub: `VTBI ${formatNumber(ivpbResult.vtbiMl)} mL · 총 ${formatNumber(ivpbResult.durationMinutes)}분`,
-        stale: ivpbResultStale,
-        warnings: ivpbResult.warnings.length,
-      };
-    }
-    if (activeModule === "drip") {
-      if (!dripResult) return null;
-      if (dripResult.mode === "forward") {
-        return {
-          title: "최신 결과 · 중력 드립",
-          main: `${formatNumber(dripResult.gttPerMin)} gtt/min`,
-          sub: `현장 카운트 권장 ${dripResult.roundedGttPerMin} gtt/min`,
-          stale: dripResultStale,
-          warnings: dripResult.warnings.length,
-        };
-      }
-      return {
-        title: "최신 결과 · 중력 드립",
-        main: `${formatNumber(dripResult.mlHr)} mL/hr`,
-        sub: "입력한 gtt/min 기준 역산 결과",
-        stale: dripResultStale,
-        warnings: dripResult.warnings.length,
-      };
-    }
-    if (activeModule === "dilution") {
-      if (!dilutionResult) return null;
-      return {
-        title: "최신 결과 · 희석 농도",
-        main: `${formatNumber(dilutionResult.concentrationPerMl)} ${dilutionResult.outputUnit}/mL`,
-        sub: "펌프 커스텀 농도에 그대로 입력 가능",
-        stale: dilutionResultStale,
-        warnings: dilutionResult.warnings.length,
-      };
-    }
-    if (!checkResult) return null;
-    return {
-      title: "최신 결과 · 검산(역산)",
-      main: `${formatNumber(checkResult.actualDose)} ${checkResult.doseLabel}`,
-      sub:
-        checkResult.differencePercent == null
-          ? `시간당 총 투여량 ${formatNumber(checkResult.totalDosePerHour)} ${checkForm.outputUnit}/hr`
-          : `처방 대비 차이 ${formatNumber(checkResult.differencePercent, 1)}%`,
-      stale: checkResultStale,
-      warnings: checkResult.warnings.length,
-    };
-  }, [
-    activeModule,
-    checkForm.outputUnit,
-    checkResult,
-    checkResultStale,
-    dilutionResult,
-    dilutionResultStale,
-    dripResult,
-    dripResultStale,
-    ivpbResult,
-    ivpbResultStale,
-    pumpForm.targetUnit,
-    pumpResult,
-    pumpResultStale,
-  ]);
   const historyDetail = useMemo(() => {
     if (!selectedHistory) return null;
     return {
@@ -1379,10 +1284,10 @@ export function ToolNurseCalculatorsPage() {
           <div className="mt-1 text-[13px] text-ios-sub">입력 3단계로 바로 계산하고, 결과는 큰 숫자로 확인합니다.</div>
         </div>
         <div className="flex items-center gap-2">
-          <Button className={SECONDARY_FLAT_BTN} onClick={() => setGuideOpen(true)}>
+          <button type="button" className={TOP_ACTION_BTN} onClick={() => setGuideOpen(true)}>
             사용 설명서
-          </Button>
-          <Link href="/tools" className="wnl-chip-muted px-3 py-1 text-[11px]">
+          </button>
+          <Link href="/tools" className={TOP_ACTION_BTN}>
             툴 목록
           </Link>
         </div>
@@ -1424,11 +1329,7 @@ export function ToolNurseCalculatorsPage() {
               <div className="text-[14px] font-bold text-ios-text">{activeGuide.title}</div>
               <div className="text-[12px] text-ios-sub">{activeGuide.subtitle}</div>
             </div>
-            <button
-              type="button"
-              className="rounded-lg border border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] px-2 py-1 text-[11px] font-semibold text-[color:var(--wnl-accent)]"
-              onClick={() => setGuideOpen(true)}
-            >
+            <button type="button" className={TOP_ACTION_BTN_SM} onClick={() => setGuideOpen(true)}>
               설명 보기
             </button>
           </div>
@@ -1441,55 +1342,6 @@ export function ToolNurseCalculatorsPage() {
             ))}
           </div>
         </div>
-      </Card>
-
-      <Card className={`p-4 ${FLAT_CARD_CLASS}`}>
-        <div className="flex items-center justify-between gap-2">
-          <div className="text-[12px] font-semibold text-ios-sub">지금 계산 결과</div>
-          {activeResultSummary ? (
-            <div
-              className={`rounded-lg px-2 py-1 text-[10px] font-semibold ${
-                activeResultSummary.stale
-                  ? "border border-amber-300 bg-amber-50 text-amber-700"
-                  : activeResultSummary.warnings
-                    ? "border border-amber-300 bg-amber-50 text-amber-700"
-                    : "border border-emerald-200 bg-emerald-50 text-emerald-700"
-              }`}
-            >
-              {activeResultSummary.stale
-                ? "입력 변경됨"
-                : activeResultSummary.warnings
-                  ? `경고 ${activeResultSummary.warnings}건`
-                  : "정상 범위"}
-            </div>
-          ) : (
-            <div className="text-[11px] text-ios-sub">대기 중</div>
-          )}
-        </div>
-        {activeResultSummary ? (
-          <div
-            className={`mt-2 rounded-2xl border px-4 py-3 ${
-              activeResultSummary.stale
-                ? "border-amber-300 bg-amber-50"
-                : "border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)]"
-            }`}
-          >
-            <div className="text-[12px] font-semibold text-ios-sub">{activeResultSummary.title}</div>
-            <div className="mt-1 text-[34px] font-extrabold tracking-[-0.03em] text-[color:var(--wnl-accent)]">
-              {activeResultSummary.main}
-            </div>
-            <div className="text-[12px] text-ios-sub">{activeResultSummary.sub}</div>
-            {activeResultSummary.stale ? (
-              <div className="mt-2 rounded-lg border border-amber-300 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-amber-700">
-                입력이 변경되어 결과가 오래되었습니다. 다시 계산해 주세요.
-              </div>
-            ) : null}
-          </div>
-        ) : (
-          <div className="mt-2 rounded-2xl border border-dashed border-ios-sep px-3 py-4 text-center text-[12px] text-ios-sub">
-            아직 계산 결과가 없습니다. 각 계산기에서 값을 입력하고 계산 버튼을 눌러주세요.
-          </div>
-        )}
       </Card>
 
       {activeModule === "pump" ? (
@@ -1510,11 +1362,6 @@ export function ToolNurseCalculatorsPage() {
             />
           </div>
 
-          <StepHeader
-            step="1"
-            title="필수값 입력"
-            desc="체중(필요 시), 목표 용량, 농도를 입력합니다. 모드가 검산이면 현재 mL/hr도 입력하세요."
-          />
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <SmallLabel>체중</SmallLabel>
@@ -1667,7 +1514,9 @@ export function ToolNurseCalculatorsPage() {
             </div>
           ) : (
             <details className="rounded-2xl border border-ios-sep bg-ios-bg p-3">
-              <summary className="cursor-pointer text-[12.5px] font-semibold text-ios-sub">Advanced 옵션</summary>
+              <summary className="cursor-pointer text-[12.5px] font-semibold text-[color:var(--wnl-accent)]">
+                Advanced 옵션
+              </summary>
               <div className="mt-3 space-y-3">
                 <div className="grid gap-2 sm:grid-cols-2">
                   <div>
@@ -1770,7 +1619,6 @@ export function ToolNurseCalculatorsPage() {
             </details>
           )}
 
-          <StepHeader step="2" title="계산 실행" desc="계산 버튼을 누르면 최신 입력 기준으로 결과를 다시 계산합니다." />
           <div className="flex flex-wrap gap-2">
             <Button className={PRIMARY_FLAT_BTN} onClick={runPump} disabled={pumpLiveIssues.length > 0}>
               {pumpMode === "forward" ? "펌프 값 계산" : "현재 세팅 검산"}
@@ -1800,11 +1648,6 @@ export function ToolNurseCalculatorsPage() {
             </div>
           ) : null}
 
-          <StepHeader
-            step="3"
-            title="결과 확인"
-            desc="큰 숫자를 펌프에 입력하고, 검산값/경고/체크리스트를 반드시 확인하세요."
-          />
           {!pumpResult ? (
             <div className="rounded-2xl border border-dashed border-ios-sep px-3 py-5 text-center text-[12px] text-ios-sub">
               아직 계산 결과가 없습니다. 위 입력 후 계산을 실행하세요.
@@ -1845,7 +1688,6 @@ export function ToolNurseCalculatorsPage() {
             <div className="text-[18px] font-extrabold tracking-[-0.02em] text-ios-text">IVPB / Secondary 계산기</div>
             <div className="text-[12px] text-ios-sub">mL + 분/시간 → mL/hr + VTBI</div>
           </div>
-          <StepHeader step="1" title="필수값 입력" desc="총 부피(mL)와 주입 시간을 입력합니다." />
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <SmallLabel>총 부피 (mL)</SmallLabel>
@@ -1905,7 +1747,9 @@ export function ToolNurseCalculatorsPage() {
             </div>
           ) : (
             <details className="rounded-2xl border border-ios-sep bg-ios-bg p-3">
-              <summary className="cursor-pointer text-[12.5px] font-semibold text-ios-sub">Advanced 옵션</summary>
+              <summary className="cursor-pointer text-[12.5px] font-semibold text-[color:var(--wnl-accent)]">
+                Advanced 옵션
+              </summary>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 <Input
                   value={ivpbForm.rangeStartMin}
@@ -1945,7 +1789,6 @@ export function ToolNurseCalculatorsPage() {
             </details>
           )}
 
-          <StepHeader step="2" title="계산 실행" desc="속도 계산 버튼을 눌러 mL/hr와 VTBI를 계산합니다." />
           <div className="flex flex-wrap gap-2">
             <Button className={PRIMARY_FLAT_BTN} onClick={runIvpb} disabled={ivpbLiveIssues.length > 0}>
               속도 계산
@@ -1975,7 +1818,6 @@ export function ToolNurseCalculatorsPage() {
             </div>
           ) : null}
 
-          <StepHeader step="3" title="결과 확인" desc="mL/hr와 VTBI를 확인한 뒤 라인 연결 상태를 점검하세요." />
           {!ivpbResult ? (
             <div className="rounded-2xl border border-dashed border-ios-sep px-3 py-5 text-center text-[12px] text-ios-sub">
               아직 계산 결과가 없습니다. 위 입력 후 계산을 실행하세요.
@@ -2022,11 +1864,6 @@ export function ToolNurseCalculatorsPage() {
               className="max-w-[280px]"
             />
           </div>
-          <StepHeader
-            step="1"
-            title="필수값 입력"
-            desc="drip factor를 선택하고 변환 방향에 맞는 값을 하나 입력합니다."
-          />
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <SmallLabel>Drip factor</SmallLabel>
@@ -2070,7 +1907,6 @@ export function ToolNurseCalculatorsPage() {
               </div>
             )}
           </div>
-          <StepHeader step="2" title="계산 실행" desc="환산 계산 버튼을 눌러 즉시 변환합니다." />
           <div className="flex flex-wrap gap-2">
             <Button className={PRIMARY_FLAT_BTN} onClick={runDrip} disabled={dripLiveIssues.length > 0}>
               환산 계산
@@ -2100,7 +1936,6 @@ export function ToolNurseCalculatorsPage() {
             </div>
           ) : null}
 
-          <StepHeader step="3" title="결과 확인" desc="환산 결과를 확인하고 15초 카운트로 현장 재확인하세요." />
           {!dripResult ? (
             <div className="rounded-2xl border border-dashed border-ios-sep px-3 py-5 text-center text-[12px] text-ios-sub">
               아직 계산 결과가 없습니다. 위 입력 후 계산을 실행하세요.
@@ -2142,7 +1977,6 @@ export function ToolNurseCalculatorsPage() {
             <div className="text-[18px] font-extrabold tracking-[-0.02em] text-ios-text">희석 / 농도 계산기</div>
             <div className="text-[12px] text-ios-sub">mg/mL, mcg/mL, units/mL, IU/mL, mEq/mL</div>
           </div>
-          <StepHeader step="1" title="필수값 입력" desc="총 약량, 총 부피(mL), 출력 단위를 선택합니다." />
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <SmallLabel>총 약량</SmallLabel>
@@ -2206,7 +2040,6 @@ export function ToolNurseCalculatorsPage() {
               </select>
             </div>
           </div>
-          <StepHeader step="2" title="계산 실행" desc="농도 계산 버튼으로 즉시 결과를 확인합니다." />
           <div className="flex flex-wrap gap-2">
             <Button className={PRIMARY_FLAT_BTN} onClick={runDilution} disabled={dilutionLiveIssues.length > 0}>
               농도 계산
@@ -2236,11 +2069,6 @@ export function ToolNurseCalculatorsPage() {
             </div>
           ) : null}
 
-          <StepHeader
-            step="3"
-            title="결과 확인"
-            desc="농도 값을 펌프 커스텀 농도 입력값으로 그대로 반영하기 전에 단위를 확인하세요."
-          />
           {!dilutionResult ? (
             <div className="rounded-2xl border border-dashed border-ios-sep px-3 py-5 text-center text-[12px] text-ios-sub">
               아직 계산 결과가 없습니다. 위 입력 후 계산을 실행하세요.
@@ -2271,11 +2099,6 @@ export function ToolNurseCalculatorsPage() {
             <div className="text-[18px] font-extrabold tracking-[-0.02em] text-ios-text">검산(역산) 계산기</div>
             <div className="text-[12px] text-ios-sub">현재 mL/hr가 실제 처방 용량과 맞는지 즉시 확인</div>
           </div>
-          <StepHeader
-            step="1"
-            title="필수값 입력"
-            desc="현재 펌프 속도, 농도, 필요 시 체중과 출력 단위를 설정합니다."
-          />
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <SmallLabel>체중</SmallLabel>
@@ -2407,7 +2230,6 @@ export function ToolNurseCalculatorsPage() {
               </div>
             )}
           </div>
-          <StepHeader step="2" title="검산 실행" desc="검산 실행 버튼으로 현재 세팅을 역산합니다." />
           <div className="flex flex-wrap gap-2">
             <Button className={PRIMARY_FLAT_BTN} onClick={runCheck} disabled={checkLiveIssues.length > 0}>
               검산 실행
@@ -2437,11 +2259,6 @@ export function ToolNurseCalculatorsPage() {
             </div>
           ) : null}
 
-          <StepHeader
-            step="3"
-            title="결과 확인"
-            desc="실제 용량과 처방 대비 차이(%)를 확인하고 차이가 크면 체크리스트를 따라 재점검하세요."
-          />
           {!checkResult ? (
             <div className="rounded-2xl border border-dashed border-ios-sep px-3 py-5 text-center text-[12px] text-ios-sub">
               아직 검산 결과가 없습니다. 위 입력 후 검산을 실행하세요.
