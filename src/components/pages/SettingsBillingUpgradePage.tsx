@@ -120,7 +120,7 @@ export function SettingsBillingUpgradePage() {
               <div>
                 <div className="text-[13px] text-ios-sub">{t("업그레이드 플랜")}</div>
                 <div className="mt-1 text-[34px] font-extrabold tracking-[-0.03em] text-ios-text">{proPlan.title}</div>
-                <div className="mt-1 max-w-[480px] text-[14px] leading-relaxed text-ios-sub">{proPlan.description}</div>
+                <div className="mt-1 max-w-[480px] text-[14px] leading-relaxed text-ios-sub">{t(proPlan.description)}</div>
               </div>
               <div className="text-right">
                 <div className="text-[24px] font-extrabold tracking-[-0.02em] text-ios-text">
@@ -131,7 +131,7 @@ export function SettingsBillingUpgradePage() {
             </div>
             <ul className="mt-4 list-disc space-y-1 pl-5 text-[13px] text-ios-sub">
               {proPlan.features.map((feature) => (
-                <li key={feature}>{feature}</li>
+                <li key={feature}>{t(feature)}</li>
               ))}
             </ul>
             <button

@@ -702,6 +702,227 @@ const EN_EXTRA: Record<string, string> = {
   "AI 분석 시작하기": "Start AI analysis",
   "정확한 분석을 위해 최소 오늘 수면 시간은 꼭 입력해 주세요.":
     "For accurate analysis, please enter at least today's sleep time.",
+
+  // Tools: nurse calculators / med-safety
+  "현장에서 바로 쓰는 계산·안전 확인 도구입니다.": "Practical calculation and safety tools for bedside use.",
+  "간호사 투약·주입 계산기": "Nurse Medication & Infusion Calculators",
+  "펌프 변환, IVPB 속도, 드립 환산, 희석 농도, 역산 검산을 100% 로컬로 즉시 계산합니다.":
+    "Pump conversion, IVPB rate, drip conversion, dilution concentration, and reverse checks run instantly on-device.",
+  "AI 약물·기구 안전 가이드": "AI Medication & Device Safety Guide",
+  "사진·텍스트로 투여 전 확인사항, 수행 절차, 중단·보고 기준을 빠르게 정리해줍니다.":
+    "Quickly organizes pre-administration checks, action steps, and stop/report criteria from photo or text input.",
+  "유료 플랜에서 AI 약물·기구 안전 가이드를 사용할 수 있어요.":
+    "The AI medication/device safety guide is available on paid plans.",
+  "AI": "AI",
+  "LOCAL": "LOCAL",
+  "PRO": "PRO",
+  "AI 약물·기구 안전 가이드는 유료 플랜 전용 기능입니다.\n플랜 업그레이드 페이지로 이동할까요?":
+    "The AI medication/device safety guide is a paid-plan feature.\nMove to the plan upgrade page?",
+  "AI 맞춤회복 + AI 약물기구안전가이드 포함":
+    "Includes AI recovery + AI medication/device safety guide",
+  "AI 약물기구안전가이드": "AI medication/device safety guide",
+  "업그레이드 후 AI 맞춤회복과 AI 약물기구안전가이드를 모두 사용할 수 있어요.":
+    "After upgrading, you can use both AI recovery and the AI medication/device safety guide.",
+  "AI 약물·도구 검색기": "AI Medication & Device Finder",
+  "간호 현장에서 바로 쓰는 약물·의료기구·상황 대응 정보를 검색형으로 제공합니다.":
+    "Searches medication, device, and scenario response guidance for immediate nursing use.",
+  "툴 목록": "Tool list",
+  "근무 모드": "Care setting",
+  "질문 유형": "Query type",
+  "현재 상황": "Current scenario",
+  "병동": "Ward",
+  "일반 검색": "General search",
+  "투여 전 확인": "Pre-administration check",
+  "투여 중 모니터": "During-administration monitoring",
+  "이상/알람 대응": "Alert/adverse response",
+  "상황질문": "Scenario question",
+  "질문 중심으로 자유 답변": "Use free-text scenario questions",
+  "약물명 단답 입력 (예: norepinephrine)": "Medication name only (e.g., norepinephrine)",
+  "기구명 단답 입력 (예: IV infusion pump)": "Device name only (e.g., IV infusion pump)",
+  "예: heparin flush 라인 주의점 요약.": "e.g., summarize heparin flush line precautions.",
+  "(선택) 목적, 핵심 V/S, 사용 약물/기구": "(optional) purpose, key V/S, medications/devices in use",
+  "일반 검색 질문을 짧게 입력하세요.": "Enter a short general search question.",
+  "예: 투여 전 확인 순서 알려줘.": "e.g., show pre-administration check sequence.",
+  "(선택) 알레르기, V/S, 주요 검사": "(optional) allergies, V/S, key labs",
+  "투여 전 확인 질문을 짧게 입력하세요.": "Enter a short pre-administration check question.",
+  "예: 주입 중 발진 발생, 먼저 뭘 할까?": "e.g., rash during infusion, what to do first?",
+  "(선택) 속도, 증상 시작 시점, V/S": "(optional) infusion rate, symptom onset, V/S",
+  "투여 중 상황을 짧게 입력하세요.": "Enter a short during-administration scenario.",
+  "예: pump occlusion 알람 반복, 대처 순서?": "e.g., repeated pump occlusion alarm, response order?",
+  "(선택) 알람 종류, 증상, 현재 속도": "(optional) alarm type, symptoms, current rate",
+  "알람/이상 상황을 짧게 입력하세요.": "Enter a short alert/adverse scenario.",
+  "예: norepinephrine": "e.g., norepinephrine",
+  "약물명만 단답으로 입력하세요. 예: norepinephrine, furosemide, vancomycin":
+    "Enter medication name only. e.g., norepinephrine, furosemide, vancomycin",
+  "예: IV infusion pump": "e.g., IV infusion pump",
+  "의료기구명만 단답으로 입력하세요. 예: syringe pump, Foley catheter, central line":
+    "Enter device name only. e.g., syringe pump, Foley catheter, central line",
+  "결과 대기": "Waiting for results",
+  "입력 후 `AI 분석 실행`을 누르면, 먼저 읽어야 할 핵심 행동부터 표시됩니다.":
+    "After input, tap `Run AI Analysis` to see priority actions first.",
+  "핵심 안전 확인 필요": "Core safety check required",
+  "표시할 분석 정보가 없습니다.": "No analysis details to display.",
+  "모드": "Mode",
+  "유형": "Type",
+  "상황": "Scenario",
+  "분석": "Analyzed",
+  "핵심 요약": "Core summary",
+  "핵심 정보 {count}": "Key info {count}",
+  "추가 정보 {count}": "Additional info {count}",
+  "가장 먼저: {item}": "First: {item}",
+  "주요 행동": "Priority actions",
+  "핵심 확인": "Core checks",
+  "실행 포인트": "Action points",
+  "위험/에스컬레이션": "Risk/escalation",
+  "실수 방지": "Error prevention",
+  "모니터/재평가": "Monitor/re-evaluate",
+  "약물": "Medication",
+  "의료기구": "Medical device",
+  "사진 업로드": "Upload photo",
+  "실시간 카메라": "Live camera",
+  "카메라 연결 중...": "Connecting camera...",
+  "이미지 제거": "Remove image",
+  "AI 분석 실행": "Run AI analysis",
+  "AI 분석 중": "Analyzing with AI",
+  "AI 분석 중...": "Analyzing with AI...",
+  "현재 화면 촬영": "Capture current view",
+  "카메라 닫기": "Close camera",
+  "업로드 이미지 미리보기": "Uploaded image preview",
+  "약물/의료도구 안전 포인트를 정리하고 있습니다. 잠시만 기다려 주세요.":
+    "Organizing medication/device safety points. Please wait a moment.",
+  "AI 약물·기구 안전 가이드 사용 가능 여부를 확인하고 있어요.":
+    "Checking access to the AI medication/device safety guide.",
+  "AI 약물·기구 안전 가이드는 Pro 플랜에서 사용할 수 있어요.":
+    "The AI medication/device safety guide is available on the Pro plan.",
+  "최근 저장된 결과를 표시합니다.": "Showing the most recently saved result.",
+  "기본 안전 모드 결과를 표시합니다.": "Showing fallback safety-mode results.",
+  "텍스트를 입력하거나 사진을 업로드해 주세요.": "Enter text or upload a photo.",
+  "약물 모드에서는 약물명만 단답으로 입력해 주세요. 예: norepinephrine":
+    "In medication mode, enter medication name only. e.g., norepinephrine",
+  "의료기구 모드에서는 기구명만 단답으로 입력해 주세요. 예: IV infusion pump":
+    "In device mode, enter device name only. e.g., IV infusion pump",
+  "오프라인 상태입니다. 데이터(모바일 네트워크)를 켠 뒤 다시 AI 분석 실행을 눌러 시도해 주세요.":
+    "You are offline. Turn on mobile data/network and try `Run AI Analysis` again.",
+  "네트워크에 연결되어 있지 않습니다. 데이터(모바일 네트워크)를 켠 뒤 다시 AI 분석 실행을 눌러 시도해 주세요.":
+    "No network connection. Turn on mobile data/network and try `Run AI Analysis` again.",
+  "이 브라우저는 실시간 카메라를 지원하지 않습니다.": "This browser does not support live camera.",
+  "카메라 화면을 찾지 못했습니다.": "Camera view not found.",
+  "카메라 영상이 아직 준비되지 않았습니다. 잠시 후 다시 촬영해 주세요.":
+    "Camera feed is not ready yet. Please capture again shortly.",
+  "이미지 캡처를 처리할 수 없습니다.": "Unable to process image capture.",
+  "캡처 이미지 생성에 실패했습니다.": "Failed to create captured image.",
+  "카메라 권한이 거부되었습니다. 브라우저 권한을 허용해 주세요.":
+    "Camera permission was denied. Please allow camera access in browser settings.",
+  "사용 가능한 카메라를 찾을 수 없습니다.": "No available camera found.",
+  "카메라가 다른 앱에서 사용 중입니다. 다른 앱을 종료 후 다시 시도해 주세요.":
+    "The camera is in use by another app. Close other apps and try again.",
+  "카메라는 HTTPS 또는 localhost에서만 사용할 수 있습니다.":
+    "Camera is available only on HTTPS or localhost.",
+  "카메라를 시작하지 못했습니다. 권한/브라우저 환경을 확인해 주세요.":
+    "Failed to start camera. Check permissions and browser environment.",
+  "유료 플랜 전용 기능입니다. 플랜 업그레이드 후 이용해 주세요.":
+    "Paid-plan feature. Please upgrade your plan to use this.",
+  "분석 중 오류가 발생했습니다.": "An error occurred during analysis.",
+  "분석 중 오류가 발생했습니다. 다시 AI 분석 실행을 눌러 시도해 주세요.":
+    "An error occurred during analysis. Please tap `Run AI Analysis` and try again.",
+  "AI API 키가 설정되지 않았습니다.": "AI API key is not configured.",
+  "이미지 용량이 너무 큽니다. 6MB 이하로 다시 업로드해 주세요.":
+    "Image size is too large. Please upload again under 6MB.",
+  "이미지 파일만 업로드할 수 있습니다.": "Only image files can be uploaded.",
+  "AI API 키가 유효하지 않거나 만료되었습니다. .env.local 환경변수를 확인해 주세요.":
+    "AI API key is invalid or expired. Check your .env.local environment variables.",
+  "현재 계정에 해당 모델 접근 권한이 없습니다. 모델명을 변경해 다시 시도해 주세요.":
+    "This account does not have access to the model. Change model name and try again.",
+  "요청한 모델을 찾을 수 없습니다. 모델명을 확인하거나 기본 fallback 모델로 다시 시도해 주세요.":
+    "Requested model not found. Check the model name or retry with fallback model.",
+  "요청 한도가 초과되었습니다. 잠시 후 다시 AI 분석 실행을 눌러 시도해 주세요.":
+    "Request limit exceeded. Please tap `Run AI Analysis` again shortly.",
+  "이전 대화 상태 동기화에 실패했습니다. 다시 AI 분석 실행을 눌러 새로 시도해 주세요.":
+    "Failed to sync previous conversation state. Tap `Run AI Analysis` to start fresh.",
+  "AI 응답 길이 제한으로 요청이 중단되었습니다. 잠시 후 다시 AI 분석 실행을 눌러 시도해 주세요.":
+    "Request stopped due to AI response length limit. Please tap `Run AI Analysis` again shortly.",
+  "AI 요청 처리 중 오류가 발생했습니다. 데이터(모바일 네트워크)를 켠 뒤 다시 AI 분석 실행을 눌러 시도해 주세요.":
+    "An error occurred while processing AI request. Turn on mobile data/network and try `Run AI Analysis` again.",
+  "AI 서버 응답 본문이 비어 다시 시도했습니다. 잠시 후 다시 AI 분석 실행을 눌러 주세요.":
+    "AI response body was empty and retried. Please tap `Run AI Analysis` again shortly.",
+  "AI 요청이 실패했습니다. 다시 AI 분석 실행을 눌러 시도해 주세요.":
+    "AI request failed. Please tap `Run AI Analysis` and try again.",
+  "AI 응답이 비정형으로 와서 자동 정리 결과로 표시했습니다.":
+    "AI response was unstructured, so it is shown as an auto-organized result.",
+  "네트워크가 불안정합니다. 데이터(모바일 네트워크)를 켠 뒤 다시 AI 분석 실행을 눌러 시도해 주세요.":
+    "Network is unstable. Turn on mobile data/network and tap `Run AI Analysis` again.",
+  "본 결과는 참고용 자동 생성 정보이며 의료행위 판단의 근거로 사용할 수 없습니다. 제공자는 본 결과의 사용으로 발생한 진단·치료·투약 결정 및 결과에 대해 책임을 지지 않습니다. 모든 처치는 병원 지침, 처방, 의료진 확인을 우선해 결정해 주세요.":
+    "This output is auto-generated for reference and must not be used as a basis for medical decisions. The provider is not responsible for diagnosis/treatment/medication decisions or outcomes based on this output. Always prioritize hospital policy, physician orders, and clinical confirmation.",
+  "오늘 수면 기록이 필요해요": "Today's sleep log is required.",
+  "AI 맞춤회복 분석 전 필수": "Required before AI recovery analysis",
+  "먼저 오늘 수면 시간을 입력해 주세요.": "Please enter today's sleep duration first.",
+  "오늘 컨디션/회복 추천은 수면 기록이 있어야 정확하게 계산됩니다.":
+    "Today's condition/recovery recommendations are calculated accurately only when sleep is logged.",
+  "확인을 누르면 일정 페이지로 이동하고 오늘 건강 기록 팝업이 바로 열립니다.":
+    "Tap Confirm to move to Schedule and open today's health log popup immediately.",
+  "필수 기록 2개가 필요해요": "Two required logs are needed.",
+  "오늘 수면 기록과 전날 건강 기록을 먼저 입력해 주세요.":
+    "Please enter today's sleep log and yesterday's health log first.",
+  "두 항목이 있어야 AI 맞춤회복 정확도가 올라갑니다.":
+    "Both items are needed to improve AI recovery accuracy.",
+  "확인을 누르면 오늘 기록 화면(수면 우선)으로 이동합니다.":
+    "Tap Confirm to move to today's record screen (sleep first).",
+  "오늘 수면 기록이 있어야 AI 맞춤회복을 시작할 수 있어요.":
+    "AI recovery starts only after today's sleep is logged.",
+  "확인을 누르면 오늘 기록 화면으로 이동합니다.": "Tap Confirm to move to today's record screen.",
+  "전날 건강 기록이 필요해요": "Yesterday's health log is required.",
+  "먼저 전날 건강 기록을 입력해 주세요.": "Please enter yesterday's health log first.",
+  "전날 기록이 있어야 추세 기반 추천을 정확히 계산할 수 있어요.":
+    "Yesterday's log is required for accurate trend-based recommendations.",
+  "확인을 누르면 전날 기록 화면으로 이동합니다.": "Tap Confirm to move to yesterday's record screen.",
+  "오늘 수면 기록 + 전날 건강 기록 입력 후 AI 맞춤회복을 시작할 수 있어요.":
+    "After entering today's sleep and yesterday's health log, you can start AI recovery.",
+  "오늘 수면 기록 + 전날 건강 기록을 먼저 입력해 주세요.":
+    "Please enter today's sleep and yesterday's health log first.",
+  "누락된 기록 날짜로 바로 이동해 입력할 수 있어요.":
+    "You can jump directly to missing record dates and enter them.",
+  "필수 기록 입력 필요": "Required logs needed",
+  "AI 인계 기능이 비활성화되어 있습니다.": "AI handoff is disabled.",
+  "AI 인계": "AI handoff",
+  "온디바이스 녹음/로컬 ASR/PHI 마스킹으로 인계를 환자별 카드로 구조화합니다.":
+    "On-device recording, local ASR, and PHI masking structure handoff into patient cards.",
+  "새 세션": "New session",
+  "분석 실행": "Run analysis",
+  "실시간 녹음 + 로컬 전사": "Live recording + local transcription",
+  "로컬 전용 모드로 동작합니다. 자동 전사가 없으면 수동 입력과 함께 사용하세요.":
+    "Runs in local-only mode. If auto transcription is unavailable, use manual input together.",
+  "녹음 중지": "Stop recording",
+  "녹음 시작": "Start recording",
+  "수동 전사 입력": "Manual transcript input",
+  "ASR 미지원 환경에서는 전사를 직접 붙여넣어 동일 파이프라인으로 분석할 수 있습니다.":
+    "In ASR-unsupported environments, paste transcripts manually and analyze through the same pipeline.",
+  "청크 추가": "Add chunk",
+  "수집된 전사 세그먼트": "Collected transcript segments",
+  "10초 검수": "10-second review",
+  "미기재/애매 항목을 확인 후 저장해 주세요.": "Review missing/ambiguous items, then save.",
+  "검수 항목이 없어 바로 저장할 수 있습니다.": "No review items found. You can save immediately.",
+  "저장된 세션": "Saved sessions",
+  "최근 3일 이상 기록하면 요인 분해 정확도가 올라가요.":
+    "Recording at least 3 recent days improves factor-breakdown accuracy.",
+  "간호사 계산기": "Nurse calculator",
+  "기록 3일 이상부터 핵심 요인을 계산해요.": "Core factors are calculated after 3+ logged days.",
+  "기록이 더 쌓이면 Best/Worst day를 보여드려요.":
+    "As more logs accumulate, Best/Worst day is shown.",
+  "AI 맞춤회복 분석 전, 오늘 수면 기록을 먼저 입력해 주세요.":
+    "Before AI recovery analysis, please log today's sleep first.",
+  "추가": "Add",
+  "두 항목이 있어야 맞춤회복 우선순위를 정확하게 계산할 수 있어요.":
+    "Both items are required to calculate personalized recovery priorities accurately.",
+  "오늘 수면 기록이 있어야 맞춤회복 분석 정확도가 올라갑니다.":
+    "Today's sleep log is required to improve personalized recovery analysis accuracy.",
+  "전날 기록이 있어야 추세 기반 맞춤회복 추천을 정확히 계산할 수 있어요.":
+    "Yesterday's log is required to accurately calculate trend-based personalized recovery recommendations.",
+  "분석 시작 전에 필수 기록 2개(오늘 수면, 전날 건강)를 확인해 주세요.":
+    "Before starting analysis, confirm the two required logs (today's sleep, yesterday's health).",
+  "필수 기록 입력하러 가기": "Go to required log entry",
+  "누르면 누락된 기록 날짜로 이동해 바로 입력할 수 있어요.":
+    "Tap to jump to missing log dates and enter immediately.",
+
   "영어 번역 적용 중": "Applying English translation",
   "영어로 표시하는 중이에요. 조금만 기다려 주세요.": "Showing in English now. Please wait a moment.",
 };

@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { todayISO, type ISODate } from "@/lib/date";
+import type { Language } from "@/lib/i18n";
 import {
   analyzeMedSafetyWithOpenAI,
+  translateMedSafetyToEnglish,
   type ClinicalMode,
   type ClinicalSituation,
+  type MedSafetyAnalysisResult,
   type QueryIntent,
 } from "@/lib/server/openaiMedSafety";
+import type { Json } from "@/types/supabase";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -28,6 +33,87 @@ function bad(status: number, error: string) {
     },
     { status }
   );
+}
+
+async function safeReadUserId(req: NextRequest): Promise<string> {
+  try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!supabaseUrl || !supabaseAnon) return "";
+    const { readUserIdFromRequest } = await import("@/lib/server/readUserId");
+    return await readUserIdFromRequest(req);
+  } catch {
+    return "";
+  }
+}
+
+async function safeReadSubscription(userId: string): Promise<{ hasPaidAccess: boolean } | null> {
+  try {
+    const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!serviceRole || !supabaseUrl) return null;
+    const { readSubscription } = await import("@/lib/server/billingStore");
+    return await readSubscription(userId);
+  } catch {
+    return null;
+  }
+}
+
+type MedSafetyResponseData = MedSafetyAnalysisResult & {
+  generatedText: string;
+  language: Language;
+  model: string;
+  analyzedAt: number;
+  source: "openai_live" | "openai_fallback";
+  fallbackReason: string | null;
+  openaiResponseId: string | null;
+  openaiConversationId: string | null;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+async function safeLoadAIContent(userId: string): Promise<{ data: Json } | null> {
+  try {
+    const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!serviceRole || !supabaseUrl) return null;
+    const { loadAIContent } = await import("@/lib/server/aiContentStore");
+    const row = await loadAIContent(userId);
+    if (!row) return null;
+    return { data: row.data };
+  } catch {
+    return null;
+  }
+}
+
+async function safeSaveMedSafetyContent(
+  userId: string,
+  dateISO: ISODate,
+  language: Language,
+  data: Json
+): Promise<string | null> {
+  try {
+    const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!serviceRole || !supabaseUrl) return "missing_supabase_env";
+
+    const { saveAIContent } = await import("@/lib/server/aiContentStore");
+    const existing = await safeLoadAIContent(userId);
+    const previous = isRecord(existing?.data) ? existing.data : {};
+    const incoming = isRecord(data) ? data : {};
+    const merged = { ...previous, ...incoming };
+    await saveAIContent({
+      userId,
+      dateISO,
+      language,
+      data: merged as Json,
+    });
+    return null;
+  } catch {
+    return "save_med_safety_content_failed";
+  }
 }
 
 function pickLocale(raw: FormDataEntryValue | null): "ko" | "en" {
@@ -107,8 +193,31 @@ async function fileToDataUrl(file: File) {
   return `data:${mime};base64,${base64}`;
 }
 
+function buildResponseData(params: {
+  language: Language;
+  analyzedAt: number;
+  analyzed: Awaited<ReturnType<typeof analyzeMedSafetyWithOpenAI>>;
+}): MedSafetyResponseData {
+  return {
+    ...params.analyzed.result,
+    generatedText: params.analyzed.rawText,
+    language: params.language,
+    model: params.analyzed.model,
+    analyzedAt: params.analyzedAt,
+    source: params.analyzed.fallbackReason ? "openai_fallback" : "openai_live",
+    fallbackReason: params.analyzed.fallbackReason,
+    openaiResponseId: params.analyzed.openaiResponseId,
+    openaiConversationId: params.analyzed.openaiConversationId,
+  };
+}
+
 export async function POST(req: NextRequest) {
   try {
+    const userId = await safeReadUserId(req);
+    if (!userId) return bad(401, "login_required");
+    const subscription = await safeReadSubscription(userId);
+    if (!subscription?.hasPaidAccess) return bad(402, "paid_plan_required");
+
     const form = await req.formData();
     const locale = pickLocale(form.get("locale"));
     const mode = pickMode(form.get("mode"));
@@ -150,13 +259,17 @@ export async function POST(req: NextRequest) {
     const timeout = setTimeout(() => abort.abort(), timeoutMs);
 
     try {
-      const analyzed = await analyzeMedSafetyWithOpenAI({
+      const analyzedAt = Date.now();
+      const today = todayISO();
+
+      // AI 맞춤회복과 동일하게 KO를 기준 생성하고, EN은 번역/직접생성 fallback으로 확보한다.
+      const analyzedKo = await analyzeMedSafetyWithOpenAI({
         query,
         mode,
         situation,
         queryIntent,
         patientSummary: patientSummary || undefined,
-        locale,
+        locale: "ko",
         imageDataUrl: imageDataUrl || undefined,
         imageName: imageName || undefined,
         previousResponseId,
@@ -165,17 +278,89 @@ export async function POST(req: NextRequest) {
         signal: abort.signal,
       });
 
+      const payloadKo = buildResponseData({
+        language: "ko",
+        analyzedAt,
+        analyzed: analyzedKo,
+      });
+
+      let payloadEn: MedSafetyResponseData | null = null;
+      try {
+        const translated = await translateMedSafetyToEnglish({
+          result: analyzedKo.result,
+          rawText: analyzedKo.rawText,
+          model: analyzedKo.model,
+          signal: abort.signal,
+        });
+        payloadEn = {
+          ...payloadKo,
+          ...translated.result,
+          generatedText: translated.rawText,
+          language: "en",
+          model: translated.model ?? payloadKo.model,
+          fallbackReason: payloadKo.fallbackReason
+            ? translated.debug
+              ? `${payloadKo.fallbackReason}|${translated.debug}`
+              : payloadKo.fallbackReason
+            : translated.debug,
+        };
+      } catch {
+        // 번역 실패 시에도 KO/EN 병행 저장 요구를 맞추기 위해 EN 직접 생성 fallback을 시도한다.
+        try {
+          const analyzedEn = await analyzeMedSafetyWithOpenAI({
+            query,
+            mode,
+            situation,
+            queryIntent,
+            patientSummary: patientSummary || undefined,
+            locale: "en",
+            imageDataUrl: imageDataUrl || undefined,
+            imageName: imageName || undefined,
+            preferredModel,
+            signal: abort.signal,
+          });
+          payloadEn = buildResponseData({
+            language: "en",
+            analyzedAt,
+            analyzed: analyzedEn,
+          });
+          payloadEn.fallbackReason = payloadEn.fallbackReason ? `en_direct:${payloadEn.fallbackReason}` : "en_direct";
+        } catch {
+          payloadEn = null;
+        }
+      }
+
+      const saveError = await safeSaveMedSafetyContent(userId, today, "ko", {
+        medSafetySearch: {
+          dateISO: today,
+          savedAt: analyzedAt,
+          request: {
+            query,
+            mode,
+            situation,
+            queryIntent: queryIntent ?? null,
+            patientSummary: patientSummary || null,
+            imageName: imageName || null,
+          },
+          variants: {
+            ko: payloadKo,
+            ...(payloadEn ? { en: payloadEn } : {}),
+          },
+        },
+      } satisfies Json);
+
+      if (saveError) {
+        payloadKo.fallbackReason = payloadKo.fallbackReason ? `${payloadKo.fallbackReason}|${saveError}` : saveError;
+        if (payloadEn) {
+          payloadEn.fallbackReason = payloadEn.fallbackReason ? `${payloadEn.fallbackReason}|${saveError}` : saveError;
+        }
+      }
+
+      const responseData = locale === "en" ? payloadEn ?? payloadKo : payloadKo;
+
       return NextResponse.json({
         ok: true,
-        data: {
-          ...analyzed.result,
-          model: analyzed.model,
-          analyzedAt: Date.now(),
-          source: analyzed.fallbackReason ? "openai_fallback" : "openai_live",
-          fallbackReason: analyzed.fallbackReason,
-          openaiResponseId: analyzed.openaiResponseId,
-          openaiConversationId: analyzed.openaiConversationId,
-        },
+        data: responseData,
       });
     } finally {
       clearTimeout(timeout);

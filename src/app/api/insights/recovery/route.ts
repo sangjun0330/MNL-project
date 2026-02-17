@@ -128,7 +128,12 @@ async function safeSaveAIContent(
     if (!serviceRole || !supabaseUrl) return "missing_supabase_env";
 
     const { saveAIContent } = await import("@/lib/server/aiContentStore");
-    await saveAIContent({ userId, dateISO, language, data });
+    const existing = await safeLoadAIContent(userId);
+    const previous = isRecord(existing?.data) ? existing.data : {};
+    const incoming = isRecord(data) ? data : {};
+    const merged = { ...previous, ...incoming };
+
+    await saveAIContent({ userId, dateISO, language, data: merged as Json });
     return null;
   } catch {
     return "save_ai_content_failed";
@@ -136,7 +141,7 @@ async function safeSaveAIContent(
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function asLanguage(value: unknown): Language | null {

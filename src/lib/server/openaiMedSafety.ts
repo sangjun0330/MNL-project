@@ -69,6 +69,15 @@ type ResponsesAttempt = {
 
 type ResponseVerbosity = "low" | "medium" | "high";
 
+export type OpenAIMedSafetyOutput = {
+  result: MedSafetyAnalysisResult;
+  model: string;
+  rawText: string;
+  fallbackReason: string | null;
+  openaiResponseId: string | null;
+  openaiConversationId: string | null;
+};
+
 function normalizeApiKey() {
   const key =
     process.env.OPENAI_API_KEY ??
@@ -1017,14 +1026,321 @@ function buildResultFromAnswer(params: AnalyzeParams, intent: QueryIntent, answe
   };
 }
 
-export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise<{
+function parseJsonStringArray(raw: string): string[] | null {
+  const text = String(raw ?? "").trim();
+  if (!text) return null;
+
+  const tryParse = (candidate: string) => {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (!Array.isArray(parsed)) return null;
+      return parsed.map((item) => String(item ?? "").trim());
+    } catch {
+      return null;
+    }
+  };
+
+  const direct = tryParse(text);
+  if (direct) return direct;
+
+  const fenced = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
+  const fencedParsed = tryParse(fenced);
+  if (fencedParsed) return fencedParsed;
+
+  const firstBracket = text.indexOf("[");
+  const lastBracket = text.lastIndexOf("]");
+  if (firstBracket >= 0 && lastBracket > firstBracket) {
+    return tryParse(text.slice(firstBracket, lastBracket + 1));
+  }
+
+  return null;
+}
+
+function hangulRatio(lines: string[]) {
+  const text = lines.join(" ");
+  const total = (text.match(/[A-Za-z가-힣]/g) ?? []).length;
+  if (!total) return 0;
+  const hangul = (text.match(/[가-힣]/g) ?? []).length;
+  return hangul / total;
+}
+
+function splitChunks<T>(arr: T[], size: number): T[][] {
+  if (size <= 0) return [arr];
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+function cloneMedSafetyResult(source: MedSafetyAnalysisResult): MedSafetyAnalysisResult {
+  return {
+    ...source,
+    item: {
+      ...source.item,
+      aliases: [...(source.item.aliases ?? [])],
+      highRiskBadges: [...(source.item.highRiskBadges ?? [])],
+    },
+    quick: {
+      ...source.quick,
+      topActions: [...(source.quick.topActions ?? [])],
+      topNumbers: [...(source.quick.topNumbers ?? [])],
+      topRisks: [...(source.quick.topRisks ?? [])],
+    },
+    do: {
+      ...source.do,
+      steps: [...(source.do.steps ?? [])],
+      calculatorsNeeded: [...(source.do.calculatorsNeeded ?? [])],
+      compatibilityChecks: [...(source.do.compatibilityChecks ?? [])],
+    },
+    safety: {
+      ...source.safety,
+      holdRules: [...(source.safety.holdRules ?? [])],
+      monitor: [...(source.safety.monitor ?? [])],
+      escalateWhen: [...(source.safety.escalateWhen ?? [])],
+    },
+    institutionalChecks: [...(source.institutionalChecks ?? [])],
+    sbar: {
+      ...source.sbar,
+    },
+    modePriority: [...(source.modePriority ?? [])],
+    searchAnswer: source.searchAnswer ?? "",
+  };
+}
+
+export async function translateMedSafetyToEnglish(input: {
   result: MedSafetyAnalysisResult;
-  model: string;
   rawText: string;
-  fallbackReason: string | null;
-  openaiResponseId: string | null;
-  openaiConversationId: string | null;
+  model?: string | null;
+  signal: AbortSignal;
+}): Promise<{
+  result: MedSafetyAnalysisResult;
+  rawText: string;
+  model: string | null;
+  debug: string | null;
 }> {
+  const apiKey = normalizeApiKey();
+  if (!apiKey) throw new Error("missing_openai_api_key");
+
+  const modelCandidates = resolveModelCandidates(input.model ?? undefined);
+  const apiBaseUrls = resolveApiBaseUrls();
+  const maxOutputTokens = Math.max(2600, Math.min(14000, resolveMaxOutputTokens() + 1600));
+  const upstreamTimeoutMs = resolveUpstreamTimeoutMs();
+  const networkRetries = resolveNetworkRetryCount();
+  const networkRetryBaseMs = resolveNetworkRetryBaseMs();
+
+  const translatedResult = cloneMedSafetyResult(input.result);
+  let translatedRawText = normalizeText(input.rawText);
+  let selectedModel: string | null = modelCandidates[0] ?? null;
+
+  const lines: string[] = [];
+  const setters: Array<(value: string) => void> = [];
+  const push = (value: string, setter: (value: string) => void) => {
+    const text = normalizeText(value);
+    if (!text) return;
+    lines.push(text);
+    setters.push(setter);
+  };
+
+  push(input.result.oneLineConclusion, (value) => {
+    translatedResult.oneLineConclusion = value;
+  });
+  push(input.result.item.name, (value) => {
+    translatedResult.item.name = value;
+  });
+  push(input.result.item.primaryUse, (value) => {
+    translatedResult.item.primaryUse = value;
+  });
+
+  translatedResult.item.aliases.forEach((value, idx) => {
+    push(value, (translated) => {
+      translatedResult.item.aliases[idx] = translated;
+    });
+  });
+  translatedResult.item.highRiskBadges.forEach((value, idx) => {
+    push(value, (translated) => {
+      translatedResult.item.highRiskBadges[idx] = translated;
+    });
+  });
+  translatedResult.quick.topActions.forEach((value, idx) => {
+    push(value, (translated) => {
+      translatedResult.quick.topActions[idx] = translated;
+    });
+  });
+  translatedResult.quick.topNumbers.forEach((value, idx) => {
+    push(value, (translated) => {
+      translatedResult.quick.topNumbers[idx] = translated;
+    });
+  });
+  translatedResult.quick.topRisks.forEach((value, idx) => {
+    push(value, (translated) => {
+      translatedResult.quick.topRisks[idx] = translated;
+    });
+  });
+
+  translatedResult.do.steps.forEach((value, idx) => {
+    push(value, (translated) => {
+      translatedResult.do.steps[idx] = translated;
+    });
+  });
+  translatedResult.do.calculatorsNeeded.forEach((value, idx) => {
+    push(value, (translated) => {
+      translatedResult.do.calculatorsNeeded[idx] = translated;
+    });
+  });
+  translatedResult.do.compatibilityChecks.forEach((value, idx) => {
+    push(value, (translated) => {
+      translatedResult.do.compatibilityChecks[idx] = translated;
+    });
+  });
+
+  translatedResult.safety.holdRules.forEach((value, idx) => {
+    push(value, (translated) => {
+      translatedResult.safety.holdRules[idx] = translated;
+    });
+  });
+  translatedResult.safety.monitor.forEach((value, idx) => {
+    push(value, (translated) => {
+      translatedResult.safety.monitor[idx] = translated;
+    });
+  });
+  translatedResult.safety.escalateWhen.forEach((value, idx) => {
+    push(value, (translated) => {
+      translatedResult.safety.escalateWhen[idx] = translated;
+    });
+  });
+
+  translatedResult.institutionalChecks.forEach((value, idx) => {
+    push(value, (translated) => {
+      translatedResult.institutionalChecks[idx] = translated;
+    });
+  });
+  push(input.result.sbar.situation, (value) => {
+    translatedResult.sbar.situation = value;
+  });
+  push(input.result.sbar.background, (value) => {
+    translatedResult.sbar.background = value;
+  });
+  push(input.result.sbar.assessment, (value) => {
+    translatedResult.sbar.assessment = value;
+  });
+  push(input.result.sbar.recommendation, (value) => {
+    translatedResult.sbar.recommendation = value;
+  });
+  push(input.result.patientScript20s, (value) => {
+    translatedResult.patientScript20s = value;
+  });
+  translatedResult.modePriority.forEach((value, idx) => {
+    push(value, (translated) => {
+      translatedResult.modePriority[idx] = translated;
+    });
+  });
+  push(input.result.confidenceNote ?? "", (value) => {
+    translatedResult.confidenceNote = value;
+  });
+  push(input.result.searchAnswer ?? "", (value) => {
+    translatedResult.searchAnswer = value;
+  });
+  push(input.rawText ?? "", (value) => {
+    translatedRawText = value;
+  });
+
+  if (!lines.length) {
+    return {
+      result: translatedResult,
+      rawText: translatedRawText,
+      model: selectedModel,
+      debug: "translate_empty_source",
+    };
+  }
+
+  const buildTranslatePrompt = (targetLines: string[], strictNoKorean = false) =>
+    [
+      "Translate each input string into natural clinical English for bedside nurses.",
+      "Return ONLY a JSON array of strings.",
+      `Array length must be exactly ${targetLines.length}.`,
+      "Keep order exactly the same.",
+      "Do not merge or split lines.",
+      "Keep numbers, units, dates, medication names, and device names unchanged when appropriate.",
+      strictNoKorean ? "Final output must contain no Korean characters." : "",
+      "",
+      JSON.stringify(targetLines, null, 2),
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+  const translateChunk = async (
+    targetLines: string[],
+    strictNoKorean = false
+  ): Promise<{ translated: string[]; model: string }> => {
+    let lastError = "openai_translate_failed";
+    for (let modelIndex = 0; modelIndex < modelCandidates.length; modelIndex += 1) {
+      const model = modelCandidates[modelIndex]!;
+      for (let baseIndex = 0; baseIndex < apiBaseUrls.length; baseIndex += 1) {
+        const apiBaseUrl = apiBaseUrls[baseIndex]!;
+        const attempt = await callResponsesApiWithRetry({
+          apiKey,
+          model,
+          developerPrompt:
+            "You are a professional Korean-to-English clinical translator for bedside nursing safety content.",
+          userPrompt: buildTranslatePrompt(targetLines, strictNoKorean),
+          apiBaseUrl,
+          signal: input.signal,
+          maxOutputTokens,
+          upstreamTimeoutMs,
+          verbosity: "medium",
+          storeResponses: false,
+          retries: networkRetries,
+          retryBaseMs: networkRetryBaseMs,
+        });
+        if (!attempt.error && attempt.text) {
+          const parsed = parseJsonStringArray(attempt.text);
+          if (parsed && parsed.length === targetLines.length) {
+            return { translated: parsed, model };
+          }
+          lastError = parsed
+            ? `openai_translate_count_mismatch_model:${model}_${parsed.length}/${targetLines.length}`
+            : `openai_translate_non_json_array_model:${model}`;
+          continue;
+        }
+        lastError = attempt.error ?? "openai_translate_failed";
+      }
+    }
+    throw new Error(lastError);
+  };
+
+  const chunks = splitChunks(lines, 14);
+  const translatedLines: string[] = [];
+  for (const chunk of chunks) {
+    let chunkTranslated = await translateChunk(chunk, false);
+    if (hangulRatio(chunkTranslated.translated) > 0.08) {
+      chunkTranslated = await translateChunk(chunk, true);
+    }
+    selectedModel = chunkTranslated.model;
+    translatedLines.push(...chunkTranslated.translated);
+  }
+
+  if (translatedLines.length !== setters.length) {
+    throw new Error(`openai_translate_count_mismatch_${translatedLines.length}/${setters.length}`);
+  }
+
+  for (let i = 0; i < translatedLines.length; i += 1) {
+    const value = String(translatedLines[i] ?? "").trim();
+    if (!value) continue;
+    setters[i]?.(value);
+  }
+
+  if (!translatedResult.searchAnswer && translatedRawText) {
+    translatedResult.searchAnswer = translatedRawText;
+  }
+
+  return {
+    result: translatedResult,
+    rawText: translatedRawText,
+    model: selectedModel,
+    debug: null,
+  };
+}
+
+export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise<OpenAIMedSafetyOutput> {
   const apiKey = normalizeApiKey();
   if (!apiKey) throw new Error("missing_openai_api_key");
 

@@ -1,12 +1,15 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
+import { useI18n } from "@/lib/useI18n";
 
 const FLAT_CARD_CLASS = "border-[color:var(--wnl-accent-border)] bg-white shadow-none";
 const PRIMARY_FLAT_BTN =
@@ -14,6 +17,7 @@ const PRIMARY_FLAT_BTN =
 const SECONDARY_FLAT_BTN =
   "h-11 rounded-xl border border-ios-sep bg-white px-4 text-[14px] font-semibold text-ios-text shadow-none hover:bg-ios-bg";
 const SEGMENT_WRAPPER_CLASS = "inline-flex rounded-2xl border border-ios-sep bg-ios-bg p-1";
+type TranslateFn = (key: string, vars?: Record<string, string | number>) => string;
 
 type ClinicalMode = "ward" | "er" | "icu";
 type ClinicalSituation = "general" | "pre_admin" | "during_admin" | "event_response";
@@ -63,6 +67,7 @@ type MedSafetyAnalyzeResult = {
   modePriority: string[];
   confidenceNote: string;
   searchAnswer?: string;
+  generatedText?: string;
   model: string;
   analyzedAt: number;
   source: "openai_live" | "openai_fallback";
@@ -158,6 +163,8 @@ function isNameOnlyInput(value: string) {
 function parseErrorMessage(raw: string) {
   if (!raw) return "분석 중 오류가 발생했습니다.";
   const normalized = String(raw).toLowerCase();
+  if (normalized.includes("login_required")) return "로그인이 필요합니다.";
+  if (normalized.includes("paid_plan_required")) return "유료 플랜 전용 기능입니다. 플랜 업그레이드 후 이용해 주세요.";
   if (normalized.includes("missing_openai_api_key")) return "AI API 키가 설정되지 않았습니다.";
   if (normalized.includes("query_or_image_required")) return "텍스트를 입력하거나 사진을 업로드해 주세요.";
   if (normalized.includes("image_too_large")) return "이미지 용량이 너무 큽니다. 6MB 이하로 다시 업로드해 주세요.";
@@ -530,7 +537,8 @@ function renderHighlightedLine(line: string): ReactNode {
   );
 }
 
-function buildNarrativeCards(answer: string): DynamicResultCard[] {
+function buildNarrativeCards(answer: string, t?: TranslateFn): DynamicResultCard[] {
+  const translate = t ?? ((key: string) => key);
   const lines = String(answer ?? "")
     .replace(/\r/g, "")
     .replace(/```[\s\S]*?```/g, "")
@@ -545,7 +553,7 @@ function buildNarrativeCards(answer: string): DynamicResultCard[] {
   if (!lines.length) return [];
 
   const cards: DynamicResultCard[] = [];
-  let currentTitle = "핵심 요약";
+  let currentTitle = translate("핵심 요약");
   let currentItems: string[] = [];
 
   const flush = () => {
@@ -553,7 +561,7 @@ function buildNarrativeCards(answer: string): DynamicResultCard[] {
       .flatMap((line) => splitLongDisplayLine(line))
       .filter((line) => line.length > 0);
     if (!items.length) return;
-    const title = normalizeDisplayLine(currentTitle) || `핵심 정보 ${cards.length + 1}`;
+    const title = normalizeDisplayLine(currentTitle) || translate("핵심 정보 {count}", { count: cards.length + 1 });
     const normalizedItems = mergeUniqueLists(items).filter((item, index) => !(index === 0 && isNearDuplicateText(item, title)));
     if (!normalizedItems.length) {
       currentItems = [];
@@ -571,7 +579,7 @@ function buildNarrativeCards(answer: string): DynamicResultCard[] {
   for (const rawLine of lines) {
     if (looksLikeHeading(rawLine)) {
       flush();
-      currentTitle = headingText(rawLine) || `핵심 정보 ${cards.length + 1}`;
+      currentTitle = headingText(rawLine) || translate("핵심 정보 {count}", { count: cards.length + 1 });
       continue;
     }
     currentItems.push(rawLine);
@@ -586,7 +594,7 @@ function buildNarrativeCards(answer: string): DynamicResultCard[] {
     .filter(Boolean);
   return paragraphs.map((block, idx) => ({
     key: `paragraph-${idx}`,
-    title: idx === 0 ? "핵심 요약" : `추가 정보 ${idx}`,
+    title: idx === 0 ? translate("핵심 요약") : translate("추가 정보 {count}", { count: idx }),
     items: mergeUniqueLists(
       block
         .split("\n")
@@ -597,14 +605,14 @@ function buildNarrativeCards(answer: string): DynamicResultCard[] {
   }));
 }
 
-function MedSafetyAnalyzingOverlay({ open }: { open: boolean }) {
+function MedSafetyAnalyzingOverlay({ open, t }: { open: boolean; t: TranslateFn }) {
   if (!open || typeof document === "undefined") return null;
   return createPortal(
     <div className="fixed inset-0 z-[2147483000] flex items-center justify-center bg-[rgba(242,242,247,0.86)] px-5 backdrop-blur-[2px]">
       <div className="relative w-full max-w-[420px] overflow-hidden rounded-[28px] border border-ios-sep bg-white px-6 py-6 shadow-[0_26px_70px_rgba(0,0,0,0.12)]">
         <div className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-transparent via-[#163B73] to-transparent wnl-recovery-progress" />
-        <div className="text-[23px] font-extrabold tracking-[-0.02em] text-ios-text">AI 분석 중</div>
-        <p className="mt-2 text-[14px] leading-6 text-ios-sub">약물/의료도구 안전 포인트를 정리하고 있습니다. 잠시만 기다려 주세요.</p>
+        <div className="text-[23px] font-extrabold tracking-[-0.02em] text-ios-text">{t("AI 분석 중")}</div>
+        <p className="mt-2 text-[14px] leading-6 text-ios-sub">{t("약물/의료도구 안전 포인트를 정리하고 있습니다. 잠시만 기다려 주세요.")}</p>
         <div className="mt-4 flex items-center gap-2">
           <span className="h-2 w-2 rounded-full bg-[color:var(--wnl-accent)] wnl-dot-pulse" />
           <span className="h-2 w-2 rounded-full bg-[color:var(--wnl-accent)] wnl-dot-pulse [animation-delay:160ms]" />
@@ -616,7 +624,30 @@ function MedSafetyAnalyzingOverlay({ open }: { open: boolean }) {
   );
 }
 
+function EnglishTranslationPendingPopup({ open, t }: { open: boolean; t: TranslateFn }) {
+  if (!open || typeof document === "undefined") return null;
+  return createPortal(
+    <div className="fixed inset-0 z-[2147483100] flex items-start justify-center bg-[rgba(242,242,247,0.56)] px-4 pt-[max(72px,env(safe-area-inset-top)+20px)] backdrop-blur-[2px]">
+      <div className="w-full max-w-[360px] rounded-[24px] border border-[#D7DEEB] bg-white/96 p-4 shadow-[0_20px_56px_rgba(15,36,74,0.16)]">
+        <div className="flex items-start gap-3">
+          <div className="mt-[1px] flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#C7D5F0] bg-[#EDF3FF]">
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#163B73] border-r-transparent" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[14px] font-bold tracking-[-0.01em] text-ios-text">{t("영어 번역 적용 중")}</p>
+            <p className="mt-1 text-[12.5px] leading-relaxed text-ios-sub">{t("영어로 표시하는 중이에요. 조금만 기다려 주세요.")}</p>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 export function ToolMedSafetyPage() {
+  const router = useRouter();
+  const { t, lang } = useI18n();
+  const { hasPaidAccess, loading: billingLoading } = useBillingAccess();
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<ClinicalMode>("ward");
   const [queryIntent, setQueryIntent] = useState<QueryIntent>("medication");
@@ -625,6 +656,7 @@ export function ToolMedSafetyPage() {
   const [result, setResult] = useState<MedSafetyAnalyzeResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [analysisRequested, setAnalysisRequested] = useState(false);
 
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -719,7 +751,7 @@ export function ToolMedSafetyPage() {
 
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
       setCameraStarting(false);
-      setCameraError("이 브라우저는 실시간 카메라를 지원하지 않습니다.");
+      setCameraError(t("이 브라우저는 실시간 카메라를 지원하지 않습니다."));
       return;
     }
 
@@ -746,23 +778,23 @@ export function ToolMedSafetyPage() {
         });
       }
     } catch (cause) {
-      setCameraError(parseCameraStartError(cause));
+      setCameraError(t(parseCameraStartError(cause)));
     } finally {
       setCameraStarting(false);
     }
-  }, [stopCamera]);
+  }, [stopCamera, t]);
 
   const captureFromCamera = useCallback(async () => {
     const video = videoRef.current;
     if (!video) {
-      setCameraError("카메라 화면을 찾지 못했습니다.");
+      setCameraError(t("카메라 화면을 찾지 못했습니다."));
       return;
     }
 
     const width = video.videoWidth;
     const height = video.videoHeight;
     if (!width || !height) {
-      setCameraError("카메라 영상이 아직 준비되지 않았습니다. 잠시 후 다시 촬영해 주세요.");
+      setCameraError(t("카메라 영상이 아직 준비되지 않았습니다. 잠시 후 다시 촬영해 주세요."));
       return;
     }
 
@@ -771,7 +803,7 @@ export function ToolMedSafetyPage() {
     canvas.height = height;
     const ctx = canvas.getContext("2d");
     if (!ctx) {
-      setCameraError("이미지 캡처를 처리할 수 없습니다.");
+      setCameraError(t("이미지 캡처를 처리할 수 없습니다."));
       return;
     }
     ctx.drawImage(video, 0, 0, width, height);
@@ -781,27 +813,27 @@ export function ToolMedSafetyPage() {
     });
 
     if (!blob) {
-      setCameraError("캡처 이미지 생성에 실패했습니다.");
+      setCameraError(t("캡처 이미지 생성에 실패했습니다."));
       return;
     }
 
     const file = new File([blob], `camera-${Date.now()}.jpg`, { type: "image/jpeg" });
     onImagePicked(file);
     stopCamera();
-  }, [onImagePicked, stopCamera]);
+  }, [onImagePicked, stopCamera, t]);
 
   const runAnalyze = useCallback(
     async (forcedQuery?: string) => {
       const normalized = (forcedQuery ?? query).replace(/\s+/g, " ").trim();
       if (!normalized && !imageFile) {
-        setError("텍스트를 입력하거나 사진을 업로드해 주세요.");
+        setError(t("텍스트를 입력하거나 사진을 업로드해 주세요."));
         return;
       }
       if (!isScenarioIntent && normalized && !isNameOnlyInput(normalized)) {
         setError(
           queryIntent === "medication"
-            ? "약물 모드에서는 약물명만 단답으로 입력해 주세요. 예: norepinephrine"
-            : "의료기구 모드에서는 기구명만 단답으로 입력해 주세요. 예: IV infusion pump"
+            ? t("약물 모드에서는 약물명만 단답으로 입력해 주세요. 예: norepinephrine")
+            : t("의료기구 모드에서는 기구명만 단답으로 입력해 주세요. 예: IV infusion pump")
         );
         return;
       }
@@ -818,14 +850,17 @@ export function ToolMedSafetyPage() {
         const cached = readMedSafetyCache(cacheKey);
         if (cached) {
           setResult(cached);
-          setError("오프라인 상태입니다. 데이터(모바일 네트워크)를 켠 뒤 다시 AI 분석 실행을 눌러 시도해 주세요. 최근 저장된 결과를 표시합니다.");
+          setError(
+            `${t("오프라인 상태입니다. 데이터(모바일 네트워크)를 켠 뒤 다시 AI 분석 실행을 눌러 시도해 주세요.")} ${t("최근 저장된 결과를 표시합니다.")}`
+          );
         } else {
           setResult(null);
-          setError("네트워크에 연결되어 있지 않습니다. 데이터(모바일 네트워크)를 켠 뒤 다시 AI 분석 실행을 눌러 시도해 주세요.");
+          setError(t("네트워크에 연결되어 있지 않습니다. 데이터(모바일 네트워크)를 켠 뒤 다시 AI 분석 실행을 눌러 시도해 주세요."));
         }
         return;
       }
 
+      setAnalysisRequested(true);
       setIsLoading(true);
       setError(null);
 
@@ -846,7 +881,7 @@ export function ToolMedSafetyPage() {
             form.set("mode", mode);
             form.set("queryIntent", queryIntent);
             form.set("situation", activeSituation);
-            form.set("locale", "ko");
+            form.set("locale", lang);
             if (isScenarioIntent && scenarioState.previousResponseId) {
               form.set("previousResponseId", scenarioState.previousResponseId);
             }
@@ -881,14 +916,14 @@ export function ToolMedSafetyPage() {
             if (isScenarioIntent) {
               setScenarioState({ previousResponseId: undefined, conversationId: undefined });
             }
-            setError(`${parseErrorMessage(finalError)} 최근 저장된 결과를 표시합니다.`);
+            setError(`${t(parseErrorMessage(finalError))} ${t("최근 저장된 결과를 표시합니다.")}`);
             return;
           }
           setResult(null);
           if (isScenarioIntent) {
             setScenarioState({ previousResponseId: undefined, conversationId: undefined });
           }
-          setError(parseErrorMessage(finalError));
+          setError(t(parseErrorMessage(finalError)));
           return;
         }
         const data = payload.data;
@@ -917,7 +952,7 @@ export function ToolMedSafetyPage() {
             setScenarioState({ previousResponseId: undefined, conversationId: undefined });
           }
           setError(
-            `${parseErrorMessage(String(data.fallbackReason ?? "openai_fallback"))} 기본 안전 모드 결과를 표시합니다.`
+            `${t(parseErrorMessage(String(data.fallbackReason ?? "openai_fallback")))} ${t("기본 안전 모드 결과를 표시합니다.")}`
           );
         }
         if (forcedQuery) setQuery(forcedQuery);
@@ -928,19 +963,31 @@ export function ToolMedSafetyPage() {
           if (isScenarioIntent) {
             setScenarioState({ previousResponseId: undefined, conversationId: undefined });
           }
-          setError(`${RETRY_WITH_DATA_MESSAGE} 최근 저장된 결과를 표시합니다.`);
+          setError(`${t(RETRY_WITH_DATA_MESSAGE)} ${t("최근 저장된 결과를 표시합니다.")}`);
         } else {
           setResult(null);
           if (isScenarioIntent) {
             setScenarioState({ previousResponseId: undefined, conversationId: undefined });
           }
-          setError(RETRY_WITH_DATA_MESSAGE);
+          setError(t(RETRY_WITH_DATA_MESSAGE));
         }
       } finally {
         setIsLoading(false);
       }
     },
-    [activeSituation, imageFile, isScenarioIntent, mode, patientSummary, preferredModel, query, queryIntent, scenarioState]
+    [
+      activeSituation,
+      imageFile,
+      isScenarioIntent,
+      lang,
+      mode,
+      patientSummary,
+      preferredModel,
+      query,
+      queryIntent,
+      scenarioState,
+      t,
+    ]
   );
 
   const resultViewState = useMemo(() => {
@@ -963,26 +1010,26 @@ export function ToolMedSafetyPage() {
     const headerConclusion = clampDisplayText(result.oneLineConclusion, result.resultKind === "scenario" ? 160 : 220);
     const headerPrimaryUse = clampDisplayText(result.item.primaryUse, result.resultKind === "scenario" ? 170 : 220);
 
-    const dynamicCardsFromNarrative = result.searchAnswer ? buildNarrativeCards(result.searchAnswer) : [];
+    const dynamicCardsFromNarrative = result.searchAnswer ? buildNarrativeCards(result.searchAnswer, t) : [];
     const dynamicCardsFallback: DynamicResultCard[] = [
       {
         key: "fallback-core",
-        title: "핵심 요약",
+        title: t("핵심 요약"),
         items: pickCardItems(
           mergeUniqueLists(
             headerConclusion ? [headerConclusion] : [],
             headerPrimaryUse ? [headerPrimaryUse] : [],
-            immediateActions.length ? [`가장 먼저: ${immediateActions[0]}`] : []
+            immediateActions.length ? [t("가장 먼저: {item}", { item: immediateActions[0] })] : []
           )
         ),
         compact: true,
       },
-      { key: "fallback-action", title: "주요 행동", items: pickCardItems(immediateActions) },
-      { key: "fallback-check", title: "핵심 확인", items: pickCardItems(checks1to5) },
-      { key: "fallback-step", title: "실행 포인트", items: pickCardItems(adjustmentPlan) },
-      { key: "fallback-risk", title: "위험/에스컬레이션", items: pickCardItems(branchRules) },
-      { key: "fallback-prevent", title: "실수 방지", items: pickCardItems(preventionPoints) },
-      { key: "fallback-monitor", title: "모니터/재평가", items: pickCardItems(reassessmentPoints) },
+      { key: "fallback-action", title: t("주요 행동"), items: pickCardItems(immediateActions) },
+      { key: "fallback-check", title: t("핵심 확인"), items: pickCardItems(checks1to5) },
+      { key: "fallback-step", title: t("실행 포인트"), items: pickCardItems(adjustmentPlan) },
+      { key: "fallback-risk", title: t("위험/에스컬레이션"), items: pickCardItems(branchRules) },
+      { key: "fallback-prevent", title: t("실수 방지"), items: pickCardItems(preventionPoints) },
+      { key: "fallback-monitor", title: t("모니터/재평가"), items: pickCardItems(reassessmentPoints) },
     ].filter((card) => card.items.length > 0);
 
     const dynamicCards = dynamicCardsFromNarrative.length ? dynamicCardsFromNarrative : dynamicCardsFallback;
@@ -1002,14 +1049,14 @@ export function ToolMedSafetyPage() {
         result.resultKind !== "scenario" && !!headerPrimaryUse && !isNearDuplicateText(headerPrimaryUse, headerConclusion),
       displayCards,
     };
-  }, [result]);
+  }, [result, t]);
 
   const resultPanel = useMemo(() => {
     if (!result) {
       return (
         <div className="py-1">
-          <div className="text-[24px] font-bold text-ios-text">결과 대기</div>
-          <div className="mt-2 text-[17px] leading-7 text-ios-sub">입력 후 `AI 분석 실행`을 누르면, 먼저 읽어야 할 핵심 행동부터 표시됩니다.</div>
+          <div className="text-[24px] font-bold text-ios-text">{t("결과 대기")}</div>
+          <div className="mt-2 text-[17px] leading-7 text-ios-sub">{t("입력 후 `AI 분석 실행`을 누르면, 먼저 읽어야 할 핵심 행동부터 표시됩니다.")}</div>
         </div>
       );
     }
@@ -1019,18 +1066,19 @@ export function ToolMedSafetyPage() {
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-full border border-[color:var(--wnl-accent)] bg-[color:var(--wnl-accent-soft)] px-3 py-1 text-[13px] font-semibold text-[color:var(--wnl-accent)]">
-              {resultViewState.resultKindChip}
+              {t(resultViewState.resultKindChip)}
             </span>
           </div>
           <div className="mt-2 text-[34px] font-bold leading-[1.08] tracking-[-0.03em] text-ios-text">{result.item.name}</div>
           <div className="mt-1.5 text-[18px] leading-7 text-ios-text">
-            {resultViewState.headerConclusion || resultViewState.headerPrimaryUse || "핵심 안전 확인 필요"}
+            {resultViewState.headerConclusion || resultViewState.headerPrimaryUse || t("핵심 안전 확인 필요")}
           </div>
           {resultViewState.showHeaderPrimaryUse ? (
             <div className="mt-1 text-[16px] leading-6 text-ios-sub">{resultViewState.headerPrimaryUse}</div>
           ) : null}
           <div className="mt-2 text-[15px] text-ios-sub">
-            모드: {modeLabel(mode)} · 유형: {queryIntentLabel(queryIntent)} · 상황: {situationLabel(activeSituation)} · 분석:{" "}
+            {t("모드")}: {t(modeLabel(mode))} · {t("유형")}: {t(queryIntentLabel(queryIntent))} · {t("상황")}: {t(situationLabel(activeSituation))} ·{" "}
+            {t("분석")}:{" "}
             {formatDateTime(result.analyzedAt)}
           </div>
         </div>
@@ -1053,30 +1101,83 @@ export function ToolMedSafetyPage() {
               ))}
             </div>
           ) : (
-            <div className="text-[15px] text-ios-sub">표시할 분석 정보가 없습니다.</div>
+            <div className="text-[15px] text-ios-sub">{t("표시할 분석 정보가 없습니다.")}</div>
           )}
         </div>
       </div>
     );
-  }, [activeSituation, mode, queryIntent, result, resultViewState]);
+  }, [activeSituation, mode, queryIntent, result, resultViewState, t]);
+
+  const englishTranslationPending = lang === "en" && isLoading && analysisRequested;
+  const showAnalyzingOverlay = isLoading && !englishTranslationPending;
+
+  if (billingLoading) {
+    return (
+      <div className="mx-auto w-full max-w-[920px] space-y-3 px-2 pb-24 pt-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[31px] font-extrabold tracking-[-0.02em] text-[color:var(--wnl-accent)]">{t("AI 약물·도구 검색기")}</div>
+            <div className="mt-1 text-[13px] text-ios-sub">{t("간호 현장에서 바로 쓰는 약물·의료기구·상황 대응 정보를 검색형으로 제공합니다.")}</div>
+          </div>
+          <Link href="/tools" className="pt-1 text-[12px] font-semibold text-[color:var(--wnl-accent)]">
+            {t("툴 목록")}
+          </Link>
+        </div>
+        <Card className={`p-5 ${FLAT_CARD_CLASS}`}>
+          <div className="text-[18px] font-bold text-ios-text">{t("구독 상태 확인 중...")}</div>
+          <div className="mt-1 text-[13px] text-ios-sub">{t("AI 약물·기구 안전 가이드 사용 가능 여부를 확인하고 있어요.")}</div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!hasPaidAccess) {
+    return (
+      <div className="mx-auto w-full max-w-[920px] space-y-3 px-2 pb-24 pt-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[31px] font-extrabold tracking-[-0.02em] text-[color:var(--wnl-accent)]">{t("AI 약물·도구 검색기")}</div>
+            <div className="mt-1 text-[13px] text-ios-sub">{t("간호 현장에서 바로 쓰는 약물·의료기구·상황 대응 정보를 검색형으로 제공합니다.")}</div>
+          </div>
+          <Link href="/tools" className="pt-1 text-[12px] font-semibold text-[color:var(--wnl-accent)]">
+            {t("툴 목록")}
+          </Link>
+        </div>
+        <Card className={`p-5 ${FLAT_CARD_CLASS}`}>
+          <div className="text-[19px] font-bold text-ios-text">{t("유료 플랜 전용 기능")}</div>
+          <div className="mt-2 text-[14px] leading-6 text-ios-sub">{t("AI 약물·기구 안전 가이드는 Pro 플랜에서 사용할 수 있어요.")}</div>
+          <Button
+            variant="secondary"
+            className={`${PRIMARY_FLAT_BTN} mt-4`}
+            onClick={() => {
+              router.push("/settings/billing/upgrade");
+            }}
+          >
+            {t("플랜 업그레이드")}
+          </Button>
+          <div className="mt-2 text-[12px] text-ios-sub">{t("업그레이드 후 AI 맞춤회복과 AI 약물기구안전가이드를 모두 사용할 수 있어요.")}</div>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <>
       <div className="mx-auto w-full max-w-[920px] space-y-3 px-2 pb-24 pt-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-[31px] font-extrabold tracking-[-0.02em] text-[color:var(--wnl-accent)]">AI 약물·도구 검색기</div>
-            <div className="mt-1 text-[13px] text-ios-sub">간호 현장에서 바로 쓰는 약물·의료기구·상황 대응 정보를 검색형으로 제공합니다.</div>
+            <div className="text-[31px] font-extrabold tracking-[-0.02em] text-[color:var(--wnl-accent)]">{t("AI 약물·도구 검색기")}</div>
+            <div className="mt-1 text-[13px] text-ios-sub">{t("간호 현장에서 바로 쓰는 약물·의료기구·상황 대응 정보를 검색형으로 제공합니다.")}</div>
           </div>
           <Link href="/tools" className="pt-1 text-[12px] font-semibold text-[color:var(--wnl-accent)]">
-            Tool 목록
+            {t("툴 목록")}
           </Link>
         </div>
 
         <Card className={`p-3 ${FLAT_CARD_CLASS}`}>
           <div className="space-y-4">
             <div className="space-y-2">
-              <div className="text-[13px] font-semibold text-ios-text">근무 모드</div>
+              <div className="text-[13px] font-semibold text-ios-text">{t("근무 모드")}</div>
               <div className={SEGMENT_WRAPPER_CLASS}>
                 {MODE_OPTIONS.map((option) => {
                   const active = mode === option.value;
@@ -1091,7 +1192,7 @@ export function ToolMedSafetyPage() {
                       }`}
                       onClick={() => setMode(option.value)}
                     >
-                      {option.label}
+                      {t(option.label)}
                     </button>
                   );
                 })}
@@ -1099,7 +1200,7 @@ export function ToolMedSafetyPage() {
             </div>
 
             <div className="space-y-2">
-              <div className="text-[13px] font-semibold text-ios-text">질문 유형</div>
+              <div className="text-[13px] font-semibold text-ios-text">{t("질문 유형")}</div>
               <div className={SEGMENT_WRAPPER_CLASS}>
                 {QUERY_INTENT_OPTIONS.map((option) => {
                   const active = queryIntent === option.value;
@@ -1121,20 +1222,20 @@ export function ToolMedSafetyPage() {
                         }
                       }}
                     >
-                      {option.label}
+                      {t(option.label)}
                     </button>
                   );
                 })}
               </div>
               <div className="text-[12px] leading-5 text-ios-sub">
-                {QUERY_INTENT_OPTIONS.find((option) => option.value === queryIntent)?.hint}
+                {t(QUERY_INTENT_OPTIONS.find((option) => option.value === queryIntent)?.hint ?? "")}
               </div>
             </div>
 
             {isScenarioIntent ? (
               <>
                 <div className="space-y-2">
-                  <div className="text-[13px] font-semibold text-ios-text">현재 상황</div>
+                  <div className="text-[13px] font-semibold text-ios-text">{t("현재 상황")}</div>
                   <div className="flex flex-wrap gap-2">
                     {SITUATION_OPTIONS.map((option) => {
                       const active = situation === option.value;
@@ -1149,13 +1250,13 @@ export function ToolMedSafetyPage() {
                           }`}
                           onClick={() => setSituation(option.value)}
                         >
-                          {option.label}
+                          {t(option.label)}
                         </button>
                       );
                     })}
                   </div>
                   <div className="rounded-xl border border-ios-sep bg-ios-bg px-3 py-2 text-[12px] leading-5 text-ios-sub">
-                    {situationInputGuide.cue}
+                    {t(situationInputGuide.cue)}
                   </div>
                 </div>
 
@@ -1163,14 +1264,14 @@ export function ToolMedSafetyPage() {
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   className="min-h-[120px] bg-white text-[16px] leading-7 text-ios-text"
-                  placeholder={situationInputGuide.queryPlaceholder}
+                  placeholder={t(situationInputGuide.queryPlaceholder)}
                 />
 
                 <Textarea
                   value={patientSummary}
                   onChange={(event) => setPatientSummary(event.target.value)}
                   className="min-h-[84px] bg-white text-[15px] leading-6 text-ios-text"
-                  placeholder={situationInputGuide.summaryPlaceholder}
+                  placeholder={t(situationInputGuide.summaryPlaceholder)}
                 />
               </>
             ) : (
@@ -1179,12 +1280,12 @@ export function ToolMedSafetyPage() {
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   className="h-12 text-[16px]"
-                  placeholder={nameOnlyGuide?.placeholder}
+                  placeholder={nameOnlyGuide?.placeholder ? t(nameOnlyGuide.placeholder) : ""}
                   autoCapitalize="off"
                   autoCorrect="off"
                   spellCheck={false}
                 />
-                <div className="text-[12px] leading-5 text-ios-sub">{nameOnlyGuide?.helper}</div>
+                <div className="text-[12px] leading-5 text-ios-sub">{nameOnlyGuide?.helper ? t(nameOnlyGuide.helper) : null}</div>
               </div>
             )}
 
@@ -1201,18 +1302,18 @@ export function ToolMedSafetyPage() {
                 }}
               />
               <Button variant="secondary" className={SECONDARY_FLAT_BTN} onClick={() => fileInputRef.current?.click()}>
-                사진 업로드
+                {t("사진 업로드")}
               </Button>
               <Button variant="secondary" className={SECONDARY_FLAT_BTN} onClick={() => void startCamera()} disabled={cameraStarting}>
-                {cameraStarting ? "카메라 연결 중..." : "실시간 카메라"}
+                {cameraStarting ? t("카메라 연결 중...") : t("실시간 카메라")}
               </Button>
               {imageFile ? (
                 <Button variant="secondary" className={SECONDARY_FLAT_BTN} onClick={clearImage}>
-                  이미지 제거
+                  {t("이미지 제거")}
                 </Button>
               ) : null}
               <Button variant="secondary" className={PRIMARY_FLAT_BTN} onClick={() => void runAnalyze()} disabled={isLoading}>
-                {isLoading ? "AI 분석 중..." : "AI 분석 실행"}
+                {isLoading ? t("AI 분석 중...") : t("AI 분석 실행")}
               </Button>
             </div>
 
@@ -1223,10 +1324,10 @@ export function ToolMedSafetyPage() {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Button variant="secondary" className={PRIMARY_FLAT_BTN} onClick={() => void captureFromCamera()}>
-                    현재 화면 촬영
+                    {t("현재 화면 촬영")}
                   </Button>
                   <Button variant="secondary" className={SECONDARY_FLAT_BTN} onClick={stopCamera}>
-                    카메라 닫기
+                    {t("카메라 닫기")}
                   </Button>
                 </div>
               </div>
@@ -1235,12 +1336,14 @@ export function ToolMedSafetyPage() {
             {previewUrl ? (
               <div className="overflow-hidden rounded-2xl border border-ios-sep p-2">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={previewUrl} alt="업로드 이미지 미리보기" className="max-h-[220px] w-full rounded-xl object-contain" />
+                <img src={previewUrl} alt={t("업로드 이미지 미리보기")} className="max-h-[220px] w-full rounded-xl object-contain" />
                 {imageFile ? <div className="mt-2 text-[12px] text-ios-sub">{imageFile.name}</div> : null}
               </div>
             ) : null}
 
-            {cameraError ? <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-[14px] font-semibold text-amber-700">{cameraError}</div> : null}
+            {cameraError ? (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-[14px] font-semibold text-amber-700">{cameraError}</div>
+            ) : null}
             {error ? <div className="rounded-2xl border border-red-200 bg-red-50 p-3 text-[15px] font-semibold text-red-700">{error}</div> : null}
           </div>
         </Card>
@@ -1249,11 +1352,14 @@ export function ToolMedSafetyPage() {
           {resultPanel}
 
           <div className="mt-4 border-t border-ios-sep pt-3 text-[14px] leading-6 text-ios-sub">
-            본 결과는 참고용 자동 생성 정보이며 의료행위 판단의 근거로 사용할 수 없습니다. 제공자는 본 결과의 사용으로 발생한 진단·치료·투약 결정 및 결과에 대해 책임을 지지 않습니다. 모든 처치는 병원 지침, 처방, 의료진 확인을 우선해 결정해 주세요.
+            {t(
+              "본 결과는 참고용 자동 생성 정보이며 의료행위 판단의 근거로 사용할 수 없습니다. 제공자는 본 결과의 사용으로 발생한 진단·치료·투약 결정 및 결과에 대해 책임을 지지 않습니다. 모든 처치는 병원 지침, 처방, 의료진 확인을 우선해 결정해 주세요."
+            )}
           </div>
         </Card>
       </div>
-      <MedSafetyAnalyzingOverlay open={isLoading} />
+      <MedSafetyAnalyzingOverlay open={showAnalyzingOverlay} t={t} />
+      <EnglishTranslationPendingPopup open={englishTranslationPending} t={t} />
     </>
   );
 }

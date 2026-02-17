@@ -27,12 +27,12 @@ const PLAN_MAP: Record<PlanTier, PlanDefinition> = {
   pro: {
     tier: "pro",
     title: "Pro",
-    description: "Advanced AI analysis with high precision workflows.",
+    description: "AI 맞춤회복 + AI 약물기구안전가이드 포함",
     priceKrw: 12900,
     periodDays: DEFAULT_PERIOD_DAYS,
     orderName: "RNest Pro Monthly",
     checkoutEnabled: true,
-    features: ["Advanced AI analysis", "Precision recovery planning", "Weekly report and insights"],
+    features: ["AI 맞춤회복", "AI 약물기구안전가이드"],
   },
 };
 
