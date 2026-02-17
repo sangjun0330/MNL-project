@@ -84,7 +84,7 @@ type MedSafetyCacheRecord = {
 
 const MED_SAFETY_CACHE_KEY = "med_safety_cache_v1";
 const MED_SAFETY_LAST_MODEL_KEY = "med_safety_last_model_v1";
-const MED_SAFETY_DEFAULT_MODEL = "gpt-5-mini-202508-07";
+const MED_SAFETY_DEFAULT_MODEL = "gpt-5.1";
 const MED_SAFETY_CLIENT_TIMEOUT_MS = 125_000;
 const RETRY_WITH_DATA_MESSAGE = "네트워크가 불안정합니다. 데이터(모바일 네트워크)를 켠 뒤 다시 AI 분석 실행을 눌러 시도해 주세요.";
 
@@ -627,6 +627,7 @@ function MedSafetyAnalyzingOverlay({ open, t }: { open: boolean; t: TranslateFn 
         <div className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-transparent via-[#163B73] to-transparent wnl-recovery-progress" />
         <div className="text-[23px] font-extrabold tracking-[-0.02em] text-ios-text">{t("AI 분석 중")}</div>
         <p className="mt-2 text-[14px] leading-6 text-ios-sub">{t("약물/의료도구 안전 포인트를 정리하고 있습니다. 잠시만 기다려 주세요.")}</p>
+        <p className="mt-1 text-[12.5px] leading-5 text-ios-sub">{t("네트워크/이미지 상황에 따라 최대 2분 정도 걸릴 수 있습니다.")}</p>
         <div className="mt-4 flex items-center gap-2">
           <span className="h-2 w-2 rounded-full bg-[color:var(--wnl-accent)] wnl-dot-pulse" />
           <span className="h-2 w-2 rounded-full bg-[color:var(--wnl-accent)] wnl-dot-pulse [animation-delay:160ms]" />
@@ -716,7 +717,7 @@ export function ToolMedSafetyPage() {
     if (typeof window === "undefined") return;
     try {
       const stored = String(window.localStorage.getItem(MED_SAFETY_LAST_MODEL_KEY) ?? "").trim();
-      if (stored && !/^gpt-4\.1-mini$/i.test(stored)) {
+      if (stored && !/^(gpt-4\.1-mini|gpt-5-mini-202508-07)$/i.test(stored)) {
         setPreferredModel(stored);
         return;
       }
@@ -1102,7 +1103,7 @@ export function ToolMedSafetyPage() {
           </div>
           {result.suggestedNames && result.suggestedNames.length ? (
             <div className="mt-3 rounded-2xl border border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] px-3 py-3">
-              <div className="text-[15px] font-bold text-[color:var(--wnl-accent)]">{t("이걸 찾으신건가요?")}</div>
+              <div className="text-[15px] font-bold text-[color:var(--wnl-accent)]">{t("이걸 찾으시고 계신가요?")}</div>
               <ul className="mt-1.5 list-disc space-y-0.5 pl-4 text-[14px] leading-6 text-ios-text">
                 {result.suggestedNames.slice(0, 3).map((name, idx) => (
                   <li key={`suggested-${idx}`}>{name}</li>

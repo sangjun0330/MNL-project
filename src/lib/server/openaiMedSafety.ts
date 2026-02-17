@@ -69,8 +69,8 @@ type ResponsesAttempt = {
 };
 
 type ResponseVerbosity = "low" | "medium" | "high";
-const MED_SAFETY_PRIMARY_MODEL = "gpt-5-mini-202508-07";
-const MED_SAFETY_DEFAULT_FALLBACK_MODELS = [MED_SAFETY_PRIMARY_MODEL, "gpt-5.1", "gpt-4o-mini"];
+const MED_SAFETY_PRIMARY_MODEL = "gpt-5.1";
+const MED_SAFETY_DEFAULT_FALLBACK_MODELS = [MED_SAFETY_PRIMARY_MODEL, "gpt-5-mini-202508-07", "gpt-4o-mini"];
 
 export type OpenAIMedSafetyOutput = {
   result: MedSafetyAnalysisResult;
@@ -113,7 +113,7 @@ function dedupeModels(models: string[]) {
 
 function resolveModelCandidates(preferredModel?: string) {
   const preferred = String(preferredModel ?? "").trim();
-  const safePreferredModel = /^gpt-4\.1-mini$/i.test(preferred) ? "" : preferred;
+  const safePreferredModel = /^(gpt-4\.1-mini|gpt-5-mini-202508-07)$/i.test(preferred) ? "" : preferred;
   const configuredPrimary = String(process.env.OPENAI_MED_SAFETY_MODEL ?? "").trim();
   const configuredFallbacks = splitModelList(process.env.OPENAI_MED_SAFETY_FALLBACK_MODELS ?? "");
   const merged = dedupeModels([
@@ -355,10 +355,11 @@ function buildDeveloperPrompt(locale: "ko" | "en") {
       "약물/의료기구/상황 질문에 대해 현장에서 즉시 쓸 수 있는 고품질 정보를 제공한다.",
       "절대 사실을 지어내지 마라. 특히 약물/의료기구의 존재 여부가 불확실하면 임상 내용을 생성하지 마라.",
       "약물/의료기구 질의에서 정확히 일치하는 대상을 확신하지 못하면 반드시 NOT_FOUND 블록만 출력하라.",
+      "약물/의료기구 질의에서 식별 가능하면 입력 오타를 그대로 쓰지 말고 정식명칭으로 정규화해 답하라.",
       "정해진 출력 템플릿을 강제하지 말고, 질문 성격에 맞는 최적의 구조로 답한다.",
       "불확실하거나 기관별 차이가 큰 내용은 단정하지 말고 확인 포인트를 명확히 표시한다.",
       "진단/처방 결정을 대체하지 않으며 기관 프로토콜·의사 지시·제조사 IFU를 최종 기준으로 둔다.",
-      "품질 기준: 핵심 우선, 중복 제거, 실수 방지 포인트 포함, 모바일에서도 한눈에 읽히는 문장 길이 유지.",
+      "품질 기준: 핵심 우선, 중복 제거, 실수 방지 포인트 포함, 모바일에서도 한눈에 읽히는 문장 길이 유지, 내용 밀도 높게.",
       "같은 의미의 문장을 반복하거나 재서술하지 않는다. 같은 정보는 1번만 전달한다.",
       "출력은 일반 텍스트 중심으로 작성하고 마크다운 장식(##, **, 코드블록)은 사용하지 않는다.",
     ].join("\n");
@@ -368,10 +369,11 @@ function buildDeveloperPrompt(locale: "ko" | "en") {
     "Provide high-quality, practical, safety-first guidance for medication, device, and scenario queries.",
     "Never fabricate facts. If medication/device identity is uncertain, do not generate clinical details.",
     "For medication/device queries, if exact identity cannot be confidently verified, output NOT_FOUND block only.",
+    "When identity is verifiable, normalize typo input to the official/canonical name in output.",
     "Do not force rigid output templates; structure response to best fit the query.",
     "Mark uncertain or institution-dependent details as verification points.",
     "Do not replace diagnosis/prescribing decisions; local protocol and IFU are final.",
-    "Quality bar: action-first, concise, de-duplicated, mobile-readable, high signal-to-noise.",
+    "Quality bar: action-first, concise, de-duplicated, high-density practical detail for bedside use.",
     "Use plain text and avoid markdown ornaments.",
   ].join("\n");
 }
@@ -380,9 +382,13 @@ function buildMedicationPrompt(query: string, contextJson: string) {
   return [
     "질문 약물에 대해 간호사를 위한 검색엔진 답변을 작성하라.",
     "가장 먼저 입력 약물명이 실제로 식별 가능한지 확인하라.",
+    "입력이 오타/약어/띄어쓰기 오류여도 식별 가능하면 정식명칭으로 정규화해 출력하라.",
     "출력 첫 줄은 반드시 아래 둘 중 하나여야 한다:",
     "ENTITY_VERIFIED: YES",
     "ENTITY_VERIFIED: NO",
+    "ENTITY_VERIFIED: YES라면 둘째 줄과 셋째 줄을 반드시 출력하라:",
+    "ENTITY_NAME: <정식명칭 1개>",
+    "ENTITY_ALIASES: <대표 별칭/동의어 1~3개; 세미콜론 구분, 없으면 NONE>",
     "정확히 일치하는 약물을 확신하지 못하면 아래 형식만 출력하고 종료하라:",
     "NOT_FOUND",
     "입력명: <원문 질의>",
@@ -391,6 +397,7 @@ function buildMedicationPrompt(query: string, contextJson: string) {
     "요청: 정확한 공식명(성분명/제품명)을 다시 입력해 주세요.",
     "NOT_FOUND 모드에서는 작용/적응증/용량/주의사항 등 임상 내용을 절대 생성하지 마라.",
     "가독성과 학습 가치가 높은 고품질 답변을 작성하라. 단순 요약이 아니라 실무+학습이 동시에 되도록 작성하라.",
+    "품질 하한: ENTITY_VERIFIED: YES일 때 본문은 최소 20줄 이상, 핵심 카테고리 누락 없이 작성하라.",
     "출력 규칙: 마크다운 기호(##, ###, **, ---, ``` )를 쓰지 말고 일반 텍스트로만 작성하라.",
     "중복 문장/중복 단락을 반복하지 말고, 모바일 화면에서 읽기 쉽게 짧은 문장과 줄바꿈으로 작성하라.",
     "각 불릿은 완결 문장 1개로 작성하고, 문장 중간에서 줄바꿈하지 마라.",
@@ -464,9 +471,13 @@ function buildDevicePrompt(query: string, contextJson: string) {
   return [
     "질문 의료기구에 대해 간호사를 위한 검색엔진 답변을 작성하라.",
     "가장 먼저 입력 기구명이 실제로 식별 가능한지 확인하라.",
+    "입력이 오타/약어/띄어쓰기 오류여도 식별 가능하면 정식명칭으로 정규화해 출력하라.",
     "출력 첫 줄은 반드시 아래 둘 중 하나여야 한다:",
     "ENTITY_VERIFIED: YES",
     "ENTITY_VERIFIED: NO",
+    "ENTITY_VERIFIED: YES라면 둘째 줄과 셋째 줄을 반드시 출력하라:",
+    "ENTITY_NAME: <정식명칭 1개>",
+    "ENTITY_ALIASES: <대표 별칭/동의어 1~3개; 세미콜론 구분, 없으면 NONE>",
     "정확히 일치하는 기구를 확신하지 못하면 아래 형식만 출력하고 종료하라:",
     "NOT_FOUND",
     "입력명: <원문 질의>",
@@ -475,6 +486,7 @@ function buildDevicePrompt(query: string, contextJson: string) {
     "요청: 정확한 공식명(제품명/기구명)을 다시 입력해 주세요.",
     "NOT_FOUND 모드에서는 사용법/적응증/경고 등 임상 내용을 절대 생성하지 마라.",
     "가독성과 학습 가치가 높은 고품질 답변을 작성하라. 단순 요약이 아니라 실무+학습이 동시에 되도록 작성하라.",
+    "품질 하한: ENTITY_VERIFIED: YES일 때 본문은 최소 20줄 이상, 핵심 카테고리 누락 없이 작성하라.",
     "출력 규칙: 마크다운 기호(##, ###, **, ---, ``` )를 쓰지 말고 일반 텍스트로만 작성하라.",
     "중복 문장/중복 단락을 반복하지 말고, 모바일 화면에서 읽기 쉽게 짧은 문장과 줄바꿈으로 작성하라.",
     "각 불릿은 완결 문장 1개로 작성하고, 문장 중간에서 줄바꿈하지 마라.",
@@ -914,90 +926,53 @@ function detectItemType(intent: QueryIntent, text: string): MedSafetyItemType {
   return "unknown";
 }
 
-const MEDICATION_SUGGESTION_SEEDS = [
-  "노르에피네프린",
-  "에피네프린",
-  "도파민",
-  "도부타민",
-  "바소프레신",
-  "페닐에프린",
-  "헤파린",
-  "와파린",
-  "푸로세미드",
-  "반코마이신",
-  "피페라실린/타조박탐",
-  "세프트리악손",
-  "아미오다론",
-  "아데노신",
-  "레귤러 인슐린",
-  "글라진 인슐린",
-  "프로포폴",
-  "미다졸람",
-  "펜타닐",
-  "모르핀",
-  "norepinephrine",
-  "epinephrine",
-  "dopamine",
-  "dobutamine",
-  "vasopressin",
-  "phenylephrine",
-  "heparin",
-  "warfarin",
-  "furosemide",
-  "vancomycin",
-  "piperacillin/tazobactam",
-  "ceftriaxone",
-  "amiodarone",
-  "adenosine",
-  "insulin regular",
-  "insulin glargine",
-  "propofol",
-  "midazolam",
-  "fentanyl",
-  "morphine",
+type CanonicalEntity = {
+  canonical: string;
+  aliases: string[];
+};
+
+const MEDICATION_CANONICAL_ENTITIES: CanonicalEntity[] = [
+  { canonical: "노르에피네프린", aliases: ["노르피네프린", "norepinephrine", "noradrenaline", "levarterenol"] },
+  { canonical: "에피네프린", aliases: ["epinephrine", "adrenaline"] },
+  { canonical: "도파민", aliases: ["dopamine"] },
+  { canonical: "도부타민", aliases: ["dobutamine"] },
+  { canonical: "바소프레신", aliases: ["vasopressin"] },
+  { canonical: "페닐에프린", aliases: ["phenylephrine"] },
+  { canonical: "헤파린", aliases: ["heparin"] },
+  { canonical: "와파린", aliases: ["warfarin"] },
+  { canonical: "푸로세미드", aliases: ["furosemide", "lasix"] },
+  { canonical: "반코마이신", aliases: ["vancomycin"] },
+  { canonical: "피페라실린/타조박탐", aliases: ["piperacillin/tazobactam", "zosyn"] },
+  { canonical: "세프트리악손", aliases: ["ceftriaxone"] },
+  { canonical: "아미오다론", aliases: ["amiodarone"] },
+  { canonical: "아데노신", aliases: ["adenosine"] },
+  { canonical: "레귤러 인슐린", aliases: ["insulin regular", "regular insulin"] },
+  { canonical: "글라진 인슐린", aliases: ["insulin glargine", "glargine"] },
+  { canonical: "프로포폴", aliases: ["propofol"] },
+  { canonical: "미다졸람", aliases: ["midazolam"] },
+  { canonical: "펜타닐", aliases: ["fentanyl"] },
+  { canonical: "모르핀", aliases: ["morphine"] },
 ];
 
-const DEVICE_SUGGESTION_SEEDS = [
-  "인퓨전 펌프",
-  "시린지 펌프",
-  "정맥주입 펌프",
-  "펜타닐 PCA 펌프",
-  "폴리 카테터",
-  "유치도뇨관",
-  "중심정맥관",
-  "PICC 라인",
-  "동맥 라인",
-  "삼방콕",
-  "연장 세트",
-  "혈액투석 카테터",
-  "비재호흡 마스크",
-  "앰부백",
-  "인공호흡기",
-  "바이레벨 PAP",
-  "고유량 비강 캐뉼라",
-  "맥박산소측정기",
-  "제세동기",
-  "흡인 카테터",
-  "infusion pump",
-  "syringe pump",
-  "iv infusion pump",
-  "fentanyl pca pump",
-  "foley catheter",
-  "urinary catheter",
-  "central line",
-  "picc line",
-  "arterial line",
-  "three-way stopcock",
-  "extension set",
-  "hemodialysis catheter",
-  "non-rebreather mask",
-  "ambu bag",
-  "ventilator",
-  "bi-level pap",
-  "high-flow nasal cannula",
-  "pulse oximeter",
-  "defibrillator",
-  "suction catheter",
+const DEVICE_CANONICAL_ENTITIES: CanonicalEntity[] = [
+  { canonical: "인퓨전 펌프", aliases: ["infusion pump", "iv infusion pump"] },
+  { canonical: "시린지 펌프", aliases: ["syringe pump"] },
+  { canonical: "펜타닐 PCA 펌프", aliases: ["fentanyl pca pump", "pca pump"] },
+  { canonical: "유치도뇨관", aliases: ["foley catheter", "urinary catheter", "폴리 카테터"] },
+  { canonical: "중심정맥관", aliases: ["central line", "cvc"] },
+  { canonical: "PICC 라인", aliases: ["picc", "picc line"] },
+  { canonical: "동맥 라인", aliases: ["arterial line", "a-line"] },
+  { canonical: "삼방콕", aliases: ["three-way stopcock", "stopcock"] },
+  { canonical: "연장 세트", aliases: ["extension set"] },
+  { canonical: "혈액투석 카테터", aliases: ["hemodialysis catheter"] },
+  { canonical: "비재호흡 마스크", aliases: ["non-rebreather mask", "nrb mask"] },
+  { canonical: "앰부백", aliases: ["ambu bag", "bag valve mask", "bvm"] },
+  { canonical: "인공호흡기", aliases: ["ventilator"] },
+  { canonical: "바이레벨 PAP", aliases: ["bi-level pap", "bipap"] },
+  { canonical: "고유량 비강 캐뉼라", aliases: ["high-flow nasal cannula", "hfnc"] },
+  { canonical: "맥박산소측정기", aliases: ["pulse oximeter", "spo2 monitor"] },
+  { canonical: "제세동기", aliases: ["defibrillator"] },
+  { canonical: "흡인 카테터", aliases: ["suction catheter"] },
 ];
 
 function normalizeEntityKey(value: string) {
@@ -1009,17 +984,67 @@ function normalizeEntityKey(value: string) {
     .trim();
 }
 
-function containsEntityReference(query: string, answer: string) {
+function normalizeEntityCompact(value: string) {
+  return normalizeEntityKey(value).replace(/\s+/g, "");
+}
+
+function canonicalEntitiesByIntent(intent: QueryIntent) {
+  return intent === "device" ? DEVICE_CANONICAL_ENTITIES : MEDICATION_CANONICAL_ENTITIES;
+}
+
+function scoreAliasMatch(queryCompact: string, aliasCompact: string) {
+  if (!queryCompact || !aliasCompact) return 0;
+  if (queryCompact === aliasCompact) return 1;
+  if (aliasCompact.includes(queryCompact) || queryCompact.includes(aliasCompact)) return 0.97;
+  const distance = levenshteinDistance(queryCompact.slice(0, 40), aliasCompact.slice(0, 40));
+  const score = 1 - distance / Math.max(queryCompact.length, aliasCompact.length);
+  const prefixPenalty = queryCompact[0] && aliasCompact[0] && queryCompact[0] !== aliasCompact[0] ? 0.08 : 0;
+  return score - prefixPenalty;
+}
+
+function resolveCanonicalEntityFromQuery(query: string, intent: QueryIntent): CanonicalEntity | null {
+  const queryCompact = normalizeEntityCompact(query);
+  if (!queryCompact || queryCompact.length < 3) return null;
+
+  const entries = canonicalEntitiesByIntent(intent);
+  let best: { entry: CanonicalEntity; score: number } | null = null;
+
+  for (const entry of entries) {
+    const aliases = dedupeLimit([entry.canonical, ...entry.aliases], 20);
+    let localBest = 0;
+    for (const alias of aliases) {
+      const aliasCompact = normalizeEntityCompact(alias);
+      if (!aliasCompact) continue;
+      const score = scoreAliasMatch(queryCompact, aliasCompact);
+      if (score > localBest) localBest = score;
+    }
+    if (!best || localBest > best.score) {
+      best = { entry, score: localBest };
+    }
+  }
+
+  if (!best) return null;
+  const threshold = queryCompact.length <= 5 ? 0.9 : 0.82;
+  if (best.score < threshold) return null;
+  return best.entry;
+}
+
+function containsEntityReference(query: string, answer: string, canonicalName?: string | null) {
   const q = normalizeEntityKey(query);
+  const canonical = normalizeEntityKey(canonicalName ?? "");
   if (!q) return true;
   const answerNorm = normalizeEntityKey(answer);
   if (!answerNorm) return false;
 
   const qCompact = q.replace(/\s+/g, "");
   const answerCompact = answerNorm.replace(/\s+/g, "");
+  const canonicalCompact = canonical.replace(/\s+/g, "");
 
   if (q.length >= 3 && answerNorm.includes(q)) return true;
   if (qCompact.length >= 3 && answerCompact.includes(qCompact)) return true;
+  if (canonical && answerNorm.includes(canonical)) return true;
+  if (canonicalCompact.length >= 3 && answerCompact.includes(canonicalCompact)) return true;
+  if (canonical && scoreAliasMatch(qCompact, canonicalCompact) >= 0.82) return true;
 
   const tokens = q.split(" ").filter((token) => token.length >= 3);
   if (!tokens.length) return true;
@@ -1075,20 +1100,21 @@ function cleanCandidateName(value: string) {
 }
 
 function fallbackSuggestionsFromQuery(query: string, intent: QueryIntent) {
-  const q = normalizeEntityKey(query).replace(/\s+/g, "");
-  if (!q || q.length < 3) return [] as string[];
-  const seeds = intent === "device" ? DEVICE_SUGGESTION_SEEDS : MEDICATION_SUGGESTION_SEEDS;
-  const scored = seeds
-    .map((name) => {
-      const normalizedName = normalizeEntityKey(name).replace(/\s+/g, "");
-      if (!normalizedName) return { name, score: 0 };
-      if (normalizedName.includes(q) || q.includes(normalizedName)) return { name, score: 0.98 };
-      const distance = levenshteinDistance(q.slice(0, 40), normalizedName.slice(0, 40));
-      const base = 1 - distance / Math.max(q.length, normalizedName.length);
-      const prefixBoost = q[0] === normalizedName[0] ? 0.06 : 0;
-      return { name, score: base + prefixBoost };
+  const queryCompact = normalizeEntityCompact(query);
+  if (!queryCompact || queryCompact.length < 3) return [] as string[];
+
+  const entries = canonicalEntitiesByIntent(intent);
+  const scored = entries
+    .map((entry) => {
+      const aliases = dedupeLimit([entry.canonical, ...entry.aliases], 20);
+      const score = aliases.reduce((best, alias) => {
+        const aliasCompact = normalizeEntityCompact(alias);
+        if (!aliasCompact) return best;
+        return Math.max(best, scoreAliasMatch(queryCompact, aliasCompact));
+      }, 0);
+      return { name: entry.canonical, score };
     })
-    .filter((row) => row.score >= 0.42)
+    .filter((row) => row.score >= 0.52)
     .sort((a, b) => b.score - a.score)
     .slice(0, 3)
     .map((row) => row.name);
@@ -1112,10 +1138,16 @@ function extractSuggestedNames(rawAnswer: string, query: string, intent: QueryIn
   };
 
   for (const line of lines) {
-    if (/^ENTITY_VERIFIED\s*[:=]/i.test(line) || /^NOT_FOUND$/i.test(line) || /^INPUT(_NAME)?\s*[:=]/i.test(line)) {
+    if (
+      /^ENTITY_VERIFIED\s*[:=]/i.test(line) ||
+      /^NOT_FOUND$/i.test(line) ||
+      /^INPUT(_NAME)?\s*[:=]/i.test(line) ||
+      /^(ENTITY_NAME|OFFICIAL_NAME|CANONICAL_NAME|정식명칭|공식명)\s*[:=]/i.test(line) ||
+      /^(ENTITY_ALIASES|ALIASES|별칭)\s*[:=]/i.test(line)
+    ) {
       continue;
     }
-    if (/^(CANDIDATES?|MAYBE_MEANT|후보|혹시.*찾으신건가요)\s*[:：]?/i.test(line)) {
+    if (/^(CANDIDATES?|MAYBE_MEANT|후보|혹시.*찾으시고\s*계신가요)\s*[:：]?/i.test(line)) {
       inCandidates = true;
       const inline = line.split(/[:：]/).slice(1).join(":").trim();
       if (inline && !/^\(?none\)?$/i.test(inline)) {
@@ -1156,6 +1188,40 @@ function parseEntityVerification(text: string): "yes" | "no" | "unknown" {
   return "unknown";
 }
 
+function parseEntityOfficialName(text: string) {
+  const lines = String(text ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  for (const line of lines) {
+    const hit = line.match(/^(ENTITY_NAME|OFFICIAL_NAME|CANONICAL_NAME|정식명칭|공식명)\s*[:=]\s*(.+)$/i);
+    if (!hit?.[2]) continue;
+    const clean = cleanLine(hit[2]);
+    if (!clean || /^none$/i.test(clean)) continue;
+    return clean.slice(0, 80);
+  }
+  return "";
+}
+
+function parseEntityAliases(text: string) {
+  const lines = String(text ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  for (const line of lines) {
+    const hit = line.match(/^(ENTITY_ALIASES|ALIASES|별칭)\s*[:=]\s*(.+)$/i);
+    if (!hit?.[2]) continue;
+    const value = hit[2].trim();
+    if (!value || /^(none|없음)$/i.test(value)) return [] as string[];
+    const list = value
+      .split(/[;,]/)
+      .map((token) => cleanCandidateName(token))
+      .filter(Boolean);
+    return dedupeLimit(list, 6);
+  }
+  return [] as string[];
+}
+
 function stripEntityControlLines(text: string) {
   return String(text ?? "")
     .split(/\r?\n/)
@@ -1163,6 +1229,10 @@ function stripEntityControlLines(text: string) {
     .filter((line) => line.length > 0)
     .filter((line) => !/^ENTITY_VERIFIED\s*[:=]/i.test(line))
     .filter((line) => !/^NOT_FOUND$/i.test(line))
+    .filter((line) => !/^(ENTITY_NAME|OFFICIAL_NAME|CANONICAL_NAME|정식명칭|공식명)\s*[:=]/i.test(line))
+    .filter((line) => !/^(ENTITY_ALIASES|ALIASES|별칭)\s*[:=]/i.test(line))
+    .filter((line) => !/^(CANDIDATES?|MAYBE_MEANT)\s*[:=]/i.test(line))
+    .filter((line) => !/^(후보|혹시.*찾으시고\s*계신가요)\s*[:：]?/i.test(line))
     .join("\n")
     .trim();
 }
@@ -1198,7 +1268,8 @@ function buildNotFoundResult(
       status: "CHECK",
       topActions: ko
         ? [
-            suggestedNames.length ? "이걸 찾으신건가요?" : "정확한 공식명을 다시 확인해 주세요.",
+            `입력하신 명칭: ${safeName}`,
+            suggestedNames.length ? "이걸 찾으시고 계신가요?" : "정확한 공식명을 다시 확인해 주세요.",
             ...suggestedNames.map((name, idx) => `${idx + 1}) ${name}`),
             suggestedNames.length
               ? "위 후보 중 정확한 이름 하나를 복사해서 다시 입력해 주세요."
@@ -1206,6 +1277,7 @@ function buildNotFoundResult(
             "철자·약어·공백을 확인하고 가능한 경우 full name으로 입력하세요.",
           ]
         : [
+            `Entered name: ${safeName}`,
             suggestedNames.length ? "Did you mean one of these?" : "Please verify the exact official name.",
             ...suggestedNames.map((name, idx) => `${idx + 1}) ${name}`),
             suggestedNames.length
@@ -1302,11 +1374,131 @@ function buildFallbackResult(params: AnalyzeParams, intent: QueryIntent, note: s
   };
 }
 
+function replaceEntityMentionForDisplay(text: string, query: string, canonicalName: string) {
+  const source = String(text ?? "");
+  const from = cleanLine(query);
+  const to = cleanLine(canonicalName);
+  if (!source || !from || !to) return source;
+  if (normalizeEntityCompact(from) === normalizeEntityCompact(to)) return source;
+  const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  let out = source.replace(new RegExp(escapeRegex(from), "gi"), to);
+  const compactFrom = from.replace(/\s+/g, "");
+  if (compactFrom.length >= 4 && compactFrom !== from) {
+    out = out.replace(new RegExp(escapeRegex(compactFrom), "gi"), to);
+  }
+  return out;
+}
+
+function qualityFallbackTemplates(intent: QueryIntent, locale: "ko" | "en", itemName: string) {
+  if (locale === "en") {
+    if (intent === "medication") {
+      return {
+        topActions: [
+          `Confirm order, route, unit, and patient before administering ${itemName}.`,
+          "Run two-person check for high-alert and look-alike/sound-alike medications.",
+          "Set infusion concentration/rate once, then perform reverse-check.",
+          "Prioritize first 15-minute reassessment after start/titration.",
+        ],
+        topNumbers: ["BP/HR/SpO2/mental status baseline", "Key labs/ECG points by medication class", "Current concentration and pump rate"],
+        topRisks: ["10x unit error (mg-mcg, units-mL)", "Wrong line/compatibility mismatch", "Delayed response to warning signs"],
+        compatibilityChecks: ["Line dedicated/shared policy", "Y-site compatibility and flush sequence", "Pump channel/line tracing double-check"],
+        monitor: ["Recheck at 5-15-30-60 minutes", "Document effect and adverse signals", "Escalate on threshold breach"],
+        holdRules: ["Hold/stop when severe hypotension, respiratory decline, or acute deterioration occurs"],
+        escalateWhen: ["Report immediately when vital signs are unstable or risk signals persist"],
+      };
+    }
+    if (intent === "device") {
+      return {
+        topActions: [
+          `Verify setup sequence and consumables before using ${itemName}.`,
+          "Check clamp/stopcock/line direction before start.",
+          "Confirm alarm meaning first, then troubleshoot top probable causes.",
+          "Escalate promptly when alarm persists after first-line fixes.",
+        ],
+        topNumbers: ["Initial 1-5 min function check", "Current settings and recent changes", "Patient response trend"],
+        topRisks: ["Wrong connection/channel", "Air/occlusion/position issue", "Alarm ignored or delayed"],
+        compatibilityChecks: ["Consumable-device compatibility", "Line routing and fixation", "Replacement criteria by IFU/protocol"],
+        monitor: ["Frequent reassessment after setting changes", "Skin/line/leak/infection signs", "Record alarm and interventions"],
+        holdRules: ["Stop use and switch route/device when severe malfunction or patient risk appears"],
+        escalateWhen: ["Call specialist/physician when unresolved critical alarm continues"],
+      };
+    }
+    return {
+      topActions: ["Confirm current condition first, then proceed with immediate priorities."],
+      topNumbers: ["Latest vitals and trend changes", "Current route/line/device status"],
+      topRisks: ["Acting with incomplete data", "Delayed escalation on deterioration"],
+      compatibilityChecks: ["Line and setup compatibility check"],
+      monitor: ["Reassess at 5-15-30-60 minutes"],
+      holdRules: ["Hold/stop when critical deterioration appears"],
+      escalateWhen: ["Report immediately when unstable findings persist"],
+    };
+  }
+
+  if (intent === "medication") {
+    return {
+      topActions: [
+        `${itemName} 투여 전 오더·환자·경로·단위를 먼저 재확인하세요.`,
+        "High-alert/LASA 가능성이 있으면 더블체크를 먼저 시행하세요.",
+        "농도/속도 설정 후 역산 검산을 반드시 수행하세요.",
+        "시작 또는 증량 후 15분 이내 재평가를 우선하세요.",
+      ],
+      topNumbers: ["혈압·맥박·SpO2·의식 baseline", "약물군별 핵심 검사값/ECG", "현재 농도와 펌프 속도"],
+      topRisks: ["mg↔mcg, units↔mL 단위 10배 오류", "라인/혼합 호환성 미확인", "경고 신호 지연 대응"],
+      compatibilityChecks: ["전용라인 필요 여부", "Y-site/혼합 가능 여부", "채널/라인 tracing 더블체크"],
+      monitor: ["5-15-30-60분 재평가", "효과·부작용 동시 확인", "기준 이탈 시 즉시 보고"],
+      holdRules: ["중증 저혈압·호흡저하·의식저하 등 급격한 악화 시 즉시 보류/중단"],
+      escalateWhen: ["활력징후 불안정 또는 위험 신호 지속 시 즉시 보고/호출"],
+    };
+  }
+  if (intent === "device") {
+    return {
+      topActions: [
+        `${itemName} 적용 전 준비물/연결 순서를 먼저 확인하세요.`,
+        "클램프·stopcock·라인 방향을 시작 전에 재확인하세요.",
+        "알람 발생 시 의미 확인 후 원인 Top3부터 순차 점검하세요.",
+        "1차 조치 후 지속 알람이면 즉시 보고하고 대체 루트를 준비하세요.",
+      ],
+      topNumbers: ["시작 1~5분 정상 작동 확인", "현재 세팅값/변경 이력", "환자 반응 추이"],
+      topRisks: ["채널/라인 오연결", "공기/폐색/위치 문제", "알람 무시 또는 지연 대응"],
+      compatibilityChecks: ["소모품-기구 호환성", "라인 꺾임·고정 상태", "교체/점검 기준(IFU·기관)"],
+      monitor: ["세팅 변경 직후 재평가 강화", "피부·누출·감염 징후 확인", "알람/조치 기록"],
+      holdRules: ["중대한 오작동 또는 환자 위해 징후 시 즉시 중지 후 대체"],
+      escalateWhen: ["치명 알람 지속·해결 불가 시 전문팀/의사 즉시 호출"],
+    };
+  }
+  return {
+    topActions: ["현재 상태를 먼저 확인하고 즉시 행동 우선순위를 정하세요."],
+    topNumbers: ["최신 활력징후와 변화 추이", "현재 라인/장비/투여 상태"],
+    topRisks: ["정보 부족 상태에서의 즉시 진행", "악화 신호 보고 지연"],
+    compatibilityChecks: ["라인·연결·셋업 호환성 확인"],
+    monitor: ["5-15-30-60분 간격 재평가"],
+    holdRules: ["중증 악화 신호 시 즉시 보류/중단"],
+    escalateWhen: ["불안정 소견 지속 시 즉시 보고/호출"],
+  };
+}
+
+function ensureMinList(primary: string[], fallback: string[], min: number, max: number) {
+  if (primary.length >= min) return dedupeLimit(primary, max);
+  return dedupeLimit([...primary, ...fallback], max);
+}
+
 function buildResultFromAnswer(params: AnalyzeParams, intent: QueryIntent, answer: string): MedSafetyAnalysisResult {
   const verification = parseEntityVerification(answer);
+  const officialNameFromControl = parseEntityOfficialName(answer);
+  const aliasesFromControl = parseEntityAliases(answer);
+  const canonicalFromQuery = intent === "medication" || intent === "device" ? resolveCanonicalEntityFromQuery(params.query, intent) : null;
   const answerWithoutControl = stripEntityControlLines(answer);
-  const normalized = sanitizeSearchAnswer(answerWithoutControl || answer);
-  const suggestedNames = extractSuggestedNames(answer, params.query, intent);
+  const normalizedRaw = sanitizeSearchAnswer(answerWithoutControl || answer);
+  const canonicalName =
+    cleanLine(officialNameFromControl || canonicalFromQuery?.canonical || params.query || params.imageName || "").slice(0, 50) || "조회 항목";
+  const normalized = replaceEntityMentionForDisplay(normalizedRaw, params.query, canonicalName);
+  const suggestedNames = dedupeLimit(
+    [
+      ...extractSuggestedNames(answer, params.query, intent),
+      ...(canonicalFromQuery?.canonical ? [canonicalFromQuery.canonical] : []),
+    ].filter((name) => normalizeEntityCompact(name) !== normalizeEntityCompact(params.query)),
+    3
+  );
   if (intent === "medication" || intent === "device") {
     if (verification === "no") {
       return buildNotFoundResult(params, intent, "entity_verification_no", suggestedNames);
@@ -1317,15 +1509,16 @@ function buildResultFromAnswer(params: AnalyzeParams, intent: QueryIntent, answe
     if (hasNotFoundSignal(normalized)) {
       return buildNotFoundResult(params, intent, "model_not_found_signal", suggestedNames);
     }
-    if (!containsEntityReference(params.query, normalized)) {
+    if (!containsEntityReference(params.query, normalized, canonicalName)) {
       return buildNotFoundResult(params, intent, "entity_reference_mismatch", suggestedNames);
     }
   }
-  const itemName = cleanLine(params.query || params.imageName || "").slice(0, 50) || "조회 항목";
+  const itemName = intent === "medication" || intent === "device" ? canonicalName : cleanLine(params.query || params.imageName || "").slice(0, 50) || "조회 항목";
   const status = detectStatus(normalized);
   const riskLevel = detectRiskLevel(normalized, status);
   const sentences = extractSentences(normalized);
   const bullets = extractBullets(normalized);
+  const templates = qualityFallbackTemplates(intent, params.locale, itemName);
 
   const topActions = dedupeLimit(
     [
@@ -1371,6 +1564,14 @@ function buildResultFromAnswer(params: AnalyzeParams, intent: QueryIntent, answe
     4
   );
   const sbar = buildSbar(normalized);
+  const aliases = dedupeLimit(
+    [
+      ...aliasesFromControl,
+      ...(canonicalFromQuery?.aliases ?? []),
+      ...pickLinesByPattern(normalized, /(별칭|alias|aka|다른 이름)/i, 4).map((line) => line.replace(/^(별칭|alias)\s*[:：]\s*/i, "")),
+    ],
+    6
+  );
 
   return {
     resultKind: intent === "scenario" ? "scenario" : intent,
@@ -1385,10 +1586,7 @@ function buildResultFromAnswer(params: AnalyzeParams, intent: QueryIntent, answe
     item: {
       name: itemName,
       type: detectItemType(intent, normalized),
-      aliases: dedupeLimit(
-        pickLinesByPattern(normalized, /(별칭|alias|aka|다른 이름)/i, 4).map((line) => line.replace(/^(별칭|alias)\s*[:：]\s*/i, "")),
-        4
-      ),
+      aliases,
       highRiskBadges:
         status === "STOP"
           ? ["즉시 중단/호출 검토"]
@@ -1400,19 +1598,19 @@ function buildResultFromAnswer(params: AnalyzeParams, intent: QueryIntent, answe
     },
     quick: {
       status,
-      topActions: topActions.length ? topActions : ["핵심 정보 재확인 후 진행"],
-      topNumbers: topNumbers.length ? topNumbers : ["핵심 활력·의식·라인 상태 확인"],
-      topRisks: topRisks.length ? topRisks : ["위험 신호 확인 및 기준 이탈 시 즉시 보고"],
+      topActions: ensureMinList(topActions, templates.topActions, 4, 8),
+      topNumbers: ensureMinList(topNumbers, templates.topNumbers, 3, 7),
+      topRisks: ensureMinList(topRisks, templates.topRisks, 3, 8),
     },
     do: {
-      steps: dedupeLimit([...topActions, ...bullets], 9),
-      calculatorsNeeded,
-      compatibilityChecks,
+      steps: ensureMinList(dedupeLimit([...topActions, ...bullets], 9), templates.topActions, 5, 9),
+      calculatorsNeeded: ensureMinList(calculatorsNeeded, templates.topNumbers, 2, 5),
+      compatibilityChecks: ensureMinList(compatibilityChecks, templates.compatibilityChecks, 2, 6),
     },
     safety: {
-      holdRules: holdRules.length ? holdRules : ["중요 기준 이탈 또는 급격한 악화 시 즉시 보류/중단"],
-      monitor: monitor.length ? monitor : ["상태에 따라 5-15-30-60분 간격 재평가"],
-      escalateWhen: escalateWhen.length ? escalateWhen : ["악화·응급 징후 발생 시 즉시 담당의/응급팀 호출"],
+      holdRules: ensureMinList(holdRules, templates.holdRules, 1, 6),
+      monitor: ensureMinList(monitor, templates.monitor, 2, 6),
+      escalateWhen: ensureMinList(escalateWhen, templates.escalateWhen, 1, 6),
     },
     institutionalChecks: institutionalChecks.length ? institutionalChecks : ["기관 프로토콜·약제부·IFU 확인 필요"],
     sbar,

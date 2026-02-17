@@ -763,8 +763,11 @@ const EN_EXTRA: Record<string, string> = {
   "핵심 안전 확인 필요": "Core safety check required",
   "표시할 분석 정보가 없습니다.": "No analysis details to display.",
   "이걸 찾으신건가요?": "Did you mean one of these?",
+  "이걸 찾으시고 계신가요?": "Is this what you were looking for?",
   "아래 후보 중 정확한 이름을 복사해 다시 입력해 주세요.":
     "Copy one exact candidate below and enter it again.",
+  "네트워크/이미지 상황에 따라 최대 2분 정도 걸릴 수 있습니다.":
+    "Depending on network/image conditions, this may take up to about 2 minutes.",
   "모드": "Mode",
   "유형": "Type",
   "상황": "Scenario",
