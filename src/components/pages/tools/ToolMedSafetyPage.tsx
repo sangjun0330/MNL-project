@@ -169,6 +169,7 @@ function parseErrorMessage(raw: string) {
   if (normalized.includes("query_or_image_required")) return "텍스트를 입력하거나 사진을 업로드해 주세요.";
   if (normalized.includes("image_too_large")) return "이미지 용량이 너무 큽니다. 6MB 이하로 다시 업로드해 주세요.";
   if (normalized.includes("image_type_invalid")) return "이미지 파일만 업로드할 수 있습니다.";
+  if (normalized.includes("client_timeout")) return RETRY_WITH_DATA_MESSAGE;
   if (normalized.includes("openai_timeout") || normalized.includes("aborted")) return RETRY_WITH_DATA_MESSAGE;
   if (normalized.includes("openai_network_")) return RETRY_WITH_DATA_MESSAGE;
   if (normalized.includes("openai_responses_401"))
@@ -249,7 +250,8 @@ function readMedSafetyCache(cacheKey: string): MedSafetyAnalyzeResult | null {
 function shouldRetryAnalyzeError(status: number, rawError: string) {
   const error = String(rawError ?? "").toLowerCase();
   if ([408, 409, 425, 429, 500, 502, 503, 504].includes(status)) return true;
-  if (/openai_network_|openai_timeout|openai_empty_text|openai_responses_(408|409|425|429|500|502|503|504)/.test(error)) return true;
+  if (/client_timeout|openai_network_|openai_timeout|openai_empty_text|openai_responses_(408|409|425|429|500|502|503|504)/.test(error))
+    return true;
   if (/openai_responses_403/.test(error) && /(html|forbidden|proxy|firewall|blocked|access denied|cloudflare)/.test(error)) return true;
   return false;
 }
@@ -262,16 +264,25 @@ async function waitMs(ms: number) {
 
 async function fetchAnalyzeWithTimeout(form: FormData, timeoutMs: number) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error("client_timeout"));
+    }, timeoutMs);
+  });
   try {
-    return await fetch("/api/tools/med-safety/analyze", {
-      method: "POST",
-      body: form,
-      cache: "no-store",
-      signal: controller.signal,
-    });
+    return (await Promise.race([
+      fetch("/api/tools/med-safety/analyze", {
+        method: "POST",
+        body: form,
+        cache: "no-store",
+        signal: controller.signal,
+      }),
+      timeoutPromise,
+    ])) as Response;
   } finally {
-    clearTimeout(timer);
+    if (timer) clearTimeout(timer);
   }
 }
 

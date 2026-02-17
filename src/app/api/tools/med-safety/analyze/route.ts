@@ -257,6 +257,7 @@ export async function POST(req: NextRequest) {
     const abort = new AbortController();
     const timeoutMs = resolveAnalyzeTimeoutMs();
     const timeout = setTimeout(() => abort.abort(), timeoutMs);
+    const routeStartedAt = Date.now();
 
     try {
       const analyzedAt = Date.now();
@@ -285,12 +286,17 @@ export async function POST(req: NextRequest) {
       });
 
       let payloadEn: MedSafetyResponseData | null = null;
+      const translateController = new AbortController();
+      const relayAbort = () => translateController.abort();
+      const translateTimeoutMs = locale === "en" ? 18_000 : 7_000;
+      const translateTimer = setTimeout(() => translateController.abort(), translateTimeoutMs);
+      abort.signal.addEventListener("abort", relayAbort);
       try {
         const translated = await translateMedSafetyToEnglish({
           result: analyzedKo.result,
           rawText: analyzedKo.rawText,
           model: analyzedKo.model,
-          signal: abort.signal,
+          signal: translateController.signal,
         });
         payloadEn = {
           ...payloadKo,
@@ -305,29 +311,40 @@ export async function POST(req: NextRequest) {
             : translated.debug,
         };
       } catch {
-        // 번역 실패 시에도 KO/EN 병행 저장 요구를 맞추기 위해 EN 직접 생성 fallback을 시도한다.
-        try {
-          const analyzedEn = await analyzeMedSafetyWithOpenAI({
-            query,
-            mode,
-            situation,
-            queryIntent,
-            patientSummary: patientSummary || undefined,
-            locale: "en",
-            imageDataUrl: imageDataUrl || undefined,
-            imageName: imageName || undefined,
-            preferredModel,
-            signal: abort.signal,
-          });
-          payloadEn = buildResponseData({
-            language: "en",
-            analyzedAt,
-            analyzed: analyzedEn,
-          });
-          payloadEn.fallbackReason = payloadEn.fallbackReason ? `en_direct:${payloadEn.fallbackReason}` : "en_direct";
-        } catch {
-          payloadEn = null;
+        // EN 직접 생성 fallback은 EN 요청에서만 수행해 응답 지연을 줄인다.
+        if (locale === "en") {
+          const elapsed = Date.now() - routeStartedAt;
+          const remainingMs = timeoutMs - elapsed;
+          if (remainingMs > 10_000) {
+            try {
+              const analyzedEn = await analyzeMedSafetyWithOpenAI({
+                query,
+                mode,
+                situation,
+                queryIntent,
+                patientSummary: patientSummary || undefined,
+                locale: "en",
+                imageDataUrl: imageDataUrl || undefined,
+                imageName: imageName || undefined,
+                preferredModel,
+                signal: abort.signal,
+              });
+              payloadEn = buildResponseData({
+                language: "en",
+                analyzedAt,
+                analyzed: analyzedEn,
+              });
+              payloadEn.fallbackReason = payloadEn.fallbackReason ? `en_direct:${payloadEn.fallbackReason}` : "en_direct";
+            } catch {
+              payloadEn = null;
+            }
+          } else {
+            payloadEn = null;
+          }
         }
+      } finally {
+        clearTimeout(translateTimer);
+        abort.signal.removeEventListener("abort", relayAbort);
       }
 
       const saveError = await safeSaveMedSafetyContent(userId, today, "ko", {

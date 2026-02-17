@@ -197,6 +197,13 @@ function resolveTotalBudgetMs() {
   return Math.max(15_000, Math.min(120_000, rounded));
 }
 
+function resolveTranslateTotalBudgetMs() {
+  const raw = Number(process.env.OPENAI_MED_SAFETY_TRANSLATE_BUDGET_MS ?? 14_000);
+  if (!Number.isFinite(raw)) return 14_000;
+  const rounded = Math.round(raw);
+  return Math.max(6_000, Math.min(60_000, rounded));
+}
+
 function truncateError(raw: string, size = 220) {
   const clean = String(raw ?? "")
     .replace(/\s+/g, " ")
@@ -1126,6 +1133,8 @@ export async function translateMedSafetyToEnglish(input: {
   const upstreamTimeoutMs = resolveUpstreamTimeoutMs();
   const networkRetries = resolveNetworkRetryCount();
   const networkRetryBaseMs = resolveNetworkRetryBaseMs();
+  const totalBudgetMs = resolveTranslateTotalBudgetMs();
+  const startedAt = Date.now();
 
   const translatedResult = cloneMedSafetyResult(input.result);
   let translatedRawText = normalizeText(input.rawText);
@@ -1271,10 +1280,21 @@ export async function translateMedSafetyToEnglish(input: {
     targetLines: string[],
     strictNoKorean = false
   ): Promise<{ translated: string[]; model: string }> => {
+    if (Date.now() - startedAt > totalBudgetMs) {
+      throw new Error("openai_translate_timeout_total_budget");
+    }
     let lastError = "openai_translate_failed";
     for (let modelIndex = 0; modelIndex < modelCandidates.length; modelIndex += 1) {
       const model = modelCandidates[modelIndex]!;
       for (let baseIndex = 0; baseIndex < apiBaseUrls.length; baseIndex += 1) {
+        if (Date.now() - startedAt > totalBudgetMs) {
+          throw new Error("openai_translate_timeout_total_budget");
+        }
+        const remainingMs = totalBudgetMs - (Date.now() - startedAt);
+        const timeoutForAttempt = Math.max(4_000, Math.min(upstreamTimeoutMs, remainingMs - 250));
+        if (!Number.isFinite(timeoutForAttempt) || timeoutForAttempt < 4_000) {
+          throw new Error("openai_translate_timeout_total_budget");
+        }
         const apiBaseUrl = apiBaseUrls[baseIndex]!;
         const attempt = await callResponsesApiWithRetry({
           apiKey,
@@ -1285,7 +1305,7 @@ export async function translateMedSafetyToEnglish(input: {
           apiBaseUrl,
           signal: input.signal,
           maxOutputTokens,
-          upstreamTimeoutMs,
+          upstreamTimeoutMs: timeoutForAttempt,
           verbosity: "medium",
           storeResponses: false,
           retries: networkRetries,
@@ -1310,6 +1330,9 @@ export async function translateMedSafetyToEnglish(input: {
   const chunks = splitChunks(lines, 14);
   const translatedLines: string[] = [];
   for (const chunk of chunks) {
+    if (Date.now() - startedAt > totalBudgetMs) {
+      throw new Error("openai_translate_timeout_total_budget");
+    }
     let chunkTranslated = await translateChunk(chunk, false);
     if (hangulRatio(chunkTranslated.translated) > 0.08) {
       chunkTranslated = await translateChunk(chunk, true);
