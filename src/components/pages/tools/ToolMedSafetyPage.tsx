@@ -30,6 +30,8 @@ type MedSafetyRiskLevel = "low" | "medium" | "high";
 
 type MedSafetyAnalyzeResult = {
   resultKind: MedSafetyResultKind;
+  notFound?: boolean;
+  notFoundReason?: string;
   oneLineConclusion: string;
   riskLevel: MedSafetyRiskLevel;
   item: {
@@ -83,7 +85,6 @@ type MedSafetyCacheRecord = {
 };
 
 const MED_SAFETY_CACHE_KEY = "med_safety_cache_v1";
-const MED_SAFETY_LAST_MODEL_KEY = "med_safety_last_model_v1";
 const MED_SAFETY_DEFAULT_MODEL = "gpt-5.1";
 const MED_SAFETY_CLIENT_TIMEOUT_MS = 125_000;
 const RETRY_WITH_DATA_MESSAGE = "네트워크가 불안정합니다. 데이터(모바일 네트워크)를 켠 뒤 다시 AI 분석 실행을 눌러 시도해 주세요.";
@@ -179,12 +180,12 @@ function parseErrorMessage(raw: string) {
     return "AI API 키가 유효하지 않거나 만료되었습니다. .env.local 환경변수를 확인해 주세요.";
   if (normalized.includes("openai_responses_403")) {
     if (/(insufficient_permissions|does not have access|model_not_found|permission|access to model)/i.test(String(raw))) {
-      return "현재 계정에 해당 모델 접근 권한이 없습니다. 모델명을 변경해 다시 시도해 주세요.";
+      return "현재 계정에 gpt-5.1 모델 접근 권한이 없습니다. API 계정 권한을 확인해 주세요.";
     }
     return RETRY_WITH_DATA_MESSAGE;
   }
   if (normalized.includes("openai_responses_404") || normalized.includes("model_not_found"))
-    return "요청한 모델을 찾을 수 없습니다. 모델명을 확인하거나 기본 fallback 모델로 다시 시도해 주세요.";
+    return "gpt-5.1 모델을 찾을 수 없습니다. API 설정과 계정 권한을 확인해 주세요.";
   if (normalized.includes("openai_responses_429")) return "요청 한도가 초과되었습니다. 잠시 후 다시 AI 분석 실행을 눌러 시도해 주세요.";
   if (normalized.includes("openai_responses_400") && /(previous_response|conversation)/i.test(String(raw)))
     return "이전 대화 상태 동기화에 실패했습니다. 다시 AI 분석 실행을 눌러 새로 시도해 주세요.";
@@ -683,7 +684,6 @@ export function ToolMedSafetyPage() {
     previousResponseId?: string;
     conversationId?: string;
   }>({});
-  const [preferredModel, setPreferredModel] = useState<string>(MED_SAFETY_DEFAULT_MODEL);
   const isScenarioIntent = queryIntent === "scenario";
   const activeSituation: ClinicalSituation = isScenarioIntent ? situation : "general";
   const situationInputGuide = SITUATION_INPUT_GUIDE[activeSituation];
@@ -712,21 +712,6 @@ export function ToolMedSafetyPage() {
       stopCamera();
     };
   }, [previewUrl, stopCamera]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const stored = String(window.localStorage.getItem(MED_SAFETY_LAST_MODEL_KEY) ?? "").trim();
-      if (stored && !/^(gpt-4\.1-mini|gpt-5-mini-202508-07)$/i.test(stored)) {
-        setPreferredModel(stored);
-        return;
-      }
-      setPreferredModel(MED_SAFETY_DEFAULT_MODEL);
-      window.localStorage.setItem(MED_SAFETY_LAST_MODEL_KEY, MED_SAFETY_DEFAULT_MODEL);
-    } catch {
-      // ignore storage read error
-    }
-  }, []);
 
   useEffect(() => {
     if (isScenarioIntent) return;
@@ -908,7 +893,6 @@ export function ToolMedSafetyPage() {
             if (isScenarioIntent && scenarioState.conversationId) {
               form.set("conversationId", scenarioState.conversationId);
             }
-            form.set("preferredModel", String(preferredModel || MED_SAFETY_DEFAULT_MODEL).trim() || MED_SAFETY_DEFAULT_MODEL);
             if (imageFile) form.set("image", imageFile);
 
             response = await fetchAnalyzeWithTimeout(form, MED_SAFETY_CLIENT_TIMEOUT_MS);
@@ -952,14 +936,6 @@ export function ToolMedSafetyPage() {
           writeMedSafetyCache(cacheKey, data);
           setResult(data);
           setError(null);
-          if (data.model) {
-            setPreferredModel(data.model);
-            try {
-              window.localStorage.setItem(MED_SAFETY_LAST_MODEL_KEY, data.model);
-            } catch {
-              // ignore storage write error
-            }
-          }
           if (isScenarioIntent) {
             setScenarioState({
               previousResponseId: data.openaiResponseId || undefined,
@@ -1002,7 +978,6 @@ export function ToolMedSafetyPage() {
       lang,
       mode,
       patientSummary,
-      preferredModel,
       query,
       queryIntent,
       scenarioState,
@@ -1017,6 +992,7 @@ export function ToolMedSafetyPage() {
         headerConclusion: "",
         headerPrimaryUse: "",
         showHeaderPrimaryUse: false,
+        isNotFoundResult: false,
         displayCards: [] as DynamicResultCard[],
       };
     }
@@ -1030,7 +1006,8 @@ export function ToolMedSafetyPage() {
     const headerConclusion = clampDisplayText(result.oneLineConclusion, result.resultKind === "scenario" ? 160 : 220);
     const headerPrimaryUse = clampDisplayText(result.item.primaryUse, result.resultKind === "scenario" ? 170 : 220);
 
-    const dynamicCardsFromNarrative = result.searchAnswer ? buildNarrativeCards(result.searchAnswer, t) : [];
+    const isNotFoundResult = Boolean(result.notFound);
+    const dynamicCardsFromNarrative = !isNotFoundResult && result.searchAnswer ? buildNarrativeCards(result.searchAnswer, t) : [];
     const dynamicCardsFallback: DynamicResultCard[] = [
       {
         key: "fallback-core",
@@ -1054,7 +1031,9 @@ export function ToolMedSafetyPage() {
 
     const dynamicCards = dynamicCardsFromNarrative.length ? dynamicCardsFromNarrative : dynamicCardsFallback;
     const displayCards =
-      result.resultKind === "scenario"
+      isNotFoundResult
+        ? []
+        : result.resultKind === "scenario"
         ? dynamicCards
         : dynamicCards.map((card) => ({
             ...card,
@@ -1066,7 +1045,8 @@ export function ToolMedSafetyPage() {
       headerConclusion,
       headerPrimaryUse,
       showHeaderPrimaryUse:
-        result.resultKind !== "scenario" && !!headerPrimaryUse && !isNearDuplicateText(headerPrimaryUse, headerConclusion),
+        !isNotFoundResult && result.resultKind !== "scenario" && !!headerPrimaryUse && !isNearDuplicateText(headerPrimaryUse, headerConclusion),
+      isNotFoundResult,
       displayCards,
     };
   }, [result, t]);
@@ -1115,7 +1095,16 @@ export function ToolMedSafetyPage() {
         </div>
 
         <div className="border-t border-ios-sep pt-2.5">
-          {resultViewState.displayCards.length ? (
+          {resultViewState.isNotFoundResult ? (
+            <div className="rounded-2xl border border-ios-sep bg-ios-bg px-3 py-3">
+              <div className="text-[14px] font-bold text-[color:var(--wnl-accent)]">{t("일치 결과 없음 (NOT_FOUND)")}</div>
+              <ul className="mt-2 list-disc space-y-0.5 pl-4 text-[15px] leading-6 text-ios-text">
+                <li>{result.oneLineConclusion}</li>
+                <li>{result.item.primaryUse}</li>
+                <li>{t("정확한 공식명(성분명/제품명/기구명)으로 다시 입력해 주세요.")}</li>
+              </ul>
+            </div>
+          ) : resultViewState.displayCards.length ? (
             <div className="space-y-2.5">
               {resultViewState.displayCards.map((card) => (
                 <section

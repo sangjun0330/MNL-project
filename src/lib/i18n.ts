@@ -764,6 +764,9 @@ const EN_EXTRA: Record<string, string> = {
   "표시할 분석 정보가 없습니다.": "No analysis details to display.",
   "이걸 찾으신건가요?": "Did you mean one of these?",
   "이걸 찾으시고 계신가요?": "Is this what you were looking for?",
+  "일치 결과 없음 (NOT_FOUND)": "No exact match (NOT_FOUND)",
+  "정확한 공식명(성분명/제품명/기구명)으로 다시 입력해 주세요.":
+    "Please re-enter the exact official name (generic/product/device).",
   "아래 후보 중 정확한 이름을 복사해 다시 입력해 주세요.":
     "Copy one exact candidate below and enter it again.",
   "네트워크/이미지 상황에 따라 최대 2분 정도 걸릴 수 있습니다.":
@@ -839,8 +842,12 @@ const EN_EXTRA: Record<string, string> = {
     "AI API key is invalid or expired. Check your .env.local environment variables.",
   "현재 계정에 해당 모델 접근 권한이 없습니다. 모델명을 변경해 다시 시도해 주세요.":
     "This account does not have access to the model. Change model name and try again.",
+  "현재 계정에 gpt-5.1 모델 접근 권한이 없습니다. API 계정 권한을 확인해 주세요.":
+    "This account does not have access to gpt-5.1. Please verify your API account permissions.",
   "요청한 모델을 찾을 수 없습니다. 모델명을 확인하거나 기본 fallback 모델로 다시 시도해 주세요.":
     "Requested model not found. Check the model name or retry with fallback model.",
+  "gpt-5.1 모델을 찾을 수 없습니다. API 설정과 계정 권한을 확인해 주세요.":
+    "gpt-5.1 was not found. Please verify your API configuration and account permissions.",
   "요청 한도가 초과되었습니다. 잠시 후 다시 AI 분석 실행을 눌러 시도해 주세요.":
     "Request limit exceeded. Please tap `Run AI Analysis` again shortly.",
   "이전 대화 상태 동기화에 실패했습니다. 다시 AI 분석 실행을 눌러 새로 시도해 주세요.":

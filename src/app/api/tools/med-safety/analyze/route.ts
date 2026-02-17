@@ -161,13 +161,6 @@ function pickOpenAIStateId(raw: FormDataEntryValue | null) {
   return value;
 }
 
-function pickPreferredModel(raw: FormDataEntryValue | null) {
-  const value = String(raw ?? "").trim();
-  if (!value) return undefined;
-  if (!/^[A-Za-z0-9._-]{3,80}$/.test(value)) return undefined;
-  return value;
-}
-
 function bytesToBase64(input: Uint8Array) {
   let binary = "";
   const chunkSize = 0x8000;
@@ -225,7 +218,6 @@ export async function POST(req: NextRequest) {
     const queryIntent = pickQueryIntent(form.get("queryIntent"));
     const previousResponseId = pickOpenAIStateId(form.get("previousResponseId"));
     const conversationId = pickOpenAIStateId(form.get("conversationId"));
-    const preferredModel = pickPreferredModel(form.get("preferredModel"));
     const query = String(form.get("query") ?? "")
       .replace(/\s+/g, " ")
       .trim()
@@ -275,7 +267,6 @@ export async function POST(req: NextRequest) {
         imageName: imageName || undefined,
         previousResponseId,
         conversationId,
-        preferredModel,
         signal: abort.signal,
       });
 
@@ -326,7 +317,6 @@ export async function POST(req: NextRequest) {
                 locale: "en",
                 imageDataUrl: imageDataUrl || undefined,
                 imageName: imageName || undefined,
-                preferredModel,
                 signal: abort.signal,
               });
               payloadEn = buildResponseData({

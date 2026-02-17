@@ -6,6 +6,8 @@ export type QueryIntent = "medication" | "device" | "scenario";
 
 export type MedSafetyAnalysisResult = {
   resultKind: "medication" | "device" | "scenario";
+  notFound?: boolean;
+  notFoundReason?: string;
   oneLineConclusion: string;
   riskLevel: "low" | "medium" | "high";
   item: {
@@ -51,7 +53,6 @@ type AnalyzeParams = {
   mode: ClinicalMode;
   situation: ClinicalSituation;
   queryIntent?: QueryIntent;
-  preferredModel?: string;
   patientSummary?: string;
   locale: "ko" | "en";
   imageDataUrl?: string;
@@ -69,8 +70,7 @@ type ResponsesAttempt = {
 };
 
 type ResponseVerbosity = "low" | "medium" | "high";
-const MED_SAFETY_PRIMARY_MODEL = "gpt-5.1";
-const MED_SAFETY_DEFAULT_FALLBACK_MODELS = [MED_SAFETY_PRIMARY_MODEL, "gpt-5-mini-202508-07", "gpt-4o-mini"];
+const MED_SAFETY_LOCKED_MODEL = "gpt-5.1";
 
 export type OpenAIMedSafetyOutput = {
   result: MedSafetyAnalysisResult;
@@ -111,18 +111,10 @@ function dedupeModels(models: string[]) {
   return out;
 }
 
-function resolveModelCandidates(preferredModel?: string) {
-  const preferred = String(preferredModel ?? "").trim();
-  const safePreferredModel = /^(gpt-4\.1-mini|gpt-5-mini-202508-07)$/i.test(preferred) ? "" : preferred;
-  const configuredPrimary = String(process.env.OPENAI_MED_SAFETY_MODEL ?? "").trim();
-  const configuredFallbacks = splitModelList(process.env.OPENAI_MED_SAFETY_FALLBACK_MODELS ?? "");
-  const merged = dedupeModels([
-    safePreferredModel,
-    configuredPrimary,
-    ...configuredFallbacks,
-    ...MED_SAFETY_DEFAULT_FALLBACK_MODELS,
-  ]);
-  return merged.length ? merged : [MED_SAFETY_PRIMARY_MODEL];
+function resolveModelCandidates() {
+  // User request: med-safety search must use a single fixed model only.
+  // Do not allow preferred/env fallback model switching here.
+  return [MED_SAFETY_LOCKED_MODEL];
 }
 
 function normalizeApiBaseUrl(raw: string) {
@@ -356,7 +348,7 @@ function buildDeveloperPrompt(locale: "ko" | "en") {
       "절대 사실을 지어내지 마라. 특히 약물/의료기구의 존재 여부가 불확실하면 임상 내용을 생성하지 마라.",
       "약물/의료기구 질의에서 정확히 일치하는 대상을 확신하지 못하면 반드시 NOT_FOUND 블록만 출력하라.",
       "약물/의료기구 질의에서 식별 가능하면 입력 오타를 그대로 쓰지 말고 정식명칭으로 정규화해 답하라.",
-      "정해진 출력 템플릿을 강제하지 말고, 질문 성격에 맞는 최적의 구조로 답한다.",
+      "user prompt에 명시된 섹션 구조와 출력 규칙을 반드시 지켜라.",
       "불확실하거나 기관별 차이가 큰 내용은 단정하지 말고 확인 포인트를 명확히 표시한다.",
       "진단/처방 결정을 대체하지 않으며 기관 프로토콜·의사 지시·제조사 IFU를 최종 기준으로 둔다.",
       "품질 기준: 핵심 우선, 중복 제거, 실수 방지 포인트 포함, 모바일에서도 한눈에 읽히는 문장 길이 유지, 내용 밀도 높게.",
@@ -370,7 +362,7 @@ function buildDeveloperPrompt(locale: "ko" | "en") {
     "Never fabricate facts. If medication/device identity is uncertain, do not generate clinical details.",
     "For medication/device queries, if exact identity cannot be confidently verified, output NOT_FOUND block only.",
     "When identity is verifiable, normalize typo input to the official/canonical name in output.",
-    "Do not force rigid output templates; structure response to best fit the query.",
+    "Strictly follow the section/output rules specified in the user prompt.",
     "Mark uncertain or institution-dependent details as verification points.",
     "Do not replace diagnosis/prescribing decisions; local protocol and IFU are final.",
     "Quality bar: action-first, concise, de-duplicated, high-density practical detail for bedside use.",
@@ -380,84 +372,42 @@ function buildDeveloperPrompt(locale: "ko" | "en") {
 
 function buildMedicationPrompt(query: string, contextJson: string) {
   return [
-    "질문 약물에 대해 간호사를 위한 검색엔진 답변을 작성하라.",
-    "가장 먼저 입력 약물명이 실제로 식별 가능한지 확인하라.",
-    "입력이 오타/약어/띄어쓰기 오류여도 식별 가능하면 정식명칭으로 정규화해 출력하라.",
-    "출력 첫 줄은 반드시 아래 둘 중 하나여야 한다:",
-    "ENTITY_VERIFIED: YES",
-    "ENTITY_VERIFIED: NO",
-    "ENTITY_VERIFIED: YES라면 둘째 줄과 셋째 줄을 반드시 출력하라:",
-    "ENTITY_NAME: <정식명칭 1개>",
-    "ENTITY_ALIASES: <대표 별칭/동의어 1~3개; 세미콜론 구분, 없으면 NONE>",
-    "정확히 일치하는 약물을 확신하지 못하면 아래 형식만 출력하고 종료하라:",
+    "질문 약물에 대해 간호사가 현장에서 바로 쓰는 고품질 안전 답변을 작성하라.",
+    "알고리즘 1단계: 입력명(오타/약어 포함)이 실제 약물로 정확히 식별 가능한지 먼저 판단하라.",
+    "알고리즘 2단계: 정확 식별 실패 시 아래 NOT_FOUND 블록만 출력하고 즉시 종료하라.",
     "NOT_FOUND",
     "입력명: <원문 질의>",
     "CANDIDATES: <정확한 후보명1>; <정확한 후보명2>; <정확한 후보명3> (없으면 NONE)",
     "판정: 정확히 일치하는 약물을 확인하지 못했습니다.",
     "요청: 정확한 공식명(성분명/제품명)을 다시 입력해 주세요.",
-    "NOT_FOUND 모드에서는 작용/적응증/용량/주의사항 등 임상 내용을 절대 생성하지 마라.",
-    "가독성과 학습 가치가 높은 고품질 답변을 작성하라. 단순 요약이 아니라 실무+학습이 동시에 되도록 작성하라.",
-    "품질 하한: ENTITY_VERIFIED: YES일 때 본문은 최소 20줄 이상, 핵심 카테고리 누락 없이 작성하라.",
-    "출력 규칙: 마크다운 기호(##, ###, **, ---, ``` )를 쓰지 말고 일반 텍스트로만 작성하라.",
-    "중복 문장/중복 단락을 반복하지 말고, 모바일 화면에서 읽기 쉽게 짧은 문장과 줄바꿈으로 작성하라.",
-    "각 불릿은 완결 문장 1개로 작성하고, 문장 중간에서 줄바꿈하지 마라.",
-    "한 불릿에는 핵심 1개만 담아라.",
-    "답변 시작에 핵심 요약 1~2문장(가장 중요한 안전 포인트)을 먼저 제시하라.",
-    "실무에서 바로 행동 가능한 정보부터 우선순위로 제시하라.",
-    "1~9번 항목은 반드시 모두 포함하라. 출력이 길어지면 각 항목을 1~2문장으로 압축해도 되지만 항목 누락은 금지한다.",
-    "각 카테고리는 '카테고리명:' 한 줄 제목으로 시작하고, 바로 아래에 핵심 항목을 작성하라.",
-    "카테고리마다 최소 3개, 최대 4개 핵심 항목을 제공하라.",
-    "아래 카테고리를 각각 분리해서 작성하라(카테고리 누락 금지):",
-    "- 이 약이 무엇인지(정의/분류/역할)",
-    "- 언제 쓰는지(적응증/사용 맥락)",
-    "- 어떻게 주는지(경로/투여 방식/원칙)",
-    "- 반드시 확인할 금기/주의 Top 3",
-    "- 반드시 모니터할 것 Top 3",
-    "- 위험 신호/즉시 대응",
-    "- 라인/호환/상호작용",
-    "- 환자 교육 포인트",
-    "- 실수 방지 포인트",
-    "",
-    "[약물 질문 출력 필수 내용]",
-    "1) 이 약이 무엇인지(정의/분류/역할)",
-    "- 정의/분류(예: 항생제/항응고/진통·진정/바소프레서/이뇨제/전해질/항부정맥 등)",
-    "- 핵심 역할(무엇을 위해 쓰는지)",
-    "- 작용 특성(효과 발현 시간대 또는 주요 기전 1~2문장)",
-    "2) 언제 쓰는지(적응증/사용 맥락)",
-    "- 대표 적응증 1~3개",
-    "- 병동/ER/ICU 부서별 사용 포인트(해당 시)",
-    "3) 어떻게 주는지(경로/투여 방식/원칙)",
-    "- 경로(PO/IV/IM/SC/흡입/패치 등)",
-    "- IV push 가능/불가/주의와 이유",
-    "- 희석/농도/속도/시간: 대표 원칙 + 기관 프로토콜/약제부 확인 포인트",
-    "- 필터/차광/프라이밍/flush, 말초/중심라인 요구(원칙 수준)",
-    "4) 반드시 확인할 금기/주의 Top 3",
-    "- 환자 상태 기반 금기/주의",
-    "- 최소 확인 데이터: 알레르기/활력/의식 + 약물군별 핵심 lab/ECG",
-    "- High-alert/LASA 여부(있으면 강하게 표시)",
-    "5) 반드시 모니터할 것 Top 3",
-    "- Vitals 우선순위",
-    "- Labs/ECG 핵심 1~2개",
-    "- 기대 효과 + 위험 신호",
-    "- 재평가 타이밍(5/15/30/60분 중 현실적 제안)",
-    "6) 위험 신호/즉시 대응",
-    "- 진짜 위험 신호 2~4개",
-    "- 즉시 행동: 중단/보류 → ABC → 모니터 강화 → 보고",
-    "- 길항제/응급약은 준비/보고 수준으로",
-    "7) 라인/호환/상호작용(치명적 중심)",
-    "- Y-site/혼합 금지/전용라인 필요(대표 원칙 + 기관 확인)",
-    "- 치명적 상호작용 Top 2~3",
-    "- 라인 실수 포인트(클램프/stopcock 포함)",
-    "8) 환자 교육 포인트(필요 시)",
-    "- 20초 설명 + teach-back 질문 1개",
-    "9) 실수 방지 포인트(최소 2개)",
-    "- 단위/농도/LASA/주입속도/혼합/flush/알람무시/기록누락 등",
-    "",
-    "안전 원칙:",
-    "- 근거 없는 수치·용량·기준은 만들지 말 것",
-    "- 기관마다 다른 부분은 반드시 '기관 확인 필요'로 표기",
-    "- 한국 간호 현장 표현으로, 바쁜 상황에서 바로 실행 가능하게 작성",
-    "- 같은 정보를 다른 문장으로 반복하지 말 것",
+    "NOT_FOUND에서는 작용/적응증/용량/주의사항 등 임상 내용을 절대 생성하지 마라.",
+    "알고리즘 3단계: 정확 식별 성공 시 아래 3줄을 맨 앞에 반드시 출력하라.",
+    "ENTITY_VERIFIED: YES",
+    "ENTITY_NAME: <정식명칭 1개>",
+    "ENTITY_ALIASES: <대표 별칭/동의어 1~3개; 세미콜론 구분, 없으면 NONE>",
+    "그 다음 본문은 다음 섹션을 순서대로 작성하라. 섹션 누락 금지.",
+    "핵심 요약:",
+    "- 가장 먼저 할 행동과 중단/보고 기준을 2~3문장으로 제시.",
+    "주요 행동:",
+    "- 지금 할 일 우선순위(투여 전 확인, 더블체크, 라인 확인, 계산/검산).",
+    "핵심 확인:",
+    "- 금기/주의 Top 3, 필수 확인 데이터(알레르기·활력·핵심 검사).",
+    "실행 포인트:",
+    "- 투여 경로/희석/농도/속도 원칙, 재평가 타이밍(5/15/30/60분).",
+    "위험/에스컬레이션:",
+    "- 위험 신호 2~4개, 즉시 대응(보류·중단·보고·호출).",
+    "라인/호환/상호작용:",
+    "- Y-site/혼합/전용라인/라인 tracing 오류 방지 포인트.",
+    "환자 교육 포인트:",
+    "- 20초 설명 + teach-back 질문 1개.",
+    "실수 방지:",
+    "- 단위(mg↔mcg, units↔mL), 농도, 속도, LASA, 알람무시 방지.",
+    "품질 규칙:",
+    "- 사실만 작성하고 없는 정보를 추정 생성하지 마라.",
+    "- 근거 없는 수치/용량/기준은 쓰지 말고 '기관 확인 필요'로 표시하라.",
+    "- 마크다운 장식(##, **, ``` ) 금지. 일반 텍스트 + 짧은 문장으로 작성하라.",
+    "- 같은 의미의 문장 반복 금지. 각 항목은 행동 가능하고 검산 가능한 문장으로 작성하라.",
+    "- 총 길이는 22~40줄, 섹션당 핵심 불릿 3~4개를 유지하라.",
     "",
     "질문:",
     query || "(없음)",
@@ -469,73 +419,40 @@ function buildMedicationPrompt(query: string, contextJson: string) {
 
 function buildDevicePrompt(query: string, contextJson: string) {
   return [
-    "질문 의료기구에 대해 간호사를 위한 검색엔진 답변을 작성하라.",
-    "가장 먼저 입력 기구명이 실제로 식별 가능한지 확인하라.",
-    "입력이 오타/약어/띄어쓰기 오류여도 식별 가능하면 정식명칭으로 정규화해 출력하라.",
-    "출력 첫 줄은 반드시 아래 둘 중 하나여야 한다:",
-    "ENTITY_VERIFIED: YES",
-    "ENTITY_VERIFIED: NO",
-    "ENTITY_VERIFIED: YES라면 둘째 줄과 셋째 줄을 반드시 출력하라:",
-    "ENTITY_NAME: <정식명칭 1개>",
-    "ENTITY_ALIASES: <대표 별칭/동의어 1~3개; 세미콜론 구분, 없으면 NONE>",
-    "정확히 일치하는 기구를 확신하지 못하면 아래 형식만 출력하고 종료하라:",
+    "질문 의료기구에 대해 간호사가 현장에서 바로 쓰는 고품질 안전 답변을 작성하라.",
+    "알고리즘 1단계: 입력 기구명(오타/약어 포함)이 실제 기구로 정확히 식별 가능한지 먼저 판단하라.",
+    "알고리즘 2단계: 정확 식별 실패 시 아래 NOT_FOUND 블록만 출력하고 즉시 종료하라.",
     "NOT_FOUND",
     "입력명: <원문 질의>",
     "CANDIDATES: <정확한 후보명1>; <정확한 후보명2>; <정확한 후보명3> (없으면 NONE)",
     "판정: 정확히 일치하는 의료기구를 확인하지 못했습니다.",
     "요청: 정확한 공식명(제품명/기구명)을 다시 입력해 주세요.",
-    "NOT_FOUND 모드에서는 사용법/적응증/경고 등 임상 내용을 절대 생성하지 마라.",
-    "가독성과 학습 가치가 높은 고품질 답변을 작성하라. 단순 요약이 아니라 실무+학습이 동시에 되도록 작성하라.",
-    "품질 하한: ENTITY_VERIFIED: YES일 때 본문은 최소 20줄 이상, 핵심 카테고리 누락 없이 작성하라.",
-    "출력 규칙: 마크다운 기호(##, ###, **, ---, ``` )를 쓰지 말고 일반 텍스트로만 작성하라.",
-    "중복 문장/중복 단락을 반복하지 말고, 모바일 화면에서 읽기 쉽게 짧은 문장과 줄바꿈으로 작성하라.",
-    "각 불릿은 완결 문장 1개로 작성하고, 문장 중간에서 줄바꿈하지 마라.",
-    "한 불릿에는 핵심 1개만 담아라.",
-    "답변 시작에 핵심 요약 1~2문장(가장 중요한 안전 포인트)을 먼저 제시하라.",
-    "현장 단계(준비→셋업→초기 확인→알람 대응)를 행동 중심으로 제시하라.",
-    "카테고리 누락 없이 끝까지 작성하라. 길면 각 항목을 1~2문장으로 압축한다.",
-    "각 카테고리는 '카테고리명:' 한 줄 제목으로 시작하고, 바로 아래에 핵심 항목을 작성하라.",
-    "카테고리마다 최소 3개, 최대 4개 핵심 항목을 제공하라.",
-    "아래 카테고리를 각각 분리해서 작성하라(카테고리 누락 금지):",
-    "- 기구 정의/언제 쓰는지",
-    "- 준비물/셋업/사용 절차",
-    "- 정상 작동 기준",
-    "- 알람/트러블슈팅",
-    "- 합병증/Stop rules",
-    "- 유지관리",
-    "- 실수 방지 포인트",
-    "",
-    "[의료기구 질문 출력 필수 내용]",
-    "1) 기구 정의/언제 쓰는지",
-    "- 정의(기구 역할 1줄), 적응증 2~3개, 금기/주의 1~2개(가능 시)",
-    "2) 준비물/셋업/사용 절차(현장 단계)",
-    "- 준비물 체크리스트",
-    "- Setup(연결→프라이밍/공기 제거→고정→설정값→시작→초기 확인)",
-    "- 적용 전 안전 확인(연결, clamp, 방향, 공기, 소모품 적합성)",
-    "3) 정상 작동 기준",
-    "- 정상 표시/정상 상태 특징 2~4개",
-    "- 시작 후 1~5분 내 확인 포인트",
-    "4) 알람/트러블슈팅(의미→먼저 볼 것→해결→보고)",
-    "- 알람 의미",
-    "- 원인 후보 Top 3",
-    "- 먼저 확인 Top 3(클램프/꺾임/연결/필터/위치/배터리)",
-    "- 해결 행동 Top 3",
-    "- 해결 안 되면 교체/대체 루트/전문팀/의사 보고 기준",
-    "5) 합병증/Stop rules",
-    "- 합병증 Top 3~5",
-    "- 즉시 중단/호출 위험 신호 2~4개",
-    "6) 유지관리(기관 확인 표기)",
-    "- 관찰 포인트(피부/고정/누출/통증/감염)",
-    "- 교체·점검 주기(기관/IFU 확인 항목 표시)",
-    "- 기록 포인트(시각, 세팅, 반응, 문제/조치)",
-    "7) 실수 방지 포인트(최소 2개)",
-    "- clamp/stopcock, 프라이밍/공기 제거, 소모품 호환, 알람 무시 등",
-    "",
-    "안전 원칙:",
-    "- 기기별 수치/주기는 제조사 IFU와 기관 프로토콜 확인 전제",
-    "- 단정이 어려운 항목은 확인 포인트로 안내",
-    "- 한국 간호 현장 표현으로, 바쁜 상황에서 바로 실행 가능하게 작성",
-    "- 같은 정보를 다른 문장으로 반복하지 말 것",
+    "NOT_FOUND에서는 사용법/알람/합병증/경고 등 임상 내용을 절대 생성하지 마라.",
+    "알고리즘 3단계: 정확 식별 성공 시 아래 3줄을 맨 앞에 반드시 출력하라.",
+    "ENTITY_VERIFIED: YES",
+    "ENTITY_NAME: <정식명칭 1개>",
+    "ENTITY_ALIASES: <대표 별칭/동의어 1~3개; 세미콜론 구분, 없으면 NONE>",
+    "그 다음 본문은 다음 섹션을 순서대로 작성하라. 섹션 누락 금지.",
+    "핵심 요약:",
+    "- 가장 먼저 할 행동과 즉시 중단/보고 기준을 2~3문장으로 제시.",
+    "주요 행동:",
+    "- 준비→셋업→시작 직후 확인의 우선순위를 행동형으로 제시.",
+    "핵심 확인:",
+    "- 연결/클램프/라인방향/소모품 호환/초기 정상 작동 기준.",
+    "실행 포인트:",
+    "- 알람 의미, 원인 Top 3, 먼저 볼 것 Top 3, 해결 Top 3.",
+    "위험/에스컬레이션:",
+    "- 즉시 중단/호출 신호, 해결 불가 시 보고/대체 루트 기준.",
+    "유지관리:",
+    "- 관찰 포인트(피부·고정·누출·감염), 교체·점검은 기관/IFU 확인.",
+    "실수 방지:",
+    "- 오연결, 프라이밍/공기 제거 누락, 알람 무시, 기록 누락 방지.",
+    "품질 규칙:",
+    "- 사실만 작성하고 없는 정보를 추정 생성하지 마라.",
+    "- 기기별 수치/주기는 단정하지 말고 '기관 확인 필요'로 표시하라.",
+    "- 마크다운 장식(##, **, ``` ) 금지. 일반 텍스트 + 짧은 문장으로 작성하라.",
+    "- 같은 의미의 문장 반복 금지. 각 항목은 현장에서 바로 수행 가능한 문장으로 작성하라.",
+    "- 총 길이는 22~40줄, 섹션당 핵심 불릿 3~4개를 유지하라.",
     "",
     "질문:",
     query || "(없음)",
@@ -934,6 +851,7 @@ type CanonicalEntity = {
 const MEDICATION_CANONICAL_ENTITIES: CanonicalEntity[] = [
   { canonical: "노르에피네프린", aliases: ["노르피네프린", "norepinephrine", "noradrenaline", "levarterenol"] },
   { canonical: "에피네프린", aliases: ["epinephrine", "adrenaline"] },
+  { canonical: "아세틸콜린", aliases: ["acetylcholine", "아세틸톨린", "아세칠콜린", "acetilcholine"] },
   { canonical: "도파민", aliases: ["dopamine"] },
   { canonical: "도부타민", aliases: ["dobutamine"] },
   { canonical: "바소프레신", aliases: ["vasopressin"] },
@@ -1093,6 +1011,7 @@ function cleanCandidateName(value: string) {
     .trim()
     .slice(0, 80);
   if (!clean) return "";
+  if (/^(none|없음|없습니다|해당\s*없음|n\/a|null|na)[.!]?$/.test(clean.toLowerCase())) return "";
   if (/^<[^>]+>$/.test(clean)) return "";
   if (/정확한\s*후보명/i.test(clean)) return "";
   if (/candidate\s*name/i.test(clean)) return "";
@@ -1250,6 +1169,8 @@ function buildNotFoundResult(
 
   return {
     resultKind: intent === "scenario" ? "scenario" : intent,
+    notFound: true,
+    notFoundReason: reason.slice(0, 120),
     oneLineConclusion: ko
       ? `입력한 "${safeName}"에 대해 정확히 일치하는 ${itemLabel}를 확인하지 못했습니다.`
       : `Could not verify an exact ${itemLabel} match for "${safeName}".`,
@@ -1334,6 +1255,8 @@ function buildFallbackResult(params: AnalyzeParams, intent: QueryIntent, note: s
   const safeName = cleanLine(params.query || params.imageName || "조회 항목").slice(0, 50) || "조회 항목";
   return {
     resultKind: intent === "scenario" ? "scenario" : intent,
+    notFound: false,
+    notFoundReason: "",
     oneLineConclusion: "AI 응답이 불안정해 기본 안내를 표시합니다. 핵심 항목을 다시 확인해 주세요.",
     riskLevel: "medium",
     item: {
@@ -1575,6 +1498,8 @@ function buildResultFromAnswer(params: AnalyzeParams, intent: QueryIntent, answe
 
   return {
     resultKind: intent === "scenario" ? "scenario" : intent,
+    notFound: false,
+    notFoundReason: "",
     oneLineConclusion:
       cleanLine(sentences[0] || "") ||
       (intent === "medication"
@@ -1720,7 +1645,7 @@ export async function translateMedSafetyToEnglish(input: {
   const apiKey = normalizeApiKey();
   if (!apiKey) throw new Error("missing_openai_api_key");
 
-  const modelCandidates = resolveModelCandidates(input.model ?? undefined);
+  const modelCandidates = resolveModelCandidates();
   const apiBaseUrls = resolveApiBaseUrls();
   const maxOutputTokens = Math.max(2600, Math.min(14000, resolveMaxOutputTokens() + 1600));
   const upstreamTimeoutMs = resolveUpstreamTimeoutMs();
@@ -1967,7 +1892,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
   if (!apiKey) throw new Error("missing_openai_api_key");
 
   const intent = inferIntent(params);
-  const modelCandidates = resolveModelCandidates(params.preferredModel);
+  const modelCandidates = resolveModelCandidates();
   const apiBaseUrls = resolveApiBaseUrls();
   const maxOutputTokens = resolveMaxOutputTokens();
   const maxOutputTokensForIntent =
@@ -1983,7 +1908,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
   const userPrompt = buildUserPrompt(params, intent);
   const startedAt = Date.now();
 
-  let selectedModel = modelCandidates[0] ?? MED_SAFETY_PRIMARY_MODEL;
+  let selectedModel = modelCandidates[0] ?? MED_SAFETY_LOCKED_MODEL;
   let rawText = "";
   let lastError = "openai_request_failed";
 
