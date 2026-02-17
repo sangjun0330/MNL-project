@@ -43,6 +43,7 @@ export type MedSafetyAnalysisResult = {
   modePriority: string[];
   confidenceNote: string;
   searchAnswer?: string;
+  suggestedNames?: string[];
 };
 
 type AnalyzeParams = {
@@ -68,6 +69,8 @@ type ResponsesAttempt = {
 };
 
 type ResponseVerbosity = "low" | "medium" | "high";
+const MED_SAFETY_PRIMARY_MODEL = "gpt-5-mini-202508-07";
+const MED_SAFETY_DEFAULT_FALLBACK_MODELS = [MED_SAFETY_PRIMARY_MODEL, "gpt-5.1", "gpt-4o-mini"];
 
 export type OpenAIMedSafetyOutput = {
   result: MedSafetyAnalysisResult;
@@ -109,13 +112,17 @@ function dedupeModels(models: string[]) {
 }
 
 function resolveModelCandidates(preferredModel?: string) {
-  const configuredPrimary = String(process.env.OPENAI_MED_SAFETY_MODEL ?? process.env.OPENAI_MODEL ?? "").trim();
-  const configuredFallbacks = splitModelList(
-    process.env.OPENAI_MED_SAFETY_FALLBACK_MODELS ?? process.env.OPENAI_FALLBACK_MODELS ?? ""
-  );
-  const defaults = ["gpt-4.1-mini", "gpt-4o-mini"];
-  const merged = dedupeModels([String(preferredModel ?? "").trim(), configuredPrimary, ...configuredFallbacks, ...defaults]);
-  return merged.length ? merged : ["gpt-4.1-mini"];
+  const preferred = String(preferredModel ?? "").trim();
+  const safePreferredModel = /^gpt-4\.1-mini$/i.test(preferred) ? "" : preferred;
+  const configuredPrimary = String(process.env.OPENAI_MED_SAFETY_MODEL ?? "").trim();
+  const configuredFallbacks = splitModelList(process.env.OPENAI_MED_SAFETY_FALLBACK_MODELS ?? "");
+  const merged = dedupeModels([
+    safePreferredModel,
+    configuredPrimary,
+    ...configuredFallbacks,
+    ...MED_SAFETY_DEFAULT_FALLBACK_MODELS,
+  ]);
+  return merged.length ? merged : [MED_SAFETY_PRIMARY_MODEL];
 }
 
 function normalizeApiBaseUrl(raw: string) {
@@ -145,8 +152,8 @@ function resolveStoreResponses() {
 function resolveMaxOutputTokens() {
   // Med safety는 글로벌 토큰 제한(OPENAI_MAX_OUTPUT_TOKENS)과 분리해서 관리한다.
   // 글로벌 값이 3200으로 고정된 환경에서도 이 엔드포인트는 더 길게 출력 가능해야 한다.
-  const raw = Number(process.env.OPENAI_MED_SAFETY_MAX_OUTPUT_TOKENS ?? 7000);
-  if (!Number.isFinite(raw)) return 7000;
+  const raw = Number(process.env.OPENAI_MED_SAFETY_MAX_OUTPUT_TOKENS ?? 3600);
+  if (!Number.isFinite(raw)) return 3600;
   const rounded = Math.round(raw);
   return Math.max(1800, Math.min(20000, rounded));
 }
@@ -164,14 +171,14 @@ function buildOutputTokenCandidates(maxOutputTokens: number, intent: QueryIntent
     if (!Number.isFinite(value) || seen.has(value)) continue;
     seen.add(value);
     out.push(value);
-    if (out.length >= 5) break;
+    if (out.length >= 3) break;
   }
   return out.length ? out : [requested];
 }
 
 function resolveNetworkRetryCount() {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_NETWORK_RETRIES ?? 1);
-  if (!Number.isFinite(raw)) return 1;
+  const raw = Number(process.env.OPENAI_MED_SAFETY_NETWORK_RETRIES ?? 0);
+  if (!Number.isFinite(raw)) return 0;
   const rounded = Math.round(raw);
   return Math.max(0, Math.min(5, rounded));
 }
@@ -184,22 +191,22 @@ function resolveNetworkRetryBaseMs() {
 }
 
 function resolveUpstreamTimeoutMs() {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_UPSTREAM_TIMEOUT_MS ?? 35_000);
-  if (!Number.isFinite(raw)) return 35_000;
+  const raw = Number(process.env.OPENAI_MED_SAFETY_UPSTREAM_TIMEOUT_MS ?? 14_000);
+  if (!Number.isFinite(raw)) return 14_000;
   const rounded = Math.round(raw);
   return Math.max(8_000, Math.min(90_000, rounded));
 }
 
 function resolveTotalBudgetMs() {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_TOTAL_BUDGET_MS ?? 45_000);
-  if (!Number.isFinite(raw)) return 45_000;
+  const raw = Number(process.env.OPENAI_MED_SAFETY_TOTAL_BUDGET_MS ?? 24_000);
+  if (!Number.isFinite(raw)) return 24_000;
   const rounded = Math.round(raw);
   return Math.max(15_000, Math.min(120_000, rounded));
 }
 
 function resolveTranslateTotalBudgetMs() {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_TRANSLATE_BUDGET_MS ?? 14_000);
-  if (!Number.isFinite(raw)) return 14_000;
+  const raw = Number(process.env.OPENAI_MED_SAFETY_TRANSLATE_BUDGET_MS ?? 6_000);
+  if (!Number.isFinite(raw)) return 6_000;
   const rounded = Math.round(raw);
   return Math.max(6_000, Math.min(60_000, rounded));
 }
@@ -376,9 +383,10 @@ function buildMedicationPrompt(query: string, contextJson: string) {
     "출력 첫 줄은 반드시 아래 둘 중 하나여야 한다:",
     "ENTITY_VERIFIED: YES",
     "ENTITY_VERIFIED: NO",
-    "정확히 일치하는 약물을 확신하지 못하면 아래 4줄만 출력하고 종료하라:",
+    "정확히 일치하는 약물을 확신하지 못하면 아래 형식만 출력하고 종료하라:",
     "NOT_FOUND",
     "입력명: <원문 질의>",
+    "CANDIDATES: <정확한 후보명1>; <정확한 후보명2>; <정확한 후보명3> (없으면 NONE)",
     "판정: 정확히 일치하는 약물을 확인하지 못했습니다.",
     "요청: 정확한 공식명(성분명/제품명)을 다시 입력해 주세요.",
     "NOT_FOUND 모드에서는 작용/적응증/용량/주의사항 등 임상 내용을 절대 생성하지 마라.",
@@ -459,9 +467,10 @@ function buildDevicePrompt(query: string, contextJson: string) {
     "출력 첫 줄은 반드시 아래 둘 중 하나여야 한다:",
     "ENTITY_VERIFIED: YES",
     "ENTITY_VERIFIED: NO",
-    "정확히 일치하는 기구를 확신하지 못하면 아래 4줄만 출력하고 종료하라:",
+    "정확히 일치하는 기구를 확신하지 못하면 아래 형식만 출력하고 종료하라:",
     "NOT_FOUND",
     "입력명: <원문 질의>",
+    "CANDIDATES: <정확한 후보명1>; <정확한 후보명2>; <정확한 후보명3> (없으면 NONE)",
     "판정: 정확히 일치하는 의료기구를 확인하지 못했습니다.",
     "요청: 정확한 공식명(제품명/기구명)을 다시 입력해 주세요.",
     "NOT_FOUND 모드에서는 사용법/적응증/경고 등 임상 내용을 절대 생성하지 마라.",
@@ -905,6 +914,92 @@ function detectItemType(intent: QueryIntent, text: string): MedSafetyItemType {
   return "unknown";
 }
 
+const MEDICATION_SUGGESTION_SEEDS = [
+  "노르에피네프린",
+  "에피네프린",
+  "도파민",
+  "도부타민",
+  "바소프레신",
+  "페닐에프린",
+  "헤파린",
+  "와파린",
+  "푸로세미드",
+  "반코마이신",
+  "피페라실린/타조박탐",
+  "세프트리악손",
+  "아미오다론",
+  "아데노신",
+  "레귤러 인슐린",
+  "글라진 인슐린",
+  "프로포폴",
+  "미다졸람",
+  "펜타닐",
+  "모르핀",
+  "norepinephrine",
+  "epinephrine",
+  "dopamine",
+  "dobutamine",
+  "vasopressin",
+  "phenylephrine",
+  "heparin",
+  "warfarin",
+  "furosemide",
+  "vancomycin",
+  "piperacillin/tazobactam",
+  "ceftriaxone",
+  "amiodarone",
+  "adenosine",
+  "insulin regular",
+  "insulin glargine",
+  "propofol",
+  "midazolam",
+  "fentanyl",
+  "morphine",
+];
+
+const DEVICE_SUGGESTION_SEEDS = [
+  "인퓨전 펌프",
+  "시린지 펌프",
+  "정맥주입 펌프",
+  "펜타닐 PCA 펌프",
+  "폴리 카테터",
+  "유치도뇨관",
+  "중심정맥관",
+  "PICC 라인",
+  "동맥 라인",
+  "삼방콕",
+  "연장 세트",
+  "혈액투석 카테터",
+  "비재호흡 마스크",
+  "앰부백",
+  "인공호흡기",
+  "바이레벨 PAP",
+  "고유량 비강 캐뉼라",
+  "맥박산소측정기",
+  "제세동기",
+  "흡인 카테터",
+  "infusion pump",
+  "syringe pump",
+  "iv infusion pump",
+  "fentanyl pca pump",
+  "foley catheter",
+  "urinary catheter",
+  "central line",
+  "picc line",
+  "arterial line",
+  "three-way stopcock",
+  "extension set",
+  "hemodialysis catheter",
+  "non-rebreather mask",
+  "ambu bag",
+  "ventilator",
+  "bi-level pap",
+  "high-flow nasal cannula",
+  "pulse oximeter",
+  "defibrillator",
+  "suction catheter",
+];
+
 function normalizeEntityKey(value: string) {
   return String(value ?? "")
     .toLowerCase()
@@ -946,6 +1041,113 @@ function hasNotFoundSignal(text: string) {
   );
 }
 
+function levenshteinDistance(a: string, b: string) {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+
+  const dp = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
+  for (let i = 0; i <= a.length; i += 1) dp[i]![0] = i;
+  for (let j = 0; j <= b.length; j += 1) dp[0]![j] = j;
+
+  for (let i = 1; i <= a.length; i += 1) {
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i]![j] = Math.min(dp[i - 1]![j]! + 1, dp[i]![j - 1]! + 1, dp[i - 1]![j - 1]! + cost);
+    }
+  }
+  return dp[a.length]![b.length]!;
+}
+
+function cleanCandidateName(value: string) {
+  const clean = String(value ?? "")
+    .replace(/^[-*•·]\s*/, "")
+    .replace(/^\d+[).]\s*/, "")
+    .replace(/^["'`(]+|["'`)]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80);
+  if (!clean) return "";
+  if (/^<[^>]+>$/.test(clean)) return "";
+  if (/정확한\s*후보명/i.test(clean)) return "";
+  if (/candidate\s*name/i.test(clean)) return "";
+  return clean;
+}
+
+function fallbackSuggestionsFromQuery(query: string, intent: QueryIntent) {
+  const q = normalizeEntityKey(query).replace(/\s+/g, "");
+  if (!q || q.length < 3) return [] as string[];
+  const seeds = intent === "device" ? DEVICE_SUGGESTION_SEEDS : MEDICATION_SUGGESTION_SEEDS;
+  const scored = seeds
+    .map((name) => {
+      const normalizedName = normalizeEntityKey(name).replace(/\s+/g, "");
+      if (!normalizedName) return { name, score: 0 };
+      if (normalizedName.includes(q) || q.includes(normalizedName)) return { name, score: 0.98 };
+      const distance = levenshteinDistance(q.slice(0, 40), normalizedName.slice(0, 40));
+      const base = 1 - distance / Math.max(q.length, normalizedName.length);
+      const prefixBoost = q[0] === normalizedName[0] ? 0.06 : 0;
+      return { name, score: base + prefixBoost };
+    })
+    .filter((row) => row.score >= 0.42)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3)
+    .map((row) => row.name);
+
+  return dedupeLimit(scored, 3);
+}
+
+function extractSuggestedNames(rawAnswer: string, query: string, intent: QueryIntent) {
+  const lines = String(rawAnswer ?? "")
+    .split(/\r?\n/)
+    .map((line) => String(line ?? "").trim())
+    .filter(Boolean);
+
+  const out: string[] = [];
+  let inCandidates = false;
+
+  const push = (value: string) => {
+    const clean = cleanCandidateName(value);
+    if (!clean) return;
+    out.push(clean);
+  };
+
+  for (const line of lines) {
+    if (/^ENTITY_VERIFIED\s*[:=]/i.test(line) || /^NOT_FOUND$/i.test(line) || /^INPUT(_NAME)?\s*[:=]/i.test(line)) {
+      continue;
+    }
+    if (/^(CANDIDATES?|MAYBE_MEANT|후보|혹시.*찾으신건가요)\s*[:：]?/i.test(line)) {
+      inCandidates = true;
+      const inline = line.split(/[:：]/).slice(1).join(":").trim();
+      if (inline && !/^\(?none\)?$/i.test(inline)) {
+        inline
+          .split(/[;,]/)
+          .map((name) => cleanCandidateName(name))
+          .filter(Boolean)
+          .forEach((name) => push(name));
+      }
+      continue;
+    }
+    if (/^(ACTION|요청|판정|REASON)\s*[:：]?/i.test(line)) {
+      inCandidates = false;
+      continue;
+    }
+    if (inCandidates) {
+      const bullet = line.match(/^(?:[-*•·]|\d+[).])\s*(.+)$/);
+      if (bullet?.[1]) {
+        push(bullet[1]);
+        continue;
+      }
+      if (!/^[A-Z_]+[:=]/.test(line)) {
+        push(line);
+      }
+    }
+  }
+
+  const uniq = dedupeLimit(out, 3);
+  if (uniq.length) return uniq;
+  return fallbackSuggestionsFromQuery(query, intent);
+}
+
 function parseEntityVerification(text: string): "yes" | "no" | "unknown" {
   const t = String(text ?? "");
   if (/ENTITY_VERIFIED\s*[:=]\s*YES/i.test(t)) return "yes";
@@ -969,7 +1171,7 @@ function buildNotFoundResult(
   params: AnalyzeParams,
   intent: QueryIntent,
   reason: string,
-  rawAnswer: string
+  suggestedNames: string[]
 ): MedSafetyAnalysisResult {
   const safeName = cleanLine(params.query || params.imageName || "조회 항목").slice(0, 70) || "조회 항목";
   const ko = params.locale === "ko";
@@ -996,14 +1198,20 @@ function buildNotFoundResult(
       status: "CHECK",
       topActions: ko
         ? [
-            "정확한 공식명(영문/한글), 성분명 또는 제품명을 다시 입력하세요.",
+            suggestedNames.length ? "이걸 찾으신건가요?" : "정확한 공식명을 다시 확인해 주세요.",
+            ...suggestedNames.map((name, idx) => `${idx + 1}) ${name}`),
+            suggestedNames.length
+              ? "위 후보 중 정확한 이름 하나를 복사해서 다시 입력해 주세요."
+              : "정확한 공식명(성분명/제품명/기구명)을 다시 입력해 주세요.",
             "철자·약어·공백을 확인하고 가능한 경우 full name으로 입력하세요.",
-            "확실하지 않으면 기관 약제부/IFU에서 명칭을 먼저 확인하세요.",
           ]
         : [
-            "Re-enter the exact official name (EN/KR), generic name, or product name.",
+            suggestedNames.length ? "Did you mean one of these?" : "Please verify the exact official name.",
+            ...suggestedNames.map((name, idx) => `${idx + 1}) ${name}`),
+            suggestedNames.length
+              ? "Copy one exact candidate above and search again."
+              : "Re-enter the exact official name (generic/product/device name).",
             "Check spelling, abbreviations, and spacing; use full name when possible.",
-            "If unsure, verify the name with local pharmacy/IFU first.",
           ],
       topNumbers: ko ? ["현재 결과는 미확인 명칭 상태입니다."] : ["Current result is based on an unverified name."],
       topRisks: ko
@@ -1045,7 +1253,8 @@ function buildNotFoundResult(
       : "The entered name is not verified, so clinical guidance is restricted for safety. Please confirm the exact name and retry.",
     modePriority: [],
     confidenceNote: reason.slice(0, 180),
-    searchAnswer: sanitizeSearchAnswer(rawAnswer),
+    searchAnswer: "",
+    suggestedNames: suggestedNames.slice(0, 3),
   };
 }
 
@@ -1097,18 +1306,19 @@ function buildResultFromAnswer(params: AnalyzeParams, intent: QueryIntent, answe
   const verification = parseEntityVerification(answer);
   const answerWithoutControl = stripEntityControlLines(answer);
   const normalized = sanitizeSearchAnswer(answerWithoutControl || answer);
+  const suggestedNames = extractSuggestedNames(answer, params.query, intent);
   if (intent === "medication" || intent === "device") {
     if (verification === "no") {
-      return buildNotFoundResult(params, intent, "entity_verification_no", answer);
+      return buildNotFoundResult(params, intent, "entity_verification_no", suggestedNames);
     }
     if (verification === "unknown") {
-      return buildNotFoundResult(params, intent, "entity_verification_missing", answer);
+      return buildNotFoundResult(params, intent, "entity_verification_missing", suggestedNames);
     }
     if (hasNotFoundSignal(normalized)) {
-      return buildNotFoundResult(params, intent, "model_not_found_signal", answer);
+      return buildNotFoundResult(params, intent, "model_not_found_signal", suggestedNames);
     }
     if (!containsEntityReference(params.query, normalized)) {
-      return buildNotFoundResult(params, intent, "entity_reference_mismatch", answer);
+      return buildNotFoundResult(params, intent, "entity_reference_mismatch", suggestedNames);
     }
   }
   const itemName = cleanLine(params.query || params.imageName || "").slice(0, 50) || "조회 항목";
@@ -1294,6 +1504,7 @@ function cloneMedSafetyResult(source: MedSafetyAnalysisResult): MedSafetyAnalysi
     },
     modePriority: [...(source.modePriority ?? [])],
     searchAnswer: source.searchAnswer ?? "",
+    suggestedNames: [...(source.suggestedNames ?? [])],
   };
 }
 
@@ -1424,6 +1635,12 @@ export async function translateMedSafetyToEnglish(input: {
   translatedResult.modePriority.forEach((value, idx) => {
     push(value, (translated) => {
       translatedResult.modePriority[idx] = translated;
+    });
+  });
+  translatedResult.suggestedNames?.forEach((value, idx) => {
+    push(value, (translated) => {
+      if (!translatedResult.suggestedNames) translatedResult.suggestedNames = [];
+      translatedResult.suggestedNames[idx] = translated;
     });
   });
   push(input.result.confidenceNote ?? "", (value) => {
@@ -1568,7 +1785,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
   const userPrompt = buildUserPrompt(params, intent);
   const startedAt = Date.now();
 
-  let selectedModel = modelCandidates[0] ?? "gpt-4.1-mini";
+  let selectedModel = modelCandidates[0] ?? MED_SAFETY_PRIMARY_MODEL;
   let rawText = "";
   let lastError = "openai_request_failed";
 

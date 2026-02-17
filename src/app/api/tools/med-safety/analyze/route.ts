@@ -17,9 +17,9 @@ export const dynamic = "force-dynamic";
 const MAX_QUERY_LENGTH = 1800;
 const MAX_PATIENT_SUMMARY_LENGTH = 1400;
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
-const DEFAULT_ANALYZE_TIMEOUT_MS = 90_000;
+const DEFAULT_ANALYZE_TIMEOUT_MS = 45_000;
 const MIN_ANALYZE_TIMEOUT_MS = 30_000;
-const MAX_ANALYZE_TIMEOUT_MS = 180_000;
+const MAX_ANALYZE_TIMEOUT_MS = 120_000;
 
 function bad(status: number, error: string) {
   const safeError = String(error ?? "unknown_error")
@@ -288,7 +288,7 @@ export async function POST(req: NextRequest) {
       let payloadEn: MedSafetyResponseData | null = null;
       const translateController = new AbortController();
       const relayAbort = () => translateController.abort();
-      const translateTimeoutMs = locale === "en" ? 18_000 : 7_000;
+      const translateTimeoutMs = locale === "en" ? 9_000 : 2_500;
       const translateTimer = setTimeout(() => translateController.abort(), translateTimeoutMs);
       abort.signal.addEventListener("abort", relayAbort);
       try {
@@ -315,7 +315,7 @@ export async function POST(req: NextRequest) {
         if (locale === "en") {
           const elapsed = Date.now() - routeStartedAt;
           const remainingMs = timeoutMs - elapsed;
-          if (remainingMs > 10_000) {
+          if (remainingMs > 22_000) {
             try {
               const analyzedEn = await analyzeMedSafetyWithOpenAI({
                 query,

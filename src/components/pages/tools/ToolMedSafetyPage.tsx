@@ -67,6 +67,7 @@ type MedSafetyAnalyzeResult = {
   modePriority: string[];
   confidenceNote: string;
   searchAnswer?: string;
+  suggestedNames?: string[];
   generatedText?: string;
   model: string;
   analyzedAt: number;
@@ -83,6 +84,7 @@ type MedSafetyCacheRecord = {
 
 const MED_SAFETY_CACHE_KEY = "med_safety_cache_v1";
 const MED_SAFETY_LAST_MODEL_KEY = "med_safety_last_model_v1";
+const MED_SAFETY_DEFAULT_MODEL = "gpt-5-mini-202508-07";
 const RETRY_WITH_DATA_MESSAGE = "네트워크가 불안정합니다. 데이터(모바일 네트워크)를 켠 뒤 다시 AI 분석 실행을 눌러 시도해 주세요.";
 
 const MODE_OPTIONS: Array<{ value: ClinicalMode; label: string }> = [
@@ -250,7 +252,7 @@ function readMedSafetyCache(cacheKey: string): MedSafetyAnalyzeResult | null {
 function shouldRetryAnalyzeError(status: number, rawError: string) {
   const error = String(rawError ?? "").toLowerCase();
   if ([408, 409, 425, 429, 500, 502, 503, 504].includes(status)) return true;
-  if (/client_timeout|openai_network_|openai_timeout|openai_empty_text|openai_responses_(408|409|425|429|500|502|503|504)/.test(error))
+  if (/openai_network_|openai_timeout|openai_empty_text|openai_responses_(408|409|425|429|500|502|503|504)/.test(error))
     return true;
   if (/openai_responses_403/.test(error) && /(html|forbidden|proxy|firewall|blocked|access denied|cloudflare)/.test(error)) return true;
   return false;
@@ -679,7 +681,7 @@ export function ToolMedSafetyPage() {
     previousResponseId?: string;
     conversationId?: string;
   }>({});
-  const [preferredModel, setPreferredModel] = useState<string>("");
+  const [preferredModel, setPreferredModel] = useState<string>(MED_SAFETY_DEFAULT_MODEL);
   const isScenarioIntent = queryIntent === "scenario";
   const activeSituation: ClinicalSituation = isScenarioIntent ? situation : "general";
   const situationInputGuide = SITUATION_INPUT_GUIDE[activeSituation];
@@ -713,7 +715,12 @@ export function ToolMedSafetyPage() {
     if (typeof window === "undefined") return;
     try {
       const stored = String(window.localStorage.getItem(MED_SAFETY_LAST_MODEL_KEY) ?? "").trim();
-      if (stored) setPreferredModel(stored);
+      if (stored && !/^gpt-4\.1-mini$/i.test(stored)) {
+        setPreferredModel(stored);
+        return;
+      }
+      setPreferredModel(MED_SAFETY_DEFAULT_MODEL);
+      window.localStorage.setItem(MED_SAFETY_LAST_MODEL_KEY, MED_SAFETY_DEFAULT_MODEL);
     } catch {
       // ignore storage read error
     }
@@ -876,7 +883,7 @@ export function ToolMedSafetyPage() {
       setError(null);
 
       try {
-        const maxClientRetries = 1;
+        const maxClientRetries = 0;
         let response: Response | null = null;
         let payload:
           | { ok: true; data: MedSafetyAnalyzeResult }
@@ -899,10 +906,10 @@ export function ToolMedSafetyPage() {
             if (isScenarioIntent && scenarioState.conversationId) {
               form.set("conversationId", scenarioState.conversationId);
             }
-            if (preferredModel) form.set("preferredModel", preferredModel);
+            form.set("preferredModel", String(preferredModel || MED_SAFETY_DEFAULT_MODEL).trim() || MED_SAFETY_DEFAULT_MODEL);
             if (imageFile) form.set("image", imageFile);
 
-            response = await fetchAnalyzeWithTimeout(form, 55_000);
+            response = await fetchAnalyzeWithTimeout(form, 35_000);
 
             payload = (await response.json().catch(() => null)) as
               | { ok: true; data: MedSafetyAnalyzeResult }
@@ -1092,6 +1099,17 @@ export function ToolMedSafetyPage() {
             {t("분석")}:{" "}
             {formatDateTime(result.analyzedAt)}
           </div>
+          {result.suggestedNames && result.suggestedNames.length ? (
+            <div className="mt-3 rounded-2xl border border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] px-3 py-3">
+              <div className="text-[15px] font-bold text-[color:var(--wnl-accent)]">{t("이걸 찾으신건가요?")}</div>
+              <ul className="mt-1.5 list-disc space-y-0.5 pl-4 text-[14px] leading-6 text-ios-text">
+                {result.suggestedNames.slice(0, 3).map((name, idx) => (
+                  <li key={`suggested-${idx}`}>{name}</li>
+                ))}
+              </ul>
+              <div className="mt-1 text-[12px] text-ios-sub">{t("아래 후보 중 정확한 이름을 복사해 다시 입력해 주세요.")}</div>
+            </div>
+          ) : null}
         </div>
 
         <div className="border-t border-ios-sep pt-2.5">

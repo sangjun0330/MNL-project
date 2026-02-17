@@ -762,6 +762,9 @@ const EN_EXTRA: Record<string, string> = {
     "After input, tap `Run AI Analysis` to see priority actions first.",
   "핵심 안전 확인 필요": "Core safety check required",
   "표시할 분석 정보가 없습니다.": "No analysis details to display.",
+  "이걸 찾으신건가요?": "Did you mean one of these?",
+  "아래 후보 중 정확한 이름을 복사해 다시 입력해 주세요.":
+    "Copy one exact candidate below and enter it again.",
   "모드": "Mode",
   "유형": "Type",
   "상황": "Scenario",
