@@ -346,6 +346,8 @@ function buildDeveloperPrompt(locale: "ko" | "en") {
     return [
       "너는 간호사를 위한 임상 검색엔진 AI다.",
       "약물/의료기구/상황 질문에 대해 현장에서 즉시 쓸 수 있는 고품질 정보를 제공한다.",
+      "절대 사실을 지어내지 마라. 특히 약물/의료기구의 존재 여부가 불확실하면 임상 내용을 생성하지 마라.",
+      "약물/의료기구 질의에서 정확히 일치하는 대상을 확신하지 못하면 반드시 NOT_FOUND 블록만 출력하라.",
       "정해진 출력 템플릿을 강제하지 말고, 질문 성격에 맞는 최적의 구조로 답한다.",
       "불확실하거나 기관별 차이가 큰 내용은 단정하지 말고 확인 포인트를 명확히 표시한다.",
       "진단/처방 결정을 대체하지 않으며 기관 프로토콜·의사 지시·제조사 IFU를 최종 기준으로 둔다.",
@@ -357,6 +359,8 @@ function buildDeveloperPrompt(locale: "ko" | "en") {
   return [
     "You are a clinical search engine AI for bedside nurses.",
     "Provide high-quality, practical, safety-first guidance for medication, device, and scenario queries.",
+    "Never fabricate facts. If medication/device identity is uncertain, do not generate clinical details.",
+    "For medication/device queries, if exact identity cannot be confidently verified, output NOT_FOUND block only.",
     "Do not force rigid output templates; structure response to best fit the query.",
     "Mark uncertain or institution-dependent details as verification points.",
     "Do not replace diagnosis/prescribing decisions; local protocol and IFU are final.",
@@ -368,6 +372,16 @@ function buildDeveloperPrompt(locale: "ko" | "en") {
 function buildMedicationPrompt(query: string, contextJson: string) {
   return [
     "질문 약물에 대해 간호사를 위한 검색엔진 답변을 작성하라.",
+    "가장 먼저 입력 약물명이 실제로 식별 가능한지 확인하라.",
+    "출력 첫 줄은 반드시 아래 둘 중 하나여야 한다:",
+    "ENTITY_VERIFIED: YES",
+    "ENTITY_VERIFIED: NO",
+    "정확히 일치하는 약물을 확신하지 못하면 아래 4줄만 출력하고 종료하라:",
+    "NOT_FOUND",
+    "입력명: <원문 질의>",
+    "판정: 정확히 일치하는 약물을 확인하지 못했습니다.",
+    "요청: 정확한 공식명(성분명/제품명)을 다시 입력해 주세요.",
+    "NOT_FOUND 모드에서는 작용/적응증/용량/주의사항 등 임상 내용을 절대 생성하지 마라.",
     "가독성과 학습 가치가 높은 고품질 답변을 작성하라. 단순 요약이 아니라 실무+학습이 동시에 되도록 작성하라.",
     "출력 규칙: 마크다운 기호(##, ###, **, ---, ``` )를 쓰지 말고 일반 텍스트로만 작성하라.",
     "중복 문장/중복 단락을 반복하지 말고, 모바일 화면에서 읽기 쉽게 짧은 문장과 줄바꿈으로 작성하라.",
@@ -441,6 +455,16 @@ function buildMedicationPrompt(query: string, contextJson: string) {
 function buildDevicePrompt(query: string, contextJson: string) {
   return [
     "질문 의료기구에 대해 간호사를 위한 검색엔진 답변을 작성하라.",
+    "가장 먼저 입력 기구명이 실제로 식별 가능한지 확인하라.",
+    "출력 첫 줄은 반드시 아래 둘 중 하나여야 한다:",
+    "ENTITY_VERIFIED: YES",
+    "ENTITY_VERIFIED: NO",
+    "정확히 일치하는 기구를 확신하지 못하면 아래 4줄만 출력하고 종료하라:",
+    "NOT_FOUND",
+    "입력명: <원문 질의>",
+    "판정: 정확히 일치하는 의료기구를 확인하지 못했습니다.",
+    "요청: 정확한 공식명(제품명/기구명)을 다시 입력해 주세요.",
+    "NOT_FOUND 모드에서는 사용법/적응증/경고 등 임상 내용을 절대 생성하지 마라.",
     "가독성과 학습 가치가 높은 고품질 답변을 작성하라. 단순 요약이 아니라 실무+학습이 동시에 되도록 작성하라.",
     "출력 규칙: 마크다운 기호(##, ###, **, ---, ``` )를 쓰지 말고 일반 텍스트로만 작성하라.",
     "중복 문장/중복 단락을 반복하지 말고, 모바일 화면에서 읽기 쉽게 짧은 문장과 줄바꿈으로 작성하라.",
@@ -881,6 +905,150 @@ function detectItemType(intent: QueryIntent, text: string): MedSafetyItemType {
   return "unknown";
 }
 
+function normalizeEntityKey(value: string) {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFKC")
+    .replace(/[^a-z0-9가-힣\s/+\-_.]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function containsEntityReference(query: string, answer: string) {
+  const q = normalizeEntityKey(query);
+  if (!q) return true;
+  const answerNorm = normalizeEntityKey(answer);
+  if (!answerNorm) return false;
+
+  const qCompact = q.replace(/\s+/g, "");
+  const answerCompact = answerNorm.replace(/\s+/g, "");
+
+  if (q.length >= 3 && answerNorm.includes(q)) return true;
+  if (qCompact.length >= 3 && answerCompact.includes(qCompact)) return true;
+
+  const tokens = q.split(" ").filter((token) => token.length >= 3);
+  if (!tokens.length) return true;
+  if (tokens.length === 1) {
+    return answerNorm.includes(tokens[0]!) || answerCompact.includes(tokens[0]!.replace(/\s+/g, ""));
+  }
+
+  const matched = tokens.filter((token) => answerNorm.includes(token) || answerCompact.includes(token)).length;
+  return matched >= Math.min(2, tokens.length);
+}
+
+function hasNotFoundSignal(text: string) {
+  const t = String(text ?? "").toLowerCase();
+  return (
+    /\bnot_found\b/.test(t) ||
+    /(찾을\s*수\s*없|확인하지\s*못|일치하는\s*(약물|기구).*(없|못)|존재하지\s*않)/i.test(t) ||
+    /(no\s+exact\s+match|cannot\s+identify|could\s+not\s+identify|not\s+found|unknown\s+medication|unknown\s+device)/i.test(t) ||
+    /(정확한\s*(이름|명칭|공식명).*(입력|다시))/i.test(t)
+  );
+}
+
+function parseEntityVerification(text: string): "yes" | "no" | "unknown" {
+  const t = String(text ?? "");
+  if (/ENTITY_VERIFIED\s*[:=]\s*YES/i.test(t)) return "yes";
+  if (/ENTITY_VERIFIED\s*[:=]\s*NO/i.test(t)) return "no";
+  if (/\bNOT_FOUND\b/i.test(t)) return "no";
+  return "unknown";
+}
+
+function stripEntityControlLines(text: string) {
+  return String(text ?? "")
+    .split(/\r?\n/)
+    .map((line) => String(line ?? "").trim())
+    .filter((line) => line.length > 0)
+    .filter((line) => !/^ENTITY_VERIFIED\s*[:=]/i.test(line))
+    .filter((line) => !/^NOT_FOUND$/i.test(line))
+    .join("\n")
+    .trim();
+}
+
+function buildNotFoundResult(
+  params: AnalyzeParams,
+  intent: QueryIntent,
+  reason: string,
+  rawAnswer: string
+): MedSafetyAnalysisResult {
+  const safeName = cleanLine(params.query || params.imageName || "조회 항목").slice(0, 70) || "조회 항목";
+  const ko = params.locale === "ko";
+  const isMedication = intent === "medication";
+  const itemLabel = ko ? (isMedication ? "약물" : "의료기구") : isMedication ? "medication" : "device";
+
+  return {
+    resultKind: intent === "scenario" ? "scenario" : intent,
+    oneLineConclusion: ko
+      ? `입력한 "${safeName}"에 대해 정확히 일치하는 ${itemLabel}를 확인하지 못했습니다.`
+      : `Could not verify an exact ${itemLabel} match for "${safeName}".`,
+    riskLevel: "medium",
+    item: {
+      name: safeName,
+      type: "unknown",
+      aliases: [],
+      highRiskBadges: [ko ? "정확한 명칭 재확인" : "Recheck exact name"],
+      primaryUse: ko
+        ? `${itemLabel} 명칭 확인 후 다시 검색이 필요합니다.`
+        : `Please verify the exact ${itemLabel} name and search again.`,
+      confidence: 10,
+    },
+    quick: {
+      status: "CHECK",
+      topActions: ko
+        ? [
+            "정확한 공식명(영문/한글), 성분명 또는 제품명을 다시 입력하세요.",
+            "철자·약어·공백을 확인하고 가능한 경우 full name으로 입력하세요.",
+            "확실하지 않으면 기관 약제부/IFU에서 명칭을 먼저 확인하세요.",
+          ]
+        : [
+            "Re-enter the exact official name (EN/KR), generic name, or product name.",
+            "Check spelling, abbreviations, and spacing; use full name when possible.",
+            "If unsure, verify the name with local pharmacy/IFU first.",
+          ],
+      topNumbers: ko ? ["현재 결과는 미확인 명칭 상태입니다."] : ["Current result is based on an unverified name."],
+      topRisks: ko
+        ? ["존재가 불명확한 항목에 대한 임상 정보는 제공할 수 없습니다."]
+        : ["Clinical details are withheld for unverified entities."],
+    },
+    do: {
+      steps: ko
+        ? ["정확한 명칭 재입력", "재검색 실행", "여전히 불일치면 공식 자료 확인 후 재시도"]
+        : ["Re-enter exact name", "Run search again", "If still unmatched, verify with official source and retry"],
+      calculatorsNeeded: [],
+      compatibilityChecks: [],
+    },
+    safety: {
+      holdRules: ko
+        ? ["정확한 식별 전에는 본 결과를 투약/사용 판단 근거로 사용하지 마세요."]
+        : ["Do not use this result for medication/device decisions until identity is verified."],
+      monitor: ko ? ["정확한 명칭 확인 후 다시 조회"] : ["Verify exact name, then run search again"],
+      escalateWhen: ko ? ["명칭 혼동이 우려되면 즉시 동료와 더블체크"] : ["If name confusion is likely, perform immediate double-check"],
+    },
+    institutionalChecks: ko
+      ? ["기관 프로토콜·약제부 DB·제조사 IFU에서 명칭 확인 필요"]
+      : ["Verify naming in local protocol, pharmacy DB, and manufacturer IFU"],
+    sbar: ko
+      ? {
+          situation: `입력명 "${safeName}"의 정확한 ${itemLabel} 식별이 되지 않았습니다.`,
+          background: "철자/약어/유사명으로 인해 오인 가능성이 있습니다.",
+          assessment: "현재 결과는 미확인 명칭으로 임상 정보 제공을 제한했습니다.",
+          recommendation: "정확한 공식명을 확인한 뒤 다시 검색하겠습니다.",
+        }
+      : {
+          situation: `Exact ${itemLabel} identity for "${safeName}" is not verified.`,
+          background: "Spelling/abbreviation/look-alike names may cause mismatch.",
+          assessment: "Clinical details are restricted due to unverified identity.",
+          recommendation: "Please verify the exact official name, then retry.",
+        },
+    patientScript20s: ko
+      ? "입력하신 명칭이 정확히 확인되지 않아 안전을 위해 임상 안내를 제한했습니다. 정확한 이름 확인 후 다시 도와드릴게요."
+      : "The entered name is not verified, so clinical guidance is restricted for safety. Please confirm the exact name and retry.",
+    modePriority: [],
+    confidenceNote: reason.slice(0, 180),
+    searchAnswer: sanitizeSearchAnswer(rawAnswer),
+  };
+}
+
 function buildFallbackResult(params: AnalyzeParams, intent: QueryIntent, note: string): MedSafetyAnalysisResult {
   const safeName = cleanLine(params.query || params.imageName || "조회 항목").slice(0, 50) || "조회 항목";
   return {
@@ -926,7 +1094,23 @@ function buildFallbackResult(params: AnalyzeParams, intent: QueryIntent, note: s
 }
 
 function buildResultFromAnswer(params: AnalyzeParams, intent: QueryIntent, answer: string): MedSafetyAnalysisResult {
-  const normalized = sanitizeSearchAnswer(answer);
+  const verification = parseEntityVerification(answer);
+  const answerWithoutControl = stripEntityControlLines(answer);
+  const normalized = sanitizeSearchAnswer(answerWithoutControl || answer);
+  if (intent === "medication" || intent === "device") {
+    if (verification === "no") {
+      return buildNotFoundResult(params, intent, "entity_verification_no", answer);
+    }
+    if (verification === "unknown") {
+      return buildNotFoundResult(params, intent, "entity_verification_missing", answer);
+    }
+    if (hasNotFoundSignal(normalized)) {
+      return buildNotFoundResult(params, intent, "model_not_found_signal", answer);
+    }
+    if (!containsEntityReference(params.query, normalized)) {
+      return buildNotFoundResult(params, intent, "entity_reference_mismatch", answer);
+    }
+  }
   const itemName = cleanLine(params.query || params.imageName || "").slice(0, 50) || "조회 항목";
   const status = detectStatus(normalized);
   const riskLevel = detectRiskLevel(normalized, status);
