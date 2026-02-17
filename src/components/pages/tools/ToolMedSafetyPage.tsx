@@ -85,6 +85,7 @@ type MedSafetyCacheRecord = {
 const MED_SAFETY_CACHE_KEY = "med_safety_cache_v1";
 const MED_SAFETY_LAST_MODEL_KEY = "med_safety_last_model_v1";
 const MED_SAFETY_DEFAULT_MODEL = "gpt-5-mini-202508-07";
+const MED_SAFETY_CLIENT_TIMEOUT_MS = 125_000;
 const RETRY_WITH_DATA_MESSAGE = "네트워크가 불안정합니다. 데이터(모바일 네트워크)를 켠 뒤 다시 AI 분석 실행을 눌러 시도해 주세요.";
 
 const MODE_OPTIONS: Array<{ value: ClinicalMode; label: string }> = [
@@ -252,7 +253,7 @@ function readMedSafetyCache(cacheKey: string): MedSafetyAnalyzeResult | null {
 function shouldRetryAnalyzeError(status: number, rawError: string) {
   const error = String(rawError ?? "").toLowerCase();
   if ([408, 409, 425, 429, 500, 502, 503, 504].includes(status)) return true;
-  if (/openai_network_|openai_timeout|openai_empty_text|openai_responses_(408|409|425|429|500|502|503|504)/.test(error))
+  if (/client_timeout|openai_network_|openai_timeout|openai_empty_text|openai_responses_(408|409|425|429|500|502|503|504)/.test(error))
     return true;
   if (/openai_responses_403/.test(error) && /(html|forbidden|proxy|firewall|blocked|access denied|cloudflare)/.test(error)) return true;
   return false;
@@ -883,7 +884,7 @@ export function ToolMedSafetyPage() {
       setError(null);
 
       try {
-        const maxClientRetries = 0;
+        const maxClientRetries = 1;
         let response: Response | null = null;
         let payload:
           | { ok: true; data: MedSafetyAnalyzeResult }
@@ -909,7 +910,7 @@ export function ToolMedSafetyPage() {
             form.set("preferredModel", String(preferredModel || MED_SAFETY_DEFAULT_MODEL).trim() || MED_SAFETY_DEFAULT_MODEL);
             if (imageFile) form.set("image", imageFile);
 
-            response = await fetchAnalyzeWithTimeout(form, 35_000);
+            response = await fetchAnalyzeWithTimeout(form, MED_SAFETY_CLIENT_TIMEOUT_MS);
 
             payload = (await response.json().catch(() => null)) as
               | { ok: true; data: MedSafetyAnalyzeResult }

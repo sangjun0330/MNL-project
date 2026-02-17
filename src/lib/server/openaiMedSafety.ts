@@ -152,8 +152,8 @@ function resolveStoreResponses() {
 function resolveMaxOutputTokens() {
   // Med safety는 글로벌 토큰 제한(OPENAI_MAX_OUTPUT_TOKENS)과 분리해서 관리한다.
   // 글로벌 값이 3200으로 고정된 환경에서도 이 엔드포인트는 더 길게 출력 가능해야 한다.
-  const raw = Number(process.env.OPENAI_MED_SAFETY_MAX_OUTPUT_TOKENS ?? 3600);
-  if (!Number.isFinite(raw)) return 3600;
+  const raw = Number(process.env.OPENAI_MED_SAFETY_MAX_OUTPUT_TOKENS ?? 7000);
+  if (!Number.isFinite(raw)) return 7000;
   const rounded = Math.round(raw);
   return Math.max(1800, Math.min(20000, rounded));
 }
@@ -171,14 +171,14 @@ function buildOutputTokenCandidates(maxOutputTokens: number, intent: QueryIntent
     if (!Number.isFinite(value) || seen.has(value)) continue;
     seen.add(value);
     out.push(value);
-    if (out.length >= 3) break;
+    if (out.length >= 5) break;
   }
   return out.length ? out : [requested];
 }
 
 function resolveNetworkRetryCount() {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_NETWORK_RETRIES ?? 0);
-  if (!Number.isFinite(raw)) return 0;
+  const raw = Number(process.env.OPENAI_MED_SAFETY_NETWORK_RETRIES ?? 1);
+  if (!Number.isFinite(raw)) return 1;
   const rounded = Math.round(raw);
   return Math.max(0, Math.min(5, rounded));
 }
@@ -191,22 +191,22 @@ function resolveNetworkRetryBaseMs() {
 }
 
 function resolveUpstreamTimeoutMs() {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_UPSTREAM_TIMEOUT_MS ?? 14_000);
-  if (!Number.isFinite(raw)) return 14_000;
+  const raw = Number(process.env.OPENAI_MED_SAFETY_UPSTREAM_TIMEOUT_MS ?? 35_000);
+  if (!Number.isFinite(raw)) return 35_000;
   const rounded = Math.round(raw);
   return Math.max(8_000, Math.min(90_000, rounded));
 }
 
 function resolveTotalBudgetMs() {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_TOTAL_BUDGET_MS ?? 24_000);
-  if (!Number.isFinite(raw)) return 24_000;
+  const raw = Number(process.env.OPENAI_MED_SAFETY_TOTAL_BUDGET_MS ?? 45_000);
+  if (!Number.isFinite(raw)) return 45_000;
   const rounded = Math.round(raw);
   return Math.max(15_000, Math.min(120_000, rounded));
 }
 
 function resolveTranslateTotalBudgetMs() {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_TRANSLATE_BUDGET_MS ?? 6_000);
-  if (!Number.isFinite(raw)) return 6_000;
+  const raw = Number(process.env.OPENAI_MED_SAFETY_TRANSLATE_BUDGET_MS ?? 14_000);
+  if (!Number.isFinite(raw)) return 14_000;
   const rounded = Math.round(raw);
   return Math.max(6_000, Math.min(60_000, rounded));
 }
