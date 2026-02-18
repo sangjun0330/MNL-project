@@ -46,6 +46,7 @@ const RAW_MODEL_LIB_BASE_URL = "https://raw.githubusercontent.com/mlc-ai/binary-
 const DEFAULT_MODEL_LIB_BASE_URL = "https://cdn.jsdelivr.net/gh/mlc-ai/binary-mlc-llm-libs@main/";
 const DEFAULT_WASM_FALLBACK_MODEL_ID = "onnx-community/Qwen2.5-0.5B-Instruct";
 const DEFAULT_WASM_FALLBACK_MAX_NEW_TOKENS = 600;
+const DEFAULT_WASM_FALLBACK_DTYPE = "q8";
 const TRANSFORMERS_JSDELIVR_URL =
   "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js";
 const TRANSFORMERS_UNPKG_URL =
@@ -203,16 +204,17 @@ async function ensureTransformersTextGenerationPipeline() {
       env.allowLocalModels = shouldAllowLocalFallbackModels();
       if (env.backends?.onnx?.wasm) {
         env.backends.onnx.wasm.proxy = false;
-        env.backends.onnx.wasm.numThreads = Math.max(
-          1,
-          Math.min(4, Math.floor(((typeof navigator !== "undefined" ? navigator.hardwareConcurrency : 4) || 4) / 2))
-        );
+        // crossOriginIsolated가 아닌 환경에서도 경고/재시도 없이 즉시 동작하도록 단일 스레드로 고정
+        env.backends.onnx.wasm.numThreads = 1;
       }
     }
 
     const modelId = resolveWasmFallbackModelId();
     const device = resolveWasmFallbackDevice();
-    const dtype = sanitizeText(process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_WASM_FALLBACK_DTYPE);
+    const dtype = readStringEnv(
+      process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_WASM_FALLBACK_DTYPE,
+      DEFAULT_WASM_FALLBACK_DTYPE
+    );
     const pipelineOptions: Record<string, unknown> = {
       device,
     };
