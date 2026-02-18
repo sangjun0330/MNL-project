@@ -194,13 +194,29 @@
     if (backend) {
       try {
         var backendOutput = await backend.refine({ result: result });
-        if (backendOutput) return backendOutput;
+        if (backendOutput) {
+          if (backendOutput && typeof backendOutput === "object" && !Array.isArray(backendOutput)) {
+            var source =
+              normalizeWhitespace(backendOutput.__source) ||
+              normalizeWhitespace(backend.runtime) ||
+              normalizeWhitespace(backend.__source) ||
+              "backend";
+            return Object.assign({}, backendOutput, {
+              __source: source,
+            });
+          }
+          return backendOutput;
+        }
       } catch (error) {
         console.warn("[handoff-webllm] custom backend failed", error);
       }
     }
 
-    return heuristicRefine(result);
+    var fallback = heuristicRefine(result);
+    if (fallback && typeof fallback === "object" && !Array.isArray(fallback)) {
+      fallback.__source = "adapter_heuristic";
+    }
+    return fallback;
   }
 
   root.__RNEST_WEBLLM_REFINE__ = async function handoffWebLlmAdapter(input) {

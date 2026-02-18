@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { HANDOFF_FLAGS } from "@/lib/handoff/featureFlags";
 import { evaluateHandoffPrivacyPolicy } from "@/lib/handoff/privacyPolicy";
+import { initWebLlmMlcBackend } from "@/lib/handoff/webLlmMlcBackend";
 
 const WEBLLM_BACKEND_DEFAULT_URL = "/runtime/webllm-refine-backend.js";
 const WEBLLM_ADAPTER_DEFAULT_URL = "/runtime/webllm-refine-adapter.js";
@@ -83,20 +84,27 @@ export function HandoffRuntimeBootstrap() {
 
     const backendSameOriginReady = isRelativeOrSameOrigin(backendUrl, window.location.origin);
     const adapterSameOriginReady = isRelativeOrSameOrigin(adapterUrl, window.location.origin);
+    const useMlcBackend = HANDOFF_FLAGS.handoffWebLlmUseMlc;
     if ((policy.profile === "strict" || policy.executionMode === "local_only") && !adapterSameOriginReady) {
       console.warn("[handoff-runtime] blocked cross-origin WebLLM adapter in strict/local_only mode", adapterUrl);
       return;
     }
 
+    if (useMlcBackend) {
+      initWebLlmMlcBackend();
+    }
+
     void (async () => {
-      if ((policy.profile === "strict" || policy.executionMode === "local_only") && !backendSameOriginReady) {
-        console.warn("[handoff-runtime] blocked cross-origin WebLLM backend in strict/local_only mode", backendUrl);
-      } else {
-        try {
-          await ensureScript(backendUrl, WEBLLM_BACKEND_SCRIPT_ID);
-        } catch (error) {
-          // backend script is optional; adapter can still run with local heuristic fallback
-          console.warn("[handoff-runtime] failed to load webllm backend script", error);
+      if (!useMlcBackend) {
+        if ((policy.profile === "strict" || policy.executionMode === "local_only") && !backendSameOriginReady) {
+          console.warn("[handoff-runtime] blocked cross-origin WebLLM backend in strict/local_only mode", backendUrl);
+        } else {
+          try {
+            await ensureScript(backendUrl, WEBLLM_BACKEND_SCRIPT_ID);
+          } catch (error) {
+            // backend script is optional; adapter can still run with local heuristic fallback
+            console.warn("[handoff-runtime] failed to load webllm backend script", error);
+          }
         }
       }
 
