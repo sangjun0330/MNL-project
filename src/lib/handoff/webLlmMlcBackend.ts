@@ -42,6 +42,8 @@ declare global {
 const DEFAULT_MODEL_ID = "Qwen2.5-3B-Instruct-q4f16_1-MLC";
 const DEFAULT_MAX_OUTPUT_TOKENS = 1_200;
 const DEFAULT_MODULE_URL = "/runtime/vendor/web-llm/index.js";
+const RAW_MODEL_LIB_BASE_URL = "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/";
+const DEFAULT_MODEL_LIB_BASE_URL = "https://cdn.jsdelivr.net/gh/mlc-ai/binary-mlc-llm-libs@main/";
 
 let enginePromise: Promise<WebLlmEngine | null> | null = null;
 
@@ -64,6 +66,66 @@ function sanitizeText(text: string | undefined) {
 
 async function loadWebLlmModule(moduleUrl: string) {
   return await import(/* webpackIgnore: true */ moduleUrl);
+}
+
+function normalizeUrlBase(value: string) {
+  const trimmed = sanitizeText(value);
+  if (!trimmed) return DEFAULT_MODEL_LIB_BASE_URL;
+  return trimmed.endsWith("/") ? trimmed : `${trimmed}/`;
+}
+
+type WebLlmAppConfig = {
+  model_list?: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+};
+
+function cloneJson<T>(value: T): T {
+  try {
+    return JSON.parse(JSON.stringify(value)) as T;
+  } catch {
+    return value;
+  }
+}
+
+export function patchWebLlmAppConfigForCsp(
+  moduleRef: unknown,
+  modelId: string,
+  modelLibBaseUrl: string
+): { appConfig: WebLlmAppConfig | null; modelLibUrl: string | null } {
+  const baseConfig = (moduleRef as any)?.prebuiltAppConfig as WebLlmAppConfig | undefined;
+  if (!baseConfig || !Array.isArray(baseConfig.model_list)) {
+    return { appConfig: null, modelLibUrl: null };
+  }
+
+  const normalizedModelId = sanitizeText(modelId);
+  const normalizedBaseUrl = normalizeUrlBase(modelLibBaseUrl);
+  const nextConfig = cloneJson(baseConfig);
+  const nextModelList = Array.isArray(nextConfig.model_list) ? nextConfig.model_list : [];
+  let resolvedModelLib: string | null = null;
+
+  for (let index = 0; index < nextModelList.length; index += 1) {
+    const record = nextModelList[index];
+    const recordModelId = sanitizeText(String((record as any)?.model_id ?? ""));
+    if (!recordModelId || recordModelId !== normalizedModelId) continue;
+
+    const currentModelLib = sanitizeText(String((record as any)?.model_lib ?? ""));
+    if (!currentModelLib) {
+      resolvedModelLib = null;
+      break;
+    }
+
+    if (currentModelLib.startsWith(RAW_MODEL_LIB_BASE_URL)) {
+      const tailPath = currentModelLib.slice(RAW_MODEL_LIB_BASE_URL.length);
+      const rewritten = `${normalizedBaseUrl}${tailPath}`;
+      (record as any).model_lib = rewritten;
+      resolvedModelLib = rewritten;
+    } else {
+      resolvedModelLib = currentModelLib;
+    }
+    break;
+  }
+
+  return { appConfig: nextConfig, modelLibUrl: resolvedModelLib };
 }
 
 function toCompactPatientInput(patient: PatientCard) {
@@ -224,12 +286,17 @@ async function getMlcEngine() {
     HANDOFF_FLAGS.handoffWebLlmModelId || DEFAULT_MODEL_ID
   );
   const moduleUrl = readStringEnv(process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_MODULE_URL, DEFAULT_MODULE_URL);
+  const modelLibBaseUrl = readStringEnv(
+    process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_MODEL_LIB_BASE_URL,
+    DEFAULT_MODEL_LIB_BASE_URL
+  );
 
   if (enginePromise) return enginePromise;
 
   enginePromise = (async () => {
     try {
       const mod = await loadWebLlmModule(moduleUrl);
+      const appConfigPatch = patchWebLlmAppConfigForCsp(mod, modelId, modelLibBaseUrl);
       const createEngine =
         (mod as any).CreateMLCEngine ??
         (mod as any).createMLCEngine ??
@@ -241,6 +308,7 @@ async function getMlcEngine() {
 
       const engine = (await createEngine(modelId, {
         initProgressCallback: () => undefined,
+        appConfig: appConfigPatch.appConfig ?? undefined,
       })) as WebLlmEngine;
 
       window.__RNEST_WEBLLM_MLC_STATUS__ = {
