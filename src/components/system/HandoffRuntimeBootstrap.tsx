@@ -16,6 +16,14 @@ function parseUrl(input: string | undefined) {
   return value;
 }
 
+function parseBoolean(value: string | undefined, fallback: boolean) {
+  if (value == null) return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+}
+
 function isRelativeOrSameOrigin(url: string, origin: string) {
   if (!url) return false;
   if (url.startsWith("/") || url.startsWith("./") || url.startsWith("../")) return true;
@@ -84,7 +92,10 @@ export function HandoffRuntimeBootstrap() {
 
     const backendSameOriginReady = isRelativeOrSameOrigin(backendUrl, window.location.origin);
     const adapterSameOriginReady = isRelativeOrSameOrigin(adapterUrl, window.location.origin);
-    const useMlcBackend = HANDOFF_FLAGS.handoffWebLlmUseMlc;
+    const llmRequired = parseBoolean(process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_REQUIRED, true);
+    const useMlcBackend = llmRequired
+      ? true
+      : parseBoolean(process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_USE_MLC, HANDOFF_FLAGS.handoffWebLlmUseMlc);
     if ((policy.profile === "strict" || policy.executionMode === "local_only") && !adapterSameOriginReady) {
       console.warn("[handoff-runtime] blocked cross-origin WebLLM adapter in strict/local_only mode", adapterUrl);
       return;

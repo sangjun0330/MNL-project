@@ -388,7 +388,15 @@ export function initWebLlmMlcBackend() {
       const text = extractCompletionText(completion);
       const parsed = extractFirstJsonObject(text);
       const normalized = normalizePatch(result, parsed);
-      if (!normalized) return null;
+      if (!normalized) {
+        // If model returned non-JSON text, keep data unchanged but still mark that MLC backend ran.
+        return {
+          __source: "mlc_webllm",
+          patients: result.patients.map((patient) => ({
+            patientKey: patient.patientKey,
+          })),
+        };
+      }
       return {
         ...normalized,
         __source: "mlc_webllm",

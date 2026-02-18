@@ -123,10 +123,10 @@ export async function ensureWebLlmRefineReady() {
     process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_ADAPTER_URL,
     WEBLLM_ADAPTER_DEFAULT_URL
   );
-  const useMlcBackend = readBooleanEnv(
-    process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_USE_MLC,
-    HANDOFF_FLAGS.handoffWebLlmUseMlc
-  );
+  const llmRequired = readBooleanEnv(process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_REQUIRED, true);
+  const useMlcBackend = llmRequired
+    ? true
+    : readBooleanEnv(process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_USE_MLC, HANDOFF_FLAGS.handoffWebLlmUseMlc);
 
   const backendSameOrigin = isRelativeOrSameOrigin(backendUrl, window.location.origin);
   const adapterSameOrigin = isRelativeOrSameOrigin(adapterUrl, window.location.origin);
@@ -315,6 +315,7 @@ export async function tryRefineWithWebLlm(result: HandoverSessionResult): Promis
     }
 
     const changed = JSON.stringify(merged.patients) !== JSON.stringify(safeInput.patients);
+    const nonLlmReason = backendSource ? `llm_backend_mismatch:${backendSource}` : "llm_backend_not_used";
     return {
       result: {
         ...merged,
@@ -325,7 +326,7 @@ export async function tryRefineWithWebLlm(result: HandoverSessionResult): Promis
       },
       llmApplied: llmUsed,
       refined: changed && llmUsed,
-      reason: llmUsed ? (changed ? null : "llm_no_change") : "llm_backend_not_used",
+      reason: llmUsed ? (changed ? null : "llm_no_change") : nonLlmReason,
       backendSource,
     };
   } catch {
