@@ -49,6 +49,8 @@ const DEFAULT_WASM_FALLBACK_MODEL_ID = "onnx-community/Qwen2.5-0.5B-Instruct";
 const HEAVY_WASM_FALLBACK_MODEL_HINTS = ["onnx-community/qwen2.5-0.5b-instruct", "qwen2.5-0.5b-instruct"];
 const DEFAULT_WASM_FALLBACK_MAX_NEW_TOKENS = 640;
 const DEFAULT_WASM_FALLBACK_DTYPE = "q8";
+const DEFAULT_WASM_FALLBACK_INIT_TIMEOUT_MS = 90_000;
+const DEFAULT_WASM_FALLBACK_INFER_TIMEOUT_MS = 45_000;
 const TRANSFORMERS_JSDELIVR_URL =
   "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js";
 const TRANSFORMERS_UNPKG_URL =
@@ -83,6 +85,21 @@ function sanitizeText(text: string | null | undefined) {
   return String(text ?? "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, code: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  return new Promise<T>((resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(code));
+    }, timeoutMs);
+    promise
+      .then((value) => resolve(value))
+      .catch((error) => reject(error))
+      .finally(() => {
+        if (timer) clearTimeout(timer);
+      });
+  });
 }
 
 async function loadWebLlmModule(moduleUrl: string) {
@@ -243,8 +260,9 @@ async function ensureTransformersTextGenerationPipeline() {
       env.allowRemoteModels = true;
       env.allowLocalModels = shouldAllowLocalFallbackModels();
       if (env.backends?.onnx?.wasm) {
-        env.backends.onnx.wasm.proxy = false;
-        // crossOriginIsolated가 아닌 환경에서도 경고/재시도 없이 즉시 동작하도록 단일 스레드로 고정
+        // 메인 스레드 프리징 방지를 위해 proxy(worker) 경로를 기본 사용
+        env.backends.onnx.wasm.proxy = true;
+        // crossOriginIsolated가 아닌 환경에서도 재시도/경고를 최소화하기 위해 단일 스레드 고정
         env.backends.onnx.wasm.numThreads = 1;
       }
     }
@@ -255,6 +273,12 @@ async function ensureTransformersTextGenerationPipeline() {
       process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_WASM_FALLBACK_DTYPE,
       DEFAULT_WASM_FALLBACK_DTYPE
     );
+    const initTimeoutMs = readNumberEnv(
+      process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_WASM_FALLBACK_INIT_TIMEOUT_MS,
+      DEFAULT_WASM_FALLBACK_INIT_TIMEOUT_MS,
+      5_000,
+      180_000
+    );
     const pipelineOptions: Record<string, unknown> = {
       device,
     };
@@ -263,12 +287,24 @@ async function ensureTransformersTextGenerationPipeline() {
     }
 
     try {
-      return await mod.pipeline("text-generation", modelId, pipelineOptions);
+      return await withTimeout(
+        mod.pipeline("text-generation", modelId, pipelineOptions),
+        initTimeoutMs,
+        "transformers_pipeline_init_timeout"
+      );
     } catch {
       if (device !== "wasm") {
-        return await mod.pipeline("text-generation", modelId, { device: "wasm" });
+        return await withTimeout(
+          mod.pipeline("text-generation", modelId, { device: "wasm" }),
+          initTimeoutMs,
+          "transformers_pipeline_init_timeout"
+        );
       }
-      return await mod.pipeline("text-generation", modelId);
+      return await withTimeout(
+        mod.pipeline("text-generation", modelId),
+        initTimeoutMs,
+        "transformers_pipeline_init_timeout"
+      );
     }
   })();
 
@@ -528,7 +564,13 @@ async function refineWithWasmFallback(
     128,
     2048
   );
-  const adaptiveMaxNewTokens = Math.min(2048, Math.max(fallbackMaxNewTokens, result.patients.length * 240));
+  const inferTimeoutMs = readNumberEnv(
+    process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_WASM_FALLBACK_INFER_TIMEOUT_MS,
+    DEFAULT_WASM_FALLBACK_INFER_TIMEOUT_MS,
+    5_000,
+    120_000
+  );
+  const adaptiveMaxNewTokens = Math.min(1_024, Math.max(fallbackMaxNewTokens, result.patients.length * 160));
   const prompt = [
     "You are a Korean clinical handoff formatter.",
     "Return ONLY JSON. No markdown. No explanation.",
@@ -550,13 +592,17 @@ async function refineWithWasmFallback(
     const currentTokens = tokenBudgets[attempt] ?? adaptiveMaxNewTokens;
     let output: unknown = null;
     try {
-      output = await pipeline(currentPrompt, {
-        max_new_tokens: currentTokens,
-        do_sample: false,
-        temperature: 0.1,
-        top_p: 0.9,
-        return_full_text: false,
-      });
+      output = await withTimeout(
+        pipeline(currentPrompt, {
+          max_new_tokens: currentTokens,
+          do_sample: false,
+          temperature: 0.1,
+          top_p: 0.9,
+          return_full_text: false,
+        }),
+        inferTimeoutMs,
+        "transformers_infer_timeout"
+      );
     } catch {
       continue;
     }
