@@ -615,8 +615,8 @@ type DynamicResultCard = {
   compact?: boolean;
 };
 
-const CARD_MAX_ITEMS = 4;
-const NON_SCENARIO_CARD_MAX_ITEMS = 4;
+const CARD_MAX_ITEMS = 3;
+const NON_SCENARIO_CARD_MAX_ITEMS = 3;
 const DISPLAY_ITEM_MAX_CHARS = 180;
 const ITEM_PRIORITY_PATTERN =
   /(즉시|중단|보류|주의|금기|핵심|반드시|필수|우선|보고|호출|알람|모니터|재평가|용량|속도|농도|단위|라인|호환|상호작용|프로토콜|기관 확인 필요)/i;
@@ -1215,15 +1215,12 @@ export function ToolMedSafetyPage() {
 
     const usingNarrativeCards = dynamicCardsFromNarrative.length > 0;
     const dynamicCards = usingNarrativeCards ? dynamicCardsFromNarrative : dynamicCardsFallback;
-    const displayCards =
-      isNotFoundResult
-        ? []
-        : result.resultKind === "scenario"
-        ? dynamicCards
-        : dynamicCards.map((card) => ({
-            ...card,
-            items: usingNarrativeCards ? card.items : card.items.slice(0, NON_SCENARIO_CARD_MAX_ITEMS),
-          }));
+    const displayCards = isNotFoundResult
+      ? []
+      : dynamicCards.map((card) => ({
+          ...card,
+          items: card.items.slice(0, NON_SCENARIO_CARD_MAX_ITEMS),
+        }));
 
     return {
       resultKindChip: kindLabel(result.resultKind),
