@@ -86,7 +86,7 @@ type MedSafetyCacheRecord = {
 
 const MED_SAFETY_CACHE_KEY = "med_safety_cache_v1";
 const MED_SAFETY_DEFAULT_MODEL = "gpt-5.1";
-const MED_SAFETY_CLIENT_TIMEOUT_MS = 125_000;
+const MED_SAFETY_CLIENT_TIMEOUT_MS = 240_000;
 const RETRY_WITH_DATA_MESSAGE = "네트워크가 불안정합니다. 데이터(모바일 네트워크)를 켠 뒤 다시 AI 분석 실행을 눌러 시도해 주세요.";
 
 const MODE_OPTIONS: Array<{ value: ClinicalMode; label: string }> = [
@@ -173,8 +173,14 @@ function parseErrorMessage(raw: string) {
   if (normalized.includes("query_or_image_required")) return "텍스트를 입력하거나 사진을 업로드해 주세요.";
   if (normalized.includes("image_too_large")) return "이미지 용량이 너무 큽니다. 6MB 이하로 다시 업로드해 주세요.";
   if (normalized.includes("image_type_invalid")) return "이미지 파일만 업로드할 수 있습니다.";
-  if (normalized.includes("client_timeout")) return RETRY_WITH_DATA_MESSAGE;
-  if (normalized.includes("openai_timeout") || normalized.includes("aborted")) return RETRY_WITH_DATA_MESSAGE;
+  if (normalized.includes("client_timeout"))
+    return "요청 처리 시간이 길어져 앱 대기 시간이 만료되었습니다. 잠시 후 다시 AI 분석 실행을 눌러 주세요.";
+  if (normalized.includes("openai_timeout_total_budget"))
+    return "AI 응답 시간이 길어 내부 처리 제한 시간을 넘었습니다. 다시 AI 분석 실행을 눌러 주세요.";
+  if (normalized.includes("openai_timeout_upstream"))
+    return "AI 서버 응답이 지연되어 시간 초과되었습니다. 잠시 후 다시 AI 분석 실행을 눌러 주세요.";
+  if (normalized.includes("openai_timeout") || normalized.includes("aborted"))
+    return "요청 처리 중 시간이 초과되었습니다. 잠시 후 다시 AI 분석 실행을 눌러 주세요.";
   if (normalized.includes("openai_network_")) return RETRY_WITH_DATA_MESSAGE;
   if (normalized.includes("openai_responses_401"))
     return "AI API 키가 유효하지 않거나 만료되었습니다. .env.local 환경변수를 확인해 주세요.";

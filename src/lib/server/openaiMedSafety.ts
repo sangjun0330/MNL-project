@@ -183,24 +183,24 @@ function resolveNetworkRetryBaseMs() {
 }
 
 function resolveUpstreamTimeoutMs() {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_UPSTREAM_TIMEOUT_MS ?? 35_000);
-  if (!Number.isFinite(raw)) return 35_000;
+  const raw = Number(process.env.OPENAI_MED_SAFETY_UPSTREAM_TIMEOUT_MS ?? 65_000);
+  if (!Number.isFinite(raw)) return 65_000;
   const rounded = Math.round(raw);
-  return Math.max(8_000, Math.min(90_000, rounded));
+  return Math.max(60_000, Math.min(180_000, rounded));
 }
 
 function resolveTotalBudgetMs() {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_TOTAL_BUDGET_MS ?? 45_000);
-  if (!Number.isFinite(raw)) return 45_000;
+  const raw = Number(process.env.OPENAI_MED_SAFETY_TOTAL_BUDGET_MS ?? 150_000);
+  if (!Number.isFinite(raw)) return 150_000;
   const rounded = Math.round(raw);
-  return Math.max(15_000, Math.min(120_000, rounded));
+  return Math.max(150_000, Math.min(300_000, rounded));
 }
 
 function resolveTranslateTotalBudgetMs() {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_TRANSLATE_BUDGET_MS ?? 14_000);
-  if (!Number.isFinite(raw)) return 14_000;
+  const raw = Number(process.env.OPENAI_MED_SAFETY_TRANSLATE_BUDGET_MS ?? 22_000);
+  if (!Number.isFinite(raw)) return 22_000;
   const rounded = Math.round(raw);
-  return Math.max(6_000, Math.min(60_000, rounded));
+  return Math.max(12_000, Math.min(90_000, rounded));
 }
 
 function truncateError(raw: string, size = 220) {
@@ -1747,7 +1747,7 @@ export async function translateMedSafetyToEnglish(input: {
   const upstreamTimeoutMs = resolveUpstreamTimeoutMs();
   const networkRetries = resolveNetworkRetryCount();
   const networkRetryBaseMs = resolveNetworkRetryBaseMs();
-  const totalBudgetMs = resolveTranslateTotalBudgetMs();
+  const totalBudgetMs = Math.max(resolveTranslateTotalBudgetMs(), Math.min(90_000, upstreamTimeoutMs + 12_000));
   const startedAt = Date.now();
 
   const translatedResult = cloneMedSafetyResult(input.result);
@@ -1996,7 +1996,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
   const outputTokenCandidates = buildOutputTokenCandidates(maxOutputTokensForIntent, intent);
   const responseVerbosity: ResponseVerbosity = "high";
   const upstreamTimeoutMs = resolveUpstreamTimeoutMs();
-  const totalBudgetMs = resolveTotalBudgetMs();
+  const totalBudgetMs = Math.max(resolveTotalBudgetMs(), Math.min(300_000, upstreamTimeoutMs + 35_000));
   const networkRetries = resolveNetworkRetryCount();
   const networkRetryBaseMs = resolveNetworkRetryBaseMs();
   const storeResponses = resolveStoreResponses();
