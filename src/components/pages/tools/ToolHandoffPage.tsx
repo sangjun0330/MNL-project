@@ -1506,13 +1506,8 @@ export function ToolHandoffPage() {
             const sourceTag = outcome.backendSource ? `:${outcome.backendSource}` : "";
             webLlmDetail = `webllm=required_failed:${outcome.reason ?? "unknown"}${sourceTag}`;
             const reasonText = formatWebLlmReason(outcome.reason);
-            const mlcStatus = typeof window !== "undefined" ? (window as any).__RNEST_WEBLLM_MLC_STATUS__ : null;
-            const mlcErrorText =
-              typeof mlcStatus?.error === "string" && mlcStatus.error.trim()
-                ? ` | mlc_error=${mlcStatus.error.trim()}`
-                : "";
-            setRefineNotice(`${reasonText}${mlcErrorText}`);
-            setError(`WebLLM 필수 모드 실패: ${reasonText}${mlcErrorText}`);
+            setRefineNotice(reasonText);
+            setError(`WebLLM 필수 모드 실패: ${reasonText}`);
             appendHandoffAuditEvent({
               action: "pipeline_run",
               sessionId,
