@@ -1,0 +1,665 @@
+"use client";
+
+import { useCallback, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
+import Image from "next/image";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { DetailCard, DetailChip, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
+import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
+import { useAIRecoveryInsights } from "@/components/insights/useAIRecoveryInsights";
+import { INSIGHTS_MIN_DAYS, isInsightsLocked, useInsightsData } from "@/components/insights/useInsightsData";
+import { useBillingAccess } from "@/components/billing/useBillingAccess";
+import { TodaySleepRequiredSheet } from "@/components/insights/TodaySleepRequiredSheet";
+import { addDays, formatKoreanDate, fromISODate, toISODate, todayISO } from "@/lib/date";
+import { hasHealthInput } from "@/lib/healthRecords";
+import { useI18n } from "@/lib/useI18n";
+import type { RecoverySection } from "@/lib/aiRecovery";
+
+function severityLabel(severity: "info" | "caution" | "warning", t: (key: string) => string) {
+  if (severity === "warning") return t("경고");
+  if (severity === "caution") return t("주의");
+  return t("안내");
+}
+
+function severityColor(severity: "info" | "caution" | "warning") {
+  if (severity === "warning") return "#E87485";
+  if (severity === "caution") return "#1B2747";
+  return "#007AFF";
+}
+
+function presentError(error: string, t: (key: string) => string) {
+  if (error.includes("unsupported_country_region_territory")) {
+    return [
+      t("OpenAI 요청이 지역 정책으로 거절됐어요."),
+      t("네트워크(와이파이/모바일) 경로를 바꿔 다시 시도해 주세요."),
+    ];
+  }
+  if (error.includes("openai_timeout")) {
+    return [t("AI 응답 시간이 길어졌어요."), t("잠시 후 다시 시도해 주세요.")];
+  }
+  return [t("AI 호출에 실패했어요. 잠시 후 다시 시도해 주세요.")];
+}
+
+function compactErrorCode(error: string) {
+  if (!error) return "";
+  // 모델명(model:xxx) 제거
+  let code = error.split("{")[0]?.trim() || error;
+  code = code.replace(/_?model:[^\s_]*/gi, "");
+  code = code.replace(/__+/g, "_").replace(/^_|_$/g, "");
+  return code.length > 90 ? `${code.slice(0, 89)}…` : code;
+}
+
+function findSectionStart(text: string, label: "A" | "B" | "C" | "D") {
+  const patterns = [new RegExp(`(?:^|\\n)\\s*\\[${label}\\]`, "i"), new RegExp(`(?:^|\\n)\\s*${label}\\s*[).:\\-]`, "i")];
+  for (const pattern of patterns) {
+    const match = pattern.exec(text);
+    if (match) return match.index + (match[0].startsWith("\n") ? 1 : 0);
+  }
+  return -1;
+}
+
+function extractCSection(text: string) {
+  const start = findSectionStart(text, "C");
+  if (start < 0) return "";
+  const tail = text.slice(start + 1);
+  const dPos = findSectionStart(tail, "D");
+  const endRelative = [dPos].filter((idx) => idx >= 0);
+  const end = endRelative.length ? start + 1 + Math.min(...endRelative) : text.length;
+  return text.slice(start, end).trim();
+}
+
+function normalizeNarrativeText(text: string, lang: "ko" | "en") {
+  let out = text;
+  out = out.replace(/오늘\s*컨디션에\s*맞춘\s*보정\s*조언입니다\.?/g, "");
+  out = out.replace(/오늘\s*컨디션\s*기준\s*핵심\s*조언입니다\.?/g, "");
+  out = out.replace(/Tailored adjustment guidance for today'?s condition\.?/gi, "");
+
+  out = out.replace(/스트레스\s*\(?\s*([0-3])\s*\)?/g, (_, raw) => {
+    const n = Number(raw);
+    if (n <= 0) return "스트레스가 거의 없는 편";
+    if (n === 1) return "스트레스가 조금 있는 편";
+    if (n === 2) return "스트레스가 꽤 있는 편";
+    return "스트레스가 높은 편";
+  });
+
+  out = out.replace(/기분\s*\(?\s*([1-5])\s*\)?/g, (_, raw) => {
+    const n = Number(raw);
+    if (n <= 1) return "기분이 많이 가라앉은 상태";
+    if (n === 2) return "기분이 다소 가라앉은 상태";
+    if (n === 3) return "기분이 보통인 상태";
+    if (n === 4) return "기분이 좋은 편";
+    return "기분이 매우 좋은 편";
+  });
+
+  out = out.replace(/(\d+(?:\.\d+)?)\s*mg/gi, (_, raw) => {
+    const mg = Number(raw);
+    if (!Number.isFinite(mg)) return `${raw}mg`;
+    const cups = Math.max(0.5, Math.round((mg / 120) * 10) / 10);
+    if (lang === "en") return `about ${cups} cup(s) (${Math.round(mg)}mg)`;
+    return `커피 약 ${cups}잔(${Math.round(mg)}mg)`;
+  });
+
+  out = out.replace(/[^\S\r\n]{2,}/g, " ").trim();
+  return out;
+}
+
+type HighlightTone = "summary" | "alert" | "plan";
+
+function highlightClass(tone: HighlightTone) {
+  if (tone === "alert") return "rounded-[6px] bg-[#FFD2DA] px-[4px] py-[1px] font-semibold text-[#5F1322]";
+  if (tone === "plan") return "rounded-[6px] bg-[#E4ECFF] px-[4px] py-[1px] font-semibold text-ios-text";
+  return "rounded-[6px] bg-[#FFF6CC] px-[4px] py-[1px] font-semibold text-ios-text";
+}
+
+function pickKeySentence(text: string) {
+  const sentences = text
+    .split(/(?<=[.!?]|다\.|요\.)\s+|\n+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+  const priorityRegex = /(핵심|최우선|주의|경고|위험|중요|필수|회복|수면부채|카페인|스트레스|기분|priority|warning|critical|must|important)/i;
+  return (
+    sentences.find((sentence) => sentence.length >= 10 && priorityRegex.test(sentence)) ??
+    sentences.find((sentence) => sentence.length >= 10) ??
+    ""
+  );
+}
+
+function highlightKeySentence(text: string, tone: HighlightTone) {
+  const target = pickKeySentence(text);
+  if (!target) return text;
+  const index = text.indexOf(target);
+  if (index < 0) return text;
+  const before = text.slice(0, index);
+  const after = text.slice(index + target.length);
+  return (
+    <>
+      {before}
+      <mark className={highlightClass(tone)}>{target}</mark>
+      {after}
+    </>
+  );
+}
+
+function normalizeLineBreaks(text: string) {
+  return text
+    .replace(/\s+-\s+/g, "\n- ")
+    .replace(/\.\s+-\s+/g, ".\n- ")
+    .replace(/[^\S\r\n]{2,}/g, " ")
+    .trim();
+}
+
+function splitBulletLines(text: string) {
+  const source = text.trim();
+  if (!source) return [];
+  const normalized = normalizeLineBreaks(source);
+  const items = normalized
+    .split(/\n+|\s+-\s+/)
+    .map((line) => line.replace(/^\-\s*/, "").trim())
+    .filter(Boolean);
+  if (items.length > 1) return items;
+  const sentenceItems = normalized
+    .split(/(?<=[.!?]|다\.|요\.)\s+|\n+/)
+    .map((line) => line.replace(/^\-\s*/, "").trim())
+    .filter(Boolean);
+  return sentenceItems.length > 1 ? sentenceItems : [normalized];
+}
+
+const CATEGORIES: Array<{
+  key: RecoverySection["category"];
+  titleKey: string;
+  icon: string;
+}> = [
+  { key: "sleep", titleKey: "수면", icon: "1" },
+  { key: "shift", titleKey: "교대근무", icon: "2" },
+  { key: "caffeine", titleKey: "카페인", icon: "3" },
+  { key: "menstrual", titleKey: "생리주기", icon: "4" },
+  { key: "stress", titleKey: "스트레스 & 감정", icon: "5" },
+  { key: "activity", titleKey: "신체 활동", icon: "6" },
+];
+
+function RecoveryGeneratingOverlay({
+  open,
+  title,
+  message,
+}: {
+  open: boolean;
+  title: string;
+  message: string;
+}) {
+  if (!open || typeof document === "undefined") return null;
+  return createPortal(
+    <div
+      className="fixed left-0 top-0 z-[2147483000] flex h-[100dvh] w-[100vw] items-center justify-center bg-[#F2F2F7] px-5"
+      style={{ position: "fixed", inset: 0 }}
+    >
+      <div className="relative w-full max-w-[420px] overflow-hidden rounded-[30px] border border-ios-sep bg-white px-6 py-6 shadow-[0_30px_90px_rgba(0,0,0,0.12)]">
+        <div className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-transparent via-[#007AFF] to-transparent wnl-recovery-progress" />
+        <div className="flex items-start gap-4">
+          <div className="relative h-[60px] w-[60px] shrink-0 overflow-hidden rounded-2xl border border-black/5 bg-[#eef4ff]">
+            <div className="absolute inset-0 wnl-logo-breathe rounded-2xl bg-[radial-gradient(80%_70%_at_50%_40%,rgba(0,122,255,0.22),transparent)]" />
+            <Image
+              src="/icons/icon-192.png"
+              alt="RNest"
+              width={60}
+              height={60}
+              className="relative h-full w-full object-cover"
+              priority
+            />
+          </div>
+          <div className="min-w-0">
+            <div className="text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">{title}</div>
+            <p className="mt-1 text-[13px] leading-relaxed text-ios-sub">{message}</p>
+          </div>
+        </div>
+        <div className="mt-4 flex items-center gap-2">
+          <span className="h-2 w-2 rounded-full bg-[#007AFF] wnl-dot-pulse" />
+          <span className="h-2 w-2 rounded-full bg-[#007AFF] wnl-dot-pulse [animation-delay:180ms]" />
+          <span className="h-2 w-2 rounded-full bg-[#007AFF] wnl-dot-pulse [animation-delay:360ms]" />
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+function EnglishTranslationPendingPopup({
+  open,
+  title,
+  message,
+}: {
+  open: boolean;
+  title: string;
+  message: string;
+}) {
+  if (!open || typeof document === "undefined") return null;
+  return createPortal(
+    <div className="fixed inset-0 z-[2147483100] flex items-start justify-center bg-[rgba(242,242,247,0.56)] px-4 pt-[max(72px,env(safe-area-inset-top)+20px)] backdrop-blur-[2px]">
+      <div className="w-full max-w-[360px] rounded-[24px] border border-[#D7DEEB] bg-white/96 p-4 shadow-[0_20px_56px_rgba(15,36,74,0.16)]">
+        <div className="flex items-start gap-3">
+          <div className="mt-[1px] flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#C7D5F0] bg-[#EDF3FF]">
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#163B73] border-r-transparent" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[14px] font-bold tracking-[-0.01em] text-ios-text">{title}</p>
+            <p className="mt-1 text-[12.5px] leading-relaxed text-ios-sub">{message}</p>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+export function InsightsAIRecoveryDetail() {
+  const { t, lang: uiLang } = useI18n();
+  const router = useRouter();
+  const [openInputGuide, setOpenInputGuide] = useState(false);
+  const [analysisRequested, setAnalysisRequested] = useState(false);
+  const { recordedDays, state } = useInsightsData();
+  const insightsLocked = isInsightsLocked(recordedDays);
+  const { hasPaidAccess, loading: billingLoading } = useBillingAccess();
+  const { data, loading, generating, error, retry, startGenerate } = useAIRecoveryInsights({
+    mode: "generate",
+    enabled: !insightsLocked && hasPaidAccess,
+    autoGenerate: false,
+  });
+  const today = useMemo(() => todayISO(), []);
+  const yesterday = useMemo(() => toISODate(addDays(fromISODate(today), -1)), [today]);
+  const todayBio = state.bio?.[today] ?? null;
+  const yesterdayBio = state.bio?.[yesterday] ?? null;
+  const yesterdayEmotion = state.emotions?.[yesterday] ?? null;
+  const hasYesterdayRecord = hasHealthInput(yesterdayBio, yesterdayEmotion);
+  const hasTodaySleep = todayBio?.sleepHours != null;
+  const needsHealthInputGuide = !hasYesterdayRecord || !hasTodaySleep;
+  const missingGuide = useMemo(() => {
+    const missingTodaySleep = !hasTodaySleep;
+    const missingYesterdayHealth = !hasYesterdayRecord;
+
+    if (!missingTodaySleep && !missingYesterdayHealth) return null;
+
+    if (missingTodaySleep && missingYesterdayHealth) {
+      return {
+        title: t("필수 기록 2개가 필요해요"),
+        subtitle: `${formatKoreanDate(today)} · ${formatKoreanDate(yesterday)} · ${t("AI 맞춤회복 분석 전 필수")}`,
+        primary: t("오늘 수면 기록과 전날 건강 기록을 먼저 입력해 주세요."),
+        description: t("두 항목이 있어야 맞춤회복 우선순위를 정확하게 계산할 수 있어요."),
+        hint: t("확인을 누르면 오늘 기록 화면(수면 우선)으로 이동합니다."),
+        route: "/schedule?openHealthLog=today&focus=sleep",
+      } as const;
+    }
+
+    if (missingTodaySleep) {
+      return {
+        title: t("오늘 수면 기록이 필요해요"),
+        subtitle: `${formatKoreanDate(today)} · ${t("AI 맞춤회복 분석 전 필수")}`,
+        primary: t("먼저 오늘 수면 시간을 입력해 주세요."),
+        description: t("오늘 수면 기록이 있어야 맞춤회복 분석 정확도가 올라갑니다."),
+        hint: t("확인을 누르면 오늘 기록 화면으로 이동합니다."),
+        route: "/schedule?openHealthLog=today&focus=sleep",
+      } as const;
+    }
+
+    return {
+      title: t("전날 건강 기록이 필요해요"),
+      subtitle: `${formatKoreanDate(yesterday)} · ${t("AI 맞춤회복 분석 전 필수")}`,
+      primary: t("먼저 전날 건강 기록을 입력해 주세요."),
+      description: t("전날 기록이 있어야 추세 기반 맞춤회복 추천을 정확히 계산할 수 있어요."),
+      hint: t("확인을 누르면 전날 기록 화면으로 이동합니다."),
+      route: "/schedule?openHealthLog=yesterday",
+    } as const;
+  }, [hasTodaySleep, hasYesterdayRecord, t, today, yesterday]);
+
+  const moveToRequiredHealthLog = useCallback(() => {
+    setOpenInputGuide(false);
+    if (!missingGuide) return;
+    router.push(missingGuide.route);
+  }, [missingGuide, router]);
+
+  const startAnalysis = useCallback(() => {
+    if (needsHealthInputGuide) {
+      setOpenInputGuide(true);
+      return;
+    }
+    setAnalysisRequested(true);
+    startGenerate();
+  }, [needsHealthInputGuide, startGenerate]);
+
+  const lang = data?.language ?? "ko";
+  const englishTranslationPending =
+    uiLang === "en" &&
+    !insightsLocked &&
+    !billingLoading &&
+    hasPaidAccess &&
+    analysisRequested &&
+    !data &&
+    !error &&
+    (loading || generating);
+  const errorLines = useMemo(() => (error ? presentError(error, t) : []), [error, t]);
+  const errorCode = useMemo(() => (error ? compactErrorCode(error) : ""), [error]);
+  const weekly = useMemo(() => {
+    const w = data?.result.weeklySummary ?? null;
+    if (!w) return null;
+    return {
+      ...w,
+      personalInsight: normalizeNarrativeText(w.personalInsight, lang),
+      nextWeekPreview: normalizeNarrativeText(w.nextWeekPreview, lang),
+    };
+  }, [data?.result.weeklySummary, lang]);
+
+  const sectionsByCategory = useMemo(() => {
+    const map = new Map<RecoverySection["category"], RecoverySection>();
+    for (const section of data?.result.sections ?? []) {
+      if (!map.has(section.category)) {
+        map.set(section.category, section);
+      }
+    }
+    return map;
+  }, [data?.result.sections]);
+
+  const orderedSections = useMemo(
+    () => CATEGORIES.map((meta) => ({ meta, section: sectionsByCategory.get(meta.key) ?? null })).filter((item) => item.section),
+    [sectionsByCategory]
+  );
+
+  const weeklyPersonalLines = useMemo(
+    () => splitBulletLines(weekly?.personalInsight ?? ""),
+    [weekly?.personalInsight]
+  );
+  const weeklyPreviewLines = useMemo(
+    () => splitBulletLines(weekly?.nextWeekPreview ?? ""),
+    [weekly?.nextWeekPreview]
+  );
+
+  const cFallbackText = useMemo(() => {
+    if (!data?.generatedText || orderedSections.length > 0) return "";
+    return normalizeNarrativeText(extractCSection(data.generatedText), lang);
+  }, [data?.generatedText, lang, orderedSections.length]);
+  const alertLines = useMemo(() => {
+    const raw = data?.result.compoundAlert?.message ?? "";
+    if (!raw) return [];
+    return normalizeLineBreaks(normalizeNarrativeText(raw, lang))
+      .split(/\n+/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+  }, [data?.result.compoundAlert?.message, lang]);
+
+  return (
+    <InsightDetailShell
+      title={t("AI 맞춤회복")}
+      subtitle={data ? formatKoreanDate(data.dateISO) : ""}
+      meta={undefined}
+      tone="navy"
+      backHref="/insights"
+    >
+      {insightsLocked ? (
+        <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />
+      ) : null}
+
+      {!insightsLocked && billingLoading ? (
+        <DetailCard className="p-5">
+          <div className="text-[13px] font-semibold text-ios-sub">{t("구독 상태 확인 중...")}</div>
+          <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
+            {t("AI 맞춤회복 사용 가능 여부를 확인하고 있어요.")}
+          </p>
+        </DetailCard>
+      ) : null}
+
+      {!insightsLocked && !billingLoading && hasPaidAccess ? (
+        <DetailCard className="p-5">
+          <div className="text-[13px] font-semibold text-ios-sub">{t("AI 맞춤회복 안내")}</div>
+          <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
+            {t("AI 맞춤회복은 오늘 컨디션과 최근 기록을 바탕으로 실행 우선순위 회복 루틴을 제안합니다.")}
+          </p>
+        </DetailCard>
+      ) : null}
+
+      {!insightsLocked && !billingLoading && !hasPaidAccess ? (
+        <DetailCard className="p-5">
+          <div className="text-[17px] font-bold tracking-[-0.01em] text-ios-text">{t("유료 플랜 전용 기능")}</div>
+          <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
+            {t("AI 맞춤회복은 Pro 플랜에서 사용할 수 있어요.")}
+          </p>
+          <div className="mt-4 flex gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                const confirmed = window.confirm(
+                  t("AI 맞춤회복은 유료 플랜 전용 기능입니다.\n플랜 업그레이드 페이지로 이동할까요?")
+                );
+                if (confirmed) router.push("/settings/billing/upgrade");
+              }}
+              className="inline-flex h-10 items-center justify-center rounded-full bg-black px-5 text-[13px] font-semibold text-white"
+            >
+              {t("확인")}
+            </button>
+            <Link
+              href="/settings/billing/upgrade"
+              className="inline-flex h-10 items-center justify-center rounded-full border border-ios-sep bg-white px-5 text-[13px] font-semibold text-ios-text"
+            >
+              {t("플랜 보기")}
+            </Link>
+          </div>
+        </DetailCard>
+      ) : null}
+
+      {!insightsLocked && hasPaidAccess && !generating && !data && !error ? (
+        <DetailCard className="p-5">
+          <div className="text-[17px] font-bold tracking-[-0.01em] text-ios-text">{t("AI 분석 준비 완료")}</div>
+          <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
+            {t("분석 시작 전에 필수 기록 2개(오늘 수면, 전날 건강)를 확인해 주세요.")}
+          </p>
+          <div className="mt-3 rounded-2xl border border-ios-sep bg-ios-bg px-3 py-3">
+            <div className="flex items-center justify-between text-[13px] text-ios-text">
+              <span>{t("오늘 수면 시간")}</span>
+              <span className={hasTodaySleep ? "text-[#0B7A3E]" : "text-[#B45309]"}>
+                {hasTodaySleep ? t("입력 완료") : t("입력 필요")}
+              </span>
+            </div>
+            <div className="mt-2 flex items-center justify-between text-[13px] text-ios-text">
+              <span>{t("전날 건강 기록")}</span>
+              <span className={hasYesterdayRecord ? "text-[#0B7A3E]" : "text-[#B45309]"}>
+                {hasYesterdayRecord ? t("입력 완료") : t("입력 필요")}
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={startAnalysis}
+            className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-full border border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] text-[14px] font-semibold text-[color:var(--wnl-accent)]"
+          >
+            {needsHealthInputGuide ? t("필수 기록 입력하러 가기") : t("AI 분석 시작하기")}
+          </button>
+          {needsHealthInputGuide ? (
+            <p className="mt-2 text-[12px] leading-relaxed text-ios-muted">
+              {t("누르면 누락된 기록 날짜로 이동해 바로 입력할 수 있어요.")}
+            </p>
+          ) : null}
+        </DetailCard>
+      ) : null}
+
+      {!insightsLocked && hasPaidAccess && !loading && !generating && !data && Boolean(error) ? (
+        <DetailCard className="p-5">
+          <div className="text-[17px] font-bold tracking-[-0.01em] text-ios-text">{t("AI 호출에 실패했어요.")}</div>
+          <div className="mt-2 space-y-1 text-[14px] leading-relaxed text-ios-sub">
+            {errorLines.map((line, idx) => (
+              <p key={`${line}-${idx}`}>{line}</p>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              if (needsHealthInputGuide) {
+                setOpenInputGuide(true);
+                return;
+              }
+              setAnalysisRequested(true);
+              retry();
+              startGenerate();
+            }}
+            className="mt-4 w-full rounded-xl bg-[#007AFF] py-3 text-[15px] font-semibold text-white active:bg-[#0062CC] transition-colors"
+          >
+            {t("다시 시도")}
+          </button>
+        </DetailCard>
+      ) : null}
+
+      {!insightsLocked && hasPaidAccess && !loading && data ? (
+        <>
+          <DetailCard className="p-5">
+            <div className="text-[13px] font-semibold text-ios-sub">{t("한줄 요약")}</div>
+            <p className="mt-2 text-[17px] font-semibold leading-relaxed tracking-[-0.01em] text-ios-text">
+              {highlightKeySentence(normalizeNarrativeText(data.result.headline || t("요약이 비어 있어요."), lang), "summary")}
+            </p>
+          </DetailCard>
+
+          <DetailCard className="p-5">
+            <div className="text-[13px] font-semibold text-ios-sub">{t("긴급 알림")}</div>
+            {data.result.compoundAlert ? (
+              <>
+                <div className="mt-2 space-y-1">
+                  {(alertLines.length
+                    ? alertLines
+                    : [normalizeNarrativeText(data.result.compoundAlert.message, lang)]).map((line, idx) => (
+                    <p key={`alert-line-${idx}`} className="text-[14px] leading-relaxed text-ios-text">
+                      {idx === 0 ? highlightKeySentence(line, "alert") : line}
+                    </p>
+                  ))}
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {data.result.compoundAlert.factors.map((factor) => (
+                    <DetailChip key={factor} color="#E87485">
+                      {factor}
+                    </DetailChip>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <p className="mt-2 text-[14px] text-ios-sub">{t("오늘은 복합 위험 알림이 없어요.")}</p>
+            )}
+          </DetailCard>
+
+          <DetailCard className="p-5">
+            <div className="text-[13px] font-semibold text-ios-sub">{t("오늘의 회복 추천")}</div>
+            {orderedSections.length ? (
+              <div className="mt-3 space-y-3">
+                {orderedSections.map(({ meta, section }, index) => (
+                  <div
+                    key={`${meta.key}-${section?.title}`}
+                    className="rounded-2xl border border-ios-sep bg-white p-4 shadow-apple-sm"
+                  >
+                    {(() => {
+                      const descriptionText = normalizeNarrativeText(section?.description || "", lang);
+                      const tips = (section?.tips ?? [])
+                        .map((tip) => normalizeNarrativeText(tip, lang))
+                        .filter(Boolean);
+
+                      return (
+                        <>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <div className="flex h-6 w-6 items-center justify-center rounded-full bg-ios-bg text-[12px] font-bold text-ios-sub">
+                          {index + 1}
+                        </div>
+                        <span className="text-[17px] font-bold text-ios-text">{section?.title || t(meta.titleKey)}</span>
+                      </div>
+                      <DetailChip color={severityColor(section?.severity ?? "info")}>
+                        {severityLabel(section?.severity ?? "info", t)}
+                      </DetailChip>
+                    </div>
+                    {descriptionText ? (
+                      <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">{descriptionText}</p>
+                    ) : null}
+                    {tips.length ? (
+                      <ol className="mt-3 space-y-2 text-[14px] leading-relaxed text-ios-text">
+                        {tips.map((tip, idx) => (
+                          <li key={`${meta.key}-${idx}`} className="flex gap-2">
+                            <span className="font-semibold text-ios-sub">{idx + 1}.</span>
+                            <span>{idx === 0 ? highlightKeySentence(tip, "plan") : tip}</span>
+                          </li>
+                        ))}
+                      </ol>
+                    ) : null}
+                        </>
+                      );
+                    })()}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
+                {cFallbackText || t("오늘은 추가 추천이 없어요.")}
+              </p>
+            )}
+          </DetailCard>
+
+          <DetailCard className="p-5">
+            <div className="text-[13px] font-semibold text-ios-sub">{t("이번 주 AI 한마디")}</div>
+            {weekly ? (
+              <div className="mt-3 space-y-3">
+                <div className="rounded-xl border border-ios-sep bg-ios-bg px-3 py-2">
+                  <p className="text-[12px] font-semibold text-ios-sub">{t("이번 주 요약")}</p>
+                  <p className="mt-1 text-[14px] text-ios-text">
+                    {t("평균 배터리")} <span className="font-extrabold">{weekly.avgBattery}</span>
+                    {" · "}
+                    {t("지난주 대비")} <span className="font-extrabold">{weekly.avgBattery - weekly.prevAvgBattery}</span>
+                  </p>
+                </div>
+                <div className="rounded-xl border border-ios-sep bg-ios-bg px-3 py-2">
+                  <p className="text-[12px] font-semibold text-ios-sub">{t("개인 패턴")}</p>
+                  <ol className="mt-1 space-y-1">
+                    {weeklyPersonalLines.map((line, idx) => (
+                      <li key={`personal-${idx}`} className="flex gap-2 text-[14px] leading-relaxed text-ios-text">
+                        <span className="font-semibold text-ios-sub">{idx + 1}.</span>
+                        <span>{line}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+                <div className="rounded-xl border border-ios-sep bg-ios-bg px-3 py-2">
+                  <p className="text-[12px] font-semibold text-ios-sub">{t("다음 주 예측")}</p>
+                  <ol className="mt-1 space-y-1">
+                    {weeklyPreviewLines.map((line, idx) => (
+                      <li key={`preview-${idx}`} className="flex gap-2 text-[14px] leading-relaxed text-ios-text">
+                        <span className="font-semibold text-ios-sub">{idx + 1}.</span>
+                        <span>{line}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-2 text-[14px] text-ios-sub">{t("주간 요약은 데이터가 더 쌓이면 표시돼요.")}</p>
+            )}
+          </DetailCard>
+
+          {/* 면책 문구 */}
+          <p className="mt-4 px-1 text-center text-[12px] leading-[1.6] text-black/30">
+            {t("본 콘텐츠는 의료 행위가 아닌 건강 관리 참고용 추천입니다. 의학적 판단이나 치료를 대체하지 않으며, 건강에 대한 결정은 반드시 전문 의료인과 상담하세요.")}
+          </p>
+        </>
+      ) : null}
+
+      <RecoveryGeneratingOverlay
+        open={Boolean(generating && !data && !insightsLocked && !englishTranslationPending)}
+        title={t("맞춤회복 분석 중")}
+        message={t("AI가 현재 상태에 맞춘 맞춤회복을 분석하고 있습니다.")}
+      />
+      <EnglishTranslationPendingPopup
+        open={englishTranslationPending}
+        title={t("영어 번역 적용 중")}
+        message={t("영어로 표시하는 중이에요. 조금만 기다려 주세요.")}
+      />
+      <TodaySleepRequiredSheet
+        open={openInputGuide}
+        onClose={() => setOpenInputGuide(false)}
+        onConfirm={moveToRequiredHealthLog}
+        titleText={missingGuide?.title}
+        subtitleText={missingGuide?.subtitle}
+        primaryText={missingGuide?.primary}
+        descriptionText={missingGuide?.description}
+        hintText={missingGuide?.hint}
+      />
+    </InsightDetailShell>
+  );
+}

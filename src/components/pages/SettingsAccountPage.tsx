@@ -1,0 +1,290 @@
+"use client";
+
+import Link from "next/link";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useRouter } from "next/navigation";
+import { BottomSheet } from "@/components/ui/BottomSheet";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
+import { cn } from "@/lib/cn";
+import { getSupabaseBrowserClient, signInWithProvider, signOut, useAuthState } from "@/lib/auth";
+import { purgeAllLocalState } from "@/lib/store";
+import { useI18n } from "@/lib/useI18n";
+
+function providerLabel(provider: string | null | undefined, t: (key: string) => string) {
+  if (provider === "google") return "Google";
+  return t("알 수 없음");
+}
+
+/* ── 삭제 완료 확인 팝업 ── */
+function DeleteSuccessOverlay({
+  open,
+  onConfirm,
+}: {
+  open: boolean;
+  onConfirm: () => void;
+}) {
+  const { t } = useI18n();
+  const [mounted, setMounted] = useState(false);
+  const [visible, setVisible] = useState(false);
+  const [portalEl, setPortalEl] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    setPortalEl(typeof document !== "undefined" ? document.body : null);
+  }, []);
+
+  useEffect(() => {
+    if (open) {
+      setMounted(true);
+      const timer = setTimeout(() => setVisible(true), 30);
+      return () => clearTimeout(timer);
+    }
+    setVisible(false);
+    const timer = setTimeout(() => setMounted(false), 500);
+    return () => clearTimeout(timer);
+  }, [open]);
+
+  if (!mounted || !portalEl) return null;
+
+  return createPortal(
+    <div
+      className={cn(
+        "fixed inset-0 z-[90] flex items-center justify-center bg-black/40 px-6 backdrop-blur-[6px]",
+        "transition-opacity duration-[400ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+        visible ? "opacity-100" : "opacity-0",
+      )}
+    >
+      <div
+        className={cn(
+          "w-full max-w-[320px] rounded-[22px] border border-ios-sep bg-white p-6 shadow-[0_24px_80px_rgba(0,0,0,0.14)]",
+          "transition-all duration-[500ms] ease-[cubic-bezier(0.175,0.885,0.32,1.1)]",
+          visible
+            ? "translate-y-0 scale-100 opacity-100"
+            : "translate-y-4 scale-95 opacity-0",
+        )}
+      >
+        {/* 체크마크 아이콘 */}
+        <div className="flex justify-center">
+          <div
+            className={cn(
+              "flex h-16 w-16 items-center justify-center rounded-full bg-[#34C759]/10",
+              "transition-transform duration-[600ms] ease-[cubic-bezier(0.175,0.885,0.32,1.1)]",
+              visible ? "scale-100" : "scale-50",
+            )}
+          >
+            <svg
+              className={cn(
+                "h-8 w-8 text-[#34C759]",
+                "transition-all duration-[500ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+                visible ? "opacity-100" : "opacity-0",
+              )}
+              style={{ transitionDelay: "200ms" }}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+        </div>
+
+        <div className="mt-5 text-center">
+          <div className="text-[18px] font-bold tracking-[-0.02em] text-ios-text">
+            {t("계정이 삭제되었습니다")}
+          </div>
+          <p className="mt-2 text-[14px] leading-[1.5] text-ios-sub">
+            {t("모든 데이터가 안전하게 삭제되었습니다. 이용해 주셔서 감사합니다.")}
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={onConfirm}
+          className="mt-6 h-[48px] w-full rounded-[14px] bg-black text-[15px] font-semibold text-white transition-transform duration-[120ms] ease-[cubic-bezier(0.175,0.885,0.32,1.1)] active:scale-[0.97]"
+        >
+          {t("확인")}
+        </button>
+      </div>
+    </div>,
+    portalEl,
+  );
+}
+
+export function SettingsAccountPage() {
+  const { user: auth, status } = useAuthState();
+  const isLoading = status === "loading";
+  const { t } = useI18n();
+  const router = useRouter();
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteText, setDeleteText] = useState("");
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteSuccess, setDeleteSuccess] = useState(false);
+  const deleteReady = deleteText.trim().toUpperCase() === "DELETE";
+
+  const onDeleteAccount = async () => {
+    if (!deleteReady || deleteBusy) return;
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      const res = await fetch("/api/user/delete", {
+        method: "DELETE",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      if (!res.ok) {
+        const msg = (await res.json())?.error ?? t("삭제에 실패했습니다. 다시 시도해 주세요.");
+        throw new Error(msg);
+      }
+      // 삭제 성공: 먼저 확인 팝업 표시
+      setDeleteOpen(false);
+      setDeleteText("");
+      setDeleteSuccess(true);
+    } catch (err: any) {
+      setDeleteError(err?.message ?? t("삭제에 실패했습니다. 다시 시도해 주세요."));
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
+
+  const handleDeleteSuccessConfirm = useCallback(async () => {
+    setDeleteSuccess(false);
+    await signOut();
+    purgeAllLocalState();
+    router.push("/settings");
+  }, [router]);
+
+  return (
+    <div className="mx-auto w-full max-w-[720px] px-4 pb-24 pt-6">
+      <div className="mb-4 flex items-center gap-2">
+        <Link href="/settings" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-ios-sep bg-white text-[18px] text-ios-text">
+          ←
+        </Link>
+        <div className="flex items-center gap-2 text-[24px] font-extrabold tracking-[-0.02em] text-ios-text">
+          <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="9" />
+            <circle cx="12" cy="9.2" r="2.8" />
+            <path d="M7.2 17.2c1.5-2 8.1-2 9.6 0" />
+          </svg>
+          {t("계정")}
+        </div>
+      </div>
+
+      <div className="rounded-apple border border-ios-sep bg-white p-5 shadow-apple">
+        <div className="text-[15px] font-bold text-ios-text">{t("소셜 로그인")}</div>
+
+        {auth ? (
+          <div className="mt-4 space-y-3 text-[14px] text-ios-text">
+            <div className="flex items-center justify-between">
+              <span className="text-ios-sub">{t("로그인 방식")}</span>
+              <span className="font-semibold">{providerLabel(auth.provider, t)}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-ios-sub">{t("계정 이메일")}</span>
+              <span className="font-semibold">{auth.email ?? t("알 수 없음")}</span>
+            </div>
+            <div className="rounded-2xl bg-black/[0.04] px-3 py-2 text-[12px] text-ios-sub">
+              {t("로그인된 계정에 기록이 안전하게 저장됩니다.")}
+            </div>
+            <div className="flex items-center gap-5 pt-2">
+              <button
+                type="button"
+                onClick={() => signOut()}
+                className="text-[15px] font-bold text-ios-text hover:opacity-80"
+              >
+                {t("로그아웃")}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteError(null);
+                  setDeleteText("");
+                  setDeleteOpen(true);
+                }}
+                className="text-[13px] text-ios-sub hover:underline underline-offset-4"
+              >
+                {t("계정삭제")}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-4 space-y-4">
+            <div className="text-[13px] text-ios-sub">
+              {t(
+                "Google 계정으로 로그인하면 기록이 계정에 저장되어 앱을 지우거나 기기를 바꿔도 복원할 수 있습니다."
+              )}
+            </div>
+
+            <div className="grid gap-2">
+              <Button onClick={() => signInWithProvider("google")} disabled={isLoading}>
+                {t("Google로 계속")}
+              </Button>
+            </div>
+            <div className="text-[12px] text-ios-muted">
+              {isLoading
+                ? t("로그인 상태를 확인 중이에요.")
+                : t("로그인 후 모든 기능(일정, 기록, 인사이트)을 사용할 수 있어요.")}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <BottomSheet
+        open={deleteOpen}
+        onClose={() => {
+          if (deleteBusy) return;
+          setDeleteOpen(false);
+          setDeleteText("");
+          setDeleteError(null);
+        }}
+      >
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="text-[24px] font-extrabold tracking-[-0.02em] text-ios-text">{t("계정 삭제하기")}</div>
+            <button
+              type="button"
+              onClick={onDeleteAccount}
+              disabled={!deleteReady || deleteBusy}
+              className={`inline-flex h-11 items-center justify-center rounded-full border px-5 text-[17px] font-semibold transition ${
+                !deleteReady || deleteBusy
+                  ? "cursor-not-allowed border-red-300 text-red-300"
+                  : "border-red-600 text-red-600 hover:bg-red-50"
+              }`}
+            >
+              {deleteBusy ? t("삭제 중...") : t("삭제")}
+            </button>
+          </div>
+          <div className="text-[13px] text-ios-sub">{t("계정 삭제는 모든 데이터를 영구적으로 삭제합니다.")}</div>
+          <div className="text-[13px] text-ios-sub">{t("삭제를 진행하려면 아래에 DELETE를 입력하세요.")}</div>
+          <Input
+            value={deleteText}
+            onChange={(e) => setDeleteText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void onDeleteAccount();
+            }}
+            placeholder="DELETE"
+            autoCapitalize="characters"
+            autoCorrect="off"
+          />
+          {deleteError ? <div className="text-[12px] text-red-600">{deleteError}</div> : null}
+          <div className="flex items-center justify-end pt-1">
+            <Button variant="secondary" onClick={() => setDeleteOpen(false)} disabled={deleteBusy}>
+              {t("취소")}
+            </Button>
+          </div>
+        </div>
+      </BottomSheet>
+
+      <DeleteSuccessOverlay open={deleteSuccess} onConfirm={handleDeleteSuccessConfirm} />
+    </div>
+  );
+}
+
+export default SettingsAccountPage;
+
