@@ -213,6 +213,19 @@ function normalizeString(value: unknown, fallback = "") {
   return clean || fallback;
 }
 
+function normalizeMultilineString(value: unknown, fallback = "") {
+  if (typeof value !== "string") return fallback;
+  const clean = String(value ?? "")
+    .replace(/\r/g, "")
+    .replace(/\u0000/g, "")
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return clean || fallback;
+}
+
 function normalizeStringArray(value: unknown, limit = 12) {
   const source = Array.isArray(value)
     ? value
@@ -318,9 +331,9 @@ function normalizeAnalyzeResult(raw: unknown): MedSafetyAnalyzeResult | null {
     patientScript20s: normalizeString(raw.patientScript20s),
     modePriority: normalizeStringArray(raw.modePriority, 8),
     confidenceNote: normalizeString(raw.confidenceNote),
-    searchAnswer: normalizeString(raw.searchAnswer),
+    searchAnswer: normalizeMultilineString(raw.searchAnswer),
     suggestedNames: normalizeStringArray(raw.suggestedNames, 5),
-    generatedText: normalizeString(raw.generatedText),
+    generatedText: normalizeMultilineString(raw.generatedText),
     model: normalizeString(raw.model, MED_SAFETY_DEFAULT_MODEL),
     analyzedAt,
     source,
@@ -597,7 +610,7 @@ type DynamicResultCard = {
 };
 
 const CARD_MAX_ITEMS = 4;
-const NON_SCENARIO_CARD_MAX_ITEMS = 3;
+const NON_SCENARIO_CARD_MAX_ITEMS = 4;
 const DISPLAY_ITEM_MAX_CHARS = 180;
 const ITEM_PRIORITY_PATTERN =
   /(즉시|중단|보류|주의|금기|핵심|반드시|필수|우선|보고|호출|알람|모니터|재평가|용량|속도|농도|단위|라인|호환|상호작용|프로토콜|기관 확인 필요)/i;
@@ -606,6 +619,8 @@ const TOPIC_LABEL_PATTERN =
 
 const CATEGORY_HEADING_PATTERN =
   /(핵심 요약|이 약이 무엇인지|언제 쓰는지|어떻게 주는지|기구 정의|준비물|셋업|사용 절차|정상 작동|알람|트러블슈팅|합병증|유지관리|실수 방지|금기|주의|모니터|위험 신호|즉시 대응|라인|호환|상호작용|환자 교육|체크리스트|보고|sbar|원인|재평가|처치|적응증|역할|정의|분류)/i;
+const INLINE_HEADING_SPLIT_PATTERN =
+  /[ \t]+(?=(핵심 요약|주요 행동|핵심 확인|실행 포인트|위험\/에스컬레이션|라인\/호환\/상호작용|환자 교육 포인트|실수 방지 포인트|이 약이 무엇인지\(정의\/분류\/역할\)|언제 쓰는지\(적응증\/사용 맥락\)|어떻게 주는지\(경로\/투여 방식\/원칙\)|반드시 확인할 금기\/주의 Top 3|반드시 모니터할 것 Top 3|위험 신호\/즉시 대응|기구 정의\/언제 쓰는지|준비물\/셋업\/사용 절차|정상 작동 기준|알람\/트러블슈팅|합병증\/Stop rules|유지관리|실수 방지)\s*[:：])/g;
 
 function headingCandidate(line: string) {
   return String(line ?? "")
@@ -703,7 +718,16 @@ function renderHighlightedLine(line: string): ReactNode {
 
 function buildNarrativeCards(answer: string, t?: TranslateFn): DynamicResultCard[] {
   const translate = t ?? ((key: string) => key);
-  const lines = String(answer ?? "")
+  const normalizedAnswer = String(answer ?? "")
+    .replace(/\r/g, "")
+    .replace(/\u0000/g, "")
+    // 구버전 캐시/응답에서 섹션 헤더가 한 줄로 붙어 들어온 경우 분리한다.
+    .replace(/[ \t]+/g, " ")
+    .replace(INLINE_HEADING_SPLIT_PATTERN, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  const lines = normalizedAnswer
     .replace(/\r/g, "")
     .replace(/```[\s\S]*?```/g, "")
     .replace(/\*\*/g, "")
@@ -752,7 +776,7 @@ function buildNarrativeCards(answer: string, t?: TranslateFn): DynamicResultCard
 
   if (cards.length) return cards;
 
-  const paragraphs = String(answer ?? "")
+  const paragraphs = normalizedAnswer
     .split(/\n{2,}/)
     .map((block) => block.trim())
     .filter(Boolean);
@@ -1160,7 +1184,8 @@ export function ToolMedSafetyPage() {
     const headerPrimaryUse = clampDisplayText(result.item.primaryUse, result.resultKind === "scenario" ? 170 : 220);
 
     const isNotFoundResult = Boolean(result.notFound);
-    const dynamicCardsFromNarrative = !isNotFoundResult && result.searchAnswer ? buildNarrativeCards(result.searchAnswer, t) : [];
+    const narrativeSource = result.searchAnswer || result.generatedText || "";
+    const dynamicCardsFromNarrative = !isNotFoundResult && narrativeSource ? buildNarrativeCards(narrativeSource, t) : [];
     const dynamicCardsFallback: DynamicResultCard[] = [
       {
         key: "fallback-core",
@@ -1182,7 +1207,8 @@ export function ToolMedSafetyPage() {
       { key: "fallback-monitor", title: t("모니터/재평가"), items: pickCardItems(reassessmentPoints) },
     ].filter((card) => card.items.length > 0);
 
-    const dynamicCards = dynamicCardsFromNarrative.length ? dynamicCardsFromNarrative : dynamicCardsFallback;
+    const usingNarrativeCards = dynamicCardsFromNarrative.length > 0;
+    const dynamicCards = usingNarrativeCards ? dynamicCardsFromNarrative : dynamicCardsFallback;
     const displayCards =
       isNotFoundResult
         ? []
@@ -1190,7 +1216,7 @@ export function ToolMedSafetyPage() {
         ? dynamicCards
         : dynamicCards.map((card) => ({
             ...card,
-            items: card.items.slice(0, NON_SCENARIO_CARD_MAX_ITEMS),
+            items: usingNarrativeCards ? card.items : card.items.slice(0, NON_SCENARIO_CARD_MAX_ITEMS),
           }));
 
     return {

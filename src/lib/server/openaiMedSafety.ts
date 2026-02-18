@@ -235,17 +235,23 @@ function normalizeText(value: string) {
 }
 
 function cleanLine(value: string) {
-  const stripped = normalizeText(value)
+  const base = normalizeText(value)
     .replace(/^[-*•·]\s*/, "")
     .replace(/^\d+[).]\s*/, "")
     .replace(/^["'`]+|["'`]+$/g, "")
-    .replace(
-      /^(핵심 요약|주요 행동|핵심 확인|실행 포인트|위험\/에스컬레이션|라인\/호환\/상호작용|환자 교육 포인트|실수 방지 포인트|이 약이 무엇인지\(정의\/분류\/역할\)|언제 쓰는지\(적응증\/사용 맥락\)|어떻게 주는지\(경로\/투여 방식\/원칙\)|반드시 확인할 금기\/주의 Top 3|반드시 모니터할 것 Top 3|위험 신호\/즉시 대응|기구 정의\/언제 쓰는지|준비물\/셋업\/사용 절차|정상 작동 기준|알람\/트러블슈팅|합병증\/Stop rules|유지관리|실수 방지)\s*[:：]\s*/i,
-      ""
-    )
     .replace(/\s+/g, " ")
     .trim();
-  return stripped;
+  if (!base) return "";
+
+  // "섹션명: 내용" 형태는 섹션명 접두어만 제거하고,
+  // "섹션명:" 단독 헤더 라인은 유지해서 클라이언트가 카드 분할에 사용하도록 한다.
+  const sectionPrefixed = base.match(
+    /^(핵심 요약|주요 행동|핵심 확인|실행 포인트|위험\/에스컬레이션|라인\/호환\/상호작용|환자 교육 포인트|실수 방지 포인트|이 약이 무엇인지\(정의\/분류\/역할\)|언제 쓰는지\(적응증\/사용 맥락\)|어떻게 주는지\(경로\/투여 방식\/원칙\)|반드시 확인할 금기\/주의 Top 3|반드시 모니터할 것 Top 3|위험 신호\/즉시 대응|기구 정의\/언제 쓰는지|준비물\/셋업\/사용 절차|정상 작동 기준|알람\/트러블슈팅|합병증\/Stop rules|유지관리|실수 방지)\s*[:：]\s*(.+)$/i
+  );
+  if (sectionPrefixed?.[2]) {
+    return sectionPrefixed[2].replace(/\s+/g, " ").trim();
+  }
+  return base;
 }
 
 function sanitizeSearchAnswer(text: string) {
