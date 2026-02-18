@@ -622,14 +622,16 @@ async function getMlcEngine() {
       return engine;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (isMlcFatalWebGpuError(message)) {
+      const isGpuFatal = isMlcFatalWebGpuError(message);
+      if (isGpuFatal) {
         mlcFatalUnavailable = true;
-        mlcFatalError = message;
+        mlcFatalError = "webgpu_unavailable";
       }
+      // GPU 관련 에러는 짧은 코드로 정규화 (raw 영어 에러 메시지를 UI에 노출하지 않음)
       window.__RNEST_WEBLLM_MLC_STATUS__ = {
         ready: false,
         modelId,
-        error: message,
+        error: isGpuFatal ? "webgpu_unavailable" : message,
         updatedAt: Date.now(),
       };
       enginePromise = null;
