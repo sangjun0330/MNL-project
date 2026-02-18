@@ -58,7 +58,7 @@ function readNumberEnv(value: string | undefined, fallback: number, min: number,
   return Math.max(min, Math.min(max, Math.floor(parsed)));
 }
 
-function sanitizeText(text: string | undefined) {
+function sanitizeText(text: string | null | undefined) {
   return String(text ?? "")
     .replace(/\s+/g, " ")
     .trim();
@@ -66,6 +66,51 @@ function sanitizeText(text: string | undefined) {
 
 async function loadWebLlmModule(moduleUrl: string) {
   return await import(/* webpackIgnore: true */ moduleUrl);
+}
+
+function uniqueStrings(values: Array<string | null | undefined>) {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const normalized = sanitizeText(value);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
+}
+
+function appendCacheBust(url: string, token: string) {
+  const trimmedUrl = sanitizeText(url);
+  const trimmedToken = sanitizeText(token);
+  if (!trimmedUrl || !trimmedToken) return trimmedUrl;
+
+  try {
+    const absolute = new URL(trimmedUrl, window.location.origin);
+    absolute.searchParams.set("v", trimmedToken);
+    return absolute.toString();
+  } catch {
+    const separator = trimmedUrl.includes("?") ? "&" : "?";
+    return `${trimmedUrl}${separator}v=${encodeURIComponent(trimmedToken)}`;
+  }
+}
+
+async function loadWebLlmModuleWithCacheRetry(moduleUrl: string, moduleVersion: string) {
+  const urls = uniqueStrings([
+    appendCacheBust(moduleUrl, moduleVersion),
+    appendCacheBust(moduleUrl, `${moduleVersion}-${Date.now()}`),
+    sanitizeText(moduleUrl),
+  ]);
+
+  let lastError: unknown = null;
+  for (const url of urls) {
+    try {
+      return await loadWebLlmModule(url);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError ?? new Error("webllm_module_load_failed");
 }
 
 function normalizeUrlBase(value: string) {
@@ -286,6 +331,10 @@ async function getMlcEngine() {
     HANDOFF_FLAGS.handoffWebLlmModelId || DEFAULT_MODEL_ID
   );
   const moduleUrl = readStringEnv(process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_MODULE_URL, DEFAULT_MODULE_URL);
+  const moduleVersion = readStringEnv(
+    process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_MODULE_VERSION,
+    modelId
+  );
   const modelLibBaseUrl = readStringEnv(
     process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_MODEL_LIB_BASE_URL,
     DEFAULT_MODEL_LIB_BASE_URL
@@ -295,7 +344,7 @@ async function getMlcEngine() {
 
   enginePromise = (async () => {
     try {
-      const mod = await loadWebLlmModule(moduleUrl);
+      const mod = await loadWebLlmModuleWithCacheRetry(moduleUrl, moduleVersion);
       const appConfigPatch = patchWebLlmAppConfigForCsp(mod, modelId, modelLibBaseUrl);
       const createEngine =
         (mod as any).CreateMLCEngine ??
