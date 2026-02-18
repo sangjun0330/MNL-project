@@ -240,6 +240,44 @@ type TransformersAsrPipeline = (
 ) => Promise<TransformersAsrOutput>;
 
 let transformersPipelinePromise: Promise<TransformersAsrPipeline | null> | null = null;
+let transformersModulePromise: Promise<any> | null = null;
+
+const TRANSFORMERS_JSDELIVR_URL =
+  "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js";
+const TRANSFORMERS_UNPKG_URL =
+  "https://unpkg.com/@huggingface/transformers@3.8.1/dist/transformers.min.js";
+
+function resolveTransformersRuntimeUrl() {
+  const configured = String(process.env.NEXT_PUBLIC_HANDOFF_WASM_ASR_TRANSFORMERS_URL ?? "").trim();
+  return configured || TRANSFORMERS_JSDELIVR_URL;
+}
+
+async function importTransformersFromUrl(url: string) {
+  return await import(/* webpackIgnore: true */ url);
+}
+
+async function ensureTransformersModule() {
+  if (transformersModulePromise) return transformersModulePromise;
+
+  transformersModulePromise = (async () => {
+    const primaryUrl = resolveTransformersRuntimeUrl();
+    try {
+      return await importTransformersFromUrl(primaryUrl);
+    } catch {
+      if (primaryUrl !== TRANSFORMERS_UNPKG_URL) {
+        return await importTransformersFromUrl(TRANSFORMERS_UNPKG_URL);
+      }
+      throw new Error("transformers_runtime_load_failed");
+    }
+  })();
+
+  try {
+    return await transformersModulePromise;
+  } catch (error) {
+    transformersModulePromise = null;
+    throw error;
+  }
+}
 
 function normalizeWasmAsrDevice(preferDevice: HandoffWasmAsrDevice | undefined) {
   if (preferDevice === "webgpu") return "webgpu";
@@ -357,7 +395,7 @@ async function ensureTransformersPipeline({
 }) {
   if (!transformersPipelinePromise) {
     transformersPipelinePromise = (async () => {
-      const mod = (await import("@huggingface/transformers")) as any;
+      const mod = (await ensureTransformersModule()) as any;
       const env = mod?.env;
       if (env && typeof env === "object") {
         env.allowRemoteModels = true;
