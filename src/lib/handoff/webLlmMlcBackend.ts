@@ -44,8 +44,16 @@ const DEFAULT_MAX_OUTPUT_TOKENS = 1_200;
 const DEFAULT_MODULE_URL = "/runtime/vendor/web-llm/index.js";
 const RAW_MODEL_LIB_BASE_URL = "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/";
 const DEFAULT_MODEL_LIB_BASE_URL = "https://cdn.jsdelivr.net/gh/mlc-ai/binary-mlc-llm-libs@main/";
+const DEFAULT_WASM_FALLBACK_MODEL_ID = "onnx-community/Qwen2.5-0.5B-Instruct";
+const DEFAULT_WASM_FALLBACK_MAX_NEW_TOKENS = 600;
+const TRANSFORMERS_JSDELIVR_URL =
+  "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js";
+const TRANSFORMERS_UNPKG_URL =
+  "https://unpkg.com/@huggingface/transformers@3.8.1/dist/transformers.min.js";
 
 let enginePromise: Promise<WebLlmEngine | null> | null = null;
+let transformersModulePromise: Promise<any> | null = null;
+let transformersTextGenPromise: Promise<any> | null = null;
 
 function readStringEnv(value: string | undefined, fallback: string) {
   const trimmed = String(value ?? "").trim();
@@ -58,6 +66,14 @@ function readNumberEnv(value: string | undefined, fallback: number, min: number,
   return Math.max(min, Math.min(max, Math.floor(parsed)));
 }
 
+function readBooleanEnv(value: string | undefined, fallback: boolean) {
+  if (value == null) return fallback;
+  const normalized = String(value).trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+}
+
 function sanitizeText(text: string | null | undefined) {
   return String(text ?? "")
     .replace(/\s+/g, " ")
@@ -66,6 +82,10 @@ function sanitizeText(text: string | null | undefined) {
 
 async function loadWebLlmModule(moduleUrl: string) {
   return await import(/* webpackIgnore: true */ moduleUrl);
+}
+
+async function importModuleFromUrl(url: string) {
+  return await import(/* webpackIgnore: true */ url);
 }
 
 function uniqueStrings(values: Array<string | null | undefined>) {
@@ -117,6 +137,98 @@ function normalizeUrlBase(value: string) {
   const trimmed = sanitizeText(value);
   if (!trimmed) return DEFAULT_MODEL_LIB_BASE_URL;
   return trimmed.endsWith("/") ? trimmed : `${trimmed}/`;
+}
+
+function resolveTransformersRuntimeUrl() {
+  const configured = sanitizeText(process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_TRANSFORMERS_URL);
+  if (configured) return configured;
+  const asrRuntimeConfigured = sanitizeText(process.env.NEXT_PUBLIC_HANDOFF_WASM_ASR_TRANSFORMERS_URL);
+  if (asrRuntimeConfigured) return asrRuntimeConfigured;
+  return TRANSFORMERS_JSDELIVR_URL;
+}
+
+function resolveWasmFallbackModelId() {
+  return readStringEnv(
+    process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_WASM_FALLBACK_MODEL_ID,
+    DEFAULT_WASM_FALLBACK_MODEL_ID
+  );
+}
+
+function resolveWasmFallbackDevice() {
+  const configured = sanitizeText(process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_WASM_FALLBACK_DEVICE).toLowerCase();
+  if (configured === "webgpu") return "webgpu";
+  if (configured === "wasm") return "wasm";
+  if (typeof navigator !== "undefined" && "gpu" in navigator) return "webgpu";
+  return "wasm";
+}
+
+async function ensureTransformersModule() {
+  if (transformersModulePromise) return transformersModulePromise;
+
+  transformersModulePromise = (async () => {
+    const primaryUrl = resolveTransformersRuntimeUrl();
+    try {
+      return await importModuleFromUrl(primaryUrl);
+    } catch {
+      if (primaryUrl !== TRANSFORMERS_UNPKG_URL) {
+        return await importModuleFromUrl(TRANSFORMERS_UNPKG_URL);
+      }
+      throw new Error("transformers_runtime_load_failed");
+    }
+  })();
+
+  try {
+    return await transformersModulePromise;
+  } catch (error) {
+    transformersModulePromise = null;
+    throw error;
+  }
+}
+
+async function ensureTransformersTextGenerationPipeline() {
+  if (transformersTextGenPromise) return transformersTextGenPromise;
+
+  transformersTextGenPromise = (async () => {
+    const mod = (await ensureTransformersModule()) as any;
+    const env = mod?.env;
+    if (env && typeof env === "object") {
+      env.allowRemoteModels = true;
+      env.allowLocalModels = true;
+      if (env.backends?.onnx?.wasm) {
+        env.backends.onnx.wasm.proxy = false;
+        env.backends.onnx.wasm.numThreads = Math.max(
+          1,
+          Math.min(4, Math.floor(((typeof navigator !== "undefined" ? navigator.hardwareConcurrency : 4) || 4) / 2))
+        );
+      }
+    }
+
+    const modelId = resolveWasmFallbackModelId();
+    const device = resolveWasmFallbackDevice();
+    const dtype = sanitizeText(process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_WASM_FALLBACK_DTYPE);
+    const pipelineOptions: Record<string, unknown> = {
+      device,
+    };
+    if (dtype) {
+      pipelineOptions.dtype = dtype;
+    }
+
+    try {
+      return await mod.pipeline("text-generation", modelId, pipelineOptions);
+    } catch {
+      if (device !== "wasm") {
+        return await mod.pipeline("text-generation", modelId, { device: "wasm" });
+      }
+      return await mod.pipeline("text-generation", modelId);
+    }
+  })();
+
+  try {
+    return await transformersTextGenPromise;
+  } catch (error) {
+    transformersTextGenPromise = null;
+    throw error;
+  }
 }
 
 type WebLlmAppConfig = {
@@ -264,6 +376,26 @@ function extractFirstJsonObject(text: string) {
   }
 }
 
+function extractGeneratedText(raw: unknown): string {
+  if (typeof raw === "string") return raw.trim();
+
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      const generated = extractGeneratedText(item);
+      if (generated) return generated;
+    }
+    return "";
+  }
+
+  if (!raw || typeof raw !== "object") return "";
+
+  const generatedText = sanitizeText((raw as any).generated_text);
+  if (generatedText) return generatedText;
+  const text = sanitizeText((raw as any).text);
+  if (text) return text;
+  return "";
+}
+
 function readStringArray(value: unknown) {
   if (!Array.isArray(value)) return undefined;
   const out = value
@@ -322,6 +454,65 @@ function normalizePatch(result: HandoverSessionResult, value: unknown): WebLlmPa
 
   if (patients.some((item) => !item)) return null;
   return { patients: patients as WebLlmPatch["patients"] };
+}
+
+async function refineWithWasmFallback(
+  result: HandoverSessionResult,
+  maxOutputTokens: number
+): Promise<WebLlmPatch | null> {
+  const enabled = readBooleanEnv(process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_WASM_FALLBACK_ENABLED, true);
+  if (!enabled) return null;
+  if (typeof window === "undefined") return null;
+  if (typeof WebAssembly === "undefined") return null;
+
+  let pipeline: any;
+  try {
+    pipeline = await ensureTransformersTextGenerationPipeline();
+  } catch {
+    return null;
+  }
+  if (!pipeline) return null;
+
+  const fallbackMaxNewTokens = readNumberEnv(
+    process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_WASM_FALLBACK_MAX_NEW_TOKENS,
+    Math.min(DEFAULT_WASM_FALLBACK_MAX_NEW_TOKENS, maxOutputTokens),
+    128,
+    2048
+  );
+  const prompt = [
+    "You are a Korean clinical handoff formatter.",
+    "Return ONLY JSON. No markdown. No explanation.",
+    buildRefinePrompt(result),
+  ].join("\n");
+
+  let output: unknown = null;
+  try {
+    output = await pipeline(prompt, {
+      max_new_tokens: fallbackMaxNewTokens,
+      do_sample: false,
+      temperature: 0.1,
+      top_p: 0.9,
+      return_full_text: false,
+    });
+  } catch {
+    return null;
+  }
+
+  const generated = extractGeneratedText(output);
+  const parsed = extractFirstJsonObject(generated);
+  const normalized = normalizePatch(result, parsed);
+  if (!normalized) {
+    return {
+      __source: "transformers_webllm",
+      patients: result.patients.map((patient) => ({
+        patientKey: patient.patientKey,
+      })),
+    };
+  }
+  return {
+    ...normalized,
+    __source: "transformers_webllm",
+  };
 }
 
 async function getMlcEngine() {
@@ -409,47 +600,59 @@ export function initWebLlmMlcBackend() {
       if (!result || !Array.isArray(result.patients)) return null;
 
       const engine = await getMlcEngine();
-      if (!engine) return null;
+      if (engine) {
+        const prompt = buildRefinePrompt(result);
+        let completion: unknown;
+        try {
+          completion = await engine.chat.completions.create({
+            messages: [
+              {
+                role: "system",
+                content:
+                  "You generate strict JSON for de-identified clinical handoff refinement. Never output markdown.",
+              },
+              {
+                role: "user",
+                content: prompt,
+              },
+            ],
+            temperature: 0.1,
+            top_p: 0.9,
+            max_tokens: maxOutputTokens,
+          });
+        } catch {
+          completion = null;
+        }
 
-      const prompt = buildRefinePrompt(result);
-      let completion: unknown;
-      try {
-        completion = await engine.chat.completions.create({
-          messages: [
-            {
-              role: "system",
-              content:
-                "You generate strict JSON for de-identified clinical handoff refinement. Never output markdown.",
-            },
-            {
-              role: "user",
-              content: prompt,
-            },
-          ],
-          temperature: 0.1,
-          top_p: 0.9,
-          max_tokens: maxOutputTokens,
-        });
-      } catch {
-        return null;
+        if (completion) {
+          const text = extractCompletionText(completion);
+          const parsed = extractFirstJsonObject(text);
+          const normalized = normalizePatch(result, parsed);
+          if (!normalized) {
+            // If model returned non-JSON text, keep data unchanged but still mark that MLC backend ran.
+            return {
+              __source: "mlc_webllm",
+              patients: result.patients.map((patient) => ({
+                patientKey: patient.patientKey,
+              })),
+            };
+          }
+          return {
+            ...normalized,
+            __source: "mlc_webllm",
+          };
+        }
       }
 
-      const text = extractCompletionText(completion);
-      const parsed = extractFirstJsonObject(text);
-      const normalized = normalizePatch(result, parsed);
-      if (!normalized) {
-        // If model returned non-JSON text, keep data unchanged but still mark that MLC backend ran.
-        return {
-          __source: "mlc_webllm",
-          patients: result.patients.map((patient) => ({
-            patientKey: patient.patientKey,
-          })),
-        };
-      }
-      return {
-        ...normalized,
-        __source: "mlc_webllm",
+      const fallbackPatch = await refineWithWasmFallback(result, maxOutputTokens);
+      if (!fallbackPatch) return null;
+      window.__RNEST_WEBLLM_MLC_STATUS__ = {
+        ready: true,
+        modelId: resolveWasmFallbackModelId(),
+        error: null,
+        updatedAt: Date.now(),
       };
+      return fallbackPatch;
     },
   };
 }
