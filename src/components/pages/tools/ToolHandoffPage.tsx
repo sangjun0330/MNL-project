@@ -1493,7 +1493,9 @@ export function ToolHandoffPage() {
         setRefineRunning(true);
         try {
           let outcome = await tryRefineWithWebLlm(currentResult);
-          if (WEBLLM_REQUIRED && !outcome.llmApplied) {
+          const isRetryableWebLlmMiss =
+            outcome.reason === "webllm_adapter_not_found" || outcome.reason === "refine_runtime_error";
+          if (WEBLLM_REQUIRED && !outcome.llmApplied && isRetryableWebLlmMiss) {
             for (let attempt = 0; attempt < 2; attempt += 1) {
               await new Promise<void>((resolve) => {
                 window.setTimeout(() => resolve(), 800 + attempt * 500);
