@@ -248,6 +248,7 @@ export function SettingsAdminHandoffPage() {
           <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">vad_min_speech_ratio: {HANDOFF_FLAGS.handoffVadMinSpeechRatio}</div>
           <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">vad_min_segment_ms: {HANDOFF_FLAGS.handoffVadMinSegmentMs}</div>
           <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">webllm_refine_enabled: {String(HANDOFF_FLAGS.handoffWebLlmRefineEnabled)}</div>
+          <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">webllm_backend_url: {process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_BACKEND_URL || "/runtime/webllm-refine-backend.js"}</div>
           <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">webllm_adapter_url: {process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_ADAPTER_URL || "/runtime/webllm-refine-adapter.js"}</div>
           <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">evidence_enabled: {String(HANDOFF_FLAGS.handoffEvidenceEnabled)}</div>
           <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">recorder_support: {String(capability.recorder)}</div>
