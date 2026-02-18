@@ -1506,9 +1506,14 @@ export function ToolHandoffPage() {
             const sourceTag = outcome.backendSource ? `:${outcome.backendSource}` : "";
             webLlmDetail = `webllm=required_failed:${outcome.reason ?? "unknown"}${sourceTag}`;
             const reasonText = formatWebLlmReason(outcome.reason);
-            // adapter_heuristic = WebGPU 미지원 환경의 정상 대체 처리 → 파이프라인 계속 진행
-            const isHeuristicFallback = outcome.backendSource === "adapter_heuristic";
-            if (!isHeuristicFallback) {
+            // WebGPU 없는 환경의 모든 graceful degradation 케이스는 파이프라인 차단 없이 진행
+            // backendSource 뿐만 아니라 reason까지 확인 (adapter 로드 전 실패 시 backendSource=null)
+            const isGracefulDegradation =
+              outcome.backendSource === "adapter_heuristic" ||
+              outcome.reason === "llm_backend_mismatch:adapter_heuristic" ||
+              outcome.reason === "llm_backend_not_used" ||
+              outcome.reason === "webllm_adapter_not_found";
+            if (!isGracefulDegradation) {
               setError(`WebLLM 필수 모드 실패: ${reasonText}`);
               appendHandoffAuditEvent({
                 action: "pipeline_run",
