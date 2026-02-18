@@ -15,6 +15,8 @@
     "test:e2e:handoff:headed": "node scripts/run-playwright.mjs test -c playwright.handoff.config.mjs --headed"
   },
   "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
+    "@mlc-ai/web-llm": "^0.2.81",
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.49.1",
     "next": "^15.5.9",

@@ -73,7 +73,9 @@ export function SettingsAdminHandoffPage() {
       recorder: isHandoffRecorderSupported(),
       webSpeech: isLocalSpeechAsrSupported(),
       wasmLocal: isWasmLocalAsrSupported({
+        engine: HANDOFF_FLAGS.handoffWasmAsrEngine,
         workerUrl: HANDOFF_FLAGS.handoffWasmAsrWorkerUrl,
+        preferDevice: HANDOFF_FLAGS.handoffWasmAsrDevice,
       }),
     }),
     []
@@ -244,10 +246,16 @@ export function SettingsAdminHandoffPage() {
           <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">wasm_asr_worker_url: {HANDOFF_FLAGS.handoffWasmAsrWorkerUrl}</div>
           <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">wasm_asr_runtime_url: {HANDOFF_FLAGS.handoffWasmAsrRuntimeUrl}</div>
           <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">wasm_asr_model_url: {HANDOFF_FLAGS.handoffWasmAsrModelUrl || "(empty)"}</div>
+          <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">wasm_asr_engine: {HANDOFF_FLAGS.handoffWasmAsrEngine}</div>
+          <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">wasm_asr_model_id: {HANDOFF_FLAGS.handoffWasmAsrModelId}</div>
+          <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">wasm_asr_device: {HANDOFF_FLAGS.handoffWasmAsrDevice}</div>
+          <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">wasm_asr_dtype: {HANDOFF_FLAGS.handoffWasmAsrDType}</div>
           <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">vad_enabled: {String(HANDOFF_FLAGS.handoffVadEnabled)}</div>
           <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">vad_min_speech_ratio: {HANDOFF_FLAGS.handoffVadMinSpeechRatio}</div>
           <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">vad_min_segment_ms: {HANDOFF_FLAGS.handoffVadMinSegmentMs}</div>
           <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">webllm_refine_enabled: {String(HANDOFF_FLAGS.handoffWebLlmRefineEnabled)}</div>
+          <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">webllm_use_mlc: {String(HANDOFF_FLAGS.handoffWebLlmUseMlc)}</div>
+          <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">webllm_model_id: {HANDOFF_FLAGS.handoffWebLlmModelId}</div>
           <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">webllm_backend_url: {process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_BACKEND_URL || "/runtime/webllm-refine-backend.js"}</div>
           <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">webllm_adapter_url: {process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_ADAPTER_URL || "/runtime/webllm-refine-adapter.js"}</div>
           <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">evidence_enabled: {String(HANDOFF_FLAGS.handoffEvidenceEnabled)}</div>
