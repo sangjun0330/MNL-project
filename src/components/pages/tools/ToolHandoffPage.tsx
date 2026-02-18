@@ -229,6 +229,17 @@ async function copyTextToClipboard(text: string) {
   throw new Error("clipboard_unavailable");
 }
 
+function formatWebLlmReason(reason: string | null | undefined) {
+  if (!reason) return "WebLLM 자동 다듬기에서 변경 사항이 없어 규칙 기반 결과를 유지했습니다.";
+  if (reason === "refine_no_change") return "WebLLM 자동 다듬기에서 변경 사항이 없어 규칙 기반 결과를 유지했습니다.";
+  if (reason === "webllm_adapter_not_found")
+    return "WebLLM 어댑터가 로드되지 않아 규칙 기반 결과를 사용했습니다. 개발 서버를 재시작해 주세요.";
+  if (reason === "browser_runtime_required") return "브라우저 런타임에서만 WebLLM 자동 다듬기를 적용할 수 있습니다.";
+  if (reason === "refine_output_invalid") return "WebLLM 출력 형식이 맞지 않아 규칙 기반 결과를 유지했습니다.";
+  if (reason === "refine_runtime_error") return "WebLLM 실행 오류로 규칙 기반 결과를 유지했습니다.";
+  return `WebLLM 자동 다듬기 스킵: ${reason}`;
+}
+
 function ResultSection({
   result,
   evidenceEnabled,
@@ -519,6 +530,7 @@ export function ToolHandoffPage() {
   const [adminError, setAdminError] = useState<string | null>(null);
   const [wasmProgress, setWasmProgress] = useState<number | null>(null);
   const [refineRunning, setRefineRunning] = useState(false);
+  const [refineNotice, setRefineNotice] = useState<string | null>(null);
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
 
   const recorderRef = useRef<HandoffRecorderController | null>(null);
@@ -851,6 +863,7 @@ export function ToolHandoffPage() {
       setSavedSessions([]);
       setResult(null);
       setEvidenceMap({});
+      setRefineNotice(null);
       setRawSegments([]);
       setChunkLogs([]);
       setManualUncertainties([]);
@@ -1443,6 +1456,7 @@ export function ToolHandoffPage() {
 
     setRunning(true);
     setError(null);
+    setRefineNotice(null);
 
     try {
       const output = runHandoffPipeline({
@@ -1451,7 +1465,27 @@ export function ToolHandoffPage() {
         rawSegments: mergedSegments,
         manualUncertainties,
       });
-      const sanitized = sanitizeStructuredSession(output.result);
+      let currentResult = sanitizeStructuredSession(output.result).result;
+      let webLlmDetail = "webllm=disabled";
+
+      if (HANDOFF_FLAGS.handoffWebLlmRefineEnabled) {
+        setRefineRunning(true);
+        try {
+          const outcome = await tryRefineWithWebLlm(currentResult);
+          currentResult = outcome.result;
+          if (outcome.refined) {
+            webLlmDetail = "webllm=refined";
+            setRefineNotice("WebLLM 자동 다듬기까지 적용된 결과입니다.");
+          } else {
+            webLlmDetail = `webllm=${outcome.reason ?? "no_change"}`;
+            setRefineNotice(formatWebLlmReason(outcome.reason));
+          }
+        } finally {
+          setRefineRunning(false);
+        }
+      }
+
+      const sanitized = sanitizeStructuredSession(currentResult);
       setDeidIssueCount(sanitized.issues.length);
       setResidualIssueCount(sanitized.residualIssues.length);
       if (sanitized.residualIssues.length) {
@@ -1490,12 +1524,25 @@ export function ToolHandoffPage() {
       appendHandoffAuditEvent({
         action: "pipeline_run",
         sessionId,
-        detail: `segments=${mergedSegments.length}|uncertainties=${sanitized.result.uncertaintyItems.length}`,
+        detail: `segments=${mergedSegments.length}|uncertainties=${sanitized.result.uncertaintyItems.length}|${webLlmDetail}`,
       });
       refreshStoredLists();
     } finally {
       setRunning(false);
+      setRefineRunning(false);
     }
+  };
+
+  const stopRecordingAndRun = async () => {
+    await stopRecording();
+    await new Promise<void>((resolve) => {
+      window.setTimeout(() => resolve(), 320);
+    });
+    if (!rawSegmentsRef.current.length && !chunkInputRef.current.trim()) {
+      setError("녹음 종료 후 분석할 전사 텍스트가 없습니다.");
+      return;
+    }
+    await run();
   };
 
   const finalizeSession = async () => {
@@ -1648,6 +1695,7 @@ export function ToolHandoffPage() {
     setError(null);
     setRecordingError(null);
     setCopyNotice(null);
+    setRefineNotice(null);
     setSessionSaved(false);
     setManualUncertainties([]);
     setDraftRecoveredAt(null);
@@ -1682,6 +1730,7 @@ export function ToolHandoffPage() {
     setLiveAliasTokens({});
     setRevealedAliasUntil({});
     setCopyNotice(null);
+    setRefineNotice(null);
     setSessionSaved(false);
     setManualUncertainties([]);
     setDraftRecoveredAt(null);
@@ -1725,6 +1774,7 @@ export function ToolHandoffPage() {
     setResidualIssueCount(0);
     setError(null);
     setCopyNotice(null);
+    setRefineNotice(null);
     liveSegmentSeqRef.current = 0;
     lastActivityRef.current = Date.now();
     setActivityPulse(Date.now());
@@ -1759,28 +1809,6 @@ export function ToolHandoffPage() {
     const encoded = encodeURIComponent(targetSessionId);
     window.location.assign(`/tools/handoff/session/${encoded}`);
   }, []);
-
-  const refineWithWebLlm = async () => {
-    if (!result) return;
-    setRefineRunning(true);
-    setError(null);
-    try {
-      const outcome = await tryRefineWithWebLlm(result);
-      setResult(outcome.result);
-      setSessionSaved(false);
-      if (!outcome.refined) {
-        setError(`WebLLM refine 스킵: ${outcome.reason ?? "no_change"}`);
-      } else {
-        appendHandoffAuditEvent({
-          action: "pipeline_run",
-          sessionId: outcome.result.sessionId,
-          detail: "webllm_refine=true",
-        });
-      }
-    } finally {
-      setRefineRunning(false);
-    }
-  };
 
   const copyStructuredOutput = async () => {
     if (!result) return;
@@ -1950,20 +1978,15 @@ export function ToolHandoffPage() {
             >
               비식별 결과 복사
             </Button>
-            {HANDOFF_FLAGS.handoffWebLlmRefineEnabled ? (
-              <Button
-                variant="secondary"
-                className={flatButtonSecondary}
-                onClick={() => { void refineWithWebLlm(); }}
-                disabled={refineRunning || running || recordingState !== "idle" || actionBlocked || screenLocked || !isWebLlmRefineAvailable()}
-              >
-                {refineRunning ? "Refine 중..." : "WebLLM 문장 다듬기"}
-              </Button>
-            ) : (
-              <div className="rounded-full border border-ios-sep bg-ios-bg px-4 py-2 text-center text-[12px] text-ios-sub">
-                WebLLM refine 비활성화
-              </div>
-            )}
+            <div className="rounded-full border border-ios-sep bg-ios-bg px-4 py-2 text-center text-[12px] text-ios-sub">
+              {refineRunning
+                ? "WebLLM 자동 다듬기 실행 중..."
+                : HANDOFF_FLAGS.handoffWebLlmRefineEnabled
+                  ? isWebLlmRefineAvailable()
+                    ? "WebLLM 자동 다듬기 활성"
+                    : "WebLLM 어댑터 로딩 대기"
+                  : "WebLLM 자동 다듬기 비활성"}
+            </div>
           </div>
         ) : null}
 
@@ -2019,6 +2042,11 @@ export function ToolHandoffPage() {
         {copyNotice ? (
           <div className="mt-2 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-[12.5px] text-emerald-800">
             {copyNotice}
+          </div>
+        ) : null}
+        {refineNotice ? (
+          <div className="mt-2 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-[12.5px] text-amber-800">
+            {refineNotice}
           </div>
         ) : null}
       </Card>
@@ -2107,9 +2135,9 @@ export function ToolHandoffPage() {
               data-testid="handoff-stop-recording"
               variant="danger"
               className={flatButtonDanger}
-              onClick={() => { void stopRecording(); }}
+              onClick={() => { void stopRecordingAndRun(); }}
             >
-              {t("녹음 중지")}
+              {t("녹음 중지 후 분석")}
             </Button>
           ) : (
             <Button
