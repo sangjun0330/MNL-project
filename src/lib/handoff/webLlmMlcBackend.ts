@@ -186,7 +186,8 @@ function shouldAllowLocalFallbackModels() {
 }
 
 function shouldSkipMlcWebGpuPath() {
-  return readBooleanEnv(process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_SKIP_MLC_WEBGPU, false);
+  // 기본값 true: WebGPU 경로 실패/재시도로 UI가 멈추는 현상 방지
+  return readBooleanEnv(process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_SKIP_MLC_WEBGPU, true);
 }
 
 function canAttemptMlcWebGpu() {
@@ -738,9 +739,29 @@ export function initWebLlmMlcBackend() {
         }
       }
 
-      // WebGPU MLC 실패 → WASM fallback은 CSP unsafe-eval 오류로 현재 환경에서 작동 불가
-      // null을 반환해 adapter_heuristic이 즉시 처리하도록 함
-      return null;
+      // WebGPU MLC 실패 시 WASM fallback 경로로 이어서 처리
+      const fallbackPatch = await refineWithWasmFallback(result, maxOutputTokens);
+      if (!fallbackPatch) {
+        window.__RNEST_WEBLLM_MLC_STATUS__ = {
+          ready: false,
+          modelId: resolveWasmFallbackModelId(),
+          error: "transformers_fallback_unavailable_returning_noop",
+          updatedAt: Date.now(),
+        };
+        return {
+          __source: "transformers_webllm",
+          patients: result.patients.map((patient) => ({
+            patientKey: patient.patientKey,
+          })),
+        };
+      }
+      window.__RNEST_WEBLLM_MLC_STATUS__ = {
+        ready: true,
+        modelId: resolveWasmFallbackModelId(),
+        error: null,
+        updatedAt: Date.now(),
+      };
+      return fallbackPatch;
     },
   };
 }
