@@ -251,6 +251,66 @@ function formatWebLlmReason(reason: string | null | undefined) {
   return `WebLLM 실행 상태: ${reason}`;
 }
 
+function readWebLlmMlcStatus() {
+  if (typeof window === "undefined") return null;
+  const status = (window as any).__RNEST_WEBLLM_MLC_STATUS__;
+  if (!status || typeof status !== "object") return null;
+  const modelId = typeof status.modelId === "string" ? status.modelId.trim() : "";
+  const error = typeof status.error === "string" && status.error.trim() ? status.error.trim() : null;
+  return {
+    ready: Boolean(status.ready),
+    modelId,
+    error,
+  };
+}
+
+function summarizeWebLlmErrorForBadge(error: string) {
+  if (error === "webgpu_unavailable") return "WebGPU 미지원";
+  if (error === "transformers_fallback_unavailable") return "fallback unavailable";
+  if (error.length <= 36) return error;
+  return `${error.slice(0, 36)}...`;
+}
+
+function formatWebLlmBadgeText(refineRunning: boolean) {
+  if (refineRunning) return "WebLLM 자동 다듬기 실행 중...";
+
+  if (WEBLLM_REQUIRED && !HANDOFF_FLAGS.handoffWebLlmRefineEnabled) {
+    return "WebLLM 필수 모드 비활성(환경변수 확인)";
+  }
+  if (!WEBLLM_REQUIRED && !HANDOFF_FLAGS.handoffWebLlmRefineEnabled) {
+    return "WebLLM 자동 다듬기 비활성";
+  }
+
+  const adapterReady = isWebLlmRefineAvailable();
+  if (!adapterReady) {
+    return WEBLLM_REQUIRED ? "WebLLM 필수 모드 로딩 중" : "WebLLM 어댑터 로딩 대기";
+  }
+
+  if (!HANDOFF_FLAGS.handoffWebLlmUseMlc) {
+    return WEBLLM_REQUIRED ? "WebLLM 필수 모드 준비됨" : "WebLLM 자동 다듬기 활성";
+  }
+
+  const status = readWebLlmMlcStatus();
+  if (status?.ready) {
+    return WEBLLM_REQUIRED
+      ? `WebLLM 필수 모드 준비됨 (MLC:${status.modelId || HANDOFF_FLAGS.handoffWebLlmModelId})`
+      : "WebLLM 자동 다듬기 활성 (MLC)";
+  }
+  if (status?.error) {
+    const detail = summarizeWebLlmErrorForBadge(status.error);
+    if (status.error === "webgpu_unavailable") {
+      return WEBLLM_REQUIRED
+        ? "WebLLM 필수 모드 준비됨 (WebGPU 미지원, 대체 경로)"
+        : "WebLLM 자동 다듬기 활성 (WebGPU 미지원, 대체 경로)";
+    }
+    return WEBLLM_REQUIRED
+      ? `WebLLM 필수 모드 준비됨 (대체 경로:${detail})`
+      : `WebLLM 자동 다듬기 활성 (대체 경로:${detail})`;
+  }
+
+  return WEBLLM_REQUIRED ? "WebLLM 필수 모드 로딩 중" : "WebLLM 어댑터 로딩 대기";
+}
+
 function ResultSection({
   result,
   evidenceEnabled,
@@ -1530,9 +1590,14 @@ export function ToolHandoffPage() {
 
           currentResult = outcome.result;
           const sourceTag = outcome.backendSource ? `:${outcome.backendSource}` : "";
+          const sourceNote = outcome.backendSource ? ` (backend=${outcome.backendSource})` : "";
           if (outcome.llmApplied) {
             webLlmDetail = outcome.refined ? "webllm=llm_refined" : "webllm=llm_no_change";
-            setRefineNotice(outcome.refined ? "WebLLM 마스킹 정리까지 적용된 결과입니다." : formatWebLlmReason(outcome.reason));
+            setRefineNotice(
+              outcome.refined
+                ? `WebLLM 마스킹 정리까지 적용된 결과입니다.${sourceNote}`
+                : `${formatWebLlmReason(outcome.reason)}${sourceNote}`
+            );
           } else {
             webLlmDetail = `webllm=${outcome.reason ?? "not_applied"}${sourceTag}`;
             setRefineNotice(formatWebLlmReason(outcome.reason));
@@ -2042,19 +2107,7 @@ export function ToolHandoffPage() {
               비식별 결과 복사
             </Button>
             <div className="rounded-full border border-ios-sep bg-ios-bg px-4 py-2 text-center text-[12px] text-ios-sub">
-              {refineRunning
-                ? "WebLLM 자동 다듬기 실행 중..."
-                : WEBLLM_REQUIRED
-                  ? HANDOFF_FLAGS.handoffWebLlmRefineEnabled
-                    ? isWebLlmRefineAvailable()
-                      ? "WebLLM 필수 모드 준비됨"
-                      : "WebLLM 필수 모드 로딩 중"
-                    : "WebLLM 필수 모드 비활성(환경변수 확인)"
-                  : HANDOFF_FLAGS.handoffWebLlmRefineEnabled
-                    ? isWebLlmRefineAvailable()
-                      ? "WebLLM 자동 다듬기 활성"
-                      : "WebLLM 어댑터 로딩 대기"
-                    : "WebLLM 자동 다듬기 비활성"}
+              {formatWebLlmBadgeText(refineRunning)}
             </div>
           </div>
         ) : null}

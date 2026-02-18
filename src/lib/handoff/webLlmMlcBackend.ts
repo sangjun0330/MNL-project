@@ -186,8 +186,12 @@ function shouldAllowLocalFallbackModels() {
 }
 
 function shouldSkipMlcWebGpuPath() {
-  // 기본값 true: WebGPU 경로 실패/재시도로 UI가 멈추는 현상 방지
-  return readBooleanEnv(process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_SKIP_MLC_WEBGPU, true);
+  const llmRequired = readBooleanEnv(process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_REQUIRED, true);
+  // 필수 모드에서는 기본적으로 MLC 경로를 시도한다.
+  const requestedSkip = readBooleanEnv(process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_SKIP_MLC_WEBGPU, !llmRequired);
+  // 필수 모드 + skip=true 조합은 사용자 의도와 충돌하므로 강제 비활성화한다.
+  if (llmRequired && requestedSkip) return false;
+  return requestedSkip;
 }
 
 function canAttemptMlcWebGpu() {
@@ -745,15 +749,11 @@ export function initWebLlmMlcBackend() {
         window.__RNEST_WEBLLM_MLC_STATUS__ = {
           ready: false,
           modelId: resolveWasmFallbackModelId(),
-          error: "transformers_fallback_unavailable_returning_noop",
+          error: "transformers_fallback_unavailable",
           updatedAt: Date.now(),
         };
-        return {
-          __source: "transformers_webllm",
-          patients: result.patients.map((patient) => ({
-            patientKey: patient.patientKey,
-          })),
-        };
+        // 어댑터가 규칙 기반 fallback을 적용하도록 null 반환
+        return null;
       }
       window.__RNEST_WEBLLM_MLC_STATUS__ = {
         ready: true,
