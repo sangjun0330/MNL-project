@@ -1,5 +1,5 @@
-/* RNest minimal service worker (cache-first for static assets) */
-const CACHE = "rnest-cache-v4";
+/* RNest minimal service worker (static asset cache only) */
+const CACHE = "rnest-cache-v5";
 const CORE = ["/", "/manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
@@ -23,6 +23,18 @@ self.addEventListener("fetch", (event) => {
   // Only handle same-origin GET
   if (req.method !== "GET" || url.origin !== self.location.origin) return;
 
+  // Never cache API responses.
+  if (url.pathname.startsWith("/api/")) return;
+
+  // Always fetch navigation/page HTML from network first.
+  // This avoids stale HTML -> JS version mismatch (hydration errors) after deploy.
+  if (req.mode === "navigate") {
+    event.respondWith(
+      fetch(req).catch(() => caches.match("/"))
+    );
+    return;
+  }
+
   // Cache-first for Next static
   if (url.pathname.startsWith("/_next/static") || url.pathname.startsWith("/icons/")) {
     event.respondWith(
@@ -35,7 +47,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Network-first for pages, with fallback to cache.
+  // Other same-origin resources: network-first with fallback to cache.
   event.respondWith(
     fetch(req)
       .then((res) => {

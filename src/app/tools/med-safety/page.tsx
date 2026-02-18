@@ -1,6 +1,6 @@
 import { AppShell } from "@/components/shell/AppShell";
-import { ToolMedSafetyPage } from "@/components/pages/tools/ToolMedSafetyPage";
 import type { Metadata } from "next";
+import { ToolMedSafetyPage } from "@/components/pages/tools/ToolMedSafetyPage";
 
 export const metadata: Metadata = {
   robots: {
@@ -17,4 +17,3 @@ export default function Page() {
     </AppShell>
   );
 }
-

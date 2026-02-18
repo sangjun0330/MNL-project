@@ -198,7 +198,156 @@ function parseErrorMessage(raw: string) {
   if (normalized.includes("openai_responses_")) return "AI 요청이 실패했습니다. 다시 AI 분석 실행을 눌러 시도해 주세요.";
   if (normalized.includes("openai_invalid_json_payload"))
     return "AI 응답이 비정형으로 와서 자동 정리 결과로 표시했습니다.";
+  if (normalized.includes("invalid_response_payload"))
+    return "서버 응답 형식이 올바르지 않아 결과를 정리하지 못했습니다. 다시 AI 분석 실행을 눌러 시도해 주세요.";
   return "분석 중 오류가 발생했습니다. 다시 AI 분석 실행을 눌러 시도해 주세요.";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeString(value: unknown, fallback = "") {
+  if (typeof value !== "string") return fallback;
+  const clean = value.replace(/\s+/g, " ").trim();
+  return clean || fallback;
+}
+
+function normalizeStringArray(value: unknown, limit = 12) {
+  const source = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value
+          .split(/\n|;/)
+          .map((item) => item.trim())
+          .filter(Boolean)
+      : [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of source) {
+    const line = normalizeString(raw);
+    if (!line) continue;
+    const key = line.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(line);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+function normalizeQuickStatus(value: unknown): MedSafetyQuickStatus {
+  const raw = String(value ?? "").toUpperCase();
+  if (raw === "OK" || raw === "CHECK" || raw === "STOP") return raw;
+  return "CHECK";
+}
+
+function normalizeRiskLevel(value: unknown): MedSafetyRiskLevel {
+  const raw = String(value ?? "").toLowerCase();
+  if (raw === "low" || raw === "medium" || raw === "high") return raw;
+  return "medium";
+}
+
+function normalizeResultKind(value: unknown): MedSafetyResultKind {
+  const raw = String(value ?? "").toLowerCase();
+  if (raw === "medication" || raw === "device" || raw === "scenario") return raw;
+  return "scenario";
+}
+
+function normalizeItemType(value: unknown): MedSafetyItemType {
+  const raw = String(value ?? "").toLowerCase();
+  if (raw === "medication" || raw === "device" || raw === "unknown") return raw;
+  return "unknown";
+}
+
+function normalizeAnalyzeResult(raw: unknown): MedSafetyAnalyzeResult | null {
+  if (!isRecord(raw)) return null;
+  const item = isRecord(raw.item) ? raw.item : {};
+  const quick = isRecord(raw.quick) ? raw.quick : {};
+  const doNode = isRecord(raw.do) ? raw.do : {};
+  const safety = isRecord(raw.safety) ? raw.safety : {};
+  const sbar = isRecord(raw.sbar) ? raw.sbar : {};
+  const fallbackReason = normalizeString(raw.fallbackReason, "");
+  const sourceRaw = String(raw.source ?? "");
+  const source: MedSafetyAnalyzeResult["source"] =
+    sourceRaw === "openai_live" || sourceRaw === "openai_fallback"
+      ? sourceRaw
+      : fallbackReason
+        ? "openai_fallback"
+        : "openai_live";
+  const analyzedAtRaw = Number(raw.analyzedAt);
+  const analyzedAt = Number.isFinite(analyzedAtRaw) && analyzedAtRaw > 0 ? analyzedAtRaw : Date.now();
+
+  return {
+    resultKind: normalizeResultKind(raw.resultKind),
+    notFound: Boolean(raw.notFound),
+    notFoundReason: normalizeString(raw.notFoundReason),
+    oneLineConclusion: normalizeString(raw.oneLineConclusion, "핵심 안전 확인 필요"),
+    riskLevel: normalizeRiskLevel(raw.riskLevel),
+    item: {
+      name: normalizeString(item.name, "조회 항목"),
+      type: normalizeItemType(item.type),
+      aliases: normalizeStringArray(item.aliases, 8),
+      highRiskBadges: normalizeStringArray(item.highRiskBadges, 6),
+      primaryUse: normalizeString(item.primaryUse, "안전 확인이 필요합니다."),
+      confidence: Math.max(0, Math.min(100, Number(item.confidence) || 0)),
+    },
+    quick: {
+      status: normalizeQuickStatus(quick.status),
+      topActions: normalizeStringArray(quick.topActions, 10),
+      topNumbers: normalizeStringArray(quick.topNumbers, 10),
+      topRisks: normalizeStringArray(quick.topRisks, 10),
+    },
+    do: {
+      steps: normalizeStringArray(doNode.steps, 12),
+      calculatorsNeeded: normalizeStringArray(doNode.calculatorsNeeded, 8),
+      compatibilityChecks: normalizeStringArray(doNode.compatibilityChecks, 8),
+    },
+    safety: {
+      holdRules: normalizeStringArray(safety.holdRules, 8),
+      monitor: normalizeStringArray(safety.monitor, 8),
+      escalateWhen: normalizeStringArray(safety.escalateWhen, 8),
+    },
+    institutionalChecks: normalizeStringArray(raw.institutionalChecks, 8),
+    sbar: {
+      situation: normalizeString(sbar.situation),
+      background: normalizeString(sbar.background),
+      assessment: normalizeString(sbar.assessment),
+      recommendation: normalizeString(sbar.recommendation),
+    },
+    patientScript20s: normalizeString(raw.patientScript20s),
+    modePriority: normalizeStringArray(raw.modePriority, 8),
+    confidenceNote: normalizeString(raw.confidenceNote),
+    searchAnswer: normalizeString(raw.searchAnswer),
+    suggestedNames: normalizeStringArray(raw.suggestedNames, 5),
+    generatedText: normalizeString(raw.generatedText),
+    model: normalizeString(raw.model, MED_SAFETY_DEFAULT_MODEL),
+    analyzedAt,
+    source,
+    fallbackReason: fallbackReason || null,
+    openaiResponseId: normalizeString(raw.openaiResponseId) || null,
+    openaiConversationId: normalizeString(raw.openaiConversationId) || null,
+  };
+}
+
+function parseAnalyzePayload(payloadRaw: unknown): { ok: true; data: MedSafetyAnalyzeResult } | { ok: false; error: string } {
+  if (!isRecord(payloadRaw)) {
+    return { ok: false, error: "invalid_response_payload_non_object" };
+  }
+
+  const hasOkFlag = typeof payloadRaw.ok === "boolean";
+  if (hasOkFlag && payloadRaw.ok === false) {
+    return { ok: false, error: normalizeString(payloadRaw.error, "med_safety_analyze_failed") };
+  }
+
+  const candidate = hasOkFlag
+    ? (payloadRaw.data ?? payloadRaw.result ?? payloadRaw.output ?? null)
+    : payloadRaw;
+  const normalized = normalizeAnalyzeResult(candidate);
+  if (!normalized) {
+    return { ok: false, error: "invalid_response_payload_data_missing" };
+  }
+  return { ok: true, data: normalized };
 }
 
 function buildAnalyzeCacheKey(args: {
@@ -664,6 +813,7 @@ export function ToolMedSafetyPage() {
   const router = useRouter();
   const { t, lang } = useI18n();
   const { hasPaidAccess, loading: billingLoading } = useBillingAccess();
+  const [mounted, setMounted] = useState(false);
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<ClinicalMode>("ward");
   const [queryIntent, setQueryIntent] = useState<QueryIntent>("medication");
@@ -692,6 +842,10 @@ export function ToolMedSafetyPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const stopCamera = useCallback(() => {
     const stream = streamRef.current;
@@ -872,10 +1026,7 @@ export function ToolMedSafetyPage() {
       try {
         const maxClientRetries = 1;
         let response: Response | null = null;
-        let payload:
-          | { ok: true; data: MedSafetyAnalyzeResult }
-          | { ok: false; error?: string }
-          | null = null;
+        let normalizedData: MedSafetyAnalyzeResult | null = null;
         let finalError = "med_safety_analyze_failed";
 
         for (let attempt = 0; attempt <= maxClientRetries; attempt += 1) {
@@ -897,13 +1048,15 @@ export function ToolMedSafetyPage() {
 
             response = await fetchAnalyzeWithTimeout(form, MED_SAFETY_CLIENT_TIMEOUT_MS);
 
-            payload = (await response.json().catch(() => null)) as
-              | { ok: true; data: MedSafetyAnalyzeResult }
-              | { ok: false; error?: string }
-              | null;
+            const payloadRaw = (await response.json().catch(() => null)) as unknown;
+            const parsedPayload = parseAnalyzePayload(payloadRaw);
 
-            if (response.ok && payload?.ok) break;
-            finalError = String((payload as any)?.error ?? "med_safety_analyze_failed");
+            if (response.ok && parsedPayload.ok) {
+              normalizedData = parsedPayload.data;
+              break;
+            }
+
+            finalError = parsedPayload.ok ? "invalid_response_payload" : String(parsedPayload.error ?? "med_safety_analyze_failed");
             if (!shouldRetryAnalyzeError(response.status, finalError) || attempt >= maxClientRetries) break;
           } catch (cause: any) {
             finalError = String(cause?.message ?? "network_error");
@@ -913,7 +1066,7 @@ export function ToolMedSafetyPage() {
           await waitMs(Math.min(2200, 500 * (attempt + 1)) + Math.floor(Math.random() * 180));
         }
 
-        if (!response?.ok || !payload?.ok) {
+        if (!response?.ok || !normalizedData) {
           const cached = readMedSafetyCache(cacheKey);
           if (cached) {
             setResult(cached);
@@ -930,7 +1083,7 @@ export function ToolMedSafetyPage() {
           setError(t(parseErrorMessage(finalError)));
           return;
         }
-        const data = payload.data;
+        const data = normalizedData;
 
         if (data.source === "openai_live") {
           writeMedSafetyCache(cacheKey, data);
@@ -1130,6 +1283,25 @@ export function ToolMedSafetyPage() {
 
   const englishTranslationPending = lang === "en" && isLoading && analysisRequested;
   const showAnalyzingOverlay = isLoading && !englishTranslationPending;
+
+  if (!mounted) {
+    return (
+      <div className="mx-auto w-full max-w-[920px] space-y-3 px-2 pb-24 pt-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[31px] font-extrabold tracking-[-0.02em] text-[color:var(--wnl-accent)]">AI 약물·도구 검색기</div>
+            <div className="mt-1 text-[13px] text-ios-sub">간호 현장에서 바로 쓰는 약물·의료기구·상황 대응 정보를 검색형으로 제공합니다.</div>
+          </div>
+          <Link href="/tools" className="pt-1 text-[12px] font-semibold text-[color:var(--wnl-accent)]">
+            툴 목록
+          </Link>
+        </div>
+        <Card className={`p-5 ${FLAT_CARD_CLASS}`}>
+          <div className="text-[18px] font-bold text-ios-text">페이지 준비 중...</div>
+        </Card>
+      </div>
+    );
+  }
 
   if (billingLoading) {
     return (
