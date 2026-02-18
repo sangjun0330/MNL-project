@@ -17,9 +17,9 @@ export const dynamic = "force-dynamic";
 const MAX_QUERY_LENGTH = 1800;
 const MAX_PATIENT_SUMMARY_LENGTH = 1400;
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
-const DEFAULT_ANALYZE_TIMEOUT_MS = 180_000;
-const MIN_ANALYZE_TIMEOUT_MS = 120_000;
-const MAX_ANALYZE_TIMEOUT_MS = 300_000;
+const DEFAULT_ANALYZE_TIMEOUT_MS = 420_000;
+const MIN_ANALYZE_TIMEOUT_MS = 300_000;
+const MAX_ANALYZE_TIMEOUT_MS = 900_000;
 
 function bad(status: number, error: string) {
   const safeError = String(error ?? "unknown_error")
@@ -177,9 +177,9 @@ function resolveAnalyzeTimeoutMs() {
   const analyzeBudgetRaw = Number(process.env.OPENAI_MED_SAFETY_TOTAL_BUDGET_MS ?? "");
   const effectiveAnalyzeBudget =
     Number.isFinite(analyzeBudgetRaw) && analyzeBudgetRaw > 0
-      ? Math.max(150_000, Math.min(300_000, Math.round(analyzeBudgetRaw)))
-      : 150_000;
-  const recommendedFloor = Math.min(MAX_ANALYZE_TIMEOUT_MS, effectiveAnalyzeBudget + 55_000);
+      ? Math.max(300_000, Math.min(900_000, Math.round(analyzeBudgetRaw)))
+      : 420_000;
+  const recommendedFloor = Math.min(MAX_ANALYZE_TIMEOUT_MS, effectiveAnalyzeBudget + 120_000);
   const rounded = Math.round(raw);
   return Math.max(Math.max(MIN_ANALYZE_TIMEOUT_MS, recommendedFloor), Math.min(MAX_ANALYZE_TIMEOUT_MS, rounded));
 }

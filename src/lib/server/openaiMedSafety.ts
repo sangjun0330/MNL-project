@@ -183,24 +183,24 @@ function resolveNetworkRetryBaseMs() {
 }
 
 function resolveUpstreamTimeoutMs() {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_UPSTREAM_TIMEOUT_MS ?? 65_000);
-  if (!Number.isFinite(raw)) return 65_000;
+  const raw = Number(process.env.OPENAI_MED_SAFETY_UPSTREAM_TIMEOUT_MS ?? 120_000);
+  if (!Number.isFinite(raw)) return 120_000;
   const rounded = Math.round(raw);
-  return Math.max(60_000, Math.min(180_000, rounded));
+  return Math.max(90_000, Math.min(300_000, rounded));
 }
 
 function resolveTotalBudgetMs() {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_TOTAL_BUDGET_MS ?? 150_000);
-  if (!Number.isFinite(raw)) return 150_000;
+  const raw = Number(process.env.OPENAI_MED_SAFETY_TOTAL_BUDGET_MS ?? 420_000);
+  if (!Number.isFinite(raw)) return 420_000;
   const rounded = Math.round(raw);
-  return Math.max(150_000, Math.min(300_000, rounded));
+  return Math.max(300_000, Math.min(900_000, rounded));
 }
 
 function resolveTranslateTotalBudgetMs() {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_TRANSLATE_BUDGET_MS ?? 22_000);
-  if (!Number.isFinite(raw)) return 22_000;
+  const raw = Number(process.env.OPENAI_MED_SAFETY_TRANSLATE_BUDGET_MS ?? 90_000);
+  if (!Number.isFinite(raw)) return 90_000;
   const rounded = Math.round(raw);
-  return Math.max(12_000, Math.min(90_000, rounded));
+  return Math.max(30_000, Math.min(180_000, rounded));
 }
 
 function truncateError(raw: string, size = 220) {
@@ -1747,7 +1747,7 @@ export async function translateMedSafetyToEnglish(input: {
   const upstreamTimeoutMs = resolveUpstreamTimeoutMs();
   const networkRetries = resolveNetworkRetryCount();
   const networkRetryBaseMs = resolveNetworkRetryBaseMs();
-  const totalBudgetMs = Math.max(resolveTranslateTotalBudgetMs(), Math.min(90_000, upstreamTimeoutMs + 12_000));
+  const totalBudgetMs = Math.max(resolveTranslateTotalBudgetMs(), Math.min(180_000, upstreamTimeoutMs + 30_000));
   const startedAt = Date.now();
 
   const translatedResult = cloneMedSafetyResult(input.result);
@@ -1996,7 +1996,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
   const outputTokenCandidates = buildOutputTokenCandidates(maxOutputTokensForIntent, intent);
   const responseVerbosity: ResponseVerbosity = "high";
   const upstreamTimeoutMs = resolveUpstreamTimeoutMs();
-  const totalBudgetMs = Math.max(resolveTotalBudgetMs(), Math.min(300_000, upstreamTimeoutMs + 35_000));
+  const totalBudgetMs = Math.max(resolveTotalBudgetMs(), Math.min(900_000, upstreamTimeoutMs + 120_000));
   const networkRetries = resolveNetworkRetryCount();
   const networkRetryBaseMs = resolveNetworkRetryBaseMs();
   const storeResponses = resolveStoreResponses();

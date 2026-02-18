@@ -86,7 +86,7 @@ type MedSafetyCacheRecord = {
 
 const MED_SAFETY_CACHE_KEY = "med_safety_cache_v1";
 const MED_SAFETY_DEFAULT_MODEL = "gpt-5.1";
-const MED_SAFETY_CLIENT_TIMEOUT_MS = 240_000;
+const MED_SAFETY_CLIENT_TIMEOUT_MS = 480_000;
 const RETRY_WITH_DATA_MESSAGE = "네트워크가 불안정합니다. 데이터(모바일 네트워크)를 켠 뒤 다시 AI 분석 실행을 눌러 시도해 주세요.";
 
 const MODE_OPTIONS: Array<{ value: ClinicalMode; label: string }> = [
