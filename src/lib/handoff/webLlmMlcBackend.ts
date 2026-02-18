@@ -595,6 +595,32 @@ async function getMlcEngine() {
 
   if (enginePromise) return enginePromise;
 
+  // 모듈 로드 전 WebGPU 실제 가용성 검증 (requestAdapter + requestDevice 둘 다)
+  // requestAdapter()는 조용히 null 반환, requestDevice() 실패가 브라우저 콘솔 경고 유발
+  // 따라서 두 단계를 모두 probe해서 실패 시 모듈 로드 자체를 건너뜀
+  try {
+    const gpuAdapter = await (navigator as any).gpu.requestAdapter({ powerPreference: "high-performance" });
+    if (!gpuAdapter) {
+      mlcFatalUnavailable = true;
+      mlcFatalError = "webgpu_unavailable";
+      window.__RNEST_WEBLLM_MLC_STATUS__ = { ready: false, modelId, error: "webgpu_unavailable", updatedAt: Date.now() };
+      return null;
+    }
+    const gpuDevice = await (gpuAdapter as any).requestDevice();
+    if (!gpuDevice) {
+      mlcFatalUnavailable = true;
+      mlcFatalError = "webgpu_unavailable";
+      window.__RNEST_WEBLLM_MLC_STATUS__ = { ready: false, modelId, error: "webgpu_unavailable", updatedAt: Date.now() };
+      return null;
+    }
+    (gpuDevice as any).destroy();
+  } catch {
+    mlcFatalUnavailable = true;
+    mlcFatalError = "webgpu_unavailable";
+    window.__RNEST_WEBLLM_MLC_STATUS__ = { ready: false, modelId, error: "webgpu_unavailable", updatedAt: Date.now() };
+    return null;
+  }
+
   enginePromise = (async () => {
     try {
       const mod = await loadWebLlmModuleWithCacheRetry(moduleUrl, moduleVersion);
