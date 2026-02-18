@@ -235,7 +235,11 @@ function formatWebLlmReason(reason: string | null | undefined) {
   if (!reason) return "WebLLM 마스킹 정리 적용이 완료되었습니다.";
   if (reason === "llm_no_change") return "WebLLM 마스킹 정리는 정상 완료되었고 기존 결과와 동일합니다.";
   if (reason === "llm_backend_not_used")
-    return "WebLLM 백엔드 응답이 없어 LLM 필수 모드를 충족하지 못했습니다.";
+    return "WebLLM 백엔드가 초기화되지 않았습니다. 모델 로딩 상태를 확인해 주세요.";
+  if (reason.startsWith("llm_backend_mismatch:")) {
+    const source = reason.slice("llm_backend_mismatch:".length).trim() || "unknown";
+    return `WebLLM이 아닌 백엔드(${source})가 연결되었습니다. MLC 백엔드 설정을 확인해 주세요.`;
+  }
   if (reason === "webllm_adapter_not_found")
     return "WebLLM 어댑터를 로드하지 못했습니다. 런타임 스크립트 URL과 CSP를 확인해 주세요.";
   if (reason === "browser_runtime_required") return "브라우저 런타임에서만 WebLLM 마스킹 정리를 적용할 수 있습니다.";
@@ -1485,13 +1489,27 @@ export function ToolHandoffPage() {
       if (HANDOFF_FLAGS.handoffWebLlmRefineEnabled) {
         setRefineRunning(true);
         try {
-          const outcome = await tryRefineWithWebLlm(currentResult);
+          let outcome = await tryRefineWithWebLlm(currentResult);
+          if (WEBLLM_REQUIRED && !outcome.llmApplied) {
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+              await new Promise<void>((resolve) => {
+                window.setTimeout(() => resolve(), 800 + attempt * 500);
+              });
+              outcome = await tryRefineWithWebLlm(currentResult);
+              if (outcome.llmApplied) break;
+            }
+          }
           if (WEBLLM_REQUIRED && !outcome.llmApplied) {
             const sourceTag = outcome.backendSource ? `:${outcome.backendSource}` : "";
             webLlmDetail = `webllm=required_failed:${outcome.reason ?? "unknown"}${sourceTag}`;
             const reasonText = formatWebLlmReason(outcome.reason);
-            setRefineNotice(reasonText);
-            setError(`WebLLM 필수 모드 실패: ${reasonText}`);
+            const mlcStatus = typeof window !== "undefined" ? (window as any).__RNEST_WEBLLM_MLC_STATUS__ : null;
+            const mlcErrorText =
+              typeof mlcStatus?.error === "string" && mlcStatus.error.trim()
+                ? ` | mlc_error=${mlcStatus.error.trim()}`
+                : "";
+            setRefineNotice(`${reasonText}${mlcErrorText}`);
+            setError(`WebLLM 필수 모드 실패: ${reasonText}${mlcErrorText}`);
             appendHandoffAuditEvent({
               action: "pipeline_run",
               sessionId,
