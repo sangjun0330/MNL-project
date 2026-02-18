@@ -158,8 +158,15 @@ function resolveWasmFallbackDevice() {
   const configured = sanitizeText(process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_WASM_FALLBACK_DEVICE).toLowerCase();
   if (configured === "webgpu") return "webgpu";
   if (configured === "wasm") return "wasm";
-  if (typeof navigator !== "undefined" && "gpu" in navigator) return "webgpu";
+  if (configured === "auto") {
+    if (typeof navigator !== "undefined" && "gpu" in navigator) return "webgpu";
+    return "wasm";
+  }
   return "wasm";
+}
+
+function shouldAllowLocalFallbackModels() {
+  return readBooleanEnv(process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_WASM_FALLBACK_ALLOW_LOCAL_MODELS, false);
 }
 
 async function ensureTransformersModule() {
@@ -193,7 +200,7 @@ async function ensureTransformersTextGenerationPipeline() {
     const env = mod?.env;
     if (env && typeof env === "object") {
       env.allowRemoteModels = true;
-      env.allowLocalModels = true;
+      env.allowLocalModels = shouldAllowLocalFallbackModels();
       if (env.backends?.onnx?.wasm) {
         env.backends.onnx.wasm.proxy = false;
         env.backends.onnx.wasm.numThreads = Math.max(
