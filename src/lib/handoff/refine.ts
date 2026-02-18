@@ -301,7 +301,7 @@ export async function tryRefineWithWebLlm(result: HandoverSessionResult): Promis
     const candidate = raw && typeof raw === "object" && "result" in (raw as any) ? (raw as any).result : raw;
     const candidateSource = extractBackendSource(candidate);
     const backendSource = candidateSource ?? wrapperSource;
-    const llmBackends = new Set(["mlc_webllm"]);
+    const llmBackends = new Set(["mlc_webllm", "transformers_webllm"]);
     const llmUsed = Boolean(backendSource && llmBackends.has(backendSource));
     const merged = mergeRefinedResult(safeInput, candidate);
     if (!merged) {

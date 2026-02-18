@@ -155,6 +155,47 @@ test("tryRefineWithWebLlm marks llmRefined when mlc backend source is used", asy
   }
 });
 
+test("tryRefineWithWebLlm marks llmRefined when transformers fallback source is used", async () => {
+  const output = runHandoffPipeline({
+    sessionId: "hs_refine_transformers_source",
+    dutyType: "night",
+    rawSegments: transcriptToRawSegments("704호 이OO 산소포화도 추적 필요.", {
+      idPrefix: "refine-transformers",
+      segmentDurationMs: 2000,
+    }),
+  });
+
+  const previousWindow = (globalThis as any).window;
+  (globalThis as any).window = {
+    __RNEST_WEBLLM_REFINE__: async ({ result }: { result: typeof output.result }) => {
+      return {
+        __source: "transformers_webllm",
+        patients: result.patients.map((patient) => ({
+          patientKey: patient.patientKey,
+          summary1: `${patient.patientKey}: transformers refined`,
+        })),
+      };
+    },
+    setTimeout,
+  };
+
+  try {
+    const outcome = await tryRefineWithWebLlm(output.result);
+    assert.equal(outcome.llmApplied, true);
+    assert.equal(outcome.refined, true);
+    assert.equal(outcome.reason, null);
+    assert.equal(outcome.backendSource, "transformers_webllm");
+    assert.equal(outcome.result.provenance.llmRefined, true);
+    assert.match(outcome.result.patients[0]?.summary1 ?? "", /transformers refined/);
+  } finally {
+    if (previousWindow === undefined) {
+      delete (globalThis as any).window;
+    } else {
+      (globalThis as any).window = previousWindow;
+    }
+  }
+});
+
 test("tryRefineWithWebLlm treats mlc no-op patch as llm applied", async () => {
   const output = runHandoffPipeline({
     sessionId: "hs_refine_llm_noop",
