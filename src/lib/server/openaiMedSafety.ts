@@ -553,6 +553,8 @@ function buildDevicePrompt(query: string, contextJson: string) {
 function buildScenarioPrompt(query: string, contextJson: string) {
   return [
     "상황 질문에 대해 질문 자체에 직접 답하라.",
+    "입력 해석 규칙: '질문'은 현재 어떤 상황인지(상황 설명), '맥락.patient_summary'는 추가 참고사항이다.",
+    "답변 작성 시 현재 상황을 최우선으로 판단하고, 추가 참고사항은 우선순위/분기 판단에만 반영하라.",
     "형식은 자유이되, 불필요한 배경 설명은 줄이고 핵심 행동 중심으로 정돈된 답변을 작성하라.",
     "출력 규칙: 마크다운 기호(##, ###, **, ---, ``` )를 쓰지 말고 일반 텍스트로만 작성하라.",
     "중복 문장/중복 단락을 반복하지 말고, 모바일 화면에서 읽기 쉽게 짧은 문장과 불릿 위주로 작성하라.",

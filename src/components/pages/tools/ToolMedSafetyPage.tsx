@@ -117,24 +117,24 @@ const SITUATION_INPUT_GUIDE: Record<
   }
 > = {
   general: {
-    queryPlaceholder: "예: heparin flush 라인 주의점 요약.",
-    summaryPlaceholder: "(선택) 목적, 핵심 V/S, 사용 약물/기구",
-    cue: "일반 검색 질문을 짧게 입력하세요.",
+    queryPlaceholder: "예: heparin flush 후 라인 저항이 느껴지는 상황입니다.",
+    summaryPlaceholder: "(선택) 추가 참고: 목적, 핵심 V/S, 사용 약물/기구",
+    cue: "위 칸에는 현재 어떤 상황인지, 아래 칸에는 추가 참고사항을 입력하세요.",
   },
   pre_admin: {
-    queryPlaceholder: "예: 투여 전 확인 순서 알려줘.",
-    summaryPlaceholder: "(선택) 알레르기, V/S, 주요 검사",
-    cue: "투여 전 확인 질문을 짧게 입력하세요.",
+    queryPlaceholder: "예: 항생제 투여 직전, 알레르기 병력이 있어 확인이 필요한 상황입니다.",
+    summaryPlaceholder: "(선택) 추가 참고: 알레르기, V/S, 주요 검사",
+    cue: "위 칸에는 현재 어떤 상황인지, 아래 칸에는 추가 참고사항을 입력하세요.",
   },
   during_admin: {
-    queryPlaceholder: "예: 주입 중 발진 발생, 먼저 뭘 할까?",
-    summaryPlaceholder: "(선택) 속도, 증상 시작 시점, V/S",
-    cue: "투여 중 상황을 짧게 입력하세요.",
+    queryPlaceholder: "예: 주입 중 발진이 발생한 상황입니다.",
+    summaryPlaceholder: "(선택) 추가 참고: 주입 속도, 증상 시작 시점, V/S",
+    cue: "위 칸에는 현재 어떤 상황인지, 아래 칸에는 추가 참고사항을 입력하세요.",
   },
   event_response: {
-    queryPlaceholder: "예: pump occlusion 알람 반복, 대처 순서?",
-    summaryPlaceholder: "(선택) 알람 종류, 증상, 현재 속도",
-    cue: "알람/이상 상황을 짧게 입력하세요.",
+    queryPlaceholder: "예: pump occlusion 알람이 반복되는 상황입니다.",
+    summaryPlaceholder: "(선택) 추가 참고: 알람 종류, 환자 증상, 현재 속도",
+    cue: "위 칸에는 현재 어떤 상황인지, 아래 칸에는 추가 참고사항을 입력하세요.",
   },
 };
 
