@@ -235,12 +235,17 @@ function normalizeText(value: string) {
 }
 
 function cleanLine(value: string) {
-  return normalizeText(value)
+  const stripped = normalizeText(value)
     .replace(/^[-*•·]\s*/, "")
     .replace(/^\d+[).]\s*/, "")
     .replace(/^["'`]+|["'`]+$/g, "")
+    .replace(
+      /^(핵심 요약|주요 행동|핵심 확인|실행 포인트|위험\/에스컬레이션|라인\/호환\/상호작용|환자 교육 포인트|실수 방지 포인트|이 약이 무엇인지\(정의\/분류\/역할\)|언제 쓰는지\(적응증\/사용 맥락\)|어떻게 주는지\(경로\/투여 방식\/원칙\)|반드시 확인할 금기\/주의 Top 3|반드시 모니터할 것 Top 3|위험 신호\/즉시 대응|기구 정의\/언제 쓰는지|준비물\/셋업\/사용 절차|정상 작동 기준|알람\/트러블슈팅|합병증\/Stop rules|유지관리|실수 방지)\s*[:：]\s*/i,
+      ""
+    )
     .replace(/\s+/g, " ")
     .trim();
+  return stripped;
 }
 
 function sanitizeSearchAnswer(text: string) {
@@ -344,70 +349,116 @@ function buildDeveloperPrompt(locale: "ko" | "en") {
   if (locale === "ko") {
     return [
       "너는 간호사를 위한 임상 검색엔진 AI다.",
-      "약물/의료기구/상황 질문에 대해 현장에서 즉시 쓸 수 있는 고품질 정보를 제공한다.",
-      "절대 사실을 지어내지 마라. 특히 약물/의료기구의 존재 여부가 불확실하면 임상 내용을 생성하지 마라.",
-      "약물/의료기구 질의에서 정확히 일치하는 대상을 확신하지 못하면 반드시 NOT_FOUND 블록만 출력하라.",
-      "약물/의료기구 질의에서 식별 가능하면 입력 오타를 그대로 쓰지 말고 정식명칭으로 정규화해 답하라.",
-      "user prompt에 명시된 섹션 구조와 출력 규칙을 반드시 지켜라.",
-      "불확실하거나 기관별 차이가 큰 내용은 단정하지 말고 확인 포인트를 명확히 표시한다.",
-      "진단/처방 결정을 대체하지 않으며 기관 프로토콜·의사 지시·제조사 IFU를 최종 기준으로 둔다.",
-      "품질 기준: 핵심 우선, 중복 제거, 실수 방지 포인트 포함, 모바일에서도 한눈에 읽히는 문장 길이 유지, 내용 밀도 높게.",
-      "같은 의미의 문장을 반복하거나 재서술하지 않는다. 같은 정보는 1번만 전달한다.",
-      "출력은 일반 텍스트 중심으로 작성하고 마크다운 장식(##, **, 코드블록)은 사용하지 않는다.",
+      "목표: 현장에서 즉시 실행 가능한 안전 중심 지시를, 높은 정보 밀도로, 중복 없이 제공한다.",
+      "절대 사실을 지어내지 마라. 불확실하면 임상 세부를 생성하지 않는다.",
+      "",
+      "[판단 플로우]",
+      "1) 약물/의료기구 질의는 '정확 식별'을 먼저 수행한다.",
+      "2) 정확 식별 실패 시 NOT_FOUND 블록만 출력하고 종료한다.",
+      "3) 정확 식별 성공 시 정식명칭으로 정규화하고, 지정된 섹션 순서로만 출력한다.",
+      "",
+      "[출력 규칙]",
+      "- 섹션 순서/제목/필수 항목을 바꾸지 않는다.",
+      "- 숫자/용량/속도/주기처럼 기관차가 큰 정보는 단정하지 말고 '기관 프로토콜/약제부/IFU 확인 필요'로 표기한다.",
+      "- 같은 의미를 반복하지 않는다. 각 불릿은 새 정보여야 한다.",
+      "- 각 문장은 짧고 명확하며 행동 가능해야 한다.",
+      "- 마크다운 장식(##, **, 코드블록) 없이 일반 텍스트로 출력한다.",
+      "",
+      "[안전 경계]",
+      "- 진단/처방 결정을 대체하지 않는다.",
+      "- 최종 기준은 기관 프로토콜·의사 지시·제조사 IFU다.",
     ].join("\n");
   }
   return [
     "You are a clinical search engine AI for bedside nurses.",
-    "Provide high-quality, practical, safety-first guidance for medication, device, and scenario queries.",
-    "Never fabricate facts. If medication/device identity is uncertain, do not generate clinical details.",
-    "For medication/device queries, if exact identity cannot be confidently verified, output NOT_FOUND block only.",
-    "When identity is verifiable, normalize typo input to the official/canonical name in output.",
-    "Strictly follow the section/output rules specified in the user prompt.",
-    "Mark uncertain or institution-dependent details as verification points.",
-    "Do not replace diagnosis/prescribing decisions; local protocol and IFU are final.",
-    "Quality bar: action-first, concise, de-duplicated, high-density practical detail for bedside use.",
-    "Use plain text and avoid markdown ornaments.",
+    "Goal: deliver bedside-actionable, safety-first guidance with high information density and zero fluff.",
+    "Never fabricate facts. If uncertain, do not generate clinical details.",
+    "For medication/device queries: verify exact identity first. If not verified, output NOT_FOUND block only.",
+    "If verified, normalize to canonical official name and follow required section order exactly.",
+    "For institution-dependent values, mark 'check local protocol/pharmacy/IFU'.",
+    "No repetition. No markdown ornaments. Plain text only.",
+    "Do not replace diagnosis or prescribing decisions.",
   ].join("\n");
 }
 
 function buildMedicationPrompt(query: string, contextJson: string) {
   return [
-    "질문 약물에 대해 간호사가 현장에서 바로 쓰는 고품질 안전 답변을 작성하라.",
-    "알고리즘 1단계: 입력명(오타/약어 포함)이 실제 약물로 정확히 식별 가능한지 먼저 판단하라.",
-    "알고리즘 2단계: 정확 식별 실패 시 아래 NOT_FOUND 블록만 출력하고 즉시 종료하라.",
+    "아래 FLOW와 OUTPUT CONTRACT를 정확히 지켜 약물 답변을 작성하라.",
+    "",
+    "[FLOW]",
+    "1) 입력 약물명(오타/약어 포함)의 정확 식별 여부를 먼저 판단한다.",
+    "2) 정확 식별 실패 시 NOT_FOUND 블록만 출력하고 즉시 종료한다.",
+    "3) 정확 식별 성공 시 ENTITY 헤더 3줄 + 본문 9개 섹션을 순서대로 출력한다.",
+    "",
+    "[NOT_FOUND 출력 형식 - 고정]",
     "NOT_FOUND",
     "입력명: <원문 질의>",
     "CANDIDATES: <정확한 후보명1>; <정확한 후보명2>; <정확한 후보명3> (없으면 NONE)",
     "판정: 정확히 일치하는 약물을 확인하지 못했습니다.",
     "요청: 정확한 공식명(성분명/제품명)을 다시 입력해 주세요.",
-    "NOT_FOUND에서는 작용/적응증/용량/주의사항 등 임상 내용을 절대 생성하지 마라.",
-    "알고리즘 3단계: 정확 식별 성공 시 아래 3줄을 맨 앞에 반드시 출력하라.",
+    "주의: NOT_FOUND에서는 임상 내용(적응증/용량/주의/모니터링)을 절대 생성하지 마라.",
+    "",
+    "[정확 식별 성공 시 헤더 - 고정]",
     "ENTITY_VERIFIED: YES",
-    "ENTITY_NAME: <정식명칭 1개>",
+    "ENTITY_NAME: <정식명칭 1개, 괄호/쉼표 설명 금지, 짧은 이름만>",
     "ENTITY_ALIASES: <대표 별칭/동의어 1~3개; 세미콜론 구분, 없으면 NONE>",
-    "그 다음 본문은 다음 섹션을 순서대로 작성하라. 섹션 누락 금지.",
-    "핵심 요약:",
-    "- 가장 먼저 할 행동과 중단/보고 기준을 2~3문장으로 제시.",
-    "주요 행동:",
-    "- 지금 할 일 우선순위(투여 전 확인, 더블체크, 라인 확인, 계산/검산).",
-    "핵심 확인:",
-    "- 금기/주의 Top 3, 필수 확인 데이터(알레르기·활력·핵심 검사).",
-    "실행 포인트:",
-    "- 투여 경로/희석/농도/속도 원칙, 재평가 타이밍(5/15/30/60분).",
-    "위험/에스컬레이션:",
-    "- 위험 신호 2~4개, 즉시 대응(보류·중단·보고·호출).",
+    "",
+    "[본문 OUTPUT CONTRACT - 아래 9개 섹션 순서 고정]",
+    "규칙: 섹션당 2~4개 불릿, 각 불릿은 '행동 + 이유/위험 + 확인포인트'를 포함한 1문장.",
+    "규칙: 섹션 제목을 불릿 문장에 반복하지 말 것.",
+    "규칙: 불확실하거나 기관 차이 큰 내용은 반드시 '기관 프로토콜/약제부/IFU 확인 필요' 표기.",
+    "",
+    "이 약이 무엇인지(정의/분류/역할):",
+    "- 정의/분류(예: 항생제/항응고/진정/바소프레서 등) 1줄",
+    "- 핵심 역할(무엇을 위해 쓰는지) 1줄",
+    "- 작용 특성(주요 기전 또는 효과 발현 시간대) 1~2문장",
+    "",
+    "언제 쓰는지(적응증/사용 맥락):",
+    "- 대표 적응증 1~3개",
+    "- 병동/ER/ICU 사용 목적 차이 포인트가 있으면 부서별 1줄",
+    "",
+    "어떻게 주는지(경로/투여 방식/원칙):",
+    "- 경로(PO/IV/IM/SC/흡입/패치 등)",
+    "- IV push 가능/불가/주의 + 이유",
+    "- 희석/농도/속도/시간은 대표 원칙만 제시",
+    "- 기관 차이가 크면 '기관 프로토콜/약제부 확인 필요' + 확인 포인트(희석액/최대속도/필터/차광)",
+    "- 준비(필터/차광/프라이밍/flush) 및 라인 요구(말초/중심) 원칙",
+    "",
+    "반드시 확인할 금기/주의 Top 3:",
+    "- 환자 상태 기반 금기/주의 Top 3",
+    "- 최소 확인 데이터: 알레르기/활력/의식 + 약물군별 핵심 lab/ECG 1~2개",
+    "- High-alert/LASA 여부가 있으면 강하게 표시",
+    "",
+    "반드시 모니터할 것 Top 3:",
+    "- 상황별 우선 활력징후(BP/MAP, HR, RR/SpO2, 의식)",
+    "- 약물군별 핵심 Labs/ECG 1~2개",
+    "- 기대 효과 + 위험 부작용 신호",
+    "- 재평가 타이밍(5/15/30/60분 중 적절값)",
+    "",
+    "위험 신호/즉시 대응:",
+    "- 진짜 위험 신호 2~4개",
+    "- 즉시 행동: 중단/보류 → ABC → 모니터 강화 → 보고",
+    "- 길항제/응급약은 '준비/의사 보고' 수준으로만 언급",
+    "",
     "라인/호환/상호작용:",
-    "- Y-site/혼합/전용라인/라인 tracing 오류 방지 포인트.",
+    "- Y-site/혼합 금지/전용 라인 필요 원칙",
+    "- 치명적 상호작용 Top 2~3",
+    "- 라인 혼동, clamp, stopcock 방향 실수 방지 포인트",
+    "",
     "환자 교육 포인트:",
-    "- 20초 설명 + teach-back 질문 1개.",
-    "실수 방지:",
-    "- 단위(mg↔mcg, units↔mL), 농도, 속도, LASA, 알람무시 방지.",
-    "품질 규칙:",
-    "- 사실만 작성하고 없는 정보를 추정 생성하지 마라.",
-    "- 근거 없는 수치/용량/기준은 쓰지 말고 '기관 확인 필요'로 표시하라.",
-    "- 마크다운 장식(##, **, ``` ) 금지. 일반 텍스트 + 짧은 문장으로 작성하라.",
-    "- 같은 의미의 문장 반복 금지. 각 항목은 행동 가능하고 검산 가능한 문장으로 작성하라.",
-    "- 총 길이는 22~40줄, 섹션당 핵심 불릿 3~4개를 유지하라.",
+    "- 20초 설명 스크립트(왜/정상 반응/바로 말할 증상)",
+    "- teach-back 질문 1개",
+    "",
+    "실수 방지 포인트:",
+    "- 최소 2개 이상",
+    "- 예: mg↔mcg/IU/mEq 단위 혼동, 농도 착각, LASA, 과속 주입, 라인 혼합, flush 누락, 알람 무시, 기록 누락",
+    "",
+    "[품질 루브릭]",
+    "- 최우선 행동이 상단에 와야 한다.",
+    "- 위험 신호와 즉시 대응이 모호하지 않아야 한다.",
+    "- 중복/장황/교과서식 일반론을 제거한다.",
+    "- 전체는 간결하되 임상적으로 충분히 깊어야 한다.",
+    "- 일반 텍스트만 사용(##, **, ``` 금지).",
     "",
     "질문:",
     query || "(없음)",
@@ -419,40 +470,71 @@ function buildMedicationPrompt(query: string, contextJson: string) {
 
 function buildDevicePrompt(query: string, contextJson: string) {
   return [
-    "질문 의료기구에 대해 간호사가 현장에서 바로 쓰는 고품질 안전 답변을 작성하라.",
-    "알고리즘 1단계: 입력 기구명(오타/약어 포함)이 실제 기구로 정확히 식별 가능한지 먼저 판단하라.",
-    "알고리즘 2단계: 정확 식별 실패 시 아래 NOT_FOUND 블록만 출력하고 즉시 종료하라.",
+    "아래 FLOW와 OUTPUT CONTRACT를 정확히 지켜 의료기구 답변을 작성하라.",
+    "",
+    "[FLOW]",
+    "1) 입력 기구명(오타/약어 포함)의 정확 식별 여부를 먼저 판단한다.",
+    "2) 정확 식별 실패 시 NOT_FOUND 블록만 출력하고 즉시 종료한다.",
+    "3) 정확 식별 성공 시 ENTITY 헤더 3줄 + 본문 7개 섹션을 순서대로 출력한다.",
+    "",
+    "[NOT_FOUND 출력 형식 - 고정]",
     "NOT_FOUND",
     "입력명: <원문 질의>",
     "CANDIDATES: <정확한 후보명1>; <정확한 후보명2>; <정확한 후보명3> (없으면 NONE)",
     "판정: 정확히 일치하는 의료기구를 확인하지 못했습니다.",
     "요청: 정확한 공식명(제품명/기구명)을 다시 입력해 주세요.",
-    "NOT_FOUND에서는 사용법/알람/합병증/경고 등 임상 내용을 절대 생성하지 마라.",
-    "알고리즘 3단계: 정확 식별 성공 시 아래 3줄을 맨 앞에 반드시 출력하라.",
+    "주의: NOT_FOUND에서는 임상 내용(사용법/알람/합병증/경고)을 절대 생성하지 마라.",
+    "",
+    "[정확 식별 성공 시 헤더 - 고정]",
     "ENTITY_VERIFIED: YES",
-    "ENTITY_NAME: <정식명칭 1개>",
+    "ENTITY_NAME: <정식명칭 1개, 괄호/쉼표 설명 금지, 짧은 이름만>",
     "ENTITY_ALIASES: <대표 별칭/동의어 1~3개; 세미콜론 구분, 없으면 NONE>",
-    "그 다음 본문은 다음 섹션을 순서대로 작성하라. 섹션 누락 금지.",
-    "핵심 요약:",
-    "- 가장 먼저 할 행동과 즉시 중단/보고 기준을 2~3문장으로 제시.",
-    "주요 행동:",
-    "- 준비→셋업→시작 직후 확인의 우선순위를 행동형으로 제시.",
-    "핵심 확인:",
-    "- 연결/클램프/라인방향/소모품 호환/초기 정상 작동 기준.",
-    "실행 포인트:",
-    "- 알람 의미, 원인 Top 3, 먼저 볼 것 Top 3, 해결 Top 3.",
-    "위험/에스컬레이션:",
-    "- 즉시 중단/호출 신호, 해결 불가 시 보고/대체 루트 기준.",
+    "",
+    "[본문 OUTPUT CONTRACT - 아래 7개 섹션 순서 고정]",
+    "규칙: 섹션당 2~4개 불릿, 각 불릿은 '행동 + 이유/위험 + 확인포인트'를 포함한 1문장.",
+    "규칙: 섹션 제목을 불릿 문장에 반복하지 말 것.",
+    "규칙: 교체/점검 주기 등 기관차 큰 내용은 반드시 '기관/IFU 확인 필요' 표기.",
+    "",
+    "기구 정의/언제 쓰는지:",
+    "- 정의 1줄(무엇을 하는 기구인지)",
+    "- 적응증 2~3개",
+    "- 가능하면 핵심 금기/주의 1~2개",
+    "",
+    "준비물/셋업/사용 절차:",
+    "- 필수 구성품 체크리스트",
+    "- Setup 6~12단계: 연결 → 프라이밍/공기 제거 → 고정 → 설정값 입력 → 시작 → 초기 확인",
+    "- 환자 적용 전 안전 확인(연결/clamp/라인 방향/공기/소모품 적합성)",
+    "",
+    "정상 작동 기준:",
+    "- 정상 시 보이는 상태/징후 2~4개",
+    "- 시작 후 1~5분 내 반드시 확인할 포인트",
+    "",
+    "알람/트러블슈팅:",
+    "- 알람 의미",
+    "- 원인 후보 Top 3",
+    "- 먼저 확인할 것 Top 3(clamp/꺾임/연결/필터/위치/배터리)",
+    "- 해결 행동 Top 3",
+    "- 해결 안 되면 보고/교체/대체 루트/전문팀 호출 기준",
+    "",
+    "합병증/Stop rules:",
+    "- 합병증 Top 3~5(감염/막힘/누출/출혈/탈락/공기유입 등)",
+    "- 즉시 중단·호출해야 할 위험 신호 2~4개",
+    "",
     "유지관리:",
-    "- 관찰 포인트(피부·고정·누출·감염), 교체·점검은 기관/IFU 확인.",
-    "실수 방지:",
-    "- 오연결, 프라이밍/공기 제거 누락, 알람 무시, 기록 누락 방지.",
-    "품질 규칙:",
-    "- 사실만 작성하고 없는 정보를 추정 생성하지 마라.",
-    "- 기기별 수치/주기는 단정하지 말고 '기관 확인 필요'로 표시하라.",
-    "- 마크다운 장식(##, **, ``` ) 금지. 일반 텍스트 + 짧은 문장으로 작성하라.",
-    "- 같은 의미의 문장 반복 금지. 각 항목은 현장에서 바로 수행 가능한 문장으로 작성하라.",
-    "- 총 길이는 22~40줄, 섹션당 핵심 불릿 3~4개를 유지하라.",
+    "- 관찰 포인트(피부/고정/누출/통증/감염징후)",
+    "- 교체·점검 주기는 '기관/IFU 확인 필요' 표기",
+    "- 기록 포인트(시각/세팅/환자 반응/문제/조치)",
+    "",
+    "실수 방지 포인트:",
+    "- 최소 2개 이상",
+    "- 예: clamp/stopcock 방향 실수, 라인 연결 누락, 프라이밍 미흡, 공기 제거 누락, 소모품 호환 착오, 알람 무시",
+    "",
+    "[품질 루브릭]",
+    "- 알람 대응은 의미→먼저 볼 것→해결→보고 순서가 명확해야 한다.",
+    "- Stop rule은 즉시 행동이 모호하지 않아야 한다.",
+    "- 중복/장황/교과서식 일반론을 제거한다.",
+    "- 전체는 간결하되 임상적으로 충분히 깊어야 한다.",
+    "- 일반 텍스트만 사용(##, **, ``` 금지).",
     "",
     "질문:",
     query || "(없음)",
@@ -1112,12 +1194,20 @@ function parseEntityOfficialName(text: string) {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
+  const normalizeOfficial = (value: string) => {
+    const clean = cleanLine(value);
+    if (!clean || /^none$/i.test(clean)) return "";
+    const noParen = clean.replace(/\s*\([^)]*\)\s*/g, " ").replace(/\s+/g, " ").trim();
+    if (!noParen) return "";
+    const maybeShort = noParen.length > 28 && /[,]/.test(noParen) ? noParen.split(",")[0]!.trim() : noParen;
+    return maybeShort.slice(0, 48);
+  };
   for (const line of lines) {
     const hit = line.match(/^(ENTITY_NAME|OFFICIAL_NAME|CANONICAL_NAME|정식명칭|공식명)\s*[:=]\s*(.+)$/i);
     if (!hit?.[2]) continue;
-    const clean = cleanLine(hit[2]);
-    if (!clean || /^none$/i.test(clean)) continue;
-    return clean.slice(0, 80);
+    const normalized = normalizeOfficial(hit[2]);
+    if (!normalized) continue;
+    return normalized;
   }
   return "";
 }
@@ -1413,7 +1503,7 @@ function buildResultFromAnswer(params: AnalyzeParams, intent: QueryIntent, answe
   const answerWithoutControl = stripEntityControlLines(answer);
   const normalizedRaw = sanitizeSearchAnswer(answerWithoutControl || answer);
   const canonicalName =
-    cleanLine(officialNameFromControl || canonicalFromQuery?.canonical || params.query || params.imageName || "").slice(0, 50) || "조회 항목";
+    cleanLine(canonicalFromQuery?.canonical || officialNameFromControl || params.query || params.imageName || "").slice(0, 50) || "조회 항목";
   const normalized = replaceEntityMentionForDisplay(normalizedRaw, params.query, canonicalName);
   const suggestedNames = dedupeLimit(
     [
