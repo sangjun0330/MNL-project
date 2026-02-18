@@ -1,3 +1,5 @@
+"use client";
+
 import { sanitizeStructuredSession } from "./deidGuard";
 import { HANDOFF_FLAGS } from "./featureFlags";
 import type { HandoverSessionResult, PatientCard } from "./types";
