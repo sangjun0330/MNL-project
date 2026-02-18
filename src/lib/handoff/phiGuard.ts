@@ -4,282 +4,333 @@ import {
   isLikelyClinicalContinuation,
   normalizeRoomMentions,
 } from "./clinicalNlu";
-import type { MaskedSegment, NormalizedSegment } from "./types";
+import type { AliasMap, MaskResult, MaskedSegment, NormalizedSegment, PhiFinding, PhiType } from "./types";
 
-const PHONE_PATTERN = /(01[0-9]-?\d{3,4}-?\d{4})/g;
-const RRN_PATTERN = /(\d{6}-?[1-4]\d{6})/g;
-const CHART_PATTERN = /(차트번호|등록번호|MRN)\s*[:#]?\s*\d{6,}/gi;
-const ADDRESS_PATTERN = /([가-힣0-9\-\s]{2,}(?:동|로|길)\s*\d{1,4}(?:-\d{1,4})?)/g;
-
-type PatientProfile = {
-  alias: string;
-  rooms: Set<string>;
-  names: Set<string>;
-  maskedNames: Set<string>;
-  mentions: number;
-  lastSeenMs: number;
+type MaskRule = {
+  type: PhiType;
+  severity: "low" | "med" | "high";
+  pattern: RegExp;
+  replacement?: string;
 };
 
-type CandidateScore = {
-  alias: string;
-  score: number;
-  roomOverlap: number;
-  nameOverlap: number;
-  maskedOverlap: number;
+const PASS1_RULES: MaskRule[] = [
+  {
+    type: "PHONE",
+    severity: "high",
+    pattern: /01[0-9][\s.-]?\d{3,4}[\s.-]?\d{4}/g,
+  },
+  {
+    type: "RRN",
+    severity: "high",
+    pattern: /\d{6}[\s/-]?[1-4]\d{6}/g,
+  },
+  {
+    type: "DOB",
+    severity: "high",
+    pattern: /(19|20)\d{2}[./-]?\d{1,2}[./-]?\d{1,2}/g,
+  },
+  {
+    type: "MRN",
+    severity: "high",
+    pattern: /(MRN|등록|차트|환자번호|ID)\s*[:#-]?\s*[A-Za-z0-9-]{4,}/gi,
+  },
+  {
+    type: "ADDRESS",
+    severity: "high",
+    pattern:
+      /(?:[가-힣]{2,}(?:구|군|읍|면|동|로|길)\s*\d{1,4}(?:-\d{1,4})?(?:번지|호)?|[가-힣]{2,}시\s+[가-힣]{2,}(?:구|군|읍|면|동)\s*\d{1,4}(?:-\d{1,4})?(?:번지|호)?)/g,
+  },
+];
+
+const PASS2_RULES: MaskRule[] = [
+  {
+    type: "LONG_DIGITS",
+    severity: "med",
+    pattern: /\b\d{7,12}\b/g,
+  },
+  {
+    type: "ROOM_NAME",
+    severity: "med",
+    pattern: /(병실|침상|Bed|Room)\s*[A-Za-z0-9가-힣-]+\s*(?:님|씨)?\s*[가-힣]{2,4}/gi,
+  },
+  {
+    type: "NAME_HINT",
+    severity: "low",
+    pattern: /[가-힣]{2,4}(?:님|씨)/g,
+  },
+];
+
+const RESIDUAL_RULES: MaskRule[] = [...PASS1_RULES, ...PASS2_RULES];
+
+type AliasRegistry = {
+  tokenToAlias: Map<string, string>;
+  aliasSeq: number;
 };
+
+function buildAlias(aliasIndex: number) {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  if (aliasIndex < alphabet.length) return `PATIENT_${alphabet[aliasIndex]}`;
+  const head = Math.floor(aliasIndex / alphabet.length);
+  const tail = aliasIndex % alphabet.length;
+  return `PATIENT_${alphabet[head - 1]}${alphabet[tail]}`;
+}
+
+function sanitizeSample(raw: string) {
+  const compact = raw.replace(/\s+/g, " ").trim();
+  if (!compact) return "***";
+  if (compact.length <= 2) return `${compact[0] ?? "*"}*`;
+  if (compact.length <= 6) return `${compact.slice(0, 1)}***${compact.slice(-1)}`;
+  return `${compact.slice(0, 2)}***${compact.slice(-2)}`;
+}
+
+function normalizeToken(token: string) {
+  return token.replace(/\s+/g, " ").trim();
+}
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function replaceLiteralAll(text: string, needle: string, replacement: string) {
-  return text.replace(new RegExp(escapeRegExp(needle), "g"), replacement);
+function replaceLiteralAll(text: string, token: string, replacement: string) {
+  if (!token) return text;
+  return text.replace(new RegExp(escapeRegExp(token), "g"), replacement);
 }
 
-function collectPatternTokens(text: string, pattern: RegExp) {
-  const matches = [...text.matchAll(pattern)];
-  return matches
-    .map((match) => (match[1] ?? match[0] ?? "").trim())
-    .filter((token) => token.length > 0);
-}
+function applyRules(text: string, rules: MaskRule[]) {
+  const findings: PhiFinding[] = [];
+  let masked = text;
 
-function buildAlias(aliasIndex: number) {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  if (aliasIndex < alphabet.length) return `환자${alphabet[aliasIndex]}`;
-  const head = Math.floor(aliasIndex / alphabet.length);
-  const tail = aliasIndex % alphabet.length;
-  return `환자${alphabet[head - 1]}${alphabet[tail]}`;
-}
+  rules.forEach((rule) => {
+    const source = masked;
+    let next = "";
+    let lastIndex = 0;
+    rule.pattern.lastIndex = 0;
 
-function countOverlap(source: Set<string>, target: string[]) {
-  let count = 0;
-  target.forEach((value) => {
-    if (source.has(value)) count += 1;
+    let match: RegExpExecArray | null = rule.pattern.exec(source);
+    while (match) {
+      const matched = match[0] ?? "";
+      const start = match.index ?? 0;
+      const end = start + matched.length;
+      findings.push({
+        type: rule.type,
+        start,
+        end,
+        sample: sanitizeSample(matched),
+        severity: rule.severity,
+      });
+      next += source.slice(lastIndex, start);
+      next += rule.replacement ?? "[REDACTED]";
+      lastIndex = end;
+      if (matched.length === 0) {
+        rule.pattern.lastIndex += 1;
+      }
+      match = rule.pattern.exec(source);
+    }
+
+    if (findings.length) {
+      next += source.slice(lastIndex);
+      masked = next || source;
+    }
   });
-  return count;
-}
 
-function sortTokensForMasking(tokens: string[]) {
-  return [...tokens].sort((a, b) => b.length - a.length || a.localeCompare(b, "ko"));
-}
-
-function createProfile(alias: string, nowMs: number): PatientProfile {
   return {
-    alias,
-    rooms: new Set<string>(),
-    names: new Set<string>(),
-    maskedNames: new Set<string>(),
-    mentions: 0,
-    lastSeenMs: nowMs,
+    maskedText: masked,
+    findings,
   };
 }
 
-function scoreProfile(profile: PatientProfile, anchors: ReturnType<typeof extractPatientAnchors>, activeAlias: string | null) {
-  const roomOverlap = countOverlap(profile.rooms, anchors.roomTokens);
-  const nameOverlap = countOverlap(profile.names, anchors.nameTokens);
-  const maskedOverlap = countOverlap(profile.maskedNames, anchors.maskedNameTokens);
+function scanResidual(text: string) {
+  const findings: PhiFinding[] = [];
 
-  let score = roomOverlap * 10 + nameOverlap * 6 + maskedOverlap * 4;
-
-  if (activeAlias && profile.alias === activeAlias) score += 1;
-  if (anchors.roomTokens.length && roomOverlap === 0 && profile.rooms.size > 0) score -= 4;
-  if (anchors.nameTokens.length && nameOverlap === 0 && roomOverlap === 0 && profile.names.size > 0) score -= 2;
-
-  return {
-    alias: profile.alias,
-    score,
-    roomOverlap,
-    nameOverlap,
-    maskedOverlap,
-  } satisfies CandidateScore;
-}
-
-function pickAliasByScores(scores: CandidateScore[], activeAlias: string | null, hasRoomAnchor: boolean) {
-  if (!scores.length) return null;
-
-  const sorted = [...scores].sort((a, b) => {
-    if (b.score !== a.score) return b.score - a.score;
-    if (b.roomOverlap !== a.roomOverlap) return b.roomOverlap - a.roomOverlap;
-    if (b.nameOverlap !== a.nameOverlap) return b.nameOverlap - a.nameOverlap;
-    if (b.maskedOverlap !== a.maskedOverlap) return b.maskedOverlap - a.maskedOverlap;
-    return a.alias.localeCompare(b.alias, "ko");
+  RESIDUAL_RULES.forEach((rule) => {
+    rule.pattern.lastIndex = 0;
+    let match: RegExpExecArray | null = rule.pattern.exec(text);
+    while (match) {
+      const matched = match[0] ?? "";
+      const start = match.index ?? 0;
+      findings.push({
+        type: rule.type,
+        start,
+        end: start + matched.length,
+        sample: sanitizeSample(matched),
+        severity: rule.severity,
+      });
+      if (matched.length === 0) {
+        rule.pattern.lastIndex += 1;
+      }
+      match = rule.pattern.exec(text);
+    }
   });
 
-  const best = sorted[0];
-  if (best.score <= 0) return null;
+  return findings;
+}
 
-  if (sorted.length === 1) return best.alias;
+function resolveAliasToken(
+  text: string,
+  registry: AliasRegistry,
+  activeAlias: string | null,
+  transitionPending: boolean
+) {
+  const normalized = normalizeRoomMentions(text);
+  const anchors = extractPatientAnchors(normalized);
+  const allTokens = [...anchors.roomTokens, ...anchors.nameTokens, ...anchors.maskedNameTokens]
+    .map((token) => normalizeToken(token))
+    .filter(Boolean);
+  const uniqueTokens = [...new Set(allTokens)];
 
-  const second = sorted[1];
-  if (best.score >= second.score + 3) return best.alias;
+  const existingAliasCounter = new Map<string, number>();
+  uniqueTokens.forEach((token) => {
+    const alias = registry.tokenToAlias.get(token);
+    if (!alias) return;
+    const weight = /\d{3,4}\s*호/.test(token) ? 5 : 1;
+    existingAliasCounter.set(alias, (existingAliasCounter.get(alias) ?? 0) + weight);
+  });
 
-  if (hasRoomAnchor) {
-    const roomMatched = sorted.filter((item) => item.roomOverlap > 0);
-    if (roomMatched.length === 1) return roomMatched[0].alias;
-    if (roomMatched.length > 1 && roomMatched[0].score >= roomMatched[1].score + 2) return roomMatched[0].alias;
+  const roomTokens = anchors.roomTokens.map((token) => normalizeToken(token)).filter(Boolean);
+  const roomAliases = roomTokens
+    .map((token) => registry.tokenToAlias.get(token))
+    .filter((alias): alias is string => Boolean(alias));
+  const hasRoomAnchor = roomTokens.length > 0;
+  const hasKnownRoomAlias = roomAliases.length > 0;
+
+  let selectedAlias: string | null = null;
+  if (hasKnownRoomAlias) {
+    const byRoom = new Map<string, number>();
+    roomAliases.forEach((alias) => {
+      byRoom.set(alias, (byRoom.get(alias) ?? 0) + 1);
+    });
+    selectedAlias = [...byRoom.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  } else if (hasRoomAnchor && !hasKnownRoomAlias) {
+    selectedAlias = buildAlias(registry.aliasSeq);
+    registry.aliasSeq += 1;
+  } else if (existingAliasCounter.size > 0) {
+    selectedAlias = [...existingAliasCounter.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  } else if (anchors.hasStrongAnchor) {
+    selectedAlias = buildAlias(registry.aliasSeq);
+    registry.aliasSeq += 1;
+  } else if (!transitionPending && activeAlias && isLikelyClinicalContinuation(normalized)) {
+    selectedAlias = activeAlias;
   }
 
-  if (activeAlias) {
-    const active = sorted.find((item) => item.alias === activeAlias);
-    if (active && active.score >= best.score - 1) return active.alias;
+  if (!selectedAlias) {
+    return {
+      selectedAlias: null,
+      tokens: uniqueTokens,
+      transitionCue: hasPatientTransitionCue(normalized),
+    };
   }
 
-  return null;
+  uniqueTokens.forEach((token) => {
+    const isRoomToken = /\d{3,4}\s*호/.test(token);
+    if (isRoomToken || !registry.tokenToAlias.has(token)) {
+      registry.tokenToAlias.set(token, selectedAlias!);
+    }
+  });
+
+  return {
+    selectedAlias,
+    tokens: uniqueTokens,
+    transitionCue: hasPatientTransitionCue(normalized),
+  };
+}
+
+function applyAliasMasking(text: string, tokens: string[], alias: string | null) {
+  if (!alias || !tokens.length) {
+    return {
+      maskedText: text,
+      findings: [] as PhiFinding[],
+    };
+  }
+
+  let maskedText = text;
+  const findings: PhiFinding[] = [];
+  const ordered = [...tokens].sort((a, b) => b.length - a.length || a.localeCompare(b, "ko"));
+
+  ordered.forEach((token) => {
+    if (!token) return;
+    if (!maskedText.includes(token)) return;
+    maskedText = replaceLiteralAll(maskedText, token, alias);
+    findings.push({
+      type: /\d{3,4}\s*호/.test(token) ? "ROOM" : "NAME",
+      start: 0,
+      end: 0,
+      sample: sanitizeSample(token),
+      severity: "med",
+    });
+  });
+
+  return {
+    maskedText,
+    findings,
+  };
 }
 
 export function applyPhiGuard(segments: NormalizedSegment[]) {
-  const profiles = new Map<string, PatientProfile>();
-  const tokenOwners = new Map<string, Set<string>>();
-  const maskedSegments: MaskedSegment[] = [];
+  const registry: AliasRegistry = {
+    tokenToAlias: new Map<string, string>(),
+    aliasSeq: 0,
+  };
 
+  const maskedSegments: MaskedSegment[] = [];
+  const findings: PhiFinding[] = [];
+  const residualFindings: PhiFinding[] = [];
   let activeAlias: string | null = null;
   let transitionPending = false;
-  let aliasSeq = 0;
-
-  const ensureProfile = (alias: string, nowMs: number) => {
-    const existing = profiles.get(alias);
-    if (existing) return existing;
-
-    const created = createProfile(alias, nowMs);
-    profiles.set(alias, created);
-    return created;
-  };
-
-  const registerOwnership = (token: string, alias: string) => {
-    if (!token) return;
-    const owners = tokenOwners.get(token) ?? new Set<string>();
-    owners.add(alias);
-    tokenOwners.set(token, owners);
-  };
-
-  const resolveAlias = (
-    anchors: ReturnType<typeof extractPatientAnchors>,
-    sourceText: string,
-    nowMs: number
-  ): string | null => {
-    if (anchors.hasStrongAnchor) {
-      const scores = [...profiles.values()]
-        .map((profile) => scoreProfile(profile, anchors, activeAlias))
-        .filter((item) => item.score > 0);
-
-      if (anchors.roomTokens.length > 0) {
-        const roomMatchedScores = scores.filter((item) => item.roomOverlap > 0);
-        if (!roomMatchedScores.length) {
-          const alias = buildAlias(aliasSeq);
-          aliasSeq += 1;
-          ensureProfile(alias, nowMs);
-          return alias;
-        }
-      }
-
-      const selected = pickAliasByScores(scores, activeAlias, anchors.roomTokens.length > 0);
-      if (selected) return selected;
-
-      if (anchors.roomTokens.length > 0 || anchors.nameTokens.length > 0 || anchors.maskedNameTokens.length > 0) {
-        const alias = buildAlias(aliasSeq);
-        aliasSeq += 1;
-        ensureProfile(alias, nowMs);
-        return alias;
-      }
-    }
-
-    if (!anchors.hasStrongAnchor && !transitionPending && activeAlias && isLikelyClinicalContinuation(sourceText)) {
-      return activeAlias;
-    }
-
-    return null;
-  };
 
   segments.forEach((segment) => {
-    const sourceText = normalizeRoomMentions(segment.normalizedText);
-    const anchors = extractPatientAnchors(sourceText);
-    const transitionCue = hasPatientTransitionCue(sourceText);
+    const resolved = resolveAliasToken(segment.normalizedText, registry, activeAlias, transitionPending);
+    const aliasMasked = applyAliasMasking(normalizeRoomMentions(segment.normalizedText), resolved.tokens, resolved.selectedAlias);
 
-    const patientAlias = resolveAlias(anchors, sourceText, segment.endMs);
-    let maskedText = sourceText;
-    const phiHits: string[] = [];
+    const pass1 = applyRules(aliasMasked.maskedText, PASS1_RULES);
+    const pass2 = applyRules(pass1.maskedText, PASS2_RULES);
+    const residual = scanResidual(pass2.maskedText);
 
-    if (patientAlias) {
-      const profile = ensureProfile(patientAlias, segment.endMs);
-      anchors.roomTokens.forEach((token) => {
-        profile.rooms.add(token);
-        registerOwnership(token, patientAlias);
-      });
-      anchors.nameTokens.forEach((token) => {
-        profile.names.add(token);
-        registerOwnership(token, patientAlias);
-      });
-      anchors.maskedNameTokens.forEach((token) => {
-        profile.maskedNames.add(token);
-        registerOwnership(token, patientAlias);
-      });
-      profile.mentions += 1;
-      profile.lastSeenMs = segment.endMs;
-
-      const replacementTokens = sortTokensForMasking([
-        ...anchors.roomTokens,
-        ...anchors.nameTokens,
-        ...anchors.maskedNameTokens,
-      ]);
-
-      replacementTokens.forEach((token) => {
-        if (!token || !maskedText.includes(token)) return;
-        phiHits.push(token);
-        maskedText = replaceLiteralAll(maskedText, token, patientAlias);
-      });
-
-      if (transitionCue && !anchors.hasStrongAnchor) {
-        activeAlias = null;
-      } else {
-        activeAlias = patientAlias;
-      }
-    } else {
-      activeAlias = transitionCue ? null : activeAlias;
-    }
-
-    [PHONE_PATTERN, RRN_PATTERN, ADDRESS_PATTERN].forEach((pattern) => {
-      const hits = collectPatternTokens(maskedText, pattern);
-      if (hits.length) {
-        hits.forEach((token) => {
-          phiHits.push(token);
-          maskedText = replaceLiteralAll(maskedText, token, "[REDACTED]");
-        });
-      }
-    });
-
-    const chartHits = maskedText.match(CHART_PATTERN);
-    if (chartHits?.length) {
-      phiHits.push(...chartHits.map(() => "차트번호"));
-      maskedText = maskedText.replace(CHART_PATTERN, "[REDACTED]");
-    }
-
-    transitionPending = transitionCue;
+    const segmentFindings = [...aliasMasked.findings, ...pass1.findings, ...pass2.findings];
+    findings.push(...segmentFindings);
+    residualFindings.push(...residual);
 
     maskedSegments.push({
       segmentId: segment.segmentId,
-      maskedText,
+      maskedText: pass2.maskedText,
       startMs: segment.startMs,
       endMs: segment.endMs,
       uncertainties: segment.uncertainties,
-      patientAlias,
-      phiHits,
+      patientAlias: resolved.selectedAlias,
+      phiHits: segmentFindings.map((hit) => hit.type),
+      findings: segmentFindings,
+      residualFindings: residual,
       evidenceRef: {
         segmentId: segment.segmentId,
         startMs: segment.startMs,
         endMs: segment.endMs,
       },
     });
+
+    activeAlias = resolved.transitionCue ? null : resolved.selectedAlias ?? activeAlias;
+    transitionPending = resolved.transitionCue;
   });
 
-  const aliasMap: Record<string, string> = {};
-  tokenOwners.forEach((owners, token) => {
-    if (owners.size !== 1) return;
-    const [alias] = [...owners];
+  const aliasMap: AliasMap = {};
+  registry.tokenToAlias.forEach((alias, token) => {
     aliasMap[token] = alias;
   });
+
+  const mask: MaskResult = {
+    maskedText: maskedSegments.map((segment) => segment.maskedText).join("\n"),
+    findings,
+    aliasMap,
+    residualFindings,
+    safeToPersist: residualFindings.length === 0,
+    exportAllowed: residualFindings.length === 0,
+  };
 
   return {
     segments: maskedSegments,
     aliasMap,
+    findings,
+    residualFindings,
+    safeToPersist: mask.safeToPersist,
+    exportAllowed: mask.exportAllowed,
+    mask,
   };
 }

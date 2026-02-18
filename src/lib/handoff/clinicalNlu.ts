@@ -89,6 +89,10 @@ const HANGUL_PARTICLE_SUFFIXES = [
 ];
 
 const POSSIBLE_NAME_STOPWORDS = new Set([
+  "해당",
+  "상기",
+  "동일",
+  "당해",
   "환자",
   "인계",
   "오늘",

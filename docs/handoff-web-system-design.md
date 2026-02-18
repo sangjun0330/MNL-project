@@ -22,9 +22,15 @@
 - Live input
   - `src/lib/handoff/recorder.ts` for chunked recording
   - `src/lib/handoff/asr.ts` for optional web speech stream
+  - `src/lib/handoff/vad.ts` for local VAD(audio decode + speech ratio gate)
+  - `src/lib/handoff/wasmAsr.ts` for spec/legacy worker protocol bridge (`INIT/TRANSCRIBE_CHUNK` + legacy fallback)
+  - default runtime script: `public/runtime/whisper-runtime.js` (same-origin, no-op safe fallback + pluggable backend hook)
 - Pipeline
   - normalize -> PHI mask -> split -> structure -> priority
   - `src/lib/handoff/pipeline.ts`
+  - optional WebLLM refine adapter: `src/lib/handoff/refine.ts` (`window.__RNEST_WEBLLM_REFINE__`)
+  - default refine adapter script: `public/runtime/webllm-refine-adapter.js` (heuristic local fallback + custom backend hook)
+  - bootstrap loader: `src/components/system/HandoffRuntimeBootstrap.tsx`
   - medical pronunciation lexicon auto-merge pipeline (`scripts/handoff/build-medical-lexicon.mjs`)
   - confusion-pair context warning (HR/RR, DC/D-C, Cr/CRP, PR/PRN, PE/PEA)
 - Storage
@@ -95,7 +101,13 @@ Recommended defaults (`.env.local`):
 - `NEXT_PUBLIC_HANDOFF_WASM_ASR_ENABLED=false`
 - `NEXT_PUBLIC_HANDOFF_WASM_ASR_WORKER_URL=/workers/handoff-whisper.worker.js`
 - `NEXT_PUBLIC_HANDOFF_WASM_ASR_MODEL_URL=`
-- `NEXT_PUBLIC_HANDOFF_WASM_ASR_RUNTIME_URL=`
+- `NEXT_PUBLIC_HANDOFF_WASM_ASR_RUNTIME_URL=/runtime/whisper-runtime.js`
+- `NEXT_PUBLIC_HANDOFF_VAD_ENABLED=true`
+- `NEXT_PUBLIC_HANDOFF_VAD_MIN_SPEECH_RATIO=0.05`
+- `NEXT_PUBLIC_HANDOFF_VAD_MIN_SEGMENT_MS=180`
+- `NEXT_PUBLIC_HANDOFF_VAD_THRESHOLD=0.012`
+- `NEXT_PUBLIC_HANDOFF_WEBLLM_REFINE_ENABLED=false`
+- `NEXT_PUBLIC_HANDOFF_WEBLLM_ADAPTER_URL=/runtime/webllm-refine-adapter.js`
 - `NEXT_PUBLIC_HANDOFF_LIVE_MEMORY_ONLY=true`
 
 ## 8. Deployment Notes

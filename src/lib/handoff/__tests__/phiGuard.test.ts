@@ -24,16 +24,17 @@ test("applyPhiGuard masks patient identifiers and keeps alias consistency", () =
   const out = applyPhiGuard(segments);
 
   assert.equal(out.segments.length, 2);
-  assert.equal(out.segments[0].patientAlias, "환자A");
-  assert.equal(out.segments[1].patientAlias, "환자A");
+  assert.equal(out.segments[0].patientAlias, "PATIENT_A");
+  assert.equal(out.segments[1].patientAlias, "PATIENT_A");
 
-  assert.match(out.segments[0].maskedText, /환자A/);
+  assert.match(out.segments[0].maskedText, /PATIENT_A/);
   assert.doesNotMatch(out.segments[0].maskedText, /최OO/);
   assert.doesNotMatch(out.segments[0].maskedText, /701호/);
   assert.match(out.segments[0].maskedText, /\[REDACTED\]/);
+  assert.equal(out.safeToPersist, true);
 
-  assert.equal(out.aliasMap["701호"], "환자A");
-  assert.equal(out.aliasMap["최OO"], "환자A");
+  assert.equal(out.aliasMap["701호"], "PATIENT_A");
+  assert.equal(out.aliasMap["최OO"], "PATIENT_A");
 });
 
 test("applyPhiGuard assigns next alias for another patient token", () => {
@@ -56,8 +57,8 @@ test("applyPhiGuard assigns next alias for another patient token", () => {
 
   const out = applyPhiGuard(segments);
 
-  assert.equal(out.segments[0].patientAlias, "환자A");
-  assert.equal(out.segments[1].patientAlias, "환자B");
+  assert.equal(out.segments[0].patientAlias, "PATIENT_A");
+  assert.equal(out.segments[1].patientAlias, "PATIENT_B");
 });
 
 test("applyPhiGuard normalizes spaced and Korean room mentions into one patient alias", () => {
@@ -79,9 +80,9 @@ test("applyPhiGuard normalizes spaced and Korean room mentions into one patient 
   ];
 
   const out = applyPhiGuard(segments);
-  assert.equal(out.segments[0].patientAlias, "환자A");
-  assert.equal(out.segments[1].patientAlias, "환자A");
-  assert.equal(out.aliasMap["701호"], "환자A");
+  assert.equal(out.segments[0].patientAlias, "PATIENT_A");
+  assert.equal(out.segments[1].patientAlias, "PATIENT_A");
+  assert.equal(out.aliasMap["701호"], "PATIENT_A");
 });
 
 test("applyPhiGuard separates patients when same real name appears in different rooms", () => {
@@ -110,11 +111,11 @@ test("applyPhiGuard separates patients when same real name appears in different 
   ];
 
   const out = applyPhiGuard(segments);
-  assert.equal(out.segments[0].patientAlias, "환자A");
-  assert.equal(out.segments[1].patientAlias, "환자B");
-  assert.equal(out.segments[2].patientAlias, "환자A");
-  assert.equal(out.aliasMap["701호"], "환자A");
-  assert.equal(out.aliasMap["702호"], "환자B");
+  assert.equal(out.segments[0].patientAlias, "PATIENT_A");
+  assert.equal(out.segments[1].patientAlias, "PATIENT_B");
+  assert.equal(out.segments[2].patientAlias, "PATIENT_A");
+  assert.equal(out.aliasMap["701호"], "PATIENT_A");
+  assert.equal(out.aliasMap["702호"], "PATIENT_B");
 });
 
 test("applyPhiGuard keeps active alias on continuation segment without explicit identifiers", () => {
@@ -136,6 +137,56 @@ test("applyPhiGuard keeps active alias on continuation segment without explicit 
   ];
 
   const out = applyPhiGuard(segments);
-  assert.equal(out.segments[0].patientAlias, "환자A");
-  assert.equal(out.segments[1].patientAlias, "환자A");
+  assert.equal(out.segments[0].patientAlias, "PATIENT_A");
+  assert.equal(out.segments[1].patientAlias, "PATIENT_A");
+});
+
+test("applyPhiGuard keeps active alias for pronoun continuation phrases", () => {
+  const segments: NormalizedSegment[] = [
+    {
+      segmentId: "s1",
+      normalizedText: "704호 이OO 폐렴으로 항생제 시작",
+      startMs: 0,
+      endMs: 5_000,
+      uncertainties: [],
+    },
+    {
+      segmentId: "s2",
+      normalizedText: "해당 환자 새벽에 호흡수 재확인 필요",
+      startMs: 5_000,
+      endMs: 10_000,
+      uncertainties: [],
+    },
+  ];
+
+  const out = applyPhiGuard(segments);
+  assert.equal(out.segments[0].patientAlias, "PATIENT_A");
+  assert.equal(out.segments[1].patientAlias, "PATIENT_A");
+  assert.doesNotMatch(out.segments[1].maskedText, /PATIENT_B/);
+});
+
+test("applyPhiGuard does not over-mask clinical numeric phrases as ADDRESS", () => {
+  const segments: NormalizedSegment[] = [
+    {
+      segmentId: "s1",
+      normalizedText: "703호 박OO 환자 혈당 280으로 새벽 2시 재측정 오더",
+      startMs: 0,
+      endMs: 5_000,
+      uncertainties: [],
+    },
+    {
+      segmentId: "s2",
+      normalizedText: "709호 김OO 환자 산소포화도 92로 산소 2L 유지",
+      startMs: 5_000,
+      endMs: 10_000,
+      uncertainties: [],
+    },
+  ];
+
+  const out = applyPhiGuard(segments);
+  assert.match(out.segments[0].maskedText, /혈당/);
+  assert.match(out.segments[0].maskedText, /재측정 오더/);
+  assert.match(out.segments[1].maskedText, /산소포화도/);
+  assert.match(out.segments[1].maskedText, /2L 유지/);
+  assert.ok(!out.segments.some((segment) => segment.findings.some((finding) => finding.type === "ADDRESS")));
 });

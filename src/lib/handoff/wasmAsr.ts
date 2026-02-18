@@ -1,7 +1,22 @@
 import type { LocalAsrSegment } from "./asr";
 
-type WorkerRequestType = "init" | "transcribe" | "stop";
-type WorkerResponseType = "init:ok" | "init:err" | "transcribe:ok" | "transcribe:err" | "stop:ok" | "stop:err";
+type WorkerRequestType = "init" | "transcribe" | "stop" | "INIT" | "TRANSCRIBE_CHUNK" | "FLUSH" | "RESET";
+type WorkerResponseType =
+  | "init:ok"
+  | "init:err"
+  | "transcribe:ok"
+  | "transcribe:err"
+  | "stop:ok"
+  | "stop:err"
+  | "READY"
+  | "PROGRESS"
+  | "PARTIAL"
+  | "FINAL"
+  | "ERROR"
+  | "RESET:ok"
+  | "RESET:err"
+  | "FLUSH:ok"
+  | "FLUSH:err";
 
 type WorkerRequestMessage = {
   id: string;
@@ -10,8 +25,8 @@ type WorkerRequestMessage = {
 };
 
 type WorkerResponseMessage = {
-  id: string;
-  type: WorkerResponseType;
+  id?: string;
+  type: WorkerResponseType | string;
   payload?: Record<string, unknown>;
 };
 
@@ -20,17 +35,38 @@ type WasmAsrWorkerOptions = {
   runtimeUrl?: string;
   modelUrl?: string;
   lang?: string;
+  onProgress?: (event: WasmAsrProgressEvent) => void;
+  onPartial?: (event: WasmAsrPartialEvent) => void;
 };
 
-type WasmAsrChunkInput = {
+export type WasmAsrChunkInput = {
   chunkId: string;
   blob: Blob;
   startMs: number;
   endMs: number;
   mimeType: string;
+  pcmFloat32?: Float32Array;
+  sampleRate?: number;
+  vad?: {
+    speechRatio: number;
+    segments: Array<{ s: number; e: number }>;
+  };
 };
 
-type WasmAsrController = {
+export type WasmAsrProgressEvent = {
+  chunkId: string;
+  percent: number;
+};
+
+export type WasmAsrPartialEvent = {
+  chunkId: string;
+  text: string;
+  t0: number;
+  t1: number;
+  confidence: number | null;
+};
+
+export type WasmAsrController = {
   start: () => Promise<boolean>;
   stop: () => Promise<void>;
   destroy: () => Promise<void>;
@@ -56,6 +92,10 @@ type CapacitorWasmAsrPlugin = {
     }>;
   }>;
 };
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
 
 function getCapacitorWasmAsrPlugin(): CapacitorWasmAsrPlugin | null {
   if (typeof window === "undefined") return null;
@@ -132,6 +172,55 @@ function normalizePluginSegments(
     .filter((segment): segment is LocalAsrSegment => Boolean(segment));
 }
 
+function normalizeWorkerSegments(
+  payload: Record<string, unknown> | undefined,
+  fallbackStartMs: number,
+  fallbackEndMs: number
+) {
+  const segments = Array.isArray(payload?.segments) ? payload.segments : [];
+  return segments
+    .map((segment) =>
+      normalizeSegment(
+        segment as {
+          text?: string;
+          startMs?: number;
+          endMs?: number;
+          confidence?: number | null;
+        },
+        fallbackStartMs,
+        fallbackEndMs
+      )
+    )
+    .filter((segment): segment is LocalAsrSegment => Boolean(segment));
+}
+
+function normalizeType(type: string | undefined) {
+  return String(type ?? "").trim();
+}
+
+function makeTypeSet(types: string[]) {
+  const set = new Set<string>();
+  types.forEach((type) => {
+    const normalized = normalizeType(type);
+    if (!normalized) return;
+    set.add(normalized);
+    set.add(normalized.toLowerCase());
+  });
+  return set;
+}
+
+function matchType(typeSet: Set<string>, currentType: string) {
+  if (!currentType) return false;
+  return typeSet.has(currentType) || typeSet.has(currentType.toLowerCase());
+}
+
+function resolveChunkId(payload: Record<string, unknown> | undefined) {
+  if (!payload) return null;
+  const chunkId = payload.chunkId;
+  if (typeof chunkId !== "string") return null;
+  return chunkId.trim() || null;
+}
+
 function createPluginController({
   plugin,
   lang,
@@ -197,22 +286,32 @@ function createWorkerController({
   modelUrl,
   lang,
   onError,
+  onProgress,
+  onPartial,
 }: WasmAsrWorkerOptions & {
   onError?: (error: unknown) => void;
 }): WasmAsrController {
+  type PendingEntry = {
+    resolve: (value: WorkerResponseMessage) => void;
+    reject: (error: Error) => void;
+    successTypes: Set<string>;
+    errorTypes: Set<string>;
+    timeoutId: number;
+    chunkId: string | null;
+  };
+
   let running = false;
   let worker: Worker | null = null;
   let disposed = false;
-  const pending = new Map<
-    string,
-    {
-      resolve: (value: Record<string, unknown>) => void;
-      reject: (error: Error) => void;
-    }
-  >();
+  let protocol: "unknown" | "legacy" | "spec" = "unknown";
+  const pending = new Map<string, PendingEntry>();
+  let transcribeChain: Promise<void> = Promise.resolve();
 
   const rejectAll = (message: string) => {
-    pending.forEach(({ reject }) => reject(new Error(message)));
+    pending.forEach((entry) => {
+      window.clearTimeout(entry.timeoutId);
+      entry.reject(new Error(message));
+    });
     pending.clear();
   };
 
@@ -222,23 +321,51 @@ function createWorkerController({
     worker = null;
   };
 
-  const postRequest = async (
-    type: WorkerRequestType,
-    payload?: Record<string, unknown>
-  ): Promise<Record<string, unknown>> => {
+  const postRequest = async ({
+    type,
+    payload,
+    successTypes,
+    errorTypes,
+    timeoutMs,
+    chunkId,
+  }: {
+    type: WorkerRequestType;
+    payload?: Record<string, unknown>;
+    successTypes: string[];
+    errorTypes: string[];
+    timeoutMs?: number;
+    chunkId?: string | null;
+  }): Promise<WorkerResponseMessage> => {
     if (!worker) throw new Error("WASM ASR worker is not initialized");
     const id = createRequestId(type);
-    return new Promise<Record<string, unknown>>((resolve, reject) => {
-      pending.set(id, { resolve, reject });
-      const message: WorkerRequestMessage = { id, type, payload };
-      worker?.postMessage(message);
-      window.setTimeout(() => {
+    return new Promise<WorkerResponseMessage>((resolve, reject) => {
+      const timeoutId = window.setTimeout(() => {
         const entry = pending.get(id);
         if (!entry) return;
         pending.delete(id);
         reject(new Error(`${type} timed out`));
-      }, 45_000);
+      }, timeoutMs ?? 45_000);
+
+      pending.set(id, {
+        resolve,
+        reject,
+        timeoutId,
+        successTypes: makeTypeSet(successTypes),
+        errorTypes: makeTypeSet(errorTypes),
+        chunkId: chunkId ?? null,
+      });
+      const message: WorkerRequestMessage = { id, type, payload };
+      worker?.postMessage(message);
     });
+  };
+
+  const enqueueTranscribe = <T>(task: () => Promise<T>) => {
+    const next = transcribeChain.then(task, task);
+    transcribeChain = next.then(
+      () => undefined,
+      () => undefined
+    );
+    return next;
   };
 
   const ensureWorker = () => {
@@ -247,22 +374,149 @@ function createWorkerController({
     worker = new Worker(workerUrl);
     worker.addEventListener("message", (event: MessageEvent<WorkerResponseMessage>) => {
       const message = event.data;
-      if (!message?.id) return;
-      const entry = pending.get(message.id);
-      if (!entry) return;
-      pending.delete(message.id);
-      if (message.type.endsWith(":ok")) {
-        entry.resolve(message.payload ?? {});
+      const currentType = normalizeType(message?.type);
+      const payload = message?.payload ?? {};
+      const chunkId = resolveChunkId(payload);
+
+      if (matchType(makeTypeSet(["PROGRESS"]), currentType) && chunkId) {
+        const percentRaw = Number((payload.percent as number | undefined) ?? (payload.progress as number | undefined) ?? 0);
+        onProgress?.({
+          chunkId,
+          percent: clamp(Math.round(percentRaw), 0, 100),
+        });
+      }
+
+      if (matchType(makeTypeSet(["PARTIAL"]), currentType) && chunkId) {
+        const text = String(payload.text ?? "").trim();
+        if (text) {
+          const confidenceRaw = payload.confidence;
+          onPartial?.({
+            chunkId,
+            text,
+            t0: Number(payload.t0 ?? 0),
+            t1: Number(payload.t1 ?? 0),
+            confidence:
+              typeof confidenceRaw === "number" && Number.isFinite(confidenceRaw) ? Number(confidenceRaw) : null,
+          });
+        }
+      }
+
+      let pendingEntry: PendingEntry | undefined;
+      let pendingKey: string | undefined;
+
+      if (message?.id && pending.has(message.id)) {
+        pendingKey = message.id;
+        pendingEntry = pending.get(message.id);
+      } else if (chunkId) {
+        for (const [key, entry] of pending.entries()) {
+          if (entry.chunkId !== chunkId) continue;
+          pendingKey = key;
+          pendingEntry = entry;
+          break;
+        }
+      }
+
+      if (!pendingEntry || !pendingKey) return;
+
+      if (matchType(pendingEntry.successTypes, currentType)) {
+        pending.delete(pendingKey);
+        window.clearTimeout(pendingEntry.timeoutId);
+        pendingEntry.resolve({
+          id: message.id,
+          type: currentType,
+          payload,
+        });
         return;
       }
-      const msg = String(message.payload?.message ?? `${message.type} failed`);
-      entry.reject(new Error(msg));
+
+      if (matchType(pendingEntry.errorTypes, currentType) || currentType.toLowerCase().endsWith(":err")) {
+        pending.delete(pendingKey);
+        window.clearTimeout(pendingEntry.timeoutId);
+        const msg = String(payload.message ?? `${currentType} failed`);
+        pendingEntry.reject(new Error(msg));
+      }
     });
     worker.addEventListener("error", (event) => {
       onError?.(new Error(event.message || "WASM ASR worker error"));
       cleanupWorker();
     });
     return worker;
+  };
+
+  const startWithSpecProtocol = async () => {
+    const response = await postRequest({
+      type: "INIT",
+      payload: {
+        modelUrl: modelUrl || undefined,
+        runtimeUrl: runtimeUrl || undefined,
+        languageHint: lang,
+        lang,
+      },
+      successTypes: ["READY", "init:ok"],
+      errorTypes: ["ERROR", "INIT:err", "init:err"],
+      timeoutMs: 20_000,
+    });
+    protocol = normalizeType(response.type).toUpperCase() === "READY" ? "spec" : "legacy";
+  };
+
+  const startWithLegacyProtocol = async () => {
+    await postRequest({
+      type: "init",
+      payload: {
+        lang,
+        runtimeUrl: runtimeUrl || undefined,
+        modelUrl: modelUrl || undefined,
+      },
+      successTypes: ["init:ok", "READY"],
+      errorTypes: ["init:err", "ERROR"],
+      timeoutMs: 20_000,
+    });
+    if (protocol === "unknown") {
+      protocol = "legacy";
+    }
+  };
+
+  const transcribeChunkNow = async (chunk: WasmAsrChunkInput) => {
+    if (!running) return [] as LocalAsrSegment[];
+    const chunkBase64 = await blobToBase64(chunk.blob);
+    const basePayload = {
+      chunkId: chunk.chunkId,
+      startMs: chunk.startMs,
+      endMs: chunk.endMs,
+      mimeType: chunk.mimeType,
+      chunkBase64,
+      t0: Number((chunk.startMs / 1000).toFixed(3)),
+      t1: Number((chunk.endMs / 1000).toFixed(3)),
+      sampleRate: chunk.sampleRate,
+      pcmFloat32: chunk.pcmFloat32,
+      vad: chunk.vad,
+    };
+
+    if (protocol !== "legacy") {
+      try {
+        const response = await postRequest({
+          type: "TRANSCRIBE_CHUNK",
+          payload: basePayload,
+          successTypes: ["FINAL", "transcribe:ok"],
+          errorTypes: ["ERROR", "TRANSCRIBE_CHUNK:err", "transcribe:err"],
+          chunkId: chunk.chunkId,
+        });
+        protocol = "spec";
+        return normalizeWorkerSegments(response.payload, chunk.startMs, chunk.endMs);
+      } catch (error) {
+        if (protocol === "spec") throw error;
+      }
+    }
+
+    const response = await postRequest({
+      type: "transcribe",
+      payload: basePayload,
+      successTypes: ["transcribe:ok", "FINAL"],
+      errorTypes: ["transcribe:err", "ERROR"],
+      chunkId: chunk.chunkId,
+    });
+    if (protocol === "unknown") protocol = "legacy";
+    return normalizeWorkerSegments(response.payload, chunk.startMs, chunk.endMs);
   };
 
   return {
@@ -272,17 +526,18 @@ function createWorkerController({
       try {
         const created = ensureWorker();
         if (!created) return false;
-        await postRequest("init", {
-          lang,
-          runtimeUrl: runtimeUrl || undefined,
-          modelUrl: modelUrl || undefined,
-        });
+        try {
+          await startWithSpecProtocol();
+        } catch {
+          await startWithLegacyProtocol();
+        }
         running = true;
         return true;
       } catch (error) {
         onError?.(error);
         cleanupWorker();
         running = false;
+        protocol = "unknown";
         return false;
       }
     },
@@ -290,7 +545,26 @@ function createWorkerController({
       if (!running) return;
       running = false;
       try {
-        await postRequest("stop");
+        if (protocol === "spec") {
+          await postRequest({
+            type: "RESET",
+            payload: {},
+            successTypes: ["RESET:ok", "stop:ok", "READY"],
+            errorTypes: ["RESET:err", "ERROR"],
+            timeoutMs: 5_000,
+          });
+        }
+      } catch {
+        // noop
+      }
+      try {
+        await postRequest({
+          type: "stop",
+          payload: {},
+          successTypes: ["stop:ok", "RESET:ok"],
+          errorTypes: ["stop:err", "ERROR"],
+          timeoutMs: 5_000,
+        });
       } catch {
         // noop
       }
@@ -298,36 +572,14 @@ function createWorkerController({
     async destroy() {
       disposed = true;
       running = false;
+      protocol = "unknown";
       cleanupWorker();
     },
     isRunning() {
       return running;
     },
     async transcribeChunk(chunk) {
-      if (!running) return [];
-      const chunkBase64 = await blobToBase64(chunk.blob);
-      const response = await postRequest("transcribe", {
-        chunkId: chunk.chunkId,
-        startMs: chunk.startMs,
-        endMs: chunk.endMs,
-        mimeType: chunk.mimeType,
-        chunkBase64,
-      });
-      const segments = Array.isArray(response.segments) ? response.segments : [];
-      return segments
-        .map((segment) =>
-          normalizeSegment(
-            segment as {
-              text?: string;
-              startMs?: number;
-              endMs?: number;
-              confidence?: number | null;
-            },
-            chunk.startMs,
-            chunk.endMs
-          )
-        )
-        .filter((segment): segment is LocalAsrSegment => Boolean(segment));
+      return enqueueTranscribe(() => transcribeChunkNow(chunk));
     },
   };
 }
@@ -346,10 +598,12 @@ export function createWasmLocalAsr(options?: {
   runtimeUrl?: string;
   modelUrl?: string;
   onError?: (error: unknown) => void;
+  onProgress?: (event: WasmAsrProgressEvent) => void;
+  onPartial?: (event: WasmAsrPartialEvent) => void;
 }): WasmAsrController {
   const lang = options?.lang ?? "ko";
   const modelUrl = options?.modelUrl ?? "";
-  const runtimeUrl = options?.runtimeUrl ?? "";
+  const runtimeUrl = options?.runtimeUrl ?? "/runtime/whisper-runtime.js";
   const workerUrl = options?.workerUrl ?? "/workers/handoff-whisper.worker.js";
   const onError = options?.onError;
   const plugin = getCapacitorWasmAsrPlugin();
@@ -379,6 +633,8 @@ export function createWasmLocalAsr(options?: {
     modelUrl,
     lang,
     onError,
+    onProgress: options?.onProgress,
+    onPartial: options?.onPartial,
   });
 
   return {
@@ -404,5 +660,3 @@ export function createWasmLocalAsr(options?: {
     },
   };
 }
-
-export type { WasmAsrChunkInput, WasmAsrController };

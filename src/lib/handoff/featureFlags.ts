@@ -51,6 +51,13 @@ function parseStringFlag(value: string | undefined, fallback: string) {
   return normalized;
 }
 
+function parseNumberFlag(value: string | undefined, fallback: number, min: number, max: number) {
+  if (value == null) return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
 export function getHandoffFeatureFlags(): HandoffFeatureFlags {
   return {
     handoffEnabled: parseBooleanFlag(process.env.NEXT_PUBLIC_HANDOFF_ENABLED, true),
@@ -75,7 +82,33 @@ export function getHandoffFeatureFlags(): HandoffFeatureFlags {
       "/workers/handoff-whisper.worker.js"
     ),
     handoffWasmAsrModelUrl: parseStringFlag(process.env.NEXT_PUBLIC_HANDOFF_WASM_ASR_MODEL_URL, ""),
-    handoffWasmAsrRuntimeUrl: parseStringFlag(process.env.NEXT_PUBLIC_HANDOFF_WASM_ASR_RUNTIME_URL, ""),
+    handoffWasmAsrRuntimeUrl: parseStringFlag(
+      process.env.NEXT_PUBLIC_HANDOFF_WASM_ASR_RUNTIME_URL,
+      "/runtime/whisper-runtime.js"
+    ),
+    handoffVadEnabled: parseBooleanFlag(process.env.NEXT_PUBLIC_HANDOFF_VAD_ENABLED, true),
+    handoffVadMinSpeechRatio: parseNumberFlag(
+      process.env.NEXT_PUBLIC_HANDOFF_VAD_MIN_SPEECH_RATIO,
+      0.05,
+      0,
+      1
+    ),
+    handoffVadMinSegmentMs: parseNumberFlag(
+      process.env.NEXT_PUBLIC_HANDOFF_VAD_MIN_SEGMENT_MS,
+      180,
+      60,
+      2_000
+    ),
+    handoffVadThreshold: parseNumberFlag(
+      process.env.NEXT_PUBLIC_HANDOFF_VAD_THRESHOLD,
+      0.012,
+      0.001,
+      0.2
+    ),
+    handoffWebLlmRefineEnabled: parseBooleanFlag(
+      process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_REFINE_ENABLED,
+      false
+    ),
     handoffPrivacyProfile: parsePrivacyProfile(process.env.NEXT_PUBLIC_HANDOFF_PRIVACY_PROFILE, "strict"),
     handoffRequireAuth: parseBooleanFlag(process.env.NEXT_PUBLIC_HANDOFF_REQUIRE_AUTH, true),
   };

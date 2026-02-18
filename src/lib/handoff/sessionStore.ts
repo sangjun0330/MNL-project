@@ -4,7 +4,27 @@ import { sanitizeStructuredSession } from "@/lib/handoff/deidGuard";
 import { handoffScopedKey, handoffScopedPrefix } from "@/lib/handoff/storageScope";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const DEFAULT_STRUCTURED_TTL_MS = 7 * DAY_MS;
+
+function parseStructuredTtlMs() {
+  const raw =
+    process.env.NEXT_PUBLIC_HANDOFF_STRUCTURED_TTL_HOURS ??
+    process.env.NEXT_PUBLIC_HANDOFF_STRUCTURED_TTL_DAYS;
+
+  if (!raw) return DAY_MS;
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DAY_MS;
+
+  if (String(raw).includes(".") || parsed > 31) {
+    const byHours = Math.min(30 * 24, Math.max(1, Math.round(parsed)));
+    return byHours * 60 * 60 * 1000;
+  }
+
+  const byDays = Math.min(30, Math.max(1, Math.round(parsed)));
+  return byDays * DAY_MS;
+}
+
+const DEFAULT_STRUCTURED_TTL_MS = parseStructuredTtlMs();
 
 export type StructuredSessionRecord = {
   id: string;
@@ -88,6 +108,9 @@ function sanitizeRecord(record: StructuredSessionRecord) {
 export function saveStructuredSession(result: HandoverSessionResult, ttlMs = DEFAULT_STRUCTURED_TTL_MS) {
   const storage = getStorage();
   if (!storage) return false;
+  if (!result.safety.persistAllowed) {
+    return false;
+  }
 
   const sanitized = sanitizeStructuredSession(result);
   if (sanitized.residualIssues.length) {
@@ -96,7 +119,7 @@ export function saveStructuredSession(result: HandoverSessionResult, ttlMs = DEF
   const now = Date.now();
   const record: StructuredSessionRecord = {
     id: sanitized.result.sessionId,
-    createdAt: now,
+    createdAt: sanitized.result.createdAtMs || now,
     expiresAt: now + ttlMs,
     result: sanitized.result,
   };

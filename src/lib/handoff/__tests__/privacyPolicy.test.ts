@@ -16,6 +16,11 @@ function baseFlags(): HandoffFeatureFlags {
     handoffWasmAsrWorkerUrl: "/workers/handoff-whisper.worker.js",
     handoffWasmAsrModelUrl: "/models/ko.bin",
     handoffWasmAsrRuntimeUrl: "/runtime/whisper.js",
+    handoffVadEnabled: true,
+    handoffVadMinSpeechRatio: 0.05,
+    handoffVadMinSegmentMs: 180,
+    handoffVadThreshold: 0.012,
+    handoffWebLlmRefineEnabled: false,
     handoffPrivacyProfile: "strict",
     handoffRequireAuth: true,
   };

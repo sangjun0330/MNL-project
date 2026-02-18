@@ -1,9 +1,34 @@
+export type IsoTs = string;
 export type DutyType = "day" | "evening" | "night";
 
 export type EvidenceRef = {
   segmentId: string;
   startMs: number;
   endMs: number;
+};
+
+export type AudioChunk = {
+  id: string;
+  startedAt: IsoTs;
+  endedAt: IsoTs;
+  mime: "audio/webm" | "audio/mp4" | "audio/wav";
+  blob: Blob;
+  pcm?: Float32Array;
+  vad?: { speechRatio: number; segments: Array<{ s: number; e: number }> };
+};
+
+export type TranscriptSegment = {
+  chunkId: string;
+  t0: number;
+  t1: number;
+  text: string;
+  confidence?: number;
+};
+
+export type TranscriptBuffer = {
+  segments: TranscriptSegment[];
+  rawText: string;
+  normalizedText: string;
 };
 
 export type RawSegment = {
@@ -34,6 +59,40 @@ export type NormalizedSegment = {
   uncertainties: SegmentUncertainty[];
 };
 
+export type PhiType =
+  | "PHONE"
+  | "RRN"
+  | "MRN"
+  | "ADDRESS"
+  | "NAME"
+  | "DOB"
+  | "BED"
+  | "ROOM"
+  | "ID_LIKE"
+  | "CUSTOM"
+  | "LONG_DIGITS"
+  | "ROOM_NAME"
+  | "NAME_HINT";
+
+export type PhiFinding = {
+  type: PhiType;
+  start: number;
+  end: number;
+  sample: string;
+  severity: "low" | "med" | "high";
+};
+
+export type AliasMap = Record<string, string>;
+
+export type MaskResult = {
+  maskedText: string;
+  findings: PhiFinding[];
+  aliasMap: AliasMap;
+  residualFindings: PhiFinding[];
+  safeToPersist: boolean;
+  exportAllowed: boolean;
+};
+
 export type MaskedSegment = {
   segmentId: string;
   maskedText: string;
@@ -42,6 +101,8 @@ export type MaskedSegment = {
   uncertainties: SegmentUncertainty[];
   patientAlias: string | null;
   phiHits: string[];
+  findings: PhiFinding[];
+  residualFindings: PhiFinding[];
   evidenceRef: EvidenceRef;
 };
 
@@ -58,6 +119,53 @@ export type WardEvent = {
   category: WardEventCategory;
   text: string;
   evidenceRef: EvidenceRef;
+};
+
+export type Unit = "mmHg" | "bpm" | "C" | "%" | "mg" | "mcg" | "mEq" | "units" | "mL" | "L/min";
+
+export type ClinicalEntity =
+  | { kind: "VITAL"; name: "BP" | "HR" | "RR" | "SpO2" | "Temp"; value: number; unit: Unit; trend?: "up" | "down" | "stable" }
+  | { kind: "MED"; name: string; route?: string; rate?: string; isHighRisk?: boolean }
+  | { kind: "LINE"; name: "PIV" | "CVC" | "A-line" | "Foley" | "NG" | "ETT" | "Drain"; details?: string }
+  | { kind: "LAB"; name: string; value?: string; flag?: "high" | "low" | "critical" }
+  | { kind: "ALARM"; name: string; context?: string }
+  | { kind: "DX"; name: string }
+  | { kind: "PLAN"; text: string };
+
+export type RiskCode =
+  | "AIRWAY"
+  | "BREATHING"
+  | "CIRCULATION"
+  | "BLEEDING"
+  | "SEPSIS"
+  | "ARRHYTHMIA"
+  | "HIGH_ALERT_MED"
+  | "DEVICE_FAILURE"
+  | "NEURO_CHANGE"
+  | "ALLERGY_REACTION"
+  | "TRANSFUSION_REACTION"
+  | "ELECTROLYTE_CRITICAL"
+  | "GLUCOSE_CRITICAL"
+  | "FALL_RISK"
+  | "PRESSURE_INJURY";
+
+export type RiskItem = {
+  code: RiskCode;
+  score: number;
+  rationale: string;
+  actions: string[];
+  evidenceRef?: EvidenceRef;
+};
+
+export type TodoPriority = "P0" | "P1" | "P2";
+export type TodoDue = "now" | "within_1h" | "today" | "next_shift";
+
+export type TodoItem = {
+  priority: TodoPriority;
+  task: string;
+  due?: TodoDue;
+  owner?: "RN" | "MD" | "RT" | "LAB";
+  evidenceRef?: EvidenceRef;
 };
 
 export type HandoffRiskLevel = "high" | "medium" | "low";
@@ -92,11 +200,30 @@ export type PatientRisk = {
 };
 
 export type PatientCard = {
+  patientKey: string;
+  summary1: string;
+  problems: string[];
+  currentStatus: string[];
+  meds: string[];
+  lines: string[];
+  labs: string[];
+  plan: TodoItem[];
+  risks: RiskItem[];
+  watchFor: string[];
+  questions: string[];
+  entities: ClinicalEntity[];
   alias: string;
   topItems: PatientTopItem[];
   todos: PatientTodo[];
-  problems: PatientProblem[];
-  risks: PatientRisk[];
+  problemItems: PatientProblem[];
+  riskItems: PatientRisk[];
+};
+
+export type GlobalTop3Item = {
+  text: string;
+  score: number;
+  patientKey?: string;
+  evidenceRef?: EvidenceRef;
 };
 
 export type GlobalTopItem = {
@@ -116,21 +243,44 @@ export type UncertaintyItem = {
   evidenceRef: EvidenceRef;
 };
 
-export type HandoverSessionResult = {
+export type HandoffSafetyState = {
+  phiSafe: boolean;
+  residualCount: number;
+  exportAllowed: boolean;
+  persistAllowed: boolean;
+};
+
+export type HandoffProvenance = {
+  stt: { engine: "whisper_wasm"; model: string; chunkSeconds: number };
+  rulesetVersion: string;
+  llmRefined: boolean;
+};
+
+export type HandoffOutput = {
+  createdAt: IsoTs;
+  mode: "local_only";
+  globalTop3: GlobalTop3Item[];
+  patients: PatientCard[];
+  uncertainties: string[];
+  safety: HandoffSafetyState;
+  provenance: HandoffProvenance;
+};
+
+export type HandoverSessionResult = HandoffOutput & {
   sessionId: string;
   dutyType: DutyType;
-  createdAt: number;
+  createdAtMs: number;
   globalTop: GlobalTopItem[];
   wardEvents: WardEvent[];
-  patients: PatientCard[];
-  uncertainties: UncertaintyItem[];
+  uncertaintyItems: UncertaintyItem[];
 };
 
 export type HandoffPipelineOutput = {
   result: HandoverSessionResult;
   local: {
     maskedSegments: MaskedSegment[];
-    aliasMap: Record<string, string>;
+    aliasMap: AliasMap;
+    mask: MaskResult;
   };
 };
 
@@ -150,6 +300,11 @@ export type HandoffFeatureFlags = {
   handoffWasmAsrWorkerUrl: string;
   handoffWasmAsrModelUrl: string;
   handoffWasmAsrRuntimeUrl: string;
+  handoffVadEnabled: boolean;
+  handoffVadMinSpeechRatio: number;
+  handoffVadMinSegmentMs: number;
+  handoffVadThreshold: number;
+  handoffWebLlmRefineEnabled: boolean;
   handoffPrivacyProfile: HandoffPrivacyProfile;
   handoffRequireAuth: boolean;
 };

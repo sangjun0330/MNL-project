@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { authHeaders } from "@/lib/billing/client";
 import { appendHandoffAuditEvent } from "@/lib/handoff/auditLog";
 import { sanitizeStructuredSession } from "@/lib/handoff/deidGuard";
 import { HANDOFF_FLAGS } from "@/lib/handoff/featureFlags";
@@ -29,19 +30,69 @@ function levelClass(level: "high" | "medium" | "low") {
 }
 
 export function HandoffSessionDetailPage({ sessionId }: { sessionId: string }) {
-  const { status: authStatus } = useAuthState();
+  const { status: authStatus, user } = useAuthState();
   const [record, setRecord] = useState<StructuredSessionRecord | null>(null);
   const [evidenceMap, setEvidenceMap] = useState<Record<string, string>>({});
   const [activeEvidence, setActiveEvidence] = useState<EvidenceRef | null>(null);
   const [deidIssueCount, setDeidIssueCount] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [adminChecking, setAdminChecking] = useState(false);
+  const [adminAllowed, setAdminAllowed] = useState(false);
+  const [adminError, setAdminError] = useState<string | null>(null);
   const privacyPolicy = evaluateHandoffPrivacyPolicy(HANDOFF_FLAGS);
   const authPending = privacyPolicy.authRequired && authStatus === "loading";
   const authBlocked = privacyPolicy.authRequired && authStatus !== "authenticated";
   const secureContextBlocked = privacyPolicy.secureContextRequired && !privacyPolicy.secureContextSatisfied;
+  const adminBlocked = authStatus !== "loading" && !adminChecking && !adminAllowed;
 
   useEffect(() => {
-    if (authBlocked || secureContextBlocked) {
+    let active = true;
+    if (authStatus !== "authenticated" || !user?.userId) {
+      setAdminChecking(false);
+      setAdminAllowed(false);
+      setAdminError(null);
+      return () => {
+        active = false;
+      };
+    }
+
+    const run = async () => {
+      setAdminChecking(true);
+      setAdminError(null);
+      try {
+        const headers = await authHeaders();
+        const res = await fetch("/api/admin/billing/access", {
+          method: "GET",
+          headers: {
+            "content-type": "application/json",
+            ...headers,
+          },
+          cache: "no-store",
+        });
+        const json = await res.json().catch(() => null);
+        if (!active) return;
+        const allowed = Boolean(json?.ok && json?.data?.isAdmin);
+        setAdminAllowed(allowed);
+        if (!allowed) {
+          setAdminError(String(json?.error ?? "admin_forbidden"));
+        }
+      } catch (cause) {
+        if (!active) return;
+        setAdminAllowed(false);
+        setAdminError(String(cause));
+      } finally {
+        if (!active) return;
+        setAdminChecking(false);
+      }
+    };
+    void run();
+    return () => {
+      active = false;
+    };
+  }, [authStatus, user?.userId]);
+
+  useEffect(() => {
+    if (authBlocked || secureContextBlocked || adminChecking || adminBlocked) {
       setRecord(null);
       return;
     }
@@ -78,10 +129,10 @@ export function HandoffSessionDetailPage({ sessionId }: { sessionId: string }) {
     };
 
     void run();
-  }, [authBlocked, secureContextBlocked, sessionId]);
+  }, [authBlocked, secureContextBlocked, adminChecking, adminBlocked, sessionId]);
 
   const removeSession = async () => {
-    if (authBlocked || secureContextBlocked) {
+    if (authBlocked || secureContextBlocked || adminChecking || adminBlocked) {
       setActionError("strict 정책으로 로그인 사용자만 세션 파기가 가능합니다.");
       return;
     }
@@ -137,6 +188,36 @@ export function HandoffSessionDetailPage({ sessionId }: { sessionId: string }) {
           <div className="mt-4">
             <Link href="/tools/handoff" className="text-[13px] font-semibold text-[color:var(--wnl-accent)]">
               ← AI 인계로 돌아가기
+            </Link>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (adminChecking) {
+    return (
+      <div className="mx-auto w-full max-w-[760px] px-4 pb-24 pt-6">
+        <Card className="p-5">
+          <div className="text-[16px] font-semibold text-ios-text">관리자 권한 확인 중입니다.</div>
+          <div className="mt-2 text-[12.5px] text-ios-sub">AI 인계 상세는 관리자 개발자 계정만 접근할 수 있습니다.</div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (adminBlocked) {
+    return (
+      <div className="mx-auto w-full max-w-[760px] px-4 pb-24 pt-6">
+        <Card className="p-5">
+          <div className="text-[16px] font-semibold text-ios-text">관리자 전용 페이지입니다.</div>
+          <div className="mt-2 text-[12.5px] text-ios-sub">
+            AI 인계 상세는 관리자 개발자 계정에서만 접근할 수 있습니다.
+            {adminError ? ` (${adminError})` : ""}
+          </div>
+          <div className="mt-4">
+            <Link href="/tools" className="text-[13px] font-semibold text-[color:var(--wnl-accent)]">
+              ← Tool 목록으로
             </Link>
           </div>
         </Card>
@@ -249,25 +330,78 @@ export function HandoffSessionDetailPage({ sessionId }: { sessionId: string }) {
         <div className="mt-3 space-y-3">
           {result.patients.map((patient) => (
             <div key={patient.alias} className="rounded-2xl border border-ios-sep bg-white p-4">
-              <div className="text-[14px] font-semibold text-ios-text">{patient.alias}</div>
-              <div className="mt-2">
-                <div className="text-[12px] font-semibold text-ios-sub">To-do</div>
+              <div className="text-[14px] font-semibold text-ios-text">{patient.patientKey}</div>
+              <div className="mt-1 text-[12.5px] text-ios-sub">{patient.summary1}</div>
+
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <div>
+                  <div className="text-[12px] font-semibold text-ios-sub">Current Status</div>
+                  <ul className="mt-1 space-y-1 text-[12.5px] text-ios-text">
+                    {patient.currentStatus.length ? patient.currentStatus.map((item, idx) => <li key={`${patient.alias}-status-${idx}`}>• {item}</li>) : <li className="text-ios-sub">없음</li>}
+                  </ul>
+                </div>
+                <div>
+                  <div className="text-[12px] font-semibold text-ios-sub">Problems</div>
+                  <ul className="mt-1 space-y-1 text-[12.5px] text-ios-text">
+                    {patient.problems.length ? patient.problems.map((item, idx) => <li key={`${patient.alias}-problem-${idx}`}>• {item}</li>) : <li className="text-ios-sub">없음</li>}
+                  </ul>
+                </div>
+              </div>
+
+              <div className="mt-3 grid gap-3 md:grid-cols-3">
+                <div>
+                  <div className="text-[12px] font-semibold text-ios-sub">Meds</div>
+                  <ul className="mt-1 space-y-1 text-[12.5px] text-ios-text">
+                    {patient.meds.length ? patient.meds.map((item, idx) => <li key={`${patient.alias}-med-${idx}`}>• {item}</li>) : <li className="text-ios-sub">없음</li>}
+                  </ul>
+                </div>
+                <div>
+                  <div className="text-[12px] font-semibold text-ios-sub">Lines</div>
+                  <ul className="mt-1 space-y-1 text-[12.5px] text-ios-text">
+                    {patient.lines.length ? patient.lines.map((item, idx) => <li key={`${patient.alias}-line-${idx}`}>• {item}</li>) : <li className="text-ios-sub">없음</li>}
+                  </ul>
+                </div>
+                <div>
+                  <div className="text-[12px] font-semibold text-ios-sub">Labs</div>
+                  <ul className="mt-1 space-y-1 text-[12.5px] text-ios-text">
+                    {patient.labs.length ? patient.labs.map((item, idx) => <li key={`${patient.alias}-lab-${idx}`}>• {item}</li>) : <li className="text-ios-sub">없음</li>}
+                  </ul>
+                </div>
+              </div>
+
+              <div className="mt-3">
+                <div className="text-[12px] font-semibold text-ios-sub">Plan</div>
                 <div className="mt-1 space-y-1.5">
-                  {patient.todos.length ? patient.todos.map((todo) => (
-                    <div key={todo.id} className="rounded-xl border border-ios-sep p-2">
-                      <span className={`rounded-full border px-2 py-0.5 text-[10.5px] font-semibold ${levelClass(todo.level)}`}>{todo.level}</span>
-                      <div className="mt-1 text-[12.5px] text-ios-text">{todo.text}</div>
-                      {HANDOFF_FLAGS.handoffEvidenceEnabled ? (
+                  {patient.plan.length ? patient.plan.map((todo, idx) => (
+                    <div key={`${patient.alias}-plan-${idx}`} className="rounded-xl border border-ios-sep p-2">
+                      <span className={`rounded-full border px-2 py-0.5 text-[10.5px] font-semibold ${levelClass(todo.priority === "P0" ? "high" : todo.priority === "P1" ? "medium" : "low")}`}>{todo.priority}</span>
+                      <div className="mt-1 text-[12.5px] text-ios-text">{todo.task}</div>
+                      {todo.evidenceRef && HANDOFF_FLAGS.handoffEvidenceEnabled ? (
                         <button
                           type="button"
                           className="mt-1 text-[11.5px] font-semibold text-[color:var(--wnl-accent)]"
-                          onClick={() => setActiveEvidence(todo.evidenceRef)}
+                          onClick={() => setActiveEvidence(todo.evidenceRef!)}
                         >
                           Evidence {evidenceRange(todo.evidenceRef)}
                         </button>
                       ) : null}
                     </div>
                   )) : <div className="text-[12px] text-ios-sub">없음</div>}
+                </div>
+              </div>
+
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <div>
+                  <div className="text-[12px] font-semibold text-ios-sub">Watch For</div>
+                  <ul className="mt-1 space-y-1 text-[12.5px] text-ios-text">
+                    {patient.watchFor.length ? patient.watchFor.map((item, idx) => <li key={`${patient.alias}-watch-${idx}`}>• {item}</li>) : <li className="text-ios-sub">없음</li>}
+                  </ul>
+                </div>
+                <div>
+                  <div className="text-[12px] font-semibold text-ios-sub">Questions</div>
+                  <ul className="mt-1 space-y-1 text-[12.5px] text-ios-text">
+                    {patient.questions.length ? patient.questions.map((item, idx) => <li key={`${patient.alias}-question-${idx}`}>• {item}</li>) : <li className="text-ios-sub">없음</li>}
+                  </ul>
                 </div>
               </div>
             </div>
@@ -278,8 +412,8 @@ export function HandoffSessionDetailPage({ sessionId }: { sessionId: string }) {
       <Card className="p-5">
         <div className="text-[15px] font-semibold text-ios-text">Uncertainties</div>
         <div className="mt-2 space-y-2">
-          {result.uncertainties.length ? (
-            result.uncertainties.map((item) => (
+          {result.uncertaintyItems.length ? (
+            result.uncertaintyItems.map((item) => (
               <div key={item.id} className="rounded-xl border border-ios-sep bg-white p-3">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.04em] text-ios-sub">{item.kind}</div>
                 <div className="mt-1 text-[12.5px] text-ios-text">{item.reason}</div>

@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Segmented } from "@/components/ui/Segmented";
 import { Textarea } from "@/components/ui/Textarea";
+import { authHeaders } from "@/lib/billing/client";
 import { createLocalSpeechAsr, isLocalSpeechAsrSupported, type LocalAsrController } from "@/lib/handoff/asr";
 import { appendHandoffAuditEvent } from "@/lib/handoff/auditLog";
 import { detectResidualStructuredPhi, sanitizeStructuredSession } from "@/lib/handoff/deidGuard";
@@ -20,6 +21,7 @@ import { HANDOFF_FLAGS } from "@/lib/handoff/featureFlags";
 import { buildEvidenceMap, runHandoffPipeline, transcriptToRawSegments } from "@/lib/handoff/pipeline";
 import type { ManualUncertaintyInput } from "@/lib/handoff/pipeline";
 import { evaluateHandoffPrivacyPolicy } from "@/lib/handoff/privacyPolicy";
+import { isWebLlmRefineAvailable, tryRefineWithWebLlm } from "@/lib/handoff/refine";
 import { createHandoffRecorder, isHandoffRecorderSupported, type HandoffRecorderController, type RecorderChunk } from "@/lib/handoff/recorder";
 import {
   deleteAllStructuredSessions,
@@ -49,6 +51,7 @@ import type {
   HandoverSessionResult,
   RawSegment,
 } from "@/lib/handoff/types";
+import { analyzeVadFromBlob } from "@/lib/handoff/vad";
 import { createHandoffSessionId } from "@/lib/handoff/types";
 import { useAuthState } from "@/lib/auth";
 import { useI18n } from "@/lib/useI18n";
@@ -182,6 +185,48 @@ function segmentBudgetOkay(current: RawSegment[], incoming: RawSegment[]) {
     };
   }
   return { ok: true as const, reason: null };
+}
+
+function buildHandoffClipboardText(result: HandoverSessionResult) {
+  const lines: string[] = [];
+  lines.push(`[AI HANDOFF] ${result.sessionId} (${result.dutyType})`);
+  lines.push(`createdAt=${result.createdAt}`);
+  lines.push("");
+  lines.push("[GLOBAL TOP3]");
+  if (result.globalTop3.length) {
+    result.globalTop3.forEach((item, index) => {
+      lines.push(`${index + 1}. ${item.text} (score ${item.score})`);
+    });
+  } else {
+    lines.push("- 없음");
+  }
+
+  result.patients.forEach((patient) => {
+    lines.push("");
+    lines.push(`[${patient.patientKey}] ${patient.summary1}`);
+    if (patient.problems.length) lines.push(`- Problems: ${patient.problems.join(" | ")}`);
+    if (patient.currentStatus.length) lines.push(`- Status: ${patient.currentStatus.join(" | ")}`);
+    if (patient.meds.length) lines.push(`- Meds: ${patient.meds.join(" | ")}`);
+    if (patient.lines.length) lines.push(`- Lines: ${patient.lines.join(" | ")}`);
+    if (patient.labs.length) lines.push(`- Labs: ${patient.labs.join(" | ")}`);
+    if (patient.plan.length) lines.push(`- Plan: ${patient.plan.map((todo) => `${todo.priority}:${todo.task}`).join(" | ")}`);
+    if (patient.watchFor.length) lines.push(`- Watch: ${patient.watchFor.join(" | ")}`);
+    if (patient.questions.length) lines.push(`- Questions: ${patient.questions.join(" | ")}`);
+  });
+
+  lines.push("");
+  lines.push(
+    `[SAFETY] phiSafe=${result.safety.phiSafe} residual=${result.safety.residualCount} exportAllowed=${result.safety.exportAllowed} persistAllowed=${result.safety.persistAllowed}`
+  );
+  return lines.join("\n");
+}
+
+async function copyTextToClipboard(text: string) {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  throw new Error("clipboard_unavailable");
 }
 
 function ResultSection({
@@ -341,7 +386,7 @@ function ResultSection({
                   <div>
                     <div className="text-[12px] font-semibold text-ios-sub">Problems</div>
                     <ul className="mt-1 space-y-1 text-[12.5px] text-ios-text">
-                      {patient.problems.length ? patient.problems.map((problem) => <li key={problem.id}>• {problem.text}</li>) : <li className="text-ios-sub">없음</li>}
+                      {patient.problems.length ? patient.problems.map((problem, idx) => <li key={`${patient.alias}-problem-${idx}`}>• {problem}</li>) : <li className="text-ios-sub">없음</li>}
                     </ul>
                   </div>
 
@@ -349,9 +394,9 @@ function ResultSection({
                     <div className="text-[12px] font-semibold text-ios-sub">Risks</div>
                     <div className="mt-1 flex flex-wrap gap-1.5">
                       {patient.risks.length ? (
-                        patient.risks.map((risk) => (
-                          <span key={risk.id} className={`rounded-full border px-2 py-1 text-[11px] font-semibold ${levelTone(risk.level)}`}>
-                            {risk.label}
+                        patient.risks.map((risk, idx) => (
+                          <span key={`${patient.alias}-risk-${risk.code}-${idx}`} className={`rounded-full border px-2 py-1 text-[11px] font-semibold ${scoreTone(risk.score)}`}>
+                            {risk.code} ({risk.score})
                           </span>
                         ))
                       ) : (
@@ -360,6 +405,23 @@ function ResultSection({
                     </div>
                   </div>
                 </div>
+
+                {(patient.watchFor.length || patient.questions.length) ? (
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    <div>
+                      <div className="text-[12px] font-semibold text-ios-sub">Watch For</div>
+                      <ul className="mt-1 space-y-1 text-[12.5px] text-ios-text">
+                        {patient.watchFor.length ? patient.watchFor.map((item, idx) => <li key={`${patient.alias}-watch-${idx}`}>• {item}</li>) : <li className="text-ios-sub">없음</li>}
+                      </ul>
+                    </div>
+                    <div>
+                      <div className="text-[12px] font-semibold text-ios-sub">Questions</div>
+                      <ul className="mt-1 space-y-1 text-[12.5px] text-ios-text">
+                        {patient.questions.length ? patient.questions.map((item, idx) => <li key={`${patient.alias}-question-${idx}`}>• {item}</li>) : <li className="text-ios-sub">없음</li>}
+                      </ul>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ))
           ) : (
@@ -372,8 +434,8 @@ function ResultSection({
         <div className="text-[15px] font-semibold text-ios-text">Uncertainties</div>
         <div className="mt-1 text-[12.5px] text-ios-sub">미기재/애매 항목 10초 검수 리스트</div>
         <div className="mt-3 space-y-2">
-          {result.uncertainties.length ? (
-            result.uncertainties.map((item) => (
+          {result.uncertaintyItems.length ? (
+            result.uncertaintyItems.map((item) => (
               <div key={item.id} className="rounded-2xl border border-ios-sep bg-white p-3">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.04em] text-ios-sub">{item.kind}</div>
                 <div className="mt-1 text-[12.5px] font-medium text-ios-text">{item.reason}</div>
@@ -419,7 +481,7 @@ function ResultSection({
 
 export function ToolHandoffPage() {
   const { t } = useI18n();
-  const { status: authStatus } = useAuthState();
+  const { status: authStatus, user } = useAuthState();
   const [sessionId, setSessionId] = useState(() => createHandoffSessionId());
   const [dutyType, setDutyType] = useState<DutyType>("night");
   const [chunkInput, setChunkInput] = useState("");
@@ -452,6 +514,12 @@ export function ToolHandoffPage() {
   const [revealedAliasUntil, setRevealedAliasUntil] = useState<Record<string, number>>({});
   const [screenLocked, setScreenLocked] = useState(false);
   const [activityPulse, setActivityPulse] = useState(Date.now());
+  const [adminChecking, setAdminChecking] = useState(false);
+  const [adminAllowed, setAdminAllowed] = useState(false);
+  const [adminError, setAdminError] = useState<string | null>(null);
+  const [wasmProgress, setWasmProgress] = useState<number | null>(null);
+  const [refineRunning, setRefineRunning] = useState(false);
+  const [copyNotice, setCopyNotice] = useState<string | null>(null);
 
   const recorderRef = useRef<HandoffRecorderController | null>(null);
   const asrRef = useRef<LocalAsrController | null>(null);
@@ -478,13 +546,13 @@ export function ToolHandoffPage() {
   }, [rawSegments]);
 
   const unresolvedCount = useMemo(() => {
-    if (!result?.uncertainties.length) return 0;
-    return result.uncertainties.filter((item) => !reviewMap[item.id]?.resolved).length;
+    if (!result?.uncertaintyItems.length) return 0;
+    return result.uncertaintyItems.filter((item) => !reviewMap[item.id]?.resolved).length;
   }, [result, reviewMap]);
   const uncertaintySummary = useMemo(() => {
-    if (!result?.uncertainties.length) return [] as Array<{ kind: string; count: number }>;
+    if (!result?.uncertaintyItems.length) return [] as Array<{ kind: string; count: number }>;
     const counter = new Map<string, number>();
-    result.uncertainties.forEach((item) => {
+    result.uncertaintyItems.forEach((item) => {
       counter.set(item.kind, (counter.get(item.kind) ?? 0) + 1);
     });
     return [...counter.entries()]
@@ -492,8 +560,8 @@ export function ToolHandoffPage() {
       .sort((a, b) => b.count - a.count);
   }, [result]);
   const visibleUncertainties = useMemo(() => {
-    if (!result?.uncertainties.length) return [];
-    return showAllUncertainties ? result.uncertainties : result.uncertainties.slice(0, 12);
+    if (!result?.uncertaintyItems.length) return [];
+    return showAllUncertainties ? result.uncertaintyItems : result.uncertaintyItems.slice(0, 12);
   }, [result, showAllUncertainties]);
   const revealedAliasSet = useMemo(() => {
     const now = activityPulse;
@@ -512,7 +580,8 @@ export function ToolHandoffPage() {
   const authPending = privacyPolicy.authRequired && authStatus === "loading";
   const authBlocked = privacyPolicy.authRequired && authStatus !== "authenticated";
   const secureContextBlocked = privacyPolicy.secureContextRequired && !privacyPolicy.secureContextSatisfied;
-  const actionBlocked = authBlocked || secureContextBlocked;
+  const adminBlocked = authStatus !== "loading" && !adminChecking && !adminAllowed;
+  const actionBlocked = authBlocked || secureContextBlocked || adminChecking || adminBlocked;
   const configuredAsrProvider = privacyPolicy.configuredAsrProvider;
   const asrProvider = privacyPolicy.effectiveAsrProvider;
   const webSpeechAsrEnabled = HANDOFF_FLAGS.handoffLocalAsrEnabled && asrProvider === "web_speech";
@@ -532,7 +601,7 @@ export function ToolHandoffPage() {
     (asrProvider === "manual" || (liveAsrEnabled && asrProviderReady)) &&
     !actionBlocked &&
     !screenLocked;
-  const reviewLockActive = Boolean(result?.uncertainties.length) && !sessionSaved && reviewCountdown > 0;
+  const reviewLockActive = Boolean(result?.uncertaintyItems.length) && !sessionSaved && reviewCountdown > 0;
   const flatButtonBase =
     "inline-flex h-11 items-center justify-center rounded-full border px-4 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50";
   const flatButtonSecondary = `${flatButtonBase} border-ios-sep bg-[#F2F2F7] text-ios-text`;
@@ -598,6 +667,53 @@ export function ToolHandoffPage() {
   }, []);
 
   useEffect(() => {
+    let active = true;
+    if (authStatus !== "authenticated" || !user?.userId) {
+      setAdminChecking(false);
+      setAdminAllowed(false);
+      setAdminError(null);
+      return () => {
+        active = false;
+      };
+    }
+
+    const run = async () => {
+      setAdminChecking(true);
+      setAdminError(null);
+      try {
+        const headers = await authHeaders();
+        const res = await fetch("/api/admin/billing/access", {
+          method: "GET",
+          headers: {
+            "content-type": "application/json",
+            ...headers,
+          },
+          cache: "no-store",
+        });
+        const json = await res.json().catch(() => null);
+        if (!active) return;
+        const allowed = Boolean(json?.ok && json?.data?.isAdmin);
+        setAdminAllowed(allowed);
+        if (!allowed) {
+          setAdminError(String(json?.error ?? "admin_forbidden"));
+        }
+      } catch (cause) {
+        if (!active) return;
+        setAdminAllowed(false);
+        setAdminError(String(cause));
+      } finally {
+        if (!active) return;
+        setAdminChecking(false);
+      }
+    };
+
+    void run();
+    return () => {
+      active = false;
+    };
+  }, [authStatus, user?.userId]);
+
+  useEffect(() => {
     if (!privacyPolicy.asrProviderDowngraded || asrPolicyBlockLoggedRef.current) return;
     asrPolicyBlockLoggedRef.current = true;
     appendHandoffAuditEvent({
@@ -629,7 +745,7 @@ export function ToolHandoffPage() {
   }, []);
 
   useEffect(() => {
-    if (authBlocked || secureContextBlocked) return;
+    if (authBlocked || secureContextBlocked || adminChecking || adminBlocked) return;
 
     const onActivity = () => {
       if (screenLockedRef.current) return;
@@ -688,7 +804,7 @@ export function ToolHandoffPage() {
       window.removeEventListener("touchstart", onActivity);
       window.removeEventListener("focusin", onActivity);
     };
-  }, [authBlocked, secureContextBlocked]);
+  }, [authBlocked, secureContextBlocked, adminChecking, adminBlocked]);
 
   useEffect(() => {
     if (!Object.keys(revealedAliasUntil).length) return;
@@ -731,7 +847,7 @@ export function ToolHandoffPage() {
   }, [liveAsrPreview]);
 
   useEffect(() => {
-    if (authBlocked || secureContextBlocked) {
+    if (authBlocked || secureContextBlocked || adminChecking || adminBlocked) {
       setSavedSessions([]);
       setResult(null);
       setEvidenceMap({});
@@ -778,10 +894,10 @@ export function ToolHandoffPage() {
       setDraftRecoveredAt(Date.now());
     };
     void bootstrap();
-  }, [authBlocked, secureContextBlocked, refreshStoredLists]);
+  }, [authBlocked, secureContextBlocked, adminChecking, adminBlocked, refreshStoredLists]);
 
   useEffect(() => {
-    if (authBlocked || secureContextBlocked) return;
+    if (authBlocked || secureContextBlocked || adminChecking || adminBlocked) return;
     const timer = window.setInterval(() => {
       const run = async () => {
         purgeExpiredStructuredSessions();
@@ -792,7 +908,7 @@ export function ToolHandoffPage() {
     }, 60_000);
 
     return () => window.clearInterval(timer);
-  }, [authBlocked, secureContextBlocked, refreshStoredLists]);
+  }, [authBlocked, secureContextBlocked, adminChecking, adminBlocked, refreshStoredLists]);
 
   useEffect(() => {
     return () => {
@@ -811,7 +927,7 @@ export function ToolHandoffPage() {
       setReviewCountdown(0);
       return;
     }
-    if (!result.uncertainties.length) {
+    if (!result.uncertaintyItems.length) {
       setReviewCountdown(0);
       return;
     }
@@ -990,12 +1106,54 @@ export function ToolHandoffPage() {
     }
 
     try {
+      let pcmFloat32: Float32Array | undefined;
+      let sampleRate: number | undefined;
+      let vadSegments: Array<{ s: number; e: number }> | undefined;
+      let vadSpeechRatio: number | undefined;
+
+      if (HANDOFF_FLAGS.handoffVadEnabled) {
+        const vad = await analyzeVadFromBlob(chunk.blob, {
+          targetSampleRate: 16_000,
+          minSpeechMs: HANDOFF_FLAGS.handoffVadMinSegmentMs,
+          threshold: HANDOFF_FLAGS.handoffVadThreshold,
+        });
+        if (vad) {
+          pcmFloat32 = vad.pcmFloat32;
+          sampleRate = vad.sampleRate;
+          vadSegments = vad.segments;
+          vadSpeechRatio = vad.speechRatio;
+          const speechDetected =
+            vad.segments.length > 0 && vad.speechRatio >= HANDOFF_FLAGS.handoffVadMinSpeechRatio;
+          if (!speechDetected) {
+            appendChunkLog(chunk, false);
+            pushManualUncertainty(
+              "VAD가 무음/저발화 구간으로 판단해 자동 전사를 건너뛰었습니다.",
+              `${chunk.chunkId} speech_ratio=${vad.speechRatio.toFixed(3)} (threshold=${HANDOFF_FLAGS.handoffVadMinSpeechRatio.toFixed(3)})`,
+              {
+                startMs: chunk.startMs,
+                endMs: chunk.endMs,
+              }
+            );
+            return;
+          }
+        }
+      }
+
       const segments = await controller.transcribeChunk({
         chunkId: chunk.chunkId,
         blob: chunk.blob,
         startMs: chunk.startMs,
         endMs: chunk.endMs,
         mimeType: chunk.mimeType,
+        pcmFloat32,
+        sampleRate,
+        vad:
+          vadSpeechRatio == null || !vadSegments
+            ? undefined
+            : {
+                speechRatio: vadSpeechRatio,
+                segments: vadSegments,
+              },
       });
 
       if (sessionIdRef.current !== chunkSessionId) return;
@@ -1052,10 +1210,12 @@ export function ToolHandoffPage() {
 
       appendSegments(asRawSegments);
       setLiveAsrPreview(asRawSegments[asRawSegments.length - 1].rawText);
+      setWasmProgress(null);
       setSessionSaved(false);
       appendChunkLog(chunk, true);
     } catch (cause) {
       appendChunkLog(chunk, false);
+      setWasmProgress(null);
       pushManualUncertainty(
         "WASM 로컬 전사 중 오류가 발생해 수동 검수가 필요합니다.",
         `${chunk.chunkId} 전사 오류: ${String(cause)}`,
@@ -1071,6 +1231,7 @@ export function ToolHandoffPage() {
   const startRecording = async () => {
     if (recordingState !== "idle") return;
     setRecordingError(null);
+    setWasmProgress(null);
 
     if (screenLocked) {
       setRecordingError("화면 잠금 상태입니다. 잠금 해제 후 녹음을 시작해 주세요.");
@@ -1079,6 +1240,14 @@ export function ToolHandoffPage() {
 
     if (authBlocked) {
       setRecordingError("strict 정책으로 로그인 사용자인 경우에만 녹음을 시작할 수 있습니다.");
+      return;
+    }
+    if (adminChecking) {
+      setRecordingError("관리자 권한 확인 중입니다. 잠시 후 다시 시도해 주세요.");
+      return;
+    }
+    if (adminBlocked) {
+      setRecordingError("AI 인계는 관리자 개발자 계정에서만 사용할 수 있습니다.");
       return;
     }
 
@@ -1122,6 +1291,14 @@ export function ToolHandoffPage() {
         workerUrl: HANDOFF_FLAGS.handoffWasmAsrWorkerUrl,
         runtimeUrl: HANDOFF_FLAGS.handoffWasmAsrRuntimeUrl,
         modelUrl: HANDOFF_FLAGS.handoffWasmAsrModelUrl,
+        onProgress: (event) => {
+          if (!event.chunkId) return;
+          setWasmProgress(event.percent);
+        },
+        onPartial: (event) => {
+          if (!event.text.trim()) return;
+          setLiveAsrPreview(event.text.trim());
+        },
         onError: (cause) => {
           setRecordingError(`WASM ASR 오류: ${String(cause)}`);
         },
@@ -1204,6 +1381,7 @@ export function ToolHandoffPage() {
     if (recordingState === "idle") return;
 
     setRecordingState("stopping");
+    setWasmProgress(null);
     asrRef.current?.stop();
     asrRef.current?.destroy();
     asrRef.current = null;
@@ -1225,6 +1403,14 @@ export function ToolHandoffPage() {
     }
     if (authBlocked) {
       setError("strict 정책으로 로그인 사용자만 분석을 실행할 수 있습니다.");
+      return;
+    }
+    if (adminChecking) {
+      setError("관리자 권한 확인 중입니다. 잠시 후 다시 시도해 주세요.");
+      return;
+    }
+    if (adminBlocked) {
+      setError("AI 인계는 관리자 개발자 계정에서만 사용할 수 있습니다.");
       return;
     }
     if (secureContextBlocked) {
@@ -1287,7 +1473,7 @@ export function ToolHandoffPage() {
       }
 
       const nextReviewMap: Record<string, ReviewState> = {};
-      sanitized.result.uncertainties.forEach((item) => {
+      sanitized.result.uncertaintyItems.forEach((item) => {
         nextReviewMap[item.id] = { resolved: false, note: "" };
       });
 
@@ -1295,6 +1481,7 @@ export function ToolHandoffPage() {
       setChunkInput("");
       setRawSegments(mergedSegments);
       setResult(sanitized.result);
+      setCopyNotice(null);
       setShowAllUncertainties(false);
       setLiveAliasTokens(buildAliasTokenIndex(output.local.aliasMap));
       setRevealedAliasUntil({});
@@ -1303,7 +1490,7 @@ export function ToolHandoffPage() {
       appendHandoffAuditEvent({
         action: "pipeline_run",
         sessionId,
-        detail: `segments=${mergedSegments.length}|uncertainties=${sanitized.result.uncertainties.length}`,
+        detail: `segments=${mergedSegments.length}|uncertainties=${sanitized.result.uncertaintyItems.length}`,
       });
       refreshStoredLists();
     } finally {
@@ -1321,6 +1508,14 @@ export function ToolHandoffPage() {
       setError("strict 정책으로 로그인 사용자만 저장할 수 있습니다.");
       return;
     }
+    if (adminChecking) {
+      setError("관리자 권한 확인 중입니다. 잠시 후 다시 시도해 주세요.");
+      return;
+    }
+    if (adminBlocked) {
+      setError("AI 인계는 관리자 개발자 계정에서만 사용할 수 있습니다.");
+      return;
+    }
     if (secureContextBlocked) {
       setError("strict 정책으로 HTTPS secure context에서만 저장할 수 있습니다.");
       return;
@@ -1328,22 +1523,25 @@ export function ToolHandoffPage() {
 
     setFinalizing(true);
     try {
+      const reviewedItems = result.uncertaintyItems.map((item) => {
+        const review = reviewMap[item.id];
+        if (!review) return item;
+
+        const flags: string[] = [];
+        if (review.resolved) flags.push("검수완료");
+        if (review.note.trim()) flags.push(`메모:${review.note.trim()}`);
+
+        if (!flags.length) return item;
+        return {
+          ...item,
+          reason: `${item.reason} | ${flags.join(" | ")}`,
+        };
+      });
+
       const reviewed = {
         ...result,
-        uncertainties: result.uncertainties.map((item) => {
-          const review = reviewMap[item.id];
-          if (!review) return item;
-
-          const flags: string[] = [];
-          if (review.resolved) flags.push("검수완료");
-          if (review.note.trim()) flags.push(`메모:${review.note.trim()}`);
-
-          if (!flags.length) return item;
-          return {
-            ...item,
-            reason: `${item.reason} | ${flags.join(" | ")}`,
-          };
-        }),
+        uncertaintyItems: reviewedItems,
+        uncertainties: reviewedItems.map((item) => item.reason),
       };
 
       const sanitized = sanitizeStructuredSession(reviewed);
@@ -1351,6 +1549,10 @@ export function ToolHandoffPage() {
       if (residual.length) {
         setResidualIssueCount(residual.length);
         setError(`잔여 식별 패턴 ${residual.length}건이 감지되어 저장을 차단했습니다.`);
+        return;
+      }
+      if (!sanitized.result.safety.persistAllowed) {
+        setError("PHI residual gate 정책으로 저장이 차단되었습니다.");
         return;
       }
       const saved = saveStructuredSession(sanitized.result);
@@ -1383,6 +1585,14 @@ export function ToolHandoffPage() {
       setError("strict 정책으로 로그인 사용자만 저장할 수 있습니다.");
       return;
     }
+    if (adminChecking) {
+      setError("관리자 권한 확인 중입니다. 잠시 후 다시 시도해 주세요.");
+      return;
+    }
+    if (adminBlocked) {
+      setError("AI 인계는 관리자 개발자 계정에서만 사용할 수 있습니다.");
+      return;
+    }
     if (secureContextBlocked) {
       setError("strict 정책으로 HTTPS secure context에서만 저장할 수 있습니다.");
       return;
@@ -1392,6 +1602,10 @@ export function ToolHandoffPage() {
     if (residual.length) {
       setResidualIssueCount(residual.length);
       setError(`잔여 식별 패턴 ${residual.length}건이 감지되어 저장을 차단했습니다.`);
+      return;
+    }
+    if (!sanitized.result.safety.persistAllowed) {
+      setError("PHI residual gate 정책으로 저장이 차단되었습니다.");
       return;
     }
     const saved = saveStructuredSession(sanitized.result);
@@ -1430,8 +1644,10 @@ export function ToolHandoffPage() {
     setLiveAliasTokens({});
     setRevealedAliasUntil({});
     setLiveAsrPreview("");
+    setWasmProgress(null);
     setError(null);
     setRecordingError(null);
+    setCopyNotice(null);
     setSessionSaved(false);
     setManualUncertainties([]);
     setDraftRecoveredAt(null);
@@ -1462,8 +1678,10 @@ export function ToolHandoffPage() {
     setRawSegments([]);
     setChunkLogs([]);
     setLiveAsrPreview("");
+    setWasmProgress(null);
     setLiveAliasTokens({});
     setRevealedAliasUntil({});
+    setCopyNotice(null);
     setSessionSaved(false);
     setManualUncertainties([]);
     setDraftRecoveredAt(null);
@@ -1496,6 +1714,7 @@ export function ToolHandoffPage() {
     setChunkLogs([]);
     setChunkInput("");
     setLiveAsrPreview("");
+    setWasmProgress(null);
     setSessionId(createHandoffSessionId());
     setScreenLocked(false);
     setRecordingError(null);
@@ -1505,6 +1724,7 @@ export function ToolHandoffPage() {
     setDeidIssueCount(0);
     setResidualIssueCount(0);
     setError(null);
+    setCopyNotice(null);
     liveSegmentSeqRef.current = 0;
     lastActivityRef.current = Date.now();
     setActivityPulse(Date.now());
@@ -1539,6 +1759,43 @@ export function ToolHandoffPage() {
     const encoded = encodeURIComponent(targetSessionId);
     window.location.assign(`/tools/handoff/session/${encoded}`);
   }, []);
+
+  const refineWithWebLlm = async () => {
+    if (!result) return;
+    setRefineRunning(true);
+    setError(null);
+    try {
+      const outcome = await tryRefineWithWebLlm(result);
+      setResult(outcome.result);
+      setSessionSaved(false);
+      if (!outcome.refined) {
+        setError(`WebLLM refine 스킵: ${outcome.reason ?? "no_change"}`);
+      } else {
+        appendHandoffAuditEvent({
+          action: "pipeline_run",
+          sessionId: outcome.result.sessionId,
+          detail: "webllm_refine=true",
+        });
+      }
+    } finally {
+      setRefineRunning(false);
+    }
+  };
+
+  const copyStructuredOutput = async () => {
+    if (!result) return;
+    if (!result.safety.exportAllowed) {
+      setError("잔여 PHI 감지로 복사/내보내기가 차단되었습니다.");
+      return;
+    }
+    try {
+      await copyTextToClipboard(buildHandoffClipboardText(result));
+      setCopyNotice("비식별 결과를 클립보드에 복사했습니다.");
+      setTimeout(() => setCopyNotice(null), 2_500);
+    } catch {
+      setError("클립보드 복사에 실패했습니다.");
+    }
+  };
 
   if (!HANDOFF_FLAGS.handoffEnabled) {
     return (
@@ -1576,6 +1833,36 @@ export function ToolHandoffPage() {
           <div className="mt-4">
             <Link href="/settings" className="text-[13px] font-semibold text-[color:var(--wnl-accent)]">
               설정(로그인)으로 이동 →
+            </Link>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (adminChecking) {
+    return (
+      <div className="mx-auto w-full max-w-[980px] px-2 pb-24 pt-4 sm:px-4 sm:pt-6">
+        <Card className={`p-5 ${HANDOFF_FLAT_CARD_CLASS}`}>
+          <div className="text-[16px] font-semibold text-ios-text">관리자 권한 확인 중입니다.</div>
+          <div className="mt-2 text-[13px] text-ios-sub">AI 인계 기능은 관리자 개발자 계정에서만 사용 가능합니다.</div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (adminBlocked) {
+    return (
+      <div className="mx-auto w-full max-w-[980px] px-2 pb-24 pt-4 sm:px-4 sm:pt-6">
+        <Card className={`p-5 ${HANDOFF_FLAT_CARD_CLASS}`}>
+          <div className="text-[16px] font-semibold text-ios-text">관리자 계정 전용 기능입니다.</div>
+          <div className="mt-2 text-[13px] text-ios-sub">
+            AI 인계는 관리자 개발자 계정에서만 사용할 수 있습니다.
+            {adminError ? ` (${adminError})` : ""}
+          </div>
+          <div className="mt-4">
+            <Link href="/tools" className="text-[13px] font-semibold text-[color:var(--wnl-accent)]">
+              ← Tool 목록으로
             </Link>
           </div>
         </Card>
@@ -1653,6 +1940,32 @@ export function ToolHandoffPage() {
             {running ? t("분석 중...") : t("분석 실행")}
           </Button>
         </div>
+        {result ? (
+          <div className="mt-2 grid gap-2 md:grid-cols-2">
+            <Button
+              variant="secondary"
+              className={flatButtonSecondary}
+              onClick={() => { void copyStructuredOutput(); }}
+              disabled={!result.safety.exportAllowed || actionBlocked || screenLocked}
+            >
+              비식별 결과 복사
+            </Button>
+            {HANDOFF_FLAGS.handoffWebLlmRefineEnabled ? (
+              <Button
+                variant="secondary"
+                className={flatButtonSecondary}
+                onClick={() => { void refineWithWebLlm(); }}
+                disabled={refineRunning || running || recordingState !== "idle" || actionBlocked || screenLocked || !isWebLlmRefineAvailable()}
+              >
+                {refineRunning ? "Refine 중..." : "WebLLM 문장 다듬기"}
+              </Button>
+            ) : (
+              <div className="rounded-full border border-ios-sep bg-ios-bg px-4 py-2 text-center text-[12px] text-ios-sub">
+                WebLLM refine 비활성화
+              </div>
+            )}
+          </div>
+        ) : null}
 
         <details className="mt-3 rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3">
           <summary className="cursor-pointer text-[12.5px] font-semibold text-ios-sub">고급 데이터 관리</summary>
@@ -1691,9 +2004,21 @@ export function ToolHandoffPage() {
             저장 차단: 잔여 식별 패턴 {residualIssueCount}건이 감지되었습니다.
           </div>
         ) : null}
+        {result ? (
+          <div className="mt-2 rounded-2xl border border-ios-sep bg-ios-bg p-3 text-[12.5px] text-ios-sub">
+            safety: phiSafe={result.safety.phiSafe ? "true" : "false"} · residual={result.safety.residualCount} ·
+            export={result.safety.exportAllowed ? "allowed" : "blocked"} ·
+            persist={result.safety.persistAllowed ? "allowed" : "blocked"}
+          </div>
+        ) : null}
         {privacyPolicy.asrProviderDowngraded ? (
           <div className="mt-2 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-[12.5px] text-amber-800">
             개인정보 보호 정책으로 자동 전사 제공자가 조정되었습니다: {configuredAsrProvider} → {asrProvider}
+          </div>
+        ) : null}
+        {copyNotice ? (
+          <div className="mt-2 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-[12.5px] text-emerald-800">
+            {copyNotice}
           </div>
         ) : null}
       </Card>
@@ -1801,6 +2126,7 @@ export function ToolHandoffPage() {
         <div className="mt-3 text-[12px] text-ios-sub">
           상태: <span className="font-semibold text-ios-text">{recordingState}</span>
           {liveAsrPreview ? <span> · 최신 전사: {liveAsrPreview}</span> : null}
+          {asrProvider === "wasm_local" && wasmProgress != null ? <span> · wasm {wasmProgress}%</span> : null}
           {chunkLogs.length ? <span> · 최근 chunk {chunkLogs.length}개</span> : null}
         </div>
 
@@ -1903,8 +2229,8 @@ export function ToolHandoffPage() {
             <div>
               <div className="text-[15px] font-semibold text-ios-text">{t("10초 검수")}</div>
               <div className="mt-1 text-[12.5px] text-ios-sub">
-                {result.uncertainties.length
-                  ? `${t("미기재/애매 항목을 확인 후 저장해 주세요.")} (${unresolvedCount}/${result.uncertainties.length})`
+                {result.uncertaintyItems.length
+                  ? `${t("미기재/애매 항목을 확인 후 저장해 주세요.")} (${unresolvedCount}/${result.uncertaintyItems.length})`
                   : t("검수 항목이 없어 바로 저장할 수 있습니다.")}
               </div>
             </div>
@@ -1916,7 +2242,7 @@ export function ToolHandoffPage() {
             </div>
           ) : null}
 
-          {result.uncertainties.length ? (
+          {result.uncertaintyItems.length ? (
             <div className="mt-3 space-y-2">
               <div className="flex flex-wrap items-center gap-2">
                 {uncertaintySummary.map((item) => (
@@ -1950,7 +2276,7 @@ export function ToolHandoffPage() {
                   </div>
                 );
               })}
-              {result.uncertainties.length > 12 ? (
+              {result.uncertaintyItems.length > 12 ? (
                 <div className="pt-1">
                   <Button
                     variant="secondary"
@@ -1959,7 +2285,7 @@ export function ToolHandoffPage() {
                   >
                     {showAllUncertainties
                       ? "핵심 항목만 보기"
-                      : `전체 보기 (+${result.uncertainties.length - visibleUncertainties.length}건)`}
+                      : `전체 보기 (+${result.uncertaintyItems.length - visibleUncertainties.length}건)`}
                   </Button>
                 </div>
               ) : null}
@@ -1971,7 +2297,7 @@ export function ToolHandoffPage() {
               data-testid="handoff-save-reviewed"
               className={flatButtonPrimary}
               onClick={() => { void finalizeSession(); }}
-              disabled={finalizing || running || reviewLockActive || actionBlocked || screenLocked}
+              disabled={finalizing || running || reviewLockActive || actionBlocked || screenLocked || !result.safety.persistAllowed}
             >
               {finalizing ? "저장 중..." : sessionSaved ? "검수 반영 저장 완료" : "검수 반영 저장"}
             </Button>
@@ -1980,7 +2306,7 @@ export function ToolHandoffPage() {
               variant="secondary"
               className={flatButtonSecondary}
               onClick={saveWithoutReview}
-              disabled={finalizing || running || reviewLockActive || actionBlocked || screenLocked}
+              disabled={finalizing || running || reviewLockActive || actionBlocked || screenLocked || !result.safety.persistAllowed}
             >
               검수 생략 즉시 저장
             </Button>

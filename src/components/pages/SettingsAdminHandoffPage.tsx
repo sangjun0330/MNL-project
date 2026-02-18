@@ -241,6 +241,14 @@ export function SettingsAdminHandoffPage() {
           <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">web_audio_capture_enabled: {String(HANDOFF_FLAGS.handoffWebAudioCaptureEnabled)}</div>
           <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">local_asr_enabled: {String(HANDOFF_FLAGS.handoffLocalAsrEnabled)}</div>
           <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">wasm_asr_enabled: {String(HANDOFF_FLAGS.handoffWasmAsrEnabled)}</div>
+          <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">wasm_asr_worker_url: {HANDOFF_FLAGS.handoffWasmAsrWorkerUrl}</div>
+          <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">wasm_asr_runtime_url: {HANDOFF_FLAGS.handoffWasmAsrRuntimeUrl}</div>
+          <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">wasm_asr_model_url: {HANDOFF_FLAGS.handoffWasmAsrModelUrl || "(empty)"}</div>
+          <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">vad_enabled: {String(HANDOFF_FLAGS.handoffVadEnabled)}</div>
+          <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">vad_min_speech_ratio: {HANDOFF_FLAGS.handoffVadMinSpeechRatio}</div>
+          <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">vad_min_segment_ms: {HANDOFF_FLAGS.handoffVadMinSegmentMs}</div>
+          <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">webllm_refine_enabled: {String(HANDOFF_FLAGS.handoffWebLlmRefineEnabled)}</div>
+          <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">webllm_adapter_url: {process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_ADAPTER_URL || "/runtime/webllm-refine-adapter.js"}</div>
           <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">evidence_enabled: {String(HANDOFF_FLAGS.handoffEvidenceEnabled)}</div>
           <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">recorder_support: {String(capability.recorder)}</div>
           <div className="wnl-sub-surface p-3 text-[12.5px] text-ios-text">web_speech_support: {String(capability.webSpeech)}</div>

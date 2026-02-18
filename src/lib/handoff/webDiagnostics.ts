@@ -1,6 +1,8 @@
 import type { HandoffFeatureFlags } from "@/lib/handoff/types";
 import { evaluateHandoffPrivacyPolicy } from "@/lib/handoff/privacyPolicy";
 import { isWasmLocalAsrSupported } from "@/lib/handoff/wasmAsr";
+import { isWebLlmRefineAvailable } from "@/lib/handoff/refine";
+import { isAudioDecodeSupported } from "@/lib/handoff/vad";
 
 export type DiagnosticStatus = "ok" | "warn" | "fail";
 
@@ -16,6 +18,8 @@ export type HandoffDiagnosticReport = {
   items: HandoffDiagnosticItem[];
 };
 
+const WEBLLM_ADAPTER_DEFAULT_URL = "/runtime/webllm-refine-adapter.js";
+
 function statusFromCondition(ok: boolean): DiagnosticStatus {
   return ok ? "ok" : "fail";
 }
@@ -28,6 +32,23 @@ function getMediaRecorderSupport() {
 function getSpeechRecognitionSupport() {
   if (typeof window === "undefined") return false;
   return Boolean((window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition);
+}
+
+function normalizeAdapterUrl(value: string | undefined) {
+  const trimmed = String(value ?? "").trim();
+  return trimmed || WEBLLM_ADAPTER_DEFAULT_URL;
+}
+
+function isRelativeOrSameOrigin(url: string) {
+  if (typeof window === "undefined") return true;
+  if (!url) return false;
+  if (url.startsWith("/") || url.startsWith("./") || url.startsWith("../")) return true;
+  try {
+    const parsed = new URL(url, window.location.origin);
+    return parsed.origin === window.location.origin;
+  } catch {
+    return false;
+  }
 }
 
 async function storageEstimateItem(): Promise<HandoffDiagnosticItem> {
@@ -179,6 +200,17 @@ export async function runHandoffWebDiagnostics(flags: HandoffFeatureFlags): Prom
         : "Mic capture unsupported; use manual transcript mode",
   });
 
+  items.push({
+    id: "vad-path",
+    label: "VAD path",
+    status: flags.handoffVadEnabled ? (isAudioDecodeSupported() ? "ok" : "warn") : "warn",
+    detail: !flags.handoffVadEnabled
+      ? "disabled by feature flag"
+      : isAudioDecodeSupported()
+        ? `enabled (min_ratio=${flags.handoffVadMinSpeechRatio}, min_segment_ms=${flags.handoffVadMinSegmentMs})`
+        : "enabled but AudioContext decode unavailable in current runtime",
+  });
+
   const speechRecognitionReady = getSpeechRecognitionSupport();
   const wasmAsrReady = isWasmLocalAsrSupported({
     workerUrl: flags.handoffWasmAsrWorkerUrl,
@@ -213,8 +245,31 @@ export async function runHandoffWebDiagnostics(flags: HandoffFeatureFlags): Prom
       if (!wasmAsrReady) {
         return "wasm_local selected but no worker/plugin runtime available";
       }
-      return "wasm_local available (on-device runtime required)";
+      const runtimeConfigured = flags.handoffWasmAsrRuntimeUrl.trim() || "/runtime/whisper-runtime.js";
+      return `wasm_local available (runtime=${runtimeConfigured})`;
     })(),
+  });
+
+  const webLlmAdapterUrl = normalizeAdapterUrl(process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_ADAPTER_URL);
+  const webLlmAdapterSameOrigin = isRelativeOrSameOrigin(webLlmAdapterUrl);
+
+  items.push({
+    id: "webllm-refine",
+    label: "WebLLM refine",
+    status: !flags.handoffWebLlmRefineEnabled
+      ? "warn"
+      : !webLlmAdapterSameOrigin && (policy.profile === "strict" || policy.executionMode === "local_only")
+        ? "fail"
+        : isWebLlmRefineAvailable()
+          ? "ok"
+          : "warn",
+    detail: !flags.handoffWebLlmRefineEnabled
+      ? "disabled by feature flag"
+      : !webLlmAdapterSameOrigin && (policy.profile === "strict" || policy.executionMode === "local_only")
+        ? `enabled but adapter URL blocked by strict/local_only policy: ${webLlmAdapterUrl}`
+        : isWebLlmRefineAvailable()
+          ? `enabled (window.__RNEST_WEBLLM_REFINE__ detected, adapter=${webLlmAdapterUrl})`
+          : `enabled but runtime adapter not found (expected ${webLlmAdapterUrl})`,
   });
 
   items.push(await storageEstimateItem());

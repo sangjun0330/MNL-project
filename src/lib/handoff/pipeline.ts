@@ -2,20 +2,21 @@ import { normalizeRoomMentions } from "./clinicalNlu";
 import { normalizeSegments } from "./normalize";
 import { applyPhiGuard } from "./phiGuard";
 import { splitSegmentsByPatient } from "./split";
-import { buildGlobalTop, buildPatientCards } from "./structure";
+import { buildGlobalTop, buildGlobalTop3, buildPatientCards } from "./structure";
 import type {
   DutyType,
   HandoffPipelineOutput,
   MaskedSegment,
   RawSegment,
   SegmentUncertainty,
-  UncertaintyKind,
   UncertaintyItem,
+  UncertaintyKind,
 } from "./types";
 
 const DEFAULT_SEGMENT_MS = 5000;
 const MAX_UNCERTAINTY_ITEM_COUNT = 24;
 const MAX_TRANSCRIPT_SEGMENT_COUNT = 360;
+const RULESET_VERSION = "handoff-rules-v3";
 
 const UNCERTAINTY_KIND_ORDER: Record<UncertaintyKind, number> = {
   manual_review: 0,
@@ -28,8 +29,7 @@ const UNCERTAINTY_KIND_ORDER: Record<UncertaintyKind, number> = {
 
 const AMBIGUOUS_PATIENT_CANDIDATE_PATTERN =
   /(혈당|헤모글로빈|체온|소변량|활력징후|투약|검사|오더|재측정|재검|체크|확인|콜|모니터|통증|호흡|산소|어지럽|흑변|출혈|항생제|항응고|의식|낙상|쇼크)/i;
-const NON_PATIENT_CONTEXT_PATTERN = /(퇴원|입원|회진|병동|신규|가능|예정|\d+\s*명)/;
-const INLINE_PATIENT_ANCHOR_PATTERN = /(\d{3,4}\s*호|환자[A-Z]{1,2}|[가-힣]{1,3}[O○0]{2}|[가-힣]{2,4}\s*환자)/g;
+const INLINE_PATIENT_ANCHOR_PATTERN = /(\d{3,4}\s*호|PATIENT_[A-Z0-9]+|[가-힣]{1,3}[O○0]{2}|[가-힣]{2,4}\s*환자)/g;
 const INLINE_TRANSITION_CUE_PATTERN = /(다음\s*환자|그다음|한편|반면|또한|그리고)/;
 
 type TranscriptOptions = {
@@ -66,17 +66,17 @@ function splitTranscriptLines(text: string) {
     for (let index = 1; index < anchors.length; index += 1) {
       const anchorIndex = anchors[index].index ?? 0;
       const previousCut = cuts[cuts.length - 1] ?? 0;
-      if (anchorIndex - previousCut < 16) continue;
+      if (anchorIndex - previousCut < 12) continue;
 
       const between = normalizedLine.slice(previousCut, anchorIndex);
       const punctuationCut = Math.max(between.lastIndexOf(","), between.lastIndexOf(";"), between.lastIndexOf("·"));
-      if (punctuationCut >= 4) {
+      if (punctuationCut >= 2) {
         cuts.push(previousCut + punctuationCut + 1);
         continue;
       }
 
       const transition = between.match(INLINE_TRANSITION_CUE_PATTERN);
-      if (transition?.index != null && transition.index >= 4) {
+      if (transition?.index != null && transition.index >= 2) {
         cuts.push(previousCut + transition.index);
         continue;
       }
@@ -133,17 +133,10 @@ function pushUncertainty(
   });
 }
 
-function isAmbiguousPatientCandidate(segment: MaskedSegment) {
-  const text = segment.maskedText;
-  if (!AMBIGUOUS_PATIENT_CANDIDATE_PATTERN.test(text)) return false;
-  if (NON_PATIENT_CONTEXT_PATTERN.test(text) && !/(환자[A-Z]{1,2})/.test(text)) return false;
-  return true;
-}
-
 function normalizeUncertaintyKeyText(text: string) {
   return text
     .toLowerCase()
-    .replace(/환자[a-z]{1,2}/g, "환자")
+    .replace(/patient_[a-z0-9]+/g, "patient")
     .replace(/\d{1,2}:\d{2}/g, "#시각")
     .replace(/\d{1,4}\s*호/g, "#호")
     .replace(/\d+(?:\.\d+)?/g, "#")
@@ -214,6 +207,7 @@ export function runHandoffPipeline({
   const phi = applyPhiGuard(normalized);
   const split = splitSegmentsByPatient(phi.segments);
   const patients = buildPatientCards({ patientSegments: split.patientSegments, dutyType });
+  const globalTop3 = buildGlobalTop3(patients);
   const globalTop = buildGlobalTop(patients);
 
   const uncertainties: UncertaintyItem[] = [];
@@ -223,17 +217,29 @@ export function runHandoffPipeline({
     });
   });
 
-  split.unmatchedSegments.forEach((segment) => {
-    if (!isAmbiguousPatientCandidate(segment)) return;
-    pushUncertainty(
-      uncertainties,
-      segment,
-      {
-        kind: "ambiguous_patient",
-        reason: "환자 분리가 애매하여 검수 대상에 추가되었습니다.",
+  if (split.fallbackApplied) {
+    uncertainties.push({
+      id: "uncertainty-fallback-patient",
+      kind: "ambiguous_patient",
+      reason: "환자 분리가 불명확하여 PATIENT_A 단일 카드로 처리했습니다.",
+      text: "환자 구분 불명확",
+      evidenceRef: {
+        segmentId: phi.segments[0]?.segmentId ?? "segment-0",
+        startMs: phi.segments[0]?.startMs ?? 0,
+        endMs: phi.segments[0]?.endMs ?? 0,
       },
-      segment.maskedText
-    );
+    });
+  }
+
+  split.unmatchedSegments.forEach((segment) => {
+    if (!AMBIGUOUS_PATIENT_CANDIDATE_PATTERN.test(segment.maskedText)) return;
+    uncertainties.push({
+      id: `uncertainty-ambiguous-${segment.segmentId}`,
+      kind: "ambiguous_patient",
+      reason: "환자 분리가 애매하여 검수 대상에 추가되었습니다.",
+      text: segment.maskedText,
+      evidenceRef: segment.evidenceRef,
+    });
   });
 
   if (manualUncertainties?.length) {
@@ -255,15 +261,36 @@ export function runHandoffPipeline({
   }
 
   const compactedUncertainties = compactUncertainties(uncertainties);
+  const createdAtMs = Date.now();
+  const createdAtIso = new Date(createdAtMs).toISOString();
 
   const result = {
     sessionId,
     dutyType,
-    createdAt: Date.now(),
+    createdAt: createdAtIso,
+    createdAtMs,
+    mode: "local_only" as const,
+    globalTop3,
     globalTop,
     wardEvents: split.wardEvents,
     patients,
-    uncertainties: compactedUncertainties,
+    uncertainties: compactedUncertainties.map((item) => item.reason),
+    uncertaintyItems: compactedUncertainties,
+    safety: {
+      phiSafe: phi.residualFindings.length === 0,
+      residualCount: phi.residualFindings.length,
+      exportAllowed: phi.exportAllowed,
+      persistAllowed: phi.safeToPersist,
+    },
+    provenance: {
+      stt: {
+        engine: "whisper_wasm" as const,
+        model: "local",
+        chunkSeconds: Math.round(DEFAULT_SEGMENT_MS / 1000),
+      },
+      rulesetVersion: RULESET_VERSION,
+      llmRefined: false,
+    },
   };
 
   return {
@@ -271,6 +298,7 @@ export function runHandoffPipeline({
     local: {
       maskedSegments: phi.segments,
       aliasMap: phi.aliasMap,
+      mask: phi.mask,
     },
   };
 }
