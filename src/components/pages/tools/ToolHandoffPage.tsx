@@ -255,10 +255,15 @@ function readWebLlmMlcStatus() {
   if (typeof window === "undefined") return null;
   const status = (window as any).__RNEST_WEBLLM_MLC_STATUS__;
   if (!status || typeof status !== "object") return null;
+  const backend =
+    status.backend === "mlc_webllm" || status.backend === "transformers_webllm" || status.backend === "none"
+      ? status.backend
+      : "none";
   const modelId = typeof status.modelId === "string" ? status.modelId.trim() : "";
   const error = typeof status.error === "string" && status.error.trim() ? status.error.trim() : null;
   return {
     ready: Boolean(status.ready),
+    backend,
     modelId,
     error,
   };
@@ -292,6 +297,11 @@ function formatWebLlmBadgeText(refineRunning: boolean) {
 
   const status = readWebLlmMlcStatus();
   if (status?.ready) {
+    if (status.backend === "transformers_webllm") {
+      return WEBLLM_REQUIRED
+        ? `WebLLM 필수 모드 준비됨 (WASM LLM:${status.modelId || "fallback"})`
+        : "WebLLM 자동 다듬기 활성 (WASM LLM)";
+    }
     return WEBLLM_REQUIRED
       ? `WebLLM 필수 모드 준비됨 (MLC:${status.modelId || HANDOFF_FLAGS.handoffWebLlmModelId})`
       : "WebLLM 자동 다듬기 활성 (MLC)";
@@ -1568,24 +1578,13 @@ export function ToolHandoffPage() {
             const sourceTag = outcome.backendSource ? `:${outcome.backendSource}` : "";
             webLlmDetail = `webllm=required_failed:${outcome.reason ?? "unknown"}${sourceTag}`;
             const reasonText = formatWebLlmReason(outcome.reason);
-            // WebGPU 없는 환경의 모든 graceful degradation 케이스는 파이프라인 차단 없이 진행
-            // backendSource 뿐만 아니라 reason까지 확인 (adapter 로드 전 실패 시 backendSource=null)
-            const isGracefulDegradation =
-              outcome.backendSource === "adapter_heuristic" ||
-              outcome.reason === "llm_backend_mismatch:adapter_heuristic" ||
-              outcome.reason === "llm_backend_not_used" ||
-              outcome.reason === "webllm_adapter_not_found";
-            if (!isGracefulDegradation) {
-              setError(`WebLLM 필수 모드 실패: ${reasonText}`);
-              appendHandoffAuditEvent({
-                action: "pipeline_run",
-                sessionId,
-                detail: `segments=${mergedSegments.length}|webllm=required_failed:${outcome.reason ?? "unknown"}${sourceTag}`,
-              });
-              return;
-            }
-            // heuristic fallback: 안내 메시지만 표시하고 파이프라인 계속
-            setRefineNotice(reasonText);
+            setError(`WebLLM 필수 모드 실패: ${reasonText}`);
+            appendHandoffAuditEvent({
+              action: "pipeline_run",
+              sessionId,
+              detail: `segments=${mergedSegments.length}|webllm=required_failed:${outcome.reason ?? "unknown"}${sourceTag}`,
+            });
+            return;
           }
 
           currentResult = outcome.result;
