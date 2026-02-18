@@ -1,3 +1,5 @@
+"use client";
+
 import type { HandoffFeatureFlags } from "@/lib/handoff/types";
 import { evaluateHandoffPrivacyPolicy } from "@/lib/handoff/privacyPolicy";
 import { isWasmLocalAsrSupported } from "@/lib/handoff/wasmAsr";
