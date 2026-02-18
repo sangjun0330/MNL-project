@@ -110,7 +110,6 @@ const handoffRuntimeHeaders = [
   ...handoffNoStoreHeaders,
   { key: "Content-Security-Policy", value: handoffContentSecurityPolicy },
 ];
-const handoffCspOnlyHeaders = [{ key: "Content-Security-Policy", value: handoffContentSecurityPolicy }];
 
 const nextConfig = {
   eslint: { ignoreDuringBuilds: true },
@@ -144,11 +143,11 @@ const nextConfig = {
       },
       {
         source: "/runtime/:path*",
-        headers: handoffCspOnlyHeaders,
+        headers: handoffRuntimeHeaders,
       },
       {
         source: "/workers/:path*",
-        headers: handoffCspOnlyHeaders,
+        headers: handoffRuntimeHeaders,
       },
       {
         source: "/settings/billing/:path*",
