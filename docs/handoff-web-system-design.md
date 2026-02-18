@@ -30,6 +30,7 @@
   - `src/lib/handoff/pipeline.ts`
   - optional WebLLM refine adapter: `src/lib/handoff/refine.ts` (`window.__RNEST_WEBLLM_REFINE__`)
   - default refine adapter script: `public/runtime/webllm-refine-adapter.js` (heuristic local fallback + custom backend hook)
+  - optional refine backend script: `public/runtime/webllm-refine-backend.js` (if missing, adapter-only fallback still runs)
   - bootstrap loader: `src/components/system/HandoffRuntimeBootstrap.tsx`
   - medical pronunciation lexicon auto-merge pipeline (`scripts/handoff/build-medical-lexicon.mjs`)
   - confusion-pair context warning (HR/RR, DC/D-C, Cr/CRP, PR/PRN, PE/PEA)
@@ -106,7 +107,8 @@ Recommended defaults (`.env.local`):
 - `NEXT_PUBLIC_HANDOFF_VAD_MIN_SPEECH_RATIO=0.05`
 - `NEXT_PUBLIC_HANDOFF_VAD_MIN_SEGMENT_MS=180`
 - `NEXT_PUBLIC_HANDOFF_VAD_THRESHOLD=0.012`
-- `NEXT_PUBLIC_HANDOFF_WEBLLM_REFINE_ENABLED=false`
+- `NEXT_PUBLIC_HANDOFF_WEBLLM_REFINE_ENABLED=true`
+- `NEXT_PUBLIC_HANDOFF_WEBLLM_BACKEND_URL=/runtime/webllm-refine-backend.js`
 - `NEXT_PUBLIC_HANDOFF_WEBLLM_ADAPTER_URL=/runtime/webllm-refine-adapter.js`
 - `NEXT_PUBLIC_HANDOFF_LIVE_MEMORY_ONLY=true`
 

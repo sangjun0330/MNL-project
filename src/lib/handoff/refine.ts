@@ -18,7 +18,120 @@ export type RefineOutcome = {
 declare global {
   interface Window {
     __RNEST_WEBLLM_REFINE__?: HandoffRefineAdapter;
+    __RNEST_WEBLLM_BACKEND__?: unknown;
   }
+}
+
+const WEBLLM_BACKEND_DEFAULT_URL = "/runtime/webllm-refine-backend.js";
+const WEBLLM_ADAPTER_DEFAULT_URL = "/runtime/webllm-refine-adapter.js";
+const WEBLLM_BACKEND_SCRIPT_ID = "wnl-handoff-webllm-backend";
+const WEBLLM_ADAPTER_SCRIPT_ID = "wnl-handoff-webllm-adapter";
+
+function readStringEnv(value: string | undefined, fallback: string) {
+  const trimmed = String(value ?? "").trim();
+  return trimmed || fallback;
+}
+
+function isRelativeOrSameOrigin(url: string, origin: string) {
+  if (!url) return false;
+  if (url.startsWith("/") || url.startsWith("./") || url.startsWith("../")) return true;
+  try {
+    return new URL(url, origin).origin === origin;
+  } catch {
+    return false;
+  }
+}
+
+function ensureScript(url: string, id: string) {
+  if (typeof document === "undefined") return Promise.resolve();
+
+  const absolute = new URL(url, window.location.origin).href;
+  const existing = document.getElementById(id) as HTMLScriptElement | null;
+  if (existing?.src === absolute) {
+    if (existing.dataset.loaded === "true") return Promise.resolve();
+    return new Promise<void>((resolve, reject) => {
+      existing.addEventListener("load", () => resolve(), { once: true });
+      existing.addEventListener("error", () => reject(new Error(`failed_to_load_${id}`)), { once: true });
+    });
+  }
+
+  if (existing) {
+    existing.remove();
+  }
+
+  return new Promise<void>((resolve, reject) => {
+    const script = document.createElement("script");
+    script.id = id;
+    script.src = url;
+    script.async = false;
+    script.defer = true;
+    script.crossOrigin = "anonymous";
+    script.dataset.loaded = "false";
+    script.addEventListener(
+      "load",
+      () => {
+        script.dataset.loaded = "true";
+        resolve();
+      },
+      { once: true }
+    );
+    script.addEventListener(
+      "error",
+      () => reject(new Error(`failed_to_load_${id}`)),
+      { once: true }
+    );
+    document.head.appendChild(script);
+  });
+}
+
+async function waitForRefineAdapter(timeoutMs: number) {
+  if (typeof window === "undefined") return false;
+  if (typeof window.__RNEST_WEBLLM_REFINE__ === "function") return true;
+
+  const started = Date.now();
+  while (Date.now() - started <= timeoutMs) {
+    await new Promise<void>((resolve) => {
+      window.setTimeout(() => resolve(), 80);
+    });
+    if (typeof window.__RNEST_WEBLLM_REFINE__ === "function") return true;
+  }
+  return false;
+}
+
+export async function ensureWebLlmRefineReady() {
+  if (typeof window === "undefined") return false;
+  if (typeof window.__RNEST_WEBLLM_REFINE__ === "function") return true;
+
+  const backendUrl = readStringEnv(
+    process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_BACKEND_URL,
+    WEBLLM_BACKEND_DEFAULT_URL
+  );
+  const adapterUrl = readStringEnv(
+    process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_ADAPTER_URL,
+    WEBLLM_ADAPTER_DEFAULT_URL
+  );
+
+  const backendSameOrigin = isRelativeOrSameOrigin(backendUrl, window.location.origin);
+  const adapterSameOrigin = isRelativeOrSameOrigin(adapterUrl, window.location.origin);
+  if (!adapterSameOrigin) {
+    return false;
+  }
+
+  if (backendSameOrigin) {
+    try {
+      await ensureScript(backendUrl, WEBLLM_BACKEND_SCRIPT_ID);
+    } catch {
+      // backend script is optional; adapter can still provide heuristic fallback
+    }
+  }
+
+  try {
+    await ensureScript(adapterUrl, WEBLLM_ADAPTER_SCRIPT_ID);
+  } catch {
+    return false;
+  }
+
+  return waitForRefineAdapter(4_000);
 }
 
 function readStringArray(value: unknown) {
@@ -29,6 +142,13 @@ function readStringArray(value: unknown) {
   return strings.length ? strings : [];
 }
 
+function normalizeTaskKey(task: string | undefined) {
+  return String(task ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
 function normalizePatientPatch(base: PatientCard, patch: unknown) {
   if (!patch || typeof patch !== "object") return base;
   const source = patch as Partial<PatientCard>;
@@ -37,11 +157,24 @@ function normalizePatientPatch(base: PatientCard, patch: unknown) {
   const nextWatch = readStringArray(source.watchFor) ?? base.watchFor;
   const nextQuestions = readStringArray(source.questions) ?? base.questions;
 
+  const basePlanByTask = new Map<string, PatientCard["plan"]>();
+  base.plan.forEach((todo) => {
+    const key = normalizeTaskKey(todo.task);
+    if (!key) return;
+    const bucket = basePlanByTask.get(key) ?? [];
+    bucket.push(todo);
+    basePlanByTask.set(key, bucket);
+  });
+
   const nextPlan =
     Array.isArray(source.plan) && source.plan.length
       ? source.plan.map((todo, index) => {
-          const current = base.plan[index];
-          const task = typeof todo?.task === "string" ? todo.task.trim() : current?.task ?? "";
+          const currentByIndex = base.plan[index];
+          const task = typeof todo?.task === "string" ? todo.task.trim() : currentByIndex?.task ?? "";
+          const taskKey = normalizeTaskKey(task);
+          const bucket = taskKey ? basePlanByTask.get(taskKey) : undefined;
+          const matchedByTask = bucket?.length ? bucket.shift() : undefined;
+          const current = matchedByTask ?? currentByIndex;
           return {
             priority:
               todo?.priority === "P0" || todo?.priority === "P1" || todo?.priority === "P2"
@@ -102,6 +235,15 @@ export async function tryRefineWithWebLlm(result: HandoverSessionResult): Promis
       result,
       refined: false,
       reason: "browser_runtime_required",
+    };
+  }
+
+  const ready = await ensureWebLlmRefineReady();
+  if (!ready) {
+    return {
+      result,
+      refined: false,
+      reason: "webllm_adapter_not_found",
     };
   }
 
