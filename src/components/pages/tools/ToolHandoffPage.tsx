@@ -79,6 +79,8 @@ const MAX_SEGMENT_COUNT = 480;
 const MAX_SEGMENT_TOTAL_TEXT_LENGTH = 120_000;
 const LIVE_MEMORY_ONLY =
   String(process.env.NEXT_PUBLIC_HANDOFF_LIVE_MEMORY_ONLY ?? "true").trim().toLowerCase() !== "false";
+const WEBLLM_REQUIRED =
+  String(process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_REQUIRED ?? "true").trim().toLowerCase() !== "false";
 const HANDOFF_FLAT_CARD_CLASS = "border-[color:var(--wnl-accent-border)] bg-white shadow-none";
 
 function parseMsValue(raw: string | undefined, fallback: number, min: number, max: number) {
@@ -230,16 +232,16 @@ async function copyTextToClipboard(text: string) {
 }
 
 function formatWebLlmReason(reason: string | null | undefined) {
-  if (!reason) return "WebLLM 자동 다듬기에서 변경 사항이 없어 규칙 기반 결과를 유지했습니다.";
-  if (reason === "refine_no_change") return "WebLLM 자동 다듬기에서 변경 사항이 없어 규칙 기반 결과를 유지했습니다.";
-  if (reason === "refine_fallback_used")
-    return "WebLLM 모델 응답을 사용하지 못해 로컬 휴리스틱 보정 결과를 적용했습니다.";
+  if (!reason) return "WebLLM 마스킹 정리 적용이 완료되었습니다.";
+  if (reason === "llm_no_change") return "WebLLM 마스킹 정리는 정상 완료되었고 기존 결과와 동일합니다.";
+  if (reason === "llm_backend_not_used")
+    return "WebLLM 백엔드 응답이 없어 LLM 필수 모드를 충족하지 못했습니다.";
   if (reason === "webllm_adapter_not_found")
-    return "WebLLM 어댑터가 로드되지 않아 규칙 기반 결과를 사용했습니다. 개발 서버를 재시작해 주세요.";
-  if (reason === "browser_runtime_required") return "브라우저 런타임에서만 WebLLM 자동 다듬기를 적용할 수 있습니다.";
-  if (reason === "refine_output_invalid") return "WebLLM 출력 형식이 맞지 않아 규칙 기반 결과를 유지했습니다.";
-  if (reason === "refine_runtime_error") return "WebLLM 실행 오류로 규칙 기반 결과를 유지했습니다.";
-  return `WebLLM 자동 다듬기 스킵: ${reason}`;
+    return "WebLLM 어댑터를 로드하지 못했습니다. 런타임 스크립트 URL과 CSP를 확인해 주세요.";
+  if (reason === "browser_runtime_required") return "브라우저 런타임에서만 WebLLM 마스킹 정리를 적용할 수 있습니다.";
+  if (reason === "refine_output_invalid") return "WebLLM 출력 형식이 유효하지 않습니다. JSON 스키마를 확인해 주세요.";
+  if (reason === "refine_runtime_error") return "WebLLM 실행 중 런타임 오류가 발생했습니다.";
+  return `WebLLM 실행 상태: ${reason}`;
 }
 
 function ResultSection({
@@ -1438,6 +1440,10 @@ export function ToolHandoffPage() {
       setError("strict 정책으로 HTTPS secure context에서만 분석을 허용합니다.");
       return;
     }
+    if (WEBLLM_REQUIRED && !HANDOFF_FLAGS.handoffWebLlmRefineEnabled) {
+      setError("WebLLM 필수 모드입니다. NEXT_PUBLIC_HANDOFF_WEBLLM_REFINE_ENABLED=true로 설정해 주세요.");
+      return;
+    }
 
     const draftSegments = sortSegments(rawSegmentsRef.current);
 
@@ -1480,13 +1486,27 @@ export function ToolHandoffPage() {
         setRefineRunning(true);
         try {
           const outcome = await tryRefineWithWebLlm(currentResult);
-          currentResult = outcome.result;
-          if (outcome.refined) {
-            webLlmDetail = "webllm=refined";
-            setRefineNotice("WebLLM 자동 다듬기까지 적용된 결과입니다.");
-          } else {
+          if (WEBLLM_REQUIRED && !outcome.llmApplied) {
             const sourceTag = outcome.backendSource ? `:${outcome.backendSource}` : "";
-            webLlmDetail = `webllm=${outcome.reason ?? "no_change"}${sourceTag}`;
+            webLlmDetail = `webllm=required_failed:${outcome.reason ?? "unknown"}${sourceTag}`;
+            const reasonText = formatWebLlmReason(outcome.reason);
+            setRefineNotice(reasonText);
+            setError(`WebLLM 필수 모드 실패: ${reasonText}`);
+            appendHandoffAuditEvent({
+              action: "pipeline_run",
+              sessionId,
+              detail: `segments=${mergedSegments.length}|webllm=required_failed:${outcome.reason ?? "unknown"}${sourceTag}`,
+            });
+            return;
+          }
+
+          currentResult = outcome.result;
+          const sourceTag = outcome.backendSource ? `:${outcome.backendSource}` : "";
+          if (outcome.llmApplied) {
+            webLlmDetail = outcome.refined ? "webllm=llm_refined" : "webllm=llm_no_change";
+            setRefineNotice(outcome.refined ? "WebLLM 마스킹 정리까지 적용된 결과입니다." : formatWebLlmReason(outcome.reason));
+          } else {
+            webLlmDetail = `webllm=${outcome.reason ?? "not_applied"}${sourceTag}`;
             setRefineNotice(formatWebLlmReason(outcome.reason));
           }
         } finally {
@@ -1972,7 +1992,13 @@ export function ToolHandoffPage() {
             data-testid="handoff-run-pipeline"
             className={flatButtonPrimary}
             onClick={run}
-            disabled={running || recordingState !== "idle" || actionBlocked || screenLocked}
+            disabled={
+              running ||
+              recordingState !== "idle" ||
+              actionBlocked ||
+              screenLocked ||
+              (WEBLLM_REQUIRED && !HANDOFF_FLAGS.handoffWebLlmRefineEnabled)
+            }
           >
             {running ? t("분석 중...") : t("분석 실행")}
           </Button>
@@ -1990,11 +2016,17 @@ export function ToolHandoffPage() {
             <div className="rounded-full border border-ios-sep bg-ios-bg px-4 py-2 text-center text-[12px] text-ios-sub">
               {refineRunning
                 ? "WebLLM 자동 다듬기 실행 중..."
-                : HANDOFF_FLAGS.handoffWebLlmRefineEnabled
-                  ? isWebLlmRefineAvailable()
-                    ? "WebLLM 자동 다듬기 활성"
-                    : "WebLLM 어댑터 로딩 대기"
-                  : "WebLLM 자동 다듬기 비활성"}
+                : WEBLLM_REQUIRED
+                  ? HANDOFF_FLAGS.handoffWebLlmRefineEnabled
+                    ? isWebLlmRefineAvailable()
+                      ? "WebLLM 필수 모드 준비됨"
+                      : "WebLLM 필수 모드 로딩 중"
+                    : "WebLLM 필수 모드 비활성(환경변수 확인)"
+                  : HANDOFF_FLAGS.handoffWebLlmRefineEnabled
+                    ? isWebLlmRefineAvailable()
+                      ? "WebLLM 자동 다듬기 활성"
+                      : "WebLLM 어댑터 로딩 대기"
+                    : "WebLLM 자동 다듬기 비활성"}
             </div>
           </div>
         ) : null}
