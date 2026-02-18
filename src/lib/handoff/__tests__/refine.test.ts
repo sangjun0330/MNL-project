@@ -100,7 +100,8 @@ test("tryRefineWithWebLlm marks heuristic fallback when non-LLM backend source i
   try {
     const outcome = await tryRefineWithWebLlm(output.result);
     assert.equal(outcome.refined, false);
-    assert.equal(outcome.reason, "refine_fallback_used");
+    assert.equal(outcome.llmApplied, false);
+    assert.equal(outcome.reason, "llm_backend_not_used");
     assert.equal(outcome.backendSource, "adapter_heuristic");
     assert.equal(outcome.result.provenance.llmRefined, false);
     assert.match(outcome.result.patients[0]?.summary1 ?? "", /fallback refined/);
@@ -139,6 +140,7 @@ test("tryRefineWithWebLlm marks llmRefined when mlc backend source is used", asy
 
   try {
     const outcome = await tryRefineWithWebLlm(output.result);
+    assert.equal(outcome.llmApplied, true);
     assert.equal(outcome.refined, true);
     assert.equal(outcome.reason, null);
     assert.equal(outcome.backendSource, "mlc_webllm");

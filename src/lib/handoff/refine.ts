@@ -14,6 +14,7 @@ export type HandoffRefineAdapter =
 
 export type RefineOutcome = {
   result: HandoverSessionResult;
+  llmApplied: boolean;
   refined: boolean;
   reason: string | null;
   backendSource: string | null;
@@ -264,6 +265,7 @@ export async function tryRefineWithWebLlm(result: HandoverSessionResult): Promis
   if (typeof window === "undefined") {
     return {
       result,
+      llmApplied: false,
       refined: false,
       reason: "browser_runtime_required",
       backendSource: null,
@@ -274,6 +276,7 @@ export async function tryRefineWithWebLlm(result: HandoverSessionResult): Promis
   if (!ready) {
     return {
       result,
+      llmApplied: false,
       refined: false,
       reason: "webllm_adapter_not_found",
       backendSource: null,
@@ -284,6 +287,7 @@ export async function tryRefineWithWebLlm(result: HandoverSessionResult): Promis
   if (typeof adapter !== "function") {
     return {
       result,
+      llmApplied: false,
       refined: false,
       reason: "webllm_adapter_not_found",
       backendSource: null,
@@ -303,6 +307,7 @@ export async function tryRefineWithWebLlm(result: HandoverSessionResult): Promis
     if (!merged) {
       return {
         result: safeInput,
+        llmApplied: false,
         refined: false,
         reason: "refine_output_invalid",
         backendSource,
@@ -315,16 +320,18 @@ export async function tryRefineWithWebLlm(result: HandoverSessionResult): Promis
         ...merged,
         provenance: {
           ...merged.provenance,
-          llmRefined: changed && llmUsed,
+          llmRefined: llmUsed,
         },
       },
+      llmApplied: llmUsed,
       refined: changed && llmUsed,
-      reason: changed ? (llmUsed ? null : "refine_fallback_used") : "refine_no_change",
+      reason: llmUsed ? (changed ? null : "llm_no_change") : "llm_backend_not_used",
       backendSource,
     };
   } catch {
     return {
       result: safeInput,
+      llmApplied: false,
       refined: false,
       reason: "refine_runtime_error",
       backendSource: null,
