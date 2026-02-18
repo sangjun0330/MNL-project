@@ -54,6 +54,7 @@ const scriptSourceParts = [
 ];
 if (isDev) scriptSourceParts.push("'unsafe-eval'");
 const scriptSources = Array.from(new Set(scriptSourceParts)).join(" ");
+const handoffScriptSources = Array.from(new Set([...scriptSourceParts, "'wasm-unsafe-eval'", "'unsafe-eval'"])).join(" ");
 const frameSources = Array.from(new Set(["'self'", tossWildcard, tossLegacyPayOrigin])).join(" ");
 const imgSources = Array.from(new Set(["'self'", "data:", "blob:", "https://cloudflareinsights.com", tossWildcard])).join(" ");
 
@@ -64,6 +65,22 @@ const contentSecurityPolicy = [
   "frame-ancestors 'none'",
   "object-src 'none'",
   `script-src ${scriptSources}`,
+  "style-src 'self' 'unsafe-inline'",
+  `img-src ${imgSources}`,
+  "font-src 'self' data:",
+  `connect-src ${Array.from(new Set(connectSources)).join(" ")}`,
+  `frame-src ${frameSources}`,
+  "media-src 'self' blob:",
+  "worker-src 'self' blob:",
+].join("; ");
+
+const handoffContentSecurityPolicy = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+  "object-src 'none'",
+  `script-src ${handoffScriptSources}`,
   "style-src 'self' 'unsafe-inline'",
   `img-src ${imgSources}`,
   "font-src 'self' data:",
@@ -89,6 +106,11 @@ const handoffNoStoreHeaders = [
   { key: "X-Robots-Tag", value: "noindex, nofollow, noarchive, nosnippet" },
 ];
 
+const handoffRuntimeHeaders = [
+  ...handoffNoStoreHeaders,
+  { key: "Content-Security-Policy", value: handoffContentSecurityPolicy },
+];
+
 const nextConfig = {
   eslint: { ignoreDuringBuilds: true },
   reactStrictMode: true,
@@ -105,19 +127,19 @@ const nextConfig = {
       },
       {
         source: "/tools/handoff",
-        headers: handoffNoStoreHeaders,
+        headers: handoffRuntimeHeaders,
       },
       {
         source: "/tools/handoff/:path*",
-        headers: handoffNoStoreHeaders,
+        headers: handoffRuntimeHeaders,
       },
       {
         source: "/handoff",
-        headers: handoffNoStoreHeaders,
+        headers: handoffRuntimeHeaders,
       },
       {
         source: "/handoff/:path*",
-        headers: handoffNoStoreHeaders,
+        headers: handoffRuntimeHeaders,
       },
       {
         source: "/settings/billing/:path*",
