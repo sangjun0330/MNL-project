@@ -32,6 +32,7 @@ declare global {
     __RNEST_WEBLLM_BACKEND__?: unknown;
     __RNEST_WEBLLM_MLC_STATUS__?: {
       ready: boolean;
+      backend: "mlc_webllm" | "transformers_webllm" | "none";
       modelId: string;
       error: string | null;
       updatedAt: number;
@@ -44,9 +45,9 @@ const DEFAULT_MAX_OUTPUT_TOKENS = 1_200;
 const DEFAULT_MODULE_URL = "/runtime/vendor/web-llm/index.js";
 const RAW_MODEL_LIB_BASE_URL = "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/";
 const DEFAULT_MODEL_LIB_BASE_URL = "https://cdn.jsdelivr.net/gh/mlc-ai/binary-mlc-llm-libs@main/";
-const DEFAULT_WASM_FALLBACK_MODEL_ID = "Xenova/distilgpt2";
+const DEFAULT_WASM_FALLBACK_MODEL_ID = "onnx-community/Qwen2.5-0.5B-Instruct";
 const HEAVY_WASM_FALLBACK_MODEL_HINTS = ["onnx-community/qwen2.5-0.5b-instruct", "qwen2.5-0.5b-instruct"];
-const DEFAULT_WASM_FALLBACK_MAX_NEW_TOKENS = 220;
+const DEFAULT_WASM_FALLBACK_MAX_NEW_TOKENS = 640;
 const DEFAULT_WASM_FALLBACK_DTYPE = "q8";
 const TRANSFORMERS_JSDELIVR_URL =
   "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js";
@@ -527,40 +528,50 @@ async function refineWithWasmFallback(
     128,
     2048
   );
+  const adaptiveMaxNewTokens = Math.min(2048, Math.max(fallbackMaxNewTokens, result.patients.length * 240));
   const prompt = [
     "You are a Korean clinical handoff formatter.",
     "Return ONLY JSON. No markdown. No explanation.",
     buildRefinePrompt(result),
   ].join("\n");
 
-  let output: unknown = null;
-  try {
-    output = await pipeline(prompt, {
-      max_new_tokens: fallbackMaxNewTokens,
-      do_sample: false,
-      temperature: 0.1,
-      top_p: 0.9,
-      return_full_text: false,
-    });
-  } catch {
-    return null;
-  }
+  const prompts = [
+    prompt,
+    [
+      "You are a strict JSON formatter for Korean clinical handoff.",
+      "Return ONLY valid JSON object with the schema {\"patients\":[...]} and no extra text.",
+      buildRefinePrompt(result),
+    ].join("\n"),
+  ];
+  const tokenBudgets = [adaptiveMaxNewTokens, Math.min(2048, adaptiveMaxNewTokens + 280)];
 
-  const generated = extractGeneratedText(output);
-  const parsed = extractFirstJsonObject(generated);
-  const normalized = normalizePatch(result, parsed);
-  if (!normalized) {
+  for (let attempt = 0; attempt < prompts.length; attempt += 1) {
+    const currentPrompt = prompts[attempt];
+    const currentTokens = tokenBudgets[attempt] ?? adaptiveMaxNewTokens;
+    let output: unknown = null;
+    try {
+      output = await pipeline(currentPrompt, {
+        max_new_tokens: currentTokens,
+        do_sample: false,
+        temperature: 0.1,
+        top_p: 0.9,
+        return_full_text: false,
+      });
+    } catch {
+      continue;
+    }
+
+    const generated = extractGeneratedText(output);
+    const parsed = extractFirstJsonObject(generated);
+    const normalized = normalizePatch(result, parsed);
+    if (!normalized) continue;
     return {
+      ...normalized,
       __source: "transformers_webllm",
-      patients: result.patients.map((patient) => ({
-        patientKey: patient.patientKey,
-      })),
     };
   }
-  return {
-    ...normalized,
-    __source: "transformers_webllm",
-  };
+
+  return null;
 }
 
 async function getMlcEngine() {
@@ -572,6 +583,7 @@ async function getMlcEngine() {
   if (mlcFatalUnavailable) {
     window.__RNEST_WEBLLM_MLC_STATUS__ = {
       ready: false,
+      backend: "none",
       modelId,
       error: mlcFatalError || "mlc_webgpu_unavailable",
       updatedAt: Date.now(),
@@ -582,6 +594,7 @@ async function getMlcEngine() {
     // WebGPU 없음 → MLC 불가, WASM fallback도 시도하지 않고 즉시 null
     window.__RNEST_WEBLLM_MLC_STATUS__ = {
       ready: false,
+      backend: "none",
       modelId,
       error: "webgpu_unavailable",
       updatedAt: Date.now(),
@@ -608,21 +621,39 @@ async function getMlcEngine() {
     if (!gpuAdapter) {
       mlcFatalUnavailable = true;
       mlcFatalError = "webgpu_unavailable";
-      window.__RNEST_WEBLLM_MLC_STATUS__ = { ready: false, modelId, error: "webgpu_unavailable", updatedAt: Date.now() };
+      window.__RNEST_WEBLLM_MLC_STATUS__ = {
+        ready: false,
+        backend: "none",
+        modelId,
+        error: "webgpu_unavailable",
+        updatedAt: Date.now(),
+      };
       return null;
     }
     const gpuDevice = await (gpuAdapter as any).requestDevice();
     if (!gpuDevice) {
       mlcFatalUnavailable = true;
       mlcFatalError = "webgpu_unavailable";
-      window.__RNEST_WEBLLM_MLC_STATUS__ = { ready: false, modelId, error: "webgpu_unavailable", updatedAt: Date.now() };
+      window.__RNEST_WEBLLM_MLC_STATUS__ = {
+        ready: false,
+        backend: "none",
+        modelId,
+        error: "webgpu_unavailable",
+        updatedAt: Date.now(),
+      };
       return null;
     }
     (gpuDevice as any).destroy();
   } catch {
     mlcFatalUnavailable = true;
     mlcFatalError = "webgpu_unavailable";
-    window.__RNEST_WEBLLM_MLC_STATUS__ = { ready: false, modelId, error: "webgpu_unavailable", updatedAt: Date.now() };
+    window.__RNEST_WEBLLM_MLC_STATUS__ = {
+      ready: false,
+      backend: "none",
+      modelId,
+      error: "webgpu_unavailable",
+      updatedAt: Date.now(),
+    };
     return null;
   }
 
@@ -646,6 +677,7 @@ async function getMlcEngine() {
 
       window.__RNEST_WEBLLM_MLC_STATUS__ = {
         ready: true,
+        backend: "mlc_webllm",
         modelId,
         error: null,
         updatedAt: Date.now(),
@@ -661,6 +693,7 @@ async function getMlcEngine() {
       // GPU 관련 에러는 짧은 코드로 정규화 (raw 영어 에러 메시지를 UI에 노출하지 않음)
       window.__RNEST_WEBLLM_MLC_STATUS__ = {
         ready: false,
+        backend: "none",
         modelId,
         error: isGpuFatal ? "webgpu_unavailable" : message,
         updatedAt: Date.now(),
@@ -728,18 +761,12 @@ export function initWebLlmMlcBackend() {
           const text = extractCompletionText(completion);
           const parsed = extractFirstJsonObject(text);
           const normalized = normalizePatch(result, parsed);
-          if (!normalized) {
+          if (normalized) {
             return {
+              ...normalized,
               __source: "mlc_webllm",
-              patients: result.patients.map((patient) => ({
-                patientKey: patient.patientKey,
-              })),
             };
           }
-          return {
-            ...normalized,
-            __source: "mlc_webllm",
-          };
         }
       }
 
@@ -748,6 +775,7 @@ export function initWebLlmMlcBackend() {
       if (!fallbackPatch) {
         window.__RNEST_WEBLLM_MLC_STATUS__ = {
           ready: false,
+          backend: "none",
           modelId: resolveWasmFallbackModelId(),
           error: "transformers_fallback_unavailable",
           updatedAt: Date.now(),
@@ -757,6 +785,7 @@ export function initWebLlmMlcBackend() {
       }
       window.__RNEST_WEBLLM_MLC_STATUS__ = {
         ready: true,
+        backend: "transformers_webllm",
         modelId: resolveWasmFallbackModelId(),
         error: null,
         updatedAt: Date.now(),
