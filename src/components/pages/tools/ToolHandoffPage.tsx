@@ -238,6 +238,9 @@ function formatWebLlmReason(reason: string | null | undefined) {
     return "WebLLM 백엔드가 초기화되지 않았습니다. 모델 로딩 상태를 확인해 주세요.";
   if (reason.startsWith("llm_backend_mismatch:")) {
     const source = reason.slice("llm_backend_mismatch:".length).trim() || "unknown";
+    if (source === "adapter_heuristic") {
+      return "WebGPU를 지원하지 않는 환경입니다. 휴리스틱 정리가 적용되었습니다.";
+    }
     return `WebLLM이 아닌 백엔드(${source})가 연결되었습니다. MLC 백엔드 설정을 확인해 주세요.`;
   }
   if (reason === "webllm_adapter_not_found")

@@ -574,10 +574,11 @@ async function getMlcEngine() {
     return null;
   }
   if (!canAttemptMlcWebGpu()) {
+    // WebGPU 없음 → MLC 불가, WASM fallback도 시도하지 않고 즉시 null
     window.__RNEST_WEBLLM_MLC_STATUS__ = {
       ready: false,
       modelId,
-      error: "webgpu_unavailable_using_wasm_fallback",
+      error: "webgpu_unavailable",
       updatedAt: Date.now(),
     };
     return null;
@@ -695,7 +696,6 @@ export function initWebLlmMlcBackend() {
           const parsed = extractFirstJsonObject(text);
           const normalized = normalizePatch(result, parsed);
           if (!normalized) {
-            // If model returned non-JSON text, keep data unchanged but still mark that MLC backend ran.
             return {
               __source: "mlc_webllm",
               patients: result.patients.map((patient) => ({
@@ -710,15 +710,9 @@ export function initWebLlmMlcBackend() {
         }
       }
 
-      const fallbackPatch = await refineWithWasmFallback(result, maxOutputTokens);
-      if (!fallbackPatch) return null;
-      window.__RNEST_WEBLLM_MLC_STATUS__ = {
-        ready: true,
-        modelId: resolveWasmFallbackModelId(),
-        error: null,
-        updatedAt: Date.now(),
-      };
-      return fallbackPatch;
+      // WebGPU MLC 실패 → WASM fallback은 CSP unsafe-eval 오류로 현재 환경에서 작동 불가
+      // null을 반환해 adapter_heuristic이 즉시 처리하도록 함
+      return null;
     },
   };
 }
