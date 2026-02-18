@@ -53,6 +53,8 @@ const scriptSourceParts = [
   ...handoffModelOrigins,
 ];
 if (isDev) scriptSourceParts.push("'unsafe-eval'");
+// wasm-unsafe-eval: WebAssembly 컴파일 허용 (ONNX Runtime 등)
+// unsafe-eval: WebLLM MLC 엔진 동적 로딩 허용
 const runtimeEvalSources = ["'wasm-unsafe-eval'", "'unsafe-eval'"];
 const scriptSources = Array.from(new Set([...scriptSourceParts, ...runtimeEvalSources])).join(" ");
 const handoffScriptSources = scriptSources;
@@ -148,6 +150,14 @@ const nextConfig = {
       },
       {
         source: "/workers/:path*",
+        headers: handoffRuntimeHeaders,
+      },
+      {
+        source: "/settings/admin/handoff",
+        headers: handoffRuntimeHeaders,
+      },
+      {
+        source: "/settings/admin/handoff/:path*",
         headers: handoffRuntimeHeaders,
       },
       {
