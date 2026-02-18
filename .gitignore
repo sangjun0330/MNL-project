@@ -10,3 +10,4 @@ dist
 .wnl_users
 playwright-report
 test-results
+public/runtime/vendor/web-llm/index.js

@@ -41,6 +41,7 @@ declare global {
 
 const DEFAULT_MODEL_ID = "Qwen2.5-3B-Instruct-q4f16_1-MLC";
 const DEFAULT_MAX_OUTPUT_TOKENS = 1_200;
+const DEFAULT_MODULE_URL = "/runtime/vendor/web-llm/index.js";
 
 let enginePromise: Promise<WebLlmEngine | null> | null = null;
 
@@ -59,6 +60,10 @@ function sanitizeText(text: string | undefined) {
   return String(text ?? "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+async function loadWebLlmModule(moduleUrl: string) {
+  return await import(/* webpackIgnore: true */ moduleUrl);
 }
 
 function toCompactPatientInput(patient: PatientCard) {
@@ -218,12 +223,13 @@ async function getMlcEngine() {
     process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_MODEL_ID,
     HANDOFF_FLAGS.handoffWebLlmModelId || DEFAULT_MODEL_ID
   );
+  const moduleUrl = readStringEnv(process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_MODULE_URL, DEFAULT_MODULE_URL);
 
   if (enginePromise) return enginePromise;
 
   enginePromise = (async () => {
     try {
-      const mod = await import("@mlc-ai/web-llm");
+      const mod = await loadWebLlmModule(moduleUrl);
       const createEngine =
         (mod as any).CreateMLCEngine ??
         (mod as any).createMLCEngine ??
