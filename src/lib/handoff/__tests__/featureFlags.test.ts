@@ -67,7 +67,7 @@ test("getHandoffFeatureFlags falls back to manual defaults when values are missi
   assert.equal(flags.handoffVadMinSpeechRatio, 0.05);
   assert.equal(flags.handoffVadMinSegmentMs, 180);
   assert.equal(flags.handoffVadThreshold, 0.012);
-  assert.equal(flags.handoffWebLlmRefineEnabled, false);
+  assert.equal(flags.handoffWebLlmRefineEnabled, true);
   assert.equal(flags.handoffPrivacyProfile, "strict");
   assert.equal(flags.handoffRequireAuth, true);
 });

@@ -107,7 +107,7 @@ export function getHandoffFeatureFlags(): HandoffFeatureFlags {
     ),
     handoffWebLlmRefineEnabled: parseBooleanFlag(
       process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_REFINE_ENABLED,
-      false
+      true
     ),
     handoffPrivacyProfile: parsePrivacyProfile(process.env.NEXT_PUBLIC_HANDOFF_PRIVACY_PROFILE, "strict"),
     handoffRequireAuth: parseBooleanFlag(process.env.NEXT_PUBLIC_HANDOFF_REQUIRE_AUTH, true),

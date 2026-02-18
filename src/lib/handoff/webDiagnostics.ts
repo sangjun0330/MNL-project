@@ -19,6 +19,7 @@ export type HandoffDiagnosticReport = {
 };
 
 const WEBLLM_ADAPTER_DEFAULT_URL = "/runtime/webllm-refine-adapter.js";
+const WEBLLM_BACKEND_DEFAULT_URL = "/runtime/webllm-refine-backend.js";
 
 function statusFromCondition(ok: boolean): DiagnosticStatus {
   return ok ? "ok" : "fail";
@@ -37,6 +38,11 @@ function getSpeechRecognitionSupport() {
 function normalizeAdapterUrl(value: string | undefined) {
   const trimmed = String(value ?? "").trim();
   return trimmed || WEBLLM_ADAPTER_DEFAULT_URL;
+}
+
+function normalizeBackendUrl(value: string | undefined) {
+  const trimmed = String(value ?? "").trim();
+  return trimmed || WEBLLM_BACKEND_DEFAULT_URL;
 }
 
 function isRelativeOrSameOrigin(url: string) {
@@ -251,25 +257,37 @@ export async function runHandoffWebDiagnostics(flags: HandoffFeatureFlags): Prom
   });
 
   const webLlmAdapterUrl = normalizeAdapterUrl(process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_ADAPTER_URL);
+  const webLlmBackendUrl = normalizeBackendUrl(process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_BACKEND_URL);
   const webLlmAdapterSameOrigin = isRelativeOrSameOrigin(webLlmAdapterUrl);
+  const webLlmBackendSameOrigin = isRelativeOrSameOrigin(webLlmBackendUrl);
+  const hasBackendRuntime =
+    typeof window !== "undefined" && Boolean((window as any).__RNEST_WEBLLM_BACKEND__);
+  const strictOrLocal = policy.profile === "strict" || policy.executionMode === "local_only";
+  const backendBlockedByPolicy = !webLlmBackendSameOrigin && strictOrLocal;
+  const adapterBlockedByPolicy = !webLlmAdapterSameOrigin && strictOrLocal;
+  const adapterReady = isWebLlmRefineAvailable();
 
   items.push({
     id: "webllm-refine",
     label: "WebLLM refine",
     status: !flags.handoffWebLlmRefineEnabled
       ? "warn"
-      : !webLlmAdapterSameOrigin && (policy.profile === "strict" || policy.executionMode === "local_only")
+      : adapterBlockedByPolicy
         ? "fail"
-        : isWebLlmRefineAvailable()
-          ? "ok"
+        : adapterReady
+          ? hasBackendRuntime
+            ? "ok"
+            : "warn"
           : "warn",
     detail: !flags.handoffWebLlmRefineEnabled
       ? "disabled by feature flag"
-      : !webLlmAdapterSameOrigin && (policy.profile === "strict" || policy.executionMode === "local_only")
+      : adapterBlockedByPolicy
         ? `enabled but adapter URL blocked by strict/local_only policy: ${webLlmAdapterUrl}`
-        : isWebLlmRefineAvailable()
-          ? `enabled (window.__RNEST_WEBLLM_REFINE__ detected, adapter=${webLlmAdapterUrl})`
-          : `enabled but runtime adapter not found (expected ${webLlmAdapterUrl})`,
+        : adapterReady
+          ? backendBlockedByPolicy
+            ? `enabled (adapter ready, backend URL blocked by strict/local_only policy: ${webLlmBackendUrl})`
+            : `enabled (adapter ready, backend=${hasBackendRuntime ? "ready" : "missing"}, backend_url=${webLlmBackendUrl}, adapter_url=${webLlmAdapterUrl})`
+          : `enabled but runtime adapter not found (backend_url=${webLlmBackendUrl}, adapter_url=${webLlmAdapterUrl})`,
   });
 
   items.push(await storageEstimateItem());
