@@ -1,0 +1,291 @@
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[];
+
+export type Database = {
+  public: {
+    Tables: {
+      ai_content: {
+        Row: {
+          user_id: string;
+          date_iso: string;
+          language: string;
+          data: Json;
+          created_at: string | null;
+          updated_at: string | null;
+        };
+        Insert: {
+          user_id: string;
+          date_iso: string;
+          language: string;
+          data: Json;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Update: {
+          user_id?: string;
+          date_iso?: string;
+          language?: string;
+          data?: Json;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Relationships: [];
+      };
+      billing_orders: {
+        Row: {
+          order_id: string;
+          user_id: string;
+          plan_tier: string;
+          amount: number;
+          currency: string;
+          status: string;
+          order_name: string;
+          payment_key: string | null;
+          fail_code: string | null;
+          fail_message: string | null;
+          toss_response: Json | null;
+          approved_at: string | null;
+          created_at: string | null;
+          updated_at: string | null;
+        };
+        Insert: {
+          order_id: string;
+          user_id: string;
+          plan_tier: string;
+          amount: number;
+          currency?: string;
+          status?: string;
+          order_name: string;
+          payment_key?: string | null;
+          fail_code?: string | null;
+          fail_message?: string | null;
+          toss_response?: Json | null;
+          approved_at?: string | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Update: {
+          order_id?: string;
+          user_id?: string;
+          plan_tier?: string;
+          amount?: number;
+          currency?: string;
+          status?: string;
+          order_name?: string;
+          payment_key?: string | null;
+          fail_code?: string | null;
+          fail_message?: string | null;
+          toss_response?: Json | null;
+          approved_at?: string | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Relationships: [];
+      };
+      billing_refund_requests: {
+        Row: {
+          id: number;
+          user_id: string;
+          order_id: string;
+          reason: string;
+          status: string;
+          admin_note: string | null;
+          reviewed_by: string | null;
+          reviewed_at: string | null;
+          review_note: string | null;
+          executed_by: string | null;
+          executed_at: string | null;
+          cancel_amount: number | null;
+          currency: string;
+          toss_payment_key_snapshot: string | null;
+          toss_cancel_transaction_key: string | null;
+          gateway_response: Json | null;
+          error_code: string | null;
+          error_message: string | null;
+          retry_count: number;
+          next_retry_at: string | null;
+          requested_at: string;
+          updated_at: string;
+          notified_at: string | null;
+          notify_user_sent_at: string | null;
+        };
+        Insert: {
+          id?: number;
+          user_id: string;
+          order_id: string;
+          reason: string;
+          status?: string;
+          admin_note?: string | null;
+          reviewed_by?: string | null;
+          reviewed_at?: string | null;
+          review_note?: string | null;
+          executed_by?: string | null;
+          executed_at?: string | null;
+          cancel_amount?: number | null;
+          currency?: string;
+          toss_payment_key_snapshot?: string | null;
+          toss_cancel_transaction_key?: string | null;
+          gateway_response?: Json | null;
+          error_code?: string | null;
+          error_message?: string | null;
+          retry_count?: number;
+          next_retry_at?: string | null;
+          requested_at?: string;
+          updated_at?: string;
+          notified_at?: string | null;
+          notify_user_sent_at?: string | null;
+        };
+        Update: {
+          id?: number;
+          user_id?: string;
+          order_id?: string;
+          reason?: string;
+          status?: string;
+          admin_note?: string | null;
+          reviewed_by?: string | null;
+          reviewed_at?: string | null;
+          review_note?: string | null;
+          executed_by?: string | null;
+          executed_at?: string | null;
+          cancel_amount?: number | null;
+          currency?: string;
+          toss_payment_key_snapshot?: string | null;
+          toss_cancel_transaction_key?: string | null;
+          gateway_response?: Json | null;
+          error_code?: string | null;
+          error_message?: string | null;
+          retry_count?: number;
+          next_retry_at?: string | null;
+          requested_at?: string;
+          updated_at?: string;
+          notified_at?: string | null;
+          notify_user_sent_at?: string | null;
+        };
+        Relationships: [];
+      };
+      billing_refund_events: {
+        Row: {
+          id: number;
+          request_id: number;
+          user_id: string;
+          order_id: string;
+          actor_user_id: string | null;
+          actor_role: string;
+          event_type: string;
+          from_status: string | null;
+          to_status: string | null;
+          message: string | null;
+          metadata: Json | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: number;
+          request_id: number;
+          user_id: string;
+          order_id: string;
+          actor_user_id?: string | null;
+          actor_role?: string;
+          event_type: string;
+          from_status?: string | null;
+          to_status?: string | null;
+          message?: string | null;
+          metadata?: Json | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: number;
+          request_id?: number;
+          user_id?: string;
+          order_id?: string;
+          actor_user_id?: string | null;
+          actor_role?: string;
+          event_type?: string;
+          from_status?: string | null;
+          to_status?: string | null;
+          message?: string | null;
+          metadata?: Json | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      wnl_user_state: {
+        Row: {
+          user_id: string;
+          payload: Json;
+          updated_at: string | null;
+        };
+        Insert: {
+          user_id: string;
+          payload: Json;
+          updated_at?: string | null;
+        };
+        Update: {
+          user_id?: string;
+          payload?: Json;
+          updated_at?: string | null;
+        };
+        Relationships: [];
+      };
+      wnl_users: {
+        Row: {
+          user_id: string;
+          created_at: string | null;
+          last_seen: string | null;
+          subscription_tier: string;
+          subscription_status: string;
+          subscription_started_at: string | null;
+          subscription_current_period_end: string | null;
+          subscription_updated_at: string | null;
+          subscription_cancel_at_period_end: boolean;
+          subscription_cancel_scheduled_at: string | null;
+          subscription_canceled_at: string | null;
+          subscription_cancel_reason: string | null;
+          toss_customer_key: string | null;
+          toss_last_order_id: string | null;
+        };
+        Insert: {
+          user_id: string;
+          created_at?: string | null;
+          last_seen?: string | null;
+          subscription_tier?: string;
+          subscription_status?: string;
+          subscription_started_at?: string | null;
+          subscription_current_period_end?: string | null;
+          subscription_updated_at?: string | null;
+          subscription_cancel_at_period_end?: boolean;
+          subscription_cancel_scheduled_at?: string | null;
+          subscription_canceled_at?: string | null;
+          subscription_cancel_reason?: string | null;
+          toss_customer_key?: string | null;
+          toss_last_order_id?: string | null;
+        };
+        Update: {
+          user_id?: string;
+          created_at?: string | null;
+          last_seen?: string | null;
+          subscription_tier?: string;
+          subscription_status?: string;
+          subscription_started_at?: string | null;
+          subscription_current_period_end?: string | null;
+          subscription_updated_at?: string | null;
+          subscription_cancel_at_period_end?: boolean;
+          subscription_cancel_scheduled_at?: string | null;
+          subscription_canceled_at?: string | null;
+          subscription_cancel_reason?: string | null;
+          toss_customer_key?: string | null;
+          toss_last_order_id?: string | null;
+        };
+        Relationships: [];
+      };
+    };
+    Views: {};
+    Functions: {};
+    Enums: {};
+    CompositeTypes: {};
+  };
+};

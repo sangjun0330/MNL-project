@@ -1,0 +1,146 @@
+{
+  "name": "handoff-starter-ko-v1",
+  "version": 1,
+  "description": "초기 규칙/사전 엔진 품질 측정용 스타터 평가셋",
+  "cases": [
+    {
+      "id": "single_patient_baseline",
+      "dutyType": "night",
+      "segments": [
+        { "text": "701호 최OO 폐렴으로 산소 2L 유지", "expectedPatient": "P1" },
+        { "text": "701호 최OO 혈압 90/60이라 30분 후 재측정 오더", "expectedPatient": "P1" },
+        { "text": "CBC와 CRP 결과 확인 필요", "expectedPatient": "P1" }
+      ],
+      "expected": {
+        "patientCount": 1,
+        "todoPatterns": [
+          { "patient": "P1", "pattern": "재측정" },
+          { "patient": "P1", "pattern": "결과\\s*확인|확인\\s*필요" }
+        ],
+        "globalTopPatterns": [
+          { "pattern": "산소|혈압", "rankMax": 3 }
+        ],
+        "uncertaintyKindsMustNotInclude": ["unresolved_abbreviation"]
+      }
+    },
+    {
+      "id": "multi_patient_inline",
+      "dutyType": "night",
+      "segments": [
+        { "text": "701호 최OO 혈압 90/60 수액볼루스 시행", "expectedPatient": "P1" },
+        { "text": "703호 박OO 혈당 280 새벽 2시 재측정 오더", "expectedPatient": "P2" },
+        { "text": "701호 최OO 산소포화도 93으로 산소 2L 유지", "expectedPatient": "P1" }
+      ],
+      "expected": {
+        "patientCount": 2,
+        "todoPatterns": [
+          { "patient": "P2", "pattern": "재측정\\s*오더|재측정" }
+        ],
+        "globalTopPatterns": [
+          { "pattern": "혈압|산소", "rankMax": 5 },
+          { "pattern": "혈당|재측정", "rankMax": 5 }
+        ]
+      }
+    },
+    {
+      "id": "pronoun_continuation",
+      "dutyType": "night",
+      "segments": [
+        { "text": "704호 이OO 폐렴으로 항생제 시작", "expectedPatient": "P1" },
+        { "text": "해당 환자 새벽에 호흡수 재확인 필요", "expectedPatient": "P1" }
+      ],
+      "expected": {
+        "patientCount": 1,
+        "todoPatterns": [
+          { "patient": "P1", "pattern": "재확인" }
+        ],
+        "globalTopPatterns": [
+          { "pattern": "항생제|호흡", "rankMax": 5 }
+        ]
+      }
+    },
+    {
+      "id": "confusion_hr_rr",
+      "dutyType": "night",
+      "segments": [
+        { "text": "705호 김OO HR 24회/분으로 호흡수 빠름 확인 필요", "expectedPatient": "P1" }
+      ],
+      "expected": {
+        "patientCount": 1,
+        "uncertaintyKindsMustInclude": ["confusable_abbreviation"]
+      }
+    },
+    {
+      "id": "confusion_dc_discharge_or_stop",
+      "dutyType": "day",
+      "segments": [
+        { "text": "706호 박OO D/C 오더인데 오늘 퇴원인지 약 중단인지 확인 필요", "expectedPatient": "P1" }
+      ],
+      "expected": {
+        "patientCount": 1,
+        "uncertaintyKindsMustInclude": ["confusable_abbreviation"]
+      }
+    },
+    {
+      "id": "unresolved_abbreviation_xyz",
+      "dutyType": "evening",
+      "segments": [
+        { "text": "707호 정OO XYZ 지시 확인 필요", "expectedPatient": "P1" }
+      ],
+      "expected": {
+        "patientCount": 1,
+        "uncertaintyKindsMustInclude": ["unresolved_abbreviation"]
+      }
+    },
+    {
+      "id": "ward_and_patient_mixed",
+      "dutyType": "day",
+      "segments": [
+        { "text": "내일 오전 퇴원 2명, 신규 입원 1명 가능", "expectedPatient": null },
+        { "text": "708호 한OO 낙상 위험 높아 침상경보 유지", "expectedPatient": "P1" }
+      ],
+      "expected": {
+        "patientCount": 1,
+        "globalTopPatterns": [
+          { "pattern": "낙상|침상경보", "rankMax": 5 }
+        ]
+      }
+    },
+    {
+      "id": "three_patient_shift",
+      "dutyType": "night",
+      "segments": [
+        { "text": "701호 최OO 항응고제 복용 중 흑변 있으면 콜", "expectedPatient": "P1" },
+        { "text": "703호 박OO BST 250, 새벽 2시 재측정 오더", "expectedPatient": "P2" },
+        { "text": "708호 정OO 소변량 감소 경향, I/O 모니터링", "expectedPatient": "P3" },
+        { "text": "703호 박OO 인슐린 sliding 시행", "expectedPatient": "P2" }
+      ],
+      "expected": {
+        "patientCount": 3,
+        "todoPatterns": [
+          { "patient": "P1", "pattern": "콜" },
+          { "patient": "P2", "pattern": "재측정\\s*오더|재측정" },
+          { "patient": "P3", "pattern": "모니터링|I\\/O" }
+        ],
+        "globalTopPatterns": [
+          { "pattern": "흑변|항응고", "rankMax": 5 },
+          { "pattern": "혈당|재측정", "rankMax": 5 },
+          { "pattern": "소변량|I\\/O", "rankMax": 5 }
+        ]
+      }
+    },
+    {
+      "id": "long_transcript_stability",
+      "dutyType": "night",
+      "transcript": "701호 최OO 환자 혈압 90/60이라 수액볼루스 시행 후 재측정 오더. 703호 박OO 환자 혈당 280으로 새벽 2시 재측정 오더. 708호 정OO 환자 소변량 감소 경향 있어 I/O 모니터링. 709호 김OO 환자 산소포화도 92로 산소 2L 유지. 701호 최OO 환자 항생제 10시 투약 예정. 703호 박OO 환자 인슐린 sliding 시행. 708호 정OO 환자 소변량 200ml 이하로 다시 확인 필요. 709호 김OO 환자 호흡수 증가로 재확인 필요. 내일 오전 퇴원 2명, 신규 입원 1명 가능.",
+      "expected": {
+        "patientCountMin": 4,
+        "globalTopPatterns": [
+          { "pattern": "혈압|수액", "rankMax": 5 },
+          { "pattern": "혈당|재측정", "rankMax": 5 },
+          { "pattern": "소변량|I\\/O", "rankMax": 5 }
+        ]
+      }
+    }
+  ]
+}

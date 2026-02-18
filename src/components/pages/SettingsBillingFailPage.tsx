@@ -1,0 +1,77 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useRef } from "react";
+import { useSearchParams } from "next/navigation";
+import { getSupabaseBrowserClient, useAuthState } from "@/lib/auth";
+import { useI18n } from "@/lib/useI18n";
+
+async function authHeaders(): Promise<Record<string, string>> {
+  const supabase = getSupabaseBrowserClient();
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+export function SettingsBillingFailPage() {
+  const { t } = useI18n();
+  const params = useSearchParams();
+  const { status } = useAuthState();
+  const code = params.get("code") ?? "unknown_error";
+  const message = params.get("message") ?? t("결제가 취소되었거나 실패했습니다.");
+  const orderId = params.get("orderId") ?? "-";
+  const sentRef = useRef(false);
+  const flatSurface = "rounded-[24px] border border-ios-sep bg-white";
+  const flatButtonBase =
+    "inline-flex h-10 items-center justify-center rounded-full border px-5 text-[13px] font-semibold transition-colors";
+  const flatButtonPrimary = `${flatButtonBase} border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]`;
+  const flatButtonSecondary = `${flatButtonBase} border-ios-sep bg-[#F2F2F7] text-ios-text`;
+
+  useEffect(() => {
+    if (status !== "authenticated" || sentRef.current) return;
+    if (!orderId || orderId === "-") return;
+    sentRef.current = true;
+
+    const run = async () => {
+      const headers = await authHeaders();
+      await fetch("/api/billing/fail", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...headers,
+        },
+        body: JSON.stringify({ orderId, code, message }),
+      }).catch(() => undefined);
+    };
+
+    void run();
+  }, [status, orderId, code, message]);
+
+  return (
+    <div className="mx-auto w-full max-w-[720px] px-4 pb-24 pt-6">
+      <div className={`${flatSurface} p-6`}>
+        <div className="text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">{t("결제 실패")}</div>
+        <div className="mt-3 text-[14px] font-semibold text-red-600">{code}</div>
+        <div className="mt-1 text-[12.5px] text-ios-sub break-all">{message}</div>
+        <div className="mt-3 text-[11.5px] text-ios-muted break-all">orderId: {orderId}</div>
+
+        <div className="mt-6 flex gap-2">
+          <Link
+            href="/settings/billing"
+            className={flatButtonPrimary}
+          >
+            {t("다시 시도")}
+          </Link>
+          <Link
+            href="/settings"
+            className={flatButtonSecondary}
+          >
+            {t("설정으로 이동")}
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default SettingsBillingFailPage;
