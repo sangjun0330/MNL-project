@@ -44,8 +44,9 @@ const DEFAULT_MAX_OUTPUT_TOKENS = 1_200;
 const DEFAULT_MODULE_URL = "/runtime/vendor/web-llm/index.js";
 const RAW_MODEL_LIB_BASE_URL = "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/";
 const DEFAULT_MODEL_LIB_BASE_URL = "https://cdn.jsdelivr.net/gh/mlc-ai/binary-mlc-llm-libs@main/";
-const DEFAULT_WASM_FALLBACK_MODEL_ID = "onnx-community/Qwen2.5-0.5B-Instruct";
-const DEFAULT_WASM_FALLBACK_MAX_NEW_TOKENS = 600;
+const DEFAULT_WASM_FALLBACK_MODEL_ID = "Xenova/distilgpt2";
+const HEAVY_WASM_FALLBACK_MODEL_HINTS = ["onnx-community/qwen2.5-0.5b-instruct", "qwen2.5-0.5b-instruct"];
+const DEFAULT_WASM_FALLBACK_MAX_NEW_TOKENS = 220;
 const DEFAULT_WASM_FALLBACK_DTYPE = "q8";
 const TRANSFORMERS_JSDELIVR_URL =
   "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js";
@@ -55,6 +56,8 @@ const TRANSFORMERS_UNPKG_URL =
 let enginePromise: Promise<WebLlmEngine | null> | null = null;
 let transformersModulePromise: Promise<any> | null = null;
 let transformersTextGenPromise: Promise<any> | null = null;
+let mlcFatalUnavailable = false;
+let mlcFatalError: string | null = null;
 
 function readStringEnv(value: string | undefined, fallback: string) {
   const trimmed = String(value ?? "").trim();
@@ -149,10 +152,22 @@ function resolveTransformersRuntimeUrl() {
 }
 
 function resolveWasmFallbackModelId() {
-  return readStringEnv(
+  const configured = readStringEnv(
     process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_WASM_FALLBACK_MODEL_ID,
     DEFAULT_WASM_FALLBACK_MODEL_ID
   );
+  const allowHeavyModel = readBooleanEnv(
+    process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_WASM_FALLBACK_ALLOW_HEAVY_MODEL,
+    false
+  );
+  const usingWasmDevice = resolveWasmFallbackDevice() === "wasm";
+  if (!allowHeavyModel && usingWasmDevice) {
+    const normalized = configured.toLowerCase();
+    if (HEAVY_WASM_FALLBACK_MODEL_HINTS.some((hint) => normalized.includes(hint))) {
+      return DEFAULT_WASM_FALLBACK_MODEL_ID;
+    }
+  }
+  return configured;
 }
 
 function resolveWasmFallbackDevice() {
@@ -168,6 +183,25 @@ function resolveWasmFallbackDevice() {
 
 function shouldAllowLocalFallbackModels() {
   return readBooleanEnv(process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_WASM_FALLBACK_ALLOW_LOCAL_MODELS, false);
+}
+
+function shouldSkipMlcWebGpuPath() {
+  return readBooleanEnv(process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_SKIP_MLC_WEBGPU, false);
+}
+
+function canAttemptMlcWebGpu() {
+  if (typeof window === "undefined") return false;
+  if (shouldSkipMlcWebGpuPath()) return false;
+  return Boolean((navigator as any)?.gpu);
+}
+
+function isMlcFatalWebGpuError(message: string) {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("failed to create webgpu context provider") ||
+    normalized.includes("unable to find a compatible gpu") ||
+    normalized.includes("webgpu")
+  );
 }
 
 async function ensureTransformersModule() {
@@ -530,6 +564,24 @@ async function getMlcEngine() {
     process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_MODEL_ID,
     HANDOFF_FLAGS.handoffWebLlmModelId || DEFAULT_MODEL_ID
   );
+  if (mlcFatalUnavailable) {
+    window.__RNEST_WEBLLM_MLC_STATUS__ = {
+      ready: false,
+      modelId,
+      error: mlcFatalError || "mlc_webgpu_unavailable",
+      updatedAt: Date.now(),
+    };
+    return null;
+  }
+  if (!canAttemptMlcWebGpu()) {
+    window.__RNEST_WEBLLM_MLC_STATUS__ = {
+      ready: false,
+      modelId,
+      error: "webgpu_unavailable_using_wasm_fallback",
+      updatedAt: Date.now(),
+    };
+    return null;
+  }
   const moduleUrl = readStringEnv(process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_MODULE_URL, DEFAULT_MODULE_URL);
   const moduleVersion = readStringEnv(
     process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_MODULE_VERSION,
@@ -568,10 +620,15 @@ async function getMlcEngine() {
       };
       return engine;
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (isMlcFatalWebGpuError(message)) {
+        mlcFatalUnavailable = true;
+        mlcFatalError = message;
+      }
       window.__RNEST_WEBLLM_MLC_STATUS__ = {
         ready: false,
         modelId,
-        error: error instanceof Error ? error.message : String(error),
+        error: message,
         updatedAt: Date.now(),
       };
       enginePromise = null;
