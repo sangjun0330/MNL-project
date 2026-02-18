@@ -287,6 +287,8 @@ export type HandoffPipelineOutput = {
 export type HandoffAsrProvider = "manual" | "web_speech" | "wasm_local";
 export type HandoffPrivacyProfile = "strict" | "standard";
 export type HandoffExecutionMode = "local_only" | "hybrid_opt_in";
+export type HandoffWasmAsrEngine = "worker_runtime" | "transformers_whisper";
+export type HandoffWasmAsrDevice = "auto" | "webgpu" | "wasm";
 
 export type HandoffFeatureFlags = {
   handoffEnabled: boolean;
@@ -300,11 +302,17 @@ export type HandoffFeatureFlags = {
   handoffWasmAsrWorkerUrl: string;
   handoffWasmAsrModelUrl: string;
   handoffWasmAsrRuntimeUrl: string;
+  handoffWasmAsrEngine: HandoffWasmAsrEngine;
+  handoffWasmAsrModelId: string;
+  handoffWasmAsrDevice: HandoffWasmAsrDevice;
+  handoffWasmAsrDType: string;
   handoffVadEnabled: boolean;
   handoffVadMinSpeechRatio: number;
   handoffVadMinSegmentMs: number;
   handoffVadThreshold: number;
   handoffWebLlmRefineEnabled: boolean;
+  handoffWebLlmUseMlc: boolean;
+  handoffWebLlmModelId: string;
   handoffPrivacyProfile: HandoffPrivacyProfile;
   handoffRequireAuth: boolean;
 };

@@ -28,15 +28,30 @@ const tossScriptOrigin = "https://js.tosspayments.com";
 const tossApiOrigin = "https://api.tosspayments.com";
 const tossWildcard = "https://*.tosspayments.com";
 const tossLegacyPayOrigin = "https://pay.toss.im";
+const handoffModelOrigins = [
+  "https://huggingface.co",
+  "https://*.huggingface.co",
+  "https://*.hf.co",
+  "https://cdn.jsdelivr.net",
+  "https://unpkg.com",
+];
 
 const connectSources = ["'self'", "https://cloudflareinsights.com", tossApiOrigin, tossWildcard, tossLegacyPayOrigin];
 if (supabaseOrigin) {
   connectSources.push(supabaseOrigin);
   connectSources.push(supabaseOrigin.replace(/^http/i, "ws"));
 }
+connectSources.push(...handoffModelOrigins);
 
 const isDev = process.env.NODE_ENV === "development";
-const scriptSourceParts = ["'self'", "'unsafe-inline'", "https://static.cloudflareinsights.com", tossScriptOrigin, tossWildcard];
+const scriptSourceParts = [
+  "'self'",
+  "'unsafe-inline'",
+  "https://static.cloudflareinsights.com",
+  tossScriptOrigin,
+  tossWildcard,
+  ...handoffModelOrigins,
+];
 if (isDev) scriptSourceParts.push("'unsafe-eval'");
 const scriptSources = Array.from(new Set(scriptSourceParts)).join(" ");
 const frameSources = Array.from(new Set(["'self'", tossWildcard, tossLegacyPayOrigin])).join(" ");

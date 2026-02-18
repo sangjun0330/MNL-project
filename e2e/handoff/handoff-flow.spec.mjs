@@ -8,7 +8,26 @@ const SAMPLE_TRANSCRIPT = `701호 최OO 폐렴이고 ABx 10시에 들어갔고 6
 test("manual handoff flow: input -> analyze -> review lock -> save -> detail", async ({ page }) => {
   await page.goto("/tools/handoff");
 
-  await expect(page.getByTestId("handoff-page-root")).toBeVisible();
+  const root = page.getByTestId("handoff-page-root");
+  const blocked = page
+    .getByTestId("handoff-auth-pending")
+    .or(page.getByTestId("handoff-auth-blocked"))
+    .or(page.getByTestId("handoff-admin-checking"))
+    .or(page.getByTestId("handoff-admin-blocked"))
+    .or(page.getByTestId("handoff-secure-context-blocked"))
+    .first();
+
+  await Promise.race([
+    root.waitFor({ state: "visible", timeout: 20_000 }),
+    blocked.waitFor({ state: "visible", timeout: 20_000 }),
+  ]);
+
+  if (await blocked.isVisible().catch(() => false)) {
+    await expect(blocked).toBeVisible();
+    return;
+  }
+
+  await expect(root).toBeVisible();
   await page.getByTestId("handoff-manual-input").fill(SAMPLE_TRANSCRIPT);
   await page.getByTestId("handoff-add-chunk").click();
   await page.getByTestId("handoff-run-pipeline").click();

@@ -72,3 +72,83 @@ test("tryRefineWithWebLlm keeps evidenceRef mapped to task when adapter reorders
     }
   }
 });
+
+test("tryRefineWithWebLlm marks heuristic fallback when non-LLM backend source is used", async () => {
+  const output = runHandoffPipeline({
+    sessionId: "hs_refine_fallback_source",
+    dutyType: "night",
+    rawSegments: transcriptToRawSegments("701호 최OO 혈압 재측정 필요.", {
+      idPrefix: "refine-fallback",
+      segmentDurationMs: 2000,
+    }),
+  });
+
+  const previousWindow = (globalThis as any).window;
+  (globalThis as any).window = {
+    __RNEST_WEBLLM_REFINE__: async ({ result }: { result: typeof output.result }) => {
+      return {
+        __source: "adapter_heuristic",
+        patients: result.patients.map((patient) => ({
+          patientKey: patient.patientKey,
+          summary1: `${patient.patientKey}: fallback refined`,
+        })),
+      };
+    },
+    setTimeout,
+  };
+
+  try {
+    const outcome = await tryRefineWithWebLlm(output.result);
+    assert.equal(outcome.refined, false);
+    assert.equal(outcome.reason, "refine_fallback_used");
+    assert.equal(outcome.backendSource, "adapter_heuristic");
+    assert.equal(outcome.result.provenance.llmRefined, false);
+    assert.match(outcome.result.patients[0]?.summary1 ?? "", /fallback refined/);
+  } finally {
+    if (previousWindow === undefined) {
+      delete (globalThis as any).window;
+    } else {
+      (globalThis as any).window = previousWindow;
+    }
+  }
+});
+
+test("tryRefineWithWebLlm marks llmRefined when mlc backend source is used", async () => {
+  const output = runHandoffPipeline({
+    sessionId: "hs_refine_llm_source",
+    dutyType: "night",
+    rawSegments: transcriptToRawSegments("703호 박OO 혈당 재확인 필요.", {
+      idPrefix: "refine-mlc",
+      segmentDurationMs: 2000,
+    }),
+  });
+
+  const previousWindow = (globalThis as any).window;
+  (globalThis as any).window = {
+    __RNEST_WEBLLM_REFINE__: async ({ result }: { result: typeof output.result }) => {
+      return {
+        __source: "mlc_webllm",
+        patients: result.patients.map((patient) => ({
+          patientKey: patient.patientKey,
+          summary1: `${patient.patientKey}: llm refined`,
+        })),
+      };
+    },
+    setTimeout,
+  };
+
+  try {
+    const outcome = await tryRefineWithWebLlm(output.result);
+    assert.equal(outcome.refined, true);
+    assert.equal(outcome.reason, null);
+    assert.equal(outcome.backendSource, "mlc_webllm");
+    assert.equal(outcome.result.provenance.llmRefined, true);
+    assert.match(outcome.result.patients[0]?.summary1 ?? "", /llm refined/);
+  } finally {
+    if (previousWindow === undefined) {
+      delete (globalThis as any).window;
+    } else {
+      (globalThis as any).window = previousWindow;
+    }
+  }
+});

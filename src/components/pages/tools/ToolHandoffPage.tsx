@@ -232,6 +232,8 @@ async function copyTextToClipboard(text: string) {
 function formatWebLlmReason(reason: string | null | undefined) {
   if (!reason) return "WebLLM 자동 다듬기에서 변경 사항이 없어 규칙 기반 결과를 유지했습니다.";
   if (reason === "refine_no_change") return "WebLLM 자동 다듬기에서 변경 사항이 없어 규칙 기반 결과를 유지했습니다.";
+  if (reason === "refine_fallback_used")
+    return "WebLLM 모델 응답을 사용하지 못해 로컬 휴리스틱 보정 결과를 적용했습니다.";
   if (reason === "webllm_adapter_not_found")
     return "WebLLM 어댑터가 로드되지 않아 규칙 기반 결과를 사용했습니다. 개발 서버를 재시작해 주세요.";
   if (reason === "browser_runtime_required") return "브라우저 런타임에서만 WebLLM 자동 다듬기를 적용할 수 있습니다.";
@@ -882,7 +884,9 @@ export function ToolHandoffPage() {
       setWebSpeechSupported(isLocalSpeechAsrSupported());
       setWasmAsrSupported(
         isWasmLocalAsrSupported({
+          engine: HANDOFF_FLAGS.handoffWasmAsrEngine,
           workerUrl: HANDOFF_FLAGS.handoffWasmAsrWorkerUrl,
+          preferDevice: HANDOFF_FLAGS.handoffWasmAsrDevice,
         })
       );
       setRecorderSupported(isHandoffRecorderSupported());
@@ -1301,9 +1305,13 @@ export function ToolHandoffPage() {
     if (asrProvider === "wasm_local") {
       const wasm = createWasmLocalAsr({
         lang: "ko",
+        engine: HANDOFF_FLAGS.handoffWasmAsrEngine,
         workerUrl: HANDOFF_FLAGS.handoffWasmAsrWorkerUrl,
         runtimeUrl: HANDOFF_FLAGS.handoffWasmAsrRuntimeUrl,
         modelUrl: HANDOFF_FLAGS.handoffWasmAsrModelUrl,
+        modelId: HANDOFF_FLAGS.handoffWasmAsrModelId,
+        preferDevice: HANDOFF_FLAGS.handoffWasmAsrDevice,
+        dtype: HANDOFF_FLAGS.handoffWasmAsrDType,
         onProgress: (event) => {
           if (!event.chunkId) return;
           setWasmProgress(event.percent);
@@ -1477,7 +1485,8 @@ export function ToolHandoffPage() {
             webLlmDetail = "webllm=refined";
             setRefineNotice("WebLLM 자동 다듬기까지 적용된 결과입니다.");
           } else {
-            webLlmDetail = `webllm=${outcome.reason ?? "no_change"}`;
+            const sourceTag = outcome.backendSource ? `:${outcome.backendSource}` : "";
+            webLlmDetail = `webllm=${outcome.reason ?? "no_change"}${sourceTag}`;
             setRefineNotice(formatWebLlmReason(outcome.reason));
           }
         } finally {
@@ -1844,7 +1853,7 @@ export function ToolHandoffPage() {
   if (authPending) {
     return (
       <div className="mx-auto w-full max-w-[980px] px-2 pb-24 pt-4 sm:px-4 sm:pt-6">
-        <Card className={`p-5 ${HANDOFF_FLAT_CARD_CLASS}`}>
+        <Card data-testid="handoff-auth-pending" className={`p-5 ${HANDOFF_FLAT_CARD_CLASS}`}>
           <div className="text-[16px] font-semibold text-ios-text">인증 상태 확인 중입니다.</div>
           <div className="mt-2 text-[13px] text-ios-sub">strict 정책 적용을 위해 로그인 상태를 검증하고 있습니다.</div>
         </Card>
@@ -1855,7 +1864,7 @@ export function ToolHandoffPage() {
   if (authBlocked) {
     return (
       <div className="mx-auto w-full max-w-[980px] px-2 pb-24 pt-4 sm:px-4 sm:pt-6">
-        <Card className={`p-5 ${HANDOFF_FLAT_CARD_CLASS}`}>
+        <Card data-testid="handoff-auth-blocked" className={`p-5 ${HANDOFF_FLAT_CARD_CLASS}`}>
           <div className="text-[16px] font-semibold text-ios-text">로그인 후 접근 가능합니다.</div>
           <div className="mt-2 text-[13px] text-ios-sub">strict 정책으로 AI 인계 기능은 인증 사용자에게만 허용됩니다.</div>
           <div className="mt-4">
@@ -1871,7 +1880,7 @@ export function ToolHandoffPage() {
   if (adminChecking) {
     return (
       <div className="mx-auto w-full max-w-[980px] px-2 pb-24 pt-4 sm:px-4 sm:pt-6">
-        <Card className={`p-5 ${HANDOFF_FLAT_CARD_CLASS}`}>
+        <Card data-testid="handoff-admin-checking" className={`p-5 ${HANDOFF_FLAT_CARD_CLASS}`}>
           <div className="text-[16px] font-semibold text-ios-text">관리자 권한 확인 중입니다.</div>
           <div className="mt-2 text-[13px] text-ios-sub">AI 인계 기능은 관리자 개발자 계정에서만 사용 가능합니다.</div>
         </Card>
@@ -1882,7 +1891,7 @@ export function ToolHandoffPage() {
   if (adminBlocked) {
     return (
       <div className="mx-auto w-full max-w-[980px] px-2 pb-24 pt-4 sm:px-4 sm:pt-6">
-        <Card className={`p-5 ${HANDOFF_FLAT_CARD_CLASS}`}>
+        <Card data-testid="handoff-admin-blocked" className={`p-5 ${HANDOFF_FLAT_CARD_CLASS}`}>
           <div className="text-[16px] font-semibold text-ios-text">관리자 계정 전용 기능입니다.</div>
           <div className="mt-2 text-[13px] text-ios-sub">
             AI 인계는 관리자 개발자 계정에서만 사용할 수 있습니다.
@@ -1901,7 +1910,7 @@ export function ToolHandoffPage() {
   if (secureContextBlocked) {
     return (
       <div className="mx-auto w-full max-w-[980px] px-2 pb-24 pt-4 sm:px-4 sm:pt-6">
-        <Card className={`p-5 ${HANDOFF_FLAT_CARD_CLASS}`}>
+        <Card data-testid="handoff-secure-context-blocked" className={`p-5 ${HANDOFF_FLAT_CARD_CLASS}`}>
           <div className="text-[16px] font-semibold text-ios-text">보안 컨텍스트가 필요합니다.</div>
           <div className="mt-2 text-[13px] text-ios-sub">
             strict 정책으로 AI 인계는 HTTPS secure context(개발 localhost 예외)에서만 허용됩니다.
