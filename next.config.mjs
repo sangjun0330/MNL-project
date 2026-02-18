@@ -53,8 +53,9 @@ const scriptSourceParts = [
   ...handoffModelOrigins,
 ];
 if (isDev) scriptSourceParts.push("'unsafe-eval'");
-const scriptSources = Array.from(new Set(scriptSourceParts)).join(" ");
-const handoffScriptSources = Array.from(new Set([...scriptSourceParts, "'wasm-unsafe-eval'", "'unsafe-eval'"])).join(" ");
+const runtimeEvalSources = ["'wasm-unsafe-eval'", "'unsafe-eval'"];
+const scriptSources = Array.from(new Set([...scriptSourceParts, ...runtimeEvalSources])).join(" ");
+const handoffScriptSources = scriptSources;
 const frameSources = Array.from(new Set(["'self'", tossWildcard, tossLegacyPayOrigin])).join(" ");
 const imgSources = Array.from(new Set(["'self'", "data:", "blob:", "https://cloudflareinsights.com", tossWildcard])).join(" ");
 
