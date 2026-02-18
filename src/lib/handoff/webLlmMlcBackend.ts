@@ -596,36 +596,6 @@ async function getMlcEngine() {
   if (enginePromise) return enginePromise;
 
   enginePromise = (async () => {
-    // createEngine 호출 전 WebGPU 실제 가용성 선행 probe
-    // navigator.gpu 존재 ≠ GPU 실제 사용 가능이므로 requestAdapter()로 먼저 확인
-    // adapter가 null이거나 throw면 createEngine 호출 없이 조용히 종료 (콘솔 에러 방지)
-    try {
-      const gpuAdapter = await (navigator as any).gpu.requestAdapter();
-      if (!gpuAdapter) {
-        mlcFatalUnavailable = true;
-        mlcFatalError = "webgpu_unavailable";
-        window.__RNEST_WEBLLM_MLC_STATUS__ = {
-          ready: false,
-          modelId,
-          error: "webgpu_unavailable",
-          updatedAt: Date.now(),
-        };
-        enginePromise = null;
-        return null;
-      }
-    } catch {
-      mlcFatalUnavailable = true;
-      mlcFatalError = "webgpu_unavailable";
-      window.__RNEST_WEBLLM_MLC_STATUS__ = {
-        ready: false,
-        modelId,
-        error: "webgpu_unavailable",
-        updatedAt: Date.now(),
-      };
-      enginePromise = null;
-      return null;
-    }
-
     try {
       const mod = await loadWebLlmModuleWithCacheRetry(moduleUrl, moduleVersion);
       const appConfigPatch = patchWebLlmAppConfigForCsp(mod, modelId, modelLibBaseUrl);
