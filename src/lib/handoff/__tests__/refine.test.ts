@@ -101,7 +101,7 @@ test("tryRefineWithWebLlm marks heuristic fallback when non-LLM backend source i
     const outcome = await tryRefineWithWebLlm(output.result);
     assert.equal(outcome.refined, false);
     assert.equal(outcome.llmApplied, false);
-    assert.equal(outcome.reason, "llm_backend_not_used");
+    assert.equal(outcome.reason, "llm_backend_mismatch:adapter_heuristic");
     assert.equal(outcome.backendSource, "adapter_heuristic");
     assert.equal(outcome.result.provenance.llmRefined, false);
     assert.match(outcome.result.patients[0]?.summary1 ?? "", /fallback refined/);
@@ -146,6 +146,45 @@ test("tryRefineWithWebLlm marks llmRefined when mlc backend source is used", asy
     assert.equal(outcome.backendSource, "mlc_webllm");
     assert.equal(outcome.result.provenance.llmRefined, true);
     assert.match(outcome.result.patients[0]?.summary1 ?? "", /llm refined/);
+  } finally {
+    if (previousWindow === undefined) {
+      delete (globalThis as any).window;
+    } else {
+      (globalThis as any).window = previousWindow;
+    }
+  }
+});
+
+test("tryRefineWithWebLlm treats mlc no-op patch as llm applied", async () => {
+  const output = runHandoffPipeline({
+    sessionId: "hs_refine_llm_noop",
+    dutyType: "night",
+    rawSegments: transcriptToRawSegments("705호 김OO 활력징후 확인.", {
+      idPrefix: "refine-llm-noop",
+      segmentDurationMs: 2000,
+    }),
+  });
+
+  const previousWindow = (globalThis as any).window;
+  (globalThis as any).window = {
+    __RNEST_WEBLLM_REFINE__: async ({ result }: { result: typeof output.result }) => {
+      return {
+        __source: "mlc_webllm",
+        patients: result.patients.map((patient) => ({
+          patientKey: patient.patientKey,
+        })),
+      };
+    },
+    setTimeout,
+  };
+
+  try {
+    const outcome = await tryRefineWithWebLlm(output.result);
+    assert.equal(outcome.llmApplied, true);
+    assert.equal(outcome.refined, false);
+    assert.equal(outcome.reason, "llm_no_change");
+    assert.equal(outcome.backendSource, "mlc_webllm");
+    assert.equal(outcome.result.provenance.llmRefined, true);
   } finally {
     if (previousWindow === undefined) {
       delete (globalThis as any).window;
