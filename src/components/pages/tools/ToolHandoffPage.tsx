@@ -235,7 +235,7 @@ function formatWebLlmReason(reason: string | null | undefined) {
   if (!reason) return "WebLLM 마스킹 정리 적용이 완료되었습니다.";
   if (reason === "llm_no_change") return "WebLLM 마스킹 정리는 정상 완료되었고 기존 결과와 동일합니다.";
   if (reason === "llm_backend_not_used")
-    return "WebLLM 백엔드가 초기화되지 않았습니다. 모델 로딩 상태를 확인해 주세요.";
+    return "WebGPU를 지원하지 않는 환경입니다. 휴리스틱 정리가 적용되었습니다.";
   if (reason.startsWith("llm_backend_mismatch:")) {
     const source = reason.slice("llm_backend_mismatch:".length).trim() || "unknown";
     if (source === "adapter_heuristic") {
@@ -1506,14 +1506,19 @@ export function ToolHandoffPage() {
             const sourceTag = outcome.backendSource ? `:${outcome.backendSource}` : "";
             webLlmDetail = `webllm=required_failed:${outcome.reason ?? "unknown"}${sourceTag}`;
             const reasonText = formatWebLlmReason(outcome.reason);
+            // adapter_heuristic = WebGPU 미지원 환경의 정상 대체 처리 → 파이프라인 계속 진행
+            const isHeuristicFallback = outcome.backendSource === "adapter_heuristic";
+            if (!isHeuristicFallback) {
+              setError(`WebLLM 필수 모드 실패: ${reasonText}`);
+              appendHandoffAuditEvent({
+                action: "pipeline_run",
+                sessionId,
+                detail: `segments=${mergedSegments.length}|webllm=required_failed:${outcome.reason ?? "unknown"}${sourceTag}`,
+              });
+              return;
+            }
+            // heuristic fallback: 안내 메시지만 표시하고 파이프라인 계속
             setRefineNotice(reasonText);
-            setError(`WebLLM 필수 모드 실패: ${reasonText}`);
-            appendHandoffAuditEvent({
-              action: "pipeline_run",
-              sessionId,
-              detail: `segments=${mergedSegments.length}|webllm=required_failed:${outcome.reason ?? "unknown"}${sourceTag}`,
-            });
-            return;
           }
 
           currentResult = outcome.result;
