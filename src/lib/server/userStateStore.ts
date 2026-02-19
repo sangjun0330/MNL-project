@@ -14,6 +14,24 @@ function countRecordKeys(value: unknown): number {
   return isRecord(value) ? Object.keys(value).length : 0;
 }
 
+function normalizeJsonForCompare(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeJsonForCompare(item));
+  }
+  if (isRecord(value)) {
+    const normalized: Record<string, unknown> = {};
+    for (const key of Object.keys(value).sort()) {
+      normalized[key] = normalizeJsonForCompare(value[key]);
+    }
+    return normalized;
+  }
+  return value;
+}
+
+function isJsonEqual(a: unknown, b: unknown): boolean {
+  return JSON.stringify(normalizeJsonForCompare(a)) === JSON.stringify(normalizeJsonForCompare(b));
+}
+
 function hasMeaningfulUserData(value: unknown): boolean {
   if (!isRecord(value)) return false;
   return (
@@ -60,6 +78,7 @@ export async function saveUserState(input: { userId: string; payload: any }): Pr
   const admin = getSupabaseAdmin();
   const now = new Date().toISOString();
   let nextPayload = input.payload;
+  let existingPayloadRaw: unknown = null;
   let existingPayload: Record<string, unknown> | null = null;
 
   // Ensure parent row exists before writing child state row (FK-safe for first login).
@@ -70,6 +89,7 @@ export async function saveUserState(input: { userId: string; payload: any }): Pr
     .select("payload")
     .eq("user_id", input.userId)
     .maybeSingle();
+  existingPayloadRaw = existing?.payload ?? null;
   if (isRecord(existing?.payload)) {
     existingPayload = existing.payload;
   }
@@ -92,6 +112,11 @@ export async function saveUserState(input: { userId: string; payload: any }): Pr
         aiRecoveryDaily: existingPayload.aiRecoveryDaily,
       };
     }
+  }
+
+  // Skip no-op writes to avoid unnecessary updated_at churn and revision row growth.
+  if (existingPayloadRaw !== null && isJsonEqual(existingPayloadRaw, nextPayload)) {
+    return;
   }
 
   const { error } = await admin
