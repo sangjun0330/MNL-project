@@ -934,6 +934,13 @@ const EN_EXTRA: Record<string, string> = {
 
   "영어 번역 적용 중": "Applying English translation",
   "영어로 표시하는 중이에요. 조금만 기다려 주세요.": "Showing in English now. Please wait a moment.",
+  "Pro 크레딧 정책": "Pro credit policy",
+  "기본 크레딧은 Pro 사용자에게 매일 10회가 한국시간 자정에 초기화됩니다.":
+    "Base credits reset to 10 every day at midnight (KST) for Pro users.",
+  "추가 크레딧은 구매 후 무료/Pro 공통으로 사용되며 날짜가 바뀌어도 유지됩니다.":
+    "Purchased extra credits are available for both Free and Pro users and do not reset daily.",
+  "AI 검색 실행 시 기본 크레딧을 먼저 차감하고, 부족하면 추가 크레딧에서 차감합니다.":
+    "AI search uses base credits first, then consumes extra credits when base credits are exhausted.",
 };
 
 const EN: Record<string, string> = { ...EN_BASE, ...EN_EXTRA };

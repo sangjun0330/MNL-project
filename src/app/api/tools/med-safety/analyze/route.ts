@@ -92,6 +92,25 @@ type MedSafetyResponseData = MedSafetyAnalysisResult & {
   openaiConversationId: string | null;
 };
 
+function hasMeaningfulStructuredContent(result: MedSafetyAnalysisResult) {
+  const quickActions = Array.isArray(result.quick?.topActions) ? result.quick.topActions.length : 0;
+  const steps = Array.isArray(result.do?.steps) ? result.do.steps.length : 0;
+  const monitor = Array.isArray(result.safety?.monitor) ? result.safety.monitor.length : 0;
+  const conclusion = String(result.oneLineConclusion ?? "").trim();
+  return quickActions > 0 && steps > 0 && monitor > 0 && conclusion.length > 0;
+}
+
+function shouldCommitConsumedCredit(params: {
+  analyzed: Awaited<ReturnType<typeof analyzeMedSafetyWithOpenAI>>;
+  responseData: MedSafetyResponseData;
+}) {
+  const rawText = String(params.analyzed.rawText ?? "").trim();
+  const liveModelSucceeded = params.analyzed.fallbackReason == null;
+  const isNotFound = params.responseData.notFound === true;
+  const hasContent = rawText.length > 0 && hasMeaningfulStructuredContent(params.responseData);
+  return liveModelSucceeded && !isNotFound && hasContent;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -416,12 +435,20 @@ export async function POST(req: NextRequest) {
       }
 
       const responseData = locale === "en" ? payloadEn ?? payloadKo : payloadKo;
-      return responseData;
+      const shouldCommitCredit = shouldCommitConsumedCredit({
+        analyzed: analyzedKo,
+        responseData: payloadKo,
+      }) && !abort.signal.aborted;
+
+      return { responseData, shouldCommitCredit };
     };
 
     if (!streamMode) {
       try {
-        const responseData = await runAnalyze();
+        const { responseData, shouldCommitCredit } = await runAnalyze();
+        if (!shouldCommitCredit) {
+          await safeRestoreConsumedMedSafetyCredit(userId, consumedSource);
+        }
         return NextResponse.json({
           ok: true,
           data: responseData,
@@ -447,11 +474,14 @@ export async function POST(req: NextRequest) {
 
         pushEvent("start", { ok: true });
         try {
-          const responseData = await runAnalyze(async (delta) => {
+          const { responseData, shouldCommitCredit } = await runAnalyze(async (delta) => {
             const chunk = String(delta ?? "");
             if (!chunk) return;
             pushEvent("delta", { text: chunk });
           });
+          if (!shouldCommitCredit) {
+            await safeRestoreConsumedMedSafetyCredit(userId, consumedSource);
+          }
           pushEvent("result", {
             ok: true,
             data: responseData,

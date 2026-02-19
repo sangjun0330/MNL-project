@@ -50,7 +50,7 @@ export function BillingCheckoutSheet({
             type="button"
             onClick={onConfirm}
             disabled={loading}
-            className="inline-flex h-11 items-center justify-center rounded-full border border-[color:var(--wnl-accent)] bg-[color:var(--wnl-accent)] px-4 text-[14px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex h-11 items-center justify-center rounded-full border border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] px-4 text-[14px] font-semibold text-[color:var(--wnl-accent)] disabled:cursor-not-allowed disabled:opacity-50"
           >
             {loading ? "결제창 여는 중..." : confirmLabel ?? "결제 계속"}
           </button>

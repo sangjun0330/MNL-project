@@ -34,38 +34,6 @@ npm run dev
 
 > Kakao 로그인은 **리디렉션 URI/도메인** 설정이 정확히 일치해야 합니다.
 
-### AI 인계(웹 모드) 설정
-- `NEXT_PUBLIC_HANDOFF_ENABLED=true`
-- `NEXT_PUBLIC_HANDOFF_EXECUTION_MODE=local_only` (권장 기본값)
-- `NEXT_PUBLIC_HANDOFF_REMOTE_SYNC_ENABLED=false` (`local_only`에서 정책상 강제 false)
-- `NEXT_PUBLIC_HANDOFF_PRIVACY_PROFILE=strict` (의료/민감정보 운영 권장)
-- `NEXT_PUBLIC_HANDOFF_REQUIRE_AUTH=true` (strict에서 사실상 필수)
-- `NEXT_PUBLIC_HANDOFF_LOCAL_ASR_ENABLED=true`
-- `NEXT_PUBLIC_HANDOFF_EVIDENCE_ENABLED=true`
-- `NEXT_PUBLIC_HANDOFF_ASR_PROVIDER=manual` (권장 기본값)
-- `NEXT_PUBLIC_HANDOFF_WEB_AUDIO_CAPTURE_ENABLED=true`
-- `NEXT_PUBLIC_HANDOFF_WASM_ASR_ENABLED=false` (`wasm_local` 사용 시 `true`)
-- `NEXT_PUBLIC_HANDOFF_WASM_ASR_WORKER_URL=/workers/handoff-whisper.worker.js`
-- `NEXT_PUBLIC_HANDOFF_WASM_ASR_MODEL_URL=` (선택)
-- `NEXT_PUBLIC_HANDOFF_WASM_ASR_RUNTIME_URL=` (선택)
-
-> `local_only` 모드는 handoff 데이터 원격 전송 경로를 정책 레벨에서 차단합니다.
-> `web_speech` 모드는 브라우저 구현에 따라 외부 STT를 사용할 수 있으므로 `hybrid_opt_in`에서만 제한적으로 사용하세요.
-> `wasm_local` 모드는 worker/plugin 온디바이스 런타임이 필요하며, 준비되지 않으면 자동 전사가 동작하지 않습니다.
-> `strict` 프로필은 인증/secure context를 강제하고, `web_speech`를 차단하며, WASM URL을 same-origin으로 제한합니다.
-> `strict` 웹 환경에서는 Vault 키를 localStorage에 남기지 않고 메모리로만 유지합니다(새로고침 시 raw/evidence 복구 불가, 안전성 우선).
-> 상세 설계 문서: `docs/handoff-web-system-design.md`
-> WASM 런타임 메시지 계약: `docs/handoff-wasm-runtime-contract.md`
-> AI 인계 저장 전에는 10초 검수 창이 적용되며, 구조화 결과는 저장 시점에 비식별 안전가드가 한 번 더 수행됩니다.
-
-### AI 인계 E2E
-```bash
-npm install -D playwright
-npm run test:e2e:handoff:install
-npm run test:e2e:handoff
-```
-- Playwright 기반 시나리오: 수동 전사 입력 -> 분석 -> 10초 검수 락 해제 -> 저장 -> 세션 상세 진입.
-
 ## 프로덕션 빌드
 ```bash
 npm run build

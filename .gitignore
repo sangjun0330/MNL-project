@@ -11,3 +11,15 @@ dist
 playwright-report
 test-results
 public/runtime/vendor/web-llm/index.js
+
+# Removed AI handoff feature (prevent local regeneration noise)
+datasets/handoff-eval
+e2e/handoff
+public/workers/handoff-whisper.worker.js
+scripts/handoff
+scripts/run-playwright.mjs
+src/app/handoff
+src/app/tools/handoff
+src/components/pages/SettingsAdminHandoffPage.tsx
+src/components/system/HandoffJanitor.tsx
+src/lib/handoff

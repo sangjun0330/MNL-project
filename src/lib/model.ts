@@ -152,6 +152,7 @@ export function defaultSettings(): AppSettings {
     },
     theme: "light",
     language: "ko",
+    hasSeenOnboarding: false,
   };
 }
 
