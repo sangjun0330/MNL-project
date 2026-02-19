@@ -262,19 +262,7 @@ function evaluateUncertainty(caseSpec, output) {
   const mustNotInclude = caseSpec.expected?.uncertaintyKindsMustNotInclude ?? [];
   if (!mustInclude.length && !mustNotInclude.length) return null;
 
-  const uncertaintyKinds = Array.isArray(output.result.uncertaintyItems)
-    ? output.result.uncertaintyItems
-        .map((item) => String(item?.kind ?? ""))
-        .filter(Boolean)
-    : Array.isArray(output.result.uncertainties)
-      ? output.result.uncertainties
-          .map((item) => {
-            if (typeof item === "string") return item;
-            return String(item?.kind ?? "");
-          })
-          .filter(Boolean)
-      : [];
-  const present = new Set(uncertaintyKinds);
+  const present = new Set(output.result.uncertainties.map((item) => item.kind));
   const includeHits = mustInclude.filter((kind) => present.has(kind)).length;
   const includeRecall = mustInclude.length ? includeHits / mustInclude.length : null;
   const violated = mustNotInclude.filter((kind) => present.has(kind));

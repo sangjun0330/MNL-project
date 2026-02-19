@@ -2,55 +2,14 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { Card } from "@/components/ui/Card";
-import { useAuthState } from "@/lib/auth";
-import { authHeaders } from "@/lib/billing/client";
-import { HANDOFF_FLAGS } from "@/lib/handoff/featureFlags";
 import { useI18n } from "@/lib/useI18n";
 
 export function ToolsPage() {
   const { t } = useI18n();
   const router = useRouter();
-  const { status, user } = useAuthState();
   const { hasPaidAccess, loading: billingLoading } = useBillingAccess();
-  const [isHandoffAdmin, setIsHandoffAdmin] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-    if (status !== "authenticated" || !user?.userId) {
-      setIsHandoffAdmin(false);
-      return () => {
-        active = false;
-      };
-    }
-
-    const run = async () => {
-      try {
-        const headers = await authHeaders();
-        const res = await fetch("/api/admin/billing/access", {
-          method: "GET",
-          headers: {
-            "content-type": "application/json",
-            ...headers,
-          },
-          cache: "no-store",
-        });
-        const json = await res.json().catch(() => null);
-        if (!active) return;
-        setIsHandoffAdmin(Boolean(json?.ok && json?.data?.isAdmin));
-      } catch {
-        if (!active) return;
-        setIsHandoffAdmin(false);
-      }
-    };
-
-    void run();
-    return () => {
-      active = false;
-    };
-  }, [status, user?.userId]);
 
   return (
     <div className="mx-auto w-full max-w-[760px] space-y-4 px-4 pb-24 pt-6">
@@ -99,22 +58,6 @@ export function ToolsPage() {
           </div>
         </Card>
       </Link>
-
-      {HANDOFF_FLAGS.handoffEnabled && isHandoffAdmin ? (
-        <Link href="/tools/handoff" className="block">
-          <Card className="p-6 transition hover:translate-y-[-1px] hover:border-[color:var(--wnl-accent-border)]">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">{t("AI 인계")}</div>
-                <div className="mt-1 text-[13px] text-ios-sub">
-                  {t("온디바이스 녹음/로컬 ASR/PHI 마스킹으로 인계를 환자별 카드로 구조화합니다.")}
-                </div>
-              </div>
-              <span className="wnl-chip-accent px-3 py-1 text-[11px]">{t("ADMIN")}</span>
-            </div>
-          </Card>
-        </Link>
-      ) : null}
     </div>
   );
 }

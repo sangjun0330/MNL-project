@@ -1,5 +1,3 @@
-"use client";
-
 import type { HandoffFeatureFlags } from "@/lib/handoff/types";
 import { evaluateHandoffPrivacyPolicy } from "@/lib/handoff/privacyPolicy";
 import { isWasmLocalAsrSupported } from "@/lib/handoff/wasmAsr";
@@ -221,9 +219,7 @@ export async function runHandoffWebDiagnostics(flags: HandoffFeatureFlags): Prom
 
   const speechRecognitionReady = getSpeechRecognitionSupport();
   const wasmAsrReady = isWasmLocalAsrSupported({
-    engine: flags.handoffWasmAsrEngine,
     workerUrl: flags.handoffWasmAsrWorkerUrl,
-    preferDevice: flags.handoffWasmAsrDevice,
   });
   const providerForCheck = policy.effectiveAsrProvider;
   items.push({
@@ -256,7 +252,7 @@ export async function runHandoffWebDiagnostics(flags: HandoffFeatureFlags): Prom
         return "wasm_local selected but no worker/plugin runtime available";
       }
       const runtimeConfigured = flags.handoffWasmAsrRuntimeUrl.trim() || "/runtime/whisper-runtime.js";
-      return `wasm_local available (engine=${flags.handoffWasmAsrEngine}, model_id=${flags.handoffWasmAsrModelId}, device=${flags.handoffWasmAsrDevice}, runtime=${runtimeConfigured})`;
+      return `wasm_local available (runtime=${runtimeConfigured})`;
     })(),
   });
 
@@ -264,12 +260,8 @@ export async function runHandoffWebDiagnostics(flags: HandoffFeatureFlags): Prom
   const webLlmBackendUrl = normalizeBackendUrl(process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_BACKEND_URL);
   const webLlmAdapterSameOrigin = isRelativeOrSameOrigin(webLlmAdapterUrl);
   const webLlmBackendSameOrigin = isRelativeOrSameOrigin(webLlmBackendUrl);
-  const backendRuntime = typeof window !== "undefined" ? (window as any).__RNEST_WEBLLM_BACKEND__ : null;
-  const backendRuntimeName =
-    backendRuntime && typeof backendRuntime === "object" ? String((backendRuntime as any).runtime ?? "") : "";
-  const hasBackendRuntime = Boolean(backendRuntime);
-  const usingMlcBackend = flags.handoffWebLlmUseMlc;
-  const mlcStatus = typeof window !== "undefined" ? (window as any).__RNEST_WEBLLM_MLC_STATUS__ : null;
+  const hasBackendRuntime =
+    typeof window !== "undefined" && Boolean((window as any).__RNEST_WEBLLM_BACKEND__);
   const strictOrLocal = policy.profile === "strict" || policy.executionMode === "local_only";
   const backendBlockedByPolicy = !webLlmBackendSameOrigin && strictOrLocal;
   const adapterBlockedByPolicy = !webLlmAdapterSameOrigin && strictOrLocal;
@@ -283,24 +275,18 @@ export async function runHandoffWebDiagnostics(flags: HandoffFeatureFlags): Prom
       : adapterBlockedByPolicy
         ? "fail"
         : adapterReady
-          ? usingMlcBackend
-            ? mlcStatus?.ready
-              ? "ok"
-              : "warn"
-            : hasBackendRuntime
-              ? "ok"
-              : "warn"
+          ? hasBackendRuntime
+            ? "ok"
+            : "warn"
           : "warn",
     detail: !flags.handoffWebLlmRefineEnabled
       ? "disabled by feature flag"
       : adapterBlockedByPolicy
         ? `enabled but adapter URL blocked by strict/local_only policy: ${webLlmAdapterUrl}`
         : adapterReady
-          ? usingMlcBackend
-            ? `enabled (adapter ready, backend_mode=mlc, backend_runtime=${backendRuntimeName || "pending"}, model=${flags.handoffWebLlmModelId}, mlc_ready=${mlcStatus?.ready ? "true" : "false"}, mlc_error=${mlcStatus?.error ?? "none"}, adapter_url=${webLlmAdapterUrl})`
-            : backendBlockedByPolicy
-              ? `enabled (adapter ready, backend URL blocked by strict/local_only policy: ${webLlmBackendUrl})`
-              : `enabled (adapter ready, backend=${hasBackendRuntime ? "ready" : "missing"}, backend_url=${webLlmBackendUrl}, adapter_url=${webLlmAdapterUrl})`
+          ? backendBlockedByPolicy
+            ? `enabled (adapter ready, backend URL blocked by strict/local_only policy: ${webLlmBackendUrl})`
+            : `enabled (adapter ready, backend=${hasBackendRuntime ? "ready" : "missing"}, backend_url=${webLlmBackendUrl}, adapter_url=${webLlmAdapterUrl})`
           : `enabled but runtime adapter not found (backend_url=${webLlmBackendUrl}, adapter_url=${webLlmAdapterUrl})`,
   });
 

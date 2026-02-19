@@ -17,26 +17,7 @@ test("recommended 1-5: local-only live view, reveal, lock, memory purge", async 
   );
 
   await page.goto("/tools/handoff");
-  const root = page.getByTestId("handoff-page-root");
-  const blocked = page
-    .getByTestId("handoff-auth-pending")
-    .or(page.getByTestId("handoff-auth-blocked"))
-    .or(page.getByTestId("handoff-admin-checking"))
-    .or(page.getByTestId("handoff-admin-blocked"))
-    .or(page.getByTestId("handoff-secure-context-blocked"))
-    .first();
-
-  await Promise.race([
-    root.waitFor({ state: "visible", timeout: 20_000 }),
-    blocked.waitFor({ state: "visible", timeout: 20_000 }),
-  ]);
-
-  if (await blocked.isVisible().catch(() => false)) {
-    await expect(blocked).toBeVisible();
-    return;
-  }
-
-  await expect(root).toBeVisible();
+  await expect(page.getByTestId("handoff-page-root")).toBeVisible();
 
   await page.getByTestId("handoff-manual-input").fill(SAMPLE_TRANSCRIPT);
   await page.getByTestId("handoff-add-chunk").click();

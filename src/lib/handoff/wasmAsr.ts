@@ -1,5 +1,4 @@
 import type { LocalAsrSegment } from "./asr";
-import type { HandoffWasmAsrDevice, HandoffWasmAsrEngine } from "./types";
 
 type WorkerRequestType = "init" | "transcribe" | "stop" | "INIT" | "TRANSCRIBE_CHUNK" | "FLUSH" | "RESET";
 type WorkerResponseType =
@@ -32,13 +31,9 @@ type WorkerResponseMessage = {
 };
 
 type WasmAsrWorkerOptions = {
-  engine: HandoffWasmAsrEngine;
   workerUrl: string;
   runtimeUrl?: string;
   modelUrl?: string;
-  modelId?: string;
-  preferDevice?: HandoffWasmAsrDevice;
-  dtype?: string;
   lang?: string;
   onProgress?: (event: WasmAsrProgressEvent) => void;
   onPartial?: (event: WasmAsrPartialEvent) => void;
@@ -224,344 +219,6 @@ function resolveChunkId(payload: Record<string, unknown> | undefined) {
   const chunkId = payload.chunkId;
   if (typeof chunkId !== "string") return null;
   return chunkId.trim() || null;
-}
-
-type TransformersAsrOutput = {
-  text?: string;
-  chunks?: Array<{
-    text?: string;
-    timestamp?: [number | null, number | null] | number[] | null;
-  }>;
-};
-
-type TransformersAsrPipeline = (
-  audio: Float32Array,
-  options?: Record<string, unknown>
-) => Promise<TransformersAsrOutput>;
-
-let transformersPipelinePromise: Promise<TransformersAsrPipeline | null> | null = null;
-let transformersModulePromise: Promise<any> | null = null;
-
-const TRANSFORMERS_JSDELIVR_URL =
-  "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js";
-const TRANSFORMERS_UNPKG_URL =
-  "https://unpkg.com/@huggingface/transformers@3.8.1/dist/transformers.min.js";
-
-function resolveTransformersRuntimeUrl() {
-  const configured = String(process.env.NEXT_PUBLIC_HANDOFF_WASM_ASR_TRANSFORMERS_URL ?? "").trim();
-  return configured || TRANSFORMERS_JSDELIVR_URL;
-}
-
-async function importTransformersFromUrl(url: string) {
-  return await import(/* webpackIgnore: true */ url);
-}
-
-async function ensureTransformersModule() {
-  if (transformersModulePromise) return transformersModulePromise;
-
-  transformersModulePromise = (async () => {
-    const primaryUrl = resolveTransformersRuntimeUrl();
-    try {
-      return await importTransformersFromUrl(primaryUrl);
-    } catch {
-      if (primaryUrl !== TRANSFORMERS_UNPKG_URL) {
-        return await importTransformersFromUrl(TRANSFORMERS_UNPKG_URL);
-      }
-      throw new Error("transformers_runtime_load_failed");
-    }
-  })();
-
-  try {
-    return await transformersModulePromise;
-  } catch (error) {
-    transformersModulePromise = null;
-    throw error;
-  }
-}
-
-function normalizeWasmAsrDevice(preferDevice: HandoffWasmAsrDevice | undefined) {
-  if (preferDevice === "webgpu") return "webgpu";
-  if (preferDevice === "wasm") return "wasm";
-  if (typeof navigator !== "undefined" && "gpu" in navigator) return "webgpu";
-  return "wasm";
-}
-
-function isTransformersAsrSupported(preferDevice?: HandoffWasmAsrDevice) {
-  if (typeof window === "undefined") return false;
-  const runtimeDevice = normalizeWasmAsrDevice(preferDevice);
-  if (runtimeDevice === "webgpu") {
-    return Boolean((navigator as any)?.gpu);
-  }
-  return typeof WebAssembly !== "undefined";
-}
-
-function isAudioContextSupported() {
-  if (typeof window === "undefined") return false;
-  return Boolean((window as any).AudioContext || (window as any).webkitAudioContext);
-}
-
-function downsamplePcm(input: Float32Array, sourceRate: number, targetRate: number) {
-  if (!input.length) return input;
-  if (sourceRate === targetRate) return input;
-  const ratio = sourceRate / targetRate;
-  const outputLength = Math.max(1, Math.round(input.length / ratio));
-  const output = new Float32Array(outputLength);
-  for (let i = 0; i < outputLength; i += 1) {
-    const pos = i * ratio;
-    const left = Math.floor(pos);
-    const right = Math.min(left + 1, input.length - 1);
-    const frac = pos - left;
-    output[i] = input[left] * (1 - frac) + input[right] * frac;
-  }
-  return output;
-}
-
-async function blobToPcmFloat32(blob: Blob, targetSampleRate: number) {
-  const AudioContextCtor = (window as any).AudioContext || (window as any).webkitAudioContext;
-  if (!AudioContextCtor) {
-    throw new Error("audio_context_unavailable");
-  }
-  const audioContext: AudioContext = new AudioContextCtor();
-  try {
-    const data = await blob.arrayBuffer();
-    const decoded = await audioContext.decodeAudioData(data.slice(0));
-    const source = decoded.numberOfChannels === 1 ? decoded.getChannelData(0) : decoded.getChannelData(0);
-    const mono = new Float32Array(source.length);
-    mono.set(source);
-    return {
-      pcmFloat32: downsamplePcm(mono, decoded.sampleRate, targetSampleRate),
-      sampleRate: targetSampleRate,
-    };
-  } finally {
-    void audioContext.close();
-  }
-}
-
-function normalizeTransformersSegments(
-  output: TransformersAsrOutput,
-  fallbackStartMs: number,
-  fallbackEndMs: number
-) {
-  const chunks = Array.isArray(output?.chunks) ? output.chunks : [];
-  const out: LocalAsrSegment[] = [];
-
-  for (const chunk of chunks) {
-    const text = String(chunk?.text ?? "").trim();
-    if (!text) continue;
-
-    const timestamp = Array.isArray(chunk?.timestamp) ? chunk.timestamp : [];
-    const startSecRaw = Number(timestamp?.[0] ?? 0);
-    const endSecRaw = Number(timestamp?.[1] ?? 0);
-    const startMs =
-      Number.isFinite(startSecRaw) && startSecRaw >= 0
-        ? fallbackStartMs + Math.round(startSecRaw * 1000)
-        : fallbackStartMs;
-    const endMs =
-      Number.isFinite(endSecRaw) && endSecRaw > startSecRaw
-        ? fallbackStartMs + Math.round(endSecRaw * 1000)
-        : Math.max(startMs + 250, fallbackEndMs);
-    out.push({
-      text,
-      startMs: Math.max(0, startMs),
-      endMs: Math.max(startMs + 250, endMs),
-      confidence: null,
-    });
-  }
-
-  if (out.length) return out;
-
-  const text = String(output?.text ?? "").trim();
-  if (!text) return [];
-  return [
-    {
-      text,
-      startMs: fallbackStartMs,
-      endMs: Math.max(fallbackStartMs + 250, fallbackEndMs),
-      confidence: null,
-    },
-  ];
-}
-
-async function ensureTransformersPipeline({
-  modelId,
-  preferDevice,
-  dtype,
-  onProgress,
-}: {
-  modelId: string;
-  preferDevice?: HandoffWasmAsrDevice;
-  dtype?: string;
-  onProgress?: (event: WasmAsrProgressEvent) => void;
-}) {
-  if (!transformersPipelinePromise) {
-    transformersPipelinePromise = (async () => {
-      const mod = (await ensureTransformersModule()) as any;
-      const env = mod?.env;
-      if (env && typeof env === "object") {
-        env.allowRemoteModels = true;
-        env.allowLocalModels = true;
-        if (env.backends?.onnx?.wasm) {
-          env.backends.onnx.wasm.proxy = false;
-          env.backends.onnx.wasm.numThreads = Math.max(
-            1,
-            Math.min(4, Math.floor((navigator.hardwareConcurrency || 4) / 2))
-          );
-        }
-      }
-
-      const runtimeDevice = normalizeWasmAsrDevice(preferDevice);
-      const pipelineOptions: Record<string, unknown> = {
-        device: runtimeDevice,
-        dtype: dtype || "q8",
-        progress_callback: (event: any) => {
-          const progress = Number(event?.progress ?? 0);
-          const percent = Math.max(0, Math.min(100, Math.round(progress * 100)));
-          onProgress?.({
-            chunkId: "model-load",
-            percent,
-          });
-        },
-      };
-
-      try {
-        return (await mod.pipeline(
-          "automatic-speech-recognition",
-          modelId || "openai/whisper-small",
-          pipelineOptions
-        )) as TransformersAsrPipeline;
-      } catch {
-        return (await mod.pipeline("automatic-speech-recognition", modelId || "openai/whisper-small", {
-          device: "wasm",
-        })) as TransformersAsrPipeline;
-      }
-    })();
-  }
-
-  try {
-    return await transformersPipelinePromise;
-  } catch (error) {
-    transformersPipelinePromise = null;
-    throw error;
-  }
-}
-
-function createTransformersWhisperController({
-  lang,
-  modelId,
-  preferDevice,
-  dtype,
-  onProgress,
-  onPartial,
-  onError,
-}: {
-  lang: string;
-  modelId: string;
-  preferDevice?: HandoffWasmAsrDevice;
-  dtype?: string;
-  onProgress?: (event: WasmAsrProgressEvent) => void;
-  onPartial?: (event: WasmAsrPartialEvent) => void;
-  onError?: (error: unknown) => void;
-}): WasmAsrController {
-  let running = false;
-  let disposed = false;
-  let transcribeChain: Promise<void> = Promise.resolve();
-
-  const enqueue = <T>(task: () => Promise<T>) => {
-    const next = transcribeChain.then(task, task);
-    transcribeChain = next.then(
-      () => undefined,
-      () => undefined
-    );
-    return next;
-  };
-
-  const transcribe = async (chunk: WasmAsrChunkInput) => {
-    if (!running || disposed) return [];
-    const pipeline = await ensureTransformersPipeline({
-      modelId,
-      preferDevice,
-      dtype,
-      onProgress,
-    });
-    if (!pipeline) return [];
-
-    const audioInput =
-      chunk.pcmFloat32 && chunk.pcmFloat32.length
-        ? {
-            pcmFloat32: chunk.pcmFloat32,
-            sampleRate: chunk.sampleRate || 16_000,
-          }
-        : await blobToPcmFloat32(chunk.blob, 16_000);
-
-    const output = (await pipeline(audioInput.pcmFloat32, {
-      sampling_rate: audioInput.sampleRate,
-      task: "transcribe",
-      language: lang,
-      return_timestamps: true,
-      chunk_length_s: 25,
-      stride_length_s: 4,
-    })) as TransformersAsrOutput;
-
-    const segments = normalizeTransformersSegments(output, chunk.startMs, chunk.endMs);
-    const partial = segments[segments.length - 1];
-    if (partial?.text) {
-      onPartial?.({
-        chunkId: chunk.chunkId,
-        text: partial.text,
-        t0: Number((partial.startMs / 1000).toFixed(3)),
-        t1: Number((partial.endMs / 1000).toFixed(3)),
-        confidence: partial.confidence,
-      });
-    }
-    onProgress?.({
-      chunkId: chunk.chunkId,
-      percent: 100,
-    });
-    return segments;
-  };
-
-  return {
-    async start() {
-      if (disposed) return false;
-      if (running) return true;
-      if (!isTransformersAsrSupported(preferDevice)) return false;
-      if (!isAudioContextSupported()) return false;
-      try {
-        await ensureTransformersPipeline({
-          modelId,
-          preferDevice,
-          dtype,
-          onProgress,
-        });
-        running = true;
-        return true;
-      } catch (error) {
-        onError?.(error);
-        running = false;
-        return false;
-      }
-    },
-    async stop() {
-      running = false;
-    },
-    async destroy() {
-      disposed = true;
-      running = false;
-    },
-    isRunning() {
-      return running;
-    },
-    async transcribeChunk(chunk) {
-      return enqueue(async () => {
-        try {
-          return await transcribe(chunk);
-        } catch (error) {
-          onError?.(error);
-          return [];
-        }
-      });
-    },
-  };
 }
 
 function createPluginController({
@@ -927,38 +584,25 @@ function createWorkerController({
   };
 }
 
-export function isWasmLocalAsrSupported(options?: {
-  engine?: HandoffWasmAsrEngine;
-  workerUrl?: string;
-  preferDevice?: HandoffWasmAsrDevice;
-}) {
+export function isWasmLocalAsrSupported(options?: { workerUrl?: string }) {
   if (typeof window === "undefined") return false;
   if (getCapacitorWasmAsrPlugin()) return true;
-  if (options?.engine === "transformers_whisper") {
-    return isTransformersAsrSupported(options.preferDevice);
-  }
   if (typeof Worker === "undefined") return false;
   if (!options?.workerUrl) return false;
   return true;
 }
 
 export function createWasmLocalAsr(options?: {
-  engine?: HandoffWasmAsrEngine;
   lang?: string;
   workerUrl?: string;
   runtimeUrl?: string;
   modelUrl?: string;
-  modelId?: string;
-  preferDevice?: HandoffWasmAsrDevice;
-  dtype?: string;
   onError?: (error: unknown) => void;
   onProgress?: (event: WasmAsrProgressEvent) => void;
   onPartial?: (event: WasmAsrPartialEvent) => void;
 }): WasmAsrController {
-  const engine = options?.engine ?? "worker_runtime";
   const lang = options?.lang ?? "ko";
   const modelUrl = options?.modelUrl ?? "";
-  const modelId = options?.modelId ?? "openai/whisper-small";
   const runtimeUrl = options?.runtimeUrl ?? "/runtime/whisper-runtime.js";
   const workerUrl = options?.workerUrl ?? "/workers/handoff-whisper.worker.js";
   const onError = options?.onError;
@@ -973,18 +617,6 @@ export function createWasmLocalAsr(options?: {
     });
   }
 
-  if (engine === "transformers_whisper") {
-    return createTransformersWhisperController({
-      lang,
-      modelId,
-      preferDevice: options?.preferDevice,
-      dtype: options?.dtype,
-      onError,
-      onProgress: options?.onProgress,
-      onPartial: options?.onPartial,
-    });
-  }
-
   if (typeof window === "undefined" || typeof Worker === "undefined" || !workerUrl) {
     return {
       start: async () => false,
@@ -996,13 +628,9 @@ export function createWasmLocalAsr(options?: {
   }
 
   const controller = createWorkerController({
-    engine,
     workerUrl,
     runtimeUrl,
     modelUrl,
-    modelId: options?.modelId,
-    preferDevice: options?.preferDevice,
-    dtype: options?.dtype,
     lang,
     onError,
     onProgress: options?.onProgress,

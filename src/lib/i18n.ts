@@ -895,10 +895,6 @@ const EN_EXTRA: Record<string, string> = {
   "누락된 기록 날짜로 바로 이동해 입력할 수 있어요.":
     "You can jump directly to missing record dates and enter them.",
   "필수 기록 입력 필요": "Required logs needed",
-  "AI 인계 기능이 비활성화되어 있습니다.": "AI handoff is disabled.",
-  "AI 인계": "AI handoff",
-  "온디바이스 녹음/로컬 ASR/PHI 마스킹으로 인계를 환자별 카드로 구조화합니다.":
-    "On-device recording, local ASR, and PHI masking structure handoff into patient cards.",
   "새 세션": "New session",
   "분석 실행": "Run analysis",
   "실시간 녹음 + 로컬 전사": "Live recording + local transcription",
