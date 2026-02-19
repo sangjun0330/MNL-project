@@ -422,7 +422,11 @@ function readMedSafetyCache(cacheKey: string): MedSafetyAnalyzeResult | null {
 function shouldRetryAnalyzeError(status: number, rawError: string) {
   const error = String(rawError ?? "").toLowerCase();
   if ([408, 409, 425, 429, 500, 502, 503, 504].includes(status)) return true;
-  if (/client_timeout|openai_network_|openai_timeout|openai_empty_text|openai_responses_(408|409|425|429|500|502|503|504)/.test(error))
+  if (
+    /client_timeout|openai_network_|openai_timeout|openai_stream_|openai_empty_text|openai_responses_(408|409|425|429|500|502|503|504)/.test(
+      error
+    )
+  )
     return true;
   if (/openai_responses_403/.test(error) && /(html|forbidden|proxy|firewall|blocked|access denied|cloudflare)/.test(error)) return true;
   return false;
@@ -456,6 +460,121 @@ async function fetchAnalyzeWithTimeout(form: FormData, timeoutMs: number) {
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+function parseSseBlock(block: string): { event: string; data: string } | null {
+  if (!block.trim()) return null;
+  let eventName = "";
+  const dataLines: string[] = [];
+  for (const rawLine of block.split(/\r?\n/g)) {
+    const line = rawLine.trimEnd();
+    if (!line || line.startsWith(":")) continue;
+    if (line.startsWith("event:")) {
+      eventName = line.slice(6).trim();
+      continue;
+    }
+    if (line.startsWith("data:")) {
+      dataLines.push(line.slice(5).trimStart());
+    }
+  }
+  if (!dataLines.length) return null;
+  return {
+    event: eventName,
+    data: dataLines.join("\n"),
+  };
+}
+
+async function parseAnalyzeStreamResponse(args: {
+  response: Response;
+  onDelta: (text: string) => void;
+}): Promise<{ data: MedSafetyAnalyzeResult | null; error: string | null }> {
+  const { response, onDelta } = args;
+  const contentType = String(response.headers.get("content-type") ?? "").toLowerCase();
+  if (!contentType.includes("text/event-stream")) {
+    const payloadRaw = (await response.json().catch(() => null)) as unknown;
+    const parsed = parseAnalyzePayload(payloadRaw);
+    if (parsed.ok) return { data: parsed.data, error: null };
+    return { data: null, error: "error" in parsed ? parsed.error : "med_safety_analyze_failed" };
+  }
+
+  if (!response.body) {
+    const payloadRaw = (await response.json().catch(() => null)) as unknown;
+    const parsed = parseAnalyzePayload(payloadRaw);
+    if (parsed.ok) return { data: parsed.data, error: null };
+    return { data: null, error: "error" in parsed ? parsed.error : "med_safety_analyze_failed" };
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let parsedData: MedSafetyAnalyzeResult | null = null;
+  let parsedError: string | null = null;
+
+  const handleBlock = (block: string) => {
+    const parsedBlock = parseSseBlock(block);
+    if (!parsedBlock) return;
+    const payloadText = parsedBlock.data.trim();
+    if (!payloadText || payloadText === "[DONE]") return;
+
+    let payload: unknown = null;
+    try {
+      payload = JSON.parse(payloadText);
+    } catch {
+      return;
+    }
+
+    const eventType = parsedBlock.event || String((payload as any)?.type ?? "");
+    if (eventType === "delta") {
+      const text = typeof (payload as any)?.text === "string" ? (payload as any).text : "";
+      if (text) onDelta(text);
+      return;
+    }
+    if (eventType === "error") {
+      parsedError = normalizeString((payload as any)?.error, "med_safety_analyze_failed");
+      return;
+    }
+    if (eventType === "result") {
+      const parsed = parseAnalyzePayload(payload);
+      if (parsed.ok) {
+        parsedData = parsed.data;
+      } else if (!parsedError) {
+        parsedError = "error" in parsed ? parsed.error : "med_safety_analyze_failed";
+      }
+      return;
+    }
+
+    const parsed = parseAnalyzePayload(payload);
+    if (parsed.ok) {
+      parsedData = parsed.data;
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+    while (true) {
+      const blockEnd = buffer.indexOf("\n\n");
+      if (blockEnd < 0) break;
+      const block = buffer.slice(0, blockEnd);
+      buffer = buffer.slice(blockEnd + 2);
+      handleBlock(block);
+    }
+  }
+
+  buffer += decoder.decode().replace(/\r\n/g, "\n");
+  while (true) {
+    const blockEnd = buffer.indexOf("\n\n");
+    if (blockEnd < 0) break;
+    const block = buffer.slice(0, blockEnd);
+    buffer = buffer.slice(blockEnd + 2);
+    handleBlock(block);
+  }
+  if (buffer.trim()) {
+    handleBlock(buffer);
+  }
+
+  return { data: parsedData, error: parsedError };
 }
 
 function parseCameraStartError(cause: unknown) {
@@ -853,6 +972,7 @@ export function ToolMedSafetyPage() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [analysisRequested, setAnalysisRequested] = useState(false);
+  const [streamingCards, setStreamingCards] = useState<DynamicResultCard[]>([]);
 
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -872,6 +992,8 @@ export function ToolMedSafetyPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const streamTextBufferRef = useRef("");
+  const streamCommittedCardsRef = useRef<DynamicResultCard[]>([]);
 
   useEffect(() => {
     setMounted(true);
@@ -1011,6 +1133,51 @@ export function ToolMedSafetyPage() {
     stopCamera();
   }, [onImagePicked, stopCamera, t]);
 
+  const resetStreamingCategoryState = useCallback(() => {
+    streamTextBufferRef.current = "";
+    streamCommittedCardsRef.current = [];
+    setStreamingCards([]);
+  }, []);
+
+  const flushStreamingCategories = useCallback(
+    (finalize: boolean) => {
+      const normalizedText = normalizeMultilineString(streamTextBufferRef.current);
+      if (!normalizedText) {
+        if (finalize && streamCommittedCardsRef.current.length) {
+          streamCommittedCardsRef.current = [];
+          setStreamingCards([]);
+        }
+        return;
+      }
+      const parsedCards = buildNarrativeCards(normalizedText, t).map((card) => ({
+        ...card,
+        items: card.items.slice(0, NON_SCENARIO_CARD_MAX_ITEMS),
+      }));
+      if (!parsedCards.length) return;
+
+      // 카테고리 단위 스트리밍: 마지막 카드는 아직 생성 중일 가능성이 높아 finalize 전에는 노출하지 않는다.
+      const commitCount = finalize ? parsedCards.length : Math.max(0, parsedCards.length - 1);
+      const nextCommitted = parsedCards.slice(0, commitCount);
+      if (!nextCommitted.length && !finalize) return;
+
+      const prevCommitted = streamCommittedCardsRef.current;
+      const changed =
+        nextCommitted.length !== prevCommitted.length ||
+        nextCommitted.some((card, index) => {
+          const prev = prevCommitted[index];
+          if (!prev) return true;
+          if (card.title !== prev.title) return true;
+          if (card.items.length !== prev.items.length) return true;
+          return card.items.some((item, itemIndex) => item !== prev.items[itemIndex]);
+        });
+
+      if (!changed) return;
+      streamCommittedCardsRef.current = nextCommitted;
+      setStreamingCards(nextCommitted);
+    },
+    [t]
+  );
+
   const runAnalyze = useCallback(
     async (forcedQuery?: string) => {
       const normalized = (forcedQuery ?? query).replace(/\s+/g, " ").trim();
@@ -1052,6 +1219,8 @@ export function ToolMedSafetyPage() {
       setAnalysisRequested(true);
       setIsLoading(true);
       setError(null);
+      setResult(null);
+      resetStreamingCategoryState();
 
       try {
         const maxClientRetries = 1;
@@ -1068,6 +1237,7 @@ export function ToolMedSafetyPage() {
             form.set("queryIntent", queryIntent);
             form.set("situation", activeSituation);
             form.set("locale", lang);
+            form.set("stream", "1");
             if (isScenarioIntent && scenarioState.previousResponseId) {
               form.set("previousResponseId", scenarioState.previousResponseId);
             }
@@ -1078,15 +1248,34 @@ export function ToolMedSafetyPage() {
 
             response = await fetchAnalyzeWithTimeout(form, MED_SAFETY_CLIENT_TIMEOUT_MS);
 
-            const payloadRaw = (await response.json().catch(() => null)) as unknown;
-            const parsedPayload = parseAnalyzePayload(payloadRaw);
+            const contentType = String(response.headers.get("content-type") ?? "").toLowerCase();
+            if (response.ok && contentType.includes("text/event-stream")) {
+              const streamed = await parseAnalyzeStreamResponse({
+                response,
+                onDelta: (text) => {
+                  if (!text) return;
+                  streamTextBufferRef.current += text;
+                  flushStreamingCategories(false);
+                },
+              });
+              flushStreamingCategories(true);
 
-            if (response.ok && parsedPayload.ok) {
-              normalizedData = parsedPayload.data;
-              break;
+              if (streamed.data) {
+                normalizedData = streamed.data;
+                break;
+              }
+              finalError = streamed.error ?? "stream_result_missing";
+            } else {
+              const payloadRaw = (await response.json().catch(() => null)) as unknown;
+              const parsedPayload = parseAnalyzePayload(payloadRaw);
+              if (response.ok && parsedPayload.ok) {
+                normalizedData = parsedPayload.data;
+                break;
+              }
+              finalError = parsedPayload.ok
+                ? "invalid_response_payload"
+                : String("error" in parsedPayload ? parsedPayload.error : "med_safety_analyze_failed");
             }
-
-            finalError = parsedPayload.ok ? "invalid_response_payload" : String(parsedPayload.error ?? "med_safety_analyze_failed");
             if (!shouldRetryAnalyzeError(response.status, finalError) || attempt >= maxClientRetries) break;
           } catch (cause: any) {
             finalError = String(cause?.message ?? "network_error");
@@ -1152,10 +1341,12 @@ export function ToolMedSafetyPage() {
         }
       } finally {
         setIsLoading(false);
+        resetStreamingCategoryState();
       }
     },
     [
       activeSituation,
+      flushStreamingCategories,
       imageFile,
       isScenarioIntent,
       lang,
@@ -1163,6 +1354,7 @@ export function ToolMedSafetyPage() {
       patientSummary,
       query,
       queryIntent,
+      resetStreamingCategoryState,
       scenarioState,
       t,
     ]
@@ -1235,6 +1427,29 @@ export function ToolMedSafetyPage() {
 
   const resultPanel = useMemo(() => {
     if (!result) {
+      if (streamingCards.length) {
+        return (
+          <div className="space-y-3 py-1">
+            <div className="text-[24px] font-bold text-ios-text">{t("카테고리별 생성 중")}</div>
+            <div className="text-[14px] leading-6 text-ios-sub">{t("완성된 카테고리부터 순서대로 표시합니다.")}</div>
+            <div className="space-y-2.5">
+              {streamingCards.map((card) => (
+                <section
+                  key={`live-${card.key}`}
+                  className={`${card.compact ? "border-l-[3px] border-[color:var(--wnl-accent)] pl-3 py-1.5" : "border-b border-ios-sep pb-2.5"} last:border-b-0`}
+                >
+                  <div className="text-[15px] font-bold tracking-[-0.01em] text-[color:var(--wnl-accent)]">{card.title}</div>
+                  <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[15px] leading-6 text-ios-text">
+                    {card.items.map((item, index) => (
+                      <li key={`live-${card.key}-${index}`}>{renderHighlightedLine(item)}</li>
+                    ))}
+                  </ul>
+                </section>
+              ))}
+            </div>
+          </div>
+        );
+      }
       return (
         <div className="py-1">
           <div className="text-[24px] font-bold text-ios-text">{t("결과 대기")}</div>
@@ -1308,10 +1523,10 @@ export function ToolMedSafetyPage() {
         </div>
       </div>
     );
-  }, [activeSituation, mode, queryIntent, result, resultViewState, t]);
+  }, [activeSituation, mode, queryIntent, result, resultViewState, streamingCards, t]);
 
   const englishTranslationPending = lang === "en" && isLoading && analysisRequested;
-  const showAnalyzingOverlay = isLoading && !englishTranslationPending;
+  const showAnalyzingOverlay = isLoading && !englishTranslationPending && streamingCards.length === 0;
 
   if (!mounted) {
     return (

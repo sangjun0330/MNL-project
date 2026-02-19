@@ -59,6 +59,7 @@ type AnalyzeParams = {
   imageName?: string;
   previousResponseId?: string;
   conversationId?: string;
+  onTextDelta?: (delta: string) => void | Promise<void>;
   signal: AbortSignal;
 };
 
@@ -68,6 +69,8 @@ type ResponsesAttempt = {
   responseId: string | null;
   conversationId: string | null;
 };
+
+type TextDeltaHandler = (delta: string) => void | Promise<void>;
 
 type ResponseVerbosity = "low" | "medium" | "high";
 const MED_SAFETY_LOCKED_MODEL = "gpt-5.1";
@@ -658,6 +661,207 @@ function extractResponsesText(json: any): string {
   return chunks.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+function extractConversationId(json: any): string | null {
+  const conversationFromString = typeof json?.conversation === "string" ? json.conversation : "";
+  const conversationFromObject = typeof json?.conversation?.id === "string" ? json.conversation.id : "";
+  return conversationFromString || conversationFromObject || null;
+}
+
+function readStringFromUnknown(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return "";
+}
+
+function extractResponsesDelta(event: any): string {
+  const eventType = String(event?.type ?? "");
+  if (!eventType || !eventType.includes("delta")) return "";
+
+  const direct = readStringFromUnknown(event?.delta);
+  if (direct) return direct;
+
+  const outputTextDelta = readStringFromUnknown(event?.output_text?.delta);
+  if (outputTextDelta) return outputTextDelta;
+
+  const textDelta = readStringFromUnknown(event?.text?.delta);
+  if (textDelta) return textDelta;
+
+  const partText = readStringFromUnknown(event?.part?.text);
+  if (partText) return partText;
+
+  return "";
+}
+
+async function readResponsesEventStream(args: {
+  response: Response;
+  model: string;
+  onTextDelta: TextDeltaHandler;
+}): Promise<ResponsesAttempt> {
+  const { response, model, onTextDelta } = args;
+  const contentType = String(response.headers.get("content-type") ?? "").toLowerCase();
+  if (!contentType.includes("text/event-stream")) {
+    const fallbackJson = await response.json().catch(() => null);
+    const fallbackText = extractResponsesText(fallbackJson);
+    const fallbackResponseId = typeof fallbackJson?.id === "string" ? fallbackJson.id : null;
+    const fallbackConversationId = extractConversationId(fallbackJson);
+    if (!fallbackText) {
+      return {
+        text: null,
+        error: `openai_empty_text_model:${model}`,
+        responseId: fallbackResponseId,
+        conversationId: fallbackConversationId,
+      };
+    }
+    await onTextDelta(fallbackText);
+    return {
+      text: fallbackText,
+      error: null,
+      responseId: fallbackResponseId,
+      conversationId: fallbackConversationId,
+    };
+  }
+
+  if (!response.body) {
+    const fallbackJson = await response.json().catch(() => null);
+    const fallbackText = extractResponsesText(fallbackJson);
+    const fallbackResponseId = typeof fallbackJson?.id === "string" ? fallbackJson.id : null;
+    const fallbackConversationId = extractConversationId(fallbackJson);
+    if (!fallbackText) {
+      return {
+        text: null,
+        error: `openai_empty_text_model:${model}`,
+        responseId: fallbackResponseId,
+        conversationId: fallbackConversationId,
+      };
+    }
+    await onTextDelta(fallbackText);
+    return {
+      text: fallbackText,
+      error: null,
+      responseId: fallbackResponseId,
+      conversationId: fallbackConversationId,
+    };
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let rawText = "";
+  let responseId: string | null = null;
+  let conversationId: string | null = null;
+  let completedResponse: Record<string, unknown> | null = null;
+  let lastEventPayload: any = null;
+  let streamError: string | null = null;
+
+  const trackMeta = (node: any) => {
+    if (!node || typeof node !== "object") return;
+    if (!responseId && typeof node.id === "string") responseId = node.id;
+    if (!conversationId) {
+      conversationId = extractConversationId(node);
+    }
+  };
+
+  const handleSseBlock = async (block: string) => {
+    if (!block.trim()) return;
+    const dataLines = block
+      .split(/\r?\n/g)
+      .map((line) => line.trimEnd())
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trimStart());
+    if (!dataLines.length) return;
+    const dataText = dataLines.join("\n").trim();
+    if (!dataText || dataText === "[DONE]") return;
+
+    let event: any = null;
+    try {
+      event = JSON.parse(dataText);
+    } catch {
+      return;
+    }
+    lastEventPayload = event;
+    trackMeta(event);
+    if (event?.response && typeof event.response === "object") {
+      trackMeta(event.response);
+    }
+    const eventType = String(event?.type ?? "");
+    if (eventType === "response.completed" && event?.response && typeof event.response === "object") {
+      completedResponse = event.response as Record<string, unknown>;
+    }
+    if (eventType === "error") {
+      const errorMessage =
+        readStringFromUnknown(event?.error?.message) ||
+        readStringFromUnknown(event?.message) ||
+        "stream_error";
+      streamError = `openai_stream_error_model:${model}_${truncateError(errorMessage)}`;
+      return;
+    }
+    const delta = extractResponsesDelta(event);
+    if (!delta) return;
+    rawText += delta;
+    await onTextDelta(delta);
+  };
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+      while (true) {
+        const separatorIndex = buffer.indexOf("\n\n");
+        if (separatorIndex < 0) break;
+        const block = buffer.slice(0, separatorIndex);
+        buffer = buffer.slice(separatorIndex + 2);
+        await handleSseBlock(block);
+      }
+    }
+    buffer += decoder.decode().replace(/\r\n/g, "\n");
+    while (true) {
+      const separatorIndex = buffer.indexOf("\n\n");
+      if (separatorIndex < 0) break;
+      const block = buffer.slice(0, separatorIndex);
+      buffer = buffer.slice(separatorIndex + 2);
+      await handleSseBlock(block);
+    }
+    if (buffer.trim()) {
+      await handleSseBlock(buffer);
+    }
+  } catch (cause: any) {
+    return {
+      text: null,
+      error: `openai_stream_parse_failed_model:${model}_${truncateError(String(cause?.message ?? cause ?? "unknown_error"))}`,
+      responseId,
+      conversationId,
+    };
+  }
+
+  if (streamError) {
+    return {
+      text: null,
+      error: streamError,
+      responseId,
+      conversationId,
+    };
+  }
+
+  const fallbackNode = completedResponse ?? lastEventPayload?.response ?? lastEventPayload ?? null;
+  const fallbackText = fallbackNode ? extractResponsesText(fallbackNode) : "";
+  const finalText = (rawText || fallbackText).trim();
+  if (!finalText) {
+    return {
+      text: null,
+      error: `openai_empty_text_model:${model}`,
+      responseId,
+      conversationId,
+    };
+  }
+  return {
+    text: finalText,
+    error: null,
+    responseId,
+    conversationId,
+  };
+}
+
 function isRetryableOpenAIError(error: string) {
   const e = String(error ?? "").toLowerCase();
   if (!e) return false;
@@ -704,6 +908,7 @@ async function callResponsesApi(args: {
   verbosity: ResponseVerbosity;
   storeResponses: boolean;
   compatMode?: boolean;
+  onTextDelta?: TextDeltaHandler;
 }): Promise<ResponsesAttempt> {
   const {
     apiKey,
@@ -720,6 +925,7 @@ async function callResponsesApi(args: {
     verbosity,
     storeResponses,
     compatMode,
+    onTextDelta,
   } = args;
 
   const userContent: Array<Record<string, unknown>> = [{ type: "input_text", text: userPrompt }];
@@ -760,6 +966,7 @@ async function callResponsesApi(args: {
         tools: [],
         store: storeResponses,
       };
+  if (onTextDelta && !compatMode) body.stream = true;
   // conversation state는 동시에 2개 키를 보내지 않고 하나만 사용한다.
   if (previousResponseId) body.previous_response_id = previousResponseId;
   else if (conversationId) body.conversation = conversationId;
@@ -818,12 +1025,18 @@ async function callResponsesApi(args: {
     };
   }
 
+  if (onTextDelta) {
+    return readResponsesEventStream({
+      response,
+      model,
+      onTextDelta,
+    });
+  }
+
   const json = await response.json().catch(() => null);
   const text = extractResponsesText(json);
   const responseId = typeof json?.id === "string" ? json.id : null;
-  const conversationFromString = typeof json?.conversation === "string" ? json.conversation : "";
-  const conversationFromObject = typeof json?.conversation?.id === "string" ? json.conversation.id : "";
-  const conversationResponseId = conversationFromString || conversationFromObject || null;
+  const conversationResponseId = extractConversationId(json);
   if (!text) {
     return { text: null, error: `openai_empty_text_model:${model}`, responseId, conversationId: conversationResponseId };
   }
@@ -2032,6 +2245,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
           break;
         }
         const outputTokenLimit = outputTokenCandidates[tokenIndex]!;
+        const allowStreamDelta = Boolean(params.onTextDelta) && modelIndex === 0 && baseIndex === 0 && tokenIndex === 0;
         const attempt = await callResponsesApiWithRetry({
           apiKey,
           model: candidateModel,
@@ -2046,7 +2260,8 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
           upstreamTimeoutMs,
           verbosity: responseVerbosity,
           storeResponses,
-          retries: networkRetries,
+          onTextDelta: allowStreamDelta ? params.onTextDelta : undefined,
+          retries: allowStreamDelta ? 0 : networkRetries,
           retryBaseMs: networkRetryBaseMs,
         });
         if (!attempt.error && attempt.text) {

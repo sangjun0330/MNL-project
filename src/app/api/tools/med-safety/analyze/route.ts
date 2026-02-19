@@ -21,15 +21,19 @@ const DEFAULT_ANALYZE_TIMEOUT_MS = 420_000;
 const MIN_ANALYZE_TIMEOUT_MS = 300_000;
 const MAX_ANALYZE_TIMEOUT_MS = 900_000;
 
-function bad(status: number, error: string) {
+function safeErrorString(error: unknown) {
   const safeError = String(error ?? "unknown_error")
     .replace(/\s+/g, " ")
     .replace(/[^\x20-\x7E가-힣ㄱ-ㅎㅏ-ㅣ.,:;!?()[\]{}'"`~@#$%^&*_\-+=/\\|<>]/g, "")
     .slice(0, 260);
+  return safeError || "unknown_error";
+}
+
+function bad(status: number, error: string) {
   return NextResponse.json(
     {
       ok: false,
-      error: safeError || "unknown_error",
+      error: safeErrorString(error),
     },
     { status }
   );
@@ -210,6 +214,17 @@ function buildResponseData(params: {
   };
 }
 
+function pickStreamMode(raw: FormDataEntryValue | null) {
+  const value = String(raw ?? "")
+    .trim()
+    .toLowerCase();
+  return value === "1" || value === "true" || value === "yes" || value === "on";
+}
+
+function sseLine(event: string, payload: unknown) {
+  return `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const userId = await safeReadUserId(req);
@@ -222,6 +237,7 @@ export async function POST(req: NextRequest) {
     const mode = pickMode(form.get("mode"));
     const situation = pickSituation(form.get("situation"));
     const queryIntent = pickQueryIntent(form.get("queryIntent"));
+    const streamMode = pickStreamMode(form.get("stream"));
     const previousResponseId = pickOpenAIStateId(form.get("previousResponseId"));
     const conversationId = pickOpenAIStateId(form.get("conversationId"));
     const query = String(form.get("query") ?? "")
@@ -257,7 +273,7 @@ export async function POST(req: NextRequest) {
     const timeout = setTimeout(() => abort.abort(), timeoutMs);
     const routeStartedAt = Date.now();
 
-    try {
+    const runAnalyze = async (onTextDelta?: (delta: string) => void | Promise<void>) => {
       const analyzedAt = Date.now();
       const today = todayISO();
 
@@ -273,6 +289,7 @@ export async function POST(req: NextRequest) {
         imageName: imageName || undefined,
         previousResponseId,
         conversationId,
+        onTextDelta,
         signal: abort.signal,
       });
 
@@ -370,14 +387,70 @@ export async function POST(req: NextRequest) {
       }
 
       const responseData = locale === "en" ? payloadEn ?? payloadKo : payloadKo;
+      return responseData;
+    };
 
-      return NextResponse.json({
-        ok: true,
-        data: responseData,
-      });
-    } finally {
-      clearTimeout(timeout);
+    if (!streamMode) {
+      try {
+        const responseData = await runAnalyze();
+        return NextResponse.json({
+          ok: true,
+          data: responseData,
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
     }
+
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        const pushEvent = (event: string, payload: unknown) => {
+          try {
+            controller.enqueue(encoder.encode(sseLine(event, payload)));
+          } catch {
+            // ignore enqueue failure after close/cancel
+          }
+        };
+
+        pushEvent("start", { ok: true });
+        try {
+          const responseData = await runAnalyze(async (delta) => {
+            const chunk = String(delta ?? "");
+            if (!chunk) return;
+            pushEvent("delta", { text: chunk });
+          });
+          pushEvent("result", {
+            ok: true,
+            data: responseData,
+          });
+        } catch (error: any) {
+          pushEvent("error", {
+            ok: false,
+            error: safeErrorString(error?.message ?? error ?? "med_safety_analyze_failed"),
+          });
+        } finally {
+          clearTimeout(timeout);
+          try {
+            controller.close();
+          } catch {
+            // ignore close failure
+          }
+        }
+      },
+      cancel() {
+        abort.abort();
+        clearTimeout(timeout);
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+      },
+    });
   } catch (error: any) {
     return bad(500, error?.message || "med_safety_analyze_failed");
   }
