@@ -218,7 +218,7 @@ export async function POST(req: Request) {
           status,
           payload,
         });
-        if (status === "CANCELED") {
+        if (status === "CANCELED" && order.orderKind === "subscription") {
           await downgradeToFreeNow({
             userId,
             reason: `Webhook cancel: ${status}`,
@@ -252,7 +252,7 @@ export async function POST(req: Request) {
         status,
         payload,
       });
-      if (status === "CANCELED") {
+      if (status === "CANCELED" && order.orderKind === "subscription") {
         await downgradeToFreeNow({
           userId,
           reason: `Webhook cancel: ${status}`,

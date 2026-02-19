@@ -4,13 +4,15 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { getSupabaseBrowserClient, useAuthState } from "@/lib/auth";
-import { formatKrw, getPlanDefinition, type PlanTier } from "@/lib/billing/plans";
+import { formatKrw, getCheckoutProductDefinition, getPlanDefinition, type PlanTier } from "@/lib/billing/plans";
 import { useI18n } from "@/lib/useI18n";
 
 type ConfirmResult = {
   order: {
     orderId: string;
     planTier: PlanTier;
+    orderKind: "subscription" | "credit_pack";
+    creditPackUnits: number;
     amount: number;
     status: "READY" | "DONE" | "FAILED" | "CANCELED";
     approvedAt: string | null;
@@ -53,7 +55,7 @@ export function SettingsBillingSuccessPage() {
   const flatSubSurface = "rounded-[18px] border border-ios-sep bg-[#F7F7FA]";
   const flatButtonBase =
     "inline-flex h-10 items-center justify-center rounded-full border px-5 text-[13px] font-semibold transition-colors";
-  const flatButtonPrimary = `${flatButtonBase} border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]`;
+  const flatButtonPrimary = `${flatButtonBase} border-[color:var(--wnl-accent)] bg-[color:var(--wnl-accent)] text-white hover:bg-[color:var(--wnl-accent-strong)]`;
   const flatButtonSecondary = `${flatButtonBase} border-ios-sep bg-[#F2F2F7] text-ios-text`;
 
   const parsedAmount = useMemo(() => {
@@ -111,7 +113,11 @@ export function SettingsBillingSuccessPage() {
     void run();
   }, [status, paymentKey, orderId, parsedAmount, t]);
 
+  const orderKind = result?.order?.orderKind ?? "subscription";
   const planTier = result?.subscription?.tier ?? result?.order?.planTier ?? "free";
+  const isCreditPack = orderKind === "credit_pack";
+  const creditUnits = Math.max(0, Number(result?.order?.creditPackUnits ?? 0));
+  const creditProduct = getCheckoutProductDefinition("credit10");
 
   return (
     <div className="mx-auto w-full max-w-[720px] px-4 pb-24 pt-6">
@@ -135,14 +141,22 @@ export function SettingsBillingSuccessPage() {
             </div>
 
             <div className={`${flatSubSurface} mt-4 p-4`}>
-              <div className="text-[13px] text-ios-sub">{t("적용 플랜")}</div>
-              <div className="mt-1 text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">{getPlanDefinition(planTier).title}</div>
+              <div className="text-[13px] text-ios-sub">{isCreditPack ? t("구매 상품") : t("적용 플랜")}</div>
+              <div className="mt-1 text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">
+                {isCreditPack ? creditProduct.title : getPlanDefinition(planTier).title}
+              </div>
               <div className="mt-2 text-[12.5px] text-ios-sub">
                 {t("결제 금액")}: {formatKrw(result.order?.amount ?? parsedAmount ?? 0)}
               </div>
-              <div className="mt-1 text-[12.5px] text-ios-sub">
-                {t("만료일")}: {formatDateLabel(result.subscription?.currentPeriodEnd ?? null)}
-              </div>
+              {isCreditPack ? (
+                <div className="mt-1 text-[12.5px] text-ios-sub">
+                  {t("충전 크레딧")}: {creditUnits > 0 ? `${creditUnits}${t("회")}` : `10${t("회")}`}
+                </div>
+              ) : (
+                <div className="mt-1 text-[12.5px] text-ios-sub">
+                  {t("만료일")}: {formatDateLabel(result.subscription?.currentPeriodEnd ?? null)}
+                </div>
+              )}
               <div className="mt-1 text-[11.5px] text-ios-muted break-all">orderId: {result.order?.orderId ?? orderId}</div>
             </div>
           </>

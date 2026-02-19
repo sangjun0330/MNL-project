@@ -1,6 +1,6 @@
 "use client";
 
-import type { PlanTier } from "@/lib/billing/plans";
+import type { BillingOrderKind, CheckoutProductId, PlanTier } from "@/lib/billing/plans";
 import { getSupabaseBrowserClient } from "@/lib/auth";
 
 export type SubscriptionApi = {
@@ -15,11 +15,24 @@ export type SubscriptionApi = {
   canceledAt: string | null;
   cancelReason: string | null;
   hasPaidAccess: boolean;
+  medSafetyQuota: {
+    timezone: "Asia/Seoul";
+    dailyLimit: number;
+    dailyUsed: number;
+    dailyRemaining: number;
+    extraCredits: number;
+    totalRemaining: number;
+    usageDate: string;
+    nextResetAt: string;
+    isPro: boolean;
+  };
 };
 
 export type BillingOrderApi = {
   orderId: string;
   planTier: PlanTier;
+  orderKind: BillingOrderKind;
+  creditPackUnits: number;
   amount: number;
   currency: string;
   status: "READY" | "DONE" | "FAILED" | "CANCELED";
@@ -34,10 +47,18 @@ export type BillingOrderApi = {
 export type SubscriptionResponse = {
   subscription: SubscriptionApi;
   orders: BillingOrderApi[];
+  purchaseSummary: {
+    totalPaidAmount: number;
+    subscriptionPaidAmount: number;
+    creditPaidAmount: number;
+    creditPurchasedUnits: number;
+  };
 };
 
 export type CheckoutResponse = {
-  planTier: "pro";
+  productId: CheckoutProductId;
+  orderKind: BillingOrderKind;
+  creditPackUnits: number;
   orderId: string;
   orderName: string;
   amount: number;
@@ -224,7 +245,7 @@ export async function ensureTossScript() {
   return tossScriptPromise;
 }
 
-export async function requestPlanCheckout(plan: "pro" = "pro") {
+export async function requestPlanCheckout(product: CheckoutProductId = "pro") {
   const headers = await authHeaders();
   const checkoutRes = await fetch("/api/billing/checkout", {
     method: "POST",
@@ -232,7 +253,7 @@ export async function requestPlanCheckout(plan: "pro" = "pro") {
       "content-type": "application/json",
       ...headers,
     },
-    body: JSON.stringify({ plan }),
+    body: JSON.stringify({ product }),
   });
   const checkoutJson = await checkoutRes.json().catch(() => null);
   if (!checkoutRes.ok || !checkoutJson?.ok) {

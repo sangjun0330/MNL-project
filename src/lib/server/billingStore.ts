@@ -1,4 +1,4 @@
-import { getPlanDefinition, type PlanTier } from "@/lib/billing/plans";
+import { getPlanDefinition, type BillingOrderKind, type PlanTier } from "@/lib/billing/plans";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { ensureUserRow } from "@/lib/server/userStateStore";
 import type { Json } from "@/types/supabase";
@@ -19,12 +19,36 @@ export type SubscriptionSnapshot = {
   canceledAt: string | null;
   cancelReason: string | null;
   hasPaidAccess: boolean;
+  medSafetyQuota: MedSafetyQuotaSnapshot;
+};
+
+export type MedSafetyCreditSource = "daily" | "extra";
+
+export type MedSafetyQuotaSnapshot = {
+  timezone: "Asia/Seoul";
+  dailyLimit: number;
+  dailyUsed: number;
+  dailyRemaining: number;
+  extraCredits: number;
+  totalRemaining: number;
+  usageDate: string;
+  nextResetAt: string;
+  isPro: boolean;
+};
+
+export type MedSafetyCreditConsumeResult = {
+  allowed: boolean;
+  source: MedSafetyCreditSource | null;
+  quota: MedSafetyQuotaSnapshot;
+  reason: string | null;
 };
 
 export type BillingOrderSummary = {
   orderId: string;
   userId?: string;
   planTier: PlanTier;
+  orderKind: BillingOrderKind;
+  creditPackUnits: number;
   amount: number;
   currency: string;
   status: BillingOrderStatus;
@@ -90,15 +114,23 @@ export type BillingRefundEventSummary = {
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const MED_SAFETY_DAILY_LIMIT_PRO = 10;
+const MED_SAFETY_TIMEZONE = "Asia/Seoul" as const;
 const OPTIONAL_CANCEL_COLUMNS = [
   "subscription_cancel_at_period_end",
   "subscription_cancel_scheduled_at",
   "subscription_canceled_at",
   "subscription_cancel_reason",
 ] as const;
+const OPTIONAL_MED_SAFETY_COLUMNS = [
+  "med_safety_extra_credits",
+  "med_safety_daily_used",
+  "med_safety_usage_date",
+] as const;
 const BASE_SUBSCRIPTION_SELECT =
   "subscription_tier, subscription_status, subscription_started_at, subscription_current_period_end, subscription_updated_at, toss_customer_key";
-const FULL_SUBSCRIPTION_SELECT = `${BASE_SUBSCRIPTION_SELECT}, ${OPTIONAL_CANCEL_COLUMNS.join(", ")}`;
+const OPTIONAL_SUBSCRIPTION_COLUMNS = [...OPTIONAL_CANCEL_COLUMNS, ...OPTIONAL_MED_SAFETY_COLUMNS] as const;
+const FULL_SUBSCRIPTION_SELECT = `${BASE_SUBSCRIPTION_SELECT}, ${OPTIONAL_SUBSCRIPTION_COLUMNS.join(", ")}`;
 const REFUND_REQUEST_SELECT = [
   "id",
   "user_id",
@@ -126,6 +158,10 @@ const REFUND_REQUEST_SELECT = [
   "notify_user_sent_at",
 ].join(", ");
 const OPEN_REFUND_STATUSES = ["REQUESTED", "UNDER_REVIEW", "APPROVED", "EXECUTING", "FAILED_RETRYABLE", "PENDING"];
+const OPTIONAL_BILLING_ORDER_COLUMNS = ["order_kind", "credit_pack_units"] as const;
+const BILLING_ORDER_SELECT_BASE =
+  "order_id, user_id, plan_tier, amount, currency, status, order_name, payment_key, fail_code, fail_message, approved_at, created_at";
+const BILLING_ORDER_SELECT_WITH_OPTIONAL = `${BILLING_ORDER_SELECT_BASE}, ${OPTIONAL_BILLING_ORDER_COLUMNS.join(", ")}`;
 
 function isSchemaCacheMissingColumnError(error: any, column: string) {
   const message = String(error?.message ?? "");
@@ -152,28 +188,32 @@ function isSchemaCacheMissingColumnError(error: any, column: string) {
   return false;
 }
 
-function isOptionalCancelColumnError(error: any) {
-  return OPTIONAL_CANCEL_COLUMNS.some((column) => isSchemaCacheMissingColumnError(error, column));
+function isOptionalSubscriptionColumnError(error: any) {
+  return OPTIONAL_SUBSCRIPTION_COLUMNS.some((column) => isSchemaCacheMissingColumnError(error, column));
 }
 
-function stripOptionalCancelColumns(values: Record<string, unknown>) {
+function isOptionalBillingOrderColumnError(error: any) {
+  return OPTIONAL_BILLING_ORDER_COLUMNS.some((column) => isSchemaCacheMissingColumnError(error, column));
+}
+
+function stripOptionalSubscriptionColumns(values: Record<string, unknown>) {
   const next = { ...values } as Record<string, unknown>;
-  for (const column of OPTIONAL_CANCEL_COLUMNS) {
+  for (const column of OPTIONAL_SUBSCRIPTION_COLUMNS) {
     delete next[column];
   }
   return next;
 }
 
-async function updateUserWithOptionalCancelFallback(userId: string, values: Record<string, unknown>) {
+async function updateUserWithOptionalSubscriptionFallback(userId: string, values: Record<string, unknown>) {
   const admin = getSupabaseAdmin();
   const { error } = await admin.from("wnl_users").update(values).eq("user_id", userId);
   if (!error) return;
 
-  if (!isOptionalCancelColumnError(error)) {
+  if (!isOptionalSubscriptionColumnError(error)) {
     throw error;
   }
 
-  const fallbackValues = stripOptionalCancelColumns(values);
+  const fallbackValues = stripOptionalSubscriptionColumns(values);
   if (Object.keys(fallbackValues).length === 0) {
     throw new Error("billing_schema_outdated_optional_columns");
   }
@@ -182,17 +222,17 @@ async function updateUserWithOptionalCancelFallback(userId: string, values: Reco
   if (fallbackError) throw fallbackError;
 }
 
-async function readUserSubscriptionRow(userId: string): Promise<{ data: any; supportsCancelColumns: boolean }> {
+async function readUserSubscriptionRow(userId: string): Promise<{ data: any; supportsOptionalColumns: boolean }> {
   const admin = getSupabaseAdmin();
   const fullRes = await admin.from("wnl_users").select(FULL_SUBSCRIPTION_SELECT).eq("user_id", userId).maybeSingle();
   if (!fullRes.error) {
     return {
       data: fullRes.data,
-      supportsCancelColumns: true,
+      supportsOptionalColumns: true,
     };
   }
 
-  if (!isOptionalCancelColumnError(fullRes.error)) {
+  if (!isOptionalSubscriptionColumnError(fullRes.error)) {
     throw fullRes.error;
   }
 
@@ -201,7 +241,7 @@ async function readUserSubscriptionRow(userId: string): Promise<{ data: any; sup
 
   return {
     data: fallbackRes.data,
-    supportsCancelColumns: false,
+    supportsOptionalColumns: false,
   };
 }
 
@@ -220,6 +260,61 @@ function parseDate(value: string | null): Date | null {
   if (!value) return null;
   const d = new Date(value);
   return Number.isFinite(d.getTime()) ? d : null;
+}
+
+function toKstDateISO(value: Date = new Date()) {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: MED_SAFETY_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const parts = formatter.formatToParts(value);
+  const year = parts.find((part) => part.type === "year")?.value ?? "";
+  const month = parts.find((part) => part.type === "month")?.value ?? "";
+  const day = parts.find((part) => part.type === "day")?.value ?? "";
+  if (/^\d{4}$/.test(year) && /^\d{2}$/.test(month) && /^\d{2}$/.test(day)) {
+    return `${year}-${month}-${day}`;
+  }
+  return value.toISOString().slice(0, 10);
+}
+
+function sanitizeIsoDate(value: unknown) {
+  const text = String(value ?? "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  return "";
+}
+
+function toNonNegativeInt(value: unknown, fallback = 0) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return Math.max(0, Math.round(fallback));
+  return Math.max(0, Math.round(n));
+}
+
+function buildMedSafetyQuotaSnapshot(input: {
+  hasPaidAccess: boolean;
+  usageDate: string;
+  dailyUsed: number;
+  extraCredits: number;
+}): MedSafetyQuotaSnapshot {
+  const now = new Date();
+  const today = toKstDateISO(now);
+  const isToday = input.usageDate === today;
+  const normalizedUsed = isToday ? toNonNegativeInt(input.dailyUsed) : 0;
+  const normalizedExtra = toNonNegativeInt(input.extraCredits);
+  const dailyRemaining = input.hasPaidAccess ? Math.max(0, MED_SAFETY_DAILY_LIMIT_PRO - normalizedUsed) : 0;
+  const nextReset = new Date(now.getTime() + DAY_MS);
+  return {
+    timezone: MED_SAFETY_TIMEZONE,
+    dailyLimit: MED_SAFETY_DAILY_LIMIT_PRO,
+    dailyUsed: normalizedUsed,
+    dailyRemaining,
+    extraCredits: normalizedExtra,
+    totalRemaining: dailyRemaining + normalizedExtra,
+    usageDate: today,
+    nextResetAt: toKstDateISO(nextReset),
+    isPro: input.hasPaidAccess,
+  };
 }
 
 function hasPaidAccessFromSnapshot(input: {
@@ -244,11 +339,44 @@ function asOrderStatus(value: unknown): BillingOrderStatus {
   return "READY";
 }
 
+function asOrderKind(value: unknown): BillingOrderKind {
+  if (value === "credit_pack") return "credit_pack";
+  return "subscription";
+}
+
+function inferOrderKindFromLegacyFields(row: any): BillingOrderKind {
+  if (row && Object.prototype.hasOwnProperty.call(row, "order_kind")) {
+    return asOrderKind(row?.order_kind);
+  }
+  const orderId = String(row?.order_id ?? "").toLowerCase();
+  const orderName = String(row?.order_name ?? "").toLowerCase();
+  if (/(^|_)credit(?:10)?(_|$)/.test(orderId)) return "credit_pack";
+  if (/credit|크레딧/.test(orderName)) return "credit_pack";
+  return "subscription";
+}
+
+function inferCreditPackUnitsFromLegacyFields(row: any, orderKind: BillingOrderKind) {
+  if (row && Object.prototype.hasOwnProperty.call(row, "credit_pack_units")) {
+    return toNonNegativeInt(row?.credit_pack_units, 0);
+  }
+  if (orderKind !== "credit_pack") return 0;
+  const fromOrderName = String(row?.order_name ?? "").match(/(\d+)\s*(?:회|credits?)/i);
+  if (fromOrderName?.[1]) {
+    return Math.max(1, toNonNegativeInt(fromOrderName[1], 10));
+  }
+  if (String(row?.order_id ?? "").toLowerCase().includes("credit10")) return 10;
+  return 10;
+}
+
 function toBillingOrderSummary(row: any): BillingOrderSummary {
+  const orderKind = inferOrderKindFromLegacyFields(row);
+  const creditPackUnits = inferCreditPackUnitsFromLegacyFields(row, orderKind);
   return {
     orderId: row?.order_id ?? "",
     userId: row?.user_id ?? undefined,
     planTier: asPlanTier(row?.plan_tier),
+    orderKind,
+    creditPackUnits,
     amount: Number(row?.amount ?? 0),
     currency: row?.currency ?? "KRW",
     status: asOrderStatus(row?.status),
@@ -497,23 +625,59 @@ export async function listRefundEventsByRequestId(requestId: number, limit = 50)
 
 async function readLatestPaidDoneOrder(userId: string): Promise<BillingOrderSummary | null> {
   const admin = getSupabaseAdmin();
-  const { data, error } = await admin
+  const fullRes = await admin
     .from("billing_orders")
-    .select("order_id, plan_tier, amount, currency, status, order_name, payment_key, fail_code, fail_message, approved_at, created_at")
+    .select(BILLING_ORDER_SELECT_WITH_OPTIONAL)
     .eq("user_id", userId)
     .eq("status", "DONE")
+    .eq("plan_tier", "pro")
+    .eq("order_kind", "subscription")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  if (error) throw error;
-  if (!data) return null;
-  return toBillingOrderSummary(data);
+  if (!fullRes.error) {
+    if (!fullRes.data) return null;
+    return toBillingOrderSummary(fullRes.data);
+  }
+
+  if (!isOptionalBillingOrderColumnError(fullRes.error)) {
+    throw fullRes.error;
+  }
+
+  const fallbackRes = await admin
+    .from("billing_orders")
+    .select(BILLING_ORDER_SELECT_BASE)
+    .eq("user_id", userId)
+    .eq("status", "DONE")
+    .eq("plan_tier", "pro")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (fallbackRes.error) throw fallbackRes.error;
+  if (!fallbackRes.data) return null;
+  const summary = toBillingOrderSummary(fallbackRes.data);
+  return summary.orderKind === "subscription" ? summary : null;
 }
 
 async function readLatestCanceledOrderUpdatedAt(userId: string): Promise<Date | null> {
   const admin = getSupabaseAdmin();
-  const { data, error } = await admin
+  const fullRes = await admin
+    .from("billing_orders")
+    .select("updated_at, created_at, order_kind")
+    .eq("user_id", userId)
+    .eq("status", "CANCELED")
+    .eq("order_kind", "subscription")
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!fullRes.error) {
+    if (!fullRes.data) return null;
+    return parseDate(fullRes.data.updated_at ?? fullRes.data.created_at ?? null);
+  }
+  if (!isOptionalBillingOrderColumnError(fullRes.error)) throw fullRes.error;
+
+  const fallbackRes = await admin
     .from("billing_orders")
     .select("updated_at, created_at")
     .eq("user_id", userId)
@@ -521,9 +685,9 @@ async function readLatestCanceledOrderUpdatedAt(userId: string): Promise<Date | 
     .order("updated_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (error) throw error;
-  if (!data) return null;
-  return parseDate(data.updated_at ?? data.created_at ?? null);
+  if (fallbackRes.error) throw fallbackRes.error;
+  if (!fallbackRes.data) return null;
+  return parseDate(fallbackRes.data.updated_at ?? fallbackRes.data.created_at ?? null);
 }
 
 async function maybeRecoverSubscriptionFromLatestPaidOrder(
@@ -558,7 +722,7 @@ async function maybeRecoverSubscriptionFromLatestPaidOrder(
 
   const startedAt = snapshot.tier === latestPaid.planTier && snapshot.startedAt ? snapshot.startedAt : paidBaseDate.toISOString();
   const nowIso = new Date().toISOString();
-  await updateUserWithOptionalCancelFallback(userId, {
+  await updateUserWithOptionalSubscriptionFallback(userId, {
     subscription_tier: latestPaid.planTier,
     subscription_status: "active",
     subscription_started_at: startedAt,
@@ -597,6 +761,9 @@ export async function readSubscription(
   let cancelScheduledAt = data?.subscription_cancel_scheduled_at ?? null;
   const canceledAt = data?.subscription_canceled_at ?? null;
   const cancelReason = sanitizeCancelReason(data?.subscription_cancel_reason);
+  const medSafetyExtraCredits = toNonNegativeInt(data?.med_safety_extra_credits, 0);
+  const medSafetyDailyUsedRaw = toNonNegativeInt(data?.med_safety_daily_used, 0);
+  const medSafetyUsageDate = sanitizeIsoDate(data?.med_safety_usage_date);
 
   const endDate = parseDate(currentPeriodEnd);
   const now = Date.now();
@@ -604,7 +771,7 @@ export async function readSubscription(
   if (shouldExpire) {
     const nowIso = new Date(now).toISOString();
     try {
-      await updateUserWithOptionalCancelFallback(userId, {
+      await updateUserWithOptionalSubscriptionFallback(userId, {
         subscription_tier: "free",
         subscription_status: "expired",
         subscription_updated_at: nowIso,
@@ -621,6 +788,14 @@ export async function readSubscription(
     }
   }
 
+  const hasPaidAccess = hasPaidAccessFromSnapshot({ tier, status, currentPeriodEnd });
+  const medSafetyQuota = buildMedSafetyQuotaSnapshot({
+    hasPaidAccess,
+    usageDate: medSafetyUsageDate,
+    dailyUsed: medSafetyDailyUsedRaw,
+    extraCredits: medSafetyExtraCredits,
+  });
+
   const snapshot: SubscriptionSnapshot = {
     tier,
     status,
@@ -632,7 +807,8 @@ export async function readSubscription(
     cancelScheduledAt,
     canceledAt,
     cancelReason,
-    hasPaidAccess: hasPaidAccessFromSnapshot({ tier, status, currentPeriodEnd }),
+    hasPaidAccess,
+    medSafetyQuota,
   };
 
   if (options?.skipReconcile) {
@@ -647,10 +823,243 @@ export async function readSubscription(
   }
 }
 
+function isMissingMedSafetyCreditColumnError(error: any) {
+  return OPTIONAL_MED_SAFETY_COLUMNS.some((column) => isSchemaCacheMissingColumnError(error, column));
+}
+
+async function readMedSafetyCreditRow(userId: string): Promise<{
+  extraCredits: number;
+  dailyUsed: number;
+  usageDate: string;
+}> {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("wnl_users")
+    .select("med_safety_extra_credits, med_safety_daily_used, med_safety_usage_date")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) {
+    if (isMissingMedSafetyCreditColumnError(error)) {
+      throw new Error("med_safety_credit_columns_missing");
+    }
+    throw error;
+  }
+  return {
+    extraCredits: toNonNegativeInt(data?.med_safety_extra_credits, 0),
+    dailyUsed: toNonNegativeInt(data?.med_safety_daily_used, 0),
+    usageDate: sanitizeIsoDate(data?.med_safety_usage_date),
+  };
+}
+
+export async function addMedSafetyExtraCredits(input: {
+  userId: string;
+  credits: number;
+  nowIso?: string;
+}): Promise<SubscriptionSnapshot> {
+  const credits = Math.max(0, Math.round(input.credits));
+  if (credits <= 0) return readSubscription(input.userId);
+  await ensureUserRow(input.userId);
+
+  const admin = getSupabaseAdmin();
+  const nowIso = input.nowIso ?? new Date().toISOString();
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const row = await readMedSafetyCreditRow(input.userId);
+    const nextExtra = row.extraCredits + credits;
+    const { data, error } = await admin
+      .from("wnl_users")
+      .update({
+        med_safety_extra_credits: nextExtra,
+        last_seen: nowIso,
+      })
+      .eq("user_id", input.userId)
+      .eq("med_safety_extra_credits", row.extraCredits)
+      .select("user_id")
+      .maybeSingle();
+    if (error) {
+      if (isMissingMedSafetyCreditColumnError(error)) {
+        throw new Error("med_safety_credit_columns_missing");
+      }
+      throw error;
+    }
+    if (data) return readSubscription(input.userId, { skipReconcile: true });
+  }
+
+  throw new Error("med_safety_credit_race_retry_exceeded");
+}
+
+export async function consumeMedSafetyCredit(input: {
+  userId: string;
+}): Promise<MedSafetyCreditConsumeResult> {
+  await ensureUserRow(input.userId);
+  const admin = getSupabaseAdmin();
+  const subscription = await readSubscription(input.userId);
+  const hasPaidAccess = subscription.hasPaidAccess;
+  const today = toKstDateISO(new Date());
+  const nowIso = new Date().toISOString();
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const row = await readMedSafetyCreditRow(input.userId);
+    const usedToday = row.usageDate === today ? row.dailyUsed : 0;
+    const extraCredits = row.extraCredits;
+
+    let source: MedSafetyCreditSource | null = null;
+    let nextDailyUsed = usedToday;
+    let nextExtra = extraCredits;
+
+    if (hasPaidAccess && usedToday < MED_SAFETY_DAILY_LIMIT_PRO) {
+      source = "daily";
+      nextDailyUsed = usedToday + 1;
+    } else if (extraCredits > 0) {
+      source = "extra";
+      nextExtra = extraCredits - 1;
+    } else {
+      return {
+        allowed: false,
+        source: null,
+        reason: "insufficient_med_safety_credits",
+        quota: buildMedSafetyQuotaSnapshot({
+          hasPaidAccess,
+          usageDate: today,
+          dailyUsed: usedToday,
+          extraCredits,
+        }),
+      };
+    }
+
+    const { data, error } = await admin
+      .from("wnl_users")
+      .update({
+        med_safety_usage_date: today,
+        med_safety_daily_used: nextDailyUsed,
+        med_safety_extra_credits: nextExtra,
+        last_seen: nowIso,
+      })
+      .eq("user_id", input.userId)
+      .eq("med_safety_daily_used", row.dailyUsed)
+      .eq("med_safety_extra_credits", row.extraCredits)
+      .select("user_id")
+      .maybeSingle();
+    if (error) {
+      if (isMissingMedSafetyCreditColumnError(error)) {
+        throw new Error("med_safety_credit_columns_missing");
+      }
+      throw error;
+    }
+    if (!data) continue;
+
+    return {
+      allowed: true,
+      source,
+      reason: null,
+      quota: buildMedSafetyQuotaSnapshot({
+        hasPaidAccess,
+        usageDate: today,
+        dailyUsed: nextDailyUsed,
+        extraCredits: nextExtra,
+      }),
+    };
+  }
+
+  throw new Error("med_safety_credit_race_retry_exceeded");
+}
+
+export async function restoreConsumedMedSafetyCredit(input: {
+  userId: string;
+  source: MedSafetyCreditSource;
+}): Promise<void> {
+  await ensureUserRow(input.userId);
+  const admin = getSupabaseAdmin();
+  const today = toKstDateISO(new Date());
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const row = await readMedSafetyCreditRow(input.userId);
+    const usedToday = row.usageDate === today ? row.dailyUsed : 0;
+    const extraCredits = row.extraCredits;
+    const nextDailyUsed = input.source === "daily" ? Math.max(0, usedToday - 1) : usedToday;
+    const nextExtra = input.source === "extra" ? extraCredits + 1 : extraCredits;
+    const nextUsageDate = row.usageDate || today;
+
+    const { data, error } = await admin
+      .from("wnl_users")
+      .update({
+        med_safety_usage_date: nextUsageDate,
+        med_safety_daily_used: nextDailyUsed,
+        med_safety_extra_credits: nextExtra,
+      })
+      .eq("user_id", input.userId)
+      .eq("med_safety_daily_used", row.dailyUsed)
+      .eq("med_safety_extra_credits", row.extraCredits)
+      .select("user_id")
+      .maybeSingle();
+
+    if (error) {
+      if (isMissingMedSafetyCreditColumnError(error)) return;
+      throw error;
+    }
+    if (data) return;
+  }
+}
+
+export type BillingPurchaseSummary = {
+  totalPaidAmount: number;
+  subscriptionPaidAmount: number;
+  creditPaidAmount: number;
+  creditPurchasedUnits: number;
+};
+
+export async function readBillingPurchaseSummary(userId: string): Promise<BillingPurchaseSummary> {
+  const admin = getSupabaseAdmin();
+  const fullRes = await admin
+    .from("billing_orders")
+    .select("order_id, order_name, amount, order_kind, credit_pack_units, status")
+    .eq("user_id", userId)
+    .eq("status", "DONE");
+  if (fullRes.error && !isOptionalBillingOrderColumnError(fullRes.error)) throw fullRes.error;
+
+  let rows: any[] = Array.isArray(fullRes.data) ? [...fullRes.data] : [];
+  if (fullRes.error && isOptionalBillingOrderColumnError(fullRes.error)) {
+    const fallbackRes = await admin
+      .from("billing_orders")
+      .select("order_id, order_name, amount, status")
+      .eq("user_id", userId)
+      .eq("status", "DONE");
+    if (fallbackRes.error) throw fallbackRes.error;
+    rows = Array.isArray(fallbackRes.data) ? [...fallbackRes.data] : [];
+  }
+
+  let totalPaidAmount = 0;
+  let subscriptionPaidAmount = 0;
+  let creditPaidAmount = 0;
+  let creditPurchasedUnits = 0;
+
+  for (const row of rows) {
+    const amount = toNonNegativeInt((row as any)?.amount, 0);
+    const kind = inferOrderKindFromLegacyFields(row as any);
+    const credits = inferCreditPackUnitsFromLegacyFields(row as any, kind);
+    totalPaidAmount += amount;
+    if (kind === "credit_pack") {
+      creditPaidAmount += amount;
+      creditPurchasedUnits += credits;
+    } else {
+      subscriptionPaidAmount += amount;
+    }
+  }
+
+  return {
+    totalPaidAmount,
+    subscriptionPaidAmount,
+    creditPaidAmount,
+    creditPurchasedUnits,
+  };
+}
+
 export async function createBillingOrder(input: {
   userId: string;
   orderId: string;
   planTier: Exclude<PlanTier, "free">;
+  orderKind?: BillingOrderKind;
+  creditPackUnits?: number;
   amount: number;
   currency?: string;
   orderName?: string;
@@ -658,19 +1067,43 @@ export async function createBillingOrder(input: {
   const admin = getSupabaseAdmin();
   const now = new Date().toISOString();
   const plan = getPlanDefinition(input.planTier);
+  const orderKind: BillingOrderKind = input.orderKind === "credit_pack" ? "credit_pack" : "subscription";
+  const creditPackUnits = orderKind === "credit_pack" ? Math.max(1, toNonNegativeInt(input.creditPackUnits, 10)) : 0;
 
   await ensureUserRow(input.userId);
 
-  await updateUserWithOptionalCancelFallback(input.userId, {
+  const baseUserUpdate: Record<string, unknown> = {
     toss_customer_key: createCustomerKey(input.userId),
     toss_last_order_id: input.orderId,
-    subscription_cancel_at_period_end: false,
-    subscription_cancel_scheduled_at: null,
-    subscription_cancel_reason: null,
     last_seen: now,
-  });
+  };
+  if (orderKind === "subscription") {
+    baseUserUpdate.subscription_cancel_at_period_end = false;
+    baseUserUpdate.subscription_cancel_scheduled_at = null;
+    baseUserUpdate.subscription_cancel_reason = null;
+  }
+  await updateUserWithOptionalSubscriptionFallback(input.userId, baseUserUpdate);
 
-  const { error } = await admin.from("billing_orders").insert({
+  const fullInsert = await admin.from("billing_orders").insert({
+    order_id: input.orderId,
+    user_id: input.userId,
+    plan_tier: input.planTier,
+    order_kind: orderKind,
+    credit_pack_units: creditPackUnits,
+    amount: Math.round(input.amount),
+    currency: input.currency ?? "KRW",
+    status: "READY",
+    order_name: input.orderName ?? plan.orderName,
+    created_at: now,
+    updated_at: now,
+  });
+  if (!fullInsert.error) return;
+  if (!isOptionalBillingOrderColumnError(fullInsert.error)) throw fullInsert.error;
+  if (orderKind === "credit_pack") {
+    throw new Error("billing_schema_outdated_credit_pack_columns");
+  }
+
+  const fallbackInsert = await admin.from("billing_orders").insert({
     order_id: input.orderId,
     user_id: input.userId,
     plan_tier: input.planTier,
@@ -681,8 +1114,7 @@ export async function createBillingOrder(input: {
     created_at: now,
     updated_at: now,
   });
-
-  if (error) throw error;
+  if (fallbackInsert.error) throw fallbackInsert.error;
 }
 
 export async function readBillingOrderByOrderId(input: {
@@ -690,50 +1122,67 @@ export async function readBillingOrderByOrderId(input: {
   orderId: string;
 }): Promise<BillingOrderSummary | null> {
   const admin = getSupabaseAdmin();
-  const { data, error } = await admin
+  const fullRes = await admin
     .from("billing_orders")
-    .select(
-      "order_id, plan_tier, amount, currency, status, order_name, payment_key, fail_code, fail_message, approved_at, created_at"
-    )
+    .select(BILLING_ORDER_SELECT_WITH_OPTIONAL)
     .eq("order_id", input.orderId)
     .eq("user_id", input.userId)
     .maybeSingle();
+  if (!fullRes.error) {
+    if (!fullRes.data) return null;
+    return toBillingOrderSummary(fullRes.data);
+  }
+  if (!isOptionalBillingOrderColumnError(fullRes.error)) throw fullRes.error;
 
-  if (error) throw error;
-  if (!data) return null;
-
-  return toBillingOrderSummary(data);
+  const fallbackRes = await admin
+    .from("billing_orders")
+    .select(BILLING_ORDER_SELECT_BASE)
+    .eq("order_id", input.orderId)
+    .eq("user_id", input.userId)
+    .maybeSingle();
+  if (fallbackRes.error) throw fallbackRes.error;
+  if (!fallbackRes.data) return null;
+  return toBillingOrderSummary(fallbackRes.data);
 }
 
 export async function readBillingOrderByOrderIdAny(orderId: string): Promise<BillingOrderSummary | null> {
   const admin = getSupabaseAdmin();
-  const { data, error } = await admin
+  const fullRes = await admin
     .from("billing_orders")
-    .select(
-      "order_id, user_id, plan_tier, amount, currency, status, order_name, payment_key, fail_code, fail_message, approved_at, created_at"
-    )
+    .select(BILLING_ORDER_SELECT_WITH_OPTIONAL)
     .eq("order_id", orderId)
     .maybeSingle();
-
-  if (error) throw error;
-  if (!data) return null;
-  return toBillingOrderSummary(data);
+  if (!fullRes.error) {
+    if (!fullRes.data) return null;
+    return toBillingOrderSummary(fullRes.data);
+  }
+  if (!isOptionalBillingOrderColumnError(fullRes.error)) throw fullRes.error;
+  const fallbackRes = await admin.from("billing_orders").select(BILLING_ORDER_SELECT_BASE).eq("order_id", orderId).maybeSingle();
+  if (fallbackRes.error) throw fallbackRes.error;
+  if (!fallbackRes.data) return null;
+  return toBillingOrderSummary(fallbackRes.data);
 }
 
 export async function listRecentBillingOrders(userId: string, limit = 12): Promise<BillingOrderSummary[]> {
   const admin = getSupabaseAdmin();
-  const { data, error } = await admin
+  const fullRes = await admin
     .from("billing_orders")
-    .select(
-      "order_id, plan_tier, amount, currency, status, order_name, payment_key, fail_code, fail_message, approved_at, created_at"
-    )
+    .select(BILLING_ORDER_SELECT_WITH_OPTIONAL)
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .limit(Math.max(1, Math.min(50, Math.round(limit))));
-
-  if (error) throw error;
-
-  return (data ?? []).map((row) => toBillingOrderSummary(row));
+  if (!fullRes.error) {
+    return (fullRes.data ?? []).map((row) => toBillingOrderSummary(row));
+  }
+  if (!isOptionalBillingOrderColumnError(fullRes.error)) throw fullRes.error;
+  const fallbackRes = await admin
+    .from("billing_orders")
+    .select(BILLING_ORDER_SELECT_BASE)
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(Math.max(1, Math.min(50, Math.round(limit))));
+  if (fallbackRes.error) throw fallbackRes.error;
+  return (fallbackRes.data ?? []).map((row) => toBillingOrderSummary(row));
 }
 
 export async function markBillingOrderFailed(input: {
@@ -782,20 +1231,33 @@ export async function markBillingOrderCanceled(input: {
 
 export async function readLatestRefundableOrder(userId: string): Promise<BillingOrderSummary | null> {
   const admin = getSupabaseAdmin();
-  const { data, error } = await admin
+  const fullRes = await admin
     .from("billing_orders")
-    .select(
-      "order_id, user_id, plan_tier, amount, currency, status, order_name, payment_key, fail_code, fail_message, approved_at, created_at"
-    )
+    .select(BILLING_ORDER_SELECT_WITH_OPTIONAL)
     .eq("user_id", userId)
     .eq("status", "DONE")
+    .eq("order_kind", "subscription")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-
-  if (error) throw error;
-  if (!data) return null;
-  return toBillingOrderSummary(data);
+  if (!fullRes.error) {
+    if (!fullRes.data) return null;
+    return toBillingOrderSummary(fullRes.data);
+  }
+  if (!isOptionalBillingOrderColumnError(fullRes.error)) throw fullRes.error;
+  const fallbackRes = await admin
+    .from("billing_orders")
+    .select(BILLING_ORDER_SELECT_BASE)
+    .eq("user_id", userId)
+    .eq("status", "DONE")
+    .eq("plan_tier", "pro")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (fallbackRes.error) throw fallbackRes.error;
+  if (!fallbackRes.data) return null;
+  const summary = toBillingOrderSummary(fallbackRes.data);
+  return summary.orderKind === "subscription" ? summary : null;
 }
 
 export async function readPendingRefundRequestByOrder(input: {
@@ -1158,7 +1620,7 @@ export async function scheduleSubscriptionCancelAtPeriodEnd(input: {
   if (!current.hasPaidAccess) throw new Error("no_active_paid_subscription");
 
   const nowIso = new Date().toISOString();
-  await updateUserWithOptionalCancelFallback(input.userId, {
+  await updateUserWithOptionalSubscriptionFallback(input.userId, {
     subscription_cancel_at_period_end: true,
     subscription_cancel_scheduled_at: nowIso,
     subscription_cancel_reason: sanitizeCancelReason(input.reason),
@@ -1171,7 +1633,7 @@ export async function scheduleSubscriptionCancelAtPeriodEnd(input: {
 
 export async function resumeScheduledSubscription(input: { userId: string }): Promise<SubscriptionSnapshot> {
   const nowIso = new Date().toISOString();
-  await updateUserWithOptionalCancelFallback(input.userId, {
+  await updateUserWithOptionalSubscriptionFallback(input.userId, {
     subscription_cancel_at_period_end: false,
     subscription_cancel_scheduled_at: null,
     subscription_cancel_reason: null,
@@ -1187,7 +1649,7 @@ export async function downgradeToFreeNow(input: {
   reason?: string | null;
 }): Promise<SubscriptionSnapshot> {
   const nowIso = new Date().toISOString();
-  await updateUserWithOptionalCancelFallback(input.userId, {
+  await updateUserWithOptionalSubscriptionFallback(input.userId, {
     subscription_tier: "free",
     subscription_status: "inactive",
     subscription_current_period_end: nowIso,
@@ -1211,13 +1673,24 @@ export async function markBillingOrderDoneAndApplyPlan(input: {
 }): Promise<SubscriptionSnapshot> {
   const admin = getSupabaseAdmin();
 
-  const { data: order, error: orderErr } = await admin
+  const fullOrderRes = await admin
     .from("billing_orders")
-    .select("order_id, user_id, plan_tier, amount, status")
+    .select("order_id, user_id, plan_tier, order_name, order_kind, credit_pack_units, amount, status")
     .eq("order_id", input.orderId)
     .eq("user_id", input.userId)
     .maybeSingle();
-  if (orderErr) throw orderErr;
+  if (fullOrderRes.error && !isOptionalBillingOrderColumnError(fullOrderRes.error)) throw fullOrderRes.error;
+  let order: any = fullOrderRes.data;
+  if (fullOrderRes.error && isOptionalBillingOrderColumnError(fullOrderRes.error)) {
+    const fallbackOrderRes = await admin
+      .from("billing_orders")
+      .select("order_id, user_id, plan_tier, order_name, amount, status")
+      .eq("order_id", input.orderId)
+      .eq("user_id", input.userId)
+      .maybeSingle();
+    if (fallbackOrderRes.error) throw fallbackOrderRes.error;
+    order = fallbackOrderRes.data;
+  }
   if (!order) throw new Error("order_not_found");
 
   const expectedAmount = Math.round(Number(order.amount ?? 0));
@@ -1232,24 +1705,17 @@ export async function markBillingOrderDoneAndApplyPlan(input: {
     throw new Error("order_canceled");
   }
 
-  const paidPlanTier = asPlanTier(order.plan_tier);
-  if (paidPlanTier === "free") {
-    throw new Error("invalid_plan");
-  }
-
   const now = new Date();
   const nowIso = now.toISOString();
-  const plan = getPlanDefinition(paidPlanTier);
-
-  const current = await readSubscription(input.userId, { skipReconcile: true });
-  const currentEnd = parseDate(current.currentPeriodEnd);
-
-  const isSamePlan = current.tier === paidPlanTier;
-  const hasRemaining = Boolean(currentEnd && Number.isFinite(currentEnd.getTime()) && currentEnd.getTime() > now.getTime());
-  const baseDate = isSamePlan && hasRemaining && currentEnd ? currentEnd : now;
-  const nextEnd = new Date(baseDate.getTime() + plan.periodDays * DAY_MS);
-
-  const startedAt = isSamePlan && current.startedAt ? current.startedAt : nowIso;
+  const orderKind = inferOrderKindFromLegacyFields(order);
+  const paidPlanTier = asPlanTier(order.plan_tier);
+  const creditPackUnits = inferCreditPackUnitsFromLegacyFields(order, orderKind);
+  if (orderKind === "subscription" && paidPlanTier === "free") {
+    throw new Error("invalid_plan");
+  }
+  if (orderKind === "credit_pack" && creditPackUnits <= 0) {
+    throw new Error("invalid_credit_pack_units");
+  }
 
   const { data: updatedOrderRow, error: orderUpdateErr } = await admin
     .from("billing_orders")
@@ -1273,7 +1739,25 @@ export async function markBillingOrderDoneAndApplyPlan(input: {
     return readSubscription(input.userId);
   }
 
-  await updateUserWithOptionalCancelFallback(input.userId, {
+  if (orderKind === "credit_pack") {
+    await addMedSafetyExtraCredits({
+      userId: input.userId,
+      credits: creditPackUnits,
+      nowIso,
+    });
+    return readSubscription(input.userId, { skipReconcile: true });
+  }
+
+  const plan = getPlanDefinition(paidPlanTier);
+  const current = await readSubscription(input.userId, { skipReconcile: true });
+  const currentEnd = parseDate(current.currentPeriodEnd);
+  const isSamePlan = current.tier === paidPlanTier;
+  const hasRemaining = Boolean(currentEnd && Number.isFinite(currentEnd.getTime()) && currentEnd.getTime() > now.getTime());
+  const baseDate = isSamePlan && hasRemaining && currentEnd ? currentEnd : now;
+  const nextEnd = new Date(baseDate.getTime() + plan.periodDays * DAY_MS);
+  const startedAt = isSamePlan && current.startedAt ? current.startedAt : nowIso;
+
+  await updateUserWithOptionalSubscriptionFallback(input.userId, {
     subscription_tier: paidPlanTier,
     subscription_status: "active",
     subscription_started_at: startedAt,
