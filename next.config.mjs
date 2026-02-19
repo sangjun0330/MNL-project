@@ -28,20 +28,12 @@ const tossScriptOrigin = "https://js.tosspayments.com";
 const tossApiOrigin = "https://api.tosspayments.com";
 const tossWildcard = "https://*.tosspayments.com";
 const tossLegacyPayOrigin = "https://pay.toss.im";
-const handoffModelOrigins = [
-  "https://huggingface.co",
-  "https://*.huggingface.co",
-  "https://*.hf.co",
-  "https://cdn.jsdelivr.net",
-  "https://unpkg.com",
-];
 
 const connectSources = ["'self'", "https://cloudflareinsights.com", tossApiOrigin, tossWildcard, tossLegacyPayOrigin];
 if (supabaseOrigin) {
   connectSources.push(supabaseOrigin);
   connectSources.push(supabaseOrigin.replace(/^http/i, "ws"));
 }
-connectSources.push(...handoffModelOrigins);
 
 const isDev = process.env.NODE_ENV === "development";
 const scriptSourceParts = [
@@ -50,14 +42,9 @@ const scriptSourceParts = [
   "https://static.cloudflareinsights.com",
   tossScriptOrigin,
   tossWildcard,
-  ...handoffModelOrigins,
 ];
 if (isDev) scriptSourceParts.push("'unsafe-eval'");
-// wasm-unsafe-eval: WebAssembly 컴파일 허용 (ONNX Runtime 등)
-// unsafe-eval: WebLLM MLC 엔진 동적 로딩 허용
-const runtimeEvalSources = ["'wasm-unsafe-eval'", "'unsafe-eval'"];
-const scriptSources = Array.from(new Set([...scriptSourceParts, ...runtimeEvalSources])).join(" ");
-const handoffScriptSources = scriptSources;
+const scriptSources = Array.from(new Set(scriptSourceParts)).join(" ");
 const frameSources = Array.from(new Set(["'self'", tossWildcard, tossLegacyPayOrigin])).join(" ");
 const imgSources = Array.from(new Set(["'self'", "data:", "blob:", "https://cloudflareinsights.com", tossWildcard])).join(" ");
 
@@ -77,22 +64,6 @@ const contentSecurityPolicy = [
   "worker-src 'self' blob:",
 ].join("; ");
 
-const handoffContentSecurityPolicy = [
-  "default-src 'self'",
-  "base-uri 'self'",
-  "form-action 'self'",
-  "frame-ancestors 'none'",
-  "object-src 'none'",
-  `script-src ${handoffScriptSources}`,
-  "style-src 'self' 'unsafe-inline'",
-  `img-src ${imgSources}`,
-  "font-src 'self' data:",
-  `connect-src ${Array.from(new Set(connectSources)).join(" ")}`,
-  `frame-src ${frameSources}`,
-  "media-src 'self' blob:",
-  "worker-src 'self' blob:",
-].join("; ");
-
 const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "DENY" },
@@ -101,17 +72,6 @@ const securityHeaders = [
   { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
   { key: "Cross-Origin-Resource-Policy", value: "same-site" },
   { key: "Content-Security-Policy", value: contentSecurityPolicy },
-];
-
-const handoffNoStoreHeaders = [
-  { key: "Cache-Control", value: "no-store, max-age=0" },
-  { key: "Pragma", value: "no-cache" },
-  { key: "X-Robots-Tag", value: "noindex, nofollow, noarchive, nosnippet" },
-];
-
-const handoffRuntimeHeaders = [
-  ...handoffNoStoreHeaders,
-  { key: "Content-Security-Policy", value: handoffContentSecurityPolicy },
 ];
 
 const nextConfig = {
@@ -127,38 +87,6 @@ const nextConfig = {
       {
         source: "/:path*",
         headers: securityHeaders,
-      },
-      {
-        source: "/tools/handoff",
-        headers: handoffRuntimeHeaders,
-      },
-      {
-        source: "/tools/handoff/:path*",
-        headers: handoffRuntimeHeaders,
-      },
-      {
-        source: "/handoff",
-        headers: handoffRuntimeHeaders,
-      },
-      {
-        source: "/handoff/:path*",
-        headers: handoffRuntimeHeaders,
-      },
-      {
-        source: "/runtime/:path*",
-        headers: handoffRuntimeHeaders,
-      },
-      {
-        source: "/workers/:path*",
-        headers: handoffRuntimeHeaders,
-      },
-      {
-        source: "/settings/admin/handoff",
-        headers: handoffRuntimeHeaders,
-      },
-      {
-        source: "/settings/admin/handoff/:path*",
-        headers: handoffRuntimeHeaders,
       },
       {
         source: "/settings/billing/:path*",

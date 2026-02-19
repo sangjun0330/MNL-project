@@ -108,13 +108,6 @@ export function SettingsAdminPage() {
                 환불/결제취소 요청 관리
                 <span className="text-ios-sub">›</span>
               </Link>
-              <Link
-                href="/settings/admin/handoff"
-                className="wnl-btn-secondary inline-flex h-11 items-center justify-between px-4 text-[13px]"
-              >
-                AI 인계 진단/보안/로그
-                <span className="text-ios-sub">›</span>
-              </Link>
             </div>
           </section>
         </>

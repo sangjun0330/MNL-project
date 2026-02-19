@@ -4,10 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { BottomNav } from "@/components/shell/BottomNav";
 import { UiPreferencesBridge } from "@/components/system/UiPreferencesBridge";
 import { CloudStateSync } from "@/components/system/CloudStateSync";
-import { HandoffJanitor } from "@/components/system/HandoffJanitor";
-import { HandoffRuntimeBootstrap } from "@/components/system/HandoffRuntimeBootstrap";
 import { getSupabaseBrowserClient, useAuthState } from "@/lib/auth";
-import { setHandoffStorageScope } from "@/lib/handoff/storageScope";
 import { hydrateState, setLocalSaveEnabled, setStorageScope } from "@/lib/store";
 import { emptyState } from "@/lib/model";
 import { useI18n } from "@/lib/useI18n";
@@ -95,7 +92,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const uid = auth?.userId ?? null;
     setLocalSaveEnabled(false);
     setStorageScope(uid ?? null);
-    setHandoffStorageScope(uid ?? null);
   }, [auth?.userId, status]);
 
   useEffect(() => {
@@ -161,8 +157,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-dvh w-full bg-ios-bg">
       <UiPreferencesBridge />
-      <HandoffJanitor />
-      <HandoffRuntimeBootstrap />
       <div className="safe-top" />
       {/* 하단 네비게이션/홈 인디케이터에 컨텐츠가 가리지 않도록 safe-area 패딩을 추가 */}
       {/*

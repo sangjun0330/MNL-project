@@ -1,7 +1,4 @@
-"use client";
-
 import { sanitizeStructuredSession } from "./deidGuard";
-import { HANDOFF_FLAGS } from "./featureFlags";
 import type { HandoverSessionResult, PatientCard } from "./types";
 
 export type HandoffRefineAdapterInput = {
@@ -14,10 +11,8 @@ export type HandoffRefineAdapter =
 
 export type RefineOutcome = {
   result: HandoverSessionResult;
-  llmApplied: boolean;
   refined: boolean;
   reason: string | null;
-  backendSource: string | null;
 };
 
 declare global {
@@ -35,14 +30,6 @@ const WEBLLM_ADAPTER_SCRIPT_ID = "wnl-handoff-webllm-adapter";
 function readStringEnv(value: string | undefined, fallback: string) {
   const trimmed = String(value ?? "").trim();
   return trimmed || fallback;
-}
-
-function readBooleanEnv(value: string | undefined, fallback: boolean) {
-  if (value == null) return fallback;
-  const normalized = String(value).trim().toLowerCase();
-  if (["1", "true", "yes", "on"].includes(normalized)) return true;
-  if (["0", "false", "no", "off"].includes(normalized)) return false;
-  return fallback;
 }
 
 function isRelativeOrSameOrigin(url: string, origin: string) {
@@ -123,10 +110,6 @@ export async function ensureWebLlmRefineReady() {
     process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_ADAPTER_URL,
     WEBLLM_ADAPTER_DEFAULT_URL
   );
-  const llmRequired = readBooleanEnv(process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_REQUIRED, true);
-  const useMlcBackend = llmRequired
-    ? true
-    : readBooleanEnv(process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_USE_MLC, HANDOFF_FLAGS.handoffWebLlmUseMlc);
 
   const backendSameOrigin = isRelativeOrSameOrigin(backendUrl, window.location.origin);
   const adapterSameOrigin = isRelativeOrSameOrigin(adapterUrl, window.location.origin);
@@ -134,14 +117,7 @@ export async function ensureWebLlmRefineReady() {
     return false;
   }
 
-  if (useMlcBackend) {
-    try {
-      const { initWebLlmMlcBackend } = await import("./webLlmMlcBackend");
-      initWebLlmMlcBackend();
-    } catch {
-      // noop: adapter fallback remains available
-    }
-  } else if (backendSameOrigin) {
+  if (backendSameOrigin) {
     try {
       await ensureScript(backendUrl, WEBLLM_BACKEND_SCRIPT_ID);
     } catch {
@@ -248,14 +224,6 @@ function mergeRefinedResult(base: HandoverSessionResult, candidate: unknown): Ha
   };
 }
 
-function extractBackendSource(value: unknown) {
-  if (!value || typeof value !== "object") return null;
-  const source = (value as any).__source;
-  if (typeof source !== "string") return null;
-  const normalized = source.trim();
-  return normalized || null;
-}
-
 export function isWebLlmRefineAvailable() {
   if (typeof window === "undefined") return false;
   return typeof window.__RNEST_WEBLLM_REFINE__ === "function";
@@ -265,10 +233,8 @@ export async function tryRefineWithWebLlm(result: HandoverSessionResult): Promis
   if (typeof window === "undefined") {
     return {
       result,
-      llmApplied: false,
       refined: false,
       reason: "browser_runtime_required",
-      backendSource: null,
     };
   }
 
@@ -276,10 +242,8 @@ export async function tryRefineWithWebLlm(result: HandoverSessionResult): Promis
   if (!ready) {
     return {
       result,
-      llmApplied: false,
       refined: false,
       reason: "webllm_adapter_not_found",
-      backendSource: null,
     };
   }
 
@@ -287,55 +251,41 @@ export async function tryRefineWithWebLlm(result: HandoverSessionResult): Promis
   if (typeof adapter !== "function") {
     return {
       result,
-      llmApplied: false,
       refined: false,
       reason: "webllm_adapter_not_found",
-      backendSource: null,
     };
   }
 
   const safeInput = sanitizeStructuredSession(result).result;
   try {
     const raw = await adapter({ result: safeInput });
-    const wrapperSource = extractBackendSource(raw);
     const candidate = raw && typeof raw === "object" && "result" in (raw as any) ? (raw as any).result : raw;
-    const candidateSource = extractBackendSource(candidate);
-    const backendSource = candidateSource ?? wrapperSource;
-    const llmBackends = new Set(["mlc_webllm", "transformers_webllm"]);
-    const llmUsed = Boolean(backendSource && llmBackends.has(backendSource));
     const merged = mergeRefinedResult(safeInput, candidate);
     if (!merged) {
       return {
         result: safeInput,
-        llmApplied: false,
         refined: false,
         reason: "refine_output_invalid",
-        backendSource,
       };
     }
 
     const changed = JSON.stringify(merged.patients) !== JSON.stringify(safeInput.patients);
-    const nonLlmReason = backendSource ? `llm_backend_mismatch:${backendSource}` : "llm_backend_not_used";
     return {
       result: {
         ...merged,
         provenance: {
           ...merged.provenance,
-          llmRefined: llmUsed,
+          llmRefined: changed,
         },
       },
-      llmApplied: llmUsed,
-      refined: changed && llmUsed,
-      reason: llmUsed ? (changed ? null : "llm_no_change") : nonLlmReason,
-      backendSource,
+      refined: changed,
+      reason: changed ? null : "refine_no_change",
     };
   } catch {
     return {
       result: safeInput,
-      llmApplied: false,
       refined: false,
       reason: "refine_runtime_error",
-      backendSource: null,
     };
   }
 }

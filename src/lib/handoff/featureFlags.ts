@@ -1,7 +1,5 @@
 import type {
   HandoffAsrProvider,
-  HandoffWasmAsrDevice,
-  HandoffWasmAsrEngine,
   HandoffExecutionMode,
   HandoffFeatureFlags,
   HandoffPrivacyProfile,
@@ -21,23 +19,6 @@ function parseAsrProvider(value: string | undefined, fallback: HandoffAsrProvide
   if (normalized === "manual") return "manual";
   if (normalized === "web_speech") return "web_speech";
   if (normalized === "wasm_local") return "wasm_local";
-  return fallback;
-}
-
-function parseWasmAsrEngine(value: string | undefined, fallback: HandoffWasmAsrEngine): HandoffWasmAsrEngine {
-  if (!value) return fallback;
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "worker_runtime") return "worker_runtime";
-  if (normalized === "transformers_whisper") return "transformers_whisper";
-  return fallback;
-}
-
-function parseWasmAsrDevice(value: string | undefined, fallback: HandoffWasmAsrDevice): HandoffWasmAsrDevice {
-  if (!value) return fallback;
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "auto") return "auto";
-  if (normalized === "webgpu") return "webgpu";
-  if (normalized === "wasm") return "wasm";
   return fallback;
 }
 
@@ -90,12 +71,12 @@ export function getHandoffFeatureFlags(): HandoffFeatureFlags {
       process.env.NEXT_PUBLIC_HANDOFF_REMOTE_SYNC_ENABLED,
       false
     ),
-    handoffAsrProvider: parseAsrProvider(process.env.NEXT_PUBLIC_HANDOFF_ASR_PROVIDER, "wasm_local"),
+    handoffAsrProvider: parseAsrProvider(process.env.NEXT_PUBLIC_HANDOFF_ASR_PROVIDER, "manual"),
     handoffWebAudioCaptureEnabled: parseBooleanFlag(
       process.env.NEXT_PUBLIC_HANDOFF_WEB_AUDIO_CAPTURE_ENABLED,
       true
     ),
-    handoffWasmAsrEnabled: parseBooleanFlag(process.env.NEXT_PUBLIC_HANDOFF_WASM_ASR_ENABLED, true),
+    handoffWasmAsrEnabled: parseBooleanFlag(process.env.NEXT_PUBLIC_HANDOFF_WASM_ASR_ENABLED, false),
     handoffWasmAsrWorkerUrl: parseStringFlag(
       process.env.NEXT_PUBLIC_HANDOFF_WASM_ASR_WORKER_URL,
       "/workers/handoff-whisper.worker.js"
@@ -104,22 +85,6 @@ export function getHandoffFeatureFlags(): HandoffFeatureFlags {
     handoffWasmAsrRuntimeUrl: parseStringFlag(
       process.env.NEXT_PUBLIC_HANDOFF_WASM_ASR_RUNTIME_URL,
       "/runtime/whisper-runtime.js"
-    ),
-    handoffWasmAsrEngine: parseWasmAsrEngine(
-      process.env.NEXT_PUBLIC_HANDOFF_WASM_ASR_ENGINE,
-      "transformers_whisper"
-    ),
-    handoffWasmAsrModelId: parseStringFlag(
-      process.env.NEXT_PUBLIC_HANDOFF_WASM_ASR_MODEL_ID,
-      "openai/whisper-small"
-    ),
-    handoffWasmAsrDevice: parseWasmAsrDevice(
-      process.env.NEXT_PUBLIC_HANDOFF_WASM_ASR_DEVICE,
-      "auto"
-    ),
-    handoffWasmAsrDType: parseStringFlag(
-      process.env.NEXT_PUBLIC_HANDOFF_WASM_ASR_DTYPE,
-      "q8"
     ),
     handoffVadEnabled: parseBooleanFlag(process.env.NEXT_PUBLIC_HANDOFF_VAD_ENABLED, true),
     handoffVadMinSpeechRatio: parseNumberFlag(
@@ -143,14 +108,6 @@ export function getHandoffFeatureFlags(): HandoffFeatureFlags {
     handoffWebLlmRefineEnabled: parseBooleanFlag(
       process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_REFINE_ENABLED,
       true
-    ),
-    handoffWebLlmUseMlc: parseBooleanFlag(
-      process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_USE_MLC,
-      true
-    ),
-    handoffWebLlmModelId: parseStringFlag(
-      process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_MODEL_ID,
-      "Qwen2.5-3B-Instruct-q4f16_1-MLC"
     ),
     handoffPrivacyProfile: parsePrivacyProfile(process.env.NEXT_PUBLIC_HANDOFF_PRIVACY_PROFILE, "strict"),
     handoffRequireAuth: parseBooleanFlag(process.env.NEXT_PUBLIC_HANDOFF_REQUIRE_AUTH, true),

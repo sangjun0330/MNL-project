@@ -23,10 +23,10 @@ CBC와 CRP 나갔고 결과 확인 필요, antibiotics first dose 완료.
 
   assert.ok(out.result.patients.length >= 1);
   assert.equal(
-    out.result.uncertaintyItems.filter((item: { kind: string }) => item.kind === "unresolved_abbreviation").length,
+    out.result.uncertainties.filter((item: { kind: string }) => item.kind === "unresolved_abbreviation").length,
     0
   );
-  assert.ok(out.result.uncertaintyItems.length <= 4);
+  assert.ok(out.result.uncertainties.length <= 4);
 });
 
 test("runHandoffPipeline splits inline multi-patient narrative into distinct patient cards", () => {
@@ -43,10 +43,8 @@ test("runHandoffPipeline splits inline multi-patient narrative into distinct pat
   });
 
   assert.ok(out.result.patients.length >= 2);
-  const planOrRiskCounts = out.result.patients
-    .map((patient) => patient.plan.length + patient.risks.length)
-    .sort((a, b) => b - a);
-  assert.ok(planOrRiskCounts[0] >= 1);
+  const problemCounts = out.result.patients.map((patient) => patient.problems.length).sort((a, b) => b - a);
+  assert.ok(problemCounts[0] >= 2);
 });
 
 test("transcriptToRawSegments bounds excessive segment counts for stability", () => {
@@ -75,23 +73,5 @@ test("runHandoffPipeline remains stable on long mixed transcript", () => {
 
   assert.ok(out.result.patients.length >= 3);
   assert.ok(out.result.globalTop.length > 0);
-  assert.ok(out.result.uncertaintyItems.length <= 24);
-});
-
-test("runHandoffPipeline keeps glucose and I/O risk signals in global top after de-id", () => {
-  const transcript =
-    "703호 박OO 환자 혈당 280으로 새벽 2시 재측정 오더. 708호 정OO 환자 소변량 감소 경향 있어 I/O 모니터링.";
-
-  const out = runHandoffPipeline({
-    sessionId: "hs_test_glucose_io_global_top",
-    dutyType: "night",
-    rawSegments: transcriptToRawSegments(transcript, {
-      idPrefix: "glucose-io",
-      segmentDurationMs: 3000,
-    }),
-  });
-
-  const globalTopText = out.result.globalTop.map((item) => item.text).join(" ");
-  assert.match(globalTopText, /(혈당|재측정)/);
-  assert.match(globalTopText, /(소변량|I\/O)/);
+  assert.ok(out.result.uncertainties.length <= 24);
 });
