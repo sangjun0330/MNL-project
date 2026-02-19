@@ -130,7 +130,6 @@ export function SettingsBillingSuccessPage() {
           <>
             <div className="mt-3 text-[14px] font-semibold text-red-600">{t("승인 실패")}</div>
             <div className="mt-1 text-[12.5px] text-ios-sub break-all">{error}</div>
-            <div className="mt-3 text-[12px] text-ios-muted">orderId: {orderId}</div>
           </>
         ) : null}
 
@@ -157,7 +156,6 @@ export function SettingsBillingSuccessPage() {
                   {t("만료일")}: {formatDateLabel(result.subscription?.currentPeriodEnd ?? null)}
                 </div>
               )}
-              <div className="mt-1 text-[11.5px] text-ios-muted break-all">orderId: {result.order?.orderId ?? orderId}</div>
             </div>
           </>
         ) : null}
