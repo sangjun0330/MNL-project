@@ -5,7 +5,7 @@ import { BottomNav } from "@/components/shell/BottomNav";
 import { UiPreferencesBridge } from "@/components/system/UiPreferencesBridge";
 import { CloudStateSync } from "@/components/system/CloudStateSync";
 import { getSupabaseBrowserClient, useAuthState } from "@/lib/auth";
-import { hydrateState, setLocalSaveEnabled, setStorageScope } from "@/lib/store";
+import { hydrateState, setLocalSaveEnabled, setStorageScope, useAppStoreSelector } from "@/lib/store";
 import { emptyState } from "@/lib/model";
 import { useI18n } from "@/lib/useI18n";
 import { OnboardingGuide } from "@/components/system/OnboardingGuide";
@@ -15,11 +15,32 @@ import { useCallback, useEffect, useRef, useState } from "react";
 const AUTH_INTERACTION_GUARD_ENABLED =
   process.env.NEXT_PUBLIC_AUTH_INTERACTION_GUARD_ENABLED !== "false";
 
+function onboardingSeenStorageKey(userId?: string | null) {
+  if (!userId) return "";
+  return `wnl:onboarding:seen:${userId}`;
+}
+
+function readOnboardingSeenLocal(userId?: string | null) {
+  if (typeof window === "undefined") return false;
+  const key = onboardingSeenStorageKey(userId);
+  if (!key) return false;
+  return window.localStorage.getItem(key) === "1";
+}
+
+function writeOnboardingSeenLocal(userId?: string | null) {
+  if (typeof window === "undefined") return;
+  const key = onboardingSeenStorageKey(userId);
+  if (!key) return;
+  window.localStorage.setItem(key, "1");
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { t } = useI18n();
   const { user: auth, status } = useAuthState();
+  const hasSeenOnboarding = useAppStoreSelector((s) => Boolean(s.settings?.hasSeenOnboarding));
+  const setSettings = useAppStoreSelector((s) => s.setSettings);
   const [hasSession, setHasSession] = useState<boolean | null>(null);
   const isAuthed = Boolean(auth?.userId) || hasSession === true;
   const [cloudReady, setCloudReady] = useState(false);
@@ -141,18 +162,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const onboardingTriggeredRef = useRef(false);
 
   useEffect(() => {
+    if (!auth?.userId || hasSeenOnboarding) return;
+    if (!readOnboardingSeenLocal(auth.userId)) return;
+    setSettings({ hasSeenOnboarding: true });
+  }, [auth?.userId, hasSeenOnboarding, setSettings]);
+
+  useEffect(() => {
     const handler = () => {
+      if (hasSeenOnboarding || readOnboardingSeenLocal(auth?.userId)) return;
       if (onboardingTriggeredRef.current) return; // 세션 내 1회만
       onboardingTriggeredRef.current = true;
       setShowOnboarding(true);
     };
     window.addEventListener("wnl:show-onboarding", handler);
     return () => window.removeEventListener("wnl:show-onboarding", handler);
-  }, []);
+  }, [auth?.userId, hasSeenOnboarding]);
 
   const handleOnboardingComplete = useCallback(() => {
+    writeOnboardingSeenLocal(auth?.userId);
+    setSettings({ hasSeenOnboarding: true });
+    onboardingTriggeredRef.current = true;
     setShowOnboarding(false);
-  }, []);
+  }, [auth?.userId, setSettings]);
 
   return (
     <div className="min-h-dvh w-full bg-ios-bg">
