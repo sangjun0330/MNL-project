@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { loadUserState, saveUserState } from "@/lib/server/userStateStore";
+import { ensureUserRow, loadUserState, saveUserState } from "@/lib/server/userStateStore";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { sanitizeStatePayload } from "@/lib/stateSanitizer";
 import { serializeStateForSupabase } from "@/lib/statePersistence";
 
-export const runtime = "edge";
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function bad(status: number, message: string) {
@@ -16,6 +16,7 @@ export async function GET(req: Request) {
   if (!userId) return bad(401, "login required");
 
   try {
+    await ensureUserRow(userId);
     const row = await loadUserState(userId);
     const sanitized = row?.payload ? sanitizeStatePayload(row.payload) : null;
     return NextResponse.json({
@@ -44,18 +45,8 @@ export async function POST(req: Request) {
 
   try {
     const serialized = serializeStateForSupabase(state);
-    // Preserve server-managed AI daily cache across normal state saves.
-    const existing = await loadUserState(userId);
-    const existingPayload =
-      existing?.payload && typeof existing.payload === "object"
-        ? (existing.payload as Record<string, unknown>)
-        : null;
-    if (existingPayload?.aiRecoveryDaily) {
-      (serialized as Record<string, unknown>).aiRecoveryDaily = existingPayload.aiRecoveryDaily;
-    }
-
     await saveUserState({ userId, payload: serialized });
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, syncedAt: new Date().toISOString() });
   } catch (e: any) {
     return bad(500, e?.message || "failed to save");
   }

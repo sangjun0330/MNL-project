@@ -219,7 +219,61 @@ export type Database = {
         };
         Relationships: [];
       };
-      wnl_user_state: {
+      med_safety_usage_events: {
+        Row: {
+          id: number;
+          user_id: string;
+          source: string;
+          delta: number;
+          reason: string;
+          metadata: Json | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: number;
+          user_id: string;
+          source: string;
+          delta: number;
+          reason: string;
+          metadata?: Json | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: number;
+          user_id?: string;
+          source?: string;
+          delta?: number;
+          reason?: string;
+          metadata?: Json | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      rnest_user_state_revisions: {
+        Row: {
+          id: number;
+          user_id: string;
+          payload: Json;
+          source: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: number;
+          user_id: string;
+          payload: Json;
+          source?: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: number;
+          user_id?: string;
+          payload?: Json;
+          source?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      rnest_user_state: {
         Row: {
           user_id: string;
           payload: Json;
@@ -237,10 +291,11 @@ export type Database = {
         };
         Relationships: [];
       };
-      wnl_users: {
+      rnest_users: {
         Row: {
           user_id: string;
           created_at: string | null;
+          updated_at: string | null;
           last_seen: string | null;
           subscription_tier: string;
           subscription_status: string;
@@ -260,6 +315,7 @@ export type Database = {
         Insert: {
           user_id: string;
           created_at?: string | null;
+          updated_at?: string | null;
           last_seen?: string | null;
           subscription_tier?: string;
           subscription_status?: string;
@@ -279,6 +335,7 @@ export type Database = {
         Update: {
           user_id?: string;
           created_at?: string | null;
+          updated_at?: string | null;
           last_seen?: string | null;
           subscription_tier?: string;
           subscription_status?: string;

@@ -9,6 +9,9 @@ import { serializeStateForSupabase } from "@/lib/statePersistence";
 const SAVE_DEBOUNCE_MS = 120;
 const RETRY_BASE_MS = 800;
 const RETRY_MAX_MS = 8000;
+type SaveOptions = {
+  keepalive?: boolean;
+};
 
 export function CloudStateSync() {
   const auth = useAuth();
@@ -26,6 +29,9 @@ export function CloudStateSync() {
   const latestStateRef = useRef<any>(null);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryCount = useRef(0);
+  const saveRetryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveRetryCount = useRef(0);
+  const remoteLoadFailedOpen = useRef(false);
   const dirtyBeforeHydrate = useRef(false);
   const lastVersionRef = useRef<number>((store as any).__v ?? 0);
   const isHydratingRef = useRef(false);
@@ -58,44 +64,27 @@ export function CloudStateSync() {
   }, [supabase]);
 
   const saveStateViaApi = useCallback(
-    async (state: any) => {
+    async (state: any, options?: SaveOptions) => {
       const authHeaders = await getAuthHeaders();
       const res = await fetch("/api/user/state", {
         method: "POST",
         headers: { "content-type": "application/json", ...authHeaders },
         body: JSON.stringify({ state }),
+        keepalive: Boolean(options?.keepalive),
       });
       if (!res.ok) throw new Error("failed to save via api");
     },
     [getAuthHeaders]
   );
 
-  const saveStateViaSupabase = useCallback(
-    async (state: any) => {
-      if (!userId) return;
-      const now = new Date().toISOString();
-      const client = supabase as any;
-      const { error } = await client
-        .from("wnl_user_state")
-        .upsert({ user_id: userId, payload: state, updated_at: now }, { onConflict: "user_id" });
-      if (error) throw error;
-      await client.from("wnl_users").upsert({ user_id: userId, last_seen: now }, { onConflict: "user_id" });
-    },
-    [supabase, userId]
-  );
-
   const normalizeStateForSave = useCallback((state: any) => serializeStateForSupabase(state), []);
 
   const saveState = useCallback(
-    async (state: any) => {
+    async (state: any, options?: SaveOptions) => {
       const normalized = normalizeStateForSave(state);
-      try {
-        await saveStateViaSupabase(normalized);
-      } catch {
-        await saveStateViaApi(normalized);
-      }
+      await saveStateViaApi(normalized, options);
     },
-    [saveStateViaSupabase, saveStateViaApi, normalizeStateForSave]
+    [saveStateViaApi, normalizeStateForSave]
   );
 
   const loadStateViaApi = useCallback(async (): Promise<{ ok: boolean; state: any | null }> => {
@@ -109,34 +98,16 @@ export function CloudStateSync() {
     return { ok: true, state: json?.state ?? null };
   }, [getAuthHeaders]);
 
-  const loadStateViaSupabase = useCallback(async (): Promise<{ ok: boolean; state: any | null }> => {
-    if (!userId) return { ok: false, state: null };
-    const client = supabase as any;
-    const { data, error } = await client
-      .from("wnl_user_state")
-      .select("payload, updated_at")
-      .eq("user_id", userId)
-      .maybeSingle();
-    if (error) return { ok: false, state: null };
-    return { ok: true, state: data?.payload ?? null };
-  }, [supabase, userId]);
-
   const loadRemoteState = useCallback(async (): Promise<{ ok: boolean; state: any | null }> => {
-    try {
-      const supa = await loadStateViaSupabase();
-      if (supa && supa.ok) return supa;
-    } catch {
-      // ignore
-    }
     try {
       const api = await loadStateViaApi();
       return api;
     } catch {
       return { ok: false, state: null };
     }
-  }, [loadStateViaSupabase, loadStateViaApi]);
+  }, [loadStateViaApi]);
 
-  const hasAnyUserData = useCallback((s: ReturnType<typeof store.getState>) => {
+  const hasAnyUserData = useCallback((s: any) => {
     const scheduleKeys = Object.keys(s.schedule ?? {});
     const noteKeys = Object.keys(s.notes ?? {});
     const emotionKeys = Object.keys(s.emotions ?? {});
@@ -149,7 +120,7 @@ export function CloudStateSync() {
       bioKeys.length ||
       shiftNameKeys.length
     );
-  }, [store]);
+  }, []);
 
   const mergeByDate = useCallback((remoteMap: Record<string, any> = {}, localMap: Record<string, any> = {}) => {
     const out: Record<string, any> = { ...remoteMap };
@@ -194,9 +165,21 @@ export function CloudStateSync() {
       saveInFlight.current = true;
       void (async () => {
         try {
-        await saveState(state);
+          await saveState(state);
+          saveRetryCount.current = 0;
+          if (saveRetryTimer.current) {
+            clearTimeout(saveRetryTimer.current);
+            saveRetryTimer.current = null;
+          }
         } catch {
-          // ignore save errors
+          saveRetryCount.current += 1;
+          const delay = Math.min(RETRY_MAX_MS, RETRY_BASE_MS * Math.pow(2, saveRetryCount.current - 1));
+          if (saveRetryTimer.current) clearTimeout(saveRetryTimer.current);
+          saveRetryTimer.current = setTimeout(() => {
+            const next = latestStateRef.current;
+            if (!next) return;
+            queueSave(next);
+          }, delay);
         } finally {
           saveInFlight.current = false;
           if (pendingSave.current) {
@@ -215,6 +198,44 @@ export function CloudStateSync() {
   }, [store]);
 
   useEffect(() => {
+    return () => {
+      if (saveRetryTimer.current) clearTimeout(saveRetryTimer.current);
+    };
+  }, []);
+
+  const flushNow = useCallback(() => {
+    if (!userId || !hydrated) return;
+    const latest = storeRef.current.getState();
+    if (remoteLoadFailedOpen.current && !hasAnyUserData(latest)) return;
+    void saveState(latest, { keepalive: true }).catch(() => {
+      // ignore save errors on page hide
+    });
+  }, [userId, hydrated, hasAnyUserData, saveState]);
+
+  useEffect(() => {
+    if (!userId || !hydrated) return;
+
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        flushNow();
+      }
+    };
+    const onPageHide = () => {
+      flushNow();
+    };
+
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("beforeunload", onPageHide);
+
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("beforeunload", onPageHide);
+    };
+  }, [userId, hydrated, flushNow]);
+
+  useEffect(() => {
     const nextV = (store as any).__v ?? 0;
     if (nextV === lastVersionRef.current) return;
     lastVersionRef.current = nextV;
@@ -228,6 +249,7 @@ export function CloudStateSync() {
     if (!userId) {
       setHydrated(false);
       lastLoadedUserIdRef.current = null;
+      remoteLoadFailedOpen.current = false;
       return;
     }
 
@@ -241,8 +263,8 @@ export function CloudStateSync() {
     const markReady = () => {
       setHydrated(true);
       if (typeof window !== "undefined") {
-        (window as any).__wnlCloudReadyUserId = userId;
-        window.dispatchEvent(new CustomEvent("wnl:cloud-ready", { detail: { userId } }));
+        (window as any).__rnestCloudReadyUserId = userId;
+        window.dispatchEvent(new CustomEvent("rnest:cloud-ready", { detail: { userId } }));
       }
     };
 
@@ -257,6 +279,7 @@ export function CloudStateSync() {
           const delay = Math.min(RETRY_MAX_MS, RETRY_BASE_MS * Math.pow(2, retryCount.current - 1));
           // 동기화 실패가 계속되면 화면 잠금은 해제하고 앱 사용은 가능하게 둡니다.
           if (retryCount.current >= 4) {
+            remoteLoadFailedOpen.current = true;
             ready = true;
           }
           if (retryTimer.current) clearTimeout(retryTimer.current);
@@ -266,7 +289,10 @@ export function CloudStateSync() {
           if (!ready) return;
         }
 
-        if (result.ok) retryCount.current = 0;
+        if (result.ok) {
+          retryCount.current = 0;
+          remoteLoadFailedOpen.current = false;
+        }
         if (result.state) {
           const remoteState = sanitizeStatePayload(result.state);
           const remoteWasSanitized = JSON.stringify(remoteState) !== JSON.stringify(result.state);
@@ -307,7 +333,7 @@ export function CloudStateSync() {
           }
           // 온보딩 표시 이벤트 (세션당 1회, AppShell에서 수신)
           if (typeof window !== "undefined" && !fresh.settings?.hasSeenOnboarding) {
-            window.dispatchEvent(new CustomEvent("wnl:show-onboarding"));
+            window.dispatchEvent(new CustomEvent("rnest:show-onboarding"));
           }
           ready = true;
         }
@@ -342,13 +368,17 @@ export function CloudStateSync() {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       const state = store.getState();
+      if (remoteLoadFailedOpen.current && !hasAnyUserData(state)) {
+        // Fail-open hydration case: never push empty state and risk wiping remote data.
+        return;
+      }
       queueSave(state);
     }, SAVE_DEBOUNCE_MS);
 
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
-  }, [userId, hydrated, store, queueSave]);
+  }, [userId, hydrated, store, queueSave, hasAnyUserData]);
 
   return null;
 }

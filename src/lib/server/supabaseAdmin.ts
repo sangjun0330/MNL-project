@@ -11,8 +11,8 @@ export function getSupabaseAdmin() {
   }
 
   const g = globalThis as any;
-  if (!g.__wnlSupabaseAdmin) {
-    g.__wnlSupabaseAdmin = createClient<Database>(supabaseUrl, serviceRoleKey, {
+  if (!g.__rnestSupabaseAdmin) {
+    g.__rnestSupabaseAdmin = createClient<Database>(supabaseUrl, serviceRoleKey, {
       auth: {
         persistSession: false,
         autoRefreshToken: false,
@@ -21,5 +21,5 @@ export function getSupabaseAdmin() {
     });
   }
 
-  return g.__wnlSupabaseAdmin as SupabaseClient<Database>;
+  return g.__rnestSupabaseAdmin as SupabaseClient<Database>;
 }

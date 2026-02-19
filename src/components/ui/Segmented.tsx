@@ -37,7 +37,7 @@ export function Segmented<T extends string>({
             className={cn(
               "flex-1 rounded-xl border px-3 py-2 text-[14px] font-semibold transition whitespace-nowrap",
               active
-                ? "border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]"
+                ? "border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
                 : "border-transparent bg-transparent text-ios-muted hover:bg-white"
             )}
           >

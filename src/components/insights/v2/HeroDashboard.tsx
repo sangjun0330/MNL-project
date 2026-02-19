@@ -2,7 +2,7 @@
 
 import { cn } from "@/lib/cn";
 import type { DailyVital } from "@/lib/vitals";
-import { statusCopy, statusFromScore, statusLabel, vitalDisplayScore } from "@/lib/wnlInsight";
+import { statusCopy, statusFromScore, statusLabel, vitalDisplayScore } from "@/lib/rnestInsight";
 import { useI18n } from "@/lib/useI18n";
 
 const INSIGHT_BLUE = "#007AFF";

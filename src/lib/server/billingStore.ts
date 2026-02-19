@@ -113,6 +113,13 @@ export type BillingRefundEventSummary = {
   createdAt: string | null;
 };
 
+export type BillingOrderAdminFilterInput = {
+  status?: BillingOrderStatus | null;
+  userId?: string | null;
+  orderKind?: BillingOrderKind | null;
+  limit?: number;
+};
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MED_SAFETY_DAILY_LIMIT_PRO = 10;
 const MED_SAFETY_TIMEZONE = "Asia/Seoul" as const;
@@ -180,7 +187,7 @@ function isSchemaCacheMissingColumnError(error: any, column: string) {
     return true;
   }
 
-  // PostgreSQL unknown-column error (ex: "column wnl_users.xxx does not exist")
+  // PostgreSQL unknown-column error (ex: "column rnest_users.xxx does not exist")
   if (code === "42703" && lower.includes("does not exist")) {
     return true;
   }
@@ -206,7 +213,7 @@ function stripOptionalSubscriptionColumns(values: Record<string, unknown>) {
 
 async function updateUserWithOptionalSubscriptionFallback(userId: string, values: Record<string, unknown>) {
   const admin = getSupabaseAdmin();
-  const { error } = await admin.from("wnl_users").update(values).eq("user_id", userId);
+  const { error } = await admin.from("rnest_users").update(values).eq("user_id", userId);
   if (!error) return;
 
   if (!isOptionalSubscriptionColumnError(error)) {
@@ -218,13 +225,13 @@ async function updateUserWithOptionalSubscriptionFallback(userId: string, values
     throw new Error("billing_schema_outdated_optional_columns");
   }
 
-  const { error: fallbackError } = await admin.from("wnl_users").update(fallbackValues).eq("user_id", userId);
+  const { error: fallbackError } = await admin.from("rnest_users").update(fallbackValues).eq("user_id", userId);
   if (fallbackError) throw fallbackError;
 }
 
 async function readUserSubscriptionRow(userId: string): Promise<{ data: any; supportsOptionalColumns: boolean }> {
   const admin = getSupabaseAdmin();
-  const fullRes = await admin.from("wnl_users").select(FULL_SUBSCRIPTION_SELECT).eq("user_id", userId).maybeSingle();
+  const fullRes = await admin.from("rnest_users").select(FULL_SUBSCRIPTION_SELECT).eq("user_id", userId).maybeSingle();
   if (!fullRes.error) {
     return {
       data: fullRes.data,
@@ -236,7 +243,7 @@ async function readUserSubscriptionRow(userId: string): Promise<{ data: any; sup
     throw fullRes.error;
   }
 
-  const fallbackRes = await admin.from("wnl_users").select(BASE_SUBSCRIPTION_SELECT).eq("user_id", userId).maybeSingle();
+  const fallbackRes = await admin.from("rnest_users").select(BASE_SUBSCRIPTION_SELECT).eq("user_id", userId).maybeSingle();
   if (fallbackRes.error) throw fallbackRes.error;
 
   return {
@@ -471,6 +478,38 @@ function toRefundEventSummary(row: any): BillingRefundEventSummary {
     metadata: (row?.metadata ?? null) as Json | null,
     createdAt: row?.created_at ?? null,
   };
+}
+
+function isMissingMedSafetyUsageEventTableError(error: any) {
+  const code = String(error?.code ?? "");
+  const message = String(error?.message ?? "").toLowerCase();
+  if (code === "42P01" || code === "42703") return true;
+  return message.includes("med_safety_usage_events");
+}
+
+async function appendMedSafetyUsageEvent(input: {
+  userId: string;
+  source: "daily" | "extra" | "restore_daily" | "restore_extra";
+  delta: number;
+  reason: string;
+  metadata?: Json | null;
+}) {
+  const delta = Math.round(Number(input.delta ?? 0));
+  if (!Number.isFinite(delta) || delta === 0) return;
+
+  const admin = getSupabaseAdmin();
+  const { error } = await admin.from("med_safety_usage_events").insert({
+    user_id: input.userId,
+    source: input.source,
+    delta,
+    reason: String(input.reason ?? "").trim().slice(0, 120) || "unknown",
+    metadata: (input.metadata ?? null) as Json | null,
+    created_at: new Date().toISOString(),
+  });
+
+  if (!error) return;
+  if (isMissingMedSafetyUsageEventTableError(error)) return;
+  throw error;
 }
 
 async function appendRefundEvent(input: {
@@ -741,7 +780,7 @@ async function maybeRecoverSubscriptionFromLatestPaidOrder(
 }
 
 export function createCustomerKey(userId: string) {
-  return `wnl_${userId.replace(/[^A-Za-z0-9_-]/g, "")}`;
+  return `rnest_${userId.replace(/[^A-Za-z0-9_-]/g, "")}`;
 }
 
 export async function readSubscription(
@@ -796,13 +835,18 @@ export async function readSubscription(
     extraCredits: medSafetyExtraCredits,
   });
 
+  const persistedCustomerKey = String(data?.toss_customer_key ?? "").trim();
+  const normalizedCustomerKey = persistedCustomerKey.startsWith("rnest_")
+    ? persistedCustomerKey
+    : createCustomerKey(userId);
+
   const snapshot: SubscriptionSnapshot = {
     tier,
     status,
     startedAt,
     currentPeriodEnd,
     updatedAt,
-    customerKey: data?.toss_customer_key || createCustomerKey(userId),
+    customerKey: normalizedCustomerKey,
     cancelAtPeriodEnd,
     cancelScheduledAt,
     canceledAt,
@@ -810,6 +854,13 @@ export async function readSubscription(
     hasPaidAccess,
     medSafetyQuota,
   };
+
+  if (normalizedCustomerKey !== persistedCustomerKey) {
+    updateUserWithOptionalSubscriptionFallback(userId, {
+      toss_customer_key: normalizedCustomerKey,
+      last_seen: new Date().toISOString(),
+    }).catch(() => undefined);
+  }
 
   if (options?.skipReconcile) {
     return snapshot;
@@ -834,7 +885,7 @@ async function readMedSafetyCreditRow(userId: string): Promise<{
 }> {
   const admin = getSupabaseAdmin();
   const { data, error } = await admin
-    .from("wnl_users")
+    .from("rnest_users")
     .select("med_safety_extra_credits, med_safety_daily_used, med_safety_usage_date")
     .eq("user_id", userId)
     .maybeSingle();
@@ -867,7 +918,7 @@ export async function addMedSafetyExtraCredits(input: {
     const row = await readMedSafetyCreditRow(input.userId);
     const nextExtra = row.extraCredits + credits;
     const { data, error } = await admin
-      .from("wnl_users")
+      .from("rnest_users")
       .update({
         med_safety_extra_credits: nextExtra,
         last_seen: nowIso,
@@ -882,7 +933,22 @@ export async function addMedSafetyExtraCredits(input: {
       }
       throw error;
     }
-    if (data) return readSubscription(input.userId, { skipReconcile: true });
+    if (data) {
+      try {
+        await appendMedSafetyUsageEvent({
+          userId: input.userId,
+          source: "extra",
+          delta: credits,
+          reason: "credit_pack_purchase",
+          metadata: {
+            grantedCredits: credits,
+          } as Json,
+        });
+      } catch {
+        // usage ledger write failure should not block credit grant
+      }
+      return readSubscription(input.userId, { skipReconcile: true });
+    }
   }
 
   throw new Error("med_safety_credit_race_retry_exceeded");
@@ -928,7 +994,7 @@ export async function consumeMedSafetyCredit(input: {
     }
 
     const { data, error } = await admin
-      .from("wnl_users")
+      .from("rnest_users")
       .update({
         med_safety_usage_date: today,
         med_safety_daily_used: nextDailyUsed,
@@ -947,6 +1013,23 @@ export async function consumeMedSafetyCredit(input: {
       throw error;
     }
     if (!data) continue;
+
+    if (source) {
+      try {
+        await appendMedSafetyUsageEvent({
+          userId: input.userId,
+          source,
+          delta: -1,
+          reason: "med_safety_search_consume",
+          metadata: {
+            usageDate: today,
+            hasPaidAccess,
+          } as Json,
+        });
+      } catch {
+        // usage ledger write failure should not block main flow
+      }
+    }
 
     return {
       allowed: true,
@@ -981,7 +1064,7 @@ export async function restoreConsumedMedSafetyCredit(input: {
     const nextUsageDate = row.usageDate || today;
 
     const { data, error } = await admin
-      .from("wnl_users")
+      .from("rnest_users")
       .update({
         med_safety_usage_date: nextUsageDate,
         med_safety_daily_used: nextDailyUsed,
@@ -997,7 +1080,23 @@ export async function restoreConsumedMedSafetyCredit(input: {
       if (isMissingMedSafetyCreditColumnError(error)) return;
       throw error;
     }
-    if (data) return;
+    if (data) {
+      try {
+        await appendMedSafetyUsageEvent({
+          userId: input.userId,
+          source: input.source === "daily" ? "restore_daily" : "restore_extra",
+          delta: 1,
+          reason: "med_safety_search_restore",
+          metadata: {
+            usageDate: today,
+            restoredSource: input.source,
+          } as Json,
+        });
+      } catch {
+        // usage ledger write failure should not block restore
+      }
+      return;
+    }
   }
 }
 
@@ -1185,6 +1284,53 @@ export async function listRecentBillingOrders(userId: string, limit = 12): Promi
     .limit(Math.max(1, Math.min(50, Math.round(limit))));
   if (fallbackRes.error) throw fallbackRes.error;
   return (fallbackRes.data ?? []).map((row) => toBillingOrderSummary(row));
+}
+
+export async function listBillingOrdersForAdmin(input?: BillingOrderAdminFilterInput): Promise<BillingOrderSummary[]> {
+  const admin = getSupabaseAdmin();
+  const limit = Math.max(1, Math.min(300, Math.round(input?.limit ?? 100)));
+
+  let fullQuery = admin
+    .from("billing_orders")
+    .select(BILLING_ORDER_SELECT_WITH_OPTIONAL)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (input?.status) {
+    fullQuery = fullQuery.eq("status", input.status);
+  }
+  if (input?.userId) {
+    fullQuery = fullQuery.eq("user_id", String(input.userId).trim());
+  }
+  if (input?.orderKind) {
+    fullQuery = fullQuery.eq("order_kind", input.orderKind);
+  }
+
+  const fullRes = await fullQuery;
+  if (!fullRes.error) {
+    return (fullRes.data ?? []).map((row) => toBillingOrderSummary(row));
+  }
+  if (!isOptionalBillingOrderColumnError(fullRes.error)) throw fullRes.error;
+
+  let fallbackQuery = admin
+    .from("billing_orders")
+    .select(BILLING_ORDER_SELECT_BASE)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (input?.status) {
+    fallbackQuery = fallbackQuery.eq("status", input.status);
+  }
+  if (input?.userId) {
+    fallbackQuery = fallbackQuery.eq("user_id", String(input.userId).trim());
+  }
+
+  const fallbackRes = await fallbackQuery;
+  if (fallbackRes.error) throw fallbackRes.error;
+  let rows = (fallbackRes.data ?? []).map((row) => toBillingOrderSummary(row));
+  if (input?.orderKind) {
+    rows = rows.filter((row) => row.orderKind === input.orderKind);
+  }
+  return rows;
 }
 
 export async function removeUnsettledBillingOrder(input: {
@@ -1587,39 +1733,26 @@ export async function withdrawRefundRequestByUser(input: {
   userId: string;
   note?: string | null;
 }): Promise<BillingRefundRequestSummary> {
-  const admin = getSupabaseAdmin();
   const current = await readRefundRequestById(input.id);
   if (!current) throw new Error("refund_request_not_found");
   if (current.userId !== input.userId) throw new Error("refund_request_forbidden");
-  if (!["REQUESTED", "PENDING"].includes(current.status)) {
-    throw new Error(`invalid_refund_request_state:${current.status}`);
-  }
 
   const note = sanitizeShortText(input.note, 500) ?? "사용자 요청 철회";
-  const nowIso = new Date().toISOString();
-  const { data, error } = await admin
-    .from("billing_refund_requests")
-    .delete()
-    .eq("id", input.id)
-    .eq("user_id", input.userId)
-    .in("status", ["REQUESTED", "PENDING"])
-    .select(REFUND_REQUEST_SELECT)
-    .maybeSingle();
-  if (error) throw error;
-  if (!data) {
-    const latest = await readRefundRequestById(input.id);
-    if (!latest) throw new Error("refund_request_not_found");
-    if (latest.userId !== input.userId) throw new Error("refund_request_forbidden");
-    throw new Error("refund_request_conflict");
-  }
-
-  const removed = toRefundRequestSummary(data);
-  return {
-    ...removed,
-    status: "WITHDRAWN",
-    adminNote: note,
-    updatedAt: nowIso,
-  };
+  return transitionRefundRequestStatus({
+    requestId: input.id,
+    expectedStatuses: ["REQUESTED", "PENDING"],
+    toStatus: "WITHDRAWN",
+    actorRole: "user",
+    actorUserId: input.userId,
+    eventType: "refund.withdrawn",
+    message: note,
+    patch: {
+      admin_note: note,
+      error_code: null,
+      error_message: null,
+      next_retry_at: null,
+    },
+  });
 }
 
 export async function listDueRetryableRefundRequests(limit = 20): Promise<BillingRefundRequestSummary[]> {

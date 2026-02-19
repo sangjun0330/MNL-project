@@ -1,4 +1,4 @@
-// src/lib/wnlInsight.ts
+// src/lib/rnestInsight.ts
 // Insight v2.x: UI helpers + palette + per-day Orders done state
 //
 // ✅ Backward compatible with older patch exports
@@ -31,9 +31,6 @@ export const RNEST_COLORS = {
   nightBg: "#0B1220",
   nightCard: "#111A2E",
 } as const;
-
-// Backward compatibility alias for older insight components.
-export const WNL_COLORS = RNEST_COLORS;
 
 export type VitalStatus = "stable" | "caution" | "warning" | "observation" | "critical";
 
@@ -158,14 +155,14 @@ export function shiftWindow(shift: Shift, pivotDate: Date) {
 // Orders: per-day done state (new + legacy compatible)
 // =========================
 
-const LEGACY_PREFIX = "wnl_orders_done_";
+const LEGACY_PREFIX = "rnest_orders_done_";
 
 export type OrderKey = "sleep_debt" | "caffeine_npo" | "hormone_duty" | "night_adapt";
 
 const ORDER_KEYS: OrderKey[] = ["sleep_debt", "caffeine_npo", "hormone_duty", "night_adapt"];
 
 export function storageKeyForOrdersDone(dateISO: string) {
-  return `wnl:orders:done:${dateISO}`;
+  return `rnest:orders:done:${dateISO}`;
 }
 
 /**

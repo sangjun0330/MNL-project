@@ -1,7 +1,7 @@
 -- Remove legacy "basic" tier and unify paid plan to "pro"
 
 -- 1) User subscription tier normalization
-update public.wnl_users
+update public.rnest_users
 set
   subscription_tier = 'pro',
   subscription_updated_at = coalesce(subscription_updated_at, now()),
@@ -9,7 +9,7 @@ set
 where lower(coalesce(subscription_tier, '')) = 'basic';
 
 -- Safety: any unexpected non-free tier is treated as pro
-update public.wnl_users
+update public.rnest_users
 set
   subscription_tier = 'pro',
   subscription_updated_at = coalesce(subscription_updated_at, now()),
@@ -42,17 +42,17 @@ begin
   if exists (
     select 1
     from pg_constraint
-    where conname = 'wnl_users_subscription_tier_check'
-      and conrelid = 'public.wnl_users'::regclass
+    where conname = 'rnest_users_subscription_tier_check'
+      and conrelid = 'public.rnest_users'::regclass
   ) then
-    alter table public.wnl_users
-      drop constraint wnl_users_subscription_tier_check;
+    alter table public.rnest_users
+      drop constraint rnest_users_subscription_tier_check;
   end if;
 end;
 $$;
 
-alter table public.wnl_users
-  add constraint wnl_users_subscription_tier_check
+alter table public.rnest_users
+  add constraint rnest_users_subscription_tier_check
   check (subscription_tier in ('free', 'pro'));
 
 -- 4) Guardrails: billing_orders stores paid orders only -> pro only

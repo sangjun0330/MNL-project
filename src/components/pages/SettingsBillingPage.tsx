@@ -43,7 +43,7 @@ export function SettingsBillingPage() {
   const flatButtonBase =
     "inline-flex h-11 items-center justify-center rounded-full border px-4 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50";
   const flatButtonSecondary = `${flatButtonBase} border-ios-sep bg-[#F2F2F7] text-ios-text`;
-  const flatButtonPrimary = `${flatButtonBase} border-[color:var(--wnl-accent)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]`;
+  const flatButtonPrimary = `${flatButtonBase} border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]`;
   const creditPack = getCheckoutProductDefinition("credit10");
 
   const loadSubscription = useCallback(async () => {
@@ -155,7 +155,7 @@ export function SettingsBillingPage() {
       <div className="mb-4 flex items-center gap-2">
         <Link
           href="/settings"
-          className="wnl-btn-secondary inline-flex h-9 w-9 items-center justify-center text-[18px] text-ios-text"
+          className="rnest-btn-secondary inline-flex h-9 w-9 items-center justify-center text-[18px] text-ios-text"
         >
           ←
         </Link>
@@ -185,11 +185,11 @@ export function SettingsBillingPage() {
                 {getPlanDefinition(activeTier).title}
               </div>
               {hasPaidAccess ? (
-                <div className="wnl-chip-accent px-3 py-1 text-[12px]">
+                <div className="rnest-chip-accent px-3 py-1 text-[12px]">
                   {t("유료 이용 중")}
                 </div>
               ) : (
-                <div className="wnl-chip-muted px-3 py-1 text-[12px]">
+                <div className="rnest-chip-muted px-3 py-1 text-[12px]">
                   {t("무료 플랜")}
                 </div>
               )}
@@ -213,7 +213,7 @@ export function SettingsBillingPage() {
                     type="button"
                     onClick={startCreditCheckout}
                     disabled={creditPaying}
-                    className="text-[11.5px] font-semibold text-[color:var(--wnl-accent)] underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+                    className="text-[11.5px] font-semibold text-[color:var(--rnest-accent)] underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {creditPaying ? t("결제창 준비 중...") : t("추가 크레딧 구매")}
                   </button>
@@ -261,7 +261,7 @@ export function SettingsBillingPage() {
             <div className="mt-4 text-center">
               <Link
                 href="/settings/billing/upgrade"
-                className="wnl-link-accent text-[13px] font-semibold"
+                className="rnest-link-accent text-[13px] font-semibold"
               >
                 {t("플랜 업그레이드하기")}
               </Link>

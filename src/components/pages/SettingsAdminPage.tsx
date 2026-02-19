@@ -48,7 +48,7 @@ export function SettingsAdminPage() {
 
   const cards = useMemo(
     () => [
-      { label: "열린 요청", value: openCount, tone: "text-[color:var(--wnl-accent)]" },
+      { label: "열린 요청", value: openCount, tone: "text-[color:var(--rnest-accent)]" },
       { label: "환불 완료", value: doneCount, tone: "text-[#0B7A3E]" },
       { label: "거절/최종실패", value: failedCount, tone: "text-[#B3261E]" },
       { label: "총 요청(최근 200건)", value: total, tone: "text-ios-text" },
@@ -61,7 +61,7 @@ export function SettingsAdminPage() {
       <div className="mb-4 flex items-center gap-2">
         <Link
           href="/settings"
-          className="wnl-btn-secondary inline-flex h-9 w-9 items-center justify-center text-[18px] text-ios-text"
+          className="rnest-btn-secondary inline-flex h-9 w-9 items-center justify-center text-[18px] text-ios-text"
         >
           ←
         </Link>
@@ -69,13 +69,13 @@ export function SettingsAdminPage() {
       </div>
 
       {status !== "authenticated" ? (
-        <div className="wnl-surface p-5">
+        <div className="rnest-surface p-5">
           <div className="text-[16px] font-bold text-ios-text">로그인이 필요합니다</div>
           <p className="mt-2 text-[13px] text-ios-sub">관리자 화면은 관리자 계정 로그인 후 접근할 수 있습니다.</p>
           <button
             type="button"
             onClick={() => signInWithProvider("google")}
-            className="wnl-btn-primary mt-4 px-4 py-2 text-[13px]"
+            className="rnest-btn-primary mt-4 px-4 py-2 text-[13px]"
           >
             Google로 로그인
           </button>
@@ -84,11 +84,11 @@ export function SettingsAdminPage() {
 
       {status === "authenticated" ? (
         <>
-          <section className="wnl-surface p-5">
+          <section className="rnest-surface p-5">
             <div className="text-[13px] font-semibold text-ios-sub">운영 요약</div>
             <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
               {cards.map((card) => (
-                <div key={card.label} className="wnl-sub-surface p-3">
+                <div key={card.label} className="rnest-sub-surface p-3">
                   <div className="text-[11px] text-ios-sub">{card.label}</div>
                   <div className={`mt-1 text-[20px] font-extrabold tracking-[-0.02em] ${card.tone}`}>{card.value}</div>
                 </div>
@@ -98,14 +98,14 @@ export function SettingsAdminPage() {
             {error ? <div className="mt-3 text-[12px] text-red-600">{error}</div> : null}
           </section>
 
-          <section className="wnl-surface mt-4 p-5">
+          <section className="rnest-surface mt-4 p-5">
             <div className="text-[15px] font-bold text-ios-text">관리 기능</div>
             <div className="mt-3 grid gap-2">
               <Link
                 href="/settings/admin/refunds"
-                className="wnl-btn-secondary inline-flex h-11 items-center justify-between px-4 text-[13px]"
+                className="rnest-btn-secondary inline-flex h-11 items-center justify-between px-4 text-[13px]"
               >
-                환불/결제취소 요청 관리
+                환불 요청 + Toss 결제 로그 운영
                 <span className="text-ios-sub">›</span>
               </Link>
             </div>

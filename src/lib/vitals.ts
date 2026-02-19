@@ -7,7 +7,7 @@ import type { AppState, BioInputs, EmotionEntry } from "@/lib/model";
 import { hasHealthInput } from "@/lib/healthRecords";
 import type { Shift } from "@/lib/types";
 import { defaultRNestState, stepRNestBatteryEngine } from "@/lib/rnestBatteryEngine";
-import { shiftTimes } from "@/lib/wnlInsight";
+import { shiftTimes } from "@/lib/rnestInsight";
 
 export type RiskTone = "green" | "orange" | "red";
 

@@ -6,8 +6,8 @@ dist
 .env
 .env.local
 .DS_Store
-.wnl_logs
-.wnl_users
+.rnest_logs
+.rnest_users
 playwright-report
 test-results
 public/runtime/vendor/web-llm/index.js

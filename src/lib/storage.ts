@@ -5,7 +5,7 @@ import type { Shift } from "@/lib/types";
  * Local-only persistence.
  * v2 adds `notes` (per-day memo).
  */
-const KEY = "wnl_bodybattery_v2";
+const KEY = "rnest_bodybattery_v2";
 
 export type PersistedState = {
   version: 2;

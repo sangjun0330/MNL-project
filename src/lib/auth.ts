@@ -57,7 +57,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
       if (typeof window !== "undefined") {
         window.dispatchEvent(
-          new CustomEvent("wnl:auth-event", {
+          new CustomEvent("rnest:auth-event", {
             detail: {
               event,
               userId: nextSession?.user?.id ?? null,

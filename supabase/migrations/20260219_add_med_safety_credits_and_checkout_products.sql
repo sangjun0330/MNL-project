@@ -1,9 +1,9 @@
-alter table public.wnl_users
+alter table public.rnest_users
   add column if not exists med_safety_extra_credits integer not null default 0,
   add column if not exists med_safety_daily_used integer not null default 0,
   add column if not exists med_safety_usage_date date;
 
-update public.wnl_users
+update public.rnest_users
 set
   med_safety_extra_credits = greatest(0, coalesce(med_safety_extra_credits, 0)),
   med_safety_daily_used = greatest(0, coalesce(med_safety_daily_used, 0))
@@ -16,32 +16,32 @@ do $$
 begin
   if exists (
     select 1 from pg_constraint
-    where conname = 'wnl_users_med_safety_extra_credits_nonnegative'
-      and conrelid = 'public.wnl_users'::regclass
+    where conname = 'rnest_users_med_safety_extra_credits_nonnegative'
+      and conrelid = 'public.rnest_users'::regclass
   ) then
-    alter table public.wnl_users drop constraint wnl_users_med_safety_extra_credits_nonnegative;
+    alter table public.rnest_users drop constraint rnest_users_med_safety_extra_credits_nonnegative;
   end if;
 end;
 $$;
 
-alter table public.wnl_users
-  add constraint wnl_users_med_safety_extra_credits_nonnegative
+alter table public.rnest_users
+  add constraint rnest_users_med_safety_extra_credits_nonnegative
   check (med_safety_extra_credits >= 0);
 
 do $$
 begin
   if exists (
     select 1 from pg_constraint
-    where conname = 'wnl_users_med_safety_daily_used_nonnegative'
-      and conrelid = 'public.wnl_users'::regclass
+    where conname = 'rnest_users_med_safety_daily_used_nonnegative'
+      and conrelid = 'public.rnest_users'::regclass
   ) then
-    alter table public.wnl_users drop constraint wnl_users_med_safety_daily_used_nonnegative;
+    alter table public.rnest_users drop constraint rnest_users_med_safety_daily_used_nonnegative;
   end if;
 end;
 $$;
 
-alter table public.wnl_users
-  add constraint wnl_users_med_safety_daily_used_nonnegative
+alter table public.rnest_users
+  add constraint rnest_users_med_safety_daily_used_nonnegative
   check (med_safety_daily_used >= 0);
 
 alter table public.billing_orders

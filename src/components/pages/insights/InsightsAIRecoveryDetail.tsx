@@ -194,10 +194,10 @@ function RecoveryGeneratingOverlay({
       style={{ position: "fixed", inset: 0 }}
     >
       <div className="relative w-full max-w-[420px] overflow-hidden rounded-[30px] border border-ios-sep bg-white px-6 py-6 shadow-[0_30px_90px_rgba(0,0,0,0.12)]">
-        <div className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-transparent via-[#007AFF] to-transparent wnl-recovery-progress" />
+        <div className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-transparent via-[#007AFF] to-transparent rnest-recovery-progress" />
         <div className="flex items-start gap-4">
           <div className="relative h-[60px] w-[60px] shrink-0 overflow-hidden rounded-2xl border border-black/5 bg-[#eef4ff]">
-            <div className="absolute inset-0 wnl-logo-breathe rounded-2xl bg-[radial-gradient(80%_70%_at_50%_40%,rgba(0,122,255,0.22),transparent)]" />
+            <div className="absolute inset-0 rnest-logo-breathe rounded-2xl bg-[radial-gradient(80%_70%_at_50%_40%,rgba(0,122,255,0.22),transparent)]" />
             <Image
               src="/icons/icon-192.png"
               alt="RNest"
@@ -213,9 +213,9 @@ function RecoveryGeneratingOverlay({
           </div>
         </div>
         <div className="mt-4 flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-[#007AFF] wnl-dot-pulse" />
-          <span className="h-2 w-2 rounded-full bg-[#007AFF] wnl-dot-pulse [animation-delay:180ms]" />
-          <span className="h-2 w-2 rounded-full bg-[#007AFF] wnl-dot-pulse [animation-delay:360ms]" />
+          <span className="h-2 w-2 rounded-full bg-[#007AFF] rnest-dot-pulse" />
+          <span className="h-2 w-2 rounded-full bg-[#007AFF] rnest-dot-pulse [animation-delay:180ms]" />
+          <span className="h-2 w-2 rounded-full bg-[#007AFF] rnest-dot-pulse [animation-delay:360ms]" />
         </div>
       </div>
     </div>,
@@ -466,7 +466,7 @@ export function InsightsAIRecoveryDetail() {
           <button
             type="button"
             onClick={startAnalysis}
-            className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-full border border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] text-[14px] font-semibold text-[color:var(--wnl-accent)]"
+            className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] text-[14px] font-semibold text-[color:var(--rnest-accent)]"
           >
             {needsHealthInputGuide ? t("필수 기록 입력하러 가기") : t("AI 분석 시작하기")}
           </button>

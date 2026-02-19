@@ -69,15 +69,15 @@ export function BottomNav() {
 
   useEffect(() => {
     if (typeof document !== "undefined") {
-      setHide(document.body.classList.contains("wnl-sheet-open"));
+      setHide(document.body.classList.contains("rnest-sheet-open"));
     }
 
     const onSheet = (e: Event) => {
       const ce = e as CustomEvent<{ open: boolean }>;
       setHide(Boolean(ce.detail?.open));
     };
-    window.addEventListener("wnl:sheet", onSheet as any);
-    return () => window.removeEventListener("wnl:sheet", onSheet as any);
+    window.addEventListener("rnest:sheet", onSheet as any);
+    return () => window.removeEventListener("rnest:sheet", onSheet as any);
   }, []);
 
   useEffect(() => {
@@ -101,7 +101,7 @@ export function BottomNav() {
           <nav
             className={cn(
               "pointer-events-auto",
-              "wnl-nav-bar"
+              "rnest-nav-bar"
             )}
           >
             <div className="grid grid-cols-5 gap-1 p-1.5">
@@ -113,8 +113,8 @@ export function BottomNav() {
                     key={it.href}
                     href={it.href}
                     className={cn(
-                      "touch-manipulation wnl-nav-item",
-                      active ? "wnl-nav-active" : "wnl-nav-inactive"
+                      "touch-manipulation rnest-nav-item",
+                      active ? "rnest-nav-active" : "rnest-nav-inactive"
                     )}
                     onPointerDown={() => {
                       if (activeHref !== it.href) setPendingHref(it.href);
@@ -130,8 +130,8 @@ export function BottomNav() {
                     }}
                     aria-current={active ? "page" : undefined}
                   >
-                    <Icon className="wnl-nav-icon" aria-hidden="true" focusable="false" />
-                    <span className="wnl-nav-label">{t(it.label)}</span>
+                    <Icon className="rnest-nav-icon" aria-hidden="true" focusable="false" />
+                    <span className="rnest-nav-label">{t(it.label)}</span>
                   </Link>
                 );
               })}
