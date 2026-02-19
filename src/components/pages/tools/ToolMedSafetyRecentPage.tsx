@@ -49,7 +49,7 @@ function modeLabel(mode: "ward" | "er" | "icu") {
 }
 
 function kindLabel(kind: "medication" | "device" | "scenario") {
-  if (kind === "medication") return "약물";
+  if (kind === "medication") return "의약품";
   if (kind === "device") return "의료기구";
   return "상황";
 }
@@ -58,6 +58,118 @@ function shortText(value: string, max = 84) {
   const text = String(value ?? "").replace(/\s+/g, " ").trim();
   if (text.length <= max) return text;
   return `${text.slice(0, max).trim()}…`;
+}
+
+type NarrativeSection = {
+  title: string;
+  items: string[];
+};
+
+function cleanNarrativeLine(value: string) {
+  return String(value ?? "")
+    .replace(/\u0000/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function stripBulletPrefix(value: string) {
+  return String(value ?? "")
+    .replace(/^[-*•·]\s+/, "")
+    .replace(/^\d+[.)]\s+/, "")
+    .trim();
+}
+
+function isHeadingLine(value: string) {
+  const line = String(value ?? "").trim();
+  if (!line) return false;
+  if (!/[:：]$/.test(line)) return false;
+  const noColon = line.replace(/[:：]$/, "").trim();
+  if (!noColon) return false;
+  if (noColon.length > 56) return false;
+  if (/^(ENTITY_|NOT_FOUND|CANDIDATES|입력명|판정|요청|추가확인|주의)/i.test(noColon)) return false;
+  return true;
+}
+
+function splitSectionItems(lines: string[]) {
+  const out: string[] = [];
+  let buffer: string[] = [];
+
+  const flush = () => {
+    if (!buffer.length) return;
+    out.push(buffer.join(" ").trim());
+    buffer = [];
+  };
+
+  for (const raw of lines) {
+    const line = cleanNarrativeLine(raw);
+    if (!line) {
+      flush();
+      continue;
+    }
+    const normalized = stripBulletPrefix(line);
+    if (!normalized) continue;
+    if (/^[-*•·]\s+/.test(line) || /^\d+[.)]\s+/.test(line)) {
+      flush();
+      buffer.push(normalized);
+      flush();
+      continue;
+    }
+    buffer.push(normalized);
+  }
+  flush();
+  return out.filter(Boolean);
+}
+
+function parseNarrativeSections(value: string): NarrativeSection[] {
+  const lines = String(value ?? "")
+    .replace(/\r/g, "")
+    .split("\n");
+
+  const sections: NarrativeSection[] = [];
+  let currentTitle = "상세 결과";
+  let currentLines: string[] = [];
+  let hasHeading = false;
+
+  const pushCurrent = () => {
+    const items = splitSectionItems(currentLines);
+    if (!items.length) {
+      currentLines = [];
+      return;
+    }
+    sections.push({
+      title: currentTitle,
+      items,
+    });
+    currentLines = [];
+  };
+
+  for (const rawLine of lines) {
+    const line = cleanNarrativeLine(rawLine);
+    if (!line) {
+      currentLines.push("");
+      continue;
+    }
+    if (isHeadingLine(line)) {
+      hasHeading = true;
+      pushCurrent();
+      currentTitle = line.replace(/[:：]$/, "").trim();
+      continue;
+    }
+    currentLines.push(line);
+  }
+  pushCurrent();
+
+  if (sections.length) return sections;
+
+  const fallbackItems = splitSectionItems(lines);
+  if (!fallbackItems.length) return [];
+  if (!hasHeading) {
+    return fallbackItems.map((item, idx) => ({
+      title: `요점 ${idx + 1}`,
+      items: [item],
+    }));
+  }
+  return [{ title: "상세 결과", items: fallbackItems }];
 }
 
 export function ToolMedSafetyRecentPage() {
@@ -111,6 +223,7 @@ export function ToolMedSafetyRecentPage() {
     if (!selected) return "";
     return selected.result.searchAnswer || selected.result.generatedText || selected.result.oneLineConclusion || "";
   }, [selected]);
+  const selectedSections = useMemo(() => parseNarrativeSections(selectedNarrative), [selectedNarrative]);
 
   return (
     <>
@@ -190,9 +303,27 @@ export function ToolMedSafetyRecentPage() {
             </div>
             <div className="rounded-2xl border border-ios-sep bg-white px-3 py-3">
               <div className="text-[12px] font-semibold text-ios-muted">{t("상세 결과")}</div>
-              <div className="mt-1 whitespace-pre-line text-[15px] leading-6 text-ios-text">
-                {selectedNarrative || t("표시할 상세 내용이 없습니다.")}
-              </div>
+              {selectedSections.length ? (
+                <div className="mt-2 space-y-2">
+                  {selectedSections.map((section, idx) => (
+                    <div
+                      key={`${section.title}-${idx}`}
+                      className="rounded-xl border border-ios-sep bg-[#F8F8FB] px-3 py-3"
+                    >
+                      <div className="text-[14px] font-bold text-ios-text">{section.title}</div>
+                      <ul className="mt-1 space-y-1 text-[14px] leading-6 text-ios-text">
+                        {section.items.map((item, itemIdx) => (
+                          <li key={`${section.title}-${idx}-item-${itemIdx}`} className="list-disc pl-1 ml-4">
+                            {item}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-1 text-[15px] leading-6 text-ios-sub">{t("표시할 상세 내용이 없습니다.")}</div>
+              )}
             </div>
             <Button variant="secondary" onClick={() => setSelected(null)}>
               {t("닫기")}

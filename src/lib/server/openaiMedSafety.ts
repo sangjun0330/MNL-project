@@ -444,7 +444,7 @@ function buildDeveloperPrompt(locale: "ko" | "en", intent: QueryIntent) {
       "핵심 원칙(환각 방지):",
       "- 존재 여부/정체가 불확실한 제품명·기구명·약어는 임상 내용을 생성하지 않는다.",
       "- “추정/가능성”은 허용되지만, 추정 상태에서 용량·속도·금기 같은 임상 결정을 단정하지 않는다.",
-      "- 수치/용량/속도/주기/희석/호환은 기관차가 크므로 원칙만 말하고 반드시 ‘기관 프로토콜/약제부/IFU 확인 필요’를 포함한다.",
+      "- 수치/용량/속도/주기/희석/호환은 기관차가 크므로 원칙 중심으로 설명하고, 기관 차이가 예상되면 ‘기관 프로토콜/약제부/IFU 확인 권장’을 덧붙인다.",
       "",
       "[판단 플로우: Identify → Decide → Respond]",
       "1. 정규화(NORMALIZE)",
@@ -462,7 +462,7 @@ function buildDeveloperPrompt(locale: "ko" | "en", intent: QueryIntent) {
       "- 후보가 단 하나로 강하게 수렴하지 않으면(동명이인/유사 발음 다수) 확신도를 낮춘다.",
       "",
       "3. 확신도 판정(CONFIDENCE)",
-      "- HIGH: 단일 후보로 명확하게 수렴(성분/약물군까지 일관)하며 혼동 위험이 낮다.",
+      "- HIGH: 단일 후보로 명확하게 수렴(성분/의약품군까지 일관)하며 혼동 위험이 낮다.",
       "- MEDIUM: 후보 1~3개가 있으나 확정 불가(제품명 애매/유사명 다수/철자 불안정).",
       "- LOW: 후보 생성 불가 또는 의미 불명.",
       "",
@@ -476,7 +476,7 @@ function buildDeveloperPrompt(locale: "ko" | "en", intent: QueryIntent) {
       "- 마크다운 장식(##, **, 코드블록) 없이 일반 텍스트만 사용한다.",
       "- 같은 의미 반복 금지. 각 불릿은 새 정보여야 한다.",
       "- 본문 불릿은 각 문장에 ‘행동 + 이유/위험 + 확인포인트’를 반드시 포함한다.",
-      "- 기관차/불확실 요소는 반드시 ‘기관 프로토콜/약제부/IFU 확인 필요’를 포함한다.",
+      "- 기관차/불확실 요소는 필요 시 ‘기관 프로토콜/약제부/IFU 확인 권장’을 포함한다.",
       "- 한국어 출력은 반드시 존댓말(합니다/하세요 체)로 작성한다.",
       "",
       "[안전 경계]",
@@ -498,7 +498,7 @@ function buildDeveloperPrompt(locale: "ko" | "en", intent: QueryIntent) {
       "핵심 원칙(환각 방지):",
       "- 존재 여부/정체가 불확실한 기구명·모델명·약어는 사용법/알람/합병증/세팅 같은 임상 내용을 생성하지 않는다.",
       "- “추정/가능성”은 후보 제시(CANDIDATES)까지만 허용하며, 본문 생성은 HIGH 확신에서만 허용한다.",
-      "- 세팅값/교체주기/규격/부품 호환/전원·압력 한계 등은 기관·제조사(IFU) 차이가 크므로 단정 금지, 반드시 ‘기관/IFU 확인 필요’를 포함한다.",
+      "- 세팅값/교체주기/규격/부품 호환/전원·압력 한계 등은 기관·제조사(IFU) 차이가 크므로 단정하지 말고, 필요 시 ‘기관/IFU 확인 권장’을 포함한다.",
       "",
       "[판단 플로우: Identify → Decide → Respond]",
       "1. 정규화(NORMALIZE)",
@@ -530,7 +530,7 @@ function buildDeveloperPrompt(locale: "ko" | "en", intent: QueryIntent) {
       "- 마크다운 장식(##, **, 코드블록) 없이 일반 텍스트만 사용한다.",
       "- 같은 의미 반복 금지. 각 불릿은 새 정보여야 한다.",
       "- 본문 불릿은 각 문장에 ‘행동 + 이유/위험 + 확인포인트’를 반드시 포함한다.",
-      "- 기관차/IFU 의존 항목(세팅, 교체주기, 호환, 규격)은 반드시 ‘기관/IFU 확인 필요’를 포함한다.",
+      "- 기관차/IFU 의존 항목(세팅, 교체주기, 호환, 규격)은 필요 시 ‘기관/IFU 확인 권장’을 포함한다.",
       "- 한국어 출력은 반드시 존댓말(합니다/하세요 체)로 작성한다.",
       "",
       "[안전 경계]",
@@ -547,13 +547,13 @@ function buildDeveloperPrompt(locale: "ko" | "en", intent: QueryIntent) {
       "절대 사실을 지어내지 마라. 불확실하면 임상 세부를 생성하지 않는다.",
       "",
       "[판단 플로우]",
-      "1) 약물/의료기구 질의는 '정확 식별'을 먼저 수행한다.",
+      "1) 의약품/의료기구 질의는 '정확 식별'을 먼저 수행한다.",
       "2) 정확 식별 실패 시 NOT_FOUND 블록만 출력하고 종료한다.",
       "3) 정확 식별 성공 시 정식명칭으로 정규화하고, 지정된 섹션 순서로만 출력한다.",
       "",
       "[출력 규칙]",
       "- 섹션 순서/제목/필수 항목을 바꾸지 않는다.",
-      "- 숫자/용량/속도/주기처럼 기관차가 큰 정보는 단정하지 말고 '기관 프로토콜/약제부/IFU 확인 필요'로 표기한다.",
+      "- 숫자/용량/속도/주기처럼 기관차가 큰 정보는 단정하지 말고 필요 시 '기관 프로토콜/약제부/IFU 확인 권장'으로 표기한다.",
       "- 같은 의미를 반복하지 않는다. 각 불릿은 새 정보여야 한다.",
       "- 각 문장은 짧고 명확하며 행동 가능해야 한다.",
       "- 마크다운 장식(##, **, 코드블록) 없이 일반 텍스트로 출력한다.",
@@ -577,10 +577,10 @@ function buildDeveloperPrompt(locale: "ko" | "en", intent: QueryIntent) {
 
 function buildMedicationPrompt(query: string, contextJson: string) {
   return [
-    "아래 FLOW와 OUTPUT CONTRACT를 정확히 지켜 “약물 질문” 답변을 작성하라.",
+    "아래 FLOW와 OUTPUT CONTRACT를 정확히 지켜 “의약품 질문” 답변을 작성하라.",
     "",
     "[FLOW]",
-    "1. 입력 약물명(오타/약어/붙여쓰기/용량/제형 포함)을 정규화한 뒤, 정확 식별 가능 여부를 판단한다.",
+    "1. 입력 의약품명(오타/약어/붙여쓰기/용량/제형 포함)을 정규화한 뒤, 정확 식별 가능 여부를 판단한다.",
     "2. 확신도 판정:",
     "- HIGH: 정확 식별 성공으로 간주한다.",
     "- MEDIUM: 확정 불가(혼동 가능)로 간주한다.",
@@ -589,13 +589,13 @@ function buildMedicationPrompt(query: string, contextJson: string) {
     "4. MEDIUM/LOW일 때는 NOT_FOUND 블록만 출력하고 즉시 종료한다.",
     "- 단, MEDIUM일 때는 CANDIDATES에 “가장 유력한 후보 1~3개”를 반드시 제시하고, 마지막 줄에 “추가 확인 요청” 1문장을 포함한다.",
     "- LOW일 때는 CANDIDATES가 없으면 NONE으로 둔다.",
-    "5. 어떤 경우에도 “존재/정체가 불확실한 약물”에 대해 임상 내용을 생성하지 마라.",
+    "5. 어떤 경우에도 “존재/정체가 불확실한 의약품”에 대해 임상 내용을 생성하지 마라.",
     "",
     "[NOT_FOUND 출력 형식 - 고정]",
     "NOT_FOUND",
     "입력명: <원문 질의>",
     "CANDIDATES: <후보명1>; <후보명2>; <후보명3> (없으면 NONE)",
-    "판정: 정확히 일치하는 약물을 확인하지 못했습니다.",
+    "판정: 정확히 일치하는 의약품을 확인하지 못했습니다.",
     "요청: 정확한 공식명(성분명/제품명) 또는 아래 후보 중 1개를 선택해 주세요.",
     "추가확인: <MEDIUM일 때만: 예/아니오 또는 1개 선택형 질문 1문장, LOW면 이 줄 생략>",
     "주의: NOT_FOUND에서는 임상 내용(적응증/용량/주의/모니터링)을 절대 생성하지 마라.",
@@ -608,7 +608,7 @@ function buildMedicationPrompt(query: string, contextJson: string) {
     "[본문 OUTPUT CONTRACT - 아래 9개 섹션 순서 고정]",
     "규칙: 섹션당 2~3개 불릿, 각 불릿은 ‘행동 + 이유/위험 + 확인포인트’를 포함한 1문장.",
     "규칙: 섹션 제목을 불릿 문장에 반복하지 말 것.",
-    "규칙: 불확실하거나 기관 차이 큰 내용은 반드시 ‘기관 프로토콜/약제부/IFU 확인 필요’ 표기.",
+    "규칙: 불확실하거나 기관 차이 큰 내용은 필요 시 ‘기관 프로토콜/약제부/IFU 확인 권장’ 표기.",
     "규칙: 용량/속도/희석/호환 등 수치 단정 금지(원칙만), 확인 포인트를 함께 제시.",
     "규칙: 한국어 문장은 반드시 존댓말(합니다/하세요 체)로 작성.",
     "",
@@ -675,7 +675,7 @@ function buildDevicePrompt(query: string, contextJson: string) {
     "[본문 OUTPUT CONTRACT - 아래 7개 섹션 순서 고정]",
     "규칙: 섹션당 2~3개 불릿, 각 불릿은 ‘행동 + 이유/위험 + 확인포인트’를 포함한 1문장.",
     "규칙: 섹션 제목을 불릿 문장에 반복하지 말 것.",
-    "규칙: 교체/점검 주기, 세팅값, 호환/규격 등 기관차 큰 내용은 반드시 ‘기관/IFU 확인 필요’ 표기.",
+    "규칙: 교체/점검 주기, 세팅값, 호환/규격 등 기관차 큰 내용은 필요 시 ‘기관/IFU 확인 권장’ 표기.",
     "규칙: 세팅값을 단정하지 말고 “원칙 + 확인포인트”로만 제시한다.",
     "규칙: 한국어 문장은 반드시 존댓말(합니다/하세요 체)로 작성.",
     "",
@@ -717,7 +717,7 @@ function buildScenarioPrompt(query: string, contextJson: string) {
     "권장 구성: 핵심 판단, 지금 할 일(즉시), 확인할 수치/관찰, 가능한 원인 Top 3, 조정/분기, 중단·호출 기준, 보고 문구.",
     "각 구성은 2~3개 핵심 포인트로 정리하라.",
     "전체 길이는 대략 18~32줄 내외로 작성하라.",
-    "불확실한 부분은 단정하지 말고 '기관 확인 필요'를 짧게 표기하라.",
+    "불확실한 부분은 단정하지 말고 필요 시 '기관 확인 권장'을 짧게 표기하라.",
     "마지막에는 현장에서 바로 읽을 수 있는 짧은 보고 문구(SBAR 형태) 2~3문장을 포함하라.",
     "질문:",
     query || "(없음)",
@@ -1453,7 +1453,7 @@ function hasNotFoundSignal(text: string) {
   const t = String(text ?? "").toLowerCase();
   return (
     /\bnot_found\b/.test(t) ||
-    /(찾을\s*수\s*없|확인하지\s*못|일치하는\s*(약물|기구).*(없|못)|존재하지\s*않)/i.test(t) ||
+    /(찾을\s*수\s*없|확인하지\s*못|일치하는\s*(약물|의약품|기구).*(없|못)|존재하지\s*않)/i.test(t) ||
     /(no\s+exact\s+match|cannot\s+identify|could\s+not\s+identify|not\s+found|unknown\s+medication|unknown\s+device)/i.test(t) ||
     /(정확한\s*(이름|명칭|공식명).*(입력|다시))/i.test(t)
   );
@@ -1677,7 +1677,7 @@ function buildNotFoundResult(
   const safeName = cleanLine(params.query || params.imageName || "조회 항목").slice(0, 70) || "조회 항목";
   const ko = params.locale === "ko";
   const isMedication = intent === "medication";
-  const itemLabel = ko ? (isMedication ? "약물" : "의료기구") : isMedication ? "medication" : "device";
+  const itemLabel = ko ? (isMedication ? "의약품" : "의료기구") : isMedication ? "medication" : "device";
 
   return {
     resultKind: intent === "scenario" ? "scenario" : intent,
@@ -1738,7 +1738,7 @@ function buildNotFoundResult(
       escalateWhen: ko ? ["명칭 혼동이 우려되면 즉시 동료와 더블체크"] : ["If name confusion is likely, perform immediate double-check"],
     },
     institutionalChecks: ko
-      ? ["기관 프로토콜·약제부 DB·제조사 IFU에서 명칭 확인 필요"]
+      ? ["기관 프로토콜·약제부 DB·제조사 IFU에서 명칭 확인 권장"]
       : ["Verify naming in local protocol, pharmacy DB, and manufacturer IFU"],
     sbar: ko
       ? {
@@ -1795,7 +1795,7 @@ function buildFallbackResult(params: AnalyzeParams, intent: QueryIntent, note: s
       monitor: ["5-15-30-60분 내 상태 재평가"],
       escalateWhen: ["호흡곤란·저혈압·의식저하·급격한 악화 시 즉시 보고"],
     },
-    institutionalChecks: ["기관 프로토콜·약제부·IFU 확인 필요"],
+    institutionalChecks: ["기관 프로토콜·약제부·IFU 확인 권장"],
     sbar: {
       situation: "안전 확인이 필요한 상태",
       background: "현재 투여/장비 상황과 최근 변화 요약",
@@ -1877,7 +1877,7 @@ function qualityFallbackTemplates(intent: QueryIntent, locale: "ko" | "en", item
         "농도/속도 설정 후 역산 검산을 반드시 수행하세요.",
         "시작 또는 증량 후 15분 이내 재평가를 우선하세요.",
       ],
-      topNumbers: ["혈압·맥박·SpO2·의식 baseline", "약물군별 핵심 검사값/ECG", "현재 농도와 펌프 속도"],
+      topNumbers: ["혈압·맥박·SpO2·의식 baseline", "의약품군별 핵심 검사값/ECG", "현재 농도와 펌프 속도"],
       topRisks: ["mg↔mcg, units↔mL 단위 10배 오류", "라인/혼합 호환성 미확인", "경고 신호 지연 대응"],
       compatibilityChecks: ["전용라인 필요 여부", "Y-site/혼합 가능 여부", "채널/라인 tracing 더블체크"],
       monitor: ["5-15-30-60분 재평가", "효과·부작용 동시 확인", "기준 이탈 시 즉시 보고"],
@@ -2052,7 +2052,7 @@ function buildResultFromAnswer(params: AnalyzeParams, intent: QueryIntent, answe
       monitor: ensureMinList(monitor, templates.monitor, 2, 6),
       escalateWhen: ensureMinList(escalateWhen, templates.escalateWhen, 1, 6),
     },
-    institutionalChecks: institutionalChecks.length ? institutionalChecks : ["기관 프로토콜·약제부·IFU 확인 필요"],
+    institutionalChecks: institutionalChecks.length ? institutionalChecks : ["기관 프로토콜·약제부·IFU 확인 권장"],
     sbar,
     patientScript20s:
       cleanLine(
