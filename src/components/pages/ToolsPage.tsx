@@ -1,15 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { Card } from "@/components/ui/Card";
 import { useI18n } from "@/lib/useI18n";
 
 export function ToolsPage() {
   const { t } = useI18n();
-  const router = useRouter();
-  const { hasPaidAccess, loading: billingLoading } = useBillingAccess();
+  const { loading: billingLoading, subscription } = useBillingAccess();
+  const medSafetyRemaining = Math.max(0, Number(subscription?.medSafetyQuota?.totalRemaining ?? 0));
 
   return (
     <div className="mx-auto w-full max-w-[760px] space-y-4 px-4 pb-24 pt-6">
@@ -32,29 +31,18 @@ export function ToolsPage() {
         </Card>
       </Link>
 
-      <Link
-        href="/tools/med-safety"
-        className="block"
-        onClick={(event) => {
-          if (billingLoading || hasPaidAccess) return;
-          event.preventDefault();
-          const confirmed = window.confirm(
-            t("AI 약물·기구 안전 가이드는 유료 플랜 전용 기능입니다.\n플랜 업그레이드 페이지로 이동할까요?")
-          );
-          if (confirmed) router.push("/settings/billing/upgrade");
-        }}
-      >
+      <Link href="/tools/med-safety" className="block">
         <Card className="p-6 transition hover:translate-y-[-1px] hover:border-[color:var(--wnl-accent-border)]">
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">{t("AI 약물·기구 안전 가이드")}</div>
               <div className="mt-1 text-[13px] text-ios-sub">
-                {!billingLoading && !hasPaidAccess
-                  ? t("유료 플랜에서 AI 약물·기구 안전 가이드를 사용할 수 있어요.")
+                {billingLoading
+                  ? t("사용 가능 크레딧을 확인 중입니다.")
                   : t("사진·텍스트로 투여 전 확인사항, 수행 절차, 중단·보고 기준을 빠르게 정리해줍니다.")}
               </div>
             </div>
-            <span className="wnl-chip-accent px-3 py-1 text-[11px]">{!billingLoading && !hasPaidAccess ? t("PRO") : t("AI")}</span>
+            <span className="wnl-chip-accent px-3 py-1 text-[11px]">{billingLoading ? t("AI") : `${t("남은")} ${medSafetyRemaining}${t("회")}`}</span>
           </div>
         </Card>
       </Link>

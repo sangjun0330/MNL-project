@@ -2,9 +2,15 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { formatKrw, getPlanDefinition } from "@/lib/billing/plans";
-import { fetchSubscriptionSnapshot, formatDateLabel, requestPlanCheckout, type SubscriptionResponse } from "@/lib/billing/client";
+import { formatKrw, getCheckoutProductDefinition, getPlanDefinition, type CheckoutProductId } from "@/lib/billing/plans";
+import {
+  fetchSubscriptionSnapshot,
+  formatDateLabel,
+  requestPlanCheckout,
+  type SubscriptionResponse,
+} from "@/lib/billing/client";
 import { signInWithProvider, useAuthState } from "@/lib/auth";
+import { BillingCheckoutSheet } from "@/components/billing/BillingCheckoutSheet";
 import { useI18n } from "@/lib/useI18n";
 
 function mapCheckoutError(raw: unknown) {
@@ -18,6 +24,8 @@ function mapCheckoutError(raw: unknown) {
   if (text.includes("toss_key_mode_mismatch")) return "토스 클라이언트키/시크릿키 모드(test/live)가 서로 다릅니다.";
   if (text.includes("invalid_origin")) return "결제 리다이렉트 URL(origin) 설정이 올바르지 않습니다.";
   if (text.includes("checkout_http_401") || text.includes("login_required")) return "로그인 세션이 만료되었습니다. 다시 로그인 후 시도해 주세요.";
+  if (text.includes("billing_schema_outdated_credit_pack_columns"))
+    return "서버 DB 스키마가 아직 최신이 아닙니다. 마이그레이션 적용 후 다시 시도해 주세요.";
   if (text.includes("checkout_http_5") || text.includes("network")) return "결제 서버 연결이 불안정합니다. 잠시 후 다시 시도해 주세요.";
   return "결제 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.";
 }
@@ -29,11 +37,14 @@ export function SettingsBillingUpgradePage() {
   const [subData, setSubData] = useState<SubscriptionResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
+  const [payingCredit, setPayingCredit] = useState(false);
+  const [checkoutProduct, setCheckoutProduct] = useState<CheckoutProductId | null>(null);
   const flatSurface = "rounded-[24px] border border-ios-sep bg-white";
   const proPlan = getPlanDefinition("pro");
+  const creditPack = getCheckoutProductDefinition("credit10");
   const flatButtonBase =
     "inline-flex h-11 items-center justify-center rounded-full border px-5 text-[14px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50";
-  const flatButtonPrimary = `${flatButtonBase} border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]`;
+  const flatButtonPrimary = `${flatButtonBase} border-[color:var(--wnl-accent)] bg-[color:var(--wnl-accent)] text-white hover:bg-[color:var(--wnl-accent-strong)]`;
   const flatButtonSecondary = `${flatButtonBase} border-ios-sep bg-[#F2F2F7] text-ios-text`;
 
   const loadSubscription = useCallback(async () => {
@@ -58,23 +69,38 @@ export function SettingsBillingUpgradePage() {
     void loadSubscription();
   }, [loadSubscription]);
 
-  const startCheckout = useCallback(async () => {
-    if (!user?.userId || paying) return;
-    setPaying(true);
+  const openCheckoutSheet = useCallback(
+    (product: CheckoutProductId) => {
+      if (!user?.userId) return;
+      setError(null);
+      setCheckoutProduct(product);
+    },
+    [user?.userId]
+  );
+
+  const confirmCheckout = useCallback(async () => {
+    if (!user?.userId || !checkoutProduct) return;
+    const target = checkoutProduct;
+    setCheckoutProduct(null);
     setError(null);
+    if (target === "pro") setPaying(true);
+    if (target === "credit10") setPayingCredit(true);
     try {
-      await requestPlanCheckout("pro");
+      await requestPlanCheckout(target);
     } catch (e: any) {
       const msg = String(e?.message ?? t("결제창을 열지 못했습니다."));
       if (!msg.includes("USER_CANCEL")) setError(mapCheckoutError(msg));
     } finally {
-      setPaying(false);
+      if (target === "pro") setPaying(false);
+      if (target === "credit10") setPayingCredit(false);
     }
-  }, [paying, t, user?.userId]);
+  }, [checkoutProduct, t, user?.userId]);
 
   const activeTier = subData?.subscription.tier ?? "free";
   const activePeriodEnd = subData?.subscription.currentPeriodEnd ?? null;
   const isProActive = activeTier === "pro" && Boolean(subData?.subscription.hasPaidAccess);
+  const quota = subData?.subscription.medSafetyQuota;
+  const checkoutDefinition = checkoutProduct ? getCheckoutProductDefinition(checkoutProduct) : null;
 
   return (
     <div className="mx-auto w-full max-w-[760px] px-4 pb-24 pt-6">
@@ -136,7 +162,7 @@ export function SettingsBillingUpgradePage() {
             </ul>
             <button
               type="button"
-              onClick={() => void startCheckout()}
+              onClick={() => openCheckoutSheet("pro")}
               disabled={paying || loading || isProActive}
               className={`${isProActive ? flatButtonSecondary : flatButtonPrimary} mt-4 w-full`}
             >
@@ -151,8 +177,57 @@ export function SettingsBillingUpgradePage() {
             </p>
             {error ? <div className="mt-3 text-[12px] text-red-600">{error}</div> : null}
           </section>
+
+          <section className={`${flatSurface} mt-4 p-6`}>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-[13px] text-ios-sub">{t("추가 구매")}</div>
+                <div className="mt-1 text-[28px] font-extrabold tracking-[-0.03em] text-ios-text">{t(creditPack.title)}</div>
+                <div className="mt-1 max-w-[480px] text-[14px] leading-relaxed text-ios-sub">{t("무료/Pro 모두 구매 후 즉시 사용 가능합니다.")}</div>
+              </div>
+              <div className="text-right">
+                <div className="text-[24px] font-extrabold tracking-[-0.02em] text-ios-text">
+                  {formatKrw(creditPack.priceKrw).replace(" KRW", "")}
+                </div>
+                <div className="text-[12px] text-ios-muted">/ 10{t("회")}</div>
+              </div>
+            </div>
+            <div className="mt-3 rounded-2xl border border-ios-sep bg-[#F7F7FA] px-3 py-2 text-[12.5px] text-ios-sub">
+              <div>
+                {t("기본 크레딧 (Pro 전용 · 매일 초기화)")}:{" "}
+                {quota?.isPro ? `${quota.dailyRemaining}/${quota.dailyLimit}${t("회")}` : t("해당 없음")}
+              </div>
+              <div className="mt-1">
+                {t("추가 크레딧 (구매분 · 미초기화)")}: {quota?.extraCredits ?? 0}
+                {t("회")}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => openCheckoutSheet("credit10")}
+              disabled={payingCredit || loading}
+              className={`${flatButtonPrimary} mt-4 w-full`}
+            >
+              {payingCredit ? t("결제창 준비 중...") : t("크레딧 10회 구매")}
+            </button>
+            <p className="mt-2 text-[11.5px] text-ios-muted">
+              {t("구매된 추가 크레딧은 AI 약물·도구 검색기 실행 시 1회당 1크레딧 사용되며, 날짜가 바뀌어도 사라지지 않습니다.")}
+            </p>
+          </section>
         </>
       ) : null}
+      <BillingCheckoutSheet
+        open={Boolean(checkoutProduct)}
+        onClose={() => setCheckoutProduct(null)}
+        onConfirm={() => void confirmCheckout()}
+        loading={Boolean((checkoutProduct === "pro" && paying) || (checkoutProduct === "credit10" && payingCredit))}
+        productTitle={checkoutDefinition?.title ?? ""}
+        productSubtitle={checkoutProduct === "pro" ? t("RNest Pro Monthly") : t("AI 약물·도구 검색기 전용 크레딧")}
+        priceKrw={checkoutDefinition?.priceKrw ?? 0}
+        periodLabel={checkoutProduct === "pro" ? t("월 구독 · 30일 단위 자동갱신") : t("10회 사용권 · 소진 전까지 유지")}
+        accountEmail={user?.email ?? null}
+        confirmLabel={t("결제 계속")}
+      />
     </div>
   );
 }
