@@ -4,7 +4,7 @@ import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { sanitizeStatePayload } from "@/lib/stateSanitizer";
 import { serializeStateForSupabase } from "@/lib/statePersistence";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 function bad(status: number, message: string) {
