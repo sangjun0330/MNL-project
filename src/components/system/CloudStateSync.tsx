@@ -13,6 +13,37 @@ type SaveOptions = {
   keepalive?: boolean;
 };
 
+function toFiniteNumber(value: unknown): number | null {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function hasMeaningfulMenstrualSettings(state: any): boolean {
+  const menstrual = state?.settings?.menstrual ?? null;
+  if (!menstrual || typeof menstrual !== "object") return false;
+
+  const enabled = Boolean(menstrual.enabled);
+  const lastPeriodStart =
+    typeof menstrual.lastPeriodStart === "string" && menstrual.lastPeriodStart.trim().length
+      ? menstrual.lastPeriodStart.trim()
+      : null;
+  const cycleLength = toFiniteNumber(menstrual.cycleLength);
+  const periodLength = toFiniteNumber(menstrual.periodLength);
+  const lutealLength = toFiniteNumber(menstrual.lutealLength);
+  const pmsDays = toFiniteNumber(menstrual.pmsDays);
+  const sensitivity = toFiniteNumber(menstrual.sensitivity);
+
+  return (
+    enabled ||
+    Boolean(lastPeriodStart) ||
+    (cycleLength != null && Math.round(cycleLength) !== 28) ||
+    (periodLength != null && Math.round(periodLength) !== 5) ||
+    (lutealLength != null && Math.round(lutealLength) !== 14) ||
+    (pmsDays != null && Math.round(pmsDays) !== 4) ||
+    (sensitivity != null && Number(sensitivity.toFixed(2)) !== 1)
+  );
+}
+
 export function CloudStateSync() {
   const auth = useAuth();
   const { status } = useAuthState();
@@ -113,12 +144,14 @@ export function CloudStateSync() {
     const emotionKeys = Object.keys(s.emotions ?? {});
     const bioKeys = Object.keys(s.bio ?? {});
     const shiftNameKeys = Object.keys(s.shiftNames ?? {});
+    const menstrualMeaningful = hasMeaningfulMenstrualSettings(s);
     return (
       scheduleKeys.length ||
       noteKeys.length ||
       emotionKeys.length ||
       bioKeys.length ||
-      shiftNameKeys.length
+      shiftNameKeys.length ||
+      menstrualMeaningful
     );
   }, []);
 

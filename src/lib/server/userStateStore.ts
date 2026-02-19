@@ -14,6 +14,47 @@ function countRecordKeys(value: unknown): number {
   return isRecord(value) ? Object.keys(value).length : 0;
 }
 
+function toFiniteNumber(value: unknown): number | null {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function readMenstrualSettings(payload: unknown): Record<string, unknown> | null {
+  if (!isRecord(payload)) return null;
+  const settings = payload.settings;
+  if (!isRecord(settings)) return null;
+  const menstrual = settings.menstrual;
+  if (!isRecord(menstrual)) return null;
+  return menstrual;
+}
+
+function hasMeaningfulMenstrualSettings(payload: unknown): boolean {
+  const menstrual = readMenstrualSettings(payload);
+  if (!menstrual) return false;
+
+  const enabled = Boolean(menstrual.enabled);
+  const lastPeriodStart =
+    typeof menstrual.lastPeriodStart === "string" && menstrual.lastPeriodStart.trim().length
+      ? menstrual.lastPeriodStart.trim()
+      : null;
+
+  const cycleLength = toFiniteNumber(menstrual.cycleLength);
+  const periodLength = toFiniteNumber(menstrual.periodLength);
+  const lutealLength = toFiniteNumber(menstrual.lutealLength);
+  const pmsDays = toFiniteNumber(menstrual.pmsDays);
+  const sensitivity = toFiniteNumber(menstrual.sensitivity);
+
+  return (
+    enabled ||
+    Boolean(lastPeriodStart) ||
+    (cycleLength != null && Math.round(cycleLength) !== 28) ||
+    (periodLength != null && Math.round(periodLength) !== 5) ||
+    (lutealLength != null && Math.round(lutealLength) !== 14) ||
+    (pmsDays != null && Math.round(pmsDays) !== 4) ||
+    (sensitivity != null && Number(sensitivity.toFixed(2)) !== 1)
+  );
+}
+
 function normalizeJsonForCompare(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map((item) => normalizeJsonForCompare(item));
@@ -39,7 +80,8 @@ function hasMeaningfulUserData(value: unknown): boolean {
     countRecordKeys(value.notes) > 0 ||
     countRecordKeys(value.emotions) > 0 ||
     countRecordKeys(value.bio) > 0 ||
-    countRecordKeys(value.shiftNames) > 0
+    countRecordKeys(value.shiftNames) > 0 ||
+    hasMeaningfulMenstrualSettings(value)
   );
 }
 
@@ -54,6 +96,20 @@ function mergeProtectedMaps(nextPayload: Record<string, unknown>, existingPayloa
       merged[key] = existingPayload[key];
     }
   }
+
+  // Prevent accidental wipe of menstrual cycle configuration during deploy/rehydration paths.
+  if (hasMeaningfulMenstrualSettings(existingPayload) && !hasMeaningfulMenstrualSettings(nextPayload)) {
+    const nextSettings = isRecord(nextPayload.settings) ? nextPayload.settings : {};
+    const existingSettings = isRecord(existingPayload.settings) ? existingPayload.settings : {};
+    const existingMenstrual = isRecord(existingSettings.menstrual) ? existingSettings.menstrual : null;
+    if (existingMenstrual) {
+      merged.settings = {
+        ...nextSettings,
+        menstrual: existingMenstrual,
+      };
+    }
+  }
+
   return merged;
 }
 
