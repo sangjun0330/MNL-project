@@ -973,6 +973,7 @@ export function ToolMedSafetyPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [analysisRequested, setAnalysisRequested] = useState(false);
   const [streamingCards, setStreamingCards] = useState<DynamicResultCard[]>([]);
+  const [streamingDisplayName, setStreamingDisplayName] = useState("");
 
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -1137,6 +1138,7 @@ export function ToolMedSafetyPage() {
     streamTextBufferRef.current = "";
     streamCommittedCardsRef.current = [];
     setStreamingCards([]);
+    setStreamingDisplayName("");
   }, []);
 
   const flushStreamingCategories = useCallback(
@@ -1221,6 +1223,7 @@ export function ToolMedSafetyPage() {
       setError(null);
       setResult(null);
       resetStreamingCategoryState();
+      setStreamingDisplayName(isScenarioIntent ? clampDisplayText(normalized, 60) : normalizeString(normalized));
 
       try {
         const maxClientRetries = 1;
@@ -1427,26 +1430,30 @@ export function ToolMedSafetyPage() {
 
   const resultPanel = useMemo(() => {
     if (!result) {
-      if (streamingCards.length) {
+      if (isLoading && analysisRequested) {
         return (
           <div className="space-y-3 py-1">
-            <div className="text-[24px] font-bold text-ios-text">{t("카테고리별 생성 중")}</div>
-            <div className="text-[14px] leading-6 text-ios-sub">{t("완성된 카테고리부터 순서대로 표시합니다.")}</div>
-            <div className="space-y-2.5">
-              {streamingCards.map((card) => (
-                <section
-                  key={`live-${card.key}`}
-                  className={`${card.compact ? "border-l-[3px] border-[color:var(--wnl-accent)] pl-3 py-1.5" : "border-b border-ios-sep pb-2.5"} last:border-b-0`}
-                >
-                  <div className="text-[15px] font-bold tracking-[-0.01em] text-[color:var(--wnl-accent)]">{card.title}</div>
-                  <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[15px] leading-6 text-ios-text">
-                    {card.items.map((item, index) => (
-                      <li key={`live-${card.key}-${index}`}>{renderHighlightedLine(item)}</li>
-                    ))}
-                  </ul>
-                </section>
-              ))}
-            </div>
+            {streamingDisplayName ? (
+              <div className="text-[34px] font-bold leading-[1.08] tracking-[-0.03em] text-ios-text">{streamingDisplayName}</div>
+            ) : null}
+            {streamingCards.length ? (
+              <div className="space-y-2.5">
+                {streamingCards.map((card) => (
+                  <section
+                    key={`live-${card.key}`}
+                    className={`${card.compact ? "border-l-[3px] border-[color:var(--wnl-accent)] pl-3 py-1.5" : "border-b border-ios-sep pb-2.5"} last:border-b-0`}
+                  >
+                    <div className="text-[15px] font-bold tracking-[-0.01em] text-[color:var(--wnl-accent)]">{card.title}</div>
+                    <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[15px] leading-6 text-ios-text">
+                      {card.items.map((item, index) => (
+                        <li key={`live-${card.key}-${index}`}>{renderHighlightedLine(item)}</li>
+                      ))}
+                    </ul>
+                  </section>
+                ))}
+              </div>
+            ) : null}
+            <div className="rounded-xl border border-ios-sep bg-ios-bg px-3 py-2 text-[13px] text-ios-sub">{t("AI가 작성중입니다...")}</div>
           </div>
         );
       }
@@ -1523,7 +1530,7 @@ export function ToolMedSafetyPage() {
         </div>
       </div>
     );
-  }, [activeSituation, mode, queryIntent, result, resultViewState, streamingCards, t]);
+  }, [activeSituation, analysisRequested, isLoading, mode, queryIntent, result, resultViewState, streamingCards, streamingDisplayName, t]);
 
   const englishTranslationPending = lang === "en" && isLoading && analysisRequested;
   const showAnalyzingOverlay = isLoading && !englishTranslationPending && streamingCards.length === 0;
