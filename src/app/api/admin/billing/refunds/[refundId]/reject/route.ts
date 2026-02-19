@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
-import { rejectRefundRequest } from "@/lib/server/billingStore";
+import { readBillingOrderByOrderIdAny, rejectRefundRequest } from "@/lib/server/billingStore";
 import { requireBillingAdmin } from "@/lib/server/billingAdminAuth";
+import { sendRefundRejectedNotification } from "@/lib/server/refundNotification";
+import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -28,6 +30,17 @@ function parseErr(error: any): { status: number; message: string } {
   return { status: 500, message };
 }
 
+async function readEmailByUserId(userId: string): Promise<string | null> {
+  try {
+    const admin = getSupabaseAdmin();
+    const { data, error } = await admin.auth.admin.getUserById(userId);
+    if (error) return null;
+    return data.user?.email ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(req: Request, ctx: any) {
   const admin = await requireBillingAdmin(req);
   if (!admin.ok) return bad(admin.status, admin.error);
@@ -52,10 +65,31 @@ export async function POST(req: Request, ctx: any) {
       reason,
       note: String(body?.note ?? "").trim() || null,
     });
+
+    const [order, requesterEmail] = await Promise.all([
+      readBillingOrderByOrderIdAny(request.orderId).catch(() => null),
+      readEmailByUserId(request.userId),
+    ]);
+
+    const notify = await sendRefundRejectedNotification({
+      requestId: request.id,
+      userId: request.userId,
+      requesterEmail,
+      orderId: request.orderId,
+      reason,
+      amount: Math.max(0, Number(order?.amount ?? request.cancelAmount ?? 0)),
+      planTier: order?.planTier ?? "free",
+      requestedAt: request.requestedAt,
+      rejectedAt: request.reviewedAt ?? new Date().toISOString(),
+      reviewNote: request.reviewNote ?? null,
+    }).catch((error) => ({ sent: false, message: String((error as any)?.message ?? "notify_failed") }));
+
     return NextResponse.json({
       ok: true,
       data: {
         request,
+        notificationSent: Boolean(notify?.sent),
+        notificationMessage: String(notify?.message ?? ""),
       },
     });
   } catch (error: any) {

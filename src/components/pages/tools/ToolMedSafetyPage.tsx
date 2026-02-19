@@ -107,7 +107,7 @@ const SITUATION_OPTIONS: Array<{ value: ClinicalSituation; label: string }> = [
 ];
 
 const QUERY_INTENT_OPTIONS: Array<{ value: QueryIntent; label: string; hint: string }> = [
-  { value: "medication", label: "약물", hint: "약물명 단답 입력 (예: norepinephrine)" },
+  { value: "medication", label: "의약품", hint: "의약품명 단답 입력 (예: norepinephrine)" },
   { value: "device", label: "의료기구", hint: "기구명 단답 입력 (예: IV infusion pump)" },
   { value: "scenario", label: "상황질문", hint: "질문 중심으로 자유 답변" },
 ];
@@ -122,7 +122,7 @@ const SITUATION_INPUT_GUIDE: Record<
 > = {
   general: {
     queryPlaceholder: "예: heparin flush 후 라인 저항이 느껴지는 상황입니다.",
-    summaryPlaceholder: "(선택) 추가 참고: 목적, 핵심 V/S, 사용 약물/기구",
+    summaryPlaceholder: "(선택) 추가 참고: 목적, 핵심 V/S, 사용 의약품/기구",
     cue: "위 칸에는 현재 어떤 상황인지, 아래 칸에는 추가 참고사항을 입력하세요.",
   },
   pre_admin: {
@@ -145,7 +145,7 @@ const SITUATION_INPUT_GUIDE: Record<
 const NAME_ONLY_INPUT_GUIDE: Record<Exclude<QueryIntent, "scenario">, { placeholder: string; helper: string }> = {
   medication: {
     placeholder: "예: norepinephrine",
-    helper: "약물명만 단답으로 입력하세요. 예: norepinephrine, furosemide, vancomycin",
+    helper: "의약품명만 단답으로 입력하세요. 예: norepinephrine, furosemide, vancomycin",
   },
   device: {
     placeholder: "예: IV infusion pump",
@@ -598,7 +598,7 @@ function parseCameraStartError(cause: unknown) {
 }
 
 function kindLabel(kind: MedSafetyResultKind) {
-  if (kind === "medication") return "약물";
+  if (kind === "medication") return "의약품";
   if (kind === "device") return "의료기구";
   return "상황";
 }
@@ -616,7 +616,7 @@ function situationLabel(situation: ClinicalSituation) {
 
 function queryIntentLabel(intent: QueryIntent) {
   const hit = QUERY_INTENT_OPTIONS.find((option) => option.value === intent);
-  return hit?.label ?? "약물";
+  return hit?.label ?? "의약품";
 }
 
 function formatDateTime(value: number) {
@@ -922,7 +922,7 @@ function MedSafetyAnalyzingOverlay({ open, t }: { open: boolean; t: TranslateFn 
       <div className="relative w-full max-w-[420px] overflow-hidden rounded-[28px] border border-ios-sep bg-white px-6 py-6 shadow-[0_26px_70px_rgba(0,0,0,0.12)]">
         <div className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-transparent via-[#163B73] to-transparent rnest-recovery-progress" />
         <div className="text-[23px] font-extrabold tracking-[-0.02em] text-ios-text">{t("AI 분석 중")}</div>
-        <p className="mt-2 text-[14px] leading-6 text-ios-sub">{t("약물/의료도구 안전 포인트를 정리하고 있습니다. 잠시만 기다려 주세요.")}</p>
+        <p className="mt-2 text-[14px] leading-6 text-ios-sub">{t("의약품/의료도구 안전 포인트를 정리하고 있습니다. 잠시만 기다려 주세요.")}</p>
         <p className="mt-1 text-[12.5px] leading-5 text-ios-sub">{t("네트워크/이미지 상황에 따라 최대 2분 정도 걸릴 수 있습니다.")}</p>
         <div className="mt-4 flex items-center gap-2">
           <span className="h-2 w-2 rounded-full bg-[color:var(--rnest-accent)] rnest-dot-pulse" />
@@ -1229,7 +1229,7 @@ export function ToolMedSafetyPage() {
       if (!isScenarioIntent && normalized && !isNameOnlyInput(normalized)) {
         setError(
           queryIntent === "medication"
-            ? t("약물 모드에서는 약물명만 단답으로 입력해 주세요. 예: norepinephrine")
+            ? t("의약품 모드에서는 의약품명만 단답으로 입력해 주세요. 예: norepinephrine")
             : t("의료기구 모드에서는 기구명만 단답으로 입력해 주세요. 예: IV infusion pump")
         );
         return;
@@ -1579,8 +1579,8 @@ export function ToolMedSafetyPage() {
       <div className="mx-auto w-full max-w-[920px] space-y-3 px-2 pb-24 pt-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-[31px] font-extrabold tracking-[-0.02em] text-[color:var(--rnest-accent)]">AI 약물·도구 검색기</div>
-            <div className="mt-1 text-[13px] text-ios-sub">간호 현장에서 바로 쓰는 약물·의료기구·상황 대응 정보를 검색형으로 제공합니다.</div>
+            <div className="text-[31px] font-extrabold tracking-[-0.02em] text-[color:var(--rnest-accent)]">AI 의약품·도구 검색기</div>
+            <div className="mt-1 text-[13px] text-ios-sub">간호 현장에서 바로 쓰는 의약품·의료기구·상황 대응 정보를 검색형으로 제공합니다.</div>
           </div>
           <Link href="/tools" className="pt-1 text-[12px] font-semibold text-[color:var(--rnest-accent)]">
             툴 목록
@@ -1598,8 +1598,8 @@ export function ToolMedSafetyPage() {
       <div className="mx-auto w-full max-w-[920px] space-y-3 px-2 pb-24 pt-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-[31px] font-extrabold tracking-[-0.02em] text-[color:var(--rnest-accent)]">{t("AI 약물·도구 검색기")}</div>
-            <div className="mt-1 text-[13px] text-ios-sub">{t("간호 현장에서 바로 쓰는 약물·의료기구·상황 대응 정보를 검색형으로 제공합니다.")}</div>
+            <div className="text-[31px] font-extrabold tracking-[-0.02em] text-[color:var(--rnest-accent)]">{t("AI 의약품·도구 검색기")}</div>
+            <div className="mt-1 text-[13px] text-ios-sub">{t("간호 현장에서 바로 쓰는 의약품·의료기구·상황 대응 정보를 검색형으로 제공합니다.")}</div>
           </div>
           <Link href="/tools" className="pt-1 text-[12px] font-semibold text-[color:var(--rnest-accent)]">
             {t("툴 목록")}
@@ -1627,8 +1627,8 @@ export function ToolMedSafetyPage() {
       <div className="mx-auto w-full max-w-[920px] space-y-3 px-2 pb-24 pt-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-[31px] font-extrabold tracking-[-0.02em] text-[color:var(--rnest-accent)]">{t("AI 약물·도구 검색기")}</div>
-            <div className="mt-1 text-[13px] text-ios-sub">{t("간호 현장에서 바로 쓰는 약물·의료기구·상황 대응 정보를 검색형으로 제공합니다.")}</div>
+            <div className="text-[31px] font-extrabold tracking-[-0.02em] text-[color:var(--rnest-accent)]">{t("AI 의약품·도구 검색기")}</div>
+            <div className="mt-1 text-[13px] text-ios-sub">{t("간호 현장에서 바로 쓰는 의약품·의료기구·상황 대응 정보를 검색형으로 제공합니다.")}</div>
           </div>
           <Link href="/tools" className="pt-1 text-[12px] font-semibold text-[color:var(--rnest-accent)]">
             {t("툴 목록")}
@@ -1647,8 +1647,8 @@ export function ToolMedSafetyPage() {
       <div className="mx-auto w-full max-w-[920px] space-y-3 px-2 pb-24 pt-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-[31px] font-extrabold tracking-[-0.02em] text-[color:var(--rnest-accent)]">{t("AI 약물·도구 검색기")}</div>
-            <div className="mt-1 text-[13px] text-ios-sub">{t("간호 현장에서 바로 쓰는 약물·의료기구·상황 대응 정보를 검색형으로 제공합니다.")}</div>
+            <div className="text-[31px] font-extrabold tracking-[-0.02em] text-[color:var(--rnest-accent)]">{t("AI 의약품·도구 검색기")}</div>
+            <div className="mt-1 text-[13px] text-ios-sub">{t("간호 현장에서 바로 쓰는 의약품·의료기구·상황 대응 정보를 검색형으로 제공합니다.")}</div>
           </div>
           <Link href="/tools" className="pt-1 text-[12px] font-semibold text-[color:var(--rnest-accent)]">
             {t("툴 목록")}
@@ -1890,7 +1890,7 @@ export function ToolMedSafetyPage() {
         onConfirm={() => void confirmCreditCheckout()}
         loading={creditPaying}
         productTitle={t(creditPack.title)}
-        productSubtitle={t("AI 약물·도구 검색기 전용")}
+        productSubtitle={t("AI 의약품·도구 검색기 전용")}
         priceKrw={creditPack.priceKrw}
         periodLabel={t("10회 사용권 · 소진 전까지 유지")}
         accountEmail={user?.email ?? null}
