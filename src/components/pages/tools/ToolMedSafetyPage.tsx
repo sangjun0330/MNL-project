@@ -17,7 +17,7 @@ import { useI18n } from "@/lib/useI18n";
 
 const FLAT_CARD_CLASS = "rounded-[24px] border border-ios-sep bg-white shadow-none";
 const PRIMARY_FLAT_BTN =
-  "h-11 rounded-full border border-[color:var(--wnl-accent)] bg-[color:var(--wnl-accent-soft)] px-4 text-[14px] font-semibold text-[color:var(--wnl-accent)] shadow-none hover:bg-[color:var(--wnl-accent-soft)]";
+  "h-11 rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] px-4 text-[14px] font-semibold text-[color:var(--rnest-accent)] shadow-none hover:bg-[color:var(--rnest-accent-soft)]";
 const SECONDARY_FLAT_BTN =
   "h-11 rounded-full border border-ios-sep bg-white px-4 text-[14px] font-semibold text-ios-text shadow-none hover:bg-[#F7F7FA]";
 const SEGMENT_WRAPPER_CLASS = "inline-flex rounded-full border border-ios-sep bg-[#F7F7FA] p-1";
@@ -830,7 +830,7 @@ function renderHighlightedLine(line: string): ReactNode {
   if (!range) return text;
   return (
     <>
-      <span className="rounded-[6px] bg-[color:var(--wnl-accent-soft)] px-[3px] py-[1px] font-semibold text-[color:var(--wnl-accent)]">
+      <span className="rounded-[6px] bg-[color:var(--rnest-accent-soft)] px-[3px] py-[1px] font-semibold text-[color:var(--rnest-accent)]">
         {text.slice(range.start, range.end)}
       </span>
       {text.slice(range.end)}
@@ -920,14 +920,14 @@ function MedSafetyAnalyzingOverlay({ open, t }: { open: boolean; t: TranslateFn 
   return createPortal(
     <div className="fixed inset-0 z-[2147483000] flex items-center justify-center bg-[rgba(242,242,247,0.86)] px-5 backdrop-blur-[2px]">
       <div className="relative w-full max-w-[420px] overflow-hidden rounded-[28px] border border-ios-sep bg-white px-6 py-6 shadow-[0_26px_70px_rgba(0,0,0,0.12)]">
-        <div className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-transparent via-[#163B73] to-transparent wnl-recovery-progress" />
+        <div className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-transparent via-[#163B73] to-transparent rnest-recovery-progress" />
         <div className="text-[23px] font-extrabold tracking-[-0.02em] text-ios-text">{t("AI 분석 중")}</div>
         <p className="mt-2 text-[14px] leading-6 text-ios-sub">{t("약물/의료도구 안전 포인트를 정리하고 있습니다. 잠시만 기다려 주세요.")}</p>
         <p className="mt-1 text-[12.5px] leading-5 text-ios-sub">{t("네트워크/이미지 상황에 따라 최대 2분 정도 걸릴 수 있습니다.")}</p>
         <div className="mt-4 flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-[color:var(--wnl-accent)] wnl-dot-pulse" />
-          <span className="h-2 w-2 rounded-full bg-[color:var(--wnl-accent)] wnl-dot-pulse [animation-delay:160ms]" />
-          <span className="h-2 w-2 rounded-full bg-[color:var(--wnl-accent)] wnl-dot-pulse [animation-delay:320ms]" />
+          <span className="h-2 w-2 rounded-full bg-[color:var(--rnest-accent)] rnest-dot-pulse" />
+          <span className="h-2 w-2 rounded-full bg-[color:var(--rnest-accent)] rnest-dot-pulse [animation-delay:160ms]" />
+          <span className="h-2 w-2 rounded-full bg-[color:var(--rnest-accent)] rnest-dot-pulse [animation-delay:320ms]" />
         </div>
       </div>
     </div>,
@@ -1480,9 +1480,9 @@ export function ToolMedSafetyPage() {
                 {streamingCards.map((card) => (
                   <section
                     key={`live-${card.key}`}
-                    className={`${card.compact ? "border-l-[3px] border-[color:var(--wnl-accent)] pl-3 py-1.5" : "border-b border-ios-sep pb-2.5"} last:border-b-0`}
+                    className={`${card.compact ? "border-l-[3px] border-[color:var(--rnest-accent)] pl-3 py-1.5" : "border-b border-ios-sep pb-2.5"} last:border-b-0`}
                   >
-                    <div className="text-[15px] font-bold tracking-[-0.01em] text-[color:var(--wnl-accent)]">{card.title}</div>
+                    <div className="text-[15px] font-bold tracking-[-0.01em] text-[color:var(--rnest-accent)]">{card.title}</div>
                     <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[15px] leading-6 text-ios-text">
                       {card.items.map((item, index) => (
                         <li key={`live-${card.key}-${index}`}>{renderHighlightedLine(item)}</li>
@@ -1508,7 +1508,7 @@ export function ToolMedSafetyPage() {
       <div className="space-y-6">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full border border-[color:var(--wnl-accent)] bg-[color:var(--wnl-accent-soft)] px-3 py-1 text-[13px] font-semibold text-[color:var(--wnl-accent)]">
+            <span className="rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] px-3 py-1 text-[13px] font-semibold text-[color:var(--rnest-accent)]">
               {t(resultViewState.resultKindChip)}
             </span>
           </div>
@@ -1525,8 +1525,8 @@ export function ToolMedSafetyPage() {
             {formatDateTime(result.analyzedAt)}
           </div>
           {result.suggestedNames && result.suggestedNames.length ? (
-            <div className="mt-3 rounded-2xl border border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] px-3 py-3">
-              <div className="text-[15px] font-bold text-[color:var(--wnl-accent)]">{t("이걸 찾으시고 계신가요?")}</div>
+            <div className="mt-3 rounded-2xl border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-3 py-3">
+              <div className="text-[15px] font-bold text-[color:var(--rnest-accent)]">{t("이걸 찾으시고 계신가요?")}</div>
               <ul className="mt-1.5 list-disc space-y-0.5 pl-4 text-[14px] leading-6 text-ios-text">
                 {result.suggestedNames.slice(0, 3).map((name, idx) => (
                   <li key={`suggested-${idx}`}>{name}</li>
@@ -1540,7 +1540,7 @@ export function ToolMedSafetyPage() {
         <div className="border-t border-ios-sep pt-2.5">
           {resultViewState.isNotFoundResult ? (
             <div className="rounded-2xl border border-ios-sep bg-ios-bg px-3 py-3">
-              <div className="text-[14px] font-bold text-[color:var(--wnl-accent)]">{t("일치 결과 없음 (NOT_FOUND)")}</div>
+              <div className="text-[14px] font-bold text-[color:var(--rnest-accent)]">{t("일치 결과 없음 (NOT_FOUND)")}</div>
               <ul className="mt-2 list-disc space-y-0.5 pl-4 text-[15px] leading-6 text-ios-text">
                 <li>{result.oneLineConclusion}</li>
                 <li>{result.item.primaryUse}</li>
@@ -1552,9 +1552,9 @@ export function ToolMedSafetyPage() {
               {resultViewState.displayCards.map((card) => (
                 <section
                   key={card.key}
-                  className={`${card.compact ? "border-l-[3px] border-[color:var(--wnl-accent)] pl-3 py-1.5" : "border-b border-ios-sep pb-2.5"} last:border-b-0`}
+                  className={`${card.compact ? "border-l-[3px] border-[color:var(--rnest-accent)] pl-3 py-1.5" : "border-b border-ios-sep pb-2.5"} last:border-b-0`}
                 >
-                  <div className="text-[15px] font-bold tracking-[-0.01em] text-[color:var(--wnl-accent)]">{card.title}</div>
+                  <div className="text-[15px] font-bold tracking-[-0.01em] text-[color:var(--rnest-accent)]">{card.title}</div>
                   <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[15px] leading-6 text-ios-text">
                     {card.items.map((item, index) => (
                       <li key={`${card.key}-${index}`}>{renderHighlightedLine(item)}</li>
@@ -1579,10 +1579,10 @@ export function ToolMedSafetyPage() {
       <div className="mx-auto w-full max-w-[920px] space-y-3 px-2 pb-24 pt-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-[31px] font-extrabold tracking-[-0.02em] text-[color:var(--wnl-accent)]">AI 약물·도구 검색기</div>
+            <div className="text-[31px] font-extrabold tracking-[-0.02em] text-[color:var(--rnest-accent)]">AI 약물·도구 검색기</div>
             <div className="mt-1 text-[13px] text-ios-sub">간호 현장에서 바로 쓰는 약물·의료기구·상황 대응 정보를 검색형으로 제공합니다.</div>
           </div>
-          <Link href="/tools" className="pt-1 text-[12px] font-semibold text-[color:var(--wnl-accent)]">
+          <Link href="/tools" className="pt-1 text-[12px] font-semibold text-[color:var(--rnest-accent)]">
             툴 목록
           </Link>
         </div>
@@ -1598,10 +1598,10 @@ export function ToolMedSafetyPage() {
       <div className="mx-auto w-full max-w-[920px] space-y-3 px-2 pb-24 pt-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-[31px] font-extrabold tracking-[-0.02em] text-[color:var(--wnl-accent)]">{t("AI 약물·도구 검색기")}</div>
+            <div className="text-[31px] font-extrabold tracking-[-0.02em] text-[color:var(--rnest-accent)]">{t("AI 약물·도구 검색기")}</div>
             <div className="mt-1 text-[13px] text-ios-sub">{t("간호 현장에서 바로 쓰는 약물·의료기구·상황 대응 정보를 검색형으로 제공합니다.")}</div>
           </div>
-          <Link href="/tools" className="pt-1 text-[12px] font-semibold text-[color:var(--wnl-accent)]">
+          <Link href="/tools" className="pt-1 text-[12px] font-semibold text-[color:var(--rnest-accent)]">
             {t("툴 목록")}
           </Link>
         </div>
@@ -1627,10 +1627,10 @@ export function ToolMedSafetyPage() {
       <div className="mx-auto w-full max-w-[920px] space-y-3 px-2 pb-24 pt-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-[31px] font-extrabold tracking-[-0.02em] text-[color:var(--wnl-accent)]">{t("AI 약물·도구 검색기")}</div>
+            <div className="text-[31px] font-extrabold tracking-[-0.02em] text-[color:var(--rnest-accent)]">{t("AI 약물·도구 검색기")}</div>
             <div className="mt-1 text-[13px] text-ios-sub">{t("간호 현장에서 바로 쓰는 약물·의료기구·상황 대응 정보를 검색형으로 제공합니다.")}</div>
           </div>
-          <Link href="/tools" className="pt-1 text-[12px] font-semibold text-[color:var(--wnl-accent)]">
+          <Link href="/tools" className="pt-1 text-[12px] font-semibold text-[color:var(--rnest-accent)]">
             {t("툴 목록")}
           </Link>
         </div>
@@ -1647,10 +1647,10 @@ export function ToolMedSafetyPage() {
       <div className="mx-auto w-full max-w-[920px] space-y-3 px-2 pb-24 pt-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-[31px] font-extrabold tracking-[-0.02em] text-[color:var(--wnl-accent)]">{t("AI 약물·도구 검색기")}</div>
+            <div className="text-[31px] font-extrabold tracking-[-0.02em] text-[color:var(--rnest-accent)]">{t("AI 약물·도구 검색기")}</div>
             <div className="mt-1 text-[13px] text-ios-sub">{t("간호 현장에서 바로 쓰는 약물·의료기구·상황 대응 정보를 검색형으로 제공합니다.")}</div>
           </div>
-          <Link href="/tools" className="pt-1 text-[12px] font-semibold text-[color:var(--wnl-accent)]">
+          <Link href="/tools" className="pt-1 text-[12px] font-semibold text-[color:var(--rnest-accent)]">
             {t("툴 목록")}
           </Link>
         </div>
@@ -1670,7 +1670,7 @@ export function ToolMedSafetyPage() {
                   type="button"
                   onClick={() => void startCreditCheckout()}
                   disabled={creditPaying}
-                  className="text-[11.5px] font-semibold text-[color:var(--wnl-accent)] underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+                  className="text-[11.5px] font-semibold text-[color:var(--rnest-accent)] underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {creditPaying ? t("결제창 준비 중...") : t("추가 크레딧 구매")}
                 </button>
@@ -1695,7 +1695,7 @@ export function ToolMedSafetyPage() {
                       type="button"
                       className={`h-9 rounded-xl px-4 text-[12.5px] font-semibold ${
                         active
-                          ? "border border-[color:var(--wnl-accent)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]"
+                          ? "border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
                           : "text-ios-sub"
                       }`}
                       onClick={() => setMode(option.value)}
@@ -1718,7 +1718,7 @@ export function ToolMedSafetyPage() {
                       type="button"
                       className={`h-9 rounded-xl px-4 text-[12.5px] font-semibold ${
                         active
-                          ? "border border-[color:var(--wnl-accent)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]"
+                          ? "border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
                           : "text-ios-sub"
                       }`}
                       onClick={() => {
@@ -1753,7 +1753,7 @@ export function ToolMedSafetyPage() {
                           type="button"
                           className={`h-9 rounded-xl border px-3 text-[12px] font-semibold ${
                             active
-                              ? "border-[color:var(--wnl-accent)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]"
+                              ? "border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
                               : "border-ios-sep bg-white text-ios-sub"
                           }`}
                           onClick={() => setSituation(option.value)}

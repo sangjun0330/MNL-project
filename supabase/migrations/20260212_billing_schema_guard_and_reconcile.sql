@@ -1,4 +1,4 @@
-alter table public.wnl_users
+alter table public.rnest_users
   add column if not exists subscription_cancel_at_period_end boolean not null default false,
   add column if not exists subscription_cancel_scheduled_at timestamptz,
   add column if not exists subscription_canceled_at timestamptz,
@@ -16,7 +16,7 @@ with latest_done as (
   where b.status = 'DONE'
     and b.plan_tier in ('basic', 'pro')
 )
-update public.wnl_users u
+update public.rnest_users u
 set
   subscription_tier = ld.plan_tier,
   subscription_status = 'active',
@@ -27,7 +27,7 @@ set
   subscription_cancel_scheduled_at = null,
   subscription_canceled_at = null,
   subscription_cancel_reason = null,
-  toss_customer_key = coalesce(u.toss_customer_key, 'wnl_' || regexp_replace(u.user_id, '[^A-Za-z0-9_-]', '', 'g')),
+  toss_customer_key = coalesce(u.toss_customer_key, 'rnest_' || regexp_replace(u.user_id, '[^A-Za-z0-9_-]', '', 'g')),
   toss_last_order_id = ld.order_id,
   last_seen = now()
 from latest_done ld

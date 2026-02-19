@@ -15,7 +15,7 @@ function bad(status: number, message: string) {
 function buildOrderId(productId: "pro" | "credit10") {
   const stamp = Date.now().toString(36);
   const rand = Math.random().toString(36).slice(2, 10);
-  return `wnl_${productId}_${stamp}_${rand}`.slice(0, 64);
+  return `rnest_${productId}_${stamp}_${rand}`.slice(0, 64);
 }
 
 function resolveOrigin(req: Request) {

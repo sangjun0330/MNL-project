@@ -50,7 +50,7 @@ export function BillingCheckoutSheet({
             type="button"
             onClick={onConfirm}
             disabled={loading}
-            className="inline-flex h-11 items-center justify-center rounded-full border border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] px-4 text-[14px] font-semibold text-[color:var(--wnl-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex h-11 items-center justify-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-4 text-[14px] font-semibold text-[color:var(--rnest-accent)] disabled:cursor-not-allowed disabled:opacity-50"
           >
             {loading ? "결제창 여는 중..." : confirmLabel ?? "결제 계속"}
           </button>
@@ -59,8 +59,8 @@ export function BillingCheckoutSheet({
     >
       <div className="rounded-[22px] border border-black/10 bg-white p-4">
         <div className="flex items-start gap-3">
-          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[14px] border border-[#DDE5F3] bg-[color:var(--wnl-accent-soft)]">
-            <span className="text-[11px] font-bold text-[color:var(--wnl-accent)]">RNest</span>
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[14px] border border-[#DDE5F3] bg-[color:var(--rnest-accent-soft)]">
+            <span className="text-[11px] font-bold text-[color:var(--rnest-accent)]">RNest</span>
           </div>
           <div className="min-w-0">
             <div className="text-[19px] font-bold tracking-[-0.02em] text-ios-text">{productTitle}</div>

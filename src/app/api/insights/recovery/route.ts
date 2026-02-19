@@ -348,7 +348,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // legacy fallback: wnl_user_state.payload.aiRecoveryDaily
+    // legacy fallback: rnest_user_state.payload.aiRecoveryDaily
     const legacyCached = readServerCachedAI(row.payload, today, lang);
     if (legacyCached) {
       void safeSaveAIContent(userId, today, legacyCached.language, {

@@ -24,7 +24,7 @@ export function SettingsBillingFailPage() {
   const flatSurface = "rounded-[24px] border border-ios-sep bg-white";
   const flatButtonBase =
     "inline-flex h-10 items-center justify-center rounded-full border px-5 text-[13px] font-semibold transition-colors";
-  const flatButtonPrimary = `${flatButtonBase} border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]`;
+  const flatButtonPrimary = `${flatButtonBase} border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]`;
   const flatButtonSecondary = `${flatButtonBase} border-ios-sep bg-[#F2F2F7] text-ios-text`;
 
   useEffect(() => {

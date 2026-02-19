@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { cn } from "@/lib/cn";
 import type { Shift } from "@/lib/types";
 import type { DailyVital } from "@/lib/vitals";
-import { round1, statusColor, statusFromScore, type VitalStatus, WNL_COLORS } from "@/lib/wnlInsight";
+import { round1, statusColor, statusFromScore, type VitalStatus, RNEST_COLORS } from "@/lib/rnestInsight";
 
 type PhaseItem = {
   title: string;
@@ -14,10 +14,10 @@ type PhaseItem = {
 };
 
 function toneColor(t: PhaseItem["tone"]) {
-  if (t === "mint") return WNL_COLORS.mint;
-  if (t === "yellow") return WNL_COLORS.yellow;
-  if (t === "pink") return WNL_COLORS.pink;
-  return WNL_COLORS.grey;
+  if (t === "mint") return RNEST_COLORS.mint;
+  if (t === "yellow") return RNEST_COLORS.yellow;
+  if (t === "pink") return RNEST_COLORS.pink;
+  return RNEST_COLORS.grey;
 }
 
 function focusFromScore(score: number) {

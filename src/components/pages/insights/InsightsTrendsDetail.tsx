@@ -5,7 +5,7 @@ import { useInsightsData, fmtMD, shiftKo, isInsightsLocked, INSIGHTS_MIN_DAYS } 
 import { formatKoreanDate } from "@/lib/date";
 import { TrendChart } from "@/components/insights/TrendChart";
 import { Pill } from "@/components/ui/Pill";
-import { statusFromScore } from "@/lib/wnlInsight";
+import { statusFromScore } from "@/lib/rnestInsight";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { useI18n } from "@/lib/useI18n";
 
@@ -133,7 +133,7 @@ export function InsightsTrendsDetail() {
         </div>
       </DetailCard>
 
-      <DetailCard className="mt-4 wnl-no-press">
+      <DetailCard className="mt-4 rnest-no-press">
         <div className="px-5 pt-5">
           <div className="text-[13px] font-semibold text-ios-sub">Trend</div>
           <div className="mt-1 text-[18px] font-bold tracking-[-0.01em] text-ios-text">{t("에너지 흐름")}</div>

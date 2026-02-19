@@ -11,7 +11,7 @@ import { HeroDashboard } from "@/components/insights/v2/HeroDashboard";
 import { DetailSummaryCard, DetailChip, DETAIL_ACCENTS } from "@/components/pages/insights/InsightDetailShell";
 import { TodaySleepRequiredSheet } from "@/components/insights/TodaySleepRequiredSheet";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
-import { statusFromScore } from "@/lib/wnlInsight";
+import { statusFromScore } from "@/lib/rnestInsight";
 import { useI18n } from "@/lib/useI18n";
 import { hasHealthInput } from "@/lib/healthRecords";
 

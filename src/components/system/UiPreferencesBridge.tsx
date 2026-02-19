@@ -11,8 +11,8 @@ export function UiPreferencesBridge() {
   useEffect(() => {
     if (typeof document === "undefined") return;
     const root = document.documentElement;
-    if (theme === "dark") root.classList.add("wnl-night");
-    else root.classList.remove("wnl-night");
+    if (theme === "dark") root.classList.add("rnest-night");
+    else root.classList.remove("rnest-night");
   }, [theme]);
 
   useEffect(() => {

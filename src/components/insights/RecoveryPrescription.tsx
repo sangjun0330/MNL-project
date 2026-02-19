@@ -80,7 +80,7 @@ function pick<T>(arr: T[], seed: string) {
 
 function getUserSeed() {
   try {
-    const key = "wnl.user.seed";
+    const key = "rnest.user.seed";
     const existing = localStorage.getItem(key);
     if (existing) return existing;
     const seed = `${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
@@ -819,7 +819,7 @@ export function RecoveryPrescription({ state, pivotISO }: Props) {
 
   // "멘트 다양화"를 위한 변형 인덱스(기본은 날짜별 1회 생성, 버튼으로 변경 가능)
   const [variant, setVariant] = useState(0);
-  const variantKey = useMemo(() => `wnl.recovery.variant:${pivot}`, [pivot]);
+  const variantKey = useMemo(() => `rnest.recovery.variant:${pivot}`, [pivot]);
   useEffect(() => {
     try {
       const stored = localStorage.getItem(variantKey);
