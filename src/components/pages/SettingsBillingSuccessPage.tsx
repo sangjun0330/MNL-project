@@ -55,7 +55,7 @@ export function SettingsBillingSuccessPage() {
   const flatSubSurface = "rounded-[18px] border border-ios-sep bg-[#F7F7FA]";
   const flatButtonBase =
     "inline-flex h-10 items-center justify-center rounded-full border px-5 text-[13px] font-semibold transition-colors";
-  const flatButtonPrimary = `${flatButtonBase} border-[color:var(--wnl-accent)] bg-[color:var(--wnl-accent)] text-white hover:bg-[color:var(--wnl-accent-strong)]`;
+  const flatButtonPrimary = `${flatButtonBase} border-[color:var(--wnl-accent)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]`;
   const flatButtonSecondary = `${flatButtonBase} border-ios-sep bg-[#F2F2F7] text-ios-text`;
 
   const parsedAmount = useMemo(() => {
