@@ -1680,6 +1680,14 @@ export function ToolMedSafetyPage() {
               </div>
             </div>
           </div>
+          <div className="mt-2 flex justify-end">
+            <Link
+              href="/tools/med-safety/recent"
+              className="text-[12px] font-semibold text-[color:var(--rnest-accent)] underline-offset-2 hover:underline"
+            >
+              {t("최근 검색 기록")}
+            </Link>
+          </div>
         </Card>
 
         <Card className={`p-3 ${FLAT_CARD_CLASS}`}>

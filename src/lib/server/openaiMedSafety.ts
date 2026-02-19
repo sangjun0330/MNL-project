@@ -257,6 +257,83 @@ function cleanLine(value: string) {
   return base;
 }
 
+function toPoliteKoreanEnding(text: string) {
+  let out = String(text ?? "");
+  if (!/[가-힣]/.test(out)) return out;
+  out = out
+    .replace(/하지 마라(?=[.!?]|$)/g, "하지 마세요")
+    .replace(/하지말라(?=[.!?]|$)/g, "하지 마세요")
+    .replace(/말라(?=[.!?]|$)/g, "마세요")
+    .replace(/해라(?=[.!?]|$)/g, "하세요")
+    .replace(/하라(?=[.!?]|$)/g, "하세요")
+    .replace(/해야 한다(?=[.!?]|$)/g, "해야 합니다")
+    .replace(/되어야 한다(?=[.!?]|$)/g, "되어야 합니다")
+    .replace(/필요하다(?=[.!?]|$)/g, "필요합니다")
+    .replace(/가능하다(?=[.!?]|$)/g, "가능합니다")
+    .replace(/권장한다(?=[.!?]|$)/g, "권장합니다")
+    .replace(/유지한다(?=[.!?]|$)/g, "유지합니다")
+    .replace(/확인한다(?=[.!?]|$)/g, "확인합니다")
+    .replace(/보고한다(?=[.!?]|$)/g, "보고합니다")
+    .replace(/사용한다(?=[.!?]|$)/g, "사용합니다");
+  return out;
+}
+
+function toPoliteKoreanText(text: string) {
+  return String(text ?? "")
+    .split("\n")
+    .map((line) => toPoliteKoreanEnding(line))
+    .join("\n");
+}
+
+function toPoliteKoreanList(items: string[]) {
+  return items.map((item) => toPoliteKoreanEnding(item));
+}
+
+function withPoliteKoreanTone(result: MedSafetyAnalysisResult, locale: "ko" | "en") {
+  if (locale !== "ko") return result;
+  return {
+    ...result,
+    oneLineConclusion: toPoliteKoreanEnding(result.oneLineConclusion),
+    notFoundReason: toPoliteKoreanEnding(result.notFoundReason ?? ""),
+    item: {
+      ...result.item,
+      aliases: toPoliteKoreanList(result.item.aliases ?? []),
+      highRiskBadges: toPoliteKoreanList(result.item.highRiskBadges ?? []),
+      primaryUse: toPoliteKoreanEnding(result.item.primaryUse),
+    },
+    quick: {
+      ...result.quick,
+      topActions: toPoliteKoreanList(result.quick.topActions ?? []),
+      topNumbers: toPoliteKoreanList(result.quick.topNumbers ?? []),
+      topRisks: toPoliteKoreanList(result.quick.topRisks ?? []),
+    },
+    do: {
+      ...result.do,
+      steps: toPoliteKoreanList(result.do.steps ?? []),
+      calculatorsNeeded: toPoliteKoreanList(result.do.calculatorsNeeded ?? []),
+      compatibilityChecks: toPoliteKoreanList(result.do.compatibilityChecks ?? []),
+    },
+    safety: {
+      ...result.safety,
+      holdRules: toPoliteKoreanList(result.safety.holdRules ?? []),
+      monitor: toPoliteKoreanList(result.safety.monitor ?? []),
+      escalateWhen: toPoliteKoreanList(result.safety.escalateWhen ?? []),
+    },
+    institutionalChecks: toPoliteKoreanList(result.institutionalChecks ?? []),
+    sbar: {
+      situation: toPoliteKoreanEnding(result.sbar.situation),
+      background: toPoliteKoreanEnding(result.sbar.background),
+      assessment: toPoliteKoreanEnding(result.sbar.assessment),
+      recommendation: toPoliteKoreanEnding(result.sbar.recommendation),
+    },
+    patientScript20s: toPoliteKoreanEnding(result.patientScript20s),
+    modePriority: toPoliteKoreanList(result.modePriority ?? []),
+    confidenceNote: toPoliteKoreanEnding(result.confidenceNote),
+    searchAnswer: toPoliteKoreanText(result.searchAnswer ?? ""),
+    suggestedNames: toPoliteKoreanList(result.suggestedNames ?? []),
+  };
+}
+
 function sanitizeSearchAnswer(text: string) {
   const replaced = normalizeText(text)
     .replace(/```[\s\S]*?```/g, "")
@@ -295,7 +372,7 @@ function sanitizeSearchAnswer(text: string) {
     seen.add(key);
     out.push(line);
   }
-  return out.join("\n");
+  return toPoliteKoreanText(out.join("\n"));
 }
 
 function dedupeLimit(items: string[], limit: number) {
@@ -400,6 +477,7 @@ function buildDeveloperPrompt(locale: "ko" | "en", intent: QueryIntent) {
       "- 같은 의미 반복 금지. 각 불릿은 새 정보여야 한다.",
       "- 본문 불릿은 각 문장에 ‘행동 + 이유/위험 + 확인포인트’를 반드시 포함한다.",
       "- 기관차/불확실 요소는 반드시 ‘기관 프로토콜/약제부/IFU 확인 필요’를 포함한다.",
+      "- 한국어 출력은 반드시 존댓말(합니다/하세요 체)로 작성한다.",
       "",
       "[안전 경계]",
       "- 진단/처방 결정을 대체하지 않는다.",
@@ -453,6 +531,7 @@ function buildDeveloperPrompt(locale: "ko" | "en", intent: QueryIntent) {
       "- 같은 의미 반복 금지. 각 불릿은 새 정보여야 한다.",
       "- 본문 불릿은 각 문장에 ‘행동 + 이유/위험 + 확인포인트’를 반드시 포함한다.",
       "- 기관차/IFU 의존 항목(세팅, 교체주기, 호환, 규격)은 반드시 ‘기관/IFU 확인 필요’를 포함한다.",
+      "- 한국어 출력은 반드시 존댓말(합니다/하세요 체)로 작성한다.",
       "",
       "[안전 경계]",
       "- 진단/처방 결정을 대체하지 않는다.",
@@ -531,6 +610,7 @@ function buildMedicationPrompt(query: string, contextJson: string) {
     "규칙: 섹션 제목을 불릿 문장에 반복하지 말 것.",
     "규칙: 불확실하거나 기관 차이 큰 내용은 반드시 ‘기관 프로토콜/약제부/IFU 확인 필요’ 표기.",
     "규칙: 용량/속도/희석/호환 등 수치 단정 금지(원칙만), 확인 포인트를 함께 제시.",
+    "규칙: 한국어 문장은 반드시 존댓말(합니다/하세요 체)로 작성.",
     "",
     "이 약이 무엇인지(정의/분류/역할):",
     "",
@@ -597,6 +677,7 @@ function buildDevicePrompt(query: string, contextJson: string) {
     "규칙: 섹션 제목을 불릿 문장에 반복하지 말 것.",
     "규칙: 교체/점검 주기, 세팅값, 호환/규격 등 기관차 큰 내용은 반드시 ‘기관/IFU 확인 필요’ 표기.",
     "규칙: 세팅값을 단정하지 말고 “원칙 + 확인포인트”로만 제시한다.",
+    "규칙: 한국어 문장은 반드시 존댓말(합니다/하세요 체)로 작성.",
     "",
     "기구 정의/언제 쓰는지:",
     "",
@@ -2389,7 +2470,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         });
         if (!attempt.error && attempt.text) {
           rawText = attempt.text;
-          const result = buildResultFromAnswer(params, intent, attempt.text);
+          const result = withPoliteKoreanTone(buildResultFromAnswer(params, intent, attempt.text), params.locale);
           return {
             result,
             model: candidateModel,
@@ -2422,7 +2503,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
             });
             if (!statelessRetry.error && statelessRetry.text) {
               rawText = statelessRetry.text;
-              const result = buildResultFromAnswer(params, intent, statelessRetry.text);
+              const result = withPoliteKoreanTone(buildResultFromAnswer(params, intent, statelessRetry.text), params.locale);
               return {
                 result,
                 model: candidateModel,
@@ -2448,10 +2529,9 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
   }
 
   return {
-    result: buildFallbackResult(
-      params,
-      intent,
-      `AI 응답 실패로 기본 안전 모드로 전환되었습니다. (${truncateError(lastError)})`
+    result: withPoliteKoreanTone(
+      buildFallbackResult(params, intent, `AI 응답 실패로 기본 안전 모드로 전환되었습니다. (${truncateError(lastError)})`),
+      params.locale
     ),
     model: selectedModel,
     rawText,
