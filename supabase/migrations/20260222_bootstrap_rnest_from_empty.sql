@@ -252,6 +252,10 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
+  IF TG_OP = 'UPDATE' AND NEW.payload IS NOT DISTINCT FROM OLD.payload THEN
+    RETURN NEW;
+  END IF;
+
   INSERT INTO public.rnest_user_state_revisions (user_id, payload, source)
   VALUES (NEW.user_id, NEW.payload, 'api');
   RETURN NEW;
