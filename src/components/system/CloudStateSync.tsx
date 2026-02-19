@@ -306,7 +306,7 @@ export function CloudStateSync() {
             });
           }
           // 온보딩 표시 이벤트 (세션당 1회, AppShell에서 수신)
-          if (typeof window !== "undefined") {
+          if (typeof window !== "undefined" && !fresh.settings?.hasSeenOnboarding) {
             window.dispatchEvent(new CustomEvent("wnl:show-onboarding"));
           }
           ready = true;

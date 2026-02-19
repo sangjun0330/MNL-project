@@ -1,7 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Children,
+  cloneElement,
+  isValidElement,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { Button } from "@/components/ui/Button";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Card } from "@/components/ui/Card";
@@ -43,6 +53,432 @@ const TOP_ACTION_BTN_SM =
 const RECENT_KEY = "nurse_calc_recent_v1";
 const CUSTOM_PRESETS_KEY = "nurse_calc_custom_presets_v1";
 const HISTORY_KEY = "nurse_calc_history_v1";
+const CALCULATOR_TRANSLATABLE_PROP_KEYS = ["placeholder", "title", "subtitle", "aria-label"] as const;
+const CALCULATOR_EN_FALLBACK: Record<string, string> = {
+  "입력 3단계로 바로 계산하고, 결과는 큰 숫자로 확인합니다.":
+    "Run in 3 quick input steps and verify results in large numbers.",
+  "사용 설명서": "User guide",
+  "화면 모드": "View mode",
+  "기본 모드": "Basic mode",
+  "전문 모드": "Pro mode",
+  "기본 모드: 필수 입력만 중심으로 보여주며, 고급 옵션은 숨깁니다.":
+    "Basic mode shows only required fields and hides advanced options.",
+  "전문 모드: 프리셋 저장, 더블체크, 처방 목표 비교 등 고급 기능을 모두 사용합니다.":
+    "Pro mode enables all advanced features including preset save, double-check, and prescribed-target comparison.",
+  "설명 보기": "View guide",
+  "1. 펌프 변환": "1. Pump conversion",
+  "2. IVPB": "2. IVPB",
+  "3. 드립": "3. Drip",
+  "4. 희석": "4. Dilution",
+  "5. 검산": "5. Reverse check",
+  "체중, 목표 용량, 농도(총 약량/총 mL)를 입력":
+    "Enter weight, target dose, and concentration (total amount/total mL).",
+  "계산/검산 모드를 선택하고 계산 실행": "Select calculate/check mode and run.",
+  "결과와 경고를 확인한 뒤 펌프에 입력": "Review result and warnings, then enter into pump.",
+  "언제 사용": "When to use",
+  "승압제/진정제 등 지속주입에서 처방 단위를 펌프 단위로 바꿀 때 사용.":
+    "Use when converting ordered dose units to pump units during continuous infusion.",
+  "필수 입력": "Required inputs",
+  "체중(필요 시), 목표 용량, 농도(총 약량 + 총 부피 mL).":
+    "Weight (if needed), target dose, concentration (total amount + total volume mL).",
+  "최종 확인": "Final check",
+  "큰 글씨 결과값과 단위/농도 체크를 완료한 뒤 적용.":
+    "Apply only after confirming large-number result and unit/concentration checks.",
+  "mL + 시간 → mL/hr + VTBI": "mL + time -> mL/hr + VTBI",
+  "총 부피(mL)와 주입 시간을 입력": "Enter total volume (mL) and infusion duration.",
+  "속도 계산 버튼 실행": "Run the rate calculation button.",
+  "mL/hr, VTBI, 라인 체크포인트 확인": "Check mL/hr, VTBI, and line checkpoints.",
+  "항생제 등 secondary 투여 rate/VTBI 설정.": "Set secondary infusion rate/VTBI (e.g., antibiotics).",
+  "총 부피(mL), 주입 시간(분/시간).": "Total volume (mL), infusion time (min/hr).",
+  "clamp/head-height/channel 연결 상태 점검.":
+    "Verify clamp/head-height/channel connection status.",
+  "drip factor를 선택": "Select drip factor.",
+  "변환 방향과 값을 입력": "Enter conversion direction and value.",
+  "환산 결과와 현장 카운트 팁 확인": "Check conversion result and bedside counting tip.",
+  "펌프 없이 중력 주입할 때.": "Use when gravity infusion is used without a pump.",
+  "drip factor(10/15/20/60)와 변환할 값.": "Drip factor (10/15/20/60) and value to convert.",
+  "15초 카운트 x4로 현장 재확인.": "Bedside recheck: 15-second count x4.",
+  "총 약량/총 mL → 농도": "Total amount/total mL -> concentration",
+  "총 약량과 총 부피(mL) 입력": "Enter total amount and total volume (mL).",
+  "출력 단위를 선택": "Select output unit.",
+  "농도 결과를 펌프 커스텀 농도에 반영": "Apply concentration result to pump custom concentration.",
+  "재구성/커스텀 희석 후 농도 확인.": "Verify concentration after reconstitution/custom dilution.",
+  "총 약량(숫자+단위), 총 부피(mL), 출력 단위.":
+    "Total amount (value+unit), total volume (mL), output unit.",
+  "mg↔mcg 등 단위 착오 없이 적용.": "Apply carefully to avoid unit mismatch (e.g., mg vs mcg).",
+  "현재 세팅 역산": "Reverse current setup",
+  "현재 속도, 농도, 필요 시 체중 입력": "Enter current rate, concentration, and weight if needed.",
+  "실제 용량과 처방 대비 차이(%) 확인": "Check actual dose and % difference vs prescribed.",
+  "인계/교대/알람 대응 시 현재 세팅 검증.":
+    "Validate current setup during shift change/alarm response.",
+  "현재 mL/hr, 농도(총 약량/총 mL), 필요 시 체중.":
+    "Current mL/hr, concentration (total amount/total mL), and weight if needed.",
+  "차이가 크면 단위/농도/채널/라인 재점검.":
+    "If the gap is large, recheck unit/concentration/channel/line.",
+  "펌프 변환 계산기": "Pump conversion calculator",
+  "계산": "Calculate",
+  "검산": "Reverse check",
+  "체중": "Weight",
+  "목표 용량": "Target dose",
+  "농도 (총 약량 / 총 부피 mL)": "Concentration (total drug amount / total volume mL)",
+  "현재 펌프 속도": "Current pump rate",
+  "빠른 농도 프리셋": "Quick concentration presets",
+  "표준 농도 선택": "Select standard concentration",
+  "프리셋을 선택하면 농도 값이 자동으로 채워집니다.":
+    "Selecting a preset auto-fills concentration values.",
+  "라인/펌프 안내": "Line/pump profile",
+  "말초": "Peripheral",
+  "중심": "Central",
+  "표준 희석": "Standard dilution",
+  "커스텀 희석": "Custom dilution",
+  "인퓨전": "Infusion",
+  "시린지": "Syringe",
+  "새 프리셋 이름 (예: ICU NE 4mg/250)": "New preset name (e.g., ICU NE 4mg/250)",
+  "약물명 (선택)": "Medication name (optional)",
+  "현재 농도 프리셋 저장": "Save current concentration preset",
+  "더블체크 모드": "Double-check mode",
+  "동료 계산값 입력 (mL/hr)": "Enter colleague-calculated value (mL/hr)",
+  "더블체크 입력값이 계산값과 2% 이상 다릅니다. 재입력 후 확인하세요.":
+    "Double-check input differs from calculated value by more than 2%. Re-enter and verify.",
+  "펌프 값 계산": "Calculate pump value",
+  "현재 세팅 검산": "Check current setup",
+  "한 줄 복사": "Copy one-line summary",
+  "입력이 변경되었습니다. 최신 값으로 다시 계산해 주세요.":
+    "Inputs changed. Recalculate with latest values.",
+  "아직 계산 결과가 없습니다. 위 입력 후 계산을 실행하세요.":
+    "No calculation result yet. Enter values above and run calculation.",
+  "펌프 입력값": "Pump input value",
+  "Soft/Hard limit은 기관 프로토콜 기준으로 최종 확인하세요.":
+    "Confirm final Soft/Hard limits using your institutional protocol.",
+  "IVPB / Secondary 계산기": "IVPB / Secondary calculator",
+  "총 부피 (mL)": "Total volume (mL)",
+  "총 부피(mL)": "Total volume (mL)",
+  "주입 시간": "Infusion duration",
+  "자주 쓰는 시간 프리셋": "Common time presets",
+  "속도 계산": "Calculate rate",
+  "처방 범위 시작(분)": "Prescribed range start (min)",
+  "처방 범위 끝(분)": "Prescribed range end (min)",
+  "처음 5~15분은 환자 상태와 라인 상태를 집중 모니터링하세요.":
+    "Closely monitor patient and line condition during the first 5–15 minutes.",
+  "Secondary 흔한 실수: clamp 열림, head-height, primary/secondary 연결, wrong channel":
+    "Common secondary errors: clamp open state, head-height, primary/secondary connection, wrong channel.",
+  "중력 드립 계산기": "Gravity drip calculator",
+  "목표 속도 (mL/hr)": "Target rate (mL/hr)",
+  "현재 방울수 (gtt/min)": "Current drops (gtt/min)",
+  "환산 계산": "Run conversion",
+  "결과": "Result",
+  "현장 카운트 권장: ": "Recommended bedside count: ",
+  "방울수 측정 팁: 15초 카운트 × 4 = gtt/min":
+    "Drop-rate tip: 15-second count × 4 = gtt/min.",
+  "환자 상태 변동/체위 변경/라인 변경 시 즉시 재평가하세요.":
+    "Reassess immediately for patient status changes, repositioning, or line changes.",
+  "희석 / 농도 계산기": "Dilution / concentration calculator",
+  "총 약량": "Total drug amount",
+  "출력 단위": "Output unit",
+  "농도 계산": "Calculate concentration",
+  "농도 결과": "Concentration result",
+  "펌프 커스텀 농도 입력값: ": "Pump custom concentration input: ",
+  "검산(역산) 계산기": "Reverse-check calculator",
+  "현재 mL/hr가 실제 처방 용량과 맞는지 즉시 확인":
+    "Instantly verify whether current mL/hr matches the intended prescribed dose.",
+  "처방 목표와의 차이(%) 비교는 전문 모드에서 설정할 수 있습니다.":
+    "Difference (%) vs prescribed target is available in Pro mode.",
+  "처방 목표(선택)": "Prescribed target (optional)",
+  "처방 목표": "Prescribed target",
+  "검산 실행": "Run reverse check",
+  "인계용 한 줄 복사": "Copy one-line summary",
+  "아직 검산 결과가 없습니다. 위 입력 후 검산을 실행하세요.":
+    "No reverse-check result yet. Enter values above and run reverse check.",
+  "시간당 총 투여량: ": "Total dose per hour: ",
+  "처방 대비 차이: ": "Difference vs prescribed: ",
+  "자동 체크리스트: 단위 확인 → 농도 확인 → 채널 확인 → 라인(Primary/Secondary) 확인":
+    "Auto checklist: verify unit -> verify concentration -> verify channel -> verify line (Primary/Secondary).",
+  "최근 계산 기록 보기 ": "View recent calculation history ",
+  "(로컬 저장)": "(stored locally)",
+  "눌러서 계산 상세 보기": "Tap to view calculation details",
+  "아직 계산 기록이 없습니다.": "No calculation history yet.",
+  "간호사 계산기 사용 설명서": "Nurse calculator user guide",
+  "한눈에 입력 순서와 확인 포인트를 볼 수 있습니다.":
+    "See input sequence and safety check points at a glance.",
+  "모드 안내": "Mode guide",
+  "기본 모드는 필수 입력 중심, 전문 모드는 프리셋 저장/더블체크/처방 목표 비교 같은 고급 기능까지 모두 제공합니다.":
+    "Basic mode focuses on required inputs. Pro mode adds advanced features like preset save, double-check, and target comparison.",
+  "공통 사용 순서": "Common workflow",
+  " 필수 입력값만 먼저 입력": " Enter required fields first",
+  " 계산 버튼 실행": " Run calculation",
+  " 결과 + 경고 + 단위 체크": " Review result + warnings + unit checks",
+  "이 계산기로 이동": "Go to this calculator",
+  " 상세": " details",
+  "계산 상세": "Calculation details",
+  "요약": "Summary",
+  "주의 없음": "No warnings",
+  "핵심 입력": "Key inputs",
+  "핵심 결과": "Key outputs",
+  "전체 기록 펼쳐보기": "Expand full record",
+  "입력 전체": "All inputs",
+  "결과 전체": "All outputs",
+  "클립보드를 사용할 수 없습니다.": "Clipboard is not available.",
+  "결과 한 줄을 복사했습니다.": "Copied one-line result.",
+  "복사에 실패했습니다.": "Failed to copy.",
+  "적용할 프리셋을 먼저 선택해 주세요.": "Select a preset to apply first.",
+  "프리셋 이름을 입력해 주세요.": "Enter a preset name.",
+  "더블체크 입력값": "Double-check value",
+  "현재 농도 값이 올바르지 않아 저장할 수 없습니다.":
+    "Current concentration values are invalid and cannot be saved.",
+  "단위 체크(필수)": "Unit check (required)",
+  "mg ↔ mcg 맞나요?": "Is mg ↔ mcg correct?",
+  "농도(총 약량 / 총 mL) 맞나요?": "Is concentration (total amount / total mL) correct?",
+  "두 체크가 모두 완료되어야 더블체크가 끝납니다.":
+    "Complete both checks to finish double-check verification.",
+  "큰 이상 경고 없음. 그래도 단위와 농도는 마지막으로 한 번 더 확인하세요.":
+    "No major warning. Still verify unit and concentration one more time.",
+  "아니오": "No",
+  "예": "Yes",
+  "목표 용량을 펌프 속도로 변환한 기록입니다.": "Record of converting target dose to pump rate.",
+  "현재 펌프 속도를 용량으로 역산한 기록입니다.": "Record of reverse-calculating dose from current pump rate.",
+  "IVPB 속도 계산 기록입니다.": "Record of IVPB rate calculation.",
+  "mL/hr를 gtt/min으로 환산한 기록입니다.": "Record of converting mL/hr to gtt/min.",
+  "gtt/min을 mL/hr로 역산한 기록입니다.": "Record of reverse-calculating mL/hr from gtt/min.",
+  "희석/농도 계산 기록입니다.": "Record of dilution/concentration calculation.",
+  "현재 세팅을 역산 검산한 기록입니다.": "Record of reverse-checking current setup.",
+  "계산 기록입니다.": "Calculation record.",
+  "펌프 계산": "Pump calculation",
+  "펌프 검산": "Pump reverse-check",
+  "드립 환산": "Drip conversion",
+  "드립 역산": "Drip reverse calculation",
+  "희석/농도": "Dilution/concentration",
+  "검산(역산)": "Reverse check",
+  "체중(kg)": "Weight (kg)",
+  "목표 단위": "Target unit",
+  "목표 시간 단위": "Target time unit",
+  "/kg 적용": "/kg applied",
+  "농도 총 약량": "Total amount in concentration",
+  "농도 단위": "Concentration unit",
+  "농도 총 부피(mL)": "Total concentration volume (mL)",
+  "현재 속도(mL/hr)": "Current rate (mL/hr)",
+  "출력 시간 단위": "Output time unit",
+  "출력 /kg 적용": "Output /kg applied",
+  "주입 시간 단위": "Infusion time unit",
+  "속도(mL/hr)": "Rate (mL/hr)",
+  "방울수(gtt/min)": "Drop count (gtt/min)",
+  "현장 카운트(gtt/min)": "Bedside count (gtt/min)",
+  "검산 용량": "Checked dose",
+  "역산 용량": "Reverse-calculated dose",
+  "시간당 총 투여량": "Total dose per hour",
+  "주입 시간(분)": "Infusion time (min)",
+  "약량 단위": "Amount unit",
+  "농도(/mL)": "Concentration (/mL)",
+  "체중 반영": "Apply weight",
+  "처방 목표 용량": "Prescribed target dose",
+  "실제 용량": "Actual dose",
+  "처방 대비 차이(%)": "Difference vs prescribed (%)",
+  "현재 펌프 속도(mL/hr)": "Current pump rate (mL/hr)",
+  "목표 속도(mL/hr)": "Target rate (mL/hr)",
+  "현재 방울수(gtt/min)": "Current drops (gtt/min)",
+  "예: 62": "e.g. 62",
+  "예: 0.1": "e.g. 0.1",
+  "예: 4": "e.g. 4",
+  "예: 250mL": "e.g. 250mL",
+  "예: 23.3": "e.g. 23.3",
+  "예: 100": "e.g. 100",
+  "예: 30": "e.g. 30",
+  "예: 33": "e.g. 33",
+  "예: 250": "e.g. 250",
+  "NE 표준농도": "NE standard concentration",
+  "인슐린 표준": "Insulin standard",
+  "헤파린 표준": "Heparin standard",
+  "Dobutamine 표준": "Dobutamine standard",
+  "지원하지 않는 단위입니다. (": "Unsupported unit. (",
+  "단위 계열이 다릅니다. (": "Unit families do not match. (",
+  "units와 IU는 약물별 정의가 다를 수 있어 기관 프로토콜을 확인하세요.":
+    "units and IU can differ by medication. Check institutional protocol.",
+  "계산된 속도가 300 mL/hr를 초과합니다. 단위/농도/채널을 즉시 재확인하세요.":
+    "Calculated rate exceeds 300 mL/hr. Recheck unit/concentration/channel immediately.",
+  "계산된 속도가 높습니다(120 mL/hr 초과). 처방과 펌프 채널을 다시 확인하세요.":
+    "Calculated rate is high (over 120 mL/hr). Recheck order and pump channel.",
+  "계산된 속도가 매우 낮습니다(0.1 mL/hr 미만). 소수점 자리와 단위를 확인하세요.":
+    "Calculated rate is very low (below 0.1 mL/hr). Check decimal place and units.",
+  "mg/mcg 또는 g/mg 변환이 포함됩니다. 10배/1000배 오류가 없는지 재확인하세요.":
+    "Includes mg/mcg or g/mg conversion. Recheck for 10x/1000x errors.",
+  "농도 계산 결과가 비정상입니다. 총 약량/총 mL를 확인하세요.":
+    "Abnormal concentration result. Verify total amount and total mL.",
+  "역산 용량이 매우 작습니다. 소수점 위치를 다시 확인하세요.":
+    "Reverse-calculated dose is very small. Recheck decimal placement.",
+  "역산 용량이 매우 큽니다. 단위/농도/속도를 다시 확인하세요.":
+    "Reverse-calculated dose is very large. Recheck unit/concentration/rate.",
+  "주입 시간이 짧습니다(15분 미만). 처방 시간 범위를 다시 확인하세요.":
+    "Infusion duration is short (under 15 min). Recheck prescribed time range.",
+  "주입 시간이 깁니다(4시간 초과). 처방 의도를 다시 확인하세요.":
+    "Infusion duration is long (over 4 hours). Recheck intended order.",
+  "일반적인 드립 팩터(10/15/20/60)가 아닙니다. 세트 라벨을 재확인하세요.":
+    "Drip factor is not typical (10/15/20/60). Recheck set label.",
+  "방울 속도가 매우 빠릅니다. 펌프 사용 가능 여부를 검토하세요.":
+    "Drop rate is very fast. Consider whether pump use is needed.",
+  "농도가 매우 높습니다. 총 약량/총 mL를 반드시 재확인하세요.":
+    "Concentration is very high. Recheck total amount and total mL.",
+  "처방 대비 차이가 50% 이상입니다. 단위/농도/채널/라인을 즉시 재확인하세요.":
+    "Difference vs prescribed is over 50%. Recheck unit/concentration/channel/line immediately.",
+  "처방 대비 차이가 20% 이상입니다. 인계 전 더블체크를 권장합니다.":
+    "Difference vs prescribed is over 20%. Double-check before shift change.",
+};
+
+function translateCalculatorText(
+  text: string,
+  lang: "ko" | "en",
+  t: (key: string, vars?: Record<string, string | number>) => string
+): string {
+  if (lang !== "en") return text;
+  if (!text) return text;
+
+  const fromGlobal = t(text);
+  if (fromGlobal !== text) return fromGlobal;
+
+  const fromFallback = CALCULATOR_EN_FALLBACK[text];
+  if (fromFallback) return fromFallback;
+
+  const requiredMatch = text.match(/^(.+) 입력이 필요합니다\.$/);
+  if (requiredMatch) {
+    const label = translateCalculatorText(requiredMatch[1], lang, t);
+    return `${label} is required.`;
+  }
+
+  const numberFormatMatch = text.match(/^(.+) 숫자 형식을 확인하세요\.$/);
+  if (numberFormatMatch) {
+    const label = translateCalculatorText(numberFormatMatch[1], lang, t);
+    return `Check numeric format for ${label}.`;
+  }
+
+  const greaterThanMatch = text.match(/^(.+)는 0보다 커야 합니다\.$/);
+  if (greaterThanMatch) {
+    const label = translateCalculatorText(greaterThanMatch[1], lang, t);
+    return `${label} must be greater than 0.`;
+  }
+
+  const notNumberMatch = text.match(/^(.+) 값이 숫자가 아닙니다\.$/);
+  if (notNumberMatch) {
+    const label = translateCalculatorText(notNumberMatch[1], lang, t);
+    return `${label} is not a number.`;
+  }
+
+  const positiveValueMatch = text.match(/^(.+) 값은 0보다 커야 합니다\.$/);
+  if (positiveValueMatch) {
+    const label = translateCalculatorText(positiveValueMatch[1], lang, t);
+    return `${label} must be greater than 0.`;
+  }
+
+  if (text.startsWith("목표 용량을 펌프 속도로 변환했습니다: ")) {
+    return `Converted target dose to pump rate: ${text.replace("목표 용량을 펌프 속도로 변환했습니다: ", "")}`;
+  }
+  if (text.startsWith("현재 펌프 속도를 역산했습니다: ")) {
+    return `Reverse-calculated from current pump rate: ${text.replace("현재 펌프 속도를 역산했습니다: ", "")}`;
+  }
+  if (text.startsWith("IVPB 속도를 계산했습니다: ")) {
+    return `Calculated IVPB rate: ${text.replace("IVPB 속도를 계산했습니다: ", "")}`;
+  }
+  if (text.startsWith("mL/hr를 gtt/min으로 환산했습니다: ")) {
+    return `Converted mL/hr to gtt/min: ${text.replace("mL/hr를 gtt/min으로 환산했습니다: ", "")}`;
+  }
+  if (text.startsWith("gtt/min을 mL/hr로 환산했습니다: ")) {
+    return `Converted gtt/min to mL/hr: ${text.replace("gtt/min을 mL/hr로 환산했습니다: ", "")}`;
+  }
+  if (text.startsWith("희석 농도 계산 결과: ")) {
+    return `Dilution concentration result: ${text.replace("희석 농도 계산 결과: ", "")}`;
+  }
+  if (text.startsWith("현재 세팅 역산 결과: ")) {
+    return `Reverse-check result: ${text.replace("현재 세팅 역산 결과: ", "")}`;
+  }
+  if (text.startsWith('프리셋 "') && text.endsWith('" 적용 완료')) {
+    return `${text.replace('" 적용 완료', '" applied')}`;
+  }
+  if (text.startsWith('프리셋 "') && text.endsWith('" 저장 완료')) {
+    return `${text.replace('" 저장 완료', '" saved')}`;
+  }
+  const warningCountMatch = text.match(/^주의 (\d+)건$/);
+  if (warningCountMatch) {
+    return `${warningCountMatch[1]} warning${warningCountMatch[1] === "1" ? "" : "s"}`;
+  }
+  if (text.startsWith("[펌프 계산]")) return text.replace("[펌프 계산]", "[Pump calc]");
+  if (text.startsWith("[펌프 검산]")) return text.replace("[펌프 검산]", "[Pump reverse-check]");
+  if (text.startsWith("[IVPB 속도]")) return text.replace("[IVPB 속도]", "[IVPB rate]");
+  if (text.startsWith("[드립 환산]")) return text.replace("[드립 환산]", "[Drip conversion]");
+  if (text.startsWith("[드립 역산]")) return text.replace("[드립 역산]", "[Drip reverse]");
+  if (text.startsWith("[희석/농도]")) return text.replace("[희석/농도]", "[Dilution/concentration]");
+  if (text.startsWith("[검산(역산)]")) return text.replace("[검산(역산)]", "[Reverse check]");
+  if (text.startsWith("검산: ")) return text.replace("검산: ", "Check: ");
+  if (text.startsWith("시간당 총 투여량: ")) return text.replace("시간당 총 투여량: ", "Total dose per hour: ");
+  if (text.startsWith("처방 대비 차이: ")) return text.replace("처방 대비 차이: ", "Difference vs prescribed: ");
+  if (text.startsWith("현장 카운트 권장: ")) return text.replace("현장 카운트 권장: ", "Recommended bedside count: ");
+  if (text.startsWith("예: ")) return text.replace("예: ", "e.g. ");
+  if (text.endsWith(" 상세")) return `${text.slice(0, -3)} details`;
+
+  if (text.includes(" | ")) {
+    return text
+      .replaceAll(" | 체중 ", " | weight ")
+      .replaceAll(" | 농도 ", " | concentration ")
+      .replaceAll(" | 펌프 ", " | pump ")
+      .replaceAll(" | 검산 ", " | check ")
+      .replaceAll(" | 실제 ", " | actual ")
+      .replaceAll(" | 총 ", " | total ")
+      .replaceAll(" | 속도 ", " | rate ")
+      .replaceAll(" | 현장 ", " | bedside ")
+      .replaceAll(" | 처방차 ", " | diff vs prescribed ");
+  }
+
+  return text;
+}
+
+function translateCalculatorNode(
+  node: ReactNode,
+  translate: (text: string) => string
+): ReactNode {
+  if (typeof node === "string") return translate(node);
+  if (node == null || typeof node === "boolean" || typeof node === "number") return node;
+  if (Array.isArray(node)) return Children.map(node, (child) => translateCalculatorNode(child, translate));
+  if (!isValidElement(node)) return node;
+
+  const element = node as ReactElement<Record<string, unknown>>;
+  const props = element.props ?? {};
+  const nextProps: Record<string, unknown> = {};
+  let changed = false;
+
+  if ("children" in props) {
+    const nextChildren = translateCalculatorNode(props.children as ReactNode, translate);
+    if (nextChildren !== props.children) {
+      nextProps.children = nextChildren;
+      changed = true;
+    }
+  }
+
+  CALCULATOR_TRANSLATABLE_PROP_KEYS.forEach((key) => {
+    const value = props[key];
+    if (typeof value !== "string") return;
+    const nextValue = translate(value);
+    if (nextValue === value) return;
+    nextProps[key] = nextValue;
+    changed = true;
+  });
+
+  const optionsValue = props.options;
+  if (Array.isArray(optionsValue)) {
+    let optionsChanged = false;
+    const nextOptions = optionsValue.map((option) => {
+      if (!option || typeof option !== "object" || Array.isArray(option)) return option;
+      const typed = option as Record<string, unknown>;
+      if (typeof typed.label !== "string") return option;
+      const nextLabel = translate(typed.label);
+      if (nextLabel === typed.label) return option;
+      optionsChanged = true;
+      return { ...typed, label: nextLabel };
+    });
+    if (optionsChanged) {
+      nextProps.options = nextOptions;
+      changed = true;
+    }
+  }
+
+  if (!changed) return element;
+  return cloneElement(element, nextProps);
+}
 
 type ToolModule = "pump" | "ivpb" | "drip" | "dilution" | "check";
 type PumpMode = "forward" | "reverse";
@@ -621,7 +1057,7 @@ function buildHistoryHeadline(item: CalcHistory) {
   }
 }
 
-function SmallLabel({ children }: { children: React.ReactNode }) {
+function SmallLabel({ children }: { children: ReactNode }) {
   return <div className="mb-1 text-[12px] font-semibold text-ios-sub">{children}</div>;
 }
 
@@ -683,7 +1119,8 @@ function WarningList({ warnings }: { warnings: CalcWarning[] }) {
 }
 
 export function ToolNurseCalculatorsPage() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
+  const translateText = useCallback((text: string) => translateCalculatorText(text, lang, t), [lang, t]);
   const [uiMode, setUiMode] = useState<UiMode>("basic");
   const [activeModule, setActiveModule] = useState<ToolModule>("pump");
   const [pumpMode, setPumpMode] = useState<PumpMode>("forward");
@@ -1361,7 +1798,7 @@ export function ToolNurseCalculatorsPage() {
     };
   }, [selectedHistory]);
 
-  return (
+  const content = (
     <div className="mx-auto w-full max-w-[760px] space-y-4 px-4 pb-24 pt-6">
       <div className="flex items-start justify-between gap-3">
         <div>
@@ -2401,7 +2838,9 @@ export function ToolNurseCalculatorsPage() {
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div className="text-[12px] font-semibold text-ios-text">{CALC_TYPE_LABEL[item.calcType]}</div>
-                    <div className="text-[11px] text-ios-sub">{new Date(item.timestamp).toLocaleTimeString("ko-KR")}</div>
+                    <div className="text-[11px] text-ios-sub">
+                      {new Date(item.timestamp).toLocaleTimeString(lang === "en" ? "en-US" : "ko-KR")}
+                    </div>
                   </div>
                   <div className="mt-1 text-[11px] text-ios-sub">
                     {Object.entries(item.outputs)
@@ -2494,7 +2933,7 @@ export function ToolNurseCalculatorsPage() {
         title={historyDetail ? `${historyDetail.title} 상세` : "계산 상세"}
         subtitle={
           selectedHistory
-            ? new Date(selectedHistory.timestamp).toLocaleString("ko-KR", {
+            ? new Date(selectedHistory.timestamp).toLocaleString(lang === "en" ? "en-US" : "ko-KR", {
                 year: "numeric",
                 month: "2-digit",
                 day: "2-digit",
@@ -2601,6 +3040,9 @@ export function ToolNurseCalculatorsPage() {
       ) : null}
     </div>
   );
+
+  if (lang !== "en") return content;
+  return <>{translateCalculatorNode(content, translateText)}</>;
 }
 
 function roundInput(value: number) {

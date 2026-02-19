@@ -160,6 +160,14 @@ export function SettingsBillingUpgradePage() {
                 <li key={feature}>{t(feature)}</li>
               ))}
             </ul>
+            <div className="mt-3 rounded-2xl border border-ios-sep bg-[#F7F7FA] px-3 py-2 text-[12.5px] text-ios-sub">
+              <div className="text-[12px] font-semibold text-ios-text">{t("Pro 크레딧 정책")}</div>
+              <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                <li>{t("기본 크레딧은 Pro 사용자에게 매일 10회가 한국시간 자정에 초기화됩니다.")}</li>
+                <li>{t("추가 크레딧은 구매 후 무료/Pro 공통으로 사용되며 날짜가 바뀌어도 유지됩니다.")}</li>
+                <li>{t("AI 검색 실행 시 기본 크레딧을 먼저 차감하고, 부족하면 추가 크레딧에서 차감합니다.")}</li>
+              </ul>
+            </div>
             <button
               type="button"
               onClick={() => openCheckoutSheet("pro")}
