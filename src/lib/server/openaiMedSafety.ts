@@ -661,6 +661,15 @@ function extractResponsesText(json: any): string {
   return chunks.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+function hasEntityControlMarkers(text: string) {
+  const t = String(text ?? "");
+  return (
+    /ENTITY_VERIFIED\s*[:=：]/i.test(t) ||
+    /(ENTITY_NAME|OFFICIAL_NAME|CANONICAL_NAME|정식명칭|공식명)\s*[:=：]/i.test(t) ||
+    /(ENTITY_ALIASES|ALIASES|별칭)\s*[:=：]/i.test(t)
+  );
+}
+
 function extractConversationId(json: any): string | null {
   const conversationFromString = typeof json?.conversation === "string" ? json.conversation : "";
   const conversationFromObject = typeof json?.conversation?.id === "string" ? json.conversation.id : "";
@@ -845,7 +854,22 @@ async function readResponsesEventStream(args: {
 
   const fallbackNode = completedResponse ?? lastEventPayload?.response ?? lastEventPayload ?? null;
   const fallbackText = fallbackNode ? extractResponsesText(fallbackNode) : "";
-  const finalText = (rawText || fallbackText).trim();
+  const rawNormalized = rawText.trim();
+  const fallbackNormalized = fallbackText.trim();
+  const rawHasMarkers = hasEntityControlMarkers(rawNormalized);
+  const fallbackHasMarkers = hasEntityControlMarkers(fallbackNormalized);
+  let finalText = rawNormalized;
+  if (fallbackNormalized) {
+    if (!rawNormalized) {
+      finalText = fallbackNormalized;
+    } else if (fallbackHasMarkers && !rawHasMarkers) {
+      // 실시간 delta 조합본에 제어 라인이 누락된 경우 완료 응답 본문을 우선한다.
+      finalText = fallbackNormalized;
+    } else if (fallbackNormalized.length >= rawNormalized.length) {
+      // 더 완전한 본문(대개 response.completed)을 우선 사용한다.
+      finalText = fallbackNormalized;
+    }
+  }
   if (!finalText) {
     return {
       text: null,
@@ -1404,8 +1428,8 @@ function extractSuggestedNames(rawAnswer: string, query: string, intent: QueryIn
 
 function parseEntityVerification(text: string): "yes" | "no" | "unknown" {
   const t = String(text ?? "");
-  if (/ENTITY_VERIFIED\s*[:=]\s*YES/i.test(t)) return "yes";
-  if (/ENTITY_VERIFIED\s*[:=]\s*NO/i.test(t)) return "no";
+  if (/ENTITY_VERIFIED\s*[:=：]\s*YES/i.test(t)) return "yes";
+  if (/ENTITY_VERIFIED\s*[:=：]\s*NO/i.test(t)) return "no";
   if (/\bNOT_FOUND\b/i.test(t)) return "no";
   return "unknown";
 }
@@ -1424,7 +1448,7 @@ function parseEntityOfficialName(text: string) {
     return maybeShort.slice(0, 48);
   };
   for (const line of lines) {
-    const hit = line.match(/^(ENTITY_NAME|OFFICIAL_NAME|CANONICAL_NAME|정식명칭|공식명)\s*[:=]\s*(.+)$/i);
+    const hit = line.match(/^(ENTITY_NAME|OFFICIAL_NAME|CANONICAL_NAME|정식명칭|공식명)\s*[:=：]\s*(.+)$/i);
     if (!hit?.[2]) continue;
     const normalized = normalizeOfficial(hit[2]);
     if (!normalized) continue;
@@ -1439,7 +1463,7 @@ function parseEntityAliases(text: string) {
     .map((line) => line.trim())
     .filter(Boolean);
   for (const line of lines) {
-    const hit = line.match(/^(ENTITY_ALIASES|ALIASES|별칭)\s*[:=]\s*(.+)$/i);
+    const hit = line.match(/^(ENTITY_ALIASES|ALIASES|별칭)\s*[:=：]\s*(.+)$/i);
     if (!hit?.[2]) continue;
     const value = hit[2].trim();
     if (!value || /^(none|없음)$/i.test(value)) return [] as string[];
@@ -1734,16 +1758,17 @@ function buildResultFromAnswer(params: AnalyzeParams, intent: QueryIntent, answe
     3
   );
   if (intent === "medication" || intent === "device") {
+    const hasVerifiedIdentity = verification === "yes" || Boolean(officialNameFromControl) || aliasesFromControl.length > 0;
     if (verification === "no") {
       return buildNotFoundResult(params, intent, "entity_verification_no", suggestedNames);
     }
-    if (verification === "unknown") {
+    if (!hasVerifiedIdentity && verification === "unknown") {
       return buildNotFoundResult(params, intent, "entity_verification_missing", suggestedNames);
     }
-    if (hasNotFoundSignal(normalized)) {
+    if (!hasVerifiedIdentity && hasNotFoundSignal(normalized)) {
       return buildNotFoundResult(params, intent, "model_not_found_signal", suggestedNames);
     }
-    if (!containsEntityReference(params.query, normalized, canonicalName)) {
+    if (!hasVerifiedIdentity && !containsEntityReference(params.query, normalized, canonicalName)) {
       return buildNotFoundResult(params, intent, "entity_reference_mismatch", suggestedNames);
     }
   }

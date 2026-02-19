@@ -734,8 +734,6 @@ type DynamicResultCard = {
   compact?: boolean;
 };
 
-const CARD_MAX_ITEMS = 3;
-const NON_SCENARIO_CARD_MAX_ITEMS = 3;
 const DISPLAY_ITEM_MAX_CHARS = 180;
 const ITEM_PRIORITY_PATTERN =
   /(즉시|중단|보류|주의|금기|핵심|반드시|필수|우선|보고|호출|알람|모니터|재평가|용량|속도|농도|단위|라인|호환|상호작용|프로토콜|기관 확인 필요)/i;
@@ -805,17 +803,7 @@ function linePriorityScore(line: string) {
 }
 
 function pickCardItems(items: string[]) {
-  const normalized = mergeUniqueLists(items);
-  if (normalized.length <= CARD_MAX_ITEMS) return normalized;
-  const first = normalized[0];
-  const rest = normalized.slice(1);
-  const picked = rest
-    .map((item, idx) => ({ item, idx, score: linePriorityScore(item) }))
-    .sort((a, b) => b.score - a.score || a.idx - b.idx)
-    .slice(0, CARD_MAX_ITEMS - 1)
-    .sort((a, b) => a.idx - b.idx)
-    .map((entry) => entry.item);
-  return mergeUniqueLists([first], picked).slice(0, CARD_MAX_ITEMS);
+  return mergeUniqueLists(items);
 }
 
 function topicPrefixRange(text: string) {
@@ -1151,10 +1139,7 @@ export function ToolMedSafetyPage() {
         }
         return;
       }
-      const parsedCards = buildNarrativeCards(normalizedText, t).map((card) => ({
-        ...card,
-        items: card.items.slice(0, NON_SCENARIO_CARD_MAX_ITEMS),
-      }));
+      const parsedCards = buildNarrativeCards(normalizedText, t);
       if (!parsedCards.length) return;
 
       // 카테고리 단위 스트리밍: 마지막 카드는 아직 생성 중일 가능성이 높아 finalize 전에는 노출하지 않는다.
@@ -1410,12 +1395,7 @@ export function ToolMedSafetyPage() {
 
     const usingNarrativeCards = dynamicCardsFromNarrative.length > 0;
     const dynamicCards = usingNarrativeCards ? dynamicCardsFromNarrative : dynamicCardsFallback;
-    const displayCards = isNotFoundResult
-      ? []
-      : dynamicCards.map((card) => ({
-          ...card,
-          items: card.items.slice(0, NON_SCENARIO_CARD_MAX_ITEMS),
-        }));
+    const displayCards = isNotFoundResult ? [] : dynamicCards;
 
     return {
       resultKindChip: kindLabel(result.resultKind),
