@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { markBillingOrderFailed, readBillingOrderByOrderId } from "@/lib/server/billingStore";
+import { markBillingOrderFailed, readBillingOrderByOrderId, removeUnsettledBillingOrder } from "@/lib/server/billingStore";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 
 export const runtime = "edge";
@@ -41,6 +41,10 @@ export async function POST(req: Request) {
         orderId,
         code,
         message,
+      });
+      await removeUnsettledBillingOrder({
+        userId,
+        orderId,
       });
     }
 

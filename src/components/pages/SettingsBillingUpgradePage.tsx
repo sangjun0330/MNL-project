@@ -44,7 +44,7 @@ export function SettingsBillingUpgradePage() {
   const creditPack = getCheckoutProductDefinition("credit10");
   const flatButtonBase =
     "inline-flex h-11 items-center justify-center rounded-full border px-5 text-[14px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50";
-  const flatButtonPrimary = `${flatButtonBase} border-[color:var(--wnl-accent)] bg-[color:var(--wnl-accent)] text-white hover:bg-[color:var(--wnl-accent-strong)]`;
+  const flatButtonPrimary = `${flatButtonBase} border-[color:var(--wnl-accent)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]`;
   const flatButtonSecondary = `${flatButtonBase} border-ios-sep bg-[#F2F2F7] text-ios-text`;
 
   const loadSubscription = useCallback(async () => {
