@@ -15,7 +15,7 @@ import { useAppStoreSelector } from "@/lib/store";
 import { computeVitalsRange, vitalMapByISO } from "@/lib/vitals";
 import { menstrualContextForDate } from "@/lib/menstrual";
 import { countHealthRecordedDays, hasHealthInput } from "@/lib/healthRecords";
-import { vitalDisplayScore } from "@/lib/wnlInsight";
+import { vitalDisplayScore } from "@/lib/rnestInsight";
 import { useI18n } from "@/lib/useI18n";
 
 import { MonthCalendar } from "@/components/home/MonthCalendar";

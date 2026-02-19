@@ -1,4 +1,4 @@
-alter table public.wnl_users
+alter table public.rnest_users
   add column if not exists subscription_tier text not null default 'free',
   add column if not exists subscription_status text not null default 'inactive',
   add column if not exists subscription_started_at timestamptz,

@@ -11,7 +11,7 @@ import { useInsightsData, shiftKo, isInsightsLocked, INSIGHTS_MIN_DAYS } from "@
 import { formatKoreanDate } from "@/lib/date";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { FACTOR_LABEL_KO, type FactorKey } from "@/lib/insightsV2";
-import { statusFromScore, statusLabel } from "@/lib/wnlInsight";
+import { statusFromScore, statusLabel } from "@/lib/rnestInsight";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { useI18n } from "@/lib/useI18n";
 import { BatteryGauge } from "@/components/home/BatteryGauge";

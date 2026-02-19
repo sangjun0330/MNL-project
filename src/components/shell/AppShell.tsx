@@ -17,7 +17,7 @@ const AUTH_INTERACTION_GUARD_ENABLED =
 
 function onboardingSeenStorageKey(userId?: string | null) {
   if (!userId) return "";
-  return `wnl:onboarding:seen:${userId}`;
+  return `rnest:onboarding:seen:${userId}`;
 }
 
 function readOnboardingSeenLocal(userId?: string | null) {
@@ -85,7 +85,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       return;
     }
     if (typeof window !== "undefined") {
-      const cachedReadyUserId = (window as any).__wnlCloudReadyUserId as string | undefined;
+      const cachedReadyUserId = (window as any).__rnestCloudReadyUserId as string | undefined;
       if (cachedReadyUserId && (!auth?.userId || cachedReadyUserId === auth.userId)) {
         setCloudReady(true);
       }
@@ -96,8 +96,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         setCloudReady(true);
       }
     };
-    window.addEventListener("wnl:cloud-ready", onReady);
-    return () => window.removeEventListener("wnl:cloud-ready", onReady);
+    window.addEventListener("rnest:cloud-ready", onReady);
+    return () => window.removeEventListener("rnest:cloud-ready", onReady);
   }, [isAuthed, auth?.userId]);
 
   useEffect(() => {
@@ -123,8 +123,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         setCloudReady(false);
       }
     };
-    window.addEventListener("wnl:auth-event", onAuthEvent);
-    return () => window.removeEventListener("wnl:auth-event", onAuthEvent);
+    window.addEventListener("rnest:auth-event", onAuthEvent);
+    return () => window.removeEventListener("rnest:auth-event", onAuthEvent);
   }, []);
 
   useEffect(() => {
@@ -174,8 +174,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       onboardingTriggeredRef.current = true;
       setShowOnboarding(true);
     };
-    window.addEventListener("wnl:show-onboarding", handler);
-    return () => window.removeEventListener("wnl:show-onboarding", handler);
+    window.addEventListener("rnest:show-onboarding", handler);
+    return () => window.removeEventListener("rnest:show-onboarding", handler);
   }, [auth?.userId, hasSeenOnboarding]);
 
   const handleOnboardingComplete = useCallback(() => {
@@ -200,13 +200,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         onPointerDownCapture={handleGuardedInteraction}
         onKeyDownCapture={handleGuardedInteraction}
       >
-        <div key={pathname} className="wnl-page-enter">
+        <div key={pathname} className="rnest-page-enter">
           {children}
         </div>
       </div>
       {allowPrompt && loginPromptOpen ? (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-6 wnl-backdrop" data-auth-modal>
-          <div className="w-full max-w-[360px] rounded-apple border border-ios-sep bg-white p-5 shadow-apple wnl-modal" data-auth-modal>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-6 rnest-backdrop" data-auth-modal>
+          <div className="w-full max-w-[360px] rounded-apple border border-ios-sep bg-white p-5 shadow-apple rnest-modal" data-auth-modal>
             <div className="text-[16px] font-bold text-ios-text">{t("로그인이 필요해요")}</div>
             <div className="mt-2 text-[13px] text-ios-sub">
               {t("모든 기능을 사용하려면 로그인해야 합니다. 설정으로 이동해 주세요.")}
@@ -225,8 +225,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       ) : null}
       {isAuthed && !cloudReady ? (
-        <div className="fixed inset-0 z-[55] flex items-center justify-center bg-white/70 backdrop-blur-sm px-6 wnl-backdrop">
-          <div className="w-full max-w-[320px] rounded-apple border border-ios-sep bg-white p-5 shadow-apple wnl-modal">
+        <div className="fixed inset-0 z-[55] flex items-center justify-center bg-white/70 backdrop-blur-sm px-6 rnest-backdrop">
+          <div className="w-full max-w-[320px] rounded-apple border border-ios-sep bg-white p-5 shadow-apple rnest-modal">
             <div className="text-[15px] font-semibold text-ios-text">{t("데이터 동기화 중…")}</div>
             <div className="mt-2 text-[12.5px] text-ios-sub">{t("로그인 데이터를 불러오는 중입니다.")}</div>
           </div>

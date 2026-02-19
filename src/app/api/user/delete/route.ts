@@ -21,14 +21,14 @@ export async function DELETE(req: Request) {
       return bad(500, `Failed to delete AI content: ${aiContentDelete.error.message}`);
     }
 
-    // 2. wnl_user_state (사용자 상태 데이터)
-    const userStateDelete = await admin.from("wnl_user_state").delete().eq("user_id", userId);
+    // 2. rnest_user_state (사용자 상태 데이터)
+    const userStateDelete = await admin.from("rnest_user_state").delete().eq("user_id", userId);
     if (userStateDelete.error) {
       return bad(500, `Failed to delete user state: ${userStateDelete.error.message}`);
     }
 
-    // 3. wnl_users (사용자 프로필)
-    const usersDelete = await admin.from("wnl_users").delete().eq("user_id", userId);
+    // 3. rnest_users (사용자 프로필)
+    const usersDelete = await admin.from("rnest_users").delete().eq("user_id", userId);
     if (usersDelete.error) {
       return bad(500, `Failed to delete user profile: ${usersDelete.error.message}`);
     }

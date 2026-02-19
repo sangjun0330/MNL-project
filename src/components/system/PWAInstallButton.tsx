@@ -140,9 +140,9 @@ export function PWAInstallButton() {
       </button>
 
       {showGuide && (
-        <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/40 wnl-backdrop" onClick={() => setShowGuide(false)}>
+        <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/40 rnest-backdrop" onClick={() => setShowGuide(false)}>
           <div
-            className="w-full max-w-[480px] rounded-t-[20px] bg-white px-5 pb-[calc(24px+env(safe-area-inset-bottom))] pt-5 wnl-modal"
+            className="w-full max-w-[480px] rounded-t-[20px] bg-white px-5 pb-[calc(24px+env(safe-area-inset-bottom))] pt-5 rnest-modal"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-4 flex justify-center">

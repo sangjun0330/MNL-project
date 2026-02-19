@@ -6,7 +6,7 @@ type DailyLogRow = {
   updatedAt: number;
 };
 
-const DISABLED_ERROR = "wnl_daily_logs_disabled_use_user_state";
+const DISABLED_ERROR = "rnest_daily_logs_disabled_use_user_state";
 
 const encoder = new TextEncoder();
 

@@ -8,7 +8,7 @@ import { menstrualContextForDate } from "@/lib/menstrual";
 import { useAppStore } from "@/lib/store";
 import { computeVitalsRange, type DailyVital } from "@/lib/vitals";
 import { computePersonalizationAccuracy, topFactors } from "@/lib/insightsV2";
-import { statusFromScore, vitalDisplayScore } from "@/lib/wnlInsight";
+import { statusFromScore, vitalDisplayScore } from "@/lib/rnestInsight";
 import { countHealthRecordedDays, hasHealthInput } from "@/lib/healthRecords";
 import { translate } from "@/lib/i18n";
 

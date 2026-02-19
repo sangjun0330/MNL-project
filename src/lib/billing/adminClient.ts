@@ -13,6 +13,9 @@ export type AdminRefundStatus =
   | "FAILED_FINAL"
   | "WITHDRAWN";
 
+export type AdminBillingOrderStatus = "READY" | "DONE" | "FAILED" | "CANCELED";
+export type AdminBillingOrderKind = "subscription" | "credit_pack";
+
 export type AdminRefundRequest = {
   id: number;
   userId: string;
@@ -38,6 +41,23 @@ export type AdminRefundRequest = {
   updatedAt: string | null;
   notifiedAt: string | null;
   notifyUserSentAt: string | null;
+};
+
+export type AdminBillingOrder = {
+  orderId: string;
+  userId?: string;
+  planTier: "free" | "pro";
+  orderKind: AdminBillingOrderKind;
+  creditPackUnits: number;
+  amount: number;
+  currency: string;
+  status: AdminBillingOrderStatus;
+  orderName: string;
+  paymentKey: string | null;
+  failCode: string | null;
+  failMessage: string | null;
+  approvedAt: string | null;
+  createdAt: string | null;
 };
 
 export type AdminRefundEvent = {
@@ -104,6 +124,22 @@ export async function fetchAdminRefundRequests(input?: {
   const qs = params.toString();
   const data = await adminFetch(`/api/admin/billing/refunds${qs ? `?${qs}` : ""}`, { method: "GET" });
   return (data?.requests ?? []) as AdminRefundRequest[];
+}
+
+export async function fetchAdminBillingOrders(input?: {
+  status?: AdminBillingOrderStatus | null;
+  orderKind?: AdminBillingOrderKind | null;
+  userId?: string | null;
+  limit?: number;
+}): Promise<AdminBillingOrder[]> {
+  const params = new URLSearchParams();
+  if (input?.status) params.set("status", input.status);
+  if (input?.orderKind) params.set("orderKind", input.orderKind);
+  if (input?.userId) params.set("userId", input.userId);
+  if (input?.limit != null) params.set("limit", String(input.limit));
+  const qs = params.toString();
+  const data = await adminFetch(`/api/admin/billing/orders${qs ? `?${qs}` : ""}`, { method: "GET" });
+  return (data?.orders ?? []) as AdminBillingOrder[];
 }
 
 export async function fetchAdminRefundDetail(refundId: number): Promise<AdminRefundDetail> {
@@ -206,7 +242,7 @@ export function refundStatusLabel(status: AdminRefundStatus) {
 export function refundStatusTone(status: AdminRefundStatus) {
   if (status === "REFUNDED") return "text-[#0B7A3E]";
   if (status === "REJECTED" || status === "FAILED_FINAL") return "text-[#B3261E]";
-  if (status === "APPROVED" || status === "UNDER_REVIEW" || status === "EXECUTING") return "text-[color:var(--wnl-accent)]";
+  if (status === "APPROVED" || status === "UNDER_REVIEW" || status === "EXECUTING") return "text-[color:var(--rnest-accent)]";
   if (status === "FAILED_RETRYABLE") return "text-[#C2410C]";
   return "text-ios-sub";
 }

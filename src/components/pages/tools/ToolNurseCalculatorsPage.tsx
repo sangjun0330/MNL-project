@@ -40,15 +40,15 @@ import {
 } from "@/lib/nurseCalculators";
 import { useI18n } from "@/lib/useI18n";
 
-const FLAT_CARD_CLASS = "border-[color:var(--wnl-accent-border)] bg-white shadow-none";
+const FLAT_CARD_CLASS = "border-[color:var(--rnest-accent-border)] bg-white shadow-none";
 const PRIMARY_FLAT_BTN =
-  "h-11 rounded-xl !border !border-[color:var(--wnl-accent)] !bg-[color:var(--wnl-accent-soft)] px-4 !text-[14px] !font-semibold !text-[color:var(--wnl-accent)] shadow-none hover:!bg-[color:var(--wnl-accent-soft)]";
+  "h-11 rounded-xl !border !border-[color:var(--rnest-accent)] !bg-[color:var(--rnest-accent-soft)] px-4 !text-[14px] !font-semibold !text-[color:var(--rnest-accent)] shadow-none hover:!bg-[color:var(--rnest-accent-soft)]";
 const SECONDARY_FLAT_BTN =
-  "h-11 rounded-xl !border !border-[color:var(--wnl-accent-border)] !bg-white px-4 !text-[14px] !font-semibold !text-[color:var(--wnl-accent)] shadow-none hover:!bg-[color:var(--wnl-accent-soft)]";
+  "h-11 rounded-xl !border !border-[color:var(--rnest-accent-border)] !bg-white px-4 !text-[14px] !font-semibold !text-[color:var(--rnest-accent)] shadow-none hover:!bg-[color:var(--rnest-accent-soft)]";
 const TOP_ACTION_BTN =
-  "inline-flex h-11 items-center justify-center whitespace-nowrap rounded-xl border border-[color:var(--wnl-accent-border)] bg-white px-4 text-[14px] font-semibold text-[color:var(--wnl-accent)] hover:bg-[color:var(--wnl-accent-soft)]";
+  "inline-flex h-11 items-center justify-center whitespace-nowrap rounded-xl border border-[color:var(--rnest-accent-border)] bg-white px-4 text-[14px] font-semibold text-[color:var(--rnest-accent)] hover:bg-[color:var(--rnest-accent-soft)]";
 const TOP_ACTION_BTN_SM =
-  "inline-flex h-8 items-center justify-center whitespace-nowrap rounded-lg border border-[color:var(--wnl-accent-border)] bg-white px-3 text-[12px] font-semibold text-[color:var(--wnl-accent)] hover:bg-[color:var(--wnl-accent-soft)]";
+  "inline-flex h-8 items-center justify-center whitespace-nowrap rounded-lg border border-[color:var(--rnest-accent-border)] bg-white px-3 text-[12px] font-semibold text-[color:var(--rnest-accent)] hover:bg-[color:var(--rnest-accent-soft)]";
 
 const RECENT_KEY = "nurse_calc_recent_v1";
 const CUSTOM_PRESETS_KEY = "nurse_calc_custom_presets_v1";
@@ -1858,7 +1858,7 @@ export function ToolNurseCalculatorsPage() {
           <div className="mt-3 grid gap-2 sm:grid-cols-3">
             {activeGuide.quickSteps.map((step, index) => (
               <div key={`${activeModule}-quick-${index}`} className="rounded-xl border border-ios-sep bg-white px-3 py-2">
-                <div className="text-[11px] font-bold text-[color:var(--wnl-accent)]">STEP {index + 1}</div>
+                <div className="text-[11px] font-bold text-[color:var(--rnest-accent)]">STEP {index + 1}</div>
                 <div className="mt-1 text-[11.5px] leading-5 text-ios-text">{step}</div>
               </div>
             ))}
@@ -1936,7 +1936,7 @@ export function ToolNurseCalculatorsPage() {
                   type="button"
                   className={`h-11 rounded-2xl border px-3 text-[13px] font-semibold ${
                     pumpForm.targetPerKg
-                      ? "border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]"
+                      ? "border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
                       : "border-ios-sep bg-white text-ios-sub"
                   }`}
                   onClick={() => setPumpForm((prev) => ({ ...prev, targetPerKg: !prev.targetPerKg }))}
@@ -2036,7 +2036,7 @@ export function ToolNurseCalculatorsPage() {
             </div>
           ) : (
             <details className="rounded-2xl border border-ios-sep bg-ios-bg p-3">
-              <summary className="cursor-pointer text-[12.5px] font-semibold text-[color:var(--wnl-accent)]">
+              <summary className="cursor-pointer text-[12.5px] font-semibold text-[color:var(--rnest-accent)]">
                 Advanced 옵션
               </summary>
               <div className="mt-3 space-y-3">
@@ -2180,11 +2180,11 @@ export function ToolNurseCalculatorsPage() {
               <Card className={`p-4 ${FLAT_CARD_CLASS}`}>
                 <div className="text-[12px] font-semibold text-ios-sub">펌프 입력값</div>
                 {pumpResult.mode === "forward" ? (
-                  <div className="mt-1 text-[36px] font-extrabold tracking-[-0.03em] text-[color:var(--wnl-accent)]">
+                  <div className="mt-1 text-[36px] font-extrabold tracking-[-0.03em] text-[color:var(--rnest-accent)]">
                     {formatNumber(pumpResult.rateMlHr)} <span className="text-[18px]">mL/hr</span>
                   </div>
                 ) : (
-                  <div className="mt-1 text-[28px] font-extrabold tracking-[-0.03em] text-[color:var(--wnl-accent)]">
+                  <div className="mt-1 text-[28px] font-extrabold tracking-[-0.03em] text-[color:var(--rnest-accent)]">
                     {formatNumber(pumpResult.dose)} <span className="text-[16px]">{pumpResult.doseLabel}</span>
                   </div>
                 )}
@@ -2269,7 +2269,7 @@ export function ToolNurseCalculatorsPage() {
             </div>
           ) : (
             <details className="rounded-2xl border border-ios-sep bg-ios-bg p-3">
-              <summary className="cursor-pointer text-[12.5px] font-semibold text-[color:var(--wnl-accent)]">
+              <summary className="cursor-pointer text-[12.5px] font-semibold text-[color:var(--rnest-accent)]">
                 Advanced 옵션
               </summary>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -2349,7 +2349,7 @@ export function ToolNurseCalculatorsPage() {
             <div className="space-y-3">
               <Card className={`p-4 ${FLAT_CARD_CLASS}`}>
                 <div className="text-[12px] font-semibold text-ios-sub">펌프 입력값</div>
-                <div className="mt-1 text-[36px] font-extrabold tracking-[-0.03em] text-[color:var(--wnl-accent)]">
+                <div className="mt-1 text-[36px] font-extrabold tracking-[-0.03em] text-[color:var(--rnest-accent)]">
                   {formatNumber(ivpbResult.rateMlHr)} <span className="text-[18px]">mL/hr</span>
                 </div>
                 <div className="mt-1 text-[13px] text-ios-sub">
@@ -2469,13 +2469,13 @@ export function ToolNurseCalculatorsPage() {
                 <div className="text-[12px] font-semibold text-ios-sub">결과</div>
                 {dripResult.mode === "forward" ? (
                   <>
-                    <div className="mt-1 text-[36px] font-extrabold tracking-[-0.03em] text-[color:var(--wnl-accent)]">
+                    <div className="mt-1 text-[36px] font-extrabold tracking-[-0.03em] text-[color:var(--rnest-accent)]">
                       {formatNumber(dripResult.gttPerMin)} <span className="text-[18px]">gtt/min</span>
                     </div>
                     <div className="mt-1 text-[12px] text-ios-sub">현장 카운트 권장: {dripResult.roundedGttPerMin} gtt/min</div>
                   </>
                 ) : (
-                  <div className="mt-1 text-[36px] font-extrabold tracking-[-0.03em] text-[color:var(--wnl-accent)]">
+                  <div className="mt-1 text-[36px] font-extrabold tracking-[-0.03em] text-[color:var(--rnest-accent)]">
                     {formatNumber(dripResult.mlHr)} <span className="text-[18px]">mL/hr</span>
                   </div>
                 )}
@@ -2600,7 +2600,7 @@ export function ToolNurseCalculatorsPage() {
             <div className="space-y-3">
               <Card className={`p-4 ${FLAT_CARD_CLASS}`}>
                 <div className="text-[12px] font-semibold text-ios-sub">농도 결과</div>
-                <div className="mt-1 text-[36px] font-extrabold tracking-[-0.03em] text-[color:var(--wnl-accent)]">
+                <div className="mt-1 text-[36px] font-extrabold tracking-[-0.03em] text-[color:var(--rnest-accent)]">
                   {formatNumber(dilutionResult.concentrationPerMl)}{" "}
                   <span className="text-[18px]">{dilutionResult.outputUnit}/mL</span>
                 </div>
@@ -2647,7 +2647,7 @@ export function ToolNurseCalculatorsPage() {
                   type="button"
                   className={`h-11 rounded-2xl border px-3 text-[13px] font-semibold ${
                     checkForm.useWeight
-                      ? "border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]"
+                      ? "border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
                       : "border-ios-sep bg-white text-ios-sub"
                   }`}
                   onClick={() => setCheckForm((prev) => ({ ...prev, useWeight: !prev.useWeight }))}
@@ -2790,7 +2790,7 @@ export function ToolNurseCalculatorsPage() {
             <div className="space-y-3">
               <Card className={`p-4 ${FLAT_CARD_CLASS}`}>
                 <div className="text-[12px] font-semibold text-ios-sub">실제 용량</div>
-                <div className="mt-1 text-[34px] font-extrabold tracking-[-0.03em] text-[color:var(--wnl-accent)]">
+                <div className="mt-1 text-[34px] font-extrabold tracking-[-0.03em] text-[color:var(--rnest-accent)]">
                   {formatNumber(checkResult.actualDose)} <span className="text-[17px]">{checkResult.doseLabel}</span>
                 </div>
                 <div className="mt-1 text-[12px] text-ios-sub">
@@ -2851,7 +2851,7 @@ export function ToolNurseCalculatorsPage() {
                   {item.flags.warnings.length ? (
                     <div className="mt-1 text-[11px] text-amber-700">{item.flags.warnings[0]}</div>
                   ) : null}
-                  <div className="mt-1 text-[10px] font-semibold text-[color:var(--wnl-accent)]">눌러서 계산 상세 보기</div>
+                  <div className="mt-1 text-[10px] font-semibold text-[color:var(--rnest-accent)]">눌러서 계산 상세 보기</div>
                 </button>
               ))
             ) : (
@@ -2880,13 +2880,13 @@ export function ToolNurseCalculatorsPage() {
             <div className="text-[12px] font-semibold text-ios-text">공통 사용 순서</div>
             <div className="mt-2 grid gap-2 sm:grid-cols-3">
               <div className="rounded-xl border border-ios-sep bg-white px-3 py-2 text-[11.5px] text-ios-text">
-                <span className="font-semibold text-[color:var(--wnl-accent)]">STEP 1</span> 필수 입력값만 먼저 입력
+                <span className="font-semibold text-[color:var(--rnest-accent)]">STEP 1</span> 필수 입력값만 먼저 입력
               </div>
               <div className="rounded-xl border border-ios-sep bg-white px-3 py-2 text-[11.5px] text-ios-text">
-                <span className="font-semibold text-[color:var(--wnl-accent)]">STEP 2</span> 계산 버튼 실행
+                <span className="font-semibold text-[color:var(--rnest-accent)]">STEP 2</span> 계산 버튼 실행
               </div>
               <div className="rounded-xl border border-ios-sep bg-white px-3 py-2 text-[11.5px] text-ios-text">
-                <span className="font-semibold text-[color:var(--wnl-accent)]">STEP 3</span> 결과 + 경고 + 단위 체크
+                <span className="font-semibold text-[color:var(--rnest-accent)]">STEP 3</span> 결과 + 경고 + 단위 체크
               </div>
             </div>
           </div>
@@ -2898,7 +2898,7 @@ export function ToolNurseCalculatorsPage() {
                 key={module}
                 className={`rounded-2xl border px-3 py-3 ${
                   active
-                    ? "border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)]"
+                    ? "border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)]"
                     : "border-ios-sep bg-white"
                 }`}
               >
@@ -2945,7 +2945,7 @@ export function ToolNurseCalculatorsPage() {
       >
         {historyDetail ? (
           <div className="space-y-3 pb-2">
-            <div className="rounded-2xl border border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] px-3 py-3">
+            <div className="rounded-2xl border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-3 py-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="text-[12px] font-semibold text-ios-sub">요약</div>
                 <div
@@ -2962,7 +2962,7 @@ export function ToolNurseCalculatorsPage() {
 
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 <div className="rounded-xl border border-ios-sep bg-white px-2.5 py-2">
-                  <div className="text-[11px] font-semibold text-[color:var(--wnl-accent)]">핵심 입력</div>
+                  <div className="text-[11px] font-semibold text-[color:var(--rnest-accent)]">핵심 입력</div>
                   <div className="mt-1.5 space-y-1">
                     {historyDetail.highlightInputs.map((entry) => (
                       <div key={`focus-in-${entry.key}`} className="flex items-start justify-between gap-2 text-[11.5px]">
@@ -2974,7 +2974,7 @@ export function ToolNurseCalculatorsPage() {
                 </div>
 
                 <div className="rounded-xl border border-ios-sep bg-white px-2.5 py-2">
-                  <div className="text-[11px] font-semibold text-[color:var(--wnl-accent)]">핵심 결과</div>
+                  <div className="text-[11px] font-semibold text-[color:var(--rnest-accent)]">핵심 결과</div>
                   <div className="mt-1.5 space-y-1">
                     {historyDetail.highlightOutputs.map((entry) => (
                       <div key={`focus-out-${entry.key}`} className="flex items-start justify-between gap-2 text-[11.5px]">
@@ -2998,7 +2998,7 @@ export function ToolNurseCalculatorsPage() {
             </div>
 
             <details className="rounded-2xl border border-ios-sep bg-white px-3 py-3">
-              <summary className="cursor-pointer text-[12px] font-semibold text-[color:var(--wnl-accent)]">
+              <summary className="cursor-pointer text-[12px] font-semibold text-[color:var(--rnest-accent)]">
                 전체 기록 펼쳐보기
               </summary>
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -3033,7 +3033,7 @@ export function ToolNurseCalculatorsPage() {
 
       {copyMessage ? (
         <div className="fixed inset-x-0 bottom-[calc(88px+env(safe-area-inset-bottom))] z-50 mx-auto w-full max-w-[720px] px-6">
-          <div className="rounded-2xl border border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] px-4 py-2 text-center text-[12px] font-semibold text-[color:var(--wnl-accent)]">
+          <div className="rounded-2xl border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-4 py-2 text-center text-[12px] font-semibold text-[color:var(--rnest-accent)]">
             {copyMessage}
           </div>
         </div>

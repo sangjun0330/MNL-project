@@ -18,7 +18,7 @@ export function ToolsPage() {
       </div>
 
       <Link href="/tools/nurse-calculators" className="block">
-        <Card className="p-6 transition hover:translate-y-[-1px] hover:border-[color:var(--wnl-accent-border)]">
+        <Card className="p-6 transition hover:translate-y-[-1px] hover:border-[color:var(--rnest-accent-border)]">
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">{t("간호사 투약·주입 계산기")}</div>
@@ -26,13 +26,13 @@ export function ToolsPage() {
                 {t("펌프 변환, IVPB 속도, 드립 환산, 희석 농도, 역산 검산을 100% 로컬로 즉시 계산합니다.")}
               </div>
             </div>
-            <span className="wnl-chip-accent px-3 py-1 text-[11px]">{t("LOCAL")}</span>
+            <span className="rnest-chip-accent px-3 py-1 text-[11px]">{t("LOCAL")}</span>
           </div>
         </Card>
       </Link>
 
       <Link href="/tools/med-safety" className="block">
-        <Card className="p-6 transition hover:translate-y-[-1px] hover:border-[color:var(--wnl-accent-border)]">
+        <Card className="p-6 transition hover:translate-y-[-1px] hover:border-[color:var(--rnest-accent-border)]">
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">{t("AI 약물·기구 안전 가이드")}</div>
@@ -42,7 +42,7 @@ export function ToolsPage() {
                   : t("사진·텍스트로 투여 전 확인사항, 수행 절차, 중단·보고 기준을 빠르게 정리해줍니다.")}
               </div>
             </div>
-            <span className="wnl-chip-accent px-3 py-1 text-[11px]">{billingLoading ? t("AI") : `${t("남은")} ${medSafetyRemaining}${t("회")}`}</span>
+            <span className="rnest-chip-accent px-3 py-1 text-[11px]">{billingLoading ? t("AI") : `${t("남은")} ${medSafetyRemaining}${t("회")}`}</span>
           </div>
         </Card>
       </Link>

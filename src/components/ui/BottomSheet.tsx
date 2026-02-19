@@ -92,14 +92,14 @@ export function BottomSheet({
     const body = document.body;
     const prevOverflow = body.style.overflow;
 
-    body.classList.add("wnl-sheet-open");
+    body.classList.add("rnest-sheet-open");
     body.style.overflow = "hidden";
-    window.dispatchEvent(new CustomEvent("wnl:sheet", { detail: { open: true } }));
+    window.dispatchEvent(new CustomEvent("rnest:sheet", { detail: { open: true } }));
 
     return () => {
-      body.classList.remove("wnl-sheet-open");
+      body.classList.remove("rnest-sheet-open");
       body.style.overflow = prevOverflow;
-      window.dispatchEvent(new CustomEvent("wnl:sheet", { detail: { open: false } }));
+      window.dispatchEvent(new CustomEvent("rnest:sheet", { detail: { open: false } }));
     };
   }, [mounted]);
 
@@ -184,7 +184,7 @@ export function BottomSheet({
             ? "bg-black/45 backdrop-blur-[10px]"
             : "bg-black/35 backdrop-blur-[6px]",
           "transition-[opacity,backdrop-filter] duration-[500ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-          "wnl-backdrop",
+          "rnest-backdrop",
           visible ? "opacity-100" : "opacity-0"
         )}
         onClick={closeWithAnimation}

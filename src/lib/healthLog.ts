@@ -31,7 +31,7 @@ export type DailyHealthSnapshot = {
   mood?: number | null;
 };
 
-const DEVICE_KEY = "wnl_device_id_v1";
+const DEVICE_KEY = "rnest_device_id_v1";
 
 /**
  * 개발/테스트 환경: 브라우저마다 고유한 deviceId를 만들어 사용

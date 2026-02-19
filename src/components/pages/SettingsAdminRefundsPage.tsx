@@ -7,6 +7,7 @@ import { formatKrw } from "@/lib/billing/plans";
 import {
   approveAdminRefund,
   executeAdminRefund,
+  fetchAdminBillingOrders,
   fetchAdminRefundDetail,
   fetchAdminRefundRequests,
   formatDateTimeLabel,
@@ -15,6 +16,8 @@ import {
   runAdminRefundRetryBatch,
   refundStatusLabel,
   refundStatusTone,
+  type AdminBillingOrder,
+  type AdminBillingOrderKind,
   type AdminRefundDetail,
   type AdminRefundRequest,
   type AdminRefundStatus,
@@ -72,6 +75,7 @@ export function SettingsAdminRefundsPage() {
   const [filter, setFilter] = useState<"ALL" | AdminRefundStatus>("ALL");
   const [userIdFilter, setUserIdFilter] = useState("");
   const [requests, setRequests] = useState<AdminRefundRequest[]>([]);
+  const [orders, setOrders] = useState<AdminBillingOrder[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -86,12 +90,20 @@ export function SettingsAdminRefundsPage() {
     setLoading(true);
     setError(null);
     try {
-      const rows = await fetchAdminRefundRequests({
-        status: filter === "ALL" ? null : filter,
-        userId: userIdFilter.trim() || null,
-        limit: 120,
-      });
-      setRequests(rows);
+      const userId = userIdFilter.trim() || null;
+      const [refundRows, orderRows] = await Promise.all([
+        fetchAdminRefundRequests({
+          status: filter === "ALL" ? null : filter,
+          userId,
+          limit: 120,
+        }),
+        fetchAdminBillingOrders({
+          userId,
+          limit: 120,
+        }),
+      ]);
+      setRequests(refundRows);
+      setOrders(orderRows);
     } catch (e: any) {
       setError(parseErrorMessage(String(e?.message ?? "failed_to_load_refunds")));
     } finally {
@@ -174,6 +186,38 @@ export function SettingsAdminRefundsPage() {
     return { open, done, failed };
   }, [requests]);
 
+  const orderSummary = useMemo(() => {
+    let done = 0;
+    let failed = 0;
+    let canceled = 0;
+    let ready = 0;
+    let totalAmount = 0;
+    const kindCounter: Record<AdminBillingOrderKind, number> = {
+      subscription: 0,
+      credit_pack: 0,
+    };
+
+    for (const order of orders) {
+      if (order.status === "DONE") done += 1;
+      else if (order.status === "FAILED") failed += 1;
+      else if (order.status === "CANCELED") canceled += 1;
+      else ready += 1;
+      totalAmount += Math.max(0, Math.round(Number(order.amount ?? 0)));
+      if (order.orderKind === "subscription" || order.orderKind === "credit_pack") {
+        kindCounter[order.orderKind] += 1;
+      }
+    }
+    return {
+      total: orders.length,
+      done,
+      failed,
+      canceled,
+      ready,
+      totalAmount,
+      kindCounter,
+    };
+  }, [orders]);
+
   const currentActionLabel = useMemo(() => {
     if (!actionLoadingKey) return null;
     const [action, id] = actionLoadingKey.split(":");
@@ -192,21 +236,21 @@ export function SettingsAdminRefundsPage() {
       <div className="mb-4 flex items-center gap-2">
         <Link
           href="/settings/admin"
-          className="wnl-btn-secondary inline-flex h-9 w-9 items-center justify-center text-[18px] text-ios-text"
+          className="rnest-btn-secondary inline-flex h-9 w-9 items-center justify-center text-[18px] text-ios-text"
         >
           ←
         </Link>
-        <div className="text-[24px] font-extrabold tracking-[-0.02em] text-ios-text">환불/결제취소 관리</div>
+        <div className="text-[24px] font-extrabold tracking-[-0.02em] text-ios-text">환불/결제 로그 운영</div>
       </div>
 
       {status !== "authenticated" ? (
-        <div className="wnl-surface p-5">
+        <div className="rnest-surface p-5">
           <div className="text-[16px] font-bold text-ios-text">로그인이 필요합니다</div>
           <p className="mt-2 text-[13px] text-ios-sub">관리자 계정으로 로그인해야 환불 관리 기능을 사용할 수 있습니다.</p>
           <button
             type="button"
             onClick={() => signInWithProvider("google")}
-            className="wnl-btn-primary mt-4 px-4 py-2 text-[13px]"
+            className="rnest-btn-primary mt-4 px-4 py-2 text-[13px]"
           >
             Google로 로그인
           </button>
@@ -215,17 +259,17 @@ export function SettingsAdminRefundsPage() {
 
       {status === "authenticated" ? (
         <>
-          <section className="wnl-surface p-5">
+          <section className="rnest-surface p-5">
             <div className="grid grid-cols-3 gap-2">
-              <div className="wnl-sub-surface p-3">
+              <div className="rnest-sub-surface p-3">
                 <div className="text-[11px] text-ios-sub">열린 요청</div>
-                <div className="mt-1 text-[20px] font-extrabold text-[color:var(--wnl-accent)]">{summary.open}</div>
+                <div className="mt-1 text-[20px] font-extrabold text-[color:var(--rnest-accent)]">{summary.open}</div>
               </div>
-              <div className="wnl-sub-surface p-3">
+              <div className="rnest-sub-surface p-3">
                 <div className="text-[11px] text-ios-sub">환불 완료</div>
                 <div className="mt-1 text-[20px] font-extrabold text-[#0B7A3E]">{summary.done}</div>
               </div>
-              <div className="wnl-sub-surface p-3">
+              <div className="rnest-sub-surface p-3">
                 <div className="text-[11px] text-ios-sub">거절/실패</div>
                 <div className="mt-1 text-[20px] font-extrabold text-[#B3261E]">{summary.failed}</div>
               </div>
@@ -239,7 +283,7 @@ export function SettingsAdminRefundsPage() {
                   onClick={() => setFilter(row.key)}
                   className={`rounded-full border px-3 py-1 text-[12px] font-semibold transition ${
                     filter === row.key
-                      ? "border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]"
+                      ? "border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
                       : "border-ios-sep bg-white text-ios-sub hover:bg-ios-bg"
                   }`}
                 >
@@ -253,12 +297,12 @@ export function SettingsAdminRefundsPage() {
                 value={userIdFilter}
                 onChange={(e) => setUserIdFilter(e.target.value)}
                 placeholder="userId 필터 (선택)"
-                className="h-10 w-full rounded-full border border-ios-sep bg-white px-4 text-[13px] text-ios-text outline-none placeholder:text-ios-muted focus:border-[color:var(--wnl-accent-border)]"
+                className="h-10 w-full rounded-full border border-ios-sep bg-white px-4 text-[13px] text-ios-text outline-none placeholder:text-ios-muted focus:border-[color:var(--rnest-accent-border)]"
               />
               <button
                 type="button"
                 onClick={() => void loadRequests()}
-                className="wnl-btn-secondary inline-flex h-10 items-center justify-center px-4 text-[13px]"
+                className="rnest-btn-secondary inline-flex h-10 items-center justify-center px-4 text-[13px]"
               >
                 새로고침
               </button>
@@ -266,7 +310,7 @@ export function SettingsAdminRefundsPage() {
                 type="button"
                 onClick={() => void runRetryBatch()}
                 disabled={batchLoading || isActionBusy}
-                className="wnl-btn-primary inline-flex h-10 items-center justify-center px-4 text-[13px] disabled:opacity-50"
+                className="rnest-btn-primary inline-flex h-10 items-center justify-center px-4 text-[13px] disabled:opacity-50"
               >
                 {batchLoading ? "재시도 실행 중..." : "재시도 큐 실행"}
               </button>
@@ -278,9 +322,78 @@ export function SettingsAdminRefundsPage() {
             {notice ? <div className="mt-3 text-[12px] text-[#0B7A3E]">{notice}</div> : null}
           </section>
 
+          <section className="rnest-surface mt-4 p-5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-[15px] font-bold text-ios-text">Toss 결제 로그</div>
+              <div className="text-[12px] text-ios-sub">최근 {orderSummary.total}건</div>
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <div className="rnest-sub-surface p-3">
+                <div className="text-[11px] text-ios-sub">승인 완료</div>
+                <div className="mt-1 text-[18px] font-extrabold text-[#0B7A3E]">{orderSummary.done}</div>
+              </div>
+              <div className="rnest-sub-surface p-3">
+                <div className="text-[11px] text-ios-sub">실패</div>
+                <div className="mt-1 text-[18px] font-extrabold text-[#B3261E]">{orderSummary.failed}</div>
+              </div>
+              <div className="rnest-sub-surface p-3">
+                <div className="text-[11px] text-ios-sub">취소/환불</div>
+                <div className="mt-1 text-[18px] font-extrabold text-[#C2410C]">{orderSummary.canceled}</div>
+              </div>
+              <div className="rnest-sub-surface p-3">
+                <div className="text-[11px] text-ios-sub">결제 시도액 합계</div>
+                <div className="mt-1 text-[15px] font-extrabold text-ios-text">{formatKrw(orderSummary.totalAmount)}</div>
+              </div>
+            </div>
+            <div className="mt-2 text-[12px] text-ios-sub">
+              구독 {orderSummary.kindCounter.subscription}건 · 크레딧팩 {orderSummary.kindCounter.credit_pack}건 · 대기중{" "}
+              {orderSummary.ready}건
+            </div>
+
+            <div className="mt-3 space-y-1.5">
+              {orders.length === 0 ? (
+                <div className="text-[12px] text-ios-muted">조건에 맞는 결제 로그가 없습니다.</div>
+              ) : (
+                orders.map((order) => (
+                  <div key={order.orderId} className="rounded-xl border border-ios-sep bg-white/85 px-3 py-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-[13px] font-semibold text-ios-text">
+                        {order.orderId} · {order.orderKind === "credit_pack" ? "추가 크레딧" : "구독"}
+                      </div>
+                      <div
+                        className={`text-[12px] font-semibold ${
+                          order.status === "DONE"
+                            ? "text-[#0B7A3E]"
+                            : order.status === "FAILED"
+                              ? "text-[#B3261E]"
+                              : order.status === "CANCELED"
+                                ? "text-[#C2410C]"
+                                : "text-[color:var(--rnest-accent)]"
+                        }`}
+                      >
+                        {order.status}
+                      </div>
+                    </div>
+                    <div className="mt-0.5 text-[12px] text-ios-sub">
+                      user: {order.userId ?? "-"} · {formatKrw(order.amount)} ({order.currency}) · {order.orderName}
+                    </div>
+                    <div className="mt-0.5 text-[11.5px] text-ios-muted">
+                      created: {formatDateTimeLabel(order.createdAt)} · approved: {formatDateTimeLabel(order.approvedAt)}
+                    </div>
+                    {order.failCode || order.failMessage ? (
+                      <div className="mt-0.5 text-[11.5px] text-[#B3261E]">
+                        {order.failCode ?? "error"} {order.failMessage ? `· ${order.failMessage}` : ""}
+                      </div>
+                    ) : null}
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+
           <section className="mt-4 space-y-2.5">
             {requests.length === 0 ? (
-              <div className="wnl-surface p-5 text-[13px] text-ios-sub">
+              <div className="rnest-surface p-5 text-[13px] text-ios-sub">
                 조건에 맞는 환불 요청이 없습니다.
               </div>
             ) : null}
@@ -293,7 +406,7 @@ export function SettingsAdminRefundsPage() {
               const canExecute = boolState(request.status, ["APPROVED", "FAILED_RETRYABLE", "EXECUTING"]);
 
               return (
-                <div key={request.id} className="wnl-surface p-4">
+                <div key={request.id} className="rnest-surface p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <div className="text-[15px] font-bold text-ios-text">#{request.id} · {request.orderId}</div>
@@ -306,7 +419,7 @@ export function SettingsAdminRefundsPage() {
                     </div>
                   </div>
 
-                  <div className="wnl-sub-surface mt-2 px-3 py-2">
+                  <div className="rnest-sub-surface mt-2 px-3 py-2">
                     <div className="text-[12px] text-ios-sub">사유</div>
                     <div className="mt-0.5 text-[13px] text-ios-text">{request.reason}</div>
                     <div className="mt-1 text-[12px] text-ios-sub">
@@ -323,7 +436,7 @@ export function SettingsAdminRefundsPage() {
                     <button
                       type="button"
                       onClick={() => void openDetail(request.id)}
-                      className="wnl-btn-secondary inline-flex h-9 items-center justify-center px-3 text-[12px]"
+                      className="rnest-btn-secondary inline-flex h-9 items-center justify-center px-3 text-[12px]"
                     >
                       {isSelected ? "상세 닫기" : "상세 보기"}
                     </button>
@@ -340,7 +453,7 @@ export function SettingsAdminRefundsPage() {
                             `요청 #${request.id}를 검토중으로 전환했습니다.`
                           );
                         }}
-                        className="wnl-btn-secondary inline-flex h-9 items-center justify-center px-3 text-[12px] disabled:opacity-40"
+                        className="rnest-btn-secondary inline-flex h-9 items-center justify-center px-3 text-[12px] disabled:opacity-40"
                       >
                         검토 시작
                       </button>
@@ -360,7 +473,7 @@ export function SettingsAdminRefundsPage() {
                             `요청 #${request.id}를 승인했습니다.`
                           );
                         }}
-                        className="inline-flex h-9 items-center justify-center rounded-full border border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] px-3 text-[12px] font-semibold text-[color:var(--wnl-accent)] transition hover:brightness-[0.98] disabled:opacity-40"
+                        className="inline-flex h-9 items-center justify-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-3 text-[12px] font-semibold text-[color:var(--rnest-accent)] transition hover:brightness-[0.98] disabled:opacity-40"
                       >
                         승인
                       </button>
@@ -416,7 +529,7 @@ export function SettingsAdminRefundsPage() {
                             `요청 #${request.id} 환불 실행이 완료되었습니다.`
                           );
                         }}
-                        className="wnl-btn-primary inline-flex h-9 items-center justify-center px-3 text-[12px] disabled:opacity-40"
+                        className="rnest-btn-primary inline-flex h-9 items-center justify-center px-3 text-[12px] disabled:opacity-40"
                       >
                         환불 실행
                       </button>
@@ -446,7 +559,7 @@ export function SettingsAdminRefundsPage() {
                             `요청 #${request.id} 승인 및 환불 실행이 완료되었습니다.`
                           );
                         }}
-                        className="inline-flex h-9 items-center justify-center rounded-full border border-ios-sep bg-white px-3 text-[12px] font-semibold text-ios-text transition hover:border-[color:var(--wnl-accent-border)] disabled:opacity-40"
+                        className="inline-flex h-9 items-center justify-center rounded-full border border-ios-sep bg-white px-3 text-[12px] font-semibold text-ios-text transition hover:border-[color:var(--rnest-accent-border)] disabled:opacity-40"
                       >
                         승인+즉시실행
                       </button>
@@ -454,7 +567,7 @@ export function SettingsAdminRefundsPage() {
                   </div>
 
                   {isSelected ? (
-                    <div className="wnl-sub-surface mt-3 px-3 py-3">
+                    <div className="rnest-sub-surface mt-3 px-3 py-3">
                       {detailLoadingId === request.id ? (
                         <div className="text-[12px] text-ios-muted">상세를 불러오는 중...</div>
                       ) : (

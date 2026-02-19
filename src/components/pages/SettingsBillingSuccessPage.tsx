@@ -55,7 +55,7 @@ export function SettingsBillingSuccessPage() {
   const flatSubSurface = "rounded-[18px] border border-ios-sep bg-[#F7F7FA]";
   const flatButtonBase =
     "inline-flex h-10 items-center justify-center rounded-full border px-5 text-[13px] font-semibold transition-colors";
-  const flatButtonPrimary = `${flatButtonBase} border-[color:var(--wnl-accent)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]`;
+  const flatButtonPrimary = `${flatButtonBase} border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]`;
   const flatButtonSecondary = `${flatButtonBase} border-ios-sep bg-[#F2F2F7] text-ios-text`;
 
   const parsedAmount = useMemo(() => {
@@ -136,7 +136,7 @@ export function SettingsBillingSuccessPage() {
 
         {!loading && !error && result ? (
           <>
-            <div className="wnl-chip-accent mt-3 inline-flex px-3 py-1 text-[12px]">
+            <div className="rnest-chip-accent mt-3 inline-flex px-3 py-1 text-[12px]">
               {t("결제 완료")}
             </div>
 
