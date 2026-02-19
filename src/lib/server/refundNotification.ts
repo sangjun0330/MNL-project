@@ -39,6 +39,41 @@ function parseRecipients(value: string) {
     .filter((item) => isEmail(item));
 }
 
+async function sendResendEmail(params: {
+  apiKey: string;
+  from: string;
+  to: string[];
+  subject: string;
+  text: string;
+  html: string;
+  replyTo?: string;
+}) {
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${params.apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: params.from,
+      to: params.to,
+      reply_to: params.replyTo,
+      subject: params.subject,
+      text: params.text,
+      html: params.html,
+    }),
+  });
+
+  if (!res.ok) {
+    const raw = await res.text().catch(() => "");
+    return {
+      ok: false,
+      message: `resend_http_${res.status}:${raw.slice(0, 180)}`,
+    };
+  }
+  return { ok: true, message: "ok" };
+}
+
 export async function sendRefundRequestNotification(input: RefundNotifyInput): Promise<{
   sent: boolean;
   message: string;
@@ -65,7 +100,7 @@ export async function sendRefundRequestNotification(input: RefundNotifyInput): P
     return { sent: false, message: "missing_refund_notify_recipients" };
   }
 
-  const text = [
+  const adminText = [
     "RNest 환불 요청이 접수되었습니다.",
     "",
     `요청 ID: ${input.requestId}`,
@@ -82,7 +117,7 @@ export async function sendRefundRequestNotification(input: RefundNotifyInput): P
     "주의: 현재 시스템은 자동 환불을 수행하지 않습니다. 관리자가 사유 검토 후 수동 처리해야 합니다.",
   ].join("\n");
 
-  const html = `
+  const adminHtml = `
     <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.55;">
       <h2 style="margin:0 0 12px;">RNest 환불 요청 접수</h2>
       <p style="margin:0 0 12px;">관리자 검토 후 수동으로 환불 처리해야 합니다.</p>
@@ -102,29 +137,68 @@ export async function sendRefundRequestNotification(input: RefundNotifyInput): P
     </div>
   `.trim();
 
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      from,
-      to: filteredRecipients,
-      reply_to: hasRequesterEmail ? requesterEmail : undefined,
-      subject,
-      text,
-      html,
-    }),
+  const adminResult = await sendResendEmail({
+    apiKey,
+    from,
+    to: filteredRecipients,
+    replyTo: hasRequesterEmail ? requesterEmail : undefined,
+    subject,
+    text: adminText,
+    html: adminHtml,
   });
 
-  if (!res.ok) {
-    const raw = await res.text().catch(() => "");
+  if (!adminResult.ok) {
     return {
       sent: false,
-      message: `resend_http_${res.status}:${raw.slice(0, 180)}`,
+      message: adminResult.message,
     };
   }
 
-  return { sent: true, message: "ok" };
+  if (!hasRequesterEmail) {
+    return { sent: true, message: "admin_sent_user_skipped" };
+  }
+
+  const userSubject = "[RNest] 환불 요청이 접수되었습니다";
+  const userText = [
+    "RNest 환불 요청이 접수되었습니다.",
+    "",
+    `사용자 이메일: ${requesterEmail}`,
+    `결제 금액: ${formatKrw(input.amount)}`,
+    `요청 시각: ${requestedAt}`,
+    "",
+    "[환불 사유]",
+    reason,
+    "",
+    "관리자 검토 후 순차 처리되며, 처리 결과는 별도 안내됩니다.",
+  ].join("\n");
+  const userHtml = `
+    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.55;">
+      <h2 style="margin:0 0 12px;">RNest 환불 요청 접수</h2>
+      <p style="margin:0 0 12px;">요청이 정상 접수되었습니다. 관리자 검토 후 순차 처리됩니다.</p>
+      <table style="border-collapse:collapse;">
+        <tr><td style="padding:4px 10px 4px 0;color:#666;">사용자 이메일</td><td style="padding:4px 0;">${escapeHtml(requesterEmail)}</td></tr>
+        <tr><td style="padding:4px 10px 4px 0;color:#666;">결제 금액</td><td style="padding:4px 0;">${formatKrw(input.amount)}</td></tr>
+        <tr><td style="padding:4px 10px 4px 0;color:#666;">요청 시각</td><td style="padding:4px 0;">${escapeHtml(requestedAt)}</td></tr>
+      </table>
+      <div style="margin-top:14px;padding:10px 12px;border:1px solid #ddd;border-radius:10px;background:#fafafa;">
+        <div style="margin-bottom:6px;color:#666;">환불 사유</div>
+        <div>${escapeHtml(reason)}</div>
+      </div>
+    </div>
+  `.trim();
+
+  const userResult = await sendResendEmail({
+    apiKey,
+    from,
+    to: [requesterEmail],
+    subject: userSubject,
+    text: userText,
+    html: userHtml,
+  });
+
+  if (!userResult.ok) {
+    return { sent: true, message: `admin_sent_user_failed:${userResult.message}` };
+  }
+
+  return { sent: true, message: "admin_sent_user_sent" };
 }

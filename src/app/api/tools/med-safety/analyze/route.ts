@@ -92,6 +92,21 @@ type MedSafetyResponseData = MedSafetyAnalysisResult & {
   openaiConversationId: string | null;
 };
 
+type MedSafetyRecentRecord = {
+  id: string;
+  savedAt: number;
+  language: Language;
+  request: {
+    query: string;
+    mode: ClinicalMode;
+    situation: ClinicalSituation;
+    queryIntent: QueryIntent | null;
+    patientSummary: string | null;
+    imageName: string | null;
+  };
+  result: MedSafetyResponseData;
+};
+
 function hasMeaningfulStructuredContent(result: MedSafetyAnalysisResult) {
   const quickActions = Array.isArray(result.quick?.topActions) ? result.quick.topActions.length : 0;
   const steps = Array.isArray(result.do?.steps) ? result.do.steps.length : 0;
@@ -154,6 +169,84 @@ async function safeSaveMedSafetyContent(
     return null;
   } catch {
     return "save_med_safety_content_failed";
+  }
+}
+
+function normalizeRecentRecords(value: unknown) {
+  if (!Array.isArray(value)) return [] as MedSafetyRecentRecord[];
+  const out: MedSafetyRecentRecord[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) continue;
+    const id = String(item.id ?? "").trim();
+    if (!id) continue;
+    const savedAtRaw = Number(item.savedAt);
+    const savedAt = Number.isFinite(savedAtRaw) && savedAtRaw > 0 ? savedAtRaw : Date.now();
+    const language = String(item.language ?? "ko").toLowerCase() === "en" ? "en" : "ko";
+    const requestNode = isRecord(item.request) ? item.request : {};
+    const resultNode = isRecord(item.result) ? item.result : null;
+    if (!resultNode) continue;
+    out.push({
+      id,
+      savedAt,
+      language,
+      request: {
+        query: String(requestNode.query ?? ""),
+        mode: pickMode((requestNode.mode as FormDataEntryValue | null) ?? null),
+        situation: pickSituation((requestNode.situation as FormDataEntryValue | null) ?? null),
+        queryIntent: pickQueryIntent((requestNode.queryIntent as FormDataEntryValue | null) ?? null) ?? null,
+        patientSummary: requestNode.patientSummary == null ? null : String(requestNode.patientSummary),
+        imageName: requestNode.imageName == null ? null : String(requestNode.imageName),
+      },
+      result: resultNode as unknown as MedSafetyResponseData,
+    });
+  }
+  return out.sort((a, b) => b.savedAt - a.savedAt).slice(0, 5);
+}
+
+async function safeAppendMedSafetyRecent(params: {
+  userId: string;
+  dateISO: ISODate;
+  language: Language;
+  query: string;
+  mode: ClinicalMode;
+  situation: ClinicalSituation;
+  queryIntent?: QueryIntent;
+  patientSummary: string;
+  imageName: string;
+  result: MedSafetyResponseData;
+}) {
+  try {
+    const existing = await safeLoadAIContent(params.userId);
+    const previous = isRecord(existing?.data) ? existing.data : {};
+    const prevRecent = normalizeRecentRecords(previous.medSafetyRecent);
+    const nextRecord: MedSafetyRecentRecord = {
+      id: `msr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+      savedAt: Date.now(),
+      language: params.language,
+      request: {
+        query: params.query,
+        mode: params.mode,
+        situation: params.situation,
+        queryIntent: params.queryIntent ?? null,
+        patientSummary: params.patientSummary || null,
+        imageName: params.imageName || null,
+      },
+      result: params.result,
+    };
+    const deduped = [
+      nextRecord,
+      ...prevRecent.filter((record) => {
+        if (record.result.item.name !== nextRecord.result.item.name) return true;
+        if (record.request.query !== nextRecord.request.query) return true;
+        return Math.abs(record.savedAt - nextRecord.savedAt) > 10_000;
+      }),
+    ].slice(0, 5);
+
+    return await safeSaveMedSafetyContent(params.userId, params.dateISO, params.language, {
+      medSafetyRecent: deduped,
+    } satisfies Json);
+  } catch {
+    return "save_med_safety_recent_failed";
   }
 }
 
@@ -439,6 +532,25 @@ export async function POST(req: NextRequest) {
         analyzed: analyzedKo,
         responseData: payloadKo,
       }) && !abort.signal.aborted;
+      if (shouldCommitCredit) {
+        const recentSaveError = await safeAppendMedSafetyRecent({
+          userId,
+          dateISO: today,
+          language: locale,
+          query,
+          mode,
+          situation,
+          queryIntent,
+          patientSummary,
+          imageName,
+          result: responseData,
+        });
+        if (recentSaveError) {
+          responseData.fallbackReason = responseData.fallbackReason
+            ? `${responseData.fallbackReason}|${recentSaveError}`
+            : recentSaveError;
+        }
+      }
 
       return { responseData, shouldCommitCredit };
     };

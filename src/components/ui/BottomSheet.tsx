@@ -8,6 +8,8 @@ const SHEET_DURATION_MS = 500;
 const SHEET_EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
 const SHEET_EASE_SNAP = "cubic-bezier(0.175, 0.885, 0.32, 1.05)";  // spring snap-back
 const SHEET_CLOSE_DELAY_MS = 180;
+let OPEN_SHEET_COUNT = 0;
+let PREV_BODY_OVERFLOW = "";
 
 type Props = {
   open: boolean;
@@ -90,15 +92,21 @@ export function BottomSheet({
   useEffect(() => {
     if (!mounted) return;
     const body = document.body;
-    const prevOverflow = body.style.overflow;
-
-    body.classList.add("rnest-sheet-open");
-    body.style.overflow = "hidden";
-    window.dispatchEvent(new CustomEvent("rnest:sheet", { detail: { open: true } }));
+    const becameFirstSheet = OPEN_SHEET_COUNT === 0;
+    if (becameFirstSheet) {
+      PREV_BODY_OVERFLOW = body.style.overflow;
+      body.classList.add("rnest-sheet-open");
+      body.style.overflow = "hidden";
+      window.dispatchEvent(new CustomEvent("rnest:sheet", { detail: { open: true } }));
+    }
+    OPEN_SHEET_COUNT += 1;
 
     return () => {
+      OPEN_SHEET_COUNT = Math.max(0, OPEN_SHEET_COUNT - 1);
+      if (OPEN_SHEET_COUNT > 0) return;
       body.classList.remove("rnest-sheet-open");
-      body.style.overflow = prevOverflow;
+      body.style.overflow = PREV_BODY_OVERFLOW;
+      PREV_BODY_OVERFLOW = "";
       window.dispatchEvent(new CustomEvent("rnest:sheet", { detail: { open: false } }));
     };
   }, [mounted]);
@@ -236,16 +244,19 @@ export function BottomSheet({
               ) : null}
             </>
           ) : (
-            <div
-              className="px-5 pt-4"
-              onPointerDown={(e) => {
-                (e.currentTarget as HTMLDivElement).setPointerCapture?.(e.pointerId);
-                onDragStart(e.clientY);
-              }}
-              onPointerMove={(e) => onDragMove(e.clientY)}
-              onPointerUp={(e) => onDragEnd(e.clientY)}
-              onPointerCancel={(e) => onDragEnd(e.clientY)}
-            >
+            <div className="px-5 pt-3">
+              <div
+                className="mb-3 flex justify-center"
+                onPointerDown={(e) => {
+                  (e.currentTarget as HTMLDivElement).setPointerCapture?.(e.pointerId);
+                  onDragStart(e.clientY);
+                }}
+                onPointerMove={(e) => onDragMove(e.clientY)}
+                onPointerUp={(e) => onDragEnd(e.clientY)}
+                onPointerCancel={(e) => onDragEnd(e.clientY)}
+              >
+                <div className="h-1.5 w-12 rounded-full bg-black/15" />
+              </div>
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   {title ? (

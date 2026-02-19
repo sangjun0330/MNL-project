@@ -92,6 +92,7 @@ export function ScheduleRecordSheet({
   const [workEventTags, setWorkEventTags] = useState<string[]>([]);
   const [workEventCustomTag, setWorkEventCustomTag] = useState<string>("");
   const [workEventNote, setWorkEventNote] = useState<string>("");
+  const [workEventNoteSheetOpen, setWorkEventNoteSheetOpen] = useState(false);
 
   // ✅ 메모
   const [note, setNote] = useState<string>("");
@@ -264,6 +265,7 @@ export function ScheduleRecordSheet({
     if (caffeineDebounce.current) clearTimeout(caffeineDebounce.current);
     if (napDebounce.current) clearTimeout(napDebounce.current);
     if (workEventNoteDebounce.current) clearTimeout(workEventNoteDebounce.current);
+    setWorkEventNoteSheetOpen(false);
     setShowMore(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, iso]);
@@ -459,6 +461,16 @@ export function ScheduleRecordSheet({
     () => workEventTags.filter((tag) => !WORK_EVENT_PRESET_SET.has(tag)),
     [workEventTags]
   );
+  const trimmedWorkEventNote = workEventNote.replace(/\s+/g, " ").trim();
+
+  const handleWorkEventNoteSheetClose = () => {
+    if (workEventNoteDebounce.current) {
+      clearTimeout(workEventNoteDebounce.current);
+      workEventNoteDebounce.current = null;
+    }
+    saveWorkEventsNow(workEventTags, workEventNote);
+    setWorkEventNoteSheetOpen(false);
+  };
 
   const handleClose = () => {
     if (noteDebounce.current) {
@@ -487,19 +499,21 @@ export function ScheduleRecordSheet({
       }
       saveWorkEventsNow(workEventTags, workEventNote);
     }
+    setWorkEventNoteSheetOpen(false);
     onClose();
   };
 
   return (
-    <BottomSheet
-      open={open}
-      onClose={handleClose}
-      title={t("기록")}
-      subtitle={dateLabel}
-      variant="appstore"
-      maxHeightClassName="max-h-[82dvh]"
-    >
-      <div className="space-y-4">
+    <>
+      <BottomSheet
+        open={open}
+        onClose={handleClose}
+        title={t("기록")}
+        subtitle={dateLabel}
+        variant="appstore"
+        maxHeightClassName="max-h-[82dvh]"
+      >
+        <div className="space-y-4">
         {/* 상단 안내 + 저장 상태 */}
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 text-[12.5px] text-ios-muted break-words">
@@ -716,7 +730,7 @@ export function ScheduleRecordSheet({
           <div className="rounded-2xl border border-ios-sep bg-white p-4">
             <div className="text-[13px] font-semibold">{t("근무 이벤트")}</div>
             <div className="mt-1 text-[12.5px] text-ios-muted">{t("오늘 근무에서 있었던 상황을 태그로 남겨 주세요.")}</div>
-            <div className="mt-1 text-[11px] font-semibold text-ios-muted">{t("태그는 여러 개 선택할 수 있어요.")}</div>
+            <div className="mt-1 text-[11px] font-semibold text-ios-muted">{t("태그 중심으로 먼저 기록하고, 필요할 때만 상세 메모를 추가해 주세요.")}</div>
 
             <div className="mt-3 flex flex-wrap gap-2">
               {workEventPresetTags.map((item) => {
@@ -773,14 +787,27 @@ export function ScheduleRecordSheet({
               </div>
             ) : null}
 
-            <div className="mt-3">
-              <div className="mb-2 text-[12px] font-semibold text-ios-muted">{t("이벤트 상세 메모 (선택)")}</div>
-              <Textarea
-                value={workEventNote}
-                onChange={(e) => setWorkEventNote(e.target.value)}
-                placeholder={t("예: 코드블루 1건 대응, 인계 지연 30분")}
-                rows={2}
-              />
+            <div className="mt-3 rounded-2xl border border-ios-sep bg-ios-bg px-3 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[12px] font-semibold text-ios-muted">{t("이벤트 상세 메모")}</div>
+                  <div className="mt-1 text-[12.5px] text-ios-sub">
+                    {trimmedWorkEventNote
+                      ? t("입력됨: {count}자", { count: trimmedWorkEventNote.length })
+                      : t("태그로 부족할 때만 상세 내용을 추가해 주세요.")}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setWorkEventNoteSheetOpen(true)}
+                  className="shrink-0 rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] px-3 py-1 text-[12px] font-semibold text-[color:var(--rnest-accent)]"
+                >
+                  {trimmedWorkEventNote ? t("수정") : t("추가")}
+                </button>
+              </div>
+              {trimmedWorkEventNote ? (
+                <div className="mt-2 line-clamp-2 text-[12px] leading-5 text-ios-sub">{trimmedWorkEventNote}</div>
+              ) : null}
             </div>
           </div>
         ) : null}
@@ -896,7 +923,31 @@ export function ScheduleRecordSheet({
             ) : null}
           </div>
         ) : null}
-      </div>
-    </BottomSheet>
+        </div>
+      </BottomSheet>
+
+      <BottomSheet
+        open={open && workEventNoteSheetOpen}
+        onClose={handleWorkEventNoteSheetClose}
+        title={t("근무 이벤트 상세 메모")}
+        subtitle={t("태그로 부족한 내용만 간단히 기록해 주세요.")}
+        variant="appstore"
+        maxHeightClassName="max-h-[62dvh]"
+      >
+        <div className="space-y-3">
+          <div className="text-[12.5px] leading-5 text-ios-sub">{t("예: 코드블루 1건 대응, 인계 지연 30분")}</div>
+          <Textarea
+            value={workEventNote}
+            onChange={(e) => setWorkEventNote(e.target.value)}
+            placeholder={t("상세 메모를 입력하세요")}
+            rows={4}
+          />
+          <div className="text-[11.5px] text-ios-muted">{t("닫으면 자동 저장됩니다.")}</div>
+          <Button variant="secondary" onClick={handleWorkEventNoteSheetClose}>
+            {t("완료")}
+          </Button>
+        </div>
+      </BottomSheet>
+    </>
   );
 }
