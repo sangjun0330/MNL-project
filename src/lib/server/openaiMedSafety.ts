@@ -1311,6 +1311,35 @@ function hasNotFoundSignal(text: string) {
   );
 }
 
+function hasStrongClinicalStructure(text: string, intent: QueryIntent) {
+  const normalized = String(text ?? "").toLowerCase();
+  if (!normalized) return false;
+  const medicationSignals = [
+    "이 약이 무엇인지",
+    "언제 쓰는지",
+    "어떻게 주는지",
+    "금기/주의",
+    "반드시 모니터",
+    "위험 신호",
+    "상호작용",
+    "환자 교육",
+    "실수 방지",
+  ];
+  const deviceSignals = [
+    "기구 정의",
+    "셋업",
+    "알람",
+    "트러블",
+    "합병증",
+    "유지관리",
+    "실수 방지",
+  ];
+  const signals = intent === "device" ? deviceSignals : medicationSignals;
+  const matched = signals.filter((signal) => normalized.includes(signal)).length;
+  // 실제 임상 본문(길고 섹션 기반)일 때만 구조 신호를 유효하게 본다.
+  return matched >= (intent === "device" ? 3 : 4) && normalized.length >= 450;
+}
+
 function levenshteinDistance(a: string, b: string) {
   if (a === b) return 0;
   if (!a.length) return b.length;
@@ -1430,7 +1459,7 @@ function parseEntityVerification(text: string): "yes" | "no" | "unknown" {
   const t = String(text ?? "");
   if (/ENTITY_VERIFIED\s*[:=：]\s*YES/i.test(t)) return "yes";
   if (/ENTITY_VERIFIED\s*[:=：]\s*NO/i.test(t)) return "no";
-  if (/\bNOT_FOUND\b/i.test(t)) return "no";
+  if (/(?:^|\n)\s*NOT_FOUND\s*(?:\n|$)/i.test(t)) return "no";
   return "unknown";
 }
 
@@ -1750,6 +1779,7 @@ function buildResultFromAnswer(params: AnalyzeParams, intent: QueryIntent, answe
   const canonicalName =
     cleanLine(canonicalFromQuery?.canonical || officialNameFromControl || params.query || params.imageName || "").slice(0, 50) || "조회 항목";
   const normalized = replaceEntityMentionForDisplay(normalizedRaw, params.query, canonicalName);
+  const strongClinicalStructure = hasStrongClinicalStructure(normalized, intent);
   const suggestedNames = dedupeLimit(
     [
       ...extractSuggestedNames(answer, params.query, intent),
@@ -1758,7 +1788,8 @@ function buildResultFromAnswer(params: AnalyzeParams, intent: QueryIntent, answe
     3
   );
   if (intent === "medication" || intent === "device") {
-    const hasVerifiedIdentity = verification === "yes" || Boolean(officialNameFromControl) || aliasesFromControl.length > 0;
+    const hasVerifiedIdentity =
+      verification === "yes" || Boolean(officialNameFromControl) || aliasesFromControl.length > 0 || strongClinicalStructure;
     if (verification === "no") {
       return buildNotFoundResult(params, intent, "entity_verification_no", suggestedNames);
     }
