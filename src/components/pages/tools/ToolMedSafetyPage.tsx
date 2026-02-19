@@ -17,7 +17,7 @@ import { useI18n } from "@/lib/useI18n";
 
 const FLAT_CARD_CLASS = "rounded-[24px] border border-ios-sep bg-white shadow-none";
 const PRIMARY_FLAT_BTN =
-  "h-11 rounded-full border border-[color:var(--wnl-accent)] bg-[color:var(--wnl-accent)] px-4 text-[14px] font-semibold text-white shadow-none hover:bg-[color:var(--wnl-accent-strong)]";
+  "h-11 rounded-full border border-[color:var(--wnl-accent)] bg-[color:var(--wnl-accent-soft)] px-4 text-[14px] font-semibold text-[color:var(--wnl-accent)] shadow-none hover:bg-[color:var(--wnl-accent-soft)]";
 const SECONDARY_FLAT_BTN =
   "h-11 rounded-full border border-ios-sep bg-white px-4 text-[14px] font-semibold text-ios-text shadow-none hover:bg-[#F7F7FA]";
 const SEGMENT_WRAPPER_CLASS = "inline-flex rounded-full border border-ios-sep bg-[#F7F7FA] p-1";
@@ -1656,42 +1656,29 @@ export function ToolMedSafetyPage() {
         </div>
 
         <Card className={`p-3 ${FLAT_CARD_CLASS}`}>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="space-y-2">
-              <div className="text-[13px] font-semibold text-ios-text">
-                {t("남은 AI 검색")}: {quotaRemaining}
-                {t("회")}
+          <div className="grid gap-1.5 sm:grid-cols-2">
+            <div className="rounded-xl border border-ios-sep bg-[#F7F7FA] px-2.5 py-2">
+              <div className="text-[11px] font-semibold text-ios-sub">{t("기본 크레딧 (Pro 전용 · 매일 초기화)")}</div>
+              <div className="mt-0.5 text-[18px] font-bold tracking-[-0.01em] text-ios-text">
+                {medSafetyQuota ? (medSafetyQuota.isPro ? `${dailyRemaining}/${medSafetyQuota.dailyLimit}${t("회")}` : t("해당 없음")) : "-"}
               </div>
-              {!medSafetyQuota ? (
-                <div className="text-[12px] text-ios-sub">{t("잔여 횟수 정보를 불러오지 못했습니다. 잠시 후 새로고침해 주세요.")}</div>
-              ) : (
-                <div className="grid gap-1.5 sm:grid-cols-2">
-                  <div className="rounded-xl border border-ios-sep bg-[#F7F7FA] px-2.5 py-2">
-                    <div className="text-[11px] font-semibold text-ios-sub">{t("기본 크레딧 (Pro 전용 · 매일 초기화)")}</div>
-                    <div className="mt-0.5 text-[13px] font-semibold text-ios-text">
-                      {medSafetyQuota.isPro ? `${dailyRemaining}/${medSafetyQuota.dailyLimit}${t("회")}` : t("해당 없음")}
-                    </div>
-                  </div>
-                  <div className="rounded-xl border border-ios-sep bg-[#F7F7FA] px-2.5 py-2">
-                    <div className="text-[11px] font-semibold text-ios-sub">{t("추가 크레딧 (구매분 · 미초기화)")}</div>
-                    <div className="mt-0.5 text-[13px] font-semibold text-ios-text">
-                      {extraCredits}
-                      {t("회")}
-                    </div>
-                  </div>
-                </div>
-              )}
-              {medSafetyQuota ? (
-                <div className="text-[11.5px] text-ios-sub">
-                  {medSafetyQuota.isPro
-                    ? t("기본 크레딧은 한국시간 자정에 10회로 초기화되고, 추가 크레딧은 날짜와 무관하게 유지됩니다.")
-                    : t("무료 플랜은 추가 크레딧만 사용하며, 추가 크레딧은 날짜와 무관하게 유지됩니다.")}
-                </div>
-              ) : null}
+            </div>
+            <div className="rounded-xl border border-ios-sep bg-[#F7F7FA] px-2.5 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-[11px] font-semibold text-ios-sub">{t("추가 크레딧 (구매분 · 미초기화)")}</div>
+                <button
+                  type="button"
+                  onClick={() => void startCreditCheckout()}
+                  disabled={creditPaying}
+                  className="text-[11.5px] font-semibold text-[color:var(--wnl-accent)] underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {creditPaying ? t("결제창 준비 중...") : t("추가 크레딧 구매")}
+                </button>
               </div>
-            <Button variant="secondary" className={SECONDARY_FLAT_BTN} onClick={() => void startCreditCheckout()} disabled={creditPaying}>
-              {creditPaying ? t("결제창 준비 중...") : `${t("크레딧 10회 구매")} (${creditPack.priceKrw.toLocaleString("ko-KR")}원)`}
-            </Button>
+              <div className="mt-0.5 text-[18px] font-bold tracking-[-0.01em] text-ios-text">
+                {medSafetyQuota ? `${extraCredits}${t("회")}` : "-"}
+              </div>
+            </div>
           </div>
         </Card>
 

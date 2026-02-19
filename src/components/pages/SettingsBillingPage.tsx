@@ -2,15 +2,17 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { formatKrw, getPlanDefinition } from "@/lib/billing/plans";
+import { getCheckoutProductDefinition, getPlanDefinition } from "@/lib/billing/plans";
 import {
   fetchSubscriptionSnapshot,
   formatDateLabel,
+  requestPlanCheckout,
   subscriptionStatusLabel,
   type SubscriptionResponse,
   authHeaders,
 } from "@/lib/billing/client";
 import { signInWithProvider, useAuthState } from "@/lib/auth";
+import { BillingCheckoutSheet } from "@/components/billing/BillingCheckoutSheet";
 import { useI18n } from "@/lib/useI18n";
 
 type CancelMode = "period_end" | "resume" | "now_refund";
@@ -35,11 +37,14 @@ export function SettingsBillingPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<CancelMode | null>(null);
+  const [creditPaying, setCreditPaying] = useState(false);
+  const [creditCheckoutSheetOpen, setCreditCheckoutSheetOpen] = useState(false);
   const flatSurface = "rounded-[24px] border border-ios-sep bg-white";
   const flatButtonBase =
     "inline-flex h-11 items-center justify-center rounded-full border px-4 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50";
   const flatButtonSecondary = `${flatButtonBase} border-ios-sep bg-[#F2F2F7] text-ios-text`;
-  const flatButtonPrimary = `${flatButtonBase} border-[color:var(--wnl-accent)] bg-[color:var(--wnl-accent)] text-white hover:bg-[color:var(--wnl-accent-strong)]`;
+  const flatButtonPrimary = `${flatButtonBase} border-[color:var(--wnl-accent)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]`;
+  const creditPack = getCheckoutProductDefinition("credit10");
 
   const loadSubscription = useCallback(async () => {
     if (!user?.userId) {
@@ -63,7 +68,6 @@ export function SettingsBillingPage() {
   const activeTier = subscription?.tier ?? "free";
   const hasPaidAccess = Boolean(subscription?.hasPaidAccess);
   const quota = subscription?.medSafetyQuota;
-  const purchaseSummary = subData?.purchaseSummary;
   const submitCancel = useCallback(
     async (mode: CancelMode) => {
       if (!user?.userId || actionLoading) return;
@@ -119,6 +123,33 @@ export function SettingsBillingPage() {
     [actionLoading, loadSubscription, t, user?.userId]
   );
 
+  const startCreditCheckout = useCallback(() => {
+    if (!user?.userId || creditPaying) return;
+    setActionError(null);
+    setCreditCheckoutSheetOpen(true);
+  }, [creditPaying, user?.userId]);
+
+  const confirmCreditCheckout = useCallback(async () => {
+    if (!user?.userId || creditPaying) return;
+    setCreditPaying(true);
+    setActionError(null);
+    setCreditCheckoutSheetOpen(false);
+    try {
+      await requestPlanCheckout("credit10");
+    } catch (e: any) {
+      const msg = String(e?.message ?? "");
+      if (!msg.includes("USER_CANCEL")) {
+        if (msg.toLowerCase().includes("billing_schema_outdated_credit_pack_columns")) {
+          setActionError(t("서버 DB 스키마가 아직 최신이 아닙니다. 마이그레이션 적용 후 다시 시도해 주세요."));
+        } else {
+          setActionError(t("결제창을 열지 못했습니다. 잠시 후 다시 시도해 주세요."));
+        }
+      }
+    } finally {
+      setCreditPaying(false);
+    }
+  }, [creditPaying, t, user?.userId]);
+
   return (
     <div className="mx-auto w-full max-w-[760px] px-4 pb-24 pt-6">
       <div className="mb-4 flex items-center gap-2">
@@ -168,29 +199,30 @@ export function SettingsBillingPage() {
               {" · "}
               {t("만료일")}: {formatDateLabel(subscription?.currentPeriodEnd ?? null)}
             </div>
-            <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+            <div className="mt-3 grid gap-1.5 sm:grid-cols-2">
               <div className="rounded-xl border border-ios-sep bg-[#F7F7FA] px-3 py-2">
                 <div className="text-[11px] font-semibold text-ios-sub">{t("기본 크레딧 (Pro 전용 · 매일 초기화)")}</div>
-                <div className="mt-0.5 text-[13px] font-semibold text-ios-text">
+                <div className="mt-0.5 text-[18px] font-bold tracking-[-0.01em] text-ios-text">
                   {quota?.isPro ? `${quota.dailyRemaining}/${quota.dailyLimit}${t("회")}` : t("해당 없음")}
                 </div>
               </div>
               <div className="rounded-xl border border-ios-sep bg-[#F7F7FA] px-3 py-2">
-                <div className="text-[11px] font-semibold text-ios-sub">{t("추가 크레딧 (구매분 · 미초기화)")}</div>
-                <div className="mt-0.5 text-[13px] font-semibold text-ios-text">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[11px] font-semibold text-ios-sub">{t("추가 크레딧 (구매분 · 미초기화)")}</div>
+                  <button
+                    type="button"
+                    onClick={startCreditCheckout}
+                    disabled={creditPaying}
+                    className="text-[11.5px] font-semibold text-[color:var(--wnl-accent)] underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {creditPaying ? t("결제창 준비 중...") : t("추가 크레딧 구매")}
+                  </button>
+                </div>
+                <div className="mt-0.5 text-[18px] font-bold tracking-[-0.01em] text-ios-text">
                   {(quota?.extraCredits ?? 0).toLocaleString("ko-KR")}
                   {t("회")}
                 </div>
               </div>
-            </div>
-            <div className="mt-1 text-[12px] text-ios-sub">
-              {t("AI 검색 총 잔여")}: {(quota?.totalRemaining ?? 0).toLocaleString("ko-KR")}
-              {t("회")}
-            </div>
-            <div className="mt-1 text-[12px] text-ios-muted">
-              {t("누적 결제")}: {formatKrw(purchaseSummary?.totalPaidAmount ?? 0)} · {t("크레딧 누적 구매")}:{" "}
-              {(purchaseSummary?.creditPurchasedUnits ?? 0).toLocaleString("ko-KR")}
-              {t("회")}
             </div>
 
             {subscription?.cancelAtPeriodEnd ? (
@@ -241,6 +273,18 @@ export function SettingsBillingPage() {
           </section>
         </>
       ) : null}
+      <BillingCheckoutSheet
+        open={creditCheckoutSheetOpen}
+        onClose={() => setCreditCheckoutSheetOpen(false)}
+        onConfirm={() => void confirmCreditCheckout()}
+        loading={creditPaying}
+        productTitle={t(creditPack.title)}
+        productSubtitle={t("AI 약물·도구 검색기 전용")}
+        priceKrw={creditPack.priceKrw}
+        periodLabel={t("10회 사용권 · 소진 전까지 유지")}
+        accountEmail={user?.email ?? null}
+        confirmLabel={t("결제 계속")}
+      />
     </div>
   );
 }

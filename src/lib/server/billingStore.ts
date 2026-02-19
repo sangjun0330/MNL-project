@@ -1169,6 +1169,7 @@ export async function listRecentBillingOrders(userId: string, limit = 12): Promi
     .from("billing_orders")
     .select(BILLING_ORDER_SELECT_WITH_OPTIONAL)
     .eq("user_id", userId)
+    .in("status", ["DONE", "CANCELED"])
     .order("created_at", { ascending: false })
     .limit(Math.max(1, Math.min(50, Math.round(limit))));
   if (!fullRes.error) {
@@ -1179,10 +1180,25 @@ export async function listRecentBillingOrders(userId: string, limit = 12): Promi
     .from("billing_orders")
     .select(BILLING_ORDER_SELECT_BASE)
     .eq("user_id", userId)
+    .in("status", ["DONE", "CANCELED"])
     .order("created_at", { ascending: false })
     .limit(Math.max(1, Math.min(50, Math.round(limit))));
   if (fallbackRes.error) throw fallbackRes.error;
   return (fallbackRes.data ?? []).map((row) => toBillingOrderSummary(row));
+}
+
+export async function removeUnsettledBillingOrder(input: {
+  userId: string;
+  orderId: string;
+}): Promise<void> {
+  const admin = getSupabaseAdmin();
+  const { error } = await admin
+    .from("billing_orders")
+    .delete()
+    .eq("order_id", input.orderId)
+    .eq("user_id", input.userId)
+    .neq("status", "DONE");
+  if (error) throw error;
 }
 
 export async function markBillingOrderFailed(input: {
@@ -1571,24 +1587,39 @@ export async function withdrawRefundRequestByUser(input: {
   userId: string;
   note?: string | null;
 }): Promise<BillingRefundRequestSummary> {
+  const admin = getSupabaseAdmin();
   const current = await readRefundRequestById(input.id);
   if (!current) throw new Error("refund_request_not_found");
   if (current.userId !== input.userId) throw new Error("refund_request_forbidden");
+  if (!["REQUESTED", "PENDING"].includes(current.status)) {
+    throw new Error(`invalid_refund_request_state:${current.status}`);
+  }
 
   const note = sanitizeShortText(input.note, 500) ?? "사용자 요청 철회";
-  return transitionRefundRequestStatus({
-    requestId: input.id,
-    expectedStatuses: ["REQUESTED", "PENDING"],
-    toStatus: "WITHDRAWN",
-    actorRole: "user",
-    actorUserId: input.userId,
-    eventType: "refund.withdrawn",
-    message: note,
-    patch: {
-      admin_note: note,
-      next_retry_at: null,
-    },
-  });
+  const nowIso = new Date().toISOString();
+  const { data, error } = await admin
+    .from("billing_refund_requests")
+    .delete()
+    .eq("id", input.id)
+    .eq("user_id", input.userId)
+    .in("status", ["REQUESTED", "PENDING"])
+    .select(REFUND_REQUEST_SELECT)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) {
+    const latest = await readRefundRequestById(input.id);
+    if (!latest) throw new Error("refund_request_not_found");
+    if (latest.userId !== input.userId) throw new Error("refund_request_forbidden");
+    throw new Error("refund_request_conflict");
+  }
+
+  const removed = toRefundRequestSummary(data);
+  return {
+    ...removed,
+    status: "WITHDRAWN",
+    adminNote: note,
+    updatedAt: nowIso,
+  };
 }
 
 export async function listDueRetryableRefundRequests(limit = 20): Promise<BillingRefundRequestSummary[]> {

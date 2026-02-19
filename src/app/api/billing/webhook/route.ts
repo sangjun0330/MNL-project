@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import {
   downgradeToFreeNow,
-  markBillingOrderCanceled,
   markBillingOrderDoneAndApplyPlan,
   markBillingOrderFailed,
   markRefundRequestRefundedBySystem,
+  removeUnsettledBillingOrder,
   readBillingOrderByOrderIdAny,
   readPendingRefundRequestByOrder,
 } from "@/lib/server/billingStore";
@@ -207,11 +207,14 @@ export async function POST(req: Request) {
       }
 
       if (CANCELED_STATUSES.has(status)) {
-        await markBillingOrderCanceled({
-          userId,
-          orderId,
-          message: `Webhook status: ${status || "CANCELED"}`,
-        });
+        if (order.status === "READY" || order.status === "FAILED") {
+          await removeUnsettledBillingOrder({
+            userId,
+            orderId,
+          });
+        } else if (order.status === "CANCELED") {
+          // 이미 완료 환불 처리된 주문 이력은 유지
+        }
         const syncedRefundId = await syncRefundRequestFromWebhookCancel({
           userId,
           orderId,
@@ -234,6 +237,10 @@ export async function POST(req: Request) {
           code: `webhook_${status.toLowerCase()}`,
           message: `Webhook status: ${status || "FAILED"}`,
         });
+        await removeUnsettledBillingOrder({
+          userId,
+          orderId,
+        });
         return ok({ accepted: true, action: "failed", orderId });
       }
 
@@ -241,11 +248,14 @@ export async function POST(req: Request) {
     }
 
     if (eventType === "CANCEL_STATUS_CHANGED") {
-      await markBillingOrderCanceled({
-        userId,
-        orderId,
-        message: `Webhook cancel status: ${status || "CANCELED"}`,
-      });
+      if (order.status === "READY" || order.status === "FAILED") {
+        await removeUnsettledBillingOrder({
+          userId,
+          orderId,
+        });
+      } else if (order.status === "CANCELED") {
+        // 이미 완료 환불 처리된 주문 이력은 유지
+      }
       const syncedRefundId = await syncRefundRequestFromWebhookCancel({
         userId,
         orderId,
