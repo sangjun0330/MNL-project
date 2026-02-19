@@ -18,8 +18,6 @@ function seg(input: {
     uncertainties: [],
     patientAlias: input.patientAlias ?? null,
     phiHits: [],
-    findings: [],
-    residualFindings: [],
     evidenceRef: {
       segmentId: input.id,
       startMs: input.startMs,

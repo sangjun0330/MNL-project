@@ -14,17 +14,6 @@ test("getHandoffFeatureFlags parses wasm_local provider and wasm options", () =>
   process.env.NEXT_PUBLIC_HANDOFF_WASM_ASR_WORKER_URL = "/workers/custom.worker.js";
   process.env.NEXT_PUBLIC_HANDOFF_WASM_ASR_MODEL_URL = "/models/ko.bin";
   process.env.NEXT_PUBLIC_HANDOFF_WASM_ASR_RUNTIME_URL = "/runtime/whisper-runtime.js";
-  process.env.NEXT_PUBLIC_HANDOFF_WASM_ASR_ENGINE = "transformers_whisper";
-  process.env.NEXT_PUBLIC_HANDOFF_WASM_ASR_MODEL_ID = "openai/whisper-small";
-  process.env.NEXT_PUBLIC_HANDOFF_WASM_ASR_DEVICE = "webgpu";
-  process.env.NEXT_PUBLIC_HANDOFF_WASM_ASR_DTYPE = "q8";
-  process.env.NEXT_PUBLIC_HANDOFF_VAD_ENABLED = "true";
-  process.env.NEXT_PUBLIC_HANDOFF_VAD_MIN_SPEECH_RATIO = "0.09";
-  process.env.NEXT_PUBLIC_HANDOFF_VAD_MIN_SEGMENT_MS = "240";
-  process.env.NEXT_PUBLIC_HANDOFF_VAD_THRESHOLD = "0.018";
-  process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_REFINE_ENABLED = "true";
-  process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_USE_MLC = "true";
-  process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_MODEL_ID = "Qwen2.5-3B-Instruct-q4f16_1-MLC";
   process.env.NEXT_PUBLIC_HANDOFF_PRIVACY_PROFILE = "standard";
   process.env.NEXT_PUBLIC_HANDOFF_REQUIRE_AUTH = "false";
 
@@ -36,22 +25,11 @@ test("getHandoffFeatureFlags parses wasm_local provider and wasm options", () =>
   assert.equal(flags.handoffWasmAsrWorkerUrl, "/workers/custom.worker.js");
   assert.equal(flags.handoffWasmAsrModelUrl, "/models/ko.bin");
   assert.equal(flags.handoffWasmAsrRuntimeUrl, "/runtime/whisper-runtime.js");
-  assert.equal(flags.handoffWasmAsrEngine, "transformers_whisper");
-  assert.equal(flags.handoffWasmAsrModelId, "openai/whisper-small");
-  assert.equal(flags.handoffWasmAsrDevice, "webgpu");
-  assert.equal(flags.handoffWasmAsrDType, "q8");
-  assert.equal(flags.handoffVadEnabled, true);
-  assert.equal(flags.handoffVadMinSpeechRatio, 0.09);
-  assert.equal(flags.handoffVadMinSegmentMs, 240);
-  assert.equal(flags.handoffVadThreshold, 0.018);
-  assert.equal(flags.handoffWebLlmRefineEnabled, true);
-  assert.equal(flags.handoffWebLlmUseMlc, true);
-  assert.equal(flags.handoffWebLlmModelId, "Qwen2.5-3B-Instruct-q4f16_1-MLC");
   assert.equal(flags.handoffPrivacyProfile, "standard");
   assert.equal(flags.handoffRequireAuth, false);
 });
 
-test("getHandoffFeatureFlags falls back to local on-device defaults when values are missing", () => {
+test("getHandoffFeatureFlags falls back to manual defaults when values are missing", () => {
   delete process.env.NEXT_PUBLIC_HANDOFF_ASR_PROVIDER;
   delete process.env.NEXT_PUBLIC_HANDOFF_EXECUTION_MODE;
   delete process.env.NEXT_PUBLIC_HANDOFF_REMOTE_SYNC_ENABLED;
@@ -59,39 +37,17 @@ test("getHandoffFeatureFlags falls back to local on-device defaults when values 
   delete process.env.NEXT_PUBLIC_HANDOFF_WASM_ASR_WORKER_URL;
   delete process.env.NEXT_PUBLIC_HANDOFF_WASM_ASR_MODEL_URL;
   delete process.env.NEXT_PUBLIC_HANDOFF_WASM_ASR_RUNTIME_URL;
-  delete process.env.NEXT_PUBLIC_HANDOFF_WASM_ASR_ENGINE;
-  delete process.env.NEXT_PUBLIC_HANDOFF_WASM_ASR_MODEL_ID;
-  delete process.env.NEXT_PUBLIC_HANDOFF_WASM_ASR_DEVICE;
-  delete process.env.NEXT_PUBLIC_HANDOFF_WASM_ASR_DTYPE;
-  delete process.env.NEXT_PUBLIC_HANDOFF_VAD_ENABLED;
-  delete process.env.NEXT_PUBLIC_HANDOFF_VAD_MIN_SPEECH_RATIO;
-  delete process.env.NEXT_PUBLIC_HANDOFF_VAD_MIN_SEGMENT_MS;
-  delete process.env.NEXT_PUBLIC_HANDOFF_VAD_THRESHOLD;
-  delete process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_REFINE_ENABLED;
-  delete process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_USE_MLC;
-  delete process.env.NEXT_PUBLIC_HANDOFF_WEBLLM_MODEL_ID;
   delete process.env.NEXT_PUBLIC_HANDOFF_PRIVACY_PROFILE;
   delete process.env.NEXT_PUBLIC_HANDOFF_REQUIRE_AUTH;
 
   const flags = getHandoffFeatureFlags();
   assert.equal(flags.handoffExecutionMode, "local_only");
   assert.equal(flags.handoffRemoteSyncEnabled, false);
-  assert.equal(flags.handoffAsrProvider, "wasm_local");
-  assert.equal(flags.handoffWasmAsrEnabled, true);
+  assert.equal(flags.handoffAsrProvider, "manual");
+  assert.equal(flags.handoffWasmAsrEnabled, false);
   assert.equal(flags.handoffWasmAsrWorkerUrl, "/workers/handoff-whisper.worker.js");
   assert.equal(flags.handoffWasmAsrModelUrl, "");
-  assert.equal(flags.handoffWasmAsrRuntimeUrl, "/runtime/whisper-runtime.js");
-  assert.equal(flags.handoffWasmAsrEngine, "transformers_whisper");
-  assert.equal(flags.handoffWasmAsrModelId, "openai/whisper-small");
-  assert.equal(flags.handoffWasmAsrDevice, "auto");
-  assert.equal(flags.handoffWasmAsrDType, "q8");
-  assert.equal(flags.handoffVadEnabled, true);
-  assert.equal(flags.handoffVadMinSpeechRatio, 0.05);
-  assert.equal(flags.handoffVadMinSegmentMs, 180);
-  assert.equal(flags.handoffVadThreshold, 0.012);
-  assert.equal(flags.handoffWebLlmRefineEnabled, true);
-  assert.equal(flags.handoffWebLlmUseMlc, true);
-  assert.equal(flags.handoffWebLlmModelId, "Qwen2.5-3B-Instruct-q4f16_1-MLC");
+  assert.equal(flags.handoffWasmAsrRuntimeUrl, "");
   assert.equal(flags.handoffPrivacyProfile, "strict");
   assert.equal(flags.handoffRequireAuth, true);
 });
