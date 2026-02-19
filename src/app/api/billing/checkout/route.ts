@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { asCheckoutPlanTier, getPlanDefinition } from "@/lib/billing/plans";
+import { asCheckoutProductId, getCheckoutProductDefinition } from "@/lib/billing/plans";
 import { createBillingOrder, createCustomerKey } from "@/lib/server/billingStore";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { getRouteSupabaseClient } from "@/lib/server/supabaseRouteClient";
@@ -12,10 +12,10 @@ function bad(status: number, message: string) {
   return NextResponse.json({ ok: false, error: message }, { status });
 }
 
-function buildOrderId(plan: "pro") {
+function buildOrderId(productId: "pro" | "credit10") {
   const stamp = Date.now().toString(36);
   const rand = Math.random().toString(36).slice(2, 10);
-  return `wnl_${plan}_${stamp}_${rand}`.slice(0, 64);
+  return `wnl_${productId}_${stamp}_${rand}`.slice(0, 64);
 }
 
 function resolveOrigin(req: Request) {
@@ -68,19 +68,21 @@ export async function POST(req: Request) {
     return bad(400, "invalid_json");
   }
 
-  const planTier = asCheckoutPlanTier(body?.plan) ?? "pro";
-
-  const plan = getPlanDefinition(planTier);
-  const orderId = buildOrderId(planTier);
+  const productId = asCheckoutProductId(body?.product ?? body?.plan) ?? "pro";
+  const product = getCheckoutProductDefinition(productId);
+  if (!product.checkoutEnabled) return bad(400, "checkout_disabled_product");
+  const orderId = buildOrderId(productId);
 
   try {
     await createBillingOrder({
       userId,
       orderId,
-      planTier,
-      amount: plan.priceKrw,
+      planTier: product.planTier ?? "pro",
+      orderKind: product.kind,
+      creditPackUnits: product.creditUnits,
+      amount: product.priceKrw,
       currency: "KRW",
-      orderName: plan.orderName,
+      orderName: product.orderName,
     });
   } catch (error: any) {
     return bad(500, error?.message || "failed_to_create_order");
@@ -94,10 +96,12 @@ export async function POST(req: Request) {
   return NextResponse.json({
     ok: true,
     data: {
-      planTier,
+      productId,
+      orderKind: product.kind,
+      creditPackUnits: product.creditUnits,
       orderId,
-      orderName: plan.orderName,
-      amount: plan.priceKrw,
+      orderName: product.orderName,
+      amount: product.priceKrw,
       currency: "KRW",
       customerKey: createCustomerKey(userId),
       customerEmail: customer.email,

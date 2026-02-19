@@ -39,7 +39,7 @@ export function SettingsBillingPage() {
   const flatButtonBase =
     "inline-flex h-11 items-center justify-center rounded-full border px-4 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50";
   const flatButtonSecondary = `${flatButtonBase} border-ios-sep bg-[#F2F2F7] text-ios-text`;
-  const flatButtonPrimary = `${flatButtonBase} border-[color:var(--wnl-accent-border)] bg-[color:var(--wnl-accent-soft)] text-[color:var(--wnl-accent)]`;
+  const flatButtonPrimary = `${flatButtonBase} border-[color:var(--wnl-accent)] bg-[color:var(--wnl-accent)] text-white hover:bg-[color:var(--wnl-accent-strong)]`;
 
   const loadSubscription = useCallback(async () => {
     if (!user?.userId) {
@@ -62,6 +62,8 @@ export function SettingsBillingPage() {
   const subscription = subData?.subscription ?? null;
   const activeTier = subscription?.tier ?? "free";
   const hasPaidAccess = Boolean(subscription?.hasPaidAccess);
+  const quota = subscription?.medSafetyQuota;
+  const purchaseSummary = subData?.purchaseSummary;
   const submitCancel = useCallback(
     async (mode: CancelMode) => {
       if (!user?.userId || actionLoading) return;
@@ -165,6 +167,30 @@ export function SettingsBillingPage() {
               {t("상태")}: {subscriptionStatusLabel(subscription?.status ?? "inactive")}
               {" · "}
               {t("만료일")}: {formatDateLabel(subscription?.currentPeriodEnd ?? null)}
+            </div>
+            <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+              <div className="rounded-xl border border-ios-sep bg-[#F7F7FA] px-3 py-2">
+                <div className="text-[11px] font-semibold text-ios-sub">{t("기본 크레딧 (Pro 전용 · 매일 초기화)")}</div>
+                <div className="mt-0.5 text-[13px] font-semibold text-ios-text">
+                  {quota?.isPro ? `${quota.dailyRemaining}/${quota.dailyLimit}${t("회")}` : t("해당 없음")}
+                </div>
+              </div>
+              <div className="rounded-xl border border-ios-sep bg-[#F7F7FA] px-3 py-2">
+                <div className="text-[11px] font-semibold text-ios-sub">{t("추가 크레딧 (구매분 · 미초기화)")}</div>
+                <div className="mt-0.5 text-[13px] font-semibold text-ios-text">
+                  {(quota?.extraCredits ?? 0).toLocaleString("ko-KR")}
+                  {t("회")}
+                </div>
+              </div>
+            </div>
+            <div className="mt-1 text-[12px] text-ios-sub">
+              {t("AI 검색 총 잔여")}: {(quota?.totalRemaining ?? 0).toLocaleString("ko-KR")}
+              {t("회")}
+            </div>
+            <div className="mt-1 text-[12px] text-ios-muted">
+              {t("누적 결제")}: {formatKrw(purchaseSummary?.totalPaidAmount ?? 0)} · {t("크레딧 누적 구매")}:{" "}
+              {(purchaseSummary?.creditPurchasedUnits ?? 0).toLocaleString("ko-KR")}
+              {t("회")}
             </div>
 
             {subscription?.cancelAtPeriodEnd ? (

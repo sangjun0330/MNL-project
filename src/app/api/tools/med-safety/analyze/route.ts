@@ -51,15 +51,33 @@ async function safeReadUserId(req: NextRequest): Promise<string> {
   }
 }
 
-async function safeReadSubscription(userId: string): Promise<{ hasPaidAccess: boolean } | null> {
+async function safeConsumeMedSafetyCredit(userId: string): Promise<{
+  allowed: boolean;
+  source: "daily" | "extra" | null;
+  reason: string | null;
+  quota: {
+    totalRemaining: number;
+    dailyRemaining: number;
+    extraCredits: number;
+  };
+}> {
+  const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!serviceRole || !supabaseUrl) throw new Error("missing_supabase_env");
+  const { consumeMedSafetyCredit } = await import("@/lib/server/billingStore");
+  return await consumeMedSafetyCredit({ userId });
+}
+
+async function safeRestoreConsumedMedSafetyCredit(userId: string, source: "daily" | "extra" | null): Promise<void> {
+  if (!source) return;
   try {
     const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    if (!serviceRole || !supabaseUrl) return null;
-    const { readSubscription } = await import("@/lib/server/billingStore");
-    return await readSubscription(userId);
+    if (!serviceRole || !supabaseUrl) return;
+    const { restoreConsumedMedSafetyCredit } = await import("@/lib/server/billingStore");
+    await restoreConsumedMedSafetyCredit({ userId, source });
   } catch {
-    return null;
+    // ignore restore failure
   }
 }
 
@@ -229,8 +247,6 @@ export async function POST(req: NextRequest) {
   try {
     const userId = await safeReadUserId(req);
     if (!userId) return bad(401, "login_required");
-    const subscription = await safeReadSubscription(userId);
-    if (!subscription?.hasPaidAccess) return bad(402, "paid_plan_required");
 
     const form = await req.formData();
     const locale = pickLocale(form.get("locale"));
@@ -267,6 +283,19 @@ export async function POST(req: NextRequest) {
       imageDataUrl = await fileToDataUrl(image);
       imageName = image.name;
     }
+
+    const creditUse = await safeConsumeMedSafetyCredit(userId);
+    if (!creditUse.allowed) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: safeErrorString(creditUse.reason ?? "insufficient_med_safety_credits"),
+          quota: creditUse.quota,
+        },
+        { status: 402 }
+      );
+    }
+    const consumedSource = creditUse.source;
 
     const abort = new AbortController();
     const timeoutMs = resolveAnalyzeTimeoutMs();
@@ -397,6 +426,9 @@ export async function POST(req: NextRequest) {
           ok: true,
           data: responseData,
         });
+      } catch (error: any) {
+        await safeRestoreConsumedMedSafetyCredit(userId, consumedSource);
+        throw error;
       } finally {
         clearTimeout(timeout);
       }
@@ -425,6 +457,7 @@ export async function POST(req: NextRequest) {
             data: responseData,
           });
         } catch (error: any) {
+          await safeRestoreConsumedMedSafetyCredit(userId, consumedSource);
           pushEvent("error", {
             ok: false,
             error: safeErrorString(error?.message ?? error ?? "med_safety_analyze_failed"),

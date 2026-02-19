@@ -41,6 +41,8 @@ export type Database = {
           order_id: string;
           user_id: string;
           plan_tier: string;
+          order_kind: string;
+          credit_pack_units: number;
           amount: number;
           currency: string;
           status: string;
@@ -57,6 +59,8 @@ export type Database = {
           order_id: string;
           user_id: string;
           plan_tier: string;
+          order_kind?: string;
+          credit_pack_units?: number;
           amount: number;
           currency?: string;
           status?: string;
@@ -73,6 +77,8 @@ export type Database = {
           order_id?: string;
           user_id?: string;
           plan_tier?: string;
+          order_kind?: string;
+          credit_pack_units?: number;
           amount?: number;
           currency?: string;
           status?: string;
@@ -247,6 +253,9 @@ export type Database = {
           subscription_cancel_reason: string | null;
           toss_customer_key: string | null;
           toss_last_order_id: string | null;
+          med_safety_extra_credits: number;
+          med_safety_daily_used: number;
+          med_safety_usage_date: string | null;
         };
         Insert: {
           user_id: string;
@@ -263,6 +272,9 @@ export type Database = {
           subscription_cancel_reason?: string | null;
           toss_customer_key?: string | null;
           toss_last_order_id?: string | null;
+          med_safety_extra_credits?: number;
+          med_safety_daily_used?: number;
+          med_safety_usage_date?: string | null;
         };
         Update: {
           user_id?: string;
@@ -279,6 +291,9 @@ export type Database = {
           subscription_cancel_reason?: string | null;
           toss_customer_key?: string | null;
           toss_last_order_id?: string | null;
+          med_safety_extra_credits?: number;
+          med_safety_daily_used?: number;
+          med_safety_usage_date?: string | null;
         };
         Relationships: [];
       };
