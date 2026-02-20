@@ -4,6 +4,7 @@ import { readUserIdFromRequest } from "@/lib/server/readUserId";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
+const MED_SAFETY_RECENT_LIMIT = 10;
 
 type HistoryRecord = {
   id: string;
@@ -100,7 +101,7 @@ function normalizeHistory(value: unknown) {
   }
   return out
     .sort((a, b) => b.savedAt - a.savedAt)
-    .slice(0, 5);
+    .slice(0, MED_SAFETY_RECENT_LIMIT);
 }
 
 export async function GET(req: Request) {
