@@ -226,9 +226,9 @@ function buildUserContext(params: GenerateOpenAIRecoveryParams) {
 
 function buildDeveloperPrompt(language: Language) {
   if (language === "ko") {
-    return "너는 간호사의 건강회복과 번아웃방지, 데이터를 통한 개인 맞춤 건강회복 전문가야. 맞춤 건강 회복을 위한 자세한 지시들 자세한 행동들을 알려주는 역할이야.";
+    return "너는 교대근무 간호사를 위한 AI 맞춤회복 분석 전문가야. 입력 데이터와 계산 지표를 근거로 우선순위가 명확한 회복 계획을 작성해. 정보는 반드시 전문적이고 신뢰 가능한 근거 중심으로 유지하되, 말투는 간호사 동료가 옆에서 안내하듯 부드러운 존댓말(해요체)로 작성해. 속어·과장·근거 없는 단정은 금지하고, 의료 진단/처방을 대체하지 않는 범위에서 즉시 실행 가능한 행동 중심으로 알려줘.";
   }
-  return "You are a nurse wellness and burnout-prevention specialist who gives data-driven, personalized recovery guidance with specific actionable steps.";
+  return "You are an AI recovery specialist for shift-working nurses. Use reliable clinical and behavioral data to provide evidence-based, prioritized recovery guidance. Keep the content professional and trustworthy, but deliver it in a warm peer-nurse tone. Avoid slang, exaggeration, and unsupported claims.";
 }
 
 function buildUserPrompt(language: Language, context: ReturnType<typeof buildUserContext>) {
@@ -262,17 +262,28 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
       "- 줄 안에서 '/'로 항목을 이어 쓰지 말고, 각 항목을 반드시 줄바꿈으로 분리할 것",
       "",
       "[D] 이번 주 AI 한마디",
-      "- 이번 주 요약 -> 개인 패턴 -> 다음 주 예측 순서",
+      "- 아래 구조를 반드시 분리해서 작성:",
+      "  이번 주 요약: 1문장",
+      "  개인 패턴:",
+      "  1. ...",
+      "  2. ...",
+      "  3. ...",
+      "  다음 주 예측:",
+      "  1. ...",
+      "  2. ...",
+      "  3. ...",
+      "- 개인 패턴과 다음 주 예측 문장을 서로 중복해서 쓰지 말 것",
       "",
       "[톤 가이드]",
-      "- 간호사 동료처럼 부드러운 말투",
+      "- 내용은 전문적이고 신뢰 가능한 근거 중심으로 유지",
+      "- 말투는 간호사 동료처럼 부드러운 존댓말(해요체) 사용",
       "- 자책 유도 금지",
-      "- 추상적인 말 대신 바로 실행 가능한 행동",
+      "- 추상적인 말 대신 즉시 실행 가능한 행동",
       "- 수치(예: 수면부채/카페인/기분)는 input JSON 값을 그대로 사용하고 임의 수치를 만들지 말 것",
       "- 수치는 소수점 1자리까지만 사용 (예: 1.6h, 42.3%)",
       "- '스트레스(2)', '기분4'처럼 숫자 태그 형태 금지. 반드시 자연어로 풀어쓰기 (예: 스트레스가 조금 높은 편, 기분이 좋은 편)",
       "- 카페인 mg는 잔 수로 같이 표현 (예: 120mg -> 약 1잔)",
-      "- 전체 답변은 한눈에 읽히게 짧은 문장 위주로 작성",
+      "- 전체 답변은 한눈에 읽히는 짧고 정확한 문장으로 작성",
       "",
       "[데이터(JSON)]",
       JSON.stringify(context, null, 2),
@@ -295,8 +306,19 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
     "Recommendation3: one concrete action",
     "Each category must contain exactly 3 recommendations.",
     "Do not chain recommendations with '/'. Use separate lines only.",
-    "[D] Weekly AI note (weekly summary -> personal pattern -> next week preview)",
-    "Tone: warm peer nurse voice, no medical jargon, no blame, concrete actions.",
+    "[D] Weekly AI note with strict structure:",
+    "Weekly summary: one sentence",
+    "Personal pattern:",
+    "1. ...",
+    "2. ...",
+    "3. ...",
+    "Next week preview:",
+    "1. ...",
+    "2. ...",
+    "3. ...",
+    "Do not repeat the same sentence in personal pattern and next week preview.",
+    "Tone: professional and trustworthy in content, but warm like a supportive nurse colleague.",
+    "Avoid slang, exaggeration, and vague claims.",
     "When workEventTags/workEventNote/note exist in Data JSON, reflect those shift events in prioritization.",
     "No duplicated sentences.",
     "Keep numbers at one decimal place max.",
@@ -355,7 +377,7 @@ async function callResponsesApi(args: {
     ],
     text: {
       format: { type: "text" },
-      verbosity: "low",
+      verbosity: "medium",
     },
     reasoning: {
       effort: "low",
@@ -639,8 +661,86 @@ function parseCompoundAlertFromText(bBlock: string): CompoundAlert | null {
   };
 }
 
+function normalizeComparableText(value: string) {
+  return value.toLowerCase().replace(/\s+/g, " ").replace(/[^a-z0-9가-힣\s]/gi, "").trim();
+}
+
+function extractLabeledBlock(text: string, startPattern: RegExp, endPatterns: RegExp[]) {
+  const startIndex = text.search(startPattern);
+  if (startIndex < 0) return "";
+  const sliced = text.slice(startIndex);
+  const startMatch = sliced.match(startPattern);
+  if (!startMatch) return "";
+  const from = startIndex + startMatch[0].length;
+
+  let end = text.length;
+  for (const endPattern of endPatterns) {
+    const idx = text.slice(from).search(endPattern);
+    if (idx >= 0) end = Math.min(end, from + idx);
+  }
+  return text.slice(from, end).trim();
+}
+
+function splitWeeklyItems(raw: string): string[] {
+  const source = raw
+    .replace(/\r/g, "\n")
+    .replace(/\s*\/\s*/g, "\n")
+    .replace(/\s*•\s*/g, "\n")
+    .replace(/\u00a0/g, " ")
+    .trim();
+  if (!source) return [];
+
+  const numbered = Array.from(source.matchAll(/(?:^|\n)\s*\d+\s*[).:\-]\s*([^\n]+)/g))
+    .map((match) => match[1].replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  if (numbered.length) {
+    const seen = new Set<string>();
+    const deduped: string[] = [];
+    for (const line of numbered) {
+      const key = normalizeComparableText(line);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(line);
+      if (deduped.length >= 3) break;
+    }
+    return deduped;
+  }
+
+  const lines = source
+    .split(/\n+/)
+    .map((line) => line.replace(/^(?:[-*•·]|\d+[).:\-])\s*/, "").replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+
+  const expanded =
+    lines.length <= 1
+      ? lines
+          .join(" ")
+          .split(/(?<=[.!?]|다\.|요\.)\s+/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+      : lines;
+
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const line of expanded) {
+    const key = normalizeComparableText(line);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(line);
+    if (deduped.length >= 3) break;
+  }
+  return deduped;
+}
+
 function parseWeeklySummaryFromText(dBlock: string): WeeklySummary | null {
-  const lines = cleanLines(dBlock)
+  const normalized = dBlock
+    .replace(/\r/g, "\n")
+    .replace(/\u00a0/g, " ")
+    .replace(/\t/g, " ")
+    .replace(/[ \f\v]+/g, " ")
+    .trim();
+
+  const lines = cleanLines(normalized)
     .map(stripHeadingPrefix)
     .filter((line) => !/^이번\s*주\s*AI\s*한마디/i.test(line) && !/^weekly/i.test(line));
 
@@ -649,7 +749,7 @@ function parseWeeklySummaryFromText(dBlock: string): WeeklySummary | null {
   const joined = lines.join(" ");
   const avgMatch = joined.match(/(?:평균\s*배터리|average\s*battery)\D*(\d{1,3})/i);
   const deltaMatch = joined.match(/(?:지난주\D*|vs\s*last\s*week\D*)([-+]?\d{1,3})/i);
-  const avgBattery = clamp(Number(avgMatch?.[1] ?? 0), 0, 100);
+  const avgBattery = avgMatch ? clamp(Number(avgMatch[1]), 0, 100) : 0;
   const delta = Number(deltaMatch?.[1] ?? 0);
   const prevAvgBattery = clamp(avgBattery - delta, 0, 100);
 
@@ -659,10 +759,46 @@ function parseWeeklySummaryFromText(dBlock: string): WeeklySummary | null {
     .filter((v) => v.label)
     .slice(0, 3);
 
-  const personalInsight = lines.slice(0, Math.min(2, lines.length)).join(" ").trim();
-  const nextWeekPreview = lines.slice(-2).join(" ").trim() || lines[lines.length - 1];
+  const personalBlock = extractLabeledBlock(
+    normalized,
+    /(?:개인\s*패턴|personal\s*pattern)\s*[:：]?\s*/i,
+    [/(?:다음\s*주\s*예측|next\s*week\s*preview)\s*[:：]?\s*/i]
+  );
+  const nextBlock = extractLabeledBlock(normalized, /(?:다음\s*주\s*예측|next\s*week\s*preview)\s*[:：]?\s*/i, []);
 
-  if (!personalInsight || !nextWeekPreview) return null;
+  let personalLines = splitWeeklyItems(personalBlock);
+  let nextLines = splitWeeklyItems(nextBlock);
+
+  if (!personalLines.length || !nextLines.length) {
+    const narrative = lines.filter(
+      (line) =>
+        !/^(?:이번\s*주\s*요약|weekly\s*summary|개인\s*패턴|personal\s*pattern|다음\s*주\s*예측|next\s*week\s*preview)\s*[:：]?$/i.test(
+          line
+        ) && !/^(?:평균\s*배터리|average\s*battery)/i.test(line)
+    );
+    const half = Math.ceil(narrative.length / 2);
+    if (!personalLines.length) {
+      personalLines = narrative.slice(0, Math.min(3, Math.max(half, 1)));
+    }
+    if (!nextLines.length) {
+      nextLines = narrative.slice(half, Math.min(narrative.length, half + 3));
+    }
+    if (!nextLines.length && narrative.length) {
+      nextLines = narrative.slice(-Math.min(3, narrative.length));
+    }
+  }
+
+  let personalInsight = personalLines.join("\n").trim();
+  let nextWeekPreview = nextLines.join("\n").trim();
+  if (
+    personalInsight &&
+    nextWeekPreview &&
+    normalizeComparableText(personalInsight) === normalizeComparableText(nextWeekPreview)
+  ) {
+    nextWeekPreview = "";
+  }
+
+  if (!personalInsight && !nextWeekPreview) return null;
 
   return {
     avgBattery: Math.round(avgBattery),
@@ -684,7 +820,7 @@ function parseHeadlineFromText(aBlock: string, wholeText: string): string {
   const wholeLines = cleanLines(wholeText)
     .map(stripHeadingPrefix)
     .filter((line) => !/^\[[A-D]\]/i.test(line));
-  return wholeLines[0] ?? "오늘 회복 체크인을 진행해요.";
+  return wholeLines[0] ?? "오늘은 회복 우선순위를 같이 점검해 볼게요.";
 }
 
 function parseResultFromGeneratedText(text: string, language: Language): AIRecoveryResult {
@@ -745,10 +881,10 @@ function buildFallbackWeeklySummary(params: GenerateOpenAIRecoveryParams): Weekl
       topDrains: drains,
       personalInsight:
         sleepLowDays >= 2
-          ? "이번 주에는 수면이 흔들린 날 이후 컨디션 하락이 반복됐어요. 수면 먼저 회복하면 전체 점수가 같이 올라가는 패턴입니다."
-          : "이번 주는 비교적 안정적인 흐름이지만, 피로가 올라가는 날엔 휴식 시간을 먼저 확보할 때 회복이 빨랐어요.",
+          ? "이번 주에는 수면이 6시간 미만인 날 뒤에 컨디션이 같이 내려가는 흐름이 반복됐어요. 수면부터 먼저 보완하면 전체 회복 지표가 함께 좋아지는 패턴이 보여요."
+          : "이번 주는 전반적으로 안정적이었고, 피로가 올라가는 날에 휴식 시간을 먼저 확보했을 때 회복 속도가 더 빨랐어요.",
       nextWeekPreview:
-        "다음 주에는 교대 전환일 주변에 수면·카페인 루틴을 먼저 고정하면 배터리 하락 폭을 줄이는 데 도움이 됩니다.",
+        "다음 주에는 교대 전환일 전후로 취침 시각과 카페인 마감 시각을 먼저 고정해 두면 배터리 하락 폭을 줄이는 데 도움이 돼요.",
     };
   }
 
@@ -777,10 +913,21 @@ function mergeWeeklySummary(
   const prevAvgBattery =
     parsed.prevAvgBattery > 0 ? parsed.prevAvgBattery : fallback.prevAvgBattery;
   const topDrains = parsed.topDrains.length ? parsed.topDrains : fallback.topDrains;
-  const personalInsight =
+  let personalInsight =
     parsed.personalInsight?.trim() ? parsed.personalInsight : fallback.personalInsight;
-  const nextWeekPreview =
+  let nextWeekPreview =
     parsed.nextWeekPreview?.trim() ? parsed.nextWeekPreview : fallback.nextWeekPreview;
+
+  if (
+    personalInsight.trim() &&
+    nextWeekPreview.trim() &&
+    normalizeComparableText(personalInsight) === normalizeComparableText(nextWeekPreview)
+  ) {
+    nextWeekPreview = fallback.nextWeekPreview;
+    if (normalizeComparableText(personalInsight) === normalizeComparableText(nextWeekPreview)) {
+      personalInsight = fallback.personalInsight;
+    }
+  }
 
   return {
     avgBattery: roundToInt(avgBattery),
