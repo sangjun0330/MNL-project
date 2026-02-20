@@ -178,12 +178,14 @@ export function ToolMedSafetyRecentPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<MedSafetyRecentItem[]>([]);
+  const [historyLimit, setHistoryLimit] = useState(5);
   const [selected, setSelected] = useState<MedSafetyRecentItem | null>(null);
 
   useEffect(() => {
     if (status !== "authenticated") {
       setLoading(false);
       setItems([]);
+      setHistoryLimit(5);
       return;
     }
 
@@ -199,18 +201,22 @@ export function ToolMedSafetyRecentPage() {
           | {
               ok?: boolean;
               error?: string;
-              data?: { items?: MedSafetyRecentItem[] };
+              data?: { items?: MedSafetyRecentItem[]; historyLimit?: number };
             }
           | null;
         if (!res.ok || !json?.ok) {
           setError(String(json?.error ?? "recent_history_failed"));
           setItems([]);
+          setHistoryLimit(5);
           return;
         }
+        const limit = Number(json?.data?.historyLimit ?? 5);
+        setHistoryLimit(Number.isFinite(limit) ? Math.max(5, Math.min(10, Math.round(limit))) : 5);
         setItems(Array.isArray(json?.data?.items) ? json.data.items : []);
       } catch (cause: any) {
         setError(String(cause?.message ?? "recent_history_failed"));
         setItems([]);
+        setHistoryLimit(5);
       } finally {
         setLoading(false);
       }
@@ -231,7 +237,9 @@ export function ToolMedSafetyRecentPage() {
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="text-[31px] font-extrabold tracking-[-0.02em] text-[color:var(--rnest-accent)]">{t("최근 AI 검색 기록")}</div>
-            <div className="mt-1 text-[13px] text-ios-sub">{t("크레딧이 실제 차감된 완료 검색 결과 최근 10건만 표시됩니다.")}</div>
+            <div className="mt-1 text-[13px] text-ios-sub">
+              {t("크레딧이 실제 차감된 완료 검색 결과 최근 {count}건만 표시됩니다.", { count: historyLimit })}
+            </div>
           </div>
           <Link href="/tools/med-safety" className="pt-1 text-[12px] font-semibold text-[color:var(--rnest-accent)]">
             {t("AI 검색기로")}

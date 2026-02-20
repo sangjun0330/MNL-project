@@ -909,6 +909,8 @@ const EN_EXTRA: Record<string, string> = {
   "AI가 작성중입니다...": "AI is writing...",
   "AI 검색기로": "Back to AI finder",
   "최근 AI 검색 기록": "Recent AI search history",
+  "크레딧이 실제 차감된 완료 검색 결과 최근 {count}건만 표시됩니다.":
+    "Only the latest {count} completed results with actual credit deduction are shown.",
   "크레딧이 실제 차감된 완료 검색 결과 최근 10건만 표시됩니다.":
     "Only the latest 10 completed results with actual credit deduction are shown.",
   "최근 검색 기록은 계정별로 저장됩니다.": "Recent search history is saved per account.",
