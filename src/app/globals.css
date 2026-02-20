@@ -582,6 +582,8 @@ html.rnest-night .text-black\/50 { color: rgba(255,255,255,0.50) !important; }
 html.rnest-night .bg-black\/5 { background-color: rgba(255,255,255,0.08) !important; }
 html.rnest-night .bg-black\/7 { background-color: rgba(255,255,255,0.10) !important; }
 html.rnest-night .bg-black\/10 { background-color: rgba(255,255,255,0.12) !important; }
+html.rnest-night .hover\:bg-white:hover { background-color: rgba(255,255,255,0.08) !important; }
+html.rnest-night .hover\:bg-white\/85:hover { background-color: rgba(255,255,255,0.10) !important; }
 
 html.rnest-night .focus\:ring-black\/10:focus { --tw-ring-color: rgba(255,255,255,0.18) !important; }
 
@@ -611,4 +613,60 @@ html.rnest-night .rnest-sub-surface {
 
 html.rnest-night .rnest-btn-secondary {
   background: rgba(17, 26, 46, 0.92);
+}
+
+/* Hardcoded light surfaces -> dark surfaces */
+html.rnest-night .bg-\[\#F8F8FB\],
+html.rnest-night .bg-\[\#F7F7FA\],
+html.rnest-night .bg-\[\#F4F4F6\],
+html.rnest-night .bg-\[\#F2F2F7\],
+html.rnest-night .bg-\[\#F1F1F1\] {
+  background-color: #121d34 !important;
+}
+
+html.rnest-night .hover\:bg-\[\#F8F8FB\]:hover,
+html.rnest-night .hover\:bg-\[\#F7F7FA\]:hover {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* Light info badges/chips */
+html.rnest-night .bg-\[\#EDF3FF\],
+html.rnest-night .bg-\[\#EEF4FF\],
+html.rnest-night .bg-\[\#E4ECFF\],
+html.rnest-night .bg-\[\#eef4ff\] {
+  background-color: rgba(144, 175, 231, 0.18) !important;
+}
+
+html.rnest-night .bg-\[\#FEF9C3\],
+html.rnest-night .bg-\[\#FFF6CC\] {
+  background-color: rgba(124, 94, 16, 0.22) !important;
+}
+
+html.rnest-night .bg-\[\#FFD2DA\] {
+  background-color: rgba(179, 38, 30, 0.24) !important;
+}
+
+html.rnest-night .bg-\[\#1B27470F\] {
+  background-color: rgba(144, 175, 231, 0.14) !important;
+}
+
+html.rnest-night .border-\[\#DDE5F3\],
+html.rnest-night .border-\[\#D7DEEB\],
+html.rnest-night .border-\[\#C7D5F0\],
+html.rnest-night .border-\[\#EAB30855\],
+html.rnest-night .border-\[\#1B274733\] {
+  border-color: rgba(255, 255, 255, 0.18) !important;
+}
+
+html.rnest-night .text-\[\#7C5E10\] {
+  color: #f8d47a !important;
+}
+
+html.rnest-night .text-\[\#5F1322\] {
+  color: #ffc2cc !important;
+}
+
+html.rnest-night .text-\[\#1B2747\],
+html.rnest-night .text-\[\#163B73\] {
+  color: rgba(224, 236, 255, 0.92) !important;
 }
