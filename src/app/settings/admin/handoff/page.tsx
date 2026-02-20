@@ -1,10 +1,5 @@
-import { AppShell } from "@/components/shell/AppShell";
-import { SettingsAdminHandoffPage } from "@/components/pages/SettingsAdminHandoffPage";
+import { redirect } from "next/navigation";
 
 export default function Page() {
-  return (
-    <AppShell>
-      <SettingsAdminHandoffPage />
-    </AppShell>
-  );
+  redirect("/settings/admin");
 }
