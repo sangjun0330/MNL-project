@@ -17,6 +17,7 @@ export const dynamic = "force-dynamic";
 const MAX_QUERY_LENGTH = 1800;
 const MAX_PATIENT_SUMMARY_LENGTH = 1400;
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
+const MED_SAFETY_RECENT_LIMIT = 10;
 const DEFAULT_ANALYZE_TIMEOUT_MS = 420_000;
 const MIN_ANALYZE_TIMEOUT_MS = 300_000;
 const MAX_ANALYZE_TIMEOUT_MS = 900_000;
@@ -200,7 +201,7 @@ function normalizeRecentRecords(value: unknown) {
       result: resultNode as unknown as MedSafetyResponseData,
     });
   }
-  return out.sort((a, b) => b.savedAt - a.savedAt).slice(0, 5);
+  return out.sort((a, b) => b.savedAt - a.savedAt).slice(0, MED_SAFETY_RECENT_LIMIT);
 }
 
 async function safeAppendMedSafetyRecent(params: {
@@ -240,7 +241,7 @@ async function safeAppendMedSafetyRecent(params: {
         if (record.request.query !== nextRecord.request.query) return true;
         return Math.abs(record.savedAt - nextRecord.savedAt) > 10_000;
       }),
-    ].slice(0, 5);
+    ].slice(0, MED_SAFETY_RECENT_LIMIT);
 
     return await safeSaveMedSafetyContent(params.userId, params.dateISO, params.language, {
       medSafetyRecent: deduped,

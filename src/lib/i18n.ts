@@ -731,6 +731,8 @@ const EN_EXTRA: Record<string, string> = {
   "PRO": "PRO",
   "AI 약물·기구 안전 가이드는 유료 플랜 전용 기능입니다.\n플랜 업그레이드 페이지로 이동할까요?":
     "The AI medication/device safety guide is a paid-plan feature.\nMove to the plan upgrade page?",
+  "AI 맞춤회복 + AI 검색 크레딧(매일 10회) + 최근 검색 10개 저장 포함":
+    "Includes AI recovery + AI search credits (10/day) + save up to 10 recent searches",
   "AI 맞춤회복 + AI 약물기구안전가이드 포함":
     "Includes AI recovery + AI medication/device safety guide",
   "AI 약물기구안전가이드": "AI medication/device safety guide",
@@ -747,6 +749,9 @@ const EN_EXTRA: Record<string, string> = {
   "사용 가능 크레딧을 확인 중입니다.": "Checking available credits.",
   "기본 크레딧": "Base credits",
   "기본 크레딧 (Pro 전용 · 매일 초기화)": "Base credits (Pro only · resets daily)",
+  "AI 검색 기본 크레딧 10회/일 (KST 자정 초기화)":
+    "AI search base credits 10/day (resets at KST midnight)",
+  "AI 검색 최근 기록 10개 저장": "Save up to 10 recent AI searches",
   "추가 크레딧": "Extra credits",
   "추가 크레딧 (구매분 · 미초기화)": "Extra credits (Purchased · no daily reset)",
   "추가 크레딧 구매": "Buy extra credits",
@@ -904,8 +909,8 @@ const EN_EXTRA: Record<string, string> = {
   "AI가 작성중입니다...": "AI is writing...",
   "AI 검색기로": "Back to AI finder",
   "최근 AI 검색 기록": "Recent AI search history",
-  "크레딧이 실제 차감된 완료 검색 결과 최근 5건만 표시됩니다.":
-    "Only the latest 5 completed results with actual credit deduction are shown.",
+  "크레딧이 실제 차감된 완료 검색 결과 최근 10건만 표시됩니다.":
+    "Only the latest 10 completed results with actual credit deduction are shown.",
   "최근 검색 기록은 계정별로 저장됩니다.": "Recent search history is saved per account.",
   "최근 기록을 불러오는 중...": "Loading recent history...",
   "최근 기록 조회에 실패했습니다.": "Failed to load recent history.",
@@ -1051,6 +1056,8 @@ const EN_EXTRA: Record<string, string> = {
     "Purchased extra credits are available for both Free and Pro users and do not reset daily.",
   "AI 검색 실행 시 기본 크레딧을 먼저 차감하고, 부족하면 추가 크레딧에서 차감합니다.":
     "AI search uses base credits first, then consumes extra credits when base credits are exhausted.",
+  "AI 검색 최근 기록은 계정별로 최대 10건까지 저장됩니다.":
+    "AI search recent history is saved per account up to 10 items.",
 };
 
 const EN: Record<string, string> = { ...EN_BASE, ...EN_EXTRA };

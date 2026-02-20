@@ -231,7 +231,7 @@ export function ToolMedSafetyRecentPage() {
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="text-[31px] font-extrabold tracking-[-0.02em] text-[color:var(--rnest-accent)]">{t("최근 AI 검색 기록")}</div>
-            <div className="mt-1 text-[13px] text-ios-sub">{t("크레딧이 실제 차감된 완료 검색 결과 최근 5건만 표시됩니다.")}</div>
+            <div className="mt-1 text-[13px] text-ios-sub">{t("크레딧이 실제 차감된 완료 검색 결과 최근 10건만 표시됩니다.")}</div>
           </div>
           <Link href="/tools/med-safety" className="pt-1 text-[12px] font-semibold text-[color:var(--rnest-accent)]">
             {t("AI 검색기로")}
