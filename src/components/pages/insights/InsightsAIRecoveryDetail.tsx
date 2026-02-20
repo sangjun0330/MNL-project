@@ -178,6 +178,54 @@ const CATEGORIES: Array<{
   { key: "activity", titleKey: "신체 활동", icon: "6" },
 ];
 
+const CATEGORY_THEME: Record<
+  RecoverySection["category"],
+  { accent: string; soft: string; softBorder: string; recSoft: string; recBorder: string }
+> = {
+  sleep: {
+    accent: "#1B2747",
+    soft: "#F5F8FF",
+    softBorder: "#DCE6FF",
+    recSoft: "#FAFCFF",
+    recBorder: "#D9E2F4",
+  },
+  shift: {
+    accent: "#264A88",
+    soft: "#F3F7FF",
+    softBorder: "#D7E2FA",
+    recSoft: "#F8FAFF",
+    recBorder: "#D6E0F4",
+  },
+  caffeine: {
+    accent: "#7A4F17",
+    soft: "#FFF9F1",
+    softBorder: "#F3DEBF",
+    recSoft: "#FFFCF7",
+    recBorder: "#F0DFC9",
+  },
+  menstrual: {
+    accent: "#7D3A6F",
+    soft: "#FFF5FB",
+    softBorder: "#F4D9EA",
+    recSoft: "#FFFAFD",
+    recBorder: "#F0D9E8",
+  },
+  stress: {
+    accent: "#4E4B8B",
+    soft: "#F6F5FF",
+    softBorder: "#DDD9F7",
+    recSoft: "#FBFAFF",
+    recBorder: "#DED9F2",
+  },
+  activity: {
+    accent: "#1E6A56",
+    soft: "#F3FBF8",
+    softBorder: "#CFEDE3",
+    recSoft: "#FAFEFC",
+    recBorder: "#D1E8DF",
+  },
+};
+
 function RecoveryGeneratingOverlay({
   open,
   title,
@@ -546,40 +594,72 @@ export function InsightsAIRecoveryDetail() {
                 {orderedSections.map(({ meta, section }, index) => (
                   <div
                     key={`${meta.key}-${section?.title}`}
-                    className="rounded-2xl border border-ios-sep bg-white p-4 shadow-apple-sm"
+                    className="rounded-2xl border p-4 shadow-apple-sm"
+                    style={{
+                      borderColor: CATEGORY_THEME[meta.key].softBorder,
+                      backgroundColor: CATEGORY_THEME[meta.key].soft,
+                    }}
                   >
                     {(() => {
+                      const theme = CATEGORY_THEME[meta.key];
                       const descriptionText = normalizeNarrativeText(section?.description || "", lang);
                       const tips = (section?.tips ?? [])
                         .map((tip) => normalizeNarrativeText(tip, lang))
                         .filter(Boolean);
+                      const recommendationPool = [...tips];
+                      if (recommendationPool.length < 3) {
+                        const derived = splitBulletLines(descriptionText).filter(Boolean);
+                        for (const item of derived) {
+                          if (recommendationPool.includes(item)) continue;
+                          recommendationPool.push(item);
+                        }
+                      }
+                      const recommendations = recommendationPool.slice(0, 3);
+                      const recLabel = lang === "en" ? "Action" : "추천";
+                      const statusLabel = lang === "en" ? "Current status" : "현재 상태";
 
                       return (
                         <>
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <div className="flex h-6 w-6 items-center justify-center rounded-full bg-ios-bg text-[12px] font-bold text-ios-sub">
-                          {index + 1}
-                        </div>
-                        <span className="text-[17px] font-bold text-ios-text">{section?.title || t(meta.titleKey)}</span>
-                      </div>
-                      <DetailChip color={severityColor(section?.severity ?? "info")}>
-                        {severityLabel(section?.severity ?? "info", t)}
-                      </DetailChip>
-                    </div>
-                    {descriptionText ? (
-                      <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">{descriptionText}</p>
-                    ) : null}
-                    {tips.length ? (
-                      <ol className="mt-3 space-y-2 text-[14px] leading-relaxed text-ios-text">
-                        {tips.map((tip, idx) => (
-                          <li key={`${meta.key}-${idx}`} className="flex gap-2">
-                            <span className="font-semibold text-ios-sub">{idx + 1}.</span>
-                            <span>{idx === 0 ? highlightKeySentence(tip, "plan") : tip}</span>
-                          </li>
-                        ))}
-                      </ol>
-                    ) : null}
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <div
+                                className="flex h-6 w-6 items-center justify-center rounded-full text-[12px] font-bold"
+                                style={{ color: theme.accent, backgroundColor: "#FFFFFF" }}
+                              >
+                                {index + 1}
+                              </div>
+                              <span className="text-[17px] font-bold text-ios-text">{section?.title || t(meta.titleKey)}</span>
+                            </div>
+                            <DetailChip color={severityColor(section?.severity ?? "info")}>
+                              {severityLabel(section?.severity ?? "info", t)}
+                            </DetailChip>
+                          </div>
+                          {descriptionText ? (
+                            <div className="mt-3 rounded-xl border bg-white px-3 py-2" style={{ borderColor: theme.recBorder }}>
+                              <div className="text-[11px] font-semibold" style={{ color: theme.accent }}>
+                                {statusLabel}
+                              </div>
+                              <p className="mt-1 text-[13.5px] leading-relaxed text-ios-sub">{descriptionText}</p>
+                            </div>
+                          ) : null}
+                          {recommendations.length ? (
+                            <div className="mt-3 grid gap-2">
+                              {recommendations.map((tip, idx) => (
+                                <div
+                                  key={`${meta.key}-${idx}`}
+                                  className="rounded-xl border px-3 py-2"
+                                  style={{ borderColor: theme.recBorder, backgroundColor: theme.recSoft }}
+                                >
+                                  <div className="text-[11px] font-semibold" style={{ color: theme.accent }}>
+                                    {recLabel} {idx + 1}
+                                  </div>
+                                  <p className="mt-1 text-[13.5px] leading-relaxed text-ios-text">
+                                    {idx === 0 ? highlightKeySentence(tip, "plan") : tip}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
                         </>
                       );
                     })()}
