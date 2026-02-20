@@ -245,16 +245,21 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
       "- 없으면 정확히 '없음'이라고 작성",
       "",
       "[C] 오늘의 회복 추천",
-      "- 해당되는 항목만 작성",
+      "- 카테고리별 박스 렌더링을 위해 반드시 블록 구조를 지킬 것",
       "- 우선순위: 수면 > 교대근무 > 카페인 > 생리주기 > 스트레스&감정 > 신체활동",
-      "- menstrualTrackingEnabled가 false면 [생리주기] 섹션을 절대 출력하지 말 것 (번호도 1~5만 사용)",
-      "- menstrualTrackingEnabled가 true면 [생리주기] 포함 가능 (번호 1~6 사용 가능)",
-      "- 각 항목은 '[카테고리명]' 헤더로 시작",
-      "- 각 항목은 설명 1문장 + 행동 2개로 짧게 작성",
+      "- menstrualTrackingEnabled가 false면 [생리주기] 섹션을 절대 출력하지 말 것",
+      "- menstrualTrackingEnabled가 true면 [생리주기] 섹션 포함 가능",
+      "- 각 카테고리는 반드시 아래 형식으로 작성:",
+      "  [카테고리명]",
+      "  상태: 현재 상태 요약 1문장",
+      "  추천1: 바로 실행할 행동 1개",
+      "  추천2: 바로 실행할 행동 1개",
+      "  추천3: 바로 실행할 행동 1개",
+      "- 각 카테고리당 추천은 정확히 3개",
       "- 생리주기는 전문용어 없이 쉬운 단어 사용",
       "- [Data JSON]에 workEventTags/workEventNote/note가 있으면 해당 근무 이벤트 맥락을 반영해 우선순위를 조정할 것",
       "- 중복 문장 금지, 같은 의미 반복 금지",
-      "- C 전체는 20줄 이내로 간결하게 작성",
+      "- 줄 안에서 '/'로 항목을 이어 쓰지 말고, 각 항목을 반드시 줄바꿈으로 분리할 것",
       "",
       "[D] 이번 주 AI 한마디",
       "- 이번 주 요약 -> 개인 패턴 -> 다음 주 예측 순서",
@@ -279,9 +284,17 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
     "Output plain text in this exact structure:",
     "[A] One-line summary",
     "[B] Urgent alert (only if 2+ risks, otherwise write 'none')",
-    "[C] Today's recovery plan (only relevant categories, prioritized sleep > shift > caffeine > menstrual > stress > activity). Each category must start with [Category].",
-    "If menstrualTrackingEnabled is false, do not include any menstrual section in [C] and use only 1-5 category numbering.",
-    "If menstrualTrackingEnabled is true, menstrual section may be included and 1-6 numbering is allowed.",
+    "[C] Today's recovery plan with strict category blocks.",
+    "Priority: sleep > shift > caffeine > menstrual > stress > activity.",
+    "If menstrualTrackingEnabled is false, do not include menstrual.",
+    "Each category block must follow this exact format:",
+    "[Category]",
+    "Status: one-sentence condition summary",
+    "Recommendation1: one concrete action",
+    "Recommendation2: one concrete action",
+    "Recommendation3: one concrete action",
+    "Each category must contain exactly 3 recommendations.",
+    "Do not chain recommendations with '/'. Use separate lines only.",
     "[D] Weekly AI note (weekly summary -> personal pattern -> next week preview)",
     "Tone: warm peer nurse voice, no medical jargon, no blame, concrete actions.",
     "When workEventTags/workEventNote/note exist in Data JSON, reflect those shift events in prioritization.",
@@ -447,7 +460,10 @@ function parseSeverity(text: string): RecoverySection["severity"] {
 }
 
 function parseCategoryBlocks(cBlock: string, language: Language): RecoverySection[] {
-  const lines = cleanLines(cBlock);
+  const normalizedBlock = cBlock
+    .replace(/([^\n])\s+(?=(?:\d+\s*[).:\-]\s*)?\[[^\]]+\])/g, "$1\n")
+    .replace(/\s*\/\s*/g, "\n");
+  const lines = cleanLines(normalizedBlock);
   const sections: RecoverySection[] = [];
 
   type Builder = {
@@ -458,41 +474,79 @@ function parseCategoryBlocks(cBlock: string, language: Language): RecoverySectio
 
   let current: Builder | null = null;
 
+  const pushDescription = (raw: string) => {
+    if (!current) return;
+    const value = stripHeadingPrefix(raw).replace(/^상태\s*[:：]\s*/i, "").replace(/^status\s*[:：]\s*/i, "").trim();
+    if (!value) return;
+    current.description.push(value);
+  };
+
+  const pushTip = (raw: string) => {
+    if (!current) return;
+    const value = raw
+      .replace(/^(?:추천|권장|recommendation|action)\s*\d*\s*[:：]\s*/i, "")
+      .replace(/^(?:[-*•·]|\d+[).])\s*/, "")
+      .trim();
+    if (!value) return;
+    current.tips.push(value);
+  };
+
   const flush = () => {
     if (!current) return;
     const descriptionText = current.description.join(" ").trim();
+    const dedupedTips: string[] = [];
+    const seenTips = new Set<string>();
+    for (const tip of current.tips) {
+      const clean = tip.replace(/\s+/g, " ").trim();
+      if (!clean) continue;
+      const key = clean.toLowerCase();
+      if (seenTips.has(key)) continue;
+      seenTips.add(key);
+      dedupedTips.push(clean);
+    }
+    const finalTips = dedupedTips.slice(0, 3);
     const title = language === "ko" ? current.meta.titleKo : current.meta.titleEn;
-    if (descriptionText || current.tips.length) {
+    if (descriptionText || finalTips.length) {
       sections.push({
         category: current.meta.category,
-        severity: parseSeverity(`${title} ${descriptionText} ${current.tips.join(" ")}`),
+        severity: parseSeverity(`${title} ${descriptionText} ${finalTips.join(" ")}`),
         title,
         description: descriptionText || (language === "ko" ? "오늘 컨디션에 맞춘 보정 조언입니다." : "Adjusted guidance for today."),
-        tips: current.tips,
+        tips: finalTips,
       });
     }
     current = null;
   };
 
   for (const line of lines) {
-    const blockHeading = line.match(/^\[(.+?)\]\s*$/);
-    if (blockHeading) {
-      const meta = parseCategoryFromLabel(blockHeading[1]);
+    const inlineHeading = line.match(/^(?:\d+\s*[).:\-]\s*)?\[(.+?)\]\s*(.*)$/);
+    if (inlineHeading) {
+      const meta = parseCategoryFromLabel(inlineHeading[1]);
       if (meta) {
         flush();
         current = { meta, description: [], tips: [] };
+        const trailing = inlineHeading[2]?.trim();
+        if (trailing) {
+          if (/^(?:추천|권장|recommendation|action)\s*\d*\s*[:：]/i.test(trailing)) pushTip(trailing);
+          else pushDescription(trailing);
+        }
       }
       continue;
     }
 
-    const numberedHeading = line.match(/^3\s*[-.]\s*([1-6])\s*[).:\-]?\s*(.+)$/);
+    const numberedHeading = line.match(/^\d+\s*[).:\-]\s*(.+)$/);
     if (numberedHeading) {
-      const idx = Number(numberedHeading[1]) - 1;
-      const meta = CATEGORY_ORDER[idx] ?? null;
+      const maybeHeading = numberedHeading[1].trim();
+      const meta = parseCategoryFromLabel(maybeHeading);
       if (meta) {
         flush();
         current = { meta, description: [], tips: [] };
-        if (numberedHeading[2]) current.description.push(numberedHeading[2].trim());
+        const trailing = maybeHeading.replace(/^상태\s*[:：]\s*/i, "").trim();
+        if (trailing && trailing.length <= 28 && !/[.!?]/.test(trailing)) {
+          // short heading text only; keep as heading and do not store description.
+        } else if (trailing) {
+          pushDescription(trailing);
+        }
       }
       continue;
     }
@@ -513,16 +567,28 @@ function parseCategoryBlocks(cBlock: string, language: Language): RecoverySectio
       continue;
     }
 
-    const tipMatch = line.match(/^(?:[-*•·]|\d+\.)\s*(.+)$/);
+    const actionLikeTip = line.match(/^(?:추천|권장|recommendation|action)\s*\d*\s*[:：]\s*(.+)$/i);
+    if (actionLikeTip) {
+      pushTip(actionLikeTip[1]);
+      continue;
+    }
+
+    const tipMatch = line.match(/^(?:[-*•·]|\d+[).])\s*(.+)$/);
     if (tipMatch) {
-      const tip = tipMatch[1].trim();
-      if (tip) current.tips.push(tip);
+      pushTip(tipMatch[1]);
+      continue;
+    }
+
+    const statusMatch = line.match(/^(?:상태|status)\s*[:：]\s*(.+)$/i);
+    if (statusMatch) {
+      pushDescription(statusMatch[1]);
       continue;
     }
 
     const plain = stripHeadingPrefix(line);
     if (plain && !/^\[C\]/i.test(plain)) {
-      current.description.push(plain);
+      if (current.description.length === 0) pushDescription(plain);
+      else pushTip(plain);
     }
   }
 
@@ -542,7 +608,8 @@ function parseCategoryBlocks(cBlock: string, language: Language): RecoverySectio
       tips: fallbackLines
         .slice(2)
         .map((line) => line.replace(/^(?:[-*•·]|\d+\.)\s*/, "").trim())
-        .filter(Boolean),
+        .filter(Boolean)
+        .slice(0, 3),
     },
   ];
 }
