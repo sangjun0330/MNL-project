@@ -14,6 +14,8 @@ import { Segmented } from "@/components/ui/Segmented";
 import { Textarea } from "@/components/ui/Textarea";
 import { cn } from "@/lib/cn";
 import { useI18n } from "@/lib/useI18n";
+import { useAuthState } from "@/lib/auth";
+import { authHeaders } from "@/lib/billing/client";
 
 
 function clamp(n: number, min: number, max: number) {
@@ -68,9 +70,11 @@ export function ScheduleRecordSheet({
   sleepFirstMode?: boolean;
 }) {
   const { t } = useI18n();
+  const { status: authStatus, user } = useAuthState();
   const store = useAppStore();
   const storeRef = useRef(store);
   const menstrualEnabled = Boolean(store.settings.menstrual?.enabled);
+  const [isAdminEditor, setIsAdminEditor] = useState(false);
 
   const [shift, setShift] = useState<Shift>("OFF");
   const [shiftNameText, setShiftNameText] = useState<string>("");
@@ -141,10 +145,47 @@ export function ScheduleRecordSheet({
   );
 
   const dateLabel = useMemo(() => formatKoreanDate(iso), [iso]);
+
+  useEffect(() => {
+    let active = true;
+    if (authStatus !== "authenticated" || !user?.userId) {
+      setIsAdminEditor(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    const run = async () => {
+      try {
+        const headers = await authHeaders();
+        const res = await fetch("/api/admin/billing/access", {
+          method: "GET",
+          headers: {
+            "content-type": "application/json",
+            ...headers,
+          },
+          cache: "no-store",
+        });
+        const json = await res.json().catch(() => null);
+        if (!active) return;
+        setIsAdminEditor(Boolean(json?.ok && json?.data?.isAdmin));
+      } catch {
+        if (!active) return;
+        setIsAdminEditor(false);
+      }
+    };
+
+    void run();
+    return () => {
+      active = false;
+    };
+  }, [authStatus, user?.userId]);
+
   const canEditHealth = useMemo(() => {
+    if (isAdminEditor) return true;
     const delta = diffDays(todayISO(), iso);
     return delta >= 0 && delta <= 1;
-  }, [iso]);
+  }, [iso, isAdminEditor]);
 
   const markSaved = () => {
     setSaveState("saving");
