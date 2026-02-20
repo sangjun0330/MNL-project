@@ -643,20 +643,14 @@ export function InsightsAIRecoveryDetail() {
                             </div>
                           ) : null}
                           {recommendations.length ? (
-                            <div className="mt-3 grid gap-2">
+                            <div className="mt-3 space-y-1.5">
                               {recommendations.map((tip, idx) => (
-                                <div
-                                  key={`${meta.key}-${idx}`}
-                                  className="rounded-xl border px-3 py-2"
-                                  style={{ borderColor: theme.recBorder, backgroundColor: theme.recSoft }}
-                                >
-                                  <div className="text-[11px] font-semibold" style={{ color: theme.accent }}>
+                                <p key={`${meta.key}-${idx}`} className="text-[13.5px] leading-relaxed text-ios-text">
+                                  <span className="mr-1 text-[11px] font-semibold" style={{ color: theme.accent }}>
                                     {recLabel} {idx + 1}
-                                  </div>
-                                  <p className="mt-1 text-[13.5px] leading-relaxed text-ios-text">
-                                    {idx === 0 ? highlightKeySentence(tip, "plan") : tip}
-                                  </p>
-                                </div>
+                                  </span>
+                                  {idx === 0 ? highlightKeySentence(tip, "plan") : tip}
+                                </p>
                               ))}
                             </div>
                           ) : null}

@@ -29,12 +29,12 @@ const PLAN_MAP: Record<PlanTier, PlanDefinition> = {
   pro: {
     tier: "pro",
     title: "Pro",
-    description: "AI 맞춤회복 + AI 약물기구안전가이드 포함",
+    description: "AI 맞춤회복 + AI 검색 크레딧(매일 10회) + 최근 검색 10개 저장 포함",
     priceKrw: 14900,
     periodDays: DEFAULT_PERIOD_DAYS,
     orderName: "RNest Pro Monthly",
     checkoutEnabled: true,
-    features: ["AI 맞춤회복", "AI 약물기구안전가이드"],
+    features: ["AI 맞춤회복", "AI 약물·도구 검색기", "AI 검색 기본 크레딧 10회/일 (KST 자정 초기화)", "AI 검색 최근 기록 10개 저장"],
   },
 };
 
