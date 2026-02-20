@@ -113,6 +113,27 @@ function mergeProtectedMaps(nextPayload: Record<string, unknown>, existingPayloa
   return merged;
 }
 
+function preserveMenstrualSettingsIfNeeded(
+  nextPayload: Record<string, unknown>,
+  existingPayload: Record<string, unknown>
+) {
+  if (!hasMeaningfulMenstrualSettings(existingPayload)) return nextPayload;
+  if (hasMeaningfulMenstrualSettings(nextPayload)) return nextPayload;
+
+  const nextSettings = isRecord(nextPayload.settings) ? nextPayload.settings : {};
+  const existingSettings = isRecord(existingPayload.settings) ? existingPayload.settings : {};
+  const existingMenstrual = isRecord(existingSettings.menstrual) ? existingSettings.menstrual : null;
+  if (!existingMenstrual) return nextPayload;
+
+  return {
+    ...nextPayload,
+    settings: {
+      ...nextSettings,
+      menstrual: existingMenstrual,
+    },
+  };
+}
+
 export async function ensureUserRow(userId: string): Promise<void> {
   const admin = getSupabaseAdmin();
   const { error } = await admin
@@ -158,6 +179,12 @@ export async function saveUserState(input: { userId: string; payload: any }): Pr
     !hasMeaningfulUserData(nextPayload)
   ) {
     nextPayload = mergeProtectedMaps(nextPayload, existingPayload);
+  }
+
+  // Keep menstrual cycle settings from being accidentally reset by a partial/default payload,
+  // even when other domains (e.g. schedule) contain data.
+  if (isRecord(nextPayload) && existingPayload) {
+    nextPayload = preserveMenstrualSettingsIfNeeded(nextPayload, existingPayload);
   }
 
   // Preserve server-managed daily AI cache unless caller explicitly set/updated it.
