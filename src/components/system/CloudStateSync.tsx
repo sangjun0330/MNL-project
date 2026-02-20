@@ -170,6 +170,13 @@ export function CloudStateSync() {
   const mergeState = useCallback((remote: any, local: any) => {
     const r = remote ?? {};
     const l = local ?? {};
+    const remoteMenstrual = r.settings?.menstrual ?? {};
+    const localMenstrual = l.settings?.menstrual ?? {};
+    const useLocalMenstrual = hasMeaningfulMenstrualSettings({
+      settings: {
+        menstrual: localMenstrual,
+      },
+    });
     return {
       ...r,
       ...l,
@@ -182,7 +189,7 @@ export function CloudStateSync() {
       settings: {
         ...(r.settings ?? {}),
         ...(l.settings ?? {}),
-        menstrual: { ...(r.settings?.menstrual ?? {}), ...(l.settings?.menstrual ?? {}) },
+        menstrual: useLocalMenstrual ? { ...remoteMenstrual, ...localMenstrual } : remoteMenstrual,
         profile: { ...(r.settings?.profile ?? {}), ...(l.settings?.profile ?? {}) },
       },
     };
@@ -274,8 +281,10 @@ export function CloudStateSync() {
     lastVersionRef.current = nextV;
     if (!userId || hydrated) return;
     if (isHydratingRef.current) return;
+    const latest = sanitizeStatePayload(store.getState());
+    if (!hasAnyUserData(latest)) return;
     dirtyBeforeHydrate.current = true;
-  }, [store, hydrated, userId]);
+  }, [store, hydrated, userId, hasAnyUserData]);
 
   useEffect(() => {
     if (status === "loading" && !userId) return;

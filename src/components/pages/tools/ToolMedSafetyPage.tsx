@@ -1655,38 +1655,43 @@ export function ToolMedSafetyPage() {
           </Link>
         </div>
 
-        <Card className={`p-3 ${FLAT_CARD_CLASS}`}>
-          <div className="grid gap-1.5 sm:grid-cols-2">
-            <div className="rounded-xl border border-ios-sep bg-[#F7F7FA] px-2.5 py-2">
-              <div className="text-[11px] font-semibold text-ios-sub">{t("기본 크레딧 (Pro 전용 · 매일 초기화)")}</div>
-              <div className="mt-0.5 text-[18px] font-bold tracking-[-0.01em] text-ios-text">
+        <Card className={`p-4 ${FLAT_CARD_CLASS}`}>
+          <div className="flex items-center justify-between">
+            <div className="text-[13px] font-semibold text-ios-text">{t("AI 검색 크레딧")}</div>
+            <Link
+              href="/tools/med-safety/recent"
+              className="text-[12.5px] font-semibold text-[color:var(--rnest-accent)] underline-offset-2 hover:underline"
+            >
+              {t("최근 검색 기록")}
+            </Link>
+          </div>
+
+          <div className="mt-2.5 grid gap-2.5 sm:grid-cols-2">
+            <div className="rounded-2xl border border-ios-sep bg-white px-3 py-3">
+              <div className="text-[11px] font-semibold text-ios-sub">{t("기본 크레딧")}</div>
+              <div className="mt-1 text-[29px] font-bold leading-none tracking-[-0.03em] text-ios-text">
                 {medSafetyQuota ? (medSafetyQuota.isPro ? `${dailyRemaining}/${medSafetyQuota.dailyLimit}${t("회")}` : t("해당 없음")) : "-"}
               </div>
+              <div className="mt-1.5 text-[11.5px] text-ios-sub">{t("Pro 전용 · 매일 초기화")}</div>
             </div>
-            <div className="rounded-xl border border-ios-sep bg-[#F7F7FA] px-2.5 py-2">
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-[11px] font-semibold text-ios-sub">{t("추가 크레딧 (구매분 · 미초기화)")}</div>
+
+            <div className="rounded-2xl border border-ios-sep bg-white px-3 py-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="text-[11px] font-semibold text-ios-sub">{t("추가 크레딧")}</div>
                 <button
                   type="button"
                   onClick={() => void startCreditCheckout()}
                   disabled={creditPaying}
-                  className="text-[11.5px] font-semibold text-[color:var(--rnest-accent)] underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+                  className="text-[12px] font-semibold text-[color:var(--rnest-accent)] underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {creditPaying ? t("결제창 준비 중...") : t("추가 크레딧 구매")}
                 </button>
               </div>
-              <div className="mt-0.5 text-[18px] font-bold tracking-[-0.01em] text-ios-text">
+              <div className="mt-1 text-[29px] font-bold leading-none tracking-[-0.03em] text-ios-text">
                 {medSafetyQuota ? `${extraCredits}${t("회")}` : "-"}
               </div>
+              <div className="mt-1.5 text-[11.5px] text-ios-sub">{t("구매분 · 미초기화")}</div>
             </div>
-          </div>
-          <div className="mt-2 flex justify-end">
-            <Link
-              href="/tools/med-safety/recent"
-              className="text-[12px] font-semibold text-[color:var(--rnest-accent)] underline-offset-2 hover:underline"
-            >
-              {t("최근 검색 기록")}
-            </Link>
           </div>
         </Card>
 
