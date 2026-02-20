@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/Textarea";
 import { useI18n } from "@/lib/useI18n";
 
 const FLAT_CARD_CLASS = "rounded-[24px] border border-ios-sep bg-white shadow-none";
+const PAGE_TITLE_CLASS = "text-[24px] font-bold tracking-[-0.015em] text-[color:var(--rnest-accent)] md:text-[26px]";
 const PRIMARY_FLAT_BTN =
   "h-11 rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] px-4 text-[14px] font-semibold text-[color:var(--rnest-accent)] shadow-none hover:bg-[color:var(--rnest-accent-soft)]";
 const SECONDARY_FLAT_BTN =
@@ -1576,13 +1577,13 @@ export function ToolMedSafetyPage() {
 
   if (!mounted) {
     return (
-      <div className="mx-auto w-full max-w-[920px] space-y-3 px-2 pb-24 pt-4">
+      <div className="mx-auto w-full max-w-[920px] space-y-2.5 px-2 pb-24 pt-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-[31px] font-extrabold tracking-[-0.02em] text-[color:var(--rnest-accent)]">AI 의약품·도구 검색기</div>
-            <div className="mt-1 text-[13px] text-ios-sub">간호 현장에서 바로 쓰는 의약품·의료기구·상황 대응 정보를 검색형으로 제공합니다.</div>
+            <div className={PAGE_TITLE_CLASS}>AI 의약품·도구 검색기</div>
+            <div className="mt-1 text-[12px] text-ios-sub">간호 현장에서 바로 쓰는 의약품·의료기구·상황 대응 정보를 검색형으로 제공합니다.</div>
           </div>
-          <Link href="/tools" className="pt-1 text-[12px] font-semibold text-[color:var(--rnest-accent)]">
+          <Link href="/tools" className="pt-1 text-[11.5px] font-semibold text-[color:var(--rnest-accent)]">
             툴 목록
           </Link>
         </div>
@@ -1595,13 +1596,13 @@ export function ToolMedSafetyPage() {
 
   if (authStatus !== "authenticated") {
     return (
-      <div className="mx-auto w-full max-w-[920px] space-y-3 px-2 pb-24 pt-4">
+      <div className="mx-auto w-full max-w-[920px] space-y-2.5 px-2 pb-24 pt-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-[31px] font-extrabold tracking-[-0.02em] text-[color:var(--rnest-accent)]">{t("AI 의약품·도구 검색기")}</div>
-            <div className="mt-1 text-[13px] text-ios-sub">{t("간호 현장에서 바로 쓰는 의약품·의료기구·상황 대응 정보를 검색형으로 제공합니다.")}</div>
+            <div className={PAGE_TITLE_CLASS}>{t("AI 의약품·도구 검색기")}</div>
+            <div className="mt-1 text-[12px] text-ios-sub">{t("간호 현장에서 바로 쓰는 의약품·의료기구·상황 대응 정보를 검색형으로 제공합니다.")}</div>
           </div>
-          <Link href="/tools" className="pt-1 text-[12px] font-semibold text-[color:var(--rnest-accent)]">
+          <Link href="/tools" className="pt-1 text-[11.5px] font-semibold text-[color:var(--rnest-accent)]">
             {t("툴 목록")}
           </Link>
         </div>
@@ -1624,13 +1625,13 @@ export function ToolMedSafetyPage() {
 
   if (billingLoading) {
     return (
-      <div className="mx-auto w-full max-w-[920px] space-y-3 px-2 pb-24 pt-4">
+      <div className="mx-auto w-full max-w-[920px] space-y-2.5 px-2 pb-24 pt-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-[31px] font-extrabold tracking-[-0.02em] text-[color:var(--rnest-accent)]">{t("AI 의약품·도구 검색기")}</div>
-            <div className="mt-1 text-[13px] text-ios-sub">{t("간호 현장에서 바로 쓰는 의약품·의료기구·상황 대응 정보를 검색형으로 제공합니다.")}</div>
+            <div className={PAGE_TITLE_CLASS}>{t("AI 의약품·도구 검색기")}</div>
+            <div className="mt-1 text-[12px] text-ios-sub">{t("간호 현장에서 바로 쓰는 의약품·의료기구·상황 대응 정보를 검색형으로 제공합니다.")}</div>
           </div>
-          <Link href="/tools" className="pt-1 text-[12px] font-semibold text-[color:var(--rnest-accent)]">
+          <Link href="/tools" className="pt-1 text-[11.5px] font-semibold text-[color:var(--rnest-accent)]">
             {t("툴 목록")}
           </Link>
         </div>
@@ -1644,53 +1645,51 @@ export function ToolMedSafetyPage() {
 
   return (
     <>
-      <div className="mx-auto w-full max-w-[920px] space-y-3 px-2 pb-24 pt-4">
+      <div className="mx-auto w-full max-w-[920px] space-y-2.5 px-2 pb-24 pt-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-[31px] font-extrabold tracking-[-0.02em] text-[color:var(--rnest-accent)]">{t("AI 의약품·도구 검색기")}</div>
-            <div className="mt-1 text-[13px] text-ios-sub">{t("간호 현장에서 바로 쓰는 의약품·의료기구·상황 대응 정보를 검색형으로 제공합니다.")}</div>
+            <div className={PAGE_TITLE_CLASS}>{t("AI 의약품·도구 검색기")}</div>
+            <div className="mt-1 text-[12px] text-ios-sub">{t("간호 현장에서 바로 쓰는 의약품·의료기구·상황 대응 정보를 검색형으로 제공합니다.")}</div>
           </div>
-          <Link href="/tools" className="pt-1 text-[12px] font-semibold text-[color:var(--rnest-accent)]">
+          <Link href="/tools" className="pt-1 text-[11.5px] font-semibold text-[color:var(--rnest-accent)]">
             {t("툴 목록")}
           </Link>
         </div>
 
-        <Card className={`p-4 ${FLAT_CARD_CLASS}`}>
+        <Card className={`p-3 ${FLAT_CARD_CLASS}`}>
           <div className="flex items-center justify-between">
-            <div className="text-[13px] font-semibold text-ios-text">{t("AI 검색 크레딧")}</div>
-            <Link
-              href="/tools/med-safety/recent"
-              className="text-[12.5px] font-semibold text-[color:var(--rnest-accent)] underline-offset-2 hover:underline"
-            >
-              {t("최근 검색 기록")}
-            </Link>
+            <div className="text-[12px] font-semibold text-ios-sub">{t("AI 검색 크레딧")}</div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => void startCreditCheckout()}
+                disabled={creditPaying}
+                className="text-[11.5px] font-semibold text-[color:var(--rnest-accent)] underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {creditPaying ? t("결제창 준비 중...") : t("추가 크레딧 구매")}
+              </button>
+              <Link
+                href="/tools/med-safety/recent"
+                className="text-[11.5px] font-semibold text-[color:var(--rnest-accent)] underline-offset-2 hover:underline"
+              >
+                {t("최근 검색 기록")}
+              </Link>
+            </div>
           </div>
 
-          <div className="mt-2.5 grid gap-2.5 sm:grid-cols-2">
-            <div className="rounded-2xl border border-ios-sep bg-white px-3 py-3">
-              <div className="text-[11px] font-semibold text-ios-sub">{t("기본 크레딧")}</div>
-              <div className="mt-1 text-[29px] font-bold leading-none tracking-[-0.03em] text-ios-text">
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <div className="rounded-xl border border-ios-sep bg-[#F7F7FA] px-2.5 py-2">
+              <div className="text-[10.5px] font-semibold text-ios-sub">{t("기본 크레딧")}</div>
+              <div className="mt-0.5 text-[22px] font-bold leading-none tracking-[-0.02em] text-ios-text">
                 {medSafetyQuota ? (medSafetyQuota.isPro ? `${dailyRemaining}/${medSafetyQuota.dailyLimit}${t("회")}` : t("해당 없음")) : "-"}
               </div>
-              <div className="mt-1.5 text-[11.5px] text-ios-sub">{t("Pro 전용 · 매일 초기화")}</div>
             </div>
 
-            <div className="rounded-2xl border border-ios-sep bg-white px-3 py-3">
-              <div className="flex items-start justify-between gap-2">
-                <div className="text-[11px] font-semibold text-ios-sub">{t("추가 크레딧")}</div>
-                <button
-                  type="button"
-                  onClick={() => void startCreditCheckout()}
-                  disabled={creditPaying}
-                  className="text-[12px] font-semibold text-[color:var(--rnest-accent)] underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {creditPaying ? t("결제창 준비 중...") : t("추가 크레딧 구매")}
-                </button>
-              </div>
-              <div className="mt-1 text-[29px] font-bold leading-none tracking-[-0.03em] text-ios-text">
+            <div className="rounded-xl border border-ios-sep bg-[#F7F7FA] px-2.5 py-2">
+              <div className="text-[10.5px] font-semibold text-ios-sub">{t("추가 크레딧")}</div>
+              <div className="mt-0.5 text-[22px] font-bold leading-none tracking-[-0.02em] text-ios-text">
                 {medSafetyQuota ? `${extraCredits}${t("회")}` : "-"}
               </div>
-              <div className="mt-1.5 text-[11.5px] text-ios-sub">{t("구매분 · 미초기화")}</div>
             </div>
           </div>
         </Card>
