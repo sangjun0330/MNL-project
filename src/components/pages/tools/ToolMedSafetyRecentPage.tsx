@@ -164,8 +164,8 @@ function parseNarrativeSections(value: string): NarrativeSection[] {
   const fallbackItems = splitSectionItems(lines);
   if (!fallbackItems.length) return [];
   if (!hasHeading) {
-    return fallbackItems.map((item, idx) => ({
-      title: `요점 ${idx + 1}`,
+    return fallbackItems.map((item) => ({
+      title: "상세 결과",
       items: [item],
     }));
   }
@@ -262,7 +262,7 @@ export function ToolMedSafetyRecentPage() {
                   key={item.id}
                   type="button"
                   onClick={() => setSelected(item)}
-                  className="w-full rounded-2xl border border-ios-sep bg-white px-3 py-3 text-left hover:bg-[#F8F8FB]"
+                  className="w-full rounded-2xl border border-ios-sep bg-white px-3 py-3 text-left hover:bg-ios-bg"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div className="text-[17px] font-bold text-ios-text">{item.result.item.name}</div>
@@ -308,9 +308,9 @@ export function ToolMedSafetyRecentPage() {
                   {selectedSections.map((section, idx) => (
                     <div
                       key={`${section.title}-${idx}`}
-                      className="rounded-xl border border-ios-sep bg-[#F8F8FB] px-3 py-3"
+                      className="rounded-xl border border-ios-sep bg-ios-bg px-3 py-3"
                     >
-                      <div className="text-[14px] font-bold text-ios-text">{section.title}</div>
+                      <div className="text-[14px] font-bold text-ios-text">{t(section.title)}</div>
                       <ul className="mt-1 space-y-1 text-[14px] leading-6 text-ios-text">
                         {section.items.map((item, itemIdx) => (
                           <li key={`${section.title}-${idx}-item-${itemIdx}`} className="list-disc pl-1 ml-4">

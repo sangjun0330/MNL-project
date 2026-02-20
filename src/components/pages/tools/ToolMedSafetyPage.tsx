@@ -20,8 +20,8 @@ const PAGE_TITLE_CLASS = "text-[24px] font-bold tracking-[-0.015em] text-[color:
 const PRIMARY_FLAT_BTN =
   "h-11 rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] px-4 text-[14px] font-semibold text-[color:var(--rnest-accent)] shadow-none hover:bg-[color:var(--rnest-accent-soft)]";
 const SECONDARY_FLAT_BTN =
-  "h-11 rounded-full border border-ios-sep bg-white px-4 text-[14px] font-semibold text-ios-text shadow-none hover:bg-[#F7F7FA]";
-const SEGMENT_WRAPPER_CLASS = "inline-flex rounded-full border border-ios-sep bg-[#F7F7FA] p-1";
+  "h-11 rounded-full border border-ios-sep bg-white px-4 text-[14px] font-semibold text-ios-text shadow-none hover:bg-ios-bg";
+const SEGMENT_WRAPPER_CLASS = "inline-flex rounded-full border border-ios-sep bg-ios-bg p-1";
 type TranslateFn = (key: string, vars?: Record<string, string | number>) => string;
 
 type ClinicalMode = "ward" | "er" | "icu";
@@ -169,54 +169,54 @@ function isNameOnlyInput(value: string) {
   return words <= 6;
 }
 
-function parseErrorMessage(raw: string) {
-  if (!raw) return "분석 중 오류가 발생했습니다.";
+function parseErrorMessage(raw: string, t: TranslateFn) {
+  if (!raw) return t("분석 중 오류가 발생했습니다.");
   const normalized = String(raw).toLowerCase();
-  if (normalized.includes("login_required")) return "로그인이 필요합니다.";
+  if (normalized.includes("login_required")) return t("로그인이 필요합니다");
   if (normalized.includes("insufficient_med_safety_credits"))
-    return "AI 검색 잔여 크레딧이 없습니다. 크레딧 10회를 구매하거나(무료/Pro), Pro는 다음날 자동 초기화 후 다시 시도해 주세요.";
+    return t("AI 검색 잔여 크레딧이 없습니다. 크레딧 10회를 구매하거나(무료/Pro), Pro는 다음날 자동 초기화 후 다시 시도해 주세요.");
   if (normalized.includes("med_safety_credit_columns_missing"))
-    return "서버 크레딧 스키마가 아직 반영되지 않았습니다. 데이터베이스 마이그레이션 적용 후 다시 시도해 주세요.";
+    return t("서버 크레딧 스키마가 아직 반영되지 않았습니다. 데이터베이스 마이그레이션 적용 후 다시 시도해 주세요.");
   if (normalized.includes("missing_supabase_env"))
-    return "서버 환경변수(SUPABASE)가 설정되지 않았습니다. 배포 환경변수를 확인해 주세요.";
-  if (normalized.includes("missing_openai_api_key")) return "AI API 키가 설정되지 않았습니다.";
-  if (normalized.includes("query_or_image_required")) return "텍스트를 입력하거나 사진을 업로드해 주세요.";
-  if (normalized.includes("image_too_large")) return "이미지 용량이 너무 큽니다. 6MB 이하로 다시 업로드해 주세요.";
-  if (normalized.includes("image_type_invalid")) return "이미지 파일만 업로드할 수 있습니다.";
+    return t("서버 환경변수(SUPABASE)가 설정되지 않았습니다. 배포 환경변수를 확인해 주세요.");
+  if (normalized.includes("missing_openai_api_key")) return t("AI API 키가 설정되지 않았습니다.");
+  if (normalized.includes("query_or_image_required")) return t("텍스트를 입력하거나 사진을 업로드해 주세요.");
+  if (normalized.includes("image_too_large")) return t("이미지 용량이 너무 큽니다. 6MB 이하로 다시 업로드해 주세요.");
+  if (normalized.includes("image_type_invalid")) return t("이미지 파일만 업로드할 수 있습니다.");
   if (normalized.includes("client_timeout"))
-    return "요청 처리 시간이 길어져 앱 대기 시간이 만료되었습니다. 잠시 후 다시 AI 분석 실행을 눌러 주세요.";
+    return t("요청 처리 시간이 길어져 앱 대기 시간이 만료되었습니다. 잠시 후 다시 AI 분석 실행을 눌러 주세요.");
   if (normalized.includes("openai_timeout_total_budget"))
-    return "AI 응답 시간이 길어 내부 처리 제한 시간을 넘었습니다. 다시 AI 분석 실행을 눌러 주세요.";
+    return t("AI 응답 시간이 길어 내부 처리 제한 시간을 넘었습니다. 다시 AI 분석 실행을 눌러 주세요.");
   if (normalized.includes("openai_timeout_upstream"))
-    return "AI 서버 응답이 지연되어 시간 초과되었습니다. 잠시 후 다시 AI 분석 실행을 눌러 주세요.";
+    return t("AI 서버 응답이 지연되어 시간 초과되었습니다. 잠시 후 다시 AI 분석 실행을 눌러 주세요.");
   if (normalized.includes("openai_timeout") || normalized.includes("aborted"))
-    return "요청 처리 중 시간이 초과되었습니다. 잠시 후 다시 AI 분석 실행을 눌러 주세요.";
-  if (normalized.includes("openai_network_")) return RETRY_WITH_DATA_MESSAGE;
+    return t("요청 처리 중 시간이 초과되었습니다. 잠시 후 다시 AI 분석 실행을 눌러 주세요.");
+  if (normalized.includes("openai_network_")) return t(RETRY_WITH_DATA_MESSAGE);
   if (normalized.includes("openai_responses_401"))
-    return "AI API 키가 유효하지 않거나 만료되었습니다. .env.local 환경변수를 확인해 주세요.";
+    return t("AI API 키가 유효하지 않거나 만료되었습니다. .env.local 환경변수를 확인해 주세요.");
   if (normalized.includes("openai_responses_403")) {
     if (/(insufficient_permissions|does not have access|model_not_found|permission|access to model)/i.test(String(raw))) {
-      return "현재 계정에 gpt-5.1 모델 접근 권한이 없습니다. API 계정 권한을 확인해 주세요.";
+      return t("현재 계정에 gpt-5.1 모델 접근 권한이 없습니다. API 계정 권한을 확인해 주세요.");
     }
-    return RETRY_WITH_DATA_MESSAGE;
+    return t(RETRY_WITH_DATA_MESSAGE);
   }
   if (normalized.includes("openai_responses_404") || normalized.includes("model_not_found"))
-    return "gpt-5.1 모델을 찾을 수 없습니다. API 설정과 계정 권한을 확인해 주세요.";
-  if (normalized.includes("openai_responses_429")) return "요청 한도가 초과되었습니다. 잠시 후 다시 AI 분석 실행을 눌러 시도해 주세요.";
+    return t("gpt-5.1 모델을 찾을 수 없습니다. API 설정과 계정 권한을 확인해 주세요.");
+  if (normalized.includes("openai_responses_429")) return t("요청 한도가 초과되었습니다. 잠시 후 다시 AI 분석 실행을 눌러 시도해 주세요.");
   if (normalized.includes("openai_responses_400") && /(previous_response|conversation)/i.test(String(raw)))
-    return "이전 대화 상태 동기화에 실패했습니다. 다시 AI 분석 실행을 눌러 새로 시도해 주세요.";
+    return t("이전 대화 상태 동기화에 실패했습니다. 다시 AI 분석 실행을 눌러 새로 시도해 주세요.");
   if (normalized.includes("openai_responses_400") && /(max_output|max output|token limit|too many tokens|context length)/i.test(String(raw)))
-    return "AI 응답 길이 제한으로 요청이 중단되었습니다. 잠시 후 다시 AI 분석 실행을 눌러 시도해 주세요.";
+    return t("AI 응답 길이 제한으로 요청이 중단되었습니다. 잠시 후 다시 AI 분석 실행을 눌러 시도해 주세요.");
   if (normalized.includes("openai_responses_400"))
-    return "AI 요청 처리 중 오류가 발생했습니다. 데이터(모바일 네트워크)를 켠 뒤 다시 AI 분석 실행을 눌러 시도해 주세요.";
-  if (normalized.includes("openai_empty_text")) return "AI 서버 응답 본문이 비어 다시 시도했습니다. 잠시 후 다시 AI 분석 실행을 눌러 주세요.";
-  if (/openai_responses_(408|409|425|500|502|503|504)/.test(normalized)) return RETRY_WITH_DATA_MESSAGE;
-  if (normalized.includes("openai_responses_")) return "AI 요청이 실패했습니다. 다시 AI 분석 실행을 눌러 시도해 주세요.";
+    return t("AI 요청 처리 중 오류가 발생했습니다. 데이터(모바일 네트워크)를 켠 뒤 다시 AI 분석 실행을 눌러 시도해 주세요.");
+  if (normalized.includes("openai_empty_text")) return t("AI 서버 응답 본문이 비어 다시 시도했습니다. 잠시 후 다시 AI 분석 실행을 눌러 주세요.");
+  if (/openai_responses_(408|409|425|500|502|503|504)/.test(normalized)) return t(RETRY_WITH_DATA_MESSAGE);
+  if (normalized.includes("openai_responses_")) return t("AI 요청이 실패했습니다. 다시 AI 분석 실행을 눌러 시도해 주세요.");
   if (normalized.includes("openai_invalid_json_payload"))
-    return "AI 응답이 비정형으로 와서 자동 정리 결과로 표시했습니다.";
+    return t("AI 응답이 비정형으로 와서 자동 정리 결과로 표시했습니다.");
   if (normalized.includes("invalid_response_payload"))
-    return "서버 응답 형식이 올바르지 않아 결과를 정리하지 못했습니다. 다시 AI 분석 실행을 눌러 시도해 주세요.";
-  return "분석 중 오류가 발생했습니다. 다시 AI 분석 실행을 눌러 시도해 주세요.";
+    return t("서버 응답 형식이 올바르지 않아 결과를 정리하지 못했습니다. 다시 AI 분석 실행을 눌러 시도해 주세요.");
+  return t("분석 중 오류가 발생했습니다. 다시 AI 분석 실행을 눌러 시도해 주세요.");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1335,14 +1335,14 @@ export function ToolMedSafetyPage() {
             if (isScenarioIntent) {
               setScenarioState({ previousResponseId: undefined, conversationId: undefined });
             }
-            setError(`${t(parseErrorMessage(finalError))} ${t("최근 저장된 결과를 표시합니다.")}`);
+            setError(`${parseErrorMessage(finalError, t)} ${t("최근 저장된 결과를 표시합니다.")}`);
             return;
           }
           setResult(null);
           if (isScenarioIntent) {
             setScenarioState({ previousResponseId: undefined, conversationId: undefined });
           }
-          setError(t(parseErrorMessage(finalError)));
+          setError(parseErrorMessage(finalError, t));
           return;
         }
         const data = normalizedData;
@@ -1363,7 +1363,7 @@ export function ToolMedSafetyPage() {
             setScenarioState({ previousResponseId: undefined, conversationId: undefined });
           }
           setError(
-            `${t(parseErrorMessage(String(data.fallbackReason ?? "openai_fallback")))} ${t("기본 안전 모드 결과를 표시합니다.")}`
+            `${parseErrorMessage(String(data.fallbackReason ?? "openai_fallback"), t)} ${t("기본 안전 모드 결과를 표시합니다.")}`
           );
         }
         if (forcedQuery) setQuery(forcedQuery);
@@ -1580,15 +1580,15 @@ export function ToolMedSafetyPage() {
       <div className="mx-auto w-full max-w-[920px] space-y-2.5 px-2 pb-24 pt-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className={PAGE_TITLE_CLASS}>AI 의약품·도구 검색기</div>
-            <div className="mt-1 text-[12px] text-ios-sub">간호 현장에서 바로 쓰는 의약품·의료기구·상황 대응 정보를 검색형으로 제공합니다.</div>
+            <div className={PAGE_TITLE_CLASS}>{t("AI 의약품·도구 검색기")}</div>
+            <div className="mt-1 text-[12px] text-ios-sub">{t("간호 현장에서 바로 쓰는 의약품·의료기구·상황 대응 정보를 검색형으로 제공합니다.")}</div>
           </div>
           <Link href="/tools" className="pt-1 text-[11.5px] font-semibold text-[color:var(--rnest-accent)]">
-            툴 목록
+            {t("툴 목록")}
           </Link>
         </div>
         <Card className={`p-5 ${FLAT_CARD_CLASS}`}>
-          <div className="text-[18px] font-bold text-ios-text">페이지 준비 중...</div>
+          <div className="text-[18px] font-bold text-ios-text">{t("페이지 준비 중...")}</div>
         </Card>
       </div>
     );
@@ -1678,14 +1678,14 @@ export function ToolMedSafetyPage() {
           </div>
 
           <div className="mt-2 grid grid-cols-2 gap-2">
-            <div className="rounded-xl border border-ios-sep bg-[#F7F7FA] px-2.5 py-2">
+            <div className="rounded-xl border border-ios-sep bg-ios-bg px-2.5 py-2">
               <div className="text-[10.5px] font-semibold text-ios-sub">{t("기본 크레딧")}</div>
               <div className="mt-0.5 text-[22px] font-bold leading-none tracking-[-0.02em] text-ios-text">
                 {medSafetyQuota ? (medSafetyQuota.isPro ? `${dailyRemaining}/${medSafetyQuota.dailyLimit}${t("회")}` : t("해당 없음")) : "-"}
               </div>
             </div>
 
-            <div className="rounded-xl border border-ios-sep bg-[#F7F7FA] px-2.5 py-2">
+            <div className="rounded-xl border border-ios-sep bg-ios-bg px-2.5 py-2">
               <div className="text-[10.5px] font-semibold text-ios-sub">{t("추가 크레딧")}</div>
               <div className="mt-0.5 text-[22px] font-bold leading-none tracking-[-0.02em] text-ios-text">
                 {medSafetyQuota ? `${extraCredits}${t("회")}` : "-"}
