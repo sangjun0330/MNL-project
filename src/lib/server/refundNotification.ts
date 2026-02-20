@@ -47,6 +47,31 @@ function isEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
+function normalizeEmailForCompare(value: string) {
+  const email = clean(value).toLowerCase();
+  if (!isEmail(email)) return email;
+  const [local, domain] = email.split("@");
+  if (domain === "gmail.com" || domain === "googlemail.com") {
+    const normalizedLocal = local.split("+")[0].replaceAll(".", "");
+    return `${normalizedLocal}@gmail.com`;
+  }
+  return email;
+}
+
+function removeIdentifierLinesFromText(text: string) {
+  return String(text)
+    .split("\n")
+    .filter((line) => !/(요청\s*id|요청id|사용자\s*id|사용자id|주문\s*id|주문id|request\s*id|requestid|user\s*id|userid|order\s*id|orderid)/i.test(line))
+    .join("\n");
+}
+
+function removeIdentifierRowsFromHtml(html: string) {
+  return String(html).replace(
+    /<tr>\s*<td[^>]*>\s*(요청\s*ID|요청ID|사용자\s*ID|사용자ID|주문\s*ID|주문ID|Request\s*ID|RequestID|User\s*ID|UserID|Order\s*ID|OrderID|orderId|userId|requestId)\s*<\/td>\s*<td[^>]*>[\s\S]*?<\/td>\s*<\/tr>/gi,
+    ""
+  );
+}
+
 function adminRefundRecipients() {
   return [REFUND_ADMIN_EMAIL];
 }
@@ -101,10 +126,11 @@ export async function sendRefundRequestNotification(input: RefundNotifyInput): P
   const reason = clean(input.reason) || "사용자 요청";
   const requestedAt = clean(input.requestedAt) || new Date().toISOString();
   const requesterEmail = clean(input.requesterEmail);
+  const requesterEmailNormalized = normalizeEmailForCompare(requesterEmail);
   const hasRequesterEmail = isEmail(requesterEmail);
   const recipients = adminRefundRecipients();
   const filteredRecipients = hasRequesterEmail
-    ? recipients.filter((email) => email !== requesterEmail.toLowerCase())
+    ? recipients.filter((email) => normalizeEmailForCompare(email) !== requesterEmailNormalized)
     : recipients;
 
   if (!filteredRecipients.length) {
@@ -170,7 +196,7 @@ export async function sendRefundRequestNotification(input: RefundNotifyInput): P
   }
 
   const userSubject = "[RNest] 환불 요청이 접수되었습니다";
-  const userText = [
+  const userText = removeIdentifierLinesFromText([
     "RNest 환불 요청이 접수되었습니다.",
     "",
     `사용자 이메일: ${requesterEmail}`,
@@ -181,8 +207,8 @@ export async function sendRefundRequestNotification(input: RefundNotifyInput): P
     reason,
     "",
     "관리자 검토 후 순차 처리되며, 처리 결과는 별도 안내됩니다.",
-  ].join("\n");
-  const userHtml = `
+  ].join("\n"));
+  const userHtml = removeIdentifierRowsFromHtml(`
     <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.55;">
       <h2 style="margin:0 0 12px;">RNest 환불 요청 접수</h2>
       <p style="margin:0 0 12px;">요청이 정상 접수되었습니다. 관리자 검토 후 순차 처리됩니다.</p>
@@ -196,7 +222,7 @@ export async function sendRefundRequestNotification(input: RefundNotifyInput): P
         <div>${escapeHtml(reason)}</div>
       </div>
     </div>
-  `.trim();
+  `.trim());
 
   const userResult = await sendResendEmail({
     apiKey,
@@ -225,6 +251,7 @@ export async function sendRefundRejectedNotification(input: RefundRejectedNotify
 
   const from = clean(process.env.BILLING_REFUND_FROM_EMAIL) || "onboarding@resend.dev";
   const requesterEmail = clean(input.requesterEmail);
+  const requesterEmailNormalized = normalizeEmailForCompare(requesterEmail);
   const hasRequesterEmail = isEmail(requesterEmail);
   const requestedAt = clean(input.requestedAt) || new Date().toISOString();
   const rejectedAt = clean(input.rejectedAt) || new Date().toISOString();
@@ -279,10 +306,13 @@ export async function sendRefundRejectedNotification(input: RefundRejectedNotify
     </div>
   `.trim();
 
+  const adminRecipients = hasRequesterEmail
+    ? adminRefundRecipients().filter((email) => normalizeEmailForCompare(email) !== requesterEmailNormalized)
+    : adminRefundRecipients();
   const adminResult = await sendResendEmail({
     apiKey,
     from,
-    to: adminRefundRecipients(),
+    to: adminRecipients,
     replyTo: hasRequesterEmail ? requesterEmail : undefined,
     subject: adminSubject,
     text: adminText,
@@ -298,21 +328,23 @@ export async function sendRefundRejectedNotification(input: RefundRejectedNotify
   }
 
   const userSubject = "[RNest] 환불 요청이 거절되었습니다";
-  const userText = [
-    "RNest 환불 요청 처리 결과를 안내드립니다.",
-    "",
-    `사용자 이메일: ${requesterEmail}`,
-    `결제 금액: ${formatKrw(input.amount)}`,
-    `요청 시각: ${requestedAt}`,
-    `거절 시각: ${rejectedAt}`,
-    "",
-    "[환불 거절 사유]",
-    reason,
-    ...(reviewNote ? ["", "[안내 메모]", reviewNote] : []),
-  ]
-    .filter(Boolean)
-    .join("\n");
-  const userHtml = `
+  const userText = removeIdentifierLinesFromText(
+    [
+      "RNest 환불 요청 처리 결과를 안내드립니다.",
+      "",
+      `사용자 이메일: ${requesterEmail}`,
+      `결제 금액: ${formatKrw(input.amount)}`,
+      `요청 시각: ${requestedAt}`,
+      `거절 시각: ${rejectedAt}`,
+      "",
+      "[환불 거절 사유]",
+      reason,
+      ...(reviewNote ? ["", "[안내 메모]", reviewNote] : []),
+    ]
+      .filter(Boolean)
+      .join("\n")
+  );
+  const userHtml = removeIdentifierRowsFromHtml(`
     <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.55;">
       <h2 style="margin:0 0 12px;">RNest 환불 요청 거절 안내</h2>
       <p style="margin:0 0 12px;">요청하신 환불은 검토 결과 거절 처리되었습니다.</p>
@@ -335,7 +367,7 @@ export async function sendRefundRejectedNotification(input: RefundRejectedNotify
           : ""
       }
     </div>
-  `.trim();
+  `.trim());
 
   const userResult = await sendResendEmail({
     apiKey,

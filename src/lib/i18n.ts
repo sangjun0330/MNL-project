@@ -262,9 +262,21 @@ const EN_EXTRA: Record<string, string> = {
   "오늘 근무에서 있었던 상황을 태그로 남겨 주세요.": "Tag what happened during today's shift.",
   "태그는 여러 개 선택할 수 있어요.": "You can select multiple tags.",
   "근무 이벤트 메모": "Shift event note",
+  "근무 이벤트 상세 메모": "Detailed shift event note",
   "직접 태그 추가": "Add custom tag",
   "직접 추가한 태그": "Custom tags",
   "이벤트 상세 메모 (선택)": "Event details (optional)",
+  "이벤트 상세 메모": "Event details",
+  "태그 중심으로 먼저 기록하고, 필요할 때만 상세 메모를 추가해 주세요.":
+    "Start with tags first, and add detailed notes only when needed.",
+  "태그로 부족한 내용만 간단히 기록해 주세요.":
+    "Only add a short note for details that tags do not cover.",
+  "태그로 부족할 때만 상세 내용을 추가해 주세요.":
+    "Add detailed notes only when tags are not enough.",
+  "상세 메모를 입력하세요": "Enter detailed notes",
+  "입력됨: {count}자": "Entered: {count} chars",
+  "닫으면 자동 저장됩니다.": "Auto-saved when closed.",
+  "수정": "Edit",
   "예: 코드블루 1건 대응, 인계 지연 30분": "e.g. handled 1 Code Blue, handover delayed by 30 min",
   "코드블루 대응": "Code Blue response",
   "중증 환자 집중 케어": "High-acuity patient care",
@@ -641,6 +653,7 @@ const EN_EXTRA: Record<string, string> = {
   "결제 후 서버 승인 완료 시 결제 이력에 즉시 반영됩니다.":
     "After payment, the history is updated immediately once server confirmation is complete.",
   "결제창을 열지 못했습니다.": "Could not open the payment window.",
+  "결제창을 열지 못했습니다. 잠시 후 다시 시도해 주세요.": "Could not open the payment window. Please try again shortly.",
   "결제 승인 파라미터가 올바르지 않습니다.": "Payment approval parameters are invalid.",
   "결제 승인에 실패했습니다.": "Payment approval failed.",
   "결제 결과": "Payment result",
@@ -724,9 +737,26 @@ const EN_EXTRA: Record<string, string> = {
   "업그레이드 후 AI 맞춤회복과 AI 약물기구안전가이드를 모두 사용할 수 있어요.":
     "After upgrading, you can use both AI recovery and the AI medication/device safety guide.",
   "AI 약물·도구 검색기": "AI Medication & Device Finder",
+  "AI 의약품·도구 검색기": "AI Medication & Device Finder",
   "간호 현장에서 바로 쓰는 약물·의료기구·상황 대응 정보를 검색형으로 제공합니다.":
     "Searches medication, device, and scenario response guidance for immediate nursing use.",
+  "간호 현장에서 바로 쓰는 의약품·의료기구·상황 대응 정보를 검색형으로 제공합니다.":
+    "Searches medication, device, and scenario response guidance for immediate nursing use.",
+  "AI 검색 크레딧": "AI search credits",
+  "남은": "Remaining",
+  "사용 가능 크레딧을 확인 중입니다.": "Checking available credits.",
+  "기본 크레딧": "Base credits",
+  "기본 크레딧 (Pro 전용 · 매일 초기화)": "Base credits (Pro only · resets daily)",
+  "추가 크레딧": "Extra credits",
+  "추가 크레딧 (구매분 · 미초기화)": "Extra credits (Purchased · no daily reset)",
+  "추가 크레딧 구매": "Buy extra credits",
+  "추가 구매": "Additional purchase",
+  "크레딧 10회 구매": "Buy 10 credits",
+  "최근 검색 기록": "Recent search history",
+  "해당 없음": "Not available",
+  "회": "uses",
   "툴 목록": "Tool list",
+  "로그인/계정 설정": "Login/account settings",
   "근무 모드": "Care setting",
   "질문 유형": "Query type",
   "현재 상황": "Current scenario",
@@ -754,6 +784,8 @@ const EN_EXTRA: Record<string, string> = {
   "예: norepinephrine": "e.g., norepinephrine",
   "약물명만 단답으로 입력하세요. 예: norepinephrine, furosemide, vancomycin":
     "Enter medication name only. e.g., norepinephrine, furosemide, vancomycin",
+  "의약품 모드에서는 의약품명만 단답으로 입력해 주세요. 예: norepinephrine":
+    "In medication mode, enter medication name only. e.g., norepinephrine",
   "예: IV infusion pump": "e.g., IV infusion pump",
   "의료기구명만 단답으로 입력하세요. 예: syringe pump, Foley catheter, central line":
     "Enter device name only. e.g., syringe pump, Foley catheter, central line",
@@ -786,7 +818,27 @@ const EN_EXTRA: Record<string, string> = {
   "실수 방지": "Error prevention",
   "모니터/재평가": "Monitor/re-evaluate",
   "약물": "Medication",
+  "의약품": "Medication",
   "의료기구": "Medical device",
+  "예: heparin flush 후 라인 저항이 느껴지는 상황입니다.":
+    "e.g., resistance is felt in the line after a heparin flush.",
+  "(선택) 추가 참고: 목적, 핵심 V/S, 사용 의약품/기구":
+    "(optional) purpose, key V/S, medications/devices in use",
+  "위 칸에는 현재 어떤 상황인지, 아래 칸에는 추가 참고사항을 입력하세요.":
+    "Enter the current situation in the top field and extra context in the bottom field.",
+  "예: 항생제 투여 직전, 알레르기 병력이 있어 확인이 필요한 상황입니다.":
+    "e.g., right before antibiotic administration, allergy history needs verification.",
+  "(선택) 추가 참고: 알레르기, V/S, 주요 검사":
+    "(optional) allergies, V/S, key labs",
+  "예: 주입 중 발진이 발생한 상황입니다.":
+    "e.g., a rash occurred during infusion.",
+  "(선택) 추가 참고: 주입 속도, 증상 시작 시점, V/S":
+    "(optional) infusion rate, symptom onset, V/S",
+  "예: pump occlusion 알람이 반복되는 상황입니다.":
+    "e.g., repeated pump occlusion alarms.",
+  "(선택) 추가 참고: 알람 종류, 환자 증상, 현재 속도":
+    "(optional) alarm type, patient symptoms, current rate",
+  "페이지 준비 중...": "Preparing page...",
   "사진 업로드": "Upload photo",
   "실시간 카메라": "Live camera",
   "카메라 연결 중...": "Connecting camera...",
@@ -798,6 +850,8 @@ const EN_EXTRA: Record<string, string> = {
   "카메라 닫기": "Close camera",
   "업로드 이미지 미리보기": "Uploaded image preview",
   "약물/의료도구 안전 포인트를 정리하고 있습니다. 잠시만 기다려 주세요.":
+    "Organizing medication/device safety points. Please wait a moment.",
+  "의약품/의료도구 안전 포인트를 정리하고 있습니다. 잠시만 기다려 주세요.":
     "Organizing medication/device safety points. Please wait a moment.",
   "AI 약물·기구 안전 가이드 사용 가능 여부를 확인하고 있어요.":
     "Checking access to the AI medication/device safety guide.",
@@ -831,6 +885,60 @@ const EN_EXTRA: Record<string, string> = {
     "Failed to start camera. Check permissions and browser environment.",
   "유료 플랜 전용 기능입니다. 플랜 업그레이드 후 이용해 주세요.":
     "Paid-plan feature. Please upgrade your plan to use this.",
+  "AI 검색 사용 횟수는 계정 단위로 관리됩니다. 로그인 후 이용해 주세요.":
+    "AI search usage is managed per account. Please log in to continue.",
+  "사용량 상태 확인 중...": "Checking usage status...",
+  "AI 검색 잔여 횟수를 불러오고 있습니다.": "Loading remaining AI search credits.",
+  "AI 검색 잔여 크레딧이 없습니다. 크레딧 10회를 구매 후 다시 시도해 주세요.":
+    "No AI search credits remaining. Buy a 10-credit pack and try again.",
+  "AI 검색 잔여 크레딧이 없습니다. 크레딧 10회를 구매하거나(무료/Pro), Pro는 다음날 자동 초기화 후 다시 시도해 주세요.":
+    "No AI search credits remaining. Buy a 10-credit pack (Free/Pro), or if you are Pro, try again after tomorrow's automatic reset.",
+  "남은 AI 검색 크레딧이 없습니다. 크레딧 10회를 구매하거나(무료/Pro), Pro는 다음날 자동 초기화 후 다시 이용해 주세요.":
+    "No AI search credits remaining. Buy a 10-credit pack (Free/Pro), or if you are Pro, use it again after tomorrow's automatic reset.",
+  "서버 크레딧 스키마가 아직 반영되지 않았습니다. 데이터베이스 마이그레이션 적용 후 다시 시도해 주세요.":
+    "The server credit schema is not applied yet. Apply the database migration and try again.",
+  "서버 DB 스키마가 아직 최신이 아닙니다. 마이그레이션 적용 후 다시 시도해 주세요.":
+    "Server DB schema is not up to date. Apply migration and try again.",
+  "크레딧 결제창을 열지 못했습니다. 잠시 후 다시 시도해 주세요.":
+    "Could not open the credit checkout window. Please try again shortly.",
+  "AI가 작성중입니다...": "AI is writing...",
+  "AI 검색기로": "Back to AI finder",
+  "최근 AI 검색 기록": "Recent AI search history",
+  "크레딧이 실제 차감된 완료 검색 결과 최근 5건만 표시됩니다.":
+    "Only the latest 5 completed results with actual credit deduction are shown.",
+  "최근 검색 기록은 계정별로 저장됩니다.": "Recent search history is saved per account.",
+  "최근 기록을 불러오는 중...": "Loading recent history...",
+  "최근 기록 조회에 실패했습니다.": "Failed to load recent history.",
+  "아직 저장된 최근 검색 결과가 없습니다. AI 검색 실행 후 다시 확인해 주세요.":
+    "No recent saved search results yet. Run AI search and check again.",
+  "최근 검색 상세": "Recent search detail",
+  "분석 시각": "Analyzed at",
+  "요약": "Summary",
+  "검색 입력": "Search input",
+  "상세 결과": "Detailed result",
+  "표시할 상세 내용이 없습니다.": "No detailed content to display.",
+  "AI 의약품·도구 검색기 전용": "For AI Medication & Device Finder only",
+  "AI 약물·도구 검색기 전용": "For AI Medication & Device Finder only",
+  "AI 약물·도구 검색기 전용 크레딧": "Credits for AI Medication & Device Finder",
+  "구매 상품": "Purchased product",
+  "충전 크레딧": "Charged credits",
+  "RNest Pro Monthly": "RNest Pro Monthly",
+  "월 구독 · 30일 단위 자동갱신": "Monthly subscription · auto-renews every 30 days",
+  "무료/Pro 모두 구매 후 즉시 사용 가능합니다.": "Available immediately after purchase for both Free and Pro.",
+  "구매된 추가 크레딧은 AI 약물·도구 검색기 실행 시 1회당 1크레딧 사용되며, 날짜가 바뀌어도 사라지지 않습니다.":
+    "Purchased extra credits are consumed 1 credit per AI Medication & Device Finder run and do not reset daily.",
+  "10회 사용권 · 소진 전까지 유지": "10 uses · available until exhausted",
+  "결제 계속": "Continue payment",
+  "서버 환경변수(SUPABASE)가 설정되지 않았습니다. 배포 환경변수를 확인해 주세요.":
+    "Server environment variables (SUPABASE) are not configured. Check deployment environment variables.",
+  "요청 처리 시간이 길어져 앱 대기 시간이 만료되었습니다. 잠시 후 다시 AI 분석 실행을 눌러 주세요.":
+    "Processing took too long and the app wait time expired. Please tap `Run AI Analysis` again shortly.",
+  "AI 응답 시간이 길어 내부 처리 제한 시간을 넘었습니다. 다시 AI 분석 실행을 눌러 주세요.":
+    "AI response time exceeded internal processing limits. Please tap `Run AI Analysis` again.",
+  "AI 서버 응답이 지연되어 시간 초과되었습니다. 잠시 후 다시 AI 분석 실행을 눌러 주세요.":
+    "AI server response was delayed and timed out. Please tap `Run AI Analysis` again shortly.",
+  "요청 처리 중 시간이 초과되었습니다. 잠시 후 다시 AI 분석 실행을 눌러 주세요.":
+    "Request processing timed out. Please tap `Run AI Analysis` again shortly.",
   "분석 중 오류가 발생했습니다.": "An error occurred during analysis.",
   "분석 중 오류가 발생했습니다. 다시 AI 분석 실행을 눌러 시도해 주세요.":
     "An error occurred during analysis. Please tap `Run AI Analysis` and try again.",
@@ -862,6 +970,8 @@ const EN_EXTRA: Record<string, string> = {
     "AI request failed. Please tap `Run AI Analysis` and try again.",
   "AI 응답이 비정형으로 와서 자동 정리 결과로 표시했습니다.":
     "AI response was unstructured, so it is shown as an auto-organized result.",
+  "서버 응답 형식이 올바르지 않아 결과를 정리하지 못했습니다. 다시 AI 분석 실행을 눌러 시도해 주세요.":
+    "Server response format was invalid, so results could not be organized. Please tap `Run AI Analysis` and try again.",
   "네트워크가 불안정합니다. 데이터(모바일 네트워크)를 켠 뒤 다시 AI 분석 실행을 눌러 시도해 주세요.":
     "Network is unstable. Turn on mobile data/network and tap `Run AI Analysis` again.",
   "본 결과는 참고용 자동 생성 정보이며 의료행위 판단의 근거로 사용할 수 없습니다. 제공자는 본 결과의 사용으로 발생한 진단·치료·투약 결정 및 결과에 대해 책임을 지지 않습니다. 모든 처치는 병원 지침, 처방, 의료진 확인을 우선해 결정해 주세요.":
