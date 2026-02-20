@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { loadAIContent } from "@/lib/server/aiContentStore";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import type { SubscriptionSnapshot } from "@/lib/server/billingStore";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
-const MED_SAFETY_RECENT_LIMIT = 10;
+const MED_SAFETY_RECENT_LIMIT_FREE = 5;
+const MED_SAFETY_RECENT_LIMIT_PRO = 10;
 
 type HistoryRecord = {
   id: string;
@@ -59,7 +61,20 @@ function normalizeResultKind(value: unknown): "medication" | "device" | "scenari
   return "scenario";
 }
 
-function normalizeHistory(value: unknown) {
+async function safeLoadSubscription(userId: string): Promise<SubscriptionSnapshot | null> {
+  try {
+    const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!serviceRole || !supabaseUrl) return null;
+    const { readSubscription } = await import("@/lib/server/billingStore");
+    return await readSubscription(userId);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeHistory(value: unknown, limit = MED_SAFETY_RECENT_LIMIT_FREE) {
+  const normalizedLimit = Math.max(MED_SAFETY_RECENT_LIMIT_FREE, Math.min(MED_SAFETY_RECENT_LIMIT_PRO, Math.round(limit)));
   if (!Array.isArray(value)) return [] as HistoryRecord[];
   const out: HistoryRecord[] = [];
   for (const raw of value) {
@@ -101,7 +116,7 @@ function normalizeHistory(value: unknown) {
   }
   return out
     .sort((a, b) => b.savedAt - a.savedAt)
-    .slice(0, MED_SAFETY_RECENT_LIMIT);
+    .slice(0, normalizedLimit);
 }
 
 export async function GET(req: Request) {
@@ -113,12 +128,15 @@ export async function GET(req: Request) {
 
     const row = await loadAIContent(userId).catch(() => null);
     const data = isRecord(row?.data) ? row?.data : {};
-    const items = normalizeHistory(data.medSafetyRecent);
+    const subscription = await safeLoadSubscription(userId);
+    const historyLimit = subscription?.hasPaidAccess ? MED_SAFETY_RECENT_LIMIT_PRO : MED_SAFETY_RECENT_LIMIT_FREE;
+    const items = normalizeHistory(data.medSafetyRecent, historyLimit);
 
     return NextResponse.json(
       {
         ok: true,
         data: {
+          historyLimit,
           items,
         },
       },

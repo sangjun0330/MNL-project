@@ -17,7 +17,8 @@ export const dynamic = "force-dynamic";
 const MAX_QUERY_LENGTH = 1800;
 const MAX_PATIENT_SUMMARY_LENGTH = 1400;
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
-const MED_SAFETY_RECENT_LIMIT = 10;
+const MED_SAFETY_RECENT_LIMIT_FREE = 5;
+const MED_SAFETY_RECENT_LIMIT_PRO = 10;
 const DEFAULT_ANALYZE_TIMEOUT_MS = 420_000;
 const MIN_ANALYZE_TIMEOUT_MS = 300_000;
 const MAX_ANALYZE_TIMEOUT_MS = 900_000;
@@ -60,6 +61,7 @@ async function safeConsumeMedSafetyCredit(userId: string): Promise<{
     totalRemaining: number;
     dailyRemaining: number;
     extraCredits: number;
+    isPro: boolean;
   };
 }> {
   const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -173,7 +175,8 @@ async function safeSaveMedSafetyContent(
   }
 }
 
-function normalizeRecentRecords(value: unknown) {
+function normalizeRecentRecords(value: unknown, limit = MED_SAFETY_RECENT_LIMIT_PRO) {
+  const normalizedLimit = Math.max(MED_SAFETY_RECENT_LIMIT_FREE, Math.min(MED_SAFETY_RECENT_LIMIT_PRO, Math.round(limit)));
   if (!Array.isArray(value)) return [] as MedSafetyRecentRecord[];
   const out: MedSafetyRecentRecord[] = [];
   for (const item of value) {
@@ -201,7 +204,7 @@ function normalizeRecentRecords(value: unknown) {
       result: resultNode as unknown as MedSafetyResponseData,
     });
   }
-  return out.sort((a, b) => b.savedAt - a.savedAt).slice(0, MED_SAFETY_RECENT_LIMIT);
+  return out.sort((a, b) => b.savedAt - a.savedAt).slice(0, normalizedLimit);
 }
 
 async function safeAppendMedSafetyRecent(params: {
@@ -215,11 +218,16 @@ async function safeAppendMedSafetyRecent(params: {
   patientSummary: string;
   imageName: string;
   result: MedSafetyResponseData;
+  recentLimit: number;
 }) {
   try {
     const existing = await safeLoadAIContent(params.userId);
     const previous = isRecord(existing?.data) ? existing.data : {};
-    const prevRecent = normalizeRecentRecords(previous.medSafetyRecent);
+    const normalizedLimit = Math.max(
+      MED_SAFETY_RECENT_LIMIT_FREE,
+      Math.min(MED_SAFETY_RECENT_LIMIT_PRO, Math.round(params.recentLimit))
+    );
+    const prevRecent = normalizeRecentRecords(previous.medSafetyRecent, MED_SAFETY_RECENT_LIMIT_PRO);
     const nextRecord: MedSafetyRecentRecord = {
       id: `msr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
       savedAt: Date.now(),
@@ -241,7 +249,7 @@ async function safeAppendMedSafetyRecent(params: {
         if (record.request.query !== nextRecord.request.query) return true;
         return Math.abs(record.savedAt - nextRecord.savedAt) > 10_000;
       }),
-    ].slice(0, MED_SAFETY_RECENT_LIMIT);
+    ].slice(0, normalizedLimit);
 
     return await safeSaveMedSafetyContent(params.userId, params.dateISO, params.language, {
       medSafetyRecent: deduped,
@@ -534,6 +542,7 @@ export async function POST(req: NextRequest) {
         responseData: payloadKo,
       }) && !abort.signal.aborted;
       if (shouldCommitCredit) {
+        const recentLimit = creditUse.quota.isPro ? MED_SAFETY_RECENT_LIMIT_PRO : MED_SAFETY_RECENT_LIMIT_FREE;
         const recentSaveError = await safeAppendMedSafetyRecent({
           userId,
           dateISO: today,
@@ -545,6 +554,7 @@ export async function POST(req: NextRequest) {
           patientSummary,
           imageName,
           result: responseData,
+          recentLimit,
         });
         if (recentSaveError) {
           responseData.fallbackReason = responseData.fallbackReason
