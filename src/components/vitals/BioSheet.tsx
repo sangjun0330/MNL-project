@@ -119,38 +119,76 @@ export function BioSheet({
       <div className="space-y-4">
         <div>
           <div className="mb-2 text-[13px] font-semibold">{t("수면 시간 (h)")}</div>
-          <Input
-            inputMode="decimal"
-            value={String(sleep)}
-            onChange={(e) => {
-              const v = e.target.value;
-              const n = v.trim() === "" ? null : Number(v);
-              if (n == null || Number.isNaN(n)) {
-                onSave({ sleepHours: null });
-              } else {
-                onSave({ sleepHours: Math.max(0, Math.min(16, n)) });
-              }
-            }}
-            placeholder={t("예: 6.5")}
-          />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              aria-label={t("수면 시간 0.5시간 감소")}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-ios-sep bg-white text-[18px] font-bold text-ios-text active:bg-ios-bg"
+              onClick={() => onSave({ sleepHours: Math.max(0, Math.round((Number(sleep) - 0.5) * 10) / 10) })}
+            >
+              −
+            </button>
+            <Input
+              inputMode="decimal"
+              value={String(sleep)}
+              onChange={(e) => {
+                const v = e.target.value;
+                const n = v.trim() === "" ? null : Number(v);
+                if (n == null || Number.isNaN(n)) {
+                  onSave({ sleepHours: null });
+                } else {
+                  onSave({ sleepHours: Math.max(0, Math.min(16, n)) });
+                }
+              }}
+              placeholder={t("예: 6.5")}
+              className="text-center"
+            />
+            <button
+              type="button"
+              aria-label={t("수면 시간 0.5시간 증가")}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-ios-sep bg-white text-[18px] font-bold text-ios-text active:bg-ios-bg"
+              onClick={() => onSave({ sleepHours: Math.min(16, Math.round((Number(sleep) + 0.5) * 10) / 10) })}
+            >
+              +
+            </button>
+          </div>
         </div>
 
         <div>
           <div className="mb-2 text-[13px] font-semibold">{t("낮잠 (h)")}</div>
-          <Input
-            inputMode="decimal"
-            value={String(nap)}
-            onChange={(e) => {
-              const v = e.target.value;
-              const n = v.trim() === "" ? null : Number(v);
-              if (n == null || Number.isNaN(n)) {
-                onSave({ napHours: null });
-              } else {
-                onSave({ napHours: Math.max(0, Math.min(4, n)) });
-              }
-            }}
-            placeholder={t("예: 1.0")}
-          />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              aria-label={t("낮잠 0.5시간 감소")}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-ios-sep bg-white text-[18px] font-bold text-ios-text active:bg-ios-bg"
+              onClick={() => onSave({ napHours: Math.max(0, Math.round((Number(nap) - 0.5) * 10) / 10) })}
+            >
+              −
+            </button>
+            <Input
+              inputMode="decimal"
+              value={String(nap)}
+              onChange={(e) => {
+                const v = e.target.value;
+                const n = v.trim() === "" ? null : Number(v);
+                if (n == null || Number.isNaN(n)) {
+                  onSave({ napHours: null });
+                } else {
+                  onSave({ napHours: Math.max(0, Math.min(4, n)) });
+                }
+              }}
+              placeholder={t("예: 1.0")}
+              className="text-center"
+            />
+            <button
+              type="button"
+              aria-label={t("낮잠 0.5시간 증가")}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-ios-sep bg-white text-[18px] font-bold text-ios-text active:bg-ios-bg"
+              onClick={() => onSave({ napHours: Math.min(4, Math.round((Number(nap) + 0.5) * 10) / 10) })}
+            >
+              +
+            </button>
+          </div>
         </div>
 
         <div>

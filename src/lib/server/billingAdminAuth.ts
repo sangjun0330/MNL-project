@@ -27,6 +27,14 @@ async function readUserEmailFromRequest(req: Request): Promise<string | null> {
   }
 }
 
+function readClientIp(req: Request): string {
+  const cfIp = req.headers.get("cf-connecting-ip");
+  if (cfIp) return cfIp.trim().slice(0, 80);
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) return xff.split(",")[0].trim().slice(0, 80);
+  return "unknown";
+}
+
 export async function requireBillingAdmin(
   req: Request
 ): Promise<
@@ -45,7 +53,17 @@ export async function requireBillingAdmin(
   const email = await readUserEmailFromRequest(req);
   const normalizedEmail = email ? email.toLowerCase() : null;
   const isAllowed = adminUserIds.has(userId) || (normalizedEmail ? adminEmails.has(normalizedEmail) : false);
-  if (!isAllowed) return { ok: false, status: 403, error: "admin_forbidden" };
+
+  if (!isAllowed) {
+    // 인증 실패 시 서버 로그에 기록 (Cloudflare Logs에 캡처됨)
+    // 클라이언트에는 상세 사유를 노출하지 않음
+    const ip = readClientIp(req);
+    const path = (() => { try { return new URL(req.url).pathname; } catch { return "unknown"; } })();
+    console.warn(
+      `[AdminAuth] Forbidden access attempt: userId=${userId}, ip=${ip}, path=${path}, ts=${new Date().toISOString()}`
+    );
+    return { ok: false, status: 403, error: "forbidden" };
+  }
 
   return {
     ok: true,

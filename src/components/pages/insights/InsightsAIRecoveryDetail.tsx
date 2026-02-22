@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
 import Link from "next/link";
@@ -226,15 +226,35 @@ const CATEGORY_THEME: Record<
   },
 };
 
+const RECOVERY_PROGRESS_STEPS = [
+  "건강 데이터 수집 중...",
+  "수면 패턴 분석 중...",
+  "일주기리듬 계산 중...",
+  "카페인·스트레스 지표 평가 중...",
+  "맞춤 처방 작성 중...",
+  "최종 결과 정리 중...",
+];
+
 function RecoveryGeneratingOverlay({
   open,
   title,
-  message,
 }: {
   open: boolean;
   title: string;
-  message: string;
 }) {
+  const [stepIdx, setStepIdx] = useState(0);
+
+  useEffect(() => {
+    if (!open) {
+      setStepIdx(0);
+      return;
+    }
+    const id = setInterval(() => {
+      setStepIdx((prev) => (prev + 1 < RECOVERY_PROGRESS_STEPS.length ? prev + 1 : prev));
+    }, 8000);
+    return () => clearInterval(id);
+  }, [open]);
+
   if (!open || typeof document === "undefined") return null;
   return createPortal(
     <div
@@ -257,13 +277,22 @@ function RecoveryGeneratingOverlay({
           </div>
           <div className="min-w-0">
             <div className="text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">{title}</div>
-            <p className="mt-1 text-[13px] leading-relaxed text-ios-sub">{message}</p>
+            <p className="mt-2 text-[13px] font-semibold text-[#007AFF]">{RECOVERY_PROGRESS_STEPS[stepIdx]}</p>
+            <p className="mt-1 text-[12px] leading-relaxed text-ios-sub">평균 1~2분 소요됩니다.</p>
           </div>
         </div>
         <div className="mt-4 flex items-center gap-2">
           <span className="h-2 w-2 rounded-full bg-[#007AFF] rnest-dot-pulse" />
           <span className="h-2 w-2 rounded-full bg-[#007AFF] rnest-dot-pulse [animation-delay:180ms]" />
           <span className="h-2 w-2 rounded-full bg-[#007AFF] rnest-dot-pulse [animation-delay:360ms]" />
+        </div>
+        <div className="mt-3 flex items-center gap-1">
+          {RECOVERY_PROGRESS_STEPS.map((_, i) => (
+            <span
+              key={i}
+              className={`h-1 flex-1 rounded-full transition-colors duration-500 ${i <= stepIdx ? "bg-[#007AFF]" : "bg-[#007AFF]/20"}`}
+            />
+          ))}
         </div>
       </div>
     </div>,
@@ -717,7 +746,6 @@ export function InsightsAIRecoveryDetail() {
       <RecoveryGeneratingOverlay
         open={Boolean(generating && !data && !insightsLocked && !englishTranslationPending)}
         title={t("맞춤회복 분석 중")}
-        message={t("AI가 현재 상태에 맞춘 맞춤회복을 분석하고 있습니다.")}
       />
       <EnglishTranslationPendingPopup
         open={englishTranslationPending}

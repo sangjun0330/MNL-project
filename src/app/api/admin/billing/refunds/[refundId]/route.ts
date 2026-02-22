@@ -48,7 +48,7 @@ export async function GET(req: Request, ctx: any) {
         events,
       },
     });
-  } catch (error: any) {
-    return bad(500, String(error?.message ?? "failed_to_read_refund_request"));
+  } catch {
+    return bad(500, "failed_to_read_refund_request");
   }
 }

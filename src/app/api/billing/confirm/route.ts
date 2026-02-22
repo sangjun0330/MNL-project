@@ -180,7 +180,7 @@ export async function POST(req: Request) {
         subscription,
       },
     });
-  } catch (error: any) {
-    return bad(500, error?.message || "failed_to_finalize_order");
+  } catch {
+    return bad(500, "failed_to_finalize_order");
   }
 }
