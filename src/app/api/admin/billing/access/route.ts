@@ -14,6 +14,7 @@ export async function GET(req: Request) {
     if (
       admin.error === "login_required" ||
       admin.error === "admin_forbidden" ||
+      admin.error === "forbidden" ||
       admin.error === "billing_admin_not_configured"
     ) {
       return NextResponse.json({

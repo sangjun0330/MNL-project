@@ -59,8 +59,8 @@ export async function GET(req: Request) {
         orders,
       },
     });
-  } catch (error: any) {
-    return bad(500, String(error?.message ?? "failed_to_list_admin_orders"));
+  } catch {
+    return bad(500, "failed_to_list_admin_orders");
   }
 }
 

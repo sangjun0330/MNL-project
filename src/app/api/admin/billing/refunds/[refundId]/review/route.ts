@@ -25,7 +25,7 @@ function parseErr(error: any): { status: number; message: string } {
   if (message === "refund_request_not_found") return { status: 404, message };
   if (message.startsWith("invalid_refund_request_state:")) return { status: 409, message };
   if (message === "refund_request_conflict") return { status: 409, message };
-  return { status: 500, message };
+  return { status: 500, message: "review_refund_failed" };
 }
 
 export async function POST(req: Request, ctx: any) {

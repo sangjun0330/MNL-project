@@ -637,7 +637,7 @@ export async function POST(req: NextRequest) {
         Connection: "keep-alive",
       },
     });
-  } catch (error: any) {
-    return bad(500, error?.message || "med_safety_analyze_failed");
+  } catch {
+    return bad(500, "med_safety_analyze_failed");
   }
 }

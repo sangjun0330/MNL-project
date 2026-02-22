@@ -477,9 +477,9 @@ export async function GET(req: NextRequest) {
     const body: AIRecoveryApiSuccess = { ok: true, data: lang === "en" ? payloadEn ?? payloadKo : payloadKo };
 
     return NextResponse.json(body);
-  } catch (error: any) {
+  } catch {
     // 502 is sometimes replaced by Cloudflare HTML error pages.
     // Use 500 so client can read JSON error details.
-    return bad(500, error?.message || "openai_generation_failed");
+    return bad(500, "openai_generation_failed");
   }
 }

@@ -148,7 +148,7 @@ export async function POST(req: Request) {
         subscription,
       },
     });
-  } catch (error: any) {
-    return bad(500, sanitizeText(error?.message, "cancel_failed"));
+  } catch {
+    return bad(500, "cancel_failed");
   }
 }
