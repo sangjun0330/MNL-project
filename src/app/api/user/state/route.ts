@@ -24,8 +24,8 @@ export async function GET(req: Request) {
       state: sanitized,
       updatedAt: row?.updatedAt ?? null,
     });
-  } catch (e: any) {
-    return bad(500, e?.message || "failed to load");
+  } catch {
+    return bad(500, "failed_to_load_state");
   }
 }
 
@@ -47,7 +47,7 @@ export async function POST(req: Request) {
     const serialized = serializeStateForSupabase(state);
     await saveUserState({ userId, payload: serialized });
     return NextResponse.json({ ok: true, syncedAt: new Date().toISOString() });
-  } catch (e: any) {
-    return bad(500, e?.message || "failed to save");
+  } catch {
+    return bad(500, "failed_to_save_state");
   }
 }

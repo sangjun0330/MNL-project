@@ -18,29 +18,29 @@ export async function DELETE(req: Request) {
     // 1. ai_content (AI 회복 캐시)
     const aiContentDelete = await admin.from("ai_content").delete().eq("user_id", userId);
     if (aiContentDelete.error) {
-      return bad(500, `Failed to delete AI content: ${aiContentDelete.error.message}`);
+      return bad(500, "failed_to_delete_account");
     }
 
     // 2. rnest_user_state (사용자 상태 데이터)
     const userStateDelete = await admin.from("rnest_user_state").delete().eq("user_id", userId);
     if (userStateDelete.error) {
-      return bad(500, `Failed to delete user state: ${userStateDelete.error.message}`);
+      return bad(500, "failed_to_delete_account");
     }
 
     // 3. rnest_users (사용자 프로필)
     const usersDelete = await admin.from("rnest_users").delete().eq("user_id", userId);
     if (usersDelete.error) {
-      return bad(500, `Failed to delete user profile: ${usersDelete.error.message}`);
+      return bad(500, "failed_to_delete_account");
     }
 
     // 4. Supabase Auth 유저 삭제
     const authDelete = await admin.auth.admin.deleteUser(userId);
     if (authDelete.error) {
-      return bad(500, `Failed to delete auth user: ${authDelete.error.message}`);
+      return bad(500, "failed_to_delete_account");
     }
 
     return NextResponse.json({ ok: true });
-  } catch (e: any) {
-    return bad(500, e?.message || "Failed to delete account.");
+  } catch {
+    return bad(500, "failed_to_delete_account");
   }
 }

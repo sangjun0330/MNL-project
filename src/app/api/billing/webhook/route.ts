@@ -47,13 +47,33 @@ function isPaymentKey(value: string) {
   return /^[A-Za-z0-9_-]{10,220}$/.test(value);
 }
 
+function timingSafeEqual(a: string, b: string): boolean {
+  const encoder = new TextEncoder();
+  const aBytes = encoder.encode(a);
+  const bBytes = encoder.encode(b);
+  if (aBytes.length !== bBytes.length) {
+    // 길이 차이도 시간 기반 공격으로 유추되지 않도록 동일한 연산을 수행 후 false 반환
+    let diff = 0;
+    for (let i = 0; i < Math.max(aBytes.length, bBytes.length); i++) {
+      diff |= (aBytes[i] ?? 0) ^ (bBytes[i] ?? 0);
+    }
+    return false;
+  }
+  let diff = 0;
+  for (let i = 0; i < aBytes.length; i++) {
+    diff |= aBytes[i] ^ bBytes[i];
+  }
+  return diff === 0;
+}
+
 function isWebhookAuthorized(req: Request) {
   const expected = clean(process.env.TOSS_WEBHOOK_TOKEN, 120);
-  if (!expected) return true;
+  // 토큰이 설정되지 않은 경우 모든 요청을 거부하여 위조 웹훅 공격 방지
+  if (!expected) return false;
 
   const urlToken = clean(new URL(req.url).searchParams.get("token"), 120);
   const headerToken = clean(req.headers.get("x-toss-webhook-token"), 120);
-  return urlToken === expected || headerToken === expected;
+  return timingSafeEqual(urlToken, expected) || timingSafeEqual(headerToken, expected);
 }
 
 function toIpv4Int(ip: string): number | null {
@@ -272,8 +292,9 @@ export async function POST(req: Request) {
     }
 
     return ok({ accepted: false, reason: "ignored_event", eventType, orderId });
-  } catch (error: any) {
+  } catch {
     // Return non-2xx so Toss retries for temporary failures.
-    return bad(500, clean(error?.message, 220) || "webhook_processing_failed");
+    // 내부 에러 상세 정보는 외부에 노출하지 않음
+    return bad(500, "webhook_processing_failed");
   }
 }

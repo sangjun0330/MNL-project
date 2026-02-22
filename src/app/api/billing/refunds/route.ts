@@ -30,7 +30,7 @@ export async function GET(req: Request) {
         requests,
       },
     });
-  } catch (error: any) {
-    return bad(500, String(error?.message ?? "failed_to_list_refunds"));
+  } catch {
+    return bad(500, "failed_to_list_refunds");
   }
 }

@@ -84,8 +84,8 @@ export async function POST(req: Request) {
       currency: "KRW",
       orderName: product.orderName,
     });
-  } catch (error: any) {
-    return bad(500, error?.message || "failed_to_create_order");
+  } catch {
+    return bad(500, "failed_to_create_order");
   }
 
   const origin = resolveOrigin(req);

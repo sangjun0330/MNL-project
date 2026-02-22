@@ -142,11 +142,11 @@ export async function GET(req: Request) {
       },
       { status: 200 }
     );
-  } catch (error: any) {
+  } catch {
     return NextResponse.json(
       {
         ok: false,
-        error: String(error?.message ?? "med_safety_history_failed"),
+        error: "med_safety_history_failed",
       },
       { status: 500 }
     );

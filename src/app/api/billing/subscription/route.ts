@@ -28,7 +28,7 @@ export async function GET(req: Request) {
         purchaseSummary,
       },
     });
-  } catch (error: any) {
-    return bad(500, error?.message || "failed_to_read_subscription");
+  } catch {
+    return bad(500, "failed_to_read_subscription");
   }
 }

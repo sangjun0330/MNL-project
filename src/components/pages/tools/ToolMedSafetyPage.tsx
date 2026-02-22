@@ -1049,13 +1049,17 @@ export function ToolMedSafetyPage() {
 
   const onImagePicked = useCallback(
     (file: File) => {
+      if (file.size > 6 * 1024 * 1024) {
+        setError(t("이미지 용량이 너무 큽니다. 6MB 이하로 다시 업로드해 주세요."));
+        return;
+      }
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       setImageFile(file);
       setPreviewUrl(URL.createObjectURL(file));
       setError(null);
       setCameraError(null);
     },
-    [previewUrl]
+    [previewUrl, t]
   );
 
   const clearImage = useCallback(() => {
@@ -1824,6 +1828,7 @@ export function ToolMedSafetyPage() {
               <Button variant="secondary" className={SECONDARY_FLAT_BTN} onClick={() => fileInputRef.current?.click()}>
                 {t("사진 업로드")}
               </Button>
+              <span className="text-[11px] text-ios-sub">최대 6MB</span>
               <Button variant="secondary" className={SECONDARY_FLAT_BTN} onClick={() => void startCamera()} disabled={cameraStarting}>
                 {cameraStarting ? t("카메라 연결 중...") : t("실시간 카메라")}
               </Button>
@@ -1862,7 +1867,11 @@ export function ToolMedSafetyPage() {
               <div className="overflow-hidden rounded-2xl border border-ios-sep p-2">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={previewUrl} alt={t("업로드 이미지 미리보기")} className="max-h-[220px] w-full rounded-xl object-contain" />
-                {imageFile ? <div className="mt-2 text-[12px] text-ios-sub">{imageFile.name}</div> : null}
+                {imageFile ? (
+                  <div className="mt-2 text-[12px] text-ios-sub">
+                    {imageFile.name} · {(imageFile.size / 1024 / 1024).toFixed(1)}MB
+                  </div>
+                ) : null}
               </div>
             ) : null}
 

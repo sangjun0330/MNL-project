@@ -32,7 +32,8 @@ function parseErr(error: any): { status: number; message: string } {
   if (message === "refund_request_forbidden") return { status: 403, message };
   if (message.startsWith("invalid_refund_request_state:")) return { status: 409, message };
   if (message === "refund_request_conflict") return { status: 409, message };
-  return { status: 500, message };
+  // 예상치 못한 에러는 내부 정보 노출 방지를 위해 일반 메시지 반환
+  return { status: 500, message: "withdraw_refund_failed" };
 }
 
 export async function POST(req: Request, ctx: any) {

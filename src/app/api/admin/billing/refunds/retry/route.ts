@@ -20,11 +20,29 @@ function toLimit(value: unknown, fallback = 10): number {
   return Math.max(1, Math.min(30, Math.round(n)));
 }
 
+function timingSafeEqual(a: string, b: string): boolean {
+  const encoder = new TextEncoder();
+  const aBytes = encoder.encode(a);
+  const bBytes = encoder.encode(b);
+  if (aBytes.length !== bBytes.length) {
+    let diff = 0;
+    for (let i = 0; i < Math.max(aBytes.length, bBytes.length); i++) {
+      diff |= (aBytes[i] ?? 0) ^ (bBytes[i] ?? 0);
+    }
+    return false;
+  }
+  let diff = 0;
+  for (let i = 0; i < aBytes.length; i++) {
+    diff |= aBytes[i] ^ bBytes[i];
+  }
+  return diff === 0;
+}
+
 function readCronAuthorization(req: Request): { ok: true; actorUserId: string } | { ok: false } {
   const expected = clean(process.env.BILLING_RETRY_CRON_SECRET, 180);
   if (!expected) return { ok: false };
   const token = clean(req.headers.get("x-billing-cron-secret"), 180);
-  if (!token || token !== expected) return { ok: false };
+  if (!token || !timingSafeEqual(token, expected)) return { ok: false };
   return { ok: true, actorUserId: "system:refund-retry-cron" };
 }
 
@@ -110,7 +128,7 @@ export async function POST(req: Request) {
         items,
       },
     });
-  } catch (error: any) {
-    return bad(500, clean(error?.message, 220) || "retry_batch_failed");
+  } catch {
+    return bad(500, "retry_batch_failed");
   }
 }

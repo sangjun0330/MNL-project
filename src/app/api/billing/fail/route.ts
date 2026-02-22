@@ -49,7 +49,7 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ ok: true });
-  } catch (error: any) {
-    return bad(500, error?.message || "failed_to_mark_failed");
+  } catch {
+    return bad(500, "failed_to_mark_failed");
   }
 }
