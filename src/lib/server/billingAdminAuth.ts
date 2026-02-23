@@ -47,7 +47,8 @@ export async function requireBillingAdmin(
   const adminUserIds = parseCsvSet(process.env.BILLING_ADMIN_USER_IDS);
   const adminEmails = parseCsvSet(process.env.BILLING_ADMIN_EMAILS, (v) => v.toLowerCase());
   if (adminUserIds.size === 0 && adminEmails.size === 0) {
-    return { ok: false, status: 500, error: "billing_admin_not_configured" };
+    console.error("[AdminAuth] BILLING_ADMIN_USER_IDS and BILLING_ADMIN_EMAILS are not configured");
+    return { ok: false, status: 403, error: "forbidden" };
   }
 
   const email = await readUserEmailFromRequest(req);
