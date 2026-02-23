@@ -1,3 +1,5 @@
+import { notFound } from "next/navigation";
+
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
@@ -9,13 +11,10 @@ export default async function DevLogsPage({
   const params = await searchParams;
   const token = (typeof params.token === "string" ? params.token : "")?.trim();
   const required = process.env.DEV_LOG_VIEW_TOKEN;
+  // LOW-1: 인증 실패 시 존재 여부 힌트 없이 404 반환
+  // URL 토큰은 브라우저 히스토리/서버 로그에 노출되므로 운영환경에서는 사용 주의
   if (!required || token !== required) {
-    return (
-      <div className="mx-auto max-w-[720px] p-6">
-        <h1 className="text-xl font-semibold">Not Found</h1>
-        <p className="mt-2 text-sm text-gray-500">DEV_LOG_VIEW_TOKEN을 설정하고 ?token= 로 접근하세요.</p>
-      </div>
-    );
+    notFound();
   }
 
   return (

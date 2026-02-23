@@ -125,7 +125,16 @@ function isWebhookIpAllowed(req: Request): boolean {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  if (rules.length === 0) return true;
+
+  if (rules.length === 0) {
+    // HIGH-4: IP 허용목록 미설정 경고 — 웹훅 인증이 토큰에만 의존하게 됨
+    // 운영 환경에서는 TOSS_WEBHOOK_IP_ALLOWLIST를 반드시 설정하세요
+    // 토스페이먼츠 공식 IP 목록: https://docs.tosspayments.com/reference/webhook
+    if (process.env.NODE_ENV === "production") {
+      console.error("[Webhook] TOSS_WEBHOOK_IP_ALLOWLIST is not configured. All IPs are allowed. Set this in production to restrict webhook sources.");
+    }
+    return true;
+  }
 
   const ip = readWebhookClientIp(req);
   if (!ip) return false;

@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import "./globals.css";
 import { PWARegister } from "@/components/PWARegister";
 import { AuthProvider } from "@/components/system/AuthProvider";
@@ -59,9 +60,16 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // middleware.ts에서 설정한 nonce를 읽어 Next.js의 내부 스크립트에 전달
+  // https://nextjs.org/docs/app/building-your-application/configuring/content-security-policy
+  const nonce = (await headers()).get("x-nonce") ?? "";
   return (
     <html lang="ko">
+      <head>
+        {/* Next.js가 이 nonce를 자신이 생성하는 인라인 스크립트에 자동으로 적용 */}
+        {nonce && <meta property="csp-nonce" content={nonce} />}
+      </head>
       <body>
         <AuthProvider>
           <PWARegister />

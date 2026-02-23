@@ -48,13 +48,29 @@ function readStateFiles(dir) {
   return out.sort();
 }
 
+// MEDIUM-2: SQL 인젝션 방지 — userId 형식 검증
+// Supabase auth.users.id는 UUID 형식이거나 provider:email 형식
+const VALID_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const VALID_PROVIDER_ID = /^[a-zA-Z0-9_-]{1,32}:[a-zA-Z0-9._%+\-]{1,64}@[a-zA-Z0-9.\-]{1,64}\.[a-zA-Z]{2,}$/;
+
+function isValidUserId(userId) {
+  const str = String(userId ?? "").trim();
+  if (!str || str.length > 320) return false;
+  return VALID_UUID.test(str) || VALID_PROVIDER_ID.test(str);
+}
+
 function parseStateFile(filePath) {
   const raw = fs.readFileSync(filePath, "utf8");
   const json = JSON.parse(raw);
   if (!isObject(json)) return null;
   if (!json.userId || !json.payload) return null;
+  const userId = String(json.userId);
+  if (!isValidUserId(userId)) {
+    console.warn(`[warn] invalid userId format, skipping: ${filePath} (userId: ${userId.slice(0, 60)})`);
+    return null;
+  }
   return {
-    userId: String(json.userId),
+    userId,
     payload: json.payload,
     updatedAt: toIso(json.updatedAt),
     source: filePath,
