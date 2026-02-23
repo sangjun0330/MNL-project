@@ -11,11 +11,11 @@
 
 | 등급 | 건수 | 즉시 조치 필요 |
 |------|------|----------------|
-| 🔴 CRITICAL | 2 | ✅ 즉시 |
-| 🟠 HIGH | 5 | ✅ 즉시 |
+| 🔴 CRITICAL | 3 | ✅ 즉시 |
+| 🟠 HIGH | 7 | ✅ 즉시 |
 | 🟡 MEDIUM | 5 | 1주일 내 |
 | 🔵 LOW | 3 | 1개월 내 |
-| **합계** | **15** | |
+| **합계** | **18** | |
 
 ---
 
@@ -128,6 +128,43 @@ import { randomBytes } from 'crypto';  // Node.js
 // 또는 Edge Runtime에서는:
 const randBytes = crypto.getRandomValues(new Uint8Array(8));
 const rand = Array.from(randBytes).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 10);
+```
+
+---
+
+---
+
+### [CRITICAL-3] 관리자 이메일 주소 소스코드에 하드코딩
+
+**파일:** `src/lib/server/refundNotification.ts:27`
+
+**문제 코드:**
+```typescript
+const REFUND_ADMIN_EMAIL = "REFUND_ADMIN_EMAIL_REDACTED";  // ← 실제 관리자 이메일 하드코딩
+```
+
+**위험도:** CRITICAL
+관리자 이메일이 소스코드에 그대로 포함되어 있습니다. 저장소 접근 권한이 있는 누구나 이를 확인할 수 있으며:
+- 타깃형 피싱(Spear Phishing) 공격 대상이 됨
+- 스팸/소셜 엔지니어링 공격에 악용 가능
+- 개인정보(PII)를 코드베이스에 포함하는 것은 보안 정책 위반
+
+**수정 계획:**
+```typescript
+// ❌ 현재
+const REFUND_ADMIN_EMAIL = "REFUND_ADMIN_EMAIL_REDACTED";
+
+// ✅ 수정 후 — 환경변수로 이동
+const REFUND_ADMIN_EMAIL = process.env.REFUND_ADMIN_EMAIL ?? "";
+if (!REFUND_ADMIN_EMAIL) {
+  console.error("[RefundNotification] REFUND_ADMIN_EMAIL not configured");
+}
+```
+
+`.env.example`에 추가:
+```
+# ⚠️ 필수: 환불 처리 알림을 받을 관리자 이메일
+REFUND_ADMIN_EMAIL=your-admin@example.com
 ```
 
 ---
@@ -250,7 +287,79 @@ Fail-open 패턴입니다. 운영 환경에서 `TOSS_WEBHOOK_IP_ALLOWLIST`를 �
 
 ---
 
-### [HIGH-5] 결제 API에 요청 레이트 리미팅 없음
+### [HIGH-5] `NEXT_PUBLIC_OPENAI_API_KEY` 폴백 — OpenAI 키 브라우저 노출 위험
+
+**파일:**
+- `src/lib/server/openaiMedSafety.ts:93`
+- `src/lib/server/openaiRecovery.ts:125`
+
+**문제 코드:**
+```typescript
+const key =
+  process.env.OPENAI_API_KEY ??
+  process.env.OPENAI_KEY ??
+  process.env.OPENAI_API_TOKEN ??
+  process.env.OPENAI_SECRET_KEY ??
+  process.env.NEXT_PUBLIC_OPENAI_API_KEY ??  // ← NEXT_PUBLIC_ 접두사 = 브라우저에 노출
+  "";
+```
+
+**위험도:** HIGH
+`NEXT_PUBLIC_` 접두사가 붙은 환경변수는 Next.js 빌드 시 번들에 포함되어 **브라우저 JavaScript로 완전 공개**됩니다. 만약 개발자가 `NEXT_PUBLIC_OPENAI_API_KEY`를 설정하면 API 키가 클라이언트에 그대로 노출되어 누구나 해당 키로 무제한 OpenAI API 호출이 가능합니다.
+
+**수정 계획:**
+```typescript
+// ❌ 현재 — NEXT_PUBLIC_ 폴백 제거
+const key =
+  process.env.OPENAI_API_KEY ??
+  process.env.OPENAI_KEY ??
+  process.env.OPENAI_API_TOKEN ??
+  process.env.OPENAI_SECRET_KEY ??
+  // process.env.NEXT_PUBLIC_OPENAI_API_KEY ← 완전 제거
+  "";
+```
+
+그리고 `.env.example` 주석에 경고 추가:
+```
+# ⚠️ NEVER use NEXT_PUBLIC_OPENAI_API_KEY — use OPENAI_API_KEY (server-only)
+OPENAI_API_KEY=sk-your-key-here
+```
+
+---
+
+### [HIGH-6] npm 의존성 패키지 HIGH 취약점 18건
+
+**현재 상태:**
+```
+npm audit 결과: HIGH 18건, MODERATE 1건
+- @eslint/eslintrc          HIGH
+- @typescript-eslint/*      HIGH (다수)
+- eslint                    HIGH
+- eslint-config-next        HIGH
+- ajv                       MODERATE
+```
+
+**위험도:** MEDIUM → HIGH
+이 취약점들은 모두 **개발(dev) 의존성**이라 프로덕션 런타임에는 직접 영향을 주지 않습니다. 그러나:
+- CI/CD 파이프라인, 빌드 서버에서 실행되는 코드에 영향
+- 빌드 시스템 공격(supply chain attack)의 진입점이 될 수 있음
+- 향후 프로덕션 의존성으로 전환될 경우 위험
+
+**수정 계획:**
+```bash
+# 자동 수정 (주요 버전 충돌 없는 경우)
+npm audit fix
+
+# 강제 수정 (주요 버전 변경 포함, 테스트 필요)
+npm audit fix --force
+
+# 또는 특정 패키지 업데이트
+npm update eslint @typescript-eslint/eslint-plugin @typescript-eslint/parser
+```
+
+---
+
+### [HIGH-7] 결제 API에 요청 레이트 리미팅 없음
 
 **파일:**
 - `src/app/api/billing/checkout/route.ts`
@@ -500,29 +609,32 @@ URL에 포함된 토큰은 브라우저 히스토리, 서버 액세스 로그, H
 |---|------|------|------|
 | 1 | `.gitignore`에 `.wnl_*` 패턴 추가 | 개발자 | `.gitignore` |
 | 2 | git 히스토리에서 `.wnl_users/`, `.wnl_logs/` 제거 | 개발자 | git history |
-| 3 | `Math.random()` → `crypto.getRandomValues()` 교체 | 개발자 | `checkout/route.ts`, `analyze/route.ts` |
-| 4 | `TOSS_WEBHOOK_IP_ALLOWLIST` 운영 환경에 즉시 설정 | 운영 | `.env` |
-| 5 | 관리자 API 응답에서 `email` 필드 제거 | 개발자 | `admin/billing/access/route.ts` |
+| 3 | 하드코딩된 관리자 이메일 환경변수로 이동 | 개발자 | `refundNotification.ts:27` |
+| 4 | `NEXT_PUBLIC_OPENAI_API_KEY` 폴백 코드 제거 | 개발자 | `openaiMedSafety.ts`, `openaiRecovery.ts` |
+| 5 | `Math.random()` → `crypto.getRandomValues()` 교체 | 개발자 | `checkout/route.ts`, `analyze/route.ts` |
+| 6 | `TOSS_WEBHOOK_IP_ALLOWLIST` 운영 환경에 즉시 설정 | 운영 | `.env` |
+| 7 | 관리자 API 응답에서 `email` 필드 제거 | 개발자 | `admin/billing/access/route.ts` |
 
 ### Phase 2 — 단기 (1주일 이내)
 
 | # | 작업 | 담당 | 파일 |
 |---|------|------|------|
-| 6 | HSTS 헤더 추가 | 개발자 | `next.config.mjs` |
-| 7 | 결제 API 레이트 리미팅 구현 | 개발자 | `checkout/route.ts`, `confirm/route.ts` |
-| 8 | `billing_admin_not_configured` 에러 메시지 숨김 | 개발자 | `billingAdminAuth.ts` |
-| 9 | SQL 복구 스크립트 userId 형식 검증 강화 | 개발자 | `restore-rnest-user-state-from-local.mjs` |
-| 10 | `.env.example`에서 `TOSS_WEBHOOK_TOKEN` 필수 표시 | 개발자 | `.env.example` |
+| 8 | HSTS 헤더 추가 | 개발자 | `next.config.mjs` |
+| 9 | 결제 API 레이트 리미팅 구현 | 개발자 | `checkout/route.ts`, `confirm/route.ts` |
+| 10 | `npm audit fix` 실행 및 취약 패키지 업데이트 | 개발자 | `package.json` |
+| 11 | `billing_admin_not_configured` 에러 메시지 숨김 | 개발자 | `billingAdminAuth.ts` |
+| 12 | SQL 복구 스크립트 userId 형식 검증 강화 | 개발자 | `restore-rnest-user-state-from-local.mjs` |
+| 13 | `.env.example`에서 `TOSS_WEBHOOK_TOKEN` 필수 표시 | 개발자 | `.env.example` |
 
 ### Phase 3 — 중기 (1개월 이내)
 
 | # | 작업 | 담당 | 파일 |
 |---|------|------|------|
-| 11 | CSP nonce 기반으로 `'unsafe-inline'` 제거 | 개발자 | `next.config.mjs`, middleware |
-| 12 | ESLint 빌드 재활성화 + 보안 플러그인 추가 | 개발자 | `next.config.mjs`, `.eslintrc` |
-| 13 | Dev 로그 페이지 프로덕션 접근 차단 | 개발자 | `next.config.mjs`, `dev/logs/page.tsx` |
-| 14 | 문서 파일 로컬 경로 제거 | 개발자 | `supabase/manual/*.md` |
-| 15 | 개인정보 노출 관련 유저 통보 검토 | 법무/개발자 | — |
+| 14 | CSP nonce 기반으로 `'unsafe-inline'` 제거 | 개발자 | `next.config.mjs`, middleware |
+| 15 | ESLint 빌드 재활성화 + 보안 플러그인 추가 | 개발자 | `next.config.mjs`, `.eslintrc` |
+| 16 | Dev 로그 페이지 프로덕션 접근 차단 | 개발자 | `next.config.mjs`, `dev/logs/page.tsx` |
+| 17 | 문서 파일 로컬 경로 제거 | 개발자 | `supabase/manual/*.md` |
+| 18 | 개인정보 노출 관련 유저 통보 검토 | 법무/개발자 | — |
 
 ---
 
