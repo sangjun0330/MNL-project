@@ -1,9 +1,9 @@
 # RNest Supabase Storage Map (Current System)
 
 ## 1) 사용자 기록 저장 플로우
-- 클라이언트 상태 변경: `PROJECT_ROOT/src/components/system/CloudStateSync.tsx`
-- 저장 API: `PROJECT_ROOT/src/app/api/user/state/route.ts`
-- 서버 저장 구현: `PROJECT_ROOT/src/lib/server/userStateStore.ts`
+- 클라이언트 상태 변경: `src/components/system/CloudStateSync.tsx`
+- 저장 API: `src/app/api/user/state/route.ts`
+- 서버 저장 구현: `src/lib/server/userStateStore.ts`
 
 저장 순서:
 1. 앱 상태 변경 발생
