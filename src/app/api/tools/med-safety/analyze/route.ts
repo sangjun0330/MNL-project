@@ -229,7 +229,7 @@ async function safeAppendMedSafetyRecent(params: {
     );
     const prevRecent = normalizeRecentRecords(previous.medSafetyRecent, MED_SAFETY_RECENT_LIMIT_PRO);
     const nextRecord: MedSafetyRecentRecord = {
-      id: `msr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+      id: `msr_${Date.now().toString(36)}_${Array.from(crypto.getRandomValues(new Uint8Array(4))).map((b) => b.toString(16).padStart(2, "0")).join("")}`,
       savedAt: Date.now(),
       language: params.language,
       request: {

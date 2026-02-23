@@ -6,8 +6,16 @@ dist
 .env
 .env.local
 .DS_Store
+
+# 로컬 사용자 데이터 — PII/건강정보 포함, 절대 커밋 금지
+.wnl_users
+.wnl_logs
 .rnest_logs
 .rnest_users
+
+# 스크립트가 생성하는 복구 SQL — 실제 사용자 데이터 포함 가능
+supabase/manual/restore_rnest_user_state_from_local.sql
+
 playwright-report
 test-results
 public/runtime/vendor/web-llm/index.js

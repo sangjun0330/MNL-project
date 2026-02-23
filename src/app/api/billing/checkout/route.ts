@@ -14,7 +14,8 @@ function bad(status: number, message: string) {
 
 function buildOrderId(productId: "pro" | "credit10") {
   const stamp = Date.now().toString(36);
-  const rand = Math.random().toString(36).slice(2, 10);
+  const bytes = crypto.getRandomValues(new Uint8Array(6));
+  const rand = Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
   return `rnest_${productId}_${stamp}_${rand}`.slice(0, 64);
 }
 
