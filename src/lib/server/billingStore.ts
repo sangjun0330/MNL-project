@@ -1755,6 +1755,19 @@ export async function withdrawRefundRequestByUser(input: {
   });
 }
 
+export async function countRecentReadyOrdersByUser(userId: string, windowMs = 60 * 60 * 1000): Promise<number> {
+  const admin = getSupabaseAdmin();
+  const since = new Date(Date.now() - windowMs).toISOString();
+  const { count, error } = await admin
+    .from("billing_orders")
+    .select("order_id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("status", "READY")
+    .gte("created_at", since);
+  if (error) throw error;
+  return count ?? 0;
+}
+
 export async function listDueRetryableRefundRequests(limit = 20): Promise<BillingRefundRequestSummary[]> {
   const admin = getSupabaseAdmin();
   const safeLimit = Math.max(1, Math.min(200, Math.round(limit)));

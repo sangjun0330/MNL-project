@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { asCheckoutProductId, getCheckoutProductDefinition } from "@/lib/billing/plans";
-import { createBillingOrder, createCustomerKey } from "@/lib/server/billingStore";
+import { countRecentReadyOrdersByUser, createBillingOrder, createCustomerKey } from "@/lib/server/billingStore";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { getRouteSupabaseClient } from "@/lib/server/supabaseRouteClient";
 import { readTossClientKeyFromEnv, readTossSecretKeyFromEnv } from "@/lib/server/tossConfig";
@@ -53,6 +53,14 @@ async function readCustomer(req: Request) {
 export async function POST(req: Request) {
   const userId = await readUserIdFromRequest(req);
   if (!userId) return bad(401, "login_required");
+
+  // H-7: 1시간 내 READY 주문 5개 초과 시 요청 차단 (결제 API 남용 방지)
+  try {
+    const readyCount = await countRecentReadyOrdersByUser(userId);
+    if (readyCount >= 5) return bad(429, "too_many_pending_orders");
+  } catch {
+    // 카운트 조회 실패 시 fail-open: 진행 허용
+  }
 
   const client = readTossClientKeyFromEnv();
   if (!client.ok) return bad(500, client.error);
