@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-export const runtime = "edge";
+// Next.js 미들웨어는 항상 Edge Runtime에서 실행됨 — 'runtime' 선언 불필요
 
 function toBase64(bytes: Uint8Array): string {
   let str = "";
