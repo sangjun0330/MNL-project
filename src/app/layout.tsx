@@ -60,6 +60,10 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
+// Cloudflare Pages(next-on-pages)는 모든 라우트가 Edge Runtime이어야 합니다.
+// 루트 레이아웃에 선언하면 이 레이아웃을 사용하는 모든 하위 페이지에 전파됩니다.
+export const runtime = "edge";
+
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   // middleware.ts에서 설정한 nonce를 읽어 Next.js의 내부 스크립트에 전달
   // https://nextjs.org/docs/app/building-your-application/configuring/content-security-policy
