@@ -16,6 +16,8 @@ export const dynamic = "force-dynamic";
 const DONE_STATUSES = new Set(["DONE"]);
 const CANCELED_STATUSES = new Set(["CANCELED", "PARTIAL_CANCELED"]);
 const FAILED_STATUSES = new Set(["ABORTED", "EXPIRED", "FAILED", "REJECTED"]);
+let warnedDeprecatedQueryToken = false;
+let warnedInsecureIpFallback = false;
 
 function ok(data?: Record<string, unknown>) {
   return NextResponse.json({ ok: true, ...(data ?? {}) });
@@ -27,6 +29,12 @@ function bad(status: number, message: string) {
 
 function clean(value: unknown, size = 220) {
   return String(value ?? "").trim().slice(0, size);
+}
+
+function envFlag(name: string, fallback = false) {
+  const raw = String(process.env[name] ?? "").trim().toLowerCase();
+  if (!raw) return fallback;
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
 }
 
 function toAmount(value: unknown) {
@@ -71,9 +79,22 @@ function isWebhookAuthorized(req: Request) {
   // 토큰이 설정되지 않은 경우 모든 요청을 거부하여 위조 웹훅 공격 방지
   if (!expected) return false;
 
-  const urlToken = clean(new URL(req.url).searchParams.get("token"), 120);
   const headerToken = clean(req.headers.get("x-toss-webhook-token"), 120);
-  return timingSafeEqual(urlToken, expected) || timingSafeEqual(headerToken, expected);
+  if (headerToken) return timingSafeEqual(headerToken, expected);
+
+  const urlToken = clean(new URL(req.url).searchParams.get("token"), 120);
+  if (!urlToken) return false;
+
+  const allowQueryToken = envFlag("TOSS_WEBHOOK_ALLOW_QUERY_TOKEN", process.env.NODE_ENV !== "production");
+  if (!allowQueryToken) return false;
+
+  if (process.env.NODE_ENV === "production" && !warnedDeprecatedQueryToken) {
+    warnedDeprecatedQueryToken = true;
+    console.warn(
+      "[Webhook] Query-string token fallback is enabled. Move token to x-toss-webhook-token header and disable TOSS_WEBHOOK_ALLOW_QUERY_TOKEN."
+    );
+  }
+  return timingSafeEqual(urlToken, expected);
 }
 
 function toIpv4Int(ip: string): number | null {
@@ -120,26 +141,32 @@ function readWebhookClientIp(req: Request): string {
   return "";
 }
 
-function isWebhookIpAllowed(req: Request): boolean {
+function checkWebhookIpAllowed(req: Request): { ok: true } | { ok: false; status: number; error: string } {
   const rules = clean(process.env.TOSS_WEBHOOK_IP_ALLOWLIST, 1200)
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
 
   if (rules.length === 0) {
-    // HIGH-4: IP 허용목록 미설정 경고 — 웹훅 인증이 토큰에만 의존하게 됨
-    // 운영 환경에서는 TOSS_WEBHOOK_IP_ALLOWLIST를 반드시 설정하세요
-    // 토스페이먼츠 공식 IP 목록: https://docs.tosspayments.com/reference/webhook
-    if (process.env.NODE_ENV === "production") {
-      console.error("[Webhook] TOSS_WEBHOOK_IP_ALLOWLIST is not configured. All IPs are allowed. Set this in production to restrict webhook sources.");
+    const allowInsecureFallback = envFlag("TOSS_WEBHOOK_ALLOW_INSECURE_NO_IP_ALLOWLIST", process.env.NODE_ENV !== "production");
+    if (!allowInsecureFallback) {
+      return { ok: false, status: 503, error: "webhook_ip_allowlist_not_configured" };
     }
-    return true;
+    if (process.env.NODE_ENV === "production" && !warnedInsecureIpFallback) {
+      warnedInsecureIpFallback = true;
+      console.error(
+        "[Webhook] TOSS_WEBHOOK_IP_ALLOWLIST is not configured. Temporary insecure fallback is enabled via TOSS_WEBHOOK_ALLOW_INSECURE_NO_IP_ALLOWLIST."
+      );
+    }
+    return { ok: true };
   }
 
   const ip = readWebhookClientIp(req);
-  if (!ip) return false;
+  if (!ip) return { ok: false, status: 403, error: "webhook_ip_missing" };
 
-  return rules.some((rule) => matchesIpv4Rule(ip, rule));
+  return rules.some((rule) => matchesIpv4Rule(ip, rule))
+    ? { ok: true }
+    : { ok: false, status: 403, error: "forbidden_webhook_ip" };
 }
 
 async function syncRefundRequestFromWebhookCancel(input: {
@@ -179,8 +206,9 @@ export async function POST(req: Request) {
   if (!isWebhookAuthorized(req)) {
     return bad(401, "unauthorized_webhook");
   }
-  if (!isWebhookIpAllowed(req)) {
-    return bad(403, "forbidden_webhook_ip");
+  const ipCheck = checkWebhookIpAllowed(req);
+  if (!ipCheck.ok) {
+    return bad(ipCheck.status, ipCheck.error);
   }
 
   let payload: any = null;

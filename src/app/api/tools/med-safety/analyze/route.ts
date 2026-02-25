@@ -23,6 +23,9 @@ const MED_SAFETY_RECENT_LIMIT_PRO = 10;
 const DEFAULT_ANALYZE_TIMEOUT_MS = 420_000;
 const MIN_ANALYZE_TIMEOUT_MS = 300_000;
 const MAX_ANALYZE_TIMEOUT_MS = 900_000;
+const DEFAULT_MED_SAFETY_HISTORY_RETENTION_DAYS = 30;
+const MIN_MED_SAFETY_HISTORY_RETENTION_DAYS = 1;
+const MAX_MED_SAFETY_HISTORY_RETENTION_DAYS = 90;
 
 function safeErrorString(error: unknown) {
   const safeError = String(error ?? "unknown_error")
@@ -178,6 +181,12 @@ async function safeSaveMedSafetyContent(
 
 function normalizeRecentRecords(value: unknown, limit = MED_SAFETY_RECENT_LIMIT_PRO) {
   const normalizedLimit = Math.max(MED_SAFETY_RECENT_LIMIT_FREE, Math.min(MED_SAFETY_RECENT_LIMIT_PRO, Math.round(limit)));
+  const retentionDaysRaw = Number(process.env.MED_SAFETY_HISTORY_RETENTION_DAYS ?? DEFAULT_MED_SAFETY_HISTORY_RETENTION_DAYS);
+  const retentionDays = Number.isFinite(retentionDaysRaw)
+    ? Math.max(MIN_MED_SAFETY_HISTORY_RETENTION_DAYS, Math.min(MAX_MED_SAFETY_HISTORY_RETENTION_DAYS, Math.round(retentionDaysRaw)))
+    : DEFAULT_MED_SAFETY_HISTORY_RETENTION_DAYS;
+  const retentionMs = retentionDays * 24 * 60 * 60 * 1000;
+  const now = Date.now();
   if (!Array.isArray(value)) return [] as MedSafetyRecentRecord[];
   const out: MedSafetyRecentRecord[] = [];
   for (const item of value) {
@@ -186,6 +195,7 @@ function normalizeRecentRecords(value: unknown, limit = MED_SAFETY_RECENT_LIMIT_
     if (!id) continue;
     const savedAtRaw = Number(item.savedAt);
     const savedAt = Number.isFinite(savedAtRaw) && savedAtRaw > 0 ? savedAtRaw : Date.now();
+    if (savedAt < now - retentionMs) continue;
     const language = String(item.language ?? "ko").toLowerCase() === "en" ? "en" : "ko";
     const requestNode = isRecord(item.request) ? item.request : {};
     const resultNode = isRecord(item.result) ? item.result : null;
@@ -199,7 +209,7 @@ function normalizeRecentRecords(value: unknown, limit = MED_SAFETY_RECENT_LIMIT_
         mode: pickMode((requestNode.mode as FormDataEntryValue | null) ?? null),
         situation: pickSituation((requestNode.situation as FormDataEntryValue | null) ?? null),
         queryIntent: pickQueryIntent((requestNode.queryIntent as FormDataEntryValue | null) ?? null) ?? null,
-        patientSummary: requestNode.patientSummary == null ? null : String(requestNode.patientSummary),
+        patientSummary: null,
         imageName: requestNode.imageName == null ? null : String(requestNode.imageName),
       },
       result: resultNode as unknown as MedSafetyResponseData,
@@ -238,7 +248,7 @@ async function safeAppendMedSafetyRecent(params: {
         mode: params.mode,
         situation: params.situation,
         queryIntent: params.queryIntent ?? null,
-        patientSummary: params.patientSummary || null,
+        patientSummary: null,
         imageName: params.imageName || null,
       },
       result: params.result,
@@ -523,7 +533,7 @@ export async function POST(req: NextRequest) {
             mode,
             situation,
             queryIntent: queryIntent ?? null,
-            patientSummary: patientSummary || null,
+            patientSummary: null,
             imageName: imageName || null,
           },
           variants: {

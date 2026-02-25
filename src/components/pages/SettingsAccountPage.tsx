@@ -123,6 +123,7 @@ export function SettingsAccountPage() {
   const [deleteText, setDeleteText] = useState("");
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteNeedsReauth, setDeleteNeedsReauth] = useState(false);
   const [deleteSuccess, setDeleteSuccess] = useState(false);
   const deleteReady = deleteText.trim().toUpperCase() === "DELETE";
 
@@ -130,6 +131,7 @@ export function SettingsAccountPage() {
     if (!deleteReady || deleteBusy) return;
     setDeleteBusy(true);
     setDeleteError(null);
+    setDeleteNeedsReauth(false);
     try {
       const supabase = getSupabaseBrowserClient();
       const { data } = await supabase.auth.getSession();
@@ -139,7 +141,13 @@ export function SettingsAccountPage() {
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       });
       if (!res.ok) {
-        const msg = (await res.json())?.error ?? t("삭제에 실패했습니다. 다시 시도해 주세요.");
+        const json = (await res.json().catch(() => null)) as { error?: string } | null;
+        const code = String(json?.error ?? "");
+        if (code === "reauth_required_recent_login") {
+          setDeleteNeedsReauth(true);
+          throw new Error(t("보안을 위해 최근 로그인 확인이 필요합니다. 다시 로그인한 뒤 계정 삭제를 진행해 주세요."));
+        }
+        const msg = json?.error ?? t("삭제에 실패했습니다. 다시 시도해 주세요.");
         throw new Error(msg);
       }
       // 삭제 성공: 먼저 확인 팝업 표시
@@ -204,6 +212,7 @@ export function SettingsAccountPage() {
                 type="button"
                 onClick={() => {
                   setDeleteError(null);
+                  setDeleteNeedsReauth(false);
                   setDeleteText("");
                   setDeleteOpen(true);
                 }}
@@ -242,6 +251,7 @@ export function SettingsAccountPage() {
           setDeleteOpen(false);
           setDeleteText("");
           setDeleteError(null);
+          setDeleteNeedsReauth(false);
         }}
       >
         <div className="space-y-4">
@@ -272,6 +282,23 @@ export function SettingsAccountPage() {
             autoCapitalize="characters"
             autoCorrect="off"
           />
+          {deleteNeedsReauth ? (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3">
+              <div className="text-[12px] font-semibold text-amber-900">{t("최근 로그인 확인 필요")}</div>
+              <div className="mt-1 text-[12px] leading-5 text-amber-800">
+                {t("계정 삭제 전 보안을 위해 다시 로그인해 주세요. 로그인 후 이 화면으로 돌아와 삭제를 다시 누르면 됩니다.")}
+              </div>
+              <div className="mt-2">
+                <Button
+                  type="button"
+                  onClick={() => signInWithProvider("google")}
+                  disabled={deleteBusy || isLoading}
+                >
+                  {t("Google로 다시 로그인")}
+                </Button>
+              </div>
+            </div>
+          ) : null}
           {deleteError ? <div className="text-[12px] text-red-600">{deleteError}</div> : null}
           <div className="flex items-center justify-end pt-1">
             <Button variant="secondary" onClick={() => setDeleteOpen(false)} disabled={deleteBusy}>
@@ -287,4 +314,3 @@ export function SettingsAccountPage() {
 }
 
 export default SettingsAccountPage;
-

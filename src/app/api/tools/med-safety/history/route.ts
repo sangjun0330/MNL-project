@@ -8,6 +8,9 @@ export const runtime = "edge";
 export const dynamic = "force-dynamic";
 const MED_SAFETY_RECENT_LIMIT_FREE = 5;
 const MED_SAFETY_RECENT_LIMIT_PRO = 10;
+const DEFAULT_MED_SAFETY_HISTORY_RETENTION_DAYS = 30;
+const MIN_MED_SAFETY_HISTORY_RETENTION_DAYS = 1;
+const MAX_MED_SAFETY_HISTORY_RETENTION_DAYS = 90;
 
 type HistoryRecord = {
   id: string;
@@ -76,6 +79,12 @@ async function safeLoadSubscription(userId: string): Promise<SubscriptionSnapsho
 
 function normalizeHistory(value: unknown, limit = MED_SAFETY_RECENT_LIMIT_FREE) {
   const normalizedLimit = Math.max(MED_SAFETY_RECENT_LIMIT_FREE, Math.min(MED_SAFETY_RECENT_LIMIT_PRO, Math.round(limit)));
+  const retentionDaysRaw = Number(process.env.MED_SAFETY_HISTORY_RETENTION_DAYS ?? DEFAULT_MED_SAFETY_HISTORY_RETENTION_DAYS);
+  const retentionDays = Number.isFinite(retentionDaysRaw)
+    ? Math.max(MIN_MED_SAFETY_HISTORY_RETENTION_DAYS, Math.min(MAX_MED_SAFETY_HISTORY_RETENTION_DAYS, Math.round(retentionDaysRaw)))
+    : DEFAULT_MED_SAFETY_HISTORY_RETENTION_DAYS;
+  const retentionMs = retentionDays * 24 * 60 * 60 * 1000;
+  const now = Date.now();
   if (!Array.isArray(value)) return [] as HistoryRecord[];
   const out: HistoryRecord[] = [];
   for (const raw of value) {
@@ -89,6 +98,7 @@ function normalizeHistory(value: unknown, limit = MED_SAFETY_RECENT_LIMIT_FREE) 
     const analyzedAt = Number(resultNode.analyzedAt);
     const savedAtRaw = Number(raw.savedAt);
     const savedAt = Number.isFinite(savedAtRaw) && savedAtRaw > 0 ? savedAtRaw : Number.isFinite(analyzedAt) ? analyzedAt : Date.now();
+    if (savedAt < now - retentionMs) continue;
     const searchAnswer = String(resultNode.searchAnswer ?? "").trim();
     const generatedText = String(resultNode.generatedText ?? "").trim();
     if (!searchAnswer && !generatedText) continue;

@@ -1,12 +1,44 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
+import { getRouteSupabaseClient } from "@/lib/server/supabaseRouteClient";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 
 export const runtime = "edge";
+const DEFAULT_DELETE_REAUTH_MAX_AGE_SEC = 15 * 60;
 
 function bad(status: number, message: string) {
   return jsonNoStore({ ok: false, error: message }, { status });
+}
+
+function extractBearerToken(req: Request): string | null {
+  const header = String(req.headers.get("authorization") ?? "").trim();
+  if (!header) return null;
+  const [scheme, token] = header.split(" ", 2);
+  if (!scheme || !token) return null;
+  return scheme.toLowerCase() === "bearer" ? token : null;
+}
+
+function resolveDeleteReauthMaxAgeMs() {
+  const raw = Number(process.env.ACCOUNT_DELETE_REAUTH_MAX_AGE_SEC ?? DEFAULT_DELETE_REAUTH_MAX_AGE_SEC);
+  if (!Number.isFinite(raw)) return DEFAULT_DELETE_REAUTH_MAX_AGE_SEC * 1000;
+  const seconds = Math.max(60, Math.min(24 * 60 * 60, Math.round(raw)));
+  return seconds * 1000;
+}
+
+async function hasRecentLoginForDelete(req: Request, expectedUserId: string): Promise<boolean> {
+  try {
+    const supabase = await getRouteSupabaseClient();
+    const bearer = extractBearerToken(req);
+    const { data, error } = bearer ? await supabase.auth.getUser(bearer) : await supabase.auth.getUser();
+    if (error || !data.user?.id) return false;
+    if (data.user.id !== expectedUserId) return false;
+    const lastSignInAtMs = Date.parse(String(data.user.last_sign_in_at ?? ""));
+    if (!Number.isFinite(lastSignInAtMs) || lastSignInAtMs <= 0) return false;
+    return Date.now() - lastSignInAtMs <= resolveDeleteReauthMaxAgeMs();
+  } catch {
+    return false;
+  }
 }
 
 export async function DELETE(req: Request) {
@@ -15,6 +47,9 @@ export async function DELETE(req: Request) {
 
   const userId = await readUserIdFromRequest(req);
   if (!userId) return bad(401, "Login required.");
+  if (!(await hasRecentLoginForDelete(req, userId))) {
+    return bad(401, "reauth_required_recent_login");
+  }
 
   const admin = getSupabaseAdmin();
 
