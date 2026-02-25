@@ -35,6 +35,12 @@ function formatHeaderDate(iso: ISODate): string {
   return `${month}월 ${day}일 ${dow}요일`;
 }
 
+function cleanText(v?: string | null) {
+  if (!v) return null;
+  const out = String(v).replace(/\r\n/g, "\n").trim();
+  return out || null;
+}
+
 function aiSummaryFallback(
   t: (key: string, vars?: Record<string, any>) => string,
   opts: { loading: boolean; generating: boolean; error: string | null }
@@ -137,6 +143,7 @@ export default function Home() {
   const canShowVitals = recordedDays >= 3;
 
   const selVital = canShowVitals ? vmap.get(homeSelected) : null;
+  const selNote = cleanText(store.notes[homeSelected]);
 
   const headerDate = useMemo(() => formatHeaderDate(homeSelected), [homeSelected]);
   const greetingText = useMemo(() => greeting(), []);
@@ -203,6 +210,15 @@ export default function Home() {
             shiftNames={store.shiftNames}
             bio={store.bio}
           />
+
+          <div className="mt-3 rounded-[16px] border border-[var(--rnest-sep)] bg-white/70 px-3 py-2.5">
+            <div className="text-[11px] font-semibold text-[var(--rnest-muted)]">
+              {selectedDateLabel} · {t("메모")}
+            </div>
+            <div className="mt-1 whitespace-pre-wrap break-words text-[13px] leading-relaxed text-[var(--rnest-text)]">
+              {selNote || t("작성된 메모가 없어요.")}
+            </div>
+          </div>
         </div>
 
         <div className="rounded-[22px] bg-[var(--rnest-card)] px-4 py-4 shadow-apple-sm">
