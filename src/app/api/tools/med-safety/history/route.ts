@@ -123,9 +123,9 @@ function normalizeHistory(value: unknown, limit = MED_SAFETY_RECENT_LIMIT_FREE) 
 export async function GET(req: Request) {
   try {
     const userId = await readUserIdFromRequest(req);
-      if (!userId) {
+    if (!userId) {
       return jsonNoStore({ ok: false, error: "login_required" }, { status: 401 });
-      }
+    }
 
     const row = await loadAIContent(userId).catch(() => null);
     const data = isRecord(row?.data) ? row?.data : {};
