@@ -11,7 +11,12 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(str);
 }
 
-function buildCSP(nonce: string): string {
+function buildCSP(
+  nonce: string,
+  options?: {
+    styleAuditReportOnly?: boolean;
+  },
+): string {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
   let supabaseOrigin = "";
   if (supabaseUrl) {
@@ -49,6 +54,16 @@ function buildCSP(nonce: string): string {
     scriptSrcParts.push("'unsafe-inline'", "'unsafe-eval'");
   }
 
+  const styleDirectives = options?.styleAuditReportOnly
+    ? [
+        // 1단계(무중단): <style> 요소 nonce 요구를 Report-Only로 먼저 검증.
+        // React inline style(style={{...}})는 아직 광범위하게 사용 중이므로 style-src-attr는 임시 허용.
+        "style-src 'self'",
+        `style-src-elem 'self' 'nonce-${nonce}'`,
+        "style-src-attr 'unsafe-inline'",
+      ]
+    : ["style-src 'self' 'unsafe-inline'"];
+
   return [
     "default-src 'self'",
     "base-uri 'self'",
@@ -56,7 +71,7 @@ function buildCSP(nonce: string): string {
     "frame-ancestors 'none'",
     "object-src 'none'",
     `script-src ${scriptSrcParts.join(" ")}`,
-    "style-src 'self' 'unsafe-inline'",
+    ...styleDirectives,
     `img-src 'self' data: blob: https://cloudflareinsights.com ${tossWildcard}`,
     "font-src 'self' data:",
     `connect-src ${connectSources.join(" ")}`,
@@ -70,6 +85,7 @@ export function middleware(request: NextRequest) {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   const nonce = toBase64(bytes);
   const csp = buildCSP(nonce);
+  const cspReportOnly = buildCSP(nonce, { styleAuditReportOnly: true });
 
   // nonce를 request header로 전달해 layout.tsx에서 읽을 수 있도록 함
   const requestHeaders = new Headers(request.headers);
@@ -80,6 +96,8 @@ export function middleware(request: NextRequest) {
   });
 
   response.headers.set("Content-Security-Policy", csp);
+  // 무중단 스타일 CSP 강화 단계: 위반은 차단하지 않고 관찰만 수행
+  response.headers.set("Content-Security-Policy-Report-Only", cspReportOnly);
   // response header에도 포함: 일부 CDN/캐시 레이어에서 활용 가능
   response.headers.set("x-nonce", nonce);
 
