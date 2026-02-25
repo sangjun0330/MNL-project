@@ -15,6 +15,7 @@ dist
 
 # 스크립트가 생성하는 복구 SQL — 실제 사용자 데이터 포함 가능
 supabase/manual/restore_rnest_user_state_from_local.sql
+wnl_insights_redesign.zip
 
 playwright-report
 test-results
