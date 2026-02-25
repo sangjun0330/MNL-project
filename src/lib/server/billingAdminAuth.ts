@@ -35,6 +35,27 @@ function readClientIp(req: Request): string {
   return "unknown";
 }
 
+function maskUserIdForLog(userId: string) {
+  const raw = String(userId ?? "").trim();
+  if (!raw) return "unknown";
+  if (raw.length <= 8) return `${raw.slice(0, 2)}***`;
+  return `${raw.slice(0, 4)}…${raw.slice(-4)}`;
+}
+
+function maskIpForLog(ip: string) {
+  const raw = String(ip ?? "").trim();
+  if (!raw || raw === "unknown") return "unknown";
+  if (raw.includes(".")) {
+    const parts = raw.split(".");
+    if (parts.length === 4) return `${parts[0]}.${parts[1]}.x.x`;
+  }
+  if (raw.includes(":")) {
+    const parts = raw.split(":").filter(Boolean);
+    if (parts.length >= 2) return `${parts.slice(0, 2).join(":")}::*`;
+  }
+  return `${raw.slice(0, 6)}…`;
+}
+
 export async function requireBillingAdmin(
   req: Request
 ): Promise<
@@ -61,7 +82,7 @@ export async function requireBillingAdmin(
     const ip = readClientIp(req);
     const path = (() => { try { return new URL(req.url).pathname; } catch { return "unknown"; } })();
     console.warn(
-      `[AdminAuth] Forbidden access attempt: userId=${userId}, ip=${ip}, path=${path}, ts=${new Date().toISOString()}`
+      `[AdminAuth] Forbidden access attempt: userId=${maskUserIdForLog(userId)}, ip=${maskIpForLog(ip)}, path=${path}, ts=${new Date().toISOString()}`
     );
     return { ok: false, status: 403, error: "forbidden" };
   }

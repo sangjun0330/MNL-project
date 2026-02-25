@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { headers } from "next/headers";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -8,11 +9,18 @@ export default async function DevLogsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  if (process.env.NODE_ENV !== "development") {
+    notFound();
+  }
+
   const params = await searchParams;
-  const token = (typeof params.token === "string" ? params.token : "")?.trim();
+  const reqHeaders = await headers();
+  const headerToken = (reqHeaders.get("x-dev-log-view-token") ?? "").trim();
+  const queryToken = (typeof params.token === "string" ? params.token : "")?.trim();
+  const token = headerToken || queryToken;
   const required = process.env.DEV_LOG_VIEW_TOKEN;
-  // LOW-1: 인증 실패 시 존재 여부 힌트 없이 404 반환
-  // URL 토큰은 브라우저 히스토리/서버 로그에 노출되므로 운영환경에서는 사용 주의
+  // 인증 실패 시 존재 여부 힌트 없이 404 반환.
+  // 운영에서는 페이지 자체를 숨기고, 개발환경에서도 헤더 토큰을 우선 사용한다.
   if (!required || token !== required) {
     notFound();
   }

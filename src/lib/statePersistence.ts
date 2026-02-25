@@ -13,23 +13,23 @@ const BIO_FIELDS = [
   "workEventNote",
 ] as const;
 
-function valueOrDash(value: unknown) {
-  return value == null ? "-" : value;
+function hasMeaningfulScalar(value: unknown) {
+  return value != null;
 }
 
 function normalizeWorkEventTags(value: unknown) {
-  if (!Array.isArray(value)) return "-";
+  if (!Array.isArray(value)) return undefined;
   const tags = value
     .map((item) => (typeof item === "string" ? item.replace(/\s+/g, " ").trim() : ""))
     .filter(Boolean)
     .slice(0, 8);
-  return tags.length ? tags : "-";
+  return tags.length ? tags : undefined;
 }
 
 function normalizeWorkEventNote(value: unknown) {
-  if (typeof value !== "string") return "-";
+  if (typeof value !== "string") return undefined;
   const note = value.replace(/\s+/g, " ").trim().slice(0, 280);
-  return note || "-";
+  return note || undefined;
 }
 
 export function serializeStateForSupabase(raw: unknown): AppState {
@@ -52,26 +52,31 @@ export function serializeStateForSupabase(raw: unknown): AppState {
     const fullBio: Record<string, unknown> = {};
     for (const key of BIO_FIELDS) {
       if (key === "mood") {
-        fullBio[key] = valueOrDash(mergedMood);
+        if (hasMeaningfulScalar(mergedMood)) fullBio[key] = mergedMood;
         continue;
       }
       if (key === "workEventTags") {
-        fullBio[key] = normalizeWorkEventTags(bio[key]);
+        const tags = normalizeWorkEventTags(bio[key]);
+        if (tags) fullBio[key] = tags;
         continue;
       }
       if (key === "workEventNote") {
-        fullBio[key] = normalizeWorkEventNote(bio[key]);
+        const note = normalizeWorkEventNote(bio[key]);
+        if (note) fullBio[key] = note;
         continue;
       }
-      fullBio[key] = valueOrDash(bio[key]);
+      if (hasMeaningfulScalar(bio[key])) fullBio[key] = bio[key];
     }
-    (next.bio as Record<string, any>)[iso] = fullBio;
+    if (Object.keys(fullBio).length) (next.bio as Record<string, any>)[iso] = fullBio;
+    else delete (next.bio as Record<string, any>)[iso];
 
-    (next.emotions as Record<string, any>)[iso] = {
-      tags: Array.isArray(emotion.tags) && emotion.tags.length ? emotion.tags : "-",
-      note: typeof emotion.note === "string" && emotion.note.trim().length ? emotion.note.trim() : "-",
-      createdAt: typeof emotion.createdAt === "number" ? emotion.createdAt : "-",
-    };
+    const emotionOut: Record<string, unknown> = {};
+    if (typeof emotion.mood === "number") emotionOut.mood = emotion.mood;
+    if (Array.isArray(emotion.tags) && emotion.tags.length) emotionOut.tags = emotion.tags;
+    if (typeof emotion.note === "string" && emotion.note.trim().length) emotionOut.note = emotion.note.trim();
+    if (typeof emotion.createdAt === "number") emotionOut.createdAt = emotion.createdAt;
+    if (Object.keys(emotionOut).length) (next.emotions as Record<string, any>)[iso] = emotionOut;
+    else delete (next.emotions as Record<string, any>)[iso];
   }
 
   return next;
