@@ -622,6 +622,19 @@ export function ScheduleRecordSheet({
           </div>
         </div>
 
+        {/* 메모 */}
+        <div className="rounded-2xl border border-ios-sep bg-white p-4">
+          <div className="text-[13px] font-semibold">{t("메모(선택)")}</div>
+          <div className="mt-2">
+            <Textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder={t("예: 컨퍼런스 / OT / 오늘 있었던 일")}
+              rows={2}
+            />
+          </div>
+        </div>
+
         {/* ✅ 필수 기록 4개 */}
         {canEditHealth ? (
           <div className="rounded-2xl border border-ios-sep bg-white p-4">
@@ -852,19 +865,6 @@ export function ScheduleRecordSheet({
             </div>
           </div>
         ) : null}
-
-        {/* 메모 */}
-        <div className="rounded-2xl border border-ios-sep bg-white p-4">
-          <div className="text-[13px] font-semibold">{t("메모(선택)")}</div>
-          <div className="mt-2">
-            <Textarea
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder={t("예: 컨퍼런스 / OT / 오늘 있었던 일")}
-              rows={2}
-            />
-          </div>
-        </div>
 
         {/* 추가 기록 */}
         {canEditHealth ? (

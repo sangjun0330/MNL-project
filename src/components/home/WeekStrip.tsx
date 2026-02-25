@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import type { ISODate } from "@/lib/date";
 import { addDays, fromISODate, todayISO, toISODate } from "@/lib/date";
+import type { BioInputs } from "@/lib/model";
 import type { Shift } from "@/lib/types";
 import { useI18n } from "@/lib/useI18n";
 
@@ -29,9 +30,23 @@ type Props = {
   onSelect: (iso: ISODate) => void;
   schedule: Record<ISODate, Shift | undefined>;
   shiftNames?: Record<ISODate, string | undefined>;
+  bio?: Record<ISODate, BioInputs | undefined>;
 };
 
-export function WeekStrip({ selected, onSelect, schedule, shiftNames }: Props) {
+function compactWorkEventLabel(bio?: BioInputs | null) {
+  const tags = Array.isArray(bio?.workEventTags)
+    ? bio.workEventTags.map((v) => String(v).trim()).filter(Boolean)
+    : [];
+  if (tags.length) {
+    const first = tags[0];
+    return tags.length > 1 ? `${first}+${tags.length - 1}` : first;
+  }
+
+  const note = typeof bio?.workEventNote === "string" ? bio.workEventNote.replace(/\s+/g, " ").trim() : "";
+  return note || null;
+}
+
+export function WeekStrip({ selected, onSelect, schedule, shiftNames, bio }: Props) {
   const { t } = useI18n();
   const today = todayISO();
 
@@ -52,6 +67,7 @@ export function WeekStrip({ selected, onSelect, schedule, shiftNames }: Props) {
         const dow = d.getUTCDay();
         const dayNum = d.getUTCDate();
         const shift = schedule[iso];
+        const eventText = compactWorkEventLabel(bio?.[iso]);
         const isSelected = iso === selected;
         const isToday = iso === today;
 
@@ -60,7 +76,7 @@ export function WeekStrip({ selected, onSelect, schedule, shiftNames }: Props) {
             key={iso}
             onClick={() => onSelect(iso)}
             className={[
-              "flex flex-1 flex-col items-center gap-1 rounded-2xl py-2.5 transition-all duration-150 active:scale-95",
+              "flex flex-1 flex-col items-center gap-0.5 rounded-2xl px-0.5 py-2.5 transition-all duration-150 active:scale-95",
               isSelected
                 ? "bg-[var(--rnest-accent)] text-white"
                 : "text-[var(--rnest-text)]",
@@ -107,6 +123,21 @@ export function WeekStrip({ selected, onSelect, schedule, shiftNames }: Props) {
               ) : (
                 <span className="h-1.5 w-1.5 rounded-full bg-transparent" />
               )}
+            </div>
+
+            {/* 근무 이벤트 (태그/메모 요약) */}
+            <div className="h-3 w-full px-0.5">
+              {eventText ? (
+                <div
+                  className={[
+                    "truncate text-center text-[8.5px] font-medium leading-none",
+                    isSelected ? "text-white/85" : "text-[var(--rnest-sub)]",
+                  ].join(" ")}
+                  title={eventText}
+                >
+                  {eventText}
+                </div>
+              ) : null}
             </div>
           </button>
         );

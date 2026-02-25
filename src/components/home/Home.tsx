@@ -3,15 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { ISODate } from "@/lib/date";
-import {
-  endOfMonth,
-  formatKoreanDate,
-  fromISODate,
-  isISODate,
-  startOfMonth,
-  toISODate,
-  todayISO,
-} from "@/lib/date";
+import { endOfMonth, formatKoreanDate, fromISODate, isISODate, startOfMonth, toISODate, todayISO } from "@/lib/date";
 import { useAppStoreSelector } from "@/lib/store";
 import { countHealthRecordedDays } from "@/lib/healthRecords";
 import { computeVitalsRange, vitalMapByISO } from "@/lib/vitals";
@@ -41,12 +33,6 @@ function formatHeaderDate(iso: ISODate): string {
   const day = d.getUTCDate();
   const dow = ["일", "월", "화", "수", "목", "금", "토"][d.getUTCDay()];
   return `${month}월 ${day}일 ${dow}요일`;
-}
-
-function cleanText(v?: string | null) {
-  if (!v) return null;
-  const out = String(v).replace(/\r\n/g, "\n").trim();
-  return out || null;
 }
 
 function aiSummaryFallback(
@@ -151,7 +137,6 @@ export default function Home() {
   const canShowVitals = recordedDays >= 3;
 
   const selVital = canShowVitals ? vmap.get(homeSelected) : null;
-  const selNote = cleanText(store.notes[homeSelected]);
 
   const headerDate = useMemo(() => formatHeaderDate(homeSelected), [homeSelected]);
   const greetingText = useMemo(() => greeting(), []);
@@ -211,16 +196,13 @@ export default function Home() {
               {t("일정 전체")} ›
             </Link>
           </div>
-          <WeekStrip selected={homeSelected} onSelect={setHomeSelected} schedule={store.schedule} shiftNames={store.shiftNames} />
-
-          <div className="mt-3 rounded-[16px] border border-[var(--rnest-sep)] bg-white/70 px-3 py-2.5">
-            <div className="text-[11px] font-semibold text-[var(--rnest-muted)]">
-              {selectedDateLabel} · {t("메모")}
-            </div>
-            <div className="mt-1 whitespace-pre-wrap break-words text-[13px] leading-relaxed text-[var(--rnest-text)]">
-              {selNote || t("작성된 메모가 없어요.")}
-            </div>
-          </div>
+          <WeekStrip
+            selected={homeSelected}
+            onSelect={setHomeSelected}
+            schedule={store.schedule}
+            shiftNames={store.shiftNames}
+            bio={store.bio}
+          />
         </div>
 
         <div className="rounded-[22px] bg-[var(--rnest-card)] px-4 py-4 shadow-apple-sm">

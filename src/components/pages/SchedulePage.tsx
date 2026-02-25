@@ -122,6 +122,7 @@ export function SchedulePage() {
         schedule={store.schedule}
         shiftNames={store.shiftNames}
         notes={store.notes}
+        bio={store.bio}
         emotions={store.emotions}
         menstrual={store.settings.menstrual}
         scheduleAppliedFrom={(store.settings as any).schedulePatternAppliedFrom ?? null}

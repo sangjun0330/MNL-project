@@ -7,7 +7,7 @@ import { cn } from "@/lib/cn";
 import type { ISODate } from "@/lib/date";
 import { addDays, addMonths, formatMonthTitle, startOfMonth, toISODate } from "@/lib/date";
 import type { Shift } from "@/lib/types";
-import type { EmotionEntry, MenstrualSettings } from "@/lib/model";
+import type { BioInputs, EmotionEntry, MenstrualSettings } from "@/lib/model";
 import { menstrualContextForDate } from "@/lib/menstrual";
 import { useAppStoreSelector } from "@/lib/store";
 import { useI18n } from "@/lib/useI18n";
@@ -21,6 +21,7 @@ type Props = {
   schedule: Record<ISODate, Shift | undefined>;
   shiftNames?: Record<ISODate, string | undefined>;
   notes?: Record<ISODate, string | undefined>;
+  bio?: Record<ISODate, BioInputs | undefined>;
   emotions?: Record<ISODate, EmotionEntry | undefined>;
   menstrual?: MenstrualSettings;
 
@@ -44,6 +45,18 @@ function moodEmoji(m: number) {
   return m === 1 ? "☹️" : m === 2 ? "😕" : m === 3 ? "😐" : m === 4 ? "🙂" : "😄";
 }
 
+function workEventSummary(bio?: BioInputs | null) {
+  const tags = Array.isArray(bio?.workEventTags)
+    ? bio.workEventTags.map((v) => String(v).trim()).filter(Boolean)
+    : [];
+  if (tags.length) {
+    const first = tags[0];
+    return tags.length > 1 ? `${first} +${tags.length - 1}` : first;
+  }
+  const note = typeof bio?.workEventNote === "string" ? firstLine(bio.workEventNote) : "";
+  return note || "";
+}
+
 function phaseColor(phase: string) {
   if (phase === "period") return "bg-rose-500";
   if (phase === "pms") return "bg-amber-500";
@@ -59,6 +72,7 @@ export function MonthCalendar({
   schedule,
   shiftNames,
   notes,
+  bio,
   emotions,
   menstrual,
   scheduleAppliedFrom,
@@ -222,6 +236,7 @@ export function MonthCalendar({
           const shift = schedule[iso];
           const shiftName = shiftNames?.[iso];
           const note = firstLine(notes?.[iso]);
+          const workEvent = workEventSummary(bio?.[iso]);
           const emo = emotions?.[iso];
 
           const phase = menstrualPhaseByISO.get(iso);
@@ -231,6 +246,7 @@ export function MonthCalendar({
           const roundR = !!phase && nextPhase !== phase;
 
           const shiftVisible = cell.inMonth && !!shift && (!scheduleAppliedFrom || cell.iso >= scheduleAppliedFrom);
+          const workEventVisible = cell.inMonth && !!workEvent;
           const noteVisible = cell.inMonth && !!note;
           const emoVisible = cell.inMonth && !!emo;
 
@@ -268,8 +284,12 @@ export function MonthCalendar({
               compact: true,
             });
           }
-          if (noteVisible) {
-            chips.push({ key: "note", text: note!, className: "bg-blue-100 text-blue-900" });
+          if (workEventVisible) {
+            chips.push({
+              key: "work-event",
+              text: workEvent,
+              className: "bg-slate-100 text-slate-800",
+            });
           }
           if (emoVisible) {
             chips.push({
@@ -277,6 +297,9 @@ export function MonthCalendar({
               text: `${moodEmoji(emo!.mood)} ${emo!.tags?.[0] ?? ""}`.trim(),
               className: "bg-ios-bg text-ios-text",
             });
+          }
+          if (noteVisible) {
+            chips.push({ key: "note", text: note!, className: "bg-blue-100 text-blue-900" });
           }
 
           return (
