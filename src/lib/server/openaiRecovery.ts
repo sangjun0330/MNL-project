@@ -122,7 +122,6 @@ function normalizeApiKey() {
     process.env.OPENAI_KEY ??
     process.env.OPENAI_API_TOKEN ??
     process.env.OPENAI_SECRET_KEY ??
-    process.env.NEXT_PUBLIC_OPENAI_API_KEY ??
     "";
   return String(key).trim();
 }

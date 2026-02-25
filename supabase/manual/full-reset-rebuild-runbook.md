@@ -2,7 +2,7 @@
 
 ## 주의
 - 이 작업은 RNest 앱 데이터 테이블을 전부 삭제 후 재생성합니다.
-- 실행 파일: `/Users/osangjun/Desktop/RNEST_updated/supabase/migrations/20260220_full_reset_rebuild_v2.sql`
+- 실행 파일: `supabase/migrations/20260220_full_reset_rebuild_v2.sql`
 
 ## 1) SQL Editor 실행
 1. Supabase Dashboard → SQL Editor

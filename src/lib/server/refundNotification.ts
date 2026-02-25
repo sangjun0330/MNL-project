@@ -24,7 +24,7 @@ type RefundRejectedNotifyInput = {
   reviewNote?: string | null;
 };
 
-const REFUND_ADMIN_EMAIL = "rnest0330@gmail.com";
+const REFUND_ADMIN_EMAIL = process.env.REFUND_ADMIN_EMAIL ?? "";
 
 function clean(value: unknown) {
   return String(value ?? "").trim();

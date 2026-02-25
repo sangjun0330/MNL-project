@@ -14,55 +14,8 @@ const allowedDevOrigins =
     ? Array.from(new Set([...devDefaults, ...allowedFromEnv]))
     : allowedFromEnv;
 
-function toOrigin(input) {
-  if (!input) return null;
-  try {
-    return new URL(input).origin;
-  } catch {
-    return null;
-  }
-}
-
-const supabaseOrigin = toOrigin(process.env.NEXT_PUBLIC_SUPABASE_URL);
-const tossScriptOrigin = "https://js.tosspayments.com";
-const tossApiOrigin = "https://api.tosspayments.com";
-const tossWildcard = "https://*.tosspayments.com";
-const tossLegacyPayOrigin = "https://pay.toss.im";
-
-const connectSources = ["'self'", "https://cloudflareinsights.com", tossApiOrigin, tossWildcard, tossLegacyPayOrigin];
-if (supabaseOrigin) {
-  connectSources.push(supabaseOrigin);
-  connectSources.push(supabaseOrigin.replace(/^http/i, "ws"));
-}
-
-const isDev = process.env.NODE_ENV === "development";
-const scriptSourceParts = [
-  "'self'",
-  "'unsafe-inline'",
-  "https://static.cloudflareinsights.com",
-  tossScriptOrigin,
-  tossWildcard,
-];
-if (isDev) scriptSourceParts.push("'unsafe-eval'");
-const scriptSources = Array.from(new Set(scriptSourceParts)).join(" ");
-const frameSources = Array.from(new Set(["'self'", tossWildcard, tossLegacyPayOrigin])).join(" ");
-const imgSources = Array.from(new Set(["'self'", "data:", "blob:", "https://cloudflareinsights.com", tossWildcard])).join(" ");
-
-const contentSecurityPolicy = [
-  "default-src 'self'",
-  "base-uri 'self'",
-  "form-action 'self'",
-  "frame-ancestors 'none'",
-  "object-src 'none'",
-  `script-src ${scriptSources}`,
-  "style-src 'self' 'unsafe-inline'",
-  `img-src ${imgSources}`,
-  "font-src 'self' data:",
-  `connect-src ${Array.from(new Set(connectSources)).join(" ")}`,
-  `frame-src ${frameSources}`,
-  "media-src 'self' blob:",
-  "worker-src 'self' blob:",
-].join("; ");
+// Content-Security-Policy는 src/middleware.ts에서 요청별 nonce와 함께 동적으로 설정됩니다.
+// 여기서는 CSP 이외의 보안 헤더만 정적으로 선언합니다.
 
 const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
@@ -71,7 +24,8 @@ const securityHeaders = [
   { key: "Permissions-Policy", value: "microphone=(self), camera=(), geolocation=(), browsing-topics=()" },
   { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
   { key: "Cross-Origin-Resource-Policy", value: "same-site" },
-  { key: "Content-Security-Policy", value: contentSecurityPolicy },
+  { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
+  // Content-Security-Policy: middleware.ts에서 요청별 nonce와 함께 동적으로 설정됨
 ];
 
 const nextConfig = {

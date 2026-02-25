@@ -11,29 +11,13 @@ function bad(status: number, message: string) {
 export async function GET(req: Request) {
   const admin = await requireBillingAdmin(req);
   if (!admin.ok) {
-    if (
-      admin.error === "login_required" ||
-      admin.error === "admin_forbidden" ||
-      admin.error === "forbidden" ||
-      admin.error === "billing_admin_not_configured"
-    ) {
-      return NextResponse.json({
-        ok: true,
-        data: {
-          isAdmin: false,
-          reason: admin.error,
-        },
-      });
+    // 에러 세부 사유(설정 상태, 이메일 등)는 외부에 노출하지 않음
+    if (admin.status === 401 || admin.status === 403 || admin.status === 500) {
+      return NextResponse.json({ ok: true, data: { isAdmin: false } });
     }
     return bad(admin.status, admin.error);
   }
 
-  return NextResponse.json({
-    ok: true,
-    data: {
-      isAdmin: true,
-      userId: admin.identity.userId,
-      email: admin.identity.email,
-    },
-  });
+  // userId·email은 응답에서 제외 — 관리자 여부만 반환
+  return NextResponse.json({ ok: true, data: { isAdmin: true } });
 }
