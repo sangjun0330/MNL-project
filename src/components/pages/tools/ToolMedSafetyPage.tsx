@@ -90,9 +90,12 @@ type MedSafetyCacheRecord = {
 };
 
 const MED_SAFETY_CACHE_KEY = "med_safety_cache_v1";
+const MED_SAFETY_CACHE_MAX_ENTRIES = 30;
 const MED_SAFETY_DEFAULT_MODEL = "gpt-5.1";
 const MED_SAFETY_CLIENT_TIMEOUT_MS = 480_000;
 const RETRY_WITH_DATA_MESSAGE = "네트워크가 불안정합니다. 데이터(모바일 네트워크)를 켠 뒤 다시 AI 분석 실행을 눌러 시도해 주세요.";
+const medSafetyMemoryCache = new Map<string, MedSafetyCacheRecord>();
+let medSafetyLegacyCacheCleared = false;
 
 const MODE_OPTIONS: Array<{ value: ClinicalMode; label: string }> = [
   { value: "ward", label: "병동" },
@@ -394,39 +397,40 @@ function buildAnalyzeCacheKey(args: {
 }
 
 function writeMedSafetyCache(cacheKey: string, data: MedSafetyAnalyzeResult) {
-  if (typeof window === "undefined") return;
-  try {
-    const raw = window.localStorage.getItem(MED_SAFETY_CACHE_KEY);
-    const parsed = raw ? (JSON.parse(raw) as Record<string, MedSafetyCacheRecord>) : {};
-    const next: Record<string, MedSafetyCacheRecord> = {
-      ...parsed,
-      [cacheKey]: {
-        savedAt: Date.now(),
-        data,
-      },
-    };
-    const entries = Object.entries(next)
-      .sort((a, b) => (b[1]?.savedAt ?? 0) - (a[1]?.savedAt ?? 0))
-      .slice(0, 30);
-    const trimmed = Object.fromEntries(entries);
-    window.localStorage.setItem(MED_SAFETY_CACHE_KEY, JSON.stringify(trimmed));
-  } catch {
-    // ignore cache write failure
+  if (typeof window !== "undefined" && !medSafetyLegacyCacheCleared) {
+    medSafetyLegacyCacheCleared = true;
+    try {
+      window.localStorage.removeItem(MED_SAFETY_CACHE_KEY);
+    } catch {
+      // ignore legacy cache cleanup failure
+    }
+  }
+  medSafetyMemoryCache.set(cacheKey, {
+    savedAt: Date.now(),
+    data,
+  });
+  if (medSafetyMemoryCache.size <= MED_SAFETY_CACHE_MAX_ENTRIES) return;
+  const entries = [...medSafetyMemoryCache.entries()]
+    .sort((a, b) => (b[1]?.savedAt ?? 0) - (a[1]?.savedAt ?? 0))
+    .slice(0, MED_SAFETY_CACHE_MAX_ENTRIES);
+  medSafetyMemoryCache.clear();
+  for (const [key, value] of entries) {
+    medSafetyMemoryCache.set(key, value);
   }
 }
 
 function readMedSafetyCache(cacheKey: string): MedSafetyAnalyzeResult | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(MED_SAFETY_CACHE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Record<string, MedSafetyCacheRecord>;
-    const hit = parsed?.[cacheKey];
-    if (!hit?.data) return null;
-    return hit.data;
-  } catch {
-    return null;
+  if (typeof window !== "undefined" && !medSafetyLegacyCacheCleared) {
+    medSafetyLegacyCacheCleared = true;
+    try {
+      window.localStorage.removeItem(MED_SAFETY_CACHE_KEY);
+    } catch {
+      // ignore legacy cache cleanup failure
+    }
   }
+  const hit = medSafetyMemoryCache.get(cacheKey);
+  if (!hit?.data) return null;
+  return hit.data;
 }
 
 function shouldRetryAnalyzeError(status: number, rawError: string) {
