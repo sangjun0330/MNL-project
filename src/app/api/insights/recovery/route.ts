@@ -10,6 +10,7 @@ import type { Shift } from "@/lib/types";
 import { computeVitalsRange } from "@/lib/vitals";
 import type { Json } from "@/types/supabase";
 import type { SubscriptionSnapshot } from "@/lib/server/billingStore";
+import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 
 // Cloudflare Pages requires Edge runtime for non-static routes.
 export const runtime = "edge";
@@ -50,7 +51,7 @@ function bad(status: number, error: string) {
     .replace(/[^\x20-\x7E가-힣ㄱ-ㅎㅏ-ㅣ.,:;!?()[\]{}'"`~@#$%^&*_\-+=/\\|<>]/g, "")
     .slice(0, 220);
   const body: AIRecoveryApiError = { ok: false, error: safeError || "unknown_error" };
-  return NextResponse.json(body, { status });
+  return jsonNoStore(body, { status });
 }
 
 // ✅ 안전하게 userId 읽기 - Supabase 환경변수 없어도 crash 안 됨
@@ -264,10 +265,11 @@ function readServerCachedAI(rawPayload: unknown, today: ISODate, lang: Language)
   return null;
 }
 
-export async function GET(req: NextRequest) {
+async function handleRecovery(req: NextRequest, options?: { allowGenerate?: boolean }) {
+  const allowGenerate = options?.allowGenerate ?? false;
   const url = new URL(req.url);
   const langHint = toLanguage(url.searchParams.get("lang"));
-  const cacheOnly = url.searchParams.get("cacheOnly") === "1";
+  const cacheOnly = !allowGenerate || url.searchParams.get("cacheOnly") === "1";
 
   // ── 1. 사용자 인증 시도 (실패해도 계속 진행) ──
   const userId = await safeReadUserId(req);
@@ -307,7 +309,7 @@ export async function GET(req: NextRequest) {
         (lang !== "en" ||
           (!looksKoreanPayload(direct) && (!koVariant || hasSameStructure(koVariant, direct))))
       ) {
-        return NextResponse.json({ ok: true, data: direct } satisfies AIRecoveryApiSuccess);
+        return jsonNoStore({ ok: true, data: direct } satisfies AIRecoveryApiSuccess);
       }
       if (lang === "en" && koVariant && koVariant.engine === "openai") {
         try {
@@ -339,10 +341,10 @@ export async function GET(req: NextRequest) {
               ? `${translatedPayload.debug}|${saveError}`
               : saveError;
           }
-          return NextResponse.json({ ok: true, data: translatedPayload } satisfies AIRecoveryApiSuccess);
+          return jsonNoStore({ ok: true, data: translatedPayload } satisfies AIRecoveryApiSuccess);
         } catch {
           if (cacheOnly) {
-            return NextResponse.json({ ok: true, data: null } satisfies AIRecoveryApiSuccess);
+            return jsonNoStore({ ok: true, data: null } satisfies AIRecoveryApiSuccess);
           }
         }
       }
@@ -358,11 +360,11 @@ export async function GET(req: NextRequest) {
           ko: legacyCached,
         },
       });
-      return NextResponse.json({ ok: true, data: legacyCached } satisfies AIRecoveryApiSuccess);
+      return jsonNoStore({ ok: true, data: legacyCached } satisfies AIRecoveryApiSuccess);
     }
 
     if (cacheOnly) {
-      return NextResponse.json({ ok: true, data: null } satisfies AIRecoveryApiSuccess);
+      return jsonNoStore({ ok: true, data: null } satisfies AIRecoveryApiSuccess);
     }
 
     const start = toISODate(addDays(fromISODate(today), -13));
@@ -476,10 +478,20 @@ export async function GET(req: NextRequest) {
 
     const body: AIRecoveryApiSuccess = { ok: true, data: lang === "en" ? payloadEn ?? payloadKo : payloadKo };
 
-    return NextResponse.json(body);
+    return jsonNoStore(body);
   } catch {
     // 502 is sometimes replaced by Cloudflare HTML error pages.
     // Use 500 so client can read JSON error details.
     return bad(500, "openai_generation_failed");
   }
+}
+
+export async function GET(req: NextRequest) {
+  return handleRecovery(req, { allowGenerate: false });
+}
+
+export async function POST(req: NextRequest) {
+  const sameOriginError = sameOriginRequestError(req);
+  if (sameOriginError) return bad(403, sameOriginError);
+  return handleRecovery(req, { allowGenerate: true });
 }

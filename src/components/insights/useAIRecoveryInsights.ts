@@ -34,8 +34,9 @@ function requestKey(lang: "ko" | "en", dateISO: string) {
 
 async function fetchAIRecovery(lang: "ko" | "en", dateISO: string, cacheOnly: boolean): Promise<AIRecoveryPayload | null> {
   const cacheOnlyQuery = cacheOnly ? "&cacheOnly=1" : "";
+  const method = cacheOnly ? "GET" : "POST";
   const res = await fetch(`/api/insights/recovery?lang=${lang}${cacheOnlyQuery}`, {
-    method: "GET",
+    method,
     cache: "no-store",
   });
 

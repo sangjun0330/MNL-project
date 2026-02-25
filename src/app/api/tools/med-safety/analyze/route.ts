@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { todayISO, type ISODate } from "@/lib/date";
 import type { Language } from "@/lib/i18n";
+import { buildPrivateNoStoreHeaders, jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import {
   analyzeMedSafetyWithOpenAI,
   translateMedSafetyToEnglish,
@@ -32,7 +33,7 @@ function safeErrorString(error: unknown) {
 }
 
 function bad(status: number, error: string) {
-  return NextResponse.json(
+  return jsonNoStore(
     {
       ok: false,
       error: safeErrorString(error),
@@ -366,6 +367,9 @@ function sseLine(event: string, payload: unknown) {
 
 export async function POST(req: NextRequest) {
   try {
+    const sameOriginError = sameOriginRequestError(req);
+    if (sameOriginError) return bad(403, sameOriginError);
+
     const userId = await safeReadUserId(req);
     if (!userId) return bad(401, "login_required");
 
@@ -407,7 +411,7 @@ export async function POST(req: NextRequest) {
 
     const creditUse = await safeConsumeMedSafetyCredit(userId);
     if (!creditUse.allowed) {
-      return NextResponse.json(
+      return jsonNoStore(
         {
           ok: false,
           error: safeErrorString(creditUse.reason ?? "insufficient_med_safety_credits"),
@@ -572,7 +576,7 @@ export async function POST(req: NextRequest) {
         if (!shouldCommitCredit) {
           await safeRestoreConsumedMedSafetyCredit(userId, consumedSource);
         }
-        return NextResponse.json({
+        return jsonNoStore({
           ok: true,
           data: responseData,
         });
@@ -631,11 +635,11 @@ export async function POST(req: NextRequest) {
     });
 
     return new Response(stream, {
-      headers: {
+      headers: buildPrivateNoStoreHeaders({
         "Content-Type": "text/event-stream; charset=utf-8",
-        "Cache-Control": "no-cache, no-transform",
+        "Cache-Control": "private, no-store, no-cache, no-transform, max-age=0",
         Connection: "keep-alive",
-      },
+      }),
     });
   } catch {
     return bad(500, "med_safety_analyze_failed");

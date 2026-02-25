@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { loadAIContent } from "@/lib/server/aiContentStore";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import { jsonNoStore } from "@/lib/server/requestSecurity";
 import type { SubscriptionSnapshot } from "@/lib/server/billingStore";
 
 export const runtime = "edge";
@@ -122,9 +123,9 @@ function normalizeHistory(value: unknown, limit = MED_SAFETY_RECENT_LIMIT_FREE) 
 export async function GET(req: Request) {
   try {
     const userId = await readUserIdFromRequest(req);
-    if (!userId) {
-      return NextResponse.json({ ok: false, error: "login_required" }, { status: 401 });
-    }
+      if (!userId) {
+      return jsonNoStore({ ok: false, error: "login_required" }, { status: 401 });
+      }
 
     const row = await loadAIContent(userId).catch(() => null);
     const data = isRecord(row?.data) ? row?.data : {};
@@ -132,7 +133,7 @@ export async function GET(req: Request) {
     const historyLimit = subscription?.hasPaidAccess ? MED_SAFETY_RECENT_LIMIT_PRO : MED_SAFETY_RECENT_LIMIT_FREE;
     const items = normalizeHistory(data.medSafetyRecent, historyLimit);
 
-    return NextResponse.json(
+    return jsonNoStore(
       {
         ok: true,
         data: {
@@ -143,7 +144,7 @@ export async function GET(req: Request) {
       { status: 200 }
     );
   } catch {
-    return NextResponse.json(
+    return jsonNoStore(
       {
         ok: false,
         error: "med_safety_history_failed",

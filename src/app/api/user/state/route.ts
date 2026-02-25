@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ensureUserRow, loadUserState, saveUserState } from "@/lib/server/userStateStore";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { sanitizeStatePayload } from "@/lib/stateSanitizer";
 import { serializeStateForSupabase } from "@/lib/statePersistence";
 
@@ -8,7 +9,7 @@ export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 function bad(status: number, message: string) {
-  return NextResponse.json({ ok: false, error: message }, { status });
+  return jsonNoStore({ ok: false, error: message }, { status });
 }
 
 export async function GET(req: Request) {
@@ -19,7 +20,7 @@ export async function GET(req: Request) {
     await ensureUserRow(userId);
     const row = await loadUserState(userId);
     const sanitized = row?.payload ? sanitizeStatePayload(row.payload) : null;
-    return NextResponse.json({
+    return jsonNoStore({
       ok: true,
       state: sanitized,
       updatedAt: row?.updatedAt ?? null,
@@ -30,6 +31,9 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const sameOriginError = sameOriginRequestError(req);
+  if (sameOriginError) return bad(403, sameOriginError);
+
   let body: any;
   try {
     body = await req.json();
@@ -46,7 +50,7 @@ export async function POST(req: Request) {
   try {
     const serialized = serializeStateForSupabase(state);
     await saveUserState({ userId, payload: serialized });
-    return NextResponse.json({ ok: true, syncedAt: new Date().toISOString() });
+    return jsonNoStore({ ok: true, syncedAt: new Date().toISOString() });
   } catch {
     return bad(500, "failed_to_save_state");
   }

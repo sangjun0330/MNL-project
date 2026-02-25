@@ -1,14 +1,18 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 
 export const runtime = "edge";
 
 function bad(status: number, message: string) {
-  return NextResponse.json({ ok: false, error: message }, { status });
+  return jsonNoStore({ ok: false, error: message }, { status });
 }
 
 export async function DELETE(req: Request) {
+  const sameOriginError = sameOriginRequestError(req);
+  if (sameOriginError) return bad(403, sameOriginError);
+
   const userId = await readUserIdFromRequest(req);
   if (!userId) return bad(401, "Login required.");
 
@@ -39,7 +43,7 @@ export async function DELETE(req: Request) {
       return bad(500, "failed_to_delete_account");
     }
 
-    return NextResponse.json({ ok: true });
+    return jsonNoStore({ ok: true });
   } catch {
     return bad(500, "failed_to_delete_account");
   }
