@@ -31,3 +31,4 @@ src/app/tools/handoff
 src/components/pages/SettingsAdminHandoffPage.tsx
 src/components/system/HandoffJanitor.tsx
 src/lib/handoff
+tsconfig.tsbuildinfo
