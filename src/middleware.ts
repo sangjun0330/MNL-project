@@ -15,6 +15,7 @@ function buildCSP(
   nonce: string,
   options?: {
     styleAuditReportOnly?: boolean;
+    enforceStrictStyle?: boolean;
   },
 ): string {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
@@ -56,13 +57,19 @@ function buildCSP(
 
   const styleDirectives = options?.styleAuditReportOnly
     ? [
-        // 1단계(무중단): <style> 요소 nonce 요구를 Report-Only로 먼저 검증.
-        // React inline style(style={{...}})는 아직 광범위하게 사용 중이므로 style-src-attr는 임시 허용.
+        // 다음 단계 준비용 감사: 인라인 style 속성까지 제거 가능한지 Report-Only로 관찰
         "style-src 'self'",
         `style-src-elem 'self' 'nonce-${nonce}'`,
-        "style-src-attr 'unsafe-inline'",
+        "style-src-attr 'none'",
       ]
-    : ["style-src 'self' 'unsafe-inline'"];
+    : options?.enforceStrictStyle
+      ? [
+          // 단계적 강화: <style> 요소는 nonce 필요, React inline style 속성은 임시 허용
+          "style-src 'self'",
+          `style-src-elem 'self' 'nonce-${nonce}'`,
+          "style-src-attr 'unsafe-inline'",
+        ]
+      : ["style-src 'self' 'unsafe-inline'"];
 
   return [
     "default-src 'self'",
@@ -84,7 +91,7 @@ function buildCSP(
 export function middleware(request: NextRequest) {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   const nonce = toBase64(bytes);
-  const csp = buildCSP(nonce);
+  const csp = buildCSP(nonce, { enforceStrictStyle: true });
   const cspReportOnly = buildCSP(nonce, { styleAuditReportOnly: true });
 
   // nonce를 request header로 전달해 layout.tsx에서 읽을 수 있도록 함

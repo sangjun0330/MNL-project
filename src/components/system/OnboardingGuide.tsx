@@ -58,6 +58,13 @@ function Tip({ children }: { children: React.ReactNode }) {
   );
 }
 
+function getCspNonce(): string | undefined {
+  if (typeof document === "undefined") return undefined;
+  const meta = document.querySelector('meta[property="csp-nonce"]');
+  const content = meta?.getAttribute("content")?.trim();
+  return content || undefined;
+}
+
 /* ────────────────────────────────────────────
    Main
    ──────────────────────────────────────────── */
@@ -173,7 +180,7 @@ export function OnboardingGuide({ open, onComplete }: Props) {
   return createPortal(
     <>
       {/* keyframe injection (only once) */}
-      <style>{`
+      <style nonce={getCspNonce()}>{`
         @keyframes onb-slide-in-right {
           from { opacity: 0; transform: translateX(50px) scale(0.96); filter: blur(4px); }
           40%  { filter: blur(0); }

@@ -29,7 +29,7 @@ const securityHeaders = [
 ];
 
 const nextConfig = {
-  eslint: { ignoreDuringBuilds: true },
+  eslint: { ignoreDuringBuilds: false },
   reactStrictMode: true,
 
   // ✅ Next.js 15+에서는 allowedDevOrigins가 experimental이 아니라 최상위 옵션입니다.
