@@ -32,6 +32,9 @@ function buildCSP(
   const tossApiOrigin = "https://api.tosspayments.com";
   const tossWildcard = "https://*.tosspayments.com";
   const tossLegacyPayOrigin = "https://pay.toss.im";
+  const daumScriptOrigin = "https://t1.daumcdn.net";
+  const daumPostcodeOrigin = "https://postcode.map.daum.net";
+  const daumWildcard = "https://*.daum.net";
 
   const connectSources = [
     "'self'",
@@ -39,6 +42,8 @@ function buildCSP(
     tossApiOrigin,
     tossWildcard,
     tossLegacyPayOrigin,
+    daumPostcodeOrigin,
+    daumWildcard,
   ];
   if (supabaseOrigin) {
     connectSources.push(supabaseOrigin);
@@ -49,7 +54,7 @@ function buildCSP(
 
   // 'strict-dynamic': nonce로 신뢰된 스크립트가 동적으로 로드하는 스크립트도 허용
   // 이를 통해 Next.js가 청크를 동적으로 로드할 수 있게 됨
-  const scriptSrcParts = ["'self'", `'nonce-${nonce}'`, "'strict-dynamic'", "https://static.cloudflareinsights.com", tossScriptOrigin, tossWildcard];
+  const scriptSrcParts = ["'self'", `'nonce-${nonce}'`, "'strict-dynamic'", "https://static.cloudflareinsights.com", tossScriptOrigin, tossWildcard, daumScriptOrigin, daumWildcard];
   // 개발 환경에서만 unsafe-inline/eval 허용 (HMR, React DevTools 등)
   if (isDev) {
     scriptSrcParts.push("'unsafe-inline'", "'unsafe-eval'");
@@ -82,7 +87,7 @@ function buildCSP(
     `img-src 'self' data: blob: https://cloudflareinsights.com ${tossWildcard}`,
     "font-src 'self' data:",
     `connect-src ${connectSources.join(" ")}`,
-    `frame-src 'self' ${tossWildcard} ${tossLegacyPayOrigin}`,
+    `frame-src 'self' ${tossWildcard} ${tossLegacyPayOrigin} ${daumPostcodeOrigin} ${daumWildcard}`,
     "media-src 'self' blob:",
     "worker-src 'self' blob:",
   ].join("; ");

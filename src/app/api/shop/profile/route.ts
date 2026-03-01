@@ -1,6 +1,7 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { loadShopShippingProfile, saveShopShippingProfile } from "@/lib/server/shopProfileStore";
+import { emptyShopShippingProfile } from "@/lib/shopProfile";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -13,7 +14,7 @@ export async function GET(req: Request) {
     const profile = await loadShopShippingProfile(userId);
     return jsonNoStore({ ok: true, data: { profile } });
   } catch {
-    return jsonNoStore({ ok: false, error: "failed_to_load_shop_profile" }, { status: 500 });
+    return jsonNoStore({ ok: true, data: { profile: emptyShopShippingProfile(), degraded: true } });
   }
 }
 
@@ -42,4 +43,3 @@ export async function PUT(req: Request) {
     return jsonNoStore({ ok: false, error: "failed_to_save_shop_profile" }, { status: 500 });
   }
 }
-

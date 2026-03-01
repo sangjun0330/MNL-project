@@ -19,7 +19,7 @@ export async function GET(req: Request) {
     const summary = summarizeShopReviews(reviews);
     return jsonNoStore({ ok: true, data: { reviews, summary } });
   } catch {
-    return jsonNoStore({ ok: false, error: "failed_to_load_shop_reviews" }, { status: 500 });
+    return jsonNoStore({ ok: true, data: { reviews: [], summary: { count: 0, averageRating: 0 }, degraded: true } });
   }
 }
 

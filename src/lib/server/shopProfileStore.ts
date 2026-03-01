@@ -1,19 +1,20 @@
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
+import { loadUserState, saveUserState } from "@/lib/server/userStateStore";
 import { emptyShopShippingProfile, normalizeShopShippingProfile, normalizeShopShippingSnapshot, type ShopShippingProfile, type ShopShippingSnapshot } from "@/lib/shopProfile";
-import type { Database, Json } from "@/types/supabase";
-
-const SHOP_PROFILE_PREFIX = "__shop_profile__";
+import type { Database } from "@/types/supabase";
 
 type ShopProfileRow = Database["public"]["Tables"]["shop_customer_profiles"]["Row"];
-
-function profileKey(userId: string) {
-  return `${SHOP_PROFILE_PREFIX}${String(userId ?? "").trim()}`.slice(0, 220);
-}
 
 function isMissingTableError(error: unknown) {
   const code = String((error as { code?: unknown } | null)?.code ?? "").trim();
   const message = String((error as { message?: unknown } | null)?.message ?? "").toLowerCase();
-  return code === "42P01" || (message.includes("relation") && message.includes("shop_customer_profiles"));
+  return (
+    code === "42P01" ||
+    code === "42703" ||
+    code === "PGRST204" ||
+    (message.includes("relation") && message.includes("shop_customer_profiles")) ||
+    (message.includes("column") && message.includes("shop_customer_profiles"))
+  );
 }
 
 function fromRow(row: ShopProfileRow | null): ShopShippingProfile {
@@ -29,34 +30,23 @@ function fromRow(row: ShopProfileRow | null): ShopShippingProfile {
 }
 
 async function loadLegacyProfile(userId: string): Promise<ShopShippingProfile> {
-  const admin = getSupabaseAdmin();
-  const { data, error } = await admin
-    .from("ai_content")
-    .select("data, updated_at")
-    .eq("user_id", profileKey(userId))
-    .order("updated_at", { ascending: false })
-    .limit(1);
-
-  if (error) throw error;
-  const row = Array.isArray(data) ? data[0] : null;
-  const payload = (row?.data ?? null) as Json | null;
-  return normalizeShopShippingProfile(payload);
+  const row = await loadUserState(userId);
+  const payload =
+    row?.payload && typeof row.payload === "object" && row.payload !== null ? (row.payload as Record<string, unknown>) : null;
+  return normalizeShopShippingProfile(payload?.shopShippingProfile ?? null);
 }
 
 async function saveLegacyProfile(userId: string, profile: ShopShippingProfile): Promise<ShopShippingProfile> {
-  const admin = getSupabaseAdmin();
-  const now = new Date().toISOString();
-  const { error } = await admin.from("ai_content").upsert(
-    {
-      user_id: profileKey(userId),
-      date_iso: now.slice(0, 10),
-      language: "ko",
-      data: profile as unknown as Json,
-      updated_at: now,
+  const row = await loadUserState(userId);
+  const existing =
+    row?.payload && typeof row.payload === "object" && row.payload !== null ? (row.payload as Record<string, unknown>) : {};
+  await saveUserState({
+    userId,
+    payload: {
+      ...existing,
+      shopShippingProfile: profile,
     },
-    { onConflict: "user_id" }
-  );
-  if (error) throw error;
+  });
   return profile;
 }
 
@@ -110,4 +100,3 @@ export function buildShopShippingSnapshot(profile: ShopShippingProfile): ShopShi
     savedAt: new Date().toISOString(),
   });
 }
-

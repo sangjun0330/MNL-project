@@ -857,7 +857,7 @@ export function ShopProductDetailPage({ product }: { product: ShopProduct }) {
                 <div className="mt-3 text-[12.5px] leading-6 text-[#a33a2b]">{t("계정에서 기본 배송지를 먼저 저장해야 합니다.")}</div>
               )}
               <div className="mt-4">
-                <Link href="/settings/account" data-auth-allow className={`${SECONDARY_BUTTON} h-10 text-[12px]`}>
+                <Link href="/settings/account/shipping" data-auth-allow className={`${SECONDARY_BUTTON} h-10 text-[12px]`}>
                   {t("배송지 수정")}
                 </Link>
               </div>
