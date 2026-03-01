@@ -408,8 +408,15 @@ export function ShopAdminPage() {
         setDraft(draftFromProduct(saved));
       }
       showNotice("notice", "상품이 저장되었습니다.");
-    } catch {
-      showNotice("error", "상품 저장에 실패했습니다. 입력값을 확인해 주세요.");
+    } catch (error: any) {
+      const text = String(error?.message ?? "failed_to_save_shop_catalog");
+      if (text === "shop_catalog_storage_unavailable") {
+        showNotice("error", "상품 저장소를 아직 사용할 수 없습니다. Supabase shop 테이블 마이그레이션을 먼저 적용해야 합니다.");
+      } else if (text === "invalid_shop_product") {
+        showNotice("error", "필수 입력값이 비어 있거나 형식이 맞지 않습니다.");
+      } else {
+        showNotice("error", "상품 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+      }
     } finally {
       setSaveLoading(false);
     }

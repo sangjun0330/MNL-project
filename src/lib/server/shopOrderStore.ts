@@ -547,7 +547,11 @@ export async function listShopOrdersForUser(userId: string, limit = 20) {
 }
 
 export async function listShopOrdersForAdmin(limit = 40) {
-  return listShopOrderRows(limit);
+  try {
+    return await listShopOrderRows(limit);
+  } catch {
+    return [];
+  }
 }
 
 export async function countRecentReadyShopOrdersByUser(userId: string) {

@@ -42,7 +42,11 @@ export async function POST(req: Request) {
     const nextCatalog = upsertShopProductInCatalog(catalog, product);
     const saved = await saveShopCatalog(nextCatalog);
     return jsonNoStore({ ok: true, data: { product, products: saved } });
-  } catch {
+  } catch (error: any) {
+    const message = String(error?.message ?? "failed_to_save_shop_catalog");
+    if (message === "shop_catalog_storage_unavailable") {
+      return jsonNoStore({ ok: false, error: "shop_catalog_storage_unavailable" }, { status: 503 });
+    }
     return jsonNoStore({ ok: false, error: "failed_to_save_shop_catalog" }, { status: 500 });
   }
 }

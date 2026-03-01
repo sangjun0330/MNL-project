@@ -181,6 +181,10 @@ export async function saveShopCatalog(products: ShopProduct[]): Promise<ShopProd
     return finalProducts;
   } catch (error) {
     if (!isMissingTableError(error)) throw error;
-    return saveLegacyShopCatalog(finalProducts);
+    try {
+      return await saveLegacyShopCatalog(finalProducts);
+    } catch {
+      throw new Error("shop_catalog_storage_unavailable");
+    }
   }
 }
