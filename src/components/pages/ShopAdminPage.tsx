@@ -58,6 +58,16 @@ type ProductDraft = {
   caution: string;
   priority: string;
   matchSignals: ShopSignalKey[];
+  detailHeadline: string;
+  detailSummary: string;
+  detailStoryTitle: string;
+  detailStoryBody: string;
+  detailFeatureTitle: string;
+  detailFeatureItems: string;
+  detailRoutineTitle: string;
+  detailRoutineItems: string;
+  detailNoticeTitle: string;
+  detailNoticeBody: string;
 };
 
 const PRIMARY_BUTTON = "inline-flex items-center justify-center rounded-2xl border border-[#11294b] bg-[#11294b] px-4 font-semibold text-white transition disabled:opacity-60";
@@ -140,6 +150,16 @@ function createEmptyDraft(): ProductDraft {
     caution: "의학적 치료 대체가 아니라 생활 루틴 보조용으로만 안내합니다.",
     priority: "4",
     matchSignals: ["baseline_recovery"],
+    detailHeadline: "",
+    detailSummary: "",
+    detailStoryTitle: "이 제품은",
+    detailStoryBody: "",
+    detailFeatureTitle: "핵심 포인트",
+    detailFeatureItems: "",
+    detailRoutineTitle: "이럴 때 보기 좋아요",
+    detailRoutineItems: "",
+    detailNoticeTitle: "구매 전 안내",
+    detailNoticeBody: "",
   };
 }
 
@@ -163,6 +183,16 @@ function draftFromProduct(product: ShopProduct): ProductDraft {
     caution: product.caution,
     priority: String(product.priority),
     matchSignals: product.matchSignals,
+    detailHeadline: product.detailPage.headline,
+    detailSummary: product.detailPage.summary,
+    detailStoryTitle: product.detailPage.storyTitle,
+    detailStoryBody: product.detailPage.storyBody,
+    detailFeatureTitle: product.detailPage.featureTitle,
+    detailFeatureItems: product.detailPage.featureItems.join("\n"),
+    detailRoutineTitle: product.detailPage.routineTitle,
+    detailRoutineItems: product.detailPage.routineItems.join("\n"),
+    detailNoticeTitle: product.detailPage.noticeTitle,
+    detailNoticeBody: product.detailPage.noticeBody,
   };
 }
 
@@ -342,6 +372,18 @@ export function ShopAdminPage() {
           caution: draft.caution,
           priority: Number(draft.priority) || 4,
           matchSignals: draft.matchSignals,
+          detailPage: {
+            headline: draft.detailHeadline,
+            summary: draft.detailSummary,
+            storyTitle: draft.detailStoryTitle,
+            storyBody: draft.detailStoryBody,
+            featureTitle: draft.detailFeatureTitle,
+            featureItems: splitLineList(draft.detailFeatureItems, 6),
+            routineTitle: draft.detailRoutineTitle,
+            routineItems: splitLineList(draft.detailRoutineItems, 6),
+            noticeTitle: draft.detailNoticeTitle,
+            noticeBody: draft.detailNoticeBody,
+          },
         },
       };
 
@@ -631,6 +673,65 @@ export function ShopAdminPage() {
           <textarea className={`${INPUT_CLASS} min-h-[96px] resize-none`} value={draft.caution} onChange={(e) => setDraft((current) => ({ ...current, caution: e.target.value }))} />
         </label>
 
+        <div className="mt-4 rounded-[24px] border border-[#eef2f7] bg-[#f8fafc] p-4">
+          <div className="text-[14px] font-bold tracking-[-0.02em] text-[#11294b]">{t("상세 페이지 구성")}</div>
+          <div className="mt-1 text-[12px] text-ios-sub">{t("상품 상세 페이지에서 보여줄 문구와 섹션을 여기서만 설정합니다.")}</div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <label className="block">
+              <div className="mb-2 text-[12px] font-semibold text-[#11294b]">{t("상세 헤드라인")}</div>
+              <input className={INPUT_CLASS} value={draft.detailHeadline} onChange={(e) => setDraft((current) => ({ ...current, detailHeadline: e.target.value }))} />
+            </label>
+            <label className="block">
+              <div className="mb-2 text-[12px] font-semibold text-[#11294b]">{t("상세 요약")}</div>
+              <input className={INPUT_CLASS} value={draft.detailSummary} onChange={(e) => setDraft((current) => ({ ...current, detailSummary: e.target.value }))} />
+            </label>
+          </div>
+
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <label className="block">
+              <div className="mb-2 text-[12px] font-semibold text-[#11294b]">{t("소개 섹션 제목")}</div>
+              <input className={INPUT_CLASS} value={draft.detailStoryTitle} onChange={(e) => setDraft((current) => ({ ...current, detailStoryTitle: e.target.value }))} />
+            </label>
+            <label className="block">
+              <div className="mb-2 text-[12px] font-semibold text-[#11294b]">{t("핵심 포인트 제목")}</div>
+              <input className={INPUT_CLASS} value={draft.detailFeatureTitle} onChange={(e) => setDraft((current) => ({ ...current, detailFeatureTitle: e.target.value }))} />
+            </label>
+          </div>
+
+          <label className="mt-3 block">
+            <div className="mb-2 text-[12px] font-semibold text-[#11294b]">{t("소개 섹션 내용")}</div>
+            <textarea className={`${INPUT_CLASS} min-h-[110px] resize-none`} value={draft.detailStoryBody} onChange={(e) => setDraft((current) => ({ ...current, detailStoryBody: e.target.value }))} />
+          </label>
+
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <label className="block">
+              <div className="mb-2 text-[12px] font-semibold text-[#11294b]">{t("핵심 포인트 목록 (줄바꿈 구분)")}</div>
+              <textarea className={`${INPUT_CLASS} min-h-[110px] resize-none`} value={draft.detailFeatureItems} onChange={(e) => setDraft((current) => ({ ...current, detailFeatureItems: e.target.value }))} />
+            </label>
+            <label className="block">
+              <div className="mb-2 text-[12px] font-semibold text-[#11294b]">{t("추천 상황 목록 (줄바꿈 구분)")}</div>
+              <textarea className={`${INPUT_CLASS} min-h-[110px] resize-none`} value={draft.detailRoutineItems} onChange={(e) => setDraft((current) => ({ ...current, detailRoutineItems: e.target.value }))} />
+            </label>
+          </div>
+
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <label className="block">
+              <div className="mb-2 text-[12px] font-semibold text-[#11294b]">{t("추천 상황 제목")}</div>
+              <input className={INPUT_CLASS} value={draft.detailRoutineTitle} onChange={(e) => setDraft((current) => ({ ...current, detailRoutineTitle: e.target.value }))} />
+            </label>
+            <label className="block">
+              <div className="mb-2 text-[12px] font-semibold text-[#11294b]">{t("구매 안내 제목")}</div>
+              <input className={INPUT_CLASS} value={draft.detailNoticeTitle} onChange={(e) => setDraft((current) => ({ ...current, detailNoticeTitle: e.target.value }))} />
+            </label>
+          </div>
+
+          <label className="mt-3 block">
+            <div className="mb-2 text-[12px] font-semibold text-[#11294b]">{t("구매 안내 본문")}</div>
+            <textarea className={`${INPUT_CLASS} min-h-[110px] resize-none`} value={draft.detailNoticeBody} onChange={(e) => setDraft((current) => ({ ...current, detailNoticeBody: e.target.value }))} />
+          </label>
+        </div>
+
         <div className="mt-3">
           <div className="mb-2 text-[12px] font-semibold text-[#11294b]">{t("추천 신호")}</div>
           <div className="flex flex-wrap gap-2">
@@ -661,6 +762,11 @@ export function ShopAdminPage() {
           <button type="button" data-auth-allow onClick={resetDraft} disabled={saveLoading} className={`${SECONDARY_BUTTON} h-11 text-[13px]`}>
             {t("입력 초기화")}
           </button>
+          {activeProductId ? (
+            <Link href={`/shop/${encodeURIComponent(activeProductId)}`} data-auth-allow className={`${SECONDARY_BUTTON} h-11 text-[13px]`}>
+              {t("상세 페이지 보기")}
+            </Link>
+          ) : null}
         </div>
       </div>
 

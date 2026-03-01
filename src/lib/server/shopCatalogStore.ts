@@ -32,7 +32,13 @@ function readProductsFromJson(data: Json | null): ShopProduct[] {
 function isMissingTableError(error: unknown) {
   const code = String((error as { code?: unknown } | null)?.code ?? "").trim();
   const message = String((error as { message?: unknown } | null)?.message ?? "").toLowerCase();
-  return code === "42P01" || message.includes("does not exist") || message.includes("relation") && message.includes("shop_products");
+  return (
+    code === "42P01" ||
+    code === "42703" ||
+    message.includes("does not exist") ||
+    (message.includes("relation") && message.includes("shop_products")) ||
+    (message.includes("column") && message.includes("detail_page"))
+  );
 }
 
 function toProductRow(product: ShopProduct): Database["public"]["Tables"]["shop_products"]["Insert"] {
@@ -55,6 +61,7 @@ function toProductRow(product: ShopProduct): Database["public"]["Tables"]["shop_
     caution: product.caution,
     priority: product.priority,
     match_signals: product.matchSignals,
+    detail_page: product.detailPage as unknown as Json,
     active: true,
   };
 }
@@ -79,6 +86,7 @@ function fromProductRow(row: ShopProductRow): ShopProduct | null {
     caution: row.caution,
     priority: row.priority,
     matchSignals: row.match_signals,
+    detailPage: row.detail_page,
   });
 }
 

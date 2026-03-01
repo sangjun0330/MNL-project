@@ -31,6 +31,19 @@ export type ShopVisualPreset = {
   className: string;
 };
 
+export type ShopDetailPage = {
+  headline: string;
+  summary: string;
+  storyTitle: string;
+  storyBody: string;
+  featureTitle: string;
+  featureItems: string[];
+  routineTitle: string;
+  routineItems: string[];
+  noticeTitle: string;
+  noticeBody: string;
+};
+
 export type ShopProduct = {
   id: string;
   name: string;
@@ -49,6 +62,7 @@ export type ShopProduct = {
   useMoments: string[];
   caution: string;
   priority: number;
+  detailPage: ShopDetailPage;
   externalUrl?: string;
 };
 
@@ -151,7 +165,7 @@ export const SHOP_VISUAL_PRESETS: ShopVisualPreset[] = [
   { key: "teal", label: "틸 그린", className: "bg-gradient-to-br from-teal-700 via-emerald-600 to-lime-500 text-white" },
 ];
 
-export const SHOP_PRODUCTS: ShopProduct[] = [
+const RAW_SHOP_PRODUCTS = [
   {
     id: "sleep-eye-mask",
     name: "온열 아이 마스크",
@@ -304,7 +318,9 @@ export const SHOP_PRODUCTS: ShopProduct[] = [
     caution: "식품 선택은 개인 기호와 성분 확인 기준으로 결정해야 합니다.",
     priority: 4,
   },
-];
+] as const;
+
+export const SHOP_PRODUCTS: ShopProduct[] = normalizeShopCatalogProducts(RAW_SHOP_PRODUCTS);
 
 function bumpSignal(map: Map<ShopSignalKey, ShopSignal>, key: ShopSignalKey, weight: number) {
   const meta = SIGNAL_META[key];
@@ -327,6 +343,68 @@ function sanitizeStringList(value: unknown, maxItems: number, maxLength: number)
     .map((item) => clampText(item, maxLength))
     .filter(Boolean);
   return Array.from(new Set(next)).slice(0, maxItems);
+}
+
+function buildDefaultDetailPage(args: {
+  name: string;
+  subtitle: string;
+  description: string;
+  benefitTags: string[];
+  useMoments: string[];
+  caution: string;
+  visualLabel: string;
+}): ShopDetailPage {
+  const fallbackFeature = args.benefitTags.length > 0 ? args.benefitTags : [args.subtitle || `${args.name}에 맞는 기본 포인트`];
+  const fallbackRoutine = args.useMoments.length > 0 ? args.useMoments : [args.subtitle || `${args.name}을(를) 가볍게 보는 상황`];
+  const safeDescription = args.description || `${args.name}에 대한 기본 상세 설명입니다.`;
+  const safeCaution = args.caution || "구매 전 구성과 사용 안내를 판매처 기준으로 다시 확인해 주세요.";
+
+  return {
+    headline: args.visualLabel || args.name,
+    summary: safeDescription,
+    storyTitle: "이 제품은",
+    storyBody: safeDescription,
+    featureTitle: "핵심 포인트",
+    featureItems: fallbackFeature.slice(0, 6),
+    routineTitle: "이럴 때 보기 좋아요",
+    routineItems: fallbackRoutine.slice(0, 6),
+    noticeTitle: "구매 전 안내",
+    noticeBody: safeCaution,
+  };
+}
+
+function normalizeShopDetailPage(
+  value: unknown,
+  defaults: {
+    name: string;
+    subtitle: string;
+    description: string;
+    benefitTags: string[];
+    useMoments: string[];
+    caution: string;
+    visualLabel: string;
+  }
+): ShopDetailPage {
+  const fallback = buildDefaultDetailPage(defaults);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return fallback;
+  const source = value as Record<string, unknown>;
+
+  return {
+    headline: clampText(source.headline, 80) || fallback.headline,
+    summary: clampText(source.summary, 220) || fallback.summary,
+    storyTitle: clampText(source.storyTitle, 40) || fallback.storyTitle,
+    storyBody: clampText(source.storyBody, 420) || fallback.storyBody,
+    featureTitle: clampText(source.featureTitle, 40) || fallback.featureTitle,
+    featureItems: sanitizeStringList(source.featureItems, 6, 48).slice(0, 6).length > 0
+      ? sanitizeStringList(source.featureItems, 6, 48).slice(0, 6)
+      : fallback.featureItems,
+    routineTitle: clampText(source.routineTitle, 40) || fallback.routineTitle,
+    routineItems: sanitizeStringList(source.routineItems, 6, 72).slice(0, 6).length > 0
+      ? sanitizeStringList(source.routineItems, 6, 72).slice(0, 6)
+      : fallback.routineItems,
+    noticeTitle: clampText(source.noticeTitle, 40) || fallback.noticeTitle,
+    noticeBody: clampText(source.noticeBody, 240) || fallback.noticeBody,
+  };
 }
 
 function describeSignalCombination(signals: ShopSignal[]) {
@@ -427,6 +505,18 @@ export function normalizeShopProduct(raw: unknown): ShopProduct | null {
   const rawPriceKrw = Number(source.priceKrw);
   const priceKrw = Number.isFinite(rawPriceKrw) && rawPriceKrw > 0 ? Math.round(rawPriceKrw) : null;
   const checkoutEnabled = Boolean(source.checkoutEnabled) && priceKrw != null;
+  const benefitTags = sanitizeStringList(source.benefitTags, 6, 24);
+  const useMoments = sanitizeStringList(source.useMoments, 5, 60);
+  const caution = clampText(source.caution, 180) || "의학적 치료 대체가 아니라 생활 루틴 보조용으로만 안내합니다.";
+  const detailPage = normalizeShopDetailPage(source.detailPage, {
+    name,
+    subtitle,
+    description,
+    benefitTags,
+    useMoments,
+    caution,
+    visualLabel,
+  });
 
   return {
     id,
@@ -442,10 +532,11 @@ export function normalizeShopProduct(raw: unknown): ShopProduct | null {
     visualLabel,
     visualClass: clampText(source.visualClass, 160) || visualPreset.className,
     matchSignals: matchSignals.length > 0 ? matchSignals : ["baseline_recovery"],
-    benefitTags: sanitizeStringList(source.benefitTags, 6, 24),
-    useMoments: sanitizeStringList(source.useMoments, 5, 60),
-    caution: clampText(source.caution, 180) || "의학적 치료 대체가 아니라 생활 루틴 보조용으로만 안내합니다.",
+    benefitTags,
+    useMoments,
+    caution,
     priority: Math.max(1, Math.min(9, Number(source.priority) || 4)),
+    detailPage,
     externalUrl: (() => {
       const value = String(source.externalUrl ?? "").trim();
       if (!value) return undefined;

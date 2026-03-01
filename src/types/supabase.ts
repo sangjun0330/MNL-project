@@ -356,6 +356,7 @@ export type Database = {
           caution: string;
           priority: number;
           match_signals: string[];
+          detail_page: Json;
           active: boolean;
           created_at: string | null;
           updated_at: string | null;
@@ -379,6 +380,7 @@ export type Database = {
           caution: string;
           priority?: number;
           match_signals?: string[];
+          detail_page?: Json;
           active?: boolean;
           created_at?: string | null;
           updated_at?: string | null;
@@ -402,6 +404,7 @@ export type Database = {
           caution?: string;
           priority?: number;
           match_signals?: string[];
+          detail_page?: Json;
           active?: boolean;
           created_at?: string | null;
           updated_at?: string | null;

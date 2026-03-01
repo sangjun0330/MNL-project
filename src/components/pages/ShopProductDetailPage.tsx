@@ -31,6 +31,7 @@ export function ShopProductDetailPage({ product }: { product: ShopProduct }) {
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [messageTone, setMessageTone] = useState<"error" | "notice">("notice");
+  const detail = product.detailPage;
 
   useEffect(() => {
     const current = loadShopClientState();
@@ -160,8 +161,8 @@ export function ShopProductDetailPage({ product }: { product: ShopProduct }) {
 
       <div className={["rounded-[28px] px-5 py-5", productToneClass(product)].join(" ")}>
         <div className="text-[11px] font-semibold uppercase tracking-[0.22em] opacity-75">{product.partnerLabel}</div>
-        <div className="mt-3 text-[28px] font-bold tracking-[-0.02em]">{product.visualLabel}</div>
-        <div className="mt-2 text-[13px] leading-6 opacity-85">{product.description}</div>
+        <div className="mt-3 text-[28px] font-bold tracking-[-0.02em]">{detail.headline}</div>
+        <div className="mt-2 text-[13px] leading-6 opacity-85">{detail.summary}</div>
       </div>
 
       <div className="rounded-[28px] border border-ios-sep bg-white p-5">
@@ -183,24 +184,28 @@ export function ShopProductDetailPage({ product }: { product: ShopProduct }) {
       </div>
 
       <div className="rounded-[28px] border border-ios-sep bg-white p-5">
-        <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{t("상세 정보")}</div>
-        <div className="mt-3 text-[13px] leading-6 text-[#44556d]">{product.description}</div>
-        <div className="mt-4">
-          <div className="text-[12px] font-semibold text-[#11294b]">{t("기대 포인트")}</div>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {product.benefitTags.map((tag) => (
-              <span key={tag} className="inline-flex rounded-full border border-[#d7dfeb] bg-[#f4f7fb] px-3 py-1 text-[11px] font-semibold text-[#11294b]">
-                {tag}
-              </span>
+        <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{detail.storyTitle}</div>
+        <div className="mt-3 text-[13px] leading-6 text-[#44556d]">{detail.storyBody}</div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="rounded-[28px] border border-ios-sep bg-white p-5">
+          <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{detail.featureTitle}</div>
+          <div className="mt-3 space-y-2">
+            {detail.featureItems.map((item) => (
+              <div key={item} className="rounded-2xl border border-[#eef2f7] bg-[#f8fafc] px-4 py-3 text-[12.5px] text-[#44556d]">
+                {item}
+              </div>
             ))}
           </div>
         </div>
-        <div className="mt-4">
-          <div className="text-[12px] font-semibold text-[#11294b]">{t("이럴 때 보기 좋아요")}</div>
-          <div className="mt-2 space-y-2">
-            {product.useMoments.map((moment) => (
-              <div key={moment} className="rounded-2xl border border-[#eef2f7] bg-[#f8fafc] px-4 py-3 text-[12.5px] text-[#44556d]">
-                {moment}
+
+        <div className="rounded-[28px] border border-ios-sep bg-white p-5">
+          <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{detail.routineTitle}</div>
+          <div className="mt-3 space-y-2">
+            {detail.routineItems.map((item) => (
+              <div key={item} className="rounded-2xl border border-[#eef2f7] bg-[#f8fafc] px-4 py-3 text-[12.5px] text-[#44556d]">
+                {item}
               </div>
             ))}
           </div>
@@ -208,8 +213,8 @@ export function ShopProductDetailPage({ product }: { product: ShopProduct }) {
       </div>
 
       <div className="rounded-[28px] border border-ios-sep bg-white p-5">
-        <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{t("구매 안내")}</div>
-        <div className="mt-2 text-[12.5px] leading-5 text-ios-sub">{product.caution}</div>
+        <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{detail.noticeTitle}</div>
+        <div className="mt-2 text-[12.5px] leading-6 text-ios-sub">{detail.noticeBody}</div>
         <div className="mt-4 flex flex-wrap gap-2">
           {product.checkoutEnabled && product.priceKrw ? (
             <button type="button" data-auth-allow onClick={() => setCheckoutOpen(true)} className={`${PRIMARY_BUTTON} h-11 text-[13px]`}>
