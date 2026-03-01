@@ -1,4 +1,5 @@
 import { todayISO } from "@/lib/date";
+import { normalizeShopShippingSnapshot, type ShopShippingSnapshot } from "@/lib/shopProfile";
 import { buildCancelIdempotencyKey, buildConfirmIdempotencyKey, readTossAcceptLanguage, readTossSecretKeyFromEnv, readTossTestCodeFromEnv } from "@/lib/server/tossConfig";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import type { ShopProduct } from "@/lib/shop";
@@ -57,6 +58,7 @@ export type ShopOrderRecord = {
   approvedAt: string | null;
   failCode: string | null;
   failMessage: string | null;
+  shipping: ShopShippingSnapshot;
   refund: ShopRefundState;
   createdAt: string;
   updatedAt: string;
@@ -72,6 +74,14 @@ export type ShopOrderSummary = {
   productSnapshot: {
     name: string;
     quantity: number;
+  };
+  shipping: {
+    recipientName: string;
+    phone: string;
+    postalCode: string;
+    addressLine1: string;
+    addressLine2: string;
+    deliveryNote: string;
   };
   refund: {
     status: ShopRefundState["status"];
@@ -161,6 +171,10 @@ function normalizeRefund(value: unknown): ShopRefundState {
   };
 }
 
+function normalizeShippingSnapshot(value: unknown): ShopShippingSnapshot {
+  return normalizeShopShippingSnapshot(value);
+}
+
 function normalizeProductSnapshot(value: unknown): ShopOrderRecord["productSnapshot"] | null {
   const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
   if (!raw) return null;
@@ -209,6 +223,7 @@ function normalizeLegacyOrder(data: unknown): ShopOrderRecord | null {
     approvedAt: cleanText(source.approvedAt, 64) || null,
     failCode: cleanText(source.failCode, 120) || null,
     failMessage: cleanText(source.failMessage, 220) || null,
+    shipping: normalizeShippingSnapshot(source.shipping),
     refund: normalizeRefund(source.refund),
     createdAt: cleanText(source.createdAt, 64),
     updatedAt: cleanText(source.updatedAt, 64),
@@ -226,7 +241,12 @@ function buildPayload(order: ShopOrderRecord): StoredShopOrder {
 function isMissingTableError(error: unknown, tableName: string) {
   const code = String((error as { code?: unknown } | null)?.code ?? "").trim();
   const message = String((error as { message?: unknown } | null)?.message ?? "").toLowerCase();
-  return code === "42P01" || (message.includes("relation") && message.includes(tableName));
+  return (
+    code === "42P01" ||
+    code === "42703" ||
+    (message.includes("relation") && message.includes(tableName)) ||
+    (message.includes("column") && message.includes("shipping_snapshot"))
+  );
 }
 
 function toProductSnapshotJson(snapshot: ShopOrderRecord["productSnapshot"]): Json {
@@ -255,6 +275,7 @@ function toShopOrderRow(order: ShopOrderRecord): Database["public"]["Tables"]["s
     approved_at: order.approvedAt,
     fail_code: order.failCode,
     fail_message: order.failMessage,
+    shipping_snapshot: order.shipping as unknown as Json,
     refund_status: order.refund.status,
     refund_reason: order.refund.reason,
     refund_requested_at: order.refund.requestedAt,
@@ -289,6 +310,7 @@ function fromShopOrderRow(row: ShopOrderRow | null): ShopOrderRecord | null {
     approvedAt: cleanText(row.approved_at, 64) || null,
     failCode: cleanText(row.fail_code, 120) || null,
     failMessage: cleanText(row.fail_message, 220) || null,
+    shipping: normalizeShippingSnapshot(row.shipping_snapshot),
     refund: {
       status: normalizeRefundStatus(row.refund_status),
       reason: cleanText(row.refund_reason, 240) || null,
@@ -474,6 +496,7 @@ export async function createShopOrder(input: {
   userId: string;
   product: ShopProduct;
   quantity: number;
+  shipping: ShopShippingSnapshot;
 }) {
   const now = new Date().toISOString();
   const quantity = Math.max(1, Math.min(9, Math.round(Number(input.quantity) || 1)));
@@ -499,6 +522,7 @@ export async function createShopOrder(input: {
     approvedAt: null,
     failCode: null,
     failMessage: null,
+    shipping: normalizeShippingSnapshot(input.shipping),
     refund: {
       status: "none",
       reason: null,
@@ -789,6 +813,14 @@ export function toShopOrderSummary(order: ShopOrderRecord): ShopOrderSummary {
     productSnapshot: {
       name: order.productSnapshot.name,
       quantity: order.productSnapshot.quantity,
+    },
+    shipping: {
+      recipientName: order.shipping.recipientName,
+      phone: order.shipping.phone,
+      postalCode: order.shipping.postalCode,
+      addressLine1: order.shipping.addressLine1,
+      addressLine2: order.shipping.addressLine2,
+      deliveryNote: order.shipping.deliveryNote,
     },
     refund: {
       status: order.refund.status,

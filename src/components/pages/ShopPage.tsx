@@ -28,6 +28,14 @@ type ShopOrderSummary = {
     name: string;
     quantity: number;
   };
+  shipping: {
+    recipientName: string;
+    phone: string;
+    postalCode: string;
+    addressLine1: string;
+    addressLine2: string;
+    deliveryNote: string;
+  };
   refund: {
     status: "none" | "requested" | "rejected" | "done";
     reason: string | null;
@@ -458,6 +466,12 @@ export function ShopPage() {
                     <div className="mt-1 text-[11px] text-ios-sub">
                       {t("수량")} {order.productSnapshot.quantity} · {Math.round(order.amount).toLocaleString("ko-KR")}원 · {formatDateLabel(order.createdAt)}
                     </div>
+                    {order.shipping.addressLine1 ? (
+                      <div className="mt-1 text-[11px] text-ios-sub">
+                        {order.shipping.recipientName} · {order.shipping.addressLine1}
+                        {order.shipping.addressLine2 ? ` ${order.shipping.addressLine2}` : ""}
+                      </div>
+                    ) : null}
                   </div>
                   <span className={`rounded-full border px-2.5 py-1 text-[10.5px] font-semibold ${orderStatusClass(order.status)}`}>
                     {orderStatusLabel(order.status)}

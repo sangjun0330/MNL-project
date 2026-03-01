@@ -30,6 +30,14 @@ type ShopAdminOrderSummary = {
     name: string;
     quantity: number;
   };
+  shipping: {
+    recipientName: string;
+    phone: string;
+    postalCode: string;
+    addressLine1: string;
+    addressLine2: string;
+    deliveryNote: string;
+  };
   refund: {
     status: "none" | "requested" | "rejected" | "done";
     reason: string | null;
@@ -56,6 +64,8 @@ type ProductDraft = {
   benefitTags: string;
   useMoments: string;
   caution: string;
+  imageUrls: string;
+  specs: string;
   priority: string;
   matchSignals: ShopSignalKey[];
   detailHeadline: string;
@@ -130,6 +140,22 @@ function splitLineList(value: string, max = 6) {
     .slice(0, max);
 }
 
+function splitSpecList(value: string, max = 8) {
+  return value
+    .split("\n")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const [label, ...rest] = item.split(":");
+      return {
+        label: String(label ?? "").trim(),
+        value: rest.join(":").trim(),
+      };
+    })
+    .filter((item) => item.label && item.value)
+    .slice(0, max);
+}
+
 function createEmptyDraft(): ProductDraft {
   return {
     id: "",
@@ -148,6 +174,8 @@ function createEmptyDraft(): ProductDraft {
     benefitTags: "",
     useMoments: "",
     caution: "의학적 치료 대체가 아니라 생활 루틴 보조용으로만 안내합니다.",
+    imageUrls: "",
+    specs: "",
     priority: "4",
     matchSignals: ["baseline_recovery"],
     detailHeadline: "",
@@ -181,6 +209,8 @@ function draftFromProduct(product: ShopProduct): ProductDraft {
     benefitTags: product.benefitTags.join(", "),
     useMoments: product.useMoments.join("\n"),
     caution: product.caution,
+    imageUrls: product.imageUrls.join("\n"),
+    specs: product.specs.map((item) => `${item.label}: ${item.value}`).join("\n"),
     priority: String(product.priority),
     matchSignals: product.matchSignals,
     detailHeadline: product.detailPage.headline,
@@ -370,6 +400,8 @@ export function ShopAdminPage() {
           benefitTags: splitCommaList(draft.benefitTags, 6),
           useMoments: splitLineList(draft.useMoments, 5),
           caution: draft.caution,
+          imageUrls: splitLineList(draft.imageUrls, 6),
+          specs: splitSpecList(draft.specs, 8),
           priority: Number(draft.priority) || 4,
           matchSignals: draft.matchSignals,
           detailPage: {
@@ -680,6 +712,27 @@ export function ShopAdminPage() {
           <textarea className={`${INPUT_CLASS} min-h-[96px] resize-none`} value={draft.caution} onChange={(e) => setDraft((current) => ({ ...current, caution: e.target.value }))} />
         </label>
 
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <label className="block">
+            <div className="mb-2 text-[12px] font-semibold text-[#11294b]">{t("상품 이미지 URL (줄바꿈 구분)")}</div>
+            <textarea
+              className={`${INPUT_CLASS} min-h-[120px] resize-none`}
+              value={draft.imageUrls}
+              onChange={(e) => setDraft((current) => ({ ...current, imageUrls: e.target.value }))}
+              placeholder="https://..."
+            />
+          </label>
+          <label className="block">
+            <div className="mb-2 text-[12px] font-semibold text-[#11294b]">{t("제품 정보 (한 줄에 라벨:값)")}</div>
+            <textarea
+              className={`${INPUT_CLASS} min-h-[120px] resize-none`}
+              value={draft.specs}
+              onChange={(e) => setDraft((current) => ({ ...current, specs: e.target.value }))}
+              placeholder={t("브랜드: RNest\n구성: 1개입")}
+            />
+          </label>
+        </div>
+
         <div className="mt-4 rounded-[24px] border border-[#eef2f7] bg-[#f8fafc] p-4">
           <div className="text-[14px] font-bold tracking-[-0.02em] text-[#11294b]">{t("상세 페이지 구성")}</div>
           <div className="mt-1 text-[12px] text-ios-sub">{t("상품 상세 페이지에서 보여줄 문구와 섹션을 여기서만 설정합니다.")}</div>
@@ -803,6 +856,14 @@ export function ShopAdminPage() {
                 </span>
               </div>
               <div className="mt-2 text-[12px] text-ios-sub">{order.refund.reason ?? t("환불 사유 없음")}</div>
+              {order.shipping.addressLine1 ? (
+                <div className="mt-2 rounded-2xl border border-[#eef2f7] bg-[#f8fafc] px-3 py-3 text-[11.5px] leading-5 text-[#44556d]">
+                  {order.shipping.recipientName} · {order.shipping.phone}<br />
+                  ({order.shipping.postalCode}) {order.shipping.addressLine1}
+                  {order.shipping.addressLine2 ? ` ${order.shipping.addressLine2}` : ""}
+                  {order.shipping.deliveryNote ? <><br />메모: {order.shipping.deliveryNote}</> : null}
+                </div>
+              ) : null}
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -850,6 +911,14 @@ export function ShopAdminPage() {
               </div>
               {order.refund.status === "rejected" ? <div className="mt-2 text-[11.5px] text-[#a33a2b]">{order.refund.note ?? t("반려 사유 없음")}</div> : null}
               {order.status === "FAILED" && order.failMessage ? <div className="mt-2 text-[11.5px] text-[#a33a2b]">{order.failMessage}</div> : null}
+              {order.shipping.addressLine1 ? (
+                <div className="mt-2 text-[11px] leading-5 text-ios-sub">
+                  {order.shipping.recipientName} · {order.shipping.phone}<br />
+                  ({order.shipping.postalCode}) {order.shipping.addressLine1}
+                  {order.shipping.addressLine2 ? ` ${order.shipping.addressLine2}` : ""}
+                  {order.shipping.deliveryNote ? <><br />메모: {order.shipping.deliveryNote}</> : null}
+                </div>
+              ) : null}
             </div>
           ))}
           {!ordersLoading && orders.length === 0 ? <div className="rounded-2xl border border-ios-sep bg-white px-4 py-4 text-[12.5px] text-ios-sub">{t("최근 주문이 없습니다.")}</div> : null}

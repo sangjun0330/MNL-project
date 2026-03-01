@@ -1,8 +1,10 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { getRouteSupabaseClient } from "@/lib/server/supabaseRouteClient";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import { isCompleteShopShippingProfile } from "@/lib/shopProfile";
 import { loadShopCatalog } from "@/lib/server/shopCatalogStore";
 import { buildShopOrderId, countRecentReadyShopOrdersByUser, createShopOrder } from "@/lib/server/shopOrderStore";
+import { buildShopShippingSnapshot, loadShopShippingProfile } from "@/lib/server/shopProfileStore";
 import { readTossClientKeyFromEnv, readTossSecretKeyFromEnv } from "@/lib/server/tossConfig";
 
 export const runtime = "edge";
@@ -76,6 +78,11 @@ export async function POST(req: Request) {
       return jsonNoStore({ ok: false, error: "shop_checkout_disabled" }, { status: 400 });
     }
 
+    const shippingProfile = await loadShopShippingProfile(userId);
+    if (!isCompleteShopShippingProfile(shippingProfile)) {
+      return jsonNoStore({ ok: false, error: "missing_shipping_address" }, { status: 400 });
+    }
+
     const orderId = buildShopOrderId(product.id);
     const customer = await readCustomer(req);
     const order = await createShopOrder({
@@ -83,6 +90,7 @@ export async function POST(req: Request) {
       userId,
       product,
       quantity,
+      shipping: buildShopShippingSnapshot(shippingProfile),
     });
     const origin = resolveOrigin(req);
     if (!origin) return jsonNoStore({ ok: false, error: "invalid_origin" }, { status: 500 });
@@ -95,6 +103,7 @@ export async function POST(req: Request) {
         amount: order.amount,
         currency: "KRW",
         quantity,
+        shipping: order.shipping,
         clientKey: client.clientKey,
         customerKey: `shop_${userId}`.slice(0, 50),
         customerEmail: customer.email,
@@ -103,7 +112,11 @@ export async function POST(req: Request) {
         failUrl: `${origin}/shop/fail`,
       },
     });
-  } catch {
+  } catch (error: any) {
+    const message = String(error?.message ?? "failed_to_create_shop_order");
+    if (message === "shop_profile_storage_unavailable") {
+      return jsonNoStore({ ok: false, error: "shop_profile_storage_unavailable" }, { status: 503 });
+    }
     return jsonNoStore({ ok: false, error: "failed_to_create_shop_order" }, { status: 500 });
   }
 }

@@ -1,14 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { cn } from "@/lib/cn";
+import { authHeaders } from "@/lib/billing/client";
 import { getSupabaseBrowserClient, signInWithProvider, signOut, useAuthState } from "@/lib/auth";
+import { emptyShopShippingProfile, formatShopShippingSingleLine, isCompleteShopShippingProfile, type ShopShippingProfile } from "@/lib/shopProfile";
 import { purgeAllLocalState } from "@/lib/store";
 import { useI18n } from "@/lib/useI18n";
 
@@ -126,6 +128,56 @@ export function SettingsAccountPage() {
   const [deleteNeedsReauth, setDeleteNeedsReauth] = useState(false);
   const [deleteSuccess, setDeleteSuccess] = useState(false);
   const deleteReady = deleteText.trim().toUpperCase() === "DELETE";
+  const [shippingProfile, setShippingProfile] = useState<ShopShippingProfile>(emptyShopShippingProfile());
+  const [shippingLoading, setShippingLoading] = useState(false);
+  const [shippingSaving, setShippingSaving] = useState(false);
+  const [shippingMessage, setShippingMessage] = useState<string | null>(null);
+  const [shippingMessageTone, setShippingMessageTone] = useState<"error" | "notice">("notice");
+
+  useEffect(() => {
+    let active = true;
+    if (!auth?.userId) {
+      setShippingProfile(emptyShopShippingProfile());
+      setShippingLoading(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    const run = async () => {
+      setShippingLoading(true);
+      try {
+        const headers = await authHeaders();
+        const res = await fetch("/api/shop/profile", {
+          method: "GET",
+          headers: {
+            "content-type": "application/json",
+            ...headers,
+          },
+          cache: "no-store",
+        });
+        const json = await res.json().catch(() => null);
+        if (!active) return;
+        if (!res.ok || !json?.ok || !json?.data?.profile) {
+          throw new Error(String(json?.error ?? `http_${res.status}`));
+        }
+        setShippingProfile(json.data.profile as ShopShippingProfile);
+      } catch {
+        if (!active) return;
+        setShippingProfile(emptyShopShippingProfile());
+        setShippingMessageTone("error");
+        setShippingMessage("배송지 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      } finally {
+        if (!active) return;
+        setShippingLoading(false);
+      }
+    };
+
+    void run();
+    return () => {
+      active = false;
+    };
+  }, [auth?.userId]);
 
   const onDeleteAccount = async () => {
     if (!deleteReady || deleteBusy) return;
@@ -167,6 +219,42 @@ export function SettingsAccountPage() {
     purgeAllLocalState();
     router.push("/settings");
   }, [router]);
+
+  const handleSaveShipping = useCallback(async () => {
+    if (!auth?.userId || shippingSaving) return;
+    setShippingSaving(true);
+    setShippingMessage(null);
+    try {
+      const headers = await authHeaders();
+      const res = await fetch("/api/shop/profile", {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          ...headers,
+        },
+        body: JSON.stringify({
+          profile: shippingProfile,
+        }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok || !json?.data?.profile) {
+        throw new Error(String(json?.error ?? `http_${res.status}`));
+      }
+      setShippingProfile(json.data.profile as ShopShippingProfile);
+      setShippingMessageTone("notice");
+      setShippingMessage("배송지가 저장되었습니다.");
+    } catch (error: any) {
+      const code = String(error?.message ?? "failed_to_save_shop_profile");
+      setShippingMessageTone("error");
+      if (code === "shop_profile_storage_unavailable") {
+        setShippingMessage("배송지 저장소를 아직 사용할 수 없습니다. Supabase shop 확장 마이그레이션을 먼저 적용해야 합니다.");
+      } else {
+        setShippingMessage("배송지 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+      }
+    } finally {
+      setShippingSaving(false);
+    }
+  }, [auth?.userId, shippingProfile, shippingSaving]);
 
   return (
     <div className="mx-auto w-full max-w-[720px] px-4 pb-24 pt-6">
@@ -241,6 +329,115 @@ export function SettingsAccountPage() {
                 : t("로그인 후 모든 기능(일정, 기록, 인사이트)을 사용할 수 있어요.")}
             </div>
           </div>
+        )}
+      </div>
+
+      <div className="rounded-apple border border-ios-sep bg-white p-5 shadow-apple">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[15px] font-bold text-ios-text">{t("기본 배송지")}</div>
+            <div className="mt-1 text-[12px] text-ios-sub">{t("쇼핑 주문에서 바로 사용되는 기본 주소입니다. 언제든 수정할 수 있습니다.")}</div>
+          </div>
+          {auth?.userId && isCompleteShopShippingProfile(shippingProfile) ? (
+            <span className="rounded-full border border-[#d7dfeb] bg-[#f4f7fb] px-3 py-1 text-[10px] font-semibold text-[#11294b]">
+              {t("저장됨")}
+            </span>
+          ) : null}
+        </div>
+
+        {!auth ? (
+          <div className="mt-4 rounded-2xl border border-[#eef2f7] bg-[#f8fafc] px-4 py-4 text-[12.5px] leading-5 text-ios-sub">
+            {t("로그인 후 기본 배송지를 저장하면 쇼핑 상세 페이지에서 바로 결제를 진행할 수 있습니다.")}
+          </div>
+        ) : (
+          <>
+            {shippingMessage ? (
+              <div
+                className={[
+                  "mt-4 rounded-2xl px-4 py-3 text-[12.5px] leading-5",
+                  shippingMessageTone === "error" ? "border border-[#f1d0cc] bg-[#fff6f5] text-[#a33a2b]" : "border border-[#d7dfeb] bg-[#eef4fb] text-[#11294b]",
+                ].join(" ")}
+              >
+                {shippingMessage}
+              </div>
+            ) : null}
+
+            {shippingLoading ? (
+              <div className="mt-4 rounded-2xl border border-[#eef2f7] bg-[#f8fafc] px-4 py-4 text-[12.5px] text-ios-sub">
+                {t("배송지 정보를 불러오는 중입니다.")}
+              </div>
+            ) : null}
+
+            {!shippingLoading && isCompleteShopShippingProfile(shippingProfile) ? (
+              <div className="mt-4 rounded-2xl border border-[#eef2f7] bg-[#f8fafc] px-4 py-4 text-[12.5px] leading-5 text-[#44556d]">
+                <div className="font-semibold text-ios-text">{shippingProfile.recipientName} · {shippingProfile.phone}</div>
+                <div className="mt-1">{formatShopShippingSingleLine(shippingProfile)}</div>
+                {shippingProfile.deliveryNote ? <div className="mt-1 text-ios-sub">{shippingProfile.deliveryNote}</div> : null}
+              </div>
+            ) : null}
+
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <label className="block">
+                <div className="mb-2 text-[12px] font-semibold text-[#11294b]">{t("받는 분")}</div>
+                <Input
+                  value={shippingProfile.recipientName}
+                  onChange={(e) => setShippingProfile((current) => ({ ...current, recipientName: e.target.value }))}
+                  placeholder={t("홍길동")}
+                />
+              </label>
+              <label className="block">
+                <div className="mb-2 text-[12px] font-semibold text-[#11294b]">{t("연락처")}</div>
+                <Input
+                  value={shippingProfile.phone}
+                  onChange={(e) => setShippingProfile((current) => ({ ...current, phone: e.target.value }))}
+                  placeholder="010-0000-0000"
+                />
+              </label>
+            </div>
+
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <label className="block">
+                <div className="mb-2 text-[12px] font-semibold text-[#11294b]">{t("우편번호")}</div>
+                <Input
+                  value={shippingProfile.postalCode}
+                  onChange={(e) => setShippingProfile((current) => ({ ...current, postalCode: e.target.value }))}
+                  placeholder="06236"
+                />
+              </label>
+              <label className="block">
+                <div className="mb-2 text-[12px] font-semibold text-[#11294b]">{t("상세 주소")}</div>
+                <Input
+                  value={shippingProfile.addressLine2}
+                  onChange={(e) => setShippingProfile((current) => ({ ...current, addressLine2: e.target.value }))}
+                  placeholder={t("101동 1201호")}
+                />
+              </label>
+            </div>
+
+            <label className="mt-3 block">
+              <div className="mb-2 text-[12px] font-semibold text-[#11294b]">{t("기본 주소")}</div>
+              <Input
+                value={shippingProfile.addressLine1}
+                onChange={(e) => setShippingProfile((current) => ({ ...current, addressLine1: e.target.value }))}
+                placeholder={t("서울시 강남구 테헤란로 123")}
+              />
+            </label>
+
+            <label className="mt-3 block">
+              <div className="mb-2 text-[12px] font-semibold text-[#11294b]">{t("배송 메모")}</div>
+              <Input
+                value={shippingProfile.deliveryNote}
+                onChange={(e) => setShippingProfile((current) => ({ ...current, deliveryNote: e.target.value }))}
+                placeholder={t("문 앞에 놓아주세요")}
+              />
+            </label>
+
+            <div className="mt-4 flex justify-end">
+              <Button onClick={() => void handleSaveShipping()} disabled={shippingSaving}>
+                {shippingSaving ? t("저장 중...") : t("배송지 저장")}
+              </Button>
+            </div>
+          </>
         )}
       </div>
 

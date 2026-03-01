@@ -11,6 +11,7 @@ type ShopCheckoutSheetProps = {
   productSubtitle?: string;
   priceKrw: number;
   quantity: number;
+  shippingLabel?: string | null;
 };
 
 export function ShopCheckoutSheet({
@@ -22,6 +23,7 @@ export function ShopCheckoutSheet({
   productSubtitle,
   priceKrw,
   quantity,
+  shippingLabel,
 }: ShopCheckoutSheetProps) {
   const total = Math.max(0, Math.round(priceKrw) * Math.max(1, quantity));
 
@@ -61,6 +63,13 @@ export function ShopCheckoutSheet({
         <div className="text-[13px] text-ios-sub">수량: {quantity}</div>
         <div className="mt-1 text-[30px] font-extrabold tracking-[-0.02em] text-ios-text">{total.toLocaleString("ko-KR")}원</div>
         <div className="my-3 h-px bg-ios-sep" />
+        {shippingLabel ? (
+          <>
+            <div className="text-[13px] font-semibold text-ios-text">배송지</div>
+            <div className="mt-1 text-[12.5px] leading-5 text-ios-sub">{shippingLabel}</div>
+            <div className="my-3 h-px bg-ios-sep" />
+          </>
+        ) : null}
         <div className="text-[12.5px] leading-5 text-ios-sub">
           결제 완료 후 주문 내역에 즉시 반영됩니다. 환불 요청은 쇼핑 탭의 주문 내역에서 접수할 수 있습니다.
         </div>

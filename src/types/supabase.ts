@@ -258,6 +258,42 @@ export type Database = {
         };
         Relationships: [];
       };
+      shop_customer_profiles: {
+        Row: {
+          user_id: string;
+          recipient_name: string;
+          phone: string;
+          postal_code: string;
+          address_line1: string;
+          address_line2: string;
+          delivery_note: string;
+          created_at: string | null;
+          updated_at: string | null;
+        };
+        Insert: {
+          user_id: string;
+          recipient_name?: string;
+          phone?: string;
+          postal_code?: string;
+          address_line1?: string;
+          address_line2?: string;
+          delivery_note?: string;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Update: {
+          user_id?: string;
+          recipient_name?: string;
+          phone?: string;
+          postal_code?: string;
+          address_line1?: string;
+          address_line2?: string;
+          delivery_note?: string;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Relationships: [];
+      };
       shop_orders: {
         Row: {
           order_id: string;
@@ -281,6 +317,7 @@ export type Database = {
           refund_cancel_amount: number | null;
           refund_canceled_at: string | null;
           refund_summary: Json | null;
+          shipping_snapshot: Json;
           created_at: string | null;
           updated_at: string | null;
         };
@@ -306,6 +343,7 @@ export type Database = {
           refund_cancel_amount?: number | null;
           refund_canceled_at?: string | null;
           refund_summary?: Json | null;
+          shipping_snapshot?: Json;
           created_at?: string | null;
           updated_at?: string | null;
         };
@@ -331,6 +369,7 @@ export type Database = {
           refund_cancel_amount?: number | null;
           refund_canceled_at?: string | null;
           refund_summary?: Json | null;
+          shipping_snapshot?: Json;
           created_at?: string | null;
           updated_at?: string | null;
         };
@@ -356,6 +395,8 @@ export type Database = {
           caution: string;
           priority: number;
           match_signals: string[];
+          image_urls: string[];
+          specs: Json;
           detail_page: Json;
           active: boolean;
           created_at: string | null;
@@ -380,6 +421,8 @@ export type Database = {
           caution: string;
           priority?: number;
           match_signals?: string[];
+          image_urls?: string[];
+          specs?: Json;
           detail_page?: Json;
           active?: boolean;
           created_at?: string | null;
@@ -404,8 +447,43 @@ export type Database = {
           caution?: string;
           priority?: number;
           match_signals?: string[];
+          image_urls?: string[];
+          specs?: Json;
           detail_page?: Json;
           active?: boolean;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Relationships: [];
+      };
+      shop_reviews: {
+        Row: {
+          id: number;
+          product_id: string;
+          user_id: string;
+          rating: number;
+          title: string;
+          body: string;
+          created_at: string | null;
+          updated_at: string | null;
+        };
+        Insert: {
+          id?: number;
+          product_id: string;
+          user_id: string;
+          rating: number;
+          title?: string;
+          body?: string;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Update: {
+          id?: number;
+          product_id?: string;
+          user_id?: string;
+          rating?: number;
+          title?: string;
+          body?: string;
           created_at?: string | null;
           updated_at?: string | null;
         };

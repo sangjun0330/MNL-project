@@ -37,7 +37,7 @@ function isMissingTableError(error: unknown) {
     code === "42703" ||
     message.includes("does not exist") ||
     (message.includes("relation") && message.includes("shop_products")) ||
-    (message.includes("column") && message.includes("detail_page"))
+    (message.includes("column") && (message.includes("detail_page") || message.includes("image_urls") || message.includes("specs")))
   );
 }
 
@@ -61,6 +61,8 @@ function toProductRow(product: ShopProduct): Database["public"]["Tables"]["shop_
     caution: product.caution,
     priority: product.priority,
     match_signals: product.matchSignals,
+    image_urls: product.imageUrls,
+    specs: product.specs as unknown as Json,
     detail_page: product.detailPage as unknown as Json,
     active: true,
   };
@@ -86,6 +88,8 @@ function fromProductRow(row: ShopProductRow): ShopProduct | null {
     caution: row.caution,
     priority: row.priority,
     matchSignals: row.match_signals,
+    imageUrls: row.image_urls,
+    specs: row.specs,
     detailPage: row.detail_page,
   });
 }

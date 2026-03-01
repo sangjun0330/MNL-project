@@ -44,6 +44,11 @@ export type ShopDetailPage = {
   noticeBody: string;
 };
 
+export type ShopProductSpec = {
+  label: string;
+  value: string;
+};
+
 export type ShopProduct = {
   id: string;
   name: string;
@@ -62,6 +67,8 @@ export type ShopProduct = {
   useMoments: string[];
   caution: string;
   priority: number;
+  imageUrls: string[];
+  specs: ShopProductSpec[];
   detailPage: ShopDetailPage;
   externalUrl?: string;
 };
@@ -345,6 +352,40 @@ function sanitizeStringList(value: unknown, maxItems: number, maxLength: number)
   return Array.from(new Set(next)).slice(0, maxItems);
 }
 
+function sanitizeUrlList(value: unknown, maxItems: number) {
+  if (!Array.isArray(value)) return [];
+  const next: string[] = [];
+  for (const item of value) {
+    const raw = String(item ?? "").trim();
+    if (!raw) continue;
+    try {
+      const url = new URL(raw);
+      if (url.protocol !== "https:" && url.protocol !== "http:") continue;
+      const normalized = url.toString().slice(0, 500);
+      if (!next.includes(normalized)) next.push(normalized);
+      if (next.length >= maxItems) break;
+    } catch {
+      continue;
+    }
+  }
+  return next;
+}
+
+function normalizeShopSpecs(value: unknown, maxItems = 8): ShopProductSpec[] {
+  if (!Array.isArray(value)) return [];
+  const next: ShopProductSpec[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const source = item as Record<string, unknown>;
+    const label = clampText(source.label, 40);
+    const specValue = clampText(source.value, 120);
+    if (!label || !specValue) continue;
+    next.push({ label, value: specValue });
+    if (next.length >= maxItems) break;
+  }
+  return next;
+}
+
 function buildDefaultDetailPage(args: {
   name: string;
   subtitle: string;
@@ -508,6 +549,8 @@ export function normalizeShopProduct(raw: unknown): ShopProduct | null {
   const benefitTags = sanitizeStringList(source.benefitTags, 6, 24);
   const useMoments = sanitizeStringList(source.useMoments, 5, 60);
   const caution = clampText(source.caution, 180) || "의학적 치료 대체가 아니라 생활 루틴 보조용으로만 안내합니다.";
+  const imageUrls = sanitizeUrlList(source.imageUrls, 6);
+  const specs = normalizeShopSpecs(source.specs, 8);
   const detailPage = normalizeShopDetailPage(source.detailPage, {
     name,
     subtitle,
@@ -536,6 +579,8 @@ export function normalizeShopProduct(raw: unknown): ShopProduct | null {
     useMoments,
     caution,
     priority: Math.max(1, Math.min(9, Number(source.priority) || 4)),
+    imageUrls,
+    specs,
     detailPage,
     externalUrl: (() => {
       const value = String(source.externalUrl ?? "").trim();
