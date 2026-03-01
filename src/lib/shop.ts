@@ -25,6 +25,12 @@ export type ShopSignal = {
   weight: number;
 };
 
+export type ShopVisualPreset = {
+  key: string;
+  label: string;
+  className: string;
+};
+
 export type ShopProduct = {
   id: string;
   name: string;
@@ -65,7 +71,9 @@ type CategoryMeta = {
   subtitle: string;
 };
 
-const SIGNAL_META: Record<ShopSignalKey, Omit<ShopSignal, "weight">> = {
+type SignalMeta = Omit<ShopSignal, "weight">;
+
+const SIGNAL_META: Record<ShopSignalKey, SignalMeta> = {
   baseline_recovery: {
     key: "baseline_recovery",
     label: "기본 회복 루틴",
@@ -118,6 +126,8 @@ const SIGNAL_META: Record<ShopSignalKey, Omit<ShopSignal, "weight">> = {
   },
 };
 
+export const SHOP_SIGNAL_OPTIONS: SignalMeta[] = Object.values(SIGNAL_META);
+
 export const SHOP_CATEGORIES: CategoryMeta[] = [
   { key: "all", label: "전체", subtitle: "오늘 추천부터" },
   { key: "sleep", label: "수면", subtitle: "야간 전후 루틴" },
@@ -126,6 +136,17 @@ export const SHOP_CATEGORIES: CategoryMeta[] = [
   { key: "warmth", label: "온열", subtitle: "복부·순환" },
   { key: "nutrition", label: "간편영양", subtitle: "근무 중 보충" },
   { key: "gear", label: "근무용품", subtitle: "오래 쓰는 편의" },
+];
+
+export const SHOP_VISUAL_PRESETS: ShopVisualPreset[] = [
+  { key: "midnight", label: "딥 네이비", className: "bg-gradient-to-br from-slate-900 via-slate-700 to-slate-500 text-white" },
+  { key: "ocean", label: "오션 블루", className: "bg-gradient-to-br from-cyan-500 via-sky-500 to-blue-500 text-white" },
+  { key: "violet", label: "인디고", className: "bg-gradient-to-br from-indigo-600 via-indigo-500 to-violet-400 text-white" },
+  { key: "sunset", label: "웜 오렌지", className: "bg-gradient-to-br from-rose-500 via-orange-400 to-amber-300 text-white" },
+  { key: "lime", label: "라임", className: "bg-gradient-to-br from-emerald-500 via-lime-400 to-yellow-300 text-slate-900" },
+  { key: "stone", label: "스톤", className: "bg-gradient-to-br from-stone-800 via-stone-600 to-stone-400 text-white" },
+  { key: "deepblue", label: "딥 블루", className: "bg-gradient-to-br from-sky-950 via-blue-900 to-cyan-700 text-white" },
+  { key: "teal", label: "틸 그린", className: "bg-gradient-to-br from-teal-700 via-emerald-600 to-lime-500 text-white" },
 ];
 
 export const SHOP_PRODUCTS: ShopProduct[] = [
@@ -277,6 +298,19 @@ function bumpSignal(map: Map<ShopSignalKey, ShopSignal>, key: ShopSignalKey, wei
   map.set(key, { ...meta, weight });
 }
 
+function clampText(value: unknown, maxLength: number) {
+  const text = String(value ?? "").trim().replace(/\s+/g, " ");
+  return text.slice(0, maxLength);
+}
+
+function sanitizeStringList(value: unknown, maxItems: number, maxLength: number) {
+  if (!Array.isArray(value)) return [];
+  const next = value
+    .map((item) => clampText(item, maxLength))
+    .filter(Boolean);
+  return Array.from(new Set(next)).slice(0, maxItems);
+}
+
 function describeSignalCombination(signals: ShopSignal[]) {
   const [first, second] = signals;
   if (!first) {
@@ -321,6 +355,104 @@ export function getShopCategoryMeta(key: ShopCategoryKey) {
 
 export function getShopProductById(id: string) {
   return SHOP_PRODUCTS.find((product) => product.id === id) ?? null;
+}
+
+export function getShopSignalMeta(key: ShopSignalKey) {
+  return SIGNAL_META[key];
+}
+
+export function isShopCategoryKey(value: string): value is ShopCategoryKey {
+  return SHOP_CATEGORIES.some((item) => item.key === value);
+}
+
+export function isShopSignalKey(value: string): value is ShopSignalKey {
+  return Object.prototype.hasOwnProperty.call(SIGNAL_META, value);
+}
+
+export function isShopVisualPresetKey(value: string) {
+  return SHOP_VISUAL_PRESETS.some((item) => item.key === value);
+}
+
+export function getShopVisualPreset(key: string | null | undefined) {
+  return SHOP_VISUAL_PRESETS.find((item) => item.key === key) ?? SHOP_VISUAL_PRESETS[0];
+}
+
+export function createShopProductId(name: string) {
+  const ascii = String(name ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, " ")
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-");
+
+  if (ascii) return ascii.slice(0, 48);
+  return `shop-${Date.now().toString(36)}`;
+}
+
+export function normalizeShopProduct(raw: unknown): ShopProduct | null {
+  if (!raw || typeof raw !== "object") return null;
+  const source = raw as Record<string, unknown>;
+
+  const name = clampText(source.name, 80);
+  const subtitle = clampText(source.subtitle, 180);
+  const description = clampText(source.description, 280);
+  const rawCategory = String(source.category ?? "");
+  const category = isShopCategoryKey(rawCategory) && rawCategory !== "all" ? rawCategory : null;
+  const visualPresetKey = String(source.visualPresetKey ?? "");
+  const visualPreset = getShopVisualPreset(visualPresetKey);
+  const matchSignals = sanitizeStringList(source.matchSignals, 8, 32).filter(isShopSignalKey);
+
+  if (!name || !subtitle || !description || !category) return null;
+
+  const id = createShopProductId(String(source.id ?? name));
+  const visualLabel = clampText(source.visualLabel, 40) || name;
+
+  return {
+    id,
+    name,
+    subtitle,
+    description,
+    category,
+    priceLabel: clampText(source.priceLabel, 60) || "제휴 가격 연동 예정",
+    partnerLabel: clampText(source.partnerLabel, 60) || "제휴 파트너 연동 준비중",
+    partnerStatus: clampText(source.partnerStatus, 80) || "제휴 검수 전 단계",
+    visualLabel,
+    visualClass: clampText(source.visualClass, 160) || visualPreset.className,
+    matchSignals: matchSignals.length > 0 ? matchSignals : ["baseline_recovery"],
+    benefitTags: sanitizeStringList(source.benefitTags, 6, 24),
+    useMoments: sanitizeStringList(source.useMoments, 5, 60),
+    caution: clampText(source.caution, 180) || "의학적 치료 대체가 아니라 생활 루틴 보조용으로만 안내합니다.",
+    priority: Math.max(1, Math.min(9, Number(source.priority) || 4)),
+    externalUrl: (() => {
+      const value = String(source.externalUrl ?? "").trim();
+      if (!value) return undefined;
+      try {
+        const url = new URL(value);
+        if (url.protocol === "https:" || url.protocol === "http:") return url.toString().slice(0, 400);
+      } catch {
+        return undefined;
+      }
+      return undefined;
+    })(),
+  };
+}
+
+export function normalizeShopCatalogProducts(raw: unknown): ShopProduct[] {
+  if (!Array.isArray(raw)) return [];
+  const next: ShopProduct[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    const product = normalizeShopProduct(item);
+    if (!product || seen.has(product.id)) continue;
+    seen.add(product.id);
+    next.push(product);
+  }
+  return next;
+}
+
+export function upsertShopProductInCatalog(catalog: ShopProduct[], product: ShopProduct) {
+  const next = catalog.filter((item) => item.id !== product.id);
+  return [product, ...next].slice(0, 80);
 }
 
 export function deriveShopSignals(input: SignalInput): { selectedDate: ISODate; signals: ShopSignal[] } {
@@ -387,10 +519,12 @@ export function buildShopRecommendations(args: {
   bio: Record<ISODate, BioInputs | undefined>;
   settings: AppSettings;
   category?: ShopCategoryKey;
+  products?: ShopProduct[];
 }): ShopRecommendationState {
   const { selectedDate, signals } = deriveShopSignals(args);
   const activeCategory = args.category ?? "all";
-  const recommendations = SHOP_PRODUCTS.filter((product) => activeCategory === "all" || product.category === activeCategory)
+  const catalog = (args.products && args.products.length > 0 ? args.products : SHOP_PRODUCTS).slice(0, 80);
+  const recommendations = catalog.filter((product) => activeCategory === "all" || product.category === activeCategory)
     .map((product) => {
       const matchedSignals = signals.filter((signal) => product.matchSignals.includes(signal.key));
       const signalScore = matchedSignals.reduce((sum, signal) => sum + signal.weight, 0);

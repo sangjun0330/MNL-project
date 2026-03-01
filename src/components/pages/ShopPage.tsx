@@ -2,15 +2,23 @@
 
 import { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useAuthState } from "@/lib/auth";
+import { authHeaders } from "@/lib/billing/client";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Card, CardBody } from "@/components/ui/Card";
 import { formatKoreanDate } from "@/lib/date";
 import {
   buildShopRecommendations,
+  createShopProductId,
   getShopCategoryMeta,
   SHOP_CATEGORIES,
+  SHOP_PRODUCTS,
+  SHOP_SIGNAL_OPTIONS,
+  SHOP_VISUAL_PRESETS,
   type ShopCategoryKey,
+  type ShopProduct,
   type ShopRecommendation,
+  type ShopSignalKey,
 } from "@/lib/shop";
 import {
   defaultShopClientState,
@@ -23,6 +31,25 @@ import {
 } from "@/lib/shopClient";
 import { useAppStoreSelector } from "@/lib/store";
 import { useI18n } from "@/lib/useI18n";
+
+type AdminProductDraft = {
+  id: string;
+  name: string;
+  subtitle: string;
+  description: string;
+  category: Exclude<ShopCategoryKey, "all">;
+  visualPresetKey: string;
+  visualLabel: string;
+  priceLabel: string;
+  partnerLabel: string;
+  partnerStatus: string;
+  externalUrl: string;
+  benefitTagsText: string;
+  useMomentsText: string;
+  caution: string;
+  priority: number;
+  matchSignals: ShopSignalKey[];
+};
 
 function StorefrontIcon() {
   return (
@@ -76,8 +103,103 @@ function pickVisibleEntries(entries: ShopRecommendation[], count: number) {
   return entries.slice(0, count);
 }
 
+function joinList(values: string[]) {
+  return values.join(", ");
+}
+
+function splitCommaList(raw: string) {
+  return Array.from(
+    new Set(
+      String(raw ?? "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  );
+}
+
+function splitLineList(raw: string) {
+  return Array.from(
+    new Set(
+      String(raw ?? "")
+        .split("\n")
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  );
+}
+
+function defaultAdminDraft(): AdminProductDraft {
+  return {
+    id: "",
+    name: "",
+    subtitle: "",
+    description: "",
+    category: "sleep",
+    visualPresetKey: SHOP_VISUAL_PRESETS[0]?.key ?? "midnight",
+    visualLabel: "",
+    priceLabel: "제휴 가격 연동 예정",
+    partnerLabel: "제휴 파트너 연동 준비중",
+    partnerStatus: "제휴 검수 전 단계",
+    externalUrl: "",
+    benefitTagsText: "",
+    useMomentsText: "",
+    caution: "의학적 치료 대체가 아니라 생활 루틴 보조용으로만 안내합니다.",
+    priority: 4,
+    matchSignals: ["baseline_recovery"],
+  };
+}
+
+function draftFromProduct(product: ShopProduct): AdminProductDraft {
+  const preset = SHOP_VISUAL_PRESETS.find((item) => item.className === product.visualClass) ?? SHOP_VISUAL_PRESETS[0];
+  return {
+    id: product.id,
+    name: product.name,
+    subtitle: product.subtitle,
+    description: product.description,
+    category: product.category,
+    visualPresetKey: preset?.key ?? SHOP_VISUAL_PRESETS[0]?.key ?? "midnight",
+    visualLabel: product.visualLabel,
+    priceLabel: product.priceLabel,
+    partnerLabel: product.partnerLabel,
+    partnerStatus: product.partnerStatus,
+    externalUrl: product.externalUrl ?? "",
+    benefitTagsText: joinList(product.benefitTags),
+    useMomentsText: product.useMoments.join("\n"),
+    caution: product.caution,
+    priority: product.priority,
+    matchSignals: product.matchSignals,
+  };
+}
+
+function draftToPayload(draft: AdminProductDraft) {
+  return {
+    id: draft.id || createShopProductId(draft.name),
+    name: draft.name,
+    subtitle: draft.subtitle,
+    description: draft.description,
+    category: draft.category,
+    visualPresetKey: draft.visualPresetKey,
+    visualLabel: draft.visualLabel || draft.name,
+    priceLabel: draft.priceLabel,
+    partnerLabel: draft.partnerLabel,
+    partnerStatus: draft.partnerStatus,
+    externalUrl: draft.externalUrl.trim(),
+    benefitTags: splitCommaList(draft.benefitTagsText),
+    useMoments: splitLineList(draft.useMomentsText),
+    caution: draft.caution,
+    priority: draft.priority,
+    matchSignals: draft.matchSignals,
+  };
+}
+
+function requiredDraftMissing(draft: AdminProductDraft) {
+  return !draft.name.trim() || !draft.subtitle.trim() || !draft.description.trim();
+}
+
 export function ShopPage() {
   const { t } = useI18n();
+  const { status, user } = useAuthState();
   const store = useAppStoreSelector(
     (s) => ({
       selected: s.selected,
@@ -98,6 +220,17 @@ export function ShopPage() {
   const [clientReady, setClientReady] = useState(false);
   const [clientState, setClientState] = useState(defaultShopClientState);
 
+  const [catalog, setCatalog] = useState<ShopProduct[]>(SHOP_PRODUCTS);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminSheetOpen, setAdminSheetOpen] = useState(false);
+  const [adminSaving, setAdminSaving] = useState(false);
+  const [adminError, setAdminError] = useState<string | null>(null);
+  const [adminNotice, setAdminNotice] = useState<string | null>(null);
+  const [adminDraft, setAdminDraft] = useState<AdminProductDraft>(defaultAdminDraft);
+
   useEffect(() => {
     setClientState(loadShopClientState());
     setClientReady(true);
@@ -108,6 +241,74 @@ export function ShopPage() {
     saveShopClientState(clientState);
   }, [clientReady, clientState]);
 
+  useEffect(() => {
+    let active = true;
+
+    const loadCatalog = async () => {
+      setCatalogLoading(true);
+      setCatalogError(null);
+      try {
+        const res = await fetch("/api/shop/catalog", {
+          method: "GET",
+          cache: "no-store",
+        });
+        const json = await res.json().catch(() => null);
+        if (!active) return;
+        if (!res.ok || !json?.ok || !Array.isArray(json?.data?.products)) {
+          throw new Error(String(json?.error ?? `http_${res.status}`));
+        }
+        setCatalog(json.data.products as ShopProduct[]);
+      } catch {
+        if (!active) return;
+        setCatalog(SHOP_PRODUCTS);
+        setCatalogError("catalog_load_failed");
+      } finally {
+        if (!active) return;
+        setCatalogLoading(false);
+      }
+    };
+
+    void loadCatalog();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    if (status !== "authenticated" || !user?.userId) {
+      setIsAdmin(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    const run = async () => {
+      try {
+        const headers = await authHeaders();
+        const res = await fetch("/api/admin/billing/access", {
+          method: "GET",
+          headers: {
+            "content-type": "application/json",
+            ...headers,
+          },
+          cache: "no-store",
+        });
+        const json = await res.json().catch(() => null);
+        if (!active) return;
+        setIsAdmin(Boolean(res.ok && json?.ok && json?.data?.isAdmin));
+      } catch {
+        if (!active) return;
+        setIsAdmin(false);
+      }
+    };
+
+    void run();
+    return () => {
+      active = false;
+    };
+  }, [status, user?.userId]);
+
   const allShopState = useMemo(
     () =>
       buildShopRecommendations({
@@ -115,8 +316,9 @@ export function ShopPage() {
         schedule: store.schedule,
         bio: store.bio,
         settings: store.settings,
+        products: catalog,
       }),
-    [store.selected, store.schedule, store.bio, store.settings]
+    [catalog, store.selected, store.schedule, store.bio, store.settings]
   );
 
   const filteredShopState = useMemo(
@@ -127,8 +329,9 @@ export function ShopPage() {
         bio: store.bio,
         settings: store.settings,
         category: deferredCategory,
+        products: catalog,
       }),
-    [deferredCategory, store.selected, store.schedule, store.bio, store.settings]
+    [catalog, deferredCategory, store.selected, store.schedule, store.bio, store.settings]
   );
 
   const recommendationById = useMemo(
@@ -165,6 +368,81 @@ export function ShopPage() {
 
   const handlePartnerClick = (productId: string) => {
     setClientState((current) => markShopPartnerClick(current, productId));
+  };
+
+  const toggleDraftSignal = (key: ShopSignalKey) => {
+    setAdminDraft((current) => {
+      const has = current.matchSignals.includes(key);
+      const nextSignals = has
+        ? current.matchSignals.filter((item) => item !== key)
+        : [...current.matchSignals, key];
+      return {
+        ...current,
+        matchSignals: nextSignals.length > 0 ? nextSignals : ["baseline_recovery"],
+      };
+    });
+  };
+
+  const startNewAdminDraft = () => {
+    setAdminError(null);
+    setAdminNotice(null);
+    setAdminDraft(defaultAdminDraft());
+  };
+
+  const loadProductIntoAdminDraft = (product: ShopProduct) => {
+    setAdminError(null);
+    setAdminNotice(null);
+    setAdminDraft(draftFromProduct(product));
+    setAdminSheetOpen(true);
+  };
+
+  const submitAdminProduct = async () => {
+    if (!isAdmin || adminSaving) return;
+    if (requiredDraftMissing(adminDraft)) {
+      setAdminError("필수 항목(상품명, 한 줄 설명, 상세 설명)을 먼저 입력해 주세요.");
+      return;
+    }
+
+    setAdminSaving(true);
+    setAdminError(null);
+    setAdminNotice(null);
+
+    try {
+      const headers = await authHeaders();
+      const res = await fetch("/api/admin/shop/catalog", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...headers,
+        },
+        body: JSON.stringify({
+          product: draftToPayload(adminDraft),
+        }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok || !Array.isArray(json?.data?.products)) {
+        throw new Error(String(json?.error ?? `http_${res.status}`));
+      }
+
+      const nextCatalog = json.data.products as ShopProduct[];
+      setCatalog(nextCatalog);
+      setAdminNotice("상품이 저장되었습니다. 쇼핑 추천 목록에 바로 반영됩니다.");
+      setAdminDraft((current) => ({
+        ...current,
+        id: String(json?.data?.product?.id ?? current.id),
+      }));
+    } catch (error) {
+      const text = String((error as { message?: string })?.message ?? "failed_to_save_shop_product");
+      if (text.includes("forbidden") || text.includes("admin")) {
+        setAdminError("관리자 권한이 없는 계정이거나 운영 설정이 누락되었습니다.");
+      } else if (text.includes("invalid_shop_product")) {
+        setAdminError("입력값 형식이 올바르지 않습니다. 필수 항목과 링크 주소를 확인해 주세요.");
+      } else {
+        setAdminError("상품 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+      }
+    } finally {
+      setAdminSaving(false);
+    }
   };
 
   const favoriteCount = clientState.favoriteIds.length;
@@ -289,6 +567,62 @@ export function ShopPage() {
           </div>
         </CardBody>
       </Card>
+
+      {isAdmin ? (
+        <Card>
+          <CardBody className="pt-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-[16px] font-bold tracking-[-0.01em] text-ios-text">{t("운영 상품 관리")}</div>
+                <div className="mt-1 text-[12.5px] leading-5 text-ios-sub">{t("관리자 계정에서만 보이는 등록 영역입니다. 저장 즉시 쇼핑 추천 카탈로그에 반영됩니다.")}</div>
+              </div>
+              <button
+                type="button"
+                data-auth-allow
+                onClick={() => {
+                  setAdminError(null);
+                  setAdminNotice(null);
+                  setAdminSheetOpen(true);
+                }}
+                className="inline-flex h-10 items-center justify-center rounded-full bg-black px-4 text-[12px] font-semibold text-white"
+              >
+                {t("상품 등록")}
+              </button>
+            </div>
+
+            <div className="mt-4 grid grid-cols-3 gap-2">
+              <div className="rounded-2xl border border-ios-sep bg-[#fafafa] px-3 py-3">
+                <div className="text-[10.5px] font-semibold uppercase tracking-[0.18em] text-ios-muted">{t("카탈로그")}</div>
+                <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-ios-text">{compactCount(catalog.length)}</div>
+              </div>
+              <div className="rounded-2xl border border-ios-sep bg-[#fafafa] px-3 py-3">
+                <div className="text-[10.5px] font-semibold uppercase tracking-[0.18em] text-ios-muted">{t("로드 상태")}</div>
+                <div className="mt-1 text-[14px] font-bold tracking-[-0.02em] text-ios-text">{catalogLoading ? t("불러오는 중") : t("준비됨")}</div>
+              </div>
+              <div className="rounded-2xl border border-ios-sep bg-[#fafafa] px-3 py-3">
+                <div className="text-[10.5px] font-semibold uppercase tracking-[0.18em] text-ios-muted">{t("운영 권한")}</div>
+                <div className="mt-1 text-[14px] font-bold tracking-[-0.02em] text-ios-text">{t("활성")}</div>
+              </div>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              {catalog.slice(0, 6).map((product) => (
+                <button
+                  key={product.id}
+                  type="button"
+                  data-auth-allow
+                  onClick={() => loadProductIntoAdminDraft(product)}
+                  className="inline-flex rounded-full border border-ios-sep bg-white px-3 py-2 text-[11px] font-semibold text-ios-text"
+                >
+                  {product.name}
+                </button>
+              ))}
+            </div>
+
+            {catalogError ? <div className="mt-3 text-[12px] text-[#b42318]">{t("카탈로그를 불러오지 못해 기본 상품 목록으로 동작 중입니다.")}</div> : null}
+          </CardBody>
+        </Card>
+      ) : null}
 
       <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
         {SHOP_CATEGORIES.map((item) => {
@@ -589,6 +923,293 @@ export function ShopPage() {
             </div>
           </div>
         ) : null}
+      </BottomSheet>
+
+      <BottomSheet
+        open={adminSheetOpen}
+        onClose={() => setAdminSheetOpen(false)}
+        title={t("운영 상품 등록")}
+        subtitle={t("관리자 계정에서만 저장되며, 저장 즉시 쇼핑 카탈로그에 반영됩니다.")}
+        variant="appstore"
+        maxHeightClassName="max-h-[86dvh]"
+        footer={
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              data-auth-allow
+              onClick={startNewAdminDraft}
+              className="inline-flex h-11 flex-1 items-center justify-center rounded-full border border-ios-sep bg-white text-[13px] font-semibold text-ios-text"
+            >
+              {t("새 상품")}
+            </button>
+            <button
+              type="button"
+              data-auth-allow
+              disabled={adminSaving}
+              onClick={() => void submitAdminProduct()}
+              className="inline-flex h-11 flex-1 items-center justify-center rounded-full bg-black text-[13px] font-semibold text-white disabled:opacity-60"
+            >
+              {adminSaving ? t("저장 중") : t("저장")}
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-4 pb-2">
+          <div className="rounded-[24px] border border-black/5 bg-white p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-[12px] font-semibold text-ios-text">{t("불러와 수정")}</div>
+                <div className="mt-1 text-[12.5px] leading-5 text-ios-sub">{t("기존 상품을 탭하면 같은 ID로 덮어써서 수정합니다. 새 상품은 아래 폼을 비운 상태로 저장하면 됩니다.")}</div>
+              </div>
+              <button
+                type="button"
+                data-auth-allow
+                onClick={startNewAdminDraft}
+                className="inline-flex h-9 items-center justify-center rounded-full border border-ios-sep bg-[#fafafa] px-3 text-[11px] font-semibold text-ios-text"
+              >
+                {t("폼 초기화")}
+              </button>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {catalog.slice(0, 10).map((product) => (
+                <button
+                  key={product.id}
+                  type="button"
+                  data-auth-allow
+                  onClick={() => setAdminDraft(draftFromProduct(product))}
+                  className="inline-flex rounded-full border border-ios-sep bg-[#fafafa] px-3 py-2 text-[11px] font-semibold text-ios-text"
+                >
+                  {product.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-[24px] border border-black/5 bg-white p-4">
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="block">
+                <div className="text-[12px] font-semibold text-ios-text">{t("상품 ID")}</div>
+                <input
+                  value={adminDraft.id}
+                  onChange={(e) => setAdminDraft((current) => ({ ...current, id: e.target.value }))}
+                  placeholder="비우면 상품명 기준 자동 생성"
+                  className="mt-2 w-full rounded-2xl border border-ios-sep bg-[#fafafa] px-4 py-3 text-[13px] text-ios-text outline-none"
+                />
+              </label>
+
+              <label className="block">
+                <div className="text-[12px] font-semibold text-ios-text">{t("상품명")}</div>
+                <input
+                  value={adminDraft.name}
+                  onChange={(e) => setAdminDraft((current) => ({ ...current, name: e.target.value }))}
+                  placeholder="예: 야간 회복 안대"
+                  className="mt-2 w-full rounded-2xl border border-ios-sep bg-[#fafafa] px-4 py-3 text-[13px] text-ios-text outline-none"
+                />
+              </label>
+
+              <label className="block md:col-span-2">
+                <div className="text-[12px] font-semibold text-ios-text">{t("한 줄 설명")}</div>
+                <input
+                  value={adminDraft.subtitle}
+                  onChange={(e) => setAdminDraft((current) => ({ ...current, subtitle: e.target.value }))}
+                  placeholder="근무 흐름에 맞는 짧은 설명"
+                  className="mt-2 w-full rounded-2xl border border-ios-sep bg-[#fafafa] px-4 py-3 text-[13px] text-ios-text outline-none"
+                />
+              </label>
+
+              <label className="block md:col-span-2">
+                <div className="text-[12px] font-semibold text-ios-text">{t("상세 설명")}</div>
+                <textarea
+                  value={adminDraft.description}
+                  onChange={(e) => setAdminDraft((current) => ({ ...current, description: e.target.value }))}
+                  rows={3}
+                  placeholder="왜 이 상품이 필요한지 간단하고 명확하게"
+                  className="mt-2 w-full rounded-2xl border border-ios-sep bg-[#fafafa] px-4 py-3 text-[13px] text-ios-text outline-none"
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="rounded-[24px] border border-black/5 bg-white p-4">
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="block">
+                <div className="text-[12px] font-semibold text-ios-text">{t("카테고리")}</div>
+                <select
+                  value={adminDraft.category}
+                  onChange={(e) => setAdminDraft((current) => ({ ...current, category: e.target.value as Exclude<ShopCategoryKey, "all"> }))}
+                  className="mt-2 w-full rounded-2xl border border-ios-sep bg-[#fafafa] px-4 py-3 text-[13px] text-ios-text outline-none"
+                >
+                  {SHOP_CATEGORIES.filter((item) => item.key !== "all").map((item) => (
+                    <option key={item.key} value={item.key}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block">
+                <div className="text-[12px] font-semibold text-ios-text">{t("우선순위")}</div>
+                <select
+                  value={String(adminDraft.priority)}
+                  onChange={(e) => setAdminDraft((current) => ({ ...current, priority: Number(e.target.value) || 4 }))}
+                  className="mt-2 w-full rounded-2xl border border-ios-sep bg-[#fafafa] px-4 py-3 text-[13px] text-ios-text outline-none"
+                >
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div className="mt-4">
+              <div className="text-[12px] font-semibold text-ios-text">{t("비주얼 톤")}</div>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                {SHOP_VISUAL_PRESETS.map((preset) => (
+                  <button
+                    key={preset.key}
+                    type="button"
+                    data-auth-allow
+                    onClick={() => setAdminDraft((current) => ({ ...current, visualPresetKey: preset.key }))}
+                    className={[
+                      "rounded-2xl border p-3 text-left transition",
+                      adminDraft.visualPresetKey === preset.key
+                        ? "border-black bg-black text-white"
+                        : "border-ios-sep bg-white text-ios-text",
+                    ].join(" ")}
+                  >
+                    <div className="text-[12px] font-semibold">{preset.label}</div>
+                    <div className={["mt-1 h-8 rounded-xl", preset.className].join(" ")} />
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <label className="mt-4 block">
+              <div className="text-[12px] font-semibold text-ios-text">{t("비주얼 라벨")}</div>
+              <input
+                value={adminDraft.visualLabel}
+                onChange={(e) => setAdminDraft((current) => ({ ...current, visualLabel: e.target.value }))}
+                placeholder="예: Night Reset"
+                className="mt-2 w-full rounded-2xl border border-ios-sep bg-[#fafafa] px-4 py-3 text-[13px] text-ios-text outline-none"
+              />
+            </label>
+          </div>
+
+          <div className="rounded-[24px] border border-black/5 bg-white p-4">
+            <div className="text-[12px] font-semibold text-ios-text">{t("추천 신호 매칭")}</div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {SHOP_SIGNAL_OPTIONS.map((signal) => {
+                const active = adminDraft.matchSignals.includes(signal.key);
+                return (
+                  <button
+                    key={signal.key}
+                    type="button"
+                    data-auth-allow
+                    onClick={() => toggleDraftSignal(signal.key)}
+                    className={[
+                      "rounded-full px-3 py-2 text-[11px] font-semibold transition",
+                      active
+                        ? "border border-black/5 bg-black text-white"
+                        : "border border-ios-sep bg-[#fafafa] text-ios-text",
+                    ].join(" ")}
+                  >
+                    {signal.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="rounded-[24px] border border-black/5 bg-white p-4">
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="block">
+                <div className="text-[12px] font-semibold text-ios-text">{t("혜택 태그 (콤마 구분)")}</div>
+                <input
+                  value={adminDraft.benefitTagsText}
+                  onChange={(e) => setAdminDraft((current) => ({ ...current, benefitTagsText: e.target.value }))}
+                  placeholder="수면 루틴, 눈 피로, 야간 후 정리"
+                  className="mt-2 w-full rounded-2xl border border-ios-sep bg-[#fafafa] px-4 py-3 text-[13px] text-ios-text outline-none"
+                />
+              </label>
+
+              <label className="block">
+                <div className="text-[12px] font-semibold text-ios-text">{t("외부 링크 (선택)")}</div>
+                <input
+                  value={adminDraft.externalUrl}
+                  onChange={(e) => setAdminDraft((current) => ({ ...current, externalUrl: e.target.value }))}
+                  placeholder="https://..."
+                  className="mt-2 w-full rounded-2xl border border-ios-sep bg-[#fafafa] px-4 py-3 text-[13px] text-ios-text outline-none"
+                />
+              </label>
+
+              <label className="block md:col-span-2">
+                <div className="text-[12px] font-semibold text-ios-text">{t("사용 시점 (줄바꿈 구분)")}</div>
+                <textarea
+                  value={adminDraft.useMomentsText}
+                  onChange={(e) => setAdminDraft((current) => ({ ...current, useMomentsText: e.target.value }))}
+                  rows={3}
+                  placeholder={"야간 근무 후 바로 쉬기 전\n잠들기 20~30분 전"}
+                  className="mt-2 w-full rounded-2xl border border-ios-sep bg-[#fafafa] px-4 py-3 text-[13px] text-ios-text outline-none"
+                />
+              </label>
+
+              <label className="block md:col-span-2">
+                <div className="text-[12px] font-semibold text-ios-text">{t("주의 문구")}</div>
+                <textarea
+                  value={adminDraft.caution}
+                  onChange={(e) => setAdminDraft((current) => ({ ...current, caution: e.target.value }))}
+                  rows={2}
+                  className="mt-2 w-full rounded-2xl border border-ios-sep bg-[#fafafa] px-4 py-3 text-[13px] text-ios-text outline-none"
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="rounded-[24px] border border-black/5 bg-white p-4">
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="block">
+                <div className="text-[12px] font-semibold text-ios-text">{t("가격 문구")}</div>
+                <input
+                  value={adminDraft.priceLabel}
+                  onChange={(e) => setAdminDraft((current) => ({ ...current, priceLabel: e.target.value }))}
+                  className="mt-2 w-full rounded-2xl border border-ios-sep bg-[#fafafa] px-4 py-3 text-[13px] text-ios-text outline-none"
+                />
+              </label>
+
+              <label className="block">
+                <div className="text-[12px] font-semibold text-ios-text">{t("파트너 라벨")}</div>
+                <input
+                  value={adminDraft.partnerLabel}
+                  onChange={(e) => setAdminDraft((current) => ({ ...current, partnerLabel: e.target.value }))}
+                  className="mt-2 w-full rounded-2xl border border-ios-sep bg-[#fafafa] px-4 py-3 text-[13px] text-ios-text outline-none"
+                />
+              </label>
+
+              <label className="block md:col-span-2">
+                <div className="text-[12px] font-semibold text-ios-text">{t("제휴 상태 문구")}</div>
+                <input
+                  value={adminDraft.partnerStatus}
+                  onChange={(e) => setAdminDraft((current) => ({ ...current, partnerStatus: e.target.value }))}
+                  className="mt-2 w-full rounded-2xl border border-ios-sep bg-[#fafafa] px-4 py-3 text-[13px] text-ios-text outline-none"
+                />
+              </label>
+            </div>
+          </div>
+
+          {adminError ? (
+            <div className="rounded-2xl border border-[#fecdca] bg-[#fff6f5] px-4 py-3 text-[12.5px] leading-5 text-[#b42318]">
+              {adminError}
+            </div>
+          ) : null}
+
+          {adminNotice ? (
+            <div className="rounded-2xl border border-[#b7e4c7] bg-[#f2fbf5] px-4 py-3 text-[12.5px] leading-5 text-[#166534]">
+              {adminNotice}
+            </div>
+          ) : null}
+        </div>
       </BottomSheet>
     </div>
   );
