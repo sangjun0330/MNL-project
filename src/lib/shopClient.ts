@@ -1,10 +1,8 @@
-const SHOP_CLIENT_STATE_KEY = "rnest_shop_state_v1";
+const SHOP_CLIENT_STATE_KEY = "rnest_shop_state_v2";
 const MAX_RECENT_PRODUCTS = 6;
 
 export type ShopClientState = {
-  version: 1;
-  favoriteIds: string[];
-  waitlistIds: string[];
+  version: 2;
   recentIds: string[];
   detailOpenCounts: Record<string, number>;
   partnerClickCounts: Record<string, number>;
@@ -12,9 +10,7 @@ export type ShopClientState = {
 
 export function defaultShopClientState(): ShopClientState {
   return {
-    version: 1,
-    favoriteIds: [],
-    waitlistIds: [],
+    version: 2,
     recentIds: [],
     detailOpenCounts: {},
     partnerClickCounts: {},
@@ -43,11 +39,9 @@ export function loadShopClientState(): ShopClientState {
     const raw = window.localStorage.getItem(SHOP_CLIENT_STATE_KEY);
     if (!raw) return defaultShopClientState();
     const parsed = JSON.parse(raw) as Partial<ShopClientState> | null;
-    if (!parsed || parsed.version !== 1) return defaultShopClientState();
+    if (!parsed || parsed.version !== 2) return defaultShopClientState();
     return {
-      version: 1,
-      favoriteIds: safeStringArray(parsed.favoriteIds),
-      waitlistIds: safeStringArray(parsed.waitlistIds),
+      version: 2,
       recentIds: safeStringArray(parsed.recentIds).slice(0, MAX_RECENT_PRODUCTS),
       detailOpenCounts: safeNumberMap(parsed.detailOpenCounts),
       partnerClickCounts: safeNumberMap(parsed.partnerClickCounts),
@@ -64,28 +58,6 @@ export function saveShopClientState(state: ShopClientState) {
   } catch {
     // ignore quota/private-mode failures
   }
-}
-
-export function toggleShopFavorite(state: ShopClientState, productId: string): ShopClientState {
-  const favoriteIds = state.favoriteIds.includes(productId)
-    ? state.favoriteIds.filter((id) => id !== productId)
-    : [productId, ...state.favoriteIds.filter((id) => id !== productId)].slice(0, 24);
-
-  return {
-    ...state,
-    favoriteIds,
-  };
-}
-
-export function toggleShopWaitlist(state: ShopClientState, productId: string): ShopClientState {
-  const waitlistIds = state.waitlistIds.includes(productId)
-    ? state.waitlistIds.filter((id) => id !== productId)
-    : [productId, ...state.waitlistIds.filter((id) => id !== productId)].slice(0, 24);
-
-  return {
-    ...state,
-    waitlistIds,
-  };
 }
 
 export function markShopViewed(state: ShopClientState, productId: string): ShopClientState {
