@@ -114,6 +114,93 @@ function ArrowUpRightIcon() {
   );
 }
 
+const FLAT_PRIMARY_BUTTON = "inline-flex items-center justify-center rounded-2xl border border-[#11294b] bg-[#11294b] px-4 font-semibold text-white transition disabled:opacity-60";
+const FLAT_SECONDARY_BUTTON = "inline-flex items-center justify-center rounded-2xl border border-[#d7dfeb] bg-[#f4f7fb] px-4 font-semibold text-[#11294b] transition";
+const FLAT_GHOST_BUTTON = "inline-flex items-center justify-center rounded-2xl border border-[#e4e9f1] bg-white px-4 font-semibold text-[#11294b] transition";
+
+function orderStatusLabel(status: ShopOrderSummary["status"]) {
+  switch (status) {
+    case "READY":
+      return "결제 대기";
+    case "PAID":
+      return "결제 완료";
+    case "FAILED":
+      return "결제 실패";
+    case "CANCELED":
+      return "주문 취소";
+    case "REFUND_REQUESTED":
+      return "환불 요청";
+    case "REFUND_REJECTED":
+      return "환불 반려";
+    case "REFUNDED":
+      return "환불 완료";
+    default:
+      return status;
+  }
+}
+
+function orderStatusClass(status: ShopOrderSummary["status"]) {
+  if (status === "FAILED" || status === "REFUND_REJECTED") {
+    return "border-[#f1d0cc] bg-[#fff6f5] text-[#a33a2b]";
+  }
+  if (status === "PAID" || status === "REFUNDED") {
+    return "border-[#d7dfeb] bg-[#eef4fb] text-[#11294b]";
+  }
+  if (status === "REFUND_REQUESTED") {
+    return "border-[#d7dfeb] bg-[#f4f7fb] text-[#11294b]";
+  }
+  return "border-[#dfe5ee] bg-[#f7f8fb] text-[#3d4d63]";
+}
+
+function productSurfaceClass(category: Exclude<ShopCategoryKey, "all">) {
+  switch (category) {
+    case "sleep":
+      return "border border-[#11294b] bg-[#11294b] text-white";
+    case "hydration":
+      return "border border-[#dbe5f4] bg-[#eef4fb] text-[#11294b]";
+    case "comfort":
+      return "border border-[#e1e7f0] bg-[#f7f9fc] text-[#11294b]";
+    case "warmth":
+      return "border border-[#e6dde0] bg-[#faf5f4] text-[#11294b]";
+    case "nutrition":
+      return "border border-[#e1e7f0] bg-[#f5f7fb] text-[#11294b]";
+    case "gear":
+      return "border border-[#dbe5f4] bg-[#edf2f9] text-[#11294b]";
+    default:
+      return "border border-[#e1e7f0] bg-[#f7f9fc] text-[#11294b]";
+  }
+}
+
+function presetPreviewClass(key: string) {
+  switch (key) {
+    case "midnight":
+      return "border border-[#11294b] bg-[#11294b]";
+    case "ocean":
+      return "border border-[#cddced] bg-[#eaf3fb]";
+    case "violet":
+      return "border border-[#d5dbef] bg-[#f1f4fb]";
+    case "sunset":
+      return "border border-[#e7d7d8] bg-[#faf3f1]";
+    case "lime":
+      return "border border-[#dfe6d9] bg-[#f5f8f2]";
+    case "stone":
+      return "border border-[#dfe3e8] bg-[#f5f7fa]";
+    case "deepblue":
+      return "border border-[#d7dfeb] bg-[#edf2f9]";
+    case "teal":
+      return "border border-[#dbe5e3] bg-[#eef5f4]";
+    default:
+      return "border border-[#d7dfeb] bg-[#f4f7fb]";
+  }
+}
+
+function formatDateTimeLabel(value: string | null) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")}`;
+}
+
 function scoreLabel(score: number) {
   if (score >= 14) return "높음";
   if (score >= 9) return "보통";
@@ -750,7 +837,7 @@ export function ShopPage() {
     <div className="mx-auto w-full max-w-[760px] space-y-4 px-4 pb-24 pt-6">
       <div>
         <div className="flex items-center gap-2">
-          <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-ios-sep bg-white text-[var(--rnest-accent)]">
+          <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-[#d7dfeb] bg-[#eef4fb] text-[#11294b]">
             <StorefrontIcon />
           </span>
           <div>
@@ -761,38 +848,38 @@ export function ShopPage() {
       </div>
 
       <Card className="overflow-hidden">
-        <div className="border-b border-ios-sep bg-gradient-to-br from-[#f8fafc] via-[#eef4ff] to-[#f5f7ff] px-5 py-5">
+        <div className="border-b border-ios-sep bg-white px-5 py-5">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-ios-muted">{t("오늘의 맞춤 추천")}</div>
-              <div className="mt-2 text-[21px] font-bold tracking-[-0.02em] text-ios-text">{allShopState.focusSummary}</div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#5f7087]">{t("오늘의 맞춤 추천")}</div>
+              <div className="mt-2 text-[21px] font-bold tracking-[-0.02em] text-[#11294b]">{allShopState.focusSummary}</div>
               <div className="mt-2 text-[12.5px] leading-5 text-ios-sub">
                 {t("기준 날짜")} {selectedDateLabel} · {t("AI 맞춤회복과 같은 입력(근무·수면·스트레스·생리 흐름)을 추천 신호로 구조화해 사용합니다.")}
               </div>
             </div>
-            <Link href="/insights/recovery" data-auth-allow className="shrink-0 rounded-full border border-ios-sep bg-white px-3 py-2 text-[12px] font-semibold text-ios-text">
+            <Link href="/insights/recovery" data-auth-allow className={`${FLAT_SECONDARY_BUTTON} h-10 shrink-0 text-[12px]`}>
               {t("AI 회복 보기")}
             </Link>
           </div>
 
           <div className="mt-4 grid grid-cols-3 gap-2">
-            <div className="rounded-2xl border border-white/80 bg-white/85 px-3 py-3">
-              <div className="text-[10.5px] font-semibold uppercase tracking-[0.18em] text-ios-muted">{t("추천 신호")}</div>
-              <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-ios-text">{compactCount(allShopState.signals.length)}</div>
+            <div className="rounded-2xl border border-[#dbe5f4] bg-[#eef4fb] px-3 py-3">
+              <div className="text-[10.5px] font-semibold uppercase tracking-[0.18em] text-[#5f7087]">{t("추천 신호")}</div>
+              <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-[#11294b]">{compactCount(allShopState.signals.length)}</div>
             </div>
-            <div className="rounded-2xl border border-white/80 bg-white/85 px-3 py-3">
-              <div className="text-[10.5px] font-semibold uppercase tracking-[0.18em] text-ios-muted">{t("관심 상품")}</div>
-              <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-ios-text">{compactCount(favoriteCount)}</div>
+            <div className="rounded-2xl border border-[#e1e7f0] bg-[#f7f9fc] px-3 py-3">
+              <div className="text-[10.5px] font-semibold uppercase tracking-[0.18em] text-[#5f7087]">{t("관심 상품")}</div>
+              <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-[#11294b]">{compactCount(favoriteCount)}</div>
             </div>
-            <div className="rounded-2xl border border-white/80 bg-white/85 px-3 py-3">
-              <div className="text-[10.5px] font-semibold uppercase tracking-[0.18em] text-ios-muted">{t("최근 본")}</div>
-              <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-ios-text">{compactCount(recentCount)}</div>
+            <div className="rounded-2xl border border-[#e1e7f0] bg-[#f7f9fc] px-3 py-3">
+              <div className="text-[10.5px] font-semibold uppercase tracking-[0.18em] text-[#5f7087]">{t("최근 본")}</div>
+              <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-[#11294b]">{compactCount(recentCount)}</div>
             </div>
           </div>
 
           <div className="mt-4 flex flex-wrap gap-2">
             {topSignalChips.map((signal) => (
-              <span key={signal.key} className="inline-flex rounded-full border border-white/70 bg-white/90 px-3 py-1 text-[11px] font-semibold text-ios-text">
+              <span key={signal.key} className="inline-flex rounded-full border border-[#d7dfeb] bg-[#f4f7fb] px-3 py-1 text-[11px] font-semibold text-[#11294b]">
                 {signal.label}
               </span>
             ))}
@@ -811,7 +898,7 @@ export function ShopPage() {
                   type="button"
                   data-auth-allow
                   onClick={() => toggleFavorite(topCard.product.id)}
-                  className="inline-flex h-10 items-center justify-center rounded-full border border-ios-sep bg-white px-4 text-[12px] font-semibold text-ios-text"
+                  className={`${FLAT_SECONDARY_BUTTON} h-10 text-[12px]`}
                 >
                   {clientState.favoriteIds.includes(topCard.product.id) ? t("저장됨") : t("첫 추천 저장")}
                 </button>
@@ -829,7 +916,7 @@ export function ShopPage() {
                         type="button"
                         data-auth-allow
                         onClick={() => openDetailSheet(entry.product.id)}
-                        className="inline-flex rounded-full border border-ios-sep bg-[#f7f7f8] px-3 py-2 text-[11px] font-semibold text-ios-text"
+                        className="inline-flex rounded-full border border-[#d7dfeb] bg-[#f4f7fb] px-3 py-2 text-[11px] font-semibold text-[#11294b]"
                       >
                         {entry.product.name}
                       </button>
@@ -850,7 +937,7 @@ export function ShopPage() {
                         type="button"
                         data-auth-allow
                         onClick={() => openDetailSheet(entry.product.id)}
-                        className="inline-flex items-center gap-1 rounded-full border border-ios-sep bg-[#f7f7f8] px-3 py-2 text-[11px] font-semibold text-ios-text"
+                        className="inline-flex items-center gap-1 rounded-full border border-[#d7dfeb] bg-[#f4f7fb] px-3 py-2 text-[11px] font-semibold text-[#11294b]"
                       >
                         <ClockIcon />
                         {entry.product.name}
@@ -874,7 +961,7 @@ export function ShopPage() {
                 "rounded-2xl px-4 py-3 text-[12.5px] leading-5",
                 orderError
                   ? "border border-[#fecdca] bg-[#fff6f5] text-[#b42318]"
-                  : "border border-[#b7e4c7] bg-[#f2fbf5] text-[#166534]",
+                  : "border border-[#d7dfeb] bg-[#eef4fb] text-[#11294b]",
               ].join(" ")}
             >
               {orderError ?? orderNotice}
@@ -899,7 +986,7 @@ export function ShopPage() {
                   setAdminNotice(null);
                   setAdminSheetOpen(true);
                 }}
-                className="inline-flex h-10 items-center justify-center rounded-full bg-black px-4 text-[12px] font-semibold text-white"
+                className={`${FLAT_PRIMARY_BUTTON} h-10 text-[12px]`}
               >
                 {t("상품 등록")}
               </button>
@@ -927,7 +1014,7 @@ export function ShopPage() {
                   type="button"
                   data-auth-allow
                   onClick={() => loadProductIntoAdminDraft(product)}
-                  className="inline-flex rounded-full border border-ios-sep bg-white px-3 py-2 text-[11px] font-semibold text-ios-text"
+                  className="inline-flex rounded-full border border-[#d7dfeb] bg-[#f4f7fb] px-3 py-2 text-[11px] font-semibold text-[#11294b]"
                 >
                   {product.name}
                 </button>
@@ -942,7 +1029,7 @@ export function ShopPage() {
                   <div className="text-[12px] font-semibold text-ios-text">{t("주문·환불 관리")}</div>
                   <div className="mt-1 text-[12px] leading-5 text-ios-sub">{t("최근 주문과 환불 요청을 여기서 바로 확인하고 처리합니다.")}</div>
                 </div>
-                <div className="rounded-full border border-ios-sep bg-white px-3 py-1 text-[11px] font-semibold text-ios-text">
+                <div className="rounded-full border border-[#d7dfeb] bg-[#f4f7fb] px-3 py-1 text-[11px] font-semibold text-[#11294b]">
                   {adminOrdersLoading ? t("불러오는 중") : `${adminOrders.length}${t("건")}`}
                 </div>
               </div>
@@ -958,17 +1045,18 @@ export function ShopPage() {
                         </div>
                         {order.userLabel ? <div className="mt-1 text-[11px] text-ios-sub">사용자 {order.userLabel}</div> : null}
                       </div>
-                      <span className="rounded-full border border-ios-sep bg-[#fafafa] px-2.5 py-1 text-[10.5px] font-semibold text-ios-text">
-                        {order.status}
+                      <span className={`rounded-full border px-2.5 py-1 text-[10.5px] font-semibold ${orderStatusClass(order.status)}`}>
+                        {orderStatusLabel(order.status)}
                       </span>
                     </div>
+                    <div className="mt-2 text-[11px] text-ios-sub">{formatDateTimeLabel(order.createdAt)}</div>
                     {order.status === "REFUND_REQUESTED" ? (
                       <div className="mt-3 flex gap-2">
                         <button
                           type="button"
                           data-auth-allow
                           onClick={() => void resolveAdminRefund(order.orderId, "approve")}
-                          className="inline-flex h-9 items-center justify-center rounded-full bg-black px-4 text-[11px] font-semibold text-white"
+                          className={`${FLAT_PRIMARY_BUTTON} h-9 text-[11px]`}
                         >
                           {t("환불 승인")}
                         </button>
@@ -976,7 +1064,7 @@ export function ShopPage() {
                           type="button"
                           data-auth-allow
                           onClick={() => void resolveAdminRefund(order.orderId, "reject")}
-                          className="inline-flex h-9 items-center justify-center rounded-full border border-ios-sep bg-white px-4 text-[11px] font-semibold text-ios-text"
+                          className={`${FLAT_SECONDARY_BUTTON} h-9 text-[11px]`}
                         >
                           {t("반려")}
                         </button>
@@ -1002,7 +1090,7 @@ export function ShopPage() {
                 <div className="text-[16px] font-bold tracking-[-0.01em] text-ios-text">{t("내 주문")}</div>
                 <div className="mt-1 text-[12.5px] leading-5 text-ios-sub">{t("쇼핑 탭에서 결제한 주문과 환불 진행 상태를 확인합니다.")}</div>
               </div>
-              <div className="rounded-full border border-ios-sep bg-[#fafafa] px-3 py-1 text-[11px] font-semibold text-ios-text">
+              <div className="rounded-full border border-[#d7dfeb] bg-[#f4f7fb] px-3 py-1 text-[11px] font-semibold text-[#11294b]">
                 {ordersLoading ? t("불러오는 중") : `${orders.length}${t("건")}`}
               </div>
             </div>
@@ -1017,10 +1105,11 @@ export function ShopPage() {
                         {t("수량")} {order.productSnapshot.quantity} · {Math.round(order.amount).toLocaleString("ko-KR")}원
                       </div>
                     </div>
-                    <span className="rounded-full border border-ios-sep bg-[#fafafa] px-2.5 py-1 text-[10.5px] font-semibold text-ios-text">
-                      {order.status}
+                    <span className={`rounded-full border px-2.5 py-1 text-[10.5px] font-semibold ${orderStatusClass(order.status)}`}>
+                      {orderStatusLabel(order.status)}
                     </span>
                   </div>
+                  <div className="mt-2 text-[11px] text-ios-sub">{formatDateTimeLabel(order.createdAt)}</div>
 
                   {order.refund.status === "requested" ? (
                     <div className="mt-2 text-[11.5px] text-ios-sub">{t("환불 요청 접수됨")} · {order.refund.reason ?? t("사유 없음")}</div>
@@ -1041,7 +1130,7 @@ export function ShopPage() {
                         type="button"
                         data-auth-allow
                         onClick={() => void requestRefund(order.orderId)}
-                        className="inline-flex h-9 items-center justify-center rounded-full border border-ios-sep bg-[#fafafa] px-4 text-[11px] font-semibold text-ios-text"
+                        className={`${FLAT_SECONDARY_BUTTON} h-9 text-[11px]`}
                       >
                         {t("환불 요청")}
                       </button>
@@ -1072,14 +1161,14 @@ export function ShopPage() {
                 })
               }
               className={[
-                "shrink-0 rounded-full px-4 py-2 text-left transition",
+                "shrink-0 rounded-2xl px-4 py-2 text-left transition",
                 active
-                  ? "border border-black/5 bg-black text-white shadow-apple-sm"
-                  : "border border-ios-sep bg-white text-ios-text",
+                  ? "border border-[#11294b] bg-[#11294b] text-white"
+                  : "border border-[#d7dfeb] bg-[#f4f7fb] text-[#11294b]",
               ].join(" ")}
             >
               <div className="text-[12px] font-semibold">{t(item.label)}</div>
-              <div className={["mt-0.5 text-[10.5px]", active ? "text-white/70" : "text-ios-muted"].join(" ")}>{t(item.subtitle)}</div>
+              <div className={["mt-0.5 text-[10.5px]", active ? "text-white/70" : "text-[#6b7c92]"].join(" ")}>{t(item.subtitle)}</div>
             </button>
           );
         })}
@@ -1092,7 +1181,7 @@ export function ShopPage() {
               <div className="text-[16px] font-bold tracking-[-0.01em] text-ios-text">{t(activeCategoryMeta.label)} {t("추천")}</div>
               <div className="mt-1 text-[12.5px] leading-5 text-ios-sub">{t(activeCategoryMeta.subtitle)} · {t("현재 상태와 태그가 맞는 순서대로 정렬합니다.")}</div>
             </div>
-            <div className="rounded-full border border-ios-sep bg-[#fafafa] px-3 py-1 text-[11px] font-semibold text-ios-text">{featured.length}{t("개")}</div>
+            <div className="rounded-full border border-[#d7dfeb] bg-[#f4f7fb] px-3 py-1 text-[11px] font-semibold text-[#11294b]">{filteredShopState.recommendations.length}{t("개")}</div>
           </div>
         </CardBody>
       </Card>
@@ -1109,7 +1198,7 @@ export function ShopPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="inline-flex rounded-full border border-ios-sep bg-[#f6f7fb] px-2.5 py-1 text-[10.5px] font-semibold text-ios-text">
+                      <span className="inline-flex rounded-full border border-[#d7dfeb] bg-[#f4f7fb] px-2.5 py-1 text-[10.5px] font-semibold text-[#11294b]">
                         {t(getShopCategoryMeta(entry.product.category).label)}
                       </span>
                       <span className="text-[11px] font-semibold text-ios-muted">
@@ -1125,25 +1214,25 @@ export function ShopPage() {
                     aria-pressed={isFavorite}
                     onClick={() => toggleFavorite(entry.product.id)}
                     className={[
-                      "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border transition",
+                      "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border transition",
                       isFavorite
-                        ? "border-rose-200 bg-rose-50 text-rose-500"
-                        : "border-ios-sep bg-white text-ios-muted",
+                        ? "border-[#11294b] bg-[#11294b] text-white"
+                        : "border-[#d7dfeb] bg-[#f4f7fb] text-[#6b7c92]",
                     ].join(" ")}
                   >
                     <HeartIcon filled={isFavorite} />
                   </button>
                 </div>
 
-                <div className={["mt-4 rounded-[22px] px-4 py-4", entry.product.visualClass].join(" ")}>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.22em] opacity-80">{entry.product.partnerLabel}</div>
+                <div className={["mt-4 rounded-[22px] px-4 py-4", productSurfaceClass(entry.product.category)].join(" ")}>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.22em] opacity-75">{entry.product.partnerLabel}</div>
                   <div className="mt-3 text-[22px] font-bold tracking-[-0.02em]">{entry.product.visualLabel}</div>
                   <div className="mt-1 max-w-[280px] text-[12px] leading-5 opacity-80">{entry.secondaryReason}</div>
                 </div>
 
                 <div className="mt-3 flex flex-wrap gap-2">
                   {entry.product.benefitTags.slice(0, 3).map((tag) => (
-                    <span key={tag} className="inline-flex rounded-full border border-ios-sep bg-[#fafafa] px-3 py-1 text-[11px] font-semibold text-ios-text">
+                    <span key={tag} className="inline-flex rounded-full border border-[#d7dfeb] bg-[#f4f7fb] px-3 py-1 text-[11px] font-semibold text-[#11294b]">
                       {tag}
                     </span>
                   ))}
@@ -1161,7 +1250,7 @@ export function ShopPage() {
                       type="button"
                       data-auth-allow
                       onClick={() => openDetailSheet(entry.product.id)}
-                      className="inline-flex h-10 items-center justify-center rounded-full border border-ios-sep bg-white px-4 text-[12px] font-semibold text-ios-text"
+                      className={`${FLAT_GHOST_BUTTON} h-10 text-[12px]`}
                     >
                       {t("상세 보기")}
                     </button>
@@ -1171,7 +1260,7 @@ export function ShopPage() {
                         type="button"
                         data-auth-allow
                         onClick={() => beginCheckout(entry.product.id)}
-                        className="inline-flex h-10 items-center justify-center rounded-full bg-black px-4 text-[12px] font-semibold text-white"
+                        className={`${FLAT_PRIMARY_BUTTON} h-10 text-[12px]`}
                       >
                         {t("바로 결제")}
                       </button>
@@ -1182,7 +1271,7 @@ export function ShopPage() {
                         rel="noreferrer noopener"
                         onClick={() => handlePartnerClick(entry.product.id)}
                         data-auth-allow
-                        className="inline-flex h-10 items-center justify-center rounded-full bg-black px-4 text-[12px] font-semibold text-white"
+                        className={`${FLAT_PRIMARY_BUTTON} h-10 text-[12px]`}
                       >
                         {t("구매하러 가기")}
                       </a>
@@ -1192,10 +1281,10 @@ export function ShopPage() {
                         data-auth-allow
                         onClick={() => toggleWaitlist(entry.product.id)}
                         className={[
-                          "inline-flex h-10 items-center justify-center rounded-full px-4 text-[12px] font-semibold transition",
+                          "inline-flex h-10 items-center justify-center rounded-2xl px-4 text-[12px] font-semibold transition",
                           isWaitlisted
-                            ? "bg-black text-white"
-                            : "border border-ios-sep bg-white text-ios-text",
+                            ? "border border-[#11294b] bg-[#11294b] text-white"
+                            : "border border-[#d7dfeb] bg-[#f4f7fb] text-[#11294b]",
                         ].join(" ")}
                       >
                         {isWaitlisted ? t("연결 대기 저장됨") : t("연결 대기 저장")}
@@ -1211,22 +1300,10 @@ export function ShopPage() {
 
       <Card>
         <CardBody className="pt-5">
-          <div className="text-[16px] font-bold tracking-[-0.01em] text-ios-text">{t("쇼핑 시스템 흐름")}</div>
-          <div className="mt-3 grid gap-3 md:grid-cols-3">
-            <div className="rounded-2xl border border-ios-sep bg-white p-4">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ios-muted">01</div>
-              <div className="mt-2 text-[14px] font-semibold text-ios-text">{t("회복 신호 추출")}</div>
-              <div className="mt-1 text-[12.5px] leading-5 text-ios-sub">{t("오늘 근무, 수면, 스트레스, 생리 흐름을 추천 태그로 구조화합니다.")}</div>
-            </div>
-            <div className="rounded-2xl border border-ios-sep bg-white p-4">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ios-muted">02</div>
-              <div className="mt-2 text-[14px] font-semibold text-ios-text">{t("상품 태그 매칭")}</div>
-              <div className="mt-1 text-[12.5px] leading-5 text-ios-sub">{t("상품별 태그와 우선순위를 비교해 추천 순서를 정렬하고, 관심 상품·최근 본 흐름을 유지합니다.")}</div>
-            </div>
-            <div className="rounded-2xl border border-ios-sep bg-white p-4">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ios-muted">03</div>
-              <div className="mt-2 text-[14px] font-semibold text-ios-text">{t("제휴 링크 연결")}</div>
-              <div className="mt-1 text-[12.5px] leading-5 text-ios-sub">{t("외부 판매처로 이동해 구매하고, 앱은 추천·클릭 추적·큐레이션만 담당합니다.")}</div>
+          <div className="rounded-2xl border border-[#d7dfeb] bg-[#f4f7fb] px-4 py-4">
+            <div className="text-[12px] font-semibold text-[#11294b]">{t("쇼핑 탭 안내")}</div>
+            <div className="mt-2 text-[12.5px] leading-5 text-ios-sub">
+              {t("이 탭은 회복 상태에 맞는 추천, 주문, 환불 상태 확인만 담당합니다. 실제 결제는 토스, 외부 링크형 상품은 판매처에서 진행됩니다.")}
             </div>
           </div>
         </CardBody>
@@ -1258,10 +1335,10 @@ export function ShopPage() {
                 data-auth-allow
                 onClick={() => toggleFavorite(selectedEntry.product.id)}
                 className={[
-                  "inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-full border text-[13px] font-semibold",
+                  "inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-2xl border text-[13px] font-semibold",
                   clientState.favoriteIds.includes(selectedEntry.product.id)
-                    ? "border-rose-200 bg-rose-50 text-rose-500"
-                    : "border-ios-sep bg-white text-ios-text",
+                    ? "border-[#11294b] bg-[#11294b] text-white"
+                    : "border-[#d7dfeb] bg-[#f4f7fb] text-[#11294b]",
                 ].join(" ")}
               >
                 <HeartIcon filled={clientState.favoriteIds.includes(selectedEntry.product.id)} />
@@ -1273,7 +1350,7 @@ export function ShopPage() {
                   type="button"
                   data-auth-allow
                   onClick={() => beginCheckout(selectedEntry.product.id)}
-                  className="inline-flex h-11 flex-1 items-center justify-center rounded-full bg-black text-[13px] font-semibold text-white"
+                  className={`${FLAT_PRIMARY_BUTTON} h-11 flex-1 text-[13px]`}
                 >
                   {t("토스로 결제")}
                 </button>
@@ -1284,7 +1361,7 @@ export function ShopPage() {
                   rel="noreferrer noopener"
                   onClick={() => handlePartnerClick(selectedEntry.product.id)}
                   data-auth-allow
-                  className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-full bg-black text-[13px] font-semibold text-white"
+                  className={`${FLAT_PRIMARY_BUTTON} h-11 flex-1 gap-2 text-[13px]`}
                 >
                   <ArrowUpRightIcon />
                   {t("판매처 이동")}
@@ -1295,10 +1372,10 @@ export function ShopPage() {
                   data-auth-allow
                   onClick={() => toggleWaitlist(selectedEntry.product.id)}
                   className={[
-                    "inline-flex h-11 flex-1 items-center justify-center rounded-full text-[13px] font-semibold transition",
+                    "inline-flex h-11 flex-1 items-center justify-center rounded-2xl text-[13px] font-semibold transition",
                     clientState.waitlistIds.includes(selectedEntry.product.id)
-                      ? "bg-black text-white"
-                      : "border border-ios-sep bg-white text-ios-text",
+                      ? "border border-[#11294b] bg-[#11294b] text-white"
+                      : "border border-[#d7dfeb] bg-[#f4f7fb] text-[#11294b]",
                   ].join(" ")}
                 >
                   {clientState.waitlistIds.includes(selectedEntry.product.id) ? t("연결 대기 저장됨") : t("연결 대기 저장")}
@@ -1310,34 +1387,34 @@ export function ShopPage() {
       >
         {selectedEntry ? (
           <div className="space-y-4 pb-2">
-            <div className={["rounded-[24px] px-5 py-5", selectedEntry.product.visualClass].join(" ")}>
-              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] opacity-80">{selectedEntry.product.partnerLabel}</div>
+            <div className={["rounded-[24px] px-5 py-5", productSurfaceClass(selectedEntry.product.category)].join(" ")}>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] opacity-75">{selectedEntry.product.partnerLabel}</div>
               <div className="mt-3 text-[26px] font-bold tracking-[-0.03em]">{selectedEntry.product.visualLabel}</div>
               <div className="mt-2 max-w-[300px] text-[13px] leading-6 opacity-90">{selectedEntry.product.description}</div>
             </div>
 
-            <div className="rounded-[24px] border border-black/5 bg-white p-4">
+            <div className="rounded-[24px] border border-ios-sep bg-white p-4">
               <div className="text-[12px] font-semibold text-ios-text">{t("왜 지금 맞는지")}</div>
               <div className="mt-2 text-[14px] leading-6 text-ios-text">{selectedEntry.primaryReason}</div>
               <div className="mt-2 text-[12.5px] leading-5 text-ios-sub">{selectedEntry.secondaryReason}</div>
             </div>
 
             <div className="grid grid-cols-3 gap-2">
-              <div className="rounded-2xl border border-black/5 bg-white p-3">
+              <div className="rounded-2xl border border-ios-sep bg-white p-3">
                 <div className="text-[10.5px] font-semibold uppercase tracking-[0.18em] text-ios-muted">{t("상세 열람")}</div>
                 <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-ios-text">{compactCount(clientState.detailOpenCounts[selectedEntry.product.id] ?? 0)}</div>
               </div>
-              <div className="rounded-2xl border border-black/5 bg-white p-3">
+              <div className="rounded-2xl border border-ios-sep bg-white p-3">
                 <div className="text-[10.5px] font-semibold uppercase tracking-[0.18em] text-ios-muted">{t("제휴 클릭")}</div>
                 <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-ios-text">{compactCount(clientState.partnerClickCounts[selectedEntry.product.id] ?? 0)}</div>
               </div>
-              <div className="rounded-2xl border border-black/5 bg-white p-3">
+              <div className="rounded-2xl border border-ios-sep bg-white p-3">
                 <div className="text-[10.5px] font-semibold uppercase tracking-[0.18em] text-ios-muted">{t("추천도")}</div>
                 <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-ios-text">{scoreLabel(selectedEntry.score)}</div>
               </div>
             </div>
 
-            <div className="rounded-[24px] border border-black/5 bg-white p-4">
+            <div className="rounded-[24px] border border-ios-sep bg-white p-4">
               <div className="text-[12px] font-semibold text-ios-text">{t("이럴 때 잘 맞아요")}</div>
               <div className="mt-3 space-y-2">
                 {selectedEntry.product.useMoments.map((moment) => (
@@ -1348,7 +1425,7 @@ export function ShopPage() {
               </div>
             </div>
 
-            <div className="rounded-[24px] border border-black/5 bg-white p-4">
+            <div className="rounded-[24px] border border-ios-sep bg-white p-4">
               <div className="text-[12px] font-semibold text-ios-text">{t("추천 기준 태그")}</div>
               <div className="mt-3 flex flex-wrap gap-2">
                 {selectedEntry.matchedSignals.length > 0 ? (
@@ -1372,7 +1449,7 @@ export function ShopPage() {
               </div>
             </div>
 
-            <div className="rounded-[24px] border border-black/5 bg-white p-4">
+            <div className="rounded-[24px] border border-ios-sep bg-white p-4">
               <div className="text-[12px] font-semibold text-ios-text">{t("제휴 안내")}</div>
               <div className="mt-2 text-[13px] leading-6 text-ios-text">{selectedEntry.product.partnerStatus}</div>
               <div className="mt-1 text-[12.5px] leading-5 text-ios-sub">
@@ -1403,7 +1480,7 @@ export function ShopPage() {
               type="button"
               data-auth-allow
               onClick={startNewAdminDraft}
-              className="inline-flex h-11 flex-1 items-center justify-center rounded-full border border-ios-sep bg-white text-[13px] font-semibold text-ios-text"
+              className={`${FLAT_SECONDARY_BUTTON} h-11 flex-1 text-[13px]`}
             >
               {t("새 상품")}
             </button>
@@ -1412,7 +1489,7 @@ export function ShopPage() {
               data-auth-allow
               disabled={adminSaving}
               onClick={() => void submitAdminProduct()}
-              className="inline-flex h-11 flex-1 items-center justify-center rounded-full bg-black text-[13px] font-semibold text-white disabled:opacity-60"
+              className={`${FLAT_PRIMARY_BUTTON} h-11 flex-1 text-[13px]`}
             >
               {adminSaving ? t("저장 중") : t("저장")}
             </button>
@@ -1420,7 +1497,7 @@ export function ShopPage() {
         }
       >
         <div className="space-y-4 pb-2">
-          <div className="rounded-[24px] border border-black/5 bg-white p-4">
+          <div className="rounded-[24px] border border-ios-sep bg-white p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-[12px] font-semibold text-ios-text">{t("불러와 수정")}</div>
@@ -1430,7 +1507,7 @@ export function ShopPage() {
                 type="button"
                 data-auth-allow
                 onClick={startNewAdminDraft}
-                className="inline-flex h-9 items-center justify-center rounded-full border border-ios-sep bg-[#fafafa] px-3 text-[11px] font-semibold text-ios-text"
+                className={`${FLAT_SECONDARY_BUTTON} h-9 px-3 text-[11px]`}
               >
                 {t("폼 초기화")}
               </button>
@@ -1450,7 +1527,7 @@ export function ShopPage() {
             </div>
           </div>
 
-          <div className="rounded-[24px] border border-black/5 bg-white p-4">
+          <div className="rounded-[24px] border border-ios-sep bg-white p-4">
             <div className="grid gap-3 md:grid-cols-2">
               <label className="block">
                 <div className="text-[12px] font-semibold text-ios-text">{t("상품 ID")}</div>
@@ -1495,7 +1572,7 @@ export function ShopPage() {
             </div>
           </div>
 
-          <div className="rounded-[24px] border border-black/5 bg-white p-4">
+          <div className="rounded-[24px] border border-ios-sep bg-white p-4">
             <div className="grid gap-3 md:grid-cols-2">
               <label className="block">
                 <div className="text-[12px] font-semibold text-ios-text">{t("카테고리")}</div>
@@ -1548,8 +1625,8 @@ export function ShopPage() {
                   className={[
                     "mt-2 inline-flex h-[50px] w-full items-center justify-between rounded-2xl border px-4 text-[13px] font-semibold transition",
                     adminDraft.checkoutEnabled
-                      ? "border-black bg-black text-white"
-                      : "border-ios-sep bg-[#fafafa] text-ios-text",
+                      ? "border-[#11294b] bg-[#11294b] text-white"
+                      : "border-[#d7dfeb] bg-[#f4f7fb] text-[#11294b]",
                   ].join(" ")}
                 >
                   <span>{adminDraft.checkoutEnabled ? t("토스 결제 활성") : t("외부 링크/대기만 사용")}</span>
@@ -1570,12 +1647,12 @@ export function ShopPage() {
                     className={[
                       "rounded-2xl border p-3 text-left transition",
                       adminDraft.visualPresetKey === preset.key
-                        ? "border-black bg-black text-white"
-                        : "border-ios-sep bg-white text-ios-text",
+                        ? "border-[#11294b] bg-[#11294b] text-white"
+                        : "border-[#d7dfeb] bg-[#f4f7fb] text-[#11294b]",
                     ].join(" ")}
                   >
                     <div className="text-[12px] font-semibold">{preset.label}</div>
-                    <div className={["mt-1 h-8 rounded-xl", preset.className].join(" ")} />
+                    <div className={["mt-2 h-8 rounded-xl", presetPreviewClass(preset.key)].join(" ")} />
                   </button>
                 ))}
               </div>
@@ -1592,7 +1669,7 @@ export function ShopPage() {
             </label>
           </div>
 
-          <div className="rounded-[24px] border border-black/5 bg-white p-4">
+          <div className="rounded-[24px] border border-ios-sep bg-white p-4">
             <div className="text-[12px] font-semibold text-ios-text">{t("추천 신호 매칭")}</div>
             <div className="mt-3 flex flex-wrap gap-2">
               {SHOP_SIGNAL_OPTIONS.map((signal) => {
@@ -1606,8 +1683,8 @@ export function ShopPage() {
                     className={[
                       "rounded-full px-3 py-2 text-[11px] font-semibold transition",
                       active
-                        ? "border border-black/5 bg-black text-white"
-                        : "border border-ios-sep bg-[#fafafa] text-ios-text",
+                        ? "border border-[#11294b] bg-[#11294b] text-white"
+                        : "border border-[#d7dfeb] bg-[#f4f7fb] text-[#11294b]",
                     ].join(" ")}
                   >
                     {signal.label}
@@ -1617,7 +1694,7 @@ export function ShopPage() {
             </div>
           </div>
 
-          <div className="rounded-[24px] border border-black/5 bg-white p-4">
+          <div className="rounded-[24px] border border-ios-sep bg-white p-4">
             <div className="grid gap-3 md:grid-cols-2">
               <label className="block">
                 <div className="text-[12px] font-semibold text-ios-text">{t("혜택 태그 (콤마 구분)")}</div>
@@ -1662,7 +1739,7 @@ export function ShopPage() {
             </div>
           </div>
 
-          <div className="rounded-[24px] border border-black/5 bg-white p-4">
+          <div className="rounded-[24px] border border-ios-sep bg-white p-4">
             <div className="grid gap-3 md:grid-cols-2">
               <label className="block">
                 <div className="text-[12px] font-semibold text-ios-text">{t("가격 문구")}</div>

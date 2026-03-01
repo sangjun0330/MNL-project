@@ -19,10 +19,10 @@ export function ShopCheckoutFailPage() {
         {code ? <div className="mt-1 text-[12px] break-all text-ios-muted">code: {code}</div> : null}
 
         <div className="mt-6 flex gap-2">
-          <Link href="/shop" className="inline-flex h-10 items-center justify-center rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] px-5 text-[13px] font-semibold text-[color:var(--rnest-accent)]">
+          <Link href="/shop" className="inline-flex h-10 items-center justify-center rounded-2xl border border-[#11294b] bg-[#11294b] px-5 text-[13px] font-semibold text-white">
             {t("쇼핑으로 돌아가기")}
           </Link>
-          <Link href="/settings/billing" className="inline-flex h-10 items-center justify-center rounded-full border border-ios-sep bg-[#F2F2F7] px-5 text-[13px] font-semibold text-ios-text">
+          <Link href="/settings/billing" className="inline-flex h-10 items-center justify-center rounded-2xl border border-[#d7dfeb] bg-[#f4f7fb] px-5 text-[13px] font-semibold text-[#11294b]">
             {t("결제 설정 보기")}
           </Link>
         </div>

@@ -39,7 +39,7 @@ export function ShopCheckoutSheet({
             type="button"
             onClick={onClose}
             disabled={loading}
-            className="inline-flex h-11 items-center justify-center rounded-full border border-ios-sep bg-[#F4F4F6] px-4 text-[14px] font-semibold text-ios-text disabled:opacity-50"
+            className="inline-flex h-11 items-center justify-center rounded-2xl border border-[#d7dfeb] bg-[#f4f7fb] px-4 text-[14px] font-semibold text-[#11294b] disabled:opacity-50"
           >
             취소
           </button>
@@ -47,20 +47,20 @@ export function ShopCheckoutSheet({
             type="button"
             onClick={onConfirm}
             disabled={loading}
-            className="inline-flex h-11 items-center justify-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-4 text-[14px] font-semibold text-[color:var(--rnest-accent)] disabled:opacity-50"
+            className="inline-flex h-11 items-center justify-center rounded-2xl border border-[#11294b] bg-[#11294b] px-4 text-[14px] font-semibold text-white disabled:opacity-50"
           >
             {loading ? "결제창 여는 중..." : "토스로 결제"}
           </button>
         </div>
       }
     >
-      <div className="rounded-[22px] border border-black/10 bg-white p-4">
+      <div className="rounded-[22px] border border-ios-sep bg-white p-4">
         <div className="text-[18px] font-bold tracking-[-0.02em] text-ios-text">{productTitle}</div>
         {productSubtitle ? <div className="mt-1 text-[13px] text-ios-sub">{productSubtitle}</div> : null}
-        <div className="my-3 h-px bg-black/10" />
+        <div className="my-3 h-px bg-ios-sep" />
         <div className="text-[13px] text-ios-sub">수량: {quantity}</div>
         <div className="mt-1 text-[30px] font-extrabold tracking-[-0.02em] text-ios-text">{total.toLocaleString("ko-KR")}원</div>
-        <div className="my-3 h-px bg-black/10" />
+        <div className="my-3 h-px bg-ios-sep" />
         <div className="text-[12.5px] leading-5 text-ios-sub">
           결제 완료 후 주문 내역에 즉시 반영됩니다. 환불 요청은 쇼핑 탭의 주문 내역에서 접수할 수 있습니다.
         </div>
