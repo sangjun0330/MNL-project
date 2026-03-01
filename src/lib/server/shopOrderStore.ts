@@ -2,10 +2,18 @@ import { todayISO } from "@/lib/date";
 import { buildCancelIdempotencyKey, buildConfirmIdempotencyKey, readTossAcceptLanguage, readTossSecretKeyFromEnv, readTossTestCodeFromEnv } from "@/lib/server/tossConfig";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import type { ShopProduct } from "@/lib/shop";
-import type { Json } from "@/types/supabase";
+import type { Database, Json } from "@/types/supabase";
 
 const SHOP_ORDER_PREFIX = "__shop_order__";
 const SHOP_ORDER_LANGUAGE = "ko";
+
+type ShopOrderRow = Database["public"]["Tables"]["shop_orders"]["Row"];
+
+type StoredShopOrder = {
+  type: "shop_order";
+  version: 1;
+  order: ShopOrderRecord;
+};
 
 export type ShopOrderStatus =
   | "READY"
@@ -76,12 +84,6 @@ export type ShopAdminOrderSummary = ShopOrderSummary & {
   userLabel: string;
 };
 
-type StoredShopOrder = {
-  type: "shop_order";
-  version: 1;
-  order: ShopOrderRecord;
-};
-
 function orderRowKey(orderId: string) {
   return `${SHOP_ORDER_PREFIX}${orderId}`.slice(0, 220);
 }
@@ -140,11 +142,14 @@ function isOrderStatus(value: unknown): value is ShopOrderStatus {
   return value === "READY" || value === "PAID" || value === "FAILED" || value === "CANCELED" || value === "REFUND_REQUESTED" || value === "REFUND_REJECTED" || value === "REFUNDED";
 }
 
+function normalizeRefundStatus(value: unknown): ShopRefundState["status"] {
+  return value === "requested" || value === "rejected" || value === "done" ? value : "none";
+}
+
 function normalizeRefund(value: unknown): ShopRefundState {
   const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
-  const status = raw.status === "requested" || raw.status === "rejected" || raw.status === "done" ? raw.status : "none";
   return {
-    status,
+    status: normalizeRefundStatus(raw.status),
     reason: cleanText(raw.reason, 240) || null,
     requestedAt: cleanText(raw.requestedAt, 64) || null,
     reviewedAt: cleanText(raw.reviewedAt, 64) || null,
@@ -156,7 +161,28 @@ function normalizeRefund(value: unknown): ShopRefundState {
   };
 }
 
-function normalizeOrder(data: unknown): ShopOrderRecord | null {
+function normalizeProductSnapshot(value: unknown): ShopOrderRecord["productSnapshot"] | null {
+  const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  if (!raw) return null;
+
+  const priceKrw = toAmount(raw.priceKrw);
+  const quantity = toAmount(raw.quantity);
+  const category = cleanText(raw.category, 24) as ShopProduct["category"];
+
+  if (priceKrw == null || quantity == null || quantity <= 0) return null;
+
+  return {
+    name: cleanText(raw.name, 80),
+    subtitle: cleanText(raw.subtitle, 180),
+    category,
+    visualLabel: cleanText(raw.visualLabel, 40),
+    visualClass: cleanText(raw.visualClass, 180),
+    priceKrw,
+    quantity,
+  };
+}
+
+function normalizeLegacyOrder(data: unknown): ShopOrderRecord | null {
   if (!data || typeof data !== "object") return null;
   const payload = data as Record<string, unknown>;
   if (payload.type !== "shop_order" || payload.version !== 1) return null;
@@ -166,28 +192,16 @@ function normalizeOrder(data: unknown): ShopOrderRecord | null {
   const orderId = cleanText(source.orderId, 80);
   const userId = cleanText(source.userId, 120);
   const status = isOrderStatus(source.status) ? source.status : null;
-  const product = source.productSnapshot && typeof source.productSnapshot === "object" ? (source.productSnapshot as Record<string, unknown>) : null;
+  const productSnapshot = normalizeProductSnapshot(source.productSnapshot);
   const amount = toAmount(source.amount);
-  const priceKrw = toAmount(product?.priceKrw);
-  const quantity = toAmount(product?.quantity);
-  if (!orderId || !userId || !status || !product || amount == null || priceKrw == null || quantity == null || quantity <= 0) return null;
-
-  const category = cleanText(product.category, 24) as ShopProduct["category"];
+  if (!orderId || !userId || !status || !productSnapshot || amount == null) return null;
 
   return {
     orderId,
     userId,
     status,
     productId: cleanText(source.productId, 80),
-    productSnapshot: {
-      name: cleanText(product.name, 80),
-      subtitle: cleanText(product.subtitle, 180),
-      category,
-      visualLabel: cleanText(product.visualLabel, 40),
-      visualClass: cleanText(product.visualClass, 180),
-      priceKrw,
-      quantity,
-    },
+    productSnapshot,
     amount,
     currency: "KRW",
     paymentKey: cleanText(source.paymentKey, 220) || null,
@@ -201,7 +215,7 @@ function normalizeOrder(data: unknown): ShopOrderRecord | null {
   };
 }
 
-function toPayload(order: ShopOrderRecord): StoredShopOrder {
+function buildPayload(order: ShopOrderRecord): StoredShopOrder {
   return {
     type: "shop_order",
     version: 1,
@@ -209,7 +223,89 @@ function toPayload(order: ShopOrderRecord): StoredShopOrder {
   };
 }
 
-async function writeOrder(order: ShopOrderRecord) {
+function isMissingTableError(error: unknown, tableName: string) {
+  const code = String((error as { code?: unknown } | null)?.code ?? "").trim();
+  const message = String((error as { message?: unknown } | null)?.message ?? "").toLowerCase();
+  return code === "42P01" || (message.includes("relation") && message.includes(tableName));
+}
+
+function toProductSnapshotJson(snapshot: ShopOrderRecord["productSnapshot"]): Json {
+  return {
+    name: snapshot.name,
+    subtitle: snapshot.subtitle,
+    category: snapshot.category,
+    visualLabel: snapshot.visualLabel,
+    visualClass: snapshot.visualClass,
+    priceKrw: snapshot.priceKrw,
+    quantity: snapshot.quantity,
+  };
+}
+
+function toShopOrderRow(order: ShopOrderRecord): Database["public"]["Tables"]["shop_orders"]["Insert"] {
+  return {
+    order_id: order.orderId,
+    user_id: order.userId,
+    status: order.status,
+    product_id: order.productId,
+    product_snapshot: toProductSnapshotJson(order.productSnapshot),
+    amount: order.amount,
+    currency: order.currency,
+    payment_key: order.paymentKey,
+    payment_summary: order.tossResponse,
+    approved_at: order.approvedAt,
+    fail_code: order.failCode,
+    fail_message: order.failMessage,
+    refund_status: order.refund.status,
+    refund_reason: order.refund.reason,
+    refund_requested_at: order.refund.requestedAt,
+    refund_reviewed_at: order.refund.reviewedAt,
+    refund_reviewed_by: order.refund.reviewedBy,
+    refund_note: order.refund.note,
+    refund_cancel_amount: order.refund.cancelAmount,
+    refund_canceled_at: order.refund.canceledAt,
+    refund_summary: order.refund.cancelResponse,
+    created_at: order.createdAt,
+    updated_at: order.updatedAt,
+  };
+}
+
+function fromShopOrderRow(row: ShopOrderRow | null): ShopOrderRecord | null {
+  if (!row) return null;
+  const status = isOrderStatus(row.status) ? row.status : null;
+  const productSnapshot = normalizeProductSnapshot(row.product_snapshot);
+  const amount = toAmount(row.amount);
+  if (!status || !productSnapshot || amount == null) return null;
+
+  return {
+    orderId: cleanText(row.order_id, 80),
+    userId: cleanText(row.user_id, 120),
+    status,
+    productId: cleanText(row.product_id, 80),
+    productSnapshot,
+    amount,
+    currency: "KRW",
+    paymentKey: cleanText(row.payment_key, 220) || null,
+    tossResponse: row.payment_summary == null ? null : summarizeTossPaymentResponse(row.payment_summary),
+    approvedAt: cleanText(row.approved_at, 64) || null,
+    failCode: cleanText(row.fail_code, 120) || null,
+    failMessage: cleanText(row.fail_message, 220) || null,
+    refund: {
+      status: normalizeRefundStatus(row.refund_status),
+      reason: cleanText(row.refund_reason, 240) || null,
+      requestedAt: cleanText(row.refund_requested_at, 64) || null,
+      reviewedAt: cleanText(row.refund_reviewed_at, 64) || null,
+      reviewedBy: cleanText(row.refund_reviewed_by, 120) || null,
+      note: cleanText(row.refund_note, 500) || null,
+      cancelAmount: toAmount(row.refund_cancel_amount),
+      canceledAt: cleanText(row.refund_canceled_at, 64) || null,
+      cancelResponse: row.refund_summary == null ? null : summarizeTossCancelResponse(row.refund_summary),
+    },
+    createdAt: cleanText(row.created_at, 64),
+    updatedAt: cleanText(row.updated_at, 64),
+  };
+}
+
+async function writeLegacyOrder(order: ShopOrderRecord) {
   const admin = getSupabaseAdmin();
   const now = new Date().toISOString();
   const nextOrder = {
@@ -221,7 +317,7 @@ async function writeOrder(order: ShopOrderRecord) {
       user_id: orderRowKey(order.orderId),
       date_iso: todayISO(),
       language: SHOP_ORDER_LANGUAGE,
-      data: toPayload(nextOrder) as unknown as Json,
+      data: buildPayload(nextOrder) as unknown as Json,
       updated_at: now,
     },
     { onConflict: "user_id" }
@@ -230,11 +326,141 @@ async function writeOrder(order: ShopOrderRecord) {
   return nextOrder;
 }
 
-async function readOrderBySyntheticKey(syntheticKey: string): Promise<ShopOrderRecord | null> {
+async function writeModernOrder(order: ShopOrderRecord) {
+  const admin = getSupabaseAdmin();
+  const now = new Date().toISOString();
+  const nextOrder = {
+    ...order,
+    updatedAt: now,
+  };
+  const { data, error } = await admin.from("shop_orders").upsert(toShopOrderRow(nextOrder), { onConflict: "order_id" }).select("*").single();
+  if (error) throw error;
+  return fromShopOrderRow(data) ?? nextOrder;
+}
+
+async function writeOrder(order: ShopOrderRecord) {
+  try {
+    return await writeModernOrder(order);
+  } catch (error) {
+    if (!isMissingTableError(error, "shop_orders")) throw error;
+    return writeLegacyOrder(order);
+  }
+}
+
+async function readLegacyOrderByKey(syntheticKey: string): Promise<ShopOrderRecord | null> {
   const admin = getSupabaseAdmin();
   const { data, error } = await admin.from("ai_content").select("data").eq("user_id", syntheticKey).maybeSingle();
   if (error) throw error;
-  return normalizeOrder((data?.data ?? null) as Json | null);
+  return normalizeLegacyOrder((data?.data ?? null) as Json | null);
+}
+
+async function readLegacyOrder(orderId: string) {
+  return readLegacyOrderByKey(orderRowKey(orderId));
+}
+
+async function readModernOrder(orderId: string): Promise<ShopOrderRecord | null> {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin.from("shop_orders").select("*").eq("order_id", orderId).maybeSingle();
+  if (error) throw error;
+  return fromShopOrderRow(data);
+}
+
+async function readOrderInternal(orderId: string) {
+  try {
+    const modern = await readModernOrder(orderId);
+    if (modern) return modern;
+  } catch (error) {
+    if (!isMissingTableError(error, "shop_orders")) throw error;
+  }
+  return readLegacyOrder(orderId);
+}
+
+async function listLegacyShopOrderRows(limit: number): Promise<ShopOrderRecord[]> {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("ai_content")
+    .select("data, updated_at")
+    .gte("user_id", SHOP_ORDER_PREFIX)
+    .lt("user_id", `${SHOP_ORDER_PREFIX}~`)
+    .order("updated_at", { ascending: false })
+    .limit(Math.max(1, Math.min(120, limit)));
+
+  if (error) throw error;
+
+  return (data ?? [])
+    .map((row) => normalizeLegacyOrder((row.data ?? null) as Json | null))
+    .filter((row): row is ShopOrderRecord => Boolean(row));
+}
+
+async function listModernShopOrderRows(limit: number): Promise<ShopOrderRecord[]> {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("shop_orders")
+    .select("*")
+    .order("updated_at", { ascending: false })
+    .limit(Math.max(1, Math.min(120, limit)));
+
+  if (error) throw error;
+
+  return (data ?? []).map((row) => fromShopOrderRow(row)).filter((row): row is ShopOrderRecord => Boolean(row));
+}
+
+async function listShopOrderRows(limit: number): Promise<ShopOrderRecord[]> {
+  let modernRows: ShopOrderRecord[] = [];
+  try {
+    modernRows = await listModernShopOrderRows(limit);
+  } catch (error) {
+    if (!isMissingTableError(error, "shop_orders")) throw error;
+  }
+
+  let legacyRows: ShopOrderRecord[] = [];
+  try {
+    legacyRows = await listLegacyShopOrderRows(limit);
+  } catch {
+    legacyRows = [];
+  }
+
+  const merged = new Map<string, ShopOrderRecord>();
+  for (const row of modernRows) merged.set(row.orderId, row);
+  for (const row of legacyRows) {
+    if (!merged.has(row.orderId)) merged.set(row.orderId, row);
+  }
+
+  return Array.from(merged.values())
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+    .slice(0, Math.max(1, Math.min(120, limit)));
+}
+
+async function writeOrderEventSafe(input: {
+  order: ShopOrderRecord;
+  eventType: string;
+  actorRole: "system" | "user" | "admin";
+  actorUserId?: string | null;
+  message?: string | null;
+  metadata?: Json | null;
+}) {
+  const admin = getSupabaseAdmin();
+  const payload: Database["public"]["Tables"]["shop_order_events"]["Insert"] = {
+    order_id: input.order.orderId,
+    user_id: input.order.userId,
+    actor_user_id: cleanText(input.actorUserId, 120) || null,
+    actor_role: input.actorRole,
+    event_type: cleanText(input.eventType, 64) || "updated",
+    status: input.order.status,
+    message: cleanText(input.message, 500) || null,
+    metadata: input.metadata ?? null,
+  };
+
+  try {
+    const { error } = await admin.from("shop_order_events").insert(payload);
+    if (error && !isMissingTableError(error, "shop_order_events")) {
+      throw error;
+    }
+  } catch (error) {
+    if (!isMissingTableError(error, "shop_order_events")) {
+      return;
+    }
+  }
 }
 
 export async function createShopOrder(input: {
@@ -282,34 +508,26 @@ export async function createShopOrder(input: {
     updatedAt: now,
   };
 
-  return writeOrder(order);
+  const saved = await writeOrder(order);
+  await writeOrderEventSafe({
+    order: saved,
+    eventType: "order_created",
+    actorRole: "user",
+    actorUserId: input.userId,
+    message: "쇼핑 주문이 생성되었습니다.",
+    metadata: { productId: input.product.id, quantity },
+  });
+  return saved;
 }
 
 export async function readShopOrder(orderId: string) {
-  return readOrderBySyntheticKey(orderRowKey(orderId));
+  return readOrderInternal(orderId);
 }
 
 export async function readShopOrderForUser(userId: string, orderId: string) {
   const order = await readShopOrder(orderId);
   if (!order || order.userId !== userId) return null;
   return order;
-}
-
-async function listShopOrderRows(limit: number): Promise<ShopOrderRecord[]> {
-  const admin = getSupabaseAdmin();
-  const { data, error } = await admin
-    .from("ai_content")
-    .select("data, updated_at")
-    .gte("user_id", SHOP_ORDER_PREFIX)
-    .lt("user_id", `${SHOP_ORDER_PREFIX}~`)
-    .order("updated_at", { ascending: false })
-    .limit(Math.max(1, Math.min(120, limit)));
-
-  if (error) throw error;
-
-  return (data ?? [])
-    .map((row) => normalizeOrder((row.data ?? null) as Json | null))
-    .filter((row): row is ShopOrderRecord => Boolean(row));
 }
 
 export async function listShopOrdersForUser(userId: string, limit = 20) {
@@ -339,12 +557,20 @@ export async function markShopOrderFailed(input: {
 }) {
   const current = await readShopOrder(input.orderId);
   if (!current) throw new Error("shop_order_not_found");
-  return writeOrder({
+  const saved = await writeOrder({
     ...current,
     status: "FAILED",
     failCode: cleanText(input.code, 120),
     failMessage: cleanText(input.message, 220),
   });
+  await writeOrderEventSafe({
+    order: saved,
+    eventType: "order_failed",
+    actorRole: "system",
+    message: saved.failMessage,
+    metadata: { code: saved.failCode },
+  });
+  return saved;
 }
 
 export async function markShopOrderPaid(input: {
@@ -355,7 +581,7 @@ export async function markShopOrderPaid(input: {
 }) {
   const current = await readShopOrder(input.orderId);
   if (!current) throw new Error("shop_order_not_found");
-  return writeOrder({
+  const saved = await writeOrder({
     ...current,
     status: "PAID",
     paymentKey: cleanText(input.paymentKey, 220),
@@ -364,6 +590,14 @@ export async function markShopOrderPaid(input: {
     failCode: null,
     failMessage: null,
   });
+  await writeOrderEventSafe({
+    order: saved,
+    eventType: "order_paid",
+    actorRole: "system",
+    message: "토스 결제가 승인되었습니다.",
+    metadata: saved.tossResponse,
+  });
+  return saved;
 }
 
 export async function requestShopOrderRefund(input: {
@@ -376,7 +610,7 @@ export async function requestShopOrderRefund(input: {
   if (current.status !== "PAID") throw new Error("shop_order_not_refundable");
   if (current.refund.status === "requested" || current.refund.status === "done") return current;
 
-  return writeOrder({
+  const saved = await writeOrder({
     ...current,
     status: "REFUND_REQUESTED",
     refund: {
@@ -392,6 +626,14 @@ export async function requestShopOrderRefund(input: {
       cancelResponse: null,
     },
   });
+  await writeOrderEventSafe({
+    order: saved,
+    eventType: "refund_requested",
+    actorRole: "user",
+    actorUserId: input.userId,
+    message: saved.refund.reason,
+  });
+  return saved;
 }
 
 export async function rejectShopOrderRefund(input: {
@@ -402,7 +644,7 @@ export async function rejectShopOrderRefund(input: {
   const current = await readShopOrder(input.orderId);
   if (!current) throw new Error("shop_order_not_found");
   if (current.refund.status !== "requested") throw new Error("shop_refund_not_requested");
-  return writeOrder({
+  const saved = await writeOrder({
     ...current,
     status: "REFUND_REJECTED",
     refund: {
@@ -413,6 +655,14 @@ export async function rejectShopOrderRefund(input: {
       note: cleanText(input.note, 500) || "환불 요청이 반려되었습니다.",
     },
   });
+  await writeOrderEventSafe({
+    order: saved,
+    eventType: "refund_rejected",
+    actorRole: "admin",
+    actorUserId: input.adminUserId,
+    message: saved.refund.note,
+  });
+  return saved;
 }
 
 export async function approveShopOrderRefund(input: {
@@ -471,7 +721,7 @@ export async function approveShopOrderRefund(input: {
     throw new Error(cleanText(json?.code, 120) || `toss_cancel_http_${res.status}`);
   }
 
-  return writeOrder({
+  const saved = await writeOrder({
     ...current,
     status: "REFUNDED",
     refund: {
@@ -485,6 +735,15 @@ export async function approveShopOrderRefund(input: {
       cancelResponse: summarizeTossCancelResponse(json),
     },
   });
+  await writeOrderEventSafe({
+    order: saved,
+    eventType: "refund_approved",
+    actorRole: "admin",
+    actorUserId: input.adminUserId,
+    message: cancelReason,
+    metadata: saved.refund.cancelResponse,
+  });
+  return saved;
 }
 
 export function buildShopOrderId(productId: string) {

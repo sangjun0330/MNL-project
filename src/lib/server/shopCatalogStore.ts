@@ -1,10 +1,12 @@
 import { todayISO } from "@/lib/date";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
-import { normalizeShopCatalogProducts, SHOP_PRODUCTS, type ShopProduct } from "@/lib/shop";
-import type { Json } from "@/types/supabase";
+import { normalizeShopCatalogProducts, normalizeShopProduct, SHOP_PRODUCTS, type ShopProduct } from "@/lib/shop";
+import type { Database, Json } from "@/types/supabase";
 
 const SHOP_CATALOG_USER_ID = "__system_shop_catalog__";
 const SHOP_CATALOG_LANGUAGE = "ko";
+
+type ShopProductRow = Database["public"]["Tables"]["shop_products"]["Row"];
 
 type StoredShopCatalog = {
   type: "shop_catalog";
@@ -27,7 +29,60 @@ function readProductsFromJson(data: Json | null): ShopProduct[] {
   return normalizeShopCatalogProducts(payload.products);
 }
 
-export async function loadShopCatalog(): Promise<ShopProduct[]> {
+function isMissingTableError(error: unknown) {
+  const code = String((error as { code?: unknown } | null)?.code ?? "").trim();
+  const message = String((error as { message?: unknown } | null)?.message ?? "").toLowerCase();
+  return code === "42P01" || message.includes("does not exist") || message.includes("relation") && message.includes("shop_products");
+}
+
+function toProductRow(product: ShopProduct): Database["public"]["Tables"]["shop_products"]["Insert"] {
+  return {
+    id: product.id,
+    name: product.name,
+    subtitle: product.subtitle,
+    description: product.description,
+    category: product.category,
+    visual_label: product.visualLabel,
+    visual_class: product.visualClass,
+    price_label: product.priceLabel,
+    partner_label: product.partnerLabel,
+    partner_status: product.partnerStatus,
+    external_url: product.externalUrl ?? null,
+    price_krw: product.priceKrw ?? null,
+    checkout_enabled: Boolean(product.checkoutEnabled && product.priceKrw && product.priceKrw > 0),
+    benefit_tags: product.benefitTags,
+    use_moments: product.useMoments,
+    caution: product.caution,
+    priority: product.priority,
+    match_signals: product.matchSignals,
+    active: true,
+  };
+}
+
+function fromProductRow(row: ShopProductRow): ShopProduct | null {
+  return normalizeShopProduct({
+    id: row.id,
+    name: row.name,
+    subtitle: row.subtitle,
+    description: row.description,
+    category: row.category,
+    visualLabel: row.visual_label,
+    visualClass: row.visual_class,
+    priceLabel: row.price_label,
+    partnerLabel: row.partner_label,
+    partnerStatus: row.partner_status,
+    externalUrl: row.external_url,
+    priceKrw: row.price_krw,
+    checkoutEnabled: row.checkout_enabled,
+    benefitTags: row.benefit_tags,
+    useMoments: row.use_moments,
+    caution: row.caution,
+    priority: row.priority,
+    matchSignals: row.match_signals,
+  });
+}
+
+async function loadLegacyShopCatalog(): Promise<ShopProduct[]> {
   const admin = getSupabaseAdmin();
   const { data, error } = await admin
     .from("ai_content")
@@ -41,7 +96,7 @@ export async function loadShopCatalog(): Promise<ShopProduct[]> {
   return products.length > 0 ? products : SHOP_PRODUCTS;
 }
 
-export async function saveShopCatalog(products: ShopProduct[]): Promise<ShopProduct[]> {
+async function saveLegacyShopCatalog(products: ShopProduct[]): Promise<ShopProduct[]> {
   const admin = getSupabaseAdmin();
   const normalized = normalizeShopCatalogProducts(products);
   const finalProducts = normalized.length > 0 ? normalized : SHOP_PRODUCTS;
@@ -61,4 +116,56 @@ export async function saveShopCatalog(products: ShopProduct[]): Promise<ShopProd
 
   if (error) throw error;
   return finalProducts;
+}
+
+export async function loadShopCatalog(): Promise<ShopProduct[]> {
+  const admin = getSupabaseAdmin();
+
+  try {
+    const { data, error } = await admin
+      .from("shop_products")
+      .select("*")
+      .eq("active", true)
+      .order("priority", { ascending: false })
+      .order("updated_at", { ascending: false });
+
+    if (error) throw error;
+
+    const products = (data ?? [])
+      .map((row) => fromProductRow(row))
+      .filter((row): row is ShopProduct => Boolean(row));
+
+    if (products.length > 0) return products;
+  } catch (error) {
+    if (!isMissingTableError(error)) throw error;
+  }
+
+  return loadLegacyShopCatalog();
+}
+
+export async function saveShopCatalog(products: ShopProduct[]): Promise<ShopProduct[]> {
+  const admin = getSupabaseAdmin();
+  const normalized = normalizeShopCatalogProducts(products);
+  const finalProducts = normalized.length > 0 ? normalized : SHOP_PRODUCTS;
+
+  try {
+    const activeIds = new Set(finalProducts.map((item) => item.id));
+    const { data: existingRows, error: existingError } = await admin.from("shop_products").select("id");
+    if (existingError) throw existingError;
+
+    const rows = finalProducts.map((item) => toProductRow(item));
+    const { error: upsertError } = await admin.from("shop_products").upsert(rows, { onConflict: "id" });
+    if (upsertError) throw upsertError;
+
+    const staleIds = (existingRows ?? []).map((row) => row.id).filter((id) => !activeIds.has(id));
+    if (staleIds.length > 0) {
+      const { error: deactivateError } = await admin.from("shop_products").update({ active: false }).in("id", staleIds);
+      if (deactivateError) throw deactivateError;
+    }
+
+    return finalProducts;
+  } catch (error) {
+    if (!isMissingTableError(error)) throw error;
+    return saveLegacyShopCatalog(finalProducts);
+  }
 }
