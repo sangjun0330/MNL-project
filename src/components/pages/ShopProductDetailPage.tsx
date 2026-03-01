@@ -164,6 +164,7 @@ export function ShopProductDetailPage({ product }: { product: ShopProduct }) {
   const selectedImageUrl = product.imageUrls[selectedImageIndex] ?? null;
   const shippingReady = Boolean(shippingProfile && isCompleteShopShippingProfile(shippingProfile));
   const shippingLabel = shippingProfile ? `${shippingProfile.recipientName} · ${shippingProfile.phone} · ${formatShopShippingSingleLine(shippingProfile)}` : null;
+  const totalPrice = Math.round((product.priceKrw ?? 0) * quantity);
 
   const handleCheckout = async () => {
     if (!product.checkoutEnabled || !product.priceKrw) return;
@@ -335,298 +336,374 @@ export function ShopProductDetailPage({ product }: { product: ShopProduct }) {
   };
 
   return (
-    <div className="mx-auto w-full max-w-[880px] space-y-4 px-4 pb-24 pt-6">
-      <Link href="/shop" data-auth-allow className="inline-flex items-center rounded-2xl border border-[#d7dfeb] bg-[#f4f7fb] px-4 py-2 text-[12px] font-semibold text-[#11294b]">
-        {t("쇼핑으로 돌아가기")}
-      </Link>
+    <div className="mx-auto w-full max-w-[1180px] px-4 pb-24 pt-6">
+      <div className="space-y-5">
+        <Link href="/shop" data-auth-allow className="inline-flex items-center rounded-full border border-[#d7dfeb] bg-white px-4 py-2 text-[12px] font-semibold text-[#11294b]">
+          {t("쇼핑으로 돌아가기")}
+        </Link>
 
-      <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-        <div className="rounded-[28px] border border-ios-sep bg-white p-4">
-          <div className="overflow-hidden rounded-[24px] border border-[#eef2f7] bg-[#f8fafc]">
-            {selectedImageUrl ? (
-              <img src={selectedImageUrl} alt={product.name} className="aspect-[1.12/1] w-full object-cover" />
-            ) : (
-              <div className={cn("flex aspect-[1.12/1] w-full items-end p-5", productToneClass(product))}>
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.22em] opacity-75">{product.partnerLabel}</div>
-                  <div className="mt-3 text-[30px] font-bold tracking-[-0.02em]">{product.visualLabel}</div>
-                  <div className="mt-2 max-w-[360px] text-[13px] leading-6 opacity-80">{product.subtitle}</div>
-                </div>
-              </div>
-            )}
+        {message ? (
+          <div
+            className={[
+              "rounded-3xl px-5 py-4 text-[12.5px] leading-5",
+              messageTone === "error" ? "border border-[#f1d0cc] bg-[#fff6f5] text-[#a33a2b]" : "border border-[#d7dfeb] bg-[#eef4fb] text-[#11294b]",
+            ].join(" ")}
+          >
+            {message}
           </div>
+        ) : null}
 
-          {product.imageUrls.length > 1 ? (
-            <div className="mt-3 grid grid-cols-4 gap-2 md:grid-cols-5">
-              {product.imageUrls.map((url, index) => (
-                <button
-                  key={`${url}-${index}`}
-                  type="button"
-                  data-auth-allow
-                  onClick={() => setSelectedImageIndex(index)}
-                  className={cn(
-                    "overflow-hidden rounded-2xl border bg-white",
-                    index === selectedImageIndex ? "border-[#11294b]" : "border-[#eef2f7]"
-                  )}
-                >
-                  <img src={url} alt={`${product.name} ${index + 1}`} className="aspect-square w-full object-cover" />
-                </button>
-              ))}
-            </div>
-          ) : null}
+        <div className="rounded-3xl border border-[#e6ebf2] bg-white px-3 py-3">
+          <div className="flex flex-wrap gap-2">
+            <a
+              href="#shop-product-gallery"
+              data-auth-allow
+              className="inline-flex min-h-[40px] items-center rounded-full border border-[#d7dfeb] bg-[#f8fafc] px-4 text-[12px] font-semibold text-[#11294b]"
+            >
+              {t("상품 정보")}
+            </a>
+            <a
+              href="#shop-product-info"
+              data-auth-allow
+              className="inline-flex min-h-[40px] items-center rounded-full border border-[#d7dfeb] bg-[#f8fafc] px-4 text-[12px] font-semibold text-[#11294b]"
+            >
+              {t("상세 정보")}
+            </a>
+            <a
+              href="#shop-product-reviews"
+              data-auth-allow
+              className="inline-flex min-h-[40px] items-center rounded-full border border-[#d7dfeb] bg-[#f8fafc] px-4 text-[12px] font-semibold text-[#11294b]"
+            >
+              {t("리뷰")}
+            </a>
+            <a
+              href="#shop-product-purchase"
+              data-auth-allow
+              className="inline-flex min-h-[40px] items-center rounded-full border border-[#d7dfeb] bg-[#f8fafc] px-4 text-[12px] font-semibold text-[#11294b]"
+            >
+              {t("구매 안내")}
+            </a>
+          </div>
         </div>
 
-        <div className="space-y-4">
-          <div className="rounded-[28px] border border-ios-sep bg-white p-5">
-            <div className="inline-flex rounded-full border border-[#d7dfeb] bg-[#f4f7fb] px-3 py-1 text-[11px] font-semibold text-[#11294b]">
-              {t(getShopCategoryMeta(product.category).label)} · {t(productAvailabilityLabel(product))}
-            </div>
-            <div className="mt-4 text-[30px] font-extrabold tracking-[-0.02em] text-ios-text">{product.name}</div>
-            <div className="mt-2 text-[14px] leading-6 text-ios-sub">{product.subtitle}</div>
-            <div className="mt-4 text-[24px] font-bold tracking-[-0.02em] text-[#11294b]">{formatShopPrice(product)}</div>
-            <div className="mt-1 text-[12px] text-ios-sub">{product.partnerStatus}</div>
-
-            {product.checkoutEnabled && product.priceKrw ? (
-              <div className="mt-4 rounded-2xl border border-[#eef2f7] bg-[#f8fafc] p-4">
-                <div className="text-[12px] font-semibold text-[#11294b]">{t("수량 선택")}</div>
-                <div className="mt-3 flex items-center gap-2">
-                  <button
-                    type="button"
-                    data-auth-allow
-                    onClick={() => setQuantity((current) => Math.max(1, current - 1))}
-                    className={`${SECONDARY_BUTTON} h-10 w-10 px-0 text-[16px]`}
-                  >
-                    -
-                  </button>
-                  <div className="flex h-10 min-w-[56px] items-center justify-center rounded-2xl border border-[#d7dfeb] bg-white px-4 text-[14px] font-semibold text-[#11294b]">
-                    {quantity}
-                  </div>
-                  <button
-                    type="button"
-                    data-auth-allow
-                    onClick={() => setQuantity((current) => Math.min(9, current + 1))}
-                    className={`${SECONDARY_BUTTON} h-10 w-10 px-0 text-[16px]`}
-                  >
-                    +
-                  </button>
-                  <div className="ml-auto text-right">
-                    <div className="text-[11px] text-ios-sub">{t("총 결제 금액")}</div>
-                    <div className="text-[18px] font-bold tracking-[-0.02em] text-[#11294b]">
-                      {Math.round((product.priceKrw ?? 0) * quantity).toLocaleString("ko-KR")}원
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
+          <div id="shop-product-gallery" className="space-y-5">
+            <div className="rounded-[32px] border border-[#e6ebf2] bg-white p-5">
+              <div className="overflow-hidden rounded-[28px] border border-[#edf1f6] bg-[#f8fafc]">
+                {selectedImageUrl ? (
+                  <img src={selectedImageUrl} alt={product.name} className="aspect-[1.02/1] w-full object-cover" />
+                ) : (
+                  <div className={cn("flex aspect-[1.02/1] w-full items-end p-8", productToneClass(product))}>
+                    <div>
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.22em] opacity-75">{product.partnerLabel}</div>
+                      <div className="mt-3 text-[34px] font-bold tracking-[-0.03em]">{product.visualLabel}</div>
+                      <div className="mt-3 max-w-[420px] text-[14px] leading-7 opacity-85">{product.subtitle}</div>
                     </div>
                   </div>
+                )}
+              </div>
+
+              {product.imageUrls.length > 1 ? (
+                <div className="mt-4 grid grid-cols-4 gap-3 md:grid-cols-5">
+                  {product.imageUrls.map((url, index) => (
+                    <button
+                      key={`${url}-${index}`}
+                      type="button"
+                      data-auth-allow
+                      onClick={() => setSelectedImageIndex(index)}
+                      className={cn(
+                        "overflow-hidden rounded-2xl border bg-white",
+                        index === selectedImageIndex ? "border-[#11294b]" : "border-[#e6ebf2]"
+                      )}
+                    >
+                      <img src={url} alt={`${product.name} ${index + 1}`} className="aspect-square w-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="rounded-[32px] border border-[#11294b] bg-[#11294b] px-6 py-6 text-white">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-white/70">{product.partnerLabel}</div>
+              <div className="mt-3 text-[30px] font-bold tracking-[-0.03em]">{detail.headline}</div>
+              <div className="mt-3 text-[14px] leading-7 text-white/80">{detail.summary}</div>
+            </div>
+          </div>
+
+          <div className="space-y-5 lg:sticky lg:top-24 lg:self-start">
+            <div className="rounded-[32px] border border-[#e6ebf2] bg-white p-6">
+              <div className="inline-flex rounded-full border border-[#d7dfeb] bg-[#f8fafc] px-3 py-1 text-[11px] font-semibold text-[#11294b]">
+                {t(getShopCategoryMeta(product.category).label)} · {t(productAvailabilityLabel(product))}
+              </div>
+
+              <div className="mt-4 text-[32px] font-extrabold tracking-[-0.03em] text-[#111827]">{product.name}</div>
+              <div className="mt-2 text-[14px] leading-6 text-[#65748b]">{product.subtitle}</div>
+
+              <div className="mt-5 border-t border-[#edf1f6] pt-5">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#8b99ad]">{t("판매가")}</div>
+                <div className="mt-2 text-[28px] font-bold tracking-[-0.03em] text-[#11294b]">{formatShopPrice(product)}</div>
+                <div className="mt-1 text-[12px] text-[#7f8da2]">{product.partnerStatus}</div>
+              </div>
+
+              {product.checkoutEnabled && product.priceKrw ? (
+                <div className="mt-5 rounded-3xl border border-[#edf1f6] bg-[#f8fafc] p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-[12px] font-semibold text-[#11294b]">{t("수량")}</div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        data-auth-allow
+                        onClick={() => setQuantity((current) => Math.max(1, current - 1))}
+                        className={`${SECONDARY_BUTTON} h-10 w-10 px-0 text-[16px]`}
+                      >
+                        -
+                      </button>
+                      <div className="flex h-10 min-w-[56px] items-center justify-center rounded-2xl border border-[#d7dfeb] bg-white px-4 text-[14px] font-semibold text-[#11294b]">
+                        {quantity}
+                      </div>
+                      <button
+                        type="button"
+                        data-auth-allow
+                        onClick={() => setQuantity((current) => Math.min(9, current + 1))}
+                        className={`${SECONDARY_BUTTON} h-10 w-10 px-0 text-[16px]`}
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 rounded-2xl border border-[#e6ebf2] bg-white px-4 py-4">
+                    <div className="flex items-center justify-between gap-3 text-[12px] text-[#7f8da2]">
+                      <span>{t("총 상품 금액")}</span>
+                      <span className="text-[18px] font-bold tracking-[-0.02em] text-[#11294b]">{totalPrice.toLocaleString("ko-KR")}원</span>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="mt-5 space-y-3">
+                {product.checkoutEnabled && product.priceKrw ? (
+                  <button type="button" data-auth-allow onClick={handleOpenCheckout} className={`${PRIMARY_BUTTON} h-12 w-full text-[13px]`}>
+                    {t("바로 결제")}
+                  </button>
+                ) : null}
+                {!product.checkoutEnabled && product.externalUrl ? (
+                  <a
+                    href={product.externalUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={handlePartnerClick}
+                    className={`${PRIMARY_BUTTON} h-12 w-full text-[13px]`}
+                  >
+                    {t("판매처로 이동")}
+                  </a>
+                ) : null}
+                {!product.checkoutEnabled && !product.externalUrl ? (
+                  <button type="button" disabled className={`${SECONDARY_BUTTON} h-12 w-full text-[13px]`}>
+                    {t("판매 준비중")}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="rounded-[32px] border border-[#e6ebf2] bg-white p-5">
+              <div className="text-[15px] font-bold tracking-[-0.02em] text-[#111827]">{t("배송 정보")}</div>
+              {status !== "authenticated" ? (
+                <div className="mt-3 text-[12.5px] leading-6 text-[#65748b]">{t("로그인 후 계정에 저장한 기본 배송지로 바로 주문할 수 있습니다.")}</div>
+              ) : shippingLoading ? (
+                <div className="mt-3 text-[12.5px] leading-6 text-[#65748b]">{t("배송지 정보를 불러오는 중입니다.")}</div>
+              ) : shippingReady && shippingProfile ? (
+                <div className="mt-3 space-y-1">
+                  <div className="text-[13px] font-semibold text-[#111827]">{shippingProfile.recipientName} · {shippingProfile.phone}</div>
+                  <div className="text-[12.5px] leading-6 text-[#65748b]">{formatShopShippingSingleLine(shippingProfile)}</div>
+                  {shippingProfile.deliveryNote ? <div className="text-[12px] text-[#7f8da2]">{shippingProfile.deliveryNote}</div> : null}
+                </div>
+              ) : (
+                <div className="mt-3 text-[12.5px] leading-6 text-[#a33a2b]">{t("아직 기본 배송지가 없습니다. 계정에서 먼저 저장해야 결제를 진행할 수 있습니다.")}</div>
+              )}
+              <div className="mt-4">
+                <Link href="/settings/account" data-auth-allow className={`${SECONDARY_BUTTON} h-10 text-[12px]`}>
+                  {t("계정에서 배송지 수정")}
+                </Link>
+              </div>
+            </div>
+
+            <div className="rounded-[32px] border border-[#e6ebf2] bg-[#f8fafc] p-5">
+              <div className="text-[15px] font-bold tracking-[-0.02em] text-[#111827]">{t("빠른 확인")}</div>
+              <div className="mt-3 grid gap-2">
+                <div className="rounded-2xl border border-[#e6ebf2] bg-white px-4 py-3">
+                  <div className="text-[11px] font-semibold text-[#8b99ad]">{t("배송")}</div>
+                  <div className="mt-1 text-[13px] font-semibold text-[#11294b]">{t("택배 · 3~7일")}</div>
+                </div>
+                <div className="rounded-2xl border border-[#e6ebf2] bg-white px-4 py-3">
+                  <div className="text-[11px] font-semibold text-[#8b99ad]">{t("환불")}</div>
+                  <div className="mt-1 text-[13px] font-semibold text-[#11294b]">{t("수령 후 7일 이내 요청")}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="shop-product-info" className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.85fr)]">
+          <div className="space-y-5">
+            <div className="rounded-[32px] border border-[#e6ebf2] bg-white p-6">
+              <div className="text-[18px] font-bold tracking-[-0.02em] text-[#111827]">{t("상세 정보")}</div>
+              <div className="mt-4 text-[14px] leading-7 text-[#44556d]">{detail.storyBody}</div>
+            </div>
+
+            <div className="rounded-[32px] border border-[#e6ebf2] bg-white p-6">
+              <div className="text-[18px] font-bold tracking-[-0.02em] text-[#111827]">{t("이 상품이 지금 맞는 이유")}</div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {matchedSignals.map((signal) => (
+                  <span key={signal.key} className="inline-flex rounded-full border border-[#d7dfeb] bg-[#f4f7fb] px-3 py-1 text-[11px] font-semibold text-[#11294b]">
+                    {signal.label}
+                  </span>
+                ))}
+              </div>
+              <div className="mt-4 space-y-2">
+                {matchedSignals.map((signal) => (
+                  <div key={`${signal.key}-reason`} className="rounded-2xl border border-[#edf1f6] bg-[#f8fafc] px-4 py-3 text-[12.5px] leading-6 text-[#44556d]">
+                    {signal.reason}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-5">
+            {product.specs.length > 0 ? (
+              <div className="rounded-[32px] border border-[#e6ebf2] bg-white p-6">
+                <div className="text-[18px] font-bold tracking-[-0.02em] text-[#111827]">{t("제품 정보")}</div>
+                <div className="mt-4 grid gap-2">
+                  {product.specs.map((spec) => (
+                    <div key={`${spec.label}-${spec.value}`} className="rounded-2xl border border-[#edf1f6] bg-[#f8fafc] px-4 py-3">
+                      <div className="text-[11px] font-semibold text-[#7f8da2]">{spec.label}</div>
+                      <div className="mt-1 text-[13px] font-semibold text-[#111827]">{spec.value}</div>
+                    </div>
+                  ))}
                 </div>
               </div>
             ) : null}
 
-            <div className="mt-4 flex flex-wrap gap-2">
-              {product.checkoutEnabled && product.priceKrw ? (
-                <button type="button" data-auth-allow onClick={handleOpenCheckout} className={`${PRIMARY_BUTTON} h-11 text-[13px]`}>
-                  {t("바로 결제")}
-                </button>
-              ) : null}
-              {!product.checkoutEnabled && product.externalUrl ? (
-                <a
-                  href={product.externalUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  onClick={handlePartnerClick}
-                  className={`${PRIMARY_BUTTON} h-11 text-[13px]`}
-                >
-                  {t("판매처로 이동")}
-                </a>
-              ) : null}
-              {!product.checkoutEnabled && !product.externalUrl ? (
-                <button type="button" disabled className={`${SECONDARY_BUTTON} h-11 text-[13px]`}>
-                  {t("판매 준비중")}
-                </button>
-              ) : null}
-            </div>
-          </div>
-
-          {message ? (
-            <div
-              className={[
-                "rounded-2xl px-4 py-3 text-[12.5px] leading-5",
-                messageTone === "error" ? "border border-[#f1d0cc] bg-[#fff6f5] text-[#a33a2b]" : "border border-[#d7dfeb] bg-[#eef4fb] text-[#11294b]",
-              ].join(" ")}
-            >
-              {message}
-            </div>
-          ) : null}
-
-          <div className="rounded-[28px] border border-ios-sep bg-white p-5">
-            <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{t("기본 배송지")}</div>
-            {status !== "authenticated" ? (
-              <div className="mt-2 text-[12.5px] leading-5 text-ios-sub">{t("로그인 후 계정에서 저장한 배송지로 바로 주문할 수 있습니다.")}</div>
-            ) : shippingLoading ? (
-              <div className="mt-2 text-[12.5px] leading-5 text-ios-sub">{t("배송지 정보를 불러오는 중입니다.")}</div>
-            ) : shippingReady && shippingProfile ? (
-              <>
-                <div className="mt-2 text-[13px] font-semibold text-ios-text">{shippingProfile.recipientName} · {shippingProfile.phone}</div>
-                <div className="mt-1 text-[12.5px] leading-5 text-ios-sub">{formatShopShippingSingleLine(shippingProfile)}</div>
-                {shippingProfile.deliveryNote ? <div className="mt-1 text-[12px] text-ios-sub">{shippingProfile.deliveryNote}</div> : null}
-              </>
-            ) : (
-              <div className="mt-2 text-[12.5px] leading-5 text-[#a33a2b]">{t("아직 기본 배송지가 없습니다. 계정에서 먼저 저장해야 결제를 진행할 수 있습니다.")}</div>
-            )}
-            <div className="mt-3">
-              <Link href="/settings/account" data-auth-allow className={`${SECONDARY_BUTTON} h-10 text-[12px]`}>
-                {t("계정에서 배송지 수정")}
-              </Link>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className={["rounded-[28px] px-5 py-5", productToneClass(product)].join(" ")}>
-        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] opacity-75">{product.partnerLabel}</div>
-        <div className="mt-3 text-[28px] font-bold tracking-[-0.02em]">{detail.headline}</div>
-        <div className="mt-2 text-[13px] leading-6 opacity-85">{detail.summary}</div>
-      </div>
-
-      {product.specs.length > 0 ? (
-        <div className="rounded-[28px] border border-ios-sep bg-white p-5">
-          <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{t("제품 정보")}</div>
-          <div className="mt-3 grid gap-2 md:grid-cols-2">
-            {product.specs.map((spec) => (
-              <div key={`${spec.label}-${spec.value}`} className="rounded-2xl border border-[#eef2f7] bg-[#f8fafc] px-4 py-3">
-                <div className="text-[11px] font-semibold text-[#6b7c92]">{spec.label}</div>
-                <div className="mt-1 text-[13px] font-semibold text-ios-text">{spec.value}</div>
+            <div className="rounded-[32px] border border-[#e6ebf2] bg-white p-6">
+              <div className="text-[18px] font-bold tracking-[-0.02em] text-[#111827]">{detail.featureTitle}</div>
+              <div className="mt-4 space-y-2">
+                {detail.featureItems.map((item) => (
+                  <div key={item} className="rounded-2xl border border-[#edf1f6] bg-[#f8fafc] px-4 py-3 text-[12.5px] leading-6 text-[#44556d]">
+                    {item}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      <div className="rounded-[28px] border border-ios-sep bg-white p-5">
-        <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{t("이 상품이 지금 맞는 이유")}</div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {matchedSignals.map((signal) => (
-            <span key={signal.key} className="inline-flex rounded-full border border-[#d7dfeb] bg-[#f4f7fb] px-3 py-1 text-[11px] font-semibold text-[#11294b]">
-              {signal.label}
-            </span>
-          ))}
-        </div>
-        <div className="mt-3 space-y-2">
-          {matchedSignals.map((signal) => (
-            <div key={`${signal.key}-reason`} className="rounded-2xl border border-[#eef2f7] bg-[#f8fafc] px-4 py-3 text-[12.5px] leading-5 text-[#44556d]">
-              {signal.reason}
             </div>
-          ))}
-        </div>
-      </div>
 
-      <div className="rounded-[28px] border border-ios-sep bg-white p-5">
-        <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{detail.storyTitle}</div>
-        <div className="mt-3 text-[13px] leading-6 text-[#44556d]">{detail.storyBody}</div>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="rounded-[28px] border border-ios-sep bg-white p-5">
-          <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{detail.featureTitle}</div>
-          <div className="mt-3 space-y-2">
-            {detail.featureItems.map((item) => (
-              <div key={item} className="rounded-2xl border border-[#eef2f7] bg-[#f8fafc] px-4 py-3 text-[12.5px] text-[#44556d]">
-                {item}
+            <div className="rounded-[32px] border border-[#e6ebf2] bg-white p-6">
+              <div className="text-[18px] font-bold tracking-[-0.02em] text-[#111827]">{detail.routineTitle}</div>
+              <div className="mt-4 space-y-2">
+                {detail.routineItems.map((item) => (
+                  <div key={item} className="rounded-2xl border border-[#edf1f6] bg-[#f8fafc] px-4 py-3 text-[12.5px] leading-6 text-[#44556d]">
+                    {item}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="rounded-[28px] border border-ios-sep bg-white p-5">
-          <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{detail.routineTitle}</div>
-          <div className="mt-3 space-y-2">
-            {detail.routineItems.map((item) => (
-              <div key={item} className="rounded-2xl border border-[#eef2f7] bg-[#f8fafc] px-4 py-3 text-[12.5px] text-[#44556d]">
-                {item}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div className="rounded-[28px] border border-ios-sep bg-white p-5">
-        <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{detail.noticeTitle}</div>
-        <div className="mt-2 text-[12.5px] leading-6 text-ios-sub">{detail.noticeBody}</div>
-      </div>
-
-      <div className="rounded-[28px] border border-ios-sep bg-white p-5">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{t("리뷰")}</div>
-            <div className="mt-1 text-[12.5px] text-ios-sub">
-              {reviewsLoading
-                ? t("리뷰를 불러오는 중입니다.")
-                : reviewSummary.count > 0
-                  ? `${renderStars(reviewSummary.averageRating)} ${reviewSummary.averageRating.toFixed(1)} · ${reviewSummary.count}개`
-                  : t("아직 등록된 리뷰가 없습니다.")}
             </div>
           </div>
         </div>
 
-        <div className="mt-4 space-y-3">
-          {reviews.map((review) => (
-            <div key={review.id} className="rounded-2xl border border-[#eef2f7] bg-[#f8fafc] px-4 py-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-[13px] font-semibold text-ios-text">{review.title || "후기"}</div>
+        <div id="shop-product-reviews" className="rounded-[32px] border border-[#e6ebf2] bg-white p-6">
+          <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+            <div>
+              <div className="text-[18px] font-bold tracking-[-0.02em] text-[#111827]">{t("리뷰")}</div>
+              <div className="mt-1 text-[12.5px] text-[#65748b]">
+                {reviewsLoading
+                  ? t("리뷰를 불러오는 중입니다.")
+                  : reviewSummary.count > 0
+                    ? `${renderStars(reviewSummary.averageRating)} ${reviewSummary.averageRating.toFixed(1)} · ${reviewSummary.count}개`
+                    : t("아직 등록된 리뷰가 없습니다.")}
+              </div>
+            </div>
+            <div className="text-[12px] text-[#7f8da2]">{t("제품당 리뷰 1개를 저장하고, 다시 작성하면 수정됩니다.")}</div>
+          </div>
+
+          <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
+            <div className="space-y-3">
+              {reviews.map((review) => (
+                <div key={review.id} className="rounded-2xl border border-[#edf1f6] bg-[#f8fafc] px-4 py-4">
+                  <div className="text-[13px] font-semibold text-[#111827]">{review.title || "후기"}</div>
                   <div className="mt-1 text-[11px] text-[#11294b]">{renderStars(review.rating)} · {formatDateLabel(review.updatedAt || review.createdAt)}</div>
+                  <div className="mt-3 text-[12.5px] leading-6 text-[#44556d]">{review.body}</div>
                 </div>
-              </div>
-              <div className="mt-2 text-[12.5px] leading-6 text-[#44556d]">{review.body}</div>
-            </div>
-          ))}
+              ))}
 
-          {!reviewsLoading && reviews.length === 0 ? (
-            <div className="rounded-2xl border border-[#eef2f7] bg-[#f8fafc] px-4 py-4 text-[12.5px] text-ios-sub">
-              {t("첫 리뷰를 남겨 제품 경험을 공유해 주세요.")}
+              {!reviewsLoading && reviews.length === 0 ? (
+                <div className="rounded-2xl border border-[#edf1f6] bg-[#f8fafc] px-4 py-4 text-[12.5px] text-[#65748b]">
+                  {t("첫 리뷰를 남겨 제품 경험을 공유해 주세요.")}
+                </div>
+              ) : null}
             </div>
-          ) : null}
+
+            <div className="rounded-3xl border border-[#edf1f6] bg-[#f8fafc] p-4">
+              <div className="text-[14px] font-semibold text-[#111827]">{t("리뷰 작성")}</div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {[1, 2, 3, 4, 5].map((value) => {
+                  const active = reviewDraft.rating === value;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      data-auth-allow
+                      onClick={() => setReviewDraft((current) => ({ ...current, rating: value }))}
+                      className={cn(
+                        "inline-flex h-10 w-10 items-center justify-center rounded-2xl border text-[14px] font-semibold transition",
+                        active ? "border-[#11294b] bg-[#11294b] text-white" : "border-[#d7dfeb] bg-white text-[#11294b]"
+                      )}
+                    >
+                      {value}
+                    </button>
+                  );
+                })}
+              </div>
+              <input
+                className={`${INPUT_CLASS} mt-3`}
+                value={reviewDraft.title}
+                onChange={(event) => setReviewDraft((current) => ({ ...current, title: event.target.value }))}
+                placeholder={t("한 줄 제목")}
+              />
+              <textarea
+                className={`${INPUT_CLASS} mt-3 min-h-[140px] resize-none`}
+                value={reviewDraft.body}
+                onChange={(event) => setReviewDraft((current) => ({ ...current, body: event.target.value }))}
+                placeholder={t("실제 사용감과 장단점을 남겨 주세요.")}
+              />
+              <div className="mt-3 flex justify-end">
+                <button type="button" data-auth-allow onClick={() => void submitReview()} disabled={reviewSaving} className={`${PRIMARY_BUTTON} h-10 text-[12px]`}>
+                  {reviewSaving ? t("저장 중...") : t("리뷰 저장")}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div className="mt-4 rounded-2xl border border-[#eef2f7] bg-[#f8fafc] p-4">
-          <div className="text-[13px] font-semibold text-ios-text">{t("리뷰 작성")}</div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {[1, 2, 3, 4, 5].map((value) => {
-              const active = reviewDraft.rating === value;
-              return (
-                <button
-                  key={value}
-                  type="button"
-                  data-auth-allow
-                  onClick={() => setReviewDraft((current) => ({ ...current, rating: value }))}
-                  className={cn(
-                    "inline-flex h-10 w-10 items-center justify-center rounded-2xl border text-[14px] font-semibold transition",
-                    active ? "border-[#11294b] bg-[#11294b] text-white" : "border-[#d7dfeb] bg-white text-[#11294b]"
-                  )}
-                >
-                  {value}
-                </button>
-              );
-            })}
-          </div>
-          <div className="mt-3 grid gap-3 md:grid-cols-2">
-            <input
-              className={INPUT_CLASS}
-              value={reviewDraft.title}
-              onChange={(event) => setReviewDraft((current) => ({ ...current, title: event.target.value }))}
-              placeholder={t("한 줄 제목")}
-            />
-            <div className="flex items-center rounded-2xl border border-[#d7dfeb] bg-white px-4 text-[12px] text-ios-sub">
-              {t("제품당 리뷰 1개를 저장하고, 다시 작성하면 수정됩니다.")}
+        <div id="shop-product-purchase" className="rounded-[32px] border border-[#e6ebf2] bg-white p-6">
+          <div className="text-[18px] font-bold tracking-[-0.02em] text-[#111827]">{t("구매 안내")}</div>
+          <div className="mt-5 grid gap-4 md:grid-cols-3">
+            <div className="rounded-3xl border border-[#edf1f6] bg-[#f8fafc] p-4">
+              <div className="text-[13px] font-semibold text-[#111827]">{t("상품 결제 정보")}</div>
+              <div className="mt-3 text-[12.5px] leading-6 text-[#44556d]">
+                {product.checkoutEnabled && product.priceKrw
+                  ? t("토스 결제로 바로 결제할 수 있으며, 승인 완료 후 주문 내역에서 상태를 확인할 수 있습니다.")
+                  : t("외부 판매처 가격과 재고는 판매처 기준으로 운영되며, 최종 결제 조건은 판매처에서 확인해야 합니다.")}
+              </div>
             </div>
-          </div>
-          <textarea
-            className={`${INPUT_CLASS} mt-3 min-h-[120px] resize-none`}
-            value={reviewDraft.body}
-            onChange={(event) => setReviewDraft((current) => ({ ...current, body: event.target.value }))}
-            placeholder={t("실제 사용감과 장단점을 남겨 주세요.")}
-          />
-          <div className="mt-3 flex justify-end">
-            <button type="button" data-auth-allow onClick={() => void submitReview()} disabled={reviewSaving} className={`${PRIMARY_BUTTON} h-10 text-[12px]`}>
-              {reviewSaving ? t("저장 중...") : t("리뷰 저장")}
-            </button>
+            <div className="rounded-3xl border border-[#edf1f6] bg-[#f8fafc] p-4">
+              <div className="text-[13px] font-semibold text-[#111827]">{t("배송 정보")}</div>
+              <div className="mt-3 text-[12.5px] leading-6 text-[#44556d]">
+                {t("전국 배송 기준 3~7일이 소요됩니다. 도서산간 지역은 추가 비용이 발생할 수 있으며, 50,000원 이상 구매 시 무료 배송 기준을 우선 적용합니다.")}
+              </div>
+            </div>
+            <div className="rounded-3xl border border-[#edf1f6] bg-[#f8fafc] p-4">
+              <div className="text-[13px] font-semibold text-[#111827]">{detail.noticeTitle}</div>
+              <div className="mt-3 text-[12.5px] leading-6 text-[#44556d]">{detail.noticeBody}</div>
+            </div>
           </div>
         </div>
       </div>
