@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable @next/next/no-img-element */
 
 import { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -46,13 +47,39 @@ type ShopOrderSummary = {
 const PRIMARY_BUTTON = "inline-flex items-center justify-center rounded-2xl border border-[#11294b] bg-[#11294b] px-4 font-semibold text-white transition disabled:opacity-60";
 const SECONDARY_BUTTON = "inline-flex items-center justify-center rounded-2xl border border-[#d7dfeb] bg-[#f4f7fb] px-4 font-semibold text-[#11294b] transition disabled:opacity-60";
 
-function StorefrontIcon() {
+function MenuIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-      <path d="M4 10l1.4-4.6A2 2 0 0 1 7.3 4h9.4a2 2 0 0 1 1.9 1.4L20 10" />
-      <path d="M5 10h14" />
-      <path d="M6 10v7a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-7" />
-      <path d="M9 19v-4h6v4" />
+      <path d="M4 7h16" />
+      <path d="M4 12h16" />
+      <path d="M4 17h16" />
+    </svg>
+  );
+}
+
+function ChevronDownIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+      <path d="M6 9l6 6 6-6" />
+    </svg>
+  );
+}
+
+function CartIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+      <circle cx="9" cy="19" r="1.25" />
+      <circle cx="18" cy="19" r="1.25" />
+      <path d="M3 4h2l2.2 9.2a1 1 0 0 0 1 .8h8.8a1 1 0 0 0 1-.76L20 7H7" />
+    </svg>
+  );
+}
+
+function ProfileIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+      <circle cx="12" cy="8" r="3.2" />
+      <path d="M5 19c1.8-3 4.1-4.5 7-4.5s5.2 1.5 7 4.5" />
     </svg>
   );
 }
@@ -310,195 +337,277 @@ export function ShopPage() {
     }
   };
 
+  const featuredPrimary = allShopState.recommendations[0] ?? null;
+  const featuredSecondary = allShopState.recommendations.slice(1, 3);
+
   return (
-    <div className="mx-auto w-full max-w-[760px] space-y-4 px-4 pb-24 pt-6">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-[#d7dfeb] bg-[#eef4fb] text-[#11294b]">
-            <StorefrontIcon />
-          </span>
-          <div>
-            <div className="text-[30px] font-extrabold tracking-[-0.02em] text-ios-text">{t("쇼핑")}</div>
-            <div className="mt-0.5 text-[13px] text-ios-sub">{t("지금 상태에 맞는 상품만 가볍게 보고 상세 페이지에서 바로 구매합니다.")}</div>
-          </div>
-        </div>
-        {isAdmin ? (
-          <Link href="/settings/admin/shop" data-auth-allow className={`${SECONDARY_BUTTON} h-10 text-[12px]`}>
-            {t("운영 관리")}
+    <div className="-mx-4 pb-24">
+      <div className="bg-[#69c8ee] px-4 py-3 text-center text-[12.5px] font-semibold text-white">
+        {t("오늘 회복 흐름에 맞는 추천 상품과 구매 정보를 한눈에 확인하세요")}
+      </div>
+
+      <div className="border-b border-[#edf1f6] bg-white px-4 py-4">
+        <div className="grid grid-cols-[auto_auto_1fr_auto_auto] items-center gap-3">
+          <button
+            type="button"
+            data-auth-allow
+            onClick={() => {
+              if (typeof window === "undefined") return;
+              document.getElementById("shop-category-strip")?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+            className="inline-flex h-10 w-10 items-center justify-center text-[#111827]"
+            aria-label={t("카테고리로 이동")}
+          >
+            <MenuIcon />
+          </button>
+          <button
+            type="button"
+            data-auth-allow
+            onClick={() => {
+              if (typeof window === "undefined") return;
+              document.getElementById("shop-category-strip")?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+            className="inline-flex items-center gap-1 text-[#111827]"
+            aria-label={t("카테고리 펼치기")}
+          >
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#d7dfeb] bg-[#f8fafc] text-[10px] font-bold text-[#11294b]">KR</span>
+            <ChevronDownIcon />
+          </button>
+          <Link href="/shop" data-auth-allow className="justify-self-center text-[36px] font-black italic tracking-[-0.07em] text-[#69c8ee]">
+            rnest
           </Link>
-        ) : null}
+          <button
+            type="button"
+            data-auth-allow
+            onClick={() => {
+              if (typeof window === "undefined") return;
+              document.getElementById(status === "authenticated" ? "shop-orders" : "shop-product-grid")?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+            className="inline-flex h-10 w-10 items-center justify-center text-[#111827]"
+            aria-label={t("주문 영역으로 이동")}
+          >
+            <CartIcon />
+          </button>
+          <Link href="/settings/account" data-auth-allow className="inline-flex h-10 w-10 items-center justify-center text-[#111827]" aria-label={t("계정 설정")}>
+            <ProfileIcon />
+          </Link>
+        </div>
       </div>
 
-      <div className="rounded-[28px] border border-ios-sep bg-white p-5">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#5f7087]">{t("오늘의 추천 기준")}</div>
-        <div className="mt-2 text-[22px] font-bold tracking-[-0.02em] text-[#11294b]">{allShopState.focusSummary}</div>
-        <div className="mt-2 text-[12.5px] leading-5 text-ios-sub">
-          {t("기준 날짜")} {selectedDateLabel} · {t("근무, 수면, 스트레스 흐름만 읽어서 상품 순서를 간단히 정합니다.")}
-        </div>
-        <div className="mt-4 flex flex-wrap gap-2">
-          {topSignals.map((signal) => (
-            <span key={signal.key} className="inline-flex rounded-full border border-[#d7dfeb] bg-[#f4f7fb] px-3 py-1 text-[11px] font-semibold text-[#11294b]">
-              {signal.label}
-            </span>
-          ))}
-        </div>
-      </div>
-
-      <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
-        {SHOP_CATEGORIES.map((item) => {
-          const active = item.key === category;
-          return (
-            <button
-              key={item.key}
-              type="button"
-              data-auth-allow
-              onClick={() =>
-                startTransition(() => {
-                  setCategory(item.key);
-                })
-              }
-              className={[
-                "shrink-0 rounded-2xl px-4 py-2 text-left transition",
-                active ? "border border-[#11294b] bg-[#11294b] text-white" : "border border-[#d7dfeb] bg-[#f4f7fb] text-[#11294b]",
-              ].join(" ")}
-            >
-              <div className="text-[12px] font-semibold">{t(item.label)}</div>
-              <div className={["mt-0.5 text-[10.5px]", active ? "text-white/70" : "text-[#6b7c92]"].join(" ")}>{t(item.subtitle)}</div>
-            </button>
-          );
-        })}
-      </div>
-
-      {catalogError ? (
-        <div className="rounded-2xl border border-[#f1d0cc] bg-[#fff6f5] px-4 py-3 text-[12.5px] text-[#a33a2b]">
-          {t("카탈로그를 불러오지 못해 기본 상품 목록으로 보여주고 있습니다.")}
-        </div>
-      ) : null}
-
-      {orderMessage ? (
-        <div
-          className={[
-            "rounded-2xl px-4 py-3 text-[12.5px] leading-5",
-            orderMessageTone === "error" ? "border border-[#f1d0cc] bg-[#fff6f5] text-[#a33a2b]" : "border border-[#d7dfeb] bg-[#eef4fb] text-[#11294b]",
-          ].join(" ")}
-        >
-          {orderMessage}
-        </div>
-      ) : null}
-
-      <div className="rounded-[28px] border border-ios-sep bg-white p-5">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-[17px] font-bold tracking-[-0.02em] text-ios-text">
-              {t(activeCategoryMeta.label)} {t("상품")}
-            </div>
-            <div className="mt-1 text-[12.5px] text-ios-sub">{t("상세 페이지에서 설명과 구매 흐름을 한 번에 확인합니다.")}</div>
+      <div className="space-y-6 px-4 pt-6">
+        {catalogError ? (
+          <div className="rounded-3xl border border-[#f1d0cc] bg-[#fff6f5] px-4 py-3 text-[12.5px] text-[#a33a2b]">
+            {t("카탈로그를 불러오지 못해 기본 상품 목록으로 보여주고 있습니다.")}
           </div>
-          <div className="rounded-full border border-[#d7dfeb] bg-[#f4f7fb] px-3 py-1 text-[11px] font-semibold text-[#11294b]">
-            {catalogLoading ? t("불러오는 중") : `${recommendations.length}${t("개")}`}
+        ) : null}
+
+        {orderMessage ? (
+          <div
+            className={[
+              "rounded-3xl px-4 py-3 text-[12.5px] leading-5",
+              orderMessageTone === "error" ? "border border-[#f1d0cc] bg-[#fff6f5] text-[#a33a2b]" : "border border-[#d7dfeb] bg-[#eef4fb] text-[#11294b]",
+            ].join(" ")}
+          >
+            {orderMessage}
           </div>
-        </div>
-      </div>
-
-      <div className="space-y-3">
-        {catalogLoading ? (
-          <div className="rounded-[28px] border border-ios-sep bg-white px-5 py-6 text-[13px] text-ios-sub">{t("상품을 불러오는 중입니다.")}</div>
         ) : null}
 
-        {!catalogLoading && recommendations.length === 0 ? (
-          <div className="rounded-[28px] border border-ios-sep bg-white px-5 py-6 text-[13px] text-ios-sub">{t("현재 조건에 맞는 상품이 없습니다. 카테고리를 바꾸거나 잠시 후 다시 확인해 주세요.")}</div>
-        ) : null}
-
-        {!catalogLoading &&
-          recommendations.map((entry) => {
-            const href = `/shop/${encodeURIComponent(entry.product.id)}`;
-            return (
-              <div key={entry.product.id} className="rounded-[28px] border border-ios-sep bg-white p-5">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="inline-flex rounded-full border border-[#d7dfeb] bg-[#f4f7fb] px-2.5 py-1 text-[10.5px] font-semibold text-[#11294b]">
-                      {t(getShopCategoryMeta(entry.product.category).label)} · {t(productAvailabilityLabel(entry.product))}
+        {featuredPrimary ? (
+          <div className="space-y-4">
+            <Link href={`/shop/${encodeURIComponent(featuredPrimary.product.id)}`} data-auth-allow className="block overflow-hidden rounded-[32px] border border-[#edf1f6] bg-white">
+              <div className="relative bg-[#f3f5f7]">
+                {featuredPrimary.product.imageUrls[0] ? (
+                  <img
+                    src={featuredPrimary.product.imageUrls[0]}
+                    alt={featuredPrimary.product.name}
+                    className="aspect-[1.15/1] w-full object-cover"
+                  />
+                ) : (
+                  <div className={["flex aspect-[1.15/1] items-end px-6 py-6", productToneClass(featuredPrimary.product)].join(" ")}>
+                    <div>
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.22em] opacity-75">{featuredPrimary.product.partnerLabel}</div>
+                      <div className="mt-3 text-[28px] font-bold tracking-[-0.03em]">{featuredPrimary.product.visualLabel}</div>
                     </div>
-                    <div className="mt-3 text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">{entry.product.name}</div>
-                    <div className="mt-1 text-[13px] leading-5 text-ios-sub">{entry.product.subtitle}</div>
                   </div>
-                  <div className="rounded-full border border-[#d7dfeb] bg-[#f4f7fb] px-3 py-1 text-[11px] font-semibold text-[#11294b]">{entry.score}</div>
+                )}
+                <div className="absolute bottom-4 right-4 rounded-full bg-black/12 px-3 py-1 text-[11px] font-semibold text-white">
+                  1 / {Math.max(1, featuredPrimary.product.imageUrls.length || 1)}
                 </div>
+              </div>
+              <div className="px-4 py-5">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#8d99ab]">{t("오늘의 추천")}</div>
+                <div className="mt-3 text-[16px] font-bold leading-7 tracking-[-0.02em] text-[#111827]">{featuredPrimary.product.name}</div>
+                <div className="mt-2 text-[13px] leading-6 text-[#44556d]">{allShopState.focusSummary}</div>
+                <div className="mt-4 text-[13px] font-semibold text-[#111827]">{formatShopPrice(featuredPrimary.product)}</div>
+              </div>
+            </Link>
 
-                <div className={["mt-4 rounded-[24px] px-4 py-4", productToneClass(entry.product)].join(" ")}>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.22em] opacity-75">{entry.product.partnerLabel}</div>
-                  <div className="mt-3 text-[22px] font-bold tracking-[-0.02em]">{entry.product.visualLabel}</div>
-                  <div className="mt-1 text-[12px] leading-5 opacity-80">{entry.primaryReason}</div>
-                </div>
-
-                <div className="mt-4 flex items-end justify-between gap-3">
-                  <div>
-                    <div className="text-[13px] font-semibold text-[#11294b]">{formatShopPrice(entry.product)}</div>
-                    <div className="mt-1 text-[11px] text-ios-sub">{entry.product.partnerStatus}</div>
-                  </div>
-                  <Link href={href} data-auth-allow className={`${PRIMARY_BUTTON} h-10 text-[12px]`}>
-                    {t("상세 보기")}
+            {featuredSecondary.length > 0 ? (
+              <div className="grid grid-cols-2 gap-4">
+                {featuredSecondary.map((entry) => (
+                  <Link key={entry.product.id} href={`/shop/${encodeURIComponent(entry.product.id)}`} data-auth-allow className="block rounded-[28px] border border-[#edf1f6] bg-white p-3">
+                    <div className="overflow-hidden rounded-[22px] bg-[#f3f5f7]">
+                      {entry.product.imageUrls[0] ? (
+                        <img src={entry.product.imageUrls[0]} alt={entry.product.name} className="aspect-square w-full object-cover" />
+                      ) : (
+                        <div className={["flex aspect-square items-end px-4 py-4", productToneClass(entry.product)].join(" ")}>
+                          <div className="text-[20px] font-bold tracking-[-0.03em]">{entry.product.visualLabel}</div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="mt-3 text-[14px] font-semibold leading-6 text-[#111827]">{entry.product.name}</div>
+                    <div className="mt-2 text-[12px] font-semibold text-[#111827]">{formatShopPrice(entry.product)}</div>
                   </Link>
-                </div>
+                ))}
               </div>
-            );
-          })}
-      </div>
-
-      {status === "authenticated" ? (
-        <div className="rounded-[28px] border border-ios-sep bg-white p-5">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{t("내 주문")}</div>
-              <div className="mt-1 text-[12.5px] text-ios-sub">{t("최근 주문 3건만 간단히 보고 필요한 경우 바로 환불 요청할 수 있습니다.")}</div>
-            </div>
-            <div className="rounded-full border border-[#d7dfeb] bg-[#f4f7fb] px-3 py-1 text-[11px] font-semibold text-[#11294b]">
-              {ordersLoading ? t("불러오는 중") : `${orders.length}${t("건")}`}
-            </div>
-          </div>
-
-          <div className="mt-4 space-y-2">
-            {orders.map((order) => (
-              <div key={order.orderId} className="rounded-2xl border border-ios-sep bg-white px-4 py-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-[13px] font-semibold text-ios-text">{order.productSnapshot.name}</div>
-                    <div className="mt-1 text-[11px] text-ios-sub">
-                      {t("수량")} {order.productSnapshot.quantity} · {Math.round(order.amount).toLocaleString("ko-KR")}원 · {formatDateLabel(order.createdAt)}
-                    </div>
-                    {order.shipping.addressLine1 ? (
-                      <div className="mt-1 text-[11px] text-ios-sub">
-                        {order.shipping.recipientName} · {order.shipping.addressLine1}
-                        {order.shipping.addressLine2 ? ` ${order.shipping.addressLine2}` : ""}
-                      </div>
-                    ) : null}
-                  </div>
-                  <span className={`rounded-full border px-2.5 py-1 text-[10.5px] font-semibold ${orderStatusClass(order.status)}`}>
-                    {orderStatusLabel(order.status)}
-                  </span>
-                </div>
-
-                {order.refund.status === "requested" ? <div className="mt-2 text-[11.5px] text-ios-sub">{t("환불 요청 접수됨")} · {order.refund.reason ?? t("사유 없음")}</div> : null}
-                {order.refund.status === "rejected" ? <div className="mt-2 text-[11.5px] text-[#a33a2b]">{t("환불 반려")} · {order.refund.note ?? t("사유 없음")}</div> : null}
-                {order.refund.status === "done" ? <div className="mt-2 text-[11.5px] text-[#11294b]">{t("환불 완료")}</div> : null}
-                {order.status === "FAILED" && order.failMessage ? <div className="mt-2 text-[11.5px] text-[#a33a2b]">{order.failMessage}</div> : null}
-
-                {order.status === "PAID" && order.refund.status === "none" ? (
-                  <div className="mt-3">
-                    <button type="button" data-auth-allow onClick={() => void requestRefund(order.orderId)} className={`${SECONDARY_BUTTON} h-9 text-[11px]`}>
-                      {t("환불 요청")}
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            ))}
-
-            {!ordersLoading && orders.length === 0 ? (
-              <div className="rounded-2xl border border-ios-sep bg-white px-4 py-4 text-[12.5px] text-ios-sub">{t("아직 주문이 없습니다. 상품 상세 페이지에서 바로 결제할 수 있습니다.")}</div>
             ) : null}
           </div>
+        ) : null}
+
+        <div id="shop-category-strip" className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+          {SHOP_CATEGORIES.map((item) => {
+            const active = item.key === category;
+            return (
+              <button
+                key={item.key}
+                type="button"
+                data-auth-allow
+                onClick={() =>
+                  startTransition(() => {
+                    setCategory(item.key);
+                  })
+                }
+                className={[
+                  "shrink-0 rounded-full px-5 py-3 text-[13px] font-semibold transition",
+                  active ? "bg-[#69c8ee] text-white" : "bg-transparent text-[#111827]",
+                ].join(" ")}
+              >
+                {t(item.label)}
+              </button>
+            );
+          })}
         </div>
-      ) : null}
+
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[13px] font-semibold text-[#8d99ab]">{t("기준 날짜")} {selectedDateLabel}</div>
+            <div className="mt-1 text-[20px] font-bold tracking-[-0.03em] text-[#111827]">{t(activeCategoryMeta.label)} {t("상품")}</div>
+          </div>
+          {isAdmin ? (
+            <Link href="/settings/admin/shop" data-auth-allow className={`${SECONDARY_BUTTON} h-10 text-[12px]`}>
+              {t("운영 관리")}
+            </Link>
+          ) : (
+            <div className="rounded-full bg-[#eef4fb] px-3 py-1 text-[11px] font-semibold text-[#11294b]">
+              {catalogLoading ? t("불러오는 중") : `${recommendations.length}${t("개")}`}
+            </div>
+          )}
+        </div>
+
+        {topSignals.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {topSignals.map((signal) => (
+              <span key={signal.key} className="inline-flex rounded-full bg-[#eef4fb] px-3 py-1 text-[11px] font-semibold text-[#11294b]">
+                {signal.label}
+              </span>
+            ))}
+          </div>
+        ) : null}
+
+        <div id="shop-product-grid" className="grid grid-cols-2 gap-x-4 gap-y-7">
+          {!catalogLoading &&
+            recommendations.map((entry, index) => (
+              <Link key={entry.product.id} href={`/shop/${encodeURIComponent(entry.product.id)}`} data-auth-allow className="block">
+                <div className="relative overflow-hidden rounded-[2px] bg-[#f3f5f7]">
+                  {entry.product.imageUrls[0] ? (
+                    <img src={entry.product.imageUrls[0]} alt={entry.product.name} className="aspect-square w-full object-cover" />
+                  ) : (
+                    <div className={["flex aspect-square items-center justify-center p-4", productToneClass(entry.product)].join(" ")}>
+                      <div className="text-center">
+                        <div className="text-[10px] font-semibold uppercase tracking-[0.24em] opacity-75">{entry.product.partnerLabel}</div>
+                        <div className="mt-2 text-[22px] font-bold tracking-[-0.03em]">{entry.product.visualLabel}</div>
+                      </div>
+                    </div>
+                  )}
+                  {index < 2 ? (
+                    <div className="absolute left-3 top-3 border border-[#69c8ee] bg-white px-3 py-1 text-[11px] font-semibold text-[#69c8ee]">
+                      NEW
+                    </div>
+                  ) : null}
+                </div>
+                <div className="mt-3 text-[16px] font-semibold leading-7 tracking-[-0.02em] text-[#111827]">{entry.product.name}</div>
+                <div className="mt-3 flex items-end gap-2">
+                  <div className="text-[14px] font-bold text-[#111827]">{formatShopPrice(entry.product)}</div>
+                  <div className="text-[12px] font-semibold text-[#d72f2f]">{entry.product.checkoutEnabled && entry.product.priceKrw ? t("바로결제") : t("상세보기")}</div>
+                </div>
+                <div className="mt-1 text-[11px] text-[#8d99ab]">{entry.primaryReason}</div>
+              </Link>
+            ))}
+
+          {catalogLoading ? (
+            <div className="col-span-2 rounded-3xl border border-[#edf1f6] bg-white px-5 py-6 text-[13px] text-[#65748b]">{t("상품을 불러오는 중입니다.")}</div>
+          ) : null}
+
+          {!catalogLoading && recommendations.length === 0 ? (
+            <div className="col-span-2 rounded-3xl border border-[#edf1f6] bg-white px-5 py-6 text-[13px] text-[#65748b]">{t("현재 조건에 맞는 상품이 없습니다. 카테고리를 바꾸거나 잠시 후 다시 확인해 주세요.")}</div>
+          ) : null}
+        </div>
+
+        {status === "authenticated" ? (
+          <div id="shop-orders" className="rounded-[32px] border border-[#edf1f6] bg-white p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[18px] font-bold tracking-[-0.02em] text-[#111827]">{t("내 주문")}</div>
+                <div className="mt-1 text-[12.5px] text-[#65748b]">{t("최근 주문을 확인하고 필요한 경우 환불 요청을 진행할 수 있습니다.")}</div>
+              </div>
+              <div className="rounded-full bg-[#eef4fb] px-3 py-1 text-[11px] font-semibold text-[#11294b]">
+                {ordersLoading ? t("불러오는 중") : `${orders.length}${t("건")}`}
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              {orders.map((order) => (
+                <div key={order.orderId} className="rounded-3xl border border-[#edf1f6] bg-[#f8fafc] px-4 py-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-[14px] font-semibold text-[#111827]">{order.productSnapshot.name}</div>
+                      <div className="mt-1 text-[11px] text-[#8d99ab]">
+                        {t("수량")} {order.productSnapshot.quantity} · {Math.round(order.amount).toLocaleString("ko-KR")}원 · {formatDateLabel(order.createdAt)}
+                      </div>
+                      {order.shipping.addressLine1 ? (
+                        <div className="mt-1 text-[11px] text-[#8d99ab]">
+                          {order.shipping.recipientName} · {order.shipping.addressLine1}
+                          {order.shipping.addressLine2 ? ` ${order.shipping.addressLine2}` : ""}
+                        </div>
+                      ) : null}
+                    </div>
+                    <span className={`rounded-full border px-2.5 py-1 text-[10.5px] font-semibold ${orderStatusClass(order.status)}`}>
+                      {orderStatusLabel(order.status)}
+                    </span>
+                  </div>
+
+                  {order.refund.status === "requested" ? <div className="mt-2 text-[11.5px] text-[#65748b]">{t("환불 요청 접수됨")} · {order.refund.reason ?? t("사유 없음")}</div> : null}
+                  {order.refund.status === "rejected" ? <div className="mt-2 text-[11.5px] text-[#a33a2b]">{t("환불 반려")} · {order.refund.note ?? t("사유 없음")}</div> : null}
+                  {order.refund.status === "done" ? <div className="mt-2 text-[11.5px] text-[#11294b]">{t("환불 완료")}</div> : null}
+                  {order.status === "FAILED" && order.failMessage ? <div className="mt-2 text-[11.5px] text-[#a33a2b]">{order.failMessage}</div> : null}
+
+                  {order.status === "PAID" && order.refund.status === "none" ? (
+                    <div className="mt-3">
+                      <button type="button" data-auth-allow onClick={() => void requestRefund(order.orderId)} className={`${SECONDARY_BUTTON} h-9 text-[11px]`}>
+                        {t("환불 요청")}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+
+              {!ordersLoading && orders.length === 0 ? (
+                <div className="rounded-3xl border border-[#edf1f6] bg-[#f8fafc] px-4 py-4 text-[12.5px] text-[#65748b]">{t("아직 주문이 없습니다. 상품 상세 페이지에서 바로 결제할 수 있습니다.")}</div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
