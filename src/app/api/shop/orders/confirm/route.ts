@@ -1,6 +1,6 @@
 import { jsonNoStore } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
-import { buildShopOrderConfirmIdempotencyKey, markShopOrderFailed, markShopOrderPaid, readShopOrderForUser } from "@/lib/server/shopOrderStore";
+import { buildShopOrderConfirmIdempotencyKey, markShopOrderFailed, markShopOrderPaid, readShopOrderForUser, toShopOrderSummary } from "@/lib/server/shopOrderStore";
 import { readTossAcceptLanguage, readTossSecretKeyFromEnv, readTossTestCodeFromEnv } from "@/lib/server/tossConfig";
 
 export const runtime = "edge";
@@ -45,7 +45,8 @@ export async function POST(req: Request) {
 
   const order = await readShopOrderForUser(userId, orderId).catch(() => null);
   if (!order) return jsonNoStore({ ok: false, error: "shop_order_not_found" }, { status: 404 });
-  if (order.status === "PAID") return jsonNoStore({ ok: true, data: { order } });
+  if (order.status === "PAID") return jsonNoStore({ ok: true, data: { order: toShopOrderSummary(order) } });
+  if (order.status !== "READY") return jsonNoStore({ ok: false, error: "shop_order_not_confirmable" }, { status: 400 });
   if (amount !== order.amount) return jsonNoStore({ ok: false, error: "amount_mismatch" }, { status: 400 });
 
   const secret = readTossSecretKeyFromEnv();
@@ -133,7 +134,7 @@ export async function POST(req: Request) {
       approvedAt: typeof json?.approvedAt === "string" ? json.approvedAt : null,
       tossResponse: json,
     });
-    return jsonNoStore({ ok: true, data: { order: paidOrder } });
+    return jsonNoStore({ ok: true, data: { order: toShopOrderSummary(paidOrder) } });
   } catch {
     return jsonNoStore({ ok: false, error: "failed_to_finalize_shop_order" }, { status: 500 });
   }

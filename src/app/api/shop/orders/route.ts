@@ -1,6 +1,6 @@
 import { jsonNoStore } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
-import { listShopOrdersForUser } from "@/lib/server/shopOrderStore";
+import { listShopOrdersForUser, toShopOrderSummary } from "@/lib/server/shopOrderStore";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -17,7 +17,7 @@ export async function GET(req: Request) {
 
   const limit = toLimit(new URL(req.url).searchParams.get("limit"));
   try {
-    const orders = await listShopOrdersForUser(userId, limit);
+    const orders = (await listShopOrdersForUser(userId, limit)).map(toShopOrderSummary);
     return jsonNoStore({ ok: true, data: { orders } });
   } catch {
     return jsonNoStore({ ok: false, error: "failed_to_list_shop_orders" }, { status: 500 });

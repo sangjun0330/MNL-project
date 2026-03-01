@@ -2,7 +2,7 @@ import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurit
 import { getRouteSupabaseClient } from "@/lib/server/supabaseRouteClient";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { loadShopCatalog } from "@/lib/server/shopCatalogStore";
-import { buildShopOrderId, createShopOrder } from "@/lib/server/shopOrderStore";
+import { buildShopOrderId, countRecentReadyShopOrdersByUser, createShopOrder } from "@/lib/server/shopOrderStore";
 import { readTossClientKeyFromEnv, readTossSecretKeyFromEnv } from "@/lib/server/tossConfig";
 
 export const runtime = "edge";
@@ -28,9 +28,11 @@ async function readCustomer(req: Request) {
     const bearer = req.headers.get("authorization") ?? "";
     const token = bearer.toLowerCase().startsWith("bearer ") ? bearer.slice(7).trim() : "";
     const { data } = token ? await supabase.auth.getUser(token) : await supabase.auth.getUser();
+    const email = String(data.user?.email ?? "").trim().slice(0, 160);
+    const name = String((data.user?.user_metadata?.full_name as string | undefined) ?? "").trim().slice(0, 80);
     return {
-      email: data.user?.email ?? null,
-      name: (data.user?.user_metadata?.full_name as string | undefined) ?? null,
+      email: email || null,
+      name: name || null,
     };
   } catch {
     return { email: null, name: null };
@@ -62,6 +64,11 @@ export async function POST(req: Request) {
   if (!productId) return jsonNoStore({ ok: false, error: "invalid_product_id" }, { status: 400 });
 
   try {
+    const readyCount = await countRecentReadyShopOrdersByUser(userId);
+    if (readyCount >= 3) {
+      return jsonNoStore({ ok: false, error: "too_many_pending_shop_orders" }, { status: 429 });
+    }
+
     const catalog = await loadShopCatalog();
     const product = catalog.find((item) => item.id === productId);
     if (!product) return jsonNoStore({ ok: false, error: "shop_product_not_found" }, { status: 404 });
@@ -76,8 +83,6 @@ export async function POST(req: Request) {
       userId,
       product,
       quantity,
-      customerEmail: customer.email,
-      customerName: customer.name,
     });
     const origin = resolveOrigin(req);
     if (!origin) return jsonNoStore({ ok: false, error: "invalid_origin" }, { status: 500 });

@@ -46,14 +46,34 @@ export type ShopOrderRecord = {
   currency: "KRW";
   paymentKey: string | null;
   tossResponse: Json | null;
-  customerEmail: string | null;
-  customerName: string | null;
   approvedAt: string | null;
   failCode: string | null;
   failMessage: string | null;
   refund: ShopRefundState;
   createdAt: string;
   updatedAt: string;
+};
+
+export type ShopOrderSummary = {
+  orderId: string;
+  status: ShopOrderStatus;
+  amount: number;
+  createdAt: string;
+  approvedAt: string | null;
+  failMessage: string | null;
+  productSnapshot: {
+    name: string;
+    quantity: number;
+  };
+  refund: {
+    status: ShopRefundState["status"];
+    reason: string | null;
+    note: string | null;
+  };
+};
+
+export type ShopAdminOrderSummary = ShopOrderSummary & {
+  userLabel: string;
 };
 
 type StoredShopOrder = {
@@ -73,6 +93,41 @@ function cleanText(value: unknown, max = 220) {
 function sanitizeReason(value: unknown) {
   const text = cleanText(value, 240);
   return text || "단순 환불 요청";
+}
+
+function maskUserId(userId: string) {
+  const text = cleanText(userId, 120);
+  if (!text) return "unknown";
+  if (text.length <= 8) return `${text.slice(0, 2)}***`;
+  return `${text.slice(0, 4)}…${text.slice(-4)}`;
+}
+
+function summarizeTossPaymentResponse(raw: any): Json {
+  const status = cleanText(raw?.status, 40);
+  const orderId = cleanText(raw?.orderId, 80);
+  const approvedAt = cleanText(raw?.approvedAt, 64);
+  const method = cleanText(raw?.method, 40);
+  const totalAmount = toAmount(raw?.totalAmount ?? raw?.balanceAmount);
+  return {
+    status: status || null,
+    orderId: orderId || null,
+    approvedAt: approvedAt || null,
+    method: method || null,
+    totalAmount,
+  };
+}
+
+function summarizeTossCancelResponse(raw: any): Json {
+  const status = cleanText(raw?.status, 40);
+  const totalAmount = toAmount(raw?.totalAmount ?? raw?.balanceAmount);
+  const cancelTransactionKey = cleanText(raw?.cancels?.[0]?.transactionKey ?? raw?.lastTransactionKey, 120);
+  const canceledAt = cleanText(raw?.cancels?.[0]?.canceledAt, 64);
+  return {
+    status: status || null,
+    totalAmount,
+    cancelTransactionKey: cancelTransactionKey || null,
+    canceledAt: canceledAt || null,
+  };
 }
 
 function toAmount(value: unknown) {
@@ -97,7 +152,7 @@ function normalizeRefund(value: unknown): ShopRefundState {
     note: cleanText(raw.note, 500) || null,
     cancelAmount: toAmount(raw.cancelAmount),
     canceledAt: cleanText(raw.canceledAt, 64) || null,
-    cancelResponse: (raw.cancelResponse ?? null) as Json | null,
+    cancelResponse: raw.cancelResponse == null ? null : summarizeTossCancelResponse(raw.cancelResponse),
   };
 }
 
@@ -136,9 +191,7 @@ function normalizeOrder(data: unknown): ShopOrderRecord | null {
     amount,
     currency: "KRW",
     paymentKey: cleanText(source.paymentKey, 220) || null,
-    tossResponse: (source.tossResponse ?? null) as Json | null,
-    customerEmail: cleanText(source.customerEmail, 160) || null,
-    customerName: cleanText(source.customerName, 120) || null,
+    tossResponse: source.tossResponse == null ? null : summarizeTossPaymentResponse(source.tossResponse),
     approvedAt: cleanText(source.approvedAt, 64) || null,
     failCode: cleanText(source.failCode, 120) || null,
     failMessage: cleanText(source.failMessage, 220) || null,
@@ -189,8 +242,6 @@ export async function createShopOrder(input: {
   userId: string;
   product: ShopProduct;
   quantity: number;
-  customerEmail?: string | null;
-  customerName?: string | null;
 }) {
   const now = new Date().toISOString();
   const quantity = Math.max(1, Math.min(9, Math.round(Number(input.quantity) || 1)));
@@ -213,8 +264,6 @@ export async function createShopOrder(input: {
     currency: "KRW",
     paymentKey: null,
     tossResponse: null,
-    customerEmail: cleanText(input.customerEmail, 160) || null,
-    customerName: cleanText(input.customerName, 120) || null,
     approvedAt: null,
     failCode: null,
     failMessage: null,
@@ -251,7 +300,8 @@ async function listShopOrderRows(limit: number): Promise<ShopOrderRecord[]> {
   const { data, error } = await admin
     .from("ai_content")
     .select("data, updated_at")
-    .like("user_id", `${SHOP_ORDER_PREFIX}%`)
+    .gte("user_id", SHOP_ORDER_PREFIX)
+    .lt("user_id", `${SHOP_ORDER_PREFIX}~`)
     .order("updated_at", { ascending: false })
     .limit(Math.max(1, Math.min(120, limit)));
 
@@ -269,6 +319,17 @@ export async function listShopOrdersForUser(userId: string, limit = 20) {
 
 export async function listShopOrdersForAdmin(limit = 40) {
   return listShopOrderRows(limit);
+}
+
+export async function countRecentReadyShopOrdersByUser(userId: string) {
+  const now = Date.now();
+  const rows = await listShopOrderRows(80);
+  return rows.filter((row) => {
+    if (row.userId !== userId || row.status !== "READY") return false;
+    const createdAt = new Date(row.createdAt).getTime();
+    if (!Number.isFinite(createdAt)) return false;
+    return now - createdAt <= 60 * 60 * 1000;
+  }).length;
 }
 
 export async function markShopOrderFailed(input: {
@@ -299,7 +360,7 @@ export async function markShopOrderPaid(input: {
     status: "PAID",
     paymentKey: cleanText(input.paymentKey, 220),
     approvedAt: cleanText(input.approvedAt, 64) || new Date().toISOString(),
-    tossResponse: input.tossResponse,
+    tossResponse: summarizeTossPaymentResponse(input.tossResponse),
     failCode: null,
     failMessage: null,
   });
@@ -421,7 +482,7 @@ export async function approveShopOrderRefund(input: {
       note: cancelReason,
       cancelAmount: current.amount,
       canceledAt: new Date().toISOString(),
-      cancelResponse: json as Json,
+      cancelResponse: summarizeTossCancelResponse(json),
     },
   });
 }
@@ -436,4 +497,31 @@ export function buildShopOrderId(productId: string) {
 
 export function buildShopOrderConfirmIdempotencyKey(orderId: string) {
   return buildConfirmIdempotencyKey(orderId);
+}
+
+export function toShopOrderSummary(order: ShopOrderRecord): ShopOrderSummary {
+  return {
+    orderId: order.orderId,
+    status: order.status,
+    amount: order.amount,
+    createdAt: order.createdAt,
+    approvedAt: order.approvedAt,
+    failMessage: order.failMessage,
+    productSnapshot: {
+      name: order.productSnapshot.name,
+      quantity: order.productSnapshot.quantity,
+    },
+    refund: {
+      status: order.refund.status,
+      reason: order.refund.reason,
+      note: order.refund.note,
+    },
+  };
+}
+
+export function toShopAdminOrderSummary(order: ShopOrderRecord): ShopAdminOrderSummary {
+  return {
+    ...toShopOrderSummary(order),
+    userLabel: maskUserId(order.userId),
+  };
 }

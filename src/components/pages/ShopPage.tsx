@@ -73,6 +73,10 @@ type ShopOrderSummary = {
   };
 };
 
+type ShopAdminOrderSummary = ShopOrderSummary & {
+  userLabel?: string;
+};
+
 function StorefrontIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
@@ -266,7 +270,7 @@ export function ShopPage() {
   const [orderError, setOrderError] = useState<string | null>(null);
   const [orders, setOrders] = useState<ShopOrderSummary[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
-  const [adminOrders, setAdminOrders] = useState<ShopOrderSummary[]>([]);
+  const [adminOrders, setAdminOrders] = useState<ShopAdminOrderSummary[]>([]);
   const [adminOrdersLoading, setAdminOrdersLoading] = useState(false);
 
   useEffect(() => {
@@ -417,7 +421,7 @@ export function ShopPage() {
         if (!res.ok || !json?.ok || !Array.isArray(json?.data?.orders)) {
           throw new Error(String(json?.error ?? `http_${res.status}`));
         }
-        setAdminOrders(json.data.orders as ShopOrderSummary[]);
+        setAdminOrders(json.data.orders as ShopAdminOrderSummary[]);
       } catch {
         if (!active) return;
         setAdminOrders([]);
@@ -572,6 +576,8 @@ export function ShopPage() {
       const text = String(error?.message ?? "failed_to_start_shop_checkout");
       if (text.includes("shop_checkout_disabled")) {
         setOrderError("이 상품은 아직 앱 내 결제가 열리지 않았습니다.");
+      } else if (text.includes("too_many_pending_shop_orders")) {
+        setOrderError("대기 중인 결제 시도가 많습니다. 잠시 후 다시 시도해 주세요.");
       } else if (text.includes("missing_toss")) {
         setOrderError("토스 결제 설정이 아직 준비되지 않았습니다.");
       } else {
@@ -608,7 +614,14 @@ export function ShopPage() {
       }
       const nextOrder = json.data.order as ShopOrderSummary;
       setOrders((current) => [nextOrder, ...current.filter((item) => item.orderId !== nextOrder.orderId)]);
-      setAdminOrders((current) => [nextOrder, ...current.filter((item) => item.orderId !== nextOrder.orderId)]);
+      setAdminOrders((current) => {
+        const currentEntry = current.find((item) => item.orderId === nextOrder.orderId);
+        const nextAdminOrder: ShopAdminOrderSummary = {
+          ...nextOrder,
+          userLabel: currentEntry?.userLabel ?? "본인",
+        };
+        return [nextAdminOrder, ...current.filter((item) => item.orderId !== nextOrder.orderId)];
+      });
       setOrderNotice("환불 요청이 접수되었습니다. 관리자 검토 후 처리됩니다.");
     } catch (error: any) {
       const text = String(error?.message ?? "failed_to_request_shop_refund");
@@ -641,7 +654,7 @@ export function ShopPage() {
       if (!res.ok || !json?.ok) {
         throw new Error(String(json?.error ?? `http_${res.status}`));
       }
-      const nextOrder = json.data.order as ShopOrderSummary;
+      const nextOrder = json.data.order as ShopAdminOrderSummary;
       setAdminOrders((current) => [nextOrder, ...current.filter((item) => item.orderId !== nextOrder.orderId)]);
       setOrders((current) => current.map((item) => (item.orderId === nextOrder.orderId ? nextOrder : item)));
       setAdminNotice(action === "approve" ? "환불이 승인되어 취소 처리되었습니다." : "환불 요청을 반려했습니다.");
@@ -943,6 +956,7 @@ export function ShopPage() {
                         <div className="mt-1 text-[11px] text-ios-sub">
                           {order.orderId} · {Math.round(order.amount).toLocaleString("ko-KR")}원
                         </div>
+                        {order.userLabel ? <div className="mt-1 text-[11px] text-ios-sub">사용자 {order.userLabel}</div> : null}
                       </div>
                       <span className="rounded-full border border-ios-sep bg-[#fafafa] px-2.5 py-1 text-[10.5px] font-semibold text-ios-text">
                         {order.status}

@@ -1,6 +1,6 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
-import { requestShopOrderRefund } from "@/lib/server/shopOrderStore";
+import { requestShopOrderRefund, toShopOrderSummary } from "@/lib/server/shopOrderStore";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -29,7 +29,7 @@ export async function POST(req: Request) {
       orderId,
       reason,
     });
-    return jsonNoStore({ ok: true, data: { order } });
+    return jsonNoStore({ ok: true, data: { order: toShopOrderSummary(order) } });
   } catch (error: any) {
     const message = String(error?.message ?? "failed_to_request_shop_refund");
     if (message.includes("not_found")) return jsonNoStore({ ok: false, error: "shop_order_not_found" }, { status: 404 });

@@ -1,6 +1,6 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { requireBillingAdmin } from "@/lib/server/billingAdminAuth";
-import { approveShopOrderRefund, rejectShopOrderRefund } from "@/lib/server/shopOrderStore";
+import { approveShopOrderRefund, rejectShopOrderRefund, toShopAdminOrderSummary } from "@/lib/server/shopOrderStore";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -29,6 +29,9 @@ export async function POST(req: Request, ctx: any) {
 
   const action = String(body?.action ?? "").trim();
   const note = String(body?.note ?? "").trim() || null;
+  if (action !== "approve" && action !== "reject") {
+    return jsonNoStore({ ok: false, error: "invalid_refund_action" }, { status: 400 });
+  }
 
   try {
     const order =
@@ -45,7 +48,7 @@ export async function POST(req: Request, ctx: any) {
             requestAcceptLanguage: req.headers.get("accept-language"),
           });
 
-    return jsonNoStore({ ok: true, data: { order } });
+    return jsonNoStore({ ok: true, data: { order: toShopAdminOrderSummary(order) } });
   } catch (error: any) {
     const message = String(error?.message ?? "failed_to_process_shop_refund");
     if (message.includes("not_found")) return jsonNoStore({ ok: false, error: "shop_order_not_found" }, { status: 404 });
