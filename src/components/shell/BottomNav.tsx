@@ -43,11 +43,12 @@ const ToolIcon = (props: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
-const SettingsIcon = (props: SVGProps<SVGSVGElement>) => (
+const ShopIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...props}>
-    <path d="M4 7h16M4 17h16" />
-    <circle cx="9" cy="7" r="2" />
-    <circle cx="15" cy="17" r="2" />
+    <path d="M5 9h14" />
+    <path d="M6 9l1.2-4a1.4 1.4 0 0 1 1.34-1H15.5a1.4 1.4 0 0 1 1.34 1L18 9" />
+    <path d="M6.5 9v8a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2V9" />
+    <path d="M9.5 12a2.5 2.5 0 0 0 5 0" />
   </svg>
 );
 
@@ -56,7 +57,7 @@ const ITEMS: NavItem[] = [
   { href: "/schedule", label: "일정", Icon: CalendarIcon },
   { href: "/insights", label: "인사이트", Icon: InsightsIcon },
   { href: "/tools", label: "툴", Icon: ToolIcon },
-  { href: "/settings", label: "설정", Icon: SettingsIcon },
+  { href: "/shop", label: "쇼핑", Icon: ShopIcon },
 ];
 
 export function BottomNav() {
@@ -88,7 +89,9 @@ export function BottomNav() {
     const hit = ITEMS.find((it) =>
       it.href === "/" ? pathname === "/" : pathname?.startsWith(it.href)
     );
-    return hit?.href ?? "/";
+    if (hit) return hit.href;
+    if (pathname?.startsWith("/settings")) return null;
+    return "/";
   }, [pathname]);
   const selectedHref = pendingHref ?? activeHref;
 
