@@ -349,9 +349,15 @@ async function writeOrder(order: ShopOrderRecord) {
 
 async function readLegacyOrderByKey(syntheticKey: string): Promise<ShopOrderRecord | null> {
   const admin = getSupabaseAdmin();
-  const { data, error } = await admin.from("ai_content").select("data").eq("user_id", syntheticKey).maybeSingle();
+  const { data, error } = await admin
+    .from("ai_content")
+    .select("data, updated_at")
+    .eq("user_id", syntheticKey)
+    .order("updated_at", { ascending: false })
+    .limit(1);
   if (error) throw error;
-  return normalizeLegacyOrder((data?.data ?? null) as Json | null);
+  const row = Array.isArray(data) ? data[0] : null;
+  return normalizeLegacyOrder((row?.data ?? null) as Json | null);
 }
 
 async function readLegacyOrder(orderId: string) {
@@ -531,7 +537,12 @@ export async function readShopOrderForUser(userId: string, orderId: string) {
 }
 
 export async function listShopOrdersForUser(userId: string, limit = 20) {
-  const rows = await listShopOrderRows(Math.max(limit * 4, 40));
+  let rows: ShopOrderRecord[] = [];
+  try {
+    rows = await listShopOrderRows(Math.max(limit * 4, 40));
+  } catch {
+    rows = [];
+  }
   return rows.filter((row) => row.userId === userId).slice(0, Math.max(1, Math.min(50, limit)));
 }
 
@@ -541,7 +552,12 @@ export async function listShopOrdersForAdmin(limit = 40) {
 
 export async function countRecentReadyShopOrdersByUser(userId: string) {
   const now = Date.now();
-  const rows = await listShopOrderRows(80);
+  let rows: ShopOrderRecord[] = [];
+  try {
+    rows = await listShopOrderRows(80);
+  } catch {
+    rows = [];
+  }
   return rows.filter((row) => {
     if (row.userId !== userId || row.status !== "READY") return false;
     const createdAt = new Date(row.createdAt).getTime();

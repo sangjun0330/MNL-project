@@ -94,13 +94,15 @@ async function loadLegacyShopCatalog(): Promise<ShopProduct[]> {
   const admin = getSupabaseAdmin();
   const { data, error } = await admin
     .from("ai_content")
-    .select("data")
+    .select("data, updated_at")
     .eq("user_id", SHOP_CATALOG_USER_ID)
-    .maybeSingle();
+    .order("updated_at", { ascending: false })
+    .limit(1);
 
   if (error) throw error;
 
-  const products = readProductsFromJson((data?.data ?? null) as Json | null);
+  const row = Array.isArray(data) ? data[0] : null;
+  const products = readProductsFromJson((row?.data ?? null) as Json | null);
   return products.length > 0 ? products : SHOP_PRODUCTS;
 }
 
@@ -144,11 +146,16 @@ export async function loadShopCatalog(): Promise<ShopProduct[]> {
       .filter((row): row is ShopProduct => Boolean(row));
 
     if (products.length > 0) return products;
-  } catch (error) {
-    if (!isMissingTableError(error)) throw error;
+  } catch {
+    // Fall back to legacy or bundled defaults when the modern table is unavailable
+    // or when production data is temporarily inconsistent.
   }
 
-  return loadLegacyShopCatalog();
+  try {
+    return await loadLegacyShopCatalog();
+  } catch {
+    return SHOP_PRODUCTS;
+  }
 }
 
 export async function saveShopCatalog(products: ShopProduct[]): Promise<ShopProduct[]> {
