@@ -37,7 +37,9 @@ export type ShopProduct = {
   subtitle: string;
   description: string;
   category: Exclude<ShopCategoryKey, "all">;
+  priceKrw: number | null;
   priceLabel: string;
+  checkoutEnabled: boolean;
   partnerLabel: string;
   partnerStatus: string;
   visualLabel: string;
@@ -156,7 +158,9 @@ export const SHOP_PRODUCTS: ShopProduct[] = [
     subtitle: "야간 후 눈 피로와 잠들기 전 루틴을 가볍게 정리하는 기본 아이템",
     description: "눈 피로 완화와 취침 전 루틴 정리를 같이 엮는 가장 기본적인 회복 카테고리입니다.",
     category: "sleep",
+    priceKrw: null,
     priceLabel: "제휴 가격 연동 예정",
+    checkoutEnabled: false,
     partnerLabel: "수면 파트너 연동 준비중",
     partnerStatus: "제휴 검수 전 단계",
     visualLabel: "Sleep Reset",
@@ -173,7 +177,9 @@ export const SHOP_PRODUCTS: ShopProduct[] = [
     subtitle: "근무 중 수분 루틴을 끊기지 않게 유지하는 데 초점을 둔 기본 장비",
     description: "카페인 섭취가 있는 날에도 물 섭취 루틴을 유지하기 쉽게 돕는 상시형 아이템입니다.",
     category: "hydration",
+    priceKrw: null,
     priceLabel: "제휴 가격 연동 예정",
+    checkoutEnabled: false,
     partnerLabel: "리빙 파트너 연동 준비중",
     partnerStatus: "상품 피드 등록 준비중",
     visualLabel: "Hydration Flow",
@@ -190,7 +196,9 @@ export const SHOP_PRODUCTS: ShopProduct[] = [
     subtitle: "오래 서 있는 날 다리 부담을 줄이는 쪽에 맞춘 근무 보조 아이템",
     description: "장시간 서 있거나 많이 걷는 날 다리 부담을 낮추는 보조형 카테고리입니다.",
     category: "gear",
+    priceKrw: null,
     priceLabel: "제휴 가격 연동 예정",
+    checkoutEnabled: false,
     partnerLabel: "근무용품 파트너 연동 준비중",
     partnerStatus: "제휴 협의중",
     visualLabel: "Shift Support",
@@ -207,7 +215,9 @@ export const SHOP_PRODUCTS: ShopProduct[] = [
     subtitle: "생리 기간이나 직전 컨디션 변동을 부드럽게 넘기도록 돕는 온열 루틴용",
     description: "복부와 하체의 부담이 있는 날에 온열 루틴으로 편안함을 더하는 카테고리입니다.",
     category: "warmth",
+    priceKrw: null,
     priceLabel: "제휴 가격 연동 예정",
+    checkoutEnabled: false,
     partnerLabel: "웰니스 파트너 연동 준비중",
     partnerStatus: "제휴 검수 전 단계",
     visualLabel: "Warm Comfort",
@@ -224,7 +234,9 @@ export const SHOP_PRODUCTS: ShopProduct[] = [
     subtitle: "식사 텀이 긴 날 빠르게 에너지를 보충하는 쪽에 맞춘 간편 루틴",
     description: "식사 간격이 길어질 때 빠르게 보충하기 쉬운 휴대형 카테고리입니다.",
     category: "nutrition",
+    priceKrw: null,
     priceLabel: "제휴 가격 연동 예정",
+    checkoutEnabled: false,
     partnerLabel: "뉴트리션 파트너 연동 준비중",
     partnerStatus: "상품 피드 등록 준비중",
     visualLabel: "Quick Fuel",
@@ -241,7 +253,9 @@ export const SHOP_PRODUCTS: ShopProduct[] = [
     subtitle: "긴장감이 높은 날 목과 어깨 부담을 잠깐씩 풀어주는 회복 보조용",
     description: "근육 긴장과 피로가 겹치는 날 잠깐 쉬는 시간을 회복 루틴으로 바꾸는 카테고리입니다.",
     category: "comfort",
+    priceKrw: null,
     priceLabel: "제휴 가격 연동 예정",
+    checkoutEnabled: false,
     partnerLabel: "컴포트 파트너 연동 준비중",
     partnerStatus: "제휴 협의중",
     visualLabel: "Ease Pressure",
@@ -258,7 +272,9 @@ export const SHOP_PRODUCTS: ShopProduct[] = [
     subtitle: "야간 또는 저녁 근무 후 눈 자극을 줄이는 데 초점을 둔 가벼운 보조용",
     description: "밝은 조명과 화면 자극이 많은 흐름에서 눈 부담을 덜어주는 보조형 카테고리입니다.",
     category: "comfort",
+    priceKrw: null,
     priceLabel: "제휴 가격 연동 예정",
+    checkoutEnabled: false,
     partnerLabel: "아이케어 파트너 연동 준비중",
     partnerStatus: "제휴 검수 전 단계",
     visualLabel: "Eye Guard",
@@ -275,7 +291,9 @@ export const SHOP_PRODUCTS: ShopProduct[] = [
     subtitle: "긴장도가 높거나 수면이 흔들리는 날 밤 루틴을 정리하는 데 맞춘 선택지",
     description: "밤 루틴을 부드럽게 정리하면서 심리적으로 마무리 신호를 주는 카테고리입니다.",
     category: "sleep",
+    priceKrw: null,
     priceLabel: "제휴 가격 연동 예정",
+    checkoutEnabled: false,
     partnerLabel: "티 파트너 연동 준비중",
     partnerStatus: "상품 피드 등록 준비중",
     visualLabel: "Calm Evening",
@@ -406,6 +424,9 @@ export function normalizeShopProduct(raw: unknown): ShopProduct | null {
 
   const id = createShopProductId(String(source.id ?? name));
   const visualLabel = clampText(source.visualLabel, 40) || name;
+  const rawPriceKrw = Number(source.priceKrw);
+  const priceKrw = Number.isFinite(rawPriceKrw) && rawPriceKrw > 0 ? Math.round(rawPriceKrw) : null;
+  const checkoutEnabled = Boolean(source.checkoutEnabled) && priceKrw != null;
 
   return {
     id,
@@ -413,7 +434,9 @@ export function normalizeShopProduct(raw: unknown): ShopProduct | null {
     subtitle,
     description,
     category,
+    priceKrw,
     priceLabel: clampText(source.priceLabel, 60) || "제휴 가격 연동 예정",
+    checkoutEnabled,
     partnerLabel: clampText(source.partnerLabel, 60) || "제휴 파트너 연동 준비중",
     partnerStatus: clampText(source.partnerStatus, 80) || "제휴 검수 전 단계",
     visualLabel,
@@ -453,6 +476,13 @@ export function normalizeShopCatalogProducts(raw: unknown): ShopProduct[] {
 export function upsertShopProductInCatalog(catalog: ShopProduct[], product: ShopProduct) {
   const next = catalog.filter((item) => item.id !== product.id);
   return [product, ...next].slice(0, 80);
+}
+
+export function formatShopPrice(product: ShopProduct) {
+  if (product.priceKrw != null && product.priceKrw > 0) {
+    return `${Math.round(product.priceKrw).toLocaleString("ko-KR")}원`;
+  }
+  return product.priceLabel;
 }
 
 export function deriveShopSignals(input: SignalInput): { selectedDate: ISODate; signals: ShopSignal[] } {

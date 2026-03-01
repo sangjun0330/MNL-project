@@ -3,13 +3,15 @@
 import { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useAuthState } from "@/lib/auth";
-import { authHeaders } from "@/lib/billing/client";
+import { authHeaders, ensureTossScript } from "@/lib/billing/client";
+import { ShopCheckoutSheet } from "@/components/shop/ShopCheckoutSheet";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Card, CardBody } from "@/components/ui/Card";
 import { formatKoreanDate } from "@/lib/date";
 import {
   buildShopRecommendations,
   createShopProductId,
+  formatShopPrice,
   getShopCategoryMeta,
   SHOP_CATEGORIES,
   SHOP_PRODUCTS,
@@ -38,6 +40,8 @@ type AdminProductDraft = {
   subtitle: string;
   description: string;
   category: Exclude<ShopCategoryKey, "all">;
+  priceKrw: number;
+  checkoutEnabled: boolean;
   visualPresetKey: string;
   visualLabel: string;
   priceLabel: string;
@@ -49,6 +53,24 @@ type AdminProductDraft = {
   caution: string;
   priority: number;
   matchSignals: ShopSignalKey[];
+};
+
+type ShopOrderSummary = {
+  orderId: string;
+  status: "READY" | "PAID" | "FAILED" | "CANCELED" | "REFUND_REQUESTED" | "REFUND_REJECTED" | "REFUNDED";
+  amount: number;
+  createdAt: string;
+  approvedAt: string | null;
+  failMessage: string | null;
+  productSnapshot: {
+    name: string;
+    quantity: number;
+  };
+  refund: {
+    status: "none" | "requested" | "rejected" | "done";
+    reason: string | null;
+    note: string | null;
+  };
 };
 
 function StorefrontIcon() {
@@ -136,6 +158,8 @@ function defaultAdminDraft(): AdminProductDraft {
     subtitle: "",
     description: "",
     category: "sleep",
+    priceKrw: 0,
+    checkoutEnabled: false,
     visualPresetKey: SHOP_VISUAL_PRESETS[0]?.key ?? "midnight",
     visualLabel: "",
     priceLabel: "제휴 가격 연동 예정",
@@ -158,6 +182,8 @@ function draftFromProduct(product: ShopProduct): AdminProductDraft {
     subtitle: product.subtitle,
     description: product.description,
     category: product.category,
+    priceKrw: product.priceKrw ?? 0,
+    checkoutEnabled: Boolean(product.checkoutEnabled && product.priceKrw && product.priceKrw > 0),
     visualPresetKey: preset?.key ?? SHOP_VISUAL_PRESETS[0]?.key ?? "midnight",
     visualLabel: product.visualLabel,
     priceLabel: product.priceLabel,
@@ -179,6 +205,8 @@ function draftToPayload(draft: AdminProductDraft) {
     subtitle: draft.subtitle,
     description: draft.description,
     category: draft.category,
+    priceKrw: Math.max(0, Math.round(Number(draft.priceKrw) || 0)),
+    checkoutEnabled: Boolean(draft.checkoutEnabled && Number(draft.priceKrw) > 0),
     visualPresetKey: draft.visualPresetKey,
     visualLabel: draft.visualLabel || draft.name,
     priceLabel: draft.priceLabel,
@@ -194,7 +222,9 @@ function draftToPayload(draft: AdminProductDraft) {
 }
 
 function requiredDraftMissing(draft: AdminProductDraft) {
-  return !draft.name.trim() || !draft.subtitle.trim() || !draft.description.trim();
+  if (!draft.name.trim() || !draft.subtitle.trim() || !draft.description.trim()) return true;
+  if (draft.checkoutEnabled && (!(Number.isFinite(draft.priceKrw)) || draft.priceKrw <= 0)) return true;
+  return false;
 }
 
 export function ShopPage() {
@@ -230,6 +260,14 @@ export function ShopPage() {
   const [adminError, setAdminError] = useState<string | null>(null);
   const [adminNotice, setAdminNotice] = useState<string | null>(null);
   const [adminDraft, setAdminDraft] = useState<AdminProductDraft>(defaultAdminDraft);
+  const [checkoutProductId, setCheckoutProductId] = useState<string | null>(null);
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [orderNotice, setOrderNotice] = useState<string | null>(null);
+  const [orderError, setOrderError] = useState<string | null>(null);
+  const [orders, setOrders] = useState<ShopOrderSummary[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [adminOrders, setAdminOrders] = useState<ShopOrderSummary[]>([]);
+  const [adminOrdersLoading, setAdminOrdersLoading] = useState(false);
 
   useEffect(() => {
     setClientState(loadShopClientState());
@@ -309,6 +347,92 @@ export function ShopPage() {
     };
   }, [status, user?.userId]);
 
+  useEffect(() => {
+    let active = true;
+    if (status !== "authenticated" || !user?.userId) {
+      setOrders([]);
+      setOrdersLoading(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    const run = async () => {
+      setOrdersLoading(true);
+      try {
+        const headers = await authHeaders();
+        const res = await fetch("/api/shop/orders?limit=8", {
+          method: "GET",
+          headers: {
+            "content-type": "application/json",
+            ...headers,
+          },
+          cache: "no-store",
+        });
+        const json = await res.json().catch(() => null);
+        if (!active) return;
+        if (!res.ok || !json?.ok || !Array.isArray(json?.data?.orders)) {
+          throw new Error(String(json?.error ?? `http_${res.status}`));
+        }
+        setOrders(json.data.orders as ShopOrderSummary[]);
+      } catch {
+        if (!active) return;
+        setOrders([]);
+      } finally {
+        if (!active) return;
+        setOrdersLoading(false);
+      }
+    };
+
+    void run();
+    return () => {
+      active = false;
+    };
+  }, [status, user?.userId, orderNotice]);
+
+  useEffect(() => {
+    let active = true;
+    if (!isAdmin) {
+      setAdminOrders([]);
+      setAdminOrdersLoading(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    const run = async () => {
+      setAdminOrdersLoading(true);
+      try {
+        const headers = await authHeaders();
+        const res = await fetch("/api/admin/shop/orders?limit=12", {
+          method: "GET",
+          headers: {
+            "content-type": "application/json",
+            ...headers,
+          },
+          cache: "no-store",
+        });
+        const json = await res.json().catch(() => null);
+        if (!active) return;
+        if (!res.ok || !json?.ok || !Array.isArray(json?.data?.orders)) {
+          throw new Error(String(json?.error ?? `http_${res.status}`));
+        }
+        setAdminOrders(json.data.orders as ShopOrderSummary[]);
+      } catch {
+        if (!active) return;
+        setAdminOrders([]);
+      } finally {
+        if (!active) return;
+        setAdminOrdersLoading(false);
+      }
+    };
+
+    void run();
+    return () => {
+      active = false;
+    };
+  }, [isAdmin, adminNotice, orderNotice]);
+
   const allShopState = useMemo(
     () =>
       buildShopRecommendations({
@@ -348,6 +472,7 @@ export function ShopPage() {
     .filter((entry): entry is ShopRecommendation => Boolean(entry));
 
   const selectedEntry = selectedProductId ? recommendationById.get(selectedProductId) ?? null : null;
+  const checkoutEntry = checkoutProductId ? recommendationById.get(checkoutProductId) ?? null : null;
   const selectedDateLabel = formatKoreanDate(allShopState.selectedDate);
   const activeCategoryMeta = getShopCategoryMeta(category);
   const topSignalChips = allShopState.signals.slice(0, 4);
@@ -368,6 +493,166 @@ export function ShopPage() {
 
   const handlePartnerClick = (productId: string) => {
     setClientState((current) => markShopPartnerClick(current, productId));
+  };
+
+  const beginCheckout = (productId: string) => {
+    if (status !== "authenticated") {
+      setOrderError("주문하려면 먼저 로그인해야 합니다.");
+      setOrderNotice(null);
+      return;
+    }
+    setSelectedProductId(null);
+    setOrderError(null);
+    setOrderNotice(null);
+    setCheckoutProductId(productId);
+  };
+
+  const submitCheckout = async () => {
+    if (!checkoutEntry || checkoutLoading) return;
+    if (status !== "authenticated") {
+      setOrderError("주문하려면 먼저 로그인해야 합니다.");
+      return;
+    }
+
+    setCheckoutLoading(true);
+    setOrderError(null);
+    setOrderNotice(null);
+
+    try {
+      const headers = await authHeaders();
+      const res = await fetch("/api/shop/orders/checkout", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...headers,
+        },
+        body: JSON.stringify({
+          productId: checkoutEntry.product.id,
+          quantity: 1,
+        }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok) {
+        throw new Error(String(json?.error ?? `http_${res.status}`));
+      }
+
+      await ensureTossScript();
+      if (typeof window === "undefined" || !window.TossPayments) {
+        throw new Error("missing_toss_sdk");
+      }
+
+      const data = json.data as {
+        orderId: string;
+        orderName: string;
+        amount: number;
+        currency: string;
+        clientKey: string;
+        customerKey: string;
+        customerEmail: string | null;
+        customerName: string | null;
+        successUrl: string;
+        failUrl: string;
+      };
+
+      const toss = window.TossPayments(data.clientKey);
+      await toss.payment({ customerKey: data.customerKey }).requestPayment({
+        method: "CARD",
+        amount: {
+          currency: data.currency,
+          value: data.amount,
+        },
+        orderId: data.orderId,
+        orderName: data.orderName,
+        successUrl: data.successUrl,
+        failUrl: data.failUrl,
+        customerEmail: data.customerEmail ?? undefined,
+        customerName: data.customerName ?? undefined,
+      });
+    } catch (error: any) {
+      const text = String(error?.message ?? "failed_to_start_shop_checkout");
+      if (text.includes("shop_checkout_disabled")) {
+        setOrderError("이 상품은 아직 앱 내 결제가 열리지 않았습니다.");
+      } else if (text.includes("missing_toss")) {
+        setOrderError("토스 결제 설정이 아직 준비되지 않았습니다.");
+      } else {
+        setOrderError("결제창을 열지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      }
+    } finally {
+      setCheckoutLoading(false);
+    }
+  };
+
+  const requestRefund = async (orderId: string) => {
+    if (status !== "authenticated") {
+      setOrderError("환불 요청은 로그인 후 가능합니다.");
+      return;
+    }
+    setOrderError(null);
+    setOrderNotice(null);
+    try {
+      const headers = await authHeaders();
+      const res = await fetch("/api/shop/orders/refund", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...headers,
+        },
+        body: JSON.stringify({
+          orderId,
+          reason: "쇼핑 탭에서 접수한 환불 요청",
+        }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok) {
+        throw new Error(String(json?.error ?? `http_${res.status}`));
+      }
+      const nextOrder = json.data.order as ShopOrderSummary;
+      setOrders((current) => [nextOrder, ...current.filter((item) => item.orderId !== nextOrder.orderId)]);
+      setAdminOrders((current) => [nextOrder, ...current.filter((item) => item.orderId !== nextOrder.orderId)]);
+      setOrderNotice("환불 요청이 접수되었습니다. 관리자 검토 후 처리됩니다.");
+    } catch (error: any) {
+      const text = String(error?.message ?? "failed_to_request_shop_refund");
+      if (text.includes("not_refundable")) {
+        setOrderError("이 주문은 현재 환불 요청을 받을 수 없는 상태입니다.");
+      } else {
+        setOrderError("환불 요청에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+      }
+    }
+  };
+
+  const resolveAdminRefund = async (orderId: string, action: "approve" | "reject") => {
+    if (!isAdmin) return;
+    setAdminError(null);
+    setAdminNotice(null);
+    try {
+      const headers = await authHeaders();
+      const res = await fetch(`/api/admin/shop/orders/${encodeURIComponent(orderId)}/refund`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...headers,
+        },
+        body: JSON.stringify({
+          action,
+          note: action === "approve" ? "관리자 승인 후 환불 처리" : "관리자 반려",
+        }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok) {
+        throw new Error(String(json?.error ?? `http_${res.status}`));
+      }
+      const nextOrder = json.data.order as ShopOrderSummary;
+      setAdminOrders((current) => [nextOrder, ...current.filter((item) => item.orderId !== nextOrder.orderId)]);
+      setOrders((current) => current.map((item) => (item.orderId === nextOrder.orderId ? nextOrder : item)));
+      setAdminNotice(action === "approve" ? "환불이 승인되어 취소 처리되었습니다." : "환불 요청을 반려했습니다.");
+    } catch (error: any) {
+      const text = String(error?.message ?? "failed_to_process_shop_refund");
+      if (text.includes("toss_")) {
+        setAdminError("토스 환불 처리에 실패했습니다. 결제 설정과 결제 상태를 확인해 주세요.");
+      } else {
+        setAdminError("환불 처리에 실패했습니다.");
+      }
+    }
   };
 
   const toggleDraftSignal = (key: ShopSignalKey) => {
@@ -568,6 +853,23 @@ export function ShopPage() {
         </CardBody>
       </Card>
 
+      {orderError || orderNotice ? (
+        <Card>
+          <CardBody className="pt-4">
+            <div
+              className={[
+                "rounded-2xl px-4 py-3 text-[12.5px] leading-5",
+                orderError
+                  ? "border border-[#fecdca] bg-[#fff6f5] text-[#b42318]"
+                  : "border border-[#b7e4c7] bg-[#f2fbf5] text-[#166534]",
+              ].join(" ")}
+            >
+              {orderError ?? orderNotice}
+            </div>
+          </CardBody>
+        </Card>
+      ) : null}
+
       {isAdmin ? (
         <Card>
           <CardBody className="pt-5">
@@ -620,6 +922,124 @@ export function ShopPage() {
             </div>
 
             {catalogError ? <div className="mt-3 text-[12px] text-[#b42318]">{t("카탈로그를 불러오지 못해 기본 상품 목록으로 동작 중입니다.")}</div> : null}
+
+            <div className="mt-4 rounded-2xl border border-ios-sep bg-[#fafafa] p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-[12px] font-semibold text-ios-text">{t("주문·환불 관리")}</div>
+                  <div className="mt-1 text-[12px] leading-5 text-ios-sub">{t("최근 주문과 환불 요청을 여기서 바로 확인하고 처리합니다.")}</div>
+                </div>
+                <div className="rounded-full border border-ios-sep bg-white px-3 py-1 text-[11px] font-semibold text-ios-text">
+                  {adminOrdersLoading ? t("불러오는 중") : `${adminOrders.length}${t("건")}`}
+                </div>
+              </div>
+
+              <div className="mt-3 space-y-2">
+                {adminOrders.slice(0, 5).map((order) => (
+                  <div key={order.orderId} className="rounded-2xl border border-ios-sep bg-white p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-[12px] font-semibold text-ios-text">{order.productSnapshot.name}</div>
+                        <div className="mt-1 text-[11px] text-ios-sub">
+                          {order.orderId} · {Math.round(order.amount).toLocaleString("ko-KR")}원
+                        </div>
+                      </div>
+                      <span className="rounded-full border border-ios-sep bg-[#fafafa] px-2.5 py-1 text-[10.5px] font-semibold text-ios-text">
+                        {order.status}
+                      </span>
+                    </div>
+                    {order.status === "REFUND_REQUESTED" ? (
+                      <div className="mt-3 flex gap-2">
+                        <button
+                          type="button"
+                          data-auth-allow
+                          onClick={() => void resolveAdminRefund(order.orderId, "approve")}
+                          className="inline-flex h-9 items-center justify-center rounded-full bg-black px-4 text-[11px] font-semibold text-white"
+                        >
+                          {t("환불 승인")}
+                        </button>
+                        <button
+                          type="button"
+                          data-auth-allow
+                          onClick={() => void resolveAdminRefund(order.orderId, "reject")}
+                          className="inline-flex h-9 items-center justify-center rounded-full border border-ios-sep bg-white px-4 text-[11px] font-semibold text-ios-text"
+                        >
+                          {t("반려")}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+
+                {!adminOrdersLoading && adminOrders.length === 0 ? (
+                  <div className="rounded-2xl border border-ios-sep bg-white px-3 py-3 text-[12px] text-ios-sub">{t("아직 주문 기록이 없습니다.")}</div>
+                ) : null}
+              </div>
+            </div>
+          </CardBody>
+        </Card>
+      ) : null}
+
+      {status === "authenticated" ? (
+        <Card>
+          <CardBody className="pt-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[16px] font-bold tracking-[-0.01em] text-ios-text">{t("내 주문")}</div>
+                <div className="mt-1 text-[12.5px] leading-5 text-ios-sub">{t("쇼핑 탭에서 결제한 주문과 환불 진행 상태를 확인합니다.")}</div>
+              </div>
+              <div className="rounded-full border border-ios-sep bg-[#fafafa] px-3 py-1 text-[11px] font-semibold text-ios-text">
+                {ordersLoading ? t("불러오는 중") : `${orders.length}${t("건")}`}
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              {orders.map((order) => (
+                <div key={order.orderId} className="rounded-2xl border border-ios-sep bg-white p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-[13px] font-semibold text-ios-text">{order.productSnapshot.name}</div>
+                      <div className="mt-1 text-[11px] text-ios-sub">
+                        {t("수량")} {order.productSnapshot.quantity} · {Math.round(order.amount).toLocaleString("ko-KR")}원
+                      </div>
+                    </div>
+                    <span className="rounded-full border border-ios-sep bg-[#fafafa] px-2.5 py-1 text-[10.5px] font-semibold text-ios-text">
+                      {order.status}
+                    </span>
+                  </div>
+
+                  {order.refund.status === "requested" ? (
+                    <div className="mt-2 text-[11.5px] text-ios-sub">{t("환불 요청 접수됨")} · {order.refund.reason ?? t("사유 없음")}</div>
+                  ) : null}
+                  {order.refund.status === "rejected" ? (
+                    <div className="mt-2 text-[11.5px] text-[#b42318]">{t("환불 반려")} · {order.refund.note ?? t("사유 없음")}</div>
+                  ) : null}
+                  {order.refund.status === "done" ? (
+                    <div className="mt-2 text-[11.5px] text-[#166534]">{t("환불 완료")}</div>
+                  ) : null}
+                  {order.status === "FAILED" && order.failMessage ? (
+                    <div className="mt-2 text-[11.5px] text-[#b42318]">{order.failMessage}</div>
+                  ) : null}
+
+                  {order.status === "PAID" && order.refund.status === "none" ? (
+                    <div className="mt-3">
+                      <button
+                        type="button"
+                        data-auth-allow
+                        onClick={() => void requestRefund(order.orderId)}
+                        className="inline-flex h-9 items-center justify-center rounded-full border border-ios-sep bg-[#fafafa] px-4 text-[11px] font-semibold text-ios-text"
+                      >
+                        {t("환불 요청")}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+
+              {!ordersLoading && orders.length === 0 ? (
+                <div className="rounded-2xl border border-ios-sep bg-white px-3 py-3 text-[12px] text-ios-sub">{t("아직 쇼핑 주문이 없습니다.")}</div>
+              ) : null}
+            </div>
           </CardBody>
         </Card>
       ) : null}
@@ -717,7 +1137,7 @@ export function ShopPage() {
 
                 <div className="mt-4 flex items-center justify-between gap-3">
                   <div>
-                    <div className="text-[11px] font-semibold text-ios-muted">{entry.product.priceLabel}</div>
+                    <div className="text-[11px] font-semibold text-ios-muted">{formatShopPrice(entry.product)}</div>
                     <div className="mt-1 text-[11px] text-ios-muted">
                       {t("제휴 클릭")} {partnerClicks}{t("회")}
                     </div>
@@ -732,7 +1152,16 @@ export function ShopPage() {
                       {t("상세 보기")}
                     </button>
 
-                    {entry.product.externalUrl ? (
+                    {entry.product.checkoutEnabled && entry.product.priceKrw ? (
+                      <button
+                        type="button"
+                        data-auth-allow
+                        onClick={() => beginCheckout(entry.product.id)}
+                        className="inline-flex h-10 items-center justify-center rounded-full bg-black px-4 text-[12px] font-semibold text-white"
+                      >
+                        {t("바로 결제")}
+                      </button>
+                    ) : entry.product.externalUrl ? (
                       <a
                         href={entry.product.externalUrl}
                         target="_blank"
@@ -789,6 +1218,17 @@ export function ShopPage() {
         </CardBody>
       </Card>
 
+      <ShopCheckoutSheet
+        open={Boolean(checkoutEntry)}
+        onClose={() => setCheckoutProductId(null)}
+        onConfirm={() => void submitCheckout()}
+        loading={checkoutLoading}
+        productTitle={checkoutEntry?.product.name ?? ""}
+        productSubtitle={checkoutEntry?.product.subtitle}
+        priceKrw={checkoutEntry?.product.priceKrw ?? 0}
+        quantity={1}
+      />
+
       <BottomSheet
         open={Boolean(selectedEntry)}
         onClose={() => setSelectedProductId(null)}
@@ -814,7 +1254,16 @@ export function ShopPage() {
                 {clientState.favoriteIds.includes(selectedEntry.product.id) ? t("관심 상품 저장됨") : t("관심 상품 저장")}
               </button>
 
-              {selectedEntry.product.externalUrl ? (
+              {selectedEntry.product.checkoutEnabled && selectedEntry.product.priceKrw ? (
+                <button
+                  type="button"
+                  data-auth-allow
+                  onClick={() => beginCheckout(selectedEntry.product.id)}
+                  className="inline-flex h-11 flex-1 items-center justify-center rounded-full bg-black text-[13px] font-semibold text-white"
+                >
+                  {t("토스로 결제")}
+                </button>
+              ) : selectedEntry.product.externalUrl ? (
                 <a
                   href={selectedEntry.product.externalUrl}
                   target="_blank"
@@ -913,7 +1362,9 @@ export function ShopPage() {
               <div className="text-[12px] font-semibold text-ios-text">{t("제휴 안내")}</div>
               <div className="mt-2 text-[13px] leading-6 text-ios-text">{selectedEntry.product.partnerStatus}</div>
               <div className="mt-1 text-[12.5px] leading-5 text-ios-sub">
-                {selectedEntry.product.externalUrl
+                {selectedEntry.product.checkoutEnabled && selectedEntry.product.priceKrw
+                  ? t("앱 안에서 토스 결제로 주문을 진행하고, 주문/환불 상태는 쇼핑 탭과 관리자 화면에 모두 기록됩니다.")
+                  : selectedEntry.product.externalUrl
                   ? t("링크가 연결된 상품은 판매처로 바로 이동하고, 앱은 추천과 클릭 흐름만 기록합니다.")
                   : t("현재는 상품 구조와 추천 로직을 먼저 고정한 상태라, 실제 판매처 링크는 제휴 등록 후 연결됩니다. 연결 대기 저장을 눌러 관심 상품처럼 묶어둘 수 있습니다.")}
               </div>
@@ -1060,6 +1511,36 @@ export function ShopPage() {
                     </option>
                   ))}
                 </select>
+              </label>
+
+              <label className="block">
+                <div className="text-[12px] font-semibold text-ios-text">{t("직접 결제 금액 (원)")}</div>
+                <input
+                  type="number"
+                  min={0}
+                  step={100}
+                  value={String(adminDraft.priceKrw)}
+                  onChange={(e) => setAdminDraft((current) => ({ ...current, priceKrw: Math.max(0, Math.round(Number(e.target.value) || 0)) }))}
+                  className="mt-2 w-full rounded-2xl border border-ios-sep bg-[#fafafa] px-4 py-3 text-[13px] text-ios-text outline-none"
+                />
+              </label>
+
+              <label className="block">
+                <div className="text-[12px] font-semibold text-ios-text">{t("앱 내 결제")}</div>
+                <button
+                  type="button"
+                  data-auth-allow
+                  onClick={() => setAdminDraft((current) => ({ ...current, checkoutEnabled: !current.checkoutEnabled }))}
+                  className={[
+                    "mt-2 inline-flex h-[50px] w-full items-center justify-between rounded-2xl border px-4 text-[13px] font-semibold transition",
+                    adminDraft.checkoutEnabled
+                      ? "border-black bg-black text-white"
+                      : "border-ios-sep bg-[#fafafa] text-ios-text",
+                  ].join(" ")}
+                >
+                  <span>{adminDraft.checkoutEnabled ? t("토스 결제 활성") : t("외부 링크/대기만 사용")}</span>
+                  <span>{adminDraft.checkoutEnabled ? "ON" : "OFF"}</span>
+                </button>
               </label>
             </div>
 
