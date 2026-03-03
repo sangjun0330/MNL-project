@@ -7,6 +7,7 @@ import type { Database, Json } from "@/types/supabase";
 
 const SHOP_ORDER_PREFIX = "__shop_order__";
 const SHOP_ORDER_LANGUAGE = "ko";
+const MAX_LIST_SCAN = 240;
 
 type ShopOrderRow = Database["public"]["Tables"]["shop_orders"]["Row"];
 
@@ -76,6 +77,7 @@ export type ShopOrderSummary = {
   amount: number;
   createdAt: string;
   approvedAt: string | null;
+  paymentMethod: string | null;
   failMessage: string | null;
   productSnapshot: {
     name: string;
@@ -152,6 +154,11 @@ function summarizeTossCancelResponse(raw: any): Json {
   };
 }
 
+function readPaymentMethod(summary: Json | null): string | null {
+  if (!summary || typeof summary !== "object" || Array.isArray(summary)) return null;
+  return cleanText((summary as Record<string, unknown>).method, 40) || null;
+}
+
 function toAmount(value: unknown) {
   const n = Number(value);
   if (!Number.isFinite(n)) return null;
@@ -159,7 +166,17 @@ function toAmount(value: unknown) {
 }
 
 function isOrderStatus(value: unknown): value is ShopOrderStatus {
-  return value === "READY" || value === "PAID" || value === "FAILED" || value === "CANCELED" || value === "REFUND_REQUESTED" || value === "REFUND_REJECTED" || value === "REFUNDED";
+  return (
+    value === "READY" ||
+    value === "PAID" ||
+    value === "SHIPPED" ||
+    value === "DELIVERED" ||
+    value === "FAILED" ||
+    value === "CANCELED" ||
+    value === "REFUND_REQUESTED" ||
+    value === "REFUND_REJECTED" ||
+    value === "REFUNDED"
+  );
 }
 
 function normalizeRefundStatus(value: unknown): ShopRefundState["status"] {
@@ -433,7 +450,7 @@ async function listLegacyShopOrderRows(limit: number): Promise<ShopOrderRecord[]
     .gte("user_id", SHOP_ORDER_PREFIX)
     .lt("user_id", `${SHOP_ORDER_PREFIX}~`)
     .order("updated_at", { ascending: false })
-    .limit(Math.max(1, Math.min(120, limit)));
+    .limit(Math.max(1, Math.min(MAX_LIST_SCAN, limit)));
 
   if (error) throw error;
 
@@ -448,7 +465,7 @@ async function listModernShopOrderRows(limit: number): Promise<ShopOrderRecord[]
     .from("shop_orders")
     .select("*")
     .order("updated_at", { ascending: false })
-    .limit(Math.max(1, Math.min(120, limit)));
+    .limit(Math.max(1, Math.min(MAX_LIST_SCAN, limit)));
 
   if (error) throw error;
 
@@ -478,7 +495,7 @@ async function listShopOrderRows(limit: number): Promise<ShopOrderRecord[]> {
 
   return Array.from(merged.values())
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-    .slice(0, Math.max(1, Math.min(120, limit)));
+    .slice(0, Math.max(1, Math.min(MAX_LIST_SCAN, limit)));
 }
 
 async function writeOrderEventSafe(input: {
@@ -586,14 +603,40 @@ export async function readShopOrderForUser(userId: string, orderId: string) {
   return order;
 }
 
-export async function listShopOrdersForUser(userId: string, limit = 20) {
+function normalizeListArgs(input: number | { limit?: number; offset?: number } | undefined) {
+  const rawLimit = typeof input === "number" ? input : input?.limit ?? 20;
+  const rawOffset = typeof input === "number" ? 0 : input?.offset ?? 0;
+  const limit = Math.max(1, Math.min(50, Math.round(Number(rawLimit) || 20)));
+  const offset = Math.max(0, Math.round(Number(rawOffset) || 0));
+  return { limit, offset };
+}
+
+export async function listShopOrdersForUserPage(
+  userId: string,
+  input?: number | { limit?: number; offset?: number }
+) {
+  const { limit, offset } = normalizeListArgs(input);
   let rows: ShopOrderRecord[] = [];
   try {
-    rows = await listShopOrderRows(Math.max(limit * 4, 40));
+    rows = await listShopOrderRows(Math.max(offset + limit + 40, 80));
   } catch {
     rows = [];
   }
-  return rows.filter((row) => row.userId === userId).slice(0, Math.max(1, Math.min(50, limit)));
+  const filtered = rows.filter((row) => row.userId === userId);
+  const total = filtered.length;
+  const orders = filtered.slice(offset, offset + limit);
+  return {
+    orders,
+    total,
+    limit,
+    offset,
+    hasMore: offset + orders.length < total,
+  };
+}
+
+export async function listShopOrdersForUser(userId: string, input?: number | { limit?: number; offset?: number }) {
+  const page = await listShopOrdersForUserPage(userId, input);
+  return page.orders;
 }
 
 export async function listShopOrdersForAdmin(limit = 40) {
@@ -618,6 +661,35 @@ export async function countRecentReadyShopOrdersByUser(userId: string) {
     if (!Number.isFinite(createdAt)) return false;
     return now - createdAt <= 60 * 60 * 1000;
   }).length;
+}
+
+export async function listVerifiedShopReviewerIdsForProduct(productId: string): Promise<Set<string>> {
+  const key = cleanText(productId, 80);
+  if (!key) return new Set();
+
+  let rows: ShopOrderRecord[] = [];
+  try {
+    rows = await listShopOrderRows(200);
+  } catch {
+    rows = [];
+  }
+
+  const verified = new Set<string>();
+  for (const row of rows) {
+    if (row.productId !== key) continue;
+    if (
+      row.status === "PAID" ||
+      row.status === "SHIPPED" ||
+      row.status === "DELIVERED" ||
+      row.status === "REFUND_REQUESTED" ||
+      row.status === "REFUND_REJECTED" ||
+      row.status === "REFUNDED"
+    ) {
+      verified.add(row.userId);
+    }
+  }
+
+  return verified;
 }
 
 export async function markShopOrderFailed(input: {
@@ -835,6 +907,7 @@ export function toShopOrderSummary(order: ShopOrderRecord): ShopOrderSummary {
     amount: order.amount,
     createdAt: order.createdAt,
     approvedAt: order.approvedAt,
+    paymentMethod: readPaymentMethod(order.tossResponse),
     failMessage: order.failMessage,
     productSnapshot: {
       name: order.productSnapshot.name,

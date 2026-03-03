@@ -9,6 +9,8 @@
  *   SHOP_EMAIL_FROM=RNest <noreply@rnest.kr> 추가 (선택)
  */
 
+import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
+
 const FROM_ADDRESS = process.env.SHOP_EMAIL_FROM ?? "RNest <noreply@rnest.kr>";
 const RESEND_API_KEY = process.env.RESEND_API_KEY ?? "";
 
@@ -39,6 +41,19 @@ async function sendEmail(payload: EmailPayload): Promise<void> {
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     console.error("[EmailService] 발송 실패:", res.status, body);
+  }
+}
+
+export async function loadUserEmailById(userId: string): Promise<string | null> {
+  const normalized = String(userId ?? "").trim();
+  if (!normalized) return null;
+  try {
+    const admin = getSupabaseAdmin();
+    const { data, error } = await admin.auth.admin.getUserById(normalized);
+    if (error) return null;
+    return String(data.user?.email ?? "").trim() || null;
+  } catch {
+    return null;
   }
 }
 

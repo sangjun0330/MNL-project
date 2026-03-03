@@ -31,6 +31,7 @@ type ShopAdminOrderSummary = {
   amount: number;
   createdAt: string;
   approvedAt: string | null;
+  paymentMethod: string | null;
   failMessage: string | null;
   productSnapshot: { name: string; quantity: number };
   shipping: {
@@ -44,6 +45,8 @@ type ShopAdminOrderSummary = {
   refund: { status: "none" | "requested" | "rejected" | "done"; reason: string | null; note: string | null };
   trackingNumber: string | null;
   courier: string | null;
+  shippedAt: string | null;
+  deliveredAt: string | null;
 };
 
 type EditableCategory = Exclude<ShopCategoryKey, "all">;
@@ -134,6 +137,16 @@ function formatDateLabel(value: string | null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function buildShippingDrafts(orders: ShopAdminOrderSummary[]) {
+  return orders.reduce<Record<string, { courier: string; trackingNumber: string }>>((acc, order) => {
+    acc[order.orderId] = {
+      courier: order.courier ?? "",
+      trackingNumber: order.trackingNumber ?? "",
+    };
+    return acc;
+  }, {});
 }
 
 function validateDraft(draft: ProductDraft): FieldErrors {
@@ -865,6 +878,8 @@ export function ShopAdminPage() {
   // Orders & refunds
   const [orders, setOrders] = useState<ShopAdminOrderSummary[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
+  const [shippingDrafts, setShippingDrafts] = useState<Record<string, { courier: string; trackingNumber: string }>>({});
+  const [shippingLoadingId, setShippingLoadingId] = useState<string | null>(null);
 
   // Edit state
   const [draft, setDraft] = useState<ProductDraft>(createEmptyDraft());
@@ -878,6 +893,18 @@ export function ShopAdminPage() {
   const [refundLoadingId, setRefundLoadingId] = useState<string | null>(null);
 
   const refundQueue = useMemo(() => orders.filter((o) => o.status === "REFUND_REQUESTED"), [orders]);
+  const salesStats = useMemo(() => {
+    const paidLikeStatuses: ShopAdminOrderSummary["status"][] = ["PAID", "SHIPPED", "DELIVERED", "REFUND_REQUESTED", "REFUND_REJECTED"];
+    const totalSales = orders
+      .filter((order) => paidLikeStatuses.includes(order.status))
+      .reduce((sum, order) => sum + Math.max(0, Math.round(Number(order.amount) || 0)), 0);
+    return {
+      totalOrders: orders.length,
+      totalSales,
+      refundPending: refundQueue.length,
+      shippingPending: orders.filter((order) => order.status === "PAID").length,
+    };
+  }, [orders, refundQueue.length]);
   const filteredCatalog = useMemo(() => {
     if (catalogFilter === "active") return catalog.filter((p) => p.active !== false);
     if (catalogFilter === "inactive") return catalog.filter((p) => p.active === false);
@@ -919,7 +946,7 @@ export function ShopAdminPage() {
             headers: { "content-type": "application/json", ...headers },
             cache: "no-store",
           }).then(async (r) => ({ ok: r.ok, json: await r.json().catch(() => null) })),
-          fetch("/api/admin/shop/orders?limit=20", {
+          fetch("/api/admin/shop/orders?limit=40", {
             method: "GET",
             headers: { "content-type": "application/json", ...headers },
             cache: "no-store",
@@ -937,6 +964,7 @@ export function ShopAdminPage() {
 
         if (ordersResult.status === "fulfilled" && ordersResult.value.ok && Array.isArray(ordersResult.value.json?.data?.orders)) {
           setOrders(ordersResult.value.json.data.orders);
+          setShippingDrafts(buildShippingDrafts(ordersResult.value.json.data.orders));
         }
       } catch {
         if (!active) return;
@@ -1009,6 +1037,7 @@ export function ShopAdminPage() {
           priority: Number(draft.priority) || 4,
           stockCount: draft.stockCount ? Number(draft.stockCount) : null,
           outOfStock: draft.outOfStock,
+          active: draft.active,
           matchSignals: draft.matchSignals,
           detailPage: {
             headline: draft.detailHeadline,
@@ -1108,6 +1137,76 @@ export function ShopAdminPage() {
     }
   };
 
+  const handleShippingDraftChange = (
+    orderId: string,
+    field: "courier" | "trackingNumber",
+    value: string
+  ) => {
+    setShippingDrafts((current) => ({
+      ...current,
+      [orderId]: {
+        courier: current[orderId]?.courier ?? "",
+        trackingNumber: current[orderId]?.trackingNumber ?? "",
+        [field]: value,
+      },
+    }));
+  };
+
+  const handleShippingAction = async (orderId: string, action: "mark_shipped" | "mark_delivered") => {
+    if (accessState !== "allowed") return;
+    setShippingLoadingId(orderId);
+    setNotice(null);
+
+    const draft = shippingDrafts[orderId] ?? { courier: "", trackingNumber: "" };
+    if (action === "mark_shipped" && (!draft.courier.trim() || !draft.trackingNumber.trim())) {
+      showNotice("error", "배송 처리에는 택배사와 운송장 번호가 모두 필요합니다.");
+      setShippingLoadingId(null);
+      return;
+    }
+
+    try {
+      const headers = await authHeaders();
+      const body =
+        action === "mark_shipped"
+          ? { action, courier: draft.courier.trim(), trackingNumber: draft.trackingNumber.trim() }
+          : { action };
+
+      const res = await fetch(`/api/admin/shop/orders/${encodeURIComponent(orderId)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok) {
+        throw new Error(String(json?.error ?? `http_${res.status}`));
+      }
+
+      const nextOrder = json.data.order as ShopAdminOrderSummary;
+      setOrders((current) => current.map((order) => (order.orderId === nextOrder.orderId ? nextOrder : order)));
+      setShippingDrafts((current) => ({
+        ...current,
+        [nextOrder.orderId]: {
+          courier: nextOrder.courier ?? "",
+          trackingNumber: nextOrder.trackingNumber ?? "",
+        },
+      }));
+      showNotice("notice", action === "mark_shipped" ? "배송 처리 완료" : "배송 완료로 변경했습니다.");
+    } catch (error: any) {
+      const message = String(error?.message ?? "");
+      if (message === "tracking_number_and_courier_required") {
+        showNotice("error", "택배사와 운송장 번호를 모두 입력해주세요.");
+      } else if (message === "shop_order_not_paid") {
+        showNotice("error", "결제 완료 주문만 배송 처리할 수 있습니다.");
+      } else if (message === "shop_order_not_shipped") {
+        showNotice("error", "배송 중 상태 주문만 배송 완료로 바꿀 수 있습니다.");
+      } else {
+        showNotice("error", "배송 상태 변경에 실패했습니다.");
+      }
+    } finally {
+      setShippingLoadingId(null);
+    }
+  };
+
   // ─── Access states ───
   if (accessState === "checking") {
     return (
@@ -1160,6 +1259,27 @@ export function ShopAdminPage() {
           {notice}
         </div>
       ) : null}
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-[24px] border border-ios-sep bg-white px-4 py-4">
+          <div className="text-[11px] font-semibold text-[#92a0b4]">총 주문</div>
+          <div className="mt-2 text-[24px] font-bold tracking-[-0.02em] text-[#11294b]">{salesStats.totalOrders}건</div>
+        </div>
+        <div className="rounded-[24px] border border-ios-sep bg-white px-4 py-4">
+          <div className="text-[11px] font-semibold text-[#92a0b4]">총 매출</div>
+          <div className="mt-2 text-[24px] font-bold tracking-[-0.02em] text-[#11294b]">
+            {salesStats.totalSales.toLocaleString("ko-KR")}원
+          </div>
+        </div>
+        <div className="rounded-[24px] border border-ios-sep bg-white px-4 py-4">
+          <div className="text-[11px] font-semibold text-[#92a0b4]">환불 대기</div>
+          <div className="mt-2 text-[24px] font-bold tracking-[-0.02em] text-[#11294b]">{salesStats.refundPending}건</div>
+        </div>
+        <div className="rounded-[24px] border border-ios-sep bg-white px-4 py-4">
+          <div className="text-[11px] font-semibold text-[#92a0b4]">배송 대기</div>
+          <div className="mt-2 text-[24px] font-bold tracking-[-0.02em] text-[#11294b]">{salesStats.shippingPending}건</div>
+        </div>
+      </div>
 
       {/* Main grid: product list | edit form */}
       <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
@@ -1410,11 +1530,61 @@ export function ShopAdminPage() {
               </div>
               {order.refund.status === "rejected" ? <div className="mt-2 text-[11.5px] text-[#a33a2b]">{order.refund.note ?? t("반려 사유 없음")}</div> : null}
               {order.status === "FAILED" && order.failMessage ? <div className="mt-2 text-[11.5px] text-[#a33a2b]">{order.failMessage}</div> : null}
+              {order.paymentMethod ? (
+                <div className="mt-2 text-[11px] text-ios-sub">결제수단: {order.paymentMethod}</div>
+              ) : null}
               {order.shipping.addressLine1 ? (
                 <div className="mt-2 text-[11px] leading-5 text-ios-sub">
                   {order.shipping.recipientName} · {order.shipping.phone}<br />
                   ({order.shipping.postalCode}) {order.shipping.addressLine1}
                   {order.shipping.addressLine2 ? ` ${order.shipping.addressLine2}` : ""}
+                </div>
+              ) : null}
+              {order.trackingNumber || order.courier ? (
+                <div className="mt-2 rounded-2xl border border-[#eef2f7] bg-[#f8fafc] px-3 py-3 text-[11px] leading-5 text-[#44556d]">
+                  {order.courier || "택배사 미입력"} · {order.trackingNumber || "운송장 미입력"}
+                  {order.shippedAt ? <><br />발송일: {formatDateLabel(order.shippedAt)}</> : null}
+                  {order.deliveredAt ? <><br />배송완료: {formatDateLabel(order.deliveredAt)}</> : null}
+                </div>
+              ) : null}
+              {order.status === "PAID" ? (
+                <div className="mt-3 rounded-2xl border border-[#eef2f7] bg-[#f8fafc] p-3">
+                  <div className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+                    <input
+                      className={INPUT_CLASS}
+                      value={shippingDrafts[order.orderId]?.courier ?? ""}
+                      onChange={(e) => handleShippingDraftChange(order.orderId, "courier", e.target.value)}
+                      placeholder="택배사 (예: CJ대한통운)"
+                    />
+                    <input
+                      className={INPUT_CLASS}
+                      value={shippingDrafts[order.orderId]?.trackingNumber ?? ""}
+                      onChange={(e) => handleShippingDraftChange(order.orderId, "trackingNumber", e.target.value)}
+                      placeholder="운송장 번호"
+                    />
+                    <button
+                      type="button"
+                      data-auth-allow
+                      disabled={shippingLoadingId === order.orderId}
+                      onClick={() => void handleShippingAction(order.orderId, "mark_shipped")}
+                      className={`${PRIMARY_BUTTON} h-12 text-[12px]`}
+                    >
+                      {shippingLoadingId === order.orderId ? "처리 중…" : "배송 처리"}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+              {order.status === "SHIPPED" ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    data-auth-allow
+                    disabled={shippingLoadingId === order.orderId}
+                    onClick={() => void handleShippingAction(order.orderId, "mark_delivered")}
+                    className={`${SECONDARY_BUTTON} h-10 text-[12px]`}
+                  >
+                    {shippingLoadingId === order.orderId ? "처리 중…" : "배송 완료"}
+                  </button>
                 </div>
               ) : null}
             </div>

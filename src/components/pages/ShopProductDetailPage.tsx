@@ -15,12 +15,12 @@ import { ShopCheckoutSheet } from "@/components/shop/ShopCheckoutSheet";
 type ShopReviewRecord = {
   id: number;
   productId: string;
-  userId: string;
   rating: number;
   title: string;
   body: string;
   createdAt: string;
   updatedAt: string;
+  authorLabel: string;
   verifiedPurchase?: boolean;
 };
 
@@ -822,7 +822,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
                 <div key={review.id} className="space-y-4">
                   <div className="text-[20px] tracking-[0.15em] text-[#3b6fc9]">{renderStars(review.rating)}</div>
                   <div className="flex flex-wrap items-center gap-2 text-[13px] text-[#4f5d72]">
-                    <span>{t("회원님")} · {formatDateLabel(review.updatedAt || review.createdAt)}</span>
+                    <span>{review.authorLabel} · {formatDateLabel(review.updatedAt || review.createdAt)}</span>
                     <span className="rounded-xl bg-[#f1f3f6] px-3 py-2 text-[12px] font-semibold text-[#66758a]">{t("리뷰")}</span>
                     {review.verifiedPurchase ? (
                       <span className="rounded-xl bg-[#eef4fb] px-3 py-2 text-[12px] font-semibold text-[#3b6fc9]">구매 확인</span>

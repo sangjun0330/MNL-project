@@ -64,17 +64,25 @@ const PRIMARY_BUTTON =
   "inline-flex items-center justify-center rounded-2xl border border-[#11294b] bg-[#11294b] px-4 font-semibold text-white transition disabled:opacity-60";
 const SECONDARY_BUTTON =
   "inline-flex items-center justify-center rounded-2xl border border-[#d7dfeb] bg-[#f4f7fb] px-4 font-semibold text-[#11294b] transition disabled:opacity-60";
+const ORDERS_PER_PAGE = 12;
 
 export function ShopOrdersPage() {
   const { status, user } = useAuthState();
   const [orders, setOrders] = useState<ShopOrderSummary[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
   const [messageTone, setMessageTone] = useState<"error" | "notice">("notice");
+  const [page, setPage] = useState(1);
+
+  const totalPages = Math.max(1, Math.ceil(total / ORDERS_PER_PAGE));
+  const currentOffset = (page - 1) * ORDERS_PER_PAGE;
 
   useEffect(() => {
     let active = true;
     if (status !== "authenticated" || !user?.userId) {
+      setOrders([]);
+      setTotal(0);
       setLoading(false);
       return () => { active = false; };
     }
@@ -83,7 +91,7 @@ export function ShopOrdersPage() {
       setLoading(true);
       try {
         const headers = await authHeaders();
-        const res = await fetch("/api/shop/orders?limit=50", {
+        const res = await fetch(`/api/shop/orders?limit=${ORDERS_PER_PAGE}&offset=${currentOffset}`, {
           method: "GET",
           headers: { "content-type": "application/json", ...headers },
           cache: "no-store",
@@ -92,9 +100,11 @@ export function ShopOrdersPage() {
         if (!active) return;
         if (!res.ok || !json?.ok || !Array.isArray(json?.data?.orders)) throw new Error();
         setOrders(json.data.orders as ShopOrderSummary[]);
+        setTotal(Math.max(0, Number(json?.data?.total ?? 0)));
       } catch {
         if (!active) return;
         setOrders([]);
+        setTotal(0);
       } finally {
         if (!active) return;
         setLoading(false);
@@ -102,7 +112,13 @@ export function ShopOrdersPage() {
     };
     void run();
     return () => { active = false; };
-  }, [status, user?.userId]);
+  }, [currentOffset, status, user?.userId]);
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
 
   const requestRefund = async (orderId: string) => {
     if (status !== "authenticated") return;
@@ -137,7 +153,7 @@ export function ShopOrdersPage() {
           </Link>
           <div>
             <h1 className="text-[18px] font-bold tracking-[-0.02em] text-[#111827]">내 주문 내역</h1>
-            {!loading && <p className="text-[12px] text-[#65748b]">전체 {orders.length}건</p>}
+            {!loading && <p className="text-[12px] text-[#65748b]">전체 {total}건</p>}
           </div>
         </div>
       </div>
@@ -225,6 +241,47 @@ export function ShopOrdersPage() {
                 </div>
               </div>
             ))}
+
+            {totalPages > 1 ? (
+              <div className="flex items-center justify-center gap-2 pt-3">
+                <button
+                  type="button"
+                  data-auth-allow
+                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                  disabled={page <= 1}
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-[#d7dfeb] bg-white text-[#8d99ab] disabled:opacity-40"
+                >
+                  ‹
+                </button>
+                {Array.from({ length: totalPages }, (_, index) => index + 1)
+                  .slice(Math.max(0, page - 3), Math.max(0, page - 3) + 5)
+                  .map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      data-auth-allow
+                      onClick={() => setPage(value)}
+                      className={[
+                        "inline-flex h-11 min-w-[44px] items-center justify-center rounded-2xl border px-3 text-[13px] font-semibold",
+                        value === page
+                          ? "border-[#11294b] bg-[#11294b] text-white"
+                          : "border-[#d7dfeb] bg-white text-[#11294b]",
+                      ].join(" ")}
+                    >
+                      {value}
+                    </button>
+                  ))}
+                <button
+                  type="button"
+                  data-auth-allow
+                  onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                  disabled={page >= totalPages}
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-[#d7dfeb] bg-white text-[#8d99ab] disabled:opacity-40"
+                >
+                  ›
+                </button>
+              </div>
+            ) : null}
           </div>
         )}
       </div>

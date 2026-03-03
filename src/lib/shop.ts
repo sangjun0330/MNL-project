@@ -74,6 +74,7 @@ export type ShopProduct = {
   externalUrl?: string;
   stockCount: number | null;
   outOfStock: boolean;
+  active: boolean;
 };
 
 export type ShopRecommendation = {
@@ -554,6 +555,7 @@ export function normalizeShopProduct(raw: unknown): ShopProduct | null {
   const rawStockCount = Number(source.stockCount);
   const stockCount = Number.isFinite(rawStockCount) && rawStockCount >= 0 ? Math.round(rawStockCount) : null;
   const outOfStock = Boolean(source.outOfStock) || (stockCount !== null && stockCount === 0);
+  const active = source.active !== false;
   const benefitTags = sanitizeStringList(source.benefitTags, 6, 24);
   const useMoments = sanitizeStringList(source.useMoments, 5, 60);
   const caution = clampText(source.caution, 180) || "의학적 치료 대체가 아니라 생활 루틴 보조용으로만 안내합니다.";
@@ -604,6 +606,7 @@ export function normalizeShopProduct(raw: unknown): ShopProduct | null {
     })(),
     stockCount,
     outOfStock,
+    active,
   };
 }
 

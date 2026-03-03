@@ -1,6 +1,7 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { requireBillingAdmin } from "@/lib/server/billingAdminAuth";
 import { approveShopOrderRefund, rejectShopOrderRefund, toShopAdminOrderSummary } from "@/lib/server/shopOrderStore";
+import { loadUserEmailById, sendRefundResultEmail } from "@/lib/server/emailService";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -47,6 +48,19 @@ export async function POST(req: Request, ctx: any) {
             note,
             requestAcceptLanguage: req.headers.get("accept-language"),
           });
+
+    try {
+      const email = await loadUserEmailById(order.userId);
+      await sendRefundResultEmail({
+        customerEmail: email,
+        productName: order.productSnapshot.name,
+        result: action === "approve" ? "approved" : "rejected",
+        note: order.refund.note,
+        cancelAmount: order.refund.cancelAmount,
+      });
+    } catch {
+      // 이메일 실패는 무시
+    }
 
     return jsonNoStore({ ok: true, data: { order: toShopAdminOrderSummary(order) } });
   } catch (error: any) {

@@ -37,7 +37,17 @@ function isMissingTableError(error: unknown) {
     code === "42703" ||
     message.includes("does not exist") ||
     (message.includes("relation") && message.includes("shop_products")) ||
-    (message.includes("column") && (message.includes("detail_page") || message.includes("image_urls") || message.includes("specs")))
+    (
+      message.includes("column") &&
+      (
+        message.includes("detail_page") ||
+        message.includes("image_urls") ||
+        message.includes("specs") ||
+        message.includes("original_price_krw") ||
+        message.includes("stock_count") ||
+        message.includes("out_of_stock")
+      )
+    )
   );
 }
 
@@ -55,6 +65,7 @@ function toProductRow(product: ShopProduct): Database["public"]["Tables"]["shop_
     partner_status: product.partnerStatus,
     external_url: product.externalUrl ?? null,
     price_krw: product.priceKrw ?? null,
+    original_price_krw: product.originalPriceKrw ?? null,
     checkout_enabled: Boolean(product.checkoutEnabled && product.priceKrw && product.priceKrw > 0),
     benefit_tags: product.benefitTags,
     use_moments: product.useMoments,
@@ -64,7 +75,9 @@ function toProductRow(product: ShopProduct): Database["public"]["Tables"]["shop_
     image_urls: product.imageUrls,
     specs: product.specs as unknown as Json,
     detail_page: product.detailPage as unknown as Json,
-    active: true,
+    stock_count: product.stockCount ?? null,
+    out_of_stock: Boolean(product.outOfStock),
+    active: product.active !== false,
   };
 }
 
@@ -82,6 +95,7 @@ function fromProductRow(row: ShopProductRow): ShopProduct | null {
     partnerStatus: row.partner_status,
     externalUrl: row.external_url,
     priceKrw: row.price_krw,
+    originalPriceKrw: row.original_price_krw,
     checkoutEnabled: row.checkout_enabled,
     benefitTags: row.benefit_tags,
     useMoments: row.use_moments,
@@ -91,6 +105,9 @@ function fromProductRow(row: ShopProductRow): ShopProduct | null {
     imageUrls: row.image_urls,
     specs: row.specs,
     detailPage: row.detail_page,
+    stockCount: row.stock_count,
+    outOfStock: row.out_of_stock,
+    active: row.active,
   });
 }
 

@@ -401,6 +401,7 @@ export type Database = {
           partner_status: string;
           external_url: string | null;
           price_krw: number | null;
+          original_price_krw: number | null;
           checkout_enabled: boolean;
           benefit_tags: string[];
           use_moments: string[];
@@ -410,6 +411,8 @@ export type Database = {
           image_urls: string[];
           specs: Json;
           detail_page: Json;
+          stock_count: number | null;
+          out_of_stock: boolean;
           active: boolean;
           created_at: string | null;
           updated_at: string | null;
@@ -427,6 +430,7 @@ export type Database = {
           partner_status: string;
           external_url?: string | null;
           price_krw?: number | null;
+          original_price_krw?: number | null;
           checkout_enabled?: boolean;
           benefit_tags?: string[];
           use_moments?: string[];
@@ -436,6 +440,8 @@ export type Database = {
           image_urls?: string[];
           specs?: Json;
           detail_page?: Json;
+          stock_count?: number | null;
+          out_of_stock?: boolean;
           active?: boolean;
           created_at?: string | null;
           updated_at?: string | null;
@@ -453,6 +459,7 @@ export type Database = {
           partner_status?: string;
           external_url?: string | null;
           price_krw?: number | null;
+          original_price_krw?: number | null;
           checkout_enabled?: boolean;
           benefit_tags?: string[];
           use_moments?: string[];
@@ -462,6 +469,8 @@ export type Database = {
           image_urls?: string[];
           specs?: Json;
           detail_page?: Json;
+          stock_count?: number | null;
+          out_of_stock?: boolean;
           active?: boolean;
           created_at?: string | null;
           updated_at?: string | null;

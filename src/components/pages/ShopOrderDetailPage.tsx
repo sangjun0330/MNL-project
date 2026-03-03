@@ -11,6 +11,7 @@ type ShopOrderDetail = {
   amount: number;
   createdAt: string;
   approvedAt: string | null;
+  paymentMethod: string | null;
   failMessage: string | null;
   productSnapshot: { name: string; quantity: number };
   shipping: {
@@ -187,6 +188,7 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
               <InfoRow label="주문번호" value={<span className="break-all font-mono text-[11px]">{order.orderId}</span>} />
               <InfoRow label="주문일시" value={formatDateLabel(order.createdAt)} />
               {order.approvedAt ? <InfoRow label="결제일시" value={formatDateLabel(order.approvedAt)} /> : null}
+              {order.paymentMethod ? <InfoRow label="결제수단" value={order.paymentMethod} /> : null}
               {order.status === "FAILED" && order.failMessage ? (
                 <InfoRow label="실패 사유" value={<span className="text-[#a33a2b]">{order.failMessage}</span>} />
               ) : null}

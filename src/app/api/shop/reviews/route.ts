@@ -1,6 +1,7 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { loadShopCatalog } from "@/lib/server/shopCatalogStore";
+import { listVerifiedShopReviewerIdsForProduct } from "@/lib/server/shopOrderStore";
 import { listShopReviewsForProduct, summarizeShopReviews, upsertShopReview } from "@/lib/server/shopReviewStore";
 
 export const runtime = "edge";
@@ -10,12 +11,37 @@ function sanitizeProductId(value: string | null) {
   return String(value ?? "").trim().slice(0, 80);
 }
 
+function maskReviewer(userId: string) {
+  const safe = String(userId ?? "").trim();
+  if (!safe) return "회원님";
+  if (safe.length <= 4) return `${safe.slice(0, 1)}**님`;
+  return `${safe.slice(0, 2)}**님`;
+}
+
+async function toPublicReviews(productId: string) {
+  const [reviews, verifiedIds] = await Promise.all([
+    listShopReviewsForProduct(productId),
+    listVerifiedShopReviewerIdsForProduct(productId),
+  ]);
+  return reviews.map((review) => ({
+    id: review.id,
+    productId: review.productId,
+    rating: review.rating,
+    title: review.title,
+    body: review.body,
+    createdAt: review.createdAt,
+    updatedAt: review.updatedAt,
+    authorLabel: maskReviewer(review.userId),
+    verifiedPurchase: verifiedIds.has(review.userId),
+  }));
+}
+
 export async function GET(req: Request) {
   const productId = sanitizeProductId(new URL(req.url).searchParams.get("productId"));
   if (!productId) return jsonNoStore({ ok: false, error: "invalid_product_id" }, { status: 400 });
 
   try {
-    const reviews = await listShopReviewsForProduct(productId);
+    const reviews = await toPublicReviews(productId);
     const summary = summarizeShopReviews(reviews);
     return jsonNoStore({ ok: true, data: { reviews, summary } });
   } catch {
@@ -44,16 +70,29 @@ export async function POST(req: Request) {
       return jsonNoStore({ ok: false, error: "shop_product_not_found" }, { status: 404 });
     }
 
-    const review = await upsertShopReview({
+    const savedReview = await upsertShopReview({
       productId,
       userId,
       rating: Number(body?.rating),
       title: String(body?.title ?? ""),
       body: String(body?.body ?? ""),
     });
-    const reviews = await listShopReviewsForProduct(productId);
+    const reviews = await toPublicReviews(productId);
     const summary = summarizeShopReviews(reviews);
-    return jsonNoStore({ ok: true, data: { review, reviews, summary } });
+    const publicReview = savedReview
+      ? {
+          id: savedReview.id,
+          productId: savedReview.productId,
+          rating: savedReview.rating,
+          title: savedReview.title,
+          body: savedReview.body,
+          createdAt: savedReview.createdAt,
+          updatedAt: savedReview.updatedAt,
+          authorLabel: maskReviewer(savedReview.userId),
+          verifiedPurchase: reviews.some((item) => item.id === savedReview.id && item.verifiedPurchase),
+        }
+      : null;
+    return jsonNoStore({ ok: true, data: { review: publicReview, reviews, summary } });
   } catch (error: any) {
     const message = String(error?.message ?? "failed_to_save_shop_review");
     if (message === "invalid_shop_review") {

@@ -1,8 +1,7 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { requireBillingAdmin } from "@/lib/server/billingAdminAuth";
 import { markShopOrderShipped, markShopOrderDelivered, toShopAdminOrderSummary } from "@/lib/server/shopOrderStore";
-import { sendShippingStartedEmail } from "@/lib/server/emailService";
-import { getRouteSupabaseClient } from "@/lib/server/supabaseRouteClient";
+import { loadUserEmailById, sendShippingStartedEmail } from "@/lib/server/emailService";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -10,16 +9,6 @@ export const dynamic = "force-dynamic";
 async function readOrderIdFromContext(ctx: any) {
   const params = await Promise.resolve(ctx?.params);
   return String(params?.orderId ?? "").trim();
-}
-
-async function getCustomerEmail(userId: string): Promise<string | null> {
-  try {
-    const supabase = await getRouteSupabaseClient();
-    const { data } = await supabase.auth.admin.getUserById(userId);
-    return String(data.user?.email ?? "").trim() || null;
-  } catch {
-    return null;
-  }
 }
 
 export async function PATCH(req: Request, ctx: any) {
@@ -56,7 +45,7 @@ export async function PATCH(req: Request, ctx: any) {
       });
       // 이메일 발송 (실패해도 계속)
       try {
-        const email = await getCustomerEmail(order.userId);
+        const email = await loadUserEmailById(order.userId);
         await sendShippingStartedEmail({
           customerEmail: email,
           productName: order.productSnapshot.name,

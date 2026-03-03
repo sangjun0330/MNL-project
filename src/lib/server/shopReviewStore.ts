@@ -185,7 +185,7 @@ export async function listShopReviewsForProduct(productId: string) {
   }
 }
 
-export function summarizeShopReviews(reviews: ShopReviewRecord[]): ShopReviewSummary {
+export function summarizeShopReviews(reviews: Array<Pick<ShopReviewRecord, "rating">>): ShopReviewSummary {
   if (reviews.length === 0) return { count: 0, averageRating: 0 };
   const total = reviews.reduce((sum, item) => sum + item.rating, 0);
   return {
