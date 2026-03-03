@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuthState } from "@/lib/auth";
 import { authHeaders } from "@/lib/billing/client";
 import { maskShopAddressLine, maskShopEmail } from "@/lib/shopPrivacy";
@@ -10,6 +10,7 @@ import { getCart, getWishlist } from "@/lib/shopClient";
 import { SHOP_BUTTON_PRIMARY } from "@/lib/shopUi";
 import { useI18n } from "@/lib/useI18n";
 import { ShopBackLink } from "@/components/shop/ShopBackLink";
+import { useShopOrderRealtimeRefresh } from "@/components/shop/useShopOrderRealtimeRefresh";
 
 type ShopOrderSummary = {
   orderId: string;
@@ -35,24 +36,21 @@ export function ShopProfilePage() {
   const [cartCount, setCartCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
-    let active = true;
-    if (status !== "authenticated" || !user?.userId) {
-      setAddresses([]);
-      setDefaultAddressId(null);
-      setOrders([]);
-      setWishlistIds([]);
-      setCartCount(0);
-      setLoading(false);
-      return () => {
-        active = false;
-      };
-    }
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
-    const run = async () => {
-      setLoading(true);
-      setMessage(null);
+  const loadProfile = useCallback(
+    async (showLoading = false) => {
+      if (status !== "authenticated" || !user?.userId) return;
+      if (showLoading && mountedRef.current) setLoading(true);
+      if (mountedRef.current) setMessage(null);
+
       try {
         const headers = await authHeaders();
         const [profileRes, ordersRes, wishlist, cartItems] = await Promise.all([
@@ -71,7 +69,7 @@ export function ShopProfilePage() {
         ]);
         const profileJson = await profileRes.json().catch(() => null);
         const ordersJson = await ordersRes.json().catch(() => null);
-        if (!active) return;
+        if (!mountedRef.current) return;
         if (!profileRes.ok || !profileJson?.ok) throw new Error(String(profileJson?.error ?? `profile_http_${profileRes.status}`));
         if (!ordersRes.ok || !ordersJson?.ok) throw new Error(String(ordersJson?.error ?? `orders_http_${ordersRes.status}`));
 
@@ -82,24 +80,42 @@ export function ShopProfilePage() {
         setWishlistIds(wishlist);
         setCartCount(cartItems.reduce((sum, item) => sum + item.quantity, 0));
       } catch {
-        if (!active) return;
-        setAddresses([]);
-        setDefaultAddressId(null);
-        setOrders([]);
-        setWishlistIds([]);
-        setCartCount(0);
-        setMessage(t("쇼핑 계정 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."));
+        if (!mountedRef.current) return;
+        if (showLoading) {
+          setAddresses([]);
+          setDefaultAddressId(null);
+          setOrders([]);
+          setWishlistIds([]);
+          setCartCount(0);
+          setMessage(t("쇼핑 계정 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."));
+        }
       } finally {
-        if (!active) return;
-        setLoading(false);
+        if (showLoading && mountedRef.current) setLoading(false);
       }
-    };
+    },
+    [status, t, user?.userId]
+  );
 
-    void run();
-    return () => {
-      active = false;
-    };
-  }, [status, t, user?.userId]);
+  useEffect(() => {
+    if (status !== "authenticated" || !user?.userId) {
+      setAddresses([]);
+      setDefaultAddressId(null);
+      setOrders([]);
+      setWishlistIds([]);
+      setCartCount(0);
+      setLoading(false);
+      return;
+    }
+
+    void loadProfile(true);
+  }, [loadProfile, status, user?.userId]);
+
+  useShopOrderRealtimeRefresh({
+    enabled: status === "authenticated",
+    userId: user?.userId ?? null,
+    scope: "shop-profile",
+    onRefresh: () => loadProfile(false),
+  });
 
   const defaultAddress = useMemo(
     () => resolveDefaultShopShippingAddress({ addresses, defaultAddressId }),

@@ -44,6 +44,17 @@ export function maskShopAddressLine(addressLine: string | null | undefined) {
 export function toMaskedShopShippingSnapshot(shipping: ShopShippingSnapshot): ShopShippingSnapshot {
   return {
     savedAt: shipping.savedAt,
+    smartTracker: shipping.smartTracker
+      ? {
+          carrierCode: shipping.smartTracker.carrierCode,
+          trackingUrl: shipping.smartTracker.trackingUrl,
+          lastStatus: shipping.smartTracker.lastStatus,
+          lastStatusLabel: shipping.smartTracker.lastStatusLabel,
+          lastEventAt: shipping.smartTracker.lastEventAt,
+          lastPolledAt: shipping.smartTracker.lastPolledAt,
+          deliveredAt: shipping.smartTracker.deliveredAt,
+        }
+      : null,
     recipientName: maskShopRecipientName(shipping.recipientName),
     phone: maskShopPhone(shipping.phone),
     postalCode: maskShopPostalCode(shipping.postalCode),

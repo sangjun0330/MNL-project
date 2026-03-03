@@ -1,7 +1,8 @@
 import { todayISO } from "@/lib/date";
 import { toMaskedShopShippingSnapshot } from "@/lib/shopPrivacy";
-import { normalizeShopShippingSnapshot, type ShopShippingSnapshot } from "@/lib/shopProfile";
+import { normalizeShopShippingSnapshot, type ShopShippingSnapshot, type ShopSmartTrackerMeta } from "@/lib/shopProfile";
 import { findShopOrderBundleByOrderId, markShopOrderBundleCanceled } from "@/lib/server/shopOrderBundleStore";
+import { buildSweetTrackerTrackingUrl, fetchSweetTrackerTracking, shouldPollSweetTracker } from "@/lib/server/sweetTracker";
 import { buildCancelIdempotencyKey, buildConfirmIdempotencyKey, readTossAcceptLanguage, readTossSecretKeyFromEnv, readTossTestCodeFromEnv } from "@/lib/server/tossConfig";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { loadUserState, saveUserState } from "@/lib/server/userStateStore";
@@ -104,6 +105,13 @@ export type ShopOrderSummary = {
   };
   trackingNumber: string | null;
   courier: string | null;
+  tracking: {
+    carrierCode: string | null;
+    trackingUrl: string | null;
+    statusLabel: string | null;
+    lastEventAt: string | null;
+    lastPolledAt: string | null;
+  } | null;
   shippedAt: string | null;
   deliveredAt: string | null;
   purchaseConfirmedAt: string | null;
@@ -211,6 +219,40 @@ function normalizeRefund(value: unknown): ShopRefundState {
 
 function normalizeShippingSnapshot(value: unknown): ShopShippingSnapshot {
   return normalizeShopShippingSnapshot(value);
+}
+
+function normalizeSmartTrackerMeta(value: unknown): ShopSmartTrackerMeta | null {
+  const snapshot = normalizeShopShippingSnapshot({ smartTracker: value });
+  return snapshot.smartTracker;
+}
+
+function buildTrackingSummary(meta: ShopSmartTrackerMeta | null) {
+  if (!meta) return null;
+  return {
+    carrierCode: meta.carrierCode,
+    trackingUrl: meta.trackingUrl,
+    statusLabel: meta.lastStatusLabel,
+    lastEventAt: meta.lastEventAt,
+    lastPolledAt: meta.lastPolledAt,
+  };
+}
+
+function mergeSmartTrackerMeta(
+  current: ShopSmartTrackerMeta | null,
+  next: Partial<ShopSmartTrackerMeta>
+): ShopSmartTrackerMeta {
+  return normalizeSmartTrackerMeta({
+    ...(current ?? {}),
+    ...next,
+  }) ?? {
+    carrierCode: cleanText(next.carrierCode, 40) || null,
+    trackingUrl: cleanText(next.trackingUrl, 400) || null,
+    lastStatus: cleanText(next.lastStatus, 40) || null,
+    lastStatusLabel: cleanText(next.lastStatusLabel, 80) || null,
+    lastEventAt: cleanText(next.lastEventAt, 64) || null,
+    lastPolledAt: cleanText(next.lastPolledAt, 64) || null,
+    deliveredAt: cleanText(next.deliveredAt, 64) || null,
+  };
 }
 
 function normalizeProductSnapshot(value: unknown): ShopOrderRecord["productSnapshot"] | null {
@@ -695,6 +737,130 @@ async function listShopOrderRows(limit: number): Promise<ShopOrderRecord[]> {
     .slice(0, Math.max(1, Math.min(MAX_LIST_SCAN, limit)));
 }
 
+function isTrackableShippedOrder(order: ShopOrderRecord) {
+  return (
+    order.status === "SHIPPED" &&
+    Boolean(order.trackingNumber) &&
+    Boolean(order.shipping.smartTracker?.carrierCode)
+  );
+}
+
+async function saveOrderWithSmartTrackerMeta(
+  order: ShopOrderRecord,
+  metaPatch: Partial<ShopSmartTrackerMeta>
+): Promise<ShopOrderRecord> {
+  const nextShipping = normalizeShopShippingSnapshot({
+    ...order.shipping,
+    smartTracker: mergeSmartTrackerMeta(order.shipping.smartTracker, metaPatch),
+  });
+  return writeOrder({
+    ...order,
+    shipping: nextShipping,
+  });
+}
+
+async function syncSingleOrderTrackingIfNeeded(
+  order: ShopOrderRecord,
+  input?: { force?: boolean; actorUserId?: string | null }
+): Promise<ShopOrderRecord> {
+  if (!isTrackableShippedOrder(order)) return order;
+  if (!shouldPollSweetTracker(order.shipping.smartTracker, Boolean(input?.force))) return order;
+
+  const meta = order.shipping.smartTracker;
+  const result = await fetchSweetTrackerTracking({
+    carrierCode: meta?.carrierCode ?? null,
+    trackingNumber: order.trackingNumber,
+  });
+
+  const now = new Date().toISOString();
+  if (!result.ok) {
+    if (result.reason === "missing_config" || result.reason === "invalid_input") {
+      return order;
+    }
+    if (result.reason === "fetch_failed") {
+      return await saveOrderWithSmartTrackerMeta(order, {
+        trackingUrl: result.trackingUrl ?? meta?.trackingUrl ?? null,
+        lastPolledAt: now,
+      }).catch(() => order);
+    }
+    return await saveOrderWithSmartTrackerMeta(order, {
+      trackingUrl: result.trackingUrl ?? meta?.trackingUrl ?? null,
+      lastStatus: "not_found",
+      lastStatusLabel: "조회 불가",
+      lastPolledAt: now,
+    }).catch(() => order);
+  }
+
+  const nextMeta = mergeSmartTrackerMeta(meta, {
+    trackingUrl: result.trackingUrl,
+    lastStatus: result.rawStatus,
+    lastStatusLabel: result.statusLabel,
+    lastEventAt: result.lastEventAt,
+    lastPolledAt: now,
+    deliveredAt: result.deliveredAt,
+  });
+
+  if (result.delivered) {
+    const deliveredAt = result.deliveredAt || order.deliveredAt || now;
+    const saved = await writeOrder({
+      ...order,
+      status: "DELIVERED",
+      deliveredAt,
+      shipping: normalizeShopShippingSnapshot({
+        ...order.shipping,
+        smartTracker: {
+          ...nextMeta,
+          deliveredAt,
+        },
+      }),
+    });
+    await writeOrderEventSafe({
+      order: saved,
+      eventType: "order_delivered",
+      actorRole: input?.actorUserId ? "admin" : "system",
+      actorUserId: input?.actorUserId ?? null,
+      message: "스마트택배 배송 조회 결과 배송 완료로 자동 반영되었습니다.",
+      metadata: {
+        source: "sweettracker",
+        statusLabel: result.statusLabel,
+        trackingUrl: result.trackingUrl,
+      },
+    });
+    return saved;
+  }
+
+  const hasMetaChanged =
+    nextMeta.trackingUrl !== meta?.trackingUrl ||
+    nextMeta.lastStatus !== meta?.lastStatus ||
+    nextMeta.lastStatusLabel !== meta?.lastStatusLabel ||
+    nextMeta.lastEventAt !== meta?.lastEventAt ||
+    nextMeta.lastPolledAt !== meta?.lastPolledAt;
+
+  if (!hasMetaChanged) return order;
+  return saveOrderWithSmartTrackerMeta(order, nextMeta).catch(() => order);
+}
+
+async function syncOrdersForRead(
+  orders: ShopOrderRecord[],
+  input?: { maxOrders?: number; force?: boolean; actorUserId?: string | null }
+): Promise<ShopOrderRecord[]> {
+  const maxOrders = Math.max(1, Math.min(5, Math.round(Number(input?.maxOrders) || 3)));
+  let syncedCount = 0;
+  const nextOrders: ShopOrderRecord[] = [];
+
+  for (const order of orders) {
+    if (isTrackableShippedOrder(order) && (syncedCount < maxOrders || input?.force)) {
+      const synced = await syncSingleOrderTrackingIfNeeded(order, input).catch(() => order);
+      nextOrders.push(synced);
+      syncedCount += 1;
+    } else {
+      nextOrders.push(order);
+    }
+  }
+
+  return nextOrders;
+}
+
 async function writeOrderEventSafe(input: {
   order: ShopOrderRecord;
   eventType: string;
@@ -887,7 +1053,7 @@ export async function listShopOrdersForUserPage(
   }
   const filtered = rows.filter((row) => row.userId === userId);
   const total = filtered.length;
-  const orders = filtered.slice(offset, offset + limit);
+  const orders = await syncOrdersForRead(filtered.slice(offset, offset + limit), { maxOrders: 3 });
   return {
     orders,
     total,
@@ -904,10 +1070,19 @@ export async function listShopOrdersForUser(userId: string, input?: number | { l
 
 export async function listShopOrdersForAdmin(limit = 40) {
   try {
-    return await listShopOrderRows(limit);
+    const rows = await listShopOrderRows(limit);
+    return await syncOrdersForRead(rows, { maxOrders: 5 });
   } catch {
     return [];
   }
+}
+
+export async function syncOutstandingShopOrders(limit = 20) {
+  const rows = await listShopOrderRows(Math.max(1, Math.min(80, limit)));
+  return syncOrdersForRead(rows.filter((row) => isTrackableShippedOrder(row)), {
+    maxOrders: Math.max(1, Math.min(20, limit)),
+    force: true,
+  });
 }
 
 export async function countRecentReadyShopOrdersByUser(userId: string) {
@@ -1438,7 +1613,8 @@ export async function confirmShopOrderPurchase(input: {
   userId: string;
   orderId: string;
 }): Promise<{ order: ShopOrderRecord; purchaseConfirmedAt: string }> {
-  const order = await readShopOrderForUser(input.userId, input.orderId);
+  const current = await readShopOrderForUser(input.userId, input.orderId);
+  const order = current ? await syncSingleOrderTrackingIfNeeded(current).catch(() => current) : null;
   if (!order) throw new Error("shop_order_not_found");
   if (!isPurchaseConfirmableOrder(order)) throw new Error("shop_order_not_delivered");
 
@@ -1500,6 +1676,7 @@ export function toShopOrderSummary(order: ShopOrderRecord): ShopOrderSummary {
     },
     trackingNumber: order.trackingNumber,
     courier: order.courier,
+    tracking: buildTrackingSummary(order.shipping.smartTracker),
     shippedAt: order.shippedAt,
     deliveredAt: order.deliveredAt,
     purchaseConfirmedAt: null,
@@ -1507,7 +1684,8 @@ export function toShopOrderSummary(order: ShopOrderRecord): ShopOrderSummary {
 }
 
 export async function getShopOrderById(userId: string, orderId: string): Promise<ShopOrderSummary | null> {
-  const order = await readShopOrderForUser(userId, orderId);
+  const current = await readShopOrderForUser(userId, orderId);
+  const order = current ? await syncSingleOrderTrackingIfNeeded(current).catch(() => current) : null;
   if (!order) return null;
   const purchaseConfirmedAt = await getShopOrderPurchaseConfirmedAt(userId, order.orderId);
   return {
@@ -1521,16 +1699,35 @@ export async function markShopOrderShipped(input: {
   adminUserId: string;
   trackingNumber: string;
   courier: string;
+  carrierCode: string;
 }): Promise<ShopOrderRecord> {
   const current = await readShopOrder(input.orderId);
   if (!current) throw new Error("shop_order_not_found");
   if (current.status !== "PAID") throw new Error("shop_order_not_paid");
   const now = new Date().toISOString();
+  const carrierCode = cleanText(input.carrierCode, 40);
+  if (!carrierCode) throw new Error("tracking_carrier_code_required");
+  const trackingUrl = buildSweetTrackerTrackingUrl({
+    carrierCode,
+    trackingNumber: input.trackingNumber,
+  });
   const saved = await writeOrder({
     ...current,
     status: "SHIPPED",
     trackingNumber: cleanText(input.trackingNumber, 120),
     courier: cleanText(input.courier, 60),
+    shipping: normalizeShopShippingSnapshot({
+      ...current.shipping,
+      smartTracker: mergeSmartTrackerMeta(current.shipping.smartTracker, {
+        carrierCode,
+        trackingUrl,
+        lastStatus: "shipped",
+        lastStatusLabel: "배송 시작",
+        lastEventAt: now,
+        lastPolledAt: null,
+        deliveredAt: null,
+      }),
+    }),
     shippedAt: now,
   });
   await writeOrderEventSafe({
@@ -1539,7 +1736,7 @@ export async function markShopOrderShipped(input: {
     actorRole: "admin",
     actorUserId: input.adminUserId,
     message: `배송 처리: ${input.courier} ${input.trackingNumber}`,
-    metadata: { trackingNumber: input.trackingNumber, courier: input.courier },
+    metadata: { trackingNumber: input.trackingNumber, courier: input.courier, carrierCode },
   });
   return saved;
 }
@@ -1555,6 +1752,16 @@ export async function markShopOrderDelivered(input: {
   const saved = await writeOrder({
     ...current,
     status: "DELIVERED",
+    shipping: normalizeShopShippingSnapshot({
+      ...current.shipping,
+      smartTracker: mergeSmartTrackerMeta(current.shipping.smartTracker, {
+        lastStatus: "delivered",
+        lastStatusLabel: "배송완료",
+        lastEventAt: now,
+        lastPolledAt: now,
+        deliveredAt: now,
+      }),
+    }),
     deliveredAt: now,
   });
   await writeOrderEventSafe({
@@ -1566,6 +1773,56 @@ export async function markShopOrderDelivered(input: {
     metadata: null,
   });
   return saved;
+}
+
+export async function confirmShopOrderDelivered(input: {
+  userId: string;
+  orderId: string;
+}): Promise<ShopOrderRecord> {
+  const current = await readShopOrderForUser(input.userId, input.orderId);
+  const order = current ? await syncSingleOrderTrackingIfNeeded(current).catch(() => current) : null;
+  if (!order) throw new Error("shop_order_not_found");
+  if (order.status === "DELIVERED") return order;
+  if (order.status !== "SHIPPED") throw new Error("shop_order_not_shipped");
+
+  const now = new Date().toISOString();
+  const saved = await writeOrder({
+    ...order,
+    status: "DELIVERED",
+    shipping: normalizeShopShippingSnapshot({
+      ...order.shipping,
+      smartTracker: mergeSmartTrackerMeta(order.shipping.smartTracker, {
+        lastStatus: "delivered",
+        lastStatusLabel: "배송완료",
+        lastEventAt: now,
+        lastPolledAt: now,
+        deliveredAt: now,
+      }),
+    }),
+    deliveredAt: now,
+  });
+  await writeOrderEventSafe({
+    order: saved,
+    eventType: "order_delivered",
+    actorRole: "user",
+    actorUserId: input.userId,
+    message: "사용자가 배송 수령을 확인했습니다.",
+    metadata: { deliveredAt: now, source: "user_confirmation" },
+  });
+  return saved;
+}
+
+export async function syncShopOrderTracking(input: {
+  orderId: string;
+  adminUserId?: string | null;
+  force?: boolean;
+}): Promise<ShopOrderRecord> {
+  const current = await readShopOrder(input.orderId);
+  if (!current) throw new Error("shop_order_not_found");
+  return syncSingleOrderTrackingIfNeeded(current, {
+    force: Boolean(input.force),
+    actorUserId: input.adminUserId ?? null,
+  });
 }
 
 export function toShopAdminOrderSummary(order: ShopOrderRecord): ShopAdminOrderSummary {

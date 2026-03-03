@@ -20,6 +20,13 @@ type EmailPayload = {
   html: string;
 };
 
+type EmailRow = {
+  label: string;
+  value: string;
+  emphasize?: boolean;
+  keepBorder?: boolean;
+};
+
 async function sendEmail(payload: EmailPayload): Promise<void> {
   if (!RESEND_API_KEY) {
     console.log("[EmailService] 이메일 미발송 (RESEND_API_KEY 미설정):", payload.subject, "→", payload.to);
@@ -34,7 +41,7 @@ async function sendEmail(payload: EmailPayload): Promise<void> {
     body: JSON.stringify({
       from: FROM_ADDRESS,
       to: [payload.to],
-      subject: payload.subject,
+      subject: sanitizeEmailHeader(payload.subject),
       html: payload.html,
     }),
   });
@@ -59,6 +66,38 @@ export async function loadUserEmailById(userId: string): Promise<string | null> 
 
 function formatKrw(amount: number) {
   return `${Math.round(amount).toLocaleString("ko-KR")}원`;
+}
+
+function sanitizeEmailHeader(value: string) {
+  return String(value ?? "")
+    .replace(/[\r\n]+/g, " ")
+    .trim();
+}
+
+function escapeHtml(value: string) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function renderEmailRows(rows: EmailRow[]) {
+  return `<table style="width:100%;border-collapse:collapse;margin:0 0 16px;">
+    ${rows
+      .map((row) => {
+        const border = row.keepBorder === false ? "" : "border-bottom:1px solid #edf1f6;";
+        const valueStyle = row.emphasize
+          ? "font-size:14px;font-weight:700;color:#111827;"
+          : "font-size:13px;color:#111827;";
+        return `<tr>
+          <td style="padding:10px 0;${border}font-size:13px;color:#8d99ab;width:100px;">${escapeHtml(row.label)}</td>
+          <td style="padding:10px 0;${border}${valueStyle}">${row.value}</td>
+        </tr>`;
+      })
+      .join("")}
+  </table>`;
 }
 
 function emailLayout(title: string, content: string) {
@@ -86,6 +125,9 @@ function emailLayout(title: string, content: string) {
 </body></html>`;
 }
 
+// 쇼핑 주문 메일의 문구/항목 편집은 아래 3개 템플릿 함수에서 바로 수정하면 됩니다.
+// 제목(subject), 안내 문장, 표에 들어가는 항목 순서를 바꾸면 실제 발송 형식이 그대로 반영됩니다.
+
 export async function sendOrderConfirmationEmail(order: {
   orderId: string;
   customerEmail: string | null;
@@ -97,21 +139,21 @@ export async function sendOrderConfirmationEmail(order: {
   addressLine2: string;
 }): Promise<void> {
   if (!order.customerEmail) return;
+  const recipientName = escapeHtml(order.recipientName);
+  const productName = escapeHtml(order.productName);
+  const orderId = escapeHtml(order.orderId);
+  const address = escapeHtml(`${order.addressLine1}${order.addressLine2 ? ` ${order.addressLine2}` : ""}`);
   const content = `
     <p style="margin:0 0 16px;font-size:14px;color:#44556d;line-height:1.7;">
-      <strong>${order.recipientName}</strong>님, 주문이 완료되었습니다.<br/>
+      <strong>${recipientName}</strong>님, 주문이 완료되었습니다.<br/>
       상품 준비 후 배송이 시작되면 별도 안내 드립니다.
     </p>
-    <table style="width:100%;border-collapse:collapse;margin:0 0 16px;">
-      <tr><td style="padding:10px 0;border-bottom:1px solid #edf1f6;font-size:13px;color:#8d99ab;width:100px;">주문번호</td>
-          <td style="padding:10px 0;border-bottom:1px solid #edf1f6;font-size:13px;color:#111827;">${order.orderId}</td></tr>
-      <tr><td style="padding:10px 0;border-bottom:1px solid #edf1f6;font-size:13px;color:#8d99ab;">상품</td>
-          <td style="padding:10px 0;border-bottom:1px solid #edf1f6;font-size:13px;color:#111827;">${order.productName} × ${order.quantity}</td></tr>
-      <tr><td style="padding:10px 0;border-bottom:1px solid #edf1f6;font-size:13px;color:#8d99ab;">결제금액</td>
-          <td style="padding:10px 0;border-bottom:1px solid #edf1f6;font-size:14px;font-weight:700;color:#111827;">${formatKrw(order.amount)}</td></tr>
-      <tr><td style="padding:10px 0;font-size:13px;color:#8d99ab;">배송지</td>
-          <td style="padding:10px 0;font-size:13px;color:#111827;">${order.addressLine1}${order.addressLine2 ? ` ${order.addressLine2}` : ""}</td></tr>
-    </table>`;
+    ${renderEmailRows([
+      { label: "주문번호", value: orderId },
+      { label: "상품", value: `${productName} × ${Math.max(1, Math.round(order.quantity))}` },
+      { label: "결제금액", value: escapeHtml(formatKrw(order.amount)), emphasize: true },
+      { label: "배송지", value: address, keepBorder: false },
+    ])}`;
 
   await sendEmail({
     to: order.customerEmail,
@@ -125,20 +167,31 @@ export async function sendShippingStartedEmail(order: {
   productName: string;
   trackingNumber: string;
   courier: string;
+  trackingUrl?: string | null;
 }): Promise<void> {
   if (!order.customerEmail) return;
+  const productName = escapeHtml(order.productName);
+  const courier = escapeHtml(order.courier);
+  const trackingNumber = escapeHtml(order.trackingNumber);
+  const trackingCta =
+    order.trackingUrl && String(order.trackingUrl).trim()
+      ? `<p style="margin:0 0 16px;">
+          <a href="${escapeHtml(order.trackingUrl)}" target="_blank" rel="noopener noreferrer"
+             style="display:inline-block;padding:10px 16px;border-radius:999px;background:#11294b;color:#ffffff;text-decoration:none;font-size:13px;font-weight:700;">
+            배송 조회하기
+          </a>
+        </p>`
+      : "";
   const content = `
     <p style="margin:0 0 16px;font-size:14px;color:#44556d;line-height:1.7;">
       주문하신 상품이 발송되었습니다. 아래 운송장 번호로 배송을 추적하실 수 있습니다.
     </p>
-    <table style="width:100%;border-collapse:collapse;margin:0 0 16px;">
-      <tr><td style="padding:10px 0;border-bottom:1px solid #edf1f6;font-size:13px;color:#8d99ab;width:100px;">상품</td>
-          <td style="padding:10px 0;border-bottom:1px solid #edf1f6;font-size:13px;color:#111827;">${order.productName}</td></tr>
-      <tr><td style="padding:10px 0;border-bottom:1px solid #edf1f6;font-size:13px;color:#8d99ab;">택배사</td>
-          <td style="padding:10px 0;border-bottom:1px solid #edf1f6;font-size:13px;color:#111827;">${order.courier}</td></tr>
-      <tr><td style="padding:10px 0;font-size:13px;color:#8d99ab;">운송장번호</td>
-          <td style="padding:10px 0;font-size:14px;font-weight:700;color:#111827;">${order.trackingNumber}</td></tr>
-    </table>`;
+    ${renderEmailRows([
+      { label: "상품", value: productName },
+      { label: "택배사", value: courier },
+      { label: "운송장번호", value: trackingNumber, emphasize: true, keepBorder: false },
+    ])}
+    ${trackingCta}`;
 
   await sendEmail({
     to: order.customerEmail,
@@ -157,6 +210,16 @@ export async function sendRefundResultEmail(order: {
   if (!order.customerEmail) return;
   const isApproved = order.result === "approved";
   const title = isApproved ? "환불이 완료되었습니다" : "환불 요청이 반려되었습니다";
+  const productName = escapeHtml(order.productName);
+  const rows: EmailRow[] = [{ label: "상품", value: productName }];
+  if (isApproved && order.cancelAmount != null) {
+    rows.push({ label: "환불금액", value: escapeHtml(formatKrw(order.cancelAmount)), emphasize: true });
+  }
+  if (order.note) {
+    rows.push({ label: "사유", value: escapeHtml(order.note), keepBorder: false });
+  } else if (rows.length > 0) {
+    rows[rows.length - 1] = { ...rows[rows.length - 1], keepBorder: false };
+  }
   const content = `
     <p style="margin:0 0 16px;font-size:14px;color:#44556d;line-height:1.7;">
       ${isApproved
@@ -164,16 +227,7 @@ export async function sendRefundResultEmail(order: {
         : `환불 요청이 반려되었습니다. 아래 사유를 확인해 주세요.`
       }
     </p>
-    <table style="width:100%;border-collapse:collapse;margin:0 0 16px;">
-      <tr><td style="padding:10px 0;border-bottom:1px solid #edf1f6;font-size:13px;color:#8d99ab;width:100px;">상품</td>
-          <td style="padding:10px 0;border-bottom:1px solid #edf1f6;font-size:13px;color:#111827;">${order.productName}</td></tr>
-      ${isApproved && order.cancelAmount != null ? `
-      <tr><td style="padding:10px 0;border-bottom:1px solid #edf1f6;font-size:13px;color:#8d99ab;">환불금액</td>
-          <td style="padding:10px 0;border-bottom:1px solid #edf1f6;font-size:14px;font-weight:700;color:#111827;">${formatKrw(order.cancelAmount)}</td></tr>` : ""}
-      ${order.note ? `
-      <tr><td style="padding:10px 0;font-size:13px;color:#8d99ab;">사유</td>
-          <td style="padding:10px 0;font-size:13px;color:#111827;">${order.note}</td></tr>` : ""}
-    </table>`;
+    ${renderEmailRows(rows)}`;
 
   await sendEmail({
     to: order.customerEmail,

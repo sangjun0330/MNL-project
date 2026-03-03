@@ -1,6 +1,6 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { requireBillingAdmin } from "@/lib/server/billingAdminAuth";
-import { markShopOrderShipped, markShopOrderDelivered, toShopAdminOrderSummary } from "@/lib/server/shopOrderStore";
+import { markShopOrderShipped, markShopOrderDelivered, syncShopOrderTracking, toShopAdminOrderSummary } from "@/lib/server/shopOrderStore";
 import { loadUserEmailById, sendShippingStartedEmail } from "@/lib/server/emailService";
 
 export const runtime = "edge";
@@ -34,14 +34,19 @@ export async function PATCH(req: Request, ctx: any) {
     if (action === "mark_shipped") {
       const trackingNumber = String(body?.trackingNumber ?? "").trim();
       const courier = String(body?.courier ?? "").trim();
+      const carrierCode = String(body?.carrierCode ?? "").trim();
       if (!trackingNumber || !courier) {
         return jsonNoStore({ ok: false, error: "tracking_number_and_courier_required" }, { status: 400 });
+      }
+      if (!carrierCode) {
+        return jsonNoStore({ ok: false, error: "tracking_carrier_code_required" }, { status: 400 });
       }
       const order = await markShopOrderShipped({
         orderId,
         adminUserId: admin.identity.userId,
         trackingNumber,
         courier,
+        carrierCode,
       });
       // 이메일 발송 (실패해도 계속)
       try {
@@ -51,10 +56,20 @@ export async function PATCH(req: Request, ctx: any) {
           productName: order.productSnapshot.name,
           trackingNumber,
           courier,
+          trackingUrl: order.shipping.smartTracker?.trackingUrl ?? null,
         });
       } catch {
         // 이메일 실패는 무시
       }
+      return jsonNoStore({ ok: true, data: { order: toShopAdminOrderSummary(order) } });
+    }
+
+    if (action === "sync_tracking") {
+      const order = await syncShopOrderTracking({
+        orderId,
+        adminUserId: admin.identity.userId,
+        force: true,
+      });
       return jsonNoStore({ ok: true, data: { order: toShopAdminOrderSummary(order) } });
     }
 
@@ -72,6 +87,9 @@ export async function PATCH(req: Request, ctx: any) {
     if (message.includes("not_found")) return jsonNoStore({ ok: false, error: "shop_order_not_found" }, { status: 404 });
     if (message.includes("not_paid")) return jsonNoStore({ ok: false, error: "shop_order_not_paid" }, { status: 400 });
     if (message.includes("not_shipped")) return jsonNoStore({ ok: false, error: "shop_order_not_shipped" }, { status: 400 });
+    if (message.includes("carrier_code_required")) {
+      return jsonNoStore({ ok: false, error: "tracking_carrier_code_required" }, { status: 400 });
+    }
     if (
       message === "shop_order_storage_unavailable" ||
       message.toLowerCase().includes("supabase admin env missing") ||

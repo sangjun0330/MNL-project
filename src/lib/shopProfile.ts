@@ -17,8 +17,19 @@ export type ShopShippingAddressBook = {
   defaultAddressId: string | null;
 };
 
+export type ShopSmartTrackerMeta = {
+  carrierCode: string | null;
+  trackingUrl: string | null;
+  lastStatus: string | null;
+  lastStatusLabel: string | null;
+  lastEventAt: string | null;
+  lastPolledAt: string | null;
+  deliveredAt: string | null;
+};
+
 export type ShopShippingSnapshot = ShopShippingProfile & {
   savedAt: string | null;
+  smartTracker: ShopSmartTrackerMeta | null;
 };
 
 export function emptyShopShippingProfile(): ShopShippingProfile {
@@ -95,9 +106,25 @@ export function normalizeShopShippingSnapshot(raw: unknown): ShopShippingSnapsho
   const source = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const base = normalizeShopShippingProfile(source);
   const savedAt = cleanText(source.savedAt, 64) || null;
+  const smartTrackerSource =
+    source.smartTracker && typeof source.smartTracker === "object" && !Array.isArray(source.smartTracker)
+      ? (source.smartTracker as Record<string, unknown>)
+      : null;
+  const smartTracker: ShopSmartTrackerMeta | null = smartTrackerSource
+    ? {
+        carrierCode: cleanText(smartTrackerSource.carrierCode, 40) || null,
+        trackingUrl: cleanText(smartTrackerSource.trackingUrl, 400) || null,
+        lastStatus: cleanText(smartTrackerSource.lastStatus, 40) || null,
+        lastStatusLabel: cleanText(smartTrackerSource.lastStatusLabel, 80) || null,
+        lastEventAt: cleanText(smartTrackerSource.lastEventAt, 64) || null,
+        lastPolledAt: cleanText(smartTrackerSource.lastPolledAt, 64) || null,
+        deliveredAt: cleanText(smartTrackerSource.deliveredAt, 64) || null,
+      }
+    : null;
   return {
     ...base,
     savedAt,
+    smartTracker,
   };
 }
 

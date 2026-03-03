@@ -247,5 +247,6 @@ export function buildShopShippingSnapshot(profile: ShopShippingProfile): ShopShi
   return normalizeShopShippingSnapshot({
     ...profile,
     savedAt: new Date().toISOString(),
+    smartTracker: null,
   });
 }

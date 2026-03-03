@@ -70,6 +70,23 @@ function boolState(input: AdminRefundStatus, targets: AdminRefundStatus[]) {
   return targets.includes(input);
 }
 
+function OpsMetricCard({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: React.ReactNode;
+  tone: string;
+}) {
+  return (
+    <div className="rounded-[22px] border border-white/70 bg-white/85 px-4 py-4 shadow-[0_10px_30px_rgba(17,41,75,0.05)]">
+      <div className="text-[11px] font-semibold text-ios-sub">{label}</div>
+      <div className={`mt-2 text-[22px] font-extrabold tracking-[-0.03em] ${tone}`}>{value}</div>
+    </div>
+  );
+}
+
 export function SettingsAdminRefundsPage() {
   const { status } = useAuthState();
   const [filter, setFilter] = useState<"ALL" | AdminRefundStatus>("ALL");
@@ -232,15 +249,18 @@ export function SettingsAdminRefundsPage() {
   }, [actionLoadingKey]);
 
   return (
-    <div className="mx-auto w-full max-w-[860px] px-4 pb-24 pt-6">
-      <div className="mb-4 flex items-center gap-2">
+    <div className="mx-auto w-full max-w-[1120px] px-4 pb-24 pt-6">
+      <div className="mb-4 flex items-center gap-3">
         <Link
           href="/settings/admin"
-          className="rnest-btn-secondary inline-flex h-9 w-9 items-center justify-center text-[18px] text-ios-text"
+          className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/80 bg-white/90 text-[18px] text-ios-text shadow-[0_8px_24px_rgba(17,41,75,0.06)]"
         >
           ←
         </Link>
-        <div className="text-[24px] font-extrabold tracking-[-0.02em] text-ios-text">환불/결제 로그 운영</div>
+        <div>
+          <div className="text-[28px] font-extrabold tracking-[-0.03em] text-ios-text">환불/결제 로그 운영</div>
+          <div className="text-[12.5px] text-ios-sub">환불 워크플로와 Toss 결제 흐름을 같은 기준으로 관리합니다.</div>
+        </div>
       </div>
 
       {status !== "authenticated" ? (
@@ -259,141 +279,92 @@ export function SettingsAdminRefundsPage() {
 
       {status === "authenticated" ? (
         <>
-          <section className="rnest-surface p-5">
-            <div className="grid grid-cols-3 gap-2">
-              <div className="rnest-sub-surface p-3">
-                <div className="text-[11px] text-ios-sub">열린 요청</div>
-                <div className="mt-1 text-[20px] font-extrabold text-[color:var(--rnest-accent)]">{summary.open}</div>
-              </div>
-              <div className="rnest-sub-surface p-3">
-                <div className="text-[11px] text-ios-sub">환불 완료</div>
-                <div className="mt-1 text-[20px] font-extrabold text-[#0B7A3E]">{summary.done}</div>
-              </div>
-              <div className="rnest-sub-surface p-3">
-                <div className="text-[11px] text-ios-sub">거절/실패</div>
-                <div className="mt-1 text-[20px] font-extrabold text-[#B3261E]">{summary.failed}</div>
-              </div>
-            </div>
-
-            <div className="mt-4 flex flex-wrap gap-1.5">
-              {FILTER_ROWS.map((row) => (
-                <button
-                  key={row.key}
-                  type="button"
-                  onClick={() => setFilter(row.key)}
-                  className={`rounded-full border px-3 py-1 text-[12px] font-semibold transition ${
-                    filter === row.key
-                      ? "border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
-                      : "border-ios-sep bg-white text-ios-sub hover:bg-ios-bg"
-                  }`}
-                >
-                  {row.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-              <input
-                value={userIdFilter}
-                onChange={(e) => setUserIdFilter(e.target.value)}
-                placeholder="userId 필터 (선택)"
-                className="h-10 w-full rounded-full border border-ios-sep bg-white px-4 text-[13px] text-ios-text outline-none placeholder:text-ios-muted focus:border-[color:var(--rnest-accent-border)]"
-              />
-              <button
-                type="button"
-                onClick={() => void loadRequests()}
-                className="rnest-btn-secondary inline-flex h-10 items-center justify-center px-4 text-[13px]"
-              >
-                새로고침
-              </button>
-              <button
-                type="button"
-                onClick={() => void runRetryBatch()}
-                disabled={batchLoading || isActionBusy}
-                className="rnest-btn-primary inline-flex h-10 items-center justify-center px-4 text-[13px] disabled:opacity-50"
-              >
-                {batchLoading ? "재시도 실행 중..." : "재시도 큐 실행"}
-              </button>
-            </div>
-
-            {loading ? <div className="mt-3 text-[12px] text-ios-muted">불러오는 중...</div> : null}
-            {currentActionLabel ? <div className="mt-3 text-[12px] text-ios-muted">{currentActionLabel}</div> : null}
-            {error ? <div className="mt-3 text-[12px] text-red-600">{error}</div> : null}
-            {notice ? <div className="mt-3 text-[12px] text-[#0B7A3E]">{notice}</div> : null}
-          </section>
-
-          <section className="rnest-surface mt-4 p-5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-[15px] font-bold text-ios-text">Toss 결제 로그</div>
-              <div className="text-[12px] text-ios-sub">최근 {orderSummary.total}건</div>
-            </div>
-            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <div className="rnest-sub-surface p-3">
-                <div className="text-[11px] text-ios-sub">승인 완료</div>
-                <div className="mt-1 text-[18px] font-extrabold text-[#0B7A3E]">{orderSummary.done}</div>
-              </div>
-              <div className="rnest-sub-surface p-3">
-                <div className="text-[11px] text-ios-sub">실패</div>
-                <div className="mt-1 text-[18px] font-extrabold text-[#B3261E]">{orderSummary.failed}</div>
-              </div>
-              <div className="rnest-sub-surface p-3">
-                <div className="text-[11px] text-ios-sub">취소/환불</div>
-                <div className="mt-1 text-[18px] font-extrabold text-[#C2410C]">{orderSummary.canceled}</div>
-              </div>
-              <div className="rnest-sub-surface p-3">
-                <div className="text-[11px] text-ios-sub">결제 시도액 합계</div>
-                <div className="mt-1 text-[15px] font-extrabold text-ios-text">{formatKrw(orderSummary.totalAmount)}</div>
-              </div>
-            </div>
-            <div className="mt-2 text-[12px] text-ios-sub">
-              구독 {orderSummary.kindCounter.subscription}건 · 크레딧팩 {orderSummary.kindCounter.credit_pack}건 · 대기중{" "}
-              {orderSummary.ready}건
-            </div>
-
-            <div className="mt-3 space-y-1.5">
-              {orders.length === 0 ? (
-                <div className="text-[12px] text-ios-muted">조건에 맞는 결제 로그가 없습니다.</div>
-              ) : (
-                orders.map((order) => (
-                  <div key={order.orderId} className="rounded-xl border border-ios-sep bg-white/85 px-3 py-2.5">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="text-[13px] font-semibold text-ios-text">
-                        {order.orderId} · {order.orderKind === "credit_pack" ? "추가 크레딧" : "구독"}
-                      </div>
-                      <div
-                        className={`text-[12px] font-semibold ${
-                          order.status === "DONE"
-                            ? "text-[#0B7A3E]"
-                            : order.status === "FAILED"
-                              ? "text-[#B3261E]"
-                              : order.status === "CANCELED"
-                                ? "text-[#C2410C]"
-                                : "text-[color:var(--rnest-accent)]"
+          <section className="rounded-[32px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(244,248,252,0.96))] p-6 shadow-[0_22px_70px_rgba(17,41,75,0.08)]">
+            <div className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
+              <div>
+                <div className="inline-flex rounded-full border border-[#dbe4ef] bg-white px-3 py-1 text-[11px] font-semibold text-[#17324d]">
+                  환불 파이프라인
+                </div>
+                <div className="mt-4 grid grid-cols-3 gap-3">
+                  <OpsMetricCard label="열린 요청" value={summary.open} tone="text-[color:var(--rnest-accent)]" />
+                  <OpsMetricCard label="환불 완료" value={summary.done} tone="text-[#0B7A3E]" />
+                  <OpsMetricCard label="거절/실패" value={summary.failed} tone="text-[#B3261E]" />
+                </div>
+                <div className="mt-4 rounded-[24px] border border-[#e3eaf2] bg-white/85 p-4">
+                  <div className="text-[12px] font-semibold text-[#17324d]">상태 필터</div>
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {FILTER_ROWS.map((row) => (
+                      <button
+                        key={row.key}
+                        type="button"
+                        onClick={() => setFilter(row.key)}
+                        className={`rounded-full border px-3 py-1.5 text-[11.5px] font-semibold transition ${
+                          filter === row.key
+                            ? "border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
+                            : "border-ios-sep bg-white text-ios-sub hover:bg-ios-bg"
                         }`}
                       >
-                        {order.status}
-                      </div>
-                    </div>
-                    <div className="mt-0.5 text-[12px] text-ios-sub">
-                      user: {order.userId ?? "-"} · {formatKrw(order.amount)} ({order.currency}) · {order.orderName}
-                    </div>
-                    <div className="mt-0.5 text-[11.5px] text-ios-muted">
-                      created: {formatDateTimeLabel(order.createdAt)} · approved: {formatDateTimeLabel(order.approvedAt)}
-                    </div>
-                    {order.failCode || order.failMessage ? (
-                      <div className="mt-0.5 text-[11.5px] text-[#B3261E]">
-                        {order.failCode ?? "error"} {order.failMessage ? `· ${order.failMessage}` : ""}
-                      </div>
-                    ) : null}
+                        {row.label}
+                      </button>
+                    ))}
                   </div>
-                ))
-              )}
+                </div>
+              </div>
+
+              <div className="rounded-[24px] border border-[#e3eaf2] bg-white/88 p-4">
+                <div className="text-[12px] font-semibold text-[#17324d]">운영 도구</div>
+                <div className="mt-2 text-[12px] leading-6 text-ios-sub">
+                  특정 사용자 기준으로 요청과 결제 로그를 함께 좁혀 보고, 재시도 배치를 바로 실행할 수 있습니다.
+                </div>
+                <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                  <input
+                    value={userIdFilter}
+                    onChange={(e) => setUserIdFilter(e.target.value)}
+                    placeholder="userId 필터 (선택)"
+                    className="h-11 w-full rounded-2xl border border-ios-sep bg-white px-4 text-[13px] text-ios-text outline-none placeholder:text-ios-muted focus:border-[color:var(--rnest-accent-border)]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void loadRequests()}
+                    className="rnest-btn-secondary inline-flex h-11 items-center justify-center px-4 text-[13px]"
+                  >
+                    새로고침
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void runRetryBatch()}
+                    disabled={batchLoading || isActionBusy}
+                    className="rnest-btn-primary inline-flex h-11 items-center justify-center px-4 text-[13px] disabled:opacity-50"
+                  >
+                    {batchLoading ? "재시도 실행 중..." : "재시도 큐 실행"}
+                  </button>
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <OpsMetricCard label="결제 승인" value={orderSummary.done} tone="text-[#0B7A3E]" />
+                  <OpsMetricCard label="재시도 필요/대기" value={orderSummary.ready} tone="text-[#17324d]" />
+                </div>
+                {loading ? <div className="mt-3 text-[12px] text-ios-muted">불러오는 중...</div> : null}
+                {currentActionLabel ? <div className="mt-3 text-[12px] text-ios-muted">{currentActionLabel}</div> : null}
+                {error ? <div className="mt-3 text-[12px] text-red-600">{error}</div> : null}
+                {notice ? <div className="mt-3 text-[12px] text-[#0B7A3E]">{notice}</div> : null}
+              </div>
             </div>
           </section>
 
-          <section className="mt-4 space-y-2.5">
+          <div className="mt-4 grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
+          <section className="rnest-surface p-5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="text-[15px] font-bold text-ios-text">환불 요청</div>
+                <div className="mt-1 text-[12px] text-ios-sub">상태 전환과 실행 버튼을 한 카드 안에서 처리합니다.</div>
+              </div>
+              <div className="rounded-full border border-[#d7dfeb] bg-[#f4f7fb] px-3 py-1 text-[11px] font-semibold text-[#11294b]">
+                {requests.length}건
+              </div>
+            </div>
+            <div className="mt-4 space-y-2.5">
             {requests.length === 0 ? (
-              <div className="rnest-surface p-5 text-[13px] text-ios-sub">
+              <div className="rounded-2xl border border-ios-sep bg-white px-4 py-4 text-[13px] text-ios-sub">
                 조건에 맞는 환불 요청이 없습니다.
               </div>
             ) : null}
@@ -406,7 +377,7 @@ export function SettingsAdminRefundsPage() {
               const canExecute = boolState(request.status, ["APPROVED", "FAILED_RETRYABLE", "EXECUTING"]);
 
               return (
-                <div key={request.id} className="rnest-surface p-4">
+                <div key={request.id} className="rounded-[24px] border border-ios-sep bg-white/90 p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <div className="text-[15px] font-bold text-ios-text">#{request.id} · {request.orderId}</div>
@@ -419,10 +390,10 @@ export function SettingsAdminRefundsPage() {
                     </div>
                   </div>
 
-                  <div className="rnest-sub-surface mt-2 px-3 py-2">
-                    <div className="text-[12px] text-ios-sub">사유</div>
-                    <div className="mt-0.5 text-[13px] text-ios-text">{request.reason}</div>
-                    <div className="mt-1 text-[12px] text-ios-sub">
+                  <div className="mt-3 rounded-[20px] border border-[#e8edf4] bg-[#f8fafc] px-4 py-3">
+                    <div className="text-[11px] font-semibold text-[#60768d]">환불 사유</div>
+                    <div className="mt-1 text-[13px] text-ios-text">{request.reason}</div>
+                    <div className="mt-2 text-[12px] text-ios-sub">
                       환불 요청 금액: {formatKrw(request.cancelAmount ?? 0)} ({request.currency})
                     </div>
                     {request.errorCode || request.errorMessage ? (
@@ -611,7 +582,78 @@ export function SettingsAdminRefundsPage() {
                 </div>
               );
             })}
+            </div>
           </section>
+
+          <section className="rnest-surface p-5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-[15px] font-bold text-ios-text">Toss 결제 로그</div>
+              <div className="text-[12px] text-ios-sub">최근 {orderSummary.total}건</div>
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <div className="rnest-sub-surface p-3">
+                <div className="text-[11px] text-ios-sub">승인 완료</div>
+                <div className="mt-1 text-[18px] font-extrabold text-[#0B7A3E]">{orderSummary.done}</div>
+              </div>
+              <div className="rnest-sub-surface p-3">
+                <div className="text-[11px] text-ios-sub">실패</div>
+                <div className="mt-1 text-[18px] font-extrabold text-[#B3261E]">{orderSummary.failed}</div>
+              </div>
+              <div className="rnest-sub-surface p-3">
+                <div className="text-[11px] text-ios-sub">취소/환불</div>
+                <div className="mt-1 text-[18px] font-extrabold text-[#C2410C]">{orderSummary.canceled}</div>
+              </div>
+              <div className="rnest-sub-surface p-3">
+                <div className="text-[11px] text-ios-sub">결제 시도액 합계</div>
+                <div className="mt-1 text-[15px] font-extrabold text-ios-text">{formatKrw(orderSummary.totalAmount)}</div>
+              </div>
+            </div>
+            <div className="mt-2 text-[12px] text-ios-sub">
+              구독 {orderSummary.kindCounter.subscription}건 · 크레딧팩 {orderSummary.kindCounter.credit_pack}건 · 대기중{" "}
+              {orderSummary.ready}건
+            </div>
+
+            <div className="mt-3 space-y-1.5">
+              {orders.length === 0 ? (
+                <div className="text-[12px] text-ios-muted">조건에 맞는 결제 로그가 없습니다.</div>
+              ) : (
+                orders.map((order) => (
+                  <div key={order.orderId} className="rounded-xl border border-ios-sep bg-white/85 px-3 py-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-[13px] font-semibold text-ios-text">
+                        {order.orderId} · {order.orderKind === "credit_pack" ? "추가 크레딧" : "구독"}
+                      </div>
+                      <div
+                        className={`text-[12px] font-semibold ${
+                          order.status === "DONE"
+                            ? "text-[#0B7A3E]"
+                            : order.status === "FAILED"
+                              ? "text-[#B3261E]"
+                              : order.status === "CANCELED"
+                                ? "text-[#C2410C]"
+                                : "text-[color:var(--rnest-accent)]"
+                        }`}
+                      >
+                        {order.status}
+                      </div>
+                    </div>
+                    <div className="mt-0.5 text-[12px] text-ios-sub">
+                      user: {order.userId ?? "-"} · {formatKrw(order.amount)} ({order.currency}) · {order.orderName}
+                    </div>
+                    <div className="mt-0.5 text-[11.5px] text-ios-muted">
+                      created: {formatDateTimeLabel(order.createdAt)} · approved: {formatDateTimeLabel(order.approvedAt)}
+                    </div>
+                    {order.failCode || order.failMessage ? (
+                      <div className="mt-0.5 text-[11.5px] text-[#B3261E]">
+                        {order.failCode ?? "error"} {order.failMessage ? `· ${order.failMessage}` : ""}
+                      </div>
+                    ) : null}
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+          </div>
         </>
       ) : null}
     </div>

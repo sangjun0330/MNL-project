@@ -46,6 +46,13 @@ type ShopAdminOrderSummary = {
   refund: { status: "none" | "requested" | "rejected" | "done"; reason: string | null; note: string | null };
   trackingNumber: string | null;
   courier: string | null;
+  tracking: {
+    carrierCode: string | null;
+    trackingUrl: string | null;
+    statusLabel: string | null;
+    lastEventAt: string | null;
+    lastPolledAt: string | null;
+  } | null;
   shippedAt: string | null;
   deliveredAt: string | null;
 };
@@ -134,6 +141,14 @@ function orderStatusClass(status: ShopAdminOrderSummary["status"]) {
   return "border-[#dfe5ee] bg-[#f7f8fb] text-[#3d4d63]";
 }
 
+function productChannelLabel(product: ShopProduct & { active?: boolean }) {
+  const isActive = (product as any).active !== false;
+  if (!isActive) return "비활성";
+  if (product.checkoutEnabled && product.priceKrw) return "직접 결제";
+  if (product.externalUrl) return "외부 링크";
+  return "준비중";
+}
+
 function formatDateLabel(value: string | null) {
   if (!value) return "-";
   const date = new Date(value);
@@ -142,13 +157,32 @@ function formatDateLabel(value: string | null) {
 }
 
 function buildShippingDrafts(orders: ShopAdminOrderSummary[]) {
-  return orders.reduce<Record<string, { courier: string; trackingNumber: string }>>((acc, order) => {
+  return orders.reduce<Record<string, { courier: string; carrierCode: string; trackingNumber: string }>>((acc, order) => {
     acc[order.orderId] = {
       courier: order.courier ?? "",
+      carrierCode: order.tracking?.carrierCode ?? "",
       trackingNumber: order.trackingNumber ?? "",
     };
     return acc;
   }, {});
+}
+
+function AdminSummaryTile({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: React.ReactNode;
+  hint?: string;
+}) {
+  return (
+    <div className="rounded-[24px] border border-white/70 bg-white/88 px-4 py-4 shadow-[0_10px_30px_rgba(17,41,75,0.05)]">
+      <div className="text-[11px] font-semibold text-[#92a0b4]">{label}</div>
+      <div className="mt-2 text-[24px] font-bold tracking-[-0.03em] text-[#11294b]">{value}</div>
+      {hint ? <div className="mt-1 text-[11px] text-[#7c8ea5]">{hint}</div> : null}
+    </div>
+  );
 }
 
 function validateDraft(draft: ProductDraft): FieldErrors {
@@ -911,7 +945,7 @@ export function ShopAdminPage() {
   // Orders & refunds
   const [orders, setOrders] = useState<ShopAdminOrderSummary[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
-  const [shippingDrafts, setShippingDrafts] = useState<Record<string, { courier: string; trackingNumber: string }>>({});
+  const [shippingDrafts, setShippingDrafts] = useState<Record<string, { courier: string; carrierCode: string; trackingNumber: string }>>({});
   const [shippingLoadingId, setShippingLoadingId] = useState<string | null>(null);
 
   // Edit state
@@ -939,6 +973,15 @@ export function ShopAdminPage() {
       shippingPending: orders.filter((order) => order.status === "PAID").length,
     };
   }, [orders, refundQueue.length]);
+  const orderFlowStats = useMemo(
+    () => ({
+      readyToShip: orders.filter((order) => order.status === "PAID").length,
+      shipping: orders.filter((order) => order.status === "SHIPPED").length,
+      delivered: orders.filter((order) => order.status === "DELIVERED").length,
+      issues: orders.filter((order) => order.status === "FAILED" || order.status === "REFUND_REJECTED").length,
+    }),
+    [orders]
+  );
   const filteredCatalog = useMemo(() => {
     if (catalogFilter === "active") return catalog.filter((p) => p.active !== false);
     if (catalogFilter === "inactive") return catalog.filter((p) => p.active === false);
@@ -1178,27 +1221,28 @@ export function ShopAdminPage() {
 
   const handleShippingDraftChange = (
     orderId: string,
-    field: "courier" | "trackingNumber",
+    field: "courier" | "carrierCode" | "trackingNumber",
     value: string
   ) => {
     setShippingDrafts((current) => ({
       ...current,
       [orderId]: {
         courier: current[orderId]?.courier ?? "",
+        carrierCode: current[orderId]?.carrierCode ?? "",
         trackingNumber: current[orderId]?.trackingNumber ?? "",
         [field]: value,
       },
     }));
   };
 
-  const handleShippingAction = async (orderId: string, action: "mark_shipped" | "mark_delivered") => {
+  const handleShippingAction = async (orderId: string, action: "mark_shipped" | "mark_delivered" | "sync_tracking") => {
     if (accessState !== "allowed") return;
     setShippingLoadingId(orderId);
     setNotice(null);
 
-    const draft = shippingDrafts[orderId] ?? { courier: "", trackingNumber: "" };
-    if (action === "mark_shipped" && (!draft.courier.trim() || !draft.trackingNumber.trim())) {
-      showNotice("error", "배송 처리에는 택배사와 운송장 번호가 모두 필요합니다.");
+    const draft = shippingDrafts[orderId] ?? { courier: "", carrierCode: "", trackingNumber: "" };
+    if (action === "mark_shipped" && (!draft.courier.trim() || !draft.carrierCode.trim() || !draft.trackingNumber.trim())) {
+      showNotice("error", "배송 처리에는 택배사명, 스마트택배 코드, 운송장 번호가 모두 필요합니다.");
       setShippingLoadingId(null);
       return;
     }
@@ -1207,7 +1251,12 @@ export function ShopAdminPage() {
       const headers = await authHeaders();
       const body =
         action === "mark_shipped"
-          ? { action, courier: draft.courier.trim(), trackingNumber: draft.trackingNumber.trim() }
+          ? {
+              action,
+              courier: draft.courier.trim(),
+              carrierCode: draft.carrierCode.trim(),
+              trackingNumber: draft.trackingNumber.trim(),
+            }
           : { action };
 
       const res = await fetch(`/api/admin/shop/orders/${encodeURIComponent(orderId)}`, {
@@ -1226,14 +1275,26 @@ export function ShopAdminPage() {
         ...current,
         [nextOrder.orderId]: {
           courier: nextOrder.courier ?? "",
+          carrierCode: nextOrder.tracking?.carrierCode ?? "",
           trackingNumber: nextOrder.trackingNumber ?? "",
         },
       }));
-      showNotice("notice", action === "mark_shipped" ? "배송 처리 완료" : "배송 완료로 변경했습니다.");
+      showNotice(
+        "notice",
+        action === "mark_shipped"
+          ? nextOrder.tracking?.trackingUrl
+            ? "배송 처리를 시작했고 스마트택배 자동 추적을 연결했습니다."
+            : "배송 처리를 시작했습니다. SmartTracker API 키를 설정하면 자동 배송 추적이 활성화됩니다."
+          : action === "sync_tracking"
+            ? "스마트택배 배송 상태를 다시 확인했습니다."
+            : "배송 완료로 변경했습니다."
+      );
     } catch (error: any) {
       const message = String(error?.message ?? "");
       if (message === "tracking_number_and_courier_required") {
         showNotice("error", "택배사와 운송장 번호를 모두 입력해주세요.");
+      } else if (message === "tracking_carrier_code_required") {
+        showNotice("error", "스마트택배 택배사 코드(t_code)를 입력해주세요.");
       } else if (message === "shop_order_not_paid") {
         showNotice("error", "결제 완료 주문만 배송 처리할 수 있습니다.");
       } else if (message === "shop_order_not_shipped") {
@@ -1281,85 +1342,97 @@ export function ShopAdminPage() {
 
   const activeProduct = catalog.find((p) => p.id === activeProductId) ?? null;
   const isActiveProduct = activeProduct ? (activeProduct as any).active !== false : true;
+  const activeSectionMeta = {
+    products: {
+      title: "상품 워크스페이스",
+      description: "카탈로그와 편집 폼을 한 흐름으로 정리합니다.",
+    },
+    orders: {
+      title: "주문·배송 워크스페이스",
+      description: "발송 준비, 추적, 완료 상태를 최근 주문 기준으로 관리합니다.",
+    },
+    refunds: {
+      title: "쇼핑 환불 워크스페이스",
+      description: "쇼핑 환불 요청만 빠르게 확인하고 처리합니다.",
+    },
+  }[activeSection];
 
   return (
-    <div className="mx-auto w-full max-w-[960px] space-y-4 px-4 pb-24 pt-6">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <Link href="/shop" data-auth-allow className={`${SECONDARY_BUTTON} h-9 text-[12px]`}>{t("← 쇼핑으로")}</Link>
-          <div className="mt-3 text-[28px] font-extrabold tracking-[-0.02em] text-ios-text">{t("쇼핑 운영 관리")}</div>
-          <div className="mt-1 text-[12.5px] text-ios-sub">{t("상품 등록 · 주문 확인 · 환불 처리")}</div>
-        </div>
-      </div>
+    <div className="mx-auto w-full max-w-[1120px] space-y-4 px-4 pb-24 pt-6">
+      <section className="rounded-[32px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(244,248,252,0.96))] p-6 shadow-[0_22px_70px_rgba(17,41,75,0.08)]">
+        <div className="grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
+          <div>
+            <Link href="/shop" data-auth-allow className={`${SECONDARY_BUTTON} h-10 text-[12px]`}>{t("← 쇼핑으로")}</Link>
+            <div className="mt-4 text-[30px] font-extrabold tracking-[-0.03em] text-ios-text">{t("쇼핑 운영 관리")}</div>
+            <div className="mt-2 text-[13px] leading-6 text-ios-sub">{t("상품, 주문, 배송, 쇼핑 환불을 같은 운영 기준으로 단순하게 정리합니다.")}</div>
 
-      {/* Global notice */}
-      {notice ? (
-        <div className={[
-          "rounded-2xl px-4 py-3 text-[12.5px] leading-5",
-          noticeTone === "error" ? "border border-[#f1d0cc] bg-[#fff6f5] text-[#a33a2b]" : "border border-[#d7dfeb] bg-[#eef4fb] text-[#11294b]",
-        ].join(" ")}>
-          {notice}
-        </div>
-      ) : null}
+            <div className="mt-5 rounded-[24px] border border-[#e3eaf2] bg-white/88 p-4">
+              <div className="text-[12px] font-semibold text-[#17324d]">{activeSectionMeta.title}</div>
+              <div className="mt-1 text-[12px] leading-6 text-ios-sub">{activeSectionMeta.description}</div>
+              <div className="mt-4 grid grid-cols-3 gap-2">
+                {([
+                  { key: "products", label: "상품" },
+                  { key: "orders", label: "주문·배송" },
+                  { key: "refunds", label: "환불" },
+                ] as { key: AdminSection; label: string }[]).map((section) => (
+                  <button
+                    key={section.key}
+                    type="button"
+                    data-auth-allow
+                    onClick={() => setActiveSection(section.key)}
+                    className={[
+                      "rounded-2xl px-4 py-3 text-[12px] font-semibold transition",
+                      activeSection === section.key
+                        ? "bg-[#11294b] text-white"
+                        : "border border-[#d7dfeb] bg-white text-[#11294b]",
+                    ].join(" ")}
+                  >
+                    {section.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <div className="rounded-[24px] border border-ios-sep bg-white px-4 py-4">
-          <div className="text-[11px] font-semibold text-[#92a0b4]">총 주문</div>
-          <div className="mt-2 text-[24px] font-bold tracking-[-0.02em] text-[#11294b]">{salesStats.totalOrders}건</div>
-        </div>
-        <div className="rounded-[24px] border border-ios-sep bg-white px-4 py-4">
-          <div className="text-[11px] font-semibold text-[#92a0b4]">총 매출</div>
-          <div className="mt-2 text-[24px] font-bold tracking-[-0.02em] text-[#11294b]">
-            {salesStats.totalSales.toLocaleString("ko-KR")}원
+          <div className="grid grid-cols-2 gap-3">
+            <AdminSummaryTile label="총 주문" value={`${salesStats.totalOrders}건`} />
+            <AdminSummaryTile
+              label="총 매출"
+              value={`${salesStats.totalSales.toLocaleString("ko-KR")}원`}
+            />
+            <AdminSummaryTile label="환불 대기" value={`${salesStats.refundPending}건`} hint="쇼핑 환불 요청" />
+            <AdminSummaryTile label="배송 대기" value={`${salesStats.shippingPending}건`} hint="결제 완료 후 미발송" />
           </div>
         </div>
-        <div className="rounded-[24px] border border-ios-sep bg-white px-4 py-4">
-          <div className="text-[11px] font-semibold text-[#92a0b4]">환불 대기</div>
-          <div className="mt-2 text-[24px] font-bold tracking-[-0.02em] text-[#11294b]">{salesStats.refundPending}건</div>
-        </div>
-        <div className="rounded-[24px] border border-ios-sep bg-white px-4 py-4">
-          <div className="text-[11px] font-semibold text-[#92a0b4]">배송 대기</div>
-          <div className="mt-2 text-[24px] font-bold tracking-[-0.02em] text-[#11294b]">{salesStats.shippingPending}건</div>
-        </div>
-      </div>
 
-      <div className="flex flex-wrap gap-2">
-        {([
-          { key: "products", label: "상품 관리" },
-          { key: "orders", label: "주문 관리" },
-          { key: "refunds", label: "환불 관리" },
-        ] as { key: AdminSection; label: string }[]).map((section) => (
-          <button
-            key={section.key}
-            type="button"
-            data-auth-allow
-            onClick={() => setActiveSection(section.key)}
-            className={[
-              "rounded-2xl px-4 py-2 text-[12px] font-semibold transition",
-              activeSection === section.key ? "bg-[#3b6fc9] text-white" : "border border-[#d7dfeb] bg-white text-[#11294b]",
-            ].join(" ")}
-          >
-            {section.label}
-          </button>
-        ))}
-      </div>
+        {notice ? (
+          <div className={[
+            "mt-5 rounded-2xl px-4 py-3 text-[12.5px] leading-5",
+            noticeTone === "error" ? "border border-[#f1d0cc] bg-[#fff6f5] text-[#a33a2b]" : "border border-[#d7dfeb] bg-[#eef4fb] text-[#11294b]",
+          ].join(" ")}>
+            {notice}
+          </div>
+        ) : null}
+      </section>
 
       {/* Main grid: product list | edit form */}
       {activeSection === "products" ? (
-      <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
+      <div className="grid gap-4 xl:grid-cols-[320px_1fr]">
 
         {/* ── Product list ── */}
         <div className="rounded-[28px] border border-ios-sep bg-white p-5">
           <div className="flex items-center justify-between gap-2">
-            <div className="text-[15px] font-bold tracking-[-0.02em] text-ios-text">{t("등록된 상품")}</div>
+            <div>
+              <div className="text-[15px] font-bold tracking-[-0.02em] text-ios-text">{t("등록된 상품")}</div>
+              <div className="mt-1 text-[11.5px] text-ios-sub">활성/비활성 상태를 빠르게 바꾸고 편집 대상을 선택합니다.</div>
+            </div>
             <div className="rounded-full border border-[#d7dfeb] bg-[#f4f7fb] px-2.5 py-0.5 text-[11px] font-semibold text-[#11294b]">
-              {catalogLoading ? "…" : `${catalog.length}개`}
+              {catalogLoading ? "…" : `${filteredCatalog.length}개`}
             </div>
           </div>
 
           {/* Filter tabs */}
-          <div className="mt-3 flex gap-1">
+          <div className="mt-4 grid grid-cols-3 gap-2">
             {(["all", "active", "inactive"] as CatalogFilter[]).map((f) => (
               <button
                 key={f}
@@ -1367,8 +1440,8 @@ export function ShopAdminPage() {
                 data-auth-allow
                 onClick={() => setCatalogFilter(f)}
                 className={[
-                  "flex-1 rounded-xl py-1.5 text-[11px] font-semibold transition",
-                  catalogFilter === f ? "bg-[#11294b] text-white" : "bg-[#f4f7fb] text-[#11294b]",
+                  "rounded-2xl py-2.5 text-[11.5px] font-semibold transition",
+                  catalogFilter === f ? "bg-[#11294b] text-white" : "border border-[#d7dfeb] bg-[#f8fafc] text-[#11294b]",
                 ].join(" ")}
               >
                 {f === "all" ? "전체" : f === "active" ? "활성" : "비활성"}
@@ -1400,7 +1473,7 @@ export function ShopAdminPage() {
                         "flex-shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold",
                         isActive ? "border-[#d7dfeb] bg-[#f4f7fb] text-[#11294b]" : "border-[#e5e9f0] bg-[#f1f3f7] text-[#92a0b4]",
                       ].join(" ")}>
-                        {isActive ? (product.checkoutEnabled && product.priceKrw ? "직접 결제" : product.externalUrl ? "외부 링크" : "준비중") : "비활성"}
+                        {productChannelLabel(product)}
                       </span>
                     </div>
                     <div className="mt-1 text-[11px] text-ios-sub">{getShopCategoryMeta(product.category).label}</div>
@@ -1454,8 +1527,27 @@ export function ShopAdminPage() {
             ) : null}
           </div>
 
+          <div className="mb-4 rounded-[24px] border border-[#e3eaf2] bg-[#f8fafc] px-4 py-4">
+            <div className="grid gap-3 md:grid-cols-3">
+              <div>
+                <div className="text-[10.5px] font-semibold text-[#7c8ea5]">상품 ID</div>
+                <div className="mt-1 text-[12px] font-semibold text-[#17324d]">{draft.id.trim() || "저장 시 자동 생성"}</div>
+              </div>
+              <div>
+                <div className="text-[10.5px] font-semibold text-[#7c8ea5]">카테고리</div>
+                <div className="mt-1 text-[12px] font-semibold text-[#17324d]">{getShopCategoryMeta(draft.category).label}</div>
+              </div>
+              <div>
+                <div className="text-[10.5px] font-semibold text-[#7c8ea5]">판매 상태</div>
+                <div className="mt-1 text-[12px] font-semibold text-[#17324d]">
+                  {draft.active === false ? "비활성" : draft.checkoutEnabled ? "직접 결제" : draft.externalUrl.trim() ? "외부 링크" : "준비중"}
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Tab bar */}
-          <div className="mb-5 flex flex-wrap gap-1 border-b border-[#eef2f7] pb-4">
+          <div className="mb-5 grid grid-cols-2 gap-2 border-b border-[#eef2f7] pb-4 md:grid-cols-3">
             {TABS.map(({ key, label }) => {
               const hasErr = errorsInTab(fieldErrors, key);
               return (
@@ -1465,7 +1557,7 @@ export function ShopAdminPage() {
                   data-auth-allow
                   onClick={() => setActiveTab(key)}
                   className={[
-                    "rounded-xl px-3 py-1.5 text-[12px] font-semibold transition relative",
+                    "rounded-2xl px-3 py-2.5 text-[12px] font-semibold transition relative",
                     activeTab === key ? "bg-[#11294b] text-white" : "bg-[#f4f7fb] text-[#11294b]",
                     hasErr ? "ring-1 ring-[#e07b6a]" : "",
                   ].join(" ")}
@@ -1521,11 +1613,16 @@ export function ShopAdminPage() {
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{t("환불 요청 처리")}</div>
-            <div className="mt-1 text-[12.5px] text-ios-sub">{t("환불 요청만 먼저 표시됩니다.")}</div>
+            <div className="mt-1 text-[12.5px] text-ios-sub">{t("쇼핑 환불 요청만 모아 승인/반려를 빠르게 처리합니다.")}</div>
           </div>
           <div className="rounded-full border border-[#d7dfeb] bg-[#f4f7fb] px-3 py-1 text-[11px] font-semibold text-[#11294b]">
             {ordersLoading ? "…" : `${refundQueue.length}건`}
           </div>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <AdminSummaryTile label="처리 대기" value={`${refundQueue.length}건`} />
+          <AdminSummaryTile label="반려/보류" value={`${orders.filter((order) => order.status === "REFUND_REJECTED").length}건`} />
+          <AdminSummaryTile label="완료" value={`${orders.filter((order) => order.status === "REFUNDED").length}건`} />
         </div>
         <div className="mt-4 space-y-3">
           {refundQueue.map((order) => (
@@ -1543,12 +1640,15 @@ export function ShopAdminPage() {
               </div>
               <div className="mt-2 text-[12px] text-ios-sub">{order.refund.reason ?? t("환불 사유 없음")}</div>
               {order.shipping.addressLine1 ? (
-                <div className="mt-2 rounded-2xl border border-[#eef2f7] bg-[#f8fafc] px-3 py-3 text-[11.5px] leading-5 text-[#44556d]">
-                  {order.shipping.recipientName} · {order.shipping.phone}<br />
-                  ({order.shipping.postalCode}) {order.shipping.addressLine1}
-                  {order.shipping.addressLine2 ? ` ${order.shipping.addressLine2}` : ""}
-                  {order.shipping.deliveryNote ? <><br />메모: {order.shipping.deliveryNote}</> : null}
-                </div>
+                <details className="mt-2 rounded-2xl border border-[#eef2f7] bg-[#f8fafc] px-3 py-3 text-[11.5px] leading-5 text-[#44556d]">
+                  <summary className="cursor-pointer list-none font-semibold text-[#17324d]">배송 정보 보기</summary>
+                  <div className="mt-2">
+                    {order.shipping.recipientName} · {order.shipping.phone}<br />
+                    ({order.shipping.postalCode}) {order.shipping.addressLine1}
+                    {order.shipping.addressLine2 ? ` ${order.shipping.addressLine2}` : ""}
+                    {order.shipping.deliveryNote ? <><br />메모: {order.shipping.deliveryNote}</> : null}
+                  </div>
+                </details>
               ) : null}
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
@@ -1582,7 +1682,21 @@ export function ShopAdminPage() {
       {/* ── Recent orders ── */}
       {activeSection === "orders" ? (
       <div className="rounded-[28px] border border-ios-sep bg-white p-5">
-        <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{t("최근 주문")}</div>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{t("최근 주문")}</div>
+            <div className="mt-1 text-[12.5px] text-ios-sub">발송 준비와 배송 추적을 최근 주문 기준으로 관리합니다.</div>
+          </div>
+          <div className="rounded-full border border-[#d7dfeb] bg-[#f4f7fb] px-3 py-1 text-[11px] font-semibold text-[#11294b]">
+            {ordersLoading ? "…" : `${orders.length}건`}
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-4">
+          <AdminSummaryTile label="발송 대기" value={`${orderFlowStats.readyToShip}건`} />
+          <AdminSummaryTile label="배송 중" value={`${orderFlowStats.shipping}건`} />
+          <AdminSummaryTile label="배송 완료" value={`${orderFlowStats.delivered}건`} />
+          <AdminSummaryTile label="이슈" value={`${orderFlowStats.issues}건`} />
+        </div>
         <div className="mt-4 space-y-2">
           {orders.map((order) => (
             <div key={order.orderId} className="rounded-2xl border border-ios-sep bg-white px-4 py-3">
@@ -1603,27 +1717,39 @@ export function ShopAdminPage() {
                 <div className="mt-2 text-[11px] text-ios-sub">결제수단: {order.paymentMethod}</div>
               ) : null}
               {order.shipping.addressLine1 ? (
-                <div className="mt-2 text-[11px] leading-5 text-ios-sub">
-                  {order.shipping.recipientName} · {order.shipping.phone}<br />
-                  ({order.shipping.postalCode}) {order.shipping.addressLine1}
-                  {order.shipping.addressLine2 ? ` ${order.shipping.addressLine2}` : ""}
-                </div>
+                <details className="mt-2 rounded-2xl border border-[#eef2f7] bg-[#f8fafc] px-3 py-3 text-[11px] leading-5 text-ios-sub">
+                  <summary className="cursor-pointer list-none font-semibold text-[#17324d]">배송지 보기</summary>
+                  <div className="mt-2">
+                    {order.shipping.recipientName} · {order.shipping.phone}<br />
+                    ({order.shipping.postalCode}) {order.shipping.addressLine1}
+                    {order.shipping.addressLine2 ? ` ${order.shipping.addressLine2}` : ""}
+                  </div>
+                </details>
               ) : null}
               {order.trackingNumber || order.courier ? (
                 <div className="mt-2 rounded-2xl border border-[#eef2f7] bg-[#f8fafc] px-3 py-3 text-[11px] leading-5 text-[#44556d]">
                   {order.courier || "택배사 미입력"} · {order.trackingNumber || "운송장 미입력"}
+                  {order.tracking?.carrierCode ? <><br />스마트택배 코드: {order.tracking.carrierCode}</> : null}
+                  {order.tracking?.statusLabel ? <><br />배송 조회 상태: {order.tracking.statusLabel}</> : null}
+                  {order.tracking?.lastEventAt ? <><br />마지막 이벤트: {formatDateLabel(order.tracking.lastEventAt)}</> : null}
                   {order.shippedAt ? <><br />발송일: {formatDateLabel(order.shippedAt)}</> : null}
                   {order.deliveredAt ? <><br />배송완료: {formatDateLabel(order.deliveredAt)}</> : null}
                 </div>
               ) : null}
               {order.status === "PAID" ? (
                 <div className="mt-3 rounded-2xl border border-[#eef2f7] bg-[#f8fafc] p-3">
-                  <div className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+                  <div className="grid gap-2 md:grid-cols-[1fr_140px_1fr_auto]">
                     <input
                       className={INPUT_CLASS}
                       value={shippingDrafts[order.orderId]?.courier ?? ""}
                       onChange={(e) => handleShippingDraftChange(order.orderId, "courier", e.target.value)}
                       placeholder="택배사 (예: CJ대한통운)"
+                    />
+                    <input
+                      className={INPUT_CLASS}
+                      value={shippingDrafts[order.orderId]?.carrierCode ?? ""}
+                      onChange={(e) => handleShippingDraftChange(order.orderId, "carrierCode", e.target.value)}
+                      placeholder="스마트택배 코드"
                     />
                     <input
                       className={INPUT_CLASS}
@@ -1638,21 +1764,31 @@ export function ShopAdminPage() {
                       onClick={() => void handleShippingAction(order.orderId, "mark_shipped")}
                       className={`${PRIMARY_BUTTON} h-12 text-[12px]`}
                     >
-                      {shippingLoadingId === order.orderId ? "처리 중…" : "배송 처리"}
+                      {shippingLoadingId === order.orderId ? "처리 중…" : "배송 시작"}
                     </button>
                   </div>
                 </div>
               ) : null}
               {order.status === "SHIPPED" ? (
                 <div className="mt-3 flex flex-wrap gap-2">
+                  {order.tracking?.trackingUrl ? (
+                    <a
+                      href={order.tracking.trackingUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={`${SECONDARY_BUTTON} h-10 text-[12px]`}
+                    >
+                      배송조회
+                    </a>
+                  ) : null}
                   <button
                     type="button"
                     data-auth-allow
                     disabled={shippingLoadingId === order.orderId}
-                    onClick={() => void handleShippingAction(order.orderId, "mark_delivered")}
+                    onClick={() => void handleShippingAction(order.orderId, "sync_tracking")}
                     className={`${SECONDARY_BUTTON} h-10 text-[12px]`}
                   >
-                    {shippingLoadingId === order.orderId ? "처리 중…" : "배송 완료"}
+                    {shippingLoadingId === order.orderId ? "조회 중…" : "배송 조회 동기화"}
                   </button>
                 </div>
               ) : null}
