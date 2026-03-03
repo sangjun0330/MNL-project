@@ -247,11 +247,11 @@ export function ShopPage() {
       </div>
 
       {/* 헤더 */}
-      <div className="border-b border-[#edf1f6] bg-white px-4 py-3">
-        <div className="relative flex items-center justify-between gap-2">
+      <div className="relative z-[60] border-b border-[#edf1f6] bg-white px-4 py-3">
+        <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3">
           <ShopLanguageSwitcher />
-          <Link href="/shop" data-auth-allow className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
-            <ShopBrandLogo className="h-10 w-[158px]" />
+          <Link href="/shop" data-auth-allow className="justify-self-center">
+            <ShopBrandLogo className="h-9 w-[146px]" />
           </Link>
           <div className="ml-auto flex items-center gap-0.5">
             <Link href="/shop/wishlist" data-auth-allow className="inline-flex h-10 w-10 items-center justify-center text-[#111827]" aria-label={t("찜한 상품")}>
@@ -268,7 +268,7 @@ export function ShopPage() {
       </div>
 
       {/* 검색창 */}
-      <div className="bg-white border-b border-[#edf1f6] px-4 py-3">
+      <div className="relative z-10 bg-white border-b border-[#edf1f6] px-4 py-3">
         <div className="relative">
           <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#8d99ab]"><SearchIcon /></span>
           <input

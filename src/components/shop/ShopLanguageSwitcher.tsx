@@ -25,7 +25,7 @@ export function ShopLanguageSwitcher() {
   const nextLabel = nextLang === "en" ? "EN" : "KR";
 
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className="relative z-[70]">
       <button
         type="button"
         data-auth-allow
@@ -42,7 +42,7 @@ export function ShopLanguageSwitcher() {
       </button>
 
       {open ? (
-        <div className="absolute left-0 top-[calc(100%+6px)] z-20 min-w-[72px] rounded-2xl border border-[#d9e2ec] bg-white p-1.5 shadow-[0_12px_28px_rgba(17,41,75,0.1)]">
+        <div className="absolute left-0 top-[calc(100%+6px)] z-[80] min-w-[72px] rounded-2xl border border-[#d9e2ec] bg-white p-1.5 shadow-[0_12px_28px_rgba(17,41,75,0.1)]">
           <button
             type="button"
             data-auth-allow
