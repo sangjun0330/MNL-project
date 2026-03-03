@@ -342,7 +342,7 @@ export function ShopPage() {
 
   return (
     <div className="-mx-4 pb-24">
-      <div className="bg-[#69c8ee] px-4 py-3 text-center text-[12.5px] font-semibold text-white">
+      <div className="bg-[#3b6fc9] px-4 py-3 text-center text-[12.5px] font-semibold text-white">
         {t("오늘 회복 흐름에 맞는 추천 상품과 구매 정보를 한눈에 확인하세요")}
       </div>
 
@@ -373,8 +373,9 @@ export function ShopPage() {
             <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#d7dfeb] bg-[#f8fafc] text-[10px] font-bold text-[#11294b]">KR</span>
             <ChevronDownIcon />
           </button>
-          <Link href="/shop" data-auth-allow className="justify-self-center text-[36px] font-black italic tracking-[-0.07em] text-[#69c8ee]">
-            rnest
+          <Link href="/shop" data-auth-allow className="justify-self-center">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/rnest-logo.png" alt="RNest" className="h-9 w-auto object-contain" />
           </Link>
           <button
             type="button"
@@ -479,7 +480,7 @@ export function ShopPage() {
                 }
                 className={[
                   "shrink-0 rounded-full px-5 py-3 text-[13px] font-semibold transition",
-                  active ? "bg-[#69c8ee] text-white" : "bg-transparent text-[#111827]",
+                  active ? "bg-[#3b6fc9] text-white" : "bg-transparent text-[#111827]",
                 ].join(" ")}
               >
                 {t(item.label)}
@@ -530,7 +531,7 @@ export function ShopPage() {
                     </div>
                   )}
                   {index < 2 ? (
-                    <div className="absolute left-3 top-3 border border-[#69c8ee] bg-white px-3 py-1 text-[11px] font-semibold text-[#69c8ee]">
+                    <div className="absolute left-3 top-3 border border-[#3b6fc9] bg-white px-3 py-1 text-[11px] font-semibold text-[#3b6fc9]">
                       NEW
                     </div>
                   ) : null}
