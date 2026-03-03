@@ -162,7 +162,6 @@ export function ShopPage() {
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [orderMessage, setOrderMessage] = useState<string | null>(null);
   const [orderMessageTone, setOrderMessageTone] = useState<"error" | "notice">("notice");
-  const [isAdmin, setIsAdmin] = useState(false);
 
   // 검색/필터/정렬
   const [searchQuery, setSearchQuery] = useState("");
@@ -205,32 +204,6 @@ export function ShopPage() {
     void run();
     return () => { active = false; };
   }, []);
-
-  useEffect(() => {
-    let active = true;
-    if (status !== "authenticated" || !user?.userId) {
-      setIsAdmin(false);
-      return () => { active = false; };
-    }
-    const run = async () => {
-      try {
-        const headers = await authHeaders();
-        const res = await fetch("/api/admin/billing/access", {
-          method: "GET",
-          headers: { "content-type": "application/json", ...headers },
-          cache: "no-store",
-        });
-        const json = await res.json().catch(() => null);
-        if (!active) return;
-        setIsAdmin(Boolean(res.ok && json?.ok && json?.data?.isAdmin));
-      } catch {
-        if (!active) return;
-        setIsAdmin(false);
-      }
-    };
-    void run();
-    return () => { active = false; };
-  }, [status, user?.userId]);
 
   useEffect(() => {
     let active = true;
@@ -626,13 +599,9 @@ export function ShopPage() {
             <div className="text-[13px] font-semibold text-[#8d99ab]">{t("기준 날짜")} {selectedDateLabel}</div>
             <div className="mt-1 text-[20px] font-bold tracking-[-0.03em] text-[#111827]">{t(activeCategoryMeta.label)} {t("상품")}</div>
           </div>
-          {isAdmin ? (
-            <Link href="/settings/admin/shop" data-auth-allow className={`${SECONDARY_BUTTON} h-10 text-[12px]`}>{t("운영 관리")}</Link>
-          ) : (
-            <div className="rounded-full bg-[#eef4fb] px-3 py-1 text-[11px] font-semibold text-[#11294b]">
-              {catalogLoading ? t("불러오는 중") : `${finalRecommendations.length}${t("개")}`}
-            </div>
-          )}
+          <div className="rounded-full bg-[#eef4fb] px-3 py-1 text-[11px] font-semibold text-[#11294b]">
+            {catalogLoading ? t("불러오는 중") : `${finalRecommendations.length}${t("개")}`}
+          </div>
         </div>
 
         {topSignals.length > 0 && !searchQuery ? (

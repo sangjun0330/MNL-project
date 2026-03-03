@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useAuthState } from "@/lib/auth";
 import { authHeaders } from "@/lib/billing/client";
@@ -65,6 +65,7 @@ const PRIMARY_BUTTON =
 const SECONDARY_BUTTON =
   "inline-flex items-center justify-center rounded-2xl border border-[#d7dfeb] bg-[#f4f7fb] px-4 font-semibold text-[#11294b] transition disabled:opacity-60";
 const ORDERS_PER_PAGE = 12;
+type OrderFilter = "all" | "progress" | "delivered" | "refund" | "issue";
 
 export function ShopOrdersPage() {
   const { status, user } = useAuthState();
@@ -74,9 +75,21 @@ export function ShopOrdersPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [messageTone, setMessageTone] = useState<"error" | "notice">("notice");
   const [page, setPage] = useState(1);
+  const [filter, setFilter] = useState<OrderFilter>("all");
 
   const totalPages = Math.max(1, Math.ceil(total / ORDERS_PER_PAGE));
   const currentOffset = (page - 1) * ORDERS_PER_PAGE;
+  const visibleOrders = useMemo(() => {
+    if (filter === "all") return orders;
+    if (filter === "progress") return orders.filter((order) => order.status === "PAID" || order.status === "SHIPPED");
+    if (filter === "delivered") return orders.filter((order) => order.status === "DELIVERED");
+    if (filter === "refund") {
+      return orders.filter((order) =>
+        order.status === "REFUND_REQUESTED" || order.status === "REFUND_REJECTED" || order.status === "REFUNDED"
+      );
+    }
+    return orders.filter((order) => order.status === "FAILED" || order.status === "CANCELED");
+  }, [filter, orders]);
 
   useEffect(() => {
     let active = true;
@@ -170,6 +183,31 @@ export function ShopOrdersPage() {
           </div>
         ) : null}
 
+        {status === "authenticated" && !loading ? (
+          <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+            {([
+              { key: "all", label: "전체" },
+              { key: "progress", label: "진행 중" },
+              { key: "delivered", label: "배송 완료" },
+              { key: "refund", label: "환불" },
+              { key: "issue", label: "문제" },
+            ] as { key: OrderFilter; label: string }[]).map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                data-auth-allow
+                onClick={() => setFilter(item.key)}
+                className={[
+                  "shrink-0 rounded-full px-4 py-2 text-[12px] font-semibold transition",
+                  filter === item.key ? "bg-[#3b6fc9] text-white" : "border border-[#d7dfeb] bg-white text-[#11294b]",
+                ].join(" ")}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
         {status !== "authenticated" ? (
           <div className="rounded-3xl border border-[#edf1f6] bg-white p-5 text-[13px] text-[#65748b]">
             로그인 후 주문 내역을 확인할 수 있습니다.
@@ -178,17 +216,19 @@ export function ShopOrdersPage() {
           <div className="rounded-3xl border border-[#edf1f6] bg-white p-5 text-[13px] text-[#65748b]">
             주문 내역을 불러오는 중입니다...
           </div>
-        ) : orders.length === 0 ? (
+        ) : visibleOrders.length === 0 ? (
           <div className="rounded-3xl border border-[#edf1f6] bg-white p-5">
-            <p className="text-[14px] font-semibold text-[#111827]">아직 주문이 없습니다</p>
-            <p className="mt-1 text-[13px] text-[#65748b]">상품 상세 페이지에서 바로 결제할 수 있습니다.</p>
+            <p className="text-[14px] font-semibold text-[#111827]">{filter === "all" ? "아직 주문이 없습니다" : "선택한 상태의 주문이 없습니다"}</p>
+            <p className="mt-1 text-[13px] text-[#65748b]">
+              {filter === "all" ? "상품 상세 페이지에서 바로 결제할 수 있습니다." : "다른 필터를 선택해 주문 상태를 다시 확인해 주세요."}
+            </p>
             <div className="mt-4">
               <Link href="/shop" data-auth-allow className={`${PRIMARY_BUTTON} h-10 text-[13px]`}>쇼핑하러 가기</Link>
             </div>
           </div>
         ) : (
           <div className="space-y-3">
-            {orders.map((order) => (
+            {visibleOrders.map((order) => (
               <div key={order.orderId} className="rounded-3xl border border-[#edf1f6] bg-white px-4 py-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">

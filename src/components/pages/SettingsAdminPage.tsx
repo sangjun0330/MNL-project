@@ -102,6 +102,13 @@ export function SettingsAdminPage() {
             <div className="text-[15px] font-bold text-ios-text">관리 기능</div>
             <div className="mt-3 grid gap-2">
               <Link
+                href="/settings/admin/shop"
+                className="rnest-btn-secondary inline-flex h-11 items-center justify-between px-4 text-[13px]"
+              >
+                쇼핑 운영 관리
+                <span className="text-ios-sub">›</span>
+              </Link>
+              <Link
                 href="/settings/admin/refunds"
                 className="rnest-btn-secondary inline-flex h-11 items-center justify-between px-4 text-[13px]"
               >

@@ -92,6 +92,7 @@ type FieldErrors = Partial<Record<keyof ProductDraft | "priceKrwRequired", strin
 
 type AdminTab = "basic" | "price" | "visual" | "media" | "detail" | "signals";
 type CatalogFilter = "all" | "active" | "inactive";
+type AdminSection = "products" | "orders" | "refunds";
 
 // ─────────────────────────────────────────────
 // Style constants
@@ -891,6 +892,7 @@ export function ShopAdminPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [noticeTone, setNoticeTone] = useState<"error" | "notice">("notice");
   const [refundLoadingId, setRefundLoadingId] = useState<string | null>(null);
+  const [activeSection, setActiveSection] = useState<AdminSection>("products");
 
   const refundQueue = useMemo(() => orders.filter((o) => o.status === "REFUND_REQUESTED"), [orders]);
   const salesStats = useMemo(() => {
@@ -1281,7 +1283,29 @@ export function ShopAdminPage() {
         </div>
       </div>
 
+      <div className="flex flex-wrap gap-2">
+        {([
+          { key: "products", label: "상품 관리" },
+          { key: "orders", label: "주문 관리" },
+          { key: "refunds", label: "환불 관리" },
+        ] as { key: AdminSection; label: string }[]).map((section) => (
+          <button
+            key={section.key}
+            type="button"
+            data-auth-allow
+            onClick={() => setActiveSection(section.key)}
+            className={[
+              "rounded-2xl px-4 py-2 text-[12px] font-semibold transition",
+              activeSection === section.key ? "bg-[#3b6fc9] text-white" : "border border-[#d7dfeb] bg-white text-[#11294b]",
+            ].join(" ")}
+          >
+            {section.label}
+          </button>
+        ))}
+      </div>
+
       {/* Main grid: product list | edit form */}
+      {activeSection === "products" ? (
       <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
 
         {/* ── Product list ── */}
@@ -1448,8 +1472,10 @@ export function ShopAdminPage() {
           </div>
         </div>
       </div>
+      ) : null}
 
       {/* ── Refund queue ── */}
+      {activeSection === "refunds" ? (
       <div className="rounded-[28px] border border-ios-sep bg-white p-5">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -1510,8 +1536,10 @@ export function ShopAdminPage() {
           ) : null}
         </div>
       </div>
+      ) : null}
 
       {/* ── Recent orders ── */}
+      {activeSection === "orders" ? (
       <div className="rounded-[28px] border border-ios-sep bg-white p-5">
         <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{t("최근 주문")}</div>
         <div className="mt-4 space-y-2">
@@ -1594,6 +1622,7 @@ export function ShopAdminPage() {
           ) : null}
         </div>
       </div>
+      ) : null}
     </div>
   );
 }

@@ -73,6 +73,66 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+function StatusTimeline({ status }: { status: string }) {
+  const steps = [
+    { key: "order", label: "주문 접수", done: true },
+    {
+      key: "paid",
+      label: "결제 완료",
+      done: ["PAID", "SHIPPED", "DELIVERED", "REFUND_REQUESTED", "REFUND_REJECTED", "REFUNDED"].includes(status),
+    },
+    {
+      key: "shipped",
+      label: "배송 중",
+      done: ["SHIPPED", "DELIVERED", "REFUND_REQUESTED", "REFUND_REJECTED", "REFUNDED"].includes(status),
+    },
+    {
+      key: "delivered",
+      label: "배송 완료",
+      done: ["DELIVERED", "REFUND_REQUESTED", "REFUND_REJECTED", "REFUNDED"].includes(status),
+    },
+  ];
+
+  if (status === "FAILED" || status === "CANCELED") {
+    return (
+      <div className="rounded-3xl border border-[#edf1f6] bg-white p-5">
+        <h2 className="mb-3 text-[14px] font-bold text-[#111827]">주문 진행 상태</h2>
+        <div className="rounded-2xl border border-[#f1d0cc] bg-[#fff6f5] px-4 py-3 text-[12.5px] text-[#a33a2b]">
+          {status === "FAILED" ? "결제 단계에서 주문이 완료되지 않았습니다." : "주문이 취소되어 후속 배송이 진행되지 않습니다."}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-3xl border border-[#edf1f6] bg-white p-5">
+      <h2 className="mb-3 text-[14px] font-bold text-[#111827]">주문 진행 상태</h2>
+      <div className="grid grid-cols-4 gap-2">
+        {steps.map((step, index) => (
+          <div key={step.key} className="relative">
+            {index < steps.length - 1 ? (
+              <div className={["absolute left-[calc(50%+12px)] right-[-50%] top-3 h-[2px]", step.done ? "bg-[#3b6fc9]" : "bg-[#d7dfeb]"].join(" ")} />
+            ) : null}
+            <div className="relative flex flex-col items-center gap-2 text-center">
+              <div
+                className={[
+                  "flex h-6 w-6 items-center justify-center rounded-full border text-[11px] font-bold",
+                  step.done ? "border-[#3b6fc9] bg-[#3b6fc9] text-white" : "border-[#d7dfeb] bg-white text-[#8d99ab]",
+                ].join(" ")}
+              >
+                {index + 1}
+              </div>
+              <div className={["text-[11px] font-semibold leading-4", step.done ? "text-[#11294b]" : "text-[#8d99ab]"].join(" ")}>
+                {step.label}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
   const { status } = useAuthState();
   const [order, setOrder] = useState<ShopOrderDetail | null>(null);
@@ -181,6 +241,8 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
                 {Math.round(order.amount).toLocaleString("ko-KR")}원
               </div>
             </div>
+
+            <StatusTimeline status={order.status} />
 
             {/* 주문 정보 */}
             <div className="rounded-3xl border border-[#edf1f6] bg-white p-5">
