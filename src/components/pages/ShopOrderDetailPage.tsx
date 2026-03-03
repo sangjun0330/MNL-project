@@ -96,25 +96,27 @@ function resolveDetailFlowLabel(order: ShopOrderDetail) {
   return orderStatusLabel(order.status);
 }
 
-function StatusTimeline({ order }: { order: ShopOrderDetail }) {
-  const paymentDone =
-    Boolean(order.approvedAt) ||
-    order.status === "PAID" ||
-    order.status === "SHIPPED" ||
-    order.status === "DELIVERED";
-  const shippingDone = Boolean(order.shippedAt) || order.status === "SHIPPED" || order.status === "DELIVERED";
-  const finishDone =
-    Boolean(order.purchaseConfirmedAt) ||
-    order.refund.status === "done" ||
-    order.status === "FAILED" ||
-    order.status === "CANCELED";
-  const activeIndex = !paymentDone ? 0 : !shippingDone ? 1 : !finishDone ? 2 : -1;
-  const steps = [
-    { key: "order", label: translate("결제 완료"), done: paymentDone },
-    { key: "shipping", label: translate("배송 중"), done: shippingDone },
-    { key: "done", label: translate("완료"), done: finishDone },
-  ];
+function buildDetailFlowDescription(order: ShopOrderDetail) {
+  if (order.purchaseConfirmedAt) return translate("결제 확인 · 배송 완료 · 구매 확정까지 모두 마쳤습니다.");
+  if (order.refund.status === "done") return translate("환불이 완료되어 주문이 안전하게 마감되었습니다.");
+  if (order.refund.status === "rejected") return translate("환불이 반려되어 기존 주문 상태가 유지됩니다.");
+  if (order.refund.status === "requested") return translate("환불 요청이 접수되어 관리자 검토를 기다리는 중입니다.");
+  if (order.status === "DELIVERED") return translate("상품 수령이 끝났습니다. 구매 확정을 진행하면 리뷰 작성이 열립니다.");
+  if (order.status === "SHIPPED") return translate("배송 이동 중입니다. 상품을 받으면 직접 배송 완료 확인이 가능합니다.");
+  if (order.status === "PAID") return translate("결제는 확인되었고 발송 준비가 진행 중입니다.");
+  return translate("주문 상태를 확인하는 중입니다.");
+}
 
+function resolveDetailProgressClass(order: ShopOrderDetail) {
+  if (order.purchaseConfirmedAt || order.refund.status === "done") return "w-full";
+  if (order.status === "FAILED" || order.status === "CANCELED" || order.refund.status === "rejected") return "w-full";
+  if (order.status === "DELIVERED" || order.refund.status === "requested") return "w-[78%]";
+  if (order.status === "SHIPPED") return "w-[58%]";
+  if (order.status === "PAID") return "w-[32%]";
+  return "w-[12%]";
+}
+
+function StatusTimeline({ order }: { order: ShopOrderDetail }) {
   if (order.status === "FAILED" || order.status === "CANCELED") {
     return (
       <div className="rounded-3xl border border-[#edf1f6] bg-white p-5">
@@ -131,27 +133,23 @@ function StatusTimeline({ order }: { order: ShopOrderDetail }) {
   return (
     <div className="rounded-3xl border border-[#edf1f6] bg-white p-5">
       <h2 className="mb-3 text-[14px] font-bold text-[#111827]">{translate("주문 진행 상태")}</h2>
-      <div className="grid grid-cols-3 gap-2">
-        {steps.map((step, index) => (
+      <div className="rounded-2xl border border-[#dbe4ef] bg-[#f8fafc] px-4 py-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-[12px] font-semibold text-[#17324d]">{resolveDetailFlowLabel(order)}</div>
+          <div className="text-[11px] font-semibold text-[#7b8fa6]">{translate("현재 상태")}</div>
+        </div>
+        <div className="mt-3 h-2 rounded-full bg-[#e4ebf3]">
           <div
-            key={step.key}
-            className={[
-              "rounded-2xl border px-3 py-3 text-center text-[11px] font-semibold",
-              step.done
-                ? "border-[#11294b] bg-[#11294b] text-white"
-                : activeIndex === index
-                  ? "border-[#bfd0e1] bg-[#eaf1f8] text-[#17324d]"
-                  : "border-[#e3e9f1] bg-[#f8fafc] text-[#8d99ab]",
-            ].join(" ")}
-          >
-            {step.label}
-          </div>
-        ))}
+            className={["h-2 rounded-full bg-[#11294b] transition-[width]", resolveDetailProgressClass(order)].join(" ")}
+          />
+        </div>
+        <div className="mt-3 text-[11.5px] leading-5 text-[#60768d]">
+          {buildDetailFlowDescription(order)}
+        </div>
       </div>
-      <div className="mt-4 rounded-2xl border border-[#dbe4ef] bg-[#f8fafc] px-4 py-3">
-        <div className="text-[12px] font-semibold text-[#17324d]">{resolveDetailFlowLabel(order)}</div>
+      <div className="mt-3 rounded-2xl border border-[#dbe4ef] bg-[#f8fafc] px-4 py-3">
         {order.trackingNumber ? (
-          <div className="mt-1 text-[11.5px] leading-5 text-[#60768d]">
+          <div className="text-[11.5px] leading-5 text-[#60768d]">
             {order.courier ?? "-"} · {order.trackingNumber}
             {order.tracking?.trackingUrl ? (
               <>

@@ -1457,6 +1457,25 @@ const SHOP_EN_EXTRA: Record<string, string> = {
   "처리 메모": "Processing note",
   "택배사": "Courier",
   "결제 완료 후 아직 별도 요청이 없습니다.": "No follow-up request has been made after payment yet.",
+  "현재 상태": "Current status",
+  "결제 확인 · 배송 완료 · 구매 확정 완료": "Payment confirmed · Delivered · Purchase confirmed",
+  "환불이 완료되어 주문이 마감되었습니다.": "The refund is complete and this order is now closed.",
+  "환불 반려 후 기존 주문 흐름이 유지됩니다.": "The refund was rejected, so the existing order flow remains unchanged.",
+  "환불 요청이 접수되어 관리자 검토를 기다리는 중입니다.": "The refund request has been received and is awaiting admin review.",
+  "배송 완료 · 구매 확정 대기": "Delivered · Awaiting purchase confirmation",
+  "배송 이동 중 · 상품 수령 후 직접 배송 완료 확인 가능":
+    "In transit · You can confirm delivery yourself after receiving the item.",
+  "결제 확인 · 배송 준비 중": "Payment confirmed · Preparing for shipment",
+  "결제 확인 · 배송 완료 · 구매 확정까지 모두 마쳤습니다.":
+    "Payment confirmed · Delivered · Purchase confirmation completed.",
+  "환불이 완료되어 주문이 안전하게 마감되었습니다.": "The refund is complete and the order has been safely closed.",
+  "환불이 반려되어 기존 주문 상태가 유지됩니다.": "The refund was rejected, so the current order status remains.",
+  "상품 수령이 끝났습니다. 구매 확정을 진행하면 리뷰 작성이 열립니다.":
+    "Delivery is complete. Confirm the purchase to unlock review writing.",
+  "배송 이동 중입니다. 상품을 받으면 직접 배송 완료 확인이 가능합니다.":
+    "Your order is in transit. Once it arrives, you can confirm delivery yourself.",
+  "결제는 확인되었고 발송 준비가 진행 중입니다.": "Payment is confirmed and shipment is being prepared.",
+  "주문 상태를 확인하는 중입니다.": "Checking your order status.",
   "배송 완료 확인": "Confirm delivery",
   "배송 수령을 확인했습니다. 이제 구매 확정을 진행해 주세요.": "Delivery received. You can now confirm the purchase.",
   "배송 완료 확인에 실패했습니다. 잠시 후 다시 시도해 주세요.": "Couldn't confirm delivery. Please try again shortly.",

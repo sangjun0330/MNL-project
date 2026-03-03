@@ -108,43 +108,17 @@ function resolveOrderFlowLabel(order: ShopOrderSummary) {
   return orderStatusLabel(order.status);
 }
 
-function OrderFlowRibbon({ order }: { order: ShopOrderSummary }) {
-  const paymentDone =
-    Boolean(order.approvedAt) ||
-    order.status === "PAID" ||
-    order.status === "SHIPPED" ||
-    order.status === "DELIVERED";
-  const shippingDone = Boolean(order.shippedAt) || order.status === "SHIPPED" || order.status === "DELIVERED";
-  const finishDone = Boolean(order.purchaseConfirmedAt) || isOrderClosed(order);
-  const activeIndex = !paymentDone ? 0 : !shippingDone ? 1 : !finishDone ? 2 : -1;
-  const steps = [
-    { label: translate("결제 완료"), done: paymentDone },
-    { label: translate("배송 중"), done: shippingDone },
-    { label: translate("완료"), done: finishDone },
-  ];
-
-  return (
-    <div className="mt-3 grid grid-cols-3 gap-2">
-      {steps.map((step, index) => {
-        const isActive = index === activeIndex;
-        return (
-          <div
-            key={step.label}
-            className={[
-              "rounded-2xl border px-3 py-2 text-center text-[10.5px] font-semibold",
-              step.done
-                ? "border-[#11294b] bg-[#11294b] text-white"
-                : isActive
-                  ? "border-[#bfd0e1] bg-[#eaf1f8] text-[#17324d]"
-                  : "border-[#e3e9f1] bg-[#f8fafc] text-[#8d99ab]",
-            ].join(" ")}
-          >
-            {step.label}
-          </div>
-        );
-      })}
-    </div>
-  );
+function buildOrderFlowDescription(order: ShopOrderSummary) {
+  if (order.purchaseConfirmedAt) return translate("결제 확인 · 배송 완료 · 구매 확정 완료");
+  if (order.refund.status === "done") return translate("환불이 완료되어 주문이 마감되었습니다.");
+  if (order.refund.status === "rejected") return translate("환불 반려 후 기존 주문 흐름이 유지됩니다.");
+  if (order.refund.status === "requested") return translate("환불 요청이 접수되어 관리자 검토를 기다리는 중입니다.");
+  if (order.status === "FAILED") return translate("결제 단계에서 주문이 완료되지 않았습니다.");
+  if (order.status === "CANCELED") return translate("주문이 취소되어 더 이상 진행되지 않습니다.");
+  if (order.status === "DELIVERED") return translate("배송 완료 · 구매 확정 대기");
+  if (order.status === "SHIPPED") return translate("배송 이동 중 · 상품 수령 후 직접 배송 완료 확인 가능");
+  if (order.status === "PAID") return translate("결제 확인 · 배송 준비 중");
+  return translate("결제 대기");
 }
 
 export function ShopOrdersPage() {
@@ -445,11 +419,15 @@ export function ShopOrdersPage() {
                   </span>
                 </div>
 
-                <OrderFlowRibbon order={order} />
-
                 <div className="mt-3 rounded-2xl border border-[#dbe4ef] bg-[#f8fafc] px-3 py-3">
-                  <div className="text-[12px] font-semibold text-[#17324d]">{resolveOrderFlowLabel(order)}</div>
-                  <div className="mt-1 text-[11.5px] text-[#60768d]">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-[12px] font-semibold text-[#17324d]">{resolveOrderFlowLabel(order)}</div>
+                      <div className="mt-1 text-[11.5px] leading-5 text-[#60768d]">{buildOrderFlowDescription(order)}</div>
+                    </div>
+                    <div className="shrink-0 text-[11px] font-semibold text-[#7b8fa6]">{t("현재 상태")}</div>
+                  </div>
+                  <div className="mt-2 text-[11.5px] text-[#60768d]">
                     {t("상품 금액")} {formatShopCurrency(order.subtotalKrw)} · {t("배송비")}{" "}
                     {order.shippingFeeKrw > 0 ? formatShopCurrency(order.shippingFeeKrw) : t("무료")}
                   </div>
