@@ -4,8 +4,10 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useAuthState } from "@/lib/auth";
 import { authHeaders } from "@/lib/billing/client";
+import { maskShopAddressLine, maskShopEmail, maskShopPhone, maskShopRecipientName } from "@/lib/shopPrivacy";
 import { formatShopShippingSingleLine, resolveDefaultShopShippingAddress, type ShopShippingAddress } from "@/lib/shopProfile";
-import { getWishlist } from "@/lib/shopClient";
+import { getCart, getWishlist } from "@/lib/shopClient";
+import { SHOP_BUTTON_PRIMARY, SHOP_BUTTON_SECONDARY } from "@/lib/shopUi";
 
 type ShopOrderSummary = {
   orderId: string;
@@ -18,20 +20,8 @@ type ShopProfileResponse = {
   defaultAddressId?: string | null;
 };
 
-function maskEmail(email: string | null | undefined) {
-  const safe = String(email ?? "").trim();
-  if (!safe.includes("@")) return "로그인된 계정";
-  const [local, domain] = safe.split("@");
-  if (!local || !domain) return safe;
-  const visible = local.length <= 2 ? local.slice(0, 1) : local.slice(0, 2);
-  return `${visible}${"*".repeat(Math.max(1, local.length - visible.length))}@${domain}`;
-}
-
-function maskPhone(phone: string) {
-  const safe = String(phone ?? "").trim();
-  if (safe.length < 7) return safe || "-";
-  return `${safe.slice(0, 3)}-${"*".repeat(Math.max(3, safe.length - 7))}-${safe.slice(-4)}`;
-}
+const PROFILE_LINK_ROW =
+  "flex items-center justify-between gap-4 rounded-[24px] border-2 border-[#bfd0e1] bg-[#eef4fb] px-4 py-4 transition hover:border-[#17324d] hover:bg-[#dfe8f1]";
 
 export function ShopProfilePage() {
   const { status, user } = useAuthState();
@@ -39,6 +29,7 @@ export function ShopProfilePage() {
   const [defaultAddressId, setDefaultAddressId] = useState<string | null>(null);
   const [orders, setOrders] = useState<ShopOrderSummary[]>([]);
   const [wishlistIds, setWishlistIds] = useState<string[]>([]);
+  const [cartCount, setCartCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -49,6 +40,7 @@ export function ShopProfilePage() {
       setDefaultAddressId(null);
       setOrders([]);
       setWishlistIds([]);
+      setCartCount(0);
       setLoading(false);
       return () => {
         active = false;
@@ -60,7 +52,7 @@ export function ShopProfilePage() {
       setMessage(null);
       try {
         const headers = await authHeaders();
-        const [profileRes, ordersRes, wishlist] = await Promise.all([
+        const [profileRes, ordersRes, wishlist, cartItems] = await Promise.all([
           fetch("/api/shop/profile", {
             method: "GET",
             headers: { "content-type": "application/json", ...headers },
@@ -72,6 +64,7 @@ export function ShopProfilePage() {
             cache: "no-store",
           }),
           getWishlist(headers),
+          getCart(headers),
         ]);
         const profileJson = await profileRes.json().catch(() => null);
         const ordersJson = await ordersRes.json().catch(() => null);
@@ -84,12 +77,14 @@ export function ShopProfilePage() {
         setDefaultAddressId(typeof profileData.defaultAddressId === "string" ? profileData.defaultAddressId : null);
         setOrders(Array.isArray(ordersJson?.data?.orders) ? (ordersJson.data.orders as ShopOrderSummary[]) : []);
         setWishlistIds(wishlist);
+        setCartCount(cartItems.reduce((sum, item) => sum + item.quantity, 0));
       } catch {
         if (!active) return;
         setAddresses([]);
         setDefaultAddressId(null);
         setOrders([]);
         setWishlistIds([]);
+        setCartCount(0);
         setMessage("쇼핑 계정 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
       } finally {
         if (!active) return;
@@ -120,7 +115,7 @@ export function ShopProfilePage() {
     [orders]
   );
 
-  const quickLinks = [
+  const orderLinks = [
     {
       href: "/shop/orders",
       title: "주문 목록",
@@ -146,17 +141,25 @@ export function ShopProfilePage() {
             ? `${confirmedCount}건의 구매 확정이 완료되었습니다.`
             : "배송 완료 후 구매 확정을 진행하면 리뷰 권한이 열립니다.",
     },
+  ];
+
+  const accountLinks = [
     {
-      href: "/settings/account/shipping",
-      title: "배송지 설정",
-      description: defaultAddress
-        ? `${defaultAddress.label} · ${formatShopShippingSingleLine(defaultAddress)}`
-        : "기본 배송지를 먼저 저장해 주세요.",
+      href: "/shop/cart",
+      title: "장바구니",
+      description: loading ? "담아둔 상품을 정리하는 중입니다." : `${cartCount}개 상품이 계정 장바구니에 저장되어 있습니다.`,
     },
     {
       href: "/shop/wishlist",
       title: "위시리스트",
       description: loading ? "계정 저장 상태를 확인하는 중입니다." : `${wishlistIds.length}개 상품이 계정에 저장되어 있습니다.`,
+    },
+    {
+      href: "/settings/account/shipping",
+      title: "배송지 설정",
+      description: defaultAddress
+        ? `${defaultAddress.label} · ${maskShopAddressLine(formatShopShippingSingleLine(defaultAddress))}`
+        : "기본 배송지를 먼저 저장해 주세요.",
     },
   ];
 
@@ -164,7 +167,7 @@ export function ShopProfilePage() {
     <div className="-mx-4 min-h-[calc(100dvh-72px)] bg-[#f4f7fb] pb-24">
       <div className="border-b border-[#dbe4ef] bg-white px-4 py-4">
         <div className="flex items-center gap-3">
-          <Link href="/shop" data-auth-allow className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-[#dbe4ef] bg-[#f8fafc] text-[#102a43]" aria-label="쇼핑으로 돌아가기">
+          <Link href="/shop" data-auth-allow className={`h-10 w-10 px-0 text-[#425a76] ${SHOP_BUTTON_SECONDARY}`} aria-label="쇼핑으로 돌아가기">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
               <path d="M19 12H5" /><path d="M12 5l-7 7 7 7" />
             </svg>
@@ -181,7 +184,7 @@ export function ShopProfilePage() {
           <div className="rounded-[28px] border border-[#dbe4ef] bg-white p-6">
             <div className="text-[16px] font-bold text-[#102a43]">로그인 후 쇼핑 프로필을 사용할 수 있습니다</div>
             <div className="mt-2 text-[13px] leading-6 text-[#5a6b80]">위시리스트, 배송지, 주문 정보는 모두 계정 기준으로 안전하게 저장됩니다.</div>
-            <Link href="/settings/account" data-auth-allow className="mt-5 inline-flex h-11 items-center justify-center rounded-2xl border border-[#102a43] bg-[#102a43] px-5 text-[13px] font-semibold text-white">
+            <Link href="/settings/account" data-auth-allow className={`mt-5 h-11 px-5 text-[13px] ${SHOP_BUTTON_PRIMARY}`}>
               로그인하러 가기
             </Link>
           </div>
@@ -189,7 +192,7 @@ export function ShopProfilePage() {
           <>
             <div className="rounded-[28px] bg-[#102a43] p-5 text-white shadow-[0_24px_64px_rgba(16,42,67,0.16)]">
               <div className="text-[12px] font-semibold uppercase tracking-[0.18em] text-white/70">Account</div>
-              <div className="mt-3 text-[24px] font-bold tracking-[-0.03em]">{maskEmail(user?.email)}</div>
+              <div className="mt-3 text-[24px] font-bold tracking-[-0.03em]">{maskShopEmail(user?.email)}</div>
               <div className="mt-3 grid gap-3 md:grid-cols-3">
                 <div className="rounded-2xl border border-white/10 bg-white/10 px-4 py-3">
                   <div className="text-[11px] text-white/70">진행 중 배송</div>
@@ -214,40 +217,63 @@ export function ShopProfilePage() {
 
             <div className="rounded-[28px] border border-[#dbe4ef] bg-white p-5">
               <div className="text-[15px] font-bold text-[#102a43]">쇼핑 개인정보</div>
-              <div className="mt-4 space-y-3 text-[13px] text-[#44556d]">
-                <div className="rounded-2xl bg-[#f4f7fb] px-4 py-3">
+              <div className="mt-4 grid gap-3 md:grid-cols-[1.15fr_0.85fr]">
+                <div className="rounded-[24px] border-2 border-[#bfd0e1] bg-[#eef4fb] px-4 py-4 text-[13px] text-[#44556d]">
                   <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#8092a8]">기본 배송지</div>
                   {defaultAddress ? (
                     <>
-                      <div className="mt-2 text-[14px] font-semibold text-[#102a43]">{defaultAddress.recipientName}</div>
-                      <div className="mt-1">{maskPhone(defaultAddress.phone)}</div>
-                      <div className="mt-1 leading-6">{formatShopShippingSingleLine(defaultAddress)}</div>
+                      <div className="mt-2 text-[14px] font-semibold text-[#102a43]">{maskShopRecipientName(defaultAddress.recipientName)}</div>
+                      <div className="mt-1">{maskShopPhone(defaultAddress.phone)}</div>
+                      <div className="mt-1 leading-6">{maskShopAddressLine(formatShopShippingSingleLine(defaultAddress))}</div>
                     </>
                   ) : (
                     <div className="mt-2 leading-6">저장된 기본 배송지가 없습니다. 결제 전에 배송지를 먼저 등록해 주세요.</div>
                   )}
                 </div>
-                <div className="rounded-2xl bg-[#f4f7fb] px-4 py-3 leading-6">
-                  결제 전에는 배송지, 수령인, 연락처를 다시 확인하는 검증 단계를 거치고, 배송 완료 후 구매 확정을 마쳐야 리뷰 권한이 활성화됩니다.
+                <div className="rounded-[24px] border-2 border-[#bfd0e1] bg-[#eef4fb] px-4 py-4 text-[12.5px] leading-6 text-[#44556d]">
+                  결제 전에는 배송지와 연락처를 다시 확인한 뒤 진행하고, 배송 완료 후 구매 확정을 마쳐야 리뷰 권한이 활성화됩니다.
                 </div>
               </div>
             </div>
 
-            <div className="rounded-[28px] border border-[#dbe4ef] bg-white p-3">
-              {quickLinks.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  data-auth-allow
-                  className="flex items-center justify-between gap-4 rounded-2xl px-3 py-4 transition hover:bg-[#f4f7fb]"
-                >
-                  <div className="min-w-0">
-                    <div className="text-[14px] font-semibold text-[#102a43]">{item.title}</div>
-                    <div className="mt-1 text-[12px] leading-5 text-[#61758a]">{item.description}</div>
-                  </div>
-                  <span className="shrink-0 text-[18px] text-[#8ca0b3]">›</span>
-                </Link>
-              ))}
+            <div className="rounded-[28px] border border-[#dbe4ef] bg-white p-5">
+              <div className="text-[14px] font-bold text-[#102a43]">주문 관리</div>
+              <div className="mt-3 grid gap-3">
+                {orderLinks.map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    data-auth-allow
+                    className={PROFILE_LINK_ROW}
+                  >
+                    <div className="min-w-0">
+                      <div className="text-[14px] font-semibold text-[#102a43]">{item.title}</div>
+                      <div className="mt-1 text-[12px] leading-5 text-[#61758a]">{item.description}</div>
+                    </div>
+                    <span className="shrink-0 text-[18px] text-[#8ca0b3]">›</span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-[28px] border border-[#dbe4ef] bg-white p-5">
+              <div className="text-[14px] font-bold text-[#102a43]">보관함과 배송</div>
+              <div className="mt-3 grid gap-3">
+                {accountLinks.map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    data-auth-allow
+                    className={PROFILE_LINK_ROW}
+                  >
+                    <div className="min-w-0">
+                      <div className="text-[14px] font-semibold text-[#102a43]">{item.title}</div>
+                      <div className="mt-1 text-[12px] leading-5 text-[#61758a]">{item.description}</div>
+                    </div>
+                    <span className="shrink-0 text-[18px] text-[#8ca0b3]">›</span>
+                  </Link>
+                ))}
+              </div>
             </div>
           </>
         )}

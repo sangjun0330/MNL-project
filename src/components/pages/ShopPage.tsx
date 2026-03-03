@@ -16,6 +16,7 @@ import {
   type ShopCategoryKey,
   type ShopProduct,
 } from "@/lib/shop";
+import { SHOP_BUTTON_PRIMARY, SHOP_BUTTON_SECONDARY } from "@/lib/shopUi";
 import { useAppStoreSelector } from "@/lib/store";
 import { useI18n } from "@/lib/useI18n";
 import {
@@ -49,8 +50,8 @@ type ShopOrderSummary = {
 type SortKey = "recommended" | "newest" | "price_asc" | "price_desc";
 type PriceFilter = "all" | "free" | "under20k" | "under50k" | "over50k";
 
-const PRIMARY_BUTTON = "inline-flex items-center justify-center rounded-2xl border border-[#11294b] bg-[#11294b] px-4 font-semibold text-white transition disabled:opacity-60";
-const SECONDARY_BUTTON = "inline-flex items-center justify-center rounded-2xl border border-[#d7dfeb] bg-[#f4f7fb] px-4 font-semibold text-[#11294b] transition disabled:opacity-60";
+const PRIMARY_BUTTON = SHOP_BUTTON_PRIMARY;
+const SECONDARY_BUTTON = SHOP_BUTTON_SECONDARY;
 
 function MenuIcon() {
   return (
@@ -335,6 +336,14 @@ export function ShopPage() {
           : "배송 상태는 계정 로그인 후 확인할 수 있습니다.",
     },
     {
+      href: "/shop/cart",
+      title: "장바구니",
+      description:
+        status === "authenticated"
+          ? "담아둔 상품 수량을 조정하고 상품별로 결제를 이어갈 수 있습니다."
+          : "로그인 후 장바구니를 계정 기준으로 저장합니다.",
+    },
+    {
       href: "/settings/account/shipping",
       title: "배송지 설정",
       description: "결제 전에 기본 배송지를 정확하게 등록하고 수정합니다.",
@@ -387,17 +396,9 @@ export function ShopPage() {
           <Link href="/shop/wishlist" data-auth-allow className="inline-flex h-10 w-10 items-center justify-center text-[#111827]" aria-label={t("찜한 상품")}>
             <WishlistIcon />
           </Link>
-          <button
-            type="button" data-auth-allow
-            onClick={() => {
-              if (typeof window === "undefined") return;
-              document.getElementById(status === "authenticated" ? "shop-orders" : "shop-product-grid")?.scrollIntoView({ behavior: "smooth", block: "start" });
-            }}
-            className="inline-flex h-10 w-10 items-center justify-center text-[#111827]"
-            aria-label={t("주문 영역으로 이동")}
-          >
+          <Link href="/shop/cart" data-auth-allow className="inline-flex h-10 w-10 items-center justify-center text-[#111827]" aria-label={t("장바구니")}>
             <CartIcon />
-          </button>
+          </Link>
           <Link href="/shop/profile" data-auth-allow className="inline-flex h-10 w-10 items-center justify-center text-[#111827]" aria-label={t("쇼핑 프로필")}>
             <ProfileIcon />
           </Link>
@@ -452,8 +453,8 @@ export function ShopPage() {
                     type="button" data-auth-allow
                     onClick={() => setSortKey(item.key)}
                     className={[
-                      "rounded-full px-3 py-1.5 text-[12px] font-semibold border transition",
-                      sortKey === item.key ? "bg-[#11294b] text-white border-[#11294b]" : "bg-white text-[#44556d] border-[#d7dfeb]",
+                      "rounded-full border-2 px-3 py-1.5 text-[12px] font-semibold transition",
+                      sortKey === item.key ? "border-[#17324d] bg-[#d1deea] text-[#2f4d6a]" : "border-[#bfd0e1] bg-white text-[#60768d]",
                     ].join(" ")}
                   >
                     {t(item.label)}
@@ -476,8 +477,8 @@ export function ShopPage() {
                     type="button" data-auth-allow
                     onClick={() => setPriceFilter(item.key)}
                     className={[
-                      "rounded-full px-3 py-1.5 text-[12px] font-semibold border transition",
-                      priceFilter === item.key ? "bg-[#11294b] text-white border-[#11294b]" : "bg-white text-[#44556d] border-[#d7dfeb]",
+                      "rounded-full border-2 px-3 py-1.5 text-[12px] font-semibold transition",
+                      priceFilter === item.key ? "border-[#17324d] bg-[#d1deea] text-[#2f4d6a]" : "border-[#bfd0e1] bg-white text-[#60768d]",
                     ].join(" ")}
                   >
                     {t(item.label)}
@@ -613,8 +614,8 @@ export function ShopPage() {
                 type="button" data-auth-allow
                 onClick={() => startTransition(() => { setCategory(item.key); })}
                 className={[
-                  "shrink-0 rounded-full px-5 py-3 text-[13px] font-semibold transition",
-                  active ? "bg-[#102a43] text-white" : "bg-transparent text-[#111827]",
+                  "shrink-0 rounded-full border-2 px-5 py-3 text-[13px] font-semibold transition",
+                  active ? "border-[#17324d] bg-[#d1deea] text-[#2f4d6a]" : "border-transparent bg-transparent text-[#60768d]",
                 ].join(" ")}
               >
                 {t(item.label)}

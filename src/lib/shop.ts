@@ -92,6 +92,14 @@ export type ShopRecommendationState = {
   focusSummary: string;
 };
 
+export type ShopPricingBreakdown = {
+  unitPriceKrw: number;
+  quantity: number;
+  subtotalKrw: number;
+  shippingFeeKrw: number;
+  totalKrw: number;
+};
+
 type CategoryMeta = {
   key: ShopCategoryKey;
   label: string;
@@ -332,6 +340,8 @@ const RAW_SHOP_PRODUCTS = [
 ] as const;
 
 export const SHOP_PRODUCTS: ShopProduct[] = normalizeShopCatalogProducts(RAW_SHOP_PRODUCTS);
+export const SHOP_DEFAULT_SHIPPING_FEE_KRW = 3000;
+export const SHOP_FREE_SHIPPING_THRESHOLD_KRW = 50000;
 
 function bumpSignal(map: Map<ShopSignalKey, ShopSignal>, key: ShopSignalKey, weight: number) {
   const meta = SIGNAL_META[key];
@@ -633,6 +643,42 @@ export function formatShopPrice(product: ShopProduct) {
     return `${Math.round(product.priceKrw).toLocaleString("ko-KR")}원`;
   }
   return product.priceLabel;
+}
+
+export function calculateShopShippingFee(subtotalKrw: number) {
+  const subtotal = Math.max(0, Math.round(Number(subtotalKrw) || 0));
+  if (subtotal <= 0) return 0;
+  if (subtotal >= SHOP_FREE_SHIPPING_THRESHOLD_KRW) return 0;
+  return SHOP_DEFAULT_SHIPPING_FEE_KRW;
+}
+
+export function calculateShopPricing(input: {
+  priceKrw: number | null | undefined;
+  quantity: number;
+  currentAmountKrw?: number | null;
+}): ShopPricingBreakdown {
+  const unitPriceKrw = Math.max(0, Math.round(Number(input.priceKrw) || 0));
+  const quantity = Math.max(1, Math.min(99, Math.round(Number(input.quantity) || 1)));
+  const subtotalKrw = unitPriceKrw * quantity;
+  const explicitAmount = Number(input.currentAmountKrw);
+  if (Number.isFinite(explicitAmount) && explicitAmount >= subtotalKrw) {
+    const totalKrw = Math.max(0, Math.round(explicitAmount));
+    return {
+      unitPriceKrw,
+      quantity,
+      subtotalKrw,
+      shippingFeeKrw: Math.max(0, totalKrw - subtotalKrw),
+      totalKrw,
+    };
+  }
+  const shippingFeeKrw = calculateShopShippingFee(subtotalKrw);
+  return {
+    unitPriceKrw,
+    quantity,
+    subtotalKrw,
+    shippingFeeKrw,
+    totalKrw: subtotalKrw + shippingFeeKrw,
+  };
 }
 
 export function getShopImageSrc(value: string | null | undefined) {

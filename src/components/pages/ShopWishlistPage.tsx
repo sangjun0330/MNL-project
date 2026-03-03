@@ -6,6 +6,7 @@ import { useAuthState } from "@/lib/auth";
 import { authHeaders } from "@/lib/billing/client";
 import { getShopImageSrc, SHOP_PRODUCTS, formatShopPrice, type ShopProduct } from "@/lib/shop";
 import { getWishlist, removeFromWishlist } from "@/lib/shopClient";
+import { SHOP_BUTTON_PRIMARY, SHOP_BUTTON_SECONDARY } from "@/lib/shopUi";
 
 export function ShopWishlistPage() {
   const { status, user } = useAuthState();
@@ -86,7 +87,7 @@ export function ShopWishlistPage() {
     <div className="-mx-4 pb-24">
       <div className="border-b border-[#edf1f6] bg-white px-4 py-4">
         <div className="flex items-center gap-3">
-          <Link href="/shop" data-auth-allow className="inline-flex h-10 w-10 items-center justify-center text-[#111827]" aria-label="쇼핑으로 돌아가기">
+          <Link href="/shop" data-auth-allow className={`h-10 w-10 px-0 text-[#425a76] ${SHOP_BUTTON_SECONDARY}`} aria-label="쇼핑으로 돌아가기">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
               <path d="M19 12H5" /><path d="M12 5l-7 7 7 7" />
             </svg>
@@ -105,7 +106,7 @@ export function ShopWishlistPage() {
           <div className="rounded-3xl border border-[#dbe4ef] bg-white p-6 text-center">
             <div className="text-[16px] font-bold text-[#102a43]">로그인 후 위시리스트를 확인할 수 있습니다</div>
             <div className="mt-2 text-[13px] leading-6 text-[#5a6b80]">찜한 상품은 기기가 아니라 계정에 안전하게 저장됩니다.</div>
-            <Link href="/settings/account" data-auth-allow className="mt-5 inline-flex h-11 items-center justify-center rounded-2xl border border-[#102a43] bg-[#102a43] px-6 text-[14px] font-semibold text-white">
+            <Link href="/settings/account" data-auth-allow className={`mt-5 h-11 px-6 text-[14px] ${SHOP_BUTTON_PRIMARY}`}>
               로그인하러 가기
             </Link>
           </div>
@@ -118,7 +119,7 @@ export function ShopWishlistPage() {
             <div className="text-[48px]">🤍</div>
             <div className="mt-4 text-[16px] font-bold text-[#111827]">아직 찜한 상품이 없어요</div>
             <div className="mt-2 text-[13px] text-[#65748b]">마음에 드는 상품의 하트를 눌러 저장해 보세요</div>
-            <Link href="/shop" data-auth-allow className="mt-6 inline-flex h-11 items-center justify-center rounded-2xl border border-[#11294b] bg-[#11294b] px-6 text-[14px] font-semibold text-white">
+            <Link href="/shop" data-auth-allow className={`mt-6 h-11 px-6 text-[14px] ${SHOP_BUTTON_PRIMARY}`}>
               쇼핑하러 가기
             </Link>
           </div>

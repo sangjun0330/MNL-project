@@ -4,11 +4,14 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuthState } from "@/lib/auth";
 import { authHeaders } from "@/lib/billing/client";
+import { SHOP_BUTTON_PRIMARY, SHOP_BUTTON_SECONDARY } from "@/lib/shopUi";
 
 type ShopOrderDetail = {
   orderId: string;
   status: string;
   amount: number;
+  subtotalKrw: number;
+  shippingFeeKrw: number;
   createdAt: string;
   approvedAt: string | null;
   paymentMethod: string | null;
@@ -62,8 +65,7 @@ function formatDateLabel(value: string | null) {
   return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
-const SECONDARY_BUTTON =
-  "inline-flex items-center justify-center rounded-2xl border border-[#d7dfeb] bg-[#f4f7fb] px-4 font-semibold text-[#11294b] transition disabled:opacity-60";
+const SECONDARY_BUTTON = SHOP_BUTTON_PRIMARY;
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -197,9 +199,14 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
       setOrder(json.data.order as ShopOrderDetail);
       setActionTone("notice");
       setActionMessage("환불 요청이 접수되었습니다. 관리자 검토 후 처리됩니다.");
-    } catch {
+    } catch (error: any) {
+      const code = String(error?.message ?? "failed_to_request_shop_refund");
       setActionTone("error");
-      setActionMessage("환불 요청에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+      if (code.includes("shop_order_bundle_refund_requires_manual_review")) {
+        setActionMessage("묶음 결제로 승인된 주문은 부분 환불을 자동 처리할 수 없습니다. 고객센터 또는 관리자 검토를 통해 접수해 주세요.");
+      } else {
+        setActionMessage("환불 요청에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+      }
     } finally {
       setActionLoading(null);
     }
@@ -238,7 +245,7 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
     <div className="-mx-4 pb-24">
       <div className="border-b border-[#edf1f6] bg-white px-4 py-4">
         <div className="flex items-center gap-3">
-          <Link href="/shop/orders" data-auth-allow className="inline-flex h-10 w-10 items-center justify-center text-[#111827]" aria-label="주문 목록으로">
+          <Link href="/shop/orders" data-auth-allow className={`h-10 w-10 px-0 text-[#425a76] ${SHOP_BUTTON_SECONDARY}`} aria-label="주문 목록으로">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
               <path d="M19 12H5" /><path d="M12 5l-7 7 7 7" />
             </svg>
@@ -279,6 +286,18 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
               <div className="mt-4 text-[28px] font-extrabold tracking-[-0.03em] text-[#111827]">
                 {Math.round(order.amount).toLocaleString("ko-KR")}원
               </div>
+              <div className="mt-3 rounded-[20px] border border-[#dbe4ef] bg-[#f7fafc] px-3 py-3 text-[12px] text-[#5b7087]">
+                <div className="flex items-center justify-between gap-3">
+                  <span>상품 금액</span>
+                  <span className="font-semibold text-[#425a76]">{order.subtotalKrw.toLocaleString("ko-KR")}원</span>
+                </div>
+                <div className="mt-1 flex items-center justify-between gap-3">
+                  <span>배송비</span>
+                  <span className="font-semibold text-[#425a76]">
+                    {order.shippingFeeKrw > 0 ? `${order.shippingFeeKrw.toLocaleString("ko-KR")}원` : "무료"}
+                  </span>
+                </div>
+              </div>
             </div>
 
             <StatusTimeline status={order.status} purchaseConfirmedAt={order.purchaseConfirmedAt} />
@@ -291,6 +310,8 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
               {order.approvedAt ? <InfoRow label="결제일시" value={formatDateLabel(order.approvedAt)} /> : null}
               {order.purchaseConfirmedAt ? <InfoRow label="구매 확정" value={formatDateLabel(order.purchaseConfirmedAt)} /> : null}
               {order.paymentMethod ? <InfoRow label="결제수단" value={order.paymentMethod} /> : null}
+              <InfoRow label="상품 금액" value={`${order.subtotalKrw.toLocaleString("ko-KR")}원`} />
+              <InfoRow label="배송비" value={order.shippingFeeKrw > 0 ? `${order.shippingFeeKrw.toLocaleString("ko-KR")}원` : "무료"} />
               {order.status === "FAILED" && order.failMessage ? (
                 <InfoRow label="실패 사유" value={<span className="text-[#a33a2b]">{order.failMessage}</span>} />
               ) : null}
@@ -299,6 +320,9 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
             {/* 배송지 */}
             <div className="rounded-3xl border border-[#edf1f6] bg-white p-5">
               <h2 className="mb-1 text-[14px] font-bold text-[#111827]">배송지</h2>
+              <div className="mb-2 rounded-2xl border border-[#dbe4ef] bg-[#f7fafc] px-3 py-3 text-[11.5px] leading-5 text-[#61758a]">
+                민감정보 보호를 위해 배송 정보는 일부 마스킹되어 표시됩니다.
+              </div>
               <InfoRow label="수령인" value={order.shipping.recipientName} />
               <InfoRow label="연락처" value={order.shipping.phone} />
               <InfoRow label="우편번호" value={order.shipping.postalCode} />

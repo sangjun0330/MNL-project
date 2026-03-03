@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useAuthState } from "@/lib/auth";
 import { authHeaders, ensureTossScript } from "@/lib/billing/client";
 import { cn } from "@/lib/cn";
-import { formatShopPrice, getShopImageSrc, type ShopProduct } from "@/lib/shop";
+import { calculateShopPricing, formatShopPrice, getShopImageSrc, type ShopProduct } from "@/lib/shop";
 import {
   buildShopShippingVerificationValue,
   formatShopShippingSingleLine,
@@ -15,7 +15,8 @@ import {
   type ShopShippingAddress,
   type ShopShippingProfile,
 } from "@/lib/shopProfile";
-import { getWishlist, loadShopClientState, markShopPartnerClick, markShopViewed, saveShopClientState, toggleWishlist } from "@/lib/shopClient";
+import { addToCart, getCart, getWishlist, loadShopClientState, markShopPartnerClick, markShopViewed, saveShopClientState, toggleWishlist } from "@/lib/shopClient";
+import { SHOP_BUTTON_ACTIVE, SHOP_BUTTON_PRIMARY } from "@/lib/shopUi";
 import { useI18n } from "@/lib/useI18n";
 import { ShopCheckoutSheet } from "@/components/shop/ShopCheckoutSheet";
 
@@ -43,8 +44,8 @@ type ShopProfileResponse = {
 };
 
 const REVIEWS_PER_PAGE = 5;
-const PRIMARY_BUTTON = "inline-flex items-center justify-center rounded-2xl border border-[#11294b] bg-[#11294b] px-4 font-semibold text-white transition disabled:opacity-60";
-const SECONDARY_BUTTON = "inline-flex items-center justify-center rounded-2xl border border-[#d7dfeb] bg-[#f4f7fb] px-4 font-semibold text-[#11294b] transition disabled:opacity-60";
+const PRIMARY_BUTTON = SHOP_BUTTON_ACTIVE;
+const SECONDARY_BUTTON = SHOP_BUTTON_PRIMARY;
 const INPUT_CLASS = "w-full rounded-2xl border border-[#d7dfeb] bg-white px-4 py-3 text-[14px] text-[#11294b] outline-none transition placeholder:text-[#92a0b4] focus:border-[#11294b]";
 
 function MenuIcon() {
@@ -152,6 +153,8 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
     body: "",
   });
   const [wishlisted, setWishlisted] = useState(false);
+  const [cartCount, setCartCount] = useState(0);
+  const [cartLoading, setCartLoading] = useState(false);
   const [catalogProducts, setCatalogProducts] = useState<ShopProduct[]>(allProducts ?? []);
   const detail = product.detailPage;
 
@@ -159,6 +162,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
     let active = true;
     if (status !== "authenticated") {
       setWishlisted(false);
+      setCartCount(0);
       return () => {
         active = false;
       };
@@ -167,12 +171,14 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
     const run = async () => {
       try {
         const headers = await authHeaders();
-        const ids = await getWishlist(headers);
+        const [ids, cartItems] = await Promise.all([getWishlist(headers), getCart(headers)]);
         if (!active) return;
         setWishlisted(ids.includes(product.id));
+        setCartCount(cartItems.reduce((sum, item) => sum + item.quantity, 0));
       } catch {
         if (!active) return;
         setWishlisted(false);
+        setCartCount(0);
       }
     };
 
@@ -315,7 +321,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
   const hardOutOfStock = product.outOfStock || (typeof product.stockCount === "number" && product.stockCount <= 0);
   const maxSelectableQuantity =
     typeof product.stockCount === "number" && product.stockCount > 0 ? Math.max(1, Math.min(9, product.stockCount)) : 9;
-  const totalPrice = Math.round((product.priceKrw ?? 0) * quantity);
+  const pricing = calculateShopPricing({ priceKrw: product.priceKrw, quantity });
   const discountPercent = product.originalPriceKrw && product.priceKrw && product.originalPriceKrw > product.priceKrw
     ? Math.round((1 - product.priceKrw / product.originalPriceKrw) * 100)
     : 0;
@@ -391,10 +397,35 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
     }
   };
 
+  const handleAddToCart = async () => {
+    if (hardOutOfStock) {
+      setMessageTone("error");
+      setMessage("현재 품절된 상품입니다.");
+      return;
+    }
+    if (status !== "authenticated") {
+      setMessageTone("error");
+      setMessage("장바구니는 로그인한 계정에 저장됩니다.");
+      return;
+    }
+    setCartLoading(true);
+    try {
+      const headers = await authHeaders();
+      const items = await addToCart(product.id, quantity, headers);
+      setCartCount(items.reduce((sum, item) => sum + item.quantity, 0));
+      setMessageTone("notice");
+      setMessage("장바구니에 담았습니다. 계정 기준으로 저장됩니다.");
+    } catch {
+      setMessageTone("error");
+      setMessage("장바구니 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setCartLoading(false);
+    }
+  };
+
   const handleCheckout = async (verification: {
     shippingConfirmed: boolean;
     contactConfirmed: boolean;
-    policyConfirmed: boolean;
   }) => {
     if (!product.checkoutEnabled || !product.priceKrw) return;
     if (status !== "authenticated") {
@@ -436,6 +467,8 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
         orderId: string;
         orderName: string;
         amount: number;
+        subtotalKrw: number;
+        shippingFeeKrw: number;
         currency: "KRW";
         clientKey: string;
         customerKey: string;
@@ -490,14 +523,21 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
         setMessage("배송지와 개인정보 확인 항목을 모두 체크한 뒤 결제를 진행해 주세요.");
       } else if (text.includes("shop_checkout_verification_mismatch")) {
         setMessage("결제 전 확인한 정보와 현재 저장된 배송지가 달라졌습니다. 배송지를 다시 확인해 주세요.");
+      } else if (text.includes("missing_toss_client_key")) {
+        setMessage("결제 설정이 아직 완료되지 않았습니다. 관리자에게 결제 키 설정을 확인해 주세요.");
+      } else if (text.includes("missing_origin") || text.includes("invalid_referer") || text.includes("invalid_referer_origin")) {
+        setMessage("현재 브라우저 보안 정보가 누락되어 결제를 시작할 수 없습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.");
+      } else if (text.includes("invalid_origin")) {
+        setMessage("결제 이동 주소를 만들지 못했습니다. 잠시 후 다시 시도해 주세요.");
       } else if (text.includes("missing_toss_sdk")) {
         setMessage("결제 모듈을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      } else if (text.includes("failed_to_create_shop_order")) {
+        setMessage("주문서를 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.");
       } else {
         setMessage("결제를 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.");
       }
     } finally {
       setCheckoutLoading(false);
-      setCheckoutOpen(false);
     }
   };
 
@@ -633,18 +673,9 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
           >
             <HeartIcon filled={wishlisted} />
           </button>
-          <button
-            type="button"
-            data-auth-allow
-            onClick={() => {
-              if (typeof window === "undefined") return;
-              document.getElementById("shop-detail-buybar")?.scrollIntoView({ behavior: "smooth", block: "end" });
-            }}
-            className="inline-flex h-10 w-10 items-center justify-center text-[#111827]"
-            aria-label={t("구매 영역으로 이동")}
-          >
+          <Link href="/shop/cart" data-auth-allow className="inline-flex h-10 w-10 items-center justify-center text-[#111827]" aria-label={t("장바구니")}>
             <CartIcon />
-          </button>
+          </Link>
           <Link href="/shop/profile" data-auth-allow className="inline-flex h-10 w-10 items-center justify-center text-[#111827]" aria-label={t("쇼핑 프로필")}>
             <ProfileIcon />
           </Link>
@@ -767,8 +798,21 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
                     </button>
                   </div>
                 </div>
-                <div className="mt-3 text-[13px] font-semibold text-[#111827]">
-                  {t("총 결제 금액")} · <span className="text-[#11294b]">{totalPrice.toLocaleString("ko-KR")}원</span>
+                <div className="mt-3 rounded-[20px] border border-[#d6e0ea] bg-white px-3 py-3 text-[12.5px] text-[#5c7187]">
+                  <div className="flex items-center justify-between gap-3">
+                    <span>{t("상품 금액")}</span>
+                    <span className="font-semibold text-[#425a76]">{pricing.subtotalKrw.toLocaleString("ko-KR")}원</span>
+                  </div>
+                  <div className="mt-1 flex items-center justify-between gap-3">
+                    <span>{t("배송비")}</span>
+                    <span className="font-semibold text-[#425a76]">
+                      {pricing.shippingFeeKrw > 0 ? `${pricing.shippingFeeKrw.toLocaleString("ko-KR")}원` : t("무료")}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between gap-3 border-t border-[#e6edf4] pt-2">
+                    <span className="font-semibold text-[#2f4d6a]">{t("총 결제 금액")}</span>
+                    <span className="font-bold text-[#2f4d6a]">{pricing.totalKrw.toLocaleString("ko-KR")}원</span>
+                  </div>
                 </div>
               </div>
             ) : null}
@@ -879,7 +923,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
               if (typeof window === "undefined") return;
               document.getElementById("shop-review-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
             }}
-            className="inline-flex h-14 w-full items-center justify-center rounded-3xl bg-[#102a43] text-[15px] font-semibold text-white"
+            className={`h-14 w-full text-[15px] ${SECONDARY_BUTTON}`}
           >
             {t("리뷰작성")}
           </button>
@@ -984,8 +1028,8 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
                   data-auth-allow
                   onClick={() => setReviewPage(page)}
                   className={cn(
-                    "inline-flex h-12 w-12 items-center justify-center rounded-2xl border text-[14px] font-semibold",
-                    reviewPage === page ? "border-[#11294b] bg-[#11294b] text-white" : "border-[#d7dfeb] bg-white text-[#11294b]"
+                    "inline-flex h-12 w-12 items-center justify-center rounded-full border-2 text-[14px] font-semibold",
+                    reviewPage === page ? "border-[#17324d] bg-[#d1deea] text-[#2f4d6a]" : "border-[#bfd0e1] bg-white text-[#60768d]"
                   )}
                 >
                   {page}
@@ -1025,8 +1069,8 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
                         data-auth-allow
                         onClick={() => setReviewDraft((current) => ({ ...current, rating: value }))}
                         className={cn(
-                          "inline-flex h-10 w-10 items-center justify-center rounded-2xl border text-[14px] font-semibold transition",
-                          active ? "border-[#11294b] bg-[#11294b] text-white" : "border-[#d7dfeb] bg-white text-[#11294b]"
+                          "inline-flex h-10 w-10 items-center justify-center rounded-full border-2 text-[14px] font-semibold transition",
+                          active ? "border-[#17324d] bg-[#d1deea] text-[#2f4d6a]" : "border-[#bfd0e1] bg-white text-[#60768d]"
                         )}
                       >
                         {value}
@@ -1063,7 +1107,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
               <div className="text-[13px] font-semibold text-[#111827]">{t("결제 안내")}</div>
               <div className="mt-3 text-[12.5px] leading-6 text-[#44556d]">
                 {product.checkoutEnabled && product.priceKrw
-                  ? t("토스 결제로 바로 결제할 수 있으며, 승인 완료 후 주문 내역에서 상태를 확인할 수 있습니다.")
+                  ? t("토스 결제로 바로 결제할 수 있으며, 배송비 3,000원은 50,000원 이상 구매 시 자동으로 무료 처리됩니다.")
                   : t("외부 판매처 가격과 재고는 판매처 기준으로 운영되며, 최종 결제 조건은 판매처에서 확인해야 합니다.")}
               </div>
             </div>
@@ -1084,13 +1128,13 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
                         data-auth-allow
                         onClick={() => setSelectedShippingAddressId(address.id)}
                         className={[
-                          "w-full rounded-2xl border px-3 py-3 text-left transition",
-                          active ? "border-[#102a43] bg-[#eef4fb]" : "border-[#d7dfeb] bg-white",
+                          "w-full rounded-[24px] border-2 px-4 py-4 text-left transition",
+                          active ? "border-[#17324d] bg-[#dfe8f1]" : "border-[#bfd0e1] bg-[#eef4fb]",
                         ].join(" ")}
                       >
                         <div className="flex items-center gap-2">
                           {active ? (
-                            <span className="rounded-full bg-[#102a43] px-2 py-0.5 text-[10px] font-semibold text-white">{t("선택")}</span>
+                            <span className="rounded-full bg-[#17324d] px-2 py-0.5 text-[10px] font-semibold text-white">{t("선택")}</span>
                           ) : null}
                           <span className="text-[12px] font-semibold text-[#11294b]">{address.label}</span>
                         </div>
@@ -1165,18 +1209,16 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
           <button
             type="button"
             data-auth-allow
-            onClick={() => {
-              if (typeof window === "undefined") return;
-              document.getElementById("shop-product-reviews")?.scrollIntoView({ behavior: "smooth", block: "start" });
-            }}
-            className="relative inline-flex h-16 flex-1 items-center justify-center rounded-2xl border border-[#d7dfeb] bg-white text-[15px] font-semibold text-[#111827]"
+            onClick={() => void handleAddToCart()}
+            disabled={cartLoading}
+            className={`relative h-16 flex-1 text-[15px] ${SECONDARY_BUTTON}`}
           >
-            {reviewSummary.count > 0 ? (
-              <span className="absolute -top-3 rounded-full bg-[#3b6fc9] px-3 py-1 text-[11px] font-semibold text-white">
-                {reviewSummary.count.toLocaleString("ko-KR")}
+            {cartCount > 0 ? (
+              <span className="absolute -top-3 rounded-full bg-[#17324d] px-3 py-1 text-[11px] font-semibold text-white">
+                {cartCount.toLocaleString("ko-KR")}
               </span>
             ) : null}
-            {t("리뷰보기")}
+            {cartLoading ? t("담는 중...") : t("장바구니")}
           </button>
 
           {hardOutOfStock ? (
@@ -1184,7 +1226,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
               {t("품절")}
             </button>
           ) : product.checkoutEnabled && product.priceKrw ? (
-            <button type="button" data-auth-allow onClick={handleOpenCheckout} className="inline-flex h-16 flex-[1.2] items-center justify-center rounded-2xl bg-[#102a43] text-[15px] font-semibold text-white">
+            <button type="button" data-auth-allow onClick={handleOpenCheckout} className={`h-16 flex-[1.2] text-[15px] ${PRIMARY_BUTTON}`}>
               {t("구매하기")}
             </button>
           ) : product.externalUrl ? (
@@ -1193,7 +1235,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
               target="_blank"
               rel="noreferrer"
               onClick={handlePartnerClick}
-              className="inline-flex h-16 flex-[1.2] items-center justify-center rounded-2xl bg-[#102a43] text-[15px] font-semibold text-white"
+              className={`h-16 flex-[1.2] text-[15px] ${PRIMARY_BUTTON}`}
             >
               {t("구매하기")}
             </a>

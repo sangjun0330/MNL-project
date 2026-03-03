@@ -52,6 +52,11 @@ body {
     color var(--rnest-dur-page) var(--rnest-ease-smooth);
 }
 
+html.rnest-sheet-open,
+body.rnest-sheet-open {
+  overflow: hidden;
+}
+
 /* ✅ iOS-like tap behaviour */
 * { -webkit-tap-highlight-color: transparent; }
 

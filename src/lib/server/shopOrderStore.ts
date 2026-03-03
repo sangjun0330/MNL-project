@@ -1,9 +1,11 @@
 import { todayISO } from "@/lib/date";
+import { toMaskedShopShippingSnapshot } from "@/lib/shopPrivacy";
 import { normalizeShopShippingSnapshot, type ShopShippingSnapshot } from "@/lib/shopProfile";
+import { findShopOrderBundleByOrderId } from "@/lib/server/shopOrderBundleStore";
 import { buildCancelIdempotencyKey, buildConfirmIdempotencyKey, readTossAcceptLanguage, readTossSecretKeyFromEnv, readTossTestCodeFromEnv } from "@/lib/server/tossConfig";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { loadUserState, saveUserState } from "@/lib/server/userStateStore";
-import type { ShopProduct } from "@/lib/shop";
+import { calculateShopPricing, type ShopProduct } from "@/lib/shop";
 import type { Database, Json } from "@/types/supabase";
 
 const SHOP_ORDER_PREFIX = "__shop_order__";
@@ -76,6 +78,8 @@ export type ShopOrderSummary = {
   orderId: string;
   status: ShopOrderStatus;
   amount: number;
+  subtotalKrw: number;
+  shippingFeeKrw: number;
   createdAt: string;
   approvedAt: string | null;
   paymentMethod: string | null;
@@ -538,10 +542,13 @@ export async function createShopOrder(input: {
   product: ShopProduct;
   quantity: number;
   shipping: ShopShippingSnapshot;
+  amountOverrideKrw?: number | null;
 }) {
   const now = new Date().toISOString();
   const quantity = Math.max(1, Math.min(9, Math.round(Number(input.quantity) || 1)));
   const priceKrw = Math.max(0, Math.round(Number(input.product.priceKrw) || 0));
+  const pricing = calculateShopPricing({ priceKrw, quantity });
+  const amountOverrideKrw = toAmount(input.amountOverrideKrw);
   const order: ShopOrderRecord = {
     orderId: input.orderId,
     userId: input.userId,
@@ -556,7 +563,7 @@ export async function createShopOrder(input: {
       priceKrw,
       quantity,
     },
-    amount: priceKrw * quantity,
+    amount: amountOverrideKrw != null && amountOverrideKrw >= pricing.subtotalKrw ? amountOverrideKrw : pricing.totalKrw,
     currency: "KRW",
     paymentKey: null,
     tossResponse: null,
@@ -880,6 +887,10 @@ export async function requestShopOrderRefund(input: {
   const current = await readShopOrderForUser(input.userId, input.orderId);
   if (!current) throw new Error("shop_order_not_found");
   if (current.status !== "PAID") throw new Error("shop_order_not_refundable");
+  const bundle = await findShopOrderBundleByOrderId(input.userId, input.orderId).catch(() => null);
+  if (bundle && bundle.itemCount > 1 && bundle.status === "PAID") {
+    throw new Error("shop_order_bundle_refund_requires_manual_review");
+  }
   if (current.refund.status === "requested" || current.refund.status === "done") return current;
 
   const saved = await writeOrder({
@@ -1069,10 +1080,17 @@ export async function confirmShopOrderPurchase(input: {
 }
 
 export function toShopOrderSummary(order: ShopOrderRecord): ShopOrderSummary {
+  const pricing = calculateShopPricing({
+    priceKrw: order.productSnapshot.priceKrw,
+    quantity: order.productSnapshot.quantity,
+    currentAmountKrw: order.amount,
+  });
   return {
     orderId: order.orderId,
     status: order.status,
-    amount: order.amount,
+    amount: pricing.totalKrw,
+    subtotalKrw: pricing.subtotalKrw,
+    shippingFeeKrw: pricing.shippingFeeKrw,
     createdAt: order.createdAt,
     approvedAt: order.approvedAt,
     paymentMethod: readPaymentMethod(order.tossResponse),
@@ -1081,14 +1099,7 @@ export function toShopOrderSummary(order: ShopOrderRecord): ShopOrderSummary {
       name: order.productSnapshot.name,
       quantity: order.productSnapshot.quantity,
     },
-    shipping: {
-      recipientName: order.shipping.recipientName,
-      phone: order.shipping.phone,
-      postalCode: order.shipping.postalCode,
-      addressLine1: order.shipping.addressLine1,
-      addressLine2: order.shipping.addressLine2,
-      deliveryNote: order.shipping.deliveryNote,
-    },
+    shipping: toMaskedShopShippingSnapshot(order.shipping),
     refund: {
       status: order.refund.status,
       reason: order.refund.reason,
@@ -1167,6 +1178,14 @@ export async function markShopOrderDelivered(input: {
 export function toShopAdminOrderSummary(order: ShopOrderRecord): ShopAdminOrderSummary {
   return {
     ...toShopOrderSummary(order),
+    shipping: {
+      recipientName: order.shipping.recipientName,
+      phone: order.shipping.phone,
+      postalCode: order.shipping.postalCode,
+      addressLine1: order.shipping.addressLine1,
+      addressLine2: order.shipping.addressLine2,
+      deliveryNote: order.shipping.deliveryNote,
+    },
     userLabel: maskUserId(order.userId),
   };
 }

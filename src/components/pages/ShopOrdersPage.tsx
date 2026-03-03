@@ -5,11 +5,14 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useAuthState } from "@/lib/auth";
 import { authHeaders } from "@/lib/billing/client";
+import { SHOP_BUTTON_ACTIVE, SHOP_BUTTON_PRIMARY, SHOP_BUTTON_SECONDARY } from "@/lib/shopUi";
 
 type ShopOrderSummary = {
   orderId: string;
   status: string;
   amount: number;
+  subtotalKrw: number;
+  shippingFeeKrw: number;
   createdAt: string;
   approvedAt: string | null;
   failMessage: string | null;
@@ -62,10 +65,15 @@ function formatDateLabel(value: string | null) {
   return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")}`;
 }
 
-const PRIMARY_BUTTON =
-  "inline-flex items-center justify-center rounded-2xl border border-[#102a43] bg-[#102a43] px-4 font-semibold text-white transition disabled:opacity-60";
-const SECONDARY_BUTTON =
-  "inline-flex items-center justify-center rounded-2xl border border-[#d7dfeb] bg-[#f4f7fb] px-4 font-semibold text-[#11294b] transition disabled:opacity-60";
+function maskTrackingNumber(value: string | null) {
+  const safe = String(value ?? "").trim();
+  if (!safe) return "-";
+  if (safe.length <= 4) return `${safe.slice(0, 1)}***`;
+  return `${safe.slice(0, 3)}••••${safe.slice(-4)}`;
+}
+
+const PRIMARY_BUTTON = SHOP_BUTTON_ACTIVE;
+const SECONDARY_BUTTON = SHOP_BUTTON_PRIMARY;
 const ORDERS_PER_PAGE = 12;
 type OrderFilter = "all" | "progress" | "delivered" | "refund" | "issue";
 
@@ -167,9 +175,14 @@ export function ShopOrdersPage() {
       setOrders((current) => [nextOrder, ...current.filter((item) => item.orderId !== nextOrder.orderId)]);
       setMessageTone("notice");
       setMessage("환불 요청이 접수되었습니다. 관리자 검토 후 처리됩니다.");
-    } catch {
+    } catch (error: any) {
+      const code = String(error?.message ?? "failed_to_request_shop_refund");
       setMessageTone("error");
-      setMessage("환불 요청에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+      if (code.includes("shop_order_bundle_refund_requires_manual_review")) {
+        setMessage("묶음 결제로 승인된 주문은 부분 환불을 자동 처리할 수 없습니다. 고객센터 또는 관리자 검토를 통해 접수해 주세요.");
+      } else {
+        setMessage("환불 요청에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+      }
     } finally {
       setActionLoadingId(null);
     }
@@ -209,7 +222,7 @@ export function ShopOrdersPage() {
     <div className="-mx-4 pb-24">
       <div className="border-b border-[#edf1f6] bg-white px-4 py-4">
         <div className="flex items-center gap-3">
-          <Link href="/shop" data-auth-allow className="inline-flex h-10 w-10 items-center justify-center text-[#111827]" aria-label="쇼핑으로 돌아가기">
+          <Link href="/shop" data-auth-allow className={`h-10 w-10 px-0 text-[#425a76] ${SHOP_BUTTON_SECONDARY}`} aria-label="쇼핑으로 돌아가기">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
               <path d="M19 12H5" /><path d="M12 5l-7 7 7 7" />
             </svg>
@@ -249,7 +262,7 @@ export function ShopOrdersPage() {
                 onClick={() => setFilter(item.key)}
                 className={[
                   "shrink-0 rounded-full px-4 py-2 text-[12px] font-semibold transition",
-                  filter === item.key ? "bg-[#102a43] text-white" : "border border-[#d7dfeb] bg-white text-[#11294b]",
+                  filter === item.key ? "border-2 border-[#17324d] bg-[#d1deea] text-[#2f4d6a]" : "border-2 border-[#bfd0e1] bg-white text-[#60768d]",
                 ].join(" ")}
               >
                 {item.label}
@@ -284,8 +297,8 @@ export function ShopOrdersPage() {
                   <div className="min-w-0 flex-1">
                     <div className="text-[14px] font-semibold text-[#111827]">{order.productSnapshot.name}</div>
                     <div className="mt-1 text-[11px] text-[#8d99ab]">
-                      수량 {order.productSnapshot.quantity} · {Math.round(order.amount).toLocaleString("ko-KR")}원 · {formatDateLabel(order.createdAt)}
-                    </div>
+                        수량 {order.productSnapshot.quantity} · 총 {Math.round(order.amount).toLocaleString("ko-KR")}원 · {formatDateLabel(order.createdAt)}
+                      </div>
                     {order.shipping.addressLine1 ? (
                       <div className="mt-1 text-[11px] text-[#8d99ab]">
                         {order.shipping.recipientName} · {order.shipping.addressLine1}{order.shipping.addressLine2 ? ` ${order.shipping.addressLine2}` : ""}
@@ -300,10 +313,13 @@ export function ShopOrdersPage() {
                 {/* 배송 추적 정보 */}
                 {order.trackingNumber ? (
                   <div className="mt-2 rounded-2xl bg-[#f4f7fb] px-3 py-2 text-[11.5px] text-[#44556d]">
-                    📦 {order.courier} · {order.trackingNumber}
+                    📦 {order.courier} · {maskTrackingNumber(order.trackingNumber)}
                     {order.shippedAt ? ` · 발송일 ${formatDateLabel(order.shippedAt)}` : ""}
                   </div>
                 ) : null}
+                <div className="mt-2 rounded-2xl border border-[#dbe4ef] bg-white px-3 py-2 text-[11.5px] text-[#5b7087]">
+                  상품 {order.subtotalKrw.toLocaleString("ko-KR")}원 · 배송비 {order.shippingFeeKrw > 0 ? `${order.shippingFeeKrw.toLocaleString("ko-KR")}원` : "무료"}
+                </div>
 
                 {/* 환불 상태 */}
                 {order.refund.status === "requested" && (

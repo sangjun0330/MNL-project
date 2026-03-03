@@ -3,6 +3,12 @@ const MAX_RECENT_PRODUCTS = 6;
 const LEGACY_WISHLIST_KEY = "rnest_shop_wishlist_v1";
 const MAX_WISHLIST_SIZE = 50;
 
+export type ShopCartItem = {
+  productId: string;
+  quantity: number;
+  savedAt: string;
+};
+
 export type ShopClientState = {
   version: 2;
   recentIds: string[];
@@ -192,4 +198,74 @@ export async function toggleWishlist(productId: string, headers?: HeadersInit): 
     ids: result.ids,
     active: Boolean(result.active),
   };
+}
+
+async function requestCart(input: {
+  method: "GET" | "PUT";
+  headers?: HeadersInit;
+  body?: Record<string, unknown>;
+}): Promise<ShopCartItem[]> {
+  const res = await fetch("/api/shop/cart", {
+    method: input.method,
+    headers: {
+      ...(input.method === "PUT" ? { "content-type": "application/json" } : {}),
+      ...(input.headers ?? {}),
+    },
+    body: input.body ? JSON.stringify(input.body) : undefined,
+    cache: "no-store",
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.ok) {
+    throw new Error(String(json?.error ?? `cart_http_${res.status}`));
+  }
+  const rawItems: unknown[] = Array.isArray(json?.data?.items) ? json.data.items : [];
+  return rawItems
+    .filter(
+      (item: unknown): item is ShopCartItem =>
+        Boolean(item) &&
+        typeof item === "object" &&
+        typeof (item as ShopCartItem).productId === "string" &&
+        typeof (item as ShopCartItem).quantity === "number"
+    )
+    .map((item) => ({
+      productId: item.productId,
+      quantity: Math.max(1, Math.min(9, Math.round(Number(item.quantity) || 1))),
+      savedAt: String(item.savedAt ?? ""),
+    }));
+}
+
+export async function getCart(headers?: HeadersInit): Promise<ShopCartItem[]> {
+  return requestCart({ method: "GET", headers });
+}
+
+export async function addToCart(productId: string, quantity = 1, headers?: HeadersInit): Promise<ShopCartItem[]> {
+  return requestCart({
+    method: "PUT",
+    headers,
+    body: { action: "add", productId, quantity },
+  });
+}
+
+export async function updateCartQuantity(productId: string, quantity: number, headers?: HeadersInit): Promise<ShopCartItem[]> {
+  return requestCart({
+    method: "PUT",
+    headers,
+    body: { action: "set", productId, quantity },
+  });
+}
+
+export async function removeFromCart(productId: string, headers?: HeadersInit): Promise<ShopCartItem[]> {
+  return requestCart({
+    method: "PUT",
+    headers,
+    body: { action: "remove", productId },
+  });
+}
+
+export async function clearCart(headers?: HeadersInit): Promise<ShopCartItem[]> {
+  return requestCart({
+    method: "PUT",
+    headers,
+    body: { action: "clear" },
+  });
 }

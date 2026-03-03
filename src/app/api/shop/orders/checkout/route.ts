@@ -1,6 +1,7 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { getRouteSupabaseClient } from "@/lib/server/supabaseRouteClient";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import { calculateShopPricing } from "@/lib/shop";
 import { buildShopShippingVerificationValue, isCompleteShopShippingProfile } from "@/lib/shopProfile";
 import { loadShopCatalog } from "@/lib/server/shopCatalogStore";
 import {
@@ -10,7 +11,7 @@ import {
   createShopOrder,
 } from "@/lib/server/shopOrderStore";
 import { buildShopShippingSnapshot, resolveShopShippingProfileFromBook } from "@/lib/server/shopProfileStore";
-import { readTossClientKeyFromEnv, readTossSecretKeyFromEnv } from "@/lib/server/tossConfig";
+import { readTossClientKeyFromEnv } from "@/lib/server/tossConfig";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -55,9 +56,6 @@ export async function POST(req: Request) {
 
   const client = readTossClientKeyFromEnv();
   if (!client.ok) return jsonNoStore({ ok: false, error: client.error }, { status: 500 });
-  const secret = readTossSecretKeyFromEnv();
-  if (!secret.ok) return jsonNoStore({ ok: false, error: secret.error }, { status: 500 });
-  if (client.mode !== secret.mode) return jsonNoStore({ ok: false, error: "toss_key_mode_mismatch" }, { status: 500 });
 
   let body: any = null;
   try {
@@ -118,15 +116,22 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-    if (!verification.shippingConfirmed || !verification.contactConfirmed || !verification.policyConfirmed) {
+    if (!verification.shippingConfirmed || !verification.contactConfirmed) {
       return jsonNoStore({ ok: false, error: "shop_checkout_verification_required" }, { status: 400 });
     }
     if (!shippingVerificationValue || shippingVerificationValue !== buildShopShippingVerificationValue(shippingProfile)) {
       return jsonNoStore({ ok: false, error: "shop_checkout_verification_mismatch" }, { status: 409 });
     }
 
+    const origin = resolveOrigin(req);
+    if (!origin) return jsonNoStore({ ok: false, error: "invalid_origin" }, { status: 500 });
+
     const orderId = buildShopOrderId(product.id);
     const customer = await readCustomer(req);
+    const pricing = calculateShopPricing({
+      priceKrw: product.priceKrw,
+      quantity,
+    });
     const order = await createShopOrder({
       orderId,
       userId,
@@ -134,18 +139,17 @@ export async function POST(req: Request) {
       quantity,
       shipping: buildShopShippingSnapshot(shippingProfile),
     });
-    const origin = resolveOrigin(req);
-    if (!origin) return jsonNoStore({ ok: false, error: "invalid_origin" }, { status: 500 });
 
     return jsonNoStore({
       ok: true,
       data: {
         orderId: order.orderId,
         orderName: product.name,
-        amount: order.amount,
+        amount: pricing.totalKrw,
+        subtotalKrw: pricing.subtotalKrw,
+        shippingFeeKrw: pricing.shippingFeeKrw,
         currency: "KRW",
         quantity,
-        shipping: order.shipping,
         clientKey: client.clientKey,
         customerKey: `shop_${userId}`.slice(0, 50),
         customerEmail: customer.email,
@@ -158,6 +162,9 @@ export async function POST(req: Request) {
     const message = String(error?.message ?? "failed_to_create_shop_order");
     if (message === "shop_profile_storage_unavailable") {
       return jsonNoStore({ ok: false, error: "shop_profile_storage_unavailable" }, { status: 503 });
+    }
+    if (message.includes("missing_toss_client_key") || message.includes("invalid_toss_client_key")) {
+      return jsonNoStore({ ok: false, error: "missing_toss_client_key" }, { status: 500 });
     }
     return jsonNoStore({ ok: false, error: "failed_to_create_shop_order" }, { status: 500 });
   }

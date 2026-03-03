@@ -2,28 +2,42 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { SHOP_BUTTON_PRIMARY, SHOP_BUTTON_SECONDARY } from "@/lib/shopUi";
 import { useI18n } from "@/lib/useI18n";
+
+function humanizeCheckoutFail(code: string, message: string) {
+  const safeCode = String(code ?? "");
+  if (safeCode.includes("PAY_PROCESS_CANCELED")) return "결제창에서 주문이 취소되었습니다.";
+  if (safeCode.includes("PAY_PROCESS_ABORTED")) return "결제 승인 전에 주문이 중단되었습니다. 잠시 후 다시 시도해 주세요.";
+  if (safeCode.includes("REJECT_CARD_COMPANY")) return "카드사 승인에 실패했습니다. 결제 수단을 다시 확인해 주세요.";
+  if (safeCode.includes("INVALID_CARD_EXPIRATION")) return "카드 유효기간을 다시 확인해 주세요.";
+  if (safeCode.includes("NOT_SUPPORTED_INSTALLMENT_PLAN_CARD_OR_MERCHANT")) {
+    return "해당 카드 또는 할부 조건이 지원되지 않습니다.";
+  }
+  if (message && message.length <= 80) return message;
+  return "결제창에서 주문이 취소되었거나 승인에 실패했습니다.";
+}
 
 export function ShopCheckoutFailPage() {
   const { t } = useI18n();
   const params = useSearchParams();
   const code = params.get("code") ?? "";
   const message = params.get("message") ?? "";
+  const displayMessage = humanizeCheckoutFail(code, message);
 
   return (
     <div className="mx-auto w-full max-w-[720px] px-4 pb-24 pt-6">
       <div className="rounded-[24px] border border-ios-sep bg-white p-6">
         <div className="text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">{t("주문 실패")}</div>
         <div className="mt-3 text-[14px] font-semibold text-red-600">{t("결제가 완료되지 않았습니다.")}</div>
-        <div className="mt-2 text-[12.5px] text-ios-sub">{message || t("결제창에서 주문이 취소되었거나 승인에 실패했습니다.")}</div>
-        {code ? <div className="mt-1 text-[12px] break-all text-ios-muted">code: {code}</div> : null}
+        <div className="mt-2 text-[12.5px] leading-6 text-ios-sub">{displayMessage}</div>
 
-        <div className="mt-6 flex gap-2">
-          <Link href="/shop" className="inline-flex h-10 items-center justify-center rounded-2xl border border-[#11294b] bg-[#11294b] px-5 text-[13px] font-semibold text-white">
+        <div className="mt-6 flex flex-wrap gap-2">
+          <Link href="/shop" className={`h-10 px-5 text-[13px] ${SHOP_BUTTON_PRIMARY}`}>
             {t("쇼핑으로 돌아가기")}
           </Link>
-          <Link href="/settings/billing" className="inline-flex h-10 items-center justify-center rounded-2xl border border-[#d7dfeb] bg-[#f4f7fb] px-5 text-[13px] font-semibold text-[#11294b]">
-            {t("결제 설정 보기")}
+          <Link href="/shop/cart" className={`h-10 px-5 text-[13px] ${SHOP_BUTTON_SECONDARY}`}>
+            {t("장바구니 보기")}
           </Link>
         </div>
       </div>
