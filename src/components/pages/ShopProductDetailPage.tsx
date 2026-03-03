@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useAuthState } from "@/lib/auth";
 import { authHeaders, ensureTossScript } from "@/lib/billing/client";
 import { cn } from "@/lib/cn";
-import { calculateShopPricing, formatShopPrice, getShopImageSrc, type ShopProduct } from "@/lib/shop";
+import { calculateShopPricing, formatShopCurrency, formatShopPrice, getShopImageSrc, type ShopProduct } from "@/lib/shop";
 import {
   buildShopShippingVerificationValue,
   formatShopShippingSingleLine,
@@ -117,7 +117,7 @@ function reviewBarWidthClass(percent: number) {
 }
 
 export function ShopProductDetailPage({ product, allProducts }: { product: ShopProduct; allProducts?: ShopProduct[] }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const { status } = useAuthState();
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
@@ -376,7 +376,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
   const handleWishlistToggle = async () => {
     if (status !== "authenticated") {
       setMessageTone("error");
-      setMessage("위시리스트는 로그인한 계정에 저장됩니다.");
+      setMessage(t("위시리스트는 로그인한 계정에 저장됩니다."));
       return;
     }
     try {
@@ -385,19 +385,19 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
       setWishlisted(next.active);
     } catch {
       setMessageTone("error");
-      setMessage("위시리스트 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+      setMessage(t("위시리스트 저장에 실패했습니다. 잠시 후 다시 시도해 주세요."));
     }
   };
 
   const handleAddToCart = async () => {
     if (hardOutOfStock) {
       setMessageTone("error");
-      setMessage("현재 품절된 상품입니다.");
+      setMessage(t("현재 품절된 상품입니다."));
       return;
     }
     if (status !== "authenticated") {
       setMessageTone("error");
-      setMessage("장바구니는 로그인한 계정에 저장됩니다.");
+      setMessage(t("장바구니는 로그인한 계정에 저장됩니다."));
       return;
     }
     setCartLoading(true);
@@ -406,10 +406,10 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
       const items = await addToCart(product.id, quantity, headers);
       setCartCount(items.reduce((sum, item) => sum + item.quantity, 0));
       setMessageTone("notice");
-      setMessage("장바구니에 담았습니다. 계정 기준으로 저장됩니다.");
+      setMessage(t("장바구니에 담았습니다. 계정 기준으로 저장됩니다."));
     } catch {
       setMessageTone("error");
-      setMessage("장바구니 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+      setMessage(t("장바구니 저장에 실패했습니다. 잠시 후 다시 시도해 주세요."));
     } finally {
       setCartLoading(false);
     }
@@ -422,12 +422,12 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
     if (!product.checkoutEnabled || !product.priceKrw) return;
     if (status !== "authenticated") {
       setMessageTone("error");
-      setMessage("결제는 로그인 후 가능합니다.");
+      setMessage(t("결제는 로그인 후 가능합니다."));
       return;
     }
     if (!shippingReady) {
       setMessageTone("error");
-      setMessage("주문 전에 계정 설정에서 기본 배송지를 먼저 저장해 주세요.");
+      setMessage(t("주문 전에 계정 설정에서 기본 배송지를 먼저 저장해 주세요."));
       return;
     }
 
@@ -498,35 +498,37 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
       const text = String(error?.message ?? "failed_to_start_shop_checkout");
       setMessageTone("error");
       if (text.includes("too_many_pending_shop_orders")) {
-        setMessage("결제 대기 주문이 많습니다. 기존 결제를 마친 뒤 다시 시도해 주세요.");
+        setMessage(t("결제 대기 주문이 많습니다. 기존 결제를 마친 뒤 다시 시도해 주세요."));
       } else if (text.includes("shop_product_out_of_stock")) {
-        setMessage("현재 품절되어 주문을 진행할 수 없습니다.");
+        setMessage(t("현재 품절되어 주문을 진행할 수 없습니다."));
       } else if (text.includes("shop_product_insufficient_stock")) {
-        setMessage("남아 있는 재고보다 많은 수량을 선택했습니다. 수량을 줄여 다시 시도해 주세요.");
+        setMessage(t("남아 있는 재고보다 많은 수량을 선택했습니다. 수량을 줄여 다시 시도해 주세요."));
       } else if (text.includes("shop_checkout_disabled")) {
-        setMessage("현재 이 상품은 앱 내 결제가 비활성화되어 있습니다.");
+        setMessage(t("현재 이 상품은 앱 내 결제가 비활성화되어 있습니다."));
       } else if (text.includes("missing_shipping_address")) {
-        setMessage("기본 배송지가 없어 주문을 진행할 수 없습니다. 계정에서 배송지를 먼저 저장해 주세요.");
+        setMessage(t("기본 배송지가 없어 주문을 진행할 수 없습니다. 계정에서 배송지를 먼저 저장해 주세요."));
       } else if (text.includes("invalid_shipping_address")) {
-        setMessage("선택한 배송지를 찾지 못했습니다. 배송지를 다시 선택해 주세요.");
+        setMessage(t("선택한 배송지를 찾지 못했습니다. 배송지를 다시 선택해 주세요."));
       } else if (text.includes("shop_profile_storage_unavailable")) {
-        setMessage("배송지 저장소가 아직 준비되지 않았습니다. 잠시 후 다시 시도해 주세요.");
+        setMessage(t("배송지 저장소가 아직 준비되지 않았습니다. 잠시 후 다시 시도해 주세요."));
+      } else if (text.includes("shop_order_storage_unavailable")) {
+        setMessage(t("주문 저장소 설정이 아직 완료되지 않았습니다. 관리자에게 주문 저장 환경 구성을 확인해 주세요."));
       } else if (text.includes("shop_checkout_verification_required")) {
-        setMessage("배송지와 개인정보 확인 항목을 모두 체크한 뒤 결제를 진행해 주세요.");
+        setMessage(t("배송지와 개인정보 확인 항목을 모두 체크한 뒤 결제를 진행해 주세요."));
       } else if (text.includes("shop_checkout_verification_mismatch")) {
-        setMessage("결제 전 확인한 정보와 현재 저장된 배송지가 달라졌습니다. 배송지를 다시 확인해 주세요.");
+        setMessage(t("결제 전 확인한 정보와 현재 저장된 배송지가 달라졌습니다. 배송지를 다시 확인해 주세요."));
       } else if (text.includes("missing_toss_client_key")) {
-        setMessage("결제 설정이 아직 완료되지 않았습니다. 관리자에게 결제 키 설정을 확인해 주세요.");
+        setMessage(t("결제 설정이 아직 완료되지 않았습니다. 관리자에게 결제 키 설정을 확인해 주세요."));
       } else if (text.includes("missing_origin") || text.includes("invalid_referer") || text.includes("invalid_referer_origin")) {
-        setMessage("현재 브라우저 보안 정보가 누락되어 결제를 시작할 수 없습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.");
+        setMessage(t("현재 브라우저 보안 정보가 누락되어 결제를 시작할 수 없습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요."));
       } else if (text.includes("invalid_origin")) {
-        setMessage("결제 이동 주소를 만들지 못했습니다. 잠시 후 다시 시도해 주세요.");
+        setMessage(t("결제 이동 주소를 만들지 못했습니다. 잠시 후 다시 시도해 주세요."));
       } else if (text.includes("missing_toss_sdk")) {
-        setMessage("결제 모듈을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+        setMessage(t("결제 모듈을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."));
       } else if (text.includes("failed_to_create_shop_order")) {
-        setMessage("주문서를 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+        setMessage(t("주문서를 생성하지 못했습니다. 잠시 후 다시 시도해 주세요."));
       } else {
-        setMessage("결제를 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+        setMessage(t("결제를 시작하지 못했습니다. 잠시 후 다시 시도해 주세요."));
       }
     } finally {
       setCheckoutLoading(false);
@@ -536,17 +538,17 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
   const handleOpenCheckout = () => {
     if (hardOutOfStock) {
       setMessageTone("error");
-      setMessage("현재 품절된 상품입니다.");
+      setMessage(t("현재 품절된 상품입니다."));
       return;
     }
     if (status !== "authenticated") {
       setMessageTone("error");
-      setMessage("결제는 로그인 후 가능합니다.");
+      setMessage(t("결제는 로그인 후 가능합니다."));
       return;
     }
     if (!shippingReady) {
       setMessageTone("error");
-      setMessage("주문 전에 계정 설정에서 기본 배송지를 먼저 저장해 주세요.");
+      setMessage(t("주문 전에 계정 설정에서 기본 배송지를 먼저 저장해 주세요."));
       return;
     }
     setCheckoutOpen(true);
@@ -560,17 +562,17 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
   const submitReview = async () => {
     if (status !== "authenticated") {
       setMessageTone("error");
-      setMessage("리뷰는 로그인 후 작성할 수 있습니다.");
+      setMessage(t("리뷰는 로그인 후 작성할 수 있습니다."));
       return;
     }
     if (!canWriteReview) {
       setMessageTone("error");
-      setMessage("배송 완료 후 구매 확정까지 마친 주문이 있는 상품만 리뷰를 작성할 수 있습니다.");
+      setMessage(t("배송 완료 후 구매 확정까지 마친 주문이 있는 상품만 리뷰를 작성할 수 있습니다."));
       return;
     }
     if (!reviewDraft.body.trim()) {
       setMessageTone("error");
-      setMessage("리뷰 내용을 입력해 주세요.");
+      setMessage(t("리뷰 내용을 입력해 주세요."));
       return;
     }
 
@@ -603,18 +605,18 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
         body: "",
       });
       setMessageTone("notice");
-      setMessage("리뷰가 저장되었습니다.");
+      setMessage(t("리뷰가 저장되었습니다."));
     } catch (error: any) {
       const code = String(error?.message ?? "failed_to_save_shop_review");
       setMessageTone("error");
       if (code === "shop_review_storage_unavailable") {
-        setMessage("리뷰 저장소를 아직 사용할 수 없습니다. Supabase shop 확장 마이그레이션을 먼저 적용해 주세요.");
+        setMessage(t("리뷰 저장소를 아직 사용할 수 없습니다. Supabase shop 확장 마이그레이션을 먼저 적용해 주세요."));
       } else if (code === "invalid_shop_review") {
-        setMessage("평점과 리뷰 내용을 확인해 주세요.");
+        setMessage(t("평점과 리뷰 내용을 확인해 주세요."));
       } else if (code === "shop_review_requires_purchase_confirmation") {
-        setMessage("배송 완료 후 구매 확정이 확인된 사용자만 리뷰를 작성할 수 있습니다.");
+        setMessage(t("배송 완료 후 구매 확정이 확인된 사용자만 리뷰를 작성할 수 있습니다."));
       } else {
-        setMessage("리뷰 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+        setMessage(t("리뷰 저장에 실패했습니다. 잠시 후 다시 시도해 주세요."));
       }
     } finally {
       setReviewSaving(false);
@@ -643,7 +645,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
             <ChevronDownIcon />
           </button>
           <Link href="/shop" data-auth-allow className="justify-self-center">
-            <ShopBrandLogo className="h-11 w-[176px]" />
+            <ShopBrandLogo className="h-9 w-[132px]" />
           </Link>
           <button
             type="button"
@@ -678,19 +680,19 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
         <section id="shop-product-gallery" className="bg-white">
           <div className="relative bg-[#eef1f4]">
             {selectedImageUrl ? (
-              <img src={selectedImageUrl} alt={product.name} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" />
+              <img src={selectedImageUrl} alt={t(product.name)} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" />
             ) : (
               <div className={cn("flex aspect-square w-full items-end p-8", productToneClass(product))}>
                 <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.22em] opacity-75">{product.partnerLabel}</div>
-                  <div className="mt-3 text-[30px] font-bold tracking-[-0.03em]">{product.visualLabel}</div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.22em] opacity-75">{t(product.partnerLabel)}</div>
+                  <div className="mt-3 text-[30px] font-bold tracking-[-0.03em]">{t(product.visualLabel)}</div>
                 </div>
               </div>
             )}
             {/* 품절 오버레이 */}
             {hardOutOfStock ? (
               <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-                <span className="rounded-full bg-white/90 px-4 py-2 text-[13px] font-bold text-[#111827]">품절</span>
+                <span className="rounded-full bg-white/90 px-4 py-2 text-[13px] font-bold text-[#111827]">{t("품절")}</span>
               </div>
             ) : null}
             {/* 이미지 카운터 */}
@@ -722,17 +724,17 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
                     index === selectedImageIndex ? "border-[#102a43]" : "border-[#e6ebf2]"
                   )}
                 >
-                  <img src={url} alt={`${product.name} ${index + 1}`} className="h-16 w-16 object-cover" referrerPolicy="no-referrer" />
+                  <img src={url} alt={`${t(product.name)} ${index + 1}`} className="h-16 w-16 object-cover" referrerPolicy="no-referrer" />
                 </button>
               ))}
             </div>
           ) : null}
 
           <div className="space-y-4 px-4 py-5">
-            <div className="text-[16px] font-semibold leading-7 tracking-[-0.02em] text-[#111827]">{product.name}</div>
-            <div className="text-[13px] leading-6 text-[#65748b]">{product.subtitle}</div>
+            <div className="text-[16px] font-semibold leading-7 tracking-[-0.02em] text-[#111827]">{t(product.name)}</div>
+            <div className="text-[13px] leading-6 text-[#65748b]">{t(product.subtitle)}</div>
             <div className="space-y-1">
-              <div className="text-[12px] text-[#9aa6b6]">{product.partnerStatus}</div>
+              <div className="text-[12px] text-[#9aa6b6]">{t(product.partnerStatus)}</div>
               {/* 할인 가격 표시 */}
               {discountPercent > 0 && product.originalPriceKrw ? (
                 <div className="flex items-baseline gap-2">
@@ -744,12 +746,12 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
               )}
               {discountPercent > 0 && product.originalPriceKrw ? (
                 <div className="text-[14px] text-[#9aa6b6] line-through">
-                  {product.originalPriceKrw.toLocaleString("ko-KR")}원
+                  {formatShopCurrency(product.originalPriceKrw)}
                 </div>
               ) : null}
               {/* 재고 표시 */}
               {product.stockCount !== null && product.stockCount <= 10 && !hardOutOfStock ? (
-                <div className="text-[12px] font-semibold text-[#e63946]">잔여 {product.stockCount}개</div>
+                <div className="text-[12px] font-semibold text-[#e63946]">{t("잔여 {count}개", { count: product.stockCount })}</div>
               ) : null}
             </div>
 
@@ -782,29 +784,29 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
                 <div className="mt-3 rounded-[20px] border border-[#d6e0ea] bg-white px-3 py-3 text-[12.5px] text-[#5c7187]">
                   <div className="flex items-center justify-between gap-3">
                     <span>{t("상품 금액")}</span>
-                    <span className="font-semibold text-[#425a76]">{pricing.subtotalKrw.toLocaleString("ko-KR")}원</span>
+                    <span className="font-semibold text-[#425a76]">{formatShopCurrency(pricing.subtotalKrw)}</span>
                   </div>
                   <div className="mt-1 flex items-center justify-between gap-3">
                     <span>{t("배송비")}</span>
                     <span className="font-semibold text-[#425a76]">
-                      {pricing.shippingFeeKrw > 0 ? `${pricing.shippingFeeKrw.toLocaleString("ko-KR")}원` : t("무료")}
+                      {pricing.shippingFeeKrw > 0 ? formatShopCurrency(pricing.shippingFeeKrw) : t("무료")}
                     </span>
                   </div>
                   <div className="mt-2 flex items-center justify-between gap-3 border-t border-[#e6edf4] pt-2">
                     <span className="font-semibold text-[#2f4d6a]">{t("총 결제 금액")}</span>
-                    <span className="font-bold text-[#2f4d6a]">{pricing.totalKrw.toLocaleString("ko-KR")}원</span>
+                    <span className="font-bold text-[#2f4d6a]">{formatShopCurrency(pricing.totalKrw)}</span>
                   </div>
                 </div>
               </div>
             ) : null}
 
             <div className="rounded-3xl border border-[#e6ebf2] bg-[#f8fafc] px-4 py-4 text-[13px] leading-7 text-[#111827]">
-              <div className="font-semibold text-[#11294b]">{detail.headline}</div>
-              <div className="mt-2 text-[#44556d]">{detail.summary}</div>
+              <div className="font-semibold text-[#11294b]">{t(detail.headline)}</div>
+              <div className="mt-2 text-[#44556d]">{t(detail.summary)}</div>
               {product.useMoments.length > 0 ? (
                 <div className="mt-3 space-y-1 text-[#44556d]">
                   {product.useMoments.slice(0, 3).map((item) => (
-                    <div key={item}>• {item}</div>
+                    <div key={item}>• {t(item)}</div>
                   ))}
                 </div>
               ) : null}
@@ -816,28 +818,28 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
           <div className="grid gap-4 md:grid-cols-2">
             {galleryImageUrls.slice(0, 2).map((url, index) => (
               <div key={`${url}-${index}`} className="overflow-hidden rounded-[2px] bg-[#eef1f4]">
-                <img src={url} alt={`${product.name} gallery ${index + 1}`} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" />
+                <img src={url} alt={`${t(product.name)} gallery ${index + 1}`} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" />
               </div>
             ))}
           </div>
 
-          <div className="text-[28px] font-bold leading-tight tracking-[-0.04em] text-[#111827]">{detail.storyTitle}</div>
-          <div className="text-[15px] leading-8 text-[#44556d]">{detail.storyBody}</div>
+          <div className="text-[28px] font-bold leading-tight tracking-[-0.04em] text-[#111827]">{t(detail.storyTitle)}</div>
+          <div className="text-[15px] leading-8 text-[#44556d]">{t(detail.storyBody)}</div>
 
           <div className="grid gap-4 md:grid-cols-2">
             <div className="rounded-3xl bg-[#3b6fc9] px-5 py-6 text-white">
-              <div className="text-[22px] font-bold tracking-[-0.03em]">{detail.featureTitle}</div>
+              <div className="text-[22px] font-bold tracking-[-0.03em]">{t(detail.featureTitle)}</div>
               <div className="mt-4 space-y-2 text-[13px] leading-6 text-white/90">
                 {detail.featureItems.map((item) => (
-                  <div key={item}>{item}</div>
+                  <div key={item}>{t(item)}</div>
                 ))}
               </div>
             </div>
             <div className="rounded-3xl border border-[#e6ebf2] bg-[#f8fafc] px-5 py-6">
-              <div className="text-[22px] font-bold tracking-[-0.03em] text-[#111827]">{detail.routineTitle}</div>
+              <div className="text-[22px] font-bold tracking-[-0.03em] text-[#111827]">{t(detail.routineTitle)}</div>
               <div className="mt-4 space-y-2 text-[13px] leading-6 text-[#44556d]">
                 {detail.routineItems.map((item) => (
-                  <div key={item}>{item}</div>
+                  <div key={item}>{t(item)}</div>
                 ))}
               </div>
             </div>
@@ -847,8 +849,8 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
             <div className="space-y-3 border-t border-[#edf1f6] pt-5">
               {product.specs.map((spec) => (
                 <div key={`${spec.label}-${spec.value}`} className="grid grid-cols-[110px_1fr] gap-4 text-[13px]">
-                  <div className="text-[#9aa6b6]">{spec.label}</div>
-                  <div className="font-medium text-[#111827]">{spec.value}</div>
+                  <div className="text-[#9aa6b6]">{t(spec.label)}</div>
+                  <div className="font-medium text-[#111827]">{t(spec.value)}</div>
                 </div>
               ))}
             </div>
@@ -881,13 +883,13 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
                 {reviewSummary.count > 0 ? reviewSummary.averageRating.toFixed(1) : "0.0"}
               </div>
               <div className="mt-1 text-[14px] font-semibold text-[#102a43]">
-                {reviewSummary.count.toLocaleString("ko-KR")} {t("개 리뷰")}
+                {reviewSummary.count.toLocaleString(lang === "en" ? "en-US" : "ko-KR")} {t("개 리뷰")}
               </div>
             </div>
             <div className="mt-5 space-y-2">
               {reviewDistribution.map((item) => (
                 <div key={item.rating} className="grid grid-cols-[72px_1fr_44px] items-center gap-3 text-[12px]">
-                  <div className="text-[#102a43]">{item.rating}점</div>
+                    <div className="text-[#102a43]">{lang === "en" ? `${item.rating} stars` : `${item.rating}점`}</div>
                   <div className="h-3 rounded-full bg-[#edf1f6]">
                     <div className={cn("h-3 rounded-full bg-[#102a43]", reviewBarWidthClass(item.percent))} />
                   </div>
@@ -958,11 +960,11 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
                     <span>{review.authorLabel} · {formatDateLabel(review.updatedAt || review.createdAt)}</span>
                     <span className="rounded-xl bg-[#f1f3f6] px-3 py-2 text-[12px] font-semibold text-[#66758a]">{t("리뷰")}</span>
                     {review.verifiedPurchase ? (
-                      <span className="rounded-xl bg-[#eef4fb] px-3 py-2 text-[12px] font-semibold text-[#3b6fc9]">구매 확인</span>
+                      <span className="rounded-xl bg-[#eef4fb] px-3 py-2 text-[12px] font-semibold text-[#3b6fc9]">{t("구매 확인")}</span>
                     ) : null}
                   </div>
-                  <div className="border-l-4 border-[#dfe4ea] pl-4 text-[13px] text-[#9aa6b6]">
-                    {product.useMoments[0] ? `${t("사용 시점")} · ${product.useMoments[0]}` : t("구매 정보가 저장되면 여기에 표시됩니다.")}
+                <div className="border-l-4 border-[#dfe4ea] pl-4 text-[13px] text-[#9aa6b6]">
+                    {product.useMoments[0] ? `${t("사용 시점")} · ${t(product.useMoments[0])}` : t("구매 정보가 저장되면 여기에 표시됩니다.")}
                   </div>
                   <div className="text-[15px] font-medium leading-8 text-[#111827]">{preview}</div>
                   {longReview ? (
@@ -1117,7 +1119,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
                           {active ? (
                             <span className="rounded-full bg-[#17324d] px-2 py-0.5 text-[10px] font-semibold text-white">{t("선택")}</span>
                           ) : null}
-                          <span className="text-[12px] font-semibold text-[#11294b]">{address.label}</span>
+                          <span className="text-[12px] font-semibold text-[#11294b]">{t(address.label)}</span>
                         </div>
                         <div className="mt-1 text-[12px] font-semibold text-[#111827]">{address.recipientName} · {address.phone}</div>
                         <div className="mt-1 text-[12px] leading-5 text-[#44556d]">{formatShopShippingSingleLine(address)}</div>
@@ -1143,8 +1145,8 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
               </div>
             </div>
             <div className="rounded-3xl border border-[#e6ebf2] bg-[#f8fafc] p-4">
-              <div className="text-[13px] font-semibold text-[#111827]">{detail.noticeTitle}</div>
-              <div className="mt-3 text-[12.5px] leading-6 text-[#44556d]">{detail.noticeBody}</div>
+              <div className="text-[13px] font-semibold text-[#111827]">{t(detail.noticeTitle)}</div>
+              <div className="mt-3 text-[12.5px] leading-6 text-[#44556d]">{t(detail.noticeBody)}</div>
             </div>
           </div>
         </section>
@@ -1153,30 +1155,30 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
         {relatedProducts.length > 0 ? (
           <section className="bg-white px-4 py-6">
             <div className="mb-4 flex items-center justify-between">
-              <div className="text-[18px] font-bold tracking-[-0.02em] text-[#111827]">관련 상품</div>
-              <Link href="/shop" data-auth-allow className="text-[13px] font-semibold text-[#3b6fc9]">전체 보기</Link>
+              <div className="text-[18px] font-bold tracking-[-0.02em] text-[#111827]">{t("관련 상품")}</div>
+              <Link href="/shop" data-auth-allow className="text-[13px] font-semibold text-[#3b6fc9]">{t("전체 보기")}</Link>
             </div>
             <div className="flex gap-4 overflow-x-auto pb-2">
               {relatedProducts.map((p) => (
                 <Link key={p.id} href={`/shop/${encodeURIComponent(p.id)}`} data-auth-allow className="shrink-0 w-[140px] block">
                   <div className="relative overflow-hidden rounded-[2px] bg-[#f3f5f7]">
                     {p.imageUrls[0] ? (
-                      <img src={getShopImageSrc(p.imageUrls[0])} alt={p.name} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" />
+                      <img src={getShopImageSrc(p.imageUrls[0])} alt={t(p.name)} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" />
                     ) : (
                       <div className={cn("flex aspect-square items-center justify-center p-3", productToneClass(p))}>
                         <div className="text-center">
-                          <div className="text-[9px] font-semibold uppercase tracking-[0.2em] opacity-75">{p.partnerLabel}</div>
-                          <div className="mt-1 text-[16px] font-bold tracking-[-0.02em]">{p.visualLabel}</div>
+                          <div className="text-[9px] font-semibold uppercase tracking-[0.2em] opacity-75">{t(p.partnerLabel)}</div>
+                          <div className="mt-1 text-[16px] font-bold tracking-[-0.02em]">{t(p.visualLabel)}</div>
                         </div>
                       </div>
                     )}
                     {p.outOfStock || (typeof p.stockCount === "number" && p.stockCount <= 0) ? (
                       <div className="absolute inset-0 flex items-center justify-center bg-black/35">
-                        <span className="rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-bold text-[#111827]">품절</span>
+                        <span className="rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-bold text-[#111827]">{t("품절")}</span>
                       </div>
                     ) : null}
                   </div>
-                  <div className="mt-2 text-[13px] font-semibold leading-5 tracking-[-0.02em] text-[#111827] line-clamp-2">{p.name}</div>
+                  <div className="mt-2 text-[13px] font-semibold leading-5 tracking-[-0.02em] text-[#111827] line-clamp-2">{t(p.name)}</div>
                   <div className="mt-1 text-[12px] font-bold text-[#111827]">{formatShopPrice(p)}</div>
                 </Link>
               ))}
@@ -1196,7 +1198,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
           >
             {cartCount > 0 ? (
               <span className="absolute -top-3 rounded-full bg-[#17324d] px-3 py-1 text-[11px] font-semibold text-white">
-                {cartCount.toLocaleString("ko-KR")}
+                {cartCount.toLocaleString(lang === "en" ? "en-US" : "ko-KR")}
               </span>
             ) : null}
             {cartLoading ? t("담는 중...") : t("장바구니")}
@@ -1233,8 +1235,8 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
         onClose={() => setCheckoutOpen(false)}
         onConfirm={(verification) => void handleCheckout(verification)}
         loading={checkoutLoading}
-        productTitle={product.name}
-        productSubtitle={product.subtitle}
+        productTitle={t(product.name)}
+        productSubtitle={t(product.subtitle)}
         priceKrw={product.priceKrw ?? 0}
         quantity={quantity}
         addresses={shippingAddresses}

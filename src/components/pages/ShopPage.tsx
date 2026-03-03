@@ -7,6 +7,7 @@ import { useAuthState } from "@/lib/auth";
 import { authHeaders } from "@/lib/billing/client";
 import {
   buildShopRecommendations,
+  formatShopCurrency,
   formatShopPrice,
   getShopCategoryMeta,
   getShopImageSrc,
@@ -47,7 +48,7 @@ function ProfileIcon() {
 
 function HeartIcon({ filled }: { filled: boolean }) {
   return (
-    <svg viewBox="0 0 24 24" fill={filled ? "#e63946" : "none"} stroke={filled ? "#e63946" : "currentColor"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4.5 w-4.5">
+    <svg viewBox="0 0 24 24" fill={filled ? "#e63946" : "none"} stroke={filled ? "#e63946" : "currentColor"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-[18px] w-[18px]">
       <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
     </svg>
   );
@@ -186,7 +187,17 @@ export function ShopPage() {
       const p = entry.product;
       if (!matchesPriceFilter(p, priceFilter)) return false;
       if (!keyword) return true;
-      return `${p.name} ${p.subtitle} ${p.description} ${p.benefitTags.join(" ")}`.toLowerCase().includes(keyword);
+      const localized = [
+        p.name,
+        t(p.name),
+        p.subtitle,
+        t(p.subtitle),
+        p.description,
+        t(p.description),
+        ...p.benefitTags,
+        ...p.benefitTags.map((tag) => t(tag)),
+      ].join(" ").toLowerCase();
+      return localized.includes(keyword);
     });
 
     if (sortKey === "price_asc") {
@@ -199,7 +210,7 @@ export function ShopPage() {
     // "recommended" = 기본 순서 유지
 
     return result;
-  }, [filteredShopState.recommendations, searchQuery, sortKey, priceFilter]);
+  }, [filteredShopState.recommendations, priceFilter, searchQuery, sortKey, t]);
 
   const selectedDateLabel = useMemo(() => {
     const date = new Date(allShopState.selectedDate);
@@ -375,12 +386,12 @@ export function ShopPage() {
               <Link href={`/shop/${encodeURIComponent(featuredPrimary.product.id)}`} data-auth-allow className="block overflow-hidden rounded-[32px] border border-[#edf1f6] bg-white">
                 <div className="relative bg-[#f3f5f7]">
                   {featuredPrimary.product.imageUrls[0] ? (
-                    <img src={getShopImageSrc(featuredPrimary.product.imageUrls[0])} alt={featuredPrimary.product.name} className="aspect-[1.15/1] w-full object-cover" referrerPolicy="no-referrer" />
+                    <img src={getShopImageSrc(featuredPrimary.product.imageUrls[0])} alt={t(featuredPrimary.product.name)} className="aspect-[1.15/1] w-full object-cover" referrerPolicy="no-referrer" />
                   ) : (
                     <div className={["flex aspect-[1.15/1] items-end px-6 py-6", productToneClass(featuredPrimary.product)].join(" ")}>
                       <div>
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] opacity-75">{featuredPrimary.product.partnerLabel}</div>
-                        <div className="mt-3 text-[28px] font-bold tracking-[-0.03em]">{featuredPrimary.product.visualLabel}</div>
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] opacity-75">{t(featuredPrimary.product.partnerLabel)}</div>
+                        <div className="mt-3 text-[28px] font-bold tracking-[-0.03em]">{t(featuredPrimary.product.visualLabel)}</div>
                       </div>
                     </div>
                   )}
@@ -389,18 +400,18 @@ export function ShopPage() {
                   </div>
                   {featuredPrimary.product.outOfStock && (
                     <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-[32px]">
-                      <span className="rounded-full bg-white/90 px-4 py-2 text-[13px] font-bold text-[#111827]">품절</span>
+                      <span className="rounded-full bg-white/90 px-4 py-2 text-[13px] font-bold text-[#111827]">{t("품절")}</span>
                     </div>
                   )}
                 </div>
                 <div className="px-4 py-5">
                   <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#8d99ab]">{t("오늘의 추천")}</div>
-                  <div className="mt-3 text-[16px] font-bold leading-7 tracking-[-0.02em] text-[#111827]">{featuredPrimary.product.name}</div>
+                  <div className="mt-3 text-[16px] font-bold leading-7 tracking-[-0.02em] text-[#111827]">{t(featuredPrimary.product.name)}</div>
                   <div className="mt-2 text-[13px] leading-6 text-[#44556d]">{allShopState.focusSummary}</div>
                   <div className="mt-4 flex items-center gap-2">
                     {featuredPrimary.product.originalPriceKrw && featuredPrimary.product.priceKrw && featuredPrimary.product.originalPriceKrw > featuredPrimary.product.priceKrw ? (
                       <>
-                        <span className="text-[12px] text-[#8d99ab] line-through">{featuredPrimary.product.originalPriceKrw.toLocaleString("ko-KR")}원</span>
+                        <span className="text-[12px] text-[#8d99ab] line-through">{formatShopCurrency(featuredPrimary.product.originalPriceKrw)}</span>
                         <span className="text-[14px] font-bold text-[#111827]">{formatShopPrice(featuredPrimary.product)}</span>
                         <span className="rounded-full bg-[#fff0f0] px-2 py-0.5 text-[11px] font-semibold text-[#e63946]">
                           -{Math.round((1 - featuredPrimary.product.priceKrw / featuredPrimary.product.originalPriceKrw) * 100)}%
@@ -428,23 +439,23 @@ export function ShopPage() {
                     <Link href={`/shop/${encodeURIComponent(entry.product.id)}`} data-auth-allow className="block rounded-[28px] border border-[#edf1f6] bg-white p-3">
                       <div className="relative overflow-hidden rounded-[22px] bg-[#f3f5f7]">
                         {entry.product.imageUrls[0] ? (
-                          <img src={getShopImageSrc(entry.product.imageUrls[0])} alt={entry.product.name} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" />
+                          <img src={getShopImageSrc(entry.product.imageUrls[0])} alt={t(entry.product.name)} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" />
                         ) : (
                           <div className={["flex aspect-square items-end px-4 py-4", productToneClass(entry.product)].join(" ")}>
-                            <div className="text-[20px] font-bold tracking-[-0.03em]">{entry.product.visualLabel}</div>
+                            <div className="text-[20px] font-bold tracking-[-0.03em]">{t(entry.product.visualLabel)}</div>
                           </div>
                         )}
                         {entry.product.outOfStock && (
                           <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-[22px]">
-                            <span className="rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-bold text-[#111827]">품절</span>
+                            <span className="rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-bold text-[#111827]">{t("품절")}</span>
                           </div>
                         )}
                       </div>
-                      <div className="mt-3 text-[14px] font-semibold leading-6 text-[#111827]">{entry.product.name}</div>
+                      <div className="mt-3 text-[14px] font-semibold leading-6 text-[#111827]">{t(entry.product.name)}</div>
                       <div className="mt-1 flex items-center gap-1.5">
                         {entry.product.originalPriceKrw && entry.product.priceKrw && entry.product.originalPriceKrw > entry.product.priceKrw ? (
                           <>
-                            <span className="text-[11px] text-[#8d99ab] line-through">{entry.product.originalPriceKrw.toLocaleString("ko-KR")}원</span>
+                            <span className="text-[11px] text-[#8d99ab] line-through">{formatShopCurrency(entry.product.originalPriceKrw)}</span>
                             <span className="text-[12px] font-bold text-[#111827]">{formatShopPrice(entry.product)}</span>
                           </>
                         ) : (
@@ -520,33 +531,33 @@ export function ShopPage() {
               <Link href={`/shop/${encodeURIComponent(entry.product.id)}`} data-auth-allow className="block">
                 <div className="relative overflow-hidden rounded-[2px] bg-[#f3f5f7]">
                   {entry.product.imageUrls[0] ? (
-                    <img src={getShopImageSrc(entry.product.imageUrls[0])} alt={entry.product.name} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" />
+                    <img src={getShopImageSrc(entry.product.imageUrls[0])} alt={t(entry.product.name)} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" />
                   ) : (
                     <div className={["flex aspect-square items-center justify-center p-4", productToneClass(entry.product)].join(" ")}>
                       <div className="text-center">
-                        <div className="text-[10px] font-semibold uppercase tracking-[0.24em] opacity-75">{entry.product.partnerLabel}</div>
-                        <div className="mt-2 text-[22px] font-bold tracking-[-0.03em]">{entry.product.visualLabel}</div>
+                        <div className="text-[10px] font-semibold uppercase tracking-[0.24em] opacity-75">{t(entry.product.partnerLabel)}</div>
+                        <div className="mt-2 text-[22px] font-bold tracking-[-0.03em]">{t(entry.product.visualLabel)}</div>
                       </div>
                     </div>
                   )}
                   {entry.product.outOfStock ? (
                     <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-                      <span className="rounded-full bg-white/90 px-3 py-1 text-[10px] font-bold text-[#111827]">품절</span>
+                      <span className="rounded-full bg-white/90 px-3 py-1 text-[10px] font-bold text-[#111827]">{t("품절")}</span>
                     </div>
                   ) : index < 2 ? (
                     <div className="absolute left-3 top-3 border border-[#3b6fc9] bg-white px-3 py-1 text-[11px] font-semibold text-[#3b6fc9]">NEW</div>
                   ) : null}
                   {entry.product.stockCount !== null && entry.product.stockCount > 0 && entry.product.stockCount <= 5 && !entry.product.outOfStock ? (
                     <div className="absolute bottom-2 left-2 rounded-full bg-white/90 px-2 py-0.5 text-[9px] font-bold text-[#e63946]">
-                      잔여 {entry.product.stockCount}개
+                      {t("잔여 {count}개", { count: entry.product.stockCount })}
                     </div>
                   ) : null}
                 </div>
-                <div className="mt-3 text-[16px] font-semibold leading-7 tracking-[-0.02em] text-[#111827]">{entry.product.name}</div>
+                <div className="mt-3 text-[16px] font-semibold leading-7 tracking-[-0.02em] text-[#111827]">{t(entry.product.name)}</div>
                 <div className="mt-1 flex flex-wrap items-end gap-1.5">
                   {entry.product.originalPriceKrw && entry.product.priceKrw && entry.product.originalPriceKrw > entry.product.priceKrw ? (
                     <>
-                      <span className="text-[11px] text-[#8d99ab] line-through">{entry.product.originalPriceKrw.toLocaleString("ko-KR")}원</span>
+                      <span className="text-[11px] text-[#8d99ab] line-through">{formatShopCurrency(entry.product.originalPriceKrw)}</span>
                       <span className="text-[14px] font-bold text-[#111827]">{formatShopPrice(entry.product)}</span>
                       <span className="text-[11px] font-semibold text-[#e63946]">
                         -{Math.round((1 - entry.product.priceKrw / entry.product.originalPriceKrw) * 100)}%
@@ -588,14 +599,14 @@ export function ShopPage() {
                 <Link key={product.id} href={`/shop/${encodeURIComponent(product.id)}`} data-auth-allow className="block shrink-0 w-[120px]">
                   <div className="overflow-hidden rounded-2xl bg-[#f3f5f7]">
                     {product.imageUrls[0] ? (
-                      <img src={getShopImageSrc(product.imageUrls[0])} alt={product.name} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" />
+                      <img src={getShopImageSrc(product.imageUrls[0])} alt={t(product.name)} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" />
                     ) : (
                       <div className={["flex aspect-square items-center justify-center", productToneClass(product)].join(" ")}>
-                        <div className="text-[16px] font-bold">{product.visualLabel.slice(0, 3)}</div>
+                        <div className="text-[16px] font-bold">{t(product.visualLabel).slice(0, 3)}</div>
                       </div>
                     )}
                   </div>
-                  <div className="mt-1.5 text-[12px] font-semibold leading-5 text-[#111827] line-clamp-2">{product.name}</div>
+                  <div className="mt-1.5 text-[12px] font-semibold leading-5 text-[#111827] line-clamp-2">{t(product.name)}</div>
                   <div className="mt-0.5 text-[11px] font-semibold text-[#44556d]">{formatShopPrice(product)}</div>
                 </Link>
               ))}

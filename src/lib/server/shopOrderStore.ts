@@ -281,9 +281,16 @@ function isMissingTableError(error: unknown, tableName: string) {
   return (
     code === "42P01" ||
     code === "42703" ||
+    code === "PGRST204" ||
     (message.includes("relation") && message.includes(tableName)) ||
-    (message.includes("column") && message.includes("shipping_snapshot"))
+    (message.includes("column") && message.includes("shipping_snapshot")) ||
+    message.includes("schema cache")
   );
+}
+
+function isStorageUnavailableError(error: unknown) {
+  const message = String((error as { message?: unknown } | null)?.message ?? "").toLowerCase();
+  return message.includes("supabase admin env missing");
 }
 
 function toProductSnapshotJson(snapshot: ShopOrderRecord["productSnapshot"]): Json {
@@ -409,8 +416,20 @@ async function writeOrder(order: ShopOrderRecord) {
   try {
     return await writeModernOrder(order);
   } catch (error) {
-    if (!isMissingTableError(error, "shop_orders")) throw error;
-    return writeLegacyOrder(order);
+    if (!isMissingTableError(error, "shop_orders")) {
+      if (isStorageUnavailableError(error)) {
+        throw new Error("shop_order_storage_unavailable");
+      }
+      throw error;
+    }
+    try {
+      return await writeLegacyOrder(order);
+    } catch (legacyError) {
+      if (isStorageUnavailableError(legacyError)) {
+        throw new Error("shop_order_storage_unavailable");
+      }
+      throw legacyError;
+    }
   }
 }
 

@@ -35,8 +35,10 @@ function isMissingTableError(error: unknown) {
   return (
     code === "42P01" ||
     code === "42703" ||
+    code === "PGRST204" ||
     message.includes("does not exist") ||
     (message.includes("relation") && message.includes("shop_products")) ||
+    message.includes("schema cache") ||
     (
       message.includes("column") &&
       (
@@ -150,9 +152,8 @@ async function saveLegacyShopCatalog(products: ShopProduct[]): Promise<ShopProdu
 }
 
 export async function loadShopCatalog(): Promise<ShopProduct[]> {
-  const admin = getSupabaseAdmin();
-
   try {
+    const admin = getSupabaseAdmin();
     const { data, error } = await admin
       .from("shop_products")
       .select("*")
@@ -223,8 +224,8 @@ export async function activateShopProduct(productId: string): Promise<void> {
 }
 
 export async function loadShopCatalogAll(): Promise<ShopProduct[]> {
-  const admin = getSupabaseAdmin();
   try {
+    const admin = getSupabaseAdmin();
     const { data, error } = await admin
       .from("shop_products")
       .select("*")

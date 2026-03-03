@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
-import { calculateShopPricing, type ShopPricingBreakdown } from "@/lib/shop";
+import { calculateShopPricing, formatShopCurrency, type ShopPricingBreakdown } from "@/lib/shop";
 import { SHOP_BUTTON_ACTIVE, SHOP_BUTTON_PRIMARY, SHOP_BUTTON_SECONDARY } from "@/lib/shopUi";
 import type { ShopShippingAddress } from "@/lib/shopProfile";
+import { useI18n } from "@/lib/useI18n";
 
 type ShopCheckoutSheetProps = {
   open: boolean;
@@ -40,6 +41,7 @@ export function ShopCheckoutSheet({
   onSelectAddress,
   shippingLabel,
 }: ShopCheckoutSheetProps) {
+  const { t } = useI18n();
   const computedPricing = calculateShopPricing({ priceKrw, quantity });
   const pricing = pricingOverride
     ? {
@@ -64,8 +66,8 @@ export function ShopCheckoutSheet({
       open={open}
       onClose={onClose}
       variant="appstore"
-      title="주문 확인"
-      subtitle="결제 전 배송지와 개인정보를 다시 확인합니다."
+      title={t("주문 확인")}
+      subtitle={t("결제 전 배송지와 개인정보를 다시 확인합니다.")}
       maxHeightClassName="max-h-[82dvh]"
       footer={
         <div className="grid grid-cols-2 gap-2">
@@ -75,7 +77,7 @@ export function ShopCheckoutSheet({
             disabled={loading}
             className={`${SHOP_BUTTON_SECONDARY} h-11 text-[14px]`}
           >
-            취소
+            {t("취소")}
           </button>
           <button
             type="button"
@@ -88,7 +90,7 @@ export function ShopCheckoutSheet({
             disabled={loading || !verificationReady}
             className={`${verificationReady ? SHOP_BUTTON_ACTIVE : SHOP_BUTTON_PRIMARY} h-11 text-[14px]`}
           >
-            {loading ? "결제창 여는 중..." : verificationReady ? "검증 후 결제" : "정보 확인 필요"}
+            {loading ? t("결제창 여는 중...") : verificationReady ? t("검증 후 결제") : t("정보 확인 필요")}
           </button>
         </div>
       }
@@ -97,24 +99,24 @@ export function ShopCheckoutSheet({
         <div className="text-[18px] font-bold tracking-[-0.02em] text-ios-text">{productTitle}</div>
         {productSubtitle ? <div className="mt-1 text-[13px] text-ios-sub">{productSubtitle}</div> : null}
         <div className="my-3 h-px bg-ios-sep" />
-        <div className="text-[13px] text-ios-sub">수량: {quantity}</div>
-        <div className="mt-1 text-[30px] font-extrabold tracking-[-0.02em] text-ios-text">{pricing.totalKrw.toLocaleString("ko-KR")}원</div>
+        <div className="text-[13px] text-ios-sub">{t("수량")}: {quantity}</div>
+        <div className="mt-1 text-[30px] font-extrabold tracking-[-0.02em] text-ios-text">{formatShopCurrency(pricing.totalKrw)}</div>
         <div className="mt-3 space-y-1 rounded-[20px] border border-[#d6e0ea] bg-[#f7fafc] px-3 py-3 text-[12px] text-[#5b7087]">
           <div className="flex items-center justify-between gap-3">
-            <span>상품 금액</span>
-            <span className="font-semibold text-[#425a76]">{pricing.subtotalKrw.toLocaleString("ko-KR")}원</span>
+            <span>{t("상품 금액")}</span>
+            <span className="font-semibold text-[#425a76]">{formatShopCurrency(pricing.subtotalKrw)}</span>
           </div>
           <div className="flex items-center justify-between gap-3">
-            <span>배송비</span>
+            <span>{t("배송비")}</span>
             <span className="font-semibold text-[#425a76]">
-              {pricing.shippingFeeKrw > 0 ? `${pricing.shippingFeeKrw.toLocaleString("ko-KR")}원` : "무료"}
+              {pricing.shippingFeeKrw > 0 ? formatShopCurrency(pricing.shippingFeeKrw) : t("무료")}
             </span>
           </div>
         </div>
         <div className="my-3 h-px bg-ios-sep" />
         {addresses.length > 1 ? (
           <>
-            <div className="text-[13px] font-semibold text-ios-text">배송지 선택</div>
+            <div className="text-[13px] font-semibold text-ios-text">{t("배송지 선택")}</div>
             <div className="mt-2 grid gap-2">
               {addresses.map((address) => {
                 const active = address.id === selectedAddressId;
@@ -131,7 +133,7 @@ export function ShopCheckoutSheet({
                   >
                     <div className="flex items-center gap-2">
                       {active ? (
-                        <span className="rounded-full bg-[#17324d] px-2 py-0.5 text-[10px] font-semibold text-white">선택</span>
+                        <span className="rounded-full bg-[#17324d] px-2 py-0.5 text-[10px] font-semibold text-white">{t("선택")}</span>
                       ) : null}
                       <span className="text-[12px] font-semibold text-[#11294b]">{address.label}</span>
                     </div>
@@ -148,7 +150,7 @@ export function ShopCheckoutSheet({
         ) : null}
         {shippingLabel ? (
           <>
-            <div className="text-[13px] font-semibold text-ios-text">배송지</div>
+            <div className="text-[13px] font-semibold text-ios-text">{t("배송지")}</div>
             <div className="mt-1 rounded-2xl border border-[#d7dfeb] bg-[#f4f7fb] px-3 py-3 text-[12.5px] leading-5 text-[#44556d]">
               {shippingLabel}
             </div>
@@ -156,19 +158,19 @@ export function ShopCheckoutSheet({
           </>
         ) : null}
 
-        <div className="text-[13px] font-semibold text-ios-text">최종 확인</div>
+        <div className="text-[13px] font-semibold text-ios-text">{t("최종 확인")}</div>
         <div className="mt-2 grid gap-2">
           {([
             {
               key: "shipping",
               checked: shippingConfirmed,
-              label: "선택한 배송지가 현재 주문 정보와 정확히 일치합니다.",
+              label: t("선택한 배송지가 현재 주문 정보와 정확히 일치합니다."),
               onToggle: () => setShippingConfirmed((current) => !current),
             },
             {
               key: "contact",
               checked: contactConfirmed,
-              label: "수령인과 연락처를 다시 확인했고 오배송 위험이 없습니다.",
+              label: t("수령인과 연락처를 다시 확인했고 오배송 위험이 없습니다."),
               onToggle: () => setContactConfirmed((current) => !current),
             },
           ] as const).map((item) => (
@@ -196,7 +198,7 @@ export function ShopCheckoutSheet({
         </div>
 
         <div className="mt-3 text-[12.5px] leading-5 text-ios-sub">
-          결제 완료 후 주문 내역에 즉시 반영됩니다. 환불 요청은 주문 상세에서 진행할 수 있고, 리뷰는 구매 확정 이후에만 작성됩니다.
+          {t("결제 완료 후 주문 내역에 즉시 반영됩니다. 환불 요청은 주문 상세에서 진행할 수 있고, 리뷰는 구매 확정 이후에만 작성됩니다.")}
         </div>
       </div>
     </BottomSheet>

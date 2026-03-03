@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuthState } from "@/lib/auth";
 import { authHeaders } from "@/lib/billing/client";
-import { getShopImageSrc, SHOP_PRODUCTS, formatShopPrice, type ShopProduct } from "@/lib/shop";
+import { formatShopCurrency, formatShopPrice, getShopImageSrc, SHOP_PRODUCTS, type ShopProduct } from "@/lib/shop";
 import { getWishlist, removeFromWishlist } from "@/lib/shopClient";
 import { SHOP_BUTTON_PRIMARY } from "@/lib/shopUi";
 import { useI18n } from "@/lib/useI18n";
@@ -131,7 +131,7 @@ export function ShopWishlistPage() {
                   data-auth-allow
                   onClick={() => void handleRemove(product.id)}
                   className="absolute right-2 top-2 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/80 shadow-sm backdrop-blur-sm"
-                  aria-label="찜 해제"
+                  aria-label={t("찜 해제")}
                 >
                   <svg viewBox="0 0 24 24" fill="#e63946" stroke="#e63946" strokeWidth="1.5" className="h-4 w-4">
                     <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
@@ -141,27 +141,27 @@ export function ShopWishlistPage() {
                   <div className="relative overflow-hidden rounded-[2px] bg-[#f3f5f7]">
                     {product.imageUrls[0] ? (
                       /* eslint-disable-next-line @next/next/no-img-element */
-                      <img src={getShopImageSrc(product.imageUrls[0])} alt={product.name} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" />
+                      <img src={getShopImageSrc(product.imageUrls[0])} alt={t(product.name)} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" />
                     ) : (
                       <div className={["flex aspect-square items-center justify-center p-4", productToneClass(product)].join(" ")}>
                         <div className="text-center">
-                          <div className="text-[10px] font-semibold uppercase tracking-[0.24em] opacity-75">{product.partnerLabel}</div>
-                          <div className="mt-2 text-[22px] font-bold tracking-[-0.03em]">{product.visualLabel}</div>
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.24em] opacity-75">{t(product.partnerLabel)}</div>
+                          <div className="mt-2 text-[22px] font-bold tracking-[-0.03em]">{t(product.visualLabel)}</div>
                         </div>
                       </div>
                     )}
                     {product.outOfStock ? (
                       <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-                        <span className="rounded-full bg-white/90 px-3 py-1 text-[11px] font-bold text-[#111827]">품절</span>
+                        <span className="rounded-full bg-white/90 px-3 py-1 text-[11px] font-bold text-[#111827]">{t("품절")}</span>
                       </div>
                     ) : null}
                   </div>
-                  <div className="mt-3 text-[15px] font-semibold leading-6 tracking-[-0.02em] text-[#111827]">{product.name}</div>
+                  <div className="mt-3 text-[15px] font-semibold leading-6 tracking-[-0.02em] text-[#111827]">{t(product.name)}</div>
                   <div className="mt-1 flex items-center gap-2">
                     {product.originalPriceKrw && product.priceKrw && product.originalPriceKrw > product.priceKrw ? (
                       <>
                         <span className="text-[12px] text-[#8d99ab] line-through">
-                          {product.originalPriceKrw.toLocaleString("ko-KR")}원
+                          {formatShopCurrency(product.originalPriceKrw)}
                         </span>
                         <span className="text-[13px] font-bold text-[#111827]">{formatShopPrice(product)}</span>
                         <span className="text-[11px] font-semibold text-[#e63946]">

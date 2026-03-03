@@ -1,5 +1,6 @@
 import type { ISODate } from "@/lib/date";
 import { todayISO } from "@/lib/date";
+import { getCurrentLanguage, translate } from "@/lib/i18n";
 import type { AppSettings, BioInputs } from "@/lib/model";
 import { menstrualContextForDate } from "@/lib/menstrual";
 import type { Shift } from "@/lib/types";
@@ -350,7 +351,12 @@ function bumpSignal(map: Map<ShopSignalKey, ShopSignal>, key: ShopSignalKey, wei
     prev.weight += weight;
     return;
   }
-  map.set(key, { ...meta, weight });
+  map.set(key, {
+    ...meta,
+    label: translate(meta.label, undefined, getCurrentLanguage()),
+    reason: translate(meta.reason, undefined, getCurrentLanguage()),
+    weight,
+  });
 }
 
 function clampText(value: unknown, maxLength: number) {
@@ -464,32 +470,50 @@ function normalizeShopDetailPage(
 
 function describeSignalCombination(signals: ShopSignal[]) {
   const [first, second] = signals;
+  const lang = getCurrentLanguage();
   if (!first) {
-    return "오늘 상태가 아직 가볍거나 입력이 적어서, 매일 쓰기 쉬운 기본 회복 아이템부터 보여줘요.";
+    return lang === "en"
+      ? "Today's inputs are still light, so we are showing easy everyday recovery picks first."
+      : "오늘 상태가 아직 가볍거나 입력이 적어서, 매일 쓰기 쉬운 기본 회복 아이템부터 보여줘요.";
   }
   if (!second) {
-    return `${first.label} 흐름이 보여서, ${first.reason}`;
+    return lang === "en"
+      ? `${first.label} stands out today, so ${first.reason}`
+      : `${first.label} 흐름이 보여서, ${first.reason}`;
   }
-  return `${first.label}과 ${second.label}이 함께 보여서, 오늘은 가볍게 바로 쓸 수 있는 회복 보조 아이템을 먼저 배치했어요.`;
+  return lang === "en"
+    ? `${first.label} and ${second.label} both stand out today, so quick recovery essentials are shown first.`
+    : `${first.label}과 ${second.label}이 함께 보여서, 오늘은 가볍게 바로 쓸 수 있는 회복 보조 아이템을 먼저 배치했어요.`;
 }
 
 function buildProductReason(product: ShopProduct, matchedSignals: ShopSignal[]) {
   const [first, second] = matchedSignals;
+  const lang = getCurrentLanguage();
+  const productName = translate(product.name, undefined, lang);
   if (!first) {
     return {
-      primary: SIGNAL_META.baseline_recovery.reason,
-      secondary: `${product.name}은(는) 기본 회복 루틴에 부담 없이 넣기 쉬운 카테고리입니다.`,
+      primary: translate(SIGNAL_META.baseline_recovery.reason, undefined, lang),
+      secondary:
+        lang === "en"
+          ? `${productName} fits easily into a basic daily recovery routine.`
+          : `${product.name}은(는) 기본 회복 루틴에 부담 없이 넣기 쉬운 카테고리입니다.`,
     };
   }
   if (!second) {
     return {
       primary: first.reason,
-      secondary: `${first.label} 기준으로 ${product.name} 카테고리를 먼저 보는 편이 잘 맞습니다.`,
+      secondary:
+        lang === "en"
+          ? `Based on ${first.label}, ${productName} is a strong category to check first.`
+          : `${first.label} 기준으로 ${product.name} 카테고리를 먼저 보는 편이 잘 맞습니다.`,
     };
   }
   return {
     primary: `${first.reason} ${second.reason}`,
-    secondary: `${first.label}과 ${second.label}이 겹쳐 ${product.name} 우선순위가 올라갔습니다.`,
+    secondary:
+      lang === "en"
+        ? `${productName} ranks higher because ${first.label} and ${second.label} overlap today.`
+        : `${first.label}과 ${second.label}이 겹쳐 ${product.name} 우선순위가 올라갔습니다.`,
   };
 }
 
@@ -501,7 +525,13 @@ type SignalInput = {
 };
 
 export function getShopCategoryMeta(key: ShopCategoryKey) {
-  return SHOP_CATEGORIES.find((item) => item.key === key) ?? SHOP_CATEGORIES[0];
+  const meta = SHOP_CATEGORIES.find((item) => item.key === key) ?? SHOP_CATEGORIES[0];
+  const lang = getCurrentLanguage();
+  return {
+    ...meta,
+    label: translate(meta.label, undefined, lang),
+    subtitle: translate(meta.subtitle, undefined, lang),
+  };
 }
 
 export function getShopProductById(id: string) {
@@ -509,7 +539,13 @@ export function getShopProductById(id: string) {
 }
 
 export function getShopSignalMeta(key: ShopSignalKey) {
-  return SIGNAL_META[key];
+  const meta = SIGNAL_META[key];
+  const lang = getCurrentLanguage();
+  return {
+    ...meta,
+    label: translate(meta.label, undefined, lang),
+    reason: translate(meta.reason, undefined, lang),
+  };
 }
 
 export function isShopCategoryKey(value: string): value is ShopCategoryKey {
@@ -638,11 +674,17 @@ export function upsertShopProductInCatalog(catalog: ShopProduct[], product: Shop
   return [product, ...next].slice(0, 80);
 }
 
+export function formatShopCurrency(value: number) {
+  const amount = Math.max(0, Math.round(Number(value) || 0));
+  const lang = getCurrentLanguage();
+  return lang === "en" ? `${amount.toLocaleString("en-US")} KRW` : `${amount.toLocaleString("ko-KR")}원`;
+}
+
 export function formatShopPrice(product: ShopProduct) {
   if (product.priceKrw != null && product.priceKrw > 0) {
-    return `${Math.round(product.priceKrw).toLocaleString("ko-KR")}원`;
+    return formatShopCurrency(product.priceKrw);
   }
-  return product.priceLabel;
+  return translate(product.priceLabel, undefined, getCurrentLanguage());
 }
 
 export function calculateShopShippingFee(subtotalKrw: number) {

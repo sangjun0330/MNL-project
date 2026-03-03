@@ -88,7 +88,7 @@ export function ShopProfilePage() {
         setOrders([]);
         setWishlistIds([]);
         setCartCount(0);
-        setMessage("쇼핑 계정 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+        setMessage(t("쇼핑 계정 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."));
       } finally {
         if (!active) return;
         setLoading(false);
@@ -99,7 +99,7 @@ export function ShopProfilePage() {
     return () => {
       active = false;
     };
-  }, [status, user?.userId]);
+  }, [status, t, user?.userId]);
 
   const defaultAddress = useMemo(
     () => resolveDefaultShopShippingAddress({ addresses, defaultAddressId }),
@@ -116,24 +116,31 @@ export function ShopProfilePage() {
   const hubLinks = [
     {
       href: "/shop/orders",
-      title: "주문 · 배송",
+      title: t("주문 · 배송"),
       description: loading
-        ? "주문과 배송 상태를 정리하는 중입니다."
-        : `${orders.length}건 주문 · 진행 ${inProgressCount}건 · 구매 확정 대기 ${confirmPendingCount}건`,
+        ? t("주문과 배송 상태를 정리하는 중입니다.")
+        : t("{orderCount}건 주문 · 진행 {progressCount}건 · 구매 확정 대기 {pendingCount}건", {
+            orderCount: orders.length,
+            progressCount: inProgressCount,
+            pendingCount: confirmPendingCount,
+          }),
     },
     {
       href: "/shop/profile/saved",
-      title: "보관함",
+      title: t("보관함"),
       description: loading
-        ? "장바구니와 위시리스트를 정리하는 중입니다."
-        : `장바구니 ${cartCount}개 · 위시리스트 ${wishlistIds.length}개`,
+        ? t("장바구니와 위시리스트를 정리하는 중입니다.")
+        : t("장바구니 {cartCount}개 · 위시리스트 {wishlistCount}개", {
+            cartCount,
+            wishlistCount: wishlistIds.length,
+          }),
     },
     {
       href: "/shop/profile/account",
-      title: "배송지 · 계정",
+      title: t("배송지 · 계정"),
       description: defaultAddress
         ? `${defaultAddress.label} · ${maskShopAddressLine(formatShopShippingSingleLine(defaultAddress))}`
-        : "배송지와 주문 전 확인 정보를 관리합니다.",
+        : t("배송지와 주문 전 확인 정보를 관리합니다."),
     },
   ];
 
@@ -164,9 +171,9 @@ export function ShopProfilePage() {
               <div className="text-[12px] font-semibold uppercase tracking-[0.18em] text-white/70">{t("계정")}</div>
               <div className="mt-2 text-[22px] font-bold tracking-[-0.03em]">{maskShopEmail(user?.email)}</div>
               <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-[12px] text-white/78">
-                <span>주문 {loading ? "-" : orders.length}</span>
-                <span>배송 중 {loading ? "-" : inProgressCount}</span>
-                <span>보관 {loading ? "-" : cartCount + wishlistIds.length}</span>
+                <span>{t("주문")} {loading ? "-" : orders.length}</span>
+                <span>{t("배송 중")} {loading ? "-" : inProgressCount}</span>
+                <span>{t("보관")} {loading ? "-" : cartCount + wishlistIds.length}</span>
               </div>
             </div>
 
@@ -191,7 +198,7 @@ export function ShopProfilePage() {
             </div>
 
             <div className="px-1 text-[12px] leading-6 text-[#61758a]">
-              배송, 환불, 구매 확정, 장바구니, 위시리스트, 배송지 정보는 각 상세 허브에서 정리해서 확인할 수 있습니다.
+              {t("배송, 환불, 구매 확정, 장바구니, 위시리스트, 배송지 정보는 각 상세 허브에서 정리해서 확인할 수 있습니다.")}
             </div>
           </>
         )}

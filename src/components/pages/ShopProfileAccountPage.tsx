@@ -76,10 +76,10 @@ export function ShopProfileAccountPage() {
     <div className="-mx-4 min-h-[calc(100dvh-72px)] bg-[#f4f7fb] pb-24">
       <div className="border-b border-[#dbe4ef] bg-white px-4 py-4">
         <div className="flex items-center gap-3">
-          <ShopBackLink href="/shop/profile" label="쇼핑 프로필로 돌아가기" />
+          <ShopBackLink href="/shop/profile" label={t("쇼핑 프로필로 돌아가기")} />
           <div>
-            <h1 className="text-[18px] font-bold tracking-[-0.02em] text-[#102a43]">배송지 · 계정</h1>
-            <p className="text-[12px] text-[#61758a]">배송지와 주문 전 확인 정보를 한 페이지에서 관리합니다.</p>
+            <h1 className="text-[18px] font-bold tracking-[-0.02em] text-[#102a43]">{t("배송지 · 계정")}</h1>
+            <p className="text-[12px] text-[#61758a]">{t("배송지와 주문 전 확인 정보를 한 페이지에서 관리합니다.")}</p>
           </div>
         </div>
       </div>
@@ -87,8 +87,8 @@ export function ShopProfileAccountPage() {
       <div className="space-y-4 px-4 py-5">
         {status !== "authenticated" ? (
           <div className="rounded-[28px] border border-[#dbe4ef] bg-white p-6">
-            <div className="text-[16px] font-bold text-[#102a43]">로그인 후 배송지 정보를 확인할 수 있습니다</div>
-            <div className="mt-2 text-[13px] leading-6 text-[#61758a]">기본 배송지와 개인정보 확인 흐름은 계정 기준으로 안전하게 관리됩니다.</div>
+            <div className="text-[16px] font-bold text-[#102a43]">{t("로그인 후 배송지 정보를 확인할 수 있습니다")}</div>
+            <div className="mt-2 text-[13px] leading-6 text-[#61758a]">{t("기본 배송지와 개인정보 확인 흐름은 계정 기준으로 안전하게 관리됩니다.")}</div>
             <Link href="/settings/account" data-auth-allow className={`mt-5 h-11 px-5 text-[13px] ${SHOP_BUTTON_PRIMARY}`}>
               {t("로그인하러 가기")}
             </Link>
@@ -100,10 +100,10 @@ export function ShopProfileAccountPage() {
               <div className="mt-2 text-[20px] font-bold tracking-[-0.03em]">{maskShopEmail(user?.email)}</div>
               <div className="mt-2 text-[12px] text-white/78">
                 {loading
-                  ? "기본 배송지를 확인하는 중입니다."
+                  ? t("기본 배송지를 확인하는 중입니다.")
                   : defaultAddress
-                    ? `기본 배송지 · ${maskShopAddressLine(formatShopShippingSingleLine(defaultAddress))}`
-                    : "아직 저장된 기본 배송지가 없습니다."}
+                    ? `${t("기본 배송지")} · ${maskShopAddressLine(formatShopShippingSingleLine(defaultAddress))}`
+                    : t("아직 저장된 기본 배송지가 없습니다.")}
               </div>
             </div>
 
@@ -111,9 +111,9 @@ export function ShopProfileAccountPage() {
               <div className="grid gap-3">
                 <Link href="/settings/account/shipping" data-auth-allow className={HUB_ROW}>
                   <div className="min-w-0">
-                    <div className="text-[14px] font-semibold text-[#102a43]">배송지 설정</div>
+                    <div className="text-[14px] font-semibold text-[#102a43]">{t("배송지 설정")}</div>
                     <div className="mt-1 text-[12px] leading-5 text-[#61758a]">
-                      배송지, 수령인, 연락처를 수정하고 기본 배송지를 지정합니다.
+                      {t("배송지, 수령인, 연락처를 수정하고 기본 배송지를 지정합니다.")}
                     </div>
                   </div>
                   <span className="shrink-0 text-[18px] text-[#8ca0b3]">›</span>
@@ -121,9 +121,9 @@ export function ShopProfileAccountPage() {
 
                 <Link href="/shop/orders?filter=delivered" data-auth-allow className={HUB_ROW}>
                   <div className="min-w-0">
-                    <div className="text-[14px] font-semibold text-[#102a43]">구매 확정 안내</div>
+                    <div className="text-[14px] font-semibold text-[#102a43]">{t("구매 확정 안내")}</div>
                     <div className="mt-1 text-[12px] leading-5 text-[#61758a]">
-                      배송 완료 후 구매 확정을 해야 리뷰 권한이 열리고, 결제 전에는 배송지 정보를 다시 확인합니다.
+                      {t("배송 완료 후 구매 확정을 해야 리뷰 권한이 열리고, 결제 전에는 배송지 정보를 다시 확인합니다.")}
                     </div>
                   </div>
                   <span className="shrink-0 text-[18px] text-[#8ca0b3]">›</span>

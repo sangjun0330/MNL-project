@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useAuthState } from "@/lib/auth";
 import { authHeaders } from "@/lib/billing/client";
+import { formatShopCurrency } from "@/lib/shop";
 import { SHOP_BUTTON_ACTIVE, SHOP_BUTTON_PRIMARY } from "@/lib/shopUi";
 import { translate } from "@/lib/i18n";
 import { useI18n } from "@/lib/useI18n";
@@ -171,7 +172,7 @@ export function ShopOrdersPage() {
       const res = await fetch("/api/shop/orders/refund", {
         method: "POST",
         headers: { "content-type": "application/json", ...headers },
-        body: JSON.stringify({ orderId, reason: "주문 내역 페이지에서 접수한 환불 요청" }),
+        body: JSON.stringify({ orderId, reason: t("주문 내역 페이지에서 접수한 환불 요청") }),
       });
       const json = await res.json().catch(() => null);
       if (!res.ok || !json?.ok) throw new Error(String(json?.error ?? `http_${res.status}`));
@@ -187,12 +188,12 @@ export function ShopOrdersPage() {
       setMessageTone("notice");
       setMessage(
         json?.data?.bundleRefundApplied
-          ? "묶음 주문 전체에 환불 요청이 접수되었습니다. 관리자 검토 후 순차 처리됩니다."
-          : "환불 요청이 접수되었습니다. 관리자 검토 후 처리됩니다."
+          ? t("묶음 주문 전체에 환불 요청이 접수되었습니다. 관리자 검토 후 순차 처리됩니다.")
+          : t("환불 요청이 접수되었습니다. 관리자 검토 후 처리됩니다.")
       );
     } catch (error: any) {
       setMessageTone("error");
-      setMessage("환불 요청에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+      setMessage(t("환불 요청에 실패했습니다. 잠시 후 다시 시도해 주세요."));
     } finally {
       setActionLoadingId(null);
     }
@@ -214,14 +215,14 @@ export function ShopOrdersPage() {
       const nextOrder = json.data.order as ShopOrderSummary;
       setOrders((current) => [nextOrder, ...current.filter((item) => item.orderId !== nextOrder.orderId)]);
       setMessageTone("notice");
-      setMessage("구매가 확정되었습니다. 이제 해당 상품 리뷰를 작성할 수 있습니다.");
+      setMessage(t("구매가 확정되었습니다. 이제 해당 상품 리뷰를 작성할 수 있습니다."));
     } catch (error: any) {
       const code = String(error?.message ?? "failed_to_confirm_shop_order_purchase");
       setMessageTone("error");
       if (code.includes("not_delivered")) {
-        setMessage("배송 완료된 주문만 구매 확정할 수 있습니다.");
+        setMessage(t("배송 완료된 주문만 구매 확정할 수 있습니다."));
       } else {
-        setMessage("구매 확정 처리에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+        setMessage(t("구매 확정 처리에 실패했습니다. 잠시 후 다시 시도해 주세요."));
       }
     } finally {
       setActionLoadingId(null);
@@ -301,10 +302,10 @@ export function ShopOrdersPage() {
               <div key={order.orderId} className="rounded-3xl border border-[#edf1f6] bg-white px-4 py-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <div className="text-[14px] font-semibold text-[#111827]">{order.productSnapshot.name}</div>
+                    <div className="text-[14px] font-semibold text-[#111827]">{t(order.productSnapshot.name)}</div>
                     <div className="mt-1 text-[11px] text-[#8d99ab]">
-                        수량 {order.productSnapshot.quantity} · 총 {Math.round(order.amount).toLocaleString("ko-KR")}원 · {formatDateLabel(order.createdAt)}
-                      </div>
+                      {t("수량")} {order.productSnapshot.quantity} · {t("총 결제 금액")} {formatShopCurrency(order.amount)} · {formatDateLabel(order.createdAt)}
+                    </div>
                     {order.shipping.addressLine1 ? (
                       <div className="mt-1 text-[11px] text-[#8d99ab]">
                         {order.shipping.recipientName} · {order.shipping.addressLine1}{order.shipping.addressLine2 ? ` ${order.shipping.addressLine2}` : ""}
@@ -320,25 +321,25 @@ export function ShopOrdersPage() {
                 {order.trackingNumber ? (
                   <div className="mt-2 rounded-2xl bg-[#f4f7fb] px-3 py-2 text-[11.5px] text-[#44556d]">
                     📦 {order.courier} · {maskTrackingNumber(order.trackingNumber)}
-                    {order.shippedAt ? ` · 발송일 ${formatDateLabel(order.shippedAt)}` : ""}
+                    {order.shippedAt ? ` · ${t("발송일")} ${formatDateLabel(order.shippedAt)}` : ""}
                   </div>
                 ) : null}
                 <div className="mt-2 rounded-2xl border border-[#dbe4ef] bg-white px-3 py-2 text-[11.5px] text-[#5b7087]">
-                  상품 {order.subtotalKrw.toLocaleString("ko-KR")}원 · 배송비 {order.shippingFeeKrw > 0 ? `${order.shippingFeeKrw.toLocaleString("ko-KR")}원` : "무료"}
+                  {t("상품 금액")} {formatShopCurrency(order.subtotalKrw)} · {t("배송비")} {order.shippingFeeKrw > 0 ? formatShopCurrency(order.shippingFeeKrw) : t("무료")}
                 </div>
 
                 {/* 환불 상태 */}
                 {order.refund.status === "requested" && (
-                  <div className="mt-2 text-[11.5px] text-[#65748b]">환불 요청 접수됨 · {order.refund.reason ?? "사유 없음"}</div>
+                  <div className="mt-2 text-[11.5px] text-[#65748b]">{t("환불 요청 접수됨")} · {order.refund.reason ?? t("사유 없음")}</div>
                 )}
                 {order.refund.status === "rejected" && (
-                  <div className="mt-2 text-[11.5px] text-[#a33a2b]">환불 반려 · {order.refund.note ?? "사유 없음"}</div>
+                  <div className="mt-2 text-[11.5px] text-[#a33a2b]">{t("환불 반려")} · {order.refund.note ?? t("사유 없음")}</div>
                 )}
                 {order.refund.status === "done" && (
-                  <div className="mt-2 text-[11.5px] text-[#11294b]">환불 완료</div>
+                  <div className="mt-2 text-[11.5px] text-[#11294b]">{t("환불 완료")}</div>
                 )}
                 {order.purchaseConfirmedAt ? (
-                  <div className="mt-2 text-[11.5px] text-[#102a43]">구매 확정 완료 · {formatDateLabel(order.purchaseConfirmedAt)}</div>
+                  <div className="mt-2 text-[11.5px] text-[#102a43]">{t("구매 확정 완료")} · {formatDateLabel(order.purchaseConfirmedAt)}</div>
                 ) : null}
                 {order.status === "FAILED" && order.failMessage && (
                   <div className="mt-2 text-[11.5px] text-[#a33a2b]">{order.failMessage}</div>

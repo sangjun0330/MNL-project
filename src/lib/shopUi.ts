@@ -14,6 +14,6 @@ export const SHOP_ICON_BUTTON =
   "inline-flex items-center justify-center rounded-[999px] border-2 border-[#bfd0e1] bg-white text-[#425a76] shadow-[inset_0_1px_0_rgba(255,255,255,0.92)] transition hover:bg-[#f7fafc]";
 
 export const SHOP_BACK_BUTTON =
-  "inline-flex h-14 w-14 items-center justify-center rounded-full border-2 border-[#b7c8d9] bg-white text-[#425a76] shadow-[inset_0_1px_0_rgba(255,255,255,0.92)] transition hover:bg-[#f7fafc]";
+  "inline-flex h-10 w-10 items-center justify-center rounded-full border-2 border-[#b7c8d9] bg-white text-[#425a76] shadow-[inset_0_1px_0_rgba(255,255,255,0.92)] transition hover:bg-[#f7fafc]";
 
-export const SHOP_BACK_ICON_CLASS = "h-6 w-6";
+export const SHOP_BACK_ICON_CLASS = "h-4 w-4";

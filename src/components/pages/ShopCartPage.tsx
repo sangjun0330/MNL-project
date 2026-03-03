@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuthState } from "@/lib/auth";
 import { authHeaders, ensureTossScript } from "@/lib/billing/client";
-import { calculateShopPricing, calculateShopShippingFee, formatShopPrice, getShopImageSrc, type ShopProduct } from "@/lib/shop";
+import { calculateShopPricing, calculateShopShippingFee, formatShopCurrency, formatShopPrice, getShopImageSrc, type ShopProduct } from "@/lib/shop";
 import {
   buildShopShippingVerificationValue,
   formatShopShippingSingleLine,
@@ -118,7 +118,7 @@ export function ShopCartPage() {
         setShippingAddresses([]);
         setSelectedShippingAddressId(null);
         setMessageTone("error");
-        setMessage("장바구니 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+        setMessage(t("장바구니 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."));
       } finally {
         if (!active) return;
         setLoading(false);
@@ -129,7 +129,7 @@ export function ShopCartPage() {
     return () => {
       active = false;
     };
-  }, [status, user?.userId]);
+  }, [status, t, user?.userId]);
 
   const lines = useMemo<CartLine[]>(
     () =>
@@ -209,7 +209,7 @@ export function ShopCartPage() {
       }
     } catch {
       setMessageTone("error");
-      setMessage("장바구니 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+      setMessage(t("장바구니 저장에 실패했습니다. 잠시 후 다시 시도해 주세요."));
     }
   };
 
@@ -231,7 +231,7 @@ export function ShopCartPage() {
     setMessage(null);
     try {
       const headers = await authHeaders();
-      await syncCart(removeFromCart(productId, headers), "선택한 상품을 장바구니에서 제거했습니다.");
+      await syncCart(removeFromCart(productId, headers), t("선택한 상품을 장바구니에서 제거했습니다."));
       if (checkoutTarget?.mode === "single" && checkoutTarget.productId === productId) {
         setCheckoutTarget(null);
       }
@@ -245,14 +245,14 @@ export function ShopCartPage() {
     setMessage(null);
     try {
       const headers = await authHeaders();
-      await syncCart(clearCart(headers), "장바구니를 비웠습니다.");
+      await syncCart(clearCart(headers), t("장바구니를 비웠습니다."));
       setCheckoutTarget(null);
       setSelectedProductIds([]);
       setSelectionTouched(false);
       knownProductIdsRef.current = [];
     } catch {
       setMessageTone("error");
-      setMessage("장바구니를 비우지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      setMessage(t("장바구니를 비우지 못했습니다. 잠시 후 다시 시도해 주세요."));
     }
   };
 
@@ -288,17 +288,17 @@ export function ShopCartPage() {
     if (!line) return;
     if (!line.product.checkoutEnabled || !line.product.priceKrw) {
       setMessageTone("error");
-      setMessage("이 상품은 앱 내 결제를 지원하지 않습니다.");
+      setMessage(t("이 상품은 앱 내 결제를 지원하지 않습니다."));
       return;
     }
     if (line.product.outOfStock) {
       setMessageTone("error");
-      setMessage("품절된 상품은 주문할 수 없습니다.");
+      setMessage(t("품절된 상품은 주문할 수 없습니다."));
       return;
     }
     if (!shippingReady) {
       setMessageTone("error");
-      setMessage("결제 전에 기본 배송지를 먼저 저장해 주세요.");
+      setMessage(t("결제 전에 기본 배송지를 먼저 저장해 주세요."));
       return;
     }
     setCheckoutTarget({ mode: "single", productId });
@@ -307,12 +307,12 @@ export function ShopCartPage() {
   const openBundleCheckout = () => {
     if (selectedLines.length === 0) {
       setMessageTone("error");
-      setMessage("먼저 결제할 상품을 선택해 주세요.");
+      setMessage(t("먼저 결제할 상품을 선택해 주세요."));
       return;
     }
     if (!shippingReady) {
       setMessageTone("error");
-      setMessage("결제 전에 기본 배송지를 먼저 저장해 주세요.");
+      setMessage(t("결제 전에 기본 배송지를 먼저 저장해 주세요."));
       return;
     }
     const invalidLine = selectedLines.find(
@@ -320,7 +320,7 @@ export function ShopCartPage() {
     );
     if (invalidLine) {
       setMessageTone("error");
-      setMessage("선택한 상품 중 앱 내 결제가 불가능한 상품이 있어 묶음 결제를 진행할 수 없습니다.");
+      setMessage(t("선택한 상품 중 앱 내 결제가 불가능한 상품이 있어 묶음 결제를 진행할 수 없습니다."));
       return;
     }
     setCheckoutTarget({ mode: "bundle" });
@@ -407,37 +407,39 @@ export function ShopCartPage() {
       const text = String(error?.message ?? "failed_to_start_shop_checkout");
       setMessageTone("error");
       if (text.includes("empty_shop_cart_selection")) {
-        setMessage("선택한 상품이 없어 묶음 결제를 진행할 수 없습니다.");
+        setMessage(t("선택한 상품이 없어 묶음 결제를 진행할 수 없습니다."));
       } else if (text.includes("invalid_cart_selection")) {
-        setMessage("장바구니 구성이 변경되었습니다. 다시 선택한 뒤 결제를 시도해 주세요.");
+        setMessage(t("장바구니 구성이 변경되었습니다. 다시 선택한 뒤 결제를 시도해 주세요."));
       } else if (text.includes("too_many_pending_shop_orders")) {
-        setMessage("결제 대기 주문이 많습니다. 기존 결제를 마친 뒤 다시 시도해 주세요.");
+        setMessage(t("결제 대기 주문이 많습니다. 기존 결제를 마친 뒤 다시 시도해 주세요."));
       } else if (text.includes("shop_product_out_of_stock")) {
-        setMessage("선택한 상품 중 품절된 상품이 있어 결제를 진행할 수 없습니다.");
+        setMessage(t("선택한 상품 중 품절된 상품이 있어 결제를 진행할 수 없습니다."));
       } else if (text.includes("shop_product_insufficient_stock")) {
-        setMessage("선택한 상품 중 재고가 부족한 상품이 있어 수량을 다시 확인해 주세요.");
+        setMessage(t("선택한 상품 중 재고가 부족한 상품이 있어 수량을 다시 확인해 주세요."));
       } else if (text.includes("shop_checkout_disabled")) {
-        setMessage("선택한 상품 중 앱 내 결제를 지원하지 않는 상품이 있습니다.");
+        setMessage(t("선택한 상품 중 앱 내 결제를 지원하지 않는 상품이 있습니다."));
       } else if (text.includes("shop_checkout_verification_required")) {
-        setMessage("배송지와 개인정보 확인 항목을 모두 체크한 뒤 결제를 진행해 주세요.");
+        setMessage(t("배송지와 개인정보 확인 항목을 모두 체크한 뒤 결제를 진행해 주세요."));
       } else if (text.includes("shop_checkout_verification_mismatch")) {
-        setMessage("결제 전 확인한 배송지 정보가 변경되었습니다. 다시 확인해 주세요.");
+        setMessage(t("결제 전 확인한 배송지 정보가 변경되었습니다. 다시 확인해 주세요."));
       } else if (text.includes("missing_shipping_address")) {
-        setMessage("기본 배송지가 없어 주문을 진행할 수 없습니다.");
+        setMessage(t("기본 배송지가 없어 주문을 진행할 수 없습니다."));
+      } else if (text.includes("shop_order_storage_unavailable")) {
+        setMessage(t("주문 저장소 설정이 아직 완료되지 않았습니다. 관리자에게 주문 저장 환경 구성을 확인해 주세요."));
       } else if (text.includes("missing_toss_client_key")) {
-        setMessage("결제 설정이 아직 완료되지 않았습니다. 관리자에게 결제 설정을 확인해 주세요.");
+        setMessage(t("결제 설정이 아직 완료되지 않았습니다. 관리자에게 결제 설정을 확인해 주세요."));
       } else if (text.includes("missing_origin") || text.includes("invalid_referer") || text.includes("invalid_referer_origin")) {
-        setMessage("현재 브라우저 보안 정보가 누락되어 결제를 시작할 수 없습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.");
+        setMessage(t("현재 브라우저 보안 정보가 누락되어 결제를 시작할 수 없습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요."));
       } else if (text.includes("invalid_origin")) {
-        setMessage("결제 이동 주소를 만들지 못했습니다. 잠시 후 다시 시도해 주세요.");
+        setMessage(t("결제 이동 주소를 만들지 못했습니다. 잠시 후 다시 시도해 주세요."));
       } else if (text.includes("missing_toss_sdk")) {
-        setMessage("결제 모듈을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+        setMessage(t("결제 모듈을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."));
       } else if (text.includes("failed_to_create_shop_bundle_order")) {
-        setMessage("묶음 주문서를 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+        setMessage(t("묶음 주문서를 생성하지 못했습니다. 잠시 후 다시 시도해 주세요."));
       } else if (text.includes("failed_to_create_shop_order")) {
-        setMessage("주문서를 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+        setMessage(t("주문서를 생성하지 못했습니다. 잠시 후 다시 시도해 주세요."));
       } else {
-        setMessage("결제를 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+        setMessage(t("결제를 시작하지 못했습니다. 잠시 후 다시 시도해 주세요."));
       }
     } finally {
       setCheckoutLoading(false);
@@ -497,8 +499,8 @@ export function ShopCartPage() {
                 <div>
                   <div className="text-[15px] font-bold text-[#102a43]">{t("담아둔 상품")}</div>
                   <div className="mt-1 text-[12px] text-[#61758a]">
-                    {lines.length}종 · 총 {cartItems.reduce((sum, item) => sum + item.quantity, 0)}개
-                    {selectedLines.length > 0 ? ` · 선택 ${selectedLines.length}종` : ""}
+                    {lines.length}{t("종")} · {t("총 수량")} {cartItems.reduce((sum, item) => sum + item.quantity, 0)}{t("개")}
+                    {selectedLines.length > 0 ? ` · ${t("선택")} ${selectedLines.length}${t("종")}` : ""}
                   </div>
                 </div>
                 <div className="flex flex-wrap justify-end gap-2">
@@ -529,22 +531,22 @@ export function ShopCartPage() {
                             "mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[11px] font-bold transition",
                             selected ? "border-[#17324d] bg-[#17324d] text-white" : "border-[#bfd0e1] bg-white text-[#8ca0b3]",
                           ].join(" ")}
-                          aria-label={selected ? "선택 해제" : "선택"}
+                          aria-label={selected ? t("선택 해제") : t("선택")}
                         >
                           {selected ? "✓" : ""}
                         </button>
                         <Link href={`/shop/${encodeURIComponent(line.product.id)}`} data-auth-allow className="shrink-0 overflow-hidden rounded-[20px] bg-white">
                           {line.product.imageUrls[0] ? (
-                            <img src={getShopImageSrc(line.product.imageUrls[0])} alt={line.product.name} className="h-24 w-24 object-cover" referrerPolicy="no-referrer" />
+                            <img src={getShopImageSrc(line.product.imageUrls[0])} alt={t(line.product.name)} className="h-24 w-24 object-cover" referrerPolicy="no-referrer" />
                           ) : (
                             <div className="flex h-24 w-24 items-center justify-center bg-[#dde7f0] text-[12px] font-semibold text-[#425a76]">
-                              {line.product.visualLabel}
+                              {t(line.product.visualLabel)}
                             </div>
                           )}
                         </Link>
                         <div className="min-w-0 flex-1">
-                          <div className="text-[14px] font-semibold text-[#102a43]">{line.product.name}</div>
-                          <div className="mt-1 text-[12px] leading-5 text-[#61758a]">{line.product.subtitle}</div>
+                          <div className="text-[14px] font-semibold text-[#102a43]">{t(line.product.name)}</div>
+                          <div className="mt-1 text-[12px] leading-5 text-[#61758a]">{t(line.product.subtitle)}</div>
                           <div className="mt-2 text-[13px] font-bold text-[#425a76]">{formatShopPrice(line.product)}</div>
                           <div className="mt-3 flex items-center gap-2">
                             <button
@@ -574,18 +576,18 @@ export function ShopCartPage() {
 
                       <div className="mt-4 rounded-[20px] border border-[#d6e0ea] bg-white px-3 py-3 text-[12px] text-[#5c7187]">
                         <div className="flex items-center justify-between gap-3">
-                          <span>상품 금액</span>
-                          <span className="font-semibold text-[#425a76]">{pricing.subtotalKrw.toLocaleString("ko-KR")}원</span>
+                          <span>{t("상품 금액")}</span>
+                          <span className="font-semibold text-[#425a76]">{formatShopCurrency(pricing.subtotalKrw)}</span>
                         </div>
                         <div className="mt-1 flex items-center justify-between gap-3">
-                          <span>배송비</span>
+                          <span>{t("배송비")}</span>
                           <span className="font-semibold text-[#425a76]">
-                            {pricing.shippingFeeKrw > 0 ? `${pricing.shippingFeeKrw.toLocaleString("ko-KR")}원` : "무료"}
+                            {pricing.shippingFeeKrw > 0 ? formatShopCurrency(pricing.shippingFeeKrw) : t("무료")}
                           </span>
                         </div>
                         <div className="mt-2 flex items-center justify-between gap-3 border-t border-[#edf2f7] pt-2">
-                          <span className="font-semibold text-[#2f4d6a]">예상 결제</span>
-                          <span className="font-bold text-[#2f4d6a]">{pricing.totalKrw.toLocaleString("ko-KR")}원</span>
+                          <span className="font-semibold text-[#2f4d6a]">{t("예상 결제")}</span>
+                          <span className="font-bold text-[#2f4d6a]">{formatShopCurrency(pricing.totalKrw)}</span>
                         </div>
                       </div>
 
@@ -597,7 +599,7 @@ export function ShopCartPage() {
                           disabled={savingProductId === line.product.id}
                           className={`h-10 text-[12px] ${SHOP_BUTTON_SECONDARY}`}
                         >
-                          삭제
+                          {t("삭제")}
                         </button>
                         <button
                           type="button"
@@ -605,7 +607,7 @@ export function ShopCartPage() {
                           onClick={() => openCheckoutFor(line.product.id)}
                           className={`h-10 text-[12px] ${SHOP_BUTTON_PRIMARY}`}
                         >
-                          이 상품 결제
+                          {t("이 상품 결제")}
                         </button>
                       </div>
                     </div>
@@ -615,27 +617,27 @@ export function ShopCartPage() {
             </div>
 
             <div className="rounded-[28px] border border-[#dbe4ef] bg-white p-5">
-              <div className="text-[15px] font-bold text-[#102a43]">장바구니 요약</div>
+              <div className="text-[15px] font-bold text-[#102a43]">{t("장바구니 요약")}</div>
               <div className="mt-3 space-y-2 text-[13px] text-[#5c7187]">
                 <div className="flex items-center justify-between gap-3">
-                  <span>선택 상품</span>
-                  <span className="font-semibold text-[#425a76]">{selectedLines.length}종 · {selectedQuantity}개</span>
+                  <span>{t("선택 상품")}</span>
+                  <span className="font-semibold text-[#425a76]">{selectedLines.length}{t("종")} · {selectedQuantity}{t("개")}</span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <span>상품 합계</span>
-                  <span className="font-semibold text-[#425a76]">{cartPricing.subtotalKrw.toLocaleString("ko-KR")}원</span>
+                  <span>{t("상품 합계")}</span>
+                  <span className="font-semibold text-[#425a76]">{formatShopCurrency(cartPricing.subtotalKrw)}</span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <span>묶음 배송비</span>
-                  <span className="font-semibold text-[#425a76]">{cartPricing.shippingFeeKrw.toLocaleString("ko-KR")}원</span>
+                  <span>{t("묶음 배송비")}</span>
+                  <span className="font-semibold text-[#425a76]">{formatShopCurrency(cartPricing.shippingFeeKrw)}</span>
                 </div>
                 <div className="flex items-center justify-between gap-3 border-t border-[#edf2f7] pt-2">
-                  <span className="font-semibold text-[#2f4d6a]">묶음 결제 총액</span>
-                  <span className="font-bold text-[#2f4d6a]">{cartPricing.totalKrw.toLocaleString("ko-KR")}원</span>
+                  <span className="font-semibold text-[#2f4d6a]">{t("묶음 결제 총액")}</span>
+                  <span className="font-bold text-[#2f4d6a]">{formatShopCurrency(cartPricing.totalKrw)}</span>
                 </div>
               </div>
               <div className="mt-3 rounded-[20px] border border-[#d6e0ea] bg-[#f7fafc] px-3 py-3 text-[12px] leading-5 text-[#5c7187]">
-                선택한 상품은 1회 결제로 묶어서 승인되며, 주문 내역에는 상품별 주문으로 안전하게 분리 저장됩니다.
+                {t("선택한 상품은 1회 결제로 묶어서 승인되며, 주문 내역에는 상품별 주문으로 안전하게 분리 저장됩니다.")}
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
                 <button
@@ -645,7 +647,7 @@ export function ShopCartPage() {
                   disabled={selectedLines.length === 0}
                   className={`h-11 text-[13px] ${SHOP_BUTTON_ACTIVE}`}
                 >
-                  선택 상품 묶음 결제
+                  {t("선택 상품 묶음 결제")}
                 </button>
               </div>
             </div>
@@ -658,11 +660,11 @@ export function ShopCartPage() {
         onClose={() => setCheckoutTarget(null)}
         onConfirm={(verification) => void handleCheckout(verification)}
         loading={checkoutLoading}
-        productTitle={checkoutTarget?.mode === "bundle" ? "장바구니 묶음 결제" : checkoutLine?.product.name ?? ""}
+        productTitle={checkoutTarget?.mode === "bundle" ? t("장바구니 묶음 결제") : t(checkoutLine?.product.name ?? "")}
         productSubtitle={
           checkoutTarget?.mode === "bundle"
-            ? `${selectedLines.length}종 · 총 ${selectedQuantity}개`
-            : checkoutLine?.product.subtitle ?? ""
+            ? `${selectedLines.length}${t("종")} · ${t("총 수량")} ${selectedQuantity}${t("개")}`
+            : t(checkoutLine?.product.subtitle ?? "")
         }
         priceKrw={checkoutLine?.product.priceKrw ?? 0}
         quantity={checkoutLine?.item.quantity ?? 1}

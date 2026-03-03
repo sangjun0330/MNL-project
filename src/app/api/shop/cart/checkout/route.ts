@@ -257,6 +257,9 @@ export async function POST(req: Request) {
     if (message === "shop_profile_storage_unavailable") {
       return jsonNoStore({ ok: false, error: "shop_profile_storage_unavailable" }, { status: 503 });
     }
+    if (message === "shop_order_storage_unavailable") {
+      return jsonNoStore({ ok: false, error: "shop_order_storage_unavailable" }, { status: 503 });
+    }
     if (message.includes("missing_toss_client_key") || message.includes("invalid_toss_client_key")) {
       return jsonNoStore({ ok: false, error: "missing_toss_client_key" }, { status: 500 });
     }

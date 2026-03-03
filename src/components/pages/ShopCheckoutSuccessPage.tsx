@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { getSupabaseBrowserClient, useAuthState } from "@/lib/auth";
+import { formatShopCurrency } from "@/lib/shop";
 import { SHOP_BUTTON_PRIMARY, SHOP_BUTTON_SECONDARY } from "@/lib/shopUi";
 import { useI18n } from "@/lib/useI18n";
 
@@ -54,24 +55,24 @@ function formatDateLabel(value: string | null) {
 }
 
 function formatWon(value: number) {
-  return `${Math.round(value).toLocaleString("ko-KR")}원`;
+  return formatShopCurrency(value);
 }
 
-function humanizeConfirmError(code: string) {
-  if (code.includes("login_required")) return "로그인 확인 후 다시 주문 상태를 불러와 주세요.";
-  if (code.includes("amount_mismatch")) return "결제 금액이 주문 정보와 달라 승인할 수 없습니다. 장바구니에서 다시 결제해 주세요.";
-  if (code.includes("shop_order_not_found")) return "결제할 주문 정보를 찾지 못했습니다. 장바구니에서 다시 시도해 주세요.";
-  if (code.includes("shop_order_not_confirmable")) return "이미 처리되었거나 확인할 수 없는 주문입니다.";
-  if (code.includes("toss_confirm_network_error")) return "결제 승인 서버와 연결되지 않았습니다. 잠시 후 주문 내역에서 상태를 확인해 주세요.";
-  if (code.includes("failed_to_finalize_shop_order")) return "결제 승인 후 주문 반영이 지연되고 있습니다. 잠시 후 주문 내역을 다시 확인해 주세요.";
-  if (code.includes("missing_toss_secret_key")) return "결제 승인 설정이 아직 완료되지 않았습니다. 관리자에게 확인해 주세요.";
+function humanizeConfirmError(code: string, t: (key: string) => string) {
+  if (code.includes("login_required")) return t("로그인 확인 후 다시 주문 상태를 불러와 주세요.");
+  if (code.includes("amount_mismatch")) return t("결제 금액이 주문 정보와 달라 승인할 수 없습니다. 장바구니에서 다시 결제해 주세요.");
+  if (code.includes("shop_order_not_found")) return t("결제할 주문 정보를 찾지 못했습니다. 장바구니에서 다시 시도해 주세요.");
+  if (code.includes("shop_order_not_confirmable")) return t("이미 처리되었거나 확인할 수 없는 주문입니다.");
+  if (code.includes("toss_confirm_network_error")) return t("결제 승인 서버와 연결되지 않았습니다. 잠시 후 주문 내역에서 상태를 확인해 주세요.");
+  if (code.includes("failed_to_finalize_shop_order")) return t("결제 승인 후 주문 반영이 지연되고 있습니다. 잠시 후 주문 내역을 다시 확인해 주세요.");
+  if (code.includes("missing_toss_secret_key")) return t("결제 승인 설정이 아직 완료되지 않았습니다. 관리자에게 확인해 주세요.");
   if (code.includes("confirm_response_mismatch") || code.includes("confirm_amount_mismatch")) {
-    return "결제 승인 응답이 주문 정보와 일치하지 않았습니다. 자동 검증 후 다시 시도해 주세요.";
+    return t("결제 승인 응답이 주문 정보와 일치하지 않았습니다. 자동 검증 후 다시 시도해 주세요.");
   }
   if (code.startsWith("toss_http_") || code.startsWith("invalid_status_")) {
-    return "결제사 승인 단계에서 주문이 완료되지 않았습니다. 카드사 승인 내역과 주문 내역을 함께 확인해 주세요.";
+    return t("결제사 승인 단계에서 주문이 완료되지 않았습니다. 카드사 승인 내역과 주문 내역을 함께 확인해 주세요.");
   }
-  return "결제 승인에 실패했습니다. 잠시 후 주문 내역에서 상태를 다시 확인해 주세요.";
+  return t("결제 승인에 실패했습니다. 잠시 후 주문 내역에서 상태를 다시 확인해 주세요.");
 }
 
 export function ShopCheckoutSuccessPage() {
@@ -96,12 +97,12 @@ export function ShopCheckoutSuccessPage() {
     if (status === "loading") return;
     if (status !== "authenticated") {
       setLoading(false);
-      setError("로그인이 필요합니다.");
+      setError(t("로그인이 필요합니다."));
       return;
     }
     if (!paymentKey || !orderId || parsedAmount == null) {
       setLoading(false);
-      setError("결제 승인 파라미터가 올바르지 않습니다.");
+      setError(t("결제 승인 파라미터가 올바르지 않습니다."));
       return;
     }
     if (requestedRef.current) return;
@@ -130,14 +131,14 @@ export function ShopCheckoutSuccessPage() {
         }
         setResult(json.data as ConfirmResult);
       } catch (caught: any) {
-        setError(humanizeConfirmError(String(caught?.message ?? "failed_to_confirm_shop_order")));
+        setError(humanizeConfirmError(String(caught?.message ?? "failed_to_confirm_shop_order"), t));
       } finally {
         setLoading(false);
       }
     };
 
     void run();
-  }, [status, paymentKey, orderId, parsedAmount]);
+  }, [status, paymentKey, orderId, parsedAmount, t]);
 
   const bundleOrders = result && result.mode === "bundle" && Array.isArray(result.orders) ? result.orders : [];
   const primaryOrderHref =
@@ -192,7 +193,7 @@ export function ShopCheckoutSuccessPage() {
             <div className="rnest-chip-accent mt-4 inline-flex px-3 py-1 text-[12px]">{t("개별 주문 완료")}</div>
             <div className="mt-4 rounded-[18px] border border-ios-sep bg-[#F7F7FA] p-4">
               <div className="text-[13px] text-ios-sub">{t("주문 상품")}</div>
-              <div className="mt-1 text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">{result.order.productSnapshot.name}</div>
+              <div className="mt-1 text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">{t(result.order.productSnapshot.name)}</div>
               <div className="mt-2 text-[12.5px] text-ios-sub">{t("수량")}: {result.order.productSnapshot.quantity}</div>
               <div className="mt-1 text-[12.5px] text-ios-sub">{t("상품 금액")}: {formatWon(result.order.subtotalKrw)}</div>
               <div className="mt-1 text-[12.5px] text-ios-sub">
@@ -209,9 +210,9 @@ export function ShopCheckoutSuccessPage() {
             <div className="rnest-chip-accent mt-4 inline-flex px-3 py-1 text-[12px]">{t("묶음 주문 완료")}</div>
             <div className="mt-4 rounded-[18px] border border-ios-sep bg-[#F7F7FA] p-4">
               <div className="text-[13px] text-ios-sub">{t("결제 묶음")}</div>
-              <div className="mt-1 text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">{result.bundle.displayName}</div>
+              <div className="mt-1 text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">{t(result.bundle.displayName)}</div>
               <div className="mt-2 text-[12.5px] text-ios-sub">
-                {t("상품 종류")}: {result.bundle.itemCount}종 · {t("총 수량")}: {result.bundle.totalQuantity}개
+                {t("상품 종류")}: {result.bundle.itemCount} {t("종")} · {t("총 수량")}: {result.bundle.totalQuantity} {t("개")}
               </div>
               <div className="mt-1 text-[12.5px] text-ios-sub">{t("상품 금액")}: {formatWon(result.bundle.subtotalKrw)}</div>
               <div className="mt-1 text-[12.5px] text-ios-sub">
@@ -226,7 +227,7 @@ export function ShopCheckoutSuccessPage() {
                 <div className="mt-2 space-y-2">
                   {bundleOrders.slice(0, 4).map((order) => (
                     <div key={order.orderId} className="rounded-2xl border border-[#dbe4ef] bg-[#f7fafc] px-3 py-3 text-[12px] text-[#44556d]">
-                      <div className="font-semibold text-[#11294b]">{order.productSnapshot.name}</div>
+                      <div className="font-semibold text-[#11294b]">{t(order.productSnapshot.name)}</div>
                       <div className="mt-1">
                         {t("수량")} {order.productSnapshot.quantity} · {formatWon(order.amount)}
                       </div>

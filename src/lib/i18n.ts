@@ -1173,7 +1173,455 @@ const EN_EXTRA: Record<string, string> = {
   "개인정보처리방침": "Privacy policy",
 };
 
-const EN: Record<string, string> = { ...EN_BASE, ...EN_EXTRA };
+const SHOP_EN_EXTRA: Record<string, string> = {
+  "언어": "Language",
+  "쇼핑 프로필로 돌아가기": "Back to shopping profile",
+  "쇼핑 계정 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.": "Couldn't load your shopping account details. Please try again shortly.",
+  "주문 · 배송": "Orders & shipping",
+  "주문과 배송 상태를 정리하는 중입니다.": "Organizing your order and shipping status.",
+  "{orderCount}건 주문 · 진행 {progressCount}건 · 구매 확정 대기 {pendingCount}건":
+    "{orderCount} orders · {progressCount} in progress · {pendingCount} awaiting confirmation",
+  "보관함": "Saved hub",
+  "장바구니와 위시리스트를 정리하는 중입니다.": "Organizing your cart and wishlist.",
+  "장바구니 {cartCount}개 · 위시리스트 {wishlistCount}개": "Cart {cartCount} · Wishlist {wishlistCount}",
+  "배송지 · 계정": "Address & account",
+  "배송지와 주문 전 확인 정보를 관리합니다.": "Manage your shipping address and pre-checkout verification details.",
+  "보관": "Saved",
+  "배송, 환불, 구매 확정, 장바구니, 위시리스트, 배송지 정보는 각 상세 허브에서 정리해서 확인할 수 있습니다.":
+    "Shipping, refunds, purchase confirmation, cart, wishlist, and address details are grouped inside each detailed hub.",
+  "장바구니와 위시리스트를 한 페이지에서 정리합니다.": "Manage your cart and wishlist on one page.",
+  "로그인 후 보관함을 사용할 수 있습니다": "Sign in to use your saved hub.",
+  "계정 기준으로 저장된 장바구니와 위시리스트를 안전하게 불러옵니다.":
+    "Securely loads your account-based cart and wishlist.",
+  "{count}개 상품을 바로 결제하거나 수량을 조정할 수 있습니다.":
+    "You can pay now or adjust the quantity for {count} saved item(s).",
+  "{count}개 상품을 저장해두고 다시 볼 수 있습니다.": "You have {count} saved item(s) to revisit later.",
+  "배송지와 주문 전 확인 정보를 한 페이지에서 관리합니다.": "Manage your shipping address and pre-checkout checks on one page.",
+  "로그인 후 배송지 정보를 확인할 수 있습니다": "Sign in to view your shipping information.",
+  "기본 배송지와 개인정보 확인 흐름은 계정 기준으로 안전하게 관리됩니다.":
+    "Your default shipping address and identity checks are managed securely per account.",
+  "기본 배송지를 확인하는 중입니다.": "Checking your default shipping address.",
+  "기본 배송지": "Default address",
+  "아직 저장된 기본 배송지가 없습니다.": "No default shipping address has been saved yet.",
+  "배송지, 수령인, 연락처를 수정하고 기본 배송지를 지정합니다.":
+    "Edit the address, recipient, and phone number, then set the default shipping address.",
+  "구매 확정 안내": "Purchase confirmation guide",
+  "배송 완료 후 구매 확정을 해야 리뷰 권한이 열리고, 결제 전에는 배송지 정보를 다시 확인합니다.":
+    "After delivery, confirm the purchase to unlock reviews, and recheck your shipping info before payment.",
+  "현재 품절된 상품입니다.": "This item is currently sold out.",
+  "장바구니는 로그인한 계정에 저장됩니다.": "Cart items are saved to your signed-in account.",
+  "장바구니에 담았습니다. 계정 기준으로 저장됩니다.": "Added to cart and saved to your account.",
+  "장바구니 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.": "Couldn't save the item to your cart. Please try again shortly.",
+  "결제는 로그인 후 가능합니다.": "You must sign in to proceed with payment.",
+  "주문 전에 계정 설정에서 기본 배송지를 먼저 저장해 주세요.":
+    "Save a default shipping address in your account settings before ordering.",
+  "결제 대기 주문이 많습니다. 기존 결제를 마친 뒤 다시 시도해 주세요.":
+    "There are too many pending payments. Finish the existing payment and try again.",
+  "현재 품절되어 주문을 진행할 수 없습니다.": "This item is sold out and cannot be ordered right now.",
+  "남아 있는 재고보다 많은 수량을 선택했습니다. 수량을 줄여 다시 시도해 주세요.":
+    "You selected more than the remaining stock. Reduce the quantity and try again.",
+  "현재 이 상품은 앱 내 결제가 비활성화되어 있습니다.": "In-app checkout is currently disabled for this product.",
+  "기본 배송지가 없어 주문을 진행할 수 없습니다. 계정에서 배송지를 먼저 저장해 주세요.":
+    "A default shipping address is required. Save one in your account first.",
+  "선택한 배송지를 찾지 못했습니다. 배송지를 다시 선택해 주세요.":
+    "The selected shipping address could not be found. Choose the address again.",
+  "배송지 저장소가 아직 준비되지 않았습니다. 잠시 후 다시 시도해 주세요.":
+    "The shipping address store is not ready yet. Please try again shortly.",
+  "주문 저장소 설정이 아직 완료되지 않았습니다. 관리자에게 주문 저장 환경 구성을 확인해 주세요.":
+    "Order storage is not fully configured yet. Ask the administrator to verify the order storage setup.",
+  "배송지와 개인정보 확인 항목을 모두 체크한 뒤 결제를 진행해 주세요.":
+    "Check all shipping and personal information confirmations before continuing.",
+  "결제 전 확인한 정보와 현재 저장된 배송지가 달라졌습니다. 배송지를 다시 확인해 주세요.":
+    "Your saved shipping address changed after verification. Please review it again.",
+  "결제 설정이 아직 완료되지 않았습니다. 관리자에게 결제 키 설정을 확인해 주세요.":
+    "Payment setup is not complete yet. Ask the administrator to verify the payment keys.",
+  "현재 브라우저 보안 정보가 누락되어 결제를 시작할 수 없습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.":
+    "Required browser security information is missing, so checkout cannot start. Refresh the page and try again.",
+  "결제 이동 주소를 만들지 못했습니다. 잠시 후 다시 시도해 주세요.":
+    "Couldn't build the payment redirect URL. Please try again shortly.",
+  "결제 모듈을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.":
+    "Couldn't load the payment module. Please try again shortly.",
+  "주문서를 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.": "Couldn't create the order sheet. Please try again shortly.",
+  "결제를 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.": "Couldn't start the payment flow. Please try again shortly.",
+  "리뷰는 로그인 후 작성할 수 있습니다.": "Sign in to write a review.",
+  "배송 완료 후 구매 확정까지 마친 주문이 있는 상품만 리뷰를 작성할 수 있습니다.":
+    "Only products with an order that has been delivered and purchase-confirmed can be reviewed.",
+  "배송 완료 후 구매 확정까지 완료한 사용자만 이 상품 리뷰를 작성하거나 수정할 수 있습니다.":
+    "Only users who have completed purchase confirmation after delivery can write or edit a review for this item.",
+  "리뷰 내용을 입력해 주세요.": "Enter your review content.",
+  "리뷰가 저장되었습니다.": "Your review has been saved.",
+  "리뷰 저장소를 아직 사용할 수 없습니다. Supabase shop 확장 마이그레이션을 먼저 적용해 주세요.":
+    "The review store is not available yet. Apply the Supabase shop extension migration first.",
+  "평점과 리뷰 내용을 확인해 주세요.": "Check the rating and review content.",
+  "배송 완료 후 구매 확정이 확인된 사용자만 리뷰를 작성할 수 있습니다.":
+    "Only users with a delivered and purchase-confirmed order can write a review.",
+  "리뷰 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.": "Couldn't save the review. Please try again shortly.",
+  "품절": "Sold out",
+  "잔여 {count}개": "{count} left",
+  "총 결제 금액": "Total payment",
+  "개 리뷰": "reviews",
+  "구매 확인": "Verified purchase",
+  "관련 상품": "Related products",
+  "전체 보기": "View all",
+  "배송비": "Shipping fee",
+  "결제창에서 주문이 취소되었습니다.": "The order was canceled in the payment window.",
+  "결제 승인 전에 주문이 중단되었습니다. 잠시 후 다시 시도해 주세요.":
+    "The order stopped before payment approval. Please try again shortly.",
+  "카드사 승인에 실패했습니다. 결제 수단을 다시 확인해 주세요.": "Card approval failed. Please check your payment method.",
+  "카드 유효기간을 다시 확인해 주세요.": "Please check the card expiration date.",
+  "해당 카드 또는 할부 조건이 지원되지 않습니다.": "This card or installment condition is not supported.",
+  "결제창에서 주문이 취소되었거나 승인에 실패했습니다.": "The order was canceled or approval failed in the payment window.",
+  "주문 실패": "Order failed",
+  "결제가 완료되지 않았습니다.": "Payment was not completed.",
+  "장바구니 보기": "View cart",
+  "검증 후 결제": "Verify & pay",
+  "결제창 여는 중...": "Opening payment window...",
+  "정보 확인 필요": "Confirmation required",
+  "주문 확인": "Order check",
+  "결제 전 배송지와 개인정보를 다시 확인합니다.": "Review your shipping address and personal details before payment.",
+  "선택한 배송지가 현재 주문 정보와 정확히 일치합니다.": "The selected shipping address exactly matches the current order information.",
+  "수령인과 연락처를 다시 확인했고 오배송 위험이 없습니다.":
+    "I rechecked the recipient and contact details, and there is no delivery mismatch risk.",
+  "결제 완료 후 주문 내역에 즉시 반영됩니다. 환불 요청은 주문 상세에서 진행할 수 있고, 리뷰는 구매 확정 이후에만 작성됩니다.":
+    "After payment, your order is added immediately. Refund requests are handled from order details, and reviews are available only after purchase confirmation.",
+  "로그인 확인 후 다시 주문 상태를 불러와 주세요.": "Please confirm your login and reload the order status.",
+  "결제 금액이 주문 정보와 달라 승인할 수 없습니다. 장바구니에서 다시 결제해 주세요.":
+    "The payment amount doesn't match the order details, so it can't be approved. Please pay again from the cart.",
+  "결제할 주문 정보를 찾지 못했습니다. 장바구니에서 다시 시도해 주세요.":
+    "Couldn't find the order to pay for. Please try again from the cart.",
+  "이미 처리되었거나 확인할 수 없는 주문입니다.": "This order has already been processed or can't be confirmed.",
+  "결제 승인 서버와 연결되지 않았습니다. 잠시 후 주문 내역에서 상태를 확인해 주세요.":
+    "Couldn't connect to the payment approval server. Please check the status in your orders shortly.",
+  "결제 승인 후 주문 반영이 지연되고 있습니다. 잠시 후 주문 내역을 다시 확인해 주세요.":
+    "Order finalization is delayed after payment approval. Please check your orders again shortly.",
+  "결제 승인 설정이 아직 완료되지 않았습니다. 관리자에게 확인해 주세요.":
+    "Payment approval configuration is not complete yet. Please contact the administrator.",
+  "결제 승인 응답이 주문 정보와 일치하지 않았습니다. 자동 검증 후 다시 시도해 주세요.":
+    "The payment approval response did not match the order details. Please try again after automatic verification.",
+  "결제사 승인 단계에서 주문이 완료되지 않았습니다. 카드사 승인 내역과 주문 내역을 함께 확인해 주세요.":
+    "The order was not completed during payment-provider approval. Please compare the card approval and order history.",
+  "결제 승인에 실패했습니다. 잠시 후 주문 내역에서 상태를 다시 확인해 주세요.":
+    "Payment approval failed. Please check the status in your orders again shortly.",
+  "결제 승인 파라미터가 올바르지 않습니다.": "The payment approval parameters are invalid.",
+  "결제 승인 처리 중입니다...": "Confirming payment...",
+  "승인 실패": "Approval failed",
+  "주문 상품": "Ordered product",
+  "결제 묶음": "Payment bundle",
+  "상품 종류": "Item types",
+  "총 수량": "Total quantity",
+  "승인 시각": "Approved at",
+  "생성된 주문": "Created orders",
+  "나머지 주문은 주문 내역에서 바로 확인할 수 있습니다.": "You can view the remaining orders directly in your order list.",
+  "다음 상품 이미지": "Next product image",
+  "찜 해제": "Remove from wishlist",
+  "찜하기": "Add to wishlist",
+  "담는 중...": "Adding...",
+  "더보기": "Show more",
+  "접기": "Show less",
+  "로그인 후 계정에 저장한 기본 배송지로 바로 주문할 수 있습니다.":
+    "After signing in, you can order right away using the default address saved to your account.",
+  "구매 안내": "Purchase guide",
+  "결제 안내": "Payment guide",
+  "배송지": "Shipping address",
+  "배송지 선택": "Choose shipping address",
+  "배송지 수정": "Edit shipping address",
+  "배송지 정보를 불러오는 중입니다.": "Loading your shipping information.",
+  "결제 시 선택한 주소": "Address selected for checkout",
+  "계정에서 기본 배송지를 먼저 저장해야 합니다.": "Save a default shipping address in your account first.",
+  "외부 판매처 가격과 재고는 판매처 기준으로 운영되며, 최종 결제 조건은 판매처에서 확인해야 합니다.":
+    "External seller pricing and stock follow the seller's rules, and final payment conditions must be checked there.",
+  "토스 결제로 바로 결제할 수 있으며, 배송비 3,000원은 50,000원 이상 구매 시 자동으로 무료 처리됩니다.":
+    "You can pay directly with Toss Payments, and the KRW 3,000 shipping fee is automatically waived for orders over KRW 50,000.",
+  "판매 준비중": "Preparing for sale",
+  "구매하기": "Buy now",
+  "사용 시점": "Use timing",
+  "구매 정보가 저장되면 여기에 표시됩니다.": "Purchase information will appear here once it is saved.",
+  "아직 등록된 리뷰가 없습니다. 첫 리뷰를 남겨 주세요.": "There are no reviews yet. Be the first to leave one.",
+  "현재 필터 조건에 맞는 리뷰가 없습니다.": "No reviews match the current filters.",
+  "리뷰": "Reviews",
+  "리뷰작성": "Write review",
+  "리뷰 작성": "Write a review",
+  "리뷰 작성 조건": "Review requirements",
+  "리뷰 저장": "Save review",
+  "실제 사용감과 장단점을 남겨 주세요.": "Share your actual experience, pros, and cons.",
+  "한 줄 제목": "One-line title",
+  "저장 중...": "Saving...",
+  "직접검색": "Search reviews",
+  "포토&동영상": "Photos & videos",
+  "별점 전체": "All ratings",
+  "별점 높은순": "Highest rating",
+  "별점 낮은순": "Lowest rating",
+  "5점만": "5 stars only",
+  "4점 이상": "4 stars and up",
+  "3점 이상": "3 stars and up",
+  "2점 이상": "2 stars and up",
+  "1점 이상": "1 star and up",
+  "선택": "Selected",
+  "국내·해외배송": "Domestic / international shipping",
+  "국내배송": "Domestic shipping",
+  "배송방법": "Shipping method",
+  "택배": "Courier",
+  "3,000원 (50,000원 이상 구매 시 무료)": "KRW 3,000 (free over KRW 50,000)",
+  "주문": "Orders",
+  "상품 금액": "Product total",
+  "수량": "Quantity",
+  "종": "types",
+  "예상 결제": "Estimated payment",
+  "장바구니 요약": "Cart summary",
+  "선택 상품": "Selected items",
+  "상품 합계": "Product subtotal",
+  "묶음 배송비": "Bundle shipping",
+  "묶음 결제 총액": "Bundle payment total",
+  "선택한 상품은 1회 결제로 묶어서 승인되며, 주문 내역에는 상품별 주문으로 안전하게 분리 저장됩니다.":
+    "Selected items are approved in a single bundled payment, then safely split into separate orders in your order history.",
+  "선택 상품 묶음 결제": "Pay for selected items together",
+  "장바구니 묶음 결제": "Cart bundle checkout",
+  "이 상품 결제": "Pay for this item",
+  "주문 정보": "Order information",
+  "주문번호": "Order number",
+  "주문일시": "Ordered at",
+  "결제일시": "Paid at",
+  "결제수단": "Payment method",
+  "실패 사유": "Failure reason",
+  "발송일": "Shipped on",
+  "사유 없음": "No reason provided",
+  "환불 요청 접수됨": "Refund request received",
+  "최종 확인": "Final check",
+  "카탈로그를 불러오지 못해 기본 상품 목록으로 보여주고 있습니다.":
+    "Couldn't load the catalog, so the default product list is being shown.",
+  "초기화": "Reset",
+  "바로결제": "Buy now",
+  "상세보기": "View details",
+  "처리 중...": "Processing...",
+  "위시리스트를 정리하는 중입니다.": "Organizing your wishlist.",
+  "장바구니를 정리하는 중입니다.": "Organizing your cart.",
+  "결제 완료": "Paid",
+  "결제 실패": "Payment failed",
+  "결제 단계에서 주문이 완료되지 않았습니다.": "The order did not complete during the payment stage.",
+  "결제 설정이 아직 완료되지 않았습니다. 관리자에게 결제 설정을 확인해 주세요.":
+    "Payment setup is not complete yet. Ask the administrator to verify the payment settings.",
+  "결제 전에 기본 배송지를 먼저 저장해 주세요.": "Save a default shipping address before payment.",
+  "결제 전 확인한 배송지 정보가 변경되었습니다. 다시 확인해 주세요.":
+    "The verified shipping information changed before payment. Please review it again.",
+  "구매가 확정되었습니다. 이제 해당 상품 리뷰를 작성할 수 있습니다.": "Purchase confirmed. You can now write a review for this item.",
+  "구매 확정 처리에 실패했습니다. 잠시 후 다시 시도해 주세요.": "Couldn't complete purchase confirmation. Please try again shortly.",
+  "배송 완료된 주문만 구매 확정할 수 있습니다.": "Only delivered orders can be purchase-confirmed.",
+  "구매 확정 완료": "Purchase confirmed",
+  "구매 확정하기": "Confirm purchase",
+  "구매 확정이 완료되어 이 계정으로 리뷰를 작성할 수 있습니다.": "Purchase confirmation is complete, so this account can now write a review.",
+  "기본 배송지가 없어 주문을 진행할 수 없습니다.": "You cannot place this order without a default shipping address.",
+  "먼저 결제할 상품을 선택해 주세요.": "Select the items you want to pay for first.",
+  "묶음 주문 전체에 환불 요청이 접수되었습니다. 관리자 검토 후 순차 처리됩니다.":
+    "A refund request was submitted for the full bundle order and will be handled after admin review.",
+  "묶음 주문서를 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.": "Couldn't create the bundle order. Please try again shortly.",
+  "민감정보 보호를 위해 배송 정보는 일부 마스킹되어 표시됩니다.": "Some shipping details are masked to protect sensitive information.",
+  "반려됨": "Rejected",
+  "배송 메모": "Delivery note",
+  "배송 조회하기": "Track shipment",
+  "배송지와 수령 정보를 확인한 뒤 구매를 확정하면 리뷰 작성 권한이 활성화됩니다.":
+    "After checking the shipping and recipient details, confirm the purchase to unlock review writing.",
+  "선택한 상품 중 앱 내 결제가 불가능한 상품이 있어 묶음 결제를 진행할 수 없습니다.":
+    "Bundle checkout cannot proceed because one or more selected items do not support in-app checkout.",
+  "선택한 상품 중 앱 내 결제를 지원하지 않는 상품이 있습니다.":
+    "One or more selected items do not support in-app checkout.",
+  "선택한 상품 중 재고가 부족한 상품이 있어 수량을 다시 확인해 주세요.":
+    "One or more selected items have insufficient stock. Please review the quantities.",
+  "선택한 상품 중 품절된 상품이 있어 결제를 진행할 수 없습니다.":
+    "Checkout cannot proceed because one or more selected items are sold out.",
+  "선택한 상품을 장바구니에서 제거했습니다.": "The selected item was removed from your cart.",
+  "선택한 상품이 없어 묶음 결제를 진행할 수 없습니다.": "You cannot continue with bundle checkout because no items are selected.",
+  "수령인": "Recipient",
+  "연락처": "Contact",
+  "요청 사유": "Request reason",
+  "우편번호": "Postal code",
+  "운송장번호": "Tracking number",
+  "이 상품은 앱 내 결제를 지원하지 않습니다.": "This item does not support in-app checkout.",
+  "장바구니 구성이 변경되었습니다. 다시 선택한 뒤 결제를 시도해 주세요.":
+    "Your cart changed. Select your items again and retry checkout.",
+  "장바구니 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.": "Couldn't load your cart. Please try again shortly.",
+  "장바구니를 비우지 못했습니다. 잠시 후 다시 시도해 주세요.": "Couldn't clear your cart. Please try again shortly.",
+  "장바구니를 비웠습니다.": "Your cart has been cleared.",
+  "주문 내역 페이지에서 접수한 환불 요청": "Refund request submitted from the orders page",
+  "주문 상세에서 접수한 환불 요청": "Refund request submitted from the order detail page",
+  "주문 접수": "Order received",
+  "주문 정보를 불러오지 못했습니다.": "Couldn't load the order details.",
+  "주문 진행 상태": "Order progress",
+  "주문이 취소되어 후속 배송이 진행되지 않습니다.": "This order was canceled, so no follow-up shipping will proceed.",
+  "주소": "Address",
+  "처리 메모": "Processing note",
+  "택배사": "Courier",
+  "품절된 상품은 주문할 수 없습니다.": "Sold-out items cannot be ordered.",
+  "확정일시": "Confirmed at",
+  "환불 상태": "Refund status",
+  "환불 요청": "Refund requested",
+  "환불 요청에 실패했습니다. 잠시 후 다시 시도해 주세요.": "Couldn't submit the refund request. Please try again shortly.",
+  "환불 요청이 접수되었습니다. 관리자 검토 후 처리됩니다.": "Your refund request has been submitted and will be processed after admin review.",
+  "환불 요청하기": "Request refund",
+  "검토 중": "Under review",
+
+  "기본 회복 루틴": "Basic recovery routine",
+  "오늘 상태와 무관하게 매일 부담 없이 쓰는 기본 회복 아이템이에요.":
+    "These are easy everyday recovery items you can use regardless of today's condition.",
+  "야간 근무 대비": "Night-shift prep",
+  "오늘 근무가 야간이라 수면 리듬 보호와 각성 피로 관리가 중요해요.":
+    "You are on a night shift today, so protecting your sleep rhythm and managing alertness fatigue matters.",
+  "긴 근무 대비": "Long-shift support",
+  "오늘 근무가 있는 날이라 오래 쓰기 편한 회복 보조 아이템을 먼저 봐야 해요.":
+    "Since you are working today, it's better to start with recovery items that stay comfortable for long hours.",
+  "수면 보완": "Sleep support",
+  "오늘 수면 시간이 낮아 회복 루틴을 더 부드럽게 잡아주는 쪽이 좋아요.":
+    "Your sleep time is lower today, so gentler recovery support is recommended.",
+  "긴장 완화": "Stress relief",
+  "스트레스 입력이 높아 바로 쉬는 감각을 주는 아이템 우선순위가 올라가요.":
+    "Your stress input is high, so items that help you unwind quickly move up in priority.",
+  "수분 보강": "Hydration support",
+  "카페인 섭취가 높아 수분 보강과 루틴 보조가 같이 필요해요.":
+    "Your caffeine intake is high, so hydration support and routine balance are both needed.",
+  "생리 기간 보조": "Period support",
+  "생리 기간 또는 통증 강도가 있어 온열과 부담 완화 중심으로 보는 편이 좋아요.":
+    "Because of your cycle or symptom intensity, warmth and comfort-focused items fit better.",
+  "생리 전 컨디션 관리": "Pre-period balance",
+  "생리 직전 구간이라 컨디션 변동을 줄여주는 편안한 아이템이 맞아요.":
+    "You are in the pre-period window, so calming items that reduce condition swings are a better fit.",
+  "근육 긴장 완화": "Muscle tension relief",
+  "활동량 또는 근무 이벤트 입력이 있어 목·어깨·다리 부담을 낮추는 쪽이 좋아요.":
+    "Your activity or work input suggests reducing neck, shoulder, and leg strain.",
+  "눈 피로 관리": "Eye fatigue care",
+  "야간/미들/이브닝 근무 흐름이라 눈 피로를 줄이는 루틴이 잘 맞아요.":
+    "Your night/middle/evening shift flow fits routines that help reduce eye fatigue.",
+  "오늘 추천부터": "Start with today's picks",
+  "수면": "Sleep",
+  "야간 전후 루틴": "Before/after night shift",
+  "수분": "Hydration",
+  "카페인 밸런스": "Caffeine balance",
+  "피로완화": "Comfort",
+  "목·눈·긴장": "Neck, eyes, tension",
+  "온열": "Warmth",
+  "복부·순환": "Abdomen, circulation",
+  "간편영양": "Quick nutrition",
+  "근무 중 보충": "On-shift refuel",
+  "근무용품": "Work gear",
+  "오래 쓰는 편의": "Long-wear comfort",
+  "이 제품은": "This product",
+  "핵심 포인트": "Key points",
+  "이럴 때 보기 좋아요": "Best for these moments",
+  "구매 전 안내": "Before you buy",
+
+  "온열 아이 마스크": "Heated eye mask",
+  "야간 후 눈 피로와 잠들기 전 루틴을 가볍게 정리하는 기본 아이템":
+    "A basic item for easing eye fatigue after night shifts and winding down before sleep.",
+  "눈 피로 완화와 취침 전 루틴 정리를 같이 엮는 가장 기본적인 회복 카테고리입니다.":
+    "A core recovery category that pairs eye fatigue relief with a calm pre-sleep routine.",
+  "수면 파트너 연동 준비중": "Sleep partner integration in progress",
+  "제휴 가격 연동 예정": "Partner pricing coming soon",
+  "제휴 검수 전 단계": "Pending partner review",
+  "제휴 파트너 연동 준비중": "Partner integration in progress",
+  "수면 루틴": "Sleep routine",
+  "눈 피로": "Eye fatigue",
+  "야간 후 정리": "Post-night-shift reset",
+  "야간 근무 후 바로 쉬기 전": "Right before resting after a night shift",
+  "잠들기 20~30분 전": "20-30 minutes before sleep",
+  "눈이 뻐근한 날 짧게": "Briefly on days when your eyes feel strained",
+  "의료기기 대체가 아니라 편안한 루틴 보조용으로만 안내합니다.":
+    "This is not a medical-device substitute and is recommended only as a comfort routine aid.",
+
+  "보온 텀블러": "Insulated tumbler",
+  "근무 중 수분 루틴을 끊기지 않게 유지하는 데 초점을 둔 기본 장비":
+    "A core item focused on keeping your hydration routine steady during work.",
+  "카페인 섭취가 있는 날에도 물 섭취 루틴을 유지하기 쉽게 돕는 상시형 아이템입니다.":
+    "A daily-use item that helps maintain water intake even on higher-caffeine days.",
+  "리빙 파트너 연동 준비중": "Lifestyle partner integration in progress",
+  "상품 피드 등록 준비중": "Product feed setup in progress",
+  "수분 루틴": "Hydration routine",
+  "긴 근무": "Long shift",
+  "근무 시작 전 준비": "Before starting your shift",
+  "긴 근무 중 자리 이동": "While moving around during a long shift",
+  "카페인 섭취 후 물 보강": "Rehydrating after caffeine intake",
+  "가격과 구성은 판매처 기준으로 최종 확인이 필요합니다.": "Final pricing and package details should be confirmed with the seller.",
+
+  "압박 양말": "Compression socks",
+  "오래 서 있는 날 다리 부담을 줄이는 쪽에 맞춘 근무 보조 아이템":
+    "A work-support item designed to reduce leg strain on long standing days.",
+  "장시간 서 있거나 많이 걷는 날 다리 부담을 낮추는 보조형 카테고리입니다.":
+    "A support category that helps ease leg strain on days with prolonged standing or walking.",
+  "근무용품 파트너 연동 준비중": "Work gear partner integration in progress",
+  "제휴 협의중": "Partner review in progress",
+  "다리 부담": "Leg strain",
+  "근무 편의": "Work comfort",
+  "연속 근무 첫날": "First day of consecutive shifts",
+  "오래 서 있는 날": "On long standing days",
+  "퇴근 후 붓기 관리 루틴": "Post-shift swelling care routine",
+  "압박 강도와 착용 시간은 개인 상태에 맞춰 조절해야 합니다.": "Adjust compression level and wear time to your own condition.",
+
+  "복부 온열 패드": "Abdominal heating pad",
+  "생리 기간이나 직전 컨디션 변동을 부드럽게 넘기도록 돕는 온열 루틴용":
+    "A warmth routine item that helps you move through period days or pre-period fluctuations more comfortably.",
+  "복부와 하체의 부담이 있는 날에 온열 루틴으로 편안함을 더하는 카테고리입니다.":
+    "A warmth-focused category that adds comfort on days with abdominal or lower-body strain.",
+  "웰니스 파트너 연동 준비중": "Wellness partner integration in progress",
+  "생리 기간": "Period",
+  "생리 첫날": "First day of your period",
+  "PMS 구간": "PMS window",
+  "퇴근 후 바로 쉬는 시간": "Downtime right after work",
+  "온열 강도와 사용 시간은 피부 상태에 맞춰 조절해야 합니다.": "Adjust warmth intensity and usage time to your skin condition.",
+
+  "간편 단백질 스낵": "Quick protein snack",
+  "식사 텀이 긴 날 빠르게 에너지를 보충하는 쪽에 맞춘 간편 루틴":
+    "A quick routine option for fast energy on days when meals are spaced far apart.",
+  "식사 간격이 길어질 때 빠르게 보충하기 쉬운 휴대형 카테고리입니다.":
+    "A portable category that is easy to use when meal gaps become long.",
+  "뉴트리션 파트너 연동 준비중": "Nutrition partner integration in progress",
+  "간편 보충": "Quick refuel",
+  "빠른 섭취": "Fast intake",
+  "식사 텀이 긴 날": "On days with long meal gaps",
+  "야간 전 간단 보충": "A light refuel before a night shift",
+  "브레이크가 짧은 근무일": "On workdays with short breaks",
+  "영양 정보와 알레르기 유발 성분은 판매처 상세를 확인해야 합니다.":
+    "Nutrition facts and allergen details should be checked on the seller's page.",
+
+  "목·어깨 온열 쿠션": "Neck & shoulder heating cushion",
+  "긴장감이 높은 날 목과 어깨 부담을 잠깐씩 풀어주는 회복 보조용":
+    "A recovery aid that briefly eases neck and shoulder strain on high-tension days.",
+  "근육 긴장과 피로가 겹치는 날 잠깐 쉬는 시간을 회복 루틴으로 바꾸는 카테고리입니다.":
+    "A category that turns short breaks into recovery routines on days with both fatigue and muscle tension.",
+  "컴포트 파트너 연동 준비중": "Comfort partner integration in progress",
+  "목·어깨": "Neck & shoulders",
+  "퇴근 후 회복": "Post-shift recovery",
+  "퇴근 후 10분 루틴": "A 10-minute routine after work",
+  "스트레스가 높은 날": "On high-stress days",
+  "목과 어깨가 굳는 날": "On days when your neck and shoulders feel stiff",
+  "심한 통증이 있으면 일반 생활용품보다 전문 진료 판단이 우선입니다.":
+    "If pain is severe, professional medical evaluation should come before general lifestyle products.",
+
+  "블루라이트 차단 안경": "Blue-light blocking glasses",
+  "야간 또는 저녁 근무 후 눈 자극을 줄이는 데 초점을 둔 가벼운 보조용":
+    "A light accessory focused on reducing eye stimulation after night or evening shifts.",
+  "밝은 조명과 화면 자극이 많은 흐름에서 눈 부담을 덜어주는 보조형 카테고리입니다.":
+    "A support category that helps reduce eye strain in bright-light and screen-heavy routines.",
+  "아이케어 파트너 연동 준비중": "Eye-care partner integration in progress",
+  "야간 루틴": "Night routine",
+  "조명 자극 완화": "Light stimulation relief",
+  "야간 근무 전": "Before a night shift",
+  "퇴근 후 화면을 볼 때": "When looking at screens after work",
+  "눈 피로가 누적된 날": "On days when eye fatigue has built up",
+  "시력 보정이 필요한 경우 전문 안경 렌즈 기준으로 별도 확인이 필요합니다.":
+    "If vision correction is needed, check separately with prescription lens guidance.",
+
+  "무카페인 릴렉스 티": "Caffeine-free relax tea",
+  "긴장도가 높거나 수면이 흔들리는 날 밤 루틴을 정리하는 데 맞춘 선택지":
+    "An option designed to settle your evening routine on tense days or when sleep feels off.",
+  "밤 루틴을 부드럽게 정리하면서 심리적으로 마무리 신호를 주는 카테고리입니다.":
+    "A category that gently closes the night routine and gives a calming sense of closure.",
+  "티 파트너 연동 준비중": "Tea partner integration in progress",
+  "취침 전 루틴": "Before-bed routine",
+  "무카페인": "Caffeine-free",
+  "잠들기 전 1시간": "1 hour before sleep",
+  "긴장도가 높은 저녁": "On tense evenings",
+  "PMS 구간의 밤 루틴": "Night routine during the PMS window",
+  "식품 선택은 개인 기호와 성분 확인 기준으로 결정해야 합니다.": "Food choices should be based on your preference and ingredient review.",
+};
+
+const EN: Record<string, string> = { ...EN_BASE, ...EN_EXTRA, ...SHOP_EN_EXTRA };
 
 let currentLang: Language = "ko";
 
