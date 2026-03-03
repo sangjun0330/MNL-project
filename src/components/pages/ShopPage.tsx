@@ -247,22 +247,22 @@ export function ShopPage() {
       </div>
 
       {/* 헤더 */}
-      <div className="border-b border-[#edf1f6] bg-white px-4 py-4">
-        <div className="relative flex items-center justify-between gap-3">
+      <div className="border-b border-[#edf1f6] bg-white px-4 py-3">
+        <div className="relative flex items-center justify-between gap-2">
           <ShopLanguageSwitcher />
           <Link href="/shop" data-auth-allow className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
-            <ShopBrandLogo className="h-12 w-[190px]" />
+            <ShopBrandLogo className="h-10 w-[158px]" />
           </Link>
-          <div className="ml-auto flex items-center gap-1">
-          <Link href="/shop/wishlist" data-auth-allow className="inline-flex h-11 w-11 items-center justify-center text-[#111827]" aria-label={t("찜한 상품")}>
-            <WishlistIcon />
-          </Link>
-          <Link href="/shop/cart" data-auth-allow className="inline-flex h-11 w-11 items-center justify-center text-[#111827]" aria-label={t("장바구니")}>
-            <CartIcon />
-          </Link>
-          <Link href="/shop/profile" data-auth-allow className="inline-flex h-11 w-11 items-center justify-center text-[#111827]" aria-label={t("쇼핑 프로필")}>
-            <ProfileIcon />
-          </Link>
+          <div className="ml-auto flex items-center gap-0.5">
+            <Link href="/shop/wishlist" data-auth-allow className="inline-flex h-10 w-10 items-center justify-center text-[#111827]" aria-label={t("찜한 상품")}>
+              <WishlistIcon />
+            </Link>
+            <Link href="/shop/cart" data-auth-allow className="inline-flex h-10 w-10 items-center justify-center text-[#111827]" aria-label={t("장바구니")}>
+              <CartIcon />
+            </Link>
+            <Link href="/shop/profile" data-auth-allow className="inline-flex h-10 w-10 items-center justify-center text-[#111827]" aria-label={t("쇼핑 프로필")}>
+              <ProfileIcon />
+            </Link>
           </div>
         </div>
       </div>

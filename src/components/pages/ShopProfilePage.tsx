@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useAuthState } from "@/lib/auth";
 import { authHeaders } from "@/lib/billing/client";
-import { maskShopAddressLine, maskShopEmail, maskShopPhone, maskShopRecipientName } from "@/lib/shopPrivacy";
+import { maskShopAddressLine, maskShopEmail } from "@/lib/shopPrivacy";
 import { formatShopShippingSingleLine, resolveDefaultShopShippingAddress, type ShopShippingAddress } from "@/lib/shopProfile";
 import { getCart, getWishlist } from "@/lib/shopClient";
 import { SHOP_BUTTON_PRIMARY } from "@/lib/shopUi";
@@ -23,7 +23,7 @@ type ShopProfileResponse = {
 };
 
 const PROFILE_LINK_ROW =
-  "flex items-center justify-between gap-4 rounded-[24px] border-2 border-[#bfd0e1] bg-[#eef4fb] px-4 py-4 transition hover:border-[#17324d] hover:bg-[#dfe8f1]";
+  "flex items-center justify-between gap-4 rounded-[22px] border border-[#d9e2ec] bg-[#f8fbfd] px-4 py-4 transition hover:border-[#b8c8d9] hover:bg-white";
 
 export function ShopProfilePage() {
   const { t } = useI18n();
@@ -113,56 +113,27 @@ export function ShopProfilePage() {
     () => orders.filter((order) => order.status === "DELIVERED" && !order.purchaseConfirmedAt).length,
     [orders]
   );
-  const confirmedCount = useMemo(
-    () => orders.filter((order) => Boolean(order.purchaseConfirmedAt)).length,
-    [orders]
-  );
-
-  const orderLinks = [
+  const hubLinks = [
     {
       href: "/shop/orders",
-      title: t("주문 목록"),
-      description: loading ? "주문 내역을 정리하는 중입니다." : `${orders.length}건의 주문과 환불 요청을 확인합니다.`,
-    },
-    {
-      href: "/shop/orders?filter=progress",
-      title: t("배송 현황"),
+      title: "주문 · 배송",
       description: loading
-        ? "배송 진행 상태를 정리하는 중입니다."
-        : inProgressCount > 0
-          ? `${inProgressCount}건이 결제 또는 배송 단계에 있습니다.`
-          : "현재 진행 중인 배송이 없습니다.",
+        ? "주문과 배송 상태를 정리하는 중입니다."
+        : `${orders.length}건 주문 · 진행 ${inProgressCount}건 · 구매 확정 대기 ${confirmPendingCount}건`,
     },
     {
-      href: "/shop/orders?filter=delivered",
-      title: t("구매 확정"),
+      href: "/shop/profile/saved",
+      title: "보관함",
       description: loading
-        ? "구매 확정 대상을 확인하는 중입니다."
-        : confirmPendingCount > 0
-          ? `${confirmPendingCount}건이 구매 확정을 기다리고 있습니다.`
-          : confirmedCount > 0
-            ? `${confirmedCount}건의 구매 확정이 완료되었습니다.`
-            : "배송 완료 후 구매 확정을 진행하면 리뷰 권한이 열립니다.",
-    },
-  ];
-
-  const accountLinks = [
-    {
-      href: "/shop/cart",
-      title: t("장바구니"),
-      description: loading ? "담아둔 상품을 정리하는 중입니다." : `${cartCount}개 상품이 계정 장바구니에 저장되어 있습니다.`,
+        ? "장바구니와 위시리스트를 정리하는 중입니다."
+        : `장바구니 ${cartCount}개 · 위시리스트 ${wishlistIds.length}개`,
     },
     {
-      href: "/shop/wishlist",
-      title: t("위시리스트"),
-      description: loading ? "계정 저장 상태를 확인하는 중입니다." : `${wishlistIds.length}개 상품이 계정에 저장되어 있습니다.`,
-    },
-    {
-      href: "/settings/account/shipping",
-      title: t("배송지 설정"),
+      href: "/shop/profile/account",
+      title: "배송지 · 계정",
       description: defaultAddress
         ? `${defaultAddress.label} · ${maskShopAddressLine(formatShopShippingSingleLine(defaultAddress))}`
-        : "기본 배송지를 먼저 저장해 주세요.",
+        : "배송지와 주문 전 확인 정보를 관리합니다.",
     },
   ];
 
@@ -189,22 +160,13 @@ export function ShopProfilePage() {
           </div>
         ) : (
           <>
-            <div className="rounded-[28px] bg-[#102a43] p-5 text-white shadow-[0_24px_64px_rgba(16,42,67,0.16)]">
+            <div className="rounded-[28px] bg-[#102a43] px-5 py-5 text-white shadow-[0_18px_46px_rgba(16,42,67,0.12)]">
               <div className="text-[12px] font-semibold uppercase tracking-[0.18em] text-white/70">{t("계정")}</div>
-              <div className="mt-3 text-[24px] font-bold tracking-[-0.03em]">{maskShopEmail(user?.email)}</div>
-              <div className="mt-3 grid gap-3 md:grid-cols-3">
-                <div className="rounded-2xl border border-white/10 bg-white/10 px-4 py-3">
-                  <div className="text-[11px] text-white/70">진행 중 배송</div>
-                  <div className="mt-1 text-[18px] font-bold">{loading ? "-" : inProgressCount}</div>
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-white/10 px-4 py-3">
-                  <div className="text-[11px] text-white/70">구매 확정 대기</div>
-                  <div className="mt-1 text-[18px] font-bold">{loading ? "-" : confirmPendingCount}</div>
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-white/10 px-4 py-3">
-                  <div className="text-[11px] text-white/70">위시리스트</div>
-                  <div className="mt-1 text-[18px] font-bold">{loading ? "-" : wishlistIds.length}</div>
-                </div>
+              <div className="mt-2 text-[22px] font-bold tracking-[-0.03em]">{maskShopEmail(user?.email)}</div>
+              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-[12px] text-white/78">
+                <span>주문 {loading ? "-" : orders.length}</span>
+                <span>배송 중 {loading ? "-" : inProgressCount}</span>
+                <span>보관 {loading ? "-" : cartCount + wishlistIds.length}</span>
               </div>
             </div>
 
@@ -214,37 +176,10 @@ export function ShopProfilePage() {
               </div>
             ) : null}
 
-            <div className="rounded-[28px] border border-[#dbe4ef] bg-white p-5">
-              <div className="text-[15px] font-bold text-[#102a43]">{t("쇼핑 개인정보")}</div>
-              <div className="mt-4 grid gap-3 md:grid-cols-[1.15fr_0.85fr]">
-                <div className="rounded-[24px] border-2 border-[#bfd0e1] bg-[#eef4fb] px-4 py-4 text-[13px] text-[#44556d]">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#8092a8]">기본 배송지</div>
-                  {defaultAddress ? (
-                    <>
-                      <div className="mt-2 text-[14px] font-semibold text-[#102a43]">{maskShopRecipientName(defaultAddress.recipientName)}</div>
-                      <div className="mt-1">{maskShopPhone(defaultAddress.phone)}</div>
-                      <div className="mt-1 leading-6">{maskShopAddressLine(formatShopShippingSingleLine(defaultAddress))}</div>
-                    </>
-                  ) : (
-                    <div className="mt-2 leading-6">저장된 기본 배송지가 없습니다. 결제 전에 배송지를 먼저 등록해 주세요.</div>
-                  )}
-                </div>
-                <div className="rounded-[24px] border-2 border-[#bfd0e1] bg-[#eef4fb] px-4 py-4 text-[12.5px] leading-6 text-[#44556d]">
-                  결제 전에는 배송지와 연락처를 다시 확인한 뒤 진행하고, 배송 완료 후 구매 확정을 마쳐야 리뷰 권한이 활성화됩니다.
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-[28px] border border-[#dbe4ef] bg-white p-5">
-              <div className="text-[14px] font-bold text-[#102a43]">{t("주문 관리")}</div>
-              <div className="mt-3 grid gap-3">
-                {orderLinks.map((item) => (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    data-auth-allow
-                    className={PROFILE_LINK_ROW}
-                  >
+            <div className="rounded-[28px] border border-[#dbe4ef] bg-white p-4">
+              <div className="grid gap-3">
+                {hubLinks.map((item) => (
+                  <Link key={item.href} href={item.href} data-auth-allow className={PROFILE_LINK_ROW}>
                     <div className="min-w-0">
                       <div className="text-[14px] font-semibold text-[#102a43]">{item.title}</div>
                       <div className="mt-1 text-[12px] leading-5 text-[#61758a]">{item.description}</div>
@@ -255,24 +190,8 @@ export function ShopProfilePage() {
               </div>
             </div>
 
-            <div className="rounded-[28px] border border-[#dbe4ef] bg-white p-5">
-              <div className="text-[14px] font-bold text-[#102a43]">{t("보관함과 배송")}</div>
-              <div className="mt-3 grid gap-3">
-                {accountLinks.map((item) => (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    data-auth-allow
-                    className={PROFILE_LINK_ROW}
-                  >
-                    <div className="min-w-0">
-                      <div className="text-[14px] font-semibold text-[#102a43]">{item.title}</div>
-                      <div className="mt-1 text-[12px] leading-5 text-[#61758a]">{item.description}</div>
-                    </div>
-                    <span className="shrink-0 text-[18px] text-[#8ca0b3]">›</span>
-                  </Link>
-                ))}
-              </div>
+            <div className="px-1 text-[12px] leading-6 text-[#61758a]">
+              배송, 환불, 구매 확정, 장바구니, 위시리스트, 배송지 정보는 각 상세 허브에서 정리해서 확인할 수 있습니다.
             </div>
           </>
         )}
