@@ -200,7 +200,7 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
         body: JSON.stringify({ orderId: order.orderId, reason: t("주문 상세에서 접수한 환불 요청") }),
       });
       const json = await res.json().catch(() => null);
-      if (!res.ok || !json?.ok) throw new Error();
+      if (!res.ok || !json?.ok) throw new Error(String(json?.error ?? `http_${res.status}`));
       setOrder(json.data.order as ShopOrderDetail);
       setActionTone("notice");
       setActionMessage(
@@ -208,9 +208,14 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
           ? t("묶음 주문 전체에 환불 요청이 접수되었습니다. 관리자 검토 후 순차 처리됩니다.")
           : t("환불 요청이 접수되었습니다. 관리자 검토 후 처리됩니다.")
       );
-    } catch {
+    } catch (error: any) {
+      const code = String(error?.message ?? "");
       setActionTone("error");
-      setActionMessage(t("환불 요청에 실패했습니다. 잠시 후 다시 시도해 주세요."));
+      if (code.includes("shop_order_storage_unavailable")) {
+        setActionMessage(t("주문 저장소 설정이 아직 완료되지 않았습니다. 관리자에게 주문 저장 환경 구성을 확인해 주세요."));
+      } else {
+        setActionMessage(t("환불 요청에 실패했습니다. 잠시 후 다시 시도해 주세요."));
+      }
     } finally {
       setActionLoading(null);
     }
@@ -237,6 +242,8 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
       setActionTone("error");
       if (code.includes("not_delivered")) {
         setActionMessage(t("배송 완료된 주문만 구매 확정할 수 있습니다."));
+      } else if (code.includes("shop_order_storage_unavailable")) {
+        setActionMessage(t("주문 저장소 설정이 아직 완료되지 않았습니다. 관리자에게 주문 저장 환경 구성을 확인해 주세요."));
       } else {
         setActionMessage(t("구매 확정 처리에 실패했습니다. 잠시 후 다시 시도해 주세요."));
       }

@@ -1160,12 +1160,17 @@ export function ShopAdminPage() {
         }),
       });
       const json = await res.json().catch(() => null);
-      if (!res.ok || !json?.ok) throw new Error();
+      if (!res.ok || !json?.ok) throw new Error(String(json?.error ?? `http_${res.status}`));
       const nextOrder = json.data.order as ShopAdminOrderSummary;
       setOrders((cur) => [nextOrder, ...cur.filter((o) => o.orderId !== nextOrder.orderId)].slice(0, 20));
       showNotice("notice", action === "approve" ? "환불을 승인했습니다." : "환불 요청을 반려했습니다.");
-    } catch {
-      showNotice("error", "환불 처리에 실패했습니다.");
+    } catch (error: any) {
+      const message = String(error?.message ?? "");
+      if (message === "shop_order_storage_unavailable") {
+        showNotice("error", "주문 저장소 또는 스키마가 아직 완전히 준비되지 않았습니다. 쇼핑 DB 마이그레이션 상태를 확인해 주세요.");
+      } else {
+        showNotice("error", "환불 처리에 실패했습니다.");
+      }
     } finally {
       setRefundLoadingId(null);
     }

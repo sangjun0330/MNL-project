@@ -264,7 +264,11 @@ export async function POST(req: Request) {
       message.toLowerCase().includes("supabase admin env missing") ||
       message.toLowerCase().includes("schema cache") ||
       message.toLowerCase().includes("shop_orders") ||
-      message.toLowerCase().includes("shop_customer_profiles")
+      message.toLowerCase().includes("shop_customer_profiles") ||
+      message.toLowerCase().includes("rnest_user_state") ||
+      message.toLowerCase().includes("rnest_users") ||
+      message.toLowerCase().includes("ai_content") ||
+      message.toLowerCase().includes("foreign key")
     ) {
       return jsonNoStore({ ok: false, error: "shop_order_storage_unavailable" }, { status: 503 });
     }

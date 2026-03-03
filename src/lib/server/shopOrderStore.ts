@@ -10,6 +10,7 @@ import type { Database, Json } from "@/types/supabase";
 
 const SHOP_ORDER_PREFIX = "__shop_order__";
 const SHOP_ORDER_LANGUAGE = "ko";
+const SHOP_ORDER_STATE_KEY = "shopOrders";
 const MAX_LIST_SCAN = 240;
 
 type ShopOrderRow = Database["public"]["Tables"]["shop_orders"]["Row"];
@@ -118,6 +119,10 @@ function orderRowKey(orderId: string) {
 
 function cleanText(value: unknown, max = 220) {
   return String(value ?? "").trim().slice(0, max);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function sanitizeReason(value: unknown) {
@@ -303,6 +308,12 @@ function isStorageUnavailableError(error: unknown) {
   return message.includes("supabase admin env missing");
 }
 
+function isForeignKeyError(error: unknown) {
+  const code = String((error as { code?: unknown } | null)?.code ?? "").trim();
+  const message = String((error as { message?: unknown } | null)?.message ?? "").toLowerCase();
+  return code === "23503" || message.includes("foreign key");
+}
+
 function toTimestamp(value: string | null | undefined) {
   const time = new Date(String(value ?? "")).getTime();
   if (!Number.isFinite(time)) return 0;
@@ -313,6 +324,34 @@ function preferLatestOrder(a: ShopOrderRecord | null, b: ShopOrderRecord | null)
   if (!a) return b;
   if (!b) return a;
   return toTimestamp(b.updatedAt) >= toTimestamp(a.updatedAt) ? b : a;
+}
+
+function normalizeStoredOrderMap(value: unknown): Record<string, ShopOrderRecord> {
+  if (!isRecord(value)) return {};
+
+  const next: Record<string, ShopOrderRecord> = {};
+  for (const [orderId, raw] of Object.entries(value).slice(0, MAX_LIST_SCAN)) {
+    const safeOrderId = cleanText(orderId, 80);
+    const order = normalizeLegacyOrder(raw);
+    if (!safeOrderId || !order) continue;
+    next[safeOrderId] = order;
+  }
+  return next;
+}
+
+function serializeStoredOrderMap(map: Record<string, ShopOrderRecord>): Json {
+  const payload: Record<string, Json> = {};
+  for (const [orderId, order] of Object.entries(map)) {
+    const safeOrderId = cleanText(orderId, 80);
+    if (!safeOrderId) continue;
+    payload[safeOrderId] = buildPayload(order) as unknown as Json;
+  }
+  return payload as Json;
+}
+
+function extractStateStoredOrders(payload: unknown): ShopOrderRecord[] {
+  if (!isRecord(payload)) return [];
+  return Object.values(normalizeStoredOrderMap(payload[SHOP_ORDER_STATE_KEY]));
 }
 
 function toProductSnapshotJson(snapshot: ShopOrderRecord["productSnapshot"]): Json {
@@ -404,7 +443,7 @@ function fromShopOrderRow(row: ShopOrderRow | null): ShopOrderRecord | null {
   };
 }
 
-async function writeLegacyOrder(order: ShopOrderRecord) {
+async function writeLegacyOrderBySyntheticKey(order: ShopOrderRecord) {
   const admin = getSupabaseAdmin();
   const now = new Date().toISOString();
   const nextOrder = {
@@ -425,6 +464,54 @@ async function writeLegacyOrder(order: ShopOrderRecord) {
   return nextOrder;
 }
 
+async function writeLegacyOrderByUserState(order: ShopOrderRecord) {
+  const now = new Date().toISOString();
+  const nextOrder = {
+    ...order,
+    updatedAt: now,
+  };
+
+  const existingRow = await loadUserState(order.userId);
+  const currentPayload = isRecord(existingRow?.payload) ? existingRow.payload : {};
+  const currentMap = normalizeStoredOrderMap(currentPayload[SHOP_ORDER_STATE_KEY]);
+
+  await saveUserState({
+    userId: order.userId,
+    payload: {
+      ...currentPayload,
+      [SHOP_ORDER_STATE_KEY]: serializeStoredOrderMap({
+        ...currentMap,
+        [nextOrder.orderId]: nextOrder,
+      }),
+    },
+  });
+
+  return nextOrder;
+}
+
+async function writeLegacyOrder(order: ShopOrderRecord) {
+  try {
+    return await writeLegacyOrderByUserState(order);
+  } catch (stateError) {
+    try {
+      return await writeLegacyOrderBySyntheticKey(order);
+    } catch (legacyError) {
+      if (isStorageUnavailableError(stateError) || isStorageUnavailableError(legacyError)) {
+        throw new Error("shop_order_storage_unavailable");
+      }
+      if (
+        isMissingTableError(stateError, "rnest_user_state") ||
+        isMissingTableError(stateError, "rnest_users") ||
+        isMissingTableError(legacyError, "ai_content") ||
+        isForeignKeyError(legacyError)
+      ) {
+        throw new Error("shop_order_storage_unavailable");
+      }
+      throw stateError;
+    }
+  }
+}
+
 async function writeModernOrder(order: ShopOrderRecord) {
   const admin = getSupabaseAdmin();
   const now = new Date().toISOString();
@@ -441,19 +528,19 @@ async function writeOrder(order: ShopOrderRecord) {
   try {
     return await writeModernOrder(order);
   } catch (error) {
-    if (!isMissingTableError(error, "shop_orders")) {
-      if (isStorageUnavailableError(error)) {
-        throw new Error("shop_order_storage_unavailable");
-      }
-      throw error;
-    }
     try {
       return await writeLegacyOrder(order);
     } catch (legacyError) {
+      if (isStorageUnavailableError(error) || isStorageUnavailableError(legacyError)) {
+        throw new Error("shop_order_storage_unavailable");
+      }
+      if (isMissingTableError(error, "shop_orders")) {
+        throw legacyError;
+      }
       if (isStorageUnavailableError(legacyError)) {
         throw new Error("shop_order_storage_unavailable");
       }
-      throw legacyError;
+      throw error;
     }
   }
 }
@@ -472,7 +559,18 @@ async function readLegacyOrderByKey(syntheticKey: string): Promise<ShopOrderReco
 }
 
 async function readLegacyOrder(orderId: string) {
-  return readLegacyOrderByKey(orderRowKey(orderId));
+  try {
+    const direct = await readLegacyOrderByKey(orderRowKey(orderId));
+    if (direct) return direct;
+  } catch {
+    // continue to newer fallback stores
+  }
+
+  const safeOrderId = cleanText(orderId, 80);
+  if (!safeOrderId) return null;
+
+  const rows = await listLegacyShopOrderRows(MAX_LIST_SCAN);
+  return rows.find((row) => row.orderId === safeOrderId) ?? null;
 }
 
 async function readModernOrder(orderId: string): Promise<ShopOrderRecord | null> {
@@ -486,8 +584,8 @@ async function readOrderInternal(orderId: string) {
   let modern: ShopOrderRecord | null = null;
   try {
     modern = await readModernOrder(orderId);
-  } catch (error) {
-    if (!isMissingTableError(error, "shop_orders")) throw error;
+  } catch {
+    modern = null;
   }
 
   let legacy: ShopOrderRecord | null = null;
@@ -500,7 +598,7 @@ async function readOrderInternal(orderId: string) {
   return preferLatestOrder(modern, legacy);
 }
 
-async function listLegacyShopOrderRows(limit: number): Promise<ShopOrderRecord[]> {
+async function listLegacyAiContentShopOrderRows(limit: number): Promise<ShopOrderRecord[]> {
   const admin = getSupabaseAdmin();
   const { data, error } = await admin
     .from("ai_content")
@@ -515,6 +613,46 @@ async function listLegacyShopOrderRows(limit: number): Promise<ShopOrderRecord[]
   return (data ?? [])
     .map((row) => normalizeLegacyOrder((row.data ?? null) as Json | null))
     .filter((row): row is ShopOrderRecord => Boolean(row));
+}
+
+async function listLegacyUserStateShopOrderRows(limit: number): Promise<ShopOrderRecord[]> {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("rnest_user_state")
+    .select("user_id, payload, updated_at")
+    .order("updated_at", { ascending: false })
+    .limit(Math.max(1, Math.min(MAX_LIST_SCAN, limit)));
+
+  if (error) throw error;
+
+  return (data ?? []).flatMap((row) => extractStateStoredOrders(row.payload));
+}
+
+async function listLegacyShopOrderRows(limit: number): Promise<ShopOrderRecord[]> {
+  let stateRows: ShopOrderRecord[] = [];
+  try {
+    stateRows = await listLegacyUserStateShopOrderRows(limit);
+  } catch {
+    stateRows = [];
+  }
+
+  let aiContentRows: ShopOrderRecord[] = [];
+  try {
+    aiContentRows = await listLegacyAiContentShopOrderRows(limit);
+  } catch {
+    aiContentRows = [];
+  }
+
+  const merged = new Map<string, ShopOrderRecord>();
+  for (const row of stateRows) merged.set(row.orderId, row);
+  for (const row of aiContentRows) {
+    const current = merged.get(row.orderId) ?? null;
+    merged.set(row.orderId, preferLatestOrder(current, row) ?? row);
+  }
+
+  return Array.from(merged.values())
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+    .slice(0, Math.max(1, Math.min(MAX_LIST_SCAN, limit)));
 }
 
 async function listModernShopOrderRows(limit: number): Promise<ShopOrderRecord[]> {
@@ -534,8 +672,8 @@ async function listShopOrderRows(limit: number): Promise<ShopOrderRecord[]> {
   let modernRows: ShopOrderRecord[] = [];
   try {
     modernRows = await listModernShopOrderRows(limit);
-  } catch (error) {
-    if (!isMissingTableError(error, "shop_orders")) throw error;
+  } catch {
+    modernRows = [];
   }
 
   let legacyRows: ShopOrderRecord[] = [];

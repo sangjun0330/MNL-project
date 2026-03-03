@@ -41,6 +41,18 @@ export async function POST(req: Request) {
     const message = String(error?.message ?? "failed_to_request_shop_refund");
     if (message.includes("not_found")) return jsonNoStore({ ok: false, error: "shop_order_not_found" }, { status: 404 });
     if (message.includes("not_refundable")) return jsonNoStore({ ok: false, error: "shop_order_not_refundable" }, { status: 400 });
+    if (
+      message === "shop_order_storage_unavailable" ||
+      message.toLowerCase().includes("supabase admin env missing") ||
+      message.toLowerCase().includes("schema cache") ||
+      message.toLowerCase().includes("shop_orders") ||
+      message.toLowerCase().includes("rnest_user_state") ||
+      message.toLowerCase().includes("rnest_users") ||
+      message.toLowerCase().includes("ai_content") ||
+      message.toLowerCase().includes("foreign key")
+    ) {
+      return jsonNoStore({ ok: false, error: "shop_order_storage_unavailable" }, { status: 503 });
+    }
     return jsonNoStore({ ok: false, error: "failed_to_request_shop_refund" }, { status: 500 });
   }
 }

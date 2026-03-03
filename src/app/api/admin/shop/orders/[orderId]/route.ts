@@ -77,6 +77,10 @@ export async function PATCH(req: Request, ctx: any) {
       message.toLowerCase().includes("supabase admin env missing") ||
       message.toLowerCase().includes("schema cache") ||
       message.toLowerCase().includes("shop_orders") ||
+      message.toLowerCase().includes("rnest_user_state") ||
+      message.toLowerCase().includes("rnest_users") ||
+      message.toLowerCase().includes("ai_content") ||
+      message.toLowerCase().includes("foreign key") ||
       message.toLowerCase().includes("tracking_number") ||
       message.toLowerCase().includes("courier") ||
       message.toLowerCase().includes("shipped_at") ||

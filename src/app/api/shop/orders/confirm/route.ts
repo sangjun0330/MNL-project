@@ -39,6 +39,20 @@ function isValidPaymentKey(value: string) {
   return /^[A-Za-z0-9_-]{10,220}$/.test(value);
 }
 
+function isShopStorageSetupError(message: string) {
+  const lower = String(message ?? "").toLowerCase();
+  return (
+    lower === "shop_order_storage_unavailable" ||
+    lower.includes("supabase admin env missing") ||
+    lower.includes("schema cache") ||
+    lower.includes("shop_orders") ||
+    lower.includes("rnest_user_state") ||
+    lower.includes("rnest_users") ||
+    lower.includes("ai_content") ||
+    lower.includes("foreign key")
+  );
+}
+
 type TossConfirmFailure = {
   ok: false;
   status: number;
@@ -217,7 +231,11 @@ async function handleSingleOrderConfirm(req: Request, input: {
         order: toShopOrderSummary(paidOrder),
       },
     });
-  } catch {
+  } catch (error: any) {
+    const message = String(error?.message ?? "");
+    if (isShopStorageSetupError(message)) {
+      return jsonNoStore({ ok: false, error: "shop_order_storage_unavailable" }, { status: 503 });
+    }
     return jsonNoStore({ ok: false, error: "failed_to_finalize_shop_order" }, { status: 500 });
   }
 }
@@ -312,13 +330,17 @@ async function handleBundleOrderConfirm(req: Request, input: {
         orders: paidOrders.map((order) => toShopOrderSummary(order)),
       },
     });
-  } catch {
+  } catch (error: any) {
     await markShopOrderBundleFailed({
       userId: input.userId,
       bundleId: input.bundle.bundleId,
       code: "failed_to_finalize_shop_bundle",
       message: "장바구니 묶음 결제를 최종 반영하지 못했습니다.",
     }).catch(() => undefined);
+    const message = String(error?.message ?? "");
+    if (isShopStorageSetupError(message)) {
+      return jsonNoStore({ ok: false, error: "shop_order_storage_unavailable" }, { status: 503 });
+    }
     return jsonNoStore({ ok: false, error: "failed_to_finalize_shop_order" }, { status: 500 });
   }
 }

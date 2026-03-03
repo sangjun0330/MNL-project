@@ -43,6 +43,18 @@ export async function POST(req: Request) {
     if (message.includes("not_delivered")) {
       return jsonNoStore({ ok: false, error: "shop_order_not_delivered" }, { status: 400 });
     }
+    if (
+      message === "shop_order_storage_unavailable" ||
+      message.toLowerCase().includes("supabase admin env missing") ||
+      message.toLowerCase().includes("schema cache") ||
+      message.toLowerCase().includes("shop_orders") ||
+      message.toLowerCase().includes("rnest_user_state") ||
+      message.toLowerCase().includes("rnest_users") ||
+      message.toLowerCase().includes("ai_content") ||
+      message.toLowerCase().includes("foreign key")
+    ) {
+      return jsonNoStore({ ok: false, error: "shop_order_storage_unavailable" }, { status: 503 });
+    }
     return jsonNoStore({ ok: false, error: "failed_to_confirm_shop_order_purchase" }, { status: 500 });
   }
 }

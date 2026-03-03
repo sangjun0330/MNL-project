@@ -70,6 +70,18 @@ export async function POST(req: Request, ctx: any) {
     if (message.includes("already_processed")) return jsonNoStore({ ok: false, error: "shop_refund_already_processed" }, { status: 409 });
     if (message.includes("missing_toss") || message.includes("invalid_toss")) return jsonNoStore({ ok: false, error: message }, { status: 500 });
     if (message.startsWith("toss_")) return jsonNoStore({ ok: false, error: message }, { status: 400 });
+    if (
+      message === "shop_order_storage_unavailable" ||
+      message.toLowerCase().includes("supabase admin env missing") ||
+      message.toLowerCase().includes("schema cache") ||
+      message.toLowerCase().includes("shop_orders") ||
+      message.toLowerCase().includes("rnest_user_state") ||
+      message.toLowerCase().includes("rnest_users") ||
+      message.toLowerCase().includes("ai_content") ||
+      message.toLowerCase().includes("foreign key")
+    ) {
+      return jsonNoStore({ ok: false, error: "shop_order_storage_unavailable" }, { status: 503 });
+    }
     return jsonNoStore({ ok: false, error: "failed_to_process_shop_refund" }, { status: 500 });
   }
 }
