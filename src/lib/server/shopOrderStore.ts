@@ -1038,7 +1038,9 @@ export async function confirmShopOrderPurchase(input: {
   if (!order) throw new Error("shop_order_not_found");
   if (!isPurchaseConfirmableOrder(order)) throw new Error("shop_order_not_delivered");
 
-  const currentMap = await loadPurchaseConfirmationMap(input.userId).catch(() => ({}));
+  const currentMap: Record<string, string> = await loadPurchaseConfirmationMap(input.userId).catch(
+    (): Record<string, string> => ({})
+  );
   if (currentMap[order.orderId]) {
     return {
       order,
