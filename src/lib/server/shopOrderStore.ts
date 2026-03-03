@@ -19,6 +19,8 @@ type StoredShopOrder = {
 export type ShopOrderStatus =
   | "READY"
   | "PAID"
+  | "SHIPPED"
+  | "DELIVERED"
   | "FAILED"
   | "CANCELED"
   | "REFUND_REQUESTED"
@@ -60,6 +62,10 @@ export type ShopOrderRecord = {
   failMessage: string | null;
   shipping: ShopShippingSnapshot;
   refund: ShopRefundState;
+  trackingNumber: string | null;
+  courier: string | null;
+  shippedAt: string | null;
+  deliveredAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -88,6 +94,10 @@ export type ShopOrderSummary = {
     reason: string | null;
     note: string | null;
   };
+  trackingNumber: string | null;
+  courier: string | null;
+  shippedAt: string | null;
+  deliveredAt: string | null;
 };
 
 export type ShopAdminOrderSummary = ShopOrderSummary & {
@@ -225,6 +235,10 @@ function normalizeLegacyOrder(data: unknown): ShopOrderRecord | null {
     failMessage: cleanText(source.failMessage, 220) || null,
     shipping: normalizeShippingSnapshot(source.shipping),
     refund: normalizeRefund(source.refund),
+    trackingNumber: cleanText(source.trackingNumber, 120) || null,
+    courier: cleanText(source.courier, 60) || null,
+    shippedAt: cleanText(source.shippedAt, 64) || null,
+    deliveredAt: cleanText(source.deliveredAt, 64) || null,
     createdAt: cleanText(source.createdAt, 64),
     updatedAt: cleanText(source.updatedAt, 64),
   };
@@ -285,6 +299,10 @@ function toShopOrderRow(order: ShopOrderRecord): Database["public"]["Tables"]["s
     refund_cancel_amount: order.refund.cancelAmount,
     refund_canceled_at: order.refund.canceledAt,
     refund_summary: order.refund.cancelResponse,
+    tracking_number: order.trackingNumber,
+    courier: order.courier,
+    shipped_at: order.shippedAt,
+    delivered_at: order.deliveredAt,
     created_at: order.createdAt,
     updated_at: order.updatedAt,
   };
@@ -322,6 +340,10 @@ function fromShopOrderRow(row: ShopOrderRow | null): ShopOrderRecord | null {
       canceledAt: cleanText(row.refund_canceled_at, 64) || null,
       cancelResponse: row.refund_summary == null ? null : summarizeTossCancelResponse(row.refund_summary),
     },
+    trackingNumber: cleanText(row.tracking_number, 120) || null,
+    courier: cleanText(row.courier, 60) || null,
+    shippedAt: cleanText(row.shipped_at, 64) || null,
+    deliveredAt: cleanText(row.delivered_at, 64) || null,
     createdAt: cleanText(row.created_at, 64),
     updatedAt: cleanText(row.updated_at, 64),
   };
@@ -534,6 +556,10 @@ export async function createShopOrder(input: {
       canceledAt: null,
       cancelResponse: null,
     },
+    trackingNumber: null,
+    courier: null,
+    shippedAt: null,
+    deliveredAt: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -827,7 +853,69 @@ export function toShopOrderSummary(order: ShopOrderRecord): ShopOrderSummary {
       reason: order.refund.reason,
       note: order.refund.note,
     },
+    trackingNumber: order.trackingNumber,
+    courier: order.courier,
+    shippedAt: order.shippedAt,
+    deliveredAt: order.deliveredAt,
   };
+}
+
+export async function getShopOrderById(userId: string, orderId: string): Promise<ShopOrderSummary | null> {
+  const order = await readShopOrderForUser(userId, orderId);
+  if (!order) return null;
+  return toShopOrderSummary(order);
+}
+
+export async function markShopOrderShipped(input: {
+  orderId: string;
+  adminUserId: string;
+  trackingNumber: string;
+  courier: string;
+}): Promise<ShopOrderRecord> {
+  const current = await readShopOrder(input.orderId);
+  if (!current) throw new Error("shop_order_not_found");
+  if (current.status !== "PAID") throw new Error("shop_order_not_paid");
+  const now = new Date().toISOString();
+  const saved = await writeOrder({
+    ...current,
+    status: "SHIPPED",
+    trackingNumber: cleanText(input.trackingNumber, 120),
+    courier: cleanText(input.courier, 60),
+    shippedAt: now,
+  });
+  await writeOrderEventSafe({
+    order: saved,
+    eventType: "order_shipped",
+    actorRole: "admin",
+    actorUserId: input.adminUserId,
+    message: `배송 처리: ${input.courier} ${input.trackingNumber}`,
+    metadata: { trackingNumber: input.trackingNumber, courier: input.courier },
+  });
+  return saved;
+}
+
+export async function markShopOrderDelivered(input: {
+  orderId: string;
+  adminUserId: string;
+}): Promise<ShopOrderRecord> {
+  const current = await readShopOrder(input.orderId);
+  if (!current) throw new Error("shop_order_not_found");
+  if (current.status !== "SHIPPED") throw new Error("shop_order_not_shipped");
+  const now = new Date().toISOString();
+  const saved = await writeOrder({
+    ...current,
+    status: "DELIVERED",
+    deliveredAt: now,
+  });
+  await writeOrderEventSafe({
+    order: saved,
+    eventType: "order_delivered",
+    actorRole: "admin",
+    actorUserId: input.adminUserId,
+    message: "배달 완료 처리",
+    metadata: null,
+  });
+  return saved;
 }
 
 export function toShopAdminOrderSummary(order: ShopOrderRecord): ShopAdminOrderSummary {

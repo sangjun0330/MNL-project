@@ -56,6 +56,7 @@ export type ShopProduct = {
   description: string;
   category: Exclude<ShopCategoryKey, "all">;
   priceKrw: number | null;
+  originalPriceKrw: number | null;
   priceLabel: string;
   checkoutEnabled: boolean;
   partnerLabel: string;
@@ -71,6 +72,8 @@ export type ShopProduct = {
   specs: ShopProductSpec[];
   detailPage: ShopDetailPage;
   externalUrl?: string;
+  stockCount: number | null;
+  outOfStock: boolean;
 };
 
 export type ShopRecommendation = {
@@ -545,7 +548,12 @@ export function normalizeShopProduct(raw: unknown): ShopProduct | null {
   const visualLabel = clampText(source.visualLabel, 40) || name;
   const rawPriceKrw = Number(source.priceKrw);
   const priceKrw = Number.isFinite(rawPriceKrw) && rawPriceKrw > 0 ? Math.round(rawPriceKrw) : null;
+  const rawOriginalPriceKrw = Number(source.originalPriceKrw);
+  const originalPriceKrw = Number.isFinite(rawOriginalPriceKrw) && rawOriginalPriceKrw > 0 ? Math.round(rawOriginalPriceKrw) : null;
   const checkoutEnabled = Boolean(source.checkoutEnabled) && priceKrw != null;
+  const rawStockCount = Number(source.stockCount);
+  const stockCount = Number.isFinite(rawStockCount) && rawStockCount >= 0 ? Math.round(rawStockCount) : null;
+  const outOfStock = Boolean(source.outOfStock) || (stockCount !== null && stockCount === 0);
   const benefitTags = sanitizeStringList(source.benefitTags, 6, 24);
   const useMoments = sanitizeStringList(source.useMoments, 5, 60);
   const caution = clampText(source.caution, 180) || "의학적 치료 대체가 아니라 생활 루틴 보조용으로만 안내합니다.";
@@ -568,6 +576,7 @@ export function normalizeShopProduct(raw: unknown): ShopProduct | null {
     description,
     category,
     priceKrw,
+    originalPriceKrw,
     priceLabel: clampText(source.priceLabel, 60) || "제휴 가격 연동 예정",
     checkoutEnabled,
     partnerLabel: clampText(source.partnerLabel, 60) || "제휴 파트너 연동 준비중",
@@ -593,6 +602,8 @@ export function normalizeShopProduct(raw: unknown): ShopProduct | null {
       }
       return undefined;
     })(),
+    stockCount,
+    outOfStock,
   };
 }
 

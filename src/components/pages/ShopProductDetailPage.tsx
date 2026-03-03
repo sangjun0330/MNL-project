@@ -8,7 +8,7 @@ import { authHeaders, ensureTossScript } from "@/lib/billing/client";
 import { cn } from "@/lib/cn";
 import { formatShopPrice, type ShopProduct } from "@/lib/shop";
 import { formatShopShippingSingleLine, isCompleteShopShippingProfile, type ShopShippingProfile } from "@/lib/shopProfile";
-import { loadShopClientState, markShopPartnerClick, markShopViewed, saveShopClientState } from "@/lib/shopClient";
+import { isInWishlist, loadShopClientState, markShopPartnerClick, markShopViewed, saveShopClientState, toggleWishlist } from "@/lib/shopClient";
 import { useI18n } from "@/lib/useI18n";
 import { ShopCheckoutSheet } from "@/components/shop/ShopCheckoutSheet";
 
@@ -21,6 +21,7 @@ type ShopReviewRecord = {
   body: string;
   createdAt: string;
   updatedAt: string;
+  verifiedPurchase?: boolean;
 };
 
 type ShopReviewSummary = {
@@ -70,6 +71,14 @@ function ProfileIcon() {
   );
 }
 
+function HeartIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" fill={filled ? "#e63946" : "none"} stroke={filled ? "#e63946" : "currentColor"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+      <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+    </svg>
+  );
+}
+
 function productToneClass(product: ShopProduct) {
   if (product.checkoutEnabled && product.priceKrw) return "border border-[#11294b] bg-[#11294b] text-white";
   if (product.externalUrl) return "border border-[#d7dfeb] bg-[#eef4fb] text-[#11294b]";
@@ -101,7 +110,7 @@ function reviewBarWidthClass(percent: number) {
   return "w-0";
 }
 
-export function ShopProductDetailPage({ product }: { product: ShopProduct }) {
+export function ShopProductDetailPage({ product, allProducts }: { product: ShopProduct; allProducts?: ShopProduct[] }) {
   const { t } = useI18n();
   const { status } = useAuthState();
   const [checkoutOpen, setCheckoutOpen] = useState(false);
@@ -126,7 +135,31 @@ export function ShopProductDetailPage({ product }: { product: ShopProduct }) {
     title: "",
     body: "",
   });
+  const [wishlisted, setWishlisted] = useState(false);
+  const [catalogProducts, setCatalogProducts] = useState<ShopProduct[]>(allProducts ?? []);
   const detail = product.detailPage;
+
+  // 위시리스트 초기 상태
+  useEffect(() => {
+    setWishlisted(isInWishlist(product.id));
+  }, [product.id]);
+
+  // 최신 카탈로그 로드 (관련 상품용)
+  useEffect(() => {
+    if (allProducts && allProducts.length > 0) return;
+    const run = async () => {
+      try {
+        const res = await fetch("/api/shop/catalog", { method: "GET", cache: "no-store" });
+        const json = await res.json().catch(() => null);
+        if (res.ok && json?.ok && Array.isArray(json?.data?.products)) {
+          setCatalogProducts(json.data.products as ShopProduct[]);
+        }
+      } catch {
+        // 무시
+      }
+    };
+    void run();
+  }, [allProducts]);
 
   useEffect(() => {
     const current = loadShopClientState();
@@ -214,6 +247,17 @@ export function ShopProductDetailPage({ product }: { product: ShopProduct }) {
   const shippingReady = Boolean(shippingProfile && isCompleteShopShippingProfile(shippingProfile));
   const shippingLabel = shippingProfile ? `${shippingProfile.recipientName} · ${shippingProfile.phone} · ${formatShopShippingSingleLine(shippingProfile)}` : null;
   const totalPrice = Math.round((product.priceKrw ?? 0) * quantity);
+  const discountPercent = product.originalPriceKrw && product.priceKrw && product.originalPriceKrw > product.priceKrw
+    ? Math.round((1 - product.priceKrw / product.originalPriceKrw) * 100)
+    : 0;
+
+  // 관련 상품: 같은 카테고리 상품 (현재 상품 제외)
+  const relatedProducts = useMemo(() => {
+    return catalogProducts
+      .filter((p) => p.id !== product.id && p.category === product.category)
+      .slice(0, 6);
+  }, [catalogProducts, product.id, product.category]);
+
   const reviewDistribution = useMemo(() => {
     const buckets = [5, 4, 3, 2, 1].map((rating) => ({
       rating,
@@ -247,6 +291,7 @@ export function ShopProductDetailPage({ product }: { product: ShopProduct }) {
       return new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime();
     });
   }, [reviewMinRating, reviewSearch, reviewSort, reviews]);
+
   const totalReviewPages = Math.max(1, Math.ceil(filteredReviews.length / REVIEWS_PER_PAGE));
   const visibleReviews = useMemo(
     () => filteredReviews.slice((reviewPage - 1) * REVIEWS_PER_PAGE, reviewPage * REVIEWS_PER_PAGE),
@@ -256,6 +301,11 @@ export function ShopProductDetailPage({ product }: { product: ShopProduct }) {
   useEffect(() => {
     setReviewPage(1);
   }, [reviewSort, reviewSearch, reviewMinRating, product.id]);
+
+  const handleWishlistToggle = () => {
+    const next = toggleWishlist(product.id);
+    setWishlisted(next);
+  };
 
   const handleCheckout = async () => {
     if (!product.checkoutEnabled || !product.priceKrw) return;
@@ -351,6 +401,11 @@ export function ShopProductDetailPage({ product }: { product: ShopProduct }) {
   };
 
   const handleOpenCheckout = () => {
+    if (product.outOfStock) {
+      setMessageTone("error");
+      setMessage("현재 품절된 상품입니다.");
+      return;
+    }
     if (status !== "authenticated") {
       setMessageTone("error");
       setMessage("결제는 로그인 후 가능합니다.");
@@ -428,12 +483,12 @@ export function ShopProductDetailPage({ product }: { product: ShopProduct }) {
 
   return (
     <div className="-mx-4 pb-[calc(182px+env(safe-area-inset-bottom))]">
-      <div className="bg-[#69c8ee] px-4 py-3 text-center text-[12.5px] font-semibold text-white">
+      <div className="bg-[#3b6fc9] px-4 py-3 text-center text-[12.5px] font-semibold text-white">
         {t("오늘 회복 흐름에 맞는 추천 상품과 구매 정보를 한눈에 확인하세요")}
       </div>
 
       <div className="border-b border-[#edf1f6] bg-white px-4 py-4">
-        <div className="grid grid-cols-[auto_auto_1fr_auto_auto] items-center gap-3">
+        <div className="grid grid-cols-[auto_auto_1fr_auto_auto_auto] items-center gap-3">
           <button
             type="button"
             data-auth-allow
@@ -458,9 +513,18 @@ export function ShopProductDetailPage({ product }: { product: ShopProduct }) {
             </span>
             <ChevronDownIcon />
           </button>
-          <Link href="/shop" data-auth-allow className="justify-self-center text-[36px] font-black italic tracking-[-0.07em] text-[#69c8ee]">
+          <Link href="/shop" data-auth-allow className="justify-self-center text-[36px] font-black italic tracking-[-0.07em] text-[#3b6fc9]">
             rnest
           </Link>
+          <button
+            type="button"
+            data-auth-allow
+            onClick={handleWishlistToggle}
+            className="inline-flex h-10 w-10 items-center justify-center text-[#111827]"
+            aria-label={wishlisted ? t("찜 해제") : t("찜하기")}
+          >
+            <HeartIcon filled={wishlisted} />
+          </button>
           <button
             type="button"
             data-auth-allow
@@ -503,9 +567,26 @@ export function ShopProductDetailPage({ product }: { product: ShopProduct }) {
                 </div>
               </div>
             )}
+            {/* 품절 오버레이 */}
+            {product.outOfStock ? (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                <span className="rounded-full bg-white/90 px-4 py-2 text-[13px] font-bold text-[#111827]">품절</span>
+              </div>
+            ) : null}
+            {/* 이미지 카운터 */}
             <div className="absolute bottom-4 right-4 rounded-full bg-black/10 px-3 py-1 text-[11px] font-semibold text-white">
               {selectedImageIndex + 1} / {Math.max(1, product.imageUrls.length || 1)}
             </div>
+            {/* 찜하기 플로팅 버튼 */}
+            <button
+              type="button"
+              data-auth-allow
+              onClick={handleWishlistToggle}
+              className="absolute right-4 top-4 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/85 shadow-md backdrop-blur-sm"
+              aria-label={wishlisted ? t("찜 해제") : t("찜하기")}
+            >
+              <HeartIcon filled={wishlisted} />
+            </button>
           </div>
 
           {product.imageUrls.length > 1 ? (
@@ -518,7 +599,7 @@ export function ShopProductDetailPage({ product }: { product: ShopProduct }) {
                   onClick={() => setSelectedImageIndex(index)}
                   className={cn(
                     "shrink-0 overflow-hidden rounded-2xl border bg-white",
-                    index === selectedImageIndex ? "border-[#69c8ee]" : "border-[#e6ebf2]"
+                    index === selectedImageIndex ? "border-[#3b6fc9]" : "border-[#e6ebf2]"
                   )}
                 >
                   <img src={url} alt={`${product.name} ${index + 1}`} className="h-16 w-16 object-cover" />
@@ -532,7 +613,24 @@ export function ShopProductDetailPage({ product }: { product: ShopProduct }) {
             <div className="text-[13px] leading-6 text-[#65748b]">{product.subtitle}</div>
             <div className="space-y-1">
               <div className="text-[12px] text-[#9aa6b6]">{product.partnerStatus}</div>
-              <div className="text-[32px] font-bold tracking-[-0.04em] text-[#111827]">{formatShopPrice(product)}</div>
+              {/* 할인 가격 표시 */}
+              {discountPercent > 0 && product.originalPriceKrw ? (
+                <div className="flex items-baseline gap-2">
+                  <span className="text-[20px] font-bold tracking-[-0.03em] text-[#e63946]">-{discountPercent}%</span>
+                  <span className="text-[32px] font-bold tracking-[-0.04em] text-[#111827]">{formatShopPrice(product)}</span>
+                </div>
+              ) : (
+                <div className="text-[32px] font-bold tracking-[-0.04em] text-[#111827]">{formatShopPrice(product)}</div>
+              )}
+              {discountPercent > 0 && product.originalPriceKrw ? (
+                <div className="text-[14px] text-[#9aa6b6] line-through">
+                  {product.originalPriceKrw.toLocaleString("ko-KR")}원
+                </div>
+              ) : null}
+              {/* 재고 표시 */}
+              {product.stockCount !== null && product.stockCount <= 10 && !product.outOfStock ? (
+                <div className="text-[12px] font-semibold text-[#e63946]">잔여 {product.stockCount}개</div>
+              ) : null}
             </div>
 
             {product.checkoutEnabled && product.priceKrw ? (
@@ -594,7 +692,7 @@ export function ShopProductDetailPage({ product }: { product: ShopProduct }) {
           <div className="text-[15px] leading-8 text-[#44556d]">{detail.storyBody}</div>
 
           <div className="grid gap-4 md:grid-cols-2">
-            <div className="rounded-3xl bg-[#69c8ee] px-5 py-6 text-white">
+            <div className="rounded-3xl bg-[#3b6fc9] px-5 py-6 text-white">
               <div className="text-[22px] font-bold tracking-[-0.03em]">{detail.featureTitle}</div>
               <div className="mt-4 space-y-2 text-[13px] leading-6 text-white/90">
                 {detail.featureItems.map((item) => (
@@ -649,16 +747,16 @@ export function ShopProductDetailPage({ product }: { product: ShopProduct }) {
               <div className="text-[40px] font-bold tracking-[-0.04em] text-[#11294b]">
                 {reviewSummary.count > 0 ? reviewSummary.averageRating.toFixed(1) : "0.0"}
               </div>
-              <div className="mt-1 text-[14px] font-semibold text-[#69c8ee]">
+              <div className="mt-1 text-[14px] font-semibold text-[#3b6fc9]">
                 {reviewSummary.count.toLocaleString("ko-KR")} {t("개 리뷰")}
               </div>
             </div>
             <div className="mt-5 space-y-2">
               {reviewDistribution.map((item) => (
                 <div key={item.rating} className="grid grid-cols-[72px_1fr_44px] items-center gap-3 text-[12px]">
-                  <div className="text-[#69c8ee]">{item.rating}점</div>
+                  <div className="text-[#3b6fc9]">{item.rating}점</div>
                   <div className="h-3 rounded-full bg-[#edf1f6]">
-                    <div className={cn("h-3 rounded-full bg-[#69c8ee]", reviewBarWidthClass(item.percent))} />
+                    <div className={cn("h-3 rounded-full bg-[#3b6fc9]", reviewBarWidthClass(item.percent))} />
                   </div>
                   <div className="text-right text-[#8d99ab]">{item.percent}%</div>
                 </div>
@@ -673,7 +771,7 @@ export function ShopProductDetailPage({ product }: { product: ShopProduct }) {
               if (typeof window === "undefined") return;
               document.getElementById("shop-review-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
             }}
-            className="inline-flex h-14 w-full items-center justify-center rounded-3xl bg-[#69c8ee] text-[15px] font-semibold text-white"
+            className="inline-flex h-14 w-full items-center justify-center rounded-3xl bg-[#3b6fc9] text-[15px] font-semibold text-white"
           >
             {t("리뷰작성")}
           </button>
@@ -722,10 +820,13 @@ export function ShopProductDetailPage({ product }: { product: ShopProduct }) {
               const preview = longReview && !expanded ? `${review.body.slice(0, 110)}...` : review.body;
               return (
                 <div key={review.id} className="space-y-4">
-                  <div className="text-[20px] tracking-[0.15em] text-[#69c8ee]">{renderStars(review.rating)}</div>
-                  <div className="flex items-center gap-3 text-[13px] text-[#4f5d72]">
+                  <div className="text-[20px] tracking-[0.15em] text-[#3b6fc9]">{renderStars(review.rating)}</div>
+                  <div className="flex flex-wrap items-center gap-2 text-[13px] text-[#4f5d72]">
                     <span>{t("회원님")} · {formatDateLabel(review.updatedAt || review.createdAt)}</span>
                     <span className="rounded-xl bg-[#f1f3f6] px-3 py-2 text-[12px] font-semibold text-[#66758a]">{t("리뷰")}</span>
+                    {review.verifiedPurchase ? (
+                      <span className="rounded-xl bg-[#eef4fb] px-3 py-2 text-[12px] font-semibold text-[#3b6fc9]">구매 확인</span>
+                    ) : null}
                   </div>
                   <div className="border-l-4 border-[#dfe4ea] pl-4 text-[13px] text-[#9aa6b6]">
                     {product.useMoments[0] ? `${t("사용 시점")} · ${product.useMoments[0]}` : t("구매 정보가 저장되면 여기에 표시됩니다.")}
@@ -868,6 +969,41 @@ export function ShopProductDetailPage({ product }: { product: ShopProduct }) {
             </div>
           </div>
         </section>
+
+        {/* 관련 상품 섹션 */}
+        {relatedProducts.length > 0 ? (
+          <section className="bg-white px-4 py-6">
+            <div className="mb-4 flex items-center justify-between">
+              <div className="text-[18px] font-bold tracking-[-0.02em] text-[#111827]">관련 상품</div>
+              <Link href="/shop" data-auth-allow className="text-[13px] font-semibold text-[#3b6fc9]">전체 보기</Link>
+            </div>
+            <div className="flex gap-4 overflow-x-auto pb-2">
+              {relatedProducts.map((p) => (
+                <Link key={p.id} href={`/shop/${encodeURIComponent(p.id)}`} data-auth-allow className="shrink-0 w-[140px] block">
+                  <div className="relative overflow-hidden rounded-[2px] bg-[#f3f5f7]">
+                    {p.imageUrls[0] ? (
+                      <img src={p.imageUrls[0]} alt={p.name} className="aspect-square w-full object-cover" />
+                    ) : (
+                      <div className={cn("flex aspect-square items-center justify-center p-3", productToneClass(p))}>
+                        <div className="text-center">
+                          <div className="text-[9px] font-semibold uppercase tracking-[0.2em] opacity-75">{p.partnerLabel}</div>
+                          <div className="mt-1 text-[16px] font-bold tracking-[-0.02em]">{p.visualLabel}</div>
+                        </div>
+                      </div>
+                    )}
+                    {p.outOfStock ? (
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/35">
+                        <span className="rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-bold text-[#111827]">품절</span>
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="mt-2 text-[13px] font-semibold leading-5 tracking-[-0.02em] text-[#111827] line-clamp-2">{p.name}</div>
+                  <div className="mt-1 text-[12px] font-bold text-[#111827]">{formatShopPrice(p)}</div>
+                </Link>
+              ))}
+            </div>
+          </section>
+        ) : null}
       </div>
 
       <div id="shop-detail-buybar" className="fixed inset-x-0 bottom-[calc(92px+env(safe-area-inset-bottom))] z-40 px-4">
@@ -882,15 +1018,19 @@ export function ShopProductDetailPage({ product }: { product: ShopProduct }) {
             className="relative inline-flex h-16 flex-1 items-center justify-center rounded-2xl border border-[#d7dfeb] bg-white text-[15px] font-semibold text-[#111827]"
           >
             {reviewSummary.count > 0 ? (
-              <span className="absolute -top-3 rounded-full bg-[#69c8ee] px-3 py-1 text-[11px] font-semibold text-white">
+              <span className="absolute -top-3 rounded-full bg-[#3b6fc9] px-3 py-1 text-[11px] font-semibold text-white">
                 {reviewSummary.count.toLocaleString("ko-KR")}
               </span>
             ) : null}
             {t("리뷰보기")}
           </button>
 
-          {product.checkoutEnabled && product.priceKrw ? (
-            <button type="button" data-auth-allow onClick={handleOpenCheckout} className="inline-flex h-16 flex-[1.2] items-center justify-center rounded-2xl bg-[#69c8ee] text-[15px] font-semibold text-white">
+          {product.outOfStock ? (
+            <button type="button" disabled className="inline-flex h-16 flex-[1.2] items-center justify-center rounded-2xl bg-[#b0b8c5] text-[15px] font-semibold text-white">
+              {t("품절")}
+            </button>
+          ) : product.checkoutEnabled && product.priceKrw ? (
+            <button type="button" data-auth-allow onClick={handleOpenCheckout} className="inline-flex h-16 flex-[1.2] items-center justify-center rounded-2xl bg-[#3b6fc9] text-[15px] font-semibold text-white">
               {t("구매하기")}
             </button>
           ) : product.externalUrl ? (
@@ -899,12 +1039,12 @@ export function ShopProductDetailPage({ product }: { product: ShopProduct }) {
               target="_blank"
               rel="noreferrer"
               onClick={handlePartnerClick}
-              className="inline-flex h-16 flex-[1.2] items-center justify-center rounded-2xl bg-[#69c8ee] text-[15px] font-semibold text-white"
+              className="inline-flex h-16 flex-[1.2] items-center justify-center rounded-2xl bg-[#3b6fc9] text-[15px] font-semibold text-white"
             >
               {t("구매하기")}
             </a>
           ) : (
-            <button type="button" disabled className="inline-flex h-16 flex-[1.2] items-center justify-center rounded-2xl bg-[#b9dff0] text-[15px] font-semibold text-white">
+            <button type="button" disabled className="inline-flex h-16 flex-[1.2] items-center justify-center rounded-2xl bg-[#8da8d8] text-[15px] font-semibold text-white">
               {t("판매 준비중")}
             </button>
           )}

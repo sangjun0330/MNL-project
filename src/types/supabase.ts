@@ -318,6 +318,10 @@ export type Database = {
           refund_canceled_at: string | null;
           refund_summary: Json | null;
           shipping_snapshot: Json;
+          tracking_number: string | null;
+          courier: string | null;
+          shipped_at: string | null;
+          delivered_at: string | null;
           created_at: string | null;
           updated_at: string | null;
         };
@@ -344,6 +348,10 @@ export type Database = {
           refund_canceled_at?: string | null;
           refund_summary?: Json | null;
           shipping_snapshot?: Json;
+          tracking_number?: string | null;
+          courier?: string | null;
+          shipped_at?: string | null;
+          delivered_at?: string | null;
           created_at?: string | null;
           updated_at?: string | null;
         };
@@ -370,6 +378,10 @@ export type Database = {
           refund_canceled_at?: string | null;
           refund_summary?: Json | null;
           shipping_snapshot?: Json;
+          tracking_number?: string | null;
+          courier?: string | null;
+          shipped_at?: string | null;
+          delivered_at?: string | null;
           created_at?: string | null;
           updated_at?: string | null;
         };

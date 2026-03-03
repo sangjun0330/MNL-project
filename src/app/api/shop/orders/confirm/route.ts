@@ -2,6 +2,7 @@ import { jsonNoStore } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { buildShopOrderConfirmIdempotencyKey, markShopOrderFailed, markShopOrderPaid, readShopOrderForUser, toShopOrderSummary } from "@/lib/server/shopOrderStore";
 import { readTossAcceptLanguage, readTossSecretKeyFromEnv, readTossTestCodeFromEnv } from "@/lib/server/tossConfig";
+import { sendOrderConfirmationEmail } from "@/lib/server/emailService";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -134,6 +135,17 @@ export async function POST(req: Request) {
       approvedAt: typeof json?.approvedAt === "string" ? json.approvedAt : null,
       tossResponse: json,
     });
+    // 주문 확인 이메일 발송 (실패해도 결제는 성공으로 처리)
+    sendOrderConfirmationEmail({
+      orderId: paidOrder.orderId,
+      customerEmail: order.shipping ? null : null, // 토스 응답의 이메일은 별도 조회 필요
+      productName: paidOrder.productSnapshot.name,
+      quantity: paidOrder.productSnapshot.quantity,
+      amount: paidOrder.amount,
+      recipientName: paidOrder.shipping.recipientName,
+      addressLine1: paidOrder.shipping.addressLine1,
+      addressLine2: paidOrder.shipping.addressLine2,
+    }).catch(() => undefined);
     return jsonNoStore({ ok: true, data: { order: toShopOrderSummary(paidOrder) } });
   } catch {
     return jsonNoStore({ ok: false, error: "failed_to_finalize_shop_order" }, { status: 500 });

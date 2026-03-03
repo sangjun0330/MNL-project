@@ -80,3 +80,57 @@ export function markShopPartnerClick(state: ShopClientState, productId: string):
     },
   };
 }
+
+// ─── 위시리스트 (localStorage, 독립 키) ───────────────────────────────────────
+
+const WISHLIST_KEY = "rnest_shop_wishlist_v1";
+const MAX_WISHLIST_SIZE = 50;
+
+export function getWishlist(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(WISHLIST_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is string => typeof item === "string").slice(0, MAX_WISHLIST_SIZE);
+  } catch {
+    return [];
+  }
+}
+
+export function isInWishlist(productId: string): boolean {
+  return getWishlist().includes(productId);
+}
+
+export function addToWishlist(productId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    const current = getWishlist();
+    if (current.includes(productId)) return;
+    const next = [productId, ...current].slice(0, MAX_WISHLIST_SIZE);
+    window.localStorage.setItem(WISHLIST_KEY, JSON.stringify(next));
+  } catch {
+    // ignore quota/private-mode failures
+  }
+}
+
+export function removeFromWishlist(productId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    const next = getWishlist().filter((id) => id !== productId);
+    window.localStorage.setItem(WISHLIST_KEY, JSON.stringify(next));
+  } catch {
+    // ignore quota/private-mode failures
+  }
+}
+
+export function toggleWishlist(productId: string): boolean {
+  if (isInWishlist(productId)) {
+    removeFromWishlist(productId);
+    return false;
+  } else {
+    addToWishlist(productId);
+    return true;
+  }
+}

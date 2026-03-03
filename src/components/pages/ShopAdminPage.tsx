@@ -27,7 +27,7 @@ import { useI18n } from "@/lib/useI18n";
 type ShopAdminOrderSummary = {
   orderId: string;
   userLabel: string;
-  status: "READY" | "PAID" | "FAILED" | "CANCELED" | "REFUND_REQUESTED" | "REFUND_REJECTED" | "REFUNDED";
+  status: "READY" | "PAID" | "FAILED" | "CANCELED" | "REFUND_REQUESTED" | "REFUND_REJECTED" | "REFUNDED" | "SHIPPED" | "DELIVERED";
   amount: number;
   createdAt: string;
   approvedAt: string | null;
@@ -42,6 +42,8 @@ type ShopAdminOrderSummary = {
     deliveryNote: string;
   };
   refund: { status: "none" | "requested" | "rejected" | "done"; reason: string | null; note: string | null };
+  trackingNumber: string | null;
+  courier: string | null;
 };
 
 type EditableCategory = Exclude<ShopCategoryKey, "all">;
@@ -53,6 +55,7 @@ type ProductDraft = {
   description: string;
   category: EditableCategory;
   priceKrw: string;
+  originalPriceKrw: string;
   priceLabel: string;
   checkoutEnabled: boolean;
   externalUrl: string;
@@ -66,6 +69,8 @@ type ProductDraft = {
   imageUrls: string[];
   specs: ShopProductSpec[];
   priority: string;
+  stockCount: string;
+  outOfStock: boolean;
   matchSignals: ShopSignalKey[];
   detailHeadline: string;
   detailSummary: string;
@@ -110,12 +115,16 @@ function orderStatusLabel(status: ShopAdminOrderSummary["status"]) {
     case "REFUND_REQUESTED": return "환불 요청";
     case "REFUND_REJECTED": return "환불 반려";
     case "REFUNDED": return "환불 완료";
+    case "SHIPPED": return "배송 중";
+    case "DELIVERED": return "배송 완료";
     default: return status;
   }
 }
 
 function orderStatusClass(status: ShopAdminOrderSummary["status"]) {
-  if (status === "PAID" || status === "REFUNDED") return "border-[#d7dfeb] bg-[#eef4fb] text-[#11294b]";
+  if (status === "PAID") return "border-[#d7dfeb] bg-[#eef4fb] text-[#11294b]";
+  if (status === "SHIPPED") return "border-[#c8dff6] bg-[#e6f0fc] text-[#2b5faa]";
+  if (status === "DELIVERED" || status === "REFUNDED") return "border-[#c2d9bd] bg-[#edf7eb] text-[#2e6b26]";
   if (status === "FAILED" || status === "REFUND_REJECTED") return "border-[#f1d0cc] bg-[#fff6f5] text-[#a33a2b]";
   return "border-[#dfe5ee] bg-[#f7f8fb] text-[#3d4d63]";
 }
@@ -160,6 +169,7 @@ function createEmptyDraft(): ProductDraft {
     description: "",
     category: "sleep",
     priceKrw: "",
+    originalPriceKrw: "",
     priceLabel: "제휴 가격 연동 예정",
     checkoutEnabled: false,
     externalUrl: "",
@@ -173,6 +183,8 @@ function createEmptyDraft(): ProductDraft {
     imageUrls: [],
     specs: [],
     priority: "4",
+    stockCount: "",
+    outOfStock: false,
     matchSignals: ["baseline_recovery"],
     detailHeadline: "",
     detailSummary: "",
@@ -196,6 +208,7 @@ function draftFromProduct(product: ShopProduct & { active?: boolean }): ProductD
     description: product.description,
     category: product.category,
     priceKrw: product.priceKrw ? String(product.priceKrw) : "",
+    originalPriceKrw: product.originalPriceKrw ? String(product.originalPriceKrw) : "",
     priceLabel: product.priceLabel,
     checkoutEnabled: product.checkoutEnabled,
     externalUrl: product.externalUrl ?? "",
@@ -209,6 +222,8 @@ function draftFromProduct(product: ShopProduct & { active?: boolean }): ProductD
     imageUrls: [...product.imageUrls],
     specs: product.specs.map((s) => ({ label: s.label, value: s.value })),
     priority: String(product.priority),
+    stockCount: product.stockCount !== null && product.stockCount !== undefined ? String(product.stockCount) : "",
+    outOfStock: product.outOfStock ?? false,
     matchSignals: [...product.matchSignals],
     detailHeadline: product.detailPage.headline,
     detailSummary: product.detailPage.summary,
@@ -495,6 +510,20 @@ function TabPrice({ draft, setDraft, errors }: { draft: ProductDraft; setDraft: 
           <FieldError message={errors.priceKrwRequired} />
         </label>
         <label className="block">
+          <div className={LABEL_CLASS}>정가 (원, 할인 전)</div>
+          <input
+            className={INPUT_CLASS}
+            inputMode="numeric"
+            value={draft.originalPriceKrw}
+            onChange={(e) => setDraft((d) => ({ ...d, originalPriceKrw: e.target.value }))}
+            placeholder="할인 시에만 입력 (예: 39000)"
+          />
+          <p className="mt-1 text-[10px] text-[#92a0b4]">입력 시 할인율 자동 계산 표시</p>
+        </label>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <label className="block">
           <div className={LABEL_CLASS}>가격 라벨</div>
           <input
             className={INPUT_CLASS}
@@ -503,7 +532,33 @@ function TabPrice({ draft, setDraft, errors }: { draft: ProductDraft; setDraft: 
             placeholder="예: 제휴 가격 연동 예정"
           />
         </label>
+        <label className="block">
+          <div className={LABEL_CLASS}>재고 수량</div>
+          <input
+            className={INPUT_CLASS}
+            inputMode="numeric"
+            value={draft.stockCount}
+            onChange={(e) => setDraft((d) => ({ ...d, stockCount: e.target.value }))}
+            placeholder="비우면 무제한"
+          />
+          <p className="mt-1 text-[10px] text-[#92a0b4]">0 또는 10 이하이면 상세 페이지에 잔여 수량 표시</p>
+        </label>
       </div>
+
+      <label className="block">
+        <div className={LABEL_CLASS}>품절 처리</div>
+        <button
+          type="button"
+          data-auth-allow
+          onClick={() => setDraft((d) => ({ ...d, outOfStock: !d.outOfStock }))}
+          className={[
+            "h-12 w-full rounded-2xl border text-[13px] font-semibold transition",
+            draft.outOfStock ? "border-[#e07b6a] bg-[#fff6f5] text-[#a33a2b]" : "border-[#d7dfeb] bg-[#f4f7fb] text-[#11294b]",
+          ].join(" ")}
+        >
+          {draft.outOfStock ? "품절 상태" : "정상 판매 중"}
+        </button>
+      </label>
 
       <label className="block">
         <div className={LABEL_CLASS}>앱 내 결제</div>
@@ -938,6 +993,7 @@ export function ShopAdminPage() {
           description: draft.description,
           category: draft.category,
           priceKrw: draft.priceKrw ? Number(draft.priceKrw) : null,
+          originalPriceKrw: draft.originalPriceKrw ? Number(draft.originalPriceKrw) : null,
           priceLabel: draft.priceLabel,
           checkoutEnabled: draft.checkoutEnabled,
           externalUrl: draft.externalUrl.trim() || undefined,
@@ -951,6 +1007,8 @@ export function ShopAdminPage() {
           imageUrls: draft.imageUrls.filter(Boolean),
           specs: draft.specs.filter((s) => s.label && s.value),
           priority: Number(draft.priority) || 4,
+          stockCount: draft.stockCount ? Number(draft.stockCount) : null,
+          outOfStock: draft.outOfStock,
           matchSignals: draft.matchSignals,
           detailPage: {
             headline: draft.detailHeadline,
