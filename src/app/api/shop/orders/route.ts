@@ -1,6 +1,6 @@
 import { jsonNoStore } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
-import { listShopOrdersForUserPage, toShopOrderSummary } from "@/lib/server/shopOrderStore";
+import { listShopOrderPurchaseConfirmations, listShopOrdersForUserPage, toShopOrderSummary } from "@/lib/server/shopOrderStore";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -26,7 +26,14 @@ export async function GET(req: Request) {
   const offset = toOffset(params.get("offset"));
   try {
     const page = await listShopOrdersForUserPage(userId, { limit, offset });
-    const orders = page.orders.map(toShopOrderSummary);
+    const confirmations = await listShopOrderPurchaseConfirmations(
+      userId,
+      page.orders.map((order) => order.orderId)
+    );
+    const orders = page.orders.map((order) => ({
+      ...toShopOrderSummary(order),
+      purchaseConfirmedAt: confirmations[order.orderId] ?? null,
+    }));
     return jsonNoStore({
       ok: true,
       data: {

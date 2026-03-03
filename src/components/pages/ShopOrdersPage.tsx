@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useAuthState } from "@/lib/auth";
 import { authHeaders } from "@/lib/billing/client";
 
@@ -26,6 +27,7 @@ type ShopOrderSummary = {
   courier: string | null;
   shippedAt: string | null;
   deliveredAt: string | null;
+  purchaseConfirmedAt: string | null;
 };
 
 function orderStatusLabel(status: string) {
@@ -61,13 +63,14 @@ function formatDateLabel(value: string | null) {
 }
 
 const PRIMARY_BUTTON =
-  "inline-flex items-center justify-center rounded-2xl border border-[#11294b] bg-[#11294b] px-4 font-semibold text-white transition disabled:opacity-60";
+  "inline-flex items-center justify-center rounded-2xl border border-[#102a43] bg-[#102a43] px-4 font-semibold text-white transition disabled:opacity-60";
 const SECONDARY_BUTTON =
   "inline-flex items-center justify-center rounded-2xl border border-[#d7dfeb] bg-[#f4f7fb] px-4 font-semibold text-[#11294b] transition disabled:opacity-60";
 const ORDERS_PER_PAGE = 12;
 type OrderFilter = "all" | "progress" | "delivered" | "refund" | "issue";
 
 export function ShopOrdersPage() {
+  const searchParams = useSearchParams();
   const { status, user } = useAuthState();
   const [orders, setOrders] = useState<ShopOrderSummary[]>([]);
   const [total, setTotal] = useState(0);
@@ -76,6 +79,7 @@ export function ShopOrdersPage() {
   const [messageTone, setMessageTone] = useState<"error" | "notice">("notice");
   const [page, setPage] = useState(1);
   const [filter, setFilter] = useState<OrderFilter>("all");
+  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
   const totalPages = Math.max(1, Math.ceil(total / ORDERS_PER_PAGE));
   const currentOffset = (page - 1) * ORDERS_PER_PAGE;
@@ -133,9 +137,23 @@ export function ShopOrdersPage() {
     }
   }, [page, totalPages]);
 
+  useEffect(() => {
+    const nextFilter = searchParams.get("filter");
+    if (
+      nextFilter === "all" ||
+      nextFilter === "progress" ||
+      nextFilter === "delivered" ||
+      nextFilter === "refund" ||
+      nextFilter === "issue"
+    ) {
+      setFilter(nextFilter);
+    }
+  }, [searchParams]);
+
   const requestRefund = async (orderId: string) => {
     if (status !== "authenticated") return;
     setMessage(null);
+    setActionLoadingId(orderId);
     try {
       const headers = await authHeaders();
       const res = await fetch("/api/shop/orders/refund", {
@@ -152,6 +170,38 @@ export function ShopOrdersPage() {
     } catch {
       setMessageTone("error");
       setMessage("환불 요청에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const confirmPurchase = async (orderId: string) => {
+    if (status !== "authenticated") return;
+    setMessage(null);
+    setActionLoadingId(orderId);
+    try {
+      const headers = await authHeaders();
+      const res = await fetch("/api/shop/orders/complete", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify({ orderId }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok) throw new Error(String(json?.error ?? `http_${res.status}`));
+      const nextOrder = json.data.order as ShopOrderSummary;
+      setOrders((current) => [nextOrder, ...current.filter((item) => item.orderId !== nextOrder.orderId)]);
+      setMessageTone("notice");
+      setMessage("구매가 확정되었습니다. 이제 해당 상품 리뷰를 작성할 수 있습니다.");
+    } catch (error: any) {
+      const code = String(error?.message ?? "failed_to_confirm_shop_order_purchase");
+      setMessageTone("error");
+      if (code.includes("not_delivered")) {
+        setMessage("배송 완료된 주문만 구매 확정할 수 있습니다.");
+      } else {
+        setMessage("구매 확정 처리에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+      }
+    } finally {
+      setActionLoadingId(null);
     }
   };
 
@@ -199,7 +249,7 @@ export function ShopOrdersPage() {
                 onClick={() => setFilter(item.key)}
                 className={[
                   "shrink-0 rounded-full px-4 py-2 text-[12px] font-semibold transition",
-                  filter === item.key ? "bg-[#3b6fc9] text-white" : "border border-[#d7dfeb] bg-white text-[#11294b]",
+                  filter === item.key ? "bg-[#102a43] text-white" : "border border-[#d7dfeb] bg-white text-[#11294b]",
                 ].join(" ")}
               >
                 {item.label}
@@ -265,6 +315,9 @@ export function ShopOrdersPage() {
                 {order.refund.status === "done" && (
                   <div className="mt-2 text-[11.5px] text-[#11294b]">환불 완료</div>
                 )}
+                {order.purchaseConfirmedAt ? (
+                  <div className="mt-2 text-[11.5px] text-[#102a43]">구매 확정 완료 · {formatDateLabel(order.purchaseConfirmedAt)}</div>
+                ) : null}
                 {order.status === "FAILED" && order.failMessage && (
                   <div className="mt-2 text-[11.5px] text-[#a33a2b]">{order.failMessage}</div>
                 )}
@@ -273,8 +326,25 @@ export function ShopOrdersPage() {
                   <Link href={`/shop/orders/${encodeURIComponent(order.orderId)}`} data-auth-allow className={`${SECONDARY_BUTTON} h-9 text-[11px]`}>
                     상세 보기
                   </Link>
+                  {order.status === "DELIVERED" && !order.purchaseConfirmedAt ? (
+                    <button
+                      type="button"
+                      data-auth-allow
+                      onClick={() => void confirmPurchase(order.orderId)}
+                      disabled={actionLoadingId === order.orderId}
+                      className={`${SECONDARY_BUTTON} h-9 text-[11px]`}
+                    >
+                      {actionLoadingId === order.orderId ? "처리 중..." : "구매 확정"}
+                    </button>
+                  ) : null}
                   {order.status === "PAID" && order.refund.status === "none" ? (
-                    <button type="button" data-auth-allow onClick={() => void requestRefund(order.orderId)} className={`${SECONDARY_BUTTON} h-9 text-[11px]`}>
+                    <button
+                      type="button"
+                      data-auth-allow
+                      onClick={() => void requestRefund(order.orderId)}
+                      disabled={actionLoadingId === order.orderId}
+                      className={`${SECONDARY_BUTTON} h-9 text-[11px]`}
+                    >
                       환불 요청
                     </button>
                   ) : null}

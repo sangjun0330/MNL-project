@@ -2,6 +2,7 @@ import { todayISO } from "@/lib/date";
 import { normalizeShopShippingSnapshot, type ShopShippingSnapshot } from "@/lib/shopProfile";
 import { buildCancelIdempotencyKey, buildConfirmIdempotencyKey, readTossAcceptLanguage, readTossSecretKeyFromEnv, readTossTestCodeFromEnv } from "@/lib/server/tossConfig";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
+import { loadUserState, saveUserState } from "@/lib/server/userStateStore";
 import type { ShopProduct } from "@/lib/shop";
 import type { Database, Json } from "@/types/supabase";
 
@@ -100,6 +101,7 @@ export type ShopOrderSummary = {
   courier: string | null;
   shippedAt: string | null;
   deliveredAt: string | null;
+  purchaseConfirmedAt: string | null;
 };
 
 export type ShopAdminOrderSummary = ShopOrderSummary & {
@@ -611,6 +613,69 @@ function normalizeListArgs(input: number | { limit?: number; offset?: number } |
   return { limit, offset };
 }
 
+function normalizePurchaseConfirmationMap(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const next: Record<string, string> = {};
+  const entries = Object.entries(raw as Record<string, unknown>).slice(0, 240);
+  for (const [orderId, value] of entries) {
+    const safeOrderId = cleanText(orderId, 80);
+    const confirmedAt = cleanText(value, 64);
+    if (!safeOrderId || !confirmedAt) continue;
+    next[safeOrderId] = confirmedAt;
+  }
+  return next;
+}
+
+async function loadPurchaseConfirmationMap(userId: string): Promise<Record<string, string>> {
+  const row = await loadUserState(userId);
+  const payload = row?.payload && typeof row.payload === "object" && row.payload !== null
+    ? (row.payload as Record<string, unknown>)
+    : {};
+  return normalizePurchaseConfirmationMap(payload.shopPurchaseConfirmations);
+}
+
+async function savePurchaseConfirmationMap(userId: string, map: Record<string, string>): Promise<Record<string, string>> {
+  const row = await loadUserState(userId);
+  const payload = row?.payload && typeof row.payload === "object" && row.payload !== null
+    ? (row.payload as Record<string, unknown>)
+    : {};
+  const normalized = normalizePurchaseConfirmationMap(map);
+  await saveUserState({
+    userId,
+    payload: {
+      ...payload,
+      shopPurchaseConfirmations: normalized,
+    },
+  });
+  return normalized;
+}
+
+export async function listShopOrderPurchaseConfirmations(
+  userId: string,
+  orderIds?: string[]
+): Promise<Record<string, string>> {
+  const map = await loadPurchaseConfirmationMap(userId);
+  if (!Array.isArray(orderIds) || orderIds.length === 0) return map;
+  return orderIds.reduce<Record<string, string>>((acc, orderId) => {
+    const safeOrderId = cleanText(orderId, 80);
+    if (safeOrderId && map[safeOrderId]) {
+      acc[safeOrderId] = map[safeOrderId];
+    }
+    return acc;
+  }, {});
+}
+
+export async function getShopOrderPurchaseConfirmedAt(userId: string, orderId: string): Promise<string | null> {
+  const safeOrderId = cleanText(orderId, 80);
+  if (!safeOrderId) return null;
+  try {
+    const map = await loadPurchaseConfirmationMap(userId);
+    return map[safeOrderId] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function listShopOrdersForUserPage(
   userId: string,
   input?: number | { limit?: number; offset?: number }
@@ -690,7 +755,7 @@ export async function countReservedShopQuantityForProduct(productId: string) {
   }, 0);
 }
 
-function isReviewEligibleOrder(row: ShopOrderRecord) {
+function isPurchaseConfirmableOrder(row: ShopOrderRecord) {
   return row.status === "DELIVERED" || Boolean(row.deliveredAt);
 }
 
@@ -706,9 +771,22 @@ export async function listVerifiedShopReviewerIdsForProduct(productId: string): 
   }
 
   const verified = new Set<string>();
+  const confirmationCache = new Map<string, Record<string, string>>();
   for (const row of rows) {
     if (row.productId !== key) continue;
-    if (isReviewEligibleOrder(row)) {
+    if (!isPurchaseConfirmableOrder(row)) continue;
+
+    let confirmations = confirmationCache.get(row.userId);
+    if (!confirmations) {
+      try {
+        confirmations = await loadPurchaseConfirmationMap(row.userId);
+      } catch {
+        confirmations = {};
+      }
+      confirmationCache.set(row.userId, confirmations);
+    }
+
+    if (confirmations[row.orderId]) {
       verified.add(row.userId);
     }
   }
@@ -728,7 +806,20 @@ export async function hasDeliveredShopOrderForUserProduct(userId: string, produc
     rows = [];
   }
 
-  return rows.some((row) => row.userId === safeUserId && row.productId === safeProductId && isReviewEligibleOrder(row));
+  let confirmations: Record<string, string> = {};
+  try {
+    confirmations = await loadPurchaseConfirmationMap(safeUserId);
+  } catch {
+    confirmations = {};
+  }
+
+  return rows.some(
+    (row) =>
+      row.userId === safeUserId &&
+      row.productId === safeProductId &&
+      isPurchaseConfirmableOrder(row) &&
+      Boolean(confirmations[row.orderId])
+  );
 }
 
 export async function markShopOrderFailed(input: {
@@ -939,6 +1030,42 @@ export function buildShopOrderConfirmIdempotencyKey(orderId: string) {
   return buildConfirmIdempotencyKey(orderId);
 }
 
+export async function confirmShopOrderPurchase(input: {
+  userId: string;
+  orderId: string;
+}): Promise<{ order: ShopOrderRecord; purchaseConfirmedAt: string }> {
+  const order = await readShopOrderForUser(input.userId, input.orderId);
+  if (!order) throw new Error("shop_order_not_found");
+  if (!isPurchaseConfirmableOrder(order)) throw new Error("shop_order_not_delivered");
+
+  const currentMap = await loadPurchaseConfirmationMap(input.userId).catch(() => ({}));
+  if (currentMap[order.orderId]) {
+    return {
+      order,
+      purchaseConfirmedAt: currentMap[order.orderId],
+    };
+  }
+
+  const purchaseConfirmedAt = new Date().toISOString();
+  await savePurchaseConfirmationMap(input.userId, {
+    ...currentMap,
+    [order.orderId]: purchaseConfirmedAt,
+  });
+  await writeOrderEventSafe({
+    order,
+    eventType: "purchase_confirmed",
+    actorRole: "user",
+    actorUserId: input.userId,
+    message: "사용자가 배송 수령 후 구매를 확정했습니다.",
+    metadata: { purchaseConfirmedAt },
+  });
+
+  return {
+    order,
+    purchaseConfirmedAt,
+  };
+}
+
 export function toShopOrderSummary(order: ShopOrderRecord): ShopOrderSummary {
   return {
     orderId: order.orderId,
@@ -969,13 +1096,18 @@ export function toShopOrderSummary(order: ShopOrderRecord): ShopOrderSummary {
     courier: order.courier,
     shippedAt: order.shippedAt,
     deliveredAt: order.deliveredAt,
+    purchaseConfirmedAt: null,
   };
 }
 
 export async function getShopOrderById(userId: string, orderId: string): Promise<ShopOrderSummary | null> {
   const order = await readShopOrderForUser(userId, orderId);
   if (!order) return null;
-  return toShopOrderSummary(order);
+  const purchaseConfirmedAt = await getShopOrderPurchaseConfirmedAt(userId, order.orderId);
+  return {
+    ...toShopOrderSummary(order),
+    purchaseConfirmedAt,
+  };
 }
 
 export async function markShopOrderShipped(input: {

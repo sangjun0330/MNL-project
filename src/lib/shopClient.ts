@@ -1,5 +1,7 @@
 const SHOP_CLIENT_STATE_KEY = "rnest_shop_state_v2";
 const MAX_RECENT_PRODUCTS = 6;
+const LEGACY_WISHLIST_KEY = "rnest_shop_wishlist_v1";
+const MAX_WISHLIST_SIZE = 50;
 
 export type ShopClientState = {
   version: 2;
@@ -81,56 +83,113 @@ export function markShopPartnerClick(state: ShopClientState, productId: string):
   };
 }
 
-// ─── 위시리스트 (localStorage, 독립 키) ───────────────────────────────────────
-
-const WISHLIST_KEY = "rnest_shop_wishlist_v1";
-const MAX_WISHLIST_SIZE = 50;
-
-export function getWishlist(): string[] {
+function readLegacyWishlist(): string[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = window.localStorage.getItem(WISHLIST_KEY);
+    const raw = window.localStorage.getItem(LEGACY_WISHLIST_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((item): item is string => typeof item === "string").slice(0, MAX_WISHLIST_SIZE);
+    const ids: string[] = [];
+    for (const item of parsed) {
+      if (typeof item !== "string") continue;
+      const id = item.trim();
+      if (!id || ids.includes(id)) continue;
+      ids.push(id);
+      if (ids.length >= MAX_WISHLIST_SIZE) break;
+    }
+    return ids;
   } catch {
     return [];
   }
 }
 
-export function isInWishlist(productId: string): boolean {
-  return getWishlist().includes(productId);
-}
-
-export function addToWishlist(productId: string): void {
+function clearLegacyWishlist() {
   if (typeof window === "undefined") return;
   try {
-    const current = getWishlist();
-    if (current.includes(productId)) return;
-    const next = [productId, ...current].slice(0, MAX_WISHLIST_SIZE);
-    window.localStorage.setItem(WISHLIST_KEY, JSON.stringify(next));
+    window.localStorage.removeItem(LEGACY_WISHLIST_KEY);
   } catch {
-    // ignore quota/private-mode failures
+    // ignore storage failures
   }
 }
 
-export function removeFromWishlist(productId: string): void {
-  if (typeof window === "undefined") return;
+async function requestWishlist(
+  input: {
+    method: "GET" | "PUT";
+    headers?: HeadersInit;
+    body?: Record<string, unknown>;
+  }
+): Promise<{ ids: string[]; active: boolean | null }> {
+  const res = await fetch("/api/shop/wishlist", {
+    method: input.method,
+    headers: {
+      ...(input.method === "PUT" ? { "content-type": "application/json" } : {}),
+      ...(input.headers ?? {}),
+    },
+    body: input.body ? JSON.stringify(input.body) : undefined,
+    cache: "no-store",
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.ok) {
+    throw new Error(String(json?.error ?? `wishlist_http_${res.status}`));
+  }
+  const ids = Array.isArray(json?.data?.ids)
+    ? json.data.ids.filter((item: unknown): item is string => typeof item === "string").slice(0, MAX_WISHLIST_SIZE)
+    : [];
+  const active = typeof json?.data?.active === "boolean" ? json.data.active : null;
+  return { ids, active };
+}
+
+export async function getWishlist(headers?: HeadersInit): Promise<string[]> {
+  const result = await requestWishlist({ method: "GET", headers });
+  const legacyIds = readLegacyWishlist();
+  if (legacyIds.length === 0) return result.ids;
+
+  const merged = Array.from(new Set([...legacyIds, ...result.ids])).slice(0, MAX_WISHLIST_SIZE);
   try {
-    const next = getWishlist().filter((id) => id !== productId);
-    window.localStorage.setItem(WISHLIST_KEY, JSON.stringify(next));
+    const saved = await requestWishlist({
+      method: "PUT",
+      headers,
+      body: { ids: merged },
+    });
+    clearLegacyWishlist();
+    return saved.ids;
   } catch {
-    // ignore quota/private-mode failures
+    return result.ids;
   }
 }
 
-export function toggleWishlist(productId: string): boolean {
-  if (isInWishlist(productId)) {
-    removeFromWishlist(productId);
-    return false;
-  } else {
-    addToWishlist(productId);
-    return true;
-  }
+export async function isInWishlist(productId: string, headers?: HeadersInit): Promise<boolean> {
+  const ids = await getWishlist(headers);
+  return ids.includes(productId);
+}
+
+export async function addToWishlist(productId: string, headers?: HeadersInit): Promise<string[]> {
+  const result = await requestWishlist({
+    method: "PUT",
+    headers,
+    body: { productId, action: "add" },
+  });
+  return result.ids;
+}
+
+export async function removeFromWishlist(productId: string, headers?: HeadersInit): Promise<string[]> {
+  const result = await requestWishlist({
+    method: "PUT",
+    headers,
+    body: { productId, action: "remove" },
+  });
+  return result.ids;
+}
+
+export async function toggleWishlist(productId: string, headers?: HeadersInit): Promise<{ ids: string[]; active: boolean }> {
+  const result = await requestWishlist({
+    method: "PUT",
+    headers,
+    body: { productId, action: "toggle" },
+  });
+  return {
+    ids: result.ids,
+    active: Boolean(result.active),
+  };
 }

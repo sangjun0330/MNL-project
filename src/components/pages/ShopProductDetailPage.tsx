@@ -8,13 +8,14 @@ import { authHeaders, ensureTossScript } from "@/lib/billing/client";
 import { cn } from "@/lib/cn";
 import { formatShopPrice, getShopImageSrc, type ShopProduct } from "@/lib/shop";
 import {
+  buildShopShippingVerificationValue,
   formatShopShippingSingleLine,
   isCompleteShopShippingProfile,
   resolveDefaultShopShippingAddress,
   type ShopShippingAddress,
   type ShopShippingProfile,
 } from "@/lib/shopProfile";
-import { isInWishlist, loadShopClientState, markShopPartnerClick, markShopViewed, saveShopClientState, toggleWishlist } from "@/lib/shopClient";
+import { getWishlist, loadShopClientState, markShopPartnerClick, markShopViewed, saveShopClientState, toggleWishlist } from "@/lib/shopClient";
 import { useI18n } from "@/lib/useI18n";
 import { ShopCheckoutSheet } from "@/components/shop/ShopCheckoutSheet";
 
@@ -154,10 +155,32 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
   const [catalogProducts, setCatalogProducts] = useState<ShopProduct[]>(allProducts ?? []);
   const detail = product.detailPage;
 
-  // 위시리스트 초기 상태
   useEffect(() => {
-    setWishlisted(isInWishlist(product.id));
-  }, [product.id]);
+    let active = true;
+    if (status !== "authenticated") {
+      setWishlisted(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    const run = async () => {
+      try {
+        const headers = await authHeaders();
+        const ids = await getWishlist(headers);
+        if (!active) return;
+        setWishlisted(ids.includes(product.id));
+      } catch {
+        if (!active) return;
+        setWishlisted(false);
+      }
+    };
+
+    void run();
+    return () => {
+      active = false;
+    };
+  }, [product.id, status]);
 
   // 최신 카탈로그 로드 (관련 상품용)
   useEffect(() => {
@@ -286,6 +309,9 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
   const shippingLabel = effectiveShippingProfile
     ? `${effectiveShippingProfile.recipientName} · ${effectiveShippingProfile.phone} · ${formatShopShippingSingleLine(effectiveShippingProfile)}`
     : null;
+  const shippingVerificationValue = effectiveShippingProfile
+    ? buildShopShippingVerificationValue(effectiveShippingProfile)
+    : "";
   const hardOutOfStock = product.outOfStock || (typeof product.stockCount === "number" && product.stockCount <= 0);
   const maxSelectableQuantity =
     typeof product.stockCount === "number" && product.stockCount > 0 ? Math.max(1, Math.min(9, product.stockCount)) : 9;
@@ -349,12 +375,27 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
     setQuantity((current) => Math.max(1, Math.min(current, maxSelectableQuantity)));
   }, [maxSelectableQuantity]);
 
-  const handleWishlistToggle = () => {
-    const next = toggleWishlist(product.id);
-    setWishlisted(next);
+  const handleWishlistToggle = async () => {
+    if (status !== "authenticated") {
+      setMessageTone("error");
+      setMessage("위시리스트는 로그인한 계정에 저장됩니다.");
+      return;
+    }
+    try {
+      const headers = await authHeaders();
+      const next = await toggleWishlist(product.id, headers);
+      setWishlisted(next.active);
+    } catch {
+      setMessageTone("error");
+      setMessage("위시리스트 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+    }
   };
 
-  const handleCheckout = async () => {
+  const handleCheckout = async (verification: {
+    shippingConfirmed: boolean;
+    contactConfirmed: boolean;
+    policyConfirmed: boolean;
+  }) => {
     if (!product.checkoutEnabled || !product.priceKrw) return;
     if (status !== "authenticated") {
       setMessageTone("error");
@@ -382,6 +423,8 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
           productId: product.id,
           quantity,
           shippingAddressId: selectedShippingAddressId,
+          shippingVerificationValue,
+          verification,
         }),
       });
       const checkoutJson = await checkoutRes.json().catch(() => null);
@@ -443,6 +486,10 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
         setMessage("선택한 배송지를 찾지 못했습니다. 배송지를 다시 선택해 주세요.");
       } else if (text.includes("shop_profile_storage_unavailable")) {
         setMessage("배송지 저장소가 아직 준비되지 않았습니다. 잠시 후 다시 시도해 주세요.");
+      } else if (text.includes("shop_checkout_verification_required")) {
+        setMessage("배송지와 개인정보 확인 항목을 모두 체크한 뒤 결제를 진행해 주세요.");
+      } else if (text.includes("shop_checkout_verification_mismatch")) {
+        setMessage("결제 전 확인한 정보와 현재 저장된 배송지가 달라졌습니다. 배송지를 다시 확인해 주세요.");
       } else if (text.includes("missing_toss_sdk")) {
         setMessage("결제 모듈을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
       } else {
@@ -486,7 +533,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
     }
     if (!canWriteReview) {
       setMessageTone("error");
-      setMessage("배송 완료된 주문 내역이 있는 상품만 리뷰를 작성할 수 있습니다.");
+      setMessage("배송 완료 후 구매 확정까지 마친 주문이 있는 상품만 리뷰를 작성할 수 있습니다.");
       return;
     }
     if (!reviewDraft.body.trim()) {
@@ -532,8 +579,8 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
         setMessage("리뷰 저장소를 아직 사용할 수 없습니다. Supabase shop 확장 마이그레이션을 먼저 적용해 주세요.");
       } else if (code === "invalid_shop_review") {
         setMessage("평점과 리뷰 내용을 확인해 주세요.");
-      } else if (code === "shop_review_requires_delivered_order") {
-        setMessage("배송 완료된 구매 내역이 확인된 사용자만 리뷰를 작성할 수 있습니다.");
+      } else if (code === "shop_review_requires_purchase_confirmation") {
+        setMessage("배송 완료 후 구매 확정이 확인된 사용자만 리뷰를 작성할 수 있습니다.");
       } else {
         setMessage("리뷰 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.");
       }
@@ -544,7 +591,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
 
   return (
     <div className="-mx-4 pb-[calc(182px+env(safe-area-inset-bottom))]">
-      <div className="bg-[#3b6fc9] px-4 py-3 text-center text-[12.5px] font-semibold text-white">
+      <div className="bg-[#102a43] px-4 py-3 text-center text-[12.5px] font-semibold text-white">
         {t("오늘 회복 흐름에 맞는 추천 상품과 구매 정보를 한눈에 확인하세요")}
       </div>
 
@@ -598,7 +645,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
           >
             <CartIcon />
           </button>
-          <Link href="/settings/account" data-auth-allow className="inline-flex h-10 w-10 items-center justify-center text-[#111827]" aria-label={t("계정 설정")}>
+          <Link href="/shop/profile" data-auth-allow className="inline-flex h-10 w-10 items-center justify-center text-[#111827]" aria-label={t("쇼핑 프로필")}>
             <ProfileIcon />
           </Link>
         </div>
@@ -660,7 +707,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
                   onClick={() => setSelectedImageIndex(index)}
                   className={cn(
                     "shrink-0 overflow-hidden rounded-2xl border bg-white",
-                    index === selectedImageIndex ? "border-[#3b6fc9]" : "border-[#e6ebf2]"
+                    index === selectedImageIndex ? "border-[#102a43]" : "border-[#e6ebf2]"
                   )}
                 >
                   <img src={url} alt={`${product.name} ${index + 1}`} className="h-16 w-16 object-cover" referrerPolicy="no-referrer" />
@@ -808,16 +855,16 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
               <div className="text-[40px] font-bold tracking-[-0.04em] text-[#11294b]">
                 {reviewSummary.count > 0 ? reviewSummary.averageRating.toFixed(1) : "0.0"}
               </div>
-              <div className="mt-1 text-[14px] font-semibold text-[#3b6fc9]">
+              <div className="mt-1 text-[14px] font-semibold text-[#102a43]">
                 {reviewSummary.count.toLocaleString("ko-KR")} {t("개 리뷰")}
               </div>
             </div>
             <div className="mt-5 space-y-2">
               {reviewDistribution.map((item) => (
                 <div key={item.rating} className="grid grid-cols-[72px_1fr_44px] items-center gap-3 text-[12px]">
-                  <div className="text-[#3b6fc9]">{item.rating}점</div>
+                  <div className="text-[#102a43]">{item.rating}점</div>
                   <div className="h-3 rounded-full bg-[#edf1f6]">
-                    <div className={cn("h-3 rounded-full bg-[#3b6fc9]", reviewBarWidthClass(item.percent))} />
+                    <div className={cn("h-3 rounded-full bg-[#102a43]", reviewBarWidthClass(item.percent))} />
                   </div>
                   <div className="text-right text-[#8d99ab]">{item.percent}%</div>
                 </div>
@@ -832,7 +879,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
               if (typeof window === "undefined") return;
               document.getElementById("shop-review-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
             }}
-            className="inline-flex h-14 w-full items-center justify-center rounded-3xl bg-[#3b6fc9] text-[15px] font-semibold text-white"
+            className="inline-flex h-14 w-full items-center justify-center rounded-3xl bg-[#102a43] text-[15px] font-semibold text-white"
           >
             {t("리뷰작성")}
           </button>
@@ -964,7 +1011,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
             ) : !canWriteReview ? (
               <div className="mt-3 rounded-2xl border border-[#d7dfeb] bg-white px-4 py-4 text-[12.5px] leading-6 text-[#44556d]">
                 <div className="font-semibold text-[#11294b]">{t("리뷰 작성 조건")}</div>
-                <div className="mt-1">{t("배송 완료된 주문 내역이 있는 사용자만 이 상품 리뷰를 작성하거나 수정할 수 있습니다.")}</div>
+                <div className="mt-1">{t("배송 완료 후 구매 확정까지 완료한 사용자만 이 상품 리뷰를 작성하거나 수정할 수 있습니다.")}</div>
               </div>
             ) : (
               <>
@@ -1038,12 +1085,12 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
                         onClick={() => setSelectedShippingAddressId(address.id)}
                         className={[
                           "w-full rounded-2xl border px-3 py-3 text-left transition",
-                          active ? "border-[#3b6fc9] bg-[#eef4fb]" : "border-[#d7dfeb] bg-white",
+                          active ? "border-[#102a43] bg-[#eef4fb]" : "border-[#d7dfeb] bg-white",
                         ].join(" ")}
                       >
                         <div className="flex items-center gap-2">
                           {active ? (
-                            <span className="rounded-full bg-[#3b6fc9] px-2 py-0.5 text-[10px] font-semibold text-white">{t("선택")}</span>
+                            <span className="rounded-full bg-[#102a43] px-2 py-0.5 text-[10px] font-semibold text-white">{t("선택")}</span>
                           ) : null}
                           <span className="text-[12px] font-semibold text-[#11294b]">{address.label}</span>
                         </div>
@@ -1137,7 +1184,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
               {t("품절")}
             </button>
           ) : product.checkoutEnabled && product.priceKrw ? (
-            <button type="button" data-auth-allow onClick={handleOpenCheckout} className="inline-flex h-16 flex-[1.2] items-center justify-center rounded-2xl bg-[#3b6fc9] text-[15px] font-semibold text-white">
+            <button type="button" data-auth-allow onClick={handleOpenCheckout} className="inline-flex h-16 flex-[1.2] items-center justify-center rounded-2xl bg-[#102a43] text-[15px] font-semibold text-white">
               {t("구매하기")}
             </button>
           ) : product.externalUrl ? (
@@ -1146,7 +1193,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
               target="_blank"
               rel="noreferrer"
               onClick={handlePartnerClick}
-              className="inline-flex h-16 flex-[1.2] items-center justify-center rounded-2xl bg-[#3b6fc9] text-[15px] font-semibold text-white"
+              className="inline-flex h-16 flex-[1.2] items-center justify-center rounded-2xl bg-[#102a43] text-[15px] font-semibold text-white"
             >
               {t("구매하기")}
             </a>
@@ -1161,7 +1208,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
       <ShopCheckoutSheet
         open={checkoutOpen}
         onClose={() => setCheckoutOpen(false)}
-        onConfirm={() => void handleCheckout()}
+        onConfirm={(verification) => void handleCheckout(verification)}
         loading={checkoutLoading}
         productTitle={product.name}
         productSubtitle={product.subtitle}

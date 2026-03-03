@@ -27,6 +27,7 @@ type ShopOrderDetail = {
   courier: string | null;
   shippedAt: string | null;
   deliveredAt: string | null;
+  purchaseConfirmedAt: string | null;
 };
 
 function orderStatusLabel(status: string) {
@@ -73,7 +74,7 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-function StatusTimeline({ status }: { status: string }) {
+function StatusTimeline({ status, purchaseConfirmedAt }: { status: string; purchaseConfirmedAt: string | null }) {
   const steps = [
     { key: "order", label: "주문 접수", done: true },
     {
@@ -91,6 +92,11 @@ function StatusTimeline({ status }: { status: string }) {
       label: "배송 완료",
       done: ["DELIVERED", "REFUND_REQUESTED", "REFUND_REJECTED", "REFUNDED"].includes(status),
     },
+    {
+      key: "purchase",
+      label: "구매 확정",
+      done: Boolean(purchaseConfirmedAt),
+    },
   ];
 
   if (status === "FAILED" || status === "CANCELED") {
@@ -107,17 +113,17 @@ function StatusTimeline({ status }: { status: string }) {
   return (
     <div className="rounded-3xl border border-[#edf1f6] bg-white p-5">
       <h2 className="mb-3 text-[14px] font-bold text-[#111827]">주문 진행 상태</h2>
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-5 gap-2">
         {steps.map((step, index) => (
           <div key={step.key} className="relative">
             {index < steps.length - 1 ? (
-              <div className={["absolute left-[calc(50%+12px)] right-[-50%] top-3 h-[2px]", step.done ? "bg-[#3b6fc9]" : "bg-[#d7dfeb]"].join(" ")} />
+              <div className={["absolute left-[calc(50%+12px)] right-[-50%] top-3 h-[2px]", step.done ? "bg-[#102a43]" : "bg-[#d7dfeb]"].join(" ")} />
             ) : null}
             <div className="relative flex flex-col items-center gap-2 text-center">
               <div
                 className={[
                   "flex h-6 w-6 items-center justify-center rounded-full border text-[11px] font-bold",
-                  step.done ? "border-[#3b6fc9] bg-[#3b6fc9] text-white" : "border-[#d7dfeb] bg-white text-[#8d99ab]",
+                  step.done ? "border-[#102a43] bg-[#102a43] text-white" : "border-[#d7dfeb] bg-white text-[#8d99ab]",
                 ].join(" ")}
               >
                 {index + 1}
@@ -138,8 +144,9 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
   const [order, setOrder] = useState<ShopOrderDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [refundMessage, setRefundMessage] = useState<string | null>(null);
-  const [refundTone, setRefundTone] = useState<"error" | "notice">("notice");
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [actionTone, setActionTone] = useState<"error" | "notice">("notice");
+  const [actionLoading, setActionLoading] = useState<"refund" | "purchase" | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -176,7 +183,8 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
 
   const requestRefund = async () => {
     if (status !== "authenticated" || !order) return;
-    setRefundMessage(null);
+    setActionMessage(null);
+    setActionLoading("refund");
     try {
       const headers = await authHeaders();
       const res = await fetch("/api/shop/orders/refund", {
@@ -187,11 +195,42 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
       const json = await res.json().catch(() => null);
       if (!res.ok || !json?.ok) throw new Error();
       setOrder(json.data.order as ShopOrderDetail);
-      setRefundTone("notice");
-      setRefundMessage("환불 요청이 접수되었습니다. 관리자 검토 후 처리됩니다.");
+      setActionTone("notice");
+      setActionMessage("환불 요청이 접수되었습니다. 관리자 검토 후 처리됩니다.");
     } catch {
-      setRefundTone("error");
-      setRefundMessage("환불 요청에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+      setActionTone("error");
+      setActionMessage("환불 요청에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const confirmPurchase = async () => {
+    if (status !== "authenticated" || !order) return;
+    setActionMessage(null);
+    setActionLoading("purchase");
+    try {
+      const headers = await authHeaders();
+      const res = await fetch("/api/shop/orders/complete", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify({ orderId: order.orderId }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok) throw new Error(String(json?.error ?? `http_${res.status}`));
+      setOrder(json.data.order as ShopOrderDetail);
+      setActionTone("notice");
+      setActionMessage("구매가 확정되었습니다. 이제 해당 상품 리뷰를 작성할 수 있습니다.");
+    } catch (error: any) {
+      const code = String(error?.message ?? "failed_to_confirm_shop_order_purchase");
+      setActionTone("error");
+      if (code.includes("not_delivered")) {
+        setActionMessage("배송 완료된 주문만 구매 확정할 수 있습니다.");
+      } else {
+        setActionMessage("구매 확정 처리에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+      }
+    } finally {
+      setActionLoading(null);
     }
   };
 
@@ -217,12 +256,12 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
           <div className="rounded-3xl border border-[#f1d0cc] bg-[#fff6f5] p-5 text-[13px] text-[#a33a2b]">{error ?? "주문 정보를 찾을 수 없습니다."}</div>
         ) : (
           <>
-            {refundMessage ? (
+            {actionMessage ? (
               <div className={[
                 "rounded-3xl px-4 py-3 text-[12.5px]",
-                refundTone === "error" ? "border border-[#f1d0cc] bg-[#fff6f5] text-[#a33a2b]" : "border border-[#d7dfeb] bg-[#eef4fb] text-[#11294b]",
+                actionTone === "error" ? "border border-[#f1d0cc] bg-[#fff6f5] text-[#a33a2b]" : "border border-[#d7dfeb] bg-[#eef4fb] text-[#11294b]",
               ].join(" ")}>
-                {refundMessage}
+                {actionMessage}
               </div>
             ) : null}
 
@@ -242,7 +281,7 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
               </div>
             </div>
 
-            <StatusTimeline status={order.status} />
+            <StatusTimeline status={order.status} purchaseConfirmedAt={order.purchaseConfirmedAt} />
 
             {/* 주문 정보 */}
             <div className="rounded-3xl border border-[#edf1f6] bg-white p-5">
@@ -250,6 +289,7 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
               <InfoRow label="주문번호" value={<span className="break-all font-mono text-[11px]">{order.orderId}</span>} />
               <InfoRow label="주문일시" value={formatDateLabel(order.createdAt)} />
               {order.approvedAt ? <InfoRow label="결제일시" value={formatDateLabel(order.approvedAt)} /> : null}
+              {order.purchaseConfirmedAt ? <InfoRow label="구매 확정" value={formatDateLabel(order.purchaseConfirmedAt)} /> : null}
               {order.paymentMethod ? <InfoRow label="결제수단" value={order.paymentMethod} /> : null}
               {order.status === "FAILED" && order.failMessage ? (
                 <InfoRow label="실패 사유" value={<span className="text-[#a33a2b]">{order.failMessage}</span>} />
@@ -297,6 +337,35 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
               </div>
             ) : null}
 
+            {(order.status === "DELIVERED" || Boolean(order.purchaseConfirmedAt)) ? (
+              <div className="rounded-3xl border border-[#edf1f6] bg-white p-5">
+                <h2 className="mb-1 text-[14px] font-bold text-[#111827]">구매 확정</h2>
+                {order.purchaseConfirmedAt ? (
+                  <>
+                    <InfoRow label="확정일시" value={formatDateLabel(order.purchaseConfirmedAt)} />
+                    <div className="mt-3 rounded-2xl border border-[#d7dfeb] bg-[#eef4fb] px-4 py-3 text-[12px] leading-5 text-[#102a43]">
+                      구매 확정이 완료되어 이 계정으로 리뷰를 작성할 수 있습니다.
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="rounded-2xl border border-[#d7dfeb] bg-[#f8fafc] px-4 py-3 text-[12.5px] leading-6 text-[#44556d]">
+                      배송지와 수령 정보를 확인한 뒤 구매를 확정하면 리뷰 작성 권한이 활성화됩니다.
+                    </div>
+                    <button
+                      type="button"
+                      data-auth-allow
+                      onClick={() => void confirmPurchase()}
+                      disabled={actionLoading === "purchase"}
+                      className={`${SECONDARY_BUTTON} mt-4 h-11 w-full text-[13px]`}
+                    >
+                      {actionLoading === "purchase" ? "처리 중..." : "구매 확정하기"}
+                    </button>
+                  </>
+                )}
+              </div>
+            ) : null}
+
             {/* 환불 상태 */}
             {order.refund.status !== "none" ? (
               <div className="rounded-3xl border border-[#edf1f6] bg-white p-5">
@@ -313,8 +382,14 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
 
             {/* 환불 요청 버튼 */}
             {order.status === "PAID" && order.refund.status === "none" ? (
-              <button type="button" data-auth-allow onClick={() => void requestRefund()} className={`${SECONDARY_BUTTON} h-11 w-full text-[13px]`}>
-                환불 요청하기
+              <button
+                type="button"
+                data-auth-allow
+                onClick={() => void requestRefund()}
+                disabled={actionLoading === "refund"}
+                className={`${SECONDARY_BUTTON} h-11 w-full text-[13px]`}
+              >
+                {actionLoading === "refund" ? "처리 중..." : "환불 요청하기"}
               </button>
             ) : null}
           </>

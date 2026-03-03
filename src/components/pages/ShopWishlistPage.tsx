@@ -2,15 +2,18 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useAuthState } from "@/lib/auth";
+import { authHeaders } from "@/lib/billing/client";
 import { getShopImageSrc, SHOP_PRODUCTS, formatShopPrice, type ShopProduct } from "@/lib/shop";
 import { getWishlist, removeFromWishlist } from "@/lib/shopClient";
 
 export function ShopWishlistPage() {
+  const { status, user } = useAuthState();
   const [wishlistIds, setWishlistIds] = useState<string[]>([]);
   const [catalog, setCatalog] = useState<ShopProduct[]>(SHOP_PRODUCTS);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setWishlistIds(getWishlist());
     // 최신 카탈로그 로드
     const run = async () => {
       try {
@@ -26,13 +29,51 @@ export function ShopWishlistPage() {
     void run();
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    if (status !== "authenticated" || !user?.userId) {
+      setWishlistIds([]);
+      setLoading(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    const run = async () => {
+      setLoading(true);
+      try {
+        const headers = await authHeaders();
+        const ids = await getWishlist(headers);
+        if (!active) return;
+        setWishlistIds(ids);
+      } catch {
+        if (!active) return;
+        setWishlistIds([]);
+      } finally {
+        if (!active) return;
+        setLoading(false);
+      }
+    };
+
+    void run();
+    return () => {
+      active = false;
+    };
+  }, [status, user?.userId]);
+
   const wishlistProducts = wishlistIds
     .map((id) => catalog.find((p) => p.id === id))
     .filter((p): p is ShopProduct => Boolean(p));
 
-  const handleRemove = (productId: string) => {
-    removeFromWishlist(productId);
-    setWishlistIds((current) => current.filter((id) => id !== productId));
+  const handleRemove = async (productId: string) => {
+    if (status !== "authenticated" || !user?.userId) return;
+    try {
+      const headers = await authHeaders();
+      const ids = await removeFromWishlist(productId, headers);
+      setWishlistIds(ids);
+    } catch {
+      // keep current state
+    }
   };
 
   function productToneClass(product: ShopProduct) {
@@ -60,7 +101,19 @@ export function ShopWishlistPage() {
       </div>
 
       <div className="px-4 py-5">
-        {wishlistProducts.length === 0 ? (
+        {status !== "authenticated" ? (
+          <div className="rounded-3xl border border-[#dbe4ef] bg-white p-6 text-center">
+            <div className="text-[16px] font-bold text-[#102a43]">로그인 후 위시리스트를 확인할 수 있습니다</div>
+            <div className="mt-2 text-[13px] leading-6 text-[#5a6b80]">찜한 상품은 기기가 아니라 계정에 안전하게 저장됩니다.</div>
+            <Link href="/settings/account" data-auth-allow className="mt-5 inline-flex h-11 items-center justify-center rounded-2xl border border-[#102a43] bg-[#102a43] px-6 text-[14px] font-semibold text-white">
+              로그인하러 가기
+            </Link>
+          </div>
+        ) : loading ? (
+          <div className="rounded-3xl border border-[#dbe4ef] bg-white p-5 text-[13px] text-[#5a6b80]">
+            위시리스트를 불러오는 중입니다...
+          </div>
+        ) : wishlistProducts.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="text-[48px]">🤍</div>
             <div className="mt-4 text-[16px] font-bold text-[#111827]">아직 찜한 상품이 없어요</div>
@@ -76,7 +129,7 @@ export function ShopWishlistPage() {
                 <button
                   type="button"
                   data-auth-allow
-                  onClick={() => handleRemove(product.id)}
+                  onClick={() => void handleRemove(product.id)}
                   className="absolute right-2 top-2 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/80 shadow-sm backdrop-blur-sm"
                   aria-label="찜 해제"
                 >

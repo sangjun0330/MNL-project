@@ -1,7 +1,7 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { getRouteSupabaseClient } from "@/lib/server/supabaseRouteClient";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
-import { isCompleteShopShippingProfile } from "@/lib/shopProfile";
+import { buildShopShippingVerificationValue, isCompleteShopShippingProfile } from "@/lib/shopProfile";
 import { loadShopCatalog } from "@/lib/server/shopCatalogStore";
 import {
   buildShopOrderId,
@@ -70,6 +70,12 @@ export async function POST(req: Request) {
   const quantity = Math.max(1, Math.min(9, Math.round(Number(body?.quantity) || 1)));
   const shippingAddressId =
     typeof body?.shippingAddressId === "string" && body.shippingAddressId.trim() ? String(body.shippingAddressId).trim() : null;
+  const verification =
+    body?.verification && typeof body.verification === "object" && body.verification !== null
+      ? (body.verification as Record<string, unknown>)
+      : {};
+  const shippingVerificationValue =
+    typeof body?.shippingVerificationValue === "string" ? String(body.shippingVerificationValue).trim() : "";
   if (!productId) return jsonNoStore({ ok: false, error: "invalid_product_id" }, { status: 400 });
 
   try {
@@ -111,6 +117,12 @@ export async function POST(req: Request) {
         { ok: false, error: shippingAddressId ? "invalid_shipping_address" : "missing_shipping_address" },
         { status: 400 }
       );
+    }
+    if (!verification.shippingConfirmed || !verification.contactConfirmed || !verification.policyConfirmed) {
+      return jsonNoStore({ ok: false, error: "shop_checkout_verification_required" }, { status: 400 });
+    }
+    if (!shippingVerificationValue || shippingVerificationValue !== buildShopShippingVerificationValue(shippingProfile)) {
+      return jsonNoStore({ ok: false, error: "shop_checkout_verification_mismatch" }, { status: 409 });
     }
 
     const orderId = buildShopOrderId(product.id);

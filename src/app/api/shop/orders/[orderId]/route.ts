@@ -1,4 +1,4 @@
-import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
+import { jsonNoStore } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { getShopOrderById } from "@/lib/server/shopOrderStore";
 

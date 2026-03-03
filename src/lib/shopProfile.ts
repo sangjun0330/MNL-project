@@ -128,3 +128,7 @@ export function formatShopShippingSingleLine(profile: Pick<ShopShippingProfile, 
   ].filter(Boolean);
   return parts.join(" ");
 }
+
+export function buildShopShippingVerificationValue(profile: ShopShippingProfile) {
+  return JSON.stringify(normalizeShopShippingProfile(profile));
+}

@@ -78,7 +78,7 @@ export async function POST(req: Request) {
     }
     const canWrite = await hasDeliveredShopOrderForUserProduct(userId, productId);
     if (!canWrite) {
-      return jsonNoStore({ ok: false, error: "shop_review_requires_delivered_order" }, { status: 403 });
+      return jsonNoStore({ ok: false, error: "shop_review_requires_purchase_confirmation" }, { status: 403 });
     }
 
     const savedReview = await upsertShopReview({
@@ -112,8 +112,8 @@ export async function POST(req: Request) {
     if (message === "shop_review_storage_unavailable") {
       return jsonNoStore({ ok: false, error: "shop_review_storage_unavailable" }, { status: 503 });
     }
-    if (message === "shop_review_requires_delivered_order") {
-      return jsonNoStore({ ok: false, error: "shop_review_requires_delivered_order" }, { status: 403 });
+    if (message === "shop_review_requires_purchase_confirmation") {
+      return jsonNoStore({ ok: false, error: "shop_review_requires_purchase_confirmation" }, { status: 403 });
     }
     return jsonNoStore({ ok: false, error: "failed_to_save_shop_review" }, { status: 500 });
   }

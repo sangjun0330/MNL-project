@@ -43,6 +43,7 @@ type ShopOrderSummary = {
   refund: { status: "none" | "requested" | "rejected" | "done"; reason: string | null; note: string | null };
   trackingNumber: string | null;
   courier: string | null;
+  purchaseConfirmedAt: string | null;
 };
 
 type SortKey = "recommended" | "newest" | "price_asc" | "price_desc";
@@ -108,32 +109,10 @@ function SearchIcon() {
   );
 }
 
-function orderStatusLabel(status: ShopOrderSummary["status"]) {
-  const map: Record<string, string> = {
-    READY: "결제 대기", PAID: "결제 완료", SHIPPED: "배송 중", DELIVERED: "배달 완료",
-    FAILED: "결제 실패", CANCELED: "주문 취소",
-    REFUND_REQUESTED: "환불 요청", REFUND_REJECTED: "환불 반려", REFUNDED: "환불 완료",
-  };
-  return map[status] ?? status;
-}
-
-function orderStatusClass(status: ShopOrderSummary["status"]) {
-  if (status === "PAID" || status === "SHIPPED" || status === "DELIVERED" || status === "REFUNDED") return "border-[#d7dfeb] bg-[#eef4fb] text-[#11294b]";
-  if (status === "FAILED" || status === "REFUND_REJECTED") return "border-[#f1d0cc] bg-[#fff6f5] text-[#a33a2b]";
-  return "border-[#dfe5ee] bg-[#f7f8fb] text-[#3d4d63]";
-}
-
 function productToneClass(product: ShopProduct) {
   if (product.checkoutEnabled && product.priceKrw) return "border border-[#11294b] bg-[#11294b] text-white";
   if (product.externalUrl) return "border border-[#d7dfeb] bg-[#eef4fb] text-[#11294b]";
   return "border border-[#e1e7f0] bg-[#f7f9fc] text-[#11294b]";
-}
-
-function formatDateLabel(value: string | null) {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function matchesPriceFilter(product: ShopProduct, filter: PriceFilter): boolean {
@@ -177,10 +156,36 @@ export function ShopPage() {
   const [recentIds, setRecentIds] = useState<string[]>([]);
 
   useEffect(() => {
-    setWishlist(getWishlist());
     const clientState = loadShopClientState();
     setRecentIds(clientState.recentIds);
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    if (status !== "authenticated" || !user?.userId) {
+      setWishlist([]);
+      return () => {
+        active = false;
+      };
+    }
+
+    const run = async () => {
+      try {
+        const headers = await authHeaders();
+        const ids = await getWishlist(headers);
+        if (!active) return;
+        setWishlist(ids);
+      } catch {
+        if (!active) return;
+        setWishlist([]);
+      }
+    };
+
+    void run();
+    return () => {
+      active = false;
+    };
+  }, [status, user?.userId]);
 
   useEffect(() => {
     let active = true;
@@ -283,47 +288,70 @@ export function ShopPage() {
   const featuredPrimary = allShopState.recommendations[0] ?? null;
   const featuredSecondary = allShopState.recommendations.slice(1, 3);
 
-  const handleToggleWishlist = (productId: string, e: React.MouseEvent) => {
+  const handleToggleWishlist = async (productId: string, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const next = toggleWishlist(productId);
-    setWishlist((current) => next ? [...current, productId] : current.filter((id) => id !== productId));
-  };
-
-  const requestRefund = async (orderId: string) => {
-    if (status !== "authenticated") {
+    if (status !== "authenticated" || !user?.userId) {
       setOrderMessageTone("error");
-      setOrderMessage("환불 요청은 로그인 후 가능합니다.");
+      setOrderMessage("위시리스트는 로그인한 계정에 저장됩니다.");
       return;
     }
-    setOrderMessage(null);
     try {
       const headers = await authHeaders();
-      const res = await fetch("/api/shop/orders/refund", {
-        method: "POST",
-        headers: { "content-type": "application/json", ...headers },
-        body: JSON.stringify({ orderId, reason: "쇼핑 탭에서 접수한 환불 요청" }),
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok || !json?.ok) throw new Error(String(json?.error ?? `http_${res.status}`));
-      const nextOrder = json.data.order as ShopOrderSummary;
-      setOrders((current) => [nextOrder, ...current.filter((item) => item.orderId !== nextOrder.orderId)].slice(0, 3));
-      setOrderMessageTone("notice");
-      setOrderMessage("환불 요청이 접수되었습니다. 관리자 검토 후 처리됩니다.");
-    } catch (error: any) {
-      const text = String(error?.message ?? "failed_to_request_shop_refund");
+      const next = await toggleWishlist(productId, headers);
+      setWishlist(next.ids);
+    } catch {
       setOrderMessageTone("error");
-      if (text.includes("not_refundable")) {
-        setOrderMessage("이 주문은 현재 환불 요청을 받을 수 없는 상태입니다.");
-      } else {
-        setOrderMessage("환불 요청에 실패했습니다. 잠시 후 다시 시도해 주세요.");
-      }
+      setOrderMessage("위시리스트 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.");
     }
   };
+
+  const shoppingHubLinks = [
+    {
+      href: "/shop/profile",
+      title: "쇼핑 프로필",
+      description: status === "authenticated" ? "주문, 배송지, 위시리스트를 한 곳에서 관리합니다." : "로그인 후 계정 기반 쇼핑 정보를 확인합니다.",
+    },
+    {
+      href: "/shop/orders",
+      title: "주문 목록",
+      description:
+        status === "authenticated"
+          ? ordersLoading
+            ? "최근 주문을 불러오는 중입니다."
+            : orders.length > 0
+              ? `최근 ${orders.length}건의 주문 상태를 바로 확인합니다.`
+              : "결제 완료 후 주문 내역이 이곳에 정리됩니다."
+          : "로그인 후 주문 내역을 확인할 수 있습니다.",
+    },
+    {
+      href: "/shop/orders?filter=progress",
+      title: "배송 현황",
+      description:
+        status === "authenticated"
+          ? orders.some((order) => order.status === "PAID" || order.status === "SHIPPED")
+            ? "진행 중인 결제와 배송 단계를 확인합니다."
+            : "현재 진행 중인 배송이 없습니다."
+          : "배송 상태는 계정 로그인 후 확인할 수 있습니다.",
+    },
+    {
+      href: "/settings/account/shipping",
+      title: "배송지 설정",
+      description: "결제 전에 기본 배송지를 정확하게 등록하고 수정합니다.",
+    },
+    {
+      href: "/shop/wishlist",
+      title: "위시리스트",
+      description:
+        status === "authenticated"
+          ? `${wishlist.length}개 상품이 계정 위시리스트에 저장되어 있습니다.`
+          : "위시리스트는 로그인한 계정에 저장됩니다.",
+    },
+  ];
 
   return (
     <div className="-mx-4 pb-24">
-      <div className="bg-[#3b6fc9] px-4 py-3 text-center text-[12.5px] font-semibold text-white">
+      <div className="bg-[#102a43] px-4 py-3 text-center text-[12.5px] font-semibold text-white">
         {t("오늘 회복 흐름에 맞는 추천 상품과 구매 정보를 한눈에 확인하세요")}
       </div>
 
@@ -370,7 +398,7 @@ export function ShopPage() {
           >
             <CartIcon />
           </button>
-          <Link href="/settings/account" data-auth-allow className="inline-flex h-10 w-10 items-center justify-center text-[#111827]" aria-label={t("계정 설정")}>
+          <Link href="/shop/profile" data-auth-allow className="inline-flex h-10 w-10 items-center justify-center text-[#111827]" aria-label={t("쇼핑 프로필")}>
             <ProfileIcon />
           </Link>
         </div>
@@ -385,7 +413,7 @@ export function ShopPage() {
             placeholder={t("상품 이름, 효능, 태그로 검색...")}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full rounded-2xl border border-[#edf1f6] bg-[#f8fafc] py-2.5 pl-9 pr-4 text-[13px] text-[#111827] outline-none placeholder:text-[#92a0b4] focus:border-[#3b6fc9]"
+            className="w-full rounded-2xl border border-[#edf1f6] bg-[#f8fafc] py-2.5 pl-9 pr-4 text-[13px] text-[#111827] outline-none placeholder:text-[#92a0b4] focus:border-[#102a43]"
           />
           {searchQuery ? (
             <button type="button" data-auth-allow onClick={() => setSearchQuery("")} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[#8d99ab]">
@@ -400,7 +428,7 @@ export function ShopPage() {
             className="flex items-center gap-1.5 text-[12px] text-[#65748b]"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-3.5 w-3.5"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
-            {t("필터")} {(priceFilter !== "all" || sortKey !== "recommended") ? <span className="rounded-full bg-[#3b6fc9] px-1.5 py-0.5 text-[10px] text-white">ON</span> : null}
+            {t("필터")} {(priceFilter !== "all" || sortKey !== "recommended") ? <span className="rounded-full bg-[#102a43] px-1.5 py-0.5 text-[10px] text-white">ON</span> : null}
           </button>
           {(searchQuery || priceFilter !== "all" || sortKey !== "recommended") ? (
             <button type="button" data-auth-allow onClick={() => { setSearchQuery(""); setPriceFilter("all"); setSortKey("recommended"); }} className="text-[11px] text-[#8d99ab]">
@@ -586,7 +614,7 @@ export function ShopPage() {
                 onClick={() => startTransition(() => { setCategory(item.key); })}
                 className={[
                   "shrink-0 rounded-full px-5 py-3 text-[13px] font-semibold transition",
-                  active ? "bg-[#3b6fc9] text-white" : "bg-transparent text-[#111827]",
+                  active ? "bg-[#102a43] text-white" : "bg-transparent text-[#111827]",
                 ].join(" ")}
               >
                 {t(item.label)}
@@ -711,68 +739,34 @@ export function ShopPage() {
         ) : null}
 
         {/* 주문 내역 섹션 */}
-        {status === "authenticated" ? (
-          <div id="shop-orders" className="rounded-[32px] border border-[#edf1f6] bg-white p-5">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-[18px] font-bold tracking-[-0.02em] text-[#111827]">{t("내 주문")}</div>
-                <div className="mt-1 text-[12.5px] text-[#65748b]">{t("최근 주문을 확인하고 필요한 경우 환불 요청을 진행할 수 있습니다.")}</div>
-              </div>
-              <Link href="/shop/orders" data-auth-allow className={`${SECONDARY_BUTTON} h-9 shrink-0 text-[11px]`}>
-                {t("전체 보기")}
-              </Link>
+        <div id="shop-orders" className="rounded-[32px] border border-[#dbe4ef] bg-white p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[18px] font-bold tracking-[-0.02em] text-[#102a43]">{t("내 쇼핑")}</div>
+              <div className="mt-1 text-[12.5px] text-[#61758a]">{t("개인 정보는 한곳에 모으고, 상세 화면에서만 깊게 확인하도록 정리했습니다.")}</div>
             </div>
-
-            <div className="mt-4 space-y-3">
-              {orders.map((order) => (
-                <div key={order.orderId} className="rounded-3xl border border-[#edf1f6] bg-[#f8fafc] px-4 py-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-[14px] font-semibold text-[#111827]">{order.productSnapshot.name}</div>
-                      <div className="mt-1 text-[11px] text-[#8d99ab]">
-                        {t("수량")} {order.productSnapshot.quantity} · {Math.round(order.amount).toLocaleString("ko-KR")}원 · {formatDateLabel(order.createdAt)}
-                      </div>
-                      {order.shipping.addressLine1 ? (
-                        <div className="mt-1 text-[11px] text-[#8d99ab]">
-                          {order.shipping.recipientName} · {order.shipping.addressLine1}{order.shipping.addressLine2 ? ` ${order.shipping.addressLine2}` : ""}
-                        </div>
-                      ) : null}
-                    </div>
-                    <span className={`rounded-full border px-2.5 py-1 text-[10.5px] font-semibold ${orderStatusClass(order.status)}`}>
-                      {orderStatusLabel(order.status)}
-                    </span>
-                  </div>
-
-                  {order.trackingNumber ? (
-                    <div className="mt-2 rounded-2xl bg-[#eef4fb] px-3 py-1.5 text-[11px] text-[#44556d]">
-                      📦 {order.courier} · {order.trackingNumber}
-                    </div>
-                  ) : null}
-
-                  {order.refund.status === "requested" && <div className="mt-2 text-[11.5px] text-[#65748b]">{t("환불 요청 접수됨")} · {order.refund.reason ?? t("사유 없음")}</div>}
-                  {order.refund.status === "rejected" && <div className="mt-2 text-[11.5px] text-[#a33a2b]">{t("환불 반려")} · {order.refund.note ?? t("사유 없음")}</div>}
-                  {order.refund.status === "done" && <div className="mt-2 text-[11.5px] text-[#11294b]">{t("환불 완료")}</div>}
-                  {order.status === "FAILED" && order.failMessage && <div className="mt-2 text-[11.5px] text-[#a33a2b]">{order.failMessage}</div>}
-
-                  <div className="mt-3 flex gap-2">
-                    <Link href={`/shop/orders/${encodeURIComponent(order.orderId)}`} data-auth-allow className={`${SECONDARY_BUTTON} h-9 text-[11px]`}>
-                      상세
-                    </Link>
-                    {order.status === "PAID" && order.refund.status === "none" ? (
-                      <button type="button" data-auth-allow onClick={() => void requestRefund(order.orderId)} className={`${SECONDARY_BUTTON} h-9 text-[11px]`}>
-                        {t("환불 요청")}
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-              ))}
-
-              {!ordersLoading && orders.length === 0 ? (
-                <div className="rounded-3xl border border-[#edf1f6] bg-[#f8fafc] px-4 py-4 text-[12.5px] text-[#65748b]">{t("아직 주문이 없습니다. 상품 상세 페이지에서 바로 결제할 수 있습니다.")}</div>
-              ) : null}
-            </div>
+            <Link href="/shop/profile" data-auth-allow className={`${SECONDARY_BUTTON} h-9 shrink-0 text-[11px]`}>
+              {t("프로필 열기")}
+            </Link>
           </div>
-        ) : null}
+
+          <div className="mt-4 rounded-3xl border border-[#edf1f6] bg-[#f8fafc] p-2">
+            {shoppingHubLinks.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                data-auth-allow
+                className="flex items-center justify-between gap-4 rounded-2xl px-3 py-4 transition hover:bg-white"
+              >
+                <div className="min-w-0">
+                  <div className="text-[13px] font-semibold text-[#102a43]">{item.title}</div>
+                  <div className="mt-1 text-[11.5px] leading-5 text-[#61758a]">{item.description}</div>
+                </div>
+                <span className="shrink-0 text-[18px] text-[#9aabbc]">›</span>
+              </Link>
+            ))}
+          </div>
+        </div>
 
         {/* 법적 푸터 */}
         <div className="mt-8 space-y-3 border-t border-[#edf1f6] pt-6 text-[11px] leading-5 text-[#8d99ab]">
