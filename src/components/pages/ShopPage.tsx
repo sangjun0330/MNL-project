@@ -10,6 +10,7 @@ import {
   buildShopRecommendations,
   formatShopPrice,
   getShopCategoryMeta,
+  getShopImageSrc,
   SHOP_CATEGORIES,
   SHOP_PRODUCTS,
   type ShopCategoryKey,
@@ -483,7 +484,7 @@ export function ShopPage() {
               <Link href={`/shop/${encodeURIComponent(featuredPrimary.product.id)}`} data-auth-allow className="block overflow-hidden rounded-[32px] border border-[#edf1f6] bg-white">
                 <div className="relative bg-[#f3f5f7]">
                   {featuredPrimary.product.imageUrls[0] ? (
-                    <img src={featuredPrimary.product.imageUrls[0]} alt={featuredPrimary.product.name} className="aspect-[1.15/1] w-full object-cover" />
+                    <img src={getShopImageSrc(featuredPrimary.product.imageUrls[0])} alt={featuredPrimary.product.name} className="aspect-[1.15/1] w-full object-cover" referrerPolicy="no-referrer" />
                   ) : (
                     <div className={["flex aspect-[1.15/1] items-end px-6 py-6", productToneClass(featuredPrimary.product)].join(" ")}>
                       <div>
@@ -536,7 +537,7 @@ export function ShopPage() {
                     <Link href={`/shop/${encodeURIComponent(entry.product.id)}`} data-auth-allow className="block rounded-[28px] border border-[#edf1f6] bg-white p-3">
                       <div className="relative overflow-hidden rounded-[22px] bg-[#f3f5f7]">
                         {entry.product.imageUrls[0] ? (
-                          <img src={entry.product.imageUrls[0]} alt={entry.product.name} className="aspect-square w-full object-cover" />
+                          <img src={getShopImageSrc(entry.product.imageUrls[0])} alt={entry.product.name} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" />
                         ) : (
                           <div className={["flex aspect-square items-end px-4 py-4", productToneClass(entry.product)].join(" ")}>
                             <div className="text-[20px] font-bold tracking-[-0.03em]">{entry.product.visualLabel}</div>
@@ -628,7 +629,7 @@ export function ShopPage() {
               <Link href={`/shop/${encodeURIComponent(entry.product.id)}`} data-auth-allow className="block">
                 <div className="relative overflow-hidden rounded-[2px] bg-[#f3f5f7]">
                   {entry.product.imageUrls[0] ? (
-                    <img src={entry.product.imageUrls[0]} alt={entry.product.name} className="aspect-square w-full object-cover" />
+                    <img src={getShopImageSrc(entry.product.imageUrls[0])} alt={entry.product.name} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" />
                   ) : (
                     <div className={["flex aspect-square items-center justify-center p-4", productToneClass(entry.product)].join(" ")}>
                       <div className="text-center">
@@ -694,7 +695,7 @@ export function ShopPage() {
                 <Link key={product.id} href={`/shop/${encodeURIComponent(product.id)}`} data-auth-allow className="block shrink-0 w-[120px]">
                   <div className="overflow-hidden rounded-2xl bg-[#f3f5f7]">
                     {product.imageUrls[0] ? (
-                      <img src={product.imageUrls[0]} alt={product.name} className="aspect-square w-full object-cover" />
+                      <img src={getShopImageSrc(product.imageUrls[0])} alt={product.name} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" />
                     ) : (
                       <div className={["flex aspect-square items-center justify-center", productToneClass(product)].join(" ")}>
                         <div className="text-[16px] font-bold">{product.visualLabel.slice(0, 3)}</div>

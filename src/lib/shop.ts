@@ -635,6 +635,16 @@ export function formatShopPrice(product: ShopProduct) {
   return product.priceLabel;
 }
 
+export function getShopImageSrc(value: string | null | undefined) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("/")) return raw;
+  if (/^https?:\/\//i.test(raw)) {
+    return `/api/shop/image?src=${encodeURIComponent(raw)}`;
+  }
+  return raw;
+}
+
 export function deriveShopSignals(input: SignalInput): { selectedDate: ISODate; signals: ShopSignal[] } {
   const selectedDate = input.selected ?? todayISO();
   const bio = input.bio[selectedDate];

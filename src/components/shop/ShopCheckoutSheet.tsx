@@ -1,6 +1,7 @@
 "use client";
 
 import { BottomSheet } from "@/components/ui/BottomSheet";
+import type { ShopShippingAddress } from "@/lib/shopProfile";
 
 type ShopCheckoutSheetProps = {
   open: boolean;
@@ -11,6 +12,9 @@ type ShopCheckoutSheetProps = {
   productSubtitle?: string;
   priceKrw: number;
   quantity: number;
+  addresses?: ShopShippingAddress[];
+  selectedAddressId?: string | null;
+  onSelectAddress?: (addressId: string) => void;
   shippingLabel?: string | null;
 };
 
@@ -23,6 +27,9 @@ export function ShopCheckoutSheet({
   productSubtitle,
   priceKrw,
   quantity,
+  addresses = [],
+  selectedAddressId = null,
+  onSelectAddress,
   shippingLabel,
 }: ShopCheckoutSheetProps) {
   const total = Math.max(0, Math.round(priceKrw) * Math.max(1, quantity));
@@ -63,6 +70,40 @@ export function ShopCheckoutSheet({
         <div className="text-[13px] text-ios-sub">수량: {quantity}</div>
         <div className="mt-1 text-[30px] font-extrabold tracking-[-0.02em] text-ios-text">{total.toLocaleString("ko-KR")}원</div>
         <div className="my-3 h-px bg-ios-sep" />
+        {addresses.length > 1 ? (
+          <>
+            <div className="text-[13px] font-semibold text-ios-text">배송지 선택</div>
+            <div className="mt-2 grid gap-2">
+              {addresses.map((address) => {
+                const active = address.id === selectedAddressId;
+                return (
+                  <button
+                    key={address.id}
+                    type="button"
+                    data-auth-allow
+                    onClick={() => onSelectAddress?.(address.id)}
+                    className={[
+                      "rounded-2xl border px-3 py-3 text-left transition",
+                      active ? "border-[#3b6fc9] bg-[#eef4fb]" : "border-[#d7dfeb] bg-white",
+                    ].join(" ")}
+                  >
+                    <div className="flex items-center gap-2">
+                      {active ? (
+                        <span className="rounded-full bg-[#3b6fc9] px-2 py-0.5 text-[10px] font-semibold text-white">선택</span>
+                      ) : null}
+                      <span className="text-[12px] font-semibold text-[#11294b]">{address.label}</span>
+                    </div>
+                    <div className="mt-1 text-[12px] font-semibold text-ios-text">{address.recipientName} · {address.phone}</div>
+                    <div className="mt-1 text-[11.5px] leading-5 text-ios-sub">
+                      ({address.postalCode}) {address.addressLine1} {address.addressLine2}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="my-3 h-px bg-ios-sep" />
+          </>
+        ) : null}
         {shippingLabel ? (
           <>
             <div className="text-[13px] font-semibold text-ios-text">배송지</div>

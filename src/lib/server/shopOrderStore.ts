@@ -690,6 +690,10 @@ export async function countReservedShopQuantityForProduct(productId: string) {
   }, 0);
 }
 
+function isReviewEligibleOrder(row: ShopOrderRecord) {
+  return row.status === "DELIVERED" || Boolean(row.deliveredAt);
+}
+
 export async function listVerifiedShopReviewerIdsForProduct(productId: string): Promise<Set<string>> {
   const key = cleanText(productId, 80);
   if (!key) return new Set();
@@ -704,19 +708,27 @@ export async function listVerifiedShopReviewerIdsForProduct(productId: string): 
   const verified = new Set<string>();
   for (const row of rows) {
     if (row.productId !== key) continue;
-    if (
-      row.status === "PAID" ||
-      row.status === "SHIPPED" ||
-      row.status === "DELIVERED" ||
-      row.status === "REFUND_REQUESTED" ||
-      row.status === "REFUND_REJECTED" ||
-      row.status === "REFUNDED"
-    ) {
+    if (isReviewEligibleOrder(row)) {
       verified.add(row.userId);
     }
   }
 
   return verified;
+}
+
+export async function hasDeliveredShopOrderForUserProduct(userId: string, productId: string): Promise<boolean> {
+  const safeUserId = cleanText(userId, 120);
+  const safeProductId = cleanText(productId, 80);
+  if (!safeUserId || !safeProductId) return false;
+
+  let rows: ShopOrderRecord[] = [];
+  try {
+    rows = await listShopOrderRows(200);
+  } catch {
+    rows = [];
+  }
+
+  return rows.some((row) => row.userId === safeUserId && row.productId === safeProductId && isReviewEligibleOrder(row));
 }
 
 export async function markShopOrderFailed(input: {

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { SHOP_PRODUCTS, formatShopPrice, type ShopProduct } from "@/lib/shop";
+import { getShopImageSrc, SHOP_PRODUCTS, formatShopPrice, type ShopProduct } from "@/lib/shop";
 import { getWishlist, removeFromWishlist } from "@/lib/shopClient";
 
 export function ShopWishlistPage() {
@@ -88,7 +88,7 @@ export function ShopWishlistPage() {
                   <div className="relative overflow-hidden rounded-[2px] bg-[#f3f5f7]">
                     {product.imageUrls[0] ? (
                       /* eslint-disable-next-line @next/next/no-img-element */
-                      <img src={product.imageUrls[0]} alt={product.name} className="aspect-square w-full object-cover" />
+                      <img src={getShopImageSrc(product.imageUrls[0])} alt={product.name} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" />
                     ) : (
                       <div className={["flex aspect-square items-center justify-center p-4", productToneClass(product)].join(" ")}>
                         <div className="text-center">

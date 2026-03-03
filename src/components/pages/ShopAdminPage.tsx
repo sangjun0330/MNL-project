@@ -8,6 +8,7 @@ import {
   createShopProductId,
   formatShopPrice,
   getShopCategoryMeta,
+  getShopImageSrc,
   getShopVisualPreset,
   SHOP_CATEGORIES,
   SHOP_PRODUCTS,
@@ -330,7 +331,15 @@ function UrlListInput({ value, onChange, max = 6 }: { value: string[]; onChange:
           </div>
           {url && isValidUrl(url) ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={url} alt="" className="h-10 w-10 rounded-xl border border-[#d7dfeb] object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+            <img
+              src={getShopImageSrc(url)}
+              alt=""
+              className="h-10 w-10 rounded-xl border border-[#d7dfeb] object-cover"
+              referrerPolicy="no-referrer"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = "none";
+              }}
+            />
           ) : <div className="h-10 w-10 flex-shrink-0 rounded-xl border border-[#d7dfeb] bg-[#f4f7fb]" />}
           <button type="button" data-auth-allow onClick={() => removeRow(i)} className="flex-shrink-0 rounded-xl p-2 text-[#92a0b4] hover:text-[#a33a2b]">✕</button>
         </div>

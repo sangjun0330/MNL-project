@@ -1,7 +1,7 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { loadShopCatalog } from "@/lib/server/shopCatalogStore";
-import { listVerifiedShopReviewerIdsForProduct } from "@/lib/server/shopOrderStore";
+import { hasDeliveredShopOrderForUserProduct, listVerifiedShopReviewerIdsForProduct } from "@/lib/server/shopOrderStore";
 import { listShopReviewsForProduct, summarizeShopReviews, upsertShopReview } from "@/lib/server/shopReviewStore";
 
 export const runtime = "edge";
@@ -41,11 +41,18 @@ export async function GET(req: Request) {
   if (!productId) return jsonNoStore({ ok: false, error: "invalid_product_id" }, { status: 400 });
 
   try {
-    const reviews = await toPublicReviews(productId);
+    const viewerUserId = await readUserIdFromRequest(req);
+    const [reviews, viewerCanWrite] = await Promise.all([
+      toPublicReviews(productId),
+      viewerUserId ? hasDeliveredShopOrderForUserProduct(viewerUserId, productId) : Promise.resolve(false),
+    ]);
     const summary = summarizeShopReviews(reviews);
-    return jsonNoStore({ ok: true, data: { reviews, summary } });
+    return jsonNoStore({ ok: true, data: { reviews, summary, viewerCanWrite } });
   } catch {
-    return jsonNoStore({ ok: true, data: { reviews: [], summary: { count: 0, averageRating: 0 }, degraded: true } });
+    return jsonNoStore({
+      ok: true,
+      data: { reviews: [], summary: { count: 0, averageRating: 0 }, viewerCanWrite: false, degraded: true },
+    });
   }
 }
 
@@ -68,6 +75,10 @@ export async function POST(req: Request) {
     const catalog = await loadShopCatalog();
     if (!catalog.some((item) => item.id === productId)) {
       return jsonNoStore({ ok: false, error: "shop_product_not_found" }, { status: 404 });
+    }
+    const canWrite = await hasDeliveredShopOrderForUserProduct(userId, productId);
+    if (!canWrite) {
+      return jsonNoStore({ ok: false, error: "shop_review_requires_delivered_order" }, { status: 403 });
     }
 
     const savedReview = await upsertShopReview({
@@ -100,6 +111,9 @@ export async function POST(req: Request) {
     }
     if (message === "shop_review_storage_unavailable") {
       return jsonNoStore({ ok: false, error: "shop_review_storage_unavailable" }, { status: 503 });
+    }
+    if (message === "shop_review_requires_delivered_order") {
+      return jsonNoStore({ ok: false, error: "shop_review_requires_delivered_order" }, { status: 403 });
     }
     return jsonNoStore({ ok: false, error: "failed_to_save_shop_review" }, { status: 500 });
   }

@@ -6,8 +6,14 @@ import { useEffect, useMemo, useState } from "react";
 import { useAuthState } from "@/lib/auth";
 import { authHeaders, ensureTossScript } from "@/lib/billing/client";
 import { cn } from "@/lib/cn";
-import { formatShopPrice, type ShopProduct } from "@/lib/shop";
-import { formatShopShippingSingleLine, isCompleteShopShippingProfile, type ShopShippingProfile } from "@/lib/shopProfile";
+import { formatShopPrice, getShopImageSrc, type ShopProduct } from "@/lib/shop";
+import {
+  formatShopShippingSingleLine,
+  isCompleteShopShippingProfile,
+  resolveDefaultShopShippingAddress,
+  type ShopShippingAddress,
+  type ShopShippingProfile,
+} from "@/lib/shopProfile";
 import { isInWishlist, loadShopClientState, markShopPartnerClick, markShopViewed, saveShopClientState, toggleWishlist } from "@/lib/shopClient";
 import { useI18n } from "@/lib/useI18n";
 import { ShopCheckoutSheet } from "@/components/shop/ShopCheckoutSheet";
@@ -27,6 +33,12 @@ type ShopReviewRecord = {
 type ShopReviewSummary = {
   count: number;
   averageRating: number;
+};
+
+type ShopProfileResponse = {
+  profile?: ShopShippingProfile | null;
+  addresses?: ShopShippingAddress[];
+  defaultAddressId?: string | null;
 };
 
 const REVIEWS_PER_PAGE = 5;
@@ -120,11 +132,14 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const [quantity, setQuantity] = useState(1);
   const [shippingProfile, setShippingProfile] = useState<ShopShippingProfile | null>(null);
+  const [shippingAddresses, setShippingAddresses] = useState<ShopShippingAddress[]>([]);
+  const [selectedShippingAddressId, setSelectedShippingAddressId] = useState<string | null>(null);
   const [shippingLoading, setShippingLoading] = useState(false);
   const [reviews, setReviews] = useState<ShopReviewRecord[]>([]);
   const [reviewSummary, setReviewSummary] = useState<ShopReviewSummary>({ count: 0, averageRating: 0 });
   const [reviewsLoading, setReviewsLoading] = useState(true);
   const [reviewSaving, setReviewSaving] = useState(false);
+  const [canWriteReview, setCanWriteReview] = useState(false);
   const [reviewPage, setReviewPage] = useState(1);
   const [expandedReviews, setExpandedReviews] = useState<Record<number, boolean>>({});
   const [reviewSort, setReviewSort] = useState<"recommended" | "latest" | "rating_high" | "rating_low">("recommended");
@@ -177,8 +192,10 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
     const run = async () => {
       setReviewsLoading(true);
       try {
+        const headers = status === "authenticated" ? await authHeaders() : {};
         const res = await fetch(`/api/shop/reviews?productId=${encodeURIComponent(product.id)}`, {
           method: "GET",
+          headers: Object.keys(headers).length > 0 ? headers : undefined,
           cache: "no-store",
         });
         const json = await res.json().catch(() => null);
@@ -186,10 +203,12 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
         if (!res.ok || !json?.ok) throw new Error(String(json?.error ?? `http_${res.status}`));
         setReviews(Array.isArray(json?.data?.reviews) ? (json.data.reviews as ShopReviewRecord[]) : []);
         setReviewSummary((json?.data?.summary as ShopReviewSummary) ?? { count: 0, averageRating: 0 });
+        setCanWriteReview(Boolean(json?.data?.viewerCanWrite));
       } catch {
         if (!active) return;
         setReviews([]);
         setReviewSummary({ count: 0, averageRating: 0 });
+        setCanWriteReview(false);
       } finally {
         if (!active) return;
         setReviewsLoading(false);
@@ -200,7 +219,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
     return () => {
       active = false;
     };
-  }, [product.id]);
+  }, [product.id, status]);
 
   useEffect(() => {
     let active = true;
@@ -227,10 +246,21 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
         const json = await res.json().catch(() => null);
         if (!active) return;
         if (!res.ok || !json?.ok) throw new Error(String(json?.error ?? `http_${res.status}`));
-        setShippingProfile((json?.data?.profile as ShopShippingProfile | null) ?? null);
+        const data = (json?.data ?? {}) as ShopProfileResponse;
+        const addresses = Array.isArray(data.addresses) ? data.addresses : [];
+        const defaultAddressId =
+          typeof data.defaultAddressId === "string" && data.defaultAddressId ? data.defaultAddressId : null;
+        const selectedAddress =
+          (defaultAddressId ? addresses.find((item) => item.id === defaultAddressId) : null) ??
+          resolveDefaultShopShippingAddress({ addresses, defaultAddressId });
+        setShippingAddresses(addresses);
+        setSelectedShippingAddressId(selectedAddress?.id ?? null);
+        setShippingProfile(selectedAddress ?? (data.profile ?? null));
       } catch {
         if (!active) return;
         setShippingProfile(null);
+        setShippingAddresses([]);
+        setSelectedShippingAddressId(null);
       } finally {
         if (!active) return;
         setShippingLoading(false);
@@ -243,9 +273,19 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
     };
   }, [status]);
 
-  const selectedImageUrl = product.imageUrls[selectedImageIndex] ?? null;
-  const shippingReady = Boolean(shippingProfile && isCompleteShopShippingProfile(shippingProfile));
-  const shippingLabel = shippingProfile ? `${shippingProfile.recipientName} · ${shippingProfile.phone} · ${formatShopShippingSingleLine(shippingProfile)}` : null;
+  const galleryImageUrls = useMemo(
+    () => product.imageUrls.map((url) => getShopImageSrc(url)).filter(Boolean),
+    [product.imageUrls]
+  );
+  const selectedImageUrl = galleryImageUrls[selectedImageIndex] ?? null;
+  const selectedShippingAddress =
+    (selectedShippingAddressId ? shippingAddresses.find((item) => item.id === selectedShippingAddressId) : null) ??
+    null;
+  const effectiveShippingProfile = selectedShippingAddress ?? shippingProfile;
+  const shippingReady = Boolean(effectiveShippingProfile && isCompleteShopShippingProfile(effectiveShippingProfile));
+  const shippingLabel = effectiveShippingProfile
+    ? `${effectiveShippingProfile.recipientName} · ${effectiveShippingProfile.phone} · ${formatShopShippingSingleLine(effectiveShippingProfile)}`
+    : null;
   const hardOutOfStock = product.outOfStock || (typeof product.stockCount === "number" && product.stockCount <= 0);
   const maxSelectableQuantity =
     typeof product.stockCount === "number" && product.stockCount > 0 ? Math.max(1, Math.min(9, product.stockCount)) : 9;
@@ -341,6 +381,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
         body: JSON.stringify({
           productId: product.id,
           quantity,
+          shippingAddressId: selectedShippingAddressId,
         }),
       });
       const checkoutJson = await checkoutRes.json().catch(() => null);
@@ -398,6 +439,8 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
         setMessage("현재 이 상품은 앱 내 결제가 비활성화되어 있습니다.");
       } else if (text.includes("missing_shipping_address")) {
         setMessage("기본 배송지가 없어 주문을 진행할 수 없습니다. 계정에서 배송지를 먼저 저장해 주세요.");
+      } else if (text.includes("invalid_shipping_address")) {
+        setMessage("선택한 배송지를 찾지 못했습니다. 배송지를 다시 선택해 주세요.");
       } else if (text.includes("shop_profile_storage_unavailable")) {
         setMessage("배송지 저장소가 아직 준비되지 않았습니다. 잠시 후 다시 시도해 주세요.");
       } else if (text.includes("missing_toss_sdk")) {
@@ -439,6 +482,11 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
     if (status !== "authenticated") {
       setMessageTone("error");
       setMessage("리뷰는 로그인 후 작성할 수 있습니다.");
+      return;
+    }
+    if (!canWriteReview) {
+      setMessageTone("error");
+      setMessage("배송 완료된 주문 내역이 있는 상품만 리뷰를 작성할 수 있습니다.");
       return;
     }
     if (!reviewDraft.body.trim()) {
@@ -484,6 +532,8 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
         setMessage("리뷰 저장소를 아직 사용할 수 없습니다. Supabase shop 확장 마이그레이션을 먼저 적용해 주세요.");
       } else if (code === "invalid_shop_review") {
         setMessage("평점과 리뷰 내용을 확인해 주세요.");
+      } else if (code === "shop_review_requires_delivered_order") {
+        setMessage("배송 완료된 구매 내역이 확인된 사용자만 리뷰를 작성할 수 있습니다.");
       } else {
         setMessage("리뷰 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.");
       }
@@ -515,7 +565,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
           <button
             type="button"
             data-auth-allow
-            onClick={() => setSelectedImageIndex((current) => (current + 1) % Math.max(1, product.imageUrls.length || 1))}
+            onClick={() => setSelectedImageIndex((current) => (current + 1) % Math.max(1, galleryImageUrls.length || 1))}
             className="inline-flex items-center gap-1 text-[#111827]"
             aria-label={t("다음 상품 이미지")}
           >
@@ -569,7 +619,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
         <section id="shop-product-gallery" className="bg-white">
           <div className="relative bg-[#eef1f4]">
             {selectedImageUrl ? (
-              <img src={selectedImageUrl} alt={product.name} className="aspect-square w-full object-cover" />
+              <img src={selectedImageUrl} alt={product.name} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" />
             ) : (
               <div className={cn("flex aspect-square w-full items-end p-8", productToneClass(product))}>
                 <div>
@@ -586,7 +636,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
             ) : null}
             {/* 이미지 카운터 */}
             <div className="absolute bottom-4 right-4 rounded-full bg-black/10 px-3 py-1 text-[11px] font-semibold text-white">
-              {selectedImageIndex + 1} / {Math.max(1, product.imageUrls.length || 1)}
+              {selectedImageIndex + 1} / {Math.max(1, galleryImageUrls.length || 1)}
             </div>
             {/* 찜하기 플로팅 버튼 */}
             <button
@@ -600,9 +650,9 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
             </button>
           </div>
 
-          {product.imageUrls.length > 1 ? (
+          {galleryImageUrls.length > 1 ? (
             <div className="flex gap-2 overflow-x-auto px-4 py-3">
-              {product.imageUrls.map((url, index) => (
+              {galleryImageUrls.map((url, index) => (
                 <button
                   key={`${url}-${index}`}
                   type="button"
@@ -613,7 +663,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
                     index === selectedImageIndex ? "border-[#3b6fc9]" : "border-[#e6ebf2]"
                   )}
                 >
-                  <img src={url} alt={`${product.name} ${index + 1}`} className="h-16 w-16 object-cover" />
+                  <img src={url} alt={`${product.name} ${index + 1}`} className="h-16 w-16 object-cover" referrerPolicy="no-referrer" />
                 </button>
               ))}
             </div>
@@ -692,9 +742,9 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
 
         <section id="shop-product-info" className="space-y-6 bg-white px-4 py-6">
           <div className="grid gap-4 md:grid-cols-2">
-            {product.imageUrls.slice(0, 2).map((url, index) => (
+            {galleryImageUrls.slice(0, 2).map((url, index) => (
               <div key={`${url}-${index}`} className="overflow-hidden rounded-[2px] bg-[#eef1f4]">
-                <img src={url} alt={`${product.name} gallery ${index + 1}`} className="aspect-square w-full object-cover" />
+                <img src={url} alt={`${product.name} gallery ${index + 1}`} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" />
               </div>
             ))}
           </div>
@@ -907,42 +957,55 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
 
           <div id="shop-review-form" className="rounded-3xl border border-[#e6ebf2] bg-[#f8fafc] p-4">
             <div className="text-[15px] font-semibold text-[#111827]">{t("리뷰 작성")}</div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {[1, 2, 3, 4, 5].map((value) => {
-                const active = reviewDraft.rating === value;
-                return (
-                  <button
-                    key={value}
-                    type="button"
-                    data-auth-allow
-                    onClick={() => setReviewDraft((current) => ({ ...current, rating: value }))}
-                    className={cn(
-                      "inline-flex h-10 w-10 items-center justify-center rounded-2xl border text-[14px] font-semibold transition",
-                      active ? "border-[#11294b] bg-[#11294b] text-white" : "border-[#d7dfeb] bg-white text-[#11294b]"
-                    )}
-                  >
-                    {value}
+            {status !== "authenticated" ? (
+              <div className="mt-3 rounded-2xl border border-[#d7dfeb] bg-white px-4 py-4 text-[12.5px] leading-6 text-[#65748b]">
+                {t("리뷰는 로그인 후 작성할 수 있습니다.")}
+              </div>
+            ) : !canWriteReview ? (
+              <div className="mt-3 rounded-2xl border border-[#d7dfeb] bg-white px-4 py-4 text-[12.5px] leading-6 text-[#44556d]">
+                <div className="font-semibold text-[#11294b]">{t("리뷰 작성 조건")}</div>
+                <div className="mt-1">{t("배송 완료된 주문 내역이 있는 사용자만 이 상품 리뷰를 작성하거나 수정할 수 있습니다.")}</div>
+              </div>
+            ) : (
+              <>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {[1, 2, 3, 4, 5].map((value) => {
+                    const active = reviewDraft.rating === value;
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        data-auth-allow
+                        onClick={() => setReviewDraft((current) => ({ ...current, rating: value }))}
+                        className={cn(
+                          "inline-flex h-10 w-10 items-center justify-center rounded-2xl border text-[14px] font-semibold transition",
+                          active ? "border-[#11294b] bg-[#11294b] text-white" : "border-[#d7dfeb] bg-white text-[#11294b]"
+                        )}
+                      >
+                        {value}
+                      </button>
+                    );
+                  })}
+                </div>
+                <input
+                  className={`${INPUT_CLASS} mt-3`}
+                  value={reviewDraft.title}
+                  onChange={(event) => setReviewDraft((current) => ({ ...current, title: event.target.value }))}
+                  placeholder={t("한 줄 제목")}
+                />
+                <textarea
+                  className={`${INPUT_CLASS} mt-3 min-h-[140px] resize-none`}
+                  value={reviewDraft.body}
+                  onChange={(event) => setReviewDraft((current) => ({ ...current, body: event.target.value }))}
+                  placeholder={t("실제 사용감과 장단점을 남겨 주세요.")}
+                />
+                <div className="mt-3 flex justify-end">
+                  <button type="button" data-auth-allow onClick={() => void submitReview()} disabled={reviewSaving} className={`${PRIMARY_BUTTON} h-11 text-[12px]`}>
+                    {reviewSaving ? t("저장 중...") : t("리뷰 저장")}
                   </button>
-                );
-              })}
-            </div>
-            <input
-              className={`${INPUT_CLASS} mt-3`}
-              value={reviewDraft.title}
-              onChange={(event) => setReviewDraft((current) => ({ ...current, title: event.target.value }))}
-              placeholder={t("한 줄 제목")}
-            />
-            <textarea
-              className={`${INPUT_CLASS} mt-3 min-h-[140px] resize-none`}
-              value={reviewDraft.body}
-              onChange={(event) => setReviewDraft((current) => ({ ...current, body: event.target.value }))}
-              placeholder={t("실제 사용감과 장단점을 남겨 주세요.")}
-            />
-            <div className="mt-3 flex justify-end">
-              <button type="button" data-auth-allow onClick={() => void submitReview()} disabled={reviewSaving} className={`${PRIMARY_BUTTON} h-11 text-[12px]`}>
-                {reviewSaving ? t("저장 중...") : t("리뷰 저장")}
-              </button>
-            </div>
+                </div>
+              </>
+            )}
           </div>
         </section>
 
@@ -963,7 +1026,40 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
                 <div className="mt-3 text-[12.5px] leading-6 text-[#65748b]">{t("로그인 후 계정에 저장한 기본 배송지로 바로 주문할 수 있습니다.")}</div>
               ) : shippingLoading ? (
                 <div className="mt-3 text-[12.5px] leading-6 text-[#65748b]">{t("배송지 정보를 불러오는 중입니다.")}</div>
-              ) : shippingReady && shippingProfile ? (
+              ) : shippingAddresses.length > 0 ? (
+                <div className="mt-3 space-y-2">
+                  {shippingAddresses.map((address) => {
+                    const active = address.id === selectedShippingAddressId;
+                    return (
+                      <button
+                        key={address.id}
+                        type="button"
+                        data-auth-allow
+                        onClick={() => setSelectedShippingAddressId(address.id)}
+                        className={[
+                          "w-full rounded-2xl border px-3 py-3 text-left transition",
+                          active ? "border-[#3b6fc9] bg-[#eef4fb]" : "border-[#d7dfeb] bg-white",
+                        ].join(" ")}
+                      >
+                        <div className="flex items-center gap-2">
+                          {active ? (
+                            <span className="rounded-full bg-[#3b6fc9] px-2 py-0.5 text-[10px] font-semibold text-white">{t("선택")}</span>
+                          ) : null}
+                          <span className="text-[12px] font-semibold text-[#11294b]">{address.label}</span>
+                        </div>
+                        <div className="mt-1 text-[12px] font-semibold text-[#111827]">{address.recipientName} · {address.phone}</div>
+                        <div className="mt-1 text-[12px] leading-5 text-[#44556d]">{formatShopShippingSingleLine(address)}</div>
+                      </button>
+                    );
+                  })}
+                  {shippingReady && effectiveShippingProfile ? (
+                    <div className="rounded-2xl border border-[#d7dfeb] bg-white px-3 py-3 text-[12px] leading-5 text-[#44556d]">
+                      {t("결제 시 선택한 주소")}
+                      <div className="mt-1 font-semibold text-[#11294b]">{shippingLabel}</div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : shippingReady ? (
                 <div className="mt-3 text-[12.5px] leading-6 text-[#44556d]">{shippingLabel}</div>
               ) : (
                 <div className="mt-3 text-[12.5px] leading-6 text-[#a33a2b]">{t("계정에서 기본 배송지를 먼저 저장해야 합니다.")}</div>
@@ -993,7 +1089,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
                 <Link key={p.id} href={`/shop/${encodeURIComponent(p.id)}`} data-auth-allow className="shrink-0 w-[140px] block">
                   <div className="relative overflow-hidden rounded-[2px] bg-[#f3f5f7]">
                     {p.imageUrls[0] ? (
-                      <img src={p.imageUrls[0]} alt={p.name} className="aspect-square w-full object-cover" />
+                      <img src={getShopImageSrc(p.imageUrls[0])} alt={p.name} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" />
                     ) : (
                       <div className={cn("flex aspect-square items-center justify-center p-3", productToneClass(p))}>
                         <div className="text-center">
@@ -1071,6 +1167,9 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
         productSubtitle={product.subtitle}
         priceKrw={product.priceKrw ?? 0}
         quantity={quantity}
+        addresses={shippingAddresses}
+        selectedAddressId={selectedShippingAddressId}
+        onSelectAddress={setSelectedShippingAddressId}
         shippingLabel={shippingLabel}
       />
     </div>

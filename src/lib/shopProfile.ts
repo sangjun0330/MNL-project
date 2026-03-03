@@ -7,6 +7,16 @@ export type ShopShippingProfile = {
   deliveryNote: string;
 };
 
+export type ShopShippingAddress = ShopShippingProfile & {
+  id: string;
+  label: string;
+};
+
+export type ShopShippingAddressBook = {
+  addresses: ShopShippingAddress[];
+  defaultAddressId: string | null;
+};
+
 export type ShopShippingSnapshot = ShopShippingProfile & {
   savedAt: string | null;
 };
@@ -26,6 +36,18 @@ function cleanText(value: unknown, max = 160) {
   return String(value ?? "").trim().replace(/\s+/g, " ").slice(0, max);
 }
 
+export function createShopShippingAddressId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `ship_${crypto.randomUUID()}`;
+  }
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    const bytes = crypto.getRandomValues(new Uint8Array(4));
+    const suffix = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+    return `ship_${Date.now().toString(36)}_${suffix}`;
+  }
+  return `ship_${Date.now().toString(36)}`;
+}
+
 export function normalizeShopShippingProfile(raw: unknown): ShopShippingProfile {
   const source = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   return {
@@ -35,6 +57,37 @@ export function normalizeShopShippingProfile(raw: unknown): ShopShippingProfile 
     addressLine1: cleanText(source.addressLine1, 180),
     addressLine2: cleanText(source.addressLine2, 180),
     deliveryNote: cleanText(source.deliveryNote, 200),
+  };
+}
+
+export function buildShopShippingAddress(
+  raw: unknown,
+  fallback?: Partial<Pick<ShopShippingAddress, "id" | "label">>
+): ShopShippingAddress {
+  const source = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const base = normalizeShopShippingProfile(source);
+  const id = cleanText(source.id ?? fallback?.id, 80) || createShopShippingAddressId();
+  const label = cleanText(source.label ?? fallback?.label, 40) || "기본 배송지";
+  return {
+    id,
+    label,
+    ...base,
+  };
+}
+
+export function normalizeShopShippingAddressBook(raw: unknown): ShopShippingAddressBook {
+  const source = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const rawAddresses = Array.isArray(source.addresses) ? source.addresses : [];
+  const addresses = rawAddresses
+    .map((item) => buildShopShippingAddress(item))
+    .filter((item, index, list) => list.findIndex((candidate) => candidate.id === item.id) === index)
+    .slice(0, 8);
+  const defaultAddressId = cleanText(source.defaultAddressId, 80) || null;
+  const resolvedDefaultAddressId =
+    addresses.find((item) => item.id === defaultAddressId)?.id ?? addresses[0]?.id ?? null;
+  return {
+    addresses,
+    defaultAddressId: resolvedDefaultAddressId,
   };
 }
 
@@ -52,6 +105,21 @@ export function isCompleteShopShippingProfile(profile: ShopShippingProfile) {
   return Boolean(profile.recipientName && profile.phone && profile.postalCode && profile.addressLine1);
 }
 
+export function toShopShippingProfile(address: ShopShippingAddress | ShopShippingProfile): ShopShippingProfile {
+  return normalizeShopShippingProfile(address);
+}
+
+export function defaultShopShippingAddressBook(): ShopShippingAddressBook {
+  return {
+    addresses: [],
+    defaultAddressId: null,
+  };
+}
+
+export function resolveDefaultShopShippingAddress(book: ShopShippingAddressBook) {
+  return book.addresses.find((item) => item.id === book.defaultAddressId) ?? book.addresses[0] ?? null;
+}
+
 export function formatShopShippingSingleLine(profile: Pick<ShopShippingProfile, "postalCode" | "addressLine1" | "addressLine2">) {
   const parts = [
     profile.postalCode ? `(${profile.postalCode})` : "",
@@ -60,4 +128,3 @@ export function formatShopShippingSingleLine(profile: Pick<ShopShippingProfile, 
   ].filter(Boolean);
   return parts.join(" ");
 }
-

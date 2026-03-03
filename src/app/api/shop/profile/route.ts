@@ -1,6 +1,11 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
-import { loadShopShippingProfile, saveShopShippingProfile } from "@/lib/server/shopProfileStore";
+import {
+  loadShopShippingAddressBook,
+  loadShopShippingProfile,
+  saveShopShippingAddressBook,
+  saveShopShippingProfile,
+} from "@/lib/server/shopProfileStore";
 import { emptyShopShippingProfile } from "@/lib/shopProfile";
 
 export const runtime = "edge";
@@ -11,10 +16,28 @@ export async function GET(req: Request) {
   if (!userId) return jsonNoStore({ ok: false, error: "login_required" }, { status: 401 });
 
   try {
-    const profile = await loadShopShippingProfile(userId);
-    return jsonNoStore({ ok: true, data: { profile } });
+    const [profile, book] = await Promise.all([
+      loadShopShippingProfile(userId),
+      loadShopShippingAddressBook(userId),
+    ]);
+    return jsonNoStore({
+      ok: true,
+      data: {
+        profile,
+        addresses: book.addresses,
+        defaultAddressId: book.defaultAddressId,
+      },
+    });
   } catch {
-    return jsonNoStore({ ok: true, data: { profile: emptyShopShippingProfile(), degraded: true } });
+    return jsonNoStore({
+      ok: true,
+      data: {
+        profile: emptyShopShippingProfile(),
+        addresses: [],
+        defaultAddressId: null,
+        degraded: true,
+      },
+    });
   }
 }
 
@@ -33,8 +56,37 @@ export async function PUT(req: Request) {
   }
 
   try {
-    const profile = await saveShopShippingProfile(userId, (body as { profile?: unknown } | null)?.profile);
-    return jsonNoStore({ ok: true, data: { profile } });
+    const source = body as {
+      profile?: unknown;
+      addresses?: unknown;
+      defaultAddressId?: unknown;
+    } | null;
+
+    if (source && ("addresses" in source || "defaultAddressId" in source)) {
+      const saved = await saveShopShippingAddressBook(userId, {
+        addresses: source.addresses,
+        defaultAddressId: source.defaultAddressId,
+      });
+      return jsonNoStore({
+        ok: true,
+        data: {
+          profile: saved.profile,
+          addresses: saved.book.addresses,
+          defaultAddressId: saved.book.defaultAddressId,
+        },
+      });
+    }
+
+    const profile = await saveShopShippingProfile(userId, source?.profile);
+    const book = await loadShopShippingAddressBook(userId);
+    return jsonNoStore({
+      ok: true,
+      data: {
+        profile,
+        addresses: book.addresses,
+        defaultAddressId: book.defaultAddressId,
+      },
+    });
   } catch (error: any) {
     const message = String(error?.message ?? "failed_to_save_shop_profile");
     if (message === "invalid_shop_shipping_profile") {

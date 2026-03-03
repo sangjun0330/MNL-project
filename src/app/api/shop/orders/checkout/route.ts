@@ -9,7 +9,7 @@ import {
   countReservedShopQuantityForProduct,
   createShopOrder,
 } from "@/lib/server/shopOrderStore";
-import { buildShopShippingSnapshot, loadShopShippingProfile } from "@/lib/server/shopProfileStore";
+import { buildShopShippingSnapshot, resolveShopShippingProfileFromBook } from "@/lib/server/shopProfileStore";
 import { readTossClientKeyFromEnv, readTossSecretKeyFromEnv } from "@/lib/server/tossConfig";
 
 export const runtime = "edge";
@@ -68,6 +68,8 @@ export async function POST(req: Request) {
 
   const productId = String(body?.productId ?? "").trim();
   const quantity = Math.max(1, Math.min(9, Math.round(Number(body?.quantity) || 1)));
+  const shippingAddressId =
+    typeof body?.shippingAddressId === "string" && body.shippingAddressId.trim() ? String(body.shippingAddressId).trim() : null;
   if (!productId) return jsonNoStore({ ok: false, error: "invalid_product_id" }, { status: 400 });
 
   try {
@@ -103,9 +105,12 @@ export async function POST(req: Request) {
       return jsonNoStore({ ok: false, error: "shop_checkout_disabled" }, { status: 400 });
     }
 
-    const shippingProfile = await loadShopShippingProfile(userId);
+    const shippingProfile = await resolveShopShippingProfileFromBook(userId, shippingAddressId);
     if (!isCompleteShopShippingProfile(shippingProfile)) {
-      return jsonNoStore({ ok: false, error: "missing_shipping_address" }, { status: 400 });
+      return jsonNoStore(
+        { ok: false, error: shippingAddressId ? "invalid_shipping_address" : "missing_shipping_address" },
+        { status: 400 }
+      );
     }
 
     const orderId = buildShopOrderId(product.id);
