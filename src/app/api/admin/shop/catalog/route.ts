@@ -1,7 +1,7 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
-import { normalizeShopProduct, upsertShopProductInCatalog } from "@/lib/shop";
+import { normalizeShopProduct } from "@/lib/shop";
 import { requireBillingAdmin } from "@/lib/server/billingAdminAuth";
-import { loadShopCatalog, saveShopCatalog } from "@/lib/server/shopCatalogStore";
+import { loadShopCatalogAll, saveOneShopProduct } from "@/lib/server/shopCatalogStore";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -11,7 +11,7 @@ export async function GET(req: Request) {
   if (!admin.ok) return jsonNoStore({ ok: false, error: admin.error }, { status: admin.status });
 
   try {
-    const products = await loadShopCatalog();
+    const products = await loadShopCatalogAll();
     return jsonNoStore({ ok: true, data: { products } });
   } catch {
     return jsonNoStore({ ok: false, error: "failed_to_load_shop_catalog" }, { status: 500 });
@@ -38,10 +38,9 @@ export async function POST(req: Request) {
   }
 
   try {
-    const catalog = await loadShopCatalog();
-    const nextCatalog = upsertShopProductInCatalog(catalog, product);
-    const saved = await saveShopCatalog(nextCatalog);
-    return jsonNoStore({ ok: true, data: { product, products: saved } });
+    const saved = await saveOneShopProduct(product);
+    const products = await loadShopCatalogAll();
+    return jsonNoStore({ ok: true, data: { product: saved, products } });
   } catch (error: any) {
     const message = String(error?.message ?? "failed_to_save_shop_catalog");
     if (message === "shop_catalog_storage_unavailable") {

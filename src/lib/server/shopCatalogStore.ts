@@ -162,6 +162,66 @@ export async function loadShopCatalog(): Promise<ShopProduct[]> {
   }
 }
 
+export async function saveOneShopProduct(product: ShopProduct): Promise<ShopProduct> {
+  const admin = getSupabaseAdmin();
+  const row = toProductRow(product);
+
+  try {
+    const { data, error } = await admin
+      .from("shop_products")
+      .upsert(row, { onConflict: "id" })
+      .select("*")
+      .single();
+    if (error) throw error;
+    return fromProductRow(data) ?? product;
+  } catch (error) {
+    if (!isMissingTableError(error)) throw error;
+    // Legacy fallback: update the full catalog
+    const catalog = await loadShopCatalog();
+    const next = [product, ...catalog.filter((item) => item.id !== product.id)].slice(0, 80);
+    const saved = await saveLegacyShopCatalog(next);
+    return saved.find((item) => item.id === product.id) ?? product;
+  }
+}
+
+export async function deactivateShopProduct(productId: string): Promise<void> {
+  const admin = getSupabaseAdmin();
+  try {
+    const { error } = await admin.from("shop_products").update({ active: false }).eq("id", productId);
+    if (error) throw error;
+  } catch (error) {
+    if (!isMissingTableError(error)) throw error;
+    // Legacy: no deactivation concept, just silently succeed
+  }
+}
+
+export async function activateShopProduct(productId: string): Promise<void> {
+  const admin = getSupabaseAdmin();
+  try {
+    const { error } = await admin.from("shop_products").update({ active: true }).eq("id", productId);
+    if (error) throw error;
+  } catch (error) {
+    if (!isMissingTableError(error)) throw error;
+  }
+}
+
+export async function loadShopCatalogAll(): Promise<ShopProduct[]> {
+  const admin = getSupabaseAdmin();
+  try {
+    const { data, error } = await admin
+      .from("shop_products")
+      .select("*")
+      .order("priority", { ascending: false })
+      .order("updated_at", { ascending: false });
+    if (error) throw error;
+    return (data ?? [])
+      .map((row) => fromProductRow(row))
+      .filter((row): row is ShopProduct => Boolean(row));
+  } catch {
+    return loadShopCatalog();
+  }
+}
+
 export async function saveShopCatalog(products: ShopProduct[]): Promise<ShopProduct[]> {
   const admin = getSupabaseAdmin();
   const normalized = normalizeShopCatalogProducts(products);
