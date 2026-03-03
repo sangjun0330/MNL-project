@@ -283,7 +283,17 @@ function isMissingTableError(error: unknown, tableName: string) {
     code === "42703" ||
     code === "PGRST204" ||
     (message.includes("relation") && message.includes(tableName)) ||
-    (message.includes("column") && message.includes("shipping_snapshot")) ||
+    (
+      message.includes("column") &&
+      (
+        message.includes("shipping_snapshot") ||
+        message.includes("tracking_number") ||
+        message.includes("courier") ||
+        message.includes("shipped_at") ||
+        message.includes("delivered_at") ||
+        message.includes(tableName)
+      )
+    ) ||
     message.includes("schema cache")
   );
 }
@@ -306,7 +316,7 @@ function toProductSnapshotJson(snapshot: ShopOrderRecord["productSnapshot"]): Js
 }
 
 function toShopOrderRow(order: ShopOrderRecord): Database["public"]["Tables"]["shop_orders"]["Insert"] {
-  return {
+  const row: Database["public"]["Tables"]["shop_orders"]["Insert"] = {
     order_id: order.orderId,
     user_id: order.userId,
     status: order.status,
@@ -329,13 +339,16 @@ function toShopOrderRow(order: ShopOrderRecord): Database["public"]["Tables"]["s
     refund_cancel_amount: order.refund.cancelAmount,
     refund_canceled_at: order.refund.canceledAt,
     refund_summary: order.refund.cancelResponse,
-    tracking_number: order.trackingNumber,
-    courier: order.courier,
-    shipped_at: order.shippedAt,
-    delivered_at: order.deliveredAt,
     created_at: order.createdAt,
     updated_at: order.updatedAt,
   };
+
+  if (order.trackingNumber) row.tracking_number = order.trackingNumber;
+  if (order.courier) row.courier = order.courier;
+  if (order.shippedAt) row.shipped_at = order.shippedAt;
+  if (order.deliveredAt) row.delivered_at = order.deliveredAt;
+
+  return row;
 }
 
 function fromShopOrderRow(row: ShopOrderRow | null): ShopOrderRecord | null {
@@ -407,9 +420,9 @@ async function writeModernOrder(order: ShopOrderRecord) {
     ...order,
     updatedAt: now,
   };
-  const { data, error } = await admin.from("shop_orders").upsert(toShopOrderRow(nextOrder), { onConflict: "order_id" }).select("*").single();
+  const { error } = await admin.from("shop_orders").upsert(toShopOrderRow(nextOrder), { onConflict: "order_id" });
   if (error) throw error;
-  return fromShopOrderRow(data) ?? nextOrder;
+  return nextOrder;
 }
 
 async function writeOrder(order: ShopOrderRecord) {
@@ -531,7 +544,6 @@ async function writeOrderEventSafe(input: {
   message?: string | null;
   metadata?: Json | null;
 }) {
-  const admin = getSupabaseAdmin();
   const payload: Database["public"]["Tables"]["shop_order_events"]["Insert"] = {
     order_id: input.order.orderId,
     user_id: input.order.userId,
@@ -544,6 +556,7 @@ async function writeOrderEventSafe(input: {
   };
 
   try {
+    const admin = getSupabaseAdmin();
     const { error } = await admin.from("shop_order_events").insert(payload);
     if (error && !isMissingTableError(error, "shop_order_events")) {
       throw error;

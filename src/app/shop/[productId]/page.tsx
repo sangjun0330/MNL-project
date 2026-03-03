@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
-import { ShopProductDetailPage } from "@/components/pages/ShopProductDetailPage";
 import { AppShell } from "@/components/shell/AppShell";
+import { ShopProductDetailMount } from "@/components/shop/ShopProductDetailMount";
 import { loadShopCatalog } from "@/lib/server/shopCatalogStore";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +26,7 @@ export default async function Page(props: { params: Promise<{ productId: string 
 
   return (
     <AppShell>
-      <ShopProductDetailPage product={product} />
+      <ShopProductDetailMount product={product} />
     </AppShell>
   );
 }

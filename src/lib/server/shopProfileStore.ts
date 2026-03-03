@@ -138,8 +138,8 @@ export async function loadShopShippingAddressBook(userId: string): Promise<ShopS
   let primaryProfile: ShopShippingProfile | null = null;
   try {
     primaryProfile = await readPrimaryProfileRow(userId);
-  } catch (error) {
-    if (!isMissingTableError(error)) throw error;
+  } catch {
+    primaryProfile = null;
   }
 
   let payload: Record<string, unknown> = {};
@@ -171,8 +171,8 @@ export async function saveShopShippingAddressBook(
 
   try {
     await writePrimaryProfileRow(userId, primaryAddress ? profile : null);
-  } catch (error) {
-    if (!isMissingTableError(error)) throw error;
+  } catch {
+    // Fall through to legacy state storage. Primary profile sync is best-effort.
   }
 
   try {
