@@ -5,7 +5,6 @@ import { startTransition, useDeferredValue, useEffect, useMemo, useState } from 
 import Link from "next/link";
 import { useAuthState } from "@/lib/auth";
 import { authHeaders } from "@/lib/billing/client";
-import { formatKoreanDate } from "@/lib/date";
 import {
   buildShopRecommendations,
   formatShopPrice,
@@ -16,7 +15,8 @@ import {
   type ShopCategoryKey,
   type ShopProduct,
 } from "@/lib/shop";
-import { SHOP_BUTTON_PRIMARY, SHOP_BUTTON_SECONDARY } from "@/lib/shopUi";
+import { ShopBrandLogo } from "@/components/shop/ShopBrandLogo";
+import { ShopLanguageSwitcher } from "@/components/shop/ShopLanguageSwitcher";
 import { useAppStoreSelector } from "@/lib/store";
 import { useI18n } from "@/lib/useI18n";
 import {
@@ -25,49 +25,8 @@ import {
   toggleWishlist,
 } from "@/lib/shopClient";
 
-type ShopOrderSummary = {
-  orderId: string;
-  status: "READY" | "PAID" | "SHIPPED" | "DELIVERED" | "FAILED" | "CANCELED" | "REFUND_REQUESTED" | "REFUND_REJECTED" | "REFUNDED";
-  amount: number;
-  createdAt: string;
-  approvedAt: string | null;
-  failMessage: string | null;
-  productSnapshot: { name: string; quantity: number };
-  shipping: {
-    recipientName: string;
-    phone: string;
-    postalCode: string;
-    addressLine1: string;
-    addressLine2: string;
-    deliveryNote: string;
-  };
-  refund: { status: "none" | "requested" | "rejected" | "done"; reason: string | null; note: string | null };
-  trackingNumber: string | null;
-  courier: string | null;
-  purchaseConfirmedAt: string | null;
-};
-
 type SortKey = "recommended" | "newest" | "price_asc" | "price_desc";
 type PriceFilter = "all" | "free" | "under20k" | "under50k" | "over50k";
-
-const PRIMARY_BUTTON = SHOP_BUTTON_PRIMARY;
-const SECONDARY_BUTTON = SHOP_BUTTON_SECONDARY;
-
-function MenuIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-      <path d="M4 7h16" /><path d="M4 12h16" /><path d="M4 17h16" />
-    </svg>
-  );
-}
-
-function ChevronDownIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-      <path d="M6 9l6 6 6-6" />
-    </svg>
-  );
-}
 
 function CartIcon() {
   return (
@@ -127,7 +86,7 @@ function matchesPriceFilter(product: ShopProduct, filter: PriceFilter): boolean 
 }
 
 export function ShopPage() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const { status, user } = useAuthState();
   const store = useAppStoreSelector(
     (s) => ({ selected: s.selected, schedule: s.schedule, bio: s.bio, settings: s.settings }),
@@ -139,8 +98,6 @@ export function ShopPage() {
   const [catalog, setCatalog] = useState<ShopProduct[]>(SHOP_PRODUCTS);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState<string | null>(null);
-  const [orders, setOrders] = useState<ShopOrderSummary[]>([]);
-  const [ordersLoading, setOrdersLoading] = useState(false);
   const [orderMessage, setOrderMessage] = useState<string | null>(null);
   const [orderMessageTone, setOrderMessageTone] = useState<"error" | "notice">("notice");
 
@@ -212,38 +169,6 @@ export function ShopPage() {
     return () => { active = false; };
   }, []);
 
-  useEffect(() => {
-    let active = true;
-    if (status !== "authenticated" || !user?.userId) {
-      setOrders([]);
-      setOrdersLoading(false);
-      return () => { active = false; };
-    }
-    const run = async () => {
-      setOrdersLoading(true);
-      try {
-        const headers = await authHeaders();
-        const res = await fetch("/api/shop/orders?limit=3", {
-          method: "GET",
-          headers: { "content-type": "application/json", ...headers },
-          cache: "no-store",
-        });
-        const json = await res.json().catch(() => null);
-        if (!active) return;
-        if (!res.ok || !json?.ok || !Array.isArray(json?.data?.orders)) throw new Error(String(json?.error ?? `http_${res.status}`));
-        setOrders(json.data.orders as ShopOrderSummary[]);
-      } catch {
-        if (!active) return;
-        setOrders([]);
-      } finally {
-        if (!active) return;
-        setOrdersLoading(false);
-      }
-    };
-    void run();
-    return () => { active = false; };
-  }, [status, user?.userId]);
-
   const allShopState = useMemo(
     () => buildShopRecommendations({ selected: store.selected, schedule: store.schedule, bio: store.bio, settings: store.settings, products: catalog }),
     [catalog, store.selected, store.schedule, store.bio, store.settings]
@@ -276,7 +201,15 @@ export function ShopPage() {
     return result;
   }, [filteredShopState.recommendations, searchQuery, sortKey, priceFilter]);
 
-  const selectedDateLabel = formatKoreanDate(allShopState.selectedDate);
+  const selectedDateLabel = useMemo(() => {
+    const date = new Date(allShopState.selectedDate);
+    if (Number.isNaN(date.getTime())) return allShopState.selectedDate;
+    return new Intl.DateTimeFormat(lang === "en" ? "en-US" : "ko-KR", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(date);
+  }, [allShopState.selectedDate, lang]);
   const topSignals = allShopState.signals.slice(0, 4);
   const activeCategoryMeta = getShopCategoryMeta(category);
 
@@ -294,7 +227,7 @@ export function ShopPage() {
     e.stopPropagation();
     if (status !== "authenticated" || !user?.userId) {
       setOrderMessageTone("error");
-      setOrderMessage("위시리스트는 로그인한 계정에 저장됩니다.");
+      setOrderMessage(t("위시리스트는 로그인한 계정에 저장됩니다."));
       return;
     }
     try {
@@ -303,60 +236,9 @@ export function ShopPage() {
       setWishlist(next.ids);
     } catch {
       setOrderMessageTone("error");
-      setOrderMessage("위시리스트 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+      setOrderMessage(t("위시리스트 저장에 실패했습니다. 잠시 후 다시 시도해 주세요."));
     }
   };
-
-  const shoppingHubLinks = [
-    {
-      href: "/shop/profile",
-      title: "쇼핑 프로필",
-      description: status === "authenticated" ? "주문, 배송지, 위시리스트를 한 곳에서 관리합니다." : "로그인 후 계정 기반 쇼핑 정보를 확인합니다.",
-    },
-    {
-      href: "/shop/orders",
-      title: "주문 목록",
-      description:
-        status === "authenticated"
-          ? ordersLoading
-            ? "최근 주문을 불러오는 중입니다."
-            : orders.length > 0
-              ? `최근 ${orders.length}건의 주문 상태를 바로 확인합니다.`
-              : "결제 완료 후 주문 내역이 이곳에 정리됩니다."
-          : "로그인 후 주문 내역을 확인할 수 있습니다.",
-    },
-    {
-      href: "/shop/orders?filter=progress",
-      title: "배송 현황",
-      description:
-        status === "authenticated"
-          ? orders.some((order) => order.status === "PAID" || order.status === "SHIPPED")
-            ? "진행 중인 결제와 배송 단계를 확인합니다."
-            : "현재 진행 중인 배송이 없습니다."
-          : "배송 상태는 계정 로그인 후 확인할 수 있습니다.",
-    },
-    {
-      href: "/shop/cart",
-      title: "장바구니",
-      description:
-        status === "authenticated"
-          ? "담아둔 상품 수량을 조정하고 상품별로 결제를 이어갈 수 있습니다."
-          : "로그인 후 장바구니를 계정 기준으로 저장합니다.",
-    },
-    {
-      href: "/settings/account/shipping",
-      title: "배송지 설정",
-      description: "결제 전에 기본 배송지를 정확하게 등록하고 수정합니다.",
-    },
-    {
-      href: "/shop/wishlist",
-      title: "위시리스트",
-      description:
-        status === "authenticated"
-          ? `${wishlist.length}개 상품이 계정 위시리스트에 저장되어 있습니다.`
-          : "위시리스트는 로그인한 계정에 저장됩니다.",
-    },
-  ];
 
   return (
     <div className="-mx-4 pb-24">
@@ -366,42 +248,22 @@ export function ShopPage() {
 
       {/* 헤더 */}
       <div className="border-b border-[#edf1f6] bg-white px-4 py-4">
-        <div className="grid grid-cols-[auto_auto_1fr_auto_auto_auto] items-center gap-2">
-          <button
-            type="button" data-auth-allow
-            onClick={() => {
-              if (typeof window === "undefined") return;
-              document.getElementById("shop-category-strip")?.scrollIntoView({ behavior: "smooth", block: "start" });
-            }}
-            className="inline-flex h-10 w-10 items-center justify-center text-[#111827]"
-            aria-label={t("카테고리로 이동")}
-          >
-            <MenuIcon />
-          </button>
-          <button
-            type="button" data-auth-allow
-            onClick={() => {
-              if (typeof window === "undefined") return;
-              document.getElementById("shop-category-strip")?.scrollIntoView({ behavior: "smooth", block: "start" });
-            }}
-            className="inline-flex items-center gap-1 text-[#111827]"
-            aria-label={t("카테고리 펼치기")}
-          >
-            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#d7dfeb] bg-[#f8fafc] text-[10px] font-bold text-[#11294b]">KR</span>
-            <ChevronDownIcon />
-          </button>
-          <Link href="/shop" data-auth-allow className="justify-self-center">
-            <img src="/rnest-logo.png" alt="RNest" className="h-9 w-auto object-contain" />
+        <div className="relative flex items-center justify-between gap-3">
+          <ShopLanguageSwitcher />
+          <Link href="/shop" data-auth-allow className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+            <ShopBrandLogo className="h-12 w-[190px]" />
           </Link>
-          <Link href="/shop/wishlist" data-auth-allow className="inline-flex h-10 w-10 items-center justify-center text-[#111827]" aria-label={t("찜한 상품")}>
+          <div className="ml-auto flex items-center gap-1">
+          <Link href="/shop/wishlist" data-auth-allow className="inline-flex h-11 w-11 items-center justify-center text-[#111827]" aria-label={t("찜한 상품")}>
             <WishlistIcon />
           </Link>
-          <Link href="/shop/cart" data-auth-allow className="inline-flex h-10 w-10 items-center justify-center text-[#111827]" aria-label={t("장바구니")}>
+          <Link href="/shop/cart" data-auth-allow className="inline-flex h-11 w-11 items-center justify-center text-[#111827]" aria-label={t("장바구니")}>
             <CartIcon />
           </Link>
-          <Link href="/shop/profile" data-auth-allow className="inline-flex h-10 w-10 items-center justify-center text-[#111827]" aria-label={t("쇼핑 프로필")}>
+          <Link href="/shop/profile" data-auth-allow className="inline-flex h-11 w-11 items-center justify-center text-[#111827]" aria-label={t("쇼핑 프로필")}>
             <ProfileIcon />
           </Link>
+          </div>
         </div>
       </div>
 
@@ -433,7 +295,7 @@ export function ShopPage() {
           </button>
           {(searchQuery || priceFilter !== "all" || sortKey !== "recommended") ? (
             <button type="button" data-auth-allow onClick={() => { setSearchQuery(""); setPriceFilter("all"); setSortKey("recommended"); }} className="text-[11px] text-[#8d99ab]">
-              초기화
+              {t("초기화")}
             </button>
           ) : null}
         </div>
@@ -630,7 +492,7 @@ export function ShopPage() {
             <div className="mt-1 text-[20px] font-bold tracking-[-0.03em] text-[#111827]">{t(activeCategoryMeta.label)} {t("상품")}</div>
           </div>
           <div className="rounded-full bg-[#eef4fb] px-3 py-1 text-[11px] font-semibold text-[#11294b]">
-            {catalogLoading ? t("불러오는 중") : `${finalRecommendations.length}${t("개")}`}
+            {catalogLoading ? t("불러오는 중") : `${finalRecommendations.length} ${t("개")}`}
           </div>
         </div>
 
@@ -710,7 +572,9 @@ export function ShopPage() {
 
           {!catalogLoading && finalRecommendations.length === 0 ? (
             <div className="col-span-2 rounded-3xl border border-[#edf1f6] bg-white px-5 py-6 text-[13px] text-[#65748b]">
-              {searchQuery ? `"${searchQuery}"에 맞는 상품이 없습니다.` : t("현재 조건에 맞는 상품이 없습니다. 카테고리를 바꾸거나 잠시 후 다시 확인해 주세요.")}
+              {searchQuery
+                ? (lang === "en" ? `No products match "${searchQuery}".` : `"${searchQuery}"에 맞는 상품이 없습니다.`)
+                : t("현재 조건에 맞는 상품이 없습니다. 카테고리를 바꾸거나 잠시 후 다시 확인해 주세요.")}
             </div>
           ) : null}
         </div>
@@ -739,51 +603,21 @@ export function ShopPage() {
           </div>
         ) : null}
 
-        {/* 주문 내역 섹션 */}
-        <div id="shop-orders" className="rounded-[32px] border border-[#dbe4ef] bg-white p-5">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-[18px] font-bold tracking-[-0.02em] text-[#102a43]">{t("내 쇼핑")}</div>
-              <div className="mt-1 text-[12.5px] text-[#61758a]">{t("개인 정보는 한곳에 모으고, 상세 화면에서만 깊게 확인하도록 정리했습니다.")}</div>
-            </div>
-            <Link href="/shop/profile" data-auth-allow className={`${SECONDARY_BUTTON} h-9 shrink-0 text-[11px]`}>
-              {t("프로필 열기")}
-            </Link>
-          </div>
-
-          <div className="mt-4 rounded-3xl border border-[#edf1f6] bg-[#f8fafc] p-2">
-            {shoppingHubLinks.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                data-auth-allow
-                className="flex items-center justify-between gap-4 rounded-2xl px-3 py-4 transition hover:bg-white"
-              >
-                <div className="min-w-0">
-                  <div className="text-[13px] font-semibold text-[#102a43]">{item.title}</div>
-                  <div className="mt-1 text-[11.5px] leading-5 text-[#61758a]">{item.description}</div>
-                </div>
-                <span className="shrink-0 text-[18px] text-[#9aabbc]">›</span>
-              </Link>
-            ))}
-          </div>
-        </div>
-
         {/* 법적 푸터 */}
         <div className="mt-8 space-y-3 border-t border-[#edf1f6] pt-6 text-[11px] leading-5 text-[#8d99ab]">
           <div className="space-y-1">
             <div className="font-semibold text-[#65748b]">RNest</div>
-            <div>대표: [대표자명] · 사업자등록번호: 000-00-00000</div>
-            <div>통신판매업신고번호: 제2025-서울○○-0000호</div>
-            <div>주소: 서울특별시 ○○구 ○○로 000, 0층</div>
-            <div>고객센터: <a href="mailto:support@rnest.kr" className="text-[#3b6fc9]">support@rnest.kr</a></div>
+            <div>{t("대표: [대표자명] · 사업자등록번호: 000-00-00000")}</div>
+            <div>{t("통신판매업신고번호: 제2025-서울○○-0000호")}</div>
+            <div>{t("주소: 서울특별시 ○○구 ○○로 000, 0층")}</div>
+            <div>{t("고객센터:")} <a href="mailto:support@rnest.kr" className="text-[#3b6fc9]">support@rnest.kr</a></div>
           </div>
           <div className="flex flex-wrap gap-3">
-            <Link href="/shop/policy" data-auth-allow className="underline hover:text-[#111827]">환불·반품 정책</Link>
+            <Link href="/shop/policy" data-auth-allow className="underline hover:text-[#111827]">{t("환불·반품 정책")}</Link>
             <span>·</span>
-            <Link href="/terms" data-auth-allow className="underline hover:text-[#111827]">이용약관</Link>
+            <Link href="/terms" data-auth-allow className="underline hover:text-[#111827]">{t("이용약관")}</Link>
             <span>·</span>
-            <Link href="/privacy" data-auth-allow className="underline hover:text-[#111827]">개인정보처리방침</Link>
+            <Link href="/privacy" data-auth-allow className="underline hover:text-[#111827]">{t("개인정보처리방침")}</Link>
           </div>
           <div>© RNest. All rights reserved.</div>
         </div>

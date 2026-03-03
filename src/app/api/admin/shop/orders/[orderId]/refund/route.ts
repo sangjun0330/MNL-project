@@ -67,6 +67,7 @@ export async function POST(req: Request, ctx: any) {
     const message = String(error?.message ?? "failed_to_process_shop_refund");
     if (message.includes("not_found")) return jsonNoStore({ ok: false, error: "shop_order_not_found" }, { status: 404 });
     if (message.includes("not_requested")) return jsonNoStore({ ok: false, error: "shop_refund_not_requested" }, { status: 400 });
+    if (message.includes("already_processed")) return jsonNoStore({ ok: false, error: "shop_refund_already_processed" }, { status: 409 });
     if (message.includes("missing_toss") || message.includes("invalid_toss")) return jsonNoStore({ ok: false, error: message }, { status: 500 });
     if (message.startsWith("toss_")) return jsonNoStore({ ok: false, error: message }, { status: 400 });
     return jsonNoStore({ ok: false, error: "failed_to_process_shop_refund" }, { status: 500 });

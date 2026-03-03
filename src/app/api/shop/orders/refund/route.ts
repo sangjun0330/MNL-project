@@ -24,19 +24,23 @@ export async function POST(req: Request) {
   if (!orderId) return jsonNoStore({ ok: false, error: "invalid_order_id" }, { status: 400 });
 
   try {
-    const order = await requestShopOrderRefund({
+    const result = await requestShopOrderRefund({
       userId,
       orderId,
       reason,
     });
-    return jsonNoStore({ ok: true, data: { order: toShopOrderSummary(order) } });
+    return jsonNoStore({
+      ok: true,
+      data: {
+        order: toShopOrderSummary(result.order),
+        orders: result.orders.map((item) => toShopOrderSummary(item)),
+        bundleRefundApplied: result.bundleRefundApplied,
+      },
+    });
   } catch (error: any) {
     const message = String(error?.message ?? "failed_to_request_shop_refund");
     if (message.includes("not_found")) return jsonNoStore({ ok: false, error: "shop_order_not_found" }, { status: 404 });
     if (message.includes("not_refundable")) return jsonNoStore({ ok: false, error: "shop_order_not_refundable" }, { status: 400 });
-    if (message.includes("bundle_refund_requires_manual_review")) {
-      return jsonNoStore({ ok: false, error: "shop_order_bundle_refund_requires_manual_review" }, { status: 400 });
-    }
     return jsonNoStore({ ok: false, error: "failed_to_request_shop_refund" }, { status: 500 });
   }
 }

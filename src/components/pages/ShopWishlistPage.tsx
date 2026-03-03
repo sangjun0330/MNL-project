@@ -6,9 +6,12 @@ import { useAuthState } from "@/lib/auth";
 import { authHeaders } from "@/lib/billing/client";
 import { getShopImageSrc, SHOP_PRODUCTS, formatShopPrice, type ShopProduct } from "@/lib/shop";
 import { getWishlist, removeFromWishlist } from "@/lib/shopClient";
-import { SHOP_BUTTON_PRIMARY, SHOP_BUTTON_SECONDARY } from "@/lib/shopUi";
+import { SHOP_BUTTON_PRIMARY } from "@/lib/shopUi";
+import { useI18n } from "@/lib/useI18n";
+import { ShopBackLink } from "@/components/shop/ShopBackLink";
 
 export function ShopWishlistPage() {
+  const { t } = useI18n();
   const { status, user } = useAuthState();
   const [wishlistIds, setWishlistIds] = useState<string[]>([]);
   const [catalog, setCatalog] = useState<ShopProduct[]>(SHOP_PRODUCTS);
@@ -87,15 +90,11 @@ export function ShopWishlistPage() {
     <div className="-mx-4 pb-24">
       <div className="border-b border-[#edf1f6] bg-white px-4 py-4">
         <div className="flex items-center gap-3">
-          <Link href="/shop" data-auth-allow className={`h-10 w-10 px-0 text-[#425a76] ${SHOP_BUTTON_SECONDARY}`} aria-label="쇼핑으로 돌아가기">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-              <path d="M19 12H5" /><path d="M12 5l-7 7 7 7" />
-            </svg>
-          </Link>
+          <ShopBackLink href="/shop" label={t("쇼핑으로 돌아가기")} />
           <div>
-            <h1 className="text-[18px] font-bold tracking-[-0.02em] text-[#111827]">찜한 상품</h1>
+            <h1 className="text-[18px] font-bold tracking-[-0.02em] text-[#111827]">{t("찜한 상품")}</h1>
             {wishlistProducts.length > 0 && (
-              <p className="text-[12px] text-[#65748b]">{wishlistProducts.length}개</p>
+              <p className="text-[12px] text-[#65748b]">{wishlistProducts.length} {t("개")}</p>
             )}
           </div>
         </div>
@@ -104,23 +103,23 @@ export function ShopWishlistPage() {
       <div className="px-4 py-5">
         {status !== "authenticated" ? (
           <div className="rounded-3xl border border-[#dbe4ef] bg-white p-6 text-center">
-            <div className="text-[16px] font-bold text-[#102a43]">로그인 후 위시리스트를 확인할 수 있습니다</div>
-            <div className="mt-2 text-[13px] leading-6 text-[#5a6b80]">찜한 상품은 기기가 아니라 계정에 안전하게 저장됩니다.</div>
+            <div className="text-[16px] font-bold text-[#102a43]">{t("로그인 후 위시리스트를 확인할 수 있습니다")}</div>
+            <div className="mt-2 text-[13px] leading-6 text-[#5a6b80]">{t("찜한 상품은 기기가 아니라 계정에 안전하게 저장됩니다.")}</div>
             <Link href="/settings/account" data-auth-allow className={`mt-5 h-11 px-6 text-[14px] ${SHOP_BUTTON_PRIMARY}`}>
-              로그인하러 가기
+              {t("로그인하러 가기")}
             </Link>
           </div>
         ) : loading ? (
           <div className="rounded-3xl border border-[#dbe4ef] bg-white p-5 text-[13px] text-[#5a6b80]">
-            위시리스트를 불러오는 중입니다...
+            {t("위시리스트를 불러오는 중입니다...")}
           </div>
         ) : wishlistProducts.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="text-[48px]">🤍</div>
-            <div className="mt-4 text-[16px] font-bold text-[#111827]">아직 찜한 상품이 없어요</div>
-            <div className="mt-2 text-[13px] text-[#65748b]">마음에 드는 상품의 하트를 눌러 저장해 보세요</div>
+            <div className="mt-4 text-[16px] font-bold text-[#111827]">{t("아직 찜한 상품이 없어요")}</div>
+            <div className="mt-2 text-[13px] text-[#65748b]">{t("마음에 드는 상품의 하트를 눌러 저장해 보세요")}</div>
             <Link href="/shop" data-auth-allow className={`mt-6 h-11 px-6 text-[14px] ${SHOP_BUTTON_PRIMARY}`}>
-              쇼핑하러 가기
+              {t("쇼핑하러 가기")}
             </Link>
           </div>
         ) : (

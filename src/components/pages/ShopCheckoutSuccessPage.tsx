@@ -53,6 +53,10 @@ function formatDateLabel(value: string | null) {
   return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
+function formatWon(value: number) {
+  return `${Math.round(value).toLocaleString("ko-KR")}원`;
+}
+
 function humanizeConfirmError(code: string) {
   if (code.includes("login_required")) return "로그인 확인 후 다시 주문 상태를 불러와 주세요.";
   if (code.includes("amount_mismatch")) return "결제 금액이 주문 정보와 달라 승인할 수 없습니다. 장바구니에서 다시 결제해 주세요.";
@@ -136,6 +140,12 @@ export function ShopCheckoutSuccessPage() {
   }, [status, paymentKey, orderId, parsedAmount]);
 
   const bundleOrders = result && result.mode === "bundle" && Array.isArray(result.orders) ? result.orders : [];
+  const primaryOrderHref =
+    result?.mode === "single"
+      ? `/shop/orders/${encodeURIComponent(result.order.orderId)}`
+      : bundleOrders[0]
+        ? `/shop/orders/${encodeURIComponent(bundleOrders[0].orderId)}`
+        : "/shop/orders";
 
   return (
     <div className="mx-auto w-full max-w-[720px] px-4 pb-24 pt-6">
@@ -150,18 +160,45 @@ export function ShopCheckoutSuccessPage() {
           </>
         ) : null}
 
+        {!loading && !error && result ? (
+          <div className="mt-4 overflow-hidden rounded-[24px] border border-[#d7e3f1] bg-[linear-gradient(135deg,#f7fbff_0%,#eef5ff_52%,#f2fbfa_100%)]">
+            <div className="px-5 py-5">
+              <div className="text-[24px] leading-none">🩺💙✨</div>
+              <div className="mt-3 text-[22px] font-extrabold tracking-[-0.03em] text-[#102a43]">
+                {result.mode === "bundle" ? t("묶음 구매가 정상 완료됐습니다!") : t("정상 구매 완료됐습니다!")}
+              </div>
+              <div className="mt-2 text-[13px] leading-6 text-[#4e6480]">
+                {result.mode === "bundle"
+                  ? t("RNest 간호 스테이션이 묶음 주문을 반갑게 확인했어요. 선택한 상품들이 안전하게 접수되어 배송 준비를 시작합니다.")
+                  : t("RNest 간호 스테이션이 주문을 반갑게 확인했어요. 안전하게 접수되었고 이제 배송 준비를 시작합니다.")}
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <span className="inline-flex rounded-full border border-[#c4d5e8] bg-white px-3 py-1 text-[11px] font-semibold text-[#27496b]">
+                  {t("결제 확인 완료")}
+                </span>
+                <span className="inline-flex rounded-full border border-[#c4d5e8] bg-white px-3 py-1 text-[11px] font-semibold text-[#27496b]">
+                  {t("주문 내역 반영 완료")}
+                </span>
+                <span className="inline-flex rounded-full border border-[#c4d5e8] bg-white px-3 py-1 text-[11px] font-semibold text-[#27496b]">
+                  {t("배송 준비 시작")}
+                </span>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {!loading && !error && result?.mode === "single" ? (
           <>
-            <div className="rnest-chip-accent mt-3 inline-flex px-3 py-1 text-[12px]">{t("주문 완료")}</div>
+            <div className="rnest-chip-accent mt-4 inline-flex px-3 py-1 text-[12px]">{t("개별 주문 완료")}</div>
             <div className="mt-4 rounded-[18px] border border-ios-sep bg-[#F7F7FA] p-4">
               <div className="text-[13px] text-ios-sub">{t("주문 상품")}</div>
               <div className="mt-1 text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">{result.order.productSnapshot.name}</div>
               <div className="mt-2 text-[12.5px] text-ios-sub">{t("수량")}: {result.order.productSnapshot.quantity}</div>
-              <div className="mt-1 text-[12.5px] text-ios-sub">{t("상품 금액")}: {Math.round(result.order.subtotalKrw).toLocaleString("ko-KR")}원</div>
+              <div className="mt-1 text-[12.5px] text-ios-sub">{t("상품 금액")}: {formatWon(result.order.subtotalKrw)}</div>
               <div className="mt-1 text-[12.5px] text-ios-sub">
-                {t("배송비")}: {result.order.shippingFeeKrw > 0 ? `${Math.round(result.order.shippingFeeKrw).toLocaleString("ko-KR")}원` : t("무료")}
+                {t("배송비")}: {result.order.shippingFeeKrw > 0 ? formatWon(result.order.shippingFeeKrw) : t("무료")}
               </div>
-              <div className="mt-1 text-[12.5px] text-ios-sub">{t("결제 금액")}: {Math.round(result.order.amount).toLocaleString("ko-KR")}원</div>
+              <div className="mt-1 text-[12.5px] text-ios-sub">{t("결제 금액")}: {formatWon(result.order.amount)}</div>
               <div className="mt-1 text-[12.5px] text-ios-sub">{t("승인 시각")}: {formatDateLabel(result.order.approvedAt)}</div>
             </div>
           </>
@@ -169,18 +206,18 @@ export function ShopCheckoutSuccessPage() {
 
         {!loading && !error && result?.mode === "bundle" ? (
           <>
-            <div className="rnest-chip-accent mt-3 inline-flex px-3 py-1 text-[12px]">{t("묶음 주문 완료")}</div>
+            <div className="rnest-chip-accent mt-4 inline-flex px-3 py-1 text-[12px]">{t("묶음 주문 완료")}</div>
             <div className="mt-4 rounded-[18px] border border-ios-sep bg-[#F7F7FA] p-4">
               <div className="text-[13px] text-ios-sub">{t("결제 묶음")}</div>
               <div className="mt-1 text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">{result.bundle.displayName}</div>
               <div className="mt-2 text-[12.5px] text-ios-sub">
                 {t("상품 종류")}: {result.bundle.itemCount}종 · {t("총 수량")}: {result.bundle.totalQuantity}개
               </div>
-              <div className="mt-1 text-[12.5px] text-ios-sub">{t("상품 금액")}: {Math.round(result.bundle.subtotalKrw).toLocaleString("ko-KR")}원</div>
+              <div className="mt-1 text-[12.5px] text-ios-sub">{t("상품 금액")}: {formatWon(result.bundle.subtotalKrw)}</div>
               <div className="mt-1 text-[12.5px] text-ios-sub">
-                {t("배송비")}: {result.bundle.shippingFeeKrw > 0 ? `${Math.round(result.bundle.shippingFeeKrw).toLocaleString("ko-KR")}원` : t("무료")}
+                {t("배송비")}: {result.bundle.shippingFeeKrw > 0 ? formatWon(result.bundle.shippingFeeKrw) : t("무료")}
               </div>
-              <div className="mt-1 text-[12.5px] text-ios-sub">{t("결제 금액")}: {Math.round(result.bundle.amount).toLocaleString("ko-KR")}원</div>
+              <div className="mt-1 text-[12.5px] text-ios-sub">{t("결제 금액")}: {formatWon(result.bundle.amount)}</div>
               <div className="mt-1 text-[12.5px] text-ios-sub">{t("승인 시각")}: {formatDateLabel(result.bundle.approvedAt)}</div>
             </div>
             {bundleOrders.length > 0 ? (
@@ -191,7 +228,7 @@ export function ShopCheckoutSuccessPage() {
                     <div key={order.orderId} className="rounded-2xl border border-[#dbe4ef] bg-[#f7fafc] px-3 py-3 text-[12px] text-[#44556d]">
                       <div className="font-semibold text-[#11294b]">{order.productSnapshot.name}</div>
                       <div className="mt-1">
-                        수량 {order.productSnapshot.quantity} · {Math.round(order.amount).toLocaleString("ko-KR")}원
+                        {t("수량")} {order.productSnapshot.quantity} · {formatWon(order.amount)}
                       </div>
                     </div>
                   ))}
@@ -204,8 +241,28 @@ export function ShopCheckoutSuccessPage() {
           </>
         ) : null}
 
+        {!loading && !error && result ? (
+          <div className="mt-4 rounded-[18px] border border-[#dbe4ef] bg-[#f8fbff] p-4">
+            <div className="text-[13px] font-semibold text-[#102a43]">{t("다음 안내")}</div>
+            <div className="mt-2 space-y-2 text-[12.5px] leading-6 text-[#526983]">
+              <div>1. {t("주문은 즉시 주문 내역에 반영되며 배송이 시작되면 상태가 자동으로 업데이트됩니다.")}</div>
+              <div>
+                2. {result.mode === "bundle"
+                  ? t("묶음 구매는 생성된 주문 중 하나에서 환불 요청을 하면 같은 결제 묶음이 함께 접수됩니다.")
+                  : t("개별 구매는 해당 주문 상세에서 바로 환불 요청을 진행할 수 있습니다.")}
+              </div>
+              <div>3. {t("배송 완료 후 구매 확정을 하면 리뷰 작성 권한이 열립니다.")}</div>
+            </div>
+          </div>
+        ) : null}
+
         <div className="mt-6 flex flex-wrap gap-2">
-          <Link href="/shop/orders" className={`h-10 px-5 text-[13px] ${SHOP_BUTTON_PRIMARY}`}>
+          {!loading && !error && result ? (
+            <Link href={primaryOrderHref} className={`h-10 px-5 text-[13px] ${SHOP_BUTTON_PRIMARY}`}>
+              {result.mode === "bundle" ? t("첫 주문 상세 보기") : t("주문 상세 보기")}
+            </Link>
+          ) : null}
+          <Link href="/shop/orders" className={`h-10 px-5 text-[13px] ${!loading && !error && result ? SHOP_BUTTON_SECONDARY : SHOP_BUTTON_PRIMARY}`}>
             {t("주문 내역 보기")}
           </Link>
           <Link href="/shop" className={`h-10 px-5 text-[13px] ${SHOP_BUTTON_SECONDARY}`}>

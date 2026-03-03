@@ -478,7 +478,7 @@ export function SettingsShippingPage() {
                 <div className="mt-1 text-[12px] text-ios-sub">{t("결제 전에 여기서 저장한 주소 중 하나를 선택할 수 있습니다.")}</div>
               </div>
               <div className="rounded-full bg-[#f4f7fb] px-3 py-1 text-[10px] font-semibold text-[#11294b]">
-                {addressBook.addresses.length}{t("개")}
+                {addressBook.addresses.length} {t("개")}
               </div>
             </div>
 

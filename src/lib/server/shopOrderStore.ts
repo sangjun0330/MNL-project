@@ -1,7 +1,7 @@
 import { todayISO } from "@/lib/date";
 import { toMaskedShopShippingSnapshot } from "@/lib/shopPrivacy";
 import { normalizeShopShippingSnapshot, type ShopShippingSnapshot } from "@/lib/shopProfile";
-import { findShopOrderBundleByOrderId } from "@/lib/server/shopOrderBundleStore";
+import { findShopOrderBundleByOrderId, markShopOrderBundleCanceled } from "@/lib/server/shopOrderBundleStore";
 import { buildCancelIdempotencyKey, buildConfirmIdempotencyKey, readTossAcceptLanguage, readTossSecretKeyFromEnv, readTossTestCodeFromEnv } from "@/lib/server/tossConfig";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { loadUserState, saveUserState } from "@/lib/server/userStateStore";
@@ -886,12 +886,74 @@ export async function requestShopOrderRefund(input: {
 }) {
   const current = await readShopOrderForUser(input.userId, input.orderId);
   if (!current) throw new Error("shop_order_not_found");
-  if (current.status !== "PAID") throw new Error("shop_order_not_refundable");
   const bundle = await findShopOrderBundleByOrderId(input.userId, input.orderId).catch(() => null);
+  const reason = sanitizeReason(input.reason);
+
   if (bundle && bundle.itemCount > 1 && bundle.status === "PAID") {
-    throw new Error("shop_order_bundle_refund_requires_manual_review");
+    const bundleOrders: ShopOrderRecord[] = [];
+    for (const item of bundle.items) {
+      const order = await readShopOrderForUser(input.userId, item.orderId);
+      if (!order) throw new Error("shop_order_not_found");
+      bundleOrders.push(order);
+    }
+
+    const hasInvalidOrder = bundleOrders.some(
+      (order) => order.refund.status !== "requested" && order.refund.status !== "done" && order.status !== "PAID"
+    );
+    if (hasInvalidOrder) throw new Error("shop_order_not_refundable");
+
+    const savedOrders: ShopOrderRecord[] = [];
+    for (const order of bundleOrders) {
+      if (order.refund.status === "requested" || order.refund.status === "done") {
+        savedOrders.push(order);
+        continue;
+      }
+      const saved = await writeOrder({
+        ...order,
+        status: "REFUND_REQUESTED",
+        refund: {
+          ...order.refund,
+          status: "requested",
+          reason,
+          requestedAt: new Date().toISOString(),
+          reviewedAt: null,
+          reviewedBy: null,
+          note: null,
+          cancelAmount: null,
+          canceledAt: null,
+          cancelResponse: null,
+        },
+      });
+      await writeOrderEventSafe({
+        order: saved,
+        eventType: "refund_requested",
+        actorRole: "user",
+        actorUserId: input.userId,
+        message: `묶음 주문 환불 요청: ${saved.refund.reason}`,
+        metadata: { bundleId: bundle.bundleId },
+      });
+      savedOrders.push(saved);
+    }
+
+    const primaryOrder =
+      savedOrders.find((order) => order.orderId === input.orderId) ??
+      savedOrders[0] ??
+      current;
+
+    return {
+      order: primaryOrder,
+      orders: savedOrders,
+      bundleRefundApplied: true,
+    };
   }
-  if (current.refund.status === "requested" || current.refund.status === "done") return current;
+  if (current.status !== "PAID") throw new Error("shop_order_not_refundable");
+  if (current.refund.status === "requested" || current.refund.status === "done") {
+    return {
+      order: current,
+      orders: [current],
+      bundleRefundApplied: false,
+    };
+  }
 
   const saved = await writeOrder({
     ...current,
@@ -899,7 +961,7 @@ export async function requestShopOrderRefund(input: {
     refund: {
       ...current.refund,
       status: "requested",
-      reason: sanitizeReason(input.reason),
+      reason,
       requestedAt: new Date().toISOString(),
       reviewedAt: null,
       reviewedBy: null,
@@ -916,7 +978,11 @@ export async function requestShopOrderRefund(input: {
     actorUserId: input.userId,
     message: saved.refund.reason,
   });
-  return saved;
+  return {
+    order: saved,
+    orders: [saved],
+    bundleRefundApplied: false,
+  };
 }
 
 export async function rejectShopOrderRefund(input: {
@@ -927,6 +993,57 @@ export async function rejectShopOrderRefund(input: {
   const current = await readShopOrder(input.orderId);
   if (!current) throw new Error("shop_order_not_found");
   if (current.refund.status !== "requested") throw new Error("shop_refund_not_requested");
+
+  const bundle = await findShopOrderBundleByOrderId(current.userId, current.orderId).catch(() => null);
+  if (bundle && bundle.itemCount > 1 && bundle.status === "PAID") {
+    const bundleOrders: ShopOrderRecord[] = [];
+    for (const item of bundle.items) {
+      const order = await readShopOrderForUser(current.userId, item.orderId);
+      if (!order) throw new Error("shop_order_not_found");
+      bundleOrders.push(order);
+    }
+    if (bundleOrders.some((order) => order.refund.status === "done")) {
+      throw new Error("shop_refund_already_processed");
+    }
+
+    const noteText = cleanText(input.note, 500) || "환불 요청이 반려되었습니다.";
+    const savedOrders: ShopOrderRecord[] = [];
+    for (const order of bundleOrders) {
+      if (order.refund.status === "rejected") {
+        savedOrders.push(order);
+        continue;
+      }
+      if (order.refund.status !== "requested") throw new Error("shop_refund_not_requested");
+
+      const saved = await writeOrder({
+        ...order,
+        status: "REFUND_REJECTED",
+        refund: {
+          ...order.refund,
+          status: "rejected",
+          reviewedAt: new Date().toISOString(),
+          reviewedBy: cleanText(input.adminUserId, 120),
+          note: noteText,
+        },
+      });
+      await writeOrderEventSafe({
+        order: saved,
+        eventType: "refund_rejected",
+        actorRole: "admin",
+        actorUserId: input.adminUserId,
+        message: saved.refund.note,
+        metadata: { bundleId: bundle.bundleId },
+      });
+      savedOrders.push(saved);
+    }
+
+    return (
+      savedOrders.find((order) => order.orderId === input.orderId) ??
+      savedOrders[0] ??
+      current
+    );
+  }
+
   const saved = await writeOrder({
     ...current,
     status: "REFUND_REJECTED",
@@ -957,7 +1074,37 @@ export async function approveShopOrderRefund(input: {
   const current = await readShopOrder(input.orderId);
   if (!current) throw new Error("shop_order_not_found");
   if (current.refund.status !== "requested") throw new Error("shop_refund_not_requested");
-  if (!current.paymentKey) throw new Error("shop_order_missing_payment_key");
+  const bundle = await findShopOrderBundleByOrderId(current.userId, current.orderId).catch(() => null);
+
+  const bundleOrders: ShopOrderRecord[] =
+    bundle && bundle.itemCount > 1 && bundle.status === "PAID"
+      ? await Promise.all(
+          bundle.items.map(async (item) => {
+            const order = await readShopOrderForUser(current.userId, item.orderId);
+            if (!order) throw new Error("shop_order_not_found");
+            return order;
+          })
+        )
+      : [];
+
+  if (bundleOrders.length > 0 && bundleOrders.every((order) => order.refund.status === "done")) {
+    return (
+      bundleOrders.find((order) => order.orderId === input.orderId) ??
+      bundleOrders[0] ??
+      current
+    );
+  }
+  if (bundleOrders.length > 0 && bundleOrders.some((order) => order.refund.status === "done")) {
+    throw new Error("shop_refund_already_processed");
+  }
+  if (bundleOrders.length > 0 && bundleOrders.some((order) => order.refund.status !== "requested")) {
+    throw new Error("shop_refund_not_requested");
+  }
+
+  const paymentKey =
+    (bundle && bundleOrders.length > 0 ? bundle.paymentKey : null) ||
+    current.paymentKey;
+  if (!paymentKey) throw new Error("shop_order_missing_payment_key");
 
   const secret = readTossSecretKeyFromEnv();
   if (!secret.ok) throw new Error(secret.error);
@@ -966,7 +1113,7 @@ export async function approveShopOrderRefund(input: {
   const headers: Record<string, string> = {
     Authorization: `Basic ${auth}`,
     "Content-Type": "application/json",
-    "Idempotency-Key": buildCancelIdempotencyKey(current.orderId),
+    "Idempotency-Key": buildCancelIdempotencyKey(bundle && bundleOrders.length > 0 ? bundle.bundleId : current.orderId),
   };
   const acceptLanguage = readTossAcceptLanguage(input.requestAcceptLanguage ?? null);
   if (acceptLanguage) headers["Accept-Language"] = acceptLanguage;
@@ -979,12 +1126,12 @@ export async function approveShopOrderRefund(input: {
 
   let res: Response;
   try {
-    res = await fetch(`https://api.tosspayments.com/v1/payments/${encodeURIComponent(current.paymentKey)}/cancel`, {
+    res = await fetch(`https://api.tosspayments.com/v1/payments/${encodeURIComponent(paymentKey)}/cancel`, {
       method: "POST",
       headers,
       body: JSON.stringify({
         cancelReason,
-        cancelAmount: current.amount,
+        cancelAmount: bundle && bundleOrders.length > 0 ? bundle.amount : current.amount,
       }),
       signal: controller.signal,
     });
@@ -1002,6 +1149,61 @@ export async function approveShopOrderRefund(input: {
 
   if (!res.ok) {
     throw new Error(cleanText(json?.code, 120) || `toss_cancel_http_${res.status}`);
+  }
+
+  if (bundle && bundleOrders.length > 0) {
+    const reviewedAt = new Date().toISOString();
+    const canceledAt = reviewedAt;
+    const cancelResponse = summarizeTossCancelResponse(json);
+    const savedOrders: ShopOrderRecord[] = [];
+
+    for (const order of bundleOrders) {
+      if (order.refund.status === "done") {
+        savedOrders.push(order);
+        continue;
+      }
+
+      const saved = await writeOrder({
+        ...order,
+        status: "REFUNDED",
+        paymentKey,
+        refund: {
+          ...order.refund,
+          status: "done",
+          reviewedAt,
+          reviewedBy: cleanText(input.adminUserId, 120),
+          note: cancelReason,
+          cancelAmount: order.amount,
+          canceledAt,
+          cancelResponse,
+        },
+      });
+      await writeOrderEventSafe({
+        order: saved,
+        eventType: "refund_approved",
+        actorRole: "admin",
+        actorUserId: input.adminUserId,
+        message: cancelReason,
+        metadata: {
+          ...(cancelResponse && typeof cancelResponse === "object" && !Array.isArray(cancelResponse) ? (cancelResponse as Record<string, Json>) : {}),
+          bundleId: bundle.bundleId,
+          bundleCancelAmount: bundle.amount,
+        },
+      });
+      savedOrders.push(saved);
+    }
+
+    await markShopOrderBundleCanceled({
+      userId: current.userId,
+      bundleId: bundle.bundleId,
+      paymentKey,
+    }).catch(() => null);
+
+    return (
+      savedOrders.find((order) => order.orderId === input.orderId) ??
+      savedOrders[0] ??
+      current
+    );
   }
 
   const saved = await writeOrder({

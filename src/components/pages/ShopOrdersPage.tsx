@@ -5,7 +5,10 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useAuthState } from "@/lib/auth";
 import { authHeaders } from "@/lib/billing/client";
-import { SHOP_BUTTON_ACTIVE, SHOP_BUTTON_PRIMARY, SHOP_BUTTON_SECONDARY } from "@/lib/shopUi";
+import { SHOP_BUTTON_ACTIVE, SHOP_BUTTON_PRIMARY } from "@/lib/shopUi";
+import { translate } from "@/lib/i18n";
+import { useI18n } from "@/lib/useI18n";
+import { ShopBackLink } from "@/components/shop/ShopBackLink";
 
 type ShopOrderSummary = {
   orderId: string;
@@ -45,7 +48,7 @@ function orderStatusLabel(status: string) {
     REFUND_REJECTED: "환불 반려",
     REFUNDED: "환불 완료",
   };
-  return map[status] ?? status;
+  return translate(map[status] ?? status);
 }
 
 function orderStatusClass(status: string) {
@@ -78,6 +81,7 @@ const ORDERS_PER_PAGE = 12;
 type OrderFilter = "all" | "progress" | "delivered" | "refund" | "issue";
 
 export function ShopOrdersPage() {
+  const { t } = useI18n();
   const searchParams = useSearchParams();
   const { status, user } = useAuthState();
   const [orders, setOrders] = useState<ShopOrderSummary[]>([]);
@@ -171,18 +175,24 @@ export function ShopOrdersPage() {
       });
       const json = await res.json().catch(() => null);
       if (!res.ok || !json?.ok) throw new Error(String(json?.error ?? `http_${res.status}`));
-      const nextOrder = json.data.order as ShopOrderSummary;
-      setOrders((current) => [nextOrder, ...current.filter((item) => item.orderId !== nextOrder.orderId)]);
+      const nextOrders = Array.isArray(json?.data?.orders) ? (json.data.orders as ShopOrderSummary[]) : [];
+      const nextOrder = (json.data.order as ShopOrderSummary) ?? nextOrders[0];
+      const nextOrderMap = new Map(nextOrders.map((item) => [item.orderId, item] as const));
+      setOrders((current) => {
+        const replaced = current.map((item) => nextOrderMap.get(item.orderId) ?? item);
+        if (!nextOrder) return replaced;
+        if (replaced.some((item) => item.orderId === nextOrder.orderId)) return replaced;
+        return [nextOrder, ...replaced];
+      });
       setMessageTone("notice");
-      setMessage("환불 요청이 접수되었습니다. 관리자 검토 후 처리됩니다.");
+      setMessage(
+        json?.data?.bundleRefundApplied
+          ? "묶음 주문 전체에 환불 요청이 접수되었습니다. 관리자 검토 후 순차 처리됩니다."
+          : "환불 요청이 접수되었습니다. 관리자 검토 후 처리됩니다."
+      );
     } catch (error: any) {
-      const code = String(error?.message ?? "failed_to_request_shop_refund");
       setMessageTone("error");
-      if (code.includes("shop_order_bundle_refund_requires_manual_review")) {
-        setMessage("묶음 결제로 승인된 주문은 부분 환불을 자동 처리할 수 없습니다. 고객센터 또는 관리자 검토를 통해 접수해 주세요.");
-      } else {
-        setMessage("환불 요청에 실패했습니다. 잠시 후 다시 시도해 주세요.");
-      }
+      setMessage("환불 요청에 실패했습니다. 잠시 후 다시 시도해 주세요.");
     } finally {
       setActionLoadingId(null);
     }
@@ -222,14 +232,10 @@ export function ShopOrdersPage() {
     <div className="-mx-4 pb-24">
       <div className="border-b border-[#edf1f6] bg-white px-4 py-4">
         <div className="flex items-center gap-3">
-          <Link href="/shop" data-auth-allow className={`h-10 w-10 px-0 text-[#425a76] ${SHOP_BUTTON_SECONDARY}`} aria-label="쇼핑으로 돌아가기">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-              <path d="M19 12H5" /><path d="M12 5l-7 7 7 7" />
-            </svg>
-          </Link>
+          <ShopBackLink href="/shop" label={t("쇼핑으로 돌아가기")} />
           <div>
-            <h1 className="text-[18px] font-bold tracking-[-0.02em] text-[#111827]">내 주문 내역</h1>
-            {!loading && <p className="text-[12px] text-[#65748b]">전체 {total}건</p>}
+            <h1 className="text-[18px] font-bold tracking-[-0.02em] text-[#111827]">{t("내 주문 내역")}</h1>
+            {!loading && <p className="text-[12px] text-[#65748b]">{t("전체")} {total} {t("건")}</p>}
           </div>
         </div>
       </div>
@@ -265,7 +271,7 @@ export function ShopOrdersPage() {
                   filter === item.key ? "border-2 border-[#17324d] bg-[#d1deea] text-[#2f4d6a]" : "border-2 border-[#bfd0e1] bg-white text-[#60768d]",
                 ].join(" ")}
               >
-                {item.label}
+                {t(item.label)}
               </button>
             ))}
           </div>
@@ -273,20 +279,20 @@ export function ShopOrdersPage() {
 
         {status !== "authenticated" ? (
           <div className="rounded-3xl border border-[#edf1f6] bg-white p-5 text-[13px] text-[#65748b]">
-            로그인 후 주문 내역을 확인할 수 있습니다.
+            {t("로그인 후 주문 내역을 확인할 수 있습니다.")}
           </div>
         ) : loading ? (
           <div className="rounded-3xl border border-[#edf1f6] bg-white p-5 text-[13px] text-[#65748b]">
-            주문 내역을 불러오는 중입니다...
+            {t("주문 내역을 불러오는 중입니다...")}
           </div>
         ) : visibleOrders.length === 0 ? (
           <div className="rounded-3xl border border-[#edf1f6] bg-white p-5">
-            <p className="text-[14px] font-semibold text-[#111827]">{filter === "all" ? "아직 주문이 없습니다" : "선택한 상태의 주문이 없습니다"}</p>
+            <p className="text-[14px] font-semibold text-[#111827]">{filter === "all" ? t("아직 주문이 없습니다") : t("선택한 상태의 주문이 없습니다")}</p>
             <p className="mt-1 text-[13px] text-[#65748b]">
-              {filter === "all" ? "상품 상세 페이지에서 바로 결제할 수 있습니다." : "다른 필터를 선택해 주문 상태를 다시 확인해 주세요."}
+              {filter === "all" ? t("상품 상세 페이지에서 바로 결제할 수 있습니다.") : t("다른 필터를 선택해 주문 상태를 다시 확인해 주세요.")}
             </p>
             <div className="mt-4">
-              <Link href="/shop" data-auth-allow className={`${PRIMARY_BUTTON} h-10 text-[13px]`}>쇼핑하러 가기</Link>
+              <Link href="/shop" data-auth-allow className={`${PRIMARY_BUTTON} h-10 text-[13px]`}>{t("쇼핑하러 가기")}</Link>
             </div>
           </div>
         ) : (
@@ -340,7 +346,7 @@ export function ShopOrdersPage() {
 
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <Link href={`/shop/orders/${encodeURIComponent(order.orderId)}`} data-auth-allow className={`${SECONDARY_BUTTON} h-9 text-[11px]`}>
-                    상세 보기
+                    {t("상세 보기")}
                   </Link>
                   {order.status === "DELIVERED" && !order.purchaseConfirmedAt ? (
                     <button
@@ -350,7 +356,7 @@ export function ShopOrdersPage() {
                       disabled={actionLoadingId === order.orderId}
                       className={`${SECONDARY_BUTTON} h-9 text-[11px]`}
                     >
-                      {actionLoadingId === order.orderId ? "처리 중..." : "구매 확정"}
+                      {actionLoadingId === order.orderId ? t("처리 중...") : t("구매 확정")}
                     </button>
                   ) : null}
                   {order.status === "PAID" && order.refund.status === "none" ? (
@@ -361,7 +367,7 @@ export function ShopOrdersPage() {
                       disabled={actionLoadingId === order.orderId}
                       className={`${SECONDARY_BUTTON} h-9 text-[11px]`}
                     >
-                      환불 요청
+                      {t("환불 요청")}
                     </button>
                   ) : null}
                 </div>

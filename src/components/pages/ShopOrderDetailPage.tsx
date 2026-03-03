@@ -4,7 +4,10 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuthState } from "@/lib/auth";
 import { authHeaders } from "@/lib/billing/client";
-import { SHOP_BUTTON_PRIMARY, SHOP_BUTTON_SECONDARY } from "@/lib/shopUi";
+import { SHOP_BUTTON_PRIMARY } from "@/lib/shopUi";
+import { translate } from "@/lib/i18n";
+import { useI18n } from "@/lib/useI18n";
+import { ShopBackLink } from "@/components/shop/ShopBackLink";
 
 type ShopOrderDetail = {
   orderId: string;
@@ -45,7 +48,7 @@ function orderStatusLabel(status: string) {
     REFUND_REJECTED: "환불 반려",
     REFUNDED: "환불 완료",
   };
-  return map[status] ?? status;
+  return translate(map[status] ?? status);
 }
 
 function orderStatusClass(status: string) {
@@ -142,6 +145,7 @@ function StatusTimeline({ status, purchaseConfirmedAt }: { status: string; purch
 }
 
 export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
+  const { t } = useI18n();
   const { status } = useAuthState();
   const [order, setOrder] = useState<ShopOrderDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -198,15 +202,14 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
       if (!res.ok || !json?.ok) throw new Error();
       setOrder(json.data.order as ShopOrderDetail);
       setActionTone("notice");
-      setActionMessage("환불 요청이 접수되었습니다. 관리자 검토 후 처리됩니다.");
-    } catch (error: any) {
-      const code = String(error?.message ?? "failed_to_request_shop_refund");
+      setActionMessage(
+        json?.data?.bundleRefundApplied
+          ? "묶음 주문 전체에 환불 요청이 접수되었습니다. 관리자 검토 후 순차 처리됩니다."
+          : "환불 요청이 접수되었습니다. 관리자 검토 후 처리됩니다."
+      );
+    } catch {
       setActionTone("error");
-      if (code.includes("shop_order_bundle_refund_requires_manual_review")) {
-        setActionMessage("묶음 결제로 승인된 주문은 부분 환불을 자동 처리할 수 없습니다. 고객센터 또는 관리자 검토를 통해 접수해 주세요.");
-      } else {
-        setActionMessage("환불 요청에 실패했습니다. 잠시 후 다시 시도해 주세요.");
-      }
+      setActionMessage("환불 요청에 실패했습니다. 잠시 후 다시 시도해 주세요.");
     } finally {
       setActionLoading(null);
     }
@@ -245,22 +248,18 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
     <div className="-mx-4 pb-24">
       <div className="border-b border-[#edf1f6] bg-white px-4 py-4">
         <div className="flex items-center gap-3">
-          <Link href="/shop/orders" data-auth-allow className={`h-10 w-10 px-0 text-[#425a76] ${SHOP_BUTTON_SECONDARY}`} aria-label="주문 목록으로">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-              <path d="M19 12H5" /><path d="M12 5l-7 7 7 7" />
-            </svg>
-          </Link>
-          <h1 className="text-[18px] font-bold tracking-[-0.02em] text-[#111827]">주문 상세</h1>
+          <ShopBackLink href="/shop/orders" label={t("주문 목록으로")} />
+          <h1 className="text-[18px] font-bold tracking-[-0.02em] text-[#111827]">{t("주문 상세")}</h1>
         </div>
       </div>
 
       <div className="space-y-4 px-4 py-5">
         {status !== "authenticated" ? (
-          <div className="rounded-3xl border border-[#edf1f6] bg-white p-5 text-[13px] text-[#65748b]">로그인 후 확인할 수 있습니다.</div>
+          <div className="rounded-3xl border border-[#edf1f6] bg-white p-5 text-[13px] text-[#65748b]">{t("로그인 후 확인할 수 있습니다.")}</div>
         ) : loading ? (
-          <div className="rounded-3xl border border-[#edf1f6] bg-white p-5 text-[13px] text-[#65748b]">불러오는 중...</div>
+          <div className="rounded-3xl border border-[#edf1f6] bg-white p-5 text-[13px] text-[#65748b]">{t("불러오는 중...")}</div>
         ) : error || !order ? (
-          <div className="rounded-3xl border border-[#f1d0cc] bg-[#fff6f5] p-5 text-[13px] text-[#a33a2b]">{error ?? "주문 정보를 찾을 수 없습니다."}</div>
+          <div className="rounded-3xl border border-[#f1d0cc] bg-[#fff6f5] p-5 text-[13px] text-[#a33a2b]">{error ?? t("주문 정보를 찾을 수 없습니다.")}</div>
         ) : (
           <>
             {actionMessage ? (

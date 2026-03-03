@@ -18,6 +18,8 @@ import {
 import { addToCart, getCart, getWishlist, loadShopClientState, markShopPartnerClick, markShopViewed, saveShopClientState, toggleWishlist } from "@/lib/shopClient";
 import { SHOP_BUTTON_ACTIVE, SHOP_BUTTON_PRIMARY } from "@/lib/shopUi";
 import { useI18n } from "@/lib/useI18n";
+import { ShopBackLink } from "@/components/shop/ShopBackLink";
+import { ShopBrandLogo } from "@/components/shop/ShopBrandLogo";
 import { ShopCheckoutSheet } from "@/components/shop/ShopCheckoutSheet";
 
 type ShopReviewRecord = {
@@ -47,16 +49,6 @@ const REVIEWS_PER_PAGE = 5;
 const PRIMARY_BUTTON = SHOP_BUTTON_ACTIVE;
 const SECONDARY_BUTTON = SHOP_BUTTON_PRIMARY;
 const INPUT_CLASS = "w-full rounded-2xl border border-[#d7dfeb] bg-white px-4 py-3 text-[14px] text-[#11294b] outline-none transition placeholder:text-[#92a0b4] focus:border-[#11294b]";
-
-function MenuIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-      <path d="M4 7h16" />
-      <path d="M4 12h16" />
-      <path d="M4 17h16" />
-    </svg>
-  );
-}
 
 function ChevronDownIcon() {
   return (
@@ -637,18 +629,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
 
       <div className="border-b border-[#edf1f6] bg-white px-4 py-4">
         <div className="grid grid-cols-[auto_auto_1fr_auto_auto_auto] items-center gap-3">
-          <button
-            type="button"
-            data-auth-allow
-            onClick={() => {
-              if (typeof window === "undefined") return;
-              document.getElementById("shop-product-info")?.scrollIntoView({ behavior: "smooth", block: "start" });
-            }}
-            className="inline-flex h-10 w-10 items-center justify-center text-[#111827]"
-            aria-label={t("상세 정보로 이동")}
-          >
-            <MenuIcon />
-          </button>
+          <ShopBackLink href="/shop" label={t("쇼핑으로 돌아가기")} />
           <button
             type="button"
             data-auth-allow
@@ -661,22 +642,22 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
             </span>
             <ChevronDownIcon />
           </button>
-          <Link href="/shop" data-auth-allow className="justify-self-center text-[36px] font-black italic tracking-[-0.07em] text-[#3b6fc9]">
-            rnest
+          <Link href="/shop" data-auth-allow className="justify-self-center">
+            <ShopBrandLogo className="h-11 w-[176px]" />
           </Link>
           <button
             type="button"
             data-auth-allow
             onClick={handleWishlistToggle}
-            className="inline-flex h-10 w-10 items-center justify-center text-[#111827]"
+            className="inline-flex h-11 w-11 items-center justify-center text-[#111827]"
             aria-label={wishlisted ? t("찜 해제") : t("찜하기")}
           >
             <HeartIcon filled={wishlisted} />
           </button>
-          <Link href="/shop/cart" data-auth-allow className="inline-flex h-10 w-10 items-center justify-center text-[#111827]" aria-label={t("장바구니")}>
+          <Link href="/shop/cart" data-auth-allow className="inline-flex h-11 w-11 items-center justify-center text-[#111827]" aria-label={t("장바구니")}>
             <CartIcon />
           </Link>
-          <Link href="/shop/profile" data-auth-allow className="inline-flex h-10 w-10 items-center justify-center text-[#111827]" aria-label={t("쇼핑 프로필")}>
+          <Link href="/shop/profile" data-auth-allow className="inline-flex h-11 w-11 items-center justify-center text-[#111827]" aria-label={t("쇼핑 프로필")}>
             <ProfileIcon />
           </Link>
         </div>

@@ -7,7 +7,9 @@ import { authHeaders } from "@/lib/billing/client";
 import { maskShopAddressLine, maskShopEmail, maskShopPhone, maskShopRecipientName } from "@/lib/shopPrivacy";
 import { formatShopShippingSingleLine, resolveDefaultShopShippingAddress, type ShopShippingAddress } from "@/lib/shopProfile";
 import { getCart, getWishlist } from "@/lib/shopClient";
-import { SHOP_BUTTON_PRIMARY, SHOP_BUTTON_SECONDARY } from "@/lib/shopUi";
+import { SHOP_BUTTON_PRIMARY } from "@/lib/shopUi";
+import { useI18n } from "@/lib/useI18n";
+import { ShopBackLink } from "@/components/shop/ShopBackLink";
 
 type ShopOrderSummary = {
   orderId: string;
@@ -24,6 +26,7 @@ const PROFILE_LINK_ROW =
   "flex items-center justify-between gap-4 rounded-[24px] border-2 border-[#bfd0e1] bg-[#eef4fb] px-4 py-4 transition hover:border-[#17324d] hover:bg-[#dfe8f1]";
 
 export function ShopProfilePage() {
+  const { t } = useI18n();
   const { status, user } = useAuthState();
   const [addresses, setAddresses] = useState<ShopShippingAddress[]>([]);
   const [defaultAddressId, setDefaultAddressId] = useState<string | null>(null);
@@ -118,12 +121,12 @@ export function ShopProfilePage() {
   const orderLinks = [
     {
       href: "/shop/orders",
-      title: "주문 목록",
+      title: t("주문 목록"),
       description: loading ? "주문 내역을 정리하는 중입니다." : `${orders.length}건의 주문과 환불 요청을 확인합니다.`,
     },
     {
       href: "/shop/orders?filter=progress",
-      title: "배송 현황",
+      title: t("배송 현황"),
       description: loading
         ? "배송 진행 상태를 정리하는 중입니다."
         : inProgressCount > 0
@@ -132,7 +135,7 @@ export function ShopProfilePage() {
     },
     {
       href: "/shop/orders?filter=delivered",
-      title: "구매 확정",
+      title: t("구매 확정"),
       description: loading
         ? "구매 확정 대상을 확인하는 중입니다."
         : confirmPendingCount > 0
@@ -146,17 +149,17 @@ export function ShopProfilePage() {
   const accountLinks = [
     {
       href: "/shop/cart",
-      title: "장바구니",
+      title: t("장바구니"),
       description: loading ? "담아둔 상품을 정리하는 중입니다." : `${cartCount}개 상품이 계정 장바구니에 저장되어 있습니다.`,
     },
     {
       href: "/shop/wishlist",
-      title: "위시리스트",
+      title: t("위시리스트"),
       description: loading ? "계정 저장 상태를 확인하는 중입니다." : `${wishlistIds.length}개 상품이 계정에 저장되어 있습니다.`,
     },
     {
       href: "/settings/account/shipping",
-      title: "배송지 설정",
+      title: t("배송지 설정"),
       description: defaultAddress
         ? `${defaultAddress.label} · ${maskShopAddressLine(formatShopShippingSingleLine(defaultAddress))}`
         : "기본 배송지를 먼저 저장해 주세요.",
@@ -167,14 +170,10 @@ export function ShopProfilePage() {
     <div className="-mx-4 min-h-[calc(100dvh-72px)] bg-[#f4f7fb] pb-24">
       <div className="border-b border-[#dbe4ef] bg-white px-4 py-4">
         <div className="flex items-center gap-3">
-          <Link href="/shop" data-auth-allow className={`h-10 w-10 px-0 text-[#425a76] ${SHOP_BUTTON_SECONDARY}`} aria-label="쇼핑으로 돌아가기">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-              <path d="M19 12H5" /><path d="M12 5l-7 7 7 7" />
-            </svg>
-          </Link>
+          <ShopBackLink href="/shop" label={t("쇼핑으로 돌아가기")} />
           <div>
-            <h1 className="text-[18px] font-bold tracking-[-0.02em] text-[#102a43]">쇼핑 프로필</h1>
-            <p className="text-[12px] text-[#61758a]">주문, 배송, 배송지, 위시리스트를 한 곳에서 관리합니다.</p>
+            <h1 className="text-[18px] font-bold tracking-[-0.02em] text-[#102a43]">{t("쇼핑 프로필")}</h1>
+            <p className="text-[12px] text-[#61758a]">{t("주문, 배송, 배송지, 위시리스트를 한 곳에서 관리합니다.")}</p>
           </div>
         </div>
       </div>
@@ -182,16 +181,16 @@ export function ShopProfilePage() {
       <div className="space-y-4 px-4 py-5">
         {status !== "authenticated" ? (
           <div className="rounded-[28px] border border-[#dbe4ef] bg-white p-6">
-            <div className="text-[16px] font-bold text-[#102a43]">로그인 후 쇼핑 프로필을 사용할 수 있습니다</div>
-            <div className="mt-2 text-[13px] leading-6 text-[#5a6b80]">위시리스트, 배송지, 주문 정보는 모두 계정 기준으로 안전하게 저장됩니다.</div>
+            <div className="text-[16px] font-bold text-[#102a43]">{t("로그인 후 쇼핑 프로필을 사용할 수 있습니다")}</div>
+            <div className="mt-2 text-[13px] leading-6 text-[#5a6b80]">{t("위시리스트, 배송지, 주문 정보는 모두 계정 기준으로 안전하게 저장됩니다.")}</div>
             <Link href="/settings/account" data-auth-allow className={`mt-5 h-11 px-5 text-[13px] ${SHOP_BUTTON_PRIMARY}`}>
-              로그인하러 가기
+              {t("로그인하러 가기")}
             </Link>
           </div>
         ) : (
           <>
             <div className="rounded-[28px] bg-[#102a43] p-5 text-white shadow-[0_24px_64px_rgba(16,42,67,0.16)]">
-              <div className="text-[12px] font-semibold uppercase tracking-[0.18em] text-white/70">Account</div>
+              <div className="text-[12px] font-semibold uppercase tracking-[0.18em] text-white/70">{t("계정")}</div>
               <div className="mt-3 text-[24px] font-bold tracking-[-0.03em]">{maskShopEmail(user?.email)}</div>
               <div className="mt-3 grid gap-3 md:grid-cols-3">
                 <div className="rounded-2xl border border-white/10 bg-white/10 px-4 py-3">
@@ -216,7 +215,7 @@ export function ShopProfilePage() {
             ) : null}
 
             <div className="rounded-[28px] border border-[#dbe4ef] bg-white p-5">
-              <div className="text-[15px] font-bold text-[#102a43]">쇼핑 개인정보</div>
+              <div className="text-[15px] font-bold text-[#102a43]">{t("쇼핑 개인정보")}</div>
               <div className="mt-4 grid gap-3 md:grid-cols-[1.15fr_0.85fr]">
                 <div className="rounded-[24px] border-2 border-[#bfd0e1] bg-[#eef4fb] px-4 py-4 text-[13px] text-[#44556d]">
                   <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#8092a8]">기본 배송지</div>
@@ -237,7 +236,7 @@ export function ShopProfilePage() {
             </div>
 
             <div className="rounded-[28px] border border-[#dbe4ef] bg-white p-5">
-              <div className="text-[14px] font-bold text-[#102a43]">주문 관리</div>
+              <div className="text-[14px] font-bold text-[#102a43]">{t("주문 관리")}</div>
               <div className="mt-3 grid gap-3">
                 {orderLinks.map((item) => (
                   <Link
@@ -257,7 +256,7 @@ export function ShopProfilePage() {
             </div>
 
             <div className="rounded-[28px] border border-[#dbe4ef] bg-white p-5">
-              <div className="text-[14px] font-bold text-[#102a43]">보관함과 배송</div>
+              <div className="text-[14px] font-bold text-[#102a43]">{t("보관함과 배송")}</div>
               <div className="mt-3 grid gap-3">
                 {accountLinks.map((item) => (
                   <Link

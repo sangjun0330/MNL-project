@@ -16,6 +16,8 @@ import {
 } from "@/lib/shopProfile";
 import { clearCart, getCart, removeFromCart, updateCartQuantity, type ShopCartItem } from "@/lib/shopClient";
 import { SHOP_BUTTON_ACTIVE, SHOP_BUTTON_PRIMARY, SHOP_BUTTON_SECONDARY } from "@/lib/shopUi";
+import { useI18n } from "@/lib/useI18n";
+import { ShopBackLink } from "@/components/shop/ShopBackLink";
 import { ShopCheckoutSheet } from "@/components/shop/ShopCheckoutSheet";
 
 type ShopProfileResponse = {
@@ -35,6 +37,7 @@ type CheckoutTarget =
   | null;
 
 export function ShopCartPage() {
+  const { t } = useI18n();
   const { status, user } = useAuthState();
   const [cartItems, setCartItems] = useState<ShopCartItem[]>([]);
   const [catalog, setCatalog] = useState<ShopProduct[]>([]);
@@ -445,15 +448,10 @@ export function ShopCartPage() {
     <div className="-mx-4 min-h-[calc(100dvh-72px)] bg-[#f4f7fb] pb-24">
       <div className="border-b border-[#dbe4ef] bg-white px-4 py-4">
         <div className="flex items-center gap-3">
-          <Link href="/shop" data-auth-allow className={`h-10 w-10 text-[#425a76] ${SHOP_BUTTON_SECONDARY}`} aria-label="쇼핑으로 돌아가기">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-              <path d="M19 12H5" />
-              <path d="M12 5l-7 7 7 7" />
-            </svg>
-          </Link>
+          <ShopBackLink href="/shop" label={t("쇼핑으로 돌아가기")} />
           <div>
-            <h1 className="text-[18px] font-bold tracking-[-0.02em] text-[#102a43]">장바구니</h1>
-            <p className="text-[12px] text-[#61758a]">상품은 계정 기준으로 저장되며 선택한 상품만 묶음 결제할 수 있습니다.</p>
+            <h1 className="text-[18px] font-bold tracking-[-0.02em] text-[#102a43]">{t("장바구니")}</h1>
+            <p className="text-[12px] text-[#61758a]">{t("상품은 계정 기준으로 저장되며 선택한 상품만 묶음 결제할 수 있습니다.")}</p>
           </div>
         </div>
       </div>
@@ -474,22 +472,22 @@ export function ShopCartPage() {
 
         {status !== "authenticated" ? (
           <div className="rounded-[28px] border border-[#dbe4ef] bg-white p-6">
-            <div className="text-[16px] font-bold text-[#102a43]">로그인 후 장바구니를 사용할 수 있습니다</div>
-            <div className="mt-2 text-[13px] leading-6 text-[#61758a]">담은 상품은 계정에 저장되어 기기가 바뀌어도 이어집니다.</div>
+            <div className="text-[16px] font-bold text-[#102a43]">{t("로그인 후 장바구니를 사용할 수 있습니다")}</div>
+            <div className="mt-2 text-[13px] leading-6 text-[#61758a]">{t("담은 상품은 계정에 저장되어 기기가 바뀌어도 이어집니다.")}</div>
             <Link href="/settings/account" data-auth-allow className={`mt-5 h-11 text-[13px] ${SHOP_BUTTON_PRIMARY}`}>
-              로그인하러 가기
+              {t("로그인하러 가기")}
             </Link>
           </div>
         ) : loading ? (
           <div className="rounded-[28px] border border-[#dbe4ef] bg-white p-5 text-[13px] text-[#61758a]">
-            장바구니를 불러오는 중입니다...
+            {t("장바구니를 불러오는 중입니다...")}
           </div>
         ) : lines.length === 0 ? (
           <div className="rounded-[28px] border border-[#dbe4ef] bg-white p-6 text-center">
-            <div className="text-[16px] font-bold text-[#102a43]">장바구니가 비어 있습니다</div>
-            <div className="mt-2 text-[13px] leading-6 text-[#61758a]">상품 상세에서 원하는 수량으로 담아두고 나중에 결제할 수 있습니다.</div>
+            <div className="text-[16px] font-bold text-[#102a43]">{t("장바구니가 비어 있습니다")}</div>
+            <div className="mt-2 text-[13px] leading-6 text-[#61758a]">{t("상품 상세에서 원하는 수량으로 담아두고 나중에 결제할 수 있습니다.")}</div>
             <Link href="/shop" data-auth-allow className={`mt-5 h-11 text-[13px] ${SHOP_BUTTON_PRIMARY}`}>
-              상품 보러 가기
+              {t("상품 보러 가기")}
             </Link>
           </div>
         ) : (
@@ -497,7 +495,7 @@ export function ShopCartPage() {
             <div className="rounded-[28px] border border-[#dbe4ef] bg-white p-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-[15px] font-bold text-[#102a43]">담아둔 상품</div>
+                  <div className="text-[15px] font-bold text-[#102a43]">{t("담아둔 상품")}</div>
                   <div className="mt-1 text-[12px] text-[#61758a]">
                     {lines.length}종 · 총 {cartItems.reduce((sum, item) => sum + item.quantity, 0)}개
                     {selectedLines.length > 0 ? ` · 선택 ${selectedLines.length}종` : ""}
@@ -505,10 +503,10 @@ export function ShopCartPage() {
                 </div>
                 <div className="flex flex-wrap justify-end gap-2">
                   <button type="button" data-auth-allow onClick={selectAll} className={`h-10 text-[12px] ${SHOP_BUTTON_SECONDARY}`}>
-                    {selectedLines.length === lines.length ? "선택 해제" : "전체 선택"}
+                    {selectedLines.length === lines.length ? t("선택 해제") : t("전체 선택")}
                   </button>
                   <button type="button" data-auth-allow onClick={() => void clearAll()} className={`h-10 text-[12px] ${SHOP_BUTTON_SECONDARY}`}>
-                    전체 비우기
+                    {t("전체 비우기")}
                   </button>
                 </div>
               </div>

@@ -274,6 +274,30 @@ export async function markShopOrderBundleFailed(input: {
   return saved[input.bundleId] ?? next;
 }
 
+export async function markShopOrderBundleCanceled(input: {
+  userId: string;
+  bundleId: string;
+  paymentKey?: string | null;
+}) {
+  const payload = await loadUserPayload(input.userId);
+  const bundles = normalizeBundleMap(payload[SHOP_ORDER_BUNDLES_KEY]);
+  const current = bundles[input.bundleId];
+  if (!current) throw new Error("shop_order_bundle_not_found");
+
+  const next: ShopOrderBundleRecord = {
+    ...current,
+    status: "CANCELED",
+    paymentKey: cleanText(input.paymentKey, 220) || current.paymentKey,
+    failCode: null,
+    failMessage: null,
+    updatedAt: new Date().toISOString(),
+  };
+
+  bundles[input.bundleId] = next;
+  const saved = await saveBundleMap(input.userId, bundles);
+  return saved[input.bundleId] ?? next;
+}
+
 export function toShopOrderBundleSummary(bundle: ShopOrderBundleRecord): ShopOrderBundleSummary {
   return {
     bundleId: bundle.bundleId,
