@@ -789,7 +789,7 @@ export function ShopPage() {
             <span>·</span>
             <Link href="/privacy" data-auth-allow className="underline hover:text-[#111827]">개인정보처리방침</Link>
           </div>
-          <div>© {new Date().getFullYear()} RNest. All rights reserved.</div>
+          <div>© RNest. All rights reserved.</div>
         </div>
       </div>
     </div>

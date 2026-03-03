@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { authHeaders } from "@/lib/billing/client";
 import { signInWithProvider, useAuthState } from "@/lib/auth";
 import { fetchAdminRefundRequests } from "@/lib/billing/adminClient";
 
@@ -16,6 +17,7 @@ function parseErrorMessage(input: string | null) {
 
 export function SettingsAdminPage() {
   const { status } = useAuthState();
+  const [accessState, setAccessState] = useState<"unknown" | "granted" | "denied">("unknown");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
@@ -24,18 +26,54 @@ export function SettingsAdminPage() {
   const [failedCount, setFailedCount] = useState(0);
 
   const load = useCallback(async () => {
-    if (status !== "authenticated") return;
+    if (status !== "authenticated") {
+      setAccessState("unknown");
+      setError(null);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
-      const rows = await fetchAdminRefundRequests({ limit: 200 });
-      setTotal(rows.length);
-      setOpenCount(
-        rows.filter((r) => ["REQUESTED", "UNDER_REVIEW", "APPROVED", "EXECUTING", "FAILED_RETRYABLE"].includes(r.status)).length
-      );
-      setDoneCount(rows.filter((r) => r.status === "REFUNDED").length);
-      setFailedCount(rows.filter((r) => r.status === "FAILED_FINAL" || r.status === "REJECTED").length);
+      const headers = await authHeaders();
+      const accessRes = await fetch("/api/admin/billing/access", {
+        method: "GET",
+        headers: {
+          "content-type": "application/json",
+          ...headers,
+        },
+        cache: "no-store",
+      });
+      const accessJson = await accessRes.json().catch(() => null);
+      if (!accessRes.ok || !accessJson?.ok) {
+        throw new Error(String(accessJson?.error ?? `failed_to_check_admin_access:${accessRes.status}`));
+      }
+      if (!accessJson?.data?.isAdmin) {
+        setAccessState("denied");
+        setTotal(0);
+        setOpenCount(0);
+        setDoneCount(0);
+        setFailedCount(0);
+        return;
+      }
+
+      setAccessState("granted");
+      try {
+        const rows = await fetchAdminRefundRequests({ limit: 200 });
+        setTotal(rows.length);
+        setOpenCount(
+          rows.filter((r) => ["REQUESTED", "UNDER_REVIEW", "APPROVED", "EXECUTING", "FAILED_RETRYABLE"].includes(r.status)).length
+        );
+        setDoneCount(rows.filter((r) => r.status === "REFUNDED").length);
+        setFailedCount(rows.filter((r) => r.status === "FAILED_FINAL" || r.status === "REJECTED").length);
+      } catch (dashboardError: any) {
+        setTotal(0);
+        setOpenCount(0);
+        setDoneCount(0);
+        setFailedCount(0);
+        setError(parseErrorMessage(String(dashboardError?.message ?? "failed_to_load_admin_dashboard")));
+      }
     } catch (e: any) {
+      setAccessState("denied");
       setError(parseErrorMessage(String(e?.message ?? "failed_to_load_admin_dashboard")));
     } finally {
       setLoading(false);
@@ -84,39 +122,52 @@ export function SettingsAdminPage() {
 
       {status === "authenticated" ? (
         <>
-          <section className="rnest-surface p-5">
-            <div className="text-[13px] font-semibold text-ios-sub">운영 요약</div>
-            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {cards.map((card) => (
-                <div key={card.label} className="rnest-sub-surface p-3">
-                  <div className="text-[11px] text-ios-sub">{card.label}</div>
-                  <div className={`mt-1 text-[20px] font-extrabold tracking-[-0.02em] ${card.tone}`}>{card.value}</div>
+          {accessState === "granted" ? (
+            <>
+              <section className="rnest-surface p-5">
+                <div className="text-[13px] font-semibold text-ios-sub">운영 요약</div>
+                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {cards.map((card) => (
+                    <div key={card.label} className="rnest-sub-surface p-3">
+                      <div className="text-[11px] text-ios-sub">{card.label}</div>
+                      <div className={`mt-1 text-[20px] font-extrabold tracking-[-0.02em] ${card.tone}`}>{card.value}</div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-            {loading ? <div className="mt-3 text-[12px] text-ios-muted">불러오는 중...</div> : null}
-            {error ? <div className="mt-3 text-[12px] text-red-600">{error}</div> : null}
-          </section>
+                {loading ? <div className="mt-3 text-[12px] text-ios-muted">불러오는 중...</div> : null}
+                {error ? <div className="mt-3 text-[12px] text-red-600">{error}</div> : null}
+              </section>
 
-          <section className="rnest-surface mt-4 p-5">
-            <div className="text-[15px] font-bold text-ios-text">관리 기능</div>
-            <div className="mt-3 grid gap-2">
-              <Link
-                href="/settings/admin/shop"
-                className="rnest-btn-secondary inline-flex h-11 items-center justify-between px-4 text-[13px]"
-              >
-                쇼핑 운영 관리
-                <span className="text-ios-sub">›</span>
-              </Link>
-              <Link
-                href="/settings/admin/refunds"
-                className="rnest-btn-secondary inline-flex h-11 items-center justify-between px-4 text-[13px]"
-              >
-                환불 요청 + Toss 결제 로그 운영
-                <span className="text-ios-sub">›</span>
-              </Link>
-            </div>
-          </section>
+              <section className="rnest-surface mt-4 p-5">
+                <div className="text-[15px] font-bold text-ios-text">관리 기능</div>
+                <div className="mt-3 grid gap-2">
+                  <Link
+                    href="/settings/admin/shop"
+                    className="rnest-btn-secondary inline-flex h-11 items-center justify-between px-4 text-[13px]"
+                  >
+                    쇼핑 운영 관리
+                    <span className="text-ios-sub">›</span>
+                  </Link>
+                  <Link
+                    href="/settings/admin/refunds"
+                    className="rnest-btn-secondary inline-flex h-11 items-center justify-between px-4 text-[13px]"
+                  >
+                    환불 요청 + Toss 결제 로그 운영
+                    <span className="text-ios-sub">›</span>
+                  </Link>
+                </div>
+              </section>
+            </>
+          ) : (
+            <section className="rnest-surface p-5">
+              <div className="text-[15px] font-bold text-ios-text">관리자 권한 확인</div>
+              <p className="mt-2 text-[13px] leading-6 text-ios-sub">
+                {loading
+                  ? "관리자 권한을 확인하는 중입니다."
+                  : error || "현재 로그인한 계정은 운영 관리자 권한이 없습니다."}
+              </p>
+            </section>
+          )}
         </>
       ) : null}
     </div>

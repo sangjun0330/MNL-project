@@ -663,6 +663,33 @@ export async function countRecentReadyShopOrdersByUser(userId: string) {
   }).length;
 }
 
+export async function countReservedShopQuantityForProduct(productId: string) {
+  const key = cleanText(productId, 80);
+  if (!key) return 0;
+
+  let rows: ShopOrderRecord[] = [];
+  try {
+    rows = await listShopOrderRows(240);
+  } catch {
+    rows = [];
+  }
+
+  return rows.reduce((sum, row) => {
+    if (row.productId !== key) return sum;
+    if (
+      row.status !== "READY" &&
+      row.status !== "PAID" &&
+      row.status !== "SHIPPED" &&
+      row.status !== "DELIVERED" &&
+      row.status !== "REFUND_REQUESTED" &&
+      row.status !== "REFUND_REJECTED"
+    ) {
+      return sum;
+    }
+    return sum + Math.max(0, Math.round(Number(row.productSnapshot.quantity) || 0));
+  }, 0);
+}
+
 export async function listVerifiedShopReviewerIdsForProduct(productId: string): Promise<Set<string>> {
   const key = cleanText(productId, 80);
   if (!key) return new Set();

@@ -1,6 +1,13 @@
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { loadUserState, saveUserState } from "@/lib/server/userStateStore";
-import { emptyShopShippingProfile, normalizeShopShippingProfile, normalizeShopShippingSnapshot, type ShopShippingProfile, type ShopShippingSnapshot } from "@/lib/shopProfile";
+import {
+  emptyShopShippingProfile,
+  isCompleteShopShippingProfile,
+  normalizeShopShippingProfile,
+  normalizeShopShippingSnapshot,
+  type ShopShippingProfile,
+  type ShopShippingSnapshot,
+} from "@/lib/shopProfile";
 import type { Database } from "@/types/supabase";
 
 type ShopProfileRow = Database["public"]["Tables"]["shop_customer_profiles"]["Row"];
@@ -51,8 +58,8 @@ async function saveLegacyProfile(userId: string, profile: ShopShippingProfile): 
 }
 
 export async function loadShopShippingProfile(userId: string): Promise<ShopShippingProfile> {
-  const admin = getSupabaseAdmin();
   try {
+    const admin = getSupabaseAdmin();
     const { data, error } = await admin.from("shop_customer_profiles").select("*").eq("user_id", userId).maybeSingle();
     if (error) throw error;
     return fromRow(data);
@@ -67,9 +74,12 @@ export async function loadShopShippingProfile(userId: string): Promise<ShopShipp
 }
 
 export async function saveShopShippingProfile(userId: string, raw: unknown): Promise<ShopShippingProfile> {
-  const admin = getSupabaseAdmin();
   const profile = normalizeShopShippingProfile(raw);
+  if (!isCompleteShopShippingProfile(profile)) {
+    throw new Error("invalid_shop_shipping_profile");
+  }
   try {
+    const admin = getSupabaseAdmin();
     const { error } = await admin.from("shop_customer_profiles").upsert(
       {
         user_id: userId,

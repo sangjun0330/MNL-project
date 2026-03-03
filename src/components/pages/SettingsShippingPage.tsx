@@ -90,6 +90,7 @@ export function SettingsShippingPage() {
   const [postcodeLoading, setPostcodeLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [messageTone, setMessageTone] = useState<"error" | "notice">("notice");
+  const [savedSignature, setSavedSignature] = useState<string | null>(null);
   const addressLine2Ref = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -120,7 +121,9 @@ export function SettingsShippingPage() {
         if (!res.ok || !json?.ok || !json?.data?.profile) {
           throw new Error(String(json?.error ?? `http_${res.status}`));
         }
-        setProfile(json.data.profile as ShopShippingProfile);
+        const nextProfile = json.data.profile as ShopShippingProfile;
+        setProfile(nextProfile);
+        setSavedSignature(JSON.stringify(nextProfile));
         if (json?.data?.degraded) {
           setMessageTone("notice");
           setMessage("기본 저장소가 준비되지 않아 호환 모드로 불러왔습니다. 저장은 정상 동작합니다.");
@@ -128,6 +131,7 @@ export function SettingsShippingPage() {
       } catch {
         if (!active) return;
         setProfile(emptyShopShippingProfile());
+        setSavedSignature(null);
         setMessageTone("error");
         setMessage("배송지 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
       } finally {
@@ -171,6 +175,11 @@ export function SettingsShippingPage() {
 
   const handleSave = useCallback(async () => {
     if (!user?.userId || saving) return;
+    if (!isCompleteShopShippingProfile(profile)) {
+      setMessageTone("error");
+      setMessage("받는 분, 연락처, 우편번호, 기본 주소를 모두 입력해 주세요.");
+      return;
+    }
     setSaving(true);
     setMessage(null);
     try {
@@ -189,13 +198,17 @@ export function SettingsShippingPage() {
       if (!res.ok || !json?.ok || !json?.data?.profile) {
         throw new Error(String(json?.error ?? `http_${res.status}`));
       }
-      setProfile(json.data.profile as ShopShippingProfile);
+      const nextProfile = json.data.profile as ShopShippingProfile;
+      setProfile(nextProfile);
+      setSavedSignature(JSON.stringify(nextProfile));
       setMessageTone("notice");
       setMessage("기본 배송지가 저장되었습니다.");
     } catch (error: any) {
       const code = String(error?.message ?? "failed_to_save_shop_profile");
       setMessageTone("error");
-      if (code === "shop_profile_storage_unavailable") {
+      if (code === "invalid_shop_shipping_profile") {
+        setMessage("받는 분, 연락처, 우편번호, 기본 주소를 모두 입력해 주세요.");
+      } else if (code === "shop_profile_storage_unavailable") {
         setMessage("배송지 저장소를 사용할 수 없습니다. 현재 환경의 Supabase 상태를 확인해 주세요.");
       } else {
         setMessage("배송지 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.");
@@ -206,6 +219,7 @@ export function SettingsShippingPage() {
   }, [profile, saving, user?.userId]);
 
   const shippingReady = isCompleteShopShippingProfile(profile);
+  const isPersisted = shippingReady && savedSignature === JSON.stringify(profile);
 
   return (
     <div className="mx-auto w-full max-w-[720px] px-4 pb-24 pt-6">
@@ -238,7 +252,7 @@ export function SettingsShippingPage() {
                   {t("다음(카카오) 우편번호 검색으로 정확한 도로명/지번 주소를 찾고, 쇼핑 주문에서 바로 사용합니다.")}
                 </div>
               </div>
-              {shippingReady ? (
+              {isPersisted ? (
                 <span className="rounded-full border border-[#d7dfeb] bg-[#f4f7fb] px-3 py-1 text-[10px] font-semibold text-[#11294b]">
                   {t("저장됨")}
                 </span>

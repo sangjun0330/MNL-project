@@ -37,6 +37,9 @@ export async function PUT(req: Request) {
     return jsonNoStore({ ok: true, data: { profile } });
   } catch (error: any) {
     const message = String(error?.message ?? "failed_to_save_shop_profile");
+    if (message === "invalid_shop_shipping_profile") {
+      return jsonNoStore({ ok: false, error: "invalid_shop_shipping_profile" }, { status: 400 });
+    }
     if (message === "shop_profile_storage_unavailable") {
       return jsonNoStore({ ok: false, error: "shop_profile_storage_unavailable" }, { status: 503 });
     }

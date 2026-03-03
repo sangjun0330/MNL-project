@@ -246,6 +246,9 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
   const selectedImageUrl = product.imageUrls[selectedImageIndex] ?? null;
   const shippingReady = Boolean(shippingProfile && isCompleteShopShippingProfile(shippingProfile));
   const shippingLabel = shippingProfile ? `${shippingProfile.recipientName} · ${shippingProfile.phone} · ${formatShopShippingSingleLine(shippingProfile)}` : null;
+  const hardOutOfStock = product.outOfStock || (typeof product.stockCount === "number" && product.stockCount <= 0);
+  const maxSelectableQuantity =
+    typeof product.stockCount === "number" && product.stockCount > 0 ? Math.max(1, Math.min(9, product.stockCount)) : 9;
   const totalPrice = Math.round((product.priceKrw ?? 0) * quantity);
   const discountPercent = product.originalPriceKrw && product.priceKrw && product.originalPriceKrw > product.priceKrw
     ? Math.round((1 - product.priceKrw / product.originalPriceKrw) * 100)
@@ -301,6 +304,10 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
   useEffect(() => {
     setReviewPage(1);
   }, [reviewSort, reviewSearch, reviewMinRating, product.id]);
+
+  useEffect(() => {
+    setQuantity((current) => Math.max(1, Math.min(current, maxSelectableQuantity)));
+  }, [maxSelectableQuantity]);
 
   const handleWishlistToggle = () => {
     const next = toggleWishlist(product.id);
@@ -383,6 +390,10 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
       setMessageTone("error");
       if (text.includes("too_many_pending_shop_orders")) {
         setMessage("결제 대기 주문이 많습니다. 기존 결제를 마친 뒤 다시 시도해 주세요.");
+      } else if (text.includes("shop_product_out_of_stock")) {
+        setMessage("현재 품절되어 주문을 진행할 수 없습니다.");
+      } else if (text.includes("shop_product_insufficient_stock")) {
+        setMessage("남아 있는 재고보다 많은 수량을 선택했습니다. 수량을 줄여 다시 시도해 주세요.");
       } else if (text.includes("shop_checkout_disabled")) {
         setMessage("현재 이 상품은 앱 내 결제가 비활성화되어 있습니다.");
       } else if (text.includes("missing_shipping_address")) {
@@ -401,7 +412,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
   };
 
   const handleOpenCheckout = () => {
-    if (product.outOfStock) {
+    if (hardOutOfStock) {
       setMessageTone("error");
       setMessage("현재 품절된 상품입니다.");
       return;
@@ -568,7 +579,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
               </div>
             )}
             {/* 품절 오버레이 */}
-            {product.outOfStock ? (
+            {hardOutOfStock ? (
               <div className="absolute inset-0 flex items-center justify-center bg-black/40">
                 <span className="rounded-full bg-white/90 px-4 py-2 text-[13px] font-bold text-[#111827]">품절</span>
               </div>
@@ -628,7 +639,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
                 </div>
               ) : null}
               {/* 재고 표시 */}
-              {product.stockCount !== null && product.stockCount <= 10 && !product.outOfStock ? (
+              {product.stockCount !== null && product.stockCount <= 10 && !hardOutOfStock ? (
                 <div className="text-[12px] font-semibold text-[#e63946]">잔여 {product.stockCount}개</div>
               ) : null}
             </div>
@@ -652,7 +663,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
                     <button
                       type="button"
                       data-auth-allow
-                      onClick={() => setQuantity((current) => Math.min(9, current + 1))}
+                      onClick={() => setQuantity((current) => Math.min(maxSelectableQuantity, current + 1))}
                       className={`${SECONDARY_BUTTON} h-10 w-10 px-0 text-[16px]`}
                     >
                       +
@@ -991,7 +1002,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
                         </div>
                       </div>
                     )}
-                    {p.outOfStock ? (
+                    {p.outOfStock || (typeof p.stockCount === "number" && p.stockCount <= 0) ? (
                       <div className="absolute inset-0 flex items-center justify-center bg-black/35">
                         <span className="rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-bold text-[#111827]">품절</span>
                       </div>
@@ -1025,7 +1036,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
             {t("리뷰보기")}
           </button>
 
-          {product.outOfStock ? (
+          {hardOutOfStock ? (
             <button type="button" disabled className="inline-flex h-16 flex-[1.2] items-center justify-center rounded-2xl bg-[#b0b8c5] text-[15px] font-semibold text-white">
               {t("품절")}
             </button>

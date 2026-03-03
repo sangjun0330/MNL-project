@@ -3,7 +3,12 @@ import { getRouteSupabaseClient } from "@/lib/server/supabaseRouteClient";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { isCompleteShopShippingProfile } from "@/lib/shopProfile";
 import { loadShopCatalog } from "@/lib/server/shopCatalogStore";
-import { buildShopOrderId, countRecentReadyShopOrdersByUser, createShopOrder } from "@/lib/server/shopOrderStore";
+import {
+  buildShopOrderId,
+  countRecentReadyShopOrdersByUser,
+  countReservedShopQuantityForProduct,
+  createShopOrder,
+} from "@/lib/server/shopOrderStore";
 import { buildShopShippingSnapshot, loadShopShippingProfile } from "@/lib/server/shopProfileStore";
 import { readTossClientKeyFromEnv, readTossSecretKeyFromEnv } from "@/lib/server/tossConfig";
 
@@ -74,6 +79,26 @@ export async function POST(req: Request) {
     const catalog = await loadShopCatalog();
     const product = catalog.find((item) => item.id === productId);
     if (!product) return jsonNoStore({ ok: false, error: "shop_product_not_found" }, { status: 404 });
+    if (product.outOfStock) {
+      return jsonNoStore({ ok: false, error: "shop_product_out_of_stock" }, { status: 409 });
+    }
+    if (typeof product.stockCount === "number") {
+      const reservedQuantity = await countReservedShopQuantityForProduct(product.id);
+      const remainingStock = Math.max(0, product.stockCount - reservedQuantity);
+      if (remainingStock <= 0) {
+        return jsonNoStore({ ok: false, error: "shop_product_out_of_stock" }, { status: 409 });
+      }
+      if (quantity > remainingStock) {
+        return jsonNoStore(
+          {
+            ok: false,
+            error: "shop_product_insufficient_stock",
+            data: { remainingStock },
+          },
+          { status: 409 }
+        );
+      }
+    }
     if (!product.checkoutEnabled || !product.priceKrw || product.priceKrw <= 0) {
       return jsonNoStore({ ok: false, error: "shop_checkout_disabled" }, { status: 400 });
     }
