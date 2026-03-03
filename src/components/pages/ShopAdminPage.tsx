@@ -307,9 +307,24 @@ function TagInput({ value, onChange, max = 6, placeholder }: { value: string[]; 
 }
 
 function UrlListInput({ value, onChange, max = 6 }: { value: string[]; onChange: (v: string[]) => void; max?: number }) {
+  const [brokenKeys, setBrokenKeys] = useState<Record<string, boolean>>({});
   const addRow = () => { if (value.length < max) onChange([...value, ""]); };
-  const updateRow = (i: number, v: string) => { const next = [...value]; next[i] = v; onChange(next); };
-  const removeRow = (i: number) => onChange(value.filter((_, idx) => idx !== i));
+  const updateRow = (i: number, v: string) => {
+    const next = [...value];
+    next[i] = v;
+    onChange(next);
+    setBrokenKeys((current) => {
+      const key = `${i}:${value[i] ?? ""}`;
+      if (!current[key]) return current;
+      const nextMap = { ...current };
+      delete nextMap[key];
+      return nextMap;
+    });
+  };
+  const removeRow = (i: number) => {
+    onChange(value.filter((_, idx) => idx !== i));
+    setBrokenKeys({});
+  };
 
   const isValidUrl = (url: string) => {
     if (!url) return true;
@@ -320,6 +335,11 @@ function UrlListInput({ value, onChange, max = 6 }: { value: string[]; onChange:
     <div className="space-y-2">
       {value.map((url, i) => (
         <div key={i} className="flex items-center gap-2">
+          {(() => {
+            const previewKey = `${i}:${url}`;
+            const canPreview = Boolean(url && isValidUrl(url) && !brokenKeys[previewKey]);
+            return (
+              <>
           <div className="flex-1">
             <input
               className={[INPUT_CLASS, !isValidUrl(url) && url ? INPUT_ERROR : ""].join(" ")}
@@ -329,19 +349,22 @@ function UrlListInput({ value, onChange, max = 6 }: { value: string[]; onChange:
             />
             {!isValidUrl(url) && url ? <p className={ERROR_CLASS}>올바른 URL을 입력해주세요 (https://로 시작)</p> : null}
           </div>
-          {url && isValidUrl(url) ? (
+          {canPreview ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={getShopImageSrc(url)}
               alt=""
               className="h-10 w-10 rounded-xl border border-[#d7dfeb] object-cover"
               referrerPolicy="no-referrer"
-              onError={(e) => {
-                (e.target as HTMLImageElement).style.display = "none";
+              onError={() => {
+                setBrokenKeys((current) => ({ ...current, [previewKey]: true }));
               }}
             />
           ) : <div className="h-10 w-10 flex-shrink-0 rounded-xl border border-[#d7dfeb] bg-[#f4f7fb]" />}
           <button type="button" data-auth-allow onClick={() => removeRow(i)} className="flex-shrink-0 rounded-xl p-2 text-[#92a0b4] hover:text-[#a33a2b]">✕</button>
+              </>
+            );
+          })()}
         </div>
       ))}
       {value.length < max ? (
@@ -1210,6 +1233,10 @@ export function ShopAdminPage() {
         showNotice("error", "결제 완료 주문만 배송 처리할 수 있습니다.");
       } else if (message === "shop_order_not_shipped") {
         showNotice("error", "배송 중 상태 주문만 배송 완료로 바꿀 수 있습니다.");
+      } else if (message === "shop_order_storage_unavailable") {
+        showNotice("error", "주문 저장소 또는 스키마가 아직 완전히 준비되지 않았습니다. 쇼핑 DB 마이그레이션 상태를 확인해 주세요.");
+      } else if (message === "failed_to_update_shop_order") {
+        showNotice("error", "배송 상태 변경 반영 중 문제가 발생했습니다. 잠시 후 목록을 새로고침하고 다시 시도해 주세요.");
       } else {
         showNotice("error", "배송 상태 변경에 실패했습니다.");
       }

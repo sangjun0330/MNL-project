@@ -303,6 +303,18 @@ function isStorageUnavailableError(error: unknown) {
   return message.includes("supabase admin env missing");
 }
 
+function toTimestamp(value: string | null | undefined) {
+  const time = new Date(String(value ?? "")).getTime();
+  if (!Number.isFinite(time)) return 0;
+  return time;
+}
+
+function preferLatestOrder(a: ShopOrderRecord | null, b: ShopOrderRecord | null): ShopOrderRecord | null {
+  if (!a) return b;
+  if (!b) return a;
+  return toTimestamp(b.updatedAt) >= toTimestamp(a.updatedAt) ? b : a;
+}
+
 function toProductSnapshotJson(snapshot: ShopOrderRecord["productSnapshot"]): Json {
   return {
     name: snapshot.name,
@@ -471,13 +483,21 @@ async function readModernOrder(orderId: string): Promise<ShopOrderRecord | null>
 }
 
 async function readOrderInternal(orderId: string) {
+  let modern: ShopOrderRecord | null = null;
   try {
-    const modern = await readModernOrder(orderId);
-    if (modern) return modern;
+    modern = await readModernOrder(orderId);
   } catch (error) {
     if (!isMissingTableError(error, "shop_orders")) throw error;
   }
-  return readLegacyOrder(orderId);
+
+  let legacy: ShopOrderRecord | null = null;
+  try {
+    legacy = await readLegacyOrder(orderId);
+  } catch {
+    legacy = null;
+  }
+
+  return preferLatestOrder(modern, legacy);
 }
 
 async function listLegacyShopOrderRows(limit: number): Promise<ShopOrderRecord[]> {
@@ -528,7 +548,8 @@ async function listShopOrderRows(limit: number): Promise<ShopOrderRecord[]> {
   const merged = new Map<string, ShopOrderRecord>();
   for (const row of modernRows) merged.set(row.orderId, row);
   for (const row of legacyRows) {
-    if (!merged.has(row.orderId)) merged.set(row.orderId, row);
+    const current = merged.get(row.orderId) ?? null;
+    merged.set(row.orderId, preferLatestOrder(current, row) ?? row);
   }
 
   return Array.from(merged.values())

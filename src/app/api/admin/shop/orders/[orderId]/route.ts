@@ -72,6 +72,18 @@ export async function PATCH(req: Request, ctx: any) {
     if (message.includes("not_found")) return jsonNoStore({ ok: false, error: "shop_order_not_found" }, { status: 404 });
     if (message.includes("not_paid")) return jsonNoStore({ ok: false, error: "shop_order_not_paid" }, { status: 400 });
     if (message.includes("not_shipped")) return jsonNoStore({ ok: false, error: "shop_order_not_shipped" }, { status: 400 });
-    return jsonNoStore({ ok: false, error: message }, { status: 500 });
+    if (
+      message === "shop_order_storage_unavailable" ||
+      message.toLowerCase().includes("supabase admin env missing") ||
+      message.toLowerCase().includes("schema cache") ||
+      message.toLowerCase().includes("shop_orders") ||
+      message.toLowerCase().includes("tracking_number") ||
+      message.toLowerCase().includes("courier") ||
+      message.toLowerCase().includes("shipped_at") ||
+      message.toLowerCase().includes("delivered_at")
+    ) {
+      return jsonNoStore({ ok: false, error: "shop_order_storage_unavailable" }, { status: 503 });
+    }
+    return jsonNoStore({ ok: false, error: "failed_to_update_shop_order" }, { status: 500 });
   }
 }
