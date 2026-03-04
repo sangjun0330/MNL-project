@@ -44,6 +44,16 @@ type ShopOrderDetail = {
   purchaseConfirmedAt: string | null;
 };
 
+type ShopLiveTrackingState = {
+  statusLabel: string | null;
+  lastEventAt: string | null;
+  lastPolledAt: string | null;
+  trackingUrl: string | null;
+  delivered: boolean;
+  cached: boolean;
+  error: string | null;
+};
+
 function orderStatusLabel(status: string) {
   const map: Record<string, string> = {
     READY: "결제 대기",
@@ -92,7 +102,7 @@ function resolveDetailFlowLabel(order: ShopOrderDetail) {
   if (order.refund.status === "done") return translate("환불 완료");
   if (order.refund.status === "rejected") return translate("환불 반려");
   if (order.refund.status === "requested") return translate("환불 요청");
-  if (order.tracking?.statusLabel) return order.tracking.statusLabel;
+  if (order.tracking?.statusLabel) return translate(order.tracking.statusLabel);
   return orderStatusLabel(order.status);
 }
 
@@ -116,7 +126,7 @@ function resolveDetailProgressClass(order: ShopOrderDetail) {
   return "w-[12%]";
 }
 
-function StatusTimeline({ order }: { order: ShopOrderDetail }) {
+function StatusTimeline({ order, trackingUrl }: { order: ShopOrderDetail; trackingUrl?: string | null }) {
   if (order.status === "FAILED" || order.status === "CANCELED") {
     return (
       <div className="rounded-3xl border border-[#edf1f6] bg-white p-5">
@@ -151,11 +161,11 @@ function StatusTimeline({ order }: { order: ShopOrderDetail }) {
         {order.trackingNumber ? (
           <div className="text-[11.5px] leading-5 text-[#60768d]">
             {order.courier ?? "-"} · {order.trackingNumber}
-            {order.tracking?.trackingUrl ? (
+            {trackingUrl ? (
               <>
                 {" · "}
                 <a
-                  href={order.tracking.trackingUrl}
+                  href={trackingUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="font-semibold text-[#2b5faa]"
@@ -180,6 +190,8 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [actionTone, setActionTone] = useState<"error" | "notice">("notice");
   const [actionLoading, setActionLoading] = useState<"refund" | "purchase" | "delivery" | "cancel" | null>(null);
+  const [liveTracking, setLiveTracking] = useState<ShopLiveTrackingState | null>(null);
+  const [trackingLoading, setTrackingLoading] = useState(false);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -218,6 +230,57 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
     [orderId, status, t]
   );
 
+  const loadLiveTracking = useCallback(
+    async (force = false) => {
+      if (status !== "authenticated" || !order) return;
+      if (order.status !== "SHIPPED" || !order.trackingNumber) {
+        setLiveTracking(null);
+        return;
+      }
+      if (force && mountedRef.current) setTrackingLoading(true);
+
+      try {
+        const headers = await authHeaders();
+        const query = new URLSearchParams({ orderId: order.orderId });
+        if (force) query.set("force", "1");
+        const res = await fetch(`/api/shop/tracking?${query.toString()}`, {
+          method: "GET",
+          headers: { "content-type": "application/json", ...headers },
+          cache: "no-store",
+        });
+        const json = await res.json().catch(() => null);
+        if (!mountedRef.current) return;
+        if (!res.ok || !json?.ok || !json?.data) throw new Error(String(json?.error ?? `http_${res.status}`));
+        setLiveTracking({
+          statusLabel: json.data.statusLabel ?? null,
+          lastEventAt: json.data.lastEventAt ?? null,
+          lastPolledAt: json.data.lastPolledAt ?? null,
+          trackingUrl: json.data.trackingUrl ?? null,
+          delivered: Boolean(json.data.delivered),
+          cached: Boolean(json.data.cached),
+          error: json.data.error ? t("택배사 정보를 다시 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.") : null,
+        });
+        if (json.data.delivered) {
+          void loadOrder(false);
+        }
+      } catch {
+        if (!mountedRef.current) return;
+        setLiveTracking((current) => ({
+          statusLabel: current?.statusLabel ?? order.tracking?.statusLabel ?? t("배송 조회중"),
+          lastEventAt: current?.lastEventAt ?? order.tracking?.lastEventAt ?? null,
+          lastPolledAt: current?.lastPolledAt ?? order.tracking?.lastPolledAt ?? null,
+          trackingUrl: current?.trackingUrl ?? order.tracking?.trackingUrl ?? null,
+          delivered: current?.delivered ?? Boolean(order.deliveredAt),
+          cached: true,
+          error: t("택배사 정보를 다시 확인하지 못했습니다. 잠시 후 다시 시도해 주세요."),
+        }));
+      } finally {
+        if (force && mountedRef.current) setTrackingLoading(false);
+      }
+    },
+    [loadOrder, order, status, t]
+  );
+
   useEffect(() => {
     if (status !== "authenticated") {
       setLoading(false);
@@ -248,6 +311,31 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
     scope: `shop-order-${orderId}`,
     onRefresh: () => loadOrder(false),
   });
+
+  useEffect(() => {
+    if (status !== "authenticated" || !order || order.status !== "SHIPPED" || !order.trackingNumber) {
+      setLiveTracking(null);
+      setTrackingLoading(false);
+      return;
+    }
+
+    void loadLiveTracking(false);
+
+    const refreshIfVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      void loadLiveTracking(false);
+    };
+
+    const intervalId = window.setInterval(refreshIfVisible, 60_000);
+    window.addEventListener("focus", refreshIfVisible);
+    document.addEventListener("visibilitychange", refreshIfVisible);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", refreshIfVisible);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+    };
+  }, [loadLiveTracking, order, status]);
 
   const requestRefund = async () => {
     if (status !== "authenticated" || !order) return;
@@ -379,6 +467,18 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
     }
   };
 
+  const trackingSnapshot = order
+    ? {
+        statusLabel: liveTracking?.statusLabel ?? order.tracking?.statusLabel ?? null,
+        lastEventAt: liveTracking?.lastEventAt ?? order.tracking?.lastEventAt ?? null,
+        lastPolledAt: liveTracking?.lastPolledAt ?? order.tracking?.lastPolledAt ?? null,
+        trackingUrl: liveTracking?.trackingUrl ?? order.tracking?.trackingUrl ?? null,
+        delivered: liveTracking?.delivered ?? Boolean(order.deliveredAt),
+        cached: liveTracking?.cached ?? true,
+        error: liveTracking?.error ?? null,
+      }
+    : null;
+
   return (
     <div className="-mx-4 pb-24">
       <div className="border-b border-[#edf1f6] bg-white px-4 py-4">
@@ -434,7 +534,7 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
               </div>
             </div>
 
-            <StatusTimeline order={order} />
+            <StatusTimeline order={order} trackingUrl={trackingSnapshot?.trackingUrl ?? order.tracking?.trackingUrl} />
 
             <div className="rounded-3xl border border-[#edf1f6] bg-white p-5">
               <h2 className="mb-3 text-[14px] font-bold text-[#111827]">{t("결제·배송 정보")}</h2>
@@ -473,12 +573,54 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
                 {order.trackingNumber ? (
                   <>
                     <InfoRow label={t("택배사")} value={order.courier ?? "-"} />
-                    {order.tracking?.carrierCode ? <InfoRow label={t("스마트택배 코드")} value={order.tracking.carrierCode} /> : null}
                     <InfoRow label={t("운송장번호")} value={<span className="font-mono font-semibold">{order.trackingNumber}</span>} />
-                    {order.tracking?.statusLabel ? <InfoRow label={t("배송 상태")} value={order.tracking.statusLabel} /> : null}
-                    {order.tracking?.lastEventAt ? <InfoRow label={t("마지막 이벤트")} value={formatDateLabel(order.tracking.lastEventAt)} /> : null}
+                    {trackingSnapshot?.statusLabel ? <InfoRow label={t("배송 상태")} value={t(trackingSnapshot.statusLabel)} /> : null}
+                    {trackingSnapshot?.lastEventAt ? <InfoRow label={t("마지막 이벤트")} value={formatDateLabel(trackingSnapshot.lastEventAt)} /> : null}
                     {order.shippedAt ? <InfoRow label={t("발송일")} value={formatDateLabel(order.shippedAt)} /> : null}
                     {order.deliveredAt ? <InfoRow label={t("배송 완료")} value={formatDateLabel(order.deliveredAt)} /> : null}
+                    {order.status === "SHIPPED" ? (
+                      <div className="py-3">
+                        <div className="rounded-[24px] border border-[#dbe4ef] bg-white px-4 py-4">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <div className="text-[11px] font-semibold text-[#60768d]">{t("실시간 배송 확인")}</div>
+                              <div className="mt-1 text-[14px] font-semibold text-[#17324d]">
+                                {trackingSnapshot?.statusLabel ? t(trackingSnapshot.statusLabel) : t("택배사 상태를 확인하는 중입니다.")}
+                              </div>
+                              <div className="mt-1 text-[11.5px] leading-5 text-[#60768d]">
+                                {trackingSnapshot?.lastPolledAt
+                                  ? `${t("마지막 확인")} ${formatDateLabel(trackingSnapshot.lastPolledAt)}`
+                                  : t("택배사 상태가 갱신되면 여기에 바로 반영됩니다.")}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              data-auth-allow
+                              onClick={() => void loadLiveTracking(true)}
+                              disabled={trackingLoading}
+                              className="inline-flex h-10 min-w-[108px] items-center justify-center rounded-full border border-[#d7dfeb] bg-[#f8fafc] px-4 text-[12px] font-semibold text-[#11294b] transition hover:border-[#11294b]"
+                            >
+                              {trackingLoading ? t("확인 중...") : t("지금 확인")}
+                            </button>
+                          </div>
+                          {trackingSnapshot?.trackingUrl ? (
+                            <a
+                              href={trackingSnapshot.trackingUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="mt-3 inline-flex text-[12px] font-semibold text-[#2b5faa]"
+                            >
+                              {t("택배사 배송 조회 열기")}
+                            </a>
+                          ) : null}
+                          {trackingSnapshot?.error ? (
+                            <div className="mt-3 rounded-2xl border border-[#edf1f6] bg-[#f8fafc] px-3 py-2 text-[11.5px] leading-5 text-[#60768d]">
+                              {trackingSnapshot.error}
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
                   </>
                 ) : null}
               </div>

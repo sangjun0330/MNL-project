@@ -2,6 +2,7 @@ import { todayISO } from "@/lib/date";
 import { toMaskedShopShippingSnapshot } from "@/lib/shopPrivacy";
 import { normalizeShopShippingSnapshot, type ShopShippingSnapshot, type ShopSmartTrackerMeta } from "@/lib/shopProfile";
 import { findShopOrderBundleByOrderId, markShopOrderBundleCanceled } from "@/lib/server/shopOrderBundleStore";
+import { loadUserEmailById, sendDeliveryCompletedEmail } from "@/lib/server/emailService";
 import { buildSweetTrackerTrackingUrl, fetchSweetTrackerTracking, shouldPollSweetTracker } from "@/lib/server/sweetTracker";
 import { buildCancelIdempotencyKey, buildConfirmIdempotencyKey, readTossAcceptLanguage, readTossSecretKeyFromEnv, readTossTestCodeFromEnv } from "@/lib/server/tossConfig";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
@@ -227,10 +228,10 @@ function normalizeSmartTrackerMeta(value: unknown): ShopSmartTrackerMeta | null 
   return snapshot.smartTracker;
 }
 
-function buildTrackingSummary(meta: ShopSmartTrackerMeta | null) {
+function buildTrackingSummary(meta: ShopSmartTrackerMeta | null, input?: { exposeCarrierCode?: boolean }) {
   if (!meta) return null;
   return {
-    carrierCode: meta.carrierCode,
+    carrierCode: input?.exposeCarrierCode ? meta.carrierCode : null,
     trackingUrl: meta.trackingUrl,
     statusLabel: meta.lastStatusLabel,
     lastEventAt: meta.lastEventAt,
@@ -827,6 +828,7 @@ async function syncSingleOrderTrackingIfNeeded(
         trackingUrl: result.trackingUrl,
       },
     });
+    await sendDeliveryCompletedEmailSafely(saved, input?.actorUserId ? "admin" : "system");
     return saved;
   }
 
@@ -891,6 +893,24 @@ async function writeOrderEventSafe(input: {
     if (!isMissingTableError(error, "shop_order_events")) {
       return;
     }
+  }
+}
+
+async function sendDeliveryCompletedEmailSafely(order: ShopOrderRecord, source: "system" | "admin" | "user") {
+  try {
+    const email = await loadUserEmailById(order.userId);
+    await sendDeliveryCompletedEmail({
+      customerEmail: email,
+      productName: order.productSnapshot.name,
+      orderId: order.orderId,
+    });
+  } catch (error: any) {
+    console.error(
+      "[ShopOrderStore] 배달완료 이메일 발송 실패 orderId=%s source=%s err=%s",
+      order.orderId,
+      source,
+      String(error?.message ?? error)
+    );
   }
 }
 
@@ -1830,11 +1850,11 @@ export async function markShopOrderDelivered(input: {
 export async function confirmShopOrderDelivered(input: {
   userId: string;
   orderId: string;
-}): Promise<ShopOrderRecord> {
+}): Promise<{ order: ShopOrderRecord; changedByUser: boolean }> {
   const current = await readShopOrderForUser(input.userId, input.orderId);
   const order = current ? await syncSingleOrderTrackingIfNeeded(current).catch(() => current) : null;
   if (!order) throw new Error("shop_order_not_found");
-  if (order.status === "DELIVERED") return order;
+  if (order.status === "DELIVERED") return { order, changedByUser: false };
   if (order.status !== "SHIPPED") throw new Error("shop_order_not_shipped");
 
   const now = new Date().toISOString();
@@ -1861,7 +1881,10 @@ export async function confirmShopOrderDelivered(input: {
     message: "사용자가 배송 수령을 확인했습니다.",
     metadata: { deliveredAt: now, source: "user_confirmation" },
   });
-  return saved;
+  return {
+    order: saved,
+    changedByUser: true,
+  };
 }
 
 export async function syncShopOrderTracking(input: {
@@ -2001,6 +2024,7 @@ export async function cancelShopOrderByUser(input: {
 export function toShopAdminOrderSummary(order: ShopOrderRecord): ShopAdminOrderSummary {
   return {
     ...toShopOrderSummary(order),
+    tracking: buildTrackingSummary(order.shipping.smartTracker, { exposeCarrierCode: true }),
     shipping: {
       recipientName: order.shipping.recipientName,
       phone: order.shipping.phone,

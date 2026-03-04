@@ -28,25 +28,25 @@ export async function POST(req: Request) {
   if (!orderId) return jsonNoStore({ ok: false, error: "invalid_order_id" }, { status: 400 });
 
   try {
-    const order = await confirmShopOrderDelivered({ userId, orderId });
+    const result = await confirmShopOrderDelivered({ userId, orderId });
 
-    // FEAT-11: 배달 완료 이메일 (fire-and-forget, 실패 시 콘솔 기록)
-    loadUserEmailById(userId)
-      .then((email) =>
-        sendDeliveryCompletedEmail({
+    if (result.changedByUser) {
+      try {
+        const email = await loadUserEmailById(userId);
+        await sendDeliveryCompletedEmail({
           customerEmail: email,
-          productName: order.productSnapshot.name,
-          orderId: order.orderId,
-        })
-      )
-      .catch((emailError) => {
+          productName: result.order.productSnapshot.name,
+          orderId: result.order.orderId,
+        });
+      } catch (emailError: any) {
         console.error("[OrderDelivered] 배달완료 이메일 발송 실패 orderId=%s err=%s", orderId, String(emailError?.message ?? emailError));
-      });
+      }
+    }
 
     return jsonNoStore({
       ok: true,
       data: {
-        order: toShopOrderSummary(order),
+        order: toShopOrderSummary(result.order),
       },
     });
   } catch (error: any) {

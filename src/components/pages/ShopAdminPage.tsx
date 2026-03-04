@@ -1242,7 +1242,7 @@ export function ShopAdminPage() {
 
     const draft = shippingDrafts[orderId] ?? { courier: "", carrierCode: "", trackingNumber: "" };
     if (action === "mark_shipped" && (!draft.courier.trim() || !draft.carrierCode.trim() || !draft.trackingNumber.trim())) {
-      showNotice("error", "배송 처리에는 택배사명, 스마트택배 코드, 운송장 번호가 모두 필요합니다.");
+      showNotice("error", "배송 처리에는 택배사명, 스마트택배 연동 코드, 운송장 번호가 모두 필요합니다.");
       setShippingLoadingId(null);
       return;
     }
@@ -1283,8 +1283,8 @@ export function ShopAdminPage() {
         "notice",
         action === "mark_shipped"
           ? nextOrder.tracking?.trackingUrl
-            ? "배송 처리를 시작했고 스마트택배 자동 추적을 연결했습니다."
-            : "배송 처리를 시작했습니다. SmartTracker API 키를 설정하면 자동 배송 추적이 활성화됩니다."
+            ? "배송 처리를 시작했고 실시간 배송 추적을 연결했습니다."
+            : "배송 처리를 시작했습니다. 배송 상태는 잠시 후 다시 동기화됩니다."
           : action === "sync_tracking"
             ? "스마트택배 배송 상태를 다시 확인했습니다."
             : "배송 완료로 변경했습니다."
@@ -1294,7 +1294,7 @@ export function ShopAdminPage() {
       if (message === "tracking_number_and_courier_required") {
         showNotice("error", "택배사와 운송장 번호를 모두 입력해주세요.");
       } else if (message === "tracking_carrier_code_required") {
-        showNotice("error", "스마트택배 택배사 코드(t_code)를 입력해주세요.");
+        showNotice("error", "스마트택배 연동 코드(t_code)를 입력해주세요.");
       } else if (message === "shop_order_not_paid") {
         showNotice("error", "결제 완료 주문만 배송 처리할 수 있습니다.");
       } else if (message === "shop_order_not_shipped") {
@@ -1749,7 +1749,7 @@ export function ShopAdminPage() {
                       className={INPUT_CLASS}
                       value={shippingDrafts[order.orderId]?.carrierCode ?? ""}
                       onChange={(e) => handleShippingDraftChange(order.orderId, "carrierCode", e.target.value)}
-                      placeholder="스마트택배 코드"
+                      placeholder="연동 코드 (t_code)"
                     />
                     <input
                       className={INPUT_CLASS}
@@ -1766,6 +1766,9 @@ export function ShopAdminPage() {
                     >
                       {shippingLoadingId === order.orderId ? "처리 중…" : "배송 시작"}
                     </button>
+                  </div>
+                  <div className="mt-2 text-[11px] text-ios-sub">
+                    스마트택배 연동 코드는 관리자 입력용이며 사용자 화면에는 노출되지 않습니다.
                   </div>
                 </div>
               ) : null}

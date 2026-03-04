@@ -13,6 +13,7 @@ import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 
 const FROM_ADDRESS = process.env.SHOP_EMAIL_FROM ?? "RNest <noreply@rnest.kr>";
 const RESEND_API_KEY = process.env.RESEND_API_KEY ?? "";
+const SITE_URL = String(process.env.NEXT_PUBLIC_SITE_URL ?? "https://rnest.kr").trim().replace(/\/+$/, "");
 
 type EmailPayload = {
   to: string;
@@ -68,6 +69,19 @@ function formatKrw(amount: number) {
   return `${Math.round(amount).toLocaleString("ko-KR")}원`;
 }
 
+function formatCompactOrderId(orderId: string) {
+  const safe = String(orderId ?? "").trim();
+  if (!safe) return "-";
+  if (safe.length <= 10) return safe;
+  return `${safe.slice(0, 4)}...${safe.slice(-4)}`;
+}
+
+function buildShopOrderDetailUrl(orderId: string) {
+  const safe = String(orderId ?? "").trim();
+  if (!safe || !SITE_URL) return "";
+  return `${SITE_URL}/shop/orders/${encodeURIComponent(safe)}`;
+}
+
 function sanitizeEmailHeader(value: string) {
   return String(value ?? "")
     .replace(/[\r\n]+/g, " ")
@@ -100,6 +114,17 @@ function renderEmailRows(rows: EmailRow[]) {
   </table>`;
 }
 
+function renderPrimaryEmailButton(label: string, href: string) {
+  const safeHref = String(href ?? "").trim();
+  if (!safeHref) return "";
+  return `<p style="margin:0 0 18px;">
+    <a href="${escapeHtml(safeHref)}" target="_blank" rel="noopener noreferrer"
+       style="display:inline-block;padding:11px 16px;border-radius:999px;background:#11294b;color:#ffffff;text-decoration:none;font-size:13px;font-weight:700;letter-spacing:-0.01em;">
+      ${escapeHtml(label)}
+    </a>
+  </p>`;
+}
+
 function emailLayout(title: string, content: string) {
   return `<!DOCTYPE html>
 <html lang="ko">
@@ -107,12 +132,12 @@ function emailLayout(title: string, content: string) {
 <body style="margin:0;padding:0;background:#f4f7fb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f7fb;padding:40px 16px;">
   <tr><td align="center">
-    <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:20px;overflow:hidden;max-width:560px;width:100%;">
+    <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #e5ebf2;border-radius:24px;overflow:hidden;max-width:560px;width:100%;box-shadow:0 10px 32px rgba(17,41,75,0.06);">
       <tr><td style="background:#11294b;padding:28px 32px;">
         <span style="color:#ffffff;font-size:20px;font-weight:700;letter-spacing:-0.02em;">RNest</span>
       </td></tr>
       <tr><td style="padding:32px;">
-        <h2 style="margin:0 0 20px;font-size:18px;font-weight:700;color:#111827;letter-spacing:-0.02em;">${title}</h2>
+        <h2 style="margin:0 0 18px;font-size:18px;font-weight:700;color:#111827;letter-spacing:-0.02em;">${title}</h2>
         ${content}
         <p style="margin:28px 0 0;font-size:12px;color:#8d99ab;line-height:1.7;">
           이 이메일은 RNest 쇼핑몰 주문과 관련하여 자동 발송되었습니다.<br/>
@@ -134,25 +159,19 @@ export async function sendOrderConfirmationEmail(order: {
   productName: string;
   quantity: number;
   amount: number;
-  recipientName: string;
-  addressLine1: string;
-  addressLine2: string;
 }): Promise<void> {
   if (!order.customerEmail) return;
-  const recipientName = escapeHtml(order.recipientName);
   const productName = escapeHtml(order.productName);
-  const orderId = escapeHtml(order.orderId);
-  const address = escapeHtml(`${order.addressLine1}${order.addressLine2 ? ` ${order.addressLine2}` : ""}`);
+  const orderId = escapeHtml(formatCompactOrderId(order.orderId));
   const content = `
     <p style="margin:0 0 16px;font-size:14px;color:#44556d;line-height:1.7;">
-      <strong>${recipientName}</strong>님, 주문이 완료되었습니다.<br/>
-      상품 준비 후 배송이 시작되면 별도 안내 드립니다.
+      결제가 정상적으로 완료되었습니다.<br/>
+      상품 준비가 시작되면 배송 안내 메일을 다시 보내드립니다.
     </p>
     ${renderEmailRows([
       { label: "주문번호", value: orderId },
       { label: "상품", value: `${productName} × ${Math.max(1, Math.round(order.quantity))}` },
-      { label: "결제금액", value: escapeHtml(formatKrw(order.amount)), emphasize: true },
-      { label: "배송지", value: address, keepBorder: false },
+      { label: "결제금액", value: escapeHtml(formatKrw(order.amount)), emphasize: true, keepBorder: false },
     ])}`;
 
   await sendEmail({
@@ -165,6 +184,7 @@ export async function sendOrderConfirmationEmail(order: {
 export async function sendShippingStartedEmail(order: {
   customerEmail: string | null;
   productName: string;
+  orderId: string;
   trackingNumber: string;
   courier: string;
   trackingUrl?: string | null;
@@ -173,25 +193,21 @@ export async function sendShippingStartedEmail(order: {
   const productName = escapeHtml(order.productName);
   const courier = escapeHtml(order.courier);
   const trackingNumber = escapeHtml(order.trackingNumber);
-  const trackingCta =
-    order.trackingUrl && String(order.trackingUrl).trim()
-      ? `<p style="margin:0 0 16px;">
-          <a href="${escapeHtml(order.trackingUrl)}" target="_blank" rel="noopener noreferrer"
-             style="display:inline-block;padding:10px 16px;border-radius:999px;background:#11294b;color:#ffffff;text-decoration:none;font-size:13px;font-weight:700;">
-            배송 조회하기
-          </a>
-        </p>`
-      : "";
+  const resolvedTrackingUrl =
+    buildShopOrderDetailUrl(order.orderId) ||
+    String(order.trackingUrl ?? "").trim() ||
+    "";
   const content = `
     <p style="margin:0 0 16px;font-size:14px;color:#44556d;line-height:1.7;">
-      주문하신 상품이 발송되었습니다. 아래 운송장 번호로 배송을 추적하실 수 있습니다.
+      주문하신 상품이 발송되었습니다.<br/>
+      아래 필요한 정보만 바로 확인하실 수 있습니다.
     </p>
     ${renderEmailRows([
       { label: "상품", value: productName },
       { label: "택배사", value: courier },
       { label: "운송장번호", value: trackingNumber, emphasize: true, keepBorder: false },
     ])}
-    ${trackingCta}`;
+    ${renderPrimaryEmailButton("배송 조회하기", resolvedTrackingUrl)}`;
 
   await sendEmail({
     to: order.customerEmail,
@@ -207,10 +223,11 @@ export async function sendDeliveryCompletedEmail(order: {
 }): Promise<void> {
   if (!order.customerEmail) return;
   const productName = escapeHtml(order.productName);
-  const orderId = escapeHtml(order.orderId);
+  const orderId = escapeHtml(formatCompactOrderId(order.orderId));
   const content = `
     <p style="margin:0 0 16px;font-size:14px;color:#44556d;line-height:1.7;">
-      주문하신 상품이 배달 완료되었습니다. 상품을 수령하셨다면 구매 확정을 진행해 주세요.
+      주문하신 상품이 배달 완료되었습니다.<br/>
+      상품을 수령하셨다면 구매 확정을 진행해 주세요.
     </p>
     ${renderEmailRows([
       { label: "주문번호", value: orderId },
@@ -236,7 +253,7 @@ export async function sendOrderCanceledEmail(order: {
 }): Promise<void> {
   if (!order.customerEmail) return;
   const productName = escapeHtml(order.productName);
-  const orderId = escapeHtml(order.orderId);
+  const orderId = escapeHtml(formatCompactOrderId(order.orderId));
   const rows: EmailRow[] = [
     { label: "주문번호", value: orderId },
     { label: "상품", value: productName },

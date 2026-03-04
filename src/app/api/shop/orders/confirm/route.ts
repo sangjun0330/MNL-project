@@ -209,23 +209,18 @@ async function handleSingleOrderConfirm(req: Request, input: {
     });
     await removeShopCartItem(paidOrder.userId, paidOrder.productId).catch(() => undefined);
 
-    // BUG-08: 이메일 실패 시 콘솔에 기록 (사용자/운영자 가시성 확보)
-    loadUserEmailById(paidOrder.userId)
-      .then((email) =>
-        sendOrderConfirmationEmail({
-          orderId: paidOrder.orderId,
-          customerEmail: email,
-          productName: paidOrder.productSnapshot.name,
-          quantity: paidOrder.productSnapshot.quantity,
-          amount: paidOrder.amount,
-          recipientName: paidOrder.shipping.recipientName,
-          addressLine1: paidOrder.shipping.addressLine1,
-          addressLine2: paidOrder.shipping.addressLine2,
-        })
-      )
-      .catch((emailError) => {
-        console.error("[OrderConfirm] 주문확인 이메일 발송 실패 orderId=%s err=%s", paidOrder.orderId, String(emailError?.message ?? emailError));
+    try {
+      const email = await loadUserEmailById(paidOrder.userId);
+      await sendOrderConfirmationEmail({
+        orderId: paidOrder.orderId,
+        customerEmail: email,
+        productName: paidOrder.productSnapshot.name,
+        quantity: paidOrder.productSnapshot.quantity,
+        amount: paidOrder.amount,
       });
+    } catch (emailError: any) {
+      console.error("[OrderConfirm] 주문확인 이메일 발송 실패 orderId=%s err=%s", paidOrder.orderId, String(emailError?.message ?? emailError));
+    }
 
     return jsonNoStore({
       ok: true,
@@ -332,27 +327,22 @@ async function handleBundleOrderConfirm(req: Request, input: {
         approvedAt: toss.approvedAt ?? new Date().toISOString(),
       };
 
-    // BUG-08: 번들 이메일 실패 시 콘솔에 기록 (사용자/운영자 가시성 확보)
-    loadUserEmailById(input.userId)
-      .then((email) =>
-        sendOrderConfirmationEmail({
-          orderId: paidBundle.bundleId,
-          customerEmail: email,
-          productName: toShopOrderBundleSummary(paidBundle).displayName,
-          quantity: paidBundle.totalQuantity,
-          amount: paidBundle.amount,
-          recipientName: paidBundle.shipping.recipientName,
-          addressLine1: paidBundle.shipping.addressLine1,
-          addressLine2: paidBundle.shipping.addressLine2,
-        })
-      )
-      .catch((emailError) => {
-        console.error(
-          "[BundleConfirm] 주문확인 이메일 발송 실패 bundleId=%s err=%s",
-          paidBundle.bundleId,
-          String(emailError?.message ?? emailError)
-        );
+    try {
+      const email = await loadUserEmailById(input.userId);
+      await sendOrderConfirmationEmail({
+        orderId: paidBundle.bundleId,
+        customerEmail: email,
+        productName: toShopOrderBundleSummary(paidBundle).displayName,
+        quantity: paidBundle.totalQuantity,
+        amount: paidBundle.amount,
       });
+    } catch (emailError: any) {
+      console.error(
+        "[BundleConfirm] 주문확인 이메일 발송 실패 bundleId=%s err=%s",
+        paidBundle.bundleId,
+        String(emailError?.message ?? emailError)
+      );
+    }
 
     return jsonNoStore({
       ok: true,

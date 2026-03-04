@@ -12,8 +12,8 @@
 
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
-import { readShopOrderForUser } from "@/lib/server/shopOrderStore";
-import { fetchSweetTrackerTracking, shouldPollSweetTracker } from "@/lib/server/sweetTracker";
+import { readShopOrderForUser, syncShopOrderTracking } from "@/lib/server/shopOrderStore";
+import { buildSweetTrackerTrackingUrl, shouldPollSweetTracker } from "@/lib/server/sweetTracker";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -43,48 +43,45 @@ export async function GET(req: Request) {
   }
 
   if (!order) return jsonNoStore({ ok: false, error: "shop_order_not_found" }, { status: 404 });
-  if (order.status !== "SHIPPED") {
-    return jsonNoStore({ ok: false, error: "order_not_in_transit" }, { status: 400 });
-  }
 
   const meta = order.shipping.smartTracker;
-  if (!shouldPollSweetTracker(meta, force)) {
-    // 폴링 불필요 시 캐시된 정보 반환
-    return jsonNoStore({
-      ok: true,
-      data: {
-        statusLabel: meta?.lastStatusLabel ?? null,
-        lastEventAt: meta?.lastEventAt ?? null,
-        delivered: false,
-        cached: true,
-      },
-    });
-  }
-
-  const result = await fetchSweetTrackerTracking({
+  const trackingUrl = buildSweetTrackerTrackingUrl({
     carrierCode: meta?.carrierCode ?? null,
     trackingNumber: order.trackingNumber,
   });
-
-  if (!result.ok) {
-    return jsonNoStore({
-      ok: true,
-      data: {
-        statusLabel: meta?.lastStatusLabel ?? "조회 불가",
-        lastEventAt: meta?.lastEventAt ?? null,
-        delivered: false,
-        error: result.reason,
-      },
-    });
+  if (!order.trackingNumber || !meta?.carrierCode) {
+    return jsonNoStore({ ok: false, error: "tracking_not_available" }, { status: 400 });
   }
 
-  return jsonNoStore({
-    ok: true,
-    data: {
-      statusLabel: result.statusLabel,
-      lastEventAt: result.lastEventAt,
-      delivered: result.delivered,
-      cached: false,
-    },
+  const buildPayload = (currentOrder: typeof order, cached: boolean, error?: string | null) => ({
+    statusLabel:
+      currentOrder.shipping.smartTracker?.lastStatusLabel ??
+      (currentOrder.status === "DELIVERED" ? "배송완료" : currentOrder.status === "SHIPPED" ? "배송 조회중" : null),
+    lastEventAt: currentOrder.shipping.smartTracker?.lastEventAt ?? currentOrder.deliveredAt ?? currentOrder.shippedAt ?? null,
+    lastPolledAt: currentOrder.shipping.smartTracker?.lastPolledAt ?? null,
+    delivered: currentOrder.status === "DELIVERED" || Boolean(currentOrder.deliveredAt),
+    trackingUrl: currentOrder.shipping.smartTracker?.trackingUrl ?? trackingUrl,
+    cached,
+    error: error ?? null,
   });
+
+  if (order.status === "DELIVERED") {
+    return jsonNoStore({ ok: true, data: buildPayload(order, true) });
+  }
+  if (order.status !== "SHIPPED") {
+    return jsonNoStore({ ok: false, error: "order_not_trackable" }, { status: 400 });
+  }
+  if (!shouldPollSweetTracker(meta, force)) {
+    return jsonNoStore({ ok: true, data: buildPayload(order, true) });
+  }
+
+  try {
+    const synced = await syncShopOrderTracking({
+      orderId: order.orderId,
+      force,
+    });
+    return jsonNoStore({ ok: true, data: buildPayload(synced, false) });
+  } catch {
+    return jsonNoStore({ ok: true, data: buildPayload(order, true, "fetch_failed") });
+  }
 }
