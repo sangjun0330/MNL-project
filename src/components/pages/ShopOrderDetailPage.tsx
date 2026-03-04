@@ -385,6 +385,7 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
         body: JSON.stringify({ orderId: order.orderId, reason: t("주문 상세에서 접수한 환불 요청") }),
       });
       const json = await res.json().catch(() => null);
+      if (!mountedRef.current) return;
       if (!res.ok || !json?.ok) throw new Error(String(json?.error ?? `http_${res.status}`));
       setOrder(json.data.order as ShopOrderDetail);
       setActionTone("notice");
@@ -394,6 +395,7 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
           : t("환불 요청이 접수되었습니다. 관리자 검토 후 처리됩니다.")
       );
     } catch (error: any) {
+      if (!mountedRef.current) return;
       const code = String(error?.message ?? "");
       setActionTone("error");
       if (code.includes("shop_order_storage_unavailable")) {
@@ -402,7 +404,7 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
         setActionMessage(t("환불 요청에 실패했습니다. 잠시 후 다시 시도해 주세요."));
       }
     } finally {
-      setActionLoading(null);
+      if (mountedRef.current) setActionLoading(null);
     }
   };
 
@@ -422,11 +424,13 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
         body: JSON.stringify({ orderId: order.orderId }),
       });
       const json = await res.json().catch(() => null);
+      if (!mountedRef.current) return;
       if (!res.ok || !json?.ok) throw new Error(String(json?.error ?? `http_${res.status}`));
       setOrder(json.data.order as ShopOrderDetail);
       setActionTone("notice");
       setActionMessage(t("구매가 확정되었습니다. 이제 해당 상품 리뷰를 작성할 수 있습니다."));
     } catch (error: any) {
+      if (!mountedRef.current) return;
       const code = String(error?.message ?? "failed_to_confirm_shop_order_purchase");
       setActionTone("error");
       if (code.includes("not_delivered")) {
@@ -437,7 +441,7 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
         setActionMessage(t("구매 확정 처리에 실패했습니다. 잠시 후 다시 시도해 주세요."));
       }
     } finally {
-      setActionLoading(null);
+      if (mountedRef.current) setActionLoading(null);
     }
   };
 
@@ -457,11 +461,13 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
         body: JSON.stringify({ orderId: order.orderId }),
       });
       const json = await res.json().catch(() => null);
+      if (!mountedRef.current) return;
       if (!res.ok || !json?.ok) throw new Error(String(json?.error ?? `http_${res.status}`));
       setOrder(json.data.order as ShopOrderDetail);
       setActionTone("notice");
       setActionMessage(t("배송 수령을 확인했습니다. 이제 구매 확정을 진행해 주세요."));
     } catch (error: any) {
+      if (!mountedRef.current) return;
       const code = String(error?.message ?? "failed_to_confirm_shop_order_delivery");
       setActionTone("error");
       if (code.includes("not_shipped")) {
@@ -472,7 +478,7 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
         setActionMessage(t("배송 완료 확인에 실패했습니다. 잠시 후 다시 시도해 주세요."));
       }
     } finally {
-      setActionLoading(null);
+      if (mountedRef.current) setActionLoading(null);
     }
   };
 
@@ -488,6 +494,7 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
         body: JSON.stringify({ orderId: order.orderId }),
       });
       const json = await res.json().catch(() => null);
+      if (!mountedRef.current) return;
       if (!res.ok || !json?.ok) throw new Error(String(json?.error ?? `http_${res.status}`));
       setOrder(json.data.order as ShopOrderDetail);
       setActionTone("notice");
@@ -497,6 +504,7 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
           : t("주문이 취소되었습니다.")
       );
     } catch (error: any) {
+      if (!mountedRef.current) return;
       const code = String(error?.message ?? "");
       setActionTone("error");
       if (code.includes("shop_order_cancel_window_expired") || code.includes("shop_order_already_shipped")) {
@@ -507,7 +515,7 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
         setActionMessage(t("주문 취소에 실패했습니다. 잠시 후 다시 시도해 주세요."));
       }
     } finally {
-      setActionLoading(null);
+      if (mountedRef.current) setActionLoading(null);
     }
   };
 

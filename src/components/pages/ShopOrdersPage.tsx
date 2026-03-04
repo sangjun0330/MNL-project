@@ -229,7 +229,7 @@ export function ShopOrdersPage() {
       void loadOrders(false);
     };
 
-    const intervalId = window.setInterval(refreshIfVisible, 30000);
+    const intervalId = window.setInterval(refreshIfVisible, 15000); // 30s → 15s: ShopOrderDetailPage와 폴링 주기 통일
     window.addEventListener("focus", refreshIfVisible);
     document.addEventListener("visibilitychange", refreshIfVisible);
 
