@@ -330,7 +330,7 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
       void loadOrder(false);
     };
 
-    const intervalId = window.setInterval(refreshIfVisible, 30000);
+    const intervalId = window.setInterval(refreshIfVisible, 15000); // 30s → 15s: 실시간 연동 실패 시 폴링 응답성 개선
     window.addEventListener("focus", refreshIfVisible);
     document.addEventListener("visibilitychange", refreshIfVisible);
 

@@ -26,7 +26,8 @@ export function useShopOrderRealtimeRefresh(input: UseShopOrderRealtimeRefreshIn
     const supabase = getSupabaseBrowserClient();
     const safeScope = String(input.scope || "shop-orders").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 40) || "shop-orders";
     const safeUserId = String(input.userId).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 48);
-    const channel = supabase.channel(`rt-${safeScope}-${safeUserId}`);
+    const channelName = `rt-${safeScope}-${safeUserId}`;
+    const channel = supabase.channel(channelName);
 
     const scheduleRefresh = () => {
       if (timerRef.current) return;
@@ -57,7 +58,13 @@ export function useShopOrderRealtimeRefresh(input: UseShopOrderRealtimeRefreshIn
         },
         scheduleRefresh
       )
-      .subscribe();
+      .subscribe((status, err) => {
+        if (status === "SUBSCRIBED") {
+          // 구독 성공: 실시간 연결됨
+        } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.warn("[ShopRealtime] 실시간 구독 실패 — 폴링으로 대체됩니다.", { channel: channelName, status, err });
+        }
+      });
 
     return () => {
       if (timerRef.current) {

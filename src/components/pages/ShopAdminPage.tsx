@@ -227,11 +227,21 @@ function mergeShippingDraftMaps(
     const server = serverDrafts[order.orderId] ?? { courier: "", carrierCode: "", trackingNumber: "" };
     const current = currentDrafts[order.orderId] ?? { courier: "", carrierCode: "", trackingNumber: "" };
     const stored = storedDrafts[order.orderId] ?? { courier: "", carrierCode: "", trackingNumber: "" };
-    merged[order.orderId] = {
-      courier: server.courier || current.courier || stored.courier || "",
-      carrierCode: server.carrierCode || current.carrierCode || stored.carrierCode || "",
-      trackingNumber: server.trackingNumber || current.trackingNumber || stored.trackingNumber || "",
-    };
+    // PAID 상태일 때는 관리자가 송장/택배사를 입력 중일 수 있으므로 현재 입력값(current > stored)을 서버보다 우선.
+    // 그 외 상태(SHIPPED 등)는 서버 데이터를 우선해서 항상 최신 DB 값으로 보여준다.
+    if (order.status === "PAID") {
+      merged[order.orderId] = {
+        courier: current.courier || stored.courier || server.courier || "",
+        carrierCode: current.carrierCode || stored.carrierCode || server.carrierCode || "",
+        trackingNumber: current.trackingNumber || stored.trackingNumber || server.trackingNumber || "",
+      };
+    } else {
+      merged[order.orderId] = {
+        courier: server.courier || current.courier || stored.courier || "",
+        carrierCode: server.carrierCode || current.carrierCode || stored.carrierCode || "",
+        trackingNumber: server.trackingNumber || current.trackingNumber || stored.trackingNumber || "",
+      };
+    }
   }
 
   return merged;
@@ -1174,7 +1184,7 @@ export function ShopAdminPage() {
       void loadAdminOrders({ showLoading: false, silent: true });
     };
 
-    const intervalId = window.setInterval(refreshIfVisible, 30000);
+    const intervalId = window.setInterval(refreshIfVisible, 15000); // 30s → 15s: 관리자 배송처리 응답성 개선
     window.addEventListener("focus", refreshIfVisible);
     document.addEventListener("visibilitychange", refreshIfVisible);
 
@@ -1358,52 +1368,54 @@ export function ShopAdminPage() {
     field: "courier" | "carrierCode" | "trackingNumber",
     value: string
   ) => {
-    setShippingDrafts((current) => ({
-      ...current,
+    // useEffect 의존 없이 즉시 localStorage에 기록 → 브라우저 이동/새로고침 전에도 안전하게 보존
+    const next = {
+      ...shippingDrafts,
       [orderId]: {
-        courier: current[orderId]?.courier ?? "",
-        carrierCode: current[orderId]?.carrierCode ?? "",
-        trackingNumber: current[orderId]?.trackingNumber ?? "",
+        courier: shippingDrafts[orderId]?.courier ?? "",
+        carrierCode: shippingDrafts[orderId]?.carrierCode ?? "",
+        trackingNumber: shippingDrafts[orderId]?.trackingNumber ?? "",
         [field]: value,
       },
-    }));
+    };
+    setShippingDrafts(next);
+    writeStoredShippingDrafts(shippingDraftStorageKey, next);
   };
 
   const handleCarrierSelectionChange = (orderId: string, value: string) => {
+    let next: Record<string, { courier: string; carrierCode: string; trackingNumber: string }>;
     if (!value) {
-      setShippingDrafts((current) => ({
-        ...current,
+      next = {
+        ...shippingDrafts,
         [orderId]: {
           courier: "",
           carrierCode: "",
-          trackingNumber: current[orderId]?.trackingNumber ?? "",
+          trackingNumber: shippingDrafts[orderId]?.trackingNumber ?? "",
         },
-      }));
-      return;
-    }
-
-    if (value === CUSTOM_CARRIER_VALUE) {
-      setShippingDrafts((current) => ({
-        ...current,
+      };
+    } else if (value === CUSTOM_CARRIER_VALUE) {
+      next = {
+        ...shippingDrafts,
         [orderId]: {
-          courier: current[orderId]?.courier ?? "",
-          carrierCode: findShopCarrierOptionByCode(current[orderId]?.carrierCode ?? "")?.code ? "" : (current[orderId]?.carrierCode ?? ""),
-          trackingNumber: current[orderId]?.trackingNumber ?? "",
+          courier: shippingDrafts[orderId]?.courier ?? "",
+          carrierCode: findShopCarrierOptionByCode(shippingDrafts[orderId]?.carrierCode ?? "")?.code ? "" : (shippingDrafts[orderId]?.carrierCode ?? ""),
+          trackingNumber: shippingDrafts[orderId]?.trackingNumber ?? "",
         },
-      }));
-      return;
+      };
+    } else {
+      const carrier = findShopCarrierOptionByCode(value);
+      if (!carrier) return;
+      next = {
+        ...shippingDrafts,
+        [orderId]: {
+          courier: carrier.label,
+          carrierCode: carrier.code,
+          trackingNumber: shippingDrafts[orderId]?.trackingNumber ?? "",
+        },
+      };
     }
-
-    const carrier = findShopCarrierOptionByCode(value);
-    if (!carrier) return;
-    setShippingDrafts((current) => ({
-      ...current,
-      [orderId]: {
-        courier: carrier.label,
-        carrierCode: carrier.code,
-        trackingNumber: current[orderId]?.trackingNumber ?? "",
-      },
-    }));
+    setShippingDrafts(next);
+    writeStoredShippingDrafts(shippingDraftStorageKey, next);
   };
 
   const handleShippingAction = async (orderId: string, action: "mark_shipped" | "mark_delivered" | "sync_tracking") => {
@@ -1450,7 +1462,8 @@ export function ShopAdminPage() {
           trackingNumber: nextOrder.trackingNumber ?? "",
         },
       }));
-      void loadAdminOrders({ showLoading: false, silent: true });
+      // DB 반영 후 목록 갱신: 즉시 호출 시 아직 이전 상태가 반환될 수 있으므로 2.5초 지연
+      setTimeout(() => { if (mountedRef.current) void loadAdminOrders({ showLoading: false, silent: true }); }, 2500);
       showNotice(
         "notice",
         action === "mark_shipped"
