@@ -29,6 +29,7 @@ import { useI18n } from "@/lib/useI18n";
 import { ShopBackLink } from "@/components/shop/ShopBackLink";
 import { ShopBrandLogo } from "@/components/shop/ShopBrandLogo";
 import { ShopCheckoutSheet } from "@/components/shop/ShopCheckoutSheet";
+import { BottomSheet } from "@/components/ui/BottomSheet";
 
 type ShopReviewRecord = {
   id: number;
@@ -881,9 +882,9 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
 
             {externalOnlyProduct ? (
               <div className="rounded-3xl border border-[#ddd7ff] bg-[#f3f0ff] px-4 py-4 text-[12.5px] leading-6 text-[#44556d]">
-                <div className="font-semibold text-[#47326f]">{t("외부 판매처 구매 안내")}</div>
+                <div className="font-semibold text-[#47326f]">{t("구매 안내")}</div>
                 <div className="mt-2">
-                  {t("구매 옵션 선택과 실제 결제는 제휴 판매처에서 이어집니다. 구매하기를 누르면 안내 시트를 거친 뒤 새 탭으로 안전하게 연결됩니다.")}
+                  {t("구매하기를 누르면 안내를 한 번 더 확인한 뒤 연결된 구매 페이지에서 결제가 이어집니다.")}
                 </div>
               </div>
             ) : null}
@@ -903,14 +904,6 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
         </section>
 
         <section id="shop-product-info" className="space-y-6 bg-white px-4 py-6">
-          <div className={cn("grid gap-4", detailSectionImageUrls.length > 1 ? "md:grid-cols-2" : "md:grid-cols-1")}>
-            {detailSectionImageUrls.map((url, index) => (
-              <div key={`${url}-${index}`} className="overflow-hidden rounded-[28px] border border-[#edf1f6] bg-[#eef1f4]">
-                <img src={url} alt={`${t(product.name)} gallery ${index + 1}`} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" />
-              </div>
-            ))}
-          </div>
-
           <div className="text-[28px] font-bold leading-tight tracking-[-0.04em] text-[#111827]">{t(detail.storyTitle)}</div>
           <div className="text-[15px] leading-8 text-[#44556d]">{t(detail.storyBody)}</div>
 
@@ -958,6 +951,21 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
               <div className="font-medium text-[#111827]">{t("3,000원 (50,000원 이상 구매 시 무료)")}</div>
             </div>
           </div>
+
+          {detailSectionImageUrls.length > 0 ? (
+            <div className="space-y-4 border-t border-[#edf1f6] pt-5">
+              {detailSectionImageUrls.map((url, index) => (
+                <div key={`${url}-${index}`} className="bg-transparent">
+                  <img
+                    src={url}
+                    alt={`${t(product.name)} detail ${index + 1}`}
+                    className="h-auto w-full object-contain"
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
+              ))}
+            </div>
+          ) : null}
         </section>
 
         <section id="shop-product-reviews" className="space-y-6 bg-white px-4 py-6">
@@ -1179,7 +1187,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
               <div className="mt-3 text-[12.5px] leading-6 text-[#44556d]">
                 {product.checkoutEnabled && product.priceKrw
                   ? t("토스 결제로 바로 결제할 수 있으며, 배송비 3,000원은 50,000원 이상 구매 시 자동으로 무료 처리됩니다.")
-                  : t("외부 판매처 가격과 재고는 판매처 기준으로 운영되며, 구매하기를 누르면 안내 확인 후 새 탭에서 판매처로 이동합니다.")}
+                  : t("연결된 구매 페이지 기준으로 가격과 재고가 운영되며, 구매하기를 누르면 안내 확인 후 계속 진행할 수 있습니다.")}
               </div>
             </div>
             <div className="rounded-3xl border border-[#e6ebf2] bg-[#f8fafc] p-4">
@@ -1240,79 +1248,58 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
         shippingLabel={shippingLabel}
       />
 
-      {externalPurchaseOpen && externalOnlyProduct && product.externalUrl ? (
-        <div
-          className="fixed inset-0 z-[60] flex items-end bg-black/35 p-4 backdrop-blur-[2px]"
-          onClick={() => setExternalPurchaseOpen(false)}
-        >
-          <div
-            className="mx-auto w-full max-w-[520px] rounded-[32px] border border-white/70 bg-white p-5 shadow-[0_24px_60px_rgba(17,41,75,0.22)]"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="inline-flex rounded-full border border-[#ddd7ff] bg-[#f3f0ff] px-3 py-1 text-[11px] font-semibold text-[#5d4d88]">
-                  {t("제휴 판매처 이동")}
-                </div>
-                <div className="mt-3 text-[22px] font-bold tracking-[-0.03em] text-[#111827]">
-                  {t("제휴 판매처에서 구매를 이어갑니다")}
-                </div>
-              </div>
-              <button
-                type="button"
-                data-auth-allow
-                onClick={() => setExternalPurchaseOpen(false)}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[#e6ebf2] bg-white text-[20px] font-medium text-[#8d99ab]"
-                aria-label={t("닫기")}
-              >
-                ×
-              </button>
+      <BottomSheet
+        open={externalPurchaseOpen && externalOnlyProduct && Boolean(product.externalUrl)}
+        onClose={() => setExternalPurchaseOpen(false)}
+        variant="appstore"
+        title={t("구매 안내")}
+        subtitle={t("한 번 더 확인한 뒤 계속 진행할 수 있습니다.")}
+        maxHeightClassName="max-h-[76dvh]"
+        footer={
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              data-auth-allow
+              onClick={() => setExternalPurchaseOpen(false)}
+              className={`${SECONDARY_BUTTON} h-11 text-[14px]`}
+            >
+              {t("취소")}
+            </button>
+            <button
+              type="button"
+              data-auth-allow
+              onClick={handlePartnerMove}
+              className={`${PRIMARY_BUTTON} h-11 text-[14px]`}
+            >
+              {t("계속하기")}
+            </button>
+          </div>
+        }
+      >
+        <div className="rounded-[22px] border border-ios-sep bg-white p-4">
+          <div className="rounded-[20px] border border-[#ddd7ff] bg-[#f3f0ff] px-4 py-4">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7a6aa8]">
+              {t("구매 계속")}
             </div>
-
-            <div className="mt-4 rounded-[26px] border border-[#ddd7ff] bg-[linear-gradient(180deg,#f8f5ff_0%,#f1efff_100%)] p-4">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7a6aa8]">
-                {t(product.partnerLabel || "제휴 판매처")}
-              </div>
-              <div className="mt-2 text-[18px] font-bold tracking-[-0.02em] text-[#1f1a2e]">{t(product.name)}</div>
-              <div className="mt-1 text-[12.5px] text-[#5d4d88]">{t(product.priceLabel || "옵션을 확인하고 판매처에서 결제를 이어가세요.")}</div>
-              <div className="mt-3 flex flex-wrap items-center gap-2 text-[11.5px] text-[#6c5f92]">
-                <span className="rounded-full border border-[#d8d2f0] bg-white/75 px-2.5 py-1">{t("판매처")} · {t(product.partnerLabel || "제휴 판매처")}</span>
-                <span className="rounded-full border border-[#d8d2f0] bg-white/75 px-2.5 py-1">
-                  {t("연결 주소")} · {partnerHostLabel ?? t("확인 필요")}
-                </span>
-              </div>
+            <div className="mt-2 text-[18px] font-bold tracking-[-0.02em] text-[#1f1a2e]">{t(product.name)}</div>
+            <div className="mt-1 text-[12.5px] text-[#5d4d88]">{t(product.priceLabel || "옵션을 확인하고 구매를 이어가세요.")}</div>
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-[11.5px] text-[#6c5f92]">
+              <span className="rounded-full border border-[#d8d2f0] bg-white/75 px-2.5 py-1">
+                {t("연결 페이지")} · {partnerHostLabel ?? t("확인 필요")}
+              </span>
             </div>
+          </div>
 
-            <div className="mt-4 rounded-[24px] border border-[#e6ebf2] bg-[#f8fafc] px-4 py-4">
-              <div className="text-[12px] font-semibold text-[#11294b]">{t("연결 전 아래 내용을 확인해 주세요.")}</div>
-              <div className="mt-3 space-y-2 text-[12.5px] leading-6 text-[#44556d]">
-                <div>• {t("선택한 옵션과 결제 조건은 판매처 기준으로 적용됩니다.")}</div>
-                <div>• {t("결제, 배송, 교환·환불 정책은 외부 판매처 안내를 따릅니다.")}</div>
-                <div>• {t("새 탭에서 안전하게 열리며, 원하면 언제든 다시 돌아올 수 있습니다.")}</div>
-              </div>
-            </div>
-
-            <div className="mt-5 flex items-center gap-3">
-              <button
-                type="button"
-                data-auth-allow
-                onClick={() => setExternalPurchaseOpen(false)}
-                className={`h-12 flex-1 text-[13px] ${SECONDARY_BUTTON}`}
-              >
-                {t("취소")}
-              </button>
-              <button
-                type="button"
-                data-auth-allow
-                onClick={handlePartnerMove}
-                className={`h-12 flex-[1.2] text-[13px] ${PRIMARY_BUTTON}`}
-              >
-                {t("외부 판매처로 이동")}
-              </button>
+          <div className="mt-4 rounded-[20px] border border-[#d6e0ea] bg-[#f7fafc] px-4 py-4">
+            <div className="text-[12px] font-semibold text-[#11294b]">{t("계속하기 전에 아래 내용을 확인해 주세요.")}</div>
+            <div className="mt-3 space-y-2 text-[12.5px] leading-6 text-[#44556d]">
+              <div>• {t("선택한 옵션과 결제 조건은 연결된 구매 페이지 기준으로 적용됩니다.")}</div>
+              <div>• {t("결제, 배송, 교환·환불 정책은 연결된 구매 페이지 안내를 따릅니다.")}</div>
+              <div>• {t("새 탭에서 안전하게 이어지며, 원하면 언제든 다시 돌아올 수 있습니다.")}</div>
             </div>
           </div>
         </div>
-      ) : null}
+      </BottomSheet>
     </div>
   );
 }

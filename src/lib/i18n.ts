@@ -242,6 +242,19 @@ const EN_EXTRA: Record<string, string> = {
   "외부 판매처로 이동": "Go to seller",
   "외부 판매처 가격과 재고는 판매처 기준으로 운영되며, 구매하기를 누르면 안내 확인 후 새 탭에서 판매처로 이동합니다.":
     "Prices and stock follow the external seller. When you tap Buy, you'll review the guide first and then open the seller in a new tab.",
+  "구매하기를 누르면 안내를 한 번 더 확인한 뒤 연결된 구매 페이지에서 결제가 이어집니다.":
+    "Tap Buy to review the guide once more, then continue checkout on the connected purchase page.",
+  "연결된 구매 페이지 기준으로 가격과 재고가 운영되며, 구매하기를 누르면 안내 확인 후 계속 진행할 수 있습니다.":
+    "Pricing and stock follow the connected purchase page. Tap Buy to review the guide and continue.",
+  "한 번 더 확인한 뒤 계속 진행할 수 있습니다.": "Review once more before continuing.",
+  "계속하기": "Continue",
+  "구매 계속": "Continue purchase",
+  "옵션을 확인하고 구매를 이어가세요.": "Review the options and continue.",
+  "연결 페이지": "Connected page",
+  "계속하기 전에 아래 내용을 확인해 주세요.": "Please review this before continuing.",
+  "선택한 옵션과 결제 조건은 연결된 구매 페이지 기준으로 적용됩니다.": "Selected options and checkout terms follow the connected purchase page.",
+  "결제, 배송, 교환·환불 정책은 연결된 구매 페이지 안내를 따릅니다.": "Payment, shipping, exchange, and refund policies follow the connected purchase page.",
+  "새 탭에서 안전하게 이어지며, 원하면 언제든 다시 돌아올 수 있습니다.": "It continues safely in a new tab, and you can return anytime.",
   "예: 1.0": "e.g. 1.0",
   "예: 150": "e.g. 150",
   "예: 2": "e.g. 2",

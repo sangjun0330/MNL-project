@@ -433,11 +433,17 @@ function TagInput({ value, onChange, max = 6, placeholder }: { value: string[]; 
 
 function UrlListInput({ value, onChange, max = 6 }: { value: string[]; onChange: (v: string[]) => void; max?: number }) {
   const [brokenKeys, setBrokenKeys] = useState<Record<string, boolean>>({});
-  const addRow = () => { if (value.length < max) onChange([...value, ""]); };
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const addRow = () => {
+    if (value.length < max) onChange([...value, ""]);
+    setUploadError(null);
+  };
   const updateRow = (i: number, v: string) => {
     const next = [...value];
     next[i] = v;
     onChange(next);
+    setUploadError(null);
     setBrokenKeys((current) => {
       const key = `${i}:${value[i] ?? ""}`;
       if (!current[key]) return current;
@@ -449,11 +455,68 @@ function UrlListInput({ value, onChange, max = 6 }: { value: string[]; onChange:
   const removeRow = (i: number) => {
     onChange(value.filter((_, idx) => idx !== i));
     setBrokenKeys({});
+    setUploadError(null);
   };
 
   const isValidUrl = (url: string) => {
     if (!url) return true;
+    if (/^data:image\/[a-z0-9.+-]+;base64,/i.test(url)) return true;
     try { const u = new URL(url); return u.protocol === "https:" || u.protocol === "http:"; } catch { return false; }
+  };
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    if (files.length === 0) return;
+    const remaining = Math.max(0, max - value.length);
+    if (remaining <= 0) {
+      setUploadError(`최대 ${max}개까지만 등록할 수 있습니다.`);
+      event.target.value = "";
+      return;
+    }
+
+    const selectedFiles = files.slice(0, remaining);
+    try {
+      const dataUrls = await Promise.all(
+        selectedFiles.map(
+          (file) =>
+            new Promise<string>((resolve, reject) => {
+              if (!file.type.startsWith("image/")) {
+                reject(new Error("invalid_type"));
+                return;
+              }
+              if (file.size > 4 * 1024 * 1024) {
+                reject(new Error("file_too_large"));
+                return;
+              }
+              const reader = new FileReader();
+              reader.onload = () => {
+                const result = typeof reader.result === "string" ? reader.result : "";
+                if (!/^data:image\/[a-z0-9.+-]+;base64,/i.test(result)) {
+                  reject(new Error("invalid_data"));
+                  return;
+                }
+                resolve(result);
+              };
+              reader.onerror = () => reject(new Error("read_failed"));
+              reader.readAsDataURL(file);
+            })
+        )
+      );
+
+      onChange([...value, ...dataUrls]);
+      setUploadError(files.length > remaining ? `최대 ${max}개까지만 등록되어 일부 파일은 제외했습니다.` : null);
+    } catch (error: any) {
+      const code = String(error?.message ?? "");
+      if (code === "file_too_large") {
+        setUploadError("이미지 파일은 1장당 4MB 이하로 업로드해 주세요.");
+      } else if (code === "invalid_type") {
+        setUploadError("이미지 파일만 업로드할 수 있습니다.");
+      } else {
+        setUploadError("이미지를 읽지 못했습니다. 다시 시도해 주세요.");
+      }
+    } finally {
+      event.target.value = "";
+    }
   };
 
   return (
@@ -463,16 +526,16 @@ function UrlListInput({ value, onChange, max = 6 }: { value: string[]; onChange:
           {(() => {
             const previewKey = `${i}:${url}`;
             const canPreview = Boolean(url && isValidUrl(url) && !brokenKeys[previewKey]);
-            return (
+          return (
               <>
           <div className="flex-1">
             <input
               className={[INPUT_CLASS, !isValidUrl(url) && url ? INPUT_ERROR : ""].join(" ")}
               value={url}
               onChange={(e) => updateRow(i, e.target.value)}
-              placeholder="https://..."
+              placeholder="https://... 또는 사진 업로드"
             />
-            {!isValidUrl(url) && url ? <p className={ERROR_CLASS}>올바른 URL을 입력해주세요 (https://로 시작)</p> : null}
+            {!isValidUrl(url) && url ? <p className={ERROR_CLASS}>올바른 URL 또는 이미지 데이터만 사용할 수 있습니다.</p> : null}
           </div>
           {canPreview ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -492,9 +555,33 @@ function UrlListInput({ value, onChange, max = 6 }: { value: string[]; onChange:
           })()}
         </div>
       ))}
-      {value.length < max ? (
-        <button type="button" data-auth-allow onClick={addRow} className={`${SECONDARY_BUTTON} h-9 text-[12px]`}>+ URL 추가</button>
-      ) : null}
+      <div className="flex flex-wrap gap-2">
+        {value.length < max ? (
+          <button type="button" data-auth-allow onClick={addRow} className={`${SECONDARY_BUTTON} h-9 text-[12px]`}>+ URL 추가</button>
+        ) : null}
+        {value.length < max ? (
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(event) => void handleFileUpload(event)}
+            />
+            <button
+              type="button"
+              data-auth-allow
+              onClick={() => fileInputRef.current?.click()}
+              className={`${SECONDARY_BUTTON} h-9 text-[12px]`}
+            >
+              + 사진 업로드
+            </button>
+          </>
+        ) : null}
+      </div>
+      {uploadError ? <p className={ERROR_CLASS}>{uploadError}</p> : null}
+      <p className="text-[10px] text-[#92a0b4]">실제 사진 업로드 시 base64로 저장됩니다. 1장당 4MB 이하 권장</p>
       <p className="text-[10px] text-[#92a0b4]">{value.length}/{max}개</p>
     </div>
   );

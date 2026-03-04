@@ -391,6 +391,11 @@ function sanitizeUrlList(value: unknown, maxItems: number) {
   for (const item of value) {
     const raw = String(item ?? "").trim();
     if (!raw) continue;
+    if (/^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=\s]+$/i.test(raw)) {
+      if (!next.includes(raw)) next.push(raw);
+      if (next.length >= maxItems) break;
+      continue;
+    }
     try {
       const url = new URL(raw);
       if (url.protocol !== "https:" && url.protocol !== "http:") continue;
