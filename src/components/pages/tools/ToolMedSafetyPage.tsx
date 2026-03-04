@@ -749,6 +749,7 @@ type DynamicResultCard = {
 };
 
 const DISPLAY_ITEM_MAX_CHARS = 180;
+const DISPLAY_CARD_MAX_ITEMS = 4;
 const ITEM_PRIORITY_PATTERN =
   /(즉시|중단|보류|주의|금기|핵심|반드시|필수|우선|보고|호출|알람|모니터|재평가|용량|속도|농도|단위|라인|호환|상호작용|프로토콜|기관 확인 필요)/i;
 const TOPIC_LABEL_PATTERN =
@@ -817,7 +818,7 @@ function linePriorityScore(line: string) {
 }
 
 function pickCardItems(items: string[]) {
-  return mergeUniqueLists(items);
+  return mergeUniqueLists(items).slice(0, DISPLAY_CARD_MAX_ITEMS);
 }
 
 function topicPrefixRange(text: string) {
@@ -877,7 +878,9 @@ function buildNarrativeCards(answer: string, t?: TranslateFn): DynamicResultCard
       .filter((line) => line.length > 0);
     if (!items.length) return;
     const title = normalizeDisplayLine(currentTitle) || translate("핵심 정보 {count}", { count: cards.length + 1 });
-    const normalizedItems = mergeUniqueLists(items).filter((item, index) => !(index === 0 && isNearDuplicateText(item, title)));
+    const normalizedItems = mergeUniqueLists(items)
+      .filter((item, index) => !(index === 0 && isNearDuplicateText(item, title)))
+      .slice(0, DISPLAY_CARD_MAX_ITEMS);
     if (!normalizedItems.length) {
       currentItems = [];
       return;
@@ -915,7 +918,7 @@ function buildNarrativeCards(answer: string, t?: TranslateFn): DynamicResultCard
         .split("\n")
         .flatMap((line) => splitLongDisplayLine(line))
         .filter((line) => line.length > 0)
-    ),
+    ).slice(0, DISPLAY_CARD_MAX_ITEMS),
     compact: idx === 0,
   }));
 }
@@ -1428,12 +1431,12 @@ export function ToolMedSafetyPage() {
       };
     }
 
-    const immediateActions = mergeUniqueLists(result.quick.topActions).slice(0, 7);
-    const checks1to5 = mergeUniqueLists(result.quick.topNumbers).slice(0, 6);
-    const branchRules = mergeUniqueLists(result.quick.topRisks, result.safety.holdRules, result.safety.escalateWhen).slice(0, 8);
-    const adjustmentPlan = mergeUniqueLists(result.do.steps).slice(0, 8);
-    const preventionPoints = mergeUniqueLists(result.do.compatibilityChecks, result.institutionalChecks).slice(0, 6);
-    const reassessmentPoints = mergeUniqueLists(result.safety.monitor).slice(0, 6);
+    const immediateActions = mergeUniqueLists(result.quick.topActions).slice(0, DISPLAY_CARD_MAX_ITEMS);
+    const checks1to5 = mergeUniqueLists(result.quick.topNumbers).slice(0, DISPLAY_CARD_MAX_ITEMS);
+    const branchRules = mergeUniqueLists(result.quick.topRisks, result.safety.holdRules, result.safety.escalateWhen).slice(0, DISPLAY_CARD_MAX_ITEMS);
+    const adjustmentPlan = mergeUniqueLists(result.do.steps).slice(0, DISPLAY_CARD_MAX_ITEMS);
+    const preventionPoints = mergeUniqueLists(result.do.compatibilityChecks, result.institutionalChecks).slice(0, DISPLAY_CARD_MAX_ITEMS);
+    const reassessmentPoints = mergeUniqueLists(result.safety.monitor).slice(0, DISPLAY_CARD_MAX_ITEMS);
     const headerConclusion = clampDisplayText(result.oneLineConclusion, result.resultKind === "scenario" ? 160 : 220);
     const headerPrimaryUse = clampDisplayText(result.item.primaryUse, result.resultKind === "scenario" ? 170 : 220);
 

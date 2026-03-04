@@ -664,6 +664,20 @@ function normalizeComparableText(value: string) {
   return value.toLowerCase().replace(/\s+/g, " ").replace(/[^a-z0-9가-힣\s]/gi, "").trim();
 }
 
+function formatSignedDelta(value: number) {
+  if (!Number.isFinite(value)) return "±0";
+  if (value === 0) return "±0";
+  return value > 0 ? `+${value}` : `${value}`;
+}
+
+function looksIncompleteNarrativeText(value: string) {
+  const text = String(value ?? "").trim();
+  if (!text || text.length < 18) return false;
+  if (/[.!?]$/.test(text)) return false;
+  if (/(요|다|니다|세요|해요|돼요|이에요|예요)$/.test(text)) return false;
+  return /(쪽|정도|위주|중심|처럼|으로|이며|인데|지만|면서|하고|하며|또는|및|후|전|때)$/.test(text);
+}
+
 function extractLabeledBlock(text: string, startPattern: RegExp, endPatterns: RegExp[]) {
   const startIndex = text.search(startPattern);
   if (startIndex < 0) return "";
@@ -917,6 +931,13 @@ function mergeWeeklySummary(
   let nextWeekPreview =
     parsed.nextWeekPreview?.trim() ? parsed.nextWeekPreview : fallback.nextWeekPreview;
 
+  if (looksIncompleteNarrativeText(personalInsight) && fallback.personalInsight?.trim()) {
+    personalInsight = fallback.personalInsight;
+  }
+  if (looksIncompleteNarrativeText(nextWeekPreview) && fallback.nextWeekPreview?.trim()) {
+    nextWeekPreview = fallback.nextWeekPreview;
+  }
+
   if (
     personalInsight.trim() &&
     nextWeekPreview.trim() &&
@@ -975,10 +996,11 @@ function buildStructuredTextFromResult(result: AIRecoveryResult, language: Langu
 
   lines.push("[D] " + weeklyTitle);
   if (result.weeklySummary) {
+    const deltaText = formatSignedDelta(result.weeklySummary.avgBattery - result.weeklySummary.prevAvgBattery);
     lines.push(
       `${language === "ko" ? "평균 배터리" : "Average battery"} ${result.weeklySummary.avgBattery} · ${
         language === "ko" ? "지난주 대비" : "vs last week"
-      } ${result.weeklySummary.avgBattery - result.weeklySummary.prevAvgBattery}`
+      } ${deltaText}`
     );
     if (result.weeklySummary.personalInsight?.trim()) {
       lines.push(`- ${result.weeklySummary.personalInsight.trim()}`);

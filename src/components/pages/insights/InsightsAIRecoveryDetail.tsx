@@ -25,7 +25,7 @@ function severityLabel(severity: "info" | "caution" | "warning", t: (key: string
 function severityColor(severity: "info" | "caution" | "warning") {
   if (severity === "warning") return "#E87485";
   if (severity === "caution") return "#1B2747";
-  return "#007AFF";
+  return "#3158A6";
 }
 
 function presentError(error: string, t: (key: string) => string) {
@@ -92,12 +92,40 @@ function normalizeNarrativeText(text: string, lang: "ko" | "en") {
     return "기분이 매우 좋은 편";
   });
 
+  const protectedCaffeineMentions: string[] = [];
+  const protectCaffeineMention = (value: string) => {
+    const token = `__RECOVERY_CAF_${protectedCaffeineMentions.length}__`;
+    protectedCaffeineMentions.push(value);
+    return token;
+  };
+  const formatCaffeinePair = (cupsRaw: string, mgRaw: string) => {
+    const mg = Number(mgRaw);
+    const cups = Number(cupsRaw);
+    const roundedMg = Number.isFinite(mg) ? Math.round(mg) : mgRaw;
+    const roundedCups = Number.isFinite(cups) ? `${Math.max(0.5, Math.round(cups * 10) / 10)}` : cupsRaw;
+    if (lang === "en") return `about ${roundedCups} cup(s) (${roundedMg}mg)`;
+    return `커피 약 ${roundedCups}잔(${roundedMg}mg)`;
+  };
+
+  out = out.replace(
+    /(?:커피\s*)?약\s*(\d+(?:\.\d+)?)\s*잔\s*\(\s*(\d+(?:\.\d+)?)\s*mg\s*\)(?:\s*\(\s*약\s*\d+(?:\.\d+)?\s*잔\s*\))?/gi,
+    (_, cupsRaw, mgRaw) => protectCaffeineMention(formatCaffeinePair(cupsRaw, mgRaw))
+  );
+  out = out.replace(
+    /(\d+(?:\.\d+)?)\s*mg\s*\(\s*약\s*(\d+(?:\.\d+)?)\s*잔\s*\)/gi,
+    (_, mgRaw, cupsRaw) => protectCaffeineMention(formatCaffeinePair(cupsRaw, mgRaw))
+  );
+
   out = out.replace(/(\d+(?:\.\d+)?)\s*mg/gi, (_, raw) => {
     const mg = Number(raw);
     if (!Number.isFinite(mg)) return `${raw}mg`;
     const cups = Math.max(0.5, Math.round((mg / 120) * 10) / 10);
     if (lang === "en") return `about ${cups} cup(s) (${Math.round(mg)}mg)`;
     return `커피 약 ${cups}잔(${Math.round(mg)}mg)`;
+  });
+  out = out.replace(/__RECOVERY_CAF_(\d+)__/g, (_, indexRaw) => {
+    const index = Number(indexRaw);
+    return protectedCaffeineMentions[index] ?? "";
   });
 
   out = out.replace(/[^\S\r\n]{2,}/g, " ").trim();
@@ -107,9 +135,51 @@ function normalizeNarrativeText(text: string, lang: "ko" | "en") {
 type HighlightTone = "summary" | "alert" | "plan";
 
 function highlightClass(tone: HighlightTone) {
-  if (tone === "alert") return "rounded-[6px] bg-[#FFD2DA] px-[4px] py-[1px] font-semibold text-[#5F1322]";
-  if (tone === "plan") return "rounded-[6px] bg-[#E4ECFF] px-[4px] py-[1px] font-semibold text-ios-text";
-  return "rounded-[6px] bg-[#FFF6CC] px-[4px] py-[1px] font-semibold text-ios-text";
+  if (tone === "alert") return "rounded-[8px] bg-[#FFE4EA] px-[5px] py-[1px] font-semibold text-[#5F1322]";
+  if (tone === "plan") return "rounded-[8px] bg-white px-[5px] py-[1px] font-semibold text-[#102146] shadow-[inset_0_0_0_1px_rgba(16,33,70,0.08)]";
+  return "rounded-[8px] bg-[#FFF8D9] px-[5px] py-[1px] font-semibold text-[#3A2A00]";
+}
+
+function formatSignedDelta(value: number) {
+  if (!Number.isFinite(value)) return "±0";
+  if (value === 0) return "±0";
+  return value > 0 ? `+${value}` : `${value}`;
+}
+
+function looksLikeTruncatedNarrative(text: string) {
+  const value = text.trim();
+  if (!value || value.length < 18) return false;
+  if (/[.!?]$/.test(value)) return false;
+  if (/(요|다|니다|세요|해요|돼요|이에요|예요)$/.test(value)) return false;
+  return /(쪽|정도|위주|중심|처럼|으로|이며|인데|지만|면서|하고|하며|또는|및|후|전|때)$/.test(value);
+}
+
+function buildWeeklyFallbackText(
+  weekly: { avgBattery: number; prevAvgBattery: number; topDrains: Array<{ label: string; pct: number }> },
+  type: "personal" | "preview",
+  lang: "ko" | "en"
+) {
+  const delta = weekly.avgBattery - weekly.prevAvgBattery;
+  const topDrain = weekly.topDrains[0]?.label ?? "";
+  if (lang === "en") {
+    if (type === "personal") {
+      return delta >= 0
+        ? "Your weekly flow stayed relatively stable, and keeping the current recovery rhythm appears to support energy recovery."
+        : "Your weekly flow was more variable than last week, so rebuilding sleep and rest rhythm first matters most.";
+    }
+    return topDrain
+      ? `Next week, stabilizing ${topDrain.toLowerCase()} first should make your battery trend easier to protect.`
+      : "Next week, locking sleep, caffeine, and rest timing first should help keep your battery more stable.";
+  }
+
+  if (type === "personal") {
+    return delta >= 0
+      ? "이번 주는 회복 흐름이 비교적 안정적이었고, 지금 리듬을 유지하는 것이 에너지 회복에 도움이 되는 패턴이에요."
+      : "이번 주는 지난주보다 회복 변동이 있어, 수면과 휴식 리듬부터 먼저 다시 정리하는 것이 중요해요.";
+  }
+  return topDrain
+    ? `다음 주에는 ${topDrain} 리듬부터 먼저 정리하면 배터리 흐름을 더 안정적으로 유지하는 데 도움이 돼요.`
+    : "다음 주에는 수면·카페인·휴식 타이밍을 먼저 고정해 회복 흐름을 더 안정적으로 이어가 보세요.";
 }
 
 function pickKeySentence(text: string) {
@@ -417,10 +487,18 @@ export function InsightsAIRecoveryDetail() {
   const weekly = useMemo(() => {
     const w = data?.result.weeklySummary ?? null;
     if (!w) return null;
+    const normalizedPersonal = normalizeNarrativeText(w.personalInsight, lang);
+    const normalizedPreview = normalizeNarrativeText(w.nextWeekPreview, lang);
     return {
       ...w,
-      personalInsight: normalizeNarrativeText(w.personalInsight, lang),
-      nextWeekPreview: normalizeNarrativeText(w.nextWeekPreview, lang),
+      personalInsight:
+        normalizedPersonal && !looksLikeTruncatedNarrative(normalizedPersonal)
+          ? normalizedPersonal
+          : buildWeeklyFallbackText(w, "personal", lang),
+      nextWeekPreview:
+        normalizedPreview && !looksLikeTruncatedNarrative(normalizedPreview)
+          ? normalizedPreview
+          : buildWeeklyFallbackText(w, "preview", lang),
     };
   }, [data?.result.weeklySummary, lang]);
 
@@ -440,11 +518,11 @@ export function InsightsAIRecoveryDetail() {
   );
 
   const weeklyPersonalLines = useMemo(
-    () => splitBulletLines(weekly?.personalInsight ?? ""),
+    () => splitBulletLines(weekly?.personalInsight ?? "").slice(0, 3),
     [weekly?.personalInsight]
   );
   const weeklyPreviewLines = useMemo(
-    () => splitBulletLines(weekly?.nextWeekPreview ?? ""),
+    () => splitBulletLines(weekly?.nextWeekPreview ?? "").slice(0, 3),
     [weekly?.nextWeekPreview]
   );
 
@@ -619,11 +697,11 @@ export function InsightsAIRecoveryDetail() {
           <DetailCard className="p-5">
             <div className="text-[13px] font-semibold text-ios-sub">{t("오늘의 회복 추천")}</div>
             {orderedSections.length ? (
-              <div className="mt-3 space-y-3">
+              <div className="mt-4 space-y-3">
                 {orderedSections.map(({ meta, section }, index) => (
                   <div
                     key={`${meta.key}-${section?.title}`}
-                    className="rounded-2xl border p-4 shadow-apple-sm"
+                    className="relative overflow-hidden rounded-[24px] border px-4 py-4 shadow-apple-sm"
                     style={{
                       borderColor: CATEGORY_THEME[meta.key].softBorder,
                       backgroundColor: CATEGORY_THEME[meta.key].soft,
@@ -648,42 +726,57 @@ export function InsightsAIRecoveryDetail() {
                       const statusLabel = lang === "en" ? "Current status" : "현재 상태";
 
                       return (
-                        <>
+                        <div className="relative pl-3">
+                          <div
+                            className="absolute bottom-0 left-0 top-0 w-[3px] rounded-full"
+                            style={{ backgroundColor: `${theme.accent}55` }}
+                          />
                           <div className="flex items-center justify-between gap-2">
                             <div className="flex items-center gap-2">
                               <div
-                                className="flex h-6 w-6 items-center justify-center rounded-full text-[12px] font-bold"
+                                className="flex h-7 w-7 items-center justify-center rounded-full text-[12px] font-bold shadow-[inset_0_0_0_1px_rgba(255,255,255,0.55)]"
                                 style={{ color: theme.accent, backgroundColor: "#FFFFFF" }}
                               >
                                 {index + 1}
                               </div>
-                              <span className="text-[17px] font-bold text-ios-text">{section?.title || t(meta.titleKey)}</span>
+                              <span className="text-[17px] font-bold tracking-[-0.01em] text-ios-text">
+                                {section?.title || t(meta.titleKey)}
+                              </span>
                             </div>
                             <DetailChip color={severityColor(section?.severity ?? "info")}>
                               {severityLabel(section?.severity ?? "info", t)}
                             </DetailChip>
                           </div>
                           {descriptionText ? (
-                            <div className="mt-3 rounded-xl border bg-white px-3 py-2" style={{ borderColor: theme.recBorder }}>
-                              <div className="text-[11px] font-semibold" style={{ color: theme.accent }}>
+                            <div className="mt-3">
+                              <div
+                                className="inline-flex items-center rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold shadow-[inset_0_0_0_1px_rgba(255,255,255,0.45)]"
+                                style={{ color: theme.accent }}
+                              >
                                 {statusLabel}
                               </div>
-                              <p className="mt-1 text-[13.5px] leading-relaxed text-ios-sub">{descriptionText}</p>
+                              <p className="mt-2 text-[14px] leading-relaxed text-[#405169]">{descriptionText}</p>
                             </div>
                           ) : null}
                           {recommendations.length ? (
-                            <div className="mt-3 space-y-1.5">
+                            <ul className="mt-3 space-y-2 border-t border-white/70 pt-3">
                               {recommendations.map((tip, idx) => (
-                                <p key={`${meta.key}-${idx}`} className="text-[13.5px] leading-relaxed text-ios-text">
-                                  <span className="mr-1 text-[11px] font-semibold" style={{ color: theme.accent }}>
-                                    {recLabel} {idx + 1}
-                                  </span>
-                                  {idx === 0 ? highlightKeySentence(tip, "plan") : tip}
-                                </p>
+                                <li key={`${meta.key}-${idx}`} className="flex gap-2 text-[14px] leading-relaxed text-ios-text">
+                                  <span
+                                    className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full"
+                                    style={{ backgroundColor: theme.accent }}
+                                  />
+                                  <div className="min-w-0">
+                                    <span className="mr-1 text-[11px] font-semibold" style={{ color: theme.accent }}>
+                                      {recLabel} {idx + 1}
+                                    </span>
+                                    <span>{idx === 0 ? highlightKeySentence(tip, "plan") : tip}</span>
+                                  </div>
+                                </li>
                               ))}
-                            </div>
+                            </ul>
                           ) : null}
-                        </>
+                        </div>
                       );
                     })()}
                   </div>
@@ -699,36 +792,48 @@ export function InsightsAIRecoveryDetail() {
           <DetailCard className="p-5">
             <div className="text-[13px] font-semibold text-ios-sub">{t("이번 주 AI 한마디")}</div>
             {weekly ? (
-              <div className="mt-3 space-y-3">
-                <div className="rounded-xl border border-ios-sep bg-ios-bg px-3 py-2">
-                  <p className="text-[12px] font-semibold text-ios-sub">{t("이번 주 요약")}</p>
-                  <p className="mt-1 text-[14px] text-ios-text">
-                    {t("평균 배터리")} <span className="font-extrabold">{weekly.avgBattery}</span>
-                    {" · "}
-                    {t("지난주 대비")} <span className="font-extrabold">{weekly.avgBattery - weekly.prevAvgBattery}</span>
-                  </p>
-                </div>
-                <div className="rounded-xl border border-ios-sep bg-ios-bg px-3 py-2">
-                  <p className="text-[12px] font-semibold text-ios-sub">{t("개인 패턴")}</p>
-                  <ol className="mt-1 space-y-1">
-                    {weeklyPersonalLines.map((line, idx) => (
-                      <li key={`personal-${idx}`} className="flex gap-2 text-[14px] leading-relaxed text-ios-text">
-                        <span className="font-semibold text-ios-sub">{idx + 1}.</span>
-                        <span>{line}</span>
-                      </li>
+              <div className="mt-4 overflow-hidden rounded-[24px] border border-[#DCE3F0] bg-[linear-gradient(180deg,#FAFBFF_0%,#FFFFFF_100%)] px-4 py-4">
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                  <div>
+                    <p className="text-[12px] font-semibold text-ios-sub">{t("이번 주 요약")}</p>
+                    <p className="mt-1 text-[16px] font-semibold text-ios-text">
+                      {t("평균 배터리")} <span className="text-[24px] font-extrabold tracking-[-0.02em]">{weekly.avgBattery}</span>
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <DetailChip color={weekly.avgBattery - weekly.prevAvgBattery >= 0 ? "#0B7A3E" : "#A33A4A"}>
+                      {t("지난주 대비")} {formatSignedDelta(weekly.avgBattery - weekly.prevAvgBattery)}
+                    </DetailChip>
+                    {weekly.topDrains.slice(0, 2).map((drain) => (
+                      <DetailChip key={`${drain.label}-${drain.pct}`} color="#5E6C84">
+                        {drain.label} {drain.pct}%
+                      </DetailChip>
                     ))}
-                  </ol>
+                  </div>
                 </div>
-                <div className="rounded-xl border border-ios-sep bg-ios-bg px-3 py-2">
-                  <p className="text-[12px] font-semibold text-ios-sub">{t("다음 주 예측")}</p>
-                  <ol className="mt-1 space-y-1">
-                    {weeklyPreviewLines.map((line, idx) => (
-                      <li key={`preview-${idx}`} className="flex gap-2 text-[14px] leading-relaxed text-ios-text">
-                        <span className="font-semibold text-ios-sub">{idx + 1}.</span>
-                        <span>{line}</span>
-                      </li>
-                    ))}
-                  </ol>
+                <div className="mt-4 space-y-4 border-t border-[#E8EDF7] pt-4">
+                  <div>
+                    <p className="text-[12px] font-semibold text-ios-sub">{t("개인 패턴")}</p>
+                    <ol className="mt-2 space-y-1.5">
+                      {weeklyPersonalLines.map((line, idx) => (
+                        <li key={`personal-${idx}`} className="flex gap-2 text-[14px] leading-relaxed text-ios-text">
+                          <span className="font-semibold text-[#5E6C84]">{idx + 1}.</span>
+                          <span>{line}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                  <div className="border-t border-[#EEF2F9] pt-4">
+                    <p className="text-[12px] font-semibold text-ios-sub">{t("다음 주 예측")}</p>
+                    <ol className="mt-2 space-y-1.5">
+                      {weeklyPreviewLines.map((line, idx) => (
+                        <li key={`preview-${idx}`} className="flex gap-2 text-[14px] leading-relaxed text-ios-text">
+                          <span className="font-semibold text-[#5E6C84]">{idx + 1}.</span>
+                          <span>{line}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
                 </div>
               </div>
             ) : (

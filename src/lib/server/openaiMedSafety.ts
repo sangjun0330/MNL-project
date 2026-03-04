@@ -48,6 +48,8 @@ export type MedSafetyAnalysisResult = {
   suggestedNames?: string[];
 };
 
+type MedSafetyStructuredResult = Omit<MedSafetyAnalysisResult, "searchAnswer">;
+
 type AnalyzeParams = {
   query: string;
   mode: ClinicalMode;
@@ -74,6 +76,8 @@ type TextDeltaHandler = (delta: string) => void | Promise<void>;
 
 type ResponseVerbosity = "low" | "medium" | "high";
 const MED_SAFETY_LOCKED_MODEL = "gpt-5.1";
+const MED_SAFETY_SECTION_MIN_ITEMS = 3;
+const MED_SAFETY_SECTION_MAX_ITEMS = 4;
 
 export type OpenAIMedSafetyOutput = {
   result: MedSafetyAnalysisResult;
@@ -609,7 +613,8 @@ function buildMedicationPrompt(query: string, contextJson: string) {
     "ENTITY_ALIASES: <대표 별칭/동의어 1~3개; 세미콜론 구분, 없으면 NONE>",
     "",
     "[본문 OUTPUT CONTRACT - 아래 9개 섹션 순서 고정]",
-    "규칙: 섹션당 2~3개 불릿, 각 불릿은 ‘행동 + 이유/위험 + 확인포인트’를 포함한 1문장.",
+    "규칙: 각 섹션은 기본 3개, 많아도 4개 불릿까지만 작성한다.",
+    "규칙: 각 불릿은 ‘행동 + 이유/위험 + 확인포인트’를 포함한 1문장.",
     "규칙: 섹션 제목을 불릿 문장에 반복하지 말 것.",
     "규칙: 불확실하거나 기관 차이 큰 내용은 필요 시 ‘기관 프로토콜/약제부/IFU 확인 권장’ 표기.",
     "규칙: 용량/속도/희석/호환 등 수치 단정 금지(원칙만), 확인 포인트를 함께 제시.",
@@ -676,7 +681,8 @@ function buildDevicePrompt(query: string, contextJson: string) {
     "ENTITY_ALIASES: <대표 별칭/동의어 1~3개; 세미콜론 구분, 없으면 NONE>",
     "",
     "[본문 OUTPUT CONTRACT - 아래 7개 섹션 순서 고정]",
-    "규칙: 섹션당 2~3개 불릿, 각 불릿은 ‘행동 + 이유/위험 + 확인포인트’를 포함한 1문장.",
+    "규칙: 각 섹션은 기본 3개, 많아도 4개 불릿까지만 작성한다.",
+    "규칙: 각 불릿은 ‘행동 + 이유/위험 + 확인포인트’를 포함한 1문장.",
     "규칙: 섹션 제목을 불릿 문장에 반복하지 말 것.",
     "규칙: 교체/점검 주기, 세팅값, 호환/규격 등 기관차 큰 내용은 필요 시 ‘기관/IFU 확인 권장’ 표기.",
     "규칙: 세팅값을 단정하지 말고 “원칙 + 확인포인트”로만 제시한다.",
@@ -718,7 +724,7 @@ function buildScenarioPrompt(query: string, contextJson: string) {
     "너무 짧게 요약하지 말고 임상적으로 필요한 맥락은 유지하라.",
     "질문과 직접 관련된 내용만 남기고 일반론·교과서식 장문 설명은 생략하라.",
     "권장 구성: 핵심 판단, 지금 할 일(즉시), 확인할 수치/관찰, 가능한 원인 Top 3, 조정/분기, 중단·호출 기준, 보고 문구.",
-    "각 구성은 2~3개 핵심 포인트로 정리하라.",
+    "각 구성은 기본 3개, 많아도 4개 핵심 포인트까지만 작성하라.",
     "전체 길이는 대략 18~32줄 내외로 작성하라.",
     "불확실한 부분은 단정하지 말고 필요 시 '기관 확인 권장'을 짧게 표기하라.",
     "마지막에는 현장에서 바로 읽을 수 있는 짧은 보고 문구(SBAR 형태) 2~3문장을 포함하라.",
@@ -1920,6 +1926,194 @@ function ensureMinList(primary: string[], fallback: string[], min: number, max: 
   return dedupeLimit([...primary, ...fallback], max);
 }
 
+function normalizeSearchAnswerBullet(value: string) {
+  return cleanLine(String(value ?? "").replace(/^(?:[-*•·]|\d+[).])\s*/, "").replace(/\s+/g, " ")).slice(0, 220);
+}
+
+function buildSearchAnswerSectionItems(items: string[], fallback: string[]) {
+  const primary = dedupeLimit(items.map((item) => normalizeSearchAnswerBullet(item)).filter(Boolean), MED_SAFETY_SECTION_MAX_ITEMS);
+  const backup = fallback.map((item) => normalizeSearchAnswerBullet(item)).filter(Boolean);
+  return ensureMinList(primary, backup, MED_SAFETY_SECTION_MIN_ITEMS, MED_SAFETY_SECTION_MAX_ITEMS);
+}
+
+function buildMedSafetySupportLines(result: MedSafetyStructuredResult) {
+  return [
+    result.patientScript20s,
+    result.sbar.situation ? `상황: ${result.sbar.situation}` : "",
+    result.sbar.background ? `배경: ${result.sbar.background}` : "",
+    result.sbar.assessment ? `평가: ${result.sbar.assessment}` : "",
+    result.sbar.recommendation ? `권고: ${result.sbar.recommendation}` : "",
+  ]
+    .map((item) => normalizeSearchAnswerBullet(item))
+    .filter(Boolean);
+}
+
+function buildCanonicalSearchAnswerFromResult(params: {
+  intent: QueryIntent;
+  result: MedSafetyStructuredResult;
+  templates: ReturnType<typeof qualityFallbackTemplates>;
+}) {
+  const { intent, result, templates } = params;
+  const baseIdentity = [
+    result.item.primaryUse,
+    result.oneLineConclusion,
+    ...result.item.aliases.slice(0, 1).map((alias) => `별칭/표기: ${alias}`),
+    ...result.item.highRiskBadges.slice(0, 1).map((badge) => `안전 태그: ${badge}`),
+  ];
+  const guidanceFallback = [
+    result.patientScript20s,
+    "환자에게 목적·주의 신호·즉시 보고 기준을 짧고 분명하게 설명하세요.",
+    "수치와 상태를 확인한 뒤 같은 순서로 재설명하세요.",
+    "설명 후 이해 여부를 바로 되묻고 기록하세요.",
+  ];
+  const supportLines = buildMedSafetySupportLines(result);
+  const sections: Array<{ title: string; items: string[] }> = [];
+
+  if (intent === "medication") {
+    sections.push(
+      {
+        title: "이 약이 무엇인지(정의/분류/역할)",
+        items: buildSearchAnswerSectionItems(baseIdentity, [result.item.primaryUse, result.oneLineConclusion, ...templates.topActions]),
+      },
+      {
+        title: "언제 확인하고 쓰는지(적응증/사용 맥락)",
+        items: buildSearchAnswerSectionItems(
+          [...result.modePriority, ...result.quick.topActions, result.item.primaryUse],
+          [result.item.primaryUse, ...templates.topActions]
+        ),
+      },
+      {
+        title: "어떻게 준비하고 진행하는지(핵심 단계)",
+        items: buildSearchAnswerSectionItems(
+          [...result.do.steps, ...result.do.calculatorsNeeded],
+          [...templates.topActions, ...templates.topNumbers]
+        ),
+      },
+      {
+        title: "반드시 확인할 수치·관찰",
+        items: buildSearchAnswerSectionItems(
+          [...result.quick.topNumbers, ...result.safety.monitor],
+          [...templates.topNumbers, ...templates.monitor]
+        ),
+      },
+      {
+        title: "반드시 확인할 금기·주의",
+        items: buildSearchAnswerSectionItems(
+          [...result.quick.topRisks, ...result.safety.holdRules, ...result.safety.escalateWhen],
+          [...templates.topRisks, ...templates.holdRules, ...templates.escalateWhen]
+        ),
+      },
+      {
+        title: "라인·호환·실수 방지",
+        items: buildSearchAnswerSectionItems(
+          [...result.do.compatibilityChecks, ...result.institutionalChecks],
+          [...templates.compatibilityChecks, ...result.institutionalChecks]
+        ),
+      },
+      {
+        title: "환자 설명·보고 포인트",
+        items: buildSearchAnswerSectionItems(supportLines, guidanceFallback),
+      }
+    );
+  } else if (intent === "device") {
+    sections.push(
+      {
+        title: "이 기구가 무엇인지(정의/용도/역할)",
+        items: buildSearchAnswerSectionItems(baseIdentity, [result.item.primaryUse, result.oneLineConclusion, ...templates.topActions]),
+      },
+      {
+        title: "사용 전 준비·셋업",
+        items: buildSearchAnswerSectionItems(
+          [...result.quick.topActions, ...result.do.steps],
+          [...templates.topActions, ...templates.compatibilityChecks]
+        ),
+      },
+      {
+        title: "정상 작동 확인·모니터",
+        items: buildSearchAnswerSectionItems(
+          [...result.quick.topNumbers, ...result.safety.monitor],
+          [...templates.topNumbers, ...templates.monitor]
+        ),
+      },
+      {
+        title: "알람·이상 시 먼저 할 일",
+        items: buildSearchAnswerSectionItems(
+          [...result.quick.topRisks, ...result.do.steps],
+          [...templates.topRisks, ...templates.topActions]
+        ),
+      },
+      {
+        title: "즉시 중단·보고 기준",
+        items: buildSearchAnswerSectionItems(
+          [...result.safety.holdRules, ...result.safety.escalateWhen, ...result.quick.topRisks],
+          [...templates.holdRules, ...templates.escalateWhen, ...templates.topRisks]
+        ),
+      },
+      {
+        title: "호환·소모품·기관 확인",
+        items: buildSearchAnswerSectionItems(
+          [...result.do.compatibilityChecks, ...result.institutionalChecks],
+          [...templates.compatibilityChecks, ...result.institutionalChecks]
+        ),
+      },
+      {
+        title: "환자 설명·보고 포인트",
+        items: buildSearchAnswerSectionItems(supportLines, guidanceFallback),
+      }
+    );
+  } else {
+    sections.push(
+      {
+        title: "핵심 판단",
+        items: buildSearchAnswerSectionItems(
+          [result.oneLineConclusion, result.item.primaryUse, ...result.quick.topRisks],
+          [result.oneLineConclusion, result.item.primaryUse, ...templates.topRisks]
+        ),
+      },
+      {
+        title: "지금 할 일",
+        items: buildSearchAnswerSectionItems(
+          [...result.quick.topActions, ...result.do.steps],
+          [...templates.topActions, ...templates.compatibilityChecks]
+        ),
+      },
+      {
+        title: "확인할 수치·관찰",
+        items: buildSearchAnswerSectionItems(
+          [...result.quick.topNumbers, ...result.safety.monitor],
+          [...templates.topNumbers, ...templates.monitor]
+        ),
+      },
+      {
+        title: "원인 후보·분기",
+        items: buildSearchAnswerSectionItems(
+          [...result.quick.topRisks, ...result.do.compatibilityChecks],
+          [...templates.topRisks, ...templates.compatibilityChecks]
+        ),
+      },
+      {
+        title: "중단·보고 기준",
+        items: buildSearchAnswerSectionItems(
+          [...result.safety.holdRules, ...result.safety.escalateWhen, ...result.institutionalChecks],
+          [...templates.holdRules, ...templates.escalateWhen, ...result.institutionalChecks]
+        ),
+      },
+      {
+        title: "보고·설명 문구",
+        items: buildSearchAnswerSectionItems(supportLines, guidanceFallback),
+      }
+    );
+  }
+
+  return sections
+    .map((section) => {
+      if (!section.items.length) return "";
+      return `${section.title}\n${section.items.map((item) => `• ${item}`).join("\n")}`;
+    })
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 function buildResultFromAnswer(params: AnalyzeParams, intent: QueryIntent, answer: string): MedSafetyAnalysisResult {
   const verification = parseEntityVerification(answer);
   const officialNameFromControl = parseEntityOfficialName(answer);
@@ -2014,7 +2208,7 @@ function buildResultFromAnswer(params: AnalyzeParams, intent: QueryIntent, answe
     6
   );
 
-  return {
+  const result: MedSafetyStructuredResult = {
     resultKind: intent === "scenario" ? "scenario" : intent,
     notFound: false,
     notFoundReason: "",
@@ -2041,21 +2235,21 @@ function buildResultFromAnswer(params: AnalyzeParams, intent: QueryIntent, answe
     },
     quick: {
       status,
-      topActions: ensureMinList(topActions, templates.topActions, 4, 8),
-      topNumbers: ensureMinList(topNumbers, templates.topNumbers, 3, 7),
-      topRisks: ensureMinList(topRisks, templates.topRisks, 3, 8),
+      topActions: ensureMinList(topActions, templates.topActions, 3, 4),
+      topNumbers: ensureMinList(topNumbers, templates.topNumbers, 3, 4),
+      topRisks: ensureMinList(topRisks, templates.topRisks, 3, 4),
     },
     do: {
-      steps: ensureMinList(dedupeLimit([...topActions, ...bullets], 9), templates.topActions, 5, 9),
-      calculatorsNeeded: ensureMinList(calculatorsNeeded, templates.topNumbers, 2, 5),
-      compatibilityChecks: ensureMinList(compatibilityChecks, templates.compatibilityChecks, 2, 6),
+      steps: ensureMinList(dedupeLimit([...topActions, ...bullets], 6), templates.topActions, 3, 4),
+      calculatorsNeeded: ensureMinList(calculatorsNeeded, templates.topNumbers, 3, 4),
+      compatibilityChecks: ensureMinList(compatibilityChecks, templates.compatibilityChecks, 3, 4),
     },
     safety: {
-      holdRules: ensureMinList(holdRules, templates.holdRules, 1, 6),
-      monitor: ensureMinList(monitor, templates.monitor, 2, 6),
-      escalateWhen: ensureMinList(escalateWhen, templates.escalateWhen, 1, 6),
+      holdRules: ensureMinList(holdRules, templates.holdRules, 1, 4),
+      monitor: ensureMinList(monitor, templates.monitor, 3, 4),
+      escalateWhen: ensureMinList(escalateWhen, templates.escalateWhen, 1, 4),
     },
-    institutionalChecks: institutionalChecks.length ? institutionalChecks : ["기관 프로토콜·약제부·IFU 확인 권장"],
+    institutionalChecks: (institutionalChecks.length ? institutionalChecks : ["기관 프로토콜·약제부·IFU 확인 권장"]).slice(0, 4),
     sbar,
     patientScript20s:
       cleanLine(
@@ -2064,7 +2258,14 @@ function buildResultFromAnswer(params: AnalyzeParams, intent: QueryIntent, answe
       ).slice(0, 220),
     modePriority: [],
     confidenceNote: "",
-    searchAnswer: normalized,
+  };
+  return {
+    ...result,
+    searchAnswer: buildCanonicalSearchAnswerFromResult({
+      intent,
+      result,
+      templates,
+    }),
   };
 }
 
@@ -2297,7 +2498,7 @@ export async function translateMedSafetyToEnglish(input: {
   if (!lines.length) {
     return {
       result: translatedResult,
-      rawText: translatedRawText,
+      rawText: translatedResult.searchAnswer || translatedRawText,
       model: selectedModel,
       debug: "translate_empty_source",
     };
@@ -2396,6 +2597,7 @@ export async function translateMedSafetyToEnglish(input: {
   if (!translatedResult.searchAnswer && translatedRawText) {
     translatedResult.searchAnswer = translatedRawText;
   }
+  translatedRawText = translatedResult.searchAnswer || translatedRawText;
 
   return {
     result: translatedResult,
@@ -2477,7 +2679,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
           return {
             result,
             model: candidateModel,
-            rawText: attempt.text,
+            rawText: result.searchAnswer || attempt.text,
             fallbackReason: null,
             openaiResponseId: attempt.responseId,
             openaiConversationId: attempt.conversationId,
@@ -2510,7 +2712,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
               return {
                 result,
                 model: candidateModel,
-                rawText: statelessRetry.text,
+                rawText: result.searchAnswer || statelessRetry.text,
                 fallbackReason: null,
                 openaiResponseId: statelessRetry.responseId,
                 openaiConversationId: statelessRetry.conversationId,
@@ -2531,13 +2733,15 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
     }
   }
 
+  const fallbackResult = withPoliteKoreanTone(
+    buildFallbackResult(params, intent, `AI 응답 실패로 기본 안전 모드로 전환되었습니다. (${truncateError(lastError)})`),
+    params.locale
+  );
+
   return {
-    result: withPoliteKoreanTone(
-      buildFallbackResult(params, intent, `AI 응답 실패로 기본 안전 모드로 전환되었습니다. (${truncateError(lastError)})`),
-      params.locale
-    ),
+    result: fallbackResult,
     model: selectedModel,
-    rawText,
+    rawText: fallbackResult.searchAnswer || "",
     fallbackReason: lastError,
     openaiResponseId: null,
     openaiConversationId: null,
