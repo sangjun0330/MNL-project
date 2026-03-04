@@ -132,19 +132,35 @@ export function SettingsAdminRefundsPage() {
     void loadRequests();
   }, [loadRequests]);
 
-  const openDetail = useCallback(async (refundId: number) => {
-    setSelectedId((prev) => (prev === refundId ? null : refundId));
-    if (details[refundId]) return;
-    setDetailLoadingId(refundId);
-    try {
-      const detail = await fetchAdminRefundDetail(refundId);
-      setDetails((prev) => ({ ...prev, [refundId]: detail }));
-    } catch (e: any) {
-      setError(parseErrorMessage(String(e?.message ?? "failed_to_load_refund_detail")));
-    } finally {
-      setDetailLoadingId(null);
+  const loadDetail = useCallback(
+    async (refundId: number, skipIfLoaded = true) => {
+      if (skipIfLoaded && details[refundId]) return;
+      setDetailLoadingId(refundId);
+      try {
+        const detail = await fetchAdminRefundDetail(refundId);
+        setDetails((prev) => ({ ...prev, [refundId]: detail }));
+      } catch (e: any) {
+        setError(parseErrorMessage(String(e?.message ?? "failed_to_load_refund_detail")));
+      } finally {
+        setDetailLoadingId(null);
+      }
+    },
+    [details]
+  );
+
+  useEffect(() => {
+    if (requests.length === 0) {
+      if (selectedId !== null) setSelectedId(null);
+      return;
     }
-  }, [details]);
+
+    const nextId = requests.some((request) => request.id === selectedId) ? selectedId : requests[0].id;
+    if (nextId == null) return;
+    if (selectedId !== nextId) setSelectedId(nextId);
+    if (!details[nextId] && detailLoadingId !== nextId) {
+      void loadDetail(nextId);
+    }
+  }, [detailLoadingId, details, loadDetail, requests, selectedId]);
 
   const refreshDetail = useCallback(async (refundId: number) => {
     try {
@@ -200,7 +216,9 @@ export function SettingsAdminRefundsPage() {
     const open = requests.filter((r) => ["REQUESTED", "UNDER_REVIEW", "APPROVED", "EXECUTING", "FAILED_RETRYABLE"].includes(r.status)).length;
     const done = requests.filter((r) => r.status === "REFUNDED").length;
     const failed = requests.filter((r) => r.status === "FAILED_FINAL" || r.status === "REJECTED").length;
-    return { open, done, failed };
+    const requested = requests.filter((r) => r.status === "REQUESTED").length;
+    const retryable = requests.filter((r) => r.status === "FAILED_RETRYABLE").length;
+    return { open, done, failed, requested, retryable };
   }, [requests]);
 
   const orderSummary = useMemo(() => {
@@ -248,8 +266,125 @@ export function SettingsAdminRefundsPage() {
     return `${actionMap[action] ?? action} 처리 중 (#${id ?? "-"})`;
   }, [actionLoadingKey]);
 
+  const selectedRequest = useMemo(
+    () => requests.find((request) => request.id === selectedId) ?? null,
+    [requests, selectedId]
+  );
+  const selectedDetail = selectedRequest ? details[selectedRequest.id] ?? null : null;
+  const relatedOrder = useMemo(
+    () => (selectedRequest ? orders.find((order) => order.orderId === selectedRequest.orderId) ?? null : null),
+    [orders, selectedRequest]
+  );
+  const visibleOrders = useMemo(() => orders.slice(0, 12), [orders]);
+
+  const canReview = selectedRequest ? boolState(selectedRequest.status, ["REQUESTED", "FAILED_RETRYABLE"]) : false;
+  const canApprove = selectedRequest
+    ? boolState(selectedRequest.status, ["REQUESTED", "UNDER_REVIEW", "FAILED_RETRYABLE"])
+    : false;
+  const canReject = selectedRequest
+    ? boolState(selectedRequest.status, ["REQUESTED", "UNDER_REVIEW", "APPROVED", "FAILED_RETRYABLE"])
+    : false;
+  const canExecute = selectedRequest ? boolState(selectedRequest.status, ["APPROVED", "FAILED_RETRYABLE", "EXECUTING"]) : false;
+
+  const selectRequest = useCallback(
+    (refundId: number) => {
+      setSelectedId(refundId);
+      void loadDetail(refundId);
+    },
+    [loadDetail]
+  );
+
+  const startReview = useCallback(() => {
+    if (!selectedRequest || !canReview) return;
+    const note = window.prompt("검토 메모(선택)", "");
+    void runAction(
+      `review:${selectedRequest.id}`,
+      selectedRequest.id,
+      () => markAdminRefundReview(selectedRequest.id, note),
+      `요청 #${selectedRequest.id}를 검토중으로 전환했습니다.`
+    );
+  }, [canReview, runAction, selectedRequest]);
+
+  const approveSelected = useCallback(() => {
+    if (!selectedRequest || !canApprove) return;
+    const confirmed = window.confirm(`요청 #${selectedRequest.id}를 승인할까요?`);
+    if (!confirmed) return;
+    const note = window.prompt("승인 메모(선택)", "");
+    void runAction(
+      `approve:${selectedRequest.id}`,
+      selectedRequest.id,
+      () => approveAdminRefund(selectedRequest.id, note),
+      `요청 #${selectedRequest.id}를 승인했습니다.`
+    );
+  }, [canApprove, runAction, selectedRequest]);
+
+  const rejectSelected = useCallback(() => {
+    if (!selectedRequest || !canReject) return;
+    const reason = window.prompt("거절 사유(필수)", "");
+    if (reason == null) return;
+    if (!reason.trim()) {
+      setError("거절 사유를 입력해 주세요.");
+      return;
+    }
+    const note = window.prompt("내부 메모(선택)", "");
+    void runAction(
+      `reject:${selectedRequest.id}`,
+      selectedRequest.id,
+      () =>
+        rejectAdminRefund({
+          refundId: selectedRequest.id,
+          reason,
+          note,
+        }),
+      `요청 #${selectedRequest.id}를 거절했습니다.`
+    );
+  }, [canReject, runAction, selectedRequest]);
+
+  const executeSelected = useCallback(() => {
+    if (!selectedRequest || !canExecute) return;
+    const confirmed = window.confirm(
+      `요청 #${selectedRequest.id} 환불을 실제 실행할까요?\n토스 취소 API를 호출하고, 성공 시 플랜을 Free로 전환합니다.`
+    );
+    if (!confirmed) return;
+    const note = window.prompt("실행 메모(선택)", "관리자 수동 환불 실행");
+    void runAction(
+      `execute:${selectedRequest.id}`,
+      selectedRequest.id,
+      () =>
+        executeAdminRefund({
+          refundId: selectedRequest.id,
+          note,
+          cancelAmount: selectedRequest.cancelAmount ?? undefined,
+        }),
+      `요청 #${selectedRequest.id} 환불 실행이 완료되었습니다.`
+    );
+  }, [canExecute, runAction, selectedRequest]);
+
+  const approveAndExecuteSelected = useCallback(() => {
+    if (!selectedRequest || !(canApprove && canExecute)) return;
+    const confirmed = window.confirm(
+      `요청 #${selectedRequest.id}를 승인 후 즉시 실행할까요?\n(승인 -> 토스 취소 호출 순서로 진행됩니다.)`
+    );
+    if (!confirmed) return;
+    const approveNote = window.prompt("승인 메모(선택)", "");
+    const executeNote = window.prompt("실행 메모(선택)", "관리자 즉시 환불 실행");
+    void runAction(
+      `approve_execute:${selectedRequest.id}`,
+      selectedRequest.id,
+      async () => {
+        await approveAdminRefund(selectedRequest.id, approveNote);
+        await executeAdminRefund({
+          refundId: selectedRequest.id,
+          note: executeNote,
+          cancelAmount: selectedRequest.cancelAmount ?? undefined,
+        });
+      },
+      `요청 #${selectedRequest.id} 승인 및 환불 실행이 완료되었습니다.`
+    );
+  }, [canApprove, canExecute, runAction, selectedRequest]);
+
   return (
-    <div className="mx-auto w-full max-w-[1120px] px-4 pb-24 pt-6">
+    <div className="mx-auto w-full max-w-[1180px] px-4 pb-24 pt-6">
       <div className="mb-4 flex items-center gap-3">
         <Link
           href="/settings/admin"
@@ -258,8 +393,8 @@ export function SettingsAdminRefundsPage() {
           ←
         </Link>
         <div>
-          <div className="text-[28px] font-extrabold tracking-[-0.03em] text-ios-text">환불/결제 로그 운영</div>
-          <div className="text-[12.5px] text-ios-sub">환불 워크플로와 Toss 결제 흐름을 같은 기준으로 관리합니다.</div>
+          <div className="text-[28px] font-extrabold tracking-[-0.03em] text-ios-text">결제·환불 운영</div>
+          <div className="text-[12.5px] text-ios-sub">환불 요청 큐와 결제 상태를 같은 기준으로 보고, 선택한 요청만 집중 처리합니다.</div>
         </div>
       </div>
 
@@ -280,17 +415,35 @@ export function SettingsAdminRefundsPage() {
       {status === "authenticated" ? (
         <>
           <section className="rounded-[32px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(244,248,252,0.96))] p-6 shadow-[0_22px_70px_rgba(17,41,75,0.08)]">
-            <div className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
+            <div className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
               <div>
                 <div className="inline-flex rounded-full border border-[#dbe4ef] bg-white px-3 py-1 text-[11px] font-semibold text-[#17324d]">
-                  환불 파이프라인
+                  환불 처리 큐
                 </div>
-                <div className="mt-4 grid grid-cols-3 gap-3">
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   <OpsMetricCard label="열린 요청" value={summary.open} tone="text-[color:var(--rnest-accent)]" />
+                  <OpsMetricCard label="즉시 검토 필요" value={summary.requested} tone="text-[#17324d]" />
+                  <OpsMetricCard label="재시도 필요" value={summary.retryable} tone="text-[#C2410C]" />
                   <OpsMetricCard label="환불 완료" value={summary.done} tone="text-[#0B7A3E]" />
-                  <OpsMetricCard label="거절/실패" value={summary.failed} tone="text-[#B3261E]" />
                 </div>
-                <div className="mt-4 rounded-[24px] border border-[#e3eaf2] bg-white/85 p-4">
+              </div>
+
+              <div>
+                <div className="inline-flex rounded-full border border-[#dbe4ef] bg-white px-3 py-1 text-[11px] font-semibold text-[#17324d]">
+                  결제 흐름
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <OpsMetricCard label="승인 완료" value={orderSummary.done} tone="text-[#0B7A3E]" />
+                  <OpsMetricCard label="대기·재시도" value={orderSummary.ready} tone="text-[#17324d]" />
+                  <OpsMetricCard label="실패·거절" value={summary.failed + orderSummary.failed} tone="text-[#B3261E]" />
+                  <OpsMetricCard label="결제 시도액" value={formatKrw(orderSummary.totalAmount)} tone="text-ios-text" />
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-[24px] border border-[#e3eaf2] bg-white/88 p-4">
+              <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+                <div>
                   <div className="text-[12px] font-semibold text-[#17324d]">상태 필터</div>
                   <div className="mt-3 flex flex-wrap gap-1.5">
                     {FILTER_ROWS.map((row) => (
@@ -309,319 +462,362 @@ export function SettingsAdminRefundsPage() {
                     ))}
                   </div>
                 </div>
-              </div>
 
-              <div className="rounded-[24px] border border-[#e3eaf2] bg-white/88 p-4">
-                <div className="text-[12px] font-semibold text-[#17324d]">운영 도구</div>
-                <div className="mt-2 text-[12px] leading-6 text-ios-sub">
-                  특정 사용자 기준으로 요청과 결제 로그를 함께 좁혀 보고, 재시도 배치를 바로 실행할 수 있습니다.
-                </div>
-                <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-                  <input
-                    value={userIdFilter}
-                    onChange={(e) => setUserIdFilter(e.target.value)}
-                    placeholder="userId 필터 (선택)"
-                    className="h-11 w-full rounded-2xl border border-ios-sep bg-white px-4 text-[13px] text-ios-text outline-none placeholder:text-ios-muted focus:border-[color:var(--rnest-accent-border)]"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => void loadRequests()}
-                    className="rnest-btn-secondary inline-flex h-11 items-center justify-center px-4 text-[13px]"
-                  >
-                    새로고침
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void runRetryBatch()}
-                    disabled={batchLoading || isActionBusy}
-                    className="rnest-btn-primary inline-flex h-11 items-center justify-center px-4 text-[13px] disabled:opacity-50"
-                  >
-                    {batchLoading ? "재시도 실행 중..." : "재시도 큐 실행"}
-                  </button>
-                </div>
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  <OpsMetricCard label="결제 승인" value={orderSummary.done} tone="text-[#0B7A3E]" />
-                  <OpsMetricCard label="재시도 필요/대기" value={orderSummary.ready} tone="text-[#17324d]" />
-                </div>
-                {loading ? <div className="mt-3 text-[12px] text-ios-muted">불러오는 중...</div> : null}
-                {currentActionLabel ? <div className="mt-3 text-[12px] text-ios-muted">{currentActionLabel}</div> : null}
-                {error ? <div className="mt-3 text-[12px] text-red-600">{error}</div> : null}
-                {notice ? <div className="mt-3 text-[12px] text-[#0B7A3E]">{notice}</div> : null}
-              </div>
-            </div>
-          </section>
-
-          <div className="mt-4 grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
-          <section className="rnest-surface p-5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <div className="text-[15px] font-bold text-ios-text">환불 요청</div>
-                <div className="mt-1 text-[12px] text-ios-sub">상태 전환과 실행 버튼을 한 카드 안에서 처리합니다.</div>
-              </div>
-              <div className="rounded-full border border-[#d7dfeb] bg-[#f4f7fb] px-3 py-1 text-[11px] font-semibold text-[#11294b]">
-                {requests.length}건
-              </div>
-            </div>
-            <div className="mt-4 space-y-2.5">
-            {requests.length === 0 ? (
-              <div className="rounded-2xl border border-ios-sep bg-white px-4 py-4 text-[13px] text-ios-sub">
-                조건에 맞는 환불 요청이 없습니다.
-              </div>
-            ) : null}
-
-            {requests.map((request) => {
-              const isSelected = selectedId === request.id;
-              const canReview = boolState(request.status, ["REQUESTED", "FAILED_RETRYABLE"]);
-              const canApprove = boolState(request.status, ["REQUESTED", "UNDER_REVIEW", "FAILED_RETRYABLE"]);
-              const canReject = boolState(request.status, ["REQUESTED", "UNDER_REVIEW", "APPROVED", "FAILED_RETRYABLE"]);
-              const canExecute = boolState(request.status, ["APPROVED", "FAILED_RETRYABLE", "EXECUTING"]);
-
-              return (
-                <div key={request.id} className="rounded-[24px] border border-ios-sep bg-white/90 p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <div className="text-[15px] font-bold text-ios-text">#{request.id} · {request.orderId}</div>
-                      <div className="mt-0.5 text-[12px] text-ios-sub">
-                        user: {request.userId} · {formatDateTimeLabel(request.requestedAt)}
-                      </div>
-                    </div>
-                    <div className={`text-[12px] font-semibold ${refundStatusTone(request.status)}`}>
-                      {refundStatusLabel(request.status)}
-                    </div>
-                  </div>
-
-                  <div className="mt-3 rounded-[20px] border border-[#e8edf4] bg-[#f8fafc] px-4 py-3">
-                    <div className="text-[11px] font-semibold text-[#60768d]">환불 사유</div>
-                    <div className="mt-1 text-[13px] text-ios-text">{request.reason}</div>
-                    <div className="mt-2 text-[12px] text-ios-sub">
-                      환불 요청 금액: {formatKrw(request.cancelAmount ?? 0)} ({request.currency})
-                    </div>
-                    {request.errorCode || request.errorMessage ? (
-                      <div className="mt-1 text-[11.5px] text-[#B3261E]">
-                        {request.errorCode ?? "error"} {request.errorMessage ? `· ${request.errorMessage}` : ""}
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap gap-1.5">
+                <div>
+                  <div className="text-[12px] font-semibold text-[#17324d]">운영 도구</div>
+                  <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                    <input
+                      value={userIdFilter}
+                      onChange={(e) => setUserIdFilter(e.target.value)}
+                      placeholder="userId 필터 (선택)"
+                      className="h-11 w-full rounded-2xl border border-ios-sep bg-white px-4 text-[13px] text-ios-text outline-none placeholder:text-ios-muted focus:border-[color:var(--rnest-accent-border)]"
+                    />
                     <button
                       type="button"
-                      onClick={() => void openDetail(request.id)}
-                      className="rnest-btn-secondary inline-flex h-9 items-center justify-center px-3 text-[12px]"
+                      onClick={() => void loadRequests()}
+                      className="rnest-btn-secondary inline-flex h-11 items-center justify-center px-4 text-[13px]"
                     >
-                      {isSelected ? "상세 닫기" : "상세 보기"}
+                      새로고침
                     </button>
-                    {canReview ? (
-                      <button
-                        type="button"
-                        disabled={actionLoadingKey !== null}
-                        onClick={() => {
-                          const note = window.prompt("검토 메모(선택)", "");
-                          void runAction(
-                            `review:${request.id}`,
-                            request.id,
-                            () => markAdminRefundReview(request.id, note),
-                            `요청 #${request.id}를 검토중으로 전환했습니다.`
-                          );
-                        }}
-                        className="rnest-btn-secondary inline-flex h-9 items-center justify-center px-3 text-[12px] disabled:opacity-40"
-                      >
-                        검토 시작
-                      </button>
-                    ) : null}
-                    {canApprove ? (
-                      <button
-                        type="button"
-                        disabled={actionLoadingKey !== null}
-                        onClick={() => {
-                          const confirmed = window.confirm(`요청 #${request.id}를 승인할까요?`);
-                          if (!confirmed) return;
-                          const note = window.prompt("승인 메모(선택)", "");
-                          void runAction(
-                            `approve:${request.id}`,
-                            request.id,
-                            () => approveAdminRefund(request.id, note),
-                            `요청 #${request.id}를 승인했습니다.`
-                          );
-                        }}
-                        className="inline-flex h-9 items-center justify-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-3 text-[12px] font-semibold text-[color:var(--rnest-accent)] transition hover:brightness-[0.98] disabled:opacity-40"
-                      >
-                        승인
-                      </button>
-                    ) : null}
-                    {canReject ? (
-                      <button
-                        type="button"
-                        disabled={actionLoadingKey !== null}
-                        onClick={() => {
-                          const reason = window.prompt("거절 사유(필수)", "");
-                          if (reason == null) return;
-                          if (!reason.trim()) {
-                            setError("거절 사유를 입력해 주세요.");
-                            return;
-                          }
-                          const note = window.prompt("내부 메모(선택)", "");
-                          void runAction(
-                            `reject:${request.id}`,
-                            request.id,
-                            () =>
-                              rejectAdminRefund({
-                                refundId: request.id,
-                                reason,
-                                note,
-                              }),
-                            `요청 #${request.id}를 거절했습니다.`
-                          );
-                        }}
-                        className="inline-flex h-9 items-center justify-center rounded-full border border-[#B3261E33] bg-[#B3261E12] px-3 text-[12px] font-semibold text-[#B3261E] transition hover:bg-[#B3261E1A] disabled:opacity-40"
-                      >
-                        거절
-                      </button>
-                    ) : null}
-                    {canExecute ? (
-                      <button
-                        type="button"
-                        disabled={isActionBusy}
-                        onClick={() => {
-                          const confirmed = window.confirm(
-                            `요청 #${request.id} 환불을 실제 실행할까요?\n토스 취소 API를 호출하고, 성공 시 플랜을 Free로 전환합니다.`
-                          );
-                          if (!confirmed) return;
-                          const note = window.prompt("실행 메모(선택)", "관리자 수동 환불 실행");
-                          void runAction(
-                            `execute:${request.id}`,
-                            request.id,
-                            () =>
-                              executeAdminRefund({
-                                refundId: request.id,
-                                note,
-                                cancelAmount: request.cancelAmount ?? undefined,
-                              }),
-                            `요청 #${request.id} 환불 실행이 완료되었습니다.`
-                          );
-                        }}
-                        className="rnest-btn-primary inline-flex h-9 items-center justify-center px-3 text-[12px] disabled:opacity-40"
-                      >
-                        환불 실행
-                      </button>
-                    ) : null}
-                    {canApprove && canExecute ? (
-                      <button
-                        type="button"
-                        disabled={isActionBusy}
-                        onClick={() => {
-                          const confirmed = window.confirm(
-                            `요청 #${request.id}를 승인 후 즉시 실행할까요?\n(승인 -> 토스 취소 호출 순서로 진행됩니다.)`
-                          );
-                          if (!confirmed) return;
-                          const approveNote = window.prompt("승인 메모(선택)", "");
-                          const executeNote = window.prompt("실행 메모(선택)", "관리자 즉시 환불 실행");
-                          void runAction(
-                            `approve_execute:${request.id}`,
-                            request.id,
-                            async () => {
-                              await approveAdminRefund(request.id, approveNote);
-                              await executeAdminRefund({
-                                refundId: request.id,
-                                note: executeNote,
-                                cancelAmount: request.cancelAmount ?? undefined,
-                              });
-                            },
-                            `요청 #${request.id} 승인 및 환불 실행이 완료되었습니다.`
-                          );
-                        }}
-                        className="inline-flex h-9 items-center justify-center rounded-full border border-ios-sep bg-white px-3 text-[12px] font-semibold text-ios-text transition hover:border-[color:var(--rnest-accent-border)] disabled:opacity-40"
-                      >
-                        승인+즉시실행
-                      </button>
-                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => void runRetryBatch()}
+                      disabled={batchLoading || isActionBusy}
+                      className="rnest-btn-primary inline-flex h-11 items-center justify-center px-4 text-[13px] disabled:opacity-50"
+                    >
+                      {batchLoading ? "재시도 실행 중..." : "재시도 큐 실행"}
+                    </button>
                   </div>
-
-                  {isSelected ? (
-                    <div className="rnest-sub-surface mt-3 px-3 py-3">
-                      {detailLoadingId === request.id ? (
-                        <div className="text-[12px] text-ios-muted">상세를 불러오는 중...</div>
-                      ) : (
-                        <>
-                          <div className="text-[12px] font-semibold text-ios-sub">상세 상태</div>
-                          <div className="mt-1 grid gap-1 text-[12px] text-ios-sub">
-                            <div>reviewedBy: {request.reviewedBy ?? "-"}</div>
-                            <div>reviewedAt: {formatDateTimeLabel(request.reviewedAt)}</div>
-                            <div>executedBy: {request.executedBy ?? "-"}</div>
-                            <div>executedAt: {formatDateTimeLabel(request.executedAt)}</div>
-                            <div>retryCount: {request.retryCount}</div>
-                            <div>nextRetryAt: {formatDateTimeLabel(request.nextRetryAt)}</div>
-                            <div>transactionKey: {request.tossCancelTransactionKey ?? "-"}</div>
-                          </div>
-
-                          <div className="mt-3 border-t border-ios-sep pt-2">
-                            <div className="text-[12px] font-semibold text-ios-sub">이벤트 로그</div>
-                            <div className="mt-1 space-y-1.5">
-                              {(details[request.id]?.events ?? []).length === 0 ? (
-                                <div className="text-[12px] text-ios-muted">이벤트가 아직 없습니다.</div>
-                              ) : (
-                                (details[request.id]?.events ?? []).map((event) => (
-                                  <div key={event.id} className="rounded-xl border border-ios-sep bg-white/85 px-2.5 py-2">
-                                    <div className="flex items-center justify-between gap-2">
-                                      <div className="text-[12px] font-semibold text-ios-text">{eventTitle(event.eventType)}</div>
-                                      <div className="text-[11px] text-ios-muted">{formatDateTimeLabel(event.createdAt)}</div>
-                                    </div>
-                                    <div className="mt-0.5 text-[11.5px] text-ios-sub">
-                                      {event.fromStatus ?? "-"} → {event.toStatus ?? "-"} · {event.actorRole}
-                                    </div>
-                                    {event.message ? <div className="mt-0.5 text-[11.5px] text-ios-sub">{event.message}</div> : null}
-                                  </div>
-                                ))
-                              )}
-                            </div>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  ) : null}
                 </div>
-              );
-            })}
+              </div>
+
+              {loading ? <div className="mt-3 text-[12px] text-ios-muted">데이터를 불러오는 중...</div> : null}
+              {currentActionLabel ? <div className="mt-3 text-[12px] text-ios-muted">{currentActionLabel}</div> : null}
+              {error ? <div className="mt-3 text-[12px] text-red-600">{error}</div> : null}
+              {notice ? <div className="mt-3 text-[12px] text-[#0B7A3E]">{notice}</div> : null}
             </div>
           </section>
 
-          <section className="rnest-surface p-5">
+          <div className="mt-4 grid gap-4 xl:grid-cols-[0.92fr_1.08fr]">
+            <section className="rnest-surface p-5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-[15px] font-bold text-ios-text">환불 요청 큐</div>
+                  <div className="mt-1 text-[12px] text-ios-sub">먼저 처리할 요청을 선택하면 오른쪽 패널에서 바로 처리할 수 있습니다.</div>
+                </div>
+                <div className="rounded-full border border-[#d7dfeb] bg-[#f4f7fb] px-3 py-1 text-[11px] font-semibold text-[#11294b]">
+                  {requests.length}건
+                </div>
+              </div>
+
+              <div className="mt-4 max-h-[780px] space-y-2.5 overflow-auto pr-1">
+                {requests.length === 0 ? (
+                  <div className="rounded-2xl border border-ios-sep bg-white px-4 py-4 text-[13px] text-ios-sub">
+                    조건에 맞는 환불 요청이 없습니다.
+                  </div>
+                ) : null}
+
+                {requests.map((request) => {
+                  const isSelected = selectedId === request.id;
+                  return (
+                    <button
+                      key={request.id}
+                      type="button"
+                      onClick={() => selectRequest(request.id)}
+                      className={`w-full rounded-[24px] border px-4 py-4 text-left transition ${
+                        isSelected
+                          ? "border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] shadow-[0_14px_36px_rgba(17,41,75,0.08)]"
+                          : "border-ios-sep bg-white/90 hover:border-[#cfd9e7]"
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-[14px] font-bold text-ios-text">
+                            #{request.id} · {request.orderId}
+                          </div>
+                          <div className="mt-1 text-[11.5px] text-ios-sub">
+                            {request.userId} · {formatDateTimeLabel(request.requestedAt)}
+                          </div>
+                        </div>
+                        <div className={`text-[12px] font-semibold ${refundStatusTone(request.status)}`}>
+                          {refundStatusLabel(request.status)}
+                        </div>
+                      </div>
+
+                      <div className="mt-3 rounded-[18px] border border-white/70 bg-white/70 px-3 py-3">
+                        <div className="text-[12.5px] leading-5 text-ios-text">{request.reason}</div>
+                        <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-semibold text-[#556a83]">
+                          <span>{formatKrw(request.cancelAmount ?? 0)}</span>
+                          <span>{request.currency}</span>
+                          <span>재시도 {request.retryCount}회</span>
+                        </div>
+                      </div>
+
+                      {request.errorCode || request.errorMessage ? (
+                        <div className="mt-2 text-[11px] text-[#B3261E]">
+                          {request.errorCode ?? "error"} {request.errorMessage ? `· ${request.errorMessage}` : ""}
+                        </div>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section className="rnest-surface p-5 xl:sticky xl:top-4 xl:self-start">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-[15px] font-bold text-ios-text">선택 요청 상세</div>
+                  <div className="mt-1 text-[12px] text-ios-sub">선택한 요청의 판단 정보, 결제 맥락, 실행 버튼을 한 패널에 모았습니다.</div>
+                </div>
+                {selectedRequest ? (
+                  <button
+                    type="button"
+                    onClick={() => void loadDetail(selectedRequest.id, false)}
+                    className="rnest-btn-secondary inline-flex h-9 items-center justify-center px-3 text-[12px]"
+                  >
+                    상세 새로고침
+                  </button>
+                ) : null}
+              </div>
+
+              {!selectedRequest ? (
+                <div className="mt-4 rounded-[24px] border border-ios-sep bg-white px-4 py-5 text-[13px] text-ios-sub">
+                  왼쪽 요청 큐에서 하나를 선택하면 상세와 처리 버튼이 이곳에 표시됩니다.
+                </div>
+              ) : (
+                <div className="mt-4 space-y-4">
+                  <div className="rounded-[24px] border border-ios-sep bg-white/90 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <div className="text-[18px] font-bold tracking-[-0.02em] text-ios-text">
+                          #{selectedRequest.id} · {selectedRequest.orderId}
+                        </div>
+                        <div className="mt-1 text-[12px] text-ios-sub">
+                          {selectedRequest.userId} · {formatDateTimeLabel(selectedRequest.requestedAt)}
+                        </div>
+                      </div>
+                      <div className={`text-[12px] font-semibold ${refundStatusTone(selectedRequest.status)}`}>
+                        {refundStatusLabel(selectedRequest.status)}
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-[18px] border border-[#e8edf4] bg-[#f8fafc] px-3 py-3">
+                        <div className="text-[11px] font-semibold text-[#60768d]">환불 요청 금액</div>
+                        <div className="mt-1 text-[15px] font-bold text-ios-text">
+                          {formatKrw(selectedRequest.cancelAmount ?? 0)} ({selectedRequest.currency})
+                        </div>
+                      </div>
+                      <div className="rounded-[18px] border border-[#e8edf4] bg-[#f8fafc] px-3 py-3">
+                        <div className="text-[11px] font-semibold text-[#60768d]">상태 추적</div>
+                        <div className="mt-1 text-[12px] text-ios-sub">
+                          재시도 {selectedRequest.retryCount}회 · 다음 시도 {formatDateTimeLabel(selectedRequest.nextRetryAt)}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 rounded-[20px] border border-[#e8edf4] bg-[#f8fafc] px-4 py-3">
+                      <div className="text-[11px] font-semibold text-[#60768d]">환불 사유</div>
+                      <div className="mt-1 text-[13px] leading-6 text-ios-text">{selectedRequest.reason}</div>
+                      {selectedRequest.errorCode || selectedRequest.errorMessage ? (
+                        <div className="mt-2 text-[11.5px] text-[#B3261E]">
+                          {selectedRequest.errorCode ?? "error"} {selectedRequest.errorMessage ? `· ${selectedRequest.errorMessage}` : ""}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="rounded-[24px] border border-ios-sep bg-white/90 p-4">
+                    <div className="text-[13px] font-semibold text-ios-text">처리 판단 정보</div>
+                    <div className="mt-3 grid gap-2 text-[12px] text-ios-sub sm:grid-cols-2">
+                      <div>reviewedBy: {selectedRequest.reviewedBy ?? "-"}</div>
+                      <div>reviewedAt: {formatDateTimeLabel(selectedRequest.reviewedAt)}</div>
+                      <div>executedBy: {selectedRequest.executedBy ?? "-"}</div>
+                      <div>executedAt: {formatDateTimeLabel(selectedRequest.executedAt)}</div>
+                      <div>transactionKey: {selectedRequest.tossCancelTransactionKey ?? "-"}</div>
+                      <div>notifyUserSentAt: {formatDateTimeLabel(selectedRequest.notifyUserSentAt)}</div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-[24px] border border-ios-sep bg-white/90 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-[13px] font-semibold text-ios-text">결제 맥락</div>
+                      {relatedOrder ? (
+                        <div
+                          className={`text-[12px] font-semibold ${
+                            relatedOrder.status === "DONE"
+                              ? "text-[#0B7A3E]"
+                              : relatedOrder.status === "FAILED"
+                                ? "text-[#B3261E]"
+                                : relatedOrder.status === "CANCELED"
+                                  ? "text-[#C2410C]"
+                                  : "text-[color:var(--rnest-accent)]"
+                          }`}
+                        >
+                          {relatedOrder.status}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {relatedOrder ? (
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-[18px] border border-[#e8edf4] bg-[#f8fafc] px-3 py-3">
+                          <div className="text-[11px] font-semibold text-[#60768d]">주문 정보</div>
+                          <div className="mt-1 text-[12.5px] text-ios-text">
+                            {relatedOrder.orderId} · {relatedOrder.orderKind === "credit_pack" ? "추가 크레딧" : "구독"}
+                          </div>
+                          <div className="mt-1 text-[11.5px] text-ios-sub">{relatedOrder.orderName}</div>
+                        </div>
+                        <div className="rounded-[18px] border border-[#e8edf4] bg-[#f8fafc] px-3 py-3">
+                          <div className="text-[11px] font-semibold text-[#60768d]">결제 금액</div>
+                          <div className="mt-1 text-[12.5px] font-semibold text-ios-text">
+                            {formatKrw(relatedOrder.amount)} ({relatedOrder.currency})
+                          </div>
+                          <div className="mt-1 text-[11.5px] text-ios-sub">
+                            승인 {formatDateTimeLabel(relatedOrder.approvedAt)}
+                          </div>
+                        </div>
+                        {relatedOrder.failCode || relatedOrder.failMessage ? (
+                          <div className="sm:col-span-2 text-[11.5px] text-[#B3261E]">
+                            {relatedOrder.failCode ?? "error"} {relatedOrder.failMessage ? `· ${relatedOrder.failMessage}` : ""}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="mt-3 rounded-[18px] border border-[#e8edf4] bg-[#f8fafc] px-3 py-3 text-[12px] text-ios-sub">
+                        연결된 결제 로그를 찾지 못했습니다.
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-[24px] border border-ios-sep bg-white/90 p-4">
+                    <div className="text-[13px] font-semibold text-ios-text">빠른 처리</div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {canReview ? (
+                        <button
+                          type="button"
+                          disabled={isActionBusy}
+                          onClick={startReview}
+                          className="rnest-btn-secondary inline-flex h-10 items-center justify-center px-4 text-[12px] disabled:opacity-40"
+                        >
+                          검토 시작
+                        </button>
+                      ) : null}
+                      {canApprove ? (
+                        <button
+                          type="button"
+                          disabled={isActionBusy}
+                          onClick={approveSelected}
+                          className="inline-flex h-10 items-center justify-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-4 text-[12px] font-semibold text-[color:var(--rnest-accent)] transition hover:brightness-[0.98] disabled:opacity-40"
+                        >
+                          승인
+                        </button>
+                      ) : null}
+                      {canReject ? (
+                        <button
+                          type="button"
+                          disabled={isActionBusy}
+                          onClick={rejectSelected}
+                          className="inline-flex h-10 items-center justify-center rounded-full border border-[#B3261E33] bg-[#B3261E12] px-4 text-[12px] font-semibold text-[#B3261E] transition hover:bg-[#B3261E1A] disabled:opacity-40"
+                        >
+                          거절
+                        </button>
+                      ) : null}
+                      {canExecute ? (
+                        <button
+                          type="button"
+                          disabled={isActionBusy}
+                          onClick={executeSelected}
+                          className="rnest-btn-primary inline-flex h-10 items-center justify-center px-4 text-[12px] disabled:opacity-40"
+                        >
+                          환불 실행
+                        </button>
+                      ) : null}
+                      {canApprove && canExecute ? (
+                        <button
+                          type="button"
+                          disabled={isActionBusy}
+                          onClick={approveAndExecuteSelected}
+                          className="inline-flex h-10 items-center justify-center rounded-full border border-ios-sep bg-white px-4 text-[12px] font-semibold text-ios-text transition hover:border-[color:var(--rnest-accent-border)] disabled:opacity-40"
+                        >
+                          승인+즉시실행
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="rounded-[24px] border border-ios-sep bg-white/90 p-4">
+                    <div className="text-[13px] font-semibold text-ios-text">이벤트 로그</div>
+                    {detailLoadingId === selectedRequest.id && !selectedDetail ? (
+                      <div className="mt-3 text-[12px] text-ios-muted">상세를 불러오는 중...</div>
+                    ) : (
+                      <div className="mt-3 max-h-[320px] space-y-2 overflow-auto pr-1">
+                        {(selectedDetail?.events ?? []).length === 0 ? (
+                          <div className="rounded-[18px] border border-[#e8edf4] bg-[#f8fafc] px-3 py-3 text-[12px] text-ios-sub">
+                            이벤트가 아직 없습니다.
+                          </div>
+                        ) : (
+                          (selectedDetail?.events ?? []).map((event) => (
+                            <div key={event.id} className="rounded-[18px] border border-[#e8edf4] bg-[#f8fafc] px-3 py-3">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div className="text-[12px] font-semibold text-ios-text">{eventTitle(event.eventType)}</div>
+                                <div className="text-[11px] text-ios-muted">{formatDateTimeLabel(event.createdAt)}</div>
+                              </div>
+                              <div className="mt-1 text-[11.5px] text-ios-sub">
+                                {event.fromStatus ?? "-"} → {event.toStatus ?? "-"} · {event.actorRole}
+                              </div>
+                              {event.message ? <div className="mt-1 text-[11.5px] text-ios-sub">{event.message}</div> : null}
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </section>
+          </div>
+
+          <section className="rnest-surface mt-4 p-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-[15px] font-bold text-ios-text">Toss 결제 로그</div>
-              <div className="text-[12px] text-ios-sub">최근 {orderSummary.total}건</div>
-            </div>
-            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <div className="rnest-sub-surface p-3">
-                <div className="text-[11px] text-ios-sub">승인 완료</div>
-                <div className="mt-1 text-[18px] font-extrabold text-[#0B7A3E]">{orderSummary.done}</div>
+              <div>
+                <div className="text-[15px] font-bold text-ios-text">최근 결제 로그</div>
+                <div className="mt-1 text-[12px] text-ios-sub">결제 흐름은 짧은 행 단위로 요약하고, 상단 상세 패널은 환불 요청 처리에 집중합니다.</div>
               </div>
-              <div className="rnest-sub-surface p-3">
-                <div className="text-[11px] text-ios-sub">실패</div>
-                <div className="mt-1 text-[18px] font-extrabold text-[#B3261E]">{orderSummary.failed}</div>
+              <div className="rounded-full border border-[#d7dfeb] bg-[#f4f7fb] px-3 py-1 text-[11px] font-semibold text-[#11294b]">
+                최근 {orderSummary.total}건
               </div>
-              <div className="rnest-sub-surface p-3">
-                <div className="text-[11px] text-ios-sub">취소/환불</div>
-                <div className="mt-1 text-[18px] font-extrabold text-[#C2410C]">{orderSummary.canceled}</div>
-              </div>
-              <div className="rnest-sub-surface p-3">
-                <div className="text-[11px] text-ios-sub">결제 시도액 합계</div>
-                <div className="mt-1 text-[15px] font-extrabold text-ios-text">{formatKrw(orderSummary.totalAmount)}</div>
-              </div>
-            </div>
-            <div className="mt-2 text-[12px] text-ios-sub">
-              구독 {orderSummary.kindCounter.subscription}건 · 크레딧팩 {orderSummary.kindCounter.credit_pack}건 · 대기중{" "}
-              {orderSummary.ready}건
             </div>
 
-            <div className="mt-3 space-y-1.5">
-              {orders.length === 0 ? (
-                <div className="text-[12px] text-ios-muted">조건에 맞는 결제 로그가 없습니다.</div>
+            <div className="mt-4 grid gap-3 md:grid-cols-4">
+              <OpsMetricCard label="승인 완료" value={orderSummary.done} tone="text-[#0B7A3E]" />
+              <OpsMetricCard label="대기" value={orderSummary.ready} tone="text-[#17324d]" />
+              <OpsMetricCard label="취소/환불" value={orderSummary.canceled} tone="text-[#C2410C]" />
+              <OpsMetricCard label="실패" value={orderSummary.failed} tone="text-[#B3261E]" />
+            </div>
+
+            <div className="mt-3 text-[12px] text-ios-sub">
+              구독 {orderSummary.kindCounter.subscription}건 · 크레딧팩 {orderSummary.kindCounter.credit_pack}건 · 결제 시도액{" "}
+              {formatKrw(orderSummary.totalAmount)}
+            </div>
+
+            <div className="mt-4 max-h-[420px] space-y-2 overflow-auto pr-1">
+              {visibleOrders.length === 0 ? (
+                <div className="rounded-2xl border border-ios-sep bg-white px-4 py-4 text-[13px] text-ios-sub">
+                  조건에 맞는 결제 로그가 없습니다.
+                </div>
               ) : (
-                orders.map((order) => (
-                  <div key={order.orderId} className="rounded-xl border border-ios-sep bg-white/85 px-3 py-2.5">
+                visibleOrders.map((order) => (
+                  <div key={order.orderId} className="rounded-[20px] border border-ios-sep bg-white/90 px-4 py-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="text-[13px] font-semibold text-ios-text">
-                        {order.orderId} · {order.orderKind === "credit_pack" ? "추가 크레딧" : "구독"}
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[13px] font-semibold text-ios-text">
+                          {order.orderId} · {order.orderKind === "credit_pack" ? "추가 크레딧" : "구독"}
+                        </div>
+                        <div className="mt-1 text-[11.5px] text-ios-sub">
+                          {order.userId ?? "-"} · {order.orderName}
+                        </div>
                       </div>
                       <div
                         className={`text-[12px] font-semibold ${
@@ -637,14 +833,13 @@ export function SettingsAdminRefundsPage() {
                         {order.status}
                       </div>
                     </div>
-                    <div className="mt-0.5 text-[12px] text-ios-sub">
-                      user: {order.userId ?? "-"} · {formatKrw(order.amount)} ({order.currency}) · {order.orderName}
-                    </div>
-                    <div className="mt-0.5 text-[11.5px] text-ios-muted">
-                      created: {formatDateTimeLabel(order.createdAt)} · approved: {formatDateTimeLabel(order.approvedAt)}
+                    <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11.5px] text-ios-sub">
+                      <span>{formatKrw(order.amount)} ({order.currency})</span>
+                      <span>생성 {formatDateTimeLabel(order.createdAt)}</span>
+                      <span>승인 {formatDateTimeLabel(order.approvedAt)}</span>
                     </div>
                     {order.failCode || order.failMessage ? (
-                      <div className="mt-0.5 text-[11.5px] text-[#B3261E]">
+                      <div className="mt-1 text-[11px] text-[#B3261E]">
                         {order.failCode ?? "error"} {order.failMessage ? `· ${order.failMessage}` : ""}
                       </div>
                     ) : null}
@@ -653,7 +848,6 @@ export function SettingsAdminRefundsPage() {
               )}
             </div>
           </section>
-          </div>
         </>
       ) : null}
     </div>
