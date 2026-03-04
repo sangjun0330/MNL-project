@@ -131,6 +131,15 @@ function buildOrderFlowDescription(order: ShopOrderSummary) {
   return translate("결제 대기");
 }
 
+function resolveTrackingErrorMessage(code: string | null) {
+  const normalized = String(code ?? "").trim();
+  if (!normalized) return null;
+  if (normalized === "missing_config") return translate("배송 조회 연동 설정이 아직 완료되지 않았습니다.");
+  if (normalized === "invalid_input") return translate("택배사 또는 운송장 정보가 아직 정확하지 않습니다.");
+  if (normalized === "not_found") return translate("택배사 조회 결과가 아직 없습니다. 잠시 후 다시 확인해 주세요.");
+  return translate("택배사 정보를 다시 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+}
+
 export function ShopOrdersPage() {
   const { t } = useI18n();
   const searchParams = useSearchParams();
@@ -257,7 +266,7 @@ export function ShopOrdersPage() {
             trackingUrl: json.data.trackingUrl ?? null,
             delivered: Boolean(json.data.delivered),
             cached: Boolean(json.data.cached),
-            error: json.data.error ? t("택배사 정보를 다시 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.") : null,
+            error: resolveTrackingErrorMessage(json.data.error ?? null),
           },
         }));
         if (json.data.delivered) {

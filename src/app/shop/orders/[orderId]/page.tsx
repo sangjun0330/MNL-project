@@ -1,5 +1,5 @@
 import { AppShell } from "@/components/shell/AppShell";
-import { ShopOrderDetailPage } from "@/components/pages/ShopOrderDetailPage";
+import { ShopOrderDetailMount } from "@/components/shop/ShopOrderDetailMount";
 
 type Props = { params: Promise<{ orderId: string }> };
 
@@ -7,7 +7,7 @@ export default async function Page({ params }: Props) {
   const { orderId } = await params;
   return (
     <AppShell>
-      <ShopOrderDetailPage orderId={orderId} />
+      <ShopOrderDetailMount orderId={orderId} />
     </AppShell>
   );
 }

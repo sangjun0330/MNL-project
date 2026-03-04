@@ -1485,6 +1485,8 @@ const SHOP_EN_EXTRA: Record<string, string> = {
   "배송 시작": "Shipment started",
   "배송완료": "Delivered",
   "배송 조회중": "Tracking in progress",
+  "배송 조회 준비중": "Tracking setup in progress",
+  "연동 정보 확인 필요": "Tracking details need attention",
   "조회 불가": "Unavailable",
   "실시간 배송 확인": "Live shipment status",
   "택배사 상태를 확인하는 중입니다.": "Checking the carrier status.",
@@ -1495,6 +1497,12 @@ const SHOP_EN_EXTRA: Record<string, string> = {
   "택배사 배송 조회 열기": "Open carrier tracking",
   "택배사 정보를 다시 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.":
     "Couldn't refresh the carrier tracking. Please try again shortly.",
+  "배송 조회 연동 설정이 아직 완료되지 않았습니다.":
+    "Tracking integration is not fully configured yet.",
+  "택배사 또는 운송장 정보가 아직 정확하지 않습니다.":
+    "The carrier or tracking number is not accurate yet.",
+  "택배사 조회 결과가 아직 없습니다. 잠시 후 다시 확인해 주세요.":
+    "The carrier has no result yet. Please check again shortly.",
   "품절된 상품은 주문할 수 없습니다.": "Sold-out items cannot be ordered.",
   "확정일시": "Confirmed at",
   "환불 상태": "Refund status",

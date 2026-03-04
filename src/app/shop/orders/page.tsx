@@ -1,10 +1,10 @@
 import { AppShell } from "@/components/shell/AppShell";
-import { ShopOrdersPage } from "@/components/pages/ShopOrdersPage";
+import { ShopOrdersMount } from "@/components/shop/ShopOrdersMount";
 
 export default function Page() {
   return (
     <AppShell>
-      <ShopOrdersPage />
+      <ShopOrdersMount />
     </AppShell>
   );
 }
