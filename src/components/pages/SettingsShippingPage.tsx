@@ -377,6 +377,7 @@ export function SettingsShippingPage() {
   const handleRemoveAddress = useCallback(
     async (addressId: string) => {
       if (saving) return;
+      if (!window.confirm("이 배송지를 삭제하시겠습니까?")) return;
       const nextAddresses = addressBook.addresses.filter((item) => item.id !== addressId);
       const nextDefaultAddressId =
         addressBook.defaultAddressId === addressId ? nextAddresses[0]?.id ?? null : addressBook.defaultAddressId;
@@ -398,6 +399,7 @@ export function SettingsShippingPage() {
 
   const handleClearAll = useCallback(async () => {
     if (saving || addressBook.addresses.length === 0) return;
+    if (!window.confirm("저장된 배송지를 모두 초기화하시겠습니까? 이 작업은 되돌릴 수 없습니다.")) return;
     const saved = await persistAddressBook(defaultShopShippingAddressBook(), "저장된 배송지가 초기화되었습니다.");
     if (saved) {
       setDraft(emptyAddressDraft());

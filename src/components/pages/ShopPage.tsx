@@ -110,6 +110,7 @@ export function ShopPage() {
 
   // 위시리스트
   const [wishlist, setWishlist] = useState<string[]>([]);
+  const [wishlistLoadingId, setWishlistLoadingId] = useState<string | null>(null);
 
   // 최근 본 상품
   const [recentIds, setRecentIds] = useState<string[]>([]);
@@ -236,11 +237,13 @@ export function ShopPage() {
   const handleToggleWishlist = async (productId: string, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    if (wishlistLoadingId === productId) return; // 이중 클릭 방지
     if (status !== "authenticated" || !user?.userId) {
       setOrderMessageTone("error");
       setOrderMessage(t("위시리스트는 로그인한 계정에 저장됩니다."));
       return;
     }
+    setWishlistLoadingId(productId);
     try {
       const headers = await authHeaders();
       const next = await toggleWishlist(productId, headers);
@@ -248,6 +251,8 @@ export function ShopPage() {
     } catch {
       setOrderMessageTone("error");
       setOrderMessage(t("위시리스트 저장에 실패했습니다. 잠시 후 다시 시도해 주세요."));
+    } finally {
+      setWishlistLoadingId(null);
     }
   };
 
@@ -386,7 +391,7 @@ export function ShopPage() {
               <Link href={`/shop/${encodeURIComponent(featuredPrimary.product.id)}`} data-auth-allow className="block overflow-hidden rounded-[32px] border border-[#edf1f6] bg-white">
                 <div className="relative bg-[#f3f5f7]">
                   {featuredPrimary.product.imageUrls[0] ? (
-                    <img src={getShopImageSrc(featuredPrimary.product.imageUrls[0])} alt={t(featuredPrimary.product.name)} className="aspect-[1.15/1] w-full object-cover" referrerPolicy="no-referrer" />
+                    <img src={getShopImageSrc(featuredPrimary.product.imageUrls[0])} alt={t(featuredPrimary.product.name)} className="aspect-[1.15/1] w-full object-cover" referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.display = "none"; }} />
                   ) : (
                     <div className={["flex aspect-[1.15/1] items-end px-6 py-6", productToneClass(featuredPrimary.product)].join(" ")}>
                       <div>
@@ -426,7 +431,9 @@ export function ShopPage() {
               <button
                 type="button" data-auth-allow
                 onClick={(e) => handleToggleWishlist(featuredPrimary.product.id, e)}
-                className="absolute right-5 top-5 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/80 shadow backdrop-blur-sm"
+                disabled={wishlistLoadingId === featuredPrimary.product.id}
+                aria-label={wishlist.includes(featuredPrimary.product.id) ? t("찜 해제") : t("찜하기")}
+                className="absolute right-5 top-5 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/80 shadow backdrop-blur-sm disabled:opacity-50"
               >
                 <HeartIcon filled={wishlist.includes(featuredPrimary.product.id)} />
               </button>
@@ -439,7 +446,7 @@ export function ShopPage() {
                     <Link href={`/shop/${encodeURIComponent(entry.product.id)}`} data-auth-allow className="block rounded-[28px] border border-[#edf1f6] bg-white p-3">
                       <div className="relative overflow-hidden rounded-[22px] bg-[#f3f5f7]">
                         {entry.product.imageUrls[0] ? (
-                          <img src={getShopImageSrc(entry.product.imageUrls[0])} alt={t(entry.product.name)} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" />
+                          <img src={getShopImageSrc(entry.product.imageUrls[0])} alt={t(entry.product.name)} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.display = "none"; }} />
                         ) : (
                           <div className={["flex aspect-square items-end px-4 py-4", productToneClass(entry.product)].join(" ")}>
                             <div className="text-[20px] font-bold tracking-[-0.03em]">{t(entry.product.visualLabel)}</div>
@@ -466,7 +473,9 @@ export function ShopPage() {
                     <button
                       type="button" data-auth-allow
                       onClick={(e) => handleToggleWishlist(entry.product.id, e)}
-                      className="absolute right-5 top-5 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/80 shadow backdrop-blur-sm"
+                      disabled={wishlistLoadingId === entry.product.id}
+                      aria-label={wishlist.includes(entry.product.id) ? t("찜 해제") : t("찜하기")}
+                      className="absolute right-5 top-5 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/80 shadow backdrop-blur-sm disabled:opacity-50"
                     >
                       <HeartIcon filled={wishlist.includes(entry.product.id)} />
                     </button>
@@ -524,14 +533,16 @@ export function ShopPage() {
               <button
                 type="button" data-auth-allow
                 onClick={(e) => handleToggleWishlist(entry.product.id, e)}
-                className="absolute right-2 top-2 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/80 shadow backdrop-blur-sm"
+                disabled={wishlistLoadingId === entry.product.id}
+                aria-label={wishlist.includes(entry.product.id) ? t("찜 해제") : t("찜하기")}
+                className="absolute right-2 top-2 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/80 shadow backdrop-blur-sm disabled:opacity-50"
               >
                 <HeartIcon filled={wishlist.includes(entry.product.id)} />
               </button>
               <Link href={`/shop/${encodeURIComponent(entry.product.id)}`} data-auth-allow className="block">
                 <div className="relative overflow-hidden rounded-[2px] bg-[#f3f5f7]">
                   {entry.product.imageUrls[0] ? (
-                    <img src={getShopImageSrc(entry.product.imageUrls[0])} alt={t(entry.product.name)} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" />
+                    <img src={getShopImageSrc(entry.product.imageUrls[0])} alt={t(entry.product.name)} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.display = "none"; }} />
                   ) : (
                     <div className={["flex aspect-square items-center justify-center p-4", productToneClass(entry.product)].join(" ")}>
                       <div className="text-center">
@@ -599,7 +610,7 @@ export function ShopPage() {
                 <Link key={product.id} href={`/shop/${encodeURIComponent(product.id)}`} data-auth-allow className="block shrink-0 w-[120px]">
                   <div className="overflow-hidden rounded-2xl bg-[#f3f5f7]">
                     {product.imageUrls[0] ? (
-                      <img src={getShopImageSrc(product.imageUrls[0])} alt={t(product.name)} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" />
+                      <img src={getShopImageSrc(product.imageUrls[0])} alt={t(product.name)} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.display = "none"; }} />
                     ) : (
                       <div className={["flex aspect-square items-center justify-center", productToneClass(product)].join(" ")}>
                         <div className="text-[16px] font-bold">{t(product.visualLabel).slice(0, 3)}</div>
