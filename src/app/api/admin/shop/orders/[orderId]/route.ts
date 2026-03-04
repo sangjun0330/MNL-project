@@ -41,13 +41,18 @@ export async function PATCH(req: Request, ctx: any) {
       if (!carrierCode) {
         return jsonNoStore({ ok: false, error: "tracking_carrier_code_required" }, { status: 400 });
       }
-      const order = await markShopOrderShipped({
+      const markedOrder = await markShopOrderShipped({
         orderId,
         adminUserId: admin.identity.userId,
         trackingNumber,
         courier,
         carrierCode,
       });
+      const order = await syncShopOrderTracking({
+        orderId,
+        adminUserId: admin.identity.userId,
+        force: true,
+      }).catch(() => markedOrder);
       try {
         const email = await loadUserEmailById(order.userId);
         await sendShippingStartedEmail({

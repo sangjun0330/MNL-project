@@ -237,7 +237,7 @@ function buildTrackingSummary(meta: ShopSmartTrackerMeta | null, input?: { expos
   if (!meta) return null;
   return {
     carrierCode: input?.exposeCarrierCode ? meta.carrierCode : null,
-    trackingUrl: meta.trackingUrl,
+    trackingUrl: null,
     statusLabel: meta.lastStatusLabel,
     lastEventAt: meta.lastEventAt,
     lastPolledAt: meta.lastPolledAt,
@@ -787,13 +787,13 @@ async function applyTrackingResultToOrder(
     if (result.reason === "fetch_failed") {
       return await saveOrderWithSmartTrackerMeta(order, {
         carrierCode: resolvedCarrierCode,
-        trackingUrl: result.trackingUrl ?? meta?.trackingUrl ?? null,
+        trackingUrl: null,
         lastPolledAt: now,
       }).catch(() => order);
     }
     return await saveOrderWithSmartTrackerMeta(order, {
       carrierCode: resolvedCarrierCode,
-      trackingUrl: result.trackingUrl ?? meta?.trackingUrl ?? null,
+      trackingUrl: null,
       lastStatus: "not_found",
       lastStatusLabel: "조회 불가",
       lastPolledAt: now,
@@ -802,7 +802,7 @@ async function applyTrackingResultToOrder(
 
   const nextMeta = mergeSmartTrackerMeta(meta, {
     carrierCode: resolvedCarrierCode,
-    trackingUrl: result.trackingUrl,
+    trackingUrl: null,
     lastStatus: result.rawStatus,
     lastStatusLabel: result.statusLabel,
     lastEventAt: result.lastEventAt,

@@ -1505,6 +1505,10 @@ const SHOP_EN_EXTRA: Record<string, string> = {
     "The carrier or tracking number is not accurate yet.",
   "배송 중 상태 주문만 실시간 조회할 수 있습니다.":
     "Only orders that are currently shipping can be checked live.",
+  "정말 배송확정을 하시겠습니까? 상품을 실제로 받은 경우에만 진행해 주세요.":
+    "Confirm delivery only if the item has actually arrived.",
+  "정말 구매 확정을 진행하시겠습니까? 확정 후에는 되돌릴 수 없습니다.":
+    "Are you sure you want to confirm the purchase? This cannot be undone afterward.",
   "택배사 조회 결과가 아직 없습니다. 잠시 후 다시 확인해 주세요.":
     "The carrier has no result yet. Please check again shortly.",
   "품절된 상품은 주문할 수 없습니다.": "Sold-out items cannot be ordered.",

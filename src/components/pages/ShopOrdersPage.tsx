@@ -416,6 +416,10 @@ export function ShopOrdersPage() {
 
   const confirmDelivery = async (orderId: string) => {
     if (status !== "authenticated") return;
+    if (typeof window !== "undefined") {
+      const confirmed = window.confirm(t("정말 배송확정을 하시겠습니까? 상품을 실제로 받은 경우에만 진행해 주세요."));
+      if (!confirmed) return;
+    }
     setMessage(null);
     setActionLoadingId(orderId);
     try {
@@ -446,6 +450,10 @@ export function ShopOrdersPage() {
 
   const confirmPurchase = async (orderId: string) => {
     if (status !== "authenticated") return;
+    if (typeof window !== "undefined") {
+      const confirmed = window.confirm(t("정말 구매 확정을 진행하시겠습니까? 확정 후에는 되돌릴 수 없습니다."));
+      if (!confirmed) return;
+    }
     setMessage(null);
     setActionLoadingId(orderId);
     try {

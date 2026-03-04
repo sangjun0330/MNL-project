@@ -55,6 +55,7 @@ export async function GET(req: Request) {
     courier: order.courier,
     trackingNumber: order.trackingNumber,
   });
+  const trackingOpenUrl = `/api/shop/tracking/open?orderId=${encodeURIComponent(order.orderId)}`;
   if (!order.trackingNumber || !resolvedCarrierCode) {
     return jsonNoStore({ ok: false, error: "tracking_not_available" }, { status: 400 });
   }
@@ -67,7 +68,7 @@ export async function GET(req: Request) {
     lastEventAt: currentOrder.shipping.smartTracker?.lastEventAt ?? currentOrder.deliveredAt ?? currentOrder.shippedAt ?? null,
     lastPolledAt: currentOrder.shipping.smartTracker?.lastPolledAt ?? null,
     delivered: currentOrder.status === "DELIVERED" || Boolean(currentOrder.deliveredAt),
-    trackingUrl: currentOrder.shipping.smartTracker?.trackingUrl ?? trackingUrl,
+    trackingUrl: trackingUrl ? trackingOpenUrl : null,
     cached,
     error: error ?? null,
   });
@@ -129,7 +130,7 @@ export async function GET(req: Request) {
       lastEventAt: result.lastEventAt,
       lastPolledAt: new Date().toISOString(),
       delivered: result.delivered,
-      trackingUrl: result.trackingUrl,
+      trackingUrl: trackingOpenUrl,
       cached: false,
       error: null,
     },
