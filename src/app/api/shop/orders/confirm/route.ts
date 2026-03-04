@@ -209,6 +209,7 @@ async function handleSingleOrderConfirm(req: Request, input: {
     });
     await removeShopCartItem(paidOrder.userId, paidOrder.productId).catch(() => undefined);
 
+    // BUG-08: 이메일 실패 시 콘솔에 기록 (사용자/운영자 가시성 확보)
     loadUserEmailById(paidOrder.userId)
       .then((email) =>
         sendOrderConfirmationEmail({
@@ -222,7 +223,9 @@ async function handleSingleOrderConfirm(req: Request, input: {
           addressLine2: paidOrder.shipping.addressLine2,
         })
       )
-      .catch(() => undefined);
+      .catch((emailError) => {
+        console.error("[OrderConfirm] 주문확인 이메일 발송 실패 orderId=%s err=%s", paidOrder.orderId, String(emailError?.message ?? emailError));
+      });
 
     return jsonNoStore({
       ok: true,
@@ -282,16 +285,38 @@ async function handleBundleOrderConfirm(req: Request, input: {
   }
 
   try {
+    // BUG-07: 개별 주문 markShopOrderPaid 실패 시 부분 성공 감지 및 로깅
     const paidOrders = [];
+    const failedOrderIds: string[] = [];
+
     for (const item of input.bundle.items) {
-      const paidOrder = await markShopOrderPaid({
-        orderId: item.orderId,
-        paymentKey: input.paymentKey,
-        approvedAt: toss.approvedAt,
-        tossResponse: toss.json,
-      });
-      paidOrders.push(paidOrder);
-      await removeShopCartItem(paidOrder.userId, paidOrder.productId).catch(() => undefined);
+      try {
+        const paidOrder = await markShopOrderPaid({
+          orderId: item.orderId,
+          paymentKey: input.paymentKey,
+          approvedAt: toss.approvedAt,
+          tossResponse: toss.json,
+        });
+        paidOrders.push(paidOrder);
+        await removeShopCartItem(paidOrder.userId, paidOrder.productId).catch(() => undefined);
+      } catch (itemError: any) {
+        failedOrderIds.push(item.orderId);
+        console.error(
+          "[BundleConfirm] bundle_partial_failure bundleId=%s orderId=%s err=%s",
+          input.bundle.bundleId,
+          item.orderId,
+          String(itemError?.message ?? itemError)
+        );
+      }
+    }
+
+    if (failedOrderIds.length > 0) {
+      console.error(
+        "[BundleConfirm] bundle_partial_failure bundleId=%s failedOrders=%s succeededOrders=%s",
+        input.bundle.bundleId,
+        failedOrderIds.join(","),
+        paidOrders.map((o) => o.orderId).join(",")
+      );
     }
 
     const paidBundle =
@@ -307,6 +332,7 @@ async function handleBundleOrderConfirm(req: Request, input: {
         approvedAt: toss.approvedAt ?? new Date().toISOString(),
       };
 
+    // BUG-08: 번들 이메일 실패 시 콘솔에 기록 (사용자/운영자 가시성 확보)
     loadUserEmailById(input.userId)
       .then((email) =>
         sendOrderConfirmationEmail({
@@ -320,7 +346,13 @@ async function handleBundleOrderConfirm(req: Request, input: {
           addressLine2: paidBundle.shipping.addressLine2,
         })
       )
-      .catch(() => undefined);
+      .catch((emailError) => {
+        console.error(
+          "[BundleConfirm] 주문확인 이메일 발송 실패 bundleId=%s err=%s",
+          paidBundle.bundleId,
+          String(emailError?.message ?? emailError)
+        );
+      });
 
     return jsonNoStore({
       ok: true,
@@ -328,6 +360,7 @@ async function handleBundleOrderConfirm(req: Request, input: {
         mode: "bundle",
         bundle: toShopOrderBundleSummary(paidBundle),
         orders: paidOrders.map((order) => toShopOrderSummary(order)),
+        ...(failedOrderIds.length > 0 && { partialFailureOrderIds: failedOrderIds }),
       },
     });
   } catch (error: any) {

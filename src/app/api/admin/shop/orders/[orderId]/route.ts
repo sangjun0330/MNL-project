@@ -1,7 +1,7 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { requireBillingAdmin } from "@/lib/server/billingAdminAuth";
 import { markShopOrderShipped, markShopOrderDelivered, syncShopOrderTracking, toShopAdminOrderSummary } from "@/lib/server/shopOrderStore";
-import { loadUserEmailById, sendShippingStartedEmail } from "@/lib/server/emailService";
+import { loadUserEmailById, sendShippingStartedEmail, sendDeliveryCompletedEmail } from "@/lib/server/emailService";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -48,19 +48,20 @@ export async function PATCH(req: Request, ctx: any) {
         courier,
         carrierCode,
       });
-      // 이메일 발송 (실패해도 계속)
-      try {
-        const email = await loadUserEmailById(order.userId);
-        await sendShippingStartedEmail({
-          customerEmail: email,
-          productName: order.productSnapshot.name,
-          trackingNumber,
-          courier,
-          trackingUrl: order.shipping.smartTracker?.trackingUrl ?? null,
+      // 배송 시작 이메일 (fire-and-forget, 실패 시 콘솔 기록)
+      loadUserEmailById(order.userId)
+        .then((email) =>
+          sendShippingStartedEmail({
+            customerEmail: email,
+            productName: order.productSnapshot.name,
+            trackingNumber,
+            courier,
+            trackingUrl: order.shipping.smartTracker?.trackingUrl ?? null,
+          })
+        )
+        .catch((emailError) => {
+          console.error("[AdminOrder] 배송시작 이메일 발송 실패 orderId=%s err=%s", orderId, String(emailError?.message ?? emailError));
         });
-      } catch {
-        // 이메일 실패는 무시
-      }
       return jsonNoStore({ ok: true, data: { order: toShopAdminOrderSummary(order) } });
     }
 
@@ -78,6 +79,18 @@ export async function PATCH(req: Request, ctx: any) {
         orderId,
         adminUserId: admin.identity.userId,
       });
+      // 배달 완료 이메일 (fire-and-forget, 실패 시 콘솔 기록)
+      loadUserEmailById(order.userId)
+        .then((email) =>
+          sendDeliveryCompletedEmail({
+            customerEmail: email,
+            productName: order.productSnapshot.name,
+            orderId: order.orderId,
+          })
+        )
+        .catch((emailError) => {
+          console.error("[AdminOrder] 배달완료 이메일 발송 실패 orderId=%s err=%s", orderId, String(emailError?.message ?? emailError));
+        });
       return jsonNoStore({ ok: true, data: { order: toShopAdminOrderSummary(order) } });
     }
 

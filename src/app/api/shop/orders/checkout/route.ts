@@ -9,6 +9,7 @@ import {
   countRecentReadyShopOrdersByUser,
   countReservedShopQuantityForProduct,
   createShopOrder,
+  markShopOrderCanceled,
 } from "@/lib/server/shopOrderStore";
 import { buildShopShippingSnapshot, resolveShopShippingProfileFromBook } from "@/lib/server/shopProfileStore";
 import { readTossClientKeyFromEnv } from "@/lib/server/tossConfig";
@@ -139,6 +140,19 @@ export async function POST(req: Request) {
       quantity,
       shipping: buildShopShippingSnapshot(shippingProfile),
     });
+
+    // BUG-01: Check-Act-Verify — 주문 생성 후 재고 재검증하여 동시 요청에 의한 초과 판매 방지
+    if (typeof product.stockCount === "number") {
+      const totalReserved = await countReservedShopQuantityForProduct(product.id);
+      if (totalReserved > product.stockCount) {
+        await markShopOrderCanceled({
+          orderId: order.orderId,
+          code: "out_of_stock_after_reserve",
+          message: "재고 부족으로 주문이 자동 취소되었습니다.",
+        }).catch(() => undefined);
+        return jsonNoStore({ ok: false, error: "shop_product_out_of_stock" }, { status: 409 });
+      }
+    }
 
     return jsonNoStore({
       ok: true,

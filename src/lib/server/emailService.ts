@@ -200,6 +200,65 @@ export async function sendShippingStartedEmail(order: {
   });
 }
 
+export async function sendDeliveryCompletedEmail(order: {
+  customerEmail: string | null;
+  productName: string;
+  orderId: string;
+}): Promise<void> {
+  if (!order.customerEmail) return;
+  const productName = escapeHtml(order.productName);
+  const orderId = escapeHtml(order.orderId);
+  const content = `
+    <p style="margin:0 0 16px;font-size:14px;color:#44556d;line-height:1.7;">
+      주문하신 상품이 배달 완료되었습니다. 상품을 수령하셨다면 구매 확정을 진행해 주세요.
+    </p>
+    ${renderEmailRows([
+      { label: "주문번호", value: orderId },
+      { label: "상품", value: productName, keepBorder: false },
+    ])}
+    <p style="margin:0 0 0;font-size:13px;color:#44556d;line-height:1.7;">
+      구매 확정 후 해당 상품에 대한 리뷰를 작성하실 수 있습니다.
+    </p>`;
+
+  await sendEmail({
+    to: order.customerEmail,
+    subject: `[RNest] 상품이 배달 완료되었습니다 — ${order.productName}`,
+    html: emailLayout("배달 완료", content),
+  });
+}
+
+export async function sendOrderCanceledEmail(order: {
+  customerEmail: string | null;
+  productName: string;
+  orderId: string;
+  refunded: boolean;
+  amount: number;
+}): Promise<void> {
+  if (!order.customerEmail) return;
+  const productName = escapeHtml(order.productName);
+  const orderId = escapeHtml(order.orderId);
+  const rows: EmailRow[] = [
+    { label: "주문번호", value: orderId },
+    { label: "상품", value: productName },
+  ];
+  if (order.refunded) {
+    rows.push({ label: "환불금액", value: escapeHtml(formatKrw(order.amount)), emphasize: true, keepBorder: false });
+  } else {
+    rows[rows.length - 1] = { ...rows[rows.length - 1], keepBorder: false };
+  }
+  const content = `
+    <p style="margin:0 0 16px;font-size:14px;color:#44556d;line-height:1.7;">
+      주문이 취소되었습니다.${order.refunded ? " 결제 금액은 영업일 기준 3~5일 이내에 결제 수단으로 환불됩니다." : ""}
+    </p>
+    ${renderEmailRows(rows)}`;
+
+  await sendEmail({
+    to: order.customerEmail,
+    subject: `[RNest] 주문이 취소되었습니다 — ${order.productName}`,
+    html: emailLayout("주문 취소", content),
+  });
+}
+
 export async function sendRefundResultEmail(order: {
   customerEmail: string | null;
   productName: string;

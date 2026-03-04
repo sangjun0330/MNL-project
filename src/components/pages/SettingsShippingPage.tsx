@@ -14,6 +14,7 @@ import {
   formatShopShippingSingleLine,
   isCompleteShopShippingProfile,
   resolveDefaultShopShippingAddress,
+  validateShopShippingProfileField,
   type ShopShippingAddress,
   type ShopShippingAddressBook,
 } from "@/lib/shopProfile";
@@ -102,11 +103,14 @@ function emptyAddressDraft(): ShopShippingAddress {
   };
 }
 
+// BUG-05: 결정적(deterministic) 직렬화로 Race Condition에 의한 false mismatch 방지
 function addressBookSignature(book: ShopShippingAddressBook) {
-  return JSON.stringify({
-    addresses: book.addresses,
-    defaultAddressId: book.defaultAddressId,
-  });
+  const sortedAddresses = [...book.addresses]
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map(({ id, label, recipientName, phone, postalCode, addressLine1, addressLine2, deliveryNote }) => ({
+      id, label, recipientName, phone, postalCode, addressLine1, addressLine2, deliveryNote,
+    }));
+  return JSON.stringify({ addresses: sortedAddresses, defaultAddressId: book.defaultAddressId });
 }
 
 export function SettingsShippingPage() {
@@ -121,6 +125,8 @@ export function SettingsShippingPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [messageTone, setMessageTone] = useState<"error" | "notice">("notice");
   const [savedSignature, setSavedSignature] = useState<string | null>(null);
+  // BUG-04: 필드별 인라인 유효성 오류 상태
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<"phone" | "postalCode", string>>>({});
   const addressLine2Ref = useRef<HTMLInputElement | null>(null);
 
   const defaultAddress = useMemo(() => resolveDefaultShopShippingAddress(addressBook), [addressBook]);
@@ -286,10 +292,20 @@ export function SettingsShippingPage() {
   }, []);
 
   const handleSaveDraft = useCallback(async () => {
+    // BUG-05: saving 중 중복 제출 완전 차단
     if (!user?.userId || saving) return;
+
+    // BUG-04: 저장 전 필드별 유효성 재검사
+    const phoneError = validateShopShippingProfileField("phone", draft.phone);
+    const postalError = validateShopShippingProfileField("postalCode", draft.postalCode);
+    const nextErrors: Partial<Record<"phone" | "postalCode", string>> = {};
+    if (phoneError) nextErrors.phone = phoneError;
+    if (postalError) nextErrors.postalCode = postalError;
+    setFieldErrors(nextErrors);
+
     if (!isCompleteShopShippingProfile(draft)) {
       setMessageTone("error");
-      setMessage("받는 분, 연락처, 우편번호, 기본 주소를 모두 입력해 주세요.");
+      setMessage("받는 분, 연락처, 우편번호, 기본 주소를 모두 올바르게 입력해 주세요.");
       return;
     }
 
@@ -566,9 +582,18 @@ export function SettingsShippingPage() {
                 <div className="mb-2 text-[12px] font-semibold text-[#11294b]">{t("연락처")}</div>
                 <Input
                   value={draft.phone}
-                  onChange={(event) => setDraft((current) => ({ ...current, phone: event.target.value }))}
+                  onChange={(event) => {
+                    const val = event.target.value;
+                    setDraft((current) => ({ ...current, phone: val }));
+                    // BUG-04: 실시간 전화번호 포맷 검증
+                    const err = val.trim() ? validateShopShippingProfileField("phone", val) : null;
+                    setFieldErrors((prev) => ({ ...prev, phone: err ?? undefined }));
+                  }}
                   placeholder="010-0000-0000"
                 />
+                {fieldErrors.phone ? (
+                  <div className="mt-1 text-[11px] text-[#a33a2b]">{fieldErrors.phone}</div>
+                ) : null}
               </label>
             </div>
 

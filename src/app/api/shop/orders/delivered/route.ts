@@ -1,6 +1,7 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { confirmShopOrderDelivered, toShopOrderSummary } from "@/lib/server/shopOrderStore";
+import { loadUserEmailById, sendDeliveryCompletedEmail } from "@/lib/server/emailService";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -28,6 +29,20 @@ export async function POST(req: Request) {
 
   try {
     const order = await confirmShopOrderDelivered({ userId, orderId });
+
+    // FEAT-11: 배달 완료 이메일 (fire-and-forget, 실패 시 콘솔 기록)
+    loadUserEmailById(userId)
+      .then((email) =>
+        sendDeliveryCompletedEmail({
+          customerEmail: email,
+          productName: order.productSnapshot.name,
+          orderId: order.orderId,
+        })
+      )
+      .catch((emailError) => {
+        console.error("[OrderDelivered] 배달완료 이메일 발송 실패 orderId=%s err=%s", orderId, String(emailError?.message ?? emailError));
+      });
+
     return jsonNoStore({
       ok: true,
       data: {

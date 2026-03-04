@@ -223,6 +223,29 @@ export async function activateShopProduct(productId: string): Promise<void> {
   }
 }
 
+/**
+ * FEAT-12: 재고 자동 품절 처리
+ *
+ * outOfStock 플래그를 true/false로 설정합니다.
+ * best-effort: DB 업데이트 실패 시 에러를 throw하지 않고 조용히 통과.
+ * (다음 checkout 시 reservedQty 재확인으로 자연스럽게 차단됨)
+ */
+export async function setShopProductOutOfStock(productId: string, outOfStock: boolean): Promise<void> {
+  const key = String(productId ?? "").trim();
+  if (!key) return;
+  const admin = getSupabaseAdmin();
+  try {
+    const { error } = await admin.from("shop_products").update({ out_of_stock: outOfStock }).eq("id", key);
+    if (error && !isMissingTableError(error)) {
+      console.error("[ShopCatalog] outOfStock 업데이트 실패 productId=%s outOfStock=%s err=%s", key, outOfStock, String(error?.message ?? error));
+    }
+  } catch (error: any) {
+    if (!isMissingTableError(error)) {
+      console.error("[ShopCatalog] outOfStock 업데이트 예외 productId=%s err=%s", key, String(error?.message ?? error));
+    }
+  }
+}
+
 export async function loadShopCatalogAll(): Promise<ShopProduct[]> {
   try {
     const admin = getSupabaseAdmin();

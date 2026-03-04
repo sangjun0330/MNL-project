@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/jobs/shop/cleanup-stale-orders",
+      "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/jobs/shop/shipping-sync",
+      "schedule": "0 * * * *"
+    }
+  ]
+}

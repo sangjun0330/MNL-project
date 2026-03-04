@@ -11,14 +11,19 @@ function readSecret() {
 
 function isAuthorized(req: Request) {
   const secret = readSecret();
-  if (!secret) return false;
+  // Vercel Cron은 CRON_SECRET 환경변수를 Bearer 토큰으로 자동 주입합니다
+  const cronSecret = String(process.env.CRON_SECRET ?? "").trim();
 
   const auth = String(req.headers.get("authorization") ?? "").trim();
   if (auth.toLowerCase().startsWith("bearer ")) {
-    return auth.slice(7).trim() === secret;
+    const token = auth.slice(7).trim();
+    if (secret && token === secret) return true;
+    if (cronSecret && token === cronSecret) return true;
   }
 
-  return String(req.headers.get("x-shop-sync-secret") ?? "").trim() === secret;
+  // 레거시: x-shop-sync-secret 헤더 (외부 스케줄러 호환)
+  if (secret && String(req.headers.get("x-shop-sync-secret") ?? "").trim() === secret) return true;
+  return false;
 }
 
 function toLimit(value: string | null): number {
@@ -27,7 +32,7 @@ function toLimit(value: string | null): number {
   return Math.max(1, Math.min(20, Math.round(n)));
 }
 
-export async function POST(req: Request) {
+async function runShippingSync(req: Request) {
   if (!readSecret()) {
     return jsonNoStore({ ok: false, error: "missing_shop_shipping_sync_secret" }, { status: 503 });
   }
@@ -50,5 +55,15 @@ export async function POST(req: Request) {
   } catch {
     return jsonNoStore({ ok: false, error: "failed_to_sync_shop_shipping" }, { status: 500 });
   }
+}
+
+// POST: 수동 호출 / 외부 스케줄러
+export async function POST(req: Request) {
+  return runShippingSync(req);
+}
+
+// GET: Vercel Cron (cron jobs send GET requests)
+export async function GET(req: Request) {
+  return runShippingSync(req);
 }
 

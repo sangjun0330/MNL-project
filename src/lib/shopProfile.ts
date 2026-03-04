@@ -128,8 +128,56 @@ export function normalizeShopShippingSnapshot(raw: unknown): ShopShippingSnapsho
   };
 }
 
+/**
+ * 한국 전화번호 포맷 검증 (010-1234-5678, 02-123-4567 등)
+ * 공백·하이픈을 제거한 후 숫자만으로 판단합니다.
+ */
+export function isValidKoreanPhone(phone: string): boolean {
+  const digits = String(phone ?? "").replace(/[\s\-]/g, "");
+  // 01X로 시작하는 휴대폰(10~11자리) 또는 지역번호(9~11자리)
+  return /^(01[016789]\d{7,8}|0[2-9]\d{7,9})$/.test(digits);
+}
+
+/**
+ * 한국 우편번호 5자리 숫자 검증
+ */
+export function isValidPostalCode(code: string): boolean {
+  return /^\d{5}$/.test(String(code ?? "").trim());
+}
+
 export function isCompleteShopShippingProfile(profile: ShopShippingProfile) {
-  return Boolean(profile.recipientName && profile.phone && profile.postalCode && profile.addressLine1);
+  if (!profile.recipientName || !profile.phone || !profile.postalCode || !profile.addressLine1) {
+    return false;
+  }
+  if (!isValidKoreanPhone(profile.phone)) return false;
+  if (!isValidPostalCode(profile.postalCode)) return false;
+  return true;
+}
+
+/**
+ * 배송 프로필의 각 필드별 오류 메시지를 반환합니다.
+ * 유효하면 null, 유효하지 않으면 오류 문자열 반환.
+ */
+export function validateShopShippingProfileField(
+  field: keyof ShopShippingProfile,
+  value: string
+): string | null {
+  switch (field) {
+    case "recipientName":
+      return value.trim() ? null : "수령인 이름을 입력해 주세요.";
+    case "phone":
+      if (!value.trim()) return "연락처를 입력해 주세요.";
+      if (!isValidKoreanPhone(value)) return "올바른 전화번호 형식을 입력해 주세요. (예: 010-1234-5678)";
+      return null;
+    case "postalCode":
+      if (!value.trim()) return "우편번호를 입력해 주세요.";
+      if (!isValidPostalCode(value)) return "우편번호는 5자리 숫자여야 합니다.";
+      return null;
+    case "addressLine1":
+      return value.trim() ? null : "주소를 입력해 주세요.";
+    default:
+      return null;
+  }
 }
 
 export function toShopShippingProfile(address: ShopShippingAddress | ShopShippingProfile): ShopShippingProfile {

@@ -7,6 +7,7 @@ import { buildCancelIdempotencyKey, buildConfirmIdempotencyKey, readTossAcceptLa
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { loadUserState, saveUserState } from "@/lib/server/userStateStore";
 import { calculateShopPricing, type ShopProduct } from "@/lib/shop";
+import { setShopProductOutOfStock } from "@/lib/server/shopCatalogStore";
 import type { Database, Json } from "@/types/supabase";
 
 const SHOP_ORDER_PREFIX = "__shop_order__";
@@ -1218,6 +1219,58 @@ export async function markShopOrderFailed(input: {
   return saved;
 }
 
+export async function markShopOrderCanceled(input: {
+  orderId: string;
+  code: string;
+  message: string;
+  actorUserId?: string | null;
+}) {
+  const current = await readShopOrder(input.orderId);
+  if (!current) throw new Error("shop_order_not_found");
+  // 이미 취소/실패/완료된 주문은 재취소하지 않음
+  if (
+    current.status === "CANCELED" ||
+    current.status === "FAILED" ||
+    current.status === "REFUNDED" ||
+    current.status === "PAID" ||
+    current.status === "SHIPPED" ||
+    current.status === "DELIVERED"
+  ) {
+    return current;
+  }
+  const saved = await writeOrder({
+    ...current,
+    status: "CANCELED",
+    failCode: cleanText(input.code, 120),
+    failMessage: cleanText(input.message, 220),
+  });
+  await writeOrderEventSafe({
+    order: saved,
+    eventType: "order_canceled",
+    actorRole: input.actorUserId ? "user" : "system",
+    actorUserId: input.actorUserId ?? null,
+    message: cleanText(input.message, 220),
+    metadata: { code: cleanText(input.code, 120) },
+  });
+  return saved;
+}
+
+export async function listStaleReadyShopOrders(staleAfterMs = 30 * 60 * 1000): Promise<ShopOrderRecord[]> {
+  const cutoffTime = Date.now() - staleAfterMs;
+  let rows: ShopOrderRecord[] = [];
+  try {
+    rows = await listShopOrderRows(240);
+  } catch {
+    return [];
+  }
+  return rows.filter((row) => {
+    if (row.status !== "READY") return false;
+    const createdAt = new Date(row.createdAt).getTime();
+    if (!Number.isFinite(createdAt)) return false;
+    return createdAt < cutoffTime;
+  });
+}
+
 export async function markShopOrderPaid(input: {
   orderId: string;
   paymentKey: string;
@@ -1242,6 +1295,7 @@ export async function markShopOrderPaid(input: {
     message: "토스 결제가 승인되었습니다.",
     metadata: saved.tossResponse,
   });
+
   return saved;
 }
 
@@ -1707,10 +1761,8 @@ export async function markShopOrderShipped(input: {
   const now = new Date().toISOString();
   const carrierCode = cleanText(input.carrierCode, 40);
   if (!carrierCode) throw new Error("tracking_carrier_code_required");
-  const trackingUrl = buildSweetTrackerTrackingUrl({
-    carrierCode,
-    trackingNumber: input.trackingNumber,
-  });
+  // BUG-06: SweetTracker API 키 URL 노출 방지
+  // trackingUrl을 DB에 저장하지 않음 — 클라이언트는 /api/shop/tracking 프록시를 통해 조회
   const saved = await writeOrder({
     ...current,
     status: "SHIPPED",
@@ -1720,7 +1772,7 @@ export async function markShopOrderShipped(input: {
       ...current.shipping,
       smartTracker: mergeSmartTrackerMeta(current.shipping.smartTracker, {
         carrierCode,
-        trackingUrl,
+        trackingUrl: null, // API 키 노출 방지: URL을 저장하지 않음
         lastStatus: "shipped",
         lastStatusLabel: "배송 시작",
         lastEventAt: now,
@@ -1823,6 +1875,127 @@ export async function syncShopOrderTracking(input: {
     force: Boolean(input.force),
     actorUserId: input.adminUserId ?? null,
   });
+}
+
+/**
+ * FEAT-01: 사용자 주문 취소
+ *
+ * - READY 상태: Toss 결제 미완료이므로 즉시 CANCELED 처리
+ * - PAID 상태 + 발송 전 + 승인 후 1시간 이내: Toss 즉시 취소 API 호출 → REFUNDED 처리
+ * - 그 외: 취소 불가 (에러 throw)
+ *
+ * 반환: { order, refunded: boolean }
+ *   refunded=false → CANCELED (결제 없음), refunded=true → REFUNDED (Toss 취소 완료)
+ */
+export async function cancelShopOrderByUser(input: {
+  userId: string;
+  orderId: string;
+  requestAcceptLanguage?: string | null;
+}): Promise<{ order: ShopOrderRecord; refunded: boolean }> {
+  const current = await readShopOrderForUser(input.userId, input.orderId);
+  if (!current) throw new Error("shop_order_not_found");
+
+  // READY: 결제 미완료 → 즉시 CANCELED (Toss 호출 불필요)
+  if (current.status === "READY") {
+    const canceled = await markShopOrderCanceled({
+      orderId: current.orderId,
+      code: "user_canceled",
+      message: "사용자가 주문을 취소했습니다.",
+      actorUserId: input.userId,
+    });
+    return { order: canceled, refunded: false };
+  }
+
+  // PAID: 발송 전 + 1시간 이내만 즉시 취소 허용
+  if (current.status === "PAID") {
+    if (current.shippedAt) throw new Error("shop_order_already_shipped");
+    const paidAt = new Date(current.approvedAt ?? current.createdAt).getTime();
+    const ONE_HOUR_MS = 60 * 60 * 1000;
+    if (Date.now() - paidAt > ONE_HOUR_MS) throw new Error("shop_order_cancel_window_expired");
+
+    // 번들 주문은 사용자 직접 취소 미지원 (환불 신청 안내)
+    const bundle = await findShopOrderBundleByOrderId(input.userId, input.orderId).catch(() => null);
+    if (bundle && bundle.itemCount > 1) throw new Error("shop_bundle_cancel_use_refund");
+
+    const paymentKey = current.paymentKey;
+    if (!paymentKey) throw new Error("shop_order_missing_payment_key");
+
+    const secret = readTossSecretKeyFromEnv();
+    if (!secret.ok) throw new Error(secret.error);
+
+    const auth = btoa(`${secret.secretKey}:`);
+    const headers: Record<string, string> = {
+      Authorization: `Basic ${auth}`,
+      "Content-Type": "application/json",
+      "Idempotency-Key": buildCancelIdempotencyKey(current.orderId),
+    };
+    const acceptLanguage = readTossAcceptLanguage(input.requestAcceptLanguage ?? null);
+    if (acceptLanguage) headers["Accept-Language"] = acceptLanguage;
+    const testCode = readTossTestCodeFromEnv(secret.mode);
+    if (testCode) headers["TossPayments-Test-Code"] = testCode;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort("timeout"), 10_000);
+
+    let res: Response;
+    try {
+      res = await fetch(
+        `https://api.tosspayments.com/v1/payments/${encodeURIComponent(paymentKey)}/cancel`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            cancelReason: "사용자 결제 취소 요청",
+            cancelAmount: current.amount,
+          }),
+          signal: controller.signal,
+        }
+      );
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    const rawText = await res.text().catch(() => "");
+    let json: any = null;
+    try {
+      json = rawText ? JSON.parse(rawText) : null;
+    } catch {
+      json = null;
+    }
+
+    if (!res.ok) {
+      throw new Error(cleanText(json?.code, 120) || `toss_cancel_http_${res.status}`);
+    }
+
+    const now = new Date().toISOString();
+    const saved = await writeOrder({
+      ...current,
+      status: "REFUNDED",
+      refund: {
+        ...current.refund,
+        status: "done",
+        reason: "사용자 결제 취소 요청",
+        requestedAt: now,
+        reviewedAt: now,
+        reviewedBy: "user",
+        note: "결제 후 1시간 이내 사용자 직접 취소",
+        cancelAmount: current.amount,
+        canceledAt: now,
+        cancelResponse: summarizeTossCancelResponse(json),
+      },
+    });
+    await writeOrderEventSafe({
+      order: saved,
+      eventType: "order_canceled_by_user",
+      actorRole: "user",
+      actorUserId: input.userId,
+      message: "결제 후 1시간 이내 사용자 직접 취소",
+      metadata: { cancelAmount: current.amount },
+    });
+    return { order: saved, refunded: true };
+  }
+
+  throw new Error("shop_order_not_cancelable");
 }
 
 export function toShopAdminOrderSummary(order: ShopOrderRecord): ShopAdminOrderSummary {

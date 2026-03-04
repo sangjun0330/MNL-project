@@ -10,6 +10,7 @@ import {
   countRecentReadyShopOrdersByUser,
   countReservedShopQuantityForProduct,
   createShopOrder,
+  markShopOrderCanceled,
   markShopOrderFailed,
   type ShopOrderRecord,
 } from "@/lib/server/shopOrderStore";
@@ -199,6 +200,29 @@ export async function POST(req: Request) {
       });
       createdOrders.push(order);
       createdOrderIds.push(order.orderId);
+    }
+
+    // BUG-01: Check-Act-Verify — 주문 생성 후 재고를 재검증하여 동시 요청에 의한 초과 판매 방지
+    for (const order of createdOrders) {
+      const product = productMap.get(order.productId);
+      if (!product || typeof product.stockCount !== "number") continue;
+      const totalReserved = await countReservedShopQuantityForProduct(order.productId);
+      if (totalReserved > product.stockCount) {
+        // 생성된 모든 주문을 취소하고 에러 반환
+        await Promise.all(
+          createdOrderIds.map((id) =>
+            markShopOrderCanceled({
+              orderId: id,
+              code: "out_of_stock_after_reserve",
+              message: "재고 부족으로 주문이 자동 취소되었습니다.",
+            }).catch(() => undefined)
+          )
+        );
+        return jsonNoStore(
+          { ok: false, error: "shop_product_out_of_stock", data: { productId: order.productId } },
+          { status: 409 }
+        );
+      }
     }
 
     const bundle = await createShopOrderBundle({

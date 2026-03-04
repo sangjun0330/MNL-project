@@ -179,7 +179,7 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [actionTone, setActionTone] = useState<"error" | "notice">("notice");
-  const [actionLoading, setActionLoading] = useState<"refund" | "purchase" | "delivery" | null>(null);
+  const [actionLoading, setActionLoading] = useState<"refund" | "purchase" | "delivery" | "cancel" | null>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -344,6 +344,41 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
     }
   };
 
+  const cancelOrder = async () => {
+    if (status !== "authenticated" || !order) return;
+    setActionMessage(null);
+    setActionLoading("cancel");
+    try {
+      const headers = await authHeaders();
+      const res = await fetch("/api/shop/orders/cancel", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify({ orderId: order.orderId }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok) throw new Error(String(json?.error ?? `http_${res.status}`));
+      setOrder(json.data.order as ShopOrderDetail);
+      setActionTone("notice");
+      setActionMessage(
+        json?.data?.refunded
+          ? t("주문이 취소되었습니다. 결제 금액이 환불 처리됩니다.")
+          : t("주문이 취소되었습니다.")
+      );
+    } catch (error: any) {
+      const code = String(error?.message ?? "");
+      setActionTone("error");
+      if (code.includes("shop_order_cancel_window_expired") || code.includes("shop_order_already_shipped")) {
+        setActionMessage(t("즉시 취소 기간이 지났습니다. 환불 신청을 이용해 주세요."));
+      } else if (code.includes("shop_bundle_cancel_use_refund")) {
+        setActionMessage(t("묶음 결제 주문은 개별 취소가 불가합니다. 환불 신청을 이용해 주세요."));
+      } else {
+        setActionMessage(t("주문 취소에 실패했습니다. 잠시 후 다시 시도해 주세요."));
+      }
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   return (
     <div className="-mx-4 pb-24">
       <div className="border-b border-[#edf1f6] bg-white px-4 py-4">
@@ -449,13 +484,51 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
               </div>
             </div>
 
-            {(order.status === "SHIPPED" ||
+            {(order.status === "READY" ||
+              order.status === "SHIPPED" ||
               order.status === "DELIVERED" ||
               Boolean(order.purchaseConfirmedAt) ||
               order.refund.status !== "none" ||
               (order.status === "PAID" && order.refund.status === "none")) ? (
               <div className="rounded-3xl border border-[#edf1f6] bg-white p-5">
                 <h2 className="mb-3 text-[14px] font-bold text-[#111827]">{t("후속 처리")}</h2>
+
+                {order.status === "READY" ? (
+                  <div className="rounded-2xl border border-[#dbe4ef] bg-[#f8fafc] px-4 py-4">
+                    <div className="text-[11px] font-semibold text-[#60768d]">{t("주문 취소")}</div>
+                    <div className="mt-2 rounded-2xl border border-[#d7dfeb] bg-white px-4 py-3 text-[12.5px] leading-6 text-[#44556d]">
+                      {t("결제가 완료되기 전 주문은 즉시 취소할 수 있습니다.")}
+                    </div>
+                    <button
+                      type="button"
+                      data-auth-allow
+                      onClick={() => void cancelOrder()}
+                      disabled={actionLoading === "cancel"}
+                      className={`${SECONDARY_BUTTON} mt-4 h-11 w-full text-[13px]`}
+                    >
+                      {actionLoading === "cancel" ? t("처리 중...") : t("주문 취소")}
+                    </button>
+                  </div>
+                ) : null}
+
+                {order.status === "PAID" && !order.shippedAt && order.refund.status === "none" &&
+                  order.approvedAt && Date.now() - new Date(order.approvedAt).getTime() < 60 * 60 * 1000 ? (
+                  <div className="rounded-2xl border border-[#dbe4ef] bg-[#f8fafc] px-4 py-4">
+                    <div className="text-[11px] font-semibold text-[#60768d]">{t("주문 취소")}</div>
+                    <div className="mt-2 rounded-2xl border border-[#d7dfeb] bg-white px-4 py-3 text-[12.5px] leading-6 text-[#44556d]">
+                      {t("결제 후 1시간 이내 발송 전 주문은 즉시 취소 및 환불이 가능합니다.")}
+                    </div>
+                    <button
+                      type="button"
+                      data-auth-allow
+                      onClick={() => void cancelOrder()}
+                      disabled={actionLoading === "cancel"}
+                      className={`${SECONDARY_BUTTON} mt-4 h-11 w-full text-[13px]`}
+                    >
+                      {actionLoading === "cancel" ? t("처리 중...") : t("주문 취소 및 환불")}
+                    </button>
+                  </div>
+                ) : null}
 
                 {order.status === "SHIPPED" && !order.deliveredAt ? (
                   <div className="rounded-2xl border border-[#dbe4ef] bg-[#f8fafc] px-4 py-4">
