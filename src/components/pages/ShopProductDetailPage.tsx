@@ -6,7 +6,15 @@ import { useEffect, useMemo, useState } from "react";
 import { useAuthState } from "@/lib/auth";
 import { authHeaders, ensureTossScript } from "@/lib/billing/client";
 import { cn } from "@/lib/cn";
-import { calculateShopPricing, formatShopCurrency, formatShopPrice, getShopImageSrc, type ShopProduct } from "@/lib/shop";
+import {
+  calculateShopPricing,
+  formatShopCurrency,
+  formatShopPrice,
+  getShopImageSrc,
+  isShopProductExternalOnly,
+  isShopProductSoldOut,
+  type ShopProduct,
+} from "@/lib/shop";
 import {
   buildShopShippingVerificationValue,
   formatShopShippingSingleLine,
@@ -120,6 +128,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
   const { t, lang } = useI18n();
   const { status } = useAuthState();
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [externalPurchaseOpen, setExternalPurchaseOpen] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [messageTone, setMessageTone] = useState<"error" | "notice">("notice");
@@ -149,6 +158,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
   const [cartLoading, setCartLoading] = useState(false);
   const [catalogProducts, setCatalogProducts] = useState<ShopProduct[]>(allProducts ?? []);
   const detail = product.detailPage;
+  const externalOnlyProduct = isShopProductExternalOnly(product);
 
   useEffect(() => {
     let active = true;
@@ -206,6 +216,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
     setSelectedImageIndex(0);
     setReviewPage(1);
     setExpandedReviews({});
+    setExternalPurchaseOpen(false);
   }, [product.id]);
 
   useEffect(() => {
@@ -298,6 +309,19 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
     () => product.imageUrls.map((url) => getShopImageSrc(url)).filter(Boolean),
     [product.imageUrls]
   );
+  const detailImageUrls = useMemo(
+    () => detail.detailImageUrls.map((url) => getShopImageSrc(url)).filter(Boolean),
+    [detail.detailImageUrls]
+  );
+  const detailSectionImageUrls = detailImageUrls.length > 0 ? detailImageUrls : galleryImageUrls.slice(0, 2);
+  const partnerHostLabel = useMemo(() => {
+    if (!product.externalUrl) return null;
+    try {
+      return new URL(product.externalUrl).hostname.replace(/^www\./, "");
+    } catch {
+      return null;
+    }
+  }, [product.externalUrl]);
   const selectedImageUrl = galleryImageUrls[selectedImageIndex] ?? null;
   const selectedShippingAddress =
     (selectedShippingAddressId ? shippingAddresses.find((item) => item.id === selectedShippingAddressId) : null) ??
@@ -310,7 +334,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
   const shippingVerificationValue = effectiveShippingProfile
     ? buildShopShippingVerificationValue(effectiveShippingProfile)
     : "";
-  const hardOutOfStock = product.outOfStock || (typeof product.stockCount === "number" && product.stockCount <= 0);
+  const hardOutOfStock = isShopProductSoldOut(product);
   const maxSelectableQuantity =
     typeof product.stockCount === "number" && product.stockCount > 0 ? Math.max(1, Math.min(9, product.stockCount)) : 9;
   const pricing = calculateShopPricing({ priceKrw: product.priceKrw, quantity });
@@ -559,6 +583,20 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
     saveShopClientState(markShopPartnerClick(current, product.id));
   };
 
+  const openPartnerPurchaseGuide = () => {
+    if (!product.externalUrl) return;
+    setExternalPurchaseOpen(true);
+  };
+
+  const handlePartnerMove = () => {
+    if (!product.externalUrl) return;
+    handlePartnerClick();
+    setExternalPurchaseOpen(false);
+    if (typeof window !== "undefined") {
+      window.open(product.externalUrl, "_blank", "noopener,noreferrer");
+    }
+  };
+
   const submitReview = async () => {
     if (status !== "authenticated") {
       setMessageTone("error");
@@ -750,7 +788,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
                 </div>
               ) : null}
               {/* 재고 표시 */}
-              {product.stockCount !== null && product.stockCount <= 10 && !hardOutOfStock ? (
+              {product.stockCount !== null && product.stockCount > 0 && product.stockCount <= 10 && !hardOutOfStock ? (
                 <div className="text-[12px] font-semibold text-[#e63946]">{t("잔여 {count}개", { count: product.stockCount })}</div>
               ) : null}
             </div>
@@ -826,21 +864,29 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
                   {t("구매하기")}
                 </button>
               ) : product.externalUrl ? (
-                <a
-                  href={product.externalUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  onClick={handlePartnerClick}
+                <button
+                  type="button"
+                  data-auth-allow
+                  onClick={openPartnerPurchaseGuide}
                   className={`inline-flex h-14 flex-[1.2] items-center justify-center text-[15px] ${PRIMARY_BUTTON}`}
                 >
                   {t("구매하기")}
-                </a>
+                </button>
               ) : (
                 <button type="button" disabled className="inline-flex h-14 flex-[1.2] items-center justify-center rounded-2xl bg-[#8da8d8] text-[15px] font-semibold text-white">
                   {t("판매 준비중")}
                 </button>
               )}
             </div>
+
+            {externalOnlyProduct ? (
+              <div className="rounded-3xl border border-[#ddd7ff] bg-[#f3f0ff] px-4 py-4 text-[12.5px] leading-6 text-[#44556d]">
+                <div className="font-semibold text-[#47326f]">{t("외부 판매처 구매 안내")}</div>
+                <div className="mt-2">
+                  {t("구매 옵션 선택과 실제 결제는 제휴 판매처에서 이어집니다. 구매하기를 누르면 안내 시트를 거친 뒤 새 탭으로 안전하게 연결됩니다.")}
+                </div>
+              </div>
+            ) : null}
 
             <div className="rounded-3xl border border-[#e6ebf2] bg-[#f8fafc] px-4 py-4 text-[13px] leading-7 text-[#111827]">
               <div className="font-semibold text-[#11294b]">{t(detail.headline)}</div>
@@ -857,9 +903,9 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
         </section>
 
         <section id="shop-product-info" className="space-y-6 bg-white px-4 py-6">
-          <div className="grid gap-4 md:grid-cols-2">
-            {galleryImageUrls.slice(0, 2).map((url, index) => (
-              <div key={`${url}-${index}`} className="overflow-hidden rounded-[2px] bg-[#eef1f4]">
+          <div className={cn("grid gap-4", detailSectionImageUrls.length > 1 ? "md:grid-cols-2" : "md:grid-cols-1")}>
+            {detailSectionImageUrls.map((url, index) => (
+              <div key={`${url}-${index}`} className="overflow-hidden rounded-[28px] border border-[#edf1f6] bg-[#eef1f4]">
                 <img src={url} alt={`${t(product.name)} gallery ${index + 1}`} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" />
               </div>
             ))}
@@ -869,9 +915,9 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
           <div className="text-[15px] leading-8 text-[#44556d]">{t(detail.storyBody)}</div>
 
           <div className="grid gap-4 md:grid-cols-2">
-            <div className="rounded-3xl bg-[#3b6fc9] px-5 py-6 text-white">
+            <div className="rounded-3xl border border-[#ddd7ff] bg-[#f3f0ff] px-5 py-6 text-[#31244d]">
               <div className="text-[22px] font-bold tracking-[-0.03em]">{t(detail.featureTitle)}</div>
-              <div className="mt-4 space-y-2 text-[13px] leading-6 text-white/90">
+              <div className="mt-4 space-y-2 text-[13px] leading-6 text-[#5d4d88]">
                 {detail.featureItems.map((item) => (
                   <div key={item}>{t(item)}</div>
                 ))}
@@ -1133,7 +1179,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
               <div className="mt-3 text-[12.5px] leading-6 text-[#44556d]">
                 {product.checkoutEnabled && product.priceKrw
                   ? t("토스 결제로 바로 결제할 수 있으며, 배송비 3,000원은 50,000원 이상 구매 시 자동으로 무료 처리됩니다.")
-                  : t("외부 판매처 가격과 재고는 판매처 기준으로 운영되며, 최종 결제 조건은 판매처에서 확인해야 합니다.")}
+                  : t("외부 판매처 가격과 재고는 판매처 기준으로 운영되며, 구매하기를 누르면 안내 확인 후 새 탭에서 판매처로 이동합니다.")}
               </div>
             </div>
             <div className="rounded-3xl border border-[#e6ebf2] bg-[#f8fafc] p-4">
@@ -1164,7 +1210,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
                         </div>
                       </div>
                     )}
-                    {p.outOfStock || (typeof p.stockCount === "number" && p.stockCount <= 0) ? (
+                    {isShopProductSoldOut(p) ? (
                       <div className="absolute inset-0 flex items-center justify-center bg-black/35">
                         <span className="rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-bold text-[#111827]">{t("품절")}</span>
                       </div>
@@ -1193,6 +1239,80 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
         onSelectAddress={setSelectedShippingAddressId}
         shippingLabel={shippingLabel}
       />
+
+      {externalPurchaseOpen && externalOnlyProduct && product.externalUrl ? (
+        <div
+          className="fixed inset-0 z-[60] flex items-end bg-black/35 p-4 backdrop-blur-[2px]"
+          onClick={() => setExternalPurchaseOpen(false)}
+        >
+          <div
+            className="mx-auto w-full max-w-[520px] rounded-[32px] border border-white/70 bg-white p-5 shadow-[0_24px_60px_rgba(17,41,75,0.22)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="inline-flex rounded-full border border-[#ddd7ff] bg-[#f3f0ff] px-3 py-1 text-[11px] font-semibold text-[#5d4d88]">
+                  {t("제휴 판매처 이동")}
+                </div>
+                <div className="mt-3 text-[22px] font-bold tracking-[-0.03em] text-[#111827]">
+                  {t("제휴 판매처에서 구매를 이어갑니다")}
+                </div>
+              </div>
+              <button
+                type="button"
+                data-auth-allow
+                onClick={() => setExternalPurchaseOpen(false)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[#e6ebf2] bg-white text-[20px] font-medium text-[#8d99ab]"
+                aria-label={t("닫기")}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="mt-4 rounded-[26px] border border-[#ddd7ff] bg-[linear-gradient(180deg,#f8f5ff_0%,#f1efff_100%)] p-4">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7a6aa8]">
+                {t(product.partnerLabel || "제휴 판매처")}
+              </div>
+              <div className="mt-2 text-[18px] font-bold tracking-[-0.02em] text-[#1f1a2e]">{t(product.name)}</div>
+              <div className="mt-1 text-[12.5px] text-[#5d4d88]">{t(product.priceLabel || "옵션을 확인하고 판매처에서 결제를 이어가세요.")}</div>
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-[11.5px] text-[#6c5f92]">
+                <span className="rounded-full border border-[#d8d2f0] bg-white/75 px-2.5 py-1">{t("판매처")} · {t(product.partnerLabel || "제휴 판매처")}</span>
+                <span className="rounded-full border border-[#d8d2f0] bg-white/75 px-2.5 py-1">
+                  {t("연결 주소")} · {partnerHostLabel ?? t("확인 필요")}
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-[24px] border border-[#e6ebf2] bg-[#f8fafc] px-4 py-4">
+              <div className="text-[12px] font-semibold text-[#11294b]">{t("연결 전 아래 내용을 확인해 주세요.")}</div>
+              <div className="mt-3 space-y-2 text-[12.5px] leading-6 text-[#44556d]">
+                <div>• {t("선택한 옵션과 결제 조건은 판매처 기준으로 적용됩니다.")}</div>
+                <div>• {t("결제, 배송, 교환·환불 정책은 외부 판매처 안내를 따릅니다.")}</div>
+                <div>• {t("새 탭에서 안전하게 열리며, 원하면 언제든 다시 돌아올 수 있습니다.")}</div>
+              </div>
+            </div>
+
+            <div className="mt-5 flex items-center gap-3">
+              <button
+                type="button"
+                data-auth-allow
+                onClick={() => setExternalPurchaseOpen(false)}
+                className={`h-12 flex-1 text-[13px] ${SECONDARY_BUTTON}`}
+              >
+                {t("취소")}
+              </button>
+              <button
+                type="button"
+                data-auth-allow
+                onClick={handlePartnerMove}
+                className={`h-12 flex-[1.2] text-[13px] ${PRIMARY_BUTTON}`}
+              >
+                {t("외부 판매처로 이동")}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

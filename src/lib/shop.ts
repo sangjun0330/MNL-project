@@ -37,6 +37,7 @@ export type ShopDetailPage = {
   summary: string;
   storyTitle: string;
   storyBody: string;
+  detailImageUrls: string[];
   featureTitle: string;
   featureItems: string[];
   routineTitle: string;
@@ -77,6 +78,18 @@ export type ShopProduct = {
   outOfStock: boolean;
   active: boolean;
 };
+
+export function isShopProductExternalOnly(product: Pick<ShopProduct, "checkoutEnabled" | "externalUrl">) {
+  return !product.checkoutEnabled && Boolean(product.externalUrl);
+}
+
+export function isShopProductSoldOut(
+  product: Pick<ShopProduct, "outOfStock" | "stockCount" | "checkoutEnabled" | "externalUrl">
+) {
+  if (product.outOfStock) return true;
+  if (isShopProductExternalOnly(product)) return false;
+  return typeof product.stockCount === "number" && product.stockCount <= 0;
+}
 
 export type ShopRecommendation = {
   product: ShopProduct;
@@ -425,6 +438,7 @@ function buildDefaultDetailPage(args: {
     summary: safeDescription,
     storyTitle: "이 제품은",
     storyBody: safeDescription,
+    detailImageUrls: [],
     featureTitle: "핵심 포인트",
     featureItems: fallbackFeature.slice(0, 6),
     routineTitle: "이럴 때 보기 좋아요",
@@ -455,6 +469,7 @@ function normalizeShopDetailPage(
     summary: clampText(source.summary, 220) || fallback.summary,
     storyTitle: clampText(source.storyTitle, 40) || fallback.storyTitle,
     storyBody: clampText(source.storyBody, 420) || fallback.storyBody,
+    detailImageUrls: sanitizeUrlList(source.detailImageUrls, 6),
     featureTitle: clampText(source.featureTitle, 40) || fallback.featureTitle,
     featureItems: sanitizeStringList(source.featureItems, 6, 48).slice(0, 6).length > 0
       ? sanitizeStringList(source.featureItems, 6, 48).slice(0, 6)
@@ -598,9 +613,21 @@ export function normalizeShopProduct(raw: unknown): ShopProduct | null {
   const rawOriginalPriceKrw = Number(source.originalPriceKrw);
   const originalPriceKrw = Number.isFinite(rawOriginalPriceKrw) && rawOriginalPriceKrw > 0 ? Math.round(rawOriginalPriceKrw) : null;
   const checkoutEnabled = Boolean(source.checkoutEnabled) && priceKrw != null;
+  const externalUrl = (() => {
+    const value = String(source.externalUrl ?? "").trim();
+    if (!value) return undefined;
+    try {
+      const url = new URL(value);
+      if (url.protocol === "https:" || url.protocol === "http:") return url.toString().slice(0, 400);
+    } catch {
+      return undefined;
+    }
+    return undefined;
+  })();
   const rawStockCount = Number(source.stockCount);
   const stockCount = Number.isFinite(rawStockCount) && rawStockCount >= 0 ? Math.round(rawStockCount) : null;
-  const outOfStock = Boolean(source.outOfStock) || (stockCount !== null && stockCount === 0);
+  const externalOnly = !checkoutEnabled && Boolean(externalUrl);
+  const outOfStock = Boolean(source.outOfStock) || (!externalOnly && stockCount !== null && stockCount === 0);
   const active = source.active !== false;
   const benefitTags = sanitizeStringList(source.benefitTags, 6, 24);
   const useMoments = sanitizeStringList(source.useMoments, 5, 60);
@@ -639,17 +666,7 @@ export function normalizeShopProduct(raw: unknown): ShopProduct | null {
     imageUrls,
     specs,
     detailPage,
-    externalUrl: (() => {
-      const value = String(source.externalUrl ?? "").trim();
-      if (!value) return undefined;
-      try {
-        const url = new URL(value);
-        if (url.protocol === "https:" || url.protocol === "http:") return url.toString().slice(0, 400);
-      } catch {
-        return undefined;
-      }
-      return undefined;
-    })(),
+    externalUrl,
     stockCount,
     outOfStock,
     active,

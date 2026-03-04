@@ -79,6 +79,7 @@ type ProductDraft = {
   useMoments: string[];
   caution: string;
   imageUrls: string[];
+  detailImageUrls: string[];
   specs: ShopProductSpec[];
   priority: string;
   stockCount: string;
@@ -318,6 +319,7 @@ function createEmptyDraft(): ProductDraft {
     useMoments: [],
     caution: "의학적 치료 대체가 아니라 생활 루틴 보조용으로만 안내합니다.",
     imageUrls: [],
+    detailImageUrls: [],
     specs: [],
     priority: "4",
     stockCount: "",
@@ -357,6 +359,7 @@ function draftFromProduct(product: ShopProduct & { active?: boolean }): ProductD
     useMoments: [...product.useMoments],
     caution: product.caution,
     imageUrls: [...product.imageUrls],
+    detailImageUrls: [...product.detailPage.detailImageUrls],
     specs: product.specs.map((s) => ({ label: s.label, value: s.value })),
     priority: String(product.priority),
     stockCount: product.stockCount !== null && product.stockCount !== undefined ? String(product.stockCount) : "",
@@ -709,7 +712,7 @@ function TabPrice({ draft, setDraft, errors }: { draft: ProductDraft; setDraft: 
             onChange={(e) => setDraft((d) => ({ ...d, stockCount: e.target.value }))}
             placeholder="비우면 무제한"
           />
-          <p className="mt-1 text-[10px] text-[#92a0b4]">0 또는 10 이하이면 상세 페이지에 잔여 수량 표시</p>
+          <p className="mt-1 text-[10px] text-[#92a0b4]">직접 결제 상품은 0이면 품절 처리됩니다. 외부 판매 상품은 비워두는 쪽이 안전합니다.</p>
         </label>
       </div>
 
@@ -861,12 +864,23 @@ function TabMedia({ draft, setDraft }: { draft: ProductDraft; setDraft: React.Di
   return (
     <div className="space-y-4">
       <div>
-        <div className={LABEL_CLASS}>상품 이미지 URL (최대 6개)</div>
+        <div className={LABEL_CLASS}>메인 갤러리 이미지 URL (최대 6개)</div>
         <UrlListInput
           value={draft.imageUrls}
           onChange={(v) => setDraft((d) => ({ ...d, imageUrls: v }))}
           max={6}
         />
+        <p className="mt-1 text-[10px] text-[#92a0b4]">상단 슬라이드와 목록 카드에 먼저 노출되는 대표 이미지입니다.</p>
+      </div>
+
+      <div>
+        <div className={LABEL_CLASS}>상세 본문 이미지 URL (최대 6개)</div>
+        <UrlListInput
+          value={draft.detailImageUrls}
+          onChange={(v) => setDraft((d) => ({ ...d, detailImageUrls: v }))}
+          max={6}
+        />
+        <p className="mt-1 text-[10px] text-[#92a0b4]">상세 소개 섹션에만 노출됩니다. 비우면 메인 이미지를 일부 재사용합니다.</p>
       </div>
 
       <div>
@@ -1264,6 +1278,7 @@ export function ShopAdminPage() {
             summary: draft.detailSummary,
             storyTitle: draft.detailStoryTitle,
             storyBody: draft.detailStoryBody,
+            detailImageUrls: draft.detailImageUrls.filter(Boolean),
             featureTitle: draft.detailFeatureTitle,
             featureItems: draft.detailFeatureItems.filter(Boolean),
             routineTitle: draft.detailRoutineTitle,
