@@ -546,13 +546,14 @@ export function InsightsAIRecoveryDetail() {
       meta={undefined}
       tone="navy"
       backHref="/insights"
+      className="rnest-recovery-static !max-w-[1240px] !px-[6px] !pt-4 sm:!px-2 lg:!px-3"
     >
       {insightsLocked ? (
         <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />
       ) : null}
 
       {!insightsLocked && billingLoading ? (
-        <DetailCard className="p-5">
+        <DetailCard className="p-4 sm:p-5">
           <div className="text-[13px] font-semibold text-ios-sub">{t("구독 상태 확인 중...")}</div>
           <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
             {t("AI 맞춤회복 사용 가능 여부를 확인하고 있어요.")}
@@ -561,7 +562,7 @@ export function InsightsAIRecoveryDetail() {
       ) : null}
 
       {!insightsLocked && !billingLoading && hasPaidAccess ? (
-        <DetailCard className="p-5">
+        <DetailCard className="p-4 sm:p-5">
           <div className="text-[13px] font-semibold text-ios-sub">{t("AI 맞춤회복 안내")}</div>
           <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
             {t("AI 맞춤회복은 오늘 컨디션과 최근 기록을 바탕으로 실행 우선순위 회복 루틴을 제안합니다.")}
@@ -570,7 +571,7 @@ export function InsightsAIRecoveryDetail() {
       ) : null}
 
       {!insightsLocked && !billingLoading && !hasPaidAccess ? (
-        <DetailCard className="p-5">
+        <DetailCard className="p-4 sm:p-5">
           <div className="text-[17px] font-bold tracking-[-0.01em] text-ios-text">{t("유료 플랜 전용 기능")}</div>
           <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
             {t("AI 맞춤회복은 Pro 플랜에서 사용할 수 있어요.")}
@@ -599,7 +600,7 @@ export function InsightsAIRecoveryDetail() {
       ) : null}
 
       {!insightsLocked && hasPaidAccess && !generating && !data && !error ? (
-        <DetailCard className="p-5">
+        <DetailCard className="p-4 sm:p-5">
           <div className="text-[17px] font-bold tracking-[-0.01em] text-ios-text">{t("AI 분석 준비 완료")}</div>
           <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
             {t("분석 시작 전에 필수 기록 2개(오늘 수면, 전날 건강)를 확인해 주세요.")}
@@ -634,7 +635,7 @@ export function InsightsAIRecoveryDetail() {
       ) : null}
 
       {!insightsLocked && hasPaidAccess && !loading && !generating && !data && Boolean(error) ? (
-        <DetailCard className="p-5">
+        <DetailCard className="p-4 sm:p-5">
           <div className="text-[17px] font-bold tracking-[-0.01em] text-ios-text">{t("AI 호출에 실패했어요.")}</div>
           <div className="mt-2 space-y-1 text-[14px] leading-relaxed text-ios-sub">
             {errorLines.map((line, idx) => (
@@ -661,14 +662,14 @@ export function InsightsAIRecoveryDetail() {
 
       {!insightsLocked && hasPaidAccess && !loading && data ? (
         <>
-          <DetailCard className="p-5">
+        <DetailCard className="px-2.5 py-4 sm:px-4 sm:py-5">
             <div className="text-[13px] font-semibold text-ios-sub">{t("한줄 요약")}</div>
             <p className="mt-2 text-[17px] font-semibold leading-relaxed tracking-[-0.01em] text-ios-text">
               {highlightKeySentence(normalizeNarrativeText(data.result.headline || t("요약이 비어 있어요."), lang), "summary")}
             </p>
           </DetailCard>
 
-          <DetailCard className="p-5">
+          <DetailCard className="p-4 sm:p-5">
             <div className="text-[13px] font-semibold text-ios-sub">{t("긴급 알림")}</div>
             {data.result.compoundAlert ? (
               <>
@@ -694,14 +695,14 @@ export function InsightsAIRecoveryDetail() {
             )}
           </DetailCard>
 
-          <DetailCard className="p-5">
+          <DetailCard className="px-2.5 py-4 sm:px-4 sm:py-5">
             <div className="text-[13px] font-semibold text-ios-sub">{t("오늘의 회복 추천")}</div>
             {orderedSections.length ? (
-              <div className="mt-4 space-y-3">
+              <div className="mt-3 space-y-2.5">
                 {orderedSections.map(({ meta, section }, index) => (
                   <div
                     key={`${meta.key}-${section?.title}`}
-                    className="relative overflow-hidden rounded-[24px] border px-4 py-4 shadow-apple-sm"
+                    className="relative overflow-hidden rounded-[22px] border px-2.5 py-3 shadow-apple-sm sm:px-3.5 sm:py-4"
                     style={{
                       borderColor: CATEGORY_THEME[meta.key].softBorder,
                       backgroundColor: CATEGORY_THEME[meta.key].soft,
@@ -726,20 +727,20 @@ export function InsightsAIRecoveryDetail() {
                       const statusLabel = lang === "en" ? "Current status" : "현재 상태";
 
                       return (
-                        <div className="relative pl-3">
+                        <div className="relative pl-1.5 sm:pl-2.5">
                           <div
-                            className="absolute bottom-0 left-0 top-0 w-[3px] rounded-full"
+                            className="absolute bottom-0 left-0 top-0 w-[2px] rounded-full sm:w-[3px]"
                             style={{ backgroundColor: `${theme.accent}55` }}
                           />
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-2">
+                          <div className="flex items-center justify-between gap-1.5">
+                            <div className="flex min-w-0 items-center gap-1.5">
                               <div
                                 className="flex h-7 w-7 items-center justify-center rounded-full text-[12px] font-bold shadow-[inset_0_0_0_1px_rgba(255,255,255,0.55)]"
                                 style={{ color: theme.accent, backgroundColor: "#FFFFFF" }}
                               >
                                 {index + 1}
                               </div>
-                              <span className="text-[17px] font-bold tracking-[-0.01em] text-ios-text">
+                              <span className="min-w-0 text-[17px] font-bold tracking-[-0.01em] text-ios-text">
                                 {section?.title || t(meta.titleKey)}
                               </span>
                             </div>
@@ -748,22 +749,22 @@ export function InsightsAIRecoveryDetail() {
                             </DetailChip>
                           </div>
                           {descriptionText ? (
-                            <div className="mt-3">
+                            <div className="mt-2.5">
                               <div
-                                className="inline-flex items-center rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold shadow-[inset_0_0_0_1px_rgba(255,255,255,0.45)]"
+                                className="inline-flex items-center rounded-full bg-white px-2 py-1 text-[10.5px] font-semibold shadow-[inset_0_0_0_1px_rgba(255,255,255,0.45)]"
                                 style={{ color: theme.accent }}
                               >
                                 {statusLabel}
                               </div>
-                              <p className="mt-2 text-[14px] leading-relaxed text-[#405169]">{descriptionText}</p>
+                              <p className="mt-1.5 text-[14px] leading-relaxed text-[#405169]">{descriptionText}</p>
                             </div>
                           ) : null}
                           {recommendations.length ? (
-                            <ul className="mt-3 space-y-2 border-t border-white/70 pt-3">
+                            <ul className="mt-2.5 space-y-1.5 border-t border-white/70 pt-2.5">
                               {recommendations.map((tip, idx) => (
-                                <li key={`${meta.key}-${idx}`} className="flex gap-2 text-[14px] leading-relaxed text-ios-text">
+                                <li key={`${meta.key}-${idx}`} className="flex gap-1.5 text-[14px] leading-relaxed text-ios-text">
                                   <span
-                                    className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full"
+                                    className="mt-[8px] h-1.5 w-1.5 shrink-0 rounded-full"
                                     style={{ backgroundColor: theme.accent }}
                                   />
                                   <div className="min-w-0">
@@ -789,10 +790,10 @@ export function InsightsAIRecoveryDetail() {
             )}
           </DetailCard>
 
-          <DetailCard className="p-5">
+          <DetailCard className="px-2.5 py-4 sm:px-4 sm:py-5">
             <div className="text-[13px] font-semibold text-ios-sub">{t("이번 주 AI 한마디")}</div>
             {weekly ? (
-              <div className="mt-4 overflow-hidden rounded-[24px] border border-[#DCE3F0] bg-[linear-gradient(180deg,#FAFBFF_0%,#FFFFFF_100%)] px-4 py-4">
+              <div className="mt-3 overflow-hidden rounded-[22px] border border-[#DCE3F0] bg-[linear-gradient(180deg,#FAFBFF_0%,#FFFFFF_100%)] px-3 py-3 sm:px-4 sm:py-4">
                 <div className="flex flex-wrap items-end justify-between gap-3">
                   <div>
                     <p className="text-[12px] font-semibold text-ios-sub">{t("이번 주 요약")}</p>

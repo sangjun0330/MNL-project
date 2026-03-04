@@ -532,6 +532,19 @@ a[aria-label="Back"]:active {
   transition: none !important;
 }
 
+/* AI recovery detail keeps a static reading layout on purpose. */
+.rnest-recovery-static,
+.rnest-recovery-static *,
+.rnest-recovery-static *::before,
+.rnest-recovery-static *::after {
+  animation: none !important;
+  transition: none !important;
+}
+
+.rnest-recovery-static :active {
+  transform: none !important;
+}
+
 /* ===================================
    RNest Night Mode (auto)
    Trigger: night_streak >= 3
