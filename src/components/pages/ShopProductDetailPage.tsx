@@ -59,14 +59,6 @@ const PRIMARY_BUTTON = SHOP_BUTTON_ACTIVE;
 const SECONDARY_BUTTON = SHOP_BUTTON_PRIMARY;
 const INPUT_CLASS = "w-full rounded-2xl border border-[#d7dfeb] bg-white px-4 py-3 text-[14px] text-[#11294b] outline-none transition placeholder:text-[#92a0b4] focus:border-[#11294b]";
 
-function ChevronDownIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-      <path d="M6 9l6 6 6-6" />
-    </svg>
-  );
-}
-
 function CartIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
@@ -669,22 +661,10 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
       </div>
 
       <div className="border-b border-[#edf1f6] bg-white px-4 py-4">
-        <div className="grid grid-cols-[auto_auto_1fr_auto_auto_auto] items-center gap-3">
+        <div className="grid grid-cols-[auto_1fr_auto_auto_auto] items-center gap-3">
           <ShopBackLink href="/shop" label={t("쇼핑으로 돌아가기")} />
-          <button
-            type="button"
-            data-auth-allow
-            onClick={() => setSelectedImageIndex((current) => (current + 1) % Math.max(1, galleryImageUrls.length || 1))}
-            className="inline-flex items-center gap-1 text-[#111827]"
-            aria-label={t("다음 상품 이미지")}
-          >
-            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#d7dfeb] bg-[#f8fafc] text-[10px] font-bold text-[#11294b]">
-              {selectedImageIndex + 1}
-            </span>
-            <ChevronDownIcon />
-          </button>
           <Link href="/shop" data-auth-allow className="justify-self-center">
-            <ShopBrandLogo className="h-9 w-[132px]" />
+            <ShopBrandLogo className="w-[158px]" />
           </Link>
           <button
             type="button"
@@ -695,7 +675,12 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
           >
             <HeartIcon filled={wishlisted} />
           </button>
-          <Link href="/shop/cart" data-auth-allow className="inline-flex h-11 w-11 items-center justify-center text-[#111827]" aria-label={t("장바구니")}>
+          <Link href="/shop/cart" data-auth-allow className="relative inline-flex h-11 w-11 items-center justify-center text-[#111827]" aria-label={t("장바구니")}>
+            {cartCount > 0 ? (
+              <span aria-hidden className="absolute right-1.5 top-1.5 inline-flex min-w-[15px] items-center justify-center rounded-full bg-[#17324d] px-1 py-[1px] text-[8px] font-bold leading-none text-white">
+                {cartCount > 99 ? "99+" : cartCount.toLocaleString(lang === "en" ? "en-US" : "ko-KR")}
+              </span>
+            ) : null}
             <CartIcon />
           </Link>
           <Link href="/shop/profile" data-auth-allow className="inline-flex h-11 w-11 items-center justify-center text-[#111827]" aria-label={t("쇼핑 프로필")}>

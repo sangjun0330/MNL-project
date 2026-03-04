@@ -17,10 +17,10 @@ import {
   type ShopProduct,
 } from "@/lib/shop";
 import { ShopBrandLogo } from "@/components/shop/ShopBrandLogo";
-import { ShopLanguageSwitcher } from "@/components/shop/ShopLanguageSwitcher";
 import { useAppStoreSelector } from "@/lib/store";
 import { useI18n } from "@/lib/useI18n";
 import {
+  getCart,
   getWishlist,
   loadShopClientState,
   toggleWishlist,
@@ -111,6 +111,7 @@ export function ShopPage() {
   // 위시리스트
   const [wishlist, setWishlist] = useState<string[]>([]);
   const [wishlistLoadingId, setWishlistLoadingId] = useState<string | null>(null);
+  const [cartCount, setCartCount] = useState(0);
 
   // 최근 본 상품
   const [recentIds, setRecentIds] = useState<string[]>([]);
@@ -124,6 +125,7 @@ export function ShopPage() {
     let active = true;
     if (status !== "authenticated" || !user?.userId) {
       setWishlist([]);
+      setCartCount(0);
       return () => {
         active = false;
       };
@@ -132,12 +134,14 @@ export function ShopPage() {
     const run = async () => {
       try {
         const headers = await authHeaders();
-        const ids = await getWishlist(headers);
+        const [ids, cartItems] = await Promise.all([getWishlist(headers), getCart(headers)]);
         if (!active) return;
         setWishlist(ids);
+        setCartCount(cartItems.reduce((sum, item) => sum + item.quantity, 0));
       } catch {
         if (!active) return;
         setWishlist([]);
+        setCartCount(0);
       }
     };
 
@@ -264,16 +268,20 @@ export function ShopPage() {
 
       {/* 헤더 */}
       <div className="relative z-[60] border-b border-[#edf1f6] bg-white px-4 py-3">
-        <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3">
-          <ShopLanguageSwitcher />
-          <Link href="/shop" data-auth-allow className="justify-self-center">
-            <ShopBrandLogo className="h-9 w-[146px]" />
+        <div className="flex items-center gap-3">
+          <Link href="/shop" data-auth-allow className="shrink-0">
+            <ShopBrandLogo className="w-[158px]" />
           </Link>
           <div className="ml-auto flex items-center gap-0.5">
             <Link href="/shop/wishlist" data-auth-allow className="inline-flex h-10 w-10 items-center justify-center text-[#111827]" aria-label={t("찜한 상품")}>
               <WishlistIcon />
             </Link>
-            <Link href="/shop/cart" data-auth-allow className="inline-flex h-10 w-10 items-center justify-center text-[#111827]" aria-label={t("장바구니")}>
+            <Link href="/shop/cart" data-auth-allow className="relative inline-flex h-10 w-10 items-center justify-center text-[#111827]" aria-label={t("장바구니")}>
+              {cartCount > 0 ? (
+                <span aria-hidden className="absolute right-1 top-1 inline-flex min-w-[15px] items-center justify-center rounded-full bg-[#17324d] px-1 py-[1px] text-[8px] font-bold leading-none text-white">
+                  {cartCount > 99 ? "99+" : cartCount.toLocaleString(lang === "en" ? "en-US" : "ko-KR")}
+                </span>
+              ) : null}
               <CartIcon />
             </Link>
             <Link href="/shop/profile" data-auth-allow className="inline-flex h-10 w-10 items-center justify-center text-[#111827]" aria-label={t("쇼핑 프로필")}>
