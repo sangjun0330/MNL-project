@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { calculateShopPricing, formatShopCurrency, type ShopPricingBreakdown } from "@/lib/shop";
 import { SHOP_BUTTON_ACTIVE, SHOP_BUTTON_PRIMARY, SHOP_BUTTON_SECONDARY } from "@/lib/shopUi";
@@ -114,49 +115,57 @@ export function ShopCheckoutSheet({
           </div>
         </div>
         <div className="my-3 h-px bg-ios-sep" />
+
+        {/* 배송지 섹션 — 항상 주소 변경 링크 포함 */}
+        <div className="flex items-center justify-between">
+          <div className="text-[13px] font-semibold text-ios-text">
+            {addresses.length > 1 ? t("배송지 선택") : t("배송지")}
+          </div>
+          <Link
+            href="/settings/account/shipping"
+            data-auth-allow
+            className="text-[12px] font-medium text-[#3b6fc9] active:opacity-60"
+          >
+            {t("다른 주소로 변경")} →
+          </Link>
+        </div>
+
         {addresses.length > 1 ? (
-          <>
-            <div className="text-[13px] font-semibold text-ios-text">{t("배송지 선택")}</div>
-            <div className="mt-2 grid gap-2">
-              {addresses.map((address) => {
-                const active = address.id === selectedAddressId;
-                return (
-                  <button
-                    key={address.id}
-                    type="button"
-                    data-auth-allow
-                    onClick={() => onSelectAddress?.(address.id)}
-                    className={[
-                      "rounded-[24px] border-2 px-4 py-4 text-left transition",
-                      active ? "border-[#17324d] bg-[#dfe8f1]" : "border-[#bfd0e1] bg-[#eef4fb]",
-                    ].join(" ")}
-                  >
-                    <div className="flex items-center gap-2">
-                      {active ? (
-                        <span className="rounded-full bg-[#17324d] px-2 py-0.5 text-[10px] font-semibold text-white">{t("선택")}</span>
-                      ) : null}
-                      <span className="text-[12px] font-semibold text-[#11294b]">{address.label}</span>
-                    </div>
-                    <div className="mt-1 text-[12px] font-semibold text-ios-text">{address.recipientName} · {address.phone}</div>
-                    <div className="mt-1 text-[11.5px] leading-5 text-ios-sub">
-                      ({address.postalCode}) {address.addressLine1} {address.addressLine2}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-            <div className="my-3 h-px bg-ios-sep" />
-          </>
+          <div className="mt-2 grid gap-2">
+            {addresses.map((address) => {
+              const active = address.id === selectedAddressId;
+              return (
+                <button
+                  key={address.id}
+                  type="button"
+                  data-auth-allow
+                  onClick={() => onSelectAddress?.(address.id)}
+                  className={[
+                    "rounded-[24px] border-2 px-4 py-4 text-left transition",
+                    active ? "border-[#17324d] bg-[#dfe8f1]" : "border-[#bfd0e1] bg-[#eef4fb]",
+                  ].join(" ")}
+                >
+                  <div className="flex items-center gap-2">
+                    {active ? (
+                      <span className="rounded-full bg-[#17324d] px-2 py-0.5 text-[10px] font-semibold text-white">{t("선택")}</span>
+                    ) : null}
+                    <span className="text-[12px] font-semibold text-[#11294b]">{address.label}</span>
+                  </div>
+                  <div className="mt-1 text-[12px] font-semibold text-ios-text">{address.recipientName} · {address.phone}</div>
+                  <div className="mt-1 text-[11.5px] leading-5 text-ios-sub">
+                    ({address.postalCode}) {address.addressLine1} {address.addressLine2}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        ) : shippingLabel ? (
+          <div className="mt-2 rounded-2xl border border-[#d7dfeb] bg-[#f4f7fb] px-3 py-3 text-[12.5px] leading-5 text-[#44556d]">
+            {shippingLabel}
+          </div>
         ) : null}
-        {shippingLabel ? (
-          <>
-            <div className="text-[13px] font-semibold text-ios-text">{t("배송지")}</div>
-            <div className="mt-1 rounded-2xl border border-[#d7dfeb] bg-[#f4f7fb] px-3 py-3 text-[12.5px] leading-5 text-[#44556d]">
-              {shippingLabel}
-            </div>
-            <div className="my-3 h-px bg-ios-sep" />
-          </>
-        ) : null}
+
+        <div className="my-3 h-px bg-ios-sep" />
 
         <div className="text-[13px] font-semibold text-ios-text">{t("최종 확인")}</div>
         <div className="mt-2 grid gap-2">

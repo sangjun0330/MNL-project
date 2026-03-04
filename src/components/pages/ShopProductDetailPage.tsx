@@ -624,7 +624,7 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
   };
 
   return (
-    <div className="-mx-4 pb-[calc(182px+env(safe-area-inset-bottom))]">
+    <div className="-mx-4 pb-[calc(100px+env(safe-area-inset-bottom))]">
       <div className="bg-[#102a43] px-4 py-3 text-center text-[12.5px] font-semibold text-white">
         {t("오늘 회복 흐름에 맞는 추천 상품과 구매 정보를 한눈에 확인하세요")}
       </div>
@@ -799,6 +799,48 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
                 </div>
               </div>
             ) : null}
+
+            {/* 장바구니 / 구매하기 버튼 — 수량 선택 바로 아래 */}
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                data-auth-allow
+                onClick={() => void handleAddToCart()}
+                disabled={cartLoading}
+                className={`relative h-14 flex-1 text-[15px] ${SECONDARY_BUTTON}`}
+              >
+                {cartCount > 0 ? (
+                  <span className="absolute -top-3 rounded-full bg-[#17324d] px-3 py-1 text-[11px] font-semibold text-white">
+                    {cartCount.toLocaleString(lang === "en" ? "en-US" : "ko-KR")}
+                  </span>
+                ) : null}
+                {cartLoading ? t("담는 중...") : t("장바구니")}
+              </button>
+
+              {hardOutOfStock ? (
+                <button type="button" disabled className="inline-flex h-14 flex-[1.2] items-center justify-center rounded-2xl bg-[#b0b8c5] text-[15px] font-semibold text-white">
+                  {t("품절")}
+                </button>
+              ) : product.checkoutEnabled && product.priceKrw ? (
+                <button type="button" data-auth-allow onClick={handleOpenCheckout} className={`h-14 flex-[1.2] text-[15px] ${PRIMARY_BUTTON}`}>
+                  {t("구매하기")}
+                </button>
+              ) : product.externalUrl ? (
+                <a
+                  href={product.externalUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={handlePartnerClick}
+                  className={`inline-flex h-14 flex-[1.2] items-center justify-center text-[15px] ${PRIMARY_BUTTON}`}
+                >
+                  {t("구매하기")}
+                </a>
+              ) : (
+                <button type="button" disabled className="inline-flex h-14 flex-[1.2] items-center justify-center rounded-2xl bg-[#8da8d8] text-[15px] font-semibold text-white">
+                  {t("판매 준비중")}
+                </button>
+              )}
+            </div>
 
             <div className="rounded-3xl border border-[#e6ebf2] bg-[#f8fafc] px-4 py-4 text-[13px] leading-7 text-[#111827]">
               <div className="font-semibold text-[#11294b]">{t(detail.headline)}</div>
@@ -1095,56 +1137,6 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
               </div>
             </div>
             <div className="rounded-3xl border border-[#e6ebf2] bg-[#f8fafc] p-4">
-              <div className="text-[13px] font-semibold text-[#111827]">{t("배송지")}</div>
-              {status !== "authenticated" ? (
-                <div className="mt-3 text-[12.5px] leading-6 text-[#65748b]">{t("로그인 후 계정에 저장한 기본 배송지로 바로 주문할 수 있습니다.")}</div>
-              ) : shippingLoading ? (
-                <div className="mt-3 text-[12.5px] leading-6 text-[#65748b]">{t("배송지 정보를 불러오는 중입니다.")}</div>
-              ) : shippingAddresses.length > 0 ? (
-                <div className="mt-3 space-y-2">
-                  {shippingAddresses.map((address) => {
-                    const active = address.id === selectedShippingAddressId;
-                    return (
-                      <button
-                        key={address.id}
-                        type="button"
-                        data-auth-allow
-                        onClick={() => setSelectedShippingAddressId(address.id)}
-                        className={[
-                          "w-full rounded-[24px] border-2 px-4 py-4 text-left transition",
-                          active ? "border-[#17324d] bg-[#dfe8f1]" : "border-[#bfd0e1] bg-[#eef4fb]",
-                        ].join(" ")}
-                      >
-                        <div className="flex items-center gap-2">
-                          {active ? (
-                            <span className="rounded-full bg-[#17324d] px-2 py-0.5 text-[10px] font-semibold text-white">{t("선택")}</span>
-                          ) : null}
-                          <span className="text-[12px] font-semibold text-[#11294b]">{t(address.label)}</span>
-                        </div>
-                        <div className="mt-1 text-[12px] font-semibold text-[#111827]">{address.recipientName} · {address.phone}</div>
-                        <div className="mt-1 text-[12px] leading-5 text-[#44556d]">{formatShopShippingSingleLine(address)}</div>
-                      </button>
-                    );
-                  })}
-                  {shippingReady && effectiveShippingProfile ? (
-                    <div className="rounded-2xl border border-[#d7dfeb] bg-white px-3 py-3 text-[12px] leading-5 text-[#44556d]">
-                      {t("결제 시 선택한 주소")}
-                      <div className="mt-1 font-semibold text-[#11294b]">{shippingLabel}</div>
-                    </div>
-                  ) : null}
-                </div>
-              ) : shippingReady ? (
-                <div className="mt-3 text-[12.5px] leading-6 text-[#44556d]">{shippingLabel}</div>
-              ) : (
-                <div className="mt-3 text-[12.5px] leading-6 text-[#a33a2b]">{t("계정에서 기본 배송지를 먼저 저장해야 합니다.")}</div>
-              )}
-              <div className="mt-4">
-                <Link href="/settings/account/shipping" data-auth-allow className={`${SECONDARY_BUTTON} h-10 text-[12px]`}>
-                  {t("배송지 수정")}
-                </Link>
-              </div>
-            </div>
-            <div className="rounded-3xl border border-[#e6ebf2] bg-[#f8fafc] p-4">
               <div className="text-[13px] font-semibold text-[#111827]">{t(detail.noticeTitle)}</div>
               <div className="mt-3 text-[12.5px] leading-6 text-[#44556d]">{t(detail.noticeBody)}</div>
             </div>
@@ -1185,49 +1177,6 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
             </div>
           </section>
         ) : null}
-      </div>
-
-      <div id="shop-detail-buybar" className="fixed inset-x-0 bottom-[calc(92px+env(safe-area-inset-bottom))] z-40 px-4">
-        <div className="mx-auto flex w-full max-w-[688px] items-center gap-3">
-          <button
-            type="button"
-            data-auth-allow
-            onClick={() => void handleAddToCart()}
-            disabled={cartLoading}
-            className={`relative h-16 flex-1 text-[15px] ${SECONDARY_BUTTON}`}
-          >
-            {cartCount > 0 ? (
-              <span className="absolute -top-3 rounded-full bg-[#17324d] px-3 py-1 text-[11px] font-semibold text-white">
-                {cartCount.toLocaleString(lang === "en" ? "en-US" : "ko-KR")}
-              </span>
-            ) : null}
-            {cartLoading ? t("담는 중...") : t("장바구니")}
-          </button>
-
-          {hardOutOfStock ? (
-            <button type="button" disabled className="inline-flex h-16 flex-[1.2] items-center justify-center rounded-2xl bg-[#b0b8c5] text-[15px] font-semibold text-white">
-              {t("품절")}
-            </button>
-          ) : product.checkoutEnabled && product.priceKrw ? (
-            <button type="button" data-auth-allow onClick={handleOpenCheckout} className={`h-16 flex-[1.2] text-[15px] ${PRIMARY_BUTTON}`}>
-              {t("구매하기")}
-            </button>
-          ) : product.externalUrl ? (
-            <a
-              href={product.externalUrl}
-              target="_blank"
-              rel="noreferrer"
-              onClick={handlePartnerClick}
-              className={`h-16 flex-[1.2] text-[15px] ${PRIMARY_BUTTON}`}
-            >
-              {t("구매하기")}
-            </a>
-          ) : (
-            <button type="button" disabled className="inline-flex h-16 flex-[1.2] items-center justify-center rounded-2xl bg-[#8da8d8] text-[15px] font-semibold text-white">
-              {t("판매 준비중")}
-            </button>
-          )}
-        </div>
       </div>
 
       <ShopCheckoutSheet
