@@ -3,7 +3,12 @@ import { toMaskedShopShippingSnapshot } from "@/lib/shopPrivacy";
 import { normalizeShopShippingSnapshot, type ShopShippingSnapshot, type ShopSmartTrackerMeta } from "@/lib/shopProfile";
 import { findShopOrderBundleByOrderId, markShopOrderBundleCanceled } from "@/lib/server/shopOrderBundleStore";
 import { loadUserEmailById, sendDeliveryCompletedEmail } from "@/lib/server/emailService";
-import { buildSweetTrackerTrackingUrl, fetchSweetTrackerTracking, shouldPollSweetTracker } from "@/lib/server/sweetTracker";
+import {
+  fetchSweetTrackerTracking,
+  shouldPollSweetTracker,
+  type SweetTrackerResult,
+} from "@/lib/server/sweetTracker";
+import { resolveSweetTrackerCarrier, resolveSweetTrackerCarrierCode } from "@/lib/shopShipping";
 import { buildCancelIdempotencyKey, buildConfirmIdempotencyKey, readTossAcceptLanguage, readTossSecretKeyFromEnv, readTossTestCodeFromEnv } from "@/lib/server/tossConfig";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { loadUserState, saveUserState } from "@/lib/server/userStateStore";
@@ -743,7 +748,12 @@ function isTrackableShippedOrder(order: ShopOrderRecord) {
   return (
     order.status === "SHIPPED" &&
     Boolean(order.trackingNumber) &&
-    Boolean(order.shipping.smartTracker?.carrierCode)
+    Boolean(
+      resolveSweetTrackerCarrierCode({
+        carrierCode: order.shipping.smartTracker?.carrierCode ?? null,
+        courier: order.courier,
+      })
+    )
   );
 }
 
@@ -761,31 +771,28 @@ async function saveOrderWithSmartTrackerMeta(
   });
 }
 
-async function syncSingleOrderTrackingIfNeeded(
+async function applyTrackingResultToOrder(
   order: ShopOrderRecord,
-  input?: { force?: boolean; actorUserId?: string | null }
+  result: SweetTrackerResult,
+  input?: { actorUserId?: string | null; resolvedCarrierCode?: string | null }
 ): Promise<ShopOrderRecord> {
-  if (!isTrackableShippedOrder(order)) return order;
-  if (!shouldPollSweetTracker(order.shipping.smartTracker, Boolean(input?.force))) return order;
-
   const meta = order.shipping.smartTracker;
-  const result = await fetchSweetTrackerTracking({
-    carrierCode: meta?.carrierCode ?? null,
-    trackingNumber: order.trackingNumber,
-  });
-
   const now = new Date().toISOString();
+  const resolvedCarrierCode = cleanText(input?.resolvedCarrierCode, 40) || meta?.carrierCode || null;
+
   if (!result.ok) {
     if (result.reason === "missing_config" || result.reason === "invalid_input") {
       return order;
     }
     if (result.reason === "fetch_failed") {
       return await saveOrderWithSmartTrackerMeta(order, {
+        carrierCode: resolvedCarrierCode,
         trackingUrl: result.trackingUrl ?? meta?.trackingUrl ?? null,
         lastPolledAt: now,
       }).catch(() => order);
     }
     return await saveOrderWithSmartTrackerMeta(order, {
+      carrierCode: resolvedCarrierCode,
       trackingUrl: result.trackingUrl ?? meta?.trackingUrl ?? null,
       lastStatus: "not_found",
       lastStatusLabel: "조회 불가",
@@ -794,6 +801,7 @@ async function syncSingleOrderTrackingIfNeeded(
   }
 
   const nextMeta = mergeSmartTrackerMeta(meta, {
+    carrierCode: resolvedCarrierCode,
     trackingUrl: result.trackingUrl,
     lastStatus: result.rawStatus,
     lastStatusLabel: result.statusLabel,
@@ -841,6 +849,29 @@ async function syncSingleOrderTrackingIfNeeded(
 
   if (!hasMetaChanged) return order;
   return saveOrderWithSmartTrackerMeta(order, nextMeta).catch(() => order);
+}
+
+async function syncSingleOrderTrackingIfNeeded(
+  order: ShopOrderRecord,
+  input?: { force?: boolean; actorUserId?: string | null }
+): Promise<ShopOrderRecord> {
+  if (!isTrackableShippedOrder(order)) return order;
+  if (!shouldPollSweetTracker(order.shipping.smartTracker, Boolean(input?.force))) return order;
+
+  const meta = order.shipping.smartTracker;
+  const resolvedCarrierCode = resolveSweetTrackerCarrierCode({
+    carrierCode: meta?.carrierCode ?? null,
+    courier: order.courier,
+  });
+  if (!resolvedCarrierCode) return order;
+  const result = await fetchSweetTrackerTracking({
+    carrierCode: resolvedCarrierCode,
+    trackingNumber: order.trackingNumber,
+  });
+  return applyTrackingResultToOrder(order, result, {
+    ...input,
+    resolvedCarrierCode,
+  });
 }
 
 async function syncOrdersForRead(
@@ -1779,15 +1810,20 @@ export async function markShopOrderShipped(input: {
   if (!current) throw new Error("shop_order_not_found");
   if (current.status !== "PAID") throw new Error("shop_order_not_paid");
   const now = new Date().toISOString();
-  const carrierCode = cleanText(input.carrierCode, 40);
+  const resolvedCarrier = resolveSweetTrackerCarrier({
+    carrierCode: input.carrierCode,
+    courier: input.courier,
+  });
+  const carrierCode = cleanText(resolvedCarrier?.code, 40);
   if (!carrierCode) throw new Error("tracking_carrier_code_required");
+  const courier = cleanText(resolvedCarrier?.label ?? input.courier, 60);
   // BUG-06: SweetTracker API 키 URL 노출 방지
   // trackingUrl을 DB에 저장하지 않음 — 클라이언트는 /api/shop/tracking 프록시를 통해 조회
   const saved = await writeOrder({
     ...current,
     status: "SHIPPED",
     trackingNumber: cleanText(input.trackingNumber, 120),
-    courier: cleanText(input.courier, 60),
+    courier,
     shipping: normalizeShopShippingSnapshot({
       ...current.shipping,
       smartTracker: mergeSmartTrackerMeta(current.shipping.smartTracker, {
@@ -1807,8 +1843,8 @@ export async function markShopOrderShipped(input: {
     eventType: "order_shipped",
     actorRole: "admin",
     actorUserId: input.adminUserId,
-    message: `배송 처리: ${input.courier} ${input.trackingNumber}`,
-    metadata: { trackingNumber: input.trackingNumber, courier: input.courier, carrierCode },
+    message: `배송 처리: ${courier} ${input.trackingNumber}`,
+    metadata: { trackingNumber: input.trackingNumber, courier, carrierCode },
   });
   return saved;
 }
@@ -1897,6 +1933,20 @@ export async function syncShopOrderTracking(input: {
   return syncSingleOrderTrackingIfNeeded(current, {
     force: Boolean(input.force),
     actorUserId: input.adminUserId ?? null,
+  });
+}
+
+export async function syncShopOrderTrackingFromSnapshot(input: {
+  orderId: string;
+  snapshot: SweetTrackerResult;
+  actorUserId?: string | null;
+  resolvedCarrierCode?: string | null;
+}): Promise<ShopOrderRecord> {
+  const current = await readShopOrder(input.orderId);
+  if (!current) throw new Error("shop_order_not_found");
+  return applyTrackingResultToOrder(current, input.snapshot, {
+    actorUserId: input.actorUserId ?? null,
+    resolvedCarrierCode: input.resolvedCarrierCode ?? null,
   });
 }
 

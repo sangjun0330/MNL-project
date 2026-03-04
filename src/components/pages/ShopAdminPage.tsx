@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuthState } from "@/lib/auth";
 import { authHeaders } from "@/lib/billing/client";
 import {
@@ -19,6 +19,7 @@ import {
   type ShopProductSpec,
   type ShopSignalKey,
 } from "@/lib/shop";
+import { findShopCarrierOptionByCode, findShopCarrierOptionByLabel, SHOP_CARRIER_OPTIONS } from "@/lib/shopShipping";
 import { useI18n } from "@/lib/useI18n";
 
 // ─────────────────────────────────────────────
@@ -101,6 +102,7 @@ type FieldErrors = Partial<Record<keyof ProductDraft | "priceKrwRequired", strin
 type AdminTab = "basic" | "price" | "visual" | "media" | "detail" | "signals";
 type CatalogFilter = "all" | "active" | "inactive";
 type AdminSection = "products" | "orders" | "refunds";
+const CUSTOM_CARRIER_VALUE = "__custom__";
 
 // ─────────────────────────────────────────────
 // Style constants
@@ -165,6 +167,82 @@ function buildShippingDrafts(orders: ShopAdminOrderSummary[]) {
     };
     return acc;
   }, {});
+}
+
+const ADMIN_SHIPPING_DRAFT_STORAGE_KEY = "shop-admin-shipping-drafts";
+
+function sanitizeShippingDraftValue(value: unknown, max = 120) {
+  return String(value ?? "").trim().slice(0, max);
+}
+
+function sanitizeShippingDraftMap(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+
+  const next: Record<string, { courier: string; carrierCode: string; trackingNumber: string }> = {};
+  for (const [orderId, raw] of Object.entries(value as Record<string, unknown>)) {
+    const safeOrderId = sanitizeShippingDraftValue(orderId, 80);
+    const source = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+    if (!safeOrderId) continue;
+    next[safeOrderId] = {
+      courier: sanitizeShippingDraftValue(source.courier, 60),
+      carrierCode: sanitizeShippingDraftValue(source.carrierCode, 40),
+      trackingNumber: sanitizeShippingDraftValue(source.trackingNumber, 120),
+    };
+  }
+  return next;
+}
+
+function readStoredShippingDrafts(storageKey: string | null) {
+  if (!storageKey || typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw) return {};
+    return sanitizeShippingDraftMap(JSON.parse(raw));
+  } catch {
+    return {};
+  }
+}
+
+function writeStoredShippingDrafts(
+  storageKey: string | null,
+  drafts: Record<string, { courier: string; carrierCode: string; trackingNumber: string }>
+) {
+  if (!storageKey || typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify(sanitizeShippingDraftMap(drafts)));
+  } catch {
+    // ignore storage quota / privacy mode failures
+  }
+}
+
+function mergeShippingDraftMaps(
+  orders: ShopAdminOrderSummary[],
+  currentDrafts: Record<string, { courier: string; carrierCode: string; trackingNumber: string }>,
+  storedDrafts: Record<string, { courier: string; carrierCode: string; trackingNumber: string }>
+) {
+  const serverDrafts = buildShippingDrafts(orders);
+  const merged: Record<string, { courier: string; carrierCode: string; trackingNumber: string }> = {};
+
+  for (const order of orders) {
+    const server = serverDrafts[order.orderId] ?? { courier: "", carrierCode: "", trackingNumber: "" };
+    const current = currentDrafts[order.orderId] ?? { courier: "", carrierCode: "", trackingNumber: "" };
+    const stored = storedDrafts[order.orderId] ?? { courier: "", carrierCode: "", trackingNumber: "" };
+    merged[order.orderId] = {
+      courier: server.courier || current.courier || stored.courier || "",
+      carrierCode: server.carrierCode || current.carrierCode || stored.carrierCode || "",
+      trackingNumber: server.trackingNumber || current.trackingNumber || stored.trackingNumber || "",
+    };
+  }
+
+  return merged;
+}
+
+function resolveDraftCarrierSelectValue(draft: { courier: string; carrierCode: string; trackingNumber: string } | undefined) {
+  const safeCode = String(draft?.carrierCode ?? "").trim();
+  const safeCourier = String(draft?.courier ?? "").trim();
+  if (!safeCode && !safeCourier) return "";
+  const carrier = findShopCarrierOptionByCode(safeCode) ?? findShopCarrierOptionByLabel(safeCourier);
+  return carrier?.code ?? CUSTOM_CARRIER_VALUE;
 }
 
 function AdminSummaryTile({
@@ -936,6 +1014,7 @@ export function ShopAdminPage() {
   const { t } = useI18n();
   const { status, user } = useAuthState();
   const [accessState, setAccessState] = useState<"checking" | "allowed" | "blocked">("checking");
+  const mountedRef = useRef(true);
 
   // Catalog (includes inactive for admin)
   const [catalog, setCatalog] = useState<(ShopProduct & { active?: boolean })[]>(SHOP_PRODUCTS);
@@ -959,6 +1038,7 @@ export function ShopAdminPage() {
   const [noticeTone, setNoticeTone] = useState<"error" | "notice">("notice");
   const [refundLoadingId, setRefundLoadingId] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<AdminSection>("products");
+  const shippingDraftStorageKey = user?.userId ? `${ADMIN_SHIPPING_DRAFT_STORAGE_KEY}:${user.userId}` : null;
 
   const refundQueue = useMemo(() => orders.filter((o) => o.status === "REFUND_REQUESTED"), [orders]);
   const salesStats = useMemo(() => {
@@ -993,6 +1073,45 @@ export function ShopAdminPage() {
     setNotice(text);
   };
 
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const loadAdminOrders = useCallback(
+    async (input?: { showLoading?: boolean; silent?: boolean; headers?: Record<string, string> }) => {
+      if (!input?.headers && (status !== "authenticated" || !user?.userId)) return;
+      if (input?.showLoading && mountedRef.current) setOrdersLoading(true);
+
+      try {
+        const headers = input?.headers ?? (await authHeaders());
+        const res = await fetch("/api/admin/shop/orders?limit=40", {
+          method: "GET",
+          headers: { "content-type": "application/json", ...headers },
+          cache: "no-store",
+        });
+        const json = await res.json().catch(() => null);
+        if (!mountedRef.current) return;
+        if (!res.ok || !json?.ok || !Array.isArray(json?.data?.orders)) throw new Error();
+
+        const nextOrders = json.data.orders as ShopAdminOrderSummary[];
+        setOrders(nextOrders);
+        setShippingDrafts((current) =>
+          mergeShippingDraftMaps(nextOrders, current, readStoredShippingDrafts(shippingDraftStorageKey))
+        );
+      } catch {
+        if (!mountedRef.current || input?.silent) return;
+        setNoticeTone("error");
+        setNotice("주문 목록을 다시 불러오지 못했습니다.");
+      } finally {
+        if (input?.showLoading && mountedRef.current) setOrdersLoading(false);
+      }
+    },
+    [shippingDraftStorageKey, status, user?.userId]
+  );
+
   // Auth + initial data load
   useEffect(() => {
     let active = true;
@@ -1015,19 +1134,13 @@ export function ShopAdminPage() {
         setAccessState("allowed");
 
         setCatalogLoading(true);
-        setOrdersLoading(true);
-
         const [catalogResult, ordersResult] = await Promise.allSettled([
           fetch("/api/admin/shop/catalog", {
             method: "GET",
             headers: { "content-type": "application/json", ...headers },
             cache: "no-store",
           }).then(async (r) => ({ ok: r.ok, json: await r.json().catch(() => null) })),
-          fetch("/api/admin/shop/orders?limit=40", {
-            method: "GET",
-            headers: { "content-type": "application/json", ...headers },
-            cache: "no-store",
-          }).then(async (r) => ({ ok: r.ok, json: await r.json().catch(() => null) })),
+          loadAdminOrders({ showLoading: true, silent: true, headers }),
         ]);
 
         if (!active) return;
@@ -1038,10 +1151,8 @@ export function ShopAdminPage() {
           setCatalog(SHOP_PRODUCTS);
           showNotice("error", "상품 목록을 불러오지 못했습니다.");
         }
-
-        if (ordersResult.status === "fulfilled" && ordersResult.value.ok && Array.isArray(ordersResult.value.json?.data?.orders)) {
-          setOrders(ordersResult.value.json.data.orders);
-          setShippingDrafts(buildShippingDrafts(ordersResult.value.json.data.orders));
+        if (ordersResult.status === "rejected") {
+          showNotice("error", "주문 목록을 불러오지 못했습니다.");
         }
       } catch {
         if (!active) return;
@@ -1049,12 +1160,34 @@ export function ShopAdminPage() {
       } finally {
         if (!active) return;
         setCatalogLoading(false);
-        setOrdersLoading(false);
       }
     };
     void run();
     return () => { active = false; };
-  }, [status, user?.userId]);
+  }, [loadAdminOrders, status, user?.userId]);
+
+  useEffect(() => {
+    if (accessState !== "allowed") return;
+
+    const refreshIfVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      void loadAdminOrders({ showLoading: false, silent: true });
+    };
+
+    const intervalId = window.setInterval(refreshIfVisible, 30000);
+    window.addEventListener("focus", refreshIfVisible);
+    document.addEventListener("visibilitychange", refreshIfVisible);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", refreshIfVisible);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+    };
+  }, [accessState, loadAdminOrders]);
+
+  useEffect(() => {
+    writeStoredShippingDrafts(shippingDraftStorageKey, shippingDrafts);
+  }, [shippingDraftStorageKey, shippingDrafts]);
 
   const selectProduct = (product: ShopProduct & { active?: boolean }) => {
     setActiveProductId(product.id);
@@ -1206,6 +1339,7 @@ export function ShopAdminPage() {
       if (!res.ok || !json?.ok) throw new Error(String(json?.error ?? `http_${res.status}`));
       const nextOrder = json.data.order as ShopAdminOrderSummary;
       setOrders((cur) => [nextOrder, ...cur.filter((o) => o.orderId !== nextOrder.orderId)].slice(0, 20));
+      void loadAdminOrders({ showLoading: false, silent: true });
       showNotice("notice", action === "approve" ? "환불을 승인했습니다." : "환불 요청을 반려했습니다.");
     } catch (error: any) {
       const message = String(error?.message ?? "");
@@ -1235,6 +1369,43 @@ export function ShopAdminPage() {
     }));
   };
 
+  const handleCarrierSelectionChange = (orderId: string, value: string) => {
+    if (!value) {
+      setShippingDrafts((current) => ({
+        ...current,
+        [orderId]: {
+          courier: "",
+          carrierCode: "",
+          trackingNumber: current[orderId]?.trackingNumber ?? "",
+        },
+      }));
+      return;
+    }
+
+    if (value === CUSTOM_CARRIER_VALUE) {
+      setShippingDrafts((current) => ({
+        ...current,
+        [orderId]: {
+          courier: current[orderId]?.courier ?? "",
+          carrierCode: findShopCarrierOptionByCode(current[orderId]?.carrierCode ?? "")?.code ? "" : (current[orderId]?.carrierCode ?? ""),
+          trackingNumber: current[orderId]?.trackingNumber ?? "",
+        },
+      }));
+      return;
+    }
+
+    const carrier = findShopCarrierOptionByCode(value);
+    if (!carrier) return;
+    setShippingDrafts((current) => ({
+      ...current,
+      [orderId]: {
+        courier: carrier.label,
+        carrierCode: carrier.code,
+        trackingNumber: current[orderId]?.trackingNumber ?? "",
+      },
+    }));
+  };
+
   const handleShippingAction = async (orderId: string, action: "mark_shipped" | "mark_delivered" | "sync_tracking") => {
     if (accessState !== "allowed") return;
     setShippingLoadingId(orderId);
@@ -1242,7 +1413,7 @@ export function ShopAdminPage() {
 
     const draft = shippingDrafts[orderId] ?? { courier: "", carrierCode: "", trackingNumber: "" };
     if (action === "mark_shipped" && (!draft.courier.trim() || !draft.carrierCode.trim() || !draft.trackingNumber.trim())) {
-      showNotice("error", "배송 처리에는 택배사명, 스마트택배 연동 코드, 운송장 번호가 모두 필요합니다.");
+      showNotice("error", "배송 처리에는 택배사 선택과 운송장 번호가 필요합니다. 기타 택배사만 연동 코드를 직접 입력해 주세요.");
       setShippingLoadingId(null);
       return;
     }
@@ -1279,6 +1450,7 @@ export function ShopAdminPage() {
           trackingNumber: nextOrder.trackingNumber ?? "",
         },
       }));
+      void loadAdminOrders({ showLoading: false, silent: true });
       showNotice(
         "notice",
         action === "mark_shipped"
@@ -1294,7 +1466,7 @@ export function ShopAdminPage() {
       if (message === "tracking_number_and_courier_required") {
         showNotice("error", "택배사와 운송장 번호를 모두 입력해주세요.");
       } else if (message === "tracking_carrier_code_required") {
-        showNotice("error", "스마트택배 연동 코드(t_code)를 입력해주세요.");
+        showNotice("error", "선택되지 않은 택배사는 스마트택배 연동 코드를 직접 입력해주세요.");
       } else if (message === "shop_order_not_paid") {
         showNotice("error", "결제 완료 주문만 배송 처리할 수 있습니다.");
       } else if (message === "shop_order_not_shipped") {
@@ -1729,7 +1901,6 @@ export function ShopAdminPage() {
               {order.trackingNumber || order.courier ? (
                 <div className="mt-2 rounded-2xl border border-[#eef2f7] bg-[#f8fafc] px-3 py-3 text-[11px] leading-5 text-[#44556d]">
                   {order.courier || "택배사 미입력"} · {order.trackingNumber || "운송장 미입력"}
-                  {order.tracking?.carrierCode ? <><br />스마트택배 코드: {order.tracking.carrierCode}</> : null}
                   {order.tracking?.statusLabel ? <><br />배송 조회 상태: {order.tracking.statusLabel}</> : null}
                   {order.tracking?.lastEventAt ? <><br />마지막 이벤트: {formatDateLabel(order.tracking.lastEventAt)}</> : null}
                   {order.shippedAt ? <><br />발송일: {formatDateLabel(order.shippedAt)}</> : null}
@@ -1738,19 +1909,20 @@ export function ShopAdminPage() {
               ) : null}
               {order.status === "PAID" ? (
                 <div className="mt-3 rounded-2xl border border-[#eef2f7] bg-[#f8fafc] p-3">
-                  <div className="grid gap-2 md:grid-cols-[1fr_140px_1fr_auto]">
-                    <input
+                  <div className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+                    <select
                       className={INPUT_CLASS}
-                      value={shippingDrafts[order.orderId]?.courier ?? ""}
-                      onChange={(e) => handleShippingDraftChange(order.orderId, "courier", e.target.value)}
-                      placeholder="택배사 (예: CJ대한통운)"
-                    />
-                    <input
-                      className={INPUT_CLASS}
-                      value={shippingDrafts[order.orderId]?.carrierCode ?? ""}
-                      onChange={(e) => handleShippingDraftChange(order.orderId, "carrierCode", e.target.value)}
-                      placeholder="연동 코드 (t_code)"
-                    />
+                      value={resolveDraftCarrierSelectValue(shippingDrafts[order.orderId])}
+                      onChange={(e) => handleCarrierSelectionChange(order.orderId, e.target.value)}
+                    >
+                      <option value="">택배사 선택</option>
+                      {SHOP_CARRIER_OPTIONS.map((carrier) => (
+                        <option key={carrier.code} value={carrier.code}>
+                          {carrier.label}
+                        </option>
+                      ))}
+                      <option value={CUSTOM_CARRIER_VALUE}>기타 택배사 직접 입력</option>
+                    </select>
                     <input
                       className={INPUT_CLASS}
                       value={shippingDrafts[order.orderId]?.trackingNumber ?? ""}
@@ -1767,8 +1939,24 @@ export function ShopAdminPage() {
                       {shippingLoadingId === order.orderId ? "처리 중…" : "배송 시작"}
                     </button>
                   </div>
+                  {resolveDraftCarrierSelectValue(shippingDrafts[order.orderId]) === CUSTOM_CARRIER_VALUE ? (
+                    <div className="mt-2 grid gap-2 md:grid-cols-2">
+                      <input
+                        className={INPUT_CLASS}
+                        value={shippingDrafts[order.orderId]?.courier ?? ""}
+                        onChange={(e) => handleShippingDraftChange(order.orderId, "courier", e.target.value)}
+                        placeholder="기타 택배사명"
+                      />
+                      <input
+                        className={INPUT_CLASS}
+                        value={shippingDrafts[order.orderId]?.carrierCode ?? ""}
+                        onChange={(e) => handleShippingDraftChange(order.orderId, "carrierCode", e.target.value)}
+                        placeholder="스마트택배 연동 코드 (t_code)"
+                      />
+                    </div>
+                  ) : null}
                   <div className="mt-2 text-[11px] text-ios-sub">
-                    스마트택배 연동 코드는 관리자 입력용이며 사용자 화면에는 노출되지 않습니다.
+                    택배사를 선택하면 스마트택배 코드가 자동으로 연결됩니다. 기타 택배사만 직접 입력이 필요합니다.
                   </div>
                 </div>
               ) : null}

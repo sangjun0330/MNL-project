@@ -1,3 +1,4 @@
+import { resolveSweetTrackerCarrierCode } from "@/lib/shopShipping";
 import type { ShopSmartTrackerMeta } from "@/lib/shopProfile";
 
 const SWEETTRACKER_TRACKING_TEMPLATE_URL = "https://info.sweettracker.co.kr/tracking/5";
@@ -44,9 +45,13 @@ function readSweetTrackerKeyFromEnv() {
 export function buildSweetTrackerTrackingUrl(input: {
   carrierCode: string | null | undefined;
   trackingNumber: string | null | undefined;
+  courier?: string | null | undefined;
 }) {
   const key = readSweetTrackerKeyFromEnv();
-  const carrierCode = cleanText(input.carrierCode, 40);
+  const carrierCode = resolveSweetTrackerCarrierCode({
+    carrierCode: input.carrierCode,
+    courier: input.courier,
+  });
   const trackingNumber = cleanText(input.trackingNumber, 80);
   if (!key || !carrierCode || !trackingNumber) return null;
   const url = new URL(SWEETTRACKER_TRACKING_TEMPLATE_URL);
@@ -187,4 +192,3 @@ export function shouldPollSweetTracker(meta: ShopSmartTrackerMeta | null | undef
   if (!Number.isFinite(last)) return true;
   return Date.now() - last >= SWEETTRACKER_MIN_POLL_MS;
 }
-

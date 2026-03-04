@@ -87,6 +87,13 @@ function formatDateLabel(value: string | null) {
   return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")}`;
 }
 
+function formatDateTimeLabel(value: string | null) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}:${String(date.getSeconds()).padStart(2, "0")}`;
+}
+
 function maskTrackingNumber(value: string | null) {
   const safe = String(value ?? "").trim();
   if (!safe) return "-";
@@ -134,6 +141,8 @@ function buildOrderFlowDescription(order: ShopOrderSummary) {
 function resolveTrackingErrorMessage(code: string | null) {
   const normalized = String(code ?? "").trim();
   if (!normalized) return null;
+  if (normalized === "tracking_not_available") return translate("배송 조회에 필요한 택배사 정보가 아직 저장되지 않았습니다.");
+  if (normalized === "order_not_trackable") return translate("배송 중 상태 주문만 실시간 조회할 수 있습니다.");
   if (normalized === "missing_config") return translate("배송 조회 연동 설정이 아직 완료되지 않았습니다.");
   if (normalized === "invalid_input") return translate("택배사 또는 운송장 정보가 아직 정확하지 않습니다.");
   if (normalized === "not_found") return translate("택배사 조회 결과가 아직 없습니다. 잠시 후 다시 확인해 주세요.");
@@ -269,11 +278,31 @@ export function ShopOrdersPage() {
             error: resolveTrackingErrorMessage(json.data.error ?? null),
           },
         }));
+        setOrders((current) =>
+          current.map((item) => {
+            if (item.orderId !== order.orderId) return item;
+            return {
+              ...item,
+              status: json.data.delivered ? "DELIVERED" : item.status,
+              deliveredAt: json.data.delivered
+                ? json.data.lastEventAt ?? item.deliveredAt ?? new Date().toISOString()
+                : item.deliveredAt,
+              tracking: {
+                carrierCode: item.tracking?.carrierCode ?? null,
+                trackingUrl: json.data.trackingUrl ?? item.tracking?.trackingUrl ?? null,
+                statusLabel: json.data.statusLabel ?? item.tracking?.statusLabel ?? null,
+                lastEventAt: json.data.lastEventAt ?? item.tracking?.lastEventAt ?? null,
+                lastPolledAt: json.data.lastPolledAt ?? item.tracking?.lastPolledAt ?? null,
+              },
+            };
+          })
+        );
         if (json.data.delivered) {
           void loadOrders(false);
         }
-      } catch {
+      } catch (error: any) {
         if (!mountedRef.current) return;
+        const code = String(error?.message ?? "");
         setTrackingByOrderId((current) => ({
           ...current,
           [order.orderId]: {
@@ -283,7 +312,7 @@ export function ShopOrdersPage() {
             trackingUrl: current[order.orderId]?.trackingUrl ?? order.tracking?.trackingUrl ?? null,
             delivered: current[order.orderId]?.delivered ?? Boolean(order.deliveredAt),
             cached: true,
-            error: t("택배사 정보를 다시 확인하지 못했습니다. 잠시 후 다시 시도해 주세요."),
+            error: resolveTrackingErrorMessage(code) ?? t("택배사 정보를 다시 확인하지 못했습니다. 잠시 후 다시 시도해 주세요."),
           },
         }));
       } finally {
@@ -577,7 +606,7 @@ export function ShopOrdersPage() {
                         </div>
                         <div className="mt-1 text-[11px] leading-5 text-[#60768d]">
                           {trackingSnapshot?.lastPolledAt
-                            ? `${t("마지막 확인")} ${formatDateLabel(trackingSnapshot.lastPolledAt)}`
+                            ? `${t("마지막 확인")} ${formatDateTimeLabel(trackingSnapshot.lastPolledAt)}`
                             : t("택배사 상태가 갱신되면 여기에 바로 반영됩니다.")}
                         </div>
                       </div>

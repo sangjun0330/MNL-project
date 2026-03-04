@@ -1499,8 +1499,12 @@ const SHOP_EN_EXTRA: Record<string, string> = {
     "Couldn't refresh the carrier tracking. Please try again shortly.",
   "배송 조회 연동 설정이 아직 완료되지 않았습니다.":
     "Tracking integration is not fully configured yet.",
+  "배송 조회에 필요한 택배사 정보가 아직 저장되지 않았습니다.":
+    "The carrier information required for tracking has not been saved yet.",
   "택배사 또는 운송장 정보가 아직 정확하지 않습니다.":
     "The carrier or tracking number is not accurate yet.",
+  "배송 중 상태 주문만 실시간 조회할 수 있습니다.":
+    "Only orders that are currently shipping can be checked live.",
   "택배사 조회 결과가 아직 없습니다. 잠시 후 다시 확인해 주세요.":
     "The carrier has no result yet. Please check again shortly.",
   "품절된 상품은 주문할 수 없습니다.": "Sold-out items cannot be ordered.",

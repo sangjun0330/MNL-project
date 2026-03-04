@@ -86,6 +86,13 @@ function formatDateLabel(value: string | null) {
   return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
+function formatTrackingDateTimeLabel(value: string | null) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}:${String(date.getSeconds()).padStart(2, "0")}`;
+}
+
 const SECONDARY_BUTTON = SHOP_BUTTON_PRIMARY;
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
@@ -129,6 +136,8 @@ function resolveDetailProgressClass(order: ShopOrderDetail) {
 function resolveTrackingErrorMessage(code: string | null) {
   const normalized = String(code ?? "").trim();
   if (!normalized) return null;
+  if (normalized === "tracking_not_available") return translate("배송 조회에 필요한 택배사 정보가 아직 저장되지 않았습니다.");
+  if (normalized === "order_not_trackable") return translate("배송 중 상태 주문만 실시간 조회할 수 있습니다.");
   if (normalized === "missing_config") return translate("배송 조회 연동 설정이 아직 완료되지 않았습니다.");
   if (normalized === "invalid_input") return translate("택배사 또는 운송장 정보가 아직 정확하지 않습니다.");
   if (normalized === "not_found") return translate("택배사 조회 결과가 아직 없습니다. 잠시 후 다시 확인해 주세요.");
@@ -269,11 +278,29 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
           cached: Boolean(json.data.cached),
           error: resolveTrackingErrorMessage(json.data.error ?? null),
         });
+        setOrder((current) => {
+          if (!current) return current;
+          return {
+            ...current,
+            status: json.data.delivered ? "DELIVERED" : current.status,
+            deliveredAt: json.data.delivered
+              ? json.data.lastEventAt ?? current.deliveredAt ?? new Date().toISOString()
+              : current.deliveredAt,
+            tracking: {
+              carrierCode: current.tracking?.carrierCode ?? null,
+              trackingUrl: json.data.trackingUrl ?? current.tracking?.trackingUrl ?? null,
+              statusLabel: json.data.statusLabel ?? current.tracking?.statusLabel ?? null,
+              lastEventAt: json.data.lastEventAt ?? current.tracking?.lastEventAt ?? null,
+              lastPolledAt: json.data.lastPolledAt ?? current.tracking?.lastPolledAt ?? null,
+            },
+          };
+        });
         if (json.data.delivered) {
           void loadOrder(false);
         }
-      } catch {
+      } catch (error: any) {
         if (!mountedRef.current) return;
+        const code = String(error?.message ?? "");
         setLiveTracking((current) => ({
           statusLabel: current?.statusLabel ?? order.tracking?.statusLabel ?? t("배송 조회중"),
           lastEventAt: current?.lastEventAt ?? order.tracking?.lastEventAt ?? null,
@@ -281,7 +308,7 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
           trackingUrl: current?.trackingUrl ?? order.tracking?.trackingUrl ?? null,
           delivered: current?.delivered ?? Boolean(order.deliveredAt),
           cached: true,
-          error: t("택배사 정보를 다시 확인하지 못했습니다. 잠시 후 다시 시도해 주세요."),
+          error: resolveTrackingErrorMessage(code) ?? t("택배사 정보를 다시 확인하지 못했습니다. 잠시 후 다시 시도해 주세요."),
         }));
       } finally {
         if (force && mountedRef.current) setTrackingLoading(false);
@@ -584,7 +611,7 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
                     <InfoRow label={t("택배사")} value={order.courier ?? "-"} />
                     <InfoRow label={t("운송장번호")} value={<span className="font-mono font-semibold">{order.trackingNumber}</span>} />
                     {trackingSnapshot?.statusLabel ? <InfoRow label={t("배송 상태")} value={t(trackingSnapshot.statusLabel)} /> : null}
-                    {trackingSnapshot?.lastEventAt ? <InfoRow label={t("마지막 이벤트")} value={formatDateLabel(trackingSnapshot.lastEventAt)} /> : null}
+                    {trackingSnapshot?.lastEventAt ? <InfoRow label={t("마지막 이벤트")} value={formatTrackingDateTimeLabel(trackingSnapshot.lastEventAt)} /> : null}
                     {order.shippedAt ? <InfoRow label={t("발송일")} value={formatDateLabel(order.shippedAt)} /> : null}
                     {order.deliveredAt ? <InfoRow label={t("배송 완료")} value={formatDateLabel(order.deliveredAt)} /> : null}
                     {order.status === "SHIPPED" ? (
@@ -598,7 +625,7 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
                               </div>
                               <div className="mt-1 text-[11.5px] leading-5 text-[#60768d]">
                                 {trackingSnapshot?.lastPolledAt
-                                  ? `${t("마지막 확인")} ${formatDateLabel(trackingSnapshot.lastPolledAt)}`
+                                  ? `${t("마지막 확인")} ${formatTrackingDateTimeLabel(trackingSnapshot.lastPolledAt)}`
                                   : t("택배사 상태가 갱신되면 여기에 바로 반영됩니다.")}
                               </div>
                             </div>

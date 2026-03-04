@@ -11,8 +11,9 @@
  */
 
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
+import { resolveSweetTrackerCarrierCode } from "@/lib/shopShipping";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
-import { readShopOrderForUser, syncShopOrderTracking } from "@/lib/server/shopOrderStore";
+import { readShopOrderForUser, syncShopOrderTrackingFromSnapshot } from "@/lib/server/shopOrderStore";
 import { buildSweetTrackerTrackingUrl, fetchSweetTrackerTracking, shouldPollSweetTracker } from "@/lib/server/sweetTracker";
 
 export const runtime = "edge";
@@ -45,11 +46,16 @@ export async function GET(req: Request) {
   if (!order) return jsonNoStore({ ok: false, error: "shop_order_not_found" }, { status: 404 });
 
   const meta = order.shipping.smartTracker;
-  const trackingUrl = buildSweetTrackerTrackingUrl({
+  const resolvedCarrierCode = resolveSweetTrackerCarrierCode({
     carrierCode: meta?.carrierCode ?? null,
+    courier: order.courier,
+  });
+  const trackingUrl = buildSweetTrackerTrackingUrl({
+    carrierCode: resolvedCarrierCode,
+    courier: order.courier,
     trackingNumber: order.trackingNumber,
   });
-  if (!order.trackingNumber || !meta?.carrierCode) {
+  if (!order.trackingNumber || !resolvedCarrierCode) {
     return jsonNoStore({ ok: false, error: "tracking_not_available" }, { status: 400 });
   }
 
@@ -77,9 +83,22 @@ export async function GET(req: Request) {
   }
 
   const result = await fetchSweetTrackerTracking({
-    carrierCode: meta?.carrierCode ?? null,
+    carrierCode: resolvedCarrierCode,
     trackingNumber: order.trackingNumber,
   });
+
+  let persistedOrder = order;
+  let persisted = false;
+  try {
+    persistedOrder = await syncShopOrderTrackingFromSnapshot({
+      orderId: order.orderId,
+      snapshot: result,
+      resolvedCarrierCode,
+    });
+    persisted = true;
+  } catch {
+    persistedOrder = order;
+  }
 
   if (!result.ok) {
     const fallbackLabel =
@@ -92,20 +111,15 @@ export async function GET(req: Request) {
             : null;
     return jsonNoStore({
       ok: true,
-      data: buildCachedPayload(order, true, result.reason, fallbackLabel),
+      data: buildCachedPayload(persistedOrder, true, result.reason, fallbackLabel),
     });
   }
 
-  if (result.delivered) {
-    try {
-      const synced = await syncShopOrderTracking({
-        orderId: order.orderId,
-        force: true,
-      });
-      return jsonNoStore({ ok: true, data: buildCachedPayload(synced, false, null, result.statusLabel) });
-    } catch {
-      // fall through to live payload below
-    }
+  if (persisted) {
+    return jsonNoStore({
+      ok: true,
+      data: buildCachedPayload(persistedOrder, false, null, result.statusLabel),
+    });
   }
 
   return jsonNoStore({
