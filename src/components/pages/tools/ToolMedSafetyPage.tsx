@@ -16,13 +16,18 @@ import { Textarea } from "@/components/ui/Textarea";
 import { useI18n } from "@/lib/useI18n";
 
 const FLAT_CARD_CLASS = "rounded-[24px] border border-ios-sep bg-white shadow-none";
-const PAGE_TITLE_CLASS = "text-[24px] font-bold tracking-[-0.015em] text-[color:var(--rnest-accent)] md:text-[26px]";
-const TOOL_LIST_LINK_CLASS = "rnest-pill-photo shrink-0 whitespace-nowrap px-3 py-1 text-[12px] leading-none";
+const PAGE_TITLE_CLASS = "text-[24px] font-bold tracking-[-0.015em] text-ios-text md:text-[26px]";
+const TOOL_LIST_LINK_CLASS =
+  "inline-flex h-8 shrink-0 items-center whitespace-nowrap rounded-full border border-black bg-white px-3 py-1 text-[12px] font-semibold leading-none text-black transition hover:bg-black/[0.04]";
 const PRIMARY_FLAT_BTN =
-  "h-11 rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] px-4 text-[14px] font-semibold text-[color:var(--rnest-accent)] shadow-none hover:bg-[color:var(--rnest-accent-soft)]";
+  "h-11 rounded-full border border-black bg-black px-4 text-[14px] font-semibold text-white shadow-none transition hover:bg-black/90";
 const SECONDARY_FLAT_BTN =
-  "h-11 rounded-full border border-ios-sep bg-white px-4 text-[14px] font-semibold text-ios-text shadow-none hover:bg-ios-bg";
+  "h-11 rounded-full border border-black bg-white px-4 text-[14px] font-semibold text-black shadow-none transition hover:bg-black/[0.04]";
 const SEGMENT_WRAPPER_CLASS = "inline-flex flex-wrap items-center gap-2";
+const SEGMENT_BUTTON_ACTIVE = "rounded-full border border-black bg-black text-white";
+const SEGMENT_BUTTON_INACTIVE = "rounded-full border border-[#D7D7D7] bg-white text-black hover:bg-black/[0.04]";
+const SITUATION_BUTTON_ACTIVE = "border-black bg-black text-white";
+const SITUATION_BUTTON_INACTIVE = "border-[#D7D7D7] bg-white text-black hover:bg-black/[0.04]";
 type TranslateFn = (key: string, vars?: Record<string, string | number>) => string;
 
 type ClinicalMode = "ward" | "er" | "icu";
@@ -837,7 +842,7 @@ function renderHighlightedLine(line: string): ReactNode {
   if (!range) return text;
   return (
     <>
-      <span className="rounded-[6px] bg-[color:var(--rnest-accent-soft)] px-[3px] py-[1px] font-semibold text-[color:var(--rnest-accent)]">
+      <span className="rounded-[6px] border border-[#D7D7D7] bg-[#F6F6F7] px-[3px] py-[1px] font-semibold text-black">
         {text.slice(range.start, range.end)}
       </span>
       {text.slice(range.end)}
@@ -934,9 +939,9 @@ function MedSafetyAnalyzingOverlay({ open, t }: { open: boolean; t: TranslateFn 
         <p className="mt-2 text-[14px] leading-6 text-ios-sub">{t("의약품/의료도구 안전 포인트를 정리하고 있습니다. 잠시만 기다려 주세요.")}</p>
         <p className="mt-1 text-[12.5px] leading-5 text-ios-sub">{t("네트워크/이미지 상황에 따라 최대 2분 정도 걸릴 수 있습니다.")}</p>
         <div className="mt-4 flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-[color:var(--rnest-accent)] rnest-dot-pulse" />
-          <span className="h-2 w-2 rounded-full bg-[color:var(--rnest-accent)] rnest-dot-pulse [animation-delay:160ms]" />
-          <span className="h-2 w-2 rounded-full bg-[color:var(--rnest-accent)] rnest-dot-pulse [animation-delay:320ms]" />
+          <span className="h-2 w-2 rounded-full bg-black rnest-dot-pulse" />
+          <span className="h-2 w-2 rounded-full bg-black rnest-dot-pulse [animation-delay:160ms]" />
+          <span className="h-2 w-2 rounded-full bg-black rnest-dot-pulse [animation-delay:320ms]" />
         </div>
       </div>
     </div>,
@@ -1493,9 +1498,9 @@ export function ToolMedSafetyPage() {
                 {streamingCards.map((card) => (
                   <section
                     key={`live-${card.key}`}
-                    className={`${card.compact ? "border-l-[3px] border-[color:var(--rnest-accent)] pl-3 py-1.5" : "border-b border-ios-sep pb-2.5"} last:border-b-0`}
+                    className={`${card.compact ? "border-l-[3px] border-black pl-3 py-1.5" : "border-b border-ios-sep pb-2.5"} last:border-b-0`}
                   >
-                    <div className="text-[15px] font-bold tracking-[-0.01em] text-[color:var(--rnest-accent)]">{card.title}</div>
+                    <div className="text-[15px] font-bold tracking-[-0.01em] text-black">{card.title}</div>
                     <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[15px] leading-6 text-ios-text">
                       {card.items.map((item, index) => (
                         <li key={`live-${card.key}-${index}`}>{renderHighlightedLine(item)}</li>
@@ -1521,7 +1526,7 @@ export function ToolMedSafetyPage() {
       <div className="space-y-6">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] px-3 py-1 text-[13px] font-semibold text-[color:var(--rnest-accent)]">
+            <span className="rounded-full border border-black bg-[#F6F6F7] px-3 py-1 text-[13px] font-semibold text-black">
               {t(resultViewState.resultKindChip)}
             </span>
           </div>
@@ -1538,8 +1543,8 @@ export function ToolMedSafetyPage() {
             {formatDateTime(result.analyzedAt)}
           </div>
           {result.suggestedNames && result.suggestedNames.length ? (
-            <div className="mt-3 rounded-2xl border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-3 py-3">
-              <div className="text-[15px] font-bold text-[color:var(--rnest-accent)]">{t("이걸 찾으시고 계신가요?")}</div>
+            <div className="mt-3 rounded-2xl border border-ios-sep bg-ios-bg px-3 py-3">
+              <div className="text-[15px] font-bold text-black">{t("이걸 찾으시고 계신가요?")}</div>
               <ul className="mt-1.5 list-disc space-y-0.5 pl-4 text-[14px] leading-6 text-ios-text">
                 {result.suggestedNames.slice(0, 3).map((name, idx) => (
                   <li key={`suggested-${idx}`}>{name}</li>
@@ -1553,7 +1558,7 @@ export function ToolMedSafetyPage() {
         <div className="border-t border-ios-sep pt-2.5">
           {resultViewState.isNotFoundResult ? (
             <div className="rounded-2xl border border-ios-sep bg-ios-bg px-3 py-3">
-              <div className="text-[14px] font-bold text-[color:var(--rnest-accent)]">{t("일치 결과 없음 (NOT_FOUND)")}</div>
+              <div className="text-[14px] font-bold text-black">{t("일치 결과 없음 (NOT_FOUND)")}</div>
               <ul className="mt-2 list-disc space-y-0.5 pl-4 text-[15px] leading-6 text-ios-text">
                 <li>{result.oneLineConclusion}</li>
                 <li>{result.item.primaryUse}</li>
@@ -1565,9 +1570,9 @@ export function ToolMedSafetyPage() {
               {resultViewState.displayCards.map((card) => (
                 <section
                   key={card.key}
-                  className={`${card.compact ? "border-l-[3px] border-[color:var(--rnest-accent)] pl-3 py-1.5" : "border-b border-ios-sep pb-2.5"} last:border-b-0`}
+                  className={`${card.compact ? "border-l-[3px] border-black pl-3 py-1.5" : "border-b border-ios-sep pb-2.5"} last:border-b-0`}
                 >
-                  <div className="text-[15px] font-bold tracking-[-0.01em] text-[color:var(--rnest-accent)]">{card.title}</div>
+                  <div className="text-[15px] font-bold tracking-[-0.01em] text-black">{card.title}</div>
                   <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[15px] leading-6 text-ios-text">
                     {card.items.map((item, index) => (
                       <li key={`${card.key}-${index}`}>{renderHighlightedLine(item)}</li>
@@ -1676,13 +1681,13 @@ export function ToolMedSafetyPage() {
                 type="button"
                 onClick={() => void startCreditCheckout()}
                 disabled={creditPaying}
-                className="text-[11.5px] font-semibold text-[color:var(--rnest-accent)] underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+                className="text-[11.5px] font-semibold text-black underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {creditPaying ? t("결제창 준비 중...") : t("추가 크레딧 구매")}
               </button>
               <Link
                 href="/tools/med-safety/recent"
-                className="text-[11.5px] font-semibold text-[color:var(--rnest-accent)] underline-offset-2 hover:underline"
+                className="text-[11.5px] font-semibold text-black underline-offset-2 hover:underline"
               >
                 {t("최근 검색 기록")}
               </Link>
@@ -1717,9 +1722,7 @@ export function ToolMedSafetyPage() {
                     <button
                       key={option.value}
                       type="button"
-                      className={`h-9 px-4 text-[12.5px] font-semibold ${
-                        active ? "rnest-pill-photo is-active" : "rnest-pill-photo-muted"
-                      }`}
+                      className={`h-9 px-4 text-[12.5px] font-semibold transition ${active ? SEGMENT_BUTTON_ACTIVE : SEGMENT_BUTTON_INACTIVE}`}
                       onClick={() => setMode(option.value)}
                     >
                       {t(option.label)}
@@ -1738,9 +1741,7 @@ export function ToolMedSafetyPage() {
                     <button
                       key={option.value}
                       type="button"
-                      className={`h-9 px-4 text-[12.5px] font-semibold ${
-                        active ? "rnest-pill-photo is-active" : "rnest-pill-photo-muted"
-                      }`}
+                      className={`h-9 px-4 text-[12.5px] font-semibold transition ${active ? SEGMENT_BUTTON_ACTIVE : SEGMENT_BUTTON_INACTIVE}`}
                       onClick={() => {
                         setQueryIntent(option.value);
                         setError(null);
@@ -1771,10 +1772,8 @@ export function ToolMedSafetyPage() {
                         <button
                           key={option.value}
                           type="button"
-                          className={`h-9 rounded-xl border px-3 text-[12px] font-semibold ${
-                            active
-                              ? "border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
-                              : "border-ios-sep bg-white text-ios-sub"
+                          className={`h-9 rounded-xl border px-3 text-[12px] font-semibold transition ${
+                            active ? SITUATION_BUTTON_ACTIVE : SITUATION_BUTTON_INACTIVE
                           }`}
                           onClick={() => setSituation(option.value)}
                         >
