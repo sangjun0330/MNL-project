@@ -261,7 +261,31 @@ export function SchedulePage() {
   return (
     <div className="space-y-3 pb-4">
 
-      {/* ── 선택된 날 뷰 카드 (TOP) ────────────────────────── */}
+      {/* ── 월간 통계 요약 ──────────────────────────────── */}
+      <Card className="px-4 py-3">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+          <span className="text-[12px] font-semibold text-ios-muted">
+            {month.getMonth() + 1}{t("월 요약")}
+          </span>
+          <div className="flex flex-wrap gap-x-3 gap-y-1">
+            {SHIFT_LABELS.filter((s) => (monthlyStats.shiftCounts[s.id] ?? 0) > 0).map((s) => (
+              <span key={s.id} className={cn("rounded-full border px-2 py-0.5 text-[11px] font-semibold", shiftColor(s.id))}>
+                {s.id} {monthlyStats.shiftCounts[s.id]}일
+              </span>
+            ))}
+            {monthlyStats.sleepAvg != null && (
+              <span className="text-[11px] text-ios-muted">
+                평균 수면 {monthlyStats.sleepAvg.toFixed(1)}h
+              </span>
+            )}
+            <span className="text-[11px] text-ios-muted">
+              기록 {monthlyStats.recordCount}/{monthlyStats.totalDays}일
+            </span>
+          </div>
+        </div>
+      </Card>
+
+      {/* ── 선택된 날 뷰 카드 ────────────────────────────── */}
       <Card className="p-4">
         {/* 날짜 헤더 */}
         <div className="flex items-start justify-between gap-2">
@@ -280,7 +304,7 @@ export function SchedulePage() {
             onClick={() => setOpenLog(true)}
             className="shrink-0 rounded-2xl border border-[var(--rnest-accent-border)] bg-[var(--rnest-accent-soft)] px-3.5 py-1.5 text-[13px] font-semibold text-[var(--rnest-accent)] transition active:opacity-70"
           >
-            {hasAnyRecord ? t("편집하기") : t("기록하기")}
+            {t("기록하기")}
           </button>
         </div>
 
@@ -357,30 +381,6 @@ export function SchedulePage() {
             {t("아직 기록이 없어요. 기록하기를 눌러 시작해보세요.")}
           </div>
         )}
-      </Card>
-
-      {/* ── 월간 통계 요약 ──────────────────────────────── */}
-      <Card className="px-4 py-3">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-          <span className="text-[12px] font-semibold text-ios-muted">
-            {month.getMonth() + 1}{t("월 요약")}
-          </span>
-          <div className="flex flex-wrap gap-x-3 gap-y-1">
-            {SHIFT_LABELS.filter((s) => (monthlyStats.shiftCounts[s.id] ?? 0) > 0).map((s) => (
-              <span key={s.id} className={cn("rounded-full border px-2 py-0.5 text-[11px] font-semibold", shiftColor(s.id))}>
-                {s.id} {monthlyStats.shiftCounts[s.id]}일
-              </span>
-            ))}
-            {monthlyStats.sleepAvg != null && (
-              <span className="text-[11px] text-ios-muted">
-                평균 수면 {monthlyStats.sleepAvg.toFixed(1)}h
-              </span>
-            )}
-            <span className="text-[11px] text-ios-muted">
-              기록 {monthlyStats.recordCount}/{monthlyStats.totalDays}일
-            </span>
-          </div>
-        </div>
       </Card>
 
       {/* ── 캘린더 (Card 없이 직접) ─────────────────────── */}
