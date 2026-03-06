@@ -1,1 +1,0 @@
-var r={},b=(c,p,i)=>(r.__chunk_97792=(_,s,e)=>{"use strict";e.d(s,{Zp:()=>d});var a=e(49631),o=e(91563);function d({className:n,children:t,...l}){return(0,a.jsx)("div",{className:(0,o.cn)("rounded-apple border border-ios-sep bg-ios-card shadow-apple",n),...l,children:t})}},r);export{b as __getNamedExports};

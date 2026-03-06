@@ -1,1 +1,0 @@
-var s={},g=(l,c,i)=>(s.__chunk_85224=(_,e,t)=>{"use strict";t.d(e,{P:()=>o});var r=t(49631),a=t(60214);function o({className:n=""}){return(0,r.jsx)(a.A,{src:"/rnest-logo.png",alt:"RNest",width:3200,height:720,className:n,priority:!0})}},s);export{g as __getNamedExports};

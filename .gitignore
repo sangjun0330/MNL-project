@@ -33,3 +33,7 @@ src/components/pages/SettingsAdminHandoffPage.tsx
 src/components/system/HandoffJanitor.tsx
 src/lib/handoff
 tsconfig.tsbuildinfo
+
+# Cloudflare / Vercel build output
+.vercel/
+.wrangler/
