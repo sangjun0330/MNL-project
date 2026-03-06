@@ -5,7 +5,7 @@ import { useMemo, useRef } from "react";
 import type { PointerEvent } from "react";
 import { cn } from "@/lib/cn";
 import type { ISODate } from "@/lib/date";
-import { addDays, addMonths, formatMonthTitle, startOfMonth, toISODate } from "@/lib/date";
+import { addDays, addMonths, formatMonthTitle, startOfMonth, toISODate, todayISO } from "@/lib/date";
 import type { Shift } from "@/lib/types";
 import type { BioInputs, EmotionEntry, MenstrualSettings } from "@/lib/model";
 import { menstrualContextForDate } from "@/lib/menstrual";
@@ -141,16 +141,19 @@ export function MonthCalendar({
     return m;
   }, [grid, menstrualEffective]);
 
-  // ✅ 모바일 스크롤 중 "날짜 선택" 오작동 방지
-  // - pointermove가 오지 않는 스크롤 케이스가 있어 window.scrollY 변화도 함께 체크
+  const today = todayISO();
+
+  // ✅ 모바일 스크롤 중 "날짜 선택" 오작동 방지 + 수평 스와이프로 월 전환
   const tap = useRef<{
     id: number | null;
     x: number;
     y: number;
     scrollY: number;
     moved: boolean;
-  }>({ id: null, x: 0, y: 0, scrollY: 0, moved: false });
+    swiped: boolean;
+  }>({ id: null, x: 0, y: 0, scrollY: 0, moved: false, swiped: false });
   const TAP_MOVE_PX = 8;
+  const SWIPE_PX = 40;
 
   const beginTap = (e: PointerEvent) => {
     tap.current.id = e.pointerId;
@@ -158,6 +161,7 @@ export function MonthCalendar({
     tap.current.y = e.clientY;
     tap.current.scrollY = typeof window !== "undefined" ? window.scrollY : 0;
     tap.current.moved = false;
+    tap.current.swiped = false;
   };
 
   const moveTap = (e: PointerEvent) => {
@@ -165,14 +169,19 @@ export function MonthCalendar({
     const dx = e.clientX - tap.current.x;
     const dy = e.clientY - tap.current.y;
     if (Math.abs(dx) > TAP_MOVE_PX || Math.abs(dy) > TAP_MOVE_PX) tap.current.moved = true;
+    // 수평 스와이프 감지 (수평이 수직보다 크고 임계값 초과)
+    if (Math.abs(dx) > SWIPE_PX && Math.abs(dx) > Math.abs(dy) * 1.5 && !tap.current.swiped && onMonthChange) {
+      tap.current.swiped = true;
+      onMonthChange(addMonths(month, dx < 0 ? 1 : -1));
+    }
   };
 
   const endTap = (e: PointerEvent, iso: ISODate) => {
     if (tap.current.id !== e.pointerId) return;
     const scrolled = typeof window !== "undefined" ? Math.abs(window.scrollY - tap.current.scrollY) > 2 : false;
-    const moved = tap.current.moved || scrolled;
+    const moved = tap.current.moved || scrolled || tap.current.swiped;
     tap.current.id = null;
-    if (moved) return; // 스크롤/드래그로 판단 → 선택 금지
+    if (moved) return; // 스크롤/드래그/스와이프로 판단 → 선택 금지
 
     // iOS Safari에서 날짜 버튼이 focus/active 상태로 남으면서
     // 시트 위에 선택 테두리(네모)가 떠 보이는 현상 방지
@@ -192,26 +201,29 @@ export function MonthCalendar({
     <div className="rounded-apple border border-ios-sep bg-white p-4 shadow-apple">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <div className="text-[18px] font-semibold">{formatMonthTitle(month)}</div>
-          <div className="mt-1 text-[12.5px] text-ios-muted">{t("날짜를 눌러 기록/편집")}</div>
-        </div>
+        <div className="text-[18px] font-semibold">{formatMonthTitle(month)}</div>
 
         {onMonthChange ? (
-          <div className="flex gap-2">
+          <div className="flex items-center gap-1">
             <button
               type="button"
-              className="rounded-2xl border border-ios-sep bg-white px-3 py-2 text-[12.5px] font-semibold"
+              className="flex h-8 w-8 items-center justify-center rounded-full text-ios-muted transition hover:bg-ios-sep/40 active:opacity-60"
               onClick={() => onMonthChange(addMonths(month, -1))}
+              aria-label={t("이전")}
             >
-              {t("이전")}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="15 18 9 12 15 6" />
+              </svg>
             </button>
             <button
               type="button"
-              className="rounded-2xl border border-ios-sep bg-white px-3 py-2 text-[12.5px] font-semibold"
+              className="flex h-8 w-8 items-center justify-center rounded-full text-ios-muted transition hover:bg-ios-sep/40 active:opacity-60"
               onClick={() => onMonthChange(addMonths(month, 1))}
+              aria-label={t("다음")}
             >
-              {t("다음")}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
             </button>
           </div>
         ) : null}
@@ -231,6 +243,7 @@ export function MonthCalendar({
         {grid.map((cell) => {
           const iso = cell.iso;
           const isSelected = iso === selected;
+          const isToday = iso === today;
           const isLowScore = Boolean(cell.inMonth && lowScoreByDate?.[iso]);
 
           const shift = schedule[iso];
@@ -321,16 +334,25 @@ export function MonthCalendar({
             >
               {isSelected ? (
                 <span className="pointer-events-none absolute inset-0 z-20">
-                  <span className="absolute inset-[2px] rounded-[10px] border border-black" />
+                  <span className="absolute inset-[2px] rounded-[10px] border-2 border-[var(--rnest-accent)] shadow-[0_0_0_1px_var(--rnest-accent-soft)]" />
                 </span>
               ) : null}
 
               <div className="flex h-full flex-col px-2 py-1">
                 {/* 날짜 */}
                 <div className="flex items-start justify-between gap-1">
-                  <div className={cn("text-[13px] font-semibold", cell.inMonth ? "text-ios-text" : "text-ios-muted")}>
+                  <div className={cn(
+                      "text-[13px] font-semibold",
+                      !cell.inMonth ? "text-ios-muted"
+                        : isToday ? "text-[var(--rnest-accent)]"
+                        : "text-ios-text"
+                    )}>
                     {cell.inMonth ? cell.d.getDate() : ""}
                   </div>
+                  {/* 오늘 dot */}
+                  {isToday && cell.inMonth && (
+                    <span className="absolute top-[6px] right-[6px] h-[5px] w-[5px] rounded-full bg-[var(--rnest-accent)] opacity-70" />
+                  )}
                 </div>
 
                 {/* 생리주기 줄 */}
@@ -361,6 +383,11 @@ export function MonthCalendar({
                       <span className="block truncate">{c.text}</span>
                     </div>
                   ))}
+                  {chips.length > 3 && (
+                    <div className="w-full rounded-md bg-[var(--rnest-accent-soft)] px-2 py-[1.5px] text-[10px] font-semibold text-[var(--rnest-accent)]">
+                      +{chips.length - 3}
+                    </div>
+                  )}
                 </div>
               </div>
             </button>

@@ -698,6 +698,39 @@ export function ScheduleRecordSheet({
               </div>
             </div>
 
+            {/* 낮잠 — 수면 바로 아래에 통합 */}
+            <div className="mt-3 border-t border-ios-sep pt-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[12px] font-semibold text-ios-muted">{t("낮잠")}</div>
+                  <div className="mt-0.5 text-[14px] font-semibold">{napText.trim() === "" || napText === "0" ? "—" : `${napText}h`}</div>
+                </div>
+                {(sleepText.trim() !== "" && napText.trim() !== "" && napText !== "0") && (
+                  <div className="shrink-0 text-[11px] font-semibold text-ios-muted">
+                    총 {((Number(sleepText) || 0) + (Number(napText) || 0)).toFixed(1)}h
+                  </div>
+                )}
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {[0, 0.5, 1, 1.5, 2, 3].map((h) => {
+                  const active = Number(napText) === h;
+                  return (
+                    <button
+                      key={h}
+                      type="button"
+                      onClick={() => setNapQuick(h)}
+                      className={cn(
+                        "rounded-full border px-3 py-1 text-[12px] font-semibold",
+                        active ? "border-[var(--rnest-accent)] bg-[var(--rnest-accent)] text-white" : "border-ios-sep bg-white"
+                      )}
+                    >
+                      {h === 0 ? t("없음") : `${h}h`}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             {/* 스트레스 */}
             <div className="mt-4">
               <div className="mb-2 text-[12px] font-semibold text-ios-muted">{t("스트레스")}</div>
@@ -883,7 +916,7 @@ export function ScheduleRecordSheet({
               <div className="min-w-0">
                 <div className="text-[13px] font-semibold">{t("추가 기록")}</div>
                 <div className="mt-0.5 text-[12.5px] text-ios-muted">
-                  {t("낮잠 · 활동량")}
+                  {t("활동량")}
                   {menstrualEnabled ? ` · ${t("생리 증상")}` : ""}
                 </div>
               </div>
@@ -892,41 +925,6 @@ export function ScheduleRecordSheet({
 
             {showMore ? (
               <div className="mt-4 space-y-4">
-                {/* 활동량 */}
-                <div>
-                  <div className="mb-2 text-[12px] font-semibold text-ios-muted">{t("낮잠 시간")}</div>
-                  <div className="flex flex-wrap gap-2">
-                    {[0, 0.5, 1, 1.5, 2, 3, 4].map((h) => {
-                      const active = Number(napText) === h;
-                      return (
-                        <button
-                          key={h}
-                          type="button"
-                          onClick={() => setNapQuick(h)}
-                          className={cn(
-                            "rounded-full border px-3 py-1 text-[12px] font-semibold",
-                            active ? "border-black bg-black text-white" : "border-ios-sep bg-white"
-                          )}
-                        >
-                          {h === 0 ? "0" : `${h}h`}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div className="mt-3">
-                    <Input
-                      inputMode="decimal"
-                      value={napText}
-                      onChange={(e) => {
-                        napTouchedRef.current = true;
-                        setNapText(e.target.value);
-                      }}
-                      onBlur={() => saveNapNow(napText)}
-                      placeholder={t("낮잠 시간 입력(예: 0.5)")}
-                    />
-                  </div>
-                </div>
-
                 {/* 활동량 */}
                 <div>
                   <div className="mb-2 text-[12px] font-semibold text-ios-muted">{t("활동량")}</div>

@@ -1,0 +1,28 @@
+{
+  "runtime": "edge",
+  "name": "insights",
+  "deploymentTarget": "v8-worker",
+  "entrypoint": "index.js",
+  "assets": [
+    {
+      "name": "noto-sans-v27-latin-regular.5dda3fca77107598.ttf",
+      "path": "assets/noto-sans-v27-latin-regular.5dda3fca77107598.ttf"
+    }
+  ],
+  "framework": {
+    "slug": "nextjs",
+    "version": "15.5.12"
+  },
+  "environment": {
+    "__NEXT_BUILD_ID": "CBncP6E_dPmB4OR3lMACh",
+    "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY": "ZY+5Gmjw/a1hf+hgvIWC67juxBBpvERhM7m61n74G28=",
+    "__NEXT_PREVIEW_MODE_ID": "2135474352011418d9e2bc85be659ed6",
+    "__NEXT_PREVIEW_MODE_SIGNING_KEY": "f44a745728804c06f6edecb93741fa044337275126d484465ff5fd778e8ec1ed",
+    "__NEXT_PREVIEW_MODE_ENCRYPTION_KEY": "691e98835ac394249088bb6b9702d9b1ad392282550a101f8487c56518394298"
+  },
+  "filePathMap": {
+    "wasm/wasm_77d9faebf7af9e421806970ce10a58e9d83116d7.wasm": ".next/server/edge-chunks/wasm_77d9faebf7af9e421806970ce10a58e9d83116d7.wasm",
+    "wasm/wasm_ef4866ecae192fd87727067cf2c0c0cf9fb8b020.wasm": ".next/server/edge-chunks/wasm_ef4866ecae192fd87727067cf2c0c0cf9fb8b020.wasm",
+    "assets/noto-sans-v27-latin-regular.5dda3fca77107598.ttf": ".next/server/edge-chunks/asset_noto-sans-v27-latin-regular.5dda3fca77107598.ttf"
+  }
+}

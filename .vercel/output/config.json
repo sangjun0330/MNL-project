@@ -1,0 +1,567 @@
+{
+  "version": 3,
+  "routes": [
+    {
+      "src": "^(?:/((?:[^/]+?)(?:/(?:[^/]+?))*))/$",
+      "headers": {
+        "Location": "/$1"
+      },
+      "status": 308,
+      "continue": true
+    },
+    {
+      "src": "/_next/__private/trace",
+      "dest": "/404",
+      "status": 404,
+      "continue": true
+    },
+    {
+      "src": "/_next/data/(.*)",
+      "missing": [
+        {
+          "type": "header",
+          "key": "x-nextjs-data"
+        }
+      ],
+      "transforms": [
+        {
+          "type": "request.headers",
+          "op": "append",
+          "target": {
+            "key": "x-nextjs-data"
+          },
+          "args": "1"
+        }
+      ],
+      "continue": true
+    },
+    {
+      "src": "^(?:/((?:[^/]+?)(?:/(?:[^/]+?))*))?(?:/)?$",
+      "headers": {
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "Referrer-Policy": "no-referrer",
+        "Permissions-Policy": "microphone=(self), camera=(), geolocation=(), browsing-topics=()",
+        "Cross-Origin-Opener-Policy": "same-origin",
+        "Cross-Origin-Resource-Policy": "same-site",
+        "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload"
+      },
+      "continue": true
+    },
+    {
+      "src": "^/settings/billing(?:/((?:[^/]+?)(?:/(?:[^/]+?))*))?(?:/)?$",
+      "headers": {
+        "Cross-Origin-Opener-Policy": "same-origin-allow-popups"
+      },
+      "continue": true
+    },
+    {
+      "src": "/404/?",
+      "status": 404,
+      "continue": true,
+      "missing": [
+        {
+          "type": "header",
+          "key": "x-prerender-revalidate"
+        }
+      ]
+    },
+    {
+      "src": "/500",
+      "status": 500,
+      "continue": true
+    },
+    {
+      "src": "^/_next/data/CBncP6E_dPmB4OR3lMACh/(.*).json",
+      "dest": "/$1",
+      "override": true,
+      "continue": true,
+      "has": [
+        {
+          "type": "header",
+          "key": "x-nextjs-data"
+        }
+      ]
+    },
+    {
+      "src": "^/index(?:/)?",
+      "has": [
+        {
+          "type": "header",
+          "key": "x-nextjs-data"
+        }
+      ],
+      "dest": "/",
+      "override": true,
+      "continue": true
+    },
+    {
+      "continue": true,
+      "src": "^(?:\\/(_next\\/data\\/[^/]{1,}))?(?:\\/((?!_next\\/static|_next\\/image|favicon.ico|manifest.webmanifest|icons\\/|sw.js).*))(\\.json)?[\\/#\\?]?$",
+      "missing": [
+        {
+          "type": "header",
+          "key": "x-prerender-revalidate",
+          "value": "2135474352011418d9e2bc85be659ed6"
+        },
+        {
+          "type": "header",
+          "key": "next-router-prefetch"
+        },
+        {
+          "type": "header",
+          "key": "purpose",
+          "value": "prefetch"
+        }
+      ],
+      "middlewarePath": "src/middleware",
+      "middlewareRawSrc": [
+        "/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|icons/|sw.js).*)"
+      ],
+      "override": true
+    },
+    {
+      "src": "^/$",
+      "has": [
+        {
+          "type": "header",
+          "key": "x-nextjs-data"
+        }
+      ],
+      "dest": "/_next/data/CBncP6E_dPmB4OR3lMACh/index.json",
+      "continue": true,
+      "override": true
+    },
+    {
+      "src": "^/((?!_next/)(?:.*[^/]|.*))/?$",
+      "has": [
+        {
+          "type": "header",
+          "key": "x-nextjs-data"
+        }
+      ],
+      "dest": "/_next/data/CBncP6E_dPmB4OR3lMACh/$1.json",
+      "continue": true,
+      "override": true
+    },
+    {
+      "src": "^/?",
+      "has": [
+        {
+          "type": "header",
+          "key": "rsc",
+          "value": "1"
+        }
+      ],
+      "dest": "/index.rsc",
+      "headers": {
+        "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch"
+      },
+      "continue": true,
+      "override": true
+    },
+    {
+      "src": "^/((?!.+\\.rsc).+?)(?:/)?$",
+      "has": [
+        {
+          "type": "header",
+          "key": "rsc",
+          "value": "1"
+        }
+      ],
+      "dest": "/$1.rsc",
+      "headers": {
+        "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch"
+      },
+      "continue": true,
+      "override": true
+    },
+    {
+      "handle": "filesystem"
+    },
+    {
+      "src": "^/_next/data/CBncP6E_dPmB4OR3lMACh/(.*).json",
+      "dest": "/$1",
+      "continue": true,
+      "has": [
+        {
+          "type": "header",
+          "key": "x-nextjs-data"
+        }
+      ]
+    },
+    {
+      "src": "^/index(?:/)?",
+      "has": [
+        {
+          "type": "header",
+          "key": "x-nextjs-data"
+        }
+      ],
+      "dest": "/",
+      "continue": true
+    },
+    {
+      "src": "/index(\\.action|\\.rsc)",
+      "dest": "/",
+      "continue": true
+    },
+    {
+      "src": "/\\.prefetch\\.rsc$",
+      "dest": "/__index.prefetch.rsc",
+      "check": true
+    },
+    {
+      "src": "/(.+)/\\.prefetch\\.rsc$",
+      "dest": "/$1.prefetch.rsc",
+      "check": true
+    },
+    {
+      "src": "/\\.rsc$",
+      "dest": "/index.rsc",
+      "check": true
+    },
+    {
+      "src": "/(.+)/\\.rsc$",
+      "dest": "/$1.rsc",
+      "check": true
+    },
+    {
+      "handle": "resource"
+    },
+    {
+      "src": "/.*",
+      "status": 404
+    },
+    {
+      "handle": "miss"
+    },
+    {
+      "src": "/_next/static/.+",
+      "status": 404,
+      "check": true,
+      "dest": "/_next/static/not-found.txt",
+      "headers": {
+        "content-type": "text/plain; charset=utf-8"
+      }
+    },
+    {
+      "handle": "rewrite"
+    },
+    {
+      "src": "^/$",
+      "has": [
+        {
+          "type": "header",
+          "key": "x-nextjs-data"
+        }
+      ],
+      "dest": "/_next/data/CBncP6E_dPmB4OR3lMACh/index.json",
+      "continue": true
+    },
+    {
+      "src": "^/((?!_next/)(?:.*[^/]|.*))/?$",
+      "has": [
+        {
+          "type": "header",
+          "key": "x-nextjs-data"
+        }
+      ],
+      "dest": "/_next/data/CBncP6E_dPmB4OR3lMACh/$1.json",
+      "continue": true
+    },
+    {
+      "src": "^/_next/data/CBncP6E_dPmB4OR3lMACh/api/admin/billing/refunds/(?<nxtPrefundId>[^/]+?)(?:/)?.json$",
+      "dest": "/api/admin/billing/refunds/[refundId]?nxtPrefundId=$nxtPrefundId"
+    },
+    {
+      "src": "^/_next/data/CBncP6E_dPmB4OR3lMACh/api/admin/billing/refunds/(?<nxtPrefundId>[^/]+?)/approve(?:/)?.json$",
+      "dest": "/api/admin/billing/refunds/[refundId]/approve?nxtPrefundId=$nxtPrefundId"
+    },
+    {
+      "src": "^/_next/data/CBncP6E_dPmB4OR3lMACh/api/admin/billing/refunds/(?<nxtPrefundId>[^/]+?)/execute(?:/)?.json$",
+      "dest": "/api/admin/billing/refunds/[refundId]/execute?nxtPrefundId=$nxtPrefundId"
+    },
+    {
+      "src": "^/_next/data/CBncP6E_dPmB4OR3lMACh/api/admin/billing/refunds/(?<nxtPrefundId>[^/]+?)/reject(?:/)?.json$",
+      "dest": "/api/admin/billing/refunds/[refundId]/reject?nxtPrefundId=$nxtPrefundId"
+    },
+    {
+      "src": "^/_next/data/CBncP6E_dPmB4OR3lMACh/api/admin/billing/refunds/(?<nxtPrefundId>[^/]+?)/review(?:/)?.json$",
+      "dest": "/api/admin/billing/refunds/[refundId]/review?nxtPrefundId=$nxtPrefundId"
+    },
+    {
+      "src": "^/_next/data/CBncP6E_dPmB4OR3lMACh/api/admin/shop/catalog/(?<nxtPproductId>[^/]+?)(?:/)?.json$",
+      "dest": "/api/admin/shop/catalog/[productId]?nxtPproductId=$nxtPproductId"
+    },
+    {
+      "src": "^/_next/data/CBncP6E_dPmB4OR3lMACh/api/admin/shop/claims/(?<nxtPclaimId>[^/]+?)(?:/)?.json$",
+      "dest": "/api/admin/shop/claims/[claimId]?nxtPclaimId=$nxtPclaimId"
+    },
+    {
+      "src": "^/_next/data/CBncP6E_dPmB4OR3lMACh/api/admin/shop/orders/(?<nxtPorderId>[^/]+?)(?:/)?.json$",
+      "dest": "/api/admin/shop/orders/[orderId]?nxtPorderId=$nxtPorderId"
+    },
+    {
+      "src": "^/_next/data/CBncP6E_dPmB4OR3lMACh/api/admin/shop/orders/(?<nxtPorderId>[^/]+?)/refund(?:/)?.json$",
+      "dest": "/api/admin/shop/orders/[orderId]/refund?nxtPorderId=$nxtPorderId"
+    },
+    {
+      "src": "^/_next/data/CBncP6E_dPmB4OR3lMACh/api/billing/refunds/(?<nxtPrefundId>[^/]+?)/withdraw(?:/)?.json$",
+      "dest": "/api/billing/refunds/[refundId]/withdraw?nxtPrefundId=$nxtPrefundId"
+    },
+    {
+      "src": "^/_next/data/CBncP6E_dPmB4OR3lMACh/api/shop/claims/(?<nxtPclaimId>[^/]+?)/return\\-shipment(?:/)?.json$",
+      "dest": "/api/shop/claims/[claimId]/return-shipment?nxtPclaimId=$nxtPclaimId"
+    },
+    {
+      "src": "^/_next/data/CBncP6E_dPmB4OR3lMACh/api/shop/orders/(?<nxtPorderId>[^/]+?)(?:/)?.json$",
+      "dest": "/api/shop/orders/[orderId]?nxtPorderId=$nxtPorderId"
+    },
+    {
+      "src": "^/_next/data/CBncP6E_dPmB4OR3lMACh/shop/orders/(?<nxtPorderId>[^/]+?)(?:/)?.json$",
+      "dest": "/shop/orders/[orderId]?nxtPorderId=$nxtPorderId"
+    },
+    {
+      "src": "^/_next/data/CBncP6E_dPmB4OR3lMACh/shop/(?<nxtPproductId>[^/]+?)(?:/)?.json$",
+      "dest": "/shop/[productId]?nxtPproductId=$nxtPproductId"
+    },
+    {
+      "src": "^/api/admin/billing/refunds/(?<nxtPrefundId>[^/]+?)(?:\\.rsc)(?:/)?$",
+      "dest": "/api/admin/billing/refunds/[refundId].rsc?nxtPrefundId=$nxtPrefundId"
+    },
+    {
+      "src": "^/api/admin/billing/refunds/(?<nxtPrefundId>[^/]+?)(?:/)?$",
+      "dest": "/api/admin/billing/refunds/[refundId]?nxtPrefundId=$nxtPrefundId"
+    },
+    {
+      "src": "^/api/admin/billing/refunds/(?<nxtPrefundId>[^/]+?)/approve(?:\\.rsc)(?:/)?$",
+      "dest": "/api/admin/billing/refunds/[refundId]/approve.rsc?nxtPrefundId=$nxtPrefundId"
+    },
+    {
+      "src": "^/api/admin/billing/refunds/(?<nxtPrefundId>[^/]+?)/approve(?:/)?$",
+      "dest": "/api/admin/billing/refunds/[refundId]/approve?nxtPrefundId=$nxtPrefundId"
+    },
+    {
+      "src": "^/api/admin/billing/refunds/(?<nxtPrefundId>[^/]+?)/execute(?:\\.rsc)(?:/)?$",
+      "dest": "/api/admin/billing/refunds/[refundId]/execute.rsc?nxtPrefundId=$nxtPrefundId"
+    },
+    {
+      "src": "^/api/admin/billing/refunds/(?<nxtPrefundId>[^/]+?)/execute(?:/)?$",
+      "dest": "/api/admin/billing/refunds/[refundId]/execute?nxtPrefundId=$nxtPrefundId"
+    },
+    {
+      "src": "^/api/admin/billing/refunds/(?<nxtPrefundId>[^/]+?)/reject(?:\\.rsc)(?:/)?$",
+      "dest": "/api/admin/billing/refunds/[refundId]/reject.rsc?nxtPrefundId=$nxtPrefundId"
+    },
+    {
+      "src": "^/api/admin/billing/refunds/(?<nxtPrefundId>[^/]+?)/reject(?:/)?$",
+      "dest": "/api/admin/billing/refunds/[refundId]/reject?nxtPrefundId=$nxtPrefundId"
+    },
+    {
+      "src": "^/api/admin/billing/refunds/(?<nxtPrefundId>[^/]+?)/review(?:\\.rsc)(?:/)?$",
+      "dest": "/api/admin/billing/refunds/[refundId]/review.rsc?nxtPrefundId=$nxtPrefundId"
+    },
+    {
+      "src": "^/api/admin/billing/refunds/(?<nxtPrefundId>[^/]+?)/review(?:/)?$",
+      "dest": "/api/admin/billing/refunds/[refundId]/review?nxtPrefundId=$nxtPrefundId"
+    },
+    {
+      "src": "^/api/admin/shop/catalog/(?<nxtPproductId>[^/]+?)(?:\\.rsc)(?:/)?$",
+      "dest": "/api/admin/shop/catalog/[productId].rsc?nxtPproductId=$nxtPproductId"
+    },
+    {
+      "src": "^/api/admin/shop/catalog/(?<nxtPproductId>[^/]+?)(?:/)?$",
+      "dest": "/api/admin/shop/catalog/[productId]?nxtPproductId=$nxtPproductId"
+    },
+    {
+      "src": "^/api/admin/shop/claims/(?<nxtPclaimId>[^/]+?)(?:\\.rsc)(?:/)?$",
+      "dest": "/api/admin/shop/claims/[claimId].rsc?nxtPclaimId=$nxtPclaimId"
+    },
+    {
+      "src": "^/api/admin/shop/claims/(?<nxtPclaimId>[^/]+?)(?:/)?$",
+      "dest": "/api/admin/shop/claims/[claimId]?nxtPclaimId=$nxtPclaimId"
+    },
+    {
+      "src": "^/api/admin/shop/orders/(?<nxtPorderId>[^/]+?)(?:\\.rsc)(?:/)?$",
+      "dest": "/api/admin/shop/orders/[orderId].rsc?nxtPorderId=$nxtPorderId"
+    },
+    {
+      "src": "^/api/admin/shop/orders/(?<nxtPorderId>[^/]+?)(?:/)?$",
+      "dest": "/api/admin/shop/orders/[orderId]?nxtPorderId=$nxtPorderId"
+    },
+    {
+      "src": "^/api/admin/shop/orders/(?<nxtPorderId>[^/]+?)/refund(?:\\.rsc)(?:/)?$",
+      "dest": "/api/admin/shop/orders/[orderId]/refund.rsc?nxtPorderId=$nxtPorderId"
+    },
+    {
+      "src": "^/api/admin/shop/orders/(?<nxtPorderId>[^/]+?)/refund(?:/)?$",
+      "dest": "/api/admin/shop/orders/[orderId]/refund?nxtPorderId=$nxtPorderId"
+    },
+    {
+      "src": "^/api/billing/refunds/(?<nxtPrefundId>[^/]+?)/withdraw(?:\\.rsc)(?:/)?$",
+      "dest": "/api/billing/refunds/[refundId]/withdraw.rsc?nxtPrefundId=$nxtPrefundId"
+    },
+    {
+      "src": "^/api/billing/refunds/(?<nxtPrefundId>[^/]+?)/withdraw(?:/)?$",
+      "dest": "/api/billing/refunds/[refundId]/withdraw?nxtPrefundId=$nxtPrefundId"
+    },
+    {
+      "src": "^/api/shop/claims/(?<nxtPclaimId>[^/]+?)/return\\-shipment(?:\\.rsc)(?:/)?$",
+      "dest": "/api/shop/claims/[claimId]/return-shipment.rsc?nxtPclaimId=$nxtPclaimId"
+    },
+    {
+      "src": "^/api/shop/claims/(?<nxtPclaimId>[^/]+?)/return\\-shipment(?:/)?$",
+      "dest": "/api/shop/claims/[claimId]/return-shipment?nxtPclaimId=$nxtPclaimId"
+    },
+    {
+      "src": "^/api/shop/orders/(?<nxtPorderId>[^/]+?)(?:\\.rsc)(?:/)?$",
+      "dest": "/api/shop/orders/[orderId].rsc?nxtPorderId=$nxtPorderId"
+    },
+    {
+      "src": "^/api/shop/orders/(?<nxtPorderId>[^/]+?)(?:/)?$",
+      "dest": "/api/shop/orders/[orderId]?nxtPorderId=$nxtPorderId"
+    },
+    {
+      "src": "^/shop/orders/(?<nxtPorderId>[^/]+?)(?:\\.rsc)(?:/)?$",
+      "dest": "/shop/orders/[orderId].rsc?nxtPorderId=$nxtPorderId"
+    },
+    {
+      "src": "^/shop/orders/(?<nxtPorderId>[^/]+?)(?:/)?$",
+      "dest": "/shop/orders/[orderId]?nxtPorderId=$nxtPorderId"
+    },
+    {
+      "src": "^/shop/(?<nxtPproductId>[^/]+?)(?:\\.rsc)(?:/)?$",
+      "dest": "/shop/[productId].rsc?nxtPproductId=$nxtPproductId"
+    },
+    {
+      "src": "^/shop/(?<nxtPproductId>[^/]+?)(?:/)?$",
+      "dest": "/shop/[productId]?nxtPproductId=$nxtPproductId"
+    },
+    {
+      "src": "^/_next/data/CBncP6E_dPmB4OR3lMACh/(.*).json",
+      "headers": {
+        "x-nextjs-matched-path": "/$1"
+      },
+      "continue": true,
+      "override": true
+    },
+    {
+      "src": "^/_next/data/CBncP6E_dPmB4OR3lMACh/(.*).json",
+      "dest": "__next_data_catchall"
+    },
+    {
+      "handle": "hit"
+    },
+    {
+      "src": "/_next/static/(?:[^/]+/pages|pages|chunks|runtime|css|image|media|CBncP6E_dPmB4OR3lMACh)/.+",
+      "headers": {
+        "cache-control": "public,max-age=31536000,immutable"
+      },
+      "continue": true,
+      "important": true
+    },
+    {
+      "src": "/index(?:/)?",
+      "headers": {
+        "x-matched-path": "/"
+      },
+      "continue": true,
+      "important": true
+    },
+    {
+      "src": "/((?!index$).*?)(?:/)?",
+      "headers": {
+        "x-matched-path": "/$1"
+      },
+      "continue": true,
+      "important": true
+    },
+    {
+      "handle": "error"
+    },
+    {
+      "src": "/.*",
+      "dest": "/_not-found",
+      "status": 404,
+      "headers": {
+        "x-next-error-status": "404"
+      }
+    },
+    {
+      "src": "/.*",
+      "dest": "/500",
+      "status": 500,
+      "headers": {
+        "x-next-error-status": "500"
+      }
+    }
+  ],
+  "images": {
+    "domains": [],
+    "sizes": [
+      640,
+      750,
+      828,
+      1080,
+      1200,
+      1920,
+      2048,
+      3840,
+      16,
+      32,
+      48,
+      64,
+      96,
+      128,
+      256,
+      384
+    ],
+    "remotePatterns": [],
+    "minimumCacheTTL": 60,
+    "formats": [
+      "image/webp"
+    ],
+    "dangerouslyAllowSVG": false,
+    "contentSecurityPolicy": "script-src 'none'; frame-src 'none'; sandbox;",
+    "contentDispositionType": "attachment"
+  },
+  "overrides": {
+    "500.html": {
+      "path": "500",
+      "contentType": "text/html; charset=utf-8"
+    },
+    "_error.rsc.json": {
+      "path": "_error.rsc",
+      "contentType": "application/json"
+    },
+    "_app.rsc.json": {
+      "path": "_app.rsc",
+      "contentType": "application/json"
+    },
+    "_document.rsc.json": {
+      "path": "_document.rsc",
+      "contentType": "application/json"
+    },
+    "__next_data_catchall.json": {
+      "path": "__next_data_catchall",
+      "contentType": "application/json"
+    },
+    "_next/static/not-found.txt": {
+      "contentType": "text/plain"
+    }
+  },
+  "framework": {
+    "version": "15.5.12"
+  },
+  "crons": [
+    {
+      "path": "/api/jobs/shop/cleanup-stale-orders",
+      "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/jobs/shop/shipping-sync",
+      "schedule": "0 * * * *"
+    }
+  ]
+}

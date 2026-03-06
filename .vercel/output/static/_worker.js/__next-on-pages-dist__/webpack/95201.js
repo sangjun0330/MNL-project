@@ -1,0 +1,1 @@
+var t={},c=(o,f,r)=>(t.__chunk_95201=(a,u,s)=>{"use strict";s.d(u,{U:()=>l});var e=s(96975);function l(n){(0,e.useRef)(n.onRefresh),(0,e.useRef)(null),(0,e.useRef)(null),(0,e.useRef)(2e3),(0,e.useRef)(!1);let[_,R]=(0,e.useState)(0)}s(76328)},t);export{c as __getNamedExports};
