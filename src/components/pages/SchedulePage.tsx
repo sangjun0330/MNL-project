@@ -99,6 +99,11 @@ function moodLabel(m: number) {
   return m === 1 ? "매우 나쁨" : m === 2 ? "나쁨" : m === 3 ? "보통" : m === 4 ? "좋음" : "매우 좋음";
 }
 
+const SCHEDULE_PILL_BUTTON_CLASS =
+  "rnest-pill-photo inline-flex h-11 items-center justify-center whitespace-nowrap px-5 text-[14px]";
+const SCHEDULE_HEADER_PILL_CLASS =
+  "rnest-pill-photo inline-flex h-9 items-center justify-center whitespace-nowrap px-3 text-[12px]";
+
 export function SchedulePage() {
   const store = useAppStore();
   const { t } = useI18n();
@@ -229,31 +234,21 @@ export function SchedulePage() {
   // ── 캘린더 헤더에 들어갈 패턴·생리주기 아이콘 ─────────
   const calendarHeaderActions = (
     <>
-      {/* 3교대 패턴 아이콘 */}
       <button
         type="button"
         onClick={() => setOpenPattern(true)}
-        className="flex h-8 w-8 items-center justify-center rounded-full text-ios-muted transition hover:bg-ios-sep/40 active:opacity-60"
+        className={cn(SCHEDULE_HEADER_PILL_CLASS, "max-w-[116px] truncate")}
         title={t("3교대 패턴 적용")}
       >
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M17 1l4 4-4 4" /><path d="M3 11V9a4 4 0 0 1 4-4h14" />
-          <path d="M7 23l-4-4 4-4" /><path d="M21 13v2a4 4 0 0 1-4 4H3" />
-        </svg>
+        {t("3교대 패턴")}
       </button>
-      {/* 생리주기 아이콘 */}
       <button
         type="button"
         onClick={() => setOpenMenstrual(true)}
-        className="flex h-8 w-8 items-center justify-center rounded-full text-ios-muted transition hover:bg-ios-sep/40 active:opacity-60"
+        className={cn(SCHEDULE_HEADER_PILL_CLASS, "max-w-[92px] truncate")}
         title={t("생리주기 설정")}
       >
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="12" cy="12" r="10" />
-          <path d="M8 14s1.5 2 4 2 4-2 4-2" />
-          <line x1="9" y1="9" x2="9.01" y2="9" />
-          <line x1="15" y1="9" x2="15.01" y2="9" />
-        </svg>
+        {t("생리주기")}
       </button>
     </>
   );
@@ -302,7 +297,7 @@ export function SchedulePage() {
           <button
             type="button"
             onClick={() => setOpenLog(true)}
-            className="shrink-0 rounded-2xl border border-[var(--rnest-accent-border)] bg-[var(--rnest-accent-soft)] px-3.5 py-1.5 text-[13px] font-semibold text-[var(--rnest-accent)] transition active:opacity-70"
+            className={cn(SCHEDULE_PILL_BUTTON_CLASS, "shrink-0")}
           >
             {t("기록하기")}
           </button>
@@ -418,6 +413,7 @@ export function SchedulePage() {
         title={t("3교대 패턴")}
         subtitle={t("선택한 날짜부터 자동 채우기")}
         variant="appstore"
+        backdropClassName="rnest-sheet-curtain-lilac"
       >
         <div className="pb-4">
           <ShiftPatternQuickApplyCard selectedISO={selected} />
@@ -432,6 +428,7 @@ export function SchedulePage() {
         subtitle={t("시작일과 평균 주기/기간 입력")}
         variant="appstore"
         maxHeightClassName="max-h-[80dvh]"
+        backdropClassName="rnest-sheet-curtain-lilac"
       >
         <div className="pb-4">
           <Card className="p-5">

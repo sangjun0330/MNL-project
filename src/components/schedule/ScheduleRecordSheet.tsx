@@ -553,6 +553,7 @@ export function ScheduleRecordSheet({
         subtitle={dateLabel}
         variant="appstore"
         maxHeightClassName="max-h-[82dvh]"
+        backdropClassName="rnest-sheet-curtain-lilac"
       >
         <div className="space-y-4">
         {/* 상단 안내 + 저장 상태 */}
@@ -887,7 +888,7 @@ export function ScheduleRecordSheet({
                 <button
                   type="button"
                   onClick={() => setWorkEventNoteSheetOpen(true)}
-                  className="shrink-0 rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] px-3 py-1 text-[12px] font-semibold text-[color:var(--rnest-accent)]"
+                  className="rnest-pill-photo shrink-0 px-3 py-1 text-[12px]"
                 >
                   {trimmedWorkEventNote ? t("수정") : t("추가")}
                 </button>
@@ -972,6 +973,7 @@ export function ScheduleRecordSheet({
         subtitle={t("태그로 부족한 내용만 간단히 기록해 주세요.")}
         variant="appstore"
         maxHeightClassName="max-h-[62dvh]"
+        backdropClassName="rnest-sheet-curtain-lilac"
       >
         <div className="space-y-3">
           <div className="text-[12.5px] leading-5 text-ios-sub">{t("예: 코드블루 1건 대응, 인계 지연 30분")}</div>

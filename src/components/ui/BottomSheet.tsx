@@ -28,6 +28,10 @@ type Props = {
    * Visual style variant.
    */
   variant?: "default" | "appstore";
+  /**
+   * Optional backdrop style override.
+   */
+  backdropClassName?: string;
 };
 
 export function BottomSheet({
@@ -39,6 +43,7 @@ export function BottomSheet({
   footer,
   maxHeightClassName,
   variant = "default",
+  backdropClassName,
 }: Props) {
   // unmount 시점 제어(닫힐 때 애니메이션 종료 후 제거)
   const [mounted, setMounted] = useState(open);
@@ -106,10 +111,11 @@ export function BottomSheet({
         aria-label="Close"
         className={cn(
           "absolute inset-0",
-          // backdrop도 부드럽게
-          isAppStore
-            ? "bg-black/45 backdrop-blur-[10px]"
-            : "bg-black/35 backdrop-blur-[6px]",
+          backdropClassName
+            ? backdropClassName
+            : isAppStore
+              ? "bg-black/45 backdrop-blur-[10px]"
+              : "bg-black/35 backdrop-blur-[6px]",
           "transition-[opacity,backdrop-filter] duration-[500ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
           "rnest-backdrop",
           visible ? "opacity-100" : "opacity-0"

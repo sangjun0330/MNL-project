@@ -109,7 +109,7 @@ export function ShiftPatternQuickApplyCard({ selectedISO }: { selectedISO: ISODa
           <button
             type="button"
             onClick={() => setStartISO(selectedISO)}
-            className="rounded-full border border-ios-sep bg-white px-2 py-0.5 text-[11px] font-semibold text-ios-muted"
+            className="rnest-pill-photo px-2.5 py-1 text-[11px]"
           >
             {t("선택일로")}
           </button>
@@ -138,10 +138,10 @@ export function ShiftPatternQuickApplyCard({ selectedISO }: { selectedISO: ISODa
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-2">
-        <Button onClick={apply} className="w-full justify-center px-3 text-center text-[12.5px]">
+        <Button variant="secondary" onClick={apply} className="rnest-pill-photo w-full justify-center px-3 text-center text-[12.5px]">
           {t("선택 시작일 적용")}
         </Button>
-        <Button variant="secondary" onClick={() => store.setSelected(selectedISO)} className="w-full justify-center px-3 text-center text-[12.5px]">
+        <Button variant="secondary" onClick={() => store.setSelected(selectedISO)} className="rnest-pill-photo w-full justify-center px-3 text-center text-[12.5px]">
           {t("선택일 유지")}
         </Button>
       </div>

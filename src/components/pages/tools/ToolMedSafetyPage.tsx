@@ -21,7 +21,7 @@ const PRIMARY_FLAT_BTN =
   "h-11 rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] px-4 text-[14px] font-semibold text-[color:var(--rnest-accent)] shadow-none hover:bg-[color:var(--rnest-accent-soft)]";
 const SECONDARY_FLAT_BTN =
   "h-11 rounded-full border border-ios-sep bg-white px-4 text-[14px] font-semibold text-ios-text shadow-none hover:bg-ios-bg";
-const SEGMENT_WRAPPER_CLASS = "inline-flex rounded-full border border-ios-sep bg-ios-bg p-1";
+const SEGMENT_WRAPPER_CLASS = "inline-flex flex-wrap items-center gap-2";
 type TranslateFn = (key: string, vars?: Record<string, string | number>) => string;
 
 type ClinicalMode = "ward" | "er" | "icu";
@@ -1716,10 +1716,8 @@ export function ToolMedSafetyPage() {
                     <button
                       key={option.value}
                       type="button"
-                      className={`h-9 rounded-xl px-4 text-[12.5px] font-semibold ${
-                        active
-                          ? "border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
-                          : "text-ios-sub"
+                      className={`h-9 px-4 text-[12.5px] font-semibold ${
+                        active ? "rnest-pill-photo is-active" : "rnest-pill-photo-muted"
                       }`}
                       onClick={() => setMode(option.value)}
                     >
@@ -1739,10 +1737,8 @@ export function ToolMedSafetyPage() {
                     <button
                       key={option.value}
                       type="button"
-                      className={`h-9 rounded-xl px-4 text-[12.5px] font-semibold ${
-                        active
-                          ? "border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
-                          : "text-ios-sub"
+                      className={`h-9 px-4 text-[12.5px] font-semibold ${
+                        active ? "rnest-pill-photo is-active" : "rnest-pill-photo-muted"
                       }`}
                       onClick={() => {
                         setQueryIntent(option.value);

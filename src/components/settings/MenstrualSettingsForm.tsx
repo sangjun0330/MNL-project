@@ -182,8 +182,9 @@ export function MenstrualSettingsForm() {
         <div className="flex items-center justify-between">
           <div className="text-[14px] font-semibold">{t("사용")}</div>
           <Button
-            variant={draft.enabled ? "primary" : "secondary"}
+            variant="secondary"
             onClick={() => setDraft((d) => ({ ...d, enabled: !d.enabled }))}
+            className={draft.enabled ? "rnest-pill-photo is-active min-w-[72px]" : "rnest-pill-photo-muted min-w-[72px]"}
           >
             {draft.enabled ? "ON" : "OFF"}
           </Button>
@@ -203,7 +204,7 @@ export function MenstrualSettingsForm() {
                     // PC에서는 커스텀 캘린더 열기
                     if (!isCoarsePointer) setDateOpen((v) => !v);
                   }}
-                  className="flex h-12 items-center rounded-2xl border border-ios-sep bg-white px-4 text-[14px] font-semibold"
+                  className="rnest-pill-photo flex h-11 items-center px-4 text-[13px]"
                 >
                   {draft.lastPeriodStart ? formatKoreanDate(draft.lastPeriodStart) : t("날짜 선택")}
                 </button>
@@ -228,7 +229,7 @@ export function MenstrualSettingsForm() {
                     <div className="flex items-center justify-between">
                       <button
                         type="button"
-                        className="rounded-xl border border-ios-sep px-2 py-1 text-[12px] font-semibold"
+                        className="rnest-pill-photo px-2.5 py-1 text-[11px]"
                         onClick={() => setViewMonth((m) => addMonths(m, -1))}
                       >
                         {t("이전")}
@@ -238,7 +239,7 @@ export function MenstrualSettingsForm() {
 
                       <button
                         type="button"
-                        className="rounded-xl border border-ios-sep px-2 py-1 text-[12px] font-semibold"
+                        className="rnest-pill-photo px-2.5 py-1 text-[11px]"
                         onClick={() => setViewMonth((m) => addMonths(m, 1))}
                       >
                         {t("다음")}
@@ -280,7 +281,7 @@ export function MenstrualSettingsForm() {
                     <div className="mt-2 flex justify-end gap-2">
                       <button
                         type="button"
-                        className="rounded-xl border border-ios-sep px-3 py-2 text-[12px] font-semibold"
+                        className="rnest-pill-photo-muted px-3 py-2 text-[12px]"
                         onClick={() => {
                           updateLastStart(null);
                           setDateOpen(false);
@@ -290,7 +291,7 @@ export function MenstrualSettingsForm() {
                       </button>
                       <button
                         type="button"
-                        className="rounded-xl bg-black px-3 py-2 text-[12px] font-semibold text-white"
+                        className="rnest-pill-photo is-active px-3 py-2 text-[12px]"
                         onClick={() => {
                           setTodayAsStart();
                           setDateOpen(false);
@@ -304,10 +305,10 @@ export function MenstrualSettingsForm() {
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <Button variant="secondary" onClick={setTodayAsStart}>
+                <Button variant="secondary" onClick={setTodayAsStart} className="rnest-pill-photo">
                   {t("오늘로 설정")}
                 </Button>
-                <Button variant="secondary" onClick={() => updateLastStart(null)}>
+                <Button variant="secondary" onClick={() => updateLastStart(null)} className="rnest-pill-photo-muted">
                   {t("비우기")}
                 </Button>
               </div>
@@ -350,10 +351,10 @@ export function MenstrualSettingsForm() {
 
         {/* ✅ 적용/되돌리기 */}
         <div className="mt-2 flex flex-wrap justify-end gap-3">
-          <Button variant="secondary" onClick={resetMenstrual} disabled={!dirty}>
+          <Button variant="secondary" onClick={resetMenstrual} disabled={!dirty} className="rnest-pill-photo-muted">
             {t("되돌리기")}
           </Button>
-          <Button onClick={applyMenstrual} disabled={!dirty}>
+          <Button variant="secondary" onClick={applyMenstrual} disabled={!dirty} className="rnest-pill-photo is-active">
             {t("적용")}
           </Button>
         </div>

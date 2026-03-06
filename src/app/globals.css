@@ -14,6 +14,10 @@
   --rnest-accent-strong: #6259C0;
   --rnest-accent-soft: rgba(123, 111, 208, 0.12);
   --rnest-accent-border: rgba(123, 111, 208, 0.28);
+  --rnest-pill-photo-bg: #E8E6F2;
+  --rnest-pill-photo-border: #B5ADE8;
+  --rnest-pill-photo-text: #7B6FD0;
+  --rnest-sheet-curtain: rgba(123, 111, 208, 0.22);
   --rnest-selection: rgba(123, 111, 208, 0.16);
 
   /* ── Lavender / 연보라 identity ── */
@@ -245,6 +249,58 @@ body.rnest-sheet-open {
   background: rgba(255, 255, 255, 0.86);
   color: var(--rnest-sub);
   font-weight: 600;
+}
+
+.rnest-pill-photo {
+  border-radius: 999px;
+  border: 2px solid var(--rnest-pill-photo-border);
+  background: var(--rnest-pill-photo-bg);
+  color: var(--rnest-pill-photo-text);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  transition: transform var(--rnest-dur-fast) var(--rnest-ease-spring),
+    filter var(--rnest-dur-fast) var(--rnest-ease-apple),
+    opacity var(--rnest-dur-fast) var(--rnest-ease-apple);
+}
+
+.rnest-pill-photo:hover {
+  filter: brightness(0.99);
+}
+
+.rnest-pill-photo:active {
+  transform: scale(0.98);
+}
+
+.rnest-pill-photo.is-active,
+.rnest-pill-photo[aria-pressed="true"] {
+  border-color: var(--rnest-pill-photo-text);
+  color: var(--rnest-pill-photo-text);
+}
+
+.rnest-pill-photo-muted {
+  border-radius: 999px;
+  border: 2px solid rgba(181, 173, 232, 0.64);
+  background: rgba(247, 247, 252, 0.94);
+  color: rgba(123, 111, 208, 0.82);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  transition: transform var(--rnest-dur-fast) var(--rnest-ease-spring),
+    background-color var(--rnest-dur-fast) var(--rnest-ease-apple);
+}
+
+.rnest-pill-photo-muted:hover {
+  background: rgba(240, 239, 250, 0.96);
+}
+
+.rnest-pill-photo-muted:active {
+  transform: scale(0.98);
+}
+
+.rnest-sheet-curtain-lilac {
+  background: var(--rnest-sheet-curtain) !important;
+  -webkit-backdrop-filter: blur(10px) saturate(1.08) !important;
+  backdrop-filter: blur(10px) saturate(1.08) !important;
 }
 
 .rnest-btn-primary {
@@ -592,6 +648,10 @@ html.rnest-night {
   --rnest-accent-strong: #9488D5;
   --rnest-accent-soft: rgba(168, 158, 232, 0.18);
   --rnest-accent-border: rgba(168, 158, 232, 0.32);
+  --rnest-pill-photo-bg: rgba(168, 158, 232, 0.24);
+  --rnest-pill-photo-border: rgba(168, 158, 232, 0.52);
+  --rnest-pill-photo-text: #CEC8F5;
+  --rnest-sheet-curtain: rgba(34, 24, 64, 0.68);
   --rnest-selection: rgba(168, 158, 232, 0.22);
 }
 
