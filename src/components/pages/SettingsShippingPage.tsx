@@ -43,20 +43,20 @@ declare global {
 const DAUM_POSTCODE_SCRIPT_ID = "daum-postcode-script";
 const DAUM_POSTCODE_SCRIPT_SRC = "https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js";
 const PRIMARY_BUTTON =
-  "inline-flex items-center justify-center rounded-full border border-black bg-black px-4 font-semibold text-white transition hover:bg-black/90 disabled:opacity-60";
+  "inline-flex items-center justify-center rounded-full border border-[#C9BFEA] bg-[#F0ECFF] px-4 font-semibold text-black transition hover:bg-[#E7E1FB] disabled:opacity-60";
 const SECONDARY_BUTTON =
-  "inline-flex items-center justify-center rounded-full border border-black bg-white px-4 font-semibold text-black transition hover:bg-black/[0.04] disabled:opacity-60";
+  "inline-flex items-center justify-center rounded-full border border-[#DDD8EF] bg-[#FBFAFE] px-4 font-semibold text-black transition hover:bg-[#F3F1FA] disabled:opacity-60";
 const DANGER_BUTTON =
-  "inline-flex items-center justify-center rounded-full border border-black bg-white px-4 font-semibold text-black transition hover:bg-black/[0.04] disabled:opacity-60";
+  "inline-flex items-center justify-center rounded-full border border-[#E5C8C3] bg-[#FFF4F2] px-4 font-semibold text-black transition hover:bg-[#FEEDE9] disabled:opacity-60";
 const SECTION_CARD = "rounded-[30px] border border-[#DDD8EF] bg-[#FFFFFF] p-5 shadow-[0_4px_16px_rgba(71,58,120,0.06)]";
 const SUB_CARD = "rounded-[24px] border border-[#DDD8EF] bg-[#F8F6FD]";
 const SECTION_TITLE = "text-[16px] font-bold text-black";
 const SECTION_DESC = "mt-1 text-[12.5px] leading-6 text-[#7B8090]";
-const SOFT_BADGE = "rounded-full border border-[#D7D7D7] bg-white px-3 py-1 text-[11px] font-semibold text-black";
+const SOFT_BADGE = "rounded-full border border-[#CEC6EB] bg-[#F0ECFF] px-3 py-1 text-[11px] font-semibold text-black";
 const FIELD_CLASS =
-  "h-12 rounded-[18px] border-[#D7D7D7] bg-white text-[14px] text-black placeholder:text-[#8F8F95] focus:ring-[color:rgba(0,0,0,0.12)]";
+  "h-12 rounded-[18px] border-[#DAD4EE] bg-white text-[14px] text-black placeholder:text-[#A1A6B4] focus:ring-[color:rgba(123,111,208,0.22)]";
 const FIELD_READONLY_CLASS =
-  "h-12 rounded-[18px] border-[#D7D7D7] bg-[#F6F6F7] text-[14px] text-black placeholder:text-[#8F8F95]";
+  "h-12 rounded-[18px] border-[#DAD4EE] bg-[#F5F2FC] text-[14px] text-black placeholder:text-[#A1A6B4]";
 
 function buildDaumAddress(data: {
   zonecode?: string;
@@ -422,7 +422,7 @@ export function SettingsShippingPage() {
   return (
     <div className="mx-auto w-full max-w-[760px] px-4 pb-24 pt-6">
       <div className="mb-4 flex items-center gap-2">
-        <Link href="/settings/account" className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-black bg-white text-[18px] text-black">
+        <Link href="/settings/account" className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[#DDD8EF] bg-[#F8F6FD] text-[18px] text-black">
           ←
         </Link>
         <div className="text-[24px] font-extrabold tracking-[-0.02em] text-black">{t("배송지 설정")}</div>
@@ -461,7 +461,7 @@ export function SettingsShippingPage() {
               <div
                 className={[
                   "mt-4 rounded-[22px] px-4 py-3 text-[12.5px] leading-6",
-                  messageTone === "error" ? "border border-[#E5C8C3] bg-[#FFF4F2] text-[#A33A2B]" : "border border-[#D7D7D7] bg-[#F6F6F7] text-black",
+                  messageTone === "error" ? "border border-[#E5C8C3] bg-[#FFF4F2] text-[#A33A2B]" : "border border-[#CEC6EB] bg-[#F0ECFF] text-black",
                 ].join(" ")}
               >
                 {message}

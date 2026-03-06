@@ -18,16 +18,16 @@ import { useI18n } from "@/lib/useI18n";
 const FLAT_CARD_CLASS = "rounded-[24px] border border-ios-sep bg-white shadow-none";
 const PAGE_TITLE_CLASS = "text-[24px] font-bold tracking-[-0.015em] text-ios-text md:text-[26px]";
 const TOOL_LIST_LINK_CLASS =
-  "inline-flex h-8 shrink-0 items-center whitespace-nowrap rounded-full border border-black bg-white px-3 py-1 text-[12px] font-semibold leading-none text-black transition hover:bg-black/[0.04]";
+  "rnest-pill-photo shrink-0 whitespace-nowrap px-3 py-1 text-[12px] leading-none text-black";
 const PRIMARY_FLAT_BTN =
-  "h-11 rounded-full border border-black bg-black px-4 text-[14px] font-semibold text-white shadow-none transition hover:bg-black/90";
+  "h-11 rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] px-4 text-[14px] font-semibold text-black shadow-none hover:bg-[color:var(--rnest-accent-soft)]";
 const SECONDARY_FLAT_BTN =
-  "h-11 rounded-full border border-black bg-white px-4 text-[14px] font-semibold text-black shadow-none transition hover:bg-black/[0.04]";
+  "h-11 rounded-full border border-ios-sep bg-white px-4 text-[14px] font-semibold text-black shadow-none hover:bg-ios-bg";
 const SEGMENT_WRAPPER_CLASS = "inline-flex flex-wrap items-center gap-2";
-const SEGMENT_BUTTON_ACTIVE = "rounded-full border border-black bg-black text-white";
-const SEGMENT_BUTTON_INACTIVE = "rounded-full border border-[#D7D7D7] bg-white text-black hover:bg-black/[0.04]";
-const SITUATION_BUTTON_ACTIVE = "border-black bg-black text-white";
-const SITUATION_BUTTON_INACTIVE = "border-[#D7D7D7] bg-white text-black hover:bg-black/[0.04]";
+const SEGMENT_BUTTON_ACTIVE = "rnest-pill-photo is-active text-black";
+const SEGMENT_BUTTON_INACTIVE = "rnest-pill-photo-muted text-black";
+const SITUATION_BUTTON_ACTIVE = "border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] text-black";
+const SITUATION_BUTTON_INACTIVE = "border-ios-sep bg-white text-black";
 type TranslateFn = (key: string, vars?: Record<string, string | number>) => string;
 
 type ClinicalMode = "ward" | "er" | "icu";
@@ -842,7 +842,7 @@ function renderHighlightedLine(line: string): ReactNode {
   if (!range) return text;
   return (
     <>
-      <span className="rounded-[6px] border border-[#D7D7D7] bg-[#F6F6F7] px-[3px] py-[1px] font-semibold text-black">
+      <span className="rounded-[6px] bg-[color:var(--rnest-accent-soft)] px-[3px] py-[1px] font-semibold text-black">
         {text.slice(range.start, range.end)}
       </span>
       {text.slice(range.end)}
@@ -939,9 +939,9 @@ function MedSafetyAnalyzingOverlay({ open, t }: { open: boolean; t: TranslateFn 
         <p className="mt-2 text-[14px] leading-6 text-ios-sub">{t("의약품/의료도구 안전 포인트를 정리하고 있습니다. 잠시만 기다려 주세요.")}</p>
         <p className="mt-1 text-[12.5px] leading-5 text-ios-sub">{t("네트워크/이미지 상황에 따라 최대 2분 정도 걸릴 수 있습니다.")}</p>
         <div className="mt-4 flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-black rnest-dot-pulse" />
-          <span className="h-2 w-2 rounded-full bg-black rnest-dot-pulse [animation-delay:160ms]" />
-          <span className="h-2 w-2 rounded-full bg-black rnest-dot-pulse [animation-delay:320ms]" />
+          <span className="h-2 w-2 rounded-full bg-[color:var(--rnest-accent)] rnest-dot-pulse" />
+          <span className="h-2 w-2 rounded-full bg-[color:var(--rnest-accent)] rnest-dot-pulse [animation-delay:160ms]" />
+          <span className="h-2 w-2 rounded-full bg-[color:var(--rnest-accent)] rnest-dot-pulse [animation-delay:320ms]" />
         </div>
       </div>
     </div>,
@@ -1498,7 +1498,7 @@ export function ToolMedSafetyPage() {
                 {streamingCards.map((card) => (
                   <section
                     key={`live-${card.key}`}
-                    className={`${card.compact ? "border-l-[3px] border-black pl-3 py-1.5" : "border-b border-ios-sep pb-2.5"} last:border-b-0`}
+                    className={`${card.compact ? "border-l-[3px] border-[color:var(--rnest-accent)] pl-3 py-1.5" : "border-b border-ios-sep pb-2.5"} last:border-b-0`}
                   >
                     <div className="text-[15px] font-bold tracking-[-0.01em] text-black">{card.title}</div>
                     <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[15px] leading-6 text-ios-text">
@@ -1526,7 +1526,7 @@ export function ToolMedSafetyPage() {
       <div className="space-y-6">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full border border-black bg-[#F6F6F7] px-3 py-1 text-[13px] font-semibold text-black">
+            <span className="rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] px-3 py-1 text-[13px] font-semibold text-black">
               {t(resultViewState.resultKindChip)}
             </span>
           </div>
@@ -1543,7 +1543,7 @@ export function ToolMedSafetyPage() {
             {formatDateTime(result.analyzedAt)}
           </div>
           {result.suggestedNames && result.suggestedNames.length ? (
-            <div className="mt-3 rounded-2xl border border-ios-sep bg-ios-bg px-3 py-3">
+            <div className="mt-3 rounded-2xl border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-3 py-3">
               <div className="text-[15px] font-bold text-black">{t("이걸 찾으시고 계신가요?")}</div>
               <ul className="mt-1.5 list-disc space-y-0.5 pl-4 text-[14px] leading-6 text-ios-text">
                 {result.suggestedNames.slice(0, 3).map((name, idx) => (
@@ -1570,7 +1570,7 @@ export function ToolMedSafetyPage() {
               {resultViewState.displayCards.map((card) => (
                 <section
                   key={card.key}
-                  className={`${card.compact ? "border-l-[3px] border-black pl-3 py-1.5" : "border-b border-ios-sep pb-2.5"} last:border-b-0`}
+                  className={`${card.compact ? "border-l-[3px] border-[color:var(--rnest-accent)] pl-3 py-1.5" : "border-b border-ios-sep pb-2.5"} last:border-b-0`}
                 >
                   <div className="text-[15px] font-bold tracking-[-0.01em] text-black">{card.title}</div>
                   <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[15px] leading-6 text-ios-text">
@@ -1722,7 +1722,7 @@ export function ToolMedSafetyPage() {
                     <button
                       key={option.value}
                       type="button"
-                      className={`h-9 px-4 text-[12.5px] font-semibold transition ${active ? SEGMENT_BUTTON_ACTIVE : SEGMENT_BUTTON_INACTIVE}`}
+                      className={`h-9 px-4 text-[12.5px] font-semibold ${active ? SEGMENT_BUTTON_ACTIVE : SEGMENT_BUTTON_INACTIVE}`}
                       onClick={() => setMode(option.value)}
                     >
                       {t(option.label)}
@@ -1741,7 +1741,7 @@ export function ToolMedSafetyPage() {
                     <button
                       key={option.value}
                       type="button"
-                      className={`h-9 px-4 text-[12.5px] font-semibold transition ${active ? SEGMENT_BUTTON_ACTIVE : SEGMENT_BUTTON_INACTIVE}`}
+                      className={`h-9 px-4 text-[12.5px] font-semibold ${active ? SEGMENT_BUTTON_ACTIVE : SEGMENT_BUTTON_INACTIVE}`}
                       onClick={() => {
                         setQueryIntent(option.value);
                         setError(null);
@@ -1772,7 +1772,7 @@ export function ToolMedSafetyPage() {
                         <button
                           key={option.value}
                           type="button"
-                          className={`h-9 rounded-xl border px-3 text-[12px] font-semibold transition ${
+                          className={`h-9 rounded-xl border px-3 text-[12px] font-semibold ${
                             active ? SITUATION_BUTTON_ACTIVE : SITUATION_BUTTON_INACTIVE
                           }`}
                           onClick={() => setSituation(option.value)}
