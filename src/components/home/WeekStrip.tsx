@@ -78,7 +78,7 @@ export function WeekStrip({ selected, onSelect, schedule, shiftNames, bio }: Pro
             className={[
               "flex flex-1 flex-col items-center gap-0.5 rounded-2xl px-0.5 py-2.5 transition-all duration-150 active:scale-95",
               isSelected
-                ? "bg-[var(--rnest-accent)] text-white"
+                ? "border-2 border-[#17324d] bg-[#dfe8f1] text-[#17324d]"
                 : "text-[var(--rnest-text)]",
             ].join(" ")}
             style={{ WebkitTapHighlightColor: "transparent" }}
@@ -87,7 +87,7 @@ export function WeekStrip({ selected, onSelect, schedule, shiftNames, bio }: Pro
             <span
               className={[
                 "text-[11px] font-medium",
-                isSelected ? "text-white/70" : "text-[var(--rnest-muted)]",
+                isSelected ? "text-[#425a76]" : "text-[var(--rnest-muted)]",
               ].join(" ")}
             >
               {weekdayLabels[dow]}
@@ -98,7 +98,7 @@ export function WeekStrip({ selected, onSelect, schedule, shiftNames, bio }: Pro
               className={[
                 "text-[17px] font-semibold leading-none",
                 isSelected
-                  ? "text-white"
+                  ? "text-[#17324d]"
                   : isToday
                   ? "text-[var(--rnest-accent)]"
                   : "text-[var(--rnest-text)]",
@@ -114,7 +114,7 @@ export function WeekStrip({ selected, onSelect, schedule, shiftNames, bio }: Pro
                   className={[
                     "rounded-full px-1.5 py-0.5 text-[9px] font-bold leading-none",
                     isSelected
-                      ? "bg-white/20 text-white"
+                      ? "bg-[#17324d]/20 text-[#17324d]"
                       : `${SHIFT_DOT[shift] ?? "bg-black/20"} text-white`,
                   ].join(" ")}
                 >
@@ -131,7 +131,7 @@ export function WeekStrip({ selected, onSelect, schedule, shiftNames, bio }: Pro
                 <div
                   className={[
                     "truncate text-center text-[8.5px] font-medium leading-none",
-                    isSelected ? "text-white/85" : "text-[var(--rnest-sub)]",
+                    isSelected ? "text-[#425a76]" : "text-[var(--rnest-sub)]",
                   ].join(" ")}
                   title={eventText}
                 >
