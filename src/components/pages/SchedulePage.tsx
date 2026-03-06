@@ -18,16 +18,85 @@ import { ShiftPatternQuickApplyCard } from "@/components/schedule/ShiftPatternQu
 import { MenstrualSettingsForm } from "@/components/settings/MenstrualSettingsForm";
 import { useI18n } from "@/lib/useI18n";
 
-function moodEmoji(m: number) {
-  return m === 1 ? "☹️" : m === 2 ? "😕" : m === 3 ? "😐" : m === 4 ? "🙂" : "😄";
+// ── 아이콘 컴포넌트 ─────────────────────────────────────────
+function IconMoon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 opacity-60">
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+    </svg>
+  );
 }
 
+function IconActivity() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 opacity-60">
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+    </svg>
+  );
+}
+
+function IconCoffee() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 opacity-60">
+      <path d="M18 8h1a4 4 0 0 1 0 8h-1" />
+      <path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z" />
+      <line x1="6" y1="1" x2="6" y2="4" />
+      <line x1="10" y1="1" x2="10" y2="4" />
+      <line x1="14" y1="1" x2="14" y2="4" />
+    </svg>
+  );
+}
+
+function IconZap() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 opacity-60">
+      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+    </svg>
+  );
+}
+
+function IconSmile() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 opacity-60">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+      <line x1="9" y1="9" x2="9.01" y2="9" />
+      <line x1="15" y1="9" x2="15.01" y2="9" />
+    </svg>
+  );
+}
+
+function IconBriefcase() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 opacity-60">
+      <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
+      <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+    </svg>
+  );
+}
+
+function IconFileText() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 opacity-60">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+      <line x1="16" y1="13" x2="8" y2="13" />
+      <line x1="16" y1="17" x2="8" y2="17" />
+    </svg>
+  );
+}
+
+// ── 헬퍼 ──────────────────────────────────────────────────
 function stressLabel(s: number) {
   return s === 0 ? "낮음" : s === 1 ? "보통" : s === 2 ? "높음" : "매우 높음";
 }
 
 function activityLabel(a: number) {
   return a === 0 ? "가벼움" : a === 1 ? "보통" : a === 2 ? "많음" : "빡셈";
+}
+
+function moodLabel(m: number) {
+  return m === 1 ? "매우 나쁨" : m === 2 ? "나쁨" : m === 3 ? "보통" : m === 4 ? "좋음" : "매우 좋음";
 }
 
 export function SchedulePage() {
@@ -157,87 +226,42 @@ export function SchedulePage() {
     selBio?.mood != null || selEmotion || selNote
   );
 
+  // ── 캘린더 헤더에 들어갈 패턴·생리주기 아이콘 ─────────
+  const calendarHeaderActions = (
+    <>
+      {/* 3교대 패턴 아이콘 */}
+      <button
+        type="button"
+        onClick={() => setOpenPattern(true)}
+        className="flex h-8 w-8 items-center justify-center rounded-full text-ios-muted transition hover:bg-ios-sep/40 active:opacity-60"
+        title={t("3교대 패턴 적용")}
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M17 1l4 4-4 4" /><path d="M3 11V9a4 4 0 0 1 4-4h14" />
+          <path d="M7 23l-4-4 4-4" /><path d="M21 13v2a4 4 0 0 1-4 4H3" />
+        </svg>
+      </button>
+      {/* 생리주기 아이콘 */}
+      <button
+        type="button"
+        onClick={() => setOpenMenstrual(true)}
+        className="flex h-8 w-8 items-center justify-center rounded-full text-ios-muted transition hover:bg-ios-sep/40 active:opacity-60"
+        title={t("생리주기 설정")}
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+          <line x1="9" y1="9" x2="9.01" y2="9" />
+          <line x1="15" y1="9" x2="15.01" y2="9" />
+        </svg>
+      </button>
+    </>
+  );
+
   return (
     <div className="space-y-3 pb-4">
 
-      {/* ── 캘린더 헤더 (패턴·생리주기 아이콘) ─────────── */}
-      <Card className="overflow-hidden p-0">
-        {/* 캘린더 상단 액션 바 */}
-        <div className="flex items-center justify-between border-b border-ios-sep px-4 py-2.5">
-          <span className="text-[13px] font-semibold text-ios-muted">{t("일정")}</span>
-          <div className="flex items-center gap-1">
-            {/* 3교대 패턴 아이콘 */}
-            <button
-              type="button"
-              onClick={() => setOpenPattern(true)}
-              className="flex h-8 w-8 items-center justify-center rounded-full text-ios-muted transition hover:bg-ios-sep/40 active:opacity-60"
-              title={t("3교대 패턴 적용")}
-            >
-              {/* 반복 아이콘 */}
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M17 1l4 4-4 4" /><path d="M3 11V9a4 4 0 0 1 4-4h14" />
-                <path d="M7 23l-4-4 4-4" /><path d="M21 13v2a4 4 0 0 1-4 4H3" />
-              </svg>
-            </button>
-            {/* 생리주기 아이콘 */}
-            <button
-              type="button"
-              onClick={() => setOpenMenstrual(true)}
-              className="flex h-8 w-8 items-center justify-center rounded-full text-ios-muted transition hover:bg-ios-sep/40 active:opacity-60"
-              title={t("생리주기 설정")}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z" />
-                <path d="M8 14s1.5 2 4 2 4-2 4-2" /><line x1="9" y1="9" x2="9.01" y2="9" /><line x1="15" y1="9" x2="15.01" y2="9" />
-              </svg>
-            </button>
-          </div>
-        </div>
-
-        {/* 캘린더 */}
-        <div className="p-3">
-          <MonthCalendar
-            month={month}
-            onMonthChange={setMonth}
-            schedule={store.schedule}
-            shiftNames={store.shiftNames}
-            notes={store.notes}
-            bio={store.bio}
-            emotions={store.emotions}
-            menstrual={store.settings.menstrual}
-            scheduleAppliedFrom={(store.settings as any).schedulePatternAppliedFrom ?? null}
-            riskColorByDate={riskColorByDate}
-            selected={selected}
-            onSelect={handleSelect}
-          />
-        </div>
-      </Card>
-
-      {/* ── 월간 통계 요약 ──────────────────────────────── */}
-      <Card className="px-4 py-3">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-          <span className="text-[12px] font-semibold text-ios-muted">
-            {month.getMonth() + 1}{t("월 요약")}
-          </span>
-          <div className="flex flex-wrap gap-x-3 gap-y-1">
-            {SHIFT_LABELS.filter((s) => (monthlyStats.shiftCounts[s.id] ?? 0) > 0).map((s) => (
-              <span key={s.id} className={cn("rounded-full border px-2 py-0.5 text-[11px] font-semibold", shiftColor(s.id))}>
-                {s.id} {monthlyStats.shiftCounts[s.id]}일
-              </span>
-            ))}
-            {monthlyStats.sleepAvg != null && (
-              <span className="text-[11px] text-ios-muted">
-                평균 수면 {monthlyStats.sleepAvg.toFixed(1)}h
-              </span>
-            )}
-            <span className="text-[11px] text-ios-muted">
-              기록 {monthlyStats.recordCount}/{monthlyStats.totalDays}일
-            </span>
-          </div>
-        </div>
-      </Card>
-
-      {/* ── 선택된 날 뷰 카드 ────────────────────────────── */}
+      {/* ── 선택된 날 뷰 카드 (TOP) ────────────────────────── */}
       <Card className="p-4">
         {/* 날짜 헤더 */}
         <div className="flex items-start justify-between gap-2">
@@ -266,7 +290,7 @@ export function SchedulePage() {
             {/* 수면 */}
             {(selBio?.sleepHours != null || selBio?.napHours != null) && (
               <div className="flex items-center gap-2 text-[13px] text-ios-text">
-                <span className="text-[15px]">💤</span>
+                <IconMoon />
                 <span>
                   {selBio?.sleepHours != null ? `수면 ${selBio.sleepHours}h` : ""}
                   {selBio?.napHours != null && selBio.napHours > 0 ? ` + 낮잠 ${selBio.napHours}h` : ""}
@@ -275,41 +299,56 @@ export function SchedulePage() {
                 </span>
               </div>
             )}
-            {/* 컨디션 한 줄 */}
+            {/* 컨디션 — 항목별 아이콘 */}
             {(selBio?.stress != null || selBio?.caffeineMg != null || selBio?.activity != null) && (
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px] text-ios-muted">
                 {selBio?.stress != null && (
-                  <span>😰 스트레스 {stressLabel(selBio.stress)}</span>
+                  <span className="flex items-center gap-1.5">
+                    <IconActivity />
+                    스트레스 {stressLabel(selBio.stress)}
+                  </span>
                 )}
                 {selBio?.caffeineMg != null && (
-                  <span>☕ 카페인 {selBio.caffeineMg}mg</span>
+                  <span className="flex items-center gap-1.5">
+                    <IconCoffee />
+                    카페인 {selBio.caffeineMg}mg
+                  </span>
                 )}
                 {selBio?.activity != null && (
-                  <span>🏃 활동 {activityLabel(selBio.activity)}</span>
+                  <span className="flex items-center gap-1.5">
+                    <IconZap />
+                    활동 {activityLabel(selBio.activity)}
+                  </span>
                 )}
               </div>
             )}
             {/* 기분 */}
             {(selBio?.mood != null || selEmotion) && (
-              <div className="text-[13px] text-ios-text">
-                <span className="text-[15px]">{moodEmoji(selBio?.mood ?? selEmotion?.mood ?? 3)}</span>
-                {" "}
-                {selEmotion?.tags?.[0] && (
-                  <span className="text-ios-muted">{selEmotion.tags[0]}</span>
-                )}
+              <div className="flex items-center gap-2 text-[13px] text-ios-text">
+                <IconSmile />
+                <span>
+                  기분 {moodLabel(selBio?.mood ?? selEmotion?.mood ?? 3)}
+                  {selEmotion?.tags?.[0] && (
+                    <span className="ml-1.5 text-ios-muted">{selEmotion.tags[0]}</span>
+                  )}
+                </span>
               </div>
             )}
             {/* 근무 이벤트 */}
             {(selBio?.workEventTags?.length || selBio?.workEventNote) && (
-              <div className="text-[12.5px] text-ios-muted">
-                🏥 {selBio?.workEventTags?.slice(0, 2).join(" · ")}
-                {(selBio?.workEventTags?.length ?? 0) > 2 && ` +${(selBio?.workEventTags?.length ?? 0) - 2}`}
+              <div className="flex items-center gap-2 text-[12.5px] text-ios-muted">
+                <IconBriefcase />
+                <span>
+                  {selBio?.workEventTags?.slice(0, 2).join(" · ")}
+                  {(selBio?.workEventTags?.length ?? 0) > 2 && ` +${(selBio?.workEventTags?.length ?? 0) - 2}`}
+                </span>
               </div>
             )}
             {/* 메모 */}
             {selNote && (
-              <div className="rounded-xl bg-ios-bg px-3 py-2 text-[12.5px] text-ios-muted">
-                📝 {selNote.split("\n")[0]}
+              <div className="flex items-start gap-2 rounded-xl bg-ios-bg px-3 py-2 text-[12.5px] text-ios-muted">
+                <IconFileText />
+                <span className="line-clamp-2 leading-relaxed">{selNote.split("\n")[0]}</span>
               </div>
             )}
           </div>
@@ -319,6 +358,47 @@ export function SchedulePage() {
           </div>
         )}
       </Card>
+
+      {/* ── 월간 통계 요약 ──────────────────────────────── */}
+      <Card className="px-4 py-3">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+          <span className="text-[12px] font-semibold text-ios-muted">
+            {month.getMonth() + 1}{t("월 요약")}
+          </span>
+          <div className="flex flex-wrap gap-x-3 gap-y-1">
+            {SHIFT_LABELS.filter((s) => (monthlyStats.shiftCounts[s.id] ?? 0) > 0).map((s) => (
+              <span key={s.id} className={cn("rounded-full border px-2 py-0.5 text-[11px] font-semibold", shiftColor(s.id))}>
+                {s.id} {monthlyStats.shiftCounts[s.id]}일
+              </span>
+            ))}
+            {monthlyStats.sleepAvg != null && (
+              <span className="text-[11px] text-ios-muted">
+                평균 수면 {monthlyStats.sleepAvg.toFixed(1)}h
+              </span>
+            )}
+            <span className="text-[11px] text-ios-muted">
+              기록 {monthlyStats.recordCount}/{monthlyStats.totalDays}일
+            </span>
+          </div>
+        </div>
+      </Card>
+
+      {/* ── 캘린더 (Card 없이 직접) ─────────────────────── */}
+      <MonthCalendar
+        month={month}
+        onMonthChange={setMonth}
+        schedule={store.schedule}
+        shiftNames={store.shiftNames}
+        notes={store.notes}
+        bio={store.bio}
+        emotions={store.emotions}
+        menstrual={store.settings.menstrual}
+        scheduleAppliedFrom={(store.settings as any).schedulePatternAppliedFrom ?? null}
+        riskColorByDate={riskColorByDate}
+        selected={selected}
+        onSelect={handleSelect}
+        headerActions={calendarHeaderActions}
+      />
 
       {/* ── 기록 시트 ─────────────────────────────────────── */}
       <ScheduleRecordSheet
