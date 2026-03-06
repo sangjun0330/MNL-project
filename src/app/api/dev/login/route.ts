@@ -40,12 +40,12 @@ export async function GET(req: Request) {
 
   const supabase = createServerClient(supabaseUrl, supabaseAnon, {
     cookies: {
-      get: (name) => cookieStore.get(name)?.value ?? null,
-      set: (name, value, options) => {
+      get: (name: string) => cookieStore.get(name)?.value ?? null,
+      set: (name: string, value: string, options: Record<string, unknown>) => {
         const store: any = cookieStore;
         if (typeof store.set === "function") store.set({ name, value, ...options });
       },
-      remove: (name, options) => {
+      remove: (name: string, options: Record<string, unknown>) => {
         const store: any = cookieStore;
         if (typeof store.set === "function") store.set({ name, value: "", ...options });
       },
