@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ISODate } from "@/lib/date";
 import { addDays, endOfMonth, formatKoreanDate, startOfMonth, toISODate, fromISODate, todayISO } from "@/lib/date";
@@ -18,6 +18,7 @@ import { ShiftPatternQuickApplyCard } from "@/components/schedule/ShiftPatternQu
 import { MenstrualSettingsForm } from "@/components/settings/MenstrualSettingsForm";
 import { useI18n } from "@/lib/useI18n";
 import { useAuthState } from "@/lib/auth";
+import { useSocialConnectionsRealtimeRefresh } from "@/components/social/useSocialConnectionsRealtimeRefresh";
 
 // ── 아이콘 컴포넌트 ─────────────────────────────────────────
 function IconMoon() {
@@ -108,7 +109,7 @@ export function SchedulePage() {
   const store = useAppStore();
   const { t } = useI18n();
   const router = useRouter();
-  const { status } = useAuthState();
+  const { status, user } = useAuthState();
 
   const [selected, setSelected] = useState<ISODate>(() => todayISO());
   const [month, setMonth] = useState<Date>(() => startOfMonth(fromISODate(todayISO())));
@@ -121,29 +122,41 @@ export function SchedulePage() {
 
   // 소셜 — 받은 요청 배지
   const [socialPendingCount, setSocialPendingCount] = useState(0);
+
+  const fetchPending = useCallback(() => {
+    if (status !== "authenticated") {
+      setSocialPendingCount(0);
+      return;
+    }
+
+    fetch("/api/social/connections")
+      .then((r) => r.json())
+      .then((res) => {
+        if (res.ok) {
+          setSocialPendingCount(res.data?.pendingIncoming?.length ?? 0);
+        }
+      })
+      .catch(() => {});
+  }, [status]);
+
   useEffect(() => {
     if (status !== "authenticated") {
       setSocialPendingCount(0);
       return;
     }
-    let cancelled = false;
-    const fetchPending = () => {
-      fetch("/api/social/connections")
-        .then((r) => r.json())
-        .then((res) => {
-          if (!cancelled && res.ok) {
-            setSocialPendingCount(res.data?.pendingIncoming?.length ?? 0);
-          }
-        })
-        .catch(() => {});
-    };
     fetchPending();
     const timer = setInterval(fetchPending, SOCIAL_PENDING_REFRESH_MS);
     return () => {
-      cancelled = true;
       clearInterval(timer);
     };
-  }, [status]);
+  }, [fetchPending, status]);
+
+  useSocialConnectionsRealtimeRefresh({
+    enabled: status === "authenticated",
+    userId: user?.userId ?? null,
+    scope: "schedule-social-pending",
+    onRefresh: fetchPending,
+  });
 
   // 날짜 선택 시 월 동기화
   const handleSelect = (iso: ISODate) => {

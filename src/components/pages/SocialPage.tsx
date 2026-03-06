@@ -10,6 +10,10 @@ import { SocialConnectionList } from "@/components/social/SocialConnectionList";
 import { SocialCommonOffDays } from "@/components/social/SocialCommonOffDays";
 import { SocialOnboarding } from "@/components/social/SocialOnboarding";
 import { SocialProfileSheet } from "@/components/social/SocialProfileSheet";
+import {
+  useSocialConnectionsRealtimeRefresh,
+  type SocialConnectionRealtimePayload,
+} from "@/components/social/useSocialConnectionsRealtimeRefresh";
 
 const SOCIAL_BACKGROUND_REFRESH_MS = 60 * 60 * 1000;
 
@@ -22,7 +26,7 @@ function currentMonth(): string {
 export function SocialPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { status } = useAuthState();
+  const { status, user } = useAuthState();
   const month = useMemo(() => currentMonth(), []);
   const inviteToken = searchParams.get("invite") ?? "";
 
@@ -114,15 +118,65 @@ export function SocialPage() {
     fetchFriendsSchedule();
   }, [profileChecked, fetchConnections, fetchFriendsSchedule, status]);
 
+  const refreshConnectionsAndSchedule = useCallback(() => {
+    fetchConnections();
+    fetchFriendsSchedule();
+  }, [fetchConnections, fetchFriendsSchedule]);
+
   // 백그라운드 갱신은 과하지 않게 1시간 간격만 유지하고,
-  // 연결/수락 직후에는 수동 refresh로 즉시 반영한다.
+  // 연결 이벤트가 발생하면 실시간 refresh로 바로 반영한다.
   useEffect(() => {
     if (!profileChecked || status !== "authenticated") return;
     const timer = setInterval(() => {
-      fetchConnections();
+      refreshConnectionsAndSchedule();
     }, SOCIAL_BACKGROUND_REFRESH_MS);
     return () => clearInterval(timer);
-  }, [profileChecked, fetchConnections, status]);
+  }, [profileChecked, refreshConnectionsAndSchedule, status]);
+
+  const handleRealtimeEvent = useCallback(
+    (payload: SocialConnectionRealtimePayload) => {
+      const next = (payload.new ?? {}) as {
+        requester_id?: string | null;
+        receiver_id?: string | null;
+        status?: string | null;
+      };
+
+      if (
+        payload.eventType === "INSERT" &&
+        next.status === "pending" &&
+        next.receiver_id === user?.userId
+      ) {
+        setNotice({ tone: "info", text: "새 연결 요청이 도착했어요." });
+        return;
+      }
+
+      if (payload.eventType === "UPDATE" && next.status === "accepted") {
+        if (next.requester_id === user?.userId) {
+          setNotice({ tone: "success", text: "보낸 연결 요청이 수락되었어요." });
+        } else if (next.receiver_id === user?.userId) {
+          setNotice({ tone: "success", text: "친구 연결이 완료되었어요." });
+        }
+        return;
+      }
+
+      if (
+        payload.eventType === "UPDATE" &&
+        next.status === "rejected" &&
+        next.requester_id === user?.userId
+      ) {
+        setNotice({ tone: "info", text: "보낸 연결 요청이 거절되었어요." });
+      }
+    },
+    [user?.userId]
+  );
+
+  useSocialConnectionsRealtimeRefresh({
+    enabled: profileChecked && status === "authenticated",
+    userId: user?.userId ?? null,
+    scope: "social-page",
+    onRefresh: refreshConnectionsAndSchedule,
+    onEvent: handleRealtimeEvent,
+  });
 
   const handleRefresh = useCallback(() => {
     fetchProfile();
