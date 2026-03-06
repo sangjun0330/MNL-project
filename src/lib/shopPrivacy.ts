@@ -47,7 +47,7 @@ export function toMaskedShopShippingSnapshot(shipping: ShopShippingSnapshot): Sh
     smartTracker: shipping.smartTracker
       ? {
           carrierCode: shipping.smartTracker.carrierCode,
-          trackingUrl: shipping.smartTracker.trackingUrl,
+          trackingUrl: null,
           lastStatus: shipping.smartTracker.lastStatus,
           lastStatusLabel: shipping.smartTracker.lastStatusLabel,
           lastEventAt: shipping.smartTracker.lastEventAt,

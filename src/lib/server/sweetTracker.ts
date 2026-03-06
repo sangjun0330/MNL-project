@@ -3,7 +3,7 @@
  *
  * - 정식 JSON REST API (`/api/v1/trackingInfo`) 사용
  * - HTML 스크래핑 방식 완전 폐기 (불안정, 마크업 변경에 취약)
- * - 사용자 노출 URL은 별도 템플릿 페이지 사용 (trackingOpenUrl)
+ * - API 키가 포함되는 외부 추적 URL은 생성/반환하지 않음
  */
 
 import { resolveSweetTrackerCarrierCode } from "@/lib/shopShipping";
@@ -11,8 +11,6 @@ import type { ShopSmartTrackerMeta } from "@/lib/shopProfile";
 
 /** 정식 JSON REST API 엔드포인트 */
 const SWEETTRACKER_API_URL = "https://info.sweettracker.co.kr/api/v1/trackingInfo";
-/** 사용자 노출용 배송 조회 템플릿 페이지 */
-const SWEETTRACKER_TRACKING_PAGE_URL = "https://info.sweettracker.co.kr/tracking/5";
 /** 동일 주문 최소 재조회 간격 (ms) */
 const SWEETTRACKER_MIN_POLL_MS = 60_000;
 
@@ -26,14 +24,12 @@ export type SweetTrackerResult =
       delivered: boolean;
       rawStatus: string;
       statusLabel: string;
-      trackingUrl: string;
       lastEventAt: string | null;
       deliveredAt: string | null;
     }
   | {
       ok: false;
       reason: "missing_config" | "invalid_input" | "not_found" | "fetch_failed";
-      trackingUrl: string | null;
     };
 
 /** SweetTracker API 응답 중 개별 배송 이벤트 */
@@ -93,30 +89,6 @@ function parseSweetTrackerTimeString(timeString: string | null | undefined): str
 // ─────────────────────────────────────────────
 
 /**
- * 사용자에게 노출할 배송 조회 URL (브라우저에서 직접 열기용)
- * API 호출이 아닌 SweetTracker 템플릿 페이지 URL
- */
-export function buildSweetTrackerTrackingUrl(input: {
-  carrierCode: string | null | undefined;
-  trackingNumber: string | null | undefined;
-  courier?: string | null | undefined;
-}) {
-  const key = readSweetTrackerKeyFromEnv();
-  const carrierCode = resolveSweetTrackerCarrierCode({
-    carrierCode: input.carrierCode,
-    courier: input.courier,
-  });
-  const trackingNumber = cleanText(input.trackingNumber, 80);
-  if (!key || !carrierCode || !trackingNumber) return null;
-
-  const url = new URL(SWEETTRACKER_TRACKING_PAGE_URL);
-  url.searchParams.set("t_key", key);
-  url.searchParams.set("t_code", carrierCode);
-  url.searchParams.set("t_invoice", trackingNumber);
-  return url.toString();
-}
-
-/**
  * SweetTracker REST API를 호출하여 배송 상태를 JSON으로 조회합니다.
  *
  * GET /api/v1/trackingInfo?t_key=&t_code=&t_invoice=
@@ -129,7 +101,7 @@ export async function fetchSweetTrackerTracking(input: {
 }): Promise<SweetTrackerResult> {
   const key = readSweetTrackerKeyFromEnv();
   if (!key) {
-    return { ok: false, reason: "missing_config", trackingUrl: null };
+    return { ok: false, reason: "missing_config" };
   }
 
   const carrierCode = resolveSweetTrackerCarrierCode({
@@ -139,15 +111,8 @@ export async function fetchSweetTrackerTracking(input: {
   const trackingNumber = cleanText(input.trackingNumber, 80);
 
   if (!carrierCode || !trackingNumber) {
-    return {
-      ok: false,
-      reason: "invalid_input",
-      trackingUrl: buildSweetTrackerTrackingUrl({ carrierCode, trackingNumber }),
-    };
+    return { ok: false, reason: "invalid_input" };
   }
-
-  // 사용자 노출용 URL (반환값에 포함)
-  const trackingUrl = buildSweetTrackerTrackingUrl({ carrierCode, trackingNumber });
 
   // ── REST API 호출 ──────────────────────────────
   const apiUrl = new URL(SWEETTRACKER_API_URL);
@@ -166,18 +131,18 @@ export async function fetchSweetTrackerTracking(input: {
       cache: "no-store",
     });
   } catch {
-    return { ok: false, reason: "fetch_failed", trackingUrl };
+    return { ok: false, reason: "fetch_failed" };
   }
 
   if (!res.ok) {
-    return { ok: false, reason: "fetch_failed", trackingUrl };
+    return { ok: false, reason: "fetch_failed" };
   }
 
   let data: SweetTrackerApiResponse;
   try {
     data = (await res.json()) as SweetTrackerApiResponse;
   } catch {
-    return { ok: false, reason: "fetch_failed", trackingUrl };
+    return { ok: false, reason: "fetch_failed" };
   }
 
   // ── 오류 메시지 감지 ──────────────────────────
@@ -194,10 +159,10 @@ export async function fetchSweetTrackerTracking(input: {
 
   if (apiKeyErrorPatterns.some((p) => msg.includes(p))) {
     console.warn("[SweetTracker] API KEY 인증 실패:", msg);
-    return { ok: false, reason: "missing_config", trackingUrl };
+    return { ok: false, reason: "missing_config" };
   }
   if (notFoundPatterns.some((p) => msg.includes(p))) {
-    return { ok: false, reason: "not_found", trackingUrl };
+    return { ok: false, reason: "not_found" };
   }
 
   // ── 배송 이벤트 없음 처리 ──────────────────────
@@ -209,7 +174,6 @@ export async function fetchSweetTrackerTracking(input: {
       delivered: false,
       rawStatus: "registered",
       statusLabel: "배송 준비중",
-      trackingUrl: trackingUrl ?? "",
       lastEventAt: null,
       deliveredAt: null,
     };
@@ -244,7 +208,6 @@ export async function fetchSweetTrackerTracking(input: {
     delivered: delivered || level >= 5,
     rawStatus: delivered || level >= 5 ? "delivered" : "in_transit",
     statusLabel,
-    trackingUrl: trackingUrl ?? "",
     lastEventAt,
     deliveredAt: delivered || level >= 5 ? lastEventAt : null,
   };

@@ -142,7 +142,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function sanitizeReason(value: unknown) {
   const text = cleanText(value, 240);
-  return text || "단순 환불 요청";
+  return text || null;
 }
 
 function maskUserId(userId: string) {
@@ -833,7 +833,6 @@ async function applyTrackingResultToOrder(
       metadata: {
         source: "sweettracker",
         statusLabel: result.statusLabel,
-        trackingUrl: result.trackingUrl,
       },
     });
     await sendDeliveryCompletedEmailSafely(saved, input?.actorUserId ? "admin" : "system");
@@ -1359,6 +1358,7 @@ export async function requestShopOrderRefund(input: {
   if (!current) throw new Error("shop_order_not_found");
   const bundle = await findShopOrderBundleByOrderId(input.userId, input.orderId).catch(() => null);
   const reason = sanitizeReason(input.reason);
+  if (!reason || reason.length < 5) throw new Error("shop_refund_reason_required");
 
   if (bundle && bundle.itemCount > 1 && bundle.status === "PAID") {
     const bundleOrders: ShopOrderRecord[] = [];
@@ -1417,7 +1417,12 @@ export async function requestShopOrderRefund(input: {
       bundleRefundApplied: true,
     };
   }
-  if (current.status !== "PAID") throw new Error("shop_order_not_refundable");
+  const isRefundableStatus =
+    current.status === "PAID" ||
+    current.status === "SHIPPED" ||
+    current.status === "DELIVERED" ||
+    current.status === "REFUND_REJECTED";
+  if (!isRefundableStatus) throw new Error("shop_order_not_refundable");
   if (current.refund.status === "requested" || current.refund.status === "done") {
     return {
       order: current,

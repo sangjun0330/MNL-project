@@ -73,6 +73,17 @@ function isJsonEqual(a: unknown, b: unknown): boolean {
   return JSON.stringify(normalizeJsonForCompare(a)) === JSON.stringify(normalizeJsonForCompare(b));
 }
 
+const SERVER_MANAGED_PAYLOAD_KEYS = [
+  "aiRecoveryDaily",
+  "shopWishlist",
+  "shopCart",
+  "shopShippingProfile",
+  "shopShippingAddressBook",
+  "shopOrders",
+  "shopOrderBundles",
+  "shopPurchaseConfirmations",
+] as const;
+
 function hasMeaningfulUserData(value: unknown): boolean {
   if (!isRecord(value)) return false;
   return (
@@ -187,13 +198,19 @@ export async function saveUserState(input: { userId: string; payload: any }): Pr
     nextPayload = preserveMenstrualSettingsIfNeeded(nextPayload, existingPayload);
   }
 
-  // Preserve server-managed daily AI cache unless caller explicitly set/updated it.
-  if (isRecord(nextPayload) && !Object.prototype.hasOwnProperty.call(nextPayload, "aiRecoveryDaily")) {
-    if (existingPayload && Object.prototype.hasOwnProperty.call(existingPayload, "aiRecoveryDaily")) {
-      nextPayload = {
-        ...nextPayload,
-        aiRecoveryDaily: existingPayload.aiRecoveryDaily,
-      };
+  // Preserve server-managed domains unless caller explicitly set/updated them.
+  // This prevents app state sync payloads from wiping shop/account data that lives
+  // in the same row but outside the AppState schema.
+  if (isRecord(nextPayload) && existingPayload) {
+    let mergedPayload: Record<string, unknown> | null = null;
+    for (const key of SERVER_MANAGED_PAYLOAD_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(nextPayload, key)) continue;
+      if (!Object.prototype.hasOwnProperty.call(existingPayload, key)) continue;
+      if (!mergedPayload) mergedPayload = { ...nextPayload };
+      mergedPayload[key] = existingPayload[key];
+    }
+    if (mergedPayload) {
+      nextPayload = mergedPayload;
     }
   }
 

@@ -113,7 +113,8 @@ export function normalizeShopShippingSnapshot(raw: unknown): ShopShippingSnapsho
   const smartTracker: ShopSmartTrackerMeta | null = smartTrackerSource
     ? {
         carrierCode: cleanText(smartTrackerSource.carrierCode, 40) || null,
-        trackingUrl: cleanText(smartTrackerSource.trackingUrl, 400) || null,
+        // 보안 정책: 외부 추적 URL(API 키 포함 가능)은 스냅샷으로 보존/노출하지 않음
+        trackingUrl: null,
         lastStatus: cleanText(smartTrackerSource.lastStatus, 40) || null,
         lastStatusLabel: cleanText(smartTrackerSource.lastStatusLabel, 80) || null,
         lastEventAt: cleanText(smartTrackerSource.lastEventAt, 64) || null,

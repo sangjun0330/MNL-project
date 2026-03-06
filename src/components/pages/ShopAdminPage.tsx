@@ -58,6 +58,38 @@ type ShopAdminOrderSummary = {
   deliveredAt: string | null;
 };
 
+type ShopAdminClaimStatus =
+  | "REQUESTED"
+  | "APPROVED"
+  | "REJECTED"
+  | "RETURN_SHIPPED"
+  | "RETURN_RECEIVED"
+  | "REFUND_COMPLETED"
+  | "EXCHANGE_SHIPPED"
+  | "WITHDRAWN";
+
+type ShopAdminClaimSummary = {
+  claimId: string;
+  orderId: string;
+  userLabel: string;
+  claimType: "REFUND" | "EXCHANGE";
+  status: ShopAdminClaimStatus;
+  reason: string;
+  detail: string | null;
+  adminNote: string | null;
+  requestedAt: string;
+  reviewedAt: string | null;
+  returnTrackingNumber: string | null;
+  returnCourier: string | null;
+  returnShippedAt: string | null;
+  returnReceivedAt: string | null;
+  exchangeTrackingNumber: string | null;
+  exchangeCourier: string | null;
+  exchangeShippedAt: string | null;
+  refundCompletedAt: string | null;
+  order: ShopAdminOrderSummary | null;
+};
+
 type EditableCategory = Exclude<ShopCategoryKey, "all">;
 
 type ProductDraft = {
@@ -142,6 +174,36 @@ function orderStatusClass(status: ShopAdminOrderSummary["status"]) {
   if (status === "DELIVERED" || status === "REFUNDED") return "border-[#c2d9bd] bg-[#edf7eb] text-[#2e6b26]";
   if (status === "FAILED" || status === "REFUND_REJECTED") return "border-[#f1d0cc] bg-[#fff6f5] text-[#a33a2b]";
   return "border-[#dfe5ee] bg-[#f7f8fb] text-[#3d4d63]";
+}
+
+function claimTypeLabel(type: ShopAdminClaimSummary["claimType"]) {
+  return type === "REFUND" ? "환불" : "교환";
+}
+
+function claimStatusLabel(status: ShopAdminClaimSummary["status"]) {
+  switch (status) {
+    case "REQUESTED": return "접수됨";
+    case "APPROVED": return "승인됨";
+    case "REJECTED": return "반려됨";
+    case "RETURN_SHIPPED": return "반품 발송";
+    case "RETURN_RECEIVED": return "반품 입고";
+    case "REFUND_COMPLETED": return "환불 완료";
+    case "EXCHANGE_SHIPPED": return "교환품 발송";
+    case "WITHDRAWN": return "철회됨";
+    default: return status;
+  }
+}
+
+function claimStatusClass(status: ShopAdminClaimSummary["status"]) {
+  if (status === "REJECTED") return "border-[#f1d0cc] bg-[#fff6f5] text-[#a33a2b]";
+  if (status === "REFUND_COMPLETED" || status === "EXCHANGE_SHIPPED") {
+    return "border-[#c2d9bd] bg-[#edf7eb] text-[#2e6b26]";
+  }
+  return "border-[#d7dfeb] bg-[#eef4fb] text-[#11294b]";
+}
+
+function isActiveClaimStatus(status: ShopAdminClaimSummary["status"]) {
+  return status === "REQUESTED" || status === "APPROVED" || status === "RETURN_SHIPPED" || status === "RETURN_RECEIVED";
 }
 
 function productChannelLabel(product: ShopProduct & { active?: boolean }) {
@@ -1135,8 +1197,11 @@ export function ShopAdminPage() {
   // Orders & refunds
   const [orders, setOrders] = useState<ShopAdminOrderSummary[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
+  const [claims, setClaims] = useState<ShopAdminClaimSummary[]>([]);
+  const [claimsLoading, setClaimsLoading] = useState(false);
   const [shippingDrafts, setShippingDrafts] = useState<Record<string, { courier: string; carrierCode: string; trackingNumber: string }>>({});
   const [shippingLoadingId, setShippingLoadingId] = useState<string | null>(null);
+  const [claimShippingDrafts, setClaimShippingDrafts] = useState<Record<string, { courier: string; trackingNumber: string }>>({});
 
   // Edit state
   const [draft, setDraft] = useState<ProductDraft>(createEmptyDraft());
@@ -1147,11 +1212,11 @@ export function ShopAdminPage() {
   const [toggleLoading, setToggleLoading] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [noticeTone, setNoticeTone] = useState<"error" | "notice">("notice");
-  const [refundLoadingId, setRefundLoadingId] = useState<string | null>(null);
+  const [claimLoadingId, setClaimLoadingId] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<AdminSection>("products");
   const shippingDraftStorageKey = user?.userId ? `${ADMIN_SHIPPING_DRAFT_STORAGE_KEY}:${user.userId}` : null;
 
-  const refundQueue = useMemo(() => orders.filter((o) => o.status === "REFUND_REQUESTED"), [orders]);
+  const claimQueue = useMemo(() => claims.filter((claim) => isActiveClaimStatus(claim.status)), [claims]);
   const salesStats = useMemo(() => {
     const paidLikeStatuses: ShopAdminOrderSummary["status"][] = ["PAID", "SHIPPED", "DELIVERED", "REFUND_REQUESTED", "REFUND_REJECTED"];
     const totalSales = orders
@@ -1160,10 +1225,10 @@ export function ShopAdminPage() {
     return {
       totalOrders: orders.length,
       totalSales,
-      refundPending: refundQueue.length,
+      refundPending: claimQueue.length,
       shippingPending: orders.filter((order) => order.status === "PAID").length,
     };
-  }, [orders, refundQueue.length]);
+  }, [claimQueue.length, orders]);
   const orderFlowStats = useMemo(
     () => ({
       readyToShip: orders.filter((order) => order.status === "PAID").length,
@@ -1223,6 +1288,45 @@ export function ShopAdminPage() {
     [shippingDraftStorageKey, status, user?.userId]
   );
 
+  const loadAdminClaims = useCallback(
+    async (input?: { showLoading?: boolean; silent?: boolean; headers?: Record<string, string> }) => {
+      if (!input?.headers && (status !== "authenticated" || !user?.userId)) return;
+      if (input?.showLoading && mountedRef.current) setClaimsLoading(true);
+
+      try {
+        const headers = input?.headers ?? (await authHeaders());
+        const res = await fetch("/api/admin/shop/claims?limit=80", {
+          method: "GET",
+          headers: { "content-type": "application/json", ...headers },
+          cache: "no-store",
+        });
+        const json = await res.json().catch(() => null);
+        if (!mountedRef.current) return;
+        if (!res.ok || !json?.ok || !Array.isArray(json?.data?.claims)) throw new Error();
+
+        const nextClaims = json.data.claims as ShopAdminClaimSummary[];
+        setClaims(nextClaims);
+        setClaimShippingDrafts((current) => {
+          const merged: Record<string, { courier: string; trackingNumber: string }> = { ...current };
+          for (const claim of nextClaims) {
+            merged[claim.claimId] = {
+              courier: current[claim.claimId]?.courier || claim.exchangeCourier || "",
+              trackingNumber: current[claim.claimId]?.trackingNumber || claim.exchangeTrackingNumber || "",
+            };
+          }
+          return merged;
+        });
+      } catch {
+        if (!mountedRef.current || input?.silent) return;
+        setNoticeTone("error");
+        setNotice("교환/환불 클레임 목록을 다시 불러오지 못했습니다.");
+      } finally {
+        if (input?.showLoading && mountedRef.current) setClaimsLoading(false);
+      }
+    },
+    [status, user?.userId]
+  );
+
   // Auth + initial data load
   useEffect(() => {
     let active = true;
@@ -1245,13 +1349,14 @@ export function ShopAdminPage() {
         setAccessState("allowed");
 
         setCatalogLoading(true);
-        const [catalogResult, ordersResult] = await Promise.allSettled([
+        const [catalogResult, ordersResult, claimsResult] = await Promise.allSettled([
           fetch("/api/admin/shop/catalog", {
             method: "GET",
             headers: { "content-type": "application/json", ...headers },
             cache: "no-store",
           }).then(async (r) => ({ ok: r.ok, json: await r.json().catch(() => null) })),
           loadAdminOrders({ showLoading: true, silent: true, headers }),
+          loadAdminClaims({ showLoading: true, silent: true, headers }),
         ]);
 
         if (!active) return;
@@ -1265,6 +1370,9 @@ export function ShopAdminPage() {
         if (ordersResult.status === "rejected") {
           showNotice("error", "주문 목록을 불러오지 못했습니다.");
         }
+        if (claimsResult.status === "rejected") {
+          showNotice("error", "교환/환불 클레임 목록을 불러오지 못했습니다.");
+        }
       } catch {
         if (!active) return;
         setAccessState("blocked");
@@ -1275,7 +1383,7 @@ export function ShopAdminPage() {
     };
     void run();
     return () => { active = false; };
-  }, [loadAdminOrders, status, user?.userId]);
+  }, [loadAdminClaims, loadAdminOrders, status, user?.userId]);
 
   useEffect(() => {
     if (accessState !== "allowed") return;
@@ -1283,6 +1391,7 @@ export function ShopAdminPage() {
     const refreshIfVisible = () => {
       if (document.visibilityState !== "visible") return;
       void loadAdminOrders({ showLoading: false, silent: true });
+      void loadAdminClaims({ showLoading: false, silent: true });
     };
 
     const intervalId = window.setInterval(refreshIfVisible, 15000); // 30s → 15s: 관리자 배송처리 응답성 개선
@@ -1294,7 +1403,7 @@ export function ShopAdminPage() {
       window.removeEventListener("focus", refreshIfVisible);
       document.removeEventListener("visibilitychange", refreshIfVisible);
     };
-  }, [accessState, loadAdminOrders]);
+  }, [accessState, loadAdminClaims, loadAdminOrders]);
 
   useEffect(() => {
     writeStoredShippingDrafts(shippingDraftStorageKey, shippingDrafts);
@@ -1433,35 +1542,88 @@ export function ShopAdminPage() {
     }
   };
 
-  const handleRefundAction = async (orderId: string, action: "approve" | "reject") => {
+  const handleClaimShippingDraftChange = (
+    claimId: string,
+    field: "courier" | "trackingNumber",
+    value: string
+  ) => {
+    setClaimShippingDrafts((current) => ({
+      ...current,
+      [claimId]: {
+        courier: current[claimId]?.courier ?? "",
+        trackingNumber: current[claimId]?.trackingNumber ?? "",
+        [field]: value,
+      },
+    }));
+  };
+
+  const handleClaimAction = async (
+    claim: ShopAdminClaimSummary,
+    action: "approve" | "reject" | "mark_return_received" | "complete_refund" | "ship_exchange"
+  ) => {
     if (accessState !== "allowed") return;
-    setRefundLoadingId(orderId);
+    setClaimLoadingId(claim.claimId);
     setNotice(null);
+
+    const draft = claimShippingDrafts[claim.claimId] ?? { courier: "", trackingNumber: "" };
+    if (action === "ship_exchange" && (!draft.courier.trim() || !draft.trackingNumber.trim())) {
+      showNotice("error", "교환품 발송 처리에는 택배사와 운송장 번호가 필요합니다.");
+      setClaimLoadingId(null);
+      return;
+    }
+
     try {
       const headers = await authHeaders();
-      const res = await fetch(`/api/admin/shop/orders/${encodeURIComponent(orderId)}/refund`, {
-        method: "POST",
+      const payload: Record<string, string> = {
+        action,
+      };
+      if (action === "approve") payload.note = "클레임 승인";
+      if (action === "reject") payload.note = "운영 기준상 현재 요청을 진행할 수 없습니다.";
+      if (action === "complete_refund") payload.note = "반품 입고 확인 후 환불 완료";
+      if (action === "ship_exchange") {
+        payload.note = "반품 입고 확인 후 교환품 발송";
+        payload.courier = draft.courier.trim();
+        payload.trackingNumber = draft.trackingNumber.trim();
+      }
+
+      const res = await fetch(`/api/admin/shop/claims/${encodeURIComponent(claim.claimId)}`, {
+        method: "PATCH",
         headers: { "content-type": "application/json", ...headers },
-        body: JSON.stringify({
-          action,
-          note: action === "reject" ? "운영 기준상 현재 환불을 진행할 수 없습니다." : "환불 승인 완료",
-        }),
+        body: JSON.stringify(payload),
       });
       const json = await res.json().catch(() => null);
       if (!res.ok || !json?.ok) throw new Error(String(json?.error ?? `http_${res.status}`));
-      const nextOrder = json.data.order as ShopAdminOrderSummary;
-      setOrders((cur) => [nextOrder, ...cur.filter((o) => o.orderId !== nextOrder.orderId)].slice(0, 20));
+
+      const nextClaim = json.data.claim as ShopAdminClaimSummary;
+      const nextOrder = (json.data.order ?? null) as ShopAdminOrderSummary | null;
+      setClaims((current) => current.map((item) => (item.claimId === nextClaim.claimId ? { ...nextClaim, order: nextOrder ?? item.order ?? null } : item)));
+      if (nextOrder) {
+        setOrders((current) => current.map((item) => (item.orderId === nextOrder.orderId ? nextOrder : item)));
+      }
+
+      void loadAdminClaims({ showLoading: false, silent: true });
       void loadAdminOrders({ showLoading: false, silent: true });
-      showNotice("notice", action === "approve" ? "환불을 승인했습니다." : "환불 요청을 반려했습니다.");
+
+      if (action === "approve") showNotice("notice", "요청을 승인했습니다.");
+      if (action === "reject") showNotice("notice", "요청을 반려했습니다.");
+      if (action === "mark_return_received") showNotice("notice", "반품 입고를 확인했습니다.");
+      if (action === "complete_refund") showNotice("notice", "환불 처리를 완료했습니다.");
+      if (action === "ship_exchange") showNotice("notice", "교환품 발송 정보를 등록했습니다.");
     } catch (error: any) {
       const message = String(error?.message ?? "");
-      if (message === "shop_order_storage_unavailable") {
-        showNotice("error", "주문 저장소 또는 스키마가 아직 완전히 준비되지 않았습니다. 쇼핑 DB 마이그레이션 상태를 확인해 주세요.");
+      if (message === "shop_claim_storage_unavailable") {
+        showNotice("error", "교환/환불 클레임 저장소 또는 스키마가 아직 완전히 준비되지 않았습니다.");
+      } else if (message.includes("refund_not_ready")) {
+        showNotice("error", "반품 입고가 확인된 환불 클레임만 최종 환불 처리할 수 있습니다.");
+      } else if (message.includes("exchange_not_ready")) {
+        showNotice("error", "반품 입고가 확인된 교환 클레임만 교환품 발송할 수 있습니다.");
+      } else if (message.includes("return_not_shipped")) {
+        showNotice("error", "사용자 반품 발송 등록 후에만 입고 확인이 가능합니다.");
       } else {
-        showNotice("error", "환불 처리에 실패했습니다.");
+        showNotice("error", "클레임 처리에 실패했습니다.");
       }
     } finally {
-      setRefundLoadingId(null);
+      setClaimLoadingId(null);
     }
   };
 
@@ -1639,8 +1801,8 @@ export function ShopAdminPage() {
       description: "발송 준비, 추적, 완료 상태를 최근 주문 기준으로 관리합니다.",
     },
     refunds: {
-      title: "쇼핑 환불 워크스페이스",
-      description: "쇼핑 환불 요청만 빠르게 확인하고 처리합니다.",
+      title: "교환·환불 워크스페이스",
+      description: "클레임 접수부터 입고·최종처리까지 한 화면에서 운영합니다.",
     },
   }[activeSection];
 
@@ -1651,7 +1813,7 @@ export function ShopAdminPage() {
           <div>
             <Link href="/shop" data-auth-allow className={`${SECONDARY_BUTTON} h-10 text-[12px]`}>{t("← 쇼핑으로")}</Link>
             <div className="mt-4 text-[30px] font-extrabold tracking-[-0.03em] text-ios-text">{t("쇼핑 운영 관리")}</div>
-            <div className="mt-2 text-[13px] leading-6 text-ios-sub">{t("상품, 주문, 배송, 쇼핑 환불을 같은 운영 기준으로 단순하게 정리합니다.")}</div>
+            <div className="mt-2 text-[13px] leading-6 text-ios-sub">{t("상품, 주문, 배송, 교환·환불 클레임을 같은 운영 기준으로 단순하게 정리합니다.")}</div>
 
             <div className="mt-5 rounded-[24px] border border-[#e3eaf2] bg-white/88 p-4">
               <div className="text-[12px] font-semibold text-[#17324d]">{activeSectionMeta.title}</div>
@@ -1660,7 +1822,7 @@ export function ShopAdminPage() {
                 {([
                   { key: "products", label: "상품" },
                   { key: "orders", label: "주문·배송" },
-                  { key: "refunds", label: "환불" },
+                  { key: "refunds", label: "교환·환불" },
                 ] as { key: AdminSection; label: string }[]).map((section) => (
                   <button
                     key={section.key}
@@ -1687,7 +1849,7 @@ export function ShopAdminPage() {
               label="총 매출"
               value={`${salesStats.totalSales.toLocaleString("ko-KR")}원`}
             />
-            <AdminSummaryTile label="환불 대기" value={`${salesStats.refundPending}건`} hint="쇼핑 환불 요청" />
+            <AdminSummaryTile label="클레임 대기" value={`${salesStats.refundPending}건`} hint="교환·환불 요청" />
             <AdminSummaryTile label="배송 대기" value={`${salesStats.shippingPending}건`} hint="결제 완료 후 미발송" />
           </div>
         </div>
@@ -1894,73 +2056,155 @@ export function ShopAdminPage() {
       </div>
       ) : null}
 
-      {/* ── Refund queue ── */}
+      {/* ── Claim queue ── */}
       {activeSection === "refunds" ? (
       <div className="rounded-[28px] border border-ios-sep bg-white p-5">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{t("환불 요청 처리")}</div>
-            <div className="mt-1 text-[12.5px] text-ios-sub">{t("쇼핑 환불 요청만 모아 승인/반려를 빠르게 처리합니다.")}</div>
+            <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{t("교환·환불 요청 처리")}</div>
+            <div className="mt-1 text-[12.5px] text-ios-sub">{t("클레임 단위로 접수·승인·입고·최종처리를 같은 흐름에서 관리합니다.")}</div>
           </div>
           <div className="rounded-full border border-[#d7dfeb] bg-[#f4f7fb] px-3 py-1 text-[11px] font-semibold text-[#11294b]">
-            {ordersLoading ? "…" : `${refundQueue.length}건`}
+            {claimsLoading ? "…" : `${claimQueue.length}건`}
           </div>
         </div>
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
-          <AdminSummaryTile label="처리 대기" value={`${refundQueue.length}건`} />
-          <AdminSummaryTile label="반려/보류" value={`${orders.filter((order) => order.status === "REFUND_REJECTED").length}건`} />
-          <AdminSummaryTile label="완료" value={`${orders.filter((order) => order.status === "REFUNDED").length}건`} />
+          <AdminSummaryTile label="처리 대기" value={`${claimQueue.length}건`} />
+          <AdminSummaryTile label="반려/보류" value={`${claims.filter((claim) => claim.status === "REJECTED").length}건`} />
+          <AdminSummaryTile
+            label="완료"
+            value={`${claims.filter((claim) => claim.status === "REFUND_COMPLETED" || claim.status === "EXCHANGE_SHIPPED").length}건`}
+          />
         </div>
         <div className="mt-4 space-y-3">
-          {refundQueue.map((order) => (
-            <div key={order.orderId} className="rounded-2xl border border-ios-sep bg-white px-4 py-4">
+          {claimQueue.map((claim) => (
+            <div key={claim.claimId} className="rounded-2xl border border-ios-sep bg-white px-4 py-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-[13px] font-semibold text-ios-text">{order.productSnapshot.name}</div>
+                  <div className="text-[13px] font-semibold text-ios-text">
+                    {claim.order?.productSnapshot.name ?? "주문 정보 로딩 중"}
+                  </div>
                   <div className="mt-1 text-[11px] text-ios-sub">
-                    {order.userLabel} · {Math.round(order.amount).toLocaleString("ko-KR")}원 · {formatDateLabel(order.createdAt)}
+                    {claimTypeLabel(claim.claimType)} · {claim.order?.userLabel ?? claim.userLabel ?? "unknown"} · 주문번호 {claim.orderId}
                   </div>
                 </div>
-                <span className={`rounded-full border px-2.5 py-1 text-[10.5px] font-semibold ${orderStatusClass(order.status)}`}>
-                  {orderStatusLabel(order.status)}
+                <span className={`rounded-full border px-2.5 py-1 text-[10.5px] font-semibold ${claimStatusClass(claim.status)}`}>
+                  {claimStatusLabel(claim.status)}
                 </span>
               </div>
-              <div className="mt-2 text-[12px] text-ios-sub">{order.refund.reason ?? t("환불 사유 없음")}</div>
-              {order.shipping.addressLine1 ? (
+
+              <div className="mt-2 text-[12px] text-ios-sub">{claim.reason || t("요청 사유 없음")}</div>
+              {claim.detail ? <div className="mt-1 text-[11.5px] text-ios-sub">{claim.detail}</div> : null}
+              {claim.adminNote ? <div className="mt-1 text-[11.5px] text-ios-sub">운영 메모: {claim.adminNote}</div> : null}
+              <div className="mt-1 text-[11px] text-[#92a0b4]">접수일: {formatDateLabel(claim.requestedAt)}</div>
+              {claim.returnTrackingNumber ? (
+                <div className="mt-1 text-[11px] text-[#92a0b4]">
+                  반품 운송장: {claim.returnCourier ?? "-"} {claim.returnTrackingNumber}
+                </div>
+              ) : null}
+              {claim.exchangeTrackingNumber ? (
+                <div className="mt-1 text-[11px] text-[#92a0b4]">
+                  교환 운송장: {claim.exchangeCourier ?? "-"} {claim.exchangeTrackingNumber}
+                </div>
+              ) : null}
+
+              {claim.order?.shipping.addressLine1 ? (
                 <details className="mt-2 rounded-2xl border border-[#eef2f7] bg-[#f8fafc] px-3 py-3 text-[11.5px] leading-5 text-[#44556d]">
                   <summary className="cursor-pointer list-none font-semibold text-[#17324d]">배송 정보 보기</summary>
                   <div className="mt-2">
-                    {order.shipping.recipientName} · {order.shipping.phone}<br />
-                    ({order.shipping.postalCode}) {order.shipping.addressLine1}
-                    {order.shipping.addressLine2 ? ` ${order.shipping.addressLine2}` : ""}
-                    {order.shipping.deliveryNote ? <><br />메모: {order.shipping.deliveryNote}</> : null}
+                    {claim.order.shipping.recipientName} · {claim.order.shipping.phone}<br />
+                    ({claim.order.shipping.postalCode}) {claim.order.shipping.addressLine1}
+                    {claim.order.shipping.addressLine2 ? ` ${claim.order.shipping.addressLine2}` : ""}
+                    {claim.order.shipping.deliveryNote ? <><br />메모: {claim.order.shipping.deliveryNote}</> : null}
                   </div>
                 </details>
               ) : null}
               <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  data-auth-allow
-                  disabled={refundLoadingId === order.orderId}
-                  onClick={() => void handleRefundAction(order.orderId, "approve")}
-                  className={`${PRIMARY_BUTTON} h-10 text-[12px]`}
-                >
-                  {refundLoadingId === order.orderId ? "처리 중…" : "환불 승인"}
-                </button>
-                <button
-                  type="button"
-                  data-auth-allow
-                  disabled={refundLoadingId === order.orderId}
-                  onClick={() => void handleRefundAction(order.orderId, "reject")}
-                  className={`${SECONDARY_BUTTON} h-10 text-[12px]`}
-                >
-                  반려
-                </button>
+                {claim.status === "REQUESTED" ? (
+                  <>
+                    <button
+                      type="button"
+                      data-auth-allow
+                      disabled={claimLoadingId === claim.claimId}
+                      onClick={() => void handleClaimAction(claim, "approve")}
+                      className={`${PRIMARY_BUTTON} h-10 text-[12px]`}
+                    >
+                      {claimLoadingId === claim.claimId ? "처리 중…" : "승인"}
+                    </button>
+                    <button
+                      type="button"
+                      data-auth-allow
+                      disabled={claimLoadingId === claim.claimId}
+                      onClick={() => void handleClaimAction(claim, "reject")}
+                      className={`${SECONDARY_BUTTON} h-10 text-[12px]`}
+                    >
+                      반려
+                    </button>
+                  </>
+                ) : null}
+
+                {claim.status === "APPROVED" ? (
+                  <div className="rounded-xl border border-[#d7dfeb] bg-[#f8fafc] px-3 py-2 text-[11.5px] text-ios-sub">
+                    사용자 반품 발송 정보를 기다리는 중입니다.
+                  </div>
+                ) : null}
+
+                {claim.status === "RETURN_SHIPPED" ? (
+                  <button
+                    type="button"
+                    data-auth-allow
+                    disabled={claimLoadingId === claim.claimId}
+                    onClick={() => void handleClaimAction(claim, "mark_return_received")}
+                    className={`${SECONDARY_BUTTON} h-10 text-[12px]`}
+                  >
+                    {claimLoadingId === claim.claimId ? "처리 중…" : "반품 입고 확인"}
+                  </button>
+                ) : null}
+
+                {claim.status === "RETURN_RECEIVED" && claim.claimType === "REFUND" ? (
+                  <button
+                    type="button"
+                    data-auth-allow
+                    disabled={claimLoadingId === claim.claimId}
+                    onClick={() => void handleClaimAction(claim, "complete_refund")}
+                    className={`${PRIMARY_BUTTON} h-10 text-[12px]`}
+                  >
+                    {claimLoadingId === claim.claimId ? "처리 중…" : "환불 실행"}
+                  </button>
+                ) : null}
+
+                {claim.status === "RETURN_RECEIVED" && claim.claimType === "EXCHANGE" ? (
+                  <div className="w-full rounded-2xl border border-[#eef2f7] bg-[#f8fafc] p-3">
+                    <div className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+                      <input
+                        className={INPUT_CLASS}
+                        placeholder="교환 택배사"
+                        value={claimShippingDrafts[claim.claimId]?.courier ?? ""}
+                        onChange={(event) => handleClaimShippingDraftChange(claim.claimId, "courier", event.target.value)}
+                      />
+                      <input
+                        className={INPUT_CLASS}
+                        placeholder="교환 운송장 번호"
+                        value={claimShippingDrafts[claim.claimId]?.trackingNumber ?? ""}
+                        onChange={(event) => handleClaimShippingDraftChange(claim.claimId, "trackingNumber", event.target.value)}
+                      />
+                      <button
+                        type="button"
+                        data-auth-allow
+                        disabled={claimLoadingId === claim.claimId}
+                        onClick={() => void handleClaimAction(claim, "ship_exchange")}
+                        className={`${PRIMARY_BUTTON} h-12 text-[12px]`}
+                      >
+                        {claimLoadingId === claim.claimId ? "처리 중…" : "교환품 발송"}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </div>
           ))}
-          {!ordersLoading && refundQueue.length === 0 ? (
-            <div className="rounded-2xl border border-ios-sep bg-white px-4 py-4 text-[12.5px] text-ios-sub">{t("현재 처리할 환불 요청이 없습니다.")}</div>
+          {!claimsLoading && claimQueue.length === 0 ? (
+            <div className="rounded-2xl border border-ios-sep bg-white px-4 py-4 text-[12.5px] text-ios-sub">{t("현재 처리할 교환/환불 요청이 없습니다.")}</div>
           ) : null}
         </div>
       </div>

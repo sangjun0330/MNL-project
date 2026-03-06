@@ -61,7 +61,7 @@ export async function PATCH(req: Request, ctx: any) {
           orderId: order.orderId,
           trackingNumber,
           courier,
-          trackingUrl: order.shipping.smartTracker?.trackingUrl ?? null,
+          trackingUrl: null,
         });
       } catch (emailError: any) {
         console.error("[AdminOrder] 배송시작 이메일 발송 실패 orderId=%s err=%s", orderId, String(emailError?.message ?? emailError));

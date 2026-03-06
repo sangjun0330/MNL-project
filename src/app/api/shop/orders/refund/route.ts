@@ -40,6 +40,9 @@ export async function POST(req: Request) {
   } catch (error: any) {
     const message = String(error?.message ?? "failed_to_request_shop_refund");
     if (message.includes("not_found")) return jsonNoStore({ ok: false, error: "shop_order_not_found" }, { status: 404 });
+    if (message.includes("reason_required")) {
+      return jsonNoStore({ ok: false, error: "shop_refund_reason_required" }, { status: 400 });
+    }
     if (message.includes("not_refundable")) return jsonNoStore({ ok: false, error: "shop_order_not_refundable" }, { status: 400 });
     if (
       message === "shop_order_storage_unavailable" ||

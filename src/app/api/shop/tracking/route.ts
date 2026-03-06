@@ -14,7 +14,7 @@ import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurit
 import { resolveSweetTrackerCarrierCode } from "@/lib/shopShipping";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { readShopOrderForUser, syncShopOrderTrackingFromSnapshot } from "@/lib/server/shopOrderStore";
-import { buildSweetTrackerTrackingUrl, fetchSweetTrackerTracking, shouldPollSweetTracker } from "@/lib/server/sweetTracker";
+import { fetchSweetTrackerTracking, shouldPollSweetTracker } from "@/lib/server/sweetTracker";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -50,12 +50,6 @@ export async function GET(req: Request) {
     carrierCode: meta?.carrierCode ?? null,
     courier: order.courier,
   });
-  const trackingUrl = buildSweetTrackerTrackingUrl({
-    carrierCode: resolvedCarrierCode,
-    courier: order.courier,
-    trackingNumber: order.trackingNumber,
-  });
-  const trackingOpenUrl = `/api/shop/tracking/open?orderId=${encodeURIComponent(order.orderId)}`;
   if (!order.trackingNumber || !resolvedCarrierCode) {
     return jsonNoStore({ ok: false, error: "tracking_not_available" }, { status: 400 });
   }
@@ -68,7 +62,7 @@ export async function GET(req: Request) {
     lastEventAt: currentOrder.shipping.smartTracker?.lastEventAt ?? currentOrder.deliveredAt ?? currentOrder.shippedAt ?? null,
     lastPolledAt: currentOrder.shipping.smartTracker?.lastPolledAt ?? null,
     delivered: currentOrder.status === "DELIVERED" || Boolean(currentOrder.deliveredAt),
-    trackingUrl: trackingUrl ? trackingOpenUrl : null,
+    trackingUrl: null,
     cached,
     error: error ?? null,
   });
@@ -130,7 +124,7 @@ export async function GET(req: Request) {
       lastEventAt: result.lastEventAt,
       lastPolledAt: new Date().toISOString(),
       delivered: result.delivered,
-      trackingUrl: trackingOpenUrl,
+      trackingUrl: null,
       cached: false,
       error: null,
     },

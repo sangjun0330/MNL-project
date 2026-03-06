@@ -2,8 +2,6 @@ import { NextResponse } from "next/server";
 import { jsonNoStore } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { readShopOrderForUser } from "@/lib/server/shopOrderStore";
-import { buildSweetTrackerTrackingUrl } from "@/lib/server/sweetTracker";
-import { resolveSweetTrackerCarrierCode } from "@/lib/shopShipping";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -23,18 +21,9 @@ export async function GET(req: Request) {
   const order = await readShopOrderForUser(userId, orderId).catch(() => null);
   if (!order) return jsonNoStore({ ok: false, error: "shop_order_not_found" }, { status: 404 });
 
-  const carrierCode = resolveSweetTrackerCarrierCode({
-    carrierCode: order.shipping.smartTracker?.carrierCode ?? null,
-    courier: order.courier,
-  });
-  const trackingUrl = buildSweetTrackerTrackingUrl({
-    carrierCode,
-    courier: order.courier,
-    trackingNumber: order.trackingNumber,
-  });
-  if (!trackingUrl) {
-    return jsonNoStore({ ok: false, error: "tracking_not_available" }, { status: 400 });
-  }
-
-  return NextResponse.redirect(trackingUrl, { status: 302 });
+  // 외부 추적 URL은 API 키 파라미터를 포함할 수 있어 직접 리다이렉트를 차단합니다.
+  // 사용자는 주문 상세(동일 계정 세션)에서 서버 프록시된 배송 상태를 확인합니다.
+  const detailUrl = new URL(`/shop/orders/${encodeURIComponent(order.orderId)}`, req.url);
+  detailUrl.searchParams.set("tracking", "1");
+  return NextResponse.redirect(detailUrl, { status: 302 });
 }
