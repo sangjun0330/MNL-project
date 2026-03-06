@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/cn";
 import type { FriendSchedule } from "@/types/social";
 
@@ -27,9 +28,15 @@ export function SocialFriendMiniCalendar({ friend, month }: Props) {
     return { iso, day: d, shift: friend.schedule[iso] ?? null };
   });
 
-  // 유의미한 날짜만 표시 (오늘 기준 전후 7일)
-  const today = new Date();
-  const todayISO = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  // 오늘 날짜는 mount 후에만 계산 — SSR/hydration 불일치 방지
+  // (서버와 클라이언트의 new Date()가 다를 수 있음: 서버 UTC vs 클라이언트 KST)
+  const [todayISO, setTodayISO] = useState("");
+  useEffect(() => {
+    const d = new Date();
+    setTodayISO(
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+    );
+  }, []);
 
   // 이번 달 전체 보여주되, 스크롤 가능한 가로 바 형태
   const shiftDays = days.filter((d) => d.shift);
@@ -44,7 +51,7 @@ export function SocialFriendMiniCalendar({ friend, month }: Props) {
     <div className="flex flex-wrap gap-1 mt-1.5">
       {days.map(({ iso, day, shift }) => {
         if (!shift) return null;
-        const isToday = iso === todayISO;
+        const isToday = todayISO !== "" && iso === todayISO;
         return (
           <div
             key={iso}
