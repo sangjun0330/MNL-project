@@ -9,16 +9,7 @@ import { useI18n } from "@/lib/useI18n";
 export function SettingsGeneralPage() {
   const store = useAppStore();
   const { t } = useI18n();
-  const theme = store.settings.theme ?? "light";
   const language = store.settings.language ?? "ko";
-
-  const generalOptions = useMemo(
-    () => [
-      { value: "light", label: t("라이트 모드") },
-      { value: "dark", label: t("다크 모드") },
-    ],
-    [t]
-  );
 
   const languageOptions = useMemo(
     () => [
@@ -46,16 +37,6 @@ export function SettingsGeneralPage() {
       <div className="rounded-apple border border-ios-sep bg-white p-5 shadow-apple">
         <div className="space-y-4">
           <div>
-            <div className="text-[13px] font-semibold text-ios-text">{t("모드 설정")}</div>
-            <div className="mt-2">
-              <Segmented
-                value={theme}
-                options={generalOptions}
-                onValueChange={(v) => store.setSettings({ theme: v as "light" | "dark" })}
-              />
-            </div>
-          </div>
-          <div>
             <div className="text-[13px] font-semibold text-ios-text">{t("언어")}</div>
             <div className="mt-2">
               <Segmented
@@ -72,4 +53,3 @@ export function SettingsGeneralPage() {
 }
 
 export default SettingsGeneralPage;
-

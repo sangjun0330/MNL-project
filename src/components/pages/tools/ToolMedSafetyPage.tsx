@@ -17,6 +17,7 @@ import { useI18n } from "@/lib/useI18n";
 
 const FLAT_CARD_CLASS = "rounded-[24px] border border-ios-sep bg-white shadow-none";
 const PAGE_TITLE_CLASS = "text-[24px] font-bold tracking-[-0.015em] text-[color:var(--rnest-accent)] md:text-[26px]";
+const TOOL_LIST_LINK_CLASS = "rnest-pill-photo shrink-0 whitespace-nowrap px-3 py-1 text-[12px] leading-none";
 const PRIMARY_FLAT_BTN =
   "h-11 rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] px-4 text-[14px] font-semibold text-[color:var(--rnest-accent)] shadow-none hover:bg-[color:var(--rnest-accent-soft)]";
 const SECONDARY_FLAT_BTN =
@@ -1590,11 +1591,11 @@ export function ToolMedSafetyPage() {
     return (
       <div className="mx-auto w-full max-w-[920px] space-y-2.5 px-2 pb-24 pt-4">
         <div className="flex items-start justify-between gap-3">
-          <div>
+          <div className="min-w-0 pr-1">
             <div className={PAGE_TITLE_CLASS}>{t("AI 의약품·도구 검색기")}</div>
             <div className="mt-1 text-[12px] text-ios-sub">{t("간호 현장에서 바로 쓰는 의약품·의료기구·상황 대응 정보를 검색형으로 제공합니다.")}</div>
           </div>
-          <Link href="/tools" className="pt-1 text-[11.5px] font-semibold text-[color:var(--rnest-accent)]">
+          <Link href="/tools" className={TOOL_LIST_LINK_CLASS}>
             {t("툴 목록")}
           </Link>
         </div>
@@ -1609,11 +1610,11 @@ export function ToolMedSafetyPage() {
     return (
       <div className="mx-auto w-full max-w-[920px] space-y-2.5 px-2 pb-24 pt-4">
         <div className="flex items-start justify-between gap-3">
-          <div>
+          <div className="min-w-0 pr-1">
             <div className={PAGE_TITLE_CLASS}>{t("AI 의약품·도구 검색기")}</div>
             <div className="mt-1 text-[12px] text-ios-sub">{t("간호 현장에서 바로 쓰는 의약품·의료기구·상황 대응 정보를 검색형으로 제공합니다.")}</div>
           </div>
-          <Link href="/tools" className="pt-1 text-[11.5px] font-semibold text-[color:var(--rnest-accent)]">
+          <Link href="/tools" className={TOOL_LIST_LINK_CLASS}>
             {t("툴 목록")}
           </Link>
         </div>
@@ -1638,11 +1639,11 @@ export function ToolMedSafetyPage() {
     return (
       <div className="mx-auto w-full max-w-[920px] space-y-2.5 px-2 pb-24 pt-4">
         <div className="flex items-start justify-between gap-3">
-          <div>
+          <div className="min-w-0 pr-1">
             <div className={PAGE_TITLE_CLASS}>{t("AI 의약품·도구 검색기")}</div>
             <div className="mt-1 text-[12px] text-ios-sub">{t("간호 현장에서 바로 쓰는 의약품·의료기구·상황 대응 정보를 검색형으로 제공합니다.")}</div>
           </div>
-          <Link href="/tools" className="pt-1 text-[11.5px] font-semibold text-[color:var(--rnest-accent)]">
+          <Link href="/tools" className={TOOL_LIST_LINK_CLASS}>
             {t("툴 목록")}
           </Link>
         </div>
@@ -1658,11 +1659,11 @@ export function ToolMedSafetyPage() {
     <>
       <div className="mx-auto w-full max-w-[920px] space-y-2.5 px-2 pb-24 pt-4">
         <div className="flex items-start justify-between gap-3">
-          <div>
+          <div className="min-w-0 pr-1">
             <div className={PAGE_TITLE_CLASS}>{t("AI 의약품·도구 검색기")}</div>
             <div className="mt-1 text-[12px] text-ios-sub">{t("간호 현장에서 바로 쓰는 의약품·의료기구·상황 대응 정보를 검색형으로 제공합니다.")}</div>
           </div>
-          <Link href="/tools" className="pt-1 text-[11.5px] font-semibold text-[color:var(--rnest-accent)]">
+          <Link href="/tools" className={TOOL_LIST_LINK_CLASS}>
             {t("툴 목록")}
           </Link>
         </div>

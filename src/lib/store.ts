@@ -66,6 +66,7 @@ function save() {
 function normalizeSettings(raw: any): AppSettings {
   const base = defaultSettings();
   const loaded = raw ?? {};
+  const { theme: _ignoredTheme, ...loadedWithoutTheme } = loaded;
 
   // menstrual: 구버전(startISO) → 신버전(lastPeriodStart) 호환
   const menstrualLoaded = loaded?.menstrual ?? {};
@@ -73,7 +74,7 @@ function normalizeSettings(raw: any): AppSettings {
 
   return {
     ...base,
-    ...loaded,
+    ...loadedWithoutTheme,
     menstrual: {
       ...base.menstrual,
       ...menstrualLoaded,
@@ -89,7 +90,6 @@ function normalizeSettings(raw: any): AppSettings {
         Math.min(1.5, Number((loaded?.profile ?? {}).caffeineSensitivity ?? base.profile?.caffeineSensitivity ?? 1.0))
       ),
     },
-    theme: loaded?.theme === "dark" ? "dark" : "light",
     language: loaded?.language === "en" ? "en" : "ko",
   };
 }

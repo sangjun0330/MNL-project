@@ -79,7 +79,7 @@ export function SettingsPage() {
             </div>
             <span className="ml-1 inline-flex h-6 w-6 shrink-0 items-center justify-center text-[22px] leading-none text-[color:var(--rnest-accent)]">›</span>
           </div>
-          <div className="mt-2 text-[12.5px] text-ios-sub">{t("모드와 언어를 설정합니다.")}</div>
+          <div className="mt-2 text-[12.5px] text-ios-sub">{t("언어를 설정합니다.")}</div>
         </Link>
 
         <Link

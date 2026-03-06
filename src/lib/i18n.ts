@@ -8,9 +8,6 @@ const EN_BASE: Record<string, string> = {
   "모든 기능을 사용하려면 로그인해야 합니다.": "Log in to use everything.",
   "일반": "General",
   "계정": "Account",
-  "모드 설정": "Mode",
-  "라이트 모드": "Light mode",
-  "다크 모드": "Dark mode",
   "언어": "Language",
   "한국어": "Korean",
   "영어": "English",
@@ -62,7 +59,7 @@ const EN_EXTRA: Record<string, string> = {
   "설정 항목을 선택해 주세요.": "Pick what you want to set up.",
   "일반 설정 열기": "Open General Settings",
   "계정 설정 열기": "Open Account Settings",
-  "모드와 언어를 설정합니다.": "Set your mode and language.",
+  "언어를 설정합니다.": "Set your language.",
   "로그인과 계정 관리를 설정합니다.": "Manage sign-in and your account.",
   "영어로 바꾸면 상세 설명, 기록 칸, 팝업 문구까지 영어로 표시됩니다.":
     "When you switch to English, details, record fields, and popup text are shown in English too.",

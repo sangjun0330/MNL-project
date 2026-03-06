@@ -5,15 +5,13 @@ import { useAppStoreSelector } from "@/lib/store";
 import { setCurrentLanguage } from "@/lib/i18n";
 
 export function UiPreferencesBridge() {
-  const theme = useAppStoreSelector((s) => s.settings.theme ?? "light");
   const language = useAppStoreSelector((s) => s.settings.language ?? "ko");
 
   useEffect(() => {
     if (typeof document === "undefined") return;
     const root = document.documentElement;
-    if (theme === "dark") root.classList.add("rnest-night");
-    else root.classList.remove("rnest-night");
-  }, [theme]);
+    root.classList.remove("rnest-night");
+  }, []);
 
   useEffect(() => {
     setCurrentLanguage(language);

@@ -197,7 +197,6 @@ function sanitizeSettings(raw: unknown): AppSettings {
 
   return {
     ...defaults,
-    theme: loaded.theme === "dark" ? "dark" : "light",
     language: loaded.language === "en" ? "en" : "ko",
     hasSeenOnboarding: Boolean(loaded.hasSeenOnboarding ?? defaults.hasSeenOnboarding),
     menstrual: {

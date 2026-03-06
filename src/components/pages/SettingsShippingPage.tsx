@@ -42,9 +42,21 @@ declare global {
 
 const DAUM_POSTCODE_SCRIPT_ID = "daum-postcode-script";
 const DAUM_POSTCODE_SCRIPT_SRC = "https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js";
-const PRIMARY_BUTTON = "inline-flex items-center justify-center rounded-2xl border border-[#3b6fc9] bg-[#3b6fc9] px-4 font-semibold text-white transition disabled:opacity-60";
-const SECONDARY_BUTTON = "inline-flex items-center justify-center rounded-2xl border border-[#d7dfeb] bg-[#f4f7fb] px-4 font-semibold text-[#11294b] transition disabled:opacity-60";
-const DANGER_BUTTON = "inline-flex items-center justify-center rounded-2xl border border-[#f1d0cc] bg-[#fff6f5] px-4 font-semibold text-[#a33a2b] transition disabled:opacity-60";
+const PRIMARY_BUTTON =
+  "inline-flex items-center justify-center rounded-full border border-[#C9BFEA] bg-[#F0ECFF] px-4 font-semibold text-[#6C61C7] transition hover:bg-[#E7E1FB] disabled:opacity-60";
+const SECONDARY_BUTTON =
+  "inline-flex items-center justify-center rounded-full border border-[#DDD8EF] bg-[#FBFAFE] px-4 font-semibold text-[#666B79] transition hover:bg-[#F3F1FA] disabled:opacity-60";
+const DANGER_BUTTON =
+  "inline-flex items-center justify-center rounded-full border border-[#E5C8C3] bg-[#FFF4F2] px-4 font-semibold text-[#A33A2B] transition hover:bg-[#FEEDE9] disabled:opacity-60";
+const SECTION_CARD = "rounded-[30px] border border-[#DDD8EF] bg-[#FFFFFF] p-5 shadow-[0_4px_16px_rgba(71,58,120,0.06)]";
+const SUB_CARD = "rounded-[24px] border border-[#DDD8EF] bg-[#F8F6FD]";
+const SECTION_TITLE = "text-[16px] font-bold text-[#414654]";
+const SECTION_DESC = "mt-1 text-[12.5px] leading-6 text-[#7B8090]";
+const SOFT_BADGE = "rounded-full border border-[#CEC6EB] bg-[#F0ECFF] px-3 py-1 text-[11px] font-semibold text-[#6C61C7]";
+const FIELD_CLASS =
+  "h-12 rounded-[18px] border-[#DAD4EE] bg-white text-[14px] text-[#4A4F5D] placeholder:text-[#A1A6B4] focus:ring-[color:rgba(123,111,208,0.22)]";
+const FIELD_READONLY_CLASS =
+  "h-12 rounded-[18px] border-[#DAD4EE] bg-[#F5F2FC] text-[14px] text-[#5D6373] placeholder:text-[#A1A6B4]";
 
 function buildDaumAddress(data: {
   zonecode?: string;
@@ -410,36 +422,36 @@ export function SettingsShippingPage() {
   return (
     <div className="mx-auto w-full max-w-[760px] px-4 pb-24 pt-6">
       <div className="mb-4 flex items-center gap-2">
-        <Link href="/settings/account" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-ios-sep bg-white text-[18px] text-ios-text">
+        <Link href="/settings/account" className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[#DDD8EF] bg-[#F8F6FD] text-[18px] text-[#6C61C7]">
           ←
         </Link>
-        <div className="text-[24px] font-extrabold tracking-[-0.02em] text-ios-text">{t("배송지 설정")}</div>
+        <div className="text-[24px] font-extrabold tracking-[-0.02em] text-[#414654]">{t("배송지 설정")}</div>
       </div>
 
       {!user?.userId ? (
-        <div className="rounded-apple border border-ios-sep bg-white p-5 shadow-apple">
-          <div className="text-[15px] font-bold text-ios-text">{t("로그인이 필요합니다")}</div>
-          <div className="mt-2 text-[13px] leading-6 text-ios-sub">
+        <div className={SECTION_CARD}>
+          <div className="text-[15px] font-bold text-[#414654]">{t("로그인이 필요합니다")}</div>
+          <div className="mt-2 text-[13px] leading-6 text-[#7B8090]">
             {t("배송지는 로그인된 계정에 영구 저장됩니다. 먼저 로그인한 뒤 다시 시도해 주세요.")}
           </div>
           <div className="mt-4">
-            <Button onClick={() => signInWithProvider("google")} disabled={status === "loading"}>
+            <Button variant="secondary" className={PRIMARY_BUTTON} onClick={() => signInWithProvider("google")} disabled={status === "loading"}>
               {t("Google로 로그인")}
             </Button>
           </div>
         </div>
       ) : (
         <div className="space-y-5">
-          <div className="rounded-apple border border-ios-sep bg-white p-5 shadow-apple">
+          <div className={SECTION_CARD}>
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
               <div>
-                <div className="text-[16px] font-bold text-[#11294b]">{t("기본 배송지 관리")}</div>
-                <div className="mt-1 text-[12px] leading-5 text-ios-sub">
+                <div className={SECTION_TITLE}>{t("기본 배송지 관리")}</div>
+                <div className={SECTION_DESC}>
                   {t("대한민국 공식 주소 검색으로 배송지를 저장하고, 결제 전에 원하는 주소를 선택할 수 있습니다.")}
                 </div>
               </div>
               {isPersisted && addressBook.addresses.length > 0 ? (
-                <span className="rounded-full border border-[#d7dfeb] bg-[#eef4fb] px-3 py-1 text-[10px] font-semibold text-[#11294b]">
+                <span className={SOFT_BADGE}>
                   {t("저장됨")}
                 </span>
               ) : null}
@@ -448,8 +460,8 @@ export function SettingsShippingPage() {
             {message ? (
               <div
                 className={[
-                  "mt-4 rounded-2xl px-4 py-3 text-[12.5px] leading-5",
-                  messageTone === "error" ? "border border-[#f1d0cc] bg-[#fff6f5] text-[#a33a2b]" : "border border-[#d7dfeb] bg-[#eef4fb] text-[#11294b]",
+                  "mt-4 rounded-[22px] px-4 py-3 text-[12.5px] leading-6",
+                  messageTone === "error" ? "border border-[#E5C8C3] bg-[#FFF4F2] text-[#A33A2B]" : "border border-[#CEC6EB] bg-[#F0ECFF] text-[#6C61C7]",
                 ].join(" ")}
               >
                 {message}
@@ -471,38 +483,38 @@ export function SettingsShippingPage() {
             </div>
 
             {loading ? (
-              <div className="mt-4 rounded-2xl border border-[#eef2f7] bg-[#f8fafc] px-4 py-4 text-[12.5px] text-ios-sub">
+              <div className={`mt-4 px-4 py-4 text-[12.5px] text-[#7B8090] ${SUB_CARD}`}>
                 {t("배송지 정보를 불러오는 중입니다.")}
               </div>
             ) : null}
 
             {!loading && defaultAddress ? (
-              <div className="mt-4 rounded-2xl border border-[#d7dfeb] bg-[#eef4fb] px-4 py-4 text-[12.5px] leading-5 text-[#44556d]">
+              <div className={`mt-4 px-4 py-4 text-[12.5px] leading-6 text-[#676D7C] ${SUB_CARD}`}>
                 <div className="flex items-center gap-2">
-                  <span className="rounded-full bg-[#3b6fc9] px-2 py-0.5 text-[10px] font-semibold text-white">{t("기본")}</span>
-                  <span className="font-semibold text-[#11294b]">{defaultAddress.label}</span>
+                  <span className={SOFT_BADGE}>{t("기본")}</span>
+                  <span className="font-semibold text-[#4A4F5D]">{defaultAddress.label}</span>
                 </div>
-                <div className="mt-2 font-semibold text-ios-text">{defaultAddress.recipientName} · {defaultAddress.phone}</div>
+                <div className="mt-2 font-semibold text-[#4A4F5D]">{defaultAddress.recipientName} · {defaultAddress.phone}</div>
                 <div className="mt-1">{formatShopShippingSingleLine(defaultAddress)}</div>
-                {defaultAddress.deliveryNote ? <div className="mt-1 text-ios-sub">{defaultAddress.deliveryNote}</div> : null}
+                {defaultAddress.deliveryNote ? <div className="mt-1 text-[#7B8090]">{defaultAddress.deliveryNote}</div> : null}
               </div>
             ) : null}
           </div>
 
-          <div className="rounded-apple border border-ios-sep bg-white p-5 shadow-apple">
+          <div className={SECTION_CARD}>
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="text-[15px] font-bold text-[#11294b]">{t("저장된 배송지")}</div>
-                <div className="mt-1 text-[12px] text-ios-sub">{t("결제 전에 여기서 저장한 주소 중 하나를 선택할 수 있습니다.")}</div>
+                <div className="text-[15px] font-bold text-[#4A4F5D]">{t("저장된 배송지")}</div>
+                <div className="mt-1 text-[12px] text-[#7B8090]">{t("결제 전에 여기서 저장한 주소 중 하나를 선택할 수 있습니다.")}</div>
               </div>
-              <div className="rounded-full bg-[#f4f7fb] px-3 py-1 text-[10px] font-semibold text-[#11294b]">
+              <div className={SOFT_BADGE}>
                 {addressBook.addresses.length} {t("개")}
               </div>
             </div>
 
             <div className="mt-4 space-y-3">
               {addressBook.addresses.length === 0 ? (
-                <div className="rounded-2xl border border-[#eef2f7] bg-[#f8fafc] px-4 py-4 text-[12.5px] leading-5 text-ios-sub">
+                <div className={`px-4 py-4 text-[12.5px] leading-6 text-[#7B8090] ${SUB_CARD}`}>
                   {t("아직 저장된 배송지가 없습니다. 새 배송지를 추가해서 결제에 사용할 주소를 먼저 등록해 주세요.")}
                 </div>
               ) : (
@@ -513,21 +525,21 @@ export function SettingsShippingPage() {
                     <div
                       key={address.id}
                       className={[
-                        "rounded-2xl border px-4 py-4",
-                        isEditing ? "border-[#3b6fc9] bg-[#f7fbff]" : "border-[#eef2f7] bg-[#f8fafc]",
+                        "rounded-[24px] border px-4 py-4",
+                        isEditing ? "border-[#C9BFEA] bg-[#F2EEFF]" : "border-[#DDD8EF] bg-[#FBFAFE]",
                       ].join(" ")}
                     >
                       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                         <div>
                           <div className="flex items-center gap-2">
                             {isDefault ? (
-                              <span className="rounded-full bg-[#3b6fc9] px-2 py-0.5 text-[10px] font-semibold text-white">{t("기본")}</span>
+                              <span className={SOFT_BADGE}>{t("기본")}</span>
                             ) : null}
-                            <span className="text-[13px] font-semibold text-[#11294b]">{address.label}</span>
+                            <span className="text-[13px] font-semibold text-[#4A4F5D]">{address.label}</span>
                           </div>
-                          <div className="mt-2 text-[13px] font-semibold text-ios-text">{address.recipientName} · {address.phone}</div>
-                          <div className="mt-1 text-[12.5px] leading-5 text-[#44556d]">{formatShopShippingSingleLine(address)}</div>
-                          {address.deliveryNote ? <div className="mt-1 text-[12px] text-ios-sub">{address.deliveryNote}</div> : null}
+                          <div className="mt-2 text-[13px] font-semibold text-[#4A4F5D]">{address.recipientName} · {address.phone}</div>
+                          <div className="mt-1 text-[12.5px] leading-6 text-[#676D7C]">{formatShopShippingSingleLine(address)}</div>
+                          {address.deliveryNote ? <div className="mt-1 text-[12px] text-[#7B8090]">{address.deliveryNote}</div> : null}
                         </div>
                         <div className="flex flex-wrap gap-2">
                           {!isDefault ? (
@@ -550,39 +562,42 @@ export function SettingsShippingPage() {
             </div>
           </div>
 
-          <div className="rounded-apple border border-ios-sep bg-white p-5 shadow-apple">
+          <div className={SECTION_CARD}>
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
               <div>
-                <div className="text-[16px] font-bold text-[#11294b]">{editingExisting ? t("배송지 변경") : t("새 배송지 추가")}</div>
-                <div className="mt-1 text-[12px] leading-5 text-ios-sub">
+                <div className={SECTION_TITLE}>{editingExisting ? t("배송지 변경") : t("새 배송지 추가")}</div>
+                <div className={SECTION_DESC}>
                   {t("주소록에 저장할 배송지 정보를 입력합니다. 검색한 기본 주소 위에 상세 주소만 추가하면 됩니다.")}
                 </div>
               </div>
               {editingExisting ? (
-                <span className="rounded-full bg-[#eef4fb] px-3 py-1 text-[10px] font-semibold text-[#11294b]">{t("수정 중")}</span>
+                <span className={SOFT_BADGE}>{t("수정 중")}</span>
               ) : null}
             </div>
 
             <div className="mt-4 grid gap-3 md:grid-cols-3">
               <label className="block md:col-span-1">
-                <div className="mb-2 text-[12px] font-semibold text-[#11294b]">{t("배송지 이름")}</div>
+                <div className="mb-2 text-[12px] font-semibold text-[#4A4F5D]">{t("배송지 이름")}</div>
                 <Input
+                  className={FIELD_CLASS}
                   value={draft.label}
                   onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))}
                   placeholder={t("예: 집, 병원, 사무실")}
                 />
               </label>
               <label className="block md:col-span-1">
-                <div className="mb-2 text-[12px] font-semibold text-[#11294b]">{t("받는 분")}</div>
+                <div className="mb-2 text-[12px] font-semibold text-[#4A4F5D]">{t("받는 분")}</div>
                 <Input
+                  className={FIELD_CLASS}
                   value={draft.recipientName}
                   onChange={(event) => setDraft((current) => ({ ...current, recipientName: event.target.value }))}
                   placeholder={t("홍길동")}
                 />
               </label>
               <label className="block md:col-span-1">
-                <div className="mb-2 text-[12px] font-semibold text-[#11294b]">{t("연락처")}</div>
+                <div className="mb-2 text-[12px] font-semibold text-[#4A4F5D]">{t("연락처")}</div>
                 <Input
+                  className={FIELD_CLASS}
                   value={draft.phone}
                   onChange={(event) => {
                     const val = event.target.value;
@@ -594,16 +609,16 @@ export function SettingsShippingPage() {
                   placeholder="010-0000-0000"
                 />
                 {fieldErrors.phone ? (
-                  <div className="mt-1 text-[11px] text-[#a33a2b]">{fieldErrors.phone}</div>
+                  <div className="mt-1 text-[11px] text-[#A33A2B]">{fieldErrors.phone}</div>
                 ) : null}
               </label>
             </div>
 
-            <div className="mt-4 rounded-2xl border border-[#eef2f7] bg-[#f8fafc] p-4">
+            <div className={`mt-4 p-4 ${SUB_CARD}`}>
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div>
-                  <div className="text-[13px] font-semibold text-[#11294b]">{t("주소 찾기")}</div>
-                  <div className="mt-1 text-[12px] leading-5 text-ios-sub">
+                  <div className="text-[13px] font-semibold text-[#4A4F5D]">{t("주소 찾기")}</div>
+                  <div className="mt-1 text-[12px] leading-6 text-[#7B8090]">
                     {t("다음(카카오) 우편번호 검색으로 정확한 대한민국 주소를 불러옵니다.")}
                   </div>
                 </div>
@@ -614,20 +629,21 @@ export function SettingsShippingPage() {
 
               <div className="mt-4 grid gap-3 md:grid-cols-[140px_1fr]">
                 <label className="block">
-                  <div className="mb-2 text-[12px] font-semibold text-[#11294b]">{t("우편번호")}</div>
-                  <Input value={draft.postalCode} readOnly placeholder="06236" />
+                  <div className="mb-2 text-[12px] font-semibold text-[#4A4F5D]">{t("우편번호")}</div>
+                  <Input className={FIELD_READONLY_CLASS} value={draft.postalCode} readOnly placeholder="06236" />
                 </label>
                 <label className="block">
-                  <div className="mb-2 text-[12px] font-semibold text-[#11294b]">{t("기본 주소")}</div>
-                  <Input value={draft.addressLine1} readOnly placeholder={t("주소 검색으로 자동 입력")} />
+                  <div className="mb-2 text-[12px] font-semibold text-[#4A4F5D]">{t("기본 주소")}</div>
+                  <Input className={FIELD_READONLY_CLASS} value={draft.addressLine1} readOnly placeholder={t("주소 검색으로 자동 입력")} />
                 </label>
               </div>
             </div>
 
             <div className="mt-4 grid gap-3 md:grid-cols-2">
               <label className="block">
-                <div className="mb-2 text-[12px] font-semibold text-[#11294b]">{t("상세 주소")}</div>
+                <div className="mb-2 text-[12px] font-semibold text-[#4A4F5D]">{t("상세 주소")}</div>
                 <Input
+                  className={FIELD_CLASS}
                   ref={addressLine2Ref}
                   value={draft.addressLine2}
                   onChange={(event) => setDraft((current) => ({ ...current, addressLine2: event.target.value }))}
@@ -635,8 +651,9 @@ export function SettingsShippingPage() {
                 />
               </label>
               <label className="block">
-                <div className="mb-2 text-[12px] font-semibold text-[#11294b]">{t("배송 메모")}</div>
+                <div className="mb-2 text-[12px] font-semibold text-[#4A4F5D]">{t("배송 메모")}</div>
                 <Input
+                  className={FIELD_CLASS}
                   value={draft.deliveryNote}
                   onChange={(event) => setDraft((current) => ({ ...current, deliveryNote: event.target.value }))}
                   placeholder={t("문 앞에 놓아주세요")}
