@@ -11,6 +11,8 @@ import { SocialCommonOffDays } from "@/components/social/SocialCommonOffDays";
 import { SocialOnboarding } from "@/components/social/SocialOnboarding";
 import { SocialProfileSheet } from "@/components/social/SocialProfileSheet";
 
+const SOCIAL_BACKGROUND_REFRESH_MS = 60 * 60 * 1000;
+
 // 현재 월 YYYY-MM
 function currentMonth(): string {
   const d = new Date();
@@ -112,12 +114,13 @@ export function SocialPage() {
     fetchFriendsSchedule();
   }, [profileChecked, fetchConnections, fetchFriendsSchedule, status]);
 
-  // 30초 폴링 (연결 목록만 — 일정은 자주 바뀌지 않음)
+  // 백그라운드 갱신은 과하지 않게 1시간 간격만 유지하고,
+  // 연결/수락 직후에는 수동 refresh로 즉시 반영한다.
   useEffect(() => {
     if (!profileChecked || status !== "authenticated") return;
     const timer = setInterval(() => {
       fetchConnections();
-    }, 30_000);
+    }, SOCIAL_BACKGROUND_REFRESH_MS);
     return () => clearInterval(timer);
   }, [profileChecked, fetchConnections, status]);
 

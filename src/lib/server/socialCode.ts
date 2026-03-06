@@ -5,8 +5,14 @@ const CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 export type SocialCodeRecord = {
   code: string;
   createdAt: string;
+  updatedAt: string;
   shareVersion: number;
 };
+
+function isMissingShareVersionSchemaError(err: unknown): boolean {
+  const message = String((err as any)?.message ?? err ?? "").toLowerCase();
+  return message.includes("share_version") || message.includes("column") && message.includes("rnest_connect_codes");
+}
 
 function generateCode(): string {
   const bytes = new Uint8Array(6);
@@ -16,21 +22,32 @@ function generateCode(): string {
 
 async function persistCode(userId: string, shareVersion: number, preferredCode?: string): Promise<SocialCodeRecord> {
   const admin = getSupabaseAdmin();
-  const createdAt = new Date().toISOString();
+  const updatedAt = new Date().toISOString();
 
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const code = attempt === 0 && preferredCode ? preferredCode : generateCode();
-    const { error } = await (admin as any)
-      .from("rnest_connect_codes")
-      .upsert({
-        user_id: userId,
-        code,
-        share_version: shareVersion,
-        updated_at: createdAt,
-      });
+    let error: any = null;
+
+    const nextRow = {
+      user_id: userId,
+      code,
+      share_version: shareVersion,
+      updated_at: updatedAt,
+    };
+
+    ({ error } = await (admin as any).from("rnest_connect_codes").upsert(nextRow));
+    if (error && isMissingShareVersionSchemaError(error)) {
+      ({ error } = await (admin as any)
+        .from("rnest_connect_codes")
+        .upsert({
+          user_id: userId,
+          code,
+          updated_at: updatedAt,
+        }));
+    }
 
     if (!error) {
-      return { code, createdAt, shareVersion };
+      return { code, createdAt: updatedAt, updatedAt, shareVersion };
     }
     if (!String(error?.message ?? "").toLowerCase().includes("unique")) {
       throw error;
@@ -42,11 +59,22 @@ async function persistCode(userId: string, shareVersion: number, preferredCode?:
 
 export async function getSocialCode(userId: string): Promise<SocialCodeRecord | null> {
   const admin = getSupabaseAdmin();
-  const { data, error } = await (admin as any)
+  let data: any = null;
+  let error: any = null;
+
+  ({ data, error } = await (admin as any)
     .from("rnest_connect_codes")
-    .select("code, created_at, share_version")
+    .select("code, created_at, updated_at, share_version")
     .eq("user_id", userId)
-    .maybeSingle();
+    .maybeSingle());
+
+  if (error && isMissingShareVersionSchemaError(error)) {
+    ({ data, error } = await (admin as any)
+      .from("rnest_connect_codes")
+      .select("code, created_at, updated_at")
+      .eq("user_id", userId)
+      .maybeSingle());
+  }
 
   if (error) throw error;
   if (!data) return null;
@@ -54,6 +82,7 @@ export async function getSocialCode(userId: string): Promise<SocialCodeRecord | 
   return {
     code: data.code,
     createdAt: data.created_at,
+    updatedAt: data.updated_at ?? data.created_at,
     shareVersion: Number(data.share_version ?? 1),
   };
 }

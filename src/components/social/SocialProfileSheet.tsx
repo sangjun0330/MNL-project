@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Button } from "@/components/ui/Button";
 import type { SocialProfile } from "@/types/social";
@@ -29,6 +29,7 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
 
   const [code, setCode] = useState<string | null>(null);
   const [codeLoading, setCodeLoading] = useState(false);
+  const [codeError, setCodeError] = useState<string | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
   const [shareState, setShareState] = useState<ShareState>("idle");
   const [sharing, setSharing] = useState(false);
@@ -42,19 +43,30 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
     setNickname(profile?.nickname ?? "");
     setAvatar(profile?.avatarEmoji ?? "🐧");
     setError(null);
+    setCodeCopied(false);
   }, [open, profile]);
 
-  useEffect(() => {
-    if (!open || codeLoading || code) return;
+  const loadCode = useCallback(async () => {
     setCodeLoading(true);
-    fetch("/api/social/code", { cache: "no-store" })
-      .then((r) => r.json())
-      .then((res) => {
-        if (res.ok) setCode(res.data?.code ?? null);
-      })
-      .catch(() => setError("내 코드를 불러오지 못했어요."))
-      .finally(() => setCodeLoading(false));
-  }, [open, code, codeLoading]);
+    setCodeError(null);
+    try {
+      const res = await fetch("/api/social/code", { cache: "no-store" }).then((r) => r.json());
+      if (!res.ok) {
+        throw new Error("내 코드를 불러오지 못했어요. 다시 시도해 주세요.");
+      }
+      setCode(res.data?.code ?? null);
+    } catch (err: any) {
+      setCode(null);
+      setCodeError(String(err?.message ?? "내 코드를 불러오지 못했어요. 다시 시도해 주세요."));
+    } finally {
+      setCodeLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    void loadCode();
+  }, [open, loadCode]);
 
   const formattedCode = useMemo(() => formatCode(code), [code]);
 
@@ -154,8 +166,9 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
       }
 
       setCode(res.data?.code ?? null);
+      setCodeError(null);
     } catch (err: any) {
-      setError(String(err?.message ?? "코드를 재생성하지 못했어요."));
+      setCodeError(String(err?.message ?? "코드를 재생성하지 못했어요."));
     } finally {
       setRegenerating(false);
     }
@@ -250,6 +263,17 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
           <div className="mt-3 flex h-24 items-center justify-center rounded-2xl bg-ios-bg">
             {codeLoading ? (
               <span className="text-[18px] font-semibold tracking-widest text-ios-muted">로드 중…</span>
+            ) : codeError ? (
+              <div className="flex flex-col items-center gap-2 px-4 text-center">
+                <span className="text-[13px] text-red-500">{codeError}</span>
+                <button
+                  type="button"
+                  onClick={() => void loadCode()}
+                  className="text-[12px] font-semibold text-[color:var(--rnest-accent)] underline underline-offset-2"
+                >
+                  다시 불러오기
+                </button>
+              </div>
             ) : (
               <span className="select-all text-[28px] font-bold tracking-widest text-ios-text">{formattedCode}</span>
             )}
@@ -258,7 +282,7 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
           <div className="mt-3 grid grid-cols-2 gap-3">
             <Button
               variant="secondary"
-              disabled={!code || codeLoading}
+              disabled={!code || codeLoading || !!codeError}
               onClick={handleCopyCode}
               className="h-12 rounded-2xl text-[14px]"
             >

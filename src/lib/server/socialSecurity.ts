@@ -12,6 +12,19 @@ function toBase64Url(bytes: Uint8Array): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
+function fromBase64Url(input: string): string {
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(input, "base64url").toString("utf8");
+  }
+  const base64 = input.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = base64 + "=".repeat((4 - (base64.length % 4 || 4)) % 4);
+  return decodeURIComponent(
+    Array.from(atob(padded))
+      .map((char) => `%${char.charCodeAt(0).toString(16).padStart(2, "0")}`)
+      .join("")
+  );
+}
+
 export function cleanSocialNickname(value: unknown, maxLength = 12): string {
   const normalized = String(value ?? "")
     .normalize("NFKC")
@@ -41,6 +54,68 @@ export async function sha256Base64Url(input: string): Promise<string> {
   return toBase64Url(new Uint8Array(digest));
 }
 
+async function hmacBase64Url(secret: string, message: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(message));
+  return toBase64Url(new Uint8Array(signature));
+}
+
+function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
+function socialInviteSecret(): string {
+  const secret =
+    String(process.env.SOCIAL_INVITE_SIGNING_SECRET ?? "").trim() ||
+    String(process.env.LOG_SIGNING_SECRET ?? "").trim() ||
+    String(process.env.SUPABASE_SERVICE_ROLE_KEY ?? "").trim();
+  if (!secret) throw new Error("missing_social_invite_secret");
+  return secret;
+}
+
+export type SocialInvitePayload = {
+  inviterUserId: string;
+  codeUpdatedAt: string;
+  expiresAt: number;
+};
+
+export async function signSocialInviteToken(payload: SocialInvitePayload): Promise<string> {
+  const body = toBase64Url(encoder.encode(JSON.stringify(payload)));
+  const sig = await hmacBase64Url(socialInviteSecret(), body);
+  return `${body}.${sig}`;
+}
+
+export async function verifySocialInviteToken(token: string): Promise<SocialInvitePayload | null> {
+  const [body, sig] = token.split(".", 2);
+  if (!body || !sig) return null;
+
+  const expected = await hmacBase64Url(socialInviteSecret(), body);
+  if (!constantTimeEqual(expected, sig)) return null;
+
+  try {
+    const json = JSON.parse(fromBase64Url(body)) as Partial<SocialInvitePayload>;
+    if (!json.inviterUserId || !json.codeUpdatedAt || !Number.isFinite(json.expiresAt)) return null;
+    return {
+      inviterUserId: String(json.inviterUserId),
+      codeUpdatedAt: String(json.codeUpdatedAt),
+      expiresAt: Number(json.expiresAt),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function isSocialActionRateLimited(input: {
   req: Request;
   userId: string;
@@ -51,25 +126,31 @@ export async function isSocialActionRateLimited(input: {
 }): Promise<boolean> {
   const admin = getSupabaseAdmin();
   const sinceIso = new Date(Date.now() - input.windowMinutes * 60_000).toISOString();
+  const actorIp = readSocialActorIp(input.req);
 
-  const [{ count: userCount }, { count: ipCount }] = await Promise.all([
-    (admin as any)
-      .from("rnest_social_action_attempts")
-      .select("id", { count: "exact", head: true })
-      .eq("action", input.action)
-      .eq("actor_user_id", input.userId)
-      .gte("created_at", sinceIso),
-    input.maxPerIp && readSocialActorIp(input.req)
-      ? (admin as any)
-          .from("rnest_social_action_attempts")
-          .select("id", { count: "exact", head: true })
-          .eq("action", input.action)
-          .eq("actor_ip", readSocialActorIp(input.req))
-          .gte("created_at", sinceIso)
-      : Promise.resolve({ count: 0 }),
-  ]);
+  try {
+    const [{ count: userCount }, { count: ipCount }] = await Promise.all([
+      (admin as any)
+        .from("rnest_social_action_attempts")
+        .select("id", { count: "exact", head: true })
+        .eq("action", input.action)
+        .eq("actor_user_id", input.userId)
+        .gte("created_at", sinceIso),
+      input.maxPerIp && actorIp
+        ? (admin as any)
+            .from("rnest_social_action_attempts")
+            .select("id", { count: "exact", head: true })
+            .eq("action", input.action)
+            .eq("actor_ip", actorIp)
+            .gte("created_at", sinceIso)
+        : Promise.resolve({ count: 0 }),
+    ]);
 
-  return Number(userCount ?? 0) >= input.maxPerUser || Number(ipCount ?? 0) >= Number(input.maxPerIp ?? Infinity);
+    return Number(userCount ?? 0) >= input.maxPerUser || Number(ipCount ?? 0) >= Number(input.maxPerIp ?? Infinity);
+  } catch (err: any) {
+    console.warn("[SocialSecurity/rateLimit] fail-open err=%s", String(err?.message ?? err));
+    return false;
+  }
 }
 
 export async function recordSocialActionAttempt(input: {

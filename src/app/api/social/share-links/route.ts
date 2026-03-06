@@ -1,8 +1,7 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
-import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { getOrCreateSocialCode } from "@/lib/server/socialCode";
-import { generateOpaqueToken, isSocialActionRateLimited, recordSocialActionAttempt, sha256Base64Url } from "@/lib/server/socialSecurity";
+import { isSocialActionRateLimited, recordSocialActionAttempt, signSocialInviteToken } from "@/lib/server/socialSecurity";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -28,20 +27,13 @@ export async function POST(req: Request) {
       return jsonNoStore({ ok: false, error: "too_many_requests" }, { status: 429 });
     }
 
-    const admin = getSupabaseAdmin();
     const socialCode = await getOrCreateSocialCode(userId);
-    const token = generateOpaqueToken(24);
-    const tokenHash = await sha256Base64Url(token);
     const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
-
-    const { error } = await (admin as any).from("rnest_social_share_invites").insert({
-      inviter_user_id: userId,
-      token_hash: tokenHash,
-      issued_share_version: socialCode.shareVersion,
-      expires_at: expiresAt,
+    const token = await signSocialInviteToken({
+      inviterUserId: userId,
+      codeUpdatedAt: socialCode.updatedAt,
+      expiresAt: Date.parse(expiresAt),
     });
-
-    if (error) throw error;
 
     await recordSocialActionAttempt({ req, userId, action: "share_link_create", success: true, detail: "ok" });
     const origin = new URL(req.url).origin;

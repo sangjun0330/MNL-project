@@ -1,13 +1,14 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
-import { isSocialActionRateLimited, recordSocialActionAttempt, sha256Base64Url } from "@/lib/server/socialSecurity";
+import { getSocialCode } from "@/lib/server/socialCode";
+import { isSocialActionRateLimited, recordSocialActionAttempt, verifySocialInviteToken } from "@/lib/server/socialSecurity";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 function sanitizeInviteToken(value: unknown): string {
-  return String(value ?? "").trim().replace(/[^A-Za-z0-9\-_]/g, "").slice(0, 120);
+  return String(value ?? "").trim().replace(/[^A-Za-z0-9\-_.]/g, "").slice(0, 320);
 }
 
 export async function POST(req: Request) {
@@ -44,41 +45,29 @@ export async function POST(req: Request) {
     }
 
     const admin = getSupabaseAdmin();
-    const tokenHash = await sha256Base64Url(token);
-    const nowIso = new Date().toISOString();
-
-    const { data: invite, error: inviteErr } = await (admin as any)
-      .from("rnest_social_share_invites")
-      .select("id, inviter_user_id, issued_share_version, expires_at, resolve_count, revoked_at")
-      .eq("token_hash", tokenHash)
-      .maybeSingle();
-
-    if (inviteErr) throw inviteErr;
-    if (!invite || invite.revoked_at || invite.expires_at < nowIso) {
+    const invite = await verifySocialInviteToken(token);
+    if (!invite || invite.expiresAt < Date.now()) {
       await recordSocialActionAttempt({ req, userId, action: "share_link_resolve", success: false, detail: "expired" });
       return jsonNoStore({ ok: false, error: "invite_not_found_or_expired" }, { status: 404 });
     }
 
-    if (invite.inviter_user_id === userId) {
+    if (invite.inviterUserId === userId) {
       await recordSocialActionAttempt({ req, userId, action: "share_link_resolve", success: false, detail: "self" });
       return jsonNoStore({ ok: false, error: "cannot_connect_to_self" }, { status: 400 });
     }
 
-    const [{ data: codeRow, error: codeErr }, { data: profile }] = await Promise.all([
-      (admin as any)
-        .from("rnest_connect_codes")
-        .select("code, share_version")
-        .eq("user_id", invite.inviter_user_id)
-        .maybeSingle(),
+    const [codeRow, profileRes] = await Promise.all([
+      getSocialCode(invite.inviterUserId),
       (admin as any)
         .from("rnest_social_profiles")
         .select("nickname, avatar_emoji")
-        .eq("user_id", invite.inviter_user_id)
+        .eq("user_id", invite.inviterUserId)
         .maybeSingle(),
     ]);
+    const profile = profileRes?.data ?? null;
+    if (profileRes?.error) throw profileRes.error;
 
-    if (codeErr) throw codeErr;
-    if (!codeRow || Number(codeRow.share_version ?? 1) !== Number(invite.issued_share_version)) {
+    if (!codeRow || String(codeRow.updatedAt) !== String(invite.codeUpdatedAt)) {
       await recordSocialActionAttempt({ req, userId, action: "share_link_resolve", success: false, detail: "stale" });
       return jsonNoStore({ ok: false, error: "invite_not_found_or_expired" }, { status: 404 });
     }
@@ -87,7 +76,7 @@ export async function POST(req: Request) {
       .from("rnest_connections")
       .select("status, requester_id, receiver_id")
       .or(
-        `and(requester_id.eq.${userId},receiver_id.eq.${invite.inviter_user_id}),and(requester_id.eq.${invite.inviter_user_id},receiver_id.eq.${userId})`
+        `and(requester_id.eq.${userId},receiver_id.eq.${invite.inviterUserId}),and(requester_id.eq.${invite.inviterUserId},receiver_id.eq.${userId})`
       )
       .limit(2);
 
@@ -106,14 +95,6 @@ export async function POST(req: Request) {
           : existing?.status === "blocked"
             ? "blocked"
             : "available";
-
-    await (admin as any)
-      .from("rnest_social_share_invites")
-      .update({
-        resolve_count: Number(invite.resolve_count ?? 0) + 1,
-        last_resolved_at: nowIso,
-      })
-      .eq("id", invite.id);
 
     await recordSocialActionAttempt({ req, userId, action: "share_link_resolve", success: true, detail: relationState });
     return jsonNoStore({

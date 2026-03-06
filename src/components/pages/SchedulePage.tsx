@@ -102,6 +102,7 @@ function moodLabel(m: number) {
 
 const SCHEDULE_PILL_BUTTON_CLASS =
   "rnest-pill-photo inline-flex h-11 items-center justify-center whitespace-nowrap px-5 text-[14px]";
+const SOCIAL_PENDING_REFRESH_MS = 60 * 60 * 1000;
 
 export function SchedulePage() {
   const store = useAppStore();
@@ -137,7 +138,7 @@ export function SchedulePage() {
         .catch(() => {});
     };
     fetchPending();
-    const timer = setInterval(fetchPending, 30_000);
+    const timer = setInterval(fetchPending, SOCIAL_PENDING_REFRESH_MS);
     return () => {
       cancelled = true;
       clearInterval(timer);
