@@ -16,7 +16,7 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
-export const runtime = "nodejs"; // cookies() 쓰기 지원을 위해 nodejs 사용
+export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
@@ -38,24 +38,37 @@ export async function GET(req: Request) {
 
   const cookieStore = await cookies();
 
+  // 세팅할 쿠키를 수집 → 나중에 response에 일괄 적용 (edge runtime 방식)
+  const pendingCookies: Array<{
+    name: string;
+    value: string;
+    options: Record<string, unknown>;
+  }> = [];
+
   const supabase = createServerClient(supabaseUrl, supabaseAnon, {
     cookies: {
       get: (name: string) => cookieStore.get(name)?.value ?? null,
       set: (name: string, value: string, options: Record<string, unknown>) => {
-        const store: any = cookieStore;
-        if (typeof store.set === "function") store.set({ name, value, ...options });
+        pendingCookies.push({ name, value, options });
       },
       remove: (name: string, options: Record<string, unknown>) => {
-        const store: any = cookieStore;
-        if (typeof store.set === "function") store.set({ name, value: "", ...options });
+        pendingCookies.push({ name, value: "", options });
       },
     },
   });
 
+  /** 수집된 쿠키를 NextResponse에 적용하는 헬퍼 */
+  function withCookies(res: NextResponse): NextResponse {
+    for (const { name, value, options } of pendingCookies) {
+      res.cookies.set(name, value, options as Parameters<typeof res.cookies.set>[2]);
+    }
+    return res;
+  }
+
   // ── 로그아웃 ────────────────────────────────────────────────
   if (logout === "1") {
     await supabase.auth.signOut();
-    return NextResponse.redirect(new URL("/schedule", req.url));
+    return withCookies(NextResponse.redirect(new URL("/schedule", req.url)));
   }
 
   // ── 유저별 이메일/비밀번호 ──────────────────────────────────
@@ -107,8 +120,7 @@ DEV_USER_2_PASSWORD=testpassword123
     );
   }
 
-  // ── 성공 → 일정 페이지로 ─────────────────────────────────────
+  // ── 성공 → 지정 페이지로 리다이렉트 ──────────────────────────
   const redirectTo = url.searchParams.get("redirect") ?? "/schedule";
-  const res = NextResponse.redirect(new URL(redirectTo, req.url));
-  return res;
+  return withCookies(NextResponse.redirect(new URL(redirectTo, req.url)));
 }
