@@ -1,9 +1,11 @@
 import { approveShopOrderRefund, readShopOrder, readShopOrderForUser, rejectShopOrderRefund, requestShopOrderRefund } from "@/lib/server/shopOrderStore";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
+import { loadUserState, saveUserState } from "@/lib/server/userStateStore";
 import type { Json } from "@/types/supabase";
 
 const SHOP_CLAIM_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_LIST_LIMIT = 120;
+const SHOP_CLAIMS_FALLBACK_KEY = "shopClaims";
 
 export type ShopClaimType = "REFUND" | "EXCHANGE";
 export type ShopClaimStatus =
@@ -44,6 +46,10 @@ function cleanText(value: unknown, max = 220) {
   return String(value ?? "").trim().slice(0, max);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function toTimestamp(value: string | null | undefined) {
   const time = new Date(String(value ?? "")).getTime();
   return Number.isFinite(time) ? time : 0;
@@ -57,7 +63,15 @@ function isStorageUnavailableError(error: unknown) {
 function isMissingTableError(error: unknown, tableName: string) {
   const code = String((error as { code?: unknown } | null)?.code ?? "").trim();
   const message = String((error as { message?: unknown } | null)?.message ?? "").toLowerCase();
-  return code === "42P01" || code === "42703" || code === "PGRST204" || (message.includes("relation") && message.includes(tableName));
+  return (
+    code === "42P01" ||
+    code === "42703" ||
+    code === "PGRST204" ||
+    code === "PGRST205" ||
+    (message.includes("schema cache") && message.includes(tableName)) ||
+    (message.includes("relation") && message.includes(tableName)) ||
+    (message.includes(tableName) && message.includes("does not exist"))
+  );
 }
 
 function isConflictError(error: unknown) {
@@ -124,6 +138,139 @@ function fromShopClaimRow(row: any): ShopClaimRecord | null {
     createdAt: cleanText(row.created_at, 64) || new Date().toISOString(),
     updatedAt: cleanText(row.updated_at, 64) || cleanText(row.created_at, 64) || new Date().toISOString(),
   };
+}
+
+function toClaimSortTime(claim: ShopClaimRecord) {
+  return Math.max(toTimestamp(claim.updatedAt), toTimestamp(claim.requestedAt), toTimestamp(claim.createdAt));
+}
+
+function sortClaimsDesc(claims: ShopClaimRecord[]) {
+  return [...claims].sort((a, b) => toClaimSortTime(b) - toClaimSortTime(a));
+}
+
+function fromFallbackClaim(raw: unknown, fallbackUserId?: string): ShopClaimRecord | null {
+  if (!isRecord(raw)) return null;
+  const claimType = normalizeClaimType(raw.claimType ?? raw.claim_type);
+  const status = normalizeClaimStatus(raw.status);
+  const claimId = cleanText(raw.claimId ?? raw.claim_id, 80);
+  const orderId = cleanText(raw.orderId ?? raw.order_id, 80);
+  const userId = cleanText(raw.userId ?? raw.user_id ?? fallbackUserId, 120);
+  if (!claimType || !status || !claimId || !orderId || !userId) return null;
+  const nowIso = new Date().toISOString();
+  return {
+    claimId,
+    orderId,
+    userId,
+    claimType,
+    status,
+    reason: cleanText(raw.reason, 240) || "후속 처리 요청",
+    detail: cleanText(raw.detail, 800) || null,
+    adminNote: cleanText(raw.adminNote ?? raw.admin_note, 800) || null,
+    requestedAt: cleanText(raw.requestedAt ?? raw.requested_at, 64) || cleanText(raw.createdAt ?? raw.created_at, 64) || nowIso,
+    reviewedAt: cleanText(raw.reviewedAt ?? raw.reviewed_at, 64) || null,
+    reviewedBy: cleanText(raw.reviewedBy ?? raw.reviewed_by, 120) || null,
+    returnTrackingNumber: cleanText(raw.returnTrackingNumber ?? raw.return_tracking_number, 120) || null,
+    returnCourier: cleanText(raw.returnCourier ?? raw.return_courier, 80) || null,
+    returnShippedAt: cleanText(raw.returnShippedAt ?? raw.return_shipped_at, 64) || null,
+    returnReceivedAt: cleanText(raw.returnReceivedAt ?? raw.return_received_at, 64) || null,
+    exchangeTrackingNumber: cleanText(raw.exchangeTrackingNumber ?? raw.exchange_tracking_number, 120) || null,
+    exchangeCourier: cleanText(raw.exchangeCourier ?? raw.exchange_courier, 80) || null,
+    exchangeShippedAt: cleanText(raw.exchangeShippedAt ?? raw.exchange_shipped_at, 64) || null,
+    refundCompletedAt: cleanText(raw.refundCompletedAt ?? raw.refund_completed_at, 64) || null,
+    createdAt: cleanText(raw.createdAt ?? raw.created_at, 64) || nowIso,
+    updatedAt: cleanText(raw.updatedAt ?? raw.updated_at, 64) || cleanText(raw.createdAt ?? raw.created_at, 64) || nowIso,
+  };
+}
+
+function toFallbackClaimPayload(claim: ShopClaimRecord) {
+  return {
+    claimId: claim.claimId,
+    orderId: claim.orderId,
+    userId: claim.userId,
+    claimType: claim.claimType,
+    status: claim.status,
+    reason: claim.reason,
+    detail: claim.detail,
+    adminNote: claim.adminNote,
+    requestedAt: claim.requestedAt,
+    reviewedAt: claim.reviewedAt,
+    reviewedBy: claim.reviewedBy,
+    returnTrackingNumber: claim.returnTrackingNumber,
+    returnCourier: claim.returnCourier,
+    returnShippedAt: claim.returnShippedAt,
+    returnReceivedAt: claim.returnReceivedAt,
+    exchangeTrackingNumber: claim.exchangeTrackingNumber,
+    exchangeCourier: claim.exchangeCourier,
+    exchangeShippedAt: claim.exchangeShippedAt,
+    refundCompletedAt: claim.refundCompletedAt,
+    createdAt: claim.createdAt,
+    updatedAt: claim.updatedAt,
+  };
+}
+
+function readFallbackClaimsFromPayload(payload: unknown, userId: string) {
+  if (!isRecord(payload)) return [] as ShopClaimRecord[];
+  const rawClaims = Array.isArray(payload[SHOP_CLAIMS_FALLBACK_KEY]) ? payload[SHOP_CLAIMS_FALLBACK_KEY] : [];
+  return sortClaimsDesc(
+    rawClaims
+      .map((item) => fromFallbackClaim(item, userId))
+      .filter((item): item is ShopClaimRecord => Boolean(item))
+  );
+}
+
+async function loadFallbackClaimsForUser(userId: string) {
+  const safeUserId = cleanText(userId, 120);
+  if (!safeUserId) return [] as ShopClaimRecord[];
+  const row = await loadUserState(safeUserId).catch(() => null);
+  return readFallbackClaimsFromPayload(row?.payload, safeUserId);
+}
+
+async function saveFallbackClaimsForUser(userId: string, claims: ShopClaimRecord[]) {
+  const safeUserId = cleanText(userId, 120);
+  if (!safeUserId) return;
+  const row = await loadUserState(safeUserId).catch(() => null);
+  const basePayload = isRecord(row?.payload) ? { ...row?.payload } : {};
+  basePayload[SHOP_CLAIMS_FALLBACK_KEY] = sortClaimsDesc(claims).map(toFallbackClaimPayload);
+  await saveUserState({
+    userId: safeUserId,
+    payload: basePayload,
+  });
+}
+
+async function listFallbackClaimsForAdmin(limit = 80): Promise<ShopClaimRecord[]> {
+  const admin: any = getSupabaseAdmin();
+  const userScanLimit = Math.max(80, Math.min(800, Math.round(Number(limit) || 80) * 6));
+  const { data, error } = await admin
+    .from("rnest_user_state")
+    .select("user_id, payload")
+    .limit(userScanLimit);
+  if (error) throw error;
+  const merged: ShopClaimRecord[] = [];
+  for (const row of data ?? []) {
+    const userId = cleanText((row as any)?.user_id, 120);
+    if (!userId) continue;
+    merged.push(...readFallbackClaimsFromPayload((row as any)?.payload, userId));
+  }
+  return sortClaimsDesc(merged).slice(0, normalizeLimit(limit));
+}
+
+async function findFallbackClaimById(claimId: string) {
+  const safeClaimId = cleanText(claimId, 80);
+  if (!safeClaimId) return null;
+  const admin: any = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("rnest_user_state")
+    .select("user_id, payload")
+    .limit(800);
+  if (error) throw error;
+  for (const row of data ?? []) {
+    const userId = cleanText((row as any)?.user_id, 120);
+    if (!userId) continue;
+    const claims = readFallbackClaimsFromPayload((row as any)?.payload, userId);
+    const claim = claims.find((item) => item.claimId === safeClaimId);
+    if (claim) return { userId, claim, claims };
+  }
+  return null;
 }
 
 function isOpenClaimStatus(status: ShopClaimStatus) {
@@ -258,11 +405,16 @@ function normalizeLimit(limit?: number, max = MAX_LIST_LIMIT) {
 
 function toShopClaimHttpStorageError(error: unknown) {
   const message = String((error as { message?: unknown } | null)?.message ?? "");
+  const normalized = message.toLowerCase();
   if (
     message === "shop_claim_storage_unavailable" ||
     isStorageUnavailableError(error) ||
     isMissingTableError(error, "shop_claims") ||
-    isMissingTableError(error, "shop_claim_events")
+    isMissingTableError(error, "shop_claim_events") ||
+    isMissingTableError(error, "rnest_user_state") ||
+    (normalized.includes("schema cache") && normalized.includes("shop_claim")) ||
+    (normalized.includes("shop_claim") && normalized.includes("does not exist")) ||
+    (normalized.includes("invalid input syntax for type uuid") && normalized.includes("shop_claim"))
   ) {
     return "shop_claim_storage_unavailable";
   }
@@ -289,15 +441,18 @@ export async function listShopClaimsForUser(
   userId: string,
   input?: { orderId?: string | null; limit?: number | null }
 ): Promise<ShopClaimRecord[]> {
+  const safeUserId = cleanText(userId, 120);
+  const safeOrderId = cleanText(input?.orderId, 80) || null;
+  const safeLimit = Number(input?.limit) || undefined;
   try {
-    return await listClaims({
-      userId,
-      orderId: cleanText(input?.orderId, 80) || undefined,
-      limit: Number(input?.limit) || undefined,
-    });
+    return await listClaims({ userId: safeUserId, orderId: safeOrderId || undefined, limit: safeLimit });
   } catch (error) {
     const storageError = toShopClaimHttpStorageError(error);
-    if (storageError) throw new Error(storageError);
+    if (storageError) {
+      const fallbackClaims = await loadFallbackClaimsForUser(safeUserId);
+      const filtered = safeOrderId ? fallbackClaims.filter((claim) => claim.orderId === safeOrderId) : fallbackClaims;
+      return filtered.slice(0, normalizeLimit(safeLimit));
+    }
     throw error;
   }
 }
@@ -307,19 +462,24 @@ export async function listShopClaimsForAdmin(limit = 80): Promise<ShopClaimRecor
     return await listClaims({ limit });
   } catch (error) {
     const storageError = toShopClaimHttpStorageError(error);
-    if (storageError) throw new Error(storageError);
+    if (storageError) return listFallbackClaimsForAdmin(limit);
     throw error;
   }
 }
 
 export async function readShopClaimForUser(userId: string, claimId: string): Promise<ShopClaimRecord | null> {
+  const safeUserId = cleanText(userId, 120);
+  const safeClaimId = cleanText(claimId, 80);
   try {
-    const claim = await readClaimById(cleanText(claimId, 80));
-    if (!claim || claim.userId !== cleanText(userId, 120)) return null;
+    const claim = await readClaimById(safeClaimId);
+    if (!claim || claim.userId !== safeUserId) return null;
     return claim;
   } catch (error) {
     const storageError = toShopClaimHttpStorageError(error);
-    if (storageError) throw new Error(storageError);
+    if (storageError) {
+      const claims = await loadFallbackClaimsForUser(safeUserId);
+      return claims.find((claim) => claim.claimId === safeClaimId) ?? null;
+    }
     throw error;
   }
 }
@@ -403,7 +563,45 @@ export async function createShopClaim(input: {
     }
     if (isConflictError(error)) throw new Error("shop_claim_already_open");
     const storageError = toShopClaimHttpStorageError(error);
-    if (storageError) throw new Error(storageError);
+    if (storageError) {
+      const fallbackClaim: ShopClaimRecord = {
+        claimId,
+        orderId,
+        userId,
+        claimType,
+        status: "REQUESTED",
+        reason,
+        detail,
+        adminNote: null,
+        requestedAt: now,
+        reviewedAt: null,
+        reviewedBy: null,
+        returnTrackingNumber: null,
+        returnCourier: null,
+        returnShippedAt: null,
+        returnReceivedAt: null,
+        exchangeTrackingNumber: null,
+        exchangeCourier: null,
+        exchangeShippedAt: null,
+        refundCompletedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      const fallbackClaims = await loadFallbackClaimsForUser(userId);
+      const openFallback = fallbackClaims.find((claim) => isOpenClaimStatus(claim.status) && claim.orderId === orderId);
+      if (openFallback) throw new Error("shop_claim_already_open");
+
+      if (claimType === "REFUND") {
+        await requestShopOrderRefund({
+          userId,
+          orderId,
+          reason,
+        });
+      }
+      await saveFallbackClaimsForUser(userId, [fallbackClaim, ...fallbackClaims.filter((claim) => claim.claimId !== fallbackClaim.claimId)]);
+      return fallbackClaim;
+    }
     throw error;
   }
 }
@@ -455,7 +653,38 @@ export async function reviewShopClaimByAdmin(input: {
     return reviewedClaim;
   } catch (error) {
     const storageError = toShopClaimHttpStorageError(error);
-    if (storageError) throw new Error(storageError);
+    if (storageError) {
+      const fallback = await findFallbackClaimById(claimId).catch(() => null);
+      if (!fallback) throw new Error("shop_claim_not_found");
+      const current = fallback.claim;
+      if (current.status !== "REQUESTED") throw new Error("shop_claim_not_reviewable");
+
+      const reviewedAt = new Date().toISOString();
+      const adminNote = sanitizeNote(input.note);
+      const nextStatus: ShopClaimStatus = input.action === "approve" ? "APPROVED" : "REJECTED";
+      const saved: ShopClaimRecord = {
+        ...current,
+        status: nextStatus,
+        reviewedAt,
+        reviewedBy: adminUserId,
+        adminNote,
+        updatedAt: reviewedAt,
+      };
+
+      if (current.claimType === "REFUND" && input.action === "reject") {
+        await rejectShopOrderRefund({
+          orderId: current.orderId,
+          adminUserId,
+          note: adminNote ?? "환불 요청이 반려되었습니다.",
+        }).catch(() => undefined);
+      }
+
+      await saveFallbackClaimsForUser(
+        fallback.userId,
+        [saved, ...fallback.claims.filter((claim) => claim.claimId !== saved.claimId)]
+      );
+      return saved;
+    }
     throw error;
   }
 }
@@ -500,7 +729,24 @@ export async function submitShopClaimReturnShipmentByUser(input: {
     return saved;
   } catch (error) {
     const storageError = toShopClaimHttpStorageError(error);
-    if (storageError) throw new Error(storageError);
+    if (storageError) {
+      const claims = await loadFallbackClaimsForUser(userId);
+      const current = claims.find((claim) => claim.claimId === claimId) ?? null;
+      if (!current) throw new Error("shop_claim_not_found");
+      if (current.status !== "APPROVED") throw new Error("shop_claim_return_not_allowed");
+
+      const now = new Date().toISOString();
+      const saved: ShopClaimRecord = {
+        ...current,
+        status: "RETURN_SHIPPED",
+        returnCourier: courier,
+        returnTrackingNumber: trackingNumber,
+        returnShippedAt: now,
+        updatedAt: now,
+      };
+      await saveFallbackClaimsForUser(userId, [saved, ...claims.filter((claim) => claim.claimId !== saved.claimId)]);
+      return saved;
+    }
     throw error;
   }
 }
@@ -541,7 +787,29 @@ export async function markShopClaimReturnReceivedByAdmin(input: {
     return saved;
   } catch (error) {
     const storageError = toShopClaimHttpStorageError(error);
-    if (storageError) throw new Error(storageError);
+    if (storageError) {
+      const fallback = await findFallbackClaimById(claimId).catch(() => null);
+      if (!fallback) throw new Error("shop_claim_not_found");
+      const current = fallback.claim;
+      if (current.status !== "RETURN_SHIPPED") throw new Error("shop_claim_return_not_shipped");
+
+      const now = new Date().toISOString();
+      const note = sanitizeNote(input.note);
+      const saved: ShopClaimRecord = {
+        ...current,
+        status: "RETURN_RECEIVED",
+        returnReceivedAt: now,
+        adminNote: note,
+        reviewedAt: current.reviewedAt ?? now,
+        reviewedBy: current.reviewedBy ?? adminUserId,
+        updatedAt: now,
+      };
+      await saveFallbackClaimsForUser(
+        fallback.userId,
+        [saved, ...fallback.claims.filter((claim) => claim.claimId !== saved.claimId)]
+      );
+      return saved;
+    }
     throw error;
   }
 }
@@ -595,7 +863,41 @@ export async function completeShopRefundClaimByAdmin(input: {
     return saved;
   } catch (error) {
     const storageError = toShopClaimHttpStorageError(error);
-    if (storageError) throw new Error(storageError);
+    if (storageError) {
+      const fallback = await findFallbackClaimById(claimId).catch(() => null);
+      if (!fallback) throw new Error("shop_claim_not_found");
+      const current = fallback.claim;
+      if (current.claimType !== "REFUND") throw new Error("shop_claim_not_refund");
+      if (current.status !== "RETURN_RECEIVED") throw new Error("shop_claim_refund_not_ready");
+
+      const note = sanitizeNote(input.note) ?? "교환/환불 클레임 환불 승인";
+      try {
+        await approveShopOrderRefund({
+          orderId: current.orderId,
+          adminUserId,
+          note,
+          requestAcceptLanguage: input.requestAcceptLanguage ?? null,
+        });
+      } catch (refundError: any) {
+        const message = String(refundError?.message ?? "");
+        if (message.includes("not_requested")) throw new Error("shop_claim_refund_not_ready");
+        throw refundError;
+      }
+
+      const now = new Date().toISOString();
+      const saved: ShopClaimRecord = {
+        ...current,
+        status: "REFUND_COMPLETED",
+        refundCompletedAt: now,
+        adminNote: note,
+        updatedAt: now,
+      };
+      await saveFallbackClaimsForUser(
+        fallback.userId,
+        [saved, ...fallback.claims.filter((claim) => claim.claimId !== saved.claimId)]
+      );
+      return saved;
+    }
     throw error;
   }
 }
@@ -644,7 +946,30 @@ export async function markShopExchangeClaimShippedByAdmin(input: {
     return saved;
   } catch (error) {
     const storageError = toShopClaimHttpStorageError(error);
-    if (storageError) throw new Error(storageError);
+    if (storageError) {
+      const fallback = await findFallbackClaimById(claimId).catch(() => null);
+      if (!fallback) throw new Error("shop_claim_not_found");
+      const current = fallback.claim;
+      if (current.claimType !== "EXCHANGE") throw new Error("shop_claim_not_exchange");
+      if (current.status !== "RETURN_RECEIVED") throw new Error("shop_claim_exchange_not_ready");
+
+      const now = new Date().toISOString();
+      const note = sanitizeNote(input.note);
+      const saved: ShopClaimRecord = {
+        ...current,
+        status: "EXCHANGE_SHIPPED",
+        exchangeCourier: courier,
+        exchangeTrackingNumber: trackingNumber,
+        exchangeShippedAt: now,
+        adminNote: note,
+        updatedAt: now,
+      };
+      await saveFallbackClaimsForUser(
+        fallback.userId,
+        [saved, ...fallback.claims.filter((claim) => claim.claimId !== saved.claimId)]
+      );
+      return saved;
+    }
     throw error;
   }
 }
@@ -652,9 +977,26 @@ export async function markShopExchangeClaimShippedByAdmin(input: {
 export async function getShopClaimLinkedOrder(input: { claimId: string; userId?: string | null }) {
   const claimId = cleanText(input.claimId, 80);
   if (!claimId) return { claim: null, order: null };
-  const claim = await readClaimById(claimId);
-  if (!claim) return { claim: null, order: null };
-  if (input.userId && claim.userId !== cleanText(input.userId, 120)) return { claim: null, order: null };
-  const order = await readShopOrder(claim.orderId).catch(() => null);
-  return { claim, order };
+  try {
+    const claim = await readClaimById(claimId);
+    if (!claim) return { claim: null, order: null };
+    if (input.userId && claim.userId !== cleanText(input.userId, 120)) return { claim: null, order: null };
+    const order = await readShopOrder(claim.orderId).catch(() => null);
+    return { claim, order };
+  } catch (error) {
+    const storageError = toShopClaimHttpStorageError(error);
+    if (!storageError) throw error;
+    const safeUserId = cleanText(input.userId, 120) || null;
+    let claim: ShopClaimRecord | null = null;
+    if (safeUserId) {
+      const claims = await loadFallbackClaimsForUser(safeUserId);
+      claim = claims.find((item) => item.claimId === claimId) ?? null;
+    } else {
+      const fallback = await findFallbackClaimById(claimId).catch(() => null);
+      claim = fallback?.claim ?? null;
+    }
+    if (!claim) return { claim: null, order: null };
+    const order = await readShopOrder(claim.orderId).catch(() => null);
+    return { claim, order };
+  }
 }

@@ -2238,110 +2238,116 @@ export function ShopAdminPage() {
                     {order.userLabel} · {order.productSnapshot.quantity}개 · {Math.round(order.amount).toLocaleString("ko-KR")}원 · {formatDateLabel(order.createdAt)}
                   </div>
                 </div>
-                <span className={`rounded-full border px-2.5 py-1 text-[10.5px] font-semibold ${orderStatusClass(order.status)}`}>
-                  {orderStatusLabel(order.status)}
-                </span>
-              </div>
-              {order.refund.status === "rejected" ? <div className="mt-2 text-[11.5px] text-[#a33a2b]">{order.refund.note ?? t("반려 사유 없음")}</div> : null}
-              {order.status === "FAILED" && order.failMessage ? <div className="mt-2 text-[11.5px] text-[#a33a2b]">{order.failMessage}</div> : null}
-              {order.paymentMethod ? (
-                <div className="mt-2 text-[11px] text-ios-sub">결제수단: {order.paymentMethod}</div>
-              ) : null}
-              {order.shipping.addressLine1 ? (
-                <details className="mt-2 rounded-2xl border border-[#eef2f7] bg-[#f8fafc] px-3 py-3 text-[11px] leading-5 text-ios-sub">
-                  <summary className="cursor-pointer list-none font-semibold text-[#17324d]">배송지 보기</summary>
-                  <div className="mt-2">
-                    {order.shipping.recipientName} · {order.shipping.phone}<br />
-                    ({order.shipping.postalCode}) {order.shipping.addressLine1}
-                    {order.shipping.addressLine2 ? ` ${order.shipping.addressLine2}` : ""}
-                  </div>
-                </details>
-              ) : null}
-              {order.trackingNumber || order.courier ? (
-                <div className="mt-2 rounded-2xl border border-[#eef2f7] bg-[#f8fafc] px-3 py-3 text-[11px] leading-5 text-[#44556d]">
-                  {order.courier || "택배사 미입력"} · {order.trackingNumber || "운송장 미입력"}
-                  {order.tracking?.statusLabel ? <><br />배송 조회 상태: {order.tracking.statusLabel}</> : null}
-                  {order.tracking?.lastEventAt ? <><br />마지막 이벤트: {formatDateLabel(order.tracking.lastEventAt)}</> : null}
-                  {order.shippedAt ? <><br />발송일: {formatDateLabel(order.shippedAt)}</> : null}
-                  {order.deliveredAt ? <><br />배송완료: {formatDateLabel(order.deliveredAt)}</> : null}
+                <div className="flex items-center gap-2">
+                  <span className={`rounded-full border px-2.5 py-1 text-[10.5px] font-semibold ${orderStatusClass(order.status)}`}>
+                    {orderStatusLabel(order.status)}
+                  </span>
+                  <button
+                    type="button"
+                    data-auth-allow
+                    onClick={() => {
+                      const el = document.getElementById(`admin-order-detail-${order.orderId}`) as HTMLDetailsElement | null;
+                      if (el) el.open = !el.open;
+                    }}
+                    className={`${SECONDARY_BUTTON} h-8 px-3 text-[11px]`}
+                  >
+                    상세 보기
+                  </button>
                 </div>
-              ) : null}
-              {order.status === "PAID" ? (
-                <div className="mt-3 rounded-2xl border border-[#eef2f7] bg-[#f8fafc] p-3">
-                  <div className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
-                    <select
-                      className={INPUT_CLASS}
-                      value={resolveDraftCarrierSelectValue(shippingDrafts[order.orderId])}
-                      onChange={(e) => handleCarrierSelectionChange(order.orderId, e.target.value)}
-                    >
-                      <option value="">택배사 선택</option>
-                      {SHOP_CARRIER_OPTIONS.map((carrier) => (
-                        <option key={carrier.code} value={carrier.code}>
-                          {carrier.label}
-                        </option>
-                      ))}
-                      <option value={CUSTOM_CARRIER_VALUE}>기타 택배사 직접 입력</option>
-                    </select>
-                    <input
-                      className={INPUT_CLASS}
-                      value={shippingDrafts[order.orderId]?.trackingNumber ?? ""}
-                      onChange={(e) => handleShippingDraftChange(order.orderId, "trackingNumber", e.target.value)}
-                      placeholder="운송장 번호"
-                    />
+              </div>
+              <details id={`admin-order-detail-${order.orderId}`} className="mt-2 rounded-2xl border border-[#eef2f7] bg-[#f8fafc] px-3 py-3">
+                <summary className="cursor-pointer list-none text-[11px] font-semibold text-[#17324d]">결제·배송 처리 펼치기</summary>
+                {order.refund.status === "rejected" ? <div className="mt-2 text-[11.5px] text-[#a33a2b]">{order.refund.note ?? t("반려 사유 없음")}</div> : null}
+                {order.status === "FAILED" && order.failMessage ? <div className="mt-2 text-[11.5px] text-[#a33a2b]">{order.failMessage}</div> : null}
+                {order.paymentMethod ? (
+                  <div className="mt-2 text-[11px] text-ios-sub">결제수단: {order.paymentMethod}</div>
+                ) : null}
+                {order.shipping.addressLine1 ? (
+                  <details className="mt-2 rounded-2xl border border-[#eef2f7] bg-white px-3 py-3 text-[11px] leading-5 text-ios-sub">
+                    <summary className="cursor-pointer list-none font-semibold text-[#17324d]">배송지 보기</summary>
+                    <div className="mt-2">
+                      {order.shipping.recipientName} · {order.shipping.phone}<br />
+                      ({order.shipping.postalCode}) {order.shipping.addressLine1}
+                      {order.shipping.addressLine2 ? ` ${order.shipping.addressLine2}` : ""}
+                    </div>
+                  </details>
+                ) : null}
+                {order.trackingNumber || order.courier ? (
+                  <div className="mt-2 rounded-2xl border border-[#eef2f7] bg-white px-3 py-3 text-[11px] leading-5 text-[#44556d]">
+                    {order.courier || "택배사 미입력"} · {order.trackingNumber || "운송장 미입력"}
+                    {order.tracking?.statusLabel ? <><br />배송 조회 상태: {order.tracking.statusLabel}</> : null}
+                    {order.tracking?.lastEventAt ? <><br />마지막 이벤트: {formatDateLabel(order.tracking.lastEventAt)}</> : null}
+                    {order.shippedAt ? <><br />발송일: {formatDateLabel(order.shippedAt)}</> : null}
+                    {order.deliveredAt ? <><br />배송완료: {formatDateLabel(order.deliveredAt)}</> : null}
+                  </div>
+                ) : null}
+                {order.status === "PAID" ? (
+                  <div className="mt-3 rounded-2xl border border-[#eef2f7] bg-white p-3">
+                    <div className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+                      <select
+                        className={INPUT_CLASS}
+                        value={resolveDraftCarrierSelectValue(shippingDrafts[order.orderId])}
+                        onChange={(e) => handleCarrierSelectionChange(order.orderId, e.target.value)}
+                      >
+                        <option value="">택배사 선택</option>
+                        {SHOP_CARRIER_OPTIONS.map((carrier) => (
+                          <option key={carrier.code} value={carrier.code}>
+                            {carrier.label}
+                          </option>
+                        ))}
+                        <option value={CUSTOM_CARRIER_VALUE}>기타 택배사 직접 입력</option>
+                      </select>
+                      <input
+                        className={INPUT_CLASS}
+                        value={shippingDrafts[order.orderId]?.trackingNumber ?? ""}
+                        onChange={(e) => handleShippingDraftChange(order.orderId, "trackingNumber", e.target.value)}
+                        placeholder="운송장 번호"
+                      />
+                      <button
+                        type="button"
+                        data-auth-allow
+                        disabled={shippingLoadingId === order.orderId}
+                        onClick={() => void handleShippingAction(order.orderId, "mark_shipped")}
+                        className={`${PRIMARY_BUTTON} h-12 text-[12px]`}
+                      >
+                        {shippingLoadingId === order.orderId ? "처리 중…" : "배송 시작"}
+                      </button>
+                    </div>
+                    {resolveDraftCarrierSelectValue(shippingDrafts[order.orderId]) === CUSTOM_CARRIER_VALUE ? (
+                      <div className="mt-2 grid gap-2 md:grid-cols-2">
+                        <input
+                          className={INPUT_CLASS}
+                          value={shippingDrafts[order.orderId]?.courier ?? ""}
+                          onChange={(e) => handleShippingDraftChange(order.orderId, "courier", e.target.value)}
+                          placeholder="기타 택배사명"
+                        />
+                        <input
+                          className={INPUT_CLASS}
+                          value={shippingDrafts[order.orderId]?.carrierCode ?? ""}
+                          onChange={(e) => handleShippingDraftChange(order.orderId, "carrierCode", e.target.value)}
+                          placeholder="스마트택배 연동 코드 (t_code)"
+                        />
+                      </div>
+                    ) : null}
+                    <div className="mt-2 text-[11px] text-ios-sub">
+                      택배사를 선택하면 스마트택배 코드가 자동으로 연결됩니다. 기타 택배사만 직접 입력이 필요합니다.
+                    </div>
+                  </div>
+                ) : null}
+                {order.status === "SHIPPED" ? (
+                  <div className="mt-3 flex flex-wrap gap-2">
                     <button
                       type="button"
                       data-auth-allow
                       disabled={shippingLoadingId === order.orderId}
-                      onClick={() => void handleShippingAction(order.orderId, "mark_shipped")}
-                      className={`${PRIMARY_BUTTON} h-12 text-[12px]`}
-                    >
-                      {shippingLoadingId === order.orderId ? "처리 중…" : "배송 시작"}
-                    </button>
-                  </div>
-                  {resolveDraftCarrierSelectValue(shippingDrafts[order.orderId]) === CUSTOM_CARRIER_VALUE ? (
-                    <div className="mt-2 grid gap-2 md:grid-cols-2">
-                      <input
-                        className={INPUT_CLASS}
-                        value={shippingDrafts[order.orderId]?.courier ?? ""}
-                        onChange={(e) => handleShippingDraftChange(order.orderId, "courier", e.target.value)}
-                        placeholder="기타 택배사명"
-                      />
-                      <input
-                        className={INPUT_CLASS}
-                        value={shippingDrafts[order.orderId]?.carrierCode ?? ""}
-                        onChange={(e) => handleShippingDraftChange(order.orderId, "carrierCode", e.target.value)}
-                        placeholder="스마트택배 연동 코드 (t_code)"
-                      />
-                    </div>
-                  ) : null}
-                  <div className="mt-2 text-[11px] text-ios-sub">
-                    택배사를 선택하면 스마트택배 코드가 자동으로 연결됩니다. 기타 택배사만 직접 입력이 필요합니다.
-                  </div>
-                </div>
-              ) : null}
-              {order.status === "SHIPPED" ? (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {order.tracking?.trackingUrl ? (
-                    <a
-                      href={order.tracking.trackingUrl}
-                      target="_blank"
-                      rel="noreferrer"
+                      onClick={() => void handleShippingAction(order.orderId, "sync_tracking")}
                       className={`${SECONDARY_BUTTON} h-10 text-[12px]`}
                     >
-                      배송조회
-                    </a>
-                  ) : null}
-                  <button
-                    type="button"
-                    data-auth-allow
-                    disabled={shippingLoadingId === order.orderId}
-                    onClick={() => void handleShippingAction(order.orderId, "sync_tracking")}
-                    className={`${SECONDARY_BUTTON} h-10 text-[12px]`}
-                  >
-                    {shippingLoadingId === order.orderId ? "조회 중…" : "배송 조회 동기화"}
-                  </button>
-                </div>
-              ) : null}
+                      {shippingLoadingId === order.orderId ? "조회 중…" : "배송 조회 동기화"}
+                    </button>
+                  </div>
+                ) : null}
+              </details>
             </div>
           ))}
           {!ordersLoading && orders.length === 0 ? (

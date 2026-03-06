@@ -36,7 +36,7 @@ export async function GET(req: Request) {
     });
   } catch (error: any) {
     const message = String(error?.message ?? "failed_to_list_admin_shop_claims");
-    if (message === "shop_claim_storage_unavailable") {
+    if (message.includes("shop_claim_storage_unavailable")) {
       return jsonNoStore({ ok: false, error: "shop_claim_storage_unavailable" }, { status: 503 });
     }
     return jsonNoStore({ ok: false, error: "failed_to_list_admin_shop_claims" }, { status: 500 });

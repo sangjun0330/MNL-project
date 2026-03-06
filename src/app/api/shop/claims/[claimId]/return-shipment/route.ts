@@ -48,7 +48,7 @@ export async function POST(req: Request, ctx: any) {
     if (message.includes("return_not_allowed")) {
       return jsonNoStore({ ok: false, error: "shop_claim_return_not_allowed" }, { status: 400 });
     }
-    if (message === "shop_claim_storage_unavailable") {
+    if (message.includes("shop_claim_storage_unavailable")) {
       return jsonNoStore({ ok: false, error: "shop_claim_storage_unavailable" }, { status: 503 });
     }
     return jsonNoStore({ ok: false, error: "failed_to_submit_shop_claim_return" }, { status: 500 });

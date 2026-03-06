@@ -103,7 +103,7 @@ export async function PATCH(req: Request, ctx: any) {
     if (message.includes("not_refund")) return jsonNoStore({ ok: false, error: "shop_claim_not_refund" }, { status: 400 });
     if (message.includes("not_exchange")) return jsonNoStore({ ok: false, error: "shop_claim_not_exchange" }, { status: 400 });
     if (message.includes("toss_")) return jsonNoStore({ ok: false, error: message }, { status: 400 });
-    if (message === "shop_claim_storage_unavailable") {
+    if (message.includes("shop_claim_storage_unavailable")) {
       return jsonNoStore({ ok: false, error: "shop_claim_storage_unavailable" }, { status: 503 });
     }
     return jsonNoStore({ ok: false, error: "failed_to_update_shop_claim" }, { status: 500 });

@@ -661,7 +661,7 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
       setActionTone("notice");
       setActionMessage(
         claimType === "REFUND"
-          ? t("환불 클레임이 접수되었습니다. 승인 후 반품 발송 정보를 등록해 주세요.")
+          ? t("환불 요청이 접수되었습니다. 승인 후 반품 발송 정보를 등록해 주세요.")
           : t("교환 클레임이 접수되었습니다. 승인 후 반품 발송 정보를 등록해 주세요.")
       );
     } catch (error: any) {
@@ -676,6 +676,8 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
         setActionMessage(t("배송 완료 후 7일 이내 주문만 교환/환불 요청이 가능합니다."));
       } else if (code.includes("not_eligible")) {
         setActionMessage(t("현재 주문 상태에서는 교환/환불 요청을 접수할 수 없습니다."));
+      } else if (code.includes("shop_claim_storage_unavailable")) {
+        setActionMessage(t("교환/환불 저장소 연결이 아직 준비되지 않았습니다. 잠시 후 다시 시도해 주세요."));
       } else {
         setActionMessage(t("교환/환불 요청에 실패했습니다. 잠시 후 다시 시도해 주세요."));
       }
@@ -1057,7 +1059,7 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
                             disabled={actionLoading === "claim_exchange" || actionLoading === "claim_refund"}
                             className={`${SECONDARY_BUTTON} h-11 w-full text-[13px]`}
                           >
-                            {actionLoading === "claim_refund" ? t("처리 중...") : t("환불 클레임 요청")}
+                            {actionLoading === "claim_refund" ? t("처리 중...") : t("환불 요청하기")}
                           </button>
                         </div>
                       </>

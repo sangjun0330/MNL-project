@@ -35,7 +35,7 @@ export async function GET(req: Request) {
     return jsonNoStore({ ok: true, data: { claims: claims.map(toUserShopClaimSummary) } });
   } catch (error: any) {
     const message = String(error?.message ?? "failed_to_list_shop_claims");
-    if (message === "shop_claim_storage_unavailable") {
+    if (message.includes("shop_claim_storage_unavailable")) {
       return jsonNoStore({ ok: false, error: "shop_claim_storage_unavailable" }, { status: 503 });
     }
     return jsonNoStore({ ok: false, error: "failed_to_list_shop_claims" }, { status: 500 });
@@ -84,7 +84,7 @@ export async function POST(req: Request) {
     if (message.includes("not_eligible")) return jsonNoStore({ ok: false, error: "shop_claim_not_eligible" }, { status: 400 });
     if (message.includes("already_refunded")) return jsonNoStore({ ok: false, error: "shop_order_already_refunded" }, { status: 409 });
     if (message.includes("not_refundable")) return jsonNoStore({ ok: false, error: "shop_order_not_refundable" }, { status: 400 });
-    if (message === "shop_claim_storage_unavailable") {
+    if (message.includes("shop_claim_storage_unavailable")) {
       return jsonNoStore({ ok: false, error: "shop_claim_storage_unavailable" }, { status: 503 });
     }
     return jsonNoStore({ ok: false, error: "failed_to_create_shop_claim" }, { status: 500 });
