@@ -101,8 +101,6 @@ function moodLabel(m: number) {
 
 const SCHEDULE_PILL_BUTTON_CLASS =
   "rnest-pill-photo inline-flex h-11 items-center justify-center whitespace-nowrap px-5 text-[14px]";
-const SCHEDULE_HEADER_PILL_CLASS =
-  "rnest-pill-photo inline-flex h-9 items-center justify-center whitespace-nowrap px-3 text-[12px]";
 
 export function SchedulePage() {
   const store = useAppStore();
@@ -237,18 +235,26 @@ export function SchedulePage() {
       <button
         type="button"
         onClick={() => setOpenPattern(true)}
-        className={cn(SCHEDULE_HEADER_PILL_CLASS, "max-w-[116px] truncate")}
+        className="flex h-8 w-8 items-center justify-center rounded-full text-ios-muted transition hover:bg-ios-sep/40 active:opacity-60"
         title={t("3교대 패턴 적용")}
       >
-        {t("3교대 패턴")}
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M17 1l4 4-4 4" /><path d="M3 11V9a4 4 0 0 1 4-4h14" />
+          <path d="M7 23l-4-4 4-4" /><path d="M21 13v2a4 4 0 0 1-4 4H3" />
+        </svg>
       </button>
       <button
         type="button"
         onClick={() => setOpenMenstrual(true)}
-        className={cn(SCHEDULE_HEADER_PILL_CLASS, "max-w-[92px] truncate")}
+        className="flex h-8 w-8 items-center justify-center rounded-full text-ios-muted transition hover:bg-ios-sep/40 active:opacity-60"
         title={t("생리주기 설정")}
       >
-        {t("생리주기")}
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+          <line x1="9" y1="9" x2="9.01" y2="9" />
+          <line x1="15" y1="9" x2="15.01" y2="9" />
+        </svg>
       </button>
     </>
   );
@@ -413,7 +419,6 @@ export function SchedulePage() {
         title={t("3교대 패턴")}
         subtitle={t("선택한 날짜부터 자동 채우기")}
         variant="appstore"
-        backdropClassName="rnest-sheet-curtain-lilac"
       >
         <div className="pb-4">
           <ShiftPatternQuickApplyCard selectedISO={selected} />
@@ -428,7 +433,6 @@ export function SchedulePage() {
         subtitle={t("시작일과 평균 주기/기간 입력")}
         variant="appstore"
         maxHeightClassName="max-h-[80dvh]"
-        backdropClassName="rnest-sheet-curtain-lilac"
       >
         <div className="pb-4">
           <Card className="p-5">

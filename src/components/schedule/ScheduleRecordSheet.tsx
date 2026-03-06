@@ -553,7 +553,6 @@ export function ScheduleRecordSheet({
         subtitle={dateLabel}
         variant="appstore"
         maxHeightClassName="max-h-[82dvh]"
-        backdropClassName="rnest-sheet-curtain-lilac"
       >
         <div className="space-y-4">
         {/* 상단 안내 + 저장 상태 */}
@@ -973,7 +972,6 @@ export function ScheduleRecordSheet({
         subtitle={t("태그로 부족한 내용만 간단히 기록해 주세요.")}
         variant="appstore"
         maxHeightClassName="max-h-[62dvh]"
-        backdropClassName="rnest-sheet-curtain-lilac"
       >
         <div className="space-y-3">
           <div className="text-[12.5px] leading-5 text-ios-sub">{t("예: 코드블루 1건 대응, 인계 지연 30분")}</div>
