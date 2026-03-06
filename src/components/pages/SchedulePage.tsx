@@ -116,6 +116,28 @@ export function SchedulePage() {
   const [openPattern, setOpenPattern] = useState(false);
   const [openMenstrual, setOpenMenstrual] = useState(false);
 
+  // 소셜 — 받은 요청 배지
+  const [socialPendingCount, setSocialPendingCount] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    const fetchPending = () => {
+      fetch("/api/social/connections")
+        .then((r) => r.json())
+        .then((res) => {
+          if (!cancelled && res.ok) {
+            setSocialPendingCount(res.data?.pendingIncoming?.length ?? 0);
+          }
+        })
+        .catch(() => {});
+    };
+    fetchPending();
+    const timer = setInterval(fetchPending, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
+
   // 날짜 선택 시 월 동기화
   const handleSelect = (iso: ISODate) => {
     setSelected(iso);
@@ -264,7 +286,8 @@ export function SchedulePage() {
 
       {/* ── 월간 통계 요약 ──────────────────────────────── */}
       <Card className="px-4 py-3">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 flex-1 min-w-0">
           <span className="text-[12px] font-semibold text-ios-muted">
             {month.getMonth() + 1}{t("월 요약")}
           </span>
@@ -283,6 +306,28 @@ export function SchedulePage() {
               기록 {monthlyStats.recordCount}/{monthlyStats.totalDays}일
             </span>
           </div>
+          </div>
+          {/* 소셜 진입 버튼 */}
+          <button
+            type="button"
+            onClick={() => router.push("/social")}
+            className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ios-muted transition hover:bg-ios-sep/40 active:opacity-60"
+            title={t("친구 일정 보기")}
+            aria-label="친구 일정 보기"
+          >
+            {/* 사람 2명 아이콘 */}
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+            </svg>
+            {socialPendingCount > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white leading-none">
+                {socialPendingCount > 9 ? "9+" : socialPendingCount}
+              </span>
+            )}
+          </button>
         </div>
       </Card>
 
