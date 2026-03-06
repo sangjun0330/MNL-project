@@ -1,61 +1,21 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
-import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
+import { getOrCreateSocialCode, regenerateSocialCode } from "@/lib/server/socialCode";
+import { isSocialActionRateLimited, recordSocialActionAttempt } from "@/lib/server/socialSecurity";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
-
-// 대문자+숫자, 오독 가능 문자 제외 (0/1/I/O)
-const CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-
-function generateCode(): string {
-  const bytes = new Uint8Array(6);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => CHARS[b % CHARS.length]).join("");
-}
-
-async function upsertCode(userId: string, code?: string): Promise<string> {
-  const admin = getSupabaseAdmin();
-  const newCode = code ?? generateCode();
-
-  // UNIQUE 충돌 시 최대 5회 재시도
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const tryCode = attempt === 0 ? newCode : generateCode();
-    const { error } = await (admin as any)
-      .from("rnest_connect_codes")
-      .upsert({ user_id: userId, code: tryCode, updated_at: new Date().toISOString() });
-
-    if (!error) return tryCode;
-    if (!error.message?.includes("unique")) throw error;
-  }
-  throw new Error("code_generation_failed");
-}
 
 // GET /api/social/code — 내 코드 조회 (없으면 자동 생성)
 export async function GET(req: Request) {
   const userId = await readUserIdFromRequest(req);
   if (!userId) return jsonNoStore({ ok: false, error: "login_required" }, { status: 401 });
 
-  const admin = getSupabaseAdmin();
-
   try {
-    const { data, error } = await (admin as any)
-      .from("rnest_connect_codes")
-      .select("code, created_at")
-      .eq("user_id", userId)
-      .maybeSingle();
-
-    if (error) throw error;
-
-    if (data) {
-      return jsonNoStore({ ok: true, data: { code: data.code, createdAt: data.created_at } });
-    }
-
-    // 코드 없음 → 자동 생성
-    const newCode = await upsertCode(userId);
+    const socialCode = await getOrCreateSocialCode(userId);
     return jsonNoStore({
       ok: true,
-      data: { code: newCode, createdAt: new Date().toISOString() },
+      data: { code: socialCode.code, createdAt: socialCode.createdAt },
     });
   } catch (err: any) {
     console.error("[SocialCode/GET] err=%s", String(err?.message ?? err));
@@ -83,12 +43,27 @@ export async function POST(req: Request) {
   }
 
   try {
-    const newCode = await upsertCode(userId);
+    const limited = await isSocialActionRateLimited({
+      req,
+      userId,
+      action: "code_regenerate",
+      maxPerUser: 3,
+      maxPerIp: 5,
+      windowMinutes: 60 * 24,
+    });
+    if (limited) {
+      await recordSocialActionAttempt({ req, userId, action: "code_regenerate", success: false, detail: "rate_limited" });
+      return jsonNoStore({ ok: false, error: "too_many_requests" }, { status: 429 });
+    }
+
+    const newCode = await regenerateSocialCode(userId);
+    await recordSocialActionAttempt({ req, userId, action: "code_regenerate", success: true, detail: "ok" });
     return jsonNoStore({
       ok: true,
-      data: { code: newCode, createdAt: new Date().toISOString() },
+      data: { code: newCode.code, createdAt: newCode.createdAt },
     });
   } catch (err: any) {
+    await recordSocialActionAttempt({ req, userId, action: "code_regenerate", success: false, detail: "failed" });
     console.error("[SocialCode/POST] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_regenerate_code" }, { status: 500 });
   }

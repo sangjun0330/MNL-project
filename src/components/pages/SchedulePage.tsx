@@ -17,6 +17,7 @@ import { ScheduleRecordSheet } from "@/components/schedule/ScheduleRecordSheet";
 import { ShiftPatternQuickApplyCard } from "@/components/schedule/ShiftPatternQuickApplyCard";
 import { MenstrualSettingsForm } from "@/components/settings/MenstrualSettingsForm";
 import { useI18n } from "@/lib/useI18n";
+import { useAuthState } from "@/lib/auth";
 
 // ── 아이콘 컴포넌트 ─────────────────────────────────────────
 function IconMoon() {
@@ -106,6 +107,7 @@ export function SchedulePage() {
   const store = useAppStore();
   const { t } = useI18n();
   const router = useRouter();
+  const { status } = useAuthState();
 
   const [selected, setSelected] = useState<ISODate>(() => todayISO());
   const [month, setMonth] = useState<Date>(() => startOfMonth(fromISODate(todayISO())));
@@ -119,6 +121,10 @@ export function SchedulePage() {
   // 소셜 — 받은 요청 배지
   const [socialPendingCount, setSocialPendingCount] = useState(0);
   useEffect(() => {
+    if (status !== "authenticated") {
+      setSocialPendingCount(0);
+      return;
+    }
     let cancelled = false;
     const fetchPending = () => {
       fetch("/api/social/connections")
@@ -136,7 +142,7 @@ export function SchedulePage() {
       cancelled = true;
       clearInterval(timer);
     };
-  }, []);
+  }, [status]);
 
   // 날짜 선택 시 월 동기화
   const handleSelect = (iso: ISODate) => {

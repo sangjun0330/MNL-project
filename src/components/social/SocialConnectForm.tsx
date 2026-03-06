@@ -8,6 +8,8 @@ type Props = {
   open: boolean;
   onClose: () => void;
   onSuccess?: () => void;
+  prefillCode?: string | null;
+  prefillMessage?: string | null;
 };
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -17,14 +19,22 @@ const ERROR_MESSAGES: Record<string, string> = {
   request_already_pending: "이미 연결 요청을 보냈거나 받았어요.",
   blocked: "연결할 수 없는 사용자예요.",
   invalid_code_format: "코드는 6자리 영숫자예요.",
+  too_many_requests: "너무 자주 시도하고 있어요. 잠시 후 다시 시도해 주세요.",
 };
 
-export function SocialConnectForm({ open, onClose, onSuccess }: Props) {
+export function SocialConnectForm({ open, onClose, onSuccess, prefillCode, prefillMessage }: Props) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setInput(prefillCode ?? "");
+    setError(null);
+    setSuccess(null);
+  }, [open, prefillCode]);
 
   // 시트가 열릴 때 자동 포커스 (키보드 표시)
   useEffect(() => {
@@ -89,6 +99,12 @@ export function SocialConnectForm({ open, onClose, onSuccess }: Props) {
       variant="appstore"
     >
       <div className="pb-6">
+        {prefillMessage && (
+          <p className="mb-3 rounded-xl bg-[color:var(--rnest-accent-soft)] px-4 py-2.5 text-[13px] text-[color:var(--rnest-accent)]">
+            {prefillMessage}
+          </p>
+        )}
+
         {/* 코드 입력 박스 — input이 전체 영역을 커버 */}
         <div className="relative mb-4 flex h-20 items-center justify-center rounded-2xl border-2 border-ios-sep bg-ios-bg transition focus-within:border-[color:var(--rnest-accent)]">
           {/* 6칸 시각 표시 (포인터 이벤트 차단하여 input이 클릭 받음) */}

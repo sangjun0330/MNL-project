@@ -1,5 +1,10 @@
 // Social feature types
 
+export type SocialProfile = {
+  nickname: string;
+  avatarEmoji: string;
+};
+
 export type SocialConnection = {
   id: number;
   userId: string;

@@ -1,6 +1,7 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
+import { isSocialActionRateLimited, recordSocialActionAttempt } from "@/lib/server/socialSecurity";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -36,6 +37,19 @@ export async function POST(req: Request) {
   const admin = getSupabaseAdmin();
 
   try {
+    const limited = await isSocialActionRateLimited({
+      req,
+      userId,
+      action: "connect_request",
+      maxPerUser: 20,
+      maxPerIp: 30,
+      windowMinutes: 10,
+    });
+    if (limited) {
+      await recordSocialActionAttempt({ req, userId, action: "connect_request", success: false, detail: "rate_limited" });
+      return jsonNoStore({ ok: false, error: "too_many_requests" }, { status: 429 });
+    }
+
     // 1. 코드 → receiverId 조회 (admin client로 RLS 우회)
     const { data: codeRow, error: codeErr } = await (admin as any)
       .from("rnest_connect_codes")
@@ -45,6 +59,7 @@ export async function POST(req: Request) {
 
     if (codeErr) throw codeErr;
     if (!codeRow) {
+      await recordSocialActionAttempt({ req, userId, action: "connect_request", success: false, detail: "code_not_found" });
       return jsonNoStore({ ok: false, error: "code_not_found" }, { status: 404 });
     }
 
@@ -52,6 +67,7 @@ export async function POST(req: Request) {
 
     // 2. 자기 자신
     if (receiverId === userId) {
+      await recordSocialActionAttempt({ req, userId, action: "connect_request", success: false, detail: "self" });
       return jsonNoStore({ ok: false, error: "cannot_connect_to_self" }, { status: 400 });
     }
 
@@ -71,12 +87,15 @@ export async function POST(req: Request) {
 
     if (existing) {
       if (existing.status === "accepted") {
+        await recordSocialActionAttempt({ req, userId, action: "connect_request", success: false, detail: "accepted" });
         return jsonNoStore({ ok: false, error: "already_connected" }, { status: 409 });
       }
       if (existing.status === "pending") {
+        await recordSocialActionAttempt({ req, userId, action: "connect_request", success: false, detail: "pending" });
         return jsonNoStore({ ok: false, error: "request_already_pending" }, { status: 409 });
       }
       if (existing.status === "blocked") {
+        await recordSocialActionAttempt({ req, userId, action: "connect_request", success: false, detail: "blocked" });
         return jsonNoStore({ ok: false, error: "blocked" }, { status: 403 });
       }
       // rejected → 삭제 후 재생성
@@ -99,6 +118,8 @@ export async function POST(req: Request) {
       .eq("user_id", receiverId)
       .maybeSingle();
 
+    await recordSocialActionAttempt({ req, userId, action: "connect_request", success: true, detail: "ok" });
+
     return jsonNoStore({
       ok: true,
       data: {
@@ -108,6 +129,7 @@ export async function POST(req: Request) {
       },
     });
   } catch (err: any) {
+    await recordSocialActionAttempt({ req, userId, action: "connect_request", success: false, detail: "failed" });
     console.error("[SocialConnect/POST] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_send_request" }, { status: 500 });
   }

@@ -1,13 +1,10 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
+import { cleanSocialNickname } from "@/lib/server/socialSecurity";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
-
-function sanitize(v: unknown, max = 20): string {
-  return String(v ?? "").trim().slice(0, max);
-}
 
 const ALLOWED_AVATARS = ["🐧", "🦊", "🐱", "🐻", "🦁", "🐺", "🦅", "🐬"];
 
@@ -50,8 +47,8 @@ export async function POST(req: Request) {
     return jsonNoStore({ ok: false, error: "invalid_json" }, { status: 400 });
   }
 
-  const nickname = sanitize(body?.nickname, 12);
-  const avatarEmoji = sanitize(body?.avatarEmoji, 4);
+  const nickname = cleanSocialNickname(body?.nickname, 12);
+  const avatarEmoji = String(body?.avatarEmoji ?? "").trim().slice(0, 4);
 
   if (!nickname) {
     return jsonNoStore({ ok: false, error: "nickname_required" }, { status: 400 });
