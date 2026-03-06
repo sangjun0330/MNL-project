@@ -8,7 +8,8 @@ import { useAppStoreSelector } from "@/lib/store";
 import { countHealthRecordedDays } from "@/lib/healthRecords";
 import { computeVitalsRange, vitalMapByISO } from "@/lib/vitals";
 import { useI18n } from "@/lib/useI18n";
-import { buildShopRecommendations, getShopImageSrc, formatShopPrice } from "@/lib/shop";
+import { buildShopRecommendations, getShopImageSrc, formatShopPrice, SHOP_PRODUCTS } from "@/lib/shop";
+import type { ShopProduct } from "@/lib/shop";
 
 import { useAIRecoveryInsights } from "@/components/insights/useAIRecoveryInsights";
 import { BatteryGauge } from "@/components/home/BatteryGauge";
@@ -157,16 +158,30 @@ export default function Home() {
 
   const selectedDateLabel = useMemo(() => formatKoreanDate(homeSelected), [homeSelected]);
 
-  // ── Shop recommendations (derived from recovery signals, no fetch needed) ──
+  // ── Shop catalog (실제 쇼핑 페이지와 동일한 제품 목록) ──
+  const [shopCatalog, setShopCatalog] = useState<ShopProduct[]>(SHOP_PRODUCTS);
+  useEffect(() => {
+    fetch("/api/shop/catalog", { method: "GET", cache: "no-store" })
+      .then((r) => r.json())
+      .then((json) => {
+        if (json?.ok && Array.isArray(json?.data?.products) && json.data.products.length > 0) {
+          setShopCatalog(json.data.products as ShopProduct[]);
+        }
+      })
+      .catch(() => {/* 실패 시 기본 SHOP_PRODUCTS 유지 */});
+  }, []);
+
+  // ── Shop recommendations (실제 쇼핑 카탈로그 기반) ──
   const topShopRecs = useMemo(() => {
     const recs = buildShopRecommendations({
       selected: homeSelected,
       schedule: store.schedule,
       bio: store.bio,
       settings: store.settings,
+      products: shopCatalog,
     });
     return recs.recommendations.slice(0, 6);
-  }, [homeSelected, store.schedule, store.bio, store.settings]);
+  }, [homeSelected, store.schedule, store.bio, store.settings, shopCatalog]);
 
   return (
     <div className="flex flex-col gap-3.5 px-0 pb-4 pt-5">

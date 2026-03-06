@@ -10,11 +10,11 @@
   --rnest-muted: rgba(28, 28, 30, 0.56);
   --rnest-card: #FFFFFF;
   --rnest-sep: rgba(60, 60, 67, 0.18);
-  --rnest-accent: #163B73;
-  --rnest-accent-strong: #0F2A54;
-  --rnest-accent-soft: rgba(22, 59, 115, 0.12);
-  --rnest-accent-border: rgba(22, 59, 115, 0.28);
-  --rnest-selection: rgba(22, 59, 115, 0.16);
+  --rnest-accent: #7B6FD0;
+  --rnest-accent-strong: #6259C0;
+  --rnest-accent-soft: rgba(123, 111, 208, 0.12);
+  --rnest-accent-border: rgba(123, 111, 208, 0.28);
+  --rnest-selection: rgba(123, 111, 208, 0.16);
 
   /* ── Lavender / 연보라 identity ── */
   --rnest-lavender:        #7B6FD0;
@@ -566,11 +566,11 @@ html.rnest-night {
   --rnest-lavender-border: rgba(168, 158, 232, 0.28);
   --rnest-card: #111A2E;
   --rnest-sep: rgba(255,255,255,0.12);
-  --rnest-accent: #90AFE7;
-  --rnest-accent-strong: #7A9BD9;
-  --rnest-accent-soft: rgba(144, 175, 231, 0.18);
-  --rnest-accent-border: rgba(144, 175, 231, 0.32);
-  --rnest-selection: rgba(144, 175, 231, 0.22);
+  --rnest-accent: #A89EE8;
+  --rnest-accent-strong: #9488D5;
+  --rnest-accent-soft: rgba(168, 158, 232, 0.18);
+  --rnest-accent-border: rgba(168, 158, 232, 0.32);
+  --rnest-selection: rgba(168, 158, 232, 0.22);
 }
 
 html.rnest-night body {
