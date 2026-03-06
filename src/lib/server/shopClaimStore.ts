@@ -332,11 +332,20 @@ async function readClaimById(claimId: string): Promise<ShopClaimRecord | null> {
 
 async function updateClaim(claimId: string, patch: Record<string, unknown>): Promise<ShopClaimRecord> {
   const admin: any = getSupabaseAdmin();
-  const { data, error } = await admin.from("shop_claims").update(patch).eq("claim_id", claimId).select("*").single();
-  if (error) throw error;
-  const claim = fromShopClaimRow(data);
-  if (!claim) throw new Error("shop_claim_not_found");
-  return claim;
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const { data, error } = await admin.from("shop_claims").update(patch).eq("claim_id", claimId).select("*").single();
+    if (!error) {
+      const claim = fromShopClaimRow(data);
+      if (!claim) throw new Error("shop_claim_not_found");
+      return claim;
+    }
+    lastError = error;
+    if (attempt < 2) {
+      await new Promise((resolve) => setTimeout(resolve, 80 * (attempt + 1)));
+    }
+  }
+  throw lastError;
 }
 
 async function insertClaim(input: {
@@ -628,6 +637,14 @@ export async function reviewShopClaimByAdmin(input: {
     if (!current) throw new Error("shop_claim_not_found");
     if (current.status !== "REQUESTED") throw new Error("shop_claim_not_reviewable");
 
+    if (current.claimType === "REFUND" && input.action === "reject") {
+      await rejectShopOrderRefund({
+        orderId: current.orderId,
+        adminUserId,
+        note: adminNote,
+      });
+    }
+
     const reviewedAt = new Date().toISOString();
     const status: ShopClaimStatus = input.action === "approve" ? "APPROVED" : "REJECTED";
     const reviewedClaim = await updateClaim(claimId, {
@@ -636,14 +653,6 @@ export async function reviewShopClaimByAdmin(input: {
       reviewed_by: adminUserId,
       admin_note: adminNote,
     });
-
-    if (current.claimType === "REFUND" && input.action === "reject") {
-      await rejectShopOrderRefund({
-        orderId: current.orderId,
-        adminUserId,
-        note: adminNote,
-      }).catch(() => undefined);
-    }
 
     await writeClaimEventSafe({
       claim: reviewedClaim,
@@ -665,6 +674,14 @@ export async function reviewShopClaimByAdmin(input: {
       const current = fallback.claim;
       if (current.status !== "REQUESTED") throw new Error("shop_claim_not_reviewable");
 
+      if (current.claimType === "REFUND" && input.action === "reject") {
+        await rejectShopOrderRefund({
+          orderId: current.orderId,
+          adminUserId,
+          note: adminNote,
+        });
+      }
+
       const reviewedAt = new Date().toISOString();
       const nextStatus: ShopClaimStatus = input.action === "approve" ? "APPROVED" : "REJECTED";
       const saved: ShopClaimRecord = {
@@ -676,14 +693,6 @@ export async function reviewShopClaimByAdmin(input: {
         updatedAt: reviewedAt,
       };
 
-      if (current.claimType === "REFUND" && input.action === "reject") {
-        await rejectShopOrderRefund({
-          orderId: current.orderId,
-          adminUserId,
-          note: adminNote,
-        }).catch(() => undefined);
-      }
-
       await saveFallbackClaimsForUser(
         fallback.userId,
         [saved, ...fallback.claims.filter((claim) => claim.claimId !== saved.claimId)]
@@ -694,22 +703,24 @@ export async function reviewShopClaimByAdmin(input: {
   }
 }
 
-export async function submitShopClaimReturnShipmentByUser(input: {
-  userId: string;
+export async function registerShopClaimReturnShipmentByAdmin(input: {
   claimId: string;
+  adminUserId: string;
   courier: string;
   trackingNumber: string;
+  note?: string | null;
 }) {
-  const userId = cleanText(input.userId, 120);
   const claimId = cleanText(input.claimId, 80);
+  const adminUserId = cleanText(input.adminUserId, 120);
   const courier = cleanText(input.courier, 80);
   const trackingNumber = cleanText(input.trackingNumber, 120);
-  if (!userId || !claimId || !courier || !trackingNumber) throw new Error("invalid_shop_claim_input");
+  if (!claimId || !adminUserId || !courier || !trackingNumber) throw new Error("invalid_shop_claim_input");
+  const note = requireAdminReason(input.note);
 
   try {
-    const current = await readShopClaimForUser(userId, claimId);
+    const current = await readClaimById(claimId);
     if (!current) throw new Error("shop_claim_not_found");
-    if (current.status !== "APPROVED") throw new Error("shop_claim_return_not_allowed");
+    if (current.status !== "APPROVED") throw new Error("shop_claim_return_not_registerable");
 
     const now = new Date().toISOString();
     const saved = await updateClaim(claimId, {
@@ -717,14 +728,17 @@ export async function submitShopClaimReturnShipmentByUser(input: {
       return_courier: courier,
       return_tracking_number: trackingNumber,
       return_shipped_at: now,
+      admin_note: note,
+      reviewed_at: current.reviewedAt ?? now,
+      reviewed_by: current.reviewedBy ?? adminUserId,
     });
 
     await writeClaimEventSafe({
       claim: saved,
-      eventType: "return_shipped",
-      actorRole: "user",
-      actorUserId: userId,
-      message: `${courier} ${trackingNumber}`,
+      eventType: "return_pickup_registered",
+      actorRole: "admin",
+      actorUserId: adminUserId,
+      message: `${note} · ${courier} ${trackingNumber}`,
       metadata: {
         courier,
         trackingNumber,
@@ -735,10 +749,10 @@ export async function submitShopClaimReturnShipmentByUser(input: {
   } catch (error) {
     const storageError = toShopClaimHttpStorageError(error);
     if (storageError) {
-      const claims = await loadFallbackClaimsForUser(userId);
-      const current = claims.find((claim) => claim.claimId === claimId) ?? null;
-      if (!current) throw new Error("shop_claim_not_found");
-      if (current.status !== "APPROVED") throw new Error("shop_claim_return_not_allowed");
+      const fallback = await findFallbackClaimById(claimId).catch(() => null);
+      if (!fallback) throw new Error("shop_claim_not_found");
+      const current = fallback.claim;
+      if (current.status !== "APPROVED") throw new Error("shop_claim_return_not_registerable");
 
       const now = new Date().toISOString();
       const saved: ShopClaimRecord = {
@@ -747,9 +761,15 @@ export async function submitShopClaimReturnShipmentByUser(input: {
         returnCourier: courier,
         returnTrackingNumber: trackingNumber,
         returnShippedAt: now,
+        adminNote: note,
+        reviewedAt: current.reviewedAt ?? now,
+        reviewedBy: current.reviewedBy ?? adminUserId,
         updatedAt: now,
       };
-      await saveFallbackClaimsForUser(userId, [saved, ...claims.filter((claim) => claim.claimId !== saved.claimId)]);
+      await saveFallbackClaimsForUser(
+        fallback.userId,
+        [saved, ...fallback.claims.filter((claim) => claim.claimId !== saved.claimId)]
+      );
       return saved;
     }
     throw error;

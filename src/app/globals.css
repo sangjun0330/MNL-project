@@ -16,6 +16,11 @@
   --rnest-accent-border: rgba(22, 59, 115, 0.28);
   --rnest-selection: rgba(22, 59, 115, 0.16);
 
+  /* ── Lavender / 연보라 identity ── */
+  --rnest-lavender:        #7B6FD0;
+  --rnest-lavender-soft:   rgba(123, 111, 208, 0.10);
+  --rnest-lavender-border: rgba(123, 111, 208, 0.22);
+
   /* ── Apple-grade easing functions ── */
   --rnest-ease-smooth: cubic-bezier(0.16, 1, 0.3, 1);
   --rnest-ease-soft: cubic-bezier(0.22, 1, 0.36, 1);
@@ -556,6 +561,9 @@ html.rnest-night {
   --rnest-text: rgba(255,255,255,0.92);
   --rnest-sub: rgba(255,255,255,0.64);
   --rnest-muted: rgba(255,255,255,0.52);
+  --rnest-lavender:        #A89EE8;
+  --rnest-lavender-soft:   rgba(168, 158, 232, 0.15);
+  --rnest-lavender-border: rgba(168, 158, 232, 0.28);
   --rnest-card: #111A2E;
   --rnest-sep: rgba(255,255,255,0.12);
   --rnest-accent: #90AFE7;

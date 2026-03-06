@@ -1,7 +1,5 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
-import { toUserShopClaimSummary } from "@/lib/server/shopClaimPresenter";
-import { submitShopClaimReturnShipmentByUser } from "@/lib/server/shopClaimStore";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -20,37 +18,12 @@ export async function POST(req: Request, ctx: any) {
 
   const claimId = await readClaimIdFromContext(ctx);
   if (!claimId) return jsonNoStore({ ok: false, error: "invalid_claim_id" }, { status: 400 });
-
-  let body: any = null;
-  try {
-    body = await req.json();
-  } catch {
-    return jsonNoStore({ ok: false, error: "invalid_json" }, { status: 400 });
-  }
-
-  const courier = String(body?.courier ?? "").trim();
-  const trackingNumber = String(body?.trackingNumber ?? "").trim();
-  if (!courier || !trackingNumber) {
-    return jsonNoStore({ ok: false, error: "invalid_shop_claim_input" }, { status: 400 });
-  }
-
-  try {
-    const claim = await submitShopClaimReturnShipmentByUser({
-      userId,
-      claimId,
-      courier,
-      trackingNumber,
-    });
-    return jsonNoStore({ ok: true, data: { claim: toUserShopClaimSummary(claim) } });
-  } catch (error: any) {
-    const message = String(error?.message ?? "failed_to_submit_shop_claim_return");
-    if (message.includes("not_found")) return jsonNoStore({ ok: false, error: "shop_claim_not_found" }, { status: 404 });
-    if (message.includes("return_not_allowed")) {
-      return jsonNoStore({ ok: false, error: "shop_claim_return_not_allowed" }, { status: 400 });
-    }
-    if (message.includes("shop_claim_storage_unavailable")) {
-      return jsonNoStore({ ok: false, error: "shop_claim_storage_unavailable" }, { status: 503 });
-    }
-    return jsonNoStore({ ok: false, error: "failed_to_submit_shop_claim_return" }, { status: 500 });
-  }
+  return jsonNoStore(
+    {
+      ok: false,
+      error: "shop_claim_return_admin_only",
+      message: "반품 회수 접수는 관리자 계정에서만 처리됩니다.",
+    },
+    { status: 403 }
+  );
 }

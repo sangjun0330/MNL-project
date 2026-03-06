@@ -5,6 +5,7 @@ import { toAdminShopClaimSummary } from "@/lib/server/shopClaimPresenter";
 import {
   completeShopRefundClaimByAdmin,
   getShopClaimLinkedOrder,
+  registerShopClaimReturnShipmentByAdmin,
   markShopClaimReturnReceivedByAdmin,
   markShopExchangeClaimShippedByAdmin,
   reviewShopClaimByAdmin,
@@ -54,6 +55,19 @@ export async function PATCH(req: Request, ctx: any) {
       await markShopClaimReturnReceivedByAdmin({
         claimId,
         adminUserId: admin.identity.userId,
+        note,
+      });
+    } else if (action === "register_return_pickup") {
+      const courier = String(body?.courier ?? "").trim();
+      const trackingNumber = String(body?.trackingNumber ?? "").trim();
+      if (!courier || !trackingNumber) {
+        return jsonNoStore({ ok: false, error: "invalid_shop_claim_input" }, { status: 400 });
+      }
+      await registerShopClaimReturnShipmentByAdmin({
+        claimId,
+        adminUserId: admin.identity.userId,
+        courier,
+        trackingNumber,
         note,
       });
     } else if (action === "complete_refund") {
@@ -131,6 +145,9 @@ export async function PATCH(req: Request, ctx: any) {
     if (message.includes("not_reviewable")) return jsonNoStore({ ok: false, error: "shop_claim_not_reviewable" }, { status: 400 });
     if (message.includes("return_not_shipped")) {
       return jsonNoStore({ ok: false, error: "shop_claim_return_not_shipped" }, { status: 400 });
+    }
+    if (message.includes("return_not_registerable")) {
+      return jsonNoStore({ ok: false, error: "shop_claim_return_not_registerable" }, { status: 400 });
     }
     if (message.includes("refund_not_ready")) {
       return jsonNoStore({ ok: false, error: "shop_claim_refund_not_ready" }, { status: 400 });

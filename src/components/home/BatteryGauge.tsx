@@ -11,12 +11,42 @@ export function BatteryGauge({
   label?: string;
   tone?: "green" | "orange" | "red";
   kind?: "body" | "mental";
-  size?: "default" | "large";
+  size?: "default" | "large" | "compact";
 }) {
   const pct = Math.max(0, Math.min(100, value));
   const t = tone ?? (pct >= 67 ? "green" : pct >= 34 ? "orange" : "red");
 
-  // 기본은 위험도 색(초록/주황/빨강), kind가 있으면 테마 색으로 고정
+  const ringColor = kind
+    ? kind === "body"
+      ? "#00C7BE"
+      : "#FF8A80"
+    : t === "green"
+    ? "#10b981"
+    : t === "orange"
+    ? "#f59e0b"
+    : "#ef4444";
+
+  // ── Compact: horizontal progress bar ──
+  if (size === "compact") {
+    return (
+      <div className="flex flex-col gap-1.5 w-full">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-black/55">{label}</span>
+          <span className="text-[14px] font-semibold leading-none tracking-[-0.02em]">
+            {Math.round(pct)}
+          </span>
+        </div>
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-black/10">
+          <div
+            className="h-full rounded-full transition-all duration-500"
+            style={{ width: `${pct}%`, backgroundColor: ringColor }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // ── Circle gauge (default / large) ──
   const ring = kind
     ? kind === "body"
       ? "stroke-[#00C7BE]"
