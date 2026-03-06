@@ -311,3 +311,62 @@ export async function sendRefundResultEmail(order: {
     html: emailLayout(title, content),
   });
 }
+
+export async function sendShopClaimResultEmail(input: {
+  customerEmail: string | null;
+  orderId: string;
+  productName: string;
+  claimType: "REFUND" | "EXCHANGE";
+  status: "REJECTED" | "REFUND_COMPLETED" | "EXCHANGE_SHIPPED";
+  requestReason: string | null;
+  adminReason: string | null;
+  exchangeCourier?: string | null;
+  exchangeTrackingNumber?: string | null;
+}): Promise<void> {
+  if (!input.customerEmail) return;
+
+  const claimTypeLabel = input.claimType === "REFUND" ? "환불" : "교환";
+  const title =
+    input.status === "REJECTED"
+      ? `${claimTypeLabel} 요청이 반려되었습니다`
+      : input.status === "REFUND_COMPLETED"
+        ? "환불이 완료되었습니다"
+        : "교환품이 발송되었습니다";
+  const intro =
+    input.status === "REJECTED"
+      ? `${claimTypeLabel} 요청이 반려되었습니다. 아래 처리 사유를 확인해 주세요.`
+      : input.status === "REFUND_COMPLETED"
+        ? "환불이 최종 완료되었습니다. 금액 반영은 결제사 영업일 기준으로 순차 처리됩니다."
+        : "교환품 발송이 완료되었습니다. 아래 운송장과 처리 사유를 확인해 주세요.";
+
+  const rows: EmailRow[] = [
+    { label: "주문번호", value: escapeHtml(formatCompactOrderId(input.orderId)) },
+    { label: "상품", value: escapeHtml(input.productName) },
+    { label: "요청유형", value: claimTypeLabel },
+    { label: "요청 사유", value: escapeHtml(input.requestReason ?? "-") },
+    { label: "처리 사유", value: escapeHtml(input.adminReason ?? "-") },
+  ];
+  if (input.status === "EXCHANGE_SHIPPED" && input.exchangeTrackingNumber) {
+    rows.push({
+      label: "교환 운송장",
+      value: `${escapeHtml(input.exchangeCourier ?? "-")} ${escapeHtml(input.exchangeTrackingNumber)}`,
+      keepBorder: false,
+    });
+  } else {
+    rows[rows.length - 1] = { ...rows[rows.length - 1], keepBorder: false };
+  }
+
+  const detailUrl = buildShopOrderDetailUrl(input.orderId);
+  const content = `
+    <p style="margin:0 0 16px;font-size:14px;color:#44556d;line-height:1.7;">
+      ${escapeHtml(intro)}
+    </p>
+    ${renderEmailRows(rows)}
+    ${renderPrimaryEmailButton("주문 상세에서 확인", detailUrl)}`;
+
+  await sendEmail({
+    to: input.customerEmail,
+    subject: `[RNest] ${title} — ${input.productName}`,
+    html: emailLayout(title, content),
+  });
+}

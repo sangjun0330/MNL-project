@@ -1202,6 +1202,7 @@ export function ShopAdminPage() {
   const [shippingDrafts, setShippingDrafts] = useState<Record<string, { courier: string; carrierCode: string; trackingNumber: string }>>({});
   const [shippingLoadingId, setShippingLoadingId] = useState<string | null>(null);
   const [claimShippingDrafts, setClaimShippingDrafts] = useState<Record<string, { courier: string; trackingNumber: string }>>({});
+  const [claimAdminNoteDrafts, setClaimAdminNoteDrafts] = useState<Record<string, string>>({});
 
   // Edit state
   const [draft, setDraft] = useState<ProductDraft>(createEmptyDraft());
@@ -1313,6 +1314,15 @@ export function ShopAdminPage() {
               courier: current[claim.claimId]?.courier || claim.exchangeCourier || "",
               trackingNumber: current[claim.claimId]?.trackingNumber || claim.exchangeTrackingNumber || "",
             };
+          }
+          return merged;
+        });
+        setClaimAdminNoteDrafts((current) => {
+          const merged: Record<string, string> = { ...current };
+          for (const claim of nextClaims) {
+            if (!(claim.claimId in merged)) {
+              merged[claim.claimId] = claim.adminNote ?? "";
+            }
           }
           return merged;
         });
@@ -1557,6 +1567,13 @@ export function ShopAdminPage() {
     }));
   };
 
+  const handleClaimAdminNoteDraftChange = (claimId: string, value: string) => {
+    setClaimAdminNoteDrafts((current) => ({
+      ...current,
+      [claimId]: value,
+    }));
+  };
+
   const handleClaimAction = async (
     claim: ShopAdminClaimSummary,
     action: "approve" | "reject" | "mark_return_received" | "complete_refund" | "ship_exchange"
@@ -1566,6 +1583,12 @@ export function ShopAdminPage() {
     setNotice(null);
 
     const draft = claimShippingDrafts[claim.claimId] ?? { courier: "", trackingNumber: "" };
+    const adminNote = String(claimAdminNoteDrafts[claim.claimId] ?? claim.adminNote ?? "").trim();
+    if (adminNote.length < 2) {
+      showNotice("error", "관리자 처리 사유를 2자 이상 입력해 주세요.");
+      setClaimLoadingId(null);
+      return;
+    }
     if (action === "ship_exchange" && (!draft.courier.trim() || !draft.trackingNumber.trim())) {
       showNotice("error", "교환품 발송 처리에는 택배사와 운송장 번호가 필요합니다.");
       setClaimLoadingId(null);
@@ -1576,12 +1599,9 @@ export function ShopAdminPage() {
       const headers = await authHeaders();
       const payload: Record<string, string> = {
         action,
+        note: adminNote,
       };
-      if (action === "approve") payload.note = "클레임 승인";
-      if (action === "reject") payload.note = "운영 기준상 현재 요청을 진행할 수 없습니다.";
-      if (action === "complete_refund") payload.note = "반품 입고 확인 후 환불 완료";
       if (action === "ship_exchange") {
-        payload.note = "반품 입고 확인 후 교환품 발송";
         payload.courier = draft.courier.trim();
         payload.trackingNumber = draft.trackingNumber.trim();
       }
@@ -1597,6 +1617,10 @@ export function ShopAdminPage() {
       const nextClaim = json.data.claim as ShopAdminClaimSummary;
       const nextOrder = (json.data.order ?? null) as ShopAdminOrderSummary | null;
       setClaims((current) => current.map((item) => (item.claimId === nextClaim.claimId ? { ...nextClaim, order: nextOrder ?? item.order ?? null } : item)));
+      setClaimAdminNoteDrafts((current) => ({
+        ...current,
+        [nextClaim.claimId]: nextClaim.adminNote ?? adminNote,
+      }));
       if (nextOrder) {
         setOrders((current) => current.map((item) => (item.orderId === nextOrder.orderId ? nextOrder : item)));
       }
@@ -1613,6 +1637,8 @@ export function ShopAdminPage() {
       const message = String(error?.message ?? "");
       if (message === "shop_claim_storage_unavailable") {
         showNotice("error", "교환/환불 클레임 저장소 또는 스키마가 아직 완전히 준비되지 않았습니다.");
+      } else if (message.includes("admin_note_required")) {
+        showNotice("error", "관리자 처리 사유를 2자 이상 입력해 주세요.");
       } else if (message.includes("refund_not_ready")) {
         showNotice("error", "반품 입고가 확인된 환불 클레임만 최종 환불 처리할 수 있습니다.");
       } else if (message.includes("exchange_not_ready")) {
@@ -2095,7 +2121,7 @@ export function ShopAdminPage() {
 
               <div className="mt-2 text-[12px] text-ios-sub">{claim.reason || t("요청 사유 없음")}</div>
               {claim.detail ? <div className="mt-1 text-[11.5px] text-ios-sub">{claim.detail}</div> : null}
-              {claim.adminNote ? <div className="mt-1 text-[11.5px] text-ios-sub">운영 메모: {claim.adminNote}</div> : null}
+              {claim.adminNote ? <div className="mt-1 text-[11.5px] text-ios-sub">관리자 처리 사유: {claim.adminNote}</div> : null}
               <div className="mt-1 text-[11px] text-[#92a0b4]">접수일: {formatDateLabel(claim.requestedAt)}</div>
               {claim.returnTrackingNumber ? (
                 <div className="mt-1 text-[11px] text-[#92a0b4]">
@@ -2119,6 +2145,25 @@ export function ShopAdminPage() {
                   </div>
                 </details>
               ) : null}
+              <div className="mt-3 rounded-2xl border border-[#eef2f7] bg-[#f8fafc] px-3 py-3">
+                <div className="text-[11px] font-semibold text-[#60768d]">관리자 처리 사유 (사용자에게 노출)</div>
+                <textarea
+                  value={claimAdminNoteDrafts[claim.claimId] ?? claim.adminNote ?? ""}
+                  onChange={(event) => handleClaimAdminNoteDraftChange(claim.claimId, event.target.value)}
+                  placeholder={
+                    claim.status === "REQUESTED"
+                      ? "승인 또는 반려 사유를 입력해 주세요."
+                      : claim.status === "RETURN_SHIPPED"
+                        ? "반품 입고 확인 사유를 입력해 주세요."
+                        : claim.claimType === "REFUND"
+                          ? "환불 처리 사유를 입력해 주세요."
+                          : "교환품 발송 처리 사유를 입력해 주세요."
+                  }
+                  disabled={claimLoadingId === claim.claimId}
+                  className="mt-2 min-h-[76px] w-full resize-none rounded-2xl border border-[#d7dfeb] bg-white px-3 py-2 text-[12px] leading-5 text-[#17324d] outline-none transition placeholder:text-[#92a0b4] focus:border-[#11294b]"
+                />
+                <div className="mt-1 text-[10.5px] text-[#92a0b4]">2자 이상 입력해야 처리 버튼이 동작합니다.</div>
+              </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 {claim.status === "REQUESTED" ? (
                   <>

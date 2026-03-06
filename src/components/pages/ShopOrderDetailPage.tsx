@@ -277,6 +277,7 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
   const [refundReasonInput, setRefundReasonInput] = useState("");
   const [claimReasonInput, setClaimReasonInput] = useState("");
   const [trackingLoading, setTrackingLoading] = useState(false);
+  const [orderInfoExpanded, setOrderInfoExpanded] = useState(false);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -285,6 +286,10 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
       mountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    setOrderInfoExpanded(false);
+  }, [orderId]);
 
   const loadOrder = useCallback(
     async (showLoading = false) => {
@@ -739,6 +744,13 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
 
   const hasOpenClaims = claims.some((claim) => isOpenClaim(claim.status));
   const canRequestPostClaim = Boolean(order?.deliveredAt) && order?.refund.status !== "done" && !hasOpenClaims;
+  const paymentShippingSummary = order
+    ? [
+        orderStatusLabel(order.status),
+        order.approvedAt ? `${t("결제")} ${formatDateLabel(order.approvedAt)}` : t("결제 대기"),
+        order.trackingNumber ? `${order.courier ?? "-"} ${order.trackingNumber}` : t("운송장 대기"),
+      ].join(" · ")
+    : "";
 
   return (
     <div className="-mx-4 pb-24">
@@ -798,93 +810,114 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
             <StatusTimeline order={order} trackingUrl={trackingSnapshot?.trackingUrl ?? order.tracking?.trackingUrl} />
 
             <div className="rounded-3xl border border-[#edf1f6] bg-white p-5">
-              <h2 className="mb-3 text-[14px] font-bold text-[#111827]">{t("결제·배송 정보")}</h2>
-
-              <div className="rounded-2xl border border-[#dbe4ef] bg-[#f8fafc] px-4 py-1">
-                <div className="border-b border-[#edf1f6] py-3 text-[11px] font-semibold text-[#60768d]">{t("주문 정보")}</div>
-                <InfoRow label={t("주문번호")} value={<span className="break-all font-mono text-[11px]">{order.orderId}</span>} />
-                <InfoRow label={t("주문일시")} value={formatDateLabel(order.createdAt)} />
-                {order.approvedAt ? <InfoRow label={t("결제일시")} value={formatDateLabel(order.approvedAt)} /> : null}
-                {order.paymentMethod ? <InfoRow label={t("결제수단")} value={order.paymentMethod} /> : null}
-                <InfoRow label={t("상품 금액")} value={formatShopCurrency(order.subtotalKrw)} />
-                <InfoRow label={t("배송비")} value={order.shippingFeeKrw > 0 ? formatShopCurrency(order.shippingFeeKrw) : t("무료")} />
-                {order.status === "FAILED" && order.failMessage ? (
-                  <InfoRow label={t("실패 사유")} value={<span className="text-[#a33a2b]">{order.failMessage}</span>} />
-                ) : null}
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-[14px] font-bold text-[#111827]">{t("결제·배송 정보")}</h2>
+                <button
+                  type="button"
+                  data-auth-allow
+                  onClick={() => setOrderInfoExpanded((current) => !current)}
+                  className="inline-flex h-9 items-center justify-center rounded-full border border-[#d7dfeb] bg-[#f8fafc] px-4 text-[11px] font-semibold text-[#11294b] transition hover:border-[#11294b]"
+                >
+                  {orderInfoExpanded ? t("접기") : t("상세 보기")}
+                </button>
               </div>
 
-              <div className="mt-3 rounded-2xl border border-[#dbe4ef] bg-[#f8fafc] px-4 py-1">
-                <div className="border-b border-[#edf1f6] py-3 text-[11px] font-semibold text-[#60768d]">{t("배송 현황")}</div>
-                <div className="py-3 text-[11.5px] leading-5 text-[#61758a]">
-                  {t("민감정보 보호를 위해 배송 정보는 일부 마스킹되어 표시됩니다.")}
+              <div className="mt-3 rounded-2xl border border-[#dbe4ef] bg-[#f8fafc] px-4 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="truncate text-[12px] font-semibold text-[#17324d]">{paymentShippingSummary}</div>
+                  <span className="text-[10.5px] text-[#7f93a8]">{orderInfoExpanded ? t("펼침") : t("접힘")}</span>
                 </div>
-                <InfoRow label={t("수령인")} value={order.shipping.recipientName} />
-                <InfoRow label={t("연락처")} value={order.shipping.phone} />
-                <InfoRow label={t("우편번호")} value={order.shipping.postalCode} />
-                <InfoRow
-                  label={t("주소")}
-                  value={
-                    <>
-                      {order.shipping.addressLine1}
-                      {order.shipping.addressLine2 ? <><br />{order.shipping.addressLine2}</> : null}
-                    </>
-                  }
-                />
-                {order.shipping.deliveryNote ? <InfoRow label={t("배송 메모")} value={order.shipping.deliveryNote} /> : null}
-                {order.trackingNumber ? (
-                  <>
-                    <InfoRow label={t("택배사")} value={order.courier ?? "-"} />
-                    <InfoRow label={t("운송장번호")} value={<span className="font-mono font-semibold">{order.trackingNumber}</span>} />
-                    {trackingSnapshot?.statusLabel ? <InfoRow label={t("배송 상태")} value={t(trackingSnapshot.statusLabel)} /> : null}
-                    {trackingSnapshot?.lastEventAt ? <InfoRow label={t("마지막 이벤트")} value={formatTrackingDateTimeLabel(trackingSnapshot.lastEventAt)} /> : null}
-                    {order.shippedAt ? <InfoRow label={t("발송일")} value={formatDateLabel(order.shippedAt)} /> : null}
-                    {order.deliveredAt ? <InfoRow label={t("배송 완료")} value={formatDateLabel(order.deliveredAt)} /> : null}
-                    {order.status === "SHIPPED" ? (
-                      <div className="py-3">
-                        <div className="rounded-[24px] border border-[#dbe4ef] bg-white px-4 py-4">
-                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                            <div>
-                              <div className="text-[11px] font-semibold text-[#60768d]">{t("실시간 배송 확인")}</div>
-                              <div className="mt-1 text-[14px] font-semibold text-[#17324d]">
-                                {trackingSnapshot?.statusLabel ? t(trackingSnapshot.statusLabel) : t("택배사 상태를 확인하는 중입니다.")}
-                              </div>
-                              <div className="mt-1 text-[11.5px] leading-5 text-[#60768d]">
-                                {trackingSnapshot?.lastPolledAt
-                                  ? `${t("마지막 확인")} ${formatTrackingDateTimeLabel(trackingSnapshot.lastPolledAt)}`
-                                  : t("택배사 상태가 갱신되면 여기에 바로 반영됩니다.")}
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              data-auth-allow
-                              onClick={() => void loadLiveTracking(true)}
-                              disabled={trackingLoading}
-                              className="inline-flex h-10 min-w-[108px] items-center justify-center rounded-full border border-[#d7dfeb] bg-[#f8fafc] px-4 text-[12px] font-semibold text-[#11294b] transition hover:border-[#11294b]"
-                            >
-                              {trackingLoading ? t("확인 중...") : t("지금 확인")}
-                            </button>
-                          </div>
-                          {trackingSnapshot?.trackingUrl ? (
-                            <a
-                              href={trackingSnapshot.trackingUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="mt-3 inline-flex text-[12px] font-semibold text-[#2b5faa]"
-                            >
-                              {t("택배사 배송 조회 열기")}
-                            </a>
-                          ) : null}
-                          {trackingSnapshot?.error ? (
-                            <div className="mt-3 rounded-2xl border border-[#edf1f6] bg-[#f8fafc] px-3 py-2 text-[11.5px] leading-5 text-[#60768d]">
-                              {trackingSnapshot.error}
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
-                    ) : null}
-                  </>
-                ) : null}
               </div>
+
+              {orderInfoExpanded ? (
+                <>
+                  <div className="mt-3 rounded-2xl border border-[#dbe4ef] bg-[#f8fafc] px-4 py-1">
+                    <div className="border-b border-[#edf1f6] py-3 text-[11px] font-semibold text-[#60768d]">{t("주문 정보")}</div>
+                    <InfoRow label={t("주문번호")} value={<span className="break-all font-mono text-[11px]">{order.orderId}</span>} />
+                    <InfoRow label={t("주문일시")} value={formatDateLabel(order.createdAt)} />
+                    {order.approvedAt ? <InfoRow label={t("결제일시")} value={formatDateLabel(order.approvedAt)} /> : null}
+                    {order.paymentMethod ? <InfoRow label={t("결제수단")} value={order.paymentMethod} /> : null}
+                    <InfoRow label={t("상품 금액")} value={formatShopCurrency(order.subtotalKrw)} />
+                    <InfoRow label={t("배송비")} value={order.shippingFeeKrw > 0 ? formatShopCurrency(order.shippingFeeKrw) : t("무료")} />
+                    {order.status === "FAILED" && order.failMessage ? (
+                      <InfoRow label={t("실패 사유")} value={<span className="text-[#a33a2b]">{order.failMessage}</span>} />
+                    ) : null}
+                  </div>
+
+                  <div className="mt-3 rounded-2xl border border-[#dbe4ef] bg-[#f8fafc] px-4 py-1">
+                    <div className="border-b border-[#edf1f6] py-3 text-[11px] font-semibold text-[#60768d]">{t("배송 현황")}</div>
+                    <div className="py-3 text-[11.5px] leading-5 text-[#61758a]">
+                      {t("민감정보 보호를 위해 배송 정보는 일부 마스킹되어 표시됩니다.")}
+                    </div>
+                    <InfoRow label={t("수령인")} value={order.shipping.recipientName} />
+                    <InfoRow label={t("연락처")} value={order.shipping.phone} />
+                    <InfoRow label={t("우편번호")} value={order.shipping.postalCode} />
+                    <InfoRow
+                      label={t("주소")}
+                      value={
+                        <>
+                          {order.shipping.addressLine1}
+                          {order.shipping.addressLine2 ? <><br />{order.shipping.addressLine2}</> : null}
+                        </>
+                      }
+                    />
+                    {order.shipping.deliveryNote ? <InfoRow label={t("배송 메모")} value={order.shipping.deliveryNote} /> : null}
+                    {order.trackingNumber ? (
+                      <>
+                        <InfoRow label={t("택배사")} value={order.courier ?? "-"} />
+                        <InfoRow label={t("운송장번호")} value={<span className="font-mono font-semibold">{order.trackingNumber}</span>} />
+                        {trackingSnapshot?.statusLabel ? <InfoRow label={t("배송 상태")} value={t(trackingSnapshot.statusLabel)} /> : null}
+                        {trackingSnapshot?.lastEventAt ? <InfoRow label={t("마지막 이벤트")} value={formatTrackingDateTimeLabel(trackingSnapshot.lastEventAt)} /> : null}
+                        {order.shippedAt ? <InfoRow label={t("발송일")} value={formatDateLabel(order.shippedAt)} /> : null}
+                        {order.deliveredAt ? <InfoRow label={t("배송 완료")} value={formatDateLabel(order.deliveredAt)} /> : null}
+                        {order.status === "SHIPPED" ? (
+                          <div className="py-3">
+                            <div className="rounded-[24px] border border-[#dbe4ef] bg-white px-4 py-4">
+                              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                <div>
+                                  <div className="text-[11px] font-semibold text-[#60768d]">{t("실시간 배송 확인")}</div>
+                                  <div className="mt-1 text-[14px] font-semibold text-[#17324d]">
+                                    {trackingSnapshot?.statusLabel ? t(trackingSnapshot.statusLabel) : t("택배사 상태를 확인하는 중입니다.")}
+                                  </div>
+                                  <div className="mt-1 text-[11.5px] leading-5 text-[#60768d]">
+                                    {trackingSnapshot?.lastPolledAt
+                                      ? `${t("마지막 확인")} ${formatTrackingDateTimeLabel(trackingSnapshot.lastPolledAt)}`
+                                      : t("택배사 상태가 갱신되면 여기에 바로 반영됩니다.")}
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  data-auth-allow
+                                  onClick={() => void loadLiveTracking(true)}
+                                  disabled={trackingLoading}
+                                  className="inline-flex h-10 min-w-[108px] items-center justify-center rounded-full border border-[#d7dfeb] bg-[#f8fafc] px-4 text-[12px] font-semibold text-[#11294b] transition hover:border-[#11294b]"
+                                >
+                                  {trackingLoading ? t("확인 중...") : t("지금 확인")}
+                                </button>
+                              </div>
+                              {trackingSnapshot?.trackingUrl ? (
+                                <a
+                                  href={trackingSnapshot.trackingUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="mt-3 inline-flex text-[12px] font-semibold text-[#2b5faa]"
+                                >
+                                  {t("택배사 배송 조회 열기")}
+                                </a>
+                              ) : null}
+                              {trackingSnapshot?.error ? (
+                                <div className="mt-3 rounded-2xl border border-[#edf1f6] bg-[#f8fafc] px-3 py-2 text-[11.5px] leading-5 text-[#60768d]">
+                                  {trackingSnapshot.error}
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+                        ) : null}
+                      </>
+                    ) : null}
+                  </div>
+                </>
+              ) : null}
             </div>
 
             {(order.status === "READY" ||
@@ -1091,7 +1124,7 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
                             ) : null}
                             {claim.adminNote ? (
                               <div className="mt-1 text-[11.5px] leading-5 text-[#60768d]">
-                                {t("운영 메모")} · {claim.adminNote}
+                                {t("관리자 처리 사유")} · {claim.adminNote}
                               </div>
                             ) : null}
                             {claim.returnTrackingNumber ? (

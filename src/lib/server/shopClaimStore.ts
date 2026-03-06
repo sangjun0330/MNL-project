@@ -307,6 +307,12 @@ function sanitizeNote(value: unknown) {
   return text || null;
 }
 
+function requireAdminReason(value: unknown) {
+  const note = sanitizeNote(value);
+  if (!note || note.length < 2) throw new Error("shop_claim_admin_note_required");
+  return note;
+}
+
 function buildShopClaimId(orderId: string) {
   const stamp = Date.now().toString(36);
   const bytes = crypto.getRandomValues(new Uint8Array(5));
@@ -615,6 +621,7 @@ export async function reviewShopClaimByAdmin(input: {
   const claimId = cleanText(input.claimId, 80);
   const adminUserId = cleanText(input.adminUserId, 120);
   if (!claimId || !adminUserId) throw new Error("invalid_shop_claim_input");
+  const adminNote = requireAdminReason(input.note);
 
   try {
     const current = await readClaimById(claimId);
@@ -622,7 +629,6 @@ export async function reviewShopClaimByAdmin(input: {
     if (current.status !== "REQUESTED") throw new Error("shop_claim_not_reviewable");
 
     const reviewedAt = new Date().toISOString();
-    const adminNote = sanitizeNote(input.note);
     const status: ShopClaimStatus = input.action === "approve" ? "APPROVED" : "REJECTED";
     const reviewedClaim = await updateClaim(claimId, {
       status: toDbClaimStatus(status),
@@ -635,7 +641,7 @@ export async function reviewShopClaimByAdmin(input: {
       await rejectShopOrderRefund({
         orderId: current.orderId,
         adminUserId,
-        note: adminNote ?? "환불 요청이 반려되었습니다.",
+        note: adminNote,
       }).catch(() => undefined);
     }
 
@@ -644,7 +650,7 @@ export async function reviewShopClaimByAdmin(input: {
       eventType: input.action === "approve" ? "claim_approved" : "claim_rejected",
       actorRole: "admin",
       actorUserId: adminUserId,
-      message: adminNote ?? (input.action === "approve" ? "요청이 승인되었습니다." : "요청이 반려되었습니다."),
+      message: adminNote,
       metadata: {
         action: input.action,
       } as Json,
@@ -660,7 +666,6 @@ export async function reviewShopClaimByAdmin(input: {
       if (current.status !== "REQUESTED") throw new Error("shop_claim_not_reviewable");
 
       const reviewedAt = new Date().toISOString();
-      const adminNote = sanitizeNote(input.note);
       const nextStatus: ShopClaimStatus = input.action === "approve" ? "APPROVED" : "REJECTED";
       const saved: ShopClaimRecord = {
         ...current,
@@ -675,7 +680,7 @@ export async function reviewShopClaimByAdmin(input: {
         await rejectShopOrderRefund({
           orderId: current.orderId,
           adminUserId,
-          note: adminNote ?? "환불 요청이 반려되었습니다.",
+          note: adminNote,
         }).catch(() => undefined);
       }
 
@@ -759,6 +764,7 @@ export async function markShopClaimReturnReceivedByAdmin(input: {
   const claimId = cleanText(input.claimId, 80);
   const adminUserId = cleanText(input.adminUserId, 120);
   if (!claimId || !adminUserId) throw new Error("invalid_shop_claim_input");
+  const note = requireAdminReason(input.note);
 
   try {
     const current = await readClaimById(claimId);
@@ -766,7 +772,6 @@ export async function markShopClaimReturnReceivedByAdmin(input: {
     if (current.status !== "RETURN_SHIPPED") throw new Error("shop_claim_return_not_shipped");
 
     const now = new Date().toISOString();
-    const note = sanitizeNote(input.note);
     const saved = await updateClaim(claimId, {
       status: toDbClaimStatus("RETURN_RECEIVED"),
       return_received_at: now,
@@ -794,7 +799,6 @@ export async function markShopClaimReturnReceivedByAdmin(input: {
       if (current.status !== "RETURN_SHIPPED") throw new Error("shop_claim_return_not_shipped");
 
       const now = new Date().toISOString();
-      const note = sanitizeNote(input.note);
       const saved: ShopClaimRecord = {
         ...current,
         status: "RETURN_RECEIVED",
@@ -823,6 +827,7 @@ export async function completeShopRefundClaimByAdmin(input: {
   const claimId = cleanText(input.claimId, 80);
   const adminUserId = cleanText(input.adminUserId, 120);
   if (!claimId || !adminUserId) throw new Error("invalid_shop_claim_input");
+  const note = requireAdminReason(input.note);
 
   try {
     const current = await readClaimById(claimId);
@@ -830,7 +835,6 @@ export async function completeShopRefundClaimByAdmin(input: {
     if (current.claimType !== "REFUND") throw new Error("shop_claim_not_refund");
     if (current.status !== "RETURN_RECEIVED") throw new Error("shop_claim_refund_not_ready");
 
-    const note = sanitizeNote(input.note) ?? "교환/환불 클레임 환불 승인";
     try {
       await approveShopOrderRefund({
         orderId: current.orderId,
@@ -870,7 +874,6 @@ export async function completeShopRefundClaimByAdmin(input: {
       if (current.claimType !== "REFUND") throw new Error("shop_claim_not_refund");
       if (current.status !== "RETURN_RECEIVED") throw new Error("shop_claim_refund_not_ready");
 
-      const note = sanitizeNote(input.note) ?? "교환/환불 클레임 환불 승인";
       try {
         await approveShopOrderRefund({
           orderId: current.orderId,
@@ -914,6 +917,7 @@ export async function markShopExchangeClaimShippedByAdmin(input: {
   const courier = cleanText(input.courier, 80);
   const trackingNumber = cleanText(input.trackingNumber, 120);
   if (!claimId || !adminUserId || !courier || !trackingNumber) throw new Error("invalid_shop_claim_input");
+  const note = requireAdminReason(input.note);
 
   try {
     const current = await readClaimById(claimId);
@@ -922,7 +926,6 @@ export async function markShopExchangeClaimShippedByAdmin(input: {
     if (current.status !== "RETURN_RECEIVED") throw new Error("shop_claim_exchange_not_ready");
 
     const now = new Date().toISOString();
-    const note = sanitizeNote(input.note);
     const saved = await updateClaim(claimId, {
       status: toDbClaimStatus("EXCHANGE_SHIPPED"),
       exchange_courier: courier,
@@ -954,7 +957,6 @@ export async function markShopExchangeClaimShippedByAdmin(input: {
       if (current.status !== "RETURN_RECEIVED") throw new Error("shop_claim_exchange_not_ready");
 
       const now = new Date().toISOString();
-      const note = sanitizeNote(input.note);
       const saved: ShopClaimRecord = {
         ...current,
         status: "EXCHANGE_SHIPPED",

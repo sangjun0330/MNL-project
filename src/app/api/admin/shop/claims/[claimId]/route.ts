@@ -1,4 +1,5 @@
 import { requireBillingAdmin } from "@/lib/server/billingAdminAuth";
+import { loadUserEmailById, sendShopClaimResultEmail } from "@/lib/server/emailService";
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { toAdminShopClaimSummary } from "@/lib/server/shopClaimPresenter";
 import {
@@ -37,6 +38,9 @@ export async function PATCH(req: Request, ctx: any) {
 
   const action = String(body?.action ?? "").trim();
   const note = String(body?.note ?? "").trim() || null;
+  if (!note || note.length < 2) {
+    return jsonNoStore({ ok: false, error: "shop_claim_admin_note_required" }, { status: 400 });
+  }
 
   try {
     if (action === "approve" || action === "reject") {
@@ -80,6 +84,37 @@ export async function PATCH(req: Request, ctx: any) {
     if (!linked.claim) {
       return jsonNoStore({ ok: false, error: "shop_claim_not_found" }, { status: 404 });
     }
+
+    const resultStatus =
+      linked.claim.status === "REJECTED" ||
+      linked.claim.status === "REFUND_COMPLETED" ||
+      linked.claim.status === "EXCHANGE_SHIPPED"
+        ? linked.claim.status
+        : null;
+    if (resultStatus && linked.order) {
+      try {
+        const email = await loadUserEmailById(linked.order.userId);
+        await sendShopClaimResultEmail({
+          customerEmail: email,
+          orderId: linked.order.orderId,
+          productName: linked.order.productSnapshot.name,
+          claimType: linked.claim.claimType,
+          status: resultStatus,
+          requestReason: linked.claim.reason,
+          adminReason: linked.claim.adminNote,
+          exchangeCourier: linked.claim.exchangeCourier,
+          exchangeTrackingNumber: linked.claim.exchangeTrackingNumber,
+        });
+      } catch (emailError: any) {
+        console.error(
+          "[AdminClaim] result email failed claimId=%s orderId=%s err=%s",
+          linked.claim.claimId,
+          linked.order.orderId,
+          String(emailError?.message ?? emailError)
+        );
+      }
+    }
+
     return jsonNoStore({
       ok: true,
       data: {
@@ -90,6 +125,9 @@ export async function PATCH(req: Request, ctx: any) {
   } catch (error: any) {
     const message = String(error?.message ?? "failed_to_update_shop_claim");
     if (message.includes("not_found")) return jsonNoStore({ ok: false, error: "shop_claim_not_found" }, { status: 404 });
+    if (message.includes("admin_note_required")) {
+      return jsonNoStore({ ok: false, error: "shop_claim_admin_note_required" }, { status: 400 });
+    }
     if (message.includes("not_reviewable")) return jsonNoStore({ ok: false, error: "shop_claim_not_reviewable" }, { status: 400 });
     if (message.includes("return_not_shipped")) {
       return jsonNoStore({ ok: false, error: "shop_claim_return_not_shipped" }, { status: 400 });
