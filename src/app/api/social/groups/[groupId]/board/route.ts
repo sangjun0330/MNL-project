@@ -4,8 +4,8 @@ import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import type { SocialGroupBoardMember } from "@/types/social";
 import {
   buildSocialGroupPermissions,
+  computeMemberWeeklyVitals,
   getSocialGroupById,
-  isSocialGroupManager,
   loadGroupActivities,
   loadPendingJoinRequests,
   loadSocialGroupProfileMap,
@@ -73,6 +73,7 @@ export async function GET(
     const memberRole = normalizeSocialGroupRole(membership.role);
     const permissions = buildSocialGroupPermissions(memberRole, group.allowMemberInvites);
 
+    // 기존 쿼리 + health_visibility를 별도로 안전하게 로드
     const [profileMap, { data: prefs }, { data: states }, joinRequests, activities] = await Promise.all([
       loadSocialGroupProfileMap(admin, memberIds),
       (admin as any)
@@ -87,6 +88,22 @@ export async function GET(
       loadGroupActivities(admin, groupId, 24),
     ]);
 
+    // health_visibility는 별도 쿼리로 안전하게 로드
+    // (마이그레이션이 아직 적용 안 됐을 경우 전체 보드 API가 실패하지 않도록 격리)
+    const healthVisMap = new Map<string, "full" | "hidden">();
+    try {
+      const { data: healthPrefs } = await (admin as any)
+        .from("rnest_social_preferences")
+        .select("user_id, health_visibility")
+        .in("user_id", memberIds);
+      for (const row of healthPrefs ?? []) {
+        const vis = String(row.health_visibility ?? "hidden");
+        healthVisMap.set(String(row.user_id), vis === "full" ? "full" : "hidden");
+      }
+    } catch {
+      // 컬럼이 없으면 전원 'hidden' 기본값 (안전)
+    }
+
     const prefMap = new Map<string, { scheduleVisibility: string; statusMessageVisible: boolean }>();
     for (const row of prefs ?? []) {
       prefMap.set(String(row.user_id), {
@@ -95,10 +112,17 @@ export async function GET(
       });
     }
 
+    // schedule + 전체 payload 맵 (vitals 계산용)
     const stateMap = new Map<string, Record<string, string>>();
+    const fullPayloadMap = new Map<string, Record<string, unknown>>();
     for (const row of states ?? []) {
-      stateMap.set(String(row.user_id), ((row.payload as any)?.schedule ?? {}) as Record<string, string>);
+      const uid = String(row.user_id);
+      stateMap.set(uid, ((row.payload as any)?.schedule ?? {}) as Record<string, string>);
+      fullPayloadMap.set(uid, (row.payload ?? {}) as Record<string, unknown>);
     }
+
+    // 오늘 ISO (서버 UTC 기준)
+    const todayISO = new Date().toISOString().slice(0, 10);
 
     let hiddenScheduleMemberCount = 0;
     const visibleOffSets: Set<string>[] = [];
@@ -108,6 +132,7 @@ export async function GET(
       const pref = prefMap.get(memberUserId) ?? { scheduleVisibility: "full", statusMessageVisible: true };
       const profile = profileMap.get(memberUserId) ?? { nickname: "", avatarEmoji: "🐧", statusMessage: "" };
       const rawSchedule = stateMap.get(memberUserId) ?? {};
+      const healthVisibility = healthVisMap.get(memberUserId) ?? "hidden";
       const schedule: Record<string, string> = {};
 
       if (memberUserId === userId) {
@@ -135,6 +160,15 @@ export async function GET(
         visibleOffSets.push(offSet);
       }
 
+      // 건강 통계: health_visibility=full인 멤버만 계산
+      let vitals = null;
+      if (healthVisibility === "full") {
+        const fullPayload = fullPayloadMap.get(memberUserId);
+        if (fullPayload) {
+          vitals = computeMemberWeeklyVitals(fullPayload, todayISO);
+        }
+      }
+
       return {
         userId: memberUserId,
         nickname: profile.nickname,
@@ -143,6 +177,8 @@ export async function GET(
         role: normalizeSocialGroupRole(row.role),
         joinedAt: String(row.joined_at ?? group.createdAt ?? new Date().toISOString()),
         schedule,
+        healthVisibility,
+        vitals,
       };
     });
 

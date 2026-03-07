@@ -22,7 +22,6 @@ import { SocialProfileSheet } from "@/components/social/SocialProfileSheet";
 import { SocialEventCenter } from "@/components/social/SocialEventCenter";
 import { SocialGroupList } from "@/components/social/SocialGroupList";
 import { SocialGroupCreateSheet } from "@/components/social/SocialGroupCreateSheet";
-import { SocialGroupDetailSheet } from "@/components/social/SocialGroupDetailSheet";
 import { SocialGroupJoinSheet } from "@/components/social/SocialGroupJoinSheet";
 import { SocialBellIcon } from "@/components/social/SocialIcons";
 import {
@@ -34,32 +33,6 @@ import { useAppStoreSelector } from "@/lib/store";
 
 const SOCIAL_BACKGROUND_REFRESH_MS = 60 * 60 * 1000;
 type SocialViewTab = "friends" | "groups";
-
-function sameGroupSummary(a: SocialGroupSummary | null | undefined, b: SocialGroupSummary | null | undefined) {
-  if (!a || !b) return false;
-  return (
-    a.id === b.id &&
-    a.name === b.name &&
-    a.description === b.description &&
-    a.role === b.role &&
-    a.ownerUserId === b.ownerUserId &&
-    a.memberCount === b.memberCount &&
-    a.joinedAt === b.joinedAt &&
-    a.notice === b.notice &&
-    a.joinMode === b.joinMode &&
-    a.allowMemberInvites === b.allowMemberInvites &&
-    a.maxMembers === b.maxMembers &&
-    a.pendingJoinRequestCount === b.pendingJoinRequestCount &&
-    a.memberPreview.length === b.memberPreview.length &&
-    a.memberPreview.every((member, index) => {
-      const other = b.memberPreview[index];
-      return !!other &&
-        member.userId === other.userId &&
-        member.nickname === other.nickname &&
-        member.avatarEmoji === other.avatarEmoji;
-    })
-  );
-}
 
 // 현재 월 YYYY-MM
 function currentMonth(): string {
@@ -111,7 +84,6 @@ export function SocialPage() {
   const [openProfile, setOpenProfile] = useState(false);
   const [openConnect, setOpenConnect] = useState(false);
   const [openGroupCreate, setOpenGroupCreate] = useState(false);
-  const [openGroupDetail, setOpenGroupDetail] = useState(false);
   const [openGroupJoin, setOpenGroupJoin] = useState(false);
   const [openEventCenter, setOpenEventCenter] = useState(false);
   const [unreadEventCount, setUnreadEventCount] = useState(0);
@@ -121,7 +93,6 @@ export function SocialPage() {
   const [notice, setNotice] = useState<{ tone: "info" | "success" | "error"; text: string } | null>(null);
   const [connectPrefillCode, setConnectPrefillCode] = useState<string | null>(null);
   const [connectPrefillMessage, setConnectPrefillMessage] = useState<string | null>(null);
-  const [selectedGroup, setSelectedGroup] = useState<SocialGroupSummary | null>(null);
   const [groupInvitePreview, setGroupInvitePreview] = useState<SocialGroupInvitePreview | null>(null);
   const handledInviteRef = useRef<string | null>(null);
   const handledGroupInviteRef = useRef<string | null>(null);
@@ -278,22 +249,6 @@ export function SocialPage() {
       })
       .catch(() => {});
   }, [status]);
-
-  const handleGroupUpdated = useCallback((nextGroup: SocialGroupSummary) => {
-    setSelectedGroup((prev) => {
-      if (!prev || prev.id !== nextGroup.id) return nextGroup;
-      return sameGroupSummary(prev, nextGroup) ? prev : nextGroup;
-    });
-    setGroups((prev) => {
-      const current = prev.find((item) => item.id === nextGroup.id);
-      if (current && sameGroupSummary(current, nextGroup)) return prev;
-      return [nextGroup, ...prev.filter((item) => item.id !== nextGroup.id)];
-    });
-  }, []);
-
-  const handleGroupsRefresh = useCallback(() => {
-    fetchGroups();
-  }, [fetchGroups]);
 
   useEffect(() => {
     if (!profileChecked || status !== "authenticated") return;
@@ -569,10 +524,9 @@ export function SocialPage() {
         const preview = res.data as SocialGroupInvitePreview;
         setGroupInvitePreview(preview);
         if (preview.state === "already_member") {
-          setSelectedGroup(preview.group);
-          setOpenGroupDetail(true);
           setNotice({ tone: "info", text: `${preview.group.name} 그룹에 이미 참여 중이에요.` });
           void fetchGroups();
+          router.push(`/social/groups/${preview.group.id}`);
           return;
         }
         if (preview.state === "group_full") {
@@ -854,8 +808,7 @@ export function SocialPage() {
           groups={groups}
           onCreateGroup={() => setOpenGroupCreate(true)}
           onOpenGroup={(group) => {
-            setSelectedGroup(group);
-            setOpenGroupDetail(true);
+            router.push(`/social/groups/${group.id}`);
           }}
         />
       )}
@@ -899,38 +852,9 @@ export function SocialPage() {
         onCreated={(group) => {
           setOpenGroupCreate(false);
           setGroups((prev) => [group, ...prev.filter((item) => item.id !== group.id)]);
-          setSelectedGroup(group);
-          setOpenGroupDetail(true);
           setActiveTab("groups");
           setNotice({ tone: "success", text: `${group.name} 그룹을 만들었어요.` });
-        }}
-      />
-
-      <SocialGroupDetailSheet
-        open={openGroupDetail}
-        onClose={() => {
-          setOpenGroupDetail(false);
-          setSelectedGroup(null);
-        }}
-        group={selectedGroup}
-        months={fetchMonths}
-        currentUserId={user?.userId ?? null}
-        mySchedule={mySchedule}
-        onGroupUpdated={handleGroupUpdated}
-        onGroupsRefresh={handleGroupsRefresh}
-        onGroupLeft={(groupId) => {
-          setOpenGroupDetail(false);
-          setSelectedGroup(null);
-          setGroups((prev) => prev.filter((group) => group.id !== groupId));
-          void fetchGroups();
-          setNotice({ tone: "info", text: "그룹에서 나왔어요." });
-        }}
-        onGroupDeleted={(groupId) => {
-          setOpenGroupDetail(false);
-          setSelectedGroup(null);
-          setGroups((prev) => prev.filter((group) => group.id !== groupId));
-          void fetchGroups();
-          setNotice({ tone: "success", text: "그룹을 삭제했어요." });
+          router.push(`/social/groups/${group.id}`);
         }}
       />
 
@@ -951,8 +875,7 @@ export function SocialPage() {
             return;
           }
           setGroups((prev) => [group, ...prev.filter((item) => item.id !== group.id)]);
-          setSelectedGroup(group);
-          setOpenGroupDetail(true);
+          router.push(`/social/groups/${group.id}`);
           setNotice({ tone: "success", text: `${group.name} 그룹에 참여했어요.` });
         }}
       />

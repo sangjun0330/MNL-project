@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Button } from "@/components/ui/Button";
-import type { SocialProfile, ScheduleVisibility } from "@/types/social";
+import type { SocialProfile, ScheduleVisibility, HealthVisibility } from "@/types/social";
 import { useAppStoreSelector } from "@/lib/store";
 
 const AVATAR_OPTIONS = ["🐧", "🦊", "🐱", "🐻", "🦁", "🐺", "🦅", "🐬"];
@@ -90,6 +90,7 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
   const [scheduleVisibility, setScheduleVisibility] = useState<ScheduleVisibility>("full");
   const [statusMsgVisible, setStatusMsgVisible] = useState(true);
   const [acceptInvites, setAcceptInvites] = useState(true);
+  const [healthVisibility, setHealthVisibility] = useState<HealthVisibility>("hidden");
   const [prefsSaving, setPrefsSaving] = useState(false);
 
   const trimmedNickname = nickname.trim();
@@ -136,6 +137,7 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
           setScheduleVisibility(res.data?.scheduleVisibility ?? "full");
           setStatusMsgVisible(res.data?.statusMessageVisible !== false);
           setAcceptInvites(res.data?.acceptInvites !== false);
+          setHealthVisibility(res.data?.healthVisibility === "full" ? "full" : "hidden");
         }
       })
       .catch(() => {});
@@ -230,6 +232,7 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
     scheduleVisibility: ScheduleVisibility;
     statusMessageVisible: boolean;
     acceptInvites: boolean;
+    healthVisibility: HealthVisibility;
   }>) => {
     if (prefsSaving) return;
     setPrefsSaving(true);
@@ -243,6 +246,7 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
         setScheduleVisibility(res.data?.scheduleVisibility ?? scheduleVisibility);
         setStatusMsgVisible(res.data?.statusMessageVisible !== false);
         setAcceptInvites(res.data?.acceptInvites !== false);
+        setHealthVisibility(res.data?.healthVisibility === "full" ? "full" : "hidden");
       }
     } catch {}
     setPrefsSaving(false);
@@ -509,6 +513,24 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
                 const next = !acceptInvites;
                 setAcceptInvites(next);
                 void handleSavePrefs({ acceptInvites: next });
+              }}
+            />
+          </div>
+
+          {/* 건강 데이터 그룹 공유 */}
+          <div className="flex items-center justify-between py-2 border-t border-ios-sep">
+            <div>
+              <p className="text-[12.5px] font-medium text-ios-text">건강 데이터 그룹 공유</p>
+              <p className="text-[11px] text-ios-muted mt-0.5">그룹 랭킹에 배터리·수면 점수 참여</p>
+            </div>
+            <ToggleSwitch
+              checked={healthVisibility === "full"}
+              disabled={prefsSaving}
+              label="건강 데이터 그룹 공유"
+              onToggle={() => {
+                const next: HealthVisibility = healthVisibility === "full" ? "hidden" : "full";
+                setHealthVisibility(next);
+                void handleSavePrefs({ healthVisibility: next });
               }}
             />
           </div>

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/cn";
 import { SocialGroupBadge } from "@/components/social/SocialGroupBadge";
 import { SocialGroupRoleBadge } from "@/components/social/SocialGroupRoleBadge";
+import { SocialGroupRankingTab } from "@/components/social/SocialGroupRankingTab";
 import { SocialThisWeek } from "@/components/social/SocialThisWeek";
 import { SocialCommonOffDays } from "@/components/social/SocialCommonOffDays";
 import type {
@@ -31,7 +32,7 @@ type Props = {
 };
 
 type ShareState = "idle" | "link-copied" | "shared";
-type DetailTab = "overview" | "members" | "manage" | "activity";
+type DetailTab = "overview" | "members" | "ranking" | "manage" | "activity";
 
 function toISODate(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -243,7 +244,9 @@ export function SocialGroupDetailSheet({
   useEffect(() => {
     if (!board) return;
     const canManage = board.permissions.canEditBasicInfo || board.permissions.canManageJoinRequests;
-    const allowedTabs: DetailTab[] = canManage ? ["overview", "members", "manage", "activity"] : ["overview", "members", "activity"];
+    const allowedTabs: DetailTab[] = canManage
+      ? ["overview", "members", "ranking", "manage", "activity"]
+      : ["overview", "members", "ranking", "activity"];
     if (!allowedTabs.includes(activeTab)) setActiveTab("overview");
   }, [activeTab, board]);
 
@@ -286,6 +289,7 @@ export function SocialGroupDetailSheet({
     const items: Array<{ id: DetailTab; label: string }> = [
       { id: "overview", label: "개요" },
       { id: "members", label: "멤버" },
+      { id: "ranking", label: "랭킹" },
     ];
     if (board?.permissions.canEditBasicInfo || board?.permissions.canManageJoinRequests) {
       items.push({ id: "manage", label: "운영" });
@@ -561,7 +565,7 @@ export function SocialGroupDetailSheet({
                     type="button"
                     onClick={() => setActiveTab(tab.id)}
                     className={cn(
-                      "flex-1 rounded-[14px] px-3 py-2.5 text-[13px] font-semibold transition",
+                      "flex-1 rounded-[14px] px-1.5 py-2.5 text-[12.5px] font-semibold transition",
                       activeTab === tab.id ? "bg-white text-ios-text shadow-sm" : "text-ios-muted"
                     )}
                   >
@@ -665,6 +669,13 @@ export function SocialGroupDetailSheet({
                   </div>
                 ) : null}
               </div>
+            )}
+
+            {activeTab === "ranking" && (
+              <SocialGroupRankingTab
+                members={board.members}
+                currentUserId={currentUserId}
+              />
             )}
 
             {activeTab === "members" && (

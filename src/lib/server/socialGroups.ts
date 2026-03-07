@@ -1,4 +1,5 @@
 import type {
+  MemberWeeklyVitals,
   SocialEventType,
   SocialGroupActivity,
   SocialGroupActivityType,
@@ -9,6 +10,7 @@ import type {
   SocialGroupRole,
   SocialGroupSummary,
 } from "@/types/social";
+import { computeVitalsRange } from "@/lib/vitals";
 
 export const DEFAULT_GROUP_MAX_MEMBERS = 12;
 export const DEFAULT_GROUP_JOIN_MODE: SocialGroupJoinMode = "open";
@@ -374,6 +376,138 @@ export async function appendGroupActivity(input: {
   } catch (error: any) {
     if (isMissingSchemaFeatureError(error)) return;
     console.error("[SocialGroupActivity/insert] group=%d err=%s", input.groupId, String(error?.message ?? error));
+  }
+}
+
+// ─── 건강 통계 계산 (서버 사이드, Edge Runtime 호환) ────────────────────────
+
+/**
+ * ISO 날짜에 days를 더한 ISO 날짜 반환 (정오 UTC 기준으로 DST 영향 방지)
+ */
+function serverOffsetISO(isoDate: string, days: number): string {
+  const d = new Date(isoDate + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * 그룹 멤버의 rnest_user_state payload로부터 지난 7일 건강 통계를 계산합니다.
+ * - health_visibility === 'full' 멤버에게만 호출해야 합니다.
+ * - 실제 건강 입력(bio)이 3일 미만이면 null을 반환합니다.
+ * - 계산 실패 시 null을 반환합니다 (에러를 throw하지 않음).
+ *
+ * 성능: payload를 최근 60일 데이터로 필터링 후 computeVitalsRange 호출.
+ * 60일치 × 최대 24명 = 최대 1440 엔진 스텝 (각 O(1)), 충분히 빠릅니다.
+ */
+export function computeMemberWeeklyVitals(
+  payload: Record<string, unknown>,
+  todayISO: string,
+): MemberWeeklyVitals | null {
+  try {
+    // 60일 전 ISO 날짜 (수면부채 누적 정확도를 위해 최소 30일 필요, 60일로 여유 확보)
+    const cutoffISO = serverOffsetISO(todayISO, -60);
+
+    // 원본 데이터 추출
+    const rawSchedule = ((payload.schedule ?? {}) as Record<string, string>);
+    const rawBio = ((payload.bio ?? {}) as Record<string, unknown>);
+    const rawEmotions = ((payload.emotions ?? {}) as Record<string, unknown>);
+    const rawNotes = ((payload.notes ?? {}) as Record<string, unknown>);
+
+    // 60일 이후 데이터만 필터링 (성능 최적화)
+    const filteredSchedule: Record<string, string> = {};
+    const filteredBio: Record<string, unknown> = {};
+    const filteredEmotions: Record<string, unknown> = {};
+    const filteredNotes: Record<string, unknown> = {};
+
+    for (const [date, value] of Object.entries(rawSchedule)) {
+      if (typeof date === "string" && date >= cutoffISO) {
+        filteredSchedule[date] = value as string;
+      }
+    }
+    for (const [date, value] of Object.entries(rawBio)) {
+      if (typeof date === "string" && date >= cutoffISO) {
+        filteredBio[date] = value;
+      }
+    }
+    for (const [date, value] of Object.entries(rawEmotions)) {
+      if (typeof date === "string" && date >= cutoffISO) {
+        filteredEmotions[date] = value;
+      }
+    }
+    for (const [date, value] of Object.entries(rawNotes)) {
+      if (typeof date === "string" && date >= cutoffISO) {
+        filteredNotes[date] = value;
+      }
+    }
+
+    // settings (menstrual, profile)는 날짜 키가 없으므로 그대로 사용
+    const filteredState = {
+      ...payload,
+      schedule: filteredSchedule,
+      bio: filteredBio,
+      emotions: filteredEmotions,
+      notes: filteredNotes,
+    };
+
+    // vitals 계산: cutoff → today (엔진이 내부적으로 computeStart를 결정)
+    const vitals = computeVitalsRange({
+      state: filteredState as any,
+      start: cutoffISO as any,
+      end: todayISO as any,
+    });
+
+    // 지난 7일 (오늘 포함 롤링 윈도우)
+    const weekStartISO = serverOffsetISO(todayISO, -6);
+    const weekVitals = vitals.filter((v) => v.dateISO >= weekStartISO);
+
+    // 실제 건강 입력이 있는 날만 카운트
+    // (엔진이 추정치를 사용하는 날은 의미있는 순위로 볼 수 없음)
+    const daysWithData = weekVitals.filter(
+      (v) =>
+        v.inputs.sleepHours != null ||
+        v.inputs.stress != null ||
+        v.inputs.mood != null ||
+        v.inputs.activity != null,
+    );
+
+    // 최소 3일 이상 데이터 없으면 랭킹 제외
+    if (daysWithData.length < 3) return null;
+
+    // 평균 계산
+    const avgBattery =
+      daysWithData.reduce((sum, v) => sum + v.body.value, 0) / daysWithData.length;
+    const avgMental =
+      daysWithData.reduce((sum, v) => sum + v.mental.ema, 0) / daysWithData.length;
+
+    const daysWithSleep = daysWithData.filter((v) => v.inputs.sleepHours != null);
+    const avgSleep =
+      daysWithSleep.length > 0
+        ? daysWithSleep.reduce((sum, v) => sum + (v.inputs.sleepHours ?? 0), 0) /
+          daysWithSleep.length
+        : null;
+
+    // 지난 7일 중 가장 나쁜 번아웃 레벨 (danger > warning > ok)
+    let burnoutLevel: "ok" | "warning" | "danger" = "ok";
+    for (const v of daysWithData) {
+      if (v.burnout.level === "danger") {
+        burnoutLevel = "danger";
+        break;
+      }
+      if (v.burnout.level === "warning") {
+        burnoutLevel = "warning";
+      }
+    }
+
+    return {
+      weeklyAvgBattery: Math.round(avgBattery * 10) / 10,
+      weeklyAvgMental: Math.round(avgMental * 10) / 10,
+      weeklyAvgSleep: avgSleep !== null ? Math.round(avgSleep * 10) / 10 : null,
+      burnoutLevel,
+      daysCounted: daysWithData.length,
+    };
+  } catch {
+    // 계산 실패 시 안전하게 null 반환 (보드 API 전체를 실패시키지 않음)
+    return null;
   }
 }
 

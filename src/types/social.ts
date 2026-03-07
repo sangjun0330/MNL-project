@@ -41,12 +41,28 @@ export type FriendMeta = {
 };
 
 export type ScheduleVisibility = "full" | "off_only" | "hidden";
+export type HealthVisibility = "full" | "hidden";
 
 export type SocialPreferences = {
   scheduleVisibility: ScheduleVisibility;
   statusMessageVisible: boolean;
   acceptInvites: boolean;
   notifyRequests: boolean;
+  healthVisibility: HealthVisibility;
+};
+
+/** 그룹 멤버의 지난 7일 건강 통계 (health_visibility=full인 멤버만 계산) */
+export type MemberWeeklyVitals = {
+  /** 지난 7일 평균 Body Battery (0-100) */
+  weeklyAvgBattery: number;
+  /** 지난 7일 평균 Mental Battery (0-100) */
+  weeklyAvgMental: number;
+  /** 지난 7일 평균 수면 시간 (수면 데이터 있는 날 기준, 없으면 null) */
+  weeklyAvgSleep: number | null;
+  /** 지난 7일 중 가장 나쁜 번아웃 레벨 */
+  burnoutLevel: "ok" | "warning" | "danger";
+  /** 실제 건강 입력이 있는 날 수 (3일 미만이면 null 반환) */
+  daysCounted: number;
 };
 
 export type SocialEventType =
@@ -127,6 +143,10 @@ export type SocialGroupBoardMember = {
   role: SocialGroupRole;
   joinedAt: string;
   schedule: Record<string, string>;
+  /** 건강 데이터 공유 여부 */
+  healthVisibility: HealthVisibility;
+  /** 지난 7일 건강 통계. null = 비공개이거나 데이터 3일 미만 */
+  vitals: MemberWeeklyVitals | null;
 };
 
 export type SocialGroupJoinRequest = {
