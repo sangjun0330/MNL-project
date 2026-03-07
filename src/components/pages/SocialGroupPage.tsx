@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthState } from "@/lib/auth";
 import { useAppStoreSelector } from "@/lib/store";
@@ -11,6 +11,12 @@ import { SocialGroupRoleBadge } from "@/components/social/SocialGroupRoleBadge";
 import { SocialGroupRankingTab } from "@/components/social/SocialGroupRankingTab";
 import { SocialThisWeek } from "@/components/social/SocialThisWeek";
 import { SocialCommonOffDays } from "@/components/social/SocialCommonOffDays";
+import {
+  SocialCalendarIcon,
+  SocialGroupIcon,
+  SocialMegaphoneIcon,
+  SocialMoonIcon,
+} from "@/components/social/SocialIcons";
 import type {
   FriendSchedule,
   SocialGroupActivity,
@@ -131,6 +137,58 @@ type DetailTab = "overview" | "members" | "ranking" | "manage" | "activity";
 type Props = {
   groupId: string;
 };
+
+function MetaPill({
+  text,
+  tone = "neutral",
+}: {
+  text: string;
+  tone?: "neutral" | "accent" | "warning";
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold",
+        tone === "accent"
+          ? "bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
+          : tone === "warning"
+            ? "bg-amber-50 text-amber-700"
+            : "bg-ios-bg text-ios-muted"
+      )}
+    >
+      {text}
+    </span>
+  );
+}
+
+function OverviewMetricCard({
+  icon,
+  label,
+  value,
+  hint,
+  className,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: number;
+  hint: string;
+  className?: string;
+}) {
+  return (
+    <div className={cn("rounded-[28px] border border-ios-sep/70 bg-white px-4 py-4 shadow-apple", className)}>
+      <div className="flex items-center gap-2">
+        <span className="flex h-8 w-8 items-center justify-center rounded-2xl bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]">
+          {icon}
+        </span>
+        <p className="text-[11.5px] font-semibold text-ios-muted">{label}</p>
+      </div>
+      <div className="mt-3 flex items-end justify-between gap-3">
+        <p className="text-[26px] font-bold tracking-[-0.03em] text-ios-text tabular-nums">{value}</p>
+        <p className="text-right text-[10.5px] leading-4 text-ios-muted">{hint}</p>
+      </div>
+    </div>
+  );
+}
 
 // ── 컴포넌트 ─────────────────────────────────────────────────
 
@@ -478,7 +536,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
 
   if (!loading && error === "not_member") {
     return (
-      <div className="space-y-3 pb-4">
+      <div className="mx-auto w-full max-w-[680px] space-y-4 px-1.5 pb-6 sm:max-w-[700px] sm:px-0">
         <div className="flex items-center justify-between pt-1">
           <button
             type="button"
@@ -493,7 +551,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
           <h1 className="text-[17px] font-bold text-ios-text">그룹</h1>
           <div className="h-9 w-9" />
         </div>
-        <div className="rounded-3xl bg-white px-4 py-8 shadow-apple text-center">
+        <div className="rounded-[32px] border border-ios-sep/70 bg-white px-4 py-8 text-center shadow-apple">
           <p className="text-[15px] font-semibold text-ios-text">이 그룹의 멤버가 아니에요</p>
           <p className="mt-2 text-[13px] text-ios-muted">초대 링크를 통해 참여할 수 있어요.</p>
         </div>
@@ -503,7 +561,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
 
   if (!loading && error === "not_found") {
     return (
-      <div className="space-y-3 pb-4">
+      <div className="mx-auto w-full max-w-[680px] space-y-4 px-1.5 pb-6 sm:max-w-[700px] sm:px-0">
         <div className="flex items-center justify-between pt-1">
           <button
             type="button"
@@ -518,7 +576,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
           <h1 className="text-[17px] font-bold text-ios-text">그룹</h1>
           <div className="h-9 w-9" />
         </div>
-        <div className="rounded-3xl bg-white px-4 py-8 shadow-apple text-center">
+        <div className="rounded-[32px] border border-ios-sep/70 bg-white px-4 py-8 text-center shadow-apple">
           <p className="text-[15px] font-semibold text-ios-text">그룹을 찾을 수 없어요</p>
           <p className="mt-2 text-[13px] text-ios-muted">삭제되었거나 잘못된 주소예요.</p>
         </div>
@@ -531,7 +589,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
   const groupName = board?.group.name ?? "그룹";
 
   return (
-    <div className="space-y-3 pb-6">
+    <div className="mx-auto w-full max-w-[680px] space-y-4 px-1.5 pb-8 sm:max-w-[700px] sm:px-0">
 
       {/* ── 헤더 ─────────────────────────────────────────── */}
       <div className="flex items-center justify-between pt-1">
@@ -551,7 +609,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
           type="button"
           disabled={sharing || !board?.permissions.canCreateInvite}
           onClick={handleShareInvite}
-          className="flex h-9 items-center gap-1 rounded-full bg-white px-3 text-[13px] font-semibold text-[color:var(--rnest-accent)] shadow-apple transition hover:bg-ios-sep/20 active:opacity-60 disabled:opacity-40"
+          className="flex h-9 min-w-[74px] items-center justify-center gap-1 rounded-full bg-white px-3 text-[13px] font-semibold text-[color:var(--rnest-accent)] shadow-apple transition hover:bg-ios-sep/20 active:opacity-60 disabled:opacity-40"
           aria-label="초대 링크 공유"
         >
           {sharing
@@ -565,38 +623,30 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
       </div>
 
       {/* ── 그룹 정보 카드 ────────────────────────────────── */}
-      <div className="rounded-3xl bg-white px-4 py-4 shadow-apple">
+      <div className="rounded-[34px] border border-ios-sep/70 bg-white px-5 py-5 shadow-apple">
         <div className="flex items-center gap-3">
           <SocialGroupBadge groupId={groupIdNum ?? 0} name={groupName} size="lg" />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <p className="truncate text-[16px] font-semibold text-ios-text">{groupName}</p>
+              <p className="truncate text-[18px] font-bold text-ios-text">{groupName}</p>
               {board ? <SocialGroupRoleBadge role={board.group.role} /> : null}
             </div>
             <p className="mt-0.5 text-[12.5px] text-ios-muted">
               멤버 {board?.group.memberCount ?? "…"}/{board?.group.maxMembers ?? 12}명
             </p>
           </div>
-        </div>
-
-        {board?.group.description ? (
-          <p className="mt-4 rounded-2xl bg-ios-bg px-4 py-3 text-[13px] leading-6 text-ios-muted">
-            {board.group.description}
-          </p>
-        ) : null}
-
-        {/* 나가기 / 삭제 버튼 */}
-        <button
-          type="button"
-          disabled={!!busyAction}
-          onClick={handleLeaveOrDelete}
-          className={cn(
-            "mt-4 w-full rounded-2xl py-3 text-[14px] font-semibold transition active:opacity-60 disabled:opacity-40",
-            myRole === "owner"
-              ? "bg-red-50 text-red-600"
-              : "bg-ios-bg text-ios-muted"
-          )}
-        >
+          {/* 나가기 / 삭제 버튼 — 우상단 pill */}
+          <button
+            type="button"
+            disabled={!!busyAction}
+            onClick={handleLeaveOrDelete}
+            className={cn(
+              "shrink-0 rounded-full px-3.5 py-1.5 text-[12px] font-semibold transition active:opacity-60 disabled:opacity-40",
+              myRole === "owner"
+                ? "bg-red-50 text-red-500"
+                : "bg-ios-bg text-ios-muted"
+            )}
+          >
           {busyAction === "delete"
             ? "삭제 중…"
             : busyAction === "leave"
@@ -605,6 +655,27 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
                 ? "그룹 삭제"
                 : "그룹 나가기"}
         </button>
+        </div>
+        {board?.group.description ? (
+          <p className="mt-3 text-[13px] leading-6 text-ios-muted">
+            {board.group.description}
+          </p>
+        ) : null}
+        <div className="mt-4 flex flex-wrap gap-2">
+          <MetaPill
+            tone="accent"
+            text={board?.group.joinMode === "approval" ? "승인 후 참여" : "즉시 참여"}
+          />
+          <MetaPill
+            text={board?.group.allowMemberInvites ? "멤버도 초대 가능" : "방장/관리자만 초대"}
+          />
+          {(board?.joinRequests.length ?? 0) > 0 ? (
+            <MetaPill
+              tone="warning"
+              text={`가입 요청 ${board?.joinRequests.length ?? 0}건`}
+            />
+          ) : null}
+        </div>
       </div>
 
       {/* ── 피드백 메시지 ─────────────────────────────────── */}
@@ -625,7 +696,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
 
       {/* ── 로딩 스켈레톤 ─────────────────────────────────── */}
       {loading && (
-        <div className="rounded-3xl bg-white px-4 py-4 shadow-apple space-y-3">
+        <div className="space-y-3 rounded-[32px] border border-ios-sep/70 bg-white px-5 py-5 shadow-apple">
           <div className="h-4 w-40 rounded-full bg-ios-sep animate-pulse" />
           <div className="h-24 rounded-2xl bg-ios-sep/70 animate-pulse" />
           <div className="h-20 rounded-2xl bg-ios-sep/50 animate-pulse" />
@@ -659,41 +730,56 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
           {/* ── 개요 탭 ────────────────────────────────────── */}
           {activeTab === "overview" && (
             <div className="space-y-4">
-              <div className="grid grid-cols-3 gap-3">
-                <div className="rounded-3xl bg-white px-4 py-4 shadow-apple">
-                  <p className="text-[11px] font-semibold text-ios-muted">오늘 OFF/VAC</p>
-                  <p className="mt-1 text-[22px] font-bold text-ios-text">{todayOffCount}</p>
-                </div>
-                <div className="rounded-3xl bg-white px-4 py-4 shadow-apple">
-                  <p className="text-[11px] font-semibold text-ios-muted">오늘 야간</p>
-                  <p className="mt-1 text-[22px] font-bold text-ios-text">{todayNightCount}</p>
-                </div>
-                <div className="rounded-3xl bg-white px-4 py-4 shadow-apple">
-                  <p className="text-[11px] font-semibold text-ios-muted">가입 요청</p>
-                  <p className="mt-1 text-[22px] font-bold text-ios-text">{board.joinRequests.length}</p>
-                </div>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                <OverviewMetricCard
+                  icon={<SocialCalendarIcon className="h-[17px] w-[17px]" />}
+                  label="오늘 OFF/VAC"
+                  value={todayOffCount}
+                  hint="오늘 같이 쉬는 멤버"
+                  className="col-span-2 sm:col-span-1"
+                />
+                <OverviewMetricCard
+                  icon={<SocialMoonIcon className="h-[16px] w-[16px]" />}
+                  label="오늘 야간"
+                  value={todayNightCount}
+                  hint="오늘 야간 근무 중"
+                />
+                <OverviewMetricCard
+                  icon={<SocialGroupIcon className="h-[17px] w-[17px]" />}
+                  label="가입 요청"
+                  value={board.joinRequests.length}
+                  hint="운영 탭에서 처리"
+                />
               </div>
 
-              <div className="rounded-3xl bg-white px-4 py-4 shadow-apple">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-[14px] font-semibold text-ios-text">그룹 공지</p>
-                    <p className="mt-0.5 text-[11.5px] text-ios-muted">
-                      {board.group.joinMode === "approval" ? "승인 후 참여" : "즉시 참여"} ·
-                      {board.group.allowMemberInvites ? " 멤버도 초대 가능" : " 방장/관리자만 초대"}
-                    </p>
+              <div className="rounded-[32px] border border-ios-sep/70 bg-white px-5 py-5 shadow-apple">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]">
+                      <SocialMegaphoneIcon className="h-[18px] w-[18px]" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-[14px] font-semibold text-ios-text">그룹 공지</p>
+                      <p className="mt-0.5 text-[11.5px] text-ios-muted">
+                        운영자가 안내사항을 올리면 여기서 바로 확인할 수 있어요.
+                      </p>
+                    </div>
                   </div>
                   {board.permissions.canEditNotice ? (
                     <button
                       type="button"
                       onClick={() => setActiveTab("manage")}
-                      className="text-[12px] font-semibold text-[color:var(--rnest-accent)]"
+                      className="shrink-0 text-[12px] font-semibold text-[color:var(--rnest-accent)]"
                     >
                       수정
                     </button>
                   ) : null}
                 </div>
-                <p className="mt-3 rounded-2xl bg-ios-bg px-4 py-3 text-[13px] leading-6 text-ios-muted">
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <MetaPill text={board.group.joinMode === "approval" ? "승인 후 참여" : "즉시 참여"} />
+                  <MetaPill text={board.group.allowMemberInvites ? "멤버 초대 가능" : "운영자만 초대"} />
+                </div>
+                <p className="mt-3 rounded-[24px] bg-ios-bg px-4 py-3 text-[13px] leading-6 text-ios-muted">
                   {board.group.notice || "아직 등록된 공지가 없어요."}
                 </p>
               </div>
@@ -725,11 +811,16 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
               {board.joinRequests.length > 0 && board.permissions.canManageJoinRequests ? (
                 <div className="rounded-3xl bg-white px-4 py-4 shadow-apple">
                   <div className="mb-3 flex items-center justify-between">
-                    <div>
-                      <p className="text-[14px] font-semibold text-ios-text">대기 중인 가입 요청</p>
-                      <p className="mt-0.5 text-[11.5px] text-ios-muted">
-                        운영 탭에서 승인하거나 거절할 수 있어요.
-                      </p>
+                    <div className="flex min-w-0 items-start gap-3">
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]">
+                        <SocialGroupIcon className="h-[18px] w-[18px]" />
+                      </span>
+                      <div>
+                        <p className="text-[14px] font-semibold text-ios-text">대기 중인 가입 요청</p>
+                        <p className="mt-0.5 text-[11.5px] text-ios-muted">
+                          운영 탭에서 승인하거나 거절할 수 있어요.
+                        </p>
+                      </div>
                     </div>
                     <button
                       type="button"
