@@ -67,3 +67,45 @@ export type SocialEvent = {
   readAt: string | null;
   createdAt: string;
 };
+
+export type SocialGroupRole = "owner" | "member";
+
+export type SocialGroupPreviewMember = {
+  userId: string;
+  nickname: string;
+  avatarEmoji: string;
+};
+
+export type SocialGroupSummary = {
+  id: number;
+  name: string;
+  description: string;
+  role: SocialGroupRole;
+  ownerUserId: string;
+  memberCount: number;
+  joinedAt: string;
+  memberPreview: SocialGroupPreviewMember[];
+};
+
+export type SocialGroupBoardMember = {
+  userId: string;
+  nickname: string;
+  avatarEmoji: string;
+  statusMessage: string;
+  role: SocialGroupRole;
+  joinedAt: string;
+  schedule: Record<string, string>;
+};
+
+export type SocialGroupBoard = {
+  group: SocialGroupSummary;
+  members: SocialGroupBoardMember[];
+  commonOffDays: string[];
+  hiddenScheduleMemberCount: number;
+};
+
+export type SocialGroupInvitePreview = {
+  token: string;
+  state: "joinable" | "already_member" | "group_full";
+  group: SocialGroupSummary;
+};

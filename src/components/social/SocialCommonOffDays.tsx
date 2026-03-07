@@ -10,6 +10,9 @@ type Props = {
   friendCount: number;
   mode: CommonOffMode;
   onModeChange: (mode: CommonOffMode) => void;
+  title?: string;
+  showModeToggle?: boolean;
+  hideFooterLabel?: boolean;
 };
 
 const WEEKDAY_KO = ["일", "월", "화", "수", "목", "금", "토"];
@@ -28,7 +31,15 @@ function formatKoreanShort(iso: string): string {
   return `${m}/${d}(${weekday})`;
 }
 
-export function SocialCommonOffDays({ dates, friendCount, mode, onModeChange }: Props) {
+export function SocialCommonOffDays({
+  dates,
+  friendCount,
+  mode,
+  onModeChange,
+  title = "이번 달 같이 쉬는 날",
+  showModeToggle = true,
+  hideFooterLabel = false,
+}: Props) {
   // D-day 계산 — mount 후에만 (hydration 안전)
   const [todayISO, setTodayISO] = useState("");
   const [nearestDaysUntil, setNearestDaysUntil] = useState<number | null>(null);
@@ -64,10 +75,10 @@ export function SocialCommonOffDays({ dates, friendCount, mode, onModeChange }: 
           <span className="flex h-7 w-7 items-center justify-center rounded-2xl bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]">
             <SocialCalendarIcon className="h-[18px] w-[18px]" />
           </span>
-          <span className="text-[13.5px] font-semibold text-ios-text">이번 달 같이 쉬는 날</span>
+          <span className="text-[13.5px] font-semibold text-ios-text">{title}</span>
         </div>
         {/* 전체/1명이라도 토글 — 친구 2명 이상일 때만 의미 있음 */}
-        {friendCount >= 2 && (
+        {showModeToggle && friendCount >= 2 && (
           <div className="flex items-center rounded-full bg-ios-bg p-0.5 gap-0.5">
             <button
               type="button"
@@ -121,7 +132,7 @@ export function SocialCommonOffDays({ dates, friendCount, mode, onModeChange }: 
         ))}
       </div>
 
-      {friendCount > 1 && mode === "all" && (
+      {!hideFooterLabel && friendCount > 1 && mode === "all" && (
         <p className="mt-2 text-[11.5px] text-ios-muted">{friendCount}명 모두 오프</p>
       )}
     </div>

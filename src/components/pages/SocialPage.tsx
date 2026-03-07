@@ -3,7 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signInWithProvider, useAuthState } from "@/lib/auth";
-import type { SocialConnectionsData, FriendsScheduleData, SocialProfile, FriendMeta } from "@/types/social";
+import type {
+  SocialConnectionsData,
+  FriendsScheduleData,
+  SocialProfile,
+  FriendMeta,
+  SocialGroupInvitePreview,
+  SocialGroupSummary,
+} from "@/types/social";
 import { SocialConnectForm } from "@/components/social/SocialConnectForm";
 import { SocialPendingCard } from "@/components/social/SocialPendingCard";
 import { SocialConnectionList } from "@/components/social/SocialConnectionList";
@@ -13,6 +20,10 @@ import { SocialNextCommonOff } from "@/components/social/SocialNextCommonOff";
 import { SocialOnboarding } from "@/components/social/SocialOnboarding";
 import { SocialProfileSheet } from "@/components/social/SocialProfileSheet";
 import { SocialEventCenter } from "@/components/social/SocialEventCenter";
+import { SocialGroupList } from "@/components/social/SocialGroupList";
+import { SocialGroupCreateSheet } from "@/components/social/SocialGroupCreateSheet";
+import { SocialGroupDetailSheet } from "@/components/social/SocialGroupDetailSheet";
+import { SocialGroupJoinSheet } from "@/components/social/SocialGroupJoinSheet";
 import { SocialBellIcon } from "@/components/social/SocialIcons";
 import {
   useSocialConnectionsRealtimeRefresh,
@@ -22,6 +33,7 @@ import { useSocialEventsRealtimeRefresh } from "@/components/social/useSocialEve
 import { useAppStoreSelector } from "@/lib/store";
 
 const SOCIAL_BACKGROUND_REFRESH_MS = 60 * 60 * 1000;
+type SocialViewTab = "friends" | "groups";
 
 // 현재 월 YYYY-MM
 function currentMonth(): string {
@@ -54,6 +66,7 @@ export function SocialPage() {
   // 내 근무표 — Zustand 클라이언트 스토어 (서버 전송 없음)
   const mySchedule = useAppStoreSelector((s) => s.schedule as Record<string, string>);
   const inviteToken = searchParams.get("invite") ?? "";
+  const groupInviteToken = searchParams.get("groupInvite") ?? "";
 
   const [connections, setConnections] = useState<SocialConnectionsData | null>(null);
   const [friendsSchedule, setFriendsSchedule] = useState<FriendsScheduleData | null>(null);
@@ -63,10 +76,17 @@ export function SocialPage() {
   const [scheduleLoading, setScheduleLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(true);
   const [connectionsError, setConnectionsError] = useState(false);
+  const [groups, setGroups] = useState<SocialGroupSummary[]>([]);
+  const [groupsLoading, setGroupsLoading] = useState(true);
+  const [groupsError, setGroupsError] = useState(false);
 
+  const [activeTab, setActiveTab] = useState<SocialViewTab>(groupInviteToken ? "groups" : "friends");
   const [commonOffMode, setCommonOffMode] = useState<CommonOffMode>("all");
   const [openProfile, setOpenProfile] = useState(false);
   const [openConnect, setOpenConnect] = useState(false);
+  const [openGroupCreate, setOpenGroupCreate] = useState(false);
+  const [openGroupDetail, setOpenGroupDetail] = useState(false);
+  const [openGroupJoin, setOpenGroupJoin] = useState(false);
   const [openEventCenter, setOpenEventCenter] = useState(false);
   const [unreadEventCount, setUnreadEventCount] = useState(0);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -74,7 +94,10 @@ export function SocialPage() {
   const [notice, setNotice] = useState<{ tone: "info" | "success" | "error"; text: string } | null>(null);
   const [connectPrefillCode, setConnectPrefillCode] = useState<string | null>(null);
   const [connectPrefillMessage, setConnectPrefillMessage] = useState<string | null>(null);
+  const [selectedGroup, setSelectedGroup] = useState<SocialGroupSummary | null>(null);
+  const [groupInvitePreview, setGroupInvitePreview] = useState<SocialGroupInvitePreview | null>(null);
   const handledInviteRef = useRef<string | null>(null);
+  const handledGroupInviteRef = useRef<string | null>(null);
 
   const fetchProfile = useCallback(() => {
     if (status !== "authenticated") {
@@ -154,12 +177,35 @@ export function SocialPage() {
       .catch(() => {});
   }, [status]);
 
+  const fetchGroups = useCallback(() => {
+    if (status !== "authenticated") {
+      setGroups([]);
+      setGroupsLoading(false);
+      setGroupsError(false);
+      return;
+    }
+    setGroupsLoading(true);
+    setGroupsError(false);
+    fetch("/api/social/groups", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((res) => {
+        if (res.ok) {
+          setGroups(res.data?.groups ?? []);
+        } else {
+          setGroupsError(true);
+        }
+      })
+      .catch(() => setGroupsError(true))
+      .finally(() => setGroupsLoading(false));
+  }, [status]);
+
   useEffect(() => {
     if (!profileChecked || status !== "authenticated") return;
     fetchConnections();
     fetchFriendsSchedule();
     fetchFriendMeta();
-  }, [profileChecked, fetchConnections, fetchFriendsSchedule, fetchFriendMeta, status]);
+    fetchGroups();
+  }, [profileChecked, fetchConnections, fetchFriendsSchedule, fetchFriendMeta, fetchGroups, status]);
 
   const refreshConnectionsAndSchedule = useCallback(() => {
     fetchConnections();
@@ -172,9 +218,10 @@ export function SocialPage() {
     if (!profileChecked || status !== "authenticated") return;
     const timer = setInterval(() => {
       refreshConnectionsAndSchedule();
+      fetchGroups();
     }, SOCIAL_BACKGROUND_REFRESH_MS);
     return () => clearInterval(timer);
-  }, [profileChecked, refreshConnectionsAndSchedule, status]);
+  }, [fetchGroups, profileChecked, refreshConnectionsAndSchedule, status]);
 
   // Bug-3: 친구 프로필 변경(닉네임/아바타/상태메시지) 실시간 미반영 보완
   // focus/visibilitychange 시 debounce 300ms 후 refresh
@@ -183,7 +230,11 @@ export function SocialPage() {
     let tid: ReturnType<typeof setTimeout>;
     const trigger = () => {
       clearTimeout(tid);
-      tid = setTimeout(refreshConnectionsAndSchedule, 300);
+      tid = setTimeout(() => {
+        refreshConnectionsAndSchedule();
+        fetchFriendMeta();
+        fetchGroups();
+      }, 300);
     };
     const onVisibility = () => { if (!document.hidden) trigger(); };
     window.addEventListener("focus", trigger);
@@ -193,7 +244,7 @@ export function SocialPage() {
       document.removeEventListener("visibilitychange", onVisibility);
       clearTimeout(tid);
     };
-  }, [profileChecked, status, refreshConnectionsAndSchedule]);
+  }, [fetchFriendMeta, fetchGroups, profileChecked, refreshConnectionsAndSchedule, status]);
 
   const handleRealtimeEvent = useCallback(
     (payload: SocialConnectionRealtimePayload) => {
@@ -252,7 +303,8 @@ export function SocialPage() {
     fetchProfile();
     fetchConnections();
     fetchFriendsSchedule();
-  }, [fetchConnections, fetchFriendsSchedule, fetchProfile]);
+    fetchGroups();
+  }, [fetchConnections, fetchFriendsSchedule, fetchGroups, fetchProfile]);
 
   const handleOnboardingComplete = useCallback(() => {
     setShowOnboarding(false);
@@ -264,11 +316,11 @@ export function SocialPage() {
     setShowOnboarding(false);
   }, []);
 
-  const pendingIncoming = connections?.pendingIncoming ?? [];
-  const pendingSent = connections?.pendingSent ?? [];
-  const rawAccepted = connections?.accepted ?? [];
-  const commonOffDays = friendsSchedule?.commonOffDays ?? [];
-  const friendSchedules = friendsSchedule?.friends ?? [];
+  const pendingIncoming = useMemo(() => connections?.pendingIncoming ?? [], [connections?.pendingIncoming]);
+  const pendingSent = useMemo(() => connections?.pendingSent ?? [], [connections?.pendingSent]);
+  const rawAccepted = useMemo(() => connections?.accepted ?? [], [connections?.accepted]);
+  const commonOffDays = useMemo(() => friendsSchedule?.commonOffDays ?? [], [friendsSchedule?.commonOffDays]);
+  const friendSchedules = useMemo(() => friendsSchedule?.friends ?? [], [friendsSchedule?.friends]);
 
   // 핀된 친구 먼저 → connectedAt 내림차순 정렬
   const accepted = useMemo(
@@ -322,6 +374,18 @@ export function SocialPage() {
       handledInviteRef.current = null;
     }
   }, [inviteToken]);
+
+  useEffect(() => {
+    if (!groupInviteToken) {
+      handledGroupInviteRef.current = null;
+    }
+  }, [groupInviteToken]);
+
+  useEffect(() => {
+    if (groupInviteToken) {
+      setActiveTab("groups");
+    }
+  }, [groupInviteToken]);
 
   useEffect(() => {
     if (!inviteToken || status !== "authenticated" || !profileChecked || showOnboarding || !profile) return;
@@ -378,6 +442,54 @@ export function SocialPage() {
       });
   }, [inviteToken, profile, profileChecked, router, showOnboarding, status]);
 
+  useEffect(() => {
+    if (!groupInviteToken || status !== "authenticated" || !profileChecked || showOnboarding || !profile) return;
+    if (handledGroupInviteRef.current === groupInviteToken) return;
+    handledGroupInviteRef.current = groupInviteToken;
+
+    fetch("/api/social/groups/invites/resolve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: groupInviteToken }),
+    })
+      .then((r) => r.json())
+      .then((res) => {
+        if (!res.ok) {
+          const message =
+            res.error === "invite_not_found_or_expired"
+              ? "그룹 초대 링크가 만료되었거나 더 이상 유효하지 않아요."
+              : res.error === "too_many_requests"
+                ? "그룹 초대 링크 확인을 너무 자주 시도하고 있어요. 잠시 후 다시 시도해 주세요."
+                : "그룹 초대 링크를 확인하지 못했어요.";
+          setNotice({ tone: "error", text: message });
+          return;
+        }
+
+        const preview = res.data as SocialGroupInvitePreview;
+        setGroupInvitePreview(preview);
+        if (preview.state === "already_member") {
+          setSelectedGroup(preview.group);
+          setOpenGroupDetail(true);
+          setNotice({ tone: "info", text: `${preview.group.name} 그룹에 이미 참여 중이에요.` });
+          void fetchGroups();
+          return;
+        }
+        if (preview.state === "group_full") {
+          setNotice({ tone: "error", text: `${preview.group.name} 그룹은 현재 정원이 가득 찼어요.` });
+          return;
+        }
+
+        setOpenGroupJoin(true);
+        setNotice({ tone: "success", text: `${preview.group.name} 그룹 초대를 확인했어요.` });
+      })
+      .catch(() => {
+        setNotice({ tone: "error", text: "그룹 초대 링크를 확인하지 못했어요." });
+      })
+      .finally(() => {
+        router.replace("/social", { scroll: false });
+      });
+  }, [fetchGroups, groupInviteToken, profile, profileChecked, router, showOnboarding, status]);
+
   if (status === "loading" || profileLoading) {
     return (
       <div className="space-y-3 pb-4">
@@ -425,9 +537,11 @@ export function SocialPage() {
         <div className="rounded-apple border border-ios-sep bg-white p-5 shadow-apple">
           <div className="text-[16px] font-semibold text-ios-text">로그인 후 소셜을 사용할 수 있어요</div>
           <p className="mt-2 text-[13px] leading-6 text-ios-muted">
-            {inviteToken
-              ? "공유 링크를 열었어요. 로그인하면 친구 코드 입력창이 자동으로 열립니다."
-              : "친구 코드를 주고받고, 서로의 일정을 보려면 로그인해야 해요."}
+            {groupInviteToken
+              ? "그룹 초대 링크를 열었어요. 로그인하면 그룹 참여 화면이 자동으로 열립니다."
+              : inviteToken
+                ? "공유 링크를 열었어요. 로그인하면 친구 코드 입력창이 자동으로 열립니다."
+                : "친구 코드를 주고받고, 서로의 일정을 보려면 로그인해야 해요."}
           </p>
           <button
             type="button"
@@ -501,8 +615,30 @@ export function SocialPage() {
         </div>
       )}
 
+      <div className="rounded-2xl bg-ios-bg p-1 shadow-apple">
+        <div className="flex items-center gap-1">
+          {([
+            { id: "friends", label: "친구" },
+            { id: "groups", label: "그룹" },
+          ] as const).map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex-1 rounded-[14px] px-3 py-2.5 text-[13px] font-semibold transition ${
+                activeTab === tab.id
+                  ? "bg-white text-ios-text shadow-sm"
+                  : "text-ios-muted"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* ── 에러 상태 ──────────────────────────────────────── */}
-      {connectionsError && !connectionsLoading && (
+      {activeTab === "friends" && connectionsError && !connectionsLoading && (
         <div className="flex items-center justify-between rounded-apple border border-ios-sep bg-white px-4 py-3 shadow-apple">
           <p className="text-[13px] text-ios-muted">연결 목록을 불러오지 못했어요.</p>
           <button
@@ -515,8 +651,21 @@ export function SocialPage() {
         </div>
       )}
 
+      {activeTab === "groups" && groupsError && !groupsLoading && (
+        <div className="flex items-center justify-between rounded-apple border border-ios-sep bg-white px-4 py-3 shadow-apple">
+          <p className="text-[13px] text-ios-muted">그룹 목록을 불러오지 못했어요.</p>
+          <button
+            type="button"
+            onClick={fetchGroups}
+            className="ml-3 shrink-0 rounded-full bg-ios-bg px-3 py-1.5 text-[12.5px] font-semibold text-[color:var(--rnest-accent)] transition active:opacity-60"
+          >
+            재시도
+          </button>
+        </div>
+      )}
+
       {/* ── 로딩 스켈레톤 ──────────────────────────────────── */}
-      {connectionsLoading && (
+      {activeTab === "friends" && connectionsLoading && (
         <div className="rounded-apple border border-ios-sep bg-white shadow-apple p-4 space-y-2.5">
           <div className="h-4 w-28 rounded-full bg-ios-sep animate-pulse" />
           <div className="h-3 w-44 rounded-full bg-ios-sep/60 animate-pulse" />
@@ -524,8 +673,16 @@ export function SocialPage() {
         </div>
       )}
 
+      {activeTab === "groups" && groupsLoading && (
+        <div className="rounded-apple border border-ios-sep bg-white shadow-apple p-4 space-y-2.5">
+          <div className="h-4 w-28 rounded-full bg-ios-sep animate-pulse" />
+          <div className="h-14 rounded-2xl bg-ios-sep/70 animate-pulse" />
+          <div className="h-14 rounded-2xl bg-ios-sep/50 animate-pulse" />
+        </div>
+      )}
+
       {/* ── 받은/보낸 연결 요청 ─────────────────────────────── */}
-      {!connectionsLoading && !connectionsError && (
+      {activeTab === "friends" && !connectionsLoading && !connectionsError && (
         <SocialPendingCard
           incoming={pendingIncoming}
           sent={pendingSent}
@@ -534,7 +691,7 @@ export function SocialPage() {
       )}
 
       {/* ── 이번 주 근무 현황 ────────────────────────────────── */}
-      {!scheduleLoading && friendSchedules.length > 0 && (
+      {activeTab === "friends" && !scheduleLoading && friendSchedules.length > 0 && (
         <SocialThisWeek
           friends={friendSchedules}
           mySchedule={mySchedule}
@@ -542,7 +699,7 @@ export function SocialPage() {
       )}
 
       {/* ── 다음 같이 쉬는 날 (친구별) ──────────────────────── */}
-      {!scheduleLoading && accepted.length > 0 && (
+      {activeTab === "friends" && !scheduleLoading && accepted.length > 0 && (
         <SocialNextCommonOff
           connections={accepted}
           pairCommonOffByUserId={pairCommonOffByUserId}
@@ -550,7 +707,7 @@ export function SocialPage() {
       )}
 
       {/* ── 같이 쉬는 날 ────────────────────────────────────── */}
-      {!scheduleLoading && displayedCommonOffDays.length > 0 && (
+      {activeTab === "friends" && !scheduleLoading && displayedCommonOffDays.length > 0 && (
         <SocialCommonOffDays
           dates={displayedCommonOffDays}
           friendCount={accepted.length}
@@ -560,7 +717,7 @@ export function SocialPage() {
       )}
 
       {/* ── 친구 목록 ──────────────────────────────────────── */}
-      {!connectionsLoading && !connectionsError && (
+      {activeTab === "friends" && !connectionsLoading && !connectionsError && (
         <SocialConnectionList
           connections={accepted}
           friendSchedules={friendSchedules}
@@ -583,6 +740,17 @@ export function SocialPage() {
         />
       )}
 
+      {activeTab === "groups" && !groupsLoading && !groupsError && (
+        <SocialGroupList
+          groups={groups}
+          onCreateGroup={() => setOpenGroupCreate(true)}
+          onOpenGroup={(group) => {
+            setSelectedGroup(group);
+            setOpenGroupDetail(true);
+          }}
+        />
+      )}
+
       {/* ── 바텀시트들 ─────────────────────────────────────── */}
       <SocialProfileSheet
         open={openProfile}
@@ -590,6 +758,7 @@ export function SocialPage() {
         profile={profile}
         onSaved={(nextProfile) => {
           setProfile(nextProfile);
+          void fetchGroups();
           setNotice({ tone: "success", text: "소셜 프로필이 저장되었어요." });
         }}
       />
@@ -613,6 +782,64 @@ export function SocialPage() {
         open={showOnboarding}
         onComplete={handleOnboardingComplete}
         onSkip={handleOnboardingSkip}
+      />
+
+      <SocialGroupCreateSheet
+        open={openGroupCreate}
+        onClose={() => setOpenGroupCreate(false)}
+        onCreated={(group) => {
+          setOpenGroupCreate(false);
+          setGroups((prev) => [group, ...prev.filter((item) => item.id !== group.id)]);
+          setSelectedGroup(group);
+          setOpenGroupDetail(true);
+          setActiveTab("groups");
+          setNotice({ tone: "success", text: `${group.name} 그룹을 만들었어요.` });
+        }}
+      />
+
+      <SocialGroupDetailSheet
+        open={openGroupDetail}
+        onClose={() => {
+          setOpenGroupDetail(false);
+          setSelectedGroup(null);
+        }}
+        group={selectedGroup}
+        months={fetchMonths}
+        currentUserId={user?.userId ?? null}
+        mySchedule={mySchedule}
+        onGroupLeft={(groupId) => {
+          setOpenGroupDetail(false);
+          setSelectedGroup(null);
+          setGroups((prev) => prev.filter((group) => group.id !== groupId));
+          void fetchGroups();
+          setNotice({ tone: "info", text: "그룹에서 나왔어요." });
+        }}
+        onGroupDeleted={(groupId) => {
+          setOpenGroupDetail(false);
+          setSelectedGroup(null);
+          setGroups((prev) => prev.filter((group) => group.id !== groupId));
+          void fetchGroups();
+          setNotice({ tone: "success", text: "그룹을 삭제했어요." });
+        }}
+      />
+
+      <SocialGroupJoinSheet
+        open={openGroupJoin}
+        preview={groupInvitePreview}
+        onClose={() => {
+          setOpenGroupJoin(false);
+          setGroupInvitePreview(null);
+        }}
+        onJoined={(group) => {
+          setOpenGroupJoin(false);
+          setGroupInvitePreview(null);
+          setGroups((prev) => [group, ...prev.filter((item) => item.id !== group.id)]);
+          setSelectedGroup(group);
+          setOpenGroupDetail(true);
+          setActiveTab("groups");
+          void fetchGroups();
+          setNotice({ tone: "success", text: `${group.name} 그룹에 참여했어요.` });
+        }}
       />
 
       <SocialEventCenter

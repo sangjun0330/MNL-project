@@ -45,6 +45,20 @@ export function cleanStatusMessage(value: unknown): string {
   return Array.from(raw).slice(0, 30).join("");
 }
 
+export function cleanSocialGroupName(value: unknown): string {
+  return cleanSocialNickname(value, 20);
+}
+
+export function cleanSocialGroupDescription(value: unknown): string {
+  const raw = String(value ?? "")
+    .replace(/<[^>]*>/g, "")
+    .replace(INVISIBLE_UNSAFE_CHARS, "")
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return Array.from(raw).slice(0, 80).join("");
+}
+
 export function readSocialActorIp(req: Request): string {
   const cfIp = String(req.headers.get("cf-connecting-ip") ?? "").trim();
   if (cfIp) return cfIp.slice(0, 80);
@@ -101,6 +115,13 @@ export type SocialInvitePayload = {
   expiresAt: number;
 };
 
+export type SocialGroupInvitePayload = {
+  groupId: number;
+  inviterUserId: string;
+  inviteVersion: number;
+  expiresAt: number;
+};
+
 export async function signSocialInviteToken(payload: SocialInvitePayload): Promise<string> {
   const body = toBase64Url(encoder.encode(JSON.stringify(payload)));
   const sig = await hmacBase64Url(socialInviteSecret(), body);
@@ -120,6 +141,35 @@ export async function verifySocialInviteToken(token: string): Promise<SocialInvi
     return {
       inviterUserId: String(json.inviterUserId),
       codeUpdatedAt: String(json.codeUpdatedAt),
+      expiresAt: Number(json.expiresAt),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function signSocialGroupInviteToken(payload: SocialGroupInvitePayload): Promise<string> {
+  const body = toBase64Url(encoder.encode(JSON.stringify(payload)));
+  const sig = await hmacBase64Url(socialInviteSecret(), body);
+  return `${body}.${sig}`;
+}
+
+export async function verifySocialGroupInviteToken(token: string): Promise<SocialGroupInvitePayload | null> {
+  const [body, sig] = token.split(".", 2);
+  if (!body || !sig) return null;
+
+  const expected = await hmacBase64Url(socialInviteSecret(), body);
+  if (!constantTimeEqual(expected, sig)) return null;
+
+  try {
+    const json = JSON.parse(fromBase64Url(body)) as Partial<SocialGroupInvitePayload>;
+    if (!Number.isFinite(json.groupId) || !json.inviterUserId || !Number.isFinite(json.inviteVersion) || !Number.isFinite(json.expiresAt)) {
+      return null;
+    }
+    return {
+      groupId: Number(json.groupId),
+      inviterUserId: String(json.inviterUserId),
+      inviteVersion: Number(json.inviteVersion),
       expiresAt: Number(json.expiresAt),
     };
   } catch {
