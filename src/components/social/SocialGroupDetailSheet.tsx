@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/cn";
@@ -139,6 +139,7 @@ export function SocialGroupDetailSheet({
   onGroupLeft,
   onGroupDeleted,
 }: Props) {
+  const groupId = group?.id ?? null;
   const [board, setBoard] = useState<SocialGroupBoard | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -154,36 +155,54 @@ export function SocialGroupDetailSheet({
   const [settingsJoinMode, setSettingsJoinMode] = useState<SocialGroupJoinMode>("open");
   const [settingsAllowMemberInvites, setSettingsAllowMemberInvites] = useState(true);
   const [settingsMaxMembers, setSettingsMaxMembers] = useState(12);
+  const onGroupUpdatedRef = useRef(onGroupUpdated);
+  const onGroupsRefreshRef = useRef(onGroupsRefresh);
+  const boardRequestSeqRef = useRef(0);
 
-  const loadBoard = useCallback(async () => {
-    if (!group) return null;
+  useEffect(() => {
+    onGroupUpdatedRef.current = onGroupUpdated;
+  }, [onGroupUpdated]);
+
+  useEffect(() => {
+    onGroupsRefreshRef.current = onGroupsRefresh;
+  }, [onGroupsRefresh]);
+
+  const loadBoard = useCallback(async (options?: { syncSummary?: boolean }) => {
+    if (!groupId) return null;
+    const requestSeq = ++boardRequestSeqRef.current;
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/social/groups/${group.id}/board?months=${encodeURIComponent(months)}`, {
+      const res = await fetch(`/api/social/groups/${groupId}/board?months=${encodeURIComponent(months)}`, {
         cache: "no-store",
       }).then((r) => r.json());
       if (!res.ok) throw new Error("그룹 정보를 불러오지 못했어요.");
       const nextBoard = res.data as SocialGroupBoard;
+      if (requestSeq !== boardRequestSeqRef.current) return null;
       setBoard(nextBoard);
-      onGroupUpdated(nextBoard.group);
+      if (options?.syncSummary !== false) {
+        onGroupUpdatedRef.current(nextBoard.group);
+      }
       return nextBoard;
     } catch (err: any) {
+      if (requestSeq !== boardRequestSeqRef.current) return null;
       setBoard(null);
       setError(String(err?.message ?? "그룹 정보를 불러오지 못했어요."));
       return null;
     } finally {
-      setLoading(false);
+      if (requestSeq === boardRequestSeqRef.current) {
+        setLoading(false);
+      }
     }
-  }, [group, months, onGroupUpdated]);
+  }, [groupId, months]);
 
   useEffect(() => {
-    if (!open || !group) return;
+    if (!open || !groupId) return;
     void loadBoard();
-  }, [open, group, loadBoard]);
+  }, [open, groupId, loadBoard]);
 
   useEffect(() => {
-    if (!open || !group) return;
+    if (!open || !groupId) return;
     let tid: ReturnType<typeof setTimeout>;
     const trigger = () => {
       clearTimeout(tid);
@@ -201,7 +220,7 @@ export function SocialGroupDetailSheet({
       document.removeEventListener("visibilitychange", onVisibility);
       clearTimeout(tid);
     };
-  }, [group, loadBoard, open]);
+  }, [groupId, loadBoard, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -209,7 +228,7 @@ export function SocialGroupDetailSheet({
     setBusyAction(null);
     setFeedback(null);
     setMemberQuery("");
-  }, [open, group?.id]);
+  }, [open, groupId]);
 
   useEffect(() => {
     if (!board) return;
@@ -277,9 +296,9 @@ export function SocialGroupDetailSheet({
 
   const updateAfterMutation = useCallback(async () => {
     const nextBoard = await loadBoard();
-    onGroupsRefresh();
+    onGroupsRefreshRef.current();
     return nextBoard;
-  }, [loadBoard, onGroupsRefresh]);
+  }, [loadBoard]);
 
   const handleManageAction = useCallback(
     async (payload: Record<string, unknown>, successText: string, fallbackError: string) => {
@@ -310,12 +329,12 @@ export function SocialGroupDetailSheet({
   );
 
   const handleShareInvite = async () => {
-    if (!group || sharing) return;
+    if (!group || !groupId || sharing) return;
     setSharing(true);
     setFeedback(null);
     setError(null);
     try {
-      const res = await fetch(`/api/social/groups/${group.id}/invite`, {
+      const res = await fetch(`/api/social/groups/${groupId}/invite`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       }).then((r) => r.json());
@@ -348,7 +367,7 @@ export function SocialGroupDetailSheet({
   };
 
   const handleLeaveOrDelete = async () => {
-    if (!group || busyAction) return;
+    if (!group || !groupId || busyAction) return;
     const isOwner = group.role === "owner";
     const confirmed = window.confirm(
       isOwner
@@ -362,7 +381,7 @@ export function SocialGroupDetailSheet({
     setError(null);
     setFeedback(null);
     try {
-      const res = await fetch(`/api/social/groups/${group.id}`, {
+      const res = await fetch(`/api/social/groups/${groupId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),

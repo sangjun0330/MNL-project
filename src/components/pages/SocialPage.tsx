@@ -35,6 +35,32 @@ import { useAppStoreSelector } from "@/lib/store";
 const SOCIAL_BACKGROUND_REFRESH_MS = 60 * 60 * 1000;
 type SocialViewTab = "friends" | "groups";
 
+function sameGroupSummary(a: SocialGroupSummary | null | undefined, b: SocialGroupSummary | null | undefined) {
+  if (!a || !b) return false;
+  return (
+    a.id === b.id &&
+    a.name === b.name &&
+    a.description === b.description &&
+    a.role === b.role &&
+    a.ownerUserId === b.ownerUserId &&
+    a.memberCount === b.memberCount &&
+    a.joinedAt === b.joinedAt &&
+    a.notice === b.notice &&
+    a.joinMode === b.joinMode &&
+    a.allowMemberInvites === b.allowMemberInvites &&
+    a.maxMembers === b.maxMembers &&
+    a.pendingJoinRequestCount === b.pendingJoinRequestCount &&
+    a.memberPreview.length === b.memberPreview.length &&
+    a.memberPreview.every((member, index) => {
+      const other = b.memberPreview[index];
+      return !!other &&
+        member.userId === other.userId &&
+        member.nickname === other.nickname &&
+        member.avatarEmoji === other.avatarEmoji;
+    })
+  );
+}
+
 // 현재 월 YYYY-MM
 function currentMonth(): string {
   const d = new Date();
@@ -98,27 +124,39 @@ export function SocialPage() {
   const [groupInvitePreview, setGroupInvitePreview] = useState<SocialGroupInvitePreview | null>(null);
   const handledInviteRef = useRef<string | null>(null);
   const handledGroupInviteRef = useRef<string | null>(null);
+  const profileFetchSeqRef = useRef(0);
+  const connectionsFetchSeqRef = useRef(0);
+  const scheduleFetchSeqRef = useRef(0);
+  const friendMetaFetchSeqRef = useRef(0);
+  const groupsFetchSeqRef = useRef(0);
 
   const fetchProfile = useCallback(() => {
     if (status !== "authenticated") {
+      profileFetchSeqRef.current += 1;
       setProfile(null);
       setProfileChecked(true);
       setProfileLoading(false);
       return;
     }
 
+    const fetchSeq = ++profileFetchSeqRef.current;
     setProfileLoading(true);
     fetch("/api/social/profile", { cache: "no-store" })
       .then((r) => r.json())
       .then((res) => {
+        if (fetchSeq !== profileFetchSeqRef.current) return;
         if (res.ok) {
           setProfile(res.data ?? null);
           setShowOnboarding(!res.data);
         }
         setProfileChecked(true);
       })
-      .catch(() => setProfileChecked(true))
-      .finally(() => setProfileLoading(false));
+      .catch(() => {
+        if (fetchSeq === profileFetchSeqRef.current) setProfileChecked(true);
+      })
+      .finally(() => {
+        if (fetchSeq === profileFetchSeqRef.current) setProfileLoading(false);
+      });
   }, [status]);
 
   // 소셜 프로필 확인 (첫 진입 온보딩)
@@ -128,50 +166,65 @@ export function SocialPage() {
 
   const fetchConnections = useCallback(() => {
     if (status !== "authenticated") {
+      connectionsFetchSeqRef.current += 1;
       setConnections(null);
       setConnectionsLoading(false);
       setConnectionsError(false);
       return;
     }
+    const fetchSeq = ++connectionsFetchSeqRef.current;
     setConnectionsLoading(true);
     setConnectionsError(false);
     fetch("/api/social/connections")
       .then((r) => r.json())
       .then((res) => {
+        if (fetchSeq !== connectionsFetchSeqRef.current) return;
         if (res.ok) {
           setConnections(res.data);
         } else {
           setConnectionsError(true);
         }
       })
-      .catch(() => setConnectionsError(true))
-      .finally(() => setConnectionsLoading(false));
+      .catch(() => {
+        if (fetchSeq === connectionsFetchSeqRef.current) setConnectionsError(true);
+      })
+      .finally(() => {
+        if (fetchSeq === connectionsFetchSeqRef.current) setConnectionsLoading(false);
+      });
   }, [status]);
 
   const fetchFriendsSchedule = useCallback(() => {
     if (status !== "authenticated") {
+      scheduleFetchSeqRef.current += 1;
       setFriendsSchedule(null);
       setScheduleLoading(false);
       return;
     }
+    const fetchSeq = ++scheduleFetchSeqRef.current;
     setScheduleLoading(true);
     fetch(`/api/social/friends/schedule?months=${fetchMonths}`)
       .then((r) => r.json())
       .then((res) => {
+        if (fetchSeq !== scheduleFetchSeqRef.current) return;
         if (res.ok) setFriendsSchedule(res.data);
       })
       .catch(() => {})
-      .finally(() => setScheduleLoading(false));
+      .finally(() => {
+        if (fetchSeq === scheduleFetchSeqRef.current) setScheduleLoading(false);
+      });
   }, [fetchMonths, status]);
 
   const fetchFriendMeta = useCallback(() => {
     if (status !== "authenticated") {
+      friendMetaFetchSeqRef.current += 1;
       setFriendMeta({});
       return;
     }
+    const fetchSeq = ++friendMetaFetchSeqRef.current;
     fetch("/api/social/friends/meta", { cache: "no-store" })
       .then((r) => r.json())
       .then((res) => {
+        if (fetchSeq !== friendMetaFetchSeqRef.current) return;
         if (res.ok) setFriendMeta(res.data ?? {});
       })
       .catch(() => {});
@@ -179,25 +232,48 @@ export function SocialPage() {
 
   const fetchGroups = useCallback(() => {
     if (status !== "authenticated") {
+      groupsFetchSeqRef.current += 1;
       setGroups([]);
       setGroupsLoading(false);
       setGroupsError(false);
       return;
     }
+    const fetchSeq = ++groupsFetchSeqRef.current;
     setGroupsLoading(true);
     setGroupsError(false);
     fetch("/api/social/groups", { cache: "no-store" })
       .then((r) => r.json())
       .then((res) => {
+        if (fetchSeq !== groupsFetchSeqRef.current) return;
         if (res.ok) {
           setGroups(res.data?.groups ?? []);
         } else {
           setGroupsError(true);
         }
       })
-      .catch(() => setGroupsError(true))
-      .finally(() => setGroupsLoading(false));
+      .catch(() => {
+        if (fetchSeq === groupsFetchSeqRef.current) setGroupsError(true);
+      })
+      .finally(() => {
+        if (fetchSeq === groupsFetchSeqRef.current) setGroupsLoading(false);
+      });
   }, [status]);
+
+  const handleGroupUpdated = useCallback((nextGroup: SocialGroupSummary) => {
+    setSelectedGroup((prev) => {
+      if (!prev || prev.id !== nextGroup.id) return nextGroup;
+      return sameGroupSummary(prev, nextGroup) ? prev : nextGroup;
+    });
+    setGroups((prev) => {
+      const current = prev.find((item) => item.id === nextGroup.id);
+      if (current && sameGroupSummary(current, nextGroup)) return prev;
+      return [nextGroup, ...prev.filter((item) => item.id !== nextGroup.id)];
+    });
+  }, []);
+
+  const handleGroupsRefresh = useCallback(() => {
+    fetchGroups();
+  }, [fetchGroups]);
 
   useEffect(() => {
     if (!profileChecked || status !== "authenticated") return;
@@ -815,14 +891,8 @@ export function SocialPage() {
         months={fetchMonths}
         currentUserId={user?.userId ?? null}
         mySchedule={mySchedule}
-        onGroupUpdated={(nextGroup) => {
-          setSelectedGroup(nextGroup);
-          setGroups((prev) => [nextGroup, ...prev.filter((item) => item.id !== nextGroup.id)]);
-          void fetchGroups();
-        }}
-        onGroupsRefresh={() => {
-          void fetchGroups();
-        }}
+        onGroupUpdated={handleGroupUpdated}
+        onGroupsRefresh={handleGroupsRefresh}
         onGroupLeft={(groupId) => {
           setOpenGroupDetail(false);
           setSelectedGroup(null);
