@@ -812,7 +812,7 @@ export function SocialPage() {
           onMetaChange={(userId, patch) => {
             setFriendMeta((prev) => ({
               ...prev,
-              [userId]: { ...(prev[userId] ?? { pinned: false, alias: "", muted: false }), ...patch },
+              [userId]: { ...(prev[userId] ?? { pinned: false, alias: "" }), ...patch },
             }));
           }}
           onAddFriend={() => {

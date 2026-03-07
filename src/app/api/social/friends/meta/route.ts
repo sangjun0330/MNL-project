@@ -15,17 +15,16 @@ export async function GET(req: Request) {
   try {
     const { data: rows, error } = await (admin as any)
       .from("rnest_social_friend_meta")
-      .select("friend_id, pinned, alias, muted")
+      .select("friend_id, pinned, alias")
       .eq("owner_id", userId);
 
     if (error) throw error;
 
-    const meta: Record<string, { pinned: boolean; alias: string; muted: boolean }> = {};
+    const meta: Record<string, { pinned: boolean; alias: string }> = {};
     for (const r of rows ?? []) {
       meta[r.friend_id] = {
         pinned: r.pinned ?? false,
         alias: r.alias ?? "",
-        muted: r.muted ?? false,
       };
     }
 

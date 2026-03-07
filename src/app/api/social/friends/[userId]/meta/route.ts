@@ -6,7 +6,7 @@ import { cleanSocialNickname } from "@/lib/server/socialSecurity";
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-// PATCH /api/social/friends/[userId]/meta — 핀/별칭/뮤트 부분 업데이트
+// PATCH /api/social/friends/[userId]/meta — 핀/별칭 부분 업데이트
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ userId: string }> }
@@ -35,14 +35,13 @@ export async function PATCH(
     // 현재 값 조회
     const { data: current } = await (admin as any)
       .from("rnest_social_friend_meta")
-      .select("pinned, alias, muted")
+      .select("pinned, alias")
       .eq("owner_id", ownerId)
       .eq("friend_id", friendId)
       .maybeSingle();
 
     const currentPinned = current?.pinned ?? false;
     const currentAlias = current?.alias ?? "";
-    const currentMuted = current?.muted ?? false;
 
     const newRow = {
       owner_id: ownerId,
@@ -52,14 +51,13 @@ export async function PATCH(
         typeof body?.alias === "string"
           ? cleanSocialNickname(body.alias, 12)
           : currentAlias,
-      muted: typeof body?.muted === "boolean" ? body.muted : currentMuted,
       updated_at: new Date().toISOString(),
     };
 
     const { data: upserted, error } = await (admin as any)
       .from("rnest_social_friend_meta")
       .upsert(newRow, { onConflict: "owner_id,friend_id" })
-      .select("pinned, alias, muted")
+      .select("pinned, alias")
       .single();
 
     if (error) throw error;
@@ -69,7 +67,6 @@ export async function PATCH(
       data: {
         pinned: upserted.pinned ?? false,
         alias: upserted.alias ?? "",
-        muted: upserted.muted ?? false,
       },
     });
   } catch (err: any) {

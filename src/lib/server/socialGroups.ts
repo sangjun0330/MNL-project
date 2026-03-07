@@ -214,15 +214,30 @@ export async function loadPendingJoinRequests(
     if (error) throw error;
 
     const requesterIds = (rows ?? []).map((row: any) => String(row.requester_user_id));
-    const profileMap = await loadSocialGroupProfileMap(admin, requesterIds);
+    const [profileMap, { data: prefRows }] = await Promise.all([
+      loadSocialGroupProfileMap(admin, requesterIds),
+      requesterIds.length > 0
+        ? (admin as any)
+            .from("rnest_social_preferences")
+            .select("user_id, status_message_visible")
+            .in("user_id", requesterIds)
+        : Promise.resolve({ data: [] }),
+    ]);
+
+    const prefMap = new Map<string, boolean>();
+    for (const row of prefRows ?? []) {
+      prefMap.set(String(row.user_id), row.status_message_visible !== false);
+    }
+
     return (rows ?? []).map((row: any) => {
-      const profile = profileMap.get(String(row.requester_user_id));
+      const requesterUserId = String(row.requester_user_id);
+      const profile = profileMap.get(requesterUserId);
       return {
         id: Number(row.id),
-        requesterUserId: String(row.requester_user_id),
+        requesterUserId,
         nickname: profile?.nickname ?? "",
         avatarEmoji: profile?.avatarEmoji ?? "🐧",
-        statusMessage: profile?.statusMessage ?? "",
+        statusMessage: prefMap.get(requesterUserId) === false ? "" : (profile?.statusMessage ?? ""),
         createdAt: String(row.created_at ?? new Date().toISOString()),
       };
     });

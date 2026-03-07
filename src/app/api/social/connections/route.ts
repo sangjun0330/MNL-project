@@ -32,19 +32,32 @@ export async function GET(req: Request) {
       )
     );
 
-    // 소셜 프로필 일괄 조회
+    // 소셜 프로필 + 프라이버시 설정 일괄 조회
     let profileMap: Record<string, { nickname: string; avatar_emoji: string; status_message: string }> = {};
+    let prefMap: Record<string, { status_message_visible: boolean }> = {};
     if (otherIds.length > 0) {
-      const { data: profiles } = await (admin as any)
-        .from("rnest_social_profiles")
-        .select("user_id, nickname, avatar_emoji, status_message")
-        .in("user_id", otherIds);
+      const [{ data: profiles }, { data: prefs }] = await Promise.all([
+        (admin as any)
+          .from("rnest_social_profiles")
+          .select("user_id, nickname, avatar_emoji, status_message")
+          .in("user_id", otherIds),
+        (admin as any)
+          .from("rnest_social_preferences")
+          .select("user_id, status_message_visible")
+          .in("user_id", otherIds),
+      ]);
 
       for (const p of profiles ?? []) {
         profileMap[p.user_id] = {
           nickname: p.nickname,
           avatar_emoji: p.avatar_emoji,
           status_message: p.status_message ?? "",
+        };
+      }
+
+      for (const p of prefs ?? []) {
+        prefMap[p.user_id] = {
+          status_message_visible: p.status_message_visible !== false,
         };
       }
     }
@@ -57,13 +70,14 @@ export async function GET(req: Request) {
       const isRequester = c.requester_id === userId;
       const otherId = isRequester ? c.receiver_id : c.requester_id;
       const profile = profileMap[otherId] ?? { nickname: "", avatar_emoji: "🐧", status_message: "" };
+      const pref = prefMap[otherId] ?? { status_message_visible: true };
 
       const entry = {
         id: c.id,
         userId: otherId,
         nickname: profile.nickname,
         avatarEmoji: profile.avatar_emoji,
-        statusMessage: profile.status_message,
+        statusMessage: pref.status_message_visible ? profile.status_message : "",
         timestamp: c.status === "accepted" ? c.updated_at : c.created_at,
       };
 

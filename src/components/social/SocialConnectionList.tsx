@@ -103,7 +103,7 @@ export function SocialConnectionList({
             const isExpanded = expandedId === c.userId;
             const preview = friendSchedule ? getPreviewShifts(friendSchedule.schedule) : [];
             const pairCommonOff = pairCommonOffByUserId.get(c.userId) ?? [];
-            const meta = friendMeta[c.userId] ?? { pinned: false, alias: "", muted: false };
+            const meta = friendMeta[c.userId] ?? { pinned: false, alias: "" };
             // 별칭이 있으면 별칭 우선
             const displayName = meta.alias || c.nickname || "익명";
 
@@ -129,9 +129,6 @@ export function SocialConnectionList({
                         <span className="text-[10.5px] text-ios-muted shrink-0">
                           ({c.nickname})
                         </span>
-                      )}
-                      {meta.muted && (
-                        <span className="text-[11px] text-ios-muted shrink-0">🔕</span>
                       )}
                     </div>
                     {c.statusMessage && (
@@ -170,7 +167,7 @@ export function SocialConnectionList({
 
                 {isExpanded && (
                   <div className="mt-3">
-                    {/* 메타 액션: 핀 + 별칭 + 뮤트 */}
+                    {/* 메타 액션: 핀 + 별칭 */}
                     <div className="flex flex-wrap items-center gap-2 mb-3">
                       {/* 핀 토글 */}
                       <button
@@ -227,19 +224,6 @@ export function SocialConnectionList({
                           ✏️ {meta.alias ? "별칭 수정" : "별칭"}
                         </button>
                       )}
-
-                      {/* 뮤트 토글 */}
-                      <button
-                        type="button"
-                        onClick={() => void handleMetaPatch(c.userId, { muted: !meta.muted })}
-                        className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold transition active:opacity-70 ${
-                          meta.muted
-                            ? "bg-gray-200 text-gray-600"
-                            : "bg-ios-bg text-ios-muted"
-                        }`}
-                      >
-                        🔕 {meta.muted ? "뮤트 해제" : "뮤트"}
-                      </button>
                     </div>
 
                     {/* 나와의 공통 오프 날짜 */}
