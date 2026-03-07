@@ -35,6 +35,15 @@ export type FriendsScheduleData = {
   commonOffDays: string[];
 };
 
+export type ScheduleVisibility = "full" | "off_only" | "hidden";
+
+export type SocialPreferences = {
+  scheduleVisibility: ScheduleVisibility;
+  statusMessageVisible: boolean;
+  acceptInvites: boolean;
+  notifyRequests: boolean;
+};
+
 export type SocialEventType =
   | "connection_request"
   | "connection_accepted"

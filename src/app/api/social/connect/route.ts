@@ -102,6 +102,18 @@ export async function POST(req: Request) {
       await (admin as any).from("rnest_connections").delete().eq("id", existing.id);
     }
 
+    // 3-B: 수신자의 accept_invites 설정 확인
+    const { data: receiverPrefs } = await (admin as any)
+      .from("rnest_social_preferences")
+      .select("accept_invites")
+      .eq("user_id", receiverId)
+      .maybeSingle();
+
+    if (receiverPrefs?.accept_invites === false) {
+      await recordSocialActionAttempt({ req, userId, action: "connect_request", success: false, detail: "invites_disabled" });
+      return jsonNoStore({ ok: false, error: "invites_disabled" }, { status: 403 });
+    }
+
     // 4. 연결 요청 insert
     const { data: conn, error: connErr } = await (admin as any)
       .from("rnest_connections")

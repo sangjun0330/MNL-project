@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Button } from "@/components/ui/Button";
-import type { SocialProfile } from "@/types/social";
+import type { SocialProfile, ScheduleVisibility } from "@/types/social";
 import { useAppStoreSelector } from "@/lib/store";
 
 const AVATAR_OPTIONS = ["🐧", "🦊", "🐱", "🐻", "🦁", "🐺", "🦅", "🐬"];
@@ -57,6 +57,12 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
   const [sharing, setSharing] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
 
+  // 프라이버시 설정 상태
+  const [scheduleVisibility, setScheduleVisibility] = useState<ScheduleVisibility>("full");
+  const [statusMsgVisible, setStatusMsgVisible] = useState(true);
+  const [acceptInvites, setAcceptInvites] = useState(true);
+  const [prefsSaving, setPrefsSaving] = useState(false);
+
   const trimmedNickname = nickname.trim();
   const trimmedStatusMessage = statusMessage.trim().slice(0, 30);
   const dirty =
@@ -93,6 +99,17 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
   useEffect(() => {
     if (!open) return;
     void loadCode();
+    // 프라이버시 설정 로드
+    fetch("/api/social/preferences", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((res) => {
+        if (res.ok) {
+          setScheduleVisibility(res.data?.scheduleVisibility ?? "full");
+          setStatusMsgVisible(res.data?.statusMessageVisible !== false);
+          setAcceptInvites(res.data?.acceptInvites !== false);
+        }
+      })
+      .catch(() => {});
   }, [open, loadCode]);
 
   const formattedCode = useMemo(() => formatCode(code), [code]);
@@ -178,6 +195,28 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
     } finally {
       setSharing(false);
     }
+  };
+
+  const handleSavePrefs = async (patch: Partial<{
+    scheduleVisibility: ScheduleVisibility;
+    statusMessageVisible: boolean;
+    acceptInvites: boolean;
+  }>) => {
+    if (prefsSaving) return;
+    setPrefsSaving(true);
+    try {
+      const res = await fetch("/api/social/preferences", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      }).then((r) => r.json());
+      if (res.ok) {
+        setScheduleVisibility(res.data?.scheduleVisibility ?? scheduleVisibility);
+        setStatusMsgVisible(res.data?.statusMessageVisible !== false);
+        setAcceptInvites(res.data?.acceptInvites !== false);
+      }
+    } catch {}
+    setPrefsSaving(false);
   };
 
   const handleRegenerate = async () => {
@@ -371,6 +410,95 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
           <p className="mt-3 text-[11.5px] leading-5 text-ios-muted">
             공유 링크는 만료 시간이 있고, 코드 재생성 시 이전 공유 링크는 자동으로 만료됩니다.
           </p>
+        </div>
+
+        {/* 프라이버시 설정 */}
+        <div className="rounded-3xl bg-white px-4 py-4 shadow-apple">
+          <p className="text-[14px] font-semibold text-ios-text mb-3">프라이버시</p>
+
+          {/* 근무 공개 범위 */}
+          <div className="mb-3">
+            <p className="text-[12.5px] font-medium text-ios-text mb-1.5">근무 공개 범위</p>
+            <div className="flex rounded-2xl bg-ios-bg p-1 gap-1">
+              {(["full", "off_only", "hidden"] as ScheduleVisibility[]).map((v) => {
+                const labels: Record<ScheduleVisibility, string> = {
+                  full: "전체 공개",
+                  off_only: "오프만",
+                  hidden: "비공개",
+                };
+                return (
+                  <button
+                    key={v}
+                    type="button"
+                    disabled={prefsSaving}
+                    onClick={() => {
+                      setScheduleVisibility(v);
+                      void handleSavePrefs({ scheduleVisibility: v });
+                    }}
+                    className={`flex-1 rounded-xl py-2 text-[11.5px] font-semibold transition ${
+                      scheduleVisibility === v
+                        ? "bg-white text-ios-text shadow-sm"
+                        : "text-ios-muted"
+                    }`}
+                  >
+                    {labels[v]}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 상태 메시지 공개 */}
+          <div className="flex items-center justify-between py-2 border-t border-ios-sep">
+            <div>
+              <p className="text-[12.5px] font-medium text-ios-text">상태 메시지 공개</p>
+              <p className="text-[11px] text-ios-muted mt-0.5">친구에게 내 상태 메시지 표시</p>
+            </div>
+            <button
+              type="button"
+              disabled={prefsSaving}
+              onClick={() => {
+                const next = !statusMsgVisible;
+                setStatusMsgVisible(next);
+                void handleSavePrefs({ statusMessageVisible: next });
+              }}
+              className={`relative h-7 w-12 rounded-full transition-colors duration-200 ${
+                statusMsgVisible ? "bg-[color:var(--rnest-accent)]" : "bg-ios-sep"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform duration-200 ${
+                  statusMsgVisible ? "translate-x-5" : "translate-x-0.5"
+                }`}
+              />
+            </button>
+          </div>
+
+          {/* 초대 링크 수신 */}
+          <div className="flex items-center justify-between py-2 border-t border-ios-sep">
+            <div>
+              <p className="text-[12.5px] font-medium text-ios-text">친구 요청 수신</p>
+              <p className="text-[11px] text-ios-muted mt-0.5">코드/링크로 연결 요청 받기</p>
+            </div>
+            <button
+              type="button"
+              disabled={prefsSaving}
+              onClick={() => {
+                const next = !acceptInvites;
+                setAcceptInvites(next);
+                void handleSavePrefs({ acceptInvites: next });
+              }}
+              className={`relative h-7 w-12 rounded-full transition-colors duration-200 ${
+                acceptInvites ? "bg-[color:var(--rnest-accent)]" : "bg-ios-sep"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform duration-200 ${
+                  acceptInvites ? "translate-x-5" : "translate-x-0.5"
+                }`}
+              />
+            </button>
+          </div>
         </div>
 
         {error ? (

@@ -48,11 +48,17 @@ export async function GET(req: Request) {
       return jsonNoStore({ ok: true, data: { friends: [], commonOffDays: [] } });
     }
 
-    // 2. 소셜 프로필
-    const { data: profiles } = await (admin as any)
-      .from("rnest_social_profiles")
-      .select("user_id, nickname, avatar_emoji, status_message")
-      .in("user_id", friendIds);
+    // 2. 소셜 프로필 + 프라이버시 설정 병렬 조회
+    const [{ data: profiles }, { data: prefs }] = await Promise.all([
+      (admin as any)
+        .from("rnest_social_profiles")
+        .select("user_id, nickname, avatar_emoji, status_message")
+        .in("user_id", friendIds),
+      (admin as any)
+        .from("rnest_social_preferences")
+        .select("user_id, schedule_visibility, status_message_visible")
+        .in("user_id", friendIds),
+    ]);
 
     const profileMap: Record<string, { nickname: string; avatar_emoji: string; status_message: string }> = {};
     for (const p of profiles ?? []) {
@@ -60,6 +66,15 @@ export async function GET(req: Request) {
         nickname: p.nickname,
         avatar_emoji: p.avatar_emoji,
         status_message: p.status_message ?? "",
+      };
+    }
+
+    // 프라이버시 설정 Map (없으면 기본값: full 공개)
+    const prefMap: Record<string, { schedule_visibility: string; status_message_visible: boolean }> = {};
+    for (const p of prefs ?? []) {
+      prefMap[p.user_id] = {
+        schedule_visibility: p.schedule_visibility ?? "full",
+        status_message_visible: p.status_message_visible !== false,
       };
     }
 
@@ -72,23 +87,33 @@ export async function GET(req: Request) {
 
     if (stateErr) throw stateErr;
 
-    // 4. 해당 월(들) 데이터만 필터링 (서버에서 필터링)
+    // 4. 해당 월(들) 데이터만 필터링 + 프라이버시 적용 (서버에서 강제)
     const friends = (states ?? []).map((s: any) => {
+      const pref = prefMap[s.user_id] ?? { schedule_visibility: "full", status_message_visible: true };
+      const profile = profileMap[s.user_id] ?? { nickname: "", avatar_emoji: "🐧", status_message: "" };
+
       // payload.schedule만 추출 — bio, emotions, notes 등은 사용하지 않음
       const rawSchedule: Record<string, string> = (s.payload as any)?.schedule ?? {};
-      const monthSchedule: Record<string, string> = {};
-      for (const [date, shift] of Object.entries(rawSchedule)) {
-        // prefixes 중 하나라도 매칭되면 포함 (다중 월 지원)
-        if (prefixes.some((p) => date.startsWith(p)) && typeof shift === "string") {
+      let monthSchedule: Record<string, string> = {};
+
+      if (pref.schedule_visibility !== "hidden") {
+        for (const [date, shift] of Object.entries(rawSchedule)) {
+          if (!prefixes.some((p) => date.startsWith(p)) || typeof shift !== "string") continue;
+
+          // off_only: OFF/VAC만 노출
+          if (pref.schedule_visibility === "off_only" && shift !== "OFF" && shift !== "VAC") continue;
+
           monthSchedule[date] = shift;
         }
       }
-      const profile = profileMap[s.user_id] ?? { nickname: "", avatar_emoji: "🐧", status_message: "" };
+      // hidden이면 monthSchedule = {} (빈 객체)
+
       return {
         userId: s.user_id,
         nickname: profile.nickname,
         avatarEmoji: profile.avatar_emoji,
-        statusMessage: profile.status_message,
+        // status_message_visible=false이면 빈 문자열로 마스킹
+        statusMessage: pref.status_message_visible ? (profile.status_message ?? "") : "",
         schedule: monthSchedule,
       };
     });
@@ -109,7 +134,7 @@ export async function GET(req: Request) {
         .map(([date]) => date)
     );
 
-    // 모든 친구가 동시에 OFF/VAC인 날
+    // 모든 친구가 동시에 OFF/VAC인 날 (schedule_visibility=hidden 친구는 제외됨)
     let commonOffDays: string[] = [];
     if (myOffDays.size > 0 && friends.length > 0) {
       const allOffSets = friends.map(
