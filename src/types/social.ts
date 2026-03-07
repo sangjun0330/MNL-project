@@ -53,7 +53,13 @@ export type SocialPreferences = {
 export type SocialEventType =
   | "connection_request"
   | "connection_accepted"
-  | "connection_rejected";
+  | "connection_rejected"
+  | "group_join_requested"
+  | "group_join_approved"
+  | "group_join_rejected"
+  | "group_role_changed"
+  | "group_owner_transferred"
+  | "group_member_removed";
 
 export type SocialEvent = {
   id: number;
@@ -63,12 +69,28 @@ export type SocialEvent = {
   payload: {
     nickname?: string;
     avatarEmoji?: string;
+    groupName?: string;
+    role?: string;
   };
   readAt: string | null;
   createdAt: string;
 };
 
-export type SocialGroupRole = "owner" | "member";
+export type SocialGroupRole = "owner" | "admin" | "member";
+export type SocialGroupJoinMode = "open" | "approval";
+
+export type SocialGroupPermissions = {
+  canCreateInvite: boolean;
+  canEditBasicInfo: boolean;
+  canEditNotice: boolean;
+  canChangeInvitePolicy: boolean;
+  canManageJoinRequests: boolean;
+  canManageMembers: boolean;
+  canPromoteMembers: boolean;
+  canTransferOwner: boolean;
+  canRemoveMembers: boolean;
+  canDeleteGroup: boolean;
+};
 
 export type SocialGroupPreviewMember = {
   userId: string;
@@ -85,6 +107,11 @@ export type SocialGroupSummary = {
   memberCount: number;
   joinedAt: string;
   memberPreview: SocialGroupPreviewMember[];
+  notice: string;
+  joinMode: SocialGroupJoinMode;
+  allowMemberInvites: boolean;
+  maxMembers: number;
+  pendingJoinRequestCount: number;
 };
 
 export type SocialGroupBoardMember = {
@@ -97,15 +124,59 @@ export type SocialGroupBoardMember = {
   schedule: Record<string, string>;
 };
 
+export type SocialGroupJoinRequest = {
+  id: number;
+  requesterUserId: string;
+  nickname: string;
+  avatarEmoji: string;
+  statusMessage: string;
+  createdAt: string;
+};
+
+export type SocialGroupActivityType =
+  | "group_created"
+  | "group_settings_updated"
+  | "group_notice_updated"
+  | "group_join_requested"
+  | "group_join_approved"
+  | "group_join_rejected"
+  | "group_member_joined"
+  | "group_member_left"
+  | "group_member_removed"
+  | "group_role_changed"
+  | "group_owner_transferred"
+  | "group_invite_rotated";
+
+export type SocialGroupActivity = {
+  id: number;
+  type: SocialGroupActivityType;
+  actorUserId: string | null;
+  actorNickname: string;
+  actorAvatarEmoji: string;
+  targetUserId: string | null;
+  targetNickname: string;
+  targetAvatarEmoji: string;
+  payload: {
+    notice?: string;
+    role?: string;
+    previousRole?: string;
+    groupName?: string;
+  };
+  createdAt: string;
+};
+
 export type SocialGroupBoard = {
   group: SocialGroupSummary;
   members: SocialGroupBoardMember[];
   commonOffDays: string[];
   hiddenScheduleMemberCount: number;
+  joinRequests: SocialGroupJoinRequest[];
+  activities: SocialGroupActivity[];
+  permissions: SocialGroupPermissions;
 };
 
 export type SocialGroupInvitePreview = {
   token: string;
-  state: "joinable" | "already_member" | "group_full";
+  state: "joinable" | "already_member" | "group_full" | "approval_required" | "request_pending";
   group: SocialGroupSummary;
 };

@@ -6,6 +6,13 @@ import {
   recordSocialActionAttempt,
   verifySocialGroupInviteToken,
 } from "@/lib/server/socialSecurity";
+import {
+  getSocialGroupById,
+  loadPendingJoinRequestForUser,
+  loadSocialGroupProfileMap,
+  mapSocialGroupSummary,
+  normalizeSocialGroupRole,
+} from "@/lib/server/socialGroups";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -53,22 +60,18 @@ export async function POST(req: Request) {
       return jsonNoStore({ ok: false, error: "invite_not_found_or_expired" }, { status: 404 });
     }
 
-    const [{ data: group, error: groupErr }, { data: memberRows, error: memberErr }] = await Promise.all([
-      (admin as any)
-        .from("rnest_social_groups")
-        .select("id, owner_user_id, name, description, invite_version, max_members, created_at")
-        .eq("id", invite.groupId)
-        .maybeSingle(),
+    const [group, { data: memberRows, error: memberErr }, joinRequest] = await Promise.all([
+      getSocialGroupById(admin, invite.groupId),
       (admin as any)
         .from("rnest_social_group_members")
         .select("user_id, role, joined_at")
         .eq("group_id", invite.groupId)
         .order("joined_at", { ascending: true }),
+      loadPendingJoinRequestForUser(admin, invite.groupId, userId),
     ]);
 
-    if (groupErr) throw groupErr;
     if (memberErr) throw memberErr;
-    if (!group || Number(group.invite_version ?? 1) !== invite.inviteVersion) {
+    if (!group || Number(group.inviteVersion ?? 1) !== invite.inviteVersion) {
       await recordSocialActionAttempt({ req, userId, action: "group_invite_resolve", success: false, detail: "stale" });
       return jsonNoStore({ ok: false, error: "invite_not_found_or_expired" }, { status: 404 });
     }
@@ -76,26 +79,17 @@ export async function POST(req: Request) {
     const members = memberRows ?? [];
     const alreadyMember = members.some((row: any) => String(row.user_id) === userId);
     const memberIds = members.map((row: any) => String(row.user_id));
-    const { data: profiles } = memberIds.length
-      ? await (admin as any)
-          .from("rnest_social_profiles")
-          .select("user_id, nickname, avatar_emoji")
-          .in("user_id", memberIds)
-      : { data: [] };
-
-    const profileMap = new Map<string, { nickname: string; avatarEmoji: string }>();
-    for (const row of profiles ?? []) {
-      profileMap.set(String(row.user_id), {
-        nickname: String(row.nickname ?? ""),
-        avatarEmoji: String(row.avatar_emoji ?? "🐧"),
-      });
-    }
+    const profileMap = await loadSocialGroupProfileMap(admin, memberIds);
 
     const state = alreadyMember
       ? "already_member"
-      : members.length >= Number(group.max_members ?? 12)
+      : members.length >= Number(group.maxMembers ?? 12)
         ? "group_full"
-        : "joinable";
+        : joinRequest?.status === "pending"
+          ? "request_pending"
+          : group.joinMode === "approval"
+            ? "approval_required"
+            : "joinable";
 
     await recordSocialActionAttempt({ req, userId, action: "group_invite_resolve", success: true, detail: state });
     return jsonNoStore({
@@ -103,23 +97,12 @@ export async function POST(req: Request) {
       data: {
         token,
         state,
-        group: {
-          id: Number(group.id),
-          name: String(group.name ?? ""),
-          description: String(group.description ?? ""),
-          role: alreadyMember
-            ? members.find((row: any) => String(row.user_id) === userId)?.role === "owner"
-              ? "owner"
-              : "member"
-            : "member",
-          ownerUserId: String(group.owner_user_id ?? ""),
+        group: mapSocialGroupSummary({
+          group,
+          membership: alreadyMember
+            ? members.find((row: any) => String(row.user_id) === userId) ?? { role: "member", joined_at: group.createdAt }
+            : { role: "member", joined_at: group.createdAt },
           memberCount: members.length,
-          joinedAt:
-            String(
-              members.find((row: any) => String(row.user_id) === userId)?.joined_at ??
-                group.created_at ??
-                new Date().toISOString()
-            ),
           memberPreview: members.slice(0, 3).map((row: any) => {
             const profile = profileMap.get(String(row.user_id));
             return {
@@ -128,7 +111,8 @@ export async function POST(req: Request) {
               avatarEmoji: profile?.avatarEmoji ?? "🐧",
             };
           }),
-        },
+          pendingJoinRequestCount: 0,
+        }),
       },
     });
   } catch (err: any) {

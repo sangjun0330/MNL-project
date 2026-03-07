@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
-import { SocialBellIcon } from "@/components/social/SocialIcons";
+import { SocialBellIcon, SocialGroupIcon } from "@/components/social/SocialIcons";
 import type { SocialEvent } from "@/types/social";
 
 type Props = {
@@ -11,11 +11,33 @@ type Props = {
   onUnreadCountChange: (count: number) => void;
 };
 
-const EVENT_LABELS: Record<string, string> = {
-  connection_request: "님이 연결 요청을 보냈어요",
-  connection_accepted: "님이 연결 요청을 수락했어요",
-  connection_rejected: "님이 연결 요청을 거절했어요",
-};
+function buildEventLabel(event: SocialEvent): string {
+  const groupName = event.payload?.groupName || "그룹";
+  const role = event.payload?.role === "admin" ? "관리자" : event.payload?.role === "owner" ? "방장" : "멤버";
+
+  switch (event.type) {
+    case "connection_request":
+      return "님이 연결 요청을 보냈어요";
+    case "connection_accepted":
+      return "님이 연결 요청을 수락했어요";
+    case "connection_rejected":
+      return "님이 연결 요청을 거절했어요";
+    case "group_join_requested":
+      return `님이 ${groupName} 그룹 가입을 요청했어요`;
+    case "group_join_approved":
+      return `${groupName} 그룹 가입이 승인되었어요`;
+    case "group_join_rejected":
+      return `${groupName} 그룹 가입이 거절되었어요`;
+    case "group_role_changed":
+      return `${groupName} 그룹에서 내 역할이 ${role}(으)로 변경되었어요`;
+    case "group_owner_transferred":
+      return `${groupName} 그룹 방장이 나에게 넘어왔어요`;
+    case "group_member_removed":
+      return `${groupName} 그룹에서 제외되었어요`;
+    default:
+      return "님과 연결 관련 알림이 있어요";
+  }
+}
 
 function timeAgo(iso: string): string {
   const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
@@ -135,10 +157,21 @@ export function SocialEventCenter({ open, onClose, onUnreadCountChange }: Props)
 
         <div className="space-y-1">
           {events.map((event) => {
-            const nickname = event.payload?.nickname || "친구";
+            const nickname =
+              event.type === "group_join_approved" ||
+              event.type === "group_join_rejected" ||
+              event.type === "group_member_removed"
+                ? event.payload?.groupName || "그룹"
+                : event.payload?.nickname || "친구";
             const avatarEmoji = event.payload?.avatarEmoji || "🐧";
-            const label = EVENT_LABELS[event.type] ?? "님과 연결 관련 알림이 있어요";
+            const label = buildEventLabel(event);
             const isUnread = !event.readAt;
+            const renderStandaloneLabel =
+              event.type === "group_join_approved" ||
+              event.type === "group_join_rejected" ||
+              event.type === "group_member_removed" ||
+              event.type === "group_role_changed" ||
+              event.type === "group_owner_transferred";
 
             return (
               <div
@@ -148,12 +181,22 @@ export function SocialEventCenter({ open, onClose, onUnreadCountChange }: Props)
                 }`}
               >
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[color:var(--rnest-accent-soft)] text-[22px]">
-                  {avatarEmoji}
+                  {event.type.startsWith("group_") ? (
+                    <SocialGroupIcon className="h-5 w-5 text-[color:var(--rnest-accent)]" />
+                  ) : (
+                    avatarEmoji
+                  )}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-[13px] text-ios-text leading-snug">
-                    <span className="font-semibold">{nickname}</span>
-                    {label}
+                    {renderStandaloneLabel ? (
+                      <span className="font-semibold">{label}</span>
+                    ) : (
+                      <>
+                        <span className="font-semibold">{nickname}</span>
+                        {label}
+                      </>
+                    )}
                   </p>
                   <p className="mt-0.5 text-[11.5px] text-ios-muted">{timeAgo(event.createdAt)}</p>
                 </div>

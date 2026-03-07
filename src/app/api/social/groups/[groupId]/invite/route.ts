@@ -6,14 +6,15 @@ import {
   recordSocialActionAttempt,
   signSocialGroupInviteToken,
 } from "@/lib/server/socialSecurity";
+import {
+  buildSocialGroupPermissions,
+  getSocialGroupById,
+  normalizeSocialGroupRole,
+  parseSocialGroupId,
+} from "@/lib/server/socialGroups";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
-
-function parseGroupId(raw: string): number | null {
-  const value = Number.parseInt(raw, 10);
-  return Number.isFinite(value) && value > 0 ? value : null;
-}
 
 export async function POST(
   req: Request,
@@ -26,7 +27,7 @@ export async function POST(
   if (!userId) return jsonNoStore({ ok: false, error: "login_required" }, { status: 401 });
 
   const { groupId: rawGroupId } = await params;
-  const groupId = parseGroupId(rawGroupId);
+  const groupId = parseSocialGroupId(rawGroupId);
   if (!groupId) return jsonNoStore({ ok: false, error: "invalid_group_id" }, { status: 400 });
 
   const admin = getSupabaseAdmin();
@@ -45,30 +46,33 @@ export async function POST(
       return jsonNoStore({ ok: false, error: "too_many_requests" }, { status: 429 });
     }
 
-    const [{ data: group, error: groupErr }, { data: membership, error: membershipErr }] = await Promise.all([
-      (admin as any)
-        .from("rnest_social_groups")
-        .select("id, invite_version")
-        .eq("id", groupId)
-        .maybeSingle(),
+    const [group, { data: membership, error: membershipErr }] = await Promise.all([
+      getSocialGroupById(admin, groupId),
       (admin as any)
         .from("rnest_social_group_members")
-        .select("user_id")
+        .select("user_id, role")
         .eq("group_id", groupId)
         .eq("user_id", userId)
         .maybeSingle(),
     ]);
 
-    if (groupErr) throw groupErr;
     if (membershipErr) throw membershipErr;
     if (!group) return jsonNoStore({ ok: false, error: "group_not_found" }, { status: 404 });
     if (!membership) return jsonNoStore({ ok: false, error: "not_group_member" }, { status: 403 });
+
+    const permissions = buildSocialGroupPermissions(
+      normalizeSocialGroupRole(membership.role),
+      group.allowMemberInvites
+    );
+    if (!permissions.canCreateInvite) {
+      return jsonNoStore({ ok: false, error: "invite_permission_denied" }, { status: 403 });
+    }
 
     const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
     const token = await signSocialGroupInviteToken({
       groupId,
       inviterUserId: userId,
-      inviteVersion: Number(group.invite_version ?? 1),
+      inviteVersion: Number(group.inviteVersion ?? 1),
       expiresAt: Date.parse(expiresAt),
     });
 

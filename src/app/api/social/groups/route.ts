@@ -2,34 +2,23 @@ import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurit
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import {
+  cleanSocialGroupNotice,
   cleanSocialGroupDescription,
   cleanSocialGroupName,
   isSocialActionRateLimited,
   recordSocialActionAttempt,
 } from "@/lib/server/socialSecurity";
+import {
+  appendGroupActivity,
+  DEFAULT_GROUP_MAX_MEMBERS,
+  getSocialGroupsByIds,
+  loadPendingJoinRequestCountMap,
+  loadSocialGroupProfileMap,
+  mapSocialGroupSummary,
+} from "@/lib/server/socialGroups";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
-
-const DEFAULT_GROUP_MAX_MEMBERS = 12;
-
-function mapGroupSummary(input: {
-  group: any;
-  membership: any;
-  memberCount: number;
-  memberPreview: Array<{ userId: string; nickname: string; avatarEmoji: string }>;
-}) {
-  return {
-    id: Number(input.group.id),
-    name: String(input.group.name ?? ""),
-    description: String(input.group.description ?? ""),
-    role: input.membership?.role === "owner" ? "owner" : "member",
-    ownerUserId: String(input.group.owner_user_id ?? ""),
-    memberCount: input.memberCount,
-    joinedAt: String(input.membership?.joined_at ?? input.group.created_at ?? new Date().toISOString()),
-    memberPreview: input.memberPreview,
-  };
-}
 
 export async function GET(req: Request) {
   const userId = await readUserIdFromRequest(req);
@@ -51,21 +40,23 @@ export async function GET(req: Request) {
       return jsonNoStore({ ok: true, data: { groups: [] } });
     }
 
-    const groupIds = Array.from(new Set(membershipRows.map((row: any) => Number(row.group_id)).filter(Number.isFinite)));
-    const [{ data: groups, error: groupErr }, { data: memberRows, error: memberErr }] = await Promise.all([
-      (admin as any)
-        .from("rnest_social_groups")
-        .select("id, owner_user_id, name, description, created_at, updated_at")
-        .in("id", groupIds)
-        .order("updated_at", { ascending: false }),
+    const groupIds = Array.from(
+      new Set(
+        membershipRows
+          .map((row: any) => Number(row.group_id))
+          .filter((value: number) => Number.isFinite(value))
+      )
+    ) as number[];
+    const [groups, { data: memberRows, error: memberErr }, pendingCountMap] = await Promise.all([
+      getSocialGroupsByIds(admin, groupIds),
       (admin as any)
         .from("rnest_social_group_members")
         .select("group_id, user_id, joined_at")
         .in("group_id", groupIds)
         .order("joined_at", { ascending: true }),
+      loadPendingJoinRequestCountMap(admin, groupIds),
     ]);
 
-    if (groupErr) throw groupErr;
     if (memberErr) throw memberErr;
 
     const membersByGroupId = new Map<number, any[]>();
@@ -77,27 +68,14 @@ export async function GET(req: Request) {
       if (typeof row.user_id === "string") memberIds.add(row.user_id);
     }
 
-    const { data: profiles } = memberIds.size
-      ? await (admin as any)
-          .from("rnest_social_profiles")
-          .select("user_id, nickname, avatar_emoji")
-          .in("user_id", Array.from(memberIds))
-      : { data: [] };
-
-    const profileMap = new Map<string, { nickname: string; avatarEmoji: string }>();
-    for (const row of profiles ?? []) {
-      profileMap.set(String(row.user_id), {
-        nickname: String(row.nickname ?? ""),
-        avatarEmoji: String(row.avatar_emoji ?? "🐧"),
-      });
-    }
+    const profileMap = await loadSocialGroupProfileMap(admin, Array.from(memberIds));
 
     const membershipMap = new Map<number, any>();
     for (const row of membershipRows) {
       membershipMap.set(Number(row.group_id), row);
     }
 
-    const groupList = (groups ?? []).map((group: any) => {
+    const groupList = groups.map((group) => {
       const groupId = Number(group.id);
       const groupMembers = membersByGroupId.get(groupId) ?? [];
       const preview = groupMembers.slice(0, 3).map((member: any) => {
@@ -109,11 +87,15 @@ export async function GET(req: Request) {
         };
       });
 
-      return mapGroupSummary({
+      return mapSocialGroupSummary({
         group,
         membership: membershipMap.get(groupId),
         memberCount: groupMembers.length,
         memberPreview: preview,
+        pendingJoinRequestCount:
+          membershipMap.get(groupId)?.role === "owner" || membershipMap.get(groupId)?.role === "admin"
+            ? Number(pendingCountMap.get(groupId) ?? 0)
+            : 0,
       });
     });
 
@@ -140,6 +122,7 @@ export async function POST(req: Request) {
 
   const name = cleanSocialGroupName(body?.name);
   const description = cleanSocialGroupDescription(body?.description);
+  const notice = cleanSocialGroupNotice(body?.notice);
   if (!name) {
     return jsonNoStore({ ok: false, error: "group_name_required" }, { status: 400 });
   }
@@ -166,10 +149,11 @@ export async function POST(req: Request) {
         owner_user_id: userId,
         name,
         description,
+        notice,
         max_members: DEFAULT_GROUP_MAX_MEMBERS,
         updated_at: new Date().toISOString(),
       })
-      .select("id, owner_user_id, name, description, created_at, updated_at")
+      .select("id, owner_user_id, name, description, notice, invite_version, max_members, join_mode, allow_member_invites, created_at, updated_at")
       .single();
 
     if (groupErr) throw groupErr;
@@ -187,26 +171,44 @@ export async function POST(req: Request) {
       throw memberErr;
     }
 
-    const { data: profile } = await (admin as any)
-      .from("rnest_social_profiles")
-      .select("nickname, avatar_emoji")
-      .eq("user_id", userId)
-      .maybeSingle();
+    const profileMap = await loadSocialGroupProfileMap(admin, [userId]);
+    const profile = profileMap.get(userId);
+
+    await appendGroupActivity({
+      admin,
+      groupId: Number(group.id),
+      type: "group_created",
+      actorUserId: userId,
+      payload: { groupName: name },
+    });
 
     await recordSocialActionAttempt({ req, userId, action: "group_create", success: true, detail: "ok" });
     return jsonNoStore({
       ok: true,
-      data: mapGroupSummary({
-        group,
+      data: mapSocialGroupSummary({
+        group: {
+          id: Number(group.id),
+          ownerUserId: String(group.owner_user_id ?? userId),
+          name: String(group.name ?? ""),
+          description: String(group.description ?? ""),
+          notice: String(group.notice ?? ""),
+          inviteVersion: Number(group.invite_version ?? 1),
+          maxMembers: Number(group.max_members ?? DEFAULT_GROUP_MAX_MEMBERS),
+          joinMode: group.join_mode === "approval" ? "approval" : "open",
+          allowMemberInvites: group.allow_member_invites !== false,
+          createdAt: String(group.created_at ?? new Date().toISOString()),
+          updatedAt: String(group.updated_at ?? group.created_at ?? new Date().toISOString()),
+        },
         membership: { role: "owner", joined_at: group.created_at },
         memberCount: 1,
         memberPreview: [
           {
             userId,
             nickname: String(profile?.nickname ?? ""),
-            avatarEmoji: String(profile?.avatar_emoji ?? "🐧"),
+            avatarEmoji: String(profile?.avatarEmoji ?? "🐧"),
           },
         ],
+        pendingJoinRequestCount: 0,
       }),
     });
   } catch (err: any) {

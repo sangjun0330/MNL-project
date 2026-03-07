@@ -2,14 +2,20 @@ import { jsonNoStore } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import type { SocialGroupBoardMember } from "@/types/social";
+import {
+  buildSocialGroupPermissions,
+  getSocialGroupById,
+  isSocialGroupManager,
+  loadGroupActivities,
+  loadPendingJoinRequests,
+  loadSocialGroupProfileMap,
+  mapSocialGroupSummary,
+  normalizeSocialGroupRole,
+  parseSocialGroupId,
+} from "@/lib/server/socialGroups";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
-
-function parseGroupId(raw: string): number | null {
-  const value = Number.parseInt(raw, 10);
-  return Number.isFinite(value) && value > 0 ? value : null;
-}
 
 function isOffOrVac(shift: string | null | undefined) {
   return shift === "OFF" || shift === "VAC";
@@ -23,7 +29,7 @@ export async function GET(
   if (!userId) return jsonNoStore({ ok: false, error: "login_required" }, { status: 401 });
 
   const { groupId: rawGroupId } = await params;
-  const groupId = parseGroupId(rawGroupId);
+  const groupId = parseSocialGroupId(rawGroupId);
   if (!groupId) return jsonNoStore({ ok: false, error: "invalid_group_id" }, { status: 400 });
 
   const url = new URL(req.url);
@@ -41,12 +47,8 @@ export async function GET(
   const admin = getSupabaseAdmin();
 
   try {
-    const [{ data: group, error: groupErr }, { data: membership, error: membershipErr }, { data: memberRows, error: memberErr }] = await Promise.all([
-      (admin as any)
-        .from("rnest_social_groups")
-        .select("id, owner_user_id, name, description, created_at, updated_at")
-        .eq("id", groupId)
-        .maybeSingle(),
+    const [group, { data: membership, error: membershipErr }, { data: memberRows, error: memberErr }] = await Promise.all([
+      getSocialGroupById(admin, groupId),
       (admin as any)
         .from("rnest_social_group_members")
         .select("role, joined_at")
@@ -60,7 +62,6 @@ export async function GET(
         .order("joined_at", { ascending: true }),
     ]);
 
-    if (groupErr) throw groupErr;
     if (membershipErr) throw membershipErr;
     if (memberErr) throw memberErr;
     if (!group) return jsonNoStore({ ok: false, error: "group_not_found" }, { status: 404 });
@@ -69,11 +70,11 @@ export async function GET(
     const members = memberRows ?? [];
     const memberIds = members.map((row: any) => String(row.user_id));
 
-    const [{ data: profiles }, { data: prefs }, { data: states }] = await Promise.all([
-      (admin as any)
-        .from("rnest_social_profiles")
-        .select("user_id, nickname, avatar_emoji, status_message")
-        .in("user_id", memberIds),
+    const memberRole = normalizeSocialGroupRole(membership.role);
+    const permissions = buildSocialGroupPermissions(memberRole, group.allowMemberInvites);
+
+    const [profileMap, { data: prefs }, { data: states }, joinRequests, activities] = await Promise.all([
+      loadSocialGroupProfileMap(admin, memberIds),
       (admin as any)
         .from("rnest_social_preferences")
         .select("user_id, schedule_visibility, status_message_visible")
@@ -82,16 +83,9 @@ export async function GET(
         .from("rnest_user_state")
         .select("user_id, payload")
         .in("user_id", memberIds),
+      permissions.canManageJoinRequests ? loadPendingJoinRequests(admin, groupId) : Promise.resolve([]),
+      loadGroupActivities(admin, groupId, 24),
     ]);
-
-    const profileMap = new Map<string, { nickname: string; avatarEmoji: string; statusMessage: string }>();
-    for (const row of profiles ?? []) {
-      profileMap.set(String(row.user_id), {
-        nickname: String(row.nickname ?? ""),
-        avatarEmoji: String(row.avatar_emoji ?? "🐧"),
-        statusMessage: String(row.status_message ?? ""),
-      });
-    }
 
     const prefMap = new Map<string, { scheduleVisibility: string; statusMessageVisible: boolean }>();
     for (const row of prefs ?? []) {
@@ -146,8 +140,8 @@ export async function GET(
         nickname: profile.nickname,
         avatarEmoji: profile.avatarEmoji,
         statusMessage: memberUserId === userId || pref.statusMessageVisible ? profile.statusMessage : "",
-        role: row.role === "owner" ? "owner" : "member",
-        joinedAt: String(row.joined_at ?? group.created_at ?? new Date().toISOString()),
+        role: normalizeSocialGroupRole(row.role),
+        joinedAt: String(row.joined_at ?? group.createdAt ?? new Date().toISOString()),
         schedule,
       };
     });
@@ -167,19 +161,19 @@ export async function GET(
     return jsonNoStore({
       ok: true,
       data: {
-        group: {
-          id: Number(group.id),
-          name: String(group.name ?? ""),
-          description: String(group.description ?? ""),
-          role: membership.role === "owner" ? "owner" : "member",
-          ownerUserId: String(group.owner_user_id ?? ""),
+        group: mapSocialGroupSummary({
+          group,
+          membership,
           memberCount: boardMembers.length,
-          joinedAt: String(membership.joined_at ?? group.created_at ?? new Date().toISOString()),
           memberPreview,
-        },
+          pendingJoinRequestCount: joinRequests.length,
+        }),
         members: boardMembers,
         commonOffDays,
         hiddenScheduleMemberCount,
+        joinRequests,
+        activities,
+        permissions,
       },
     });
   } catch (err: any) {

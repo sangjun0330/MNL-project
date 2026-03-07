@@ -1,14 +1,10 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
+import { appendGroupActivity, getSocialGroupById, normalizeSocialGroupRole, parseSocialGroupId } from "@/lib/server/socialGroups";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
-
-function parseGroupId(raw: string): number | null {
-  const value = Number.parseInt(raw, 10);
-  return Number.isFinite(value) && value > 0 ? value : null;
-}
 
 export async function PATCH(
   req: Request,
@@ -21,7 +17,7 @@ export async function PATCH(
   if (!userId) return jsonNoStore({ ok: false, error: "login_required" }, { status: 401 });
 
   const { groupId: rawGroupId } = await params;
-  const groupId = parseGroupId(rawGroupId);
+  const groupId = parseSocialGroupId(rawGroupId);
   if (!groupId) return jsonNoStore({ ok: false, error: "invalid_group_id" }, { status: 400 });
 
   let body: any = null;
@@ -39,12 +35,8 @@ export async function PATCH(
   const admin = getSupabaseAdmin();
 
   try {
-    const [{ data: group, error: groupErr }, { data: membership, error: membershipErr }] = await Promise.all([
-      (admin as any)
-        .from("rnest_social_groups")
-        .select("id, owner_user_id")
-        .eq("id", groupId)
-        .maybeSingle(),
+    const [group, { data: membership, error: membershipErr }] = await Promise.all([
+      getSocialGroupById(admin, groupId),
       (admin as any)
         .from("rnest_social_group_members")
         .select("role")
@@ -53,13 +45,12 @@ export async function PATCH(
         .maybeSingle(),
     ]);
 
-    if (groupErr) throw groupErr;
     if (membershipErr) throw membershipErr;
     if (!group) return jsonNoStore({ ok: false, error: "group_not_found" }, { status: 404 });
     if (!membership) return jsonNoStore({ ok: false, error: "not_group_member" }, { status: 403 });
 
     if (action === "delete") {
-      if (membership.role !== "owner") {
+      if (normalizeSocialGroupRole(membership.role) !== "owner") {
         return jsonNoStore({ ok: false, error: "only_owner_can_delete_group" }, { status: 403 });
       }
       const { error } = await (admin as any).from("rnest_social_groups").delete().eq("id", groupId);
@@ -67,7 +58,7 @@ export async function PATCH(
       return jsonNoStore({ ok: true });
     }
 
-    if (membership.role === "owner") {
+    if (normalizeSocialGroupRole(membership.role) === "owner") {
       return jsonNoStore({ ok: false, error: "owner_cannot_leave_group" }, { status: 409 });
     }
 
@@ -78,6 +69,14 @@ export async function PATCH(
       .eq("user_id", userId);
 
     if (error) throw error;
+
+    await appendGroupActivity({
+      admin,
+      groupId,
+      type: "group_member_left",
+      actorUserId: userId,
+      payload: { groupName: group.name },
+    });
     return jsonNoStore({ ok: true });
   } catch (err: any) {
     console.error("[SocialGroup/PATCH] id=%d err=%s", groupId, String(err?.message ?? err));

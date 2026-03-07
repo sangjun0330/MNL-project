@@ -480,7 +480,15 @@ export function SocialPage() {
         }
 
         setOpenGroupJoin(true);
-        setNotice({ tone: "success", text: `${preview.group.name} 그룹 초대를 확인했어요.` });
+        setNotice({
+          tone: preview.state === "request_pending" ? "info" : "success",
+          text:
+            preview.state === "request_pending"
+              ? `${preview.group.name} 그룹 가입 요청이 이미 대기 중이에요.`
+              : preview.state === "approval_required"
+                ? `${preview.group.name} 그룹은 승인 후 참여할 수 있어요.`
+                : `${preview.group.name} 그룹 초대를 확인했어요.`,
+        });
       })
       .catch(() => {
         setNotice({ tone: "error", text: "그룹 초대 링크를 확인하지 못했어요." });
@@ -807,6 +815,14 @@ export function SocialPage() {
         months={fetchMonths}
         currentUserId={user?.userId ?? null}
         mySchedule={mySchedule}
+        onGroupUpdated={(nextGroup) => {
+          setSelectedGroup(nextGroup);
+          setGroups((prev) => [nextGroup, ...prev.filter((item) => item.id !== nextGroup.id)]);
+          void fetchGroups();
+        }}
+        onGroupsRefresh={() => {
+          void fetchGroups();
+        }}
         onGroupLeft={(groupId) => {
           setOpenGroupDetail(false);
           setSelectedGroup(null);
@@ -830,14 +846,18 @@ export function SocialPage() {
           setOpenGroupJoin(false);
           setGroupInvitePreview(null);
         }}
-        onJoined={(group) => {
+        onJoined={(group, state) => {
           setOpenGroupJoin(false);
           setGroupInvitePreview(null);
+          setActiveTab("groups");
+          void fetchGroups();
+          if (state === "request_pending") {
+            setNotice({ tone: "info", text: `${group.name} 그룹 가입 요청을 보냈어요.` });
+            return;
+          }
           setGroups((prev) => [group, ...prev.filter((item) => item.id !== group.id)]);
           setSelectedGroup(group);
           setOpenGroupDetail(true);
-          setActiveTab("groups");
-          void fetchGroups();
           setNotice({ tone: "success", text: `${group.name} 그룹에 참여했어요.` });
         }}
       />

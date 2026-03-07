@@ -47,3 +47,23 @@ export function SocialBellIcon({ className = "" }: IconProps) {
     </svg>
   );
 }
+
+export function SocialGroupIcon({ className = "" }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M16 20v-1.2a3.8 3.8 0 0 0-3.8-3.8H7.8A3.8 3.8 0 0 0 4 18.8V20" />
+      <circle cx="10" cy="8.5" r="3.2" />
+      <path d="M20 20v-1a3 3 0 0 0-2.4-2.94" />
+      <path d="M15.6 4.65a3.2 3.2 0 0 1 0 6.1" />
+    </svg>
+  );
+}

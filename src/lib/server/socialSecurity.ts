@@ -59,6 +59,16 @@ export function cleanSocialGroupDescription(value: unknown): string {
   return Array.from(raw).slice(0, 80).join("");
 }
 
+export function cleanSocialGroupNotice(value: unknown): string {
+  const raw = String(value ?? "")
+    .replace(/<[^>]*>/g, "")
+    .replace(INVISIBLE_UNSAFE_CHARS, "")
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return Array.from(raw).slice(0, 120).join("");
+}
+
 export function readSocialActorIp(req: Request): string {
   const cfIp = String(req.headers.get("cf-connecting-ip") ?? "").trim();
   if (cfIp) return cfIp.slice(0, 80);

@@ -10,7 +10,7 @@ type Props = {
   open: boolean;
   preview: SocialGroupInvitePreview | null;
   onClose: () => void;
-  onJoined: (group: SocialGroupSummary) => void;
+  onJoined: (group: SocialGroupSummary, state?: "joined" | "request_pending") => void;
 };
 
 export function SocialGroupJoinSheet({ open, preview, onClose, onJoined }: Props) {
@@ -40,7 +40,8 @@ export function SocialGroupJoinSheet({ open, preview, onClose, onJoined }: Props
         throw new Error("그룹에 참여하지 못했어요.");
       }
 
-      onJoined(res.data);
+      const nextGroup = (res.data?.group ?? res.data) as SocialGroupSummary;
+      onJoined(nextGroup, res.data?.state === "request_pending" ? "request_pending" : "joined");
     } catch (err: any) {
       setError(String(err?.message ?? "그룹에 참여하지 못했어요."));
     } finally {
@@ -103,6 +104,14 @@ export function SocialGroupJoinSheet({ open, preview, onClose, onJoined }: Props
               >
                 정원이 가득 찼어요
               </Button>
+            ) : preview?.state === "request_pending" ? (
+              <Button
+                variant="secondary"
+                disabled
+                className="mt-4 h-12 w-full rounded-2xl text-[15px]"
+              >
+                가입 요청 대기 중
+              </Button>
             ) : (
               <Button
                 variant="primary"
@@ -110,7 +119,13 @@ export function SocialGroupJoinSheet({ open, preview, onClose, onJoined }: Props
                 onClick={handleJoin}
                 className="mt-4 h-12 w-full rounded-2xl text-[15px]"
               >
-                {joining ? "참여 중…" : "이 그룹에 참여하기"}
+                {joining
+                  ? preview?.state === "approval_required"
+                    ? "요청 보내는 중…"
+                    : "참여 중…"
+                  : preview?.state === "approval_required"
+                    ? "가입 요청 보내기"
+                    : "이 그룹에 참여하기"}
               </Button>
             )}
           </div>

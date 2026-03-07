@@ -2,6 +2,7 @@
 
 import type { SocialGroupSummary } from "@/types/social";
 import { SocialGroupBadge } from "@/components/social/SocialGroupBadge";
+import { SocialGroupRoleBadge } from "@/components/social/SocialGroupRoleBadge";
 
 type Props = {
   groups: SocialGroupSummary[];
@@ -44,17 +45,16 @@ export function SocialGroupList({ groups, onOpenGroup, onCreateGroup }: Props) {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <p className="truncate text-[13.5px] font-semibold text-ios-text">{group.name}</p>
-                    <span
-                      className={`shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-semibold ${
-                        group.role === "owner"
-                          ? "bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
-                          : "bg-ios-bg text-ios-muted"
-                      }`}
-                    >
-                      {group.role === "owner" ? "방장" : "멤버"}
-                    </span>
+                    <SocialGroupRoleBadge role={group.role} />
+                    {group.pendingJoinRequestCount > 0 && (group.role === "owner" || group.role === "admin") ? (
+                      <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[10.5px] font-semibold text-amber-700">
+                        요청 {group.pendingJoinRequestCount}
+                      </span>
+                    ) : null}
                   </div>
-                  {group.description ? (
+                  {group.notice ? (
+                    <p className="mt-0.5 truncate text-[11.5px] text-ios-muted">공지 · {group.notice}</p>
+                  ) : group.description ? (
                     <p className="mt-0.5 truncate text-[11.5px] text-ios-muted">{group.description}</p>
                   ) : (
                     <p className="mt-0.5 text-[11.5px] text-ios-muted">멤버 {group.memberCount}명</p>
@@ -70,7 +70,12 @@ export function SocialGroupList({ groups, onOpenGroup, onCreateGroup }: Props) {
                         </span>
                       ))}
                     </div>
-                    <span className="text-[10.5px] text-ios-muted">멤버 {group.memberCount}명</span>
+                    <span className="text-[10.5px] text-ios-muted">
+                      멤버 {group.memberCount}/{group.maxMembers}명
+                    </span>
+                    {group.joinMode === "approval" ? (
+                      <span className="text-[10.5px] text-ios-muted">승인제</span>
+                    ) : null}
                   </div>
                 </div>
                 <svg
