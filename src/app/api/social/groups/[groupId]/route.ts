@@ -1,7 +1,15 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
-import { appendGroupActivity, getSocialGroupById, normalizeSocialGroupRole, parseSocialGroupId } from "@/lib/server/socialGroups";
+import {
+  appendGroupActivity,
+  appendSocialEvent,
+  getSocialGroupById,
+  listSocialGroupRecipientIds,
+  loadSocialGroupProfileMap,
+  normalizeSocialGroupRole,
+  parseSocialGroupId,
+} from "@/lib/server/socialGroups";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -35,7 +43,7 @@ export async function PATCH(
   const admin = getSupabaseAdmin();
 
   try {
-    const [group, { data: membership, error: membershipErr }] = await Promise.all([
+    const [group, { data: membership, error: membershipErr }, { data: memberRows, error: memberRowsErr }] = await Promise.all([
       getSocialGroupById(admin, groupId),
       (admin as any)
         .from("rnest_social_group_members")
@@ -43,9 +51,14 @@ export async function PATCH(
         .eq("group_id", groupId)
         .eq("user_id", userId)
         .maybeSingle(),
+      (admin as any)
+        .from("rnest_social_group_members")
+        .select("user_id, role")
+        .eq("group_id", groupId),
     ]);
 
     if (membershipErr) throw membershipErr;
+    if (memberRowsErr) throw memberRowsErr;
     if (!group) return jsonNoStore({ ok: false, error: "group_not_found" }, { status: 404 });
     if (!membership) return jsonNoStore({ ok: false, error: "not_group_member" }, { status: 403 });
 
@@ -77,6 +90,28 @@ export async function PATCH(
       actorUserId: userId,
       payload: { groupName: group.name },
     });
+
+    const recipientIds = listSocialGroupRecipientIds(memberRows ?? [], { excludeUserIds: [userId] });
+    if (recipientIds.length > 0) {
+      const actorProfile = (await loadSocialGroupProfileMap(admin, [userId])).get(userId);
+      await Promise.all(
+        recipientIds.map((recipientId) =>
+          appendSocialEvent({
+            admin,
+            recipientId,
+            actorId: userId,
+            type: "group_member_left",
+            entityId: String(groupId),
+            payload: {
+              groupName: group.name,
+              nickname: actorProfile?.nickname ?? "",
+              avatarEmoji: actorProfile?.avatarEmoji ?? "🐧",
+            },
+          })
+        )
+      );
+    }
+
     return jsonNoStore({ ok: true });
   } catch (err: any) {
     console.error("[SocialGroup/PATCH] id=%d err=%s", groupId, String(err?.message ?? err));

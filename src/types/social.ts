@@ -53,9 +53,13 @@ export type SocialEventType =
   | "connection_request"
   | "connection_accepted"
   | "connection_rejected"
+  | "group_notice_updated"
+  | "group_settings_updated"
   | "group_join_requested"
   | "group_join_approved"
   | "group_join_rejected"
+  | "group_member_joined"
+  | "group_member_left"
   | "group_role_changed"
   | "group_owner_transferred"
   | "group_member_removed";
@@ -70,6 +74,8 @@ export type SocialEvent = {
     avatarEmoji?: string;
     groupName?: string;
     role?: string;
+    notice?: string;
+    summary?: string;
   };
   readAt: string | null;
   createdAt: string;

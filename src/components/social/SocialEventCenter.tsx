@@ -9,6 +9,7 @@ type Props = {
   open: boolean;
   onClose: () => void;
   onUnreadCountChange: (count: number) => void;
+  refreshTick: number;
 };
 
 function buildEventLabel(event: SocialEvent): string {
@@ -22,12 +23,20 @@ function buildEventLabel(event: SocialEvent): string {
       return "님이 연결 요청을 수락했어요";
     case "connection_rejected":
       return "님이 연결 요청을 거절했어요";
+    case "group_notice_updated":
+      return `님이 ${groupName} 그룹 공지를 업데이트했어요`;
+    case "group_settings_updated":
+      return `님이 ${groupName} 그룹 설정을 변경했어요`;
     case "group_join_requested":
       return `님이 ${groupName} 그룹 가입을 요청했어요`;
     case "group_join_approved":
       return `${groupName} 그룹 가입이 승인되었어요`;
     case "group_join_rejected":
       return `${groupName} 그룹 가입이 거절되었어요`;
+    case "group_member_joined":
+      return `님이 ${groupName} 그룹에 들어왔어요`;
+    case "group_member_left":
+      return `님이 ${groupName} 그룹에서 나갔어요`;
     case "group_role_changed":
       return `${groupName} 그룹에서 내 역할이 ${role}(으)로 변경되었어요`;
     case "group_owner_transferred":
@@ -39,6 +48,18 @@ function buildEventLabel(event: SocialEvent): string {
   }
 }
 
+function buildEventDetail(event: SocialEvent): string | null {
+  if (event.type === "group_notice_updated") {
+    const notice = String(event.payload?.notice ?? "").trim();
+    return notice ? `공지 · ${notice}` : "공지가 비워졌어요.";
+  }
+  if (event.type === "group_settings_updated") {
+    const summary = String(event.payload?.summary ?? "").trim();
+    return summary || null;
+  }
+  return null;
+}
+
 function timeAgo(iso: string): string {
   const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
   if (diff < 60) return "방금 전";
@@ -47,7 +68,7 @@ function timeAgo(iso: string): string {
   return `${Math.floor(diff / 86400)}일 전`;
 }
 
-export function SocialEventCenter({ open, onClose, onUnreadCountChange }: Props) {
+export function SocialEventCenter({ open, onClose, onUnreadCountChange, refreshTick }: Props) {
   const [events, setEvents] = useState<SocialEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [markingAll, setMarkingAll] = useState(false);
@@ -67,7 +88,7 @@ export function SocialEventCenter({ open, onClose, onUnreadCountChange }: Props)
   useEffect(() => {
     if (!open) return;
     void loadEvents();
-  }, [open, loadEvents]);
+  }, [open, loadEvents, refreshTick]);
 
   // 시트 열릴 때 unread 이벤트 id 목록 수집 → read 처리
   useEffect(() => {
@@ -113,7 +134,7 @@ export function SocialEventCenter({ open, onClose, onUnreadCountChange }: Props)
       open={open}
       onClose={onClose}
       title="알림"
-      subtitle="친구 연결 요청 및 응답 알림"
+      subtitle="친구 연결, 그룹 공지, 운영 변경 알림"
       variant="appstore"
       maxHeightClassName="max-h-[78dvh]"
     >
@@ -165,6 +186,7 @@ export function SocialEventCenter({ open, onClose, onUnreadCountChange }: Props)
                 : event.payload?.nickname || "친구";
             const avatarEmoji = event.payload?.avatarEmoji || "🐧";
             const label = buildEventLabel(event);
+            const detail = buildEventDetail(event);
             const isUnread = !event.readAt;
             const renderStandaloneLabel =
               event.type === "group_join_approved" ||
@@ -198,6 +220,9 @@ export function SocialEventCenter({ open, onClose, onUnreadCountChange }: Props)
                       </>
                     )}
                   </p>
+                  {detail ? (
+                    <p className="mt-1 line-clamp-2 text-[11.5px] text-ios-muted">{detail}</p>
+                  ) : null}
                   <p className="mt-0.5 text-[11.5px] text-ios-muted">{timeAgo(event.createdAt)}</p>
                 </div>
                 {isUnread && (

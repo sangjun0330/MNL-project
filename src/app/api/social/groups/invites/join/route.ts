@@ -10,6 +10,7 @@ import {
   appendGroupActivity,
   appendSocialEvent,
   getSocialGroupById,
+  listSocialGroupRecipientIds,
   loadPendingJoinRequestForUser,
   loadSocialGroupProfileMap,
   mapSocialGroupSummary,
@@ -184,6 +185,24 @@ export async function POST(req: Request) {
         actorUserId: userId,
         payload: { groupName: group.name },
       });
+
+      const recipientIds = listSocialGroupRecipientIds(members, { excludeUserIds: [userId] });
+      await Promise.all(
+        recipientIds.map((recipientId) =>
+          appendSocialEvent({
+            admin,
+            recipientId,
+            actorId: userId,
+            type: "group_member_joined",
+            entityId: String(invite.groupId),
+            payload: {
+              groupName: group.name,
+              nickname: myProfile?.nickname ?? "",
+              avatarEmoji: myProfile?.avatarEmoji ?? "🐧",
+            },
+          })
+        )
+      );
     }
 
     const { data: finalMemberRows } = await (admin as any)

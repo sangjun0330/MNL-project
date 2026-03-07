@@ -63,6 +63,26 @@ export function isSocialGroupManager(role: SocialGroupRole | string | null | und
   return role === "owner" || role === "admin";
 }
 
+export function listSocialGroupRecipientIds(
+  memberRows: Array<{ user_id?: unknown; role?: unknown }>,
+  input?: {
+    excludeUserIds?: string[];
+    managersOnly?: boolean;
+  }
+): string[] {
+  const exclude = new Set((input?.excludeUserIds ?? []).filter(Boolean));
+  const ids = new Set<string>();
+
+  for (const row of memberRows ?? []) {
+    const userId = String(row?.user_id ?? "").trim();
+    if (!userId || exclude.has(userId)) continue;
+    if (input?.managersOnly && !isSocialGroupManager(normalizeSocialGroupRole(row?.role))) continue;
+    ids.add(userId);
+  }
+
+  return Array.from(ids);
+}
+
 export function buildSocialGroupPermissions(
   role: SocialGroupRole,
   allowMemberInvites: boolean

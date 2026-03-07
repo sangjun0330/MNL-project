@@ -115,6 +115,7 @@ export function SocialPage() {
   const [openGroupJoin, setOpenGroupJoin] = useState(false);
   const [openEventCenter, setOpenEventCenter] = useState(false);
   const [unreadEventCount, setUnreadEventCount] = useState(0);
+  const [eventRefreshTick, setEventRefreshTick] = useState(0);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [profileChecked, setProfileChecked] = useState(false);
   const [notice, setNotice] = useState<{ tone: "info" | "success" | "error"; text: string } | null>(null);
@@ -129,6 +130,7 @@ export function SocialPage() {
   const scheduleFetchSeqRef = useRef(0);
   const friendMetaFetchSeqRef = useRef(0);
   const groupsFetchSeqRef = useRef(0);
+  const eventsFetchSeqRef = useRef(0);
 
   const fetchProfile = useCallback(() => {
     if (status !== "authenticated") {
@@ -259,6 +261,24 @@ export function SocialPage() {
       });
   }, [status]);
 
+  const fetchUnreadEventCount = useCallback(() => {
+    if (status !== "authenticated") {
+      eventsFetchSeqRef.current += 1;
+      setUnreadEventCount(0);
+      return;
+    }
+    const fetchSeq = ++eventsFetchSeqRef.current;
+    fetch("/api/social/events", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((res) => {
+        if (fetchSeq !== eventsFetchSeqRef.current) return;
+        if (res.ok) {
+          setUnreadEventCount(Number(res.data?.unreadCount ?? 0));
+        }
+      })
+      .catch(() => {});
+  }, [status]);
+
   const handleGroupUpdated = useCallback((nextGroup: SocialGroupSummary) => {
     setSelectedGroup((prev) => {
       if (!prev || prev.id !== nextGroup.id) return nextGroup;
@@ -281,7 +301,8 @@ export function SocialPage() {
     fetchFriendsSchedule();
     fetchFriendMeta();
     fetchGroups();
-  }, [profileChecked, fetchConnections, fetchFriendsSchedule, fetchFriendMeta, fetchGroups, status]);
+    fetchUnreadEventCount();
+  }, [profileChecked, fetchConnections, fetchFriendsSchedule, fetchFriendMeta, fetchGroups, fetchUnreadEventCount, status]);
 
   const refreshConnectionsAndSchedule = useCallback(() => {
     fetchConnections();
@@ -310,6 +331,7 @@ export function SocialPage() {
         refreshConnectionsAndSchedule();
         fetchFriendMeta();
         fetchGroups();
+        fetchUnreadEventCount();
       }, 300);
     };
     const onVisibility = () => { if (!document.hidden) trigger(); };
@@ -320,7 +342,7 @@ export function SocialPage() {
       document.removeEventListener("visibilitychange", onVisibility);
       clearTimeout(tid);
     };
-  }, [fetchFriendMeta, fetchGroups, profileChecked, refreshConnectionsAndSchedule, status]);
+  }, [fetchFriendMeta, fetchGroups, fetchUnreadEventCount, profileChecked, refreshConnectionsAndSchedule, status]);
 
   const handleRealtimeEvent = useCallback(
     (payload: SocialConnectionRealtimePayload) => {
@@ -368,7 +390,10 @@ export function SocialPage() {
   });
 
   // 새 이벤트(알림) 실시간 구독 — INSERT 시 unread count +1
-  const handleNewEvent = useCallback(() => setUnreadEventCount((c) => c + 1), []);
+  const handleNewEvent = useCallback(() => {
+    setEventRefreshTick((prev) => prev + 1);
+    fetchUnreadEventCount();
+  }, [fetchUnreadEventCount]);
   useSocialEventsRealtimeRefresh({
     enabled: profileChecked && status === "authenticated",
     userId: user?.userId ?? null,
@@ -936,6 +961,7 @@ export function SocialPage() {
         open={openEventCenter}
         onClose={() => setOpenEventCenter(false)}
         onUnreadCountChange={setUnreadEventCount}
+        refreshTick={eventRefreshTick}
       />
     </div>
   );

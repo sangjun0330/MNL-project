@@ -13,6 +13,8 @@ import {
   appendSocialEvent,
   buildSocialGroupPermissions,
   getSocialGroupById,
+  listSocialGroupRecipientIds,
+  loadSocialGroupProfileMap,
   normalizeSocialGroupRole,
   parseSocialGroupId,
 } from "@/lib/server/socialGroups";
@@ -32,6 +34,28 @@ function parseMaxMembers(value: unknown, fallback: number): number {
   const parsed = Number.parseInt(String(value ?? fallback), 10);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(24, Math.max(2, parsed));
+}
+
+function buildSettingsSummary(input: {
+  previousName: string;
+  nextName: string;
+  previousDescription: string;
+  nextDescription: string;
+  previousJoinMode: "open" | "approval";
+  nextJoinMode: "open" | "approval";
+  previousAllowMemberInvites: boolean;
+  nextAllowMemberInvites: boolean;
+  previousMaxMembers: number;
+  nextMaxMembers: number;
+}): string {
+  const changed: string[] = [];
+  if (input.previousName !== input.nextName) changed.push("이름");
+  if (input.previousDescription !== input.nextDescription) changed.push("소개");
+  if (input.previousJoinMode !== input.nextJoinMode) changed.push("가입 방식");
+  if (input.previousAllowMemberInvites !== input.nextAllowMemberInvites) changed.push("초대 권한");
+  if (input.previousMaxMembers !== input.nextMaxMembers) changed.push("최대 인원");
+  if (changed.length === 0) return "그룹 설정이 업데이트됐어요.";
+  return `변경 항목: ${changed.join(", ")}`;
 }
 
 export async function POST(
@@ -141,6 +165,11 @@ export async function POST(
         nextAllowMemberInvites !== group.allowMemberInvites ||
         nextMaxMembers !== group.maxMembers;
       const noticeChanged = nextNotice !== group.notice;
+      const recipientIds = listSocialGroupRecipientIds(members, { excludeUserIds: [userId] });
+      const actorProfile =
+        settingsChanged || noticeChanged
+          ? (await loadSocialGroupProfileMap(admin, [userId])).get(userId)
+          : null;
 
       if (settingsChanged) {
         await appendGroupActivity({
@@ -150,6 +179,34 @@ export async function POST(
           actorUserId: userId,
           payload: { groupName: nextName },
         });
+        await Promise.all(
+          recipientIds.map((recipientId) =>
+            appendSocialEvent({
+              admin,
+              recipientId,
+              actorId: userId,
+              type: "group_settings_updated",
+              entityId: String(groupId),
+              payload: {
+                groupName: nextName,
+                nickname: actorProfile?.nickname ?? "",
+                avatarEmoji: actorProfile?.avatarEmoji ?? "🐧",
+                summary: buildSettingsSummary({
+                  previousName: group.name,
+                  nextName,
+                  previousDescription: group.description,
+                  nextDescription,
+                  previousJoinMode: group.joinMode,
+                  nextJoinMode,
+                  previousAllowMemberInvites: group.allowMemberInvites,
+                  nextAllowMemberInvites,
+                  previousMaxMembers: group.maxMembers,
+                  nextMaxMembers,
+                }),
+              },
+            })
+          )
+        );
       }
       if (noticeChanged) {
         await appendGroupActivity({
@@ -159,6 +216,23 @@ export async function POST(
           actorUserId: userId,
           payload: { notice: nextNotice },
         });
+        await Promise.all(
+          recipientIds.map((recipientId) =>
+            appendSocialEvent({
+              admin,
+              recipientId,
+              actorId: userId,
+              type: "group_notice_updated",
+              entityId: String(groupId),
+              payload: {
+                groupName: nextName,
+                nickname: actorProfile?.nickname ?? "",
+                avatarEmoji: actorProfile?.avatarEmoji ?? "🐧",
+                notice: nextNotice,
+              },
+            })
+          )
+        );
       }
 
       await recordSocialActionAttempt({ req, userId, action: `group_manage_${action}`, success: true, detail: "ok" });
@@ -406,6 +480,28 @@ export async function POST(
           entityId: String(groupId),
           payload: { groupName: group.name },
         });
+        if (!existingMember) {
+          const requesterProfile = (await loadSocialGroupProfileMap(admin, [requesterUserId])).get(requesterUserId);
+          const recipientIds = listSocialGroupRecipientIds(members, {
+            excludeUserIds: [userId, requesterUserId],
+          });
+          await Promise.all(
+            recipientIds.map((recipientId) =>
+              appendSocialEvent({
+                admin,
+                recipientId,
+                actorId: requesterUserId,
+                type: "group_member_joined",
+                entityId: String(groupId),
+                payload: {
+                  groupName: group.name,
+                  nickname: requesterProfile?.nickname ?? "",
+                  avatarEmoji: requesterProfile?.avatarEmoji ?? "🐧",
+                },
+              })
+            )
+          );
+        }
       } else {
         const { error: updateErr } = await (admin as any)
           .from("rnest_social_group_join_requests")
