@@ -35,6 +35,12 @@ export type FriendsScheduleData = {
   commonOffDays: string[];
 };
 
+export type FriendMeta = {
+  pinned: boolean;
+  alias: string; // 빈 문자열이면 원래 닉네임 사용
+  muted: boolean;
+};
+
 export type ScheduleVisibility = "full" | "off_only" | "hidden";
 
 export type SocialPreferences = {

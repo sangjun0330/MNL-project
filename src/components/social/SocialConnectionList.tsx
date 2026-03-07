@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { SocialConnection, FriendSchedule } from "@/types/social";
+import type { SocialConnection, FriendSchedule, FriendMeta } from "@/types/social";
 import { SocialFriendMiniCalendar } from "./SocialFriendMiniCalendar";
 
 type Props = {
@@ -10,6 +10,8 @@ type Props = {
   month: string; // "YYYY-MM"
   mySchedule: Record<string, string>;
   pairCommonOffByUserId: Map<string, string[]>;
+  friendMeta: Record<string, FriendMeta>;
+  onMetaChange: (userId: string, patch: Partial<FriendMeta>) => void;
   onAddFriend: () => void;
   onRefresh: () => void;
 };
@@ -29,11 +31,15 @@ export function SocialConnectionList({
   month,
   mySchedule,
   pairCommonOffByUserId,
+  friendMeta,
+  onMetaChange,
   onAddFriend,
   onRefresh,
 }: Props) {
   const [loadingId, setLoadingId] = useState<number | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [editingAliasId, setEditingAliasId] = useState<string | null>(null);
+  const [aliasInput, setAliasInput] = useState("");
 
   const handleAction = async (id: number, action: "delete" | "block") => {
     if (loadingId) return;
@@ -56,10 +62,20 @@ export function SocialConnectionList({
     setLoadingId(null);
   };
 
-  // 리렌더링마다 새 Map 생성 방지
+  const handleMetaPatch = async (userId: string, patch: Partial<FriendMeta>) => {
+    // 낙관적 업데이트
+    onMetaChange(userId, patch);
+    try {
+      await fetch(`/api/social/friends/${userId}/meta`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+    } catch {}
+  };
+
   const scheduleByUserId = new Map(friendSchedules.map((f) => [f.userId, f]));
 
-  // 접힌 상태에서 보여줄 미리보기 (날짜순 정렬 후 최신 6개)
   const getPreviewShifts = (schedule: Record<string, string>) =>
     Object.entries(schedule)
       .sort(([a], [b]) => a.localeCompare(b))
@@ -87,6 +103,9 @@ export function SocialConnectionList({
             const isExpanded = expandedId === c.userId;
             const preview = friendSchedule ? getPreviewShifts(friendSchedule.schedule) : [];
             const pairCommonOff = pairCommonOffByUserId.get(c.userId) ?? [];
+            const meta = friendMeta[c.userId] ?? { pinned: false, alias: "", muted: false };
+            // 별칭이 있으면 별칭 우선
+            const displayName = meta.alias || c.nickname || "익명";
 
             return (
               <div key={c.id} className="px-4 py-3">
@@ -95,12 +114,26 @@ export function SocialConnectionList({
                   className="flex w-full items-center gap-3 text-left"
                   onClick={() => setExpandedId(isExpanded ? null : c.userId)}
                 >
-                  <span className="text-[26px]">{c.avatarEmoji || "🐧"}</span>
+                  <div className="relative shrink-0">
+                    <span className="text-[26px]">{c.avatarEmoji || "🐧"}</span>
+                    {meta.pinned && (
+                      <span className="absolute -top-1 -right-1 text-[10px]">📌</span>
+                    )}
+                  </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-[13.5px] font-semibold text-ios-text truncate">
-                      {c.nickname || "익명"}
-                    </p>
-                    {/* 상태 메시지 — 항상 표시 */}
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-[13.5px] font-semibold text-ios-text truncate">
+                        {displayName}
+                      </p>
+                      {meta.alias && (
+                        <span className="text-[10.5px] text-ios-muted shrink-0">
+                          ({c.nickname})
+                        </span>
+                      )}
+                      {meta.muted && (
+                        <span className="text-[11px] text-ios-muted shrink-0">🔕</span>
+                      )}
+                    </div>
                     {c.statusMessage && (
                       <p className="text-[11.5px] text-ios-muted mt-0.5 truncate">{c.statusMessage}</p>
                     )}
@@ -135,14 +168,85 @@ export function SocialConnectionList({
                   </svg>
                 </button>
 
-                {/* 펼침 — 공통 오프 + 미니 캘린더 */}
                 {isExpanded && (
                   <div className="mt-3">
-                    {/* 나와의 개별 공통 오프 날짜 */}
+                    {/* 메타 액션: 핀 + 별칭 + 뮤트 */}
+                    <div className="flex flex-wrap items-center gap-2 mb-3">
+                      {/* 핀 토글 */}
+                      <button
+                        type="button"
+                        onClick={() => void handleMetaPatch(c.userId, { pinned: !meta.pinned })}
+                        className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold transition active:opacity-70 ${
+                          meta.pinned
+                            ? "bg-amber-100 text-amber-700"
+                            : "bg-ios-bg text-ios-muted"
+                        }`}
+                      >
+                        📌 {meta.pinned ? "핀 해제" : "핀"}
+                      </button>
+
+                      {/* 별칭 편집 */}
+                      {editingAliasId === c.userId ? (
+                        <div className="flex items-center gap-1 flex-1 min-w-0">
+                          <input
+                            autoFocus
+                            value={aliasInput}
+                            onChange={(e) =>
+                              setAliasInput(Array.from(e.target.value).slice(0, 12).join(""))
+                            }
+                            placeholder="별칭 입력 (최대 12자)"
+                            className="flex-1 min-w-0 rounded-xl bg-ios-bg px-2.5 py-1 text-[11.5px] text-ios-text outline-none border border-ios-sep focus:border-[color:var(--rnest-accent)]"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void handleMetaPatch(c.userId, { alias: aliasInput.trim() });
+                              setEditingAliasId(null);
+                            }}
+                            className="text-[11px] font-semibold text-[color:var(--rnest-accent)] shrink-0"
+                          >
+                            확인
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingAliasId(null)}
+                            className="text-[11px] text-ios-muted shrink-0"
+                          >
+                            취소
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAliasInput(meta.alias);
+                            setEditingAliasId(c.userId);
+                          }}
+                          className="flex items-center gap-1 rounded-full bg-ios-bg px-2.5 py-1 text-[11px] font-semibold text-ios-muted transition active:opacity-70"
+                        >
+                          ✏️ {meta.alias ? "별칭 수정" : "별칭"}
+                        </button>
+                      )}
+
+                      {/* 뮤트 토글 */}
+                      <button
+                        type="button"
+                        onClick={() => void handleMetaPatch(c.userId, { muted: !meta.muted })}
+                        className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold transition active:opacity-70 ${
+                          meta.muted
+                            ? "bg-gray-200 text-gray-600"
+                            : "bg-ios-bg text-ios-muted"
+                        }`}
+                      >
+                        🔕 {meta.muted ? "뮤트 해제" : "뮤트"}
+                      </button>
+                    </div>
+
+                    {/* 나와의 공통 오프 날짜 */}
                     {pairCommonOff.length > 0 ? (
                       <div className="mb-3">
                         <p className="text-[11.5px] font-semibold text-ios-muted mb-1.5">
-                          {c.nickname || "친구"}와 같이 쉬는 날
+                          {displayName}와 같이 쉬는 날
                         </p>
                         <div className="flex flex-wrap gap-1">
                           {pairCommonOff.map((iso) => (

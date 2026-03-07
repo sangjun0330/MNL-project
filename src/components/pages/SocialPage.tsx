@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signInWithProvider, useAuthState } from "@/lib/auth";
-import type { SocialConnectionsData, FriendsScheduleData, SocialProfile } from "@/types/social";
+import type { SocialConnectionsData, FriendsScheduleData, SocialProfile, FriendMeta } from "@/types/social";
 import { SocialConnectForm } from "@/components/social/SocialConnectForm";
 import { SocialPendingCard } from "@/components/social/SocialPendingCard";
 import { SocialConnectionList } from "@/components/social/SocialConnectionList";
@@ -57,6 +57,7 @@ export function SocialPage() {
   const [connections, setConnections] = useState<SocialConnectionsData | null>(null);
   const [friendsSchedule, setFriendsSchedule] = useState<FriendsScheduleData | null>(null);
   const [profile, setProfile] = useState<SocialProfile | null>(null);
+  const [friendMeta, setFriendMeta] = useState<Record<string, FriendMeta>>({});
   const [connectionsLoading, setConnectionsLoading] = useState(true);
   const [scheduleLoading, setScheduleLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(true);
@@ -139,11 +140,25 @@ export function SocialPage() {
       .finally(() => setScheduleLoading(false));
   }, [fetchMonths, status]);
 
+  const fetchFriendMeta = useCallback(() => {
+    if (status !== "authenticated") {
+      setFriendMeta({});
+      return;
+    }
+    fetch("/api/social/friends/meta", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((res) => {
+        if (res.ok) setFriendMeta(res.data ?? {});
+      })
+      .catch(() => {});
+  }, [status]);
+
   useEffect(() => {
     if (!profileChecked || status !== "authenticated") return;
     fetchConnections();
     fetchFriendsSchedule();
-  }, [profileChecked, fetchConnections, fetchFriendsSchedule, status]);
+    fetchFriendMeta();
+  }, [profileChecked, fetchConnections, fetchFriendsSchedule, fetchFriendMeta, status]);
 
   const refreshConnectionsAndSchedule = useCallback(() => {
     fetchConnections();
@@ -250,9 +265,24 @@ export function SocialPage() {
 
   const pendingIncoming = connections?.pendingIncoming ?? [];
   const pendingSent = connections?.pendingSent ?? [];
-  const accepted = connections?.accepted ?? [];
+  const rawAccepted = connections?.accepted ?? [];
   const commonOffDays = friendsSchedule?.commonOffDays ?? [];
   const friendSchedules = friendsSchedule?.friends ?? [];
+
+  // 핀된 친구 먼저 → connectedAt 내림차순 정렬
+  const accepted = useMemo(
+    () =>
+      [...rawAccepted].sort((a, b) => {
+        const aPinned = friendMeta[a.userId]?.pinned ? 1 : 0;
+        const bPinned = friendMeta[b.userId]?.pinned ? 1 : 0;
+        if (bPinned !== aPinned) return bPinned - aPinned;
+        // connectedAt 내림차순 (없으면 마지막)
+        const aAt = a.connectedAt ?? "";
+        const bAt = b.connectedAt ?? "";
+        return bAt.localeCompare(aAt);
+      }),
+    [rawAccepted, friendMeta]
+  );
 
   // pairCommonOff: 각 친구와 나의 개별 공통 오프 날짜 (이번 달 기준)
   const pairCommonOffByUserId = useMemo(() => {
@@ -539,6 +569,13 @@ export function SocialPage() {
           month={month}
           mySchedule={mySchedule}
           pairCommonOffByUserId={pairCommonOffByUserId}
+          friendMeta={friendMeta}
+          onMetaChange={(userId, patch) => {
+            setFriendMeta((prev) => ({
+              ...prev,
+              [userId]: { ...(prev[userId] ?? { pinned: false, alias: "", muted: false }), ...patch },
+            }));
+          }}
           onAddFriend={() => {
             setConnectPrefillCode(null);
             setConnectPrefillMessage(null);
