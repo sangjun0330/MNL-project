@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { SocialCalendarIcon } from "@/components/social/SocialIcons";
 
 export type CommonOffMode = "all" | "any";
 
@@ -60,7 +61,9 @@ export function SocialCommonOffDays({ dates, friendCount, mode, onModeChange }: 
       {/* 헤더 + 모드 토글 */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
-          <span className="text-[18px]">📅</span>
+          <span className="flex h-7 w-7 items-center justify-center rounded-2xl bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]">
+            <SocialCalendarIcon className="h-[18px] w-[18px]" />
+          </span>
           <span className="text-[13.5px] font-semibold text-ios-text">이번 달 같이 쉬는 날</span>
         </div>
         {/* 전체/1명이라도 토글 — 친구 2명 이상일 때만 의미 있음 */}

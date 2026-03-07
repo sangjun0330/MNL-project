@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { SocialConnection } from "@/types/social";
+import { SocialCalendarIcon } from "@/components/social/SocialIcons";
 
 type Props = {
   connections: SocialConnection[];
@@ -54,7 +55,9 @@ export function SocialNextCommonOff({ connections, pairCommonOffByUserId }: Prop
   return (
     <div className="rounded-apple border border-ios-sep bg-white shadow-apple px-4 py-3">
       <div className="flex items-center gap-2 mb-2.5">
-        <span className="text-[18px]">🗓️</span>
+        <span className="flex h-7 w-7 items-center justify-center rounded-2xl bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]">
+          <SocialCalendarIcon className="h-[18px] w-[18px]" />
+        </span>
         <span className="text-[13.5px] font-semibold text-ios-text">다음 같이 쉬는 날</span>
       </div>
 

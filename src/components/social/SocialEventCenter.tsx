@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
+import { SocialBellIcon } from "@/components/social/SocialIcons";
 import type { SocialEvent } from "@/types/social";
 
 type Props = {
@@ -125,7 +126,9 @@ export function SocialEventCenter({ open, onClose, onUnreadCountChange }: Props)
 
         {!loading && events.length === 0 && (
           <div className="py-8 text-center">
-            <p className="text-[32px] mb-2">🔔</p>
+            <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-[20px] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]">
+              <SocialBellIcon className="h-7 w-7" />
+            </div>
             <p className="text-[14px] text-ios-muted">최근 7일 내 알림이 없어요</p>
           </div>
         )}

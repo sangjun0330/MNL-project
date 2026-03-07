@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { FriendSchedule } from "@/types/social";
+import { SocialCalendarIcon } from "@/components/social/SocialIcons";
 
 type Props = {
   friends: FriendSchedule[];
@@ -60,7 +61,9 @@ export function SocialThisWeek({ friends, mySchedule }: Props) {
   return (
     <div className="rounded-apple border border-ios-sep bg-white shadow-apple px-4 py-3">
       <div className="flex items-center gap-2 mb-3">
-        <span className="text-[18px]">📆</span>
+        <span className="flex h-7 w-7 items-center justify-center rounded-2xl bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]">
+          <SocialCalendarIcon className="h-[18px] w-[18px]" />
+        </span>
         <span className="text-[13.5px] font-semibold text-ios-text">이번 주 근무 현황</span>
       </div>
 

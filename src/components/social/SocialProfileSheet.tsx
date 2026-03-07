@@ -39,6 +39,35 @@ function formatCode(code: string | null) {
   return `${code.slice(0, 3)} · ${code.slice(3)}`;
 }
 
+type ToggleSwitchProps = {
+  checked: boolean;
+  disabled?: boolean;
+  onToggle: () => void;
+  label: string;
+};
+
+function ToggleSwitch({ checked, disabled = false, onToggle, label }: ToggleSwitchProps) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={onToggle}
+      className={`inline-flex h-7 w-12 shrink-0 items-center overflow-hidden rounded-full p-0.5 transition-colors duration-200 ${
+        checked ? "bg-[color:var(--rnest-accent)]" : "bg-ios-sep"
+      } disabled:opacity-50`}
+    >
+      <span
+        className={`block h-6 w-6 rounded-full bg-white shadow-[0_1px_3px_rgba(15,23,42,0.18)] transition-transform duration-200 ${
+          checked ? "translate-x-5" : "translate-x-0"
+        }`}
+      />
+    </button>
+  );
+}
+
 export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
   const mySchedule = useAppStoreSelector((s) => s.schedule as Record<string, string>);
   const autoStatus = useMemo(() => generateAutoStatus(mySchedule), [mySchedule]);
@@ -454,24 +483,16 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
               <p className="text-[12.5px] font-medium text-ios-text">상태 메시지 공개</p>
               <p className="text-[11px] text-ios-muted mt-0.5">친구에게 내 상태 메시지 표시</p>
             </div>
-            <button
-              type="button"
+            <ToggleSwitch
+              checked={statusMsgVisible}
               disabled={prefsSaving}
-              onClick={() => {
+              label="상태 메시지 공개"
+              onToggle={() => {
                 const next = !statusMsgVisible;
                 setStatusMsgVisible(next);
                 void handleSavePrefs({ statusMessageVisible: next });
               }}
-              className={`relative h-7 w-12 rounded-full transition-colors duration-200 ${
-                statusMsgVisible ? "bg-[color:var(--rnest-accent)]" : "bg-ios-sep"
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform duration-200 ${
-                  statusMsgVisible ? "translate-x-5" : "translate-x-0.5"
-                }`}
-              />
-            </button>
+            />
           </div>
 
           {/* 초대 링크 수신 */}
@@ -480,24 +501,16 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
               <p className="text-[12.5px] font-medium text-ios-text">친구 요청 수신</p>
               <p className="text-[11px] text-ios-muted mt-0.5">코드/링크로 연결 요청 받기</p>
             </div>
-            <button
-              type="button"
+            <ToggleSwitch
+              checked={acceptInvites}
               disabled={prefsSaving}
-              onClick={() => {
+              label="친구 요청 수신"
+              onToggle={() => {
                 const next = !acceptInvites;
                 setAcceptInvites(next);
                 void handleSavePrefs({ acceptInvites: next });
               }}
-              className={`relative h-7 w-12 rounded-full transition-colors duration-200 ${
-                acceptInvites ? "bg-[color:var(--rnest-accent)]" : "bg-ios-sep"
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform duration-200 ${
-                  acceptInvites ? "translate-x-5" : "translate-x-0.5"
-                }`}
-              />
-            </button>
+            />
           </div>
         </div>
 
