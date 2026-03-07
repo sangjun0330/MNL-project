@@ -1,16 +1,25 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { usePathname, useRouter } from "next/navigation";
 import { BottomNav } from "@/components/shell/BottomNav";
 import { UiPreferencesBridge } from "@/components/system/UiPreferencesBridge";
-import { CloudStateSync } from "@/components/system/CloudStateSync";
 import { getSupabaseBrowserClient, useAuthState } from "@/lib/auth";
 import { hydrateState, setLocalSaveEnabled, setStorageScope, useAppStoreSelector } from "@/lib/store";
 import { emptyState } from "@/lib/model";
 import { useI18n } from "@/lib/useI18n";
-import { OnboardingGuide } from "@/components/system/OnboardingGuide";
 import type { SyntheticEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
+
+const CloudStateSync = dynamic(
+  () => import("@/components/system/CloudStateSync").then((mod) => mod.CloudStateSync),
+  { ssr: false }
+);
+
+const OnboardingGuide = dynamic(
+  () => import("@/components/system/OnboardingGuide").then((mod) => mod.OnboardingGuide),
+  { ssr: false }
+);
 
 const AUTH_INTERACTION_GUARD_ENABLED =
   process.env.NEXT_PUBLIC_AUTH_INTERACTION_GUARD_ENABLED !== "false";

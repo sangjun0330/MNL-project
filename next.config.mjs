@@ -14,8 +14,67 @@ const allowedDevOrigins =
     ? Array.from(new Set([...devDefaults, ...allowedFromEnv]))
     : allowedFromEnv;
 
-// Content-Security-Policy는 src/middleware.ts에서 요청별 nonce와 함께 동적으로 설정됩니다.
-// 여기서는 CSP 이외의 보안 헤더만 정적으로 선언합니다.
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+let supabaseOrigin = "";
+if (supabaseUrl) {
+  try {
+    supabaseOrigin = new URL(supabaseUrl).origin;
+  } catch {
+    // ignore malformed URL
+  }
+}
+
+const tossScriptOrigin = "https://js.tosspayments.com";
+const tossApiOrigin = "https://api.tosspayments.com";
+const tossWildcard = "https://*.tosspayments.com";
+const tossLegacyPayOrigin = "https://pay.toss.im";
+const daumScriptOrigin = "https://t1.daumcdn.net";
+const daumPostcodeOrigin = "https://postcode.map.daum.net";
+const daumWildcard = "https://*.daum.net";
+
+const connectSources = [
+  "'self'",
+  "https://cloudflareinsights.com",
+  tossApiOrigin,
+  tossWildcard,
+  tossLegacyPayOrigin,
+  daumPostcodeOrigin,
+  daumWildcard,
+];
+
+if (supabaseOrigin) {
+  connectSources.push(supabaseOrigin, supabaseOrigin.replace(/^http/i, "ws"));
+}
+
+const scriptSources = [
+  "'self'",
+  "'unsafe-inline'",
+  "https://static.cloudflareinsights.com",
+  tossScriptOrigin,
+  tossWildcard,
+  daumScriptOrigin,
+  daumWildcard,
+];
+
+if (process.env.NODE_ENV === "development") {
+  scriptSources.push("'unsafe-eval'");
+}
+
+const contentSecurityPolicy = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+  "object-src 'none'",
+  `script-src ${scriptSources.join(" ")}`,
+  "style-src 'self' 'unsafe-inline'",
+  `img-src 'self' data: blob: https://cloudflareinsights.com ${tossWildcard}`,
+  "font-src 'self' data:",
+  `connect-src ${connectSources.join(" ")}`,
+  `frame-src 'self' ${tossWildcard} ${tossLegacyPayOrigin} ${daumPostcodeOrigin} ${daumWildcard}`,
+  "media-src 'self' blob:",
+  "worker-src 'self' blob:",
+].join("; ");
 
 const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
@@ -25,7 +84,7 @@ const securityHeaders = [
   { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
   { key: "Cross-Origin-Resource-Policy", value: "same-site" },
   { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
-  // Content-Security-Policy: middleware.ts에서 요청별 nonce와 함께 동적으로 설정됨
+  { key: "Content-Security-Policy", value: contentSecurityPolicy },
 ];
 
 const nextConfig = {

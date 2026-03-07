@@ -1,13 +1,13 @@
+import { Suspense } from "react";
 import { AppShell } from "@/components/shell/AppShell";
 import { ShopCheckoutSuccessPage } from "@/components/pages/ShopCheckoutSuccessPage";
-
-export const runtime = "edge";
-export const dynamic = "force-dynamic";
 
 export default function Page() {
   return (
     <AppShell>
-      <ShopCheckoutSuccessPage />
+      <Suspense fallback={<div className="min-h-[40dvh] rounded-apple bg-white/70" />}>
+        <ShopCheckoutSuccessPage />
+      </Suspense>
     </AppShell>
   );
 }

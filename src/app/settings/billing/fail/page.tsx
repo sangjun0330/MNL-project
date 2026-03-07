@@ -1,13 +1,13 @@
+import { Suspense } from "react";
 import { AppShell } from "@/components/shell/AppShell";
 import { SettingsBillingFailPage } from "@/components/pages/SettingsBillingFailPage";
-
-export const runtime = "edge";
-export const dynamic = "force-dynamic";
 
 export default function Page() {
   return (
     <AppShell>
-      <SettingsBillingFailPage />
+      <Suspense fallback={<div className="min-h-[40dvh] rounded-apple bg-white/70" />}>
+        <SettingsBillingFailPage />
+      </Suspense>
     </AppShell>
   );
 }

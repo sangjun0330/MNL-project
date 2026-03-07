@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { ISODate } from "@/lib/date";
@@ -139,8 +140,38 @@ export default function Home() {
 
   const headerDate = useMemo(() => formatHeaderDate(homeSelected), [homeSelected]);
   const greetingText = useMemo(() => greeting(), []);
+  const [deferredReady, setDeferredReady] = useState(false);
 
-  const aiRecovery = useAIRecoveryInsights({ mode: "cache", enabled: true });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const win = window as Window &
+      typeof globalThis & {
+        requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+        cancelIdleCallback?: (handle: number) => void;
+      };
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let idleId: number | null = null;
+    const markReady = () => {
+      if (!cancelled) setDeferredReady(true);
+    };
+
+    if (typeof win.requestIdleCallback === "function") {
+      idleId = win.requestIdleCallback(markReady, { timeout: 900 });
+    } else {
+      timeoutId = setTimeout(markReady, 220);
+    }
+
+    return () => {
+      cancelled = true;
+      if (idleId != null && typeof win.cancelIdleCallback === "function") {
+        win.cancelIdleCallback(idleId);
+      }
+      if (timeoutId != null) clearTimeout(timeoutId);
+    };
+  }, []);
+
+  const aiRecovery = useAIRecoveryInsights({ mode: "cache", enabled: deferredReady });
   const aiHeadline = useMemo(() => {
     const raw = aiRecovery.data?.result?.headline;
     if (typeof raw === "string") {
@@ -161,6 +192,7 @@ export default function Home() {
   // ── Shop catalog (실제 쇼핑 페이지와 동일한 제품 목록) ──
   const [shopCatalog, setShopCatalog] = useState<ShopProduct[]>(SHOP_PRODUCTS);
   useEffect(() => {
+    if (!deferredReady) return;
     fetch("/api/shop/catalog", { method: "GET", cache: "no-store" })
       .then((r) => r.json())
       .then((json) => {
@@ -169,10 +201,11 @@ export default function Home() {
         }
       })
       .catch(() => {/* 실패 시 기본 SHOP_PRODUCTS 유지 */});
-  }, []);
+  }, [deferredReady]);
 
   // ── Shop recommendations (실제 쇼핑 카탈로그 기반) ──
   const topShopRecs = useMemo(() => {
+    if (!deferredReady) return [];
     const recs = buildShopRecommendations({
       selected: homeSelected,
       schedule: store.schedule,
@@ -181,7 +214,7 @@ export default function Home() {
       products: shopCatalog,
     });
     return recs.recommendations.slice(0, 6);
-  }, [homeSelected, store.schedule, store.bio, store.settings, shopCatalog]);
+  }, [deferredReady, homeSelected, store.schedule, store.bio, store.settings, shopCatalog]);
 
   return (
     <div className="flex flex-col gap-3.5 px-0 pb-4 pt-5">
@@ -364,12 +397,15 @@ export default function Home() {
                   href={`/shop/${encodeURIComponent(entry.product.id)}`}
                   className="shrink-0 w-[112px] rounded-[14px] bg-[var(--rnest-card)] shadow-apple-sm overflow-hidden active:opacity-75"
                 >
-                  <div className="aspect-square w-full overflow-hidden bg-[var(--rnest-accent-soft)]">
+                  <div className="relative aspect-square w-full overflow-hidden bg-[var(--rnest-accent-soft)]">
                     {imgSrc ? (
-                      <img
+                      <Image
                         src={imgSrc}
                         alt={entry.product.name}
-                        className="h-full w-full object-cover"
+                        fill
+                        sizes="112px"
+                        unoptimized
+                        className="object-cover"
                         onError={(e) => {
                           (e.currentTarget as HTMLImageElement).style.display = "none";
                         }}
