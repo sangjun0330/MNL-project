@@ -1,7 +1,7 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
-import { cleanSocialNickname } from "@/lib/server/socialSecurity";
+import { cleanSocialNickname, cleanStatusMessage } from "@/lib/server/socialSecurity";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -17,14 +17,20 @@ export async function GET(req: Request) {
   try {
     const { data, error } = await (admin as any)
       .from("rnest_social_profiles")
-      .select("nickname, avatar_emoji, updated_at")
+      .select("nickname, avatar_emoji, status_message, updated_at")
       .eq("user_id", userId)
       .maybeSingle();
 
     if (error) throw error;
     return jsonNoStore({
       ok: true,
-      data: data ? { nickname: data.nickname, avatarEmoji: data.avatar_emoji } : null,
+      data: data
+        ? {
+            nickname: data.nickname,
+            avatarEmoji: data.avatar_emoji,
+            statusMessage: data.status_message ?? "",
+          }
+        : null,
     });
   } catch (err: any) {
     console.error("[SocialProfile/GET] err=%s", String(err?.message ?? err));
@@ -49,6 +55,7 @@ export async function POST(req: Request) {
 
   const nickname = cleanSocialNickname(body?.nickname, 12);
   const avatarEmoji = String(body?.avatarEmoji ?? "").trim().slice(0, 4);
+  const statusMessage = cleanStatusMessage(body?.statusMessage);
 
   if (!nickname) {
     return jsonNoStore({ ok: false, error: "nickname_required" }, { status: 400 });
@@ -63,11 +70,12 @@ export async function POST(req: Request) {
       user_id: userId,
       nickname,
       avatar_emoji: avatarEmoji,
+      status_message: statusMessage,
       updated_at: new Date().toISOString(),
     });
 
     if (error) throw error;
-    return jsonNoStore({ ok: true, data: { nickname, avatarEmoji } });
+    return jsonNoStore({ ok: true, data: { nickname, avatarEmoji, statusMessage } });
   } catch (err: any) {
     console.error("[SocialProfile/POST] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_save_profile" }, { status: 500 });

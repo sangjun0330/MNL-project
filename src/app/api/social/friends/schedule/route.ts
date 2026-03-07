@@ -41,12 +41,16 @@ export async function GET(req: Request) {
     // 2. 소셜 프로필
     const { data: profiles } = await (admin as any)
       .from("rnest_social_profiles")
-      .select("user_id, nickname, avatar_emoji")
+      .select("user_id, nickname, avatar_emoji, status_message")
       .in("user_id", friendIds);
 
-    const profileMap: Record<string, { nickname: string; avatar_emoji: string }> = {};
+    const profileMap: Record<string, { nickname: string; avatar_emoji: string; status_message: string }> = {};
     for (const p of profiles ?? []) {
-      profileMap[p.user_id] = { nickname: p.nickname, avatar_emoji: p.avatar_emoji };
+      profileMap[p.user_id] = {
+        nickname: p.nickname,
+        avatar_emoji: p.avatar_emoji,
+        status_message: p.status_message ?? "",
+      };
     }
 
     // 3. 친구 스케줄 조회 — payload 전체를 서버에서 조회 후 schedule만 추출
@@ -69,11 +73,12 @@ export async function GET(req: Request) {
           monthSchedule[date] = shift;
         }
       }
-      const profile = profileMap[s.user_id] ?? { nickname: "", avatar_emoji: "🐧" };
+      const profile = profileMap[s.user_id] ?? { nickname: "", avatar_emoji: "🐧", status_message: "" };
       return {
         userId: s.user_id,
         nickname: profile.nickname,
         avatarEmoji: profile.avatar_emoji,
+        statusMessage: profile.status_message,
         schedule: monthSchedule,
       };
     });

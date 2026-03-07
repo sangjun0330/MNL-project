@@ -34,6 +34,15 @@ export function cleanSocialNickname(value: unknown, maxLength = 12): string {
   return Array.from(normalized).slice(0, maxLength).join("");
 }
 
+export function cleanStatusMessage(value: unknown): string {
+  return String(value ?? "")
+    .replace(/<[^>]*>/g, "") // HTML 태그 제거 (XSS 방지)
+    .replace(INVISIBLE_UNSAFE_CHARS, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 30); // 30자 제한
+}
+
 export function readSocialActorIp(req: Request): string {
   const cfIp = String(req.headers.get("cf-connecting-ip") ?? "").trim();
   if (cfIp) return cfIp.slice(0, 80);

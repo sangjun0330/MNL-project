@@ -8,12 +8,14 @@ import { SocialConnectForm } from "@/components/social/SocialConnectForm";
 import { SocialPendingCard } from "@/components/social/SocialPendingCard";
 import { SocialConnectionList } from "@/components/social/SocialConnectionList";
 import { SocialCommonOffDays } from "@/components/social/SocialCommonOffDays";
+import { SocialThisWeek } from "@/components/social/SocialThisWeek";
 import { SocialOnboarding } from "@/components/social/SocialOnboarding";
 import { SocialProfileSheet } from "@/components/social/SocialProfileSheet";
 import {
   useSocialConnectionsRealtimeRefresh,
   type SocialConnectionRealtimePayload,
 } from "@/components/social/useSocialConnectionsRealtimeRefresh";
+import { useAppStoreSelector } from "@/lib/store";
 
 const SOCIAL_BACKGROUND_REFRESH_MS = 60 * 60 * 1000;
 
@@ -28,6 +30,8 @@ export function SocialPage() {
   const searchParams = useSearchParams();
   const { status, user } = useAuthState();
   const month = useMemo(() => currentMonth(), []);
+  // 내 근무표 — Zustand 클라이언트 스토어 (서버 전송 없음)
+  const mySchedule = useAppStoreSelector((s) => s.schedule as Record<string, string>);
   const inviteToken = searchParams.get("invite") ?? "";
 
   const [connections, setConnections] = useState<SocialConnectionsData | null>(null);
@@ -398,6 +402,14 @@ export function SocialPage() {
         />
       )}
 
+      {/* ── 이번 주 근무 현황 ────────────────────────────────── */}
+      {!scheduleLoading && friendSchedules.length > 0 && (
+        <SocialThisWeek
+          friends={friendSchedules}
+          mySchedule={mySchedule}
+        />
+      )}
+
       {/* ── 같이 쉬는 날 ────────────────────────────────────── */}
       {!scheduleLoading && commonOffDays.length > 0 && (
         <SocialCommonOffDays
@@ -412,6 +424,7 @@ export function SocialPage() {
           connections={accepted}
           friendSchedules={friendSchedules}
           month={month}
+          mySchedule={mySchedule}
           onAddFriend={() => {
             setConnectPrefillCode(null);
             setConnectPrefillMessage(null);

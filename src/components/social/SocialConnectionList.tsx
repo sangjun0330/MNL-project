@@ -8,14 +8,29 @@ type Props = {
   connections: SocialConnection[];
   friendSchedules: FriendSchedule[];
   month: string; // "YYYY-MM"
+  mySchedule: Record<string, string>;
   onAddFriend: () => void;
   onRefresh: () => void;
 };
+
+const WEEKDAY_KO = ["일", "월", "화", "수", "목", "금", "토"];
+
+function formatKoreanShort(iso: string): string {
+  const [, m, d] = iso.split("-").map(Number);
+  const date = new Date(iso + "T00:00:00");
+  const weekday = WEEKDAY_KO[date.getDay()];
+  return `${m}/${d}(${weekday})`;
+}
+
+function isOffOrVac(s?: string) {
+  return s === "OFF" || s === "VAC";
+}
 
 export function SocialConnectionList({
   connections,
   friendSchedules,
   month,
+  mySchedule,
   onAddFriend,
   onRefresh,
 }: Props) {
@@ -42,6 +57,19 @@ export function SocialConnectionList({
     () => new Map(friendSchedules.map((f) => [f.userId, f])),
     [friendSchedules]
   );
+
+  // 친구별 나와의 공통 오프 날짜 사전 계산 (클라이언트, API 변경 없음)
+  const pairCommonOffByUserId = useMemo(() => {
+    const result = new Map<string, string[]>();
+    for (const [userId, friendSched] of scheduleByUserId.entries()) {
+      const offs = Object.entries(friendSched.schedule)
+        .filter(([date, shift]) => isOffOrVac(shift) && isOffOrVac(mySchedule[date]))
+        .map(([date]) => date)
+        .sort();
+      result.set(userId, offs);
+    }
+    return result;
+  }, [scheduleByUserId, mySchedule]);
 
   // 접힌 상태에서 보여줄 미리보기 (날짜순 정렬 후 최신 5개)
   const getPreviewShifts = (schedule: Record<string, string>) =>
@@ -70,6 +98,7 @@ export function SocialConnectionList({
             const friendSchedule = scheduleByUserId.get(c.userId);
             const isExpanded = expandedId === c.userId;
             const preview = friendSchedule ? getPreviewShifts(friendSchedule.schedule) : [];
+            const pairCommonOff = pairCommonOffByUserId.get(c.userId) ?? [];
 
             return (
               <div key={c.id} className="px-4 py-3">
@@ -83,7 +112,11 @@ export function SocialConnectionList({
                     <p className="text-[13.5px] font-semibold text-ios-text truncate">
                       {c.nickname || "익명"}
                     </p>
-                    {!isExpanded && preview.length > 0 && (
+                    {/* 상태 메시지 — 항상 표시 */}
+                    {c.statusMessage && (
+                      <p className="text-[11.5px] text-ios-muted mt-0.5 truncate">{c.statusMessage}</p>
+                    )}
+                    {!isExpanded && !c.statusMessage && preview.length > 0 && (
                       <div className="flex flex-wrap gap-x-2 gap-y-0.5 mt-0.5">
                         {preview.map(([date, shift]) => {
                           const day = parseInt(date.split("-")[2], 10);
@@ -114,11 +147,39 @@ export function SocialConnectionList({
                   </svg>
                 </button>
 
-                {/* 펼침 — 미니 캘린더 */}
+                {/* 펼침 — 공통 오프 + 미니 캘린더 */}
                 {isExpanded && (
                   <div className="mt-3">
+                    {/* 나와의 개별 공통 오프 날짜 */}
+                    {pairCommonOff.length > 0 ? (
+                      <div className="mb-3">
+                        <p className="text-[11.5px] font-semibold text-ios-muted mb-1.5">
+                          {c.nickname || "친구"}와 같이 쉬는 날
+                        </p>
+                        <div className="flex flex-wrap gap-1">
+                          {pairCommonOff.map((iso) => (
+                            <span
+                              key={iso}
+                              className="rounded-full bg-emerald-500/10 text-emerald-700 px-2.5 py-0.5 text-[11.5px] font-medium"
+                            >
+                              {formatKoreanShort(iso)}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="mb-3 text-[11.5px] text-ios-muted">
+                        이번 달 같이 쉬는 날이 없어요
+                      </p>
+                    )}
+
+                    {/* 친구 미니 캘린더 */}
                     {friendSchedule ? (
-                      <SocialFriendMiniCalendar friend={friendSchedule} month={month} />
+                      <SocialFriendMiniCalendar
+                        friend={friendSchedule}
+                        month={month}
+                        mySchedule={mySchedule}
+                      />
                     ) : (
                       <p className="text-[12px] text-ios-muted">이번 달 일정 정보가 없어요</p>
                     )}

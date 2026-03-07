@@ -3,6 +3,7 @@
 export type SocialProfile = {
   nickname: string;
   avatarEmoji: string;
+  statusMessage: string;
 };
 
 export type SocialConnection = {
@@ -10,6 +11,7 @@ export type SocialConnection = {
   userId: string;
   nickname: string;
   avatarEmoji: string;
+  statusMessage: string;
   connectedAt?: string;
   requestedAt?: string;
 };
@@ -24,6 +26,7 @@ export type FriendSchedule = {
   userId: string;
   nickname: string;
   avatarEmoji: string;
+  statusMessage: string;
   schedule: Record<string, string>; // "YYYY-MM-DD" → shift type
 };
 

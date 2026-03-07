@@ -33,15 +33,19 @@ export async function GET(req: Request) {
     );
 
     // 소셜 프로필 일괄 조회
-    let profileMap: Record<string, { nickname: string; avatar_emoji: string }> = {};
+    let profileMap: Record<string, { nickname: string; avatar_emoji: string; status_message: string }> = {};
     if (otherIds.length > 0) {
       const { data: profiles } = await (admin as any)
         .from("rnest_social_profiles")
-        .select("user_id, nickname, avatar_emoji")
+        .select("user_id, nickname, avatar_emoji, status_message")
         .in("user_id", otherIds);
 
       for (const p of profiles ?? []) {
-        profileMap[p.user_id] = { nickname: p.nickname, avatar_emoji: p.avatar_emoji };
+        profileMap[p.user_id] = {
+          nickname: p.nickname,
+          avatar_emoji: p.avatar_emoji,
+          status_message: p.status_message ?? "",
+        };
       }
     }
 
@@ -52,13 +56,14 @@ export async function GET(req: Request) {
     for (const c of connections) {
       const isRequester = c.requester_id === userId;
       const otherId = isRequester ? c.receiver_id : c.requester_id;
-      const profile = profileMap[otherId] ?? { nickname: "", avatar_emoji: "🐧" };
+      const profile = profileMap[otherId] ?? { nickname: "", avatar_emoji: "🐧", status_message: "" };
 
       const entry = {
         id: c.id,
         userId: otherId,
         nickname: profile.nickname,
         avatarEmoji: profile.avatar_emoji,
+        statusMessage: profile.status_message,
         timestamp: c.status === "accepted" ? c.updated_at : c.created_at,
       };
 

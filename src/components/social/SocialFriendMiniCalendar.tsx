@@ -7,6 +7,7 @@ import type { FriendSchedule } from "@/types/social";
 type Props = {
   friend: FriendSchedule;
   month: string; // "YYYY-MM"
+  mySchedule?: Record<string, string>;
 };
 
 const SHIFT_COLORS: Record<string, string> = {
@@ -18,7 +19,7 @@ const SHIFT_COLORS: Record<string, string> = {
   VAC: "bg-orange-500/15 text-orange-700",
 };
 
-export function SocialFriendMiniCalendar({ friend, month }: Props) {
+export function SocialFriendMiniCalendar({ friend, month, mySchedule }: Props) {
   // 해당 월의 날짜 배열 생성
   const [year, mon] = month.split("-").map(Number);
   const daysInMonth = new Date(year, mon, 0).getDate();
@@ -52,13 +53,19 @@ export function SocialFriendMiniCalendar({ friend, month }: Props) {
       {days.map(({ iso, day, shift }) => {
         if (!shift) return null;
         const isToday = todayISO !== "" && iso === todayISO;
+        const myShift = mySchedule?.[iso];
+        const isCommonOff =
+          myShift !== undefined &&
+          (myShift === "OFF" || myShift === "VAC") &&
+          (shift === "OFF" || shift === "VAC");
         return (
           <div
             key={iso}
             className={cn(
               "flex min-w-[36px] flex-col items-center rounded-xl px-1.5 py-1",
               SHIFT_COLORS[shift] ?? "bg-ios-bg text-ios-text",
-              isToday && "ring-1 ring-offset-0 ring-[color:var(--rnest-accent)]"
+              isToday && "ring-1 ring-offset-0 ring-[color:var(--rnest-accent)]",
+              isCommonOff && !isToday && "ring-2 ring-offset-0 ring-emerald-500"
             )}
           >
             <span className="text-[9px] font-medium opacity-70">{day}일</span>

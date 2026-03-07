@@ -24,6 +24,7 @@ function formatCode(code: string | null) {
 export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
   const [nickname, setNickname] = useState(profile?.nickname ?? "");
   const [avatar, setAvatar] = useState(profile?.avatarEmoji ?? "🐧");
+  const [statusMessage, setStatusMessage] = useState(profile?.statusMessage ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -36,12 +37,17 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
   const [regenerating, setRegenerating] = useState(false);
 
   const trimmedNickname = nickname.trim();
-  const dirty = trimmedNickname !== (profile?.nickname ?? "") || avatar !== (profile?.avatarEmoji ?? "🐧");
+  const trimmedStatusMessage = statusMessage.trim().slice(0, 30);
+  const dirty =
+    trimmedNickname !== (profile?.nickname ?? "") ||
+    avatar !== (profile?.avatarEmoji ?? "🐧") ||
+    trimmedStatusMessage !== (profile?.statusMessage ?? "");
 
   useEffect(() => {
     if (!open) return;
     setNickname(profile?.nickname ?? "");
     setAvatar(profile?.avatarEmoji ?? "🐧");
+    setStatusMessage(profile?.statusMessage ?? "");
     setError(null);
     setCodeCopied(false);
   }, [open, profile]);
@@ -83,7 +89,11 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
       const res = await fetch("/api/social/profile", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nickname: trimmedNickname, avatarEmoji: avatar }),
+        body: JSON.stringify({
+          nickname: trimmedNickname,
+          avatarEmoji: avatar,
+          statusMessage: trimmedStatusMessage,
+        }),
       }).then((r) => r.json());
 
       if (!res.ok) {
@@ -207,6 +217,27 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
               }}
               placeholder="닉네임 입력"
               maxLength={12}
+              className="w-full rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3 text-[15px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent)] placeholder:text-ios-muted/60"
+            />
+          </div>
+
+          <div className="mt-4">
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-[13px] font-semibold text-ios-text">
+                상태 메시지 <span className="font-normal text-ios-muted">(선택)</span>
+              </label>
+              <span className="text-[12px] text-ios-muted">{Array.from(trimmedStatusMessage).length}/30</span>
+            </div>
+            <input
+              value={statusMessage}
+              onChange={(e) => {
+                // 30자 제한 (유니코드 문자 단위)
+                const chars = Array.from(e.target.value);
+                if (chars.length <= 30) setStatusMessage(e.target.value);
+                setError(null);
+              }}
+              placeholder="한 줄 메시지를 입력해 주세요"
+              maxLength={60}
               className="w-full rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3 text-[15px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent)] placeholder:text-ios-muted/60"
             />
           </div>
