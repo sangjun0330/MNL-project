@@ -4,8 +4,26 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Button } from "@/components/ui/Button";
 import type { SocialProfile } from "@/types/social";
+import { useAppStoreSelector } from "@/lib/store";
 
 const AVATAR_OPTIONS = ["🐧", "🦊", "🐱", "🐻", "🦁", "🐺", "🦅", "🐬"];
+
+function toISODate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function generateAutoStatus(schedule: Record<string, string>): string | null {
+  const todayISO = toISODate(new Date());
+  const tomorrowISO = toISODate(new Date(Date.now() + 86400000));
+  const today = schedule[todayISO];
+  const tomorrow = schedule[tomorrowISO];
+  if (today === "OFF" || today === "VAC") return "오늘 오프 🎉";
+  if (tomorrow === "OFF" || tomorrow === "VAC") return "내일 오프입니다 😊";
+  if (today === "N") return "오늘 야간 근무 중 🌙";
+  if (today === "D") return "오늘 낮 근무 중 ☀️";
+  if (today === "E") return "오늘 저녁 근무 중 🌆";
+  return null;
+}
 
 type Props = {
   open: boolean;
@@ -22,6 +40,9 @@ function formatCode(code: string | null) {
 }
 
 export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
+  const mySchedule = useAppStoreSelector((s) => s.schedule as Record<string, string>);
+  const autoStatus = useMemo(() => generateAutoStatus(mySchedule), [mySchedule]);
+
   const [nickname, setNickname] = useState(profile?.nickname ?? "");
   const [avatar, setAvatar] = useState(profile?.avatarEmoji ?? "🐧");
   const [statusMessage, setStatusMessage] = useState(profile?.statusMessage ?? "");
@@ -226,7 +247,18 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
               <label className="text-[13px] font-semibold text-ios-text">
                 상태 메시지 <span className="font-normal text-ios-muted">(선택)</span>
               </label>
-              <span className="text-[12px] text-ios-muted">{Array.from(trimmedStatusMessage).length}/30</span>
+              <div className="flex items-center gap-2">
+                {autoStatus && (
+                  <button
+                    type="button"
+                    onClick={() => { setStatusMessage(autoStatus); setError(null); }}
+                    className="text-[11px] font-semibold text-[color:var(--rnest-accent)] underline underline-offset-2 transition active:opacity-60"
+                  >
+                    자동 제안
+                  </button>
+                )}
+                <span className="text-[12px] text-ios-muted">{Array.from(trimmedStatusMessage).length}/30</span>
+              </div>
             </div>
             <input
               value={statusMessage}

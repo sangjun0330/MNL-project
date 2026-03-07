@@ -7,8 +7,9 @@ import type { SocialConnectionsData, FriendsScheduleData, SocialProfile } from "
 import { SocialConnectForm } from "@/components/social/SocialConnectForm";
 import { SocialPendingCard } from "@/components/social/SocialPendingCard";
 import { SocialConnectionList } from "@/components/social/SocialConnectionList";
-import { SocialCommonOffDays } from "@/components/social/SocialCommonOffDays";
+import { SocialCommonOffDays, type CommonOffMode } from "@/components/social/SocialCommonOffDays";
 import { SocialThisWeek } from "@/components/social/SocialThisWeek";
+import { SocialNextCommonOff } from "@/components/social/SocialNextCommonOff";
 import { SocialOnboarding } from "@/components/social/SocialOnboarding";
 import { SocialProfileSheet } from "@/components/social/SocialProfileSheet";
 import {
@@ -36,6 +37,10 @@ function buildFetchMonths(): string {
   return cur === next ? cur : `${cur},${next}`;
 }
 
+function isOffOrVac(s?: string) {
+  return s === "OFF" || s === "VAC";
+}
+
 export function SocialPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -55,6 +60,7 @@ export function SocialPage() {
   const [profileLoading, setProfileLoading] = useState(true);
   const [connectionsError, setConnectionsError] = useState(false);
 
+  const [commonOffMode, setCommonOffMode] = useState<CommonOffMode>("all");
   const [openProfile, setOpenProfile] = useState(false);
   const [openConnect, setOpenConnect] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -235,6 +241,38 @@ export function SocialPage() {
   const accepted = connections?.accepted ?? [];
   const commonOffDays = friendsSchedule?.commonOffDays ?? [];
   const friendSchedules = friendsSchedule?.friends ?? [];
+
+  // pairCommonOff: 각 친구와 나의 개별 공통 오프 날짜 (이번 달 기준)
+  const pairCommonOffByUserId = useMemo(() => {
+    const result = new Map<string, string[]>();
+    for (const f of friendSchedules) {
+      const offs = Object.entries(f.schedule)
+        .filter(([date, shift]) => isOffOrVac(shift) && isOffOrVac(mySchedule[date]))
+        .map(([d]) => d)
+        .sort();
+      result.set(f.userId, offs);
+    }
+    return result;
+  }, [friendSchedules, mySchedule]);
+
+  // 공통 오프 표시 모드: 'all' = 전원 동시 오프 (API 기준), 'any' = 나 + 1명 이상
+  const displayedCommonOffDays = useMemo(() => {
+    if (commonOffMode === "all") return commonOffDays;
+    const primaryPrefix = month + "-";
+    const myOff = new Set(
+      Object.entries(mySchedule)
+        .filter(([d, s]) => d.startsWith(primaryPrefix) && isOffOrVac(s))
+        .map(([d]) => d)
+    );
+    const friendOff = new Set(
+      friendSchedules.flatMap((f) =>
+        Object.entries(f.schedule)
+          .filter(([, s]) => isOffOrVac(s))
+          .map(([d]) => d)
+      )
+    );
+    return Array.from(myOff).filter((d) => friendOff.has(d)).sort();
+  }, [commonOffMode, commonOffDays, mySchedule, friendSchedules, month]);
 
   useEffect(() => {
     if (!inviteToken) {
@@ -442,11 +480,21 @@ export function SocialPage() {
         />
       )}
 
+      {/* ── 다음 같이 쉬는 날 (친구별) ──────────────────────── */}
+      {!scheduleLoading && accepted.length > 0 && (
+        <SocialNextCommonOff
+          connections={accepted}
+          pairCommonOffByUserId={pairCommonOffByUserId}
+        />
+      )}
+
       {/* ── 같이 쉬는 날 ────────────────────────────────────── */}
-      {!scheduleLoading && commonOffDays.length > 0 && (
+      {!scheduleLoading && displayedCommonOffDays.length > 0 && (
         <SocialCommonOffDays
-          dates={commonOffDays}
+          dates={displayedCommonOffDays}
           friendCount={accepted.length}
+          mode={commonOffMode}
+          onModeChange={setCommonOffMode}
         />
       )}
 
@@ -457,6 +505,7 @@ export function SocialPage() {
           friendSchedules={friendSchedules}
           month={month}
           mySchedule={mySchedule}
+          pairCommonOffByUserId={pairCommonOffByUserId}
           onAddFriend={() => {
             setConnectPrefillCode(null);
             setConnectPrefillMessage(null);

@@ -2,9 +2,13 @@
 
 import { useEffect, useState } from "react";
 
+export type CommonOffMode = "all" | "any";
+
 type Props = {
   dates: string[]; // ISO date strings
   friendCount: number;
+  mode: CommonOffMode;
+  onModeChange: (mode: CommonOffMode) => void;
 };
 
 const WEEKDAY_KO = ["일", "월", "화", "수", "목", "금", "토"];
@@ -23,7 +27,7 @@ function formatKoreanShort(iso: string): string {
   return `${m}/${d}(${weekday})`;
 }
 
-export function SocialCommonOffDays({ dates, friendCount }: Props) {
+export function SocialCommonOffDays({ dates, friendCount, mode, onModeChange }: Props) {
   // D-day 계산 — mount 후에만 (hydration 안전)
   const [todayISO, setTodayISO] = useState("");
   const [nearestDaysUntil, setNearestDaysUntil] = useState<number | null>(null);
@@ -53,9 +57,39 @@ export function SocialCommonOffDays({ dates, friendCount }: Props) {
 
   return (
     <div className="rounded-apple border border-ios-sep bg-white shadow-apple px-4 py-3">
-      <div className="flex items-center gap-2 mb-2">
-        <span className="text-[18px]">📅</span>
-        <span className="text-[13.5px] font-semibold text-ios-text">이번 달 같이 쉬는 날</span>
+      {/* 헤더 + 모드 토글 */}
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <span className="text-[18px]">📅</span>
+          <span className="text-[13.5px] font-semibold text-ios-text">이번 달 같이 쉬는 날</span>
+        </div>
+        {/* 전체/1명이라도 토글 — 친구 2명 이상일 때만 의미 있음 */}
+        {friendCount >= 2 && (
+          <div className="flex items-center rounded-full bg-ios-bg p-0.5 gap-0.5">
+            <button
+              type="button"
+              onClick={() => onModeChange("all")}
+              className={`rounded-full px-2.5 py-1 text-[10.5px] font-semibold transition ${
+                mode === "all"
+                  ? "bg-white text-ios-text shadow-sm"
+                  : "text-ios-muted"
+              }`}
+            >
+              전체
+            </button>
+            <button
+              type="button"
+              onClick={() => onModeChange("any")}
+              className={`rounded-full px-2.5 py-1 text-[10.5px] font-semibold transition ${
+                mode === "any"
+                  ? "bg-white text-ios-text shadow-sm"
+                  : "text-ios-muted"
+              }`}
+            >
+              1명이라도
+            </button>
+          </div>
+        )}
       </div>
 
       {/* D-day 배너 */}
@@ -84,7 +118,7 @@ export function SocialCommonOffDays({ dates, friendCount }: Props) {
         ))}
       </div>
 
-      {friendCount > 1 && (
+      {friendCount > 1 && mode === "all" && (
         <p className="mt-2 text-[11.5px] text-ios-muted">{friendCount}명 모두 오프</p>
       )}
     </div>

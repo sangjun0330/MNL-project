@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import type { SocialConnection, FriendSchedule } from "@/types/social";
 import { SocialFriendMiniCalendar } from "./SocialFriendMiniCalendar";
 
@@ -9,6 +9,7 @@ type Props = {
   friendSchedules: FriendSchedule[];
   month: string; // "YYYY-MM"
   mySchedule: Record<string, string>;
+  pairCommonOffByUserId: Map<string, string[]>;
   onAddFriend: () => void;
   onRefresh: () => void;
 };
@@ -22,29 +23,32 @@ function formatKoreanShort(iso: string): string {
   return `${m}/${d}(${weekday})`;
 }
 
-function isOffOrVac(s?: string) {
-  return s === "OFF" || s === "VAC";
-}
-
 export function SocialConnectionList({
   connections,
   friendSchedules,
   month,
   mySchedule,
+  pairCommonOffByUserId,
   onAddFriend,
   onRefresh,
 }: Props) {
   const [loadingId, setLoadingId] = useState<number | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const handleDelete = async (id: number) => {
+  const handleAction = async (id: number, action: "delete" | "block") => {
     if (loadingId) return;
+    if (
+      action === "block" &&
+      !window.confirm("차단하면 연결이 해제되고 향후 요청도 막힙니다. 계속할까요?")
+    ) {
+      return;
+    }
     setLoadingId(id);
     try {
       await fetch(`/api/social/connections/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "delete" }),
+        body: JSON.stringify({ action }),
       });
       setExpandedId(null);
       onRefresh();
@@ -53,25 +57,9 @@ export function SocialConnectionList({
   };
 
   // 리렌더링마다 새 Map 생성 방지
-  const scheduleByUserId = useMemo(
-    () => new Map(friendSchedules.map((f) => [f.userId, f])),
-    [friendSchedules]
-  );
+  const scheduleByUserId = new Map(friendSchedules.map((f) => [f.userId, f]));
 
-  // 친구별 나와의 공통 오프 날짜 사전 계산 (클라이언트, API 변경 없음)
-  const pairCommonOffByUserId = useMemo(() => {
-    const result = new Map<string, string[]>();
-    for (const [userId, friendSched] of scheduleByUserId.entries()) {
-      const offs = Object.entries(friendSched.schedule)
-        .filter(([date, shift]) => isOffOrVac(shift) && isOffOrVac(mySchedule[date]))
-        .map(([date]) => date)
-        .sort();
-      result.set(userId, offs);
-    }
-    return result;
-  }, [scheduleByUserId, mySchedule]);
-
-  // 접힌 상태에서 보여줄 미리보기 (날짜순 정렬 후 최신 5개)
+  // 접힌 상태에서 보여줄 미리보기 (날짜순 정렬 후 최신 6개)
   const getPreviewShifts = (schedule: Record<string, string>) =>
     Object.entries(schedule)
       .sort(([a], [b]) => a.localeCompare(b))
@@ -183,17 +171,32 @@ export function SocialConnectionList({
                     ) : (
                       <p className="text-[12px] text-ios-muted">이번 달 일정 정보가 없어요</p>
                     )}
-                    <button
-                      type="button"
-                      disabled={loadingId === c.id}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDelete(c.id);
-                      }}
-                      className="mt-3 text-[12px] text-red-400 underline underline-offset-2 transition active:opacity-60 disabled:opacity-40"
-                    >
-                      {loadingId === c.id ? "처리 중…" : "연결 해제"}
-                    </button>
+
+                    {/* 액션 버튼: 차단 + 연결 해제 */}
+                    <div className="mt-3 flex items-center gap-4">
+                      <button
+                        type="button"
+                        disabled={loadingId === c.id}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleAction(c.id, "block");
+                        }}
+                        className="text-[12px] text-ios-muted underline underline-offset-2 transition active:opacity-60 disabled:opacity-40"
+                      >
+                        {loadingId === c.id ? "처리 중…" : "차단"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={loadingId === c.id}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleAction(c.id, "delete");
+                        }}
+                        className="text-[12px] text-red-400 underline underline-offset-2 transition active:opacity-60 disabled:opacity-40"
+                      >
+                        {loadingId === c.id ? "처리 중…" : "연결 해제"}
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
