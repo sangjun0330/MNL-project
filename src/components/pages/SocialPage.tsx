@@ -25,11 +25,24 @@ function currentMonth(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
+// 이번 주 7일이 다음 달로 넘어가는 경우 두 달 모두 fetch
+// (월말 SocialThisWeek 깨짐 방지)
+function buildFetchMonths(): string {
+  const today = new Date();
+  const d6 = new Date(today);
+  d6.setDate(today.getDate() + 6);
+  const cur = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+  const next = `${d6.getFullYear()}-${String(d6.getMonth() + 1).padStart(2, "0")}`;
+  return cur === next ? cur : `${cur},${next}`;
+}
+
 export function SocialPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { status, user } = useAuthState();
   const month = useMemo(() => currentMonth(), []);
+  // 이번 주 7일 커버를 위해 필요한 months 파라미터 (월말 경계 처리)
+  const fetchMonths = useMemo(() => buildFetchMonths(), []);
   // 내 근무표 — Zustand 클라이언트 스토어 (서버 전송 없음)
   const mySchedule = useAppStoreSelector((s) => s.schedule as Record<string, string>);
   const inviteToken = searchParams.get("invite") ?? "";
@@ -107,14 +120,14 @@ export function SocialPage() {
       return;
     }
     setScheduleLoading(true);
-    fetch(`/api/social/friends/schedule?month=${month}`)
+    fetch(`/api/social/friends/schedule?months=${fetchMonths}`)
       .then((r) => r.json())
       .then((res) => {
         if (res.ok) setFriendsSchedule(res.data);
       })
       .catch(() => {})
       .finally(() => setScheduleLoading(false));
-  }, [month, status]);
+  }, [fetchMonths, status]);
 
   useEffect(() => {
     if (!profileChecked || status !== "authenticated") return;
@@ -136,6 +149,25 @@ export function SocialPage() {
     }, SOCIAL_BACKGROUND_REFRESH_MS);
     return () => clearInterval(timer);
   }, [profileChecked, refreshConnectionsAndSchedule, status]);
+
+  // Bug-3: 친구 프로필 변경(닉네임/아바타/상태메시지) 실시간 미반영 보완
+  // focus/visibilitychange 시 debounce 300ms 후 refresh
+  useEffect(() => {
+    if (!profileChecked || status !== "authenticated") return;
+    let tid: ReturnType<typeof setTimeout>;
+    const trigger = () => {
+      clearTimeout(tid);
+      tid = setTimeout(refreshConnectionsAndSchedule, 300);
+    };
+    const onVisibility = () => { if (!document.hidden) trigger(); };
+    window.addEventListener("focus", trigger);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("focus", trigger);
+      document.removeEventListener("visibilitychange", onVisibility);
+      clearTimeout(tid);
+    };
+  }, [profileChecked, status, refreshConnectionsAndSchedule]);
 
   const handleRealtimeEvent = useCallback(
     (payload: SocialConnectionRealtimePayload) => {

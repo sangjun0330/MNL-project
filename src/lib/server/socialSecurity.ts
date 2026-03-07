@@ -35,12 +35,14 @@ export function cleanSocialNickname(value: unknown, maxLength = 12): string {
 }
 
 export function cleanStatusMessage(value: unknown): string {
-  return String(value ?? "")
-    .replace(/<[^>]*>/g, "") // HTML 태그 제거 (XSS 방지)
+  const raw = String(value ?? "")
+    .replace(/<[^>]*>/g, "")           // HTML 태그 제거 (XSS 방지)
     .replace(INVISIBLE_UNSAFE_CHARS, "")
+    .replace(/[\r\n\t]+/g, " ")        // 줄바꿈·탭 → 공백 (붙여넣기 방지)
     .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 30); // 30자 제한
+    .trim();
+  // Array.from() = grapheme-aware (대부분 emoji 안전, Edge 호환)
+  return Array.from(raw).slice(0, 30).join("");
 }
 
 export function readSocialActorIp(req: Request): string {

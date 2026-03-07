@@ -231,9 +231,10 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
             <input
               value={statusMessage}
               onChange={(e) => {
-                // 30자 제한 (유니코드 문자 단위)
-                const chars = Array.from(e.target.value);
-                if (chars.length <= 30) setStatusMessage(e.target.value);
+                // 줄바꿈·탭 → 공백 (붙여넣기 방지), 30자 제한 (grapheme 단위)
+                const cleaned = e.target.value.replace(/[\r\n\t]+/g, " ");
+                const chars = Array.from(cleaned);
+                if (chars.length <= 30) setStatusMessage(cleaned);
                 setError(null);
               }}
               placeholder="한 줄 메시지를 입력해 주세요"

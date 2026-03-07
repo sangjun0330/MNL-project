@@ -5,18 +5,28 @@ import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-// GET /api/social/friends/schedule?month=YYYY-MM
+// GET /api/social/friends/schedule?months=YYYY-MM,YYYY-MM
+// 하위 호환: ?month=YYYY-MM 단일 파라미터도 동작
 export async function GET(req: Request) {
   const userId = await readUserIdFromRequest(req);
   if (!userId) return jsonNoStore({ ok: false, error: "login_required" }, { status: 401 });
 
   const url = new URL(req.url);
-  const month = url.searchParams.get("month") ?? "";
+  // months=2026-03,2026-04 또는 month=2026-03 (하위 호환)
+  const rawMonths = url.searchParams.get("months") ?? url.searchParams.get("month") ?? "";
+  const monthList = rawMonths
+    .split(",")
+    .map((m) => m.trim())
+    .filter((m) => /^\d{4}-\d{2}$/.test(m));
 
-  // YYYY-MM 형식 검증
-  if (!/^\d{4}-\d{2}$/.test(month)) {
+  // 0개 또는 3개 이상이면 오류
+  if (monthList.length === 0 || monthList.length > 2) {
     return jsonNoStore({ ok: false, error: "invalid_month_format" }, { status: 400 });
   }
+
+  // commonOffDays 계산은 첫 번째 월(현재월) 기준
+  const primaryMonth = monthList[0];
+  const prefixes = monthList.map((m) => m + "-");
 
   const admin = getSupabaseAdmin();
 
@@ -62,14 +72,14 @@ export async function GET(req: Request) {
 
     if (stateErr) throw stateErr;
 
-    // 4. 해당 월 데이터만 필터링 (서버에서 필터링)
-    const prefix = month + "-";
+    // 4. 해당 월(들) 데이터만 필터링 (서버에서 필터링)
     const friends = (states ?? []).map((s: any) => {
       // payload.schedule만 추출 — bio, emotions, notes 등은 사용하지 않음
       const rawSchedule: Record<string, string> = (s.payload as any)?.schedule ?? {};
       const monthSchedule: Record<string, string> = {};
       for (const [date, shift] of Object.entries(rawSchedule)) {
-        if (date.startsWith(prefix) && typeof shift === "string") {
+        // prefixes 중 하나라도 매칭되면 포함 (다중 월 지원)
+        if (prefixes.some((p) => date.startsWith(p)) && typeof shift === "string") {
           monthSchedule[date] = shift;
         }
       }
@@ -91,9 +101,11 @@ export async function GET(req: Request) {
       .maybeSingle();
 
     const mySchedule: Record<string, string> = (myState?.payload as any)?.schedule ?? {};
+    // commonOffDays는 현재월(primaryMonth) 기준만 계산
+    const primaryPrefix = primaryMonth + "-";
     const myOffDays = new Set(
       Object.entries(mySchedule)
-        .filter(([date, shift]) => date.startsWith(prefix) && (shift === "OFF" || shift === "VAC"))
+        .filter(([date, shift]) => date.startsWith(primaryPrefix) && (shift === "OFF" || shift === "VAC"))
         .map(([date]) => date)
     );
 
