@@ -34,3 +34,21 @@ export type FriendsScheduleData = {
   friends: FriendSchedule[];
   commonOffDays: string[];
 };
+
+export type SocialEventType =
+  | "connection_request"
+  | "connection_accepted"
+  | "connection_rejected";
+
+export type SocialEvent = {
+  id: number;
+  type: SocialEventType;
+  actorId: string | null;
+  entityId: string | null;
+  payload: {
+    nickname?: string;
+    avatarEmoji?: string;
+  };
+  readAt: string | null;
+  createdAt: string;
+};

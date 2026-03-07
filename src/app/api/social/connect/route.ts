@@ -120,6 +120,35 @@ export async function POST(req: Request) {
 
     await recordSocialActionAttempt({ req, userId, action: "connect_request", success: true, detail: "ok" });
 
+    // 6. 수신자에게 connection_request 이벤트 생성
+    // 요청자 프로필 조회
+    const { data: requesterProfile } = await (admin as any)
+      .from("rnest_social_profiles")
+      .select("nickname, avatar_emoji")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    // dedupe_key UNIQUE — 재시도 시 중복 무시
+    const { error: eventErr } = await (admin as any)
+      .from("rnest_social_events")
+      .upsert(
+        {
+          recipient_id: receiverId,
+          actor_id: userId,
+          type: "connection_request",
+          entity_id: String(conn.id),
+          payload: {
+            nickname: requesterProfile?.nickname ?? "",
+            avatarEmoji: requesterProfile?.avatar_emoji ?? "🐧",
+          },
+          dedupe_key: `req-${conn.id}`,
+        },
+        { onConflict: "dedupe_key", ignoreDuplicates: true }
+      );
+    if (eventErr) {
+      console.warn("[SocialConnect/POST] event upsert skipped: %s", eventErr.code);
+    }
+
     return jsonNoStore({
       ok: true,
       data: {

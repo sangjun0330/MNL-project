@@ -77,6 +77,40 @@ export async function PATCH(
       .eq("id", connectionId);
 
     if (updateErr) throw updateErr;
+
+    // 수락/거절 이벤트 — 요청자(requester)에게 알림
+    if (action === "accept" || action === "reject") {
+      const eventType = action === "accept" ? "connection_accepted" : "connection_rejected";
+      const dedupeKey = action === "accept" ? `acc-${connectionId}` : `rej-${connectionId}`;
+
+      // receiver(userId) 프로필 조회
+      const { data: responderProfile } = await (admin as any)
+        .from("rnest_social_profiles")
+        .select("nickname, avatar_emoji")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      const { error: eventErr } = await (admin as any)
+        .from("rnest_social_events")
+        .upsert(
+          {
+            recipient_id: conn.requester_id,
+            actor_id: userId,
+            type: eventType,
+            entity_id: String(connectionId),
+            payload: {
+              nickname: responderProfile?.nickname ?? "",
+              avatarEmoji: responderProfile?.avatar_emoji ?? "🐧",
+            },
+            dedupe_key: dedupeKey,
+          },
+          { onConflict: "dedupe_key", ignoreDuplicates: true }
+        );
+      if (eventErr) {
+        console.warn("[SocialConnections/PATCH] event upsert skipped: %s", eventErr.code);
+      }
+    }
+
     return jsonNoStore({ ok: true });
   } catch (err: any) {
     console.error("[SocialConnections/PATCH] id=%d err=%s", connectionId, String(err?.message ?? err));

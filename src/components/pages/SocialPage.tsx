@@ -12,10 +12,12 @@ import { SocialThisWeek } from "@/components/social/SocialThisWeek";
 import { SocialNextCommonOff } from "@/components/social/SocialNextCommonOff";
 import { SocialOnboarding } from "@/components/social/SocialOnboarding";
 import { SocialProfileSheet } from "@/components/social/SocialProfileSheet";
+import { SocialEventCenter } from "@/components/social/SocialEventCenter";
 import {
   useSocialConnectionsRealtimeRefresh,
   type SocialConnectionRealtimePayload,
 } from "@/components/social/useSocialConnectionsRealtimeRefresh";
+import { useSocialEventsRealtimeRefresh } from "@/components/social/useSocialEventsRealtimeRefresh";
 import { useAppStoreSelector } from "@/lib/store";
 
 const SOCIAL_BACKGROUND_REFRESH_MS = 60 * 60 * 1000;
@@ -63,6 +65,8 @@ export function SocialPage() {
   const [commonOffMode, setCommonOffMode] = useState<CommonOffMode>("all");
   const [openProfile, setOpenProfile] = useState(false);
   const [openConnect, setOpenConnect] = useState(false);
+  const [openEventCenter, setOpenEventCenter] = useState(false);
+  const [unreadEventCount, setUnreadEventCount] = useState(0);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [profileChecked, setProfileChecked] = useState(false);
   const [notice, setNotice] = useState<{ tone: "info" | "success" | "error"; text: string } | null>(null);
@@ -218,6 +222,14 @@ export function SocialPage() {
     scope: "social-page",
     onRefresh: refreshConnectionsAndSchedule,
     onEvent: handleRealtimeEvent,
+  });
+
+  // 새 이벤트(알림) 실시간 구독 — INSERT 시 unread count +1
+  const handleNewEvent = useCallback(() => setUnreadEventCount((c) => c + 1), []);
+  useSocialEventsRealtimeRefresh({
+    enabled: profileChecked && status === "authenticated",
+    userId: user?.userId ?? null,
+    onNewEvent: handleNewEvent,
   });
 
   const handleRefresh = useCallback(() => {
@@ -415,15 +427,36 @@ export function SocialPage() {
           </svg>
         </button>
         <h1 className="text-[17px] font-bold text-ios-text">소셜</h1>
-        <button
-          type="button"
-          onClick={() => (profile ? setOpenProfile(true) : setShowOnboarding(true))}
-          className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-[20px] shadow-apple transition hover:bg-ios-sep/20 active:opacity-60"
-          title="내 소셜 프로필"
-          aria-label="내 소셜 프로필"
-        >
-          <span>{profile?.avatarEmoji ?? "👤"}</span>
-        </button>
+        <div className="flex items-center gap-2">
+          {/* 🔔 알림 버튼 */}
+          <button
+            type="button"
+            onClick={() => setOpenEventCenter(true)}
+            className="relative flex h-9 w-9 items-center justify-center rounded-full bg-white shadow-apple transition hover:bg-ios-sep/20 active:opacity-60"
+            title="알림"
+            aria-label="알림"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-ios-text">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+              <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            </svg>
+            {unreadEventCount > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-0.5 text-[9px] font-bold text-white leading-none">
+                {unreadEventCount > 9 ? "9+" : unreadEventCount}
+              </span>
+            )}
+          </button>
+          {/* 프로필 버튼 */}
+          <button
+            type="button"
+            onClick={() => (profile ? setOpenProfile(true) : setShowOnboarding(true))}
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-[20px] shadow-apple transition hover:bg-ios-sep/20 active:opacity-60"
+            title="내 소셜 프로필"
+            aria-label="내 소셜 프로필"
+          >
+            <span>{profile?.avatarEmoji ?? "👤"}</span>
+          </button>
+        </div>
       </div>
 
       {notice && (
@@ -545,6 +578,12 @@ export function SocialPage() {
         open={showOnboarding}
         onComplete={handleOnboardingComplete}
         onSkip={handleOnboardingSkip}
+      />
+
+      <SocialEventCenter
+        open={openEventCenter}
+        onClose={() => setOpenEventCenter(false)}
+        onUnreadCountChange={setUnreadEventCount}
       />
     </div>
   );
