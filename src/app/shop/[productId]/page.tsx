@@ -3,6 +3,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { ShopProductDetailMount } from "@/components/shop/ShopProductDetailMount";
 import { loadShopCatalog } from "@/lib/server/shopCatalogStore";
 
+export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 function resolveProductId(value: string) {
