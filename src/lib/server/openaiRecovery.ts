@@ -675,7 +675,7 @@ function looksIncompleteNarrativeText(value: string) {
   if (!text || text.length < 18) return false;
   if (/[.!?]$/.test(text)) return false;
   if (/(요|다|니다|세요|해요|돼요|이에요|예요)$/.test(text)) return false;
-  return /(쪽|정도|위주|중심|처럼|으로|이며|인데|지만|면서|하고|하며|또는|및|후|전|때)$/.test(text);
+  return true;
 }
 
 function extractLabeledBlock(text: string, startPattern: RegExp, endPatterns: RegExp[]) {
@@ -714,7 +714,6 @@ function splitWeeklyItems(raw: string): string[] {
       if (!key || seen.has(key)) continue;
       seen.add(key);
       deduped.push(line);
-      if (deduped.length >= 3) break;
     }
     return deduped;
   }
@@ -740,7 +739,6 @@ function splitWeeklyItems(raw: string): string[] {
     if (!key || seen.has(key)) continue;
     seen.add(key);
     deduped.push(line);
-    if (deduped.length >= 3) break;
   }
   return deduped;
 }
@@ -791,13 +789,13 @@ function parseWeeklySummaryFromText(dBlock: string): WeeklySummary | null {
     );
     const half = Math.ceil(narrative.length / 2);
     if (!personalLines.length) {
-      personalLines = narrative.slice(0, Math.min(3, Math.max(half, 1)));
+      personalLines = narrative.slice(0, Math.max(half, 1));
     }
     if (!nextLines.length) {
-      nextLines = narrative.slice(half, Math.min(narrative.length, half + 3));
+      nextLines = narrative.slice(half);
     }
     if (!nextLines.length && narrative.length) {
-      nextLines = narrative.slice(-Math.min(3, narrative.length));
+      nextLines = narrative.slice(-Math.min(4, narrative.length));
     }
   }
 

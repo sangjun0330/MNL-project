@@ -145,7 +145,7 @@ function looksLikeTruncatedNarrative(text: string) {
   if (!value || value.length < 18) return false;
   if (/[.!?]$/.test(value)) return false;
   if (/(요|다|니다|세요|해요|돼요|이에요|예요)$/.test(value)) return false;
-  return /(쪽|정도|위주|중심|처럼|으로|이며|인데|지만|면서|하고|하며|또는|및|후|전|때)$/.test(value);
+  return true;
 }
 
 function buildWeeklyFallbackText(
@@ -348,58 +348,45 @@ function RecoverySectionRow({
 
   return (
     <article className="px-5 py-5 sm:px-6 sm:py-6">
-      <div className="flex items-start gap-4">
-        <div
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[18px] text-[18px] font-bold tracking-[-0.02em]"
-          style={{
-            color: theme.accent,
-            backgroundColor: `${theme.accent}14`,
-            boxShadow: `inset 0 0 0 1px ${theme.accent}12`,
-          }}
-        >
-          {index + 1}
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <span
+            className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[12px] font-bold tracking-[-0.02em]"
+            style={{
+              color: theme.accent,
+              backgroundColor: `${theme.accent}12`,
+              boxShadow: `inset 0 0 0 1px ${theme.accent}12`,
+            }}
+          >
+            {index + 1}
+          </span>
+          <h3 className="text-[18px] font-bold tracking-[-0.03em] text-ios-text sm:text-[19px]">
+            {section.title || t(meta.titleKey)}
+          </h3>
+          <RecoveryMetaPill color={theme.accent}>{severityLabel(section.severity ?? "info", t)}</RecoveryMetaPill>
         </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <h3 className="text-[21px] font-bold tracking-[-0.03em] text-ios-text">
-              {section.title || t(meta.titleKey)}
-            </h3>
-            <RecoveryMetaPill color={theme.accent}>{severityLabel(section.severity ?? "info", t)}</RecoveryMetaPill>
-          </div>
 
-          {descriptionText ? (
-            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
-              <RecoveryMetaPill color={theme.accent} subtle>
-                {statusLabel}
-              </RecoveryMetaPill>
-              <p className="min-w-0 flex-1 text-[15px] leading-7 text-[#42536A]">{descriptionText}</p>
+        {descriptionText ? (
+          <div className="mt-3">
+            <div className="text-[11px] font-semibold tracking-[0.12em]" style={{ color: theme.accent }}>
+              {statusLabel}
             </div>
-          ) : null}
+            <p className="mt-2 break-keep text-[15px] leading-7 text-[#42536A]">{descriptionText}</p>
+          </div>
+        ) : null}
 
-          {recommendations.length ? (
-            <ol className="mt-4 space-y-3">
-              {recommendations.map((tip, idx) => (
-                <li key={`${meta.key}-${idx}`} className="flex gap-3">
-                  <span
-                    className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold"
-                    style={{
-                      color: theme.accent,
-                      backgroundColor: `${theme.accent}12`,
-                    }}
-                  >
-                    {idx + 1}
-                  </span>
-                  <div className="min-w-0 flex-1 text-[15px] leading-7 text-ios-text">
-                    <span className="mr-2 text-[12px] font-semibold" style={{ color: theme.accent }}>
-                      {recLabel} {idx + 1}
-                    </span>
-                    <span>{idx === 0 ? highlightKeySentence(tip, "plan") : tip}</span>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          ) : null}
-        </div>
+        {recommendations.length ? (
+          <ol className="mt-5 space-y-3">
+            {recommendations.map((tip, idx) => (
+              <li key={`${meta.key}-${idx}`} className="border-t border-[rgba(16,33,70,0.08)] pt-3 first:border-t-0 first:pt-0">
+                <div className="text-[12.5px] font-semibold" style={{ color: theme.accent }}>
+                  {recLabel} {idx + 1}
+                </div>
+                <p className="mt-1.5 break-keep text-[15px] leading-7 text-ios-text">{tip}</p>
+              </li>
+            ))}
+          </ol>
+        ) : null}
       </div>
     </article>
   );
@@ -626,14 +613,20 @@ export function InsightsAIRecoveryDetail() {
     [sectionsByCategory]
   );
 
-  const weeklyPersonalLines = useMemo(
-    () => splitBulletLines(weekly?.personalInsight ?? "").slice(0, 3),
-    [weekly?.personalInsight]
-  );
-  const weeklyPreviewLines = useMemo(
-    () => splitBulletLines(weekly?.nextWeekPreview ?? "").slice(0, 3),
-    [weekly?.nextWeekPreview]
-  );
+  const weeklyPersonalLines = useMemo(() => {
+    if (!weekly) return [];
+    const fallback = splitBulletLines(buildWeeklyFallbackText(weekly, "personal", lang));
+    const lines = splitBulletLines(weekly.personalInsight ?? "").filter(Boolean);
+    if (!lines.length) return fallback;
+    return lines.some((line) => looksLikeTruncatedNarrative(line)) ? fallback : lines;
+  }, [weekly, lang]);
+  const weeklyPreviewLines = useMemo(() => {
+    if (!weekly) return [];
+    const fallback = splitBulletLines(buildWeeklyFallbackText(weekly, "preview", lang));
+    const lines = splitBulletLines(weekly.nextWeekPreview ?? "").filter(Boolean);
+    if (!lines.length) return fallback;
+    return lines.some((line) => looksLikeTruncatedNarrative(line)) ? fallback : lines;
+  }, [weekly, lang]);
 
   const cFallbackText = useMemo(() => {
     if (!data?.generatedText || orderedSections.length > 0) return "";
@@ -670,7 +663,7 @@ export function InsightsAIRecoveryDetail() {
         </DetailCard>
       ) : null}
 
-      {!insightsLocked && !billingLoading && hasPaidAccess ? (
+      {!insightsLocked && !billingLoading && hasPaidAccess && !data && !loading && !generating ? (
         <DetailCard className="p-4 sm:p-5">
           <div className="text-[13px] font-semibold text-ios-sub">{t("AI 맞춤회복 안내")}</div>
           <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
@@ -773,51 +766,51 @@ export function InsightsAIRecoveryDetail() {
         <>
           <DetailCard
             className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
-            style={{ background: "linear-gradient(180deg, rgba(247,249,255,0.96) 0%, #FFFFFF 68%)" }}
+            style={{ background: "linear-gradient(180deg, rgba(249,250,254,0.98) 0%, #FFFFFF 78%)" }}
           >
-            <div className="flex flex-col gap-5">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-                <div className="max-w-[620px]">
-                  <div className="text-[12px] font-semibold tracking-[0.18em] text-[color:var(--rnest-accent)]">
-                    {lang === "en" ? "TODAY RECOVERY" : "오늘 회복 브리핑"}
-                  </div>
-                  <p className="mt-3 text-[28px] font-extrabold leading-[1.22] tracking-[-0.04em] text-ios-text sm:text-[31px]">
-                    {highlightKeySentence(
-                      normalizeNarrativeText(data.result.headline || t("요약이 비어 있어요."), lang),
-                      "summary"
-                    )}
-                  </p>
-                  <p className="mt-3 text-[14px] leading-6 text-ios-sub">
-                    {t("오늘 컨디션과 최근 흐름을 기준으로 지금 가장 먼저 해야 할 회복 우선순위를 정리했어요.")}
-                  </p>
+            <div className="flex flex-col gap-4">
+              <div className="max-w-[680px]">
+                <div className="text-[11px] font-semibold tracking-[0.18em] text-[color:var(--rnest-accent)]">
+                  {lang === "en" ? "TODAY RECOVERY" : "오늘 회복 브리핑"}
                 </div>
-                <div className="shrink-0 rounded-[26px] bg-[#F7F9FD] px-4 py-3 shadow-[inset_0_0_0_1px_rgba(16,33,70,0.06)]">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ios-muted">
-                    {t("핵심 지표")}
-                  </div>
-                  <div className="mt-2 flex items-end gap-2">
-                    <span className="text-[32px] font-extrabold tracking-[-0.04em] text-ios-text">
-                      {weekly?.avgBattery ?? "--"}
-                    </span>
-                    <span className="pb-1 text-[12px] font-semibold text-ios-muted">{t("평균 배터리")}</span>
-                  </div>
-                </div>
+                <p className="mt-2 break-keep text-[19px] font-bold leading-[1.6] tracking-[-0.03em] text-ios-text sm:text-[21px]">
+                  {normalizeNarrativeText(data.result.headline || t("요약이 비어 있어요."), lang)}
+                </p>
+                <p className="mt-2 max-w-[560px] break-keep text-[13px] leading-6 text-ios-sub">
+                  {t("오늘 컨디션과 최근 흐름을 기준으로 지금 가장 먼저 해야 할 회복 우선순위를 정리했어요.")}
+                </p>
               </div>
 
-              <div className="flex flex-wrap gap-2">
-                <RecoveryMetaPill color="#1B2747">{formatKoreanDate(data.dateISO)}</RecoveryMetaPill>
-                <RecoveryMetaPill color="#5E6C84">
-                  {t("카테고리")} {orderedSections.length}개
-                </RecoveryMetaPill>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-[20px] bg-ios-bg px-4 py-3">
+                  <div className="text-[11px] font-semibold tracking-[0.08em] text-ios-muted">{t("분석 날짜")}</div>
+                  <div className="mt-1 text-[16px] font-bold tracking-[-0.02em] text-ios-text">{formatKoreanDate(data.dateISO)}</div>
+                </div>
+                <div className="rounded-[20px] bg-ios-bg px-4 py-3">
+                  <div className="text-[11px] font-semibold tracking-[0.08em] text-ios-muted">{t("카테고리")}</div>
+                  <div className="mt-1 text-[16px] font-bold tracking-[-0.02em] text-ios-text">{orderedSections.length}개</div>
+                </div>
                 {weekly ? (
-                  <RecoveryMetaPill color={weekly.avgBattery - weekly.prevAvgBattery >= 0 ? "#0B7A3E" : "#A33A4A"}>
-                    {t("지난주 대비")} {formatSignedDelta(weekly.avgBattery - weekly.prevAvgBattery)}
-                  </RecoveryMetaPill>
+                  <>
+                    <div className="rounded-[20px] bg-ios-bg px-4 py-3">
+                      <div className="text-[11px] font-semibold tracking-[0.08em] text-ios-muted">{t("평균 배터리")}</div>
+                      <div className="mt-1 text-[16px] font-bold tracking-[-0.02em] text-ios-text">{weekly.avgBattery}</div>
+                    </div>
+                    <div className="rounded-[20px] bg-ios-bg px-4 py-3">
+                      <div className="text-[11px] font-semibold tracking-[0.08em] text-ios-muted">{t("지난주 대비")}</div>
+                      <div
+                        className="mt-1 text-[16px] font-bold tracking-[-0.02em]"
+                        style={{ color: weekly.avgBattery - weekly.prevAvgBattery >= 0 ? "#0B7A3E" : "#A33A4A" }}
+                      >
+                        {formatSignedDelta(weekly.avgBattery - weekly.prevAvgBattery)}
+                      </div>
+                    </div>
+                  </>
                 ) : null}
               </div>
 
               {data.result.compoundAlert ? (
-                <div className="rounded-[26px] bg-[#FFF4F6] px-4 py-4 shadow-[inset_0_0_0_1px_rgba(232,116,133,0.12)] sm:px-5">
+                <div className="rounded-[24px] bg-[#FFF4F6] px-4 py-4 shadow-[inset_0_0_0_1px_rgba(232,116,133,0.12)] sm:px-5">
                   <div className="flex flex-wrap items-center gap-2">
                     <RecoveryMetaPill color="#B2415A">{t("긴급 알림")}</RecoveryMetaPill>
                     {data.result.compoundAlert.factors.map((factor) => (
@@ -830,7 +823,7 @@ export function InsightsAIRecoveryDetail() {
                     {(alertLines.length
                       ? alertLines
                       : [normalizeNarrativeText(data.result.compoundAlert.message, lang)]).map((line, idx) => (
-                      <p key={`alert-line-${idx}`} className="text-[14px] leading-7 text-ios-text">
+                      <p key={`alert-line-${idx}`} className="break-keep text-[14px] leading-7 text-ios-text">
                         {idx === 0 ? highlightKeySentence(line, "alert") : line}
                       </p>
                     ))}
@@ -842,16 +835,16 @@ export function InsightsAIRecoveryDetail() {
 
           <DetailCard className="overflow-hidden px-0 py-0">
             <div className="border-b border-ios-sep/70 px-5 py-5 sm:px-6">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div className="flex flex-col gap-2">
                 <div>
-                  <div className="text-[12px] font-semibold tracking-[0.16em] text-ios-muted">
+                  <div className="text-[11px] font-semibold tracking-[0.18em] text-[color:var(--rnest-accent)]">
                     {t("오늘 플랜")}
                   </div>
-                  <div className="mt-1 text-[24px] font-bold tracking-[-0.04em] text-ios-text">
+                  <div className="mt-1 text-[20px] font-bold tracking-[-0.03em] text-ios-text">
                     {t("오늘의 회복 추천")}
                   </div>
                 </div>
-                <p className="text-[13px] leading-6 text-ios-sub">
+                <p className="max-w-[560px] break-keep text-[13px] leading-6 text-ios-sub">
                   {t("가장 중요한 행동부터 빠르게 읽을 수 있게 순서대로 정리했어요.")}
                 </p>
               </div>
@@ -879,19 +872,19 @@ export function InsightsAIRecoveryDetail() {
           </DetailCard>
 
           <DetailCard className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div>
+            <div className="flex flex-col gap-3">
+              <div className="max-w-[620px]">
                 <div className="text-[12px] font-semibold tracking-[0.16em] text-ios-muted">
                   {lang === "en" ? "WEEKLY NOTE" : "주간 회복 노트"}
                 </div>
-                <div className="mt-1 text-[24px] font-bold tracking-[-0.04em] text-ios-text">{t("이번 주 AI 한마디")}</div>
+                <div className="mt-1 text-[20px] font-bold tracking-[-0.03em] text-ios-text">{t("이번 주 AI 한마디")}</div>
               </div>
               {weekly ? (
                 <div className="flex flex-wrap gap-2">
                   <RecoveryMetaPill color="#1B2747">
                     {t("평균 배터리")} {weekly.avgBattery}
                   </RecoveryMetaPill>
-                  {weekly.topDrains.slice(0, 2).map((drain) => (
+                  {weekly.topDrains.map((drain) => (
                     <RecoveryMetaPill key={`${drain.label}-${drain.pct}`} color="#5E6C84">
                       {drain.label} {drain.pct}%
                     </RecoveryMetaPill>
@@ -901,25 +894,31 @@ export function InsightsAIRecoveryDetail() {
             </div>
 
             {weekly ? (
-              <div className="mt-5 grid gap-5 border-t border-ios-sep/70 pt-5 lg:grid-cols-[1fr_1fr]">
+              <div className="mt-5 space-y-5 border-t border-ios-sep/70 pt-5">
                 <div>
                   <p className="text-[13px] font-semibold text-ios-muted">{t("개인 패턴")}</p>
-                  <ol className="mt-3 space-y-2.5">
+                  <ol className="mt-3 space-y-3">
                     {weeklyPersonalLines.map((line, idx) => (
-                      <li key={`personal-${idx}`} className="flex gap-3 text-[15px] leading-7 text-ios-text">
-                        <span className="text-[13px] font-bold text-[color:var(--rnest-accent)]">{idx + 1}</span>
-                        <span>{idx === 0 ? highlightKeySentence(line, "summary") : line}</span>
+                      <li
+                        key={`personal-${idx}`}
+                        className="grid grid-cols-[20px_minmax(0,1fr)] gap-3 text-[15px] leading-7 text-ios-text"
+                      >
+                        <span className="pt-0.5 text-[13px] font-bold text-[color:var(--rnest-accent)]">{idx + 1}</span>
+                        <span className="break-keep">{line}</span>
                       </li>
                     ))}
                   </ol>
                 </div>
-                <div className="border-t border-ios-sep/70 pt-5 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
+                <div className="border-t border-ios-sep/70 pt-5">
                   <p className="text-[13px] font-semibold text-ios-muted">{t("다음 주 예측")}</p>
-                  <ol className="mt-3 space-y-2.5">
+                  <ol className="mt-3 space-y-3">
                     {weeklyPreviewLines.map((line, idx) => (
-                      <li key={`preview-${idx}`} className="flex gap-3 text-[15px] leading-7 text-ios-text">
-                        <span className="text-[13px] font-bold text-[color:var(--rnest-accent)]">{idx + 1}</span>
-                        <span>{idx === 0 ? highlightKeySentence(line, "plan") : line}</span>
+                      <li
+                        key={`preview-${idx}`}
+                        className="grid grid-cols-[20px_minmax(0,1fr)] gap-3 text-[15px] leading-7 text-ios-text"
+                      >
+                        <span className="pt-0.5 text-[13px] font-bold text-[color:var(--rnest-accent)]">{idx + 1}</span>
+                        <span className="break-keep">{line}</span>
                       </li>
                     ))}
                   </ol>
