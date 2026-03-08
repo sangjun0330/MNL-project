@@ -126,14 +126,6 @@ function normalizeNarrativeText(text: string, lang: "ko" | "en") {
   return out;
 }
 
-type HighlightTone = "summary" | "alert" | "plan";
-
-function highlightClass(tone: HighlightTone) {
-  if (tone === "alert") return "rounded-[10px] bg-[#FFF1F4] px-[6px] py-[1px] font-semibold text-[#7A2335]";
-  if (tone === "plan") return "rounded-[10px] bg-[#F5F8FF] px-[6px] py-[1px] font-semibold text-[#16325D]";
-  return "rounded-[10px] bg-[#F5F8FF] px-[6px] py-[1px] font-semibold text-[#16325D]";
-}
-
 function formatSignedDelta(value: number) {
   if (!Number.isFinite(value)) return "±0";
   if (value === 0) return "±0";
@@ -174,35 +166,6 @@ function buildWeeklyFallbackText(
   return topDrain
     ? `다음 주에는 ${topDrain} 리듬부터 먼저 정리하면 배터리 흐름을 더 안정적으로 유지하는 데 도움이 돼요.`
     : "다음 주에는 수면·카페인·휴식 타이밍을 먼저 고정해 회복 흐름을 더 안정적으로 이어가 보세요.";
-}
-
-function pickKeySentence(text: string) {
-  const sentences = text
-    .split(/(?<=[.!?]|다\.|요\.)\s+|\n+/)
-    .map((sentence) => sentence.trim())
-    .filter(Boolean);
-  const priorityRegex = /(핵심|최우선|주의|경고|위험|중요|필수|회복|수면부채|카페인|스트레스|기분|priority|warning|critical|must|important)/i;
-  return (
-    sentences.find((sentence) => sentence.length >= 10 && priorityRegex.test(sentence)) ??
-    sentences.find((sentence) => sentence.length >= 10) ??
-    ""
-  );
-}
-
-function highlightKeySentence(text: string, tone: HighlightTone) {
-  const target = pickKeySentence(text);
-  if (!target) return text;
-  const index = text.indexOf(target);
-  if (index < 0) return text;
-  const before = text.slice(0, index);
-  const after = text.slice(index + target.length);
-  return (
-    <>
-      {before}
-      <mark className={highlightClass(tone)}>{target}</mark>
-      {after}
-    </>
-  );
 }
 
 function normalizeLineBreaks(text: string) {
@@ -382,9 +345,7 @@ function RecoverySectionRow({
                 <div className="text-[12.5px] font-semibold" style={{ color: theme.accent }}>
                   {recLabel} {idx + 1}
                 </div>
-                <p className="mt-1.5 break-keep text-[15px] leading-7 text-ios-text">
-                  {highlightKeySentence(tip, "plan")}
-                </p>
+                <p className="mt-1.5 break-keep text-[15px] leading-7 text-ios-text">{tip}</p>
               </li>
             ))}
           </ol>
@@ -826,7 +787,7 @@ export function InsightsAIRecoveryDetail() {
                       ? alertLines
                       : [normalizeNarrativeText(data.result.compoundAlert.message, lang)]).map((line, idx) => (
                       <p key={`alert-line-${idx}`} className="break-keep text-[14px] leading-7 text-ios-text">
-                        {idx === 0 ? highlightKeySentence(line, "alert") : line}
+                        {line}
                       </p>
                     ))}
                   </div>
