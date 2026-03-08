@@ -11,10 +11,14 @@ import {
   setSocialClientCache,
 } from "@/lib/socialClientCache";
 import {
+  SocialActivityIcon,
   SocialBatteryIcon,
   SocialBrainIcon,
+  SocialCoffeeIcon,
   SocialFlameIcon,
+  SocialMoodIcon,
   SocialMoonIcon,
+  SocialStressIcon,
   SocialTargetIcon,
   SocialTrophyIcon,
 } from "@/components/social/SocialIcons";
@@ -35,19 +39,36 @@ function MetricIcon({
 }) {
   if (metric === "sleep") return <SocialMoonIcon className={className} />;
   if (metric === "mental") return <SocialBrainIcon className={className} />;
+  if (metric === "stress") return <SocialStressIcon className={className} />;
+  if (metric === "activity") return <SocialActivityIcon className={className} />;
+  if (metric === "caffeine") return <SocialCoffeeIcon className={className} />;
+  if (metric === "mood") return <SocialMoodIcon className={className} />;
   return <SocialBatteryIcon className={className} />;
 }
 
 function metricLabel(metric: ChallengeMetric): string {
   if (metric === "sleep") return "수면 시간";
   if (metric === "mental") return "멘탈 배터리";
+  if (metric === "stress") return "스트레스";
+  if (metric === "activity") return "활동량";
+  if (metric === "caffeine") return "카페인";
+  if (metric === "mood") return "기분";
   return "신체 배터리";
 }
 
 function typeLabel(challengeType: ChallengeType): string {
+  if (challengeType === "low_value") return "낮은 값 경쟁";
   if (challengeType === "group_goal") return "그룹 목표";
   if (challengeType === "streak") return "연속 달성";
   return "순위 경쟁";
+}
+
+function metricMax(metric: ChallengeMetric): number {
+  if (metric === "sleep") return 16;
+  if (metric === "stress" || metric === "activity") return 3;
+  if (metric === "mood") return 5;
+  if (metric === "caffeine") return 1000;
+  return 100;
 }
 
 function formatDate(iso: string): string {
@@ -58,6 +79,9 @@ function formatDate(iso: string): string {
 function formatValue(value: number | null, metric: ChallengeMetric): string {
   if (value == null) return "-";
   if (metric === "sleep") return `${value.toFixed(1)}h`;
+  if (metric === "caffeine") return `${Math.round(value)}mg`;
+  if (metric === "stress" || metric === "activity") return `${value.toFixed(1)}단계`;
+  if (metric === "mood") return `${value.toFixed(1)}점`;
   return String(Math.round(value));
 }
 
@@ -92,16 +116,37 @@ function gapLabel(
   challengeType: ChallengeType,
 ): string | null {
   if (leaderValue == null || currentValue == null) return null;
-  const diff = leaderValue - currentValue;
+  const diff =
+    challengeType === "low_value" ? currentValue - leaderValue : leaderValue - currentValue;
   if (diff <= 0) return null;
   if (challengeType === "streak") return `${Math.round(diff)}일 차이`;
   if (metric === "sleep") return `${diff.toFixed(1)}h 차이`;
+  if (metric === "caffeine") return `${Math.round(diff)}mg 차이`;
+  if (metric === "stress" || metric === "activity") return `${diff.toFixed(1)}단계 차이`;
+  if (metric === "mood") return `${diff.toFixed(1)}점 차이`;
   return `${Math.round(diff)}점 차이`;
 }
 
-function leaderboardBarWidth(value: number | null, leaderValue: number | null): number {
-  if (value == null || leaderValue == null || leaderValue <= 0) return 0;
-  return Math.max(10, Math.min(100, (value / leaderValue) * 100));
+function leaderboardBarWidth(
+  value: number | null,
+  leaderValue: number | null,
+  trailingValue: number | null,
+  challengeType: ChallengeType,
+  metric: ChallengeMetric,
+): number {
+  if (value == null || leaderValue == null) return 0;
+  if (challengeType === "low_value") {
+    const worstValue = trailingValue ?? leaderValue;
+    if (worstValue <= leaderValue) return 100;
+    const ratio = (worstValue - value) / (worstValue - leaderValue);
+    return Math.max(10, Math.min(100, ratio * 90 + 10));
+  }
+  if (challengeType === "streak") {
+    const target = Math.max(1, leaderValue);
+    return Math.max(10, Math.min(100, (value / target) * 100));
+  }
+  const scaleMax = Math.max(metricMax(metric), leaderValue);
+  return Math.max(10, Math.min(100, (value / scaleMax) * 100));
 }
 
 function metricTheme(metric: ChallengeMetric) {
@@ -120,6 +165,74 @@ function metricTheme(metric: ChallengeMetric) {
       rowHighlight: "bg-[#EEF6FF] border border-sky-100",
       spotlight:
         "bg-[radial-gradient(circle_at_top_right,rgba(96,165,250,0.2),transparent_38%)]",
+    };
+  }
+  if (metric === "stress") {
+    return {
+      heroSurface:
+        "bg-[linear-gradient(135deg,#FFF3F3_0%,#FFFFFF_54%,#FFF6F6_100%)] border border-rose-100/70",
+      iconSurface: "bg-[#FFE5E8] text-[#D14767]",
+      accentSurface: "bg-[#FFF0F2] text-[#D14767]",
+      accentText: "text-[#D14767]",
+      leaderSurface: "bg-[#FFF7F8]",
+      topSurface: "bg-[linear-gradient(135deg,#FFF9E8_0%,#FFF4C8_100%)] border border-[#F0D989]",
+      secondSurface: "bg-[linear-gradient(135deg,#F8FBFF_0%,#EEF4FB_100%)] border border-[#D5DFEC]",
+      thirdSurface: "bg-[linear-gradient(135deg,#FFF5ED_0%,#FFE8D7_100%)] border border-[#E8C5A7]",
+      progress: "bg-[linear-gradient(90deg,#FB7185_0%,#E11D48_100%)]",
+      rowHighlight: "bg-[#FFF4F6] border border-rose-100",
+      spotlight:
+        "bg-[radial-gradient(circle_at_top_right,rgba(251,113,133,0.18),transparent_40%)]",
+    };
+  }
+  if (metric === "activity") {
+    return {
+      heroSurface:
+        "bg-[linear-gradient(135deg,#EFFAF4_0%,#FFFFFF_54%,#F5FFF9_100%)] border border-emerald-100/70",
+      iconSurface: "bg-[#DCF7E7] text-[#1D9A62]",
+      accentSurface: "bg-[#EAF9F1] text-[#178452]",
+      accentText: "text-[#178452]",
+      leaderSurface: "bg-[#F6FCF8]",
+      topSurface: "bg-[linear-gradient(135deg,#FFF9E8_0%,#FFF4C8_100%)] border border-[#F0D989]",
+      secondSurface: "bg-[linear-gradient(135deg,#F8FBFF_0%,#EEF4FB_100%)] border border-[#D5DFEC]",
+      thirdSurface: "bg-[linear-gradient(135deg,#FFF5ED_0%,#FFE8D7_100%)] border border-[#E8C5A7]",
+      progress: "bg-[linear-gradient(90deg,#34D399_0%,#10B981_100%)]",
+      rowHighlight: "bg-[#EFFBF4] border border-emerald-100",
+      spotlight:
+        "bg-[radial-gradient(circle_at_top_right,rgba(52,211,153,0.18),transparent_40%)]",
+    };
+  }
+  if (metric === "caffeine") {
+    return {
+      heroSurface:
+        "bg-[linear-gradient(135deg,#FFF7EF_0%,#FFFFFF_54%,#FFF9F2_100%)] border border-amber-100/70",
+      iconSurface: "bg-[#FEEBD9] text-[#B96B23]",
+      accentSurface: "bg-[#FFF3E6] text-[#B96B23]",
+      accentText: "text-[#B96B23]",
+      leaderSurface: "bg-[#FFF9F3]",
+      topSurface: "bg-[linear-gradient(135deg,#FFF9E8_0%,#FFF4C8_100%)] border border-[#F0D989]",
+      secondSurface: "bg-[linear-gradient(135deg,#F8FBFF_0%,#EEF4FB_100%)] border border-[#D5DFEC]",
+      thirdSurface: "bg-[linear-gradient(135deg,#FFF5ED_0%,#FFE8D7_100%)] border border-[#E8C5A7]",
+      progress: "bg-[linear-gradient(90deg,#F59E0B_0%,#D97706_100%)]",
+      rowHighlight: "bg-[#FFF8F0] border border-amber-100",
+      spotlight:
+        "bg-[radial-gradient(circle_at_top_right,rgba(245,158,11,0.18),transparent_40%)]",
+    };
+  }
+  if (metric === "mood") {
+    return {
+      heroSurface:
+        "bg-[linear-gradient(135deg,#F2FBFB_0%,#FFFFFF_54%,#F4FFFF_100%)] border border-cyan-100/70",
+      iconSurface: "bg-[#DDF7F8] text-[#0E8EA0]",
+      accentSurface: "bg-[#E9FAFB] text-[#0E8EA0]",
+      accentText: "text-[#0E8EA0]",
+      leaderSurface: "bg-[#F5FCFD]",
+      topSurface: "bg-[linear-gradient(135deg,#FFF9E8_0%,#FFF4C8_100%)] border border-[#F0D989]",
+      secondSurface: "bg-[linear-gradient(135deg,#F8FBFF_0%,#EEF4FB_100%)] border border-[#D5DFEC]",
+      thirdSurface: "bg-[linear-gradient(135deg,#FFF5ED_0%,#FFE8D7_100%)] border border-[#E8C5A7]",
+      progress: "bg-[linear-gradient(90deg,#22D3EE_0%,#0891B2_100%)]",
+      rowHighlight: "bg-[#EFFBFD] border border-cyan-100",
+      spotlight:
+        "bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.18),transparent_40%)]",
     };
   }
   if (metric === "mental") {
@@ -313,6 +426,7 @@ function LeaderboardRow({
   metric,
   challengeType,
   leaderValue,
+  trailingValue,
   currentUserId,
   theme,
 }: {
@@ -320,6 +434,7 @@ function LeaderboardRow({
   metric: ChallengeMetric;
   challengeType: ChallengeType;
   leaderValue: number | null;
+  trailingValue: number | null;
   currentUserId: string | null;
   theme: ReturnType<typeof metricTheme>;
 }) {
@@ -327,7 +442,7 @@ function LeaderboardRow({
   const value = challengeValueNumber(entry, challengeType);
   const gap = gapLabel(leaderValue, value, metric, challengeType);
   const valueLabel = challengeValueLabel(value, metric, challengeType);
-  const width = leaderboardBarWidth(value, leaderValue);
+  const width = leaderboardBarWidth(value, leaderValue, trailingValue, challengeType, metric);
 
   return (
     <div
@@ -560,6 +675,8 @@ export function SocialGroupChallengePage({
   const topThree = detail?.leaderboard.slice(0, 3) ?? [];
   const chasingEntries = detail?.leaderboard.slice(3) ?? [];
   const leaderValue = detail ? challengeValueNumber(leaderEntry, detail.challengeType) : null;
+  const trailingEntry = detail?.leaderboard[detail.leaderboard.length - 1] ?? null;
+  const trailingValue = detail ? challengeValueNumber(trailingEntry, detail.challengeType) : null;
   const myValue = detail ? challengeValueNumber(myEntry, detail.challengeType) : null;
   const myGap = detail ? gapLabel(leaderValue, myValue, detail.metric, detail.challengeType) : null;
   const theme = metricTheme(detail?.metric ?? "battery");
@@ -570,6 +687,8 @@ export function SocialGroupChallengePage({
       ? ""
       : detail.challengeType === "streak"
         ? "연속 기록을 이어가며 가장 긴 streak를 만드는 레이스예요."
+        : detail.challengeType === "low_value"
+          ? "최근 건강 기록 중 더 낮을수록 좋은 값을 기준으로 순위를 겨루는 레이스예요."
         : detail.challengeType === "group_goal"
           ? "개인 기록도 보이지만, 결국 그룹 평균으로 목표를 넘기는 미션이에요."
           : "최근 건강 기록으로 바로 순위가 반영되는 경쟁형 챌린지예요.";
@@ -645,6 +764,8 @@ export function SocialGroupChallengePage({
                   hint={
                     detail.challengeType === "leaderboard"
                       ? "가장 높은 기록이 우승"
+                      : detail.challengeType === "low_value"
+                        ? "가장 낮은 기록이 우승"
                       : detail.challengeType === "group_goal"
                         ? "그룹 평균 달성"
                         : "연속 유지 필요"
@@ -747,7 +868,11 @@ export function SocialGroupChallengePage({
                 <div>
                   <p className="text-[14px] font-bold text-ios-text">내 레이스 현황</p>
                   <p className="mt-0.5 text-[11.5px] text-ios-muted">
-                    {isLeader ? "현재 선두를 유지하고 있어요." : "선두와의 격차를 줄여 보세요."}
+                    {isLeader
+                      ? "현재 선두를 유지하고 있어요."
+                      : detail.challengeType === "low_value"
+                        ? "더 낮은 값으로 선두와의 격차를 줄여 보세요."
+                        : "선두와의 격차를 줄여 보세요."}
                   </p>
                 </div>
                 <div className={cn("rounded-full px-3 py-1.5 text-[11px] font-bold", theme.accentSurface)}>
@@ -769,7 +894,13 @@ export function SocialGroupChallengePage({
                 <HeroStat
                   label={isLeader ? "상태" : "선두와 격차"}
                   value={isLeader ? "LEAD" : myGap ?? "-"}
-                  hint={isLeader ? "방어 중" : "추격 필요"}
+                  hint={
+                    isLeader
+                      ? "방어 중"
+                      : detail.challengeType === "low_value"
+                        ? "값 낮추기 필요"
+                        : "추격 필요"
+                  }
                 />
               </div>
 
@@ -777,12 +908,30 @@ export function SocialGroupChallengePage({
                 <div className="mt-4">
                   <div className="mb-1.5 flex items-center justify-between text-[11px] text-ios-muted">
                     <span>내 기록</span>
-                    <span>선두 대비 {Math.min(100, Math.round((myValue / leaderValue) * 100))}%</span>
+                    <span>
+                      선두 대비 {Math.round(
+                        leaderboardBarWidth(
+                          myValue,
+                          leaderValue,
+                          trailingValue,
+                          detail.challengeType,
+                          detail.metric,
+                        )
+                      )}%
+                    </span>
                   </div>
                   <div className="h-3 overflow-hidden rounded-full bg-ios-sep">
                     <div
                       className={cn("h-full rounded-full", theme.progress)}
-                      style={{ width: `${leaderboardBarWidth(myValue, leaderValue)}%` }}
+                      style={{
+                        width: `${leaderboardBarWidth(
+                          myValue,
+                          leaderValue,
+                          trailingValue,
+                          detail.challengeType,
+                          detail.metric,
+                        )}%`,
+                      }}
                     />
                   </div>
                 </div>
@@ -839,7 +988,11 @@ export function SocialGroupChallengePage({
                   <div>
                     <p className="text-[14px] font-bold text-ios-text">리더보드</p>
                     <p className="mt-0.5 text-[11.5px] text-ios-muted">
-                      {detail.challengeType === "streak" ? "가장 긴 연속 달성 순서예요." : "현재 기록이 높은 순서로 정렬돼요."}
+                      {detail.challengeType === "streak"
+                        ? "가장 긴 연속 달성 순서예요."
+                        : detail.challengeType === "low_value"
+                          ? "현재 기록이 낮은 순서로 정렬돼요."
+                          : "현재 기록이 높은 순서로 정렬돼요."}
                     </p>
                   </div>
                 </div>
@@ -886,6 +1039,7 @@ export function SocialGroupChallengePage({
                         metric={detail.metric}
                         challengeType={detail.challengeType}
                         leaderValue={leaderValue}
+                        trailingValue={trailingValue}
                         currentUserId={currentUserId}
                         theme={theme}
                       />

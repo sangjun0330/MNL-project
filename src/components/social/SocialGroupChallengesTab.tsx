@@ -5,12 +5,14 @@ import { useRouter } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import {
+  SocialActivityIcon,
   SocialBatteryIcon,
   SocialBrainIcon,
-  SocialFlameIcon,
+  SocialCoffeeIcon,
+  SocialMoodIcon,
   SocialMoonIcon,
   SocialPlusIcon,
-  SocialTargetIcon,
+  SocialStressIcon,
   SocialTrophyIcon,
 } from "@/components/social/SocialIcons";
 import type {
@@ -36,23 +38,68 @@ type Props = {
 function MetricIcon({ metric, className }: { metric: ChallengeMetric; className?: string }) {
   if (metric === "sleep") return <SocialMoonIcon className={className ?? "h-[15px] w-[15px]"} />;
   if (metric === "mental") return <SocialBrainIcon className={className ?? "h-[15px] w-[15px]"} />;
+  if (metric === "stress") return <SocialStressIcon className={className ?? "h-[15px] w-[15px]"} />;
+  if (metric === "activity") return <SocialActivityIcon className={className ?? "h-[15px] w-[15px]"} />;
+  if (metric === "caffeine") return <SocialCoffeeIcon className={className ?? "h-[15px] w-[15px]"} />;
+  if (metric === "mood") return <SocialMoodIcon className={className ?? "h-[15px] w-[15px]"} />;
   return <SocialBatteryIcon className={className ?? "h-[15px] w-[15px]"} />;
 }
 
 function metricLabel(metric: ChallengeMetric): string {
   if (metric === "sleep") return "수면 시간";
   if (metric === "mental") return "멘탈 배터리";
+  if (metric === "stress") return "스트레스";
+  if (metric === "activity") return "활동량";
+  if (metric === "caffeine") return "카페인";
+  if (metric === "mood") return "기분";
   return "신체 배터리";
 }
 
 function typeLabel(challengeType: ChallengeType): string {
+  if (challengeType === "low_value") return "낮은 값 경쟁";
   if (challengeType === "group_goal") return "그룹 목표";
   if (challengeType === "streak") return "연속 달성";
   return "순위 경쟁";
 }
 
-function metricUnit(metric: ChallengeMetric): string {
-  return metric === "sleep" ? "h" : "";
+function metricMax(metric: ChallengeMetric): number {
+  if (metric === "sleep") return 16;
+  if (metric === "stress" || metric === "activity") return 3;
+  if (metric === "mood") return 5;
+  if (metric === "caffeine") return 1000;
+  return 100;
+}
+
+function metricInputHint(metric: ChallengeMetric): string {
+  if (metric === "sleep") return "시간, 예: 7.0";
+  if (metric === "caffeine") return "mg, 예: 200";
+  if (metric === "stress" || metric === "activity") return "단계, 0–3";
+  if (metric === "mood") return "점수, 1–5";
+  return "점수, 0–100";
+}
+
+function metricPlaceholder(metric: ChallengeMetric): string {
+  if (metric === "sleep") return "7.0";
+  if (metric === "caffeine") return "200";
+  if (metric === "stress" || metric === "activity") return "1.5";
+  if (metric === "mood") return "4";
+  return "50";
+}
+
+function formatMetricValue(metric: ChallengeMetric, value: number): string {
+  if (metric === "sleep") return `${value.toFixed(1)}h`;
+  if (metric === "caffeine") return `${Math.round(value)}mg`;
+  if (metric === "stress" || metric === "activity") return `${value.toFixed(1)}단계`;
+  if (metric === "mood") return `${value.toFixed(1)}점`;
+  return `${Math.round(value)}`;
+}
+
+function progressPercent(metric: ChallengeMetric, challengeType: ChallengeType, value: number): number {
+  const max = metricMax(metric);
+  if (challengeType === "low_value") {
+    return Math.max(10, Math.min(100, (1 - value / max) * 100));
+  }
+  return Math.max(10, Math.min(100, (value / max) * 100));
 }
 
 // ── D-N 배지 ─────────────────────────────────────────────────
@@ -90,14 +137,14 @@ function DaysBadge({ daysLeft, status }: { daysLeft: number; status: string }) {
 
 function ProgressBar({
   value,
-  maxValue,
   metric,
+  challengeType,
   streak,
   targetDays,
 }: {
   value: number | null;
-  maxValue: number;
   metric: ChallengeMetric;
+  challengeType: ChallengeType;
   streak?: number | null;
   targetDays?: number | null;
 }) {
@@ -119,10 +166,12 @@ function ProgressBar({
     );
   }
   if (value == null) return null;
-  const pct = Math.min(100, (value / maxValue) * 100);
+  const pct = progressPercent(metric, challengeType, value);
   const colorClass =
     metric === "sleep"
       ? pct >= 80 ? "bg-blue-400" : pct >= 60 ? "bg-sky-400" : "bg-amber-400"
+      : metric === "caffeine"
+        ? pct >= 80 ? "bg-emerald-400" : pct >= 60 ? "bg-sky-400" : "bg-amber-400"
       : pct >= 60 ? "bg-green-400" : pct >= 40 ? "bg-amber-400" : "bg-red-400";
 
   return (
@@ -134,8 +183,7 @@ function ProgressBar({
         />
       </div>
       <span className="shrink-0 text-[11.5px] font-bold text-ios-text tabular-nums">
-        {metric === "sleep" ? `${value.toFixed(1)}h` : Math.round(value)}
-        {metricUnit(metric)}
+        {formatMetricValue(metric, value)}
       </span>
     </div>
   );
@@ -159,7 +207,6 @@ function ChallengeCard({
   const router = useRouter();
   const entry = challenge.myEntry;
   const isParticipating = entry !== null;
-  const maxValue = challenge.metric === "sleep" ? 9 : 100;
   const openChallenge = () => {
     router.push(`/social/groups/${groupId}/challenges/${challenge.id}`);
   };
@@ -204,16 +251,16 @@ function ChallengeCard({
           challenge.challengeType === "streak" ? (
             <ProgressBar
               value={null}
-              maxValue={maxValue}
               metric={challenge.metric}
+              challengeType={challenge.challengeType}
               streak={entry.streakDays ?? 0}
               targetDays={challenge.targetDays}
             />
           ) : (
             <ProgressBar
               value={entry.snapshotValue}
-              maxValue={maxValue}
               metric={challenge.metric}
+              challengeType={challenge.challengeType}
             />
           )
         ) : (
@@ -240,7 +287,7 @@ function ChallengeCard({
         </p>
         {challenge.challengeType === "group_goal" && challenge.targetValue != null && (
           <p className="text-[11px] text-ios-muted">
-            · 목표 {challenge.metric === "sleep" ? `${challenge.targetValue}h` : challenge.targetValue}
+            · 목표 {formatMetricValue(challenge.metric, challenge.targetValue)}
           </p>
         )}
         {challenge.challengeType === "streak" && challenge.targetDays != null && (
@@ -267,12 +314,17 @@ function ChallengeCard({
 
 const METRICS: Array<{ value: ChallengeMetric; label: string; icon: ReactNode }> = [
   { value: "battery", label: "신체 배터리", icon: <SocialBatteryIcon className="h-5 w-5" /> },
-  { value: "sleep",   label: "수면 시간",   icon: <SocialMoonIcon className="h-5 w-5" />    },
-  { value: "mental",  label: "멘탈 배터리", icon: <SocialBrainIcon className="h-5 w-5" />   },
+  { value: "sleep", label: "수면 시간", icon: <SocialMoonIcon className="h-5 w-5" /> },
+  { value: "mental", label: "멘탈 배터리", icon: <SocialBrainIcon className="h-5 w-5" /> },
+  { value: "stress", label: "스트레스", icon: <SocialStressIcon className="h-5 w-5" /> },
+  { value: "activity", label: "활동량", icon: <SocialActivityIcon className="h-5 w-5" /> },
+  { value: "caffeine", label: "카페인", icon: <SocialCoffeeIcon className="h-5 w-5" /> },
+  { value: "mood", label: "기분", icon: <SocialMoodIcon className="h-5 w-5" /> },
 ];
 
 const TYPES: Array<{ value: ChallengeType; label: string; desc: string }> = [
   { value: "leaderboard", label: "순위 경쟁",   desc: "높은 값 순으로 개인 순위 경쟁" },
+  { value: "low_value", label: "낮은 값 경쟁", desc: "낮은 값 순으로 개인 순위 경쟁" },
   { value: "group_goal",  label: "그룹 목표",   desc: "그룹 평균이 목표값 이상이면 성공" },
   { value: "streak",      label: "연속 달성",   desc: "N일 연속 목표값 이상 유지" },
 ];
@@ -334,8 +386,12 @@ function CreateChallengeSheet({
       }).then((r) => r.json());
 
       if (!res.ok) {
-        const errMsg =
+      const errMsg =
           res.error === "challenge_title_required" ? "챌린지 이름을 입력해 주세요." :
+          res.error === "invalid_challenge_metric" ? "지원하지 않는 측정 지표예요." :
+          res.error === "invalid_challenge_type" ? "지원하지 않는 챌린지 방식이에요." :
+          res.error === "challenge_target_required" ? "목표값을 입력해 주세요." :
+          res.error === "challenge_target_days_required" ? "목표 일수를 입력해 주세요." :
           res.error === "too_many_active_challenges" ? "진행 중인 챌린지가 너무 많아요. (최대 5개)" :
           res.error === "too_many_requests" ? "잠시 후 다시 시도해 주세요." :
           "챌린지를 만들지 못했어요.";
@@ -455,16 +511,14 @@ function CreateChallengeSheet({
           <div>
             <label className="mb-1.5 block text-[13px] font-semibold text-ios-text">
               {challengeType === "group_goal" ? "그룹 목표값 *" : "달성 기준값 *"}
-              <span className="ml-1 font-normal text-ios-muted">
-                ({metric === "sleep" ? "시간, 예: 7.0" : "점수, 0–100"})
-              </span>
+              <span className="ml-1 font-normal text-ios-muted">({metricInputHint(metric)})</span>
             </label>
             <input
               type="number"
               inputMode="decimal"
               value={targetValue}
               onChange={(e) => setTargetValue(e.target.value)}
-              placeholder={metric === "sleep" ? "7.0" : "50"}
+              placeholder={metricPlaceholder(metric)}
               className="w-full rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3 text-[14px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent)] placeholder:text-ios-muted/60"
             />
           </div>

@@ -20,6 +20,23 @@ export const MAX_ACTIVE_CHALLENGES_PER_GROUP = 5;
 export const MIN_CHALLENGE_DAYS = 3;
 export const MAX_CHALLENGE_DAYS = 30;
 
+const CHALLENGE_METRICS = new Set<ChallengeMetric>([
+  "battery",
+  "sleep",
+  "mental",
+  "stress",
+  "activity",
+  "caffeine",
+  "mood",
+]);
+
+const CHALLENGE_TYPES = new Set<ChallengeType>([
+  "leaderboard",
+  "low_value",
+  "group_goal",
+  "streak",
+]);
+
 // ── 텍스트 정제 ──────────────────────────────────────────────
 
 export function cleanChallengeTitle(raw: string): string {
@@ -44,12 +61,21 @@ function normalizeStatus(value: unknown): ChallengeStatus {
 }
 
 function normalizeMetric(value: unknown): ChallengeMetric {
-  if (value === "sleep" || value === "mental") return value;
+  if (
+    value === "sleep" ||
+    value === "mental" ||
+    value === "stress" ||
+    value === "activity" ||
+    value === "caffeine" ||
+    value === "mood"
+  ) {
+    return value;
+  }
   return "battery";
 }
 
 function normalizeType(value: unknown): ChallengeType {
-  if (value === "group_goal" || value === "streak") return value;
+  if (value === "group_goal" || value === "streak" || value === "low_value") return value;
   return "leaderboard";
 }
 
@@ -101,6 +127,10 @@ function metricSnapshotValue(metric: ChallengeMetric, vitals: ReturnType<typeof 
   if (!vitals) return null;
   if (metric === "sleep") return vitals.weeklyAvgSleep ?? null;
   if (metric === "mental") return vitals.weeklyAvgMental;
+  if (metric === "stress") return vitals.weeklyAvgStress ?? null;
+  if (metric === "activity") return vitals.weeklyAvgActivity ?? null;
+  if (metric === "caffeine") return vitals.weeklyAvgCaffeine ?? null;
+  if (metric === "mood") return vitals.weeklyAvgMood ?? null;
   return vitals.weeklyAvgBattery;
 }
 
@@ -380,6 +410,13 @@ export async function getGroupChallengeDetail(
     sortedEntries = sortedEntries.sort(
       (a, b) => (b.streakDays ?? 0) - (a.streakDays ?? 0)
     );
+  } else if (challengeType === "low_value") {
+    sortedEntries = sortedEntries.sort((a, b) => {
+      if (a.snapshotValue == null && b.snapshotValue == null) return 0;
+      if (a.snapshotValue == null) return 1;
+      if (b.snapshotValue == null) return -1;
+      return a.snapshotValue - b.snapshotValue;
+    });
   } else {
     sortedEntries = sortedEntries.sort(
       (a, b) => (b.snapshotValue ?? Number.NEGATIVE_INFINITY) - (a.snapshotValue ?? Number.NEGATIVE_INFINITY)
@@ -445,10 +482,32 @@ export async function createGroupChallenge(
 ): Promise<GroupChallengeSummary> {
   const title = cleanChallengeTitle(payload.title);
   if (!title) throw new Error("challenge_title_required");
+  const metric = CHALLENGE_METRICS.has(payload.metric as ChallengeMetric)
+    ? payload.metric
+    : null;
+  const challengeType = CHALLENGE_TYPES.has(payload.challengeType as ChallengeType)
+    ? payload.challengeType
+    : null;
+  if (!metric) throw new Error("invalid_challenge_metric");
+  if (!challengeType) throw new Error("invalid_challenge_type");
 
   const durationDays = Math.min(MAX_CHALLENGE_DAYS, Math.max(MIN_CHALLENGE_DAYS, payload.durationDays ?? 7));
   const startsAt = new Date();
   const endsAt = new Date(startsAt.getTime() + durationDays * 86_400_000);
+  const rawTargetValue = payload.targetValue != null ? Number(payload.targetValue) : null;
+  const targetValue = rawTargetValue != null && Number.isFinite(rawTargetValue) ? rawTargetValue : null;
+  const rawTargetDays = payload.targetDays != null ? Number(payload.targetDays) : null;
+  const targetDays =
+    rawTargetDays != null && Number.isFinite(rawTargetDays)
+      ? Math.min(durationDays, Math.max(1, Math.round(rawTargetDays)))
+      : null;
+
+  if ((challengeType === "group_goal" || challengeType === "streak") && targetValue == null) {
+    throw new Error("challenge_target_required");
+  }
+  if (challengeType === "streak" && targetDays == null) {
+    throw new Error("challenge_target_days_required");
+  }
 
   // 동시 active 챌린지 개수 제한
   const { count } = await (admin as any)
@@ -468,10 +527,10 @@ export async function createGroupChallenge(
       created_by:     userId,
       title,
       description:    payload.description ? cleanChallengeDescription(payload.description) : null,
-      metric:         payload.metric ?? "battery",
-      challenge_type: payload.challengeType ?? "leaderboard",
-      target_value:   payload.targetValue ?? null,
-      target_days:    payload.targetDays ?? null,
+      metric,
+      challenge_type: challengeType,
+      target_value:   challengeType === "group_goal" || challengeType === "streak" ? targetValue : null,
+      target_days:    challengeType === "streak" ? targetDays : null,
       status:         "active",
       starts_at:      startsAt.toISOString(),
       ends_at:        endsAt.toISOString(),

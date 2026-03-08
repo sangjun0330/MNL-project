@@ -554,7 +554,8 @@ export function computeMemberWeeklyVitals(
         v.inputs.sleepHours != null ||
         v.inputs.stress != null ||
         v.inputs.mood != null ||
-        v.inputs.activity != null,
+        v.inputs.activity != null ||
+        v.inputs.caffeineMg != null,
     );
 
     // 최소 3일 이상 데이터 없으면 랭킹 제외
@@ -573,6 +574,34 @@ export function computeMemberWeeklyVitals(
           daysWithSleep.length
         : null;
 
+    const daysWithStress = daysWithData.filter((v) => v.inputs.stress != null);
+    const avgStress =
+      daysWithStress.length > 0
+        ? daysWithStress.reduce((sum, v) => sum + Number(v.inputs.stress ?? 0), 0) /
+          daysWithStress.length
+        : null;
+
+    const daysWithActivity = daysWithData.filter((v) => v.inputs.activity != null);
+    const avgActivity =
+      daysWithActivity.length > 0
+        ? daysWithActivity.reduce((sum, v) => sum + Number(v.inputs.activity ?? 0), 0) /
+          daysWithActivity.length
+        : null;
+
+    const daysWithCaffeine = daysWithData.filter((v) => v.inputs.caffeineMg != null);
+    const avgCaffeine =
+      daysWithCaffeine.length > 0
+        ? daysWithCaffeine.reduce((sum, v) => sum + Number(v.inputs.caffeineMg ?? 0), 0) /
+          daysWithCaffeine.length
+        : null;
+
+    const daysWithMood = daysWithData.filter((v) => v.inputs.mood != null);
+    const avgMood =
+      daysWithMood.length > 0
+        ? daysWithMood.reduce((sum, v) => sum + Number(v.inputs.mood ?? 0), 0) /
+          daysWithMood.length
+        : null;
+
     // 지난 7일 중 가장 나쁜 번아웃 레벨 (danger > warning > ok)
     let burnoutLevel: "ok" | "warning" | "danger" = "ok";
     for (const v of daysWithData) {
@@ -589,6 +618,10 @@ export function computeMemberWeeklyVitals(
       weeklyAvgBattery: Math.round(avgBattery * 10) / 10,
       weeklyAvgMental: Math.round(avgMental * 10) / 10,
       weeklyAvgSleep: avgSleep !== null ? Math.round(avgSleep * 10) / 10 : null,
+      weeklyAvgStress: avgStress !== null ? Math.round(avgStress * 10) / 10 : null,
+      weeklyAvgActivity: avgActivity !== null ? Math.round(avgActivity * 10) / 10 : null,
+      weeklyAvgCaffeine: avgCaffeine !== null ? Math.round(avgCaffeine * 10) / 10 : null,
+      weeklyAvgMood: avgMood !== null ? Math.round(avgMood * 10) / 10 : null,
       burnoutLevel,
       daysCounted: daysWithData.length,
     };

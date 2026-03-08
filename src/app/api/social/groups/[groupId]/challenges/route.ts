@@ -163,6 +163,18 @@ export async function POST(
     if (err?.message === "challenge_title_required") {
       return jsonNoStore({ ok: false, error: "challenge_title_required" }, { status: 400 });
     }
+    if (err?.message === "invalid_challenge_metric") {
+      return jsonNoStore({ ok: false, error: "invalid_challenge_metric" }, { status: 400 });
+    }
+    if (err?.message === "invalid_challenge_type") {
+      return jsonNoStore({ ok: false, error: "invalid_challenge_type" }, { status: 400 });
+    }
+    if (err?.message === "challenge_target_required") {
+      return jsonNoStore({ ok: false, error: "challenge_target_required" }, { status: 400 });
+    }
+    if (err?.message === "challenge_target_days_required") {
+      return jsonNoStore({ ok: false, error: "challenge_target_days_required" }, { status: 400 });
+    }
     if (err?.message === "too_many_active_challenges") {
       return jsonNoStore({ ok: false, error: "too_many_active_challenges" }, { status: 409 });
     }

@@ -59,6 +59,14 @@ export type MemberWeeklyVitals = {
   weeklyAvgMental: number;
   /** 지난 7일 평균 수면 시간 (수면 데이터 있는 날 기준, 없으면 null) */
   weeklyAvgSleep: number | null;
+  /** 지난 7일 평균 스트레스 단계 (입력된 날 기준, 없으면 null) */
+  weeklyAvgStress: number | null;
+  /** 지난 7일 평균 활동 단계 (입력된 날 기준, 없으면 null) */
+  weeklyAvgActivity: number | null;
+  /** 지난 7일 평균 카페인 섭취량 mg (입력된 날 기준, 없으면 null) */
+  weeklyAvgCaffeine: number | null;
+  /** 지난 7일 평균 기분 점수 (입력된 날 기준, 없으면 null) */
+  weeklyAvgMood: number | null;
   /** 지난 7일 중 가장 나쁜 번아웃 레벨 */
   burnoutLevel: "ok" | "warning" | "danger";
   /** 실제 건강 입력이 있는 날 수 (3일 미만이면 null 반환) */
@@ -229,8 +237,15 @@ export type SocialGroupInvitePreview = {
 // Group Challenge types
 // ══════════════════════════════════════════════════════════════
 
-export type ChallengeMetric = "battery" | "sleep" | "mental";
-export type ChallengeType   = "leaderboard" | "group_goal" | "streak";
+export type ChallengeMetric =
+  | "battery"
+  | "sleep"
+  | "mental"
+  | "stress"
+  | "activity"
+  | "caffeine"
+  | "mood";
+export type ChallengeType = "leaderboard" | "low_value" | "group_goal" | "streak";
 export type ChallengeStatus = "active" | "ended" | "canceled";
 
 /** 내 참가 엔트리 */

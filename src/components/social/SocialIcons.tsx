@@ -246,6 +246,90 @@ export function SocialBrainIcon({ className = "" }: IconProps) {
   );
 }
 
+export function SocialStressIcon({ className = "" }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M4 8.5c1.6-2.6 3.5-3.9 5.7-3.9 2.7 0 3.4 2.2 5.1 2.2 1.1 0 2.3-.8 3.7-2.5" />
+      <path d="M4 15.5c1.6-2.6 3.5-3.9 5.7-3.9 2.7 0 3.4 2.2 5.1 2.2 1.1 0 2.3-.8 3.7-2.5" />
+      <path d="M18.2 4.2 20 5.8l-1.8 1.6" />
+      <path d="M18.2 11.2 20 12.8l-1.8 1.6" />
+    </svg>
+  );
+}
+
+export function SocialActivityIcon({ className = "" }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <circle cx="14.5" cy="5.5" r="2.2" />
+      <path d="m10.5 10.5 2.6-2.1 2 1.4 1.9 2.7" />
+      <path d="m11 14-2.5 2.6" />
+      <path d="m14.2 12.2-1.1 4.3" />
+      <path d="m8.3 10 2.3 1.1" />
+      <path d="m15.9 10.8 2.7-.3" />
+    </svg>
+  );
+}
+
+export function SocialCoffeeIcon({ className = "" }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M5 9.5h10.5a0.5 0.5 0 0 1 .5.5v3.4A4.6 4.6 0 0 1 11.4 18H9.6A4.6 4.6 0 0 1 5 13.4V9.5Z" />
+      <path d="M16 10.5h1.1a2.9 2.9 0 0 1 0 5.8H16" />
+      <path d="M7 20h11" />
+      <path d="M9 5.2c0 1-.8 1.4-.8 2.3" />
+      <path d="M12 4.4c0 1-.8 1.4-.8 2.3" />
+      <path d="M15 5.2c0 1-.8 1.4-.8 2.3" />
+    </svg>
+  );
+}
+
+export function SocialMoodIcon({ className = "" }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M9.2 10.2h.01" />
+      <path d="M14.8 10.2h.01" />
+      <path d="M8.8 14.2c1 1.2 2 1.8 3.2 1.8s2.2-.6 3.2-1.8" />
+    </svg>
+  );
+}
+
 export function SocialTargetIcon({ className = "" }: IconProps) {
   return (
     <svg
