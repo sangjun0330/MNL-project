@@ -195,14 +195,13 @@ function splitBulletLines(text: string) {
 const CATEGORIES: Array<{
   key: RecoverySection["category"];
   titleKey: string;
-  icon: string;
 }> = [
-  { key: "sleep", titleKey: "수면", icon: "1" },
-  { key: "shift", titleKey: "교대근무", icon: "2" },
-  { key: "caffeine", titleKey: "카페인", icon: "3" },
-  { key: "menstrual", titleKey: "생리주기", icon: "4" },
-  { key: "stress", titleKey: "스트레스 & 감정", icon: "5" },
-  { key: "activity", titleKey: "신체 활동", icon: "6" },
+  { key: "sleep", titleKey: "수면" },
+  { key: "shift", titleKey: "교대근무" },
+  { key: "caffeine", titleKey: "카페인" },
+  { key: "menstrual", titleKey: "생리주기" },
+  { key: "stress", titleKey: "스트레스 & 감정" },
+  { key: "activity", titleKey: "신체 활동" },
 ];
 
 const CATEGORY_THEME: Record<
@@ -277,18 +276,73 @@ function RecoveryMetaPill({
   );
 }
 
+function RecoveryCategoryIcon({
+  category,
+}: {
+  category: RecoverySection["category"];
+}) {
+  const cls = "h-[16px] w-[16px]";
+  if (category === "sleep") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" className={cls} aria-hidden="true">
+        <path d="M15.7 3.8a7.6 7.6 0 1 0 4.5 13.7A8.8 8.8 0 0 1 15.7 3.8Z" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (category === "shift") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" className={cls} aria-hidden="true">
+        <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.9" />
+        <path d="M12 7.5V12l3.2 1.9" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (category === "caffeine") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" className={cls} aria-hidden="true">
+        <path d="M6 9h8.5a2.5 2.5 0 0 1 0 5H14v1.3A2.7 2.7 0 0 1 11.3 18h-2.6A2.7 2.7 0 0 1 6 15.3V9Z" stroke="currentColor" strokeWidth="1.9" strokeLinejoin="round" />
+        <path d="M9 6.2c0-1 .8-1.2.8-2.2M12 6.2c0-1 .8-1.2.8-2.2" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (category === "menstrual") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" className={cls} aria-hidden="true">
+        <path d="M12 4.5c2.3 3 4.5 5.5 4.5 8.2A4.5 4.5 0 1 1 7.5 12.7C7.5 10 9.7 7.5 12 4.5Z" stroke="currentColor" strokeWidth="1.9" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (category === "stress") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" className={cls} aria-hidden="true">
+        <path d="M9.2 8.5c0-1.9 1.3-3 2.8-3s2.8 1.1 2.8 3c0 1-.4 1.8-1 2.4-.8.8-1.7 1.3-1.8 2.6" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M10.3 18h3.4M10.8 20h2.4" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+        <path d="M5 12h1.5M17.5 12H19M7.2 6.7l1 1M15.8 7.7l1-1" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={cls} aria-hidden="true">
+      <path d="M12 5.5v6.2l4.3 2.3" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M8 8.2a5 5 0 1 0 8 0" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function RecoverySectionRow({
-  index,
   meta,
   section,
   lang,
   t,
+  expanded,
+  onToggleExpanded,
 }: {
-  index: number;
-  meta: { key: RecoverySection["category"]; titleKey: string; icon: string };
+  meta: { key: RecoverySection["category"]; titleKey: string };
   section: RecoverySection;
   lang: "ko" | "en";
   t: (key: string) => string;
+  expanded: boolean;
+  onToggleExpanded: () => void;
 }) {
   const theme = CATEGORY_THEME[meta.key];
   const descriptionText = normalizeNarrativeText(section.description || "", lang);
@@ -308,25 +362,38 @@ function RecoverySectionRow({
   const recommendations = recommendationPool.slice(0, 3);
   const statusLabel = lang === "en" ? "Current status" : "현재 상태";
   const recLabel = lang === "en" ? "Action" : "추천";
+  const severity = section.severity ?? "info";
+  const visibleRecommendations = expanded ? recommendations : recommendations.slice(0, 1);
+  const toggleLabel = expanded ? (lang === "en" ? "Show less" : "접기") : (lang === "en" ? "More tips" : "추천 더 보기");
 
   return (
     <article className="px-5 py-5 sm:px-6 sm:py-6">
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2.5">
           <span
-            className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[12px] font-bold tracking-[-0.02em]"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full"
             style={{
               color: theme.accent,
               backgroundColor: `${theme.accent}12`,
               boxShadow: `inset 0 0 0 1px ${theme.accent}12`,
             }}
           >
-            {index + 1}
+            <RecoveryCategoryIcon category={meta.key} />
           </span>
           <h3 className="text-[18px] font-bold tracking-[-0.03em] text-ios-text sm:text-[19px]">
             {section.title || t(meta.titleKey)}
           </h3>
-          <RecoveryMetaPill color={theme.accent}>{severityLabel(section.severity ?? "info", t)}</RecoveryMetaPill>
+          {severity !== "info" ? <RecoveryMetaPill color={theme.accent}>{severityLabel(severity, t)}</RecoveryMetaPill> : null}
+          {recommendations.length > 1 ? (
+            <button
+              type="button"
+              onClick={onToggleExpanded}
+              className="ml-auto inline-flex h-9 items-center justify-center rounded-full border border-ios-sep bg-white px-3.5 text-[12px] font-semibold shadow-apple-sm"
+              style={{ color: theme.accent }}
+            >
+              {toggleLabel}
+            </button>
+          ) : null}
         </div>
 
         {descriptionText ? (
@@ -338,9 +405,9 @@ function RecoverySectionRow({
           </div>
         ) : null}
 
-        {recommendations.length ? (
+        {visibleRecommendations.length ? (
           <ol className="mt-5 space-y-3">
-            {recommendations.map((tip, idx) => (
+            {visibleRecommendations.map((tip, idx) => (
               <li key={`${meta.key}-${idx}`} className="border-t border-[rgba(16,33,70,0.08)] pt-3 first:border-t-0 first:pt-0">
                 <div className="text-[12.5px] font-semibold" style={{ color: theme.accent }}>
                   {recLabel} {idx + 1}
@@ -462,6 +529,7 @@ export function InsightsAIRecoveryDetail() {
   const router = useRouter();
   const [openInputGuide, setOpenInputGuide] = useState(false);
   const [analysisRequested, setAnalysisRequested] = useState(false);
+  const [expandedSections, setExpandedSections] = useState<Partial<Record<RecoverySection["category"], boolean>>>({});
   const { recordedDays, state } = useInsightsData();
   const insightsLocked = isInsightsLocked(recordedDays);
   const { hasPaidAccess, loading: billingLoading } = useBillingAccess();
@@ -575,6 +643,12 @@ export function InsightsAIRecoveryDetail() {
     () => CATEGORIES.map((meta) => ({ meta, section: sectionsByCategory.get(meta.key) ?? null })).filter((item) => item.section),
     [sectionsByCategory]
   );
+  const toggleSectionExpanded = useCallback((category: RecoverySection["category"]) => {
+    setExpandedSections((current) => ({
+      ...current,
+      [category]: !current[category],
+    }));
+  }, []);
 
   const weeklyPersonalLines = useMemo(() => {
     if (!weekly) return [];
@@ -806,7 +880,7 @@ export function InsightsAIRecoveryDetail() {
 
           {orderedSections.length ? (
             <div className="space-y-3">
-              {orderedSections.map(({ meta, section }, index) => {
+              {orderedSections.map(({ meta, section }) => {
                 if (!section) return null;
                 const theme = CATEGORY_THEME[meta.key];
                 return (
@@ -818,7 +892,14 @@ export function InsightsAIRecoveryDetail() {
                       boxShadow: `inset 0 1px 0 ${theme.softBorder}, 0 10px 28px rgba(15, 36, 74, 0.04)`,
                     }}
                   >
-                    <RecoverySectionRow index={index} meta={meta} section={section} lang={lang} t={t} />
+                    <RecoverySectionRow
+                      meta={meta}
+                      section={section}
+                      lang={lang}
+                      t={t}
+                      expanded={Boolean(expandedSections[meta.key])}
+                      onToggleExpanded={() => toggleSectionExpanded(meta.key)}
+                    />
                   </DetailCard>
                 );
               })}
