@@ -69,6 +69,30 @@ export function cleanSocialGroupNotice(value: unknown): string {
   return Array.from(raw).slice(0, 120).join("");
 }
 
+export function cleanSocialGroupNoticeTitle(value: unknown): string {
+  const raw = String(value ?? "")
+    .replace(/<[^>]*>/g, "")
+    .replace(INVISIBLE_UNSAFE_CHARS, "")
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return Array.from(raw).slice(0, 36).join("");
+}
+
+export function cleanSocialGroupNoticeBody(value: unknown): string {
+  const raw = String(value ?? "")
+    .replace(/<[^>]*>/g, "")
+    .replace(INVISIBLE_UNSAFE_CHARS, "")
+    .replace(/\r/g, "")
+    .replace(/\t/g, " ")
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return Array.from(raw).slice(0, 600).join("");
+}
+
 export function readSocialActorIp(req: Request): string {
   const cfIp = String(req.headers.get("cf-connecting-ip") ?? "").trim();
   if (cfIp) return cfIp.slice(0, 80);

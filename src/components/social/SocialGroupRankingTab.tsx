@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import {
   SocialAlertIcon,
@@ -141,7 +141,7 @@ type SectionProps = {
 
 function RankingSection({ title, children }: SectionProps) {
   return (
-    <div className="rounded-[30px] border border-ios-sep/70 bg-white px-4 py-4 shadow-apple">
+    <div className="rounded-[30px] bg-white px-4 py-4 shadow-apple">
       <p className="mb-2.5 flex items-center gap-1.5 text-[13px] font-semibold text-ios-text">{title}</p>
       <div className="space-y-1.5">{children}</div>
     </div>
@@ -164,6 +164,8 @@ function RankingRulePill({
 }
 
 export function SocialGroupRankingTab({ members, currentUserId }: Props) {
+  const [systemExpanded, setSystemExpanded] = useState(false);
+
   // 공유 ON + vitals 있는 멤버
   const withVitals = useMemo(
     () =>
@@ -283,51 +285,66 @@ export function SocialGroupRankingTab({ members, currentUserId }: Props) {
         </p>
       </div>
 
-      <div className="rounded-[30px] border border-ios-sep/70 bg-white px-4 py-4 shadow-apple">
-        <div className="flex items-start gap-3">
+      <div className="rounded-[30px] bg-white px-4 py-4 shadow-apple">
+        <button
+          type="button"
+          onClick={() => setSystemExpanded((prev) => !prev)}
+          className="flex w-full items-center gap-3 text-left"
+        >
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]">
             <SocialInfoIcon className="h-[18px] w-[18px]" />
           </span>
-          <div className="min-w-0">
-            <p className="text-[13.5px] font-semibold text-ios-text">현재 랭킹 카테고리</p>
-            <p className="mt-1 text-[12px] leading-5 text-ios-muted">
-              신체 배터리와 수면 시간을 지난 7일 기준으로 집계해요. 건강 데이터 그룹 공유가 켜져 있고,
-              실제 건강 기록이 3일 이상 있는 멤버만 순위에 반영됩니다.
-            </p>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[13.5px] font-semibold text-ios-text">랭킹 기준 안내</p>
+            <p className="truncate text-[11.5px] text-ios-muted">배터리 · 수면 · 지난 7일 · 최소 3일</p>
           </div>
-        </div>
+          <svg
+            viewBox="0 0 20 20"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            className={cn("h-4 w-4 shrink-0 text-ios-muted transition", systemExpanded && "rotate-180")}
+            aria-hidden="true"
+          >
+            <path d="m5 7.5 5 5 5-5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
 
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <div className="rounded-2xl bg-ios-bg px-3 py-3">
-            <p className="flex items-center gap-1.5 text-[12px] font-semibold text-ios-text">
-              <SocialBatteryIcon className="h-[14px] w-[14px]" />
-              신체 배터리
-            </p>
-            <p className="mt-1 text-[11px] leading-5 text-ios-muted">최근 7일 Body Battery 평균</p>
-          </div>
-          <div className="rounded-2xl bg-ios-bg px-3 py-3">
-            <p className="flex items-center gap-1.5 text-[12px] font-semibold text-ios-text">
-              <SocialMoonIcon className="h-[14px] w-[14px]" />
-              수면 시간
-            </p>
-            <p className="mt-1 text-[11px] leading-5 text-ios-muted">수면을 입력한 날만 평균에 반영</p>
-          </div>
-        </div>
+        {systemExpanded ? (
+          <>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <div className="rounded-2xl bg-ios-bg px-3 py-3">
+                <p className="flex items-center gap-1.5 text-[12px] font-semibold text-ios-text">
+                  <SocialBatteryIcon className="h-[14px] w-[14px]" />
+                  신체 배터리
+                </p>
+                <p className="mt-1 text-[11px] leading-5 text-ios-muted">최근 7일 Body Battery 평균</p>
+              </div>
+              <div className="rounded-2xl bg-ios-bg px-3 py-3">
+                <p className="flex items-center gap-1.5 text-[12px] font-semibold text-ios-text">
+                  <SocialMoonIcon className="h-[14px] w-[14px]" />
+                  수면 시간
+                </p>
+                <p className="mt-1 text-[11px] leading-5 text-ios-muted">수면을 입력한 날만 평균에 반영</p>
+              </div>
+            </div>
 
-        <div className="mt-3 flex flex-wrap gap-2">
-          <RankingRulePill
-            icon={<SocialChartIcon className="h-[13px] w-[13px]" />}
-            text="지난 7일 기준"
-          />
-          <RankingRulePill
-            icon={<SocialHourglassIcon className="h-[13px] w-[13px]" />}
-            text="최소 3일 데이터"
-          />
-          <RankingRulePill
-            icon={<SocialInfoIcon className="h-[13px] w-[13px]" />}
-            text="비공개 멤버 제외"
-          />
-        </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <RankingRulePill
+                icon={<SocialChartIcon className="h-[13px] w-[13px]" />}
+                text="지난 7일 기준"
+              />
+              <RankingRulePill
+                icon={<SocialHourglassIcon className="h-[13px] w-[13px]" />}
+                text="최소 3일 데이터"
+              />
+              <RankingRulePill
+                icon={<SocialInfoIcon className="h-[13px] w-[13px]" />}
+                text="비공개 멤버 제외"
+              />
+            </div>
+          </>
+        ) : null}
       </div>
 
       {/* 번아웃 알림 (위험/경고 멤버 있을 때만) */}

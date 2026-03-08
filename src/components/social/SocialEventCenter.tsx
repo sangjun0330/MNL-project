@@ -23,6 +23,8 @@ function buildEventLabel(event: SocialEvent): string {
       return "님이 연결 요청을 수락했어요";
     case "connection_rejected":
       return "님이 연결 요청을 거절했어요";
+    case "group_notice_posted":
+      return `님이 ${groupName} 그룹에 새 공지를 올렸어요`;
     case "group_notice_updated":
       return `님이 ${groupName} 그룹 공지를 업데이트했어요`;
     case "group_settings_updated":
@@ -49,6 +51,13 @@ function buildEventLabel(event: SocialEvent): string {
 }
 
 function buildEventDetail(event: SocialEvent): string | null {
+  if (event.type === "group_notice_posted") {
+    const title = String(event.payload?.title ?? "").trim();
+    const notice = String(event.payload?.notice ?? "").trim();
+    if (title && notice) return `${title} · ${notice}`;
+    if (title) return title;
+    return notice || null;
+  }
   if (event.type === "group_notice_updated") {
     const notice = String(event.payload?.notice ?? "").trim();
     return notice ? `공지 · ${notice}` : "공지가 비워졌어요.";

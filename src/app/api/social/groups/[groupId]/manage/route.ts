@@ -2,9 +2,11 @@ import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurit
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import {
+  cleanSocialGroupNoticeBody,
   cleanSocialGroupDescription,
   cleanSocialGroupName,
   cleanSocialGroupNotice,
+  cleanSocialGroupNoticeTitle,
   isSocialActionRateLimited,
   recordSocialActionAttempt,
 } from "@/lib/server/socialSecurity";
@@ -34,6 +36,19 @@ function parseMaxMembers(value: unknown, fallback: number): number {
   const parsed = Number.parseInt(String(value ?? fallback), 10);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(24, Math.max(2, parsed));
+}
+
+function isMissingGroupNoticeSchemaError(error: unknown): boolean {
+  const message = String((error as any)?.message ?? error ?? "").toLowerCase();
+  const code = String((error as any)?.code ?? "").toLowerCase();
+  return (
+    code === "42p01" ||
+    code === "42703" ||
+    message.includes("does not exist") ||
+    message.includes("column") ||
+    message.includes("relation") ||
+    message.includes("schema cache")
+  );
 }
 
 function buildSettingsSummary(input: {
@@ -236,6 +251,120 @@ export async function POST(
       }
 
       await recordSocialActionAttempt({ req, userId, action: `group_manage_${action}`, success: true, detail: "ok" });
+      return jsonNoStore({ ok: true });
+    }
+
+    if (action === "create_notice_post") {
+      if (!permissions.canEditNotice) {
+        return jsonNoStore({ ok: false, error: "group_manage_forbidden" }, { status: 403 });
+      }
+
+      const title = cleanSocialGroupNoticeTitle(body?.title);
+      const noticeBody = cleanSocialGroupNoticeBody(body?.body);
+      if (!title || !noticeBody) {
+        return jsonNoStore({ ok: false, error: "invalid_notice_post" }, { status: 400 });
+      }
+
+      const actorProfile = (await loadSocialGroupProfileMap(admin, [userId])).get(userId);
+      const recipientIds = listSocialGroupRecipientIds(members, { excludeUserIds: [userId] });
+      const timestamp = new Date().toISOString();
+
+      try {
+        const { error: insertErr } = await (admin as any)
+          .from("rnest_social_group_notice_posts")
+          .insert({
+            group_id: groupId,
+            author_user_id: userId,
+            title,
+            body: noticeBody,
+            created_at: timestamp,
+            updated_at: timestamp,
+          });
+        if (insertErr) throw insertErr;
+      } catch (error: any) {
+        if (!isMissingGroupNoticeSchemaError(error)) throw error;
+
+        const { error: fallbackErr } = await (admin as any)
+          .from("rnest_social_groups")
+          .update({
+            notice: cleanSocialGroupNotice(noticeBody),
+            updated_at: timestamp,
+          })
+          .eq("id", groupId);
+        if (fallbackErr) throw fallbackErr;
+      }
+
+      await (admin as any)
+        .from("rnest_social_groups")
+        .update({ updated_at: timestamp })
+        .eq("id", groupId);
+
+      await appendGroupActivity({
+        admin,
+        groupId,
+        type: "group_notice_posted",
+        actorUserId: userId,
+        payload: { groupName: group.name, title, notice: noticeBody },
+      });
+
+      await Promise.all(
+        recipientIds.map((recipientId) =>
+          appendSocialEvent({
+            admin,
+            recipientId,
+            actorId: userId,
+            type: "group_notice_posted",
+            entityId: String(groupId),
+            payload: {
+              groupName: group.name,
+              nickname: actorProfile?.nickname ?? "",
+              avatarEmoji: actorProfile?.avatarEmoji ?? "🐧",
+              title,
+              notice: noticeBody,
+            },
+          })
+        )
+      );
+
+      await recordSocialActionAttempt({
+        req,
+        userId,
+        action: `group_manage_${action}`,
+        success: true,
+        detail: "created",
+      });
+      return jsonNoStore({ ok: true });
+    }
+
+    if (action === "delete_notice_post") {
+      if (!permissions.canEditNotice) {
+        return jsonNoStore({ ok: false, error: "group_manage_forbidden" }, { status: 403 });
+      }
+
+      const noticeId = Number.parseInt(String(body?.noticeId ?? ""), 10);
+      if (!Number.isFinite(noticeId) || noticeId <= 0) {
+        return jsonNoStore({ ok: false, error: "invalid_notice_post" }, { status: 400 });
+      }
+
+      const { error: deleteErr } = await (admin as any)
+        .from("rnest_social_group_notice_posts")
+        .delete()
+        .eq("group_id", groupId)
+        .eq("id", noticeId);
+      if (deleteErr) throw deleteErr;
+
+      await (admin as any)
+        .from("rnest_social_groups")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", groupId);
+
+      await recordSocialActionAttempt({
+        req,
+        userId,
+        action: `group_manage_${action}`,
+        success: true,
+        detail: "deleted",
+      });
       return jsonNoStore({ ok: true });
     }
 

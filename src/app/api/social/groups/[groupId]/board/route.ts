@@ -7,6 +7,7 @@ import {
   computeMemberWeeklyVitals,
   getSocialGroupById,
   loadGroupActivities,
+  loadGroupNoticePosts,
   loadPendingJoinRequests,
   loadSocialGroupProfileMap,
   mapSocialGroupSummary,
@@ -74,7 +75,7 @@ export async function GET(
     const permissions = buildSocialGroupPermissions(memberRole, group.allowMemberInvites);
 
     // 기존 쿼리 + health_visibility를 별도로 안전하게 로드
-    const [profileMap, { data: prefs }, { data: states }, joinRequests, activities] = await Promise.all([
+    const [profileMap, { data: prefs }, { data: states }, joinRequests, activities, noticePosts] = await Promise.all([
       loadSocialGroupProfileMap(admin, memberIds),
       (admin as any)
         .from("rnest_social_preferences")
@@ -86,6 +87,7 @@ export async function GET(
         .in("user_id", memberIds),
       permissions.canManageJoinRequests ? loadPendingJoinRequests(admin, groupId) : Promise.resolve([]),
       loadGroupActivities(admin, groupId, 24),
+      loadGroupNoticePosts(admin, groupId, 12),
     ]);
 
     // health_visibility는 별도 쿼리로 안전하게 로드
@@ -193,6 +195,7 @@ export async function GET(
       nickname: member.nickname,
       avatarEmoji: member.avatarEmoji,
     }));
+    const ownerProfile = profileMap.get(group.ownerUserId);
 
     return jsonNoStore({
       ok: true,
@@ -207,6 +210,23 @@ export async function GET(
         members: boardMembers,
         commonOffDays,
         hiddenScheduleMemberCount,
+        notices:
+          noticePosts.length > 0
+            ? noticePosts
+            : group.notice
+              ? [
+                  {
+                    id: 0,
+                    title: "고정 안내",
+                    body: group.notice,
+                    createdAt: group.updatedAt,
+                    updatedAt: group.updatedAt,
+                    authorUserId: group.ownerUserId,
+                    authorNickname: ownerProfile?.nickname ?? "",
+                    authorAvatarEmoji: ownerProfile?.avatarEmoji ?? "🐧",
+                  },
+                ]
+              : [],
         joinRequests,
         activities,
         permissions,

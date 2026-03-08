@@ -69,6 +69,7 @@ export type SocialEventType =
   | "connection_request"
   | "connection_accepted"
   | "connection_rejected"
+  | "group_notice_posted"
   | "group_notice_updated"
   | "group_settings_updated"
   | "group_join_requested"
@@ -90,6 +91,7 @@ export type SocialEvent = {
     avatarEmoji?: string;
     groupName?: string;
     role?: string;
+    title?: string;
     notice?: string;
     summary?: string;
   };
@@ -160,6 +162,7 @@ export type SocialGroupJoinRequest = {
 
 export type SocialGroupActivityType =
   | "group_created"
+  | "group_notice_posted"
   | "group_settings_updated"
   | "group_notice_updated"
   | "group_join_requested"
@@ -182,6 +185,7 @@ export type SocialGroupActivity = {
   targetNickname: string;
   targetAvatarEmoji: string;
   payload: {
+    title?: string;
     notice?: string;
     role?: string;
     previousRole?: string;
@@ -190,11 +194,23 @@ export type SocialGroupActivity = {
   createdAt: string;
 };
 
+export type SocialGroupNoticePost = {
+  id: number;
+  title: string;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+  authorUserId: string | null;
+  authorNickname: string;
+  authorAvatarEmoji: string;
+};
+
 export type SocialGroupBoard = {
   group: SocialGroupSummary;
   members: SocialGroupBoardMember[];
   commonOffDays: string[];
   hiddenScheduleMemberCount: number;
+  notices: SocialGroupNoticePost[];
   joinRequests: SocialGroupJoinRequest[];
   activities: SocialGroupActivity[];
   permissions: SocialGroupPermissions;

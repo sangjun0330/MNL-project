@@ -76,6 +76,8 @@ function buildActivityText(activity: SocialGroupActivity): string {
       return `${actor}님이 그룹을 만들었어요.`;
     case "group_settings_updated":
       return `${actor}님이 그룹 설정을 바꿨어요.`;
+    case "group_notice_posted":
+      return `${actor}님이 새 공지를 올렸어요.`;
     case "group_notice_updated":
       return `${actor}님이 공지를 수정했어요.`;
     case "group_join_requested":
@@ -123,6 +125,8 @@ function parseActionError(errorCode: string | undefined, fallback: string): stri
       return "이미 처리되었거나 존재하지 않는 가입 요청이에요.";
     case "invite_permission_denied":
       return "이 그룹에서 초대 링크를 만들 권한이 없어요.";
+    case "invalid_notice_post":
+      return "공지 제목과 내용을 입력해 주세요.";
     default:
       return fallback;
   }
@@ -976,9 +980,10 @@ export function SocialGroupDetailSheet({
                         <span className="text-[22px]">{activity.actorAvatarEmoji || "🐧"}</span>
                         <div className="min-w-0 flex-1">
                           <p className="text-[13px] leading-6 text-ios-text">{buildActivityText(activity)}</p>
-                          {activity.type === "group_notice_updated" && activity.payload.notice ? (
+                          {(activity.type === "group_notice_updated" || activity.type === "group_notice_posted") &&
+                          (activity.payload.title || activity.payload.notice) ? (
                             <p className="mt-1 truncate text-[11px] text-ios-muted">
-                              &quot;{activity.payload.notice}&quot;
+                              &quot;{activity.payload.title ? `${activity.payload.title} · ` : ""}{activity.payload.notice}&quot;
                             </p>
                           ) : null}
                           <p className="mt-1 text-[10.5px] text-ios-muted">{timeAgo(activity.createdAt)}</p>

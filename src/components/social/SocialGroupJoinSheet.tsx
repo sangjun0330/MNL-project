@@ -24,7 +24,13 @@ export function SocialGroupJoinSheet({ open, preview, onClose, onJoined }: Props
   }, [open, preview?.token]);
 
   const handleJoin = async () => {
-    if (!preview || preview.state !== "joinable" || joining) return;
+    if (
+      !preview ||
+      !["joinable", "approval_required"].includes(preview.state) ||
+      joining
+    ) {
+      return;
+    }
     setJoining(true);
     setError(null);
     try {

@@ -77,6 +77,8 @@ function buildActivityText(activity: SocialGroupActivity): string {
       return `${actor}님이 그룹을 만들었어요.`;
     case "group_settings_updated":
       return `${actor}님이 그룹 설정을 바꿨어요.`;
+    case "group_notice_posted":
+      return `${actor}님이 새 공지를 올렸어요.`;
     case "group_notice_updated":
       return `${actor}님이 공지를 수정했어요.`;
     case "group_join_requested":
@@ -124,6 +126,8 @@ function parseActionError(errorCode: string | undefined, fallback: string): stri
       return "이미 처리되었거나 존재하지 않는 가입 요청이에요.";
     case "invite_permission_denied":
       return "이 그룹에서 초대 링크를 만들 권한이 없어요.";
+    case "invalid_notice_post":
+      return "공지 제목과 내용을 입력해 주세요.";
     default:
       return fallback;
   }
@@ -175,7 +179,7 @@ function OverviewMetricCard({
   className?: string;
 }) {
   return (
-    <div className={cn("rounded-[28px] border border-ios-sep/70 bg-white px-4 py-4 shadow-apple", className)}>
+    <div className={cn("rounded-[28px] bg-white px-4 py-4 shadow-apple", className)}>
       <div className="flex items-center gap-2">
         <span className="flex h-8 w-8 items-center justify-center rounded-2xl bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]">
           {icon}
@@ -219,6 +223,10 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
   const [settingsJoinMode, setSettingsJoinMode] = useState<SocialGroupJoinMode>("open");
   const [settingsAllowMemberInvites, setSettingsAllowMemberInvites] = useState(true);
   const [settingsMaxMembers, setSettingsMaxMembers] = useState(12);
+  const [noticeComposerOpen, setNoticeComposerOpen] = useState(false);
+  const [noticeTitle, setNoticeTitle] = useState("");
+  const [noticeBody, setNoticeBody] = useState("");
+  const [expandedNoticeId, setExpandedNoticeId] = useState<number | null>(null);
   const boardRequestSeqRef = useRef(0);
 
   // ── 보드 로드 ─────────────────────────────────────────────
@@ -342,6 +350,17 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
   const todayNightCount = useMemo(
     () => (board?.members ?? []).filter((member) => member.schedule[todayISO] === "N").length,
     [board?.members, todayISO]
+  );
+
+  const hasLegacyFallbackNotice = useMemo(
+    () =>
+      Boolean(
+        board?.group.notice &&
+          board.notices.length === 1 &&
+          board.notices[0]?.id === 0 &&
+          board.notices[0]?.body === board.group.notice
+      ),
+    [board?.group.notice, board?.notices]
   );
 
   const tabs = useMemo(() => {
@@ -532,6 +551,39 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
     );
   };
 
+  const handleCreateNoticePost = async () => {
+    const trimmedTitle = Array.from(noticeTitle.trim()).slice(0, 36).join("");
+    const trimmedBody = Array.from(noticeBody.trim()).slice(0, 600).join("");
+    const success = await handleManageAction(
+      {
+        action: "create_notice_post",
+        title: trimmedTitle,
+        body: trimmedBody,
+      },
+      "새 공지를 올렸어요.",
+      "공지를 올리지 못했어요."
+    );
+    if (success) {
+      setNoticeTitle("");
+      setNoticeBody("");
+      setNoticeComposerOpen(false);
+      setExpandedNoticeId(null);
+    }
+  };
+
+  const handleDeleteNoticePost = async (noticeId: number) => {
+    const confirmed = window.confirm("이 공지를 삭제할까요?");
+    if (!confirmed) return;
+    const success = await handleManageAction(
+      { action: "delete_notice_post", noticeId },
+      "공지를 삭제했어요.",
+      "공지를 삭제하지 못했어요."
+    );
+    if (success && expandedNoticeId === noticeId) {
+      setExpandedNoticeId(null);
+    }
+  };
+
   // ── 에러 상태 (그룹 없음 / 비회원) ────────────────────────
 
   if (!loading && error === "not_member") {
@@ -551,7 +603,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
           <h1 className="text-[17px] font-bold text-ios-text">그룹</h1>
           <div className="h-9 w-9" />
         </div>
-        <div className="rounded-[32px] border border-ios-sep/70 bg-white px-4 py-8 text-center shadow-apple">
+        <div className="rounded-[32px] bg-white px-4 py-8 text-center shadow-apple">
           <p className="text-[15px] font-semibold text-ios-text">이 그룹의 멤버가 아니에요</p>
           <p className="mt-2 text-[13px] text-ios-muted">초대 링크를 통해 참여할 수 있어요.</p>
         </div>
@@ -576,7 +628,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
           <h1 className="text-[17px] font-bold text-ios-text">그룹</h1>
           <div className="h-9 w-9" />
         </div>
-        <div className="rounded-[32px] border border-ios-sep/70 bg-white px-4 py-8 text-center shadow-apple">
+        <div className="rounded-[32px] bg-white px-4 py-8 text-center shadow-apple">
           <p className="text-[15px] font-semibold text-ios-text">그룹을 찾을 수 없어요</p>
           <p className="mt-2 text-[13px] text-ios-muted">삭제되었거나 잘못된 주소예요.</p>
         </div>
@@ -623,7 +675,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
       </div>
 
       {/* ── 그룹 정보 카드 ────────────────────────────────── */}
-      <div className="rounded-[34px] border border-ios-sep/70 bg-white px-5 py-5 shadow-apple">
+      <div className="rounded-[34px] bg-white px-5 py-5 shadow-apple">
         <div className="flex items-center gap-3">
           <SocialGroupBadge groupId={groupIdNum ?? 0} name={groupName} size="lg" />
           <div className="min-w-0 flex-1">
@@ -696,7 +748,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
 
       {/* ── 로딩 스켈레톤 ─────────────────────────────────── */}
       {loading && (
-        <div className="space-y-3 rounded-[32px] border border-ios-sep/70 bg-white px-5 py-5 shadow-apple">
+        <div className="space-y-3 rounded-[32px] bg-white px-5 py-5 shadow-apple">
           <div className="h-4 w-40 rounded-full bg-ios-sep animate-pulse" />
           <div className="h-24 rounded-2xl bg-ios-sep/70 animate-pulse" />
           <div className="h-20 rounded-2xl bg-ios-sep/50 animate-pulse" />
@@ -752,42 +804,161 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
                 />
               </div>
 
-              <div className="rounded-[32px] border border-ios-sep/70 bg-white px-5 py-5 shadow-apple">
+              <div className="rounded-[32px] bg-white px-5 py-5 shadow-apple">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex min-w-0 items-start gap-3">
                     <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]">
                       <SocialMegaphoneIcon className="h-[18px] w-[18px]" />
                     </span>
                     <div className="min-w-0">
-                      <p className="text-[14px] font-semibold text-ios-text">그룹 공지</p>
+                      <p className="text-[14px] font-semibold text-ios-text">공지 게시판</p>
                       <p className="mt-0.5 text-[11.5px] text-ios-muted">
-                        운영자가 안내사항을 올리면 여기서 바로 확인할 수 있어요.
+                        한 줄 목록으로 보고, 필요한 공지만 펼쳐서 자세히 볼 수 있어요.
                       </p>
                     </div>
                   </div>
                   {board.permissions.canEditNotice ? (
                     <button
                       type="button"
-                      onClick={() => setActiveTab("manage")}
+                      onClick={() => setNoticeComposerOpen((prev) => !prev)}
                       className="shrink-0 text-[12px] font-semibold text-[color:var(--rnest-accent)]"
                     >
-                      수정
+                      {noticeComposerOpen ? "닫기" : "작성"}
                     </button>
                   ) : null}
                 </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <MetaPill text={board.group.joinMode === "approval" ? "승인 후 참여" : "즉시 참여"} />
-                  <MetaPill text={board.group.allowMemberInvites ? "멤버 초대 가능" : "운영자만 초대"} />
+
+                {board.permissions.canEditNotice && noticeComposerOpen ? (
+                  <div className="mt-4 rounded-[26px] bg-ios-bg px-4 py-4">
+                    <div className="space-y-3">
+                      <div>
+                        <div className="mb-1.5 flex items-center justify-between gap-3">
+                          <label className="text-[12px] font-semibold text-ios-text">공지 제목</label>
+                          <span className="text-[10.5px] text-ios-muted">{Array.from(noticeTitle).length}/36</span>
+                        </div>
+                        <input
+                          value={noticeTitle}
+                          onChange={(e) => setNoticeTitle(Array.from(e.target.value).slice(0, 36).join(""))}
+                          placeholder="예: 3/14 저녁 모임 안내"
+                          className="w-full rounded-2xl bg-white px-4 py-3 text-[13px] text-ios-text outline-none placeholder:text-ios-muted/60"
+                        />
+                      </div>
+                      <div>
+                        <div className="mb-1.5 flex items-center justify-between gap-3">
+                          <label className="text-[12px] font-semibold text-ios-text">공지 내용</label>
+                          <span className="text-[10.5px] text-ios-muted">{Array.from(noticeBody).length}/600</span>
+                        </div>
+                        <textarea
+                          value={noticeBody}
+                          onChange={(e) => setNoticeBody(Array.from(e.target.value).slice(0, 600).join(""))}
+                          placeholder="공지 내용을 입력해 주세요."
+                          className="min-h-[110px] w-full resize-none rounded-2xl bg-white px-4 py-3 text-[13px] leading-6 text-ios-text outline-none placeholder:text-ios-muted/60"
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="secondary"
+                          onClick={() => {
+                            setNoticeComposerOpen(false);
+                            setNoticeTitle("");
+                            setNoticeBody("");
+                          }}
+                          className="h-10 flex-1 rounded-2xl text-[13px]"
+                        >
+                          취소
+                        </Button>
+                        <Button
+                          variant="primary"
+                          disabled={busyAction === "create_notice_post"}
+                          onClick={handleCreateNoticePost}
+                          className="h-10 flex-1 rounded-2xl text-[13px]"
+                        >
+                          {busyAction === "create_notice_post" ? "올리는 중…" : "공지 올리기"}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {board.group.notice && !hasLegacyFallbackNotice ? (
+                  <div className="mt-4 rounded-[24px] bg-ios-bg px-4 py-3">
+                    <div className="mb-2">
+                      <MetaPill text="고정 안내" />
+                    </div>
+                    <p className="text-[12.5px] leading-6 text-ios-muted">{board.group.notice}</p>
+                  </div>
+                ) : null}
+
+                <div className="mt-4 space-y-2.5">
+                  {board.notices.length === 0 ? (
+                    <p className="rounded-[24px] bg-ios-bg px-4 py-3 text-[12.5px] text-ios-muted">
+                      아직 올라온 공지가 없어요.
+                    </p>
+                  ) : (
+                    board.notices.map((notice) => {
+                      const expanded = expandedNoticeId === notice.id;
+                      return (
+                        <div key={`${notice.id}-${notice.updatedAt}`} className="rounded-[24px] bg-ios-bg px-4 py-3">
+                          <button
+                            type="button"
+                            onClick={() => setExpandedNoticeId(expanded ? null : notice.id)}
+                            className="flex w-full items-start gap-3 text-left"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <p className="truncate text-[13px] font-semibold text-ios-text">
+                                  {notice.title || "제목 없음"}
+                                </p>
+                                {notice.id === 0 ? <MetaPill text="고정" /> : null}
+                              </div>
+                              <p className="mt-1 truncate text-[11.5px] text-ios-muted">
+                                {notice.body}
+                              </p>
+                              <p className="mt-1 text-[10.5px] text-ios-muted">
+                                {(notice.authorNickname || "운영자")} · {timeAgo(notice.createdAt)}
+                              </p>
+                            </div>
+                            <svg
+                              viewBox="0 0 20 20"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.8"
+                              className={cn("mt-1 h-4 w-4 shrink-0 text-ios-muted transition", expanded && "rotate-180")}
+                              aria-hidden="true"
+                            >
+                              <path d="m5 7.5 5 5 5-5" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          </button>
+                          {expanded ? (
+                            <div className="mt-3 border-t border-ios-sep/70 pt-3">
+                              <p className="whitespace-pre-line text-[13px] leading-6 text-ios-text">
+                                {notice.body}
+                              </p>
+                              {notice.id > 0 && board.permissions.canEditNotice ? (
+                                <div className="mt-3 flex justify-end">
+                                  <button
+                                    type="button"
+                                    disabled={busyAction === "delete_notice_post"}
+                                    onClick={() => void handleDeleteNoticePost(notice.id)}
+                                    className="rounded-full bg-white px-3 py-1.5 text-[11.5px] font-semibold text-red-600 shadow-sm transition active:opacity-60 disabled:opacity-40"
+                                  >
+                                    삭제
+                                  </button>
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
-                <p className="mt-3 rounded-[24px] bg-ios-bg px-4 py-3 text-[13px] leading-6 text-ios-muted">
-                  {board.group.notice || "아직 등록된 공지가 없어요."}
-                </p>
               </div>
 
               {otherMembers.length > 0 ? (
                 <SocialThisWeek friends={otherMembers} mySchedule={mySchedule} />
               ) : (
-                <div className="rounded-apple border border-ios-sep bg-white px-4 py-3 text-[12.5px] text-ios-muted shadow-apple">
+                <div className="rounded-apple bg-white px-4 py-3 text-[12.5px] text-ios-muted shadow-apple">
                   아직 그룹에서 함께 볼 수 있는 근무표가 없어요.
                 </div>
               )}
@@ -803,7 +974,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
                   hideFooterLabel
                 />
               ) : (
-                <div className="rounded-apple border border-ios-sep bg-white px-4 py-3 text-[12.5px] text-ios-muted shadow-apple">
+                <div className="rounded-apple bg-white px-4 py-3 text-[12.5px] text-ios-muted shadow-apple">
                   이번 달에 그룹 전체가 같이 쉬는 날은 아직 없어요.
                 </div>
               )}
@@ -987,7 +1158,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
                 <div className="mb-3">
                   <p className="text-[14px] font-semibold text-ios-text">그룹 설정</p>
                   <p className="mt-0.5 text-[11.5px] text-ios-muted">
-                    그룹 이름, 소개, 공지, 가입 방식을 조정할 수 있어요.
+                    그룹 이름, 소개, 상단 안내, 가입 방식을 조정할 수 있어요.
                   </p>
                 </div>
 
@@ -1016,7 +1187,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
 
                   <div>
                     <div className="mb-1.5 flex items-center justify-between gap-3">
-                      <label className="block text-[12.5px] font-semibold text-ios-text">그룹 공지</label>
+                      <label className="block text-[12.5px] font-semibold text-ios-text">상단 고정 안내</label>
                       <span className="text-[11px] text-ios-muted">
                         {Array.from(settingsNotice).length}/120
                       </span>
@@ -1200,9 +1371,10 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
                         <p className="text-[13px] leading-6 text-ios-text">
                           {buildActivityText(activity)}
                         </p>
-                        {activity.type === "group_notice_updated" && activity.payload.notice ? (
+                        {(activity.type === "group_notice_updated" || activity.type === "group_notice_posted") &&
+                        (activity.payload.title || activity.payload.notice) ? (
                           <p className="mt-1 truncate text-[11px] text-ios-muted">
-                            &quot;{activity.payload.notice}&quot;
+                            &quot;{activity.payload.title ? `${activity.payload.title} · ` : ""}{activity.payload.notice}&quot;
                           </p>
                         ) : null}
                         <p className="mt-1 text-[10.5px] text-ios-muted">{timeAgo(activity.createdAt)}</p>

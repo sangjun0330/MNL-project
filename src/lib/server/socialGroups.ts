@@ -5,6 +5,7 @@ import type {
   SocialGroupActivityType,
   SocialGroupJoinMode,
   SocialGroupJoinRequest,
+  SocialGroupNoticePost,
   SocialGroupPermissions,
   SocialGroupPreviewMember,
   SocialGroupRole,
@@ -349,6 +350,49 @@ export async function loadGroupActivities(
         targetAvatarEmoji: target?.avatarEmoji ?? "🐧",
         payload: (row.payload ?? {}) as SocialGroupActivity["payload"],
         createdAt: String(row.created_at ?? new Date().toISOString()),
+      };
+    });
+  } catch (error: any) {
+    if (isMissingSchemaFeatureError(error)) return [];
+    throw error;
+  }
+}
+
+export async function loadGroupNoticePosts(
+  admin: any,
+  groupId: number,
+  limit = 12
+): Promise<SocialGroupNoticePost[]> {
+  try {
+    const { data: rows, error } = await (admin as any)
+      .from("rnest_social_group_notice_posts")
+      .select("id, author_user_id, title, body, created_at, updated_at")
+      .eq("group_id", groupId)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+
+    const authorIds: string[] = [];
+    for (const row of rows ?? []) {
+      const authorUserId = String((row as any).author_user_id ?? "").trim();
+      if (authorUserId && !authorIds.includes(authorUserId)) {
+        authorIds.push(authorUserId);
+      }
+    }
+    const profileMap = await loadSocialGroupProfileMap(admin, authorIds);
+
+    return (rows ?? []).map((row: any) => {
+      const authorUserId = row.author_user_id ? String(row.author_user_id) : null;
+      const author = authorUserId ? profileMap.get(authorUserId) : null;
+      return {
+        id: Number(row.id),
+        title: String(row.title ?? ""),
+        body: String(row.body ?? ""),
+        createdAt: String(row.created_at ?? new Date().toISOString()),
+        updatedAt: String(row.updated_at ?? row.created_at ?? new Date().toISOString()),
+        authorUserId,
+        authorNickname: author?.nickname ?? "",
+        authorAvatarEmoji: author?.avatarEmoji ?? "🐧",
       };
     });
   } catch (error: any) {
