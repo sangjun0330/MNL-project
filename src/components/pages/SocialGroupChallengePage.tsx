@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthState } from "@/lib/auth";
 import { cn } from "@/lib/cn";
@@ -388,10 +388,13 @@ export function SocialGroupChallengePage({
   const { user } = useAuthState();
   const currentUserId = user?.userId ?? null;
 
-  const groupIdNum = parseInt(rawGroupId, 10);
-  const challengeIdNum = parseInt(rawChallengeId, 10);
+  const parsedGroupId = parseInt(rawGroupId, 10);
+  const parsedChallengeId = parseInt(rawChallengeId, 10);
+  const groupIdNum = Number.isFinite(parsedGroupId) && parsedGroupId > 0 ? parsedGroupId : null;
+  const challengeIdNum =
+    Number.isFinite(parsedChallengeId) && parsedChallengeId > 0 ? parsedChallengeId : null;
   const detailCacheKey =
-    currentUserId && Number.isFinite(groupIdNum) && Number.isFinite(challengeIdNum)
+    currentUserId && groupIdNum && challengeIdNum
       ? buildSocialClientCacheKey(currentUserId, "group-challenge-detail", `${groupIdNum}:${challengeIdNum}`)
       : null;
 
@@ -400,18 +403,33 @@ export function SocialGroupChallengePage({
   const [error, setError] = useState<string | null>(null);
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
+  const detailRef = useRef<GroupChallengeDetail | null>(null);
+  const detailRequestSeqRef = useRef(0);
+
+  useEffect(() => {
+    detailRef.current = detail;
+  }, [detail]);
 
   const loadDetail = useCallback(async () => {
+    if (!groupIdNum || !challengeIdNum) {
+      setDetail(null);
+      setError("invalid_route");
+      setLoading(false);
+      return;
+    }
+    const requestSeq = ++detailRequestSeqRef.current;
     const cached = detailCacheKey
       ? getSocialClientCache<GroupChallengeDetail>(detailCacheKey)
       : null;
-    if (cached && !detail) {
+    const hasVisibleDetail = Boolean(cached || detailRef.current);
+    if (cached && !detailRef.current) {
+      detailRef.current = cached.data;
       setDetail(cached.data);
       setLoading(false);
       setError(null);
     }
-    setLoading(true);
-    if (!cached && !detail) {
+    setLoading(!hasVisibleDetail);
+    if (!hasVisibleDetail) {
       setError(null);
     }
     try {
@@ -419,17 +437,21 @@ export function SocialGroupChallengePage({
         `/api/social/groups/${groupIdNum}/challenges/${challengeIdNum}`,
         { cache: "no-store" }
       ).then((r) => r.json());
+      if (requestSeq !== detailRequestSeqRef.current) return;
       if (!res.ok) throw new Error(res.error ?? "불러오기 실패");
       const nextDetail = res.data as GroupChallengeDetail;
+      detailRef.current = nextDetail;
       setDetail(nextDetail);
       setError(null);
       if (detailCacheKey) {
         setSocialClientCache(detailCacheKey, nextDetail);
       }
     } catch (err: any) {
+      if (requestSeq !== detailRequestSeqRef.current) return;
       const nextError = String(err?.message ?? "챌린지 정보를 불러오지 못했어요.");
       const isTerminalError = nextError === "challenge_not_found";
-      if (!detail || isTerminalError) {
+      if (!detailRef.current || isTerminalError || nextError === "invalid_route") {
+        detailRef.current = null;
         setDetail(null);
         setError(nextError);
         if (detailCacheKey) {
@@ -439,16 +461,18 @@ export function SocialGroupChallengePage({
         setError(null);
       }
     } finally {
-      setLoading(false);
+      if (requestSeq === detailRequestSeqRef.current) {
+        setLoading(false);
+      }
     }
-  }, [challengeIdNum, detail, detailCacheKey, groupIdNum]);
+  }, [challengeIdNum, detailCacheKey, groupIdNum]);
 
   useEffect(() => {
     void loadDetail();
   }, [loadDetail]);
 
   const handleJoin = async () => {
-    if (joining || !detail) return;
+    if (joining || !detail || !groupIdNum || !challengeIdNum) return;
     setJoining(true);
     setJoinError(null);
     try {
@@ -499,7 +523,10 @@ export function SocialGroupChallengePage({
     </div>
   );
 
-  if (!loading && error) {
+  const initialLoading = loading && !detail;
+  const refreshing = loading && !!detail;
+
+  if (!initialLoading && error) {
     return (
       <div className="mx-auto w-full max-w-[680px] space-y-4 px-1.5 pb-8 sm:max-w-[700px] sm:px-0">
         <BackHeader />
@@ -508,6 +535,8 @@ export function SocialGroupChallengePage({
           <p className="mt-2 text-[13px] text-ios-muted">
             {error === "challenge_not_found"
               ? "삭제되었거나 존재하지 않는 챌린지예요."
+              : error === "invalid_route"
+                ? "잘못된 챌린지 주소예요."
               : "잠시 후 다시 시도해 주세요."}
           </p>
           <button
@@ -549,7 +578,15 @@ export function SocialGroupChallengePage({
     <div className="mx-auto w-full max-w-[680px] space-y-4 px-1.5 pb-8 sm:max-w-[700px] sm:px-0">
       <BackHeader />
 
-      {loading && (
+      {refreshing && (
+        <div className="flex justify-end">
+          <span className="rounded-full bg-ios-bg px-3 py-1 text-[11px] font-medium text-ios-muted">
+            업데이트 중…
+          </span>
+        </div>
+      )}
+
+      {initialLoading && (
         <div className="space-y-3">
           <div className="h-52 rounded-[34px] bg-white animate-pulse shadow-apple" />
           <div className="h-32 rounded-[32px] bg-white animate-pulse shadow-apple" />
@@ -557,7 +594,7 @@ export function SocialGroupChallengePage({
         </div>
       )}
 
-      {!loading && detail && (
+      {detail && (
         <>
           <div className={cn("relative overflow-hidden rounded-[36px] shadow-apple", theme.heroSurface)}>
             <div className={cn("absolute inset-0", theme.spotlight)} />

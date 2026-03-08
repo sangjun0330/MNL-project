@@ -115,6 +115,15 @@ export function SocialPage() {
   const friendMetaFetchSeqRef = useRef(0);
   const groupsFetchSeqRef = useRef(0);
   const eventsFetchSeqRef = useRef(0);
+  const profileRef = useRef<SocialProfile | null>(null);
+  const profileCheckedRef = useRef(false);
+  const connectionsRef = useRef<SocialConnectionsData | null>(null);
+  const connectionsLoadedRef = useRef(false);
+  const friendsScheduleRef = useRef<FriendsScheduleData | null>(null);
+  const scheduleLoadedRef = useRef(false);
+  const groupsRef = useRef<SocialGroupSummary[]>([]);
+  const groupsLoadedRef = useRef(false);
+  const lastUserIdRef = useRef<string | null>(null);
 
   const profileCacheKey = useMemo(
     () => (currentUserId ? buildSocialClientCacheKey(currentUserId, "profile") : null),
@@ -144,9 +153,68 @@ export function SocialPage() {
     [currentUserId]
   );
 
+  useEffect(() => {
+    profileRef.current = profile;
+  }, [profile]);
+
+  useEffect(() => {
+    profileCheckedRef.current = profileChecked;
+  }, [profileChecked]);
+
+  useEffect(() => {
+    connectionsRef.current = connections;
+  }, [connections]);
+
+  useEffect(() => {
+    friendsScheduleRef.current = friendsSchedule;
+  }, [friendsSchedule]);
+
+  useEffect(() => {
+    groupsRef.current = groups;
+  }, [groups]);
+
+  useEffect(() => {
+    if (lastUserIdRef.current === currentUserId) return;
+    lastUserIdRef.current = currentUserId;
+
+    profileRef.current = null;
+    profileCheckedRef.current = false;
+    connectionsRef.current = null;
+    connectionsLoadedRef.current = false;
+    friendsScheduleRef.current = null;
+    scheduleLoadedRef.current = false;
+    groupsRef.current = [];
+    groupsLoadedRef.current = false;
+
+    setProfile(null);
+    setProfileChecked(false);
+    setConnections(null);
+    setFriendsSchedule(null);
+    setFriendMeta({});
+    setGroups([]);
+    setUnreadEventCount(0);
+    setConnectionsError(false);
+    setGroupsError(false);
+    setShowOnboarding(false);
+
+    if (status === "authenticated" && currentUserId) {
+      setProfileLoading(true);
+      setConnectionsLoading(true);
+      setScheduleLoading(true);
+      setGroupsLoading(true);
+    } else {
+      setProfileLoading(false);
+      setConnectionsLoading(false);
+      setScheduleLoading(false);
+      setGroupsLoading(false);
+    }
+  }, [currentUserId, status]);
+
   const fetchProfile = useCallback(() => {
     if (status !== "authenticated" || !currentUserId) {
       profileFetchSeqRef.current += 1;
+      profileRef.current = null;
+      profileCheckedRef.current = true;
       setProfile(null);
       setProfileChecked(true);
       setProfileLoading(false);
@@ -158,10 +226,12 @@ export function SocialPage() {
     if (cached) {
       setProfile(cached.data ?? null);
       setShowOnboarding(!cached.data);
+      profileRef.current = cached.data ?? null;
+      profileCheckedRef.current = true;
       setProfileChecked(true);
       setProfileLoading(false);
     } else {
-      setProfileLoading(!profileChecked && profile === null);
+      setProfileLoading(!profileCheckedRef.current && profileRef.current === null);
     }
 
     fetch("/api/social/profile", { cache: "no-store" })
@@ -170,21 +240,26 @@ export function SocialPage() {
         if (fetchSeq !== profileFetchSeqRef.current) return;
         if (res.ok) {
           const nextProfile = (res.data ?? null) as SocialProfile | null;
+          profileRef.current = nextProfile;
           setProfile(nextProfile);
           setShowOnboarding(!nextProfile);
           if (profileCacheKey) {
             setSocialClientCache(profileCacheKey, nextProfile);
           }
         }
+        profileCheckedRef.current = true;
         setProfileChecked(true);
       })
       .catch(() => {
-        if (fetchSeq === profileFetchSeqRef.current) setProfileChecked(true);
+        if (fetchSeq === profileFetchSeqRef.current) {
+          profileCheckedRef.current = true;
+          setProfileChecked(true);
+        }
       })
       .finally(() => {
         if (fetchSeq === profileFetchSeqRef.current) setProfileLoading(false);
       });
-  }, [currentUserId, profile, profileCacheKey, profileChecked, status]);
+  }, [currentUserId, profileCacheKey, status]);
 
   // 소셜 프로필 확인 (첫 진입 온보딩)
   useEffect(() => {
@@ -194,6 +269,8 @@ export function SocialPage() {
   const fetchConnections = useCallback(() => {
     if (status !== "authenticated" || !currentUserId) {
       connectionsFetchSeqRef.current += 1;
+      connectionsRef.current = null;
+      connectionsLoadedRef.current = false;
       setConnections(null);
       setConnectionsLoading(false);
       setConnectionsError(false);
@@ -203,8 +280,11 @@ export function SocialPage() {
     const cached = connectionsCacheKey
       ? getSocialClientCache<SocialConnectionsData>(connectionsCacheKey)
       : null;
-    const hasVisibleConnections = Boolean(cached || connections);
+    const hasVisibleConnections =
+      Boolean(cached || connectionsRef.current) || connectionsLoadedRef.current;
     if (cached) {
+      connectionsRef.current = cached.data;
+      connectionsLoadedRef.current = true;
       setConnections(cached.data);
       setConnectionsLoading(false);
       setConnectionsError(false);
@@ -217,6 +297,8 @@ export function SocialPage() {
       .then((res) => {
         if (fetchSeq !== connectionsFetchSeqRef.current) return;
         if (res.ok) {
+          connectionsRef.current = res.data as SocialConnectionsData;
+          connectionsLoadedRef.current = true;
           setConnections(res.data);
           if (connectionsCacheKey) {
             setSocialClientCache(connectionsCacheKey, res.data as SocialConnectionsData);
@@ -233,11 +315,13 @@ export function SocialPage() {
       .finally(() => {
         if (fetchSeq === connectionsFetchSeqRef.current) setConnectionsLoading(false);
       });
-  }, [connections, connectionsCacheKey, currentUserId, status]);
+  }, [connectionsCacheKey, currentUserId, status]);
 
   const fetchFriendsSchedule = useCallback(() => {
     if (status !== "authenticated" || !currentUserId) {
       scheduleFetchSeqRef.current += 1;
+      friendsScheduleRef.current = null;
+      scheduleLoadedRef.current = false;
       setFriendsSchedule(null);
       setScheduleLoading(false);
       return;
@@ -246,8 +330,11 @@ export function SocialPage() {
     const cached = friendsScheduleCacheKey
       ? getSocialClientCache<FriendsScheduleData>(friendsScheduleCacheKey)
       : null;
-    const hasVisibleSchedule = Boolean(cached || friendsSchedule);
+    const hasVisibleSchedule =
+      Boolean(cached || friendsScheduleRef.current) || scheduleLoadedRef.current;
     if (cached) {
+      friendsScheduleRef.current = cached.data;
+      scheduleLoadedRef.current = true;
       setFriendsSchedule(cached.data);
       setScheduleLoading(false);
     } else {
@@ -258,6 +345,8 @@ export function SocialPage() {
       .then((res) => {
         if (fetchSeq !== scheduleFetchSeqRef.current) return;
         if (res.ok) {
+          friendsScheduleRef.current = res.data as FriendsScheduleData;
+          scheduleLoadedRef.current = true;
           setFriendsSchedule(res.data);
           if (friendsScheduleCacheKey) {
             setSocialClientCache(friendsScheduleCacheKey, res.data as FriendsScheduleData);
@@ -268,7 +357,7 @@ export function SocialPage() {
       .finally(() => {
         if (fetchSeq === scheduleFetchSeqRef.current) setScheduleLoading(false);
       });
-  }, [currentUserId, fetchMonths, friendsSchedule, friendsScheduleCacheKey, status]);
+  }, [currentUserId, fetchMonths, friendsScheduleCacheKey, status]);
 
   const fetchFriendMeta = useCallback(() => {
     if (status !== "authenticated" || !currentUserId) {
@@ -301,6 +390,8 @@ export function SocialPage() {
   const fetchGroups = useCallback(() => {
     if (status !== "authenticated" || !currentUserId) {
       groupsFetchSeqRef.current += 1;
+      groupsRef.current = [];
+      groupsLoadedRef.current = false;
       setGroups([]);
       setGroupsLoading(false);
       setGroupsError(false);
@@ -308,8 +399,10 @@ export function SocialPage() {
     }
     const fetchSeq = ++groupsFetchSeqRef.current;
     const cached = groupsCacheKey ? getSocialClientCache<SocialGroupSummary[]>(groupsCacheKey) : null;
-    const hasVisibleGroups = Boolean(cached) || groups.length > 0 || !groupsLoading;
+    const hasVisibleGroups = Boolean(cached) || groupsRef.current.length > 0 || groupsLoadedRef.current;
     if (cached) {
+      groupsRef.current = cached.data ?? [];
+      groupsLoadedRef.current = true;
       setGroups(cached.data ?? []);
       setGroupsLoading(false);
       setGroupsError(false);
@@ -323,6 +416,8 @@ export function SocialPage() {
         if (fetchSeq !== groupsFetchSeqRef.current) return;
         if (res.ok) {
           const nextGroups = (res.data?.groups ?? []) as SocialGroupSummary[];
+          groupsRef.current = nextGroups;
+          groupsLoadedRef.current = true;
           setGroups(nextGroups);
           if (groupsCacheKey) {
             setSocialClientCache(groupsCacheKey, nextGroups);
@@ -339,7 +434,7 @@ export function SocialPage() {
       .finally(() => {
         if (fetchSeq === groupsFetchSeqRef.current) setGroupsLoading(false);
       });
-  }, [currentUserId, groups, groupsCacheKey, groupsLoading, status]);
+  }, [currentUserId, groupsCacheKey, status]);
 
   const fetchUnreadEventCount = useCallback(() => {
     if (status !== "authenticated" || !currentUserId) {

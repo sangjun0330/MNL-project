@@ -258,6 +258,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
   const hydratedSettingsGroupIdRef = useRef<number | null>(null);
   const challengesLoadedRef = useRef(false);
   const selectedOverviewAvailableIdsRef = useRef<string[]>([]);
+  const challengesRef = useRef<GroupChallengeSummary[]>([]);
 
   const boardCacheKey = useMemo(
     () =>
@@ -276,18 +277,24 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
 
   // ── 챌린지 로드 ───────────────────────────────────────────
 
+  useEffect(() => {
+    challengesRef.current = challenges;
+  }, [challenges]);
+
   const loadChallenges = useCallback(async () => {
     if (!groupIdNum) return;
     const requestSeq = ++challengesRequestSeqRef.current;
     const cached = challengesCacheKey
       ? getSocialClientCache<GroupChallengeSummary[]>(challengesCacheKey)
       : null;
+    const hasVisibleChallenges =
+      Boolean(cached) || challengesRef.current.length > 0 || challengesLoadedRef.current;
     if (cached) {
       setChallenges(cached.data ?? []);
       challengesLoadedRef.current = true;
       setChallengesLoading(false);
     } else {
-      setChallengesLoading(challenges.length === 0);
+      setChallengesLoading(!hasVisibleChallenges);
     }
     try {
       const res = await fetch(
@@ -311,7 +318,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
         setChallengesLoading(false);
       }
     }
-  }, [challenges.length, challengesCacheKey, groupIdNum]);
+  }, [challengesCacheKey, groupIdNum]);
 
   // ── 보드 로드 ─────────────────────────────────────────────
 

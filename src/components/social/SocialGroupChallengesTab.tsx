@@ -160,17 +160,27 @@ function ChallengeCard({
   const entry = challenge.myEntry;
   const isParticipating = entry !== null;
   const maxValue = challenge.metric === "sleep" ? 9 : 100;
+  const openChallenge = () => {
+    router.push(`/social/groups/${groupId}/challenges/${challenge.id}`);
+  };
 
   return (
-    <button
-      type="button"
-      onClick={() =>
-        router.push(`/social/groups/${groupId}/challenges/${challenge.id}`)
-      }
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={openChallenge}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          openChallenge();
+        }
+      }}
       className={cn(
-        "w-full rounded-[28px] bg-white px-4 py-4 text-left shadow-apple transition active:opacity-80",
+        "w-full cursor-pointer rounded-[28px] bg-white px-4 py-4 text-left shadow-apple transition active:opacity-80",
         isEnded && "opacity-60"
       )}
+      aria-label={`${challenge.title} 챌린지 열기`}
     >
       {/* 상단: 메트릭 아이콘 + 제목 + D-N */}
       <div className="flex items-start gap-2">
@@ -249,7 +259,7 @@ function ChallengeCard({
           <path d="m8 5 5 5-5 5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </div>
-    </button>
+    </div>
   );
 }
 
