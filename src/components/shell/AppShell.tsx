@@ -67,8 +67,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [router, pathname]);
 
   useEffect(() => {
-    // ✅ 로컬 저장 비활성: Supabase만 사용
-    setLocalSaveEnabled(false);
+    // Keep a per-user local write-ahead cache so transient sync failures
+    // or app background kills do not lose the latest inputs before server sync.
+    setLocalSaveEnabled(true);
   }, []);
 
   useEffect(() => {
@@ -120,7 +121,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (status === "loading") return;
     const uid = auth?.userId ?? null;
-    setLocalSaveEnabled(false);
+    setLocalSaveEnabled(true);
     setStorageScope(uid ?? null);
   }, [auth?.userId, status]);
 
@@ -128,7 +129,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const onAuthEvent = (event: Event) => {
       const detail = (event as CustomEvent).detail as { event?: string };
       if (detail?.event === "SIGNED_OUT") {
+        // Do not overwrite the signed-in user's cached state with an empty payload.
+        setLocalSaveEnabled(false);
+        setStorageScope(null);
         hydrateState(emptyState());
+        setLocalSaveEnabled(true);
         setCloudReady(false);
       }
     };

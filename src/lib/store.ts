@@ -12,11 +12,14 @@ import { autoAdjustMenstrualSettings } from "@/lib/menstrual";
 import { sanitizeStatePayload } from "@/lib/stateSanitizer";
 
 const STORAGE_KEY_BASE = "rnest_app_state_v1";
+const STORAGE_META_SUFFIX = ":meta";
 const RESET_VERSION_KEY = "rnest_reset_version";
 const RESET_VERSION = "2026-02-03-2";
 const SSR_SELECTED = "1970-01-01" as ISODate;
 let currentStorageKey = STORAGE_KEY_BASE;
+let currentStorageMetaKey = `${STORAGE_KEY_BASE}${STORAGE_META_SUFFIX}`;
 let localSaveEnabled = false;
+let lastLocalSavedAt: number | null = null;
 
 /**
  * SSR hydration 안정:
@@ -53,11 +56,25 @@ function emit() {
   for (const l of listeners) l();
 }
 
+function readSavedAtMeta(raw: string | null): number | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as { savedAt?: unknown };
+    const savedAt = Number(parsed?.savedAt);
+    return Number.isFinite(savedAt) ? savedAt : null;
+  } catch {
+    return null;
+  }
+}
+
 function save() {
   if (typeof window === "undefined") return;
   if (!localSaveEnabled) return;
   try {
+    const savedAt = Date.now();
     window.localStorage.setItem(currentStorageKey, JSON.stringify(state));
+    window.localStorage.setItem(currentStorageMetaKey, JSON.stringify({ savedAt }));
+    lastLocalSavedAt = savedAt;
   } catch {
     // ignore
   }
@@ -118,7 +135,9 @@ function loadFromStorage() {
   if (!localSaveEnabled) return;
 
   const raw = window.localStorage.getItem(currentStorageKey);
+  const metaRaw = window.localStorage.getItem(currentStorageMetaKey);
   const loaded = safeParse<AppState>(raw, ssrSafeInitialState());
+  lastLocalSavedAt = readSavedAtMeta(metaRaw);
   applyLoadedState(loaded);
 
   emit();
@@ -136,10 +155,17 @@ function buildStorageKey(userId?: string | null) {
   return `${STORAGE_KEY_BASE}:${userId}`;
 }
 
+function buildStorageMetaKey(userId?: string | null) {
+  return `${buildStorageKey(userId)}${STORAGE_META_SUFFIX}`;
+}
+
 export function setStorageScope(userId?: string | null) {
   const nextKey = buildStorageKey(userId);
+  const nextMetaKey = buildStorageMetaKey(userId);
   if (nextKey === currentStorageKey) return;
   currentStorageKey = nextKey;
+  currentStorageMetaKey = nextMetaKey;
+  lastLocalSavedAt = null;
   loadFromStorage();
 }
 
@@ -156,6 +182,7 @@ export function purgeAllLocalStateIfNeeded() {
   for (const key of keys) window.localStorage.removeItem(key);
 
   window.localStorage.setItem(RESET_VERSION_KEY, RESET_VERSION);
+  lastLocalSavedAt = null;
 }
 
 export function purgeAllLocalState() {
@@ -167,10 +194,15 @@ export function purgeAllLocalState() {
   }
   for (const key of keys) window.localStorage.removeItem(key);
   window.localStorage.setItem(RESET_VERSION_KEY, RESET_VERSION);
+  lastLocalSavedAt = null;
 }
 
 export function setLocalSaveEnabled(enabled: boolean) {
   localSaveEnabled = enabled;
+}
+
+export function getLocalStateSavedAt() {
+  return lastLocalSavedAt;
 }
 
 function setState(patch: Partial<AppState>) {

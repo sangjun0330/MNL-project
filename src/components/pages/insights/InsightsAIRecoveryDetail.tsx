@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { DetailCard, DetailChip, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
+import { DetailCard, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { useAIRecoveryInsights } from "@/components/insights/useAIRecoveryInsights";
 import { INSIGHTS_MIN_DAYS, isInsightsLocked, useInsightsData } from "@/components/insights/useInsightsData";
@@ -20,12 +20,6 @@ function severityLabel(severity: "info" | "caution" | "warning", t: (key: string
   if (severity === "warning") return t("경고");
   if (severity === "caution") return t("주의");
   return t("안내");
-}
-
-function severityColor(severity: "info" | "caution" | "warning") {
-  if (severity === "warning") return "#E87485";
-  if (severity === "caution") return "#1B2747";
-  return "#3158A6";
 }
 
 function presentError(error: string, t: (key: string) => string) {
@@ -135,9 +129,9 @@ function normalizeNarrativeText(text: string, lang: "ko" | "en") {
 type HighlightTone = "summary" | "alert" | "plan";
 
 function highlightClass(tone: HighlightTone) {
-  if (tone === "alert") return "rounded-[8px] bg-[#FFE4EA] px-[5px] py-[1px] font-semibold text-[#5F1322]";
-  if (tone === "plan") return "rounded-[8px] bg-white px-[5px] py-[1px] font-semibold text-[#102146] shadow-[inset_0_0_0_1px_rgba(16,33,70,0.08)]";
-  return "rounded-[8px] bg-[#FFF8D9] px-[5px] py-[1px] font-semibold text-[#3A2A00]";
+  if (tone === "alert") return "rounded-[10px] bg-[#FFF1F4] px-[6px] py-[1px] font-semibold text-[#7A2335]";
+  if (tone === "plan") return "rounded-[10px] bg-[#F5F8FF] px-[6px] py-[1px] font-semibold text-[#16325D]";
+  return "rounded-[10px] bg-[#F5F8FF] px-[6px] py-[1px] font-semibold text-[#16325D]";
 }
 
 function formatSignedDelta(value: number) {
@@ -295,6 +289,121 @@ const CATEGORY_THEME: Record<
     recBorder: "#D1E8DF",
   },
 };
+
+function RecoveryMetaPill({
+  children,
+  color,
+  subtle = false,
+}: {
+  children: ReactNode;
+  color?: string;
+  subtle?: boolean;
+}) {
+  const resolvedColor = color ?? "#667085";
+  return (
+    <span
+      className="inline-flex items-center rounded-full px-3 py-1.5 text-[11.5px] font-semibold"
+      style={{
+        color: resolvedColor,
+        backgroundColor: subtle ? "rgba(255,255,255,0.92)" : `${resolvedColor}12`,
+        boxShadow: `inset 0 0 0 1px ${subtle ? "rgba(16,33,70,0.08)" : `${resolvedColor}22`}`,
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
+function RecoverySectionRow({
+  index,
+  meta,
+  section,
+  lang,
+  t,
+}: {
+  index: number;
+  meta: { key: RecoverySection["category"]; titleKey: string; icon: string };
+  section: RecoverySection;
+  lang: "ko" | "en";
+  t: (key: string) => string;
+}) {
+  const theme = CATEGORY_THEME[meta.key];
+  const descriptionText = normalizeNarrativeText(section.description || "", lang);
+  const tips = (section.tips ?? [])
+    .map((tip) => normalizeNarrativeText(tip, lang))
+    .filter(Boolean);
+  const recommendationPool = [...tips];
+
+  if (recommendationPool.length < 3) {
+    const derived = splitBulletLines(descriptionText).filter(Boolean);
+    for (const item of derived) {
+      if (recommendationPool.includes(item)) continue;
+      recommendationPool.push(item);
+    }
+  }
+
+  const recommendations = recommendationPool.slice(0, 3);
+  const statusLabel = lang === "en" ? "Current status" : "현재 상태";
+  const recLabel = lang === "en" ? "Action" : "추천";
+
+  return (
+    <article className="px-5 py-5 sm:px-6 sm:py-6">
+      <div className="flex items-start gap-4">
+        <div
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[18px] text-[18px] font-bold tracking-[-0.02em]"
+          style={{
+            color: theme.accent,
+            backgroundColor: `${theme.accent}14`,
+            boxShadow: `inset 0 0 0 1px ${theme.accent}12`,
+          }}
+        >
+          {index + 1}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h3 className="text-[21px] font-bold tracking-[-0.03em] text-ios-text">
+              {section.title || t(meta.titleKey)}
+            </h3>
+            <RecoveryMetaPill color={theme.accent}>{severityLabel(section.severity ?? "info", t)}</RecoveryMetaPill>
+          </div>
+
+          {descriptionText ? (
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
+              <RecoveryMetaPill color={theme.accent} subtle>
+                {statusLabel}
+              </RecoveryMetaPill>
+              <p className="min-w-0 flex-1 text-[15px] leading-7 text-[#42536A]">{descriptionText}</p>
+            </div>
+          ) : null}
+
+          {recommendations.length ? (
+            <ol className="mt-4 space-y-3">
+              {recommendations.map((tip, idx) => (
+                <li key={`${meta.key}-${idx}`} className="flex gap-3">
+                  <span
+                    className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold"
+                    style={{
+                      color: theme.accent,
+                      backgroundColor: `${theme.accent}12`,
+                    }}
+                  >
+                    {idx + 1}
+                  </span>
+                  <div className="min-w-0 flex-1 text-[15px] leading-7 text-ios-text">
+                    <span className="mr-2 text-[12px] font-semibold" style={{ color: theme.accent }}>
+                      {recLabel} {idx + 1}
+                    </span>
+                    <span>{idx === 0 ? highlightKeySentence(tip, "plan") : tip}</span>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          ) : null}
+        </div>
+      </div>
+    </article>
+  );
+}
 
 const RECOVERY_PROGRESS_STEPS = [
   "건강 데이터 수집 중...",
@@ -546,7 +655,7 @@ export function InsightsAIRecoveryDetail() {
       meta={undefined}
       tone="navy"
       backHref="/insights"
-      className="rnest-recovery-static !max-w-[1240px] !px-[6px] !pt-4 sm:!px-2 lg:!px-3"
+      className="rnest-recovery-static !max-w-[860px] !px-3 !pt-5 sm:!px-4"
     >
       {insightsLocked ? (
         <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />
@@ -662,183 +771,162 @@ export function InsightsAIRecoveryDetail() {
 
       {!insightsLocked && hasPaidAccess && !loading && data ? (
         <>
-        <DetailCard className="px-2.5 py-4 sm:px-4 sm:py-5">
-            <div className="text-[13px] font-semibold text-ios-sub">{t("한줄 요약")}</div>
-            <p className="mt-2 text-[17px] font-semibold leading-relaxed tracking-[-0.01em] text-ios-text">
-              {highlightKeySentence(normalizeNarrativeText(data.result.headline || t("요약이 비어 있어요."), lang), "summary")}
-            </p>
-          </DetailCard>
-
-          <DetailCard className="p-4 sm:p-5">
-            <div className="text-[13px] font-semibold text-ios-sub">{t("긴급 알림")}</div>
-            {data.result.compoundAlert ? (
-              <>
-                <div className="mt-2 space-y-1">
-                  {(alertLines.length
-                    ? alertLines
-                    : [normalizeNarrativeText(data.result.compoundAlert.message, lang)]).map((line, idx) => (
-                    <p key={`alert-line-${idx}`} className="text-[14px] leading-relaxed text-ios-text">
-                      {idx === 0 ? highlightKeySentence(line, "alert") : line}
-                    </p>
-                  ))}
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {data.result.compoundAlert.factors.map((factor) => (
-                    <DetailChip key={factor} color="#E87485">
-                      {factor}
-                    </DetailChip>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <p className="mt-2 text-[14px] text-ios-sub">{t("오늘은 복합 위험 알림이 없어요.")}</p>
-            )}
-          </DetailCard>
-
-          <DetailCard className="px-2.5 py-4 sm:px-4 sm:py-5">
-            <div className="text-[13px] font-semibold text-ios-sub">{t("오늘의 회복 추천")}</div>
-            {orderedSections.length ? (
-              <div className="mt-3 space-y-2.5">
-                {orderedSections.map(({ meta, section }, index) => (
-                  <div
-                    key={`${meta.key}-${section?.title}`}
-                    className="relative overflow-hidden rounded-[22px] border px-2.5 py-3 shadow-apple-sm sm:px-3.5 sm:py-4"
-                    style={{
-                      borderColor: CATEGORY_THEME[meta.key].softBorder,
-                      backgroundColor: CATEGORY_THEME[meta.key].soft,
-                    }}
-                  >
-                    {(() => {
-                      const theme = CATEGORY_THEME[meta.key];
-                      const descriptionText = normalizeNarrativeText(section?.description || "", lang);
-                      const tips = (section?.tips ?? [])
-                        .map((tip) => normalizeNarrativeText(tip, lang))
-                        .filter(Boolean);
-                      const recommendationPool = [...tips];
-                      if (recommendationPool.length < 3) {
-                        const derived = splitBulletLines(descriptionText).filter(Boolean);
-                        for (const item of derived) {
-                          if (recommendationPool.includes(item)) continue;
-                          recommendationPool.push(item);
-                        }
-                      }
-                      const recommendations = recommendationPool.slice(0, 3);
-                      const recLabel = lang === "en" ? "Action" : "추천";
-                      const statusLabel = lang === "en" ? "Current status" : "현재 상태";
-
-                      return (
-                        <div className="relative pl-1.5 sm:pl-2.5">
-                          <div
-                            className="absolute bottom-0 left-0 top-0 w-[2px] rounded-full sm:w-[3px]"
-                            style={{ backgroundColor: `${theme.accent}55` }}
-                          />
-                          <div className="flex items-center justify-between gap-1.5">
-                            <div className="flex min-w-0 items-center gap-1.5">
-                              <div
-                                className="flex h-7 w-7 items-center justify-center rounded-full text-[12px] font-bold shadow-[inset_0_0_0_1px_rgba(255,255,255,0.55)]"
-                                style={{ color: theme.accent, backgroundColor: "#FFFFFF" }}
-                              >
-                                {index + 1}
-                              </div>
-                              <span className="min-w-0 text-[17px] font-bold tracking-[-0.01em] text-ios-text">
-                                {section?.title || t(meta.titleKey)}
-                              </span>
-                            </div>
-                            <DetailChip color={severityColor(section?.severity ?? "info")}>
-                              {severityLabel(section?.severity ?? "info", t)}
-                            </DetailChip>
-                          </div>
-                          {descriptionText ? (
-                            <div className="mt-2.5">
-                              <div
-                                className="inline-flex items-center rounded-full bg-white px-2 py-1 text-[10.5px] font-semibold shadow-[inset_0_0_0_1px_rgba(255,255,255,0.45)]"
-                                style={{ color: theme.accent }}
-                              >
-                                {statusLabel}
-                              </div>
-                              <p className="mt-1.5 text-[14px] leading-relaxed text-[#405169]">{descriptionText}</p>
-                            </div>
-                          ) : null}
-                          {recommendations.length ? (
-                            <ul className="mt-2.5 space-y-1.5 border-t border-white/70 pt-2.5">
-                              {recommendations.map((tip, idx) => (
-                                <li key={`${meta.key}-${idx}`} className="flex gap-1.5 text-[14px] leading-relaxed text-ios-text">
-                                  <span
-                                    className="mt-[8px] h-1.5 w-1.5 shrink-0 rounded-full"
-                                    style={{ backgroundColor: theme.accent }}
-                                  />
-                                  <div className="min-w-0">
-                                    <span className="mr-1 text-[11px] font-semibold" style={{ color: theme.accent }}>
-                                      {recLabel} {idx + 1}
-                                    </span>
-                                    <span>{idx === 0 ? highlightKeySentence(tip, "plan") : tip}</span>
-                                  </div>
-                                </li>
-                              ))}
-                            </ul>
-                          ) : null}
-                        </div>
-                      );
-                    })()}
+          <DetailCard
+            className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
+            style={{ background: "linear-gradient(180deg, rgba(247,249,255,0.96) 0%, #FFFFFF 68%)" }}
+          >
+            <div className="flex flex-col gap-5">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                <div className="max-w-[620px]">
+                  <div className="text-[12px] font-semibold tracking-[0.18em] text-[color:var(--rnest-accent)]">
+                    {lang === "en" ? "TODAY RECOVERY" : "오늘 회복 브리핑"}
                   </div>
-                ))}
+                  <p className="mt-3 text-[28px] font-extrabold leading-[1.22] tracking-[-0.04em] text-ios-text sm:text-[31px]">
+                    {highlightKeySentence(
+                      normalizeNarrativeText(data.result.headline || t("요약이 비어 있어요."), lang),
+                      "summary"
+                    )}
+                  </p>
+                  <p className="mt-3 text-[14px] leading-6 text-ios-sub">
+                    {t("오늘 컨디션과 최근 흐름을 기준으로 지금 가장 먼저 해야 할 회복 우선순위를 정리했어요.")}
+                  </p>
+                </div>
+                <div className="shrink-0 rounded-[26px] bg-[#F7F9FD] px-4 py-3 shadow-[inset_0_0_0_1px_rgba(16,33,70,0.06)]">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ios-muted">
+                    {t("핵심 지표")}
+                  </div>
+                  <div className="mt-2 flex items-end gap-2">
+                    <span className="text-[32px] font-extrabold tracking-[-0.04em] text-ios-text">
+                      {weekly?.avgBattery ?? "--"}
+                    </span>
+                    <span className="pb-1 text-[12px] font-semibold text-ios-muted">{t("평균 배터리")}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <RecoveryMetaPill color="#1B2747">{formatKoreanDate(data.dateISO)}</RecoveryMetaPill>
+                <RecoveryMetaPill color="#5E6C84">
+                  {t("카테고리")} {orderedSections.length}개
+                </RecoveryMetaPill>
+                {weekly ? (
+                  <RecoveryMetaPill color={weekly.avgBattery - weekly.prevAvgBattery >= 0 ? "#0B7A3E" : "#A33A4A"}>
+                    {t("지난주 대비")} {formatSignedDelta(weekly.avgBattery - weekly.prevAvgBattery)}
+                  </RecoveryMetaPill>
+                ) : null}
+              </div>
+
+              {data.result.compoundAlert ? (
+                <div className="rounded-[26px] bg-[#FFF4F6] px-4 py-4 shadow-[inset_0_0_0_1px_rgba(232,116,133,0.12)] sm:px-5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <RecoveryMetaPill color="#B2415A">{t("긴급 알림")}</RecoveryMetaPill>
+                    {data.result.compoundAlert.factors.map((factor) => (
+                      <RecoveryMetaPill key={factor} color="#E87485" subtle>
+                        {factor}
+                      </RecoveryMetaPill>
+                    ))}
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {(alertLines.length
+                      ? alertLines
+                      : [normalizeNarrativeText(data.result.compoundAlert.message, lang)]).map((line, idx) => (
+                      <p key={`alert-line-${idx}`} className="text-[14px] leading-7 text-ios-text">
+                        {idx === 0 ? highlightKeySentence(line, "alert") : line}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </DetailCard>
+
+          <DetailCard className="overflow-hidden px-0 py-0">
+            <div className="border-b border-ios-sep/70 px-5 py-5 sm:px-6">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <div className="text-[12px] font-semibold tracking-[0.16em] text-ios-muted">
+                    {t("오늘 플랜")}
+                  </div>
+                  <div className="mt-1 text-[24px] font-bold tracking-[-0.04em] text-ios-text">
+                    {t("오늘의 회복 추천")}
+                  </div>
+                </div>
+                <p className="text-[13px] leading-6 text-ios-sub">
+                  {t("가장 중요한 행동부터 빠르게 읽을 수 있게 순서대로 정리했어요.")}
+                </p>
+              </div>
+            </div>
+            {orderedSections.length ? (
+              <div className="divide-y divide-[rgba(16,33,70,0.08)]">
+                {orderedSections.map(({ meta, section }, index) =>
+                  section ? (
+                    <RecoverySectionRow
+                      key={`${meta.key}-${section.title}`}
+                      index={index}
+                      meta={meta}
+                      section={section}
+                      lang={lang}
+                      t={t}
+                    />
+                  ) : null
+                )}
               </div>
             ) : (
-              <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
+              <p className="px-5 py-5 text-[14px] leading-7 text-ios-sub sm:px-6">
                 {cFallbackText || t("오늘은 추가 추천이 없어요.")}
               </p>
             )}
           </DetailCard>
 
-          <DetailCard className="px-2.5 py-4 sm:px-4 sm:py-5">
-            <div className="text-[13px] font-semibold text-ios-sub">{t("이번 주 AI 한마디")}</div>
-            {weekly ? (
-              <div className="mt-3 overflow-hidden rounded-[22px] border border-[#DCE3F0] bg-[linear-gradient(180deg,#FAFBFF_0%,#FFFFFF_100%)] px-3 py-3 sm:px-4 sm:py-4">
-                <div className="flex flex-wrap items-end justify-between gap-3">
-                  <div>
-                    <p className="text-[12px] font-semibold text-ios-sub">{t("이번 주 요약")}</p>
-                    <p className="mt-1 text-[16px] font-semibold text-ios-text">
-                      {t("평균 배터리")} <span className="text-[24px] font-extrabold tracking-[-0.02em]">{weekly.avgBattery}</span>
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <DetailChip color={weekly.avgBattery - weekly.prevAvgBattery >= 0 ? "#0B7A3E" : "#A33A4A"}>
-                      {t("지난주 대비")} {formatSignedDelta(weekly.avgBattery - weekly.prevAvgBattery)}
-                    </DetailChip>
-                    {weekly.topDrains.slice(0, 2).map((drain) => (
-                      <DetailChip key={`${drain.label}-${drain.pct}`} color="#5E6C84">
-                        {drain.label} {drain.pct}%
-                      </DetailChip>
-                    ))}
-                  </div>
+          <DetailCard className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <div className="text-[12px] font-semibold tracking-[0.16em] text-ios-muted">
+                  {lang === "en" ? "WEEKLY NOTE" : "주간 회복 노트"}
                 </div>
-                <div className="mt-4 space-y-4 border-t border-[#E8EDF7] pt-4">
-                  <div>
-                    <p className="text-[12px] font-semibold text-ios-sub">{t("개인 패턴")}</p>
-                    <ol className="mt-2 space-y-1.5">
-                      {weeklyPersonalLines.map((line, idx) => (
-                        <li key={`personal-${idx}`} className="flex gap-2 text-[14px] leading-relaxed text-ios-text">
-                          <span className="font-semibold text-[#5E6C84]">{idx + 1}.</span>
-                          <span>{line}</span>
-                        </li>
-                      ))}
-                    </ol>
-                  </div>
-                  <div className="border-t border-[#EEF2F9] pt-4">
-                    <p className="text-[12px] font-semibold text-ios-sub">{t("다음 주 예측")}</p>
-                    <ol className="mt-2 space-y-1.5">
-                      {weeklyPreviewLines.map((line, idx) => (
-                        <li key={`preview-${idx}`} className="flex gap-2 text-[14px] leading-relaxed text-ios-text">
-                          <span className="font-semibold text-[#5E6C84]">{idx + 1}.</span>
-                          <span>{line}</span>
-                        </li>
-                      ))}
-                    </ol>
-                  </div>
+                <div className="mt-1 text-[24px] font-bold tracking-[-0.04em] text-ios-text">{t("이번 주 AI 한마디")}</div>
+              </div>
+              {weekly ? (
+                <div className="flex flex-wrap gap-2">
+                  <RecoveryMetaPill color="#1B2747">
+                    {t("평균 배터리")} {weekly.avgBattery}
+                  </RecoveryMetaPill>
+                  {weekly.topDrains.slice(0, 2).map((drain) => (
+                    <RecoveryMetaPill key={`${drain.label}-${drain.pct}`} color="#5E6C84">
+                      {drain.label} {drain.pct}%
+                    </RecoveryMetaPill>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
+            {weekly ? (
+              <div className="mt-5 grid gap-5 border-t border-ios-sep/70 pt-5 lg:grid-cols-[1fr_1fr]">
+                <div>
+                  <p className="text-[13px] font-semibold text-ios-muted">{t("개인 패턴")}</p>
+                  <ol className="mt-3 space-y-2.5">
+                    {weeklyPersonalLines.map((line, idx) => (
+                      <li key={`personal-${idx}`} className="flex gap-3 text-[15px] leading-7 text-ios-text">
+                        <span className="text-[13px] font-bold text-[color:var(--rnest-accent)]">{idx + 1}</span>
+                        <span>{idx === 0 ? highlightKeySentence(line, "summary") : line}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+                <div className="border-t border-ios-sep/70 pt-5 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
+                  <p className="text-[13px] font-semibold text-ios-muted">{t("다음 주 예측")}</p>
+                  <ol className="mt-3 space-y-2.5">
+                    {weeklyPreviewLines.map((line, idx) => (
+                      <li key={`preview-${idx}`} className="flex gap-3 text-[15px] leading-7 text-ios-text">
+                        <span className="text-[13px] font-bold text-[color:var(--rnest-accent)]">{idx + 1}</span>
+                        <span>{idx === 0 ? highlightKeySentence(line, "plan") : line}</span>
+                      </li>
+                    ))}
+                  </ol>
                 </div>
               </div>
             ) : (
-              <p className="mt-2 text-[14px] text-ios-sub">{t("주간 요약은 데이터가 더 쌓이면 표시돼요.")}</p>
+              <p className="mt-4 text-[14px] leading-7 text-ios-sub">{t("주간 요약은 데이터가 더 쌓이면 표시돼요.")}</p>
             )}
           </DetailCard>
 
