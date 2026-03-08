@@ -271,6 +271,7 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
       "  1. ...",
       "  2. ...",
       "  3. ...",
+      "- 각 번호 문장은 반드시 완결된 문장 1개로 작성하고, 번호 문장 중간에서 줄바꿈으로 끊지 말 것",
       "- 개인 패턴과 다음 주 예측 문장을 서로 중복해서 쓰지 말 것",
       "",
       "[톤 가이드]",
@@ -315,6 +316,7 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
     "1. ...",
     "2. ...",
     "3. ...",
+    "Each numbered line must be one complete sentence and must not break mid-sentence across line wraps.",
     "Do not repeat the same sentence in personal pattern and next week preview.",
     "Tone: professional and trustworthy in content, but warm like a supportive nurse colleague.",
     "Avoid slang, exaggeration, and vague claims.",
@@ -672,10 +674,13 @@ function formatSignedDelta(value: number) {
 
 function looksIncompleteNarrativeText(value: string) {
   const text = String(value ?? "").trim();
-  if (!text || text.length < 18) return false;
+  if (!text) return false;
   if (/[.!?]$/.test(text)) return false;
   if (/(요|다|니다|세요|해요|돼요|이에요|예요)$/.test(text)) return false;
-  return true;
+  if (/(는|은|이|가|을|를|와|과|도|만|에|에서|에게|로|으로|보다|및|또는|혹은|기준|대비|중심|수준|범위|전후|전후로|때문|위해)$/.test(text)) {
+    return true;
+  }
+  return text.length >= 12;
 }
 
 function extractLabeledBlock(text: string, startPattern: RegExp, endPatterns: RegExp[]) {
@@ -703,8 +708,15 @@ function splitWeeklyItems(raw: string): string[] {
     .trim();
   if (!source) return [];
 
-  const numbered = Array.from(source.matchAll(/(?:^|\n)\s*\d+\s*[).:\-]\s*([^\n]+)/g))
-    .map((match) => match[1].replace(/\s+/g, " ").trim())
+  const numbered = Array.from(
+    source.matchAll(/(?:^|\n)\s*\d+\s*[).:\-]\s*([\s\S]*?)(?=(?:\n\s*\d+\s*[).:\-]\s*)|$)/g)
+  )
+    .map((match) =>
+      match[1]
+        .replace(/\n+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+    )
     .filter(Boolean);
   if (numbered.length) {
     const seen = new Set<string>();
@@ -718,10 +730,30 @@ function splitWeeklyItems(raw: string): string[] {
     return deduped;
   }
 
-  const lines = source
+  const rawLines = source
     .split(/\n+/)
-    .map((line) => line.replace(/^(?:[-*•·]|\d+[).:\-])\s*/, "").replace(/\s+/g, " ").trim())
+    .map((line) => line.replace(/\s+/g, " ").trim())
     .filter(Boolean);
+
+  const lines: string[] = [];
+  for (const line of rawLines) {
+    const cleaned = line.replace(/^(?:[-*•·]|\d+[).:\-])\s*/, "").trim();
+    if (!cleaned) continue;
+
+    const lastIndex = lines.length - 1;
+    const shouldAppend =
+      lastIndex >= 0 &&
+      !/^(?:개인\s*패턴|personal\s*pattern|다음\s*주\s*예측|next\s*week\s*preview|이번\s*주\s*요약|weekly\s*summary)\s*[:：]?$/i.test(
+        cleaned
+      ) &&
+      !/[.!?]$/.test(lines[lastIndex]);
+
+    if (shouldAppend) {
+      lines[lastIndex] = `${lines[lastIndex]} ${cleaned}`.replace(/\s+/g, " ").trim();
+      continue;
+    }
+    lines.push(cleaned);
+  }
 
   const expanded =
     lines.length <= 1
@@ -741,6 +773,10 @@ function splitWeeklyItems(raw: string): string[] {
     deduped.push(line);
   }
   return deduped;
+}
+
+function hasIncompleteWeeklyItems(raw: string) {
+  return splitWeeklyItems(raw).some((line) => looksIncompleteNarrativeText(line));
 }
 
 function parseWeeklySummaryFromText(dBlock: string): WeeklySummary | null {
@@ -933,6 +969,12 @@ function mergeWeeklySummary(
     personalInsight = fallback.personalInsight;
   }
   if (looksIncompleteNarrativeText(nextWeekPreview) && fallback.nextWeekPreview?.trim()) {
+    nextWeekPreview = fallback.nextWeekPreview;
+  }
+  if (hasIncompleteWeeklyItems(personalInsight) && fallback.personalInsight?.trim()) {
+    personalInsight = fallback.personalInsight;
+  }
+  if (hasIncompleteWeeklyItems(nextWeekPreview) && fallback.nextWeekPreview?.trim()) {
     nextWeekPreview = fallback.nextWeekPreview;
   }
 

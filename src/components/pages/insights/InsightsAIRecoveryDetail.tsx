@@ -134,10 +134,13 @@ function formatSignedDelta(value: number) {
 
 function looksLikeTruncatedNarrative(text: string) {
   const value = text.trim();
-  if (!value || value.length < 18) return false;
+  if (!value) return false;
   if (/[.!?]$/.test(value)) return false;
   if (/(요|다|니다|세요|해요|돼요|이에요|예요)$/.test(value)) return false;
-  return true;
+  if (/(는|은|이|가|을|를|와|과|도|만|에|에서|에게|로|으로|보다|및|또는|혹은|기준|대비|중심|수준|범위|전후|전후로|때문|위해)$/.test(value)) {
+    return true;
+  }
+  return value.length >= 12;
 }
 
 function buildWeeklyFallbackText(
@@ -180,14 +183,26 @@ function splitBulletLines(text: string) {
   const source = text.trim();
   if (!source) return [];
   const normalized = normalizeLineBreaks(source);
+  const numbered = Array.from(
+    normalized.matchAll(/(?:^|\n)\s*\d+\s*[).:\-]\s*([\s\S]*?)(?=(?:\n\s*\d+\s*[).:\-]\s*)|$)/g)
+  )
+    .map((match) =>
+      match[1]
+        .replace(/\n+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+    )
+    .filter(Boolean);
+  if (numbered.length) return numbered;
+
   const items = normalized
     .split(/\n+|\s+-\s+/)
-    .map((line) => line.replace(/^\-\s*/, "").trim())
+    .map((line) => line.replace(/^\-\s*/, "").replace(/\s+/g, " ").trim())
     .filter(Boolean);
   if (items.length > 1) return items;
   const sentenceItems = normalized
     .split(/(?<=[.!?]|다\.|요\.)\s+|\n+/)
-    .map((line) => line.replace(/^\-\s*/, "").trim())
+    .map((line) => line.replace(/^\-\s*/, "").replace(/\s+/g, " ").trim())
     .filter(Boolean);
   return sentenceItems.length > 1 ? sentenceItems : [normalized];
 }
