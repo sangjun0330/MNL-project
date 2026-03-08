@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/cn";
+import { BottomSheet } from "@/components/ui/BottomSheet";
 import {
   SocialBatteryIcon,
   SocialBrainIcon,
@@ -339,211 +340,184 @@ function CreateChallengeSheet({
   };
 
   return (
-    <>
-      <div
-        role="presentation"
-        className="fixed inset-0 z-40 bg-black/30"
-        onClick={onClose}
-      />
-      <div className="fixed bottom-0 left-0 right-0 z-50 flex max-h-[90dvh] flex-col overflow-hidden rounded-t-[32px] bg-white">
-        {/* 핸들 */}
-        <div className="flex shrink-0 justify-center pt-3 pb-1">
-          <div className="h-1 w-10 rounded-full bg-ios-sep" />
+    <BottomSheet
+      open
+      onClose={onClose}
+      title="챌린지 만들기"
+      subtitle="그룹 멤버와 함께 볼 건강 목표를 설정해 보세요."
+      variant="appstore"
+      maxHeightClassName="max-h-[90dvh]"
+    >
+      <div className="space-y-5 pb-2">
+        <div>
+          <div className="mb-1.5 flex items-center justify-between">
+            <label className="text-[13px] font-semibold text-ios-text">챌린지 이름 *</label>
+            <span className="text-[11px] text-ios-muted">{Array.from(title).length}/40</span>
+          </div>
+          <input
+            value={title}
+            onChange={(e) => setTitle(Array.from(e.target.value).slice(0, 40).join(""))}
+            placeholder="예: 이번 주 수면 배틀"
+            className="w-full rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3 text-[14px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent)] placeholder:text-ios-muted/60"
+          />
         </div>
 
-        {/* 헤더 */}
-        <div className="flex shrink-0 items-center justify-between px-5 py-3">
-          <p className="text-[17px] font-bold text-ios-text">챌린지 만들기</p>
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex h-7 w-7 items-center justify-center rounded-full bg-ios-bg text-ios-muted transition active:opacity-60"
-            aria-label="닫기"
-          >
-            <svg width="12" height="12" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-              <path d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" />
-            </svg>
-          </button>
+        <div>
+          <div className="mb-1.5 flex items-center justify-between">
+            <label className="text-[13px] font-semibold text-ios-text">설명 (선택)</label>
+            <span className="text-[11px] text-ios-muted">{Array.from(description).length}/120</span>
+          </div>
+          <input
+            value={description}
+            onChange={(e) => setDescription(Array.from(e.target.value).slice(0, 120).join(""))}
+            placeholder="챌린지 목표나 규칙을 간단히 설명해 주세요."
+            className="w-full rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3 text-[14px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent)] placeholder:text-ios-muted/60"
+          />
         </div>
 
-        {/* 스크롤 영역 */}
-        <div className="flex-1 overflow-y-auto px-5 pb-[calc(32px+env(safe-area-inset-bottom))]">
-          <div className="space-y-5">
-
-            {/* 이름 */}
-            <div>
-              <div className="mb-1.5 flex items-center justify-between">
-                <label className="text-[13px] font-semibold text-ios-text">챌린지 이름 *</label>
-                <span className="text-[11px] text-ios-muted">{Array.from(title).length}/40</span>
-              </div>
-              <input
-                value={title}
-                onChange={(e) => setTitle(Array.from(e.target.value).slice(0, 40).join(""))}
-                placeholder="예: 이번 주 수면 배틀"
-                className="w-full rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3 text-[14px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent)] placeholder:text-ios-muted/60"
-              />
-            </div>
-
-            {/* 설명 */}
-            <div>
-              <div className="mb-1.5 flex items-center justify-between">
-                <label className="text-[13px] font-semibold text-ios-text">설명 (선택)</label>
-                <span className="text-[11px] text-ios-muted">{Array.from(description).length}/120</span>
-              </div>
-              <input
-                value={description}
-                onChange={(e) => setDescription(Array.from(e.target.value).slice(0, 120).join(""))}
-                placeholder="챌린지 목표나 규칙을 간단히 설명해 주세요."
-                className="w-full rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3 text-[14px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent)] placeholder:text-ios-muted/60"
-              />
-            </div>
-
-            {/* 메트릭 */}
-            <div>
-              <p className="mb-2 text-[13px] font-semibold text-ios-text">측정 지표</p>
-              <div className="grid grid-cols-3 gap-2">
-                {METRICS.map((m) => (
-                  <button
-                    key={m.value}
-                    type="button"
-                    onClick={() => setMetric(m.value)}
-                    className={cn(
-                      "flex flex-col items-center gap-1.5 rounded-2xl border px-3 py-3 text-center transition",
-                      metric === m.value
-                        ? "border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
-                        : "border-ios-sep bg-ios-bg text-ios-muted"
-                    )}
-                  >
-                    {m.icon}
-                    <span className="text-[11px] font-semibold leading-tight">{m.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* 챌린지 방식 */}
-            <div>
-              <p className="mb-2 text-[13px] font-semibold text-ios-text">챌린지 방식</p>
-              <div className="space-y-2">
-                {TYPES.map((t) => (
-                  <button
-                    key={t.value}
-                    type="button"
-                    onClick={() => setChallengeType(t.value)}
-                    className={cn(
-                      "flex w-full items-start gap-3 rounded-2xl border px-4 py-3 text-left transition",
-                      challengeType === t.value
-                        ? "border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)]"
-                        : "border-ios-sep bg-ios-bg"
-                    )}
-                  >
-                    <span className={cn(
-                      "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2",
-                      challengeType === t.value
-                        ? "border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent)]"
-                        : "border-ios-sep bg-white"
-                    )}>
-                      {challengeType === t.value && (
-                        <span className="h-1.5 w-1.5 rounded-full bg-white" />
-                      )}
-                    </span>
-                    <div className="min-w-0">
-                      <p className={cn(
-                        "text-[13px] font-semibold",
-                        challengeType === t.value ? "text-[color:var(--rnest-accent)]" : "text-ios-text"
-                      )}>{t.label}</p>
-                      <p className="mt-0.5 text-[11.5px] text-ios-muted">{t.desc}</p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* 목표값 (group_goal / streak) */}
-            {(challengeType === "group_goal" || challengeType === "streak") && (
-              <div>
-                <label className="mb-1.5 block text-[13px] font-semibold text-ios-text">
-                  {challengeType === "group_goal" ? "그룹 목표값 *" : "달성 기준값 *"}
-                  <span className="ml-1 font-normal text-ios-muted">
-                    ({metric === "sleep" ? "시간, 예: 7.0" : "점수, 0–100"})
-                  </span>
-                </label>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  value={targetValue}
-                  onChange={(e) => setTargetValue(e.target.value)}
-                  placeholder={metric === "sleep" ? "7.0" : "50"}
-                  className="w-full rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3 text-[14px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent)] placeholder:text-ios-muted/60"
-                />
-              </div>
-            )}
-
-            {/* 연속 일수 (streak) */}
-            {challengeType === "streak" && (
-              <div>
-                <label className="mb-1.5 block text-[13px] font-semibold text-ios-text">
-                  목표 연속 일수 *
-                </label>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  value={targetDays}
-                  onChange={(e) => setTargetDays(e.target.value)}
-                  placeholder="7"
-                  className="w-full rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3 text-[14px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent)] placeholder:text-ios-muted/60"
-                />
-              </div>
-            )}
-
-            {/* 기간 */}
-            <div>
-              <p className="mb-2 text-[13px] font-semibold text-ios-text">진행 기간</p>
-              <div className="flex gap-2">
-                {DURATIONS.map((d) => (
-                  <button
-                    key={d.days}
-                    type="button"
-                    onClick={() => setDurationDays(d.days)}
-                    className={cn(
-                      "flex-1 rounded-2xl border py-2.5 text-[13px] font-semibold transition",
-                      durationDays === d.days
-                        ? "border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
-                        : "border-ios-sep bg-ios-bg text-ios-muted"
-                    )}
-                  >
-                    {d.label}
-                  </button>
-                ))}
-              </div>
-              <p className="mt-1.5 text-[11.5px] text-ios-muted">
-                시작: 지금 · 종료: {(() => {
-                  const end = new Date(Date.now() + durationDays * 86_400_000);
-                  return `${end.getMonth() + 1}/${end.getDate()}`;
-                })()}
-              </p>
-            </div>
-
-            {/* 에러 */}
-            {error && (
-              <div className="rounded-2xl bg-red-50 px-4 py-3 text-[13px] text-red-600">
-                {error}
-              </div>
-            )}
-
-            {/* 제출 버튼 */}
-            <button
-              type="button"
-              disabled={submitting}
-              onClick={handleSubmit}
-              className="w-full rounded-2xl bg-[color:var(--rnest-accent)] py-4 text-[15px] font-bold text-white transition active:opacity-80 disabled:opacity-40"
-            >
-              {submitting ? "만드는 중…" : "챌린지 만들기"}
-            </button>
+        <div>
+          <p className="mb-2 text-[13px] font-semibold text-ios-text">측정 지표</p>
+          <div className="grid grid-cols-3 gap-2">
+            {METRICS.map((m) => (
+              <button
+                key={m.value}
+                type="button"
+                onClick={() => setMetric(m.value)}
+                className={cn(
+                  "flex flex-col items-center gap-1.5 rounded-2xl border px-3 py-3 text-center transition",
+                  metric === m.value
+                    ? "border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
+                    : "border-ios-sep bg-ios-bg text-ios-muted"
+                )}
+              >
+                {m.icon}
+                <span className="text-[11px] font-semibold leading-tight">{m.label}</span>
+              </button>
+            ))}
           </div>
         </div>
+
+        <div>
+          <p className="mb-2 text-[13px] font-semibold text-ios-text">챌린지 방식</p>
+          <div className="space-y-2">
+            {TYPES.map((t) => (
+              <button
+                key={t.value}
+                type="button"
+                onClick={() => setChallengeType(t.value)}
+                className={cn(
+                  "flex w-full items-start gap-3 rounded-2xl border px-4 py-3 text-left transition",
+                  challengeType === t.value
+                    ? "border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)]"
+                    : "border-ios-sep bg-ios-bg"
+                )}
+              >
+                <span
+                  className={cn(
+                    "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2",
+                    challengeType === t.value
+                      ? "border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent)]"
+                      : "border-ios-sep bg-white"
+                  )}
+                >
+                  {challengeType === t.value && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-white" />
+                  )}
+                </span>
+                <div className="min-w-0">
+                  <p
+                    className={cn(
+                      "text-[13px] font-semibold",
+                      challengeType === t.value ? "text-[color:var(--rnest-accent)]" : "text-ios-text"
+                    )}
+                  >
+                    {t.label}
+                  </p>
+                  <p className="mt-0.5 text-[11.5px] text-ios-muted">{t.desc}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {(challengeType === "group_goal" || challengeType === "streak") && (
+          <div>
+            <label className="mb-1.5 block text-[13px] font-semibold text-ios-text">
+              {challengeType === "group_goal" ? "그룹 목표값 *" : "달성 기준값 *"}
+              <span className="ml-1 font-normal text-ios-muted">
+                ({metric === "sleep" ? "시간, 예: 7.0" : "점수, 0–100"})
+              </span>
+            </label>
+            <input
+              type="number"
+              inputMode="decimal"
+              value={targetValue}
+              onChange={(e) => setTargetValue(e.target.value)}
+              placeholder={metric === "sleep" ? "7.0" : "50"}
+              className="w-full rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3 text-[14px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent)] placeholder:text-ios-muted/60"
+            />
+          </div>
+        )}
+
+        {challengeType === "streak" && (
+          <div>
+            <label className="mb-1.5 block text-[13px] font-semibold text-ios-text">
+              목표 연속 일수 *
+            </label>
+            <input
+              type="number"
+              inputMode="numeric"
+              value={targetDays}
+              onChange={(e) => setTargetDays(e.target.value)}
+              placeholder="7"
+              className="w-full rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3 text-[14px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent)] placeholder:text-ios-muted/60"
+            />
+          </div>
+        )}
+
+        <div>
+          <p className="mb-2 text-[13px] font-semibold text-ios-text">진행 기간</p>
+          <div className="flex gap-2">
+            {DURATIONS.map((d) => (
+              <button
+                key={d.days}
+                type="button"
+                onClick={() => setDurationDays(d.days)}
+                className={cn(
+                  "flex-1 rounded-2xl border py-2.5 text-[13px] font-semibold transition",
+                  durationDays === d.days
+                    ? "border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
+                    : "border-ios-sep bg-ios-bg text-ios-muted"
+                )}
+              >
+                {d.label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1.5 text-[11.5px] text-ios-muted">
+            시작: 지금 · 종료: {(() => {
+              const end = new Date(Date.now() + durationDays * 86_400_000);
+              return `${end.getMonth() + 1}/${end.getDate()}`;
+            })()}
+          </p>
+        </div>
+
+        {error && (
+          <div className="rounded-2xl bg-red-50 px-4 py-3 text-[13px] text-red-600">
+            {error}
+          </div>
+        )}
+
+        <button
+          type="button"
+          disabled={submitting}
+          onClick={handleSubmit}
+          className="w-full rounded-2xl bg-[color:var(--rnest-accent)] py-4 text-[15px] font-bold text-white transition active:opacity-80 disabled:opacity-40"
+        >
+          {submitting ? "만드는 중…" : "챌린지 만들기"}
+        </button>
       </div>
-    </>
+    </BottomSheet>
   );
 }
 

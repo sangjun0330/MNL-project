@@ -6,6 +6,7 @@ import { useAuthState } from "@/lib/auth";
 import { useAppStoreSelector } from "@/lib/store";
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/Button";
+import { BottomSheet } from "@/components/ui/BottomSheet";
 import { SocialGroupBadge } from "@/components/social/SocialGroupBadge";
 import { SocialGroupRoleBadge } from "@/components/social/SocialGroupRoleBadge";
 import { SocialGroupRankingTab } from "@/components/social/SocialGroupRankingTab";
@@ -1377,152 +1378,129 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
 
       {/* ── 멤버 바텀시트 ─────────────────────────────────── */}
       {memberSheetOpen && board && (
-        <>
-          {/* 백드롭 */}
-          <div
-            role="presentation"
-            className="fixed inset-0 z-40 bg-black/30"
-            onClick={() => { setMemberSheetOpen(false); setMemberQuery(""); }}
-          />
-          {/* 시트 */}
-          <div className="fixed bottom-0 left-0 right-0 z-50 flex max-h-[78dvh] flex-col overflow-hidden rounded-t-[32px] bg-white">
-            {/* 드래그 핸들 */}
-            <div className="flex shrink-0 justify-center pt-3 pb-1">
-              <div className="h-1 w-10 rounded-full bg-ios-sep" />
-            </div>
-            {/* 타이틀 + 닫기 */}
-            <div className="flex shrink-0 items-center justify-between px-5 py-3">
-              <p className="text-[17px] font-bold text-ios-text">
-                멤버 {board.group.memberCount}명
-              </p>
-              {board.hiddenScheduleMemberCount > 0 && (
-                <span className="mr-auto ml-2 text-[11px] text-ios-muted">
-                  근무 비공개 {board.hiddenScheduleMemberCount}명
-                </span>
-              )}
-              <button
-                type="button"
-                onClick={() => { setMemberSheetOpen(false); setMemberQuery(""); }}
-                className="flex h-7 w-7 items-center justify-center rounded-full bg-ios-bg text-ios-muted transition active:opacity-60"
-                aria-label="닫기"
-              >
-                <svg width="12" height="12" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                  <path d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" />
-                </svg>
-              </button>
-            </div>
-            {/* 검색 */}
-            <div className="shrink-0 px-5 pb-3">
-              <input
-                value={memberQuery}
-                onChange={(e) => setMemberQuery(e.target.value)}
-                placeholder="멤버 검색"
-                className="w-full rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3 text-[14px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent)] placeholder:text-ios-muted/60"
-              />
-            </div>
-            {/* 멤버 목록 */}
-            <div className="flex-1 overflow-y-auto px-5 pb-[calc(28px+env(safe-area-inset-bottom))]">
-              <div className="space-y-2.5">
-                {visibleMembers.map((member) => {
-                  const canPromote =
-                    board.permissions.canPromoteMembers &&
-                    member.userId !== currentUserId &&
-                    member.role !== "owner";
-                  const canTransfer =
-                    board.permissions.canTransferOwner &&
-                    member.userId !== currentUserId &&
-                    member.role !== "owner";
-                  const canRemove =
-                    board.permissions.canRemoveMembers &&
-                    member.userId !== currentUserId &&
-                    member.role !== "owner" &&
-                    !(myRole === "admin" && member.role === "admin");
+        <BottomSheet
+          open={memberSheetOpen}
+          onClose={() => {
+            setMemberSheetOpen(false);
+            setMemberQuery("");
+          }}
+          title={`멤버 ${board.group.memberCount}명`}
+          subtitle={
+            board.hiddenScheduleMemberCount > 0
+              ? `근무 비공개 ${board.hiddenScheduleMemberCount}명`
+              : "멤버 정보와 공개된 근무 현황을 확인할 수 있어요."
+          }
+          variant="appstore"
+          maxHeightClassName="max-h-[78dvh]"
+        >
+          <div className="space-y-3">
+            <input
+              value={memberQuery}
+              onChange={(e) => setMemberQuery(e.target.value)}
+              placeholder="멤버 검색"
+              className="w-full rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3 text-[14px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent)] placeholder:text-ios-muted/60"
+            />
 
-                  return (
-                    <div key={member.userId} className="rounded-2xl bg-ios-bg px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <span className="text-[24px]">{member.avatarEmoji || "🐧"}</span>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <p className="truncate text-[13.5px] font-semibold text-ios-text">
-                              {member.nickname || "익명"}
-                            </p>
-                            <SocialGroupRoleBadge role={member.role} className="text-[10px]" />
-                            {member.userId === currentUserId ? (
-                              <span className="rounded-full bg-[color:var(--rnest-accent-soft)] px-2 py-0.5 text-[10px] font-semibold text-[color:var(--rnest-accent)]">
-                                나
-                              </span>
-                            ) : null}
-                          </div>
-                          {member.statusMessage ? (
-                            <p className="mt-0.5 truncate text-[11.5px] text-ios-muted">
-                              {member.statusMessage}
-                            </p>
-                          ) : null}
-                          <p className="mt-1 text-[10.5px] text-ios-muted">
-                            {formatJoinedAt(member.joinedAt)}
+            <div className="space-y-2.5 pb-2">
+              {visibleMembers.map((member) => {
+                const canPromote =
+                  board.permissions.canPromoteMembers &&
+                  member.userId !== currentUserId &&
+                  member.role !== "owner";
+                const canTransfer =
+                  board.permissions.canTransferOwner &&
+                  member.userId !== currentUserId &&
+                  member.role !== "owner";
+                const canRemove =
+                  board.permissions.canRemoveMembers &&
+                  member.userId !== currentUserId &&
+                  member.role !== "owner" &&
+                  !(myRole === "admin" && member.role === "admin");
+
+                return (
+                  <div key={member.userId} className="rounded-2xl bg-ios-bg px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <span className="text-[24px]">{member.avatarEmoji || "🐧"}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <p className="truncate text-[13.5px] font-semibold text-ios-text">
+                            {member.nickname || "익명"}
                           </p>
+                          <SocialGroupRoleBadge role={member.role} className="text-[10px]" />
+                          {member.userId === currentUserId ? (
+                            <span className="rounded-full bg-[color:var(--rnest-accent-soft)] px-2 py-0.5 text-[10px] font-semibold text-[color:var(--rnest-accent)]">
+                              나
+                            </span>
+                          ) : null}
                         </div>
+                        {member.statusMessage ? (
+                          <p className="mt-0.5 truncate text-[11.5px] text-ios-muted">
+                            {member.statusMessage}
+                          </p>
+                        ) : null}
+                        <p className="mt-1 text-[10.5px] text-ios-muted">
+                          {formatJoinedAt(member.joinedAt)}
+                        </p>
                       </div>
-                      <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-ios-muted">
-                        <div className="rounded-2xl bg-white px-3 py-2">
-                          이번 달 OFF/VAC {countShifts(member.schedule, isOffOrVac)}일
-                        </div>
-                        <div className="rounded-2xl bg-white px-3 py-2">
-                          {Object.keys(member.schedule).length > 0 ? "근무 공개 중" : "근무 비공개"}
-                        </div>
-                      </div>
-                      {(canPromote || canTransfer || canRemove) && (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {canPromote ? (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                void handleChangeRole(
-                                  member.userId,
-                                  member.role === "admin" ? "member" : "admin"
-                                )
-                              }
-                              disabled={busyAction !== null}
-                              className="rounded-full bg-white px-3 py-1.5 text-[11.5px] font-semibold text-[color:var(--rnest-accent)] shadow-sm transition active:opacity-60 disabled:opacity-40"
-                            >
-                              {member.role === "admin" ? "관리자 해제" : "관리자 지정"}
-                            </button>
-                          ) : null}
-                          {canTransfer ? (
-                            <button
-                              type="button"
-                              onClick={() => void handleTransferOwner(member.userId, member.nickname)}
-                              disabled={busyAction !== null}
-                              className="rounded-full bg-white px-3 py-1.5 text-[11.5px] font-semibold text-sky-700 shadow-sm transition active:opacity-60 disabled:opacity-40"
-                            >
-                              방장 위임
-                            </button>
-                          ) : null}
-                          {canRemove ? (
-                            <button
-                              type="button"
-                              onClick={() => void handleRemoveMember(member.userId, member.nickname)}
-                              disabled={busyAction !== null}
-                              className="rounded-full bg-white px-3 py-1.5 text-[11.5px] font-semibold text-red-600 shadow-sm transition active:opacity-60 disabled:opacity-40"
-                            >
-                              그룹에서 제외
-                            </button>
-                          ) : null}
-                        </div>
-                      )}
                     </div>
-                  );
-                })}
-                {visibleMembers.length === 0 && memberQuery.trim() && (
-                  <p className="py-6 text-center text-[13px] text-ios-muted">
-                    검색 결과가 없어요.
-                  </p>
-                )}
-              </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-ios-muted">
+                      <div className="rounded-2xl bg-white px-3 py-2">
+                        이번 달 OFF/VAC {countShifts(member.schedule, isOffOrVac)}일
+                      </div>
+                      <div className="rounded-2xl bg-white px-3 py-2">
+                        {Object.keys(member.schedule).length > 0 ? "근무 공개 중" : "근무 비공개"}
+                      </div>
+                    </div>
+                    {(canPromote || canTransfer || canRemove) && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {canPromote ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void handleChangeRole(
+                                member.userId,
+                                member.role === "admin" ? "member" : "admin"
+                              )
+                            }
+                            disabled={busyAction !== null}
+                            className="rounded-full bg-white px-3 py-1.5 text-[11.5px] font-semibold text-[color:var(--rnest-accent)] shadow-sm transition active:opacity-60 disabled:opacity-40"
+                          >
+                            {member.role === "admin" ? "관리자 해제" : "관리자 지정"}
+                          </button>
+                        ) : null}
+                        {canTransfer ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleTransferOwner(member.userId, member.nickname)}
+                            disabled={busyAction !== null}
+                            className="rounded-full bg-white px-3 py-1.5 text-[11.5px] font-semibold text-sky-700 shadow-sm transition active:opacity-60 disabled:opacity-40"
+                          >
+                            방장 위임
+                          </button>
+                        ) : null}
+                        {canRemove ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleRemoveMember(member.userId, member.nickname)}
+                            disabled={busyAction !== null}
+                            className="rounded-full bg-white px-3 py-1.5 text-[11.5px] font-semibold text-red-600 shadow-sm transition active:opacity-60 disabled:opacity-40"
+                          >
+                            그룹에서 제외
+                          </button>
+                        ) : null}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {visibleMembers.length === 0 && memberQuery.trim() && (
+                <p className="py-6 text-center text-[13px] text-ios-muted">
+                  검색 결과가 없어요.
+                </p>
+              )}
             </div>
           </div>
-        </>
+        </BottomSheet>
       )}
 
       {/* ── 일반 에러 ─────────────────────────────────────── */}
