@@ -97,6 +97,162 @@ function rowToEntry(row: any): ChallengeEntry {
   };
 }
 
+function metricSnapshotValue(metric: ChallengeMetric, vitals: ReturnType<typeof computeMemberWeeklyVitals>): number | null {
+  if (!vitals) return null;
+  if (metric === "sleep") return vitals.weeklyAvgSleep ?? null;
+  if (metric === "mental") return vitals.weeklyAvgMental;
+  return vitals.weeklyAvgBattery;
+}
+
+function sameIsoDate(snapshotAt: unknown, todayISO: string): boolean {
+  return typeof snapshotAt === "string" && snapshotAt.slice(0, 10) === todayISO;
+}
+
+async function loadChallengeVitalsMap(
+  admin: any,
+  userIds: string[],
+  todayISO: string,
+): Promise<Map<string, ReturnType<typeof computeMemberWeeklyVitals>>> {
+  const vitalsMap = new Map<string, ReturnType<typeof computeMemberWeeklyVitals>>();
+  if (userIds.length === 0) return vitalsMap;
+
+  const { data: states, error } = await (admin as any)
+    .from("rnest_user_state")
+    .select("user_id, payload")
+    .in("user_id", userIds);
+
+  if (error) throw error;
+
+  for (const userId of userIds) {
+    vitalsMap.set(userId, null);
+  }
+
+  for (const row of states ?? []) {
+    const userId = String(row.user_id ?? "");
+    if (!userId) continue;
+    const payload = (row.payload ?? {}) as Record<string, unknown>;
+    vitalsMap.set(userId, computeMemberWeeklyVitals(payload, todayISO));
+  }
+
+  return vitalsMap;
+}
+
+function buildEntrySyncUpdate(input: {
+  challenge: any;
+  entry: any;
+  vitals: ReturnType<typeof computeMemberWeeklyVitals>;
+  nowIso: string;
+  todayISO: string;
+}) {
+  const metric = normalizeMetric(input.challenge.metric);
+  const challengeType = normalizeType(input.challenge.challenge_type);
+  const snapshotValue = metricSnapshotValue(metric, input.vitals);
+  const prevStreak = Number(input.entry.streak_days ?? 0);
+  const alreadySyncedToday = sameIsoDate(input.entry.snapshot_at, input.todayISO);
+  const targetValue =
+    input.challenge.target_value != null ? Number(input.challenge.target_value) : 0;
+  const targetDays =
+    input.challenge.target_days != null ? Number(input.challenge.target_days) : 7;
+  const wasCompleted = Boolean(input.entry.is_completed);
+
+  let streakDays: number | null = null;
+  let isCompleted = wasCompleted;
+  let completedAt = input.entry.completed_at ? String(input.entry.completed_at) : null;
+
+  if (challengeType === "streak") {
+    if (snapshotValue == null) {
+      streakDays = prevStreak;
+    } else if (snapshotValue >= targetValue) {
+      streakDays = alreadySyncedToday ? prevStreak : prevStreak + 1;
+    } else {
+      streakDays = 0;
+    }
+
+    if (!wasCompleted && (streakDays ?? 0) >= targetDays) {
+      isCompleted = true;
+      completedAt = input.nowIso;
+    }
+  }
+
+  return {
+    snapshot_value: snapshotValue,
+    streak_days: streakDays,
+    snapshot_at: input.nowIso,
+    is_completed: isCompleted,
+    completed_at: completedAt,
+  };
+}
+
+async function syncChallengeRows(admin: any, challengeRows: any[]): Promise<void> {
+  if (challengeRows.length === 0) return;
+
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const todayISO = nowIso.slice(0, 10);
+
+  const expiredIds = challengeRows
+    .filter((row) => normalizeStatus(row.status) === "active" && String(row.ends_at ?? "") < nowIso)
+    .map((row) => Number(row.id));
+
+  if (expiredIds.length > 0) {
+    await (admin as any)
+      .from("rnest_social_group_challenges")
+      .update({ status: "ended", ended_at: nowIso })
+      .in("id", expiredIds);
+  }
+
+  const activeRows = challengeRows.filter(
+    (row) => normalizeStatus(row.status) === "active" && !expiredIds.includes(Number(row.id))
+  );
+  if (activeRows.length === 0) return;
+
+  for (const challenge of activeRows) {
+    const challengeId = Number(challenge.id);
+    const { data: entries, error: entriesError } = await (admin as any)
+      .from("rnest_social_challenge_entries")
+      .select("id, user_id, streak_days, snapshot_value, snapshot_at, is_completed, completed_at")
+      .eq("challenge_id", challengeId);
+
+    if (entriesError) throw entriesError;
+    if (!entries || entries.length === 0) continue;
+
+    const userIds = entries.map((entry: any) => String(entry.user_id ?? ""));
+    const vitalsMap = await loadChallengeVitalsMap(admin, userIds, todayISO);
+
+    await Promise.all(
+      entries.map(async (entry: any) => {
+        const nextUpdate = buildEntrySyncUpdate({
+          challenge,
+          entry,
+          vitals: vitalsMap.get(String(entry.user_id ?? "")) ?? null,
+          nowIso,
+          todayISO,
+        });
+
+        const prevSnapshotValue =
+          entry.snapshot_value != null ? Number(entry.snapshot_value) : null;
+        const prevStreakDays =
+          entry.streak_days != null ? Number(entry.streak_days) : null;
+        const prevCompletedAt =
+          entry.completed_at != null ? String(entry.completed_at) : null;
+        const shouldPersist =
+          prevSnapshotValue !== nextUpdate.snapshot_value ||
+          prevStreakDays !== nextUpdate.streak_days ||
+          Boolean(entry.is_completed) !== nextUpdate.is_completed ||
+          prevCompletedAt !== nextUpdate.completed_at ||
+          !sameIsoDate(entry.snapshot_at, todayISO);
+
+        if (!shouldPersist) return;
+
+        await (admin as any)
+          .from("rnest_social_challenge_entries")
+          .update(nextUpdate)
+          .eq("id", Number(entry.id));
+      })
+    );
+  }
+}
+
 // ── 목록 로드 ────────────────────────────────────────────────
 
 export async function listGroupChallenges(
@@ -117,7 +273,21 @@ export async function listGroupChallenges(
   if (error) throw error;
   if (!challenges || challenges.length === 0) return [];
 
-  const challengeIds: number[] = challenges.map((c: any) => Number(c.id));
+  await syncChallengeRows(admin, challenges);
+
+  const { data: refreshedChallenges, error: refreshError } = await (admin as any)
+    .from("rnest_social_group_challenges")
+    .select("*")
+    .eq("group_id", groupId)
+    .in("status", ["active", "ended"])
+    .order("status", { ascending: true })
+    .order("ends_at", { ascending: false })
+    .limit(20);
+
+  if (refreshError) throw refreshError;
+  const challengeRows = refreshedChallenges ?? challenges;
+
+  const challengeIds: number[] = challengeRows.map((c: any) => Number(c.id));
 
   // 참가자 수 집계
   const { data: countRows } = await (admin as any)
@@ -143,7 +313,7 @@ export async function listGroupChallenges(
     myEntryMap.set(Number(r.challenge_id), rowToEntry(r));
   }
 
-  return challenges.map((row: any) => {
+  return challengeRows.map((row: any) => {
     const cid = Number(row.id);
     return rowToSummary(row, countMap.get(cid) ?? 0, myEntryMap.get(cid) ?? null);
   });
@@ -164,6 +334,17 @@ export async function getGroupChallengeDetail(
 
   if (error) throw error;
   if (!row) return null;
+
+  await syncChallengeRows(admin, [row]);
+
+  const { data: refreshedRow, error: refreshError } = await (admin as any)
+    .from("rnest_social_group_challenges")
+    .select("*")
+    .eq("id", challengeId)
+    .maybeSingle();
+
+  if (refreshError) throw refreshError;
+  const challengeRow = refreshedRow ?? row;
 
   // 참가자 엔트리 목록
   const { data: entryRows } = await (admin as any)
@@ -193,11 +374,15 @@ export async function getGroupChallengeDetail(
   }
 
   // 리더보드 (streak는 streak_days 기준 정렬)
-  const challengeType = normalizeType(row.challenge_type);
+  const challengeType = normalizeType(challengeRow.challenge_type);
   let sortedEntries = [...entries];
   if (challengeType === "streak") {
     sortedEntries = sortedEntries.sort(
       (a, b) => (b.streakDays ?? 0) - (a.streakDays ?? 0)
+    );
+  } else {
+    sortedEntries = sortedEntries.sort(
+      (a, b) => (b.snapshotValue ?? Number.NEGATIVE_INFINITY) - (a.snapshotValue ?? Number.NEGATIVE_INFINITY)
     );
   }
 
@@ -219,28 +404,28 @@ export async function getGroupChallengeDetail(
     if (withValues.length > 0) {
       const sum = withValues.reduce((acc, e) => acc + (e.snapshotValue ?? 0), 0);
       groupCurrentAvg = Math.round((sum / withValues.length) * 10) / 10;
-      const targetValue = row.target_value != null ? Number(row.target_value) : null;
+      const targetValue = challengeRow.target_value != null ? Number(challengeRow.target_value) : null;
       groupGoalMet = targetValue !== null ? groupCurrentAvg >= targetValue : null;
     }
   }
 
   const myEntry = entries.find((e) => e.userId === userId) ?? null;
-  const endsAt = String(row.ends_at ?? "");
+  const endsAt = String(challengeRow.ends_at ?? "");
 
   return {
-    id: Number(row.id),
-    groupId: Number(row.group_id),
-    title: String(row.title ?? ""),
-    description: row.description ? String(row.description) : null,
-    metric: normalizeMetric(row.metric),
+    id: Number(challengeRow.id),
+    groupId: Number(challengeRow.group_id),
+    title: String(challengeRow.title ?? ""),
+    description: challengeRow.description ? String(challengeRow.description) : null,
+    metric: normalizeMetric(challengeRow.metric),
     challengeType,
-    targetValue: row.target_value != null ? Number(row.target_value) : null,
-    targetDays: row.target_days != null ? Number(row.target_days) : null,
-    status: normalizeStatus(row.status),
-    startsAt: String(row.starts_at ?? ""),
+    targetValue: challengeRow.target_value != null ? Number(challengeRow.target_value) : null,
+    targetDays: challengeRow.target_days != null ? Number(challengeRow.target_days) : null,
+    status: normalizeStatus(challengeRow.status),
+    startsAt: String(challengeRow.starts_at ?? ""),
     endsAt,
-    createdBy: String(row.created_by ?? ""),
-    createdAt: String(row.created_at ?? ""),
+    createdBy: String(challengeRow.created_by ?? ""),
+    createdAt: String(challengeRow.created_at ?? ""),
     participantCount: entries.length,
     myEntry,
     daysLeft: calcDaysLeft(endsAt),
@@ -313,7 +498,24 @@ export async function joinChallenge(
     .eq("user_id", userId)
     .maybeSingle();
 
-  if (existing) return rowToEntry(existing);
+  if (existing) {
+    const { data: challenge } = await (admin as any)
+      .from("rnest_social_group_challenges")
+      .select("id, status, ends_at, metric, challenge_type, target_value, target_days")
+      .eq("id", challengeId)
+      .maybeSingle();
+    if (challenge) {
+      await syncChallengeRows(admin, [challenge]);
+      const { data: refreshed } = await (admin as any)
+        .from("rnest_social_challenge_entries")
+        .select("*")
+        .eq("challenge_id", challengeId)
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (refreshed) return rowToEntry(refreshed);
+    }
+    return rowToEntry(existing);
+  }
 
   const { data: inserted, error } = await (admin as any)
     .from("rnest_social_challenge_entries")
@@ -322,6 +524,23 @@ export async function joinChallenge(
     .single();
 
   if (error) throw error;
+  const { data: challenge } = await (admin as any)
+    .from("rnest_social_group_challenges")
+    .select("id, status, ends_at, metric, challenge_type, target_value, target_days")
+    .eq("id", challengeId)
+    .maybeSingle();
+
+  if (challenge) {
+    await syncChallengeRows(admin, [challenge]);
+    const { data: refreshed } = await (admin as any)
+      .from("rnest_social_challenge_entries")
+      .select("*")
+      .eq("challenge_id", challengeId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (refreshed) return rowToEntry(refreshed);
+  }
+
   return rowToEntry(inserted);
 }
 
@@ -369,7 +588,6 @@ export type SyncResult = {
 export async function syncAllActiveChallenges(admin: any): Promise<SyncResult> {
   const result: SyncResult = { processedCount: 0, endedCount: 0, errorCount: 0 };
 
-  // 1. 종료 시각이 지난 active 챌린지 → ended 처리
   const now = new Date().toISOString();
   const { data: toEnd } = await (admin as any)
     .from("rnest_social_group_challenges")
@@ -389,86 +607,18 @@ export async function syncAllActiveChallenges(admin: any): Promise<SyncResult> {
   // 2. 여전히 active인 챌린지 목록
   const { data: activeChallenges } = await (admin as any)
     .from("rnest_social_group_challenges")
-    .select("id, metric, challenge_type, target_value, target_days")
+    .select("id, status, ends_at, metric, challenge_type, target_value, target_days")
     .eq("status", "active")
     .gte("ends_at", now)
     .limit(100);
 
   if (!activeChallenges || activeChallenges.length === 0) return result;
 
-  // 3. 챌린지별 참가자 엔트리 + 실제 vitals 계산
-  for (const challenge of activeChallenges) {
-    try {
-      const challengeId = Number(challenge.id);
-      const metric = normalizeMetric(challenge.metric);
-      const challengeType = normalizeType(challenge.challenge_type);
-
-      const { data: entries } = await (admin as any)
-        .from("rnest_social_challenge_entries")
-        .select("id, user_id, streak_days")
-        .eq("challenge_id", challengeId);
-
-      if (!entries || entries.length === 0) continue;
-
-      const updates: Array<{ id: number; snapshot_value: number | null; streak_days: number | null; snapshot_at: string; is_completed: boolean; completed_at: string | null }> = [];
-
-      for (const entry of entries) {
-        try {
-          const vitals = await computeMemberWeeklyVitals(admin, String(entry.user_id));
-          let snapshotValue: number | null = null;
-          let streakDays: number | null = null;
-          let isCompleted = false;
-          let completedAt: string | null = null;
-
-          if (vitals) {
-            if (metric === "battery") snapshotValue = vitals.weeklyAvgBattery;
-            else if (metric === "sleep") snapshotValue = vitals.weeklyAvgSleep ?? null;
-            else if (metric === "mental") snapshotValue = vitals.weeklyAvgMental;
-
-            if (challengeType === "streak" && snapshotValue !== null) {
-              const threshold = challenge.target_value != null ? Number(challenge.target_value) : 0;
-              const targetDays = challenge.target_days != null ? Number(challenge.target_days) : 7;
-              // 오늘 값이 임계값 이상이면 연속일 +1, 미만이면 리셋
-              const prevStreak = Number(entry.streak_days ?? 0);
-              streakDays = snapshotValue >= threshold ? prevStreak + 1 : 0;
-              if (streakDays >= targetDays) {
-                isCompleted = true;
-                completedAt = new Date().toISOString();
-              }
-            }
-          }
-
-          updates.push({
-            id: Number(entry.id),
-            snapshot_value: snapshotValue,
-            streak_days: streakDays,
-            snapshot_at: new Date().toISOString(),
-            is_completed: isCompleted,
-            completed_at: completedAt,
-          });
-        } catch {
-          // 개별 참가자 오류는 무시하고 계속
-        }
-      }
-
-      // 배치 업데이트
-      for (const upd of updates) {
-        await (admin as any)
-          .from("rnest_social_challenge_entries")
-          .update({
-            snapshot_value: upd.snapshot_value,
-            streak_days: upd.streak_days,
-            snapshot_at: upd.snapshot_at,
-            is_completed: upd.is_completed,
-            completed_at: upd.completed_at,
-          })
-          .eq("id", upd.id);
-      }
-
-      result.processedCount++;
-    } catch {
-      result.errorCount++;
-    }
+  try {
+    await syncChallengeRows(admin, activeChallenges);
+    result.processedCount = activeChallenges.length;
+  } catch {
+    result.errorCount = activeChallenges.length;
   }
 
   return result;

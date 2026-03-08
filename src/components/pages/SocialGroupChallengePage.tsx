@@ -508,7 +508,7 @@ export function SocialGroupChallengePage({
                 })}
               </div>
               <p className="mt-4 text-center text-[11px] text-ios-muted">
-                순위는 매 시간 자동으로 갱신돼요
+                참가 정보와 최근 건강 기록을 기준으로 자동 갱신돼요
               </p>
             </div>
           )}

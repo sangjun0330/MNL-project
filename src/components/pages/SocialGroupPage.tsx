@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/Button";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { SocialGroupBadge } from "@/components/social/SocialGroupBadge";
 import { SocialGroupRoleBadge } from "@/components/social/SocialGroupRoleBadge";
-import { SocialGroupRankingTab } from "@/components/social/SocialGroupRankingTab";
 import { SocialGroupChallengesTab } from "@/components/social/SocialGroupChallengesTab";
 import { SocialThisWeek } from "@/components/social/SocialThisWeek";
 import { SocialCommonOffDays } from "@/components/social/SocialCommonOffDays";
@@ -18,7 +17,6 @@ import {
   SocialGroupIcon,
   SocialMegaphoneIcon,
   SocialMoonIcon,
-  SocialTrophyIcon,
 } from "@/components/social/SocialIcons";
 import type {
   FriendSchedule,
@@ -140,7 +138,7 @@ function parseActionError(errorCode: string | undefined, fallback: string): stri
 // ── 타입 ─────────────────────────────────────────────────────
 
 type ShareState = "idle" | "link-copied" | "shared";
-type DetailTab = "overview" | "ranking" | "manage" | "activity";
+type DetailTab = "overview" | "challenge" | "manage" | "activity";
 
 type Props = {
   groupId: string;
@@ -317,7 +315,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
       clearTimeout(tid);
       tid = setTimeout(() => {
         void loadBoard();
-        if (activeTab === "ranking") {
+        if (activeTab === "challenge") {
           void loadChallenges();
         }
       }, 250);
@@ -358,13 +356,13 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
     const canManage =
       board.permissions.canEditBasicInfo || board.permissions.canManageJoinRequests;
     const allowedTabs: DetailTab[] = canManage
-      ? ["overview", "ranking", "manage", "activity"]
-      : ["overview", "ranking", "activity"];
+      ? ["overview", "challenge", "manage", "activity"]
+      : ["overview", "challenge", "activity"];
     if (!allowedTabs.includes(activeTab)) setActiveTab("overview");
   }, [activeTab, board]);
 
   useEffect(() => {
-    if (activeTab !== "ranking" || !groupIdNum || challengesLoadedRef.current || challengesLoading) return;
+    if (activeTab !== "challenge" || !groupIdNum || challengesLoadedRef.current || challengesLoading) return;
     void loadChallenges();
   }, [activeTab, challengesLoading, groupIdNum, loadChallenges]);
 
@@ -426,7 +424,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
   const tabs = useMemo(() => {
     const items: Array<{ id: DetailTab; label: string }> = [
       { id: "overview", label: "개요" },
-      { id: "ranking", label: "랭킹·챌린지" },
+      { id: "challenge", label: "챌린지" },
     ];
     if (board?.permissions.canEditBasicInfo || board?.permissions.canManageJoinRequests) {
       items.push({ id: "manage", label: "운영" });
@@ -1101,29 +1099,24 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
             </div>
           )}
 
-          {/* ── 랭킹·챌린지 탭 ──────────────────────────────── */}
-          {activeTab === "ranking" && (
-            <div className="space-y-6">
-              {/* 주간 랭킹 */}
-              <SocialGroupRankingTab
-                members={board.members}
-                currentUserId={currentUserId}
-              />
-
-              {/* 챌린지 구분선 */}
-              <div>
-                <div className="mb-3 flex items-center gap-2 px-0.5">
-                  <SocialTrophyIcon className="h-[15px] w-[15px] text-[color:var(--rnest-accent)]" />
-                  <p className="text-[14px] font-bold text-ios-text">그룹 챌린지</p>
-                </div>
-                <SocialGroupChallengesTab
-                  groupId={groupIdNum ?? 0}
-                  challenges={challenges}
-                  currentUserId={currentUserId}
-                  canCreate={myRole === "owner" || myRole === "admin"}
-                  onRefresh={() => void loadChallenges()}
-                />
+          {/* ── 챌린지 탭 ───────────────────────────────────── */}
+          {activeTab === "challenge" && (
+            <div className="space-y-4">
+              <div className="rounded-3xl bg-white px-4 py-4 shadow-apple">
+                <p className="text-[14px] font-semibold text-ios-text">그룹 챌린지</p>
+                <p className="mt-0.5 text-[11.5px] leading-5 text-ios-muted">
+                  참가한 멤버의 최근 건강 기록을 기준으로 챌린지 진행 상황이 자동으로 반영돼요.
+                </p>
               </div>
+
+              <SocialGroupChallengesTab
+                groupId={groupIdNum ?? 0}
+                challenges={challenges}
+                loading={challengesLoading && !challengesLoadedRef.current}
+                currentUserId={currentUserId}
+                canCreate={myRole === "owner" || myRole === "admin"}
+                onRefresh={() => void loadChallenges()}
+              />
             </div>
           )}
 

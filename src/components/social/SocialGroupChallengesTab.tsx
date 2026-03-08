@@ -25,6 +25,7 @@ import type {
 type Props = {
   groupId: number;
   challenges: GroupChallengeSummary[];
+  loading?: boolean;
   currentUserId: string | null;
   canCreate: boolean;
   onRefresh: () => void;
@@ -526,6 +527,7 @@ function CreateChallengeSheet({
 export function SocialGroupChallengesTab({
   groupId,
   challenges,
+  loading = false,
   currentUserId,
   canCreate,
   onRefresh,
@@ -551,6 +553,15 @@ export function SocialGroupChallengesTab({
       setJoiningId(null);
     }
   };
+
+  if (loading) {
+    return (
+      <div className="space-y-3">
+        <div className="h-24 rounded-[28px] bg-white shadow-apple animate-pulse" />
+        <div className="h-24 rounded-[28px] bg-white shadow-apple animate-pulse" />
+      </div>
+    );
+  }
 
   // ── 빈 상태 ────────────────────────────────────────────────
   if (challenges.length === 0) {
