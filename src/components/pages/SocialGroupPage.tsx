@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { SocialGroupBadge } from "@/components/social/SocialGroupBadge";
 import { SocialGroupRoleBadge } from "@/components/social/SocialGroupRoleBadge";
 import { SocialGroupRankingTab } from "@/components/social/SocialGroupRankingTab";
+import { SocialGroupChallengesTab } from "@/components/social/SocialGroupChallengesTab";
 import { SocialThisWeek } from "@/components/social/SocialThisWeek";
 import { SocialCommonOffDays } from "@/components/social/SocialCommonOffDays";
 import {
@@ -16,9 +17,11 @@ import {
   SocialGroupIcon,
   SocialMegaphoneIcon,
   SocialMoonIcon,
+  SocialTrophyIcon,
 } from "@/components/social/SocialIcons";
 import type {
   FriendSchedule,
+  GroupChallengeSummary,
   SocialGroupActivity,
   SocialGroupBoard,
   SocialGroupJoinMode,
@@ -136,7 +139,7 @@ function parseActionError(errorCode: string | undefined, fallback: string): stri
 // ── 타입 ─────────────────────────────────────────────────────
 
 type ShareState = "idle" | "link-copied" | "shared";
-type DetailTab = "overview" | "members" | "ranking" | "manage" | "activity";
+type DetailTab = "overview" | "ranking" | "manage" | "activity";
 
 type Props = {
   groupId: string;
@@ -211,11 +214,14 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
   const [board, setBoard] = useState<SocialGroupBoard | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [challenges, setChallenges] = useState<GroupChallengeSummary[]>([]);
+  const [challengesLoading, setChallengesLoading] = useState(false);
   const [feedback, setFeedback] = useState<{ tone: "info" | "success" | "error"; text: string } | null>(null);
   const [sharing, setSharing] = useState(false);
   const [shareState, setShareState] = useState<ShareState>("idle");
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<DetailTab>("overview");
+  const [memberSheetOpen, setMemberSheetOpen] = useState(false);
   const [memberQuery, setMemberQuery] = useState("");
   const [settingsName, setSettingsName] = useState("");
   const [settingsDescription, setSettingsDescription] = useState("");
@@ -223,11 +229,42 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
   const [settingsJoinMode, setSettingsJoinMode] = useState<SocialGroupJoinMode>("open");
   const [settingsAllowMemberInvites, setSettingsAllowMemberInvites] = useState(true);
   const [settingsMaxMembers, setSettingsMaxMembers] = useState(12);
+  const [settingsDirty, setSettingsDirty] = useState(false);
   const [noticeComposerOpen, setNoticeComposerOpen] = useState(false);
   const [noticeTitle, setNoticeTitle] = useState("");
   const [noticeBody, setNoticeBody] = useState("");
   const [expandedNoticeId, setExpandedNoticeId] = useState<number | null>(null);
   const boardRequestSeqRef = useRef(0);
+  const challengesRequestSeqRef = useRef(0);
+  const boardRef = useRef<SocialGroupBoard | null>(null);
+  const hydratedSettingsGroupIdRef = useRef<number | null>(null);
+  const challengesLoadedRef = useRef(false);
+
+  // ── 챌린지 로드 ───────────────────────────────────────────
+
+  const loadChallenges = useCallback(async () => {
+    if (!groupIdNum) return;
+    const requestSeq = ++challengesRequestSeqRef.current;
+    setChallengesLoading(true);
+    try {
+      const res = await fetch(
+        `/api/social/groups/${groupIdNum}/challenges`,
+        { cache: "no-store" }
+      ).then((r) => r.json());
+      if (requestSeq !== challengesRequestSeqRef.current) return;
+      if (res.ok) {
+        setChallenges(res.data as GroupChallengeSummary[]);
+        challengesLoadedRef.current = true;
+      }
+    } catch {
+      // 챌린지 로드 실패는 조용히 무시 (보드가 주 콘텐츠)
+    } finally {
+      if (requestSeq === challengesRequestSeqRef.current) {
+        challengesLoadedRef.current = true;
+        setChallengesLoading(false);
+      }
+    }
+  }, [groupIdNum]);
 
   // ── 보드 로드 ─────────────────────────────────────────────
 
@@ -248,11 +285,12 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
       }
       const nextBoard = res.data as SocialGroupBoard;
       if (requestSeq !== boardRequestSeqRef.current) return null;
+      boardRef.current = nextBoard;
       setBoard(nextBoard);
       return nextBoard;
     } catch (err: any) {
       if (requestSeq !== boardRequestSeqRef.current) return null;
-      setBoard(null);
+      if (!boardRef.current) setBoard(null);
       setError(String(err?.message ?? "그룹 정보를 불러오지 못했어요."));
       return null;
     } finally {
@@ -266,6 +304,8 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
       setLoading(false);
       return;
     }
+    challengesLoadedRef.current = false;
+    setChallenges([]);
     void loadBoard();
   }, [groupIdNum, loadBoard]);
 
@@ -274,7 +314,12 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
     let tid: ReturnType<typeof setTimeout>;
     const trigger = () => {
       clearTimeout(tid);
-      tid = setTimeout(() => void loadBoard(), 250);
+      tid = setTimeout(() => {
+        void loadBoard();
+        if (activeTab === "ranking") {
+          void loadChallenges();
+        }
+      }, 250);
     };
     const onVisibility = () => {
       if (!document.hidden) trigger();
@@ -286,27 +331,41 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
       document.removeEventListener("visibilitychange", onVisibility);
       clearTimeout(tid);
     };
-  }, [groupIdNum, loadBoard]);
+  }, [activeTab, groupIdNum, loadBoard, loadChallenges]);
+
+  useEffect(() => {
+    boardRef.current = board;
+  }, [board]);
 
   useEffect(() => {
     if (!board) return;
+    const groupChanged = hydratedSettingsGroupIdRef.current !== board.group.id;
+    if (!groupChanged && settingsDirty) return;
+
+    hydratedSettingsGroupIdRef.current = board.group.id;
     setSettingsName(board.group.name);
     setSettingsDescription(board.group.description);
     setSettingsNotice(board.group.notice);
     setSettingsJoinMode(board.group.joinMode);
     setSettingsAllowMemberInvites(board.group.allowMemberInvites);
     setSettingsMaxMembers(board.group.maxMembers);
-  }, [board]);
+    setSettingsDirty(false);
+  }, [board, settingsDirty]);
 
   useEffect(() => {
     if (!board) return;
     const canManage =
       board.permissions.canEditBasicInfo || board.permissions.canManageJoinRequests;
     const allowedTabs: DetailTab[] = canManage
-      ? ["overview", "members", "ranking", "manage", "activity"]
-      : ["overview", "members", "ranking", "activity"];
+      ? ["overview", "ranking", "manage", "activity"]
+      : ["overview", "ranking", "activity"];
     if (!allowedTabs.includes(activeTab)) setActiveTab("overview");
   }, [activeTab, board]);
+
+  useEffect(() => {
+    if (activeTab !== "ranking" || !groupIdNum || challengesLoadedRef.current || challengesLoading) return;
+    void loadChallenges();
+  }, [activeTab, challengesLoading, groupIdNum, loadChallenges]);
 
   // ── 파생 값 ───────────────────────────────────────────────
 
@@ -366,8 +425,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
   const tabs = useMemo(() => {
     const items: Array<{ id: DetailTab; label: string }> = [
       { id: "overview", label: "개요" },
-      { id: "members", label: "멤버" },
-      { id: "ranking", label: "랭킹" },
+      { id: "ranking", label: "랭킹·챌린지" },
     ];
     if (board?.permissions.canEditBasicInfo || board?.permissions.canManageJoinRequests) {
       items.push({ id: "manage", label: "운영" });
@@ -380,6 +438,8 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
     () => board?.members.find((m) => m.userId === currentUserId)?.role ?? "member",
     [board?.members, currentUserId]
   ) as SocialGroupRole;
+  const initialLoading = loading && !board;
+  const refreshing = loading && !!board;
 
   // ── 액션 핸들러 ───────────────────────────────────────────
 
@@ -486,7 +546,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
     const trimmedName = Array.from(settingsName.trim()).slice(0, 20).join("");
     const trimmedDescription = Array.from(settingsDescription.trim()).slice(0, 80).join("");
     const trimmedNotice = Array.from(settingsNotice.trim()).slice(0, 120).join("");
-    await handleManageAction(
+    const success = await handleManageAction(
       {
         action: "update_settings",
         name: trimmedName,
@@ -499,6 +559,9 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
       "그룹 설정을 저장했어요.",
       "그룹 설정을 저장하지 못했어요."
     );
+    if (success) {
+      setSettingsDirty(false);
+    }
   };
 
   const handleChangeRole = async (targetUserId: string, role: "admin" | "member") => {
@@ -586,7 +649,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
 
   // ── 에러 상태 (그룹 없음 / 비회원) ────────────────────────
 
-  if (!loading && error === "not_member") {
+  if (!initialLoading && error === "not_member") {
     return (
       <div className="mx-auto w-full max-w-[680px] space-y-4 px-1.5 pb-6 sm:max-w-[700px] sm:px-0">
         <div className="flex items-center justify-between pt-1">
@@ -611,7 +674,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
     );
   }
 
-  if (!loading && error === "not_found") {
+  if (!initialLoading && error === "not_found") {
     return (
       <div className="mx-auto w-full max-w-[680px] space-y-4 px-1.5 pb-6 sm:max-w-[700px] sm:px-0">
         <div className="flex items-center justify-between pt-1">
@@ -683,9 +746,16 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
               <p className="truncate text-[18px] font-bold text-ios-text">{groupName}</p>
               {board ? <SocialGroupRoleBadge role={board.group.role} /> : null}
             </div>
-            <p className="mt-0.5 text-[12.5px] text-ios-muted">
+            <button
+              type="button"
+              onClick={() => setMemberSheetOpen(true)}
+              className="mt-0.5 flex items-center gap-1 text-[12.5px] text-ios-muted transition active:opacity-60"
+            >
               멤버 {board?.group.memberCount ?? "…"}/{board?.group.maxMembers ?? 12}명
-            </p>
+              <svg width="11" height="11" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="8 5 14 10 8 15" />
+              </svg>
+            </button>
           </div>
           {/* 나가기 / 삭제 버튼 — 우상단 pill */}
           <button
@@ -747,7 +817,15 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
       ) : null}
 
       {/* ── 로딩 스켈레톤 ─────────────────────────────────── */}
-      {loading && (
+      {refreshing ? (
+        <div className="flex justify-end">
+          <span className="rounded-full bg-ios-bg px-3 py-1 text-[11px] font-medium text-ios-muted">
+            업데이트 중…
+          </span>
+        </div>
+      ) : null}
+
+      {initialLoading && (
         <div className="space-y-3 rounded-[32px] bg-white px-5 py-5 shadow-apple">
           <div className="h-4 w-40 rounded-full bg-ios-sep animate-pulse" />
           <div className="h-24 rounded-2xl bg-ios-sep/70 animate-pulse" />
@@ -756,7 +834,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
       )}
 
       {/* ── 탭 + 콘텐츠 ──────────────────────────────────── */}
-      {!loading && board && (
+      {board && (
         <>
           {/* 탭 바 */}
           <div className="rounded-2xl bg-ios-bg p-1 shadow-apple">
@@ -1022,131 +1100,28 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
             </div>
           )}
 
-          {/* ── 랭킹 탭 ────────────────────────────────────── */}
+          {/* ── 랭킹·챌린지 탭 ──────────────────────────────── */}
           {activeTab === "ranking" && (
-            <SocialGroupRankingTab members={board.members} currentUserId={currentUserId} />
-          )}
+            <div className="space-y-6">
+              {/* 주간 랭킹 */}
+              <SocialGroupRankingTab
+                members={board.members}
+                currentUserId={currentUserId}
+              />
 
-          {/* ── 멤버 탭 ────────────────────────────────────── */}
-          {activeTab === "members" && (
-            <div className="space-y-4">
-              <div className="rounded-3xl bg-white px-4 py-4 shadow-apple">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-[14px] font-semibold text-ios-text">그룹 멤버</p>
-                    <p className="mt-0.5 text-[11.5px] text-ios-muted">
-                      공개 범위에 따라 일부 근무표는 숨겨질 수 있어요.
-                    </p>
-                  </div>
-                  {board.hiddenScheduleMemberCount > 0 ? (
-                    <span className="text-[11px] text-ios-muted">
-                      근무 비공개 {board.hiddenScheduleMemberCount}명
-                    </span>
-                  ) : null}
+              {/* 챌린지 구분선 */}
+              <div>
+                <div className="mb-3 flex items-center gap-2 px-0.5">
+                  <SocialTrophyIcon className="h-[15px] w-[15px] text-[color:var(--rnest-accent)]" />
+                  <p className="text-[14px] font-bold text-ios-text">그룹 챌린지</p>
                 </div>
-
-                <input
-                  value={memberQuery}
-                  onChange={(e) => setMemberQuery(e.target.value)}
-                  placeholder="멤버 검색"
-                  className="mt-4 w-full rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3 text-[14px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent)] placeholder:text-ios-muted/60"
+                <SocialGroupChallengesTab
+                  groupId={groupIdNum ?? 0}
+                  challenges={challenges}
+                  currentUserId={currentUserId}
+                  canCreate={myRole === "owner" || myRole === "admin"}
+                  onRefresh={() => void loadChallenges()}
                 />
-
-                <div className="mt-4 space-y-3">
-                  {visibleMembers.map((member) => {
-                    const canPromote =
-                      board.permissions.canPromoteMembers &&
-                      member.userId !== currentUserId &&
-                      member.role !== "owner";
-                    const canTransfer =
-                      board.permissions.canTransferOwner &&
-                      member.userId !== currentUserId &&
-                      member.role !== "owner";
-                    const canRemove =
-                      board.permissions.canRemoveMembers &&
-                      member.userId !== currentUserId &&
-                      member.role !== "owner" &&
-                      !(myRole === "admin" && member.role === "admin");
-
-                    return (
-                      <div key={member.userId} className="rounded-2xl bg-ios-bg px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <span className="text-[24px]">{member.avatarEmoji || "🐧"}</span>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <p className="truncate text-[13.5px] font-semibold text-ios-text">
-                                {member.nickname || "익명"}
-                              </p>
-                              <SocialGroupRoleBadge role={member.role} className="text-[10px]" />
-                              {member.userId === currentUserId ? (
-                                <span className="rounded-full bg-[color:var(--rnest-accent-soft)] px-2 py-0.5 text-[10px] font-semibold text-[color:var(--rnest-accent)]">
-                                  나
-                                </span>
-                              ) : null}
-                            </div>
-                            {member.statusMessage ? (
-                              <p className="mt-0.5 truncate text-[11.5px] text-ios-muted">
-                                {member.statusMessage}
-                              </p>
-                            ) : null}
-                            <p className="mt-1 text-[10.5px] text-ios-muted">
-                              {formatJoinedAt(member.joinedAt)}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-ios-muted">
-                          <div className="rounded-2xl bg-white px-3 py-2">
-                            이번 달 OFF/VAC {countShifts(member.schedule, isOffOrVac)}일
-                          </div>
-                          <div className="rounded-2xl bg-white px-3 py-2">
-                            {Object.keys(member.schedule).length > 0 ? "근무 공개 중" : "근무 비공개"}
-                          </div>
-                        </div>
-
-                        {(canPromote || canTransfer || canRemove) && (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {canPromote ? (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  void handleChangeRole(
-                                    member.userId,
-                                    member.role === "admin" ? "member" : "admin"
-                                  )
-                                }
-                                disabled={busyAction !== null}
-                                className="rounded-full bg-white px-3 py-1.5 text-[11.5px] font-semibold text-[color:var(--rnest-accent)] shadow-sm transition active:opacity-60 disabled:opacity-40"
-                              >
-                                {member.role === "admin" ? "관리자 해제" : "관리자 지정"}
-                              </button>
-                            ) : null}
-                            {canTransfer ? (
-                              <button
-                                type="button"
-                                onClick={() => void handleTransferOwner(member.userId, member.nickname)}
-                                disabled={busyAction !== null}
-                                className="rounded-full bg-white px-3 py-1.5 text-[11.5px] font-semibold text-sky-700 shadow-sm transition active:opacity-60 disabled:opacity-40"
-                              >
-                                방장 위임
-                              </button>
-                            ) : null}
-                            {canRemove ? (
-                              <button
-                                type="button"
-                                onClick={() => void handleRemoveMember(member.userId, member.nickname)}
-                                disabled={busyAction !== null}
-                                className="rounded-full bg-white px-3 py-1.5 text-[11.5px] font-semibold text-red-600 shadow-sm transition active:opacity-60 disabled:opacity-40"
-                              >
-                                그룹에서 제외
-                              </button>
-                            ) : null}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
               </div>
             </div>
           )}
@@ -1167,9 +1142,10 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
                     <label className="mb-1.5 block text-[12.5px] font-semibold text-ios-text">그룹 이름</label>
                     <input
                       value={settingsName}
-                      onChange={(e) =>
-                        setSettingsName(Array.from(e.target.value).slice(0, 20).join(""))
-                      }
+                      onChange={(e) => {
+                        setSettingsDirty(true);
+                        setSettingsName(Array.from(e.target.value).slice(0, 20).join(""));
+                      }}
                       className="w-full rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3 text-[14px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent)]"
                     />
                   </div>
@@ -1178,9 +1154,10 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
                     <label className="mb-1.5 block text-[12.5px] font-semibold text-ios-text">그룹 소개</label>
                     <textarea
                       value={settingsDescription}
-                      onChange={(e) =>
-                        setSettingsDescription(Array.from(e.target.value).slice(0, 80).join(""))
-                      }
+                      onChange={(e) => {
+                        setSettingsDirty(true);
+                        setSettingsDescription(Array.from(e.target.value).slice(0, 80).join(""));
+                      }}
                       className="min-h-[86px] w-full resize-none rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3 text-[14px] leading-6 text-ios-text outline-none transition focus:border-[color:var(--rnest-accent)]"
                     />
                   </div>
@@ -1194,9 +1171,10 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
                     </div>
                     <textarea
                       value={settingsNotice}
-                      onChange={(e) =>
-                        setSettingsNotice(Array.from(e.target.value).slice(0, 120).join(""))
-                      }
+                      onChange={(e) => {
+                        setSettingsDirty(true);
+                        setSettingsNotice(Array.from(e.target.value).slice(0, 120).join(""));
+                      }}
                       className="min-h-[96px] w-full resize-none rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3 text-[14px] leading-6 text-ios-text outline-none transition focus:border-[color:var(--rnest-accent)]"
                     />
                   </div>
@@ -1213,7 +1191,10 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
                             <button
                               key={item.id}
                               type="button"
-                              onClick={() => setSettingsJoinMode(item.id)}
+                              onClick={() => {
+                                setSettingsDirty(true);
+                                setSettingsJoinMode(item.id);
+                              }}
                               className={cn(
                                 "rounded-[14px] px-3 py-2.5 text-[12.5px] font-semibold transition",
                                 settingsJoinMode === item.id
@@ -1237,7 +1218,10 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
                         <input
                           type="checkbox"
                           checked={settingsAllowMemberInvites}
-                          onChange={(e) => setSettingsAllowMemberInvites(e.target.checked)}
+                          onChange={(e) => {
+                            setSettingsDirty(true);
+                            setSettingsAllowMemberInvites(e.target.checked);
+                          }}
                           className="h-4 w-4 accent-[color:var(--rnest-accent)]"
                         />
                       </label>
@@ -1250,7 +1234,10 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
                           max={24}
                           step={1}
                           value={settingsMaxMembers}
-                          onChange={(e) => setSettingsMaxMembers(Number(e.target.value))}
+                          onChange={(e) => {
+                            setSettingsDirty(true);
+                            setSettingsMaxMembers(Number(e.target.value));
+                          }}
                           className="w-full"
                         />
                         <div className="mt-1 flex items-center justify-between text-[11px] text-ios-muted">
@@ -1388,8 +1375,158 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
         </>
       )}
 
+      {/* ── 멤버 바텀시트 ─────────────────────────────────── */}
+      {memberSheetOpen && board && (
+        <>
+          {/* 백드롭 */}
+          <div
+            role="presentation"
+            className="fixed inset-0 z-40 bg-black/30"
+            onClick={() => { setMemberSheetOpen(false); setMemberQuery(""); }}
+          />
+          {/* 시트 */}
+          <div className="fixed bottom-0 left-0 right-0 z-50 flex max-h-[78dvh] flex-col overflow-hidden rounded-t-[32px] bg-white">
+            {/* 드래그 핸들 */}
+            <div className="flex shrink-0 justify-center pt-3 pb-1">
+              <div className="h-1 w-10 rounded-full bg-ios-sep" />
+            </div>
+            {/* 타이틀 + 닫기 */}
+            <div className="flex shrink-0 items-center justify-between px-5 py-3">
+              <p className="text-[17px] font-bold text-ios-text">
+                멤버 {board.group.memberCount}명
+              </p>
+              {board.hiddenScheduleMemberCount > 0 && (
+                <span className="mr-auto ml-2 text-[11px] text-ios-muted">
+                  근무 비공개 {board.hiddenScheduleMemberCount}명
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => { setMemberSheetOpen(false); setMemberQuery(""); }}
+                className="flex h-7 w-7 items-center justify-center rounded-full bg-ios-bg text-ios-muted transition active:opacity-60"
+                aria-label="닫기"
+              >
+                <svg width="12" height="12" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                  <path d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" />
+                </svg>
+              </button>
+            </div>
+            {/* 검색 */}
+            <div className="shrink-0 px-5 pb-3">
+              <input
+                value={memberQuery}
+                onChange={(e) => setMemberQuery(e.target.value)}
+                placeholder="멤버 검색"
+                className="w-full rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3 text-[14px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent)] placeholder:text-ios-muted/60"
+              />
+            </div>
+            {/* 멤버 목록 */}
+            <div className="flex-1 overflow-y-auto px-5 pb-[calc(28px+env(safe-area-inset-bottom))]">
+              <div className="space-y-2.5">
+                {visibleMembers.map((member) => {
+                  const canPromote =
+                    board.permissions.canPromoteMembers &&
+                    member.userId !== currentUserId &&
+                    member.role !== "owner";
+                  const canTransfer =
+                    board.permissions.canTransferOwner &&
+                    member.userId !== currentUserId &&
+                    member.role !== "owner";
+                  const canRemove =
+                    board.permissions.canRemoveMembers &&
+                    member.userId !== currentUserId &&
+                    member.role !== "owner" &&
+                    !(myRole === "admin" && member.role === "admin");
+
+                  return (
+                    <div key={member.userId} className="rounded-2xl bg-ios-bg px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <span className="text-[24px]">{member.avatarEmoji || "🐧"}</span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <p className="truncate text-[13.5px] font-semibold text-ios-text">
+                              {member.nickname || "익명"}
+                            </p>
+                            <SocialGroupRoleBadge role={member.role} className="text-[10px]" />
+                            {member.userId === currentUserId ? (
+                              <span className="rounded-full bg-[color:var(--rnest-accent-soft)] px-2 py-0.5 text-[10px] font-semibold text-[color:var(--rnest-accent)]">
+                                나
+                              </span>
+                            ) : null}
+                          </div>
+                          {member.statusMessage ? (
+                            <p className="mt-0.5 truncate text-[11.5px] text-ios-muted">
+                              {member.statusMessage}
+                            </p>
+                          ) : null}
+                          <p className="mt-1 text-[10.5px] text-ios-muted">
+                            {formatJoinedAt(member.joinedAt)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-ios-muted">
+                        <div className="rounded-2xl bg-white px-3 py-2">
+                          이번 달 OFF/VAC {countShifts(member.schedule, isOffOrVac)}일
+                        </div>
+                        <div className="rounded-2xl bg-white px-3 py-2">
+                          {Object.keys(member.schedule).length > 0 ? "근무 공개 중" : "근무 비공개"}
+                        </div>
+                      </div>
+                      {(canPromote || canTransfer || canRemove) && (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {canPromote ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void handleChangeRole(
+                                  member.userId,
+                                  member.role === "admin" ? "member" : "admin"
+                                )
+                              }
+                              disabled={busyAction !== null}
+                              className="rounded-full bg-white px-3 py-1.5 text-[11.5px] font-semibold text-[color:var(--rnest-accent)] shadow-sm transition active:opacity-60 disabled:opacity-40"
+                            >
+                              {member.role === "admin" ? "관리자 해제" : "관리자 지정"}
+                            </button>
+                          ) : null}
+                          {canTransfer ? (
+                            <button
+                              type="button"
+                              onClick={() => void handleTransferOwner(member.userId, member.nickname)}
+                              disabled={busyAction !== null}
+                              className="rounded-full bg-white px-3 py-1.5 text-[11.5px] font-semibold text-sky-700 shadow-sm transition active:opacity-60 disabled:opacity-40"
+                            >
+                              방장 위임
+                            </button>
+                          ) : null}
+                          {canRemove ? (
+                            <button
+                              type="button"
+                              onClick={() => void handleRemoveMember(member.userId, member.nickname)}
+                              disabled={busyAction !== null}
+                              className="rounded-full bg-white px-3 py-1.5 text-[11.5px] font-semibold text-red-600 shadow-sm transition active:opacity-60 disabled:opacity-40"
+                            >
+                              그룹에서 제외
+                            </button>
+                          ) : null}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {visibleMembers.length === 0 && memberQuery.trim() && (
+                  <p className="py-6 text-center text-[13px] text-ios-muted">
+                    검색 결과가 없어요.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
       {/* ── 일반 에러 ─────────────────────────────────────── */}
-      {!loading && error && error !== "not_member" && error !== "not_found" ? (
+      {!initialLoading && error && error !== "not_member" && error !== "not_found" ? (
         <div className="rounded-2xl bg-red-50 px-4 py-3">
           <p className="text-[13px] text-red-600">{error}</p>
           <button

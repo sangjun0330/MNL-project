@@ -194,3 +194,89 @@ export function SocialGroupIcon({ className = "" }: IconProps) {
     </svg>
   );
 }
+
+export function SocialTrophyIcon({ className = "" }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M8 21h8M12 17v4" />
+      <path d="M7 4H4a1 1 0 0 0-1 1v2a4 4 0 0 0 4 4" />
+      <path d="M17 4h3a1 1 0 0 1 1 1v2a4 4 0 0 1-4 4" />
+      <path d="M6.5 4h11a.5.5 0 0 1 .5.5v7A5.5 5.5 0 0 1 12.5 17h-1A5.5 5.5 0 0 1 6 11.5v-7a.5.5 0 0 1 .5-.5Z" />
+    </svg>
+  );
+}
+
+export function SocialFlameIcon({ className = "" }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M12 2c-.4 0-.7.3-.7.7 0 3.2-2.1 5-3.8 6.4C5.8 10.5 4.5 11.7 4.5 14a7.5 7.5 0 0 0 15 0c0-5-4.1-7.7-5.4-11.1A.7.7 0 0 0 13.4 2H12Zm0 4.2c.9 2.4 3.1 4.3 3.1 7.8a3.1 3.1 0 0 1-6.2 0c0-1.6.8-2.5 1.9-3.4.5-.4 1-.9 1.2-1.5V6.2Z" />
+    </svg>
+  );
+}
+
+export function SocialBrainIcon({ className = "" }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15A2.5 2.5 0 0 1 9.5 22a2.5 2.5 0 0 1-2.45-2H4.5a2 2 0 0 1-2-2v-1a2 2 0 0 1 2-2 2 2 0 0 1-2-2v-1a2 2 0 0 1 2-2 2 2 0 0 1-2-2v-1a2 2 0 0 1 2-2h2.55A2.5 2.5 0 0 1 9.5 2Z" />
+      <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 2.5 2.5 2.5 2.5 0 0 0 2.45-2H19.5a2 2 0 0 0 2-2v-1a2 2 0 0 0-2-2 2 2 0 0 0 2-2v-1a2 2 0 0 0-2-2 2 2 0 0 0 2-2v-1a2 2 0 0 0-2-2h-2.55A2.5 2.5 0 0 0 14.5 2Z" />
+    </svg>
+  );
+}
+
+export function SocialTargetIcon({ className = "" }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <circle cx="12" cy="12" r="6" />
+      <circle cx="12" cy="12" r="2" />
+    </svg>
+  );
+}
+
+export function SocialPlusIcon({ className = "" }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}

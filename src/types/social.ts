@@ -131,6 +131,9 @@ export type SocialGroupSummary = {
   joinedAt: string;
   memberPreview: SocialGroupPreviewMember[];
   notice: string;
+  latestNoticeTitle: string | null;
+  latestNoticePreview: string | null;
+  latestNoticeCreatedAt: string | null;
   joinMode: SocialGroupJoinMode;
   allowMemberInvites: boolean;
   maxMembers: number;
@@ -220,4 +223,69 @@ export type SocialGroupInvitePreview = {
   token: string;
   state: "joinable" | "already_member" | "group_full" | "approval_required" | "request_pending";
   group: SocialGroupSummary;
+};
+
+// ══════════════════════════════════════════════════════════════
+// Group Challenge types
+// ══════════════════════════════════════════════════════════════
+
+export type ChallengeMetric = "battery" | "sleep" | "mental";
+export type ChallengeType   = "leaderboard" | "group_goal" | "streak";
+export type ChallengeStatus = "active" | "ended" | "canceled";
+
+/** 내 참가 엔트리 */
+export type ChallengeEntry = {
+  challengeId: number;
+  userId: string;
+  joinedAt: string;
+  snapshotValue: number | null;
+  streakDays: number | null;
+  snapshotAt: string | null;
+  isCompleted: boolean;
+  completedAt: string | null;
+};
+
+/** 리더보드 한 행 */
+export type ChallengeLeaderboardEntry = ChallengeEntry & {
+  rank: number;
+  nickname: string;
+  avatarEmoji: string;
+};
+
+/** 챌린지 요약 (목록 카드용) */
+export type GroupChallengeSummary = {
+  id: number;
+  groupId: number;
+  title: string;
+  description: string | null;
+  metric: ChallengeMetric;
+  challengeType: ChallengeType;
+  targetValue: number | null;
+  targetDays: number | null;
+  status: ChallengeStatus;
+  startsAt: string;
+  endsAt: string;
+  createdBy: string;
+  createdAt: string;
+  participantCount: number;
+  myEntry: ChallengeEntry | null;
+  daysLeft: number; // 음수면 종료됨
+};
+
+/** 챌린지 상세 (리더보드 포함) */
+export type GroupChallengeDetail = GroupChallengeSummary & {
+  leaderboard: ChallengeLeaderboardEntry[];
+  groupCurrentAvg: number | null;  // group_goal 타입: 현재 참가자 평균
+  groupGoalMet: boolean | null;    // group_goal: 목표 달성 여부
+};
+
+/** 챌린지 생성 페이로드 */
+export type CreateChallengePayload = {
+  title: string;
+  description?: string;
+  metric: ChallengeMetric;
+  challengeType: ChallengeType;
+  targetValue?: number;
+  targetDays?: number;
+  durationDays: 7 | 14 | 21 | 30;
 };

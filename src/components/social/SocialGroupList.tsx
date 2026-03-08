@@ -12,7 +12,7 @@ type Props = {
 
 export function SocialGroupList({ groups, onOpenGroup, onCreateGroup }: Props) {
   return (
-    <div className="rounded-apple border border-ios-sep bg-white shadow-apple">
+    <div className="rounded-apple bg-white shadow-apple">
       <div className="flex items-center justify-between px-4 pt-3 pb-1">
         <span className="text-[12px] font-semibold text-ios-muted">내 그룹 {groups.length}</span>
       </div>
@@ -52,7 +52,11 @@ export function SocialGroupList({ groups, onOpenGroup, onCreateGroup }: Props) {
                       </span>
                     ) : null}
                   </div>
-                  {group.notice ? (
+                  {group.latestNoticePreview ? (
+                    <p className="mt-0.5 truncate text-[11.5px] text-ios-muted">
+                      공지{group.latestNoticeTitle ? ` · ${group.latestNoticeTitle}` : ""} · {group.latestNoticePreview}
+                    </p>
+                  ) : group.notice ? (
                     <p className="mt-0.5 truncate text-[11.5px] text-ios-muted">공지 · {group.notice}</p>
                   ) : group.description ? (
                     <p className="mt-0.5 truncate text-[11.5px] text-ios-muted">{group.description}</p>

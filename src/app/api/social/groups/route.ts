@@ -12,6 +12,7 @@ import {
   appendGroupActivity,
   DEFAULT_GROUP_MAX_MEMBERS,
   getSocialGroupsByIds,
+  loadLatestGroupNoticePreviewMap,
   loadPendingJoinRequestCountMap,
   loadSocialGroupProfileMap,
   mapSocialGroupSummary,
@@ -47,7 +48,7 @@ export async function GET(req: Request) {
           .filter((value: number) => Number.isFinite(value))
       )
     ) as number[];
-    const [groups, { data: memberRows, error: memberErr }, pendingCountMap] = await Promise.all([
+    const [groups, { data: memberRows, error: memberErr }, pendingCountMap, latestNoticePreviewMap] = await Promise.all([
       getSocialGroupsByIds(admin, groupIds),
       (admin as any)
         .from("rnest_social_group_members")
@@ -55,6 +56,7 @@ export async function GET(req: Request) {
         .in("group_id", groupIds)
         .order("joined_at", { ascending: true }),
       loadPendingJoinRequestCountMap(admin, groupIds),
+      loadLatestGroupNoticePreviewMap(admin, groupIds),
     ]);
 
     if (memberErr) throw memberErr;
@@ -75,7 +77,8 @@ export async function GET(req: Request) {
       membershipMap.set(Number(row.group_id), row);
     }
 
-    const groupList = groups.map((group) => {
+    const groupList = groups
+      .map((group) => {
       const groupId = Number(group.id);
       const groupMembers = membersByGroupId.get(groupId) ?? [];
       const preview = groupMembers.slice(0, 3).map((member: any) => {
@@ -92,12 +95,18 @@ export async function GET(req: Request) {
         membership: membershipMap.get(groupId),
         memberCount: groupMembers.length,
         memberPreview: preview,
+        latestNotice: latestNoticePreviewMap.get(groupId) ?? null,
         pendingJoinRequestCount:
           membershipMap.get(groupId)?.role === "owner" || membershipMap.get(groupId)?.role === "admin"
             ? Number(pendingCountMap.get(groupId) ?? 0)
             : 0,
       });
-    });
+      })
+      .sort((a, b) => {
+        const joinedCompare = b.joinedAt.localeCompare(a.joinedAt);
+        if (joinedCompare !== 0) return joinedCompare;
+        return b.id - a.id;
+      });
 
     return jsonNoStore({ ok: true, data: { groups: groupList } });
   } catch (err: any) {
@@ -208,6 +217,13 @@ export async function POST(req: Request) {
             avatarEmoji: String(profile?.avatarEmoji ?? "🐧"),
           },
         ],
+        latestNotice: notice
+          ? {
+              title: "고정 안내",
+              preview: notice,
+              createdAt: String(group.updated_at ?? group.created_at ?? new Date().toISOString()),
+            }
+          : null,
         pendingJoinRequestCount: 0,
       }),
     });

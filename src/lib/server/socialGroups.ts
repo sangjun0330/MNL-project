@@ -164,6 +164,11 @@ export function mapSocialGroupSummary(input: {
   membership: { role?: string | null; joined_at?: string | null } | null | undefined;
   memberCount: number;
   memberPreview: SocialGroupPreviewMember[];
+  latestNotice?: {
+    title: string;
+    preview: string;
+    createdAt: string;
+  } | null;
   pendingJoinRequestCount?: number;
 }): SocialGroupSummary {
   return {
@@ -176,6 +181,9 @@ export function mapSocialGroupSummary(input: {
     joinedAt: String(input.membership?.joined_at ?? input.group.createdAt),
     memberPreview: input.memberPreview,
     notice: input.group.notice,
+    latestNoticeTitle: input.latestNotice?.title ?? null,
+    latestNoticePreview: input.latestNotice?.preview ?? null,
+    latestNoticeCreatedAt: input.latestNotice?.createdAt ?? null,
     joinMode: input.group.joinMode,
     allowMemberInvites: input.group.allowMemberInvites,
     maxMembers: input.group.maxMembers,
@@ -397,6 +405,41 @@ export async function loadGroupNoticePosts(
     });
   } catch (error: any) {
     if (isMissingSchemaFeatureError(error)) return [];
+    throw error;
+  }
+}
+
+export async function loadLatestGroupNoticePreviewMap(
+  admin: any,
+  groupIds: number[]
+): Promise<Map<number, { title: string; preview: string; createdAt: string }>> {
+  const previewMap = new Map<number, { title: string; preview: string; createdAt: string }>();
+  if (groupIds.length === 0) return previewMap;
+
+  try {
+    const { data: rows, error } = await (admin as any)
+      .from("rnest_social_group_notice_posts")
+      .select("group_id, title, body, created_at")
+      .in("group_id", groupIds)
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+
+    for (const row of rows ?? []) {
+      const groupId = Number((row as any).group_id ?? 0);
+      if (!Number.isFinite(groupId) || groupId <= 0 || previewMap.has(groupId)) continue;
+
+      const title = String((row as any).title ?? "").trim();
+      const body = String((row as any).body ?? "").trim();
+      previewMap.set(groupId, {
+        title: title || "공지",
+        preview: body,
+        createdAt: String((row as any).created_at ?? new Date().toISOString()),
+      });
+    }
+
+    return previewMap;
+  } catch (error: any) {
+    if (isMissingSchemaFeatureError(error)) return previewMap;
     throw error;
   }
 }
