@@ -7,15 +7,18 @@ import { cn } from "@/lib/cn";
 import {
   SocialBatteryIcon,
   SocialBrainIcon,
+  SocialFlameIcon,
   SocialMoonIcon,
+  SocialTargetIcon,
+  SocialTrophyIcon,
 } from "@/components/social/SocialIcons";
 import type {
+  ChallengeEntry,
+  ChallengeLeaderboardEntry,
   ChallengeMetric,
   ChallengeType,
   GroupChallengeDetail,
 } from "@/types/social";
-
-// ── 헬퍼 ─────────────────────────────────────────────────────
 
 function MetricIcon({
   metric,
@@ -57,20 +60,117 @@ function calcDaysLeft(endsAt: string): number {
   return Math.ceil(ms / 86_400_000);
 }
 
-function RankBadge({ rank }: { rank: number }) {
+function challengeValueNumber(
+  entry: Pick<ChallengeEntry, "snapshotValue" | "streakDays"> | null,
+  challengeType: ChallengeType,
+): number | null {
+  if (!entry) return null;
+  if (challengeType === "streak") return entry.streakDays ?? null;
+  return entry.snapshotValue;
+}
+
+function challengeValueLabel(
+  value: number | null,
+  metric: ChallengeMetric,
+  challengeType: ChallengeType,
+): string {
+  if (value == null) return "-";
+  if (challengeType === "streak") return `${Math.round(value)}일`;
+  return formatValue(value, metric);
+}
+
+function gapLabel(
+  leaderValue: number | null,
+  currentValue: number | null,
+  metric: ChallengeMetric,
+  challengeType: ChallengeType,
+): string | null {
+  if (leaderValue == null || currentValue == null) return null;
+  const diff = leaderValue - currentValue;
+  if (diff <= 0) return null;
+  if (challengeType === "streak") return `${Math.round(diff)}일 차이`;
+  if (metric === "sleep") return `${diff.toFixed(1)}h 차이`;
+  return `${Math.round(diff)}점 차이`;
+}
+
+function leaderboardBarWidth(value: number | null, leaderValue: number | null): number {
+  if (value == null || leaderValue == null || leaderValue <= 0) return 0;
+  return Math.max(10, Math.min(100, (value / leaderValue) * 100));
+}
+
+function metricTheme(metric: ChallengeMetric) {
+  if (metric === "sleep") {
+    return {
+      heroSurface:
+        "bg-[linear-gradient(135deg,#EEF6FF_0%,#FFFFFF_54%,#F3F8FF_100%)] border border-sky-100/70",
+      iconSurface: "bg-[#E3F0FF] text-[#2A72D6]",
+      accentSurface: "bg-[#EAF3FF] text-[#2563C9]",
+      accentText: "text-[#2563C9]",
+      leaderSurface: "bg-[#F3F8FF]",
+      topSurface: "bg-[linear-gradient(135deg,#FFF9E8_0%,#FFF4C8_100%)] border border-[#F0D989]",
+      secondSurface: "bg-[linear-gradient(135deg,#F8FBFF_0%,#EEF4FB_100%)] border border-[#D5DFEC]",
+      thirdSurface: "bg-[linear-gradient(135deg,#FFF5ED_0%,#FFE8D7_100%)] border border-[#E8C5A7]",
+      progress: "bg-[linear-gradient(90deg,#60A5FA_0%,#2563EB_100%)]",
+      rowHighlight: "bg-[#EEF6FF] border border-sky-100",
+      spotlight:
+        "bg-[radial-gradient(circle_at_top_right,rgba(96,165,250,0.2),transparent_38%)]",
+    };
+  }
+  if (metric === "mental") {
+    return {
+      heroSurface:
+        "bg-[linear-gradient(135deg,#FFF5ED_0%,#FFFFFF_54%,#FFF6EF_100%)] border border-orange-100/70",
+      iconSurface: "bg-[#FFE8D8] text-[#C85D28]",
+      accentSurface: "bg-[#FFF0E5] text-[#C85D28]",
+      accentText: "text-[#C85D28]",
+      leaderSurface: "bg-[#FFF7F1]",
+      topSurface: "bg-[linear-gradient(135deg,#FFF9E8_0%,#FFF4C8_100%)] border border-[#F0D989]",
+      secondSurface: "bg-[linear-gradient(135deg,#F8FBFF_0%,#EEF4FB_100%)] border border-[#D5DFEC]",
+      thirdSurface: "bg-[linear-gradient(135deg,#FFF5ED_0%,#FFE8D7_100%)] border border-[#E8C5A7]",
+      progress: "bg-[linear-gradient(90deg,#FB923C_0%,#F97316_100%)]",
+      rowHighlight: "bg-[#FFF6EF] border border-orange-100",
+      spotlight:
+        "bg-[radial-gradient(circle_at_top_right,rgba(251,146,60,0.18),transparent_40%)]",
+    };
+  }
+  return {
+    heroSurface:
+      "bg-[linear-gradient(135deg,#F3FBF6_0%,#FFFFFF_54%,#F5FFF8_100%)] border border-emerald-100/70",
+    iconSurface: "bg-[#E4F6EA] text-[#18975C]",
+    accentSurface: "bg-[#EAF8EF] text-[#138454]",
+    accentText: "text-[#138454]",
+    leaderSurface: "bg-[#F6FCF8]",
+    topSurface: "bg-[linear-gradient(135deg,#FFF9E8_0%,#FFF4C8_100%)] border border-[#F0D989]",
+    secondSurface: "bg-[linear-gradient(135deg,#F8FBFF_0%,#EEF4FB_100%)] border border-[#D5DFEC]",
+    thirdSurface: "bg-[linear-gradient(135deg,#FFF5ED_0%,#FFE8D7_100%)] border border-[#E8C5A7]",
+    progress: "bg-[linear-gradient(90deg,#4ADE80_0%,#22C55E_100%)]",
+    rowHighlight: "bg-[#EFFBF4] border border-emerald-100",
+    spotlight:
+      "bg-[radial-gradient(circle_at_top_right,rgba(74,222,128,0.18),transparent_40%)]",
+  };
+}
+
+function RankBadge({
+  rank,
+  large = false,
+}: {
+  rank: number;
+  large?: boolean;
+}) {
   const cls =
     rank === 1
-      ? "bg-yellow-50 text-yellow-600 border border-yellow-200"
+      ? "border-[#F0D989] bg-[#FFF7D8] text-[#A36A00] shadow-[0_8px_24px_rgba(240,185,11,0.16)]"
       : rank === 2
-        ? "bg-slate-100 text-slate-500 border border-slate-200"
+        ? "border-[#D8DEE8] bg-[#F8FAFC] text-[#5A6578]"
         : rank === 3
-          ? "bg-orange-50 text-orange-500 border border-orange-200"
-          : "bg-ios-bg text-ios-muted border border-transparent";
+          ? "border-[#E7C2A3] bg-[#FFF1E6] text-[#9B5D37]"
+          : "border-ios-sep bg-ios-bg text-ios-muted";
 
   return (
     <div
       className={cn(
-        "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[12px] font-bold tabular-nums",
+        "inline-flex shrink-0 items-center justify-center rounded-full border font-bold tabular-nums",
+        large ? "h-11 min-w-11 px-3 text-[17px]" : "h-8 min-w-8 px-2 text-[12px]",
         cls
       )}
     >
@@ -88,33 +188,186 @@ function DaysBadge({
 }) {
   if (status === "canceled") {
     return (
-      <span className="rounded-full bg-ios-sep px-2.5 py-1 text-[11px] font-semibold text-ios-muted">
+      <span className="rounded-full bg-ios-sep px-3 py-1 text-[11px] font-semibold text-ios-muted">
         취소됨
       </span>
     );
   }
   if (status === "ended" || daysLeft <= 0) {
     return (
-      <span className="rounded-full bg-ios-sep px-2.5 py-1 text-[11px] font-semibold text-ios-muted">
+      <span className="rounded-full bg-ios-sep px-3 py-1 text-[11px] font-semibold text-ios-muted">
         종료됨
       </span>
     );
   }
   if (daysLeft <= 1) {
     return (
-      <span className="rounded-full bg-red-50 px-2.5 py-1 text-[11px] font-bold text-red-600">
+      <span className="rounded-full bg-red-50 px-3 py-1 text-[11px] font-bold text-red-600">
         D-DAY
       </span>
     );
   }
   return (
-    <span className="rounded-full bg-[color:var(--rnest-accent-soft)] px-2.5 py-1 text-[11px] font-bold text-[color:var(--rnest-accent)]">
+    <span className="rounded-full bg-[color:var(--rnest-accent-soft)] px-3 py-1 text-[11px] font-bold text-[color:var(--rnest-accent)]">
       D-{daysLeft}
     </span>
   );
 }
 
-// ── 컴포넌트 ─────────────────────────────────────────────────
+function HeroStat({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+}) {
+  return (
+    <div className="rounded-[22px] bg-white/78 px-3 py-3 backdrop-blur-[6px]">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ios-muted">
+        {label}
+      </p>
+      <p className="mt-1.5 text-[18px] font-bold tracking-[-0.03em] text-ios-text">{value}</p>
+      <p className="mt-1 text-[10.5px] text-ios-muted">{hint}</p>
+    </div>
+  );
+}
+
+function PodiumCard({
+  entry,
+  metric,
+  challengeType,
+  currentUserId,
+  theme,
+  prominent = false,
+}: {
+  entry: ChallengeLeaderboardEntry;
+  metric: ChallengeMetric;
+  challengeType: ChallengeType;
+  currentUserId: string | null;
+  theme: ReturnType<typeof metricTheme>;
+  prominent?: boolean;
+}) {
+  const isMe = entry.userId === currentUserId;
+  const value = challengeValueLabel(challengeValueNumber(entry, challengeType), metric, challengeType);
+  const surface =
+    entry.rank === 1 ? theme.topSurface : entry.rank === 2 ? theme.secondSurface : theme.thirdSurface;
+
+  return (
+    <div
+      className={cn(
+        "relative overflow-hidden rounded-[28px] px-4 py-4 shadow-sm",
+        surface,
+        prominent ? "min-h-[148px]" : "min-h-[132px]",
+        isMe && "ring-2 ring-[color:var(--rnest-accent)]/18"
+      )}
+    >
+      <div className="absolute right-0 top-0 h-20 w-24 rounded-full bg-white/35 blur-2xl" />
+      <div className="relative">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <RankBadge rank={entry.rank} large={prominent} />
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/75 text-[24px] shadow-sm">
+              {entry.avatarEmoji || "🐧"}
+            </div>
+          </div>
+          {entry.rank === 1 ? (
+            <span className="rounded-full bg-white/80 px-2.5 py-1 text-[10px] font-bold tracking-[0.08em] text-[#A36A00]">
+              LEADER
+            </span>
+          ) : null}
+        </div>
+        <div className="mt-4">
+          <p className="truncate text-[15px] font-bold text-ios-text">
+            {entry.nickname || "알 수 없음"}
+            {isMe ? (
+              <span className="ml-1.5 rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-semibold text-[color:var(--rnest-accent)]">
+                나
+              </span>
+            ) : null}
+          </p>
+          <p className="mt-1 text-[11px] font-semibold text-ios-muted">
+            {entry.rank === 1 ? "현재 선두" : `${entry.rank}위 추격 중`}
+          </p>
+          <p className="mt-3 text-[26px] font-black tracking-[-0.04em] text-ios-text tabular-nums">
+            {value}
+          </p>
+          {entry.isCompleted ? (
+            <p className="mt-1 text-[11px] font-bold text-emerald-700">달성 완료</p>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LeaderboardRow({
+  entry,
+  metric,
+  challengeType,
+  leaderValue,
+  currentUserId,
+  theme,
+}: {
+  entry: ChallengeLeaderboardEntry;
+  metric: ChallengeMetric;
+  challengeType: ChallengeType;
+  leaderValue: number | null;
+  currentUserId: string | null;
+  theme: ReturnType<typeof metricTheme>;
+}) {
+  const isMe = entry.userId === currentUserId;
+  const value = challengeValueNumber(entry, challengeType);
+  const gap = gapLabel(leaderValue, value, metric, challengeType);
+  const valueLabel = challengeValueLabel(value, metric, challengeType);
+  const width = leaderboardBarWidth(value, leaderValue);
+
+  return (
+    <div
+      className={cn(
+        "rounded-[24px] border px-4 py-3",
+        isMe ? theme.rowHighlight : "border-transparent bg-ios-bg"
+      )}
+    >
+      <div className="flex items-center gap-3">
+        <RankBadge rank={entry.rank} />
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white text-[22px] shadow-sm">
+          {entry.avatarEmoji || "🐧"}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <p className="truncate text-[14px] font-semibold text-ios-text">
+              {entry.nickname || "알 수 없음"}
+            </p>
+            {isMe ? (
+              <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-[color:var(--rnest-accent)]">
+                나
+              </span>
+            ) : null}
+          </div>
+          <p className="mt-1 text-[10.5px] text-ios-muted">
+            {gap ? `선두와 ${gap}` : "현재 선두"}
+          </p>
+        </div>
+        <div className="text-right">
+          <p className={cn("text-[18px] font-black tabular-nums", isMe ? theme.accentText : "text-ios-text")}>
+            {valueLabel}
+          </p>
+          {entry.isCompleted ? (
+            <p className="mt-0.5 text-[10px] font-semibold text-emerald-700">완료</p>
+          ) : null}
+        </div>
+      </div>
+      <div className="mt-3 flex items-center gap-2">
+        <div className="h-2 flex-1 overflow-hidden rounded-full bg-white">
+          <div className={cn("h-full rounded-full", theme.progress)} style={{ width: `${width}%` }} />
+        </div>
+        <span className="shrink-0 text-[10.5px] font-semibold text-ios-muted">{width}%</span>
+      </div>
+    </div>
+  );
+}
 
 type Props = {
   groupId: string;
@@ -185,8 +438,6 @@ export function SocialGroupChallengePage({
     }
   };
 
-  // ── 공통 헤더 ────────────────────────────────────────────
-
   const BackHeader = () => (
     <div className="flex items-center justify-between pt-1">
       <button
@@ -213,16 +464,12 @@ export function SocialGroupChallengePage({
     </div>
   );
 
-  // ── 에러 ─────────────────────────────────────────────────
-
   if (!loading && error) {
     return (
       <div className="mx-auto w-full max-w-[680px] space-y-4 px-1.5 pb-8 sm:max-w-[700px] sm:px-0">
         <BackHeader />
         <div className="rounded-[32px] bg-white px-4 py-8 text-center shadow-apple">
-          <p className="text-[15px] font-semibold text-ios-text">
-            챌린지를 불러오지 못했어요
-          </p>
+          <p className="text-[15px] font-semibold text-ios-text">챌린지를 불러오지 못했어요</p>
           <p className="mt-2 text-[13px] text-ios-muted">
             {error === "challenge_not_found"
               ? "삭제되었거나 존재하지 않는 챌린지예요."
@@ -240,170 +487,237 @@ export function SocialGroupChallengePage({
     );
   }
 
-  // ── 파생 값 ─────────────────────────────────────────────
-
   const daysLeft = detail ? calcDaysLeft(detail.endsAt) : 0;
   const isActive = detail?.status === "active";
   const myEntry = detail?.myEntry ?? null;
   const isParticipating = myEntry !== null;
-  const myLeaderboardEntry = detail?.leaderboard.find(
-    (e) => e.userId === currentUserId
-  );
+  const myLeaderboardEntry = detail?.leaderboard.find((entry) => entry.userId === currentUserId) ?? null;
+  const leaderEntry = detail?.leaderboard[0] ?? null;
+  const topThree = detail?.leaderboard.slice(0, 3) ?? [];
+  const chasingEntries = detail?.leaderboard.slice(3) ?? [];
+  const leaderValue = detail ? challengeValueNumber(leaderEntry, detail.challengeType) : null;
+  const myValue = detail ? challengeValueNumber(myEntry, detail.challengeType) : null;
+  const myGap = detail ? gapLabel(leaderValue, myValue, detail.metric, detail.challengeType) : null;
+  const theme = metricTheme(detail?.metric ?? "battery");
+  const isLeader = myLeaderboardEntry?.rank === 1;
+
+  const heroSummary =
+    !detail
+      ? ""
+      : detail.challengeType === "streak"
+        ? "연속 기록을 이어가며 가장 긴 streak를 만드는 레이스예요."
+        : detail.challengeType === "group_goal"
+          ? "개인 기록도 보이지만, 결국 그룹 평균으로 목표를 넘기는 미션이에요."
+          : "최근 건강 기록으로 바로 순위가 반영되는 경쟁형 챌린지예요.";
 
   return (
     <div className="mx-auto w-full max-w-[680px] space-y-4 px-1.5 pb-8 sm:max-w-[700px] sm:px-0">
       <BackHeader />
 
-      {/* ── 로딩 스켈레톤 ─────────────────────────────────── */}
       {loading && (
         <div className="space-y-3">
-          <div className="h-44 rounded-[34px] bg-white animate-pulse shadow-apple" />
-          <div className="h-28 rounded-[32px] bg-white animate-pulse shadow-apple" />
-          <div className="h-48 rounded-[32px] bg-white animate-pulse shadow-apple" />
+          <div className="h-52 rounded-[34px] bg-white animate-pulse shadow-apple" />
+          <div className="h-32 rounded-[32px] bg-white animate-pulse shadow-apple" />
+          <div className="h-56 rounded-[32px] bg-white animate-pulse shadow-apple" />
         </div>
       )}
 
-      {/* ── 챌린지 정보 카드 ──────────────────────────────── */}
       {!loading && detail && (
         <>
-          <div className="rounded-[34px] bg-white px-5 py-5 shadow-apple">
-            {/* 메트릭 아이콘 + 제목 */}
-            <div className="flex items-start gap-3">
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[16px] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]">
-                <MetricIcon metric={detail.metric} className="h-[22px] w-[22px]" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-[18px] font-bold leading-tight text-ios-text">
-                  {detail.title}
-                </p>
-                <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                  <span className="rounded-full bg-ios-bg px-2.5 py-1 text-[11px] font-semibold text-ios-muted">
-                    {typeLabel(detail.challengeType)}
-                  </span>
-                  <span className="rounded-full bg-ios-bg px-2.5 py-1 text-[11px] font-semibold text-ios-muted">
-                    {metricLabel(detail.metric)}
-                  </span>
-                  <DaysBadge daysLeft={daysLeft} status={detail.status} />
+          <div className={cn("relative overflow-hidden rounded-[36px] shadow-apple", theme.heroSurface)}>
+            <div className={cn("absolute inset-0", theme.spotlight)} />
+            <div className="relative px-5 py-5">
+              <div className="flex items-start gap-3">
+                <span className={cn("flex h-14 w-14 shrink-0 items-center justify-center rounded-[20px]", theme.iconSurface)}>
+                  <MetricIcon metric={detail.metric} className="h-[24px] w-[24px]" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={cn("rounded-full px-2.5 py-1 text-[11px] font-bold", theme.accentSurface)}>
+                      {typeLabel(detail.challengeType)}
+                    </span>
+                    <span className="rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-ios-muted">
+                      {metricLabel(detail.metric)}
+                    </span>
+                    <DaysBadge daysLeft={daysLeft} status={detail.status} />
+                  </div>
+                  <p className="mt-3 text-[28px] font-black leading-none tracking-[-0.05em] text-ios-text">
+                    {detail.title}
+                  </p>
+                  <p className="mt-2 max-w-[520px] text-[13px] leading-6 text-ios-muted">
+                    {detail.description || heroSummary}
+                  </p>
                 </div>
               </div>
-            </div>
 
-            {detail.description && (
-              <p className="mt-3 text-[13px] leading-6 text-ios-muted">
-                {detail.description}
-              </p>
-            )}
+              <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <HeroStat
+                  label="참가자"
+                  value={`${detail.participantCount}명`}
+                  hint="현재 레이스 참여"
+                />
+                <HeroStat
+                  label="현재 선두"
+                  value={challengeValueLabel(leaderValue, detail.metric, detail.challengeType)}
+                  hint={leaderEntry ? `${leaderEntry.nickname} 리드 중` : "선두 대기 중"}
+                />
+                <HeroStat
+                  label={detail.challengeType === "streak" ? "목표일" : "목표"}
+                  value={
+                    detail.challengeType === "streak" && detail.targetDays
+                      ? `${detail.targetDays}일`
+                      : detail.targetValue != null
+                        ? challengeValueLabel(detail.targetValue, detail.metric, detail.challengeType)
+                        : "자유 경쟁"
+                  }
+                  hint={
+                    detail.challengeType === "leaderboard"
+                      ? "가장 높은 기록이 우승"
+                      : detail.challengeType === "group_goal"
+                        ? "그룹 평균 달성"
+                        : "연속 유지 필요"
+                  }
+                />
+                <HeroStat
+                  label="기간"
+                  value={`${formatDate(detail.startsAt)} ~ ${formatDate(detail.endsAt)}`}
+                  hint={detail.status === "active" ? "지금 진행 중" : "종료된 경기"}
+                />
+              </div>
 
-            {/* 메타 그리드 */}
-            <div className="mt-4 grid grid-cols-3 gap-2">
-              <div className="rounded-2xl bg-ios-bg px-3 py-2.5 text-center">
-                <p className="text-[10px] font-semibold text-ios-muted">기간</p>
-                <p className="mt-0.5 text-[12px] font-semibold text-ios-text">
-                  {formatDate(detail.startsAt)} ~ {formatDate(detail.endsAt)}
-                </p>
-              </div>
-              <div className="rounded-2xl bg-ios-bg px-3 py-2.5 text-center">
-                <p className="text-[10px] font-semibold text-ios-muted">참가자</p>
-                <p className="mt-0.5 text-[12px] font-semibold text-ios-text">
-                  {detail.participantCount}명
-                </p>
-              </div>
-              <div className="rounded-2xl bg-ios-bg px-3 py-2.5 text-center">
-                <p className="text-[10px] font-semibold text-ios-muted">
-                  {detail.challengeType === "streak" ? "목표일" : "목표"}
-                </p>
-                <p className="mt-0.5 text-[12px] font-semibold text-ios-text">
-                  {detail.challengeType === "streak" && detail.targetDays
-                    ? `${detail.targetDays}일 연속`
-                    : detail.targetValue != null
-                      ? formatValue(detail.targetValue, detail.metric)
-                      : "-"}
-                </p>
-              </div>
+              {leaderEntry ? (
+                <div className={cn("mt-4 rounded-[26px] border border-white/65 px-4 py-4 shadow-sm", theme.leaderSurface)}>
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-10 w-10 items-center justify-center rounded-[16px] bg-white text-[#B07A00] shadow-sm">
+                      <SocialTrophyIcon className="h-5 w-5" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ios-muted">현재 선두</p>
+                      <p className="mt-1 truncate text-[16px] font-bold text-ios-text">
+                        {leaderEntry.nickname}
+                        <span className={cn("ml-2 text-[18px]", theme.accentText)}>
+                          {challengeValueLabel(leaderValue, detail.metric, detail.challengeType)}
+                        </span>
+                      </p>
+                    </div>
+                    {myGap ? (
+                      <div className="text-right">
+                        <p className="text-[10.5px] font-semibold text-ios-muted">내 격차</p>
+                        <p className="mt-1 text-[12.5px] font-bold text-ios-text">{myGap}</p>
+                      </div>
+                    ) : isParticipating ? (
+                      <div className={cn("rounded-full px-3 py-1.5 text-[11px] font-bold", theme.accentSurface)}>
+                        {isLeader ? "선두 유지 중" : "동점 포함"}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
 
-          {/* ── 그룹 목표 진행 ─────────────────────────────── */}
-          {detail.challengeType === "group_goal" &&
-            detail.targetValue != null && (
-              <div className="rounded-[32px] bg-white px-5 py-5 shadow-apple">
-                <p className="mb-3 text-[14px] font-bold text-ios-text">
-                  그룹 목표 달성 현황
-                </p>
-                <div className="flex items-center justify-between">
-                  <p className="text-[12.5px] text-ios-muted">그룹 평균</p>
-                  <p className="text-[15px] font-bold text-ios-text tabular-nums">
-                    {detail.groupCurrentAvg != null
-                      ? formatValue(detail.groupCurrentAvg, detail.metric)
-                      : "-"}
-                    <span className="ml-1 text-[11px] font-normal text-ios-muted">
-                      / 목표 {formatValue(detail.targetValue, detail.metric)}
-                    </span>
+          {detail.challengeType === "group_goal" && detail.targetValue != null && (
+            <div className="rounded-[32px] bg-white px-5 py-5 shadow-apple">
+              <div className="flex items-center gap-2">
+                <span className={cn("flex h-9 w-9 items-center justify-center rounded-2xl", theme.iconSurface)}>
+                  <SocialTargetIcon className="h-[17px] w-[17px]" />
+                </span>
+                <div>
+                  <p className="text-[14px] font-bold text-ios-text">그룹 목표 진행 현황</p>
+                  <p className="mt-0.5 text-[11.5px] text-ios-muted">전체 참가자 평균으로 목표를 넘겨야 성공해요.</p>
+                </div>
+              </div>
+              <div className="mt-4 flex items-end justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-semibold text-ios-muted">그룹 평균</p>
+                  <p className="mt-1 text-[28px] font-black tracking-[-0.04em] text-ios-text tabular-nums">
+                    {detail.groupCurrentAvg != null ? formatValue(detail.groupCurrentAvg, detail.metric) : "-"}
                   </p>
                 </div>
-                {detail.groupCurrentAvg != null && (
-                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-ios-sep">
+                <div className="text-right">
+                  <p className="text-[11px] font-semibold text-ios-muted">목표</p>
+                  <p className="mt-1 text-[17px] font-bold text-ios-text">
+                    {formatValue(detail.targetValue, detail.metric)}
+                  </p>
+                </div>
+              </div>
+              {detail.groupCurrentAvg != null ? (
+                <div className="mt-4">
+                  <div className="h-3 overflow-hidden rounded-full bg-ios-sep">
                     <div
-                      className={cn(
-                        "h-full rounded-full transition-all",
-                        detail.groupGoalMet ? "bg-emerald-400" : "bg-[color:var(--rnest-accent)]"
-                      )}
-                      style={{
-                        width: `${Math.min(100, (detail.groupCurrentAvg / detail.targetValue) * 100)}%`,
-                      }}
+                      className={cn("h-full rounded-full", theme.progress)}
+                      style={{ width: `${Math.min(100, (detail.groupCurrentAvg / detail.targetValue) * 100)}%` }}
                     />
                   </div>
-                )}
-                {detail.groupGoalMet === true && (
-                  <div className="mt-3 rounded-2xl bg-emerald-50 px-4 py-3 text-center">
-                    <p className="text-[13px] font-bold text-emerald-700">
-                      🎉 그룹 목표 달성!
-                    </p>
+                  <div className="mt-2 flex items-center justify-between text-[11px] text-ios-muted">
+                    <span>0</span>
+                    <span>{Math.min(100, Math.round((detail.groupCurrentAvg / detail.targetValue) * 100))}% 달성</span>
+                    <span>{formatValue(detail.targetValue, detail.metric)}</span>
                   </div>
-                )}
-                {detail.groupCurrentAvg == null && (
-                  <p className="mt-3 text-center text-[12px] text-ios-muted">
-                    아직 스냅샷 데이터가 없어요. 잠시 후 다시 확인해 주세요.
-                  </p>
-                )}
-              </div>
-            )}
+                </div>
+              ) : (
+                <p className="mt-4 rounded-2xl bg-ios-bg px-4 py-3 text-center text-[12px] text-ios-muted">
+                  아직 스냅샷 데이터가 없어요. 잠시 후 다시 확인해 주세요.
+                </p>
+              )}
+              {detail.groupGoalMet === true ? (
+                <div className="mt-4 flex items-center gap-2 rounded-[22px] bg-emerald-50 px-4 py-3">
+                  <SocialFlameIcon className="h-[18px] w-[18px] text-emerald-600" />
+                  <p className="text-[13px] font-bold text-emerald-700">그룹 목표를 달성했어요.</p>
+                </div>
+              ) : null}
+            </div>
+          )}
 
-          {/* ── 내 현황 ───────────────────────────────────── */}
-          {isParticipating && myEntry && (
+          {isParticipating && myEntry ? (
             <div className="rounded-[32px] bg-white px-5 py-5 shadow-apple">
-              <p className="mb-3 text-[14px] font-bold text-ios-text">내 현황</p>
-              <div className="flex items-center gap-4">
-                {myLeaderboardEntry && (
-                  <div className="flex flex-col items-center rounded-2xl bg-ios-bg px-5 py-3">
-                    <p className="text-[10px] font-semibold text-ios-muted">내 순위</p>
-                    <p className="mt-1 text-[22px] font-bold tabular-nums text-ios-text">
-                      {myLeaderboardEntry.rank}
-                      <span className="text-[13px]">위</span>
-                    </p>
-                  </div>
-                )}
-                <div className="flex flex-col items-center rounded-2xl bg-ios-bg px-5 py-3">
-                  <p className="text-[10px] font-semibold text-ios-muted">
-                    {detail.challengeType === "streak"
-                      ? "연속 달성"
-                      : metricLabel(detail.metric)}
-                  </p>
-                  <p className="mt-1 text-[22px] font-bold tabular-nums text-ios-text">
-                    {detail.challengeType === "streak"
-                      ? `${myEntry.streakDays ?? 0}일`
-                      : formatValue(myEntry.snapshotValue, detail.metric)}
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[14px] font-bold text-ios-text">내 레이스 현황</p>
+                  <p className="mt-0.5 text-[11.5px] text-ios-muted">
+                    {isLeader ? "현재 선두를 유지하고 있어요." : "선두와의 격차를 줄여 보세요."}
                   </p>
                 </div>
-                {myEntry.isCompleted && (
-                  <div className="ml-auto rounded-2xl bg-emerald-50 px-4 py-3 text-center">
-                    <p className="text-[11px] font-bold text-emerald-700">달성 완료</p>
-                    <p className="mt-0.5 text-[20px]">✓</p>
-                  </div>
-                )}
+                <div className={cn("rounded-full px-3 py-1.5 text-[11px] font-bold", theme.accentSurface)}>
+                  {myLeaderboardEntry ? `#${myLeaderboardEntry.rank}` : "참가 완료"}
+                </div>
               </div>
-              {myEntry.snapshotAt && (
-                <p className="mt-3 text-[11px] text-ios-muted text-right">
+
+              <div className="mt-4 grid grid-cols-3 gap-2">
+                <HeroStat
+                  label="내 순위"
+                  value={myLeaderboardEntry ? `${myLeaderboardEntry.rank}위` : "-"}
+                  hint={isLeader ? "현재 선두" : "실시간 기준"}
+                />
+                <HeroStat
+                  label={detail.challengeType === "streak" ? "연속 기록" : metricLabel(detail.metric)}
+                  value={challengeValueLabel(myValue, detail.metric, detail.challengeType)}
+                  hint="내 최신 기록"
+                />
+                <HeroStat
+                  label={isLeader ? "상태" : "선두와 격차"}
+                  value={isLeader ? "LEAD" : myGap ?? "-"}
+                  hint={isLeader ? "방어 중" : "추격 필요"}
+                />
+              </div>
+
+              {leaderValue != null && myValue != null ? (
+                <div className="mt-4">
+                  <div className="mb-1.5 flex items-center justify-between text-[11px] text-ios-muted">
+                    <span>내 기록</span>
+                    <span>선두 대비 {Math.min(100, Math.round((myValue / leaderValue) * 100))}%</span>
+                  </div>
+                  <div className="h-3 overflow-hidden rounded-full bg-ios-sep">
+                    <div
+                      className={cn("h-full rounded-full", theme.progress)}
+                      style={{ width: `${leaderboardBarWidth(myValue, leaderValue)}%` }}
+                    />
+                  </div>
+                </div>
+              ) : null}
+
+              {myEntry.snapshotAt ? (
+                <p className="mt-4 text-right text-[11px] text-ios-muted">
                   마지막 갱신:{" "}
                   {new Date(myEntry.snapshotAt).toLocaleString("ko-KR", {
                     month: "numeric",
@@ -412,112 +726,111 @@ export function SocialGroupChallengePage({
                     minute: "2-digit",
                   })}
                 </p>
-              )}
+              ) : null}
             </div>
-          )}
+          ) : null}
 
-          {/* ── 참가 유도 (미참가 + 진행 중) ──────────────── */}
-          {isActive && !isParticipating && (
-            <div className="rounded-[32px] bg-white px-5 py-6 text-center shadow-apple">
-              <p className="text-[13.5px] text-ios-muted">
-                아직 이 챌린지에 참가하지 않았어요.
-              </p>
-              {joinError && (
-                <p className="mt-2 text-[12.5px] text-red-600">{joinError}</p>
-              )}
+          {isActive && !isParticipating ? (
+            <div className={cn("rounded-[32px] bg-white px-5 py-6 shadow-apple", theme.heroSurface)}>
+              <div className="flex items-start gap-3">
+                <span className={cn("flex h-11 w-11 shrink-0 items-center justify-center rounded-[18px]", theme.iconSurface)}>
+                  <SocialTrophyIcon className="h-[20px] w-[20px]" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[16px] font-bold text-ios-text">지금 바로 레이스에 참가하세요</p>
+                  <p className="mt-1 text-[12.5px] leading-5 text-ios-muted">
+                    참가하면 최근 건강 기록 기준으로 바로 순위에 들어가요.
+                  </p>
+                </div>
+              </div>
+              {joinError ? (
+                <p className="mt-3 text-[12.5px] text-red-600">{joinError}</p>
+              ) : null}
               <button
                 type="button"
                 disabled={joining}
                 onClick={() => void handleJoin()}
-                className="mt-4 rounded-full bg-[color:var(--rnest-accent)] px-8 py-3 text-[14px] font-bold text-white transition active:opacity-80 disabled:opacity-40"
+                className="mt-4 w-full rounded-[22px] bg-[color:var(--rnest-accent)] py-4 text-[15px] font-bold text-white transition active:opacity-80 disabled:opacity-40"
               >
                 {joining ? "참가 중…" : "챌린지 참가하기"}
               </button>
             </div>
-          )}
+          ) : null}
 
-          {/* ── 리더보드 ──────────────────────────────────── */}
-          {detail.leaderboard.length > 0 && (
+          {detail.leaderboard.length > 0 ? (
             <div className="rounded-[32px] bg-white px-5 py-5 shadow-apple">
-              <p className="mb-4 text-[14px] font-bold text-ios-text">
-                리더보드
-                {detail.challengeType === "streak" && (
-                  <span className="ml-1.5 text-[11px] font-normal text-ios-muted">
-                    연속 달성일 기준
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2">
+                  <span className={cn("mt-0.5 flex h-9 w-9 items-center justify-center rounded-2xl", theme.iconSurface)}>
+                    <SocialTrophyIcon className="h-[17px] w-[17px]" />
                   </span>
-                )}
-              </p>
-              <div className="space-y-2">
-                {detail.leaderboard.map((entry) => {
-                  const isMe = entry.userId === currentUserId;
-                  const displayValue =
-                    detail.challengeType === "streak"
-                      ? entry.streakDays != null
-                        ? `${entry.streakDays}일`
-                        : "-"
-                      : formatValue(entry.snapshotValue, detail.metric);
-
-                  return (
-                    <div
-                      key={entry.userId}
-                      className={cn(
-                        "flex items-center gap-3 rounded-2xl px-4 py-3",
-                        isMe
-                          ? "bg-[color:var(--rnest-accent-soft)]"
-                          : "bg-ios-bg"
-                      )}
-                    >
-                      <RankBadge rank={entry.rank} />
-                      <span className="text-[21px] leading-none">
-                        {entry.avatarEmoji || "🐧"}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p
-                          className={cn(
-                            "truncate text-[13.5px] font-semibold",
-                            isMe
-                              ? "text-[color:var(--rnest-accent)]"
-                              : "text-ios-text"
-                          )}
-                        >
-                          {entry.nickname || "알 수 없음"}
-                          {isMe && (
-                            <span className="ml-1 text-[11px] font-normal">
-                              (나)
-                            </span>
-                          )}
-                        </p>
-                        {entry.isCompleted && (
-                          <p className="text-[10.5px] font-semibold text-emerald-600">
-                            달성 완료 ✓
-                          </p>
-                        )}
-                      </div>
-                      <p
-                        className={cn(
-                          "shrink-0 text-[13.5px] font-bold tabular-nums",
-                          isMe
-                            ? "text-[color:var(--rnest-accent)]"
-                            : "text-ios-text"
-                        )}
-                      >
-                        {displayValue}
-                      </p>
-                    </div>
-                  );
-                })}
+                  <div>
+                    <p className="text-[14px] font-bold text-ios-text">리더보드</p>
+                    <p className="mt-0.5 text-[11.5px] text-ios-muted">
+                      {detail.challengeType === "streak" ? "가장 긴 연속 달성 순서예요." : "현재 기록이 높은 순서로 정렬돼요."}
+                    </p>
+                  </div>
+                </div>
+                <div className="rounded-full bg-ios-bg px-3 py-1.5 text-[11px] font-semibold text-ios-muted">
+                  {detail.participantCount}명 경쟁 중
+                </div>
               </div>
-              <p className="mt-4 text-center text-[11px] text-ios-muted">
-                참가 정보와 최근 건강 기록을 기준으로 자동 갱신돼요
-              </p>
-            </div>
-          )}
 
-          {detail.leaderboard.length === 0 && (
+              <div className="mt-4 space-y-2.5">
+                {topThree[0] ? (
+                  <PodiumCard
+                    entry={topThree[0]}
+                    metric={detail.metric}
+                    challengeType={detail.challengeType}
+                    currentUserId={currentUserId}
+                    theme={theme}
+                    prominent
+                  />
+                ) : null}
+                {topThree.length > 1 ? (
+                  <div className="grid grid-cols-2 gap-2.5">
+                    {topThree.slice(1).map((entry) => (
+                      <PodiumCard
+                        key={entry.userId}
+                        entry={entry}
+                        metric={detail.metric}
+                        challengeType={detail.challengeType}
+                        currentUserId={currentUserId}
+                        theme={theme}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              {chasingEntries.length > 0 ? (
+                <div className="mt-5 border-t border-ios-sep pt-4">
+                  <p className="mb-3 text-[12px] font-semibold text-ios-muted">추격 순위</p>
+                  <div className="space-y-2">
+                    {chasingEntries.map((entry) => (
+                      <LeaderboardRow
+                        key={entry.userId}
+                        entry={entry}
+                        metric={detail.metric}
+                        challengeType={detail.challengeType}
+                        leaderValue={leaderValue}
+                        currentUserId={currentUserId}
+                        theme={theme}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="mt-4 rounded-[22px] bg-ios-bg px-4 py-3">
+                <p className="text-[11.5px] leading-5 text-ios-muted">
+                  참가 정보와 최근 건강 기록을 기준으로 순위가 자동 갱신돼요.
+                </p>
+              </div>
+            </div>
+          ) : (
             <div className="rounded-[32px] bg-white px-5 py-8 text-center shadow-apple">
-              <p className="text-[13px] text-ios-muted">
-                아직 참가자가 없어요. 먼저 참가해 보세요!
-              </p>
+              <p className="text-[13px] text-ios-muted">아직 참가자가 없어요. 먼저 참가해 보세요!</p>
             </div>
           )}
         </>
