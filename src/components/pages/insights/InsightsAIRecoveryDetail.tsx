@@ -382,7 +382,9 @@ function RecoverySectionRow({
                 <div className="text-[12.5px] font-semibold" style={{ color: theme.accent }}>
                   {recLabel} {idx + 1}
                 </div>
-                <p className="mt-1.5 break-keep text-[15px] leading-7 text-ios-text">{tip}</p>
+                <p className="mt-1.5 break-keep text-[15px] leading-7 text-ios-text">
+                  {highlightKeySentence(tip, "plan")}
+                </p>
               </li>
             ))}
           </ol>
@@ -833,43 +835,38 @@ export function InsightsAIRecoveryDetail() {
             </div>
           </DetailCard>
 
-          <DetailCard className="overflow-hidden px-0 py-0">
-            <div className="border-b border-ios-sep/70 px-5 py-5 sm:px-6">
-              <div className="flex flex-col gap-2">
-                <div>
-                  <div className="text-[11px] font-semibold tracking-[0.18em] text-[color:var(--rnest-accent)]">
-                    {t("오늘 플랜")}
-                  </div>
-                  <div className="mt-1 text-[20px] font-bold tracking-[-0.03em] text-ios-text">
-                    {t("오늘의 회복 추천")}
-                  </div>
-                </div>
-                <p className="max-w-[560px] break-keep text-[13px] leading-6 text-ios-sub">
-                  {t("가장 중요한 행동부터 빠르게 읽을 수 있게 순서대로 정리했어요.")}
-                </p>
-              </div>
+          <div className="px-1">
+            <div className="text-[11px] font-semibold tracking-[0.18em] text-[color:var(--rnest-accent)]">{t("오늘 플랜")}</div>
+            <div className="mt-1 text-[20px] font-bold tracking-[-0.03em] text-ios-text">{t("오늘의 회복 추천")}</div>
+            <p className="mt-2 max-w-[560px] break-keep text-[13px] leading-6 text-ios-sub">
+              {t("가장 중요한 행동부터 빠르게 읽을 수 있게 순서대로 정리했어요.")}
+            </p>
+          </div>
+
+          {orderedSections.length ? (
+            <div className="space-y-3">
+              {orderedSections.map(({ meta, section }, index) => {
+                if (!section) return null;
+                const theme = CATEGORY_THEME[meta.key];
+                return (
+                  <DetailCard
+                    key={`${meta.key}-${section.title}`}
+                    className="overflow-hidden"
+                    style={{
+                      background: `linear-gradient(180deg, ${theme.soft} 0%, #FFFFFF 100%)`,
+                      boxShadow: `inset 0 1px 0 ${theme.softBorder}, 0 10px 28px rgba(15, 36, 74, 0.04)`,
+                    }}
+                  >
+                    <RecoverySectionRow index={index} meta={meta} section={section} lang={lang} t={t} />
+                  </DetailCard>
+                );
+              })}
             </div>
-            {orderedSections.length ? (
-              <div className="divide-y divide-[rgba(16,33,70,0.08)]">
-                {orderedSections.map(({ meta, section }, index) =>
-                  section ? (
-                    <RecoverySectionRow
-                      key={`${meta.key}-${section.title}`}
-                      index={index}
-                      meta={meta}
-                      section={section}
-                      lang={lang}
-                      t={t}
-                    />
-                  ) : null
-                )}
-              </div>
-            ) : (
-              <p className="px-5 py-5 text-[14px] leading-7 text-ios-sub sm:px-6">
-                {cFallbackText || t("오늘은 추가 추천이 없어요.")}
-              </p>
-            )}
-          </DetailCard>
+          ) : (
+            <DetailCard className="px-5 py-5 sm:px-6">
+              <p className="text-[14px] leading-7 text-ios-sub">{cFallbackText || t("오늘은 추가 추천이 없어요.")}</p>
+            </DetailCard>
+          )}
 
           <DetailCard className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6">
             <div className="flex flex-col gap-3">
