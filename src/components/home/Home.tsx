@@ -15,6 +15,7 @@ import type { ShopProduct } from "@/lib/shop";
 import { useAIRecoveryInsights } from "@/components/insights/useAIRecoveryInsights";
 import { BatteryGauge } from "@/components/home/BatteryGauge";
 import { WeekStrip } from "@/components/home/WeekStrip";
+import { HomeSocialCard } from "@/components/home/HomeSocialCard";
 
 function isReasonableISODate(v: any): v is ISODate {
   if (!isISODate(v)) return false;
@@ -55,6 +56,8 @@ function aiSummaryFallback(
   return t("AI 회복분석에서 오늘 맞춤회복 한줄요약을 확인해요.");
 }
 
+// ── Icons ────────────────────────────────────────────────────────
+
 function IconChart() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -73,6 +76,17 @@ function IconWrench() {
   );
 }
 
+function IconPeople() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  );
+}
+
 function IconSparkle() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -80,6 +94,8 @@ function IconSparkle() {
     </svg>
   );
 }
+
+// ── Main Component ───────────────────────────────────────────────
 
 export default function Home() {
   const { t } = useI18n();
@@ -189,7 +205,7 @@ export default function Home() {
 
   const selectedDateLabel = useMemo(() => formatKoreanDate(homeSelected), [homeSelected]);
 
-  // ── Shop catalog (실제 쇼핑 페이지와 동일한 제품 목록) ──
+  // ── Shop catalog ──────────────────────────────────────────────
   const [shopCatalog, setShopCatalog] = useState<ShopProduct[]>(SHOP_PRODUCTS);
   useEffect(() => {
     if (!deferredReady) return;
@@ -203,7 +219,7 @@ export default function Home() {
       .catch(() => {/* 실패 시 기본 SHOP_PRODUCTS 유지 */});
   }, [deferredReady]);
 
-  // ── Shop recommendations (실제 쇼핑 카탈로그 기반) ──
+  // ── Shop recommendations ──────────────────────────────────────
   const topShopRecs = useMemo(() => {
     if (!deferredReady) return [];
     const recs = buildShopRecommendations({
@@ -222,12 +238,23 @@ export default function Home() {
       {/* ── Header ── */}
       <div className="flex items-start justify-between px-1">
         <div>
-          <h1 className="text-[22px] font-semibold tracking-[-0.02em] text-[var(--rnest-text)]">{headerDate}</h1>
-          <p className="mt-0.5 text-[13px] text-[var(--rnest-sub)]">{greetingText}</p>
+          <h1
+            className="text-[22px] font-semibold tracking-[-0.02em]"
+            style={{ color: "var(--rnest-text)" }}
+          >
+            {headerDate}
+          </h1>
+          <p
+            className="mt-0.5 text-[13px]"
+            style={{ color: "var(--rnest-sub)" }}
+          >
+            {greetingText}
+          </p>
         </div>
         <Link
           href="/settings"
-          className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--rnest-sub)] transition-opacity active:opacity-50"
+          className="flex h-9 w-9 items-center justify-center rounded-full transition-opacity active:opacity-50"
+          style={{ color: "var(--rnest-sub)" }}
           aria-label="설정"
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -238,12 +265,23 @@ export default function Home() {
       </div>
 
       {/* ── Week Strip ── */}
-      <div className="rounded-[22px] bg-[var(--rnest-card)] px-3 py-3.5 shadow-apple-sm">
+      <div
+        className="rounded-[22px] px-3 py-3.5 shadow-apple-sm"
+        style={{ background: "var(--rnest-card)" }}
+      >
         <div className="mb-2.5 flex items-center justify-between px-1">
-          <span className="text-[11px] font-semibold uppercase tracking-widest text-[var(--rnest-muted)]">
+          <span
+            className="text-[11px] font-semibold uppercase tracking-widest"
+            style={{ color: "var(--rnest-muted)" }}
+          >
             {t("이번 주")}
           </span>
-          <Link href="/schedule" className="text-[12px] font-medium text-[var(--rnest-accent)] active:opacity-60" data-auth-allow>
+          <Link
+            href="/schedule"
+            className="text-[12px] font-medium active:opacity-60"
+            style={{ color: "var(--rnest-accent)" }}
+            data-auth-allow
+          >
             {t("일정 전체")} ›
           </Link>
         </div>
@@ -254,31 +292,53 @@ export default function Home() {
           shiftNames={store.shiftNames}
           bio={store.bio}
         />
-        <div className="mt-3 rounded-[14px] border border-[var(--rnest-sep)] bg-[var(--rnest-bg)] px-3 py-2.5">
-          <div className="text-[11px] font-semibold text-[var(--rnest-muted)]">
+        <div
+          className="mt-3 rounded-[14px] border px-3 py-2.5"
+          style={{
+            borderColor: "var(--rnest-sep)",
+            background: "var(--rnest-bg)",
+          }}
+        >
+          <div
+            className="text-[11px] font-semibold"
+            style={{ color: "var(--rnest-muted)" }}
+          >
             {selectedDateLabel} · {t("메모")}
           </div>
-          <div className="mt-1 whitespace-pre-wrap break-words text-[13px] leading-relaxed text-[var(--rnest-text)]">
+          <div
+            className="mt-1 whitespace-pre-wrap break-words text-[13px] leading-relaxed"
+            style={{ color: "var(--rnest-text)" }}
+          >
             {selNote || t("작성된 메모가 없어요.")}
           </div>
         </div>
       </div>
 
       {/* ── AI Recovery Card ── */}
-      <div className="rounded-[22px] bg-[var(--rnest-card)] px-4 py-4 shadow-apple-sm">
+      <div
+        className="rounded-[22px] px-4 py-4 shadow-apple-sm"
+        style={{ background: "var(--rnest-card)" }}
+      >
         {/* Top row */}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5">
             <span style={{ color: "var(--rnest-lavender)" }}>
               <IconSparkle />
             </span>
-            <span className="text-[11px] font-semibold uppercase tracking-widest text-[var(--rnest-muted)]">
+            <span
+              className="text-[11px] font-semibold uppercase tracking-widest"
+              style={{ color: "var(--rnest-muted)" }}
+            >
               {t("AI 맞춤회복")}
             </span>
           </div>
           <Link
             href="/insights/recovery"
-            className="shrink-0 rounded-full border border-[var(--rnest-accent-border)] px-3 py-1 text-[11px] font-medium text-[var(--rnest-accent)] active:opacity-60"
+            className="shrink-0 rounded-full border px-3 py-1 text-[11px] font-medium active:opacity-60"
+            style={{
+              borderColor: "var(--rnest-accent-border)",
+              color: "var(--rnest-accent)",
+            }}
           >
             {t("회복분석 전체")} ›
           </Link>
@@ -287,15 +347,23 @@ export default function Home() {
         {/* Headline */}
         {aiRecovery.loading || aiRecovery.generating ? (
           <div className="mt-3 space-y-2">
-            <div className="h-4 w-4/5 animate-pulse rounded-full bg-[var(--rnest-sep)]" />
-            <div className="h-4 w-3/5 animate-pulse rounded-full bg-[var(--rnest-sep)]" />
+            <div
+              className="h-4 w-4/5 animate-pulse rounded-full"
+              style={{ background: "var(--rnest-sep)" }}
+            />
+            <div
+              className="h-4 w-3/5 animate-pulse rounded-full"
+              style={{ background: "var(--rnest-sep)" }}
+            />
           </div>
         ) : (
           <p
-            className={[
-              "mt-3 text-[15px] font-semibold leading-snug tracking-[-0.01em]",
-              aiRecovery.data?.result?.headline ? "text-[var(--rnest-text)]" : "text-[var(--rnest-sub)]",
-            ].join(" ")}
+            className="mt-3 text-[15px] font-semibold leading-snug tracking-[-0.01em]"
+            style={{
+              color: aiRecovery.data?.result?.headline
+                ? "var(--rnest-text)"
+                : "var(--rnest-sub)",
+            }}
           >
             {aiHeadline}
           </p>
@@ -321,11 +389,24 @@ export default function Home() {
       </div>
 
       {/* ── Condition (compact) ── */}
-      <div className="rounded-[22px] bg-[var(--rnest-card)] px-4 py-4 shadow-apple-sm">
+      <div
+        className="rounded-[22px] px-4 py-4 shadow-apple-sm"
+        style={{ background: "var(--rnest-card)" }}
+      >
         <div className="flex items-center justify-between">
-          <span className="text-[11px] font-semibold uppercase tracking-widest text-[var(--rnest-muted)]">{t("컨디션")}</span>
+          <span
+            className="text-[11px] font-semibold uppercase tracking-widest"
+            style={{ color: "var(--rnest-muted)" }}
+          >
+            {t("컨디션")}
+          </span>
           {selVital ? (
-            <span className="text-[12px] text-[var(--rnest-sub)]">{selectedDateLabel}</span>
+            <span
+              className="text-[12px]"
+              style={{ color: "var(--rnest-sub)" }}
+            >
+              {selectedDateLabel}
+            </span>
           ) : null}
         </div>
 
@@ -335,12 +416,18 @@ export default function Home() {
             <BatteryGauge value={selVital.mental.ema} label="Mental" tone={selVital.mental.tone} kind="mental" size="compact" />
           </div>
         ) : (
-          <p className="mt-2 text-[13px] text-[var(--rnest-muted)]">
+          <p
+            className="mt-2 text-[13px]"
+            style={{ color: "var(--rnest-muted)" }}
+          >
             {recordedDays < 3
               ? t("건강 기록을 최소 3일 이상 입력해야 컨디션 지표가 보여요.")
               : t("기록이 아직 없어서 오늘 지표가 비어 있어.")}
             {recordedDays < 3 && (
-              <span className="ml-1 font-semibold text-[var(--rnest-text)]">
+              <span
+                className="ml-1 font-semibold"
+                style={{ color: "var(--rnest-text)" }}
+              >
                 {t("현재 {count}일 기록됨", { count: recordedDays })}
               </span>
             )}
@@ -348,28 +435,99 @@ export default function Home() {
         )}
       </div>
 
-      {/* ── Quick Nav ── */}
-      <div className="grid grid-cols-2 gap-2">
-        <Link href="/insights" className="rnest-pressable flex flex-col rounded-[20px] bg-[var(--rnest-card)] p-5 shadow-apple-sm">
+      {/* ── Social Groups Card (deferred) ── */}
+      <HomeSocialCard deferred={deferredReady} />
+
+      {/* ── Quick Nav (3-column: Insights · Social · Tools) ── */}
+      <div className="grid grid-cols-3 gap-2">
+        <Link
+          href="/insights"
+          className="rnest-pressable flex flex-col rounded-[20px] p-4 shadow-apple-sm"
+          style={{ background: "var(--rnest-card)" }}
+        >
           <div className="flex items-center justify-between">
             <span style={{ color: "var(--rnest-lavender)" }}>
               <IconChart />
             </span>
-            <span className="text-[16px] text-[var(--rnest-muted)]">›</span>
+            <span
+              className="text-[14px]"
+              style={{ color: "var(--rnest-muted)" }}
+            >
+              ›
+            </span>
           </div>
-          <p className="mt-4 text-[14px] font-semibold text-[var(--rnest-text)]">{t("인사이트")}</p>
-          <p className="mt-0.5 text-[12px] text-[var(--rnest-muted)]">{t("트렌드 · 통계")}</p>
+          <p
+            className="mt-3 text-[13px] font-semibold"
+            style={{ color: "var(--rnest-text)" }}
+          >
+            {t("인사이트")}
+          </p>
+          <p
+            className="mt-0.5 text-[11px]"
+            style={{ color: "var(--rnest-muted)" }}
+          >
+            {t("트렌드 · 통계")}
+          </p>
         </Link>
 
-        <Link href="/tools" className="rnest-pressable flex flex-col rounded-[20px] bg-[var(--rnest-card)] p-5 shadow-apple-sm">
+        <Link
+          href="/social"
+          className="rnest-pressable flex flex-col rounded-[20px] p-4 shadow-apple-sm"
+          style={{ background: "var(--rnest-card)" }}
+        >
+          <div className="flex items-center justify-between">
+            <span style={{ color: "var(--rnest-lavender)" }}>
+              <IconPeople />
+            </span>
+            <span
+              className="text-[14px]"
+              style={{ color: "var(--rnest-muted)" }}
+            >
+              ›
+            </span>
+          </div>
+          <p
+            className="mt-3 text-[13px] font-semibold"
+            style={{ color: "var(--rnest-text)" }}
+          >
+            {t("소셜")}
+          </p>
+          <p
+            className="mt-0.5 text-[11px]"
+            style={{ color: "var(--rnest-muted)" }}
+          >
+            {t("그룹 · 챌린지")}
+          </p>
+        </Link>
+
+        <Link
+          href="/tools"
+          className="rnest-pressable flex flex-col rounded-[20px] p-4 shadow-apple-sm"
+          style={{ background: "var(--rnest-card)" }}
+        >
           <div className="flex items-center justify-between">
             <span style={{ color: "var(--rnest-lavender)" }}>
               <IconWrench />
             </span>
-            <span className="text-[16px] text-[var(--rnest-muted)]">›</span>
+            <span
+              className="text-[14px]"
+              style={{ color: "var(--rnest-muted)" }}
+            >
+              ›
+            </span>
           </div>
-          <p className="mt-4 text-[14px] font-semibold text-[var(--rnest-text)]">{t("간호 툴")}</p>
-          <p className="mt-0.5 text-[12px] text-[var(--rnest-muted)]">{t("계산 · 안전정보")}</p>
+          <p
+            className="mt-3 text-[13px] font-semibold"
+            style={{ color: "var(--rnest-text)" }}
+          >
+            {t("간호 툴")}
+          </p>
+          <p
+            className="mt-0.5 text-[11px]"
+            style={{ color: "var(--rnest-muted)" }}
+          >
+            {t("계산 · 안전")}
+          </p>
         </Link>
       </div>
 
@@ -377,10 +535,17 @@ export default function Home() {
       {topShopRecs.length > 0 && (
         <div>
           <div className="mb-2.5 flex items-center justify-between px-1">
-            <span className="text-[11px] font-semibold uppercase tracking-widest text-[var(--rnest-muted)]">
+            <span
+              className="text-[11px] font-semibold uppercase tracking-widest"
+              style={{ color: "var(--rnest-muted)" }}
+            >
               {t("AI 맞춤 쇼핑")}
             </span>
-            <Link href="/shop" className="text-[12px] font-medium text-[var(--rnest-accent)] active:opacity-60">
+            <Link
+              href="/shop"
+              className="text-[12px] font-medium active:opacity-60"
+              style={{ color: "var(--rnest-accent)" }}
+            >
               {t("쇼핑 전체")} ›
             </Link>
           </div>
@@ -395,9 +560,13 @@ export default function Home() {
                 <Link
                   key={entry.product.id}
                   href={`/shop/${encodeURIComponent(entry.product.id)}`}
-                  className="shrink-0 w-[112px] rounded-[14px] bg-[var(--rnest-card)] shadow-apple-sm overflow-hidden active:opacity-75"
+                  className="shrink-0 w-[112px] rounded-[14px] shadow-apple-sm overflow-hidden active:opacity-75"
+                  style={{ background: "var(--rnest-card)" }}
                 >
-                  <div className="relative aspect-square w-full overflow-hidden bg-[var(--rnest-accent-soft)]">
+                  <div
+                    className="relative aspect-square w-full overflow-hidden"
+                    style={{ background: "var(--rnest-accent-soft)" }}
+                  >
                     {imgSrc ? (
                       <Image
                         src={imgSrc}
@@ -415,10 +584,16 @@ export default function Home() {
                     )}
                   </div>
                   <div className="px-2 py-2">
-                    <p className="line-clamp-2 text-[11px] font-semibold leading-snug text-[var(--rnest-text)]">
+                    <p
+                      className="line-clamp-2 text-[11px] font-semibold leading-snug"
+                      style={{ color: "var(--rnest-text)" }}
+                    >
                       {entry.product.name}
                     </p>
-                    <p className="mt-1 text-[11px] font-bold text-[var(--rnest-accent)]">
+                    <p
+                      className="mt-1 text-[11px] font-bold"
+                      style={{ color: "var(--rnest-accent)" }}
+                    >
                       {formatShopPrice(entry.product)}
                     </p>
                     {entry.primaryReason && (
