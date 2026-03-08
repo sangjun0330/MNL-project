@@ -14,7 +14,7 @@ import type {
 import { SocialConnectForm } from "@/components/social/SocialConnectForm";
 import { SocialPendingCard } from "@/components/social/SocialPendingCard";
 import { SocialConnectionList } from "@/components/social/SocialConnectionList";
-import { SocialCommonOffDays, type CommonOffMode } from "@/components/social/SocialCommonOffDays";
+import { SocialSelectableCommonOffCard } from "@/components/social/SocialSelectableCommonOffCard";
 import { SocialThisWeek } from "@/components/social/SocialThisWeek";
 import { SocialNextCommonOff } from "@/components/social/SocialNextCommonOff";
 import { SocialOnboarding } from "@/components/social/SocialOnboarding";
@@ -23,6 +23,10 @@ import { SocialEventCenter } from "@/components/social/SocialEventCenter";
 import { SocialGroupList } from "@/components/social/SocialGroupList";
 import { SocialGroupCreateSheet } from "@/components/social/SocialGroupCreateSheet";
 import { SocialGroupJoinSheet } from "@/components/social/SocialGroupJoinSheet";
+import {
+  SocialOverlapSelectorSheet,
+  type SocialOverlapSelectorItem,
+} from "@/components/social/SocialOverlapSelectorSheet";
 import { SocialBellIcon } from "@/components/social/SocialIcons";
 import {
   useSocialConnectionsRealtimeRefresh,
@@ -30,6 +34,11 @@ import {
 } from "@/components/social/useSocialConnectionsRealtimeRefresh";
 import { useSocialEventsRealtimeRefresh } from "@/components/social/useSocialEventsRealtimeRefresh";
 import { useAppStoreSelector } from "@/lib/store";
+import {
+  computeSelectedCommonOffDays,
+  haveSameIds,
+  isOffOrVac,
+} from "@/lib/socialOverlap";
 
 const SOCIAL_BACKGROUND_REFRESH_MS = 60 * 60 * 1000;
 type SocialViewTab = "friends" | "groups";
@@ -49,10 +58,6 @@ function buildFetchMonths(): string {
   const cur = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
   const next = `${d6.getFullYear()}-${String(d6.getMonth() + 1).padStart(2, "0")}`;
   return cur === next ? cur : `${cur},${next}`;
-}
-
-function isOffOrVac(s?: string) {
-  return s === "OFF" || s === "VAC";
 }
 
 export function SocialPage() {
@@ -80,12 +85,12 @@ export function SocialPage() {
   const [groupsError, setGroupsError] = useState(false);
 
   const [activeTab, setActiveTab] = useState<SocialViewTab>(groupInviteToken ? "groups" : "friends");
-  const [commonOffMode, setCommonOffMode] = useState<CommonOffMode>("all");
   const [openProfile, setOpenProfile] = useState(false);
   const [openConnect, setOpenConnect] = useState(false);
   const [openGroupCreate, setOpenGroupCreate] = useState(false);
   const [openGroupJoin, setOpenGroupJoin] = useState(false);
   const [openEventCenter, setOpenEventCenter] = useState(false);
+  const [openCommonOffSelector, setOpenCommonOffSelector] = useState(false);
   const [unreadEventCount, setUnreadEventCount] = useState(0);
   const [eventRefreshTick, setEventRefreshTick] = useState(0);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -94,8 +99,10 @@ export function SocialPage() {
   const [connectPrefillCode, setConnectPrefillCode] = useState<string | null>(null);
   const [connectPrefillMessage, setConnectPrefillMessage] = useState<string | null>(null);
   const [groupInvitePreview, setGroupInvitePreview] = useState<SocialGroupInvitePreview | null>(null);
+  const [selectedCommonOffFriendIds, setSelectedCommonOffFriendIds] = useState<string[]>([]);
   const handledInviteRef = useRef<string | null>(null);
   const handledGroupInviteRef = useRef<string | null>(null);
+  const selectedCommonOffAvailableIdsRef = useRef<string[]>([]);
   const profileFetchSeqRef = useRef(0);
   const connectionsFetchSeqRef = useRef(0);
   const scheduleFetchSeqRef = useRef(0);
@@ -375,8 +382,11 @@ export function SocialPage() {
   const pendingIncoming = useMemo(() => connections?.pendingIncoming ?? [], [connections?.pendingIncoming]);
   const pendingSent = useMemo(() => connections?.pendingSent ?? [], [connections?.pendingSent]);
   const rawAccepted = useMemo(() => connections?.accepted ?? [], [connections?.accepted]);
-  const commonOffDays = useMemo(() => friendsSchedule?.commonOffDays ?? [], [friendsSchedule?.commonOffDays]);
   const friendSchedules = useMemo(() => friendsSchedule?.friends ?? [], [friendsSchedule?.friends]);
+  const friendScheduleByUserId = useMemo(
+    () => new Map(friendSchedules.map((friend) => [friend.userId, friend])),
+    [friendSchedules]
+  );
 
   // 핀된 친구 먼저 → connectedAt 내림차순 정렬
   const accepted = useMemo(
@@ -406,24 +416,64 @@ export function SocialPage() {
     return result;
   }, [friendSchedules, mySchedule]);
 
-  // 공통 오프 표시 모드: 'all' = 전원 동시 오프 (API 기준), 'any' = 나 + 1명 이상
-  const displayedCommonOffDays = useMemo(() => {
-    if (commonOffMode === "all") return commonOffDays;
-    const primaryPrefix = month + "-";
-    const myOff = new Set(
-      Object.entries(mySchedule)
-        .filter(([d, s]) => d.startsWith(primaryPrefix) && isOffOrVac(s))
-        .map(([d]) => d)
-    );
-    const friendOff = new Set(
-      friendSchedules.flatMap((f) =>
-        Object.entries(f.schedule)
-          .filter(([, s]) => isOffOrVac(s))
-          .map(([d]) => d)
-      )
-    );
-    return Array.from(myOff).filter((d) => friendOff.has(d)).sort();
-  }, [commonOffMode, commonOffDays, mySchedule, friendSchedules, month]);
+  const selectableCommonOffFriends = useMemo<SocialOverlapSelectorItem[]>(
+    () =>
+      accepted
+        .map((connection) => {
+          const friend = friendScheduleByUserId.get(connection.userId);
+          if (!friend) return null;
+          const alias = friendMeta[connection.userId]?.alias.trim();
+          return {
+            id: connection.userId,
+            label: alias || connection.nickname || "익명",
+            emoji: connection.avatarEmoji,
+            description:
+              connection.statusMessage ||
+              "이 친구와 내 일정이 같이 OFF/VAC인 날만 골라서 보여줘요.",
+          };
+        })
+        .filter(Boolean) as SocialOverlapSelectorItem[],
+    [accepted, friendMeta, friendScheduleByUserId]
+  );
+
+  const selectedCommonOffLabels = useMemo(() => {
+    const selectedIdSet = new Set(selectedCommonOffFriendIds);
+    return selectableCommonOffFriends
+      .filter((friend) => selectedIdSet.has(friend.id))
+      .map((friend) => friend.label);
+  }, [selectableCommonOffFriends, selectedCommonOffFriendIds]);
+
+  const selectedCommonOffDates = useMemo(
+    () =>
+      computeSelectedCommonOffDays({
+        month,
+        mySchedule,
+        members: friendSchedules.map((friend) => ({
+          userId: friend.userId,
+          schedule: friend.schedule,
+        })),
+        selectedIds: selectedCommonOffFriendIds,
+      }),
+    [friendSchedules, month, mySchedule, selectedCommonOffFriendIds]
+  );
+
+  useEffect(() => {
+    const nextAvailableIds = selectableCommonOffFriends.map((friend) => friend.id);
+    const nextAvailableIdSet = new Set(nextAvailableIds);
+    const previousAvailableIds = selectedCommonOffAvailableIdsRef.current;
+    selectedCommonOffAvailableIdsRef.current = nextAvailableIds;
+
+    setSelectedCommonOffFriendIds((prev) => {
+      const pruned = prev.filter((id) => nextAvailableIdSet.has(id));
+      if (prev.length === 0 && previousAvailableIds.length === 0) {
+        return nextAvailableIds;
+      }
+      if (haveSameIds(prev, previousAvailableIds)) {
+        return nextAvailableIds;
+      }
+      return pruned;
+    });
+  }, [selectableCommonOffFriends]);
 
   useEffect(() => {
     if (!inviteToken) {
@@ -769,13 +819,22 @@ export function SocialPage() {
         />
       )}
 
-      {/* ── 같이 쉬는 날 ────────────────────────────────────── */}
-      {activeTab === "friends" && !scheduleLoading && displayedCommonOffDays.length > 0 && (
-        <SocialCommonOffDays
-          dates={displayedCommonOffDays}
-          friendCount={accepted.length}
-          mode={commonOffMode}
-          onModeChange={setCommonOffMode}
+      {/* ── 선택한 친구와 같이 쉬는 날 ───────────────────────── */}
+      {activeTab === "friends" && !scheduleLoading && selectableCommonOffFriends.length > 0 && (
+        <SocialSelectableCommonOffCard
+          title="선택한 친구와 같이 쉬는 날"
+          subtitle="내 일정은 자동 포함돼요. 원하는 친구만 골라서 이번 달 교집합을 바로 볼 수 있어요."
+          dates={selectedCommonOffDates}
+          selectedLabels={selectedCommonOffLabels}
+          selectedCount={selectedCommonOffFriendIds.length}
+          availableCount={selectableCommonOffFriends.length}
+          selectionNoun="친구"
+          onSelectClick={() => setOpenCommonOffSelector(true)}
+          emptyText={
+            selectedCommonOffFriendIds.length === 0
+              ? "친구를 선택하면 이번 달 같이 쉬는 날을 바로 계산해드려요."
+              : "선택한 친구와 이번 달 같이 쉬는 날이 아직 없어요."
+          }
         />
       )}
 
@@ -885,6 +944,17 @@ export function SocialPage() {
         onClose={() => setOpenEventCenter(false)}
         onUnreadCountChange={setUnreadEventCount}
         refreshTick={eventRefreshTick}
+      />
+
+      <SocialOverlapSelectorSheet
+        open={openCommonOffSelector}
+        title="같이 쉬는 친구 선택"
+        subtitle="선택한 친구들과 내 일정이 모두 OFF/VAC인 날만 계산해요."
+        noun="친구"
+        items={selectableCommonOffFriends}
+        selectedIds={selectedCommonOffFriendIds}
+        onClose={() => setOpenCommonOffSelector(false)}
+        onApply={setSelectedCommonOffFriendIds}
       />
     </div>
   );

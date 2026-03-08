@@ -11,7 +11,11 @@ import { SocialGroupBadge } from "@/components/social/SocialGroupBadge";
 import { SocialGroupRoleBadge } from "@/components/social/SocialGroupRoleBadge";
 import { SocialGroupChallengesTab } from "@/components/social/SocialGroupChallengesTab";
 import { SocialThisWeek } from "@/components/social/SocialThisWeek";
-import { SocialCommonOffDays } from "@/components/social/SocialCommonOffDays";
+import { SocialSelectableCommonOffCard } from "@/components/social/SocialSelectableCommonOffCard";
+import {
+  SocialOverlapSelectorSheet,
+  type SocialOverlapSelectorItem,
+} from "@/components/social/SocialOverlapSelectorSheet";
 import {
   SocialCalendarIcon,
   SocialGroupIcon,
@@ -26,6 +30,11 @@ import type {
   SocialGroupJoinMode,
   SocialGroupRole,
 } from "@/types/social";
+import {
+  computeSelectedCommonOffDays,
+  haveSameIds,
+  isOffOrVac,
+} from "@/lib/socialOverlap";
 
 // ── 공통 헬퍼 ────────────────────────────────────────────────
 
@@ -38,16 +47,17 @@ function buildFetchMonths(): string {
   return cur === next ? cur : `${cur},${next}`;
 }
 
+function currentMonth() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
 function toISODate(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function countShifts(schedule: Record<string, string>, predicate: (shift: string) => boolean) {
   return Object.values(schedule).filter((shift) => predicate(shift)).length;
-}
-
-function isOffOrVac(shift?: string) {
-  return shift === "OFF" || shift === "VAC";
 }
 
 function timeAgo(iso: string): string {
@@ -204,6 +214,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
   const currentUserId = user?.userId ?? null;
   const mySchedule = useAppStoreSelector((s) => s.schedule as Record<string, string>);
   const months = useMemo(() => buildFetchMonths(), []);
+  const month = useMemo(() => currentMonth(), []);
 
   const groupIdNum = useMemo(() => {
     const n = parseInt(rawGroupId, 10);
@@ -221,6 +232,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<DetailTab>("overview");
   const [memberSheetOpen, setMemberSheetOpen] = useState(false);
+  const [memberOverlapSelectorOpen, setMemberOverlapSelectorOpen] = useState(false);
   const [memberQuery, setMemberQuery] = useState("");
   const [settingsName, setSettingsName] = useState("");
   const [settingsDescription, setSettingsDescription] = useState("");
@@ -233,11 +245,13 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
   const [noticeTitle, setNoticeTitle] = useState("");
   const [noticeBody, setNoticeBody] = useState("");
   const [expandedNoticeId, setExpandedNoticeId] = useState<number | null>(null);
+  const [selectedOverviewMemberIds, setSelectedOverviewMemberIds] = useState<string[]>([]);
   const boardRequestSeqRef = useRef(0);
   const challengesRequestSeqRef = useRef(0);
   const boardRef = useRef<SocialGroupBoard | null>(null);
   const hydratedSettingsGroupIdRef = useRef<number | null>(null);
   const challengesLoadedRef = useRef(false);
+  const selectedOverviewAvailableIdsRef = useRef<string[]>([]);
 
   // ── 챌린지 로드 ───────────────────────────────────────────
 
@@ -385,6 +399,39 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
     [board?.members, currentUserId]
   );
 
+  const selectableOverviewMembers = useMemo<SocialOverlapSelectorItem[]>(
+    () =>
+      otherMembers.map((member) => ({
+        id: member.userId,
+        label: member.nickname || "익명",
+        emoji: member.avatarEmoji,
+        description:
+          member.statusMessage || "이 멤버와 내 일정이 모두 OFF/VAC인 날을 계산해요.",
+      })),
+    [otherMembers]
+  );
+
+  const selectedOverviewMemberLabels = useMemo(() => {
+    const selectedIdSet = new Set(selectedOverviewMemberIds);
+    return selectableOverviewMembers
+      .filter((member) => selectedIdSet.has(member.id))
+      .map((member) => member.label);
+  }, [selectableOverviewMembers, selectedOverviewMemberIds]);
+
+  const selectedOverviewCommonOffDays = useMemo(
+    () =>
+      computeSelectedCommonOffDays({
+        month,
+        mySchedule,
+        members: otherMembers.map((member) => ({
+          userId: member.userId,
+          schedule: member.schedule,
+        })),
+        selectedIds: selectedOverviewMemberIds,
+      }),
+    [month, mySchedule, otherMembers, selectedOverviewMemberIds]
+  );
+
   const todayISO = useMemo(() => toISODate(new Date()), []);
 
   const visibleMembers = useMemo(
@@ -439,6 +486,24 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
   ) as SocialGroupRole;
   const initialLoading = loading && !board;
   const refreshing = loading && !!board;
+
+  useEffect(() => {
+    const nextAvailableIds = selectableOverviewMembers.map((member) => member.id);
+    const nextAvailableIdSet = new Set(nextAvailableIds);
+    const previousAvailableIds = selectedOverviewAvailableIdsRef.current;
+    selectedOverviewAvailableIdsRef.current = nextAvailableIds;
+
+    setSelectedOverviewMemberIds((prev) => {
+      const pruned = prev.filter((id) => nextAvailableIdSet.has(id));
+      if (prev.length === 0 && previousAvailableIds.length === 0) {
+        return nextAvailableIds;
+      }
+      if (haveSameIds(prev, previousAvailableIds)) {
+        return nextAvailableIds;
+      }
+      return pruned;
+    });
+  }, [selectableOverviewMembers]);
 
   // ── 액션 핸들러 ───────────────────────────────────────────
 
@@ -1040,19 +1105,25 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
                 </div>
               )}
 
-              {board.commonOffDays.length > 0 ? (
-                <SocialCommonOffDays
-                  dates={board.commonOffDays}
-                  friendCount={board.group.memberCount}
-                  mode="all"
-                  onModeChange={() => {}}
-                  title="이번 달 그룹 같이 쉬는 날"
-                  showModeToggle={false}
-                  hideFooterLabel
+              {selectableOverviewMembers.length > 0 ? (
+                <SocialSelectableCommonOffCard
+                  title="선택한 멤버와 같이 쉬는 날"
+                  subtitle="내 일정은 자동 포함돼요. 원하는 멤버만 골라서 이번 달 교집합을 바로 볼 수 있어요."
+                  dates={selectedOverviewCommonOffDays}
+                  selectedLabels={selectedOverviewMemberLabels}
+                  selectedCount={selectedOverviewMemberIds.length}
+                  availableCount={selectableOverviewMembers.length}
+                  selectionNoun="멤버"
+                  onSelectClick={() => setMemberOverlapSelectorOpen(true)}
+                  emptyText={
+                    selectedOverviewMemberIds.length === 0
+                      ? "멤버를 선택하면 이번 달 같이 쉬는 날을 바로 계산해드려요."
+                      : "선택한 멤버와 이번 달 같이 쉬는 날이 아직 없어요."
+                  }
                 />
               ) : (
                 <div className="rounded-apple bg-white px-4 py-3 text-[12.5px] text-ios-muted shadow-apple">
-                  이번 달에 그룹 전체가 같이 쉬는 날은 아직 없어요.
+                  이번 달에 함께 비교할 수 있는 그룹 멤버 일정이 아직 없어요.
                 </div>
               )}
 
@@ -1495,6 +1566,17 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
           </div>
         </BottomSheet>
       )}
+
+      <SocialOverlapSelectorSheet
+        open={memberOverlapSelectorOpen}
+        title="같이 쉬는 멤버 선택"
+        subtitle="선택한 멤버들과 내 일정이 모두 OFF/VAC인 날만 계산해요."
+        noun="멤버"
+        items={selectableOverviewMembers}
+        selectedIds={selectedOverviewMemberIds}
+        onClose={() => setMemberOverlapSelectorOpen(false)}
+        onApply={setSelectedOverviewMemberIds}
+      />
 
       {/* ── 일반 에러 ─────────────────────────────────────── */}
       {!initialLoading && error && error !== "not_member" && error !== "not_found" ? (
