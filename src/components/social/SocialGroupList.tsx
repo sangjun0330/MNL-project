@@ -8,9 +8,10 @@ type Props = {
   groups: SocialGroupSummary[];
   onOpenGroup: (group: SocialGroupSummary) => void;
   onCreateGroup: () => void;
+  onPrefetchGroup?: (group: SocialGroupSummary) => void;
 };
 
-export function SocialGroupList({ groups, onOpenGroup, onCreateGroup }: Props) {
+export function SocialGroupList({ groups, onOpenGroup, onCreateGroup, onPrefetchGroup }: Props) {
   return (
     <div className="rounded-apple bg-white shadow-apple">
       <div className="flex items-center justify-between px-4 pt-3 pb-1">
@@ -38,6 +39,7 @@ export function SocialGroupList({ groups, onOpenGroup, onCreateGroup }: Props) {
               <button
                 key={group.id}
                 type="button"
+                onPointerDown={() => onPrefetchGroup?.(group)}
                 onClick={() => onOpenGroup(group)}
                 className="flex w-full items-center gap-3 px-4 py-3 text-left transition active:opacity-75"
               >

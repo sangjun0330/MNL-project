@@ -5,6 +5,12 @@ import { useRouter } from "next/navigation";
 import { useAuthState } from "@/lib/auth";
 import { useAppStoreSelector } from "@/lib/store";
 import { cn } from "@/lib/cn";
+import {
+  buildSocialClientCacheKey,
+  clearSocialClientCache,
+  getSocialClientCache,
+  setSocialClientCache,
+} from "@/lib/socialClientCache";
 import { Button } from "@/components/ui/Button";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { SocialGroupBadge } from "@/components/social/SocialGroupBadge";
@@ -253,12 +259,36 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
   const challengesLoadedRef = useRef(false);
   const selectedOverviewAvailableIdsRef = useRef<string[]>([]);
 
+  const boardCacheKey = useMemo(
+    () =>
+      currentUserId && groupIdNum
+        ? buildSocialClientCacheKey(currentUserId, "group-board", `${groupIdNum}:${months}`)
+        : null,
+    [currentUserId, groupIdNum, months]
+  );
+  const challengesCacheKey = useMemo(
+    () =>
+      currentUserId && groupIdNum
+        ? buildSocialClientCacheKey(currentUserId, "group-challenges", String(groupIdNum))
+        : null,
+    [currentUserId, groupIdNum]
+  );
+
   // ── 챌린지 로드 ───────────────────────────────────────────
 
   const loadChallenges = useCallback(async () => {
     if (!groupIdNum) return;
     const requestSeq = ++challengesRequestSeqRef.current;
-    setChallengesLoading(true);
+    const cached = challengesCacheKey
+      ? getSocialClientCache<GroupChallengeSummary[]>(challengesCacheKey)
+      : null;
+    if (cached) {
+      setChallenges(cached.data ?? []);
+      challengesLoadedRef.current = true;
+      setChallengesLoading(false);
+    } else {
+      setChallengesLoading(challenges.length === 0);
+    }
     try {
       const res = await fetch(
         `/api/social/groups/${groupIdNum}/challenges`,
@@ -266,7 +296,11 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
       ).then((r) => r.json());
       if (requestSeq !== challengesRequestSeqRef.current) return;
       if (res.ok) {
-        setChallenges(res.data as GroupChallengeSummary[]);
+        const nextChallenges = res.data as GroupChallengeSummary[];
+        setChallenges(nextChallenges);
+        if (challengesCacheKey) {
+          setSocialClientCache(challengesCacheKey, nextChallenges);
+        }
         challengesLoadedRef.current = true;
       }
     } catch {
@@ -277,15 +311,24 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
         setChallengesLoading(false);
       }
     }
-  }, [groupIdNum]);
+  }, [challenges.length, challengesCacheKey, groupIdNum]);
 
   // ── 보드 로드 ─────────────────────────────────────────────
 
   const loadBoard = useCallback(async () => {
     if (!groupIdNum) return null;
     const requestSeq = ++boardRequestSeqRef.current;
+    const cached = boardCacheKey ? getSocialClientCache<SocialGroupBoard>(boardCacheKey) : null;
+    if (cached && !boardRef.current) {
+      boardRef.current = cached.data;
+      setBoard(cached.data);
+      setLoading(false);
+      setError(null);
+    }
     setLoading(true);
-    setError(null);
+    if (!boardRef.current && !cached) {
+      setError(null);
+    }
     try {
       const res = await fetch(
         `/api/social/groups/${groupIdNum}/board?months=${encodeURIComponent(months)}`,
@@ -300,16 +343,30 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
       if (requestSeq !== boardRequestSeqRef.current) return null;
       boardRef.current = nextBoard;
       setBoard(nextBoard);
+      setError(null);
+      if (boardCacheKey) {
+        setSocialClientCache(boardCacheKey, nextBoard);
+      }
       return nextBoard;
     } catch (err: any) {
       if (requestSeq !== boardRequestSeqRef.current) return null;
-      if (!boardRef.current) setBoard(null);
-      setError(String(err?.message ?? "그룹 정보를 불러오지 못했어요."));
+      const nextError = String(err?.message ?? "그룹 정보를 불러오지 못했어요.");
+      const isTerminalError = nextError === "not_member" || nextError === "not_found";
+      if (!boardRef.current || isTerminalError) {
+        boardRef.current = null;
+        setBoard(null);
+        setError(nextError);
+        if (boardCacheKey) {
+          clearSocialClientCache(boardCacheKey);
+        }
+      } else {
+        setError(null);
+      }
       return null;
     } finally {
       if (requestSeq === boardRequestSeqRef.current) setLoading(false);
     }
-  }, [groupIdNum, months]);
+  }, [boardCacheKey, groupIdNum, months]);
 
   useEffect(() => {
     if (!groupIdNum) {

@@ -35,6 +35,11 @@ import {
 import { useSocialEventsRealtimeRefresh } from "@/components/social/useSocialEventsRealtimeRefresh";
 import { useAppStoreSelector } from "@/lib/store";
 import {
+  buildSocialClientCacheKey,
+  getSocialClientCache,
+  setSocialClientCache,
+} from "@/lib/socialClientCache";
+import {
   computeSelectedCommonOffDays,
   haveSameIds,
   isOffOrVac,
@@ -64,6 +69,7 @@ export function SocialPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { status, user } = useAuthState();
+  const currentUserId = user?.userId ?? null;
   const month = useMemo(() => currentMonth(), []);
   // 이번 주 7일 커버를 위해 필요한 months 파라미터 (월말 경계 처리)
   const fetchMonths = useMemo(() => buildFetchMonths(), []);
@@ -110,8 +116,36 @@ export function SocialPage() {
   const groupsFetchSeqRef = useRef(0);
   const eventsFetchSeqRef = useRef(0);
 
+  const profileCacheKey = useMemo(
+    () => (currentUserId ? buildSocialClientCacheKey(currentUserId, "profile") : null),
+    [currentUserId]
+  );
+  const connectionsCacheKey = useMemo(
+    () => (currentUserId ? buildSocialClientCacheKey(currentUserId, "connections") : null),
+    [currentUserId]
+  );
+  const friendsScheduleCacheKey = useMemo(
+    () =>
+      currentUserId
+        ? buildSocialClientCacheKey(currentUserId, "friends-schedule", fetchMonths)
+        : null,
+    [currentUserId, fetchMonths]
+  );
+  const friendMetaCacheKey = useMemo(
+    () => (currentUserId ? buildSocialClientCacheKey(currentUserId, "friend-meta") : null),
+    [currentUserId]
+  );
+  const groupsCacheKey = useMemo(
+    () => (currentUserId ? buildSocialClientCacheKey(currentUserId, "groups") : null),
+    [currentUserId]
+  );
+  const unreadEventsCacheKey = useMemo(
+    () => (currentUserId ? buildSocialClientCacheKey(currentUserId, "events-unread") : null),
+    [currentUserId]
+  );
+
   const fetchProfile = useCallback(() => {
-    if (status !== "authenticated") {
+    if (status !== "authenticated" || !currentUserId) {
       profileFetchSeqRef.current += 1;
       setProfile(null);
       setProfileChecked(true);
@@ -120,14 +154,27 @@ export function SocialPage() {
     }
 
     const fetchSeq = ++profileFetchSeqRef.current;
-    setProfileLoading(true);
+    const cached = profileCacheKey ? getSocialClientCache<SocialProfile | null>(profileCacheKey) : null;
+    if (cached) {
+      setProfile(cached.data ?? null);
+      setShowOnboarding(!cached.data);
+      setProfileChecked(true);
+      setProfileLoading(false);
+    } else {
+      setProfileLoading(!profileChecked && profile === null);
+    }
+
     fetch("/api/social/profile", { cache: "no-store" })
       .then((r) => r.json())
       .then((res) => {
         if (fetchSeq !== profileFetchSeqRef.current) return;
         if (res.ok) {
-          setProfile(res.data ?? null);
-          setShowOnboarding(!res.data);
+          const nextProfile = (res.data ?? null) as SocialProfile | null;
+          setProfile(nextProfile);
+          setShowOnboarding(!nextProfile);
+          if (profileCacheKey) {
+            setSocialClientCache(profileCacheKey, nextProfile);
+          }
         }
         setProfileChecked(true);
       })
@@ -137,7 +184,7 @@ export function SocialPage() {
       .finally(() => {
         if (fetchSeq === profileFetchSeqRef.current) setProfileLoading(false);
       });
-  }, [status]);
+  }, [currentUserId, profile, profileCacheKey, profileChecked, status]);
 
   // 소셜 프로필 확인 (첫 진입 온보딩)
   useEffect(() => {
@@ -145,7 +192,7 @@ export function SocialPage() {
   }, [fetchProfile]);
 
   const fetchConnections = useCallback(() => {
-    if (status !== "authenticated") {
+    if (status !== "authenticated" || !currentUserId) {
       connectionsFetchSeqRef.current += 1;
       setConnections(null);
       setConnectionsLoading(false);
@@ -153,7 +200,17 @@ export function SocialPage() {
       return;
     }
     const fetchSeq = ++connectionsFetchSeqRef.current;
-    setConnectionsLoading(true);
+    const cached = connectionsCacheKey
+      ? getSocialClientCache<SocialConnectionsData>(connectionsCacheKey)
+      : null;
+    const hasVisibleConnections = Boolean(cached || connections);
+    if (cached) {
+      setConnections(cached.data);
+      setConnectionsLoading(false);
+      setConnectionsError(false);
+    } else {
+      setConnectionsLoading(!hasVisibleConnections);
+    }
     setConnectionsError(false);
     fetch("/api/social/connections")
       .then((r) => r.json())
@@ -161,57 +218,88 @@ export function SocialPage() {
         if (fetchSeq !== connectionsFetchSeqRef.current) return;
         if (res.ok) {
           setConnections(res.data);
+          if (connectionsCacheKey) {
+            setSocialClientCache(connectionsCacheKey, res.data as SocialConnectionsData);
+          }
         } else {
-          setConnectionsError(true);
+          if (!hasVisibleConnections) setConnectionsError(true);
         }
       })
       .catch(() => {
-        if (fetchSeq === connectionsFetchSeqRef.current) setConnectionsError(true);
+        if (fetchSeq === connectionsFetchSeqRef.current && !hasVisibleConnections) {
+          setConnectionsError(true);
+        }
       })
       .finally(() => {
         if (fetchSeq === connectionsFetchSeqRef.current) setConnectionsLoading(false);
       });
-  }, [status]);
+  }, [connections, connectionsCacheKey, currentUserId, status]);
 
   const fetchFriendsSchedule = useCallback(() => {
-    if (status !== "authenticated") {
+    if (status !== "authenticated" || !currentUserId) {
       scheduleFetchSeqRef.current += 1;
       setFriendsSchedule(null);
       setScheduleLoading(false);
       return;
     }
     const fetchSeq = ++scheduleFetchSeqRef.current;
-    setScheduleLoading(true);
+    const cached = friendsScheduleCacheKey
+      ? getSocialClientCache<FriendsScheduleData>(friendsScheduleCacheKey)
+      : null;
+    const hasVisibleSchedule = Boolean(cached || friendsSchedule);
+    if (cached) {
+      setFriendsSchedule(cached.data);
+      setScheduleLoading(false);
+    } else {
+      setScheduleLoading(!hasVisibleSchedule);
+    }
     fetch(`/api/social/friends/schedule?months=${fetchMonths}`)
       .then((r) => r.json())
       .then((res) => {
         if (fetchSeq !== scheduleFetchSeqRef.current) return;
-        if (res.ok) setFriendsSchedule(res.data);
+        if (res.ok) {
+          setFriendsSchedule(res.data);
+          if (friendsScheduleCacheKey) {
+            setSocialClientCache(friendsScheduleCacheKey, res.data as FriendsScheduleData);
+          }
+        }
       })
       .catch(() => {})
       .finally(() => {
         if (fetchSeq === scheduleFetchSeqRef.current) setScheduleLoading(false);
       });
-  }, [fetchMonths, status]);
+  }, [currentUserId, fetchMonths, friendsSchedule, friendsScheduleCacheKey, status]);
 
   const fetchFriendMeta = useCallback(() => {
-    if (status !== "authenticated") {
+    if (status !== "authenticated" || !currentUserId) {
       friendMetaFetchSeqRef.current += 1;
       setFriendMeta({});
       return;
     }
     const fetchSeq = ++friendMetaFetchSeqRef.current;
+    const cached = friendMetaCacheKey
+      ? getSocialClientCache<Record<string, FriendMeta>>(friendMetaCacheKey)
+      : null;
+    if (cached) {
+      setFriendMeta(cached.data ?? {});
+    }
     fetch("/api/social/friends/meta", { cache: "no-store" })
       .then((r) => r.json())
       .then((res) => {
         if (fetchSeq !== friendMetaFetchSeqRef.current) return;
-        if (res.ok) setFriendMeta(res.data ?? {});
+        if (res.ok) {
+          const nextMeta = (res.data ?? {}) as Record<string, FriendMeta>;
+          setFriendMeta(nextMeta);
+          if (friendMetaCacheKey) {
+            setSocialClientCache(friendMetaCacheKey, nextMeta);
+          }
+        }
       })
       .catch(() => {});
-  }, [status]);
+  }, [currentUserId, friendMetaCacheKey, status]);
 
   const fetchGroups = useCallback(() => {
-    if (status !== "authenticated") {
+    if (status !== "authenticated" || !currentUserId) {
       groupsFetchSeqRef.current += 1;
       setGroups([]);
       setGroupsLoading(false);
@@ -219,52 +307,74 @@ export function SocialPage() {
       return;
     }
     const fetchSeq = ++groupsFetchSeqRef.current;
-    setGroupsLoading(true);
+    const cached = groupsCacheKey ? getSocialClientCache<SocialGroupSummary[]>(groupsCacheKey) : null;
+    const hasVisibleGroups = Boolean(cached) || groups.length > 0 || !groupsLoading;
+    if (cached) {
+      setGroups(cached.data ?? []);
+      setGroupsLoading(false);
+      setGroupsError(false);
+    } else {
+      setGroupsLoading(!hasVisibleGroups);
+    }
     setGroupsError(false);
     fetch("/api/social/groups", { cache: "no-store" })
       .then((r) => r.json())
       .then((res) => {
         if (fetchSeq !== groupsFetchSeqRef.current) return;
         if (res.ok) {
-          setGroups(res.data?.groups ?? []);
+          const nextGroups = (res.data?.groups ?? []) as SocialGroupSummary[];
+          setGroups(nextGroups);
+          if (groupsCacheKey) {
+            setSocialClientCache(groupsCacheKey, nextGroups);
+          }
         } else {
-          setGroupsError(true);
+          if (!hasVisibleGroups) setGroupsError(true);
         }
       })
       .catch(() => {
-        if (fetchSeq === groupsFetchSeqRef.current) setGroupsError(true);
+        if (fetchSeq === groupsFetchSeqRef.current && !hasVisibleGroups) {
+          setGroupsError(true);
+        }
       })
       .finally(() => {
         if (fetchSeq === groupsFetchSeqRef.current) setGroupsLoading(false);
       });
-  }, [status]);
+  }, [currentUserId, groups, groupsCacheKey, groupsLoading, status]);
 
   const fetchUnreadEventCount = useCallback(() => {
-    if (status !== "authenticated") {
+    if (status !== "authenticated" || !currentUserId) {
       eventsFetchSeqRef.current += 1;
       setUnreadEventCount(0);
       return;
     }
     const fetchSeq = ++eventsFetchSeqRef.current;
+    const cached = unreadEventsCacheKey ? getSocialClientCache<number>(unreadEventsCacheKey) : null;
+    if (cached) {
+      setUnreadEventCount(Number(cached.data ?? 0));
+    }
     fetch("/api/social/events", { cache: "no-store" })
       .then((r) => r.json())
       .then((res) => {
         if (fetchSeq !== eventsFetchSeqRef.current) return;
         if (res.ok) {
-          setUnreadEventCount(Number(res.data?.unreadCount ?? 0));
+          const nextUnreadCount = Number(res.data?.unreadCount ?? 0);
+          setUnreadEventCount(nextUnreadCount);
+          if (unreadEventsCacheKey) {
+            setSocialClientCache(unreadEventsCacheKey, nextUnreadCount);
+          }
         }
       })
       .catch(() => {});
-  }, [status]);
+  }, [currentUserId, status, unreadEventsCacheKey]);
 
   useEffect(() => {
-    if (!profileChecked || status !== "authenticated") return;
+    if (status !== "authenticated") return;
     fetchConnections();
     fetchFriendsSchedule();
     fetchFriendMeta();
     fetchGroups();
     fetchUnreadEventCount();
-  }, [profileChecked, fetchConnections, fetchFriendsSchedule, fetchFriendMeta, fetchGroups, fetchUnreadEventCount, status]);
+  }, [fetchConnections, fetchFriendsSchedule, fetchFriendMeta, fetchGroups, fetchUnreadEventCount, status]);
 
   const refreshConnectionsAndSchedule = useCallback(() => {
     fetchConnections();
@@ -274,18 +384,18 @@ export function SocialPage() {
   // 백그라운드 갱신은 과하지 않게 1시간 간격만 유지하고,
   // 연결 이벤트가 발생하면 실시간 refresh로 바로 반영한다.
   useEffect(() => {
-    if (!profileChecked || status !== "authenticated") return;
+    if (status !== "authenticated") return;
     const timer = setInterval(() => {
       refreshConnectionsAndSchedule();
       fetchGroups();
     }, SOCIAL_BACKGROUND_REFRESH_MS);
     return () => clearInterval(timer);
-  }, [fetchGroups, profileChecked, refreshConnectionsAndSchedule, status]);
+  }, [fetchGroups, refreshConnectionsAndSchedule, status]);
 
   // Bug-3: 친구 프로필 변경(닉네임/아바타/상태메시지) 실시간 미반영 보완
   // focus/visibilitychange 시 debounce 300ms 후 refresh
   useEffect(() => {
-    if (!profileChecked || status !== "authenticated") return;
+    if (status !== "authenticated") return;
     let tid: ReturnType<typeof setTimeout>;
     const trigger = () => {
       clearTimeout(tid);
@@ -304,7 +414,7 @@ export function SocialPage() {
       document.removeEventListener("visibilitychange", onVisibility);
       clearTimeout(tid);
     };
-  }, [fetchFriendMeta, fetchGroups, fetchUnreadEventCount, profileChecked, refreshConnectionsAndSchedule, status]);
+  }, [fetchFriendMeta, fetchGroups, fetchUnreadEventCount, refreshConnectionsAndSchedule, status]);
 
   const handleRealtimeEvent = useCallback(
     (payload: SocialConnectionRealtimePayload) => {
@@ -344,7 +454,7 @@ export function SocialPage() {
   );
 
   useSocialConnectionsRealtimeRefresh({
-    enabled: profileChecked && status === "authenticated",
+    enabled: status === "authenticated",
     userId: user?.userId ?? null,
     scope: "social-page",
     onRefresh: refreshConnectionsAndSchedule,
@@ -357,10 +467,29 @@ export function SocialPage() {
     fetchUnreadEventCount();
   }, [fetchUnreadEventCount]);
   useSocialEventsRealtimeRefresh({
-    enabled: profileChecked && status === "authenticated",
+    enabled: status === "authenticated",
     userId: user?.userId ?? null,
     onNewEvent: handleNewEvent,
   });
+
+  const prefetchGroupBoard = useCallback(
+    (groupId: number) => {
+      if (status !== "authenticated" || !currentUserId) return;
+      const boardCacheKey = buildSocialClientCacheKey(currentUserId, "group-board", `${groupId}:${fetchMonths}`);
+      if (getSocialClientCache(boardCacheKey)) return;
+      fetch(`/api/social/groups/${groupId}/board?months=${encodeURIComponent(fetchMonths)}`, {
+        cache: "no-store",
+      })
+        .then((r) => r.json())
+        .then((res) => {
+          if (res.ok) {
+            setSocialClientCache(boardCacheKey, res.data);
+          }
+        })
+        .catch(() => {});
+    },
+    [currentUserId, fetchMonths, status]
+  );
 
   const handleRefresh = useCallback(() => {
     fetchProfile();
@@ -603,7 +732,7 @@ export function SocialPage() {
       });
   }, [fetchGroups, groupInviteToken, profile, profileChecked, router, showOnboarding, status]);
 
-  if (status === "loading" || profileLoading) {
+  if (status === "loading") {
     return (
       <div className="space-y-3 pb-4">
         <div className="flex items-center justify-between pt-1">
@@ -866,7 +995,9 @@ export function SocialPage() {
         <SocialGroupList
           groups={groups}
           onCreateGroup={() => setOpenGroupCreate(true)}
+          onPrefetchGroup={(group) => prefetchGroupBoard(group.id)}
           onOpenGroup={(group) => {
+            prefetchGroupBoard(group.id);
             router.push(`/social/groups/${group.id}`);
           }}
         />
@@ -879,6 +1010,9 @@ export function SocialPage() {
         profile={profile}
         onSaved={(nextProfile) => {
           setProfile(nextProfile);
+          if (profileCacheKey) {
+            setSocialClientCache(profileCacheKey, nextProfile);
+          }
           void fetchGroups();
           setNotice({ tone: "success", text: "소셜 프로필이 저장되었어요." });
         }}
@@ -909,8 +1043,12 @@ export function SocialPage() {
         open={openGroupCreate}
         onClose={() => setOpenGroupCreate(false)}
         onCreated={(group) => {
+          const nextGroups = [group, ...groups.filter((item) => item.id !== group.id)];
           setOpenGroupCreate(false);
-          setGroups((prev) => [group, ...prev.filter((item) => item.id !== group.id)]);
+          setGroups(nextGroups);
+          if (groupsCacheKey) {
+            setSocialClientCache(groupsCacheKey, nextGroups);
+          }
           setActiveTab("groups");
           setNotice({ tone: "success", text: `${group.name} 그룹을 만들었어요.` });
           router.push(`/social/groups/${group.id}`);
@@ -933,7 +1071,11 @@ export function SocialPage() {
             setNotice({ tone: "info", text: `${group.name} 그룹 가입 요청을 보냈어요.` });
             return;
           }
-          setGroups((prev) => [group, ...prev.filter((item) => item.id !== group.id)]);
+          const nextGroups = [group, ...groups.filter((item) => item.id !== group.id)];
+          setGroups(nextGroups);
+          if (groupsCacheKey) {
+            setSocialClientCache(groupsCacheKey, nextGroups);
+          }
           router.push(`/social/groups/${group.id}`);
           setNotice({ tone: "success", text: `${group.name} 그룹에 참여했어요.` });
         }}

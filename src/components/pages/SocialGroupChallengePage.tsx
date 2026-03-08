@@ -5,6 +5,12 @@ import { useRouter } from "next/navigation";
 import { useAuthState } from "@/lib/auth";
 import { cn } from "@/lib/cn";
 import {
+  buildSocialClientCacheKey,
+  clearSocialClientCache,
+  getSocialClientCache,
+  setSocialClientCache,
+} from "@/lib/socialClientCache";
+import {
   SocialBatteryIcon,
   SocialBrainIcon,
   SocialFlameIcon,
@@ -384,6 +390,10 @@ export function SocialGroupChallengePage({
 
   const groupIdNum = parseInt(rawGroupId, 10);
   const challengeIdNum = parseInt(rawChallengeId, 10);
+  const detailCacheKey =
+    currentUserId && Number.isFinite(groupIdNum) && Number.isFinite(challengeIdNum)
+      ? buildSocialClientCacheKey(currentUserId, "group-challenge-detail", `${groupIdNum}:${challengeIdNum}`)
+      : null;
 
   const [detail, setDetail] = useState<GroupChallengeDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -392,21 +402,46 @@ export function SocialGroupChallengePage({
   const [joinError, setJoinError] = useState<string | null>(null);
 
   const loadDetail = useCallback(async () => {
+    const cached = detailCacheKey
+      ? getSocialClientCache<GroupChallengeDetail>(detailCacheKey)
+      : null;
+    if (cached && !detail) {
+      setDetail(cached.data);
+      setLoading(false);
+      setError(null);
+    }
     setLoading(true);
-    setError(null);
+    if (!cached && !detail) {
+      setError(null);
+    }
     try {
       const res = await fetch(
         `/api/social/groups/${groupIdNum}/challenges/${challengeIdNum}`,
         { cache: "no-store" }
       ).then((r) => r.json());
       if (!res.ok) throw new Error(res.error ?? "불러오기 실패");
-      setDetail(res.data as GroupChallengeDetail);
+      const nextDetail = res.data as GroupChallengeDetail;
+      setDetail(nextDetail);
+      setError(null);
+      if (detailCacheKey) {
+        setSocialClientCache(detailCacheKey, nextDetail);
+      }
     } catch (err: any) {
-      setError(String(err?.message ?? "챌린지 정보를 불러오지 못했어요."));
+      const nextError = String(err?.message ?? "챌린지 정보를 불러오지 못했어요.");
+      const isTerminalError = nextError === "challenge_not_found";
+      if (!detail || isTerminalError) {
+        setDetail(null);
+        setError(nextError);
+        if (detailCacheKey) {
+          clearSocialClientCache(detailCacheKey);
+        }
+      } else {
+        setError(null);
+      }
     } finally {
       setLoading(false);
     }
-  }, [groupIdNum, challengeIdNum]);
+  }, [challengeIdNum, detail, detailCacheKey, groupIdNum]);
 
   useEffect(() => {
     void loadDetail();
