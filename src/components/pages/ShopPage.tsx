@@ -637,7 +637,7 @@ export function ShopPage() {
         <div className="mt-8 space-y-3 border-t border-[#edf1f6] pt-6 text-[11px] leading-5 text-[#8d99ab]">
           <div className="space-y-1">
             <div className="font-semibold text-[#65748b]">RNest</div>
-            <div>{t("대표: [대표자명] · 사업자등록번호: 000-00-00000")}</div>
+            <div>{t("대표: 오상준 · 사업자등록번호: 523-03-03796")}</div>
             <div>{t("통신판매업신고번호: 제2025-서울○○-0000호")}</div>
             <div>{t("주소: 서울특별시 ○○구 ○○로 000, 0층")}</div>
             <div>{t("고객센터:")} <a href="mailto:support@rnest.kr" className="text-[#3b6fc9]">support@rnest.kr</a></div>
