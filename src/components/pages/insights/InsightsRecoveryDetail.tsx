@@ -1,18 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import {
-  InsightDetailShell,
-  DetailSummaryCard,
-  DetailChip,
-  DETAIL_ACCENTS,
-  DETAIL_GRADIENTS,
-} from "@/components/pages/insights/InsightDetailShell";
-import { useInsightsData, shiftKo, isInsightsLocked, INSIGHTS_MIN_DAYS } from "@/components/insights/useInsightsData";
-import { formatKoreanDate } from "@/lib/date";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
+import {
+  AIPlannerModuleLinkCard,
+  AIPlannerTimelineLinkCard,
+} from "@/components/insights/AIRecoveryPlannerCards";
+import { useAIRecoveryPlanner } from "@/components/insights/useAIRecoveryPlanner";
 import { useRecoveryPlanner } from "@/components/insights/useRecoveryPlanner";
-import { useAppStoreSelector } from "@/lib/store";
+import { useInsightsData, isInsightsLocked, INSIGHTS_MIN_DAYS, shiftKo } from "@/components/insights/useInsightsData";
+import { InsightDetailShell, DetailCard, DetailChip, DETAIL_ACCENTS } from "@/components/pages/insights/InsightDetailShell";
+import { buildFallbackModules } from "@/lib/aiRecoveryPlanner";
+import { formatKoreanDate } from "@/lib/date";
 import {
   caffeineSensitivityPresetFromValue,
   caffeineSensitivityPresetLabel,
@@ -20,16 +19,18 @@ import {
   chronotypePresetLabel,
   normalizeProfileSettings,
 } from "@/lib/recoveryPlanner";
+import { useAppStoreSelector } from "@/lib/store";
 import { useI18n } from "@/lib/useI18n";
-
-function pct(p: number) {
-  return `${Math.round(p * 100)}%`;
-}
 
 export function InsightsRecoveryDetail() {
   const { t } = useI18n();
-  const { end, top3, syncLabel, todayShift, ordersSummary, hasTodayShift, recordedDays } = useInsightsData();
+  const { end, recordedDays, syncLabel, todayShift, hasTodayShift } = useInsightsData();
   const planner = useRecoveryPlanner();
+  const aiPlanner = useAIRecoveryPlanner({
+    mode: "generate",
+    enabled: !isInsightsLocked(recordedDays) && planner.aiAvailable,
+    autoGenerate: false,
+  });
   const profile = useAppStoreSelector((s) => normalizeProfileSettings(s.settings.profile));
   const profileSummary = `${chronotypePresetLabel(chronotypePresetFromValue(profile.chronotype))} · ${t("카페인")} ${caffeineSensitivityPresetLabel(
     caffeineSensitivityPresetFromValue(profile.caffeineSensitivity)
@@ -47,180 +48,110 @@ export function InsightsRecoveryDetail() {
     );
   }
 
-  const recoverySummary = planner.focusFactor
-    ? `회복 포커스 · ${planner.focusFactor.label}`
-    : "회복 포커스 · 오늘의 회복 우선순위";
-  const recoveryDetail = planner.primaryAction
-    ? `지금 할 1개 · ${planner.primaryAction}`
-    : "기록이 쌓이면 회복 플랜이 더 정교해져요.";
+  const fallbackModules = buildFallbackModules({
+    language: "ko",
+    plannerContext: {
+      focusFactor: planner.focusFactor,
+      primaryAction: planner.primaryAction,
+      avoidAction: planner.avoidAction,
+      nextDuty: planner.nextDuty,
+      nextDutyDate: planner.nextDutyDate,
+      plannerTone: planner.tone,
+      ordersTop3: planner.ordersTop3,
+    },
+    nextDutyLabel: planner.nextDutyLabel,
+    timelinePreview: planner.timelinePreview,
+  });
+  const plannerModules = aiPlanner.data?.result ?? {
+    ...fallbackModules,
+    explanation: {
+      eyebrow: "AI Recovery Brief",
+      title: "AI 회복 해설",
+      headline: planner.focusFactor ? `${planner.focusFactor.label} 중심 해설` : "회복 우선순위 해설",
+      summary: "회복 포커스와 오더 우선순위를 AI가 맥락 중심으로 설명합니다.",
+      recovery: {
+        headline: planner.primaryAction ?? "오늘 회복 우선순위를 확인해 보세요.",
+        compoundAlert: null,
+        sections: [],
+        weeklySummary: null,
+      },
+    },
+  };
+
+  const right = planner.aiAvailable ? (
+    <button
+      type="button"
+      onClick={aiPlanner.startGenerate}
+      disabled={aiPlanner.generating}
+      className="inline-flex h-9 items-center justify-center rounded-full border border-[#CFE0FF] bg-[#EDF4FF] px-3 text-[12px] font-semibold text-[#0F4FCB] disabled:opacity-60"
+    >
+      {aiPlanner.generating ? "생성 중..." : "오늘의 플래너 생성하기"}
+    </button>
+  ) : null;
 
   return (
     <InsightDetailShell
       title="회복 플래너"
       subtitle={formatKoreanDate(end)}
-      meta="다음 근무 전까지 무엇을 먼저 해야 하는지 한 흐름으로 정리합니다."
+      meta="다음 근무 전까지 무엇을 먼저 해야 하는지 AI가 한 흐름으로 정리합니다."
+      chips={
+        <>
+          <DetailChip color={DETAIL_ACCENTS.mint}>{planner.nextDutyLabel}</DetailChip>
+          {planner.nextDuty ? <DetailChip color={DETAIL_ACCENTS.mint}>다음 {shiftKo(planner.nextDuty)}</DetailChip> : null}
+          {hasTodayShift ? <DetailChip color={DETAIL_ACCENTS.navy}>{shiftKo(todayShift)}</DetailChip> : null}
+          <DetailChip color={DETAIL_ACCENTS.navy}>{syncLabel}</DetailChip>
+        </>
+      }
+      right={right}
     >
-      <div className="space-y-4">
-        <DetailSummaryCard
-          accent="mint"
-          label="Recovery Planner"
-          title="오늘의 회복 플래너"
-          metric={planner.focusFactor ? pct(planner.focusFactor.pct) : "—"}
-          metricLabel={planner.focusFactor ? planner.focusFactor.label : "핵심 요인"}
-          summary={recoverySummary}
-          detail={recoveryDetail}
-          chips={(
-            <>
-              <DetailChip color={DETAIL_ACCENTS.mint}>{planner.nextDutyLabel}</DetailChip>
-              {planner.nextDuty ? <DetailChip color={DETAIL_ACCENTS.mint}>다음 {shiftKo(planner.nextDuty)}</DetailChip> : null}
-              <DetailChip color={DETAIL_ACCENTS.mint}>{syncLabel}</DetailChip>
-            </>
-          )}
-        />
+      <Link
+        href="/settings/personalization"
+        className="flex items-center justify-between rounded-apple border border-ios-sep bg-white px-4 py-4 shadow-apple transition-shadow duration-300 hover:shadow-apple-lg"
+      >
+        <div>
+          <div className="text-[12px] font-semibold text-ios-sub">Personalization</div>
+          <div className="mt-1 text-[16px] font-bold tracking-[-0.01em] text-ios-text">{t("개인화로 플래너 정밀도 높이기")}</div>
+          <div className="mt-1 text-[13px] text-ios-sub">{t("현재 설정 · {summary}", { summary: profileSummary })}</div>
+        </div>
+        <div className="text-[22px] text-ios-muted">›</div>
+      </Link>
 
-        <Link
-          href="/settings/personalization"
-          className="flex items-center justify-between rounded-apple border border-ios-sep bg-white px-4 py-4 shadow-apple transition-shadow duration-300 hover:shadow-apple-lg"
-        >
-          <div>
-            <div className="text-[12px] font-semibold text-ios-sub">Personalization</div>
-            <div className="mt-1 text-[16px] font-bold tracking-[-0.01em] text-ios-text">{t("개인화로 플래너 정밀도 높이기")}</div>
-            <div className="mt-1 text-[13px] text-ios-sub">{t("현재 설정 · {summary}", { summary: profileSummary })}</div>
-          </div>
-          <div className="text-[22px] text-ios-muted">›</div>
-        </Link>
+      {planner.aiAvailable && aiPlanner.error ? (
+        <DetailCard className="p-5 sm:p-6">
+          <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">AI 플래너 생성에 실패했어요.</div>
+          <p className="mt-2 text-[14px] leading-6 text-ios-sub">기존 플래너 미리보기는 계속 사용할 수 있어요. 다시 생성하면 최신 AI 내용으로 갱신됩니다.</p>
+          <button
+            type="button"
+            onClick={() => {
+              aiPlanner.retry();
+              aiPlanner.startGenerate();
+            }}
+            className="mt-4 inline-flex h-10 items-center justify-center rounded-full bg-black px-5 text-[13px] font-semibold text-white"
+          >
+            다시 생성
+          </button>
+        </DetailCard>
+      ) : null}
 
-        <Link
-          href="/insights/recovery/plan"
-          className="group block rounded-apple border border-ios-sep p-5 shadow-apple transition-shadow duration-300 hover:shadow-apple-lg"
-          style={{ backgroundImage: DETAIL_GRADIENTS.mint }}
-        >
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <div className="text-[12px] font-semibold text-ios-sub">Recovery Strategy</div>
-              <div className="mt-1 text-[18px] font-bold tracking-[-0.01em] text-ios-text">회복 처방</div>
-            </div>
-            <div className="text-[22px] text-ios-muted transition group-hover:text-ios-text">›</div>
-          </div>
+      {planner.aiAvailable && aiPlanner.generating ? (
+        <DetailCard className="p-5 sm:p-6">
+          <div className="text-[12px] font-semibold text-ios-sub">AI Planner</div>
+          <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-ios-text">오늘의 플래너를 생성하고 있어요.</div>
+          <p className="mt-2 text-[14px] leading-6 text-ios-sub">회복 처방, AI 회복 해설, 오늘 오더, 타임라인을 한 번에 새로 정리하고 있습니다.</p>
+        </DetailCard>
+      ) : null}
 
-          <div className="mt-4 flex items-end gap-2">
-            <div className="text-[36px] font-extrabold tracking-[-0.02em]" style={{ color: DETAIL_ACCENTS.mint }}>
-              {planner.focusFactor ? pct(planner.focusFactor.pct) : "—"}
-            </div>
-            <div className="pb-1 text-[14px] font-bold text-ios-text">{planner.focusFactor ? planner.focusFactor.label : "핵심 요인"}</div>
-          </div>
-          <div className="mt-2 text-[14px] text-ios-text">
-            <span className="font-bold" style={{ color: DETAIL_ACCENTS.mint }}>
-              {recoverySummary}
-            </span>
-          </div>
-          <div className="mt-1 text-[13px] text-ios-sub">다음 근무 전까지 회복 목표와 피해야 할 포인트를 먼저 정리합니다.</div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <DetailChip color={DETAIL_ACCENTS.mint}>{planner.nextDutyLabel}</DetailChip>
-            {hasTodayShift ? <DetailChip color={DETAIL_ACCENTS.mint}>{shiftKo(todayShift)}</DetailChip> : null}
-            {!planner.fullAccess && !planner.billingLoading ? (
-              <DetailChip color={DETAIL_ACCENTS.mint}>전체는 Pro</DetailChip>
-            ) : null}
-          </div>
-        </Link>
+      {!planner.aiAvailable && !planner.billingLoading ? (
+        <DetailCard className="p-5 sm:p-6">
+          <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">AI 플래너 생성은 Pro에서 사용할 수 있어요.</div>
+          <p className="mt-2 text-[14px] leading-6 text-ios-sub">지금은 기본 미리보기로 회복 방향을 확인하고, Pro에서는 각 카테고리의 AI 버전을 모두 볼 수 있어요.</p>
+        </DetailCard>
+      ) : null}
 
-        <Link
-          href="/insights/recovery/orders"
-          className="group block rounded-apple border border-ios-sep p-5 shadow-apple transition-shadow duration-300 hover:shadow-apple-lg"
-          style={{ backgroundImage: DETAIL_GRADIENTS.navy }}
-        >
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <div className="text-[12px] font-semibold text-ios-sub">Dr. RNEST&apos;s Orders</div>
-              <div className="mt-1 text-[18px] font-bold tracking-[-0.01em] text-ios-text">오늘 오더</div>
-            </div>
-            <div className="text-[22px] text-ios-muted transition group-hover:text-ios-text">›</div>
-          </div>
-
-          <div className="mt-4 flex items-end gap-2">
-            <div className="text-[36px] font-extrabold tracking-[-0.02em]" style={{ color: DETAIL_ACCENTS.navy }}>
-              {ordersSummary.count}
-            </div>
-            <div className="pb-1 text-[14px] font-bold text-ios-text">Orders</div>
-          </div>
-          <div className="mt-2 text-[14px] text-ios-text">
-            <span className="font-bold" style={{ color: DETAIL_ACCENTS.navy }}>
-              즉시 실행 오더 · {planner.ordersTop3[0]?.text ?? ordersSummary.headline}
-            </span>
-          </div>
-          <div className="mt-1 text-[13px] text-ios-sub">작은 오더부터 실행하면 회복 효율이 올라갑니다.</div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            {planner.ordersTop3.slice(0, 3).map((item) => (
-              <DetailChip key={`${item.rank}-${item.title}`} color={DETAIL_ACCENTS.navy}>
-                오더 {item.rank} · {item.title}
-              </DetailChip>
-            ))}
-            {!planner.fullAccess && !planner.billingLoading ? (
-              <DetailChip color={DETAIL_ACCENTS.navy}>전체는 Pro</DetailChip>
-            ) : null}
-          </div>
-        </Link>
-
-        <Link
-          href="/insights/recovery/timeline"
-          className="group block rounded-apple border border-ios-sep p-5 shadow-apple transition-shadow duration-300 hover:shadow-apple-lg"
-          style={{ backgroundImage: DETAIL_GRADIENTS.navy }}
-        >
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <div className="text-[12px] font-semibold text-ios-sub">Timeline Forecast</div>
-              <div className="mt-1 text-[18px] font-bold tracking-[-0.01em] text-ios-text">타임라인</div>
-            </div>
-            <div className="text-[22px] text-ios-muted transition group-hover:text-ios-text">›</div>
-          </div>
-          <div className="mt-4 text-[14px] text-ios-text">
-            <span className="font-bold" style={{ color: DETAIL_ACCENTS.navy }}>
-              {planner.timelinePreview[0]?.phase ?? "회복 흐름"} · {planner.timelinePreview[0]?.text ?? "시간대별 회복 흐름을 정리합니다."}
-            </span>
-          </div>
-          <div className="mt-1 text-[13px] text-ios-sub">출근 전, 근무 중, 퇴근 후에 무엇을 해야 하는지 시간순으로 보여줍니다.</div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            {planner.timelinePreview.map((item) => (
-              <DetailChip key={item.phase} color={DETAIL_ACCENTS.navy}>
-                {item.phase}
-              </DetailChip>
-            ))}
-            {!planner.fullAccess && !planner.billingLoading ? (
-              <DetailChip color={DETAIL_ACCENTS.navy}>전체는 Pro</DetailChip>
-            ) : null}
-          </div>
-        </Link>
-
-        <Link
-          href="/insights/recovery/ai"
-          className="group block rounded-apple border border-ios-sep p-5 shadow-apple transition-shadow duration-300 hover:shadow-apple-lg"
-          style={{ backgroundImage: DETAIL_GRADIENTS.mint }}
-        >
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <div className="text-[12px] font-semibold text-ios-sub">AI Recovery Brief</div>
-              <div className="mt-1 text-[18px] font-bold tracking-[-0.01em] text-ios-text">AI 회복 해설</div>
-            </div>
-            <div className="text-[22px] text-ios-muted transition group-hover:text-ios-text">›</div>
-          </div>
-          <div className="mt-4 text-[14px] text-ios-text">
-            <span className="font-bold" style={{ color: DETAIL_ACCENTS.mint }}>
-              왜 이런 우선순위가 잡혔는지 AI가 풀어 설명합니다.
-            </span>
-          </div>
-          <div className="mt-1 text-[13px] text-ios-sub">회복 포커스, 오늘 오더, 주간 흐름을 맥락 중심으로 정리합니다.</div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            {top3?.map((item) => (
-              <DetailChip key={item.key} color={DETAIL_ACCENTS.mint}>
-                TOP · {item.label} {pct(item.pct)}
-              </DetailChip>
-            ))}
-            {!planner.aiAvailable && !planner.billingLoading ? (
-              <DetailChip color={DETAIL_ACCENTS.mint}>Pro</DetailChip>
-            ) : null}
-          </div>
-        </Link>
-      </div>
+      <AIPlannerModuleLinkCard href="/insights/recovery/plan" accent="mint" module={plannerModules.prescription} itemPreviewCount={2} />
+      <AIPlannerModuleLinkCard href="/insights/recovery/ai" accent="rose" module={plannerModules.explanation} itemPreviewCount={0} />
+      <AIPlannerModuleLinkCard href="/insights/recovery/orders" accent="navy" module={plannerModules.orders} itemPreviewCount={2} />
+      <AIPlannerTimelineLinkCard href="/insights/recovery/timeline" accent="navy" module={plannerModules.timeline} itemPreviewCount={2} />
     </InsightDetailShell>
   );
 }

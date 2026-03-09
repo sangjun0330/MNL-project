@@ -7,7 +7,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { DetailCard, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
-import { useAIRecoveryInsights } from "@/components/insights/useAIRecoveryInsights";
+import { useAIRecoveryPlanner } from "@/components/insights/useAIRecoveryPlanner";
 import { INSIGHTS_MIN_DAYS, isInsightsLocked, useInsightsData } from "@/components/insights/useInsightsData";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { TodaySleepRequiredSheet } from "@/components/insights/TodaySleepRequiredSheet";
@@ -34,15 +34,6 @@ function presentError(error: string, t: (key: string) => string) {
     return [t("AI 응답 시간이 길어졌어요."), t("잠시 후 다시 시도해 주세요.")];
   }
   return [t("AI 호출에 실패했어요. 잠시 후 다시 시도해 주세요.")];
-}
-
-function compactErrorCode(error: string) {
-  if (!error) return "";
-  // 모델명(model:xxx) 제거
-  let code = error.split("{")[0]?.trim() || error;
-  code = code.replace(/_?model:[^\s_]*/gi, "");
-  code = code.replace(/__+/g, "_").replace(/^_|_$/g, "");
-  return code.length > 90 ? `${code.slice(0, 89)}…` : code;
 }
 
 function findSectionStart(text: string, label: "A" | "B" | "C" | "D") {
@@ -550,11 +541,12 @@ export function InsightsAIRecoveryDetail() {
   const insightsLocked = isInsightsLocked(recordedDays);
   const { hasEntitlement, loading: billingLoading } = useBillingAccess();
   const hasPlannerAIAccess = hasEntitlement("recoveryPlannerAI");
-  const { data, loading, generating, error, retry, startGenerate } = useAIRecoveryInsights({
+  const plannerAI = useAIRecoveryPlanner({
     mode: "generate",
     enabled: !insightsLocked && hasPlannerAIAccess,
     autoGenerate: false,
   });
+  const { data, loading, generating, error, retry } = plannerAI;
   const today = useMemo(() => todayISO(), []);
   const yesterday = useMemo(() => toISODate(addDays(fromISODate(today), -1)), [today]);
   const todayBio = state.bio?.[today] ?? null;
@@ -613,9 +605,10 @@ export function InsightsAIRecoveryDetail() {
       return;
     }
     setAnalysisRequested(true);
-    startGenerate();
-  }, [needsHealthInputGuide, startGenerate]);
+    plannerAI.startGenerate();
+  }, [needsHealthInputGuide, plannerAI]);
 
+  const recoveryResult = data?.result.explanation.recovery ?? null;
   const lang = data?.language ?? "ko";
   const englishTranslationPending =
     uiLang === "en" &&
@@ -627,9 +620,8 @@ export function InsightsAIRecoveryDetail() {
     !error &&
     (loading || generating);
   const errorLines = useMemo(() => (error ? presentError(error, t) : []), [error, t]);
-  const errorCode = useMemo(() => (error ? compactErrorCode(error) : ""), [error]);
   const weekly = useMemo(() => {
-    const w = data?.result.weeklySummary ?? null;
+    const w = recoveryResult?.weeklySummary ?? null;
     if (!w) return null;
     const normalizedPersonal = normalizeNarrativeText(w.personalInsight, lang);
     const normalizedPreview = normalizeNarrativeText(w.nextWeekPreview, lang);
@@ -644,23 +636,22 @@ export function InsightsAIRecoveryDetail() {
           ? normalizedPreview
           : buildWeeklyFallbackText(w, "preview", lang),
     };
-  }, [data?.result.weeklySummary, lang]);
+  }, [recoveryResult?.weeklySummary, lang]);
 
   const sectionsByCategory = useMemo(() => {
     const map = new Map<RecoverySection["category"], RecoverySection>();
-    for (const section of data?.result.sections ?? []) {
+    for (const section of recoveryResult?.sections ?? []) {
       if (!map.has(section.category)) {
         map.set(section.category, section);
       }
     }
     return map;
-  }, [data?.result.sections]);
+  }, [recoveryResult?.sections]);
 
   const orderedSections = useMemo(
     () =>
       CATEGORIES.map((meta) => ({ meta, section: sectionsByCategory.get(meta.key) ?? null }))
-        .filter((item) => item.section)
-        .slice(0, 3),
+        .filter((item) => item.section),
     [sectionsByCategory]
   );
   const toggleSectionExpanded = useCallback((category: RecoverySection["category"]) => {
@@ -686,17 +677,18 @@ export function InsightsAIRecoveryDetail() {
   }, [weekly, lang]);
 
   const cFallbackText = useMemo(() => {
-    if (!data?.generatedText || orderedSections.length > 0) return "";
-    return normalizeNarrativeText(extractCSection(data.generatedText), lang);
-  }, [data?.generatedText, lang, orderedSections.length]);
+    const generatedText = data?.explanationGeneratedText ?? data?.generatedText;
+    if (!generatedText || orderedSections.length > 0) return "";
+    return normalizeNarrativeText(extractCSection(generatedText), lang);
+  }, [data?.explanationGeneratedText, data?.generatedText, lang, orderedSections.length]);
   const alertLines = useMemo(() => {
-    const raw = data?.result.compoundAlert?.message ?? "";
+    const raw = recoveryResult?.compoundAlert?.message ?? "";
     if (!raw) return [];
     return normalizeLineBreaks(normalizeNarrativeText(raw, lang))
       .split(/\n+/)
       .map((line) => line.trim())
       .filter(Boolean);
-  }, [data?.result.compoundAlert?.message, lang]);
+  }, [recoveryResult?.compoundAlert?.message, lang]);
   const plannerContext = data?.plannerContext ?? null;
 
   return (
@@ -811,7 +803,7 @@ export function InsightsAIRecoveryDetail() {
               }
               setAnalysisRequested(true);
               retry();
-              startGenerate();
+              plannerAI.startGenerate();
             }}
             className="mt-4 w-full rounded-xl bg-[#007AFF] py-3 text-[15px] font-semibold text-white active:bg-[#0062CC] transition-colors"
           >
@@ -832,7 +824,7 @@ export function InsightsAIRecoveryDetail() {
                   {lang === "en" ? "TODAY RECOVERY" : "오늘 회복 브리핑"}
                 </div>
                 <p className="mt-2 break-keep text-[19px] font-bold leading-[1.6] tracking-[-0.03em] text-ios-text sm:text-[21px]">
-                  {normalizeNarrativeText(data.result.headline || t("요약이 비어 있어요."), lang)}
+                  {normalizeNarrativeText(recoveryResult?.headline || t("요약이 비어 있어요."), lang)}
                 </p>
                 <p className="mt-2 max-w-[560px] break-keep text-[13px] leading-6 text-ios-sub">
                   {t("오늘 컨디션과 최근 흐름을 기준으로 지금 가장 먼저 해야 할 회복 우선순위를 정리했어요.")}
@@ -867,11 +859,11 @@ export function InsightsAIRecoveryDetail() {
                 ) : null}
               </div>
 
-              {data.result.compoundAlert ? (
+              {recoveryResult?.compoundAlert ? (
                 <div className="rounded-[24px] bg-[#FFF4F6] px-4 py-4 shadow-[inset_0_0_0_1px_rgba(232,116,133,0.12)] sm:px-5">
                   <div className="flex flex-wrap items-center gap-2">
                     <RecoveryMetaPill color="#B2415A">{t("긴급 알림")}</RecoveryMetaPill>
-                    {data.result.compoundAlert.factors.map((factor) => (
+                    {recoveryResult.compoundAlert.factors.map((factor) => (
                       <RecoveryMetaPill key={factor} color="#E87485" subtle>
                         {factor}
                       </RecoveryMetaPill>
@@ -880,7 +872,7 @@ export function InsightsAIRecoveryDetail() {
                   <div className="mt-3 space-y-2">
                     {(alertLines.length
                       ? alertLines
-                      : [normalizeNarrativeText(data.result.compoundAlert.message, lang)]).map((line, idx) => (
+                      : [normalizeNarrativeText(recoveryResult.compoundAlert.message, lang)]).map((line, idx) => (
                       <p key={`alert-line-${idx}`} className="break-keep text-[14px] leading-7 text-ios-text">
                         {line}
                       </p>

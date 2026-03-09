@@ -1,24 +1,29 @@
 "use client";
 
-import { InsightDetailShell, DetailSummaryCard, DetailChip, DETAIL_ACCENTS } from "@/components/pages/insights/InsightDetailShell";
-import { useInsightsData, shiftKo, isInsightsLocked, INSIGHTS_MIN_DAYS } from "@/components/insights/useInsightsData";
-import { formatKoreanDate } from "@/lib/date";
-import { TimelineForecast } from "@/components/insights/v2/TimelineForecast";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
+import { AIPlannerTimelineDetailCard } from "@/components/insights/AIRecoveryPlannerCards";
 import { RecoveryPlannerUpgradeCard } from "@/components/insights/RecoveryPlannerUpgradeCard";
+import { useAIRecoveryPlanner } from "@/components/insights/useAIRecoveryPlanner";
 import { useRecoveryPlanner } from "@/components/insights/useRecoveryPlanner";
+import { DetailCard, DetailChip, DETAIL_ACCENTS, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
+import { useInsightsData, isInsightsLocked, INSIGHTS_MIN_DAYS, shiftKo } from "@/components/insights/useInsightsData";
+import { buildFallbackModules } from "@/lib/aiRecoveryPlanner";
+import { formatKoreanDate } from "@/lib/date";
 import { useI18n } from "@/lib/useI18n";
 
 export function InsightsTimelineDetail() {
   const { t } = useI18n();
-  const { end, todayShift, todayVital, hasTodayShift, recordedDays } = useInsightsData();
+  const { end, recordedDays, syncLabel, todayShift, hasTodayShift } = useInsightsData();
   const planner = useRecoveryPlanner();
-  const isRestDay = todayShift === "OFF" || todayShift === "VAC";
+  const aiPlanner = useAIRecoveryPlanner({
+    mode: "cache",
+    enabled: planner.aiAvailable && !isInsightsLocked(recordedDays),
+  });
 
   if (isInsightsLocked(recordedDays)) {
     return (
       <InsightDetailShell
-        title="타임라인 예보"
+        title="타임라인"
         subtitle={formatKoreanDate(end)}
         meta={t("건강 기록 3일 이상부터 타임라인이 열립니다.")}
         backHref="/insights/recovery"
@@ -28,86 +33,65 @@ export function InsightsTimelineDetail() {
     );
   }
 
-  const metaCopy = hasTodayShift
-    ? isRestDay
-      ? "휴식일 컨디션 기반으로 회복 루틴을 추천합니다."
-      : `${shiftKo(todayShift)} 기준으로 출근 전 · 근무 중 · 퇴근 후 회복 추천을 제공합니다.`
-    : "오늘 근무가 설정되지 않았어요. 일정에서 근무를 입력하면 타임라인 예보가 열립니다.";
-
-  const summaryLabel = isRestDay ? "휴식일 회복 추천" : "알고리즘 회복 추천";
-  const detailCopy = hasTodayShift
-    ? isRestDay
-      ? "근무 없이 회복을 최적화하는 휴식 루틴을 제공합니다."
-      : "출근 전 · 근무 중 · 퇴근 후 회복 루틴을 제공합니다."
-    : "근무가 입력되면 출근 전 · 근무 중 · 퇴근 후 회복 루틴을 제공합니다.";
+  const fallback = buildFallbackModules({
+    language: "ko",
+    plannerContext: {
+      focusFactor: planner.focusFactor,
+      primaryAction: planner.primaryAction,
+      avoidAction: planner.avoidAction,
+      nextDuty: planner.nextDuty,
+      nextDutyDate: planner.nextDutyDate,
+      plannerTone: planner.tone,
+      ordersTop3: planner.ordersTop3,
+    },
+    nextDutyLabel: planner.nextDutyLabel,
+    timelinePreview: planner.timelinePreview,
+  });
 
   return (
-    <InsightDetailShell title="타임라인" subtitle={formatKoreanDate(end)} meta={metaCopy} backHref="/insights/recovery">
-      <DetailSummaryCard
-        accent="navy"
-        label="Timeline Forecast"
-        title="오늘의 회복 흐름"
-        metric={hasTodayShift ? shiftKo(todayShift) : "—"}
-        metricLabel="Shift"
-        summary={(
-          <>
-            <span className="font-bold">{summaryLabel}</span>
-            {hasTodayShift ? <> · {shiftKo(todayShift)} 기준</> : null}
-          </>
-        )}
-        detail={detailCopy}
-        chips={(
-          <>
-            {hasTodayShift ? (
-              isRestDay ? (
-                <>
-                  <DetailChip color={DETAIL_ACCENTS.navy}>휴식 최적화</DetailChip>
-                  <DetailChip color={DETAIL_ACCENTS.navy}>리듬 회복</DetailChip>
-                </>
-              ) : (
-                <>
-                  <DetailChip color={DETAIL_ACCENTS.navy}>근무 단계별</DetailChip>
-                  <DetailChip color={DETAIL_ACCENTS.navy}>알고리즘 분석</DetailChip>
-                </>
-              )
-            ) : (
-              <DetailChip color={DETAIL_ACCENTS.navy}>근무 설정 필요</DetailChip>
-            )}
-          </>
-        )}
-      />
-
+    <InsightDetailShell
+      title="타임라인"
+      subtitle={formatKoreanDate(end)}
+      meta="하루가 흘러가는 순서에 맞춰 언제 무엇을 해야 하는지 AI가 정리합니다."
+      backHref="/insights/recovery"
+      chips={
+        <>
+          <DetailChip color={DETAIL_ACCENTS.mint}>{planner.nextDutyLabel}</DetailChip>
+          {hasTodayShift ? <DetailChip color={DETAIL_ACCENTS.navy}>{shiftKo(todayShift)}</DetailChip> : null}
+          <DetailChip color={DETAIL_ACCENTS.navy}>{syncLabel}</DetailChip>
+        </>
+      }
+    >
       {planner.billingLoading ? (
-        <div className="rounded-apple border border-ios-sep bg-white p-5 shadow-apple">
+        <DetailCard className="p-5 sm:p-6">
           <div className="text-[13px] font-semibold text-ios-sub">Access</div>
           <div className="mt-1 text-[17px] font-bold tracking-[-0.02em] text-ios-text">타임라인 접근 상태를 확인하고 있어요.</div>
-          <div className="mt-2 text-[14px] leading-6 text-ios-sub">시간대별 회복 흐름 전체를 보여줄 수 있는지 확인 중입니다.</div>
-        </div>
+        </DetailCard>
       ) : !planner.fullAccess ? (
         <>
-          <div className="rounded-apple border border-ios-sep bg-white p-5 shadow-apple">
-            <div className="text-[12px] font-semibold text-ios-sub">Preview</div>
-            <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-ios-text">시간대별 회복 흐름 미리보기</div>
-            <div className="mt-4 space-y-3">
-              {planner.timelinePreview.slice(0, 1).map((item) => (
-                <div key={item.phase} className="rounded-2xl border border-ios-sep bg-ios-bg px-4 py-4">
-                  <div className="text-[12px] font-semibold text-ios-sub">{item.phase}</div>
-                  <div className="mt-1 text-[14px] leading-6 text-ios-sub">{item.text}</div>
-                </div>
-              ))}
-            </div>
-          </div>
+          <AIPlannerTimelineDetailCard accent="navy" module={fallback.timeline} />
           <RecoveryPlannerUpgradeCard
             title="타임라인 전체는 Pro에서 열립니다."
-            description="출근 전, 근무 중, 퇴근 후 흐름을 시간대별로 모두 확인할 수 있어요."
+            description="시간대별 행동 흐름과 주의 포인트를 모두 확인할 수 있어요."
             returnTo="/insights/recovery/timeline"
           />
         </>
-      ) : hasTodayShift ? (
-        <div className="mt-4">
-          <TimelineForecast shift={todayShift} vital={todayVital} />
-        </div>
-      ) : null}
+      ) : aiPlanner.data ? (
+        <AIPlannerTimelineDetailCard accent="navy" module={aiPlanner.data.result.timeline} />
+      ) : aiPlanner.loading ? (
+        <DetailCard className="p-5 sm:p-6">
+          <div className="text-[13px] font-semibold text-ios-sub">AI Planner</div>
+          <div className="mt-1 text-[17px] font-bold tracking-[-0.02em] text-ios-text">AI 타임라인을 불러오고 있어요.</div>
+        </DetailCard>
+      ) : (
+        <>
+          <AIPlannerTimelineDetailCard accent="navy" module={fallback.timeline} />
+          <DetailCard className="p-5 sm:p-6">
+            <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">AI 플래너를 아직 생성하지 않았어요.</div>
+            <p className="mt-2 text-[14px] leading-6 text-ios-sub">회복 플래너 허브 오른쪽 상단의 생성 버튼을 누르면 타임라인이 AI 버전으로 채워집니다.</p>
+          </DetailCard>
+        </>
+      )}
     </InsightDetailShell>
   );
 }

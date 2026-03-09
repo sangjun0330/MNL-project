@@ -1,32 +1,29 @@
 "use client";
 
-import {
-  InsightDetailShell,
-  DetailSummaryCard,
-  DetailChip,
-  DETAIL_ACCENTS,
-} from "@/components/pages/insights/InsightDetailShell";
-import { useInsightsData, shiftKo, isInsightsLocked, INSIGHTS_MIN_DAYS } from "@/components/insights/useInsightsData";
-import { formatKoreanDate } from "@/lib/date";
-import { RecoveryPrescription } from "@/components/insights/RecoveryPrescription";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
+import { AIPlannerModuleDetailCard } from "@/components/insights/AIRecoveryPlannerCards";
 import { RecoveryPlannerUpgradeCard } from "@/components/insights/RecoveryPlannerUpgradeCard";
+import { useAIRecoveryPlanner } from "@/components/insights/useAIRecoveryPlanner";
 import { useRecoveryPlanner } from "@/components/insights/useRecoveryPlanner";
+import { DetailCard, DetailChip, DETAIL_ACCENTS, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
+import { useInsightsData, isInsightsLocked, INSIGHTS_MIN_DAYS, shiftKo } from "@/components/insights/useInsightsData";
+import { buildFallbackModules } from "@/lib/aiRecoveryPlanner";
+import { formatKoreanDate } from "@/lib/date";
 import { useI18n } from "@/lib/useI18n";
-
-function pct(p: number) {
-  return `${Math.round(p * 100)}%`;
-}
 
 export function InsightsRecoveryPlanDetail() {
   const { t } = useI18n();
-  const { end, state, top1, top3, syncLabel, todayShift, hasTodayShift, recordedDays } = useInsightsData();
+  const { end, recordedDays, syncLabel, todayShift, hasTodayShift } = useInsightsData();
   const planner = useRecoveryPlanner();
+  const aiPlanner = useAIRecoveryPlanner({
+    mode: "cache",
+    enabled: planner.aiAvailable && !isInsightsLocked(recordedDays),
+  });
 
   if (isInsightsLocked(recordedDays)) {
     return (
       <InsightDetailShell
-        title="다음 듀티까지 회복 처방"
+        title="회복 처방"
         subtitle={formatKoreanDate(end)}
         meta={t("건강 기록 3일 이상부터 회복 처방이 열립니다.")}
         backHref="/insights/recovery"
@@ -36,74 +33,61 @@ export function InsightsRecoveryPlanDetail() {
     );
   }
 
-  const summary = top1 ? (
-    <>
-      <span className="font-bold">회복 포커스</span> · {top1.label}
-    </>
-  ) : (
-    <span className="font-bold">회복 포커스</span>
-  );
-
-  const detail = top1
-    ? `${top1.label} 비중 ${pct(top1.pct)} · 회복 처방을 가장 먼저 확인하세요.`
-    : "기록이 쌓이면 회복 처방이 더 정교해져요.";
+  const fallback = buildFallbackModules({
+    language: "ko",
+    plannerContext: {
+      focusFactor: planner.focusFactor,
+      primaryAction: planner.primaryAction,
+      avoidAction: planner.avoidAction,
+      nextDuty: planner.nextDuty,
+      nextDutyDate: planner.nextDutyDate,
+      plannerTone: planner.tone,
+      ordersTop3: planner.ordersTop3,
+    },
+    nextDutyLabel: planner.nextDutyLabel,
+    timelinePreview: planner.timelinePreview,
+  });
 
   return (
     <InsightDetailShell
       title="회복 처방"
       subtitle={formatKoreanDate(end)}
-      meta="다음 실제 근무 전까지 무엇을 먼저 회복해야 하는지 전략 중심으로 정리합니다."
+      meta="다음 실제 근무 전까지 무엇을 먼저 회복해야 하는지 AI 전략 중심으로 정리합니다."
       backHref="/insights/recovery"
+      chips={
+        <>
+          <DetailChip color={DETAIL_ACCENTS.mint}>{planner.nextDutyLabel}</DetailChip>
+          {planner.nextDuty ? <DetailChip color={DETAIL_ACCENTS.mint}>다음 {shiftKo(planner.nextDuty)}</DetailChip> : null}
+          {hasTodayShift ? <DetailChip color={DETAIL_ACCENTS.navy}>{shiftKo(todayShift)}</DetailChip> : null}
+          <DetailChip color={DETAIL_ACCENTS.navy}>{syncLabel}</DetailChip>
+        </>
+      }
     >
-      <DetailSummaryCard
-        accent="mint"
-        label="Personalized Recovery"
-        title="다음 근무까지의 회복 전략"
-        metric={top1 ? pct(top1.pct) : "—"}
-        metricLabel={top1 ? top1.label : "핵심 요인"}
-        summary={summary}
-        detail={planner.primaryAction ? `지금 할 1개 · ${planner.primaryAction}` : detail}
-        chips={(
-          <>
-            <DetailChip color={DETAIL_ACCENTS.mint}>{planner.nextDutyLabel}</DetailChip>
-            {planner.nextDuty ? <DetailChip color={DETAIL_ACCENTS.mint}>다음 {shiftKo(planner.nextDuty)}</DetailChip> : null}
-            <DetailChip color={DETAIL_ACCENTS.mint}>{syncLabel}</DetailChip>
-            {hasTodayShift ? <DetailChip color={DETAIL_ACCENTS.mint}>{shiftKo(todayShift)}</DetailChip> : null}
-            {top3?.map((t) => (
-              <DetailChip key={t.key} color={DETAIL_ACCENTS.mint}>
-                TOP · {t.label} {pct(t.pct)}
-              </DetailChip>
-            ))}
-          </>
-        )}
-      />
-
       {planner.billingLoading ? (
-        <div className="rounded-apple border border-ios-sep bg-white p-5 shadow-apple">
+        <DetailCard className="p-5 sm:p-6">
           <div className="text-[13px] font-semibold text-ios-sub">Access</div>
-          <div className="mt-1 text-[17px] font-bold tracking-[-0.02em] text-ios-text">플랜 접근 상태를 확인하고 있어요.</div>
-          <div className="mt-2 text-[14px] leading-6 text-ios-sub">회복 처방 전체를 보여줄 수 있는지 확인 중입니다.</div>
-        </div>
+          <div className="mt-1 text-[17px] font-bold tracking-[-0.02em] text-ios-text">회복 처방 접근 상태를 확인하고 있어요.</div>
+        </DetailCard>
       ) : !planner.fullAccess ? (
         <>
-          <div className="rounded-apple border border-ios-sep bg-white p-5 shadow-apple">
-            <div className="text-[13px] font-semibold text-ios-sub">Preview</div>
-            <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-ios-text">이번 회복 목표</div>
-            <div className="mt-3 rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3">
-              <div className="text-[12px] font-semibold text-ios-sub">지금 할 1개</div>
-              <div className="mt-1 text-[15px] font-semibold leading-6 text-ios-text">{planner.primaryAction ?? t("기록이 쌓이면 회복 목표가 더 정교해져요.")}</div>
-            </div>
-            <div className="mt-3 rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3">
-              <div className="text-[12px] font-semibold text-ios-sub">피해야 할 것</div>
-              <div className="mt-1 text-[14px] leading-6 text-ios-sub">{planner.avoidAction ?? t("늦은 자극과 무리한 일정은 줄여 주세요.")}</div>
-            </div>
-          </div>
+          <AIPlannerModuleDetailCard accent="mint" module={fallback.prescription} />
           <RecoveryPlannerUpgradeCard title="회복 처방 전체는 Pro에서 열립니다." returnTo="/insights/recovery/plan" />
         </>
+      ) : aiPlanner.data ? (
+        <AIPlannerModuleDetailCard accent="mint" module={aiPlanner.data.result.prescription} />
+      ) : aiPlanner.loading ? (
+        <DetailCard className="p-5 sm:p-6">
+          <div className="text-[13px] font-semibold text-ios-sub">AI Planner</div>
+          <div className="mt-1 text-[17px] font-bold tracking-[-0.02em] text-ios-text">AI 회복 처방을 불러오고 있어요.</div>
+        </DetailCard>
       ) : (
-        <div className="mt-4">
-          <RecoveryPrescription state={state} pivotISO={end} />
-        </div>
+        <>
+          <AIPlannerModuleDetailCard accent="mint" module={fallback.prescription} />
+          <DetailCard className="p-5 sm:p-6">
+            <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">AI 플래너를 아직 생성하지 않았어요.</div>
+            <p className="mt-2 text-[14px] leading-6 text-ios-sub">회복 플래너 허브 오른쪽 상단의 생성 버튼을 누르면 오늘 처방이 AI 버전으로 채워집니다.</p>
+          </DetailCard>
+        </>
       )}
     </InsightDetailShell>
   );

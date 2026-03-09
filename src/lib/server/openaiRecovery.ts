@@ -1,4 +1,5 @@
 import type { AIRecoveryResult, CompoundAlert, RecoverySection, WeeklySummary } from "@/lib/aiRecovery";
+import type { AIRecoveryPlannerModules, AIPlannerModule, AIPlannerModuleItem, AIPlannerTimelineModule, AIPlannerTimelineItem } from "@/lib/aiRecoveryPlanner";
 import type { Language } from "@/lib/i18n";
 import type { ProfileSettings } from "@/lib/model";
 import type { PlannerContext } from "@/lib/recoveryPlanner";
@@ -1594,5 +1595,316 @@ export async function translateAIRecoveryToEnglish(
     if (err?.name === "AbortError") throw new Error(`openai_timeout_model:${model}`);
     if (typeof err?.message === "string" && err.message.trim()) throw new Error(err.message.trim());
     throw new Error(`openai_fetch_model:${model}_${truncateError(err?.message ?? "unknown")}`);
+  }
+}
+
+export type OpenAIRecoveryPlannerModulesOutput = {
+  result: AIRecoveryPlannerModules;
+  generatedText: string;
+  engine: "openai";
+  model: string | null;
+  debug: string | null;
+};
+
+function buildPlannerDeveloperPrompt(language: Language) {
+  if (language === "ko") {
+    return [
+      "너는 RNest의 회복 플래너 생성 엔진이야.",
+      "교대근무 간호사의 기록, 근무 패턴, plannerContext를 읽고 회복 처방·오늘 오더·타임라인을 전문적이고 실행 가능한 문장으로 정리해.",
+      "plannerContext는 최우선 가드레일이다.",
+      "새로운 우선순위를 임의로 만들지 말고 plannerContext.focusFactor, primaryAction, avoidAction과 정렬해.",
+      "내용은 의료 진단이 아니라 회복 운영 가이드여야 한다.",
+      "출력은 반드시 JSON 하나만 반환해.",
+    ].join(" ");
+  }
+
+  return [
+    "You are RNest's recovery planner generation engine.",
+    "Read the nurse's records, shift flow, and plannerContext, then produce professional but actionable recovery strategy, orders, and timeline guidance.",
+    "plannerContext is the primary guardrail.",
+    "Do not invent a conflicting priority. Stay aligned with plannerContext.focusFactor, primaryAction, and avoidAction.",
+    "This is not medical diagnosis. It is a recovery operations guide.",
+    "Return only one JSON object.",
+  ].join(" ");
+}
+
+function buildPlannerUserPrompt(language: Language, context: ReturnType<typeof buildUserContext>) {
+  const baseShape = {
+    heroTitle: language === "en" ? "Today Recovery Planner" : "오늘의 회복 플래너",
+    heroSummary: "string",
+    prescription: {
+      eyebrow: "string",
+      title: "string",
+      headline: "string",
+      summary: "string",
+      items: [
+        { label: "string", title: "string", body: "string", chips: ["string"] },
+      ],
+    },
+    orders: {
+      eyebrow: "string",
+      title: "string",
+      headline: "string",
+      summary: "string",
+      items: [
+        { label: "string", title: "string", body: "string", chips: ["string"] },
+      ],
+    },
+    timeline: {
+      eyebrow: "string",
+      title: "string",
+      headline: "string",
+      summary: "string",
+      items: [
+        { phase: "string", focus: "string", body: "string", caution: "string" },
+      ],
+    },
+  };
+
+  if (language === "ko") {
+    return [
+      "아래 Data JSON을 읽고 회복 플래너 3개 카테고리를 생성하세요.",
+      "반드시 JSON 하나만 출력하세요. 코드펜스 금지, 설명문 금지.",
+      "",
+      "[공통 원칙]",
+      "- plannerContext.focusFactor가 있으면 모든 카테고리의 첫 문장과 우선순위가 여기에 맞아야 함",
+      "- plannerContext.primaryAction과 avoidAction과 충돌 금지",
+      "- workEventTags, workEventNote, note가 있으면 근무 맥락에 반영",
+      "- 수치가 필요한 경우 Data JSON에 있는 값만 사용",
+      "- 문장은 짧고 전문적이며 실행 가능하게 작성",
+      "",
+      "[회복 처방 프롬프트]",
+      "- 다음 실제 근무 전까지 무엇을 먼저 회복해야 하는지 전략 중심으로 작성",
+      "- items는 정확히 4개",
+      "- 권장 label 순서: 이번 회복 목표 / 지금 할 1개 / 피해야 할 것 / 다음 근무 전 체크",
+      "",
+      "[오늘 오더 프롬프트]",
+      "- 지금 바로 실행 가능한 행동 리스트로 작성",
+      "- items는 정확히 4개",
+      "- 각 body는 1~2문장, 모호한 추상어 금지",
+      "",
+      "[타임라인 프롬프트]",
+      "- 시간대 순서대로 작성",
+      "- items는 정확히 4개",
+      "- phase는 시간대명, focus는 핵심 포인트, body는 실행 문장",
+      "- 근무가 없으면 휴식일 루틴 기준으로 작성",
+      "",
+      "[JSON shape]",
+      JSON.stringify(baseShape, null, 2),
+      "",
+      "[Data JSON]",
+      JSON.stringify(context, null, 2),
+    ].join("\n");
+  }
+
+  return [
+    "Read the Data JSON and create the 3 recovery planner categories.",
+    "Return one JSON object only. No code fences and no extra commentary.",
+    "",
+    "[Shared rules]",
+    "- Stay aligned with plannerContext.focusFactor, primaryAction, and avoidAction",
+    "- Reflect workEventTags, workEventNote, and note when present",
+    "- Use only numbers that exist in Data JSON",
+    "- Keep every sentence short, professional, and actionable",
+    "",
+    "[Recovery strategy prompt]",
+    "- Explain what to protect first before the next actual shift",
+    "- items must be exactly 4",
+    "- Recommended labels order: Main goal / Do this now / Avoid / Before next shift",
+    "",
+    "[Today orders prompt]",
+    "- Write immediate executable actions",
+    "- items must be exactly 4",
+    "- Each body must be concrete, 1-2 sentences max",
+    "",
+    "[Timeline prompt]",
+    "- Write in chronological order",
+    "- items must be exactly 4",
+    "- phase is the time block, focus is the key point, body is the action sentence",
+    "- If there is no shift, write a rest-day routine",
+    "",
+    "[JSON shape]",
+    JSON.stringify(baseShape, null, 2),
+    "",
+    "[Data JSON]",
+    JSON.stringify(context, null, 2),
+  ].join("\n");
+}
+
+function parsePlannerModuleItems(value: unknown): AIPlannerModuleItem[] {
+  if (!Array.isArray(value)) return [];
+  const items: AIPlannerModuleItem[] = [];
+  for (const item of value) {
+    const row = typeof item === "object" && item !== null ? (item as Record<string, unknown>) : null;
+    if (!row) continue;
+    const title = asString(row.title);
+    const body = asString(row.body);
+    if (!title || !body) continue;
+    items.push({
+      label: asString(row.label) || "",
+      title,
+      body,
+      chips: asStringArray(row.chips).slice(0, 4),
+    });
+  }
+  return items;
+}
+
+function parsePlannerTimelineItems(value: unknown): AIPlannerTimelineItem[] {
+  if (!Array.isArray(value)) return [];
+  const items: AIPlannerTimelineItem[] = [];
+  for (const item of value) {
+    const row = typeof item === "object" && item !== null ? (item as Record<string, unknown>) : null;
+    if (!row) continue;
+    const phase = asString(row.phase);
+    const focus = asString(row.focus);
+    const body = asString(row.body);
+    if (!phase || !body) continue;
+    items.push({
+      phase,
+      focus: focus || phase,
+      body,
+      caution: asString(row.caution) || null,
+    });
+  }
+  return items;
+}
+
+function parsePlannerModule(
+  value: unknown,
+  fallback: { eyebrow: string; title: string; headline: string; summary: string }
+): AIPlannerModule {
+  const row = typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+  return {
+    eyebrow: asString(row.eyebrow) || fallback.eyebrow,
+    title: asString(row.title) || fallback.title,
+    headline: asString(row.headline) || fallback.headline,
+    summary: asString(row.summary) || fallback.summary,
+    items: parsePlannerModuleItems(row.items),
+  };
+}
+
+function parsePlannerTimelineModule(
+  value: unknown,
+  fallback: { eyebrow: string; title: string; headline: string; summary: string }
+): AIPlannerTimelineModule {
+  const row = typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+  return {
+    eyebrow: asString(row.eyebrow) || fallback.eyebrow,
+    title: asString(row.title) || fallback.title,
+    headline: asString(row.headline) || fallback.headline,
+    summary: asString(row.summary) || fallback.summary,
+    items: parsePlannerTimelineItems(row.items),
+  };
+}
+
+function parsePlannerModulesFromJson(
+  candidate: Record<string, unknown>,
+  language: Language,
+  plannerContext: PlannerContext | null | undefined
+): AIRecoveryPlannerModules {
+  const focusLabel = plannerContext?.focusFactor?.label ?? (language === "en" ? "Today recovery" : "오늘 회복");
+  const heroTitle = asString(candidate.heroTitle) || (language === "en" ? "Today Recovery Planner" : "오늘의 회복 플래너");
+  const heroSummary =
+    asString(candidate.heroSummary) ||
+    (language === "en"
+      ? `Protect ${focusLabel.toLowerCase()} first and start from one action now.`
+      : `${focusLabel}를 먼저 지키고, 지금 할 1개부터 바로 실행하세요.`);
+
+  return {
+    heroTitle,
+    heroSummary,
+    prescription: parsePlannerModule(candidate.prescription, {
+      eyebrow: "Recovery Strategy",
+      title: language === "en" ? "Recovery Strategy" : "회복 처방",
+      headline: focusLabel,
+      summary:
+        language === "en"
+          ? "Strategic priorities before the next actual shift."
+          : "다음 실제 근무 전까지 가장 먼저 지켜야 할 전략입니다.",
+    }),
+    orders: parsePlannerModule(candidate.orders, {
+      eyebrow: "Today Orders",
+      title: language === "en" ? "Today Orders" : "오늘 오더",
+      headline:
+        language === "en" ? "Immediate actions for today’s condition." : "지금 상태에서 바로 실행할 행동들입니다.",
+      summary:
+        language === "en"
+          ? "Small concrete actions make recovery easier to hold."
+          : "작고 구체적인 행동부터 시작하면 회복 루틴이 더 잘 유지됩니다.",
+    }),
+    timeline: parsePlannerTimelineModule(candidate.timeline, {
+      eyebrow: "Timeline Forecast",
+      title: language === "en" ? "Timeline" : "타임라인",
+      headline:
+        language === "en"
+          ? "Place recovery in the order your day unfolds."
+          : "하루가 흘러가는 순서대로 회복 포인트를 배치했습니다.",
+      summary:
+        language === "en"
+          ? "Timing matters as much as the action itself."
+          : "무엇을 하느냐만큼 언제 하느냐도 중요합니다.",
+    }),
+  };
+}
+
+export async function generateAIRecoveryPlannerModulesWithOpenAI(
+  params: GenerateOpenAIRecoveryParams
+): Promise<OpenAIRecoveryPlannerModulesOutput> {
+  const apiKey = normalizeApiKey();
+  const model = resolveModel();
+  if (!apiKey) {
+    throw new Error("missing_openai_api_key");
+  }
+
+  const context = buildUserContext(params);
+  const developerPrompt = buildPlannerDeveloperPrompt(params.language);
+  const userPrompt = buildPlannerUserPrompt(params.language, context);
+  const maxOutputTokens = Math.max(resolveMaxOutputTokens(), 2400);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 40_000);
+
+  try {
+    const attempt = await callResponsesApi({
+      apiKey,
+      model,
+      developerPrompt,
+      userPrompt,
+      signal: controller.signal,
+      maxOutputTokens,
+    });
+
+    if (!attempt.text) {
+      throw new Error(attempt.error ?? `openai_request_failed_model:${model}`);
+    }
+
+    const generatedText = attempt.text.trim();
+    const parsed = parseJsonObject(generatedText);
+    if (!parsed) {
+      throw new Error(`openai_planner_non_json_model:${model}`);
+    }
+
+    const plannerModules = parsePlannerModulesFromJson(parsed, params.language, params.plannerContext);
+    if (!plannerModules.prescription.items.length || !plannerModules.orders.items.length || !plannerModules.timeline.items.length) {
+      throw new Error(`openai_planner_incomplete_model:${model}`);
+    }
+
+    return {
+      result: plannerModules,
+      generatedText,
+      engine: "openai",
+      model,
+      debug: null,
+    };
+  } catch (err: any) {
+    if (err?.name === "AbortError") {
+      throw new Error(`openai_timeout_model:${model}`);
+    }
+    if (typeof err?.message === "string" && err.message.trim()) {
+      throw new Error(err.message.trim());
+    }
+    throw new Error(`openai_fetch_model:${model}_${truncateError(err?.message ?? "unknown")}`);
+  } finally {
+    clearTimeout(timer);
   }
 }
