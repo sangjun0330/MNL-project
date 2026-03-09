@@ -1,8 +1,19 @@
 "use client";
 
+import Link from "next/link";
 import { useI18n } from "@/lib/useI18n";
 
-export function InsightsLockedNotice({ recordedDays, minDays = 3 }: { recordedDays: number; minDays?: number }) {
+export function InsightsLockedNotice({
+  recordedDays,
+  minDays = 3,
+  ctaHref = "/schedule?openHealthLog=today&focus=sleep",
+  ctaLabel,
+}: {
+  recordedDays: number;
+  minDays?: number;
+  ctaHref?: string;
+  ctaLabel?: string;
+}) {
   const remaining = Math.max(minDays - recordedDays, 0);
   const { t } = useI18n();
   return (
@@ -19,6 +30,20 @@ export function InsightsLockedNotice({ recordedDays, minDays = 3 }: { recordedDa
       </div>
       <div className="mt-4 text-[12px] text-ios-muted">
         {t("수면/스트레스/활동/기분/낮잠/증상/카페인 중 하나라도 입력된 날짜가 기록일로 집계됩니다.")}
+      </div>
+      <div className="mt-5 flex gap-2">
+        <Link
+          href={ctaHref}
+          className="inline-flex h-11 items-center justify-center rounded-full bg-black px-5 text-[13px] font-semibold text-white"
+        >
+          {ctaLabel ?? t("오늘 기록하러 가기")}
+        </Link>
+        <Link
+          href="/schedule"
+          className="inline-flex h-11 items-center justify-center rounded-full border border-ios-sep bg-white px-5 text-[13px] font-semibold text-ios-text"
+        >
+          {t("일정 보기")}
+        </Link>
       </div>
     </div>
   );

@@ -97,7 +97,11 @@ export function InsightsTimelineDetail() {
               ))}
             </div>
           </div>
-          <RecoveryPlannerUpgradeCard title="타임라인 전체는 Pro에서 열립니다." description="출근 전, 근무 중, 퇴근 후 흐름을 시간대별로 모두 확인할 수 있어요." />
+          <RecoveryPlannerUpgradeCard
+            title="타임라인 전체는 Pro에서 열립니다."
+            description="출근 전, 근무 중, 퇴근 후 흐름을 시간대별로 모두 확인할 수 있어요."
+            returnTo="/insights/recovery/timeline"
+          />
         </>
       ) : hasTodayShift ? (
         <div className="mt-4">

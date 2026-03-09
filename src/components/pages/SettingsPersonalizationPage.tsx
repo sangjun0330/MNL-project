@@ -40,6 +40,28 @@ export function SettingsPersonalizationPage() {
     []
   );
 
+  const plannerPreviewLines = useMemo(() => {
+    const lines: string[] = [];
+    if (chronotype === "morning") {
+      lines.push("아침형 리듬 기준으로 나이트 전환 시 낮잠·빛 차단을 조금 더 일찍 강조합니다.");
+    } else if (chronotype === "evening") {
+      lines.push("저녁형 리듬 기준으로 데이 근무 전 취침을 더 앞당기도록 안내합니다.");
+    } else {
+      lines.push("중간형 리듬 기준으로 근무 전후 수면/빛 조절을 균형 있게 안내합니다.");
+    }
+
+    if (caffeineSensitivity === "high") {
+      lines.push("카페인 컷오프 시간을 더 앞당겨 늦은 섭취 간섭을 줄이도록 반영합니다.");
+    } else if (caffeineSensitivity === "low") {
+      lines.push("카페인 컷오프를 약간 유연하게 보되, 근무 후반 과다 섭취는 계속 경고합니다.");
+    } else {
+      lines.push("일반적인 컷오프 기준으로 수면 간섭을 줄이는 방향으로 반영합니다.");
+    }
+
+    lines.push("AI 회복 해설도 같은 설정을 기준으로 오늘 플랜의 이유를 설명합니다.");
+    return lines;
+  }, [caffeineSensitivity, chronotype]);
+
   return (
     <div className="mx-auto w-full max-w-[720px] px-4 pb-24 pt-6">
       <div className="mb-4 flex items-center gap-2">
@@ -97,6 +119,18 @@ export function SettingsPersonalizationPage() {
           </div>
           <div className="mt-3 rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3 text-[13px] leading-6 text-ios-sub">
             {caffeineSensitivityPresetDescription(caffeineSensitivity)}
+          </div>
+        </div>
+
+        <div className="rounded-apple border border-ios-sep bg-white p-5 shadow-apple">
+          <div className="text-[13px] font-semibold text-ios-sub">Planner Preview</div>
+          <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-ios-text">현재 설정이 반영되는 방식</div>
+          <div className="mt-3 space-y-2">
+            {plannerPreviewLines.map((line) => (
+              <div key={line} className="rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3 text-[13px] leading-6 text-ios-sub">
+                {line}
+              </div>
+            ))}
           </div>
         </div>
       </div>

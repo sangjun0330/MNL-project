@@ -59,7 +59,11 @@ export function InsightsRecoveryOrdersDetail() {
               ))}
             </div>
           </div>
-          <RecoveryPlannerUpgradeCard title="오늘 오더 전체는 Pro에서 열립니다." description="지금 바로 실행할 오더 전체와 맞춤 회복 오더 상세를 확인할 수 있어요." />
+          <RecoveryPlannerUpgradeCard
+            title="오늘 오더 전체는 Pro에서 열립니다."
+            description="지금 바로 실행할 오더 전체와 맞춤 회복 오더 상세를 확인할 수 있어요."
+            returnTo="/insights/recovery/orders"
+          />
         </>
       ) : (
         <OrdersDetailBlocks state={state} pivotISO={end} todayShift={todayShift} ordersSummary={ordersSummary} />

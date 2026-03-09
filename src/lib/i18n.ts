@@ -756,6 +756,13 @@ const EN_EXTRA: Record<string, string> = {
   "이번 주 흐름 해설": "This week's recovery flow",
   "영어 번역 적용 중": "Applying English translation",
   "영어로 표시하는 중이에요. 조금만 기다려 주세요.": "Displaying in English. Please wait a moment.",
+  "회복 플래너로 돌아가기": "Back to recovery planner",
+  "인사이트로 돌아가기": "Back to insights",
+  "이전 화면으로 돌아가기": "Back to previous screen",
+  "업그레이드 후 복귀": "Return after upgrade",
+  "결제가 완료되면 원래 보던 화면으로 바로 돌아갈 수 있게 연결해 둘게요.":
+    "After payment, we'll keep the path ready so you can go straight back to what you were viewing.",
+  "플랜만 보고 돌아가기": "View plans and go back",
   "오늘 건강 기록": "Today's health log",
   "전날 건강 기록": "Yesterday's health log",
   "오늘 수면 시간": "Today's sleep time",
@@ -1095,6 +1102,8 @@ const EN_EXTRA: Record<string, string> = {
 
   "회복 플래너": "Recovery planner",
   "건강 기록 3일 이상부터 회복 플래너가 열립니다.": "Recovery planner opens after 3+ logged health days.",
+  "오늘 기록하러 가기": "Go log today",
+  "일정 보기": "View schedule",
   "오늘의 회복 우선순위를 확인해 보세요.": "Check today's recovery priorities.",
   "기록을 3일 이상 쌓으면 다음 근무 전까지의 회복 플랜이 열려요.":
     "Once you build 3 or more days of logs, your recovery plan before the next shift will open.",
@@ -1109,6 +1118,8 @@ const EN_EXTRA: Record<string, string> = {
   "회복 플래너와 AI 해설에 반영할 개인 리듬을 설정합니다.":
     "Set your personal rhythm for the recovery planner and AI brief.",
   "회복 플래너 정밀도 높이기": "Increase recovery planner precision",
+  "개인화로 플래너 정밀도 높이기": "Increase planner precision with personalization",
+  "현재 설정 · {summary}": "Current setting · {summary}",
   "카페인 민감도": "Caffeine sensitivity",
   "필수 기록 입력 필요": "Required logs needed",
   "새 세션": "New session",

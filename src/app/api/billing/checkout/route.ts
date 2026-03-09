@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { asCheckoutProductId, getCheckoutProductDefinition } from "@/lib/billing/plans";
+import { sanitizeInternalPath } from "@/lib/navigation";
 import { countRecentReadyOrdersByUser, createBillingOrder, createCustomerKey } from "@/lib/server/billingStore";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { getRouteSupabaseClient } from "@/lib/server/supabaseRouteClient";
@@ -78,6 +79,7 @@ export async function POST(req: Request) {
   }
 
   const productId = asCheckoutProductId(body?.product ?? body?.plan) ?? "pro";
+  const returnTo = sanitizeInternalPath(typeof body?.returnTo === "string" ? body.returnTo : null, "");
   const product = getCheckoutProductDefinition(productId);
   if (!product.checkoutEnabled) return bad(400, "checkout_disabled_product");
   const orderId = buildOrderId(productId);
@@ -116,8 +118,8 @@ export async function POST(req: Request) {
       customerEmail: customer.email,
       customerName: customer.name,
       clientKey: client.clientKey,
-      successUrl: `${origin}/settings/billing/success`,
-      failUrl: `${origin}/settings/billing/fail`,
+      successUrl: `${origin}/settings/billing/success${returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ""}`,
+      failUrl: `${origin}/settings/billing/fail${returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ""}`,
     },
   });
 }

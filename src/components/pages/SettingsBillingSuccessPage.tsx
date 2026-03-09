@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { getSupabaseBrowserClient, useAuthState } from "@/lib/auth";
 import { formatKrw, getCheckoutProductDefinition, getPlanDefinition, type PlanTier } from "@/lib/billing/plans";
+import { sanitizeInternalPath } from "@/lib/navigation";
 import { useI18n } from "@/lib/useI18n";
 
 type ConfirmResult = {
@@ -46,6 +47,7 @@ export function SettingsBillingSuccessPage() {
   const paymentKey = params.get("paymentKey") ?? "";
   const orderId = params.get("orderId") ?? "";
   const amount = params.get("amount") ?? "";
+  const returnTo = sanitizeInternalPath(params.get("returnTo"), "");
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -118,6 +120,14 @@ export function SettingsBillingSuccessPage() {
   const isCreditPack = orderKind === "credit_pack";
   const creditUnits = Math.max(0, Number(result?.order?.creditPackUnits ?? 0));
   const creditProduct = getCheckoutProductDefinition("credit10");
+  const primaryHref = returnTo || "/settings/billing";
+  const primaryLabel = returnTo
+    ? returnTo.startsWith("/insights/recovery")
+      ? t("회복 플래너로 돌아가기")
+      : returnTo === "/insights"
+        ? t("인사이트로 돌아가기")
+        : t("이전 화면으로 돌아가기")
+    : t("구독으로 돌아가기");
 
   return (
     <div className="mx-auto w-full max-w-[720px] px-4 pb-24 pt-6">
@@ -162,10 +172,10 @@ export function SettingsBillingSuccessPage() {
 
         <div className="mt-6 flex gap-2">
           <Link
-            href="/settings/billing"
+            href={primaryHref}
             className={flatButtonPrimary}
           >
-            {t("구독으로 돌아가기")}
+            {primaryLabel}
           </Link>
           <Link
             href="/insights"

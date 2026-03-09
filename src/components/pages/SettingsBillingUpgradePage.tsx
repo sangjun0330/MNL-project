@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { formatKrw, getCheckoutProductDefinition, getPlanDefinition, type CheckoutProductId } from "@/lib/billing/plans";
 import {
   fetchSubscriptionSnapshot,
@@ -11,6 +12,7 @@ import {
 } from "@/lib/billing/client";
 import { signInWithProvider, useAuthState } from "@/lib/auth";
 import { BillingCheckoutSheet } from "@/components/billing/BillingCheckoutSheet";
+import { sanitizeInternalPath, withReturnTo } from "@/lib/navigation";
 import { useI18n } from "@/lib/useI18n";
 
 function mapCheckoutError(raw: unknown) {
@@ -32,6 +34,7 @@ function mapCheckoutError(raw: unknown) {
 
 export function SettingsBillingUpgradePage() {
   const { t } = useI18n();
+  const searchParams = useSearchParams();
   const { status, user } = useAuthState();
   const [loading, setLoading] = useState(true);
   const [subData, setSubData] = useState<SubscriptionResponse | null>(null);
@@ -46,6 +49,7 @@ export function SettingsBillingUpgradePage() {
     "inline-flex h-11 items-center justify-center rounded-full border px-5 text-[14px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50";
   const flatButtonPrimary = `${flatButtonBase} border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]`;
   const flatButtonSecondary = `${flatButtonBase} border-ios-sep bg-[#F2F2F7] text-ios-text`;
+  const returnTo = sanitizeInternalPath(searchParams.get("returnTo"), "");
 
   const loadSubscription = useCallback(async () => {
     if (!user?.userId) {
@@ -83,30 +87,35 @@ export function SettingsBillingUpgradePage() {
     const target = checkoutProduct;
     setCheckoutProduct(null);
     setError(null);
-    if (target === "pro") setPaying(true);
-    if (target === "credit10") setPayingCredit(true);
-    try {
-      await requestPlanCheckout(target);
-    } catch (e: any) {
-      const msg = String(e?.message ?? t("결제창을 열지 못했습니다."));
-      if (!msg.includes("USER_CANCEL")) setError(mapCheckoutError(msg));
+      if (target === "pro") setPaying(true);
+      if (target === "credit10") setPayingCredit(true);
+      try {
+        await requestPlanCheckout(target, { returnTo });
+      } catch (e: any) {
+        const msg = String(e?.message ?? t("결제창을 열지 못했습니다."));
+        if (!msg.includes("USER_CANCEL")) setError(mapCheckoutError(msg));
     } finally {
       if (target === "pro") setPaying(false);
       if (target === "credit10") setPayingCredit(false);
     }
-  }, [checkoutProduct, t, user?.userId]);
+  }, [checkoutProduct, returnTo, t, user?.userId]);
 
   const activeTier = subData?.subscription.tier ?? "free";
   const activePeriodEnd = subData?.subscription.currentPeriodEnd ?? null;
   const isProActive = activeTier === "pro" && Boolean(subData?.subscription.hasPaidAccess);
   const quota = subData?.subscription.medSafetyQuota;
   const checkoutDefinition = checkoutProduct ? getCheckoutProductDefinition(checkoutProduct) : null;
+  const returnLabel = returnTo.startsWith("/insights/recovery")
+    ? t("회복 플래너로 돌아가기")
+    : returnTo === "/insights"
+      ? t("인사이트로 돌아가기")
+      : t("이전 화면으로 돌아가기");
 
   return (
     <div className="mx-auto w-full max-w-[760px] px-4 pb-24 pt-6">
       <div className="mb-4 flex items-center gap-2">
         <Link
-          href="/settings/billing"
+          href={returnTo ? returnTo : "/settings/billing"}
           className="rnest-btn-secondary inline-flex h-9 w-9 items-center justify-center text-[18px] text-ios-text"
         >
           ←
@@ -133,6 +142,16 @@ export function SettingsBillingUpgradePage() {
 
       {status === "authenticated" ? (
         <>
+          {returnTo ? (
+            <section className={`${flatSurface} mb-4 p-4`}>
+              <div className="text-[13px] font-semibold text-ios-sub">{t("업그레이드 후 복귀")}</div>
+              <div className="mt-1 text-[16px] font-bold tracking-[-0.02em] text-ios-text">{returnLabel}</div>
+              <div className="mt-1 text-[13px] leading-relaxed text-ios-sub">
+                {t("결제가 완료되면 원래 보던 화면으로 바로 돌아갈 수 있게 연결해 둘게요.")}
+              </div>
+            </section>
+          ) : null}
+
           <section className={`${flatSurface} p-6`}>
             <div className="text-[13px] font-semibold text-ios-sub">{t("현재 플랜")}</div>
             <div className="mt-2 text-[30px] font-extrabold tracking-[-0.03em] text-ios-text">
@@ -223,6 +242,14 @@ export function SettingsBillingUpgradePage() {
               {t("구매된 추가 크레딧은 AI 약물·도구 검색기 실행 시 1회당 1크레딧 사용되며, 날짜가 바뀌어도 사라지지 않습니다.")}
             </p>
           </section>
+
+          {returnTo ? (
+            <div className="mt-4">
+              <Link href={withReturnTo("/settings/billing", returnTo)} className={flatButtonSecondary}>
+                {t("플랜만 보고 돌아가기")}
+              </Link>
+            </div>
+          ) : null}
         </>
       ) : null}
       <BillingCheckoutSheet

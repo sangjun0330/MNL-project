@@ -2,13 +2,16 @@
 
 import Link from "next/link";
 import { DetailCard, DetailChip, DETAIL_ACCENTS } from "@/components/pages/insights/InsightDetailShell";
+import { withReturnTo } from "@/lib/navigation";
 
 export function RecoveryPlannerUpgradeCard({
   title,
   description,
+  returnTo,
 }: {
   title?: string;
   description?: string;
+  returnTo?: string;
 }) {
   return (
     <DetailCard className="p-5 sm:p-6">
@@ -30,13 +33,13 @@ export function RecoveryPlannerUpgradeCard({
       </div>
       <div className="mt-5 flex gap-2">
         <Link
-          href="/settings/billing/upgrade"
+          href={withReturnTo("/settings/billing/upgrade", returnTo)}
           className="inline-flex h-11 items-center justify-center rounded-full bg-black px-5 text-[13px] font-semibold text-white"
         >
           Pro 시작하기
         </Link>
         <Link
-          href="/settings/billing"
+          href={withReturnTo("/settings/billing", returnTo)}
           className="inline-flex h-11 items-center justify-center rounded-full border border-ios-sep bg-white px-5 text-[13px] font-semibold text-ios-text"
         >
           플랜 보기

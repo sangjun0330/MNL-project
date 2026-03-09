@@ -12,6 +12,14 @@ import { useInsightsData, shiftKo, isInsightsLocked, INSIGHTS_MIN_DAYS } from "@
 import { formatKoreanDate } from "@/lib/date";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { useRecoveryPlanner } from "@/components/insights/useRecoveryPlanner";
+import { useAppStoreSelector } from "@/lib/store";
+import {
+  caffeineSensitivityPresetFromValue,
+  caffeineSensitivityPresetLabel,
+  chronotypePresetFromValue,
+  chronotypePresetLabel,
+  normalizeProfileSettings,
+} from "@/lib/recoveryPlanner";
 import { useI18n } from "@/lib/useI18n";
 
 function pct(p: number) {
@@ -22,6 +30,10 @@ export function InsightsRecoveryDetail() {
   const { t } = useI18n();
   const { end, top3, syncLabel, todayShift, ordersSummary, hasTodayShift, recordedDays } = useInsightsData();
   const planner = useRecoveryPlanner();
+  const profile = useAppStoreSelector((s) => normalizeProfileSettings(s.settings.profile));
+  const profileSummary = `${chronotypePresetLabel(chronotypePresetFromValue(profile.chronotype))} · ${t("카페인")} ${caffeineSensitivityPresetLabel(
+    caffeineSensitivityPresetFromValue(profile.caffeineSensitivity)
+  )}`;
 
   if (isInsightsLocked(recordedDays)) {
     return (
@@ -65,6 +77,18 @@ export function InsightsRecoveryDetail() {
             </>
           )}
         />
+
+        <Link
+          href="/settings/personalization"
+          className="flex items-center justify-between rounded-apple border border-ios-sep bg-white px-4 py-4 shadow-apple transition-shadow duration-300 hover:shadow-apple-lg"
+        >
+          <div>
+            <div className="text-[12px] font-semibold text-ios-sub">Personalization</div>
+            <div className="mt-1 text-[16px] font-bold tracking-[-0.01em] text-ios-text">{t("개인화로 플래너 정밀도 높이기")}</div>
+            <div className="mt-1 text-[13px] text-ios-sub">{t("현재 설정 · {summary}", { summary: profileSummary })}</div>
+          </div>
+          <div className="text-[22px] text-ios-muted">›</div>
+        </Link>
 
         <Link
           href="/insights/recovery/plan"

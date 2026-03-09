@@ -6,11 +6,23 @@ import { useI18n } from "@/lib/useI18n";
 import { PWAInstallButton } from "@/components/system/PWAInstallButton";
 import { useAuthState } from "@/lib/auth";
 import { authHeaders } from "@/lib/billing/client";
+import { useAppStoreSelector } from "@/lib/store";
+import {
+  caffeineSensitivityPresetFromValue,
+  caffeineSensitivityPresetLabel,
+  chronotypePresetFromValue,
+  chronotypePresetLabel,
+  normalizeProfileSettings,
+} from "@/lib/recoveryPlanner";
 
 export function SettingsPage() {
   const { t } = useI18n();
   const { status, user } = useAuthState();
+  const profile = useAppStoreSelector((s) => normalizeProfileSettings(s.settings.profile));
   const [isAdmin, setIsAdmin] = useState(false);
+  const personalizationSummary = `${chronotypePresetLabel(chronotypePresetFromValue(profile.chronotype))} · ${t("카페인")} ${caffeineSensitivityPresetLabel(
+    caffeineSensitivityPresetFromValue(profile.caffeineSensitivity)
+  )}`;
 
   useEffect(() => {
     let active = true;
@@ -124,6 +136,9 @@ export function SettingsPage() {
             <span className="ml-1 inline-flex h-6 w-6 shrink-0 items-center justify-center text-[22px] leading-none text-[color:var(--rnest-accent)]">›</span>
           </div>
           <div className="mt-2 text-[12.5px] text-ios-sub">{t("회복 플래너와 AI 해설에 반영할 개인 리듬을 설정합니다.")}</div>
+          <div className="mt-2 inline-flex rounded-full border border-ios-sep bg-ios-bg px-2.5 py-1 text-[11.5px] font-semibold text-ios-text">
+            {personalizationSummary}
+          </div>
         </Link>
 
         <Link

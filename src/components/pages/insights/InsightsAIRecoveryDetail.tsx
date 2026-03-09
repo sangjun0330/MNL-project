@@ -13,6 +13,7 @@ import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { TodaySleepRequiredSheet } from "@/components/insights/TodaySleepRequiredSheet";
 import { addDays, formatKoreanDate, fromISODate, toISODate, todayISO } from "@/lib/date";
 import { hasHealthInput } from "@/lib/healthRecords";
+import { withReturnTo } from "@/lib/navigation";
 import { useI18n } from "@/lib/useI18n";
 import type { RecoverySection } from "@/lib/aiRecovery";
 
@@ -742,14 +743,14 @@ export function InsightsAIRecoveryDetail() {
                 const confirmed = window.confirm(
                   t("AI 회복 해설은 유료 플랜 전용 기능입니다.\n플랜 업그레이드 페이지로 이동할까요?")
                 );
-                if (confirmed) router.push("/settings/billing/upgrade");
+                if (confirmed) router.push(withReturnTo("/settings/billing/upgrade", "/insights/recovery/ai"));
               }}
               className="inline-flex h-10 items-center justify-center rounded-full bg-black px-5 text-[13px] font-semibold text-white"
             >
               {t("확인")}
             </button>
             <Link
-              href="/settings/billing/upgrade"
+              href={withReturnTo("/settings/billing/upgrade", "/insights/recovery/ai")}
               className="inline-flex h-10 items-center justify-center rounded-full border border-ios-sep bg-white px-5 text-[13px] font-semibold text-ios-text"
             >
               {t("플랜 보기")}

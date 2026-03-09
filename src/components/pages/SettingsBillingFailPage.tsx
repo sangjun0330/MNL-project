@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { getSupabaseBrowserClient, useAuthState } from "@/lib/auth";
+import { sanitizeInternalPath } from "@/lib/navigation";
 import { useI18n } from "@/lib/useI18n";
 
 async function authHeaders(): Promise<Record<string, string>> {
@@ -20,12 +21,14 @@ export function SettingsBillingFailPage() {
   const code = params.get("code") ?? "unknown_error";
   const message = params.get("message") ?? t("결제가 취소되었거나 실패했습니다.");
   const orderId = params.get("orderId") ?? "-";
+  const returnTo = sanitizeInternalPath(params.get("returnTo"), "");
   const sentRef = useRef(false);
   const flatSurface = "rounded-[24px] border border-ios-sep bg-white";
   const flatButtonBase =
     "inline-flex h-10 items-center justify-center rounded-full border px-5 text-[13px] font-semibold transition-colors";
   const flatButtonPrimary = `${flatButtonBase} border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]`;
   const flatButtonSecondary = `${flatButtonBase} border-ios-sep bg-[#F2F2F7] text-ios-text`;
+  const retryHref = returnTo ? `/settings/billing/upgrade?returnTo=${encodeURIComponent(returnTo)}` : "/settings/billing";
 
   useEffect(() => {
     if (status !== "authenticated" || sentRef.current) return;
@@ -57,7 +60,7 @@ export function SettingsBillingFailPage() {
 
         <div className="mt-6 flex gap-2">
           <Link
-            href="/settings/billing"
+            href={retryHref}
             className={flatButtonPrimary}
           >
             {t("다시 시도")}

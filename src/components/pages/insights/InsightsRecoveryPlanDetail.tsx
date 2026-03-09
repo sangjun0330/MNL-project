@@ -98,7 +98,7 @@ export function InsightsRecoveryPlanDetail() {
               <div className="mt-1 text-[14px] leading-6 text-ios-sub">{planner.avoidAction ?? t("늦은 자극과 무리한 일정은 줄여 주세요.")}</div>
             </div>
           </div>
-          <RecoveryPlannerUpgradeCard title="회복 처방 전체는 Pro에서 열립니다." />
+          <RecoveryPlannerUpgradeCard title="회복 처방 전체는 Pro에서 열립니다." returnTo="/insights/recovery/plan" />
         </>
       ) : (
         <div className="mt-4">

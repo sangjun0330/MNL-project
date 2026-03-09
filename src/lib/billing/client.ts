@@ -3,6 +3,7 @@
 import type { BillingEntitlements } from "@/lib/billing/entitlements";
 import type { BillingOrderKind, CheckoutProductId, PlanTier } from "@/lib/billing/plans";
 import { getSupabaseBrowserClient } from "@/lib/auth";
+import { sanitizeInternalPath } from "@/lib/navigation";
 
 export type SubscriptionApi = {
   tier: PlanTier;
@@ -247,7 +248,10 @@ export async function ensureTossScript() {
   return tossScriptPromise;
 }
 
-export async function requestPlanCheckout(product: CheckoutProductId = "pro") {
+export async function requestPlanCheckout(
+  product: CheckoutProductId = "pro",
+  options?: { returnTo?: string | null }
+) {
   const headers = await authHeaders();
   const checkoutRes = await fetch("/api/billing/checkout", {
     method: "POST",
@@ -255,7 +259,10 @@ export async function requestPlanCheckout(product: CheckoutProductId = "pro") {
       "content-type": "application/json",
       ...headers,
     },
-    body: JSON.stringify({ product }),
+    body: JSON.stringify({
+      product,
+      returnTo: sanitizeInternalPath(options?.returnTo ?? null, ""),
+    }),
   });
   const checkoutJson = await checkoutRes.json().catch(() => null);
   if (!checkoutRes.ok || !checkoutJson?.ok) {

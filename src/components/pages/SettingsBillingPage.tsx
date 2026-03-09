@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { getCheckoutProductDefinition, getPlanDefinition } from "@/lib/billing/plans";
 import {
   fetchSubscriptionSnapshot,
@@ -13,6 +14,7 @@ import {
 } from "@/lib/billing/client";
 import { signInWithProvider, useAuthState } from "@/lib/auth";
 import { BillingCheckoutSheet } from "@/components/billing/BillingCheckoutSheet";
+import { sanitizeInternalPath, withReturnTo } from "@/lib/navigation";
 import { useI18n } from "@/lib/useI18n";
 
 type CancelMode = "period_end" | "resume" | "now_refund";
@@ -31,6 +33,7 @@ function parseBillingActionError(input: string | null, t: (key: string) => strin
 
 export function SettingsBillingPage() {
   const { t } = useI18n();
+  const searchParams = useSearchParams();
   const { status, user } = useAuthState();
   const [subData, setSubData] = useState<SubscriptionResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -45,6 +48,7 @@ export function SettingsBillingPage() {
   const flatButtonSecondary = `${flatButtonBase} border-ios-sep bg-[#F2F2F7] text-ios-text`;
   const flatButtonPrimary = `${flatButtonBase} border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]`;
   const creditPack = getCheckoutProductDefinition("credit10");
+  const returnTo = sanitizeInternalPath(searchParams.get("returnTo"), "");
 
   const loadSubscription = useCallback(async () => {
     if (!user?.userId) {
@@ -135,7 +139,7 @@ export function SettingsBillingPage() {
     setActionError(null);
     setCreditCheckoutSheetOpen(false);
     try {
-      await requestPlanCheckout("credit10");
+      await requestPlanCheckout("credit10", { returnTo });
     } catch (e: any) {
       const msg = String(e?.message ?? "");
       if (!msg.includes("USER_CANCEL")) {
@@ -148,7 +152,7 @@ export function SettingsBillingPage() {
     } finally {
       setCreditPaying(false);
     }
-  }, [creditPaying, t, user?.userId]);
+  }, [creditPaying, returnTo, t, user?.userId]);
 
   return (
     <div className="mx-auto w-full max-w-[760px] px-4 pb-24 pt-6">
@@ -260,7 +264,7 @@ export function SettingsBillingPage() {
 
             <div className="mt-4 text-center">
               <Link
-                href="/settings/billing/upgrade"
+                href={withReturnTo("/settings/billing/upgrade", returnTo)}
                 className="rnest-link-accent text-[13px] font-semibold"
               >
                 {t("플랜 업그레이드하기")}
