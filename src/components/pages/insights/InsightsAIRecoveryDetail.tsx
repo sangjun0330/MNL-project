@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { createPortal } from "react-dom";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { DetailCard, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { useAIRecoveryPlanner } from "@/components/insights/useAIRecoveryPlanner";
@@ -13,7 +13,7 @@ import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { TodaySleepRequiredSheet } from "@/components/insights/TodaySleepRequiredSheet";
 import { addDays, formatKoreanDate, fromISODate, toISODate, todayISO } from "@/lib/date";
 import { hasHealthInput } from "@/lib/healthRecords";
-import { withReturnTo } from "@/lib/navigation";
+import { sanitizeInternalPath, withReturnTo } from "@/lib/navigation";
 import { useI18n } from "@/lib/useI18n";
 import type { RecoverySection } from "@/lib/aiRecovery";
 
@@ -197,6 +197,12 @@ function splitBulletLines(text: string) {
     .map((line) => line.replace(/^\-\s*/, "").replace(/\s+/g, " ").trim())
     .filter(Boolean);
   return sentenceItems.length > 1 ? sentenceItems : [normalized];
+}
+
+function normalizeRequestedOrderCountParam(value: string | null) {
+  const parsed = Math.round(Number(value));
+  if (!Number.isFinite(parsed)) return null;
+  return Math.max(1, Math.min(5, parsed));
 }
 
 const CATEGORIES: Array<{
@@ -534,6 +540,7 @@ function EnglishTranslationPendingPopup({
 export function InsightsAIRecoveryDetail() {
   const { t, lang: uiLang } = useI18n();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [openInputGuide, setOpenInputGuide] = useState(false);
   const [analysisRequested, setAnalysisRequested] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Partial<Record<RecoverySection["category"], boolean>>>({});
@@ -547,6 +554,8 @@ export function InsightsAIRecoveryDetail() {
     autoGenerate: false,
   });
   const { data, loading, generating, error, retry } = plannerAI;
+  const requestedOrderCount = normalizeRequestedOrderCountParam(searchParams.get("orderCount"));
+  const backHref = sanitizeInternalPath(searchParams.get("returnTo"), "/insights/recovery");
   const today = useMemo(() => todayISO(), []);
   const yesterday = useMemo(() => toISODate(addDays(fromISODate(today), -1)), [today]);
   const todayBio = state.bio?.[today] ?? null;
@@ -605,8 +614,8 @@ export function InsightsAIRecoveryDetail() {
       return;
     }
     setAnalysisRequested(true);
-    plannerAI.startGenerate();
-  }, [needsHealthInputGuide, plannerAI]);
+    plannerAI.startGenerate(requestedOrderCount ?? undefined);
+  }, [needsHealthInputGuide, plannerAI, requestedOrderCount]);
 
   const recoveryResult = data?.result.explanation.recovery ?? null;
   const lang = data?.language ?? "ko";
@@ -697,7 +706,7 @@ export function InsightsAIRecoveryDetail() {
       subtitle={data ? formatKoreanDate(data.dateISO) : ""}
       meta={undefined}
       tone="navy"
-      backHref="/insights/recovery"
+      backHref={backHref}
       className="rnest-recovery-static !max-w-[860px] !px-3 !pt-5 sm:!px-4"
     >
       {insightsLocked ? (
@@ -719,6 +728,11 @@ export function InsightsAIRecoveryDetail() {
           <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
             {t("AI 맞춤회복은 오늘 무엇을 먼저 회복해야 하는지와 그 이유를 맥락 중심으로 설명합니다.")}
           </p>
+          {requestedOrderCount != null ? (
+            <div className="mt-3 inline-flex rounded-full border border-[#DCE6FF] bg-[#F6F9FF] px-3 py-1.5 text-[12px] font-semibold text-[#315CA8]">
+              {t("오늘의 오더 {count}개 기준으로 함께 생성됩니다.", { count: requestedOrderCount })}
+            </div>
+          ) : null}
         </DetailCard>
       ) : null}
 
@@ -757,6 +771,11 @@ export function InsightsAIRecoveryDetail() {
           <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
             {t("분석 시작 전에 필수 기록 2개(오늘 수면, 전날 건강)를 확인해 주세요.")}
           </p>
+          {requestedOrderCount != null ? (
+            <div className="mt-3 rounded-2xl border border-[#DCE6FF] bg-[#F6F9FF] px-3 py-3 text-[13px] leading-6 text-[#315CA8]">
+              {t("이번 분석에서는 오늘의 오더를 {count}개 기준으로 생성합니다.", { count: requestedOrderCount })}
+            </div>
+          ) : null}
           <div className="mt-3 rounded-2xl border border-ios-sep bg-ios-bg px-3 py-3">
             <div className="flex items-center justify-between text-[13px] text-ios-text">
               <span>{t("오늘 수면 시간")}</span>
@@ -776,7 +795,11 @@ export function InsightsAIRecoveryDetail() {
             onClick={startAnalysis}
             className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] text-[14px] font-semibold text-[color:var(--rnest-accent)]"
           >
-            {needsHealthInputGuide ? t("필수 기록 입력하러 가기") : t("AI 맞춤회복 시작하기")}
+            {needsHealthInputGuide
+              ? t("필수 기록 입력하러 가기")
+              : requestedOrderCount != null
+                ? t("AI 맞춤회복과 오더 {count}개 생성하기", { count: requestedOrderCount })
+                : t("AI 맞춤회복 시작하기")}
           </button>
           {needsHealthInputGuide ? (
             <p className="mt-2 text-[12px] leading-relaxed text-ios-muted">
@@ -803,7 +826,7 @@ export function InsightsAIRecoveryDetail() {
               }
               setAnalysisRequested(true);
               retry();
-              plannerAI.startGenerate();
+              plannerAI.startGenerate(requestedOrderCount ?? undefined);
             }}
             className="mt-4 w-full rounded-xl bg-[#007AFF] py-3 text-[15px] font-semibold text-white active:bg-[#0062CC] transition-colors"
           >
@@ -858,6 +881,15 @@ export function InsightsAIRecoveryDetail() {
                   </>
                 ) : null}
               </div>
+
+              {backHref === "/insights/recovery/orders" ? (
+                <Link
+                  href={backHref}
+                  className="inline-flex h-10 items-center justify-center self-start rounded-full border border-[#DCE6FF] bg-[#EDF4FF] px-4 text-[13px] font-semibold text-[#0F4FCB]"
+                >
+                  {t("오늘의 오더 보기")}
+                </Link>
+              ) : null}
 
               {recoveryResult?.compoundAlert ? (
                 <div className="rounded-[24px] bg-[#FFF4F6] px-4 py-4 shadow-[inset_0_0_0_1px_rgba(232,116,133,0.12)] sm:px-5">

@@ -75,6 +75,7 @@ function isJsonEqual(a: unknown, b: unknown): boolean {
 
 const SERVER_MANAGED_PAYLOAD_KEYS = [
   "aiRecoveryDaily",
+  "recoveryOrderCompletions",
   "shopWishlist",
   "shopCart",
   "shopShippingProfile",

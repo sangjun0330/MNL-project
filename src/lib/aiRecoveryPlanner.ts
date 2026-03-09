@@ -73,6 +73,7 @@ export type AIRecoveryPlannerResult = AIRecoveryPlannerModules & {
 export type AIRecoveryPlannerPayload = {
   dateISO: ISODate;
   language: Language;
+  requestedOrderCount?: number | null;
   todayShift: Shift;
   nextShift: Shift | null;
   todayVitalScore: number | null;

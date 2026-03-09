@@ -38,6 +38,12 @@ function toLanguage(value: string | null): Language | null {
   return null;
 }
 
+function normalizeRequestedOrderCount(value: unknown): number | null {
+  const parsed = Math.round(Number(value));
+  if (!Number.isFinite(parsed)) return null;
+  return Math.max(1, Math.min(5, parsed));
+}
+
 function normalizePayloadToState(payload: unknown, languageHint: Language | null): AppState {
   const sanitized = sanitizeStatePayload(payload);
   if (!languageHint) return sanitized;
@@ -274,6 +280,7 @@ function asPlannerPayload(candidate: unknown, fallbackLang: Language): AIRecover
   return {
     dateISO: candidate.dateISO as ISODate,
     language,
+    requestedOrderCount: normalizeRequestedOrderCount(candidate.requestedOrderCount),
     todayShift: (typeof candidate.todayShift === "string" ? candidate.todayShift : "OFF") as Shift,
     nextShift: (typeof candidate.nextShift === "string" ? candidate.nextShift : null) as Shift | null,
     todayVitalScore: typeof candidate.todayVitalScore === "number" ? candidate.todayVitalScore : null,
@@ -288,6 +295,11 @@ function asPlannerPayload(candidate: unknown, fallbackLang: Language): AIRecover
     profileSnapshot: profileSnapshot ?? undefined,
     result: candidate.result as AIRecoveryPlannerPayload["result"],
   };
+}
+
+function isRequestedOrderCountCurrent(cached: number | null | undefined, requested: number | null) {
+  if (requested == null) return true;
+  return normalizeRequestedOrderCount(cached) === requested;
 }
 
 function isPlannerContextCurrent(cached: PlannerContext | null | undefined, current: PlannerContext) {
@@ -345,8 +357,9 @@ function readRecoveryVariants(raw: unknown, today: ISODate): Partial<Record<Lang
   return variants;
 }
 
-async function handlePlanner(req: NextRequest, options?: { allowGenerate?: boolean }) {
+async function handlePlanner(req: NextRequest, options?: { allowGenerate?: boolean; requestedOrderCount?: number | null }) {
   const allowGenerate = options?.allowGenerate ?? false;
+  const requestedOrderCount = normalizeRequestedOrderCount(options?.requestedOrderCount);
   const url = new URL(req.url);
   const langHint = toLanguage(url.searchParams.get("lang"));
   const cacheOnly = !allowGenerate || url.searchParams.get("cacheOnly") === "1";
@@ -418,7 +431,8 @@ async function handlePlanner(req: NextRequest, options?: { allowGenerate?: boole
       const directIsCurrent =
         direct &&
         isPlannerContextCurrent(direct.plannerContext, plannerContext) &&
-        isProfileSnapshotCurrent(direct.profileSnapshot, profileSnapshot);
+        isProfileSnapshotCurrent(direct.profileSnapshot, profileSnapshot) &&
+        (cacheOnly || isRequestedOrderCountCurrent(direct.requestedOrderCount, requestedOrderCount));
 
       if (directIsCurrent) {
         return jsonNoStore({ ok: true, data: direct } satisfies AIRecoveryPlannerApiSuccess);
@@ -481,6 +495,7 @@ async function handlePlanner(req: NextRequest, options?: { allowGenerate?: boole
     try {
       const plannerAI = await generateAIRecoveryPlannerModulesWithOpenAI({
         language: lang,
+        requestedOrderCount,
         todayISO: today,
         todayShift,
         nextShift,
@@ -519,6 +534,7 @@ async function handlePlanner(req: NextRequest, options?: { allowGenerate?: boole
     const payload: AIRecoveryPlannerPayload = {
       dateISO: today,
       language: lang,
+      requestedOrderCount,
       todayShift,
       nextShift,
       todayVitalScore,
@@ -569,5 +585,15 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const sameOriginError = sameOriginRequestError(req);
   if (sameOriginError) return bad(403, sameOriginError);
-  return handlePlanner(req, { allowGenerate: true });
+  let requestedOrderCount: number | null = null;
+  const rawBody = await req.text().catch(() => "");
+  if (rawBody.trim()) {
+    try {
+      const body = JSON.parse(rawBody);
+      requestedOrderCount = normalizeRequestedOrderCount((body as { orderCount?: unknown } | null)?.orderCount);
+    } catch {
+      return bad(400, "invalid_json");
+    }
+  }
+  return handlePlanner(req, { allowGenerate: true, requestedOrderCount });
 }

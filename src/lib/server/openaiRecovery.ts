@@ -1682,6 +1682,7 @@ export type OpenAIRecoveryPlannerModulesOutput = {
 
 type GenerateOpenAIRecoveryPlannerParams = GenerateOpenAIRecoveryParams & {
   recoveryResult?: AIRecoveryResult | null;
+  requestedOrderCount?: number | null;
 };
 
 function buildPlannerRecoveryReference(result: AIRecoveryResult | null | undefined) {
@@ -1699,16 +1700,29 @@ function buildPlannerRecoveryReference(result: AIRecoveryResult | null | undefin
   };
 }
 
-function buildPlannerOrdersDeveloperPrompt(language: Language) {
+function buildPlannerOrdersDeveloperPrompt(language: Language, requestedOrderCount?: number | null) {
+  const requestedCountClause =
+    requestedOrderCount != null
+      ? language === "en"
+        ? `Return exactly ${requestedOrderCount} orders unless the data truly supports fewer.`
+        : `가능하면 정확히 ${requestedOrderCount}개의 오더를 반환하고, 데이터가 정말 부족할 때만 더 적게 작성한다.`
+      : language === "en"
+        ? "Return between 1 and 5 orders."
+        : "오더는 1개 이상 5개 이하로 작성한다.";
   if (language === "ko") {
     return [
       "너는 RNest의 AI 오늘의 오더 생성 엔진이야.",
       "AI 맞춤회복 결과를 최상위 기준으로 삼고, 전체 건강기록 히스토리와 오늘 상태를 함께 읽어 회복 행동 체크리스트를 만든다.",
       "오더는 추상적인 조언이 아니라 실제로 체크 가능한 행동이어야 한다.",
-      "가장 중요한 오더만 1개 이상 5개 이하로 고르고, 중요하지 않은 항목은 과감히 제외한다.",
+      requestedCountClause,
+      "중요하지 않은 항목은 과감히 제외하되, 선택한 개수 안에서 우선순위가 분명해야 한다.",
       "각 오더는 title, body, when, reason을 가져야 하고, id는 영어 snake_case로 안정적으로 작성한다.",
       "when은 긴 문장이 아니라 '지금', '근무 중', '퇴근 직후', '잠들기 전'처럼 아주 짧은 타이밍 라벨만 쓴다.",
       "chips는 선택 사항이며 0~3개, 한두 단어 수준의 짧은 태그만 쓴다.",
+      "오더는 지금 컨디션에서도 실행할 수 있을 정도로 낮은 마찰이어야 하고, 한 번에 하나씩 끝낼 수 있어야 한다.",
+      "body는 실제 실행 문장으로 쓰고, 가능하면 시간/횟수/조건을 포함해 바로 행동할 수 있게 만든다.",
+      "reason은 사용자의 개인 상태(수면, 교대, 기분, 스트레스, 활동, 카페인, 생리주기, 최근 반복 패턴)와 연결해 왜 이 행동이 회복에 유리한지 설명한다.",
+      "서로 거의 같은 행동을 다른 말로 반복하지 말고, 같은 타이밍 오더가 과하게 몰리지 않게 조정한다.",
       "타임라인은 별도 섹션으로 만들지 말고 when/reason 안에 녹여라.",
       "출력은 JSON 하나만 반환한다.",
     ].join(" ");
@@ -1717,10 +1731,15 @@ function buildPlannerOrdersDeveloperPrompt(language: Language) {
     "You are RNest's AI today-orders generation engine.",
     "Use the AI customized recovery result as the top-level source of truth, then read the full health-record history and today's condition to build an actionable checklist.",
     "Orders must be concrete actions that can be checked off, not generic advice.",
-    "Choose only the most important items, with a minimum of 1 and a maximum of 5.",
+    requestedCountClause,
+    "Keep priority sharp within the selected count and cut lower-value suggestions.",
     "Each order must include title, body, when, and reason, and id must be stable snake_case English.",
     "Use when as a very short timing label only, such as 'Now', 'During shift', 'After work', or 'Before bed'.",
     "chips are optional, must stay between 0 and 3, and should be very short keyword tags.",
+    "Orders must stay low-friction for today's condition and feel realistically finishable one by one.",
+    "Write body as an immediate execution sentence, preferably with a small duration, count, or trigger.",
+    "Write reason in a personalized way that ties the action to sleep, shift pattern, mood, stress, activity, caffeine, menstrual timing, or repeating blockers in the history.",
+    "Avoid near-duplicate actions and avoid stacking too many orders into the same timing window unless clearly necessary.",
     "Do not create a separate timeline section. Fold timing into when and reason.",
     "Return one JSON object only.",
   ].join(" ");
@@ -1730,8 +1749,9 @@ function buildPlannerOrdersUserPrompt(args: {
   language: Language;
   context: ReturnType<typeof buildUserContext>;
   recoveryResult: AIRecoveryResult | null | undefined;
+  requestedOrderCount?: number | null;
 }) {
-  const { language, context, recoveryResult } = args;
+  const { language, context, recoveryResult, requestedOrderCount } = args;
   const recoveryReference = buildPlannerRecoveryReference(recoveryResult);
   const shape = {
     eyebrow: "string",
@@ -1757,20 +1777,28 @@ function buildPlannerOrdersUserPrompt(args: {
       "",
       "[목표]",
       "- AI 맞춤회복을 실제 행동 체크리스트로 바꾸기",
-      "- 오늘 가장 중요한 오더만 1~5개만 고르기",
+      requestedOrderCount != null
+        ? `- 오늘 가장 중요한 오더를 ${requestedOrderCount}개로 맞춰 고르기`
+        : "- 오늘 가장 중요한 오더만 1~5개만 고르기",
       "- 타이밍 정보는 when과 reason에 자연스럽게 녹이기",
+      "- 사용자가 지금 컨디션에서도 바로 실천할 수 있게 마찰을 낮추기",
       "",
       "[제약]",
-      "- items 길이는 1 이상 5 이하",
+      requestedOrderCount != null
+        ? `- items 길이는 정확히 ${requestedOrderCount}`
+        : "- items 길이는 1 이상 5 이하",
       "- id는 영어 snake_case",
       "- title은 행동 중심의 짧은 문장",
-      "- body는 체크리스트 한 줄처럼 짧고 분명하게",
+      "- body는 체크리스트 한 줄처럼 짧고 분명하게, 가능하면 시간/횟수/조건을 포함",
       "- when은 12자 안팎의 아주 짧은 타이밍 라벨만 사용",
-      "- reason은 왜 지금 필요한지 한 문장",
+      "- reason은 왜 지금 필요한지, 사용자의 현재 패턴과 연결해 한 문장으로 설명",
       "- chips는 0~3개, 짧은 키워드만 사용",
       "- today / weekly / history / plannerContext / AI Recovery Brief JSON을 모두 보고 판단",
       "- 전체 건강기록을 봤을 때 반복적으로 회복을 방해하는 패턴이 있으면 우선순위에 반영",
+      "- 작은 행동이지만 회복 효과가 크고 실수/소진을 줄이는 방향을 우선",
+      "- 같은 행동을 표현만 바꿔 중복 생성하지 말 것",
       "- Data JSON에 없는 수치를 새로 만들지 말 것",
+      requestedOrderCount != null ? `[선택된 오더 개수]\n${requestedOrderCount}` : "",
       "",
       "[JSON shape]",
       JSON.stringify(shape, null, 2),
@@ -1788,19 +1816,26 @@ function buildPlannerOrdersUserPrompt(args: {
     "Return JSON only. No code fences and no commentary.",
     "[Goal]",
     "- Turn AI customized recovery into an actionable checklist",
-    "- Choose only the most important 1 to 5 orders for today",
+    requestedOrderCount != null
+      ? `- Choose exactly ${requestedOrderCount} important orders for today`
+      : "- Choose only the most important 1 to 5 orders for today",
     "- Fold timing into when and reason instead of creating a separate timeline section",
+    "- Keep the actions easy to start in the user's current condition",
     "[Constraints]",
-    "- items length must be between 1 and 5",
+    requestedOrderCount != null
+      ? `- items length must be exactly ${requestedOrderCount}`
+      : "- items length must be between 1 and 5",
     "- id must be English snake_case",
     "- title must be short and action-first",
-    "- body must read like a checklist line",
+    "- body must read like a checklist line and should include a small duration, count, or trigger when helpful",
     "- when must stay short, ideally a timing label under about 16 characters",
-    "- reason must explain why it matters now in one sentence",
+    "- reason must explain why it matters now in one sentence and tie back to the user's current pattern",
     "- chips are optional, between 0 and 3, and should be short keyword tags",
     "- use today / weekly / history / plannerContext / AI Recovery Brief JSON together",
     "- reflect recurring blockers found across the full health record history",
+    "- prefer low-friction, high-impact, non-duplicated actions",
     "- do not invent numbers missing from Data JSON",
+    requestedOrderCount != null ? `[Requested order count]\n${requestedOrderCount}` : "",
     "[JSON shape]",
     JSON.stringify(shape, null, 2),
     "[AI Recovery Brief JSON]",
@@ -1845,29 +1880,20 @@ function normalizeChecklistChip(value: string) {
   return value.replace(/\s+/g, " ").trim().slice(0, 18);
 }
 
+function normalizeRequestedOrderCount(value: number | null | undefined) {
+  const parsed = Math.round(Number(value));
+  if (!Number.isFinite(parsed)) return null;
+  return Math.max(1, Math.min(5, parsed));
+}
+
 function buildFallbackChecklistItems(
   plannerContext: PlannerContext | null | undefined,
-  language: Language
+  language: Language,
+  requestedOrderCount?: number | null
 ): AIPlannerChecklistItem[] {
+  const targetCount = normalizeRequestedOrderCount(requestedOrderCount) ?? Math.max(1, Math.min(5, plannerContext?.ordersTop3?.length ?? 1));
   const orders = plannerContext?.ordersTop3 ?? [];
-  if (!orders.length) {
-    return [
-      {
-        id: "protect_recovery_routine",
-        title: language === "en" ? "Protect one recovery routine" : "회복 루틴 하나 지키기",
-        body:
-          plannerContext?.primaryAction ??
-          (language === "en" ? "Keep the first recovery action small enough to complete today." : "오늘 끝낼 수 있을 만큼 작은 회복 행동 하나만 먼저 실행하세요."),
-        when: language === "en" ? "Now" : "지금",
-        reason:
-          plannerContext?.avoidAction ??
-          (language === "en" ? "Reducing late stimulation keeps the rest of the day more stable." : "늦은 자극을 줄이면 오늘 회복 흐름이 덜 흔들립니다."),
-        chips: [],
-      },
-    ];
-  }
-
-  return orders.slice(0, 5).map((order, index) => ({
+  const baseItems: AIPlannerChecklistItem[] = orders.slice(0, 5).map((order, index) => ({
     id: slugifyChecklistId(order.title || order.text, `order_${index + 1}`),
     title: order.title,
     body: order.text,
@@ -1885,10 +1911,100 @@ function buildFallbackChecklistItems(
         : "AI 맞춤회복 우선순위와 같은 방향으로 실행되는 오더입니다.",
     chips: [],
   }));
+
+  if (!baseItems.length) {
+    baseItems.push({
+      id: "protect_recovery_routine",
+      title: language === "en" ? "Protect one recovery routine" : "회복 루틴 하나 지키기",
+      body:
+        plannerContext?.primaryAction ??
+        (language === "en"
+          ? "Keep the first recovery action small enough to complete today."
+          : "오늘 끝낼 수 있을 만큼 작은 회복 행동 하나만 먼저 실행하세요."),
+      when: language === "en" ? "Now" : "지금",
+      reason:
+        plannerContext?.avoidAction ??
+        (language === "en"
+          ? "Reducing late stimulation keeps the rest of the day more stable."
+          : "늦은 자극을 줄이면 오늘 회복 흐름이 덜 흔들립니다."),
+      chips: [],
+    });
+  }
+
+  const supplementalTemplates: AIPlannerChecklistItem[] =
+    language === "en"
+      ? [
+          {
+            id: "pause_before_next_task",
+            title: "Pause before the next key task",
+            body: "Before the next important task, stop for 10 seconds and reset your pace.",
+            when: "During shift",
+            reason: "A short reset lowers mistakes and preserves mental energy when recovery is already thin.",
+            chips: ["focus"],
+          },
+          {
+            id: "reset_with_small_movement",
+            title: "Add a 3-minute reset walk",
+            body: "Walk slowly for 3 minutes once today and let your shoulders drop.",
+            when: "Later today",
+            reason: "A short movement reset is easier to start than full exercise and still lifts circulation and mood.",
+            chips: ["reset"],
+          },
+          {
+            id: "close_day_gently",
+            title: "Close the day with a quiet landing",
+            body: "Before bed, dim the phone and sit quietly for 5 minutes before lying down.",
+            when: "Before bed",
+            reason: "A softer landing helps keep the nervous system from carrying the day too far into sleep.",
+            chips: ["sleep"],
+          },
+        ]
+      : [
+          {
+            id: "pause_before_next_task",
+            title: "다음 중요한 일 전 10초 멈추기",
+            body: "다음 중요한 일 전에 10초만 멈추고 호흡과 속도를 다시 맞춥니다.",
+            when: "근무 중",
+            reason: "회복이 얇은 날일수록 짧은 리셋이 실수와 멘탈 소모를 줄이는 데 유리합니다.",
+            chips: ["집중"],
+          },
+          {
+            id: "reset_with_small_movement",
+            title: "3분 리셋 걷기 넣기",
+            body: "오늘 한 번만 3분 천천히 걸으며 어깨 힘을 내려놓습니다.",
+            when: "오늘 안에",
+            reason: "짧은 움직임은 부담이 낮으면서도 순환과 기분 회복에 바로 도움이 됩니다.",
+            chips: ["리셋"],
+          },
+          {
+            id: "close_day_gently",
+            title: "잠들기 전 조용히 마감하기",
+            body: "잠들기 전 5분만 휴대폰 밝기를 낮추고 조용히 앉아 하루를 마감합니다.",
+            when: "잠들기 전",
+            reason: "하루 자극을 조금만 낮춰도 신경계가 덜 들뜬 상태로 잠에 들어가기 쉬워집니다.",
+            chips: ["수면"],
+          },
+        ];
+
+  const items = [...baseItems];
+  for (const extra of supplementalTemplates) {
+    if (items.length >= targetCount) break;
+    if (items.some((item) => item.id === extra.id)) continue;
+    items.push(extra);
+  }
+
+  return items.slice(0, targetCount);
 }
 
-function parsePlannerChecklistItems(value: unknown, language: Language, plannerContext?: PlannerContext | null): AIPlannerChecklistItem[] {
-  if (!Array.isArray(value)) return buildFallbackChecklistItems(plannerContext, language);
+function parsePlannerChecklistItems(
+  value: unknown,
+  language: Language,
+  plannerContext?: PlannerContext | null,
+  requestedOrderCount?: number | null
+): AIPlannerChecklistItem[] {
+  const targetCount = normalizeRequestedOrderCount(requestedOrderCount);
+  const fallbackItems = buildFallbackChecklistItems(plannerContext, language, targetCount);
+  if (!Array.isArray(value)) return fallbackItems;
 
   const items: AIPlannerChecklistItem[] = [];
   for (const item of value) {
@@ -1914,16 +2030,27 @@ function parsePlannerChecklistItems(value: unknown, language: Language, plannerC
   }
 
   const deduped = items.filter((item, index) => items.findIndex((candidate) => candidate.id === item.id) === index);
-  return deduped.length ? deduped : buildFallbackChecklistItems(plannerContext, language);
+  if (!deduped.length) return fallbackItems;
+
+  if (targetCount == null) return deduped;
+
+  const merged = [...deduped.slice(0, targetCount)];
+  for (const fallbackItem of fallbackItems) {
+    if (merged.length >= targetCount) break;
+    if (merged.some((item) => item.id === fallbackItem.id)) continue;
+    merged.push(fallbackItem);
+  }
+  return merged.slice(0, targetCount);
 }
 
 function parsePlannerChecklistModule(
   value: unknown,
   language: Language,
-  plannerContext?: PlannerContext | null
+  plannerContext?: PlannerContext | null,
+  requestedOrderCount?: number | null
 ): AIPlannerChecklistModule {
   const row = typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
-  const items = parsePlannerChecklistItems(row.items, language, plannerContext);
+  const items = parsePlannerChecklistItems(row.items, language, plannerContext, requestedOrderCount);
   return {
     eyebrow: asString(row.eyebrow) || "Today Orders",
     title: asString(row.title) || (language === "en" ? "Today Orders" : "오늘의 오더"),
@@ -1953,11 +2080,12 @@ async function generatePlannerOrdersWithOpenAI(
   if (!apiKey) throw new Error("missing_openai_api_key");
 
   const context = buildUserContext(params);
-  const developerPrompt = buildPlannerOrdersDeveloperPrompt(params.language);
+  const developerPrompt = buildPlannerOrdersDeveloperPrompt(params.language, params.requestedOrderCount);
   const userPrompt = buildPlannerOrdersUserPrompt({
     language: params.language,
     context,
     recoveryResult: params.recoveryResult,
+    requestedOrderCount: params.requestedOrderCount,
   });
   const maxOutputTokens = Math.max(resolveMaxOutputTokens(), 1800);
   const controller = new AbortController();
@@ -1983,7 +2111,12 @@ async function generatePlannerOrdersWithOpenAI(
       throw new Error(`openai_planner_orders_non_json_model:${model}`);
     }
 
-    const checklistModule = parsePlannerChecklistModule(parsed, params.language, params.plannerContext);
+    const checklistModule = parsePlannerChecklistModule(
+      parsed,
+      params.language,
+      params.plannerContext,
+      params.requestedOrderCount
+    );
     if (checklistModule.items.length < 1 || checklistModule.items.length > 5) {
       throw new Error(`openai_planner_orders_incomplete_model:${model}`);
     }

@@ -244,7 +244,8 @@ export type ChallengeMetric =
   | "stress"
   | "activity"
   | "caffeine"
-  | "mood";
+  | "mood"
+  | "order_completion";
 export type ChallengeType = "leaderboard" | "low_value" | "group_goal" | "streak";
 export type ChallengeStatus = "active" | "ended" | "canceled";
 

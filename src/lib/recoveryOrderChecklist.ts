@@ -73,3 +73,54 @@ export function clearStaleRecoveryOrderDone(dateISO: string, activeIds: string[]
   }
   if (changed) writeRecoveryOrderDone(dateISO, next);
 }
+
+export function doneMapFromIds(ids: string[]): RecoveryOrderDoneMap {
+  const next: RecoveryOrderDoneMap = {};
+  for (const id of ids) {
+    if (typeof id === "string" && id) next[id] = true;
+  }
+  return next;
+}
+
+function completedIdsFromDoneMap(doneMap: RecoveryOrderDoneMap): string[] {
+  return Object.entries(doneMap)
+    .filter(([, done]) => Boolean(done))
+    .map(([id]) => id);
+}
+
+export async function readRemoteRecoveryOrderDone(dateISO: string): Promise<RecoveryOrderDoneMap> {
+  if (typeof window === "undefined") return {};
+  try {
+    const res = await fetch(`/api/insights/recovery/orders/progress?dateISO=${encodeURIComponent(dateISO)}`, {
+      method: "GET",
+      credentials: "include",
+      cache: "no-store",
+    });
+    if (!res.ok) return {};
+    const json = await res.json().catch(() => null);
+    const completedIds = Array.isArray(json?.data?.completedIds)
+      ? json.data.completedIds.filter((value: unknown): value is string => typeof value === "string" && value.length > 0)
+      : [];
+    return doneMapFromIds(completedIds);
+  } catch {
+    return {};
+  }
+}
+
+export async function writeRemoteRecoveryOrderDone(dateISO: string, doneMap: RecoveryOrderDoneMap) {
+  if (typeof window === "undefined") return;
+  try {
+    await fetch("/api/insights/recovery/orders/progress", {
+      method: "POST",
+      credentials: "include",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dateISO,
+        completedIds: completedIdsFromDoneMap(doneMap),
+      }),
+    });
+  } catch {
+    // ignore remote persistence failures
+  }
+}

@@ -13,10 +13,14 @@ import { formatKoreanDate } from "@/lib/date";
 import {
   clearStaleRecoveryOrderDone,
   markRecoveryOrderDone,
+  readRemoteRecoveryOrderDone,
   readRecoveryOrderDone,
+  writeRecoveryOrderDone,
+  writeRemoteRecoveryOrderDone,
 } from "@/lib/recoveryOrderChecklist";
 import { useInsightsData, isInsightsLocked, INSIGHTS_MIN_DAYS, shiftKo } from "@/components/insights/useInsightsData";
 import { useI18n } from "@/lib/useI18n";
+import { withReturnTo } from "@/lib/navigation";
 
 export function InsightsRecoveryOrdersDetail() {
   const { t } = useI18n();
@@ -28,6 +32,7 @@ export function InsightsRecoveryOrdersDetail() {
   });
   const [doneMap, setDoneMap] = useState<Record<string, boolean>>({});
   const [completingIds, setCompletingIds] = useState<Record<string, boolean>>({});
+  const [selectedOrderCount, setSelectedOrderCount] = useState(3);
   const completionTimersRef = useRef<number[]>([]);
 
   useEffect(() => {
@@ -59,10 +64,40 @@ export function InsightsRecoveryOrdersDetail() {
   const orderIdsKey = ordersModule.items.map((item) => item.id).join("|");
 
   useEffect(() => {
+    let active = true;
+    const activeIds = orderIdsKey ? orderIdsKey.split("|") : [];
     if (aiPlanner.data?.result.orders.items?.length) {
-      clearStaleRecoveryOrderDone(plannerDateISO, orderIdsKey ? orderIdsKey.split("|") : []);
+      clearStaleRecoveryOrderDone(plannerDateISO, activeIds);
     }
-    setDoneMap(readRecoveryOrderDone(plannerDateISO));
+    const localDone = readRecoveryOrderDone(plannerDateISO);
+    setDoneMap(localDone);
+
+    if (!aiPlanner.data?.result.orders.items?.length) {
+      return () => {
+        active = false;
+      };
+    }
+
+    void (async () => {
+      const remoteDone = await readRemoteRecoveryOrderDone(plannerDateISO);
+      if (!active) return;
+      const keep = new Set(activeIds);
+      const merged: Record<string, boolean> = {};
+      for (const [id, done] of Object.entries({ ...remoteDone, ...localDone })) {
+        if (done && keep.has(id)) merged[id] = true;
+      }
+      setDoneMap(merged);
+      writeRecoveryOrderDone(plannerDateISO, merged);
+      const mergedKeys = JSON.stringify(Object.keys(merged).sort());
+      const remoteKeys = JSON.stringify(Object.keys(remoteDone).filter((id) => remoteDone[id]).sort());
+      if (mergedKeys !== remoteKeys) {
+        await writeRemoteRecoveryOrderDone(plannerDateISO, merged);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
   }, [aiPlanner.data, orderIdsKey, plannerDateISO]);
 
   const activeItems = ordersModule.items.filter((item) => !doneMap[item.id]);
@@ -76,10 +111,14 @@ export function InsightsRecoveryOrdersDetail() {
     }));
     const timer = window.setTimeout(() => {
       markRecoveryOrderDone(plannerDateISO, id);
-      setDoneMap((current) => ({
-        ...current,
-        [id]: true,
-      }));
+      setDoneMap((current) => {
+        const next = {
+          ...current,
+          [id]: true,
+        };
+        void writeRemoteRecoveryOrderDone(plannerDateISO, next);
+        return next;
+      });
       setCompletingIds((current) => {
         const next = { ...current };
         delete next[id];
@@ -102,6 +141,8 @@ export function InsightsRecoveryOrdersDetail() {
       </InsightDetailShell>
     );
   }
+
+  const orderGenerationHref = `${withReturnTo("/insights/recovery/ai", "/insights/recovery/orders")}&orderCount=${selectedOrderCount}`;
 
   return (
     <InsightDetailShell
@@ -178,13 +219,32 @@ export function InsightsRecoveryOrdersDetail() {
           <div className="text-[11px] font-semibold tracking-[0.16em] text-[#1B2747]">TODAY ORDERS</div>
           <div className="mt-1 text-[22px] font-bold tracking-[-0.03em] text-ios-text">오늘의 오더가 아직 생성되지 않았어요.</div>
           <p className="mt-3 break-keep text-[14px] leading-6 text-ios-sub">
-            AI 맞춤회복 상세에서 필수 기록을 확인하고 AI 분석을 시작하면, 같은 기준으로 오늘의 오더 체크리스트가 함께 생성됩니다.
+            먼저 오늘 필요한 오더 개수를 1~5개 사이에서 고른 뒤, AI 맞춤회복 상세에서 필수 기록을 확인하고 분석을 시작해 주세요.
           </p>
+          <div className="mt-4">
+            <div className="text-[12px] font-semibold text-ios-sub">생성할 오더 개수</div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {[1, 2, 3, 4, 5].map((count) => (
+                <button
+                  key={count}
+                  type="button"
+                  onClick={() => setSelectedOrderCount(count)}
+                  className={
+                    count === selectedOrderCount
+                      ? "inline-flex h-9 items-center justify-center rounded-full border border-[#A9C6FF] bg-[#EDF4FF] px-4 text-[13px] font-semibold text-[#0F4FCB]"
+                      : "inline-flex h-9 items-center justify-center rounded-full border border-ios-sep bg-white px-4 text-[13px] font-semibold text-ios-text"
+                  }
+                >
+                  {count}개
+                </button>
+              ))}
+            </div>
+          </div>
           <Link
-            href="/insights/recovery/ai"
+            href={orderGenerationHref}
             className="mt-4 inline-flex h-10 items-center justify-center rounded-full border border-[#CFE0FF] bg-[#EDF4FF] px-4 text-[13px] font-semibold text-[#0F4FCB]"
           >
-            AI 맞춤회복으로 이동
+            {selectedOrderCount}개 기준으로 AI 맞춤회복 생성하기
           </Link>
         </DetailCard>
       ) : null}

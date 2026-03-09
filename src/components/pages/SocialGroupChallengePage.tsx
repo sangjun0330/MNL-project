@@ -43,6 +43,7 @@ function MetricIcon({
   if (metric === "activity") return <SocialActivityIcon className={className} />;
   if (metric === "caffeine") return <SocialCoffeeIcon className={className} />;
   if (metric === "mood") return <SocialMoodIcon className={className} />;
+  if (metric === "order_completion") return <SocialTargetIcon className={className} />;
   return <SocialBatteryIcon className={className} />;
 }
 
@@ -53,6 +54,7 @@ function metricLabel(metric: ChallengeMetric): string {
   if (metric === "activity") return "활동량";
   if (metric === "caffeine") return "카페인";
   if (metric === "mood") return "기분";
+  if (metric === "order_completion") return "오더 완료횟수";
   return "신체 배터리";
 }
 
@@ -68,6 +70,7 @@ function metricMax(metric: ChallengeMetric): number {
   if (metric === "stress" || metric === "activity") return 3;
   if (metric === "mood") return 5;
   if (metric === "caffeine") return 1000;
+  if (metric === "order_completion") return 20;
   return 100;
 }
 
@@ -82,6 +85,7 @@ function formatValue(value: number | null, metric: ChallengeMetric): string {
   if (metric === "caffeine") return `${Math.round(value)}mg`;
   if (metric === "stress" || metric === "activity") return `${value.toFixed(1)}단계`;
   if (metric === "mood") return `${value.toFixed(1)}점`;
+  if (metric === "order_completion") return `${Math.round(value)}회`;
   return String(Math.round(value));
 }
 
@@ -124,6 +128,7 @@ function gapLabel(
   if (metric === "caffeine") return `${Math.round(diff)}mg 차이`;
   if (metric === "stress" || metric === "activity") return `${diff.toFixed(1)}단계 차이`;
   if (metric === "mood") return `${diff.toFixed(1)}점 차이`;
+  if (metric === "order_completion") return `${Math.round(diff)}회 차이`;
   return `${Math.round(diff)}점 차이`;
 }
 
@@ -233,6 +238,23 @@ function metricTheme(metric: ChallengeMetric) {
       rowHighlight: "bg-[#EFFBFD] border border-cyan-100",
       spotlight:
         "bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.18),transparent_40%)]",
+    };
+  }
+  if (metric === "order_completion") {
+    return {
+      heroSurface:
+        "bg-[linear-gradient(135deg,#F4F6FF_0%,#FFFFFF_54%,#F6F8FF_100%)] border border-indigo-100/70",
+      iconSurface: "bg-[#E8ECFF] text-[#4A5FD3]",
+      accentSurface: "bg-[#EEF1FF] text-[#4A5FD3]",
+      accentText: "text-[#4A5FD3]",
+      leaderSurface: "bg-[#F7F8FF]",
+      topSurface: "bg-[linear-gradient(135deg,#FFF9E8_0%,#FFF4C8_100%)] border border-[#F0D989]",
+      secondSurface: "bg-[linear-gradient(135deg,#F8FBFF_0%,#EEF4FB_100%)] border border-[#D5DFEC]",
+      thirdSurface: "bg-[linear-gradient(135deg,#FFF5ED_0%,#FFE8D7_100%)] border border-[#E8C5A7]",
+      progress: "bg-[linear-gradient(90deg,#818CF8_0%,#4F46E5_100%)]",
+      rowHighlight: "bg-[#F3F5FF] border border-indigo-100",
+      spotlight:
+        "bg-[radial-gradient(circle_at_top_right,rgba(99,102,241,0.18),transparent_40%)]",
     };
   }
   if (metric === "mental") {

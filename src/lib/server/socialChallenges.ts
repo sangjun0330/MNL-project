@@ -13,7 +13,9 @@ import type {
   GroupChallengeDetail,
   GroupChallengeSummary,
 } from "@/types/social";
+import type { ISODate } from "@/lib/date";
 import { computeMemberWeeklyVitals } from "@/lib/server/socialGroups";
+import { countRecoveryOrderCompletionsFromPayload } from "@/lib/server/recoveryOrderStore";
 
 // ── 상수 ──────────────────────────────────────────────────────
 export const MAX_ACTIVE_CHALLENGES_PER_GROUP = 5;
@@ -28,6 +30,7 @@ const CHALLENGE_METRICS = new Set<ChallengeMetric>([
   "activity",
   "caffeine",
   "mood",
+  "order_completion",
 ]);
 
 const CHALLENGE_TYPES = new Set<ChallengeType>([
@@ -67,7 +70,8 @@ function normalizeMetric(value: unknown): ChallengeMetric {
     value === "stress" ||
     value === "activity" ||
     value === "caffeine" ||
-    value === "mood"
+    value === "mood" ||
+    value === "order_completion"
   ) {
     return value;
   }
@@ -123,7 +127,14 @@ function rowToEntry(row: any): ChallengeEntry {
   };
 }
 
-function metricSnapshotValue(metric: ChallengeMetric, vitals: ReturnType<typeof computeMemberWeeklyVitals>): number | null {
+type MemberChallengeSnapshot = {
+  vitals: ReturnType<typeof computeMemberWeeklyVitals>;
+  orderCompletionCount: number | null;
+};
+
+function metricSnapshotValue(metric: ChallengeMetric, snapshot: MemberChallengeSnapshot): number | null {
+  if (metric === "order_completion") return snapshot.orderCompletionCount;
+  const vitals = snapshot.vitals;
   if (!vitals) return null;
   if (metric === "sleep") return vitals.weeklyAvgSleep ?? null;
   if (metric === "mental") return vitals.weeklyAvgMental;
@@ -138,13 +149,13 @@ function sameIsoDate(snapshotAt: unknown, todayISO: string): boolean {
   return typeof snapshotAt === "string" && snapshotAt.slice(0, 10) === todayISO;
 }
 
-async function loadChallengeVitalsMap(
+async function loadChallengeSnapshotMap(
   admin: any,
   userIds: string[],
-  todayISO: string,
-): Promise<Map<string, ReturnType<typeof computeMemberWeeklyVitals>>> {
-  const vitalsMap = new Map<string, ReturnType<typeof computeMemberWeeklyVitals>>();
-  if (userIds.length === 0) return vitalsMap;
+  todayISO: ISODate,
+): Promise<Map<string, MemberChallengeSnapshot>> {
+  const snapshotMap = new Map<string, MemberChallengeSnapshot>();
+  if (userIds.length === 0) return snapshotMap;
 
   const { data: states, error } = await (admin as any)
     .from("rnest_user_state")
@@ -154,29 +165,35 @@ async function loadChallengeVitalsMap(
   if (error) throw error;
 
   for (const userId of userIds) {
-    vitalsMap.set(userId, null);
+    snapshotMap.set(userId, {
+      vitals: null,
+      orderCompletionCount: 0,
+    });
   }
 
   for (const row of states ?? []) {
     const userId = String(row.user_id ?? "");
     if (!userId) continue;
     const payload = (row.payload ?? {}) as Record<string, unknown>;
-    vitalsMap.set(userId, computeMemberWeeklyVitals(payload, todayISO));
+    snapshotMap.set(userId, {
+      vitals: computeMemberWeeklyVitals(payload, todayISO),
+      orderCompletionCount: countRecoveryOrderCompletionsFromPayload(payload, todayISO, 7),
+    });
   }
 
-  return vitalsMap;
+  return snapshotMap;
 }
 
 function buildEntrySyncUpdate(input: {
   challenge: any;
   entry: any;
-  vitals: ReturnType<typeof computeMemberWeeklyVitals>;
+  snapshot: MemberChallengeSnapshot;
   nowIso: string;
   todayISO: string;
 }) {
   const metric = normalizeMetric(input.challenge.metric);
   const challengeType = normalizeType(input.challenge.challenge_type);
-  const snapshotValue = metricSnapshotValue(metric, input.vitals);
+  const snapshotValue = metricSnapshotValue(metric, input.snapshot);
   const prevStreak = Number(input.entry.streak_days ?? 0);
   const alreadySyncedToday = sameIsoDate(input.entry.snapshot_at, input.todayISO);
   const targetValue =
@@ -218,7 +235,7 @@ async function syncChallengeRows(admin: any, challengeRows: any[]): Promise<void
 
   const now = new Date();
   const nowIso = now.toISOString();
-  const todayISO = nowIso.slice(0, 10);
+  const todayISO = nowIso.slice(0, 10) as ISODate;
 
   const expiredIds = challengeRows
     .filter((row) => normalizeStatus(row.status) === "active" && String(row.ends_at ?? "") < nowIso)
@@ -247,14 +264,14 @@ async function syncChallengeRows(admin: any, challengeRows: any[]): Promise<void
     if (!entries || entries.length === 0) continue;
 
     const userIds = entries.map((entry: any) => String(entry.user_id ?? ""));
-    const vitalsMap = await loadChallengeVitalsMap(admin, userIds, todayISO);
+    const snapshotMap = await loadChallengeSnapshotMap(admin, userIds, todayISO);
 
     await Promise.all(
       entries.map(async (entry: any) => {
         const nextUpdate = buildEntrySyncUpdate({
           challenge,
           entry,
-          vitals: vitalsMap.get(String(entry.user_id ?? "")) ?? null,
+          snapshot: snapshotMap.get(String(entry.user_id ?? "")) ?? { vitals: null, orderCompletionCount: 0 },
           nowIso,
           todayISO,
         });

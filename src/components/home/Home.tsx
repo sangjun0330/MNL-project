@@ -18,7 +18,12 @@ import { useRecoveryPlanner } from "@/components/insights/useRecoveryPlanner";
 import { BatteryGauge } from "@/components/home/BatteryGauge";
 import { WeekStrip } from "@/components/home/WeekStrip";
 import { HomeSocialCard } from "@/components/home/HomeSocialCard";
-import { clearStaleRecoveryOrderDone, readRecoveryOrderDone } from "@/lib/recoveryOrderChecklist";
+import {
+  clearStaleRecoveryOrderDone,
+  readRecoveryOrderDone,
+  readRemoteRecoveryOrderDone,
+  writeRecoveryOrderDone,
+} from "@/lib/recoveryOrderChecklist";
 
 function isReasonableISODate(v: any): v is ISODate {
   if (!isISODate(v)) return false;
@@ -214,13 +219,32 @@ export default function Home() {
   const plannerOrderIdsKey = useMemo(() => plannerOrders.map((item) => item.id).join("|"), [plannerOrders]);
 
   useEffect(() => {
-    if (plannerOrders.length) {
-      clearStaleRecoveryOrderDone(
-        plannerDateISO,
-        plannerOrders.map((item) => item.id)
-      );
+    let active = true;
+    const activeIds = plannerOrders.map((item) => item.id);
+    if (activeIds.length) {
+      clearStaleRecoveryOrderDone(plannerDateISO, activeIds);
     }
-    setPlannerDoneMap(readRecoveryOrderDone(plannerDateISO));
+    const localDone = readRecoveryOrderDone(plannerDateISO);
+    setPlannerDoneMap(localDone);
+    if (!activeIds.length) {
+      return () => {
+        active = false;
+      };
+    }
+    void (async () => {
+      const remoteDone = await readRemoteRecoveryOrderDone(plannerDateISO);
+      if (!active) return;
+      const keep = new Set(activeIds);
+      const merged: Record<string, boolean> = {};
+      for (const [id, done] of Object.entries({ ...remoteDone, ...localDone })) {
+        if (done && keep.has(id)) merged[id] = true;
+      }
+      setPlannerDoneMap(merged);
+      writeRecoveryOrderDone(plannerDateISO, merged);
+    })();
+    return () => {
+      active = false;
+    };
   }, [plannerDateISO, plannerOrderIdsKey, plannerOrders]);
 
   const activePlannerOrders = useMemo(

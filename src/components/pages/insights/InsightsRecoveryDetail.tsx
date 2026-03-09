@@ -23,7 +23,12 @@ import {
   chronotypePresetLabel,
   normalizeProfileSettings,
 } from "@/lib/recoveryPlanner";
-import { clearStaleRecoveryOrderDone, readRecoveryOrderDone } from "@/lib/recoveryOrderChecklist";
+import {
+  clearStaleRecoveryOrderDone,
+  readRecoveryOrderDone,
+  readRemoteRecoveryOrderDone,
+  writeRecoveryOrderDone,
+} from "@/lib/recoveryOrderChecklist";
 import { useAppStoreSelector } from "@/lib/store";
 import { useI18n } from "@/lib/useI18n";
 
@@ -47,13 +52,32 @@ export function InsightsRecoveryDetail() {
   const plannerDateISO = aiPlanner.data?.dateISO ?? end;
 
   useEffect(() => {
-    if (aiPlanner.data?.result.orders.items?.length) {
-      clearStaleRecoveryOrderDone(
-        plannerDateISO,
-        aiPlanner.data.result.orders.items.map((item) => item.id)
-      );
+    let active = true;
+    const activeIds = aiPlanner.data?.result.orders.items.map((item) => item.id) ?? [];
+    if (activeIds.length) {
+      clearStaleRecoveryOrderDone(plannerDateISO, activeIds);
     }
-    setDoneMap(readRecoveryOrderDone(plannerDateISO));
+    const localDone = readRecoveryOrderDone(plannerDateISO);
+    setDoneMap(localDone);
+    if (!activeIds.length) {
+      return () => {
+        active = false;
+      };
+    }
+    void (async () => {
+      const remoteDone = await readRemoteRecoveryOrderDone(plannerDateISO);
+      if (!active) return;
+      const keep = new Set(activeIds);
+      const merged: Record<string, boolean> = {};
+      for (const [id, done] of Object.entries({ ...remoteDone, ...localDone })) {
+        if (done && keep.has(id)) merged[id] = true;
+      }
+      setDoneMap(merged);
+      writeRecoveryOrderDone(plannerDateISO, merged);
+    })();
+    return () => {
+      active = false;
+    };
   }, [aiPlanner.data, plannerDateISO]);
 
   if (isInsightsLocked(recordedDays)) {

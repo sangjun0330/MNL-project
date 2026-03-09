@@ -13,6 +13,7 @@ import {
   SocialMoonIcon,
   SocialPlusIcon,
   SocialStressIcon,
+  SocialTargetIcon,
   SocialTrophyIcon,
 } from "@/components/social/SocialIcons";
 import type {
@@ -42,6 +43,7 @@ function MetricIcon({ metric, className }: { metric: ChallengeMetric; className?
   if (metric === "activity") return <SocialActivityIcon className={className ?? "h-[15px] w-[15px]"} />;
   if (metric === "caffeine") return <SocialCoffeeIcon className={className ?? "h-[15px] w-[15px]"} />;
   if (metric === "mood") return <SocialMoodIcon className={className ?? "h-[15px] w-[15px]"} />;
+  if (metric === "order_completion") return <SocialTargetIcon className={className ?? "h-[15px] w-[15px]"} />;
   return <SocialBatteryIcon className={className ?? "h-[15px] w-[15px]"} />;
 }
 
@@ -52,6 +54,7 @@ function metricLabel(metric: ChallengeMetric): string {
   if (metric === "activity") return "활동량";
   if (metric === "caffeine") return "카페인";
   if (metric === "mood") return "기분";
+  if (metric === "order_completion") return "오더 완료횟수";
   return "신체 배터리";
 }
 
@@ -67,6 +70,7 @@ function metricMax(metric: ChallengeMetric): number {
   if (metric === "stress" || metric === "activity") return 3;
   if (metric === "mood") return 5;
   if (metric === "caffeine") return 1000;
+  if (metric === "order_completion") return 20;
   return 100;
 }
 
@@ -75,6 +79,7 @@ function metricInputHint(metric: ChallengeMetric): string {
   if (metric === "caffeine") return "mg, 예: 200";
   if (metric === "stress" || metric === "activity") return "단계, 0–3";
   if (metric === "mood") return "점수, 1–5";
+  if (metric === "order_completion") return "횟수, 예: 5";
   return "점수, 0–100";
 }
 
@@ -83,6 +88,7 @@ function metricPlaceholder(metric: ChallengeMetric): string {
   if (metric === "caffeine") return "200";
   if (metric === "stress" || metric === "activity") return "1.5";
   if (metric === "mood") return "4";
+  if (metric === "order_completion") return "5";
   return "50";
 }
 
@@ -91,6 +97,7 @@ function formatMetricValue(metric: ChallengeMetric, value: number): string {
   if (metric === "caffeine") return `${Math.round(value)}mg`;
   if (metric === "stress" || metric === "activity") return `${value.toFixed(1)}단계`;
   if (metric === "mood") return `${value.toFixed(1)}점`;
+  if (metric === "order_completion") return `${Math.round(value)}회`;
   return `${Math.round(value)}`;
 }
 
@@ -320,6 +327,7 @@ const METRICS: Array<{ value: ChallengeMetric; label: string; icon: ReactNode }>
   { value: "activity", label: "활동량", icon: <SocialActivityIcon className="h-5 w-5" /> },
   { value: "caffeine", label: "카페인", icon: <SocialCoffeeIcon className="h-5 w-5" /> },
   { value: "mood", label: "기분", icon: <SocialMoodIcon className="h-5 w-5" /> },
+  { value: "order_completion", label: "오더 완료횟수", icon: <SocialTargetIcon className="h-5 w-5" /> },
 ];
 
 const TYPES: Array<{ value: ChallengeType; label: string; desc: string }> = [
