@@ -258,7 +258,7 @@ export function SettingsBillingPage() {
 
             {hasPaidAccess ? (
               <p className="mt-2 text-[11.5px] leading-relaxed text-ios-muted">
-                {t("기간 종료 해지는 서비스가 만료일까지 유지됩니다. 환불 요청은 관리자 검토 후 수동으로 처리됩니다.")}
+                {t("해지 예약 시 현재 이용 기간 종료일까지 유지되며, 환불은 관리자 검토 후 처리됩니다.")}
               </p>
             ) : null}
 

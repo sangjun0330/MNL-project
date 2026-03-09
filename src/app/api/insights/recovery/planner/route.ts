@@ -32,6 +32,7 @@ import type { SubscriptionSnapshot } from "@/lib/server/billingStore";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
+const DEFAULT_ORDER_COUNT = 3;
 
 function toLanguage(value: string | null): Language | null {
   if (value === "ko" || value === "en") return value;
@@ -40,7 +41,7 @@ function toLanguage(value: string | null): Language | null {
 
 function normalizeRequestedOrderCount(value: unknown): number | null {
   const parsed = Math.round(Number(value));
-  if (!Number.isFinite(parsed)) return null;
+  if (!Number.isFinite(parsed)) return DEFAULT_ORDER_COUNT;
   return Math.max(1, Math.min(5, parsed));
 }
 

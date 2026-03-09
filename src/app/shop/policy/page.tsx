@@ -1,6 +1,15 @@
 import Link from "next/link";
 import { AppShell } from "@/components/shell/AppShell";
 
+function PolicySection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-3xl border border-[#edf1f6] bg-white p-5">
+      <h2 className="text-[16px] font-bold text-[#111827]">{title}</h2>
+      <div className="mt-3 space-y-2 text-[13px] leading-6 text-[#44556d]">{children}</div>
+    </section>
+  );
+}
+
 export default function ShopPolicyPage() {
   return (
     <AppShell>
@@ -18,57 +27,43 @@ export default function ShopPolicyPage() {
         </div>
 
         <div className="space-y-6 px-4 py-6">
-          <section className="rounded-3xl border border-[#edf1f6] bg-white p-5">
-            <h2 className="text-[16px] font-bold text-[#111827]">교환 및 반품 기준</h2>
-            <div className="mt-3 space-y-2 text-[13px] leading-6 text-[#44556d]">
-              <p>• 배송 완료 후 <strong>7일 이내</strong>에 교환·반품 신청이 가능합니다.</p>
-              <p>• 단순 변심의 경우 반품 배송비(왕복)는 고객 부담입니다.</p>
-              <p>• 상품 하자·오배송의 경우 배송비 전액 당사 부담입니다.</p>
-              <p>• 개봉 후 사용한 상품, 포장 훼손 시 교환·반품이 제한될 수 있습니다.</p>
-            </div>
-          </section>
+          <PolicySection title="1. 주문 취소">
+            <p>결제 전 상태 주문은 즉시 취소할 수 있습니다.</p>
+            <p>결제 완료 주문은 발송 전이며 결제 승인 후 약 1시간 이내인 경우에 한해 즉시 취소가 가능할 수 있습니다.</p>
+            <p>이미 발송이 시작된 주문, 즉시 취소 가능 시간이 지난 주문, 묶음 결제에 포함된 일부 주문은 즉시 취소가 제한되며 환불 또는 클레임 절차로 안내될 수 있습니다.</p>
+          </PolicySection>
 
-          <section className="rounded-3xl border border-[#edf1f6] bg-white p-5">
-            <h2 className="text-[16px] font-bold text-[#111827]">결제 취소 및 환불 처리</h2>
-            <div className="mt-3 space-y-2 text-[13px] leading-6 text-[#44556d]">
-              <p>• 결제 당일 취소 시 즉시 승인 취소(실질적 미청구) 처리됩니다.</p>
-              <p>• 결제 익일 이후 환불은 <strong>영업일 기준 3~5일</strong> 이내 원결제 수단으로 반환됩니다.</p>
-              <p>• 카드 취소의 경우 카드사 정책에 따라 청구서에 반영되기까지 시간이 걸릴 수 있습니다.</p>
-              <p>• 환불 요청은 쇼핑 탭의 주문 내역에서 직접 신청하거나 고객센터로 문의해 주세요.</p>
-            </div>
-          </section>
+          <PolicySection title="2. 환불 요청">
+            <p>환불 요청은 주문 상세 화면에서 접수할 수 있으며, 사유 입력이 필요할 수 있습니다.</p>
+            <p>환불 요청이 접수되면 즉시 자동 환불되지 않고, 관리자 검토 및 처리 절차를 거칠 수 있습니다.</p>
+            <p>승인된 환불은 원결제 수단으로 처리되며, 실제 반영 시점은 결제사·카드사 또는 금융기관 일정에 따라 달라질 수 있습니다.</p>
+          </PolicySection>
 
-          <section className="rounded-3xl border border-[#edf1f6] bg-white p-5">
-            <h2 className="text-[16px] font-bold text-[#111827]">교환·반품 불가 사유</h2>
-            <div className="mt-3 space-y-2 text-[13px] leading-6 text-[#44556d]">
-              <p>• 고객 귀책 사유로 인한 상품 훼손, 오염, 분실</p>
-              <p>• 개봉·사용으로 인해 상품 가치가 현저히 감소한 경우</p>
-              <p>• 소비자 보호법 및 전자상거래법에서 정한 반품 불가 기간 경과</p>
-              <p>• 주문 제작 또는 맞춤 제작된 상품</p>
-            </div>
-          </section>
+          <PolicySection title="3. 배송 완료 후 교환·환불 클레임">
+            <p>배송 완료 후 7일 이내에는 주문 상세에서 교환 또는 환불 클레임을 접수할 수 있습니다.</p>
+            <p>동일 주문에는 동시에 여러 건의 진행 중 클레임을 둘 수 없으며, 처리 중인 클레임이 있으면 추가 요청이 제한될 수 있습니다.</p>
+            <p>클레임은 접수, 승인, 반품 회수 접수, 반품 입고, 환불 완료 또는 교환품 발송 순으로 단계적으로 처리될 수 있습니다.</p>
+          </PolicySection>
 
-          <section className="rounded-3xl border border-[#edf1f6] bg-white p-5">
-            <h2 className="text-[16px] font-bold text-[#111827]">배송 안내</h2>
-            <div className="mt-3 space-y-2 text-[13px] leading-6 text-[#44556d]">
-              <p>• 결제 완료 후 <strong>1~3 영업일</strong> 이내 발송됩니다 (공휴일·주말 제외).</p>
-              <p>• 도서·산간 지역은 추가 배송일이 소요될 수 있습니다.</p>
-              <p>• 배송 시작 시 운송장 번호를 주문 상세 페이지에서 확인하실 수 있습니다.</p>
-            </div>
-          </section>
+          <PolicySection title="4. 반품·교환 제한">
+            <p>반품 가능 기간이 지난 경우, 이미 환불이 완료된 경우, 진행 중인 동일 주문 클레임이 있는 경우 요청이 제한될 수 있습니다.</p>
+            <p>이용자 책임으로 상품이 훼손되었거나 사용 흔적이 큰 경우, 포장 또는 구성품이 현저히 손상된 경우에는 처리 범위가 제한될 수 있습니다.</p>
+            <p>외부 판매처로 연결되는 상품은 해당 판매처의 환불·교환 정책이 우선 적용될 수 있습니다.</p>
+          </PolicySection>
 
-          <section className="rounded-3xl border border-[#edf1f6] bg-white p-5">
-            <h2 className="text-[16px] font-bold text-[#111827]">고객센터</h2>
-            <div className="mt-3 space-y-2 text-[13px] leading-6 text-[#44556d]">
-              <p>• 이메일: <a href="mailto:support@rnest.kr" className="text-[#3b6fc9] underline">support@rnest.kr</a></p>
-              <p>• 운영 시간: 평일 09:00 ~ 18:00 (점심시간 12:00 ~ 13:00 제외)</p>
-              <p>• 이메일 문의는 영업일 기준 1~2일 이내 순차 답변드립니다.</p>
-            </div>
-          </section>
+          <PolicySection title="5. 배송 안내">
+            <p>결제 완료 후 상품 준비와 발송이 진행되며, 실제 출고 시점은 재고, 운영 일정, 공휴일, 제휴사 사정에 따라 달라질 수 있습니다.</p>
+            <p>배송이 시작되면 주문 상세에서 운송장과 배송 상태를 확인할 수 있습니다.</p>
+          </PolicySection>
+
+          <PolicySection title="6. 고객 문의">
+            <p>환불, 반품, 교환, 배송 관련 문의는 주문 상세 또는 고객센터 이메일로 접수할 수 있습니다.</p>
+            <p>이메일: <a href="mailto:support@rnest.kr" className="text-[#3b6fc9] underline">support@rnest.kr</a></p>
+          </PolicySection>
 
           <div className="text-center text-[11px] text-[#8d99ab]">
-            본 환불·반품 정책은 소비자보호법 및 전자상거래법을 준수합니다.<br/>
-            최종 수정일: 2025년 1월 1일
+            본 정책은 현재 서비스 구현 기준으로 작성되었으며, 운영 정책 및 관련 법령에 따라 변경될 수 있습니다.<br />
+            최종 수정일: 2026년 3월 9일
           </div>
         </div>
       </div>

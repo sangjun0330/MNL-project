@@ -52,6 +52,8 @@ type RecoveryOpenAILogFeature =
   | "recovery_translate"
   | "planner_orders";
 
+const DEFAULT_PLANNER_ORDER_COUNT = 3;
+
 type CategoryMeta = {
   category: RecoverySection["category"];
   titleKo: string;
@@ -199,7 +201,7 @@ function resolveMaxOutputTokens() {
 }
 
 function resolveStoreResponses() {
-  const raw = String(process.env.OPENAI_RECOVERY_STORE ?? process.env.OPENAI_STORE ?? "true")
+  const raw = String(process.env.OPENAI_RECOVERY_STORE ?? "true")
     .trim()
     .toLowerCase();
   if (!raw) return true;
@@ -1738,8 +1740,8 @@ function buildPlannerOrdersDeveloperPrompt(language: Language, requestedOrderCou
         ? `Return exactly ${requestedOrderCount} orders unless the data truly supports fewer.`
         : `가능하면 정확히 ${requestedOrderCount}개의 오더를 반환하고, 데이터가 정말 부족할 때만 더 적게 작성한다.`
       : language === "en"
-        ? "Return between 1 and 5 orders."
-        : "오더는 1개 이상 5개 이하로 작성한다.";
+        ? `Return exactly ${DEFAULT_PLANNER_ORDER_COUNT} orders by default, unless the data truly supports fewer.`
+        : `기본값은 ${DEFAULT_PLANNER_ORDER_COUNT}개의 오더를 작성하고, 데이터가 정말 부족할 때만 더 적게 작성한다.`;
   if (language === "ko") {
     return [
       "너는 RNest의 AI 오늘의 오더 생성 엔진이야.",
@@ -1820,14 +1822,14 @@ function buildPlannerOrdersUserPrompt(args: {
       "- AI 맞춤회복을 실제 행동 체크리스트로 바꾸기",
       requestedOrderCount != null
         ? `- 오늘 가장 중요한 오더를 ${requestedOrderCount}개로 맞춰 고르기`
-        : "- 오늘 가장 중요한 오더만 1~5개만 고르기",
+        : `- 오늘 가장 중요한 오더 ${DEFAULT_PLANNER_ORDER_COUNT}개를 기본값으로 고르기`,
       "- 타이밍 정보는 when과 reason에 자연스럽게 녹이기",
       "- 사용자가 지금 컨디션에서도 바로 실천할 수 있게 마찰을 낮추기",
       "",
       "[제약]",
       requestedOrderCount != null
         ? `- items 길이는 정확히 ${requestedOrderCount}`
-        : "- items 길이는 1 이상 5 이하",
+        : `- items 길이는 기본적으로 정확히 ${DEFAULT_PLANNER_ORDER_COUNT}`,
       "- id는 영어 snake_case",
       "- title은 행동 중심의 짧은 문장",
       "- body는 체크리스트 한 줄처럼 짧고 분명하게, 가능하면 시간/횟수/조건을 포함",
@@ -1862,13 +1864,13 @@ function buildPlannerOrdersUserPrompt(args: {
     "- Turn AI customized recovery into an actionable checklist",
     requestedOrderCount != null
       ? `- Choose exactly ${requestedOrderCount} important orders for today`
-      : "- Choose only the most important 1 to 5 orders for today",
+      : `- Choose exactly ${DEFAULT_PLANNER_ORDER_COUNT} important orders for today by default`,
     "- Fold timing into when and reason instead of creating a separate timeline section",
     "- Keep the actions easy to start in the user's current condition",
     "[Constraints]",
     requestedOrderCount != null
       ? `- items length must be exactly ${requestedOrderCount}`
-      : "- items length must be between 1 and 5",
+      : `- items length should default to exactly ${DEFAULT_PLANNER_ORDER_COUNT}`,
     "- id must be English snake_case",
     "- title must be short and action-first",
     "- body must read like a checklist line and should include a small duration, count, or trigger when helpful",
@@ -1929,7 +1931,7 @@ function normalizeChecklistChip(value: string) {
 
 function normalizeRequestedOrderCount(value: number | null | undefined) {
   const parsed = Math.round(Number(value));
-  if (!Number.isFinite(parsed)) return null;
+  if (!Number.isFinite(parsed)) return DEFAULT_PLANNER_ORDER_COUNT;
   return Math.max(1, Math.min(5, parsed));
 }
 
@@ -1938,7 +1940,9 @@ function buildFallbackChecklistItems(
   language: Language,
   requestedOrderCount?: number | null
 ): AIPlannerChecklistItem[] {
-  const targetCount = normalizeRequestedOrderCount(requestedOrderCount) ?? Math.max(1, Math.min(5, plannerContext?.ordersTop3?.length ?? 1));
+  const targetCount =
+    normalizeRequestedOrderCount(requestedOrderCount) ??
+    Math.max(DEFAULT_PLANNER_ORDER_COUNT, Math.min(5, plannerContext?.ordersTop3?.length ?? DEFAULT_PLANNER_ORDER_COUNT));
   const orders = plannerContext?.ordersTop3 ?? [];
   const baseItems: AIPlannerChecklistItem[] = orders.slice(0, 5).map((order, index) => ({
     id: slugifyChecklistId(order.title || order.text, `order_${index + 1}`),

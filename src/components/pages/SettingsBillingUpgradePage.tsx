@@ -122,7 +122,7 @@ export function SettingsBillingUpgradePage() {
         </Link>
         <div>
           <div className="text-[24px] font-extrabold tracking-[-0.02em] text-ios-text">{t("플랜 업그레이드")}</div>
-          <div className="text-[12px] text-ios-sub">{t("결제창 승인 완료 즉시 플랜이 적용됩니다.")}</div>
+          <div className="text-[12px] text-ios-sub">{t("결제 후 바로 플랜이 적용됩니다.")}</div>
         </div>
       </div>
 
@@ -147,7 +147,7 @@ export function SettingsBillingUpgradePage() {
               <div className="text-[13px] font-semibold text-ios-sub">{t("업그레이드 후 복귀")}</div>
               <div className="mt-1 text-[16px] font-bold tracking-[-0.02em] text-ios-text">{returnLabel}</div>
               <div className="mt-1 text-[13px] leading-relaxed text-ios-sub">
-                {t("결제가 완료되면 원래 보던 화면으로 바로 돌아갈 수 있게 연결해 둘게요.")}
+                {t("결제 후 원래 보던 화면으로 바로 돌아갈 수 있습니다.")}
               </div>
             </section>
           ) : null}
@@ -180,12 +180,11 @@ export function SettingsBillingUpgradePage() {
               ))}
             </ul>
             <div className="mt-3 rounded-2xl border border-ios-sep bg-[#F7F7FA] px-3 py-2 text-[12.5px] text-ios-sub">
-              <div className="text-[12px] font-semibold text-ios-text">{t("Pro 크레딧 정책")}</div>
+              <div className="text-[12px] font-semibold text-ios-text">{t("이용 안내")}</div>
               <ul className="mt-1 list-disc space-y-0.5 pl-4">
-                <li>{t("기본 크레딧은 Pro 사용자에게 매일 10회가 한국시간 자정에 초기화됩니다.")}</li>
-                <li>{t("추가 크레딧은 구매 후 무료/Pro 공통으로 사용되며 날짜가 바뀌어도 유지됩니다.")}</li>
-                <li>{t("AI 검색 실행 시 기본 크레딧을 먼저 차감하고, 부족하면 추가 크레딧에서 차감합니다.")}</li>
-                <li>{t("AI 검색 최근 기록은 계정별로 최대 10건까지 저장됩니다.")}</li>
+                <li>{t("Pro 기본 크레딧은 매일 10회가 한국시간 자정에 초기화됩니다.")}</li>
+                <li>{t("추가 크레딧은 구매 후 소진 전까지 유지됩니다.")}</li>
+                <li>{t("AI 검색은 기본 크레딧을 먼저 사용하고, 부족하면 추가 크레딧이 차감됩니다.")}</li>
               </ul>
             </div>
             <button
@@ -201,7 +200,7 @@ export function SettingsBillingUpgradePage() {
                   : `${proPlan.title} ${t("결제하기")}`}
             </button>
             <p className="mt-2 text-[11.5px] text-ios-muted">
-              {t("토스페이먼츠 결제창으로 진행되며, 서버 승인 완료 후 플랜이 적용됩니다.")}
+              {t("토스페이먼츠 결제 승인 후 플랜이 적용됩니다.")}
             </p>
             {error ? <div className="mt-3 text-[12px] text-red-600">{error}</div> : null}
           </section>
@@ -239,7 +238,7 @@ export function SettingsBillingUpgradePage() {
               {payingCredit ? t("결제창 준비 중...") : t("크레딧 10회 구매")}
             </button>
             <p className="mt-2 text-[11.5px] text-ios-muted">
-              {t("구매된 추가 크레딧은 AI 약물·도구 검색기 실행 시 1회당 1크레딧 사용되며, 날짜가 바뀌어도 사라지지 않습니다.")}
+              {t("추가 크레딧은 AI 검색 1회당 1크레딧이 사용되며, 소진 전까지 유지됩니다.")}
             </p>
           </section>
 

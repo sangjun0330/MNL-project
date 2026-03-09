@@ -7,6 +7,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { DetailCard, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
+import { RecoveryPlannerUpgradeCard } from "@/components/insights/RecoveryPlannerUpgradeCard";
 import { useAIRecoveryPlanner } from "@/components/insights/useAIRecoveryPlanner";
 import { INSIGHTS_MIN_DAYS, isInsightsLocked, useInsightsData } from "@/components/insights/useInsightsData";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
@@ -201,7 +202,7 @@ function splitBulletLines(text: string) {
 
 function normalizeRequestedOrderCountParam(value: string | null) {
   const parsed = Math.round(Number(value));
-  if (!Number.isFinite(parsed)) return null;
+  if (!Number.isFinite(parsed)) return 3;
   return Math.max(1, Math.min(5, parsed));
 }
 
@@ -737,32 +738,26 @@ export function InsightsAIRecoveryDetail() {
       ) : null}
 
       {!insightsLocked && !billingLoading && !hasPlannerAIAccess ? (
-        <DetailCard className="p-4 sm:p-5">
-          <div className="text-[17px] font-bold tracking-[-0.01em] text-ios-text">{t("유료 플랜 전용 기능")}</div>
-          <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
-            {t("AI 맞춤회복은 Pro 플랜에서 사용할 수 있어요.")}
-          </p>
-          <div className="mt-4 flex gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                const confirmed = window.confirm(
-                  t("AI 맞춤회복은 유료 플랜 전용 기능입니다.\n플랜 업그레이드 페이지로 이동할까요?")
-                );
-                if (confirmed) router.push(withReturnTo("/settings/billing/upgrade", "/insights/recovery/ai"));
-              }}
-              className="inline-flex h-10 items-center justify-center rounded-full bg-black px-5 text-[13px] font-semibold text-white"
-            >
-              {t("확인")}
-            </button>
-            <Link
-              href={withReturnTo("/settings/billing/upgrade", "/insights/recovery/ai")}
-              className="inline-flex h-10 items-center justify-center rounded-full border border-ios-sep bg-white px-5 text-[13px] font-semibold text-ios-text"
-            >
-              {t("플랜 보기")}
-            </Link>
-          </div>
-        </DetailCard>
+        <>
+          <DetailCard
+            className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
+            style={{ background: "linear-gradient(180deg, rgba(246,248,252,0.98) 0%, #FFFFFF 82%)" }}
+          >
+            <div className="text-[11px] font-semibold tracking-[0.16em] text-[#1B2747]">AI CUSTOMIZED RECOVERY</div>
+            <div className="mt-1 text-[22px] font-bold tracking-[-0.03em] text-ios-text">{t("AI 맞춤회복")}</div>
+            <p className="mt-3 break-keep text-[18px] font-bold leading-8 tracking-[-0.03em] text-ios-text">
+              {t("오늘 무엇을 먼저 회복해야 하는지, 왜 그 순서가 중요한지 AI가 맥락 중심으로 설명합니다.")}
+            </p>
+            <p className="mt-2 break-keep text-[14px] leading-6 text-ios-sub">
+              {t("수면, 교대근무, 스트레스, 활동, 최근 기록 흐름을 함께 읽고 오늘 회복 우선순위를 정리합니다.")}
+            </p>
+          </DetailCard>
+          <RecoveryPlannerUpgradeCard
+            title={t("AI 맞춤회복 전체는 Pro에서 열립니다.")}
+            description={t("AI가 오늘의 회복 우선순위와 이유를 설명하고, 바로 실행할 오늘의 오더까지 함께 연결합니다.")}
+            returnTo="/insights/recovery/ai"
+          />
+        </>
       ) : null}
 
       {!insightsLocked && hasPlannerAIAccess && !generating && !data && !error ? (

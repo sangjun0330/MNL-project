@@ -72,7 +72,7 @@ export function BillingCheckoutSheet({
         {periodLabel ? <div className="mt-0.5 text-[12.5px] text-ios-sub">{periodLabel}</div> : null}
         <div className="my-3 h-px bg-black/10" />
         <div className="text-[12.5px] leading-5 text-ios-sub">
-          결제 승인 후 즉시 적용됩니다. 구독은 다음 갱신일 1일 전까지 해지하지 않으면 자동 연장됩니다.
+          결제 후 바로 적용됩니다. 구독은 해지 전까지 자동 갱신되며, 해지 예약 시 현재 이용 기간 종료일까지 유지됩니다.
         </div>
         {accountEmail ? (
           <>

@@ -27,15 +27,16 @@ type HookResult = {
 
 const inFlightGenerate = new Map<string, Promise<AIRecoveryPlannerPayload | null>>();
 const sessionDailyCache = new Map<string, AIRecoveryPlannerPayload>();
+const DEFAULT_ORDER_COUNT = 3;
 
 function normalizeRequestedOrderCount(value: number | null | undefined) {
   const parsed = Math.round(Number(value));
-  if (!Number.isFinite(parsed)) return null;
+  if (!Number.isFinite(parsed)) return DEFAULT_ORDER_COUNT;
   return Math.max(1, Math.min(5, parsed));
 }
 
 function requestKey(userId: string, lang: "ko" | "en", dateISO: string, requestedOrderCount?: number | null) {
-  return `${userId}:${lang}:${dateISO}:${normalizeRequestedOrderCount(requestedOrderCount) ?? "default"}`;
+  return `${userId}:${lang}:${dateISO}:${normalizeRequestedOrderCount(requestedOrderCount)}`;
 }
 
 async function fetchAIRecoveryPlanner(
