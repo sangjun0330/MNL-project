@@ -24,15 +24,18 @@ npm run dev
 - 브라우저에서 http://localhost:3000 접속
 
 ## 환경 변수 설정
-`.env.local`에 아래 값을 넣어주세요. (예시는 `.env.example` 참고)
+`.env.local`에 아래 값을 넣어주세요.
 
-- `AUTH_SECRET` (필수)
-- `NEXTAUTH_URL` (예: `http://localhost:3000`)
-- `AUTH_TRUST_HOST=true` (로컬 개발용)
-- `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`
-- `AUTH_KAKAO_ID`, `AUTH_KAKAO_SECRET`
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `NEXT_PUBLIC_SITE_URL`
+- `AUTH_ALLOWED_EMAILS` (선택, 테스트 중 허용할 이메일만 `,` 또는 줄바꿈으로 지정)
 
-> Kakao 로그인은 **리디렉션 URI/도메인** 설정이 정확히 일치해야 합니다.
+Google 로그인은 앱 코드에서 직접 OAuth client id/secret을 읽지 않고, Supabase Dashboard의 `Authentication > Providers > Google` 설정을 사용합니다.
+
+- 로컬 개발에서는 현재 접속 중인 브라우저 origin(`http://localhost:3000` 등)을 우선 사용해 OAuth callback을 보냅니다.
+- `NEXT_PUBLIC_SITE_URL`은 메타데이터/이메일 링크용 기본 도메인으로도 쓰이므로 환경별로 맞게 관리해야 합니다.
 
 ## 프로덕션 빌드
 ```bash

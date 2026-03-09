@@ -1,4 +1,5 @@
 import { getRouteSupabaseClient } from "@/lib/server/supabaseRouteClient";
+import { isAuthEmailAllowed } from "@/lib/server/authAccess";
 
 function extractBearerToken(req: Request): string | null {
   const header = req.headers.get("authorization") ?? "";
@@ -20,11 +21,12 @@ export async function readUserIdFromRequest(req: Request): Promise<string> {
     // 토큰이 무효하더라도 cookie 기반 인증으로 폴스루하지 않아
     // 토큰 위조나 세션 혼용 공격을 방지한다.
     const { data, error } = await supabase.auth.getUser(bearer);
-    if (!error && data.user?.id) return data.user.id;
+    if (!error && data.user?.id && isAuthEmailAllowed(data.user.email ?? null)) return data.user.id;
     return "";
   }
 
   // Bearer 토큰이 없을 때만 cookie 기반 인증 시도
   const { data } = await supabase.auth.getUser();
-  return data.user?.id ?? "";
+  if (data.user?.id && isAuthEmailAllowed(data.user.email ?? null)) return data.user.id;
+  return "";
 }

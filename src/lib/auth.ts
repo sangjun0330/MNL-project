@@ -46,15 +46,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let active = true;
 
-    supabase.auth.getSession().then(({ data }) => {
+    const syncAllowedSession = async (nextSession: Session | null) => {
       if (!active) return;
-      setSession(data.session ?? null);
+      if (!nextSession?.user) {
+        setSession(null);
+        setLoading(false);
+        return;
+      }
+      try {
+        const response = await fetch("/api/auth/session", {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        });
+        if (!active) return;
+        if (response.ok) {
+          setSession(nextSession);
+          setLoading(false);
+          return;
+        }
+        if (response.status === 401) {
+          await supabase.auth.signOut();
+          if (!active) return;
+          setSession(null);
+          setLoading(false);
+          return;
+        }
+      } catch {
+        // Fail open on transient client/network issues; server APIs still enforce auth.
+      }
+      if (!active) return;
+      setSession(nextSession);
       setLoading(false);
+    };
+
+    supabase.auth.getSession().then(({ data }) => {
+      void syncAllowedSession(data.session ?? null);
     });
 
     const { data } = supabase.auth.onAuthStateChange((event, nextSession) => {
-      setSession(nextSession ?? null);
-      setLoading(false);
+      void syncAllowedSession(nextSession ?? null);
       if (typeof window !== "undefined") {
         window.dispatchEvent(
           new CustomEvent("rnest:auth-event", {
@@ -110,6 +141,10 @@ export function signInWithProvider(provider: "google" = "google") {
   const supabase = getSupabaseBrowserClient();
   const isBrowser = typeof window !== "undefined";
   const resolveOrigin = () => {
+    if (isBrowser) {
+      const browserOrigin = String(window.location.origin ?? "").trim();
+      if (browserOrigin) return browserOrigin;
+    }
     const raw = process.env.NEXT_PUBLIC_SITE_URL;
     if (raw) {
       try {
@@ -132,6 +167,7 @@ export function signInWithProvider(provider: "google" = "google") {
     provider,
     options: {
       redirectTo,
+      queryParams: provider === "google" ? { prompt: "select_account" } : undefined,
     },
   });
 }

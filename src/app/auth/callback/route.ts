@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ensureUserRow } from "@/lib/server/userStateStore";
+import { hasAuthEmailAllowlist, isAuthEmailAllowed } from "@/lib/server/authAccess";
 import { getRouteSupabaseClient } from "@/lib/server/supabaseRouteClient";
 
 export const runtime = "edge";
@@ -26,23 +27,43 @@ export async function GET(req: Request) {
   const code = url.searchParams.get("code");
   const next = url.searchParams.get("next");
   const origin = url.origin;
+  let authError = "";
 
   if (code) {
     const supabase = await getRouteSupabaseClient();
 
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-    if (!error) {
+    if (error) {
+      authError = "oauth_exchange_failed";
+      console.error("[AuthCallback] exchangeCodeForSession failed: %s", String(error.message ?? error));
+    } else {
+      const email = data.user?.email ?? null;
+      if (!isAuthEmailAllowed(email)) {
+        authError = "unauthorized_email";
+        console.warn("[AuthCallback] blocked sign-in for non-allowlisted email");
+        await supabase.auth.signOut();
+      }
       const userId = data.user?.id;
-      if (userId) {
+      if (userId && !authError) {
         try {
           await ensureUserRow(userId);
         } catch {
           // ignore user bootstrap errors (do not block login)
         }
+      } else if (!userId) {
+        authError = "oauth_user_missing";
+        console.error("[AuthCallback] no user returned after OAuth exchange");
       }
     }
   }
 
   const safeNext = resolveSafeNextPath(next, origin);
-  return NextResponse.redirect(new URL(safeNext, origin));
+  const redirectUrl = new URL(safeNext, origin);
+  if (authError) {
+    redirectUrl.searchParams.set("authError", authError);
+    if (authError === "unauthorized_email" && hasAuthEmailAllowlist()) {
+      redirectUrl.searchParams.set("authHint", "allowlist");
+    }
+  }
+  return NextResponse.redirect(redirectUrl);
 }

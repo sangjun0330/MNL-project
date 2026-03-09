@@ -77,6 +77,7 @@ export function SocialPage() {
   const mySchedule = useAppStoreSelector((s) => s.schedule as Record<string, string>);
   const inviteToken = searchParams.get("invite") ?? "";
   const groupInviteToken = searchParams.get("groupInvite") ?? "";
+  const authError = searchParams.get("authError") ?? "";
 
   const [connections, setConnections] = useState<SocialConnectionsData | null>(null);
   const [friendsSchedule, setFriendsSchedule] = useState<FriendsScheduleData | null>(null);
@@ -880,6 +881,13 @@ export function SocialPage() {
                 ? "공유 링크를 열었어요. 로그인하면 친구 코드 입력창이 자동으로 열립니다."
                 : "친구 코드를 주고받고, 서로의 일정을 보려면 로그인해야 해요."}
           </p>
+          {authError ? (
+            <div className="mt-3 rounded-2xl border border-[#F3D7A8] bg-[#FFF8EC] px-3 py-3 text-[12.5px] leading-6 text-[#8A5A12]">
+              {authError === "unauthorized_email"
+                ? "이 계정은 현재 테스트 허용 목록에 없어 로그인할 수 없어요."
+                : "Google 로그인 처리에 실패했어요. 잠시 후 다시 시도해 주세요."}
+            </div>
+          ) : null}
           <button
             type="button"
             onClick={() => signInWithProvider("google")}

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useI18n } from "@/lib/useI18n";
 import { PWAInstallButton } from "@/components/system/PWAInstallButton";
@@ -17,9 +18,11 @@ import {
 
 export function SettingsPage() {
   const { t } = useI18n();
+  const searchParams = useSearchParams();
   const { status, user } = useAuthState();
   const profile = useAppStoreSelector((s) => normalizeProfileSettings(s.settings.profile));
   const [isAdmin, setIsAdmin] = useState(false);
+  const authError = searchParams.get("authError");
   const personalizationSummary = `${chronotypePresetLabel(chronotypePresetFromValue(profile.chronotype))} · ${t("카페인")} ${caffeineSensitivityPresetLabel(
     caffeineSensitivityPresetFromValue(profile.caffeineSensitivity)
   )}`;
@@ -65,6 +68,14 @@ export function SettingsPage() {
         <div className="text-[28px] font-extrabold tracking-[-0.02em]">{t("설정")}</div>
         <div className="mt-1 text-[13px] text-ios-sub">{t("모든 기능을 사용하려면 로그인해야 합니다.")}</div>
       </div>
+
+      {authError ? (
+        <div className="mb-4 rounded-apple border border-[#F3D7A8] bg-[#FFF8EC] px-4 py-3 text-[13px] leading-6 text-[#8A5A12] shadow-apple-sm">
+          {authError === "unauthorized_email"
+            ? t("이 계정은 현재 테스트 허용 목록에 없어 로그인할 수 없어요.")
+            : t("Google 로그인 처리에 실패했어요. 잠시 후 다시 시도해 주세요.")}
+        </div>
+      ) : null}
 
       {/* PWA 앱 설치 */}
       <div className="mb-4">
