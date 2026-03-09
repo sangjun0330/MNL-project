@@ -199,20 +199,50 @@ export default function Home() {
   const aiRecovery = useAIRecoveryInsights({ mode: "cache", enabled: deferredReady && planner.aiAvailable });
   const aiPlanner = useAIRecoveryPlanner({ mode: "cache", enabled: deferredReady && planner.aiAvailable });
   const [plannerDoneMap, setPlannerDoneMap] = useState<Record<string, boolean>>({});
+  const aiPlannerHeadline = useMemo(() => {
+    const candidates = [
+      aiPlanner.data?.result.explanation.recovery.headline,
+      aiPlanner.data?.result.explanation.headline,
+      aiRecovery.data?.result?.headline,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate !== "string") continue;
+      const line = candidate.replace(/\s+/g, " ").trim();
+      if (line) return line;
+    }
+    return null;
+  }, [
+    aiPlanner.data?.result.explanation.headline,
+    aiPlanner.data?.result.explanation.recovery.headline,
+    aiRecovery.data?.result?.headline,
+  ]);
+  const aiCardLoading = !aiPlannerHeadline && (
+    aiRecovery.loading ||
+    aiRecovery.generating ||
+    aiPlanner.loading ||
+    aiPlanner.generating
+  );
   const aiHeadline = useMemo(() => {
     if (planner.state === "needs_records") return t("기록을 3일 이상 쌓으면 AI 맞춤회복도 열려요.");
     if (!planner.aiAvailable && !planner.billingLoading) return t("AI 맞춤회복은 Pro에서 열립니다.");
-    const raw = aiRecovery.data?.result?.headline;
-    if (typeof raw === "string") {
-      const line = raw.replace(/\s+/g, " ").trim();
-      if (line) return line;
-    }
+    if (aiPlannerHeadline) return aiPlannerHeadline;
     return aiSummaryFallback(t, {
-      loading: aiRecovery.loading,
-      generating: aiRecovery.generating,
-      error: aiRecovery.error,
+      loading: aiCardLoading,
+      generating: !aiCardLoading && (aiRecovery.generating || aiPlanner.generating),
+      error: aiRecovery.error ?? aiPlanner.error,
     });
-  }, [aiRecovery.data?.result?.headline, aiRecovery.loading, aiRecovery.generating, aiRecovery.error, planner.aiAvailable, planner.billingLoading, planner.state, t]);
+  }, [
+    aiCardLoading,
+    aiPlanner.generating,
+    aiPlanner.error,
+    aiPlannerHeadline,
+    aiRecovery.error,
+    aiRecovery.generating,
+    planner.aiAvailable,
+    planner.billingLoading,
+    planner.state,
+    t,
+  ]);
 
   const plannerDateISO = aiPlanner.data?.dateISO ?? todayISO();
   const plannerOrders = useMemo(() => aiPlanner.data?.result.orders.items ?? [], [aiPlanner.data]);
@@ -412,7 +442,7 @@ export default function Home() {
           </Link>
         </div>
 
-        {aiRecovery.loading || aiRecovery.generating ? (
+        {aiCardLoading ? (
           <div className="mt-3 space-y-2">
             <div
               className="h-4 w-4/5 animate-pulse rounded-full"
@@ -427,7 +457,7 @@ export default function Home() {
           <p
             className="mt-3 text-[15px] font-semibold leading-snug tracking-[-0.01em]"
             style={{
-              color: aiRecovery.data?.result?.headline
+              color: aiPlannerHeadline
                 ? "var(--rnest-text)"
                 : "var(--rnest-sub)",
             }}

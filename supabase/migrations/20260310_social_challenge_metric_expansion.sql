@@ -16,7 +16,8 @@ ALTER TABLE public.rnest_social_group_challenges
       'stress',
       'activity',
       'caffeine',
-      'mood'
+      'mood',
+      'order_completion'
     )
   );
 

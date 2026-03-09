@@ -88,6 +88,15 @@ function calcDaysLeft(endsAt: string): number {
   return Math.ceil(ms / 86_400_000);
 }
 
+function matchesChallengeConstraint(error: any, constraint: string) {
+  if (!error || typeof error !== "object") return false;
+  if (error.constraint === constraint) return true;
+  const text = [error.message, error.details, error.hint]
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .join(" ");
+  return error.code === "23514" && text.includes(constraint);
+}
+
 function rowToSummary(
   row: any,
   participantCount: number,
@@ -555,7 +564,15 @@ export async function createGroupChallenge(
     .select("*")
     .single();
 
-  if (error) throw error;
+  if (error) {
+    if (matchesChallengeConstraint(error, "rnest_social_group_challenges_metric_check")) {
+      throw new Error("invalid_challenge_metric");
+    }
+    if (matchesChallengeConstraint(error, "rnest_social_group_challenges_challenge_type_check")) {
+      throw new Error("invalid_challenge_type");
+    }
+    throw error;
+  }
 
   return rowToSummary(inserted, 0, null);
 }
