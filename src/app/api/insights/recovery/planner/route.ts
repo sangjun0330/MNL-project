@@ -353,10 +353,6 @@ async function handlePlanner(req: NextRequest, options?: { allowGenerate?: boole
       return jsonNoStore({ ok: true, data: null } satisfies AIRecoveryPlannerApiSuccess);
     }
 
-    let plannerDebug: string | null = null;
-    let explanationDebug: string | null = null;
-    let plannerModel: string | null = null;
-
     const fallbackModules = buildFallbackModules({
       language: lang,
       plannerContext,
@@ -364,27 +360,9 @@ async function handlePlanner(req: NextRequest, options?: { allowGenerate?: boole
       timelinePreview,
     });
 
-    let plannerModules = fallbackModules;
-    let plannerGeneratedText: string | undefined;
-    try {
-      const plannerAI = await generateAIRecoveryPlannerModulesWithOpenAI({
-        language: lang,
-        todayISO: today,
-        todayShift,
-        nextShift,
-        todayVital,
-        vitals7,
-        prevWeekVitals: prevWeek,
-        plannerContext,
-        profile,
-      });
-      plannerModules = plannerAI.result;
-      plannerGeneratedText = plannerAI.generatedText;
-      plannerModel = plannerAI.model;
-    } catch (err: any) {
-      plannerDebug = typeof err?.message === "string" ? err.message : "planner_ai_failed";
-    }
-
+    let plannerDebug: string | null = null;
+    let explanationDebug: string | null = null;
+    let plannerModel: string | null = null;
     const fallbackRecovery = generateAIRecovery(todayVital, vitals7, prevWeek, nextShift, lang);
     let explanationResult = fallbackRecovery;
     let explanationGeneratedText: string | undefined;
@@ -406,6 +384,28 @@ async function handlePlanner(req: NextRequest, options?: { allowGenerate?: boole
       explanationModel = explanationAI.model;
     } catch (err: any) {
       explanationDebug = typeof err?.message === "string" ? err.message : "explanation_ai_failed";
+    }
+
+    let plannerModules = fallbackModules;
+    let plannerGeneratedText: string | undefined;
+    try {
+      const plannerAI = await generateAIRecoveryPlannerModulesWithOpenAI({
+        language: lang,
+        todayISO: today,
+        todayShift,
+        nextShift,
+        todayVital,
+        vitals7,
+        prevWeekVitals: prevWeek,
+        plannerContext,
+        profile,
+        recoveryResult: explanationResult,
+      });
+      plannerModules = plannerAI.result;
+      plannerGeneratedText = plannerAI.generatedText;
+      plannerModel = plannerAI.model;
+    } catch (err: any) {
+      plannerDebug = typeof err?.message === "string" ? err.message : "planner_ai_failed";
     }
 
     const todayVitalScore = todayVital ? Math.round(Math.min(todayVital.body.value, todayVital.mental.ema)) : null;

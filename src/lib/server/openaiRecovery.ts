@@ -1606,126 +1606,273 @@ export type OpenAIRecoveryPlannerModulesOutput = {
   debug: string | null;
 };
 
-function buildPlannerDeveloperPrompt(language: Language) {
+type GenerateOpenAIRecoveryPlannerParams = GenerateOpenAIRecoveryParams & {
+  recoveryResult?: AIRecoveryResult | null;
+};
+
+type PlannerModuleKind = "prescription" | "orders" | "timeline";
+
+function buildPlannerRecoveryReference(result: AIRecoveryResult | null | undefined) {
+  if (!result) return null;
+  return {
+    headline: result.headline,
+    compoundAlert: result.compoundAlert,
+    sections: result.sections.map((section) => ({
+      category: section.category,
+      title: section.title,
+      description: section.description,
+      tips: section.tips,
+    })),
+    weeklySummary: result.weeklySummary,
+  };
+}
+
+function buildPlannerModuleDeveloperPrompt(language: Language, kind: PlannerModuleKind) {
   if (language === "ko") {
+    if (kind === "prescription") {
+      return [
+        "너는 RNest의 AI 회복 처방 생성 엔진이야.",
+        "기존 AI 회복 해설과 plannerContext를 기반으로, 다음 실제 근무 전까지의 전략을 전문적이고 설득력 있게 정리해.",
+        "새 우선순위를 임의로 만들지 말고 plannerContext.focusFactor, primaryAction, avoidAction을 중심축으로 유지해.",
+        "회복 처방은 점수 설명이 아니라 행동 우선순위와 이유를 정리하는 전략 문서여야 해.",
+        "출력은 JSON 하나만 반환해.",
+      ].join(" ");
+    }
+    if (kind === "orders") {
+      return [
+        "너는 RNest의 AI 오늘 오더 생성 엔진이야.",
+        "기록된 데이터, 근무 맥락, AI 회복 해설, plannerContext를 읽고 바로 실행 가능한 오더를 작성해.",
+        "각 오더는 추상적 조언이 아니라 실제 행동이어야 하고, 실행 이유까지 간결하게 설명해.",
+        "오더의 우선순위는 plannerContext.primaryAction과 AI 회복 해설의 핵심 리스크에 맞춰야 해.",
+        "출력은 JSON 하나만 반환해.",
+      ].join(" ");
+    }
     return [
-      "너는 RNest의 회복 플래너 생성 엔진이야.",
-      "교대근무 간호사의 기록, 근무 패턴, plannerContext를 읽고 회복 처방·오늘 오더·타임라인을 전문적이고 실행 가능한 문장으로 정리해.",
-      "plannerContext는 최우선 가드레일이다.",
-      "새로운 우선순위를 임의로 만들지 말고 plannerContext.focusFactor, primaryAction, avoidAction과 정렬해.",
-      "내용은 의료 진단이 아니라 회복 운영 가이드여야 한다.",
-      "출력은 반드시 JSON 하나만 반환해.",
+      "너는 RNest의 AI 타임라인 생성 엔진이야.",
+      "기록된 데이터, 근무 패턴, AI 회복 해설, plannerContext를 바탕으로 하루 흐름에 맞는 시간대별 회복 플로우를 작성해.",
+      "타임라인은 시간순서와 실행 맥락이 중요하다.",
+      "각 단계는 지금 왜 그 행동을 해야 하는지 분명하게 적고, 무리하지 않도록 caution도 함께 제시해.",
+      "출력은 JSON 하나만 반환해.",
     ].join(" ");
   }
 
+  if (kind === "prescription") {
+    return [
+      "You are RNest's AI recovery strategy engine.",
+      "Use the existing AI recovery brief and plannerContext to produce a professional strategy before the next actual shift.",
+      "Do not invent a conflicting priority. Stay anchored to plannerContext.focusFactor, primaryAction, and avoidAction.",
+      "This should read like an operational recovery strategy, not a score explanation.",
+      "Return one JSON object only.",
+    ].join(" ");
+  }
+  if (kind === "orders") {
+    return [
+      "You are RNest's AI action orders engine.",
+      "Read the recorded data, shift context, AI recovery brief, and plannerContext, then write immediate and executable action orders.",
+      "Each order must be concrete and briefly explain why it matters now.",
+      "Order priority must stay aligned with plannerContext.primaryAction and the core risks surfaced in the AI recovery brief.",
+      "Return one JSON object only.",
+    ].join(" ");
+  }
   return [
-    "You are RNest's recovery planner generation engine.",
-    "Read the nurse's records, shift flow, and plannerContext, then produce professional but actionable recovery strategy, orders, and timeline guidance.",
-    "plannerContext is the primary guardrail.",
-    "Do not invent a conflicting priority. Stay aligned with plannerContext.focusFactor, primaryAction, and avoidAction.",
-    "This is not medical diagnosis. It is a recovery operations guide.",
-    "Return only one JSON object.",
+    "You are RNest's AI timeline engine.",
+    "Use the recorded data, shift flow, AI recovery brief, and plannerContext to generate a time-ordered recovery flow.",
+    "Timing and sequence matter more than generic advice.",
+    "Each step should explain what to do and what to watch out for in that phase.",
+    "Return one JSON object only.",
   ].join(" ");
 }
 
-function buildPlannerUserPrompt(language: Language, context: ReturnType<typeof buildUserContext>) {
-  const baseShape = {
-    heroTitle: language === "en" ? "Today Recovery Planner" : "오늘의 회복 플래너",
-    heroSummary: "string",
-    prescription: {
-      eyebrow: "string",
-      title: "string",
-      headline: "string",
-      summary: "string",
-      items: [
-        { label: "string", title: "string", body: "string", chips: ["string"] },
-      ],
-    },
-    orders: {
-      eyebrow: "string",
-      title: "string",
-      headline: "string",
-      summary: "string",
-      items: [
-        { label: "string", title: "string", body: "string", chips: ["string"] },
-      ],
-    },
-    timeline: {
-      eyebrow: "string",
-      title: "string",
-      headline: "string",
-      summary: "string",
-      items: [
-        { phase: "string", focus: "string", body: "string", caution: "string" },
-      ],
-    },
-  };
+function buildPlannerModuleUserPrompt(args: {
+  language: Language;
+  kind: PlannerModuleKind;
+  context: ReturnType<typeof buildUserContext>;
+  recoveryResult: AIRecoveryResult | null | undefined;
+}) {
+  const { language, kind, context, recoveryResult } = args;
+  const recoveryReference = buildPlannerRecoveryReference(recoveryResult);
 
-  if (language === "ko") {
+  if (kind === "prescription") {
+    const shape = {
+      eyebrow: "string",
+      title: "string",
+      headline: "string",
+      summary: "string",
+      items: [
+        { label: "핵심 회복 목표", title: "string", body: "string", chips: ["string"] },
+        { label: "왜 지금 이게 먼저인지", title: "string", body: "string", chips: ["string"] },
+        { label: "지금 할 1개", title: "string", body: "string", chips: ["string"] },
+        { label: "피해야 할 것", title: "string", body: "string", chips: ["string"] },
+        { label: "다음 근무 전 체크", title: "string", body: "string", chips: ["string"] },
+      ],
+    };
+    if (language === "ko") {
+      return [
+        "회복 처방 상세 페이지용 JSON을 작성하세요.",
+        "반드시 JSON 하나만 출력하세요. 코드펜스 금지, 설명문 금지.",
+        "",
+        "[목표]",
+        "- 다음 실제 근무 전까지 무엇을 먼저 회복해야 하는지 전략적으로 설명",
+        "- AI 회복 해설의 내용과 plannerContext를 그대로 확장한 느낌이어야 함",
+        "- 사용자가 '왜 이걸 먼저 해야 하지?'에 답을 얻어야 함",
+        "",
+        "[제약]",
+        "- items는 정확히 5개",
+        "- 각 body는 2문장 이하",
+        "- plannerContext.primaryAction과 avoidAction을 반드시 items에 반영",
+        "- Data JSON에 없는 수치를 만들지 말 것",
+        "",
+        "[JSON shape]",
+        JSON.stringify(shape, null, 2),
+        "",
+        "[AI Recovery Brief JSON]",
+        JSON.stringify(recoveryReference, null, 2),
+        "",
+        "[Data JSON]",
+        JSON.stringify(context, null, 2),
+      ].join("\n");
+    }
     return [
-      "아래 Data JSON을 읽고 회복 플래너 3개 카테고리를 생성하세요.",
-      "반드시 JSON 하나만 출력하세요. 코드펜스 금지, 설명문 금지.",
-      "",
-      "[공통 원칙]",
-      "- plannerContext.focusFactor가 있으면 모든 카테고리의 첫 문장과 우선순위가 여기에 맞아야 함",
-      "- plannerContext.primaryAction과 avoidAction과 충돌 금지",
-      "- workEventTags, workEventNote, note가 있으면 근무 맥락에 반영",
-      "- 수치가 필요한 경우 Data JSON에 있는 값만 사용",
-      "- 문장은 짧고 전문적이며 실행 가능하게 작성",
-      "",
-      "[회복 처방 프롬프트]",
-      "- 다음 실제 근무 전까지 무엇을 먼저 회복해야 하는지 전략 중심으로 작성",
-      "- items는 정확히 4개",
-      "- 권장 label 순서: 이번 회복 목표 / 지금 할 1개 / 피해야 할 것 / 다음 근무 전 체크",
-      "",
-      "[오늘 오더 프롬프트]",
-      "- 지금 바로 실행 가능한 행동 리스트로 작성",
-      "- items는 정확히 4개",
-      "- 각 body는 1~2문장, 모호한 추상어 금지",
-      "",
-      "[타임라인 프롬프트]",
-      "- 시간대 순서대로 작성",
-      "- items는 정확히 4개",
-      "- phase는 시간대명, focus는 핵심 포인트, body는 실행 문장",
-      "- 근무가 없으면 휴식일 루틴 기준으로 작성",
-      "",
+      "Create a JSON object for the recovery strategy detail page.",
+      "Return JSON only. No code fences and no commentary.",
+      "[Goal]",
+      "- Explain what must be protected first before the next actual shift",
+      "- It should feel like an expanded version of the AI recovery brief and plannerContext",
+      "- The user should understand why this priority comes first",
+      "[Constraints]",
+      "- items must be exactly 5",
+      "- each body must be 2 sentences max",
+      "- plannerContext.primaryAction and avoidAction must appear in the items",
+      "- do not invent numbers not present in Data JSON",
       "[JSON shape]",
-      JSON.stringify(baseShape, null, 2),
-      "",
+      JSON.stringify(shape, null, 2),
+      "[AI Recovery Brief JSON]",
+      JSON.stringify(recoveryReference, null, 2),
       "[Data JSON]",
       JSON.stringify(context, null, 2),
     ].join("\n");
   }
 
+  if (kind === "orders") {
+    const shape = {
+      eyebrow: "string",
+      title: "string",
+      headline: "string",
+      summary: "string",
+      items: [
+        { label: "오더 1", title: "string", body: "string", chips: ["string"] },
+        { label: "오더 2", title: "string", body: "string", chips: ["string"] },
+        { label: "오더 3", title: "string", body: "string", chips: ["string"] },
+        { label: "오더 4", title: "string", body: "string", chips: ["string"] },
+        { label: "오더 5", title: "string", body: "string", chips: ["string"] },
+      ],
+    };
+    if (language === "ko") {
+      return [
+        "오늘 오더 상세 페이지용 JSON을 작성하세요.",
+        "반드시 JSON 하나만 출력하세요. 코드펜스 금지, 설명문 금지.",
+        "",
+        "[목표]",
+        "- 지금 바로 실행 가능한 오더를 우선순위 순으로 제시",
+        "- 회복 플래너의 '실행 레이어'처럼 보여야 함",
+        "- 각 오더는 구체적 행동 + 왜 지금 필요한지 1줄 설명으로 구성",
+        "",
+        "[제약]",
+        "- items는 정확히 5개",
+        "- 각 title은 행동 중심의 짧은 문장",
+        "- 각 body는 2문장 이하",
+        "- AI Recovery Brief JSON과 plannerContext.ordersTop3의 핵심을 반영",
+        "",
+        "[JSON shape]",
+        JSON.stringify(shape, null, 2),
+        "",
+        "[AI Recovery Brief JSON]",
+        JSON.stringify(recoveryReference, null, 2),
+        "",
+        "[Data JSON]",
+        JSON.stringify(context, null, 2),
+      ].join("\n");
+    }
+    return [
+      "Create a JSON object for the today orders detail page.",
+      "Return JSON only. No code fences and no commentary.",
+      "[Goal]",
+      "- List immediate actions in priority order",
+      "- This should feel like the execution layer of the planner",
+      "- Each order must combine a concrete action with a short reason for why it matters now",
+      "[Constraints]",
+      "- items must be exactly 5",
+      "- each title should be an action-first short phrase",
+      "- each body must be 2 sentences max",
+      "- reflect the core of AI Recovery Brief JSON and plannerContext.ordersTop3",
+      "[JSON shape]",
+      JSON.stringify(shape, null, 2),
+      "[AI Recovery Brief JSON]",
+      JSON.stringify(recoveryReference, null, 2),
+      "[Data JSON]",
+      JSON.stringify(context, null, 2),
+    ].join("\n");
+  }
+
+  const shape = {
+    eyebrow: "string",
+    title: "string",
+    headline: "string",
+    summary: "string",
+    items: [
+      { phase: "지금", focus: "string", body: "string", caution: "string" },
+      { phase: "근무 전", focus: "string", body: "string", caution: "string" },
+      { phase: "근무 중", focus: "string", body: "string", caution: "string" },
+      { phase: "퇴근 후", focus: "string", body: "string", caution: "string" },
+      { phase: "취침 전", focus: "string", body: "string", caution: "string" },
+    ],
+  };
+  if (language === "ko") {
+    return [
+      "타임라인 상세 페이지용 JSON을 작성하세요.",
+      "반드시 JSON 하나만 출력하세요. 코드펜스 금지, 설명문 금지.",
+      "",
+      "[목표]",
+      "- 사용자가 하루 흐름에 따라 무엇을 언제 해야 하는지 이해하게 만들 것",
+      "- 같은 행동 나열이 아니라 시간대별 맥락과 주의 포인트를 함께 적을 것",
+      "- 근무가 없는 날은 휴식일 기준 흐름으로 바꿔 작성",
+      "",
+      "[제약]",
+      "- items는 정확히 5개",
+      "- phase는 실제 시간대 라벨",
+      "- focus는 그 시간대의 핵심 포인트",
+      "- body는 2문장 이하",
+      "- caution은 1문장 이하",
+      "- AI Recovery Brief JSON과 plannerContext를 반영",
+      "",
+      "[JSON shape]",
+      JSON.stringify(shape, null, 2),
+      "",
+      "[AI Recovery Brief JSON]",
+      JSON.stringify(recoveryReference, null, 2),
+      "",
+      "[Data JSON]",
+      JSON.stringify(context, null, 2),
+    ].join("\n");
+  }
   return [
-    "Read the Data JSON and create the 3 recovery planner categories.",
-    "Return one JSON object only. No code fences and no extra commentary.",
-    "",
-    "[Shared rules]",
-    "- Stay aligned with plannerContext.focusFactor, primaryAction, and avoidAction",
-    "- Reflect workEventTags, workEventNote, and note when present",
-    "- Use only numbers that exist in Data JSON",
-    "- Keep every sentence short, professional, and actionable",
-    "",
-    "[Recovery strategy prompt]",
-    "- Explain what to protect first before the next actual shift",
-    "- items must be exactly 4",
-    "- Recommended labels order: Main goal / Do this now / Avoid / Before next shift",
-    "",
-    "[Today orders prompt]",
-    "- Write immediate executable actions",
-    "- items must be exactly 4",
-    "- Each body must be concrete, 1-2 sentences max",
-    "",
-    "[Timeline prompt]",
-    "- Write in chronological order",
-    "- items must be exactly 4",
-    "- phase is the time block, focus is the key point, body is the action sentence",
-    "- If there is no shift, write a rest-day routine",
-    "",
+    "Create a JSON object for the timeline detail page.",
+    "Return JSON only. No code fences and no commentary.",
+    "[Goal]",
+    "- Help the user understand what to do and when to do it across the day",
+    "- Each phase should include timing context and what to watch out for",
+    "- If there is no shift, turn it into a rest-day flow",
+    "[Constraints]",
+    "- items must be exactly 5",
+    "- phase is the time block label",
+    "- focus is the key point for that phase",
+    "- body must be 2 sentences max",
+    "- caution must be 1 sentence max",
+    "- reflect AI Recovery Brief JSON and plannerContext",
     "[JSON shape]",
-    JSON.stringify(baseShape, null, 2),
-    "",
+    JSON.stringify(shape, null, 2),
+    "[AI Recovery Brief JSON]",
+    JSON.stringify(recoveryReference, null, 2),
     "[Data JSON]",
     JSON.stringify(context, null, 2),
   ].join("\n");
@@ -1798,59 +1945,15 @@ function parsePlannerTimelineModule(
   };
 }
 
-function parsePlannerModulesFromJson(
-  candidate: Record<string, unknown>,
-  language: Language,
-  plannerContext: PlannerContext | null | undefined
-): AIRecoveryPlannerModules {
-  const focusLabel = plannerContext?.focusFactor?.label ?? (language === "en" ? "Today recovery" : "오늘 회복");
-  const heroTitle = asString(candidate.heroTitle) || (language === "en" ? "Today Recovery Planner" : "오늘의 회복 플래너");
-  const heroSummary =
-    asString(candidate.heroSummary) ||
-    (language === "en"
-      ? `Protect ${focusLabel.toLowerCase()} first and start from one action now.`
-      : `${focusLabel}를 먼저 지키고, 지금 할 1개부터 바로 실행하세요.`);
-
-  return {
-    heroTitle,
-    heroSummary,
-    prescription: parsePlannerModule(candidate.prescription, {
-      eyebrow: "Recovery Strategy",
-      title: language === "en" ? "Recovery Strategy" : "회복 처방",
-      headline: focusLabel,
-      summary:
-        language === "en"
-          ? "Strategic priorities before the next actual shift."
-          : "다음 실제 근무 전까지 가장 먼저 지켜야 할 전략입니다.",
-    }),
-    orders: parsePlannerModule(candidate.orders, {
-      eyebrow: "Today Orders",
-      title: language === "en" ? "Today Orders" : "오늘 오더",
-      headline:
-        language === "en" ? "Immediate actions for today’s condition." : "지금 상태에서 바로 실행할 행동들입니다.",
-      summary:
-        language === "en"
-          ? "Small concrete actions make recovery easier to hold."
-          : "작고 구체적인 행동부터 시작하면 회복 루틴이 더 잘 유지됩니다.",
-    }),
-    timeline: parsePlannerTimelineModule(candidate.timeline, {
-      eyebrow: "Timeline Forecast",
-      title: language === "en" ? "Timeline" : "타임라인",
-      headline:
-        language === "en"
-          ? "Place recovery in the order your day unfolds."
-          : "하루가 흘러가는 순서대로 회복 포인트를 배치했습니다.",
-      summary:
-        language === "en"
-          ? "Timing matters as much as the action itself."
-          : "무엇을 하느냐만큼 언제 하느냐도 중요합니다.",
-    }),
-  };
-}
-
-export async function generateAIRecoveryPlannerModulesWithOpenAI(
-  params: GenerateOpenAIRecoveryParams
-): Promise<OpenAIRecoveryPlannerModulesOutput> {
+async function generatePlannerModuleWithOpenAI(
+  params: GenerateOpenAIRecoveryPlannerParams,
+  kind: PlannerModuleKind
+): Promise<{
+  kind: PlannerModuleKind;
+  generatedText: string;
+  model: string | null;
+  module: AIPlannerModule | AIPlannerTimelineModule;
+}> {
   const apiKey = normalizeApiKey();
   const model = resolveModel();
   if (!apiKey) {
@@ -1858,9 +1961,14 @@ export async function generateAIRecoveryPlannerModulesWithOpenAI(
   }
 
   const context = buildUserContext(params);
-  const developerPrompt = buildPlannerDeveloperPrompt(params.language);
-  const userPrompt = buildPlannerUserPrompt(params.language, context);
-  const maxOutputTokens = Math.max(resolveMaxOutputTokens(), 2400);
+  const developerPrompt = buildPlannerModuleDeveloperPrompt(params.language, kind);
+  const userPrompt = buildPlannerModuleUserPrompt({
+    language: params.language,
+    kind,
+    context,
+    recoveryResult: params.recoveryResult,
+  });
+  const maxOutputTokens = Math.max(resolveMaxOutputTokens(), 1800);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 40_000);
 
@@ -1881,20 +1989,59 @@ export async function generateAIRecoveryPlannerModulesWithOpenAI(
     const generatedText = attempt.text.trim();
     const parsed = parseJsonObject(generatedText);
     if (!parsed) {
-      throw new Error(`openai_planner_non_json_model:${model}`);
+      throw new Error(`openai_planner_${kind}_non_json_model:${model}`);
     }
 
-    const plannerModules = parsePlannerModulesFromJson(parsed, params.language, params.plannerContext);
-    if (!plannerModules.prescription.items.length || !plannerModules.orders.items.length || !plannerModules.timeline.items.length) {
-      throw new Error(`openai_planner_incomplete_model:${model}`);
+    if (kind === "timeline") {
+      const timelineModule = parsePlannerTimelineModule(parsed, {
+        eyebrow: "Timeline Forecast",
+        title: params.language === "en" ? "Timeline" : "타임라인",
+        headline: params.language === "en" ? "Protect recovery in time order." : "회복 행동을 시간 순서대로 배치하세요.",
+        summary:
+          params.language === "en"
+            ? "Timing matters as much as the action itself."
+            : "무엇을 하느냐만큼 언제 하느냐도 중요합니다.",
+      });
+      if (timelineModule.items.length < 5) {
+        throw new Error(`openai_planner_${kind}_incomplete_model:${model}`);
+      }
+      return { kind, generatedText, model, module: timelineModule };
+    }
+
+    const moduleResult = parsePlannerModule(parsed, {
+      eyebrow: kind === "prescription" ? "Recovery Strategy" : "Today Orders",
+      title:
+        kind === "prescription"
+          ? params.language === "en"
+            ? "Recovery Strategy"
+            : "회복 처방"
+          : params.language === "en"
+            ? "Today Orders"
+            : "오늘 오더",
+      headline:
+        kind === "prescription"
+          ? params.plannerContext?.focusFactor?.label ?? (params.language === "en" ? "Recovery strategy" : "회복 전략")
+          : params.language === "en"
+            ? "Immediate actions for today"
+            : "지금 바로 실행할 행동",
+      summary:
+        kind === "prescription"
+          ? params.language === "en"
+            ? "Strategic priorities before the next actual shift."
+            : "다음 실제 근무 전까지의 전략적 우선순위입니다."
+          : params.language === "en"
+            ? "Action-first orders for today."
+            : "오늘 바로 실행할 오더입니다.",
+    });
+    if (moduleResult.items.length < 5) {
+      throw new Error(`openai_planner_${kind}_incomplete_model:${model}`);
     }
 
     return {
-      result: plannerModules,
+      kind,
       generatedText,
-      engine: "openai",
       model,
-      debug: null,
+      module: moduleResult,
     };
   } catch (err: any) {
     if (err?.name === "AbortError") {
@@ -1907,4 +2054,36 @@ export async function generateAIRecoveryPlannerModulesWithOpenAI(
   } finally {
     clearTimeout(timer);
   }
+}
+
+export async function generateAIRecoveryPlannerModulesWithOpenAI(
+  params: GenerateOpenAIRecoveryPlannerParams
+): Promise<OpenAIRecoveryPlannerModulesOutput> {
+  const results = await Promise.all([
+    generatePlannerModuleWithOpenAI(params, "prescription"),
+    generatePlannerModuleWithOpenAI(params, "orders"),
+    generatePlannerModuleWithOpenAI(params, "timeline"),
+  ]);
+
+  const prescription = results.find((item) => item.kind === "prescription")?.module as AIPlannerModule | undefined;
+  const orders = results.find((item) => item.kind === "orders")?.module as AIPlannerModule | undefined;
+  const timeline = results.find((item) => item.kind === "timeline")?.module as AIPlannerTimelineModule | undefined;
+  const model = results.find((item) => item.model)?.model ?? resolveModel();
+  if (!prescription || !orders || !timeline) {
+    throw new Error(`openai_planner_missing_module_model:${model}`);
+  }
+
+  return {
+    result: {
+      heroTitle: params.language === "en" ? "Today Recovery Planner" : "오늘의 회복 플래너",
+      heroSummary: prescription.summary || orders.summary || timeline.summary,
+      prescription,
+      orders,
+      timeline,
+    },
+    generatedText: results.map((item) => `[${item.kind.toUpperCase()}]\n${item.generatedText}`).join("\n\n"),
+    engine: "openai",
+    model,
+    debug: null,
+  };
 }
