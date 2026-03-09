@@ -48,8 +48,7 @@ export function CloudStateSync() {
   const auth = useAuth();
   const { status } = useAuthState();
   const store = useAppStore();
-  const [sessionUserId, setSessionUserId] = useState<string | null>(null);
-  const userId = auth?.userId ?? sessionUserId ?? null;
+  const userId = auth?.userId ?? null;
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const [hydrated, setHydrated] = useState(false);
   const skipNextSave = useRef(false);
@@ -78,22 +77,6 @@ export function CloudStateSync() {
     } catch {
       return {};
     }
-  }, [supabase]);
-
-  useEffect(() => {
-    let active = true;
-    supabase.auth.getSession().then(({ data }) => {
-      if (!active) return;
-      setSessionUserId(data.session?.user?.id ?? null);
-    });
-    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      if (!active) return;
-      setSessionUserId(nextSession?.user?.id ?? null);
-    });
-    return () => {
-      active = false;
-      data.subscription?.unsubscribe();
-    };
   }, [supabase]);
 
   const saveStateViaApi = useCallback(

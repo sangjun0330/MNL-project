@@ -31,6 +31,7 @@ npm run dev
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `NEXT_PUBLIC_SITE_URL`
 - `AUTH_ALLOWED_EMAILS` (선택, 테스트 중 허용할 이메일만 `,` 또는 줄바꿈으로 지정)
+- `AUTH_REQUIRE_EXISTING_USER=true` (선택, 폐쇄 테스트에서 기존 앱 사용자만 재로그인 허용)
 
 Google 로그인은 앱 코드에서 직접 OAuth client id/secret을 읽지 않고, Supabase Dashboard의 `Authentication > Providers > Google` 설정을 사용합니다.
 

@@ -883,7 +883,7 @@ export function SocialPage() {
           </p>
           {authError ? (
             <div className="mt-3 rounded-2xl border border-[#F3D7A8] bg-[#FFF8EC] px-3 py-3 text-[12.5px] leading-6 text-[#8A5A12]">
-              {authError === "unauthorized_email"
+              {authError === "unauthorized_email" || authError === "unauthorized_new_user"
                 ? "이 계정은 현재 테스트 허용 목록에 없어 로그인할 수 없어요."
                 : "Google 로그인 처리에 실패했어요. 잠시 후 다시 시도해 주세요."}
             </div>

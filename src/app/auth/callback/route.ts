@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
+import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { ensureUserRow } from "@/lib/server/userStateStore";
-import { hasAuthEmailAllowlist, isAuthEmailAllowed } from "@/lib/server/authAccess";
+import { hasAuthEmailAllowlist, isAuthEmailAllowed, shouldRequireExistingAuthUser } from "@/lib/server/authAccess";
 import { getRouteSupabaseClient } from "@/lib/server/supabaseRouteClient";
 
 export const runtime = "edge";
@@ -19,6 +20,21 @@ function resolveSafeNextPath(rawNext: string | null, origin: string) {
     return `${target.pathname}${target.search}${target.hash}`;
   } catch {
     return DEFAULT_AUTH_REDIRECT_PATH;
+  }
+}
+
+async function hasExistingAppUser(userId: string) {
+  try {
+    const admin = getSupabaseAdmin();
+    const { data, error } = await admin.from("rnest_users").select("user_id").eq("user_id", userId).maybeSingle();
+    if (error) {
+      console.error("[AuthCallback] failed to check existing app user: %s", String(error.message ?? error));
+      return false;
+    }
+    return Boolean(data?.user_id);
+  } catch (error) {
+    console.error("[AuthCallback] existing app user check crashed: %s", String((error as Error)?.message ?? error));
+    return false;
   }
 }
 
@@ -44,6 +60,14 @@ export async function GET(req: Request) {
         await supabase.auth.signOut();
       }
       const userId = data.user?.id;
+      if (userId && !authError && shouldRequireExistingAuthUser()) {
+        const exists = await hasExistingAppUser(userId);
+        if (!exists) {
+          authError = "unauthorized_new_user";
+          console.warn("[AuthCallback] blocked sign-in for user without existing app record");
+          await supabase.auth.signOut();
+        }
+      }
       if (userId && !authError) {
         try {
           await ensureUserRow(userId);

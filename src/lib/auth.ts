@@ -46,6 +46,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let active = true;
 
+    const clearClientAuth = async () => {
+      try {
+        await fetch("/api/auth/logout", {
+          method: "POST",
+          credentials: "include",
+          cache: "no-store",
+        });
+      } catch {
+        // ignore
+      }
+      try {
+        await supabase.auth.signOut({ scope: "global" });
+      } catch {
+        // ignore
+      }
+      if (!active) return;
+      setSession(null);
+      setLoading(false);
+    };
+
     const syncAllowedSession = async (nextSession: Session | null) => {
       if (!active) return;
       if (!nextSession?.user) {
@@ -54,6 +74,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       try {
+        const trustedUser = await supabase.auth.getUser();
+        if (!active) return;
+        if (trustedUser.error || !trustedUser.data.user?.id || trustedUser.data.user.id !== nextSession.user.id) {
+          await clearClientAuth();
+          return;
+        }
         const response = await fetch("/api/auth/session", {
           method: "GET",
           credentials: "include",
@@ -66,18 +92,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return;
         }
         if (response.status === 401) {
-          await supabase.auth.signOut();
-          if (!active) return;
-          setSession(null);
-          setLoading(false);
+          await clearClientAuth();
           return;
         }
       } catch {
-        // Fail open on transient client/network issues; server APIs still enforce auth.
+        await clearClientAuth();
+        return;
       }
       if (!active) return;
-      setSession(nextSession);
-      setLoading(false);
+      await clearClientAuth();
     };
 
     supabase.auth.getSession().then(({ data }) => {
@@ -172,7 +195,16 @@ export function signInWithProvider(provider: "google" = "google") {
   });
 }
 
-export function signOut() {
+export async function signOut() {
   const supabase = getSupabaseBrowserClient();
-  return supabase.auth.signOut();
+  try {
+    await fetch("/api/auth/logout", {
+      method: "POST",
+      credentials: "include",
+      cache: "no-store",
+    });
+  } catch {
+    // ignore
+  }
+  return supabase.auth.signOut({ scope: "global" });
 }

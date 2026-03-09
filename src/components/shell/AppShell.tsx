@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { usePathname, useRouter } from "next/navigation";
 import { BottomNav } from "@/components/shell/BottomNav";
 import { UiPreferencesBridge } from "@/components/system/UiPreferencesBridge";
-import { getSupabaseBrowserClient, useAuthState } from "@/lib/auth";
+import { useAuthState } from "@/lib/auth";
 import { hydrateState, setLocalSaveEnabled, setStorageScope, useAppStoreSelector } from "@/lib/store";
 import { emptyState } from "@/lib/model";
 import { useI18n } from "@/lib/useI18n";
@@ -50,8 +50,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { user: auth, status } = useAuthState();
   const hasSeenOnboarding = useAppStoreSelector((s) => Boolean(s.settings?.hasSeenOnboarding));
   const setSettings = useAppStoreSelector((s) => s.setSettings);
-  const [hasSession, setHasSession] = useState<boolean | null>(null);
-  const isAuthed = Boolean(auth?.userId) || hasSession === true;
+  const isAuthed = Boolean(auth?.userId);
   const [cloudReady, setCloudReady] = useState(false);
   const allowPrompt =
     AUTH_INTERACTION_GUARD_ENABLED &&
@@ -70,23 +69,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     // Keep a per-user local write-ahead cache so transient sync failures
     // or app background kills do not lose the latest inputs before server sync.
     setLocalSaveEnabled(true);
-  }, []);
-
-  useEffect(() => {
-    const supabase = getSupabaseBrowserClient();
-    let active = true;
-    supabase.auth.getSession().then(({ data }) => {
-      if (!active) return;
-      setHasSession(Boolean(data.session));
-    });
-    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      if (!active) return;
-      setHasSession(Boolean(nextSession));
-    });
-    return () => {
-      active = false;
-      data.subscription?.unsubscribe();
-    };
   }, []);
 
   useEffect(() => {
