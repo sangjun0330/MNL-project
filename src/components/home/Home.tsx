@@ -13,10 +13,12 @@ import { buildShopRecommendations, getShopImageSrc, formatShopPrice, SHOP_PRODUC
 import type { ShopProduct } from "@/lib/shop";
 
 import { useAIRecoveryInsights } from "@/components/insights/useAIRecoveryInsights";
+import { useAIRecoveryPlanner } from "@/components/insights/useAIRecoveryPlanner";
 import { useRecoveryPlanner } from "@/components/insights/useRecoveryPlanner";
 import { BatteryGauge } from "@/components/home/BatteryGauge";
 import { WeekStrip } from "@/components/home/WeekStrip";
 import { HomeSocialCard } from "@/components/home/HomeSocialCard";
+import { clearStaleRecoveryOrderDone, readRecoveryOrderDone } from "@/lib/recoveryOrderChecklist";
 
 function isReasonableISODate(v: any): v is ISODate {
   if (!isISODate(v)) return false;
@@ -190,6 +192,8 @@ export default function Home() {
 
   const planner = useRecoveryPlanner();
   const aiRecovery = useAIRecoveryInsights({ mode: "cache", enabled: deferredReady && planner.aiAvailable });
+  const aiPlanner = useAIRecoveryPlanner({ mode: "cache", enabled: deferredReady && planner.aiAvailable });
+  const [plannerDoneMap, setPlannerDoneMap] = useState<Record<string, boolean>>({});
   const aiHeadline = useMemo(() => {
     if (planner.state === "needs_records") return t("기록을 3일 이상 쌓으면 AI 맞춤회복도 열려요.");
     if (!planner.aiAvailable && !planner.billingLoading) return t("AI 맞춤회복은 Pro에서 열립니다.");
@@ -205,7 +209,43 @@ export default function Home() {
     });
   }, [aiRecovery.data?.result?.headline, aiRecovery.loading, aiRecovery.generating, aiRecovery.error, planner.aiAvailable, planner.billingLoading, planner.state, t]);
 
-  const aiTone = (aiRecovery.data?.result as any)?.tone as string | undefined;
+  const plannerDateISO = aiPlanner.data?.dateISO ?? todayISO();
+  const plannerOrders = useMemo(() => aiPlanner.data?.result.orders.items ?? [], [aiPlanner.data]);
+  const plannerOrderIdsKey = useMemo(() => plannerOrders.map((item) => item.id).join("|"), [plannerOrders]);
+
+  useEffect(() => {
+    if (plannerOrders.length) {
+      clearStaleRecoveryOrderDone(
+        plannerDateISO,
+        plannerOrders.map((item) => item.id)
+      );
+    }
+    setPlannerDoneMap(readRecoveryOrderDone(plannerDateISO));
+  }, [plannerDateISO, plannerOrderIdsKey, plannerOrders]);
+
+  const activePlannerOrders = useMemo(
+    () => plannerOrders.filter((item) => !plannerDoneMap[item.id]),
+    [plannerDoneMap, plannerOrders]
+  );
+  const plannerPreviewOrder = activePlannerOrders[0] ?? plannerOrders[0] ?? null;
+  const plannerAllDone = planner.aiAvailable && plannerOrders.length > 0 && activePlannerOrders.length === 0;
+  const plannerPreviewTitle =
+    planner.state === "needs_records"
+      ? t("오늘의 오더")
+      : plannerAllDone
+        ? t("오늘의 오더를 모두 완료했어요.")
+      : planner.aiAvailable && plannerPreviewOrder
+        ? plannerPreviewOrder.title
+        : planner.ordersTop3[0]?.title ?? t("오늘의 오더를 준비 중이에요.");
+  const plannerPreviewBody =
+    planner.state === "needs_records"
+      ? t("건강 기록을 3일 이상 쌓으면 오늘 실행할 오더가 여기에 보여요.")
+      : plannerAllDone
+        ? t("필요하면 전체 보기에서 오늘 회복 흐름을 다시 확인할 수 있어요.")
+      : planner.aiAvailable && plannerPreviewOrder
+        ? plannerPreviewOrder.body
+        : planner.primaryAction ?? t("AI 맞춤회복에서 오늘 실행할 오더를 함께 정리합니다.");
+  const plannerRemainingCount = activePlannerOrders.length;
 
   const selectedDateLabel = useMemo(() => formatKoreanDate(homeSelected), [homeSelected]);
 
@@ -318,85 +358,6 @@ export default function Home() {
         </div>
       </div>
 
-      {/* ── Recovery Planner Card ── */}
-      <Link
-        href="/insights/recovery"
-        className="block rounded-[22px] px-4 py-4 shadow-apple-sm active:opacity-95"
-        style={{ background: "var(--rnest-card)" }}
-      >
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5">
-            <span style={{ color: "var(--rnest-accent)" }}>
-              <IconSparkle />
-            </span>
-            <span
-              className="text-[11px] font-semibold uppercase tracking-widest"
-              style={{ color: "var(--rnest-muted)" }}
-            >
-              {t("회복 플래너")}
-            </span>
-          </div>
-          <span
-            className="shrink-0 rounded-full border px-3 py-1 text-[11px] font-medium"
-            style={{
-              borderColor: "var(--rnest-accent-border)",
-              color: "var(--rnest-accent)",
-            }}
-          >
-            {t("전체 보기")} ›
-          </span>
-        </div>
-
-        <p
-          className="mt-3 text-[15px] font-semibold leading-snug tracking-[-0.01em]"
-          style={{ color: "var(--rnest-text)" }}
-        >
-          {planner.state === "needs_records"
-            ? t("건강 기록 3일 이상부터 회복 플래너가 열립니다.")
-            : planner.focusFactor
-              ? `${t("회복 포커스")} · ${planner.focusFactor.label}`
-              : t("오늘의 회복 우선순위를 확인해 보세요.")}
-        </p>
-        <p className="mt-2 text-[13px] leading-relaxed" style={{ color: "var(--rnest-sub)" }}>
-          {planner.state === "needs_records"
-            ? t("기록을 3일 이상 쌓으면 다음 근무 전까지의 회복 플랜이 열려요.")
-            : planner.primaryAction ?? t("다음 근무 전까지 무엇을 먼저 해야 하는지 정리해 드려요.")}
-        </p>
-
-        <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
-          <div className="rounded-[16px] border px-3 py-3" style={{ borderColor: "var(--rnest-sep)", background: "var(--rnest-bg)" }}>
-            <div className="text-[11px] font-semibold" style={{ color: "var(--rnest-muted)" }}>
-              {t("다음 근무")}
-            </div>
-            <div className="mt-1 text-[14px] font-semibold" style={{ color: "var(--rnest-text)" }}>
-              {planner.state === "needs_records" ? t("현재 {count}일 기록됨", { count: planner.recordedDays }) : planner.nextDutyLabel}
-            </div>
-          </div>
-          <div className="rounded-[16px] border px-3 py-3" style={{ borderColor: "var(--rnest-sep)", background: "var(--rnest-bg)" }}>
-            <div className="text-[11px] font-semibold" style={{ color: "var(--rnest-muted)" }}>
-              {t("지금 할 1개")}
-            </div>
-            <div className="mt-1 text-[14px] font-semibold" style={{ color: "var(--rnest-text)" }}>
-              {planner.state === "needs_records" ? t("기록 더 쌓기") : planner.ordersTop3[0]?.title ?? t("회복 루틴")}
-            </div>
-          </div>
-          <div className="rounded-[16px] border px-3 py-3" style={{ borderColor: "var(--rnest-sep)", background: "var(--rnest-bg)" }}>
-            <div className="text-[11px] font-semibold" style={{ color: "var(--rnest-muted)" }}>
-              {t("피해야 할 것")}
-            </div>
-            <div className="mt-1 text-[13px] leading-relaxed" style={{ color: "var(--rnest-text)" }}>
-              {planner.state === "needs_records" ? t("기록 건너뛰기") : planner.avoidAction ?? t("늦은 자극")}
-            </div>
-          </div>
-        </div>
-
-        {!planner.fullAccess && !planner.billingLoading ? (
-          <div className="mt-3 inline-flex items-center rounded-full bg-[#FFF5E8] px-2.5 py-1 text-[11px] font-semibold text-[#A05A00]">
-            {t("요약은 무료 · 전체 플랜은 Pro")}
-          </div>
-        ) : null}
-      </Link>
-
       {/* ── AI Recovery Card ── */}
       <div
         className="rounded-[22px] px-4 py-4 shadow-apple-sm"
@@ -427,7 +388,6 @@ export default function Home() {
           </Link>
         </div>
 
-        {/* Headline */}
         {aiRecovery.loading || aiRecovery.generating ? (
           <div className="mt-3 space-y-2">
             <div
@@ -452,7 +412,7 @@ export default function Home() {
           </p>
         )}
 
-        <p className="mt-2 text-[12.5px] leading-relaxed" style={{ color: "var(--rnest-sub)" }}>
+        <p className="mt-2 text-[13px] leading-relaxed" style={{ color: "var(--rnest-sub)" }}>
           {planner.state === "needs_records"
             ? t("회복 플래너가 열리면 AI 맞춤회복도 함께 볼 수 있어요.")
             : planner.aiAvailable
@@ -460,24 +420,81 @@ export default function Home() {
               : t("AI 맞춤회복은 Pro에서 열립니다.")}
         </p>
 
-        {/* Tone badge */}
-        {aiTone && (
-          <div className="mt-3">
+        <div className="mt-4 flex flex-wrap gap-2">
+          <span
+            className="inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold"
+            style={{ borderColor: "var(--rnest-sep)", color: "var(--rnest-text)" }}
+          >
+            {planner.focusFactor ? `${t("회복 포커스")} ${planner.focusFactor.label}` : t("오늘 회복")}
+          </span>
+        </div>
+      </div>
+
+      {/* ── Recovery Planner Card ── */}
+      <Link
+        href="/insights/recovery"
+        className="block rounded-[22px] px-4 py-4 shadow-apple-sm active:opacity-95"
+        style={{ background: "var(--rnest-card)" }}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5">
+            <span style={{ color: "var(--rnest-accent)" }}>
+              <IconSparkle />
+            </span>
             <span
-              className={[
-                "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold",
-                aiTone === "stable"
-                  ? "bg-emerald-50 text-emerald-700"
-                  : aiTone === "noti"
-                  ? "bg-amber-50 text-amber-700"
-                  : "bg-red-50 text-red-700",
-              ].join(" ")}
+              className="text-[11px] font-semibold uppercase tracking-widest"
+              style={{ color: "var(--rnest-muted)" }}
             >
-              {aiTone === "stable" ? "✓ 안정" : aiTone === "noti" ? "⚠ 주의" : "! 경고"}
+              {t("회복 플래너")}
             </span>
           </div>
-        )}
-      </div>
+          <span
+            className="shrink-0 rounded-full border px-3 py-1 text-[11px] font-medium"
+            style={{
+              borderColor: "var(--rnest-accent-border)",
+              color: "var(--rnest-accent)",
+            }}
+          >
+            {t("전체 보기")} ›
+          </span>
+        </div>
+
+        <div className="mt-4 text-[11px] font-semibold uppercase tracking-[0.18em]" style={{ color: "var(--rnest-muted)" }}>
+          {t("오늘의 오더")}
+        </div>
+        <p
+          className="mt-1 text-[20px] font-bold leading-tight tracking-[-0.02em]"
+          style={{ color: "var(--rnest-text)" }}
+        >
+          {plannerPreviewTitle}
+        </p>
+        <p className="mt-2 text-[13px] leading-relaxed" style={{ color: "var(--rnest-sub)" }}>
+          {plannerPreviewBody}
+        </p>
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          <span
+            className="inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold"
+            style={{ borderColor: "var(--rnest-sep)", color: "var(--rnest-sub)" }}
+          >
+            {planner.state === "needs_records" ? t("현재 {count}일 기록됨", { count: planner.recordedDays }) : planner.nextDutyLabel}
+          </span>
+          {planner.aiAvailable && plannerOrders.length ? (
+            <span
+              className="inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold"
+              style={{ borderColor: "var(--rnest-sep)", color: "var(--rnest-sub)" }}
+            >
+              {plannerRemainingCount > 0 ? t("남은 오더 {count}개", { count: plannerRemainingCount }) : t("오늘 오더 완료")}
+            </span>
+          ) : null}
+        </div>
+
+        {!planner.fullAccess && !planner.billingLoading ? (
+          <div className="mt-3 inline-flex items-center rounded-full bg-[#FFF5E8] px-2.5 py-1 text-[11px] font-semibold text-[#A05A00]">
+            {t("요약은 무료 · 전체 플랜은 Pro")}
+          </div>
+        ) : null}
+      </Link>
 
       {/* ── Condition (compact) ── */}
       <div

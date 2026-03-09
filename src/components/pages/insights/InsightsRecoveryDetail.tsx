@@ -15,6 +15,7 @@ import { useInsightsData, isInsightsLocked, INSIGHTS_MIN_DAYS, shiftKo } from "@
 import { DetailCard, DetailChip, DETAIL_ACCENTS, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
 import { buildExplanationModule, buildFallbackModules } from "@/lib/aiRecoveryPlanner";
 import { formatKoreanDate } from "@/lib/date";
+import { withReturnTo } from "@/lib/navigation";
 import {
   caffeineSensitivityPresetFromValue,
   caffeineSensitivityPresetLabel,
@@ -105,12 +106,21 @@ export function InsightsRecoveryDetail() {
   const activeOrders = plannerReady ? ordersModule.items.filter((item) => !doneMap[item.id]) : [];
   const completedCount = plannerReady ? ordersModule.items.length - activeOrders.length : 0;
   const recoveryReady = Boolean(aiPlanner.data?.result.explanation || aiRecovery.data);
+  const personalizationHref = withReturnTo("/settings/personalization", "/insights/recovery");
 
   return (
     <InsightDetailShell
       title="회복 플래너"
       subtitle={formatKoreanDate(end)}
       meta="AI 맞춤회복과 오늘의 오더를 한 흐름으로 보고, 바로 실행까지 이어가세요."
+      right={
+        <Link
+          href={personalizationHref}
+          className="inline-flex h-9 items-center justify-center rounded-full border border-[#DCE6FF] bg-white px-3 text-[11px] font-semibold text-[#315CA8] shadow-apple-sm"
+        >
+          개인화
+        </Link>
+      }
       chips={
         <>
           <DetailChip color={DETAIL_ACCENTS.mint}>{planner.nextDutyLabel}</DetailChip>
@@ -120,22 +130,11 @@ export function InsightsRecoveryDetail() {
         </>
       }
     >
-      <Link
-        href="/settings/personalization"
-        className="flex items-center justify-between rounded-apple border border-ios-sep bg-white px-4 py-4 shadow-apple transition-shadow duration-300 hover:shadow-apple-lg"
-      >
-        <div>
-          <div className="text-[12px] font-semibold text-ios-sub">Personalization</div>
-          <div className="mt-1 text-[16px] font-bold tracking-[-0.01em] text-ios-text">{t("개인화로 AI 정밀도 높이기")}</div>
-          <div className="mt-1 text-[13px] text-ios-sub">{t("현재 설정 · {summary}", { summary: profileSummary })}</div>
-        </div>
-        <div className="text-[22px] text-ios-muted">›</div>
-      </Link>
-
       {planner.aiAvailable && (aiRecovery.loading || aiPlanner.loading) ? (
         <DetailCard className="p-5 sm:p-6">
           <div className="text-[12px] font-semibold text-ios-sub">AI Sync</div>
           <div className="mt-1 text-[17px] font-bold tracking-[-0.02em] text-ios-text">저장된 AI 맞춤회복과 오늘의 오더를 확인하고 있어요.</div>
+          <div className="mt-2 text-[13px] text-ios-sub">{t("현재 설정 · {summary}", { summary: profileSummary })}</div>
         </DetailCard>
       ) : null}
 

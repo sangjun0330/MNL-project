@@ -17,23 +17,6 @@ function LinkChevron() {
   return <div className="text-[24px] text-ios-muted">›</div>;
 }
 
-function WrappedMetaPill({
-  children,
-  color = "#1B2747",
-}: {
-  children: React.ReactNode;
-  color?: string;
-}) {
-  return (
-    <span
-      className="inline-flex max-w-full items-center rounded-full border bg-white px-3 py-1.5 text-[12px] font-semibold leading-5 break-keep shadow-apple-sm whitespace-normal"
-      style={{ color, borderColor: `${color}33` }}
-    >
-      {children}
-    </span>
-  );
-}
-
 export function RecoveryAIOverviewLinkCard({
   href,
   module,
@@ -167,19 +150,14 @@ export function RecoveryChecklistItemCard({
         </div>
 
         <div className="min-w-0 flex-1">
-          <WrappedMetaPill>{item.when}</WrappedMetaPill>
-          {item.chips?.length ? (
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              {item.chips.slice(0, 3).map((chip) => (
-                <DetailChip key={`${item.id}-${chip}`} color="#5E6C84">
-                  {chip}
-                </DetailChip>
-              ))}
-            </div>
-          ) : null}
-          <div className="mt-3 break-keep text-[18px] font-bold leading-7 tracking-[-0.02em] text-ios-text">{item.title}</div>
-          <p className="mt-2 break-keep text-[14px] leading-6 text-ios-text">{item.body}</p>
-          {item.reason ? <p className="mt-3 break-keep text-[13px] leading-6 text-ios-sub">{item.reason}</p> : null}
+          <span
+            className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold"
+            style={{ backgroundColor: "#F4F7FC", color: "#1B2747" }}
+          >
+            {item.when}
+          </span>
+          <div className="mt-3 break-keep text-[17px] font-bold leading-7 tracking-[-0.02em] text-ios-text">{item.title}</div>
+          <p className="mt-2 break-keep text-[14px] leading-6 text-ios-sub">{item.body}</p>
         </div>
       </div>
     </DetailCard>

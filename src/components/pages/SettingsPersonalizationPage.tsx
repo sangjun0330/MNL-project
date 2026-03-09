@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import { Segmented } from "@/components/ui/Segmented";
+import { sanitizeInternalPath } from "@/lib/navigation";
 import { useAppStore } from "@/lib/store";
 import {
   caffeineSensitivityPresetDescription,
@@ -17,10 +19,12 @@ import {
 } from "@/lib/recoveryPlanner";
 
 export function SettingsPersonalizationPage() {
+  const searchParams = useSearchParams();
   const store = useAppStore();
   const profile = normalizeProfileSettings(store.settings.profile);
   const chronotype = chronotypePresetFromValue(profile.chronotype);
   const caffeineSensitivity = caffeineSensitivityPresetFromValue(profile.caffeineSensitivity);
+  const backHref = sanitizeInternalPath(searchParams.get("returnTo"), "/settings");
 
   const chronotypeOptions = useMemo(
     () => [
@@ -65,7 +69,7 @@ export function SettingsPersonalizationPage() {
   return (
     <div className="mx-auto w-full max-w-[720px] px-4 pb-24 pt-6">
       <div className="mb-4 flex items-center gap-2">
-        <Link href="/settings" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-ios-sep bg-white text-[18px] text-ios-text">
+        <Link href={backHref} className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-ios-sep bg-white text-[18px] text-ios-text">
           ←
         </Link>
         <div className="text-[24px] font-extrabold tracking-[-0.02em] text-ios-text">개인화</div>
