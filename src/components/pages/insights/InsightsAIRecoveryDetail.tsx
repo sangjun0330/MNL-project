@@ -564,7 +564,7 @@ export function InsightsAIRecoveryDetail() {
     if (missingTodaySleep && missingYesterdayHealth) {
       return {
         title: t("필수 기록 2개가 필요해요"),
-        subtitle: `${formatKoreanDate(today)} · ${formatKoreanDate(yesterday)} · ${t("AI 회복 해설 분석 전 필수")}`,
+        subtitle: `${formatKoreanDate(today)} · ${formatKoreanDate(yesterday)} · ${t("AI 맞춤회복 분석 전 필수")}`,
         primary: t("오늘 수면 기록과 전날 건강 기록을 먼저 입력해 주세요."),
         description: t("두 항목이 있어야 회복 플래너 해설 우선순위를 정확하게 계산할 수 있어요."),
         hint: t("확인을 누르면 오늘 기록 화면(수면 우선)으로 이동합니다."),
@@ -575,7 +575,7 @@ export function InsightsAIRecoveryDetail() {
     if (missingTodaySleep) {
       return {
         title: t("오늘 수면 기록이 필요해요"),
-        subtitle: `${formatKoreanDate(today)} · ${t("AI 회복 해설 분석 전 필수")}`,
+        subtitle: `${formatKoreanDate(today)} · ${t("AI 맞춤회복 분석 전 필수")}`,
         primary: t("먼저 오늘 수면 시간을 입력해 주세요."),
         description: t("오늘 수면 기록이 있어야 회복 플래너 해설 정확도가 올라갑니다."),
         hint: t("확인을 누르면 오늘 기록 화면으로 이동합니다."),
@@ -585,7 +585,7 @@ export function InsightsAIRecoveryDetail() {
 
     return {
       title: t("전날 건강 기록이 필요해요"),
-      subtitle: `${formatKoreanDate(yesterday)} · ${t("AI 회복 해설 분석 전 필수")}`,
+      subtitle: `${formatKoreanDate(yesterday)} · ${t("AI 맞춤회복 분석 전 필수")}`,
       primary: t("먼저 전날 건강 기록을 입력해 주세요."),
       description: t("전날 기록이 있어야 추세 기반 회복 플래너 해설을 정확히 계산할 수 있어요."),
       hint: t("확인을 누르면 전날 기록 화면으로 이동합니다."),
@@ -693,7 +693,7 @@ export function InsightsAIRecoveryDetail() {
 
   return (
     <InsightDetailShell
-      title={t("AI 회복 해설")}
+      title={t("AI 맞춤회복")}
       subtitle={data ? formatKoreanDate(data.dateISO) : ""}
       meta={undefined}
       tone="navy"
@@ -708,16 +708,16 @@ export function InsightsAIRecoveryDetail() {
         <DetailCard className="p-4 sm:p-5">
           <div className="text-[13px] font-semibold text-ios-sub">{t("구독 상태 확인 중...")}</div>
           <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
-            {t("AI 회복 해설 사용 가능 여부를 확인하고 있어요.")}
+            {t("AI 맞춤회복 사용 가능 여부를 확인하고 있어요.")}
           </p>
         </DetailCard>
       ) : null}
 
       {!insightsLocked && !billingLoading && hasPlannerAIAccess && !data && !loading && !generating ? (
         <DetailCard className="p-4 sm:p-5">
-          <div className="text-[13px] font-semibold text-ios-sub">{t("AI 회복 해설 안내")}</div>
+          <div className="text-[13px] font-semibold text-ios-sub">{t("AI 맞춤회복 안내")}</div>
           <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
-            {t("AI 회복 해설은 회복 플래너가 왜 이런 우선순위를 잡았는지 맥락 중심으로 풀어 설명합니다.")}
+            {t("AI 맞춤회복은 오늘 무엇을 먼저 회복해야 하는지와 그 이유를 맥락 중심으로 설명합니다.")}
           </p>
         </DetailCard>
       ) : null}
@@ -726,14 +726,14 @@ export function InsightsAIRecoveryDetail() {
         <DetailCard className="p-4 sm:p-5">
           <div className="text-[17px] font-bold tracking-[-0.01em] text-ios-text">{t("유료 플랜 전용 기능")}</div>
           <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
-            {t("AI 회복 해설은 Pro 플랜에서 사용할 수 있어요.")}
+            {t("AI 맞춤회복은 Pro 플랜에서 사용할 수 있어요.")}
           </p>
           <div className="mt-4 flex gap-2">
             <button
               type="button"
               onClick={() => {
                 const confirmed = window.confirm(
-                  t("AI 회복 해설은 유료 플랜 전용 기능입니다.\n플랜 업그레이드 페이지로 이동할까요?")
+                  t("AI 맞춤회복은 유료 플랜 전용 기능입니다.\n플랜 업그레이드 페이지로 이동할까요?")
                 );
                 if (confirmed) router.push(withReturnTo("/settings/billing/upgrade", "/insights/recovery/ai"));
               }}
@@ -776,7 +776,7 @@ export function InsightsAIRecoveryDetail() {
             onClick={startAnalysis}
             className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] text-[14px] font-semibold text-[color:var(--rnest-accent)]"
           >
-            {needsHealthInputGuide ? t("필수 기록 입력하러 가기") : t("AI 분석 시작하기")}
+            {needsHealthInputGuide ? t("필수 기록 입력하러 가기") : t("AI 맞춤회복 시작하기")}
           </button>
           {needsHealthInputGuide ? (
             <p className="mt-2 text-[12px] leading-relaxed text-ios-muted">
@@ -1013,7 +1013,7 @@ export function InsightsAIRecoveryDetail() {
 
       <RecoveryGeneratingOverlay
         open={Boolean(generating && !data && !insightsLocked && !englishTranslationPending)}
-        title={t("AI 회복 해설 분석 중")}
+        title={t("AI 맞춤회복 분석 중")}
       />
       <EnglishTranslationPendingPopup
         open={englishTranslationPending}

@@ -1,10 +1,5 @@
-import { AppShell } from "@/components/shell/AppShell";
-import { InsightsRecoveryPlanDetail } from "@/components/pages/insights/InsightsRecoveryPlanDetail";
+import { redirect } from "next/navigation";
 
 export default function Page() {
-  return (
-    <AppShell>
-      <InsightsRecoveryPlanDetail />
-    </AppShell>
-  );
+  redirect("/insights/recovery/ai");
 }

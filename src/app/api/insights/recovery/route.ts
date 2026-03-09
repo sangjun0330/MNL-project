@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { addDays, fromISODate, toISODate, todayISO, type ISODate } from "@/lib/date";
 import type { AIRecoveryApiError, AIRecoveryApiSuccess, AIRecoveryPayload } from "@/lib/aiRecoveryContract";
+import type { AIRecoveryPlannerPayload } from "@/lib/aiRecoveryPlanner";
 import type { Language } from "@/lib/i18n";
 import { countHealthRecordedDays, hasHealthInput } from "@/lib/healthRecords";
 import type { AppState } from "@/lib/model";
@@ -44,6 +45,19 @@ function hasReliableEstimatedSignal(v: { engine?: { inputReliability?: number; d
   const reliability = v.engine?.inputReliability ?? 0;
   const gap = v.engine?.daysSinceAnyInput ?? 99;
   return reliability >= 0.45 && gap <= 2;
+}
+
+function collectRecordedDates(state: AppState): ISODate[] {
+  const dates = new Set<ISODate>();
+  const keys = new Set<string>([...Object.keys(state.bio ?? {}), ...Object.keys(state.emotions ?? {})]);
+  for (const raw of keys) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) continue;
+    const iso = raw as ISODate;
+    if (hasHealthInput(state.bio?.[iso] ?? null, state.emotions?.[iso] ?? null)) {
+      dates.add(iso);
+    }
+  }
+  return Array.from(dates).sort();
 }
 
 function bad(status: number, error: string) {
@@ -224,6 +238,38 @@ function normalizeProfileSnapshot(value: AIRecoveryPayload["profileSnapshot"]) {
   };
 }
 
+function asPlannerRecoveryPayload(candidate: unknown, fallbackLang: Language): AIRecoveryPayload | null {
+  if (!candidate || typeof candidate !== "object") return null;
+  const planner = candidate as AIRecoveryPlannerPayload;
+  if (typeof planner.dateISO !== "string" || !planner.result || typeof planner.result !== "object") return null;
+  const explanation = (planner.result as Record<string, unknown>).explanation;
+  if (!explanation || typeof explanation !== "object") return null;
+  const recovery = (explanation as Record<string, unknown>).recovery;
+  if (!recovery || typeof recovery !== "object") return null;
+  const language = asLanguage((planner as any).language) ?? fallbackLang;
+
+  return {
+    dateISO: planner.dateISO as ISODate,
+    language,
+    todayShift: (typeof planner.todayShift === "string" ? planner.todayShift : "OFF") as Shift,
+    nextShift: (typeof planner.nextShift === "string" ? planner.nextShift : null) as Shift | null,
+    todayVitalScore: typeof planner.todayVitalScore === "number" ? planner.todayVitalScore : null,
+    source: planner.source === "local" ? "local" : "supabase",
+    engine: planner.engine === "rule" ? "rule" : "openai",
+    model: typeof planner.model === "string" ? planner.model : null,
+    debug: typeof planner.debug === "string" ? planner.debug : null,
+    generatedText:
+      typeof planner.explanationGeneratedText === "string"
+        ? planner.explanationGeneratedText
+        : typeof planner.generatedText === "string"
+          ? planner.generatedText
+          : undefined,
+    plannerContext: planner.plannerContext,
+    profileSnapshot: planner.profileSnapshot,
+    result: recovery as AIRecoveryPayload["result"],
+  };
+}
+
 function isPlannerContextCurrent(cached: PlannerContext | null | undefined, current: PlannerContext) {
   if (!cached) return false;
 
@@ -276,6 +322,14 @@ function readAIContentVariants(raw: unknown, today: ISODate): Partial<Record<Lan
   const single = asPayload(raw, "ko");
   if (single && single.dateISO === today) {
     variants[single.language] = variants[single.language] ?? single;
+  }
+
+  const plannerVariants = isRecord(raw.plannerVariants) ? raw.plannerVariants : null;
+  if (plannerVariants) {
+    const plannerKo = asPlannerRecoveryPayload(plannerVariants.ko, "ko");
+    const plannerEn = asPlannerRecoveryPayload(plannerVariants.en, "en");
+    if (plannerKo && plannerKo.dateISO === today) variants.ko = variants.ko ?? plannerKo;
+    if (plannerEn && plannerEn.dateISO === today) variants.en = variants.en ?? plannerEn;
   }
 
   return variants;
@@ -416,6 +470,12 @@ async function handleRecovery(req: NextRequest, options?: { allowGenerate?: bool
           shift: todayShift,
         }
       : null;
+    const recordedDates = collectRecordedDates(state);
+    const historyStart = recordedDates[0] ?? today;
+    const historyDateSet = new Set(recordedDates);
+    const allVitals = computeVitalsRange({ state, start: historyStart, end: today }).filter(
+      (v) => historyDateSet.has(v.dateISO) || hasReliableEstimatedSignal(v)
+    );
     const plannerContext = buildPlannerContext({
       pivotISO: today,
       schedule: state.schedule,
@@ -520,6 +580,7 @@ async function handleRecovery(req: NextRequest, options?: { allowGenerate?: bool
       todayVital,
       vitals7,
       prevWeekVitals: prevWeek,
+      allVitals,
       plannerContext,
       profile,
     });
@@ -565,6 +626,7 @@ async function handleRecovery(req: NextRequest, options?: { allowGenerate?: bool
             todayVital,
             vitals7,
             prevWeekVitals: prevWeek,
+            allVitals,
             plannerContext,
             profile,
           });

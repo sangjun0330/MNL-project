@@ -1,16 +1,19 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
+import { RecoveryPlannerUpgradeCard } from "@/components/insights/RecoveryPlannerUpgradeCard";
 import {
-  AIPlannerModuleLinkCard,
-  AIPlannerTimelineLinkCard,
-} from "@/components/insights/AIRecoveryPlannerCards";
+  RecoveryAIOverviewLinkCard,
+  RecoveryOrdersLinkCard,
+} from "@/components/insights/RecoveryPlannerFlowCards";
+import { useAIRecoveryInsights } from "@/components/insights/useAIRecoveryInsights";
 import { useAIRecoveryPlanner } from "@/components/insights/useAIRecoveryPlanner";
 import { useRecoveryPlanner } from "@/components/insights/useRecoveryPlanner";
 import { useInsightsData, isInsightsLocked, INSIGHTS_MIN_DAYS, shiftKo } from "@/components/insights/useInsightsData";
-import { InsightDetailShell, DetailCard, DetailChip, DETAIL_ACCENTS } from "@/components/pages/insights/InsightDetailShell";
-import { buildFallbackModules } from "@/lib/aiRecoveryPlanner";
+import { DetailCard, DetailChip, DETAIL_ACCENTS, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
+import { buildExplanationModule, buildFallbackModules } from "@/lib/aiRecoveryPlanner";
 import { formatKoreanDate } from "@/lib/date";
 import {
   caffeineSensitivityPresetFromValue,
@@ -19,6 +22,7 @@ import {
   chronotypePresetLabel,
   normalizeProfileSettings,
 } from "@/lib/recoveryPlanner";
+import { readRecoveryOrderDone } from "@/lib/recoveryOrderChecklist";
 import { useAppStoreSelector } from "@/lib/store";
 import { useI18n } from "@/lib/useI18n";
 
@@ -26,6 +30,10 @@ export function InsightsRecoveryDetail() {
   const { t } = useI18n();
   const { end, recordedDays, syncLabel, todayShift, hasTodayShift } = useInsightsData();
   const planner = useRecoveryPlanner();
+  const aiRecovery = useAIRecoveryInsights({
+    mode: "cache",
+    enabled: !isInsightsLocked(recordedDays) && planner.aiAvailable,
+  });
   const aiPlanner = useAIRecoveryPlanner({
     mode: "generate",
     enabled: !isInsightsLocked(recordedDays) && planner.aiAvailable,
@@ -35,6 +43,11 @@ export function InsightsRecoveryDetail() {
   const profileSummary = `${chronotypePresetLabel(chronotypePresetFromValue(profile.chronotype))} · ${t("카페인")} ${caffeineSensitivityPresetLabel(
     caffeineSensitivityPresetFromValue(profile.caffeineSensitivity)
   )}`;
+  const [doneMap, setDoneMap] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    setDoneMap(readRecoveryOrderDone(end));
+  }, [end]);
 
   if (isInsightsLocked(recordedDays)) {
     return (
@@ -62,30 +75,38 @@ export function InsightsRecoveryDetail() {
     nextDutyLabel: planner.nextDutyLabel,
     timelinePreview: planner.timelinePreview,
   });
-  const plannerModules = aiPlanner.data?.result ?? {
-    ...fallbackModules,
-    explanation: {
-      eyebrow: "AI Recovery Brief",
-      title: "AI 회복 해설",
-      headline: planner.focusFactor ? `${planner.focusFactor.label} 중심 해설` : "회복 우선순위 해설",
-      summary: "회복 포커스와 오더 우선순위를 AI가 맥락 중심으로 설명합니다.",
-      recovery: {
-        headline: planner.primaryAction ?? "오늘 회복 우선순위를 확인해 보세요.",
-        compoundAlert: null,
-        sections: [],
-        weeklySummary: null,
-      },
-    },
-  };
 
+  const explanationModule = aiPlanner.data?.result.explanation
+    ? aiPlanner.data.result.explanation
+    : aiRecovery.data
+      ? buildExplanationModule(aiRecovery.data.result, aiRecovery.data.language)
+    : {
+        title: "AI 맞춤회복",
+        eyebrow: "AI Recovery",
+        headline: planner.focusFactor ? `${planner.focusFactor.label} 중심 회복` : planner.primaryAction ?? "오늘 회복 우선순위를 확인해 보세요.",
+        summary: "오늘 회복이 어디에 집중되어야 하는지, 왜 그게 중요한지 AI 기준으로 정리합니다.",
+        recovery: {
+          headline: planner.primaryAction ?? "오늘 회복 우선순위를 확인해 보세요.",
+          compoundAlert: null,
+          sections: [],
+          weeklySummary: null,
+        },
+      };
+
+  const ordersModule = aiPlanner.data?.result.orders ?? fallbackModules.orders;
+  const activeOrders = ordersModule.items.filter((item) => !doneMap[item.id]);
+  const completedCount = ordersModule.items.length - activeOrders.length;
   const right = planner.aiAvailable ? (
     <button
       type="button"
-      onClick={aiPlanner.startGenerate}
+      onClick={() => {
+        aiPlanner.retry();
+        aiPlanner.startGenerate();
+      }}
       disabled={aiPlanner.generating}
       className="inline-flex h-9 items-center justify-center rounded-full border border-[#CFE0FF] bg-[#EDF4FF] px-3 text-[12px] font-semibold text-[#0F4FCB] disabled:opacity-60"
     >
-      {aiPlanner.generating ? "생성 중..." : "오늘의 플래너 생성하기"}
+      {aiPlanner.generating ? "생성 중..." : "AI 생성"}
     </button>
   ) : null;
 
@@ -93,7 +114,8 @@ export function InsightsRecoveryDetail() {
     <InsightDetailShell
       title="회복 플래너"
       subtitle={formatKoreanDate(end)}
-      meta="다음 근무 전까지 무엇을 먼저 해야 하는지 AI가 한 흐름으로 정리합니다."
+      meta="AI 맞춤회복과 오늘의 오더를 한 흐름으로 보고, 바로 실행까지 이어가세요."
+      right={right}
       chips={
         <>
           <DetailChip color={DETAIL_ACCENTS.mint}>{planner.nextDutyLabel}</DetailChip>
@@ -102,7 +124,6 @@ export function InsightsRecoveryDetail() {
           <DetailChip color={DETAIL_ACCENTS.navy}>{syncLabel}</DetailChip>
         </>
       }
-      right={right}
     >
       <Link
         href="/settings/personalization"
@@ -110,48 +131,65 @@ export function InsightsRecoveryDetail() {
       >
         <div>
           <div className="text-[12px] font-semibold text-ios-sub">Personalization</div>
-          <div className="mt-1 text-[16px] font-bold tracking-[-0.01em] text-ios-text">{t("개인화로 플래너 정밀도 높이기")}</div>
+          <div className="mt-1 text-[16px] font-bold tracking-[-0.01em] text-ios-text">{t("개인화로 AI 정밀도 높이기")}</div>
           <div className="mt-1 text-[13px] text-ios-sub">{t("현재 설정 · {summary}", { summary: profileSummary })}</div>
         </div>
         <div className="text-[22px] text-ios-muted">›</div>
       </Link>
 
-      {planner.aiAvailable && aiPlanner.error ? (
+      {planner.aiAvailable && (aiRecovery.loading || aiPlanner.loading) ? (
         <DetailCard className="p-5 sm:p-6">
-          <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">AI 플래너 생성에 실패했어요.</div>
-          <p className="mt-2 text-[14px] leading-6 text-ios-sub">기존 플래너 미리보기는 계속 사용할 수 있어요. 다시 생성하면 최신 AI 내용으로 갱신됩니다.</p>
-          <button
-            type="button"
-            onClick={() => {
-              aiPlanner.retry();
-              aiPlanner.startGenerate();
-            }}
-            className="mt-4 inline-flex h-10 items-center justify-center rounded-full bg-black px-5 text-[13px] font-semibold text-white"
-          >
-            다시 생성
-          </button>
+          <div className="text-[12px] font-semibold text-ios-sub">AI Sync</div>
+          <div className="mt-1 text-[17px] font-bold tracking-[-0.02em] text-ios-text">저장된 AI 맞춤회복과 오늘의 오더를 확인하고 있어요.</div>
         </DetailCard>
       ) : null}
 
-      {planner.aiAvailable && aiPlanner.generating ? (
+      {planner.aiAvailable && !aiPlanner.data && !aiPlanner.generating && !aiPlanner.loading ? (
         <DetailCard className="p-5 sm:p-6">
-          <div className="text-[12px] font-semibold text-ios-sub">AI Planner</div>
-          <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-ios-text">오늘의 플래너를 생성하고 있어요.</div>
-          <p className="mt-2 text-[14px] leading-6 text-ios-sub">회복 처방, AI 회복 해설, 오늘 오더, 타임라인을 한 번에 새로 정리하고 있습니다.</p>
+          <div className="text-[12px] font-semibold text-ios-sub">AI Ready</div>
+          <div className="mt-1 text-[17px] font-bold tracking-[-0.02em] text-ios-text">AI 맞춤회복과 오늘의 오더를 아직 생성하지 않았어요.</div>
+          <p className="mt-2 text-[14px] leading-6 text-ios-sub">오른쪽 상단의 AI 생성 버튼을 누르면 회복 해설과 체크리스트 오더를 같은 기준으로 함께 만듭니다.</p>
         </DetailCard>
       ) : null}
 
       {!planner.aiAvailable && !planner.billingLoading ? (
-        <DetailCard className="p-5 sm:p-6">
-          <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">AI 플래너 생성은 Pro에서 사용할 수 있어요.</div>
-          <p className="mt-2 text-[14px] leading-6 text-ios-sub">지금은 기본 미리보기로 회복 방향을 확인하고, Pro에서는 각 카테고리의 AI 버전을 모두 볼 수 있어요.</p>
-        </DetailCard>
-      ) : null}
-
-      <AIPlannerModuleLinkCard href="/insights/recovery/plan" accent="mint" module={plannerModules.prescription} itemPreviewCount={2} />
-      <AIPlannerModuleLinkCard href="/insights/recovery/ai" accent="rose" module={plannerModules.explanation} itemPreviewCount={0} />
-      <AIPlannerModuleLinkCard href="/insights/recovery/orders" accent="navy" module={plannerModules.orders} itemPreviewCount={2} />
-      <AIPlannerTimelineLinkCard href="/insights/recovery/timeline" accent="navy" module={plannerModules.timeline} itemPreviewCount={2} />
+        <>
+          <RecoveryAIOverviewLinkCard
+            href="/insights/recovery/ai"
+            module={explanationModule}
+            focusLabel={planner.focusFactor?.label ?? null}
+            primaryAction={planner.primaryAction}
+            avoidAction={planner.avoidAction}
+          />
+          <RecoveryOrdersLinkCard
+            href="/insights/recovery/orders"
+            module={ordersModule}
+            activeItems={activeOrders}
+            completedCount={completedCount}
+          />
+          <RecoveryPlannerUpgradeCard
+            title="AI 맞춤회복과 오늘의 오더 전체는 Pro에서 열립니다."
+            description="AI가 왜 이 회복을 먼저 봐야 하는지 설명하고, 바로 체크할 수 있는 오늘의 오더까지 함께 제공합니다."
+            returnTo="/insights/recovery"
+          />
+        </>
+      ) : (
+        <>
+          <RecoveryAIOverviewLinkCard
+            href="/insights/recovery/ai"
+            module={explanationModule}
+            focusLabel={planner.focusFactor?.label ?? null}
+            primaryAction={planner.primaryAction}
+            avoidAction={planner.avoidAction}
+          />
+          <RecoveryOrdersLinkCard
+            href="/insights/recovery/orders"
+            module={ordersModule}
+            activeItems={activeOrders}
+            completedCount={completedCount}
+          />
+        </>
+      )}
     </InsightDetailShell>
   );
 }

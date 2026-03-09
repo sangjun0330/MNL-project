@@ -23,13 +23,13 @@ export function RecoveryPlannerUpgradeCard({
         {title ?? "전체 회복 플래너는 Pro에서 열립니다."}
       </div>
       <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
-        {description ?? "회복 처방, 오늘 오더, 타임라인 전체와 AI 회복 해설까지 한 흐름으로 사용할 수 있어요."}
+        {description ?? "AI 맞춤회복과 오늘의 오더 전체를 한 흐름으로 보고, 체크리스트 실행까지 이어갈 수 있어요."}
       </p>
       <div className="mt-4 flex flex-wrap gap-2">
-        <DetailChip color={DETAIL_ACCENTS.mint}>회복 처방 전체</DetailChip>
-        <DetailChip color={DETAIL_ACCENTS.navy}>오늘 오더 전체</DetailChip>
-        <DetailChip color={DETAIL_ACCENTS.navy}>타임라인 전체</DetailChip>
-        <DetailChip color={DETAIL_ACCENTS.mint}>AI 회복 해설</DetailChip>
+        <DetailChip color={DETAIL_ACCENTS.mint}>AI 맞춤회복</DetailChip>
+        <DetailChip color={DETAIL_ACCENTS.navy}>오늘의 오더</DetailChip>
+        <DetailChip color={DETAIL_ACCENTS.navy}>AI 체크리스트</DetailChip>
+        <DetailChip color={DETAIL_ACCENTS.mint}>개인화 분석</DetailChip>
       </div>
       <div className="mt-5 flex gap-2">
         <Link

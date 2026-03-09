@@ -58,7 +58,7 @@ export function SettingsPersonalizationPage() {
       lines.push("일반적인 컷오프 기준으로 수면 간섭을 줄이는 방향으로 반영합니다.");
     }
 
-    lines.push("AI 회복 해설도 같은 설정을 기준으로 오늘 플랜의 이유를 설명합니다.");
+    lines.push("AI 맞춤회복도 같은 설정을 기준으로 오늘 플랜의 이유를 설명합니다.");
     return lines;
   }, [caffeineSensitivity, chronotype]);
 
@@ -76,7 +76,7 @@ export function SettingsPersonalizationPage() {
           <div className="text-[13px] font-semibold text-ios-sub">Recovery Planner</div>
           <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-ios-text">회복 플래너 정밀도 높이기</div>
           <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
-            크로노타입과 카페인 민감도를 설정하면 회복 플래너와 AI 회복 해설이 내 리듬에 더 맞게 조정됩니다.
+            크로노타입과 카페인 민감도를 설정하면 회복 플래너와 AI 맞춤회복이 내 리듬에 더 맞게 조정됩니다.
           </p>
         </div>
 

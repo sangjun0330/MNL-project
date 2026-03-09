@@ -29,14 +29,14 @@ const PLAN_MAP: Record<PlanTier, PlanDefinition> = {
   pro: {
     tier: "pro",
     title: "Pro",
-    description: "회복 플래너 전체 + AI 회복 해설 + AI 안전 가이드(매일 10회)",
+    description: "AI 맞춤회복 전체 + 오늘의 오더 체크리스트 + AI 안전 가이드(매일 10회)",
     priceKrw: 14900,
     periodDays: DEFAULT_PERIOD_DAYS,
     orderName: "RNest Pro Monthly",
     checkoutEnabled: true,
     features: [
-      "회복 처방 · 오늘 오더 · 타임라인 전체",
-      "AI 회복 해설",
+      "AI 맞춤회복 전체",
+      "오늘의 오더 체크리스트",
       "AI 약물·도구 안전 가이드",
       "AI 검색 기본 크레딧 10회/일 (KST 자정 초기화)",
       "AI 검색 최근 기록 10개 저장",

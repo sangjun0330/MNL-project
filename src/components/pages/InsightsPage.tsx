@@ -167,7 +167,7 @@ export function InsightsPage() {
             detail={
               planner.primaryAction
                 ? `${t("지금 할 1개")} · ${planner.primaryAction}`
-                : t("다음 근무 전까지 회복 처방, 오늘 오더, 타임라인을 한 흐름으로 볼 수 있어요.")
+                : t("AI 맞춤회복과 오늘의 오더를 한 흐름으로 볼 수 있어요.")
             }
             chips={(
               <>
