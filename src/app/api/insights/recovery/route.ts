@@ -412,8 +412,9 @@ function readServerCachedAI(rawPayload: unknown, today: ISODate, lang: Language)
   return null;
 }
 
-async function handleRecovery(req: NextRequest, options?: { allowGenerate?: boolean }) {
+async function handleRecovery(req: NextRequest, options?: { allowGenerate?: boolean; forceGenerate?: boolean }) {
   const allowGenerate = options?.allowGenerate ?? false;
+  const forceGenerate = options?.forceGenerate ?? false;
   const url = new URL(req.url);
   const langHint = toLanguage(url.searchParams.get("lang"));
   const cacheOnly = !allowGenerate || url.searchParams.get("cacheOnly") === "1";
@@ -489,7 +490,7 @@ async function handleRecovery(req: NextRequest, options?: { allowGenerate?: bool
 
     // ── 3. Supabase ai_content 캐시 우선 조회 ──
     const aiContent = await safeLoadAIContent(userId);
-    if (aiContent && aiContent.dateISO === today) {
+    if (!forceGenerate && aiContent && aiContent.dateISO === today) {
       const variants = readAIContentVariants(aiContent.data, today);
       const koVariant = variants.ko ?? null;
       const direct = variants[lang] ?? null;
@@ -551,7 +552,7 @@ async function handleRecovery(req: NextRequest, options?: { allowGenerate?: bool
     }
 
     // legacy fallback: rnest_user_state.payload.aiRecoveryDaily
-    const legacyCached = readServerCachedAI(row.payload, today, lang);
+    const legacyCached = forceGenerate ? null : readServerCachedAI(row.payload, today, lang);
     if (
       legacyCached &&
       isPlannerContextCurrent(legacyCached.plannerContext, plannerContext) &&
@@ -676,5 +677,15 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const sameOriginError = sameOriginRequestError(req);
   if (sameOriginError) return bad(403, sameOriginError);
-  return handleRecovery(req, { allowGenerate: true });
+  let forceGenerate = false;
+  const rawBody = await req.text().catch(() => "");
+  if (rawBody.trim()) {
+    try {
+      const body = JSON.parse(rawBody) as { forceGenerate?: unknown } | null;
+      forceGenerate = Boolean(body?.forceGenerate);
+    } catch {
+      return bad(400, "invalid_json");
+    }
+  }
+  return handleRecovery(req, { allowGenerate: true, forceGenerate });
 }

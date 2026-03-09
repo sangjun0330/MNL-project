@@ -41,7 +41,8 @@ function requestKey(userId: string, lang: "ko" | "en", dateISO: string, requeste
 async function fetchAIRecoveryPlanner(
   lang: "ko" | "en",
   cacheOnly: boolean,
-  requestedOrderCount?: number | null
+  requestedOrderCount?: number | null,
+  forceGenerate = false
 ): Promise<AIRecoveryPlannerPayload | null> {
   const cacheOnlyQuery = cacheOnly ? "&cacheOnly=1" : "";
   const method = cacheOnly ? "GET" : "POST";
@@ -54,6 +55,7 @@ async function fetchAIRecoveryPlanner(
         ? undefined
         : JSON.stringify({
             orderCount: normalizeRequestedOrderCount(requestedOrderCount),
+            forceGenerate,
           }),
   });
 
@@ -78,7 +80,7 @@ function getOrStartGenerate(userId: string, lang: "ko" | "en", dateISO: string, 
   const existing = inFlightGenerate.get(key);
   if (existing) return existing;
 
-  const promise = fetchAIRecoveryPlanner(lang, false, requestedOrderCount).finally(() => {
+  const promise = fetchAIRecoveryPlanner(lang, false, requestedOrderCount, true).finally(() => {
     inFlightGenerate.delete(key);
   });
 
@@ -172,7 +174,9 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
         if (!shouldGenerate) return;
 
         setGenerating(true);
-        const generated = await getOrStartGenerate(user?.userId ?? "guest", lang, dateISO, requestedOrderCount);
+        const generated = forceGenerate
+          ? await fetchAIRecoveryPlanner(lang, false, requestedOrderCount, true)
+          : await getOrStartGenerate(user?.userId ?? "guest", lang, dateISO, requestedOrderCount);
         if (!active) return;
         if (generated && generated.language === lang) {
           sessionDailyCache.set(key, generated);

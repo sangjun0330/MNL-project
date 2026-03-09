@@ -47,6 +47,11 @@ type TextAttempt = {
   error: string | null;
 };
 
+type RecoveryOpenAILogFeature =
+  | "recovery_explanation"
+  | "recovery_translate"
+  | "planner_orders";
+
 type CategoryMeta = {
   category: RecoverySection["category"];
   titleKo: string;
@@ -191,6 +196,15 @@ function resolveMaxOutputTokens() {
   const raw = Number(process.env.OPENAI_MAX_OUTPUT_TOKENS ?? DEFAULT_MAX_OUTPUT_TOKENS);
   if (!Number.isFinite(raw)) return DEFAULT_MAX_OUTPUT_TOKENS;
   return Math.round(clamp(raw, 700, 3500));
+}
+
+function resolveStoreResponses() {
+  const raw = String(process.env.OPENAI_RECOVERY_STORE ?? process.env.OPENAI_STORE ?? "true")
+    .trim()
+    .toLowerCase();
+  if (!raw) return true;
+  if (raw === "0" || raw === "false" || raw === "off" || raw === "no") return false;
+  return true;
 }
 
 function normalizeApiKey() {
@@ -452,8 +466,12 @@ async function callResponsesApi(args: {
   userPrompt: string;
   signal: AbortSignal;
   maxOutputTokens: number;
+  logFeature: RecoveryOpenAILogFeature;
+  language: Language;
+  dateISO: string;
 }): Promise<TextAttempt> {
-  const { apiKey, model, developerPrompt, userPrompt, signal, maxOutputTokens } = args;
+  const { apiKey, model, developerPrompt, userPrompt, signal, maxOutputTokens, logFeature, language, dateISO } = args;
+  const storeResponses = resolveStoreResponses();
 
   const payload = {
     model,
@@ -476,7 +494,14 @@ async function callResponsesApi(args: {
     },
     max_output_tokens: maxOutputTokens,
     tools: [],
-    store: false,
+    store: storeResponses,
+    metadata: {
+      app: "rnest",
+      surface: "insights_recovery",
+      feature: logFeature,
+      language,
+      date_iso: dateISO,
+    },
   };
 
   const response = await fetch("https://api.openai.com/v1/responses", {
@@ -1387,6 +1412,9 @@ export async function generateAIRecoveryWithOpenAI(
       userPrompt,
       signal: controller.signal,
       maxOutputTokens,
+      logFeature: "recovery_explanation",
+      language: params.language,
+      dateISO: params.todayISO,
     });
 
     if (!attempt.text) {
@@ -1537,6 +1565,9 @@ export async function translateAIRecoveryToEnglish(
         signal: controller.signal,
         // 번역은 길이가 길어지기 쉬워 생성보다 넉넉하게 허용
         maxOutputTokens: Math.max(resolveMaxOutputTokens(), 2600),
+        logFeature: "recovery_translate",
+        language: "en",
+        dateISO: "translation",
       });
       if (!attempt.text) {
         throw new Error(attempt.error ?? `openai_request_failed_model:${model}`);
@@ -2115,6 +2146,9 @@ async function generatePlannerOrdersWithOpenAI(
       userPrompt,
       signal: controller.signal,
       maxOutputTokens,
+      logFeature: "planner_orders",
+      language: params.language,
+      dateISO: params.todayISO,
     });
 
     if (!attempt.text) {

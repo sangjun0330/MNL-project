@@ -357,9 +357,13 @@ function readRecoveryVariants(raw: unknown, today: ISODate): Partial<Record<Lang
   return variants;
 }
 
-async function handlePlanner(req: NextRequest, options?: { allowGenerate?: boolean; requestedOrderCount?: number | null }) {
+async function handlePlanner(
+  req: NextRequest,
+  options?: { allowGenerate?: boolean; requestedOrderCount?: number | null; forceGenerate?: boolean }
+) {
   const allowGenerate = options?.allowGenerate ?? false;
   const requestedOrderCount = normalizeRequestedOrderCount(options?.requestedOrderCount);
+  const forceGenerate = options?.forceGenerate ?? false;
   const url = new URL(req.url);
   const langHint = toLanguage(url.searchParams.get("lang"));
   const cacheOnly = !allowGenerate || url.searchParams.get("cacheOnly") === "1";
@@ -425,7 +429,7 @@ async function handlePlanner(req: NextRequest, options?: { allowGenerate?: boole
 
     const aiContent = await safeLoadAIContent(userId);
     const recoveryVariants = aiContent && aiContent.dateISO === today ? readRecoveryVariants(aiContent.data, today) : {};
-    if (aiContent && aiContent.dateISO === today) {
+    if (!forceGenerate && aiContent && aiContent.dateISO === today) {
       const variants = readPlannerVariants(aiContent.data, today);
       const direct = variants[lang] ?? null;
       const directIsCurrent =
@@ -457,7 +461,7 @@ async function handlePlanner(req: NextRequest, options?: { allowGenerate?: boole
     let explanationResult = fallbackRecovery;
     let explanationGeneratedText: string | undefined;
     let explanationModel: string | null = null;
-    const cachedRecovery = recoveryVariants[lang] ?? null;
+    const cachedRecovery = forceGenerate ? null : recoveryVariants[lang] ?? null;
     const cachedRecoveryIsCurrent =
       cachedRecovery &&
       isPlannerContextCurrent(cachedRecovery.plannerContext, plannerContext) &&
@@ -586,14 +590,16 @@ export async function POST(req: NextRequest) {
   const sameOriginError = sameOriginRequestError(req);
   if (sameOriginError) return bad(403, sameOriginError);
   let requestedOrderCount: number | null = null;
+  let forceGenerate = false;
   const rawBody = await req.text().catch(() => "");
   if (rawBody.trim()) {
     try {
       const body = JSON.parse(rawBody);
       requestedOrderCount = normalizeRequestedOrderCount((body as { orderCount?: unknown } | null)?.orderCount);
+      forceGenerate = Boolean((body as { forceGenerate?: unknown } | null)?.forceGenerate);
     } catch {
       return bad(400, "invalid_json");
     }
   }
-  return handlePlanner(req, { allowGenerate: true, requestedOrderCount });
+  return handlePlanner(req, { allowGenerate: true, requestedOrderCount, forceGenerate });
 }

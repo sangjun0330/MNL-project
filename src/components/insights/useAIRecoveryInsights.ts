@@ -33,12 +33,19 @@ function requestKey(userId: string, lang: "ko" | "en", dateISO: string) {
   return `${userId}:${lang}:${dateISO}`;
 }
 
-async function fetchAIRecovery(lang: "ko" | "en", dateISO: string, cacheOnly: boolean): Promise<AIRecoveryPayload | null> {
+async function fetchAIRecovery(
+  lang: "ko" | "en",
+  dateISO: string,
+  cacheOnly: boolean,
+  forceGenerate = false
+): Promise<AIRecoveryPayload | null> {
   const cacheOnlyQuery = cacheOnly ? "&cacheOnly=1" : "";
   const method = cacheOnly ? "GET" : "POST";
   const res = await fetch(`/api/insights/recovery?lang=${lang}${cacheOnlyQuery}`, {
     method,
     cache: "no-store",
+    headers: cacheOnly ? undefined : { "Content-Type": "application/json" },
+    body: cacheOnly ? undefined : JSON.stringify({ forceGenerate }),
   });
 
   const text = await res.text().catch(() => "");
@@ -68,7 +75,7 @@ function getOrStartGenerate(userId: string, lang: "ko" | "en", dateISO: string) 
   const existing = inFlightGenerate.get(key);
   if (existing) return existing;
 
-  const promise = fetchAIRecovery(lang, dateISO, false)
+  const promise = fetchAIRecovery(lang, dateISO, false, true)
     .catch((err) => {
       throw err;
     })
@@ -123,9 +130,10 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
     const dateISO = todayISO();
     const key = requestKey(user?.userId ?? "guest", lang, dateISO);
     let active = true;
+    const forceGenerate = mode === "generate" && manualGenerateCount > 0;
 
     const fromSession = sessionDailyCache.get(key) ?? null;
-    if (fromSession && fromSession.language === lang) {
+    if (fromSession && fromSession.language === lang && !forceGenerate) {
       setRemoteData(fromSession);
       setError(null);
       setGenerating(false);
@@ -151,7 +159,7 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
         if (cached && cached.language === lang) {
           sessionDailyCache.set(key, cached);
           setRemoteData(cached);
-          return;
+          if (!forceGenerate) return;
         }
 
         setRemoteData(null);
@@ -160,7 +168,9 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
         if (!shouldGenerate) return;
 
         setGenerating(true);
-        const generated = await getOrStartGenerate(user?.userId ?? "guest", lang, dateISO);
+        const generated = forceGenerate
+          ? await fetchAIRecovery(lang, dateISO, false, true)
+          : await getOrStartGenerate(user?.userId ?? "guest", lang, dateISO);
         if (!active) return;
         if (generated && generated.language === lang) {
           sessionDailyCache.set(key, generated);
