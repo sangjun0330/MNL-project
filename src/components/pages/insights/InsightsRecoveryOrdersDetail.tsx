@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { RecoveryChecklistItemCard } from "@/components/insights/RecoveryPlannerFlowCards";
 import { RecoveryPlannerUpgradeCard } from "@/components/insights/RecoveryPlannerUpgradeCard";
@@ -22,15 +23,21 @@ export function InsightsRecoveryOrdersDetail() {
   const { end, recordedDays, syncLabel, todayShift, hasTodayShift } = useInsightsData();
   const planner = useRecoveryPlanner();
   const aiPlanner = useAIRecoveryPlanner({
-    mode: "generate",
+    mode: "cache",
     enabled: planner.aiAvailable && !isInsightsLocked(recordedDays),
-    autoGenerate: true,
   });
   const [doneMap, setDoneMap] = useState<Record<string, boolean>>({});
+  const [completingIds, setCompletingIds] = useState<Record<string, boolean>>({});
+  const completionTimersRef = useRef<number[]>([]);
 
   useEffect(() => {
-    setDoneMap(readRecoveryOrderDone(end));
-  }, [end]);
+    return () => {
+      for (const timer of completionTimersRef.current) {
+        window.clearTimeout(timer);
+      }
+      completionTimersRef.current = [];
+    };
+  }, []);
 
   const fallback = buildFallbackModules({
     language: "ko",
@@ -48,29 +55,46 @@ export function InsightsRecoveryOrdersDetail() {
   });
 
   const ordersModule = aiPlanner.data?.result.orders ?? fallback.orders;
+  const plannerDateISO = aiPlanner.data?.dateISO ?? end;
   const orderIdsKey = ordersModule.items.map((item) => item.id).join("|");
 
   useEffect(() => {
-    clearStaleRecoveryOrderDone(end, orderIdsKey ? orderIdsKey.split("|") : []);
-    setDoneMap(readRecoveryOrderDone(end));
-  }, [end, orderIdsKey]);
+    if (aiPlanner.data?.result.orders.items?.length) {
+      clearStaleRecoveryOrderDone(plannerDateISO, orderIdsKey ? orderIdsKey.split("|") : []);
+    }
+    setDoneMap(readRecoveryOrderDone(plannerDateISO));
+  }, [aiPlanner.data, orderIdsKey, plannerDateISO]);
 
   const activeItems = ordersModule.items.filter((item) => !doneMap[item.id]);
   const completedCount = ordersModule.items.length - activeItems.length;
 
   const completeItem = (id: string) => {
-    markRecoveryOrderDone(end, id);
-    setDoneMap((current) => ({
+    if (doneMap[id] || completingIds[id]) return;
+    setCompletingIds((current) => ({
       ...current,
       [id]: true,
     }));
+    const timer = window.setTimeout(() => {
+      markRecoveryOrderDone(plannerDateISO, id);
+      setDoneMap((current) => ({
+        ...current,
+        [id]: true,
+      }));
+      setCompletingIds((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
+      completionTimersRef.current = completionTimersRef.current.filter((value) => value !== timer);
+    }, 420);
+    completionTimersRef.current.push(timer);
   };
 
   if (isInsightsLocked(recordedDays)) {
     return (
       <InsightDetailShell
         title="오늘의 오더"
-        subtitle={formatKoreanDate(end)}
+        subtitle={formatKoreanDate(plannerDateISO)}
         meta={t("건강 기록 3일 이상부터 오늘의 오더가 열립니다.")}
         backHref="/insights/recovery"
       >
@@ -82,7 +106,7 @@ export function InsightsRecoveryOrdersDetail() {
   return (
     <InsightDetailShell
       title="오늘의 오더"
-      subtitle={formatKoreanDate(end)}
+      subtitle={formatKoreanDate(plannerDateISO)}
       meta="AI 맞춤회복을 오늘 바로 실행할 수 있도록 체크리스트로 정리했습니다."
       backHref="/insights/recovery"
       chips={
@@ -119,65 +143,100 @@ export function InsightsRecoveryOrdersDetail() {
         </>
       ) : null}
 
-      {planner.aiAvailable && aiPlanner.generating && !aiPlanner.data ? (
+      {planner.aiAvailable && aiPlanner.loading ? (
         <DetailCard
           className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
           style={{ background: "linear-gradient(180deg, rgba(246,248,252,0.98) 0%, #FFFFFF 82%)" }}
         >
           <div className="text-[11px] font-semibold tracking-[0.16em] text-[#1B2747]">TODAY ORDERS</div>
-          <div className="mt-1 text-[22px] font-bold tracking-[-0.03em] text-ios-text">AI가 오늘의 오더를 정리하고 있어요.</div>
+          <div className="mt-1 text-[22px] font-bold tracking-[-0.03em] text-ios-text">저장된 오늘의 오더를 확인하고 있어요.</div>
           <p className="mt-3 break-keep text-[14px] leading-6 text-ios-sub">
-            전체 건강기록과 오늘 컨디션을 함께 보고, 지금 진짜 필요한 오더만 체크리스트로 추리는 중입니다.
+            AI 맞춤회복에서 이미 만든 오더가 있으면 같은 흐름으로 불러옵니다.
           </p>
         </DetailCard>
       ) : null}
 
       {planner.aiAvailable && aiPlanner.error ? (
         <DetailCard className="p-5 sm:p-6">
-          <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">AI 오더 생성에 실패했어요.</div>
-          <p className="mt-2 text-[14px] leading-6 text-ios-sub">기본 오더는 계속 볼 수 있고, 잠시 후 다시 열면 재생성됩니다.</p>
+          <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">오늘의 오더를 불러오지 못했어요.</div>
+          <p className="mt-2 text-[14px] leading-6 text-ios-sub">잠시 후 다시 시도하거나 AI 맞춤회복 상세에서 다시 확인해 주세요.</p>
+          <button
+            type="button"
+            onClick={aiPlanner.retry}
+            className="mt-4 inline-flex h-10 items-center justify-center rounded-full border border-[#CFE0FF] bg-[#EDF4FF] px-4 text-[13px] font-semibold text-[#0F4FCB]"
+          >
+            다시 불러오기
+          </button>
         </DetailCard>
       ) : null}
 
-      <DetailCard
-        className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
-        style={{ background: "linear-gradient(180deg, rgba(246,248,252,0.98) 0%, #FFFFFF 82%)" }}
-      >
-        <div className="max-w-[680px]">
+      {planner.aiAvailable && !aiPlanner.loading && !aiPlanner.error && !aiPlanner.data ? (
+        <DetailCard
+          className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
+          style={{ background: "linear-gradient(180deg, rgba(246,248,252,0.98) 0%, #FFFFFF 82%)" }}
+        >
           <div className="text-[11px] font-semibold tracking-[0.16em] text-[#1B2747]">TODAY ORDERS</div>
-          <div className="mt-1 text-[22px] font-bold tracking-[-0.03em] text-ios-text">{ordersModule.title}</div>
-          <p className="mt-3 break-keep text-[18px] font-bold leading-8 tracking-[-0.03em] text-ios-text">{ordersModule.headline}</p>
-          <p className="mt-2 break-keep text-[14px] leading-6 text-ios-sub">{ordersModule.summary}</p>
-        </div>
-
-        <div className="mt-5 grid gap-2 sm:grid-cols-3">
-          <div className="rounded-[20px] bg-ios-bg px-4 py-3">
-            <div className="text-[11px] font-semibold tracking-[0.08em] text-ios-muted">남은 오더</div>
-            <div className="mt-1 text-[16px] font-bold tracking-[-0.02em] text-ios-text">{activeItems.length}개</div>
-          </div>
-          <div className="rounded-[20px] bg-ios-bg px-4 py-3">
-            <div className="text-[11px] font-semibold tracking-[0.08em] text-ios-muted">완료</div>
-            <div className="mt-1 text-[16px] font-bold tracking-[-0.02em] text-ios-text">{completedCount}개</div>
-          </div>
-          <div className="rounded-[20px] bg-ios-bg px-4 py-3">
-            <div className="text-[11px] font-semibold tracking-[0.08em] text-ios-muted">기준</div>
-            <div className="mt-1 text-[14px] font-semibold leading-6 text-ios-text">{planner.focusFactor?.label ?? "오늘 회복"}</div>
-          </div>
-        </div>
-      </DetailCard>
-
-      {activeItems.length ? (
-        <div className="space-y-3">
-          {activeItems.map((item) => (
-            <RecoveryChecklistItemCard key={item.id} item={item} onComplete={completeItem} />
-          ))}
-        </div>
-      ) : (
-        <DetailCard className="px-5 py-6 sm:px-6">
-          <div className="text-[18px] font-bold tracking-[-0.02em] text-ios-text">오늘의 오더를 모두 완료했어요.</div>
-          <p className="mt-2 text-[14px] leading-6 text-ios-sub">남은 목록은 비워 두고, 필요하면 AI 맞춤회복에서 전체 맥락을 다시 확인하세요.</p>
+          <div className="mt-1 text-[22px] font-bold tracking-[-0.03em] text-ios-text">오늘의 오더가 아직 생성되지 않았어요.</div>
+          <p className="mt-3 break-keep text-[14px] leading-6 text-ios-sub">
+            AI 맞춤회복 상세에서 필수 기록을 확인하고 AI 분석을 시작하면, 같은 기준으로 오늘의 오더 체크리스트가 함께 생성됩니다.
+          </p>
+          <Link
+            href="/insights/recovery/ai"
+            className="mt-4 inline-flex h-10 items-center justify-center rounded-full border border-[#CFE0FF] bg-[#EDF4FF] px-4 text-[13px] font-semibold text-[#0F4FCB]"
+          >
+            AI 맞춤회복으로 이동
+          </Link>
         </DetailCard>
-      )}
+      ) : null}
+
+      {planner.aiAvailable && aiPlanner.data ? (
+        <>
+          <DetailCard
+            className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
+            style={{ background: "linear-gradient(180deg, rgba(246,248,252,0.98) 0%, #FFFFFF 82%)" }}
+          >
+            <div className="max-w-[680px]">
+              <div className="text-[11px] font-semibold tracking-[0.16em] text-[#1B2747]">TODAY ORDERS</div>
+              <div className="mt-1 text-[22px] font-bold tracking-[-0.03em] text-ios-text">{ordersModule.title}</div>
+              <p className="mt-3 break-keep text-[18px] font-bold leading-8 tracking-[-0.03em] text-ios-text">{ordersModule.headline}</p>
+              <p className="mt-2 break-keep text-[14px] leading-6 text-ios-sub">{ordersModule.summary}</p>
+            </div>
+
+            <div className="mt-5 grid gap-2 sm:grid-cols-3">
+              <div className="rounded-[20px] bg-ios-bg px-4 py-3">
+                <div className="text-[11px] font-semibold tracking-[0.08em] text-ios-muted">남은 오더</div>
+                <div className="mt-1 text-[16px] font-bold tracking-[-0.02em] text-ios-text">{activeItems.length}개</div>
+              </div>
+              <div className="rounded-[20px] bg-ios-bg px-4 py-3">
+                <div className="text-[11px] font-semibold tracking-[0.08em] text-ios-muted">완료</div>
+                <div className="mt-1 text-[16px] font-bold tracking-[-0.02em] text-ios-text">{completedCount}개</div>
+              </div>
+              <div className="rounded-[20px] bg-ios-bg px-4 py-3">
+                <div className="text-[11px] font-semibold tracking-[0.08em] text-ios-muted">기준</div>
+                <div className="mt-1 text-[14px] font-semibold leading-6 text-ios-text">{planner.focusFactor?.label ?? "오늘 회복"}</div>
+              </div>
+            </div>
+          </DetailCard>
+
+          {activeItems.length ? (
+            <div className="space-y-3">
+              {activeItems.map((item) => (
+                <RecoveryChecklistItemCard
+                  key={item.id}
+                  item={item}
+                  completing={Boolean(completingIds[item.id])}
+                  onComplete={completeItem}
+                />
+              ))}
+            </div>
+          ) : (
+            <DetailCard className="px-5 py-6 sm:px-6">
+              <div className="text-[18px] font-bold tracking-[-0.02em] text-ios-text">오늘의 오더를 모두 완료했어요.</div>
+              <p className="mt-2 text-[14px] leading-6 text-ios-sub">남은 목록은 비워 두고, 필요하면 AI 맞춤회복에서 전체 맥락을 다시 확인하세요.</p>
+            </DetailCard>
+          )}
+        </>
+      ) : null}
     </InsightDetailShell>
   );
 }

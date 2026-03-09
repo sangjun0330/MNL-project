@@ -1707,6 +1707,8 @@ function buildPlannerOrdersDeveloperPrompt(language: Language) {
       "오더는 추상적인 조언이 아니라 실제로 체크 가능한 행동이어야 한다.",
       "가장 중요한 오더만 1개 이상 5개 이하로 고르고, 중요하지 않은 항목은 과감히 제외한다.",
       "각 오더는 title, body, when, reason을 가져야 하고, id는 영어 snake_case로 안정적으로 작성한다.",
+      "when은 긴 문장이 아니라 '지금', '근무 중', '퇴근 직후', '잠들기 전'처럼 아주 짧은 타이밍 라벨만 쓴다.",
+      "chips는 선택 사항이며 0~3개, 한두 단어 수준의 짧은 태그만 쓴다.",
       "타임라인은 별도 섹션으로 만들지 말고 when/reason 안에 녹여라.",
       "출력은 JSON 하나만 반환한다.",
     ].join(" ");
@@ -1717,6 +1719,8 @@ function buildPlannerOrdersDeveloperPrompt(language: Language) {
     "Orders must be concrete actions that can be checked off, not generic advice.",
     "Choose only the most important items, with a minimum of 1 and a maximum of 5.",
     "Each order must include title, body, when, and reason, and id must be stable snake_case English.",
+    "Use when as a very short timing label only, such as 'Now', 'During shift', 'After work', or 'Before bed'.",
+    "chips are optional, must stay between 0 and 3, and should be very short keyword tags.",
     "Do not create a separate timeline section. Fold timing into when and reason.",
     "Return one JSON object only.",
   ].join(" ");
@@ -1761,7 +1765,9 @@ function buildPlannerOrdersUserPrompt(args: {
       "- id는 영어 snake_case",
       "- title은 행동 중심의 짧은 문장",
       "- body는 체크리스트 한 줄처럼 짧고 분명하게",
+      "- when은 12자 안팎의 아주 짧은 타이밍 라벨만 사용",
       "- reason은 왜 지금 필요한지 한 문장",
+      "- chips는 0~3개, 짧은 키워드만 사용",
       "- today / weekly / history / plannerContext / AI Recovery Brief JSON을 모두 보고 판단",
       "- 전체 건강기록을 봤을 때 반복적으로 회복을 방해하는 패턴이 있으면 우선순위에 반영",
       "- Data JSON에 없는 수치를 새로 만들지 말 것",
@@ -1789,7 +1795,9 @@ function buildPlannerOrdersUserPrompt(args: {
     "- id must be English snake_case",
     "- title must be short and action-first",
     "- body must read like a checklist line",
+    "- when must stay short, ideally a timing label under about 16 characters",
     "- reason must explain why it matters now in one sentence",
+    "- chips are optional, between 0 and 3, and should be short keyword tags",
     "- use today / weekly / history / plannerContext / AI Recovery Brief JSON together",
     "- reflect recurring blockers found across the full health record history",
     "- do not invent numbers missing from Data JSON",
@@ -1809,6 +1817,32 @@ function slugifyChecklistId(value: string, fallback: string) {
     .replace(/^_+|_+$/g, "")
     .slice(0, 40);
   return normalized || fallback;
+}
+
+function normalizeChecklistWhen(value: string | null | undefined, language: Language) {
+  const raw = (value ?? "").replace(/\s+/g, " ").trim();
+  if (!raw) return language === "en" ? "Today" : "오늘";
+  if (raw.length <= (language === "en" ? 18 : 12)) return raw;
+
+  if (language === "en") {
+    if (/now|right away|immediately/i.test(raw)) return "Now";
+    if (/before bed|sleep|night/i.test(raw)) return "Before bed";
+    if (/after work|after shift|post shift/i.test(raw)) return "After work";
+    if (/during shift|at work|while working/i.test(raw)) return "During shift";
+    if (/before work|before shift|morning/i.test(raw)) return "Before work";
+    return "Later today";
+  }
+
+  if (/지금|바로|즉시/.test(raw)) return "지금";
+  if (/잠|취침|자기|잠들기/.test(raw)) return "잠들기 전";
+  if (/퇴근|근무 후|집에/.test(raw)) return "퇴근 직후";
+  if (/근무|업무|교대/.test(raw)) return "근무 중";
+  if (/출근|아침|근무 전/.test(raw)) return "출근 전";
+  return "오늘 안에";
+}
+
+function normalizeChecklistChip(value: string) {
+  return value.replace(/\s+/g, " ").trim().slice(0, 18);
 }
 
 function buildFallbackChecklistItems(
@@ -1869,9 +1903,12 @@ function parsePlannerChecklistItems(value: unknown, language: Language, plannerC
       id,
       title,
       body,
-      when: asString(row.when) || (language === "en" ? "Today" : "오늘"),
+      when: normalizeChecklistWhen(asString(row.when), language),
       reason: asString(row.reason) || null,
-      chips: asStringArray(row.chips).slice(0, 4),
+      chips: asStringArray(row.chips)
+        .map(normalizeChecklistChip)
+        .filter(Boolean)
+        .slice(0, 3),
     });
     if (items.length >= 5) break;
   }

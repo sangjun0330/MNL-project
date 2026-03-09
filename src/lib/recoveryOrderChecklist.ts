@@ -6,8 +6,23 @@ function storageKey(dateISO: string) {
   return `${STORAGE_PREFIX}${dateISO}`;
 }
 
+function pruneRecoveryOrderDoneStorage(activeDateISO: string) {
+  if (typeof window === "undefined") return;
+  try {
+    const activeKey = storageKey(activeDateISO);
+    for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+      const key = window.localStorage.key(index);
+      if (!key?.startsWith(STORAGE_PREFIX)) continue;
+      if (key !== activeKey) window.localStorage.removeItem(key);
+    }
+  } catch {
+    // ignore local persistence failures
+  }
+}
+
 export function readRecoveryOrderDone(dateISO: string): RecoveryOrderDoneMap {
   if (typeof window === "undefined") return {};
+  pruneRecoveryOrderDoneStorage(dateISO);
   try {
     const raw = window.localStorage.getItem(storageKey(dateISO));
     if (!raw) return {};
@@ -25,6 +40,7 @@ export function readRecoveryOrderDone(dateISO: string): RecoveryOrderDoneMap {
 
 export function writeRecoveryOrderDone(dateISO: string, next: RecoveryOrderDoneMap) {
   if (typeof window === "undefined") return;
+  pruneRecoveryOrderDoneStorage(dateISO);
   try {
     window.localStorage.setItem(storageKey(dateISO), JSON.stringify(next ?? {}));
   } catch {
@@ -43,6 +59,7 @@ export function markRecoveryOrderDone(dateISO: string, itemId: string) {
 
 export function clearStaleRecoveryOrderDone(dateISO: string, activeIds: string[]) {
   if (typeof window === "undefined") return;
+  pruneRecoveryOrderDoneStorage(dateISO);
   const keep = new Set(activeIds.filter(Boolean));
   const current = readRecoveryOrderDone(dateISO);
   let changed = false;

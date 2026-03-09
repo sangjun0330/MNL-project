@@ -22,7 +22,7 @@ import {
   chronotypePresetLabel,
   normalizeProfileSettings,
 } from "@/lib/recoveryPlanner";
-import { readRecoveryOrderDone } from "@/lib/recoveryOrderChecklist";
+import { clearStaleRecoveryOrderDone, readRecoveryOrderDone } from "@/lib/recoveryOrderChecklist";
 import { useAppStoreSelector } from "@/lib/store";
 import { useI18n } from "@/lib/useI18n";
 
@@ -35,19 +35,25 @@ export function InsightsRecoveryDetail() {
     enabled: !isInsightsLocked(recordedDays) && planner.aiAvailable,
   });
   const aiPlanner = useAIRecoveryPlanner({
-    mode: "generate",
+    mode: "cache",
     enabled: !isInsightsLocked(recordedDays) && planner.aiAvailable,
-    autoGenerate: false,
   });
   const profile = useAppStoreSelector((s) => normalizeProfileSettings(s.settings.profile));
   const profileSummary = `${chronotypePresetLabel(chronotypePresetFromValue(profile.chronotype))} · ${t("카페인")} ${caffeineSensitivityPresetLabel(
     caffeineSensitivityPresetFromValue(profile.caffeineSensitivity)
   )}`;
   const [doneMap, setDoneMap] = useState<Record<string, boolean>>({});
+  const plannerDateISO = aiPlanner.data?.dateISO ?? end;
 
   useEffect(() => {
-    setDoneMap(readRecoveryOrderDone(end));
-  }, [end]);
+    if (aiPlanner.data?.result.orders.items?.length) {
+      clearStaleRecoveryOrderDone(
+        plannerDateISO,
+        aiPlanner.data.result.orders.items.map((item) => item.id)
+      );
+    }
+    setDoneMap(readRecoveryOrderDone(plannerDateISO));
+  }, [aiPlanner.data, plannerDateISO]);
 
   if (isInsightsLocked(recordedDays)) {
     return (
@@ -94,28 +100,17 @@ export function InsightsRecoveryDetail() {
       };
 
   const ordersModule = aiPlanner.data?.result.orders ?? fallbackModules.orders;
-  const activeOrders = ordersModule.items.filter((item) => !doneMap[item.id]);
-  const completedCount = ordersModule.items.length - activeOrders.length;
-  const right = planner.aiAvailable ? (
-    <button
-      type="button"
-      onClick={() => {
-        aiPlanner.retry();
-        aiPlanner.startGenerate();
-      }}
-      disabled={aiPlanner.generating}
-      className="inline-flex h-9 items-center justify-center rounded-full border border-[#CFE0FF] bg-[#EDF4FF] px-3 text-[12px] font-semibold text-[#0F4FCB] disabled:opacity-60"
-    >
-      {aiPlanner.generating ? "생성 중..." : "AI 생성"}
-    </button>
-  ) : null;
+
+  const plannerReady = Boolean(aiPlanner.data);
+  const activeOrders = plannerReady ? ordersModule.items.filter((item) => !doneMap[item.id]) : [];
+  const completedCount = plannerReady ? ordersModule.items.length - activeOrders.length : 0;
+  const recoveryReady = Boolean(aiPlanner.data?.result.explanation || aiRecovery.data);
 
   return (
     <InsightDetailShell
       title="회복 플래너"
       subtitle={formatKoreanDate(end)}
       meta="AI 맞춤회복과 오늘의 오더를 한 흐름으로 보고, 바로 실행까지 이어가세요."
-      right={right}
       chips={
         <>
           <DetailChip color={DETAIL_ACCENTS.mint}>{planner.nextDutyLabel}</DetailChip>
@@ -144,28 +139,20 @@ export function InsightsRecoveryDetail() {
         </DetailCard>
       ) : null}
 
-      {planner.aiAvailable && !aiPlanner.data && !aiPlanner.generating && !aiPlanner.loading ? (
-        <DetailCard className="p-5 sm:p-6">
-          <div className="text-[12px] font-semibold text-ios-sub">AI Ready</div>
-          <div className="mt-1 text-[17px] font-bold tracking-[-0.02em] text-ios-text">AI 맞춤회복과 오늘의 오더를 아직 생성하지 않았어요.</div>
-          <p className="mt-2 text-[14px] leading-6 text-ios-sub">오른쪽 상단의 AI 생성 버튼을 누르면 회복 해설과 체크리스트 오더를 같은 기준으로 함께 만듭니다.</p>
-        </DetailCard>
-      ) : null}
-
       {!planner.aiAvailable && !planner.billingLoading ? (
         <>
           <RecoveryAIOverviewLinkCard
             href="/insights/recovery/ai"
             module={explanationModule}
             focusLabel={planner.focusFactor?.label ?? null}
-            primaryAction={planner.primaryAction}
-            avoidAction={planner.avoidAction}
+            ready={recoveryReady}
           />
           <RecoveryOrdersLinkCard
             href="/insights/recovery/orders"
             module={ordersModule}
-            activeItems={activeOrders}
-            completedCount={completedCount}
+            ready={plannerReady}
+            activeCount={plannerReady ? activeOrders.length : null}
+            completedCount={plannerReady ? completedCount : null}
           />
           <RecoveryPlannerUpgradeCard
             title="AI 맞춤회복과 오늘의 오더 전체는 Pro에서 열립니다."
@@ -179,14 +166,14 @@ export function InsightsRecoveryDetail() {
             href="/insights/recovery/ai"
             module={explanationModule}
             focusLabel={planner.focusFactor?.label ?? null}
-            primaryAction={planner.primaryAction}
-            avoidAction={planner.avoidAction}
+            ready={recoveryReady}
           />
           <RecoveryOrdersLinkCard
             href="/insights/recovery/orders"
             module={ordersModule}
-            activeItems={activeOrders}
-            completedCount={completedCount}
+            ready={plannerReady}
+            activeCount={plannerReady ? activeOrders.length : null}
+            completedCount={plannerReady ? completedCount : null}
           />
         </>
       )}
