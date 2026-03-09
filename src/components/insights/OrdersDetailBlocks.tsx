@@ -62,7 +62,7 @@ export function OrdersDetailBlocks({
             showShift ? (
               <>
                 <DetailChip color={DETAIL_ACCENTS.navy}>{shiftKo(todayShift)}</DetailChip>
-                <DetailChip color={DETAIL_ACCENTS.navy}>내일 {shiftKo(nextDuty)}</DetailChip>
+                <DetailChip color={DETAIL_ACCENTS.navy}>다음 {shiftKo(nextDuty)}</DetailChip>
               </>
             ) : null
           }
@@ -88,7 +88,7 @@ export function OrdersDetailBlocks({
                     <div className="text-[14px] font-bold text-ios-text">{o.title}</div>
                     <div className="text-[12px] text-ios-muted">{pct(o.pct)}</div>
                   </div>
-                  {showShift ? <DetailChip color={DETAIL_ACCENTS.navy}>내일 {shiftKo(nextDuty)}</DetailChip> : null}
+                  {showShift ? <DetailChip color={DETAIL_ACCENTS.navy}>다음 {shiftKo(nextDuty)}</DetailChip> : null}
                 </div>
                 <div className="mt-2 text-[13px] text-ios-sub">{o.line.text}</div>
               </div>
@@ -118,7 +118,7 @@ export function OrdersDetailBlocks({
                       <div className="text-[12px] text-ios-muted">{pct(o.pct)}</div>
                     </div>
                   </div>
-                  {showShift ? <DetailChip color={DETAIL_ACCENTS.navy}>내일 {shiftKo(nextDuty)}</DetailChip> : null}
+                  {showShift ? <DetailChip color={DETAIL_ACCENTS.navy}>다음 {shiftKo(nextDuty)}</DetailChip> : null}
                 </div>
 
                 <ul className="mt-3 list-disc space-y-2 pl-5 text-[13px] text-ios-sub">

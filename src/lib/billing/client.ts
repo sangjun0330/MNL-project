@@ -1,5 +1,6 @@
 "use client";
 
+import type { BillingEntitlements } from "@/lib/billing/entitlements";
 import type { BillingOrderKind, CheckoutProductId, PlanTier } from "@/lib/billing/plans";
 import { getSupabaseBrowserClient } from "@/lib/auth";
 
@@ -15,6 +16,7 @@ export type SubscriptionApi = {
   canceledAt: string | null;
   cancelReason: string | null;
   hasPaidAccess: boolean;
+  entitlements: BillingEntitlements;
   medSafetyQuota: {
     timezone: "Asia/Seoul";
     dailyLimit: number;

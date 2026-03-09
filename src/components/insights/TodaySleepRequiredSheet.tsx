@@ -32,7 +32,7 @@ export function TodaySleepRequiredSheet({
   const { t } = useI18n();
   const today = useMemo(() => todayISO(), []);
   const resolvedTitle = titleText ?? t("오늘 수면 기록이 필요해요");
-  const resolvedSubtitle = subtitleText ?? `${formatKoreanDate(today)} · ${t("AI 맞춤회복 분석 전 필수")}`;
+  const resolvedSubtitle = subtitleText ?? `${formatKoreanDate(today)} · ${t("AI 회복 해설 분석 전 필수")}`;
   const resolvedPrimary = primaryText ?? t("먼저 오늘 수면 시간을 입력해 주세요.");
   const resolvedDescription = descriptionText ?? t("오늘 컨디션/회복 추천은 수면 기록이 있어야 정확하게 계산됩니다.");
   const resolvedHint = hintText ?? t("확인을 누르면 일정 페이지로 이동하고 오늘 건강 기록 팝업이 바로 열립니다.");

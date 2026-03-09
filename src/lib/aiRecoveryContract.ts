@@ -1,6 +1,8 @@
 import type { AIRecoveryResult } from "@/lib/aiRecovery";
 import type { ISODate } from "@/lib/date";
 import type { Language } from "@/lib/i18n";
+import type { ProfileSettings } from "@/lib/model";
+import type { PlannerContext } from "@/lib/recoveryPlanner";
 import type { Shift } from "@/lib/types";
 
 export type AIRecoveryPayload = {
@@ -14,6 +16,8 @@ export type AIRecoveryPayload = {
   model: string | null;
   debug?: string | null;
   generatedText?: string;
+  plannerContext?: PlannerContext;
+  profileSnapshot?: Pick<ProfileSettings, "chronotype" | "caffeineSensitivity">;
   result: AIRecoveryResult;
 };
 

@@ -1,4 +1,5 @@
 import { getPlanDefinition, type BillingOrderKind, type PlanTier } from "@/lib/billing/plans";
+import { buildBillingEntitlements, type BillingEntitlements } from "@/lib/billing/entitlements";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { ensureUserRow } from "@/lib/server/userStateStore";
 import type { Json } from "@/types/supabase";
@@ -19,6 +20,7 @@ export type SubscriptionSnapshot = {
   canceledAt: string | null;
   cancelReason: string | null;
   hasPaidAccess: boolean;
+  entitlements: BillingEntitlements;
   medSafetyQuota: MedSafetyQuotaSnapshot;
 };
 
@@ -852,6 +854,10 @@ export async function readSubscription(
     canceledAt,
     cancelReason,
     hasPaidAccess,
+    entitlements: buildBillingEntitlements({
+      hasPaidAccess,
+      medSafetyTotalRemaining: medSafetyQuota.totalRemaining,
+    }),
     medSafetyQuota,
   };
 

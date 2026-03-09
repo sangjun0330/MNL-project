@@ -19,22 +19,28 @@ const PLAN_MAP: Record<PlanTier, PlanDefinition> = {
   free: {
     tier: "free",
     title: "Free",
-    description: "Statistics-focused insights without AI recovery.",
+    description: "기록, 기본 인사이트, 회복 플래너 요약을 사용할 수 있습니다.",
     priceKrw: 0,
     periodDays: DEFAULT_PERIOD_DAYS,
     orderName: "RNest Free Plan",
     checkoutEnabled: false,
-    features: ["Vital/Trend/Thieves statistics", "Core schedule and health logging"],
+    features: ["일정 및 건강 기록", "Vital/Trend/Thieves 기본 인사이트", "회복 플래너 요약"],
   },
   pro: {
     tier: "pro",
     title: "Pro",
-    description: "AI 맞춤회복 + AI 검색 크레딧(매일 10회) + 최근 검색 10개 저장 포함",
+    description: "회복 플래너 전체 + AI 회복 해설 + AI 안전 가이드(매일 10회)",
     priceKrw: 14900,
     periodDays: DEFAULT_PERIOD_DAYS,
     orderName: "RNest Pro Monthly",
     checkoutEnabled: true,
-    features: ["AI 맞춤회복", "AI 약물·도구 검색기", "AI 검색 기본 크레딧 10회/일 (KST 자정 초기화)", "AI 검색 최근 기록 10개 저장"],
+    features: [
+      "회복 처방 · 오늘 오더 · 타임라인 전체",
+      "AI 회복 해설",
+      "AI 약물·도구 안전 가이드",
+      "AI 검색 기본 크레딧 10회/일 (KST 자정 초기화)",
+      "AI 검색 최근 기록 10개 저장",
+    ],
   },
 };
 

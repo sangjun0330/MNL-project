@@ -1,5 +1,7 @@
 import type { AIRecoveryResult, CompoundAlert, RecoverySection, WeeklySummary } from "@/lib/aiRecovery";
 import type { Language } from "@/lib/i18n";
+import type { ProfileSettings } from "@/lib/model";
+import type { PlannerContext } from "@/lib/recoveryPlanner";
 import type { Shift } from "@/lib/types";
 import type { DailyVital } from "@/lib/vitals";
 
@@ -11,6 +13,8 @@ type GenerateOpenAIRecoveryParams = {
   todayVital: DailyVital | null;
   vitals7: DailyVital[];
   prevWeekVitals: DailyVital[];
+  plannerContext?: PlannerContext | null;
+  profile?: ProfileSettings | null;
 };
 
 export type OpenAIRecoveryOutput = {
@@ -220,24 +224,32 @@ function buildUserContext(params: GenerateOpenAIRecoveryParams) {
         note: typeof vital.note === "string" ? vital.note.replace(/\s+/g, " ").trim().slice(0, 160) : "-",
       })),
     },
+    profile: {
+      chronotype: roundNumber(params.profile?.chronotype ?? 0.5, 2),
+      caffeineSensitivity: roundNumber(params.profile?.caffeineSensitivity ?? 1, 2),
+    },
+    plannerContext: params.plannerContext ?? null,
   };
 }
 
 function buildDeveloperPrompt(language: Language) {
   if (language === "ko") {
-    return "너는 교대근무 간호사를 위한 AI 맞춤회복 분석 전문가야. 입력 데이터와 계산 지표를 근거로 우선순위가 명확한 회복 계획을 작성해. 정보는 반드시 전문적이고 신뢰 가능한 근거 중심으로 유지하되, 말투는 간호사 동료가 옆에서 안내하듯 부드러운 존댓말(해요체)로 작성해. 속어·과장·근거 없는 단정은 금지하고, 의료 진단/처방을 대체하지 않는 범위에서 즉시 실행 가능한 행동 중심으로 알려줘.";
+    return "너는 교대근무 간호사를 위한 AI 회복 해설 엔진이야. 규칙 기반 회복 플래너가 이미 정한 우선순위를 바탕으로, 왜 이런 회복 포커스와 행동이 잡혔는지 설명해. 새 계획을 임의로 만들지 말고 plannerContext와 정렬된 해설만 제공해. 정보는 전문적이고 신뢰 가능한 근거 중심으로 유지하되, 말투는 간호사 동료가 옆에서 설명하듯 부드러운 존댓말(해요체)로 작성해. 속어·과장·근거 없는 단정은 금지하고, 의료 진단/처방을 대체하지 않는 범위에서 즉시 실행 가능한 설명 중심으로 알려줘.";
   }
-  return "You are an AI recovery specialist for shift-working nurses. Use reliable clinical and behavioral data to provide evidence-based, prioritized recovery guidance. Keep the content professional and trustworthy, but deliver it in a warm peer-nurse tone. Avoid slang, exaggeration, and unsupported claims.";
+  return "You are an AI recovery explanation engine for shift-working nurses. A rule-based recovery planner has already chosen the priority actions. Explain why those priorities make sense and how to adjust them gently, but do not invent a conflicting plan. Keep the content professional and trustworthy in evidence, but warm like a supportive nurse colleague. Avoid slang, exaggeration, unsupported claims, and any wording that replaces medical judgment.";
 }
 
 function buildUserPrompt(language: Language, context: ReturnType<typeof buildUserContext>) {
   if (language === "ko") {
     return [
       "supabase를 통한 데이터와 유저의 기록 기반 알고리즘/통계 데이터를 총합해 회복 조언을 작성하세요.",
+      "- plannerContext가 있으면 그 우선순위와 반드시 정렬하세요.",
+      "- plannerContext.focusFactor 또는 plannerContext.primaryAction과 충돌하는 새 계획을 만들지 마세요.",
       "아래 형식을 반드시 지켜서 한국어 텍스트로 출력하세요.",
       "",
       "[A] 한줄 요약",
       "- 전체 데이터를 종합해서 오늘 가장 중요한 것 한 문장",
+      "- 가능하면 plannerContext.focusFactor 또는 plannerContext.primaryAction을 직접 반영",
       "",
       "[B] 긴급 알림",
       "- 위험 요소 2개 이상 동시 발생 시에만 작성",
@@ -246,6 +258,7 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
       "[C] 오늘의 회복 추천",
       "- 카테고리별 박스 렌더링을 위해 반드시 블록 구조를 지킬 것",
       "- 우선순위: 수면 > 교대근무 > 카페인 > 생리주기 > 스트레스&감정 > 신체활동",
+      "- plannerContext.focusFactor와 관련 있는 카테고리를 먼저 설명할 것",
       "- menstrualTrackingEnabled가 false면 [생리주기] 섹션을 절대 출력하지 말 것",
       "- menstrualTrackingEnabled가 true면 [생리주기] 섹션 포함 가능",
       "- 각 카테고리는 반드시 아래 형식으로 작성:",
@@ -292,11 +305,14 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
 
   return [
     "Create personalized recovery guidance from the user's Supabase-backed records and computed trends.",
+    "If plannerContext exists, stay aligned with it. Do not invent a conflicting plan.",
     "Output plain text in this exact structure:",
     "[A] One-line summary",
+    "Reflect plannerContext.focusFactor or plannerContext.primaryAction when possible.",
     "[B] Urgent alert (only if 2+ risks, otherwise write 'none')",
     "[C] Today's recovery plan with strict category blocks.",
     "Priority: sleep > shift > caffeine > menstrual > stress > activity.",
+    "Explain the categories most related to plannerContext.focusFactor first.",
     "If menstrualTrackingEnabled is false, do not include menstrual.",
     "Each category block must follow this exact format:",
     "[Category]",

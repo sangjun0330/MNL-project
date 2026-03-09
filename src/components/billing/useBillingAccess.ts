@@ -1,13 +1,52 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import {
+  DEFAULT_BILLING_ENTITLEMENTS,
+  hasBillingEntitlement,
+  type BillingEntitlement,
+  type BillingEntitlements,
+} from "@/lib/billing/entitlements";
 import { fetchSubscriptionSnapshot, type SubscriptionApi } from "@/lib/billing/client";
 import { useAuthState } from "@/lib/auth";
+
+const cachedSubscriptions = new Map<string, { subscription: SubscriptionApi | null; cachedAt: number }>();
+const inFlightSubscriptions = new Map<string, Promise<SubscriptionApi | null>>();
+const BILLING_CACHE_TTL_MS = 15_000;
+
+async function readSubscriptionWithCache(userId: string, force = false) {
+  const now = Date.now();
+  const cached = cachedSubscriptions.get(userId);
+  if (!force && cached && now - cached.cachedAt < BILLING_CACHE_TTL_MS) {
+    return cached.subscription;
+  }
+
+  const inFlight = inFlightSubscriptions.get(userId);
+  if (!force && inFlight) return inFlight;
+
+  const request = fetchSubscriptionSnapshot()
+    .then((data) => {
+      const subscription = data.subscription;
+      cachedSubscriptions.set(userId, {
+        subscription,
+        cachedAt: Date.now(),
+      });
+      return subscription;
+    })
+    .finally(() => {
+      inFlightSubscriptions.delete(userId);
+    });
+
+  inFlightSubscriptions.set(userId, request);
+  return request;
+}
 
 type BillingAccessState = {
   loading: boolean;
   subscription: SubscriptionApi | null;
   hasPaidAccess: boolean;
+  entitlements: BillingEntitlements;
+  hasEntitlement: (key: BillingEntitlement) => boolean;
   error: string | null;
   reload: () => void;
 };
@@ -19,7 +58,18 @@ export function useBillingAccess(): BillingAccessState {
   const [error, setError] = useState<string | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
 
-  const reload = useCallback(() => setReloadTick((c) => c + 1), []);
+  const reload = useCallback(() => {
+    if (user?.userId) {
+      cachedSubscriptions.delete(user.userId);
+      inFlightSubscriptions.delete(user.userId);
+    }
+    setReloadTick((c) => c + 1);
+  }, [user?.userId]);
+  const entitlements = subscription?.entitlements ?? DEFAULT_BILLING_ENTITLEMENTS;
+  const hasEntitlement = useCallback(
+    (key: BillingEntitlement) => hasBillingEntitlement(subscription?.entitlements, key),
+    [subscription?.entitlements]
+  );
 
   useEffect(() => {
     let active = true;
@@ -34,11 +84,12 @@ export function useBillingAccess(): BillingAccessState {
 
     setLoading(true);
     setError(null);
+    setSubscription(null);
     const run = async () => {
       try {
-        const data = await fetchSubscriptionSnapshot();
+        const data = await readSubscriptionWithCache(user.userId, reloadTick > 0);
         if (!active) return;
-        setSubscription(data.subscription);
+        setSubscription(data);
       } catch (e: any) {
         if (!active) return;
         setSubscription(null);
@@ -58,6 +109,8 @@ export function useBillingAccess(): BillingAccessState {
     loading,
     subscription,
     hasPaidAccess: Boolean(subscription?.hasPaidAccess),
+    entitlements,
+    hasEntitlement,
     error,
     reload,
   };

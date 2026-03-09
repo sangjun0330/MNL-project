@@ -11,6 +11,7 @@ import { computeVitalsRange } from "@/lib/vitals";
 import type { Json } from "@/types/supabase";
 import type { SubscriptionSnapshot } from "@/lib/server/billingStore";
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
+import { buildPlannerContext, normalizeProfileSettings, type PlannerContext } from "@/lib/recoveryPlanner";
 
 // Cloudflare Pages requires Edge runtime for non-static routes.
 export const runtime = "edge";
@@ -153,6 +154,8 @@ function asPayload(candidate: unknown, fallbackLang: Language): AIRecoveryPayloa
   if (!isRecord(candidate) || !isRecord(candidate.result)) return null;
   if (typeof candidate.dateISO !== "string") return null;
   const language = asLanguage(candidate.language) ?? fallbackLang;
+  const plannerContext = asPlannerContext(candidate.plannerContext);
+  const profileSnapshot = asProfileSnapshot(candidate.profileSnapshot);
   return {
     dateISO: candidate.dateISO as ISODate,
     language,
@@ -164,8 +167,98 @@ function asPayload(candidate: unknown, fallbackLang: Language): AIRecoveryPayloa
     model: typeof candidate.model === "string" ? candidate.model : null,
     debug: typeof candidate.debug === "string" ? candidate.debug : null,
     generatedText: typeof candidate.generatedText === "string" ? candidate.generatedText : undefined,
+    plannerContext: plannerContext ?? undefined,
+    profileSnapshot: profileSnapshot ?? undefined,
     result: candidate.result as AIRecoveryPayload["result"],
   };
+}
+
+function asPlannerContext(value: unknown): PlannerContext | null {
+  if (!isRecord(value)) return null;
+  const focus = isRecord(value.focusFactor)
+    ? {
+        key: typeof value.focusFactor.key === "string" ? value.focusFactor.key : "",
+        label: typeof value.focusFactor.label === "string" ? value.focusFactor.label : "",
+        pct: typeof value.focusFactor.pct === "number" ? value.focusFactor.pct : 0,
+      }
+    : null;
+
+  return {
+    focusFactor: focus && focus.key && focus.label ? (focus as PlannerContext["focusFactor"]) : null,
+    primaryAction: typeof value.primaryAction === "string" ? value.primaryAction : null,
+    avoidAction: typeof value.avoidAction === "string" ? value.avoidAction : null,
+    nextDuty: typeof value.nextDuty === "string" ? (value.nextDuty as Shift) : null,
+    nextDutyDate: typeof value.nextDutyDate === "string" ? (value.nextDutyDate as ISODate) : null,
+    plannerTone:
+      value.plannerTone === "warning" || value.plannerTone === "noti" || value.plannerTone === "stable"
+        ? value.plannerTone
+        : "stable",
+    ordersTop3: Array.isArray(value.ordersTop3)
+      ? value.ordersTop3
+          .map((item, index) => {
+            if (!isRecord(item)) return null;
+            return {
+              rank: typeof item.rank === "number" ? item.rank : index + 1,
+              title: typeof item.title === "string" ? item.title : "",
+              text: typeof item.text === "string" ? item.text : "",
+            };
+          })
+          .filter((item): item is PlannerContext["ordersTop3"][number] => Boolean(item && item.title && item.text))
+      : [],
+  };
+}
+
+function asProfileSnapshot(value: unknown): AIRecoveryPayload["profileSnapshot"] | null {
+  if (!isRecord(value)) return null;
+  return {
+    chronotype: Number.isFinite(Number(value.chronotype)) ? Number(value.chronotype) : 0.5,
+    caffeineSensitivity: Number.isFinite(Number(value.caffeineSensitivity)) ? Number(value.caffeineSensitivity) : 1,
+  };
+}
+
+function normalizeProfileSnapshot(value: AIRecoveryPayload["profileSnapshot"]) {
+  const profile = normalizeProfileSettings(value ?? null);
+  return {
+    chronotype: Number(profile.chronotype.toFixed(2)),
+    caffeineSensitivity: Number(profile.caffeineSensitivity.toFixed(2)),
+  };
+}
+
+function isPlannerContextCurrent(cached: PlannerContext | null | undefined, current: PlannerContext) {
+  if (!cached) return false;
+
+  const cachedFocus = cached.focusFactor?.key ?? null;
+  const currentFocus = current.focusFactor?.key ?? null;
+  if (cachedFocus !== currentFocus) return false;
+  if ((cached.primaryAction ?? null) !== (current.primaryAction ?? null)) return false;
+  if ((cached.avoidAction ?? null) !== (current.avoidAction ?? null)) return false;
+  if ((cached.nextDuty ?? null) !== (current.nextDuty ?? null)) return false;
+  if ((cached.nextDutyDate ?? null) !== (current.nextDutyDate ?? null)) return false;
+  if (cached.plannerTone !== current.plannerTone) return false;
+
+  const cachedOrders = cached.ordersTop3 ?? [];
+  const currentOrders = current.ordersTop3 ?? [];
+  if (cachedOrders.length !== currentOrders.length) return false;
+  return cachedOrders.every((item, index) => {
+    const target = currentOrders[index];
+    return Boolean(
+      target &&
+      item.rank === target.rank &&
+      item.title === target.title &&
+      item.text === target.text
+    );
+  });
+}
+
+function isProfileSnapshotCurrent(
+  cached: AIRecoveryPayload["profileSnapshot"] | null | undefined,
+  current: NonNullable<AIRecoveryPayload["profileSnapshot"]>
+) {
+  if (!cached) return false;
+  return (
+    Number(cached.chronotype.toFixed(2)) === current.chronotype &&
+    Number(cached.caffeineSensitivity.toFixed(2)) === current.caffeineSensitivity
+  );
 }
 
 function readAIContentVariants(raw: unknown, today: ISODate): Partial<Record<Language, AIRecoveryPayload>> {
@@ -278,7 +371,7 @@ async function handleRecovery(req: NextRequest, options?: { allowGenerate?: bool
   }
 
   const subscription = await safeLoadSubscription(userId);
-  if (!subscription?.hasPaidAccess) {
+  if (!subscription?.entitlements?.recoveryPlannerAI) {
     return bad(402, "paid_plan_required_ai_recovery");
   }
 
@@ -297,21 +390,68 @@ async function handleRecovery(req: NextRequest, options?: { allowGenerate?: bool
       return bad(403, "insights_locked_min_3_days");
     }
 
+    const start = toISODate(addDays(fromISODate(today), -13));
+    const vitals14 = computeVitalsRange({ state, start, end: today });
+    const inputDateSet = new Set<ISODate>();
+    for (let i = 0; i < 14; i++) {
+      const iso = toISODate(addDays(fromISODate(start), i));
+      const bio = state.bio?.[iso] ?? null;
+      const emotion = state.emotions?.[iso] ?? null;
+      if (hasHealthInput(bio, emotion)) inputDateSet.add(iso);
+    }
+
+    const start7 = toISODate(addDays(fromISODate(today), -6));
+    const vitals7 = vitals14.filter(
+      (v) => v.dateISO >= start7 && (inputDateSet.has(v.dateISO) || hasReliableEstimatedSignal(v))
+    );
+    const prevWeek = vitals14.filter(
+      (v) => v.dateISO < start7 && (inputDateSet.has(v.dateISO) || hasReliableEstimatedSignal(v))
+    );
+    const todayVitalCandidate = vitals14.find((v) => v.dateISO === today) ?? null;
+    const todayHasInput = inputDateSet.has(today) || hasReliableEstimatedSignal(todayVitalCandidate);
+    const todayShift = (readShift(state.schedule, today) ?? todayVitalCandidate?.shift ?? "OFF") as Shift;
+    const todayVital = todayHasInput && todayVitalCandidate
+      ? {
+          ...todayVitalCandidate,
+          shift: todayShift,
+        }
+      : null;
+    const plannerContext = buildPlannerContext({
+      pivotISO: today,
+      schedule: state.schedule,
+      todayVital,
+      factorVitals: vitals7.length ? vitals7 : todayVital ? [todayVital] : [],
+      profile: state.settings?.profile,
+    });
+    const nextShift = plannerContext.nextDuty;
+    const profile = normalizeProfileSettings(state.settings?.profile);
+    const profileSnapshot = normalizeProfileSnapshot(profile);
+
     // ── 3. Supabase ai_content 캐시 우선 조회 ──
     const aiContent = await safeLoadAIContent(userId);
     if (aiContent && aiContent.dateISO === today) {
       const variants = readAIContentVariants(aiContent.data, today);
       const koVariant = variants.ko ?? null;
       const direct = variants[lang] ?? null;
-      if (
+      const directIsCurrent =
         direct &&
         direct.engine === "openai" &&
+        isPlannerContextCurrent(direct.plannerContext, plannerContext) &&
+        isProfileSnapshotCurrent(direct.profileSnapshot, profileSnapshot);
+      const koIsCurrent =
+        koVariant &&
+        koVariant.engine === "openai" &&
+        isPlannerContextCurrent(koVariant.plannerContext, plannerContext) &&
+        isProfileSnapshotCurrent(koVariant.profileSnapshot, profileSnapshot);
+
+      if (
+        directIsCurrent &&
         (lang !== "en" ||
-          (!looksKoreanPayload(direct) && (!koVariant || hasSameStructure(koVariant, direct))))
+          (!looksKoreanPayload(direct!) && (!koVariant || !koIsCurrent || hasSameStructure(koVariant, direct!))))
       ) {
-        return jsonNoStore({ ok: true, data: direct } satisfies AIRecoveryApiSuccess);
+        return jsonNoStore({ ok: true, data: direct! } satisfies AIRecoveryApiSuccess);
       }
-      if (lang === "en" && koVariant && koVariant.engine === "openai") {
+      if (lang === "en" && koVariant && koIsCurrent) {
         try {
           const translated = await translateAIRecoveryToEnglish({
             result: koVariant.result,
@@ -352,7 +492,11 @@ async function handleRecovery(req: NextRequest, options?: { allowGenerate?: bool
 
     // legacy fallback: rnest_user_state.payload.aiRecoveryDaily
     const legacyCached = readServerCachedAI(row.payload, today, lang);
-    if (legacyCached) {
+    if (
+      legacyCached &&
+      isPlannerContextCurrent(legacyCached.plannerContext, plannerContext) &&
+      isProfileSnapshotCurrent(legacyCached.profileSnapshot, profileSnapshot)
+    ) {
       void safeSaveAIContent(userId, today, legacyCached.language, {
         dateISO: today,
         generatedAt: Date.now(),
@@ -367,35 +511,6 @@ async function handleRecovery(req: NextRequest, options?: { allowGenerate?: bool
       return jsonNoStore({ ok: true, data: null } satisfies AIRecoveryApiSuccess);
     }
 
-    const start = toISODate(addDays(fromISODate(today), -13));
-    const vitals14 = computeVitalsRange({ state, start, end: today });
-    const inputDateSet = new Set<ISODate>();
-    for (let i = 0; i < 14; i++) {
-      const iso = toISODate(addDays(fromISODate(start), i));
-      const bio = state.bio?.[iso] ?? null;
-      const emotion = state.emotions?.[iso] ?? null;
-      if (hasHealthInput(bio, emotion)) inputDateSet.add(iso);
-    }
-
-    const start7 = toISODate(addDays(fromISODate(today), -6));
-    const vitals7 = vitals14.filter(
-      (v) => v.dateISO >= start7 && (inputDateSet.has(v.dateISO) || hasReliableEstimatedSignal(v))
-    );
-    const prevWeek = vitals14.filter(
-      (v) => v.dateISO < start7 && (inputDateSet.has(v.dateISO) || hasReliableEstimatedSignal(v))
-    );
-    const todayVitalCandidate = vitals14.find((v) => v.dateISO === today) ?? null;
-    const todayHasInput = inputDateSet.has(today) || hasReliableEstimatedSignal(todayVitalCandidate);
-    const todayShift = (readShift(state.schedule, today) ?? todayVitalCandidate?.shift ?? "OFF") as Shift;
-    const tomorrowISO = toISODate(addDays(fromISODate(today), 1));
-    const nextShift = readShift(state.schedule, tomorrowISO);
-    const todayVital = todayHasInput && todayVitalCandidate
-      ? {
-          ...todayVitalCandidate,
-          shift: todayShift,
-        }
-      : null;
-
     // ── 4. OpenAI 한국어 단일 생성(영어는 번역 캐시) ──
     const aiKo = await generateAIRecoveryWithOpenAI({
       language: "ko",
@@ -405,6 +520,8 @@ async function handleRecovery(req: NextRequest, options?: { allowGenerate?: bool
       todayVital,
       vitals7,
       prevWeekVitals: prevWeek,
+      plannerContext,
+      profile,
     });
     const todayVitalScore = todayVital
       ? Math.round(Math.min(todayVital.body.value, todayVital.mental.ema))
@@ -421,6 +538,8 @@ async function handleRecovery(req: NextRequest, options?: { allowGenerate?: bool
       model: aiKo.model,
       debug: aiKo.debug,
       generatedText: aiKo.generatedText,
+      plannerContext,
+      profileSnapshot,
       result: aiKo.result,
     };
 
@@ -446,6 +565,8 @@ async function handleRecovery(req: NextRequest, options?: { allowGenerate?: bool
             todayVital,
             vitals7,
             prevWeekVitals: prevWeek,
+            plannerContext,
+            profile,
           });
           payloadEn = {
             ...payloadKo,

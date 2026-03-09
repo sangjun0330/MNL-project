@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AIRecoveryPayload } from "@/lib/aiRecoveryContract";
 import { todayISO } from "@/lib/date";
 import { useInsightsData } from "@/components/insights/useInsightsData";
+import { useAuthState } from "@/lib/auth";
 import { useI18n } from "@/lib/useI18n";
 
 type FetchMode = "cache" | "generate";
@@ -28,8 +29,8 @@ type HookResult = {
 const inFlightGenerate = new Map<string, Promise<AIRecoveryPayload | null>>();
 const sessionDailyCache = new Map<string, AIRecoveryPayload>();
 
-function requestKey(lang: "ko" | "en", dateISO: string) {
-  return `${lang}:${dateISO}`;
+function requestKey(userId: string, lang: "ko" | "en", dateISO: string) {
+  return `${userId}:${lang}:${dateISO}`;
 }
 
 async function fetchAIRecovery(lang: "ko" | "en", dateISO: string, cacheOnly: boolean): Promise<AIRecoveryPayload | null> {
@@ -62,8 +63,8 @@ async function fetchAIRecovery(lang: "ko" | "en", dateISO: string, cacheOnly: bo
   return payload;
 }
 
-function getOrStartGenerate(lang: "ko" | "en", dateISO: string) {
-  const key = requestKey(lang, dateISO);
+function getOrStartGenerate(userId: string, lang: "ko" | "en", dateISO: string) {
+  const key = requestKey(userId, lang, dateISO);
   const existing = inFlightGenerate.get(key);
   if (existing) return existing;
 
@@ -84,6 +85,7 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
   const enabled = options?.enabled ?? true;
   const autoGenerate = options?.autoGenerate ?? mode !== "generate";
   const { lang } = useI18n();
+  const { user } = useAuthState();
   const { state } = useInsightsData();
   const [remoteData, setRemoteData] = useState<AIRecoveryPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -95,13 +97,13 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
   const retry = useCallback(() => {
     // 세션 캐시 클리어 후 재시도
     const dateISO = todayISO();
-    const key = requestKey(lang, dateISO);
+    const key = requestKey(user?.userId ?? "guest", lang, dateISO);
     sessionDailyCache.delete(key);
     inFlightGenerate.delete(key);
     setError(null);
     setRemoteData(null);
     setRetryCount((c) => c + 1);
-  }, [lang]);
+  }, [lang, user?.userId]);
   const startGenerate = useCallback(() => {
     setError(null);
     setManualGenerateCount((c) => c + 1);
@@ -119,7 +121,7 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
     }
     if (!isStoreHydrated) return;
     const dateISO = todayISO();
-    const key = requestKey(lang, dateISO);
+    const key = requestKey(user?.userId ?? "guest", lang, dateISO);
     let active = true;
 
     const fromSession = sessionDailyCache.get(key) ?? null;
@@ -139,6 +141,7 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
     setLoading(true);
     setGenerating(false);
     setError(null);
+    setRemoteData(null);
 
     const run = async () => {
       try {
@@ -157,7 +160,7 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
         if (!shouldGenerate) return;
 
         setGenerating(true);
-        const generated = await getOrStartGenerate(lang, dateISO);
+        const generated = await getOrStartGenerate(user?.userId ?? "guest", lang, dateISO);
         if (!active) return;
         if (generated && generated.language === lang) {
           sessionDailyCache.set(key, generated);
@@ -178,7 +181,7 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
     return () => {
       active = false;
     };
-  }, [enabled, isStoreHydrated, lang, mode, retryCount, autoGenerate, manualGenerateCount]);
+  }, [enabled, isStoreHydrated, lang, mode, retryCount, autoGenerate, manualGenerateCount, user?.userId]);
 
   return useMemo(
     () => ({

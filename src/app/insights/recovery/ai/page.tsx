@@ -1,10 +1,10 @@
 import { AppShell } from "@/components/shell/AppShell";
-import { InsightsRecoveryDetail } from "@/components/pages/insights/InsightsRecoveryDetail";
+import { InsightsAIRecoveryDetail } from "@/components/pages/insights/InsightsAIRecoveryDetail";
 
 export default function Page() {
   return (
     <AppShell>
-      <InsightsRecoveryDetail />
+      <InsightsAIRecoveryDetail />
     </AppShell>
   );
 }

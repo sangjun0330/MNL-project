@@ -9,6 +9,7 @@ import type { AppState } from "@/lib/model";
 import type { DailyVital } from "@/lib/vitals";
 import { computeVitalsRange } from "@/lib/vitals";
 import { FACTOR_LABEL_KO, topFactors, type FactorKey } from "@/lib/insightsV2";
+import { findNextActualDuty, getRecoveryPlannerTone } from "@/lib/recoveryPlanner";
 import { Segmented } from "@/components/ui/Segmented";
 import { DETAIL_GRADIENTS } from "@/components/pages/insights/InsightDetailShell";
 
@@ -109,41 +110,6 @@ function barCls(t: Tone) {
   return "bg-emerald-600";
 }
 
-function calcTone(v: DailyVital | null): Tone {
-  if (!v) return "stable";
-
-  const vital = Math.round((v.body.value + v.mental.ema) / 2);
-  const debt = v.engine?.sleepDebtHours ?? 0;
-  const csi = v.engine?.CSI ?? v.engine?.CMF ?? 0;
-  const sri = v.engine?.SRI ?? v.engine?.SRS ?? 1;
-  const cif = v.engine?.CIF ?? (1 - (v.engine?.CSD ?? 0));
-  const slf = v.engine?.SLF ?? 0;
-  const mif = v.engine?.MIF ?? 1;
-  const night = v.engine?.nightStreak ?? 0;
-
-  // deterministic thresholds
-  const warn =
-    vital <= 45 ||
-    debt >= 7 ||
-    (night >= 2 && (csi >= 0.6 || sri <= 0.55)) ||
-    cif <= 0.7 ||
-    slf >= 0.75 ||
-    mif <= 0.75;
-  if (warn) return "warning";
-
-  const noti =
-    vital <= 60 ||
-    debt >= 3 ||
-    csi >= 0.45 ||
-    sri <= 0.7 ||
-    cif <= 0.85 ||
-    slf >= 0.55 ||
-    mif <= 0.85;
-  if (noti) return "noti";
-
-  return "stable";
-}
-
 function cutoffForNextDuty(next: Shift) {
   // 상대 시간(사용자가 생각하는 "컷오프")
   if (next === "D") return "15:00";
@@ -153,7 +119,7 @@ function cutoffForNextDuty(next: Shift) {
   return "14:00";
 }
 
-function getNextDuty(state: AppState, pivot: ISODate): Shift {
+function getScheduledTomorrowDuty(state: AppState, pivot: ISODate): Shift {
   const tomorrow = toISODate(addDays(fromISODate(pivot), 1)) as ISODate;
   return (state.schedule?.[tomorrow] as Shift | undefined) ?? "OFF";
 }
@@ -250,27 +216,27 @@ function buildOrderLines(opts: {
 
   const dutyHint: Record<Shift, Line[]> = {
     D: [
-      data("내일 데이 듀티입니다."),
-      coach("기상/취침을 30분만 당겨봐요. 내일이 훨씬 쉬워져요."),
+      data("다음 근무는 데이 듀티입니다."),
+      coach("기상/취침을 30분만 당겨봐요. 다음 근무가 훨씬 쉬워져요."),
     ],
     M: [
-      data("내일 미들 듀티입니다."),
+      data("다음 근무는 미들 듀티입니다."),
       coach("오전 리듬을 유지하고, 늦은 카페인만 줄여도 쉬워집니다."),
     ],
     E: [
-      data("내일 이브 듀티입니다."),
+      data("다음 근무는 이브 듀티입니다."),
       coach("오전은 ‘리듬 당기기’가 핵심이에요. 빛/가벼운 활동을 조금만 해요."),
     ],
     N: [
-      data("내일 나이트 듀티입니다."),
+      data("다음 근무는 나이트 듀티입니다."),
       coach("출근 전 코어 수면(90분) 또는 낮잠+휴식으로 준비해요."),
     ],
     OFF: [
-      data("내일 오프 듀티입니다."),
+      data("다음 일정은 오프입니다."),
       coach("오프는 회복을 ‘쌓는 날’이에요. 수면/빛/걷기만 챙겨요."),
     ],
     VAC: [
-      data("내일 휴가입니다."),
+      data("다음 일정은 휴가입니다."),
       coach("휴가는 회복을 ‘쌓는 날’이에요. 수면/빛/가벼운 걷기만 챙겨요."),
     ],
   };
@@ -368,7 +334,7 @@ function oneLinerForDriver(opts: {
       data(`수면부채 ${fmt1(s.debt)}h입니다. 오늘은 낮잠 15~25분 1회가 효율적입니다.`),
       data(`수면회복(SRI) ${pct(s.sri)}%입니다. 취침 전 루틴을 고정해 회복을 올립니다.`),
       coach("오늘은 잠을 ‘길게’보다 ‘잘’ 자는 쪽으로 가요. 조도/샤워/호흡만 지켜요."),
-      coach("내일 듀티를 위해 수면을 30~60분만 늘려봐요. 체감이 커요."),
+      coach("다음 근무를 위해 수면을 30~60분만 늘려봐요. 체감이 커요."),
     );
   }
 
@@ -570,7 +536,11 @@ function Surface({
 
 export function useRecoveryPlanData(state: AppState, pivotISO?: ISODate, variant = 0) {
   const pivot = (pivotISO ?? todayISO()) as ISODate;
-  const nextDuty = useMemo(() => getNextDuty(state, pivot), [state, pivot]);
+  const nextDutyInfo = useMemo(() => findNextActualDuty(state.schedule, pivot), [state.schedule, pivot]);
+  const nextDuty = useMemo(
+    () => nextDutyInfo?.shift ?? getScheduledTomorrowDuty(state, pivot),
+    [nextDutyInfo, state, pivot]
+  );
   const sig = useMemo(() => scheduleSignature(state, pivot), [state, pivot]);
 
   const { todayVital, rangeVitals } = useMemo(() => {
@@ -581,7 +551,7 @@ export function useRecoveryPlanData(state: AppState, pivotISO?: ISODate, variant
     return { todayVital, rangeVitals: vitals };
   }, [state, pivot]);
 
-  const tone = useMemo(() => calcTone(todayVital), [todayVital]);
+  const tone = useMemo(() => getRecoveryPlannerTone(todayVital), [todayVital]);
   const s = useMemo(() => compactSummary(todayVital), [todayVital]);
 
   const userSeed = useMemo(() => getUserSeed(), []);
@@ -632,7 +602,7 @@ export function useRecoveryPlanData(state: AppState, pivotISO?: ISODate, variant
       "2~3시간마다 60초 마이크로 브레이크로 멘탈 배터리를 보호합니다.",
       "식사는 가볍게 자주(단백질/수분 우선)로 혈당 변동을 줄입니다.",
       "가능하면 샤워/환기/조도↓로 ‘종료 신호’를 고정합니다.",
-      "내일 듀티 전 15~25분 낮잠 1회로 안전 마진을 만듭니다.",
+      "다음 근무 전 15~25분 낮잠 1회로 안전 마진을 만듭니다.",
     ];
     const base7d = [
       "기상 시간을 30분 단위로 고정해 리듬을 만듭니다.",
@@ -709,14 +679,14 @@ export function useRecoveryPlanData(state: AppState, pivotISO?: ISODate, variant
 
     const tail = {
       stable: [
-        coach("내일 듀티를 위해 ‘작게 고정’만 해도 충분해요."),
+        coach("다음 근무를 위해 ‘작게 고정’만 해도 충분해요."),
         coach("오늘은 무리하지 말고, 유지 루틴으로 가요."),
         coach("작은 루틴만 지켜도 내일이 쉬워져요."),
         coach("가볍게 유지하면 다음 듀티가 편해집니다."),
         coach("한 가지 루틴만 고정해도 충분해요."),
       ],
       noti: [
-        coach("조금만 조정해도 내일 듀티가 쉬워져요."),
+        coach("조금만 조정해도 다음 근무가 쉬워져요."),
         coach("어렵게 말고, 하나만 선택해요."),
         coach("작게 조정해도 체감이 큽니다."),
         coach("오늘은 회복 입력을 조금만 추가해요."),
@@ -743,7 +713,7 @@ export function useRecoveryPlanData(state: AppState, pivotISO?: ISODate, variant
     items.push({ label: "SRI", value: `${pct(s.sri)}%`, kind: s.sri <= 0.6 ? "noti" : "info" });
     items.push({ label: "CSI", value: `${pct(s.csi)}%`, kind: s.csi >= 0.6 ? "warning" : s.csi >= 0.45 ? "noti" : "info" });
     items.push({ label: "CIF", value: `${pct(s.cif)}%`, kind: s.cif <= 0.75 ? "noti" : "info" });
-    items.push({ label: "내일 듀티", value: shiftKo(nextDuty), kind: "info" });
+    items.push({ label: "다음 근무", value: shiftKo(nextDuty), kind: "info" });
     if (s.night > 0) items.push({ label: "연속 나이트", value: `${s.night}회`, kind: s.night >= 2 ? "warning" : "noti" });
     return items;
   }, [s, tone, nextDuty]);
@@ -751,6 +721,8 @@ export function useRecoveryPlanData(state: AppState, pivotISO?: ISODate, variant
   return {
     pivot,
     nextDuty,
+    nextDutyDate: nextDutyInfo?.dateISO ?? null,
+    nextDutyInfo,
     todayVital,
     tone,
     s,
@@ -854,11 +826,11 @@ export function RecoveryPrescription({ state, pivotISO }: Props) {
 
   return (
     <Card
-      title="맞춤 회복 처방"
+      title="회복 처방"
       right={<Chip className={cn("border", toneChipCls(tone))}>{toneLabel(tone)}</Chip>}
     >
       <div className="text-[12.5px] text-ios-muted">
-        기준일 <b>{pivot}</b> · 내일 <b>{shiftKo(nextDuty)}</b> 듀티 중심으로 회복 플랜을 제시합니다.
+        기준일 <b>{pivot}</b> · 다음 <b>{shiftKo(nextDuty)}</b> 근무 중심으로 회복 플랜을 제시합니다.
       </div>
 
       <div className="mt-3 -mx-1 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">

@@ -733,6 +733,29 @@ const EN_EXTRA: Record<string, string> = {
   "구독 상태 확인 중...": "Checking subscription status...",
   "AI 맞춤회복 사용 가능 여부를 확인하고 있어요.":
     "Checking whether AI recovery is available for your plan.",
+  "AI 회복 해설": "AI recovery brief",
+  "AI 회복 해설은 유료 플랜 전용 기능입니다.\n플랜 업그레이드 페이지로 이동할까요?":
+    "AI recovery brief is a paid-plan feature.\nMove to the plan upgrade page?",
+  "AI 회복 해설은 Pro 플랜에서 사용할 수 있어요.":
+    "AI recovery brief is available on the Pro plan.",
+  "AI 회복 해설은 Pro에서 열립니다.": "AI recovery brief opens on Pro.",
+  "AI 회복 해설 안내": "AI recovery brief guide",
+  "AI 회복 해설은 회복 플래너가 왜 이런 우선순위를 잡았는지 맥락 중심으로 풀어 설명합니다.":
+    "AI recovery brief explains, with context, why the recovery planner chose these priorities.",
+  "AI 회복 해설 사용 가능 여부를 확인하고 있어요.":
+    "Checking whether AI recovery brief is available for your plan.",
+  "오늘 수면 입력 후 바로 AI 회복 해설을 시작해요.":
+    "AI recovery brief starts right after you log today's sleep.",
+  "저장된 AI 회복 해설을 확인하고 있어요...": "Checking saved AI recovery brief...",
+  "로그인 후 오늘의 AI 회복 해설을 확인할 수 있어요.":
+    "Sign in to view today's AI recovery brief.",
+  "AI 회복 해설에서 오늘 플랜의 이유를 확인해요.":
+    "Check why today's plan was chosen in the AI recovery brief.",
+  "AI 회복 해설 분석 중": "Analyzing AI recovery brief",
+  "AI가 해설한 오늘 플랜": "Today's plan explained by AI",
+  "이번 주 흐름 해설": "This week's recovery flow",
+  "영어 번역 적용 중": "Applying English translation",
+  "영어로 표시하는 중이에요. 조금만 기다려 주세요.": "Displaying in English. Please wait a moment.",
   "오늘 건강 기록": "Today's health log",
   "전날 건강 기록": "Yesterday's health log",
   "오늘 수면 시간": "Today's sleep time",
@@ -742,6 +765,16 @@ const EN_EXTRA: Record<string, string> = {
   "AI 분석 시작하기": "Start AI analysis",
   "정확한 분석을 위해 최소 오늘 수면 시간은 꼭 입력해 주세요.":
     "For accurate analysis, please enter at least today's sleep time.",
+  "회복 플래너가 왜 이런 우선순위를 잡았는지 AI가 설명해 줍니다.":
+    "AI explains why the recovery planner set these priorities.",
+  "회복 플래너가 열리면 AI 해설도 함께 볼 수 있어요.":
+    "Once the recovery planner opens, the AI brief will open too.",
+  "회복 플래너가 왜 이런 우선순위를 잡았는지 중요한 항목만 빠르게 정리했어요.":
+    "A quick summary of the key reasons behind the recovery planner's priorities.",
+  "오늘 컨디션과 최근 흐름을 기준으로 지금 가장 먼저 해야 할 회복 우선순위를 정리했어요.":
+    "Based on today's condition and recent flow, this summarizes what to recover first right now.",
+  "기록을 3일 이상 쌓으면 AI 회복 해설도 열려요.":
+    "Once you build 3 or more days of logs, the AI recovery brief opens too.",
 
   // Tools: nurse calculators / med-safety
   "현장에서 바로 쓰는 계산·안전 확인 도구입니다.": "Practical calculation and safety tools for bedside use.",
@@ -1012,6 +1045,7 @@ const EN_EXTRA: Record<string, string> = {
     "This output is auto-generated for reference and must not be used as a basis for medical decisions. The provider is not responsible for diagnosis/treatment/medication decisions or outcomes based on this output. Always prioritize hospital policy, physician orders, and clinical confirmation.",
   "오늘 수면 기록이 필요해요": "Today's sleep log is required.",
   "AI 맞춤회복 분석 전 필수": "Required before AI recovery analysis",
+  "AI 회복 해설 분석 전 필수": "Required before AI recovery brief",
   "먼저 오늘 수면 시간을 입력해 주세요.": "Please enter today's sleep duration first.",
   "오늘 컨디션/회복 추천은 수면 기록이 있어야 정확하게 계산됩니다.":
     "Today's condition/recovery recommendations are calculated accurately only when sleep is logged.",
@@ -1022,15 +1056,21 @@ const EN_EXTRA: Record<string, string> = {
     "Please enter today's sleep log and yesterday's health log first.",
   "두 항목이 있어야 AI 맞춤회복 정확도가 올라갑니다.":
     "Both items are needed to improve AI recovery accuracy.",
+  "두 항목이 있어야 회복 플래너 해설 우선순위를 정확하게 계산할 수 있어요.":
+    "Both logs are needed to calculate recovery planner explanation priorities accurately.",
   "확인을 누르면 오늘 기록 화면(수면 우선)으로 이동합니다.":
     "Tap Confirm to move to today's record screen (sleep first).",
   "오늘 수면 기록이 있어야 AI 맞춤회복을 시작할 수 있어요.":
     "AI recovery starts only after today's sleep is logged.",
+  "오늘 수면 기록이 있어야 회복 플래너 해설 정확도가 올라갑니다.":
+    "Today's sleep log improves recovery planner explanation accuracy.",
   "확인을 누르면 오늘 기록 화면으로 이동합니다.": "Tap Confirm to move to today's record screen.",
   "전날 건강 기록이 필요해요": "Yesterday's health log is required.",
   "먼저 전날 건강 기록을 입력해 주세요.": "Please enter yesterday's health log first.",
   "전날 기록이 있어야 추세 기반 추천을 정확히 계산할 수 있어요.":
     "Yesterday's log is required for accurate trend-based recommendations.",
+  "전날 기록이 있어야 추세 기반 회복 플래너 해설을 정확히 계산할 수 있어요.":
+    "Yesterday's log is required to accurately calculate trend-based recovery planner explanations.",
   "확인을 누르면 전날 기록 화면으로 이동합니다.": "Tap Confirm to move to yesterday's record screen.",
   "오늘 수면 기록 + 전날 건강 기록 입력 후 AI 맞춤회복을 시작할 수 있어요.":
     "After entering today's sleep and yesterday's health log, you can start AI recovery.",
@@ -1038,6 +1078,38 @@ const EN_EXTRA: Record<string, string> = {
     "Please enter today's sleep and yesterday's health log first.",
   "누락된 기록 날짜로 바로 이동해 입력할 수 있어요.":
     "You can jump directly to missing record dates and enter them.",
+  "AI 회복 해설 분석 전, 오늘 수면 기록을 먼저 입력해 주세요.":
+    "Before AI recovery brief analysis, please log today's sleep first.",
+  "분석 시작 전에 필수 기록 2개(오늘 수면, 전날 건강)를 확인해 주세요.":
+    "Before starting analysis, check the two required logs (today's sleep and yesterday's health).",
+  "필수 기록 입력하러 가기": "Go enter required logs",
+  "누르면 누락된 기록 날짜로 이동해 바로 입력할 수 있어요.":
+    "Tap to jump to the missing log date and enter it right away.",
+  "회복 루틴을 먼저 고정해요.": "Lock in one recovery routine first.",
+  "늦은 자극을 줄여요.": "Reduce late stimulation.",
+  "오늘 플랜": "Today's plan",
+  "지금 할 1개": "One thing to do now",
+  "피해야 할 것": "Avoid this",
+  "카테고리": "Categories",
+  "분석 날짜": "Analysis date",
+
+  "회복 플래너": "Recovery planner",
+  "건강 기록 3일 이상부터 회복 플래너가 열립니다.": "Recovery planner opens after 3+ logged health days.",
+  "오늘의 회복 우선순위를 확인해 보세요.": "Check today's recovery priorities.",
+  "기록을 3일 이상 쌓으면 다음 근무 전까지의 회복 플랜이 열려요.":
+    "Once you build 3 or more days of logs, your recovery plan before the next shift will open.",
+  "다음 근무 전까지 회복 처방, 오늘 오더, 타임라인을 한 흐름으로 볼 수 있어요.":
+    "See the recovery prescription, today's orders, and timeline in one flow before your next shift.",
+  "전체는 Pro": "Full version on Pro",
+  "요약은 무료 · 전체 플랜은 Pro": "Summary is free · full plan is Pro",
+  "기록 더 쌓기": "Log more days",
+  "기록 건너뛰기": "Skipping logs",
+  "개인화": "Personalization",
+  "개인화 설정 열기": "Open personalization settings",
+  "회복 플래너와 AI 해설에 반영할 개인 리듬을 설정합니다.":
+    "Set your personal rhythm for the recovery planner and AI brief.",
+  "회복 플래너 정밀도 높이기": "Increase recovery planner precision",
+  "카페인 민감도": "Caffeine sensitivity",
   "필수 기록 입력 필요": "Required logs needed",
   "새 세션": "New session",
   "분석 실행": "Run analysis",
@@ -1070,14 +1142,6 @@ const EN_EXTRA: Record<string, string> = {
     "Today's sleep log is required to improve personalized recovery analysis accuracy.",
   "전날 기록이 있어야 추세 기반 맞춤회복 추천을 정확히 계산할 수 있어요.":
     "Yesterday's log is required to accurately calculate trend-based personalized recovery recommendations.",
-  "분석 시작 전에 필수 기록 2개(오늘 수면, 전날 건강)를 확인해 주세요.":
-    "Before starting analysis, confirm the two required logs (today's sleep, yesterday's health).",
-  "필수 기록 입력하러 가기": "Go to required log entry",
-  "누르면 누락된 기록 날짜로 이동해 바로 입력할 수 있어요.":
-    "Tap to jump to missing log dates and enter immediately.",
-
-  "영어 번역 적용 중": "Applying English translation",
-  "영어로 표시하는 중이에요. 조금만 기다려 주세요.": "Showing in English now. Please wait a moment.",
   "Pro 크레딧 정책": "Pro credit policy",
   "기본 크레딧은 Pro 사용자에게 매일 10회가 한국시간 자정에 초기화됩니다.":
     "Base credits reset to 10 every day at midnight (KST) for Pro users.",
@@ -1201,7 +1265,6 @@ const EN_EXTRA: Record<string, string> = {
 };
 
 const SHOP_EN_EXTRA: Record<string, string> = {
-  "언어": "Language",
   "쇼핑 프로필로 돌아가기": "Back to shopping profile",
   "쇼핑 계정 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.": "Couldn't load your shopping account details. Please try again shortly.",
   "주문 · 배송": "Orders & shipping",
@@ -1333,9 +1396,6 @@ const SHOP_EN_EXTRA: Record<string, string> = {
     "The order was not completed during payment-provider approval. Please compare the card approval and order history.",
   "결제 승인에 실패했습니다. 잠시 후 주문 내역에서 상태를 다시 확인해 주세요.":
     "Payment approval failed. Please check the status in your orders again shortly.",
-  "결제 승인 파라미터가 올바르지 않습니다.": "The payment approval parameters are invalid.",
-  "결제 승인 처리 중입니다...": "Confirming payment...",
-  "승인 실패": "Approval failed",
   "주문 상품": "Ordered product",
   "결제 묶음": "Payment bundle",
   "상품 종류": "Item types",
@@ -1421,14 +1481,11 @@ const SHOP_EN_EXTRA: Record<string, string> = {
   "최종 확인": "Final check",
   "카탈로그를 불러오지 못해 기본 상품 목록으로 보여주고 있습니다.":
     "Couldn't load the catalog, so the default product list is being shown.",
-  "초기화": "Reset",
   "바로결제": "Buy now",
   "상세보기": "View details",
   "처리 중...": "Processing...",
   "위시리스트를 정리하는 중입니다.": "Organizing your wishlist.",
   "장바구니를 정리하는 중입니다.": "Organizing your cart.",
-  "결제 완료": "Paid",
-  "결제 실패": "Payment failed",
   "결제 단계에서 주문이 완료되지 않았습니다.": "The order did not complete during the payment stage.",
   "결제 설정이 아직 완료되지 않았습니다. 관리자에게 결제 설정을 확인해 주세요.":
     "Payment setup is not complete yet. Ask the administrator to verify the payment settings.",
@@ -1541,7 +1598,6 @@ const SHOP_EN_EXTRA: Record<string, string> = {
   "품절된 상품은 주문할 수 없습니다.": "Sold-out items cannot be ordered.",
   "확정일시": "Confirmed at",
   "환불 상태": "Refund status",
-  "환불 요청": "Refund requested",
   "환불 요청에 실패했습니다. 잠시 후 다시 시도해 주세요.": "Couldn't submit the refund request. Please try again shortly.",
   "환불 요청이 접수되었습니다. 관리자 검토 후 처리됩니다.": "Your refund request has been submitted and will be processed after admin review.",
   "환불 요청하기": "Request refund",
@@ -1578,7 +1634,6 @@ const SHOP_EN_EXTRA: Record<string, string> = {
   "야간/미들/이브닝 근무 흐름이라 눈 피로를 줄이는 루틴이 잘 맞아요.":
     "Your night/middle/evening shift flow fits routines that help reduce eye fatigue.",
   "오늘 추천부터": "Start with today's picks",
-  "수면": "Sleep",
   "야간 전후 루틴": "Before/after night shift",
   "수분": "Hydration",
   "카페인 밸런스": "Caffeine balance",
@@ -1647,7 +1702,6 @@ const SHOP_EN_EXTRA: Record<string, string> = {
   "복부와 하체의 부담이 있는 날에 온열 루틴으로 편안함을 더하는 카테고리입니다.":
     "A warmth-focused category that adds comfort on days with abdominal or lower-body strain.",
   "웰니스 파트너 연동 준비중": "Wellness partner integration in progress",
-  "생리 기간": "Period",
   "생리 첫날": "First day of your period",
   "PMS 구간": "PMS window",
   "퇴근 후 바로 쉬는 시간": "Downtime right after work",

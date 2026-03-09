@@ -13,6 +13,7 @@ import { buildShopRecommendations, getShopImageSrc, formatShopPrice, SHOP_PRODUC
 import type { ShopProduct } from "@/lib/shop";
 
 import { useAIRecoveryInsights } from "@/components/insights/useAIRecoveryInsights";
+import { useRecoveryPlanner } from "@/components/insights/useRecoveryPlanner";
 import { BatteryGauge } from "@/components/home/BatteryGauge";
 import { WeekStrip } from "@/components/home/WeekStrip";
 import { HomeSocialCard } from "@/components/home/HomeSocialCard";
@@ -49,11 +50,11 @@ function aiSummaryFallback(
   t: (key: string, vars?: Record<string, any>) => string,
   opts: { loading: boolean; generating: boolean; error: string | null }
 ) {
-  if (opts.loading || opts.generating) return t("저장된 맞춤회복을 확인하고 있어요...");
-  if (opts.error?.includes("requires_today_sleep")) return t("오늘 수면 입력 후 바로 개인 맞춤 회복 가이드를 시작해요.");
-  if (opts.error?.includes("plan") || opts.error?.includes("subscription")) return t("AI 회복은 Pro 플랜에서 사용할 수 있어요.");
-  if (opts.error?.includes("auth")) return t("로그인 후 오늘의 맞춤회복을 확인할 수 있어요.");
-  return t("AI 회복분석에서 오늘 맞춤회복 한줄요약을 확인해요.");
+  if (opts.loading || opts.generating) return t("저장된 AI 회복 해설을 확인하고 있어요...");
+  if (opts.error?.includes("requires_today_sleep")) return t("오늘 수면 입력 후 바로 AI 회복 해설을 시작해요.");
+  if (opts.error?.includes("plan") || opts.error?.includes("subscription")) return t("AI 회복 해설은 Pro 플랜에서 사용할 수 있어요.");
+  if (opts.error?.includes("auth")) return t("로그인 후 오늘의 AI 회복 해설을 확인할 수 있어요.");
+  return t("AI 회복 해설에서 오늘 플랜의 이유를 확인해요.");
 }
 
 // ── Icons ────────────────────────────────────────────────────────
@@ -187,8 +188,11 @@ export default function Home() {
     };
   }, []);
 
-  const aiRecovery = useAIRecoveryInsights({ mode: "cache", enabled: deferredReady });
+  const planner = useRecoveryPlanner();
+  const aiRecovery = useAIRecoveryInsights({ mode: "cache", enabled: deferredReady && planner.aiAvailable });
   const aiHeadline = useMemo(() => {
+    if (planner.state === "needs_records") return t("기록을 3일 이상 쌓으면 AI 회복 해설도 열려요.");
+    if (!planner.aiAvailable && !planner.billingLoading) return t("AI 회복 해설은 Pro에서 열립니다.");
     const raw = aiRecovery.data?.result?.headline;
     if (typeof raw === "string") {
       const line = raw.replace(/\s+/g, " ").trim();
@@ -199,7 +203,7 @@ export default function Home() {
       generating: aiRecovery.generating,
       error: aiRecovery.error,
     });
-  }, [aiRecovery.data?.result?.headline, aiRecovery.loading, aiRecovery.generating, aiRecovery.error, t]);
+  }, [aiRecovery.data?.result?.headline, aiRecovery.loading, aiRecovery.generating, aiRecovery.error, planner.aiAvailable, planner.billingLoading, planner.state, t]);
 
   const aiTone = (aiRecovery.data?.result as any)?.tone as string | undefined;
 
@@ -314,6 +318,85 @@ export default function Home() {
         </div>
       </div>
 
+      {/* ── Recovery Planner Card ── */}
+      <Link
+        href="/insights/recovery"
+        className="block rounded-[22px] px-4 py-4 shadow-apple-sm active:opacity-95"
+        style={{ background: "var(--rnest-card)" }}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5">
+            <span style={{ color: "var(--rnest-accent)" }}>
+              <IconSparkle />
+            </span>
+            <span
+              className="text-[11px] font-semibold uppercase tracking-widest"
+              style={{ color: "var(--rnest-muted)" }}
+            >
+              {t("회복 플래너")}
+            </span>
+          </div>
+          <span
+            className="shrink-0 rounded-full border px-3 py-1 text-[11px] font-medium"
+            style={{
+              borderColor: "var(--rnest-accent-border)",
+              color: "var(--rnest-accent)",
+            }}
+          >
+            {t("전체 보기")} ›
+          </span>
+        </div>
+
+        <p
+          className="mt-3 text-[15px] font-semibold leading-snug tracking-[-0.01em]"
+          style={{ color: "var(--rnest-text)" }}
+        >
+          {planner.state === "needs_records"
+            ? t("건강 기록 3일 이상부터 회복 플래너가 열립니다.")
+            : planner.focusFactor
+              ? `${t("회복 포커스")} · ${planner.focusFactor.label}`
+              : t("오늘의 회복 우선순위를 확인해 보세요.")}
+        </p>
+        <p className="mt-2 text-[13px] leading-relaxed" style={{ color: "var(--rnest-sub)" }}>
+          {planner.state === "needs_records"
+            ? t("기록을 3일 이상 쌓으면 다음 근무 전까지의 회복 플랜이 열려요.")
+            : planner.primaryAction ?? t("다음 근무 전까지 무엇을 먼저 해야 하는지 정리해 드려요.")}
+        </p>
+
+        <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <div className="rounded-[16px] border px-3 py-3" style={{ borderColor: "var(--rnest-sep)", background: "var(--rnest-bg)" }}>
+            <div className="text-[11px] font-semibold" style={{ color: "var(--rnest-muted)" }}>
+              {t("다음 근무")}
+            </div>
+            <div className="mt-1 text-[14px] font-semibold" style={{ color: "var(--rnest-text)" }}>
+              {planner.state === "needs_records" ? t("현재 {count}일 기록됨", { count: planner.recordedDays }) : planner.nextDutyLabel}
+            </div>
+          </div>
+          <div className="rounded-[16px] border px-3 py-3" style={{ borderColor: "var(--rnest-sep)", background: "var(--rnest-bg)" }}>
+            <div className="text-[11px] font-semibold" style={{ color: "var(--rnest-muted)" }}>
+              {t("지금 할 1개")}
+            </div>
+            <div className="mt-1 text-[14px] font-semibold" style={{ color: "var(--rnest-text)" }}>
+              {planner.state === "needs_records" ? t("기록 더 쌓기") : planner.ordersTop3[0]?.title ?? t("회복 루틴")}
+            </div>
+          </div>
+          <div className="rounded-[16px] border px-3 py-3" style={{ borderColor: "var(--rnest-sep)", background: "var(--rnest-bg)" }}>
+            <div className="text-[11px] font-semibold" style={{ color: "var(--rnest-muted)" }}>
+              {t("피해야 할 것")}
+            </div>
+            <div className="mt-1 text-[13px] leading-relaxed" style={{ color: "var(--rnest-text)" }}>
+              {planner.state === "needs_records" ? t("기록 건너뛰기") : planner.avoidAction ?? t("늦은 자극")}
+            </div>
+          </div>
+        </div>
+
+        {!planner.fullAccess && !planner.billingLoading ? (
+          <div className="mt-3 inline-flex items-center rounded-full bg-[#FFF5E8] px-2.5 py-1 text-[11px] font-semibold text-[#A05A00]">
+            {t("요약은 무료 · 전체 플랜은 Pro")}
+          </div>
+        ) : null}
+      </Link>
+
       {/* ── AI Recovery Card ── */}
       <div
         className="rounded-[22px] px-4 py-4 shadow-apple-sm"
@@ -329,18 +412,18 @@ export default function Home() {
               className="text-[11px] font-semibold uppercase tracking-widest"
               style={{ color: "var(--rnest-muted)" }}
             >
-              {t("AI 맞춤회복")}
+              {t("AI 회복 해설")}
             </span>
           </div>
           <Link
-            href="/insights/recovery"
+            href="/insights/recovery/ai"
             className="shrink-0 rounded-full border px-3 py-1 text-[11px] font-medium active:opacity-60"
             style={{
               borderColor: "var(--rnest-accent-border)",
               color: "var(--rnest-accent)",
             }}
           >
-            {t("회복분석 전체")} ›
+            {t("이유 보기")} ›
           </Link>
         </div>
 
@@ -368,6 +451,14 @@ export default function Home() {
             {aiHeadline}
           </p>
         )}
+
+        <p className="mt-2 text-[12.5px] leading-relaxed" style={{ color: "var(--rnest-sub)" }}>
+          {planner.state === "needs_records"
+            ? t("회복 플래너가 열리면 AI 해설도 함께 볼 수 있어요.")
+            : planner.aiAvailable
+              ? t("회복 플래너가 왜 이런 우선순위를 잡았는지 AI가 설명해 줍니다.")
+              : t("AI 회복 해설은 Pro에서 열립니다.")}
+        </p>
 
         {/* Tone badge */}
         {aiTone && (

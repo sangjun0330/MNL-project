@@ -10,6 +10,8 @@ import { useInsightsData, shiftKo, isInsightsLocked, INSIGHTS_MIN_DAYS } from "@
 import { formatKoreanDate } from "@/lib/date";
 import { RecoveryPrescription } from "@/components/insights/RecoveryPrescription";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
+import { RecoveryPlannerUpgradeCard } from "@/components/insights/RecoveryPlannerUpgradeCard";
+import { useRecoveryPlanner } from "@/components/insights/useRecoveryPlanner";
 import { useI18n } from "@/lib/useI18n";
 
 function pct(p: number) {
@@ -19,6 +21,7 @@ function pct(p: number) {
 export function InsightsRecoveryPlanDetail() {
   const { t } = useI18n();
   const { end, state, top1, top3, syncLabel, todayShift, hasTodayShift, recordedDays } = useInsightsData();
+  const planner = useRecoveryPlanner();
 
   if (isInsightsLocked(recordedDays)) {
     return (
@@ -47,21 +50,23 @@ export function InsightsRecoveryPlanDetail() {
 
   return (
     <InsightDetailShell
-      title="다음 듀티까지 회복 처방"
+      title="회복 처방"
       subtitle={formatKoreanDate(end)}
-      meta="기록(수면/스트레스/활동/카페인/기분/주기)을 근거로 회복 플랜을 제공합니다."
+      meta="다음 실제 근무 전까지 무엇을 먼저 회복해야 하는지 전략 중심으로 정리합니다."
       backHref="/insights/recovery"
     >
       <DetailSummaryCard
         accent="mint"
         label="Personalized Recovery"
-        title="오늘부터 다음 듀티까지의 회복 처방"
+        title="다음 근무까지의 회복 전략"
         metric={top1 ? pct(top1.pct) : "—"}
         metricLabel={top1 ? top1.label : "핵심 요인"}
         summary={summary}
-        detail={detail}
+        detail={planner.primaryAction ? `지금 할 1개 · ${planner.primaryAction}` : detail}
         chips={(
           <>
+            <DetailChip color={DETAIL_ACCENTS.mint}>{planner.nextDutyLabel}</DetailChip>
+            {planner.nextDuty ? <DetailChip color={DETAIL_ACCENTS.mint}>다음 {shiftKo(planner.nextDuty)}</DetailChip> : null}
             <DetailChip color={DETAIL_ACCENTS.mint}>{syncLabel}</DetailChip>
             {hasTodayShift ? <DetailChip color={DETAIL_ACCENTS.mint}>{shiftKo(todayShift)}</DetailChip> : null}
             {top3?.map((t) => (
@@ -73,9 +78,33 @@ export function InsightsRecoveryPlanDetail() {
         )}
       />
 
-      <div className="mt-4">
-        <RecoveryPrescription state={state} pivotISO={end} />
-      </div>
+      {planner.billingLoading ? (
+        <div className="rounded-apple border border-ios-sep bg-white p-5 shadow-apple">
+          <div className="text-[13px] font-semibold text-ios-sub">Access</div>
+          <div className="mt-1 text-[17px] font-bold tracking-[-0.02em] text-ios-text">플랜 접근 상태를 확인하고 있어요.</div>
+          <div className="mt-2 text-[14px] leading-6 text-ios-sub">회복 처방 전체를 보여줄 수 있는지 확인 중입니다.</div>
+        </div>
+      ) : !planner.fullAccess ? (
+        <>
+          <div className="rounded-apple border border-ios-sep bg-white p-5 shadow-apple">
+            <div className="text-[13px] font-semibold text-ios-sub">Preview</div>
+            <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-ios-text">이번 회복 목표</div>
+            <div className="mt-3 rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3">
+              <div className="text-[12px] font-semibold text-ios-sub">지금 할 1개</div>
+              <div className="mt-1 text-[15px] font-semibold leading-6 text-ios-text">{planner.primaryAction ?? t("기록이 쌓이면 회복 목표가 더 정교해져요.")}</div>
+            </div>
+            <div className="mt-3 rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3">
+              <div className="text-[12px] font-semibold text-ios-sub">피해야 할 것</div>
+              <div className="mt-1 text-[14px] leading-6 text-ios-sub">{planner.avoidAction ?? t("늦은 자극과 무리한 일정은 줄여 주세요.")}</div>
+            </div>
+          </div>
+          <RecoveryPlannerUpgradeCard title="회복 처방 전체는 Pro에서 열립니다." />
+        </>
+      ) : (
+        <div className="mt-4">
+          <RecoveryPrescription state={state} pivotISO={end} />
+        </div>
+      )}
     </InsightDetailShell>
   );
 }

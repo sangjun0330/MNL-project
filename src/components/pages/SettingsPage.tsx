@@ -104,6 +104,29 @@ export function SettingsPage() {
         </Link>
 
         <Link
+          href="/settings/personalization"
+          className="rounded-apple border border-ios-sep bg-white/95 p-4 shadow-apple-sm transition hover:translate-y-[-1px] hover:border-[color:var(--rnest-accent-border)]"
+          aria-label={t("개인화 설정 열기")}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2 text-[17px] font-bold text-ios-text">
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]">
+                <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 3v18" />
+                  <path d="M7 7.5c1.2-1 3-1.5 5-1.5s3.8.5 5 1.5" />
+                  <path d="M7 16.5c1.2 1 3 1.5 5 1.5s3.8-.5 5-1.5" />
+                  <path d="M4.5 12H3" />
+                  <path d="M21 12h-1.5" />
+                </svg>
+              </span>
+              <span className="truncate">{t("개인화")}</span>
+            </div>
+            <span className="ml-1 inline-flex h-6 w-6 shrink-0 items-center justify-center text-[22px] leading-none text-[color:var(--rnest-accent)]">›</span>
+          </div>
+          <div className="mt-2 text-[12.5px] text-ios-sub">{t("회복 플래너와 AI 해설에 반영할 개인 리듬을 설정합니다.")}</div>
+        </Link>
+
+        <Link
           href="/settings/billing"
           className="rounded-apple border border-ios-sep bg-white/95 p-4 shadow-apple-sm transition hover:translate-y-[-1px] hover:border-[color:var(--rnest-accent-border)]"
           aria-label={t("구독 설정 열기")}

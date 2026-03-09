@@ -547,10 +547,11 @@ export function InsightsAIRecoveryDetail() {
   const [expandedSections, setExpandedSections] = useState<Partial<Record<RecoverySection["category"], boolean>>>({});
   const { recordedDays, state } = useInsightsData();
   const insightsLocked = isInsightsLocked(recordedDays);
-  const { hasPaidAccess, loading: billingLoading } = useBillingAccess();
+  const { hasEntitlement, loading: billingLoading } = useBillingAccess();
+  const hasPlannerAIAccess = hasEntitlement("recoveryPlannerAI");
   const { data, loading, generating, error, retry, startGenerate } = useAIRecoveryInsights({
     mode: "generate",
-    enabled: !insightsLocked && hasPaidAccess,
+    enabled: !insightsLocked && hasPlannerAIAccess,
     autoGenerate: false,
   });
   const today = useMemo(() => todayISO(), []);
@@ -570,9 +571,9 @@ export function InsightsAIRecoveryDetail() {
     if (missingTodaySleep && missingYesterdayHealth) {
       return {
         title: t("필수 기록 2개가 필요해요"),
-        subtitle: `${formatKoreanDate(today)} · ${formatKoreanDate(yesterday)} · ${t("AI 맞춤회복 분석 전 필수")}`,
+        subtitle: `${formatKoreanDate(today)} · ${formatKoreanDate(yesterday)} · ${t("AI 회복 해설 분석 전 필수")}`,
         primary: t("오늘 수면 기록과 전날 건강 기록을 먼저 입력해 주세요."),
-        description: t("두 항목이 있어야 맞춤회복 우선순위를 정확하게 계산할 수 있어요."),
+        description: t("두 항목이 있어야 회복 플래너 해설 우선순위를 정확하게 계산할 수 있어요."),
         hint: t("확인을 누르면 오늘 기록 화면(수면 우선)으로 이동합니다."),
         route: "/schedule?openHealthLog=today&focus=sleep",
       } as const;
@@ -581,9 +582,9 @@ export function InsightsAIRecoveryDetail() {
     if (missingTodaySleep) {
       return {
         title: t("오늘 수면 기록이 필요해요"),
-        subtitle: `${formatKoreanDate(today)} · ${t("AI 맞춤회복 분석 전 필수")}`,
+        subtitle: `${formatKoreanDate(today)} · ${t("AI 회복 해설 분석 전 필수")}`,
         primary: t("먼저 오늘 수면 시간을 입력해 주세요."),
-        description: t("오늘 수면 기록이 있어야 맞춤회복 분석 정확도가 올라갑니다."),
+        description: t("오늘 수면 기록이 있어야 회복 플래너 해설 정확도가 올라갑니다."),
         hint: t("확인을 누르면 오늘 기록 화면으로 이동합니다."),
         route: "/schedule?openHealthLog=today&focus=sleep",
       } as const;
@@ -591,9 +592,9 @@ export function InsightsAIRecoveryDetail() {
 
     return {
       title: t("전날 건강 기록이 필요해요"),
-      subtitle: `${formatKoreanDate(yesterday)} · ${t("AI 맞춤회복 분석 전 필수")}`,
+      subtitle: `${formatKoreanDate(yesterday)} · ${t("AI 회복 해설 분석 전 필수")}`,
       primary: t("먼저 전날 건강 기록을 입력해 주세요."),
-      description: t("전날 기록이 있어야 추세 기반 맞춤회복 추천을 정확히 계산할 수 있어요."),
+      description: t("전날 기록이 있어야 추세 기반 회복 플래너 해설을 정확히 계산할 수 있어요."),
       hint: t("확인을 누르면 전날 기록 화면으로 이동합니다."),
       route: "/schedule?openHealthLog=yesterday",
     } as const;
@@ -619,7 +620,7 @@ export function InsightsAIRecoveryDetail() {
     uiLang === "en" &&
     !insightsLocked &&
     !billingLoading &&
-    hasPaidAccess &&
+    hasPlannerAIAccess &&
     analysisRequested &&
     !data &&
     !error &&
@@ -655,7 +656,10 @@ export function InsightsAIRecoveryDetail() {
   }, [data?.result.sections]);
 
   const orderedSections = useMemo(
-    () => CATEGORIES.map((meta) => ({ meta, section: sectionsByCategory.get(meta.key) ?? null })).filter((item) => item.section),
+    () =>
+      CATEGORIES.map((meta) => ({ meta, section: sectionsByCategory.get(meta.key) ?? null }))
+        .filter((item) => item.section)
+        .slice(0, 3),
     [sectionsByCategory]
   );
   const toggleSectionExpanded = useCallback((category: RecoverySection["category"]) => {
@@ -692,14 +696,15 @@ export function InsightsAIRecoveryDetail() {
       .map((line) => line.trim())
       .filter(Boolean);
   }, [data?.result.compoundAlert?.message, lang]);
+  const plannerContext = data?.plannerContext ?? null;
 
   return (
     <InsightDetailShell
-      title={t("AI 맞춤회복")}
+      title={t("AI 회복 해설")}
       subtitle={data ? formatKoreanDate(data.dateISO) : ""}
       meta={undefined}
       tone="navy"
-      backHref="/insights"
+      backHref="/insights/recovery"
       className="rnest-recovery-static !max-w-[860px] !px-3 !pt-5 sm:!px-4"
     >
       {insightsLocked ? (
@@ -710,32 +715,32 @@ export function InsightsAIRecoveryDetail() {
         <DetailCard className="p-4 sm:p-5">
           <div className="text-[13px] font-semibold text-ios-sub">{t("구독 상태 확인 중...")}</div>
           <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
-            {t("AI 맞춤회복 사용 가능 여부를 확인하고 있어요.")}
+            {t("AI 회복 해설 사용 가능 여부를 확인하고 있어요.")}
           </p>
         </DetailCard>
       ) : null}
 
-      {!insightsLocked && !billingLoading && hasPaidAccess && !data && !loading && !generating ? (
+      {!insightsLocked && !billingLoading && hasPlannerAIAccess && !data && !loading && !generating ? (
         <DetailCard className="p-4 sm:p-5">
-          <div className="text-[13px] font-semibold text-ios-sub">{t("AI 맞춤회복 안내")}</div>
+          <div className="text-[13px] font-semibold text-ios-sub">{t("AI 회복 해설 안내")}</div>
           <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
-            {t("AI 맞춤회복은 오늘 컨디션과 최근 기록을 바탕으로 실행 우선순위 회복 루틴을 제안합니다.")}
+            {t("AI 회복 해설은 회복 플래너가 왜 이런 우선순위를 잡았는지 맥락 중심으로 풀어 설명합니다.")}
           </p>
         </DetailCard>
       ) : null}
 
-      {!insightsLocked && !billingLoading && !hasPaidAccess ? (
+      {!insightsLocked && !billingLoading && !hasPlannerAIAccess ? (
         <DetailCard className="p-4 sm:p-5">
           <div className="text-[17px] font-bold tracking-[-0.01em] text-ios-text">{t("유료 플랜 전용 기능")}</div>
           <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
-            {t("AI 맞춤회복은 Pro 플랜에서 사용할 수 있어요.")}
+            {t("AI 회복 해설은 Pro 플랜에서 사용할 수 있어요.")}
           </p>
           <div className="mt-4 flex gap-2">
             <button
               type="button"
               onClick={() => {
                 const confirmed = window.confirm(
-                  t("AI 맞춤회복은 유료 플랜 전용 기능입니다.\n플랜 업그레이드 페이지로 이동할까요?")
+                  t("AI 회복 해설은 유료 플랜 전용 기능입니다.\n플랜 업그레이드 페이지로 이동할까요?")
                 );
                 if (confirmed) router.push("/settings/billing/upgrade");
               }}
@@ -753,7 +758,7 @@ export function InsightsAIRecoveryDetail() {
         </DetailCard>
       ) : null}
 
-      {!insightsLocked && hasPaidAccess && !generating && !data && !error ? (
+      {!insightsLocked && hasPlannerAIAccess && !generating && !data && !error ? (
         <DetailCard className="p-4 sm:p-5">
           <div className="text-[17px] font-bold tracking-[-0.01em] text-ios-text">{t("AI 분석 준비 완료")}</div>
           <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
@@ -788,7 +793,7 @@ export function InsightsAIRecoveryDetail() {
         </DetailCard>
       ) : null}
 
-      {!insightsLocked && hasPaidAccess && !loading && !generating && !data && Boolean(error) ? (
+      {!insightsLocked && hasPlannerAIAccess && !loading && !generating && !data && Boolean(error) ? (
         <DetailCard className="p-4 sm:p-5">
           <div className="text-[17px] font-bold tracking-[-0.01em] text-ios-text">{t("AI 호출에 실패했어요.")}</div>
           <div className="mt-2 space-y-1 text-[14px] leading-relaxed text-ios-sub">
@@ -814,7 +819,7 @@ export function InsightsAIRecoveryDetail() {
         </DetailCard>
       ) : null}
 
-      {!insightsLocked && hasPaidAccess && !loading && data ? (
+      {!insightsLocked && hasPlannerAIAccess && !loading && data ? (
         <>
           <DetailCard
             className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
@@ -882,14 +887,37 @@ export function InsightsAIRecoveryDetail() {
                   </div>
                 </div>
               ) : null}
+
+              {plannerContext ? (
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <div className="rounded-[20px] bg-ios-bg px-4 py-3">
+                    <div className="text-[11px] font-semibold tracking-[0.08em] text-ios-muted">{t("회복 포커스")}</div>
+                    <div className="mt-1 text-[15px] font-bold tracking-[-0.02em] text-ios-text">
+                      {plannerContext.focusFactor?.label ?? t("오늘 플랜")}
+                    </div>
+                  </div>
+                  <div className="rounded-[20px] bg-ios-bg px-4 py-3">
+                    <div className="text-[11px] font-semibold tracking-[0.08em] text-ios-muted">{t("지금 할 1개")}</div>
+                    <div className="mt-1 text-[14px] font-semibold leading-6 text-ios-text">
+                      {plannerContext.primaryAction ?? t("회복 루틴을 먼저 고정해요.")}
+                    </div>
+                  </div>
+                  <div className="rounded-[20px] bg-ios-bg px-4 py-3">
+                    <div className="text-[11px] font-semibold tracking-[0.08em] text-ios-muted">{t("피해야 할 것")}</div>
+                    <div className="mt-1 text-[14px] font-semibold leading-6 text-ios-text">
+                      {plannerContext.avoidAction ?? t("늦은 자극을 줄여요.")}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </DetailCard>
 
           <div className="px-1">
             <div className="text-[11px] font-semibold tracking-[0.18em] text-[color:var(--rnest-accent)]">{t("오늘 플랜")}</div>
-            <div className="mt-1 text-[20px] font-bold tracking-[-0.03em] text-ios-text">{t("오늘의 회복 추천")}</div>
+            <div className="mt-1 text-[20px] font-bold tracking-[-0.03em] text-ios-text">{t("AI가 해설한 오늘 플랜")}</div>
             <p className="mt-2 max-w-[560px] break-keep text-[13px] leading-6 text-ios-sub">
-              {t("가장 중요한 행동부터 빠르게 읽을 수 있게 순서대로 정리했어요.")}
+              {t("회복 플래너가 왜 이런 우선순위를 잡았는지 중요한 항목만 빠르게 정리했어요.")}
             </p>
           </div>
 
@@ -931,7 +959,7 @@ export function InsightsAIRecoveryDetail() {
                 <div className="text-[12px] font-semibold tracking-[0.16em] text-ios-muted">
                   {lang === "en" ? "WEEKLY NOTE" : "주간 회복 노트"}
                 </div>
-                <div className="mt-1 text-[20px] font-bold tracking-[-0.03em] text-ios-text">{t("이번 주 AI 한마디")}</div>
+                <div className="mt-1 text-[20px] font-bold tracking-[-0.03em] text-ios-text">{t("이번 주 흐름 해설")}</div>
               </div>
               {weekly ? (
                 <div className="flex flex-wrap gap-2">
@@ -992,7 +1020,7 @@ export function InsightsAIRecoveryDetail() {
 
       <RecoveryGeneratingOverlay
         open={Boolean(generating && !data && !insightsLocked && !englishTranslationPending)}
-        title={t("맞춤회복 분석 중")}
+        title={t("AI 회복 해설 분석 중")}
       />
       <EnglishTranslationPendingPopup
         open={englishTranslationPending}

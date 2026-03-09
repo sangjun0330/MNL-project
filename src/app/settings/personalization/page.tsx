@@ -1,10 +1,10 @@
 import { AppShell } from "@/components/shell/AppShell";
-import { InsightsRecoveryDetail } from "@/components/pages/insights/InsightsRecoveryDetail";
+import { SettingsPersonalizationPage } from "@/components/pages/SettingsPersonalizationPage";
 
 export default function Page() {
   return (
     <AppShell>
-      <InsightsRecoveryDetail />
+      <SettingsPersonalizationPage />
     </AppShell>
   );
 }

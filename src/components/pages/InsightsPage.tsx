@@ -1,19 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import { addDays, formatKoreanDate, fromISODate, toISODate, todayISO } from "@/lib/date";
+import { useMemo } from "react";
+import { formatKoreanDate } from "@/lib/date";
 import { useInsightsData, shiftKo, isInsightsLocked, INSIGHTS_MIN_DAYS } from "@/components/insights/useInsightsData";
-import { useAIRecoveryInsights } from "@/components/insights/useAIRecoveryInsights";
+import { useRecoveryPlanner } from "@/components/insights/useRecoveryPlanner";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { HeroDashboard } from "@/components/insights/v2/HeroDashboard";
 import { DetailSummaryCard, DetailChip, DETAIL_ACCENTS } from "@/components/pages/insights/InsightDetailShell";
-import { TodaySleepRequiredSheet } from "@/components/insights/TodaySleepRequiredSheet";
-import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { statusFromScore } from "@/lib/rnestInsight";
 import { useI18n } from "@/lib/useI18n";
-import { hasHealthInput } from "@/lib/healthRecords";
 
 function MetricCard({
   label,
@@ -73,22 +69,9 @@ function formatPct(p: number) {
   return `${Math.round(p * 100)}%`;
 }
 
-function compactText(text: string, max = 80) {
-  const normalized = text.trim().replace(/\s+/g, " ");
-  if (normalized.length <= max) return normalized;
-  return `${normalized.slice(0, max - 1)}…`;
-}
-
-function stripLeadingDash(text: string) {
-  return text.replace(/^\s*[-•·]\s*/, "").trim();
-}
-
 export function InsightsPage() {
   const { t } = useI18n();
-  const router = useRouter();
-  const [openInputGuide, setOpenInputGuide] = useState(false);
   const {
-    state,
     end,
     todayVital,
     todayShift,
@@ -105,55 +88,8 @@ export function InsightsPage() {
     recordedDays,
     hasInsightData,
   } = useInsightsData();
+  const planner = useRecoveryPlanner();
   const insightsLocked = isInsightsLocked(recordedDays);
-  const { hasPaidAccess, loading: billingLoading } = useBillingAccess();
-  const {
-    data: aiRecovery,
-    loading: aiRecoveryLoading,
-    error: aiRecoveryError,
-  } = useAIRecoveryInsights({ mode: "cache", enabled: !insightsLocked && hasPaidAccess });
-  const today = useMemo(() => todayISO(), []);
-  const yesterday = useMemo(() => toISODate(addDays(fromISODate(today), -1)), [today]);
-  const todayBio = state.bio?.[today] ?? null;
-  const yesterdayBio = state.bio?.[yesterday] ?? null;
-  const yesterdayEmotion = state.emotions?.[yesterday] ?? null;
-  const hasTodaySleep = todayBio?.sleepHours != null;
-  const hasYesterdayHealth = hasHealthInput(yesterdayBio, yesterdayEmotion);
-  const requiresRecoveryInputs = !hasTodaySleep || !hasYesterdayHealth;
-  const missingGuide = useMemo(() => {
-    if (!requiresRecoveryInputs) return null;
-
-    if (!hasTodaySleep && !hasYesterdayHealth) {
-      return {
-        title: t("필수 기록 2개가 필요해요"),
-        subtitle: `${formatKoreanDate(today)} · ${formatKoreanDate(yesterday)} · ${t("AI 맞춤회복 분석 전 필수")}`,
-        primary: t("오늘 수면 기록과 전날 건강 기록을 먼저 입력해 주세요."),
-        description: t("두 항목이 있어야 AI 맞춤회복 정확도가 올라갑니다."),
-        hint: t("확인을 누르면 오늘 기록 화면(수면 우선)으로 이동합니다."),
-        route: "/schedule?openHealthLog=today&focus=sleep",
-      } as const;
-    }
-
-    if (!hasTodaySleep) {
-      return {
-        title: t("오늘 수면 기록이 필요해요"),
-        subtitle: `${formatKoreanDate(today)} · ${t("AI 맞춤회복 분석 전 필수")}`,
-        primary: t("먼저 오늘 수면 시간을 입력해 주세요."),
-        description: t("오늘 수면 기록이 있어야 AI 맞춤회복을 시작할 수 있어요."),
-        hint: t("확인을 누르면 오늘 기록 화면으로 이동합니다."),
-        route: "/schedule?openHealthLog=today&focus=sleep",
-      } as const;
-    }
-
-    return {
-      title: t("전날 건강 기록이 필요해요"),
-      subtitle: `${formatKoreanDate(yesterday)} · ${t("AI 맞춤회복 분석 전 필수")}`,
-      primary: t("먼저 전날 건강 기록을 입력해 주세요."),
-      description: t("전날 기록이 있어야 추세 기반 추천을 정확히 계산할 수 있어요."),
-      hint: t("확인을 누르면 전날 기록 화면으로 이동합니다."),
-      route: "/schedule?openHealthLog=yesterday",
-    } as const;
-  }, [hasTodaySleep, hasYesterdayHealth, requiresRecoveryInputs, t, today, yesterday]);
 
   const body = useMemo(() => Math.round(todayVital?.body.value ?? 0), [todayVital]);
   const mental = useMemo(() => Math.round(todayVital?.mental.ema ?? 0), [todayVital]);
@@ -180,34 +116,6 @@ export function InsightsPage() {
     [todayVital]
   );
   const weeklyStatus = useMemo(() => statusFromScore(avgDisplay), [avgDisplay]);
-  const aiHeadline = useMemo(() => {
-    if (!billingLoading && !hasPaidAccess) return t("유료 플랜 전용 기능");
-    if (aiRecovery) return compactText(stripLeadingDash(aiRecovery.result.headline), 90);
-    if (aiRecoveryLoading) return t("AI 데이터 확인 중...");
-    if (aiRecoveryError) return t("AI 호출 상태를 확인해 주세요.");
-    return t("오늘의 맞춤회복을 받아보세요.");
-  }, [aiRecovery, aiRecoveryError, aiRecoveryLoading, billingLoading, hasPaidAccess, t]);
-  const aiTopSection = aiRecovery?.result.sections.length ? aiRecovery.result.sections[0] : null;
-  const aiSummary = useMemo(
-    () =>
-      requiresRecoveryInputs
-        ? t("오늘 수면 기록 + 전날 건강 기록 입력 후 AI 맞춤회복을 시작할 수 있어요.")
-        : !billingLoading && !hasPaidAccess
-          ? t("AI 맞춤회복은 Pro 플랜에서 사용할 수 있어요.")
-        : aiRecoveryLoading
-          ? t("저장된 맞춤회복을 확인하고 있어요...")
-          : aiTopSection
-            ? compactText(aiTopSection.description, 86)
-            : aiRecoveryError
-              ? t("AI 호출 상태를 확인해 주세요.")
-              : t("상세 페이지에서 오늘 맞춤회복 분석을 시작할 수 있어요."),
-    [aiTopSection, requiresRecoveryInputs, billingLoading, hasPaidAccess, aiRecoveryLoading, aiRecoveryError, t]
-  );
-  const moveToRequiredHealthLog = () => {
-    setOpenInputGuide(false);
-    if (!missingGuide) return;
-    router.push(missingGuide.route);
-  };
 
   if (insightsLocked) {
     return (
@@ -244,69 +152,38 @@ export function InsightsPage() {
         <span>Vital {todayDisplay ?? "—"}</span>
       </div>
 
-      {/* AI Recovery summary */}
+      {/* Recovery Planner summary */}
       <section className="mt-6">
-        <Link
-          href="/insights/recovery"
-          className="block"
-          onClick={(e) => {
-            if (!hasPaidAccess && !billingLoading) {
-              e.preventDefault();
-              const confirmed = window.confirm(
-                t("AI 맞춤회복은 유료 플랜 전용 기능입니다.\n플랜 업그레이드 페이지로 이동할까요?")
-              );
-              if (confirmed) router.push("/settings/billing/upgrade");
-              return;
-            }
-            if (!requiresRecoveryInputs) return;
-            e.preventDefault();
-            setOpenInputGuide(true);
-          }}
-        >
+        <Link href="/insights/recovery" className="block">
           <DetailSummaryCard
-            accent="navy"
-            label="AI Recovery"
-            title={t("AI 맞춤회복")}
+            accent="mint"
+            label="Recovery Planner"
+            title={t("회복 플래너")}
             summary={
-              requiresRecoveryInputs
-                ? t("오늘 수면 기록 + 전날 건강 기록을 먼저 입력해 주세요.")
-                : !billingLoading && !hasPaidAccess
-                  ? t("유료 플랜 전용 기능")
-                : aiHeadline
+              planner.focusFactor
+                ? `${t("회복 포커스")} · ${planner.focusFactor.label}`
+                : t("오늘의 회복 우선순위를 확인해 보세요.")
             }
             detail={
-              requiresRecoveryInputs
-                ? t("누락된 기록 날짜로 바로 이동해 입력할 수 있어요.")
-                : !billingLoading && !hasPaidAccess
-                ? t("확인 버튼을 누르면 플랜 업그레이드 페이지로 이동합니다.")
-                : aiRecovery
-                  ? t("내 기록을 반영한 오늘의 개인 맞춤 회복 가이드")
-                  : aiSummary
+              planner.primaryAction
+                ? `${t("지금 할 1개")} · ${planner.primaryAction}`
+                : t("다음 근무 전까지 회복 처방, 오늘 오더, 타임라인을 한 흐름으로 볼 수 있어요.")
             }
             chips={(
               <>
-                {requiresRecoveryInputs ? (
-                  <DetailChip color={DETAIL_ACCENTS.pink}>{t("필수 기록 입력 필요")}</DetailChip>
-                ) : (
-                  !billingLoading && !hasPaidAccess ? (
-                    <DetailChip color={DETAIL_ACCENTS.pink}>{t("유료 플랜 전용")}</DetailChip>
-                  ) : aiRecovery ? (
-                    <>
-                      {(aiRecovery.result.sections ?? []).slice(0, 2).map((section) => (
-                        <DetailChip key={`${section.category}-${section.title}`} color={DETAIL_ACCENTS.navy}>
-                          {section.title}
-                        </DetailChip>
-                      ))}
-                    </>
-                  ) : (
-                    <DetailChip color={DETAIL_ACCENTS.pink}>
-                      {aiRecoveryError ? t("AI 호출 실패") : t("오늘 맞춤회복 받기")}
-                    </DetailChip>
-                  )
-                )}
+                <DetailChip color={DETAIL_ACCENTS.mint}>{planner.nextDutyLabel}</DetailChip>
+                {planner.nextDuty ? <DetailChip color={DETAIL_ACCENTS.mint}>다음 {shiftKo(planner.nextDuty)}</DetailChip> : null}
+                {planner.ordersTop3.slice(0, planner.fullAccess ? 2 : 1).map((item) => (
+                  <DetailChip key={`${item.rank}-${item.title}`} color={DETAIL_ACCENTS.mint}>
+                    오더 {item.rank} · {item.title}
+                  </DetailChip>
+                ))}
+                {!planner.fullAccess && !planner.billingLoading ? (
+                  <DetailChip color={DETAIL_ACCENTS.pink}>{t("전체는 Pro")}</DetailChip>
+                ) : null}
               </>
             )}
-            valueColor={DETAIL_ACCENTS.navy}
+            valueColor={DETAIL_ACCENTS.mint}
           />
         </Link>
       </section>
@@ -452,17 +329,6 @@ export function InsightsPage() {
       </section>
         </>
       )}
-
-      <TodaySleepRequiredSheet
-        open={openInputGuide}
-        onClose={() => setOpenInputGuide(false)}
-        onConfirm={moveToRequiredHealthLog}
-        titleText={missingGuide?.title}
-        subtitleText={missingGuide?.subtitle}
-        primaryText={missingGuide?.primary}
-        descriptionText={missingGuide?.description}
-        hintText={missingGuide?.hint}
-      />
     </div>
   );
 }
