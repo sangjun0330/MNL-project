@@ -177,6 +177,12 @@ export function resolveOpenAIResponsesRequestConfig(args: {
     if (gatewayToken) {
       headers["cf-aig-authorization"] = `Bearer ${gatewayToken}`;
     }
+    // Fallback: Cloudflare BYOK(stored key)가 CF 대시보드에 미설정된 경우에도
+    // Authorization 헤더를 함께 전송해 OpenAI 인증이 통과되도록 함.
+    // BYOK가 설정된 경우 CF가 stored key를 우선 사용하므로 이 헤더는 무시됨.
+    if (openAIApiKey) {
+      headers.Authorization = `Bearer ${openAIApiKey}`;
+    }
   } else if (usesCloudflareGateway && authMode === "request_header") {
     if (openAIApiKey) {
       headers.Authorization = `Bearer ${openAIApiKey}`;
@@ -189,8 +195,8 @@ export function resolveOpenAIResponsesRequestConfig(args: {
   }
 
   let missingCredential: string | null = null;
-  if (usesCloudflareGateway && authMode === "stored_key" && !gatewayToken) {
-    missingCredential = "missing_cf_aig_token";
+  if (usesCloudflareGateway && authMode === "stored_key" && !gatewayToken && !openAIApiKey) {
+    missingCredential = "missing_cf_aig_token_and_openai_api_key";
   } else if ((authMode === "request_header" || authMode === "direct") && !openAIApiKey) {
     missingCredential = "missing_openai_api_key";
   }
