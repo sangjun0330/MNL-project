@@ -4,7 +4,13 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
-import { RecoveryChecklistItemCard, RecoveryPhaseTabs } from "@/components/insights/RecoveryPlannerFlowCards";
+import {
+  RecoveryChecklistItemCard,
+  RecoveryHeroFact,
+  RecoveryOrderCountSelector,
+  RecoveryPhaseTabs,
+  RecoveryStageHeroCard,
+} from "@/components/insights/RecoveryPlannerFlowCards";
 import { RecoveryPlannerUpgradeCard } from "@/components/insights/RecoveryPlannerUpgradeCard";
 import { useAIRecoveryPlanner } from "@/components/insights/useAIRecoveryPlanner";
 import { useRecoveryPlanner } from "@/components/insights/useRecoveryPlanner";
@@ -24,7 +30,6 @@ import {
   buildRecoveryOrderProgressId,
   getAfterWorkReadiness,
   normalizeRecoveryPhase,
-  recoveryPhaseDescription,
   recoveryPhaseEyebrow,
 } from "@/lib/recoveryPhases";
 import { useInsightsData, isInsightsLocked, INSIGHTS_MIN_DAYS, shiftKo } from "@/components/insights/useInsightsData";
@@ -147,7 +152,6 @@ export function InsightsRecoveryOrdersDetail() {
   const totalOrdersCount = startOrders.length + afterOrders.length;
   const completedCount = totalOrdersCount - activeStartItems.length - activeAfterItems.length;
   const activeItems = activePhase === "start" ? activeStartItems : activeAfterItems;
-  const activeModule = activePhase === "start" ? startOrdersModule : afterOrdersModule;
   const phaseHeadline =
     activePhase === "start"
       ? startOrdersModule?.items[0]?.title ?? startOrdersModule?.headline ?? "아침 회복에 맞춘 오더를 생성해요."
@@ -204,7 +208,7 @@ export function InsightsRecoveryOrdersDetail() {
     <InsightDetailShell
       title="오늘의 오더"
       subtitle={formatKoreanDate(plannerDateISO)}
-      meta="오늘 시작 오더와 퇴근 후 오더를 같은 흐름으로 체크합니다."
+      meta={activePhase === "after_work" ? "퇴근 후 탭에서 밤 회복용 오더를 이어서 체크합니다." : "아침 탭에서 하루 시작용 오더를 먼저 체크합니다."}
       backHref="/insights/recovery"
       chips={
         <>
@@ -215,22 +219,31 @@ export function InsightsRecoveryOrdersDetail() {
       }
     >
       {planner.aiAvailable && !planner.billingLoading ? (
-        <DetailCard
-          className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
-          style={{
-            background: "linear-gradient(180deg, rgba(250,251,255,0.98) 0%, rgba(255,255,255,0.96) 100%)",
-            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.94), 0 16px 38px rgba(15,36,74,0.04)",
-          }}
+        <RecoveryStageHeroCard
+          eyebrow="TODAY ORDERS"
+          title={activePhase === "start" ? "아침 오더" : "퇴근 후 오더"}
+          status="체크리스트"
+          headline={phaseHeadline}
+          summary={phaseSummary}
+          chips={
+            <>
+              <DetailChip color="#1B2747">{activePhase === "start" ? "오늘 시작" : "퇴근 후"}</DetailChip>
+              <DetailChip color="#5E6C84">{formatKoreanDate(plannerDateISO)}</DetailChip>
+              <DetailChip color="#315CA8">선택 {selectedOrderCount}개</DetailChip>
+            </>
+          }
+          facts={
+            <>
+              <RecoveryHeroFact label="남은 오더" value={`${activeItems.length}개`} />
+              <RecoveryHeroFact label="완료" value={`${completedCount}개`} />
+              <RecoveryHeroFact
+                label="다음 흐름"
+                value={activePhase === "start" ? "아침 완료 후 퇴근 후 오더로 이어짐" : "오늘 밤 회복까지 이어서 체크"}
+              />
+            </>
+          }
         >
-          <div className="text-[10.5px] font-semibold tracking-[0.18em] text-[#1B2747]">TODAY ORDERS</div>
-          <div className="mt-1 text-[19px] font-bold tracking-[-0.03em] text-ios-text">
-            {activePhase === "start" ? "아침 오더" : "퇴근 후 오더"}
-          </div>
-          <p className="mt-2 break-keep text-[15px] font-semibold leading-7 tracking-[-0.02em] text-ios-text">
-            {phaseHeadline}
-          </p>
-          <p className="mt-2 break-keep text-[13px] leading-6 text-ios-sub">{phaseSummary}</p>
-          <div className="mt-4">
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px] lg:items-start">
             <RecoveryPhaseTabs
               value={activePhase}
               onChange={setActivePhase}
@@ -247,13 +260,13 @@ export function InsightsRecoveryOrdersDetail() {
                 },
               ]}
             />
+            <RecoveryOrderCountSelector
+              value={selectedOrderCount}
+              onChange={setSelectedOrderCount}
+              helper="현재 선택 개수로 AI 생성 화면에 이어집니다."
+            />
           </div>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <DetailChip color="#1B2747">남은 오더 {activeItems.length}개</DetailChip>
-            <DetailChip color="#5E6C84">완료 {completedCount}개</DetailChip>
-            <DetailChip color="#315CA8">기준 {selectedOrderCount}개</DetailChip>
-          </div>
-        </DetailCard>
+        </RecoveryStageHeroCard>
       ) : null}
 
       {planner.billingLoading ? (
@@ -316,24 +329,8 @@ export function InsightsRecoveryOrdersDetail() {
           <p className="mt-3 break-keep text-[14px] leading-6 text-ios-sub">
             먼저 오늘 필요한 오더 개수를 1~5개 사이에서 고른 뒤, AI 맞춤회복 상세에서 오늘 시작 회복을 만들어 주세요.
           </p>
-          <div className="mt-4">
-            <div className="text-[12px] font-semibold text-ios-sub">생성할 오더 개수</div>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {[1, 2, 3, 4, 5].map((count) => (
-                <button
-                  key={count}
-                  type="button"
-                  onClick={() => setSelectedOrderCount(count)}
-                  className={
-                    count === selectedOrderCount
-                      ? "inline-flex h-9 items-center justify-center rounded-full border border-[#A9C6FF] bg-[#EDF4FF] px-4 text-[13px] font-semibold text-[#0F4FCB]"
-                      : "inline-flex h-9 items-center justify-center rounded-full border border-ios-sep bg-white px-4 text-[13px] font-semibold text-ios-text"
-                  }
-                >
-                  {count}개
-                </button>
-              ))}
-            </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <DetailChip color="#315CA8">현재 선택 {selectedOrderCount}개</DetailChip>
           </div>
           <Link
             href={orderGenerationHref}
@@ -348,17 +345,6 @@ export function InsightsRecoveryOrdersDetail() {
         <>
           {activePhase === "start" ? (
             <>
-              <DetailCard
-                className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
-                style={{
-                  background: "linear-gradient(180deg, rgba(250,251,255,0.98) 0%, rgba(255,255,255,0.96) 100%)",
-                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.94), 0 16px 38px rgba(15,36,74,0.04)",
-                }}
-              >
-                <div className="text-[10.5px] font-semibold tracking-[0.18em] text-[#1B2747]">{recoveryPhaseEyebrow("start")}</div>
-                <div className="mt-1 text-[18px] font-bold tracking-[-0.03em] text-ios-text">{startOrdersModule?.title ?? "아침 오더"}</div>
-                <p className="mt-2 text-[13px] leading-6 text-ios-sub">{recoveryPhaseDescription("start", "ko")}</p>
-              </DetailCard>
               {activeStartItems.length ? (
                 <div className="space-y-3">
                   {activeStartItems.map((item) => (
@@ -385,18 +371,6 @@ export function InsightsRecoveryOrdersDetail() {
             </>
           ) : (
             <>
-              <DetailCard
-                className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
-                style={{
-                  background: "linear-gradient(180deg, rgba(250,251,255,0.98) 0%, rgba(255,255,255,0.96) 100%)",
-                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.94), 0 16px 38px rgba(15,36,74,0.04)",
-                }}
-              >
-                <div className="text-[10.5px] font-semibold tracking-[0.18em] text-[#1B2747]">{recoveryPhaseEyebrow("after_work")}</div>
-                <div className="mt-1 text-[18px] font-bold tracking-[-0.03em] text-ios-text">{activeModule?.title ?? "퇴근 후 오더"}</div>
-                <p className="mt-2 text-[13px] leading-6 text-ios-sub">{recoveryPhaseDescription("after_work", "ko")}</p>
-              </DetailCard>
-
               {!afterWorkReadiness.ready ? (
                 <DetailCard
                   className="px-5 py-6 sm:px-6"
@@ -430,24 +404,8 @@ export function InsightsRecoveryOrdersDetail() {
                 >
                   <div className="text-[17px] font-bold tracking-[-0.02em] text-ios-text">퇴근 후 오더를 만들 수 있어요.</div>
                   <p className="mt-2 text-[13px] leading-6 text-ios-sub">퇴근 후 회복 업데이트를 만들면 이 탭에 오더가 이어집니다.</p>
-                  <div className="mt-4">
-                    <div className="text-[12px] font-semibold text-ios-sub">생성할 오더 개수</div>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {[1, 2, 3, 4, 5].map((count) => (
-                        <button
-                          key={`after-count-${count}`}
-                          type="button"
-                          onClick={() => setSelectedOrderCount(count)}
-                          className={
-                            count === selectedOrderCount
-                              ? "inline-flex h-9 items-center justify-center rounded-full border border-[#A9C6FF] bg-[#EDF4FF] px-4 text-[13px] font-semibold text-[#0F4FCB]"
-                              : "inline-flex h-9 items-center justify-center rounded-full border border-ios-sep bg-white px-4 text-[13px] font-semibold text-ios-text"
-                          }
-                        >
-                          {count}개
-                        </button>
-                      ))}
-                    </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <DetailChip color="#315CA8">현재 선택 {selectedOrderCount}개</DetailChip>
                   </div>
                   {afterPlanner.error ? (
                     <p className="mt-3 text-[13px] leading-6 text-[#8F2943]">
