@@ -8,6 +8,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { DetailCard, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { RecoveryPlannerUpgradeCard } from "@/components/insights/RecoveryPlannerUpgradeCard";
+import { RecoveryPhaseTabs } from "@/components/insights/RecoveryPlannerFlowCards";
 import { useAIRecoveryPlanner } from "@/components/insights/useAIRecoveryPlanner";
 import { INSIGHTS_MIN_DAYS, isInsightsLocked, useInsightsData } from "@/components/insights/useInsightsData";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
@@ -312,6 +313,15 @@ function RecoveryMetaPill({
   );
 }
 
+function clampStyle(lines: number) {
+  return {
+    display: "-webkit-box",
+    WebkitLineClamp: lines,
+    WebkitBoxOrient: "vertical" as const,
+    overflow: "hidden",
+  };
+}
+
 function RecoveryCategoryIcon({
   category,
 }: {
@@ -396,11 +406,13 @@ function RecoverySectionRow({
   }
 
   const recommendations = recommendationPool.slice(0, 3);
-  const statusLabel = lang === "en" ? "Current status" : "현재 상태";
-  const recLabel = lang === "en" ? "Action" : "추천";
   const severity = section.severity ?? "info";
-  const visibleRecommendations = expanded ? recommendations : recommendations.slice(0, 1);
-  const toggleLabel = expanded ? (lang === "en" ? "Show less" : "접기") : (lang === "en" ? "More tips" : "추천 더 보기");
+  const primaryText = recommendations[0] ?? descriptionText;
+  const supportingText = descriptionText && descriptionText !== primaryText ? descriptionText : recommendations[1] ?? "";
+  const extraRecommendations = recommendations.filter((tip) => tip !== primaryText).slice(descriptionText && descriptionText !== primaryText ? 0 : 1);
+  const visibleRecommendations = expanded ? extraRecommendations : [];
+  const hasExtraContent = Boolean(supportingText || extraRecommendations.length);
+  const toggleLabel = expanded ? (lang === "en" ? "Show less" : "접기") : (lang === "en" ? "More" : "더 보기");
 
   return (
     <article className="px-5 py-5 sm:px-6 sm:py-6">
@@ -420,7 +432,7 @@ function RecoverySectionRow({
             {section.title || t(meta.titleKey)}
           </h3>
           {severity !== "info" ? <RecoveryMetaPill color={theme.accent}>{severityLabel(severity, t)}</RecoveryMetaPill> : null}
-          {recommendations.length > 1 ? (
+          {hasExtraContent ? (
             <button
               type="button"
               onClick={onToggleExpanded}
@@ -432,23 +444,24 @@ function RecoverySectionRow({
           ) : null}
         </div>
 
-        {descriptionText ? (
-          <div className="mt-3">
-            <div className="text-[11px] font-semibold tracking-[0.12em]" style={{ color: theme.accent }}>
-              {statusLabel}
-            </div>
-            <p className="mt-2 break-keep text-[15px] leading-7 text-[#42536A]">{descriptionText}</p>
-          </div>
+        {primaryText ? (
+          <p className="mt-3 break-keep text-[15px] font-semibold leading-7 tracking-[-0.02em] text-ios-text">{primaryText}</p>
+        ) : null}
+
+        {supportingText ? (
+          <p className="mt-2 break-keep text-[13px] leading-6 text-[#5E6C84]" style={expanded ? undefined : clampStyle(2)}>
+            {supportingText}
+          </p>
         ) : null}
 
         {visibleRecommendations.length ? (
-          <ol className="mt-5 space-y-3">
+          <ol className="mt-4 space-y-2 border-t border-[rgba(16,33,70,0.08)] pt-4">
             {visibleRecommendations.map((tip, idx) => (
-              <li key={`${meta.key}-${idx}`} className="border-t border-[rgba(16,33,70,0.08)] pt-3 first:border-t-0 first:pt-0">
-                <div className="text-[12.5px] font-semibold" style={{ color: theme.accent }}>
-                  {recLabel} {idx + 1}
-                </div>
-                <p className="mt-1.5 break-keep text-[15px] leading-7 text-ios-text">{tip}</p>
+              <li key={`${meta.key}-${idx}`} className="grid grid-cols-[14px_minmax(0,1fr)] gap-2 text-[13px] leading-6 text-[#4E5D76]">
+                <span className="pt-1 text-[10px] font-bold" style={{ color: theme.accent }}>
+                  •
+                </span>
+                <p className="break-keep">{tip}</p>
               </li>
             ))}
           </ol>
@@ -650,65 +663,54 @@ function RecoveryPhaseResultCard({
     <>
       <DetailCard
         className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
-        style={{ background: "linear-gradient(180deg, rgba(249,250,254,0.98) 0%, #FFFFFF 78%)" }}
+        style={{
+          background: "linear-gradient(180deg, rgba(250,251,255,0.98) 0%, rgba(255,255,255,0.96) 100%)",
+          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.94), 0 16px 38px rgba(15,36,74,0.04)",
+        }}
       >
         <div className="flex flex-col gap-4">
-          <div className="max-w-[700px]">
-            <div className="text-[11px] font-semibold tracking-[0.18em] text-[color:var(--rnest-accent)]">
-              {recoveryPhaseEyebrow(phase, lang)}
-            </div>
-            <p className="mt-2 break-keep text-[19px] font-bold leading-[1.6] tracking-[-0.03em] text-ios-text sm:text-[21px]">
-              {normalizeNarrativeText(recoveryResult?.headline || t("요약이 비어 있어요."), lang)}
-            </p>
-            <p className="mt-2 max-w-[620px] break-keep text-[13px] leading-6 text-ios-sub">
-              {recoveryPhaseDescription(phase, lang)}
-            </p>
-          </div>
-
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="rounded-[20px] bg-ios-bg px-4 py-3">
-              <div className="text-[11px] font-semibold tracking-[0.08em] text-ios-muted">{t("분석 단계")}</div>
-              <div className="mt-1 text-[16px] font-bold tracking-[-0.02em] text-ios-text">{recoveryPhaseTitle(phase, lang)}</div>
-            </div>
-            <div className="rounded-[20px] bg-ios-bg px-4 py-3">
-              <div className="text-[11px] font-semibold tracking-[0.08em] text-ios-muted">{t("카테고리")}</div>
-              <div className="mt-1 text-[16px] font-bold tracking-[-0.02em] text-ios-text">{orderedSections.length}개</div>
-            </div>
-            <div className="rounded-[20px] bg-ios-bg px-4 py-3">
-              <div className="text-[11px] font-semibold tracking-[0.08em] text-ios-muted">{t("회복 포커스")}</div>
-              <div className="mt-1 text-[14px] font-semibold leading-6 text-ios-text">
-                {plannerContext?.focusFactor?.label ?? t("오늘 회복")}
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 max-w-[700px]">
+              <div className="text-[10.5px] font-semibold tracking-[0.18em] text-[color:var(--rnest-accent)]">
+                {recoveryPhaseEyebrow(phase, lang)}
               </div>
+              <p className="mt-2 break-keep text-[18px] font-bold leading-[1.65] tracking-[-0.03em] text-ios-text sm:text-[20px]">
+                {normalizeNarrativeText(recoveryResult?.headline || t("요약이 비어 있어요."), lang)}
+              </p>
+              <p className="mt-2 max-w-[620px] break-keep text-[13px] leading-6 text-ios-sub">{recoveryPhaseDescription(phase, lang)}</p>
             </div>
-            <div className="rounded-[20px] bg-ios-bg px-4 py-3">
-              <div className="text-[11px] font-semibold tracking-[0.08em] text-ios-muted">{t("기준 날짜")}</div>
-              <div className="mt-1 text-[16px] font-bold tracking-[-0.02em] text-ios-text">{formatKoreanDate(payload.dateISO)}</div>
-            </div>
+            <Link
+              href={ordersHref}
+              className="inline-flex h-10 shrink-0 items-center justify-center rounded-full border border-[#D5E2FA] bg-white/92 px-4 text-[12px] font-semibold text-[#17386D] shadow-[0_10px_24px_rgba(18,35,73,0.05)]"
+            >
+              {phase === "after_work" ? t("오더 보기") : t("오더 보기")}
+            </Link>
           </div>
 
-          {continuityNode ? continuityNode : null}
+          <div className="flex flex-wrap gap-2">
+            <RecoveryMetaPill color="#315CA8">{recoveryPhaseTitle(phase, lang)}</RecoveryMetaPill>
+            <RecoveryMetaPill color="#1B2747">{plannerContext?.focusFactor?.label ?? t("오늘 회복")}</RecoveryMetaPill>
+            <RecoveryMetaPill color="#5E6C84">{formatKoreanDate(payload.dateISO)}</RecoveryMetaPill>
+            {orderedSections.length ? <RecoveryMetaPill color="#5E6C84">{t("해설 {count}개", { count: orderedSections.length })}</RecoveryMetaPill> : null}
+          </div>
 
           {plannerContext ? (
-            <div className="grid gap-2 sm:grid-cols-3">
-              <div className="rounded-[20px] bg-ios-bg px-4 py-3">
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="rounded-[18px] bg-[#F7F9FD] px-4 py-3">
                 <div className="text-[11px] font-semibold tracking-[0.08em] text-ios-muted">{t("지금 할 1개")}</div>
                 <div className="mt-1 text-[14px] font-semibold leading-6 text-ios-text">{plannerContext.primaryAction ?? t("회복 루틴을 먼저 고정해요.")}</div>
               </div>
-              <div className="rounded-[20px] bg-ios-bg px-4 py-3">
+              <div className="rounded-[18px] bg-[#F7F9FD] px-4 py-3">
                 <div className="text-[11px] font-semibold tracking-[0.08em] text-ios-muted">{t("피해야 할 것")}</div>
                 <div className="mt-1 text-[14px] font-semibold leading-6 text-ios-text">{plannerContext.avoidAction ?? t("늦은 자극을 줄여요.")}</div>
-              </div>
-              <div className="rounded-[20px] bg-ios-bg px-4 py-3">
-                <div className="text-[11px] font-semibold tracking-[0.08em] text-ios-muted">{t("연결된 오더")}</div>
-                <Link href={ordersHref} className="mt-1 inline-flex text-[14px] font-semibold leading-6 text-[#0F4FCB]">
-                  {phase === "after_work" ? t("퇴근 후 오더 보기") : t("오늘 시작 오더 보기")}
-                </Link>
               </div>
             </div>
           ) : null}
 
+          {continuityNode ? continuityNode : null}
+
           {recoveryResult?.compoundAlert ? (
-            <div className="rounded-[24px] bg-[#FFF4F6] px-4 py-4 shadow-[inset_0_0_0_1px_rgba(232,116,133,0.12)] sm:px-5">
+            <div className="rounded-[20px] bg-[#FFF6F7] px-4 py-4 shadow-[inset_0_0_0_1px_rgba(232,116,133,0.12)] sm:px-5">
               <div className="flex flex-wrap items-center gap-2">
                 <RecoveryMetaPill color="#B2415A">{t("긴급 알림")}</RecoveryMetaPill>
                 {recoveryResult.compoundAlert.factors.map((factor) => (
@@ -717,9 +719,9 @@ function RecoveryPhaseResultCard({
                   </RecoveryMetaPill>
                 ))}
               </div>
-              <div className="mt-3 space-y-2">
+              <div className="mt-3 space-y-1.5">
                 {(alertLines.length ? alertLines : [normalizeNarrativeText(recoveryResult.compoundAlert.message, lang)]).map((line, idx) => (
-                  <p key={`${phaseKeyPrefix}alert-${idx}`} className="break-keep text-[14px] leading-7 text-ios-text">
+                  <p key={`${phaseKeyPrefix}alert-${idx}`} className="break-keep text-[13px] leading-6 text-ios-text">
                     {line}
                   </p>
                 ))}
@@ -730,8 +732,8 @@ function RecoveryPhaseResultCard({
       </DetailCard>
 
       <div className="px-1">
-        <div className="text-[11px] font-semibold tracking-[0.18em] text-[color:var(--rnest-accent)]">{recoveryPhaseEyebrow(phase, lang)}</div>
-        <div className="mt-1 text-[20px] font-bold tracking-[-0.03em] text-ios-text">
+        <div className="text-[10.5px] font-semibold tracking-[0.18em] text-[color:var(--rnest-accent)]">{recoveryPhaseEyebrow(phase, lang)}</div>
+        <div className="mt-1 text-[18px] font-bold tracking-[-0.03em] text-ios-text">
           {phase === "after_work" ? t("퇴근 후 회복 해설") : t("오늘 시작 회복 해설")}
         </div>
       </div>
@@ -769,13 +771,19 @@ function RecoveryPhaseResultCard({
       )}
 
       {showWeekly ? (
-        <DetailCard className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6">
+        <DetailCard
+          className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
+          style={{
+            background: "linear-gradient(180deg, rgba(250,251,255,0.98) 0%, rgba(255,255,255,0.96) 100%)",
+            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.94), 0 16px 38px rgba(15,36,74,0.04)",
+          }}
+        >
           <div className="flex flex-col gap-3">
             <div className="max-w-[620px]">
               <div className="text-[12px] font-semibold tracking-[0.16em] text-ios-muted">
                 {lang === "en" ? "WEEKLY NOTE" : "주간 회복 노트"}
               </div>
-              <div className="mt-1 text-[20px] font-bold tracking-[-0.03em] text-ios-text">{t("이번 주 흐름 해설")}</div>
+              <div className="mt-1 text-[18px] font-bold tracking-[-0.03em] text-ios-text">{t("이번 주 흐름 해설")}</div>
             </div>
             {weekly ? (
               <div className="flex flex-wrap gap-2">
@@ -851,6 +859,7 @@ export function InsightsAIRecoveryDetail() {
   });
   const requestedOrderCount = normalizeRequestedOrderCountParam(searchParams.get("orderCount"));
   const preferredPhase = normalizeRecoveryPhase(searchParams.get("phase"));
+  const [activePhase, setActivePhase] = useState<RecoveryPhase>(preferredPhase);
   const backHref = sanitizeInternalPath(searchParams.get("returnTo"), "/insights/recovery");
   const ordersHref = withReturnTo("/insights/recovery/orders", "/insights/recovery/ai");
   const today = useMemo(() => todayISO(), []);
@@ -910,17 +919,23 @@ export function InsightsAIRecoveryDetail() {
     router.push(missingGuide.route);
   }, [missingGuide, router]);
 
+  useEffect(() => {
+    setActivePhase(preferredPhase);
+  }, [preferredPhase]);
+
   const startAnalysis = useCallback(() => {
     if (needsHealthInputGuide) {
       setOpenInputGuide(true);
       return;
     }
+    setActivePhase("start");
     setActiveGeneratingPhase("start");
     startPlannerAI.startGenerate(requestedOrderCount ?? undefined);
   }, [needsHealthInputGuide, requestedOrderCount, startPlannerAI]);
 
   const startAfterWorkAnalysis = useCallback(() => {
     if (!afterWorkReadiness.ready) return;
+    setActivePhase("after_work");
     setActiveGeneratingPhase("after_work");
     afterPlannerAI.startGenerate(requestedOrderCount ?? undefined);
   }, [afterPlannerAI, afterWorkReadiness.ready, requestedOrderCount]);
@@ -1050,22 +1065,37 @@ export function InsightsAIRecoveryDetail() {
       ) : null}
 
       {!insightsLocked && !billingLoading && hasPlannerAIAccess ? (
-        <DetailCard className="p-4 sm:p-5">
-          <div className="text-[13px] font-semibold text-ios-sub">{t("RECOVERY THREAD")}</div>
-          <div className="mt-1 text-[20px] font-bold tracking-[-0.02em] text-ios-text">{t("아침 시작 회복에서 퇴근 후 회복까지 한 흐름으로 이어집니다.")}</div>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            <div className="rounded-2xl border border-[#DCE6FF] bg-[#F6F9FF] px-3 py-3">
-              <div className="text-[12px] font-semibold text-[#315CA8]">{t("1단계 · 오늘 시작 회복")}</div>
-              <p className="mt-2 text-[13px] leading-6 text-[#315CA8]">
-                {t("전날 기록과 오늘 수면만 기준으로 오늘을 어떻게 시작할지 먼저 정합니다.")}
-              </p>
-            </div>
-            <div className="rounded-2xl border border-ios-sep bg-ios-bg px-3 py-3">
-              <div className="text-[12px] font-semibold text-ios-text">{t("2단계 · 퇴근 후 회복")}</div>
-              <p className="mt-2 text-[13px] leading-6 text-ios-sub">
-                {t("오늘 실제 기록과 아침 오더 진행을 반영해 오늘 밤 회복과 내일 보호 방향을 업데이트합니다.")}
-              </p>
-            </div>
+        <DetailCard
+          className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
+          style={{
+            background: "linear-gradient(180deg, rgba(250,251,255,0.98) 0%, rgba(255,255,255,0.96) 100%)",
+            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.94), 0 16px 40px rgba(15,36,74,0.04)",
+          }}
+        >
+          <div className="text-[10.5px] font-semibold tracking-[0.18em] text-[color:var(--rnest-accent)]">{t("RECOVERY FLOW")}</div>
+          <div className="mt-1 text-[18px] font-bold tracking-[-0.03em] text-ios-text">{t("AI 맞춤회복")}</div>
+          <p className="mt-2 text-[13px] leading-6 text-ios-sub">
+            {activePhase === "after_work"
+              ? t("아침 회복을 이어 받아 오늘 밤 회복만 다시 정리합니다.")
+              : t("전날 기록과 오늘 수면만으로 아침 회복 방향을 먼저 정합니다.")}
+          </p>
+          <div className="mt-4">
+            <RecoveryPhaseTabs
+              value={activePhase}
+              onChange={setActivePhase}
+              items={[
+                {
+                  value: "start",
+                  label: t("아침 회복"),
+                  hint: startPlannerAI.data ? t("준비됨") : t("시작 전"),
+                },
+                {
+                  value: "after_work",
+                  label: t("퇴근 후 회복"),
+                  hint: afterPlannerAI.data ? t("업데이트됨") : afterWorkReadiness.ready ? t("생성 가능") : t("기록 대기"),
+                },
+              ]}
+            />
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
             <RecoveryMetaPill color="#315CA8">{t("기본 오더 {count}개", { count: requestedOrderCount })}</RecoveryMetaPill>
@@ -1076,98 +1106,112 @@ export function InsightsAIRecoveryDetail() {
 
       {!insightsLocked && hasPlannerAIAccess ? (
         <>
-          {!startPlannerAI.data ? (
-            <DetailCard className="p-4 sm:p-5">
-              <div className="text-[11px] font-semibold tracking-[0.16em] text-[color:var(--rnest-accent)]">{recoveryPhaseEyebrow("start")}</div>
-              <div className="mt-1 text-[20px] font-bold tracking-[-0.02em] text-ios-text">{t("오늘 시작 회복 준비")}</div>
-              <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">
-                {t("전날 건강 기록과 오늘 수면 기록만 확인되면, 오늘을 어떤 방향으로 시작해야 할지 먼저 정리합니다.")}
-              </p>
-              <div className="mt-4 rounded-2xl border border-ios-sep bg-ios-bg px-3 py-3">
-                <div className="flex items-center justify-between text-[13px] text-ios-text">
-                  <span>{t("오늘 수면 시간")}</span>
-                  <span className={hasTodaySleep ? "text-[#0B7A3E]" : "text-[#B45309]"}>
-                    {hasTodaySleep ? t("입력 완료") : t("입력 필요")}
-                  </span>
-                </div>
-                <div className="mt-2 flex items-center justify-between text-[13px] text-ios-text">
-                  <span>{t("전날 건강 기록")}</span>
-                  <span className={hasYesterdayRecord ? "text-[#0B7A3E]" : "text-[#B45309]"}>
-                    {hasYesterdayRecord ? t("입력 완료") : t("입력 필요")}
-                  </span>
-                </div>
-              </div>
-              {startPlannerAI.error ? (
-                <div className="mt-4 rounded-2xl border border-[#F4D0D8] bg-[#FFF6F8] px-3 py-3 text-[13px] leading-6 text-[#8F2943]">
-                  {startErrorLines.map((line, idx) => (
-                    <p key={`start-error-${idx}`}>{line}</p>
-                  ))}
-                </div>
-              ) : null}
-              <button
-                type="button"
-                onClick={startAnalysis}
-                className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] text-[14px] font-semibold text-[color:var(--rnest-accent)]"
+          {activePhase === "start" ? (
+            !startPlannerAI.data ? (
+              <DetailCard
+                className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
+                style={{
+                  background: "linear-gradient(180deg, rgba(250,251,255,0.98) 0%, rgba(255,255,255,0.96) 100%)",
+                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.94), 0 16px 40px rgba(15,36,74,0.04)",
+                }}
               >
-                {needsHealthInputGuide
-                  ? t("필수 기록 입력하러 가기")
-                  : t("오늘 시작 회복과 오더 {count}개 생성하기", { count: requestedOrderCount })}
-              </button>
-            </DetailCard>
-          ) : (
-            <RecoveryPhaseResultCard
-              phase="start"
-              payload={startPlannerAI.data}
-              t={t}
-              expandedSections={expandedSections}
-              onToggleExpanded={(category) => toggleSectionExpanded("start", category)}
-              ordersHref={ordersHref}
-            />
-          )}
-
-          <DetailCard className="p-4 sm:p-5">
-            <div className="text-[11px] font-semibold tracking-[0.16em] text-[color:var(--rnest-accent)]">{recoveryPhaseEyebrow("after_work")}</div>
-            <div className="mt-1 text-[20px] font-bold tracking-[-0.02em] text-ios-text">{t("퇴근 후 회복 업데이트")}</div>
-            <p className="mt-2 text-[14px] leading-relaxed text-ios-sub">{t("아침 회복을 그대로 이어 받아, 오늘 실제 기록으로 오늘 밤 회복과 내일 보호 방향을 다시 맞춥니다.")}</p>
-            {preferredPhase === "after_work" ? (
-              <div className="mt-3 inline-flex rounded-full border border-[#DCE6FF] bg-[#F6F9FF] px-3 py-1.5 text-[12px] font-semibold text-[#315CA8]">
-                {t("지금은 퇴근 후 회복 업데이트 흐름을 보고 있어요.")}
-              </div>
-            ) : null}
-          </DetailCard>
-
-          {!startPlannerAI.data ? (
-            <DetailCard className="p-4 sm:p-5">
-              <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{t("오늘 시작 회복이 먼저 필요해요.")}</div>
-              <p className="mt-2 text-[14px] leading-6 text-ios-sub">{t("퇴근 후 회복은 아침 회복 흐름을 이어 받는 단계라서, 오늘 시작 회복을 먼저 만든 뒤 열립니다.")}</p>
+                <div className="text-[10.5px] font-semibold tracking-[0.18em] text-[color:var(--rnest-accent)]">{recoveryPhaseEyebrow("start")}</div>
+                <div className="mt-1 text-[18px] font-bold tracking-[-0.03em] text-ios-text">{t("오늘 시작 회복 준비")}</div>
+                <p className="mt-2 text-[13px] leading-6 text-ios-sub">
+                  {t("전날 기록과 오늘 수면만 확인되면 아침 회복 방향을 바로 정리합니다.")}
+                </p>
+                <div className="mt-4 grid gap-2">
+                  <div className="rounded-[18px] bg-[#F7F9FD] px-3.5 py-3 text-[13px] text-ios-text">
+                    <div className="flex items-center justify-between">
+                      <span>{t("오늘 수면")}</span>
+                      <span className={hasTodaySleep ? "text-[#0B7A3E]" : "text-[#B45309]"}>{hasTodaySleep ? t("완료") : t("필요")}</span>
+                    </div>
+                  </div>
+                  <div className="rounded-[18px] bg-[#F7F9FD] px-3.5 py-3 text-[13px] text-ios-text">
+                    <div className="flex items-center justify-between">
+                      <span>{t("전날 기록")}</span>
+                      <span className={hasYesterdayRecord ? "text-[#0B7A3E]" : "text-[#B45309]"}>{hasYesterdayRecord ? t("완료") : t("필요")}</span>
+                    </div>
+                  </div>
+                </div>
+                {startPlannerAI.error ? (
+                  <div className="mt-4 rounded-[18px] bg-[#FFF7F8] px-3.5 py-3 text-[13px] leading-6 text-[#8F2943]">
+                    {startErrorLines.map((line, idx) => (
+                      <p key={`start-error-${idx}`}>{line}</p>
+                    ))}
+                  </div>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={startAnalysis}
+                  className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] text-[14px] font-semibold text-[color:var(--rnest-accent)]"
+                >
+                  {needsHealthInputGuide
+                    ? t("필수 기록 입력하러 가기")
+                    : t("오늘 시작 회복과 오더 {count}개 생성하기", { count: requestedOrderCount })}
+                </button>
+              </DetailCard>
+            ) : (
+              <RecoveryPhaseResultCard
+                phase="start"
+                payload={startPlannerAI.data}
+                t={t}
+                expandedSections={expandedSections}
+                onToggleExpanded={(category) => toggleSectionExpanded("start", category)}
+                ordersHref={`${ordersHref}${ordersHref.includes("?") ? "&" : "?"}phase=start`}
+              />
+            )
+          ) : !startPlannerAI.data ? (
+            <DetailCard
+              className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
+              style={{
+                background: "linear-gradient(180deg, rgba(250,251,255,0.98) 0%, rgba(255,255,255,0.96) 100%)",
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.94), 0 16px 40px rgba(15,36,74,0.04)",
+              }}
+            >
+              <div className="text-[10.5px] font-semibold tracking-[0.18em] text-[color:var(--rnest-accent)]">{recoveryPhaseEyebrow("after_work")}</div>
+              <div className="mt-1 text-[18px] font-bold tracking-[-0.03em] text-ios-text">{t("퇴근 후 회복은 아침 회복 뒤에 열려요")}</div>
+              <p className="mt-2 text-[13px] leading-6 text-ios-sub">{t("퇴근 후 회복은 아침 회복 흐름을 이어 받는 단계라서, 오늘 시작 회복을 먼저 만들어야 합니다.")}</p>
             </DetailCard>
           ) : !afterWorkReadiness.ready ? (
-            <DetailCard className="p-4 sm:p-5">
-              <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{t("오늘 기록이 조금 더 쌓이면 퇴근 후 회복이 열려요.")}</div>
-              <p className="mt-2 text-[14px] leading-6 text-ios-sub">
-                {t("스트레스·카페인·활동·기분·근무 메모 중 2개 이상이 입력되면 아침 회복을 이어 받아 저녁 회복으로 업데이트합니다.")}
+            <DetailCard
+              className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
+              style={{
+                background: "linear-gradient(180deg, rgba(250,251,255,0.98) 0%, rgba(255,255,255,0.96) 100%)",
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.94), 0 16px 40px rgba(15,36,74,0.04)",
+              }}
+            >
+              <div className="text-[10.5px] font-semibold tracking-[0.18em] text-[color:var(--rnest-accent)]">{recoveryPhaseEyebrow("after_work")}</div>
+              <div className="mt-1 text-[18px] font-bold tracking-[-0.03em] text-ios-text">{t("오늘 기록이 조금 더 필요해요")}</div>
+              <p className="mt-2 text-[13px] leading-6 text-ios-sub">
+                {t("스트레스·카페인·활동·기분·근무 메모 중 2개 이상이 입력되면 퇴근 후 회복을 업데이트할 수 있어요.")}
               </p>
-              <div className="mt-4 grid gap-2 sm:grid-cols-2">
-                <div className="rounded-2xl border border-[#DCE6FF] bg-[#F6F9FF] px-3 py-3">
-                  <div className="text-[12px] font-semibold text-[#315CA8]">{t("현재 반영된 오늘 기록")}</div>
-                  <p className="mt-2 text-[13px] leading-6 text-[#315CA8]">
-                    {afterWorkReadiness.recordedLabels.length ? afterWorkReadiness.recordedLabels.join(" · ") : t("아직 없음")}
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-ios-sep bg-ios-bg px-3 py-3">
-                  <div className="text-[12px] font-semibold text-ios-text">{t("추가하면 좋은 기록")}</div>
-                  <p className="mt-2 text-[13px] leading-6 text-ios-sub">{afterWorkMissingLabels.slice(0, 3).join(" · ") || t("기록 준비 완료")}</p>
-                </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {(afterWorkReadiness.recordedLabels.length ? afterWorkReadiness.recordedLabels : [t("아직 없음")]).map((label) => (
+                  <RecoveryMetaPill key={`recorded-${label}`} color="#315CA8">
+                    {label}
+                  </RecoveryMetaPill>
+                ))}
+                {afterWorkMissingLabels.slice(0, 3).map((label) => (
+                  <RecoveryMetaPill key={`missing-${label}`} color="#5E6C84">
+                    {label}
+                  </RecoveryMetaPill>
+                ))}
               </div>
             </DetailCard>
           ) : !afterPlannerAI.data ? (
-            <DetailCard className="p-4 sm:p-5">
-              <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{t("퇴근 후 회복 업데이트 준비 완료")}</div>
-              <p className="mt-2 text-[14px] leading-6 text-ios-sub">
-                {t("오늘 실제 기록과 아침 오더 진행을 반영해서, 오늘 밤 회복과 내일 보호 흐름을 다시 맞출 수 있어요.")}
-              </p>
+            <DetailCard
+              className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
+              style={{
+                background: "linear-gradient(180deg, rgba(250,251,255,0.98) 0%, rgba(255,255,255,0.96) 100%)",
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.94), 0 16px 40px rgba(15,36,74,0.04)",
+              }}
+            >
+              <div className="text-[10.5px] font-semibold tracking-[0.18em] text-[color:var(--rnest-accent)]">{recoveryPhaseEyebrow("after_work")}</div>
+              <div className="mt-1 text-[18px] font-bold tracking-[-0.03em] text-ios-text">{t("퇴근 후 회복 업데이트 준비 완료")}</div>
+              <p className="mt-2 text-[13px] leading-6 text-ios-sub">{t("오늘 실제 기록과 아침 오더 진행을 반영해 오늘 밤 회복만 다시 정리합니다.")}</p>
               {afterPlannerAI.error ? (
-                <div className="mt-4 rounded-2xl border border-[#F4D0D8] bg-[#FFF6F8] px-3 py-3 text-[13px] leading-6 text-[#8F2943]">
+                <div className="mt-4 rounded-[18px] bg-[#FFF7F8] px-3.5 py-3 text-[13px] leading-6 text-[#8F2943]">
                   {afterErrorLines.map((line, idx) => (
                     <p key={`after-error-${idx}`}>{line}</p>
                   ))}
@@ -1189,7 +1233,7 @@ export function InsightsAIRecoveryDetail() {
               t={t}
               expandedSections={expandedSections}
               onToggleExpanded={(category) => toggleSectionExpanded("after_work", category)}
-              ordersHref={ordersHref}
+              ordersHref={`${ordersHref}${ordersHref.includes("?") ? "&" : "?"}phase=after_work`}
               continuityNode={afterContinuityNode}
               showWeekly={false}
             />
