@@ -141,7 +141,6 @@ const EN_EXTRA: Record<string, string> = {
     "Your rhythm is estimated automatically using your last period start and average cycle.",
   "마지막 카페인 (시간)": "Last caffeine (time)",
   "많음": "High",
-  "맞춤 회복": "Personalized recovery",
   "맞춤 회복 오더": "Personalized recovery orders",
   "맞춤 회복 중심 인사이트": "Recovery-focused personalized insights",
   "통계 중심 인사이트": "Stats-focused insights",
@@ -409,7 +408,6 @@ const EN_EXTRA: Record<string, string> = {
   "오늘 수면 기록을 먼저 입력해 주세요.": "Please enter today's sleep record first.",
   "오늘 수면 입력 후 바로 개인 맞춤 회복 가이드를 시작해요.": "Your personalized recovery guide starts right after you enter today's sleep.",
   "오늘은 복합 위험 알림이 없어요.": "No compound risk alerts for today.",
-  "오늘은 추가 추천이 없어요.": "No additional recommendations today.",
   "오늘은 추가 추천이 없어요.": "No additional recommendations today.",
   "요약이 비어 있어요.": "No summary available.",
   "오늘 가이드": "Today's guide",
@@ -1024,12 +1022,12 @@ const EN_EXTRA: Record<string, string> = {
     "AI API key is invalid or expired. Check your .env.local environment variables.",
   "현재 계정에 해당 모델 접근 권한이 없습니다. 모델명을 변경해 다시 시도해 주세요.":
     "This account does not have access to the model. Change model name and try again.",
-  "현재 계정에 gpt-5.1 모델 접근 권한이 없습니다. API 계정 권한을 확인해 주세요.":
-    "This account does not have access to gpt-5.1. Please verify your API account permissions.",
+  "현재 계정에 gpt-5.2 모델 접근 권한이 없습니다. API 계정 권한을 확인해 주세요.":
+    "This account does not have access to gpt-5.2. Please verify your API account permissions.",
   "요청한 모델을 찾을 수 없습니다. 모델명을 확인하거나 기본 fallback 모델로 다시 시도해 주세요.":
     "Requested model not found. Check the model name or retry with fallback model.",
-  "gpt-5.1 모델을 찾을 수 없습니다. API 설정과 계정 권한을 확인해 주세요.":
-    "gpt-5.1 was not found. Please verify your API configuration and account permissions.",
+  "gpt-5.2 모델을 찾을 수 없습니다. API 설정과 계정 권한을 확인해 주세요.":
+    "gpt-5.2 was not found. Please verify your API configuration and account permissions.",
   "요청 한도가 초과되었습니다. 잠시 후 다시 AI 분석 실행을 눌러 시도해 주세요.":
     "Request limit exceeded. Please tap `Run AI Analysis` again shortly.",
   "이전 대화 상태 동기화에 실패했습니다. 다시 AI 분석 실행을 눌러 새로 시도해 주세요.":

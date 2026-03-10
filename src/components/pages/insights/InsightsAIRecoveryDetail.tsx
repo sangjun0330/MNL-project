@@ -40,6 +40,7 @@ import {
 } from "@/lib/recoveryOrderChecklist";
 import { useI18n } from "@/lib/useI18n";
 import type { RecoverySection } from "@/lib/aiRecovery";
+import { normalizeRecoveryCopy } from "@/lib/recoveryCopy";
 
 function severityLabel(severity: "info" | "caution" | "warning", t: (key: string) => string) {
   if (severity === "warning") return t("경고");
@@ -98,7 +99,7 @@ function extractCSection(text: string) {
 }
 
 function normalizeNarrativeText(text: string, lang: "ko" | "en") {
-  let out = text;
+  let out = normalizeRecoveryCopy(text);
   out = out.replace(/오늘\s*컨디션에\s*맞춘\s*보정\s*조언입니다\.?/g, "");
   out = out.replace(/오늘\s*컨디션\s*기준\s*핵심\s*조언입니다\.?/g, "");
   out = out.replace(/Tailored adjustment guidance for today'?s condition\.?/gi, "");
@@ -436,6 +437,7 @@ function RecoverySectionRow({
   const visibleRecommendations = expanded ? extraRecommendations : [];
   const hasExtraContent = Boolean(supportingText || extraRecommendations.length);
   const toggleLabel = expanded ? (lang === "en" ? "Show less" : "접기") : (lang === "en" ? "More" : "더 보기");
+  const titleText = normalizeRecoveryCopy(section.title || t(meta.titleKey));
 
   return (
     <article className="px-5 py-5 sm:px-6 sm:py-6">
@@ -452,7 +454,7 @@ function RecoverySectionRow({
             <RecoveryCategoryIcon category={meta.key} />
           </span>
           <h3 className="text-[18px] font-bold tracking-[-0.03em] text-ios-text sm:text-[19px]">
-            {section.title || t(meta.titleKey)}
+            {titleText}
           </h3>
           {severity !== "info" ? <RecoveryMetaPill color={theme.accent}>{severityLabel(severity, t)}</RecoveryMetaPill> : null}
           {hasExtraContent ? (
@@ -686,6 +688,10 @@ function RecoveryPhaseResultCard({
 
   const plannerContext = payload.plannerContext ?? null;
   const phaseKeyPrefix = `${phase}:`;
+  const headlineText = normalizeNarrativeText(recoveryResult?.headline || t("요약이 비어 있어요."), lang);
+  const focusLabel = normalizeRecoveryCopy(plannerContext?.focusFactor?.label ?? t("오늘 회복"));
+  const primaryActionText = normalizeNarrativeText(plannerContext?.primaryAction ?? t("회복 루틴을 먼저 고정해요."), lang);
+  const avoidActionText = normalizeNarrativeText(plannerContext?.avoidAction ?? t("늦은 자극을 줄여요."), lang);
 
   return (
     <>
@@ -693,7 +699,7 @@ function RecoveryPhaseResultCard({
         eyebrow={recoveryPhaseEyebrow(phase, lang)}
         title={phase === "after_work" ? t("퇴근 후 회복 해설") : t("오늘 시작 회복 해설")}
         status={recoveryPhaseTitle(phase, lang)}
-        headline={normalizeNarrativeText(recoveryResult?.headline || t("요약이 비어 있어요."), lang)}
+        headline={headlineText}
         summary={recoveryPhaseDescription(phase, lang)}
         action={
           <Link
@@ -705,16 +711,16 @@ function RecoveryPhaseResultCard({
         }
         chips={
           <>
-            <RecoveryMetaPill color="#1B2747">{plannerContext?.focusFactor?.label ?? t("오늘 회복")}</RecoveryMetaPill>
+            <RecoveryMetaPill color="#1B2747">{focusLabel}</RecoveryMetaPill>
             <RecoveryMetaPill color="#5E6C84">{formatKoreanDate(payload.dateISO)}</RecoveryMetaPill>
             {orderedSections.length ? <RecoveryMetaPill color="#5E6C84">{t("해설 {count}개", { count: orderedSections.length })}</RecoveryMetaPill> : null}
           </>
         }
         facts={
           <>
-            <RecoveryHeroFact label={t("지금 할 1개")} value={plannerContext?.primaryAction ?? t("회복 루틴을 먼저 고정해요.")} />
-            <RecoveryHeroFact label={t("피해야 할 것")} value={plannerContext?.avoidAction ?? t("늦은 자극을 줄여요.")} />
-            <RecoveryHeroFact label={t("핵심 포커스")} value={plannerContext?.focusFactor?.label ?? t("오늘 회복")} />
+            <RecoveryHeroFact label={t("지금 할 1개")} value={primaryActionText} />
+            <RecoveryHeroFact label={t("피해야 할 것")} value={avoidActionText} />
+            <RecoveryHeroFact label={t("핵심 포커스")} value={focusLabel} />
           </>
         }
       >
@@ -1017,7 +1023,7 @@ export function InsightsAIRecoveryDetail() {
         <div>
           <div className="text-[11px] font-semibold tracking-[0.08em] text-ios-muted">{t("아침 기준")}</div>
           <p className="mt-1 break-keep text-[14px] leading-6 text-ios-text">
-            {startPlannerAI.data.result.explanation.recovery.headline || t("아침 회복이 먼저 기준이 됩니다.")}
+            {normalizeRecoveryCopy(startPlannerAI.data.result.explanation.recovery.headline || t("아침 회복이 먼저 기준이 됩니다."))}
           </p>
         </div>
         <div>

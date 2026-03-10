@@ -97,7 +97,7 @@ type MedSafetyCacheRecord = {
 
 const MED_SAFETY_CACHE_KEY = "med_safety_cache_v1";
 const MED_SAFETY_CACHE_MAX_ENTRIES = 30;
-const MED_SAFETY_DEFAULT_MODEL = "gpt-5.1";
+const MED_SAFETY_DEFAULT_MODEL = "gpt-5.2";
 const MED_SAFETY_CLIENT_TIMEOUT_MS = 480_000;
 const RETRY_WITH_DATA_MESSAGE = "네트워크가 불안정합니다. 데이터(모바일 네트워크)를 켠 뒤 다시 AI 분석 실행을 눌러 시도해 주세요.";
 const medSafetyMemoryCache = new Map<string, MedSafetyCacheRecord>();
@@ -205,12 +205,12 @@ function parseErrorMessage(raw: string, t: TranslateFn) {
     return t("AI API 키가 유효하지 않거나 만료되었습니다. .env.local 환경변수를 확인해 주세요.");
   if (normalized.includes("openai_responses_403")) {
     if (/(insufficient_permissions|does not have access|model_not_found|permission|access to model)/i.test(String(raw))) {
-      return t("현재 계정에 gpt-5.1 모델 접근 권한이 없습니다. API 계정 권한을 확인해 주세요.");
+      return t("현재 계정에 gpt-5.2 모델 접근 권한이 없습니다. API 계정 권한을 확인해 주세요.");
     }
     return t(RETRY_WITH_DATA_MESSAGE);
   }
   if (normalized.includes("openai_responses_404") || normalized.includes("model_not_found"))
-    return t("gpt-5.1 모델을 찾을 수 없습니다. API 설정과 계정 권한을 확인해 주세요.");
+    return t("gpt-5.2 모델을 찾을 수 없습니다. API 설정과 계정 권한을 확인해 주세요.");
   if (normalized.includes("openai_responses_429")) return t("요청 한도가 초과되었습니다. 잠시 후 다시 AI 분석 실행을 눌러 시도해 주세요.");
   if (normalized.includes("openai_responses_400") && /(previous_response|conversation)/i.test(String(raw)))
     return t("이전 대화 상태 동기화에 실패했습니다. 다시 AI 분석 실행을 눌러 새로 시도해 주세요.");

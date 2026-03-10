@@ -35,6 +35,7 @@ import {
 import { useInsightsData, isInsightsLocked, INSIGHTS_MIN_DAYS, shiftKo } from "@/components/insights/useInsightsData";
 import { useI18n } from "@/lib/useI18n";
 import { withReturnTo } from "@/lib/navigation";
+import { normalizeRecoveryCopy } from "@/lib/recoveryCopy";
 
 function normalizeRequestedOrderCountParam(value: string | null) {
   if (value == null || String(value).trim() === "") return 3;
@@ -154,12 +155,12 @@ export function InsightsRecoveryOrdersDetail() {
   const activeItems = activePhase === "start" ? activeStartItems : activeAfterItems;
   const phaseHeadline =
     activePhase === "start"
-      ? startOrdersModule?.items[0]?.title ?? startOrdersModule?.headline ?? "아침 회복에 맞춘 오더를 생성해요."
-      : afterOrdersModule?.items[0]?.title ?? afterOrdersModule?.headline ?? "퇴근 후 회복에 맞춘 오더를 생성해요.";
+      ? normalizeRecoveryCopy(startOrdersModule?.items[0]?.title ?? startOrdersModule?.headline ?? "아침 회복에 맞춘 오더를 생성해요.")
+      : normalizeRecoveryCopy(afterOrdersModule?.items[0]?.title ?? afterOrdersModule?.headline ?? "퇴근 후 회복에 맞춘 오더를 생성해요.");
   const phaseSummary =
     activePhase === "start"
-      ? startOrdersModule?.items[0]?.body ?? startOrdersModule?.summary ?? "아침에는 바로 실행할 수 있는 스타터 오더만 간단히 정리합니다."
-      : afterOrdersModule?.items[0]?.body ?? afterOrdersModule?.summary ?? "퇴근 후 회복에 맞춰 오더를 이어서 정리합니다.";
+      ? normalizeRecoveryCopy(startOrdersModule?.items[0]?.body ?? startOrdersModule?.summary ?? "아침에는 바로 실행할 수 있는 스타터 오더만 간단히 정리합니다.")
+      : normalizeRecoveryCopy(afterOrdersModule?.items[0]?.body ?? afterOrdersModule?.summary ?? "퇴근 후 회복에 맞춰 오더를 이어서 정리합니다.");
 
   const completeItem = (phase: "start" | "after_work", id: string) => {
     const progressId = buildRecoveryOrderProgressId(phase, id);

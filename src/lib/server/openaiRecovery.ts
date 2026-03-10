@@ -234,8 +234,8 @@ function normalizeApiKey() {
 }
 
 function resolveModel() {
-  const model = String(process.env.OPENAI_MODEL ?? "gpt-5.1").trim();
-  return model || "gpt-5.1";
+  const model = String(process.env.OPENAI_MODEL ?? "gpt-5.2").trim();
+  return model || "gpt-5.2";
 }
 
 function truncateError(raw: string, size = 220) {

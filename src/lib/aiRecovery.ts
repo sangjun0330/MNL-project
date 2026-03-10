@@ -1,7 +1,7 @@
 // src/lib/aiRecovery.ts
-// AI 맞춤 회복 처방 생성 엔진
+// AI 맞춤 회복 생성 엔진
 // - 유저의 DailyVital 데이터(수면, 근무, 카페인, 생리주기, 스트레스, 활동)를 분석
-// - 카테고리별 조건부 처방을 줄글로 생성
+// - 카테고리별 조건부 가이드를 줄글로 생성
 
 import type { DailyVital } from "@/lib/vitals";
 import type { MenstrualContext, MenstrualPhase } from "@/lib/menstrual";
@@ -92,8 +92,8 @@ export function generateAIRecovery(
   if (!today) {
     return {
       headline: lang === "en"
-        ? "Not enough data to generate recovery prescriptions. Please record your health data."
-        : "회복 처방을 생성할 데이터가 부족해요. 건강 기록을 입력해 주세요.",
+        ? "Not enough data to generate a recovery guide. Please record your health data."
+        : "회복 가이드를 생성할 데이터가 부족해요. 건강 기록을 입력해 주세요.",
       compoundAlert: null,
       sections: [],
       weeklySummary: null,

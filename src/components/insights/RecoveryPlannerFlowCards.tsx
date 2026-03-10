@@ -3,6 +3,7 @@
 import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 import { cn } from "@/lib/cn";
+import { normalizeRecoveryCopy } from "@/lib/recoveryCopy";
 import { DetailCard, DetailChip } from "@/components/pages/insights/InsightDetailShell";
 import type { AIPlannerChecklistItem, AIPlannerChecklistModule, AIPlannerExplanationModule } from "@/lib/aiRecoveryPlanner";
 
@@ -117,7 +118,7 @@ export function RecoveryStageHeroCard({
       }}
     >
       <div className="relative flex flex-col gap-5">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 flex-1">
             <SurfaceLabel color="var(--rnest-accent)">{eyebrow}</SurfaceLabel>
             <div className="mt-2 flex flex-wrap items-center gap-2.5">
@@ -128,14 +129,14 @@ export function RecoveryStageHeroCard({
                 </span>
               ) : null}
             </div>
-            <p className="mt-4 max-w-[700px] break-keep text-[20px] font-bold leading-[1.5] tracking-[-0.04em] text-ios-text sm:text-[24px]">
+            <p className="mt-4 max-w-none break-keep text-[20px] font-bold leading-[1.45] tracking-[-0.04em] text-ios-text sm:max-w-[700px] sm:text-[24px] sm:leading-[1.5]">
               {headline}
             </p>
             {summary ? (
-              <p className="mt-2 max-w-[640px] break-keep text-[13px] leading-6 text-ios-sub sm:text-[14px]">{summary}</p>
+              <p className="mt-2 max-w-none break-keep text-[13px] leading-6 text-ios-sub sm:max-w-[640px] sm:text-[14px]">{summary}</p>
             ) : null}
           </div>
-          {action ? <div className="shrink-0">{action}</div> : null}
+          {action ? <div className="w-full sm:w-auto sm:shrink-0">{action}</div> : null}
         </div>
 
         {chips ? <div className="flex flex-wrap gap-2">{chips}</div> : null}
@@ -198,6 +199,13 @@ export function RecoveryAIOverviewLinkCard({
   focusLabel: string | null;
   ready: boolean;
 }) {
+  const titleText = normalizeRecoveryCopy(module.title);
+  const headlineText = ready ? normalizeRecoveryCopy(module.headline) : "오늘 회복 우선순위를 아직 분석하지 않았어요.";
+  const summaryText = ready
+    ? normalizeRecoveryCopy(module.summary)
+    : "상세 페이지에서 필수 기록을 확인한 뒤 AI 맞춤회복을 시작하면, 오늘 회복의 기준을 먼저 정리합니다.";
+  const focusText = focusLabel ? normalizeRecoveryCopy(focusLabel) : null;
+
   return (
     <Link href={href} className="block">
       <DetailCard
@@ -210,21 +218,19 @@ export function RecoveryAIOverviewLinkCard({
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0 max-w-[680px]">
             <SurfaceLabel color="var(--rnest-accent)">AI CUSTOMIZED RECOVERY</SurfaceLabel>
-            <div className="mt-1 text-[18px] font-bold tracking-[-0.03em] text-ios-text">{module.title}</div>
+            <div className="mt-1 text-[18px] font-bold tracking-[-0.03em] text-ios-text">{titleText}</div>
             <p className="mt-3 break-keep text-[16px] font-bold leading-7 tracking-[-0.03em] text-ios-text" style={clampText(2)}>
-              {ready ? module.headline : "오늘 회복 우선순위를 아직 분석하지 않았어요."}
+              {headlineText}
             </p>
             <p className="mt-2 break-keep text-[13px] leading-6 text-ios-sub" style={clampText(2)}>
-              {ready
-                ? module.summary
-                : "상세 페이지에서 필수 기록을 확인한 뒤 AI 맞춤회복을 시작하면, 오늘 회복의 기준을 먼저 정리합니다."}
+              {summaryText}
             </p>
           </div>
           <LinkChevron />
         </div>
 
         <div className="mt-4 flex flex-wrap gap-2">
-          <DetailChip color="#1B2747">{focusLabel ? `회복 포커스 ${focusLabel}` : "오늘 회복"}</DetailChip>
+          <DetailChip color="#1B2747">{focusText ? `회복 포커스 ${focusText}` : "오늘 회복"}</DetailChip>
           <DetailChip color="#5E6C84">{ready ? "상세 보기" : "분석 시작"}</DetailChip>
         </div>
       </DetailCard>
@@ -245,6 +251,12 @@ export function RecoveryOrdersLinkCard({
   activeCount: number | null;
   completedCount: number | null;
 }) {
+  const titleText = normalizeRecoveryCopy(ready ? "오늘의 오더" : module.title);
+  const headlineText = ready ? normalizeRecoveryCopy(module.items?.[0]?.title ?? module.headline) : "AI 맞춤회복을 시작하면 오늘의 오더가 생성돼요.";
+  const summaryText = ready
+    ? normalizeRecoveryCopy(module.items?.[0]?.body ?? module.summary)
+    : "허브에서는 최소한만 보여주고, 상세 페이지에서 체크리스트 전체를 확인할 수 있어요.";
+
   return (
     <Link href={href} className="block">
       <DetailCard
@@ -257,14 +269,12 @@ export function RecoveryOrdersLinkCard({
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0 max-w-[680px]">
             <SurfaceLabel color="#1B2747">TODAY ORDERS</SurfaceLabel>
-            <div className="mt-1 text-[18px] font-bold tracking-[-0.03em] text-ios-text">{ready ? "오늘의 오더" : module.title}</div>
+            <div className="mt-1 text-[18px] font-bold tracking-[-0.03em] text-ios-text">{titleText}</div>
             <p className="mt-3 break-keep text-[16px] font-bold leading-7 tracking-[-0.03em] text-ios-text" style={clampText(2)}>
-              {ready ? module.items?.[0]?.title ?? module.headline : "AI 맞춤회복을 시작하면 오늘의 오더가 생성돼요."}
+              {headlineText}
             </p>
             <p className="mt-2 break-keep text-[13px] leading-6 text-ios-sub" style={clampText(2)}>
-              {ready
-                ? module.items?.[0]?.body ?? module.summary
-                : "허브에서는 최소한만 보여주고, 상세 페이지에서 체크리스트 전체를 확인할 수 있어요."}
+              {summaryText}
             </p>
           </div>
           <LinkChevron />
@@ -289,6 +299,9 @@ export function RecoveryChecklistItemCard({
   completing?: boolean;
   onComplete: (id: string) => void;
 }) {
+  const titleText = normalizeRecoveryCopy(item.title);
+  const bodyText = normalizeRecoveryCopy(item.body);
+
   return (
     <DetailCard
       className={cn(
@@ -301,14 +314,14 @@ export function RecoveryChecklistItemCard({
         boxShadow: "inset 0 1px 0 rgba(255,255,255,0.92), 0 16px 36px rgba(15,36,74,0.05)",
       }}
     >
-      <div className="grid grid-cols-[40px_minmax(0,1fr)] gap-x-4 gap-y-4">
+      <div className="flex items-start gap-4">
         <div className="relative mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center">
           <button
             type="button"
             onClick={() => onComplete(item.id)}
             disabled={completing}
             aria-pressed={completing}
-            aria-label={`${item.title} 완료`}
+            aria-label={`${titleText || item.title} 완료`}
             className={cn(
               "relative z-[1] flex h-8 w-8 items-center justify-center rounded-full border transition-all duration-300",
               completing
@@ -341,14 +354,12 @@ export function RecoveryChecklistItemCard({
               {item.when}
             </span>
           </div>
-          <div className="mt-3 break-keep text-[18px] font-bold leading-[1.55] tracking-[-0.03em] text-ios-text">{item.title}</div>
+          <div className="mt-3 break-keep text-[18px] font-bold leading-[1.55] tracking-[-0.03em] text-ios-text sm:text-[19px]">{titleText}</div>
         </div>
+      </div>
 
-        <div className="col-span-2">
-          <div className="mx-auto max-w-[620px] rounded-[20px] border border-[rgba(16,33,70,0.06)] bg-white/80 px-4 py-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.94)]">
-            <p className="break-keep text-[14px] leading-7 text-ios-sub">{item.body}</p>
-          </div>
-        </div>
+      <div className="mt-4 rounded-[22px] border border-[rgba(16,33,70,0.06)] bg-[linear-gradient(180deg,rgba(255,255,255,0.92)_0%,rgba(248,250,255,0.88)_100%)] px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.94)] sm:px-5">
+        <p className="break-keep text-[14px] leading-7 text-ios-sub">{bodyText}</p>
       </div>
     </DetailCard>
   );

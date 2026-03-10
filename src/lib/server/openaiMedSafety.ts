@@ -75,7 +75,7 @@ type ResponsesAttempt = {
 type TextDeltaHandler = (delta: string) => void | Promise<void>;
 
 type ResponseVerbosity = "low" | "medium" | "high";
-const MED_SAFETY_LOCKED_MODEL = "gpt-5.1";
+const MED_SAFETY_LOCKED_MODEL = "gpt-5.2";
 const MED_SAFETY_SECTION_MIN_ITEMS = 3;
 const MED_SAFETY_SECTION_MAX_ITEMS = 4;
 
