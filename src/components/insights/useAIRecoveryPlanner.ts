@@ -31,6 +31,16 @@ const inFlightGenerate = new Map<string, Promise<AIRecoveryPlannerPayload | null
 const sessionDailyCache = new Map<string, AIRecoveryPlannerPayload>();
 const DEFAULT_ORDER_COUNT = 3;
 
+function clearPlannerPhaseCache(userId: string, lang: "ko" | "en", dateISO: string, phase: RecoveryPhase) {
+  const prefix = `${userId}:${lang}:${dateISO}:${phase}:`;
+  for (const key of Array.from(sessionDailyCache.keys())) {
+    if (key.startsWith(prefix)) sessionDailyCache.delete(key);
+  }
+  for (const key of Array.from(inFlightGenerate.keys())) {
+    if (key.startsWith(prefix)) inFlightGenerate.delete(key);
+  }
+}
+
 function normalizeRequestedOrderCount(value: number | null | undefined) {
   if (value == null || String(value).trim() === "") return DEFAULT_ORDER_COUNT;
   const parsed = Math.round(Number(value));
@@ -132,20 +142,22 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
 
   const retry = useCallback(() => {
     const dateISO = todayISO();
-    sessionDailyCache.delete(requestKey(user?.userId ?? "guest", lang, dateISO, phase));
-    inFlightGenerate.delete(requestKey(user?.userId ?? "guest", lang, dateISO, phase));
+    clearPlannerPhaseCache(user?.userId ?? "guest", lang, dateISO, phase);
     setError(null);
     setRemoteData(null);
     setRetryCount((c) => c + 1);
   }, [lang, phase, user?.userId]);
 
   const startGenerate = useCallback((orderCount?: number) => {
+    const dateISO = todayISO();
+    clearPlannerPhaseCache(user?.userId ?? "guest", lang, dateISO, phase);
     setError(null);
+    setRemoteData(null);
     setManualGenerateState((current) => ({
       count: current.count + 1,
       orderCount: normalizeRequestedOrderCount(orderCount),
     }));
-  }, []);
+  }, [lang, phase, user?.userId]);
 
   const isStoreHydrated = state.selected !== ("1970-01-01" as any);
 
@@ -160,7 +172,8 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
     if (!isStoreHydrated) return;
 
     const dateISO = todayISO();
-    const key = requestKey(user?.userId ?? "guest", lang, dateISO, phase);
+    const currentRequestedOrderCount = manualGenerateState.orderCount;
+    const key = requestKey(user?.userId ?? "guest", lang, dateISO, phase, currentRequestedOrderCount);
     let active = true;
     const forceGenerate = mode === "generate" && manualGenerateState.count > 0;
     const requestedOrderCount = forceGenerate ? manualGenerateState.orderCount : null;
@@ -189,10 +202,10 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
         const cached = await fetchAIRecoveryPlanner(lang, phase, true);
         if (!active) return;
 
-        if (cached && cached.language === lang && cached.phase === phase) {
+        if (cached && cached.language === lang && cached.phase === phase && !forceGenerate) {
           sessionDailyCache.set(key, cached);
           setRemoteData(cached);
-          if (!forceGenerate) return;
+          return;
         }
 
         const shouldGenerate = mode === "generate" && (autoGenerate || manualGenerateState.count > 0);

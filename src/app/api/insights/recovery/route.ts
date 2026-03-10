@@ -178,6 +178,9 @@ function asPayload(candidate: unknown, fallbackLang: Language): AIRecoveryPayloa
   if (!isRecord(candidate) || !isRecord(candidate.result)) return null;
   if (typeof candidate.dateISO !== "string") return null;
   const language = asLanguage(candidate.language) ?? fallbackLang;
+  const engine = candidate.engine === "rule" ? "rule" : "openai";
+  const generatedText = typeof candidate.generatedText === "string" ? candidate.generatedText : undefined;
+  if (engine === "openai" && !generatedText?.trim()) return null;
   const plannerContext = asPlannerContext(candidate.plannerContext);
   const profileSnapshot = asProfileSnapshot(candidate.profileSnapshot);
   return {
@@ -188,10 +191,10 @@ function asPayload(candidate: unknown, fallbackLang: Language): AIRecoveryPayloa
     nextShift: (typeof candidate.nextShift === "string" ? candidate.nextShift : null) as Shift | null,
     todayVitalScore: typeof candidate.todayVitalScore === "number" ? candidate.todayVitalScore : null,
     source: candidate.source === "local" ? "local" : "supabase",
-    engine: candidate.engine === "rule" ? "rule" : "openai",
+    engine,
     model: typeof candidate.model === "string" ? candidate.model : null,
     debug: typeof candidate.debug === "string" ? candidate.debug : null,
-    generatedText: typeof candidate.generatedText === "string" ? candidate.generatedText : undefined,
+    generatedText,
     plannerContext: plannerContext ?? undefined,
     profileSnapshot: profileSnapshot ?? undefined,
     result: candidate.result as AIRecoveryPayload["result"],
@@ -267,6 +270,11 @@ function asPlannerPayload(candidate: unknown, fallbackLang: Language): AIRecover
   if (!isRecord(candidate) || !isRecord(candidate.result) || !hasChecklistOrdersShape(candidate.result)) return null;
   if (typeof candidate.dateISO !== "string") return null;
   const language = asLanguage(candidate.language) ?? fallbackLang;
+  const engine = candidate.engine === "rule" ? "rule" : "openai";
+  const generatedText = typeof candidate.generatedText === "string" ? candidate.generatedText : undefined;
+  const explanationGeneratedText =
+    typeof candidate.explanationGeneratedText === "string" ? candidate.explanationGeneratedText : undefined;
+  if (engine === "openai" && (!generatedText?.trim() || !explanationGeneratedText?.trim())) return null;
   const plannerContext = asPlannerContext(candidate.plannerContext);
   const profileSnapshot = asProfileSnapshot(candidate.profileSnapshot);
   return {
@@ -278,12 +286,11 @@ function asPlannerPayload(candidate: unknown, fallbackLang: Language): AIRecover
     nextShift: (typeof candidate.nextShift === "string" ? candidate.nextShift : null) as Shift | null,
     todayVitalScore: typeof candidate.todayVitalScore === "number" ? candidate.todayVitalScore : null,
     source: candidate.source === "local" ? "local" : "supabase",
-    engine: candidate.engine === "rule" ? "rule" : "openai",
+    engine,
     model: typeof candidate.model === "string" ? candidate.model : null,
     debug: typeof candidate.debug === "string" ? candidate.debug : null,
-    generatedText: typeof candidate.generatedText === "string" ? candidate.generatedText : undefined,
-    explanationGeneratedText:
-      typeof candidate.explanationGeneratedText === "string" ? candidate.explanationGeneratedText : undefined,
+    generatedText,
+    explanationGeneratedText,
     plannerContext: plannerContext ?? undefined,
     profileSnapshot: profileSnapshot ?? undefined,
     result: candidate.result as AIRecoveryPlannerPayload["result"],
@@ -299,6 +306,14 @@ function asPlannerRecoveryPayload(candidate: unknown, fallbackLang: Language): A
   const recovery = (explanation as Record<string, unknown>).recovery;
   if (!recovery || typeof recovery !== "object") return null;
   const language = asLanguage((planner as any).language) ?? fallbackLang;
+  const engine = planner.engine === "rule" ? "rule" : "openai";
+  const generatedText =
+    typeof planner.explanationGeneratedText === "string"
+      ? planner.explanationGeneratedText
+      : typeof planner.generatedText === "string"
+        ? planner.generatedText
+        : undefined;
+  if (engine === "openai" && !generatedText?.trim()) return null;
 
   return {
     dateISO: planner.dateISO as ISODate,
@@ -308,15 +323,10 @@ function asPlannerRecoveryPayload(candidate: unknown, fallbackLang: Language): A
     nextShift: (typeof planner.nextShift === "string" ? planner.nextShift : null) as Shift | null,
     todayVitalScore: typeof planner.todayVitalScore === "number" ? planner.todayVitalScore : null,
     source: planner.source === "local" ? "local" : "supabase",
-    engine: planner.engine === "rule" ? "rule" : "openai",
+    engine,
     model: typeof planner.model === "string" ? planner.model : null,
     debug: typeof planner.debug === "string" ? planner.debug : null,
-    generatedText:
-      typeof planner.explanationGeneratedText === "string"
-        ? planner.explanationGeneratedText
-        : typeof planner.generatedText === "string"
-          ? planner.generatedText
-          : undefined,
+    generatedText,
     plannerContext: planner.plannerContext,
     profileSnapshot: planner.profileSnapshot,
     result: recovery as AIRecoveryPayload["result"],
@@ -868,10 +878,10 @@ async function handleRecovery(
     const body: AIRecoveryApiSuccess = { ok: true, data: lang === "en" ? payloadEn ?? payloadKo : payloadKo };
 
     return jsonNoStore(body);
-  } catch {
+  } catch (err: any) {
     // 502 is sometimes replaced by Cloudflare HTML error pages.
     // Use 500 so client can read JSON error details.
-    return bad(500, "openai_generation_failed");
+    return bad(500, typeof err?.message === "string" && err.message.trim() ? err.message.trim() : "openai_generation_failed");
   }
 }
 

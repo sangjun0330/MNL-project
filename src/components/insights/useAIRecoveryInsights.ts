@@ -31,6 +31,16 @@ type HookResult = {
 const inFlightGenerate = new Map<string, Promise<AIRecoveryPayload | null>>();
 const sessionDailyCache = new Map<string, AIRecoveryPayload>();
 
+function clearRecoveryPhaseCache(userId: string, lang: "ko" | "en", dateISO: string, phase: RecoveryPhase) {
+  const prefix = `${userId}:${lang}:${dateISO}:${phase}`;
+  for (const key of Array.from(sessionDailyCache.keys())) {
+    if (key === prefix) sessionDailyCache.delete(key);
+  }
+  for (const key of Array.from(inFlightGenerate.keys())) {
+    if (key === prefix) inFlightGenerate.delete(key);
+  }
+}
+
 function requestKey(userId: string, lang: "ko" | "en", dateISO: string, phase: RecoveryPhase) {
   return `${userId}:${lang}:${dateISO}:${phase}`;
 }
@@ -108,17 +118,18 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
   const retry = useCallback(() => {
     // 세션 캐시 클리어 후 재시도
     const dateISO = todayISO();
-    const key = requestKey(user?.userId ?? "guest", lang, dateISO, phase);
-    sessionDailyCache.delete(key);
-    inFlightGenerate.delete(key);
+    clearRecoveryPhaseCache(user?.userId ?? "guest", lang, dateISO, phase);
     setError(null);
     setRemoteData(null);
     setRetryCount((c) => c + 1);
   }, [lang, phase, user?.userId]);
   const startGenerate = useCallback(() => {
+    const dateISO = todayISO();
+    clearRecoveryPhaseCache(user?.userId ?? "guest", lang, dateISO, phase);
     setError(null);
+    setRemoteData(null);
     setManualGenerateCount((c) => c + 1);
-  }, []);
+  }, [lang, phase, user?.userId]);
 
   const isStoreHydrated = state.selected !== ("1970-01-01" as any);
 
@@ -160,10 +171,10 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
         const cached = await fetchAIRecovery(lang, dateISO, phase, true);
         if (!active) return;
 
-        if (cached && cached.language === lang && cached.phase === phase) {
+        if (cached && cached.language === lang && cached.phase === phase && !forceGenerate) {
           sessionDailyCache.set(key, cached);
           setRemoteData(cached);
-          if (!forceGenerate) return;
+          return;
         }
 
         setRemoteData(null);

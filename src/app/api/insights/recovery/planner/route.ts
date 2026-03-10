@@ -243,6 +243,9 @@ function asRecoveryPayload(candidate: unknown, fallbackLang: Language): AIRecove
   if (!isRecord(candidate) || !isRecord(candidate.result)) return null;
   if (typeof candidate.dateISO !== "string") return null;
   const language = asLanguage(candidate.language) ?? fallbackLang;
+  const engine = candidate.engine === "rule" ? "rule" : "openai";
+  const generatedText = typeof candidate.generatedText === "string" ? candidate.generatedText : undefined;
+  if (engine === "openai" && !generatedText?.trim()) return null;
   const plannerContext = asPlannerContext(candidate.plannerContext);
   const profileSnapshot = asProfileSnapshot(candidate.profileSnapshot);
   return {
@@ -253,10 +256,10 @@ function asRecoveryPayload(candidate: unknown, fallbackLang: Language): AIRecove
     nextShift: (typeof candidate.nextShift === "string" ? candidate.nextShift : null) as Shift | null,
     todayVitalScore: typeof candidate.todayVitalScore === "number" ? candidate.todayVitalScore : null,
     source: candidate.source === "local" ? "local" : "supabase",
-    engine: candidate.engine === "rule" ? "rule" : "openai",
+    engine,
     model: typeof candidate.model === "string" ? candidate.model : null,
     debug: typeof candidate.debug === "string" ? candidate.debug : null,
-    generatedText: typeof candidate.generatedText === "string" ? candidate.generatedText : undefined,
+    generatedText,
     plannerContext: plannerContext ?? undefined,
     profileSnapshot: profileSnapshot ?? undefined,
     result: candidate.result as AIRecoveryPayload["result"],
@@ -286,6 +289,11 @@ function asPlannerPayload(candidate: unknown, fallbackLang: Language): AIRecover
   if (typeof candidate.dateISO !== "string") return null;
   if (!hasChecklistOrdersShape(candidate.result)) return null;
   const language = asLanguage(candidate.language) ?? fallbackLang;
+  const engine = candidate.engine === "rule" ? "rule" : "openai";
+  const generatedText = typeof candidate.generatedText === "string" ? candidate.generatedText : undefined;
+  const explanationGeneratedText =
+    typeof candidate.explanationGeneratedText === "string" ? candidate.explanationGeneratedText : undefined;
+  if (engine === "openai" && (!generatedText?.trim() || !explanationGeneratedText?.trim())) return null;
   const plannerContext = asPlannerContext(candidate.plannerContext);
   const profileSnapshot = asProfileSnapshot(candidate.profileSnapshot);
   return {
@@ -297,12 +305,11 @@ function asPlannerPayload(candidate: unknown, fallbackLang: Language): AIRecover
     nextShift: (typeof candidate.nextShift === "string" ? candidate.nextShift : null) as Shift | null,
     todayVitalScore: typeof candidate.todayVitalScore === "number" ? candidate.todayVitalScore : null,
     source: candidate.source === "local" ? "local" : "supabase",
-    engine: candidate.engine === "rule" ? "rule" : "openai",
+    engine,
     model: typeof candidate.model === "string" ? candidate.model : null,
     debug: typeof candidate.debug === "string" ? candidate.debug : null,
-    generatedText: typeof candidate.generatedText === "string" ? candidate.generatedText : undefined,
-    explanationGeneratedText:
-      typeof candidate.explanationGeneratedText === "string" ? candidate.explanationGeneratedText : undefined,
+    generatedText,
+    explanationGeneratedText,
     plannerContext: plannerContext ?? undefined,
     profileSnapshot: profileSnapshot ?? undefined,
     result: candidate.result as AIRecoveryPlannerPayload["result"],
@@ -695,8 +702,8 @@ async function handlePlanner(
     }
 
     return jsonNoStore({ ok: true, data: payload } satisfies AIRecoveryPlannerApiSuccess);
-  } catch {
-    return bad(500, "openai_generation_failed");
+  } catch (err: any) {
+    return bad(500, typeof err?.message === "string" && err.message.trim() ? err.message.trim() : "openai_generation_failed");
   }
 }
 

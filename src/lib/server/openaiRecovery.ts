@@ -539,10 +539,25 @@ function extractResponsesText(json: any): string {
   const output = Array.isArray(json?.output) ? json.output : [];
   const chunks: string[] = [];
   for (const item of output) {
+    if (typeof item?.text === "string" && item.text.trim()) {
+      chunks.push(item.text.trim());
+    }
+    if (item?.json && typeof item.json === "object") {
+      chunks.push(JSON.stringify(item.json));
+    }
+    if (item?.parsed && typeof item.parsed === "object") {
+      chunks.push(JSON.stringify(item.parsed));
+    }
     const content = Array.isArray(item?.content) ? item.content : [];
     for (const part of content) {
       const text = typeof part?.text === "string" ? part.text : "";
       if (text) chunks.push(text);
+      if (part?.json && typeof part.json === "object") {
+        chunks.push(JSON.stringify(part.json));
+      }
+      if (part?.parsed && typeof part.parsed === "object") {
+        chunks.push(JSON.stringify(part.parsed));
+      }
     }
   }
   return chunks.join("").trim();
@@ -562,7 +577,7 @@ async function callResponsesApi(args: {
 }): Promise<TextAttempt> {
   const { apiKey, model, developerPrompt, userPrompt, signal, maxOutputTokens, logFeature, language, dateISO, phase = "start" } = args;
   const storeResponses = resolveStoreResponses();
-  const reasoningEffort = logFeature === "recovery_translate" ? "low" : "medium";
+  const reasoningEffort = "low";
   const verbosity = logFeature === "recovery_translate" ? "low" : "medium";
 
   const payload = {
@@ -618,9 +633,12 @@ async function callResponsesApi(args: {
   const json = await response.json().catch(() => null);
   const text = extractResponsesText(json);
   if (!text) {
+    const status = typeof json?.status === "string" ? json.status : "unknown";
+    const incompleteReason =
+      typeof json?.incomplete_details?.reason === "string" ? json.incomplete_details.reason : "none";
     return {
       text: null,
-      error: `openai_empty_text_model:${model}`,
+      error: `openai_empty_text_model:${model}_status:${status}_incomplete:${incompleteReason}`,
     };
   }
 
@@ -1609,52 +1627,60 @@ export async function generateAIRecoveryWithOpenAI(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 35_000);
   try {
-    const attempt = await callResponsesApi({
-      apiKey,
-      model,
-      developerPrompt,
-      userPrompt,
-      signal: controller.signal,
-      maxOutputTokens,
-      logFeature: "recovery_explanation",
-      language: params.language,
-      dateISO: params.todayISO,
-      phase: params.phase ?? "start",
-    });
+    let lastError = `openai_request_failed_model:${model}`;
+    for (let attemptIndex = 0; attemptIndex < 2; attemptIndex += 1) {
+      const attempt = await callResponsesApi({
+        apiKey,
+        model,
+        developerPrompt,
+        userPrompt,
+        signal: controller.signal,
+        maxOutputTokens: Math.min(3400, maxOutputTokens + attemptIndex * 500),
+        logFeature: "recovery_explanation",
+        language: params.language,
+        dateISO: params.todayISO,
+        phase: params.phase ?? "start",
+      });
 
-    if (!attempt.text) {
-      throw new Error(attempt.error ?? `openai_request_failed_model:${model}`);
-    }
+      if (!attempt.text) {
+        lastError = attempt.error ?? `openai_request_failed_model:${model}`;
+        continue;
+      }
 
-    const rawText = attempt.text.trim();
-    const parsedObject = parseJsonObject(rawText);
-    if (!parsedObject) {
-      throw new Error(`openai_recovery_non_json_model:${model}`);
+      const rawText = attempt.text.trim();
+      const parsedObject = parseJsonObject(rawText);
+      if (!parsedObject) {
+        lastError = `openai_recovery_non_json_model:${model}`;
+        continue;
+      }
+      const parsed = parseRecoveryJsonResult(parsedObject);
+      if (!parsed) {
+        lastError = `openai_recovery_invalid_shape_model:${model}`;
+        continue;
+      }
+      const safeSections = context.menstrualTrackingEnabled
+        ? parsed.sections
+        : parsed.sections.filter((section) => section.category !== "menstrual");
+      if (!safeSections.length) {
+        lastError = `openai_recovery_empty_sections_model:${model}`;
+        continue;
+      }
+      const weeklyFallback = buildFallbackWeeklySummary(params);
+      const mergedResult: AIRecoveryResult = {
+        ...parsed,
+        sections: safeSections,
+        weeklySummary: mergeWeeklySummary(parsed.weeklySummary, weeklyFallback),
+      };
+      const generatedText = buildStructuredTextFromResult(mergedResult, params.language);
+      return {
+        result: mergedResult,
+        generatedText,
+        engine: "openai",
+        model,
+        debug: null,
+      };
     }
-    const parsed = parseRecoveryJsonResult(parsedObject);
-    if (!parsed) {
-      throw new Error(`openai_recovery_invalid_shape_model:${model}`);
-    }
-    const safeSections = context.menstrualTrackingEnabled
-      ? parsed.sections
-      : parsed.sections.filter((section) => section.category !== "menstrual");
-    if (!safeSections.length) {
-      throw new Error(`openai_recovery_empty_sections_model:${model}`);
-    }
-    const weeklyFallback = buildFallbackWeeklySummary(params);
-    const mergedResult: AIRecoveryResult = {
-      ...parsed,
-      sections: safeSections,
-      weeklySummary: mergeWeeklySummary(parsed.weeklySummary, weeklyFallback),
-    };
-    const generatedText = buildStructuredTextFromResult(mergedResult, params.language);
-    return {
-      result: mergedResult,
-      generatedText,
-      engine: "openai",
-      model,
-      debug: null,
-    };
+    throw new Error(lastError);
   } catch (err: any) {
     if (err?.name === "AbortError") {
       throw new Error(`openai_timeout_model:${model}`);
@@ -2451,47 +2477,54 @@ async function generatePlannerOrdersWithOpenAI(
   const timer = setTimeout(() => controller.abort(), 40_000);
 
   try {
-    const attempt = await callResponsesApi({
-      apiKey,
-      model,
-      developerPrompt,
-      userPrompt,
-      signal: controller.signal,
-      maxOutputTokens,
-      logFeature: "planner_orders",
-      language: params.language,
-      dateISO: params.todayISO,
-      phase: params.phase ?? "start",
-    });
+    let lastError = `openai_request_failed_model:${model}`;
+    for (let attemptIndex = 0; attemptIndex < 2; attemptIndex += 1) {
+      const attempt = await callResponsesApi({
+        apiKey,
+        model,
+        developerPrompt,
+        userPrompt,
+        signal: controller.signal,
+        maxOutputTokens: Math.min(3200, maxOutputTokens + attemptIndex * 400),
+        logFeature: "planner_orders",
+        language: params.language,
+        dateISO: params.todayISO,
+        phase: params.phase ?? "start",
+      });
 
-    if (!attempt.text) {
-      throw new Error(attempt.error ?? `openai_request_failed_model:${model}`);
+      if (!attempt.text) {
+        lastError = attempt.error ?? `openai_request_failed_model:${model}`;
+        continue;
+      }
+
+      const generatedText = attempt.text.trim();
+      const parsed = parseJsonObject(generatedText);
+      if (!parsed) {
+        lastError = `openai_planner_orders_non_json_model:${model}`;
+        continue;
+      }
+
+      const checklistModule = parsePlannerChecklistModule(
+        parsed,
+        params.language,
+        params.requestedOrderCount
+      );
+      const targetCount = normalizeRequestedOrderCount(params.requestedOrderCount);
+      if (
+        !checklistModule.title ||
+        !checklistModule.headline ||
+        !checklistModule.summary ||
+        checklistModule.items.length < 1 ||
+        checklistModule.items.length > 5 ||
+        (targetCount != null && checklistModule.items.length !== targetCount)
+      ) {
+        lastError = `openai_planner_orders_incomplete_model:${model}`;
+        continue;
+      }
+
+      return { generatedText, model, module: checklistModule };
     }
-
-    const generatedText = attempt.text.trim();
-    const parsed = parseJsonObject(generatedText);
-    if (!parsed) {
-      throw new Error(`openai_planner_orders_non_json_model:${model}`);
-    }
-
-    const checklistModule = parsePlannerChecklistModule(
-      parsed,
-      params.language,
-      params.requestedOrderCount
-    );
-    const targetCount = normalizeRequestedOrderCount(params.requestedOrderCount);
-    if (
-      !checklistModule.title ||
-      !checklistModule.headline ||
-      !checklistModule.summary ||
-      checklistModule.items.length < 1 ||
-      checklistModule.items.length > 5 ||
-      (targetCount != null && checklistModule.items.length !== targetCount)
-    ) {
-      throw new Error(`openai_planner_orders_incomplete_model:${model}`);
-    }
-
-    return { generatedText, model, module: checklistModule };
+    throw new Error(lastError);
   } catch (err: any) {
     if (err?.name === "AbortError") {
       throw new Error(`openai_timeout_model:${model}`);
