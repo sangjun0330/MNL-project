@@ -826,7 +826,7 @@ export function RecoveryPrescription({ state, pivotISO }: Props) {
 
   return (
     <Card
-      title="회복 처방"
+      title="회복 가이드"
       right={<Chip className={cn("border", toneChipCls(tone))}>{toneLabel(tone)}</Chip>}
     >
       <div className="text-[12.5px] text-ios-muted">

@@ -365,7 +365,7 @@ export function InsightsVitalDetail() {
           </div>
 
           <div className="text-[12.5px] text-ios-muted">
-            {t("* Sync는 \u201C최근 7일\u201D 기준입니다. 입력이 쌓이면 Recovery 처방의 근거(수치)가 더 단단해져요.")}
+            {t("* Sync는 \u201C최근 7일\u201D 기준입니다. 입력이 쌓이면 Recovery 가이드의 근거(수치)가 더 단단해져요.")}
           </div>
         </div>
       </BottomSheet>

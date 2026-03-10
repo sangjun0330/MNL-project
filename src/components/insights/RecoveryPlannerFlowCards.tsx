@@ -301,7 +301,7 @@ export function RecoveryChecklistItemCard({
         boxShadow: "inset 0 1px 0 rgba(255,255,255,0.92), 0 16px 36px rgba(15,36,74,0.05)",
       }}
     >
-      <div className="flex items-start gap-4">
+      <div className="grid grid-cols-[40px_minmax(0,1fr)] gap-x-4 gap-y-4">
         <div className="relative mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center">
           <button
             type="button"
@@ -342,8 +342,11 @@ export function RecoveryChecklistItemCard({
             </span>
           </div>
           <div className="mt-3 break-keep text-[18px] font-bold leading-[1.55] tracking-[-0.03em] text-ios-text">{item.title}</div>
-          <div className="mt-3 rounded-[18px] border border-[rgba(16,33,70,0.06)] bg-white/78 px-3.5 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.92)]">
-            <p className="break-keep text-[13px] leading-6 text-ios-sub">{item.body}</p>
+        </div>
+
+        <div className="col-span-2">
+          <div className="mx-auto max-w-[620px] rounded-[20px] border border-[rgba(16,33,70,0.06)] bg-white/80 px-4 py-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.94)]">
+            <p className="break-keep text-[14px] leading-7 text-ios-sub">{item.body}</p>
           </div>
         </div>
       </div>
