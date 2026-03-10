@@ -986,13 +986,13 @@ export function InsightsAIRecoveryDetail() {
 
   const startAnalysis = useCallback(() => {
     if (!isAdminOrDev && needsHealthInputGuide) {
-      setOpenInputGuide(true);
+      if (missingGuide) router.push(missingGuide.route);
       return;
     }
     setActivePhase("start");
     setActiveGeneratingPhase("start");
     startPlannerAI.startGenerate(selectedOrderCount);
-  }, [isAdminOrDev, needsHealthInputGuide, selectedOrderCount, startPlannerAI]);
+  }, [isAdminOrDev, needsHealthInputGuide, missingGuide, router, selectedOrderCount, startPlannerAI]);
 
   const startAfterWorkAnalysis = useCallback(() => {
     if (!isAdminOrDev && !afterWorkReadiness.ready) return;
@@ -1328,6 +1328,13 @@ export function InsightsAIRecoveryDetail() {
                   </RecoveryMetaPill>
                 ))}
               </div>
+              <button
+                type="button"
+                onClick={() => router.push("/schedule?openHealthLog=today")}
+                className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] text-[14px] font-semibold text-[color:var(--rnest-accent)]"
+              >
+                {t("오늘 기록 입력하러 가기")}
+              </button>
             </DetailCard>
           ) : !afterPlannerAI.data ? (
             <DetailCard

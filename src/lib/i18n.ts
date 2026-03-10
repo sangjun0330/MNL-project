@@ -1088,6 +1088,7 @@ const EN_EXTRA: Record<string, string> = {
   "분석 시작 전에 필수 기록 2개(오늘 수면, 전날 건강)를 확인해 주세요.":
     "Before starting analysis, check the two required logs (today's sleep and yesterday's health).",
   "필수 기록 입력하러 가기": "Go enter required logs",
+  "오늘 기록 입력하러 가기": "Go enter today's logs",
   "누르면 누락된 기록 날짜로 이동해 바로 입력할 수 있어요.":
     "Tap to jump to the missing log date and enter it right away.",
   "회복 루틴을 먼저 고정해요.": "Lock in one recovery routine first.",
