@@ -14,6 +14,9 @@ import type { Json } from "@/types/supabase";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
+// Pin Edge Function to US/EU regions so outbound OpenAI calls never originate
+// from Asian PoPs whose egress IPs may be blocked by OpenAI's region policy.
+export const preferredRegion = ["iad1", "sfo1", "fra1"];
 
 const MAX_QUERY_LENGTH = 1800;
 const MAX_PATIENT_SUMMARY_LENGTH = 1400;

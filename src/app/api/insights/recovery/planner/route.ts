@@ -40,6 +40,9 @@ import type { SubscriptionSnapshot } from "@/lib/server/billingStore";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
+// Pin Edge Function to US/EU regions so outbound OpenAI calls never originate
+// from Asian PoPs whose egress IPs may be blocked by OpenAI's region policy.
+export const preferredRegion = ["iad1", "sfo1", "fra1"];
 const DEFAULT_ORDER_COUNT = 3;
 
 function toLanguage(value: string | null): Language | null {

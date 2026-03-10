@@ -238,6 +238,33 @@ function resolveModel() {
   return model || "gpt-5.2";
 }
 
+// OPENAI_RECOVERY_BASE_URL → OPENAI_BASE_URL 순서로 폴백
+// 프록시/대체 엔드포인트 설정 시 사용 (와이파이 지역 정책 우회 등)
+function resolveApiBaseUrl(): string {
+  const raw = String(
+    process.env.OPENAI_RECOVERY_BASE_URL ??
+    process.env.OPENAI_BASE_URL ??
+    "https://api.openai.com/v1"
+  ).trim();
+  // 후행 슬래시 제거
+  return (raw || "https://api.openai.com/v1").replace(/\/+$/, "");
+}
+
+// 재시도 가능한 에러 여부 판단
+function isRetryableRecoveryError(error: string): boolean {
+  const e = String(error ?? "").toLowerCase();
+  if (!e) return false;
+  // 네트워크 수준 오류 (DNS, 연결 거부 등)
+  if (e.startsWith("openai_network_")) return true;
+  // 빈 응답
+  if (e.includes("openai_empty_text_")) return true;
+  // 재시도 가능한 HTTP 상태 코드
+  if (/openai_responses_(408|409|425|429|500|502|503|504)/.test(e)) return true;
+  // 프록시/방화벽이 HTML 403으로 응답하는 케이스
+  if (/openai_responses_403/.test(e) && /(html|forbidden|proxy|firewall|blocked|access denied|cloudflare)/.test(e)) return true;
+  return false;
+}
+
 function truncateError(raw: string, size = 220) {
   const clean = String(raw ?? "")
     .replace(/\s+/g, " ")
@@ -579,6 +606,7 @@ async function callResponsesApi(args: {
   const storeResponses = resolveStoreResponses();
   const reasoningEffort = "low";
   const verbosity = logFeature === "recovery_translate" ? "low" : "medium";
+  const baseUrl = resolveApiBaseUrl();
 
   const payload = {
     model,
@@ -612,15 +640,26 @@ async function callResponsesApi(args: {
     },
   };
 
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(payload),
-    signal,
-  });
+  // 네트워크 수준 오류(DNS 실패, 연결 거부, 타임아웃 등)를 catch해 에러 문자열로 반환
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/responses`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(payload),
+      signal,
+    });
+  } catch (cause: any) {
+    // AbortError는 상위에서 처리하므로 그대로 throw
+    if (cause?.name === "AbortError") throw cause;
+    return {
+      text: null,
+      error: `openai_network_${truncateError(String(cause?.message ?? cause ?? "fetch_failed"))}`,
+    };
+  }
 
   if (!response.ok) {
     const raw = await response.text().catch(() => "");
@@ -1628,7 +1667,7 @@ export async function generateAIRecoveryWithOpenAI(
   const timer = setTimeout(() => controller.abort(), 35_000);
   try {
     let lastError = `openai_request_failed_model:${model}`;
-    for (let attemptIndex = 0; attemptIndex < 2; attemptIndex += 1) {
+    for (let attemptIndex = 0; attemptIndex < 3; attemptIndex += 1) {
       const attempt = await callResponsesApi({
         apiKey,
         model,
@@ -1644,6 +1683,12 @@ export async function generateAIRecoveryWithOpenAI(
 
       if (!attempt.text) {
         lastError = attempt.error ?? `openai_request_failed_model:${model}`;
+        // 지역 제한·인증 오류처럼 재시도가 의미 없는 영구 오류는 즉시 종료
+        if (!isRetryableRecoveryError(lastError)) break;
+        // 재시도 가능한 오류는 짧은 딜레이 후 재시도
+        if (attemptIndex < 2) {
+          await new Promise((r) => setTimeout(r, 1000 * (attemptIndex + 1)));
+        }
         continue;
       }
 
@@ -2478,7 +2523,7 @@ async function generatePlannerOrdersWithOpenAI(
 
   try {
     let lastError = `openai_request_failed_model:${model}`;
-    for (let attemptIndex = 0; attemptIndex < 2; attemptIndex += 1) {
+    for (let attemptIndex = 0; attemptIndex < 3; attemptIndex += 1) {
       const attempt = await callResponsesApi({
         apiKey,
         model,
@@ -2494,6 +2539,10 @@ async function generatePlannerOrdersWithOpenAI(
 
       if (!attempt.text) {
         lastError = attempt.error ?? `openai_request_failed_model:${model}`;
+        if (!isRetryableRecoveryError(lastError)) break;
+        if (attemptIndex < 2) {
+          await new Promise((r) => setTimeout(r, 1000 * (attemptIndex + 1)));
+        }
         continue;
       }
 

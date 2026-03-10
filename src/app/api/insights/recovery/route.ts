@@ -27,6 +27,9 @@ import { buildPlannerContext, normalizeProfileSettings, type PlannerContext } fr
 // Cloudflare Pages requires Edge runtime for non-static routes.
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
+// Pin Edge Function to US/EU regions so outbound OpenAI calls never originate
+// from Asian PoPs whose egress IPs may be blocked by OpenAI's region policy.
+export const preferredRegion = ["iad1", "sfo1", "fra1"];
 
 function toLanguage(value: string | null): Language | null {
   if (value === "ko" || value === "en") return value;
