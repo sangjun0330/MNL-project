@@ -17,6 +17,8 @@ import {
 import { useAIRecoveryPlanner } from "@/components/insights/useAIRecoveryPlanner";
 import { INSIGHTS_MIN_DAYS, isInsightsLocked, useInsightsData } from "@/components/insights/useInsightsData";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
+import { useAuthState } from "@/lib/auth";
+import { authHeaders } from "@/lib/billing/client";
 import { TodaySleepRequiredSheet } from "@/components/insights/TodaySleepRequiredSheet";
 import type { AIRecoveryPlannerPayload } from "@/lib/aiRecoveryPlanner";
 import { addDays, formatKoreanDate, fromISODate, toISODate, todayISO } from "@/lib/date";
@@ -251,6 +253,14 @@ function normalizeRequestedOrderCountParam(value: string | null) {
   const parsed = Math.round(Number(value));
   if (!Number.isFinite(parsed)) return 3;
   return Math.max(1, Math.min(5, parsed));
+}
+
+// 일반 사용자용: 아침(4~12시) / 퇴근 후(15~23시) 생성 시간 창 확인
+function isWithinGenerationWindow(phase: RecoveryPhase): boolean {
+  const hour = new Date().getHours();
+  if (phase === "start") return hour >= 4 && hour <= 12;
+  if (phase === "after_work") return hour >= 15;
+  return false;
 }
 
 const CATEGORIES: Array<{
@@ -862,6 +872,34 @@ export function InsightsAIRecoveryDetail() {
   const { recordedDays, state } = useInsightsData();
   const insightsLocked = isInsightsLocked(recordedDays);
   const { hasEntitlement, loading: billingLoading } = useBillingAccess();
+  const { user, status: authStatus } = useAuthState();
+  const [isAdminOrDev, setIsAdminOrDev] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    if (authStatus !== "authenticated" || !user?.userId) {
+      setIsAdminOrDev(false);
+      return () => { active = false; };
+    }
+    const run = async () => {
+      try {
+        const headers = await authHeaders();
+        const res = await fetch("/api/admin/billing/access", {
+          method: "GET",
+          headers: { "content-type": "application/json", ...headers },
+          cache: "no-store",
+        });
+        const json = await res.json().catch(() => null);
+        if (!active) return;
+        setIsAdminOrDev(Boolean(json?.ok && json?.data?.isAdmin));
+      } catch {
+        if (!active) return;
+        setIsAdminOrDev(false);
+      }
+    };
+    void run();
+    return () => { active = false; };
+  }, [authStatus, user?.userId]);
   const hasPlannerAIAccess = hasEntitlement("recoveryPlannerAI");
   const startPlannerAI = useAIRecoveryPlanner({
     mode: "generate",
@@ -947,21 +985,21 @@ export function InsightsAIRecoveryDetail() {
   }, [initialRequestedOrderCount]);
 
   const startAnalysis = useCallback(() => {
-    if (needsHealthInputGuide) {
+    if (!isAdminOrDev && needsHealthInputGuide) {
       setOpenInputGuide(true);
       return;
     }
     setActivePhase("start");
     setActiveGeneratingPhase("start");
     startPlannerAI.startGenerate(selectedOrderCount);
-  }, [needsHealthInputGuide, selectedOrderCount, startPlannerAI]);
+  }, [isAdminOrDev, needsHealthInputGuide, selectedOrderCount, startPlannerAI]);
 
   const startAfterWorkAnalysis = useCallback(() => {
-    if (!afterWorkReadiness.ready) return;
+    if (!isAdminOrDev && !afterWorkReadiness.ready) return;
     setActivePhase("after_work");
     setActiveGeneratingPhase("after_work");
     afterPlannerAI.startGenerate(selectedOrderCount);
-  }, [afterPlannerAI, afterWorkReadiness.ready, selectedOrderCount]);
+  }, [afterPlannerAI, afterWorkReadiness.ready, isAdminOrDev, selectedOrderCount]);
 
   useEffect(() => {
     if (!startPlannerAI.generating && !afterPlannerAI.generating) {
@@ -1156,7 +1194,7 @@ export function InsightsAIRecoveryDetail() {
                   onChange={setSelectedOrderCount}
                   helper={t("아침과 퇴근 후에 같은 기준 개수를 사용해요.")}
                 />
-                {activePhase === "start" && startPlannerAI.data ? (
+                {isAdminOrDev && activePhase === "start" && startPlannerAI.data ? (
                   <button
                     type="button"
                     onClick={startAnalysis}
@@ -1164,7 +1202,7 @@ export function InsightsAIRecoveryDetail() {
                   >
                     {t("아침 회복과 오더 {count}개 다시 생성", { count: selectedOrderCount })}
                   </button>
-                ) : activePhase === "after_work" && afterPlannerAI.data ? (
+                ) : isAdminOrDev && activePhase === "after_work" && afterPlannerAI.data ? (
                   <button
                     type="button"
                     onClick={startAfterWorkAnalysis}
@@ -1225,17 +1263,23 @@ export function InsightsAIRecoveryDetail() {
                     ))}
                   </div>
                 ) : null}
-                <button
-                  type="button"
-                  onClick={startAnalysis}
-                  className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] text-[14px] font-semibold text-[color:var(--rnest-accent)]"
-                >
-                  {needsHealthInputGuide
-                    ? t("필수 기록 입력하러 가기")
-                    : startPlannerAI.error
-                      ? t("오늘 시작 회복과 오더 {count}개 다시 불러오기", { count: selectedOrderCount })
-                      : t("오늘 시작 회복과 오더 {count}개 생성하기", { count: selectedOrderCount })}
-                </button>
+                {isAdminOrDev || isWithinGenerationWindow("start") ? (
+                  <button
+                    type="button"
+                    onClick={startAnalysis}
+                    className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] text-[14px] font-semibold text-[color:var(--rnest-accent)]"
+                  >
+                    {!isAdminOrDev && needsHealthInputGuide
+                      ? t("필수 기록 입력하러 가기")
+                      : startPlannerAI.error
+                        ? t("오늘 시작 회복과 오더 {count}개 다시 불러오기", { count: selectedOrderCount })
+                        : t("오늘 시작 회복과 오더 {count}개 생성하기", { count: selectedOrderCount })}
+                  </button>
+                ) : (
+                  <p className="mt-4 text-center text-[13px] leading-6 text-ios-sub">
+                    {t("아침 회복은 오전 4시~오후 1시 사이에 생성할 수 있어요.")}
+                  </p>
+                )}
               </DetailCard>
             ) : (
               <RecoveryPhaseResultCard
@@ -1259,7 +1303,7 @@ export function InsightsAIRecoveryDetail() {
               <div className="mt-1 text-[18px] font-bold tracking-[-0.03em] text-ios-text">{t("퇴근 후 회복은 아침 회복 뒤에 열려요")}</div>
               <p className="mt-2 text-[13px] leading-6 text-ios-sub">{t("퇴근 후 회복은 아침 회복 흐름을 이어 받는 단계라서, 오늘 시작 회복을 먼저 만들어야 합니다.")}</p>
             </DetailCard>
-          ) : !afterWorkReadiness.ready ? (
+          ) : !afterWorkReadiness.ready && !isAdminOrDev ? (
             <DetailCard
               className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
               style={{
@@ -1307,15 +1351,21 @@ export function InsightsAIRecoveryDetail() {
                 </div>
               ) : null}
               {afterContinuityNode}
-              <button
-                type="button"
-                onClick={startAfterWorkAnalysis}
-                className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] text-[14px] font-semibold text-[color:var(--rnest-accent)]"
-              >
-                {afterPlannerAI.error
-                  ? t("퇴근 후 회복과 오더 {count}개 다시 불러오기", { count: selectedOrderCount })
-                  : t("퇴근 후 회복과 오더 {count}개 업데이트하기", { count: selectedOrderCount })}
-              </button>
+              {isAdminOrDev || isWithinGenerationWindow("after_work") ? (
+                <button
+                  type="button"
+                  onClick={startAfterWorkAnalysis}
+                  className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] text-[14px] font-semibold text-[color:var(--rnest-accent)]"
+                >
+                  {afterPlannerAI.error
+                    ? t("퇴근 후 회복과 오더 {count}개 다시 불러오기", { count: selectedOrderCount })
+                    : t("퇴근 후 회복과 오더 {count}개 업데이트하기", { count: selectedOrderCount })}
+                </button>
+              ) : (
+                <p className="mt-4 text-center text-[13px] leading-6 text-ios-sub">
+                  {t("퇴근 후 회복은 오후 3시 이후에 생성할 수 있어요.")}
+                </p>
+              )}
             </DetailCard>
           ) : (
             <RecoveryPhaseResultCard
