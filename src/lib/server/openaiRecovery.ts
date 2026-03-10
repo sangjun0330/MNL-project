@@ -3,6 +3,7 @@ import type { AIRecoveryPlannerModules, AIPlannerChecklistItem, AIPlannerCheckli
 import type { Language } from "@/lib/i18n";
 import type { ProfileSettings } from "@/lib/model";
 import type { PlannerContext } from "@/lib/recoveryPlanner";
+import type { RecoveryPhase } from "@/lib/recoveryPhases";
 import type { Shift } from "@/lib/types";
 import type { DailyVital } from "@/lib/vitals";
 
@@ -24,6 +25,7 @@ type RecoveryHistorySummary = {
 type GenerateOpenAIRecoveryParams = {
   language: Language;
   todayISO: string;
+  phase?: RecoveryPhase;
   todayShift: Shift;
   nextShift: Shift | null;
   todayVital: DailyVital | null;
@@ -32,6 +34,18 @@ type GenerateOpenAIRecoveryParams = {
   allVitals?: DailyVital[];
   plannerContext?: PlannerContext | null;
   profile?: ProfileSettings | null;
+  recoveryThread?: RecoveryThreadReference | null;
+};
+
+type RecoveryThreadReference = {
+  startRecoveryHeadline?: string | null;
+  startFocusLabel?: string | null;
+  startPrimaryAction?: string | null;
+  startAvoidAction?: string | null;
+  totalStartOrderCount?: number;
+  completedStartOrderCount?: number;
+  completedStartOrders?: Array<{ id: string; title: string }>;
+  pendingStartOrders?: Array<{ id: string; title: string }>;
 };
 
 export type OpenAIRecoveryOutput = {
@@ -233,7 +247,8 @@ function truncateError(raw: string, size = 220) {
 }
 
 function buildUserContext(params: GenerateOpenAIRecoveryParams) {
-  const { todayISO, language, todayShift, nextShift, todayVital, vitals7, prevWeekVitals, allVitals } = params;
+  const { todayISO, language, phase = "start", todayShift, nextShift, todayVital, vitals7, prevWeekVitals, allVitals } = params;
+  const includeSameDayDynamicInputs = phase === "after_work";
   const menstrualTrackingEnabled =
     typeof todayVital?.menstrual?.enabled === "boolean"
       ? todayVital.menstrual.enabled
@@ -257,6 +272,33 @@ function buildUserContext(params: GenerateOpenAIRecoveryParams) {
   return {
     language,
     dateISO: todayISO,
+    phase: {
+      id: phase,
+      title:
+        language === "en"
+          ? phase === "after_work"
+            ? "After-work recovery update"
+            : "Start-of-day recovery"
+          : phase === "after_work"
+            ? "퇴근 후 회복 업데이트"
+            : "오늘 시작 회복",
+      purpose:
+        language === "en"
+          ? phase === "after_work"
+            ? "Use today's actual logs and the morning recovery thread to update tonight's recovery."
+            : "Use yesterday's records and today's sleep only to set a safe recovery direction for starting the day."
+          : phase === "after_work"
+            ? "오늘 실제 기록과 아침 회복 흐름을 이어 받아 오늘 밤 회복을 업데이트합니다."
+            : "전날 기록과 오늘 수면만 기준으로 하루 시작 회복 방향을 정합니다.",
+      todayInputPolicy:
+        language === "en"
+          ? phase === "after_work"
+            ? "Today's actual dynamic inputs may be included."
+            : "Only today's sleep is included. Same-day stress, caffeine, activity, mood, and work-event inputs are intentionally excluded."
+          : phase === "after_work"
+            ? "오늘 실제 입력이 함께 반영됩니다."
+            : "오늘은 수면만 포함하고, 같은 날 스트레스·카페인·활동·기분·근무메모는 의도적으로 제외했습니다.",
+    },
     menstrualTrackingEnabled,
     shift: {
       today: todayShift,
@@ -264,31 +306,35 @@ function buildUserContext(params: GenerateOpenAIRecoveryParams) {
     },
     today: todayVital
       ? {
-          vitalScore: roundInteger(Math.min(todayVital.body.value, todayVital.mental.ema)),
-          body: roundInteger(todayVital.body.value),
-          mental: roundInteger(todayVital.mental.ema),
           sleepHours: roundNumber(todayVital.inputs.sleepHours, 1),
           napHours: roundNumber(todayVital.inputs.napHours, 1),
-          stress: roundInteger(todayVital.inputs.stress),
-          activity: roundInteger(todayVital.inputs.activity),
-          mood: roundInteger(todayVital.inputs.mood ?? todayVital.emotion?.mood),
-          caffeineMg: roundInteger(todayVital.inputs.caffeineMg),
           symptomSeverity: roundInteger(todayVital.inputs.symptomSeverity),
-          workEventTags: normalizeWorkEventTags(todayVital.inputs.workEventTags),
-          workEventNote:
-            typeof todayVital.inputs.workEventNote === "string"
-              ? todayVital.inputs.workEventNote.replace(/\s+/g, " ").trim().slice(0, 180)
-              : "-",
-          note: typeof todayVital.note === "string" ? todayVital.note.replace(/\s+/g, " ").trim().slice(0, 180) : "-",
           menstrualLabel: todayVital.menstrual?.label ?? "-",
           menstrualTracking: Boolean(todayVital.menstrual?.enabled),
           sleepDebtHours: roundNumber(todayVital.engine?.sleepDebtHours, 1),
           nightStreak: roundInteger(todayVital.engine?.nightStreak),
-          csi: roundNumber(todayVital.engine?.CSI, 2),
-          sri: roundNumber(todayVital.engine?.SRI, 2),
-          cif: roundNumber(todayVital.engine?.CIF, 2),
-          slf: roundNumber(todayVital.engine?.SLF, 2),
-          mif: roundNumber(todayVital.engine?.MIF, 2),
+          ...(includeSameDayDynamicInputs
+            ? {
+                vitalScore: roundInteger(Math.min(todayVital.body.value, todayVital.mental.ema)),
+                body: roundInteger(todayVital.body.value),
+                mental: roundInteger(todayVital.mental.ema),
+                stress: roundInteger(todayVital.inputs.stress),
+                activity: roundInteger(todayVital.inputs.activity),
+                mood: roundInteger(todayVital.inputs.mood ?? todayVital.emotion?.mood),
+                caffeineMg: roundInteger(todayVital.inputs.caffeineMg),
+                workEventTags: normalizeWorkEventTags(todayVital.inputs.workEventTags),
+                workEventNote:
+                  typeof todayVital.inputs.workEventNote === "string"
+                    ? todayVital.inputs.workEventNote.replace(/\s+/g, " ").trim().slice(0, 180)
+                    : "-",
+                note: typeof todayVital.note === "string" ? todayVital.note.replace(/\s+/g, " ").trim().slice(0, 180) : "-",
+                csi: roundNumber(todayVital.engine?.CSI, 2),
+                sri: roundNumber(todayVital.engine?.SRI, 2),
+                cif: roundNumber(todayVital.engine?.CIF, 2),
+                slf: roundNumber(todayVital.engine?.SLF, 2),
+                mif: roundNumber(todayVital.engine?.MIF, 2),
+              }
+            : {}),
         }
       : null,
     weekly: {
@@ -296,23 +342,30 @@ function buildUserContext(params: GenerateOpenAIRecoveryParams) {
       avgVitalPrev7: avgPrev,
       recordsIn7Days: vitals7.length,
       workEvents: eventSummary7,
-      recentVitals7: vitals7.map((vital) => ({
-        dateISO: vital.dateISO,
-        shift: vital.shift,
-        sleepHours: roundNumber(vital.inputs.sleepHours, 1),
-        napHours: roundNumber(vital.inputs.napHours, 1),
-        stress: roundInteger(vital.inputs.stress),
-        activity: roundInteger(vital.inputs.activity),
-        mood: roundInteger(vital.inputs.mood ?? vital.emotion?.mood),
-        caffeineMg: roundInteger(vital.inputs.caffeineMg),
-        symptomSeverity: roundInteger(vital.inputs.symptomSeverity),
-        workEventTags: normalizeWorkEventTags(vital.inputs.workEventTags),
-        workEventNote:
-          typeof vital.inputs.workEventNote === "string"
-            ? vital.inputs.workEventNote.replace(/\s+/g, " ").trim().slice(0, 160)
-            : "-",
-        note: typeof vital.note === "string" ? vital.note.replace(/\s+/g, " ").trim().slice(0, 160) : "-",
-      })),
+      recentVitals7: vitals7.map((vital) => {
+        const isCurrentDayStartRow = phase === "start" && vital.dateISO === todayISO;
+        return {
+          dateISO: vital.dateISO,
+          shift: vital.shift,
+          sleepHours: roundNumber(vital.inputs.sleepHours, 1),
+          napHours: roundNumber(vital.inputs.napHours, 1),
+          symptomSeverity: roundInteger(vital.inputs.symptomSeverity),
+          ...(isCurrentDayStartRow
+            ? {}
+            : {
+                stress: roundInteger(vital.inputs.stress),
+                activity: roundInteger(vital.inputs.activity),
+                mood: roundInteger(vital.inputs.mood ?? vital.emotion?.mood),
+                caffeineMg: roundInteger(vital.inputs.caffeineMg),
+                workEventTags: normalizeWorkEventTags(vital.inputs.workEventTags),
+                workEventNote:
+                  typeof vital.inputs.workEventNote === "string"
+                    ? vital.inputs.workEventNote.replace(/\s+/g, " ").trim().slice(0, 160)
+                    : "-",
+                note: typeof vital.note === "string" ? vital.note.replace(/\s+/g, " ").trim().slice(0, 160) : "-",
+              }),
+        };
+      }),
     },
     profile: {
       chronotype: roundNumber(params.profile?.chronotype ?? 0.5, 2),
@@ -320,26 +373,48 @@ function buildUserContext(params: GenerateOpenAIRecoveryParams) {
     },
     plannerContext: params.plannerContext ?? null,
     history: historySummary,
+    recoveryThread:
+      params.recoveryThread
+        ? {
+            startRecoveryHeadline: params.recoveryThread.startRecoveryHeadline ?? null,
+            startFocusLabel: params.recoveryThread.startFocusLabel ?? null,
+            startPrimaryAction: params.recoveryThread.startPrimaryAction ?? null,
+            startAvoidAction: params.recoveryThread.startAvoidAction ?? null,
+            totalStartOrderCount: params.recoveryThread.totalStartOrderCount ?? 0,
+            completedStartOrderCount: params.recoveryThread.completedStartOrderCount ?? 0,
+            completedStartOrders: params.recoveryThread.completedStartOrders ?? [],
+            pendingStartOrders: params.recoveryThread.pendingStartOrders ?? [],
+          }
+        : null,
   };
 }
 
-function buildDeveloperPrompt(language: Language) {
+function buildDeveloperPrompt(language: Language, phase: RecoveryPhase = "start") {
   if (language === "ko") {
-    return "너는 교대근무 간호사를 위한 AI 회복 해설 엔진이야. 규칙 기반 회복 플래너가 이미 정한 우선순위를 바탕으로, 왜 이런 회복 포커스와 행동이 잡혔는지 설명해. 새 계획을 임의로 만들지 말고 plannerContext와 정렬된 해설만 제공해. 정보는 전문적이고 신뢰 가능한 근거 중심으로 유지하되, 말투는 간호사 동료가 옆에서 설명하듯 부드러운 존댓말(해요체)로 작성해. 속어·과장·근거 없는 단정은 금지하고, 의료 진단/처방을 대체하지 않는 범위에서 즉시 실행 가능한 설명 중심으로 알려줘.";
+    return phase === "after_work"
+      ? "너는 교대근무 간호사를 위한 AI 퇴근 후 회복 해설 엔진이야. 아침에 만든 시작 회복과 오더 진행 상황을 끊지 말고 이어 받아, 오늘 실제 기록을 반영해 오늘 밤 회복과 내일 보호 방향을 업데이트해. 새 계획을 처음부터 다시 만드는 것이 아니라 아침 흐름을 보정하는 설명이어야 한다. plannerContext와 recoveryThread가 있으면 반드시 그 맥락과 정렬해. 정보는 전문적이고 신뢰 가능한 근거 중심으로 유지하되, 말투는 간호사 동료가 옆에서 설명하듯 부드러운 존댓말(해요체)로 작성해. 속어·과장·근거 없는 단정은 금지하고, 의료 진단/처방을 대체하지 않는 범위에서 즉시 실행 가능한 설명 중심으로 알려줘. 응답 안에 planner, plannerContext 같은 내부 시스템 용어를 직접 쓰지 말고 사용자에게 자연스러운 표현으로 바꿔 써라."
+      : "너는 교대근무 간호사를 위한 AI 시작 회복 해설 엔진이야. 전날 기록과 오늘 수면만 기준으로 오늘 하루를 어떻게 시작해야 하는지 설명해. plannerContext가 이미 정한 우선순위를 바탕으로 왜 이런 회복 포커스와 행동이 잡혔는지 설명하고, 새 계획을 임의로 만들지 말고 plannerContext와 정렬된 해설만 제공해. 같은 날의 스트레스·카페인·활동·기분·근무메모는 시작 회복 입력에서 제외된 항목이므로, 오늘 상태를 추정하거나 단정하지 말고 그 미입력 사실 자체도 핵심 설명으로 끌어오지 마라. 정보는 전문적이고 신뢰 가능한 근거 중심으로 유지하되, 말투는 간호사 동료가 옆에서 설명하듯 부드러운 존댓말(해요체)로 작성해. 속어·과장·근거 없는 단정은 금지하고, 의료 진단/처방을 대체하지 않는 범위에서 즉시 실행 가능한 설명 중심으로 알려줘. 응답 안에 planner, plannerContext 같은 내부 시스템 용어를 직접 쓰지 말고 사용자에게 자연스러운 표현으로 바꿔 써라.";
   }
-  return "You are an AI recovery explanation engine for shift-working nurses. A rule-based recovery planner has already chosen the priority actions. Explain why those priorities make sense and how to adjust them gently, but do not invent a conflicting plan. Keep the content professional and trustworthy in evidence, but warm like a supportive nurse colleague. Avoid slang, exaggeration, unsupported claims, and any wording that replaces medical judgment.";
+  return phase === "after_work"
+    ? "You are an AI after-work recovery explanation engine for shift-working nurses. Continue the morning recovery thread instead of restarting it. Use today's actual logs and order progress to update tonight's recovery and protection for tomorrow, while staying aligned with plannerContext and recoveryThread. Keep the content professional and trustworthy in evidence, but warm like a supportive nurse colleague. Avoid slang, exaggeration, unsupported claims, and any wording that replaces medical judgment. Do not expose internal system terms such as planner or plannerContext in the user-facing response."
+    : "You are an AI start-of-day recovery explanation engine for shift-working nurses. Use yesterday's records and today's sleep only to explain how the day should start. A rule-based recovery planner has already chosen the priority actions. Explain why those priorities make sense, stay aligned with plannerContext, and do not invent a conflicting plan. Same-day stress, caffeine, activity, mood, and work-event inputs are intentionally excluded in this phase, so do not infer them, do not describe them as today's state, and do not make their absence a main talking point. Keep the content professional and trustworthy in evidence, but warm like a supportive nurse colleague. Avoid slang, exaggeration, unsupported claims, and any wording that replaces medical judgment. Do not expose internal system terms such as planner or plannerContext in the user-facing response.";
 }
 
-function buildUserPrompt(language: Language, context: ReturnType<typeof buildUserContext>) {
+function buildUserPrompt(language: Language, context: ReturnType<typeof buildUserContext>, phase: RecoveryPhase = "start") {
   if (language === "ko") {
     return [
       "supabase를 통한 데이터와 유저의 기록 기반 알고리즘/통계 데이터를 총합해 회복 조언을 작성하세요.",
       "- plannerContext가 있으면 그 우선순위와 반드시 정렬하세요.",
       "- plannerContext.focusFactor 또는 plannerContext.primaryAction과 충돌하는 새 계획을 만들지 마세요.",
+      phase === "after_work"
+        ? "- 지금은 퇴근 후 회복 업데이트 단계입니다. 아침에 만든 회복 흐름을 끊지 말고, 오늘 실제 기록으로 밤 회복과 다음날 보호 방향을 보정하세요."
+        : "- 지금은 오늘 시작 회복 단계입니다. 오늘 수면을 제외한 같은 날 동적 입력은 이번 단계의 분석 입력에서 제외됐으므로, 오늘 상태를 추정하지도 말고 그 미입력 사실 자체를 설명의 중심으로 끌어오지도 마세요.",
       "아래 형식을 반드시 지켜서 한국어 텍스트로 출력하세요.",
       "",
       "[A] 한줄 요약",
-      "- 전체 데이터를 종합해서 오늘 가장 중요한 것 한 문장",
+      phase === "after_work"
+        ? "- 전체 데이터를 종합해서 오늘 밤 회복에서 가장 중요한 것 한 문장"
+        : "- 전체 데이터를 종합해서 오늘 시작에서 가장 중요한 것 한 문장",
       "- 가능하면 plannerContext.focusFactor 또는 plannerContext.primaryAction을 직접 반영",
       "",
       "[B] 긴급 알림",
@@ -361,6 +436,9 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
       "- 각 카테고리당 추천은 정확히 3개",
       "- 생리주기는 전문용어 없이 쉬운 단어 사용",
       "- [Data JSON]에 workEventTags/workEventNote/note가 있으면 해당 근무 이벤트 맥락을 반영해 우선순위를 조정할 것",
+      phase === "after_work"
+        ? "- recoveryThread가 있으면 아침 회복 headline/오더 진행을 이어 받아 오늘 밤 회복 설명에 연결할 것"
+        : "- recoveryThread가 없더라도 시작 회복은 하루를 여는 기준으로 설명할 것",
       "- 중복 문장 금지, 같은 의미 반복 금지",
       "- 줄 안에서 '/'로 항목을 이어 쓰지 말고, 각 항목을 반드시 줄바꿈으로 분리할 것",
       "",
@@ -387,6 +465,8 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
       "- 수치는 소수점 1자리까지만 사용 (예: 1.6h, 42.3%)",
       "- '스트레스(2)', '기분4'처럼 숫자 태그 형태 금지. 반드시 자연어로 풀어쓰기 (예: 스트레스가 조금 높은 편, 기분이 좋은 편)",
       "- 카페인 mg는 잔 수로 같이 표현 (예: 120mg -> 약 1잔)",
+      "- 카페인 표현은 한 문장 안에서 한 번만 정리하고, 같은 수치를 괄호로 중복 반복하지 말 것",
+      "- planner, plannerContext 같은 내부 시스템 용어를 사용자에게 직접 노출하지 말 것",
       "- 전체 답변은 한눈에 읽히는 짧고 정확한 문장으로 작성",
       "",
       "[데이터(JSON)]",
@@ -397,6 +477,9 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
   return [
     "Create personalized recovery guidance from the user's Supabase-backed records and computed trends.",
     "If plannerContext exists, stay aligned with it. Do not invent a conflicting plan.",
+    phase === "after_work"
+      ? "This is the after-work recovery update. Continue the morning recovery thread and adjust tonight's recovery with today's actual logs."
+      : "This is the start-of-day recovery. Use today's sleep only for same-day inputs, and do not infer missing same-day stress, caffeine, activity, mood, or work events.",
     "Output plain text in this exact structure:",
     "[A] One-line summary",
     "Reflect plannerContext.focusFactor or plannerContext.primaryAction when possible.",
@@ -428,10 +511,15 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
     "Tone: professional and trustworthy in content, but warm like a supportive nurse colleague.",
     "Avoid slang, exaggeration, and vague claims.",
     "When workEventTags/workEventNote/note exist in Data JSON, reflect those shift events in prioritization.",
+    phase === "after_work"
+      ? "If recoveryThread exists, carry the morning recovery headline and order progress into the evening update."
+      : "If same-day dynamic inputs are absent from Data JSON, do not talk about them as if they were observed today.",
     "No duplicated sentences.",
     "Keep numbers at one decimal place max.",
     "Do not use score tags like stress(2) or mood4. Rewrite them in plain language.",
     "Express caffeine both as cups and mg (e.g., about 1 cup / 120mg).",
+    "Mention caffeine only once per sentence and do not duplicate the same quantity in extra parentheses.",
+    "Do not expose internal system words such as planner or plannerContext in the user-facing answer.",
     "",
     "[Data JSON]",
     JSON.stringify(context, null, 2),
@@ -471,8 +559,9 @@ async function callResponsesApi(args: {
   logFeature: RecoveryOpenAILogFeature;
   language: Language;
   dateISO: string;
+  phase?: RecoveryPhase;
 }): Promise<TextAttempt> {
-  const { apiKey, model, developerPrompt, userPrompt, signal, maxOutputTokens, logFeature, language, dateISO } = args;
+  const { apiKey, model, developerPrompt, userPrompt, signal, maxOutputTokens, logFeature, language, dateISO, phase = "start" } = args;
   const storeResponses = resolveStoreResponses();
 
   const payload = {
@@ -503,6 +592,7 @@ async function callResponsesApi(args: {
       feature: logFeature,
       language,
       date_iso: dateISO,
+      phase,
     },
   };
 
@@ -1401,8 +1491,8 @@ export async function generateAIRecoveryWithOpenAI(
   }
 
   const context = buildUserContext(params);
-  const developerPrompt = buildDeveloperPrompt(params.language);
-  const userPrompt = buildUserPrompt(params.language, context);
+  const developerPrompt = buildDeveloperPrompt(params.language, params.phase ?? "start");
+  const userPrompt = buildUserPrompt(params.language, context, params.phase ?? "start");
   const maxOutputTokens = resolveMaxOutputTokens();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 35_000);
@@ -1417,6 +1507,7 @@ export async function generateAIRecoveryWithOpenAI(
       logFeature: "recovery_explanation",
       language: params.language,
       dateISO: params.todayISO,
+      phase: params.phase ?? "start",
     });
 
     if (!attempt.text) {
@@ -1733,7 +1824,11 @@ function buildPlannerRecoveryReference(result: AIRecoveryResult | null | undefin
   };
 }
 
-function buildPlannerOrdersDeveloperPrompt(language: Language, requestedOrderCount?: number | null) {
+function buildPlannerOrdersDeveloperPrompt(
+  language: Language,
+  phase: RecoveryPhase = "start",
+  requestedOrderCount?: number | null
+) {
   const requestedCountClause =
     requestedOrderCount != null
       ? language === "en"
@@ -1746,6 +1841,12 @@ function buildPlannerOrdersDeveloperPrompt(language: Language, requestedOrderCou
     return [
       "너는 RNest의 AI 오늘의 오더 생성 엔진이야.",
       "AI 맞춤회복 결과를 최상위 기준으로 삼고, 전체 건강기록 히스토리와 오늘 상태를 함께 읽어 회복 행동 체크리스트를 만든다.",
+      phase === "after_work"
+        ? "지금은 퇴근 후 오더 단계다. 아침에 만든 회복 흐름과 오더 진행 상황을 이어 받아, 오늘 밤 회복과 다음날 보호에 맞는 오더를 만든다."
+        : "지금은 오늘 시작 오더 단계다. 아침에 바로 실행할 수 있는 낮은 마찰의 스타터 오더를 우선 만든다.",
+      phase === "after_work"
+        ? "퇴근 후 단계에서는 오늘 실제 동적 입력을 반영해도 된다."
+        : "시작 단계에서는 오늘 수면 외의 같은 날 스트레스·카페인·활동·기분·근무메모를 분석 근거나 오더 설명 중심으로 끌어오지 말고, 그 미입력 사실을 오더 문구에 굳이 적지 않는다.",
       "오더는 추상적인 조언이 아니라 실제로 체크 가능한 행동이어야 한다.",
       requestedCountClause,
       "중요하지 않은 항목은 과감히 제외하되, 선택한 개수 안에서 우선순위가 분명해야 한다.",
@@ -1757,6 +1858,9 @@ function buildPlannerOrdersDeveloperPrompt(language: Language, requestedOrderCou
       "body에는 시작 트리거를 넣어 사용자가 언제 시작할지 바로 알 수 있게 한다. 예: 출근 전, 다음 투약 전, 퇴근 직후, 잠들기 전.",
       "제네릭한 '쉬기/눕기/눈감기' 표현만으로 끝내지 말고, 언제/어디서/무엇을/얼마나 중 최소 2개를 드러내 실행 장면이 그려지게 만든다.",
       "reason은 사용자의 개인 상태(수면, 교대, 기분, 스트레스, 활동, 카페인, 생리주기, 최근 반복 패턴)와 연결해 왜 이 행동이 회복에 유리한지 설명한다.",
+      phase === "after_work"
+        ? "퇴근 후 오더는 '퇴근 직후', '잠들기 전' 타이밍 중심으로 구성하고, 이미 완료된 시작 오더를 반복하지 않는다."
+        : "시작 오더는 '지금', '출근 전', '근무 중' 타이밍 중심으로 구성하고, 하루 시작에 과한 행동을 요구하지 않는다.",
       "오늘 데이터가 극심한 피로나 수면부채를 분명히 가리키는 경우가 아니면 막연한 휴식 오더를 남발하지 않는다.",
       "오더가 3개 이상이면 실수 방지/집중 리셋, 짧은 신체 회복, 정서 안정 또는 수면 전환 중 최소 2개 이상 영역이 섞이게 만든다.",
       "title은 행동만 적지 말고 맥락이 보이게 만든다. 예: '근무 중 3분 걷기 리셋', '퇴근 후 10분 감각 낮추기'.",
@@ -1768,6 +1872,9 @@ function buildPlannerOrdersDeveloperPrompt(language: Language, requestedOrderCou
   return [
     "You are RNest's AI today-orders generation engine.",
     "Use the AI customized recovery result as the top-level source of truth, then read the full health-record history and today's condition to build an actionable checklist.",
+    phase === "after_work"
+      ? "This is the after-work orders phase. Continue the morning recovery thread and order progress, then focus the checklist on tonight's recovery and protection for tomorrow."
+      : "This is the start-of-day orders phase. Prioritize low-friction actions that help the user begin the day safely and clearly.",
     "Orders must be concrete actions that can be checked off, not generic advice.",
     requestedCountClause,
     "Keep priority sharp within the selected count and cut lower-value suggestions.",
@@ -1779,6 +1886,9 @@ function buildPlannerOrdersDeveloperPrompt(language: Language, requestedOrderCou
     "Include a start trigger in body so the user knows exactly when to begin, such as before the next med pass, during a short break, right after arriving home, or before bed.",
     "Do not stop at vague rest wording. Make the scene concrete with at least two of timing, place, action, or duration.",
     "Write reason in a personalized way that ties the action to sleep, shift pattern, mood, stress, activity, caffeine, menstrual timing, or repeating blockers in the history.",
+    phase === "after_work"
+      ? "After-work orders should lean toward after work and before-bed timing, and should not repeat morning orders already completed."
+      : "Start-of-day orders should lean toward now, before work, and during shift timing, and should stay easy enough to start immediately.",
     "Unless today's data clearly points to acute exhaustion or sleep debt, avoid filling the list with generic lie-down or rest-only actions.",
     "When returning 3 or more orders, mix at least two domains across safety or focus reset, light body recovery, and emotional downshift or sleep transition.",
     "Make title action-first but contextual, such as '3-minute reset walk during shift' or '10-minute wind-down after work'.",
@@ -1792,9 +1902,10 @@ function buildPlannerOrdersUserPrompt(args: {
   language: Language;
   context: ReturnType<typeof buildUserContext>;
   recoveryResult: AIRecoveryResult | null | undefined;
+  phase?: RecoveryPhase;
   requestedOrderCount?: number | null;
 }) {
-  const { language, context, recoveryResult, requestedOrderCount } = args;
+  const { language, context, recoveryResult, phase = "start", requestedOrderCount } = args;
   const recoveryReference = buildPlannerRecoveryReference(recoveryResult);
   const shape = {
     eyebrow: "string",
@@ -1819,12 +1930,15 @@ function buildPlannerOrdersUserPrompt(args: {
       "반드시 JSON 하나만 출력하세요. 코드펜스 금지, 설명문 금지.",
       "",
       "[목표]",
-      "- AI 맞춤회복을 실제 행동 체크리스트로 바꾸기",
+      phase === "after_work" ? "- 퇴근 후 회복 업데이트를 실제 행동 체크리스트로 바꾸기" : "- AI 맞춤회복을 실제 행동 체크리스트로 바꾸기",
       requestedOrderCount != null
         ? `- 오늘 가장 중요한 오더를 ${requestedOrderCount}개로 맞춰 고르기`
         : `- 오늘 가장 중요한 오더 ${DEFAULT_PLANNER_ORDER_COUNT}개를 기본값으로 고르기`,
       "- 타이밍 정보는 when과 reason에 자연스럽게 녹이기",
       "- 사용자가 지금 컨디션에서도 바로 실천할 수 있게 마찰을 낮추기",
+      phase === "after_work"
+        ? "- recoveryThread를 참고해 아침 흐름을 이어받되, 오늘 밤 회복과 잠들기 전 전환을 위한 오더로 업데이트하기"
+        : "- 하루를 시작할 때 바로 실행할 수 있는 스타터 오더가 되게 만들기",
       "",
       "[제약]",
       requestedOrderCount != null
@@ -1838,10 +1952,16 @@ function buildPlannerOrdersUserPrompt(args: {
       "- reason은 왜 지금 필요한지, 사용자의 현재 패턴과 연결해 한 문장으로 설명",
       "- chips는 0~3개, 짧은 키워드만 사용",
       "- today / weekly / history / plannerContext / AI Recovery Brief JSON을 모두 보고 판단",
+      phase === "after_work"
+        ? "- 퇴근 후 단계에서는 오늘 실제 입력을 reason에 반영할 수 있음"
+        : "- 시작 단계에서는 오늘 수면 외 같은 날 동적 입력을 reason의 근거로 끌어오지 말 것",
       "- 전체 건강기록을 봤을 때 반복적으로 회복을 방해하는 패턴이 있으면 우선순위에 반영",
       "- 작은 행동이지만 회복 효과가 크고 실수/소진을 줄이는 방향을 우선",
       "- 막연한 '쉬기/눕기/눈감기' 표현만 쓰지 말고, 왜 지금 그 행동을 해야 하는지 실행 장면이 보이게 작성",
       "- items가 3개 이상이면 집중·안전, 짧은 움직임, 정서 안정/수면 전환 중 최소 2개 이상 영역이 섞이게 구성",
+      phase === "after_work"
+        ? "- 퇴근 후 단계에서는 when이 '퇴근 직후', '잠들기 전' 쪽으로 자연스럽게 분산되게 구성"
+        : "- 시작 단계에서는 when이 '지금', '출근 전', '근무 중' 쪽으로 자연스럽게 분산되게 구성",
       "- 같은 행동을 표현만 바꿔 중복 생성하지 말 것",
       "- Data JSON에 없는 수치를 새로 만들지 말 것",
       requestedOrderCount != null ? `[선택된 오더 개수]\n${requestedOrderCount}` : "",
@@ -1861,12 +1981,17 @@ function buildPlannerOrdersUserPrompt(args: {
     "Create a JSON object for today's checklist orders.",
     "Return JSON only. No code fences and no commentary.",
     "[Goal]",
-    "- Turn AI customized recovery into an actionable checklist",
+    phase === "after_work"
+      ? "- Turn the after-work recovery update into an actionable checklist"
+      : "- Turn AI customized recovery into an actionable checklist",
     requestedOrderCount != null
       ? `- Choose exactly ${requestedOrderCount} important orders for today`
       : `- Choose exactly ${DEFAULT_PLANNER_ORDER_COUNT} important orders for today by default`,
     "- Fold timing into when and reason instead of creating a separate timeline section",
     "- Keep the actions easy to start in the user's current condition",
+    phase === "after_work"
+      ? "- Carry the morning recovery thread forward while focusing on after-work and bedtime recovery"
+      : "- Make the checklist feel like a clean start-of-day launch sequence",
     "[Constraints]",
     requestedOrderCount != null
       ? `- items length must be exactly ${requestedOrderCount}`
@@ -1883,6 +2008,9 @@ function buildPlannerOrdersUserPrompt(args: {
     "- prefer low-friction, high-impact, non-duplicated actions",
     "- avoid vague rest-only wording unless today's data strongly supports acute exhaustion or sleep debt",
     "- if there are 3 or more items, mix at least two domains across focus or safety reset, light movement, and emotional or sleep recovery",
+    phase === "after_work"
+      ? "- after-work timing should lean toward after work and before bed"
+      : "- start-of-day timing should lean toward now, before work, and during shift",
     "- do not invent numbers missing from Data JSON",
     requestedOrderCount != null ? `[Requested order count]\n${requestedOrderCount}` : "",
     "[JSON shape]",
@@ -1930,6 +2058,7 @@ function normalizeChecklistChip(value: string) {
 }
 
 function normalizeRequestedOrderCount(value: number | null | undefined) {
+  if (value == null || String(value).trim() === "") return DEFAULT_PLANNER_ORDER_COUNT;
   const parsed = Math.round(Number(value));
   if (!Number.isFinite(parsed)) return DEFAULT_PLANNER_ORDER_COUNT;
   return Math.max(1, Math.min(5, parsed));
@@ -1938,6 +2067,7 @@ function normalizeRequestedOrderCount(value: number | null | undefined) {
 function buildFallbackChecklistItems(
   plannerContext: PlannerContext | null | undefined,
   language: Language,
+  phase: RecoveryPhase,
   requestedOrderCount?: number | null
 ): AIPlannerChecklistItem[] {
   const targetCount =
@@ -1984,58 +2114,112 @@ function buildFallbackChecklistItems(
 
   const supplementalTemplates: AIPlannerChecklistItem[] =
     language === "en"
-      ? [
-          {
-            id: "pause_before_next_task",
-            title: "10-second safety pause before the next key task",
-            body: "Before the next important task, stop for 10 seconds and quietly recheck the name, order, or next step once.",
-            when: "During shift",
-            reason: "A brief pause protects focus and reduces errors on days when recovery margin is already thin.",
-            chips: ["safety", "focus"],
-          },
-          {
-            id: "reset_with_small_movement",
-            title: "Add one 3-minute reset walk",
-            body: "During one short break today, set a 3-minute timer and walk slowly until your shoulders and jaw loosen.",
-            when: "During shift",
-            reason: "A brief walk is easier to start than full exercise and still helps circulation, mood, and mental reset.",
-            chips: ["movement", "reset"],
-          },
-          {
-            id: "close_day_gently",
-            title: "Close the day with a quiet 5-minute landing",
-            body: "Before bed, lower the phone brightness, put it down, and sit quietly for 5 minutes before lying down.",
-            when: "Before bed",
-            reason: "A softer landing helps keep the nervous system from carrying the day too far into sleep.",
-            chips: ["sleep"],
-          },
-        ]
-      : [
-          {
-            id: "pause_before_next_task",
-            title: "다음 핵심 업무 전 10초 확인 루틴",
-            body: "다음 투약·처치·인계 전 10초만 멈추고 이름·순서·속도를 속으로 한 번 다시 짚습니다.",
-            when: "근무 중",
-            reason: "회복 여유가 얇은 날일수록 짧은 확인 루틴이 실수와 멘탈 소모를 줄이는 데 직접 도움이 됩니다.",
-            chips: ["실수 방지", "집중"],
-          },
-          {
-            id: "reset_with_small_movement",
-            title: "복도 한 바퀴 3분 리셋 걷기",
-            body: "근무 중 한 번, 3분 타이머를 맞추고 복도나 휴게실을 천천히 걸으며 어깨와 턱 힘을 풉니다.",
-            when: "근무 중",
-            reason: "짧은 움직임은 부담이 낮으면서도 순환, 기분, 집중 회복을 같이 끌어올리기 좋습니다.",
-            chips: ["움직임", "리셋"],
-          },
-          {
-            id: "close_day_gently",
-            title: "잠들기 전 5분 조용히 마감하기",
-            body: "잠들기 전 휴대폰을 내려두고 밝기를 낮춘 뒤, 5분만 조용히 앉아 호흡을 고르고 눕습니다.",
-            when: "잠들기 전",
-            reason: "하루 자극을 조금만 낮춰도 신경계가 덜 들뜬 상태로 잠에 들어가기 쉬워집니다.",
-            chips: ["수면"],
-          },
-        ];
+      ? phase === "after_work"
+        ? [
+            {
+              id: "after_work_unload",
+              title: "10-minute unload right after work",
+              body: "Right after arriving home, put the phone down, wash up, and sit quietly for 10 minutes before doing anything else.",
+              when: "After work",
+              reason: "A short landing helps your nervous system stop carrying shift tension straight into the evening.",
+              chips: ["wind_down", "after_work"],
+            },
+            {
+              id: "light_recovery_walk_home",
+              title: "5-minute light body reset after shift",
+              body: "After work, set a 5-minute timer and walk slowly indoors while releasing your shoulders and jaw.",
+              when: "After work",
+              reason: "A brief movement reset helps circulation and mental decompression without feeling like full exercise.",
+              chips: ["movement", "reset"],
+            },
+            {
+              id: "bedtime_landing",
+              title: "5-minute quiet landing before bed",
+              body: "Before bed, lower the screen brightness, put the phone away, and sit still for 5 minutes before lying down.",
+              when: "Before bed",
+              reason: "Lowering stimulation makes it easier to shift from work mode into real recovery sleep.",
+              chips: ["sleep"],
+            },
+          ]
+        : [
+            {
+              id: "pause_before_next_task",
+              title: "10-second safety pause before the next key task",
+              body: "Before the next important task, stop for 10 seconds and quietly recheck the name, order, or next step once.",
+              when: "During shift",
+              reason: "A brief pause protects focus and reduces errors on days when recovery margin is already thin.",
+              chips: ["safety", "focus"],
+            },
+            {
+              id: "reset_with_small_movement",
+              title: "Add one 3-minute reset walk",
+              body: "During one short break today, set a 3-minute timer and walk slowly until your shoulders and jaw loosen.",
+              when: "During shift",
+              reason: "A brief walk is easier to start than full exercise and still helps circulation, mood, and mental reset.",
+              chips: ["movement", "reset"],
+            },
+            {
+              id: "close_day_gently",
+              title: "Close the day with a quiet 5-minute landing",
+              body: "Before bed, lower the phone brightness, put it down, and sit quietly for 5 minutes before lying down.",
+              when: "Before bed",
+              reason: "A softer landing helps keep the nervous system from carrying the day too far into sleep.",
+              chips: ["sleep"],
+            },
+          ]
+      : phase === "after_work"
+        ? [
+            {
+              id: "after_work_unload",
+              title: "퇴근 직후 10분 감각 낮추기",
+              body: "집에 도착하면 휴대폰을 내려두고 세안이나 샤워만 한 뒤, 10분만 조용히 앉아 속도를 낮춥니다.",
+              when: "퇴근 직후",
+              reason: "근무 긴장을 바로 끌고 가지 않게 짧게 착지하면 저녁 회복이 훨씬 부드럽게 시작됩니다.",
+              chips: ["정서 안정", "퇴근 후"],
+            },
+            {
+              id: "light_recovery_walk_home",
+              title: "퇴근 후 5분 몸 풀기",
+              body: "퇴근 후 5분 타이머를 맞추고 실내를 천천히 오가며 어깨와 턱 힘을 풀어 줍니다.",
+              when: "퇴근 직후",
+              reason: "짧은 움직임은 근무 중 쌓인 긴장을 낮추고 바로 눕는 것보다 회복 전환에 유리합니다.",
+              chips: ["움직임", "회복"],
+            },
+            {
+              id: "bedtime_landing",
+              title: "잠들기 전 5분 조용히 착지하기",
+              body: "잠들기 전 휴대폰을 내려두고 밝기를 낮춘 뒤, 5분만 조용히 앉아 호흡을 고르고 눕습니다.",
+              when: "잠들기 전",
+              reason: "하루 자극을 조금 낮춰 두면 몸이 잠으로 넘어가는 데 필요한 브레이크가 걸립니다.",
+              chips: ["수면"],
+            },
+          ]
+        : [
+            {
+              id: "pause_before_next_task",
+              title: "다음 핵심 업무 전 10초 확인 루틴",
+              body: "다음 투약·처치·인계 전 10초만 멈추고 이름·순서·속도를 속으로 한 번 다시 짚습니다.",
+              when: "근무 중",
+              reason: "회복 여유가 얇은 날일수록 짧은 확인 루틴이 실수와 멘탈 소모를 줄이는 데 직접 도움이 됩니다.",
+              chips: ["실수 방지", "집중"],
+            },
+            {
+              id: "reset_with_small_movement",
+              title: "복도 한 바퀴 3분 리셋 걷기",
+              body: "근무 중 한 번, 3분 타이머를 맞추고 복도나 휴게실을 천천히 걸으며 어깨와 턱 힘을 풉니다.",
+              when: "근무 중",
+              reason: "짧은 움직임은 부담이 낮으면서도 순환, 기분, 집중 회복을 같이 끌어올리기 좋습니다.",
+              chips: ["움직임", "리셋"],
+            },
+            {
+              id: "close_day_gently",
+              title: "잠들기 전 5분 조용히 마감하기",
+              body: "잠들기 전 휴대폰을 내려두고 밝기를 낮춘 뒤, 5분만 조용히 앉아 호흡을 고르고 눕습니다.",
+              when: "잠들기 전",
+              reason: "하루 자극을 조금만 낮춰도 신경계가 덜 들뜬 상태로 잠에 들어가기 쉬워집니다.",
+              chips: ["수면"],
+            },
+          ];
 
   const items = [...baseItems];
   for (const extra of supplementalTemplates) {
@@ -2050,11 +2234,12 @@ function buildFallbackChecklistItems(
 function parsePlannerChecklistItems(
   value: unknown,
   language: Language,
+  phase: RecoveryPhase,
   plannerContext?: PlannerContext | null,
   requestedOrderCount?: number | null
 ): AIPlannerChecklistItem[] {
   const targetCount = normalizeRequestedOrderCount(requestedOrderCount);
-  const fallbackItems = buildFallbackChecklistItems(plannerContext, language, targetCount);
+  const fallbackItems = buildFallbackChecklistItems(plannerContext, language, phase, targetCount);
   if (!Array.isArray(value)) return fallbackItems;
 
   const items: AIPlannerChecklistItem[] = [];
@@ -2097,24 +2282,41 @@ function parsePlannerChecklistItems(
 function parsePlannerChecklistModule(
   value: unknown,
   language: Language,
+  phase: RecoveryPhase,
   plannerContext?: PlannerContext | null,
   requestedOrderCount?: number | null
 ): AIPlannerChecklistModule {
   const row = typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
-  const items = parsePlannerChecklistItems(row.items, language, plannerContext, requestedOrderCount);
+  const items = parsePlannerChecklistItems(row.items, language, phase, plannerContext, requestedOrderCount);
   return {
     eyebrow: asString(row.eyebrow) || "Today Orders",
-    title: asString(row.title) || (language === "en" ? "Today Orders" : "오늘의 오더"),
+    title:
+      asString(row.title) ||
+      (language === "en"
+        ? phase === "after_work"
+          ? "After-work Orders"
+          : "Start Orders"
+        : phase === "after_work"
+          ? "퇴근 후 오더"
+          : "오늘 시작 오더"),
     headline:
       asString(row.headline) ||
       (language === "en"
-        ? "Move AI customized recovery into a checklist."
-        : "AI 맞춤회복을 오늘의 체크리스트로 옮겼어요."),
+        ? phase === "after_work"
+          ? "Update the morning recovery thread into tonight's checklist."
+          : "Move start-of-day recovery into a checklist."
+        : phase === "after_work"
+          ? "아침 회복 흐름을 이어 받아 오늘 밤 체크리스트로 업데이트했어요."
+          : "오늘 시작 회복을 바로 실행할 체크리스트로 옮겼어요."),
     summary:
       asString(row.summary) ||
       (language === "en"
-        ? "Only the most important orders for today are listed."
-        : "오늘 꼭 필요한 오더만 남겨 체크리스트로 정리했어요."),
+        ? phase === "after_work"
+          ? "Only the evening recovery orders that matter now are listed."
+          : "Only the most important starter orders for today are listed."
+        : phase === "after_work"
+          ? "지금 필요한 퇴근 후 회복 오더만 남겨 저녁 루틴으로 정리했어요."
+          : "오늘 시작에 꼭 필요한 스타터 오더만 남겨 정리했어요."),
     items,
   };
 }
@@ -2131,11 +2333,16 @@ async function generatePlannerOrdersWithOpenAI(
   if (!apiKey) throw new Error("missing_openai_api_key");
 
   const context = buildUserContext(params);
-  const developerPrompt = buildPlannerOrdersDeveloperPrompt(params.language, params.requestedOrderCount);
+  const developerPrompt = buildPlannerOrdersDeveloperPrompt(
+    params.language,
+    params.phase ?? "start",
+    params.requestedOrderCount
+  );
   const userPrompt = buildPlannerOrdersUserPrompt({
     language: params.language,
     context,
     recoveryResult: params.recoveryResult,
+    phase: params.phase ?? "start",
     requestedOrderCount: params.requestedOrderCount,
   });
   const maxOutputTokens = Math.max(resolveMaxOutputTokens(), 1800);
@@ -2153,6 +2360,7 @@ async function generatePlannerOrdersWithOpenAI(
       logFeature: "planner_orders",
       language: params.language,
       dateISO: params.todayISO,
+      phase: params.phase ?? "start",
     });
 
     if (!attempt.text) {
@@ -2168,6 +2376,7 @@ async function generatePlannerOrdersWithOpenAI(
     const checklistModule = parsePlannerChecklistModule(
       parsed,
       params.language,
+      params.phase ?? "start",
       params.plannerContext,
       params.requestedOrderCount
     );
@@ -2198,8 +2407,12 @@ export async function generateAIRecoveryPlannerModulesWithOpenAI(
       heroTitle: params.language === "en" ? "AI Customized Recovery" : "AI 맞춤회복",
       heroSummary:
         params.language === "en"
-          ? "AI customized recovery now flows directly into today's checklist orders."
-          : "AI 맞춤회복을 바로 오늘의 체크리스트 오더로 이어서 봅니다.",
+          ? params.phase === "after_work"
+            ? "The morning recovery thread now continues into after-work checklist orders."
+            : "Start-of-day recovery now flows directly into today's checklist orders."
+          : params.phase === "after_work"
+            ? "아침 회복 흐름을 이어 받아 퇴근 후 오더로 연결합니다."
+            : "오늘 시작 회복을 바로 체크리스트 오더로 이어서 봅니다.",
       orders: result.module,
     },
     generatedText: result.generatedText,

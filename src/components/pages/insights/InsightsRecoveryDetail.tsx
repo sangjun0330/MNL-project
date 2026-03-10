@@ -16,6 +16,7 @@ import { DetailCard, DetailChip, DETAIL_ACCENTS, InsightDetailShell } from "@/co
 import { buildExplanationModule, buildFallbackModules } from "@/lib/aiRecoveryPlanner";
 import { formatKoreanDate } from "@/lib/date";
 import { withReturnTo } from "@/lib/navigation";
+import { buildRecoveryOrderProgressId } from "@/lib/recoveryPhases";
 import {
   caffeineSensitivityPresetFromValue,
   caffeineSensitivityPresetLabel,
@@ -39,21 +40,36 @@ export function InsightsRecoveryDetail() {
   const aiRecovery = useAIRecoveryInsights({
     mode: "cache",
     enabled: !isInsightsLocked(recordedDays) && planner.aiAvailable,
+    phase: "start",
+  });
+  const aiRecoveryAfter = useAIRecoveryInsights({
+    mode: "cache",
+    enabled: !isInsightsLocked(recordedDays) && planner.aiAvailable,
+    phase: "after_work",
   });
   const aiPlanner = useAIRecoveryPlanner({
     mode: "cache",
     enabled: !isInsightsLocked(recordedDays) && planner.aiAvailable,
+    phase: "start",
+  });
+  const aiPlannerAfter = useAIRecoveryPlanner({
+    mode: "cache",
+    enabled: !isInsightsLocked(recordedDays) && planner.aiAvailable,
+    phase: "after_work",
   });
   const profile = useAppStoreSelector((s) => normalizeProfileSettings(s.settings.profile));
   const profileSummary = `${chronotypePresetLabel(chronotypePresetFromValue(profile.chronotype))} · ${t("카페인")} ${caffeineSensitivityPresetLabel(
     caffeineSensitivityPresetFromValue(profile.caffeineSensitivity)
   )}`;
   const [doneMap, setDoneMap] = useState<Record<string, boolean>>({});
-  const plannerDateISO = aiPlanner.data?.dateISO ?? end;
+  const plannerDateISO = aiPlannerAfter.data?.dateISO ?? aiPlanner.data?.dateISO ?? end;
 
   useEffect(() => {
     let active = true;
-    const activeIds = aiPlanner.data?.result.orders.items.map((item) => item.id) ?? [];
+    const activeIds = [
+      ...(aiPlanner.data?.result.orders.items.map((item) => buildRecoveryOrderProgressId("start", item.id)) ?? []),
+      ...(aiPlannerAfter.data?.result.orders.items.map((item) => buildRecoveryOrderProgressId("after_work", item.id)) ?? []),
+    ];
     if (activeIds.length) {
       clearStaleRecoveryOrderDone(plannerDateISO, activeIds);
     }
@@ -78,7 +94,7 @@ export function InsightsRecoveryDetail() {
     return () => {
       active = false;
     };
-  }, [aiPlanner.data, plannerDateISO]);
+  }, [aiPlanner.data, aiPlannerAfter.data, plannerDateISO]);
 
   if (isInsightsLocked(recordedDays)) {
     return (
@@ -107,11 +123,15 @@ export function InsightsRecoveryDetail() {
     timelinePreview: planner.timelinePreview,
   });
 
-  const explanationModule = aiPlanner.data?.result.explanation
-    ? aiPlanner.data.result.explanation
-    : aiRecovery.data
-      ? buildExplanationModule(aiRecovery.data.result, aiRecovery.data.language)
-    : {
+  const explanationModule = aiPlannerAfter.data?.result.explanation
+    ? aiPlannerAfter.data.result.explanation
+    : aiPlanner.data?.result.explanation
+      ? aiPlanner.data.result.explanation
+      : aiRecoveryAfter.data
+        ? buildExplanationModule(aiRecoveryAfter.data.result, aiRecoveryAfter.data.language)
+        : aiRecovery.data
+          ? buildExplanationModule(aiRecovery.data.result, aiRecovery.data.language)
+      : {
         title: "AI 맞춤회복",
         eyebrow: "AI Recovery",
         headline: planner.focusFactor ? `${planner.focusFactor.label} 중심 회복` : planner.primaryAction ?? "오늘 회복 우선순위를 확인해 보세요.",
@@ -124,12 +144,19 @@ export function InsightsRecoveryDetail() {
         },
       };
 
-  const ordersModule = aiPlanner.data?.result.orders ?? fallbackModules.orders;
+  const ordersModule = aiPlannerAfter.data?.result.orders ?? aiPlanner.data?.result.orders ?? fallbackModules.orders;
 
-  const plannerReady = Boolean(aiPlanner.data);
-  const activeOrders = plannerReady ? ordersModule.items.filter((item) => !doneMap[item.id]) : [];
-  const completedCount = plannerReady ? ordersModule.items.length - activeOrders.length : 0;
-  const recoveryReady = Boolean(aiPlanner.data?.result.explanation || aiRecovery.data);
+  const startOrders = aiPlanner.data?.result.orders.items ?? [];
+  const afterOrders = aiPlannerAfter.data?.result.orders.items ?? [];
+  const plannerReady = Boolean(aiPlanner.data || aiPlannerAfter.data);
+  const activeOrders = plannerReady
+    ? [
+        ...startOrders.filter((item) => !doneMap[buildRecoveryOrderProgressId("start", item.id)]),
+        ...afterOrders.filter((item) => !doneMap[buildRecoveryOrderProgressId("after_work", item.id)]),
+      ]
+    : [];
+  const completedCount = plannerReady ? startOrders.length + afterOrders.length - activeOrders.length : 0;
+  const recoveryReady = Boolean(aiPlannerAfter.data?.result.explanation || aiPlanner.data?.result.explanation || aiRecoveryAfter.data || aiRecovery.data);
   const personalizationHref = withReturnTo("/settings/personalization", "/insights/recovery");
 
   return (

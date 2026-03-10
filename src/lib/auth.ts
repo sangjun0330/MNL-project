@@ -41,10 +41,38 @@ export function getSupabaseBrowserClient(): ReturnType<typeof createBrowserClien
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const [session, setSession] = useState<Session | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let active = true;
+
+    const sessionUserToAuthUser = (nextSession: Session): AuthUser => ({
+      userId: nextSession.user.id,
+      email: nextSession.user.email ?? null,
+      provider: (nextSession.user as { app_metadata?: { provider?: string } })?.app_metadata?.provider,
+    });
+
+    const readServerSession = async (): Promise<{ available: boolean; userId: string | null }> => {
+      try {
+        const response = await fetch("/api/auth/session", {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        });
+        if (response.ok) {
+          const payload = await response.json().catch(() => null);
+          const userId = typeof payload?.userId === "string" ? payload.userId : null;
+          return { available: true, userId };
+        }
+        if (response.status === 401) {
+          return { available: true, userId: null };
+        }
+      } catch {
+        // ignore
+      }
+      return { available: false, userId: null };
+    };
 
     const clearClientAuth = async () => {
       try {
@@ -63,44 +91,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       if (!active) return;
       setSession(null);
+      setUser(null);
       setLoading(false);
     };
 
     const syncAllowedSession = async (nextSession: Session | null) => {
+      const serverSession = await readServerSession();
       if (!active) return;
+
       if (!nextSession?.user) {
-        setSession(null);
-        setLoading(false);
-        return;
-      }
-      try {
-        const trustedUser = await supabase.auth.getUser();
-        if (!active) return;
-        if (trustedUser.error || !trustedUser.data.user?.id || trustedUser.data.user.id !== nextSession.user.id) {
-          await clearClientAuth();
-          return;
-        }
-        const response = await fetch("/api/auth/session", {
-          method: "GET",
-          credentials: "include",
-          cache: "no-store",
-        });
-        if (!active) return;
-        if (response.ok) {
-          setSession(nextSession);
+        if (serverSession.available && serverSession.userId) {
+          setSession(null);
+          setUser({ userId: serverSession.userId });
           setLoading(false);
           return;
         }
-        if (response.status === 401) {
+        setSession(null);
+        setUser(null);
+        setLoading(false);
+        return;
+      }
+
+      if (serverSession.available) {
+        if (!serverSession.userId || serverSession.userId !== nextSession.user.id) {
           await clearClientAuth();
           return;
         }
-      } catch {
-        await clearClientAuth();
-        return;
       }
+
       if (!active) return;
-      await clearClientAuth();
+      setSession(nextSession);
+      setUser(sessionUserToAuthUser(nextSession));
+      setLoading(false);
     };
 
     supabase.auth.getSession().then(({ data }) => {
@@ -126,15 +148,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       data.subscription?.unsubscribe();
     };
   }, [supabase]);
-
-  const user: AuthUser | null = useMemo(() => {
-    if (!session?.user) return null;
-    return {
-      userId: session.user.id,
-      email: session.user.email ?? null,
-      provider: (session.user as { app_metadata?: { provider?: string } })?.app_metadata?.provider,
-    };
-  }, [session]);
 
   const status: AuthState["status"] = loading
     ? "loading"

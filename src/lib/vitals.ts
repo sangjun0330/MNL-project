@@ -208,7 +208,12 @@ function burnoutFrom(v: { body: number; mental: number; shift: Shift }): { level
   };
 }
 
-function parseArgs(args: any[]): { state: AppState; start: ISODate; end: ISODate } | null {
+function parseArgs(args: any[]): {
+  state: AppState;
+  start: ISODate;
+  end: ISODate;
+  disableTodayCarryISO?: ISODate | null;
+} | null {
   const a0 = args[0];
 
   // current call site: computeVitalsRange({ state: store, start, end })
@@ -217,6 +222,10 @@ function parseArgs(args: any[]): { state: AppState; start: ISODate; end: ISODate
       state: (a0.state ?? a0.store) as AppState,
       start: (a0.start ?? a0.from) as ISODate,
       end: (a0.end ?? a0.to) as ISODate,
+      disableTodayCarryISO:
+        typeof (a0.disableTodayCarryISO ?? a0.disableCarryISO) === "string"
+          ? ((a0.disableTodayCarryISO ?? a0.disableCarryISO) as ISODate)
+          : null,
     };
   }
 
@@ -246,7 +255,7 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
   const parsed = parseArgs(args);
   if (!parsed) return [];
 
-  const { state, start, end } = parsed;
+  const { state, start, end, disableTodayCarryISO } = parsed;
   if (!start || !end) return [];
 
   const days = Math.max(0, diffDays(end, start));
@@ -355,8 +364,9 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
     let estimatedStress = false;
     let estimatedActivity = false;
     let estimatedMood = false;
+    const blockTodayCarry = disableTodayCarryISO === iso;
 
-    if (effectiveSleepHours == null && effectiveNapHours == null && recentSleepObs.length) {
+    if (!blockTodayCarry && effectiveSleepHours == null && effectiveNapHours == null && recentSleepObs.length) {
       const prev = recentSleepObs[0];
       const gap = diffDays(iso, prev.iso);
       if (gap >= 1 && gap <= 2) {
@@ -379,7 +389,7 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
       }
     }
 
-    if (effectiveStress == null && recentStressObs.length) {
+    if (!blockTodayCarry && effectiveStress == null && recentStressObs.length) {
       const prev = recentStressObs[0];
       const gap = diffDays(iso, prev.iso);
       if (gap >= 1 && gap <= 2) {
@@ -389,7 +399,7 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
       }
     }
 
-    if (effectiveActivity == null && recentActivityObs.length) {
+    if (!blockTodayCarry && effectiveActivity == null && recentActivityObs.length) {
       const prev = recentActivityObs[0];
       const gap = diffDays(iso, prev.iso);
       if (gap >= 1 && gap <= 2) {
@@ -399,7 +409,7 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
       }
     }
 
-    if (effectiveMood == null && recentMoodObs.length) {
+    if (!blockTodayCarry && effectiveMood == null && recentMoodObs.length) {
       const prev = recentMoodObs[0];
       const gap = diffDays(iso, prev.iso);
       if (gap >= 1 && gap <= 2) {
@@ -409,7 +419,7 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
       }
     }
 
-    if (effectiveCaffeineMg == null && effectiveCaffeineLastAt == null && recentCaffeineObs.length) {
+    if (!blockTodayCarry && effectiveCaffeineMg == null && effectiveCaffeineLastAt == null && recentCaffeineObs.length) {
       const prev = recentCaffeineObs[0];
       const gap = diffDays(iso, prev.iso);
       if (gap >= 1 && gap <= 2) {
@@ -425,7 +435,7 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
           }
         }
       }
-    } else if (effectiveCaffeineMg == null && effectiveCaffeineLastAt != null) {
+    } else if (!blockTodayCarry && effectiveCaffeineMg == null && effectiveCaffeineLastAt != null) {
       // If time is logged without mg, infer a conservative one-cup baseline.
       const prev = recentCaffeineObs[0];
       const prevGap = prev ? diffDays(iso, prev.iso) : null;
@@ -437,7 +447,7 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
       estimatedCaffeine = true;
     }
 
-    if (effectiveSymptomSeverity == null && menstrual.enabled) {
+    if (!blockTodayCarry && effectiveSymptomSeverity == null && menstrual.enabled) {
       const phaseBaseline = baselineSymptomByPhase(menstrual.phase);
       const flowBaseline = clamp(Number(rawMenstrualFlow ?? 0), 0, 3) * 0.25;
       const cycleBaseline = clamp(phaseBaseline + flowBaseline, 0, 3);

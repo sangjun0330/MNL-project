@@ -18,6 +18,17 @@ import {
   generateAIRecoveryWithOpenAI,
 } from "@/lib/server/openaiRecovery";
 import {
+  buildAfterWorkMissingLabels,
+  buildRecoveryOrderProgressId,
+  buildRecoveryPhaseState,
+  getAfterWorkReadiness,
+  normalizeRecoveryPhase,
+  recoveryPhaseTitle,
+  stripStartPhaseDynamicInputs,
+  stripStartPhaseDynamicInputsFromVitals,
+  type RecoveryPhase,
+} from "@/lib/recoveryPhases";
+import {
   buildPlannerContext,
   buildPlannerTimelinePreview,
   formatRelativeDutyKorean,
@@ -40,6 +51,7 @@ function toLanguage(value: string | null): Language | null {
 }
 
 function normalizeRequestedOrderCount(value: unknown): number | null {
+  if (value == null || String(value).trim() === "") return DEFAULT_ORDER_COUNT;
   const parsed = Math.round(Number(value));
   if (!Number.isFinite(parsed)) return DEFAULT_ORDER_COUNT;
   return Math.max(1, Math.min(5, parsed));
@@ -239,6 +251,7 @@ function asRecoveryPayload(candidate: unknown, fallbackLang: Language): AIRecove
   return {
     dateISO: candidate.dateISO as ISODate,
     language,
+    phase: normalizeRecoveryPhase(candidate.phase),
     todayShift: (typeof candidate.todayShift === "string" ? candidate.todayShift : "OFF") as Shift,
     nextShift: (typeof candidate.nextShift === "string" ? candidate.nextShift : null) as Shift | null,
     todayVitalScore: typeof candidate.todayVitalScore === "number" ? candidate.todayVitalScore : null,
@@ -281,6 +294,7 @@ function asPlannerPayload(candidate: unknown, fallbackLang: Language): AIRecover
   return {
     dateISO: candidate.dateISO as ISODate,
     language,
+    phase: normalizeRecoveryPhase(candidate.phase),
     requestedOrderCount: normalizeRequestedOrderCount(candidate.requestedOrderCount),
     todayShift: (typeof candidate.todayShift === "string" ? candidate.todayShift : "OFF") as Shift,
     nextShift: (typeof candidate.nextShift === "string" ? candidate.nextShift : null) as Shift | null,
@@ -358,15 +372,70 @@ function readRecoveryVariants(raw: unknown, today: ISODate): Partial<Record<Lang
   return variants;
 }
 
+function readRecoveryPhasePayload(
+  raw: unknown,
+  today: ISODate,
+  lang: Language,
+  phase: RecoveryPhase
+): AIRecoveryPayload | null {
+  if (!isRecord(raw)) return phase === "start" ? readRecoveryVariants(raw, today)[lang] ?? null : null;
+  const phaseNode = isRecord(raw.recoveryPhaseVariants) ? raw.recoveryPhaseVariants : null;
+  const langNode = phaseNode && isRecord(phaseNode[lang]) ? phaseNode[lang] : null;
+  const direct = langNode ? asRecoveryPayload(langNode[phase], lang) : null;
+  if (direct && direct.dateISO === today) return direct;
+  return phase === "start" ? readRecoveryVariants(raw, today)[lang] ?? null : null;
+}
+
+function readPlannerPhasePayload(
+  raw: unknown,
+  today: ISODate,
+  lang: Language,
+  phase: RecoveryPhase
+): AIRecoveryPlannerPayload | null {
+  if (!isRecord(raw)) return phase === "start" ? readPlannerVariants(raw, today)[lang] ?? null : null;
+  const phaseNode = isRecord(raw.plannerPhaseVariants) ? raw.plannerPhaseVariants : null;
+  const langNode = phaseNode && isRecord(phaseNode[lang]) ? phaseNode[lang] : null;
+  const direct = langNode ? asPlannerPayload(langNode[phase], lang) : null;
+  if (direct && direct.dateISO === today) return direct;
+  return phase === "start" ? readPlannerVariants(raw, today)[lang] ?? null : null;
+}
+
+function buildRecoveryThread(
+  startPlanner: AIRecoveryPlannerPayload | null,
+  completedIds: string[]
+): NonNullable<Parameters<typeof generateAIRecoveryWithOpenAI>[0]["recoveryThread"]> | null {
+  if (!startPlanner) return null;
+  const completed = new Set(completedIds);
+  const startOrders = startPlanner.result.orders.items ?? [];
+  const completedStartOrders = startOrders
+    .filter((item) => completed.has(buildRecoveryOrderProgressId("start", item.id)))
+    .map((item) => ({ id: item.id, title: item.title }));
+  const pendingStartOrders = startOrders
+    .filter((item) => !completed.has(buildRecoveryOrderProgressId("start", item.id)))
+    .map((item) => ({ id: item.id, title: item.title }));
+
+  return {
+    startRecoveryHeadline: startPlanner.result.explanation.recovery.headline ?? null,
+    startFocusLabel: startPlanner.plannerContext?.focusFactor?.label ?? null,
+    startPrimaryAction: startPlanner.plannerContext?.primaryAction ?? null,
+    startAvoidAction: startPlanner.plannerContext?.avoidAction ?? null,
+    totalStartOrderCount: startOrders.length,
+    completedStartOrderCount: completedStartOrders.length,
+    completedStartOrders,
+    pendingStartOrders,
+  };
+}
+
 async function handlePlanner(
   req: NextRequest,
-  options?: { allowGenerate?: boolean; requestedOrderCount?: number | null; forceGenerate?: boolean }
+  options?: { allowGenerate?: boolean; requestedOrderCount?: number | null; forceGenerate?: boolean; phase?: RecoveryPhase }
 ) {
   const allowGenerate = options?.allowGenerate ?? false;
   const requestedOrderCount = normalizeRequestedOrderCount(options?.requestedOrderCount);
   const forceGenerate = options?.forceGenerate ?? false;
   const url = new URL(req.url);
   const langHint = toLanguage(url.searchParams.get("lang"));
+  const phase = normalizeRecoveryPhase(options?.phase ?? url.searchParams.get("phase"));
   const cacheOnly = !allowGenerate || url.searchParams.get("cacheOnly") === "1";
 
   const userId = await safeReadUserId(req);
@@ -386,14 +455,24 @@ async function handlePlanner(
     const today = todayISO();
     const recordedDays = countHealthRecordedDays({ bio: state.bio, emotions: state.emotions });
     if (recordedDays < 3) return bad(403, "insights_locked_min_3_days");
+    const readiness = getAfterWorkReadiness(state, today);
+    if (phase === "after_work" && !readiness.ready && !cacheOnly) {
+      return bad(409, `after_work_inputs_required:${buildAfterWorkMissingLabels(readiness.recordedLabels).slice(0, 3).join(",")}`);
+    }
+    const phaseState = buildRecoveryPhaseState(state, today, phase);
 
     const start = toISODate(addDays(fromISODate(today), -13));
-    const vitals14 = computeVitalsRange({ state, start, end: today });
+    const vitals14 = computeVitalsRange({
+      state: phaseState,
+      start,
+      end: today,
+      disableTodayCarryISO: phase === "start" ? today : null,
+    });
     const inputDateSet = new Set<ISODate>();
     for (let i = 0; i < 14; i++) {
       const iso = toISODate(addDays(fromISODate(start), i));
-      const bio = state.bio?.[iso] ?? null;
-      const emotion = state.emotions?.[iso] ?? null;
+      const bio = phaseState.bio?.[iso] ?? null;
+      const emotion = phaseState.emotions?.[iso] ?? null;
       if (hasHealthInput(bio, emotion)) inputDateSet.add(iso);
     }
 
@@ -406,35 +485,57 @@ async function handlePlanner(
     );
     const todayVitalCandidate = vitals14.find((v) => v.dateISO === today) ?? null;
     const todayHasInput = inputDateSet.has(today) || hasReliableEstimatedSignal(todayVitalCandidate);
-    const todayShift = (readShift(state.schedule, today) ?? todayVitalCandidate?.shift ?? "OFF") as Shift;
-    const todayVital = todayHasInput && todayVitalCandidate ? { ...todayVitalCandidate, shift: todayShift } : null;
-    const recordedDates = collectRecordedDates(state);
+    const todayShift = (readShift(phaseState.schedule, today) ?? todayVitalCandidate?.shift ?? "OFF") as Shift;
+    const phaseTodayVitalCandidate = phase === "start" ? stripStartPhaseDynamicInputs(todayVitalCandidate) : todayVitalCandidate;
+    const todayVital = todayHasInput && phaseTodayVitalCandidate ? { ...phaseTodayVitalCandidate, shift: todayShift } : null;
+    const recordedDates = collectRecordedDates(phaseState);
     const historyStart = recordedDates[0] ?? today;
     const historyDateSet = new Set(recordedDates);
-    const allVitals = computeVitalsRange({ state, start: historyStart, end: today }).filter(
+    const allVitalsRaw = computeVitalsRange({
+      state: phaseState,
+      start: historyStart,
+      end: today,
+      disableTodayCarryISO: phase === "start" ? today : null,
+    }).filter(
       (v) => historyDateSet.has(v.dateISO) || hasReliableEstimatedSignal(v)
     );
+    const phaseVitals7 = phase === "start" ? stripStartPhaseDynamicInputsFromVitals(vitals7, today) : vitals7;
+    const phasePrevWeek = phase === "start" ? stripStartPhaseDynamicInputsFromVitals(prevWeek, today) : prevWeek;
+    const allVitals = phase === "start" ? stripStartPhaseDynamicInputsFromVitals(allVitalsRaw, today) : allVitalsRaw;
 
     const plannerContext = buildPlannerContext({
       pivotISO: today,
-      schedule: state.schedule,
+      schedule: phaseState.schedule,
       todayVital,
-      factorVitals: vitals7.length ? vitals7 : todayVital ? [todayVital] : [],
-      profile: state.settings?.profile,
+      factorVitals: phaseVitals7.length ? phaseVitals7 : todayVital ? [todayVital] : [],
+      profile: phaseState.settings?.profile,
     });
     const nextShift = plannerContext.nextDuty;
-    const profile = normalizeProfileSettings(state.settings?.profile);
+    const profile = normalizeProfileSettings(phaseState.settings?.profile);
     const profileSnapshot = normalizeProfileSnapshot(profile);
     const timelinePreview = buildPlannerTimelinePreview(todayShift, todayVital, profile);
     const nextDutyLabel = formatRelativeDutyKorean(plannerContext.nextDutyDate, today);
 
     const aiContent = await safeLoadAIContent(userId);
-    const recoveryVariants = aiContent && aiContent.dateISO === today ? readRecoveryVariants(aiContent.data, today) : {};
+    const cachedRecovery = aiContent && aiContent.dateISO === today ? readRecoveryPhasePayload(aiContent.data, today, lang, phase) : null;
+    const cachedStartPlanner =
+      aiContent && aiContent.dateISO === today ? readPlannerPhasePayload(aiContent.data, today, lang, "start") : null;
+    const startCompletedIds =
+      phase === "after_work" && cachedStartPlanner
+        ? await (async () => {
+            const { readRecoveryOrderCompletedIds } = await import("@/lib/server/recoveryOrderStore");
+            return await readRecoveryOrderCompletedIds(userId, today);
+          })()
+        : [];
+    const recoveryThread = phase === "after_work" ? buildRecoveryThread(cachedStartPlanner, startCompletedIds) : null;
+    if (phase === "after_work" && !cachedStartPlanner && !cacheOnly) {
+      return bad(409, "start_recovery_required_before_after_work");
+    }
     if (!forceGenerate && aiContent && aiContent.dateISO === today) {
-      const variants = readPlannerVariants(aiContent.data, today);
-      const direct = variants[lang] ?? null;
+      const direct = readPlannerPhasePayload(aiContent.data, today, lang, phase);
       const directIsCurrent =
         direct &&
+        direct.phase === phase &&
         isPlannerContextCurrent(direct.plannerContext, plannerContext) &&
         isProfileSnapshotCurrent(direct.profileSnapshot, profileSnapshot) &&
         (cacheOnly || isRequestedOrderCountCurrent(direct.requestedOrderCount, requestedOrderCount));
@@ -458,13 +559,13 @@ async function handlePlanner(
     let plannerDebug: string | null = null;
     let explanationDebug: string | null = null;
     let plannerModel: string | null = null;
-    const fallbackRecovery = generateAIRecovery(todayVital, vitals7, prevWeek, nextShift, lang);
+    const fallbackRecovery = generateAIRecovery(todayVital, phaseVitals7, phasePrevWeek, nextShift, lang);
     let explanationResult = fallbackRecovery;
     let explanationGeneratedText: string | undefined;
     let explanationModel: string | null = null;
-    const cachedRecovery = forceGenerate ? null : recoveryVariants[lang] ?? null;
     const cachedRecoveryIsCurrent =
       cachedRecovery &&
+      cachedRecovery.phase === phase &&
       isPlannerContextCurrent(cachedRecovery.plannerContext, plannerContext) &&
       isProfileSnapshotCurrent(cachedRecovery.profileSnapshot, profileSnapshot);
 
@@ -478,14 +579,16 @@ async function handlePlanner(
         const explanationAI = await generateAIRecoveryWithOpenAI({
           language: lang,
           todayISO: today,
+          phase,
           todayShift,
           nextShift,
           todayVital,
-          vitals7,
-          prevWeekVitals: prevWeek,
+          vitals7: phaseVitals7,
+          prevWeekVitals: phasePrevWeek,
           allVitals,
           plannerContext,
           profile,
+          recoveryThread,
         });
         explanationResult = explanationAI.result;
         explanationGeneratedText = explanationAI.generatedText;
@@ -502,14 +605,16 @@ async function handlePlanner(
         language: lang,
         requestedOrderCount,
         todayISO: today,
+        phase,
         todayShift,
         nextShift,
         todayVital,
-        vitals7,
-        prevWeekVitals: prevWeek,
+        vitals7: phaseVitals7,
+        prevWeekVitals: phasePrevWeek,
         allVitals,
         plannerContext,
         profile,
+        recoveryThread,
         recoveryResult: explanationResult,
       });
       plannerModules = plannerAI.result;
@@ -524,6 +629,7 @@ async function handlePlanner(
     const explanationPayload: AIRecoveryPayload = {
       dateISO: today,
       language: lang,
+      phase,
       todayShift,
       nextShift,
       todayVitalScore,
@@ -539,6 +645,7 @@ async function handlePlanner(
     const payload: AIRecoveryPlannerPayload = {
       dateISO: today,
       language: lang,
+      phase,
       requestedOrderCount,
       todayShift,
       nextShift,
@@ -557,21 +664,49 @@ async function handlePlanner(
       },
     };
 
+    const aiContentRecord = isRecord(aiContent?.data) ? (aiContent?.data as Record<string, unknown>) : {};
+    const previousRecoveryPhaseVariants =
+      isRecord(aiContentRecord.recoveryPhaseVariants) ? (aiContentRecord.recoveryPhaseVariants as Record<string, unknown>) : {};
+    const previousPlannerPhaseVariants =
+      isRecord(aiContentRecord.plannerPhaseVariants) ? (aiContentRecord.plannerPhaseVariants as Record<string, unknown>) : {};
+    const previousRecoveryLangNode =
+      isRecord(previousRecoveryPhaseVariants[lang]) ? (previousRecoveryPhaseVariants[lang] as Record<string, unknown>) : {};
+    const previousPlannerLangNode =
+      isRecord(previousPlannerPhaseVariants[lang]) ? (previousPlannerPhaseVariants[lang] as Record<string, unknown>) : {};
+    const legacyRecoveryVariants =
+      isRecord(aiContentRecord.variants) ? (aiContentRecord.variants as Record<string, unknown>) : {};
+    const legacyPlannerVariants =
+      isRecord(aiContentRecord.plannerVariants) ? (aiContentRecord.plannerVariants as Record<string, unknown>) : {};
+
     const saveError = await safeSaveAIContent(userId, today, lang, {
       dateISO: today,
       generatedAt: Date.now(),
-      variants: {
-        ...(isRecord(aiContent?.data) && isRecord((aiContent?.data as Record<string, unknown>).variants)
-          ? ((aiContent?.data as Record<string, unknown>).variants as Record<string, unknown>)
-          : {}),
-        [lang]: explanationPayload,
+      recoveryPhaseVariants: {
+        ...previousRecoveryPhaseVariants,
+        [lang]: {
+          ...previousRecoveryLangNode,
+          [phase]: explanationPayload,
+        },
       },
-      plannerVariants: {
-        ...(isRecord(aiContent?.data) && isRecord((aiContent?.data as Record<string, unknown>).plannerVariants)
-          ? ((aiContent?.data as Record<string, unknown>).plannerVariants as Record<string, unknown>)
-          : {}),
-        [lang]: payload,
+      plannerPhaseVariants: {
+        ...previousPlannerPhaseVariants,
+        [lang]: {
+          ...previousPlannerLangNode,
+          [phase]: payload,
+        },
       },
+      ...(phase === "start"
+        ? {
+            variants: {
+              ...legacyRecoveryVariants,
+              [lang]: explanationPayload,
+            },
+            plannerVariants: {
+              ...legacyPlannerVariants,
+              [lang]: payload,
+            },
+          }
+        : {}),
     } as Json);
     if (saveError) {
       payload.debug = payload.debug ? `${payload.debug}|${saveError}` : saveError;
@@ -592,15 +727,17 @@ export async function POST(req: NextRequest) {
   if (sameOriginError) return bad(403, sameOriginError);
   let requestedOrderCount: number | null = null;
   let forceGenerate = false;
+  let phase: RecoveryPhase | null = null;
   const rawBody = await req.text().catch(() => "");
   if (rawBody.trim()) {
     try {
       const body = JSON.parse(rawBody);
       requestedOrderCount = normalizeRequestedOrderCount((body as { orderCount?: unknown } | null)?.orderCount);
       forceGenerate = Boolean((body as { forceGenerate?: unknown } | null)?.forceGenerate);
+      phase = normalizeRecoveryPhase((body as { phase?: unknown } | null)?.phase);
     } catch {
       return bad(400, "invalid_json");
     }
   }
-  return handlePlanner(req, { allowGenerate: true, requestedOrderCount, forceGenerate });
+  return handlePlanner(req, { allowGenerate: true, requestedOrderCount, forceGenerate, phase: phase ?? undefined });
 }

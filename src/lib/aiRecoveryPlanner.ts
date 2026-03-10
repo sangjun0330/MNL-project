@@ -3,6 +3,7 @@ import type { ISODate } from "@/lib/date";
 import type { Language } from "@/lib/i18n";
 import type { ProfileSettings } from "@/lib/model";
 import type { PlannerContext, PlannerTimelinePreview } from "@/lib/recoveryPlanner";
+import type { RecoveryPhase } from "@/lib/recoveryPhases";
 import type { Shift } from "@/lib/types";
 
 export type AIPlannerModuleItem = {
@@ -73,6 +74,7 @@ export type AIRecoveryPlannerResult = AIRecoveryPlannerModules & {
 export type AIRecoveryPlannerPayload = {
   dateISO: ISODate;
   language: Language;
+  phase: RecoveryPhase;
   requestedOrderCount?: number | null;
   todayShift: Shift;
   nextShift: Shift | null;

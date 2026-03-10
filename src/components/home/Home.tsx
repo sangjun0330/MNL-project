@@ -24,6 +24,7 @@ import {
   readRemoteRecoveryOrderDone,
   writeRecoveryOrderDone,
 } from "@/lib/recoveryOrderChecklist";
+import { buildRecoveryOrderProgressId } from "@/lib/recoveryPhases";
 
 function isReasonableISODate(v: any): v is ISODate {
   if (!isISODate(v)) return false;
@@ -196,13 +197,25 @@ export default function Home() {
   }, []);
 
   const planner = useRecoveryPlanner();
-  const aiRecovery = useAIRecoveryInsights({ mode: "cache", enabled: deferredReady && planner.aiAvailable });
-  const aiPlanner = useAIRecoveryPlanner({ mode: "cache", enabled: deferredReady && planner.aiAvailable });
+  const aiRecovery = useAIRecoveryInsights({ mode: "cache", enabled: deferredReady && planner.aiAvailable, phase: "start" });
+  const aiRecoveryAfter = useAIRecoveryInsights({
+    mode: "cache",
+    enabled: deferredReady && planner.aiAvailable,
+    phase: "after_work",
+  });
+  const aiPlanner = useAIRecoveryPlanner({ mode: "cache", enabled: deferredReady && planner.aiAvailable, phase: "start" });
+  const aiPlannerAfter = useAIRecoveryPlanner({
+    mode: "cache",
+    enabled: deferredReady && planner.aiAvailable,
+    phase: "after_work",
+  });
   const [plannerDoneMap, setPlannerDoneMap] = useState<Record<string, boolean>>({});
+  const activeExplanationModule = aiPlannerAfter.data?.result.explanation ?? aiPlanner.data?.result.explanation ?? null;
   const aiPlannerHeadline = useMemo(() => {
     const candidates = [
-      aiPlanner.data?.result.explanation.recovery.headline,
-      aiPlanner.data?.result.explanation.headline,
+      activeExplanationModule?.recovery.headline,
+      activeExplanationModule?.headline,
+      aiRecoveryAfter.data?.result?.headline,
       aiRecovery.data?.result?.headline,
     ];
     for (const candidate of candidates) {
@@ -212,45 +225,62 @@ export default function Home() {
     }
     return null;
   }, [
-    aiPlanner.data?.result.explanation.headline,
-    aiPlanner.data?.result.explanation.recovery.headline,
+    activeExplanationModule?.headline,
+    activeExplanationModule?.recovery.headline,
+    aiRecoveryAfter.data?.result?.headline,
     aiRecovery.data?.result?.headline,
   ]);
   const aiCardLoading = !aiPlannerHeadline && (
     aiRecovery.loading ||
     aiRecovery.generating ||
+    aiRecoveryAfter.loading ||
+    aiRecoveryAfter.generating ||
     aiPlanner.loading ||
-    aiPlanner.generating
+    aiPlanner.generating ||
+    aiPlannerAfter.loading ||
+    aiPlannerAfter.generating
   );
   const aiHeadline = useMemo(() => {
     if (planner.state === "needs_records") return t("기록을 3일 이상 쌓으면 AI 맞춤회복도 열려요.");
-    if (!planner.aiAvailable && !planner.billingLoading) return t("AI 맞춤회복은 Pro에서 열립니다.");
     if (aiPlannerHeadline) return aiPlannerHeadline;
+    if (!planner.aiAvailable && !planner.billingLoading) return t("AI 맞춤회복은 Pro에서 열립니다.");
     return aiSummaryFallback(t, {
       loading: aiCardLoading,
-      generating: !aiCardLoading && (aiRecovery.generating || aiPlanner.generating),
-      error: aiRecovery.error ?? aiPlanner.error,
+      generating: !aiCardLoading && (aiRecovery.generating || aiRecoveryAfter.generating || aiPlanner.generating || aiPlannerAfter.generating),
+      error: aiRecoveryAfter.error ?? aiPlannerAfter.error ?? aiRecovery.error ?? aiPlanner.error,
     });
   }, [
     aiCardLoading,
     aiPlanner.generating,
     aiPlanner.error,
+    aiPlannerAfter.generating,
+    aiPlannerAfter.error,
     aiPlannerHeadline,
     aiRecovery.error,
     aiRecovery.generating,
+    aiRecoveryAfter.error,
+    aiRecoveryAfter.generating,
     planner.aiAvailable,
     planner.billingLoading,
     planner.state,
     t,
   ]);
 
-  const plannerDateISO = aiPlanner.data?.dateISO ?? todayISO();
-  const plannerOrders = useMemo(() => aiPlanner.data?.result.orders.items ?? [], [aiPlanner.data]);
-  const plannerOrderIdsKey = useMemo(() => plannerOrders.map((item) => item.id).join("|"), [plannerOrders]);
+  const plannerDateISO = aiPlannerAfter.data?.dateISO ?? aiPlanner.data?.dateISO ?? todayISO();
+  const startPlannerOrders = useMemo(() => aiPlanner.data?.result.orders.items ?? [], [aiPlanner.data]);
+  const afterPlannerOrders = useMemo(() => aiPlannerAfter.data?.result.orders.items ?? [], [aiPlannerAfter.data]);
+  const plannerOrderIdsKey = useMemo(
+    () =>
+      [
+        ...startPlannerOrders.map((item) => buildRecoveryOrderProgressId("start", item.id)),
+        ...afterPlannerOrders.map((item) => buildRecoveryOrderProgressId("after_work", item.id)),
+      ].join("|"),
+    [afterPlannerOrders, startPlannerOrders]
+  );
 
   useEffect(() => {
     let active = true;
-    const activeIds = plannerOrders.map((item) => item.id);
+    const activeIds = plannerOrderIdsKey ? plannerOrderIdsKey.split("|") : [];
     if (activeIds.length) {
       clearStaleRecoveryOrderDone(plannerDateISO, activeIds);
     }
@@ -275,14 +305,25 @@ export default function Home() {
     return () => {
       active = false;
     };
-  }, [plannerDateISO, plannerOrderIdsKey, plannerOrders]);
+  }, [plannerDateISO, plannerOrderIdsKey]);
 
-  const activePlannerOrders = useMemo(
-    () => plannerOrders.filter((item) => !plannerDoneMap[item.id]),
-    [plannerDoneMap, plannerOrders]
+  const activeStartPlannerOrders = useMemo(
+    () => startPlannerOrders.filter((item) => !plannerDoneMap[buildRecoveryOrderProgressId("start", item.id)]),
+    [plannerDoneMap, startPlannerOrders]
   );
-  const plannerPreviewOrder = activePlannerOrders[0] ?? plannerOrders[0] ?? null;
-  const plannerAllDone = planner.aiAvailable && plannerOrders.length > 0 && activePlannerOrders.length === 0;
+  const activeAfterPlannerOrders = useMemo(
+    () => afterPlannerOrders.filter((item) => !plannerDoneMap[buildRecoveryOrderProgressId("after_work", item.id)]),
+    [afterPlannerOrders, plannerDoneMap]
+  );
+  const plannerPreviewOrder =
+    activeAfterPlannerOrders[0] ??
+    activeStartPlannerOrders[0] ??
+    afterPlannerOrders[0] ??
+    startPlannerOrders[0] ??
+    null;
+  const plannerTotalOrders = startPlannerOrders.length + afterPlannerOrders.length;
+  const plannerRemainingCount = activeStartPlannerOrders.length + activeAfterPlannerOrders.length;
+  const plannerAllDone = planner.aiAvailable && plannerTotalOrders > 0 && plannerRemainingCount === 0;
   const plannerPreviewTitle =
     planner.state === "needs_records"
       ? t("오늘의 오더")
@@ -299,7 +340,6 @@ export default function Home() {
       : planner.aiAvailable && plannerPreviewOrder
         ? plannerPreviewOrder.body
         : planner.primaryAction ?? t("AI 맞춤회복에서 오늘 실행할 오더를 함께 정리합니다.");
-  const plannerRemainingCount = activePlannerOrders.length;
 
   const selectedDateLabel = useMemo(() => formatKoreanDate(homeSelected), [homeSelected]);
 
@@ -533,7 +573,7 @@ export default function Home() {
           >
             {planner.state === "needs_records" ? t("현재 {count}일 기록됨", { count: planner.recordedDays }) : planner.nextDutyLabel}
           </span>
-          {planner.aiAvailable && plannerOrders.length ? (
+          {planner.aiAvailable && plannerTotalOrders > 0 ? (
             <span
               className="inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold"
               style={{ borderColor: "var(--rnest-sep)", color: "var(--rnest-sub)" }}

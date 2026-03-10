@@ -5,6 +5,7 @@ import type { AIRecoveryPayload } from "@/lib/aiRecoveryContract";
 import { todayISO } from "@/lib/date";
 import { useInsightsData } from "@/components/insights/useInsightsData";
 import { useAuthState } from "@/lib/auth";
+import { DEFAULT_RECOVERY_PHASE, normalizeRecoveryPhase, type RecoveryPhase } from "@/lib/recoveryPhases";
 import { useI18n } from "@/lib/useI18n";
 
 type FetchMode = "cache" | "generate";
@@ -13,6 +14,7 @@ type HookOptions = {
   mode?: FetchMode;
   enabled?: boolean;
   autoGenerate?: boolean;
+  phase?: RecoveryPhase;
 };
 
 type HookResult = {
@@ -29,23 +31,24 @@ type HookResult = {
 const inFlightGenerate = new Map<string, Promise<AIRecoveryPayload | null>>();
 const sessionDailyCache = new Map<string, AIRecoveryPayload>();
 
-function requestKey(userId: string, lang: "ko" | "en", dateISO: string) {
-  return `${userId}:${lang}:${dateISO}`;
+function requestKey(userId: string, lang: "ko" | "en", dateISO: string, phase: RecoveryPhase) {
+  return `${userId}:${lang}:${dateISO}:${phase}`;
 }
 
 async function fetchAIRecovery(
   lang: "ko" | "en",
   dateISO: string,
+  phase: RecoveryPhase,
   cacheOnly: boolean,
   forceGenerate = false
 ): Promise<AIRecoveryPayload | null> {
   const cacheOnlyQuery = cacheOnly ? "&cacheOnly=1" : "";
   const method = cacheOnly ? "GET" : "POST";
-  const res = await fetch(`/api/insights/recovery?lang=${lang}${cacheOnlyQuery}`, {
+  const res = await fetch(`/api/insights/recovery?lang=${lang}&phase=${phase}${cacheOnlyQuery}`, {
     method,
     cache: "no-store",
     headers: cacheOnly ? undefined : { "Content-Type": "application/json" },
-    body: cacheOnly ? undefined : JSON.stringify({ forceGenerate }),
+    body: cacheOnly ? undefined : JSON.stringify({ forceGenerate, phase }),
   });
 
   const text = await res.text().catch(() => "");
@@ -70,12 +73,12 @@ async function fetchAIRecovery(
   return payload;
 }
 
-function getOrStartGenerate(userId: string, lang: "ko" | "en", dateISO: string) {
-  const key = requestKey(userId, lang, dateISO);
+function getOrStartGenerate(userId: string, lang: "ko" | "en", dateISO: string, phase: RecoveryPhase) {
+  const key = requestKey(userId, lang, dateISO, phase);
   const existing = inFlightGenerate.get(key);
   if (existing) return existing;
 
-  const promise = fetchAIRecovery(lang, dateISO, false, true)
+  const promise = fetchAIRecovery(lang, dateISO, phase, false, true)
     .catch((err) => {
       throw err;
     })
@@ -91,6 +94,7 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
   const mode = options?.mode ?? "cache";
   const enabled = options?.enabled ?? true;
   const autoGenerate = options?.autoGenerate ?? mode !== "generate";
+  const phase = normalizeRecoveryPhase(options?.phase ?? DEFAULT_RECOVERY_PHASE);
   const { lang } = useI18n();
   const { user } = useAuthState();
   const { state } = useInsightsData();
@@ -104,13 +108,13 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
   const retry = useCallback(() => {
     // 세션 캐시 클리어 후 재시도
     const dateISO = todayISO();
-    const key = requestKey(user?.userId ?? "guest", lang, dateISO);
+    const key = requestKey(user?.userId ?? "guest", lang, dateISO, phase);
     sessionDailyCache.delete(key);
     inFlightGenerate.delete(key);
     setError(null);
     setRemoteData(null);
     setRetryCount((c) => c + 1);
-  }, [lang, user?.userId]);
+  }, [lang, phase, user?.userId]);
   const startGenerate = useCallback(() => {
     setError(null);
     setManualGenerateCount((c) => c + 1);
@@ -128,7 +132,7 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
     }
     if (!isStoreHydrated) return;
     const dateISO = todayISO();
-    const key = requestKey(user?.userId ?? "guest", lang, dateISO);
+    const key = requestKey(user?.userId ?? "guest", lang, dateISO, phase);
     let active = true;
     const forceGenerate = mode === "generate" && manualGenerateCount > 0;
 
@@ -153,10 +157,10 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
 
     const run = async () => {
       try {
-        const cached = await fetchAIRecovery(lang, dateISO, true);
+        const cached = await fetchAIRecovery(lang, dateISO, phase, true);
         if (!active) return;
 
-        if (cached && cached.language === lang) {
+        if (cached && cached.language === lang && cached.phase === phase) {
           sessionDailyCache.set(key, cached);
           setRemoteData(cached);
           if (!forceGenerate) return;
@@ -169,10 +173,10 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
 
         setGenerating(true);
         const generated = forceGenerate
-          ? await fetchAIRecovery(lang, dateISO, false, true)
-          : await getOrStartGenerate(user?.userId ?? "guest", lang, dateISO);
+          ? await fetchAIRecovery(lang, dateISO, phase, false, true)
+          : await getOrStartGenerate(user?.userId ?? "guest", lang, dateISO, phase);
         if (!active) return;
-        if (generated && generated.language === lang) {
+        if (generated && generated.language === lang && generated.phase === phase) {
           sessionDailyCache.set(key, generated);
         }
         setRemoteData(generated ?? null);
@@ -191,7 +195,7 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
     return () => {
       active = false;
     };
-  }, [enabled, isStoreHydrated, lang, mode, retryCount, autoGenerate, manualGenerateCount, user?.userId]);
+  }, [enabled, isStoreHydrated, lang, mode, phase, retryCount, autoGenerate, manualGenerateCount, user?.userId]);
 
   return useMemo(
     () => ({
