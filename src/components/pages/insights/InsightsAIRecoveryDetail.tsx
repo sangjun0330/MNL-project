@@ -1036,17 +1036,6 @@ export function InsightsAIRecoveryDetail() {
     </div>
   ) : null;
 
-  const activePlannerPayload = activePhase === "after_work" ? afterPlannerAI.data : startPlannerAI.data;
-  const activeRecoveryHeadline = activePlannerPayload?.result.explanation.recovery.headline ?? "";
-  const activeHeadlineText = activePlannerPayload
-    ? normalizeNarrativeText(activeRecoveryHeadline, activePlannerPayload.language)
-    : activePhase === "after_work"
-      ? t("아침 회복을 이어 받아 오늘 밤 회복만 다시 정리해요.")
-      : t("전날 기록과 오늘 수면으로 하루 시작 회복 기준을 먼저 정해요.");
-  const activeSummaryText =
-    activePhase === "after_work"
-      ? t("퇴근 후 실제 기록과 아침 오더 진행을 반영해 오늘 밤 회복을 업데이트합니다.")
-      : t("같은 날 스트레스, 카페인, 활동, 기분 입력은 제외하고 아침 시작 방향만 먼저 설명합니다.");
   const activeStatusText =
     activePhase === "after_work"
       ? afterPlannerAI.data
@@ -1059,10 +1048,6 @@ export function InsightsAIRecoveryDetail() {
         : needsHealthInputGuide
           ? t("필수 기록 필요")
           : t("생성 준비 완료");
-  const activeFocusText =
-    activePlannerPayload?.plannerContext?.focusFactor?.label ??
-    (activePhase === "after_work" ? t("오늘 밤 회복") : t("오늘 시작 기준"));
-  const activeOrderLinkText = t("오더 {count}개 연결", { count: selectedOrderCount });
 
   return (
     <InsightDetailShell
@@ -1114,73 +1099,84 @@ export function InsightsAIRecoveryDetail() {
       ) : null}
 
       {!insightsLocked && !billingLoading && hasPlannerAIAccess ? (
-        <RecoveryStageHeroCard
-          eyebrow={t("RECOVERY FLOW")}
-          title={activePhase === "after_work" ? t("퇴근 후 회복 업데이트") : t("오늘 시작 회복")}
-          status={t("AI 맞춤회복")}
-          headline={activeHeadlineText}
-          summary={activeSummaryText}
-          chips={
-            <>
-              <RecoveryMetaPill color="#315CA8">{recoveryPhaseTitle(activePhase, uiLang)}</RecoveryMetaPill>
-              <RecoveryMetaPill color="#1B2747">{activeOrderLinkText}</RecoveryMetaPill>
-              <RecoveryMetaPill color="#5E6C84">{formatKoreanDate(plannerDateISO)}</RecoveryMetaPill>
-              {startPlannerAI.data ? <RecoveryMetaPill color="#5E6C84">{startProgressText}</RecoveryMetaPill> : null}
-            </>
-          }
-          facts={
-            <>
-              <RecoveryHeroFact label={t("회복 포커스")} value={activeFocusText} />
-              <RecoveryHeroFact label={t("현재 상태")} value={activeStatusText} />
-              <RecoveryHeroFact
-                label={t("오더 연결")}
-                value={activePhase === "after_work" ? t("퇴근 후 오더 {count}개 기준", { count: selectedOrderCount }) : t("아침 오더 {count}개 기준", { count: selectedOrderCount })}
-              />
-            </>
-          }
-        >
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px] lg:items-start">
-            <RecoveryPhaseTabs
-              value={activePhase}
-              onChange={setActivePhase}
-              items={[
-                {
-                  value: "start",
-                  label: t("아침 회복"),
-                  hint: startPlannerAI.data ? t("생성됨") : needsHealthInputGuide ? t("필수 기록 필요") : t("생성 가능"),
-                },
-                {
-                  value: "after_work",
-                  label: t("퇴근 후 회복"),
-                  hint: afterPlannerAI.data ? t("업데이트됨") : afterWorkReadiness.ready ? t("생성 가능") : t("기록 대기"),
-                },
-              ]}
-            />
-            <RecoveryOrderCountSelector
-              value={selectedOrderCount}
-              onChange={setSelectedOrderCount}
-              helper={t("아침과 퇴근 후에 같은 기준 개수를 사용해요.")}
-            />
-          </div>
-          {activePhase === "start" && startPlannerAI.data ? (
-            <button
-              type="button"
-              onClick={startAnalysis}
-              className="inline-flex h-10 items-center justify-center rounded-full border border-[#D5E2FA] bg-white/92 px-4 text-[13px] font-semibold text-[#17386D] shadow-[0_10px_24px_rgba(18,35,73,0.05)]"
-            >
-              {t("아침 회복과 오더 {count}개 다시 생성", { count: selectedOrderCount })}
-            </button>
-          ) : null}
-          {activePhase === "after_work" && afterPlannerAI.data ? (
-            <button
-              type="button"
-              onClick={startAfterWorkAnalysis}
-              className="inline-flex h-10 items-center justify-center rounded-full border border-[#D5E2FA] bg-white/92 px-4 text-[13px] font-semibold text-[#17386D] shadow-[0_10px_24px_rgba(18,35,73,0.05)]"
-            >
-              {t("퇴근 후 회복과 오더 {count}개 다시 생성", { count: selectedOrderCount })}
-            </button>
-          ) : null}
-        </RecoveryStageHeroCard>
+        <>
+          <RecoveryPhaseTabs
+            value={activePhase}
+            onChange={setActivePhase}
+            items={[
+              {
+                value: "start",
+                label: t("아침 회복"),
+                hint: startPlannerAI.data ? t("생성됨") : needsHealthInputGuide ? t("필수 기록 필요") : t("생성 가능"),
+              },
+              {
+                value: "after_work",
+                label: t("퇴근 후 회복"),
+                hint: afterPlannerAI.data ? t("업데이트됨") : afterWorkReadiness.ready ? t("생성 가능") : t("기록 대기"),
+              },
+            ]}
+          />
+
+          <DetailCard
+            className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
+            style={{
+              background: "linear-gradient(180deg, rgba(250,251,255,0.98) 0%, rgba(255,255,255,0.96) 100%)",
+              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.94), 0 16px 40px rgba(15,36,74,0.04)",
+            }}
+          >
+            <div className="flex flex-col gap-4">
+              <div>
+                <div className="text-[10.5px] font-semibold tracking-[0.18em] text-[color:var(--rnest-accent)]">{t("RECOVERY FLOW")}</div>
+                <div className="mt-1 text-[20px] font-bold tracking-[-0.03em] text-ios-text">
+                  {activePhase === "after_work" ? t("퇴근 후 회복 업데이트 설정") : t("오늘 시작 회복 설정")}
+                </div>
+                <p className="mt-2 break-keep text-[13px] leading-6 text-ios-sub">
+                  {activePhase === "after_work"
+                    ? t("오늘 실제 기록과 아침 오더 진행을 반영해 밤 회복 업데이트를 생성합니다.")
+                    : t("전날 기록과 오늘 수면 기준으로 아침 시작 회복과 오더를 생성합니다.")}
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <RecoveryMetaPill color="#315CA8">{recoveryPhaseTitle(activePhase, uiLang)}</RecoveryMetaPill>
+                <RecoveryMetaPill color="#1B2747">{activeStatusText}</RecoveryMetaPill>
+                <RecoveryMetaPill color="#5E6C84">{formatKoreanDate(plannerDateISO)}</RecoveryMetaPill>
+                {startPlannerAI.data ? <RecoveryMetaPill color="#5E6C84">{startProgressText}</RecoveryMetaPill> : null}
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_200px] lg:items-end">
+                <RecoveryOrderCountSelector
+                  value={selectedOrderCount}
+                  onChange={setSelectedOrderCount}
+                  helper={t("아침과 퇴근 후에 같은 기준 개수를 사용해요.")}
+                />
+                {activePhase === "start" && startPlannerAI.data ? (
+                  <button
+                    type="button"
+                    onClick={startAnalysis}
+                    className="inline-flex h-11 items-center justify-center rounded-full border border-[#D5E2FA] bg-white/92 px-4 text-[13px] font-semibold text-[#17386D] shadow-[0_10px_24px_rgba(18,35,73,0.05)]"
+                  >
+                    {t("아침 회복과 오더 {count}개 다시 생성", { count: selectedOrderCount })}
+                  </button>
+                ) : activePhase === "after_work" && afterPlannerAI.data ? (
+                  <button
+                    type="button"
+                    onClick={startAfterWorkAnalysis}
+                    className="inline-flex h-11 items-center justify-center rounded-full border border-[#D5E2FA] bg-white/92 px-4 text-[13px] font-semibold text-[#17386D] shadow-[0_10px_24px_rgba(18,35,73,0.05)]"
+                  >
+                    {t("퇴근 후 회복과 오더 {count}개 다시 생성", { count: selectedOrderCount })}
+                  </button>
+                ) : (
+                  <div className="rounded-[20px] border border-[rgba(16,33,70,0.06)] bg-white/72 px-4 py-3 text-[13px] leading-6 text-ios-sub">
+                    {activePhase === "after_work"
+                      ? t("퇴근 후 탭이 열리면 같은 개수 기준으로 회복과 오더를 이어서 만듭니다.")
+                      : t("아침 회복을 먼저 만들면 아래 해설 카드와 오더가 함께 연결됩니다.")}
+                  </div>
+                )}
+              </div>
+            </div>
+          </DetailCard>
+        </>
       ) : null}
 
       {!insightsLocked && hasPlannerAIAccess ? (

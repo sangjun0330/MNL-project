@@ -37,8 +37,8 @@ export function RecoveryPhaseTabs<T extends string>({
   onChange: (value: T) => void;
 }) {
   return (
-    <div className="rounded-[24px] border border-white/80 bg-[linear-gradient(180deg,rgba(251,252,255,0.96)_0%,rgba(245,247,252,0.96)_100%)] p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_12px_32px_rgba(15,36,74,0.05)]">
-      <div className="grid grid-cols-2 gap-1.5">
+    <div className="rounded-2xl bg-ios-bg p-1 shadow-apple">
+      <div className="flex items-stretch gap-1">
         {items.map((item) => {
           const active = item.value === value;
           return (
@@ -48,14 +48,14 @@ export function RecoveryPhaseTabs<T extends string>({
               onClick={() => !item.disabled && onChange(item.value)}
               disabled={item.disabled}
               className={cn(
-                "min-w-0 rounded-[18px] px-3 py-3 text-left transition-all duration-200",
+                "min-w-0 flex-1 rounded-[14px] px-3 py-2.5 text-left transition-all duration-200",
                 active
-                  ? "bg-white shadow-[0_10px_24px_rgba(18,35,73,0.08),inset_0_1px_0_rgba(255,255,255,0.95)]"
+                  ? "bg-white text-ios-text shadow-sm"
                   : "bg-transparent",
                 item.disabled ? "opacity-45" : "hover:bg-white/70"
               )}
             >
-              <div className={cn("text-[13px] font-semibold tracking-[-0.02em]", active ? "text-[#17386D]" : "text-ios-sub")}>
+              <div className={cn("text-[13px] font-semibold tracking-[-0.02em]", active ? "text-[#17386D]" : "text-ios-muted")}>
                 {item.label}
               </div>
               {item.hint ? (

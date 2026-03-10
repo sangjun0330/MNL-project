@@ -219,54 +219,55 @@ export function InsightsRecoveryOrdersDetail() {
       }
     >
       {planner.aiAvailable && !planner.billingLoading ? (
-        <RecoveryStageHeroCard
-          eyebrow="TODAY ORDERS"
-          title={activePhase === "start" ? "아침 오더" : "퇴근 후 오더"}
-          status="체크리스트"
-          headline={phaseHeadline}
-          summary={phaseSummary}
-          chips={
-            <>
-              <DetailChip color="#1B2747">{activePhase === "start" ? "오늘 시작" : "퇴근 후"}</DetailChip>
-              <DetailChip color="#5E6C84">{formatKoreanDate(plannerDateISO)}</DetailChip>
-              <DetailChip color="#315CA8">선택 {selectedOrderCount}개</DetailChip>
-            </>
-          }
-          facts={
-            <>
-              <RecoveryHeroFact label="남은 오더" value={`${activeItems.length}개`} />
-              <RecoveryHeroFact label="완료" value={`${completedCount}개`} />
-              <RecoveryHeroFact
-                label="다음 흐름"
-                value={activePhase === "start" ? "아침 완료 후 퇴근 후 오더로 이어짐" : "오늘 밤 회복까지 이어서 체크"}
-              />
-            </>
-          }
-        >
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px] lg:items-start">
-            <RecoveryPhaseTabs
-              value={activePhase}
-              onChange={setActivePhase}
-              items={[
-                {
-                  value: "start",
-                  label: "아침",
-                  hint: startPlanner.data ? `${activeStartItems.length}개 남음` : "생성 전",
-                },
-                {
-                  value: "after_work",
-                  label: "퇴근 후",
-                  hint: afterPlanner.data ? `${activeAfterItems.length}개 남음` : afterWorkReadiness.ready ? "생성 가능" : "기록 대기",
-                },
-              ]}
-            />
+        <>
+          <RecoveryPhaseTabs
+            value={activePhase}
+            onChange={setActivePhase}
+            items={[
+              {
+                value: "start",
+                label: "아침",
+                hint: startPlanner.data ? `${activeStartItems.length}개 남음` : "생성 전",
+              },
+              {
+                value: "after_work",
+                label: "퇴근 후",
+                hint: afterPlanner.data ? `${activeAfterItems.length}개 남음` : afterWorkReadiness.ready ? "생성 가능" : "기록 대기",
+              },
+            ]}
+          />
+
+          <RecoveryStageHeroCard
+            eyebrow="TODAY ORDERS"
+            title={activePhase === "start" ? "아침 오더" : "퇴근 후 오더"}
+            status="체크리스트"
+            headline={phaseHeadline}
+            summary={phaseSummary}
+            chips={
+              <>
+                <DetailChip color="#1B2747">{activePhase === "start" ? "오늘 시작" : "퇴근 후"}</DetailChip>
+                <DetailChip color="#5E6C84">{formatKoreanDate(plannerDateISO)}</DetailChip>
+                <DetailChip color="#315CA8">선택 {selectedOrderCount}개</DetailChip>
+              </>
+            }
+            facts={
+              <>
+                <RecoveryHeroFact label="남은 오더" value={`${activeItems.length}개`} />
+                <RecoveryHeroFact label="완료" value={`${completedCount}개`} />
+                <RecoveryHeroFact
+                  label="다음 흐름"
+                  value={activePhase === "start" ? "아침 완료 후 퇴근 후 오더로 이어짐" : "오늘 밤 회복까지 이어서 체크"}
+                />
+              </>
+            }
+          >
             <RecoveryOrderCountSelector
               value={selectedOrderCount}
               onChange={setSelectedOrderCount}
               helper="현재 선택 개수로 AI 생성 화면에 이어집니다."
             />
-          </div>
-        </RecoveryStageHeroCard>
+          </RecoveryStageHeroCard>
+        </>
       ) : null}
 
       {planner.billingLoading ? (
