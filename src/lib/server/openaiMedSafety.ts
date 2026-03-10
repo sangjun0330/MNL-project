@@ -1,3 +1,5 @@
+import { normalizeOpenAIResponsesBaseUrl, resolveOpenAIResponsesRequestConfig } from "@/lib/server/openaiGateway";
+
 export type MedSafetyItemType = "medication" | "device" | "unknown";
 export type MedSafetyQuickStatus = "OK" | "CHECK" | "STOP";
 export type ClinicalMode = "ward" | "er" | "icu";
@@ -124,18 +126,20 @@ function resolveModelCandidates() {
 }
 
 function normalizeApiBaseUrl(raw: string) {
-  const trimmed = String(raw ?? "").trim();
-  if (!trimmed) return "";
-  return trimmed.replace(/\/+$/, "");
+  return normalizeOpenAIResponsesBaseUrl(String(raw ?? "").trim());
 }
 
 function resolveApiBaseUrls() {
   const listFromEnv = splitModelList(process.env.OPENAI_MED_SAFETY_BASE_URLS ?? "").map((item) => normalizeApiBaseUrl(item));
-  const single = normalizeApiBaseUrl(
-    process.env.OPENAI_MED_SAFETY_BASE_URL ?? process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1"
-  );
-  const defaults = ["https://api.openai.com/v1"];
-  return dedupeModels([...listFromEnv, single, ...defaults]).filter(Boolean);
+  const singleRaw = String(process.env.OPENAI_MED_SAFETY_BASE_URL ?? process.env.OPENAI_BASE_URL ?? "").trim();
+  const single = normalizeApiBaseUrl(singleRaw);
+  const configured = dedupeModels([...listFromEnv, single]).filter(Boolean);
+
+  // If the operator explicitly configured gateway/proxy URLs, keep requests on those
+  // endpoints instead of silently falling back to direct OpenAI and bypassing telemetry.
+  if (configured.length) return configured;
+
+  return ["https://api.openai.com/v1"];
 }
 
 function resolveStoreResponses() {
@@ -1108,6 +1112,20 @@ async function callResponsesApi(args: {
     compatMode,
     onTextDelta,
   } = args;
+  const requestConfig = resolveOpenAIResponsesRequestConfig({
+    apiBaseUrl,
+    apiKey,
+    model,
+    scope: "med_safety",
+  });
+  if (requestConfig.missingCredential) {
+    return {
+      text: null,
+      error: requestConfig.missingCredential,
+      responseId: null,
+      conversationId: null,
+    };
+  }
 
   const userContent: Array<Record<string, unknown>> = [{ type: "input_text", text: userPrompt }];
   if (imageDataUrl) {
@@ -1131,12 +1149,12 @@ async function callResponsesApi(args: {
   const body: Record<string, unknown> = compatMode
     ? {
         // 400/게이트웨이 호환 이슈를 피하기 위한 최소 요청 바디
-        model,
+        model: requestConfig.model,
         input: baseInput,
         max_output_tokens: maxOutputTokens,
       }
     : {
-        model,
+        model: requestConfig.model,
         input: baseInput,
         text: {
           format: { type: "text" as const },
@@ -1166,12 +1184,9 @@ async function callResponsesApi(args: {
     requestAbort.abort();
   }, upstreamTimeoutMs);
   try {
-    response = await fetch(`${apiBaseUrl}/responses`, {
+    response = await fetch(requestConfig.requestUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
+      headers: requestConfig.headers,
       body: JSON.stringify(body),
       signal: requestAbort.signal,
     });
@@ -1181,7 +1196,7 @@ async function callResponsesApi(args: {
     if (timedOut) {
       return {
         text: null,
-        error: `openai_timeout_upstream_model:${model}`,
+        error: `openai_timeout_upstream_model:${requestConfig.model}`,
         responseId: null,
         conversationId: null,
       };
@@ -1200,7 +1215,7 @@ async function callResponsesApi(args: {
     const raw = await response.text().catch(() => "");
     return {
       text: null,
-      error: `openai_responses_${response.status}_model:${model}_${truncateError(raw || "unknown_error")}`,
+      error: `openai_responses_${response.status}_model:${requestConfig.model}_${truncateError(raw || "unknown_error")}`,
       responseId: null,
       conversationId: null,
     };
@@ -1209,7 +1224,7 @@ async function callResponsesApi(args: {
   if (onTextDelta) {
     return readResponsesEventStream({
       response,
-      model,
+      model: requestConfig.model,
       onTextDelta,
     });
   }
@@ -1219,7 +1234,12 @@ async function callResponsesApi(args: {
   const responseId = typeof json?.id === "string" ? json.id : null;
   const conversationResponseId = extractConversationId(json);
   if (!text) {
-    return { text: null, error: `openai_empty_text_model:${model}`, responseId, conversationId: conversationResponseId };
+    return {
+      text: null,
+      error: `openai_empty_text_model:${requestConfig.model}`,
+      responseId,
+      conversationId: conversationResponseId,
+    };
   }
   return { text, error: null, responseId, conversationId: conversationResponseId };
 }
@@ -2362,7 +2382,6 @@ export async function translateMedSafetyToEnglish(input: {
   debug: string | null;
 }> {
   const apiKey = normalizeApiKey();
-  if (!apiKey) throw new Error("missing_openai_api_key");
 
   const modelCandidates = resolveModelCandidates();
   const apiBaseUrls = resolveApiBaseUrls();
@@ -2609,7 +2628,6 @@ export async function translateMedSafetyToEnglish(input: {
 
 export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise<OpenAIMedSafetyOutput> {
   const apiKey = normalizeApiKey();
-  if (!apiKey) throw new Error("missing_openai_api_key");
 
   const intent = inferIntent(params);
   const modelCandidates = resolveModelCandidates();

@@ -1,0 +1,202 @@
+export type OpenAIRequestScope = "recovery" | "med_safety";
+
+export type OpenAIResponsesRequestConfig = {
+  requestUrl: string;
+  headers: Record<string, string>;
+  model: string;
+  usesCloudflareGateway: boolean;
+  authMode: "direct" | "request_header" | "stored_key";
+  missingCredential: string | null;
+};
+
+const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
+
+function trimEnv(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function isTruthyFlag(raw: string) {
+  const normalized = raw.trim().toLowerCase();
+  if (!normalized) return null;
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return null;
+}
+
+function normalizeGatewayAuthMode(raw: string) {
+  const value = raw.trim().toLowerCase();
+  if (!value || value === "auto") return "auto" as const;
+  if (
+    [
+      "request_header",
+      "request-headers",
+      "request",
+      "key_in_request",
+      "key-in-request",
+      "cf_header",
+      "cf-header",
+      "header",
+    ].includes(value)
+  ) {
+    return "request_header" as const;
+  }
+  if (
+    [
+      "stored_key",
+      "stored-key",
+      "byok",
+      "gateway_key",
+      "gateway-key",
+      "gateway_token",
+      "gateway-token",
+      "authorization",
+      "cf_token",
+      "cf-token",
+    ].includes(value)
+  ) {
+    return "stored_key" as const;
+  }
+  return "auto" as const;
+}
+
+function resolveGatewayToken(scope: OpenAIRequestScope) {
+  const values =
+    scope === "med_safety"
+      ? [
+          process.env.OPENAI_MED_SAFETY_GATEWAY_TOKEN,
+          process.env.OPENAI_MED_SAFETY_CF_AIG_TOKEN,
+          process.env.CF_AIG_TOKEN,
+          process.env.CLOUDFLARE_AI_GATEWAY_TOKEN,
+          process.env.OPENAI_GATEWAY_TOKEN,
+          process.env.OPENAI_GATEWAY_API_KEY,
+        ]
+      : [
+          process.env.OPENAI_RECOVERY_GATEWAY_TOKEN,
+          process.env.OPENAI_RECOVERY_CF_AIG_TOKEN,
+          process.env.CF_AIG_TOKEN,
+          process.env.CLOUDFLARE_AI_GATEWAY_TOKEN,
+          process.env.OPENAI_GATEWAY_TOKEN,
+          process.env.OPENAI_GATEWAY_API_KEY,
+        ];
+  return values.map(trimEnv).find(Boolean) ?? "";
+}
+
+function resolveStoredKeyFlag(scope: OpenAIRequestScope) {
+  const values =
+    scope === "med_safety"
+      ? [
+          process.env.OPENAI_MED_SAFETY_GATEWAY_USE_STORED_KEY,
+          process.env.OPENAI_GATEWAY_USE_STORED_KEY,
+        ]
+      : [
+          process.env.OPENAI_RECOVERY_GATEWAY_USE_STORED_KEY,
+          process.env.OPENAI_GATEWAY_USE_STORED_KEY,
+        ];
+  for (const raw of values) {
+    const parsed = isTruthyFlag(trimEnv(raw));
+    if (parsed !== null) return parsed;
+  }
+  return null;
+}
+
+function resolveGatewayAuthMode(scope: OpenAIRequestScope, openAIApiKey: string, gatewayToken: string) {
+  const values =
+    scope === "med_safety"
+      ? [
+          process.env.OPENAI_MED_SAFETY_GATEWAY_AUTH_MODE,
+          process.env.OPENAI_GATEWAY_AUTH_MODE,
+        ]
+      : [
+          process.env.OPENAI_RECOVERY_GATEWAY_AUTH_MODE,
+          process.env.OPENAI_GATEWAY_AUTH_MODE,
+        ];
+
+  for (const raw of values) {
+    const normalized = normalizeGatewayAuthMode(trimEnv(raw));
+    if (normalized !== "auto") return normalized;
+  }
+
+  const storedKeyFlag = resolveStoredKeyFlag(scope);
+  if (storedKeyFlag === true) return "stored_key" as const;
+  if (storedKeyFlag === false) return "request_header" as const;
+
+  if (!gatewayToken) return "direct" as const;
+  if (!openAIApiKey) return "stored_key" as const;
+  return "request_header" as const;
+}
+
+function isCloudflareGatewayBaseUrl(url: string) {
+  return /^https:\/\/gateway\.ai\.cloudflare\.com(?:\/|$)/i.test(url);
+}
+
+function stripKnownEndpointSuffix(url: string) {
+  return url.replace(/\/(?:responses|chat\/completions)$/i, "");
+}
+
+export function normalizeOpenAIResponsesBaseUrl(raw: string) {
+  const trimmed = trimEnv(raw).replace(/\/+$/, "");
+  if (!trimmed) return DEFAULT_OPENAI_BASE_URL;
+
+  const stripped = stripKnownEndpointSuffix(trimmed);
+  if (!isCloudflareGatewayBaseUrl(stripped)) return stripped || DEFAULT_OPENAI_BASE_URL;
+
+  if (/\/compat$/i.test(stripped)) {
+    return stripped.replace(/\/compat$/i, "/openai");
+  }
+  if (/\/v1\/[^/]+\/[^/]+$/i.test(stripped)) {
+    return `${stripped}/openai`;
+  }
+  return stripped;
+}
+
+function normalizeOpenAIResponsesModel(model: string) {
+  const trimmed = trimEnv(model);
+  if (!trimmed) return "gpt-5.2";
+  return trimmed.replace(/^openai\//i, "");
+}
+
+export function resolveOpenAIResponsesRequestConfig(args: {
+  apiBaseUrl: string;
+  apiKey: string;
+  model: string;
+  scope: OpenAIRequestScope;
+}): OpenAIResponsesRequestConfig {
+  const normalizedBaseUrl = normalizeOpenAIResponsesBaseUrl(args.apiBaseUrl);
+  const usesCloudflareGateway = isCloudflareGatewayBaseUrl(normalizedBaseUrl);
+  const gatewayToken = resolveGatewayToken(args.scope);
+  const authMode = usesCloudflareGateway
+    ? resolveGatewayAuthMode(args.scope, trimEnv(args.apiKey), gatewayToken)
+    : ("direct" as const);
+
+  const authorizationToken =
+    authMode === "stored_key" ? gatewayToken : trimEnv(args.apiKey);
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+
+  if (authorizationToken) {
+    headers.Authorization = `Bearer ${authorizationToken}`;
+  }
+  if (usesCloudflareGateway && authMode === "request_header" && gatewayToken) {
+    headers["cf-aig-authorization"] = `Bearer ${gatewayToken}`;
+  }
+
+  let missingCredential: string | null = null;
+  if (usesCloudflareGateway && authMode === "stored_key" && !gatewayToken) {
+    missingCredential = "missing_cf_aig_token";
+  } else if (!authorizationToken) {
+    missingCredential = "missing_openai_api_key";
+  }
+
+  return {
+    requestUrl: `${normalizedBaseUrl}/responses`,
+    headers,
+    // Cloudflare's provider-native OpenAI Responses endpoint expects plain model ids
+    // like "gpt-5.2". The "openai/..." prefix is only for the unified /compat APIs.
+    model: normalizeOpenAIResponsesModel(args.model),
+    usesCloudflareGateway,
+    authMode,
+    missingCredential,
+  };
+}

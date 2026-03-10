@@ -6,6 +6,7 @@ import type { PlannerContext } from "@/lib/recoveryPlanner";
 import type { RecoveryPhase } from "@/lib/recoveryPhases";
 import type { Shift } from "@/lib/types";
 import type { DailyVital } from "@/lib/vitals";
+import { normalizeOpenAIResponsesBaseUrl, resolveOpenAIResponsesRequestConfig } from "@/lib/server/openaiGateway";
 
 type RecoveryHistorySummary = {
   totalRecords: number;
@@ -246,8 +247,7 @@ function resolveApiBaseUrl(): string {
     process.env.OPENAI_BASE_URL ??
     "https://api.openai.com/v1"
   ).trim();
-  // 후행 슬래시 제거
-  return (raw || "https://api.openai.com/v1").replace(/\/+$/, "");
+  return normalizeOpenAIResponsesBaseUrl(raw || "https://api.openai.com/v1");
 }
 
 // 재시도 가능한 에러 여부 판단
@@ -606,10 +606,21 @@ async function callResponsesApi(args: {
   const storeResponses = resolveStoreResponses();
   const reasoningEffort = "low";
   const verbosity = logFeature === "recovery_translate" ? "low" : "medium";
-  const baseUrl = resolveApiBaseUrl();
+  const requestConfig = resolveOpenAIResponsesRequestConfig({
+    apiBaseUrl: resolveApiBaseUrl(),
+    apiKey,
+    model,
+    scope: "recovery",
+  });
+  if (requestConfig.missingCredential) {
+    return {
+      text: null,
+      error: requestConfig.missingCredential,
+    };
+  }
 
   const payload = {
-    model,
+    model: requestConfig.model,
     input: [
       {
         role: "developer",
@@ -643,12 +654,9 @@ async function callResponsesApi(args: {
   // 네트워크 수준 오류(DNS 실패, 연결 거부, 타임아웃 등)를 catch해 에러 문자열로 반환
   let response: Response;
   try {
-    response = await fetch(`${baseUrl}/responses`, {
+    response = await fetch(requestConfig.requestUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
+      headers: requestConfig.headers,
       body: JSON.stringify(payload),
       signal,
     });
@@ -665,7 +673,7 @@ async function callResponsesApi(args: {
     const raw = await response.text().catch(() => "");
     return {
       text: null,
-      error: `openai_responses_${response.status}_model:${model}_${truncateError(raw || "unknown_error")}`,
+      error: `openai_responses_${response.status}_model:${requestConfig.model}_${truncateError(raw || "unknown_error")}`,
     };
   }
 
@@ -677,7 +685,7 @@ async function callResponsesApi(args: {
       typeof json?.incomplete_details?.reason === "string" ? json.incomplete_details.reason : "none";
     return {
       text: null,
-      error: `openai_empty_text_model:${model}_status:${status}_incomplete:${incompleteReason}`,
+      error: `openai_empty_text_model:${requestConfig.model}_status:${status}_incomplete:${incompleteReason}`,
     };
   }
 
@@ -1654,10 +1662,13 @@ export async function generateAIRecoveryWithOpenAI(
   params: GenerateOpenAIRecoveryParams
 ): Promise<OpenAIRecoveryOutput> {
   const apiKey = normalizeApiKey();
-  const model = resolveModel();
-  if (!apiKey) {
-    throw new Error("missing_openai_api_key");
-  }
+  const baseUrl = resolveApiBaseUrl();
+  const model = resolveOpenAIResponsesRequestConfig({
+    apiBaseUrl: baseUrl,
+    apiKey,
+    model: resolveModel(),
+    scope: "recovery",
+  }).model;
 
   const context = buildUserContext(params);
   const developerPrompt = buildDeveloperPrompt(params.language, params.phase ?? "start");
@@ -1742,10 +1753,13 @@ export async function translateAIRecoveryToEnglish(
   source: OpenAIRecoveryOutput
 ): Promise<OpenAIRecoveryOutput> {
   const apiKey = normalizeApiKey();
-  const model = resolveModel();
-  if (!apiKey) {
-    throw new Error("missing_openai_api_key");
-  }
+  const baseUrl = resolveApiBaseUrl();
+  const model = resolveOpenAIResponsesRequestConfig({
+    apiBaseUrl: baseUrl,
+    apiKey,
+    model: resolveModel(),
+    scope: "recovery",
+  }).model;
 
   type Pointer =
     | { kind: "headline" }
@@ -2501,8 +2515,13 @@ async function generatePlannerOrdersWithOpenAI(
   module: AIPlannerChecklistModule;
 }> {
   const apiKey = normalizeApiKey();
-  const model = resolveModel();
-  if (!apiKey) throw new Error("missing_openai_api_key");
+  const baseUrl = resolveApiBaseUrl();
+  const model = resolveOpenAIResponsesRequestConfig({
+    apiBaseUrl: baseUrl,
+    apiKey,
+    model: resolveModel(),
+    scope: "recovery",
+  }).model;
 
   const context = buildUserContext(params);
   const developerPrompt = buildPlannerOrdersDeveloperPrompt(
