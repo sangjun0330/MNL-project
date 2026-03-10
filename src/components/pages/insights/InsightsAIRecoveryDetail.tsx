@@ -229,6 +229,36 @@ function normalizeRequestedOrderCountParam(value: string | null) {
   return Math.max(1, Math.min(5, parsed));
 }
 
+function OrderCountSelector({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <div>
+      <div className="text-[12px] font-semibold text-ios-sub">오더 개수</div>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {[1, 2, 3, 4, 5].map((count) => (
+          <button
+            key={count}
+            type="button"
+            onClick={() => onChange(count)}
+            className={
+              count === value
+                ? "inline-flex h-9 items-center justify-center rounded-full border border-[#A9C6FF] bg-[#EDF4FF] px-4 text-[13px] font-semibold text-[#0F4FCB]"
+                : "inline-flex h-9 items-center justify-center rounded-full border border-ios-sep bg-white px-4 text-[13px] font-semibold text-ios-text"
+            }
+          >
+            {count}개
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const CATEGORIES: Array<{
   key: RecoverySection["category"];
   titleKey: string;
@@ -857,11 +887,12 @@ export function InsightsAIRecoveryDetail() {
     autoGenerate: false,
     phase: "after_work",
   });
-  const requestedOrderCount = normalizeRequestedOrderCountParam(searchParams.get("orderCount"));
+  const initialRequestedOrderCount = normalizeRequestedOrderCountParam(searchParams.get("orderCount"));
   const preferredPhase = normalizeRecoveryPhase(searchParams.get("phase"));
   const [activePhase, setActivePhase] = useState<RecoveryPhase>(preferredPhase);
+  const [selectedOrderCount, setSelectedOrderCount] = useState(initialRequestedOrderCount);
   const backHref = sanitizeInternalPath(searchParams.get("returnTo"), "/insights/recovery");
-  const ordersHref = withReturnTo("/insights/recovery/orders", "/insights/recovery/ai");
+  const ordersHref = withReturnTo(`/insights/recovery/orders?orderCount=${selectedOrderCount}`, "/insights/recovery/ai");
   const today = useMemo(() => todayISO(), []);
   const yesterday = useMemo(() => toISODate(addDays(fromISODate(today), -1)), [today]);
   const todayBio = state.bio?.[today] ?? null;
@@ -923,6 +954,10 @@ export function InsightsAIRecoveryDetail() {
     setActivePhase(preferredPhase);
   }, [preferredPhase]);
 
+  useEffect(() => {
+    setSelectedOrderCount(initialRequestedOrderCount);
+  }, [initialRequestedOrderCount]);
+
   const startAnalysis = useCallback(() => {
     if (needsHealthInputGuide) {
       setOpenInputGuide(true);
@@ -930,15 +965,15 @@ export function InsightsAIRecoveryDetail() {
     }
     setActivePhase("start");
     setActiveGeneratingPhase("start");
-    startPlannerAI.startGenerate(requestedOrderCount ?? undefined);
-  }, [needsHealthInputGuide, requestedOrderCount, startPlannerAI]);
+    startPlannerAI.startGenerate(selectedOrderCount);
+  }, [needsHealthInputGuide, selectedOrderCount, startPlannerAI]);
 
   const startAfterWorkAnalysis = useCallback(() => {
     if (!afterWorkReadiness.ready) return;
     setActivePhase("after_work");
     setActiveGeneratingPhase("after_work");
-    afterPlannerAI.startGenerate(requestedOrderCount ?? undefined);
-  }, [afterPlannerAI, afterWorkReadiness.ready, requestedOrderCount]);
+    afterPlannerAI.startGenerate(selectedOrderCount);
+  }, [afterPlannerAI, afterWorkReadiness.ready, selectedOrderCount]);
 
   useEffect(() => {
     if (!startPlannerAI.generating && !afterPlannerAI.generating) {
@@ -1098,9 +1133,30 @@ export function InsightsAIRecoveryDetail() {
             />
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
-            <RecoveryMetaPill color="#315CA8">{t("기본 오더 {count}개", { count: requestedOrderCount })}</RecoveryMetaPill>
+            <RecoveryMetaPill color="#315CA8">{t("기본 오더 {count}개", { count: selectedOrderCount })}</RecoveryMetaPill>
             {startPlannerAI.data ? <RecoveryMetaPill color="#1B2747">{startProgressText}</RecoveryMetaPill> : null}
           </div>
+          <div className="mt-4">
+            <OrderCountSelector value={selectedOrderCount} onChange={setSelectedOrderCount} />
+          </div>
+          {activePhase === "start" && startPlannerAI.data ? (
+            <button
+              type="button"
+              onClick={startAnalysis}
+              className="mt-4 inline-flex h-10 items-center justify-center rounded-full border border-[#D5E2FA] bg-white/92 px-4 text-[13px] font-semibold text-[#17386D] shadow-[0_10px_24px_rgba(18,35,73,0.05)]"
+            >
+              {t("아침 회복과 오더 {count}개 다시 생성", { count: selectedOrderCount })}
+            </button>
+          ) : null}
+          {activePhase === "after_work" && afterPlannerAI.data ? (
+            <button
+              type="button"
+              onClick={startAfterWorkAnalysis}
+              className="mt-4 inline-flex h-10 items-center justify-center rounded-full border border-[#D5E2FA] bg-white/92 px-4 text-[13px] font-semibold text-[#17386D] shadow-[0_10px_24px_rgba(18,35,73,0.05)]"
+            >
+              {t("퇴근 후 회복과 오더 {count}개 다시 생성", { count: selectedOrderCount })}
+            </button>
+          ) : null}
         </DetailCard>
       ) : null}
 
@@ -1134,6 +1190,9 @@ export function InsightsAIRecoveryDetail() {
                     </div>
                   </div>
                 </div>
+                <div className="mt-4">
+                  <OrderCountSelector value={selectedOrderCount} onChange={setSelectedOrderCount} />
+                </div>
                 {startPlannerAI.error ? (
                   <div className="mt-4 rounded-[18px] bg-[#FFF7F8] px-3.5 py-3 text-[13px] leading-6 text-[#8F2943]">
                     {startErrorLines.map((line, idx) => (
@@ -1148,7 +1207,9 @@ export function InsightsAIRecoveryDetail() {
                 >
                   {needsHealthInputGuide
                     ? t("필수 기록 입력하러 가기")
-                    : t("오늘 시작 회복과 오더 {count}개 생성하기", { count: requestedOrderCount })}
+                    : startPlannerAI.error
+                      ? t("오늘 시작 회복과 오더 {count}개 다시 불러오기", { count: selectedOrderCount })
+                      : t("오늘 시작 회복과 오더 {count}개 생성하기", { count: selectedOrderCount })}
                 </button>
               </DetailCard>
             ) : (
@@ -1210,6 +1271,9 @@ export function InsightsAIRecoveryDetail() {
               <div className="text-[10.5px] font-semibold tracking-[0.18em] text-[color:var(--rnest-accent)]">{recoveryPhaseEyebrow("after_work")}</div>
               <div className="mt-1 text-[18px] font-bold tracking-[-0.03em] text-ios-text">{t("퇴근 후 회복 업데이트 준비 완료")}</div>
               <p className="mt-2 text-[13px] leading-6 text-ios-sub">{t("오늘 실제 기록과 아침 오더 진행을 반영해 오늘 밤 회복만 다시 정리합니다.")}</p>
+              <div className="mt-4">
+                <OrderCountSelector value={selectedOrderCount} onChange={setSelectedOrderCount} />
+              </div>
               {afterPlannerAI.error ? (
                 <div className="mt-4 rounded-[18px] bg-[#FFF7F8] px-3.5 py-3 text-[13px] leading-6 text-[#8F2943]">
                   {afterErrorLines.map((line, idx) => (
@@ -1223,7 +1287,9 @@ export function InsightsAIRecoveryDetail() {
                 onClick={startAfterWorkAnalysis}
                 className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] text-[14px] font-semibold text-[color:var(--rnest-accent)]"
               >
-                {t("퇴근 후 회복과 오더 {count}개 업데이트하기", { count: requestedOrderCount })}
+                {afterPlannerAI.error
+                  ? t("퇴근 후 회복과 오더 {count}개 다시 불러오기", { count: selectedOrderCount })
+                  : t("퇴근 후 회복과 오더 {count}개 업데이트하기", { count: selectedOrderCount })}
               </button>
             </DetailCard>
           ) : (

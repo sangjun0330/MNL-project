@@ -398,14 +398,15 @@ function readRecoveryPhasePayload(
   const phaseNode = isRecord(raw.recoveryPhaseVariants) ? raw.recoveryPhaseVariants : null;
   const langNode = phaseNode && isRecord(phaseNode[lang]) ? phaseNode[lang] : null;
   const direct = langNode ? asPayload(langNode[phase], lang) : null;
-  if (direct && direct.dateISO === today) return direct;
+  if (direct && direct.dateISO === today && direct.engine === "openai") return direct;
 
   const plannerPhaseNode = isRecord(raw.plannerPhaseVariants) ? raw.plannerPhaseVariants : null;
   const plannerLangNode = plannerPhaseNode && isRecord(plannerPhaseNode[lang]) ? plannerPhaseNode[lang] : null;
   const plannerDirect = plannerLangNode ? asPlannerRecoveryPayload(plannerLangNode[phase], lang) : null;
-  if (plannerDirect && plannerDirect.dateISO === today) return plannerDirect;
+  if (plannerDirect && plannerDirect.dateISO === today && plannerDirect.engine === "openai") return plannerDirect;
 
-  return phase === "start" ? readAIContentVariants(raw, today)[lang] ?? null : null;
+  const legacy = phase === "start" ? readAIContentVariants(raw, today)[lang] ?? null : null;
+  return legacy?.engine === "openai" ? legacy : null;
 }
 
 function readPlannerPhasePayload(
@@ -418,7 +419,7 @@ function readPlannerPhasePayload(
   const plannerPhaseNode = isRecord(raw.plannerPhaseVariants) ? raw.plannerPhaseVariants : null;
   const plannerLangNode = plannerPhaseNode && isRecord(plannerPhaseNode[lang]) ? plannerPhaseNode[lang] : null;
   const plannerDirect = plannerLangNode ? asPlannerPayload(plannerLangNode[phase], lang) : null;
-  if (plannerDirect && plannerDirect.dateISO === today) return plannerDirect;
+  if (plannerDirect && plannerDirect.dateISO === today && plannerDirect.engine === "openai") return plannerDirect;
   return null;
 }
 

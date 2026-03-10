@@ -3,12 +3,11 @@ import { addDays, fromISODate, toISODate, todayISO, type ISODate } from "@/lib/d
 import type { AIRecoveryPayload } from "@/lib/aiRecoveryContract";
 import {
   buildExplanationModule,
-  buildFallbackModules,
+  type AIRecoveryPlannerModules,
   type AIRecoveryPlannerApiError,
   type AIRecoveryPlannerApiSuccess,
   type AIRecoveryPlannerPayload,
 } from "@/lib/aiRecoveryPlanner";
-import { generateAIRecovery } from "@/lib/aiRecovery";
 import type { Language } from "@/lib/i18n";
 import { countHealthRecordedDays, hasHealthInput } from "@/lib/healthRecords";
 import type { AppState } from "@/lib/model";
@@ -30,8 +29,6 @@ import {
 } from "@/lib/recoveryPhases";
 import {
   buildPlannerContext,
-  buildPlannerTimelinePreview,
-  formatRelativeDutyKorean,
   normalizeProfileSettings,
   type PlannerContext,
 } from "@/lib/recoveryPlanner";
@@ -382,8 +379,9 @@ function readRecoveryPhasePayload(
   const phaseNode = isRecord(raw.recoveryPhaseVariants) ? raw.recoveryPhaseVariants : null;
   const langNode = phaseNode && isRecord(phaseNode[lang]) ? phaseNode[lang] : null;
   const direct = langNode ? asRecoveryPayload(langNode[phase], lang) : null;
-  if (direct && direct.dateISO === today) return direct;
-  return phase === "start" ? readRecoveryVariants(raw, today)[lang] ?? null : null;
+  if (direct && direct.dateISO === today && direct.engine === "openai") return direct;
+  const legacy = phase === "start" ? readRecoveryVariants(raw, today)[lang] ?? null : null;
+  return legacy?.engine === "openai" ? legacy : null;
 }
 
 function readPlannerPhasePayload(
@@ -396,8 +394,9 @@ function readPlannerPhasePayload(
   const phaseNode = isRecord(raw.plannerPhaseVariants) ? raw.plannerPhaseVariants : null;
   const langNode = phaseNode && isRecord(phaseNode[lang]) ? phaseNode[lang] : null;
   const direct = langNode ? asPlannerPayload(langNode[phase], lang) : null;
-  if (direct && direct.dateISO === today) return direct;
-  return phase === "start" ? readPlannerVariants(raw, today)[lang] ?? null : null;
+  if (direct && direct.dateISO === today && direct.engine === "openai") return direct;
+  const legacy = phase === "start" ? readPlannerVariants(raw, today)[lang] ?? null : null;
+  return legacy?.engine === "openai" ? legacy : null;
 }
 
 function buildRecoveryThread(
@@ -513,8 +512,6 @@ async function handlePlanner(
     const nextShift = plannerContext.nextDuty;
     const profile = normalizeProfileSettings(phaseState.settings?.profile);
     const profileSnapshot = normalizeProfileSnapshot(profile);
-    const timelinePreview = buildPlannerTimelinePreview(todayShift, todayVital, profile);
-    const nextDutyLabel = formatRelativeDutyKorean(plannerContext.nextDutyDate, today);
 
     const aiContent = await safeLoadAIContent(userId);
     const cachedRecovery = aiContent && aiContent.dateISO === today ? readRecoveryPhasePayload(aiContent.data, today, lang, phase) : null;
@@ -549,22 +546,15 @@ async function handlePlanner(
       return jsonNoStore({ ok: true, data: null } satisfies AIRecoveryPlannerApiSuccess);
     }
 
-    const fallbackModules = buildFallbackModules({
-      language: lang,
-      plannerContext,
-      nextDutyLabel,
-      timelinePreview,
-    });
-
     let plannerDebug: string | null = null;
     let explanationDebug: string | null = null;
     let plannerModel: string | null = null;
-    const fallbackRecovery = generateAIRecovery(todayVital, phaseVitals7, phasePrevWeek, nextShift, lang);
-    let explanationResult = fallbackRecovery;
+    let explanationResult: AIRecoveryPayload["result"];
     let explanationGeneratedText: string | undefined;
     let explanationModel: string | null = null;
     const cachedRecoveryIsCurrent =
       cachedRecovery &&
+      cachedRecovery.engine === "openai" &&
       cachedRecovery.phase === phase &&
       isPlannerContextCurrent(cachedRecovery.plannerContext, plannerContext) &&
       isProfileSnapshotCurrent(cachedRecovery.profileSnapshot, profileSnapshot);
@@ -575,35 +565,8 @@ async function handlePlanner(
       explanationModel = cachedRecovery.model;
       explanationDebug = cachedRecovery.debug ?? null;
     } else {
-      try {
-        const explanationAI = await generateAIRecoveryWithOpenAI({
-          language: lang,
-          todayISO: today,
-          phase,
-          todayShift,
-          nextShift,
-          todayVital,
-          vitals7: phaseVitals7,
-          prevWeekVitals: phasePrevWeek,
-          allVitals,
-          plannerContext,
-          profile,
-          recoveryThread,
-        });
-        explanationResult = explanationAI.result;
-        explanationGeneratedText = explanationAI.generatedText;
-        explanationModel = explanationAI.model;
-      } catch (err: any) {
-        explanationDebug = typeof err?.message === "string" ? err.message : "explanation_ai_failed";
-      }
-    }
-
-    let plannerModules = fallbackModules;
-    let plannerGeneratedText: string | undefined;
-    try {
-      const plannerAI = await generateAIRecoveryPlannerModulesWithOpenAI({
+      const explanationAI = await generateAIRecoveryWithOpenAI({
         language: lang,
-        requestedOrderCount,
         todayISO: today,
         phase,
         todayShift,
@@ -615,14 +578,33 @@ async function handlePlanner(
         plannerContext,
         profile,
         recoveryThread,
-        recoveryResult: explanationResult,
       });
-      plannerModules = plannerAI.result;
-      plannerGeneratedText = plannerAI.generatedText;
-      plannerModel = plannerAI.model;
-    } catch (err: any) {
-      plannerDebug = typeof err?.message === "string" ? err.message : "planner_ai_failed";
+      explanationResult = explanationAI.result;
+      explanationGeneratedText = explanationAI.generatedText;
+      explanationModel = explanationAI.model;
     }
+
+    let plannerModules: AIRecoveryPlannerModules;
+    let plannerGeneratedText: string | undefined;
+    const plannerAI = await generateAIRecoveryPlannerModulesWithOpenAI({
+      language: lang,
+      requestedOrderCount,
+      todayISO: today,
+      phase,
+      todayShift,
+      nextShift,
+      todayVital,
+      vitals7: phaseVitals7,
+      prevWeekVitals: phasePrevWeek,
+      allVitals,
+      plannerContext,
+      profile,
+      recoveryThread,
+      recoveryResult: explanationResult,
+    });
+    plannerModules = plannerAI.result;
+    plannerGeneratedText = plannerAI.generatedText;
+    plannerModel = plannerAI.model;
 
     const todayVitalScore = todayVital ? Math.round(Math.min(todayVital.body.value, todayVital.mental.ema)) : null;
     const model = explanationModel ?? plannerModel ?? null;
@@ -634,7 +616,7 @@ async function handlePlanner(
       nextShift,
       todayVitalScore,
       source: "supabase",
-      engine: explanationGeneratedText ? "openai" : "rule",
+      engine: "openai",
       model: explanationModel,
       debug: explanationDebug,
       generatedText: explanationGeneratedText,
@@ -651,7 +633,7 @@ async function handlePlanner(
       nextShift,
       todayVitalScore,
       source: "supabase",
-      engine: plannerGeneratedText || explanationGeneratedText ? "openai" : "rule",
+      engine: "openai",
       model,
       debug: [plannerDebug, explanationDebug].filter(Boolean).join("|") || null,
       generatedText: plannerGeneratedText,

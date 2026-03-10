@@ -84,7 +84,13 @@ async function fetchAIRecoveryPlanner(
     throw new Error(json?.error ?? `http_${res.status}`);
   }
 
-  return (json?.data ?? null) as AIRecoveryPlannerPayload | null;
+  const payload = (json?.data ?? null) as AIRecoveryPlannerPayload | null;
+  if (!payload) return null;
+  if (payload.engine !== "openai") {
+    if (cacheOnly) return null;
+    throw new Error(`invalid_engine:${String(payload.engine ?? "unknown")}`);
+  }
+  return payload;
 }
 
 function getOrStartGenerate(

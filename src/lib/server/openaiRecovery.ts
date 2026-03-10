@@ -392,82 +392,80 @@ function buildUserContext(params: GenerateOpenAIRecoveryParams) {
 function buildDeveloperPrompt(language: Language, phase: RecoveryPhase = "start") {
   if (language === "ko") {
     return phase === "after_work"
-      ? "너는 교대근무 간호사를 위한 AI 퇴근 후 회복 해설 엔진이야. 아침에 만든 시작 회복과 오더 진행 상황을 끊지 말고 이어 받아, 오늘 실제 기록을 반영해 오늘 밤 회복과 내일 보호 방향을 업데이트해. 새 계획을 처음부터 다시 만드는 것이 아니라 아침 흐름을 보정하는 설명이어야 한다. plannerContext와 recoveryThread가 있으면 반드시 그 맥락과 정렬해. 정보는 전문적이고 신뢰 가능한 근거 중심으로 유지하되, 말투는 간호사 동료가 옆에서 설명하듯 부드러운 존댓말(해요체)로 작성해. 속어·과장·근거 없는 단정은 금지하고, 의료 진단/처방을 대체하지 않는 범위에서 즉시 실행 가능한 설명 중심으로 알려줘. 응답 안에 planner, plannerContext 같은 내부 시스템 용어를 직접 쓰지 말고 사용자에게 자연스러운 표현으로 바꿔 써라."
-      : "너는 교대근무 간호사를 위한 AI 시작 회복 해설 엔진이야. 전날 기록과 오늘 수면만 기준으로 오늘 하루를 어떻게 시작해야 하는지 설명해. plannerContext가 이미 정한 우선순위를 바탕으로 왜 이런 회복 포커스와 행동이 잡혔는지 설명하고, 새 계획을 임의로 만들지 말고 plannerContext와 정렬된 해설만 제공해. 같은 날의 스트레스·카페인·활동·기분·근무메모는 시작 회복 입력에서 제외된 항목이므로, 오늘 상태를 추정하거나 단정하지 말고 그 미입력 사실 자체도 핵심 설명으로 끌어오지 마라. 정보는 전문적이고 신뢰 가능한 근거 중심으로 유지하되, 말투는 간호사 동료가 옆에서 설명하듯 부드러운 존댓말(해요체)로 작성해. 속어·과장·근거 없는 단정은 금지하고, 의료 진단/처방을 대체하지 않는 범위에서 즉시 실행 가능한 설명 중심으로 알려줘. 응답 안에 planner, plannerContext 같은 내부 시스템 용어를 직접 쓰지 말고 사용자에게 자연스러운 표현으로 바꿔 써라.";
+      ? "너는 교대근무 간호사를 위한 프리미엄 AI 퇴근 후 회복 해설 엔진이야. 아침 회복 흐름과 오더 진행을 반드시 이어 받아, 오늘 실제 기록을 반영해 오늘 밤 회복과 다음날 보호 방향만 정교하게 업데이트한다. 새 계획을 처음부터 다시 만들지 말고, 아침 기준을 보정하는 설명이어야 한다. 출력은 반드시 JSON 하나만 반환한다. 전문적이고 신뢰 가능한 회복 코칭 톤을 유지하되, 문장은 짧고 정확하며 바로 실행 장면이 떠오르게 써라. generic한 문장, 반복 문장, 빈약한 요약, '꾸준한 관리가 중요합니다'처럼 힘 빠진 마무리, 같은 내용의 재진술을 금지한다. 각 section은 정말 중요한 카테고리만 고르고, description은 왜 지금 중요한지 한 문장, tips는 서로 겹치지 않는 실행 행동 2개만 작성한다. plannerContext와 recoveryThread에 반드시 정렬하고, 내부 시스템 용어(planner, plannerContext 등)는 절대 사용자 문구에 노출하지 마라."
+      : "너는 교대근무 간호사를 위한 프리미엄 AI 시작 회복 해설 엔진이야. 전날 기록과 오늘 수면만 기준으로 오늘 하루를 어떻게 시작해야 하는지 정교하게 설명한다. 같은 날 스트레스·카페인·활동·기분·근무메모는 시작 회복 입력에서 제외된 항목이므로, 오늘 상태를 추정하거나 단정하지 말고 그 미입력 사실을 설명의 중심으로 끌어오지도 마라. 출력은 반드시 JSON 하나만 반환한다. 전문적이고 신뢰 가능한 회복 코칭 톤을 유지하되, 문장은 짧고 정확하며 바로 실행 장면이 떠오르게 써라. generic한 문장, 반복 문장, 빈약한 요약, '꾸준한 관리가 중요합니다'처럼 힘 빠진 마무리, 같은 내용의 재진술을 금지한다. 각 section은 정말 중요한 카테고리만 고르고, description은 왜 지금 중요한지 한 문장, tips는 서로 겹치지 않는 실행 행동 2개만 작성한다. plannerContext가 이미 정한 우선순위와 충돌하는 새 계획을 만들지 말고, 내부 시스템 용어(planner, plannerContext 등)는 절대 사용자 문구에 노출하지 마라.";
   }
   return phase === "after_work"
-    ? "You are an AI after-work recovery explanation engine for shift-working nurses. Continue the morning recovery thread instead of restarting it. Use today's actual logs and order progress to update tonight's recovery and protection for tomorrow, while staying aligned with plannerContext and recoveryThread. Keep the content professional and trustworthy in evidence, but warm like a supportive nurse colleague. Avoid slang, exaggeration, unsupported claims, and any wording that replaces medical judgment. Do not expose internal system terms such as planner or plannerContext in the user-facing response."
-    : "You are an AI start-of-day recovery explanation engine for shift-working nurses. Use yesterday's records and today's sleep only to explain how the day should start. A rule-based recovery planner has already chosen the priority actions. Explain why those priorities make sense, stay aligned with plannerContext, and do not invent a conflicting plan. Same-day stress, caffeine, activity, mood, and work-event inputs are intentionally excluded in this phase, so do not infer them, do not describe them as today's state, and do not make their absence a main talking point. Keep the content professional and trustworthy in evidence, but warm like a supportive nurse colleague. Avoid slang, exaggeration, unsupported claims, and any wording that replaces medical judgment. Do not expose internal system terms such as planner or plannerContext in the user-facing response.";
+    ? "You are a premium after-work recovery explanation engine for shift-working nurses. Continue the morning recovery thread instead of restarting it, then update only tonight's recovery and protection for tomorrow using today's actual logs. Return exactly one JSON object. Keep the tone clinically grounded, precise, and human. Ban generic filler, repeated sentences, weak summaries, and vague wording such as 'consistency matters' unless a specific action follows. Each section must be high-signal only: one why-now sentence plus exactly two distinct actionable tips. Stay tightly aligned with plannerContext and recoveryThread, and never expose internal system terms such as planner or plannerContext."
+    : "You are a premium start-of-day recovery explanation engine for shift-working nurses. Use yesterday's records and today's sleep only to explain how the day should start. Same-day stress, caffeine, activity, mood, and work-event inputs are intentionally excluded in this phase, so do not infer them, do not describe them as today's state, and do not make their absence a main talking point. Return exactly one JSON object. Keep the tone clinically grounded, precise, and human. Ban generic filler, repeated sentences, weak summaries, and vague wording such as 'consistency matters' unless a specific action follows. Each section must be high-signal only: one why-now sentence plus exactly two distinct actionable tips. Stay aligned with plannerContext and do not invent a conflicting plan. Never expose internal system terms such as planner or plannerContext.";
 }
 
 function buildUserPrompt(language: Language, context: ReturnType<typeof buildUserContext>, phase: RecoveryPhase = "start") {
   if (language === "ko") {
+    const shape = {
+      headline: "string",
+      compoundAlert: {
+        factors: ["string"],
+        message: "string",
+      },
+      sections: [
+        {
+          category: "sleep|shift|caffeine|menstrual|stress|activity",
+          severity: "info|caution|warning",
+          title: "string",
+          description: "string",
+          tips: ["string", "string"],
+        },
+      ],
+      weeklySummary: {
+        avgBattery: "number",
+        prevAvgBattery: "number",
+        topDrains: [{ label: "string", pct: "number" }],
+        personalInsight: "string",
+        nextWeekPreview: "string",
+      },
+    };
     return [
-      "supabase를 통한 데이터와 유저의 기록 기반 알고리즘/통계 데이터를 총합해 회복 조언을 작성하세요.",
+      "사용자의 기록과 계산된 회복 지표를 바탕으로 AI 맞춤회복 JSON을 작성하세요.",
+      "반드시 JSON 하나만 출력하세요. 코드펜스, 설명문, 마크다운 금지.",
       "- plannerContext가 있으면 그 우선순위와 반드시 정렬하세요.",
       "- plannerContext.focusFactor 또는 plannerContext.primaryAction과 충돌하는 새 계획을 만들지 마세요.",
       phase === "after_work"
-        ? "- 지금은 퇴근 후 회복 업데이트 단계입니다. 아침에 만든 회복 흐름을 끊지 말고, 오늘 실제 기록으로 밤 회복과 다음날 보호 방향을 보정하세요."
-        : "- 지금은 오늘 시작 회복 단계입니다. 오늘 수면을 제외한 같은 날 동적 입력은 이번 단계의 분석 입력에서 제외됐으므로, 오늘 상태를 추정하지도 말고 그 미입력 사실 자체를 설명의 중심으로 끌어오지도 마세요.",
-      "아래 형식을 반드시 지켜서 한국어 텍스트로 출력하세요.",
+        ? "- 지금은 퇴근 후 회복 업데이트 단계입니다. 아침 회복 흐름과 오더 진행을 반드시 이어 받아, 오늘 밤 회복과 다음날 보호 중심으로 업데이트하세요."
+        : "- 지금은 오늘 시작 회복 단계입니다. 오늘 수면을 제외한 같은 날 동적 입력은 분석 입력에서 제외됐으므로, 오늘 상태를 추정하지도 말고 그 미입력 사실 자체를 설명의 중심으로 끌어오지도 마세요.",
       "",
-      "[A] 한줄 요약",
+      "[핵심 목표]",
       phase === "after_work"
-        ? "- 전체 데이터를 종합해서 오늘 밤 회복에서 가장 중요한 것 한 문장"
-        : "- 전체 데이터를 종합해서 오늘 시작에서 가장 중요한 것 한 문장",
-      "- 가능하면 plannerContext.focusFactor 또는 plannerContext.primaryAction을 직접 반영",
+        ? "- headline은 오늘 밤 회복에서 가장 중요한 축을 1~2문장으로 정리"
+        : "- headline은 오늘 시작에서 가장 중요한 축을 1~2문장으로 정리",
+      "- headline에는 가능하면 focusFactor 또는 primaryAction의 맥락을 자연스럽게 녹일 것",
+      "- sections는 정말 중요한 카테고리만 2~4개 선택",
+      "- 각 section.description은 왜 이 카테고리가 지금 중요한지 실제 데이터 2가지 이상에 기대어 1문장으로 설명",
+      "- 각 section.tips는 정확히 2개, 서로 겹치지 않는 실행 행동으로 작성",
+      "- tips는 추상 조언이 아니라 시작 타이밍/장소/시간/방법 중 최소 2개가 보이게 작성",
+      "- description과 tips는 같은 문장을 반복하지 말 것",
       "",
-      "[B] 긴급 알림",
-      "- 위험 요소 2개 이상 동시 발생 시에만 작성",
-      "- 없으면 정확히 '없음'이라고 작성",
-      "",
-      "[C] 오늘의 회복 추천",
-      "- 카테고리별 박스 렌더링을 위해 반드시 블록 구조를 지킬 것",
-      "- 우선순위: 수면 > 교대근무 > 카페인 > 생리주기 > 스트레스&감정 > 신체활동",
-      "- plannerContext.focusFactor와 관련 있는 카테고리를 먼저 설명할 것",
-      "- menstrualTrackingEnabled가 false면 [생리주기] 섹션을 절대 출력하지 말 것",
-      "- menstrualTrackingEnabled가 true면 [생리주기] 섹션 포함 가능",
-      "- 각 카테고리는 반드시 아래 형식으로 작성:",
-      "  [카테고리명]",
-      "  상태: 현재 상태 요약 1문장",
-      "  추천1: 바로 실행할 행동 1개",
-      "  추천2: 바로 실행할 행동 1개",
-      "  추천3: 바로 실행할 행동 1개",
-      "- 각 카테고리당 추천은 정확히 3개",
-      "- 생리주기는 전문용어 없이 쉬운 단어 사용",
-      "- [Data JSON]에 workEventTags/workEventNote/note가 있으면 해당 근무 이벤트 맥락을 반영해 우선순위를 조정할 것",
+      "[품질 기준]",
+      "- '꾸준한 관리가 중요합니다', '신경 쓰세요', '활용해보세요' 같은 generic 마무리 금지",
+      "- 같은 의미를 문장만 바꿔 반복 금지",
+      "- 카테고리 title은 맥락이 보이는 짧은 제목으로 작성",
+      "- 수치(수면, 카페인, 활동, 기분, 스트레스)는 Data JSON에 있는 값만 사용하고 임의 수치 금지",
+      "- 숫자 태그형 표현 금지. 예: 스트레스(2), 기분4 금지",
+      "- 카페인 수치는 필요할 때만 자연어로 한 번만 설명",
       phase === "after_work"
-        ? "- recoveryThread가 있으면 아침 회복 headline/오더 진행을 이어 받아 오늘 밤 회복 설명에 연결할 것"
-        : "- recoveryThread가 없더라도 시작 회복은 하루를 여는 기준으로 설명할 것",
-      "- 중복 문장 금지, 같은 의미 반복 금지",
-      "- 줄 안에서 '/'로 항목을 이어 쓰지 말고, 각 항목을 반드시 줄바꿈으로 분리할 것",
+        ? "- recoveryThread가 있으면 아침 headline, 완료/미완료 오더와 연결된 문맥이 section 또는 headline에 드러나야 함"
+        : "- 시작 회복 단계에서는 같은 날 스트레스/카페인/활동/기분을 오늘 상태처럼 말하지 말 것",
       "",
-      "[D] 이번 주 AI 한마디",
-      "- 아래 구조를 반드시 분리해서 작성:",
-      "  이번 주 요약: 1문장",
-      "  개인 패턴:",
-      "  1. ...",
-      "  2. ...",
-      "  3. ...",
-      "  다음 주 예측:",
-      "  1. ...",
-      "  2. ...",
-      "  3. ...",
-      "- 각 번호 문장은 반드시 완결된 문장 1개로 작성하고, 번호 문장 중간에서 줄바꿈으로 끊지 말 것",
-      "- 개인 패턴과 다음 주 예측 문장을 서로 중복해서 쓰지 말 것",
+      "[JSON 규칙]",
+      "- compoundAlert는 위험 요소 2개 이상이 동시에 뚜렷할 때만 작성, 아니면 null",
+      `- sections.category 값은 sleep, shift, caffeine, ${context.menstrualTrackingEnabled ? "menstrual, " : ""}stress, activity 중에서만 선택`,
+      `- menstrualTrackingEnabled가 ${context.menstrualTrackingEnabled ? "true" : "false"}이므로 생리주기 섹션 포함 여부를 이에 맞출 것`,
+      "- sections는 우선순위가 높은 순서대로 배열",
+      "- weeklySummary.personalInsight와 weeklySummary.nextWeekPreview는 서로 다른 내용으로 작성",
+      "- weeklySummary.topDrains는 0~3개",
       "",
-      "[톤 가이드]",
-      "- 내용은 전문적이고 신뢰 가능한 근거 중심으로 유지",
-      "- 말투는 간호사 동료처럼 부드러운 존댓말(해요체) 사용",
-      "- 자책 유도 금지",
-      "- 추상적인 말 대신 즉시 실행 가능한 행동",
-      "- 수치(예: 수면부채/카페인/기분)는 input JSON 값을 그대로 사용하고 임의 수치를 만들지 말 것",
-      "- 수치는 소수점 1자리까지만 사용 (예: 1.6h, 42.3%)",
-      "- '스트레스(2)', '기분4'처럼 숫자 태그 형태 금지. 반드시 자연어로 풀어쓰기 (예: 스트레스가 조금 높은 편, 기분이 좋은 편)",
-      "- 카페인 mg는 잔 수로 같이 표현 (예: 120mg -> 약 1잔)",
-      "- 카페인 표현은 한 문장 안에서 한 번만 정리하고, 같은 수치를 괄호로 중복 반복하지 말 것",
-      "- planner, plannerContext 같은 내부 시스템 용어를 사용자에게 직접 노출하지 말 것",
-      "- 전체 답변은 한눈에 읽히는 짧고 정확한 문장으로 작성",
+      "[JSON shape]",
+      JSON.stringify(shape, null, 2),
       "",
       "[데이터(JSON)]",
       JSON.stringify(context, null, 2),
@@ -475,51 +473,52 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
   }
 
   return [
-    "Create personalized recovery guidance from the user's Supabase-backed records and computed trends.",
+    "Create a premium AI recovery JSON from the user's Supabase-backed records and computed trends.",
+    "Return JSON only. No markdown, no code fences, no commentary.",
     "If plannerContext exists, stay aligned with it. Do not invent a conflicting plan.",
     phase === "after_work"
       ? "This is the after-work recovery update. Continue the morning recovery thread and adjust tonight's recovery with today's actual logs."
-      : "This is the start-of-day recovery. Use today's sleep only for same-day inputs, and do not infer missing same-day stress, caffeine, activity, mood, or work events.",
-    "Output plain text in this exact structure:",
-    "[A] One-line summary",
-    "Reflect plannerContext.focusFactor or plannerContext.primaryAction when possible.",
-    "[B] Urgent alert (only if 2+ risks, otherwise write 'none')",
-    "[C] Today's recovery plan with strict category blocks.",
-    "Priority: sleep > shift > caffeine > menstrual > stress > activity.",
-    "Explain the categories most related to plannerContext.focusFactor first.",
-    "If menstrualTrackingEnabled is false, do not include menstrual.",
-    "Each category block must follow this exact format:",
-    "[Category]",
-    "Status: one-sentence condition summary",
-    "Recommendation1: one concrete action",
-    "Recommendation2: one concrete action",
-    "Recommendation3: one concrete action",
-    "Each category must contain exactly 3 recommendations.",
-    "Do not chain recommendations with '/'. Use separate lines only.",
-    "[D] Weekly AI note with strict structure:",
-    "Weekly summary: one sentence",
-    "Personal pattern:",
-    "1. ...",
-    "2. ...",
-    "3. ...",
-    "Next week preview:",
-    "1. ...",
-    "2. ...",
-    "3. ...",
-    "Each numbered line must be one complete sentence and must not break mid-sentence across line wraps.",
-    "Do not repeat the same sentence in personal pattern and next week preview.",
-    "Tone: professional and trustworthy in content, but warm like a supportive nurse colleague.",
-    "Avoid slang, exaggeration, and vague claims.",
+      : "This is the start-of-day recovery. Same-day stress, caffeine, activity, mood, and work-event inputs are intentionally excluded here, so do not infer them or talk about them as observed today.",
+    "headline must summarize today's highest-priority recovery direction in 1-2 sentences.",
+    "sections must include only the most decision-useful categories, ideally 2 to 4.",
+    "Each section.description must explain why the category matters now in exactly one strong sentence grounded in real data.",
+    "Each section.tips must contain exactly two distinct actions. They must not repeat the description in different words.",
+    "Ban generic filler such as 'consistency matters', 'pay attention', or 'keep managing it' unless a concrete action immediately follows.",
+    "Use specific, professional, easy-to-execute guidance that fits a shift-working nurse.",
     "When workEventTags/workEventNote/note exist in Data JSON, reflect those shift events in prioritization.",
     phase === "after_work"
       ? "If recoveryThread exists, carry the morning recovery headline and order progress into the evening update."
-      : "If same-day dynamic inputs are absent from Data JSON, do not talk about them as if they were observed today.",
-    "No duplicated sentences.",
-    "Keep numbers at one decimal place max.",
-    "Do not use score tags like stress(2) or mood4. Rewrite them in plain language.",
-    "Express caffeine both as cups and mg (e.g., about 1 cup / 120mg).",
-    "Mention caffeine only once per sentence and do not duplicate the same quantity in extra parentheses.",
+      : "Do not describe excluded same-day inputs as if they were observed today.",
+    "compoundAlert must be null unless there are at least two simultaneous meaningful risks.",
+    `menstrualTrackingEnabled is ${context.menstrualTrackingEnabled ? "true" : "false"}; follow that strictly.`,
+    "weeklySummary.personalInsight and weeklySummary.nextWeekPreview must not repeat the same message.",
     "Do not expose internal system words such as planner or plannerContext in the user-facing answer.",
+    "",
+    "[JSON shape]",
+    JSON.stringify(
+      {
+        headline: "string",
+        compoundAlert: { factors: ["string"], message: "string" },
+        sections: [
+          {
+            category: "sleep|shift|caffeine|menstrual|stress|activity",
+            severity: "info|caution|warning",
+            title: "string",
+            description: "string",
+            tips: ["string", "string"],
+          },
+        ],
+        weeklySummary: {
+          avgBattery: "number",
+          prevAvgBattery: "number",
+          topDrains: [{ label: "string", pct: "number" }],
+          personalInsight: "string",
+          nextWeekPreview: "string",
+        },
+      },
+      null,
+      2
+    ),
     "",
     "[Data JSON]",
     JSON.stringify(context, null, 2),
@@ -563,6 +562,8 @@ async function callResponsesApi(args: {
 }): Promise<TextAttempt> {
   const { apiKey, model, developerPrompt, userPrompt, signal, maxOutputTokens, logFeature, language, dateISO, phase = "start" } = args;
   const storeResponses = resolveStoreResponses();
+  const reasoningEffort = logFeature === "recovery_translate" ? "low" : "medium";
+  const verbosity = logFeature === "recovery_translate" ? "low" : "medium";
 
   const payload = {
     model,
@@ -578,10 +579,10 @@ async function callResponsesApi(args: {
     ],
     text: {
       format: { type: "text" },
-      verbosity: "medium",
+      verbosity,
     },
     reasoning: {
-      effort: "low",
+      effort: reasoningEffort,
     },
     max_output_tokens: maxOutputTokens,
     tools: [],
@@ -1078,7 +1079,7 @@ function parseHeadlineFromText(aBlock: string, wholeText: string): string {
   return wholeLines[0] ?? "오늘은 회복 우선순위를 같이 점검해 볼게요.";
 }
 
-function parseResultFromGeneratedText(text: string, language: Language): AIRecoveryResult {
+export function parseResultFromGeneratedText(text: string, language: Language): AIRecoveryResult {
   const aBlock = extractSection(text, "A");
   const bBlock = extractSection(text, "B");
   const cBlock = extractSection(text, "C");
@@ -1329,6 +1330,117 @@ function asStringArray(value: unknown): string[] {
   return value.map((item) => asString(item)).filter(Boolean);
 }
 
+function asRecoveryCategory(value: unknown): RecoverySection["category"] | null {
+  return value === "sleep" ||
+    value === "shift" ||
+    value === "caffeine" ||
+    value === "menstrual" ||
+    value === "stress" ||
+    value === "activity"
+    ? (value as RecoverySection["category"])
+    : null;
+}
+
+function asRecoverySeverity(value: unknown, fallbackText: string): RecoverySection["severity"] {
+  return value === "info" || value === "caution" || value === "warning"
+    ? (value as RecoverySection["severity"])
+    : parseSeverity(fallbackText);
+}
+
+function dedupeNarrativeStrings(values: string[], limit: number, blocked: string[] = []) {
+  const blockedKeys = new Set(blocked.map(normalizeComparableText).filter(Boolean));
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const clean = value.replace(/\s+/g, " ").trim();
+    if (!clean) continue;
+    const key = normalizeComparableText(clean);
+    if (!key || seen.has(key) || blockedKeys.has(key)) continue;
+    seen.add(key);
+    out.push(clean);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+function parseRecoveryJsonResult(candidate: Record<string, unknown>): AIRecoveryResult | null {
+  const headline = asString(candidate.headline);
+  if (!headline) return null;
+
+  const sectionsRaw = Array.isArray(candidate.sections) ? candidate.sections : [];
+  const sections = sectionsRaw
+    .map((item) => {
+      const row = typeof item === "object" && item !== null ? (item as Record<string, unknown>) : null;
+      if (!row) return null;
+      const category = asRecoveryCategory(row.category);
+      const title = asString(row.title);
+      const description = asString(row.description);
+      const tips = dedupeNarrativeStrings(asStringArray(row.tips), 2, [description]);
+      if (!category || !title || !description || !tips.length) return null;
+      return {
+        category,
+        severity: asRecoverySeverity(row.severity, `${title} ${description} ${tips.join(" ")}`),
+        title,
+        description,
+        tips,
+      } satisfies RecoverySection;
+    })
+    .filter((section): section is RecoverySection => Boolean(section))
+    .slice(0, 4);
+
+  if (!sections.length) return null;
+
+  const compoundRaw =
+    typeof candidate.compoundAlert === "object" && candidate.compoundAlert !== null
+      ? (candidate.compoundAlert as Record<string, unknown>)
+      : null;
+  const compoundAlert =
+    compoundRaw && asString(compoundRaw.message)
+      ? {
+          factors: dedupeNarrativeStrings(asStringArray(compoundRaw.factors), 4),
+          message: asString(compoundRaw.message),
+        }
+      : null;
+
+  const weeklyRaw =
+    typeof candidate.weeklySummary === "object" && candidate.weeklySummary !== null
+      ? (candidate.weeklySummary as Record<string, unknown>)
+      : null;
+  const topDrains = Array.isArray(weeklyRaw?.topDrains)
+    ? weeklyRaw!.topDrains
+        .map((item) => {
+          const row = typeof item === "object" && item !== null ? (item as Record<string, unknown>) : null;
+          if (!row) return null;
+          const label = asString(row.label);
+          const pct = Number(row.pct);
+          if (!label || !Number.isFinite(pct)) return null;
+          return {
+            label,
+            pct: Math.round(clamp(pct, 0, 100)),
+          };
+        })
+        .filter((item): item is { label: string; pct: number } => Boolean(item))
+        .slice(0, 3)
+    : [];
+  const weeklySummary =
+    weeklyRaw && (asString(weeklyRaw.personalInsight) || asString(weeklyRaw.nextWeekPreview) || topDrains.length)
+      ? {
+          avgBattery: Math.round(clamp(Number(weeklyRaw.avgBattery), 0, 100)),
+          prevAvgBattery: Math.round(clamp(Number(weeklyRaw.prevAvgBattery), 0, 100)),
+          topDrains,
+          personalInsight: asString(weeklyRaw.personalInsight),
+          nextWeekPreview: asString(weeklyRaw.nextWeekPreview),
+        }
+      : null;
+
+  return {
+    headline,
+    compoundAlert,
+    sections,
+    weeklySummary,
+  };
+}
+
 function shapeMatches(source: TranslationBundle, translated: TranslationBundle) {
   if (source.sections.length !== translated.sections.length) return false;
   for (let i = 0; i < source.sections.length; i++) {
@@ -1493,7 +1605,7 @@ export async function generateAIRecoveryWithOpenAI(
   const context = buildUserContext(params);
   const developerPrompt = buildDeveloperPrompt(params.language, params.phase ?? "start");
   const userPrompt = buildUserPrompt(params.language, context, params.phase ?? "start");
-  const maxOutputTokens = resolveMaxOutputTokens();
+  const maxOutputTokens = Math.max(resolveMaxOutputTokens(), 2200);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 35_000);
   try {
@@ -1514,17 +1626,28 @@ export async function generateAIRecoveryWithOpenAI(
       throw new Error(attempt.error ?? `openai_request_failed_model:${model}`);
     }
 
-    const generatedText = attempt.text.trim();
-    const parsed = parseResultFromGeneratedText(generatedText, params.language);
+    const rawText = attempt.text.trim();
+    const parsedObject = parseJsonObject(rawText);
+    if (!parsedObject) {
+      throw new Error(`openai_recovery_non_json_model:${model}`);
+    }
+    const parsed = parseRecoveryJsonResult(parsedObject);
+    if (!parsed) {
+      throw new Error(`openai_recovery_invalid_shape_model:${model}`);
+    }
     const safeSections = context.menstrualTrackingEnabled
       ? parsed.sections
       : parsed.sections.filter((section) => section.category !== "menstrual");
+    if (!safeSections.length) {
+      throw new Error(`openai_recovery_empty_sections_model:${model}`);
+    }
     const weeklyFallback = buildFallbackWeeklySummary(params);
     const mergedResult: AIRecoveryResult = {
       ...parsed,
       sections: safeSections,
       weeklySummary: mergeWeeklySummary(parsed.weeklySummary, weeklyFallback),
     };
+    const generatedText = buildStructuredTextFromResult(mergedResult, params.language);
     return {
       result: mergedResult,
       generatedText,
@@ -1850,6 +1973,8 @@ function buildPlannerOrdersDeveloperPrompt(
       "오더는 추상적인 조언이 아니라 실제로 체크 가능한 행동이어야 한다.",
       requestedCountClause,
       "중요하지 않은 항목은 과감히 제외하되, 선택한 개수 안에서 우선순위가 분명해야 한다.",
+      "응답은 JSON 하나만 반환하고, title/headline/summary/items를 모두 채워야 한다.",
+      "headline은 오늘 오더 흐름의 핵심을 한 문장으로, summary는 왜 이 오더 구성이 맞는지 한 문장으로 적는다.",
       "각 오더는 title, body, when, reason을 가져야 하고, id는 영어 snake_case로 안정적으로 작성한다.",
       "when은 긴 문장이 아니라 '지금', '근무 중', '퇴근 직후', '잠들기 전'처럼 아주 짧은 타이밍 라벨만 쓴다.",
       "chips는 선택 사항이며 0~3개, 한두 단어 수준의 짧은 태그만 쓴다.",
@@ -1865,6 +1990,8 @@ function buildPlannerOrdersDeveloperPrompt(
       "오더가 3개 이상이면 실수 방지/집중 리셋, 짧은 신체 회복, 정서 안정 또는 수면 전환 중 최소 2개 이상 영역이 섞이게 만든다.",
       "title은 행동만 적지 말고 맥락이 보이게 만든다. 예: '근무 중 3분 걷기 리셋', '퇴근 후 10분 감각 낮추기'.",
       "서로 거의 같은 행동을 다른 말로 반복하지 말고, 같은 타이밍 오더가 과하게 몰리지 않게 조정한다.",
+      "generic한 문장('휴식하기', '컨디션 관리하기', '꾸준히 해보기')만으로는 절대 끝내지 말고, 왜 지금 필요한지와 실행 장면이 보여야 한다.",
+      "reason은 description 재진술처럼 짧게 얼버무리지 말고, 개인 기록 패턴 2가지 이상과 연결되면 더 좋다.",
       "타임라인은 별도 섹션으로 만들지 말고 when/reason 안에 녹여라.",
       "출력은 JSON 하나만 반환한다.",
     ].join(" ");
@@ -1878,6 +2005,7 @@ function buildPlannerOrdersDeveloperPrompt(
     "Orders must be concrete actions that can be checked off, not generic advice.",
     requestedCountClause,
     "Keep priority sharp within the selected count and cut lower-value suggestions.",
+    "Return one JSON object with non-empty title, headline, summary, and items.",
     "Each order must include title, body, when, and reason, and id must be stable snake_case English.",
     "Use when as a very short timing label only, such as 'Now', 'During shift', 'After work', or 'Before bed'.",
     "chips are optional, must stay between 0 and 3, and should be very short keyword tags.",
@@ -1893,6 +2021,7 @@ function buildPlannerOrdersDeveloperPrompt(
     "When returning 3 or more orders, mix at least two domains across safety or focus reset, light body recovery, and emotional downshift or sleep transition.",
     "Make title action-first but contextual, such as '3-minute reset walk during shift' or '10-minute wind-down after work'.",
     "Avoid near-duplicate actions and avoid stacking too many orders into the same timing window unless clearly necessary.",
+    "Do not settle for thin phrases like 'rest more' or 'manage your condition'. The user must be able to picture exactly what to do next.",
     "Do not create a separate timeline section. Fold timing into when and reason.",
     "Return one JSON object only.",
   ].join(" ");
@@ -1945,7 +2074,10 @@ function buildPlannerOrdersUserPrompt(args: {
         ? `- items 길이는 정확히 ${requestedOrderCount}`
         : `- items 길이는 기본적으로 정확히 ${DEFAULT_PLANNER_ORDER_COUNT}`,
       "- id는 영어 snake_case",
+      "- title, headline, summary는 모두 비워 두지 말 것",
       "- title은 행동 중심의 짧은 문장",
+      "- headline은 오늘 오더 흐름의 핵심을 한 문장으로 정리",
+      "- summary는 왜 이 오더 구성이 맞는지 한 문장으로 정리",
       "- body는 체크리스트 한 줄처럼 짧고 분명하게, 가능하면 시간/횟수/조건을 포함",
       "- body 안에 시작 트리거를 넣어 언제 시작하는지 바로 보이게 할 것",
       "- when은 12자 안팎의 아주 짧은 타이밍 라벨만 사용",
@@ -1958,6 +2090,7 @@ function buildPlannerOrdersUserPrompt(args: {
       "- 전체 건강기록을 봤을 때 반복적으로 회복을 방해하는 패턴이 있으면 우선순위에 반영",
       "- 작은 행동이지만 회복 효과가 크고 실수/소진을 줄이는 방향을 우선",
       "- 막연한 '쉬기/눕기/눈감기' 표현만 쓰지 말고, 왜 지금 그 행동을 해야 하는지 실행 장면이 보이게 작성",
+      "- '컨디션 관리하기', '회복하기', '휴식하기'처럼 generic한 제목/문장 금지",
       "- items가 3개 이상이면 집중·안전, 짧은 움직임, 정서 안정/수면 전환 중 최소 2개 이상 영역이 섞이게 구성",
       phase === "after_work"
         ? "- 퇴근 후 단계에서는 when이 '퇴근 직후', '잠들기 전' 쪽으로 자연스럽게 분산되게 구성"
@@ -1997,7 +2130,10 @@ function buildPlannerOrdersUserPrompt(args: {
       ? `- items length must be exactly ${requestedOrderCount}`
       : `- items length should default to exactly ${DEFAULT_PLANNER_ORDER_COUNT}`,
     "- id must be English snake_case",
+    "- title, headline, and summary must all be present",
     "- title must be short and action-first",
+    "- headline must summarize the core order theme in one sentence",
+    "- summary must explain why this order mix fits today in one sentence",
     "- body must read like a checklist line and should include a small duration, count, or trigger when helpful",
     "- body must include a clear start trigger so the user knows when to begin",
     "- when must stay short, ideally a timing label under about 16 characters",
@@ -2007,6 +2143,7 @@ function buildPlannerOrdersUserPrompt(args: {
     "- reflect recurring blockers found across the full health record history",
     "- prefer low-friction, high-impact, non-duplicated actions",
     "- avoid vague rest-only wording unless today's data strongly supports acute exhaustion or sleep debt",
+    "- ban generic headings or filler such as 'manage your condition' or 'recover well'",
     "- if there are 3 or more items, mix at least two domains across focus or safety reset, light movement, and emotional or sleep recovery",
     phase === "after_work"
       ? "- after-work timing should lean toward after work and before bed"
@@ -2064,7 +2201,7 @@ function normalizeRequestedOrderCount(value: number | null | undefined) {
   return Math.max(1, Math.min(5, parsed));
 }
 
-function buildFallbackChecklistItems(
+export function buildFallbackChecklistItems(
   plannerContext: PlannerContext | null | undefined,
   language: Language,
   phase: RecoveryPhase,
@@ -2234,13 +2371,10 @@ function buildFallbackChecklistItems(
 function parsePlannerChecklistItems(
   value: unknown,
   language: Language,
-  phase: RecoveryPhase,
-  plannerContext?: PlannerContext | null,
   requestedOrderCount?: number | null
 ): AIPlannerChecklistItem[] {
   const targetCount = normalizeRequestedOrderCount(requestedOrderCount);
-  const fallbackItems = buildFallbackChecklistItems(plannerContext, language, phase, targetCount);
-  if (!Array.isArray(value)) return fallbackItems;
+  if (!Array.isArray(value)) return [];
 
   const items: AIPlannerChecklistItem[] = [];
   for (const item of value) {
@@ -2248,7 +2382,8 @@ function parsePlannerChecklistItems(
     if (!row) continue;
     const title = asString(row.title);
     const body = asString(row.body);
-    if (!title || !body) continue;
+    const reason = asString(row.reason);
+    if (!title || !body || !reason) continue;
     const rawId = asString(row.id) || title;
     const id = slugifyChecklistId(rawId, slugifyChecklistId(title, `order_${items.length + 1}`));
     items.push({
@@ -2256,7 +2391,7 @@ function parsePlannerChecklistItems(
       title,
       body,
       when: normalizeChecklistWhen(asString(row.when), language),
-      reason: asString(row.reason) || null,
+      reason,
       chips: asStringArray(row.chips)
         .map(normalizeChecklistChip)
         .filter(Boolean)
@@ -2266,57 +2401,23 @@ function parsePlannerChecklistItems(
   }
 
   const deduped = items.filter((item, index) => items.findIndex((candidate) => candidate.id === item.id) === index);
-  if (!deduped.length) return fallbackItems;
-
-  if (targetCount == null) return deduped;
-
-  const merged = [...deduped.slice(0, targetCount)];
-  for (const fallbackItem of fallbackItems) {
-    if (merged.length >= targetCount) break;
-    if (merged.some((item) => item.id === fallbackItem.id)) continue;
-    merged.push(fallbackItem);
-  }
-  return merged.slice(0, targetCount);
+  if (!deduped.length) return [];
+  if (targetCount != null && deduped.length !== targetCount) return [];
+  return deduped.slice(0, targetCount ?? 5);
 }
 
 function parsePlannerChecklistModule(
   value: unknown,
   language: Language,
-  phase: RecoveryPhase,
-  plannerContext?: PlannerContext | null,
   requestedOrderCount?: number | null
 ): AIPlannerChecklistModule {
   const row = typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
-  const items = parsePlannerChecklistItems(row.items, language, phase, plannerContext, requestedOrderCount);
+  const items = parsePlannerChecklistItems(row.items, language, requestedOrderCount);
   return {
     eyebrow: asString(row.eyebrow) || "Today Orders",
-    title:
-      asString(row.title) ||
-      (language === "en"
-        ? phase === "after_work"
-          ? "After-work Orders"
-          : "Start Orders"
-        : phase === "after_work"
-          ? "퇴근 후 오더"
-          : "오늘 시작 오더"),
-    headline:
-      asString(row.headline) ||
-      (language === "en"
-        ? phase === "after_work"
-          ? "Update the morning recovery thread into tonight's checklist."
-          : "Move start-of-day recovery into a checklist."
-        : phase === "after_work"
-          ? "아침 회복 흐름을 이어 받아 오늘 밤 체크리스트로 업데이트했어요."
-          : "오늘 시작 회복을 바로 실행할 체크리스트로 옮겼어요."),
-    summary:
-      asString(row.summary) ||
-      (language === "en"
-        ? phase === "after_work"
-          ? "Only the evening recovery orders that matter now are listed."
-          : "Only the most important starter orders for today are listed."
-        : phase === "after_work"
-          ? "지금 필요한 퇴근 후 회복 오더만 남겨 저녁 루틴으로 정리했어요."
-          : "오늘 시작에 꼭 필요한 스타터 오더만 남겨 정리했어요."),
+    title: asString(row.title),
+    headline: asString(row.headline),
+    summary: asString(row.summary),
     items,
   };
 }
@@ -2345,7 +2446,7 @@ async function generatePlannerOrdersWithOpenAI(
     phase: params.phase ?? "start",
     requestedOrderCount: params.requestedOrderCount,
   });
-  const maxOutputTokens = Math.max(resolveMaxOutputTokens(), 1800);
+  const maxOutputTokens = Math.max(resolveMaxOutputTokens(), 2200);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 40_000);
 
@@ -2376,11 +2477,17 @@ async function generatePlannerOrdersWithOpenAI(
     const checklistModule = parsePlannerChecklistModule(
       parsed,
       params.language,
-      params.phase ?? "start",
-      params.plannerContext,
       params.requestedOrderCount
     );
-    if (checklistModule.items.length < 1 || checklistModule.items.length > 5) {
+    const targetCount = normalizeRequestedOrderCount(params.requestedOrderCount);
+    if (
+      !checklistModule.title ||
+      !checklistModule.headline ||
+      !checklistModule.summary ||
+      checklistModule.items.length < 1 ||
+      checklistModule.items.length > 5 ||
+      (targetCount != null && checklistModule.items.length !== targetCount)
+    ) {
       throw new Error(`openai_planner_orders_incomplete_model:${model}`);
     }
 

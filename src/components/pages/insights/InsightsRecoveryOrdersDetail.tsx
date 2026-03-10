@@ -31,6 +31,13 @@ import { useInsightsData, isInsightsLocked, INSIGHTS_MIN_DAYS, shiftKo } from "@
 import { useI18n } from "@/lib/useI18n";
 import { withReturnTo } from "@/lib/navigation";
 
+function normalizeRequestedOrderCountParam(value: string | null) {
+  if (value == null || String(value).trim() === "") return 3;
+  const parsed = Math.round(Number(value));
+  if (!Number.isFinite(parsed)) return 3;
+  return Math.max(1, Math.min(5, parsed));
+}
+
 export function InsightsRecoveryOrdersDetail() {
   const { t } = useI18n();
   const searchParams = useSearchParams();
@@ -48,7 +55,8 @@ export function InsightsRecoveryOrdersDetail() {
   });
   const [doneMap, setDoneMap] = useState<Record<string, boolean>>({});
   const [completingIds, setCompletingIds] = useState<Record<string, boolean>>({});
-  const [selectedOrderCount, setSelectedOrderCount] = useState(3);
+  const initialOrderCount = normalizeRequestedOrderCountParam(searchParams.get("orderCount"));
+  const [selectedOrderCount, setSelectedOrderCount] = useState(initialOrderCount);
   const preferredPhase = normalizeRecoveryPhase(searchParams.get("phase"));
   const [activePhase, setActivePhase] = useState<"start" | "after_work">(preferredPhase);
   const completionTimersRef = useRef<number[]>([]);
@@ -58,6 +66,10 @@ export function InsightsRecoveryOrdersDetail() {
   useEffect(() => {
     setActivePhase(preferredPhase);
   }, [preferredPhase]);
+
+  useEffect(() => {
+    setSelectedOrderCount(initialOrderCount);
+  }, [initialOrderCount]);
 
   useEffect(() => {
     return () => {
@@ -84,7 +96,7 @@ export function InsightsRecoveryOrdersDetail() {
   });
 
   const plannerDateISO = startPlanner.data?.dateISO ?? afterPlanner.data?.dateISO ?? end;
-  const startOrdersModule = startPlanner.data?.result.orders ?? fallback.orders;
+  const startOrdersModule = startPlanner.data?.result.orders ?? null;
   const afterOrdersModule = afterPlanner.data?.result.orders ?? null;
   const progressIdsKey = [
     ...(startPlanner.data?.result.orders.items.map((item) => buildRecoveryOrderProgressId("start", item.id)) ?? []),
@@ -128,7 +140,7 @@ export function InsightsRecoveryOrdersDetail() {
     };
   }, [plannerDateISO, progressIdsKey]);
 
-  const startOrders = startOrdersModule.items;
+  const startOrders = startOrdersModule?.items ?? [];
   const afterOrders = afterOrdersModule?.items ?? [];
   const activeStartItems = startOrders.filter((item) => !doneMap[buildRecoveryOrderProgressId("start", item.id)]);
   const activeAfterItems = afterOrders.filter((item) => !doneMap[buildRecoveryOrderProgressId("after_work", item.id)]);
@@ -138,11 +150,11 @@ export function InsightsRecoveryOrdersDetail() {
   const activeModule = activePhase === "start" ? startOrdersModule : afterOrdersModule;
   const phaseHeadline =
     activePhase === "start"
-      ? startOrdersModule.items[0]?.title ?? startOrdersModule.headline
-      : afterOrdersModule?.items[0]?.title ?? afterOrdersModule?.headline ?? "퇴근 후 오더";
+      ? startOrdersModule?.items[0]?.title ?? startOrdersModule?.headline ?? "아침 회복에 맞춘 오더를 생성해요."
+      : afterOrdersModule?.items[0]?.title ?? afterOrdersModule?.headline ?? "퇴근 후 회복에 맞춘 오더를 생성해요.";
   const phaseSummary =
     activePhase === "start"
-      ? startOrdersModule.items[0]?.body ?? startOrdersModule.summary
+      ? startOrdersModule?.items[0]?.body ?? startOrdersModule?.summary ?? "아침에는 바로 실행할 수 있는 스타터 오더만 간단히 정리합니다."
       : afterOrdersModule?.items[0]?.body ?? afterOrdersModule?.summary ?? "퇴근 후 회복에 맞춰 오더를 이어서 정리합니다.";
 
   const completeItem = (phase: "start" | "after_work", id: string) => {
@@ -239,6 +251,7 @@ export function InsightsRecoveryOrdersDetail() {
           <div className="mt-4 flex flex-wrap gap-2">
             <DetailChip color="#1B2747">남은 오더 {activeItems.length}개</DetailChip>
             <DetailChip color="#5E6C84">완료 {completedCount}개</DetailChip>
+            <DetailChip color="#315CA8">기준 {selectedOrderCount}개</DetailChip>
           </div>
         </DetailCard>
       ) : null}
@@ -283,14 +296,13 @@ export function InsightsRecoveryOrdersDetail() {
       {planner.aiAvailable && startPlanner.error ? (
         <DetailCard className="p-5 sm:p-6">
           <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">오늘 시작 오더를 불러오지 못했어요.</div>
-          <p className="mt-2 text-[14px] leading-6 text-ios-sub">잠시 후 다시 시도하거나 AI 맞춤회복 상세에서 다시 확인해 주세요.</p>
-          <button
-            type="button"
-            onClick={startPlanner.retry}
+          <p className="mt-2 text-[14px] leading-6 text-ios-sub">기존 fallback 오더를 대신 보여주지 않고, 다시 생성할 수 있게 유지하고 있어요.</p>
+          <Link
+            href={orderGenerationHref}
             className="mt-4 inline-flex h-10 items-center justify-center rounded-full border border-[#CFE0FF] bg-[#EDF4FF] px-4 text-[13px] font-semibold text-[#0F4FCB]"
           >
-            다시 불러오기
-          </button>
+            AI에서 다시 생성하기
+          </Link>
         </DetailCard>
       ) : null}
 
@@ -344,7 +356,7 @@ export function InsightsRecoveryOrdersDetail() {
                 }}
               >
                 <div className="text-[10.5px] font-semibold tracking-[0.18em] text-[#1B2747]">{recoveryPhaseEyebrow("start")}</div>
-                <div className="mt-1 text-[18px] font-bold tracking-[-0.03em] text-ios-text">{startOrdersModule.title}</div>
+                <div className="mt-1 text-[18px] font-bold tracking-[-0.03em] text-ios-text">{startOrdersModule?.title ?? "아침 오더"}</div>
                 <p className="mt-2 text-[13px] leading-6 text-ios-sub">{recoveryPhaseDescription("start", "ko")}</p>
               </DetailCard>
               {activeStartItems.length ? (
@@ -359,11 +371,11 @@ export function InsightsRecoveryOrdersDetail() {
                   ))}
                 </div>
               ) : (
-                <DetailCard
-                  className="px-5 py-6 sm:px-6"
-                  style={{
-                    background: "linear-gradient(180deg, rgba(250,251,255,0.98) 0%, rgba(255,255,255,0.96) 100%)",
-                    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.94), 0 16px 38px rgba(15,36,74,0.04)",
+              <DetailCard
+                className="px-5 py-6 sm:px-6"
+                style={{
+                  background: "linear-gradient(180deg, rgba(250,251,255,0.98) 0%, rgba(255,255,255,0.96) 100%)",
+                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.94), 0 16px 38px rgba(15,36,74,0.04)",
                   }}
                 >
                   <div className="text-[17px] font-bold tracking-[-0.02em] text-ios-text">아침 오더를 모두 완료했어요.</div>
@@ -418,6 +430,25 @@ export function InsightsRecoveryOrdersDetail() {
                 >
                   <div className="text-[17px] font-bold tracking-[-0.02em] text-ios-text">퇴근 후 오더를 만들 수 있어요.</div>
                   <p className="mt-2 text-[13px] leading-6 text-ios-sub">퇴근 후 회복 업데이트를 만들면 이 탭에 오더가 이어집니다.</p>
+                  <div className="mt-4">
+                    <div className="text-[12px] font-semibold text-ios-sub">생성할 오더 개수</div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {[1, 2, 3, 4, 5].map((count) => (
+                        <button
+                          key={`after-count-${count}`}
+                          type="button"
+                          onClick={() => setSelectedOrderCount(count)}
+                          className={
+                            count === selectedOrderCount
+                              ? "inline-flex h-9 items-center justify-center rounded-full border border-[#A9C6FF] bg-[#EDF4FF] px-4 text-[13px] font-semibold text-[#0F4FCB]"
+                              : "inline-flex h-9 items-center justify-center rounded-full border border-ios-sep bg-white px-4 text-[13px] font-semibold text-ios-text"
+                          }
+                        >
+                          {count}개
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   {afterPlanner.error ? (
                     <p className="mt-3 text-[13px] leading-6 text-[#8F2943]">
                       {afterPlanner.error.includes("after_work_inputs_required")
