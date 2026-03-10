@@ -49,9 +49,8 @@ function normalizeGatewayAuthMode(raw: string) {
       "gateway-key",
       "gateway_token",
       "gateway-token",
-      "authorization",
-      "cf_token",
-      "cf-token",
+      "byok_header",
+      "byok-header",
     ].includes(value)
   ) {
     return "stored_key" as const;
@@ -168,24 +167,31 @@ export function resolveOpenAIResponsesRequestConfig(args: {
     ? resolveGatewayAuthMode(args.scope, trimEnv(args.apiKey), gatewayToken)
     : ("direct" as const);
 
-  const authorizationToken =
-    authMode === "stored_key" ? gatewayToken : trimEnv(args.apiKey);
+  const openAIApiKey = trimEnv(args.apiKey);
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
 
-  if (authorizationToken) {
-    headers.Authorization = `Bearer ${authorizationToken}`;
-  }
-  if (usesCloudflareGateway && authMode === "request_header" && gatewayToken) {
-    headers["cf-aig-authorization"] = `Bearer ${gatewayToken}`;
+  if (usesCloudflareGateway && authMode === "stored_key") {
+    if (gatewayToken) {
+      headers["cf-aig-authorization"] = `Bearer ${gatewayToken}`;
+    }
+  } else if (usesCloudflareGateway && authMode === "request_header") {
+    if (openAIApiKey) {
+      headers.Authorization = `Bearer ${openAIApiKey}`;
+    }
+    if (gatewayToken) {
+      headers["cf-aig-authorization"] = `Bearer ${gatewayToken}`;
+    }
+  } else if (openAIApiKey) {
+    headers.Authorization = `Bearer ${openAIApiKey}`;
   }
 
   let missingCredential: string | null = null;
   if (usesCloudflareGateway && authMode === "stored_key" && !gatewayToken) {
     missingCredential = "missing_cf_aig_token";
-  } else if (!authorizationToken) {
+  } else if ((authMode === "request_header" || authMode === "direct") && !openAIApiKey) {
     missingCredential = "missing_openai_api_key";
   }
 
