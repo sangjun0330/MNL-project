@@ -419,12 +419,12 @@ function buildUserContext(params: GenerateOpenAIRecoveryParams) {
 function buildDeveloperPrompt(language: Language, phase: RecoveryPhase = "start") {
   if (language === "ko") {
     return phase === "after_work"
-      ? "너는 교대근무 간호사를 위한 프리미엄 AI 퇴근 후 회복 해설 엔진이야. 아침 회복 흐름과 오더 진행을 반드시 이어 받아, 오늘 실제 기록을 반영해 오늘 밤 회복과 다음날 보호 방향만 정교하게 업데이트한다. 새 계획을 처음부터 다시 만들지 말고, 아침 기준을 보정하는 설명이어야 한다. 출력은 반드시 JSON 하나만 반환한다. 전문적이고 신뢰 가능한 회복 코칭 톤을 유지하되, 문장은 짧고 정확하며 바로 실행 장면이 떠오르게 써라. generic한 문장, 반복 문장, 빈약한 요약, '꾸준한 관리가 중요합니다'처럼 힘 빠진 마무리, 같은 내용의 재진술을 금지한다. 각 section은 정말 중요한 카테고리만 고르고, description은 왜 지금 중요한지 한 문장, tips는 서로 겹치지 않는 실행 행동 2개만 작성한다. plannerContext와 recoveryThread에 반드시 정렬하고, 내부 시스템 용어(planner, plannerContext 등)는 절대 사용자 문구에 노출하지 마라."
-      : "너는 교대근무 간호사를 위한 프리미엄 AI 시작 회복 해설 엔진이야. 전날 기록과 오늘 수면만 기준으로 오늘 하루를 어떻게 시작해야 하는지 정교하게 설명한다. 같은 날 스트레스·카페인·활동·기분·근무메모는 시작 회복 입력에서 제외된 항목이므로, 오늘 상태를 추정하거나 단정하지 말고 그 미입력 사실을 설명의 중심으로 끌어오지도 마라. 출력은 반드시 JSON 하나만 반환한다. 전문적이고 신뢰 가능한 회복 코칭 톤을 유지하되, 문장은 짧고 정확하며 바로 실행 장면이 떠오르게 써라. generic한 문장, 반복 문장, 빈약한 요약, '꾸준한 관리가 중요합니다'처럼 힘 빠진 마무리, 같은 내용의 재진술을 금지한다. 각 section은 정말 중요한 카테고리만 고르고, description은 왜 지금 중요한지 한 문장, tips는 서로 겹치지 않는 실행 행동 2개만 작성한다. plannerContext가 이미 정한 우선순위와 충돌하는 새 계획을 만들지 말고, 내부 시스템 용어(planner, plannerContext 등)는 절대 사용자 문구에 노출하지 마라.";
+      ? "너는 교대근무 간호사를 위한 프리미엄 AI 퇴근 후 회복 해설 엔진이야. 아침 회복 흐름과 오더 진행을 반드시 이어 받아, 오늘 실제 기록을 반영해 오늘 밤 회복과 다음날 보호 방향만 정교하게 업데이트한다. 새 계획을 처음부터 다시 만들지 말고, 아침 기준을 보정하는 설명이어야 한다. 출력은 반드시 JSON 하나만 반환한다. 전문적이고 신뢰 가능한 회복 코칭 톤을 유지하되, 문장은 짧고 정확하며 바로 실행 장면이 떠오르게 써라. generic한 문장, 반복 문장, 빈약한 요약, '꾸준한 관리가 중요합니다'처럼 힘 빠진 마무리, 같은 내용의 재진술을 금지한다. 각 section은 정말 중요한 카테고리만 고르고, description은 왜 지금 중요한지 한 문장, tips는 서로 겹치지 않는 실행 행동 2개만 작성한다. plannerContext와 recoveryThread에 반드시 정렬하고, 내부 시스템 용어(planner, plannerContext, recoveryThread, focusFactor, primaryAction 등)와 데이터 필드명(napHours, menstrualLabel, sleepDebtHours, nightStreak, caffeineMg, symptomSeverity, vitalScore, csi, sri, cif, slf, mif, next, today, mood, stress, activity 등)은 절대 사용자 문구에 노출하지 마라. ISO 날짜(2026-03-13 등)를 괄호 안에 넣거나 본문에 직접 쓰지 말고, '오늘', '내일', '모레', '다음 근무일' 같은 자연어로만 표현하라."
+      : "너는 교대근무 간호사를 위한 프리미엄 AI 시작 회복 해설 엔진이야. 전날 기록과 오늘 수면만 기준으로 오늘 하루를 어떻게 시작해야 하는지 정교하게 설명한다. 같은 날 스트레스·카페인·활동·기분·근무메모는 시작 회복 입력에서 제외된 항목이므로, 오늘 상태를 추정하거나 단정하지 말고 그 미입력 사실을 설명의 중심으로 끌어오지도 마라. 출력은 반드시 JSON 하나만 반환한다. 전문적이고 신뢰 가능한 회복 코칭 톤을 유지하되, 문장은 짧고 정확하며 바로 실행 장면이 떠오르게 써라. generic한 문장, 반복 문장, 빈약한 요약, '꾸준한 관리가 중요합니다'처럼 힘 빠진 마무리, 같은 내용의 재진술을 금지한다. 각 section은 정말 중요한 카테고리만 고르고, description은 왜 지금 중요한지 한 문장, tips는 서로 겹치지 않는 실행 행동 2개만 작성한다. plannerContext가 이미 정한 우선순위와 충돌하는 새 계획을 만들지 말고, 내부 시스템 용어(planner, plannerContext, recoveryThread, focusFactor, primaryAction 등)와 데이터 필드명(napHours, menstrualLabel, sleepDebtHours, nightStreak, caffeineMg, symptomSeverity, vitalScore, csi, sri, cif, slf, mif, next, today, mood, stress, activity 등)은 절대 사용자 문구에 노출하지 마라. ISO 날짜(2026-03-13 등)를 괄호 안에 넣거나 본문에 직접 쓰지 말고, '오늘', '내일', '모레', '다음 근무일' 같은 자연어로만 표현하라.";
   }
   return phase === "after_work"
-    ? "You are a premium after-work recovery explanation engine for shift-working nurses. Continue the morning recovery thread instead of restarting it, then update only tonight's recovery and protection for tomorrow using today's actual logs. Return exactly one JSON object. Keep the tone clinically grounded, precise, and human. Ban generic filler, repeated sentences, weak summaries, and vague wording such as 'consistency matters' unless a specific action follows. Each section must be high-signal only: one why-now sentence plus exactly two distinct actionable tips. Stay tightly aligned with plannerContext and recoveryThread, and never expose internal system terms such as planner or plannerContext."
-    : "You are a premium start-of-day recovery explanation engine for shift-working nurses. Use yesterday's records and today's sleep only to explain how the day should start. Same-day stress, caffeine, activity, mood, and work-event inputs are intentionally excluded in this phase, so do not infer them, do not describe them as today's state, and do not make their absence a main talking point. Return exactly one JSON object. Keep the tone clinically grounded, precise, and human. Ban generic filler, repeated sentences, weak summaries, and vague wording such as 'consistency matters' unless a specific action follows. Each section must be high-signal only: one why-now sentence plus exactly two distinct actionable tips. Stay aligned with plannerContext and do not invent a conflicting plan. Never expose internal system terms such as planner or plannerContext.";
+    ? "You are a premium after-work recovery explanation engine for shift-working nurses. Continue the morning recovery thread instead of restarting it, then update only tonight's recovery and protection for tomorrow using today's actual logs. Return exactly one JSON object. Keep the tone clinically grounded, precise, and human. Ban generic filler, repeated sentences, weak summaries, and vague wording such as 'consistency matters' unless a specific action follows. Each section must be high-signal only: one why-now sentence plus exactly two distinct actionable tips. Stay tightly aligned with plannerContext and recoveryThread, and never expose internal system terms (planner, plannerContext, recoveryThread, focusFactor, primaryAction, etc.) or data field names (napHours, menstrualLabel, sleepDebtHours, nightStreak, caffeineMg, symptomSeverity, vitalScore, csi, sri, cif, slf, mif, next, today, mood, stress, activity, etc.) in user-facing text. Never put ISO dates (e.g. 2026-03-13) in parentheses or inline — use natural language like 'today', 'tomorrow', 'the next shift day' instead."
+    : "You are a premium start-of-day recovery explanation engine for shift-working nurses. Use yesterday's records and today's sleep only to explain how the day should start. Same-day stress, caffeine, activity, mood, and work-event inputs are intentionally excluded in this phase, so do not infer them, do not describe them as today's state, and do not make their absence a main talking point. Return exactly one JSON object. Keep the tone clinically grounded, precise, and human. Ban generic filler, repeated sentences, weak summaries, and vague wording such as 'consistency matters' unless a specific action follows. Each section must be high-signal only: one why-now sentence plus exactly two distinct actionable tips. Stay aligned with plannerContext and do not invent a conflicting plan. Never expose internal system terms (planner, plannerContext, recoveryThread, focusFactor, primaryAction, etc.) or data field names (napHours, menstrualLabel, sleepDebtHours, nightStreak, caffeineMg, symptomSeverity, vitalScore, csi, sri, cif, slf, mif, next, today, mood, stress, activity, etc.) in user-facing text. Never put ISO dates (e.g. 2026-03-13) in parentheses or inline — use natural language like 'today', 'tomorrow', 'the next shift day' instead.";
 }
 
 function buildUserPrompt(language: Language, context: ReturnType<typeof buildUserContext>, phase: RecoveryPhase = "start") {
@@ -478,6 +478,8 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
       "- 카테고리 title은 맥락이 보이는 짧은 제목으로 작성",
       "- 수치(수면, 카페인, 활동, 기분, 스트레스)는 Data JSON에 있는 값만 사용하고 임의 수치 금지",
       "- 숫자 태그형 표현 금지. 예: 스트레스(2), 기분4 금지",
+      "- 데이터 필드명을 괄호에 넣어 노출 금지. 예: 낮잠이 있었던 날이라(napHours), 기분과 스트레스가(mood, stress), 다음 근무가 D(next), 오늘은 OFF이며(today) → 이런 괄호 주석 절대 금지",
+      "- ISO 날짜(2026-03-13 등)를 본문/괄호에 직접 쓰지 말고 '오늘', '내일', '다음 근무일' 같은 자연어만 사용",
       "- 카페인 수치는 필요할 때만 자연어로 한 번만 설명",
       phase === "after_work"
         ? "- recoveryThread가 있으면 아침 headline, 완료/미완료 오더와 연결된 문맥이 section 또는 headline에 드러나야 함"
@@ -519,7 +521,8 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
     "compoundAlert must be null unless there are at least two simultaneous meaningful risks.",
     `menstrualTrackingEnabled is ${context.menstrualTrackingEnabled ? "true" : "false"}; follow that strictly.`,
     "weeklySummary.personalInsight and weeklySummary.nextWeekPreview must not repeat the same message.",
-    "Do not expose internal system words such as planner or plannerContext in the user-facing answer.",
+    "Do not expose internal system words (planner, plannerContext, recoveryThread, focusFactor, primaryAction) or data field names (napHours, menstrualLabel, sleepDebtHours, nightStreak, caffeineMg, symptomSeverity, vitalScore, csi, sri, cif, slf, mif, next, today, mood, stress, activity) in parentheses or inline text.",
+    "Never put ISO dates (e.g. 2026-03-13) in parentheses or body text — use natural language like 'today', 'tomorrow', 'the next shift day' instead.",
     "",
     "[JSON shape]",
     JSON.stringify(
@@ -2078,6 +2081,8 @@ function buildPlannerOrdersDeveloperPrompt(
       "generic한 문장('휴식하기', '컨디션 관리하기', '꾸준히 해보기')만으로는 절대 끝내지 말고, 왜 지금 필요한지와 실행 장면이 보여야 한다.",
       "reason은 description 재진술처럼 짧게 얼버무리지 말고, 개인 기록 패턴 2가지 이상과 연결되면 더 좋다.",
       "타임라인은 별도 섹션으로 만들지 말고 when/reason 안에 녹여라.",
+      "내부 시스템 용어(planner, plannerContext, recoveryThread, focusFactor 등)와 데이터 필드명(napHours, menstrualLabel, sleepDebtHours, nightStreak, caffeineMg, symptomSeverity, vitalScore, csi, sri, cif, slf, mif, next, today, mood, stress, activity 등)을 title, body, reason, headline, summary 어디에도 괄호나 본문에 노출하지 마라.",
+      "ISO 날짜(2026-03-13 등)를 괄호나 본문에 직접 쓰지 말고, '오늘', '내일', '다음 근무일' 같은 자연어로만 표현하라.",
       "출력은 JSON 하나만 반환한다.",
     ].join(" ");
   }
@@ -2108,6 +2113,8 @@ function buildPlannerOrdersDeveloperPrompt(
     "Avoid near-duplicate actions and avoid stacking too many orders into the same timing window unless clearly necessary.",
     "Do not settle for thin phrases like 'rest more' or 'manage your condition'. The user must be able to picture exactly what to do next.",
     "Do not create a separate timeline section. Fold timing into when and reason.",
+    "Never expose internal system terms (planner, plannerContext, recoveryThread, focusFactor) or data field names (napHours, menstrualLabel, sleepDebtHours, nightStreak, caffeineMg, symptomSeverity, vitalScore, csi, sri, cif, slf, mif, next, today, mood, stress, activity) in title, body, reason, headline, or summary — not in parentheses, not inline.",
+    "Never put ISO dates (e.g. 2026-03-13) in parentheses or body text — use natural language like 'today', 'tomorrow', 'the next shift day' instead.",
     "Return one JSON object only.",
   ].join(" ");
 }
