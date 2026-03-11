@@ -52,6 +52,7 @@ type AnalyzePayload = {
   source: "openai_live" | "openai_fallback";
   fallbackReason?: string | null;
   continuationToken?: string | null;
+  startedFreshSession?: boolean;
 };
 
 type AnswerSectionTone = "summary" | "action" | "warning" | "compare" | "neutral";
@@ -148,6 +149,7 @@ function parseAnalyzePayload(payloadRaw: unknown): { ok: true; data: AnalyzePayl
       source: String(node.source ?? "") === "openai_fallback" ? "openai_fallback" : "openai_live",
       fallbackReason: node.fallbackReason == null ? null : String(node.fallbackReason),
       continuationToken: typeof node.continuationToken === "string" ? node.continuationToken : null,
+      startedFreshSession: node.startedFreshSession === true,
     },
   };
 }
@@ -763,17 +765,15 @@ export function ToolMedSafetyPage() {
       }
 
       setStreamingText("");
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `assistant-${normalizedData.analyzedAt.toString(36)}`,
-          role: "assistant",
-          content: normalizedData.answer,
-          timestamp: normalizedData.analyzedAt,
-          model: normalizedData.model,
-          source: normalizedData.source,
-        },
-      ]);
+      const assistantMessage: Message = {
+        id: `assistant-${normalizedData.analyzedAt.toString(36)}`,
+        role: "assistant",
+        content: normalizedData.answer,
+        timestamp: normalizedData.analyzedAt,
+        model: normalizedData.model,
+        source: normalizedData.source,
+      };
+      setMessages((prev) => (normalizedData.startedFreshSession ? [userMessage, assistantMessage] : [...prev, assistantMessage]));
       setLastContinuationToken(normalizedData.continuationToken ?? null);
 
       if (normalizedData.source === "openai_fallback") {

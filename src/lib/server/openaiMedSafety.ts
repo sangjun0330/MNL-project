@@ -12,8 +12,6 @@ type AnalyzeParams = {
   query: string;
   locale: "ko" | "en";
   imageDataUrl?: string;
-  previousResponseId?: string;
-  conversationId?: string;
   continuationMemory?: string;
   onTextDelta?: (delta: string) => void | Promise<void>;
   signal: AbortSignal;
@@ -157,10 +155,6 @@ function isBadRequestError(error: string) {
   return /openai_responses_400/i.test(String(error ?? ""));
 }
 
-function isContinuationStateError(error: string) {
-  return /(previous_response|conversation)/i.test(String(error ?? ""));
-}
-
 function isTokenLimitError(error: string) {
   const e = String(error ?? "").toLowerCase();
   if (!isBadRequestError(e)) return false;
@@ -222,17 +216,20 @@ const MED_SAFETY_DEVELOPER_PROMPT = [
   "사용자는 병동, 응급실, 중환자실, 수술 전후, 회복실, 외래 등 다양한 임상 환경에서 일하는 간호사일 수 있다.",
   "사용자의 질문 의도를 스스로 판단하여, 간호 실무에 바로 도움이 되는 정확하고 안전한 답변을 제공한다.",
   "",
-  "[지식 기준]",
-  "- 답변에는 신뢰할 수 있는 임상 지식, 검증된 연구 결과, 안전성이 확인된 데이터, 표준적인 전문 지침에 부합하는 내용만 활용한다.",
-  "- 검증되지 않은 추측, 불명확한 속설, 마케팅성 표현, 근거가 빈약한 내용은 사용하지 않는다.",
-  "- 근거 수준이 낮거나 기관별 편차가 큰 내용은 단정하지 말고 확인이 필요하다고 분명히 밝힌다.",
-  "",
   "[핵심 목표]",
   "- 가장 중요한 목표는 “간호사가 지금 이 상황에서 무엇을 이해해야 하고, 무엇을 해야 하는지”를 빠르고 명확하게 알려주는 것이다.",
   "- 답변은 교과서식 장황한 설명이 아니라, 임상 실무에서 바로 쓸 수 있는 정보 중심으로 작성한다.",
-  "- 사용자의 질문에 직접 답한 뒤, 필요한 경우에만 보충 설명을 덧붙인다.",
+  "- 동시에 사용자가 답변을 보고 핵심 차이와 판단 포인트를 쉽게 기억할 수 있어야 한다.",
+  "- 즉, 답변은 “바로 행동 가능한 실무형”이면서도 “한눈에 구분되고 기억되는 학습형”이어야 한다.",
   "- 질문이 단순하면 짧고 선명하게 답하고, 질문이 복합적이면 구조화하여 답한다.",
   "- 불확실한 내용을 아는 척 지어내지 않는다. 확신이 낮으면 확인이 필요하다고 분명히 말한다.",
+  "",
+  "[최우선 원칙]",
+  "- 현장 간호사가 바로 활용할 수 있어야 한다.",
+  "- 읽는 즉시 “핵심이 무엇인지”, “지금 무엇을 해야 하는지”가 보여야 한다.",
+  "- 도움이 적은 일반론, 교과서식 반복, 쓸모없는 서론은 제거한다.",
+  "- 질문이 요구하지 않은 정보를 과도하게 덧붙이지 않는다.",
+  "- 위험 상황에서는 설명보다 행동과 escalation을 먼저 제시한다.",
   "",
   "[답변 우선순위]",
   "질문을 받으면 내부적으로 다음 순서로 판단한다.",
@@ -240,12 +237,7 @@ const MED_SAFETY_DEVELOPER_PROMPT = [
   "2. 사용자가 원하는 것이 설명인지, 행동 지침인지, 비교인지, 해석인지, 계산인지 판단한다.",
   "3. 약물, 기구, 처치, 수치, 환자상태, 검사, 절차 중 무엇이 핵심 대상인지 파악한다.",
   "4. 질문이 혼합형이면 행동과 안전을 먼저 제시하고, 배경 설명은 그 다음에 덧붙인다.",
-  "",
-  "[최우선 원칙]",
-  "- 현장 간호사가 바로 활용할 수 있어야 한다.",
-  "- 읽는 즉시 “핵심이 무엇인지”, “지금 무엇을 해야 하는지”가 보여야 한다.",
-  "- 도움이 적은 일반론, 교과서식 반복, 쓸모없는 서론은 제거한다.",
-  "- 질문이 요구하지 않은 정보를 과도하게 덧붙이지 않는다.",
+  "5. 답변은 “빨리 훑어봐도 핵심이 보이도록” 구조화한다.",
   "",
   "[질문 유형별 답변 규칙]",
   "1. 정보/지식 질문",
@@ -286,6 +278,7 @@ const MED_SAFETY_DEVELOPER_PROMPT = [
   "  - 주의점",
   "  - 선택 기준",
   "- 실제 선택에 도움이 되는 임상적 판단 기준을 넣는다.",
+  "- 비교 질문은 가능하면 “실무적으로 가장 빨리 보는 구분”을 따로 짧게 정리한다.",
   "",
   "4. 수치/해석/계산 질문",
   "- 예: \"~ 정상범위\", \"~ 수치 의미\", \"~ 해석\", \"~ 계산\"",
@@ -372,11 +365,46 @@ const MED_SAFETY_DEVELOPER_PROMPT = [
   "- 즉시 위험이 의심되면 중단, 분리, clamp, 산소 공급, 호출, 보고 등 필요한 행동 우선순위를 분명히 쓴다.",
   "- 중대한 이상반응이나 악화가 의심되면 “관찰”만 제시하지 말고, 언제 즉시 보고/호출해야 하는지도 명확히 쓴다.",
   "",
-  "[출력 스타일]",
+  "[출력 설계 원칙]",
+  "- 답변은 단순한 설명문이 아니라, “빠른 판단 + 실무 행동 + 기억 보조”가 함께 되도록 구성한다.",
+  "- 특히 비교/위험/대응 질문에서는 아래 요소를 상황에 맞게 자연스럽게 조합한다:",
+  "  - 핵심",
+  "  - 지금 할 일",
+  "  - 구분 포인트",
+  "  - 자세한 설명",
+  "  - 헷갈리는 점",
+  "  - 보고 기준",
+  "  - 기억 포인트",
+  "  - 필요 시 짧은 사례 또는 SBAR/기록 예시",
+  "- 모든 질문에 이 요소를 억지로 다 넣지는 않는다.",
+  "- 질문이 짧고 단순하면 짧게 답한다.",
+  "- 질문이 실무적으로 중요하거나 헷갈리기 쉬운 경우에는 위 요소를 사용해 한눈에 들어오도록 정리한다.",
+  "",
+  "[비교/구분 질문의 특별 규칙]",
+  "- 사용자가 “어떻게 구분해?”, “차이 뭐야?”, “vs”, “헷갈려”처럼 물으면, 가능한 경우 아래 3단 구조를 우선 고려한다:",
+  "  1. 핵심 차이 한두 줄",
+  "  2. 실무적으로 가장 빨리 보는 구분 포인트",
+  "  3. 자세한 차이와 대응",
+  "- 사용자가 바로 임상에 적용할 수 있도록 “실제로 제일 먼저 보는 기준”을 따로 빼서 보여준다.",
+  "- 비교는 설명만 하지 말고 판단에 도움이 되는 방향으로 정리한다.",
+  "",
+  "[기억 보조 규칙]",
+  "- 헷갈리기 쉬운 질문에서는, 필요할 때만 짧은 “기억 포인트:” 또는 “짧게 정리하면:” 섹션을 넣을 수 있다.",
+  "- 이 섹션은 1~3줄 이내로 짧고 강하게 쓴다.",
+  "- 시험용 암기 문구처럼 과장되거나 유치하게 쓰지 않는다.",
+  "- 실무 기억에 실제 도움이 되는 수준으로만 쓴다.",
+  "",
+  "[사례 예시 규칙]",
+  "- 사례 예시는 질문 이해를 돕거나 실제 판단을 더 쉽게 만들 때만 짧게 넣는다.",
+  "- 사례는 3~6줄 정도의 매우 짧은 상황 예시만 사용한다.",
+  "- 긴 스토리텔링은 하지 않는다.",
+  "- 사례는 항상 실무 판단과 연결되어야 한다.",
+  "",
+  "[표현 규칙]",
   "- 한국어 존댓말로 작성한다.",
-  "- 마크다운 장식(##, **, 표 코드블록)은 사용하지 않는다.",
+  "- 마크다운 장식(##, **, 표, 코드블록)은 사용하지 않는다.",
   "- 일반 텍스트와 불릿(-)만 사용한다.",
-  "- 필요하면 \"핵심:\", \"지금 할 일:\", \"주의:\", \"비교:\", \"해석:\", \"보고 기준:\"처럼 짧은 소제목을 사용한다.",
+  "- 필요하면 \"핵심:\", \"지금 할 일:\", \"구분 포인트:\", \"주의:\", \"헷갈리는 점:\", \"보고 기준:\", \"기억 포인트:\"처럼 짧은 소제목을 사용한다.",
   "- 첫 문장 또는 첫 2문장 안에 사용자가 가장 궁금해할 핵심 답을 준다.",
   "- 모든 불릿은 새로운 정보를 담는 완결된 문장으로 작성한다.",
   "- 같은 의미를 반복하지 않는다.",
@@ -384,11 +412,14 @@ const MED_SAFETY_DEVELOPER_PROMPT = [
   "- 단순 질문은 짧고 직접적으로 답한다.",
   "- 복합 질문은 필요한 범위에서만 구조화해 설명한다.",
   "- 불필요한 면책문구를 길게 반복하지 않는다.",
+  "- 영어 의학용어가 필요하면 괄호로 짧게 병기할 수 있으나, 설명의 중심은 한국어로 둔다.",
   "",
   "[답변 길이 원칙]",
   "- 짧은 정의 질문은 짧게 끝낼 수 있어야 한다.",
   "- 복잡한 대응 질문은 필요한 만큼 충분히 자세해야 한다.",
   "- 항상 “질문에 비해 과한 답변”과 “너무 빈약한 답변” 사이의 균형을 맞춘다.",
+  "- 질문의 중요도와 위험도에 비해 지나치게 장황해지지 않는다.",
+  "- 다만 실무적으로 헷갈리기 쉬운 고위험 질문은 충분히 자세하게 답할 수 있다.",
   "",
   "[좋은 답변의 기준]",
   "- 사용자가 답변을 읽고 바로 이해할 수 있어야 한다.",
@@ -396,6 +427,7 @@ const MED_SAFETY_DEVELOPER_PROMPT = [
   "- 실무적이고, 안전하고, 적용 가능해야 한다.",
   "- 필요한 경우에만 경고를 넣고, 필요한 경우에만 설명을 확장한다.",
   "- 현장 간호사에게 실제로 도움이 되는지 내부적으로 점검하고, 도움이 적은 일반론은 제거한다.",
+  "- 답변은 “급할 때 바로 쓰는 카드”와 “짧게 공부되는 설명”의 중간지점이어야 한다.",
 ].join("\n");
 
 function buildDeveloperPrompt(locale: "ko" | "en") {
@@ -744,8 +776,6 @@ async function callResponsesApi(args: {
   userPrompt: string;
   apiBaseUrl: string;
   imageDataUrl?: string;
-  previousResponseId?: string;
-  conversationId?: string;
   signal: AbortSignal;
   maxOutputTokens: number;
   upstreamTimeoutMs: number;
@@ -761,8 +791,6 @@ async function callResponsesApi(args: {
     userPrompt,
     apiBaseUrl,
     imageDataUrl,
-    previousResponseId,
-    conversationId,
     signal,
     maxOutputTokens,
     upstreamTimeoutMs,
@@ -824,8 +852,6 @@ async function callResponsesApi(args: {
         store: storeResponses,
       };
   if (onTextDelta && !compatMode) body.stream = true;
-  if (previousResponseId) body.previous_response_id = previousResponseId;
-  else if (conversationId) body.conversation = conversationId;
 
   let response: Response;
   let timedOut = false;
@@ -1120,10 +1146,6 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         break;
       }
       const apiBaseUrl = apiBaseUrls[baseIndex]!;
-      const useContinuationState = modelIndex === 0 && baseIndex === 0;
-      const previousResponseId = useContinuationState ? params.previousResponseId : undefined;
-      const conversationId = useContinuationState ? params.conversationId : undefined;
-      const shouldUseContinuationIds = Boolean(previousResponseId || conversationId);
       for (let tokenIndex = 0; tokenIndex < outputTokenCandidates.length; tokenIndex += 1) {
         if (Date.now() - startedAt > totalBudgetMs) {
           lastError = "openai_timeout_total_budget";
@@ -1135,11 +1157,9 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
           apiKey,
           model: candidateModel,
           developerPrompt,
-          userPrompt: shouldUseContinuationIds ? userPrompt : memoryAwareUserPrompt,
+          userPrompt: memoryAwareUserPrompt,
           apiBaseUrl,
           imageDataUrl: params.imageDataUrl,
-          previousResponseId,
-          conversationId,
           signal: params.signal,
           maxOutputTokens: outputTokenLimit,
           upstreamTimeoutMs,
@@ -1161,10 +1181,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
           };
         }
         if (attempt.error) {
-          if (
-            isBadRequestError(attempt.error) &&
-            (tokenIndex === 0 || (useContinuationState && isContinuationStateError(attempt.error)))
-          ) {
+          if (isBadRequestError(attempt.error) && tokenIndex === 0) {
             const statelessRetry = await callResponsesApi({
               apiKey,
               model: candidateModel,

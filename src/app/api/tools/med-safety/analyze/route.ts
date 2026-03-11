@@ -7,7 +7,7 @@ import {
   buildMedSafetyContinuationMemoryText,
   createMedSafetyContinuationToken,
   readMedSafetyContinuationToken,
-  type MedSafetyContinuationMemoryTurn,
+  shouldStartFreshMedSafetySession,
 } from "@/lib/server/medSafetyContinuation";
 import type { Json } from "@/types/supabase";
 
@@ -29,8 +29,6 @@ const MAX_MED_SAFETY_HISTORY_RETENTION_DAYS = 90;
 type RequestBody = {
   query?: unknown;
   continuationToken?: unknown;
-  previousResponseId?: unknown;
-  conversationId?: unknown;
   locale?: unknown;
   imageDataUrl?: unknown;
   stream?: unknown;
@@ -45,6 +43,7 @@ type MedSafetyResponseData = {
   source: "openai_live" | "openai_fallback";
   fallbackReason: string | null;
   continuationToken: string | null;
+  startedFreshSession: boolean;
 };
 
 type MedSafetyRecentRecord = {
@@ -291,6 +290,7 @@ function normalizeRecentRecords(value: unknown, limit = MED_SAFETY_RECENT_LIMIT_
         source: String(resultNode.source ?? "") === "openai_fallback" ? "openai_fallback" : "openai_live",
         fallbackReason: toPublicReason(resultNode.fallbackReason),
         continuationToken: typeof resultNode.continuationToken === "string" ? resultNode.continuationToken : null,
+        startedFreshSession: resultNode.startedFreshSession === true,
       },
     });
   }
@@ -409,6 +409,7 @@ function buildResponseData(params: {
     source: params.analyzed.fallbackReason ? "openai_fallback" : "openai_live",
     fallbackReason: toPublicReason(params.analyzed.fallbackReason),
     continuationToken: null,
+    startedFreshSession: false,
   };
 }
 
@@ -470,14 +471,27 @@ export async function POST(req: NextRequest) {
     const timeoutMs = resolveAnalyzeTimeoutMs();
     const timeout = setTimeout(() => abort.abort(), timeoutMs);
     const routeStartedAt = Date.now();
-    const continuationState = await readMedSafetyContinuationToken({
+    const rawContinuationState = await readMedSafetyContinuationToken({
       token: continuationToken,
       userId,
     });
-    const previousResponseId = continuationState?.previousResponseId ?? undefined;
-    const conversationId = continuationState?.conversationId ?? undefined;
-    const koContinuationMemory = buildMedSafetyContinuationMemoryText(continuationState?.memoryTurns ?? [], "ko");
-    const enContinuationMemory = buildMedSafetyContinuationMemoryText(continuationState?.memoryTurns ?? [], "en");
+    const startedFreshSession = shouldStartFreshMedSafetySession({
+      query,
+      summary: rawContinuationState?.summary,
+      lastTurn: rawContinuationState?.lastTurn ?? null,
+      hasNewImage: Boolean(imageDataUrl),
+    });
+    const continuationState = startedFreshSession ? null : rawContinuationState;
+    const koContinuationMemory = buildMedSafetyContinuationMemoryText({
+      summary: continuationState?.summary,
+      lastTurn: continuationState?.lastTurn ?? null,
+      locale: "ko",
+    });
+    const enContinuationMemory = buildMedSafetyContinuationMemoryText({
+      summary: continuationState?.summary,
+      lastTurn: continuationState?.lastTurn ?? null,
+      locale: "en",
+    });
 
     const runAnalyze = async (onTextDelta?: (delta: string) => void | Promise<void>) => {
       const analyzedAt = Date.now();
@@ -487,8 +501,6 @@ export async function POST(req: NextRequest) {
         query,
         locale: "ko",
         imageDataUrl: imageDataUrl || undefined,
-        previousResponseId,
-        conversationId,
         continuationMemory: koContinuationMemory || undefined,
         onTextDelta,
         signal: abort.signal,
@@ -549,24 +561,18 @@ export async function POST(req: NextRequest) {
         abort.signal.removeEventListener("abort", relayAbort);
       }
 
-      const nextMemoryTurns: MedSafetyContinuationMemoryTurn[] = [
-        ...(continuationState?.memoryTurns ?? []),
-        {
-          query,
-          answer: analyzedKo.result.answer,
-        },
-      ];
       const nextContinuationToken = await createMedSafetyContinuationToken({
         userId,
-        previousTurns: nextMemoryTurns.slice(0, -1),
-        responseId: analyzedKo.openaiResponseId,
-        conversationId: analyzedKo.openaiConversationId,
+        previousSummary: continuationState?.summary,
         query,
         answer: analyzedKo.result.answer,
+        hadImage: Boolean(imageDataUrl),
       });
       payloadKo.continuationToken = nextContinuationToken;
+      payloadKo.startedFreshSession = startedFreshSession;
       if (payloadEn) {
         payloadEn.continuationToken = nextContinuationToken;
+        payloadEn.startedFreshSession = startedFreshSession;
       }
 
       const storedPayloadKo: MedSafetyResponseData = {
