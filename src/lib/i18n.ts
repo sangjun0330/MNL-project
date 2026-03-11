@@ -992,8 +992,8 @@ const EN_EXTRA: Record<string, string> = {
   "필요한 만큼 충전해 두고 AI 검색에 바로 사용할 수 있습니다.": "Top up as needed and use it right away for AI search.",
   "결제 후 검색 크레딧이 즉시 충전되며, 사용 전까지 남은 수량이 유지됩니다.":
     "Search credits are charged immediately after payment and remain available until used.",
-  "크레딧 {{count}}회 구매": "Buy {{count}} credits",
-  "{{count}}회 사용권 · 소진 전까지 유지": "{{count}} uses · available until exhausted",
+  "크레딧 {count}회 구매": "Buy {count} credits",
+  "{count}회 사용권 · 소진 전까지 유지": "{count} uses · available until exhausted",
   "크레딧 10회": "10 credits",
   "크레딧 30회": "30 credits",
   "크레딧 10회 구매": "Buy 10 credits",

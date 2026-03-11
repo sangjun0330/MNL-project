@@ -314,7 +314,7 @@ export function SettingsBillingPage() {
                   >
                     {creditPaying && creditCheckoutProduct === creditPack.id
                       ? t("결제창 준비 중...")
-                      : t("크레딧 {{count}}회 구매", { count: creditPack.creditUnits })}
+                      : t("크레딧 {count}회 구매", { count: creditPack.creditUnits })}
                   </button>
                 </div>
               ))}
@@ -332,7 +332,7 @@ export function SettingsBillingPage() {
         priceKrw={creditCheckoutProduct ? getCheckoutProductDefinition(creditCheckoutProduct).priceKrw : 0}
         periodLabel={
           creditCheckoutProduct
-            ? t("{{count}}회 사용권 · 소진 전까지 유지", {
+            ? t("{count}회 사용권 · 소진 전까지 유지", {
                 count: getCheckoutProductDefinition(creditCheckoutProduct).creditUnits,
               })
             : ""

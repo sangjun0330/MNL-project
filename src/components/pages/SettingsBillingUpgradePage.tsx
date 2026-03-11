@@ -191,7 +191,7 @@ export function SettingsBillingUpgradePage() {
 
           {error ? <div className="mt-3 text-[12px] text-red-600">{error}</div> : null}
 
-          <section className={`${flatSurface} mt-4 p-6`}>
+          <section id="search-credits" className={`${flatSurface} mt-4 p-6`}>
             <div className="flex items-start justify-between gap-4">
               <div>
                 <div className="text-[13px] text-ios-sub">{t("업그레이드 플랜")}</div>
@@ -342,7 +342,7 @@ export function SettingsBillingUpgradePage() {
                   >
                     {payingCredit && checkoutProduct === creditPack.id
                       ? t("결제창 준비 중...")
-                      : t("크레딧 {{count}}회 구매", { count: creditPack.creditUnits })}
+                      : t("크레딧 {count}회 구매", { count: creditPack.creditUnits })}
                   </button>
                 </div>
               ))}
@@ -380,7 +380,7 @@ export function SettingsBillingUpgradePage() {
         priceKrw={checkoutDefinition?.priceKrw ?? 0}
         periodLabel={
           checkoutDefinition?.kind === "credit_pack"
-            ? t("{{count}}회 사용권 · 소진 전까지 유지", { count: checkoutDefinition.creditUnits })
+            ? t("{count}회 사용권 · 소진 전까지 유지", { count: checkoutDefinition.creditUnits })
             : t("월 플랜 · 결제 시 30일 연장")
         }
         detailText={

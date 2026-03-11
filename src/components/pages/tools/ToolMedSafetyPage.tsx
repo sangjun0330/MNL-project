@@ -4,14 +4,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useAuthState } from "@/lib/auth";
-import { requestPlanCheckout } from "@/lib/billing/client";
 import type { SubscriptionApi } from "@/lib/billing/client";
-import { getCheckoutProductDefinition, getPlanDefinition, type CheckoutProductId } from "@/lib/billing/plans";
-import { BillingCheckoutSheet } from "@/components/billing/BillingCheckoutSheet";
+import { getPlanDefinition } from "@/lib/billing/plans";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
+import { withReturnTo } from "@/lib/navigation";
 import { copyTextToClipboard } from "@/lib/structuredCopy";
 import { useI18n } from "@/lib/useI18n";
 
@@ -541,13 +540,10 @@ export function ToolMedSafetyPage() {
   const [lastContinuationToken, setLastContinuationToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copyMessage, setCopyMessage] = useState("");
-  const [creditPaying, setCreditPaying] = useState(false);
-  const [creditCheckoutProduct, setCreditCheckoutProduct] = useState<CheckoutProductId | null>(null);
   const [lastSubmittedQuery, setLastSubmittedQuery] = useState("");
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [selectedImageName, setSelectedImageName] = useState("");
   const [showSessionDecisionPrompt, setShowSessionDecisionPrompt] = useState(false);
-  const [hasShownSessionDecisionPrompt, setHasShownSessionDecisionPrompt] = useState(false);
   const [optimisticQuota, setOptimisticQuota] = useState<SubscriptionApi["medSafetyQuota"] | null>(null);
   const threadEndRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -561,6 +557,7 @@ export function ToolMedSafetyPage() {
   const medSafetyQuota = optimisticQuota ?? subscriptionMedSafetyQuota;
   const quotaRemaining = Math.max(0, Number(medSafetyQuota?.totalRemaining ?? 0));
   const activePlanTitle = getPlanDefinition(subscription?.tier ?? "free").title;
+  const creditPurchaseHref = `${withReturnTo("/settings/billing/upgrade", "/tools/med-safety")}#search-credits`;
   const quotaKnown = authStatus === "authenticated" && !billingLoading && !!medSafetyQuota;
   const canAsk = authStatus === "authenticated" && (!quotaKnown || quotaRemaining > 0);
   const hasConversation = messages.length > 0 || Boolean(streamingText);
@@ -581,34 +578,6 @@ export function ToolMedSafetyPage() {
     threadEndRef.current.scrollIntoView({ block: "end" });
   }, [messages, streamingText, error]);
 
-  async function openCreditCheckout(product: CheckoutProductId) {
-    if (creditPaying || authStatus !== "authenticated") return;
-    setError(null);
-    setCreditCheckoutProduct(product);
-  }
-
-  async function confirmCreditCheckout() {
-    if (creditPaying || authStatus !== "authenticated" || !creditCheckoutProduct) return;
-    const targetProduct = creditCheckoutProduct;
-    setCreditPaying(true);
-    setError(null);
-    setCreditCheckoutProduct(null);
-    try {
-      await requestPlanCheckout(targetProduct);
-    } catch (cause: any) {
-      const message = String(cause?.message ?? "checkout_failed");
-      if (!message.includes("USER_CANCEL")) {
-        if (message.toLowerCase().includes("billing_schema_outdated_credit_pack_columns")) {
-          setError(t("서버 DB 스키마가 아직 최신이 아닙니다. 마이그레이션 적용 후 다시 시도해 주세요."));
-        } else {
-          setError(t("크레딧 결제창을 열지 못했습니다. 잠시 후 다시 시도해 주세요."));
-        }
-      }
-    } finally {
-      setCreditPaying(false);
-    }
-  }
-
   function focusComposerSoon() {
     window.setTimeout(() => {
       composerInputRef.current?.focus();
@@ -625,7 +594,6 @@ export function ToolMedSafetyPage() {
     setSelectedImage(null);
     setSelectedImageName("");
     setShowSessionDecisionPrompt(false);
-    setHasShownSessionDecisionPrompt(false);
   }
 
   function continueCurrentSession() {
@@ -636,6 +604,7 @@ export function ToolMedSafetyPage() {
   function startNewQuestionFlow() {
     setShowSessionDecisionPrompt(false);
     resetConversation();
+    window.scrollTo({ top: 0, behavior: "smooth" });
     focusComposerSoon();
   }
 
@@ -701,7 +670,6 @@ export function ToolMedSafetyPage() {
     const question = String(forcedQuery ?? input)
       .replace(/\s+/g, " ")
       .trim();
-    const assistantCountBeforeSubmit = messages.reduce((count, message) => (message.role === "assistant" ? count + 1 : count), 0);
     if (!question) {
       setError(t("질문을 입력해 주세요."));
       return;
@@ -723,6 +691,7 @@ export function ToolMedSafetyPage() {
     setIsLoading(true);
     setStreamingText("");
     setError(null);
+    setShowSessionDecisionPrompt(false);
     setLastSubmittedQuery(question);
 
     try {
@@ -794,10 +763,7 @@ export function ToolMedSafetyPage() {
       };
       setMessages((prev) => (normalizedData.startedFreshSession ? [userMessage, assistantMessage] : [...prev, assistantMessage]));
       setLastContinuationToken(normalizedData.continuationToken ?? null);
-      if (!hasShownSessionDecisionPrompt && assistantCountBeforeSubmit >= 1) {
-        setShowSessionDecisionPrompt(true);
-        setHasShownSessionDecisionPrompt(true);
-      }
+      setShowSessionDecisionPrompt(true);
 
       if (normalizedData.source === "openai_fallback") {
         setError(
@@ -922,24 +888,12 @@ export function ToolMedSafetyPage() {
                     {t("새 검색")}
                   </button>
                 ) : (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => void openCreditCheckout("credit10")}
-                      disabled={creditPaying}
-                      className="inline-flex h-10 items-center justify-center rounded-full border border-[#E8E8EC] bg-white px-4 text-[12.5px] font-semibold text-ios-text disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {creditPaying && creditCheckoutProduct === "credit10" ? t("결제창 준비 중...") : t("크레딧 10회")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void openCreditCheckout("credit30")}
-                      disabled={creditPaying}
-                      className="inline-flex h-10 items-center justify-center rounded-full border border-[#E8E8EC] bg-white px-4 text-[12.5px] font-semibold text-ios-text disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {creditPaying && creditCheckoutProduct === "credit30" ? t("결제창 준비 중...") : t("크레딧 30회")}
-                    </button>
-                  </>
+                  <Link
+                    href={creditPurchaseHref}
+                    className="inline-flex h-10 items-center justify-center rounded-full border border-[#E8E8EC] bg-white px-4 text-[12.5px] font-semibold text-ios-text"
+                  >
+                    {t("추가 크레딧 구매하기")}
+                  </Link>
                 )}
                 <Link
                   href="/tools/med-safety/recent"
@@ -1121,38 +1075,22 @@ export function ToolMedSafetyPage() {
             </div>
             <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] text-ios-sub">
               <span>{t("환자 이름, 등록번호, 연락처 등 식별정보는 입력하지 마세요.")}</span>
-              <span>{hasConversation ? t("이전 답변을 이어서 묻습니다.") : t("하단 입력창에 질문을 입력하면 바로 검색이 시작됩니다.")}</span>
+              <span>
+                {hasConversation
+                  ? t("같은 주제면 이어서 묻고, 다른 주제면 `다른 질문하기`로 새로 시작하세요.")
+                  : t("하단 입력창에 질문을 입력하면 바로 검색이 시작됩니다.")}
+              </span>
             </div>
           </div>
         </div>
       </div>
 
-      <BillingCheckoutSheet
-        open={Boolean(creditCheckoutProduct)}
-        onClose={() => setCreditCheckoutProduct(null)}
-        onConfirm={() => void confirmCreditCheckout()}
-        loading={creditPaying}
-        productTitle={t(creditCheckoutProduct ? getCheckoutProductDefinition(creditCheckoutProduct).title : "")}
-        productSubtitle={t("AI 임상 검색 전용")}
-        priceKrw={creditCheckoutProduct ? getCheckoutProductDefinition(creditCheckoutProduct).priceKrw : 0}
-        periodLabel={
-          creditCheckoutProduct
-            ? t("{{count}}회 사용권 · 소진 전까지 유지", {
-                count: getCheckoutProductDefinition(creditCheckoutProduct).creditUnits,
-              })
-            : ""
-        }
-        detailText={t("결제 후 검색 크레딧이 즉시 충전되며, 사용 전까지 남은 수량이 유지됩니다.")}
-        accountEmail={user?.email ?? null}
-        confirmLabel={t("결제 계속")}
-      />
-
       {showSessionDecisionPrompt ? (
         <div className="fixed inset-0 z-[115] flex items-end justify-center bg-black/10 px-4 pb-[calc(136px+env(safe-area-inset-bottom))] pt-6 backdrop-blur-[2px] sm:items-center sm:pb-6">
           <div className="w-full max-w-[420px] rounded-[28px] border border-[#E8E8EC] bg-white px-5 py-5 shadow-[0_24px_80px_rgba(15,23,42,0.14)]">
-            <div className="text-[17px] font-semibold tracking-[-0.02em] text-ios-text">{t("이 세션에서 계속 질문할까요?")}</div>
+            <div className="text-[17px] font-semibold tracking-[-0.02em] text-ios-text">{t("다음 질문 방식을 선택해 주세요")}</div>
             <div className="mt-2 text-[13px] leading-6 text-ios-sub">
-              {t("계속 질문하면 같은 대화 흐름을 이어가고, 새 질문하기를 누르면 화면과 세션이 새로 시작됩니다.")}
+              {t("이 결과에 대한 질문이면 같은 세션으로 이어지고, 다른 주제면 새 세션으로 시작하는 편이 더 정확합니다.")}
             </div>
             <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
               <button
@@ -1160,14 +1098,14 @@ export function ToolMedSafetyPage() {
                 onClick={startNewQuestionFlow}
                 className="min-h-[52px] rounded-full border border-[#E8E8EC] bg-white px-4 py-3 text-center text-[13px] font-semibold leading-5 text-ios-text"
               >
-                {t("새 질문하기")}
+                {t("다른 질문하기")}
               </button>
               <button
                 type="button"
                 onClick={continueCurrentSession}
                 className="min-h-[52px] rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent)] px-4 py-3 text-center text-[13px] font-semibold leading-5 text-white"
               >
-                {t("이 세션에서 계속 질문하기")}
+                {t("이 결과에 대한 질문하기")}
               </button>
             </div>
           </div>
