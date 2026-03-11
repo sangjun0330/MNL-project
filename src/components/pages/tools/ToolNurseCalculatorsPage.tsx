@@ -39,6 +39,13 @@ import {
   sanitizeNumericInput,
 } from "@/lib/nurseCalculators";
 import { useI18n } from "@/lib/useI18n";
+import { ToolBMIPage } from "@/components/pages/tools/ToolBMIPage";
+import { ToolBSAPage } from "@/components/pages/tools/ToolBSAPage";
+import { ToolCrClPage } from "@/components/pages/tools/ToolCrClPage";
+import { ToolFluidBalancePage } from "@/components/pages/tools/ToolFluidBalancePage";
+import { ToolGCSPage } from "@/components/pages/tools/ToolGCSPage";
+import { ToolPediatricDosePage } from "@/components/pages/tools/ToolPediatricDosePage";
+import { ToolUnitConverterPage } from "@/components/pages/tools/ToolUnitConverterPage";
 
 const FLAT_CARD_CLASS = "border-[color:var(--rnest-accent-border)] bg-white shadow-none";
 const PRIMARY_FLAT_BTN =
@@ -480,7 +487,19 @@ function translateCalculatorNode(
   return cloneElement(element, nextProps);
 }
 
-type ToolModule = "pump" | "ivpb" | "drip" | "dilution" | "check";
+type ToolModule =
+  | "pump"
+  | "ivpb"
+  | "drip"
+  | "dilution"
+  | "check"
+  | "pediatric-dose"
+  | "gcs"
+  | "bmi"
+  | "bsa"
+  | "crcl"
+  | "fluid-balance"
+  | "unit-converter";
 type PumpMode = "forward" | "reverse";
 type DripMode = "forward" | "reverse";
 type UiMode = "basic" | "pro";
@@ -723,7 +742,46 @@ const HISTORY_HIGHLIGHT_KEYS: Record<CalcHistory["calcType"], { inputs: string[]
   },
 };
 
-const MODULE_ORDER: ToolModule[] = ["pump", "ivpb", "drip", "dilution", "check"];
+const CORE_MODULES: ToolModule[] = ["pump", "ivpb", "drip", "dilution", "check"];
+const MODULE_ORDER: ToolModule[] = [
+  "pump",
+  "ivpb",
+  "drip",
+  "dilution",
+  "check",
+  "pediatric-dose",
+  "gcs",
+  "bmi",
+  "bsa",
+  "crcl",
+  "fluid-balance",
+  "unit-converter",
+];
+
+const MODULE_GROUPS: Array<{ title: string; items: Array<{ value: ToolModule; label: string }> }> = [
+  {
+    title: "투약·주입",
+    items: [
+      { value: "pump", label: "펌프 변환" },
+      { value: "ivpb", label: "IVPB" },
+      { value: "drip", label: "드립 환산" },
+      { value: "dilution", label: "희석 농도" },
+      { value: "check", label: "역산 검산" },
+      { value: "pediatric-dose", label: "소아 용량" },
+    ],
+  },
+  {
+    title: "평가·임상",
+    items: [
+      { value: "gcs", label: "GCS" },
+      { value: "bmi", label: "BMI" },
+      { value: "bsa", label: "BSA" },
+      { value: "crcl", label: "CrCl" },
+      { value: "fluid-balance", label: "수액 밸런스" },
+      { value: "unit-converter", label: "단위 변환기" },
+    ],
+  },
+];
 
 const MODULE_GUIDE: Record<
   ToolModule,
@@ -786,6 +844,76 @@ const MODULE_GUIDE: Record<
       { title: "언제 사용", body: "인계/교대/알람 대응 시 현재 세팅 검증." },
       { title: "필수 입력", body: "현재 mL/hr, 농도(총 약량/총 mL), 필요 시 체중." },
       { title: "최종 확인", body: "차이가 크면 단위/농도/채널/라인 재점검." },
+    ],
+  },
+  "pediatric-dose": {
+    title: "6. 소아 용량",
+    subtitle: "체중 기반 mg/kg",
+    quickSteps: ["체중과 처방 용량을 입력", "횟수와 최대 상한을 확인", "1회/일일 용량을 확인"],
+    details: [
+      { title: "언제 사용", body: "소아 체중 기반 처방 용량을 빠르게 계산할 때 사용." },
+      { title: "필수 입력", body: "체중, mg/kg 용량, 투여 횟수." },
+      { title: "최종 확인", body: "1회 최대/일일 최대 상한과 단위를 마지막으로 재확인." },
+    ],
+  },
+  gcs: {
+    title: "7. GCS",
+    subtitle: "의식 평가",
+    quickSteps: ["E/V/M 반응을 선택", "총점을 확인", "중증도와 경고를 함께 확인"],
+    details: [
+      { title: "언제 사용", body: "의식 수준을 빠르게 분류하고 인계할 때 사용." },
+      { title: "필수 입력", body: "눈 반응, 언어 반응, 운동 반응." },
+      { title: "최종 확인", body: "점수뿐 아니라 환자 실제 반응과 추세를 함께 기록." },
+    ],
+  },
+  bmi: {
+    title: "8. BMI",
+    subtitle: "체질량지수",
+    quickSteps: ["체중과 신장을 입력", "기준(아시아/WHO)을 선택", "BMI와 분류를 확인"],
+    details: [
+      { title: "언제 사용", body: "기초 평가나 교육 자료 확인 시 사용." },
+      { title: "필수 입력", body: "체중(kg), 신장(cm)." },
+      { title: "최종 확인", body: "적용 기준(아시아/WHO)을 혼동하지 않도록 확인." },
+    ],
+  },
+  bsa: {
+    title: "9. BSA",
+    subtitle: "체표면적",
+    quickSteps: ["체중과 신장을 입력", "공식별 값을 확인", "투약 기준값에 적용"],
+    details: [
+      { title: "언제 사용", body: "체표면적 기준 용량 산정이나 참고값 확인 시 사용." },
+      { title: "필수 입력", body: "체중(kg), 신장(cm)." },
+      { title: "최종 확인", body: "사용할 공식(DuBois/Mosteller)과 기관 기준을 맞춰 확인." },
+    ],
+  },
+  crcl: {
+    title: "10. CrCl",
+    subtitle: "Cockcroft-Gault",
+    quickSteps: ["나이, 체중, Cr를 입력", "성별을 선택", "청소율과 단계 분류를 확인"],
+    details: [
+      { title: "언제 사용", body: "신기능 기준 투약 검토 전 빠른 참고값이 필요할 때 사용." },
+      { title: "필수 입력", body: "나이, 체중, 혈청 크레아티닌, 성별." },
+      { title: "최종 확인", body: "실제 처방 조정은 기관 기준과 최신 검사값을 함께 확인." },
+    ],
+  },
+  "fluid-balance": {
+    title: "11. 수액 밸런스",
+    subtitle: "섭취/배출 I/O",
+    quickSteps: ["섭취/배출 항목을 입력", "불감손실을 반영", "순 밸런스를 확인"],
+    details: [
+      { title: "언제 사용", body: "근무 중 I/O를 빠르게 합산하고 순 밸런스를 볼 때 사용." },
+      { title: "필수 입력", body: "섭취량, 배출량, 필요 시 불감손실." },
+      { title: "최종 확인", body: "기록 누락과 단위(mL)를 마지막에 다시 확인." },
+    ],
+  },
+  "unit-converter": {
+    title: "12. 단위 변환기",
+    subtitle: "체온·체중·질량·용량",
+    quickSteps: ["변환 범주를 선택", "기준값을 입력", "결과 단위를 확인"],
+    details: [
+      { title: "언제 사용", body: "체온·체중·질량·용량 단위를 즉시 변환할 때 사용." },
+      { title: "필수 입력", body: "범주 선택, 원래 값, 변환 대상 단위." },
+      { title: "최종 확인", body: "체온/질량/용량 단위를 혼동하지 않도록 확인." },
     ],
   },
 };
@@ -1180,7 +1308,7 @@ export function ToolNurseCalculatorsPage() {
       if (raw) {
         const parsed = JSON.parse(raw) as Partial<PersistedSnapshot>;
         if (parsed.uiMode === "basic" || parsed.uiMode === "pro") setUiMode(parsed.uiMode);
-        if (parsed.activeModule) setActiveModule(parsed.activeModule);
+        if (parsed.activeModule && MODULE_ORDER.includes(parsed.activeModule)) setActiveModule(parsed.activeModule);
         if (parsed.pumpMode) setPumpMode(parsed.pumpMode);
         if (parsed.dripMode) setDripMode(parsed.dripMode);
         if (parsed.pump) setPumpForm((prev) => ({ ...prev, ...parsed.pump }));
@@ -1215,7 +1343,7 @@ export function ToolNurseCalculatorsPage() {
 
     // URL ?tab= 파라미터가 있으면 localStorage보다 우선
     const urlTab = new URLSearchParams(window.location.search).get("tab");
-    if (urlTab && ["pump", "ivpb", "drip", "dilution", "check"].includes(urlTab))
+    if (urlTab && MODULE_ORDER.includes(urlTab as ToolModule))
       setActiveModule(urlTab as ToolModule);
   }, []);
 
@@ -1275,6 +1403,14 @@ export function ToolNurseCalculatorsPage() {
     const timer = window.setTimeout(() => setCopyMessage(""), 2200);
     return () => window.clearTimeout(timer);
   }, [copyMessage]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("tab") === activeModule) return;
+    url.searchParams.set("tab", activeModule);
+    window.history.replaceState({}, "", `${url.pathname}?${url.searchParams.toString()}`);
+  }, [activeModule]);
 
   const appendHistory = useCallback(
     (
@@ -1778,6 +1914,7 @@ export function ToolNurseCalculatorsPage() {
   ]);
 
   const activeGuide = MODULE_GUIDE[activeModule];
+  const isCoreModule = CORE_MODULES.includes(activeModule);
   const isBasicMode = uiMode === "basic";
   const historyDetail = useMemo(() => {
     if (!selectedHistory) return null;
@@ -1821,35 +1958,58 @@ export function ToolNurseCalculatorsPage() {
       </div>
 
       <Card className={`space-y-3 p-4 ${FLAT_CARD_CLASS}`}>
-        <div className="grid gap-2 sm:grid-cols-[160px,1fr] sm:items-center">
-          <div className="text-[12px] font-semibold text-ios-sub">화면 모드</div>
-          <Segmented<UiMode>
-            value={uiMode}
-            onValueChange={setUiMode}
-            options={[
-              { value: "basic", label: "기본 모드" },
-              { value: "pro", label: "전문 모드" },
-            ]}
-            className="max-w-[260px]"
-          />
+        {isCoreModule ? (
+          <>
+            <div className="grid gap-2 sm:grid-cols-[160px,1fr] sm:items-center">
+              <div className="text-[12px] font-semibold text-ios-sub">화면 모드</div>
+              <Segmented<UiMode>
+                value={uiMode}
+                onValueChange={setUiMode}
+                options={[
+                  { value: "basic", label: "기본 모드" },
+                  { value: "pro", label: "전문 모드" },
+                ]}
+                className="max-w-[260px]"
+              />
+            </div>
+            <div className="rounded-xl border border-ios-sep bg-ios-bg px-3 py-2 text-[11.5px] text-ios-sub">
+              {isBasicMode
+                ? "기본 모드: 필수 입력만 중심으로 보여주며, 고급 옵션은 숨깁니다."
+                : "전문 모드: 프리셋 저장, 더블체크, 처방 목표 비교 등 고급 기능을 모두 사용합니다."}
+            </div>
+          </>
+        ) : (
+          <div className="rounded-xl border border-ios-sep bg-ios-bg px-3 py-2 text-[11.5px] text-ios-sub">
+            현재 계산기는 단일 입력 카드로 구성되어 있으며, 결과를 바로 아래에서 확인할 수 있습니다.
+          </div>
+        )}
+
+        <div className="space-y-3">
+          {MODULE_GROUPS.map((group) => (
+            <div key={group.title} className="space-y-2">
+              <div className="text-[12px] font-semibold text-ios-sub">{group.title}</div>
+              <div className="grid gap-2 sm:grid-cols-3 xl:grid-cols-6">
+                {group.items.map((item) => {
+                  const active = item.value === activeModule;
+                  return (
+                    <button
+                      key={item.value}
+                      type="button"
+                      onClick={() => setActiveModule(item.value)}
+                      className={`rounded-xl border px-3 py-2 text-left text-[12.5px] font-semibold transition ${
+                        active
+                          ? "border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
+                          : "border-ios-sep bg-white text-ios-text hover:border-[color:var(--rnest-accent-border)]"
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
-        <div className="rounded-xl border border-ios-sep bg-ios-bg px-3 py-2 text-[11.5px] text-ios-sub">
-          {isBasicMode
-            ? "기본 모드: 필수 입력만 중심으로 보여주며, 고급 옵션은 숨깁니다."
-            : "전문 모드: 프리셋 저장, 더블체크, 처방 목표 비교 등 고급 기능을 모두 사용합니다."}
-        </div>
-        <Segmented<ToolModule>
-          value={activeModule}
-          onValueChange={setActiveModule}
-          options={[
-            { value: "pump", label: "1. 펌프 변환" },
-            { value: "ivpb", label: "2. IVPB" },
-            { value: "drip", label: "3. 드립" },
-            { value: "dilution", label: "4. 희석" },
-            { value: "check", label: "5. 검산" },
-          ]}
-          className="overflow-x-auto"
-        />
         <div className="rounded-2xl border border-ios-sep bg-ios-bg px-3 py-3">
           <div className="flex items-start justify-between gap-2">
             <div>
@@ -2824,6 +2984,48 @@ export function ToolNurseCalculatorsPage() {
               ) : null}
             </div>
           ) : null}
+        </Card>
+      ) : null}
+
+      {activeModule === "pediatric-dose" ? (
+        <Card className={`space-y-4 p-4 ${FLAT_CARD_CLASS}`}>
+          <ToolPediatricDosePage embedded />
+        </Card>
+      ) : null}
+
+      {activeModule === "gcs" ? (
+        <Card className={`space-y-4 p-4 ${FLAT_CARD_CLASS}`}>
+          <ToolGCSPage embedded />
+        </Card>
+      ) : null}
+
+      {activeModule === "bmi" ? (
+        <Card className={`space-y-4 p-4 ${FLAT_CARD_CLASS}`}>
+          <ToolBMIPage embedded />
+        </Card>
+      ) : null}
+
+      {activeModule === "bsa" ? (
+        <Card className={`space-y-4 p-4 ${FLAT_CARD_CLASS}`}>
+          <ToolBSAPage embedded />
+        </Card>
+      ) : null}
+
+      {activeModule === "crcl" ? (
+        <Card className={`space-y-4 p-4 ${FLAT_CARD_CLASS}`}>
+          <ToolCrClPage embedded />
+        </Card>
+      ) : null}
+
+      {activeModule === "fluid-balance" ? (
+        <Card className={`space-y-4 p-4 ${FLAT_CARD_CLASS}`}>
+          <ToolFluidBalancePage embedded />
+        </Card>
+      ) : null}
+
+      {activeModule === "unit-converter" ? (
+        <Card className={`space-y-4 p-4 ${FLAT_CARD_CLASS}`}>
+          <ToolUnitConverterPage embedded />
         </Card>
       ) : null}
 

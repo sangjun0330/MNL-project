@@ -1,308 +1,230 @@
 "use client";
 
-import { useState, useMemo } from "react";
 import Link from "next/link";
+import { useMemo, useState } from "react";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { Card } from "@/components/ui/Card";
 import { useI18n } from "@/lib/useI18n";
 
-// ── Tool definitions ────────────────────────────────
-
-type ToolItem = {
-  id: string;
-  emoji: string;
+type ToolCategory = {
+  id: "calculators" | "ai_med_safety";
   name: string;
   description: string;
   href: string;
-  badge: "LOCAL" | "NEW" | "AI";
-  category: "medication" | "assessment" | "clinical" | "ai";
   keywords: string[];
+  tone: "calculator" | "guide";
+  quickLinks?: Array<{ label: string; href: string }>;
+  secondaryLink?: { label: string; href: string };
 };
 
-const CATEGORIES = [
-  { key: "medication" as const, label: "💉 투약·주입", count: 6 },
-  { key: "assessment" as const, label: "📋 환자 평가", count: 3 },
-  { key: "clinical" as const, label: "🧪 임상 계산", count: 3 },
-  { key: "ai" as const, label: "🤖 AI 도구", count: 2 },
-] as const;
-
-const TOOLS: ToolItem[] = [
-  // 💉 투약·주입
+const CATEGORY_CARDS: ToolCategory[] = [
   {
-    id: "pump",
-    emoji: "💉",
-    name: "펌프 변환",
-    description: "처방 용량 → mL/hr 변환",
-    href: "/tools/nurse-calculators?tab=pump",
-    badge: "LOCAL",
-    category: "medication",
-    keywords: ["펌프", "pump", "ml/hr", "변환", "주입"],
+    id: "calculators",
+    name: "통합 간호 계산기",
+    description: "투약·주입·평가·임상 계산기를 한 페이지에서 전환합니다.",
+    href: "/tools/nurse-calculators",
+    tone: "calculator",
+    keywords: [
+      "계산기",
+      "pump",
+      "ivpb",
+      "drip",
+      "dilution",
+      "check",
+      "pediatric",
+      "gcs",
+      "bmi",
+      "bsa",
+      "crcl",
+      "fluid balance",
+      "unit converter",
+      "소아",
+      "체표면적",
+      "수액",
+      "단위 변환",
+    ],
+    quickLinks: [
+      { label: "펌프", href: "/tools/nurse-calculators?tab=pump" },
+      { label: "IVPB", href: "/tools/nurse-calculators?tab=ivpb" },
+      { label: "GCS", href: "/tools/nurse-calculators?tab=gcs" },
+      { label: "BMI", href: "/tools/nurse-calculators?tab=bmi" },
+      { label: "CrCl", href: "/tools/nurse-calculators?tab=crcl" },
+      { label: "수액 밸런스", href: "/tools/nurse-calculators?tab=fluid-balance" },
+    ],
   },
   {
-    id: "ivpb",
-    emoji: "💧",
-    name: "IVPB 속도",
-    description: "간헐적 정맥주입 속도 계산",
-    href: "/tools/nurse-calculators?tab=ivpb",
-    badge: "LOCAL",
-    category: "medication",
-    keywords: ["ivpb", "정맥주입", "속도", "간헐적"],
-  },
-  {
-    id: "drip",
-    emoji: "⏱️",
-    name: "드립 환산",
-    description: "mL/hr ↔ gtt/min 환산",
-    href: "/tools/nurse-calculators?tab=drip",
-    badge: "LOCAL",
-    category: "medication",
-    keywords: ["드립", "drip", "gtt", "환산"],
-  },
-  {
-    id: "dilution",
-    emoji: "🧴",
-    name: "희석 농도",
-    description: "희석 후 농도 계산",
-    href: "/tools/nurse-calculators?tab=dilution",
-    badge: "LOCAL",
-    category: "medication",
-    keywords: ["희석", "농도", "dilution"],
-  },
-  {
-    id: "check",
-    emoji: "✅",
-    name: "역산 검산",
-    description: "현재 펌프 설정 역산 검증",
-    href: "/tools/nurse-calculators?tab=check",
-    badge: "LOCAL",
-    category: "medication",
-    keywords: ["역산", "검산", "검증", "확인"],
-  },
-  {
-    id: "pediatric-dose",
-    emoji: "👶",
-    name: "소아 용량",
-    description: "체중 기반 mg/kg 용량 산출",
-    href: "/tools/pediatric-dose",
-    badge: "NEW",
-    category: "medication",
-    keywords: ["소아", "체중", "mg/kg", "pediatric", "용량"],
-  },
-  // 📋 환자 평가
-  {
-    id: "gcs",
-    emoji: "🧠",
-    name: "GCS 의식 평가",
-    description: "Glasgow Coma Scale 점수",
-    href: "/tools/gcs",
-    badge: "NEW",
-    category: "assessment",
-    keywords: ["gcs", "의식", "glasgow", "coma"],
-  },
-  {
-    id: "bmi",
-    emoji: "📊",
-    name: "BMI 계산",
-    description: "체질량지수 (아시아 기준)",
-    href: "/tools/bmi",
-    badge: "NEW",
-    category: "assessment",
-    keywords: ["bmi", "체질량", "비만", "체중"],
-  },
-  {
-    id: "bsa",
-    emoji: "📐",
-    name: "BSA 체표면적",
-    description: "DuBois/Mosteller 체표면적",
-    href: "/tools/bsa",
-    badge: "NEW",
-    category: "assessment",
-    keywords: ["bsa", "체표면적", "dubois", "mosteller"],
-  },
-  // 🧪 임상 계산
-  {
-    id: "crcl",
-    emoji: "🔬",
-    name: "CrCl 신기능",
-    description: "Cockcroft-Gault 청소율",
-    href: "/tools/crcl",
-    badge: "NEW",
-    category: "clinical",
-    keywords: ["crcl", "크레아티닌", "신기능", "cockcroft", "gault", "청소율"],
-  },
-  {
-    id: "fluid-balance",
-    emoji: "💦",
-    name: "수액 밸런스",
-    description: "섭취/배출 I/O 계산",
-    href: "/tools/fluid-balance",
-    badge: "NEW",
-    category: "clinical",
-    keywords: ["수액", "밸런스", "i/o", "intake", "output", "섭취", "배출"],
-  },
-  {
-    id: "unit-converter",
-    emoji: "🔄",
-    name: "단위 변환기",
-    description: "체온·체중·질량·용량 변환",
-    href: "/tools/unit-converter",
-    badge: "NEW",
-    category: "clinical",
-    keywords: ["단위", "변환", "체온", "celsius", "fahrenheit", "kg", "lb"],
-  },
-  // 🤖 AI 도구
-  {
-    id: "med-safety",
-    emoji: "🛡️",
-    name: "AI 약물·기구 안전 가이드",
-    description: "투여 전 AI 안전 확인",
+    id: "ai_med_safety",
+    name: "AI 약물 안전 가이드",
+    description: "AI 약물·기구 안전 가이드와 최근 검색 기록을 별도로 관리합니다.",
     href: "/tools/med-safety",
-    badge: "AI",
-    category: "ai",
-    keywords: ["ai", "약물", "안전", "기구", "가이드", "med-safety"],
-  },
-  {
-    id: "med-safety-recent",
-    emoji: "📋",
-    name: "최근 검색 기록",
-    description: "AI 검색 히스토리",
-    href: "/tools/med-safety/recent",
-    badge: "AI",
-    category: "ai",
-    keywords: ["최근", "검색", "기록", "히스토리"],
+    tone: "guide",
+    keywords: ["ai", "약물", "기구", "안전", "가이드", "최근 검색", "히스토리", "med safety"],
+    quickLinks: [
+      { label: "약물/기구 검색", href: "/tools/med-safety" },
+      { label: "최근 기록", href: "/tools/med-safety/recent" },
+    ],
+    secondaryLink: { label: "최근 검색 기록", href: "/tools/med-safety/recent" },
   },
 ];
 
-// ── Badge component ─────────────────────────────────
+function CategoryIcon({ tone }: { tone: ToolCategory["tone"] }) {
+  if (tone === "guide") {
+    return (
+      <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+        <path
+          d="M14 3.5l8 3.2v6.4c0 5.1-3.2 9.4-8 11.4-4.8-2-8-6.3-8-11.4V6.7L14 3.5z"
+          fill="#FFF1E2"
+          stroke="#D97706"
+          strokeWidth="1.5"
+          strokeLinejoin="round"
+        />
+        <path d="M14 8.2v8.8" stroke="#B45309" strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M9.6 12.6H18.4" stroke="#B45309" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    );
+  }
 
-function ToolBadge({ badge, remainingText }: { badge: string; remainingText?: string }) {
-  const cls =
-    badge === "AI"
-      ? "bg-purple-100 text-purple-700"
-      : badge === "NEW"
-        ? "bg-blue-100 text-blue-700"
-        : "bg-gray-100 text-gray-600";
   return (
-    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${cls}`}>
-      {remainingText ?? badge}
-    </span>
+    <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+      <rect x="4" y="3.5" width="20" height="21" rx="5" fill="#EEF4FF" stroke="#1D4ED8" strokeWidth="1.5" />
+      <rect x="8" y="7.5" width="12" height="4" rx="2" fill="#BFDBFE" />
+      <path d="M9 16h2.5" stroke="#1D4ED8" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M16.5 16H19" stroke="#1D4ED8" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M10.25 14.75v2.5" stroke="#1D4ED8" strokeWidth="1.8" strokeLinecap="round" />
+      <circle cx="10.25" cy="20.25" r="1.2" fill="#1D4ED8" />
+      <path d="M16 19.2l3 3" stroke="#1D4ED8" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M19 19.2l-3 3" stroke="#1D4ED8" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
   );
 }
 
-// ── Main component ──────────────────────────────────
+function SearchIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <circle cx="7" cy="7" r="5.25" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M11 11l3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ArrowIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true">
+      <path d="M5.5 3.5L9.5 7.5L5.5 11.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function CreditBadge({ remaining }: { remaining: number }) {
+  return (
+    <span className="inline-flex items-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--rnest-accent)]">
+      AI {remaining}회
+    </span>
+  );
+}
 
 export function ToolsPage() {
   const { t } = useI18n();
   const { loading: billingLoading, subscription } = useBillingAccess();
   const medSafetyRemaining = Math.max(0, Number(subscription?.medSafetyQuota?.totalRemaining ?? 0));
-
   const [query, setQuery] = useState("");
   const normalizedQuery = query.trim().toLowerCase();
 
-  const filtered = useMemo(() => {
-    if (!normalizedQuery) return null;
-    return TOOLS.filter(
-      (tool) =>
-        tool.name.toLowerCase().includes(normalizedQuery) ||
-        tool.description.toLowerCase().includes(normalizedQuery) ||
-        tool.keywords.some((kw) => kw.includes(normalizedQuery)),
+  const filteredCards = useMemo(() => {
+    if (!normalizedQuery) return CATEGORY_CARDS;
+    return CATEGORY_CARDS.filter((card) =>
+      [card.name, card.description, ...card.keywords].some((value) => value.toLowerCase().includes(normalizedQuery))
     );
   }, [normalizedQuery]);
 
-  const getBadgeText = (tool: ToolItem) => {
-    if (tool.badge === "AI" && !billingLoading) {
-      return `${t("남은")} ${medSafetyRemaining}${t("회")}`;
-    }
-    return undefined;
-  };
-
   return (
-    <div className="mx-auto w-full max-w-[760px] px-4 pb-24 pt-6">
-      {/* Header */}
+    <div className="mx-auto w-full max-w-[820px] px-4 pb-24 pt-6">
       <div className="mb-5">
         <div className="text-[30px] font-extrabold tracking-[-0.02em] text-ios-text">{t("툴")}</div>
-        <div className="mt-1 text-[13px] text-ios-sub">{t("현장에서 바로 쓰는 계산·안전 확인 도구입니다.")}</div>
+        <div className="mt-1 text-[13px] leading-6 text-ios-sub">
+          {t("계산기는 한 페이지로 통합하고, AI 약물 안전 가이드는 별도로 분리했습니다.")}
+        </div>
       </div>
 
-      {/* Search */}
       <div className="relative mb-6">
-        <svg
-          className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ios-muted"
-          width="16"
-          height="16"
-          viewBox="0 0 16 16"
-          fill="none"
-        >
-          <circle cx="7" cy="7" r="5.25" stroke="currentColor" strokeWidth="1.5" />
-          <path d="M11 11l3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
+        <div className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ios-muted">
+          <SearchIcon />
+        </div>
         <input
           type="text"
           className="w-full rounded-2xl border border-ios-sep bg-white py-3 pl-10 pr-4 text-[14px] outline-none placeholder:text-ios-muted focus:border-black"
-          placeholder={t("계산기 검색...")}
+          placeholder={t("툴 검색...")}
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(event) => setQuery(event.target.value)}
         />
-        {query && (
-          <button
-            type="button"
-            onClick={() => setQuery("")}
-            className="absolute right-3.5 top-1/2 -translate-y-1/2 rounded-full bg-black/10 p-1 transition hover:bg-black/15"
-            aria-label="Clear"
-          >
-            <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-              <path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-          </button>
-        )}
       </div>
 
-      {/* Search results */}
-      {filtered !== null ? (
-        filtered.length > 0 ? (
-          <div className="space-y-2">
-            {filtered.map((tool) => (
-              <Link key={tool.id} href={tool.href} className="block">
-                <Card className="flex items-center gap-3 p-4 transition hover:translate-y-[-1px] hover:border-[color:var(--rnest-accent-border)]">
-                  <span className="text-[20px]">{tool.emoji}</span>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[14px] font-semibold text-ios-text">{t(tool.name)}</div>
-                    <div className="text-[12px] text-ios-sub">{t(tool.description)}</div>
-                  </div>
-                  <ToolBadge badge={tool.badge} remainingText={getBadgeText(tool)} />
-                </Card>
-              </Link>
-            ))}
+      <div className="mb-4 flex items-center justify-between gap-3 rounded-[26px] border border-ios-sep bg-[#FCFCFD] px-4 py-4">
+        <div>
+          <div className="text-[13px] font-semibold text-ios-text">{t("카테고리 2개로 단순화")}</div>
+          <div className="mt-1 text-[12px] leading-5 text-ios-sub">
+            {t("통합 계산기 1개, AI 약물 안전 가이드 1개만 바로 진입하도록 정리했습니다.")}
           </div>
-        ) : (
-          <div className="py-16 text-center text-[14px] text-ios-muted">{t("검색 결과가 없습니다.")}</div>
-        )
-      ) : (
-        /* Category grid */
-        <div className="space-y-8">
-          {CATEGORIES.map((cat) => {
-            const tools = TOOLS.filter((t) => t.category === cat.key);
-            return (
-              <section key={cat.key}>
-                <h2 className="mb-3 text-[15px] font-bold text-ios-text">{t(cat.label)}</h2>
-                <div className="grid grid-cols-2 gap-2.5">
-                  {tools.map((tool) => (
-                    <Link key={tool.id} href={tool.href} className="block">
-                      <Card className="flex h-full flex-col p-4 transition hover:translate-y-[-1px] hover:border-[color:var(--rnest-accent-border)]">
-                        <div className="mb-2 flex items-center justify-between">
-                          <span className="text-[22px]">{tool.emoji}</span>
-                          <ToolBadge badge={tool.badge} remainingText={getBadgeText(tool)} />
-                        </div>
-                        <div className="text-[13px] font-semibold text-ios-text">{t(tool.name)}</div>
-                        <div className="mt-0.5 text-[11px] leading-snug text-ios-sub">{t(tool.description)}</div>
-                      </Card>
+        </div>
+        {!billingLoading ? <CreditBadge remaining={medSafetyRemaining} /> : null}
+      </div>
+
+      {filteredCards.length ? (
+        <div className="space-y-4">
+          {filteredCards.map((card) => (
+            <Card
+              key={card.id}
+              className="overflow-hidden rounded-[30px] border border-ios-sep bg-white p-5 shadow-none transition hover:border-[color:var(--rnest-accent-border)]"
+            >
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex min-w-0 gap-4">
+                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[20px] border border-ios-sep bg-[#F7F8FA]">
+                    <CategoryIcon tone={card.tone} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[22px] font-bold tracking-[-0.02em] text-ios-text">{t(card.name)}</div>
+                    <div className="mt-1 text-[13px] leading-6 text-ios-sub">{t(card.description)}</div>
+                  </div>
+                </div>
+                <Link
+                  href={card.href}
+                  className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] px-4 text-[13px] font-semibold text-[color:var(--rnest-accent)]"
+                >
+                  {t("열기")}
+                  <ArrowIcon />
+                </Link>
+              </div>
+
+              {card.quickLinks?.length ? (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {card.quickLinks.map((link) => (
+                    <Link
+                      key={`${card.id}-${link.label}`}
+                      href={link.href}
+                      className="inline-flex items-center rounded-full border border-ios-sep bg-[#F7F8FA] px-3 py-2 text-[12px] font-semibold text-ios-text"
+                    >
+                      {t(link.label)}
                     </Link>
                   ))}
                 </div>
-              </section>
-            );
-          })}
+              ) : null}
+
+              {card.secondaryLink ? (
+                <div className="mt-4 border-t border-ios-sep pt-4">
+                  <Link
+                    href={card.secondaryLink.href}
+                    className="inline-flex items-center gap-2 text-[12.5px] font-semibold text-[color:var(--rnest-accent)]"
+                  >
+                    {t(card.secondaryLink.label)}
+                    <ArrowIcon />
+                  </Link>
+                </div>
+              ) : null}
+            </Card>
+          ))}
         </div>
+      ) : (
+        <div className="py-16 text-center text-[14px] text-ios-muted">{t("검색 결과가 없습니다.")}</div>
       )}
     </div>
   );

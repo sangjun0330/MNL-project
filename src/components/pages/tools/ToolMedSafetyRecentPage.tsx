@@ -377,6 +377,20 @@ export function ToolMedSafetyRecentPage() {
     if (!selected) return "";
     return buildRecentCopyText(selected, selectedSections, t);
   }, [selected, selectedSections, t]);
+  const selectedSectionTitles = useMemo(
+    () => selectedSections.map((section) => section.title).filter(Boolean).slice(0, 6),
+    [selectedSections]
+  );
+  const selectedPreviewText = useMemo(() => {
+    const normalized = selectedNarrative
+      .replace(/\r/g, "")
+      .split("\n")
+      .map((line) => cleanNarrativeLine(line))
+      .filter(Boolean)
+      .join("\n");
+    if (!normalized) return "";
+    return normalized.length > 760 ? `${normalized.slice(0, 760).trim()}…` : normalized;
+  }, [selectedNarrative]);
 
   const latestSavedAt = items[0]?.savedAt ?? 0;
 
@@ -452,34 +466,27 @@ export function ToolMedSafetyRecentPage() {
         <span className={META_PILL_CLASS}>{t("{count}섹션", { count: selectedSections.length })}</span>
       </div>
 
-      <div className="space-y-3">
-        {selectedSections.length ? (
-          selectedSections.map((section, idx) => (
-            <section
-              key={`${section.title}-${idx}`}
-              className="rounded-[24px] border border-ios-sep bg-white px-4 py-4 shadow-[0_10px_24px_rgba(16,24,40,0.03)]"
-            >
-              <div className="flex items-center gap-2">
-                <span className="inline-flex h-7 min-w-7 items-center justify-center rounded-full bg-[#F1F4F8] px-2 text-[12px] font-bold text-ios-sub">
-                  {idx + 1}
-                </span>
-                <div className="text-[15px] font-bold tracking-[-0.01em] text-ios-text">{t(section.title)}</div>
-              </div>
-              <ul className="mt-3 space-y-2.5">
-                {section.items.map((item, itemIdx) => (
-                  <li key={`${section.title}-${idx}-item-${itemIdx}`} className="flex items-start gap-2.5 text-[14px] leading-6 text-ios-text">
-                    <span className="mt-[9px] h-1.5 w-1.5 shrink-0 rounded-full bg-[color:var(--rnest-accent)]" />
-                    <span>{item}</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))
-        ) : (
-          <div className="rounded-[22px] border border-ios-sep bg-[#F7F7F8] px-4 py-4 text-[14px] leading-6 text-ios-sub">
-            {t("표시할 상세 내용이 없습니다.")}
+      {selectedSectionTitles.length ? (
+        <div className="flex flex-wrap gap-2">
+          {selectedSectionTitles.map((title) => (
+            <span key={title} className="inline-flex items-center rounded-full border border-ios-sep bg-white px-3 py-1.5 text-[12px] font-semibold text-ios-text">
+              {t(title)}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="rounded-[24px] border border-ios-sep bg-white px-4 py-4 shadow-[0_10px_24px_rgba(16,24,40,0.03)]">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[15px] font-bold tracking-[-0.01em] text-ios-text">{t("상세 가이드")}</div>
+            <div className="mt-1 text-[12px] text-ios-sub">{t("상세 내용은 전부 펼치지 않고 핵심 미리보기만 표시합니다.")}</div>
           </div>
-        )}
+          <span className={META_PILL_CLASS}>{t("가이드 복사")}</span>
+        </div>
+        <div className="mt-3 whitespace-pre-line text-[14px] leading-7 text-ios-text">
+          {selectedPreviewText || t("표시할 상세 내용이 없습니다.")}
+        </div>
       </div>
     </div>
   ) : (

@@ -12,14 +12,39 @@ type RawEntry = { label: string; amountRaw: string };
 const INTAKE_PRESETS = ["IV 수액", "경구 수분", "수혈", "기타 주입"];
 const OUTPUT_PRESETS = ["소변", "배액관", "구토", "기타 배출"];
 
+function FlowSectionIcon({ kind }: { kind: "intake" | "output" }) {
+  const stroke = kind === "intake" ? "#2563EB" : "#DC2626";
+  const fill = kind === "intake" ? "#DBEAFE" : "#FEE2E2";
+
+  return (
+    <span
+      className="inline-flex h-7 w-7 items-center justify-center rounded-full"
+      style={{ backgroundColor: fill }}
+      aria-hidden="true"
+    >
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+        <path
+          d={kind === "intake" ? "M7 11V3m0 0L4.5 5.5M7 3l2.5 2.5" : "M7 3v8m0 0L4.5 8.5M7 11l2.5-2.5"}
+          stroke={stroke}
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </span>
+  );
+}
+
 function EntryList({
   title,
+  icon,
   presets,
   entries,
   setEntries,
   t,
 }: {
   title: string;
+  icon: React.ReactNode;
   presets: string[];
   entries: RawEntry[];
   setEntries: Dispatch<SetStateAction<RawEntry[]>>;
@@ -32,7 +57,10 @@ function EntryList({
 
   return (
     <Card className="p-5">
-      <div className="mb-3 text-[14px] font-bold text-ios-text">{title}</div>
+      <div className="mb-3 flex items-center gap-2">
+        {icon}
+        <div className="text-[14px] font-bold text-ios-text">{title}</div>
+      </div>
 
       {entries.length === 0 && (
         <div className="py-4 text-center text-[13px] text-ios-muted">{t("항목을 추가하세요")}</div>
@@ -84,7 +112,7 @@ function EntryList({
   );
 }
 
-export function ToolFluidBalancePage() {
+export function ToolFluidBalancePage({ embedded = false }: { embedded?: boolean }) {
   const { t } = useI18n();
   const [intakeEntries, setIntakeEntries] = useState<RawEntry[]>([{ label: "IV 수액", amountRaw: "" }]);
   const [outputEntries, setOutputEntries] = useState<RawEntry[]>([{ label: "소변", amountRaw: "" }]);
@@ -121,10 +149,11 @@ export function ToolFluidBalancePage() {
   };
 
   return (
-    <ToolPageShell title={t("수액 밸런스")} subtitle={t("섭취/배출 I/O 계산")} badge="NEW">
+    <ToolPageShell title={t("수액 밸런스")} subtitle={t("섭취/배출 I/O 계산")} badge="NEW" embedded={embedded}>
       <div className="space-y-4">
         <EntryList
-          title={`📥 ${t("섭취 (Intake)")}`}
+          title={t("섭취 (Intake)")}
+          icon={<FlowSectionIcon kind="intake" />}
           presets={INTAKE_PRESETS}
           entries={intakeEntries}
           setEntries={setIntakeEntries}
@@ -132,7 +161,8 @@ export function ToolFluidBalancePage() {
         />
 
         <EntryList
-          title={`📤 ${t("배출 (Output)")}`}
+          title={t("배출 (Output)")}
+          icon={<FlowSectionIcon kind="output" />}
           presets={OUTPUT_PRESETS}
           entries={outputEntries}
           setEntries={setOutputEntries}

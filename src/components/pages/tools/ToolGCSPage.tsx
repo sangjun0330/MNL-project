@@ -69,7 +69,7 @@ function OptionGroup({
   );
 }
 
-export function ToolGCSPage() {
+export function ToolGCSPage({ embedded = false }: { embedded?: boolean }) {
   const { t } = useI18n();
   const [eye, setEye] = useState(4);
   const [verbal, setVerbal] = useState(5);
@@ -84,7 +84,7 @@ export function ToolGCSPage() {
   };
 
   return (
-    <ToolPageShell title={t("GCS 의식 평가")} subtitle={t("Glasgow Coma Scale 점수 계산")} badge="NEW">
+    <ToolPageShell title={t("GCS 의식 평가")} subtitle={t("Glasgow Coma Scale 점수 계산")} badge="NEW" embedded={embedded}>
       <div className="space-y-4">
         <Card className="p-5">
           <OptionGroup title={t("눈 반응 (E)")} options={EYE_OPTIONS} value={eye} onChange={setEye} />

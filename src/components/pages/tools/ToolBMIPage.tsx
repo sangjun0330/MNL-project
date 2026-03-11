@@ -16,7 +16,7 @@ const BMI_LABELS: Record<string, { label: string; color: string }> = {
   obese3: { label: "고도비만 (3단계)", color: "text-red-700" },
 };
 
-export function ToolBMIPage() {
+export function ToolBMIPage({ embedded = false }: { embedded?: boolean }) {
   const { t } = useI18n();
   const [weightRaw, setWeightRaw] = useState("");
   const [heightRaw, setHeightRaw] = useState("");
@@ -30,7 +30,7 @@ export function ToolBMIPage() {
   }, [weight, height, asianCutoffs]);
 
   return (
-    <ToolPageShell title={t("BMI 계산")} subtitle={t("체질량지수 (아시아 기준 포함)")} badge="NEW">
+    <ToolPageShell title={t("BMI 계산")} subtitle={t("체질량지수 (아시아 기준 포함)")} badge="NEW" embedded={embedded}>
       <div className="space-y-4">
         <Card className="p-5 space-y-4">
           <div>

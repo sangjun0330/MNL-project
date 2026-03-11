@@ -8,10 +8,18 @@ type ToolPageShellProps = {
   subtitle?: string;
   badge?: string;
   badgeVariant?: "new" | "local" | "ai";
+  embedded?: boolean;
   children: React.ReactNode;
 };
 
-export function ToolPageShell({ title, subtitle, badge, badgeVariant = "new", children }: ToolPageShellProps) {
+export function ToolPageShell({
+  title,
+  subtitle,
+  badge,
+  badgeVariant = "new",
+  embedded = false,
+  children,
+}: ToolPageShellProps) {
   const { t } = useI18n();
   const badgeClass =
     badgeVariant === "ai"
@@ -19,6 +27,26 @@ export function ToolPageShell({ title, subtitle, badge, badgeVariant = "new", ch
       : badgeVariant === "local"
         ? "bg-gray-100 text-gray-600"
         : "bg-blue-100 text-blue-700";
+
+  if (embedded) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="text-[22px] font-bold tracking-[-0.015em] text-ios-text">{title}</h2>
+            {subtitle ? <p className="mt-1 text-[13px] text-ios-sub">{subtitle}</p> : null}
+          </div>
+          {badge ? (
+            <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${badgeClass}`}>
+              {badge}
+            </span>
+          ) : null}
+        </div>
+
+        {children}
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto w-full max-w-[760px] px-4 pb-24 pt-6">

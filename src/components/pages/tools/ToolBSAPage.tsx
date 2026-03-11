@@ -7,7 +7,7 @@ import { ToolPageShell } from "./ToolPageShell";
 import { calculateBSA, sanitizeNumericInput, parseNumericInput, formatNumber, type BSAFormula } from "@/lib/nurseCalculators";
 import { useI18n } from "@/lib/useI18n";
 
-export function ToolBSAPage() {
+export function ToolBSAPage({ embedded = false }: { embedded?: boolean }) {
   const { t } = useI18n();
   const [weightRaw, setWeightRaw] = useState("");
   const [heightRaw, setHeightRaw] = useState("");
@@ -21,7 +21,7 @@ export function ToolBSAPage() {
   }, [weight, height, formula]);
 
   return (
-    <ToolPageShell title={t("BSA 체표면적")} subtitle={t("DuBois / Mosteller 공식")} badge="NEW">
+    <ToolPageShell title={t("BSA 체표면적")} subtitle={t("DuBois / Mosteller 공식")} badge="NEW" embedded={embedded}>
       <div className="space-y-4">
         <Card className="p-5 space-y-4">
           <div>

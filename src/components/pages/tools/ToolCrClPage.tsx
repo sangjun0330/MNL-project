@@ -15,7 +15,7 @@ const RENAL_LABELS: Record<string, { label: string; color: string }> = {
   failure: { label: "신부전 (<15)", color: "text-red-700" },
 };
 
-export function ToolCrClPage() {
+export function ToolCrClPage({ embedded = false }: { embedded?: boolean }) {
   const { t } = useI18n();
   const [ageRaw, setAgeRaw] = useState("");
   const [weightRaw, setWeightRaw] = useState("");
@@ -31,7 +31,7 @@ export function ToolCrClPage() {
   }, [age, weight, cr, isFemale]);
 
   return (
-    <ToolPageShell title={t("CrCl 신기능")} subtitle={t("Cockcroft-Gault 청소율 계산")} badge="NEW">
+    <ToolPageShell title={t("CrCl 신기능")} subtitle={t("Cockcroft-Gault 청소율 계산")} badge="NEW" embedded={embedded}>
       <div className="space-y-4">
         <Card className="p-5 space-y-4">
           <div>

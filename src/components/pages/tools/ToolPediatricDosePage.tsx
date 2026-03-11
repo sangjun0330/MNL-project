@@ -7,7 +7,7 @@ import { ToolPageShell } from "./ToolPageShell";
 import { calculatePediatricDose, sanitizeNumericInput, parseNumericInput, formatNumber } from "@/lib/nurseCalculators";
 import { useI18n } from "@/lib/useI18n";
 
-export function ToolPediatricDosePage() {
+export function ToolPediatricDosePage({ embedded = false }: { embedded?: boolean }) {
   const { t } = useI18n();
   const [weightRaw, setWeightRaw] = useState("");
   const [dosePerKgRaw, setDosePerKgRaw] = useState("");
@@ -37,7 +37,7 @@ export function ToolPediatricDosePage() {
   };
 
   return (
-    <ToolPageShell title={t("소아 용량 계산")} subtitle={t("체중 기반 mg/kg 용량 산출")} badge="NEW">
+    <ToolPageShell title={t("소아 용량 계산")} subtitle={t("체중 기반 mg/kg 용량 산출")} badge="NEW" embedded={embedded}>
       <div className="space-y-4">
         <Card className="p-5 space-y-4">
           <div>

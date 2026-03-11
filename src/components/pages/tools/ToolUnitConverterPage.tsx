@@ -14,17 +14,70 @@ import {
 } from "@/lib/nurseCalculators";
 import { useI18n } from "@/lib/useI18n";
 
-const CATEGORY_LABELS: Record<UnitCategory, { label: string; emoji: string }> = {
-  temperature: { label: "체온", emoji: "🌡️" },
-  weight: { label: "체중", emoji: "⚖️" },
-  length: { label: "길이", emoji: "📏" },
-  mass: { label: "질량", emoji: "💊" },
-  volume: { label: "용량", emoji: "🧪" },
+const CATEGORY_LABELS: Record<UnitCategory, { label: string }> = {
+  temperature: { label: "체온" },
+  weight: { label: "체중" },
+  length: { label: "길이" },
+  mass: { label: "질량" },
+  volume: { label: "용량" },
 };
 
 const CATEGORIES = Object.keys(CATEGORY_LABELS) as UnitCategory[];
 
-export function ToolUnitConverterPage() {
+function UnitCategoryIcon({ category }: { category: UnitCategory }) {
+  const palette: Record<UnitCategory, { bg: string; stroke: string; fill?: string }> = {
+    temperature: { bg: "#FCE7F3", stroke: "#DB2777", fill: "#F9A8D4" },
+    weight: { bg: "#EFF6FF", stroke: "#2563EB", fill: "#93C5FD" },
+    length: { bg: "#ECFDF5", stroke: "#059669", fill: "#86EFAC" },
+    mass: { bg: "#FFF7ED", stroke: "#D97706", fill: "#FDBA74" },
+    volume: { bg: "#EEF2FF", stroke: "#4F46E5", fill: "#A5B4FC" },
+  };
+
+  const colors = palette[category];
+
+  return (
+    <span
+      className="inline-flex h-5 w-5 items-center justify-center rounded-full"
+      style={{ backgroundColor: colors.bg }}
+      aria-hidden="true"
+    >
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+        {category === "temperature" ? (
+          <>
+            <path d="M6 2.2v4.2" stroke={colors.stroke} strokeWidth="1.3" strokeLinecap="round" />
+            <path d="M4.8 6.1a1.9 1.9 0 103.8 0A1.9 1.9 0 004.8 6.1z" fill={colors.fill} stroke={colors.stroke} strokeWidth="1.1" />
+          </>
+        ) : null}
+        {category === "weight" ? (
+          <>
+            <path d="M3 4.5h6L8.2 9H3.8L3 4.5z" fill={colors.fill} stroke={colors.stroke} strokeWidth="1.1" strokeLinejoin="round" />
+            <path d="M4.8 4.5a1.2 1.2 0 012.4 0" stroke={colors.stroke} strokeWidth="1.1" strokeLinecap="round" />
+          </>
+        ) : null}
+        {category === "length" ? (
+          <>
+            <rect x="2" y="4" width="8" height="4" rx="1.2" fill={colors.fill} stroke={colors.stroke} strokeWidth="1.1" />
+            <path d="M4 4.8v2.4M6 4.8v1.6M8 4.8v2.4" stroke={colors.stroke} strokeWidth="1.1" strokeLinecap="round" />
+          </>
+        ) : null}
+        {category === "mass" ? (
+          <>
+            <path d="M4.2 4.2h3.6l1 4H3.2l1-4z" fill={colors.fill} stroke={colors.stroke} strokeWidth="1.1" strokeLinejoin="round" />
+            <path d="M5 3.2h2" stroke={colors.stroke} strokeWidth="1.1" strokeLinecap="round" />
+          </>
+        ) : null}
+        {category === "volume" ? (
+          <>
+            <path d="M4 2.8h4v1.1l-1 1.3v3.1A1.7 1.7 0 015.3 10 1.7 1.7 0 014 8.3V5.2l-1-1.3V2.8z" fill={colors.fill} stroke={colors.stroke} strokeWidth="1.1" strokeLinejoin="round" />
+            <path d="M4.8 6.2h2.4" stroke={colors.stroke} strokeWidth="1.1" strokeLinecap="round" />
+          </>
+        ) : null}
+      </svg>
+    </span>
+  );
+}
+
+export function ToolUnitConverterPage({ embedded = false }: { embedded?: boolean }) {
   const { t } = useI18n();
   const [category, setCategory] = useState<UnitCategory>("temperature");
   const [valueRaw, setValueRaw] = useState("");
@@ -54,7 +107,7 @@ export function ToolUnitConverterPage() {
   };
 
   return (
-    <ToolPageShell title={t("단위 변환기")} subtitle={t("체온·체중·질량·용량 변환")} badge="NEW">
+    <ToolPageShell title={t("단위 변환기")} subtitle={t("체온·체중·질량·용량 변환")} badge="NEW" embedded={embedded}>
       <div className="space-y-4">
         {/* Category selector */}
         <div className="flex flex-wrap gap-2">
@@ -63,11 +116,12 @@ export function ToolUnitConverterPage() {
               key={cat}
               type="button"
               onClick={() => handleCategoryChange(cat)}
-              className={`rounded-full px-3.5 py-2 text-[13px] font-semibold transition ${
+              className={`inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-[13px] font-semibold transition ${
                 category === cat ? "bg-black text-white" : "bg-black/5 text-ios-text hover:bg-black/8"
               }`}
             >
-              {CATEGORY_LABELS[cat].emoji} {t(CATEGORY_LABELS[cat].label)}
+              <UnitCategoryIcon category={cat} />
+              <span>{t(CATEGORY_LABELS[cat].label)}</span>
             </button>
           ))}
         </div>
