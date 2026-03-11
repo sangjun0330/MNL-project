@@ -235,8 +235,8 @@ function normalizeApiKey() {
 }
 
 function resolveModel() {
-  const model = String(process.env.OPENAI_MODEL ?? "gpt-5.2").trim();
-  return model || "gpt-5.2";
+  const model = String(process.env.OPENAI_MODEL ?? "gpt-5.4").trim();
+  return model || "gpt-5.4";
 }
 
 // OPENAI_RECOVERY_BASE_URL → OPENAI_BASE_URL 순서로 폴백

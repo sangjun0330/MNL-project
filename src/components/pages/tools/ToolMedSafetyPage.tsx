@@ -24,12 +24,14 @@ const SECONDARY_FLAT_BTN =
   "h-11 rounded-full border border-[#E8E8EC] bg-white px-4 text-[14px] font-semibold text-ios-text shadow-none hover:bg-[#F7F7F8]";
 const MESSAGE_USER_CLASS = "rounded-[24px] bg-[#F3F4F6] px-4 py-3 text-[15px] leading-6 text-ios-text";
 const META_PILL_CLASS = "inline-flex items-center rounded-full border border-[#E8E8EC] bg-[#F7F7F8] px-3 py-1.5 text-[11px] font-semibold text-ios-sub";
-const QUICK_CHIP_CLASS =
-  "inline-flex items-center rounded-full border border-[#E8E8EC] bg-white px-3.5 py-2 text-[12.5px] font-semibold text-ios-text transition hover:bg-[#F7F7F8]";
-const CANVAS_SURFACE_CLASS = "rounded-[28px] border border-[#ECECF0] bg-[#FBFBFC] p-3 sm:p-4";
-const STREAMING_CARD_CLASS = "rounded-[28px] border border-[#E7E8ED] bg-white px-5 py-4 text-[15px] leading-7 text-ios-text shadow-[0_12px_30px_rgba(15,23,42,0.04)]";
+const QUICK_TILE_CLASS =
+  "group min-w-[260px] snap-start rounded-[30px] border border-[#E8E8EC] bg-white/88 px-5 py-4 text-left shadow-[0_18px_36px_rgba(15,23,42,0.04)] backdrop-blur transition hover:-translate-y-0.5 hover:border-[#D9DBE3] hover:bg-white";
+const STREAMING_CARD_CLASS =
+  "rounded-[30px] border border-[#E7E8ED] bg-white px-5 py-4 text-[15px] leading-7 text-ios-text shadow-[0_18px_36px_rgba(15,23,42,0.04)]";
 const COMPOSER_PANEL_CLASS =
-  "rounded-[30px] border border-[#E8E8EC] bg-white/96 p-3 shadow-[0_22px_40px_rgba(15,23,42,0.12)] backdrop-blur";
+  "rounded-[32px] border border-[#E8E8EC] bg-white/96 p-3 shadow-[0_24px_50px_rgba(15,23,42,0.12)] backdrop-blur-xl";
+const OPEN_LAYOUT_CLASS =
+  "relative min-h-[calc(100dvh-120px)] overflow-hidden bg-[radial-gradient(circle_at_top,#FFFFFF_0%,#FAFAFB_42%,#F4F5F7_100%)]";
 const MED_SAFETY_CLIENT_TIMEOUT_MS = 480_000;
 const RETRY_WITH_DATA_MESSAGE = "네트워크가 불안정합니다. 데이터(모바일 네트워크)를 켠 뒤 다시 시도해 주세요.";
 const QUICK_PROMPTS = [
@@ -113,13 +115,13 @@ function parseErrorMessage(raw: string, t: TranslateFn) {
   if (normalized.includes("openai_responses_401"))
     return t("AI API 키가 유효하지 않거나 만료되었습니다. 환경변수를 확인해 주세요.");
   if (normalized.includes("openai_responses_403_model_access")) {
-    return t("현재 계정에 gpt-5.2 모델 접근 권한이 없습니다. API 계정 권한을 확인해 주세요.");
+    return t("현재 계정에 gpt-5.4 모델 접근 권한이 없습니다. API 계정 권한을 확인해 주세요.");
   }
   if (normalized.includes("openai_responses_403")) {
     return t(RETRY_WITH_DATA_MESSAGE);
   }
   if (normalized.includes("openai_responses_404") || normalized.includes("model_not_found"))
-    return t("gpt-5.2 모델을 찾을 수 없습니다. API 설정과 계정 권한을 확인해 주세요.");
+    return t("gpt-5.4 모델을 찾을 수 없습니다. API 설정과 계정 권한을 확인해 주세요.");
   if (normalized.includes("openai_responses_429")) return t("요청 한도가 초과되었습니다. 잠시 후 다시 시도해 주세요.");
   if (normalized.includes("openai_responses_400_continuation"))
     return t("이전 대화 상태 동기화에 실패했습니다. 새 검색으로 다시 시도해 주세요.");
@@ -455,18 +457,18 @@ function parseAnswerSections(value: string): AnswerSection[] {
 
 function sectionCardClass(tone: AnswerSectionTone) {
   if (tone === "summary") {
-    return "rounded-[26px] border border-[#E3E7F1] bg-[linear-gradient(180deg,#FFFFFF_0%,#F7FAFF_100%)] p-4 shadow-[0_12px_26px_rgba(15,23,42,0.04)]";
+    return "rounded-[28px] border border-[#E4E8F1] bg-[linear-gradient(180deg,#FFFFFF_0%,#F8FAFF_100%)] px-5 py-4 shadow-[0_16px_34px_rgba(15,23,42,0.04)]";
   }
   if (tone === "action") {
-    return "rounded-[26px] border border-[#DDE9DE] bg-[linear-gradient(180deg,#FCFFFB_0%,#F5FBF3_100%)] p-4";
+    return "rounded-[28px] border border-[#DCE8DE] bg-[linear-gradient(180deg,#FDFFFC_0%,#F6FBF4_100%)] px-5 py-4";
   }
   if (tone === "warning") {
-    return "rounded-[26px] border border-[#F1DFC9] bg-[linear-gradient(180deg,#FFFDF9_0%,#FFF6EE_100%)] p-4";
+    return "rounded-[28px] border border-[#F0DFC9] bg-[linear-gradient(180deg,#FFFDF9_0%,#FFF7EF_100%)] px-5 py-4";
   }
   if (tone === "compare") {
-    return "rounded-[26px] border border-[#DEE6F1] bg-[linear-gradient(180deg,#FFFFFF_0%,#F7FAFD_100%)] p-4";
+    return "rounded-[28px] border border-[#DFE6F0] bg-[linear-gradient(180deg,#FFFFFF_0%,#F8FAFD_100%)] px-5 py-4";
   }
-  return "rounded-[26px] border border-[#E8E8EC] bg-[#FCFCFD] p-4";
+  return "rounded-[28px] border border-[#E8E8EC] bg-[#FCFCFD] px-5 py-4";
 }
 
 function sectionTitleClass(tone: AnswerSectionTone) {
@@ -484,7 +486,7 @@ function AssistantAnswerSections({ content }: { content: string }) {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       {sections.map((section, sectionIndex) => (
         <section key={`${section.title}-${sectionIndex}`} className={sectionCardClass(section.tone)}>
           <div
@@ -494,14 +496,14 @@ function AssistantAnswerSections({ content }: { content: string }) {
           >
             {section.title}
           </div>
-          <div className="mt-3 space-y-2.5">
+          <div className="mt-3 space-y-3">
             {section.items.map((item, itemIndex) => (
               <div
                 key={`${section.title}-${itemIndex}`}
-                className={`rounded-[20px] px-4 py-3 text-ios-text ${
+                className={`text-ios-text ${
                   section.tone === "summary" && itemIndex === 0
-                    ? "bg-white text-[18px] font-semibold leading-8 shadow-[0_8px_20px_rgba(15,23,42,0.03)]"
-                    : "bg-white/92 text-[15px] leading-7"
+                    ? "text-[19px] font-semibold leading-8 tracking-[-0.02em]"
+                    : "text-[15px] leading-7 text-ios-text/90"
                 }`}
               >
                 {item}
@@ -787,20 +789,21 @@ export function ToolMedSafetyPage() {
 
   return (
     <>
-      <div className="mx-auto w-full max-w-[860px] space-y-4 px-3 pb-[calc(148px+env(safe-area-inset-bottom))] pt-6">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 pr-1">
-            <div className={PAGE_TITLE_CLASS}>{t("AI 임상 검색")}</div>
-            <div className="mt-1 text-[13px] leading-6 text-ios-sub">{t("간호 현장에서 약물, 기구, 수치, 절차, 상황 질문을 바로 물어보세요.")}</div>
-          </div>
-          <Link href="/tools" className={TOOL_LIST_LINK_CLASS}>
-            {t("툴 목록")}
-          </Link>
-        </div>
+      <div className="mx-auto w-full max-w-[1120px] px-1 pb-[calc(168px+env(safe-area-inset-bottom))] pt-4 sm:px-2">
+        <div className={`px-3 py-3 sm:px-4 ${OPEN_LAYOUT_CLASS}`}>
+          <div className="absolute inset-x-0 top-0 h-32 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.95),rgba(255,255,255,0))]" />
+          <div className="relative">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 pr-1">
+                <div className={PAGE_TITLE_CLASS}>{t("AI 임상 검색")}</div>
+                <div className="mt-1 text-[13px] leading-6 text-ios-sub">{t("간호 현장에서 약물, 기구, 수치, 절차, 상황 질문을 바로 물어보세요.")}</div>
+              </div>
+              <Link href="/tools" className={TOOL_LIST_LINK_CLASS}>
+                {t("툴 목록")}
+              </Link>
+            </div>
 
-        <Card className={`p-5 sm:p-6 ${FLAT_CARD_CLASS}`}>
-          <div className="flex flex-col gap-5">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mt-4 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="inline-flex items-center rounded-full bg-black px-3 py-1.5 text-[11px] font-semibold text-white">
                   {t("크레딧")}: {quotaRemaining}
@@ -842,55 +845,55 @@ export function ToolMedSafetyPage() {
             </div>
 
             {quotaKnown && quotaRemaining <= 0 ? (
-              <div className="rounded-[22px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] font-semibold leading-6 text-amber-700">
+              <div className="mt-4 rounded-[24px] border border-amber-200 bg-amber-50/92 px-4 py-3 text-[13px] font-semibold leading-6 text-amber-700">
                 {t("남은 AI 검색 크레딧이 없습니다. 크레딧 10회를 구매하거나 Pro 기본 크레딧이 초기화된 뒤 다시 이용해 주세요.")}
               </div>
             ) : null}
 
             {!hasConversation ? (
-              <div className="flex min-h-[420px] flex-col justify-center py-4 sm:min-h-[500px]">
-                <div className="mx-auto max-w-[620px] text-center">
-                  <div className="text-[30px] font-bold tracking-[-0.04em] text-ios-text sm:text-[36px]">{t("무엇이든 물어보세요")}</div>
-                  <div className="mt-3 text-[15px] leading-7 text-ios-sub">
+              <div className="flex min-h-[calc(100dvh-280px)] flex-col justify-center pb-8 pt-8">
+                <div className="mx-auto max-w-[760px] text-center">
+                  <div className="text-[34px] font-bold tracking-[-0.05em] text-ios-text sm:text-[48px]">{t("무엇이든 물어보세요")}</div>
+                  <div className="mt-4 text-[17px] leading-8 text-ios-sub sm:text-[18px]">
                     {t("약물, 기구, 검사 수치, 간호 절차, 상황 대응까지 한 번에 질문할 수 있습니다.")}
                   </div>
                 </div>
 
-                <div className={`mx-auto mt-8 w-full max-w-[720px] ${CANVAS_SURFACE_CLASS}`}>
-                  <div className="text-[12px] font-semibold tracking-[0.01em] text-ios-sub">{t("빠른 질문")}</div>
-                  <div className="mt-3 flex flex-wrap gap-2">
+                <div className="mt-10">
+                  <div className="mb-3 px-2 text-[12px] font-semibold tracking-[0.01em] text-ios-sub">{t("빠른 질문")}</div>
+                  <div className="-mx-1 flex snap-x gap-3 overflow-x-auto px-1 pb-2">
                     {QUICK_PROMPTS.map((prompt) => (
                       <button
                         key={prompt}
                         type="button"
-                        className={QUICK_CHIP_CLASS}
+                        className={QUICK_TILE_CLASS}
                         onClick={() => void submitQuestion(prompt)}
                         disabled={isLoading || !canAsk}
                       >
-                        {prompt}
+                        <div className="text-[12px] font-semibold text-ios-sub">{t("빠른 질문")}</div>
+                        <div className="mt-2 text-[22px] font-semibold tracking-[-0.03em] text-ios-text">{prompt}</div>
+                        <div className="mt-3 text-[13px] leading-6 text-ios-sub">{t("탭하면 바로 질문이 시작됩니다.")}</div>
                       </button>
                     ))}
                   </div>
-                  <div className="mt-4 rounded-[22px] border border-dashed border-[#E3E4E8] bg-white px-4 py-4 text-[13px] leading-6 text-ios-sub">
-                    {t("하단 입력창에 질문을 입력하면 바로 검색이 시작됩니다.")}
-                  </div>
+                  <div className="mt-4 px-2 text-[13px] leading-6 text-ios-sub">{t("하단 입력창에 질문을 입력하면 바로 검색이 시작됩니다.")}</div>
                 </div>
               </div>
             ) : (
-              <div className="space-y-6">
-                <div className="space-y-6">
+              <div className="mx-auto mt-8 w-full max-w-[900px] pb-10">
+                <div className="space-y-9">
                   {messages.map((message) => (
                     <div key={message.id} className={message.role === "user" ? "flex justify-end" : "flex justify-start"}>
-                      <div className={message.role === "user" ? "max-w-[88%]" : "max-w-full min-w-0 flex-1"}>
+                      <div className={message.role === "user" ? "max-w-[86%] sm:max-w-[72%]" : "w-full max-w-[860px] min-w-0"}>
                         {message.role === "user" ? (
                           <div className={MESSAGE_USER_CLASS}>
-                            <div className="whitespace-pre-wrap break-words">{message.content}</div>
+                            <div className="whitespace-pre-wrap break-words text-[16px] leading-7">{message.content}</div>
                           </div>
                         ) : (
                           <AssistantAnswerSections content={message.content} />
                         )}
                         <div
-                          className={`mt-2 flex flex-wrap items-center gap-2 text-[11px] text-ios-sub ${
+                          className={`mt-2 flex flex-wrap items-center gap-2 px-1 text-[11px] text-ios-sub ${
                             message.role === "user" ? "justify-end" : ""
                           }`}
                         >
@@ -905,11 +908,11 @@ export function ToolMedSafetyPage() {
 
                   {streamingText ? (
                     <div className="flex justify-start">
-                      <div className="max-w-full min-w-0 flex-1">
+                      <div className="w-full max-w-[860px] min-w-0">
                         <div className={STREAMING_CARD_CLASS}>
                           <div className="whitespace-pre-wrap break-words">{streamingText}</div>
                         </div>
-                        <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-ios-sub">
+                        <div className="mt-2 flex flex-wrap items-center gap-2 px-1 text-[11px] text-ios-sub">
                           <span>{t("AI")}</span>
                           <span>{t("작성 중...")}</span>
                         </div>
@@ -921,69 +924,77 @@ export function ToolMedSafetyPage() {
                 </div>
               </div>
             )}
-          </div>
-        </Card>
 
-        {error ? (
-          <Card className={`p-4 ${FLAT_CARD_CLASS}`}>
-            <div className="rounded-[22px] border border-red-200 bg-red-50 px-4 py-4 text-[14px] font-semibold leading-6 text-red-700">{error}</div>
-            {lastSubmittedQuery ? (
-              <div className="mt-3">
-                <button
-                  type="button"
-                  onClick={() => void submitQuestion(lastSubmittedQuery)}
-                  className="inline-flex h-10 items-center justify-center rounded-full border border-red-200 bg-white px-4 text-[12.5px] font-semibold text-red-700"
-                >
-                  {t("같은 질문 다시 시도")}
-                </button>
+            {error ? (
+              <div className="mx-auto mt-4 w-full max-w-[900px]">
+                <div className="rounded-[24px] border border-red-200 bg-red-50/92 px-4 py-4 text-[14px] font-semibold leading-6 text-red-700">
+                  {error}
+                </div>
+                {lastSubmittedQuery ? (
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      onClick={() => void submitQuestion(lastSubmittedQuery)}
+                      className="inline-flex h-10 items-center justify-center rounded-full border border-red-200 bg-white px-4 text-[12.5px] font-semibold text-red-700"
+                    >
+                      {t("같은 질문 다시 시도")}
+                    </button>
+                  </div>
+                ) : null}
               </div>
             ) : null}
-          </Card>
-        ) : null}
 
-        <div className="px-1 text-[12.5px] leading-6 text-ios-sub">
-          <div>
-            {t(
-              "본 결과는 참고용 자동 생성 정보이며 의료행위 판단의 근거로 사용할 수 없습니다. 모든 처치는 병원 지침, 처방, 의료진 확인을 우선해 결정해 주세요."
-            )}
+            <div className="mx-auto mt-8 w-full max-w-[900px] px-1 text-[12.5px] leading-6 text-ios-sub">
+              {t(
+                "본 결과는 참고용 자동 생성 정보이며 의료행위 판단의 근거로 사용할 수 없습니다. 모든 처치는 병원 지침, 처방, 의료진 확인을 우선해 결정해 주세요."
+              )}
+            </div>
           </div>
         </div>
       </div>
 
       <div className="pointer-events-none fixed inset-x-0 bottom-[calc(14px+env(safe-area-inset-bottom))] z-50">
-        <div className="mx-auto w-full max-w-[720px] px-4">
+        <div className="mx-auto w-full max-w-[980px] px-3 sm:px-5">
           <div className={`pointer-events-auto ${COMPOSER_PANEL_CLASS}`}>
             <div className="flex items-center gap-3">
-              <Input
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    void submitQuestion();
-                  }
-                }}
-                className="h-12 flex-1 rounded-full border-0 bg-[#F5F6F8] px-5 text-[15px] shadow-none"
-                placeholder={hasConversation ? t("예: 그럼 중심정맥으로만 줘야 하나요?") : t("예: norepinephrine 투여 시 주의사항이 뭐야?")}
-                autoCapitalize="off"
-                autoCorrect="off"
-                autoComplete="off"
-                spellCheck={false}
-              />
-              <Button
-                variant="secondary"
-                className={`${PRIMARY_FLAT_BTN} h-12 shrink-0 rounded-full px-5`}
+              <div className="flex h-14 flex-1 items-center rounded-full bg-[#F4F5F7] px-4">
+                <Input
+                  value={input}
+                  onChange={(event) => setInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void submitQuestion();
+                    }
+                  }}
+                  className="h-12 flex-1 border-0 bg-transparent px-1 text-[16px] shadow-none placeholder:text-ios-sub"
+                  placeholder={hasConversation ? t("예: 그럼 중심정맥으로만 줘야 하나요?") : t("예: norepinephrine 투여 시 주의사항이 뭐야?")}
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </div>
+              <button
+                type="button"
+                className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-black text-white disabled:cursor-not-allowed disabled:opacity-50"
                 onClick={() => void submitQuestion()}
                 disabled={isLoading || !canAsk}
+                aria-label={isLoading ? t("질문 중...") : hasConversation ? t("보내기") : t("AI 검색")}
               >
-                {isLoading ? t("질문 중...") : hasConversation ? t("보내기") : t("AI 검색")}
-              </Button>
+                {isLoading ? (
+                  <span className="text-[11px] font-semibold">{t("질문 중...")}</span>
+                ) : (
+                  <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
+                    <path d="M5 12h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                    <path d="M13 6l6 6-6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </button>
             </div>
-            <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-              <div className="text-[11px] leading-5 text-ios-sub">{t("환자 이름, 등록번호, 연락처 등 식별정보는 입력하지 마세요.")}</div>
-              {hasConversation ? (
-                <div className="text-[11px] leading-5 text-ios-sub">{t("이전 답변을 이어서 묻습니다.")}</div>
-              ) : null}
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 px-1 text-[11.5px] text-ios-sub">
+              <span>{t("환자 이름, 등록번호, 연락처 등 식별정보는 입력하지 마세요.")}</span>
+              <span>{hasConversation ? t("이전 답변을 이어서 묻습니다.") : t("하단 입력창에 질문을 입력하면 바로 검색이 시작됩니다.")}</span>
             </div>
           </div>
         </div>

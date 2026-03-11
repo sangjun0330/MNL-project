@@ -193,9 +193,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         - 모바일은 여전히 자연스럽게 full width
       */}
       <div
-        className={`mx-auto max-w-[720px] px-4 ${
-          isMedSafetyImmersive ? "pb-[calc(24px+env(safe-area-inset-bottom))]" : "pb-[calc(96px+env(safe-area-inset-bottom))]"
-        }`}
+        className={`mx-auto w-full ${
+          isMedSafetyImmersive ? "max-w-[1180px] px-3 sm:px-5" : "max-w-[720px] px-4"
+        } ${isMedSafetyImmersive ? "pb-[calc(24px+env(safe-area-inset-bottom))]" : "pb-[calc(96px+env(safe-area-inset-bottom))]"}`}
         onPointerDownCapture={handleGuardedInteraction}
         onKeyDownCapture={handleGuardedInteraction}
       >

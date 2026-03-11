@@ -150,7 +150,7 @@ export function normalizeOpenAIResponsesBaseUrl(raw: string) {
 
 function normalizeOpenAIResponsesModel(model: string) {
   const trimmed = trimEnv(model);
-  if (!trimmed) return "gpt-5.2";
+  if (!trimmed) return "gpt-5.4";
   return trimmed.replace(/^openai\//i, "");
 }
 
@@ -205,7 +205,7 @@ export function resolveOpenAIResponsesRequestConfig(args: {
     requestUrl: `${normalizedBaseUrl}/responses`,
     headers,
     // Cloudflare's provider-native OpenAI Responses endpoint expects plain model ids
-    // like "gpt-5.2". The "openai/..." prefix is only for the unified /compat APIs.
+    // like "gpt-5.4". The "openai/..." prefix is only for the unified /compat APIs.
     model: normalizeOpenAIResponsesModel(args.model),
     usesCloudflareGateway,
     authMode,

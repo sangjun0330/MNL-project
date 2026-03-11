@@ -29,7 +29,7 @@ type ResponsesAttempt = {
 type TextDeltaHandler = (delta: string) => void | Promise<void>;
 type ResponseVerbosity = "low" | "medium" | "high";
 
-const MED_SAFETY_LOCKED_MODEL = "gpt-5.2";
+const MED_SAFETY_LOCKED_MODEL = "gpt-5.4";
 
 export type OpenAIMedSafetyOutput = {
   result: MedSafetyAnalysisResult;

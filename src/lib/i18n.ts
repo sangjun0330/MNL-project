@@ -959,6 +959,7 @@ const EN_EXTRA: Record<string, string> = {
   "무엇이든 물어보세요": "Ask anything",
   "약물, 기구, 검사 수치, 간호 절차, 상황 대응까지 한 번에 질문할 수 있습니다.":
     "You can ask about medications, devices, labs, nursing procedures, and situation response in one place.",
+  "탭하면 바로 질문이 시작됩니다.": "Tap to start this question right away.",
   "하단 입력창에 질문을 입력하면 바로 검색이 시작됩니다.":
     "Type in the bottom chat bar to start the search right away.",
   "예: norepinephrine 투여 시 주의사항이 뭐야?": "e.g., What should I watch for when giving norepinephrine?",
@@ -1256,12 +1257,12 @@ const EN_EXTRA: Record<string, string> = {
     "AI API key is invalid or expired. Check your .env.local environment variables.",
   "현재 계정에 해당 모델 접근 권한이 없습니다. 모델명을 변경해 다시 시도해 주세요.":
     "This account does not have access to the model. Change model name and try again.",
-  "현재 계정에 gpt-5.2 모델 접근 권한이 없습니다. API 계정 권한을 확인해 주세요.":
-    "This account does not have access to gpt-5.2. Please verify your API account permissions.",
+  "현재 계정에 gpt-5.4 모델 접근 권한이 없습니다. API 계정 권한을 확인해 주세요.":
+    "This account does not have access to gpt-5.4. Please verify your API account permissions.",
   "요청한 모델을 찾을 수 없습니다. 모델명을 확인하거나 기본 fallback 모델로 다시 시도해 주세요.":
     "Requested model not found. Check the model name or retry with fallback model.",
-  "gpt-5.2 모델을 찾을 수 없습니다. API 설정과 계정 권한을 확인해 주세요.":
-    "gpt-5.2 was not found. Please verify your API configuration and account permissions.",
+  "gpt-5.4 모델을 찾을 수 없습니다. API 설정과 계정 권한을 확인해 주세요.":
+    "gpt-5.4 was not found. Please verify your API configuration and account permissions.",
   "요청 한도가 초과되었습니다. 잠시 후 다시 AI 분석 실행을 눌러 시도해 주세요.":
     "Request limit exceeded. Please tap `Run AI Analysis` again shortly.",
   "이전 대화 상태 동기화에 실패했습니다. 다시 AI 분석 실행을 눌러 새로 시도해 주세요.":
