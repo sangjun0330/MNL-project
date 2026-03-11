@@ -1,25 +1,15 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { todayISO, type ISODate } from "@/lib/date";
 import type { Language } from "@/lib/i18n";
 import { buildPrivateNoStoreHeaders, jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
-import {
-  analyzeMedSafetyWithOpenAI,
-  translateMedSafetyToEnglish,
-  type ClinicalMode,
-  type ClinicalSituation,
-  type MedSafetyAnalysisResult,
-  type QueryIntent,
-} from "@/lib/server/openaiMedSafety";
+import { analyzeMedSafetyWithOpenAI, translateMedSafetyToEnglish } from "@/lib/server/openaiMedSafety";
 import type { Json } from "@/types/supabase";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
-// Pin Edge Function to US/EU regions so outbound OpenAI calls never originate
-// from Asian PoPs whose egress IPs may be blocked by OpenAI's region policy.
 export const preferredRegion = ["iad1", "sfo1", "fra1"];
 
-const MAX_QUERY_LENGTH = 1800;
-const MAX_PATIENT_SUMMARY_LENGTH = 1400;
+const MAX_QUERY_LENGTH = 2400;
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
 const MED_SAFETY_RECENT_LIMIT_FREE = 5;
 const MED_SAFETY_RECENT_LIMIT_PRO = 10;
@@ -30,12 +20,131 @@ const DEFAULT_MED_SAFETY_HISTORY_RETENTION_DAYS = 30;
 const MIN_MED_SAFETY_HISTORY_RETENTION_DAYS = 1;
 const MAX_MED_SAFETY_HISTORY_RETENTION_DAYS = 90;
 
+type RequestBody = {
+  query?: unknown;
+  previousResponseId?: unknown;
+  conversationId?: unknown;
+  locale?: unknown;
+  imageDataUrl?: unknown;
+  stream?: unknown;
+};
+
+type MedSafetyResponseData = {
+  answer: string;
+  query: string;
+  language: Language;
+  model: string;
+  analyzedAt: number;
+  source: "openai_live" | "openai_fallback";
+  fallbackReason: string | null;
+  responseId: string | null;
+  conversationId: string | null;
+};
+
+type MedSafetyRecentRecord = {
+  id: string;
+  savedAt: number;
+  language: Language;
+  request: {
+    query: string;
+  };
+  result: MedSafetyResponseData;
+};
+
+const EXACT_PUBLIC_ERRORS = new Set([
+  "invalid_origin",
+  "missing_origin",
+  "invalid_referer_origin",
+  "invalid_referer",
+  "login_required",
+  "missing_supabase_env",
+  "missing_openai_api_key",
+  "query_required",
+  "sensitive_query_blocked",
+  "image_too_large_max_6mb",
+  "insufficient_med_safety_credits",
+  "med_safety_analyze_failed",
+]);
+
+function normalizePublicReasonToken(raw: unknown): string | null {
+  const value = String(raw ?? "").trim();
+  if (!value) return null;
+  if (EXACT_PUBLIC_ERRORS.has(value)) return value;
+
+  const normalized = value.toLowerCase();
+  if (normalized.startsWith("openai_network_")) return "openai_network";
+  if (normalized.includes("openai_timeout_total_budget") || normalized.includes("translate_timeout_total_budget")) {
+    return "openai_timeout_total_budget";
+  }
+  if (normalized.includes("openai_timeout_upstream")) return "openai_timeout_upstream";
+  if (normalized.includes("openai_timeout_retry_aborted")) return "openai_timeout_retry_aborted";
+  if (normalized.includes("openai_stream_parse_failed")) return "openai_stream_parse_failed";
+  if (normalized.includes("openai_empty_text")) return "openai_empty_text";
+  if (normalized.includes("translate_empty_source")) return "translate_empty_source";
+  if (normalized.startsWith("en_direct")) return "en_direct";
+  if (normalized.includes("save_med_safety_content_failed")) return "save_med_safety_content_failed";
+  if (normalized.includes("save_med_safety_recent_failed")) return "save_med_safety_recent_failed";
+
+  const statusMatch = normalized.match(/openai_responses_(\d{3})/);
+  if (statusMatch) {
+    const status = statusMatch[1];
+    if (status === "400") {
+      if (/(previous_response|conversation)/i.test(value)) return "openai_responses_400_continuation";
+      if (/(max_output|max output|token limit|too many tokens|context length|incomplete_details|max_output_tokens)/i.test(value)) {
+        return "openai_responses_400_token_limit";
+      }
+      return "openai_responses_400";
+    }
+    if (status === "403" && /(insufficient_permissions|does not have access|model_not_found|permission|access to model)/i.test(value)) {
+      return "openai_responses_403_model_access";
+    }
+    return `openai_responses_${status}`;
+  }
+
+  return null;
+}
+
+function splitReasonTokens(raw: unknown) {
+  return String(raw ?? "")
+    .split("|")
+    .map((token) => token.trim())
+    .filter(Boolean);
+}
+
+function toPublicReason(raw: unknown): string | null {
+  const tokens = splitReasonTokens(raw);
+  if (!tokens.length) return null;
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const token of tokens) {
+    const normalized = normalizePublicReasonToken(token);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out.length ? out.join("|") : null;
+}
+
+function mergePublicReasons(...values: Array<string | null | undefined>) {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const publicReason = toPublicReason(value);
+    if (!publicReason) continue;
+    for (const token of publicReason.split("|")) {
+      if (!token || seen.has(token)) continue;
+      seen.add(token);
+      out.push(token);
+    }
+  }
+  return out.length ? out.join("|") : null;
+}
+
 function safeErrorString(error: unknown) {
-  const safeError = String(error ?? "unknown_error")
-    .replace(/\s+/g, " ")
-    .replace(/[^\x20-\x7E가-힣ㄱ-ㅎㅏ-ㅣ.,:;!?()[\]{}'"`~@#$%^&*_\-+=/\\|<>]/g, "")
-    .slice(0, 260);
-  return safeError || "unknown_error";
+  const value = String(error ?? "").trim();
+  if (!value) return "unknown_error";
+  if (EXACT_PUBLIC_ERRORS.has(value)) return value;
+  return toPublicReason(value) ?? "unknown_error";
 }
 
 function bad(status: number, error: string) {
@@ -46,6 +155,10 @@ function bad(status: number, error: string) {
     },
     { status }
   );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function safeReadUserId(req: NextRequest): Promise<string> {
@@ -89,55 +202,6 @@ async function safeRestoreConsumedMedSafetyCredit(userId: string, source: "daily
   } catch {
     // ignore restore failure
   }
-}
-
-type MedSafetyResponseData = MedSafetyAnalysisResult & {
-  generatedText: string;
-  language: Language;
-  model: string;
-  analyzedAt: number;
-  source: "openai_live" | "openai_fallback";
-  fallbackReason: string | null;
-  openaiResponseId: string | null;
-  openaiConversationId: string | null;
-};
-
-type MedSafetyRecentRecord = {
-  id: string;
-  savedAt: number;
-  language: Language;
-  request: {
-    query: string;
-    mode: ClinicalMode;
-    situation: ClinicalSituation;
-    queryIntent: QueryIntent | null;
-    patientSummary: string | null;
-    imageName: string | null;
-  };
-  result: MedSafetyResponseData;
-};
-
-function hasMeaningfulStructuredContent(result: MedSafetyAnalysisResult) {
-  const quickActions = Array.isArray(result.quick?.topActions) ? result.quick.topActions.length : 0;
-  const steps = Array.isArray(result.do?.steps) ? result.do.steps.length : 0;
-  const monitor = Array.isArray(result.safety?.monitor) ? result.safety.monitor.length : 0;
-  const conclusion = String(result.oneLineConclusion ?? "").trim();
-  return quickActions > 0 && steps > 0 && monitor > 0 && conclusion.length > 0;
-}
-
-function shouldCommitConsumedCredit(params: {
-  analyzed: Awaited<ReturnType<typeof analyzeMedSafetyWithOpenAI>>;
-  responseData: MedSafetyResponseData;
-}) {
-  const rawText = String(params.analyzed.rawText ?? "").trim();
-  const liveModelSucceeded = params.analyzed.fallbackReason == null;
-  const isNotFound = params.responseData.notFound === true;
-  const hasContent = rawText.length > 0 && hasMeaningfulStructuredContent(params.responseData);
-  return liveModelSucceeded && !isNotFound && hasContent;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function safeLoadAIContent(userId: string): Promise<{ data: Json } | null> {
@@ -203,19 +267,36 @@ function normalizeRecentRecords(value: unknown, limit = MED_SAFETY_RECENT_LIMIT_
     const requestNode = isRecord(item.request) ? item.request : {};
     const resultNode = isRecord(item.result) ? item.result : null;
     if (!resultNode) continue;
+    const answer = String(resultNode.answer ?? resultNode.searchAnswer ?? resultNode.generatedText ?? "").trim();
+    if (!answer) continue;
     out.push({
       id,
       savedAt,
       language,
       request: {
-        query: String(requestNode.query ?? ""),
-        mode: pickMode((requestNode.mode as FormDataEntryValue | null) ?? null),
-        situation: pickSituation((requestNode.situation as FormDataEntryValue | null) ?? null),
-        queryIntent: pickQueryIntent((requestNode.queryIntent as FormDataEntryValue | null) ?? null) ?? null,
-        patientSummary: null,
-        imageName: requestNode.imageName == null ? null : String(requestNode.imageName),
+        query: String(requestNode.query ?? "").trim(),
       },
-      result: resultNode as unknown as MedSafetyResponseData,
+      result: {
+        answer,
+        query: String(resultNode.query ?? requestNode.query ?? "").trim(),
+        language,
+        model: String(resultNode.model ?? "").trim(),
+        analyzedAt: Number.isFinite(Number(resultNode.analyzedAt)) ? Number(resultNode.analyzedAt) : savedAt,
+        source: String(resultNode.source ?? "") === "openai_fallback" ? "openai_fallback" : "openai_live",
+        fallbackReason: toPublicReason(resultNode.fallbackReason),
+        responseId:
+          typeof resultNode.responseId === "string"
+            ? resultNode.responseId
+            : typeof resultNode.openaiResponseId === "string"
+              ? resultNode.openaiResponseId
+              : null,
+        conversationId:
+          typeof resultNode.conversationId === "string"
+            ? resultNode.conversationId
+            : typeof resultNode.openaiConversationId === "string"
+              ? resultNode.openaiConversationId
+              : null,
+      },
     });
   }
   return out.sort((a, b) => b.savedAt - a.savedAt).slice(0, normalizedLimit);
@@ -226,11 +307,6 @@ async function safeAppendMedSafetyRecent(params: {
   dateISO: ISODate;
   language: Language;
   query: string;
-  mode: ClinicalMode;
-  situation: ClinicalSituation;
-  queryIntent?: QueryIntent;
-  patientSummary: string;
-  imageName: string;
   result: MedSafetyResponseData;
   recentLimit: number;
 }) {
@@ -248,18 +324,12 @@ async function safeAppendMedSafetyRecent(params: {
       language: params.language,
       request: {
         query: params.query,
-        mode: params.mode,
-        situation: params.situation,
-        queryIntent: params.queryIntent ?? null,
-        patientSummary: null,
-        imageName: params.imageName || null,
       },
       result: params.result,
     };
     const deduped = [
       nextRecord,
       ...prevRecent.filter((record) => {
-        if (record.result.item.name !== nextRecord.result.item.name) return true;
         if (record.request.query !== nextRecord.request.query) return true;
         return Math.abs(record.savedAt - nextRecord.savedAt) > 10_000;
       }),
@@ -273,59 +343,48 @@ async function safeAppendMedSafetyRecent(params: {
   }
 }
 
-function pickLocale(raw: FormDataEntryValue | null): "ko" | "en" {
+function pickLocale(raw: unknown): "ko" | "en" {
   const value = String(raw ?? "").trim().toLowerCase();
   if (value === "en") return "en";
   return "ko";
 }
 
-function pickMode(raw: FormDataEntryValue | null): ClinicalMode {
-  const value = String(raw ?? "")
-    .trim()
-    .toLowerCase();
-  if (value === "er") return "er";
-  if (value === "icu") return "icu";
-  return "ward";
-}
-
-function pickSituation(raw: FormDataEntryValue | null): ClinicalSituation {
-  const value = String(raw ?? "")
-    .trim()
-    .toLowerCase();
-  if (value === "general") return "general";
-  if (value === "pre_admin") return "pre_admin";
-  if (value === "during_admin") return "during_admin";
-  if (value === "event_response") return "event_response";
-  // legacy aliases from previous UI
-  if (value === "alarm" || value === "adverse_suspect") return "event_response";
-  return "general";
-}
-
-function pickQueryIntent(raw: FormDataEntryValue | null): QueryIntent | undefined {
-  const value = String(raw ?? "")
-    .trim()
-    .toLowerCase();
-  if (value === "medication") return "medication";
-  if (value === "device") return "device";
-  if (value === "scenario") return "scenario";
-  return undefined;
-}
-
-function pickOpenAIStateId(raw: FormDataEntryValue | null) {
+function pickOpenAIStateId(raw: unknown) {
   const value = String(raw ?? "").trim();
   if (!value) return undefined;
   if (!/^[A-Za-z0-9_-]{8,220}$/.test(value)) return undefined;
   return value;
 }
 
-function bytesToBase64(input: Uint8Array) {
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let i = 0; i < input.length; i += chunkSize) {
-    const chunk = input.subarray(i, i + chunkSize);
-    binary += String.fromCharCode(...chunk);
-  }
-  return btoa(binary);
+function pickStreamMode(raw: unknown) {
+  if (typeof raw === "boolean") return raw;
+  const value = String(raw ?? "")
+    .trim()
+    .toLowerCase();
+  return value === "1" || value === "true" || value === "yes" || value === "on";
+}
+
+function estimateBase64Bytes(dataUrl: string) {
+  const base64 = dataUrl.split(",", 2)[1] ?? "";
+  if (!base64) return 0;
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
+}
+
+function pickImageDataUrl(raw: unknown) {
+  const value = String(raw ?? "").trim();
+  if (!value) return "";
+  if (!/^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=\s]+$/i.test(value)) return "";
+  return value.replace(/\s+/g, "");
+}
+
+function containsSensitivePattern(query: string) {
+  const normalized = String(query ?? "").trim();
+  if (!normalized) return false;
+  if (/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(normalized)) return true;
+  if (/(?:\+?82[-\s]?)?0?1[0-9][-\s]?\d{3,4}[-\s]?\d{4}\b/.test(normalized)) return true;
+  if (/\b\d{6}[-\s]?[1-4]\d{6}\b/.test(normalized)) return true;
+  return false;
 }
 
 function resolveAnalyzeTimeoutMs() {
@@ -341,37 +400,31 @@ function resolveAnalyzeTimeoutMs() {
   return Math.max(Math.max(MIN_ANALYZE_TIMEOUT_MS, recommendedFloor), Math.min(MAX_ANALYZE_TIMEOUT_MS, rounded));
 }
 
-async function fileToDataUrl(file: File) {
-  const mime = file.type || "application/octet-stream";
-  const buffer = await file.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
-  const base64 = bytesToBase64(bytes);
-  return `data:${mime};base64,${base64}`;
-}
-
 function buildResponseData(params: {
   language: Language;
   analyzedAt: number;
   analyzed: Awaited<ReturnType<typeof analyzeMedSafetyWithOpenAI>>;
 }): MedSafetyResponseData {
   return {
-    ...params.analyzed.result,
-    generatedText: params.analyzed.rawText,
+    answer: params.analyzed.result.answer,
+    query: params.analyzed.result.query,
     language: params.language,
     model: params.analyzed.model,
     analyzedAt: params.analyzedAt,
     source: params.analyzed.fallbackReason ? "openai_fallback" : "openai_live",
-    fallbackReason: params.analyzed.fallbackReason,
-    openaiResponseId: params.analyzed.openaiResponseId,
-    openaiConversationId: params.analyzed.openaiConversationId,
+    fallbackReason: toPublicReason(params.analyzed.fallbackReason),
+    responseId: params.analyzed.openaiResponseId,
+    conversationId: params.analyzed.openaiConversationId,
   };
 }
 
-function pickStreamMode(raw: FormDataEntryValue | null) {
-  const value = String(raw ?? "")
-    .trim()
-    .toLowerCase();
-  return value === "1" || value === "true" || value === "yes" || value === "on";
+function shouldCommitConsumedCredit(params: {
+  analyzed: Awaited<ReturnType<typeof analyzeMedSafetyWithOpenAI>>;
+  responseData: MedSafetyResponseData;
+}) {
+  const liveModelSucceeded = params.analyzed.fallbackReason == null;
+  const hasContent = String(params.responseData.answer ?? "").trim().length > 0;
+  return liveModelSucceeded && hasContent;
 }
 
 function sseLine(event: string, payload: unknown) {
@@ -386,40 +439,25 @@ export async function POST(req: NextRequest) {
     const userId = await safeReadUserId(req);
     if (!userId) return bad(401, "login_required");
 
-    const form = await req.formData();
-    const locale = pickLocale(form.get("locale"));
-    const mode = pickMode(form.get("mode"));
-    const situation = pickSituation(form.get("situation"));
-    const queryIntent = pickQueryIntent(form.get("queryIntent"));
-    const streamMode = pickStreamMode(form.get("stream"));
-    const previousResponseId = pickOpenAIStateId(form.get("previousResponseId"));
-    const conversationId = pickOpenAIStateId(form.get("conversationId"));
-    const query = String(form.get("query") ?? "")
+    const bodyRaw = ((await req.json().catch(() => null)) ?? {}) as RequestBody;
+    const locale = pickLocale(bodyRaw.locale);
+    const streamMode = pickStreamMode(bodyRaw.stream);
+    const previousResponseId = pickOpenAIStateId(bodyRaw.previousResponseId);
+    const conversationId = pickOpenAIStateId(bodyRaw.conversationId);
+    const query = String(bodyRaw.query ?? "")
       .replace(/\s+/g, " ")
       .trim()
       .slice(0, MAX_QUERY_LENGTH);
-    const patientSummary = String(form.get("patientSummary") ?? "")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, MAX_PATIENT_SUMMARY_LENGTH);
+    const imageDataUrl = pickImageDataUrl(bodyRaw.imageDataUrl);
 
-    const imageEntry = form.get("image");
-    const image = imageEntry instanceof File ? imageEntry : null;
-
-    if (!query && !image) {
-      return bad(400, "query_or_image_required");
+    if (!query) {
+      return bad(400, "query_required");
     }
-
-    let imageDataUrl = "";
-    let imageName = "";
-
-    if (image) {
-      if (!image.type.startsWith("image/")) return bad(400, "image_type_invalid");
-      if (image.size <= 0) return bad(400, "image_empty");
-      if (image.size > MAX_IMAGE_BYTES) return bad(413, "image_too_large_max_6mb");
-
-      imageDataUrl = await fileToDataUrl(image);
-      imageName = image.name;
+    if (containsSensitivePattern(query)) {
+      return bad(400, "sensitive_query_blocked");
+    }
+    if (imageDataUrl && estimateBase64Bytes(imageDataUrl) > MAX_IMAGE_BYTES) {
+      return bad(413, "image_too_large_max_6mb");
     }
 
     const creditUse = await safeConsumeMedSafetyCredit(userId);
@@ -444,16 +482,10 @@ export async function POST(req: NextRequest) {
       const analyzedAt = Date.now();
       const today = todayISO();
 
-      // AI 맞춤회복과 동일하게 KO를 기준 생성하고, EN은 번역/직접생성 fallback으로 확보한다.
       const analyzedKo = await analyzeMedSafetyWithOpenAI({
         query,
-        mode,
-        situation,
-        queryIntent,
-        patientSummary: patientSummary || undefined,
         locale: "ko",
         imageDataUrl: imageDataUrl || undefined,
-        imageName: imageName || undefined,
         previousResponseId,
         conversationId,
         onTextDelta,
@@ -474,25 +506,19 @@ export async function POST(req: NextRequest) {
       abort.signal.addEventListener("abort", relayAbort);
       try {
         const translated = await translateMedSafetyToEnglish({
-          result: analyzedKo.result,
+          answer: analyzedKo.result.answer,
           rawText: analyzedKo.rawText,
           model: analyzedKo.model,
           signal: translateController.signal,
         });
         payloadEn = {
           ...payloadKo,
-          ...translated.result,
-          generatedText: translated.rawText,
+          answer: translated.result.answer,
           language: "en",
           model: translated.model ?? payloadKo.model,
-          fallbackReason: payloadKo.fallbackReason
-            ? translated.debug
-              ? `${payloadKo.fallbackReason}|${translated.debug}`
-              : payloadKo.fallbackReason
-            : translated.debug,
+          fallbackReason: mergePublicReasons(payloadKo.fallbackReason, translated.debug),
         };
       } catch {
-        // EN 직접 생성 fallback은 EN 요청에서만 수행해 응답 지연을 줄인다.
         if (locale === "en") {
           const elapsed = Date.now() - routeStartedAt;
           const remainingMs = timeoutMs - elapsed;
@@ -500,13 +526,8 @@ export async function POST(req: NextRequest) {
             try {
               const analyzedEn = await analyzeMedSafetyWithOpenAI({
                 query,
-                mode,
-                situation,
-                queryIntent,
-                patientSummary: patientSummary || undefined,
                 locale: "en",
                 imageDataUrl: imageDataUrl || undefined,
-                imageName: imageName || undefined,
                 signal: abort.signal,
               });
               payloadEn = buildResponseData({
@@ -514,12 +535,10 @@ export async function POST(req: NextRequest) {
                 analyzedAt,
                 analyzed: analyzedEn,
               });
-              payloadEn.fallbackReason = payloadEn.fallbackReason ? `en_direct:${payloadEn.fallbackReason}` : "en_direct";
+              payloadEn.fallbackReason = mergePublicReasons("en_direct", payloadEn.fallbackReason);
             } catch {
               payloadEn = null;
             }
-          } else {
-            payloadEn = null;
           }
         }
       } finally {
@@ -533,11 +552,6 @@ export async function POST(req: NextRequest) {
           savedAt: analyzedAt,
           request: {
             query,
-            mode,
-            situation,
-            queryIntent: queryIntent ?? null,
-            patientSummary: null,
-            imageName: imageName || null,
           },
           variants: {
             ko: payloadKo,
@@ -547,9 +561,9 @@ export async function POST(req: NextRequest) {
       } satisfies Json);
 
       if (saveError) {
-        payloadKo.fallbackReason = payloadKo.fallbackReason ? `${payloadKo.fallbackReason}|${saveError}` : saveError;
+        payloadKo.fallbackReason = mergePublicReasons(payloadKo.fallbackReason, saveError);
         if (payloadEn) {
-          payloadEn.fallbackReason = payloadEn.fallbackReason ? `${payloadEn.fallbackReason}|${saveError}` : saveError;
+          payloadEn.fallbackReason = mergePublicReasons(payloadEn.fallbackReason, saveError);
         }
       }
 
@@ -565,18 +579,11 @@ export async function POST(req: NextRequest) {
           dateISO: today,
           language: locale,
           query,
-          mode,
-          situation,
-          queryIntent,
-          patientSummary,
-          imageName,
           result: responseData,
           recentLimit,
         });
         if (recentSaveError) {
-          responseData.fallbackReason = responseData.fallbackReason
-            ? `${responseData.fallbackReason}|${recentSaveError}`
-            : recentSaveError;
+          responseData.fallbackReason = mergePublicReasons(responseData.fallbackReason, recentSaveError);
         }
       }
 
@@ -591,7 +598,7 @@ export async function POST(req: NextRequest) {
         }
         return jsonNoStore({
           ok: true,
-          data: responseData,
+          ...responseData,
         });
       } catch (error: any) {
         await safeRestoreConsumedMedSafetyCredit(userId, consumedSource);
@@ -624,7 +631,7 @@ export async function POST(req: NextRequest) {
           }
           pushEvent("result", {
             ok: true,
-            data: responseData,
+            ...responseData,
           });
         } catch (error: any) {
           await safeRestoreConsumedMedSafetyCredit(userId, consumedSource);

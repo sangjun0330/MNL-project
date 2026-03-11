@@ -929,30 +929,41 @@ const EN_EXTRA: Record<string, string> = {
   "간호사 투약·주입 계산기": "Nurse Medication & Infusion Calculators",
   "펌프 변환, IVPB 속도, 드립 환산, 희석 농도, 역산 검산을 100% 로컬로 즉시 계산합니다.":
     "Pump conversion, IVPB rate, drip conversion, dilution concentration, and reverse checks run instantly on-device.",
-  "AI 약물·기구 안전 가이드": "AI Medication & Device Safety Guide",
+  "AI 약물·기구 안전 가이드": "AI Clinical Search",
+  "AI 약물 안전 가이드": "AI Clinical Search",
+  "AI 임상 검색": "AI Clinical Search",
   "사진·텍스트로 투여 전 확인사항, 수행 절차, 중단·보고 기준을 빠르게 정리해줍니다.":
-    "Quickly organizes pre-administration checks, action steps, and stop/report criteria from photo or text input.",
+    "Quickly organizes clinical guidance from free-text nursing questions.",
   "유료 플랜에서 AI 약물·기구 안전 가이드를 사용할 수 있어요.":
-    "The AI medication/device safety guide is available on paid plans.",
+    "AI clinical search is available on paid plans.",
   "AI": "AI",
   "LOCAL": "LOCAL",
   "PRO": "PRO",
   "AI 약물·기구 안전 가이드는 유료 플랜 전용 기능입니다.\n플랜 업그레이드 페이지로 이동할까요?":
-    "The AI medication/device safety guide is a paid-plan feature.\nMove to the plan upgrade page?",
+    "AI clinical search is a paid-plan feature.\nMove to the plan upgrade page?",
   "AI 맞춤회복 + AI 검색 크레딧(매일 10회) + 최근 검색 10개 저장 포함":
     "Includes AI recovery + AI search credits (10/day) + save up to 10 recent searches",
   "AI 맞춤회복 + AI 약물기구안전가이드 포함":
-    "Includes AI recovery + AI medication/device safety guide",
-  "AI 약물기구안전가이드": "AI medication/device safety guide",
+    "Includes AI recovery + AI clinical search",
+  "AI 약물기구안전가이드": "AI clinical search",
   "업그레이드 후 AI 맞춤회복과 AI 약물기구안전가이드를 모두 사용할 수 있어요.":
-    "After upgrading, you can use both AI recovery and the AI medication/device safety guide.",
-  "AI 약물·도구 검색기": "AI Medication & Device Finder",
-  "AI 의약품·도구 검색기": "AI Medication & Device Finder",
+    "After upgrading, you can use both AI recovery and AI clinical search.",
+  "AI 약물·도구 검색기": "AI Clinical Search",
+  "AI 의약품·도구 검색기": "AI Clinical Search",
   "간호 현장에서 바로 쓰는 약물·의료기구·상황 대응 정보를 검색형으로 제공합니다.":
-    "Searches medication, device, and scenario response guidance for immediate nursing use.",
+    "Ask medication, device, procedure, lab, and bedside scenario questions in one place.",
   "간호 현장에서 바로 쓰는 의약품·의료기구·상황 대응 정보를 검색형으로 제공합니다.":
-    "Searches medication, device, and scenario response guidance for immediate nursing use.",
+    "Ask medication, device, procedure, lab, and bedside scenario questions in one place.",
+  "간호 현장에서 약물, 기구, 수치, 절차, 상황 질문을 바로 물어보세요.":
+    "Ask about medications, devices, labs, procedures, and clinical situations right away.",
+  "무엇이든 물어보세요": "Ask anything",
+  "약물, 기구, 검사 수치, 간호 절차, 상황 대응까지 한 번에 질문할 수 있습니다.":
+    "You can ask about medications, devices, labs, nursing procedures, and situation response in one place.",
+  "예: norepinephrine 투여 시 주의사항이 뭐야?": "e.g., What should I watch for when giving norepinephrine?",
+  "빠른 질문": "Quick questions",
   "AI 검색 크레딧": "AI search credits",
+  "크레딧": "Credits",
+  "기본": "Base",
   "남은": "Remaining",
   "사용 가능 크레딧을 확인 중입니다.": "Checking available credits.",
   "기본 크레딧": "Base credits",
@@ -960,6 +971,12 @@ const EN_EXTRA: Record<string, string> = {
   "AI 검색 기본 크레딧 10회/일 (KST 자정 초기화)":
     "AI search base credits 10/day (resets at KST midnight)",
   "AI 검색 최근 기록 10개 저장": "Save up to 10 recent AI searches",
+  "AI 임상 검색 전용": "AI clinical search only",
+  "임상 질문에 AI가 즉시 답변합니다.": "AI answers clinical questions right away.",
+  "계산기는 한 페이지로 통합하고, AI 임상 검색은 별도로 분리했습니다.":
+    "Calculators are unified into one page, and AI clinical search is separated.",
+  "통합 계산기 1개, AI 임상 검색 1개만 바로 진입하도록 정리했습니다.":
+    "The tool page is simplified to one unified calculator and one AI clinical search entry.",
   "추가 크레딧": "Extra credits",
   "추가 크레딧 (구매분 · 미초기화)": "Extra credits (Purchased · no daily reset)",
   "추가 크레딧 구매": "Buy extra credits",
@@ -1115,6 +1132,34 @@ const EN_EXTRA: Record<string, string> = {
     "Could not open the credit checkout window. Please try again shortly.",
   "AI가 작성중입니다...": "AI is writing...",
   "AI 검색기로": "Back to AI finder",
+  "질문을 입력해 주세요.": "Please enter a question.",
+  "질문 처리 중 오류가 발생했습니다.": "There was an error while processing the question.",
+  "질문 처리 중 오류가 발생했습니다. 다시 시도해 주세요.": "There was an error while processing the question. Please try again.",
+  "AI 검색 잔여 크레딧이 없습니다. 크레딧 10회를 구매하거나 Pro 기본 크레딧이 초기화된 뒤 다시 시도해 주세요.":
+    "You have no AI search credits left. Buy 10 more credits or try again after the Pro base credits reset.",
+  "남은 AI 검색 크레딧이 없습니다. 크레딧 10회를 구매하거나 Pro 기본 크레딧이 초기화된 뒤 다시 이용해 주세요.":
+    "You have no AI search credits left. Buy 10 more credits or come back after the Pro base credits reset.",
+  "AI 검색": "AI Search",
+  "질문 중...": "Asking...",
+  "보안 검증에 실패했습니다. 앱을 새로고침한 뒤 다시 시도해 주세요.":
+    "Security validation failed. Refresh the app and try again.",
+  "환자 식별정보를 제거한 뒤 다시 질문해 주세요.":
+    "Remove patient-identifying information and ask again.",
+  "후속 질문": "Follow-up question",
+  "예: 그럼 중심정맥으로만 줘야 하나요?": "e.g., So should it only be given through a central line?",
+  "이전 답변을 이어서 묻습니다. 새 주제로 바꾸려면 `새 검색`을 눌러 주세요.":
+    "Your next question continues the previous answer. Tap `New search` to switch topics.",
+  "환자 이름, 등록번호, 연락처 등 식별정보는 입력하지 마세요.":
+    "Do not enter identifying information such as patient name, chart number, or phone number.",
+  "보내기": "Send",
+  "답변을 복사했습니다.": "Copied the answer.",
+  "답변 복사": "Copy answer",
+  "기본 안전 모드": "Safety fallback",
+  "기본 안전 모드 답변을 표시합니다.": "Showing the safety fallback answer.",
+  "작성 중...": "Writing...",
+  "같은 질문 다시 시도": "Retry same question",
+  "AI 응답을 끝까지 읽지 못했습니다. 다시 시도해 주세요.":
+    "The AI response could not be read completely. Please try again.",
   "최근 AI 검색 기록": "Recent AI search history",
   "크레딧이 실제 차감된 완료 검색 결과 최근 {count}건만 표시됩니다.":
     "Only the latest {count} completed results with actual credit deduction are shown.",
@@ -1124,6 +1169,13 @@ const EN_EXTRA: Record<string, string> = {
   "{count}건": "{count} items",
   "{count}섹션": "{count} sections",
   "어제": "Yesterday",
+  "질문과 답변이 함께 복사됩니다.": "The question and answer are copied together.",
+  "완료된 검색만 저장되며, 항목별로 질문과 답변을 다시 열 수 있습니다.":
+    "Only completed searches are saved, and you can reopen each question and answer.",
+  "완료된 검색만 저장되며, 질문과 답변을 그대로 다시 열 수 있습니다.":
+    "Only completed searches are saved, and you can reopen the original question and answer.",
+  "질문과 요약을 먼저 보고, 전체 보기에서 답변 전문을 확인합니다.":
+    "Preview the question and summary first, then open the full answer.",
   "완료된 검색만 저장되며, 항목별로 요약과 원문 가이드를 바로 다시 열 수 있습니다.":
     "Only completed searches are saved, and each item can reopen its summary and full guide instantly.",
   "최근 검색 기록은 계정별로 저장됩니다.": "Recent search history is saved per account.",
@@ -1139,7 +1191,9 @@ const EN_EXTRA: Record<string, string> = {
   "요약": "Summary",
   "검색 질의": "Search query",
   "검색 입력": "Search input",
+  "질문": "Question",
   "상세 결과": "Detailed result",
+  "상세 답변": "Full answer",
   "상세 가이드": "Detailed guide",
   "구분이 잘 되도록 섹션별로 다시 정리했습니다.":
     "Reorganized into cleaner sections for easier scanning.",
@@ -1156,6 +1210,8 @@ const EN_EXTRA: Record<string, string> = {
   "완료 검색만 저장": "Completed only",
   "계정별로 동기화됩니다.": "Synced per account.",
   "바로 복사 가능": "Ready to copy",
+  "임상 질문": "Clinical question",
+  "질문 기록": "Question record",
   "저장 정책": "Save policy",
   "선택하면 정리된 상세 보기와 복사가 가능합니다.": "Select an item to open a cleaner detail view or copy it.",
   "선택한 결과": "Selected result",

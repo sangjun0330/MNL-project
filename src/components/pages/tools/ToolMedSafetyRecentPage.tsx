@@ -15,19 +15,18 @@ type MedSafetyRecentItem = {
   language: "ko" | "en";
   request: {
     query: string;
-    mode: "ward" | "er" | "icu";
-    situation: "general" | "pre_admin" | "during_admin" | "event_response";
-    queryIntent: "medication" | "device" | "scenario" | null;
+    mode?: "ward" | "er" | "icu" | null;
+    situation?: "general" | "pre_admin" | "during_admin" | "event_response" | null;
+    queryIntent?: "medication" | "device" | "scenario" | null;
   };
   result: {
-    resultKind: "medication" | "device" | "scenario";
-    oneLineConclusion: string;
-    searchAnswer: string;
-    generatedText: string;
+    title: string;
+    summary: string;
+    answer: string;
     analyzedAt: number;
-    item: {
-      name: string;
-    };
+    resultKind: "medication" | "device" | "scenario";
+    model?: string | null;
+    source?: "openai_live" | "openai_fallback";
   };
 };
 
@@ -62,69 +61,14 @@ const TWO_LINE_CLAMP_STYLE = {
   overflow: "hidden",
 };
 
-function formatDateTime(value: number) {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "-";
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(
-    d.getHours()
-  ).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
-
-function formatListTime(value: number) {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "-";
-  return `${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(
-    d.getMinutes()
-  ).padStart(2, "0")}`;
-}
-
-function dayKey(value: number) {
-  const d = new Date(value);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-function formatDayLabel(value: number, t: (key: string) => string) {
-  const now = new Date();
-  const today = dayKey(now.getTime());
-  const yesterdayDate = new Date(now);
-  yesterdayDate.setDate(now.getDate() - 1);
-  const yesterday = dayKey(yesterdayDate.getTime());
-  const current = dayKey(value);
-  if (current === today) return t("오늘");
-  if (current === yesterday) return t("어제");
-  const d = new Date(value);
-  return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")}`;
-}
-
-function modeLabel(mode: "ward" | "er" | "icu") {
-  if (mode === "er") return "ER";
-  if (mode === "icu") return "ICU";
-  return "병동";
-}
-
-function kindLabel(kind: "medication" | "device" | "scenario") {
-  if (kind === "medication") return "의약품";
-  if (kind === "device") return "의료기구";
-  return "상황";
-}
-
-function situationLabel(situation: "general" | "pre_admin" | "during_admin" | "event_response") {
-  if (situation === "pre_admin") return "투여 전 확인";
-  if (situation === "during_admin") return "투여 중 모니터";
-  if (situation === "event_response") return "이상/알람 대응";
-  return "일반 검색";
-}
-
-function queryIntentLabel(intent: "medication" | "device" | "scenario" | null) {
-  if (intent === "device") return "의료기구";
-  if (intent === "scenario") return "상황질문";
-  return "의약품";
-}
-
-function shortText(value: string, max = 84) {
-  const text = String(value ?? "").replace(/\s+/g, " ").trim();
-  if (text.length <= max) return text;
-  return `${text.slice(0, max).trim()}…`;
+function isHeadingLine(value: string) {
+  const line = String(value ?? "").trim();
+  if (!line) return false;
+  if (!/[:：]$/.test(line)) return false;
+  const noColon = line.replace(/[:：]$/, "").trim();
+  if (!noColon) return false;
+  if (noColon.length > 56) return false;
+  return true;
 }
 
 function cleanNarrativeLine(value: string) {
@@ -139,17 +83,6 @@ function stripBulletPrefix(value: string) {
     .replace(/^[-*•·]\s+/, "")
     .replace(/^\d+[.)]\s+/, "")
     .trim();
-}
-
-function isHeadingLine(value: string) {
-  const line = String(value ?? "").trim();
-  if (!line) return false;
-  if (!/[:：]$/.test(line)) return false;
-  const noColon = line.replace(/[:：]$/, "").trim();
-  if (!noColon) return false;
-  if (noColon.length > 56) return false;
-  if (/^(ENTITY_|NOT_FOUND|CANDIDATES|입력명|판정|요청|추가확인|주의)/i.test(noColon)) return false;
-  return true;
 }
 
 function splitSectionItems(lines: string[]) {
@@ -190,7 +123,6 @@ function parseNarrativeSections(value: string): NarrativeSection[] {
   const sections: NarrativeSection[] = [];
   let currentTitle = "상세 결과";
   let currentLines: string[] = [];
-  let hasHeading = false;
 
   const pushCurrent = () => {
     const items = splitSectionItems(currentLines);
@@ -212,7 +144,6 @@ function parseNarrativeSections(value: string): NarrativeSection[] {
       continue;
     }
     if (isHeadingLine(line)) {
-      hasHeading = true;
       pushCurrent();
       currentTitle = line.replace(/[:：]$/, "").trim();
       continue;
@@ -225,40 +156,104 @@ function parseNarrativeSections(value: string): NarrativeSection[] {
 
   const fallbackItems = splitSectionItems(lines);
   if (!fallbackItems.length) return [];
-  if (!hasHeading) {
-    return fallbackItems.map((item) => ({
-      title: "상세 결과",
-      items: [item],
-    }));
-  }
   return [{ title: "상세 결과", items: fallbackItems }];
+}
+
+function formatDateTime(value: number) {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "-";
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(
+    d.getHours()
+  ).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+function formatListTime(value: number) {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "-";
+  return `${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(
+    d.getMinutes()
+  ).padStart(2, "0")}`;
+}
+
+function dayKey(value: number) {
+  const d = new Date(value);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function formatDayLabel(value: number, t: (key: string) => string) {
+  const now = new Date();
+  const today = dayKey(now.getTime());
+  const yesterdayDate = new Date(now);
+  yesterdayDate.setDate(now.getDate() - 1);
+  const yesterday = dayKey(yesterdayDate.getTime());
+  const current = dayKey(value);
+  if (current === today) return t("오늘");
+  if (current === yesterday) return t("어제");
+  const d = new Date(value);
+  return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function shortText(value: string, max = 88) {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (text.length <= max) return text;
+  return `${text.slice(0, max).trim()}…`;
+}
+
+function kindLabel(kind: "medication" | "device" | "scenario") {
+  if (kind === "medication") return "의약품";
+  if (kind === "device") return "의료기구";
+  return "임상 질문";
 }
 
 function resultKindMark(kind: "medication" | "device" | "scenario") {
   if (kind === "device") return "DEV";
-  if (kind === "scenario") return "CASE";
+  if (kind === "scenario") return "AI";
   return "RX";
+}
+
+function modeLabel(mode: "ward" | "er" | "icu" | null | undefined) {
+  if (mode === "er") return "ER";
+  if (mode === "icu") return "ICU";
+  if (mode === "ward") return "병동";
+  return "";
+}
+
+function situationLabel(situation: "general" | "pre_admin" | "during_admin" | "event_response" | null | undefined) {
+  if (situation === "pre_admin") return "투여 전 확인";
+  if (situation === "during_admin") return "투여 중 모니터";
+  if (situation === "event_response") return "이상/알람 대응";
+  if (situation === "general") return "일반 검색";
+  return "";
+}
+
+function queryIntentLabel(intent: "medication" | "device" | "scenario" | null | undefined) {
+  if (intent === "device") return "의료기구";
+  if (intent === "scenario") return "상황질문";
+  if (intent === "medication") return "의약품";
+  return "";
 }
 
 function buildRecentCopyText(item: MedSafetyRecentItem, sections: NarrativeSection[], t: TranslateFn) {
   const copySections: StructuredCopySection[] = [
-    { title: t("요약"), body: item.result.oneLineConclusion },
-    { title: t("검색 입력"), body: item.request.query || "-" },
+    { title: t("요약"), body: item.result.summary },
+    { title: t("질문"), body: item.request.query || "-" },
     ...sections.map((section) => ({
       title: t(section.title),
       items: section.items,
     })),
   ];
 
+  const metaLines = [
+    `${t("분석 시각")}: ${formatDateTime(item.savedAt)}`,
+    `${t("유형")}: ${t(kindLabel(item.result.resultKind))}`,
+  ];
+  if (item.request.mode) metaLines.push(`${t("근무 모드")}: ${t(modeLabel(item.request.mode))}`);
+  if (item.request.situation) metaLines.push(`${t("상황")}: ${t(situationLabel(item.request.situation))}`);
+  if (item.request.queryIntent) metaLines.push(`${t("질문 유형")}: ${t(queryIntentLabel(item.request.queryIntent))}`);
+
   return buildStructuredCopyText({
-    title: item.result.item.name,
-    metaLines: [
-      `${t("분석 시각")}: ${formatDateTime(item.savedAt)}`,
-      `${t("유형")}: ${t(kindLabel(item.result.resultKind))}`,
-      `${t("근무 모드")}: ${t(modeLabel(item.request.mode))}`,
-      `${t("질문 유형")}: ${t(queryIntentLabel(item.request.queryIntent))}`,
-      `${t("상황")}: ${t(situationLabel(item.request.situation))}`,
-    ],
+    title: item.result.title,
+    metaLines,
     sections: copySections,
   });
 }
@@ -377,24 +372,12 @@ export function ToolMedSafetyRecentPage() {
       }));
   }, [items, t]);
 
-  const selected = useMemo(
-    () => items.find((item) => item.id === selectedId) ?? items[0] ?? null,
-    [items, selectedId]
-  );
-
-  const selectedNarrative = useMemo(() => {
-    if (!selected) return "";
-    return selected.result.searchAnswer || selected.result.generatedText || selected.result.oneLineConclusion || "";
-  }, [selected]);
-  const selectedSections = useMemo(() => parseNarrativeSections(selectedNarrative), [selectedNarrative]);
+  const selected = useMemo(() => items.find((item) => item.id === selectedId) ?? items[0] ?? null, [items, selectedId]);
+  const selectedSections = useMemo(() => parseNarrativeSections(selected?.result.answer ?? ""), [selected]);
   const selectedCopyText = useMemo(() => {
     if (!selected) return "";
     return buildRecentCopyText(selected, selectedSections, t);
   }, [selected, selectedSections, t]);
-  const selectedFullText = useMemo(() => {
-    const normalized = String(selectedNarrative ?? "").replace(/\u0000/g, "").replace(/\r/g, "").trim();
-    return normalized;
-  }, [selectedNarrative]);
   const selectedSectionTitles = useMemo(
     () => selectedSections.map((section) => section.title).filter(Boolean).slice(0, 6),
     [selectedSections]
@@ -402,37 +385,29 @@ export function ToolMedSafetyRecentPage() {
 
   const latestSavedAt = items[0]?.savedAt ?? 0;
 
-  const handleCopySelected = async () => {
+  async function handleCopySelected() {
     if (!selectedCopyText) return;
     try {
       const copied = await copyTextToClipboard(selectedCopyText);
-      setCopyMessage(
-        copied ? t("결과를 형식에 맞게 복사했습니다.") : t("클립보드를 사용할 수 없습니다.")
-      );
+      setCopyMessage(copied ? t("답변을 복사했습니다.") : t("클립보드를 사용할 수 없습니다."));
     } catch {
       setCopyMessage(t("복사에 실패했습니다."));
     }
-  };
+  }
 
-  const handleCopyItem = async (item: MedSafetyRecentItem) => {
+  async function handleCopyItem(item: MedSafetyRecentItem) {
     try {
-      const copied = await copyTextToClipboard(
-        buildRecentCopyText(
-          item,
-          parseNarrativeSections(item.result.searchAnswer || item.result.generatedText || item.result.oneLineConclusion || ""),
-          t
-        )
-      );
-      setCopyMessage(copied ? t("결과를 형식에 맞게 복사했습니다.") : t("클립보드를 사용할 수 없습니다."));
+      const copied = await copyTextToClipboard(buildRecentCopyText(item, parseNarrativeSections(item.result.answer), t));
+      setCopyMessage(copied ? t("답변을 복사했습니다.") : t("클립보드를 사용할 수 없습니다."));
     } catch {
       setCopyMessage(t("복사에 실패했습니다."));
     }
-  };
+  }
 
-  const handleOpenItem = (item: MedSafetyRecentItem) => {
+  function handleOpenItem(item: MedSafetyRecentItem) {
     setSelectedId(item.id);
     if (!isDesktop) setDetailOpen(true);
-  };
+  }
 
   const detailContent = selected ? (
     <div className="space-y-4">
@@ -444,13 +419,14 @@ export function ToolMedSafetyRecentPage() {
                 {t(kindLabel(selected.result.resultKind))}
               </span>
               <span className={META_PILL_CLASS}>{formatDateTime(selected.savedAt)}</span>
+              {selected.result.model ? <span className={META_PILL_CLASS}>{selected.result.model}</span> : null}
             </div>
-            <div className="mt-2 text-[22px] font-bold tracking-[-0.02em] text-ios-text">{selected.result.item.name}</div>
-            <div className="mt-2 text-[15px] leading-7 text-ios-text">{selected.result.oneLineConclusion}</div>
+            <div className="mt-2 text-[22px] font-bold tracking-[-0.02em] text-ios-text">{selected.result.title}</div>
+            <div className="mt-2 text-[15px] leading-7 text-ios-text">{selected.result.summary}</div>
           </div>
           {isDesktop ? (
             <button type="button" onClick={() => void handleCopySelected()} className={QUICK_ACTION_PRIMARY_CLASS}>
-              {t("가이드 복사")}
+              {t("답변 복사")}
             </button>
           ) : null}
         </div>
@@ -458,20 +434,20 @@ export function ToolMedSafetyRecentPage() {
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="rounded-[22px] border border-ios-sep bg-[#F7F7F8] px-4 py-3">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ios-muted">{t("검색 입력")}</div>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ios-muted">{t("질문")}</div>
           <div className="mt-2 text-[14px] font-semibold leading-6 text-ios-text">{selected.request.query || "-"}</div>
         </div>
         <div className="rounded-[22px] border border-ios-sep bg-[#F7F7F8] px-4 py-3">
           <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ios-muted">{t("저장 정책")}</div>
-          <div className="mt-2 text-[14px] leading-6 text-ios-sub">{t("완료된 검색만 저장되며, 항목별로 요약과 원문 가이드를 바로 다시 열 수 있습니다.")}</div>
+          <div className="mt-2 text-[14px] leading-6 text-ios-sub">{t("완료된 검색만 저장되며, 질문과 답변을 그대로 다시 열 수 있습니다.")}</div>
         </div>
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <span className={META_PILL_CLASS}>{t(modeLabel(selected.request.mode))}</span>
-        <span className={META_PILL_CLASS}>{t(situationLabel(selected.request.situation))}</span>
-        <span className={META_PILL_CLASS}>{t(queryIntentLabel(selected.request.queryIntent))}</span>
-        <span className={META_PILL_CLASS}>{t("{count}섹션", { count: selectedSections.length })}</span>
+        {selected.request.mode ? <span className={META_PILL_CLASS}>{t(modeLabel(selected.request.mode))}</span> : null}
+        {selected.request.situation ? <span className={META_PILL_CLASS}>{t(situationLabel(selected.request.situation))}</span> : null}
+        {selected.request.queryIntent ? <span className={META_PILL_CLASS}>{t(queryIntentLabel(selected.request.queryIntent))}</span> : null}
+        <span className={META_PILL_CLASS}>{t("{count}섹션", { count: selectedSections.length || 1 })}</span>
       </div>
 
       {selectedSectionTitles.length ? (
@@ -485,13 +461,7 @@ export function ToolMedSafetyRecentPage() {
       ) : null}
 
       <div className="rounded-[24px] border border-ios-sep bg-white px-4 py-4 shadow-[0_10px_24px_rgba(16,24,40,0.03)]">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-[15px] font-bold tracking-[-0.01em] text-ios-text">{t("상세 가이드")}</div>
-            <div className="mt-1 text-[12px] text-ios-sub">{t("전체 내용이 그대로 표시됩니다.")}</div>
-          </div>
-          <span className={META_PILL_CLASS}>{t("가이드 복사")}</span>
-        </div>
+        <div className="text-[15px] font-bold tracking-[-0.01em] text-ios-text">{t("상세 답변")}</div>
 
         {selectedSections.length ? (
           <div className="mt-4 space-y-3">
@@ -511,14 +481,9 @@ export function ToolMedSafetyRecentPage() {
               </section>
             ))}
           </div>
-        ) : null}
-
-        <div className="mt-4 rounded-[20px] border border-ios-sep bg-[#FCFCFD] px-4 py-4">
-          <div className="text-[13px] font-bold tracking-[-0.01em] text-ios-text">{t("원문 전체")}</div>
-          <div className="mt-2 whitespace-pre-wrap break-words text-[14px] leading-7 text-ios-text">
-            {selectedFullText || t("표시할 상세 내용이 없습니다.")}
-          </div>
-        </div>
+        ) : (
+          <div className="mt-4 whitespace-pre-wrap break-words text-[14px] leading-7 text-ios-text">{selected.result.answer}</div>
+        )}
       </div>
     </div>
   ) : (
@@ -540,7 +505,7 @@ export function ToolMedSafetyRecentPage() {
                 </span>
               </div>
               <div className="mt-2 max-w-[760px] text-[13px] leading-6 text-ios-sub">
-                {t("완료된 검색만 저장되며, 항목별로 요약과 원문 가이드를 바로 다시 열 수 있습니다.")}
+                {t("완료된 검색만 저장되며, 항목별로 질문과 답변을 다시 열 수 있습니다.")}
               </div>
             </div>
             <Link
@@ -565,9 +530,9 @@ export function ToolMedSafetyRecentPage() {
               <div className="mt-1 text-[12px] text-ios-sub">{t("계정별로 동기화됩니다.")}</div>
             </div>
             <div className="rounded-[24px] border border-ios-sep bg-white/90 px-4 py-4">
-              <div className="text-[12px] font-semibold text-ios-sub">{t("정리된 복사본")}</div>
+              <div className="text-[12px] font-semibold text-ios-sub">{t("복사")}</div>
               <div className="mt-2 text-[18px] font-bold tracking-[-0.02em] text-ios-text">{t("바로 복사 가능")}</div>
-              <div className="mt-1 text-[12px] text-ios-sub">{t("현재 화면 카드 순서대로 복사됩니다.")}</div>
+              <div className="mt-1 text-[12px] text-ios-sub">{t("질문과 답변이 함께 복사됩니다.")}</div>
             </div>
           </div>
         </Card>
@@ -610,7 +575,7 @@ export function ToolMedSafetyRecentPage() {
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <div>
                       <div className="text-[16px] font-bold tracking-[-0.01em] text-ios-text">{group.label}</div>
-                      <div className="mt-1 text-[12px] text-ios-sub">{t("항목별로 검색어와 요약만 짧게 보고, 전체 보기에서 상세 원문을 확인합니다.")}</div>
+                      <div className="mt-1 text-[12px] text-ios-sub">{t("질문과 요약을 먼저 보고, 전체 보기에서 답변 전문을 확인합니다.")}</div>
                     </div>
                     <span className={META_PILL_CLASS}>{t("{count}건", { count: group.items.length })}</span>
                   </div>
@@ -619,10 +584,7 @@ export function ToolMedSafetyRecentPage() {
                     {group.items.map((item) => {
                       const isActive = selected?.id === item.id;
                       return (
-                        <article
-                          key={item.id}
-                          className={`${ITEM_CARD_CLASS} ${isActive ? ITEM_CARD_ACTIVE_CLASS : ITEM_CARD_IDLE_CLASS}`}
-                        >
+                        <article key={item.id} className={`${ITEM_CARD_CLASS} ${isActive ? ITEM_CARD_ACTIVE_CLASS : ITEM_CARD_IDLE_CLASS}`}>
                           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
                             <button type="button" onClick={() => handleOpenItem(item)} className="min-w-0 text-left">
                               <div className="flex items-start gap-3">
@@ -631,7 +593,7 @@ export function ToolMedSafetyRecentPage() {
                                 </div>
                                 <div className="min-w-0 flex-1">
                                   <div className="flex flex-wrap items-center gap-2">
-                                    <div className="min-w-0 text-[14px] font-bold tracking-[-0.015em] text-ios-text">{item.result.item.name}</div>
+                                    <div className="min-w-0 text-[14px] font-bold tracking-[-0.015em] text-ios-text">{item.result.title}</div>
                                     <span className="inline-flex shrink-0 items-center rounded-full bg-[color:var(--rnest-accent-soft)] px-2 py-1 text-[10px] font-semibold text-[color:var(--rnest-accent)]">
                                       {t(kindLabel(item.result.resultKind))}
                                     </span>
@@ -641,19 +603,19 @@ export function ToolMedSafetyRecentPage() {
                                   </div>
 
                                   <div className="mt-2 rounded-[16px] border border-ios-sep bg-[#F8F8F9] px-3 py-2">
-                                    <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ios-muted">{t("검색어")}</div>
+                                    <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ios-muted">{t("질문")}</div>
                                     <div className="mt-1 text-[12.5px] font-semibold leading-5 text-ios-text" style={TWO_LINE_CLAMP_STYLE}>
                                       {item.request.query || "-"}
                                     </div>
                                   </div>
 
                                   <div className="mt-2 text-[12.5px] leading-5 text-ios-sub" style={TWO_LINE_CLAMP_STYLE}>
-                                    {item.result.oneLineConclusion || item.result.searchAnswer || item.result.generatedText || "-"}
+                                    {shortText(item.result.summary || item.result.answer || "-")}
                                   </div>
 
                                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                                    <span className={META_PILL_CLASS}>{t(modeLabel(item.request.mode))}</span>
-                                    <span className={META_PILL_CLASS}>{t(situationLabel(item.request.situation))}</span>
+                                    {item.request.mode ? <span className={META_PILL_CLASS}>{t(modeLabel(item.request.mode))}</span> : null}
+                                    {item.request.situation ? <span className={META_PILL_CLASS}>{t(situationLabel(item.request.situation))}</span> : null}
                                   </div>
                                 </div>
                               </div>
@@ -661,7 +623,7 @@ export function ToolMedSafetyRecentPage() {
 
                             <div className="flex flex-wrap justify-end gap-2 lg:w-[190px] lg:flex-col lg:items-stretch">
                               <button type="button" onClick={() => void handleCopyItem(item)} className={QUICK_ACTION_CLASS}>
-                                {t("결과 복사")}
+                                {t("복사")}
                               </button>
                               <button type="button" onClick={() => handleOpenItem(item)} className={QUICK_ACTION_PRIMARY_CLASS}>
                                 {t("전체 보기")}
@@ -679,12 +641,10 @@ export function ToolMedSafetyRecentPage() {
             <div className="hidden lg:block">
               <div className="sticky top-4">
                 <Card className={DETAIL_PANEL_CLASS}>
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <div>
-                      <div className="text-[12px] font-semibold uppercase tracking-[0.08em] text-ios-muted">{t("선택한 결과")}</div>
-                      <div className="mt-1 text-[20px] font-bold tracking-[-0.02em] text-ios-text">
-                        {selected?.result.item.name || t("최근 검색 상세")}
-                      </div>
+                  <div className="mb-3">
+                    <div className="text-[12px] font-semibold uppercase tracking-[0.08em] text-ios-muted">{t("선택한 결과")}</div>
+                    <div className="mt-1 text-[20px] font-bold tracking-[-0.02em] text-ios-text">
+                      {selected?.result.title || t("최근 검색 상세")}
                     </div>
                   </div>
                   {detailContent}
@@ -699,14 +659,14 @@ export function ToolMedSafetyRecentPage() {
         open={!isDesktop && detailOpen && Boolean(selected)}
         onClose={() => setDetailOpen(false)}
         variant="appstore"
-        title={selected?.result.item.name || t("최근 검색 상세")}
+        title={selected?.result.title || t("최근 검색 상세")}
         subtitle={selected ? `${t("분석 시각")}: ${formatDateTime(selected.savedAt)}` : ""}
         maxHeightClassName="max-h-[82dvh]"
         footer={
           selected ? (
             <div className="flex gap-2">
               <Button className={PRIMARY_ACTION_CLASS} onClick={() => void handleCopySelected()}>
-                {t("가이드 복사")}
+                {t("답변 복사")}
               </Button>
               <Button variant="secondary" className={SECONDARY_ACTION_CLASS} onClick={() => setDetailOpen(false)}>
                 {t("닫기")}

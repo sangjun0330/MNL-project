@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { loadAIContent } from "@/lib/server/aiContentStore";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { jsonNoStore } from "@/lib/server/requestSecurity";
@@ -6,6 +5,7 @@ import type { SubscriptionSnapshot } from "@/lib/server/billingStore";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
+
 const MED_SAFETY_RECENT_LIMIT_FREE = 5;
 const MED_SAFETY_RECENT_LIMIT_PRO = 10;
 const DEFAULT_MED_SAFETY_HISTORY_RETENTION_DAYS = 30;
@@ -18,19 +18,18 @@ type HistoryRecord = {
   language: "ko" | "en";
   request: {
     query: string;
-    mode: "ward" | "er" | "icu";
-    situation: "general" | "pre_admin" | "during_admin" | "event_response";
-    queryIntent: "medication" | "device" | "scenario" | null;
+    mode?: "ward" | "er" | "icu" | null;
+    situation?: "general" | "pre_admin" | "during_admin" | "event_response" | null;
+    queryIntent?: "medication" | "device" | "scenario" | null;
   };
   result: {
-    resultKind: "medication" | "device" | "scenario";
-    oneLineConclusion: string;
-    searchAnswer: string;
-    generatedText: string;
+    title: string;
+    summary: string;
+    answer: string;
     analyzedAt: number;
-    item: {
-      name: string;
-    };
+    resultKind: "medication" | "device" | "scenario";
+    model?: string | null;
+    source?: "openai_live" | "openai_fallback";
   };
 };
 
@@ -38,19 +37,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function normalizeMode(value: unknown): "ward" | "er" | "icu" {
+function normalizeMode(value: unknown): "ward" | "er" | "icu" | null {
   const raw = String(value ?? "").toLowerCase();
   if (raw === "er") return "er";
   if (raw === "icu") return "icu";
-  return "ward";
+  if (raw === "ward") return "ward";
+  return null;
 }
 
-function normalizeSituation(value: unknown): "general" | "pre_admin" | "during_admin" | "event_response" {
+function normalizeSituation(value: unknown): "general" | "pre_admin" | "during_admin" | "event_response" | null {
   const raw = String(value ?? "").toLowerCase();
   if (raw === "pre_admin") return "pre_admin";
   if (raw === "during_admin") return "during_admin";
   if (raw === "event_response") return "event_response";
-  return "general";
+  if (raw === "general") return "general";
+  return null;
 }
 
 function normalizeQueryIntent(value: unknown): "medication" | "device" | "scenario" | null {
@@ -63,6 +64,21 @@ function normalizeResultKind(value: unknown): "medication" | "device" | "scenari
   const raw = String(value ?? "").toLowerCase();
   if (raw === "medication" || raw === "device" || raw === "scenario") return raw;
   return "scenario";
+}
+
+function normalizeText(value: unknown) {
+  return String(value ?? "")
+    .replace(/\r/g, "")
+    .replace(/\u0000/g, "")
+    .trim();
+}
+
+function firstMeaningfulLine(value: string) {
+  const line = normalizeText(value)
+    .split("\n")
+    .map((item) => item.trim())
+    .find(Boolean);
+  return line ? line.replace(/^[-*•·]\s*/, "") : "";
 }
 
 async function safeLoadSubscription(userId: string): Promise<SubscriptionSnapshot | null> {
@@ -86,45 +102,58 @@ function normalizeHistory(value: unknown, limit = MED_SAFETY_RECENT_LIMIT_FREE) 
   const retentionMs = retentionDays * 24 * 60 * 60 * 1000;
   const now = Date.now();
   if (!Array.isArray(value)) return [] as HistoryRecord[];
+
   const out: HistoryRecord[] = [];
   for (const raw of value) {
     if (!isRecord(raw)) continue;
     const resultNode = isRecord(raw.result) ? raw.result : null;
     const requestNode = isRecord(raw.request) ? raw.request : {};
     if (!resultNode) continue;
-    if (Boolean(resultNode.notFound)) continue;
+
     const id = String(raw.id ?? "").trim();
     if (!id) continue;
-    const analyzedAt = Number(resultNode.analyzedAt);
+
+    const analyzedAtRaw = Number(resultNode.analyzedAt);
     const savedAtRaw = Number(raw.savedAt);
-    const savedAt = Number.isFinite(savedAtRaw) && savedAtRaw > 0 ? savedAtRaw : Number.isFinite(analyzedAt) ? analyzedAt : Date.now();
+    const savedAt = Number.isFinite(savedAtRaw) && savedAtRaw > 0 ? savedAtRaw : Number.isFinite(analyzedAtRaw) ? analyzedAtRaw : Date.now();
     if (savedAt < now - retentionMs) continue;
-    const searchAnswer = String(resultNode.searchAnswer ?? "").trim();
-    const generatedText = String(resultNode.generatedText ?? "").trim();
-    if (!searchAnswer && !generatedText) continue;
-    const itemNode = isRecord(resultNode.item) ? resultNode.item : {};
+
+    const query = normalizeText(requestNode.query ?? resultNode.query);
+    const modernAnswer = normalizeText(resultNode.answer);
+    const legacyAnswer = normalizeText(resultNode.searchAnswer ?? resultNode.generatedText);
+    const answer = modernAnswer || legacyAnswer;
+    if (!answer) continue;
+
+    const legacyItemNode = isRecord(resultNode.item) ? resultNode.item : {};
+    const title = normalizeText(resultNode.title ?? legacyItemNode.name) || query || "AI 임상 검색";
+    const summary =
+      normalizeText(resultNode.summary ?? resultNode.oneLineConclusion) ||
+      firstMeaningfulLine(answer) ||
+      query ||
+      "질문 기록";
+
     out.push({
       id,
       savedAt,
       language: String(raw.language ?? "").toLowerCase() === "en" ? "en" : "ko",
       request: {
-        query: String(requestNode.query ?? "").trim(),
+        query,
         mode: normalizeMode(requestNode.mode),
         situation: normalizeSituation(requestNode.situation),
         queryIntent: normalizeQueryIntent(requestNode.queryIntent),
       },
       result: {
+        title,
+        summary,
+        answer,
+        analyzedAt: Number.isFinite(analyzedAtRaw) && analyzedAtRaw > 0 ? analyzedAtRaw : savedAt,
         resultKind: normalizeResultKind(resultNode.resultKind),
-        oneLineConclusion: String(resultNode.oneLineConclusion ?? "").trim(),
-        searchAnswer,
-        generatedText,
-        analyzedAt: Number.isFinite(analyzedAt) && analyzedAt > 0 ? analyzedAt : savedAt,
-        item: {
-          name: String(itemNode.name ?? "").trim() || "조회 결과",
-        },
+        model: typeof resultNode.model === "string" ? resultNode.model : null,
+        source: String(resultNode.source ?? "") === "openai_fallback" ? "openai_fallback" : "openai_live",
       },
     });
   }
+
   return out
     .sort((a, b) => b.savedAt - a.savedAt)
     .slice(0, normalizedLimit);
@@ -138,7 +167,7 @@ export async function GET(req: Request) {
     }
 
     const row = await loadAIContent(userId).catch(() => null);
-    const data = isRecord(row?.data) ? row?.data : {};
+    const data = isRecord(row?.data) ? row.data : {};
     const subscription = await safeLoadSubscription(userId);
     const historyLimit = subscription?.hasPaidAccess ? MED_SAFETY_RECENT_LIMIT_PRO : MED_SAFETY_RECENT_LIMIT_FREE;
     const items = normalizeHistory(data.medSafetyRecent, historyLimit);

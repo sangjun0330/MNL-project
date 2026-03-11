@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/Card";
 import { useI18n } from "@/lib/useI18n";
 
 type ToolCategory = {
-  id: "calculators" | "ai_med_safety";
+  id: "calculators" | "ai_search";
   name: string;
   description: string;
   href: string;
@@ -53,14 +53,14 @@ const CATEGORY_CARDS: ToolCategory[] = [
     ],
   },
   {
-    id: "ai_med_safety",
-    name: "AI 약물 안전 가이드",
-    description: "AI 약물·기구 안전 가이드와 최근 검색 기록을 별도로 관리합니다.",
+    id: "ai_search",
+    name: "AI 임상 검색",
+    description: "임상 질문에 AI가 즉시 답변합니다.",
     href: "/tools/med-safety",
     tone: "guide",
-    keywords: ["ai", "약물", "기구", "안전", "가이드", "최근 검색", "히스토리", "med safety"],
+    keywords: ["ai", "검색", "질문", "약물", "기구", "임상", "간호", "안전"],
     quickLinks: [
-      { label: "약물/기구 검색", href: "/tools/med-safety" },
+      { label: "AI 검색", href: "/tools/med-safety" },
       { label: "최근 기록", href: "/tools/med-safety/recent" },
     ],
     secondaryLink: { label: "최근 검색 기록", href: "/tools/med-safety/recent" },
@@ -142,7 +142,7 @@ export function ToolsPage() {
       <div className="mb-5">
         <div className="text-[30px] font-extrabold tracking-[-0.02em] text-ios-text">{t("툴")}</div>
         <div className="mt-1 text-[13px] leading-6 text-ios-sub">
-          {t("계산기는 한 페이지로 통합하고, AI 약물 안전 가이드는 별도로 분리했습니다.")}
+          {t("계산기는 한 페이지로 통합하고, AI 임상 검색은 별도로 분리했습니다.")}
         </div>
       </div>
 
@@ -163,7 +163,7 @@ export function ToolsPage() {
         <div>
           <div className="text-[13px] font-semibold text-ios-text">{t("카테고리 2개로 단순화")}</div>
           <div className="mt-1 text-[12px] leading-5 text-ios-sub">
-            {t("통합 계산기 1개, AI 약물 안전 가이드 1개만 바로 진입하도록 정리했습니다.")}
+            {t("통합 계산기 1개, AI 임상 검색 1개만 바로 진입하도록 정리했습니다.")}
           </div>
         </div>
         {!billingLoading ? <CreditBadge remaining={medSafetyRemaining} /> : null}
