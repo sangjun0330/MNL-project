@@ -1006,6 +1006,31 @@ export function ToolMedSafetyPage() {
       {/* Fixed composer - always at bottom */}
       <div className="pointer-events-none fixed inset-x-0 bottom-0 z-50 bg-white/96 backdrop-blur-xl">
         <div className="pointer-events-auto mx-auto w-full max-w-[980px] px-3 pb-[env(safe-area-inset-bottom)] sm:px-5">
+          {showSessionDecisionPrompt ? (
+            <div className="mb-3 rounded-[24px] border border-[#E8E8EC] bg-white/98 p-3 shadow-[0_16px_40px_rgba(15,23,42,0.10)]">
+              <div className="mb-2 px-1 text-[12px] font-medium text-ios-sub">
+                {t("다음 질문을 선택해 주세요")}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={startNewQuestionFlow}
+                  className="min-h-[64px] rounded-[18px] border border-[#E8E8EC] bg-[#FAFAFB] px-4 py-3 text-left"
+                >
+                  <div className="text-[14px] font-semibold text-ios-text">{t("다른 질문하기")}</div>
+                  <div className="mt-1 text-[11px] leading-5 text-ios-sub">{t("새 세션으로 시작")}</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={continueCurrentSession}
+                  className="min-h-[64px] rounded-[18px] border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-4 py-3 text-left"
+                >
+                  <div className="text-[14px] font-semibold text-[color:var(--rnest-accent)]">{t("이 결과에 대한 질문하기")}</div>
+                  <div className="mt-1 text-[11px] leading-5 text-[color:var(--rnest-accent)]/80">{t("같은 결과 이어서 질문")}</div>
+                </button>
+              </div>
+            </div>
+          ) : null}
           <div className="rounded-t-[28px] border border-b-0 border-[#E8E8EC] bg-white/96 px-3 pb-3 pt-2 shadow-[0_-8px_40px_rgba(15,23,42,0.10)] sm:rounded-t-[32px] sm:px-4">
             {selectedImage ? (
               <div className="mb-2 flex items-center gap-2 rounded-2xl bg-[#F4F5F7] px-3 py-2">
@@ -1084,33 +1109,6 @@ export function ToolMedSafetyPage() {
           </div>
         </div>
       </div>
-
-      {showSessionDecisionPrompt ? (
-        <div className="fixed inset-0 z-[115] flex items-end justify-center bg-black/10 px-4 pb-[calc(136px+env(safe-area-inset-bottom))] pt-6 backdrop-blur-[2px] sm:items-center sm:pb-6">
-          <div className="w-full max-w-[420px] rounded-[28px] border border-[#E8E8EC] bg-white px-5 py-5 shadow-[0_24px_80px_rgba(15,23,42,0.14)]">
-            <div className="text-[17px] font-semibold tracking-[-0.02em] text-ios-text">{t("다음 질문 방식을 선택해 주세요")}</div>
-            <div className="mt-2 text-[13px] leading-6 text-ios-sub">
-              {t("이 결과에 대한 질문이면 같은 세션으로 이어지고, 다른 주제면 새 세션으로 시작하는 편이 더 정확합니다.")}
-            </div>
-            <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <button
-                type="button"
-                onClick={startNewQuestionFlow}
-                className="min-h-[52px] rounded-full border border-[#E8E8EC] bg-white px-4 py-3 text-center text-[13px] font-semibold leading-5 text-ios-text"
-              >
-                {t("다른 질문하기")}
-              </button>
-              <button
-                type="button"
-                onClick={continueCurrentSession}
-                className="min-h-[52px] rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent)] px-4 py-3 text-center text-[13px] font-semibold leading-5 text-white"
-              >
-                {t("이 결과에 대한 질문하기")}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       {copyMessage ? (
         <div className="pointer-events-none fixed bottom-[calc(130px+env(safe-area-inset-bottom))] left-1/2 z-[120] -translate-x-1/2 rounded-full bg-black px-4 py-2 text-[12px] font-semibold text-white shadow-lg">
