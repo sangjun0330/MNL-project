@@ -47,7 +47,7 @@ const SECONDARY_ACTION_CLASS =
 const HERO_CARD_CLASS =
   "overflow-hidden rounded-[32px] border border-ios-sep bg-[radial-gradient(circle_at_top_right,rgba(255,234,214,0.72),transparent_36%),linear-gradient(180deg,#FFFFFF_0%,#FCFCFD_100%)] p-5 shadow-none";
 const GROUP_CARD_CLASS = "rounded-[30px] border border-ios-sep bg-[#FCFCFD] p-3 shadow-none md:p-4";
-const ITEM_CARD_CLASS = "rounded-[26px] border border-ios-sep bg-white p-4 transition";
+const ITEM_CARD_CLASS = "rounded-[24px] border border-ios-sep bg-white px-3 py-3 transition";
 const ITEM_CARD_ACTIVE_CLASS = "border-[color:var(--rnest-accent-border)] bg-[#FFF9F4] shadow-[0_12px_30px_rgba(16,24,40,0.06)]";
 const ITEM_CARD_IDLE_CLASS = "hover:border-[color:var(--rnest-accent-border)] hover:bg-[#FFFDFC]";
 const QUICK_ACTION_CLASS =
@@ -377,20 +377,14 @@ export function ToolMedSafetyRecentPage() {
     if (!selected) return "";
     return buildRecentCopyText(selected, selectedSections, t);
   }, [selected, selectedSections, t]);
+  const selectedFullText = useMemo(() => {
+    const normalized = String(selectedNarrative ?? "").replace(/\u0000/g, "").replace(/\r/g, "").trim();
+    return normalized;
+  }, [selectedNarrative]);
   const selectedSectionTitles = useMemo(
     () => selectedSections.map((section) => section.title).filter(Boolean).slice(0, 6),
     [selectedSections]
   );
-  const selectedPreviewText = useMemo(() => {
-    const normalized = selectedNarrative
-      .replace(/\r/g, "")
-      .split("\n")
-      .map((line) => cleanNarrativeLine(line))
-      .filter(Boolean)
-      .join("\n");
-    if (!normalized) return "";
-    return normalized.length > 760 ? `${normalized.slice(0, 760).trim()}…` : normalized;
-  }, [selectedNarrative]);
 
   const latestSavedAt = items[0]?.savedAt ?? 0;
 
@@ -480,12 +474,36 @@ export function ToolMedSafetyRecentPage() {
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="text-[15px] font-bold tracking-[-0.01em] text-ios-text">{t("상세 가이드")}</div>
-            <div className="mt-1 text-[12px] text-ios-sub">{t("상세 내용은 전부 펼치지 않고 핵심 미리보기만 표시합니다.")}</div>
+            <div className="mt-1 text-[12px] text-ios-sub">{t("전체 내용이 그대로 표시됩니다.")}</div>
           </div>
           <span className={META_PILL_CLASS}>{t("가이드 복사")}</span>
         </div>
-        <div className="mt-3 whitespace-pre-line text-[14px] leading-7 text-ios-text">
-          {selectedPreviewText || t("표시할 상세 내용이 없습니다.")}
+
+        {selectedSections.length ? (
+          <div className="mt-4 space-y-3">
+            {selectedSections.map((section, index) => (
+              <section key={`${section.title}-${index}`} className="rounded-[20px] border border-ios-sep bg-[#FCFCFD] px-4 py-4">
+                <div className="text-[13px] font-bold tracking-[-0.01em] text-ios-text">{t(section.title || "상세 결과")}</div>
+                <div className="mt-2 space-y-2">
+                  {section.items.map((entry, entryIndex) => (
+                    <div
+                      key={`${section.title}-${entryIndex}`}
+                      className="rounded-[16px] border border-ios-sep bg-white px-3 py-2.5 text-[13.5px] leading-6 text-ios-text"
+                    >
+                      {entry}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="mt-4 rounded-[20px] border border-ios-sep bg-[#FCFCFD] px-4 py-4">
+          <div className="text-[13px] font-bold tracking-[-0.01em] text-ios-text">{t("원문 전체")}</div>
+          <div className="mt-2 whitespace-pre-wrap break-words text-[14px] leading-7 text-ios-text">
+            {selectedFullText || t("표시할 상세 내용이 없습니다.")}
+          </div>
         </div>
       </div>
     </div>
@@ -578,12 +596,12 @@ export function ToolMedSafetyRecentPage() {
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <div>
                       <div className="text-[16px] font-bold tracking-[-0.01em] text-ios-text">{group.label}</div>
-                      <div className="mt-1 text-[12px] text-ios-sub">{t("선택하면 정리된 상세 보기와 복사가 가능합니다.")}</div>
+                      <div className="mt-1 text-[12px] text-ios-sub">{t("한 줄 목록에서 전체 보기로 원문 전체를 확인할 수 있습니다.")}</div>
                     </div>
                     <span className={META_PILL_CLASS}>{t("{count}건", { count: group.items.length })}</span>
                   </div>
 
-                  <div className="space-y-3">
+                  <div className="space-y-2">
                     {group.items.map((item) => {
                       const isActive = selected?.id === item.id;
                       return (
@@ -591,49 +609,36 @@ export function ToolMedSafetyRecentPage() {
                           key={item.id}
                           className={`${ITEM_CARD_CLASS} ${isActive ? ITEM_CARD_ACTIVE_CLASS : ITEM_CARD_IDLE_CLASS}`}
                         >
-                          <div className="flex flex-col gap-3">
-                            <div className="flex items-start gap-3">
-                              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[18px] bg-[#F4F5F7] text-[12px] font-bold tracking-[0.08em] text-ios-sub">
+                          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-4">
+                            <button type="button" onClick={() => handleOpenItem(item)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[16px] bg-[#F4F5F7] text-[11px] font-bold tracking-[0.08em] text-ios-sub">
                                 {resultKindMark(item.result.resultKind)}
                               </div>
                               <div className="min-w-0 flex-1">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <div className="text-[18px] font-bold tracking-[-0.015em] text-ios-text">{item.result.item.name}</div>
-                                  <span className="inline-flex items-center rounded-full bg-[color:var(--rnest-accent-soft)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--rnest-accent)]">
+                                <div className="flex min-w-0 flex-wrap items-center gap-2 lg:flex-nowrap">
+                                  <div className="shrink-0 text-[14px] font-bold tracking-[-0.015em] text-ios-text">{item.result.item.name}</div>
+                                  <span className="inline-flex shrink-0 items-center rounded-full bg-[color:var(--rnest-accent-soft)] px-2 py-1 text-[10px] font-semibold text-[color:var(--rnest-accent)]">
                                     {t(kindLabel(item.result.resultKind))}
                                   </span>
+                                  <span className="hidden h-1 w-1 shrink-0 rounded-full bg-ios-sep lg:inline-block" />
+                                  <div className="min-w-0 flex-1 truncate text-[13px] leading-6 text-ios-sub">
+                                    {shortText(item.result.oneLineConclusion || item.result.searchAnswer || item.result.generatedText, 140)}
+                                  </div>
                                 </div>
-                                <div className="mt-1.5 text-[14px] leading-6 text-ios-text">
-                                  {shortText(item.result.oneLineConclusion || item.result.searchAnswer || item.result.generatedText, 120)}
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="flex flex-wrap gap-2">
-                              <span className={META_PILL_CLASS}>{t(modeLabel(item.request.mode))}</span>
-                              <span className={META_PILL_CLASS}>{t(situationLabel(item.request.situation))}</span>
-                              <span className={META_PILL_CLASS}>{formatDateTime(item.savedAt)}</span>
-                            </div>
-
-                            <div className="grid gap-2 md:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-                              <div className="rounded-[20px] border border-ios-sep bg-[#F7F7F8] px-3.5 py-3">
-                                <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ios-muted">{t("검색 질의")}</div>
-                                <div className="mt-1.5 text-[13.5px] font-semibold leading-6 text-ios-text">{item.request.query || "-"}</div>
-                              </div>
-                              <div className="rounded-[20px] border border-ios-sep bg-[#F7F7F8] px-3.5 py-3">
-                                <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ios-muted">{t("요약")}</div>
-                                <div className="mt-1.5 text-[13.5px] leading-6 text-ios-text">
-                                  {shortText(item.result.searchAnswer || item.result.generatedText || item.result.oneLineConclusion, 110)}
+                                <div className="mt-1 flex flex-wrap items-center gap-2">
+                                  <span className={META_PILL_CLASS}>{t(modeLabel(item.request.mode))}</span>
+                                  <span className={META_PILL_CLASS}>{t(situationLabel(item.request.situation))}</span>
+                                  <span className={META_PILL_CLASS}>{formatDateTime(item.savedAt)}</span>
                                 </div>
                               </div>
-                            </div>
+                            </button>
 
-                            <div className="flex flex-wrap justify-end gap-2">
+                            <div className="flex flex-wrap justify-end gap-2 lg:shrink-0">
                               <button type="button" onClick={() => void handleCopyItem(item)} className={QUICK_ACTION_CLASS}>
                                 {t("결과 복사")}
                               </button>
                               <button type="button" onClick={() => handleOpenItem(item)} className={QUICK_ACTION_PRIMARY_CLASS}>
-                                {t("상세 보기")}
+                                {t("전체 보기")}
                               </button>
                             </div>
                           </div>
