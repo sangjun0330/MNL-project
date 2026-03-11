@@ -55,6 +55,12 @@ const QUICK_ACTION_CLASS =
 const QUICK_ACTION_PRIMARY_CLASS =
   "inline-flex h-10 items-center justify-center rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] px-4 text-[12.5px] font-semibold text-[color:var(--rnest-accent)]";
 const DETAIL_PANEL_CLASS = "rounded-[30px] border border-ios-sep bg-white p-4 shadow-none";
+const TWO_LINE_CLAMP_STYLE = {
+  display: "-webkit-box",
+  WebkitBoxOrient: "vertical" as const,
+  WebkitLineClamp: 2,
+  overflow: "hidden",
+};
 
 function formatDateTime(value: number) {
   const d = new Date(value);
@@ -62,6 +68,14 @@ function formatDateTime(value: number) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(
     d.getHours()
   ).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+function formatListTime(value: number) {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "-";
+  return `${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(
+    d.getMinutes()
+  ).padStart(2, "0")}`;
 }
 
 function dayKey(value: number) {
@@ -596,7 +610,7 @@ export function ToolMedSafetyRecentPage() {
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <div>
                       <div className="text-[16px] font-bold tracking-[-0.01em] text-ios-text">{group.label}</div>
-                      <div className="mt-1 text-[12px] text-ios-sub">{t("한 줄 목록에서 전체 보기로 원문 전체를 확인할 수 있습니다.")}</div>
+                      <div className="mt-1 text-[12px] text-ios-sub">{t("항목별로 검색어와 요약만 짧게 보고, 전체 보기에서 상세 원문을 확인합니다.")}</div>
                     </div>
                     <span className={META_PILL_CLASS}>{t("{count}건", { count: group.items.length })}</span>
                   </div>
@@ -609,31 +623,43 @@ export function ToolMedSafetyRecentPage() {
                           key={item.id}
                           className={`${ITEM_CARD_CLASS} ${isActive ? ITEM_CARD_ACTIVE_CLASS : ITEM_CARD_IDLE_CLASS}`}
                         >
-                          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-4">
-                            <button type="button" onClick={() => handleOpenItem(item)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
-                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[16px] bg-[#F4F5F7] text-[11px] font-bold tracking-[0.08em] text-ios-sub">
-                                {resultKindMark(item.result.resultKind)}
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="flex min-w-0 flex-wrap items-center gap-2 lg:flex-nowrap">
-                                  <div className="shrink-0 text-[14px] font-bold tracking-[-0.015em] text-ios-text">{item.result.item.name}</div>
-                                  <span className="inline-flex shrink-0 items-center rounded-full bg-[color:var(--rnest-accent-soft)] px-2 py-1 text-[10px] font-semibold text-[color:var(--rnest-accent)]">
-                                    {t(kindLabel(item.result.resultKind))}
-                                  </span>
-                                  <span className="hidden h-1 w-1 shrink-0 rounded-full bg-ios-sep lg:inline-block" />
-                                  <div className="min-w-0 flex-1 truncate text-[13px] leading-6 text-ios-sub">
-                                    {shortText(item.result.oneLineConclusion || item.result.searchAnswer || item.result.generatedText, 140)}
-                                  </div>
+                          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+                            <button type="button" onClick={() => handleOpenItem(item)} className="min-w-0 text-left">
+                              <div className="flex items-start gap-3">
+                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[16px] bg-[#F4F5F7] text-[11px] font-bold tracking-[0.08em] text-ios-sub">
+                                  {resultKindMark(item.result.resultKind)}
                                 </div>
-                                <div className="mt-1 flex flex-wrap items-center gap-2">
-                                  <span className={META_PILL_CLASS}>{t(modeLabel(item.request.mode))}</span>
-                                  <span className={META_PILL_CLASS}>{t(situationLabel(item.request.situation))}</span>
-                                  <span className={META_PILL_CLASS}>{formatDateTime(item.savedAt)}</span>
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <div className="min-w-0 text-[14px] font-bold tracking-[-0.015em] text-ios-text">{item.result.item.name}</div>
+                                    <span className="inline-flex shrink-0 items-center rounded-full bg-[color:var(--rnest-accent-soft)] px-2 py-1 text-[10px] font-semibold text-[color:var(--rnest-accent)]">
+                                      {t(kindLabel(item.result.resultKind))}
+                                    </span>
+                                    <span className="inline-flex shrink-0 items-center rounded-full border border-ios-sep bg-white px-2 py-1 text-[10px] font-semibold text-ios-sub">
+                                      {formatListTime(item.savedAt)}
+                                    </span>
+                                  </div>
+
+                                  <div className="mt-2 rounded-[16px] border border-ios-sep bg-[#F8F8F9] px-3 py-2">
+                                    <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ios-muted">{t("검색어")}</div>
+                                    <div className="mt-1 text-[12.5px] font-semibold leading-5 text-ios-text" style={TWO_LINE_CLAMP_STYLE}>
+                                      {item.request.query || "-"}
+                                    </div>
+                                  </div>
+
+                                  <div className="mt-2 text-[12.5px] leading-5 text-ios-sub" style={TWO_LINE_CLAMP_STYLE}>
+                                    {item.result.oneLineConclusion || item.result.searchAnswer || item.result.generatedText || "-"}
+                                  </div>
+
+                                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                                    <span className={META_PILL_CLASS}>{t(modeLabel(item.request.mode))}</span>
+                                    <span className={META_PILL_CLASS}>{t(situationLabel(item.request.situation))}</span>
+                                  </div>
                                 </div>
                               </div>
                             </button>
 
-                            <div className="flex flex-wrap justify-end gap-2 lg:shrink-0">
+                            <div className="flex flex-wrap justify-end gap-2 lg:w-[190px] lg:flex-col lg:items-stretch">
                               <button type="button" onClick={() => void handleCopyItem(item)} className={QUICK_ACTION_CLASS}>
                                 {t("결과 복사")}
                               </button>
