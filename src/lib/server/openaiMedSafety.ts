@@ -87,10 +87,10 @@ function resolveApiBaseUrls() {
 }
 
 function resolveStoreResponses() {
-  const raw = String(process.env.OPENAI_MED_SAFETY_STORE ?? process.env.OPENAI_STORE ?? "false")
+  const raw = String(process.env.OPENAI_MED_SAFETY_STORE ?? process.env.OPENAI_STORE ?? "true")
     .trim()
     .toLowerCase();
-  if (!raw) return false;
+  if (!raw) return true;
   if (raw === "0" || raw === "false" || raw === "off" || raw === "no") return false;
   return true;
 }

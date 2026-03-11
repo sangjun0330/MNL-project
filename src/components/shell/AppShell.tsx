@@ -199,9 +199,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         onPointerDownCapture={handleGuardedInteraction}
         onKeyDownCapture={handleGuardedInteraction}
       >
-        <div key={pathname} className="rnest-page-enter">
-          {children}
-        </div>
+        {isMedSafetyImmersive ? (
+          children
+        ) : (
+          <div key={pathname} className="rnest-page-enter">
+            {children}
+          </div>
+        )}
       </div>
       {allowPrompt && loginPromptOpen ? (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-6 rnest-backdrop" data-auth-modal>
