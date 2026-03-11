@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useAuthState } from "@/lib/auth";
 import { requestPlanCheckout } from "@/lib/billing/client";
+import type { SubscriptionApi } from "@/lib/billing/client";
 import { getCheckoutProductDefinition } from "@/lib/billing/plans";
 import { BillingCheckoutSheet } from "@/components/billing/BillingCheckoutSheet";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
@@ -24,22 +25,12 @@ const SECONDARY_FLAT_BTN =
   "h-11 rounded-full border border-[#E8E8EC] bg-white px-4 text-[14px] font-semibold text-ios-text shadow-none hover:bg-[#F7F7F8]";
 const MESSAGE_USER_CLASS = "rounded-[24px] bg-[#F3F4F6] px-4 py-3 text-[15px] leading-6 text-ios-text";
 const META_PILL_CLASS = "inline-flex items-center rounded-full border border-[#E8E8EC] bg-[#F7F7F8] px-3 py-1.5 text-[11px] font-semibold text-ios-sub";
-const QUICK_TILE_CLASS =
-  "group min-w-[260px] snap-start rounded-[30px] border border-[#E8E8EC] bg-white/88 px-5 py-4 text-left shadow-[0_18px_36px_rgba(15,23,42,0.04)] backdrop-blur transition hover:-translate-y-0.5 hover:border-[#D9DBE3] hover:bg-white";
 const STREAMING_CARD_CLASS =
   "rounded-[30px] border border-[#E7E8ED] bg-white px-5 py-4 text-[15px] leading-7 text-ios-text shadow-[0_18px_36px_rgba(15,23,42,0.04)]";
-const COMPOSER_PANEL_CLASS =
-  "rounded-[32px] border border-[#E8E8EC] bg-white/96 p-3 shadow-[0_24px_50px_rgba(15,23,42,0.12)] backdrop-blur-xl";
 const OPEN_LAYOUT_CLASS =
   "relative min-h-[calc(100dvh-120px)] overflow-hidden bg-[radial-gradient(circle_at_top,#FFFFFF_0%,#FAFAFB_42%,#F4F5F7_100%)]";
 const MED_SAFETY_CLIENT_TIMEOUT_MS = 480_000;
 const RETRY_WITH_DATA_MESSAGE = "네트워크가 불안정합니다. 데이터(모바일 네트워크)를 켠 뒤 다시 시도해 주세요.";
-const QUICK_PROMPTS = [
-  "norepinephrine이 뭐야?",
-  "heparin vs enoxaparin 차이",
-  "pump occlusion 알람 대응",
-  "중심정맥관 드레싱 언제 교체해?",
-];
 
 type TranslateFn = (key: string, vars?: Record<string, string | number>) => string;
 
@@ -50,6 +41,7 @@ type Message = {
   timestamp: number;
   model?: string;
   source?: "openai_live" | "openai_fallback";
+  imageDataUrl?: string | null;
 };
 
 type AnalyzePayload = {
@@ -548,11 +540,17 @@ export function ToolMedSafetyPage() {
   const [lastSubmittedQuery, setLastSubmittedQuery] = useState("");
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [selectedImageName, setSelectedImageName] = useState("");
+  const [optimisticQuota, setOptimisticQuota] = useState<SubscriptionApi["medSafetyQuota"] | null>(null);
   const threadEndRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const creditPack = getCheckoutProductDefinition("credit10");
-  const medSafetyQuota = subscription?.medSafetyQuota;
+  const subscriptionMedSafetyQuota = subscription?.medSafetyQuota ?? null;
+  useEffect(() => {
+    setOptimisticQuota(subscriptionMedSafetyQuota);
+  }, [subscriptionMedSafetyQuota]);
+
+  const medSafetyQuota = optimisticQuota ?? subscriptionMedSafetyQuota;
   const quotaRemaining = Math.max(0, Number(medSafetyQuota?.totalRemaining ?? 0));
   const dailyRemaining = Math.max(0, Number(medSafetyQuota?.dailyRemaining ?? 0));
   const extraCredits = Math.max(0, Number(medSafetyQuota?.extraCredits ?? 0));
@@ -635,6 +633,30 @@ export function ToolMedSafetyPage() {
     setSelectedImageName("");
   }
 
+  function applyOptimisticQuotaConsume() {
+    setOptimisticQuota((prev) => {
+      if (!prev || prev.totalRemaining <= 0) return prev;
+      if (prev.isPro && prev.dailyRemaining > 0) {
+        const nextDailyRemaining = Math.max(0, prev.dailyRemaining - 1);
+        return {
+          ...prev,
+          dailyUsed: prev.dailyUsed + 1,
+          dailyRemaining: nextDailyRemaining,
+          totalRemaining: nextDailyRemaining + prev.extraCredits,
+        };
+      }
+      if (prev.extraCredits > 0) {
+        const nextExtraCredits = Math.max(0, prev.extraCredits - 1);
+        return {
+          ...prev,
+          extraCredits: nextExtraCredits,
+          totalRemaining: prev.dailyRemaining + nextExtraCredits,
+        };
+      }
+      return prev;
+    });
+  }
+
   async function copyLatestAnswer() {
     if (!lastAssistantMessage?.content) return;
     try {
@@ -664,14 +686,15 @@ export function ToolMedSafetyPage() {
       return;
     }
 
+    const imageToSend = selectedImage;
     const userMessage: Message = {
       id: `user-${Date.now().toString(36)}`,
       role: "user",
       content: question,
       timestamp: Date.now(),
+      imageDataUrl: imageToSend,
     };
 
-    const imageToSend = selectedImage;
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
     setSelectedImage(null);
@@ -695,7 +718,7 @@ export function ToolMedSafetyPage() {
               locale: lang,
               stream: true,
               continuationToken: lastContinuationToken ?? undefined,
-              ...(imageToSend ? { imageBase64: imageToSend } : {}),
+              ...(imageToSend ? { imageDataUrl: imageToSend } : {}),
             },
             MED_SAFETY_CLIENT_TIMEOUT_MS
           );
@@ -758,6 +781,7 @@ export function ToolMedSafetyPage() {
           `${parseErrorMessage(String(normalizedData.fallbackReason ?? "openai_fallback"), t)} ${t("기본 안전 모드 답변을 표시합니다.")}`
         );
       } else {
+        applyOptimisticQuotaConsume();
         setError(null);
       }
     } catch (cause: any) {
@@ -841,7 +865,7 @@ export function ToolMedSafetyPage() {
         onChange={handleImageSelect}
       />
 
-      <div className="mx-auto w-full max-w-[1120px] px-1 pb-[calc(160px+env(safe-area-inset-bottom))] pt-4 sm:px-2">
+      <div className="mx-auto w-full max-w-[1120px] px-1 pb-[calc(220px+env(safe-area-inset-bottom))] pt-4 sm:px-2">
         <div className={`px-3 py-3 sm:px-4 ${OPEN_LAYOUT_CLASS}`}>
           <div className="absolute inset-x-0 top-0 h-32 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.95),rgba(255,255,255,0))]" />
           <div className="relative">
@@ -903,32 +927,12 @@ export function ToolMedSafetyPage() {
             ) : null}
 
             {!hasConversation ? (
-              <div className="flex min-h-[calc(100dvh-380px)] flex-col justify-center pb-4 pt-8">
-                <div className="mx-auto max-w-[760px] text-center">
+              <div className="flex min-h-[calc(100dvh-360px)] flex-col justify-between pb-6 pt-10">
+                <div className="mx-auto flex flex-1 max-w-[760px] flex-col items-center justify-center text-center">
                   <div className="text-[34px] font-bold tracking-[-0.05em] text-ios-text sm:text-[48px]">{t("무엇이든 물어보세요")}</div>
                   <div className="mt-4 text-[17px] leading-8 text-ios-sub sm:text-[18px]">
                     {t("약물, 기구, 검사 수치, 간호 절차, 상황 대응까지 한 번에 질문할 수 있습니다.")}
                   </div>
-                </div>
-
-                <div className="mt-10">
-                  <div className="mb-3 px-2 text-[12px] font-semibold tracking-[0.01em] text-ios-sub">{t("빠른 질문")}</div>
-                  <div className="-mx-1 flex snap-x gap-3 overflow-x-auto px-1 pb-2">
-                    {QUICK_PROMPTS.map((prompt) => (
-                      <button
-                        key={prompt}
-                        type="button"
-                        className={QUICK_TILE_CLASS}
-                        onClick={() => void submitQuestion(prompt)}
-                        disabled={isLoading || !canAsk}
-                      >
-                        <div className="text-[12px] font-semibold text-ios-sub">{t("빠른 질문")}</div>
-                        <div className="mt-2 text-[22px] font-semibold tracking-[-0.03em] text-ios-text">{prompt}</div>
-                        <div className="mt-3 text-[13px] leading-6 text-ios-sub">{t("탭하면 바로 질문이 시작됩니다.")}</div>
-                      </button>
-                    ))}
-                  </div>
-                  <div className="mt-4 px-2 text-[13px] leading-6 text-ios-sub">{t("하단 입력창에 질문을 입력하면 바로 검색이 시작됩니다.")}</div>
                 </div>
 
                 <div className="mx-auto mt-8 w-full max-w-[900px] px-1 text-[12.5px] leading-6 text-ios-sub">
@@ -945,6 +949,11 @@ export function ToolMedSafetyPage() {
                       <div className={message.role === "user" ? "max-w-[86%] sm:max-w-[72%]" : "w-full max-w-[860px] min-w-0"}>
                         {message.role === "user" ? (
                           <div className={MESSAGE_USER_CLASS}>
+                            {message.imageDataUrl ? (
+                              <div className="mb-3 overflow-hidden rounded-[18px] border border-[#E5E7EB] bg-white">
+                                <img src={message.imageDataUrl} alt="" className="max-h-[280px] w-full object-cover" />
+                              </div>
+                            ) : null}
                             <div className="whitespace-pre-wrap break-words text-[16px] leading-7">{message.content}</div>
                           </div>
                         ) : (
@@ -957,7 +966,6 @@ export function ToolMedSafetyPage() {
                         >
                           <span>{message.role === "user" ? t("나") : t("AI")}</span>
                           <span>{formatTime(message.timestamp)}</span>
-                          {message.model ? <span>{message.model}</span> : null}
                           {message.source === "openai_fallback" ? <span>{t("기본 안전 모드")}</span> : null}
                         </div>
                       </div>
@@ -1012,9 +1020,9 @@ export function ToolMedSafetyPage() {
       </div>
 
       {/* Fixed composer - always at bottom */}
-      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-50 pb-[env(safe-area-inset-bottom)]">
-        <div className="pointer-events-auto mx-auto w-full max-w-[980px] px-3 sm:px-5">
-          <div className="rounded-t-[28px] border border-b-0 border-[#E8E8EC] bg-white/96 px-3 pb-3 pt-2 shadow-[0_-8px_40px_rgba(15,23,42,0.10)] backdrop-blur-xl sm:rounded-t-[32px] sm:px-4">
+      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-50 bg-white/96 backdrop-blur-xl">
+        <div className="pointer-events-auto mx-auto w-full max-w-[980px] px-3 pb-[env(safe-area-inset-bottom)] sm:px-5">
+          <div className="rounded-t-[28px] border border-b-0 border-[#E8E8EC] bg-white/96 px-3 pb-3 pt-2 shadow-[0_-8px_40px_rgba(15,23,42,0.10)] sm:rounded-t-[32px] sm:px-4">
             {selectedImage ? (
               <div className="mb-2 flex items-center gap-2 rounded-2xl bg-[#F4F5F7] px-3 py-2">
                 <img src={selectedImage} alt="" className="h-12 w-12 rounded-xl object-cover" />

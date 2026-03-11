@@ -46,7 +46,7 @@ const SECONDARY_ACTION_CLASS =
 const HERO_CARD_CLASS =
   "overflow-hidden rounded-[32px] border border-ios-sep bg-[radial-gradient(circle_at_top_right,rgba(255,234,214,0.72),transparent_36%),linear-gradient(180deg,#FFFFFF_0%,#FCFCFD_100%)] p-5 shadow-none";
 const GROUP_CARD_CLASS = "rounded-[30px] border border-ios-sep bg-[#FCFCFD] p-3 shadow-none md:p-4";
-const ITEM_CARD_CLASS = "rounded-[24px] border border-ios-sep bg-white px-3 py-3 transition";
+const ITEM_CARD_CLASS = "rounded-[24px] border border-ios-sep bg-white p-4 transition";
 const ITEM_CARD_ACTIVE_CLASS = "border-[color:var(--rnest-accent-border)] bg-[#FFF9F4] shadow-[0_12px_30px_rgba(16,24,40,0.06)]";
 const ITEM_CARD_IDLE_CLASS = "hover:border-[color:var(--rnest-accent-border)] hover:bg-[#FFFDFC]";
 const QUICK_ACTION_CLASS =
@@ -203,12 +203,6 @@ function kindLabel(kind: "medication" | "device" | "scenario") {
   if (kind === "medication") return "의약품";
   if (kind === "device") return "의료기구";
   return "임상 질문";
-}
-
-function resultKindMark(kind: "medication" | "device" | "scenario") {
-  if (kind === "device") return "DEV";
-  if (kind === "scenario") return "AI";
-  return "RX";
 }
 
 function modeLabel(mode: "ward" | "er" | "icu" | null | undefined) {
@@ -585,50 +579,42 @@ export function ToolMedSafetyRecentPage() {
                       const isActive = selected?.id === item.id;
                       return (
                         <article key={item.id} className={`${ITEM_CARD_CLASS} ${isActive ? ITEM_CARD_ACTIVE_CLASS : ITEM_CARD_IDLE_CLASS}`}>
-                          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
-                            <button type="button" onClick={() => handleOpenItem(item)} className="min-w-0 text-left">
-                              <div className="flex items-start gap-3">
-                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[16px] bg-[#F4F5F7] text-[11px] font-bold tracking-[0.08em] text-ios-sub">
-                                  {resultKindMark(item.result.resultKind)}
-                                </div>
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <div className="min-w-0 text-[14px] font-bold tracking-[-0.015em] text-ios-text">{item.result.title}</div>
-                                    <span className="inline-flex shrink-0 items-center rounded-full bg-[color:var(--rnest-accent-soft)] px-2 py-1 text-[10px] font-semibold text-[color:var(--rnest-accent)]">
-                                      {t(kindLabel(item.result.resultKind))}
-                                    </span>
-                                    <span className="inline-flex shrink-0 items-center rounded-full border border-ios-sep bg-white px-2 py-1 text-[10px] font-semibold text-ios-sub">
-                                      {formatListTime(item.savedAt)}
-                                    </span>
-                                  </div>
-
-                                  <div className="mt-2 rounded-[16px] border border-ios-sep bg-[#F8F8F9] px-3 py-2">
-                                    <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ios-muted">{t("질문")}</div>
-                                    <div className="mt-1 text-[12.5px] font-semibold leading-5 text-ios-text" style={TWO_LINE_CLAMP_STYLE}>
-                                      {item.request.query || "-"}
-                                    </div>
-                                  </div>
-
-                                  <div className="mt-2 text-[12.5px] leading-5 text-ios-sub" style={TWO_LINE_CLAMP_STYLE}>
-                                    {shortText(item.result.summary || item.result.answer || "-")}
-                                  </div>
-
-                                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                                    {item.request.mode ? <span className={META_PILL_CLASS}>{t(modeLabel(item.request.mode))}</span> : null}
-                                    {item.request.situation ? <span className={META_PILL_CLASS}>{t(situationLabel(item.request.situation))}</span> : null}
-                                  </div>
+                          <button type="button" onClick={() => handleOpenItem(item)} className="w-full text-left">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text sm:text-[18px]">{item.result.title}</div>
+                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                  <span className="inline-flex shrink-0 items-center rounded-full bg-[color:var(--rnest-accent-soft)] px-2.5 py-1 text-[10.5px] font-semibold text-[color:var(--rnest-accent)]">
+                                    {t(kindLabel(item.result.resultKind))}
+                                  </span>
+                                  {item.request.mode ? <span className={META_PILL_CLASS}>{t(modeLabel(item.request.mode))}</span> : null}
+                                  {item.request.situation ? <span className={META_PILL_CLASS}>{t(situationLabel(item.request.situation))}</span> : null}
                                 </div>
                               </div>
-                            </button>
-
-                            <div className="flex flex-wrap justify-end gap-2 lg:w-[190px] lg:flex-col lg:items-stretch">
-                              <button type="button" onClick={() => void handleCopyItem(item)} className={QUICK_ACTION_CLASS}>
-                                {t("복사")}
-                              </button>
-                              <button type="button" onClick={() => handleOpenItem(item)} className={QUICK_ACTION_PRIMARY_CLASS}>
-                                {t("전체 보기")}
-                              </button>
+                              <span className="inline-flex shrink-0 items-center rounded-full border border-ios-sep bg-white px-3 py-1.5 text-[11px] font-semibold text-ios-sub">
+                                {formatListTime(item.savedAt)}
+                              </span>
                             </div>
+
+                            <div className="mt-3 rounded-[18px] border border-ios-sep bg-[#F8F8F9] px-4 py-3">
+                              <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ios-muted">{t("질문")}</div>
+                              <div className="mt-1 text-[14px] font-semibold leading-6 text-ios-text" style={TWO_LINE_CLAMP_STYLE}>
+                                {item.request.query || "-"}
+                              </div>
+                            </div>
+
+                            <div className="mt-3 text-[13.5px] leading-6 text-ios-sub" style={TWO_LINE_CLAMP_STYLE}>
+                              {shortText(item.result.summary || item.result.answer || "-", 120)}
+                            </div>
+                          </button>
+
+                          <div className="mt-4 flex items-center justify-end gap-2">
+                            <button type="button" onClick={() => void handleCopyItem(item)} className={QUICK_ACTION_CLASS}>
+                              {t("복사")}
+                            </button>
+                            <button type="button" onClick={() => handleOpenItem(item)} className={QUICK_ACTION_PRIMARY_CLASS}>
+                              {t("전체 보기")}
+                            </button>
                           </div>
                         </article>
                       );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   DEFAULT_BILLING_ENTITLEMENTS,
   hasBillingEntitlement,
@@ -57,6 +57,11 @@ export function useBillingAccess(): BillingAccessState {
   const [subscription, setSubscription] = useState<SubscriptionApi | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
+  const subscriptionRef = useRef<SubscriptionApi | null>(null);
+
+  useEffect(() => {
+    subscriptionRef.current = subscription;
+  }, [subscription]);
 
   const reload = useCallback(() => {
     if (user?.userId) {
@@ -82,9 +87,8 @@ export function useBillingAccess(): BillingAccessState {
       };
     }
 
-    setLoading(true);
+    setLoading(!subscriptionRef.current);
     setError(null);
-    setSubscription(null);
     const run = async () => {
       try {
         const data = await readSubscriptionWithCache(user.userId, reloadTick > 0);

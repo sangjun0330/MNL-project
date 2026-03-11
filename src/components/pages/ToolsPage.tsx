@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { Card } from "@/components/ui/Card";
 import { useI18n } from "@/lib/useI18n";
@@ -18,6 +17,19 @@ type ToolCategory = {
 };
 
 const CATEGORY_CARDS: ToolCategory[] = [
+  {
+    id: "ai_search",
+    name: "AI 임상 검색",
+    description: "임상 질문에 AI가 즉시 답변합니다.",
+    href: "/tools/med-safety",
+    tone: "guide",
+    keywords: ["ai", "검색", "질문", "약물", "기구", "임상", "간호", "안전"],
+    quickLinks: [
+      { label: "AI 검색", href: "/tools/med-safety" },
+      { label: "최근 기록", href: "/tools/med-safety/recent" },
+    ],
+    secondaryLink: { label: "최근 검색 기록", href: "/tools/med-safety/recent" },
+  },
   {
     id: "calculators",
     name: "통합 간호 계산기",
@@ -52,19 +64,6 @@ const CATEGORY_CARDS: ToolCategory[] = [
       { label: "수액 밸런스", href: "/tools/nurse-calculators?tab=fluid-balance" },
     ],
   },
-  {
-    id: "ai_search",
-    name: "AI 임상 검색",
-    description: "임상 질문에 AI가 즉시 답변합니다.",
-    href: "/tools/med-safety",
-    tone: "guide",
-    keywords: ["ai", "검색", "질문", "약물", "기구", "임상", "간호", "안전"],
-    quickLinks: [
-      { label: "AI 검색", href: "/tools/med-safety" },
-      { label: "최근 기록", href: "/tools/med-safety/recent" },
-    ],
-    secondaryLink: { label: "최근 검색 기록", href: "/tools/med-safety/recent" },
-  },
 ];
 
 function CategoryIcon({ tone }: { tone: ToolCategory["tone"] }) {
@@ -98,15 +97,6 @@ function CategoryIcon({ tone }: { tone: ToolCategory["tone"] }) {
   );
 }
 
-function SearchIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <circle cx="7" cy="7" r="5.25" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M11 11l3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 function ArrowIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true">
@@ -127,51 +117,15 @@ export function ToolsPage() {
   const { t } = useI18n();
   const { loading: billingLoading, subscription } = useBillingAccess();
   const medSafetyRemaining = Math.max(0, Number(subscription?.medSafetyQuota?.totalRemaining ?? 0));
-  const [query, setQuery] = useState("");
-  const normalizedQuery = query.trim().toLowerCase();
-
-  const filteredCards = useMemo(() => {
-    if (!normalizedQuery) return CATEGORY_CARDS;
-    return CATEGORY_CARDS.filter((card) =>
-      [card.name, card.description, ...card.keywords].some((value) => value.toLowerCase().includes(normalizedQuery))
-    );
-  }, [normalizedQuery]);
 
   return (
     <div className="mx-auto w-full max-w-[820px] px-4 pb-24 pt-6">
       <div className="mb-5">
         <div className="text-[30px] font-extrabold tracking-[-0.02em] text-ios-text">{t("툴")}</div>
-        <div className="mt-1 text-[13px] leading-6 text-ios-sub">
-          {t("계산기는 한 페이지로 통합하고, AI 임상 검색은 별도로 분리했습니다.")}
-        </div>
       </div>
 
-      <div className="relative mb-6">
-        <div className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ios-muted">
-          <SearchIcon />
-        </div>
-        <input
-          type="text"
-          className="w-full rounded-2xl border border-ios-sep bg-white py-3 pl-10 pr-4 text-[14px] outline-none placeholder:text-ios-muted focus:border-black"
-          placeholder={t("툴 검색...")}
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-      </div>
-
-      <div className="mb-4 flex items-center justify-between gap-3 rounded-[26px] border border-ios-sep bg-[#FCFCFD] px-4 py-4">
-        <div>
-          <div className="text-[13px] font-semibold text-ios-text">{t("카테고리 2개로 단순화")}</div>
-          <div className="mt-1 text-[12px] leading-5 text-ios-sub">
-            {t("통합 계산기 1개, AI 임상 검색 1개만 바로 진입하도록 정리했습니다.")}
-          </div>
-        </div>
-        {!billingLoading ? <CreditBadge remaining={medSafetyRemaining} /> : null}
-      </div>
-
-      {filteredCards.length ? (
-        <div className="space-y-4">
-          {filteredCards.map((card) => (
+      <div className="space-y-4">
+        {CATEGORY_CARDS.map((card) => (
             <Card
               key={card.id}
               className="overflow-hidden rounded-[30px] border border-ios-sep bg-white p-5 shadow-none transition hover:border-[color:var(--rnest-accent-border)]"
@@ -182,7 +136,10 @@ export function ToolsPage() {
                     <CategoryIcon tone={card.tone} />
                   </div>
                   <div className="min-w-0">
-                    <div className="text-[22px] font-bold tracking-[-0.02em] text-ios-text">{t(card.name)}</div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="text-[22px] font-bold tracking-[-0.02em] text-ios-text">{t(card.name)}</div>
+                      {card.id === "ai_search" && !billingLoading ? <CreditBadge remaining={medSafetyRemaining} /> : null}
+                    </div>
                     <div className="mt-1 text-[13px] leading-6 text-ios-sub">{t(card.description)}</div>
                   </div>
                 </div>
@@ -221,11 +178,8 @@ export function ToolsPage() {
                 </div>
               ) : null}
             </Card>
-          ))}
-        </div>
-      ) : (
-        <div className="py-16 text-center text-[14px] text-ios-muted">{t("검색 결과가 없습니다.")}</div>
-      )}
+        ))}
+      </div>
     </div>
   );
 }
