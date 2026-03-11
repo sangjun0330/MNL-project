@@ -1212,6 +1212,11 @@ export function ToolNurseCalculatorsPage() {
     } catch {
       // ignore local parse errors
     }
+
+    // URL ?tab= 파라미터가 있으면 localStorage보다 우선
+    const urlTab = new URLSearchParams(window.location.search).get("tab");
+    if (urlTab && ["pump", "ivpb", "drip", "dilution", "check"].includes(urlTab))
+      setActiveModule(urlTab as ToolModule);
   }, []);
 
   useEffect(() => {

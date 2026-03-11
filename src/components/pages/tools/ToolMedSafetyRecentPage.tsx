@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useAuthState } from "@/lib/auth";
 import { useI18n } from "@/lib/useI18n";
+import { buildStructuredCopyText, copyTextToClipboard, type StructuredCopySection } from "@/lib/structuredCopy";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -30,9 +31,30 @@ type MedSafetyRecentItem = {
   };
 };
 
-const FLAT_CARD_CLASS = "rounded-[24px] border border-ios-sep bg-white shadow-none";
-const FLAT_BUTTON =
-  "inline-flex h-10 items-center justify-center rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] px-4 text-[13px] font-semibold text-[color:var(--rnest-accent)]";
+type NarrativeSection = {
+  title: string;
+  items: string[];
+};
+
+type TranslateFn = (key: string, vars?: Record<string, string | number>) => string;
+
+const FLAT_CARD_CLASS = "rounded-[28px] border border-ios-sep bg-white shadow-none";
+const META_PILL_CLASS = "inline-flex items-center rounded-full border border-ios-sep bg-[#F7F7F8] px-2.5 py-1 text-[11px] font-semibold text-ios-sub";
+const PRIMARY_ACTION_CLASS =
+  "h-11 flex-1 rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent)] px-4 text-[14px] font-semibold text-white shadow-none hover:bg-[color:var(--rnest-accent)]/90";
+const SECONDARY_ACTION_CLASS =
+  "h-11 flex-1 rounded-full border border-ios-sep bg-white px-4 text-[14px] font-semibold text-ios-text shadow-none hover:bg-ios-bg";
+const HERO_CARD_CLASS =
+  "overflow-hidden rounded-[32px] border border-ios-sep bg-[radial-gradient(circle_at_top_right,rgba(255,234,214,0.72),transparent_36%),linear-gradient(180deg,#FFFFFF_0%,#FCFCFD_100%)] p-5 shadow-none";
+const GROUP_CARD_CLASS = "rounded-[30px] border border-ios-sep bg-[#FCFCFD] p-3 shadow-none md:p-4";
+const ITEM_CARD_CLASS = "rounded-[26px] border border-ios-sep bg-white p-4 transition";
+const ITEM_CARD_ACTIVE_CLASS = "border-[color:var(--rnest-accent-border)] bg-[#FFF9F4] shadow-[0_12px_30px_rgba(16,24,40,0.06)]";
+const ITEM_CARD_IDLE_CLASS = "hover:border-[color:var(--rnest-accent-border)] hover:bg-[#FFFDFC]";
+const QUICK_ACTION_CLASS =
+  "inline-flex h-10 items-center justify-center rounded-full border border-ios-sep bg-white px-4 text-[12.5px] font-semibold text-ios-text";
+const QUICK_ACTION_PRIMARY_CLASS =
+  "inline-flex h-10 items-center justify-center rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] px-4 text-[12.5px] font-semibold text-[color:var(--rnest-accent)]";
+const DETAIL_PANEL_CLASS = "rounded-[30px] border border-ios-sep bg-white p-4 shadow-none";
 
 function formatDateTime(value: number) {
   const d = new Date(value);
@@ -40,6 +62,24 @@ function formatDateTime(value: number) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(
     d.getHours()
   ).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+function dayKey(value: number) {
+  const d = new Date(value);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function formatDayLabel(value: number, t: (key: string) => string) {
+  const now = new Date();
+  const today = dayKey(now.getTime());
+  const yesterdayDate = new Date(now);
+  yesterdayDate.setDate(now.getDate() - 1);
+  const yesterday = dayKey(yesterdayDate.getTime());
+  const current = dayKey(value);
+  if (current === today) return t("오늘");
+  if (current === yesterday) return t("어제");
+  const d = new Date(value);
+  return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function modeLabel(mode: "ward" | "er" | "icu") {
@@ -54,16 +94,24 @@ function kindLabel(kind: "medication" | "device" | "scenario") {
   return "상황";
 }
 
+function situationLabel(situation: "general" | "pre_admin" | "during_admin" | "event_response") {
+  if (situation === "pre_admin") return "투여 전 확인";
+  if (situation === "during_admin") return "투여 중 모니터";
+  if (situation === "event_response") return "이상/알람 대응";
+  return "일반 검색";
+}
+
+function queryIntentLabel(intent: "medication" | "device" | "scenario" | null) {
+  if (intent === "device") return "의료기구";
+  if (intent === "scenario") return "상황질문";
+  return "의약품";
+}
+
 function shortText(value: string, max = 84) {
   const text = String(value ?? "").replace(/\s+/g, " ").trim();
   if (text.length <= max) return text;
   return `${text.slice(0, max).trim()}…`;
 }
-
-type NarrativeSection = {
-  title: string;
-  items: string[];
-};
 
 function cleanNarrativeLine(value: string) {
   return String(value ?? "")
@@ -172,6 +220,35 @@ function parseNarrativeSections(value: string): NarrativeSection[] {
   return [{ title: "상세 결과", items: fallbackItems }];
 }
 
+function resultKindMark(kind: "medication" | "device" | "scenario") {
+  if (kind === "device") return "DEV";
+  if (kind === "scenario") return "CASE";
+  return "RX";
+}
+
+function buildRecentCopyText(item: MedSafetyRecentItem, sections: NarrativeSection[], t: TranslateFn) {
+  const copySections: StructuredCopySection[] = [
+    { title: t("요약"), body: item.result.oneLineConclusion },
+    { title: t("검색 입력"), body: item.request.query || "-" },
+    ...sections.map((section) => ({
+      title: t(section.title),
+      items: section.items,
+    })),
+  ];
+
+  return buildStructuredCopyText({
+    title: item.result.item.name,
+    metaLines: [
+      `${t("분석 시각")}: ${formatDateTime(item.savedAt)}`,
+      `${t("유형")}: ${t(kindLabel(item.result.resultKind))}`,
+      `${t("근무 모드")}: ${t(modeLabel(item.request.mode))}`,
+      `${t("질문 유형")}: ${t(queryIntentLabel(item.request.queryIntent))}`,
+      `${t("상황")}: ${t(situationLabel(item.request.situation))}`,
+    ],
+    sections: copySections,
+  });
+}
+
 export function ToolMedSafetyRecentPage() {
   const { status } = useAuthState();
   const { t } = useI18n();
@@ -179,13 +256,24 @@ export function ToolMedSafetyRecentPage() {
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<MedSafetyRecentItem[]>([]);
   const [historyLimit, setHistoryLimit] = useState(5);
-  const [selected, setSelected] = useState<MedSafetyRecentItem | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(false);
+  const [copyMessage, setCopyMessage] = useState("");
+
+  useEffect(() => {
+    if (!copyMessage) return;
+    const timer = window.setTimeout(() => setCopyMessage(""), 1800);
+    return () => window.clearTimeout(timer);
+  }, [copyMessage]);
 
   useEffect(() => {
     if (status !== "authenticated") {
       setLoading(false);
       setItems([]);
       setHistoryLimit(5);
+      setSelectedId(null);
+      setDetailOpen(false);
       return;
     }
 
@@ -225,120 +313,378 @@ export function ToolMedSafetyRecentPage() {
     void run();
   }, [status]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const media = window.matchMedia("(min-width: 1024px)");
+    const sync = () => {
+      const next = media.matches;
+      setIsDesktop(next);
+      if (next) setDetailOpen(false);
+    };
+    sync();
+    if (typeof media.addEventListener === "function") {
+      media.addEventListener("change", sync);
+      return () => media.removeEventListener("change", sync);
+    }
+    media.addListener(sync);
+    return () => media.removeListener(sync);
+  }, []);
+
+  useEffect(() => {
+    if (!items.length) {
+      setSelectedId(null);
+      return;
+    }
+    if (!selectedId || !items.some((item) => item.id === selectedId)) {
+      setSelectedId(items[0]!.id);
+    }
+  }, [items, selectedId]);
+
+  const groupedItems = useMemo(() => {
+    const groups = new Map<string, { label: string; items: MedSafetyRecentItem[] }>();
+    for (const item of items) {
+      const key = dayKey(item.savedAt);
+      const current = groups.get(key);
+      if (current) {
+        current.items.push(item);
+        continue;
+      }
+      groups.set(key, {
+        label: formatDayLabel(item.savedAt, t),
+        items: [item],
+      });
+    }
+    return [...groups.entries()]
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([key, value]) => ({
+        key,
+        label: value.label,
+        items: value.items.sort((a, b) => b.savedAt - a.savedAt),
+      }));
+  }, [items, t]);
+
+  const selected = useMemo(
+    () => items.find((item) => item.id === selectedId) ?? items[0] ?? null,
+    [items, selectedId]
+  );
+
   const selectedNarrative = useMemo(() => {
     if (!selected) return "";
     return selected.result.searchAnswer || selected.result.generatedText || selected.result.oneLineConclusion || "";
   }, [selected]);
   const selectedSections = useMemo(() => parseNarrativeSections(selectedNarrative), [selectedNarrative]);
+  const selectedCopyText = useMemo(() => {
+    if (!selected) return "";
+    return buildRecentCopyText(selected, selectedSections, t);
+  }, [selected, selectedSections, t]);
+
+  const latestSavedAt = items[0]?.savedAt ?? 0;
+
+  const handleCopySelected = async () => {
+    if (!selectedCopyText) return;
+    try {
+      const copied = await copyTextToClipboard(selectedCopyText);
+      setCopyMessage(
+        copied ? t("결과를 형식에 맞게 복사했습니다.") : t("클립보드를 사용할 수 없습니다.")
+      );
+    } catch {
+      setCopyMessage(t("복사에 실패했습니다."));
+    }
+  };
+
+  const handleCopyItem = async (item: MedSafetyRecentItem) => {
+    try {
+      const copied = await copyTextToClipboard(
+        buildRecentCopyText(
+          item,
+          parseNarrativeSections(item.result.searchAnswer || item.result.generatedText || item.result.oneLineConclusion || ""),
+          t
+        )
+      );
+      setCopyMessage(copied ? t("결과를 형식에 맞게 복사했습니다.") : t("클립보드를 사용할 수 없습니다."));
+    } catch {
+      setCopyMessage(t("복사에 실패했습니다."));
+    }
+  };
+
+  const handleOpenItem = (item: MedSafetyRecentItem) => {
+    setSelectedId(item.id);
+    if (!isDesktop) setDetailOpen(true);
+  };
+
+  const detailContent = selected ? (
+    <div className="space-y-4">
+      <div className="rounded-[26px] border border-[color:var(--rnest-accent-border)] bg-[linear-gradient(180deg,#FFFDFC_0%,#FFF8F2_100%)] p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center rounded-full bg-[color:var(--rnest-accent-soft)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--rnest-accent)]">
+                {t(kindLabel(selected.result.resultKind))}
+              </span>
+              <span className={META_PILL_CLASS}>{formatDateTime(selected.savedAt)}</span>
+            </div>
+            <div className="mt-2 text-[22px] font-bold tracking-[-0.02em] text-ios-text">{selected.result.item.name}</div>
+            <div className="mt-2 text-[15px] leading-7 text-ios-text">{selected.result.oneLineConclusion}</div>
+          </div>
+          {isDesktop ? (
+            <button type="button" onClick={() => void handleCopySelected()} className={QUICK_ACTION_PRIMARY_CLASS}>
+              {t("가이드 복사")}
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="rounded-[22px] border border-ios-sep bg-[#F7F7F8] px-4 py-3">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ios-muted">{t("검색 입력")}</div>
+          <div className="mt-2 text-[14px] font-semibold leading-6 text-ios-text">{selected.request.query || "-"}</div>
+        </div>
+        <div className="rounded-[22px] border border-ios-sep bg-[#F7F7F8] px-4 py-3">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ios-muted">{t("저장 정책")}</div>
+          <div className="mt-2 text-[14px] leading-6 text-ios-sub">{t("완료된 검색만 저장되며, 항목별로 요약과 원문 가이드를 바로 다시 열 수 있습니다.")}</div>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <span className={META_PILL_CLASS}>{t(modeLabel(selected.request.mode))}</span>
+        <span className={META_PILL_CLASS}>{t(situationLabel(selected.request.situation))}</span>
+        <span className={META_PILL_CLASS}>{t(queryIntentLabel(selected.request.queryIntent))}</span>
+        <span className={META_PILL_CLASS}>{t("{count}섹션", { count: selectedSections.length })}</span>
+      </div>
+
+      <div className="space-y-3">
+        {selectedSections.length ? (
+          selectedSections.map((section, idx) => (
+            <section
+              key={`${section.title}-${idx}`}
+              className="rounded-[24px] border border-ios-sep bg-white px-4 py-4 shadow-[0_10px_24px_rgba(16,24,40,0.03)]"
+            >
+              <div className="flex items-center gap-2">
+                <span className="inline-flex h-7 min-w-7 items-center justify-center rounded-full bg-[#F1F4F8] px-2 text-[12px] font-bold text-ios-sub">
+                  {idx + 1}
+                </span>
+                <div className="text-[15px] font-bold tracking-[-0.01em] text-ios-text">{t(section.title)}</div>
+              </div>
+              <ul className="mt-3 space-y-2.5">
+                {section.items.map((item, itemIdx) => (
+                  <li key={`${section.title}-${idx}-item-${itemIdx}`} className="flex items-start gap-2.5 text-[14px] leading-6 text-ios-text">
+                    <span className="mt-[9px] h-1.5 w-1.5 shrink-0 rounded-full bg-[color:var(--rnest-accent)]" />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))
+        ) : (
+          <div className="rounded-[22px] border border-ios-sep bg-[#F7F7F8] px-4 py-4 text-[14px] leading-6 text-ios-sub">
+            {t("표시할 상세 내용이 없습니다.")}
+          </div>
+        )}
+      </div>
+    </div>
+  ) : (
+    <div className="rounded-[24px] border border-dashed border-ios-sep bg-[#FCFCFD] px-4 py-5 text-[14px] leading-6 text-ios-sub">
+      {t("선택한 검색 결과가 여기 표시됩니다.")}
+    </div>
+  );
 
   return (
     <>
-      <div className="mx-auto w-full max-w-[920px] space-y-3 px-2 pb-24 pt-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-[31px] font-extrabold tracking-[-0.02em] text-[color:var(--rnest-accent)]">{t("최근 AI 검색 기록")}</div>
-            <div className="mt-1 text-[13px] text-ios-sub">
-              {t("크레딧이 실제 차감된 완료 검색 결과 최근 {count}건만 표시됩니다.", { count: historyLimit })}
+      <div className="mx-auto w-full max-w-[1120px] space-y-4 px-2 pb-24 pt-4">
+        <Card className={HERO_CARD_CLASS}>
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="text-[31px] font-extrabold tracking-[-0.02em] text-ios-text">{t("최근 AI 검색 기록")}</div>
+                <span className="inline-flex items-center rounded-full bg-[color:var(--rnest-accent-soft)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--rnest-accent)]">
+                  {t("최근 {count}건", { count: historyLimit })}
+                </span>
+              </div>
+              <div className="mt-2 max-w-[760px] text-[13px] leading-6 text-ios-sub">
+                {t("완료된 검색만 저장되며, 항목별로 요약과 원문 가이드를 바로 다시 열 수 있습니다.")}
+              </div>
+            </div>
+            <Link
+              href="/tools/med-safety"
+              className="inline-flex h-11 items-center justify-center rounded-full border border-[color:var(--rnest-accent)] bg-white px-4 text-[12.5px] font-semibold text-[color:var(--rnest-accent)]"
+            >
+              {t("AI 검색기로")}
+            </Link>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <div className="rounded-[24px] border border-ios-sep bg-white/90 px-4 py-4">
+              <div className="text-[12px] font-semibold text-ios-sub">{t("최근 저장")}</div>
+              <div className="mt-2 text-[28px] font-bold tracking-[-0.03em] text-ios-text">{items.length}</div>
+              <div className="mt-1 text-[12px] text-ios-sub">{t("완료 검색만 저장")}</div>
+            </div>
+            <div className="rounded-[24px] border border-ios-sep bg-white/90 px-4 py-4">
+              <div className="text-[12px] font-semibold text-ios-sub">{t("마지막 저장")}</div>
+              <div className="mt-2 text-[18px] font-bold tracking-[-0.02em] text-ios-text">
+                {latestSavedAt ? formatDateTime(latestSavedAt) : "-"}
+              </div>
+              <div className="mt-1 text-[12px] text-ios-sub">{t("계정별로 동기화됩니다.")}</div>
+            </div>
+            <div className="rounded-[24px] border border-ios-sep bg-white/90 px-4 py-4">
+              <div className="text-[12px] font-semibold text-ios-sub">{t("정리된 복사본")}</div>
+              <div className="mt-2 text-[18px] font-bold tracking-[-0.02em] text-ios-text">{t("바로 복사 가능")}</div>
+              <div className="mt-1 text-[12px] text-ios-sub">{t("현재 화면 카드 순서대로 복사됩니다.")}</div>
             </div>
           </div>
-          <Link href="/tools/med-safety" className="pt-1 text-[12px] font-semibold text-[color:var(--rnest-accent)]">
-            {t("AI 검색기로")}
-          </Link>
-        </div>
+        </Card>
 
-        <Card className={`p-3 ${FLAT_CARD_CLASS}`}>
-          {status !== "authenticated" ? (
-            <div className="space-y-2">
-              <div className="text-[18px] font-bold text-ios-text">{t("로그인이 필요합니다")}</div>
+        {status !== "authenticated" ? (
+          <Card className={`p-5 ${FLAT_CARD_CLASS}`}>
+            <div className="space-y-3">
+              <div className="text-[19px] font-bold text-ios-text">{t("로그인이 필요합니다")}</div>
               <div className="text-[13px] leading-6 text-ios-sub">{t("최근 검색 기록은 계정별로 저장됩니다.")}</div>
-              <Link href="/settings/account" className={FLAT_BUTTON}>
+              <Link href="/settings/account" className="inline-flex h-10 items-center justify-center rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] px-4 text-[13px] font-semibold text-[color:var(--rnest-accent)]">
                 {t("로그인/계정 설정")}
               </Link>
             </div>
-          ) : loading ? (
-            <div className="text-[14px] text-ios-sub">{t("최근 기록을 불러오는 중...")}</div>
-          ) : error ? (
-            <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-3 text-[14px] font-semibold text-red-700">
+          </Card>
+        ) : loading ? (
+          <Card className={`p-5 ${FLAT_CARD_CLASS}`}>
+            <div className="space-y-2">
+              <div className="text-[17px] font-bold text-ios-text">{t("최근 기록을 불러오는 중...")}</div>
+              <div className="text-[13px] leading-6 text-ios-sub">{t("계정에 저장된 완료 검색 결과를 정리하고 있습니다.")}</div>
+            </div>
+          </Card>
+        ) : error ? (
+          <Card className={`p-4 ${FLAT_CARD_CLASS}`}>
+            <div className="rounded-[24px] border border-red-200 bg-red-50 px-4 py-4 text-[14px] font-semibold text-red-700">
               {t("최근 기록 조회에 실패했습니다.")} ({error})
             </div>
-          ) : !items.length ? (
-            <div className="text-[14px] leading-6 text-ios-sub">{t("아직 저장된 최근 검색 결과가 없습니다. AI 검색 실행 후 다시 확인해 주세요.")}</div>
-          ) : (
+          </Card>
+        ) : !items.length ? (
+          <Card className={`p-5 ${FLAT_CARD_CLASS}`}>
             <div className="space-y-2">
-              {items.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setSelected(item)}
-                  className="w-full rounded-2xl border border-ios-sep bg-white px-3 py-3 text-left hover:bg-ios-bg"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-[17px] font-bold text-ios-text">{item.result.item.name}</div>
-                    <span className="rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] px-2 py-0.5 text-[11px] font-semibold text-[color:var(--rnest-accent)]">
-                      {t(kindLabel(item.result.resultKind))}
-                    </span>
+              <div className="text-[18px] font-bold text-ios-text">{t("저장된 기록이 없습니다")}</div>
+              <div className="text-[13px] leading-6 text-ios-sub">{t("아직 저장된 최근 검색 결과가 없습니다. AI 검색 실행 후 다시 확인해 주세요.")}</div>
+            </div>
+          </Card>
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.08fr)_minmax(360px,0.92fr)]">
+            <div className="space-y-4">
+              {groupedItems.map((group) => (
+                <section key={group.key} className={GROUP_CARD_CLASS}>
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[16px] font-bold tracking-[-0.01em] text-ios-text">{group.label}</div>
+                      <div className="mt-1 text-[12px] text-ios-sub">{t("선택하면 정리된 상세 보기와 복사가 가능합니다.")}</div>
+                    </div>
+                    <span className={META_PILL_CLASS}>{t("{count}건", { count: group.items.length })}</span>
                   </div>
-                  <div className="mt-1 text-[12px] text-ios-sub">
-                    {t("모드")}: {t(modeLabel(item.request.mode))} · {t("분석")}: {formatDateTime(item.savedAt)}
+
+                  <div className="space-y-3">
+                    {group.items.map((item) => {
+                      const isActive = selected?.id === item.id;
+                      return (
+                        <article
+                          key={item.id}
+                          className={`${ITEM_CARD_CLASS} ${isActive ? ITEM_CARD_ACTIVE_CLASS : ITEM_CARD_IDLE_CLASS}`}
+                        >
+                          <div className="flex flex-col gap-3">
+                            <div className="flex items-start gap-3">
+                              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[18px] bg-[#F4F5F7] text-[12px] font-bold tracking-[0.08em] text-ios-sub">
+                                {resultKindMark(item.result.resultKind)}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <div className="text-[18px] font-bold tracking-[-0.015em] text-ios-text">{item.result.item.name}</div>
+                                  <span className="inline-flex items-center rounded-full bg-[color:var(--rnest-accent-soft)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--rnest-accent)]">
+                                    {t(kindLabel(item.result.resultKind))}
+                                  </span>
+                                </div>
+                                <div className="mt-1.5 text-[14px] leading-6 text-ios-text">
+                                  {shortText(item.result.oneLineConclusion || item.result.searchAnswer || item.result.generatedText, 120)}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2">
+                              <span className={META_PILL_CLASS}>{t(modeLabel(item.request.mode))}</span>
+                              <span className={META_PILL_CLASS}>{t(situationLabel(item.request.situation))}</span>
+                              <span className={META_PILL_CLASS}>{formatDateTime(item.savedAt)}</span>
+                            </div>
+
+                            <div className="grid gap-2 md:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+                              <div className="rounded-[20px] border border-ios-sep bg-[#F7F7F8] px-3.5 py-3">
+                                <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ios-muted">{t("검색 질의")}</div>
+                                <div className="mt-1.5 text-[13.5px] font-semibold leading-6 text-ios-text">{item.request.query || "-"}</div>
+                              </div>
+                              <div className="rounded-[20px] border border-ios-sep bg-[#F7F7F8] px-3.5 py-3">
+                                <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ios-muted">{t("요약")}</div>
+                                <div className="mt-1.5 text-[13.5px] leading-6 text-ios-text">
+                                  {shortText(item.result.searchAnswer || item.result.generatedText || item.result.oneLineConclusion, 110)}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap justify-end gap-2">
+                              <button type="button" onClick={() => void handleCopyItem(item)} className={QUICK_ACTION_CLASS}>
+                                {t("결과 복사")}
+                              </button>
+                              <button type="button" onClick={() => handleOpenItem(item)} className={QUICK_ACTION_PRIMARY_CLASS}>
+                                {t("상세 보기")}
+                              </button>
+                            </div>
+                          </div>
+                        </article>
+                      );
+                    })}
                   </div>
-                  <div className="mt-1.5 text-[13px] leading-5 text-ios-sub">
-                    {shortText(item.result.oneLineConclusion || item.result.searchAnswer || item.result.generatedText)}
-                  </div>
-                </button>
+                </section>
               ))}
             </div>
-          )}
-        </Card>
+
+            <div className="hidden lg:block">
+              <div className="sticky top-4">
+                <Card className={DETAIL_PANEL_CLASS}>
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[12px] font-semibold uppercase tracking-[0.08em] text-ios-muted">{t("선택한 결과")}</div>
+                      <div className="mt-1 text-[20px] font-bold tracking-[-0.02em] text-ios-text">
+                        {selected?.result.item.name || t("최근 검색 상세")}
+                      </div>
+                    </div>
+                  </div>
+                  {detailContent}
+                </Card>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <BottomSheet
-        open={Boolean(selected)}
-        onClose={() => setSelected(null)}
+        open={!isDesktop && detailOpen && Boolean(selected)}
+        onClose={() => setDetailOpen(false)}
         variant="appstore"
         title={selected?.result.item.name || t("최근 검색 상세")}
         subtitle={selected ? `${t("분석 시각")}: ${formatDateTime(selected.savedAt)}` : ""}
-        maxHeightClassName="max-h-[78dvh]"
+        maxHeightClassName="max-h-[82dvh]"
+        footer={
+          selected ? (
+            <div className="flex gap-2">
+              <Button className={PRIMARY_ACTION_CLASS} onClick={() => void handleCopySelected()}>
+                {t("가이드 복사")}
+              </Button>
+              <Button variant="secondary" className={SECONDARY_ACTION_CLASS} onClick={() => setDetailOpen(false)}>
+                {t("닫기")}
+              </Button>
+            </div>
+          ) : null
+        }
       >
-        {selected ? (
-          <div className="space-y-3">
-            <div className="rounded-2xl border border-ios-sep bg-ios-bg px-3 py-3">
-              <div className="text-[12px] font-semibold text-ios-muted">{t("요약")}</div>
-              <div className="mt-1 text-[15px] leading-6 text-ios-text">{selected.result.oneLineConclusion}</div>
-            </div>
-            <div className="rounded-2xl border border-ios-sep bg-white px-3 py-3">
-              <div className="text-[12px] font-semibold text-ios-muted">{t("검색 입력")}</div>
-              <div className="mt-1 text-[15px] leading-6 text-ios-text">{selected.request.query || "-"}</div>
-            </div>
-            <div className="rounded-2xl border border-ios-sep bg-white px-3 py-3">
-              <div className="text-[12px] font-semibold text-ios-muted">{t("상세 결과")}</div>
-              {selectedSections.length ? (
-                <div className="mt-2 space-y-2">
-                  {selectedSections.map((section, idx) => (
-                    <div
-                      key={`${section.title}-${idx}`}
-                      className="rounded-xl border border-ios-sep bg-ios-bg px-3 py-3"
-                    >
-                      <div className="text-[14px] font-bold text-ios-text">{t(section.title)}</div>
-                      <ul className="mt-1 space-y-1 text-[14px] leading-6 text-ios-text">
-                        {section.items.map((item, itemIdx) => (
-                          <li key={`${section.title}-${idx}-item-${itemIdx}`} className="list-disc pl-1 ml-4">
-                            {item}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="mt-1 text-[15px] leading-6 text-ios-sub">{t("표시할 상세 내용이 없습니다.")}</div>
-              )}
-            </div>
-            <Button variant="secondary" onClick={() => setSelected(null)}>
-              {t("닫기")}
-            </Button>
-          </div>
-        ) : null}
+        {detailContent}
       </BottomSheet>
+
+      {copyMessage ? (
+        <div className="pointer-events-none fixed bottom-[calc(92px+env(safe-area-inset-bottom))] left-1/2 z-[120] -translate-x-1/2 rounded-full bg-black px-4 py-2 text-[12px] font-semibold text-white shadow-lg">
+          {copyMessage}
+        </div>
+      ) : null}
     </>
   );
 }

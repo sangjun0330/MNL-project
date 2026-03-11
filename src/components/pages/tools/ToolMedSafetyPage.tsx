@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
+import { buildStructuredCopyText, copyTextToClipboard } from "@/lib/structuredCopy";
 import { useI18n } from "@/lib/useI18n";
 
 const FLAT_CARD_CLASS = "rounded-[24px] border border-ios-sep bg-white shadow-none";
@@ -28,6 +29,12 @@ const SEGMENT_BUTTON_ACTIVE = "rnest-pill-photo is-active text-black";
 const SEGMENT_BUTTON_INACTIVE = "rnest-pill-photo-muted text-black";
 const SITUATION_BUTTON_ACTIVE = "border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] text-black";
 const SITUATION_BUTTON_INACTIVE = "border-ios-sep bg-white text-black";
+const RESULT_META_PILL_CLASS =
+  "inline-flex items-center rounded-full border border-ios-sep bg-[#F5F5F7] px-2.5 py-1 text-[11px] font-semibold text-ios-sub";
+const RESULT_COPY_BUTTON_CLASS =
+  "inline-flex h-11 items-center justify-center gap-2 rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] px-4 text-[13px] font-semibold text-[color:var(--rnest-accent)]";
+const RESULT_COPY_PANEL_CLASS =
+  "mt-4 rounded-[24px] border border-[color:var(--rnest-accent-border)] bg-[linear-gradient(180deg,#FFFDFC_0%,#FFF8F2_100%)] px-4 py-4";
 type TranslateFn = (key: string, vars?: Record<string, string | number>) => string;
 
 type ClinicalMode = "ward" | "er" | "icu";
@@ -929,6 +936,35 @@ function buildNarrativeCards(answer: string, t?: TranslateFn): DynamicResultCard
   }));
 }
 
+function renderResultCardList(cards: DynamicResultCard[]) {
+  return (
+    <div className="space-y-3">
+      {cards.map((card) => (
+        <section
+          key={card.key}
+          className={
+            card.compact
+              ? "rounded-[24px] border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-4 py-4"
+              : "rounded-[24px] border border-ios-sep bg-white px-4 py-4"
+          }
+        >
+          <div className={`text-[15px] font-bold tracking-[-0.01em] ${card.compact ? "text-[color:var(--rnest-accent)]" : "text-black"}`}>
+            {card.title}
+          </div>
+          <ul className="mt-3 space-y-2.5">
+            {card.items.map((item, index) => (
+              <li key={`${card.key}-${index}`} className="flex items-start gap-2.5 text-[15px] leading-6 text-ios-text">
+                <span className={`mt-[9px] h-1.5 w-1.5 shrink-0 rounded-full ${card.compact ? "bg-[color:var(--rnest-accent)]" : "bg-ios-sub"}`} />
+                <span>{renderHighlightedLine(item)}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+    </div>
+  );
+}
+
 function MedSafetyAnalyzingOverlay({ open, t }: { open: boolean; t: TranslateFn }) {
   if (!open || typeof document === "undefined") return null;
   return createPortal(
@@ -988,6 +1024,7 @@ export function ToolMedSafetyPage() {
   const [analysisRequested, setAnalysisRequested] = useState(false);
   const [streamingCards, setStreamingCards] = useState<DynamicResultCard[]>([]);
   const [streamingDisplayName, setStreamingDisplayName] = useState("");
+  const [copyMessage, setCopyMessage] = useState("");
 
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -1020,6 +1057,12 @@ export function ToolMedSafetyPage() {
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    if (!copyMessage) return;
+    const timer = window.setTimeout(() => setCopyMessage(""), 1800);
+    return () => window.clearTimeout(timer);
+  }, [copyMessage]);
 
   const stopCamera = useCallback(() => {
     const stream = streamRef.current;
@@ -1485,6 +1528,75 @@ export function ToolMedSafetyPage() {
     };
   }, [result, t]);
 
+  const guideCopyText = useMemo(() => {
+    if (!result) return "";
+
+    const sections: Array<{ title: string; body?: string; items?: string[] }> = [
+      {
+        title: t("요약"),
+        body: resultViewState.headerConclusion || resultViewState.headerPrimaryUse || result.oneLineConclusion,
+      },
+      {
+        title: t("검색 입력"),
+        body: query.replace(/\s+/g, " ").trim() || result.item.name,
+      },
+    ];
+
+    if (isScenarioIntent && patientSummary.trim()) {
+      sections.push({
+        title: t("추가 참고"),
+        body: patientSummary.trim(),
+      });
+    }
+
+    if (result.suggestedNames?.length) {
+      sections.push({
+        title: t("추천 이름"),
+        items: result.suggestedNames.slice(0, 3),
+      });
+    }
+
+    if (resultViewState.isNotFoundResult) {
+      sections.push({
+        title: t("재검색 안내"),
+        items: [
+          result.oneLineConclusion,
+          result.item.primaryUse,
+          t("정확한 공식명(성분명/제품명/기구명)으로 다시 입력해 주세요."),
+        ],
+      });
+    } else {
+      sections.push(
+        ...resultViewState.displayCards.map((card) => ({
+          title: card.title,
+          items: card.items,
+        }))
+      );
+    }
+
+    return buildStructuredCopyText({
+      title: result.item.name,
+      metaLines: [
+        `${t("분석 시각")}: ${formatDateTime(result.analyzedAt)}`,
+        `${t("유형")}: ${t(kindLabel(result.resultKind))}`,
+        `${t("근무 모드")}: ${t(modeLabel(mode))}`,
+        `${t("질문 유형")}: ${t(queryIntentLabel(queryIntent))}`,
+        `${t("상황")}: ${t(situationLabel(activeSituation))}`,
+      ],
+      sections,
+    });
+  }, [activeSituation, isScenarioIntent, mode, patientSummary, query, queryIntent, result, resultViewState, t]);
+
+  const handleCopyResult = useCallback(async () => {
+    if (!guideCopyText) return;
+    try {
+      const copied = await copyTextToClipboard(guideCopyText);
+      setCopyMessage(copied ? t("결과를 형식에 맞게 복사했습니다.") : t("클립보드를 사용할 수 없습니다."));
+    } catch {
+      setCopyMessage(t("복사에 실패했습니다."));
+    }
+  }, [guideCopyText, t]);
+
   const resultPanel = useMemo(() => {
     if (!result) {
       if (isLoading && analysisRequested) {
@@ -1493,23 +1605,7 @@ export function ToolMedSafetyPage() {
             {streamingDisplayName ? (
               <div className="text-[34px] font-bold leading-[1.08] tracking-[-0.03em] text-ios-text">{streamingDisplayName}</div>
             ) : null}
-            {streamingCards.length ? (
-              <div className="space-y-2.5">
-                {streamingCards.map((card) => (
-                  <section
-                    key={`live-${card.key}`}
-                    className={`${card.compact ? "border-l-[3px] border-[color:var(--rnest-accent)] pl-3 py-1.5" : "border-b border-ios-sep pb-2.5"} last:border-b-0`}
-                  >
-                    <div className="text-[15px] font-bold tracking-[-0.01em] text-black">{card.title}</div>
-                    <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[15px] leading-6 text-ios-text">
-                      {card.items.map((item, index) => (
-                        <li key={`live-${card.key}-${index}`}>{renderHighlightedLine(item)}</li>
-                      ))}
-                    </ul>
-                  </section>
-                ))}
-              </div>
-            ) : null}
+            {streamingCards.length ? renderResultCardList(streamingCards) : null}
             <div className="rounded-xl border border-ios-sep bg-ios-bg px-3 py-2 text-[13px] text-ios-sub">{t("AI가 작성중입니다...")}</div>
           </div>
         );
@@ -1537,10 +1633,26 @@ export function ToolMedSafetyPage() {
           {resultViewState.showHeaderPrimaryUse ? (
             <div className="mt-1 text-[16px] leading-6 text-ios-sub">{resultViewState.headerPrimaryUse}</div>
           ) : null}
-          <div className="mt-2 text-[15px] text-ios-sub">
-            {t("모드")}: {t(modeLabel(mode))} · {t("유형")}: {t(queryIntentLabel(queryIntent))} · {t("상황")}: {t(situationLabel(activeSituation))} ·{" "}
-            {t("분석")}:{" "}
-            {formatDateTime(result.analyzedAt)}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <span className={RESULT_META_PILL_CLASS}>{t("근무 모드")}: {t(modeLabel(mode))}</span>
+            <span className={RESULT_META_PILL_CLASS}>{t("질문 유형")}: {t(queryIntentLabel(queryIntent))}</span>
+            <span className={RESULT_META_PILL_CLASS}>{t("상황")}: {t(situationLabel(activeSituation))}</span>
+            <span className={RESULT_META_PILL_CLASS}>{formatDateTime(result.analyzedAt)}</span>
+          </div>
+          <div className={RESULT_COPY_PANEL_CLASS}>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <div className="text-[14px] font-bold tracking-[-0.01em] text-ios-text">{t("정리된 복사본")}</div>
+                <div className="mt-1 text-[12.5px] leading-5 text-ios-sub">{t("현재 화면 카드 순서대로 복사됩니다.")}</div>
+              </div>
+              <button type="button" onClick={() => void handleCopyResult()} className={RESULT_COPY_BUTTON_CLASS}>
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path d="M5 2.5h5a1.5 1.5 0 011.5 1.5v6A1.5 1.5 0 0110 11.5H5A1.5 1.5 0 013.5 10V4A1.5 1.5 0 015 2.5z" stroke="currentColor" strokeWidth="1.3" />
+                  <path d="M8.5 2v-.2A1.8 1.8 0 006.7 0h-4A1.7 1.7 0 001 1.7v6.1A1.7 1.7 0 002.7 9.5H3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+                </svg>
+                {t("가이드 복사")}
+              </button>
+            </div>
           </div>
           {result.suggestedNames && result.suggestedNames.length ? (
             <div className="mt-3 rounded-2xl border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-3 py-3">
@@ -1566,28 +1678,14 @@ export function ToolMedSafetyPage() {
               </ul>
             </div>
           ) : resultViewState.displayCards.length ? (
-            <div className="space-y-2.5">
-              {resultViewState.displayCards.map((card) => (
-                <section
-                  key={card.key}
-                  className={`${card.compact ? "border-l-[3px] border-[color:var(--rnest-accent)] pl-3 py-1.5" : "border-b border-ios-sep pb-2.5"} last:border-b-0`}
-                >
-                  <div className="text-[15px] font-bold tracking-[-0.01em] text-black">{card.title}</div>
-                  <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[15px] leading-6 text-ios-text">
-                    {card.items.map((item, index) => (
-                      <li key={`${card.key}-${index}`}>{renderHighlightedLine(item)}</li>
-                    ))}
-                  </ul>
-                </section>
-              ))}
-            </div>
+            renderResultCardList(resultViewState.displayCards)
           ) : (
             <div className="text-[15px] text-ios-sub">{t("표시할 분석 정보가 없습니다.")}</div>
           )}
         </div>
       </div>
     );
-  }, [activeSituation, analysisRequested, isLoading, mode, queryIntent, result, resultViewState, streamingCards, streamingDisplayName, t]);
+  }, [activeSituation, analysisRequested, handleCopyResult, isLoading, mode, queryIntent, result, resultViewState, streamingCards, streamingDisplayName, t]);
 
   const englishTranslationPending = lang === "en" && isLoading && analysisRequested;
   const showAnalyzingOverlay = isLoading && !englishTranslationPending && streamingCards.length === 0;
@@ -1914,6 +2012,11 @@ export function ToolMedSafetyPage() {
       />
       <MedSafetyAnalyzingOverlay open={showAnalyzingOverlay} t={t} />
       <EnglishTranslationPendingPopup open={englishTranslationPending} t={t} />
+      {copyMessage ? (
+        <div className="pointer-events-none fixed bottom-[calc(92px+env(safe-area-inset-bottom))] left-1/2 z-[120] -translate-x-1/2 rounded-full bg-black px-4 py-2 text-[12px] font-semibold text-white shadow-lg">
+          {copyMessage}
+        </div>
+      ) : null}
     </>
   );
 }

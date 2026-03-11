@@ -674,3 +674,211 @@ export function calculateDoseCheck(input: DoseCheckInput): CalcResult<DoseCheckO
     warnings,
   };
 }
+
+// ────────────────────────────────────────────────────
+// GCS (Glasgow Coma Scale)
+// ────────────────────────────────────────────────────
+
+export type GCSInput = { eye: number; verbal: number; motor: number };
+export type GCSSeverity = "mild" | "moderate" | "severe";
+export type GCSOutput = { total: number; severity: GCSSeverity };
+
+export function calculateGCS(input: GCSInput): CalcResult<GCSOutput> {
+  const { eye, verbal, motor } = input;
+  const warnings: CalcWarning[] = [];
+  if (eye < 1 || eye > 4) return { ok: false, errors: ["눈 반응(E)은 1~4 사이여야 합니다."], warnings };
+  if (verbal < 1 || verbal > 5) return { ok: false, errors: ["언어 반응(V)은 1~5 사이여야 합니다."], warnings };
+  if (motor < 1 || motor > 6) return { ok: false, errors: ["운동 반응(M)은 1~6 사이여야 합니다."], warnings };
+  const total = eye + verbal + motor;
+  const severity: GCSSeverity = total >= 13 ? "mild" : total >= 9 ? "moderate" : "severe";
+  if (total <= 8) warnings.push({ code: "gcs_severe", severity: "critical", message: "GCS ≤ 8: 기도 확보 및 즉시 의사 보고가 필요합니다." });
+  else if (total <= 12) warnings.push({ code: "gcs_moderate", severity: "warning", message: "GCS 9-12: 의식 저하 상태로 집중 모니터링이 필요합니다." });
+  return { ok: true, data: { total, severity }, warnings };
+}
+
+// ────────────────────────────────────────────────────
+// BMI (Body Mass Index)
+// ────────────────────────────────────────────────────
+
+export type BMICategoryKey = "underweight" | "normal" | "overweight" | "obese" | "obese2" | "obese3";
+export type BMIOutput = { bmi: number; categoryKey: BMICategoryKey };
+
+export function calculateBMI(weightKg: number, heightCm: number, asianCutoffs = true): CalcResult<BMIOutput> {
+  const warnings: CalcWarning[] = [];
+  if (weightKg <= 0 || heightCm <= 0) return { ok: false, errors: ["체중과 신장을 올바르게 입력해주세요."], warnings };
+  if (heightCm < 50 || heightCm > 250) warnings.push({ code: "bmi_height_range", severity: "info", message: "신장 입력값을 확인해주세요." });
+  const heightM = heightCm / 100;
+  const bmi = round(weightKg / (heightM * heightM), 1);
+  let categoryKey: BMICategoryKey;
+  if (asianCutoffs) {
+    if (bmi < 18.5) categoryKey = "underweight";
+    else if (bmi < 23) categoryKey = "normal";
+    else if (bmi < 25) categoryKey = "overweight";
+    else if (bmi < 30) categoryKey = "obese";
+    else if (bmi < 35) categoryKey = "obese2";
+    else categoryKey = "obese3";
+  } else {
+    if (bmi < 18.5) categoryKey = "underweight";
+    else if (bmi < 25) categoryKey = "normal";
+    else if (bmi < 30) categoryKey = "overweight";
+    else if (bmi < 35) categoryKey = "obese";
+    else if (bmi < 40) categoryKey = "obese2";
+    else categoryKey = "obese3";
+  }
+  return { ok: true, data: { bmi, categoryKey }, warnings };
+}
+
+// ────────────────────────────────────────────────────
+// BSA (Body Surface Area)
+// ────────────────────────────────────────────────────
+
+export type BSAFormula = "dubois" | "mosteller";
+export type BSAOutput = { bsaM2: number; formulaUsed: BSAFormula };
+
+export function calculateBSA(weightKg: number, heightCm: number, formula: BSAFormula = "mosteller"): CalcResult<BSAOutput> {
+  const warnings: CalcWarning[] = [];
+  if (weightKg <= 0 || heightCm <= 0) return { ok: false, errors: ["체중과 신장을 올바르게 입력해주세요."], warnings };
+  let bsa: number;
+  if (formula === "dubois") {
+    bsa = 0.007184 * Math.pow(heightCm, 0.725) * Math.pow(weightKg, 0.425);
+  } else {
+    bsa = Math.sqrt((heightCm * weightKg) / 3600);
+  }
+  bsa = round(bsa, 2);
+  if (bsa > 2.5) warnings.push({ code: "bsa_high", severity: "info", message: "BSA가 2.5 m²를 초과합니다. 입력값을 확인해주세요." });
+  if (bsa < 0.5) warnings.push({ code: "bsa_low", severity: "info", message: "BSA가 0.5 m² 미만입니다. 입력값을 확인해주세요." });
+  return { ok: true, data: { bsaM2: bsa, formulaUsed: formula }, warnings };
+}
+
+// ────────────────────────────────────────────────────
+// CrCl (Creatinine Clearance — Cockcroft-Gault)
+// ────────────────────────────────────────────────────
+
+export type RenalStageKey = "normal" | "mild" | "moderate" | "severe" | "failure";
+export type CrClOutput = { crclMlMin: number; renalStageKey: RenalStageKey };
+
+export function calculateCrCl(age: number, weightKg: number, serumCr: number, isFemale: boolean): CalcResult<CrClOutput> {
+  const warnings: CalcWarning[] = [];
+  if (age <= 0 || age > 130) return { ok: false, errors: ["나이를 올바르게 입력해주세요."], warnings };
+  if (weightKg <= 0) return { ok: false, errors: ["체중을 올바르게 입력해주세요."], warnings };
+  if (serumCr <= 0) return { ok: false, errors: ["혈청 크레아티닌을 올바르게 입력해주세요."], warnings };
+  let crcl = ((140 - age) * weightKg) / (72 * serumCr);
+  if (isFemale) crcl *= 0.85;
+  crcl = round(crcl, 1);
+  let renalStageKey: RenalStageKey;
+  if (crcl >= 90) renalStageKey = "normal";
+  else if (crcl >= 60) renalStageKey = "mild";
+  else if (crcl >= 30) renalStageKey = "moderate";
+  else if (crcl >= 15) renalStageKey = "severe";
+  else renalStageKey = "failure";
+  if (renalStageKey === "severe" || renalStageKey === "failure")
+    warnings.push({ code: "crcl_low", severity: "critical", message: "신기능 저하: 용량 조절이 필요할 수 있습니다. 처방의에게 확인하세요." });
+  else if (renalStageKey === "moderate")
+    warnings.push({ code: "crcl_moderate", severity: "warning", message: "중등도 신기능 저하: 일부 약물의 용량 조절이 필요할 수 있습니다." });
+  return { ok: true, data: { crclMlMin: crcl, renalStageKey }, warnings };
+}
+
+// ────────────────────────────────────────────────────
+// Unit Converter (Temperature, Weight, Length, Mass, Volume)
+// ────────────────────────────────────────────────────
+
+export type UnitCategory = "temperature" | "weight" | "length" | "mass" | "volume";
+
+const UNIT_CONVERSIONS: Record<string, Record<string, (v: number) => number>> = {
+  "temperature:°C:°F": { convert: (v) => v * 9 / 5 + 32 },
+  "temperature:°F:°C": { convert: (v) => (v - 32) * 5 / 9 },
+  "weight:kg:lb": { convert: (v) => v * 2.20462 },
+  "weight:lb:kg": { convert: (v) => v * 0.453592 },
+  "length:cm:in": { convert: (v) => v / 2.54 },
+  "length:in:cm": { convert: (v) => v * 2.54 },
+  "mass:g:mg": { convert: (v) => v * 1000 },
+  "mass:mg:g": { convert: (v) => v / 1000 },
+  "mass:mg:mcg": { convert: (v) => v * 1000 },
+  "mass:mcg:mg": { convert: (v) => v / 1000 },
+  "mass:g:mcg": { convert: (v) => v * 1_000_000 },
+  "mass:mcg:g": { convert: (v) => v / 1_000_000 },
+  "volume:L:mL": { convert: (v) => v * 1000 },
+  "volume:mL:L": { convert: (v) => v / 1000 },
+};
+
+export type UnitConversionOutput = { result: number; fromUnit: string; toUnit: string };
+
+export function convertMedicalUnit(category: UnitCategory, value: number, fromUnit: string, toUnit: string): CalcResult<UnitConversionOutput> {
+  const warnings: CalcWarning[] = [];
+  if (fromUnit === toUnit) return { ok: true, data: { result: value, fromUnit, toUnit }, warnings };
+  const key = `${category}:${fromUnit}:${toUnit}`;
+  const entry = UNIT_CONVERSIONS[key];
+  if (!entry) return { ok: false, errors: [`${fromUnit} → ${toUnit} 변환을 지원하지 않습니다.`], warnings };
+  const result = round(entry.convert(value), 4);
+  return { ok: true, data: { result, fromUnit, toUnit }, warnings };
+}
+
+export const UNIT_OPTIONS: Record<UnitCategory, string[]> = {
+  temperature: ["°C", "°F"],
+  weight: ["kg", "lb"],
+  length: ["cm", "in"],
+  mass: ["g", "mg", "mcg"],
+  volume: ["L", "mL"],
+};
+
+// ────────────────────────────────────────────────────
+// Fluid Balance (I/O)
+// ────────────────────────────────────────────────────
+
+export type FluidEntry = { label: string; amountMl: number };
+export type FluidBalanceOutput = { totalIntakeMl: number; totalOutputMl: number; netBalanceMl: number };
+
+export function calculateFluidBalance(intake: FluidEntry[], output: FluidEntry[], insensibleLossMl = 500): CalcResult<FluidBalanceOutput> {
+  const warnings: CalcWarning[] = [];
+  const totalIntakeMl = round(intake.reduce((s, e) => s + Math.max(0, e.amountMl), 0), 0);
+  const totalOutputMl = round(output.reduce((s, e) => s + Math.max(0, e.amountMl), 0) + Math.max(0, insensibleLossMl), 0);
+  const netBalanceMl = totalIntakeMl - totalOutputMl;
+  if (netBalanceMl > 1000) warnings.push({ code: "fluid_positive", severity: "warning", message: "수분 균형이 +1,000 mL 이상입니다. 과수분 위험을 확인하세요." });
+  if (netBalanceMl < -500) warnings.push({ code: "fluid_negative", severity: "warning", message: "수분 균형이 -500 mL 이하입니다. 탈수 위험을 확인하세요." });
+  return { ok: true, data: { totalIntakeMl, totalOutputMl, netBalanceMl }, warnings };
+}
+
+// ────────────────────────────────────────────────────
+// Pediatric Dose Calculator
+// ────────────────────────────────────────────────────
+
+export type PediatricDoseOutput = {
+  singleDose: number;
+  dailyDose: number;
+  appliedSingleDose: number;
+  appliedDailyDose: number;
+  singleCapped: boolean;
+  dailyCapped: boolean;
+};
+
+export function calculatePediatricDose(
+  weightKg: number,
+  dosePerKg: number,
+  frequency: number,
+  maxSingleDose?: number | null,
+  maxDailyDose?: number | null,
+): CalcResult<PediatricDoseOutput> {
+  const warnings: CalcWarning[] = [];
+  if (weightKg <= 0) return { ok: false, errors: ["체중을 올바르게 입력해주세요."], warnings };
+  if (dosePerKg <= 0) return { ok: false, errors: ["체중당 용량을 올바르게 입력해주세요."], warnings };
+  if (frequency <= 0) return { ok: false, errors: ["투여 횟수를 올바르게 입력해주세요."], warnings };
+  if (weightKg > 150) warnings.push({ code: "peds_weight_high", severity: "info", message: "체중이 150 kg을 초과합니다. 소아 계산이 적절한지 확인하세요." });
+  const singleDose = round(dosePerKg * weightKg, 2);
+  const dailyDose = round(singleDose * frequency, 2);
+  let appliedSingleDose = singleDose;
+  let appliedDailyDose = dailyDose;
+  let singleCapped = false;
+  let dailyCapped = false;
+  if (maxSingleDose != null && maxSingleDose > 0 && singleDose > maxSingleDose) {
+    appliedSingleDose = maxSingleDose;
+    singleCapped = true;
+    warnings.push({ code: "peds_single_cap", severity: "warning", message: `1회 최대 용량(${maxSingleDose})을 초과하여 상한 적용됩니다.` });
+    appliedDailyDose = round(appliedSingleDose * frequency, 2);
+  }
+  if (maxDailyDose != null && maxDailyDose > 0 && appliedDailyDose > maxDailyDose) {
+    appliedDailyDose = maxDailyDose;
+    dailyCapped = true;
+    warnings.push({ code: "peds_daily_cap", severity: "warning", message: `일일 최대 용량(${maxDailyDose})을 초과하여 상한 적용됩니다.` });
+  }
+  return { ok: true, data: { singleDose, dailyDose, appliedSingleDose, appliedDailyDose, singleCapped, dailyCapped }, warnings };
+}
