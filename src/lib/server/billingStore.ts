@@ -1,4 +1,4 @@
-import { getPlanDefinition, type BillingOrderKind, type PlanTier } from "@/lib/billing/plans";
+import { PAID_PLAN_TIERS, getPlanDefinition, type BillingOrderKind, type PlanTier } from "@/lib/billing/plans";
 import { buildBillingEntitlements, type BillingEntitlements } from "@/lib/billing/entitlements";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { ensureUserRow } from "@/lib/server/userStateStore";
@@ -123,7 +123,6 @@ export type BillingOrderAdminFilterInput = {
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const MED_SAFETY_DAILY_LIMIT_PRO = 10;
 const MED_SAFETY_TIMEZONE = "Asia/Seoul" as const;
 const OPTIONAL_CANCEL_COLUMNS = [
   "subscription_cancel_at_period_end",
@@ -256,6 +255,8 @@ async function readUserSubscriptionRow(userId: string): Promise<{ data: any; sup
 
 function asPlanTier(value: unknown): PlanTier {
   if (value === "free") return "free";
+  if (value === "plus") return "plus";
+  if (value === "pro") return "pro";
   if (typeof value === "string" && value.trim()) return "pro";
   return "free";
 }
@@ -308,20 +309,16 @@ function buildMedSafetyQuotaSnapshot(input: {
 }): MedSafetyQuotaSnapshot {
   const now = new Date();
   const today = toKstDateISO(now);
-  const isToday = input.usageDate === today;
-  const normalizedUsed = isToday ? toNonNegativeInt(input.dailyUsed) : 0;
   const normalizedExtra = toNonNegativeInt(input.extraCredits);
-  const dailyRemaining = input.hasPaidAccess ? Math.max(0, MED_SAFETY_DAILY_LIMIT_PRO - normalizedUsed) : 0;
-  const nextReset = new Date(now.getTime() + DAY_MS);
   return {
     timezone: MED_SAFETY_TIMEZONE,
-    dailyLimit: MED_SAFETY_DAILY_LIMIT_PRO,
-    dailyUsed: normalizedUsed,
-    dailyRemaining,
+    dailyLimit: 0,
+    dailyUsed: 0,
+    dailyRemaining: 0,
     extraCredits: normalizedExtra,
-    totalRemaining: dailyRemaining + normalizedExtra,
+    totalRemaining: normalizedExtra,
     usageDate: today,
-    nextResetAt: toKstDateISO(nextReset),
+    nextResetAt: toKstDateISO(now),
     isPro: input.hasPaidAccess,
   };
 }
@@ -359,7 +356,7 @@ function inferOrderKindFromLegacyFields(row: any): BillingOrderKind {
   }
   const orderId = String(row?.order_id ?? "").toLowerCase();
   const orderName = String(row?.order_name ?? "").toLowerCase();
-  if (/(^|_)credit(?:10)?(_|$)/.test(orderId)) return "credit_pack";
+  if (/(^|_)credit(?:10|30)?(_|$)/.test(orderId)) return "credit_pack";
   if (/credit|크레딧/.test(orderName)) return "credit_pack";
   return "subscription";
 }
@@ -373,6 +370,7 @@ function inferCreditPackUnitsFromLegacyFields(row: any, orderKind: BillingOrderK
   if (fromOrderName?.[1]) {
     return Math.max(1, toNonNegativeInt(fromOrderName[1], 10));
   }
+  if (String(row?.order_id ?? "").toLowerCase().includes("credit30")) return 30;
   if (String(row?.order_id ?? "").toLowerCase().includes("credit10")) return 10;
   return 10;
 }
@@ -671,7 +669,7 @@ async function readLatestPaidDoneOrder(userId: string): Promise<BillingOrderSumm
     .select(BILLING_ORDER_SELECT_WITH_OPTIONAL)
     .eq("user_id", userId)
     .eq("status", "DONE")
-    .eq("plan_tier", "pro")
+    .in("plan_tier", [...PAID_PLAN_TIERS])
     .eq("order_kind", "subscription")
     .order("created_at", { ascending: false })
     .limit(1)
@@ -691,14 +689,17 @@ async function readLatestPaidDoneOrder(userId: string): Promise<BillingOrderSumm
     .select(BILLING_ORDER_SELECT_BASE)
     .eq("user_id", userId)
     .eq("status", "DONE")
-    .eq("plan_tier", "pro")
     .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(12);
   if (fallbackRes.error) throw fallbackRes.error;
-  if (!fallbackRes.data) return null;
-  const summary = toBillingOrderSummary(fallbackRes.data);
-  return summary.orderKind === "subscription" ? summary : null;
+  const rows = Array.isArray(fallbackRes.data) ? fallbackRes.data : [];
+  for (const row of rows) {
+    const summary = toBillingOrderSummary(row);
+    if (summary.orderKind === "subscription" && summary.planTier !== "free") {
+      return summary;
+    }
+  }
+  return null;
 }
 
 async function readLatestCanceledOrderUpdatedAt(userId: string): Promise<Date | null> {
@@ -740,7 +741,7 @@ async function maybeRecoverSubscriptionFromLatestPaidOrder(
 
   const latestPaid = await readLatestPaidDoneOrder(userId);
   if (!latestPaid) return null;
-  if (latestPaid.planTier !== "pro") return null;
+  if (latestPaid.planTier === "free") return null;
 
   const paidBaseDate = parseDate(latestPaid.approvedAt ?? latestPaid.createdAt);
   if (!paidBaseDate) return null;
@@ -912,6 +913,8 @@ export async function addMedSafetyExtraCredits(input: {
   userId: string;
   credits: number;
   nowIso?: string;
+  reason?: string;
+  metadata?: Json | null;
 }): Promise<SubscriptionSnapshot> {
   const credits = Math.max(0, Math.round(input.credits));
   if (credits <= 0) return readSubscription(input.userId);
@@ -945,10 +948,12 @@ export async function addMedSafetyExtraCredits(input: {
           userId: input.userId,
           source: "extra",
           delta: credits,
-          reason: "credit_pack_purchase",
-          metadata: {
-            grantedCredits: credits,
-          } as Json,
+          reason: String(input.reason ?? "").trim() || "credit_grant",
+          metadata:
+            (input.metadata ??
+              ({
+                grantedCredits: credits,
+              } satisfies Json)) as Json,
         });
       } catch {
         // usage ledger write failure should not block credit grant
@@ -972,17 +977,12 @@ export async function consumeMedSafetyCredit(input: {
 
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const row = await readMedSafetyCreditRow(input.userId);
-    const usedToday = row.usageDate === today ? row.dailyUsed : 0;
     const extraCredits = row.extraCredits;
 
     let source: MedSafetyCreditSource | null = null;
-    let nextDailyUsed = usedToday;
     let nextExtra = extraCredits;
 
-    if (hasPaidAccess && usedToday < MED_SAFETY_DAILY_LIMIT_PRO) {
-      source = "daily";
-      nextDailyUsed = usedToday + 1;
-    } else if (extraCredits > 0) {
+    if (extraCredits > 0) {
       source = "extra";
       nextExtra = extraCredits - 1;
     } else {
@@ -993,7 +993,7 @@ export async function consumeMedSafetyCredit(input: {
         quota: buildMedSafetyQuotaSnapshot({
           hasPaidAccess,
           usageDate: today,
-          dailyUsed: usedToday,
+          dailyUsed: 0,
           extraCredits,
         }),
       };
@@ -1003,12 +1003,11 @@ export async function consumeMedSafetyCredit(input: {
       .from("rnest_users")
       .update({
         med_safety_usage_date: today,
-        med_safety_daily_used: nextDailyUsed,
+        med_safety_daily_used: 0,
         med_safety_extra_credits: nextExtra,
         last_seen: nowIso,
       })
       .eq("user_id", input.userId)
-      .eq("med_safety_daily_used", row.dailyUsed)
       .eq("med_safety_extra_credits", row.extraCredits)
       .select("user_id")
       .maybeSingle();
@@ -1044,7 +1043,7 @@ export async function consumeMedSafetyCredit(input: {
       quota: buildMedSafetyQuotaSnapshot({
         hasPaidAccess,
         usageDate: today,
-        dailyUsed: nextDailyUsed,
+        dailyUsed: 0,
         extraCredits: nextExtra,
       }),
     };
@@ -1418,14 +1417,17 @@ export async function readLatestRefundableOrder(userId: string): Promise<Billing
     .select(BILLING_ORDER_SELECT_BASE)
     .eq("user_id", userId)
     .eq("status", "DONE")
-    .eq("plan_tier", "pro")
     .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(12);
   if (fallbackRes.error) throw fallbackRes.error;
-  if (!fallbackRes.data) return null;
-  const summary = toBillingOrderSummary(fallbackRes.data);
-  return summary.orderKind === "subscription" ? summary : null;
+  const rows = Array.isArray(fallbackRes.data) ? fallbackRes.data : [];
+  for (const row of rows) {
+    const summary = toBillingOrderSummary(row);
+    if (summary.orderKind === "subscription") {
+      return summary;
+    }
+  }
+  return null;
 }
 
 export async function readPendingRefundRequestByOrder(input: {
@@ -1927,6 +1929,11 @@ export async function markBillingOrderDoneAndApplyPlan(input: {
       userId: input.userId,
       credits: creditPackUnits,
       nowIso,
+      reason: "credit_pack_purchase",
+      metadata: {
+        grantedCredits: creditPackUnits,
+        orderId: input.orderId,
+      } as Json,
     });
     return readSubscription(input.userId, { skipReconcile: true });
   }
@@ -1934,11 +1941,10 @@ export async function markBillingOrderDoneAndApplyPlan(input: {
   const plan = getPlanDefinition(paidPlanTier);
   const current = await readSubscription(input.userId, { skipReconcile: true });
   const currentEnd = parseDate(current.currentPeriodEnd);
-  const isSamePlan = current.tier === paidPlanTier;
   const hasRemaining = Boolean(currentEnd && Number.isFinite(currentEnd.getTime()) && currentEnd.getTime() > now.getTime());
-  const baseDate = isSamePlan && hasRemaining && currentEnd ? currentEnd : now;
+  const baseDate = hasRemaining && currentEnd ? currentEnd : now;
   const nextEnd = new Date(baseDate.getTime() + plan.periodDays * DAY_MS);
-  const startedAt = isSamePlan && current.startedAt ? current.startedAt : nowIso;
+  const startedAt = current.startedAt && current.hasPaidAccess ? current.startedAt : nowIso;
 
   await updateUserWithOptionalSubscriptionFallback(input.userId, {
     subscription_tier: paidPlanTier,
@@ -1955,5 +1961,19 @@ export async function markBillingOrderDoneAndApplyPlan(input: {
     last_seen: nowIso,
   });
 
-  return readSubscription(input.userId);
+  if (plan.medSafetyIncludedCredits > 0) {
+    await addMedSafetyExtraCredits({
+      userId: input.userId,
+      credits: plan.medSafetyIncludedCredits,
+      nowIso,
+      reason: "subscription_plan_grant",
+      metadata: {
+        grantedCredits: plan.medSafetyIncludedCredits,
+        planTier: paidPlanTier,
+        orderId: input.orderId,
+      } as Json,
+    });
+  }
+
+  return readSubscription(input.userId, { skipReconcile: true });
 }

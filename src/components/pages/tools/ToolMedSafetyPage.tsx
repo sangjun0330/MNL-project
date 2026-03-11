@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAuthState } from "@/lib/auth";
 import { requestPlanCheckout } from "@/lib/billing/client";
 import type { SubscriptionApi } from "@/lib/billing/client";
-import { getCheckoutProductDefinition } from "@/lib/billing/plans";
+import { getCheckoutProductDefinition, getPlanDefinition, type CheckoutProductId } from "@/lib/billing/plans";
 import { BillingCheckoutSheet } from "@/components/billing/BillingCheckoutSheet";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { Button } from "@/components/ui/Button";
@@ -20,11 +20,15 @@ const PAGE_TITLE_CLASS = "text-[24px] font-bold tracking-[-0.015em] text-ios-tex
 const TOOL_LIST_LINK_CLASS =
   "inline-flex h-10 shrink-0 items-center justify-center whitespace-nowrap rounded-full border border-[#E8E8EC] bg-white px-4 text-[12px] font-semibold leading-none text-ios-text";
 const PRIMARY_FLAT_BTN =
-  "h-11 rounded-full border border-black bg-black px-4 text-[14px] font-semibold text-white shadow-none hover:bg-black";
+  "h-11 rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-4 text-[14px] font-semibold text-[color:var(--rnest-accent)] shadow-none hover:border-[color:var(--rnest-accent)]";
 const SECONDARY_FLAT_BTN =
   "h-11 rounded-full border border-[#E8E8EC] bg-white px-4 text-[14px] font-semibold text-ios-text shadow-none hover:bg-[#F7F7F8]";
 const MESSAGE_USER_CLASS = "rounded-[24px] bg-[#F3F4F6] px-4 py-3 text-[15px] leading-6 text-ios-text";
 const META_PILL_CLASS = "inline-flex items-center rounded-full border border-[#E8E8EC] bg-[#F7F7F8] px-3 py-1.5 text-[11px] font-semibold text-ios-sub";
+const ACCENT_PILL_CLASS =
+  "inline-flex items-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-3 py-1.5 text-[11px] font-semibold text-[color:var(--rnest-accent)]";
+const ACCENT_SOLID_ICON_BTN_CLASS =
+  "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent)] text-white shadow-[0_10px_24px_rgba(123,111,208,0.22)] transition hover:bg-[color:var(--rnest-accent-strong)] disabled:cursor-not-allowed disabled:opacity-40";
 const STREAMING_CARD_CLASS =
   "rounded-[30px] border border-[#E7E8ED] bg-white px-5 py-4 text-[15px] leading-7 text-ios-text shadow-[0_18px_36px_rgba(15,23,42,0.04)]";
 const OPEN_LAYOUT_CLASS =
@@ -89,7 +93,7 @@ function parseErrorMessage(raw: string, t: TranslateFn) {
     return t("보안 검증에 실패했습니다. 앱을 새로고침한 뒤 다시 시도해 주세요.");
   }
   if (normalized.includes("insufficient_med_safety_credits"))
-    return t("AI 검색 잔여 크레딧이 없습니다. 크레딧 10회를 구매하거나 Pro 기본 크레딧이 초기화된 뒤 다시 시도해 주세요.");
+    return t("AI 검색 잔여 크레딧이 없습니다. 추가 크레딧을 구매하거나 Plus/Pro 플랜 크레딧을 충전한 뒤 다시 시도해 주세요.");
   if (normalized.includes("missing_supabase_env"))
     return t("서버 환경변수(SUPABASE)가 설정되지 않았습니다. 배포 환경변수를 확인해 주세요.");
   if (normalized.includes("missing_openai_api_key")) return t("AI API 키가 설정되지 않았습니다.");
@@ -538,7 +542,7 @@ export function ToolMedSafetyPage() {
   const [error, setError] = useState<string | null>(null);
   const [copyMessage, setCopyMessage] = useState("");
   const [creditPaying, setCreditPaying] = useState(false);
-  const [creditCheckoutSheetOpen, setCreditCheckoutSheetOpen] = useState(false);
+  const [creditCheckoutProduct, setCreditCheckoutProduct] = useState<CheckoutProductId | null>(null);
   const [lastSubmittedQuery, setLastSubmittedQuery] = useState("");
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [selectedImageName, setSelectedImageName] = useState("");
@@ -549,7 +553,6 @@ export function ToolMedSafetyPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composerInputRef = useRef<HTMLInputElement | null>(null);
 
-  const creditPack = getCheckoutProductDefinition("credit10");
   const subscriptionMedSafetyQuota = subscription?.medSafetyQuota ?? null;
   useEffect(() => {
     setOptimisticQuota(subscriptionMedSafetyQuota);
@@ -557,8 +560,7 @@ export function ToolMedSafetyPage() {
 
   const medSafetyQuota = optimisticQuota ?? subscriptionMedSafetyQuota;
   const quotaRemaining = Math.max(0, Number(medSafetyQuota?.totalRemaining ?? 0));
-  const dailyRemaining = Math.max(0, Number(medSafetyQuota?.dailyRemaining ?? 0));
-  const extraCredits = Math.max(0, Number(medSafetyQuota?.extraCredits ?? 0));
+  const activePlanTitle = getPlanDefinition(subscription?.tier ?? "free").title;
   const quotaKnown = authStatus === "authenticated" && !billingLoading && !!medSafetyQuota;
   const canAsk = authStatus === "authenticated" && (!quotaKnown || quotaRemaining > 0);
   const hasConversation = messages.length > 0 || Boolean(streamingText);
@@ -579,19 +581,20 @@ export function ToolMedSafetyPage() {
     threadEndRef.current.scrollIntoView({ block: "end" });
   }, [messages, streamingText, error]);
 
-  async function startCreditCheckout() {
+  async function openCreditCheckout(product: CheckoutProductId) {
     if (creditPaying || authStatus !== "authenticated") return;
     setError(null);
-    setCreditCheckoutSheetOpen(true);
+    setCreditCheckoutProduct(product);
   }
 
   async function confirmCreditCheckout() {
-    if (creditPaying || authStatus !== "authenticated") return;
+    if (creditPaying || authStatus !== "authenticated" || !creditCheckoutProduct) return;
+    const targetProduct = creditCheckoutProduct;
     setCreditPaying(true);
     setError(null);
-    setCreditCheckoutSheetOpen(false);
+    setCreditCheckoutProduct(null);
     try {
-      await requestPlanCheckout("credit10");
+      await requestPlanCheckout(targetProduct);
     } catch (cause: any) {
       const message = String(cause?.message ?? "checkout_failed");
       if (!message.includes("USER_CANCEL")) {
@@ -660,21 +663,14 @@ export function ToolMedSafetyPage() {
   function applyOptimisticQuotaConsume() {
     setOptimisticQuota((prev) => {
       if (!prev || prev.totalRemaining <= 0) return prev;
-      if (prev.isPro && prev.dailyRemaining > 0) {
-        const nextDailyRemaining = Math.max(0, prev.dailyRemaining - 1);
-        return {
-          ...prev,
-          dailyUsed: prev.dailyUsed + 1,
-          dailyRemaining: nextDailyRemaining,
-          totalRemaining: nextDailyRemaining + prev.extraCredits,
-        };
-      }
       if (prev.extraCredits > 0) {
         const nextExtraCredits = Math.max(0, prev.extraCredits - 1);
         return {
           ...prev,
+          dailyUsed: 0,
+          dailyRemaining: 0,
           extraCredits: nextExtraCredits,
-          totalRemaining: prev.dailyRemaining + nextExtraCredits,
+          totalRemaining: nextExtraCredits,
         };
       }
       return prev;
@@ -698,7 +694,7 @@ export function ToolMedSafetyPage() {
       return;
     }
     if (quotaKnown && quotaRemaining <= 0) {
-      setError(t("AI 검색 잔여 크레딧이 없습니다. 크레딧 10회를 구매하거나 Pro 기본 크레딧이 초기화된 뒤 다시 시도해 주세요."));
+      setError(t("AI 검색 잔여 크레딧이 없습니다. 추가 크레딧을 구매하거나 Plus/Pro 플랜 크레딧을 충전한 뒤 다시 시도해 주세요."));
       return;
     }
 
@@ -908,14 +904,11 @@ export function ToolMedSafetyPage() {
 
             <div className="mt-4 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center rounded-full bg-black px-3 py-1.5 text-[11px] font-semibold text-white">
+                <span className={ACCENT_PILL_CLASS}>
                   {t("크레딧")}: {quotaRemaining}
                 </span>
                 <span className={META_PILL_CLASS}>
-                  {t("기본")}: {medSafetyQuota?.isPro ? `${dailyRemaining}/${medSafetyQuota.dailyLimit}` : t("해당 없음")}
-                </span>
-                <span className={META_PILL_CLASS}>
-                  {t("추가 크레딧")}: {extraCredits}
+                  {t("플랜")}: {activePlanTitle}
                 </span>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -929,14 +922,24 @@ export function ToolMedSafetyPage() {
                     {t("새 검색")}
                   </button>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={() => void startCreditCheckout()}
-                    disabled={creditPaying}
-                    className="inline-flex h-10 items-center justify-center rounded-full border border-[#E8E8EC] bg-white px-4 text-[12.5px] font-semibold text-ios-text disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {creditPaying ? t("결제창 준비 중...") : t("추가 크레딧 구매")}
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void openCreditCheckout("credit10")}
+                      disabled={creditPaying}
+                      className="inline-flex h-10 items-center justify-center rounded-full border border-[#E8E8EC] bg-white px-4 text-[12.5px] font-semibold text-ios-text disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {creditPaying && creditCheckoutProduct === "credit10" ? t("결제창 준비 중...") : t("크레딧 10회")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void openCreditCheckout("credit30")}
+                      disabled={creditPaying}
+                      className="inline-flex h-10 items-center justify-center rounded-full border border-[#E8E8EC] bg-white px-4 text-[12.5px] font-semibold text-ios-text disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {creditPaying && creditCheckoutProduct === "credit30" ? t("결제창 준비 중...") : t("크레딧 30회")}
+                    </button>
+                  </>
                 )}
                 <Link
                   href="/tools/med-safety/recent"
@@ -949,7 +952,7 @@ export function ToolMedSafetyPage() {
 
             {quotaKnown && quotaRemaining <= 0 ? (
               <div className="mt-4 rounded-[24px] border border-amber-200 bg-amber-50/92 px-4 py-3 text-[13px] font-semibold leading-6 text-amber-700">
-                {t("남은 AI 검색 크레딧이 없습니다. 크레딧 10회를 구매하거나 Pro 기본 크레딧이 초기화된 뒤 다시 이용해 주세요.")}
+                {t("남은 AI 검색 크레딧이 없습니다. 추가 크레딧을 구매하거나 Plus/Pro 플랜 크레딧을 충전한 뒤 다시 이용해 주세요.")}
               </div>
             ) : null}
 
@@ -1098,7 +1101,7 @@ export function ToolMedSafetyPage() {
               </div>
               <button
                 type="button"
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-black text-white disabled:cursor-not-allowed disabled:opacity-40"
+                className={ACCENT_SOLID_ICON_BTN_CLASS}
                 onClick={() => void submitQuestion()}
                 disabled={isLoading || !canAsk}
                 aria-label={isLoading ? t("질문 중...") : t("보내기")}
@@ -1125,37 +1128,44 @@ export function ToolMedSafetyPage() {
       </div>
 
       <BillingCheckoutSheet
-        open={creditCheckoutSheetOpen}
-        onClose={() => setCreditCheckoutSheetOpen(false)}
+        open={Boolean(creditCheckoutProduct)}
+        onClose={() => setCreditCheckoutProduct(null)}
         onConfirm={() => void confirmCreditCheckout()}
         loading={creditPaying}
-        productTitle={t(creditPack.title)}
+        productTitle={t(creditCheckoutProduct ? getCheckoutProductDefinition(creditCheckoutProduct).title : "")}
         productSubtitle={t("AI 임상 검색 전용")}
-        priceKrw={creditPack.priceKrw}
-        periodLabel={t("10회 사용권 · 소진 전까지 유지")}
+        priceKrw={creditCheckoutProduct ? getCheckoutProductDefinition(creditCheckoutProduct).priceKrw : 0}
+        periodLabel={
+          creditCheckoutProduct
+            ? t("{{count}}회 사용권 · 소진 전까지 유지", {
+                count: getCheckoutProductDefinition(creditCheckoutProduct).creditUnits,
+              })
+            : ""
+        }
+        detailText={t("결제 후 검색 크레딧이 즉시 충전되며, 사용 전까지 남은 수량이 유지됩니다.")}
         accountEmail={user?.email ?? null}
         confirmLabel={t("결제 계속")}
       />
 
       {showSessionDecisionPrompt ? (
         <div className="fixed inset-0 z-[115] flex items-end justify-center bg-black/10 px-4 pb-[calc(136px+env(safe-area-inset-bottom))] pt-6 backdrop-blur-[2px] sm:items-center sm:pb-6">
-          <div className="w-full max-w-[360px] rounded-[28px] border border-[#E8E8EC] bg-white px-5 py-5 shadow-[0_24px_80px_rgba(15,23,42,0.14)]">
+          <div className="w-full max-w-[420px] rounded-[28px] border border-[#E8E8EC] bg-white px-5 py-5 shadow-[0_24px_80px_rgba(15,23,42,0.14)]">
             <div className="text-[17px] font-semibold tracking-[-0.02em] text-ios-text">{t("이 세션에서 계속 질문할까요?")}</div>
             <div className="mt-2 text-[13px] leading-6 text-ios-sub">
               {t("계속 질문하면 같은 대화 흐름을 이어가고, 새 질문하기를 누르면 화면과 세션이 새로 시작됩니다.")}
             </div>
-            <div className="mt-4 flex gap-2">
+            <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
               <button
                 type="button"
                 onClick={startNewQuestionFlow}
-                className="flex-1 rounded-full border border-[#E8E8EC] bg-white px-4 py-3 text-[13px] font-semibold text-ios-text"
+                className="min-h-[52px] rounded-full border border-[#E8E8EC] bg-white px-4 py-3 text-center text-[13px] font-semibold leading-5 text-ios-text"
               >
                 {t("새 질문하기")}
               </button>
               <button
                 type="button"
                 onClick={continueCurrentSession}
-                className="flex-1 rounded-full bg-black px-4 py-3 text-[13px] font-semibold text-white"
+                className="min-h-[52px] rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent)] px-4 py-3 text-center text-[13px] font-semibold leading-5 text-white"
               >
                 {t("이 세션에서 계속 질문하기")}
               </button>

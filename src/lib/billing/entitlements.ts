@@ -21,7 +21,7 @@ export function buildBillingEntitlements(args: {
   hasPaidAccess: boolean;
   medSafetyTotalRemaining: number;
 }): BillingEntitlements {
-  const medSafetyAvailable = args.hasPaidAccess || args.medSafetyTotalRemaining > 0;
+  const medSafetyAvailable = args.medSafetyTotalRemaining > 0;
 
   return {
     recoveryPlannerSummary: true,

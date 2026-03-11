@@ -119,7 +119,8 @@ export function SettingsBillingSuccessPage() {
   const planTier = result?.subscription?.tier ?? result?.order?.planTier ?? "free";
   const isCreditPack = orderKind === "credit_pack";
   const creditUnits = Math.max(0, Number(result?.order?.creditPackUnits ?? 0));
-  const creditProduct = getCheckoutProductDefinition("credit10");
+  const creditProduct = getCheckoutProductDefinition(creditUnits >= 30 ? "credit30" : "credit10");
+  const planDefinition = getPlanDefinition(planTier);
   const primaryHref = returnTo || "/settings/billing";
   const primaryLabel = returnTo
     ? returnTo.startsWith("/insights/recovery")
@@ -152,19 +153,25 @@ export function SettingsBillingSuccessPage() {
             <div className={`${flatSubSurface} mt-4 p-4`}>
               <div className="text-[13px] text-ios-sub">{isCreditPack ? t("구매 상품") : t("적용 플랜")}</div>
               <div className="mt-1 text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">
-                {isCreditPack ? creditProduct.title : getPlanDefinition(planTier).title}
+                {isCreditPack ? creditProduct.title : planDefinition.title}
               </div>
               <div className="mt-2 text-[12.5px] text-ios-sub">
                 {t("결제 금액")}: {formatKrw(result.order?.amount ?? parsedAmount ?? 0)}
               </div>
               {isCreditPack ? (
                 <div className="mt-1 text-[12.5px] text-ios-sub">
-                  {t("충전 크레딧")}: {creditUnits > 0 ? `${creditUnits}${t("회")}` : `10${t("회")}`}
+                  {t("충전 크레딧")}: {creditUnits > 0 ? `${creditUnits}${t("회")}` : `${creditProduct.creditUnits}${t("회")}`}
                 </div>
               ) : (
-                <div className="mt-1 text-[12.5px] text-ios-sub">
-                  {t("만료일")}: {formatDateLabel(result.subscription?.currentPeriodEnd ?? null)}
-                </div>
+                <>
+                  <div className="mt-1 text-[12.5px] text-ios-sub">
+                    {t("포함 검색 크레딧")}: {planDefinition.medSafetyIncludedCredits}
+                    {t("회")}
+                  </div>
+                  <div className="mt-1 text-[12.5px] text-ios-sub">
+                    {t("만료일")}: {formatDateLabel(result.subscription?.currentPeriodEnd ?? null)}
+                  </div>
+                </>
               )}
             </div>
           </>

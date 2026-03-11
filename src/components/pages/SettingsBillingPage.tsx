@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { getCheckoutProductDefinition, getPlanDefinition } from "@/lib/billing/plans";
+import { getCheckoutProductDefinition, getPlanDefinition, type CheckoutProductId } from "@/lib/billing/plans";
 import {
   fetchSubscriptionSnapshot,
   formatDateLabel,
@@ -41,13 +41,15 @@ export function SettingsBillingPage() {
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<CancelMode | null>(null);
   const [creditPaying, setCreditPaying] = useState(false);
-  const [creditCheckoutSheetOpen, setCreditCheckoutSheetOpen] = useState(false);
+  const [creditCheckoutProduct, setCreditCheckoutProduct] = useState<CheckoutProductId | null>(null);
   const flatSurface = "rounded-[24px] border border-ios-sep bg-white";
   const flatButtonBase =
     "inline-flex h-11 items-center justify-center rounded-full border px-4 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50";
   const flatButtonSecondary = `${flatButtonBase} border-ios-sep bg-[#F2F2F7] text-ios-text`;
   const flatButtonPrimary = `${flatButtonBase} border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]`;
-  const creditPack = getCheckoutProductDefinition("credit10");
+  const creditPack10 = getCheckoutProductDefinition("credit10");
+  const creditPack30 = getCheckoutProductDefinition("credit30");
+  const creditPacks = [creditPack10, creditPack30];
   const returnTo = sanitizeInternalPath(searchParams.get("returnTo"), "");
 
   const loadSubscription = useCallback(async () => {
@@ -71,7 +73,9 @@ export function SettingsBillingPage() {
   const subscription = subData?.subscription ?? null;
   const activeTier = subscription?.tier ?? "free";
   const hasPaidAccess = Boolean(subscription?.hasPaidAccess);
+  const currentPlan = getPlanDefinition(activeTier);
   const quota = subscription?.medSafetyQuota;
+  const totalCredits = Math.max(0, Number(quota?.totalRemaining ?? 0));
   const submitCancel = useCallback(
     async (mode: CancelMode) => {
       if (!user?.userId || actionLoading) return;
@@ -127,19 +131,20 @@ export function SettingsBillingPage() {
     [actionLoading, loadSubscription, t, user?.userId]
   );
 
-  const startCreditCheckout = useCallback(() => {
+  const startCreditCheckout = useCallback((product: CheckoutProductId) => {
     if (!user?.userId || creditPaying) return;
     setActionError(null);
-    setCreditCheckoutSheetOpen(true);
+    setCreditCheckoutProduct(product);
   }, [creditPaying, user?.userId]);
 
   const confirmCreditCheckout = useCallback(async () => {
-    if (!user?.userId || creditPaying) return;
+    if (!user?.userId || creditPaying || !creditCheckoutProduct) return;
+    const targetProduct = creditCheckoutProduct;
     setCreditPaying(true);
     setActionError(null);
-    setCreditCheckoutSheetOpen(false);
+    setCreditCheckoutProduct(null);
     try {
-      await requestPlanCheckout("credit10", { returnTo });
+      await requestPlanCheckout(targetProduct, { returnTo });
     } catch (e: any) {
       const msg = String(e?.message ?? "");
       if (!msg.includes("USER_CANCEL")) {
@@ -152,7 +157,7 @@ export function SettingsBillingPage() {
     } finally {
       setCreditPaying(false);
     }
-  }, [creditPaying, returnTo, t, user?.userId]);
+  }, [creditCheckoutProduct, creditPaying, returnTo, t, user?.userId]);
 
   return (
     <div className="mx-auto w-full max-w-[760px] px-4 pb-24 pt-6">
@@ -186,7 +191,7 @@ export function SettingsBillingPage() {
             <div className="text-[13px] font-semibold text-ios-sub">{t("현재 플랜")}</div>
             <div className="mt-2 flex items-end justify-between gap-3">
               <div className="text-[42px] font-extrabold tracking-[-0.03em] text-ios-text">
-                {getPlanDefinition(activeTier).title}
+                {currentPlan.title}
               </div>
               {hasPaidAccess ? (
                 <div className="rnest-chip-accent px-3 py-1 text-[12px]">
@@ -205,17 +210,17 @@ export function SettingsBillingPage() {
             </div>
             <div className="mt-3 grid gap-1.5 sm:grid-cols-2">
               <div className="rounded-xl border border-ios-sep bg-[#F7F7FA] px-3 py-2">
-                <div className="text-[11px] font-semibold text-ios-sub">{t("기본 크레딧 (Pro 전용 · 매일 초기화)")}</div>
+                <div className="text-[11px] font-semibold text-ios-sub">{t("현재 플랜 포함 크레딧")}</div>
                 <div className="mt-0.5 text-[18px] font-bold tracking-[-0.01em] text-ios-text">
-                  {quota?.isPro ? `${quota.dailyRemaining}/${quota.dailyLimit}${t("회")}` : t("해당 없음")}
+                  {currentPlan.medSafetyIncludedCredits > 0 ? `${currentPlan.medSafetyIncludedCredits}${t("회")}` : t("해당 없음")}
                 </div>
               </div>
               <div className="rounded-xl border border-ios-sep bg-[#F7F7FA] px-3 py-2">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="text-[11px] font-semibold text-ios-sub">{t("추가 크레딧 (구매분 · 미초기화)")}</div>
+                  <div className="text-[11px] font-semibold text-ios-sub">{t("현재 보유 검색 크레딧")}</div>
                   <button
                     type="button"
-                    onClick={startCreditCheckout}
+                    onClick={() => startCreditCheckout("credit10")}
                     disabled={creditPaying}
                     className="text-[11.5px] font-semibold text-[color:var(--rnest-accent)] underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-60"
                   >
@@ -223,7 +228,7 @@ export function SettingsBillingPage() {
                   </button>
                 </div>
                 <div className="mt-0.5 text-[18px] font-bold tracking-[-0.01em] text-ios-text">
-                  {(quota?.extraCredits ?? 0).toLocaleString("ko-KR")}
+                  {totalCredits.toLocaleString("ko-KR")}
                   {t("회")}
                 </div>
               </div>
@@ -275,17 +280,64 @@ export function SettingsBillingPage() {
             {actionError ? <div className="mt-2 text-[12px] text-red-600">{actionError}</div> : null}
             {actionNotice ? <div className="mt-2 text-[12px] text-[#0B7A3E]">{actionNotice}</div> : null}
           </section>
+
+          <section className={`${flatSurface} mt-4 p-6`}>
+            <div className="text-[13px] font-semibold text-ios-sub">{t("추가 크레딧 구매")}</div>
+            <div className="mt-1 text-[24px] font-extrabold tracking-[-0.02em] text-ios-text">{t("AI 임상 검색 크레딧")}</div>
+            <div className="mt-2 text-[13px] leading-6 text-ios-sub">
+              {t("필요한 만큼 충전해 두고 AI 검색에 바로 사용할 수 있습니다.")}
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              {creditPacks.map((creditPack) => (
+                <div key={creditPack.id} className="rounded-[20px] border border-ios-sep bg-[#F7F7FA] p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{t(creditPack.title)}</div>
+                      <div className="mt-1 text-[12px] text-ios-sub">{t("소진 전까지 유지")}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-[19px] font-extrabold tracking-[-0.02em] text-ios-text">
+                        {creditPack.priceKrw.toLocaleString("ko-KR")}
+                        {t("원")}
+                      </div>
+                      <div className="text-[12px] text-ios-muted">
+                        {creditPack.creditUnits}
+                        {t("회")}
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => startCreditCheckout(creditPack.id)}
+                    disabled={creditPaying}
+                    className={`${flatButtonPrimary} mt-4 w-full`}
+                  >
+                    {creditPaying && creditCheckoutProduct === creditPack.id
+                      ? t("결제창 준비 중...")
+                      : t("크레딧 {{count}}회 구매", { count: creditPack.creditUnits })}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
         </>
       ) : null}
       <BillingCheckoutSheet
-        open={creditCheckoutSheetOpen}
-        onClose={() => setCreditCheckoutSheetOpen(false)}
+        open={Boolean(creditCheckoutProduct)}
+        onClose={() => setCreditCheckoutProduct(null)}
         onConfirm={() => void confirmCreditCheckout()}
         loading={creditPaying}
-        productTitle={t(creditPack.title)}
-        productSubtitle={t("AI 약물·도구 검색기 전용")}
-        priceKrw={creditPack.priceKrw}
-        periodLabel={t("10회 사용권 · 소진 전까지 유지")}
+        productTitle={t(creditCheckoutProduct ? getCheckoutProductDefinition(creditCheckoutProduct).title : "")}
+        productSubtitle={t("AI 임상 검색 전용")}
+        priceKrw={creditCheckoutProduct ? getCheckoutProductDefinition(creditCheckoutProduct).priceKrw : 0}
+        periodLabel={
+          creditCheckoutProduct
+            ? t("{{count}}회 사용권 · 소진 전까지 유지", {
+                count: getCheckoutProductDefinition(creditCheckoutProduct).creditUnits,
+              })
+            : ""
+        }
+        detailText={t("결제 후 검색 크레딧이 즉시 충전되며, 사용 전까지 남은 수량이 유지됩니다.")}
         accountEmail={user?.email ?? null}
         confirmLabel={t("결제 계속")}
       />

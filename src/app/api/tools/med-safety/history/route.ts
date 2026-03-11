@@ -1,6 +1,7 @@
 import { loadAIContent } from "@/lib/server/aiContentStore";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { jsonNoStore } from "@/lib/server/requestSecurity";
+import { getPlanDefinition } from "@/lib/billing/plans";
 import type { SubscriptionSnapshot } from "@/lib/server/billingStore";
 
 export const runtime = "edge";
@@ -169,7 +170,10 @@ export async function GET(req: Request) {
     const row = await loadAIContent(userId).catch(() => null);
     const data = isRecord(row?.data) ? row.data : {};
     const subscription = await safeLoadSubscription(userId);
-    const historyLimit = subscription?.hasPaidAccess ? MED_SAFETY_RECENT_LIMIT_PRO : MED_SAFETY_RECENT_LIMIT_FREE;
+    const historyLimit =
+      subscription?.hasPaidAccess && subscription.tier !== "free"
+        ? getPlanDefinition(subscription.tier).medSafetyHistoryLimit
+        : getPlanDefinition("free").medSafetyHistoryLimit;
     const items = normalizeHistory(data.medSafetyRecent, historyLimit);
 
     return jsonNoStore(

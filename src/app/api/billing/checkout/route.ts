@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { asCheckoutProductId, getCheckoutProductDefinition } from "@/lib/billing/plans";
+import { asCheckoutProductId, getCheckoutProductDefinition, getPaidPlanRank } from "@/lib/billing/plans";
 import { sanitizeInternalPath } from "@/lib/navigation";
-import { countRecentReadyOrdersByUser, createBillingOrder, createCustomerKey } from "@/lib/server/billingStore";
+import { countRecentReadyOrdersByUser, createBillingOrder, createCustomerKey, readSubscription } from "@/lib/server/billingStore";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { getRouteSupabaseClient } from "@/lib/server/supabaseRouteClient";
 import { readTossClientKeyFromEnv, readTossSecretKeyFromEnv } from "@/lib/server/tossConfig";
@@ -13,7 +13,7 @@ function bad(status: number, message: string) {
   return NextResponse.json({ ok: false, error: message }, { status });
 }
 
-function buildOrderId(productId: "pro" | "credit10") {
+function buildOrderId(productId: "plus" | "pro" | "credit10" | "credit30") {
   const stamp = Date.now().toString(36);
   const bytes = crypto.getRandomValues(new Uint8Array(6));
   const rand = Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -78,10 +78,26 @@ export async function POST(req: Request) {
     return bad(400, "invalid_json");
   }
 
-  const productId = asCheckoutProductId(body?.product ?? body?.plan) ?? "pro";
+  const productId = asCheckoutProductId(body?.product ?? body?.plan) ?? "plus";
   const returnTo = sanitizeInternalPath(typeof body?.returnTo === "string" ? body.returnTo : null, "");
   const product = getCheckoutProductDefinition(productId);
   if (!product.checkoutEnabled) return bad(400, "checkout_disabled_product");
+
+  if (product.kind === "subscription" && product.planTier) {
+    try {
+      const current = await readSubscription(userId);
+      if (current.hasPaidAccess && current.tier !== "free") {
+        const currentRank = getPaidPlanRank(current.tier);
+        const targetRank = getPaidPlanRank(product.planTier);
+        if (targetRank < currentRank) {
+          return bad(409, "paid_plan_downgrade_not_allowed");
+        }
+      }
+    } catch {
+      // fail-open: checkout creation should not be blocked by snapshot read failure
+    }
+  }
+
   const orderId = buildOrderId(productId);
 
   try {

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { todayISO, type ISODate } from "@/lib/date";
 import type { Language } from "@/lib/i18n";
+import { getPlanDefinition } from "@/lib/billing/plans";
 import { buildPrivateNoStoreHeaders, jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { analyzeMedSafetyWithOpenAI, translateMedSafetyToEnglish } from "@/lib/server/openaiMedSafety";
 import {
@@ -192,6 +193,18 @@ async function safeConsumeMedSafetyCredit(userId: string): Promise<{
   if (!serviceRole || !supabaseUrl) throw new Error("missing_supabase_env");
   const { consumeMedSafetyCredit } = await import("@/lib/server/billingStore");
   return await consumeMedSafetyCredit({ userId });
+}
+
+async function safeReadSubscription(userId: string) {
+  try {
+    const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!serviceRole || !supabaseUrl) return null;
+    const { readSubscription } = await import("@/lib/server/billingStore");
+    return await readSubscription(userId);
+  } catch {
+    return null;
+  }
 }
 
 async function safeRestoreConsumedMedSafetyCredit(userId: string, source: "daily" | "extra" | null): Promise<void> {
@@ -473,6 +486,7 @@ export async function POST(req: NextRequest) {
       token: continuationToken,
       userId,
     });
+    const subscription = await safeReadSubscription(userId);
     const previousResponseId = continuationState?.previousResponseId ?? undefined;
     const conversationId = continuationState?.conversationId ?? undefined;
 
@@ -596,7 +610,10 @@ export async function POST(req: NextRequest) {
         responseData: payloadKo,
       }) && !abort.signal.aborted;
       if (shouldCommitCredit) {
-        const recentLimit = creditUse.quota.isPro ? MED_SAFETY_RECENT_LIMIT_PRO : MED_SAFETY_RECENT_LIMIT_FREE;
+        const recentLimit =
+          subscription?.hasPaidAccess && subscription.tier !== "free"
+            ? getPlanDefinition(subscription.tier).medSafetyHistoryLimit
+            : getPlanDefinition("free").medSafetyHistoryLimit;
         const recentSaveError = await safeAppendMedSafetyRecent({
           userId,
           dateISO: today,

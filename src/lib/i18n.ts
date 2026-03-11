@@ -984,6 +984,18 @@ const EN_EXTRA: Record<string, string> = {
   "추가 크레딧 (구매분 · 미초기화)": "Extra credits (Purchased · no daily reset)",
   "추가 크레딧 구매": "Buy extra credits",
   "추가 구매": "Additional purchase",
+  "AI 검색 크레딧 30회": "AI search credits 30",
+  "AI 검색 기록 저장 5개": "Save up to 5 recent AI searches",
+  "AI 검색 기록은 최근 5개까지 저장됩니다.": "AI search history is saved up to 5 recent items.",
+  "AI 검색 1회당 1크레딧 차감 · 소진 전까지 유지": "1 credit is used per AI search · kept until exhausted",
+  "소진 전까지 유지": "Kept until exhausted",
+  "필요한 만큼 충전해 두고 AI 검색에 바로 사용할 수 있습니다.": "Top up as needed and use it right away for AI search.",
+  "결제 후 검색 크레딧이 즉시 충전되며, 사용 전까지 남은 수량이 유지됩니다.":
+    "Search credits are charged immediately after payment and remain available until used.",
+  "크레딧 {{count}}회 구매": "Buy {{count}} credits",
+  "{{count}}회 사용권 · 소진 전까지 유지": "{{count}} uses · available until exhausted",
+  "크레딧 10회": "10 credits",
+  "크레딧 30회": "30 credits",
   "크레딧 10회 구매": "Buy 10 credits",
   "해당 없음": "Not available",
   "회": "uses",
@@ -1123,10 +1135,14 @@ const EN_EXTRA: Record<string, string> = {
   "AI 검색 잔여 횟수를 불러오고 있습니다.": "Loading remaining AI search credits.",
   "AI 검색 잔여 크레딧이 없습니다. 크레딧 10회를 구매 후 다시 시도해 주세요.":
     "No AI search credits remaining. Buy a 10-credit pack and try again.",
+  "AI 검색 잔여 크레딧이 없습니다. 추가 크레딧을 구매하거나 Plus/Pro 플랜 크레딧을 충전한 뒤 다시 시도해 주세요.":
+    "No AI search credits remain. Buy extra credits or recharge with Plus/Pro plan credits and try again.",
   "AI 검색 잔여 크레딧이 없습니다. 크레딧 10회를 구매하거나(무료/Pro), Pro는 다음날 자동 초기화 후 다시 시도해 주세요.":
     "No AI search credits remaining. Buy a 10-credit pack (Free/Pro), or if you are Pro, try again after tomorrow's automatic reset.",
   "남은 AI 검색 크레딧이 없습니다. 크레딧 10회를 구매하거나(무료/Pro), Pro는 다음날 자동 초기화 후 다시 이용해 주세요.":
     "No AI search credits remaining. Buy a 10-credit pack (Free/Pro), or if you are Pro, use it again after tomorrow's automatic reset.",
+  "남은 AI 검색 크레딧이 없습니다. 추가 크레딧을 구매하거나 Plus/Pro 플랜 크레딧을 충전한 뒤 다시 이용해 주세요.":
+    "No AI search credits remain. Buy extra credits or recharge with Plus/Pro plan credits and use it again.",
   "서버 크레딧 스키마가 아직 반영되지 않았습니다. 데이터베이스 마이그레이션 적용 후 다시 시도해 주세요.":
     "The server credit schema is not applied yet. Apply the database migration and try again.",
   "서버 DB 스키마가 아직 최신이 아닙니다. 마이그레이션 적용 후 다시 시도해 주세요.":

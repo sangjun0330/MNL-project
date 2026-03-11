@@ -249,7 +249,7 @@ export async function ensureTossScript() {
 }
 
 export async function requestPlanCheckout(
-  product: CheckoutProductId = "pro",
+  product: CheckoutProductId = "plus",
   options?: { returnTo?: string | null }
 ) {
   const headers = await authHeaders();
