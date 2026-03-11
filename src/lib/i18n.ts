@@ -959,6 +959,8 @@ const EN_EXTRA: Record<string, string> = {
   "무엇이든 물어보세요": "Ask anything",
   "약물, 기구, 검사 수치, 간호 절차, 상황 대응까지 한 번에 질문할 수 있습니다.":
     "You can ask about medications, devices, labs, nursing procedures, and situation response in one place.",
+  "하단 입력창에 질문을 입력하면 바로 검색이 시작됩니다.":
+    "Type in the bottom chat bar to start the search right away.",
   "예: norepinephrine 투여 시 주의사항이 뭐야?": "e.g., What should I watch for when giving norepinephrine?",
   "빠른 질문": "Quick questions",
   "AI 검색 크레딧": "AI search credits",
@@ -1147,6 +1149,7 @@ const EN_EXTRA: Record<string, string> = {
     "Remove patient-identifying information and ask again.",
   "후속 질문": "Follow-up question",
   "예: 그럼 중심정맥으로만 줘야 하나요?": "e.g., So should it only be given through a central line?",
+  "이전 답변을 이어서 묻습니다.": "This continues the previous answer.",
   "이전 답변을 이어서 묻습니다. 새 주제로 바꾸려면 `새 검색`을 눌러 주세요.":
     "Your next question continues the previous answer. Tap `New search` to switch topics.",
   "환자 이름, 등록번호, 연락처 등 식별정보는 입력하지 마세요.":

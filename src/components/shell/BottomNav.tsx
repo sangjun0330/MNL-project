@@ -95,7 +95,7 @@ export function BottomNav() {
   }, [pathname]);
   const selectedHref = pendingHref ?? activeHref;
 
-  if (hide) return null;
+  if (hide || pathname === "/tools/med-safety") return null;
 
   return (
     <>

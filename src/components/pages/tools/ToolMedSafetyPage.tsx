@@ -11,7 +11,6 @@ import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
-import { Textarea } from "@/components/ui/Textarea";
 import { copyTextToClipboard } from "@/lib/structuredCopy";
 import { useI18n } from "@/lib/useI18n";
 
@@ -24,11 +23,13 @@ const PRIMARY_FLAT_BTN =
 const SECONDARY_FLAT_BTN =
   "h-11 rounded-full border border-[#E8E8EC] bg-white px-4 text-[14px] font-semibold text-ios-text shadow-none hover:bg-[#F7F7F8]";
 const MESSAGE_USER_CLASS = "rounded-[24px] bg-[#F3F4F6] px-4 py-3 text-[15px] leading-6 text-ios-text";
-const MESSAGE_ASSISTANT_CLASS = "rounded-[28px] bg-[#FBFBFC] px-5 py-4 text-[15px] leading-7 text-ios-text";
 const META_PILL_CLASS = "inline-flex items-center rounded-full border border-[#E8E8EC] bg-[#F7F7F8] px-3 py-1.5 text-[11px] font-semibold text-ios-sub";
 const QUICK_CHIP_CLASS =
   "inline-flex items-center rounded-full border border-[#E8E8EC] bg-white px-3.5 py-2 text-[12.5px] font-semibold text-ios-text transition hover:bg-[#F7F7F8]";
 const CANVAS_SURFACE_CLASS = "rounded-[28px] border border-[#ECECF0] bg-[#FBFBFC] p-3 sm:p-4";
+const STREAMING_CARD_CLASS = "rounded-[28px] border border-[#E7E8ED] bg-white px-5 py-4 text-[15px] leading-7 text-ios-text shadow-[0_12px_30px_rgba(15,23,42,0.04)]";
+const COMPOSER_PANEL_CLASS =
+  "rounded-[30px] border border-[#E8E8EC] bg-white/96 p-3 shadow-[0_22px_40px_rgba(15,23,42,0.12)] backdrop-blur";
 const MED_SAFETY_CLIENT_TIMEOUT_MS = 480_000;
 const RETRY_WITH_DATA_MESSAGE = "네트워크가 불안정합니다. 데이터(모바일 네트워크)를 켠 뒤 다시 시도해 주세요.";
 const QUICK_PROMPTS = [
@@ -56,8 +57,15 @@ type AnalyzePayload = {
   analyzedAt: number;
   source: "openai_live" | "openai_fallback";
   fallbackReason?: string | null;
-  responseId?: string | null;
-  conversationId?: string | null;
+  continuationToken?: string | null;
+};
+
+type AnswerSectionTone = "summary" | "action" | "warning" | "compare" | "neutral";
+
+type AnswerSection = {
+  title: string;
+  items: string[];
+  tone: AnswerSectionTone;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -145,8 +153,7 @@ function parseAnalyzePayload(payloadRaw: unknown): { ok: true; data: AnalyzePayl
       analyzedAt,
       source: String(node.source ?? "") === "openai_fallback" ? "openai_fallback" : "openai_live",
       fallbackReason: node.fallbackReason == null ? null : String(node.fallbackReason),
-      responseId: typeof node.responseId === "string" ? node.responseId : null,
-      conversationId: typeof node.conversationId === "string" ? node.conversationId : null,
+      continuationToken: typeof node.continuationToken === "string" ? node.continuationToken : null,
     },
   };
 }
@@ -305,6 +312,208 @@ async function parseAnalyzeStreamResponse(args: {
   return { data: parsedData, error: parsedError };
 }
 
+function cleanAnswerLine(value: string) {
+  return String(value ?? "")
+    .replace(/\u0000/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function stripBulletPrefix(value: string) {
+  return String(value ?? "")
+    .replace(/^[-*•·]\s+/, "")
+    .replace(/^\d+[.)]\s+/, "")
+    .trim();
+}
+
+function isAnswerBulletLine(value: string) {
+  return /^[-*•·]\s+/.test(value) || /^\d+[.)]\s+/.test(value);
+}
+
+const SECTION_TITLE_PATTERNS = [
+  /^(핵심|핵심 요약|핵심 해석|핵심 판단|요약|정의|임상 의미)$/i,
+  /^(지금 할 일|즉시 대응|즉시 조치|바로 할 수 있는 조치|실무 포인트|간호 포인트|관찰 포인트|확인 포인트)$/i,
+  /^(확인할 것|확인할 수치|확인 질문|추가로 확인할 것|추가로 정확히 해석하려면)$/i,
+  /^(주의|위험|보고 기준|호출 기준|중단 기준|중단\/보고\/호출 기준|stop rule)$/i,
+  /^(원인 후보|문제 원인 후보|원인|감별 포인트)$/i,
+  /^(비교|차이|선택 기준)$/i,
+  /^(해석|수치 해석|기전|적응증|모니터링|투여\/간호 핵심|투여\/모니터링 핵심)$/i,
+  /^(SBAR|보고 문구|보고 예시|SBAR 예시)$/i,
+];
+
+function looksLikeSectionHeading(value: string) {
+  const line = cleanAnswerLine(value);
+  if (!line) return false;
+  const normalized = stripBulletPrefix(line);
+  if (!normalized) return false;
+  if (/[:：]$/.test(normalized)) return true;
+  if (SECTION_TITLE_PATTERNS.some((pattern) => pattern.test(normalized))) return true;
+  if (normalized.length > 20) return false;
+  if (/[.?!]$/.test(normalized)) return false;
+  if (/(입니다|합니다|하세요|됩니다|입니다요)$/.test(normalized)) return false;
+  if (/[,:;]/.test(normalized)) return false;
+  return /^[가-힣A-Za-z0-9/()+ -]+$/.test(normalized);
+}
+
+function formatSectionTitle(value: string) {
+  return stripBulletPrefix(cleanAnswerLine(value)).replace(/[:：]$/, "").trim() || "핵심";
+}
+
+function splitAnswerSectionItems(lines: string[]) {
+  const out: string[] = [];
+  let buffer: string[] = [];
+
+  const flush = () => {
+    const text = buffer.join(" ").replace(/\s+/g, " ").trim();
+    if (text) out.push(stripBulletPrefix(text));
+    buffer = [];
+  };
+
+  for (const raw of lines) {
+    const line = cleanAnswerLine(raw);
+    if (!line) {
+      flush();
+      continue;
+    }
+    const normalized = stripBulletPrefix(line);
+    if (!normalized) continue;
+    if (isAnswerBulletLine(line)) {
+      flush();
+      out.push(normalized);
+      continue;
+    }
+    buffer.push(normalized);
+  }
+
+  flush();
+  return out.filter(Boolean);
+}
+
+function inferSectionTone(title: string, index: number): AnswerSectionTone {
+  const normalized = String(title ?? "")
+    .replace(/\s+/g, "")
+    .toLowerCase();
+
+  if (index === 0 || /(핵심|요약|정의|임상의미)/.test(normalized)) return "summary";
+  if (/(지금할일|즉시대응|조치|확인|실무포인트|간호포인트|sbar)/.test(normalized)) return "action";
+  if (/(주의|위험|보고|호출|중단|stop)/.test(normalized)) return "warning";
+  if (/(비교|차이|선택기준)/.test(normalized)) return "compare";
+  return "neutral";
+}
+
+function parseAnswerSections(value: string): AnswerSection[] {
+  const lines = String(value ?? "")
+    .replace(/\r/g, "")
+    .split("\n");
+
+  const sections: AnswerSection[] = [];
+  let currentTitle = "핵심";
+  let currentLines: string[] = [];
+
+  const pushCurrent = () => {
+    const items = splitAnswerSectionItems(currentLines);
+    if (!items.length) {
+      currentLines = [];
+      return;
+    }
+    sections.push({
+      title: currentTitle,
+      items,
+      tone: inferSectionTone(currentTitle, sections.length),
+    });
+    currentLines = [];
+  };
+
+  for (const rawLine of lines) {
+    const line = cleanAnswerLine(rawLine);
+    if (!line) {
+      currentLines.push("");
+      continue;
+    }
+    if (looksLikeSectionHeading(line)) {
+      pushCurrent();
+      currentTitle = formatSectionTitle(line);
+      continue;
+    }
+    currentLines.push(line);
+  }
+
+  pushCurrent();
+
+  if (sections.length) return sections;
+
+  const fallbackItems = splitAnswerSectionItems(lines);
+  if (!fallbackItems.length) return [];
+  return [
+    {
+      title: "답변",
+      items: fallbackItems,
+      tone: "summary",
+    },
+  ];
+}
+
+function sectionCardClass(tone: AnswerSectionTone) {
+  if (tone === "summary") {
+    return "rounded-[26px] border border-[#E3E7F1] bg-[linear-gradient(180deg,#FFFFFF_0%,#F7FAFF_100%)] p-4 shadow-[0_12px_26px_rgba(15,23,42,0.04)]";
+  }
+  if (tone === "action") {
+    return "rounded-[26px] border border-[#DDE9DE] bg-[linear-gradient(180deg,#FCFFFB_0%,#F5FBF3_100%)] p-4";
+  }
+  if (tone === "warning") {
+    return "rounded-[26px] border border-[#F1DFC9] bg-[linear-gradient(180deg,#FFFDF9_0%,#FFF6EE_100%)] p-4";
+  }
+  if (tone === "compare") {
+    return "rounded-[26px] border border-[#DEE6F1] bg-[linear-gradient(180deg,#FFFFFF_0%,#F7FAFD_100%)] p-4";
+  }
+  return "rounded-[26px] border border-[#E8E8EC] bg-[#FCFCFD] p-4";
+}
+
+function sectionTitleClass(tone: AnswerSectionTone) {
+  if (tone === "summary") return "bg-[#EDF3FF] text-[#32568A]";
+  if (tone === "action") return "bg-[#EAF6E8] text-[#2F6B36]";
+  if (tone === "warning") return "bg-[#FFF0DE] text-[#9B5C1C]";
+  if (tone === "compare") return "bg-[#EEF3FA] text-[#46617E]";
+  return "bg-[#F2F3F5] text-ios-sub";
+}
+
+function AssistantAnswerSections({ content }: { content: string }) {
+  const sections = parseAnswerSections(content);
+  if (!sections.length) {
+    return <div className="whitespace-pre-wrap break-words text-[15px] leading-7 text-ios-text">{content}</div>;
+  }
+
+  return (
+    <div className="space-y-3">
+      {sections.map((section, sectionIndex) => (
+        <section key={`${section.title}-${sectionIndex}`} className={sectionCardClass(section.tone)}>
+          <div
+            className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold tracking-[0.01em] ${sectionTitleClass(
+              section.tone
+            )}`}
+          >
+            {section.title}
+          </div>
+          <div className="mt-3 space-y-2.5">
+            {section.items.map((item, itemIndex) => (
+              <div
+                key={`${section.title}-${itemIndex}`}
+                className={`rounded-[20px] px-4 py-3 text-ios-text ${
+                  section.tone === "summary" && itemIndex === 0
+                    ? "bg-white text-[18px] font-semibold leading-8 shadow-[0_8px_20px_rgba(15,23,42,0.03)]"
+                    : "bg-white/92 text-[15px] leading-7"
+                }`}
+              >
+                {item}
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
 export function ToolMedSafetyPage() {
   const router = useRouter();
   const { t, lang } = useI18n();
@@ -315,8 +524,7 @@ export function ToolMedSafetyPage() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [streamingText, setStreamingText] = useState("");
-  const [lastResponseId, setLastResponseId] = useState<string | null>(null);
-  const [lastConversationId, setLastConversationId] = useState<string | null>(null);
+  const [lastContinuationToken, setLastContinuationToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copyMessage, setCopyMessage] = useState("");
   const [creditPaying, setCreditPaying] = useState(false);
@@ -381,8 +589,7 @@ export function ToolMedSafetyPage() {
     setInput("");
     setStreamingText("");
     setError(null);
-    setLastResponseId(null);
-    setLastConversationId(null);
+    setLastContinuationToken(null);
     setLastSubmittedQuery("");
   }
 
@@ -442,8 +649,7 @@ export function ToolMedSafetyPage() {
               query: question,
               locale: lang,
               stream: true,
-              previousResponseId: lastResponseId ?? undefined,
-              conversationId: lastConversationId ?? undefined,
+              continuationToken: lastContinuationToken ?? undefined,
             },
             MED_SAFETY_CLIENT_TIMEOUT_MS
           );
@@ -499,8 +705,7 @@ export function ToolMedSafetyPage() {
           source: normalizedData.source,
         },
       ]);
-      setLastResponseId(normalizedData.responseId ?? null);
-      setLastConversationId(normalizedData.conversationId ?? null);
+      setLastContinuationToken(normalizedData.continuationToken ?? null);
 
       if (normalizedData.source === "openai_fallback") {
         setError(
@@ -582,7 +787,7 @@ export function ToolMedSafetyPage() {
 
   return (
     <>
-      <div className="mx-auto w-full max-w-[860px] space-y-4 px-3 pb-24 pt-6">
+      <div className="mx-auto w-full max-w-[860px] space-y-4 px-3 pb-[calc(148px+env(safe-area-inset-bottom))] pt-6">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 pr-1">
             <div className={PAGE_TITLE_CLASS}>{t("AI 임상 검색")}</div>
@@ -608,14 +813,25 @@ export function ToolMedSafetyPage() {
                 </span>
               </div>
               <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => void startCreditCheckout()}
-                  disabled={creditPaying}
-                  className="inline-flex h-10 items-center justify-center rounded-full border border-[#E8E8EC] bg-white px-4 text-[12.5px] font-semibold text-ios-text disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {creditPaying ? t("결제창 준비 중...") : t("추가 크레딧 구매")}
-                </button>
+                {hasConversation && lastAssistantMessage ? (
+                  <button type="button" onClick={() => void copyLatestAnswer()} className={SECONDARY_FLAT_BTN}>
+                    {t("복사")}
+                  </button>
+                ) : null}
+                {hasConversation ? (
+                  <button type="button" onClick={resetConversation} className={SECONDARY_FLAT_BTN}>
+                    {t("새 검색")}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void startCreditCheckout()}
+                    disabled={creditPaying}
+                    className="inline-flex h-10 items-center justify-center rounded-full border border-[#E8E8EC] bg-white px-4 text-[12.5px] font-semibold text-ios-text disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {creditPaying ? t("결제창 준비 중...") : t("추가 크레딧 구매")}
+                  </button>
+                )}
                 <Link
                   href="/tools/med-safety/recent"
                   className="inline-flex h-10 items-center justify-center rounded-full border border-[#E8E8EC] bg-white px-4 text-[12.5px] font-semibold text-ios-text"
@@ -632,7 +848,7 @@ export function ToolMedSafetyPage() {
             ) : null}
 
             {!hasConversation ? (
-              <div className="flex min-h-[420px] flex-col justify-center py-2 sm:min-h-[500px]">
+              <div className="flex min-h-[420px] flex-col justify-center py-4 sm:min-h-[500px]">
                 <div className="mx-auto max-w-[620px] text-center">
                   <div className="text-[30px] font-bold tracking-[-0.04em] text-ios-text sm:text-[36px]">{t("무엇이든 물어보세요")}</div>
                   <div className="mt-3 text-[15px] leading-7 text-ios-sub">
@@ -641,36 +857,8 @@ export function ToolMedSafetyPage() {
                 </div>
 
                 <div className={`mx-auto mt-8 w-full max-w-[720px] ${CANVAS_SURFACE_CLASS}`}>
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                    <Input
-                      value={input}
-                      onChange={(event) => setInput(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          void submitQuestion();
-                        }
-                      }}
-                      className="h-14 flex-1 rounded-[20px] border-0 bg-white px-5 text-[16px] shadow-none"
-                      placeholder={t("예: norepinephrine 투여 시 주의사항이 뭐야?")}
-                      autoCapitalize="off"
-                      autoCorrect="off"
-                      autoComplete="off"
-                      spellCheck={false}
-                    />
-                    <Button
-                      variant="secondary"
-                      className={`${PRIMARY_FLAT_BTN} h-12 shrink-0 px-6`}
-                      onClick={() => void submitQuestion()}
-                      disabled={isLoading || !canAsk}
-                    >
-                      {isLoading ? t("질문 중...") : t("AI 검색")}
-                    </Button>
-                  </div>
-                  <div className="mt-3 text-[12px] leading-5 text-ios-sub">
-                    {t("환자 이름, 등록번호, 연락처 등 식별정보는 입력하지 마세요.")}
-                  </div>
-                  <div className="mt-5 flex flex-wrap gap-2">
+                  <div className="text-[12px] font-semibold tracking-[0.01em] text-ios-sub">{t("빠른 질문")}</div>
+                  <div className="mt-3 flex flex-wrap gap-2">
                     {QUICK_PROMPTS.map((prompt) => (
                       <button
                         key={prompt}
@@ -683,98 +871,53 @@ export function ToolMedSafetyPage() {
                       </button>
                     ))}
                   </div>
+                  <div className="mt-4 rounded-[22px] border border-dashed border-[#E3E4E8] bg-white px-4 py-4 text-[13px] leading-6 text-ios-sub">
+                    {t("하단 입력창에 질문을 입력하면 바로 검색이 시작됩니다.")}
+                  </div>
                 </div>
               </div>
             ) : (
               <div className="space-y-6">
-                <div className="max-h-[60vh] overflow-y-auto pr-1">
-                  <div className="space-y-6">
-                    {messages.map((message) => (
-                      <div key={message.id} className={message.role === "user" ? "flex justify-end" : "flex justify-start"}>
-                        <div className={message.role === "user" ? "max-w-[86%]" : "max-w-full min-w-0 flex-1"}>
-                          <div className={message.role === "user" ? MESSAGE_USER_CLASS : MESSAGE_ASSISTANT_CLASS}>
+                <div className="space-y-6">
+                  {messages.map((message) => (
+                    <div key={message.id} className={message.role === "user" ? "flex justify-end" : "flex justify-start"}>
+                      <div className={message.role === "user" ? "max-w-[88%]" : "max-w-full min-w-0 flex-1"}>
+                        {message.role === "user" ? (
+                          <div className={MESSAGE_USER_CLASS}>
                             <div className="whitespace-pre-wrap break-words">{message.content}</div>
                           </div>
-                          <div
-                            className={`mt-2 flex flex-wrap items-center gap-2 text-[11px] text-ios-sub ${
-                              message.role === "user" ? "justify-end" : ""
-                            }`}
-                          >
-                            <span>{message.role === "user" ? t("나") : t("AI")}</span>
-                            <span>{formatTime(message.timestamp)}</span>
-                            {message.model ? <span>{message.model}</span> : null}
-                            {message.source === "openai_fallback" ? <span>{t("기본 안전 모드")}</span> : null}
-                          </div>
+                        ) : (
+                          <AssistantAnswerSections content={message.content} />
+                        )}
+                        <div
+                          className={`mt-2 flex flex-wrap items-center gap-2 text-[11px] text-ios-sub ${
+                            message.role === "user" ? "justify-end" : ""
+                          }`}
+                        >
+                          <span>{message.role === "user" ? t("나") : t("AI")}</span>
+                          <span>{formatTime(message.timestamp)}</span>
+                          {message.model ? <span>{message.model}</span> : null}
+                          {message.source === "openai_fallback" ? <span>{t("기본 안전 모드")}</span> : null}
                         </div>
                       </div>
-                    ))}
+                    </div>
+                  ))}
 
-                    {streamingText ? (
-                      <div className="flex justify-start">
-                        <div className="max-w-full min-w-0 flex-1">
-                          <div className={MESSAGE_ASSISTANT_CLASS}>
-                            <div className="whitespace-pre-wrap break-words">{streamingText}</div>
-                          </div>
-                          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-ios-sub">
-                            <span>{t("AI")}</span>
-                            <span>{t("작성 중...")}</span>
-                          </div>
+                  {streamingText ? (
+                    <div className="flex justify-start">
+                      <div className="max-w-full min-w-0 flex-1">
+                        <div className={STREAMING_CARD_CLASS}>
+                          <div className="whitespace-pre-wrap break-words">{streamingText}</div>
+                        </div>
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-ios-sub">
+                          <span>{t("AI")}</span>
+                          <span>{t("작성 중...")}</span>
                         </div>
                       </div>
-                    ) : null}
-
-                    <div ref={threadEndRef} />
-                  </div>
-                </div>
-
-                <div className={CANVAS_SURFACE_CLASS}>
-                  <div className="text-[13px] font-semibold text-ios-sub">{t("후속 질문")}</div>
-                  <Textarea
-                    value={input}
-                    onChange={(event) => setInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" && !event.shiftKey) {
-                        event.preventDefault();
-                        void submitQuestion();
-                      }
-                    }}
-                    className="mt-3 min-h-[116px] rounded-[20px] border-0 bg-white px-4 py-3 text-[15px] leading-6 text-ios-text"
-                    placeholder={t("예: 그럼 중심정맥으로만 줘야 하나요?")}
-                    autoCapitalize="off"
-                    autoCorrect="off"
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                  <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="text-[12px] leading-5 text-ios-sub">
-                      {t("이전 답변을 이어서 묻습니다. 새 주제로 바꾸려면 `새 검색`을 눌러 주세요.")}
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                      <button type="button" onClick={() => void copyLatestAnswer()} className={SECONDARY_FLAT_BTN} disabled={!lastAssistantMessage}>
-                        {t("복사")}
-                      </button>
-                      <button type="button" onClick={resetConversation} className={SECONDARY_FLAT_BTN}>
-                        {t("새 검색")}
-                      </button>
-                      <Link
-                        href="/tools/med-safety/recent"
-                        className="inline-flex h-11 items-center justify-center rounded-full border border-[#E8E8EC] bg-white px-4 text-[14px] font-semibold text-ios-text"
-                      >
-                        {t("최근 기록")}
-                      </Link>
-                      <Button
-                        variant="secondary"
-                        className={`${PRIMARY_FLAT_BTN} px-5`}
-                        onClick={() => void submitQuestion()}
-                        disabled={isLoading || !canAsk}
-                      >
-                        {isLoading ? t("질문 중...") : t("보내기")}
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="mt-3 text-[12px] leading-5 text-ios-sub">
-                    {t("환자 이름, 등록번호, 연락처 등 식별정보는 입력하지 마세요.")}
-                  </div>
+                  ) : null}
+
+                  <div ref={threadEndRef} />
                 </div>
               </div>
             )}
@@ -807,6 +950,45 @@ export function ToolMedSafetyPage() {
         </div>
       </div>
 
+      <div className="pointer-events-none fixed inset-x-0 bottom-[calc(14px+env(safe-area-inset-bottom))] z-50">
+        <div className="mx-auto w-full max-w-[720px] px-4">
+          <div className={`pointer-events-auto ${COMPOSER_PANEL_CLASS}`}>
+            <div className="flex items-center gap-3">
+              <Input
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void submitQuestion();
+                  }
+                }}
+                className="h-12 flex-1 rounded-full border-0 bg-[#F5F6F8] px-5 text-[15px] shadow-none"
+                placeholder={hasConversation ? t("예: 그럼 중심정맥으로만 줘야 하나요?") : t("예: norepinephrine 투여 시 주의사항이 뭐야?")}
+                autoCapitalize="off"
+                autoCorrect="off"
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <Button
+                variant="secondary"
+                className={`${PRIMARY_FLAT_BTN} h-12 shrink-0 rounded-full px-5`}
+                onClick={() => void submitQuestion()}
+                disabled={isLoading || !canAsk}
+              >
+                {isLoading ? t("질문 중...") : hasConversation ? t("보내기") : t("AI 검색")}
+              </Button>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+              <div className="text-[11px] leading-5 text-ios-sub">{t("환자 이름, 등록번호, 연락처 등 식별정보는 입력하지 마세요.")}</div>
+              {hasConversation ? (
+                <div className="text-[11px] leading-5 text-ios-sub">{t("이전 답변을 이어서 묻습니다.")}</div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      </div>
+
       <BillingCheckoutSheet
         open={creditCheckoutSheetOpen}
         onClose={() => setCreditCheckoutSheetOpen(false)}
@@ -821,7 +1003,7 @@ export function ToolMedSafetyPage() {
       />
 
       {copyMessage ? (
-        <div className="pointer-events-none fixed bottom-[calc(92px+env(safe-area-inset-bottom))] left-1/2 z-[120] -translate-x-1/2 rounded-full bg-black px-4 py-2 text-[12px] font-semibold text-white shadow-lg">
+        <div className="pointer-events-none fixed bottom-[calc(106px+env(safe-area-inset-bottom))] left-1/2 z-[120] -translate-x-1/2 rounded-full bg-black px-4 py-2 text-[12px] font-semibold text-white shadow-lg">
           {copyMessage}
         </div>
       ) : null}

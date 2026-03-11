@@ -14,6 +14,7 @@ type AnalyzeParams = {
   imageDataUrl?: string;
   previousResponseId?: string;
   conversationId?: string;
+  continuationMemory?: string;
   onTextDelta?: (delta: string) => void | Promise<void>;
   signal: AbortSignal;
 };
@@ -221,6 +222,11 @@ const MED_SAFETY_DEVELOPER_PROMPT = [
   "사용자는 병동, 응급실, 중환자실, 수술 전후, 회복실, 외래 등 다양한 임상 환경에서 일하는 간호사일 수 있다.",
   "사용자의 질문 의도를 스스로 판단하여, 간호 실무에 바로 도움이 되는 정확하고 안전한 답변을 제공한다.",
   "",
+  "[지식 기준]",
+  "- 답변에는 신뢰할 수 있는 임상 지식, 검증된 연구 결과, 안전성이 확인된 데이터, 표준적인 전문 지침에 부합하는 내용만 활용한다.",
+  "- 검증되지 않은 추측, 불명확한 속설, 마케팅성 표현, 근거가 빈약한 내용은 사용하지 않는다.",
+  "- 근거 수준이 낮거나 기관별 편차가 큰 내용은 단정하지 말고 확인이 필요하다고 분명히 밝힌다.",
+  "",
   "[핵심 목표]",
   "- 가장 중요한 목표는 “간호사가 지금 이 상황에서 무엇을 이해해야 하고, 무엇을 해야 하는지”를 빠르고 명확하게 알려주는 것이다.",
   "- 답변은 교과서식 장황한 설명이 아니라, 임상 실무에서 바로 쓸 수 있는 정보 중심으로 작성한다.",
@@ -405,10 +411,40 @@ function buildDeveloperPrompt(locale: "ko" | "en") {
 }
 
 function buildUserPrompt(query: string, locale: "ko" | "en") {
+  const normalizedQuery = normalizeText(query);
   if (locale === "en") {
-    return `Question:\n${normalizeText(query)}`;
+    return [
+      `User question: ${normalizedQuery}`,
+      "Answer directly in the format that best fits the user's intent, and if there is any risk, present safety and immediate actions first.",
+    ].join("\n");
   }
-  return normalizeText(query);
+  return [
+    `사용자 질문: ${normalizedQuery}`,
+    "질문 의도에 가장 잘 맞는 형태로 직접 답하고, 위험 가능성이 있으면 안전과 행동을 먼저 제시하라.",
+  ].join("\n");
+}
+
+function buildUserPromptWithContinuationMemory(userPrompt: string, memory: string | undefined, locale: "ko" | "en") {
+  const normalizedMemory = normalizeText(memory ?? "");
+  if (!normalizedMemory) return userPrompt;
+  if (locale === "en") {
+    return [
+      userPrompt,
+      "",
+      "Prior conversation context:",
+      normalizedMemory,
+      "",
+      "Use the prior context only when it is relevant to the current question. If the context is incomplete or conflicts with the current question, say that confirmation is needed instead of assuming.",
+    ].join("\n");
+  }
+  return [
+    userPrompt,
+    "",
+    "이전 대화 맥락:",
+    normalizedMemory,
+    "",
+    "위 맥락은 현재 질문과 관련된 범위에서만 반영하라. 맥락이 불완전하거나 현재 질문과 충돌하면 단정하지 말고 확인이 필요하다고 밝혀라.",
+  ].join("\n");
 }
 
 function extractResponsesText(json: any): string {
@@ -1065,6 +1101,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
   const storeResponses = resolveStoreResponses();
   const developerPrompt = buildDeveloperPrompt(params.locale);
   const userPrompt = buildUserPrompt(params.query, params.locale);
+  const memoryAwareUserPrompt = buildUserPromptWithContinuationMemory(userPrompt, params.continuationMemory, params.locale);
   const startedAt = Date.now();
 
   let selectedModel = modelCandidates[0] ?? MED_SAFETY_LOCKED_MODEL;
@@ -1086,6 +1123,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
       const useContinuationState = modelIndex === 0 && baseIndex === 0;
       const previousResponseId = useContinuationState ? params.previousResponseId : undefined;
       const conversationId = useContinuationState ? params.conversationId : undefined;
+      const shouldUseContinuationIds = Boolean(previousResponseId || conversationId);
       for (let tokenIndex = 0; tokenIndex < outputTokenCandidates.length; tokenIndex += 1) {
         if (Date.now() - startedAt > totalBudgetMs) {
           lastError = "openai_timeout_total_budget";
@@ -1097,7 +1135,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
           apiKey,
           model: candidateModel,
           developerPrompt,
-          userPrompt,
+          userPrompt: shouldUseContinuationIds ? userPrompt : memoryAwareUserPrompt,
           apiBaseUrl,
           imageDataUrl: params.imageDataUrl,
           previousResponseId,
@@ -1131,7 +1169,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
               apiKey,
               model: candidateModel,
               developerPrompt,
-              userPrompt,
+              userPrompt: memoryAwareUserPrompt,
               apiBaseUrl,
               imageDataUrl: params.imageDataUrl,
               signal: params.signal,

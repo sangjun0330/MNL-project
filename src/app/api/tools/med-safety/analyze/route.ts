@@ -3,6 +3,12 @@ import { todayISO, type ISODate } from "@/lib/date";
 import type { Language } from "@/lib/i18n";
 import { buildPrivateNoStoreHeaders, jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { analyzeMedSafetyWithOpenAI, translateMedSafetyToEnglish } from "@/lib/server/openaiMedSafety";
+import {
+  buildMedSafetyContinuationMemoryText,
+  createMedSafetyContinuationToken,
+  readMedSafetyContinuationToken,
+  type MedSafetyContinuationMemoryTurn,
+} from "@/lib/server/medSafetyContinuation";
 import type { Json } from "@/types/supabase";
 
 export const runtime = "edge";
@@ -22,6 +28,7 @@ const MAX_MED_SAFETY_HISTORY_RETENTION_DAYS = 90;
 
 type RequestBody = {
   query?: unknown;
+  continuationToken?: unknown;
   previousResponseId?: unknown;
   conversationId?: unknown;
   locale?: unknown;
@@ -37,8 +44,7 @@ type MedSafetyResponseData = {
   analyzedAt: number;
   source: "openai_live" | "openai_fallback";
   fallbackReason: string | null;
-  responseId: string | null;
-  conversationId: string | null;
+  continuationToken: string | null;
 };
 
 type MedSafetyRecentRecord = {
@@ -284,18 +290,7 @@ function normalizeRecentRecords(value: unknown, limit = MED_SAFETY_RECENT_LIMIT_
         analyzedAt: Number.isFinite(Number(resultNode.analyzedAt)) ? Number(resultNode.analyzedAt) : savedAt,
         source: String(resultNode.source ?? "") === "openai_fallback" ? "openai_fallback" : "openai_live",
         fallbackReason: toPublicReason(resultNode.fallbackReason),
-        responseId:
-          typeof resultNode.responseId === "string"
-            ? resultNode.responseId
-            : typeof resultNode.openaiResponseId === "string"
-              ? resultNode.openaiResponseId
-              : null,
-        conversationId:
-          typeof resultNode.conversationId === "string"
-            ? resultNode.conversationId
-            : typeof resultNode.openaiConversationId === "string"
-              ? resultNode.openaiConversationId
-              : null,
+        continuationToken: typeof resultNode.continuationToken === "string" ? resultNode.continuationToken : null,
       },
     });
   }
@@ -349,10 +344,10 @@ function pickLocale(raw: unknown): "ko" | "en" {
   return "ko";
 }
 
-function pickOpenAIStateId(raw: unknown) {
+function pickContinuationToken(raw: unknown) {
   const value = String(raw ?? "").trim();
   if (!value) return undefined;
-  if (!/^[A-Za-z0-9_-]{8,220}$/.test(value)) return undefined;
+  if (value.length < 24 || value.length > 8192) return undefined;
   return value;
 }
 
@@ -413,8 +408,7 @@ function buildResponseData(params: {
     analyzedAt: params.analyzedAt,
     source: params.analyzed.fallbackReason ? "openai_fallback" : "openai_live",
     fallbackReason: toPublicReason(params.analyzed.fallbackReason),
-    responseId: params.analyzed.openaiResponseId,
-    conversationId: params.analyzed.openaiConversationId,
+    continuationToken: null,
   };
 }
 
@@ -442,8 +436,7 @@ export async function POST(req: NextRequest) {
     const bodyRaw = ((await req.json().catch(() => null)) ?? {}) as RequestBody;
     const locale = pickLocale(bodyRaw.locale);
     const streamMode = pickStreamMode(bodyRaw.stream);
-    const previousResponseId = pickOpenAIStateId(bodyRaw.previousResponseId);
-    const conversationId = pickOpenAIStateId(bodyRaw.conversationId);
+    const continuationToken = pickContinuationToken(bodyRaw.continuationToken);
     const query = String(bodyRaw.query ?? "")
       .replace(/\s+/g, " ")
       .trim()
@@ -477,6 +470,14 @@ export async function POST(req: NextRequest) {
     const timeoutMs = resolveAnalyzeTimeoutMs();
     const timeout = setTimeout(() => abort.abort(), timeoutMs);
     const routeStartedAt = Date.now();
+    const continuationState = await readMedSafetyContinuationToken({
+      token: continuationToken,
+      userId,
+    });
+    const previousResponseId = continuationState?.previousResponseId ?? undefined;
+    const conversationId = continuationState?.conversationId ?? undefined;
+    const koContinuationMemory = buildMedSafetyContinuationMemoryText(continuationState?.memoryTurns ?? [], "ko");
+    const enContinuationMemory = buildMedSafetyContinuationMemoryText(continuationState?.memoryTurns ?? [], "en");
 
     const runAnalyze = async (onTextDelta?: (delta: string) => void | Promise<void>) => {
       const analyzedAt = Date.now();
@@ -488,6 +489,7 @@ export async function POST(req: NextRequest) {
         imageDataUrl: imageDataUrl || undefined,
         previousResponseId,
         conversationId,
+        continuationMemory: koContinuationMemory || undefined,
         onTextDelta,
         signal: abort.signal,
       });
@@ -528,6 +530,7 @@ export async function POST(req: NextRequest) {
                 query,
                 locale: "en",
                 imageDataUrl: imageDataUrl || undefined,
+                continuationMemory: enContinuationMemory || undefined,
                 signal: abort.signal,
               });
               payloadEn = buildResponseData({
@@ -546,6 +549,37 @@ export async function POST(req: NextRequest) {
         abort.signal.removeEventListener("abort", relayAbort);
       }
 
+      const nextMemoryTurns: MedSafetyContinuationMemoryTurn[] = [
+        ...(continuationState?.memoryTurns ?? []),
+        {
+          query,
+          answer: analyzedKo.result.answer,
+        },
+      ];
+      const nextContinuationToken = await createMedSafetyContinuationToken({
+        userId,
+        previousTurns: nextMemoryTurns.slice(0, -1),
+        responseId: analyzedKo.openaiResponseId,
+        conversationId: analyzedKo.openaiConversationId,
+        query,
+        answer: analyzedKo.result.answer,
+      });
+      payloadKo.continuationToken = nextContinuationToken;
+      if (payloadEn) {
+        payloadEn.continuationToken = nextContinuationToken;
+      }
+
+      const storedPayloadKo: MedSafetyResponseData = {
+        ...payloadKo,
+        continuationToken: null,
+      };
+      const storedPayloadEn: MedSafetyResponseData | null = payloadEn
+        ? {
+            ...payloadEn,
+            continuationToken: null,
+          }
+        : null;
+
       const saveError = await safeSaveMedSafetyContent(userId, today, "ko", {
         medSafetySearch: {
           dateISO: today,
@@ -554,8 +588,8 @@ export async function POST(req: NextRequest) {
             query,
           },
           variants: {
-            ko: payloadKo,
-            ...(payloadEn ? { en: payloadEn } : {}),
+            ko: storedPayloadKo,
+            ...(storedPayloadEn ? { en: storedPayloadEn } : {}),
           },
         },
       } satisfies Json);
@@ -579,7 +613,10 @@ export async function POST(req: NextRequest) {
           dateISO: today,
           language: locale,
           query,
-          result: responseData,
+          result: {
+            ...responseData,
+            continuationToken: null,
+          },
           recentLimit,
         });
         if (recentSaveError) {

@@ -51,6 +51,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const hasSeenOnboarding = useAppStoreSelector((s) => Boolean(s.settings?.hasSeenOnboarding));
   const setSettings = useAppStoreSelector((s) => s.setSettings);
   const isAuthed = Boolean(auth?.userId);
+  const isMedSafetyImmersive = pathname === "/tools/med-safety";
   const [cloudReady, setCloudReady] = useState(false);
   const allowPrompt =
     AUTH_INTERACTION_GUARD_ENABLED &&
@@ -192,7 +193,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         - 모바일은 여전히 자연스럽게 full width
       */}
       <div
-        className="mx-auto max-w-[720px] px-4 pb-[calc(96px+env(safe-area-inset-bottom))]"
+        className={`mx-auto max-w-[720px] px-4 ${
+          isMedSafetyImmersive ? "pb-[calc(24px+env(safe-area-inset-bottom))]" : "pb-[calc(96px+env(safe-area-inset-bottom))]"
+        }`}
         onPointerDownCapture={handleGuardedInteraction}
         onKeyDownCapture={handleGuardedInteraction}
       >
