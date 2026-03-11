@@ -255,10 +255,10 @@ function normalizeRequestedOrderCountParam(value: string | null) {
   return Math.max(1, Math.min(5, parsed));
 }
 
-// 일반 사용자용: 아침(4~12시) / 퇴근 후(15~23시) 생성 시간 창 확인
+// 시작 회복은 근무 패턴 때문에 시간 제한을 두지 않는다.
 function isWithinGenerationWindow(phase: RecoveryPhase): boolean {
+  if (phase === "start") return true;
   const hour = new Date().getHours();
-  if (phase === "start") return hour >= 4 && hour <= 12;
   if (phase === "after_work") return hour >= 15;
   return false;
 }
@@ -985,14 +985,14 @@ export function InsightsAIRecoveryDetail() {
   }, [initialRequestedOrderCount]);
 
   const startAnalysis = useCallback(() => {
-    if (!isAdminOrDev && needsHealthInputGuide) {
-      if (missingGuide) router.push(missingGuide.route);
+    if (needsHealthInputGuide) {
+      setOpenInputGuide(true);
       return;
     }
     setActivePhase("start");
     setActiveGeneratingPhase("start");
     startPlannerAI.startGenerate(selectedOrderCount);
-  }, [isAdminOrDev, needsHealthInputGuide, missingGuide, router, selectedOrderCount, startPlannerAI]);
+  }, [needsHealthInputGuide, selectedOrderCount, startPlannerAI]);
 
   const startAfterWorkAnalysis = useCallback(() => {
     if (!isAdminOrDev && !afterWorkReadiness.ready) return;
@@ -1269,7 +1269,7 @@ export function InsightsAIRecoveryDetail() {
                     onClick={startAnalysis}
                     className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] text-[14px] font-semibold text-[color:var(--rnest-accent)]"
                   >
-                    {!isAdminOrDev && needsHealthInputGuide
+                    {needsHealthInputGuide
                       ? t("필수 기록 입력하러 가기")
                       : startPlannerAI.error
                         ? t("오늘 시작 회복과 오더 {count}개 다시 불러오기", { count: selectedOrderCount })

@@ -4,10 +4,8 @@ import type { Language } from "@/lib/i18n";
 import { buildPrivateNoStoreHeaders, jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { analyzeMedSafetyWithOpenAI, translateMedSafetyToEnglish } from "@/lib/server/openaiMedSafety";
 import {
-  buildMedSafetyContinuationMemoryText,
   createMedSafetyContinuationToken,
   readMedSafetyContinuationToken,
-  shouldStartFreshMedSafetySession,
 } from "@/lib/server/medSafetyContinuation";
 import type { Json } from "@/types/supabase";
 
@@ -471,27 +469,12 @@ export async function POST(req: NextRequest) {
     const timeoutMs = resolveAnalyzeTimeoutMs();
     const timeout = setTimeout(() => abort.abort(), timeoutMs);
     const routeStartedAt = Date.now();
-    const rawContinuationState = await readMedSafetyContinuationToken({
+    const continuationState = await readMedSafetyContinuationToken({
       token: continuationToken,
       userId,
     });
-    const startedFreshSession = shouldStartFreshMedSafetySession({
-      query,
-      summary: rawContinuationState?.summary,
-      lastTurn: rawContinuationState?.lastTurn ?? null,
-      hasNewImage: Boolean(imageDataUrl),
-    });
-    const continuationState = startedFreshSession ? null : rawContinuationState;
-    const koContinuationMemory = buildMedSafetyContinuationMemoryText({
-      summary: continuationState?.summary,
-      lastTurn: continuationState?.lastTurn ?? null,
-      locale: "ko",
-    });
-    const enContinuationMemory = buildMedSafetyContinuationMemoryText({
-      summary: continuationState?.summary,
-      lastTurn: continuationState?.lastTurn ?? null,
-      locale: "en",
-    });
+    const previousResponseId = continuationState?.previousResponseId ?? undefined;
+    const conversationId = continuationState?.conversationId ?? undefined;
 
     const runAnalyze = async (onTextDelta?: (delta: string) => void | Promise<void>) => {
       const analyzedAt = Date.now();
@@ -501,7 +484,8 @@ export async function POST(req: NextRequest) {
         query,
         locale: "ko",
         imageDataUrl: imageDataUrl || undefined,
-        continuationMemory: koContinuationMemory || undefined,
+        previousResponseId,
+        conversationId,
         onTextDelta,
         signal: abort.signal,
       });
@@ -542,7 +526,8 @@ export async function POST(req: NextRequest) {
                 query,
                 locale: "en",
                 imageDataUrl: imageDataUrl || undefined,
-                continuationMemory: enContinuationMemory || undefined,
+                previousResponseId,
+                conversationId,
                 signal: abort.signal,
               });
               payloadEn = buildResponseData({
@@ -563,16 +548,14 @@ export async function POST(req: NextRequest) {
 
       const nextContinuationToken = await createMedSafetyContinuationToken({
         userId,
-        previousSummary: continuationState?.summary,
-        query,
-        answer: analyzedKo.result.answer,
-        hadImage: Boolean(imageDataUrl),
+        responseId: analyzedKo.openaiResponseId,
+        conversationId: analyzedKo.openaiConversationId,
       });
       payloadKo.continuationToken = nextContinuationToken;
-      payloadKo.startedFreshSession = startedFreshSession;
+      payloadKo.startedFreshSession = false;
       if (payloadEn) {
         payloadEn.continuationToken = nextContinuationToken;
-        payloadEn.startedFreshSession = startedFreshSession;
+        payloadEn.startedFreshSession = false;
       }
 
       const storedPayloadKo: MedSafetyResponseData = {

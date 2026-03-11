@@ -12,6 +12,8 @@ type AnalyzeParams = {
   query: string;
   locale: "ko" | "en";
   imageDataUrl?: string;
+  previousResponseId?: string;
+  conversationId?: string;
   continuationMemory?: string;
   onTextDelta?: (delta: string) => void | Promise<void>;
   signal: AbortSignal;
@@ -776,6 +778,8 @@ async function callResponsesApi(args: {
   userPrompt: string;
   apiBaseUrl: string;
   imageDataUrl?: string;
+  previousResponseId?: string;
+  conversationId?: string;
   signal: AbortSignal;
   maxOutputTokens: number;
   upstreamTimeoutMs: number;
@@ -791,6 +795,8 @@ async function callResponsesApi(args: {
     userPrompt,
     apiBaseUrl,
     imageDataUrl,
+    previousResponseId,
+    conversationId,
     signal,
     maxOutputTokens,
     upstreamTimeoutMs,
@@ -852,6 +858,8 @@ async function callResponsesApi(args: {
         store: storeResponses,
       };
   if (onTextDelta && !compatMode) body.stream = true;
+  if (previousResponseId) body.previous_response_id = previousResponseId;
+  else if (conversationId) body.conversation = conversationId;
 
   let response: Response;
   let timedOut = false;
@@ -1146,6 +1154,10 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         break;
       }
       const apiBaseUrl = apiBaseUrls[baseIndex]!;
+      const useContinuationState = modelIndex === 0 && baseIndex === 0;
+      const previousResponseId = useContinuationState ? params.previousResponseId : undefined;
+      const conversationId = useContinuationState ? params.conversationId : undefined;
+      const shouldUseContinuationIds = Boolean(previousResponseId || conversationId);
       for (let tokenIndex = 0; tokenIndex < outputTokenCandidates.length; tokenIndex += 1) {
         if (Date.now() - startedAt > totalBudgetMs) {
           lastError = "openai_timeout_total_budget";
@@ -1157,9 +1169,11 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
           apiKey,
           model: candidateModel,
           developerPrompt,
-          userPrompt: memoryAwareUserPrompt,
+          userPrompt: shouldUseContinuationIds ? userPrompt : memoryAwareUserPrompt,
           apiBaseUrl,
           imageDataUrl: params.imageDataUrl,
+          previousResponseId,
+          conversationId,
           signal: params.signal,
           maxOutputTokens: outputTokenLimit,
           upstreamTimeoutMs,
@@ -1186,7 +1200,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
               apiKey,
               model: candidateModel,
               developerPrompt,
-              userPrompt: memoryAwareUserPrompt,
+              userPrompt,
               apiBaseUrl,
               imageDataUrl: params.imageDataUrl,
               signal: params.signal,

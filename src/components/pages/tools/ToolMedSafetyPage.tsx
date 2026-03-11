@@ -542,9 +542,12 @@ export function ToolMedSafetyPage() {
   const [lastSubmittedQuery, setLastSubmittedQuery] = useState("");
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [selectedImageName, setSelectedImageName] = useState("");
+  const [showSessionDecisionPrompt, setShowSessionDecisionPrompt] = useState(false);
+  const [hasShownSessionDecisionPrompt, setHasShownSessionDecisionPrompt] = useState(false);
   const [optimisticQuota, setOptimisticQuota] = useState<SubscriptionApi["medSafetyQuota"] | null>(null);
   const threadEndRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const composerInputRef = useRef<HTMLInputElement | null>(null);
 
   const creditPack = getCheckoutProductDefinition("credit10");
   const subscriptionMedSafetyQuota = subscription?.medSafetyQuota ?? null;
@@ -603,6 +606,12 @@ export function ToolMedSafetyPage() {
     }
   }
 
+  function focusComposerSoon() {
+    window.setTimeout(() => {
+      composerInputRef.current?.focus();
+    }, 30);
+  }
+
   function resetConversation() {
     setMessages([]);
     setInput("");
@@ -612,6 +621,19 @@ export function ToolMedSafetyPage() {
     setLastSubmittedQuery("");
     setSelectedImage(null);
     setSelectedImageName("");
+    setShowSessionDecisionPrompt(false);
+    setHasShownSessionDecisionPrompt(false);
+  }
+
+  function continueCurrentSession() {
+    setShowSessionDecisionPrompt(false);
+    focusComposerSoon();
+  }
+
+  function startNewQuestionFlow() {
+    setShowSessionDecisionPrompt(false);
+    resetConversation();
+    focusComposerSoon();
   }
 
   function handleImageSelect(event: React.ChangeEvent<HTMLInputElement>) {
@@ -683,6 +705,7 @@ export function ToolMedSafetyPage() {
     const question = String(forcedQuery ?? input)
       .replace(/\s+/g, " ")
       .trim();
+    const assistantCountBeforeSubmit = messages.reduce((count, message) => (message.role === "assistant" ? count + 1 : count), 0);
     if (!question) {
       setError(t("질문을 입력해 주세요."));
       return;
@@ -775,6 +798,10 @@ export function ToolMedSafetyPage() {
       };
       setMessages((prev) => (normalizedData.startedFreshSession ? [userMessage, assistantMessage] : [...prev, assistantMessage]));
       setLastContinuationToken(normalizedData.continuationToken ?? null);
+      if (!hasShownSessionDecisionPrompt && assistantCountBeforeSubmit >= 1) {
+        setShowSessionDecisionPrompt(true);
+        setHasShownSessionDecisionPrompt(true);
+      }
 
       if (normalizedData.source === "openai_fallback") {
         setError(
@@ -1052,6 +1079,7 @@ export function ToolMedSafetyPage() {
               </button>
               <div className="flex h-12 flex-1 items-center rounded-full bg-[#F4F5F7] px-4">
                 <Input
+                  ref={composerInputRef}
                   value={input}
                   onChange={(event) => setInput(event.target.value)}
                   onKeyDown={(event) => {
@@ -1108,6 +1136,33 @@ export function ToolMedSafetyPage() {
         accountEmail={user?.email ?? null}
         confirmLabel={t("결제 계속")}
       />
+
+      {showSessionDecisionPrompt ? (
+        <div className="fixed inset-0 z-[115] flex items-end justify-center bg-black/10 px-4 pb-[calc(136px+env(safe-area-inset-bottom))] pt-6 backdrop-blur-[2px] sm:items-center sm:pb-6">
+          <div className="w-full max-w-[360px] rounded-[28px] border border-[#E8E8EC] bg-white px-5 py-5 shadow-[0_24px_80px_rgba(15,23,42,0.14)]">
+            <div className="text-[17px] font-semibold tracking-[-0.02em] text-ios-text">{t("이 세션에서 계속 질문할까요?")}</div>
+            <div className="mt-2 text-[13px] leading-6 text-ios-sub">
+              {t("계속 질문하면 같은 대화 흐름을 이어가고, 새 질문하기를 누르면 화면과 세션이 새로 시작됩니다.")}
+            </div>
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                onClick={startNewQuestionFlow}
+                className="flex-1 rounded-full border border-[#E8E8EC] bg-white px-4 py-3 text-[13px] font-semibold text-ios-text"
+              >
+                {t("새 질문하기")}
+              </button>
+              <button
+                type="button"
+                onClick={continueCurrentSession}
+                className="flex-1 rounded-full bg-black px-4 py-3 text-[13px] font-semibold text-white"
+              >
+                {t("이 세션에서 계속 질문하기")}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {copyMessage ? (
         <div className="pointer-events-none fixed bottom-[calc(130px+env(safe-area-inset-bottom))] left-1/2 z-[120] -translate-x-1/2 rounded-full bg-black px-4 py-2 text-[12px] font-semibold text-white shadow-lg">
