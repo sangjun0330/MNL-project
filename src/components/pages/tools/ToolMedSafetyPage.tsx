@@ -350,11 +350,7 @@ function looksLikeSectionHeading(value: string) {
   if (!normalized) return false;
   if (/[:：]$/.test(normalized)) return true;
   if (SECTION_TITLE_PATTERNS.some((pattern) => pattern.test(normalized))) return true;
-  if (normalized.length > 20) return false;
-  if (/[.?!]$/.test(normalized)) return false;
-  if (/(입니다|합니다|하세요|됩니다|입니다요)$/.test(normalized)) return false;
-  if (/[,:;]/.test(normalized)) return false;
-  return /^[가-힣A-Za-z0-9/()+ -]+$/.test(normalized);
+  return false;
 }
 
 function formatSectionTitle(value: string) {
@@ -550,7 +546,10 @@ export function ToolMedSafetyPage() {
   const [creditPaying, setCreditPaying] = useState(false);
   const [creditCheckoutSheetOpen, setCreditCheckoutSheetOpen] = useState(false);
   const [lastSubmittedQuery, setLastSubmittedQuery] = useState("");
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [selectedImageName, setSelectedImageName] = useState("");
   const threadEndRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const creditPack = getCheckoutProductDefinition("credit10");
   const medSafetyQuota = subscription?.medSafetyQuota;
@@ -611,6 +610,29 @@ export function ToolMedSafetyPage() {
     setError(null);
     setLastContinuationToken(null);
     setLastSubmittedQuery("");
+    setSelectedImage(null);
+    setSelectedImageName("");
+  }
+
+  function handleImageSelect(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (file.size > 6 * 1024 * 1024) {
+      setError(t("이미지 용량이 너무 큽니다. 6MB 이하로 다시 시도해 주세요."));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setSelectedImage(reader.result as string);
+      setSelectedImageName(file.name);
+    };
+    reader.readAsDataURL(file);
+    event.target.value = "";
+  }
+
+  function removeSelectedImage() {
+    setSelectedImage(null);
+    setSelectedImageName("");
   }
 
   async function copyLatestAnswer() {
@@ -649,8 +671,11 @@ export function ToolMedSafetyPage() {
       timestamp: Date.now(),
     };
 
+    const imageToSend = selectedImage;
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
+    setSelectedImage(null);
+    setSelectedImageName("");
     setIsLoading(true);
     setStreamingText("");
     setError(null);
@@ -670,6 +695,7 @@ export function ToolMedSafetyPage() {
               locale: lang,
               stream: true,
               continuationToken: lastContinuationToken ?? undefined,
+              ...(imageToSend ? { imageBase64: imageToSend } : {}),
             },
             MED_SAFETY_CLIENT_TIMEOUT_MS
           );
@@ -805,54 +831,17 @@ export function ToolMedSafetyPage() {
     );
   }
 
-  const composerNode = (
-    <div className={hasConversation ? `pointer-events-auto ${COMPOSER_PANEL_CLASS}` : COMPOSER_PANEL_CLASS}>
-      <div className="flex items-center gap-3">
-        <div className="flex h-14 flex-1 items-center rounded-full bg-[#F4F5F7] px-4">
-          <Input
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                void submitQuestion();
-              }
-            }}
-            className="h-12 flex-1 border-0 bg-transparent px-1 text-[16px] shadow-none placeholder:text-ios-sub"
-            placeholder={hasConversation ? t("예: 그럼 중심정맥으로만 줘야 하나요?") : t("예: norepinephrine 투여 시 주의사항이 뭐야?")}
-            autoCapitalize="off"
-            autoCorrect="off"
-            autoComplete="off"
-            spellCheck={false}
-          />
-        </div>
-        <button
-          type="button"
-          className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-black text-white disabled:cursor-not-allowed disabled:opacity-50"
-          onClick={() => void submitQuestion()}
-          disabled={isLoading || !canAsk}
-          aria-label={isLoading ? t("질문 중...") : hasConversation ? t("보내기") : t("AI 검색")}
-        >
-          {isLoading ? (
-            <span className="text-[11px] font-semibold">{t("질문 중...")}</span>
-          ) : (
-            <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
-              <path d="M5 12h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-              <path d="M13 6l6 6-6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          )}
-        </button>
-      </div>
-      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 px-1 text-[11.5px] text-ios-sub">
-        <span>{t("환자 이름, 등록번호, 연락처 등 식별정보는 입력하지 마세요.")}</span>
-        <span>{hasConversation ? t("이전 답변을 이어서 묻습니다.") : t("하단 입력창에 질문을 입력하면 바로 검색이 시작됩니다.")}</span>
-      </div>
-    </div>
-  );
-
   return (
     <>
-      <div className={`mx-auto w-full max-w-[1120px] px-1 pt-4 sm:px-2 ${hasConversation ? "pb-[calc(168px+env(safe-area-inset-bottom))]" : "pb-8"}`}>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleImageSelect}
+      />
+
+      <div className="mx-auto w-full max-w-[1120px] px-1 pb-[calc(160px+env(safe-area-inset-bottom))] pt-4 sm:px-2">
         <div className={`px-3 py-3 sm:px-4 ${OPEN_LAYOUT_CLASS}`}>
           <div className="absolute inset-x-0 top-0 h-32 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.95),rgba(255,255,255,0))]" />
           <div className="relative">
@@ -914,45 +903,38 @@ export function ToolMedSafetyPage() {
             ) : null}
 
             {!hasConversation ? (
-              <div className="flex min-h-[calc(100dvh-280px)] flex-col justify-between pb-4 pt-8">
-                <div className="flex flex-1 flex-col justify-center">
-                  <div className="mx-auto max-w-[760px] text-center">
-                    <div className="text-[34px] font-bold tracking-[-0.05em] text-ios-text sm:text-[48px]">{t("무엇이든 물어보세요")}</div>
-                    <div className="mt-4 text-[17px] leading-8 text-ios-sub sm:text-[18px]">
-                      {t("약물, 기구, 검사 수치, 간호 절차, 상황 대응까지 한 번에 질문할 수 있습니다.")}
-                    </div>
-                  </div>
-
-                  <div className="mt-10">
-                    <div className="mb-3 px-2 text-[12px] font-semibold tracking-[0.01em] text-ios-sub">{t("빠른 질문")}</div>
-                    <div className="-mx-1 flex snap-x gap-3 overflow-x-auto px-1 pb-2">
-                      {QUICK_PROMPTS.map((prompt) => (
-                        <button
-                          key={prompt}
-                          type="button"
-                          className={QUICK_TILE_CLASS}
-                          onClick={() => void submitQuestion(prompt)}
-                          disabled={isLoading || !canAsk}
-                        >
-                          <div className="text-[12px] font-semibold text-ios-sub">{t("빠른 질문")}</div>
-                          <div className="mt-2 text-[22px] font-semibold tracking-[-0.03em] text-ios-text">{prompt}</div>
-                          <div className="mt-3 text-[13px] leading-6 text-ios-sub">{t("탭하면 바로 질문이 시작됩니다.")}</div>
-                        </button>
-                      ))}
-                    </div>
-                    <div className="mt-4 px-2 text-[13px] leading-6 text-ios-sub">{t("하단 입력창에 질문을 입력하면 바로 검색이 시작됩니다.")}</div>
+              <div className="flex min-h-[calc(100dvh-380px)] flex-col justify-center pb-4 pt-8">
+                <div className="mx-auto max-w-[760px] text-center">
+                  <div className="text-[34px] font-bold tracking-[-0.05em] text-ios-text sm:text-[48px]">{t("무엇이든 물어보세요")}</div>
+                  <div className="mt-4 text-[17px] leading-8 text-ios-sub sm:text-[18px]">
+                    {t("약물, 기구, 검사 수치, 간호 절차, 상황 대응까지 한 번에 질문할 수 있습니다.")}
                   </div>
                 </div>
 
-                <div className="mt-8">
-                  <div className="mx-auto w-full max-w-[900px] px-1 text-[12.5px] leading-6 text-ios-sub">
-                    {t(
-                      "본 결과는 참고용 자동 생성 정보이며 의료행위 판단의 근거로 사용할 수 없습니다. 모든 처치는 병원 지침, 처방, 의료진 확인을 우선해 결정해 주세요."
-                    )}
+                <div className="mt-10">
+                  <div className="mb-3 px-2 text-[12px] font-semibold tracking-[0.01em] text-ios-sub">{t("빠른 질문")}</div>
+                  <div className="-mx-1 flex snap-x gap-3 overflow-x-auto px-1 pb-2">
+                    {QUICK_PROMPTS.map((prompt) => (
+                      <button
+                        key={prompt}
+                        type="button"
+                        className={QUICK_TILE_CLASS}
+                        onClick={() => void submitQuestion(prompt)}
+                        disabled={isLoading || !canAsk}
+                      >
+                        <div className="text-[12px] font-semibold text-ios-sub">{t("빠른 질문")}</div>
+                        <div className="mt-2 text-[22px] font-semibold tracking-[-0.03em] text-ios-text">{prompt}</div>
+                        <div className="mt-3 text-[13px] leading-6 text-ios-sub">{t("탭하면 바로 질문이 시작됩니다.")}</div>
+                      </button>
+                    ))}
                   </div>
-                  <div className="mx-auto mt-4 w-full max-w-[980px]">
-                    {composerNode}
-                  </div>
+                  <div className="mt-4 px-2 text-[13px] leading-6 text-ios-sub">{t("하단 입력창에 질문을 입력하면 바로 검색이 시작됩니다.")}</div>
+                </div>
+
+                <div className="mx-auto mt-8 w-full max-w-[900px] px-1 text-[12.5px] leading-6 text-ios-sub">
+                  {t(
+                    "본 결과는 참고용 자동 생성 정보이며 의료행위 판단의 근거로 사용할 수 없습니다. 모든 처치는 병원 지침, 처방, 의료진 확인을 우선해 결정해 주세요."
+                  )}
                 </div>
               </div>
             ) : (
@@ -998,6 +980,12 @@ export function ToolMedSafetyPage() {
 
                   <div ref={threadEndRef} />
                 </div>
+
+                <div className="mx-auto mt-8 w-full px-1 text-[12.5px] leading-6 text-ios-sub">
+                  {t(
+                    "본 결과는 참고용 자동 생성 정보이며 의료행위 판단의 근거로 사용할 수 없습니다. 모든 처치는 병원 지침, 처방, 의료진 확인을 우선해 결정해 주세요."
+                  )}
+                </div>
               </div>
             )}
 
@@ -1019,25 +1007,86 @@ export function ToolMedSafetyPage() {
                 ) : null}
               </div>
             ) : null}
-
-            {hasConversation ? (
-              <div className="mx-auto mt-8 w-full max-w-[900px] px-1 text-[12.5px] leading-6 text-ios-sub">
-                {t(
-                  "본 결과는 참고용 자동 생성 정보이며 의료행위 판단의 근거로 사용할 수 없습니다. 모든 처치는 병원 지침, 처방, 의료진 확인을 우선해 결정해 주세요."
-                )}
-              </div>
-            ) : null}
           </div>
         </div>
       </div>
 
-      {hasConversation ? (
-        <div className="pointer-events-none fixed inset-x-0 bottom-[calc(14px+env(safe-area-inset-bottom))] z-50">
-          <div className="mx-auto w-full max-w-[980px] px-3 sm:px-5">
-            {composerNode}
+      {/* Fixed composer - always at bottom */}
+      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-50 pb-[env(safe-area-inset-bottom)]">
+        <div className="pointer-events-auto mx-auto w-full max-w-[980px] px-3 sm:px-5">
+          <div className="rounded-t-[28px] border border-b-0 border-[#E8E8EC] bg-white/96 px-3 pb-3 pt-2 shadow-[0_-8px_40px_rgba(15,23,42,0.10)] backdrop-blur-xl sm:rounded-t-[32px] sm:px-4">
+            {selectedImage ? (
+              <div className="mb-2 flex items-center gap-2 rounded-2xl bg-[#F4F5F7] px-3 py-2">
+                <img src={selectedImage} alt="" className="h-12 w-12 rounded-xl object-cover" />
+                <span className="flex-1 truncate text-[13px] text-ios-sub">{selectedImageName}</span>
+                <button
+                  type="button"
+                  onClick={removeSelectedImage}
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-ios-sub hover:bg-[#E8E8EC]"
+                  aria-label={t("이미지 제거")}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden="true">
+                    <path d="M18 6L6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                </button>
+              </div>
+            ) : null}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#E8E8EC] bg-white text-ios-sub hover:bg-[#F7F7F8]"
+                aria-label={t("이미지 첨부")}
+              >
+                <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
+                  <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+              </button>
+              <div className="flex h-12 flex-1 items-center rounded-full bg-[#F4F5F7] px-4">
+                <Input
+                  value={input}
+                  onChange={(event) => setInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void submitQuestion();
+                    }
+                  }}
+                  className="h-10 flex-1 border-0 bg-transparent px-0 text-[15px] shadow-none placeholder:text-ios-sub focus-visible:ring-0"
+                  placeholder={hasConversation ? t("예: 그럼 중심정맥으로만 줘야 하나요?") : t("예: norepinephrine 투여 시 주의사항이 뭐야?")}
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </div>
+              <button
+                type="button"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-black text-white disabled:cursor-not-allowed disabled:opacity-40"
+                onClick={() => void submitQuestion()}
+                disabled={isLoading || !canAsk}
+                aria-label={isLoading ? t("질문 중...") : t("보내기")}
+              >
+                {isLoading ? (
+                  <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 animate-spin" aria-hidden="true">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" opacity="0.3" />
+                    <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
+                    <path d="M5 12h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                    <path d="M13 6l6 6-6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </button>
+            </div>
+            <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] text-ios-sub">
+              <span>{t("환자 이름, 등록번호, 연락처 등 식별정보는 입력하지 마세요.")}</span>
+              <span>{hasConversation ? t("이전 답변을 이어서 묻습니다.") : t("하단 입력창에 질문을 입력하면 바로 검색이 시작됩니다.")}</span>
+            </div>
           </div>
         </div>
-      ) : null}
+      </div>
 
       <BillingCheckoutSheet
         open={creditCheckoutSheetOpen}
@@ -1053,7 +1102,7 @@ export function ToolMedSafetyPage() {
       />
 
       {copyMessage ? (
-        <div className="pointer-events-none fixed bottom-[calc(106px+env(safe-area-inset-bottom))] left-1/2 z-[120] -translate-x-1/2 rounded-full bg-black px-4 py-2 text-[12px] font-semibold text-white shadow-lg">
+        <div className="pointer-events-none fixed bottom-[calc(130px+env(safe-area-inset-bottom))] left-1/2 z-[120] -translate-x-1/2 rounded-full bg-black px-4 py-2 text-[12px] font-semibold text-white shadow-lg">
           {copyMessage}
         </div>
       ) : null}
