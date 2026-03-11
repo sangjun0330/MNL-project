@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { ToolPageShell } from "./ToolPageShell";
-import { calculateBMI, sanitizeNumericInput, parseNumericInput, formatNumber } from "@/lib/nurseCalculators";
+import { calculateBMI, sanitizeNumericInput, parseNumericInput, formatNumber, type CalcHistory } from "@/lib/nurseCalculators";
 import { useI18n } from "@/lib/useI18n";
 
 const BMI_LABELS: Record<string, { label: string; color: string }> = {
@@ -16,11 +16,18 @@ const BMI_LABELS: Record<string, { label: string; color: string }> = {
   obese3: { label: "고도비만 (3단계)", color: "text-red-700" },
 };
 
-export function ToolBMIPage({ embedded = false }: { embedded?: boolean }) {
+export function ToolBMIPage({
+  embedded = false,
+  onHistoryRecord,
+}: {
+  embedded?: boolean;
+  onHistoryRecord?: (record: CalcHistory) => void;
+}) {
   const { t } = useI18n();
   const [weightRaw, setWeightRaw] = useState("");
   const [heightRaw, setHeightRaw] = useState("");
   const [asianCutoffs, setAsianCutoffs] = useState(true);
+  const lastHistorySignatureRef = useRef<string | null>(null);
 
   const weight = parseNumericInput(weightRaw);
   const height = parseNumericInput(heightRaw);
@@ -28,6 +35,34 @@ export function ToolBMIPage({ embedded = false }: { embedded?: boolean }) {
     if (weight == null || height == null || weight <= 0 || height <= 0) return null;
     return calculateBMI(weight, height, asianCutoffs);
   }, [weight, height, asianCutoffs]);
+
+  useEffect(() => {
+    if (!result?.ok || !onHistoryRecord) {
+      if (!result) lastHistorySignatureRef.current = null;
+      return;
+    }
+
+    const signature = [weight ?? "", height ?? "", asianCutoffs, result.data.bmi, result.data.categoryKey].join("|");
+    if (lastHistorySignatureRef.current === signature) return;
+    lastHistorySignatureRef.current = signature;
+
+    onHistoryRecord({
+      timestamp: Date.now(),
+      calcType: "bmi",
+      inputs: {
+        weightKg: weight ?? null,
+        heightCm: height ?? null,
+        asianCutoffs,
+      },
+      outputs: {
+        bmi: result.data.bmi,
+        categoryLabel: BMI_LABELS[result.data.categoryKey]?.label ?? result.data.categoryKey,
+      },
+      flags: {
+        warnings: result.warnings.map((warning) => warning.message),
+      },
+    });
+  }, [asianCutoffs, height, onHistoryRecord, result, weight]);
 
   return (
     <ToolPageShell title={t("BMI 계산")} subtitle={t("체질량지수 (아시아 기준 포함)")} badge="NEW" embedded={embedded}>

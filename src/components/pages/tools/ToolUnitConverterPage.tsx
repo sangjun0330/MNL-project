@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { ToolPageShell } from "./ToolPageShell";
 import {
+  type CalcHistory,
   convertMedicalUnit,
   UNIT_OPTIONS,
   sanitizeNumericInput,
@@ -77,12 +78,19 @@ function UnitCategoryIcon({ category }: { category: UnitCategory }) {
   );
 }
 
-export function ToolUnitConverterPage({ embedded = false }: { embedded?: boolean }) {
+export function ToolUnitConverterPage({
+  embedded = false,
+  onHistoryRecord,
+}: {
+  embedded?: boolean;
+  onHistoryRecord?: (record: CalcHistory) => void;
+}) {
   const { t } = useI18n();
   const [category, setCategory] = useState<UnitCategory>("temperature");
   const [valueRaw, setValueRaw] = useState("");
   const [fromIdx, setFromIdx] = useState(0);
   const [toIdx, setToIdx] = useState(1);
+  const lastHistorySignatureRef = useRef<string | null>(null);
 
   const units = UNIT_OPTIONS[category];
   const fromUnit = units[fromIdx] ?? units[0];
@@ -94,6 +102,34 @@ export function ToolUnitConverterPage({ embedded = false }: { embedded?: boolean
     return convertMedicalUnit(category, value, fromUnit, toUnit);
   }, [category, value, fromUnit, toUnit, valueRaw]);
 
+  useEffect(() => {
+    if (!result?.ok || !onHistoryRecord) {
+      if (!result) lastHistorySignatureRef.current = null;
+      return;
+    }
+
+    const signature = [category, value ?? "", fromUnit, toUnit, result.data.result].join("|");
+    if (lastHistorySignatureRef.current === signature) return;
+    lastHistorySignatureRef.current = signature;
+
+    onHistoryRecord({
+      timestamp: Date.now(),
+      calcType: "unit_converter",
+      inputs: {
+        unitCategory: CATEGORY_LABELS[category].label,
+        inputValue: value ?? null,
+        fromUnit,
+        toUnit,
+      },
+      outputs: {
+        convertedValue: result.data.result,
+      },
+      flags: {
+        warnings: result.warnings.map((warning) => warning.message),
+      },
+    });
+  }, [category, fromUnit, onHistoryRecord, result, toUnit, value]);
+
   const handleSwap = () => {
     setFromIdx(toIdx);
     setToIdx(fromIdx);
@@ -104,6 +140,7 @@ export function ToolUnitConverterPage({ embedded = false }: { embedded?: boolean
     setFromIdx(0);
     setToIdx(Math.min(1, UNIT_OPTIONS[cat].length - 1));
     setValueRaw("");
+    lastHistorySignatureRef.current = null;
   };
 
   return (

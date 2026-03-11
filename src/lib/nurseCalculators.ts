@@ -52,7 +52,14 @@ export type CalcHistory = {
     | "drip_forward"
     | "drip_reverse"
     | "dilution"
-    | "dose_check";
+    | "dose_check"
+    | "pediatric_dose"
+    | "gcs"
+    | "bmi"
+    | "bsa"
+    | "crcl"
+    | "fluid_balance"
+    | "unit_converter";
   inputs: Record<string, string | number | boolean | null>;
   outputs: Record<string, string | number>;
   flags: {

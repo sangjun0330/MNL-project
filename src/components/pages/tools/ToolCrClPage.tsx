@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { ToolPageShell } from "./ToolPageShell";
-import { calculateCrCl, sanitizeNumericInput, parseNumericInput, formatNumber } from "@/lib/nurseCalculators";
+import { calculateCrCl, sanitizeNumericInput, parseNumericInput, formatNumber, type CalcHistory } from "@/lib/nurseCalculators";
 import { useI18n } from "@/lib/useI18n";
 
 const RENAL_LABELS: Record<string, { label: string; color: string }> = {
@@ -15,12 +15,19 @@ const RENAL_LABELS: Record<string, { label: string; color: string }> = {
   failure: { label: "신부전 (<15)", color: "text-red-700" },
 };
 
-export function ToolCrClPage({ embedded = false }: { embedded?: boolean }) {
+export function ToolCrClPage({
+  embedded = false,
+  onHistoryRecord,
+}: {
+  embedded?: boolean;
+  onHistoryRecord?: (record: CalcHistory) => void;
+}) {
   const { t } = useI18n();
   const [ageRaw, setAgeRaw] = useState("");
   const [weightRaw, setWeightRaw] = useState("");
   const [crRaw, setCrRaw] = useState("");
   const [isFemale, setIsFemale] = useState(false);
+  const lastHistorySignatureRef = useRef<string | null>(null);
 
   const age = parseNumericInput(ageRaw);
   const weight = parseNumericInput(weightRaw);
@@ -29,6 +36,35 @@ export function ToolCrClPage({ embedded = false }: { embedded?: boolean }) {
     if (age == null || weight == null || cr == null || age <= 0 || weight <= 0 || cr <= 0) return null;
     return calculateCrCl(age, weight, cr, isFemale);
   }, [age, weight, cr, isFemale]);
+
+  useEffect(() => {
+    if (!result?.ok || !onHistoryRecord) {
+      if (!result) lastHistorySignatureRef.current = null;
+      return;
+    }
+
+    const signature = [age ?? "", weight ?? "", cr ?? "", isFemale, result.data.crclMlMin, result.data.renalStageKey].join("|");
+    if (lastHistorySignatureRef.current === signature) return;
+    lastHistorySignatureRef.current = signature;
+
+    onHistoryRecord({
+      timestamp: Date.now(),
+      calcType: "crcl",
+      inputs: {
+        age: age ?? null,
+        weightKg: weight ?? null,
+        serumCr: cr ?? null,
+        isFemale,
+      },
+      outputs: {
+        crclMlMin: result.data.crclMlMin,
+        renalStageLabel: RENAL_LABELS[result.data.renalStageKey]?.label ?? result.data.renalStageKey,
+      },
+      flags: {
+        warnings: result.warnings.map((warning) => warning.message),
+      },
+    });
+  }, [age, cr, isFemale, onHistoryRecord, result, weight]);
 
   return (
     <ToolPageShell title={t("CrCl 신기능")} subtitle={t("Cockcroft-Gault 청소율 계산")} badge="NEW" embedded={embedded}>

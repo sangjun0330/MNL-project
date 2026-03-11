@@ -563,7 +563,7 @@ type CheckFormState = {
 
 type PersistedSnapshot = {
   uiMode: UiMode;
-  activeModule: ToolModule;
+  activeModule: ToolModule | null;
   pumpMode: PumpMode;
   dripMode: DripMode;
   pump: PumpFormState;
@@ -646,10 +646,35 @@ const CALC_TYPE_LABEL: Record<CalcHistory["calcType"], string> = {
   drip_reverse: "드립 역산",
   dilution: "희석/농도",
   dose_check: "검산(역산)",
+  pediatric_dose: "소아 용량",
+  gcs: "GCS",
+  bmi: "BMI",
+  bsa: "BSA",
+  crcl: "CrCl",
+  fluid_balance: "수액 밸런스",
+  unit_converter: "단위 변환기",
+};
+
+const CALC_TYPE_MODULE: Record<CalcHistory["calcType"], ToolModule> = {
+  pump_forward: "pump",
+  pump_reverse: "pump",
+  ivpb: "ivpb",
+  drip_forward: "drip",
+  drip_reverse: "drip",
+  dilution: "dilution",
+  dose_check: "check",
+  pediatric_dose: "pediatric-dose",
+  gcs: "gcs",
+  bmi: "bmi",
+  bsa: "bsa",
+  crcl: "crcl",
+  fluid_balance: "fluid-balance",
+  unit_converter: "unit-converter",
 };
 
 const HISTORY_FIELD_LABEL: Record<string, string> = {
   weightKg: "체중(kg)",
+  heightCm: "신장(cm)",
   targetDose: "목표 용량",
   targetUnit: "목표 단위",
   targetTimeUnit: "목표 시간 단위",
@@ -681,6 +706,39 @@ const HISTORY_FIELD_LABEL: Record<string, string> = {
   prescribedTargetDose: "처방 목표 용량",
   actualDose: "실제 용량",
   differencePercent: "처방 대비 차이(%)",
+  eye: "눈 반응(E)",
+  verbal: "언어 반응(V)",
+  motor: "운동 반응(M)",
+  total: "총점",
+  severityLabel: "중증도",
+  bmi: "BMI",
+  categoryLabel: "분류",
+  asianCutoffs: "아시아 기준",
+  formula: "공식",
+  formulaLabel: "공식",
+  bsaM2: "체표면적(m²)",
+  age: "나이",
+  serumCr: "혈청 Cr",
+  isFemale: "여성 보정",
+  crclMlMin: "CrCl(mL/min)",
+  renalStageLabel: "신기능 단계",
+  dosePerKg: "용량(mg/kg)",
+  frequency: "투여 횟수(회/일)",
+  maxSingleDose: "1회 최대 용량",
+  maxDailyDose: "일일 최대 용량",
+  singleDose: "계산 1회 용량",
+  dailyDose: "계산 일일 용량",
+  appliedSingleDose: "적용 1회 용량",
+  appliedDailyDose: "적용 일일 용량",
+  unitCategory: "변환 범주",
+  inputValue: "입력값",
+  fromUnit: "변환 전",
+  toUnit: "변환 후",
+  convertedValue: "변환 결과",
+  intakeItems: "섭취 항목",
+  outputItems: "배출 항목",
+  insensibleLossMl: "불감 손실(mL)",
+  netBalanceMl: "순 밸런스(mL)",
 };
 
 const HISTORY_HIGHLIGHT_KEYS: Record<CalcHistory["calcType"], { inputs: string[]; outputs: string[] }> = {
@@ -740,6 +798,34 @@ const HISTORY_HIGHLIGHT_KEYS: Record<CalcHistory["calcType"], { inputs: string[]
     ],
     outputs: ["actualDose", "differencePercent", "totalDosePerHour"],
   },
+  pediatric_dose: {
+    inputs: ["weightKg", "dosePerKg", "frequency", "maxSingleDose", "maxDailyDose"],
+    outputs: ["appliedSingleDose", "appliedDailyDose", "singleDose", "dailyDose"],
+  },
+  gcs: {
+    inputs: ["eye", "verbal", "motor"],
+    outputs: ["total", "severityLabel"],
+  },
+  bmi: {
+    inputs: ["weightKg", "heightCm", "asianCutoffs"],
+    outputs: ["bmi", "categoryLabel"],
+  },
+  bsa: {
+    inputs: ["weightKg", "heightCm", "formula"],
+    outputs: ["bsaM2", "formulaLabel"],
+  },
+  crcl: {
+    inputs: ["age", "weightKg", "serumCr", "isFemale"],
+    outputs: ["crclMlMin", "renalStageLabel"],
+  },
+  fluid_balance: {
+    inputs: ["intakeItems", "outputItems", "insensibleLossMl"],
+    outputs: ["totalIntakeMl", "totalOutputMl", "netBalanceMl"],
+  },
+  unit_converter: {
+    inputs: ["unitCategory", "inputValue", "fromUnit", "toUnit"],
+    outputs: ["convertedValue"],
+  },
 };
 
 const CORE_MODULES: ToolModule[] = ["pump", "ivpb", "drip", "dilution", "check"];
@@ -782,6 +868,91 @@ const MODULE_GROUPS: Array<{ title: string; items: Array<{ value: ToolModule; la
     ],
   },
 ];
+
+const MODULE_LABELS: Record<ToolModule, string> = {
+  pump: "펌프 변환",
+  ivpb: "IVPB",
+  drip: "드립 환산",
+  dilution: "희석 농도",
+  check: "역산 검산",
+  "pediatric-dose": "소아 용량",
+  gcs: "GCS",
+  bmi: "BMI",
+  bsa: "BSA",
+  crcl: "CrCl",
+  "fluid-balance": "수액 밸런스",
+  "unit-converter": "단위 변환기",
+};
+
+const MODULE_TILE_META: Record<
+  ToolModule,
+  {
+    accentClass: string;
+    softClass: string;
+    iconClass: string;
+  }
+> = {
+  pump: {
+    accentClass: "border-[#CFE0FF] bg-[#F7FBFF]",
+    softClass: "bg-[#EAF2FF]",
+    iconClass: "text-[#2563EB]",
+  },
+  ivpb: {
+    accentClass: "border-[#D6ECFF] bg-[#F7FCFF]",
+    softClass: "bg-[#E6F6FF]",
+    iconClass: "text-[#0284C7]",
+  },
+  drip: {
+    accentClass: "border-[#D4F1EC] bg-[#F6FFFD]",
+    softClass: "bg-[#E6FBF5]",
+    iconClass: "text-[#0F766E]",
+  },
+  dilution: {
+    accentClass: "border-[#FFE4CF] bg-[#FFF9F3]",
+    softClass: "bg-[#FFF0E1]",
+    iconClass: "text-[#D97706]",
+  },
+  check: {
+    accentClass: "border-[#D8F0DB] bg-[#F8FFF9]",
+    softClass: "bg-[#E9F8EC]",
+    iconClass: "text-[#15803D]",
+  },
+  "pediatric-dose": {
+    accentClass: "border-[#FFE1EC] bg-[#FFF8FB]",
+    softClass: "bg-[#FFEAF2]",
+    iconClass: "text-[#DB2777]",
+  },
+  gcs: {
+    accentClass: "border-[#E4DCFF] bg-[#FAF8FF]",
+    softClass: "bg-[#F0EBFF]",
+    iconClass: "text-[#7C3AED]",
+  },
+  bmi: {
+    accentClass: "border-[#FDE3C2] bg-[#FFFBF4]",
+    softClass: "bg-[#FFF2DE]",
+    iconClass: "text-[#EA580C]",
+  },
+  bsa: {
+    accentClass: "border-[#D8F0FF] bg-[#F7FCFF]",
+    softClass: "bg-[#E9F8FF]",
+    iconClass: "text-[#0891B2]",
+  },
+  crcl: {
+    accentClass: "border-[#FFDACC] bg-[#FFF8F5]",
+    softClass: "bg-[#FFEAE2]",
+    iconClass: "text-[#DC2626]",
+  },
+  "fluid-balance": {
+    accentClass: "border-[#D9ECFF] bg-[#F7FBFF]",
+    softClass: "bg-[#EAF4FF]",
+    iconClass: "text-[#1D4ED8]",
+  },
+  "unit-converter": {
+    accentClass: "border-[#DDDDFE] bg-[#F8F8FF]",
+    softClass: "bg-[#EEEEFF]",
+    iconClass: "text-[#4F46E5]",
+  },
+};
 
 const MODULE_GUIDE: Record<
   ToolModule,
@@ -1180,8 +1351,164 @@ function buildHistoryHeadline(item: CalcHistory) {
       if (diff == null) return `현재 세팅 역산 결과: ${formatNumber(actualDose)} ${doseLabel}`;
       return `현재 세팅 역산 결과: ${formatNumber(actualDose)} ${doseLabel} (처방 대비 ${formatNumber(diff, 1)}%)`;
     }
+    case "pediatric_dose": {
+      const singleDose = parseHistoryNumber(outputs.appliedSingleDose);
+      const dailyDose = parseHistoryNumber(outputs.appliedDailyDose);
+      if (singleDose == null && dailyDose == null) return "소아 체중 기반 용량 계산 기록입니다.";
+      return `소아 용량 계산: 1회 ${formatNumber(singleDose ?? 0)} mg · 일일 ${formatNumber(dailyDose ?? 0)} mg`;
+    }
+    case "gcs": {
+      const total = parseHistoryNumber(outputs.total);
+      const severity = typeof outputs.severityLabel === "string" ? outputs.severityLabel : "중증도 확인";
+      if (total == null) return "GCS 의식 평가 기록입니다.";
+      return `GCS 평가: 총점 ${formatNumber(total, 0)}점 · ${severity}`;
+    }
+    case "bmi": {
+      const bmi = parseHistoryNumber(outputs.bmi);
+      const category = typeof outputs.categoryLabel === "string" ? outputs.categoryLabel : "분류 확인";
+      if (bmi == null) return "BMI 계산 기록입니다.";
+      return `BMI 계산: ${formatNumber(bmi, 1)} · ${category}`;
+    }
+    case "bsa": {
+      const bsa = parseHistoryNumber(outputs.bsaM2);
+      if (bsa == null) return "체표면적 계산 기록입니다.";
+      return `BSA 계산: ${formatNumber(bsa, 2)} m²`;
+    }
+    case "crcl": {
+      const crcl = parseHistoryNumber(outputs.crclMlMin);
+      const stage = typeof outputs.renalStageLabel === "string" ? outputs.renalStageLabel : "신기능 단계";
+      if (crcl == null) return "CrCl 계산 기록입니다.";
+      return `CrCl 계산: ${formatNumber(crcl, 1)} mL/min · ${stage}`;
+    }
+    case "fluid_balance": {
+      const netBalance = parseHistoryNumber(outputs.netBalanceMl);
+      const totalIntake = parseHistoryNumber(outputs.totalIntakeMl);
+      const totalOutput = parseHistoryNumber(outputs.totalOutputMl);
+      if (netBalance == null) return "수액 밸런스 계산 기록입니다.";
+      return `수액 밸런스: 섭취 ${formatNumber(totalIntake ?? 0, 0)} mL · 배출 ${formatNumber(totalOutput ?? 0, 0)} mL · 순 ${formatNumber(netBalance, 0)} mL`;
+    }
+    case "unit_converter": {
+      const converted = parseHistoryNumber(outputs.convertedValue);
+      const fromUnit = typeof inputs.fromUnit === "string" ? inputs.fromUnit : "";
+      const toUnit = typeof inputs.toUnit === "string" ? inputs.toUnit : "";
+      if (converted == null) return "단위 변환 기록입니다.";
+      return `단위 변환: ${fromUnit} → ${toUnit} = ${formatNumber(converted, 4)}`;
+    }
     default:
       return "계산 기록입니다.";
+  }
+}
+
+function BackArrowIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+      <path d="M8.75 3.5L5.25 7l3.5 3.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function ModuleTileIcon({ module }: { module: ToolModule }) {
+  switch (module) {
+    case "pump":
+      return (
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+          <rect x="6" y="5" width="9" height="9" rx="2.5" stroke="currentColor" strokeWidth="1.8" />
+          <path d="M15 9.5h3.5a2 2 0 012 2V14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          <path d="M20.5 14v4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          <path d="M20.5 22c1.7-1.2 2.5-2.4 2.5-3.7a2.5 2.5 0 10-5 0c0 1.3.8 2.5 2.5 3.7z" fill="currentColor" fillOpacity="0.18" stroke="currentColor" strokeWidth="1.5" />
+        </svg>
+      );
+    case "ivpb":
+      return (
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+          <path d="M11 5h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          <path d="M12 5v3l-2.5 3.3v7.2A2.5 2.5 0 0012 21h4a2.5 2.5 0 002.5-2.5v-7.2L16 8V5" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+          <path d="M14 11.5v5.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          <path d="M12 14.25h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        </svg>
+      );
+    case "drip":
+      return (
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+          <path d="M10 7v4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          <path d="M18 7v4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          <path d="M10 18c1.8-1.2 2.7-2.6 2.7-4a2.7 2.7 0 10-5.4 0c0 1.4.9 2.8 2.7 4z" fill="currentColor" fillOpacity="0.18" stroke="currentColor" strokeWidth="1.5" />
+          <path d="M18 22c2.1-1.5 3.2-3 3.2-4.8a3.2 3.2 0 10-6.4 0c0 1.8 1.1 3.3 3.2 4.8z" fill="currentColor" fillOpacity="0.18" stroke="currentColor" strokeWidth="1.5" />
+        </svg>
+      );
+    case "dilution":
+      return (
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+          <path d="M11 5h6v2.5l-2 2.3v7.2A3 3 0 0112 20h4a3 3 0 01-3-3v-7.2L11 7.5V5z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+          <path d="M11.5 14h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        </svg>
+      );
+    case "check":
+      return (
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+          <rect x="7" y="6" width="14" height="16" rx="3" stroke="currentColor" strokeWidth="1.8" />
+          <path d="M11 14l2.2 2.2L17.5 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    case "pediatric-dose":
+      return (
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+          <circle cx="10.5" cy="9" r="2.5" stroke="currentColor" strokeWidth="1.8" />
+          <path d="M8 19.5v-4a2.5 2.5 0 012.5-2.5h0A2.5 2.5 0 0113 15.5v4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          <path d="M17 8h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          <path d="M19 6v4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          <rect x="16" y="13" width="6" height="8" rx="2" stroke="currentColor" strokeWidth="1.8" />
+        </svg>
+      );
+    case "gcs":
+      return (
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+          <path d="M5 14c2.4-3.4 5.6-5.1 9-5.1s6.6 1.7 9 5.1c-2.4 3.4-5.6 5.1-9 5.1S7.4 17.4 5 14z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+          <circle cx="14" cy="14" r="2.7" stroke="currentColor" strokeWidth="1.8" />
+        </svg>
+      );
+    case "bmi":
+      return (
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+          <circle cx="14" cy="8" r="2.5" stroke="currentColor" strokeWidth="1.8" />
+          <path d="M14 11v7.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          <path d="M10.5 13.5L14 16l3.5-2.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M9 21h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        </svg>
+      );
+    case "bsa":
+      return (
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+          <rect x="7" y="6" width="14" height="16" rx="3" stroke="currentColor" strokeWidth="1.8" />
+          <path d="M11.5 10.5h5M11.5 14h5M11.5 17.5h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          <path d="M18.5 10.5v7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        </svg>
+      );
+    case "crcl":
+      return (
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+          <path d="M11.2 8.5c-2.7 0-4.7 1.9-4.7 4.9 0 3.5 2.4 6 5.4 6 2.1 0 3.7-1.2 4.3-3.2V8.9c-.9-.3-2-.4-3-.4z" fill="currentColor" fillOpacity="0.16" stroke="currentColor" strokeWidth="1.5" />
+          <path d="M16.8 8.5c2.7 0 4.7 1.9 4.7 4.9 0 3.5-2.4 6-5.4 6-2.1 0-3.7-1.2-4.3-3.2V8.9c.9-.3 2-.4 3-.4z" fill="currentColor" fillOpacity="0.16" stroke="currentColor" strokeWidth="1.5" />
+        </svg>
+      );
+    case "fluid-balance":
+      return (
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+          <path d="M10 21V8m0 0L7.5 10.5M10 8l2.5 2.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M18 7v13m0 0l-2.5-2.5M18 20l2.5-2.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    case "unit-converter":
+      return (
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+          <rect x="6" y="8" width="8" height="12" rx="2" stroke="currentColor" strokeWidth="1.8" />
+          <path d="M9 10.5v2M11 10.5v4M9 17v1.5M11 17v1.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          <path d="M17 11h5m0 0l-1.8-1.8M22 11l-1.8 1.8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M22 17h-5m0 0l1.8-1.8M17 17l1.8 1.8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    default:
+      return null;
   }
 }
 
@@ -1250,7 +1577,7 @@ export function ToolNurseCalculatorsPage() {
   const { t, lang } = useI18n();
   const translateText = useCallback((text: string) => translateCalculatorText(text, lang, t), [lang, t]);
   const [uiMode, setUiMode] = useState<UiMode>("basic");
-  const [activeModule, setActiveModule] = useState<ToolModule>("pump");
+  const [activeModule, setActiveModule] = useState<ToolModule | null>(null);
   const [pumpMode, setPumpMode] = useState<PumpMode>("forward");
   const [dripMode, setDripMode] = useState<DripMode>("forward");
 
@@ -1308,7 +1635,6 @@ export function ToolNurseCalculatorsPage() {
       if (raw) {
         const parsed = JSON.parse(raw) as Partial<PersistedSnapshot>;
         if (parsed.uiMode === "basic" || parsed.uiMode === "pro") setUiMode(parsed.uiMode);
-        if (parsed.activeModule && MODULE_ORDER.includes(parsed.activeModule)) setActiveModule(parsed.activeModule);
         if (parsed.pumpMode) setPumpMode(parsed.pumpMode);
         if (parsed.dripMode) setDripMode(parsed.dripMode);
         if (parsed.pump) setPumpForm((prev) => ({ ...prev, ...parsed.pump }));
@@ -1343,8 +1669,9 @@ export function ToolNurseCalculatorsPage() {
 
     // URL ?tab= 파라미터가 있으면 localStorage보다 우선
     const urlTab = new URLSearchParams(window.location.search).get("tab");
-    if (urlTab && MODULE_ORDER.includes(urlTab as ToolModule))
+    if (urlTab && MODULE_ORDER.includes(urlTab as ToolModule)) {
       setActiveModule(urlTab as ToolModule);
+    }
   }, []);
 
   useEffect(() => {
@@ -1407,10 +1734,32 @@ export function ToolNurseCalculatorsPage() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const url = new URL(window.location.href);
-    if (url.searchParams.get("tab") === activeModule) return;
-    url.searchParams.set("tab", activeModule);
-    window.history.replaceState({}, "", `${url.pathname}?${url.searchParams.toString()}`);
+    const currentTab = url.searchParams.get("tab");
+    if (activeModule) {
+      if (currentTab === activeModule) return;
+      url.searchParams.set("tab", activeModule);
+    } else {
+      if (!currentTab) return;
+      url.searchParams.delete("tab");
+    }
+    const nextSearch = url.searchParams.toString();
+    window.history.replaceState({}, "", nextSearch ? `${url.pathname}?${nextSearch}` : url.pathname);
   }, [activeModule]);
+
+  const appendHistoryRecord = useCallback(
+    (payload: Omit<CalcHistory, "timestamp">) => {
+      setHistory((prev) => {
+        const isSame =
+          prev[0] &&
+          prev[0].calcType === payload.calcType &&
+          JSON.stringify(prev[0].inputs) === JSON.stringify(payload.inputs) &&
+          JSON.stringify(prev[0].outputs) === JSON.stringify(payload.outputs);
+        if (isSame) return prev;
+        return [{ ...payload, timestamp: Date.now() }, ...prev].slice(0, 60);
+      });
+    },
+    []
+  );
 
   const appendHistory = useCallback(
     (
@@ -1419,18 +1768,28 @@ export function ToolNurseCalculatorsPage() {
       outputs: CalcHistory["outputs"],
       warnings: CalcWarning[]
     ) => {
-      const next: CalcHistory = {
-        timestamp: Date.now(),
+      appendHistoryRecord({
         calcType,
         inputs,
         outputs,
         flags: {
           warnings: warnings.map((item) => item.message),
         },
-      };
-      setHistory((prev) => [next, ...prev].slice(0, 60));
+      });
     },
-    []
+    [appendHistoryRecord]
+  );
+
+  const appendEmbeddedHistory = useCallback(
+    (record: CalcHistory) => {
+      appendHistoryRecord({
+        calcType: record.calcType,
+        inputs: record.inputs,
+        outputs: record.outputs,
+        flags: record.flags,
+      });
+    },
+    [appendHistoryRecord]
   );
 
   const getLastOutput = useCallback(
@@ -1913,9 +2272,10 @@ export function ToolNurseCalculatorsPage() {
     uiMode,
   ]);
 
-  const activeGuide = MODULE_GUIDE[activeModule];
-  const isCoreModule = CORE_MODULES.includes(activeModule);
+  const activeGuide = activeModule ? MODULE_GUIDE[activeModule] : null;
+  const isCoreModule = activeModule ? CORE_MODULES.includes(activeModule) : false;
   const isBasicMode = uiMode === "basic";
+  const recentHistoryItems = history.slice(0, 6);
   const historyDetail = useMemo(() => {
     if (!selectedHistory) return null;
     const inputs = Object.entries(selectedHistory.inputs).map(([key, value]) => ({
@@ -1957,79 +2317,136 @@ export function ToolNurseCalculatorsPage() {
         </div>
       </div>
 
-      <Card className={`space-y-3 p-4 ${FLAT_CARD_CLASS}`}>
-        {isCoreModule ? (
-          <>
-            <div className="grid gap-2 sm:grid-cols-[160px,1fr] sm:items-center">
-              <div className="text-[12px] font-semibold text-ios-sub">화면 모드</div>
-              <Segmented<UiMode>
-                value={uiMode}
-                onValueChange={setUiMode}
-                options={[
-                  { value: "basic", label: "기본 모드" },
-                  { value: "pro", label: "전문 모드" },
-                ]}
-                className="max-w-[260px]"
-              />
+      {!activeModule ? (
+        <>
+          <Card className={`space-y-4 p-5 ${FLAT_CARD_CLASS}`}>
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="min-w-0">
+                <div className="text-[24px] font-extrabold tracking-[-0.02em] text-ios-text">계산기 선택</div>
+                <div className="mt-1 text-[13px] leading-6 text-ios-sub">
+                  정사각형 아이콘을 눌러 필요한 계산기로 들어가세요. 상세 계산 화면은 선택한 뒤에만 열립니다.
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+                <div className="rounded-2xl border border-ios-sep bg-ios-bg px-3 py-3 text-center">
+                  <div className="text-[11px] font-semibold text-ios-sub">전체 계산기</div>
+                  <div className="mt-1 text-[22px] font-extrabold tracking-[-0.03em] text-ios-text">{MODULE_ORDER.length}</div>
+                </div>
+                <div className="rounded-2xl border border-ios-sep bg-ios-bg px-3 py-3 text-center">
+                  <div className="text-[11px] font-semibold text-ios-sub">최근 계산</div>
+                  <div className="mt-1 text-[22px] font-extrabold tracking-[-0.03em] text-ios-text">{history.length}</div>
+                </div>
+              </div>
             </div>
-            <div className="rounded-xl border border-ios-sep bg-ios-bg px-3 py-2 text-[11.5px] text-ios-sub">
-              {isBasicMode
-                ? "기본 모드: 필수 입력만 중심으로 보여주며, 고급 옵션은 숨깁니다."
-                : "전문 모드: 프리셋 저장, 더블체크, 처방 목표 비교 등 고급 기능을 모두 사용합니다."}
-            </div>
-          </>
-        ) : (
-          <div className="rounded-xl border border-ios-sep bg-ios-bg px-3 py-2 text-[11.5px] text-ios-sub">
-            현재 계산기는 단일 입력 카드로 구성되어 있으며, 결과를 바로 아래에서 확인할 수 있습니다.
-          </div>
-        )}
+          </Card>
 
-        <div className="space-y-3">
           {MODULE_GROUPS.map((group) => (
-            <div key={group.title} className="space-y-2">
-              <div className="text-[12px] font-semibold text-ios-sub">{group.title}</div>
-              <div className="grid gap-2 sm:grid-cols-3 xl:grid-cols-6">
+            <div key={group.title} className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-[13px] font-semibold text-ios-sub">{group.title}</div>
+                <div className="text-[11px] text-ios-muted">{group.items.length}개</div>
+              </div>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
                 {group.items.map((item) => {
-                  const active = item.value === activeModule;
+                  const meta = MODULE_TILE_META[item.value];
+                  const guide = MODULE_GUIDE[item.value];
                   return (
                     <button
                       key={item.value}
                       type="button"
                       onClick={() => setActiveModule(item.value)}
-                      className={`rounded-xl border px-3 py-2 text-left text-[12.5px] font-semibold transition ${
-                        active
-                          ? "border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
-                          : "border-ios-sep bg-white text-ios-text hover:border-[color:var(--rnest-accent-border)]"
-                      }`}
+                      className={`aspect-square rounded-[28px] border p-4 text-left transition hover:-translate-y-0.5 hover:shadow-[0_18px_40px_rgba(15,23,42,0.06)] ${meta.accentClass}`}
                     >
-                      {item.label}
+                      <div className="flex h-full flex-col justify-between">
+                        <div className={`flex h-14 w-14 items-center justify-center rounded-[20px] ${meta.softClass} ${meta.iconClass}`}>
+                          <ModuleTileIcon module={item.value} />
+                        </div>
+                        <div>
+                          <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{MODULE_LABELS[item.value]}</div>
+                          <div className="mt-1 text-[11.5px] leading-5 text-ios-sub">{guide.subtitle}</div>
+                        </div>
+                      </div>
                     </button>
                   );
                 })}
               </div>
             </div>
           ))}
-        </div>
-        <div className="rounded-2xl border border-ios-sep bg-ios-bg px-3 py-3">
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <div className="text-[14px] font-bold text-ios-text">{activeGuide.title}</div>
-              <div className="text-[12px] text-ios-sub">{activeGuide.subtitle}</div>
+        </>
+      ) : activeGuide ? (
+        <Card className={`space-y-4 p-4 ${FLAT_CARD_CLASS}`}>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <button
+                type="button"
+                onClick={() => setActiveModule(null)}
+                className="inline-flex items-center gap-1 text-[12px] font-semibold text-[color:var(--rnest-accent)]"
+              >
+                <BackArrowIcon />
+                계산기 전체 보기
+              </button>
+              <div className="mt-2 flex items-start gap-3">
+                <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-[20px] ${MODULE_TILE_META[activeModule].softClass} ${MODULE_TILE_META[activeModule].iconClass}`}>
+                  <ModuleTileIcon module={activeModule} />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[23px] font-extrabold tracking-[-0.02em] text-ios-text">{MODULE_LABELS[activeModule]}</div>
+                  <div className="mt-1 text-[13px] text-ios-sub">{activeGuide.subtitle}</div>
+                </div>
+              </div>
             </div>
-            <button type="button" className={TOP_ACTION_BTN_SM} onClick={() => setGuideOpen(true)}>
-              설명 보기
+            <button type="button" className={TOP_ACTION_BTN} onClick={() => setGuideOpen(true)}>
+              사용 설명서
             </button>
           </div>
-          <div className="mt-3 grid gap-2 sm:grid-cols-3">
-            {activeGuide.quickSteps.map((step, index) => (
-              <div key={`${activeModule}-quick-${index}`} className="rounded-xl border border-ios-sep bg-white px-3 py-2">
-                <div className="text-[11px] font-bold text-[color:var(--rnest-accent)]">STEP {index + 1}</div>
-                <div className="mt-1 text-[11.5px] leading-5 text-ios-text">{step}</div>
+
+          {isCoreModule ? (
+            <>
+              <div className="grid gap-2 sm:grid-cols-[160px,1fr] sm:items-center">
+                <div className="text-[12px] font-semibold text-ios-sub">화면 모드</div>
+                <Segmented<UiMode>
+                  value={uiMode}
+                  onValueChange={setUiMode}
+                  options={[
+                    { value: "basic", label: "기본 모드" },
+                    { value: "pro", label: "전문 모드" },
+                  ]}
+                  className="max-w-[260px]"
+                />
               </div>
-            ))}
+              <div className="rounded-xl border border-ios-sep bg-ios-bg px-3 py-2 text-[11.5px] text-ios-sub">
+                {isBasicMode
+                  ? "기본 모드: 필수 입력만 중심으로 보여주며, 고급 옵션은 숨깁니다."
+                  : "전문 모드: 프리셋 저장, 더블체크, 처방 목표 비교 등 고급 기능을 모두 사용합니다."}
+              </div>
+            </>
+          ) : (
+            <div className="rounded-xl border border-ios-sep bg-ios-bg px-3 py-2 text-[11.5px] text-ios-sub">
+              현재 계산기는 단일 입력 카드로 구성되어 있으며, 결과를 바로 아래에서 확인할 수 있습니다.
+            </div>
+          )}
+
+          <div className="rounded-2xl border border-ios-sep bg-ios-bg px-3 py-3">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <div className="text-[14px] font-bold text-ios-text">{activeGuide.title}</div>
+                <div className="text-[12px] text-ios-sub">{activeGuide.subtitle}</div>
+              </div>
+              <button type="button" className={TOP_ACTION_BTN_SM} onClick={() => setGuideOpen(true)}>
+                설명 보기
+              </button>
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-3">
+              {activeGuide.quickSteps.map((step, index) => (
+                <div key={`${activeModule}-quick-${index}`} className="rounded-xl border border-ios-sep bg-white px-3 py-2">
+                  <div className="text-[11px] font-bold text-[color:var(--rnest-accent)]">STEP {index + 1}</div>
+                  <div className="mt-1 text-[11.5px] leading-5 text-ios-text">{step}</div>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      </Card>
+        </Card>
+      ) : null}
 
       {activeModule === "pump" ? (
         <Card className={`space-y-4 p-4 ${FLAT_CARD_CLASS}`}>
@@ -2989,85 +3406,109 @@ export function ToolNurseCalculatorsPage() {
 
       {activeModule === "pediatric-dose" ? (
         <Card className={`space-y-4 p-4 ${FLAT_CARD_CLASS}`}>
-          <ToolPediatricDosePage embedded />
+          <ToolPediatricDosePage embedded onHistoryRecord={appendEmbeddedHistory} />
         </Card>
       ) : null}
 
       {activeModule === "gcs" ? (
         <Card className={`space-y-4 p-4 ${FLAT_CARD_CLASS}`}>
-          <ToolGCSPage embedded />
+          <ToolGCSPage embedded onHistoryRecord={appendEmbeddedHistory} />
         </Card>
       ) : null}
 
       {activeModule === "bmi" ? (
         <Card className={`space-y-4 p-4 ${FLAT_CARD_CLASS}`}>
-          <ToolBMIPage embedded />
+          <ToolBMIPage embedded onHistoryRecord={appendEmbeddedHistory} />
         </Card>
       ) : null}
 
       {activeModule === "bsa" ? (
         <Card className={`space-y-4 p-4 ${FLAT_CARD_CLASS}`}>
-          <ToolBSAPage embedded />
+          <ToolBSAPage embedded onHistoryRecord={appendEmbeddedHistory} />
         </Card>
       ) : null}
 
       {activeModule === "crcl" ? (
         <Card className={`space-y-4 p-4 ${FLAT_CARD_CLASS}`}>
-          <ToolCrClPage embedded />
+          <ToolCrClPage embedded onHistoryRecord={appendEmbeddedHistory} />
         </Card>
       ) : null}
 
       {activeModule === "fluid-balance" ? (
         <Card className={`space-y-4 p-4 ${FLAT_CARD_CLASS}`}>
-          <ToolFluidBalancePage embedded />
+          <ToolFluidBalancePage embedded onHistoryRecord={appendEmbeddedHistory} />
         </Card>
       ) : null}
 
       {activeModule === "unit-converter" ? (
         <Card className={`space-y-4 p-4 ${FLAT_CARD_CLASS}`}>
-          <ToolUnitConverterPage embedded />
+          <ToolUnitConverterPage embedded onHistoryRecord={appendEmbeddedHistory} />
         </Card>
       ) : null}
 
-      <Card className={`p-4 ${FLAT_CARD_CLASS}`}>
-        <details>
-          <summary className="cursor-pointer text-[14px] font-semibold text-ios-text">
-            최근 계산 기록 보기 <span className="text-[11px] font-medium text-ios-sub">(로컬 저장)</span>
-          </summary>
-          <div className="mt-3 space-y-2">
-            {history.length ? (
-              history.slice(0, 6).map((item) => (
-                <button
-                  key={`${item.timestamp}-${item.calcType}`}
-                  type="button"
-                  className="w-full rounded-2xl border border-ios-sep bg-white px-3 py-2 text-left hover:bg-ios-bg"
-                  onClick={() => setSelectedHistory(item)}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-[12px] font-semibold text-ios-text">{CALC_TYPE_LABEL[item.calcType]}</div>
-                    <div className="text-[11px] text-ios-sub">
-                      {new Date(item.timestamp).toLocaleTimeString(lang === "en" ? "en-US" : "ko-KR")}
+      <Card className={`space-y-3 p-4 ${FLAT_CARD_CLASS}`}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div className="text-[14px] font-semibold text-ios-text">최근 계산</div>
+            <div className="mt-1 text-[11.5px] text-ios-sub">모든 계산기 결과를 로컬에 최근 순으로 저장합니다.</div>
+          </div>
+          <div className="rounded-full border border-ios-sep bg-ios-bg px-3 py-1 text-[11px] font-semibold text-ios-sub">
+            {history.length}건 저장됨
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          {recentHistoryItems.length ? (
+            recentHistoryItems.map((item) => (
+              <div key={`${item.timestamp}-${item.calcType}`} className="rounded-2xl border border-ios-sep bg-white px-3 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="text-[12px] font-semibold text-ios-text">{CALC_TYPE_LABEL[item.calcType]}</div>
+                      <div className="rounded-full border border-ios-sep bg-ios-bg px-2 py-0.5 text-[10px] font-semibold text-ios-sub">
+                        {new Date(item.timestamp).toLocaleTimeString(lang === "en" ? "en-US" : "ko-KR")}
+                      </div>
                     </div>
+                    <div className="mt-1 text-[11.5px] leading-5 text-ios-sub">{buildHistoryHeadline(item)}</div>
+                    {item.flags.warnings.length ? (
+                      <div className="mt-1 text-[11px] text-amber-700">{item.flags.warnings[0]}</div>
+                    ) : null}
                   </div>
-                  <div className="mt-1 text-[11px] text-ios-sub">
+                  <button
+                    type="button"
+                    className={TOP_ACTION_BTN_SM}
+                    onClick={() => {
+                      setActiveModule(CALC_TYPE_MODULE[item.calcType]);
+                      setSelectedHistory(null);
+                    }}
+                  >
+                    다시 열기
+                  </button>
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="rounded-lg border border-ios-sep bg-ios-bg px-2.5 py-1.5 text-[11px] font-semibold text-ios-text"
+                    onClick={() => setSelectedHistory(item)}
+                  >
+                    계산 상세 보기
+                  </button>
+                  <div className="rounded-lg border border-ios-sep bg-white px-2.5 py-1.5 text-[11px] text-ios-sub">
                     {Object.entries(item.outputs)
                       .slice(0, 2)
                       .map(([key, value]) => `${getHistoryLabel(key)}: ${formatHistoryValue(value)}`)
                       .join(" · ")}
                   </div>
-                  {item.flags.warnings.length ? (
-                    <div className="mt-1 text-[11px] text-amber-700">{item.flags.warnings[0]}</div>
-                  ) : null}
-                  <div className="mt-1 text-[10px] font-semibold text-[color:var(--rnest-accent)]">눌러서 계산 상세 보기</div>
-                </button>
-              ))
-            ) : (
-              <div className="rounded-2xl border border-dashed border-ios-sep px-3 py-5 text-center text-[12px] text-ios-sub">
-                아직 계산 기록이 없습니다.
+                </div>
               </div>
-            )}
-          </div>
-        </details>
+            ))
+          ) : (
+            <div className="rounded-2xl border border-dashed border-ios-sep px-3 py-5 text-center text-[12px] text-ios-sub">
+              아직 계산 기록이 없습니다.
+            </div>
+          )}
+        </div>
       </Card>
 
       <BottomSheet
@@ -3200,6 +3641,21 @@ export function ToolNurseCalculatorsPage() {
                       {warning}
                     </div>
                   ))}
+                </div>
+              ) : null}
+
+              {selectedHistory ? (
+                <div className="mt-3 flex justify-end">
+                  <button
+                    type="button"
+                    className={TOP_ACTION_BTN_SM}
+                    onClick={() => {
+                      setActiveModule(CALC_TYPE_MODULE[selectedHistory.calcType]);
+                      setSelectedHistory(null);
+                    }}
+                  >
+                    이 계산기로 이동
+                  </button>
                 </div>
               ) : null}
             </div>

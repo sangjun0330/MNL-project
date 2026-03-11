@@ -1,19 +1,26 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { ToolPageShell } from "./ToolPageShell";
-import { calculatePediatricDose, sanitizeNumericInput, parseNumericInput, formatNumber } from "@/lib/nurseCalculators";
+import { calculatePediatricDose, sanitizeNumericInput, parseNumericInput, formatNumber, type CalcHistory } from "@/lib/nurseCalculators";
 import { useI18n } from "@/lib/useI18n";
 
-export function ToolPediatricDosePage({ embedded = false }: { embedded?: boolean }) {
+export function ToolPediatricDosePage({
+  embedded = false,
+  onHistoryRecord,
+}: {
+  embedded?: boolean;
+  onHistoryRecord?: (record: CalcHistory) => void;
+}) {
   const { t } = useI18n();
   const [weightRaw, setWeightRaw] = useState("");
   const [dosePerKgRaw, setDosePerKgRaw] = useState("");
   const [frequencyRaw, setFrequencyRaw] = useState("3");
   const [maxSingleRaw, setMaxSingleRaw] = useState("");
   const [maxDailyRaw, setMaxDailyRaw] = useState("");
+  const lastHistorySignatureRef = useRef<string | null>(null);
 
   const weight = parseNumericInput(weightRaw);
   const dosePerKg = parseNumericInput(dosePerKgRaw);
@@ -28,12 +35,53 @@ export function ToolPediatricDosePage({ embedded = false }: { embedded?: boolean
     return calculatePediatricDose(weight, dosePerKg, frequency, maxSingle, maxDaily);
   }, [weight, dosePerKg, frequency, maxSingle, maxDaily]);
 
+  useEffect(() => {
+    if (!result?.ok || !onHistoryRecord) {
+      if (!result) lastHistorySignatureRef.current = null;
+      return;
+    }
+
+    const signature = [
+      weight ?? "",
+      dosePerKg ?? "",
+      frequency ?? "",
+      maxSingle ?? "",
+      maxDaily ?? "",
+      result.data.appliedSingleDose,
+      result.data.appliedDailyDose,
+    ].join("|");
+    if (lastHistorySignatureRef.current === signature) return;
+    lastHistorySignatureRef.current = signature;
+
+    onHistoryRecord({
+      timestamp: Date.now(),
+      calcType: "pediatric_dose",
+      inputs: {
+        weightKg: weight ?? null,
+        dosePerKg: dosePerKg ?? null,
+        frequency: frequency ?? null,
+        maxSingleDose: maxSingle,
+        maxDailyDose: maxDaily,
+      },
+      outputs: {
+        appliedSingleDose: result.data.appliedSingleDose,
+        appliedDailyDose: result.data.appliedDailyDose,
+        singleDose: result.data.singleDose,
+        dailyDose: result.data.dailyDose,
+      },
+      flags: {
+        warnings: result.warnings.map((warning) => warning.message),
+      },
+    });
+  }, [dosePerKg, frequency, maxDaily, maxSingle, onHistoryRecord, result, weight]);
+
   const handleReset = () => {
     setWeightRaw("");
     setDosePerKgRaw("");
     setFrequencyRaw("3");
     setMaxSingleRaw("");
     setMaxDailyRaw("");
+    lastHistorySignatureRef.current = null;
   };
 
   return (

@@ -1,10 +1,17 @@
 "use client";
 
-import { useState, useMemo, useCallback, type Dispatch, type SetStateAction } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { ToolPageShell } from "./ToolPageShell";
-import { calculateFluidBalance, sanitizeNumericInput, parseNumericInput, formatNumber, type FluidEntry } from "@/lib/nurseCalculators";
+import {
+  calculateFluidBalance,
+  sanitizeNumericInput,
+  parseNumericInput,
+  formatNumber,
+  type CalcHistory,
+  type FluidEntry,
+} from "@/lib/nurseCalculators";
 import { useI18n } from "@/lib/useI18n";
 
 type RawEntry = { label: string; amountRaw: string };
@@ -112,11 +119,18 @@ function EntryList({
   );
 }
 
-export function ToolFluidBalancePage({ embedded = false }: { embedded?: boolean }) {
+export function ToolFluidBalancePage({
+  embedded = false,
+  onHistoryRecord,
+}: {
+  embedded?: boolean;
+  onHistoryRecord?: (record: CalcHistory) => void;
+}) {
   const { t } = useI18n();
   const [intakeEntries, setIntakeEntries] = useState<RawEntry[]>([{ label: "IV 수액", amountRaw: "" }]);
   const [outputEntries, setOutputEntries] = useState<RawEntry[]>([{ label: "소변", amountRaw: "" }]);
   const [insensibleRaw, setInsensibleRaw] = useState("500");
+  const lastHistorySignatureRef = useRef<string | null>(null);
 
   const toFluidEntries = useCallback(
     (raw: RawEntry[]): FluidEntry[] =>
@@ -142,10 +156,56 @@ export function ToolFluidBalancePage({ embedded = false }: { embedded?: boolean 
     [hasAnyInput, intakeEntries, outputEntries, insensibleRaw, toFluidEntries],
   );
 
+  useEffect(() => {
+    if (!result?.ok || !onHistoryRecord) {
+      if (!result) lastHistorySignatureRef.current = null;
+      return;
+    }
+
+    const intakeSummary = intakeEntries
+      .filter((entry) => entry.amountRaw.trim())
+      .map((entry) => `${entry.label || "항목"} ${entry.amountRaw}mL`)
+      .join(", ");
+    const outputSummary = outputEntries
+      .filter((entry) => entry.amountRaw.trim())
+      .map((entry) => `${entry.label || "항목"} ${entry.amountRaw}mL`)
+      .join(", ");
+    const insensibleLossMl = parseNumericInput(insensibleRaw) ?? 0;
+    const signature = [
+      intakeSummary,
+      outputSummary,
+      insensibleLossMl,
+      result.data.totalIntakeMl,
+      result.data.totalOutputMl,
+      result.data.netBalanceMl,
+    ].join("|");
+    if (lastHistorySignatureRef.current === signature) return;
+    lastHistorySignatureRef.current = signature;
+
+    onHistoryRecord({
+      timestamp: Date.now(),
+      calcType: "fluid_balance",
+      inputs: {
+        intakeItems: intakeSummary || "-",
+        outputItems: outputSummary || "-",
+        insensibleLossMl,
+      },
+      outputs: {
+        totalIntakeMl: result.data.totalIntakeMl,
+        totalOutputMl: result.data.totalOutputMl,
+        netBalanceMl: result.data.netBalanceMl,
+      },
+      flags: {
+        warnings: result.warnings.map((warning) => warning.message),
+      },
+    });
+  }, [insensibleRaw, intakeEntries, onHistoryRecord, outputEntries, result]);
+
   const handleReset = () => {
     setIntakeEntries([{ label: "IV 수액", amountRaw: "" }]);
     setOutputEntries([{ label: "소변", amountRaw: "" }]);
     setInsensibleRaw("500");
+    lastHistorySignatureRef.current = null;
   };
 
   return (

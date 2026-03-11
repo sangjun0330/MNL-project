@@ -1,17 +1,24 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { ToolPageShell } from "./ToolPageShell";
-import { calculateBSA, sanitizeNumericInput, parseNumericInput, formatNumber, type BSAFormula } from "@/lib/nurseCalculators";
+import { calculateBSA, sanitizeNumericInput, parseNumericInput, formatNumber, type BSAFormula, type CalcHistory } from "@/lib/nurseCalculators";
 import { useI18n } from "@/lib/useI18n";
 
-export function ToolBSAPage({ embedded = false }: { embedded?: boolean }) {
+export function ToolBSAPage({
+  embedded = false,
+  onHistoryRecord,
+}: {
+  embedded?: boolean;
+  onHistoryRecord?: (record: CalcHistory) => void;
+}) {
   const { t } = useI18n();
   const [weightRaw, setWeightRaw] = useState("");
   const [heightRaw, setHeightRaw] = useState("");
   const [formula, setFormula] = useState<BSAFormula>("mosteller");
+  const lastHistorySignatureRef = useRef<string | null>(null);
 
   const weight = parseNumericInput(weightRaw);
   const height = parseNumericInput(heightRaw);
@@ -19,6 +26,34 @@ export function ToolBSAPage({ embedded = false }: { embedded?: boolean }) {
     if (weight == null || height == null || weight <= 0 || height <= 0) return null;
     return calculateBSA(weight, height, formula);
   }, [weight, height, formula]);
+
+  useEffect(() => {
+    if (!result?.ok || !onHistoryRecord) {
+      if (!result) lastHistorySignatureRef.current = null;
+      return;
+    }
+
+    const signature = [weight ?? "", height ?? "", formula, result.data.bsaM2].join("|");
+    if (lastHistorySignatureRef.current === signature) return;
+    lastHistorySignatureRef.current = signature;
+
+    onHistoryRecord({
+      timestamp: Date.now(),
+      calcType: "bsa",
+      inputs: {
+        weightKg: weight ?? null,
+        heightCm: height ?? null,
+        formula,
+      },
+      outputs: {
+        bsaM2: result.data.bsaM2,
+        formulaLabel: formula === "mosteller" ? "Mosteller" : "DuBois",
+      },
+      flags: {
+        warnings: result.warnings.map((warning) => warning.message),
+      },
+    });
+  }, [formula, height, onHistoryRecord, result, weight]);
 
   return (
     <ToolPageShell title={t("BSA 체표면적")} subtitle={t("DuBois / Mosteller 공식")} badge="NEW" embedded={embedded}>

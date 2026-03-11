@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { ToolPageShell } from "./ToolPageShell";
-import { calculateGCS } from "@/lib/nurseCalculators";
+import { calculateGCS, type CalcHistory } from "@/lib/nurseCalculators";
 import { useI18n } from "@/lib/useI18n";
 
 const EYE_OPTIONS = [
@@ -69,18 +69,52 @@ function OptionGroup({
   );
 }
 
-export function ToolGCSPage({ embedded = false }: { embedded?: boolean }) {
+export function ToolGCSPage({
+  embedded = false,
+  onHistoryRecord,
+}: {
+  embedded?: boolean;
+  onHistoryRecord?: (record: CalcHistory) => void;
+}) {
   const { t } = useI18n();
   const [eye, setEye] = useState(4);
   const [verbal, setVerbal] = useState(5);
   const [motor, setMotor] = useState(6);
+  const lastHistorySignatureRef = useRef<string | null>(null);
 
   const result = useMemo(() => calculateGCS({ eye, verbal, motor }), [eye, verbal, motor]);
+
+  useEffect(() => {
+    if (!result.ok || !onHistoryRecord) return;
+    if (eye === 4 && verbal === 5 && motor === 6 && lastHistorySignatureRef.current == null) return;
+
+    const signature = [eye, verbal, motor, result.data.total, result.data.severity].join("|");
+    if (lastHistorySignatureRef.current === signature) return;
+    lastHistorySignatureRef.current = signature;
+
+    onHistoryRecord({
+      timestamp: Date.now(),
+      calcType: "gcs",
+      inputs: {
+        eye,
+        verbal,
+        motor,
+      },
+      outputs: {
+        total: result.data.total,
+        severityLabel: SEVERITY_LABELS[result.data.severity]?.label ?? result.data.severity,
+      },
+      flags: {
+        warnings: result.warnings.map((warning) => warning.message),
+      },
+    });
+  }, [eye, motor, onHistoryRecord, result, verbal]);
 
   const handleReset = () => {
     setEye(4);
     setVerbal(5);
     setMotor(6);
+    lastHistorySignatureRef.current = null;
   };
 
   return (
