@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { cn } from "@/lib/cn";
 
 export const DETAIL_GRADIENTS = {
@@ -24,6 +24,8 @@ export function InsightDetailShell({
   right,
   backHref = "/insights",
   className,
+  chatMode = false,
+  chatBottomBar,
 }: {
   title: string;
   subtitle?: string;
@@ -34,7 +36,58 @@ export function InsightDetailShell({
   right?: React.ReactNode;
   backHref?: string;
   className?: string;
+  chatMode?: boolean;
+  chatBottomBar?: ReactNode;
 }) {
+  if (chatMode) {
+    return (
+      <div className="fixed inset-0 z-[55] flex flex-col bg-[#F7F7F8]">
+        {/* ChatGPT-style header */}
+        <div className="shrink-0 flex items-center bg-white border-b border-[rgba(0,0,0,0.06)] px-4 h-14 gap-2" style={{ paddingTop: "env(safe-area-inset-top)" }}>
+          <Link
+            href={backHref}
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-[#F2F2F7]"
+            aria-label="Back"
+          >
+            <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5 text-[#1C1C1E]" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="3" y1="8" x2="21" y2="8" />
+              <line x1="3" y1="14" x2="21" y2="14" />
+              <line x1="3" y1="20" x2="21" y2="20" />
+            </svg>
+          </Link>
+          <div className="flex-1 flex justify-center">
+            <div className="inline-flex items-center gap-1">
+              <span className="text-[17px] font-semibold text-[#1C1C1E]">{title}</span>
+              {subtitle && (
+                <span className="text-[14px] font-normal text-[rgba(28,28,30,0.56)]"> {subtitle}</span>
+              )}
+              <svg viewBox="0 0 24 24" fill="none" className="h-3.5 w-3.5 text-[rgba(28,28,30,0.4)] ml-0.5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5">
+            {right}
+          </div>
+        </div>
+
+        {/* Scrollable content area */}
+        <div className="flex-1 overflow-y-auto">
+          <div className={cn("mx-auto w-full max-w-[860px] px-3 pt-4 pb-6 sm:px-4 space-y-4", className)}>
+            {children}
+          </div>
+        </div>
+
+        {/* Bottom chat bar */}
+        {chatBottomBar ? (
+          <div className="shrink-0 bg-white border-t border-[rgba(0,0,0,0.06)]">
+            {chatBottomBar}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div className={cn("mx-auto w-full max-w-[920px] px-3 pb-24 pt-6 sm:px-4", className)}>
       <div className="mb-4 flex items-center justify-between gap-3">

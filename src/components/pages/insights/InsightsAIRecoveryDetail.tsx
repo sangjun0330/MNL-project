@@ -1093,18 +1093,77 @@ export function InsightsAIRecoveryDetail() {
           ? t("필수 기록 필요")
           : t("생성 준비 완료");
 
+  const isGenerating = startPlannerAI.generating || afterPlannerAI.generating;
+
+  const chatBottomBar = (
+    <div className="px-4 py-3" style={{ paddingBottom: "calc(12px + env(safe-area-inset-bottom))" }}>
+      <div className="flex items-center gap-2 mx-auto max-w-[860px]">
+        <button
+          type="button"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-ios-sep bg-white shadow-apple-sm"
+        >
+          <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5 text-[#1C1C1E]" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+        </button>
+        <div className="flex-1 flex items-center rounded-full bg-[#F2F2F7] px-4 h-11 min-w-0">
+          <span className="flex-1 text-[15px] text-[rgba(28,28,30,0.4)] truncate">
+            {insightsLocked
+              ? t("데이터가 부족합니다")
+              : !hasPlannerAIAccess
+                ? t("Pro 구독이 필요합니다")
+                : isGenerating
+                  ? t("분석 중...")
+                  : activePhase === "after_work"
+                    ? afterPlannerAI.data
+                      ? t("퇴근 후 회복 완료 · 다시 분석하기")
+                      : t("퇴근 후 회복 분석하기")
+                    : startPlannerAI.data
+                      ? t("아침 회복 완료 · 다시 분석하기")
+                      : t("아침 회복 분석하기")}
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={activePhase === "start" ? startAnalysis : startAfterWorkAnalysis}
+          disabled={insightsLocked || !hasPlannerAIAccess || isGenerating}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#1C1C1E] text-white shadow-sm disabled:opacity-30 active:scale-95 transition-all"
+        >
+          {isGenerating ? (
+            <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 animate-spin" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 19V5" />
+              <path d="M5 12l7-7 7 7" />
+            </svg>
+          )}
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <InsightDetailShell
-      title={t("AI 맞춤회복")}
-      subtitle={formatKoreanDate(plannerDateISO)}
-      meta={
-        activePhase === "after_work"
-          ? t("퇴근 후 탭에서 오늘 실제 기록을 반영한 밤 회복 업데이트를 확인합니다.")
-          : t("아침 탭에서 전날 기록과 오늘 수면 기준의 시작 회복을 먼저 확인합니다.")
-      }
-      tone="navy"
+      title={t("AI 임상 검색")}
+      subtitle="Auto"
       backHref={backHref}
-      className="rnest-recovery-static !max-w-[860px] !px-3 !pt-5 sm:!px-4"
+      chatMode={true}
+      chatBottomBar={chatBottomBar}
+      className="rnest-recovery-static"
+      right={
+        <button
+          type="button"
+          onClick={() => router.push("/settings")}
+          className="flex h-9 w-9 items-center justify-center rounded-full bg-[#F2F2F7]"
+        >
+          <svg viewBox="0 0 24 24" fill="none" className="h-[18px] w-[18px] text-[#1C1C1E]" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="8" r="4" />
+            <path d="M20 20c0-4.4-3.6-8-8-8s-8 3.6-8 8" />
+          </svg>
+        </button>
+      }
     >
       {insightsLocked ? (
         <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />
@@ -1160,67 +1219,67 @@ export function InsightsAIRecoveryDetail() {
               },
             ]}
           />
-
-          <DetailCard
-            className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
-            style={{
-              background: "linear-gradient(180deg, rgba(250,251,255,0.98) 0%, rgba(255,255,255,0.96) 100%)",
-              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.94), 0 16px 40px rgba(15,36,74,0.04)",
-            }}
-          >
-            <div className="flex flex-col gap-4">
-              <div>
-                <div className="text-[10.5px] font-semibold tracking-[0.18em] text-[color:var(--rnest-accent)]">{t("RECOVERY FLOW")}</div>
-                <div className="mt-1 text-[20px] font-bold tracking-[-0.03em] text-ios-text">
-                  {activePhase === "after_work" ? t("퇴근 후 회복 업데이트 설정") : t("오늘 시작 회복 설정")}
-                </div>
-                <p className="mt-2 break-keep text-[13px] leading-6 text-ios-sub">
-                  {activePhase === "after_work"
-                    ? t("오늘 실제 기록과 아침 오더 진행을 반영해 밤 회복 업데이트를 생성합니다.")
-                    : t("전날 기록과 오늘 수면 기준으로 아침 시작 회복과 오더를 생성합니다.")}
-                </p>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <RecoveryMetaPill color="#315CA8">{recoveryPhaseTitle(activePhase, uiLang)}</RecoveryMetaPill>
-                <RecoveryMetaPill color="#1B2747">{activeStatusText}</RecoveryMetaPill>
-                <RecoveryMetaPill color="#5E6C84">{formatKoreanDate(plannerDateISO)}</RecoveryMetaPill>
-                {startPlannerAI.data ? <RecoveryMetaPill color="#5E6C84">{startProgressText}</RecoveryMetaPill> : null}
-              </div>
-
-              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_200px] lg:items-end">
-                <RecoveryOrderCountSelector
-                  value={selectedOrderCount}
-                  onChange={setSelectedOrderCount}
-                  helper={t("아침과 퇴근 후에 같은 기준 개수를 사용해요.")}
-                />
-                {isAdminOrDev && activePhase === "start" && startPlannerAI.data ? (
-                  <button
-                    type="button"
-                    onClick={startAnalysis}
-                    className="inline-flex h-11 items-center justify-center rounded-full border border-[#D5E2FA] bg-white/92 px-4 text-[13px] font-semibold text-[#17386D] shadow-[0_10px_24px_rgba(18,35,73,0.05)]"
-                  >
-                    {t("아침 회복과 오더 {count}개 다시 생성", { count: selectedOrderCount })}
-                  </button>
-                ) : isAdminOrDev && activePhase === "after_work" && afterPlannerAI.data ? (
-                  <button
-                    type="button"
-                    onClick={startAfterWorkAnalysis}
-                    className="inline-flex h-11 items-center justify-center rounded-full border border-[#D5E2FA] bg-white/92 px-4 text-[13px] font-semibold text-[#17386D] shadow-[0_10px_24px_rgba(18,35,73,0.05)]"
-                  >
-                    {t("퇴근 후 회복과 오더 {count}개 다시 생성", { count: selectedOrderCount })}
-                  </button>
-                ) : (
-                  <div className="rounded-[20px] border border-[rgba(16,33,70,0.06)] bg-white/72 px-4 py-3 text-[13px] leading-6 text-ios-sub">
-                    {activePhase === "after_work"
-                      ? t("퇴근 후 탭이 열리면 같은 개수 기준으로 회복과 오더를 이어서 만듭니다.")
-                      : t("아침 회복을 먼저 만들면 아래 해설 카드와 오더가 함께 연결됩니다.")}
-                  </div>
-                )}
-              </div>
+          <div className="flex flex-wrap items-start gap-3">
+            <div className="flex-1 min-w-[200px]">
+              <RecoveryOrderCountSelector
+                value={selectedOrderCount}
+                onChange={setSelectedOrderCount}
+                helper={t("아침과 퇴근 후에 같은 기준 개수를 사용해요.")}
+              />
             </div>
-          </DetailCard>
+            {isAdminOrDev && activePhase === "start" && startPlannerAI.data ? (
+              <button
+                type="button"
+                onClick={startAnalysis}
+                className="inline-flex h-9 shrink-0 items-center justify-center rounded-full border border-[#D5E2FA] bg-white/92 px-3.5 text-[12px] font-semibold text-[#17386D] shadow-[0_10px_24px_rgba(18,35,73,0.05)]"
+              >
+                {t("아침 회복과 오더 {count}개 다시 생성", { count: selectedOrderCount })}
+              </button>
+            ) : isAdminOrDev && activePhase === "after_work" && afterPlannerAI.data ? (
+              <button
+                type="button"
+                onClick={startAfterWorkAnalysis}
+                className="inline-flex h-9 shrink-0 items-center justify-center rounded-full border border-[#D5E2FA] bg-white/92 px-3.5 text-[12px] font-semibold text-[#17386D] shadow-[0_10px_24px_rgba(18,35,73,0.05)]"
+              >
+                {t("퇴근 후 회복과 오더 {count}개 다시 생성", { count: selectedOrderCount })}
+              </button>
+            ) : null}
+          </div>
         </>
+      ) : null}
+
+      {/* ChatGPT-style quick action cards — shown on empty state */}
+      {!insightsLocked && hasPlannerAIAccess && !startPlannerAI.data && !afterPlannerAI.data && !isGenerating ? (
+        <div className="grid grid-cols-2 gap-3 pt-2">
+          {(isAdminOrDev || isWithinGenerationWindow("start")) ? (
+            <button
+              type="button"
+              onClick={startAnalysis}
+              className="text-left rounded-[20px] border border-ios-sep bg-white px-4 py-4 shadow-apple-sm active:scale-[0.97] transition-transform"
+            >
+              <div className="text-[14px] font-semibold text-ios-text leading-snug break-keep">
+                {!isAdminOrDev && needsHealthInputGuide ? t("필수 기록 입력") : t("아침 회복 분석 시작")}
+              </div>
+              <div className="mt-1 text-[12px] text-ios-sub">{t("오늘의 회복 방향 잡기")}</div>
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => router.push("/schedule?openHealthLog=today&focus=sleep")}
+            className="text-left rounded-[20px] border border-ios-sep bg-white px-4 py-4 shadow-apple-sm active:scale-[0.97] transition-transform"
+          >
+            <div className="text-[14px] font-semibold text-ios-text leading-snug break-keep">{t("오늘 건강 기록")}</div>
+            <div className="mt-1 text-[12px] text-ios-sub">{t("수면·스트레스·활동 입력")}</div>
+          </button>
+          <button
+            type="button"
+            onClick={() => router.push(ordersHref)}
+            className="text-left rounded-[20px] border border-ios-sep bg-white px-4 py-4 shadow-apple-sm active:scale-[0.97] transition-transform"
+          >
+            <div className="text-[14px] font-semibold text-ios-text leading-snug break-keep">{t("오더 목록")}</div>
+            <div className="mt-1 text-[12px] text-ios-sub">{t("오늘의 회복 체크리스트")}</div>
+          </button>
+        </div>
       ) : null}
 
       {!insightsLocked && hasPlannerAIAccess ? (
