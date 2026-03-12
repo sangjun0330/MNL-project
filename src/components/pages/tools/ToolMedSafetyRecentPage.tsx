@@ -372,10 +372,6 @@ export function ToolMedSafetyRecentPage() {
     if (!selected) return "";
     return buildRecentCopyText(selected, selectedSections, t);
   }, [selected, selectedSections, t]);
-  const selectedSectionTitles = useMemo(
-    () => selectedSections.map((section) => section.title).filter(Boolean).slice(0, 6),
-    [selectedSections]
-  );
 
   const latestSavedAt = items[0]?.savedAt ?? 0;
 
@@ -416,24 +412,16 @@ export function ToolMedSafetyRecentPage() {
               {selected.result.model ? <span className={META_PILL_CLASS}>{selected.result.model}</span> : null}
             </div>
             <div className="mt-2 text-[22px] font-bold tracking-[-0.02em] text-ios-text">{selected.result.title}</div>
-            <div className="mt-2 text-[15px] leading-7 text-ios-text">{selected.result.summary}</div>
+            <div className="mt-3 text-[12px] font-semibold uppercase tracking-[0.08em] text-ios-muted">{t("질문")}</div>
+            <div className="mt-1 text-[14px] font-semibold leading-6 text-ios-text">{selected.request.query || "-"}</div>
+            <div className="mt-4 text-[12px] font-semibold uppercase tracking-[0.08em] text-ios-muted">{t("요약")}</div>
+            <div className="mt-1 text-[15px] leading-7 text-ios-text">{selected.result.summary}</div>
           </div>
           {isDesktop ? (
             <button type="button" onClick={() => void handleCopySelected()} className={QUICK_ACTION_PRIMARY_CLASS}>
               {t("답변 복사")}
             </button>
           ) : null}
-        </div>
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="rounded-[22px] border border-ios-sep bg-[#F7F7F8] px-4 py-3">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ios-muted">{t("질문")}</div>
-          <div className="mt-2 text-[14px] font-semibold leading-6 text-ios-text">{selected.request.query || "-"}</div>
-        </div>
-        <div className="rounded-[22px] border border-ios-sep bg-[#F7F7F8] px-4 py-3">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ios-muted">{t("저장 정책")}</div>
-          <div className="mt-2 text-[14px] leading-6 text-ios-sub">{t("완료된 검색만 저장되며, 질문과 답변을 그대로 다시 열 수 있습니다.")}</div>
         </div>
       </div>
 
@@ -444,41 +432,26 @@ export function ToolMedSafetyRecentPage() {
         <span className={META_PILL_CLASS}>{t("{count}섹션", { count: selectedSections.length || 1 })}</span>
       </div>
 
-      {selectedSectionTitles.length ? (
-        <div className="flex flex-wrap gap-2">
-          {selectedSectionTitles.map((title) => (
-            <span key={title} className="inline-flex items-center rounded-full border border-ios-sep bg-white px-3 py-1.5 text-[12px] font-semibold text-ios-text">
-              {t(title)}
-            </span>
+      {selectedSections.length ? (
+        <div className="space-y-3">
+          {selectedSections.map((section, index) => (
+            <section key={`${section.title}-${index}`} className="rounded-[24px] border border-ios-sep bg-white px-4 py-4 shadow-[0_10px_24px_rgba(16,24,40,0.03)]">
+              <div className="text-[18px] font-bold tracking-[-0.02em] text-ios-text">{t(section.title || "상세 결과")}</div>
+              <div className="mt-3 space-y-2">
+                {section.items.map((entry, entryIndex) => (
+                  <div key={`${section.title}-${entryIndex}`} className="text-[14px] leading-7 text-ios-text">
+                    - {entry}
+                  </div>
+                ))}
+              </div>
+            </section>
           ))}
         </div>
-      ) : null}
-
-      <div className="rounded-[24px] border border-ios-sep bg-white px-4 py-4 shadow-[0_10px_24px_rgba(16,24,40,0.03)]">
-        <div className="text-[15px] font-bold tracking-[-0.01em] text-ios-text">{t("상세 답변")}</div>
-
-        {selectedSections.length ? (
-          <div className="mt-4 space-y-3">
-            {selectedSections.map((section, index) => (
-              <section key={`${section.title}-${index}`} className="rounded-[20px] border border-ios-sep bg-[#FCFCFD] px-4 py-4">
-                <div className="text-[13px] font-bold tracking-[-0.01em] text-ios-text">{t(section.title || "상세 결과")}</div>
-                <div className="mt-2 space-y-2">
-                  {section.items.map((entry, entryIndex) => (
-                    <div
-                      key={`${section.title}-${entryIndex}`}
-                      className="rounded-[16px] border border-ios-sep bg-white px-3 py-2.5 text-[13.5px] leading-6 text-ios-text"
-                    >
-                      {entry}
-                    </div>
-                  ))}
-                </div>
-              </section>
-            ))}
-          </div>
-        ) : (
-          <div className="mt-4 whitespace-pre-wrap break-words text-[14px] leading-7 text-ios-text">{selected.result.answer}</div>
-        )}
-      </div>
+      ) : (
+        <div className="rounded-[24px] border border-ios-sep bg-white px-4 py-4 shadow-[0_10px_24px_rgba(16,24,40,0.03)]">
+          <div className="whitespace-pre-wrap break-words text-[14px] leading-7 text-ios-text">{selected.result.answer}</div>
+        </div>
+      )}
     </div>
   ) : (
     <div className="rounded-[24px] border border-dashed border-ios-sep bg-[#FCFCFD] px-4 py-5 text-[14px] leading-6 text-ios-sub">
@@ -596,14 +569,11 @@ export function ToolMedSafetyRecentPage() {
                               </span>
                             </div>
 
-                            <div className="mt-3 rounded-[18px] border border-ios-sep bg-[#F8F8F9] px-4 py-3">
-                              <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ios-muted">{t("질문")}</div>
-                              <div className="mt-1 text-[14px] font-semibold leading-6 text-ios-text" style={TWO_LINE_CLAMP_STYLE}>
-                                {item.request.query || "-"}
-                              </div>
+                            <div className="mt-3 text-[14px] font-semibold leading-6 text-ios-text" style={TWO_LINE_CLAMP_STYLE}>
+                              {item.request.query || "-"}
                             </div>
 
-                            <div className="mt-3 text-[13.5px] leading-6 text-ios-sub" style={TWO_LINE_CLAMP_STYLE}>
+                            <div className="mt-2 text-[13.5px] leading-6 text-ios-sub" style={TWO_LINE_CLAMP_STYLE}>
                               {shortText(item.result.summary || item.result.answer || "-", 120)}
                             </div>
                           </button>

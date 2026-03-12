@@ -26,9 +26,9 @@ const META_PILL_CLASS = "inline-flex items-center rounded-full border border-[#E
 const ACCENT_PILL_CLASS =
   "inline-flex items-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-3 py-1.5 text-[11px] font-semibold text-[color:var(--rnest-accent)]";
 const COMPOSER_ACTION_BTN_CLASS =
-  "flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/12 bg-white/6 text-white/70 transition hover:bg-white/10 hover:text-white";
+  "flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#E6E1F7] bg-white/78 text-ios-sub backdrop-blur-md transition hover:border-[color:var(--rnest-accent-border)] hover:bg-white";
 const COMPOSER_SEND_BTN_CLASS =
-  "flex h-11 min-w-[52px] shrink-0 items-center justify-center rounded-full border border-[color:var(--rnest-accent-strong)] bg-[color:var(--rnest-accent)] px-3 text-white shadow-[0_12px_26px_rgba(123,111,208,0.26)] transition hover:bg-[color:var(--rnest-accent-strong)] disabled:cursor-not-allowed disabled:border-white/8 disabled:bg-white/10 disabled:text-white/40 disabled:shadow-none";
+  "flex h-11 min-w-[52px] shrink-0 items-center justify-center rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent)] px-3 text-white shadow-[0_12px_26px_rgba(123,111,208,0.22)] transition hover:bg-[color:var(--rnest-accent-strong)] disabled:cursor-not-allowed disabled:border-[#E6E1F7] disabled:bg-[#ECEAF5] disabled:text-[#A49DBD] disabled:shadow-none";
 const STREAMING_CARD_CLASS =
   "rounded-[30px] border border-[#E7E8ED] bg-white px-5 py-4 text-[15px] leading-7 text-ios-text shadow-[0_18px_36px_rgba(15,23,42,0.04)]";
 const OPEN_LAYOUT_CLASS =
@@ -1068,7 +1068,7 @@ export function ToolMedSafetyPage() {
         </div>
       </div>
 
-      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-50 bg-[linear-gradient(180deg,rgba(255,255,255,0)_0%,rgba(255,255,255,0.88)_18%,rgba(255,255,255,0.98)_100%)] pb-[env(safe-area-inset-bottom)] pt-8 backdrop-blur-[14px]">
+      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-50 bg-[linear-gradient(180deg,rgba(255,255,255,0)_0%,rgba(255,255,255,0.78)_20%,rgba(255,255,255,0.94)_100%)] pb-[env(safe-area-inset-bottom)] pt-8 backdrop-blur-[18px]">
         <div className="pointer-events-auto mx-auto w-full max-w-[892px] px-3 pb-3 sm:px-4">
           {showSessionDecisionPrompt ? (
             <div className="mb-3 grid grid-cols-2 gap-2">
@@ -1093,10 +1093,10 @@ export function ToolMedSafetyPage() {
           <div
             className={`overflow-hidden rounded-[28px] border px-3 pb-2 pt-2 shadow-[0_16px_42px_rgba(15,23,42,0.24)] transition sm:px-4 ${
               isComposerDragOver
-                ? "border-[color:var(--rnest-accent)] bg-[#34323D]"
+                ? "border-[color:var(--rnest-accent)] bg-white/92 backdrop-blur-2xl"
                 : isComposerFocused
-                ? "border-white/16 bg-[#303030]"
-                : "border-white/10 bg-[#2B2B2B]"
+                ? "border-[color:var(--rnest-accent-border)] bg-white/88 backdrop-blur-2xl"
+                : "border-white/70 bg-white/78 backdrop-blur-2xl"
             }`}
             onDragEnter={(event) => {
               event.preventDefault();
@@ -1119,16 +1119,16 @@ export function ToolMedSafetyPage() {
             onDrop={handleComposerDrop}
           >
             {selectedImage ? (
-              <div className="mb-2 flex items-center gap-3 rounded-[20px] border border-white/8 bg-white/[0.04] px-3 py-2.5">
+              <div className="mb-2 flex items-center gap-3 rounded-[20px] border border-[#EAE6F6] bg-white/86 px-3 py-2.5">
                 <img src={selectedImage} alt="" className="h-12 w-12 rounded-[14px] object-cover" />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[13px] font-medium text-white/92">{selectedImageName}</div>
-                  <div className="mt-0.5 text-[11px] text-white/50">{t("질문과 함께 전송됩니다.")}</div>
+                  <div className="truncate text-[13px] font-medium text-ios-text">{selectedImageName}</div>
+                  <div className="mt-0.5 text-[11px] text-ios-sub">{t("질문과 함께 전송됩니다.")}</div>
                 </div>
                 <button
                   type="button"
                   onClick={removeSelectedImage}
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/6 text-white/65 transition hover:bg-white/10 hover:text-white"
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#F5F3FA] text-ios-sub transition hover:bg-[#EEEAF8] hover:text-[color:var(--rnest-accent)]"
                   aria-label={t("이미지 제거")}
                 >
                   <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden="true">
@@ -1148,7 +1148,7 @@ export function ToolMedSafetyPage() {
                   <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                 </svg>
               </button>
-              <div className="flex min-h-[56px] items-end rounded-[22px] border border-white/8 bg-white/[0.04] px-4 py-3 transition focus-within:border-white/14 focus-within:bg-white/[0.06]">
+              <div className="flex min-h-[56px] items-end rounded-[22px] border border-[#ECE7F7] bg-white/88 px-4 py-3 transition focus-within:border-[color:var(--rnest-accent-border)] focus-within:bg-white">
                 <textarea
                   ref={composerInputRef}
                   value={input}
@@ -1163,7 +1163,7 @@ export function ToolMedSafetyPage() {
                     }
                   }}
                   rows={1}
-                  className="max-h-[220px] min-h-[28px] flex-1 resize-none overflow-y-auto border-0 bg-transparent p-0 text-[15px] leading-7 text-white shadow-none outline-none placeholder:text-white/42"
+                  className="max-h-[220px] min-h-[28px] flex-1 resize-none overflow-y-auto border-0 bg-transparent p-0 text-[15px] leading-7 text-ios-text shadow-none outline-none placeholder:text-ios-sub"
                   placeholder={hasConversation ? t("예: 그럼 중심정맥으로만 줘야 하나요?") : t("예: norepinephrine 투여 시 주의사항이 뭐야?")}
                   autoCapitalize="off"
                   autoCorrect="off"
@@ -1192,7 +1192,7 @@ export function ToolMedSafetyPage() {
                 )}
               </button>
             </div>
-            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] text-white/45">
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] text-ios-sub">
               <span>{t("환자 이름, 등록번호, 연락처 등 식별정보는 입력하지 마세요.")}</span>
               <span>
                 {hasConversation
