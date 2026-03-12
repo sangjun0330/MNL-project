@@ -509,24 +509,80 @@ function stripBulletPrefix(value: string) {
     .trim();
 }
 
+function stripHeadingAnnotations(value: string) {
+  return String(value ?? "")
+    .replace(/\([^)]*\)/g, "")
+    .replace(/（[^）]*）/g, "")
+    .replace(/\[[^\]]*\]/g, "")
+    .replace(/\s+/g, "")
+    .trim();
+}
+
+function normalizeSectionHeadingKey(value: string) {
+  return stripHeadingAnnotations(
+    stripBulletPrefix(cleanAnswerLine(value))
+      .replace(/^[“"'`]+/, "")
+      .replace(/[”"'`]+$/, "")
+      .replace(/[:：?？]$/, "")
+  ).toLowerCase();
+}
+
 const SECTION_TITLE_PATTERNS = [
-  /^(핵심|핵심 요약|핵심 해석|핵심 판단|요약|정의|임상 의미)$/i,
-  /^(지금 할 일|즉시 대응|즉시 조치|바로 할 수 있는 조치|실무 포인트|간호 포인트|관찰 포인트|확인 포인트)$/i,
-  /^(확인할 것|확인할 수치|확인 질문|추가로 확인할 것|추가로 정확히 해석하려면)$/i,
-  /^(주의|위험|보고 기준|호출 기준|중단 기준|중단\/보고\/호출 기준|stop rule)$/i,
-  /^(원인 후보|문제 원인 후보|원인|감별 포인트)$/i,
-  /^(비교|차이|선택 기준)$/i,
-  /^(해석|수치 해석|기전|적응증|모니터링|투여\/간호 핵심|투여\/모니터링 핵심)$/i,
-  /^(SBAR|보고 문구|보고 예시|SBAR 예시)$/i,
+  /^(핵심|핵심요약|핵심해석|핵심판단|요약|정의|임상의미|핵심질문)$/,
+  /^(지금할일|즉시대응|즉시조치|바로할수있는조치|실무포인트|간호포인트|관찰포인트|확인포인트)$/,
+  /^(확인할것|확인할수치|확인질문|추가로확인할것|추가로정확히해석하려면|추가로몇가지만확인해주시면)$/,
+  /^(주의|위험|보고기준|호출기준|중단기준|중단\/보고\/호출기준|stoprule|escalation)$/,
+  /^(원인후보|문제원인후보|원인|감별포인트)$/,
+  /^(비교|차이|선택기준)$/,
+  /^(해석|수치해석|기전|적응증|모니터링|투여\/간호핵심|투여\/모니터링핵심)$/,
+  /^(sbar|간단sbar예시|보고문구|보고예시|sbar예시)$/,
+  /^(페니라민주면되나요|항히스타민주면되나요|스테로이드도줘야하나요|에피네프린이먼저인상황인지가핵심입니다)$/,
 ];
 
-function looksLikeSectionHeading(value: string) {
+function looksLikeStructuredAnswerLine(value: string) {
+  const raw = String(value ?? "").trimStart();
+  if (!raw) return false;
+  if (/^[-*•·]\s+/.test(raw)) return true;
+  if (/^\d+[.)]\s+/.test(raw)) return true;
+  if (/^[A-Za-z][A-Za-z0-9/+ -]{0,12}:\s*/.test(raw)) return true;
+  return false;
+}
+
+function looksLikeSectionHeading(
+  value: string,
+  context?: {
+    previousNonEmptyLine?: string | null;
+    nextNonEmptyLine?: string | null;
+  }
+) {
   const line = cleanAnswerLine(value);
   if (!line) return false;
   const normalized = stripBulletPrefix(line);
   if (!normalized) return false;
-  if (/[:：]$/.test(normalized)) return true;
-  if (SECTION_TITLE_PATTERNS.some((pattern) => pattern.test(normalized))) return true;
+  if (looksLikeStructuredAnswerLine(line)) return false;
+
+  const headingKey = normalizeSectionHeadingKey(normalized);
+  if (!headingKey) return false;
+
+  if (/[:：]$/.test(normalized) && headingKey.length <= 28) return true;
+  if (/[?？]$/.test(normalized) && headingKey.length <= 28) return true;
+  if (SECTION_TITLE_PATTERNS.some((pattern) => pattern.test(headingKey))) return true;
+
+  const previousNonEmptyLine = cleanAnswerLine(context?.previousNonEmptyLine ?? "");
+  const nextNonEmptyLine = cleanAnswerLine(context?.nextNonEmptyLine ?? "");
+  const nextLooksStructured = looksLikeStructuredAnswerLine(nextNonEmptyLine);
+  const startsNewBlock = !previousNonEmptyLine || nextLooksStructured;
+
+  if (
+    startsNewBlock &&
+    headingKey.length <= 24 &&
+    !/[.。]$/.test(normalized) &&
+    !/니다$/.test(headingKey) &&
+    !/습니다$/.test(headingKey)
+  ) {
+    return true;
+  }
+
   return false;
 }
 
@@ -588,6 +644,16 @@ function parseAnswerBodyLine(value: string) {
     };
   }
 
+  const labelMatch = raw.match(/^(\s*)([A-Za-z][A-Za-z0-9/+ -]{0,12}:)\s*(.*)$/);
+  if (labelMatch) {
+    return {
+      kind: "label" as const,
+      marker: labelMatch[2],
+      content: labelMatch[3].trim(),
+      level: getAnswerIndentLevel(labelMatch[1]),
+    };
+  }
+
   return {
     kind: "text" as const,
     content: raw.trim(),
@@ -601,7 +667,7 @@ function inferSectionTone(title: string, index: number): AnswerSectionTone {
     .toLowerCase();
 
   if (index === 0 || /(핵심|요약|정의|임상의미)/.test(normalized)) return "summary";
-  if (/(지금할일|즉시대응|조치|확인|실무포인트|간호포인트|sbar)/.test(normalized)) return "action";
+  if (/(지금할일|즉시대응|조치|확인|실무포인트|간호포인트|sbar|페니라민|항히스타민|스테로이드)/.test(normalized)) return "action";
   if (/(주의|위험|보고|호출|중단|stop)/.test(normalized)) return "warning";
   if (/(비교|차이|선택기준)/.test(normalized)) return "compare";
   return "neutral";
@@ -631,14 +697,32 @@ function parseAnswerSections(value: string): AnswerSection[] {
     currentLines = [];
   };
 
-  for (const rawLine of lines) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const rawLine = lines[index];
     const preservedLine = normalizeAnswerRawLine(rawLine);
     const line = cleanAnswerLine(preservedLine);
     if (!line) {
       currentLines.push("");
       continue;
     }
-    if (looksLikeSectionHeading(line)) {
+
+    let previousNonEmptyLine: string | null = null;
+    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+      const candidate = cleanAnswerLine(lines[cursor]);
+      if (!candidate) continue;
+      previousNonEmptyLine = candidate;
+      break;
+    }
+
+    let nextNonEmptyLine: string | null = null;
+    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+      const candidate = cleanAnswerLine(lines[cursor]);
+      if (!candidate) continue;
+      nextNonEmptyLine = candidate;
+      break;
+    }
+
+    if (looksLikeSectionHeading(line, { previousNonEmptyLine, nextNonEmptyLine })) {
       pushCurrent();
       currentTitle = formatSectionTitle(line);
       continue;
@@ -745,6 +829,19 @@ function AssistantAnswerSections({ content }: { content: string }) {
                         style={indentStyle}
                       >
                         <span className="min-w-[20px] shrink-0 font-semibold text-ios-text">{parsedLine.marker}</span>
+                        <div className="min-w-0 whitespace-pre-wrap break-words">{parsedLine.content}</div>
+                      </div>
+                    );
+                  }
+
+                  if (parsedLine.kind === "label") {
+                    return (
+                      <div
+                        key={`${section.title}-${lineIndex}`}
+                        className="flex items-start gap-3 text-[15px] leading-7 text-ios-text/90"
+                        style={indentStyle}
+                      >
+                        <span className="min-w-[24px] shrink-0 font-semibold text-[color:var(--rnest-accent)]">{parsedLine.marker}</span>
                         <div className="min-w-0 whitespace-pre-wrap break-words">{parsedLine.content}</div>
                       </div>
                     );
@@ -1287,7 +1384,7 @@ export function ToolMedSafetyPage() {
         className="mx-auto w-full max-w-[1120px] px-1 pt-4 transition-[padding-bottom] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] sm:px-2"
         style={{
           paddingBottom: showSessionDecisionPrompt
-            ? "calc(160px + env(safe-area-inset-bottom))"
+            ? "calc(228px + env(safe-area-inset-bottom))"
             : "calc(260px + env(safe-area-inset-bottom))",
         }}
       >

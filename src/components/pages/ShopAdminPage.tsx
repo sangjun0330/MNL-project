@@ -2064,7 +2064,7 @@ export function ShopAdminPage() {
 
           {/* Tab bar */}
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as AdminTab)} className="mb-5">
-            <TabsList className="grid w-full grid-cols-2 gap-2 bg-transparent md:grid-cols-3">
+            <TabsList className="grid h-auto w-full grid-cols-2 gap-2 bg-transparent p-0 md:grid-cols-3">
               {TABS.map(({ key, label }) => {
                 const hasErr = errorsInTab(fieldErrors, key);
                 return (
@@ -2073,7 +2073,7 @@ export function ShopAdminPage() {
                     value={key}
                     data-auth-allow
                     className={[
-                      "relative rounded-2xl px-3 py-2.5 text-[12px] font-semibold transition",
+                      "relative min-h-[52px] rounded-2xl px-3 py-2.5 text-[12px] font-semibold transition",
                       "data-[state=active]:bg-[#11294b] data-[state=active]:text-white data-[state=inactive]:bg-[#f4f7fb] data-[state=inactive]:text-[#11294b]",
                       hasErr ? "ring-1 ring-[#e07b6a]" : "",
                     ].join(" ")}

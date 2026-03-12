@@ -398,24 +398,24 @@ export function MonthCalendar({
                   {cell.inMonth && phase ? (
                     <div
                       className={cn(
-                        "-mx-2 mt-0.5 h-[4px]",
+                        "-mx-2 mt-0.5 h-[3px]",
                         roundL ? "rounded-l-full" : "",
                         roundR ? "rounded-r-full" : "",
                         phaseColor(phase)
                       )}
                     />
                   ) : (
-                    <div className="mt-0.5 h-[4px]" />
+                    <div className="mt-0.5 h-[3px]" />
                   )}
 
                   {/* 칩들 */}
-                  <div className="mt-0.5 space-y-[2px]">
+                  <div className="mt-0.5 space-y-px">
                     {chips.slice(0, 3).map((c) => (
                       <div
                         key={c.key}
                         className={cn(
                           "w-full rounded-md px-2 font-semibold leading-none",
-                          c.compact ? "py-[1.5px] text-[10.5px]" : "py-[2px] text-[11px]",
+                          c.compact ? "py-px text-[10.5px]" : "py-[1.5px] text-[11px]",
                           c.className
                         )}
                       >
@@ -423,7 +423,7 @@ export function MonthCalendar({
                       </div>
                     ))}
                     {chips.length > 3 && (
-                      <div className="w-full rounded-md bg-[var(--rnest-accent-soft)] px-2 py-[1.5px] text-[10px] font-semibold text-[var(--rnest-accent)]">
+                      <div className="w-full rounded-md bg-[var(--rnest-accent-soft)] px-2 py-px text-[10px] font-semibold text-[var(--rnest-accent)]">
                         +{chips.length - 3}
                       </div>
                     )}
