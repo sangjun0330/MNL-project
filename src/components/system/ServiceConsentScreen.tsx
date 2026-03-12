@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { signOut } from "@/lib/auth";
 import { cn } from "@/lib/cn";
 import { SERVICE_CONSENT_ITEMS } from "@/lib/serviceConsent";
@@ -43,6 +43,7 @@ function ConsentCard({
   badge: string;
   onChange: (checked: boolean) => void;
 }) {
+  const detailsRef = useRef<HTMLDetailsElement | null>(null);
   const accentClass =
     accent === "storage"
       ? "border-[#DCE6F2] bg-[#F7FAFD] text-[#24415D]"
@@ -104,7 +105,19 @@ function ConsentCard({
           </div>
         </div>
       </label>
-      <details className="mx-5 mb-5 rounded-[18px] border border-[#E9EEF4] bg-[#FAFCFE] px-4 py-3">
+      <details
+        ref={detailsRef}
+        className="mx-5 mb-5 scroll-mb-[220px] rounded-[18px] border border-[#E9EEF4] bg-[#FAFCFE] px-4 py-3"
+        onToggle={() => {
+          if (!detailsRef.current?.open) return;
+          window.requestAnimationFrame(() => {
+            detailsRef.current?.scrollIntoView({
+              block: "nearest",
+              behavior: "smooth",
+            });
+          });
+        }}
+      >
         <summary className="cursor-pointer list-none text-[12.5px] font-semibold text-[#26486B]">
           자세히 보기
         </summary>
@@ -146,8 +159,8 @@ export function ServiceConsentScreen({ onSubmit }: Props) {
   };
 
   return (
-    <div className="fixed inset-0 z-[110] overflow-y-auto bg-[linear-gradient(180deg,#F7FAFD_0%,#EEF3F8_100%)]">
-      <div className="mx-auto flex min-h-full w-full max-w-[720px] flex-col px-5 pb-[calc(144px+env(safe-area-inset-bottom))] pt-[max(24px,env(safe-area-inset-top))]">
+    <div className="fixed inset-0 z-[110] overflow-y-auto overscroll-contain bg-[linear-gradient(180deg,#F7FAFD_0%,#EEF3F8_100%)]">
+      <div className="mx-auto flex min-h-full w-full max-w-[720px] flex-col px-5 pb-[calc(240px+env(safe-area-inset-bottom))] pt-[max(24px,env(safe-area-inset-top))]">
         <div className="rounded-[32px] border border-[#E2E8F0] bg-white/92 px-5 py-6 shadow-[0_22px_64px_rgba(15,23,42,0.08)] backdrop-blur">
           <div className="flex flex-wrap items-center gap-2">
             <div className="inline-flex rounded-full border border-[#D6E1EC] bg-[#F5F8FB] px-3 py-1 text-[11px] font-semibold tracking-[0.08em] text-[#274A6C]">

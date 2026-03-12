@@ -9,6 +9,8 @@ import { translate } from "@/lib/i18n";
 import { useI18n } from "@/lib/useI18n";
 import { ShopBackLink } from "@/components/shop/ShopBackLink";
 import { useShopOrderRealtimeRefresh } from "@/components/shop/useShopOrderRealtimeRefresh";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 
 type ShopOrderDetail = {
   orderId: string;
@@ -779,9 +781,9 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
                   <div className="text-[16px] font-bold text-[#111827]">{t(order.productSnapshot.name)}</div>
                   <div className="mt-1 text-[12px] text-[#8d99ab]">{t("수량")} {order.productSnapshot.quantity}</div>
                 </div>
-                <span className={`rounded-full border px-3 py-1.5 text-[11px] font-semibold ${orderStatusClass(order.status)}`}>
+                <Badge variant="outline" className={`text-[10.5px] font-semibold ${orderStatusClass(order.status)}`}>
                   {orderStatusLabel(order.status)}
-                </span>
+                </Badge>
               </div>
               <div className="mt-4 text-[28px] font-extrabold tracking-[-0.03em] text-[#111827]">
                 {formatShopCurrency(order.amount)}
@@ -1119,9 +1121,9 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
                               <div className="text-[12px] font-semibold text-[#17324d]">
                                 {claimTypeLabel(claim.claimType)}
                               </div>
-                              <span className={`rounded-full border px-2.5 py-1 text-[10.5px] font-semibold ${claimStatusClass(claim.status)}`}>
+                              <Badge variant="outline" className={`text-[10.5px] font-semibold ${claimStatusClass(claim.status)}`}>
                                 {claimStatusLabel(claim.status)}
-                              </span>
+                              </Badge>
                             </div>
                             <div className="mt-1 text-[11.5px] leading-5 text-[#60768d]">
                               {claim.reason}

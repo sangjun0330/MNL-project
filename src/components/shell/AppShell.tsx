@@ -40,6 +40,27 @@ type BootstrapPayload = {
 
 type BusyStage = "onboarding" | null;
 
+let bootstrapCache: {
+  userId: string;
+  payload: BootstrapPayload;
+} | null = null;
+
+function readBootstrapCache(userId?: string | null) {
+  if (!userId) return null;
+  if (bootstrapCache?.userId !== userId) return null;
+  return bootstrapCache.payload;
+}
+
+function writeBootstrapCache(userId: string, payload: BootstrapPayload) {
+  bootstrapCache = { userId, payload };
+}
+
+function clearBootstrapCache(userId?: string | null) {
+  if (!userId || bootstrapCache?.userId === userId) {
+    bootstrapCache = null;
+  }
+}
+
 function GateLoadingScreen({ message, detail }: { message: string; detail: string }) {
   return (
     <div className="fixed inset-0 z-[55] flex items-center justify-center bg-white/86 px-6 backdrop-blur-sm">
@@ -116,6 +137,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [busyStage, setBusyStage] = useState<BusyStage>(null);
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const bootstrapRequestRef = useRef(0);
+  const cachedBootstrap = readBootstrapCache(auth?.userId ?? null);
+  const resolvedBootstrap = bootstrap ?? cachedBootstrap;
   const goToSettings = useCallback(() => {
     setLoginPromptOpen(false);
     if (!pathname?.startsWith("/settings")) {
@@ -133,10 +156,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
   }, [supabase]);
 
-  const loadBootstrap = useCallback(async () => {
+  const loadBootstrap = useCallback(async (options?: { silent?: boolean }) => {
     if (!auth?.userId) return null;
     const requestId = ++bootstrapRequestRef.current;
-    setBootstrapLoading(true);
+    const silent = options?.silent === true;
+    if (!silent) {
+      setBootstrapLoading(true);
+    }
     setBootstrapError(null);
 
     try {
@@ -157,13 +183,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       const data = (json?.data ?? null) as BootstrapPayload | null;
       if (!data || requestId !== bootstrapRequestRef.current) return null;
       setBootstrap(data);
+      writeBootstrapCache(auth.userId, data);
       hydrateState(data.consentCompleted && data.state ? data.state : emptyState());
       return data;
     } catch (error) {
       if (requestId === bootstrapRequestRef.current) {
-        setBootstrap(null);
-        setBootstrapError((error as Error)?.message ?? "failed_to_load_bootstrap");
-        hydrateState(emptyState());
+        if (!silent) {
+          setBootstrap(null);
+          setBootstrapError((error as Error)?.message ?? "failed_to_load_bootstrap");
+          hydrateState(emptyState());
+        }
       }
       return null;
     } finally {
@@ -177,6 +206,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (status === "loading") return;
     if (!auth?.userId) {
       bootstrapRequestRef.current += 1;
+      clearBootstrapCache();
       setBootstrap(null);
       setBootstrapLoading(false);
       setBootstrapError(null);
@@ -184,7 +214,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       hydrateState(emptyState());
       return;
     }
-    void loadBootstrap();
+    const cached = readBootstrapCache(auth.userId);
+    if (cached) {
+      setBootstrap(cached);
+      setBootstrapError(null);
+      hydrateState(cached.consentCompleted && cached.state ? cached.state : emptyState());
+    } else {
+      setBootstrap(null);
+      setBootstrapError(null);
+      hydrateState(emptyState());
+    }
+    void loadBootstrap({ silent: Boolean(cached?.consentCompleted) });
   }, [auth?.userId, loadBootstrap, status]);
 
   useEffect(() => {
@@ -217,24 +257,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setLoginPromptOpen(true);
   }, [shouldBlockInteraction]);
 
+  const hasBootstrap = resolvedBootstrap !== null;
   const showOnboarding =
     isAuthed &&
     !isPolicyPage &&
+    hasBootstrap &&
     !bootstrapLoading &&
     !bootstrapError &&
-    !bootstrap?.onboardingCompleted &&
-    !bootstrap?.hasStoredState;
+    !resolvedBootstrap?.onboardingCompleted &&
+    !resolvedBootstrap?.hasStoredState;
 
   const showConsent =
     isAuthed &&
     !isPolicyPage &&
+    hasBootstrap &&
     !bootstrapLoading &&
     !bootstrapError &&
     !showOnboarding &&
-    !bootstrap?.consentCompleted;
+    !resolvedBootstrap?.consentCompleted;
 
-  const canRenderContent = !isAuthed || isPolicyPage || Boolean(bootstrap?.consentCompleted);
-  const showBottomNav = !isAuthed || Boolean(bootstrap?.consentCompleted);
+  const canRenderContent = !isAuthed || isPolicyPage || Boolean(resolvedBootstrap?.consentCompleted);
+  const showBottomNav = !isAuthed || Boolean(resolvedBootstrap?.consentCompleted);
 
   const handleOnboardingComplete = useCallback(async () => {
     if (!auth?.userId || busyStage) return;
@@ -344,16 +387,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       ) : null}
-      {isAuthed && !isPolicyPage && (bootstrapLoading || busyStage === "onboarding") ? (
+      {isAuthed && !isPolicyPage && (busyStage === "onboarding" || (bootstrapLoading && !resolvedBootstrap?.consentCompleted)) ? (
         <GateLoadingScreen
           message={loadingCopy.message}
           detail={loadingCopy.detail}
         />
       ) : null}
-      {isAuthed && !isPolicyPage && !bootstrapLoading && bootstrapError ? (
+      {isAuthed && !isPolicyPage && !bootstrapLoading && bootstrapError && !resolvedBootstrap?.consentCompleted ? (
         <GateErrorScreen onRetry={() => void loadBootstrap()} />
       ) : null}
-      {isAuthed && Boolean(bootstrap?.consentCompleted) ? <CloudStateSync /> : null}
+      {isAuthed && Boolean(resolvedBootstrap?.consentCompleted) ? <CloudStateSync /> : null}
       <OnboardingGuide open={showOnboarding} onComplete={handleOnboardingComplete} />
       {showConsent ? <ServiceConsentScreen onSubmit={handleConsentComplete} /> : null}
       <div className="safe-bottom" />

@@ -5,6 +5,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { authHeaders } from "@/lib/billing/client";
 import { formatKrw } from "@/lib/billing/plans";
 import { signInWithProvider, useAuthState } from "@/lib/auth";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 
 type AdminRefundRowLite = {
   status: "REQUESTED" | "UNDER_REVIEW" | "APPROVED" | "REJECTED" | "EXECUTING" | "REFUNDED" | "FAILED_RETRYABLE" | "FAILED_FINAL" | "WITHDRAWN";
@@ -173,7 +175,7 @@ function AdminWorkspaceCard({
           <div className="text-[20px] font-bold tracking-[-0.03em] text-ios-text">{title}</div>
           <p className="mt-2 text-[13px] leading-6 text-ios-sub">{description}</p>
         </div>
-        <div className={`rounded-full px-3 py-1 text-[11px] font-semibold ${accent}`}>{cta}</div>
+        <Badge className={`text-[11px] ${accent}`}>{cta}</Badge>
       </div>
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -190,12 +192,9 @@ function AdminWorkspaceCard({
 
       <div className="mt-4 flex flex-wrap gap-2">
         {chips.map((chip) => (
-          <span
-            key={chip}
-            className="rounded-full border border-[#d9e2ee] bg-[#f7f9fc] px-3 py-1 text-[11px] font-semibold text-[#41556f]"
-          >
+          <Badge key={chip} variant="secondary" className="border-[#d9e2ee] bg-[#f7f9fc] text-[11px] text-[#41556f]">
             {chip}
-          </span>
+          </Badge>
         ))}
       </div>
 
@@ -464,9 +463,9 @@ export function SettingsAdminPage() {
               <section className="rounded-[34px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.97),rgba(244,248,252,0.95))] p-6 shadow-[0_22px_70px_rgba(17,41,75,0.08)]">
                 <div className="grid gap-6 xl:grid-cols-[1.08fr_0.92fr]">
                   <div>
-                    <div className="inline-flex rounded-full border border-[#dbe4ef] bg-white px-3 py-1 text-[11px] font-semibold text-[#17324d]">
+                    <Badge variant="outline" className="border-[#dbe4ef] bg-white text-[11px] text-[#17324d]">
                       운영 센터
-                    </div>
+                    </Badge>
                     <div className="mt-4 text-[28px] font-bold tracking-[-0.04em] text-ios-text">
                       통계 확인과 처리 진입을 한 번에
                     </div>
@@ -475,15 +474,15 @@ export function SettingsAdminPage() {
                       판단할 수 있게 구성했습니다.
                     </p>
                     <div className="mt-4 flex flex-wrap gap-2">
-                      <span className="rounded-full border border-[#d9e2ee] bg-white px-3 py-1 text-[11px] font-semibold text-[#41556f]">
+                      <Badge variant="secondary" className="border-[#d9e2ee] bg-white text-[11px] text-[#41556f]">
                         쇼핑 매출 {formatKrw(dashboard.shop.totalSales)}
-                      </span>
-                      <span className="rounded-full border border-[#d9e2ee] bg-white px-3 py-1 text-[11px] font-semibold text-[#41556f]">
+                      </Badge>
+                      <Badge variant="secondary" className="border-[#d9e2ee] bg-white text-[11px] text-[#41556f]">
                         결제 시도액 {formatKrw(dashboard.billing.totalAttemptAmount)}
-                      </span>
-                      <span className="rounded-full border border-[#d9e2ee] bg-white px-3 py-1 text-[11px] font-semibold text-[#41556f]">
+                      </Badge>
+                      <Badge variant="secondary" className="border-[#d9e2ee] bg-white text-[11px] text-[#41556f]">
                         처리 필요 {dashboard.shop.readyToShip + dashboard.billing.openRefunds}건
-                      </span>
+                      </Badge>
                     </div>
                   </div>
 
@@ -504,7 +503,9 @@ export function SettingsAdminPage() {
                 {error ? <div className="mt-4 text-[12px] text-red-600">{error}</div> : null}
               </section>
 
-              <section className="mt-4 grid gap-4 xl:grid-cols-2">
+              <Separator className="my-5 bg-[#e5ecf4]" />
+
+              <section className="grid gap-4 xl:grid-cols-2">
                 {workspaceCards.map((card) => (
                   <AdminWorkspaceCard key={card.title} {...card} />
                 ))}

@@ -26,11 +26,11 @@ const META_PILL_CLASS = "inline-flex items-center rounded-full border border-[#E
 const ACCENT_PILL_CLASS =
   "inline-flex items-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-3 py-1.5 text-[11px] font-semibold text-[color:var(--rnest-accent)]";
 const COMPOSER_ACTION_BTN_CLASS =
-  "flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#E6E1F7] bg-white/78 text-ios-sub backdrop-blur-md transition hover:border-[color:var(--rnest-accent-border)] hover:bg-white disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-[#E6E1F7] disabled:hover:bg-white/78";
+  "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#E6E1F7] bg-white/78 text-ios-sub backdrop-blur-md transition hover:border-[color:var(--rnest-accent-border)] hover:bg-white disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-[#E6E1F7] disabled:hover:bg-white/78 sm:h-11 sm:w-11";
 const COMPOSER_SELECTOR_BTN_CLASS =
-  "inline-flex h-11 min-w-[92px] items-center justify-center gap-2 rounded-full border border-[#E6E1F7] bg-white/86 px-3 text-[12px] font-semibold text-ios-text backdrop-blur-md transition hover:border-[color:var(--rnest-accent-border)] hover:bg-white disabled:cursor-not-allowed disabled:opacity-45";
+  "inline-flex h-10 min-w-[74px] items-center justify-center gap-1.5 rounded-full border border-[#E6E1F7] bg-white/86 px-2.5 text-[11.5px] font-semibold text-ios-text backdrop-blur-md transition hover:border-[color:var(--rnest-accent-border)] hover:bg-white disabled:cursor-not-allowed disabled:opacity-45 sm:h-11 sm:min-w-[82px] sm:px-3 sm:text-[12px]";
 const COMPOSER_SEND_BTN_CLASS =
-  "flex h-11 min-w-[52px] shrink-0 items-center justify-center rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent)] px-3 text-white shadow-[0_12px_26px_rgba(123,111,208,0.22)] transition hover:bg-[color:var(--rnest-accent-strong)] disabled:cursor-not-allowed disabled:border-[#E6E1F7] disabled:bg-[#ECEAF5] disabled:text-[#A49DBD] disabled:shadow-none";
+  "flex h-10 min-w-[48px] shrink-0 items-center justify-center rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent)] px-2.5 text-white shadow-[0_12px_26px_rgba(123,111,208,0.22)] transition hover:bg-[color:var(--rnest-accent-strong)] disabled:cursor-not-allowed disabled:border-[#E6E1F7] disabled:bg-[#ECEAF5] disabled:text-[#A49DBD] disabled:shadow-none sm:h-11 sm:min-w-[52px] sm:px-3";
 const STREAMING_CARD_CLASS =
   "rounded-[30px] border border-[#E7E8ED] bg-white px-5 py-4 text-[15px] leading-7 text-ios-text shadow-[0_18px_36px_rgba(15,23,42,0.04)]";
 const OPEN_LAYOUT_CLASS =
@@ -818,8 +818,6 @@ export function ToolMedSafetyPage() {
   const quotaRemaining = Math.max(0, Number(medSafetyQuota?.totalRemaining ?? 0));
   const alternateSearchType: SearchCreditType = activeSearchType === "premium" ? "standard" : "premium";
   const alternateQuotaRemaining = Math.max(0, Number(getQuotaForSearchType(medSafetyQuota, alternateSearchType)?.totalRemaining ?? 0));
-  const standardQuotaRemaining = Math.max(0, Number(medSafetyQuota?.standard.totalRemaining ?? 0));
-  const premiumQuotaRemaining = Math.max(0, Number(medSafetyQuota?.premium.totalRemaining ?? 0));
   const activePlanTitle = getPlanDefinition(activeTier).title;
   const billingActionHref = isFreePlan
     ? withReturnTo("/settings/billing/upgrade", "/tools/med-safety")
@@ -1472,7 +1470,7 @@ export function ToolMedSafetyPage() {
       </div>
 
       <div className="pointer-events-none fixed inset-x-0 bottom-0 z-50 pb-[env(safe-area-inset-bottom)] pt-8">
-        <div className="pointer-events-auto mx-auto w-full max-w-[892px] px-3 pb-3 sm:px-4">
+        <div className="pointer-events-auto mx-auto w-full max-w-[892px] px-2 pb-2 sm:px-4 sm:pb-3">
           <div
             className={`overflow-hidden rounded-[28px] transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
               showSessionDecisionPrompt ? "max-h-[120px] translate-y-0 opacity-100" : "pointer-events-none max-h-0 translate-y-5 opacity-0"
@@ -1501,8 +1499,10 @@ export function ToolMedSafetyPage() {
             </div>
           </div>
           <div
-            className={`overflow-hidden rounded-[28px] transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
-              showSessionDecisionPrompt ? "pointer-events-none max-h-0 translate-y-6 opacity-0" : "max-h-[320px] translate-y-0 opacity-100"
+            className={`rounded-[28px] transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+              showSessionDecisionPrompt
+                ? "pointer-events-none max-h-0 translate-y-6 overflow-hidden opacity-0"
+                : "max-h-[360px] translate-y-0 overflow-visible opacity-100"
             }`}
             aria-hidden={showSessionDecisionPrompt}
           >
@@ -1556,7 +1556,7 @@ export function ToolMedSafetyPage() {
                   </button>
                 </div>
               ) : null}
-              <div className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto] items-end gap-2">
+              <div className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto] items-end gap-1.5 sm:gap-2">
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
@@ -1568,7 +1568,7 @@ export function ToolMedSafetyPage() {
                     <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                   </svg>
                 </button>
-                <div className="flex min-h-[56px] items-end rounded-[22px] border border-[#ECE7F7] bg-white/88 px-4 py-3 transition focus-within:border-[color:var(--rnest-accent-border)] focus-within:bg-white">
+                <div className="flex min-h-[54px] items-end rounded-[22px] border border-[#ECE7F7] bg-white/88 px-3 py-3 transition focus-within:border-[color:var(--rnest-accent-border)] focus-within:bg-white sm:min-h-[56px] sm:px-4">
                   <textarea
                     ref={composerInputRef}
                     value={input}
@@ -1601,20 +1601,18 @@ export function ToolMedSafetyPage() {
                     disabled={isComposerLocked}
                     aria-haspopup="menu"
                     aria-expanded={isSearchTypeMenuOpen}
-                    aria-label={t("검색 유형 선택")}
+                    aria-label={t("모델 선택")}
                   >
                     <span>{t(activeSearchMeta.shortTitle)}</span>
-                    <span className="text-ios-sub">{selectedQuotaRemaining}</span>
                     <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4 text-ios-sub" aria-hidden="true">
                       <path d="M5 7.5l5 5 5-5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                   </button>
                   {isSearchTypeMenuOpen ? (
-                    <div className="absolute bottom-[calc(100%+10px)] right-0 z-20 w-[248px] rounded-[22px] border border-[#E6E1F7] bg-white/96 p-2 shadow-[0_18px_36px_rgba(15,23,42,0.16)] backdrop-blur-xl">
+                    <div className="absolute bottom-[calc(100%+10px)] right-0 z-[80] w-[220px] max-w-[calc(100vw-32px)] rounded-[22px] border border-[#E6E1F7] bg-white/96 p-2 shadow-[0_18px_36px_rgba(15,23,42,0.16)] backdrop-blur-xl">
                       {(["standard", "premium"] as const).map((type) => {
                         const meta = getSearchCreditMeta(type);
                         const active = activeSearchType === type;
-                        const remaining = type === "standard" ? standardQuotaRemaining : premiumQuotaRemaining;
                         return (
                           <button
                             key={type}
@@ -1634,21 +1632,28 @@ export function ToolMedSafetyPage() {
                             }`}
                             aria-pressed={active}
                           >
-                            <div className="min-w-0">
+                            <div className="min-w-0 pr-2">
                               <div className={`text-[13px] font-semibold ${active ? "text-[color:var(--rnest-accent)]" : "text-ios-text"}`}>
                                 {t(meta.title)}
                               </div>
                               <div className="mt-0.5 text-[11.5px] leading-5 text-ios-sub">{t(meta.description)}</div>
                             </div>
-                            <div className="shrink-0 text-right">
-                              <div className={`text-[12px] font-semibold ${active ? "text-[color:var(--rnest-accent)]" : "text-ios-text"}`}>
-                                {remaining}
-                                {t("회")}
-                              </div>
-                              {active ? (
-                                <div className="mt-1 text-[11px] text-[color:var(--rnest-accent)]">{t("현재 선택")}</div>
-                              ) : null}
-                            </div>
+                            <span
+                              className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${
+                                active
+                                  ? "border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent)] text-white"
+                                  : "border-[#D7DCEA] bg-white text-transparent"
+                              }`}
+                              aria-hidden="true"
+                            >
+                              <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
+                                <path
+                                  fillRule="evenodd"
+                                  d="M16.704 5.29a1 1 0 0 1 .006 1.414l-7.2 7.26a1 1 0 0 1-1.42 0L3.29 9.165a1 1 0 1 1 1.42-1.408l4.09 4.123 6.49-6.543a1 1 0 0 1 1.414-.006z"
+                                  clipRule="evenodd"
+                                />
+                              </svg>
+                            </span>
                           </button>
                         );
                       })}

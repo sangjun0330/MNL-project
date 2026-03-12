@@ -22,6 +22,8 @@ import {
   type AdminRefundRequest,
   type AdminRefundStatus,
 } from "@/lib/billing/adminClient";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 
 const FILTER_ROWS: { key: "ALL" | AdminRefundStatus; label: string }[] = [
   { key: "ALL", label: "전체" },
@@ -417,9 +419,9 @@ export function SettingsAdminRefundsPage() {
           <section className="rounded-[32px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(244,248,252,0.96))] p-6 shadow-[0_22px_70px_rgba(17,41,75,0.08)]">
             <div className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
               <div>
-                <div className="inline-flex rounded-full border border-[#dbe4ef] bg-white px-3 py-1 text-[11px] font-semibold text-[#17324d]">
+                <Badge variant="outline" className="border-[#dbe4ef] bg-white text-[11px] text-[#17324d]">
                   환불 처리 큐
-                </div>
+                </Badge>
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   <OpsMetricCard label="열린 요청" value={summary.open} tone="text-[color:var(--rnest-accent)]" />
                   <OpsMetricCard label="즉시 검토 필요" value={summary.requested} tone="text-[#17324d]" />
@@ -429,9 +431,9 @@ export function SettingsAdminRefundsPage() {
               </div>
 
               <div>
-                <div className="inline-flex rounded-full border border-[#dbe4ef] bg-white px-3 py-1 text-[11px] font-semibold text-[#17324d]">
+                <Badge variant="outline" className="border-[#dbe4ef] bg-white text-[11px] text-[#17324d]">
                   결제 흐름
-                </div>
+                </Badge>
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   <OpsMetricCard label="승인 완료" value={orderSummary.done} tone="text-[#0B7A3E]" />
                   <OpsMetricCard label="대기·재시도" value={orderSummary.ready} tone="text-[#17324d]" />
@@ -505,9 +507,9 @@ export function SettingsAdminRefundsPage() {
                   <div className="text-[15px] font-bold text-ios-text">환불 요청 큐</div>
                   <div className="mt-1 text-[12px] text-ios-sub">먼저 처리할 요청을 선택하면 오른쪽 패널에서 바로 처리할 수 있습니다.</div>
                 </div>
-                <div className="rounded-full border border-[#d7dfeb] bg-[#f4f7fb] px-3 py-1 text-[11px] font-semibold text-[#11294b]">
+                <Badge variant="secondary" className="border-[#d7dfeb] bg-[#f4f7fb] text-[11px] text-[#11294b]">
                   {requests.length}건
-                </div>
+                </Badge>
               </div>
 
               <div className="mt-4 max-h-[780px] space-y-2.5 overflow-auto pr-1">
@@ -539,17 +541,17 @@ export function SettingsAdminRefundsPage() {
                             {request.userId} · {formatDateTimeLabel(request.requestedAt)}
                           </div>
                         </div>
-                        <div className={`text-[12px] font-semibold ${refundStatusTone(request.status)}`}>
+                        <Badge variant="outline" className={`text-[10.5px] font-semibold ${refundStatusTone(request.status)}`}>
                           {refundStatusLabel(request.status)}
-                        </div>
+                        </Badge>
                       </div>
 
                       <div className="mt-3 rounded-[18px] border border-white/70 bg-white/70 px-3 py-3">
                         <div className="text-[12.5px] leading-5 text-ios-text">{request.reason}</div>
                         <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-semibold text-[#556a83]">
-                          <span>{formatKrw(request.cancelAmount ?? 0)}</span>
-                          <span>{request.currency}</span>
-                          <span>재시도 {request.retryCount}회</span>
+                          <Badge variant="secondary" className="text-[11px] font-semibold">{formatKrw(request.cancelAmount ?? 0)}</Badge>
+                          <Badge variant="secondary" className="text-[11px] font-semibold">{request.currency}</Badge>
+                          <Badge variant="secondary" className="text-[11px] font-semibold">재시도 {request.retryCount}회</Badge>
                         </div>
                       </div>
 
@@ -597,9 +599,9 @@ export function SettingsAdminRefundsPage() {
                           {selectedRequest.userId} · {formatDateTimeLabel(selectedRequest.requestedAt)}
                         </div>
                       </div>
-                      <div className={`text-[12px] font-semibold ${refundStatusTone(selectedRequest.status)}`}>
+                      <Badge variant="outline" className={`text-[10.5px] font-semibold ${refundStatusTone(selectedRequest.status)}`}>
                         {refundStatusLabel(selectedRequest.status)}
-                      </div>
+                      </Badge>
                     </div>
 
                     <div className="mt-4 grid gap-3 sm:grid-cols-2">

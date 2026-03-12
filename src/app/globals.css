@@ -42,6 +42,33 @@
   --rnest-dur-page: 480ms;    /* page transitions */
   --rnest-dur-sheet: 500ms;   /* bottom sheet slide */
   --rnest-dur-modal: 400ms;   /* modal/dialog animations */
+
+  /* ── shadcn/ui CSS variables — RNest 라벤더 테마로 매핑 ── */
+  --background: 240 5% 97%;          /* #F7F7F8 */
+  --foreground: 240 5% 11%;          /* #1C1C1E */
+  --card: 0 0% 100%;
+  --card-foreground: 240 5% 11%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 240 5% 11%;
+  --primary: 252 35% 55%;            /* #7B6FD0 라벤더 */
+  --primary-foreground: 0 0% 100%;
+  --secondary: 252 20% 95%;          /* 연한 라벤더 배경 */
+  --secondary-foreground: 252 30% 38%;
+  --muted: 240 5% 96%;
+  --muted-foreground: 240 5% 45%;
+  --accent: 252 35% 55%;             /* 라벤더 */
+  --accent-foreground: 0 0% 100%;
+  --destructive: 4 72% 55%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 252 20% 88%;             /* 라벤더 틴트 보더 */
+  --input: 252 20% 88%;
+  --ring: 252 35% 55%;               /* 라벤더 포커스 링 */
+  --radius: 1.25rem;                 /* 20px — rounded-apple과 통일 */
+  --chart-1: 252 35% 55%;
+  --chart-2: 280 30% 60%;
+  --chart-3: 220 60% 55%;
+  --chart-4: 160 50% 50%;
+  --chart-5: 35 80% 55%;
 }
 
 html, body {

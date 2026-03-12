@@ -11,6 +11,8 @@ import { translate } from "@/lib/i18n";
 import { useI18n } from "@/lib/useI18n";
 import { ShopBackLink } from "@/components/shop/ShopBackLink";
 import { useShopOrderRealtimeRefresh } from "@/components/shop/useShopOrderRealtimeRefresh";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 
 type ShopOrderSummary = {
   orderId: string;
@@ -569,9 +571,9 @@ export function ShopOrdersPage() {
                       {t("수량")} {order.productSnapshot.quantity} · {t("총 결제 금액")} {formatShopCurrency(order.amount)}
                     </div>
                   </div>
-                  <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10.5px] font-semibold ${orderStatusClass(order.status)}`}>
+                  <Badge variant="outline" className={`shrink-0 text-[10.5px] font-semibold ${orderStatusClass(order.status)}`}>
                     {orderStatusLabel(order.status)}
-                  </span>
+                  </Badge>
                 </div>
 
                 <div className="mt-3 rounded-2xl border border-[#dbe4ef] bg-[#f8fafc] px-3 py-3">
@@ -644,7 +646,8 @@ export function ShopOrdersPage() {
                   <div className="mt-2 text-[11.5px] text-[#a33a2b]">{order.failMessage}</div>
                 ) : null}
 
-                <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Separator className="my-3 bg-[#edf1f6]" />
+                <div className="flex flex-wrap items-center gap-2">
                   <Link href={`/shop/orders/${encodeURIComponent(order.orderId)}`} data-auth-allow className={`${SECONDARY_BUTTON} h-9 text-[11px]`}>
                     {t("상세 보기")}
                   </Link>
