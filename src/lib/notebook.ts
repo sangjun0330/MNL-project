@@ -24,6 +24,29 @@ export type RNestMemoTable = {
   rows: RNestMemoTableRow[]
 }
 
+export type RNestMemoAttachmentKind = "image" | "pdf" | "file" | "scan"
+
+export type RNestMemoAttachment = {
+  id: string
+  blobKey: string
+  name: string
+  mimeType: string
+  size: number
+  kind: RNestMemoAttachmentKind
+  createdAt: number
+}
+
+export type RNestMemoLockEnvelope = {
+  version: 1
+  algorithm: "PBKDF2-AES-GCM"
+  iterations: number
+  saltB64: string
+  ivB64: string
+  cipherB64: string
+  hint: string
+  lockedAt: number
+}
+
 export type RNestMemoBlock = {
   id: string
   type: RNestMemoBlockType
@@ -39,11 +62,15 @@ export type RNestMemoDocument = {
   title: string
   icon: string
   coverStyle: string | null
+  pinned: boolean
   favorite: boolean
   trashedAt: number | null
   reminderAt: number | null
   tags: string[]
   blocks: RNestMemoBlock[]
+  attachments: RNestMemoAttachment[]
+  attachmentBlobKeys: string[]
+  lock: RNestMemoLockEnvelope | null
   createdAt: number
   updatedAt: number
 }
@@ -165,6 +192,10 @@ const MAX_TAGS = 8
 const MAX_BLOCK_TEXT_LENGTH = 4000
 const MAX_BLOCKS = 64
 const MAX_TABLE_ROWS = 20
+const MAX_MEMO_ATTACHMENTS = 10
+const MAX_ATTACHMENT_NAME_LENGTH = 120
+const MAX_ATTACHMENT_BLOB_KEY_LENGTH = 120
+const MAX_LOCK_HINT_LENGTH = 80
 const MAX_RECORD_FIELDS = 16
 const MAX_SELECT_OPTIONS = 10
 const MAX_RECORD_TITLE_LENGTH = 80
@@ -225,6 +256,107 @@ export function sanitizeNotebookTags(value: unknown) {
 function sanitizeIcon(value: unknown, fallback: string) {
   const text = cleanText(value, 4)
   return text || fallback
+}
+
+function normalizeAttachmentKind(value: unknown, fallback: RNestMemoAttachmentKind): RNestMemoAttachmentKind {
+  const raw = cleanText(value, 12)
+  return raw === "image" || raw === "pdf" || raw === "file" || raw === "scan" ? raw : fallback
+}
+
+function sanitizeMemoAttachment(value: unknown): RNestMemoAttachment | null {
+  if (!value || typeof value !== "object") return null
+  const source = value as Record<string, unknown>
+  const mimeType = cleanText(source.mimeType, 80).toLowerCase()
+  const fallbackKind: RNestMemoAttachmentKind =
+    mimeType.startsWith("image/")
+      ? "image"
+      : mimeType === "application/pdf"
+        ? "pdf"
+        : "file"
+  const blobKey = cleanText(source.blobKey, MAX_ATTACHMENT_BLOB_KEY_LENGTH)
+  if (!blobKey) return null
+  return {
+    id: cleanText(source.id, 60) || createNotebookId("memo_attachment"),
+    blobKey,
+    name: cleanText(source.name, MAX_ATTACHMENT_NAME_LENGTH) || "첨부 파일",
+    mimeType,
+    size:
+      typeof source.size === "number" && Number.isFinite(source.size) && source.size >= 0
+        ? Math.min(Math.round(source.size), 100 * 1024 * 1024)
+        : 0,
+    kind: normalizeAttachmentKind(source.kind, fallbackKind),
+    createdAt:
+      typeof source.createdAt === "number" && Number.isFinite(source.createdAt)
+        ? source.createdAt
+        : nowTs(),
+  }
+}
+
+export function createMemoAttachment(input: Partial<RNestMemoAttachment> & { blobKey: string }) {
+  return sanitizeMemoAttachment(input)
+}
+
+function sanitizeMemoAttachments(value: unknown) {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const attachments: RNestMemoAttachment[] = []
+  for (const item of value) {
+    const attachment = sanitizeMemoAttachment(item)
+    if (!attachment || seen.has(attachment.id)) continue
+    seen.add(attachment.id)
+    attachments.push(attachment)
+    if (attachments.length >= MAX_MEMO_ATTACHMENTS) break
+  }
+  return attachments
+}
+
+function sanitizeAttachmentBlobKeys(value: unknown, attachments: RNestMemoAttachment[]) {
+  const seen = new Set<string>()
+  const out: string[] = []
+
+  for (const attachment of attachments) {
+    if (!attachment.blobKey || seen.has(attachment.blobKey)) continue
+    seen.add(attachment.blobKey)
+    out.push(attachment.blobKey)
+  }
+
+  if (!Array.isArray(value)) return out
+  for (const item of value) {
+    const next = cleanText(item, MAX_ATTACHMENT_BLOB_KEY_LENGTH)
+    if (!next || seen.has(next)) continue
+    seen.add(next)
+    out.push(next)
+    if (out.length >= MAX_MEMO_ATTACHMENTS) break
+  }
+  return out.slice(0, MAX_MEMO_ATTACHMENTS)
+}
+
+function sanitizeMemoLockEnvelope(value: unknown): RNestMemoLockEnvelope | null {
+  if (!value || typeof value !== "object") return null
+  const source = value as Record<string, unknown>
+  const version = source.version === 1 ? 1 : null
+  const algorithm = cleanText(source.algorithm, 24)
+  const iterations =
+    typeof source.iterations === "number" && Number.isFinite(source.iterations)
+      ? Math.max(10000, Math.min(Math.round(source.iterations), 500000))
+      : 180000
+  const saltB64 = cleanText(source.saltB64, 4096)
+  const ivB64 = cleanText(source.ivB64, 128)
+  const cipherB64 = cleanText(source.cipherB64, 200000)
+  if (!version || algorithm !== "PBKDF2-AES-GCM" || !saltB64 || !ivB64 || !cipherB64) return null
+  return {
+    version,
+    algorithm: "PBKDF2-AES-GCM",
+    iterations,
+    saltB64,
+    ivB64,
+    cipherB64,
+    hint: cleanText(source.hint, MAX_LOCK_HINT_LENGTH),
+    lockedAt:
+      typeof source.lockedAt === "number" && Number.isFinite(source.lockedAt)
+        ? source.lockedAt
+        : nowTs(),
+  }
 }
 
 export function defaultMemoState(): RNestMemoState {
@@ -338,20 +470,32 @@ export function coerceMemoBlockType(block: RNestMemoBlock, nextType: RNestMemoBl
 
 function createMemoDocumentBase(input?: Partial<RNestMemoDocument>): RNestMemoDocument {
   const timestamp = nowTs()
+  const lock = sanitizeMemoLockEnvelope(input?.lock)
   const candidateBlocks =
     input?.blocks?.slice(0, MAX_BLOCKS).map((block) => createMemoBlock(block.type, block)) ?? []
-  const blocks = candidateBlocks.length > 0 ? candidateBlocks : [createMemoBlock("paragraph")]
+  const blocks = lock
+    ? []
+    : candidateBlocks.length > 0
+      ? candidateBlocks
+      : [createMemoBlock("paragraph")]
+  const attachments = lock ? [] : sanitizeMemoAttachments(input?.attachments)
+  const attachmentBlobKeys = sanitizeAttachmentBlobKeys(input?.attachmentBlobKeys, attachments)
 
   return {
     id: input?.id ?? createNotebookId("memo_doc"),
     title: cleanText(input?.title, MAX_TITLE_LENGTH) || "새 메모",
     icon: normalizeMemoIcon(input?.icon, "note"),
     coverStyle: normalizeMemoCover(input?.coverStyle),
+    pinned: Boolean(input?.pinned),
     favorite: Boolean(input?.favorite),
     trashedAt: typeof input?.trashedAt === "number" && Number.isFinite(input.trashedAt) ? input.trashedAt : null,
-    reminderAt: typeof input?.reminderAt === "number" && Number.isFinite(input.reminderAt) ? input.reminderAt : null,
-    tags: sanitizeNotebookTags(input?.tags),
+    reminderAt:
+      lock || typeof input?.reminderAt !== "number" || !Number.isFinite(input.reminderAt) ? null : input.reminderAt,
+    tags: lock ? [] : sanitizeNotebookTags(input?.tags),
     blocks,
+    attachments,
+    attachmentBlobKeys,
+    lock,
     createdAt: typeof input?.createdAt === "number" && Number.isFinite(input.createdAt) ? input.createdAt : timestamp,
     updatedAt: typeof input?.updatedAt === "number" && Number.isFinite(input.updatedAt) ? input.updatedAt : timestamp,
   }
@@ -466,6 +610,9 @@ export function memoBlockToPlainText(block: RNestMemoBlock) {
 export function memoDocumentToPlainText(document: RNestMemoDocument) {
   return [
     cleanText(document.title, MAX_TITLE_LENGTH),
+    document.attachments.length > 0
+      ? `첨부: ${document.attachments.map((attachment) => cleanText(attachment.name, MAX_ATTACHMENT_NAME_LENGTH)).join(", ")}`
+      : "",
     ...document.blocks.map((block) => memoBlockToPlainText(block)),
   ]
     .filter(Boolean)
@@ -479,6 +626,12 @@ function escapeMarkdownCell(value: string) {
 
 export function memoDocumentToMarkdown(document: RNestMemoDocument) {
   const lines: string[] = [`# ${document.title}`]
+  if (document.attachments.length > 0) {
+    lines.push("## 첨부")
+    for (const attachment of document.attachments) {
+      lines.push(`- ${cleanText(attachment.name, MAX_ATTACHMENT_NAME_LENGTH)}`)
+    }
+  }
   for (const block of document.blocks) {
     if (block.type === "divider") {
       lines.push("---")

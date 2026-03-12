@@ -4,31 +4,39 @@ import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState
 import {
   Bell,
   BookOpenText,
+  Camera,
   CheckSquare,
   ChevronDown,
   ChevronRight,
   Copy,
   Download,
+  File,
   FileText,
   Folder,
   GripVertical,
   Heading1,
+  ImageIcon,
   Leaf,
   Lightbulb,
   Link2,
   List,
   ListOrdered,
+  Lock,
+  LockOpen,
   MessageSquareQuote,
   Minus,
   MoonStar,
   MoreHorizontal,
   NotebookPen,
+  Paperclip,
   Pin,
+  PinOff,
   Plus,
   Quote,
   ReceiptText,
   RotateCcw,
   Search,
+  Shield,
   Sparkles,
   Star,
   StickyNote,
@@ -40,6 +48,7 @@ import {
 import { cn } from "@/lib/cn"
 import {
   coerceMemoBlockType,
+  createMemoAttachment,
   createMemoBlock,
   createMemoFromPreset,
   createMemoTableRow,
@@ -54,13 +63,37 @@ import {
   memoReminderPresets,
   sanitizeNotebookTags,
   type RNestMemoBlock,
+  type RNestMemoAttachment,
   type RNestMemoBlockType,
   type RNestMemoCoverId,
   type RNestMemoDocument,
   type RNestMemoIconId,
   type RNestMemoState,
 } from "@/lib/notebook"
+import {
+  applyLockedMemoPayload,
+  createLockedMemoEnvelope,
+  createLockedMemoPayloadFromDocument,
+  createLockedMemoSnapshot,
+  reencryptLockedMemoEnvelope,
+  removeLockedMemoSnapshot,
+  unlockLockedMemoEnvelope,
+  type RNestLockedMemoPayload,
+} from "@/lib/notebookSecurity"
+import {
+  deleteMemoAttachmentBlob,
+  loadMemoAttachmentBlob,
+  saveMemoAttachmentBlob,
+} from "@/lib/notebookAttachmentStore"
 import { useAppStore } from "@/lib/store"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import Link from "next/link"
 
 /* ─── helpers ──────────────────────────────────────────────── */
@@ -83,17 +116,50 @@ function downloadTextFile(fileName: string, content: string, mimeType: string) {
   window.URL.revokeObjectURL(url)
 }
 
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes}B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)}KB`
+  return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)}MB`
+}
+
+function deriveAttachmentKind(file: File, preferred: RNestMemoAttachment["kind"] | null = null): RNestMemoAttachment["kind"] {
+  if (preferred) return preferred
+  if (file.type.startsWith("image/")) return "image"
+  if (file.type === "application/pdf") return "pdf"
+  return "file"
+}
+
+function buildDocBlobKeys(doc: RNestMemoDocument) {
+  return Array.from(
+    new Set([...(doc.attachmentBlobKeys ?? []), ...(doc.attachments ?? []).map((attachment) => attachment.blobKey)])
+  )
+}
+
 function buildMemoSearchText(doc: RNestMemoDocument) {
-  return [doc.title, doc.tags.join(" "), memoDocumentToPlainText(doc)].join(" ").toLowerCase()
+  return [
+    doc.title,
+    doc.tags.join(" "),
+    doc.attachments.map((attachment) => attachment.name).join(" "),
+    memoDocumentToPlainText(doc),
+  ]
+    .join(" ")
+    .toLowerCase()
 }
 
 function buildSummary(doc: RNestMemoDocument) {
-  return doc.blocks
+  if (doc.lock && doc.blocks.length === 0 && doc.attachments.length === 0) {
+    return "잠긴 메모"
+  }
+
+  const textSummary = doc.blocks
     .map((block) => memoBlockToPlainText(block))
     .join(" ")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 100)
+  if (textSummary) return textSummary
+  if (doc.attachments.length > 0) return `첨부 ${doc.attachments.length}개`
+  return ""
 }
 
 function sortByUpdated(a: RNestMemoDocument, b: RNestMemoDocument) {
@@ -317,22 +383,39 @@ function renderBlockTypeIcon(type: RNestMemoBlockType, className = "h-3.5 w-3.5"
   }
 }
 
+function renderAttachmentIcon(kind: RNestMemoAttachment["kind"], className = "h-4 w-4") {
+  if (kind === "image" || kind === "scan") {
+    return <ImageIcon className={className} strokeWidth={1.8} />
+  }
+  if (kind === "pdf") {
+    return <FileText className={className} strokeWidth={1.8} />
+  }
+  return <File className={className} strokeWidth={1.8} />
+}
+
+const mobileSafeInputClass = "text-[16px] md:text-[14px]"
+const mobileSafeBodyClass = "text-[16px] md:text-[15px]"
+const mobileSafeFineClass = "text-[16px] md:text-[12.5px]"
+
 const pageItemPositionCache = new Map<string, number>()
 
 /* ─── sidebar page item ───────────────────────────────────── */
 
 function PageItem({
   doc,
+  summary,
   isActive,
+  isLocked,
   listKey,
   onClick,
 }: {
   doc: RNestMemoDocument
+  summary: string
   isActive: boolean
+  isLocked: boolean
   listKey: string
   onClick: () => void
 }) {
-  const summary = buildSummary(doc)
   const itemRef = useRef<HTMLButtonElement>(null)
 
   useLayoutEffect(() => {
@@ -363,7 +446,7 @@ function PageItem({
         easing: "cubic-bezier(0.22, 1, 0.36, 1)",
       }
     )
-  }, [doc.id, doc.updatedAt, doc.favorite, doc.title, isActive, listKey, summary])
+  }, [doc.id, doc.updatedAt, doc.favorite, doc.pinned, doc.title, isActive, isLocked, listKey, summary])
 
   return (
     <button
@@ -386,9 +469,13 @@ function PageItem({
           {summary || "비어 있는 메모"}
         </span>
       </span>
-      {doc.favorite && (
-        <Star className="mt-1 h-3 w-3 shrink-0 fill-current text-[color:var(--rnest-accent)] opacity-60" />
-      )}
+      <span className="mt-0.5 flex shrink-0 items-center gap-1 text-ios-muted">
+        {doc.pinned && <Pin className="h-3 w-3 text-[color:var(--rnest-accent)]" />}
+        {isLocked && <Lock className="h-3 w-3" />}
+        {doc.favorite && (
+          <Star className="h-3 w-3 fill-current text-[color:var(--rnest-accent)] opacity-60" />
+        )}
+      </span>
     </button>
   )
 }
@@ -602,10 +689,12 @@ function BlockTypeMenu({
 
 function MoreMenu({
   doc,
+  isUnlocked,
   onAction,
   onClose,
 }: {
   doc: RNestMemoDocument
+  isUnlocked: boolean
   onAction: (action: string) => void
   onClose: () => void
 }) {
@@ -625,7 +714,16 @@ function MoreMenu({
         { id: "delete-permanent", label: "영구 삭제", icon: <Trash2 className="h-3.5 w-3.5" />, danger: true },
       ]
     : [
+        { id: "pin", label: doc.pinned ? "핀 해제" : "핀 고정", icon: doc.pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" /> },
         { id: "favorite", label: doc.favorite ? "즐겨찾기 해제" : "즐겨찾기", icon: <Star className="h-3.5 w-3.5" /> },
+        {
+          id: doc.lock ? (isUnlocked ? "relock" : "unlock") : "lock",
+          label: doc.lock ? (isUnlocked ? "다시 잠그기" : "잠금 해제") : "잠금 설정",
+          icon: doc.lock ? (isUnlocked ? <Lock className="h-3.5 w-3.5" /> : <LockOpen className="h-3.5 w-3.5" />) : <Shield className="h-3.5 w-3.5" />,
+        },
+        ...(doc.lock && isUnlocked
+          ? [{ id: "remove-lock", label: "잠금 제거", icon: <Shield className="h-3.5 w-3.5" /> }]
+          : []),
         { id: "duplicate", label: "복제", icon: <Copy className="h-3.5 w-3.5" /> },
         { id: "export-txt", label: "TXT 내보내기", icon: <Download className="h-3.5 w-3.5" /> },
         { id: "export-md", label: "Markdown 내보내기", icon: <Download className="h-3.5 w-3.5" /> },
@@ -700,7 +798,7 @@ function SlashMenu({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="/ 명령 검색"
-          className="w-full border-none bg-transparent text-[13px] text-ios-text outline-none placeholder:text-gray-400"
+          className={cn("w-full border-none bg-transparent text-ios-text outline-none placeholder:text-gray-400", mobileSafeInputClass)}
         />
       </div>
       <div className="max-h-[280px] overflow-y-auto py-1">
@@ -962,6 +1060,7 @@ function InlineBlock({
             onKeyDown={handleEditorKeyDown}
             placeholder="제목"
             className="w-full border-none bg-transparent text-[22px] font-bold tracking-[-0.02em] text-ios-text outline-none placeholder:text-gray-300"
+            style={{ fontSize: "max(16px, 22px)" }}
           />
         )}
 
@@ -972,7 +1071,10 @@ function InlineBlock({
             onKeyDown={handleEditorKeyDown}
             placeholder="내용을 입력하세요..."
             rows={1}
-            className="w-full resize-none border-none bg-transparent text-[15px] leading-relaxed text-ios-text outline-none placeholder:text-gray-300"
+            className={cn(
+              "w-full resize-none border-none bg-transparent leading-relaxed text-ios-text outline-none placeholder:text-gray-300",
+              mobileSafeBodyClass
+            )}
             style={{ minHeight: "1.6em", height: "auto" }}
             onInput={(e) => {
               const el = e.currentTarget
@@ -991,7 +1093,10 @@ function InlineBlock({
               onKeyDown={handleEditorKeyDown}
               placeholder="목록 항목"
               rows={1}
-              className="w-full resize-none border-none bg-transparent text-[15px] leading-relaxed text-ios-text outline-none placeholder:text-gray-300"
+              className={cn(
+                "w-full resize-none border-none bg-transparent leading-relaxed text-ios-text outline-none placeholder:text-gray-300",
+                mobileSafeBodyClass
+              )}
               style={{ minHeight: "1.6em", height: "auto" }}
               onInput={(e) => {
                 const el = e.currentTarget
@@ -1011,7 +1116,10 @@ function InlineBlock({
               onKeyDown={handleEditorKeyDown}
               placeholder="번호 항목"
               rows={1}
-              className="w-full resize-none border-transparent bg-transparent text-[15px] leading-relaxed text-ios-text outline-none placeholder:text-gray-300"
+              className={cn(
+                "w-full resize-none border-transparent bg-transparent leading-relaxed text-ios-text outline-none placeholder:text-gray-300",
+                mobileSafeBodyClass
+              )}
               style={{ minHeight: "1.6em", height: "auto" }}
               onInput={(e) => {
                 const el = e.currentTarget
@@ -1047,7 +1155,8 @@ function InlineBlock({
               placeholder="할 일"
               rows={1}
               className={cn(
-                "w-full resize-none border-none bg-transparent text-[15px] leading-relaxed outline-none placeholder:text-gray-300",
+                "w-full resize-none border-none bg-transparent leading-relaxed outline-none placeholder:text-gray-300",
+                mobileSafeBodyClass,
                 block.checked ? "text-ios-muted line-through" : "text-ios-text"
               )}
               style={{ minHeight: "1.6em", height: "auto" }}
@@ -1069,7 +1178,10 @@ function InlineBlock({
               onKeyDown={handleEditorKeyDown}
               placeholder="콜아웃 내용을 입력하세요"
               rows={1}
-              className="w-full resize-none border-none bg-transparent text-[14.5px] leading-relaxed text-ios-text outline-none placeholder:text-gray-300"
+              className={cn(
+                "w-full resize-none border-none bg-transparent leading-relaxed text-ios-text outline-none placeholder:text-gray-300",
+                "text-[16px] md:text-[14.5px]"
+              )}
               style={{ minHeight: "1.6em", height: "auto" }}
               onInput={(e) => {
                 const el = e.currentTarget
@@ -1089,7 +1201,10 @@ function InlineBlock({
               onKeyDown={handleEditorKeyDown}
               placeholder="인용하거나 강조할 문장을 적어 두세요"
               rows={1}
-              className="w-full resize-none border-none bg-transparent text-[14.5px] leading-relaxed text-ios-text outline-none placeholder:text-gray-300"
+              className={cn(
+                "w-full resize-none border-none bg-transparent leading-relaxed text-ios-text outline-none placeholder:text-gray-300",
+                "text-[16px] md:text-[14.5px]"
+              )}
               style={{ minHeight: "1.6em", height: "auto" }}
               onInput={(e) => {
                 const el = e.currentTarget
@@ -1117,7 +1232,10 @@ function InlineBlock({
                 onChange={(e) => onChange({ ...block, text: e.target.value })}
                 onKeyDown={handleEditorKeyDown}
                 placeholder="토글 제목"
-                className="w-full border-none bg-transparent text-[14px] font-medium text-ios-text outline-none placeholder:text-gray-300"
+                className={cn(
+                  "w-full border-none bg-transparent font-medium text-ios-text outline-none placeholder:text-gray-300",
+                  mobileSafeInputClass
+                )}
               />
             </div>
             {!block.collapsed && (
@@ -1128,7 +1246,10 @@ function InlineBlock({
                   onKeyDown={handleCommandKeyDown}
                   placeholder="토글 안쪽 내용을 입력하세요"
                   rows={2}
-                  className="w-full resize-none border-none bg-transparent text-[14px] leading-relaxed text-ios-text outline-none placeholder:text-gray-300"
+                  className={cn(
+                    "w-full resize-none border-none bg-transparent leading-relaxed text-ios-text outline-none placeholder:text-gray-300",
+                    mobileSafeInputClass
+                  )}
                   style={{ minHeight: "3.2em", height: "auto" }}
                   onInput={(e) => {
                     const el = e.currentTarget
@@ -1154,7 +1275,10 @@ function InlineBlock({
                   onChange={(e) => onChange({ ...block, text: e.target.value })}
                   onKeyDown={handleCommandKeyDown}
                   placeholder="https://example.com"
-                  className="w-full border-none bg-transparent text-[14px] font-medium text-ios-text outline-none placeholder:text-gray-300"
+                  className={cn(
+                    "w-full border-none bg-transparent font-medium text-ios-text outline-none placeholder:text-gray-300",
+                    mobileSafeInputClass
+                  )}
                 />
                 <input
                   type="text"
@@ -1162,7 +1286,10 @@ function InlineBlock({
                   onChange={(e) => onChange({ ...block, detailText: e.target.value })}
                   onKeyDown={handleCommandKeyDown}
                   placeholder="링크 제목 또는 메모"
-                  className="w-full border-none bg-transparent text-[12.5px] text-ios-sub outline-none placeholder:text-gray-300"
+                  className={cn(
+                    "w-full border-none bg-transparent text-ios-sub outline-none placeholder:text-gray-300",
+                    mobileSafeFineClass
+                  )}
                 />
                 {getBookmarkMeta(block.text) ? (
                   <a
@@ -1203,6 +1330,7 @@ function InlineBlock({
                         })
                       }
                       className="w-full border-none bg-transparent font-medium text-ios-sub outline-none"
+                      style={{ fontSize: "16px" }}
                     />
                   </th>
                   <th className="px-3 py-2 text-left font-medium text-ios-sub">
@@ -1219,6 +1347,7 @@ function InlineBlock({
                         })
                       }
                       className="w-full border-none bg-transparent font-medium text-ios-sub outline-none"
+                      style={{ fontSize: "16px" }}
                     />
                   </th>
                   <th className="w-8" />
@@ -1244,6 +1373,7 @@ function InlineBlock({
                         }
                         placeholder="..."
                         className="w-full border-none bg-transparent text-ios-text outline-none placeholder:text-gray-300"
+                        style={{ fontSize: "16px" }}
                       />
                     </td>
                     <td className="px-3 py-2">
@@ -1263,6 +1393,7 @@ function InlineBlock({
                         }
                         placeholder="..."
                         className="w-full border-none bg-transparent text-ios-text outline-none placeholder:text-gray-300"
+                        style={{ fontSize: "16px" }}
                       />
                     </td>
                     <td className="px-1 py-2">
@@ -1415,7 +1546,7 @@ function InlineTagEditor({
           }}
           onBlur={() => { handleAdd(); if (!draft.trim()) setEditing(false) }}
           placeholder="태그 입력 후 Enter"
-          className="h-6 w-24 border-none bg-transparent text-[12px] text-ios-text outline-none placeholder:text-gray-300"
+          className={cn("h-6 w-24 border-none bg-transparent text-ios-text outline-none placeholder:text-gray-300", mobileSafeFineClass)}
         />
       ) : (
         <button
@@ -1498,6 +1629,22 @@ export function ToolNotebookPage() {
   const [showCoverPicker, setShowCoverPicker] = useState(false)
   const [showMoreMenu, setShowMoreMenu] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const attachmentInputRef = useRef<HTMLInputElement>(null)
+  const scanInputRef = useRef<HTMLInputElement>(null)
+  const unlockKeysRef = useRef<Record<string, CryptoKey>>({})
+  const attachmentUrlRef = useRef<Record<string, string>>({})
+  const [unlockedPayloads, setUnlockedPayloads] = useState<Record<string, RNestLockedMemoPayload>>({})
+  const [attachmentUrls, setAttachmentUrls] = useState<Record<string, string>>({})
+  const [lockDialogOpen, setLockDialogOpen] = useState(false)
+  const [unlockDialogOpen, setUnlockDialogOpen] = useState(false)
+  const [lockPassword, setLockPassword] = useState("")
+  const [lockPasswordConfirm, setLockPasswordConfirm] = useState("")
+  const [lockHint, setLockHint] = useState("")
+  const [unlockPassword, setUnlockPassword] = useState("")
+  const [lockBusy, setLockBusy] = useState(false)
+  const [unlockBusy, setUnlockBusy] = useState(false)
+  const [lockError, setLockError] = useState<string | null>(null)
+  const [unlockError, setUnlockError] = useState<string | null>(null)
 
   // auto-close sidebar on mobile on first mount
   useEffect(() => {
@@ -1519,6 +1666,24 @@ export function ToolNotebookPage() {
     setShowMoreMenu(false)
   }, [activeMemoId])
 
+  useEffect(() => {
+    function clearUnlockedState() {
+      unlockKeysRef.current = {}
+      setUnlockedPayloads({})
+    }
+
+    function handleVisibilityChange() {
+      if (document.hidden) clearUnlockedState()
+    }
+
+    window.addEventListener("pagehide", clearUnlockedState)
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    return () => {
+      window.removeEventListener("pagehide", clearUnlockedState)
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+    }
+  }, [])
+
   /* ── derived lists ── */
 
   const allDocs = useMemo(
@@ -1532,6 +1697,28 @@ export function ToolNotebookPage() {
   const activeDocs = useMemo(
     () => allDocs.filter((d) => d.trashedAt == null),
     [allDocs]
+  )
+
+  const renderedDocs = useMemo(() => {
+    const next: Record<string, RNestMemoDocument> = {}
+    for (const doc of allDocs) {
+      next[doc.id] = unlockedPayloads[doc.id] ? applyLockedMemoPayload(doc, unlockedPayloads[doc.id]) : doc
+    }
+    return next
+  }, [allDocs, unlockedPayloads])
+
+  function getRenderableDoc(doc: RNestMemoDocument) {
+    return renderedDocs[doc.id] ?? doc
+  }
+
+  const pinnedDocs = useMemo(
+    () => activeDocs.filter((d) => d.pinned),
+    [activeDocs]
+  )
+
+  const unpinnedDocs = useMemo(
+    () => activeDocs.filter((d) => !d.pinned),
+    [activeDocs]
   )
 
   const favoriteDocs = useMemo(
@@ -1553,14 +1740,27 @@ export function ToolNotebookPage() {
 
   const searchResults = useMemo(() => {
     if (!queryDeferred) return null
-    return activeDocs.filter((d) => buildMemoSearchText(d).includes(queryDeferred))
-  }, [activeDocs, queryDeferred])
+    return activeDocs
+      .filter((d) => buildMemoSearchText(renderedDocs[d.id] ?? d).includes(queryDeferred))
+      .sort((a, b) => Number(b.pinned) - Number(a.pinned) || sortByUpdated(a, b))
+  }, [activeDocs, queryDeferred, renderedDocs])
 
-  const displayDocs = searchResults ?? activeDocs
-
-  const activeMemo = useMemo(
+  const activeMemoRaw = useMemo(
     () => allDocs.find((d) => d.id === activeMemoId) ?? null,
     [activeMemoId, allDocs]
+  )
+
+  const activeMemo = useMemo(
+    () => (activeMemoRaw ? renderedDocs[activeMemoRaw.id] ?? activeMemoRaw : null),
+    [activeMemoRaw, renderedDocs]
+  )
+
+  const activeMemoIsLocked = Boolean(activeMemoRaw?.lock)
+  const activeMemoIsUnlocked = Boolean(activeMemoRaw?.id && unlockedPayloads[activeMemoRaw.id])
+  const activeMemoAttachments = useMemo(() => activeMemo?.attachments ?? [], [activeMemo])
+  const activeMemoAttachmentSignature = useMemo(
+    () => activeMemoAttachments.map((attachment) => `${attachment.blobKey}:${attachment.name}:${attachment.kind}`).join("|"),
+    [activeMemoAttachments]
   )
 
   const headingBlocks = useMemo(
@@ -1579,20 +1779,134 @@ export function ToolNotebookPage() {
     }
   }, [activeMemoId, activeDocs])
 
+  useEffect(() => {
+    const previousUrls = attachmentUrlRef.current
+    attachmentUrlRef.current = {}
+    setAttachmentUrls({})
+    Object.values(previousUrls).forEach((url) => window.URL.revokeObjectURL(url))
+
+    if (activeMemoAttachments.length === 0) return
+
+    let cancelled = false
+
+    void (async () => {
+      const nextUrls: Record<string, string> = {}
+      for (const attachment of activeMemoAttachments) {
+        const blob = await loadMemoAttachmentBlob(attachment.blobKey).catch(() => null)
+        if (!blob) continue
+        nextUrls[attachment.blobKey] = window.URL.createObjectURL(blob)
+      }
+
+      if (cancelled) {
+        Object.values(nextUrls).forEach((url) => window.URL.revokeObjectURL(url))
+        return
+      }
+
+      attachmentUrlRef.current = nextUrls
+      setAttachmentUrls(nextUrls)
+    })()
+
+    return () => {
+      cancelled = true
+      const urls = attachmentUrlRef.current
+      attachmentUrlRef.current = {}
+      Object.values(urls).forEach((url) => window.URL.revokeObjectURL(url))
+    }
+  }, [
+    activeMemo?.id,
+    activeMemoAttachments,
+    activeMemoAttachmentSignature,
+  ])
+
   /* ── state operations ── */
 
   function commit(docs: Record<string, RNestMemoDocument | undefined>, recent?: string[]) {
     store.setMemoState({ documents: docs, recent: recent ?? memoState.recent })
   }
 
-  function saveDoc(doc: RNestMemoDocument) {
-    const next = { ...doc, updatedAt: Date.now() }
-    commit({ ...memoState.documents, [next.id]: next }, insertRecent(memoState.recent, next.id))
+  function clearUnlockSession(docId: string) {
+    delete unlockKeysRef.current[docId]
+    setUnlockedPayloads((current) => {
+      if (!(docId in current)) return current
+      const next = { ...current }
+      delete next[docId]
+      return next
+    })
+  }
+
+  function saveRawDoc(
+    doc: RNestMemoDocument,
+    options?: {
+      touchRecent?: boolean
+      touchUpdatedAt?: boolean
+    }
+  ) {
+    const touchRecent = options?.touchRecent ?? true
+    const touchUpdatedAt = options?.touchUpdatedAt ?? true
+    const next = touchUpdatedAt ? { ...doc, updatedAt: Date.now() } : doc
+    const latestMemo = store.getState().memo
+    commit(
+      { ...latestMemo.documents, [next.id]: next },
+      touchRecent ? insertRecent(latestMemo.recent, next.id) : latestMemo.recent
+    )
+    return next
+  }
+
+  async function cleanupAttachmentBlobsIfUnused(blobKeys: string[]) {
+    const uniqueKeys = Array.from(new Set(blobKeys.filter(Boolean)))
+    if (uniqueKeys.length === 0) return
+    const latestDocuments = store.getState().memo.documents
+    await Promise.all(
+      uniqueKeys.map(async (blobKey) => {
+        const stillUsed = Object.values(latestDocuments).some(
+          (doc) => doc && buildDocBlobKeys(doc).includes(blobKey)
+        )
+        if (!stillUsed) {
+          await deleteMemoAttachmentBlob(blobKey).catch(() => null)
+        }
+      })
+    )
+  }
+
+  async function updateActiveMemoContent(
+    updater: (doc: RNestMemoDocument) => RNestMemoDocument,
+    options?: {
+      touchRecent?: boolean
+      touchUpdatedAt?: boolean
+    }
+  ) {
+    if (!activeMemoRaw || !activeMemo) return null
+    if (!activeMemoRaw.lock) {
+      return saveRawDoc(updater(activeMemoRaw), options)
+    }
+
+    const sessionKey = unlockKeysRef.current[activeMemoRaw.id]
+    const unlockedPayload = unlockedPayloads[activeMemoRaw.id]
+    if (!sessionKey || !unlockedPayload) {
+      setToast("잠금 해제 후 수정할 수 있습니다")
+      setUnlockDialogOpen(true)
+      return null
+    }
+
+    const nextEffective = updater(activeMemo)
+    const nextPayload = createLockedMemoPayloadFromDocument(nextEffective)
+    const nextEnvelope = await reencryptLockedMemoEnvelope(nextPayload, activeMemoRaw.lock, sessionKey)
+    const nextRaw = createLockedMemoSnapshot(
+      {
+        ...nextEffective,
+        lock: activeMemoRaw.lock,
+      },
+      nextEnvelope
+    )
+    const saved = saveRawDoc(nextRaw, options)
+    setUnlockedPayloads((current) => ({ ...current, [activeMemoRaw.id]: nextPayload }))
+    return saved
   }
 
   function createMemo(presetId = "blank") {
     const doc = createMemoFromPreset(presetId)
-    commit({ ...memoState.documents, [doc.id]: doc }, insertRecent(memoState.recent, doc.id))
+    const latestMemo = store.getState().memo
+    commit({ ...latestMemo.documents, [doc.id]: doc }, insertRecent(latestMemo.recent, doc.id))
     setActiveMemoId(doc.id)
     setQuery("")
     setToast("새 페이지를 만들었습니다")
@@ -1603,17 +1917,24 @@ export function ToolNotebookPage() {
       ...doc,
       id: crypto.randomUUID(),
       title: `${doc.title} 복사`,
+      pinned: false,
       favorite: false,
       trashedAt: null,
       createdAt: Date.now(),
       updatedAt: Date.now(),
+      attachments: doc.attachments.map((attachment) => ({
+        ...attachment,
+        id: crypto.randomUUID(),
+      })),
+      attachmentBlobKeys: buildDocBlobKeys(doc),
       blocks: doc.blocks.map((b) =>
         b.type === "table"
           ? { ...b, id: crypto.randomUUID(), table: { columns: b.table?.columns ?? ["항목", "내용"], rows: (b.table?.rows ?? []).map((r) => ({ ...r, id: crypto.randomUUID() })) } }
           : { ...b, id: crypto.randomUUID() }
       ),
     }
-    commit({ ...memoState.documents, [next.id]: next }, insertRecent(memoState.recent, next.id))
+    const latestMemo = store.getState().memo
+    commit({ ...latestMemo.documents, [next.id]: next }, insertRecent(latestMemo.recent, next.id))
     setActiveMemoId(next.id)
     setToast("페이지를 복제했습니다")
   }
@@ -1621,7 +1942,8 @@ export function ToolNotebookPage() {
   function trashMemo(id: string) {
     const doc = memoState.documents[id]
     if (!doc) return
-    saveDoc({ ...doc, trashedAt: Date.now(), favorite: false })
+    saveRawDoc({ ...doc, trashedAt: Date.now(), favorite: false }, { touchRecent: false, touchUpdatedAt: false })
+    clearUnlockSession(id)
     if (activeMemoId === id) setActiveMemoId(null)
     setToast("휴지통으로 이동했습니다")
   }
@@ -1629,43 +1951,95 @@ export function ToolNotebookPage() {
   function restoreMemo(id: string) {
     const doc = memoState.documents[id]
     if (!doc) return
-    saveDoc({ ...doc, trashedAt: null })
+    saveRawDoc({ ...doc, trashedAt: null }, { touchRecent: false, touchUpdatedAt: false })
     setToast("복구했습니다")
   }
 
   function deletePermanently(id: string) {
-    const next = { ...memoState.documents }
+    const latestMemo = store.getState().memo
+    const blobKeys = latestMemo.documents[id] ? buildDocBlobKeys(latestMemo.documents[id] as RNestMemoDocument) : []
+    const next = { ...latestMemo.documents }
     delete next[id]
-    commit(next, memoState.recent.filter((i) => i !== id))
+    commit(next, latestMemo.recent.filter((i) => i !== id))
+    clearUnlockSession(id)
+    void cleanupAttachmentBlobsIfUnused(blobKeys)
     if (activeMemoId === id) setActiveMemoId(null)
     setToast("영구 삭제했습니다")
   }
 
   function handleMoreAction(action: string) {
-    if (!activeMemo) return
+    if (!activeMemoRaw || !activeMemo) return
     switch (action) {
+      case "pin":
+        saveRawDoc(
+          { ...activeMemoRaw, pinned: !activeMemoRaw.pinned },
+          { touchRecent: false, touchUpdatedAt: false }
+        )
+        setToast(activeMemoRaw.pinned ? "핀 고정을 해제했습니다" : "상단에 고정했습니다")
+        break
       case "favorite":
-        saveDoc({ ...activeMemo, favorite: !activeMemo.favorite })
+        saveRawDoc(
+          { ...activeMemoRaw, favorite: !activeMemoRaw.favorite },
+          { touchRecent: false, touchUpdatedAt: false }
+        )
+        break
+      case "lock":
+        setLockPassword("")
+        setLockPasswordConfirm("")
+        setLockHint(activeMemoRaw.lock?.hint ?? "")
+        setLockError(null)
+        setLockDialogOpen(true)
+        break
+      case "unlock":
+        setUnlockPassword("")
+        setUnlockError(null)
+        setUnlockDialogOpen(true)
+        break
+      case "relock":
+        clearUnlockSession(activeMemoRaw.id)
+        setToast("메모를 다시 잠갔습니다")
+        break
+      case "remove-lock":
+        void (async () => {
+          const payload = unlockedPayloads[activeMemoRaw.id]
+          if (!payload) {
+            setToast("잠금 해제 후 잠금 제거가 가능합니다")
+            setUnlockDialogOpen(true)
+            return
+          }
+          const next = removeLockedMemoSnapshot(activeMemoRaw, payload)
+          saveRawDoc(next, { touchRecent: false })
+          clearUnlockSession(activeMemoRaw.id)
+          setToast("잠금을 제거했습니다")
+        })()
         break
       case "duplicate":
-        duplicateMemo(activeMemo)
+        duplicateMemo(activeMemoRaw)
         break
       case "export-txt":
+        if (activeMemoRaw.lock && !activeMemoIsUnlocked) {
+          setToast("잠금 해제 후 내보낼 수 있습니다")
+          break
+        }
         downloadTextFile(`${activeMemo.title}.txt`, memoDocumentToPlainText(activeMemo), "text/plain;charset=utf-8")
         setToast("TXT 파일을 다운로드합니다")
         break
       case "export-md":
+        if (activeMemoRaw.lock && !activeMemoIsUnlocked) {
+          setToast("잠금 해제 후 내보낼 수 있습니다")
+          break
+        }
         downloadTextFile(`${activeMemo.title}.md`, memoDocumentToMarkdown(activeMemo), "text/markdown;charset=utf-8")
         setToast("Markdown 파일을 다운로드합니다")
         break
       case "trash":
-        trashMemo(activeMemo.id)
+        trashMemo(activeMemoRaw.id)
         break
       case "restore":
-        restoreMemo(activeMemo.id)
+        restoreMemo(activeMemoRaw.id)
         break
       case "delete-permanent":
-        deletePermanently(activeMemo.id)
+        deletePermanently(activeMemoRaw.id)
         break
     }
   }
@@ -1676,84 +2050,257 @@ export function ToolNotebookPage() {
     if (typeof window !== "undefined" && window.innerWidth < 768) setSidebarOpen(false)
   }
 
+  async function confirmLockMemo() {
+    if (!activeMemoRaw || !activeMemo) return
+    if (lockPassword.trim().length < 4) {
+      setLockError("잠금 암호는 4자 이상으로 입력해 주세요.")
+      return
+    }
+    if (lockPassword !== lockPasswordConfirm) {
+      setLockError("암호 확인이 일치하지 않습니다.")
+      return
+    }
+
+    setLockBusy(true)
+    setLockError(null)
+    try {
+      const { envelope, key, payload } = await createLockedMemoEnvelope(
+        lockPassword,
+        createLockedMemoPayloadFromDocument(activeMemo),
+        lockHint
+      )
+      const next = createLockedMemoSnapshot(activeMemo, envelope)
+      saveRawDoc(next, { touchRecent: false, touchUpdatedAt: false })
+      unlockKeysRef.current[activeMemoRaw.id] = key
+      setUnlockedPayloads((current) => ({ ...current, [activeMemoRaw.id]: payload }))
+      setLockDialogOpen(false)
+      setLockPassword("")
+      setLockPasswordConfirm("")
+      setLockHint("")
+      setToast("잠금 메모를 설정했습니다")
+    } catch (error) {
+      setLockError(error instanceof Error ? error.message : "잠금 메모를 설정하지 못했습니다.")
+    } finally {
+      setLockBusy(false)
+    }
+  }
+
+  async function confirmUnlockMemo() {
+    if (!activeMemoRaw?.lock) return
+    if (!unlockPassword.trim()) {
+      setUnlockError("암호를 입력해 주세요.")
+      return
+    }
+
+    setUnlockBusy(true)
+    setUnlockError(null)
+    try {
+      const { key, payload } = await unlockLockedMemoEnvelope(unlockPassword, activeMemoRaw.lock)
+      unlockKeysRef.current[activeMemoRaw.id] = key
+      setUnlockedPayloads((current) => ({ ...current, [activeMemoRaw.id]: payload }))
+      setUnlockDialogOpen(false)
+      setUnlockPassword("")
+      setToast("잠금 메모를 열었습니다")
+    } catch (error) {
+      setUnlockError(error instanceof Error ? error.message : "잠금 메모를 열지 못했습니다.")
+    } finally {
+      setUnlockBusy(false)
+    }
+  }
+
+  async function addAttachments(fileList: FileList | null, preferredKind: RNestMemoAttachment["kind"] | null = null) {
+    if (!fileList || fileList.length === 0 || !activeMemo) return
+
+    const existingCount = activeMemo.attachments.length
+    const available = Math.max(0, 10 - existingCount)
+    if (available === 0) {
+      setToast("첨부는 메모당 최대 10개까지 저장할 수 있습니다")
+      return
+    }
+
+    const files = Array.from(fileList).slice(0, available)
+    const nextAttachments: RNestMemoAttachment[] = []
+    let skippedLarge = 0
+
+    for (const file of files) {
+      if (file.size > 12 * 1024 * 1024) {
+        skippedLarge += 1
+        continue
+      }
+
+      const blobKey = crypto.randomUUID()
+      const saved = await saveMemoAttachmentBlob(blobKey, file)
+        .then(() => true)
+        .catch(() => false)
+      if (!saved) continue
+      const attachment = createMemoAttachment({
+        id: crypto.randomUUID(),
+        blobKey,
+        name: file.name || (preferredKind === "scan" ? "스캔 이미지" : "첨부 파일"),
+        mimeType: file.type || "application/octet-stream",
+        size: file.size,
+        kind: deriveAttachmentKind(file, preferredKind),
+        createdAt: Date.now(),
+      })
+      if (!attachment) continue
+      nextAttachments.push(attachment)
+    }
+
+    if (nextAttachments.length === 0) {
+      setToast(skippedLarge > 0 ? "12MB 이하 파일만 첨부할 수 있습니다" : "첨부 파일을 추가하지 못했습니다")
+      return
+    }
+
+    await updateActiveMemoContent((doc) => ({
+      ...doc,
+      attachments: [...doc.attachments, ...nextAttachments],
+      attachmentBlobKeys: Array.from(
+        new Set([...doc.attachmentBlobKeys, ...nextAttachments.map((attachment) => attachment.blobKey)])
+      ),
+    }))
+
+    setToast(
+      preferredKind === "scan"
+        ? `스캔 ${nextAttachments.length}개를 추가했습니다`
+        : `첨부 ${nextAttachments.length}개를 추가했습니다`
+    )
+  }
+
+  async function removeAttachment(attachmentId: string) {
+    if (!activeMemo) return
+    const target = activeMemo.attachments.find((attachment) => attachment.id === attachmentId)
+    if (!target) return
+
+    await updateActiveMemoContent((doc) => {
+      const remainingAttachments = doc.attachments.filter((attachment) => attachment.id !== attachmentId)
+      const remainingBlobKeys = Array.from(new Set(remainingAttachments.map((attachment) => attachment.blobKey)))
+      return {
+        ...doc,
+        attachments: remainingAttachments,
+        attachmentBlobKeys: remainingBlobKeys,
+      }
+    })
+
+    await cleanupAttachmentBlobsIfUnused([target.blobKey])
+    setToast("첨부를 제거했습니다")
+  }
+
+  function openAttachment(attachment: RNestMemoAttachment) {
+    const url = attachmentUrls[attachment.blobKey]
+    if (!url) {
+      setToast("이 기기에서만 열 수 있는 첨부입니다")
+      return
+    }
+    window.open(url, "_blank", "noopener,noreferrer")
+  }
+
   /* ── block operations ── */
 
   function updateBlock(blockId: string, next: RNestMemoBlock) {
     if (!activeMemo) return
-    saveDoc({ ...activeMemo, blocks: activeMemo.blocks.map((b) => (b.id === blockId ? next : b)) })
+    void updateActiveMemoContent((doc) => ({
+      ...doc,
+      blocks: doc.blocks.map((b) => (b.id === blockId ? next : b)),
+    }))
   }
 
   function changeBlockType(blockId: string, newType: RNestMemoBlockType) {
     if (!activeMemo) return
-    saveDoc({
-      ...activeMemo,
-      blocks: activeMemo.blocks.map((b) => (b.id === blockId ? coerceMemoBlockType(b, newType) : b)),
-    })
+    void updateActiveMemoContent((doc) => ({
+      ...doc,
+      blocks: doc.blocks.map((b) => (b.id === blockId ? coerceMemoBlockType(b, newType) : b)),
+    }))
   }
 
   function deleteBlock(blockId: string) {
     if (!activeMemo) return
-    const next = activeMemo.blocks.filter((b) => b.id !== blockId)
-    saveDoc({ ...activeMemo, blocks: next.length ? next : [createMemoBlock("paragraph")] })
+    void updateActiveMemoContent((doc) => ({
+      ...doc,
+      blocks: (() => {
+        const next = doc.blocks.filter((b) => b.id !== blockId)
+        return next.length ? next : [createMemoBlock("paragraph")]
+      })(),
+    }))
   }
 
   function addBlockAfter(blockId: string, type: RNestMemoBlockType = "paragraph") {
     if (!activeMemo) return
-    const idx = activeMemo.blocks.findIndex((b) => b.id === blockId)
-    if (idx === -1) return
-    const newBlocks = [...activeMemo.blocks]
-    newBlocks.splice(idx + 1, 0, createMemoBlock(type))
-    saveDoc({ ...activeMemo, blocks: newBlocks })
+    void updateActiveMemoContent((doc) => ({
+      ...doc,
+      blocks: (() => {
+        const idx = doc.blocks.findIndex((b) => b.id === blockId)
+        if (idx === -1) return doc.blocks
+        const next = [...doc.blocks]
+        next.splice(idx + 1, 0, createMemoBlock(type))
+        return next
+      })(),
+    }))
   }
 
   function moveBlock(blockId: string, direction: "up" | "down") {
     if (!activeMemo) return
-    const idx = activeMemo.blocks.findIndex((b) => b.id === blockId)
-    if (idx === -1) return
-    const swap = direction === "up" ? idx - 1 : idx + 1
-    if (swap < 0 || swap >= activeMemo.blocks.length) return
-    const next = [...activeMemo.blocks]
-    const temp = next[swap]
-    next[swap] = next[idx]
-    next[idx] = temp
-    saveDoc({ ...activeMemo, blocks: next })
+    void updateActiveMemoContent((doc) => ({
+      ...doc,
+      blocks: (() => {
+        const idx = doc.blocks.findIndex((b) => b.id === blockId)
+        if (idx === -1) return doc.blocks
+        const swap = direction === "up" ? idx - 1 : idx + 1
+        if (swap < 0 || swap >= doc.blocks.length) return doc.blocks
+        const next = [...doc.blocks]
+        const temp = next[swap]
+        next[swap] = next[idx]
+        next[idx] = temp
+        return next
+      })(),
+    }))
   }
 
   function duplicateBlock(blockId: string) {
     if (!activeMemo) return
-    const idx = activeMemo.blocks.findIndex((b) => b.id === blockId)
-    if (idx === -1) return
-    const block = activeMemo.blocks[idx]
-    const duplicate =
-      block.type === "table"
-        ? createMemoBlock("table", {
-            table: {
-              columns: block.table?.columns ?? ["항목", "내용"],
-              rows: (block.table?.rows ?? []).map((row) => createMemoTableRow(row.left, row.right)),
-            },
-          })
-        : createMemoBlock(block.type, {
-            text: block.text,
-            detailText: block.detailText,
-            checked: block.checked,
-            collapsed: block.collapsed,
-          })
-    const next = [...activeMemo.blocks]
-    next.splice(idx + 1, 0, duplicate)
-    saveDoc({ ...activeMemo, blocks: next })
+    void updateActiveMemoContent((doc) => ({
+      ...doc,
+      blocks: (() => {
+        const idx = doc.blocks.findIndex((b) => b.id === blockId)
+        if (idx === -1) return doc.blocks
+        const block = doc.blocks[idx]
+        const duplicate =
+          block.type === "table"
+            ? createMemoBlock("table", {
+                table: {
+                  columns: block.table?.columns ?? ["항목", "내용"],
+                  rows: (block.table?.rows ?? []).map((row) => createMemoTableRow(row.left, row.right)),
+                },
+              })
+            : createMemoBlock(block.type, {
+                text: block.text,
+                detailText: block.detailText,
+                checked: block.checked,
+                collapsed: block.collapsed,
+              })
+        const next = [...doc.blocks]
+        next.splice(idx + 1, 0, duplicate)
+        return next
+      })(),
+    }))
     setToast("블록을 복제했습니다")
   }
 
   function appendBlock(type: RNestMemoBlockType) {
     if (!activeMemo) return
-    saveDoc({ ...activeMemo, blocks: [...activeMemo.blocks, createMemoBlock(type)] })
+    void updateActiveMemoContent((doc) => ({
+      ...doc,
+      blocks: [...doc.blocks, createMemoBlock(type)],
+    }))
   }
 
   function appendTemplateBundle(templateId: (typeof quickInsertTemplates)[number]["id"]) {
     if (!activeMemo) return
     const template = quickInsertTemplates.find((item) => item.id === templateId)
     if (!template) return
-    saveDoc({ ...activeMemo, blocks: [...activeMemo.blocks, ...template.createBlocks()] })
+    void updateActiveMemoContent((doc) => ({
+      ...doc,
+      blocks: [...doc.blocks, ...template.createBlocks()],
+    }))
     setToast(`${template.label} 구성을 추가했습니다`)
   }
 
@@ -1765,7 +2312,10 @@ export function ToolNotebookPage() {
   /* ── render ── */
 
   return (
-    <div className="flex h-[calc(100dvh-56px)] overflow-hidden bg-white">
+    <div
+      className="flex h-[calc(100dvh-56px)] overflow-hidden bg-white"
+      style={{ WebkitTextSizeAdjust: "100%" }}
+    >
       {/* ─── SIDEBAR BACKDROP (mobile) ─── */}
       {sidebarOpen && (
         <div
@@ -1805,7 +2355,10 @@ export function ToolNotebookPage() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="검색..."
-              className="h-8 w-full rounded-lg border border-gray-200 bg-white pl-8 pr-3 text-[13px] text-ios-text outline-none placeholder:text-gray-400 focus:border-[color:var(--rnest-accent-border)] focus:ring-1 focus:ring-[color:var(--rnest-accent-border)]"
+              className={cn(
+                "h-10 w-full rounded-lg border border-gray-200 bg-white pl-8 pr-3 text-ios-text outline-none placeholder:text-gray-400 focus:border-[color:var(--rnest-accent-border)] focus:ring-1 focus:ring-[color:var(--rnest-accent-border)] md:h-8",
+                mobileSafeInputClass
+              )}
             />
           </div>
         </div>
@@ -1830,15 +2383,47 @@ export function ToolNotebookPage() {
                 <div className="px-2 py-3 text-center text-[12px] text-gray-400">결과 없음</div>
               )}
               {searchResults.map((doc) => (
-                <PageItem key={doc.id} doc={doc} listKey="search" isActive={activeMemoId === doc.id} onClick={() => openMemo(doc.id)} />
+                <PageItem
+                  key={doc.id}
+                  doc={getRenderableDoc(doc)}
+                  summary={buildSummary(getRenderableDoc(doc))}
+                  isLocked={Boolean(doc.lock && !unlockedPayloads[doc.id])}
+                  listKey="search"
+                  isActive={activeMemoId === doc.id}
+                  onClick={() => openMemo(doc.id)}
+                />
               ))}
             </SidebarSection>
           ) : (
             <>
+              {pinnedDocs.length > 0 && (
+                <SidebarSection title="고정" count={pinnedDocs.length}>
+                  {pinnedDocs.map((doc) => (
+                    <PageItem
+                      key={doc.id}
+                      doc={getRenderableDoc(doc)}
+                      summary={buildSummary(getRenderableDoc(doc))}
+                      isLocked={Boolean(doc.lock && !unlockedPayloads[doc.id])}
+                      listKey="pinned"
+                      isActive={activeMemoId === doc.id}
+                      onClick={() => openMemo(doc.id)}
+                    />
+                  ))}
+                </SidebarSection>
+              )}
+
               {recentDocs.length > 0 && (
                 <SidebarSection title="최근" count={recentDocs.length}>
                   {recentDocs.map((doc) => (
-                    <PageItem key={doc.id} doc={doc} listKey="recent" isActive={activeMemoId === doc.id} onClick={() => openMemo(doc.id)} />
+                    <PageItem
+                      key={doc.id}
+                      doc={getRenderableDoc(doc)}
+                      summary={buildSummary(getRenderableDoc(doc))}
+                      isLocked={Boolean(doc.lock && !unlockedPayloads[doc.id])}
+                      listKey="recent"
+                      isActive={activeMemoId === doc.id}
+                      onClick={() => openMemo(doc.id)}
+                    />
                   ))}
                 </SidebarSection>
               )}
@@ -1846,26 +2431,50 @@ export function ToolNotebookPage() {
               {favoriteDocs.length > 0 && (
                 <SidebarSection title="즐겨찾기" count={favoriteDocs.length}>
                   {favoriteDocs.map((doc) => (
-                    <PageItem key={doc.id} doc={doc} listKey="favorites" isActive={activeMemoId === doc.id} onClick={() => openMemo(doc.id)} />
+                    <PageItem
+                      key={doc.id}
+                      doc={getRenderableDoc(doc)}
+                      summary={buildSummary(getRenderableDoc(doc))}
+                      isLocked={Boolean(doc.lock && !unlockedPayloads[doc.id])}
+                      listKey="favorites"
+                      isActive={activeMemoId === doc.id}
+                      onClick={() => openMemo(doc.id)}
+                    />
                   ))}
                 </SidebarSection>
               )}
 
-              <SidebarSection title="페이지" count={activeDocs.length}>
+              <SidebarSection title="페이지" count={unpinnedDocs.length}>
                 {activeDocs.length === 0 && (
                   <div className="px-2 py-6 text-center text-[12px] text-gray-400">
                     아직 메모가 없습니다
                   </div>
                 )}
-                {activeDocs.map((doc) => (
-                  <PageItem key={doc.id} doc={doc} listKey="pages" isActive={activeMemoId === doc.id} onClick={() => openMemo(doc.id)} />
+                {unpinnedDocs.map((doc) => (
+                  <PageItem
+                    key={doc.id}
+                    doc={getRenderableDoc(doc)}
+                    summary={buildSummary(getRenderableDoc(doc))}
+                    isLocked={Boolean(doc.lock && !unlockedPayloads[doc.id])}
+                    listKey="pages"
+                    isActive={activeMemoId === doc.id}
+                    onClick={() => openMemo(doc.id)}
+                  />
                 ))}
               </SidebarSection>
 
               {trashedDocs.length > 0 && (
                 <SidebarSection title="휴지통" count={trashedDocs.length} defaultOpen={false}>
                   {trashedDocs.map((doc) => (
-                    <PageItem key={doc.id} doc={doc} listKey="trash" isActive={activeMemoId === doc.id} onClick={() => openMemo(doc.id)} />
+                    <PageItem
+                      key={doc.id}
+                      doc={getRenderableDoc(doc)}
+                      summary={buildSummary(getRenderableDoc(doc))}
+                      isLocked={Boolean(doc.lock && !unlockedPayloads[doc.id])}
+                      listKey="trash"
+                      isActive={activeMemoId === doc.id}
+                      onClick={() => openMemo(doc.id)}
+                    />
                   ))}
                 </SidebarSection>
               )}
@@ -1895,6 +2504,18 @@ export function ToolNotebookPage() {
                 {renderMemoIcon(activeMemo.icon, "h-3.5 w-3.5")}
               </span>
               <span className="truncate text-[13px] font-medium text-ios-sub">{activeMemo.title || "제목 없음"}</span>
+              {activeMemoRaw?.pinned && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-[color:var(--rnest-accent-soft)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--rnest-accent)]">
+                  <Pin className="h-3 w-3" />
+                  고정
+                </span>
+              )}
+              {activeMemoIsLocked && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-[color:var(--rnest-accent-border)] bg-white px-2 py-0.5 text-[11px] font-medium text-ios-sub">
+                  {activeMemoIsUnlocked ? <LockOpen className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
+                  {activeMemoIsUnlocked ? "잠금 해제됨" : "잠금 메모"}
+                </span>
+              )}
               <span className="ml-auto text-[11.5px] text-gray-400">
                 {relativeTime(activeMemo.updatedAt)}
               </span>
@@ -1908,7 +2529,8 @@ export function ToolNotebookPage() {
                 </button>
                 {showMoreMenu && (
                   <MoreMenu
-                    doc={activeMemo}
+                    doc={activeMemoRaw ?? activeMemo}
+                    isUnlocked={activeMemoIsUnlocked}
                     onAction={handleMoreAction}
                     onClose={() => setShowMoreMenu(false)}
                   />
@@ -1947,7 +2569,7 @@ export function ToolNotebookPage() {
                 {showIconPicker && (
                   <IconPicker
                     value={activeMemo.icon}
-                    onChange={(icon) => saveDoc({ ...activeMemo, icon })}
+                    onChange={(icon) => activeMemoRaw && saveRawDoc({ ...activeMemoRaw, icon })}
                     onClose={() => setShowIconPicker(false)}
                   />
                 )}
@@ -1957,23 +2579,53 @@ export function ToolNotebookPage() {
               <input
                 type="text"
                 value={activeMemo.title}
-                onChange={(e) => saveDoc({ ...activeMemo, title: e.target.value })}
+                onChange={(e) => activeMemoRaw && saveRawDoc({ ...activeMemoRaw, title: e.target.value })}
                 placeholder="제목 없음"
                 className="mb-2 w-full border-none bg-transparent text-[32px] font-bold tracking-[-0.03em] text-ios-text outline-none placeholder:text-gray-200"
               />
 
               {/* tags + reminder row */}
               <div className="mb-8 flex flex-wrap items-center gap-3">
-                <InlineTagEditor
-                  tags={activeMemo.tags}
-                  onChange={(next) => saveDoc({ ...activeMemo, tags: next })}
-                />
-                <span className="text-gray-200">|</span>
-                <ReminderPicker
-                  reminderAt={activeMemo.reminderAt}
-                  onSet={(v) => saveDoc({ ...activeMemo, reminderAt: v })}
-                />
-                <span className="text-gray-200">|</span>
+                {activeMemoIsLocked && !activeMemoIsUnlocked ? (
+                  <>
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-3 py-1 text-[12px] font-medium text-[color:var(--rnest-accent)]">
+                      <Lock className="h-3.5 w-3.5" />
+                      잠금 메모
+                    </span>
+                    {activeMemoRaw?.lock?.hint && (
+                      <span className="text-[12px] text-ios-muted">힌트: {activeMemoRaw.lock.hint}</span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUnlockPassword("")
+                        setUnlockError(null)
+                        setUnlockDialogOpen(true)
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-[color:var(--rnest-accent-border)] bg-white px-3 py-1 text-[12px] font-medium text-ios-sub transition-colors hover:bg-[color:var(--rnest-accent-soft)]"
+                    >
+                      <LockOpen className="h-3.5 w-3.5" />
+                      잠금 해제
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <InlineTagEditor
+                      tags={activeMemo.tags}
+                      onChange={(next) => {
+                        void updateActiveMemoContent((doc) => ({ ...doc, tags: next }))
+                      }}
+                    />
+                    <span className="text-gray-200">|</span>
+                    <ReminderPicker
+                      reminderAt={activeMemo.reminderAt}
+                      onSet={(v) => {
+                        void updateActiveMemoContent((doc) => ({ ...doc, reminderAt: v }))
+                      }}
+                    />
+                    <span className="text-gray-200">|</span>
+                  </>
+                )}
                 <div className="relative">
                   <button
                     type="button"
@@ -1991,23 +2643,175 @@ export function ToolNotebookPage() {
                   {showCoverPicker && (
                     <CoverPicker
                       value={activeMemo.coverStyle}
-                      onChange={(coverStyle) => saveDoc({ ...activeMemo, coverStyle })}
+                      onChange={(coverStyle) => activeMemoRaw && saveRawDoc({ ...activeMemoRaw, coverStyle })}
                       onClose={() => setShowCoverPicker(false)}
                     />
                   )}
                 </div>
               </div>
 
-              {(headingBlocks.length > 0 || quickInsertTemplates.length > 0) && (
-                <div className="mb-8 space-y-4">
-                  {headingBlocks.length > 0 && (
+              {(!activeMemoIsLocked || activeMemoIsUnlocked) && (
+                <div className="mb-8 rounded-[28px] border border-[color:var(--rnest-accent-border)]/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.96)_0%,rgba(248,245,255,0.96)_100%)] p-4 shadow-[0_16px_36px_rgba(123,111,208,0.08)]">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-ios-muted">
-                        <NotebookPen className="h-3.5 w-3.5" />
-                        페이지 목차
+                      <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-ios-muted">
+                        <Paperclip className="h-3.5 w-3.5" />
+                        첨부
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        {headingBlocks.map((block) => (
+                      <p className="mt-1 text-[12px] text-ios-muted">첨부와 스캔은 이 기기에 저장됩니다.</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => attachmentInputRef.current?.click()}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-[color:var(--rnest-accent-border)] bg-white px-3 py-1.5 text-[12px] font-medium text-ios-sub transition-colors hover:bg-[color:var(--rnest-accent-soft)]"
+                      >
+                        <Paperclip className="h-3.5 w-3.5" />
+                        파일 추가
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => scanInputRef.current?.click()}
+                        className="inline-flex items-center gap-1.5 rounded-full bg-[color:var(--rnest-accent-soft)] px-3 py-1.5 text-[12px] font-medium text-[color:var(--rnest-accent)] transition-colors hover:bg-[color:var(--rnest-accent-soft)]/80"
+                      >
+                        <Camera className="h-3.5 w-3.5" />
+                        스캔
+                      </button>
+                    </div>
+                  </div>
+
+                  <input
+                    ref={attachmentInputRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={(event) => {
+                      void addAttachments(event.target.files)
+                      event.currentTarget.value = ""
+                    }}
+                  />
+                  <input
+                    ref={scanInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="hidden"
+                    onChange={(event) => {
+                      void addAttachments(event.target.files, "scan")
+                      event.currentTarget.value = ""
+                    }}
+                  />
+
+                  {activeMemo.attachments.length === 0 ? (
+                    <div className="mt-4 rounded-2xl border border-dashed border-gray-200 bg-white/80 px-4 py-5 text-[13px] text-ios-muted">
+                      아직 첨부가 없습니다. 참고 이미지, PDF, 스캔을 이 메모에 붙여두세요.
+                    </div>
+                  ) : (
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      {activeMemo.attachments.map((attachment) => {
+                        const previewUrl = attachmentUrls[attachment.blobKey]
+                        const isVisual = attachment.kind === "image" || attachment.kind === "scan"
+                        return (
+                          <div
+                            key={attachment.id}
+                            className="overflow-hidden rounded-2xl border border-white/70 bg-white shadow-[0_12px_28px_rgba(15,23,42,0.06)]"
+                          >
+                            <div className="flex gap-3 p-3">
+                              <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-[color:var(--rnest-accent-soft)]">
+                                {isVisual && previewUrl ? (
+                                  <div
+                                    className="h-full w-full bg-cover bg-center"
+                                    style={{ backgroundImage: `url(${previewUrl})` }}
+                                  />
+                                ) : (
+                                  <span className="text-[color:var(--rnest-accent)]">
+                                    {renderAttachmentIcon(attachment.kind, "h-6 w-6")}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <p className="truncate text-[13px] font-medium text-ios-text">{attachment.name}</p>
+                                    <p className="mt-1 text-[11.5px] text-ios-muted">
+                                      {formatFileSize(attachment.size)} · {attachment.kind === "scan" ? "스캔" : attachment.kind === "image" ? "이미지" : attachment.kind === "pdf" ? "PDF" : "파일"}
+                                    </p>
+                                  </div>
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-[color:var(--rnest-accent-soft)] px-2 py-0.5 text-[10.5px] font-medium text-[color:var(--rnest-accent)]">
+                                    로컬
+                                  </span>
+                                </div>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  <button
+                                    type="button"
+                                    disabled={!previewUrl}
+                                    onClick={() => openAttachment(attachment)}
+                                    className={cn(
+                                      "inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11.5px] font-medium transition-colors",
+                                      previewUrl
+                                        ? "bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)] hover:bg-[color:var(--rnest-accent-soft)]/80"
+                                        : "cursor-not-allowed bg-gray-100 text-gray-400"
+                                    )}
+                                  >
+                                    열기
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      void removeAttachment(attachment.id)
+                                    }}
+                                    className="inline-flex items-center gap-1 rounded-full border border-gray-200 px-3 py-1 text-[11.5px] font-medium text-ios-sub transition-colors hover:bg-gray-50"
+                                  >
+                                    제거
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {activeMemoIsLocked && !activeMemoIsUnlocked ? (
+                <div className="rounded-[32px] border border-[color:var(--rnest-accent-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(248,245,255,0.98)_100%)] px-6 py-10 text-center shadow-[0_18px_42px_rgba(123,111,208,0.08)]">
+                  <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-[22px] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)] shadow-[inset_0_0_0_1px_rgba(196,181,253,0.4)]">
+                    <Shield className="h-8 w-8" />
+                  </div>
+                  <h3 className="mt-5 text-[22px] font-semibold tracking-[-0.02em] text-ios-text">잠금 메모입니다</h3>
+                  <p className="mx-auto mt-2 max-w-md text-[14px] leading-relaxed text-ios-sub">
+                    본문, 태그, 리마인더, 첨부 목록은 암호화되어 있습니다. 읽거나 수정하려면 잠금 해제가 필요합니다.
+                  </p>
+                  {activeMemoRaw?.lock?.hint && (
+                    <p className="mt-3 text-[12px] text-ios-muted">힌트: {activeMemoRaw.lock.hint}</p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUnlockPassword("")
+                      setUnlockError(null)
+                      setUnlockDialogOpen(true)
+                    }}
+                    className="mt-5 inline-flex items-center gap-2 rounded-full bg-[color:var(--rnest-accent-soft)] px-4 py-2 text-[13px] font-medium text-[color:var(--rnest-accent)] transition-colors hover:bg-[color:var(--rnest-accent-soft)]/80"
+                  >
+                    <LockOpen className="h-4 w-4" />
+                    잠금 해제
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {(headingBlocks.length > 0 || quickInsertTemplates.length > 0) && (
+                    <div className="mb-8 space-y-4">
+                      {headingBlocks.length > 0 && (
+                        <div>
+                          <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-ios-muted">
+                            <NotebookPen className="h-3.5 w-3.5" />
+                            페이지 목차
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {headingBlocks.map((block) => (
                           <button
                             key={block.id}
                             type="button"
@@ -2016,55 +2820,57 @@ export function ToolNotebookPage() {
                           >
                             {block.text}
                           </button>
-                        ))}
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div>
+                        <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-ios-muted">
+                          <Sparkles className="h-3.5 w-3.5" />
+                          빠른 삽입
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {quickInsertTemplates.map((template) => (
+                            <button
+                              key={template.id}
+                              type="button"
+                              onClick={() => appendTemplateBundle(template.id)}
+                              className="rounded-full border border-[color:var(--rnest-accent-border)] bg-white px-3 py-1.5 text-[12px] font-medium text-[color:var(--rnest-accent)] transition-colors hover:bg-[color:var(--rnest-accent-soft)]"
+                            >
+                              {template.label}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     </div>
                   )}
 
-                  <div>
-                    <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-ios-muted">
-                      <Sparkles className="h-3.5 w-3.5" />
-                      빠른 삽입
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {quickInsertTemplates.map((template) => (
-                        <button
-                          key={template.id}
-                          type="button"
-                          onClick={() => appendTemplateBundle(template.id)}
-                          className="rounded-full border border-[color:var(--rnest-accent-border)] bg-white px-3 py-1.5 text-[12px] font-medium text-[color:var(--rnest-accent)] transition-colors hover:bg-[color:var(--rnest-accent-soft)]"
-                        >
-                          {template.label}
-                        </button>
-                      ))}
-                    </div>
+                  {/* blocks */}
+                  <div className="space-y-1 pl-10">
+                    {activeMemo.blocks.map((block, idx) => (
+                      <InlineBlock
+                        key={block.id}
+                        block={block}
+                        isFirst={idx === 0}
+                        isLast={idx === activeMemo.blocks.length - 1}
+                        onChange={(next) => updateBlock(block.id, next)}
+                        onDelete={() => deleteBlock(block.id)}
+                        onDuplicate={() => duplicateBlock(block.id)}
+                        onTypeChange={(type) => changeBlockType(block.id, type)}
+                        onAddAfter={(type) => addBlockAfter(block.id, type)}
+                        onMoveUp={() => moveBlock(block.id, "up")}
+                        onMoveDown={() => moveBlock(block.id, "down")}
+                      />
+                    ))}
                   </div>
-                </div>
+
+                  {/* add block */}
+                  <div className="mt-4 pl-10">
+                    <AddBlockButton onSelect={appendBlock} />
+                  </div>
+                </>
               )}
-
-              {/* blocks */}
-              <div className="space-y-1 pl-10">
-                {activeMemo.blocks.map((block, idx) => (
-                  <InlineBlock
-                    key={block.id}
-                    block={block}
-                    isFirst={idx === 0}
-                    isLast={idx === activeMemo.blocks.length - 1}
-                    onChange={(next) => updateBlock(block.id, next)}
-                    onDelete={() => deleteBlock(block.id)}
-                    onDuplicate={() => duplicateBlock(block.id)}
-                    onTypeChange={(type) => changeBlockType(block.id, type)}
-                    onAddAfter={(type) => addBlockAfter(block.id, type)}
-                    onMoveUp={() => moveBlock(block.id, "up")}
-                    onMoveDown={() => moveBlock(block.id, "down")}
-                  />
-                ))}
-              </div>
-
-              {/* add block */}
-              <div className="mt-4 pl-10">
-                <AddBlockButton onSelect={appendBlock} />
-              </div>
 
               {/* footer info */}
               {activeMemo.trashedAt != null && (
@@ -2120,6 +2926,145 @@ export function ToolNotebookPage() {
             </div>
           )}
         </div>
+
+        <Dialog
+          open={lockDialogOpen}
+          onOpenChange={(open) => {
+            setLockDialogOpen(open)
+            if (!open) {
+              setLockError(null)
+              setLockPassword("")
+              setLockPasswordConfirm("")
+            }
+          }}
+        >
+          <DialogContent className="rounded-[28px] border-0 bg-white p-0 shadow-[0_30px_80px_rgba(15,23,42,0.18)] sm:max-w-[480px]">
+            <div className="rounded-[28px] bg-[linear-gradient(180deg,rgba(250,245,255,0.98)_0%,rgba(255,255,255,0.98)_100%)] p-6">
+              <DialogHeader>
+                <DialogTitle className="text-[22px] tracking-[-0.02em] text-ios-text">잠금 메모 설정</DialogTitle>
+                <DialogDescription className="text-[13px] leading-relaxed text-ios-sub">
+                  본문, 태그, 리마인더, 첨부 목록을 암호화해 보호합니다. 제목과 아이콘은 목록에서 보이도록 남겨둡니다.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="mt-5 space-y-3">
+                <input
+                  type="password"
+                  value={lockPassword}
+                  onChange={(event) => setLockPassword(event.target.value)}
+                  placeholder="암호 입력"
+                  className={cn(
+                    "h-11 w-full rounded-2xl border border-gray-200 bg-white px-4 text-ios-text outline-none focus:border-[color:var(--rnest-accent-border)] focus:ring-2 focus:ring-[color:var(--rnest-accent-soft)]",
+                    mobileSafeInputClass
+                  )}
+                />
+                <input
+                  type="password"
+                  value={lockPasswordConfirm}
+                  onChange={(event) => setLockPasswordConfirm(event.target.value)}
+                  placeholder="암호 확인"
+                  className={cn(
+                    "h-11 w-full rounded-2xl border border-gray-200 bg-white px-4 text-ios-text outline-none focus:border-[color:var(--rnest-accent-border)] focus:ring-2 focus:ring-[color:var(--rnest-accent-soft)]",
+                    mobileSafeInputClass
+                  )}
+                />
+                <input
+                  type="text"
+                  value={lockHint}
+                  onChange={(event) => setLockHint(event.target.value)}
+                  placeholder="힌트 (선택)"
+                  className={cn(
+                    "h-11 w-full rounded-2xl border border-gray-200 bg-white px-4 text-ios-text outline-none focus:border-[color:var(--rnest-accent-border)] focus:ring-2 focus:ring-[color:var(--rnest-accent-soft)]",
+                    mobileSafeInputClass
+                  )}
+                />
+                {lockError && <p className="text-[12px] text-red-500">{lockError}</p>}
+              </div>
+
+              <DialogFooter className="mt-6 gap-2 sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => setLockDialogOpen(false)}
+                  className="inline-flex h-11 items-center justify-center rounded-full border border-gray-200 px-4 text-[13px] font-medium text-ios-sub transition-colors hover:bg-gray-50"
+                >
+                  취소
+                </button>
+                <button
+                  type="button"
+                  disabled={lockBusy}
+                  onClick={() => {
+                    void confirmLockMemo()
+                  }}
+                  className="inline-flex h-11 items-center justify-center rounded-full bg-[color:var(--rnest-accent-soft)] px-5 text-[13px] font-medium text-[color:var(--rnest-accent)] transition-colors hover:bg-[color:var(--rnest-accent-soft)]/80 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {lockBusy ? "설정 중..." : "잠금 설정"}
+                </button>
+              </DialogFooter>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog
+          open={unlockDialogOpen}
+          onOpenChange={(open) => {
+            setUnlockDialogOpen(open)
+            if (!open) {
+              setUnlockError(null)
+              setUnlockPassword("")
+            }
+          }}
+        >
+          <DialogContent className="rounded-[28px] border-0 bg-white p-0 shadow-[0_30px_80px_rgba(15,23,42,0.18)] sm:max-w-[440px]">
+            <div className="rounded-[28px] bg-[linear-gradient(180deg,rgba(250,245,255,0.98)_0%,rgba(255,255,255,0.98)_100%)] p-6">
+              <DialogHeader>
+                <DialogTitle className="text-[22px] tracking-[-0.02em] text-ios-text">잠금 메모 열기</DialogTitle>
+                <DialogDescription className="text-[13px] leading-relaxed text-ios-sub">
+                  암호를 입력하면 이 세션에서만 메모 내용이 열립니다. 페이지를 벗어나면 다시 잠깁니다.
+                </DialogDescription>
+              </DialogHeader>
+
+              {activeMemoRaw?.lock?.hint && (
+                <div className="mt-4 rounded-2xl border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)]/60 px-4 py-3 text-[12px] text-ios-sub">
+                  힌트: {activeMemoRaw.lock.hint}
+                </div>
+              )}
+
+              <div className="mt-4 space-y-3">
+                <input
+                  type="password"
+                  value={unlockPassword}
+                  onChange={(event) => setUnlockPassword(event.target.value)}
+                  placeholder="암호 입력"
+                  className={cn(
+                    "h-11 w-full rounded-2xl border border-gray-200 bg-white px-4 text-ios-text outline-none focus:border-[color:var(--rnest-accent-border)] focus:ring-2 focus:ring-[color:var(--rnest-accent-soft)]",
+                    mobileSafeInputClass
+                  )}
+                />
+                {unlockError && <p className="text-[12px] text-red-500">{unlockError}</p>}
+              </div>
+
+              <DialogFooter className="mt-6 gap-2 sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => setUnlockDialogOpen(false)}
+                  className="inline-flex h-11 items-center justify-center rounded-full border border-gray-200 px-4 text-[13px] font-medium text-ios-sub transition-colors hover:bg-gray-50"
+                >
+                  취소
+                </button>
+                <button
+                  type="button"
+                  disabled={unlockBusy}
+                  onClick={() => {
+                    void confirmUnlockMemo()
+                  }}
+                  className="inline-flex h-11 items-center justify-center rounded-full bg-[color:var(--rnest-accent-soft)] px-5 text-[13px] font-medium text-[color:var(--rnest-accent)] transition-colors hover:bg-[color:var(--rnest-accent-soft)]/80 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {unlockBusy ? "열는 중..." : "잠금 해제"}
+                </button>
+              </DialogFooter>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* toast */}
         {toast && (
