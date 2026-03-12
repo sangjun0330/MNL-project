@@ -31,6 +31,8 @@ function ssrSafeInitialState(): AppState {
     notes: {},
     emotions: {},
     bio: {},
+    memo: base.memo,
+    records: base.records,
     settings: defaultSettings(),
   };
 }
@@ -95,6 +97,8 @@ function applyLoadedState(loaded: AppState) {
     notes: (sanitized as any)?.notes ?? {},
     emotions: (sanitized as any)?.emotions ?? {},
     bio: (sanitized as any)?.bio ?? {},
+    memo: (sanitized as any)?.memo ?? emptyState().memo,
+    records: (sanitized as any)?.records ?? emptyState().records,
     settings: normalizeSettings((sanitized as any)?.settings),
   };
 
@@ -315,6 +319,14 @@ function clearBioForDate(iso: ISODate) {
   setState({ bio: next });
 }
 
+function setMemoState(next: AppState["memo"]) {
+  setState({ memo: next });
+}
+
+function setRecordState(next: AppState["records"]) {
+  setState({ records: next });
+}
+
 function getState() {
   return state;
 }
@@ -327,6 +339,8 @@ function buildStoreSnapshot(s: AppState): AppStore {
     notes: s.notes,
     emotions: s.emotions,
     bio: s.bio,
+    memo: s.memo,
+    records: s.records,
     settings: s.settings,
 
     getState,
@@ -347,6 +361,9 @@ function buildStoreSnapshot(s: AppState): AppStore {
 
     setBioForDate,
     clearBioForDate,
+
+    setMemoState,
+    setRecordState,
   };
   (store as any).__v = version;
   return store;

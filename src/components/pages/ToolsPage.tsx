@@ -6,7 +6,7 @@ import { Card } from "@/components/ui/Card";
 import { useI18n } from "@/lib/useI18n";
 
 type ToolCategory = {
-  id: "calculators" | "ai_search";
+  id: "calculators" | "ai_search" | "notebook";
   name: string;
   description: string;
   href: string;
@@ -17,6 +17,19 @@ type ToolCategory = {
 };
 
 const CATEGORY_CARDS: ToolCategory[] = [
+  {
+    id: "notebook",
+    name: "메모·기록지",
+    description: "노션 스타일의 개인 메모와 범용 기록지를 RNest 흐름에 맞게 한 화면에서 관리합니다.",
+    href: "/tools/notebook",
+    tone: "guide",
+    keywords: ["메모", "기록지", "노트", "문서", "체크리스트", "정리", "markdown", "csv"],
+    quickLinks: [
+      { label: "메모", href: "/tools/notebook?tab=memo" },
+      { label: "기록지", href: "/tools/notebook?tab=records" },
+    ],
+    secondaryLink: { label: "메모·기록지 열기", href: "/tools/notebook" },
+  },
   {
     id: "ai_search",
     name: "AI 임상 검색",

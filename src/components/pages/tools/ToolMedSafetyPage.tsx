@@ -7,10 +7,11 @@ import { useAuthState } from "@/lib/auth";
 import type { SubscriptionApi } from "@/lib/billing/client";
 import { getPlanDefinition, getSearchCreditMeta, type SearchCreditType } from "@/lib/billing/plans";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
+import { AnimatedCopyLabel } from "@/components/ui/AnimatedCopyLabel";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { withReturnTo } from "@/lib/navigation";
-import { copyTextToClipboard } from "@/lib/structuredCopy";
+import { buildStructuredCopyText, copyTextToClipboard } from "@/lib/structuredCopy";
 import { useI18n } from "@/lib/useI18n";
 
 const FLAT_CARD_CLASS = "rounded-[32px] border border-[#E8E8EC] bg-white shadow-[0_18px_50px_rgba(15,23,42,0.04)]";
@@ -188,6 +189,14 @@ function formatTime(value: number) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+function formatCopyDateTime(value: number) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")} ${String(
+    date.getHours()
+  ).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
 function parseErrorMessage(raw: string, t: TranslateFn) {
@@ -782,6 +791,9 @@ function AssistantAnswerSections({ content }: { content: string }) {
     return <div className="whitespace-pre-wrap break-words text-[15px] leading-7 text-ios-text">{content}</div>;
   }
 
+  const leadTextClass = "whitespace-pre-wrap break-words text-[15.5px] font-normal leading-7 tracking-[-0.01em] text-ios-text";
+  const bodyTextClass = "text-[15px] leading-7 text-ios-text/90";
+
   return (
     <div className="space-y-4">
       {sections.map((section, sectionIndex) => (
@@ -794,7 +806,7 @@ function AssistantAnswerSections({ content }: { content: string }) {
             {section.title}
           </div>
           <div className="mt-3">
-            <div className="whitespace-pre-wrap break-words text-[19px] font-semibold leading-8 tracking-[-0.02em] text-ios-text">
+            <div className={leadTextClass}>
               {section.lead}
             </div>
             {section.bodyLines.length > 0 ? (
@@ -812,7 +824,7 @@ function AssistantAnswerSections({ content }: { content: string }) {
                     return (
                       <div
                         key={`${section.title}-${lineIndex}`}
-                        className="flex items-start gap-3 text-[15px] leading-7 text-ios-text/90"
+                        className={`flex items-start gap-3 ${bodyTextClass}`}
                         style={indentStyle}
                       >
                         <span className="mt-[11px] h-[5px] w-[5px] shrink-0 rounded-full bg-current opacity-50" aria-hidden="true" />
@@ -825,7 +837,7 @@ function AssistantAnswerSections({ content }: { content: string }) {
                     return (
                       <div
                         key={`${section.title}-${lineIndex}`}
-                        className="flex items-start gap-3 text-[15px] leading-7 text-ios-text/90"
+                        className={`flex items-start gap-3 ${bodyTextClass}`}
                         style={indentStyle}
                       >
                         <span className="min-w-[20px] shrink-0 font-semibold text-ios-text">{parsedLine.marker}</span>
@@ -838,7 +850,7 @@ function AssistantAnswerSections({ content }: { content: string }) {
                     return (
                       <div
                         key={`${section.title}-${lineIndex}`}
-                        className="flex items-start gap-3 text-[15px] leading-7 text-ios-text/90"
+                        className={`flex items-start gap-3 ${bodyTextClass}`}
                         style={indentStyle}
                       >
                         <span className="min-w-[24px] shrink-0 font-semibold text-[color:var(--rnest-accent)]">{parsedLine.marker}</span>
@@ -850,7 +862,7 @@ function AssistantAnswerSections({ content }: { content: string }) {
                   return (
                     <div
                       key={`${section.title}-${lineIndex}`}
-                      className="whitespace-pre-wrap break-words text-[15px] leading-7 text-ios-text/90"
+                      className={`whitespace-pre-wrap break-words ${bodyTextClass}`}
                       style={indentStyle}
                     >
                       {parsedLine.content}
@@ -887,6 +899,7 @@ export function ToolMedSafetyPage() {
   const [optimisticQuota, setOptimisticQuota] = useState<SubscriptionApi["medSafetyQuota"] | null>(null);
   const [selectedSearchType, setSelectedSearchType] = useState<SearchCreditType | null>(null);
   const [isSearchTypeMenuOpen, setIsSearchTypeMenuOpen] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const [isComposerDragOver, setIsComposerDragOver] = useState(false);
   const threadEndRef = useRef<HTMLDivElement | null>(null);
@@ -925,9 +938,24 @@ export function ToolMedSafetyPage() {
   const canAsk = authStatus === "authenticated" && (!quotaKnown || selectedQuotaRemaining > 0);
   const hasConversation = messages.length > 0 || Boolean(streamingText);
   const lastAssistantMessage = [...messages].reverse().find((message) => message.role === "assistant") ?? null;
+  const lastUserMessage = [...messages].reverse().find((message) => message.role === "user") ?? null;
   const hasTypedInput = normalizeQuestionInput(input).length > 0;
   const isComposerLocked = showSessionDecisionPrompt;
   const canSubmit = !isComposerLocked && !isLoading && canAsk && (hasTypedInput || Boolean(selectedImage));
+  const latestAnswerSummary = lastAssistantMessage ? parseAnswerSections(lastAssistantMessage.content)[0]?.lead ?? "" : "";
+  const latestCopyText = lastAssistantMessage
+    ? buildStructuredCopyText({
+        title: lastSubmittedQuery || lastUserMessage?.content || t("AI 임상 검색 결과"),
+        metaLines: [
+          `${t("분석 시각")}: ${formatCopyDateTime(lastAssistantMessage.timestamp)}`,
+          `${t("유형")}: ${t("임상 질문")}`,
+        ],
+        sections: [
+          { title: t("요약"), body: latestAnswerSummary || lastAssistantMessage.content },
+          { title: t("상세 결과"), body: lastAssistantMessage.content },
+        ],
+      })
+    : "";
 
   useEffect(() => {
     setMounted(true);
@@ -980,6 +1008,12 @@ export function ToolMedSafetyPage() {
     const timer = window.setTimeout(() => setCopyMessage(""), 1800);
     return () => window.clearTimeout(timer);
   }, [copyMessage]);
+
+  useEffect(() => {
+    if (!copiedKey) return;
+    const timer = window.setTimeout(() => setCopiedKey(null), 1400);
+    return () => window.clearTimeout(timer);
+  }, [copiedKey]);
 
   useEffect(() => {
     if (!isSearchTypeMenuOpen) return;
@@ -1143,9 +1177,10 @@ export function ToolMedSafetyPage() {
   }
 
   async function copyLatestAnswer() {
-    if (!lastAssistantMessage?.content) return;
+    if (!latestCopyText) return;
     try {
-      const copied = await copyTextToClipboard(lastAssistantMessage.content);
+      const copied = await copyTextToClipboard(latestCopyText);
+      if (copied) setCopiedKey("latest-answer");
       setCopyMessage(copied ? t("답변을 복사했습니다.") : t("클립보드를 사용할 수 없습니다."));
     } catch {
       setCopyMessage(t("복사에 실패했습니다."));
@@ -1422,7 +1457,7 @@ export function ToolMedSafetyPage() {
                 </Link>
                 {hasConversation && lastAssistantMessage ? (
                   <button type="button" onClick={() => void copyLatestAnswer()} className={SECONDARY_FLAT_BTN}>
-                    {t("복사")}
+                    <AnimatedCopyLabel copied={copiedKey === "latest-answer"} label={t("복사")} />
                   </button>
                 ) : null}
                 {hasConversation ? (

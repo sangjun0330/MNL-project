@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useAuthState } from "@/lib/auth";
 import { useI18n } from "@/lib/useI18n";
-import { buildStructuredCopyText, copyTextToClipboard, type StructuredCopySection } from "@/lib/structuredCopy";
+import { buildStructuredCopyText, copyTextToClipboard } from "@/lib/structuredCopy";
+import { AnimatedCopyLabel } from "@/components/ui/AnimatedCopyLabel";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -227,16 +228,7 @@ function queryIntentLabel(intent: "medication" | "device" | "scenario" | null | 
   return "";
 }
 
-function buildRecentCopyText(item: MedSafetyRecentItem, sections: NarrativeSection[], t: TranslateFn) {
-  const copySections: StructuredCopySection[] = [
-    { title: t("요약"), body: item.result.summary },
-    { title: t("질문"), body: item.request.query || "-" },
-    ...sections.map((section) => ({
-      title: t(section.title),
-      items: section.items,
-    })),
-  ];
-
+function buildRecentCopyText(item: MedSafetyRecentItem, t: TranslateFn) {
   const metaLines = [
     `${t("분석 시각")}: ${formatDateTime(item.savedAt)}`,
     `${t("유형")}: ${t(kindLabel(item.result.resultKind))}`,
@@ -246,9 +238,12 @@ function buildRecentCopyText(item: MedSafetyRecentItem, sections: NarrativeSecti
   if (item.request.queryIntent) metaLines.push(`${t("질문 유형")}: ${t(queryIntentLabel(item.request.queryIntent))}`);
 
   return buildStructuredCopyText({
-    title: item.result.title,
+    title: item.request.query || item.result.title,
     metaLines,
-    sections: copySections,
+    sections: [
+      { title: t("요약"), body: item.result.summary || "-" },
+      { title: t("상세 결과"), body: item.result.answer || "-" },
+    ],
   });
 }
 
@@ -263,12 +258,19 @@ export function ToolMedSafetyRecentPage() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [isDesktop, setIsDesktop] = useState(false);
   const [copyMessage, setCopyMessage] = useState("");
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   useEffect(() => {
     if (!copyMessage) return;
     const timer = window.setTimeout(() => setCopyMessage(""), 1800);
     return () => window.clearTimeout(timer);
   }, [copyMessage]);
+
+  useEffect(() => {
+    if (!copiedKey) return;
+    const timer = window.setTimeout(() => setCopiedKey(null), 1400);
+    return () => window.clearTimeout(timer);
+  }, [copiedKey]);
 
   useEffect(() => {
     if (status !== "authenticated") {
@@ -370,8 +372,8 @@ export function ToolMedSafetyRecentPage() {
   const selectedSections = useMemo(() => parseNarrativeSections(selected?.result.answer ?? ""), [selected]);
   const selectedCopyText = useMemo(() => {
     if (!selected) return "";
-    return buildRecentCopyText(selected, selectedSections, t);
-  }, [selected, selectedSections, t]);
+    return buildRecentCopyText(selected, t);
+  }, [selected, t]);
 
   const latestSavedAt = items[0]?.savedAt ?? 0;
 
@@ -379,6 +381,7 @@ export function ToolMedSafetyRecentPage() {
     if (!selectedCopyText) return;
     try {
       const copied = await copyTextToClipboard(selectedCopyText);
+      if (copied) setCopiedKey("selected");
       setCopyMessage(copied ? t("답변을 복사했습니다.") : t("클립보드를 사용할 수 없습니다."));
     } catch {
       setCopyMessage(t("복사에 실패했습니다."));
@@ -387,7 +390,8 @@ export function ToolMedSafetyRecentPage() {
 
   async function handleCopyItem(item: MedSafetyRecentItem) {
     try {
-      const copied = await copyTextToClipboard(buildRecentCopyText(item, parseNarrativeSections(item.result.answer), t));
+      const copied = await copyTextToClipboard(buildRecentCopyText(item, t));
+      if (copied) setCopiedKey(`item:${item.id}`);
       setCopyMessage(copied ? t("답변을 복사했습니다.") : t("클립보드를 사용할 수 없습니다."));
     } catch {
       setCopyMessage(t("복사에 실패했습니다."));
@@ -418,7 +422,7 @@ export function ToolMedSafetyRecentPage() {
           </div>
           {isDesktop ? (
             <button type="button" onClick={() => void handleCopySelected()} className={QUICK_ACTION_PRIMARY_CLASS}>
-              {t("답변 복사")}
+              <AnimatedCopyLabel copied={copiedKey === "selected"} label={t("답변 복사")} />
             </button>
           ) : null}
         </div>
@@ -579,7 +583,7 @@ export function ToolMedSafetyRecentPage() {
 
                           <div className="mt-4 flex items-center justify-end gap-2">
                             <button type="button" onClick={() => void handleCopyItem(item)} className={QUICK_ACTION_CLASS}>
-                              {t("복사")}
+                              <AnimatedCopyLabel copied={copiedKey === `item:${item.id}`} label={t("복사")} />
                             </button>
                             <button type="button" onClick={() => handleOpenItem(item)} className={QUICK_ACTION_PRIMARY_CLASS}>
                               {t("전체 보기")}
@@ -621,7 +625,7 @@ export function ToolMedSafetyRecentPage() {
           selected ? (
             <div className="flex gap-2">
               <Button className={PRIMARY_ACTION_CLASS} onClick={() => void handleCopySelected()}>
-                {t("답변 복사")}
+                <AnimatedCopyLabel copied={copiedKey === "selected"} label={t("답변 복사")} />
               </Button>
               <Button variant="secondary" className={SECONDARY_ACTION_CLASS} onClick={() => setDetailOpen(false)}>
                 {t("닫기")}

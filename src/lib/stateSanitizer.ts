@@ -1,4 +1,10 @@
 import type { ISODate } from "@/lib/date";
+import {
+  sanitizeMemoState,
+  sanitizeRecordState,
+  type RNestMemoState,
+  type RNestRecordState,
+} from "@/lib/notebook";
 import { defaultSettings, emptyState, type AppSettings, type AppState, type BioInputs, type EmotionEntry } from "@/lib/model";
 import type { Shift } from "@/lib/types";
 
@@ -270,6 +276,9 @@ export function sanitizeStatePayload(raw: unknown): AppState {
     emotions[iso] = emotion;
   }
 
+  const memo: RNestMemoState = sanitizeMemoState(loaded.memo);
+  const records: RNestRecordState = sanitizeRecordState(loaded.records);
+
   return {
     ...base,
     selected: asIso(loaded.selected) ?? base.selected,
@@ -278,6 +287,8 @@ export function sanitizeStatePayload(raw: unknown): AppState {
     notes,
     emotions,
     bio,
+    memo,
+    records,
     settings: sanitizeSettings(loaded.settings),
   };
 }

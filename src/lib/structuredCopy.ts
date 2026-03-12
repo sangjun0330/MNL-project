@@ -17,9 +17,28 @@ function normalizeBody(value: string | null | undefined) {
   const lines = String(value ?? "")
     .replace(/\r/g, "")
     .split("\n")
-    .map((line) => normalizeLine(line))
-    .filter(Boolean);
-  return lines.join("\n");
+    .map((line) =>
+      String(line ?? "")
+        .replace(/\u0000/g, "")
+        .replace(/[ \t]+/g, " ")
+        .trim()
+    );
+
+  let start = 0;
+  let end = lines.length;
+  while (start < end && !lines[start]) start += 1;
+  while (end > start && !lines[end - 1]) end -= 1;
+
+  const trimmed = lines.slice(start, end);
+  const out: string[] = [];
+  let previousBlank = false;
+  for (const line of trimmed) {
+    const isBlank = !line;
+    if (isBlank && previousBlank) continue;
+    out.push(line);
+    previousBlank = isBlank;
+  }
+  return out.join("\n").trim();
 }
 
 function normalizeItems(items: string[] | null | undefined) {
@@ -54,7 +73,7 @@ export function buildStructuredCopyText(args: {
     blocks.push(title);
     blocks.push(buildDivider(title.length + 6, "="));
   }
-  if (metaLines.length) blocks.push(metaLines.map((line) => `- ${line}`).join("\n"));
+  if (metaLines.length) blocks.push(metaLines.join("\n"));
 
   for (const section of args.sections) {
     const heading = normalizeLine(section.title);
@@ -65,7 +84,7 @@ export function buildStructuredCopyText(args: {
     const blockLines: string[] = [];
     if (heading) blockLines.push(`[${heading}]`);
     if (body) blockLines.push(body);
-    if (items.length) blockLines.push(...items.map((item, index) => `${index + 1}. ${item}`));
+    if (items.length) blockLines.push(...items.map((item) => `- ${item}`));
     blocks.push(blockLines.join("\n"));
   }
 

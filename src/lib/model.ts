@@ -1,5 +1,11 @@
 import type { ISODate } from "@/lib/date";
 import { todayISO } from "@/lib/date";
+import {
+  defaultMemoState,
+  defaultRecordState,
+  type RNestMemoState,
+  type RNestRecordState,
+} from "@/lib/notebook";
 import type { Shift } from "@/lib/types";
 
 // =========================
@@ -96,6 +102,8 @@ export type AppState = {
   notes: Record<ISODate, string | undefined>;
   emotions: Record<ISODate, EmotionEntry | undefined>;
   bio: Record<ISODate, BioInputs | undefined>;
+  memo: RNestMemoState;
+  records: RNestRecordState;
   settings: AppSettings;
 };
 
@@ -120,6 +128,9 @@ export type AppStore = AppState & {
 
   setBioForDate: (iso: ISODate, patch: Partial<BioInputs>) => void;
   clearBioForDate: (iso: ISODate) => void;
+
+  setMemoState: (next: RNestMemoState) => void;
+  setRecordState: (next: RNestRecordState) => void;
 };
 
 // =========================
@@ -174,6 +185,8 @@ export function emptyState(): AppState {
     notes: {},
     emotions: {},
     bio: {},
+    memo: defaultMemoState(),
+    records: defaultRecordState(),
     settings: defaultSettings(),
   };
 }
