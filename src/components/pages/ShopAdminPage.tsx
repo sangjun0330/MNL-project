@@ -21,6 +21,9 @@ import {
 } from "@/lib/shop";
 import { findShopCarrierOptionByCode, findShopCarrierOptionByLabel, SHOP_CARRIER_OPTIONS } from "@/lib/shopShipping";
 import { useI18n } from "@/lib/useI18n";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 // ─────────────────────────────────────────────
 // Types
@@ -2060,35 +2063,38 @@ export function ShopAdminPage() {
           </div>
 
           {/* Tab bar */}
-          <div className="mb-5 grid grid-cols-2 gap-2 border-b border-[#eef2f7] pb-4 md:grid-cols-3">
-            {TABS.map(({ key, label }) => {
-              const hasErr = errorsInTab(fieldErrors, key);
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  data-auth-allow
-                  onClick={() => setActiveTab(key)}
-                  className={[
-                    "rounded-2xl px-3 py-2.5 text-[12px] font-semibold transition relative",
-                    activeTab === key ? "bg-[#11294b] text-white" : "bg-[#f4f7fb] text-[#11294b]",
-                    hasErr ? "ring-1 ring-[#e07b6a]" : "",
-                  ].join(" ")}
-                >
-                  {label}
-                  {hasErr ? <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-[#e07b6a]" /> : null}
-                </button>
-              );
-            })}
-          </div>
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as AdminTab)} className="mb-5">
+            <TabsList className="grid w-full grid-cols-2 gap-2 bg-transparent md:grid-cols-3">
+              {TABS.map(({ key, label }) => {
+                const hasErr = errorsInTab(fieldErrors, key);
+                return (
+                  <TabsTrigger
+                    key={key}
+                    value={key}
+                    data-auth-allow
+                    className={[
+                      "relative rounded-2xl px-3 py-2.5 text-[12px] font-semibold transition",
+                      "data-[state=active]:bg-[#11294b] data-[state=active]:text-white data-[state=inactive]:bg-[#f4f7fb] data-[state=inactive]:text-[#11294b]",
+                      hasErr ? "ring-1 ring-[#e07b6a]" : "",
+                    ].join(" ")}
+                  >
+                    {label}
+                    {hasErr ? <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-[#e07b6a]" /> : null}
+                  </TabsTrigger>
+                );
+              })}
+            </TabsList>
 
-          {/* Tab content */}
-          {activeTab === "basic" && <TabBasic draft={draft} setDraft={setDraft} errors={fieldErrors} />}
-          {activeTab === "price" && <TabPrice draft={draft} setDraft={setDraft} errors={fieldErrors} />}
-          {activeTab === "visual" && <TabVisual draft={draft} setDraft={setDraft} />}
-          {activeTab === "media" && <TabMedia draft={draft} setDraft={setDraft} />}
-          {activeTab === "detail" && <TabDetail draft={draft} setDraft={setDraft} />}
-          {activeTab === "signals" && <TabSignals draft={draft} setDraft={setDraft} />}
+            <Separator className="my-4 bg-[#eef2f7]" />
+
+            {/* Tab content */}
+            <TabsContent value="basic"><TabBasic draft={draft} setDraft={setDraft} errors={fieldErrors} /></TabsContent>
+            <TabsContent value="price"><TabPrice draft={draft} setDraft={setDraft} errors={fieldErrors} /></TabsContent>
+            <TabsContent value="visual"><TabVisual draft={draft} setDraft={setDraft} /></TabsContent>
+            <TabsContent value="media"><TabMedia draft={draft} setDraft={setDraft} /></TabsContent>
+            <TabsContent value="detail"><TabDetail draft={draft} setDraft={setDraft} /></TabsContent>
+            <TabsContent value="signals"><TabSignals draft={draft} setDraft={setDraft} /></TabsContent>
+          </Tabs>
 
           {/* Action buttons */}
           <div className="mt-6 flex flex-wrap gap-2 border-t border-[#eef2f7] pt-4">
@@ -2175,9 +2181,9 @@ export function ShopAdminPage() {
                     {claimTypeLabel(claim.claimType)} · {claim.order?.userLabel ?? claim.userLabel ?? "unknown"} · 주문번호 {claim.orderId}
                   </div>
                 </div>
-                <span className={`rounded-full border px-2.5 py-1 text-[10.5px] font-semibold ${claimStatusClass(claim.status)}`}>
+                <Badge variant="outline" className={`text-[10.5px] font-semibold ${claimStatusClass(claim.status)}`}>
                   {claimStatusLabel(claim.status)}
-                </span>
+                </Badge>
               </div>
 
               <div className="mt-2 text-[12px] text-ios-sub">{claim.reason || t("요청 사유 없음")}</div>
@@ -2382,9 +2388,9 @@ export function ShopAdminPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className={`rounded-full border px-2.5 py-1 text-[10.5px] font-semibold ${orderStatusClass(order.status)}`}>
+                  <Badge variant="outline" className={`text-[10.5px] font-semibold ${orderStatusClass(order.status)}`}>
                     {orderStatusLabel(order.status)}
-                  </span>
+                  </Badge>
                   <button
                     type="button"
                     data-auth-allow

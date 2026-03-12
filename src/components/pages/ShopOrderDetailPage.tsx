@@ -1026,12 +1026,14 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
                 {order.refund.status !== "none" ? (
                   <div className="mt-3 rounded-2xl border border-[#dbe4ef] bg-[#f8fafc] px-4 py-4">
                     <div className="text-[11px] font-semibold text-[#60768d]">{t("환불 상태")}</div>
-                    <div className="mt-2 text-[12px] font-semibold text-[#17324d]">
+                    <div className="mt-2">
+                      <Badge variant="outline" className={`text-[11px] font-semibold ${order.refund.status === "rejected" ? "border-[#f1d0cc] bg-[#fff6f5] text-[#a33a2b]" : order.refund.status === "done" ? "border-[#c2d9bd] bg-[#edf7eb] text-[#2e6b26]" : "border-[#d7dfeb] bg-[#eef4fb] text-[#11294b]"}`}>
                       {order.refund.status === "requested"
                         ? t("검토 중")
                         : order.refund.status === "rejected"
                           ? t("반려됨")
                           : t("완료")}
+                      </Badge>
                     </div>
                     {order.refund.reason ? (
                       <div className="mt-1 text-[11.5px] text-[#60768d]">
