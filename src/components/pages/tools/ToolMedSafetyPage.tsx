@@ -35,6 +35,7 @@ const OPEN_LAYOUT_CLASS =
   "relative min-h-[calc(100dvh-120px)] overflow-hidden bg-[radial-gradient(circle_at_top,#FFFFFF_0%,#FAFAFB_42%,#F4F5F7_100%)]";
 const MED_SAFETY_CLIENT_TIMEOUT_MS = 480_000;
 const RETRY_WITH_DATA_MESSAGE = "네트워크가 불안정합니다. 데이터(모바일 네트워크)를 켠 뒤 다시 시도해 주세요.";
+const MED_SAFETY_SESSION_STORAGE_KEY_BASE = "rnest-med-safety-session";
 
 type TranslateFn = (key: string, vars?: Record<string, string | number>) => string;
 
@@ -67,8 +68,93 @@ type AnswerSection = {
   tone: AnswerSectionTone;
 };
 
+type PersistedMedSafetySession = {
+  messages: Message[];
+  input: string;
+  lastContinuationToken: string | null;
+  lastSubmittedQuery: string;
+  showSessionDecisionPrompt: boolean;
+  updatedAt: number;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function canUseSessionStorage() {
+  return typeof window !== "undefined" && typeof window.sessionStorage !== "undefined";
+}
+
+function buildMedSafetySessionStorageKey(userId?: string | null) {
+  return userId ? `${MED_SAFETY_SESSION_STORAGE_KEY_BASE}:${userId}` : MED_SAFETY_SESSION_STORAGE_KEY_BASE;
+}
+
+function normalizePersistedMessage(value: unknown): Message | null {
+  if (!isRecord(value)) return null;
+  const role = value.role === "assistant" ? "assistant" : value.role === "user" ? "user" : null;
+  const content = typeof value.content === "string" ? value.content : "";
+  const timestamp = Number(value.timestamp);
+  if (!role || !content || !Number.isFinite(timestamp)) return null;
+  return {
+    id: typeof value.id === "string" && value.id ? value.id : `${role}-${timestamp.toString(36)}`,
+    role,
+    content,
+    timestamp,
+    model: typeof value.model === "string" ? value.model : undefined,
+    source:
+      value.source === "openai_fallback" ? "openai_fallback" : value.source === "openai_live" ? "openai_live" : undefined,
+    imageDataUrl: null,
+  };
+}
+
+function readPersistedMedSafetySession(storageKey: string): PersistedMedSafetySession | null {
+  if (!canUseSessionStorage()) return null;
+  try {
+    const raw = window.sessionStorage.getItem(storageKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isRecord(parsed) || !Array.isArray(parsed.messages)) return null;
+    const messages = parsed.messages.map(normalizePersistedMessage).filter((message): message is Message => Boolean(message));
+    if (!messages.some((message) => message.role === "assistant")) return null;
+    return {
+      messages,
+      input: typeof parsed.input === "string" ? parsed.input : "",
+      lastContinuationToken: typeof parsed.lastContinuationToken === "string" ? parsed.lastContinuationToken : null,
+      lastSubmittedQuery: typeof parsed.lastSubmittedQuery === "string" ? parsed.lastSubmittedQuery : "",
+      showSessionDecisionPrompt: parsed.showSessionDecisionPrompt === true,
+      updatedAt: Number(parsed.updatedAt) || Date.now(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writePersistedMedSafetySession(storageKey: string, session: PersistedMedSafetySession) {
+  if (!canUseSessionStorage()) return;
+  const sanitizedMessages = session.messages.map((message) => ({
+    ...message,
+    imageDataUrl: null,
+  }));
+  try {
+    window.sessionStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        ...session,
+        messages: sanitizedMessages,
+      })
+    );
+  } catch {
+    // Ignore storage quota/private mode failures.
+  }
+}
+
+function clearPersistedMedSafetySession(storageKey: string) {
+  if (!canUseSessionStorage()) return;
+  try {
+    window.sessionStorage.removeItem(storageKey);
+  } catch {
+    // Ignore storage failures.
+  }
 }
 
 function normalizeMultilineText(value: unknown) {
@@ -554,9 +640,10 @@ function AssistantAnswerSections({ content }: { content: string }) {
 export function ToolMedSafetyPage() {
   const router = useRouter();
   const { t, lang } = useI18n();
-  const { status: authStatus } = useAuthState();
+  const { user, status: authStatus } = useAuthState();
   const { loading: billingLoading, subscription, reload: reloadBilling } = useBillingAccess();
   const [mounted, setMounted] = useState(false);
+  const [didRestoreSession, setDidRestoreSession] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -574,6 +661,7 @@ export function ToolMedSafetyPage() {
   const threadEndRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const restoredSessionKeyRef = useRef<string | null>(null);
 
   const subscriptionMedSafetyQuota = subscription?.medSafetyQuota ?? null;
   useEffect(() => {
@@ -584,6 +672,7 @@ export function ToolMedSafetyPage() {
   const quotaRemaining = Math.max(0, Number(medSafetyQuota?.totalRemaining ?? 0));
   const activePlanTitle = getPlanDefinition(subscription?.tier ?? "free").title;
   const creditPurchaseHref = `${withReturnTo("/settings/billing/upgrade", "/tools/med-safety")}#search-credits`;
+  const medSafetySessionStorageKey = buildMedSafetySessionStorageKey(user?.userId ?? null);
   const quotaKnown = authStatus === "authenticated" && !billingLoading && !!medSafetyQuota;
   const canAsk = authStatus === "authenticated" && (!quotaKnown || quotaRemaining > 0);
   const hasConversation = messages.length > 0 || Boolean(streamingText);
@@ -591,10 +680,52 @@ export function ToolMedSafetyPage() {
   const hasTypedInput = normalizeQuestionInput(input).length > 0;
   const isComposerLocked = showSessionDecisionPrompt;
   const canSubmit = !isComposerLocked && !isLoading && canAsk && (hasTypedInput || Boolean(selectedImage));
+  const showCreditPurchaseCta = !hasConversation || (quotaKnown && quotaRemaining <= 0);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
+    if (authStatus === "loading") return;
+
+    if (authStatus !== "authenticated" || !user?.userId) {
+      setDidRestoreSession(true);
+      return;
+    }
+
+    if (restoredSessionKeyRef.current === medSafetySessionStorageKey) {
+      setDidRestoreSession(true);
+      return;
+    }
+
+    const persisted = readPersistedMedSafetySession(medSafetySessionStorageKey);
+    if (persisted) {
+      setMessages(persisted.messages);
+      setInput(persisted.input);
+      setStreamingText("");
+      setLastContinuationToken(persisted.lastContinuationToken);
+      setError(null);
+      setLastSubmittedQuery(persisted.lastSubmittedQuery);
+      setSelectedImage(null);
+      setSelectedImageName("");
+      setShowSessionDecisionPrompt(persisted.showSessionDecisionPrompt);
+    } else if (restoredSessionKeyRef.current && restoredSessionKeyRef.current !== medSafetySessionStorageKey) {
+      setMessages([]);
+      setInput("");
+      setStreamingText("");
+      setLastContinuationToken(null);
+      setError(null);
+      setLastSubmittedQuery("");
+      setSelectedImage(null);
+      setSelectedImageName("");
+      setShowSessionDecisionPrompt(false);
+    }
+
+    restoredSessionKeyRef.current = medSafetySessionStorageKey;
+    setDidRestoreSession(true);
+  }, [mounted, authStatus, user?.userId, medSafetySessionStorageKey]);
 
   useEffect(() => {
     if (!copyMessage) return;
@@ -621,6 +752,46 @@ export function ToolMedSafetyPage() {
     setIsComposerDragOver(false);
   }, [isComposerLocked]);
 
+  useEffect(() => {
+    if (!mounted || !didRestoreSession) return;
+    if (authStatus !== "authenticated" || !user?.userId) return;
+    if (isLoading || streamingText) return;
+
+    const hasPersistableSession =
+      messages.some((message) => message.role === "assistant") ||
+      input.trim().length > 0 ||
+      Boolean(lastContinuationToken) ||
+      Boolean(lastSubmittedQuery) ||
+      showSessionDecisionPrompt;
+
+    if (!hasPersistableSession) {
+      clearPersistedMedSafetySession(medSafetySessionStorageKey);
+      return;
+    }
+
+    writePersistedMedSafetySession(medSafetySessionStorageKey, {
+      messages,
+      input,
+      lastContinuationToken,
+      lastSubmittedQuery,
+      showSessionDecisionPrompt,
+      updatedAt: Date.now(),
+    });
+  }, [
+    mounted,
+    didRestoreSession,
+    authStatus,
+    user?.userId,
+    medSafetySessionStorageKey,
+    messages,
+    input,
+    lastContinuationToken,
+    lastSubmittedQuery,
+    showSessionDecisionPrompt,
+    isLoading,
+    streamingText,
+  ]);
+
   function focusComposerSoon() {
     window.setTimeout(() => {
       composerInputRef.current?.focus();
@@ -637,6 +808,7 @@ export function ToolMedSafetyPage() {
     setSelectedImage(null);
     setSelectedImageName("");
     setShowSessionDecisionPrompt(false);
+    clearPersistedMedSafetySession(medSafetySessionStorageKey);
   }
 
   function continueCurrentSession() {
@@ -931,7 +1103,14 @@ export function ToolMedSafetyPage() {
         onChange={handleImageSelect}
       />
 
-      <div className="mx-auto w-full max-w-[1120px] px-1 pb-[calc(260px+env(safe-area-inset-bottom))] pt-4 sm:px-2">
+      <div
+        className="mx-auto w-full max-w-[1120px] px-1 pt-4 transition-[padding-bottom] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] sm:px-2"
+        style={{
+          paddingBottom: showSessionDecisionPrompt
+            ? "calc(160px + env(safe-area-inset-bottom))"
+            : "calc(260px + env(safe-area-inset-bottom))",
+        }}
+      >
         <div className={`px-3 py-3 sm:px-4 ${OPEN_LAYOUT_CLASS}`}>
           <div className="absolute inset-x-0 top-0 h-32 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.95),rgba(255,255,255,0))]" />
           <div className="relative">
@@ -964,14 +1143,15 @@ export function ToolMedSafetyPage() {
                   <button type="button" onClick={resetConversation} className={SECONDARY_FLAT_BTN}>
                     {t("새 검색")}
                   </button>
-                ) : (
+                ) : null}
+                {showCreditPurchaseCta ? (
                   <Link
                     href={creditPurchaseHref}
                     className="inline-flex h-10 items-center justify-center rounded-full border border-[#E8E8EC] bg-white px-4 text-[12.5px] font-semibold text-ios-text"
                   >
                     {t("추가 크레딧 구매하기")}
                   </Link>
-                )}
+                ) : null}
                 <Link
                   href="/tools/med-safety/recent"
                   className="inline-flex h-10 items-center justify-center rounded-full border border-[#E8E8EC] bg-white px-4 text-[12.5px] font-semibold text-ios-text"
@@ -983,7 +1163,13 @@ export function ToolMedSafetyPage() {
 
             {quotaKnown && quotaRemaining <= 0 ? (
               <div className="mt-4 rounded-[24px] border border-amber-200 bg-amber-50/92 px-4 py-3 text-[13px] font-semibold leading-6 text-amber-700">
-                {t("남은 AI 검색 크레딧이 없습니다. 추가 크레딧을 구매하거나 Plus/Pro 플랜 크레딧을 충전한 뒤 다시 이용해 주세요.")}
+                <div>{t("남은 AI 검색 크레딧이 없습니다. 추가 크레딧을 구매하거나 Plus/Pro 플랜 크레딧을 충전한 뒤 다시 이용해 주세요.")}</div>
+                <Link
+                  href={creditPurchaseHref}
+                  className="mt-3 inline-flex h-10 items-center justify-center rounded-full border border-amber-300 bg-white px-4 text-[12.5px] font-semibold text-amber-700"
+                >
+                  {t("추가 크레딧 구매하기")}
+                </Link>
               </div>
             ) : null}
 
@@ -1082,11 +1268,13 @@ export function ToolMedSafetyPage() {
 
       <div className="pointer-events-none fixed inset-x-0 bottom-0 z-50 bg-[linear-gradient(180deg,rgba(255,255,255,0)_0%,rgba(255,255,255,0.78)_20%,rgba(255,255,255,0.94)_100%)] pb-[env(safe-area-inset-bottom)] pt-8 backdrop-blur-[18px]">
         <div className="pointer-events-auto mx-auto w-full max-w-[892px] px-3 pb-3 sm:px-4">
-          {showSessionDecisionPrompt ? (
-            <div className="mb-3">
-              <div className="mb-2 px-1 text-[12px] font-semibold text-[color:var(--rnest-accent)]">
-                {t("다음 질문 전에는 위 두 옵션 중 하나를 먼저 선택해 주세요.")}
-              </div>
+          <div
+            className={`overflow-hidden transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+              showSessionDecisionPrompt ? "max-h-[120px] translate-y-0 opacity-100" : "pointer-events-none max-h-0 translate-y-5 opacity-0"
+            }`}
+            aria-hidden={!showSessionDecisionPrompt}
+          >
+            <div className="pb-2">
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
@@ -1106,134 +1294,124 @@ export function ToolMedSafetyPage() {
                 </button>
               </div>
             </div>
-          ) : null}
+          </div>
           <div
-            className={`overflow-hidden rounded-[28px] border px-3 pb-2 pt-2 shadow-[0_16px_42px_rgba(15,23,42,0.24)] transition sm:px-4 ${
-              isComposerDragOver
-                ? "border-[color:var(--rnest-accent)] bg-white/92 backdrop-blur-2xl"
-                : isComposerFocused
-                ? "border-[color:var(--rnest-accent-border)] bg-white/88 backdrop-blur-2xl"
-                : "border-white/70 bg-white/78 backdrop-blur-2xl"
+            className={`overflow-hidden transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+              showSessionDecisionPrompt ? "pointer-events-none max-h-0 translate-y-6 opacity-0" : "max-h-[320px] translate-y-0 opacity-100"
             }`}
-            onDragEnter={(event) => {
-              if (isComposerLocked) return;
-              event.preventDefault();
-              event.stopPropagation();
-              setIsComposerDragOver(true);
-            }}
-            onDragOver={(event) => {
-              if (isComposerLocked) return;
-              event.preventDefault();
-              event.stopPropagation();
-              if (!isComposerDragOver) setIsComposerDragOver(true);
-            }}
-            onDragLeave={(event) => {
-              if (isComposerLocked) return;
-              event.preventDefault();
-              event.stopPropagation();
-              const currentTarget = event.currentTarget;
-              if (!currentTarget.contains(event.relatedTarget as Node | null)) {
-                setIsComposerDragOver(false);
-              }
-            }}
-            onDrop={handleComposerDrop}
+            aria-hidden={showSessionDecisionPrompt}
           >
-            {isComposerLocked ? (
-              <div className="mb-2 rounded-[18px] border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-3 py-2 text-[12px] font-medium leading-5 text-[color:var(--rnest-accent)]">
-                {t("먼저 '다른 질문하기' 또는 '이 결과에 대한 질문하기'를 선택해 주세요.")}
-              </div>
-            ) : null}
-            {selectedImage ? (
-              <div className="mb-2 flex items-center gap-3 rounded-[20px] border border-[#EAE6F6] bg-white/86 px-3 py-2.5">
-                <img src={selectedImage} alt="" className="h-12 w-12 rounded-[14px] object-cover" />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-[13px] font-medium text-ios-text">{selectedImageName}</div>
-                  <div className="mt-0.5 text-[11px] text-ios-sub">{t("질문과 함께 전송됩니다.")}</div>
+            <div
+              className={`rounded-[28px] border px-3 pb-2 pt-2 shadow-[0_16px_42px_rgba(15,23,42,0.24)] transition sm:px-4 ${
+                isComposerDragOver
+                  ? "border-[color:var(--rnest-accent)] bg-white/92 backdrop-blur-2xl"
+                  : isComposerFocused
+                  ? "border-[color:var(--rnest-accent-border)] bg-white/88 backdrop-blur-2xl"
+                  : "border-white/70 bg-white/78 backdrop-blur-2xl"
+              }`}
+              onDragEnter={(event) => {
+                if (isComposerLocked) return;
+                event.preventDefault();
+                event.stopPropagation();
+                setIsComposerDragOver(true);
+              }}
+              onDragOver={(event) => {
+                if (isComposerLocked) return;
+                event.preventDefault();
+                event.stopPropagation();
+                if (!isComposerDragOver) setIsComposerDragOver(true);
+              }}
+              onDragLeave={(event) => {
+                if (isComposerLocked) return;
+                event.preventDefault();
+                event.stopPropagation();
+                const currentTarget = event.currentTarget;
+                if (!currentTarget.contains(event.relatedTarget as Node | null)) {
+                  setIsComposerDragOver(false);
+                }
+              }}
+              onDrop={handleComposerDrop}
+            >
+              {selectedImage ? (
+                <div className="mb-2 flex items-center gap-3 rounded-[20px] border border-[#EAE6F6] bg-white/86 px-3 py-2.5">
+                  <img src={selectedImage} alt="" className="h-12 w-12 rounded-[14px] object-cover" />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[13px] font-medium text-ios-text">{selectedImageName}</div>
+                    <div className="mt-0.5 text-[11px] text-ios-sub">{t("질문과 함께 전송됩니다.")}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={removeSelectedImage}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#F5F3FA] text-ios-sub transition hover:bg-[#EEEAF8] hover:text-[color:var(--rnest-accent)]"
+                    aria-label={t("이미지 제거")}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden="true">
+                      <path d="M18 6L6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                    </svg>
+                  </button>
+                </div>
+              ) : null}
+              <div className="grid grid-cols-[auto_1fr_auto] items-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className={COMPOSER_ACTION_BTN_CLASS}
+                  disabled={isComposerLocked}
+                  aria-label={t("이미지 첨부")}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
+                    <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                </button>
+                <div className="flex min-h-[56px] items-end rounded-[22px] border border-[#ECE7F7] bg-white/88 px-4 py-3 transition focus-within:border-[color:var(--rnest-accent-border)] focus-within:bg-white">
+                  <textarea
+                    ref={composerInputRef}
+                    value={input}
+                    onChange={(event) => setInput(event.target.value)}
+                    onPaste={handleComposerPaste}
+                    onFocus={() => setIsComposerFocused(true)}
+                    onBlur={() => setIsComposerFocused(false)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                        event.preventDefault();
+                        void submitQuestion();
+                      }
+                    }}
+                    rows={1}
+                    className="max-h-[220px] min-h-[28px] flex-1 resize-none overflow-y-auto border-0 bg-transparent p-0 text-[15px] leading-7 text-ios-text shadow-none outline-none placeholder:text-ios-sub disabled:cursor-not-allowed disabled:text-ios-sub"
+                    placeholder={hasConversation ? t("예: 그럼 중심정맥으로만 줘야 하나요?") : t("예: norepinephrine 투여 시 주의사항이 뭐야?")}
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    autoComplete="off"
+                    spellCheck={false}
+                    aria-label={t("임상 질문 입력")}
+                    disabled={isComposerLocked}
+                  />
                 </div>
                 <button
                   type="button"
-                  onClick={removeSelectedImage}
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#F5F3FA] text-ios-sub transition hover:bg-[#EEEAF8] hover:text-[color:var(--rnest-accent)]"
-                  aria-label={t("이미지 제거")}
+                  className={COMPOSER_SEND_BTN_CLASS}
+                  onClick={() => void submitQuestion()}
+                  disabled={!canSubmit}
+                  aria-label={isLoading ? t("질문 중...") : t("보내기")}
                 >
-                  <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden="true">
-                    <path d="M18 6L6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                  </svg>
+                  {isLoading ? (
+                    <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 animate-spin" aria-hidden="true">
+                      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" opacity="0.3" />
+                      <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
+                      <path d="M5 12h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                      <path d="M13 6l6 6-6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  )}
                 </button>
               </div>
-            ) : null}
-            <div className="grid grid-cols-[auto_1fr_auto] items-end gap-2">
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className={COMPOSER_ACTION_BTN_CLASS}
-                disabled={isComposerLocked}
-                aria-label={t("이미지 첨부")}
-              >
-                <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
-                  <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                </svg>
-              </button>
-              <div className="flex min-h-[56px] items-end rounded-[22px] border border-[#ECE7F7] bg-white/88 px-4 py-3 transition focus-within:border-[color:var(--rnest-accent-border)] focus-within:bg-white">
-                <textarea
-                  ref={composerInputRef}
-                  value={input}
-                  onChange={(event) => setInput(event.target.value)}
-                  onPaste={handleComposerPaste}
-                  onFocus={() => setIsComposerFocused(true)}
-                  onBlur={() => setIsComposerFocused(false)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-                      event.preventDefault();
-                      void submitQuestion();
-                    }
-                  }}
-                  rows={1}
-                  className="max-h-[220px] min-h-[28px] flex-1 resize-none overflow-y-auto border-0 bg-transparent p-0 text-[15px] leading-7 text-ios-text shadow-none outline-none placeholder:text-ios-sub disabled:cursor-not-allowed disabled:text-ios-sub"
-                  placeholder={
-                    isComposerLocked
-                      ? t("먼저 위 옵션 중 하나를 선택해 주세요.")
-                      : hasConversation
-                      ? t("예: 그럼 중심정맥으로만 줘야 하나요?")
-                      : t("예: norepinephrine 투여 시 주의사항이 뭐야?")
-                  }
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  autoComplete="off"
-                  spellCheck={false}
-                  aria-label={t("임상 질문 입력")}
-                  disabled={isComposerLocked}
-                />
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] text-ios-sub">
+                <span>{t("환자 이름, 등록번호, 연락처 등 식별정보는 입력하지 마세요.")}</span>
+                <span>{hasConversation ? t("다른 주제로 바꾸려면 다른 질문하기를 눌러 주세요.") : t("이미지 붙여넣기/드래그도 가능합니다.")}</span>
               </div>
-              <button
-                type="button"
-                className={COMPOSER_SEND_BTN_CLASS}
-                onClick={() => void submitQuestion()}
-                disabled={!canSubmit}
-                aria-label={isLoading ? t("질문 중...") : t("보내기")}
-              >
-                {isLoading ? (
-                  <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 animate-spin" aria-hidden="true">
-                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" opacity="0.3" />
-                    <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                  </svg>
-                ) : (
-                  <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
-                    <path d="M5 12h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                    <path d="M13 6l6 6-6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                )}
-              </button>
-            </div>
-            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] text-ios-sub">
-              <span>{t("환자 이름, 등록번호, 연락처 등 식별정보는 입력하지 마세요.")}</span>
-              <span>
-                {isComposerLocked
-                  ? t("질문을 이어가려면 위에서 먼저 방식을 선택해 주세요.")
-                  : hasConversation
-                  ? t("다른 주제로 바꾸려면 다른 질문하기를 눌러 주세요.")
-                  : t("이미지 붙여넣기/드래그도 가능합니다.")}
-              </span>
             </div>
           </div>
         </div>
