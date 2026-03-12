@@ -261,6 +261,27 @@ function asPlanTier(value: unknown): PlanTier {
   return "free";
 }
 
+function normalizePersistedPaidPlanTier(value: Exclude<PlanTier, "free">): Exclude<PlanTier, "free"> {
+  return value === "plus" ? "pro" : value;
+}
+
+function isPlanTierConstraintError(error: any, column: "plan_tier" | "subscription_tier") {
+  const code = String(error?.code ?? "");
+  const message = String(error?.message ?? "");
+  const lower = message.toLowerCase();
+  if (!message) return false;
+
+  const mentionsColumn = lower.includes(column) || lower.includes(`${column}_check`);
+  const mentionsConstraint =
+    lower.includes("check constraint") ||
+    lower.includes("violates check constraint") ||
+    lower.includes("invalid input value for enum");
+
+  if (!mentionsColumn && !mentionsConstraint) return false;
+  if (code === "23514" || code === "22P02") return true;
+  return lower.includes(`${column}_check`) || lower.includes("invalid input value for enum");
+}
+
 function asSubscriptionStatus(value: unknown): SubscriptionStatus {
   if (value === "active" || value === "expired") return value;
   return "inactive";
@@ -350,6 +371,17 @@ function asOrderKind(value: unknown): BillingOrderKind {
   return "subscription";
 }
 
+function inferPlanTierFromLegacyFields(row: any): PlanTier {
+  const directTier = asPlanTier(row?.plan_tier);
+  if (directTier === "plus") return "plus";
+
+  const orderId = String(row?.order_id ?? "").toLowerCase();
+  const orderName = String(row?.order_name ?? "").toLowerCase();
+  if (/(^|_)plus(_|$)/.test(orderId) || /\bplus\b/.test(orderName)) return "plus";
+  if (/(^|_)pro(_|$)/.test(orderId) || /\bpro\b/.test(orderName)) return "pro";
+  return directTier;
+}
+
 function inferOrderKindFromLegacyFields(row: any): BillingOrderKind {
   if (row && Object.prototype.hasOwnProperty.call(row, "order_kind")) {
     return asOrderKind(row?.order_kind);
@@ -381,7 +413,7 @@ function toBillingOrderSummary(row: any): BillingOrderSummary {
   return {
     orderId: row?.order_id ?? "",
     userId: row?.user_id ?? undefined,
-    planTier: asPlanTier(row?.plan_tier),
+    planTier: inferPlanTierFromLegacyFields(row),
     orderKind,
     creditPackUnits,
     amount: Number(row?.amount ?? 0),
@@ -764,8 +796,7 @@ async function maybeRecoverSubscriptionFromLatestPaidOrder(
 
   const startedAt = snapshot.tier === latestPaid.planTier && snapshot.startedAt ? snapshot.startedAt : paidBaseDate.toISOString();
   const nowIso = new Date().toISOString();
-  await updateUserWithOptionalSubscriptionFallback(userId, {
-    subscription_tier: latestPaid.planTier,
+  await updatePaidSubscriptionWithCompatibility(userId, latestPaid.planTier, {
     subscription_status: "active",
     subscription_started_at: startedAt,
     subscription_current_period_end: recoveredPeriodEnd.toISOString(),
@@ -784,6 +815,54 @@ async function maybeRecoverSubscriptionFromLatestPaidOrder(
 
 export function createCustomerKey(userId: string) {
   return `rnest_${userId.replace(/[^A-Za-z0-9_-]/g, "")}`;
+}
+
+async function updatePaidSubscriptionWithCompatibility(
+  userId: string,
+  planTier: PlanTier,
+  values: Record<string, unknown>
+) {
+  if (planTier === "free") {
+    throw new Error("invalid_paid_plan_tier");
+  }
+
+  try {
+    await updateUserWithOptionalSubscriptionFallback(userId, {
+      ...values,
+      subscription_tier: planTier,
+    });
+    return;
+  } catch (error) {
+    const fallbackTier = normalizePersistedPaidPlanTier(planTier);
+    if (fallbackTier === planTier || !isPlanTierConstraintError(error, "subscription_tier")) {
+      throw error;
+    }
+  }
+
+  await updateUserWithOptionalSubscriptionFallback(userId, {
+    ...values,
+    subscription_tier: normalizePersistedPaidPlanTier(planTier),
+  });
+}
+
+async function maybeResolveLegacyPlusTier(userId: string, snapshot: SubscriptionSnapshot): Promise<SubscriptionSnapshot> {
+  if (!snapshot.hasPaidAccess || snapshot.tier !== "pro") return snapshot;
+
+  const latestPaid = await readLatestPaidDoneOrder(userId);
+  if (!latestPaid || latestPaid.planTier !== "plus") return snapshot;
+
+  const paidBaseDate = parseDate(latestPaid.approvedAt ?? latestPaid.createdAt);
+  if (!paidBaseDate) return snapshot;
+
+  const latestCanceledAt = await readLatestCanceledOrderUpdatedAt(userId);
+  if (latestCanceledAt && latestCanceledAt.getTime() >= paidBaseDate.getTime()) {
+    return snapshot;
+  }
+
+  return {
+    ...snapshot,
+    tier: "plus",
+  };
 }
 
 export async function readSubscription(
@@ -856,6 +935,7 @@ export async function readSubscription(
     cancelReason,
     hasPaidAccess,
     entitlements: buildBillingEntitlements({
+      tier,
       hasPaidAccess,
       medSafetyTotalRemaining: medSafetyQuota.totalRemaining,
     }),
@@ -869,15 +949,18 @@ export async function readSubscription(
     }).catch(() => undefined);
   }
 
+  const effectiveSnapshot = await maybeResolveLegacyPlusTier(userId, snapshot).catch(() => snapshot);
+
   if (options?.skipReconcile) {
-    return snapshot;
+    return effectiveSnapshot;
   }
 
   try {
-    const recovered = await maybeRecoverSubscriptionFromLatestPaidOrder(userId, snapshot);
-    return recovered ?? snapshot;
+    const recovered = await maybeRecoverSubscriptionFromLatestPaidOrder(userId, effectiveSnapshot);
+    const nextSnapshot = recovered ?? effectiveSnapshot;
+    return await maybeResolveLegacyPlusTier(userId, nextSnapshot).catch(() => nextSnapshot);
   } catch {
-    return snapshot;
+    return effectiveSnapshot;
   }
 }
 
@@ -1173,6 +1256,7 @@ export async function createBillingOrder(input: {
   const plan = getPlanDefinition(input.planTier);
   const orderKind: BillingOrderKind = input.orderKind === "credit_pack" ? "credit_pack" : "subscription";
   const creditPackUnits = orderKind === "credit_pack" ? Math.max(1, toNonNegativeInt(input.creditPackUnits, 10)) : 0;
+  const normalizedPersistedTier = normalizePersistedPaidPlanTier(input.planTier);
 
   await ensureUserRow(input.userId);
 
@@ -1202,15 +1286,35 @@ export async function createBillingOrder(input: {
     updated_at: now,
   });
   if (!fullInsert.error) return;
-  if (!isOptionalBillingOrderColumnError(fullInsert.error)) throw fullInsert.error;
-  if (orderKind === "credit_pack") {
-    throw new Error("billing_schema_outdated_credit_pack_columns");
+
+  let lastInsertError: any = fullInsert.error;
+  const canRetryWithLegacyPlanTier =
+    normalizedPersistedTier !== input.planTier && isPlanTierConstraintError(fullInsert.error, "plan_tier");
+
+  if (canRetryWithLegacyPlanTier) {
+    const legacyTierInsert = await admin.from("billing_orders").insert({
+      order_id: input.orderId,
+      user_id: input.userId,
+      plan_tier: normalizedPersistedTier,
+      order_kind: orderKind,
+      credit_pack_units: creditPackUnits,
+      amount: Math.round(input.amount),
+      currency: input.currency ?? "KRW",
+      status: "READY",
+      order_name: input.orderName ?? plan.orderName,
+      created_at: now,
+      updated_at: now,
+    });
+    if (!legacyTierInsert.error) return;
+    lastInsertError = legacyTierInsert.error;
   }
+
+  if (!isOptionalBillingOrderColumnError(lastInsertError)) throw lastInsertError;
 
   const fallbackInsert = await admin.from("billing_orders").insert({
     order_id: input.orderId,
     user_id: input.userId,
-    plan_tier: input.planTier,
+    plan_tier: normalizedPersistedTier,
     amount: Math.round(input.amount),
     currency: input.currency ?? "KRW",
     status: "READY",
@@ -1893,7 +1997,7 @@ export async function markBillingOrderDoneAndApplyPlan(input: {
   const now = new Date();
   const nowIso = now.toISOString();
   const orderKind = inferOrderKindFromLegacyFields(order);
-  const paidPlanTier = asPlanTier(order.plan_tier);
+  const paidPlanTier = inferPlanTierFromLegacyFields(order);
   const creditPackUnits = inferCreditPackUnitsFromLegacyFields(order, orderKind);
   if (orderKind === "subscription" && paidPlanTier === "free") {
     throw new Error("invalid_plan");
@@ -1946,8 +2050,7 @@ export async function markBillingOrderDoneAndApplyPlan(input: {
   const nextEnd = new Date(baseDate.getTime() + plan.periodDays * DAY_MS);
   const startedAt = current.startedAt && current.hasPaidAccess ? current.startedAt : nowIso;
 
-  await updateUserWithOptionalSubscriptionFallback(input.userId, {
-    subscription_tier: paidPlanTier,
+  await updatePaidSubscriptionWithCompatibility(input.userId, paidPlanTier, {
     subscription_status: "active",
     subscription_started_at: startedAt,
     subscription_current_period_end: nextEnd.toISOString(),

@@ -205,7 +205,7 @@ export function InsightsRecoveryDetail() {
             completedCount={plannerReady ? completedCount : null}
           />
           <RecoveryPlannerUpgradeCard
-            title="AI 맞춤회복과 오늘의 오더 전체는 Pro에서 열립니다."
+            title="AI 맞춤회복과 오늘의 오더 전체는 Plus 이상 플랜에서 열립니다."
             description="AI가 왜 이 회복을 먼저 봐야 하는지 설명하고, 바로 체크할 수 있는 오늘의 오더까지 함께 제공합니다."
             returnTo="/insights/recovery"
           />

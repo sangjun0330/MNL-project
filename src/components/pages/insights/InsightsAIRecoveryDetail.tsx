@@ -1135,7 +1135,7 @@ export function InsightsAIRecoveryDetail() {
             </p>
           </DetailCard>
           <RecoveryPlannerUpgradeCard
-            title={t("AI 맞춤회복 전체는 Pro에서 열립니다.")}
+            title={t("AI 맞춤회복 전체는 Plus 이상 플랜에서 열립니다.")}
             description={t("AI가 오늘의 회복 우선순위와 이유를 설명하고, 바로 실행할 오늘의 오더까지 함께 연결합니다.")}
             returnTo="/insights/recovery/ai"
           />

@@ -60,7 +60,8 @@ function aiSummaryFallback(
 ) {
   if (opts.loading || opts.generating) return t("저장된 AI 맞춤회복을 확인하고 있어요...");
   if (opts.error?.includes("requires_today_sleep")) return t("오늘 수면 입력 후 바로 AI 맞춤회복을 시작해요.");
-  if (opts.error?.includes("plan") || opts.error?.includes("subscription")) return t("AI 맞춤회복은 Pro 플랜에서 사용할 수 있어요.");
+  if (opts.error?.includes("plan") || opts.error?.includes("subscription"))
+    return t("AI 맞춤회복은 Plus 이상 플랜에서 사용할 수 있어요.");
   if (opts.error?.includes("auth")) return t("로그인 후 오늘의 AI 맞춤회복을 확인할 수 있어요.");
   return t("AI 맞춤회복에서 오늘 플랜의 이유를 확인해요.");
 }
@@ -243,7 +244,7 @@ export default function Home() {
   const aiHeadline = useMemo(() => {
     if (planner.state === "needs_records") return t("기록을 3일 이상 쌓으면 AI 맞춤회복도 열려요.");
     if (aiPlannerHeadline) return aiPlannerHeadline;
-    if (!planner.aiAvailable && !planner.billingLoading) return t("AI 맞춤회복은 Pro에서 열립니다.");
+    if (!planner.aiAvailable && !planner.billingLoading) return t("AI 맞춤회복은 Plus 이상 플랜에서 열립니다.");
     return aiSummaryFallback(t, {
       loading: aiCardLoading,
       generating: !aiCardLoading && (aiRecovery.generating || aiRecoveryAfter.generating || aiPlanner.generating || aiPlannerAfter.generating),
@@ -511,7 +512,7 @@ export default function Home() {
             ? t("회복 플래너가 열리면 AI 맞춤회복도 함께 볼 수 있어요.")
             : planner.aiAvailable
               ? t("회복 플래너가 왜 이런 우선순위를 잡았는지 AI가 설명해 줍니다.")
-              : t("AI 맞춤회복은 Pro에서 열립니다.")}
+              : t("AI 맞춤회복은 Plus 이상 플랜에서 열립니다.")}
         </p>
 
         <div className="mt-4 flex flex-wrap gap-2">

@@ -290,7 +290,7 @@ export function InsightsRecoveryOrdersDetail() {
             <p className="mt-2 break-keep text-[14px] leading-6 text-ios-sub">{fallback.orders.summary}</p>
           </DetailCard>
           <RecoveryPlannerUpgradeCard
-            title="AI 오늘의 오더 전체는 Pro에서 열립니다."
+            title="AI 오늘의 오더 전체는 Plus 이상 플랜에서 열립니다."
             description="AI가 전체 건강기록을 보고 오늘 꼭 필요한 1~5개의 오더만 체크리스트로 정리합니다."
             returnTo="/insights/recovery/orders"
           />

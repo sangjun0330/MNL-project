@@ -111,7 +111,8 @@ export async function POST(req: Request) {
       currency: "KRW",
       orderName: product.orderName,
     });
-  } catch {
+  } catch (error) {
+    console.error("[billing/checkout] failed to create order", error);
     return bad(500, "failed_to_create_order");
   }
 

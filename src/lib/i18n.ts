@@ -708,8 +708,10 @@ const EN_EXTRA: Record<string, string> = {
     "Tap Confirm to move to the plan upgrade page.",
   "AI가 현재 상태에 맞춘 맞춤회복을 분석하고 있습니다.":
     "AI is analyzing personalized recovery for your current condition.",
-  "AI 맞춤회복은 Pro 플랜에서 사용할 수 있어요.":
-    "AI recovery is available on the Pro plan.",
+  "AI 맞춤회복은 Plus 이상 플랜에서 사용할 수 있어요.":
+    "AI recovery is available on Plus or higher plans.",
+  "AI 맞춤회복은 Plus 이상 플랜에서 열립니다.":
+    "AI recovery opens on Plus or higher plans.",
   "오늘 수면 입력 후 AI 맞춤회복을 바로 분석합니다.":
     "AI recovery analysis starts right after you log today's sleep.",
   "OpenAI 요청이 지역 정책으로 거절됐어요.":
@@ -734,9 +736,11 @@ const EN_EXTRA: Record<string, string> = {
   "AI 회복 해설": "AI recovery brief",
   "AI 회복 해설은 유료 플랜 전용 기능입니다.\n플랜 업그레이드 페이지로 이동할까요?":
     "AI recovery brief is a paid-plan feature.\nMove to the plan upgrade page?",
-  "AI 회복 해설은 Pro 플랜에서 사용할 수 있어요.":
-    "AI recovery brief is available on the Pro plan.",
-  "AI 회복 해설은 Pro에서 열립니다.": "AI recovery brief opens on Pro.",
+  "AI 회복 해설은 Plus 이상 플랜에서 사용할 수 있어요.":
+    "AI recovery brief is available on Plus or higher plans.",
+  "AI 회복 해설은 Plus 이상 플랜에서 열립니다.": "AI recovery brief opens on Plus or higher plans.",
+  "AI 맞춤회복 전체는 Plus 이상 플랜에서 열립니다.":
+    "Full AI recovery opens on Plus or higher plans.",
   "AI 회복 해설 안내": "AI recovery brief guide",
   "AI 회복 해설은 회복 플래너가 왜 이런 우선순위를 잡았는지 맥락 중심으로 풀어 설명합니다.":
     "AI recovery brief explains, with context, why the recovery planner chose these priorities.",
