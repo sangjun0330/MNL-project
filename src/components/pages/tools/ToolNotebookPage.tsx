@@ -1,6 +1,6 @@
 "use client"
 
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
+import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import {
   Bell,
   BookOpenText,
@@ -317,20 +317,57 @@ function renderBlockTypeIcon(type: RNestMemoBlockType, className = "h-3.5 w-3.5"
   }
 }
 
+const pageItemPositionCache = new Map<string, number>()
+
 /* ─── sidebar page item ───────────────────────────────────── */
 
 function PageItem({
   doc,
   isActive,
+  listKey,
   onClick,
 }: {
   doc: RNestMemoDocument
   isActive: boolean
+  listKey: string
   onClick: () => void
 }) {
   const summary = buildSummary(doc)
+  const itemRef = useRef<HTMLButtonElement>(null)
+
+  useLayoutEffect(() => {
+    const element = itemRef.current
+    if (!element) return
+    const cacheKey = `${listKey}:${doc.id}`
+    const nextTop = element.getBoundingClientRect().top
+    const previousTop = pageItemPositionCache.get(cacheKey)
+    pageItemPositionCache.set(cacheKey, nextTop)
+
+    if (typeof previousTop !== "number") return
+    const deltaY = previousTop - nextTop
+    if (Math.abs(deltaY) < 2) return
+
+    element.animate(
+      [
+        {
+          transform: `translateY(${deltaY}px)`,
+          boxShadow: "0 18px 36px rgba(123,111,208,0.08)",
+        },
+        {
+          transform: "translateY(0)",
+          boxShadow: "0 0 0 rgba(123,111,208,0)",
+        },
+      ],
+      {
+        duration: 280,
+        easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+      }
+    )
+  }, [doc.id, doc.updatedAt, doc.favorite, doc.title, isActive, listKey, summary])
+
   return (
     <button
+      ref={itemRef}
       type="button"
       onClick={onClick}
       className={cn(
@@ -720,7 +757,7 @@ function InlineBlock({
   onDelete: () => void
   onDuplicate: () => void
   onTypeChange: (t: RNestMemoBlockType) => void
-  onAddAfter: () => void
+  onAddAfter: (type?: RNestMemoBlockType) => void
   onMoveUp: () => void
   onMoveDown: () => void
   isFirst: boolean
@@ -729,6 +766,27 @@ function InlineBlock({
   const [showTypeMenu, setShowTypeMenu] = useState(false)
   const [showSlashMenu, setShowSlashMenu] = useState(false)
   const [hovered, setHovered] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!showTypeMenu) return
+    function handlePointerDown(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setShowTypeMenu(false)
+      }
+    }
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setShowTypeMenu(false)
+      }
+    }
+    document.addEventListener("mousedown", handlePointerDown)
+    document.addEventListener("keydown", handleEscape)
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown)
+      document.removeEventListener("keydown", handleEscape)
+    }
+  }, [showTypeMenu])
 
   function handleCommandKeyDown(e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
@@ -757,40 +815,74 @@ function InlineBlock({
       id={`memo-block-${block.id}`}
       className="group relative scroll-mt-28"
       onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => { setHovered(false); setShowTypeMenu(false) }}
+      onMouseLeave={() => setHovered(false)}
     >
-      {/* left controls: grip + add */}
+      {/* left controls: unified block menu */}
       <div
         className={cn(
           "absolute -left-10 top-0.5 flex flex-col items-center gap-0.5 transition-opacity",
-          hovered ? "opacity-100" : "opacity-0"
+          hovered || showTypeMenu ? "opacity-100" : "opacity-0"
         )}
       >
-        <button
-          type="button"
-          onClick={onAddAfter}
-          className="flex h-6 w-6 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-          title="아래에 블록 추가"
-        >
-          <Plus className="h-3.5 w-3.5" />
-        </button>
-        <div className="relative">
+        <div className="relative" ref={menuRef}>
           <button
             type="button"
             onClick={() => setShowTypeMenu(!showTypeMenu)}
-            className="flex h-6 w-6 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+            className={cn(
+              "flex h-12 w-7 flex-col items-center justify-center gap-0.5 rounded-xl border bg-white/95 text-gray-400 shadow-sm backdrop-blur transition-colors",
+              showTypeMenu
+                ? "border-[color:var(--rnest-accent-border)] text-[color:var(--rnest-accent)] shadow-[0_8px_22px_rgba(123,111,208,0.16)]"
+                : "border-gray-200 hover:border-gray-300 hover:bg-white hover:text-gray-600"
+            )}
             title="블록 메뉴"
+            aria-label="블록 메뉴 열기"
+            aria-expanded={showTypeMenu}
           >
+            <Plus className="h-3.5 w-3.5" />
             <GripVertical className="h-3.5 w-3.5" />
           </button>
           {showTypeMenu && (
-            <div className="absolute left-0 top-full z-30 mt-1 w-48 rounded-xl border border-gray-200 bg-white py-1 shadow-lg">
+            <div className="absolute left-0 top-full z-30 mt-2 w-56 rounded-2xl border border-gray-200 bg-white py-1.5 shadow-[0_18px_40px_rgba(15,23,42,0.14)]">
               <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-ios-muted">
-                블록 변환
+                아래에 새 블록
+              </div>
+              {(
+                [
+                  "paragraph",
+                  "heading",
+                  "bulleted",
+                  "numbered",
+                  "checklist",
+                  "callout",
+                  "quote",
+                  "toggle",
+                  "bookmark",
+                  "divider",
+                  "table",
+                ] as RNestMemoBlockType[]
+              ).map((type) => (
+                <button
+                  key={`add-below-${type}`}
+                  type="button"
+                  onClick={() => {
+                    onAddAfter(type)
+                    setShowTypeMenu(false)
+                  }}
+                  className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-ios-text transition-colors hover:bg-gray-50"
+                >
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded text-ios-sub">
+                    {renderBlockTypeIcon(type, "h-3 w-3")}
+                  </span>
+                  {blockTypeLabels[type]} 추가
+                </button>
+              ))}
+              <div className="mx-2 my-1.5 border-t border-gray-100" />
+              <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-ios-muted">
+                현재 블록 설정
               </div>
               {(Object.keys(blockTypeLabels) as RNestMemoBlockType[]).map((type) => (
                 <button
-                  key={type}
+                  key={`convert-${type}`}
                   type="button"
                   onClick={() => { onTypeChange(type); setShowTypeMenu(false) }}
                   className={cn(
@@ -803,7 +895,7 @@ function InlineBlock({
                   <span className="inline-flex h-5 w-5 items-center justify-center rounded text-ios-sub">
                     {renderBlockTypeIcon(type, "h-3 w-3")}
                   </span>
-                  {blockTypeLabels[type]}
+                  {blockTypeLabels[type]}로 변경
                 </button>
               ))}
               <div className="mx-2 my-1 border-t border-gray-100" />
@@ -1580,7 +1672,6 @@ export function ToolNotebookPage() {
 
   function openMemo(id: string) {
     setActiveMemoId(id)
-    commit(memoState.documents, insertRecent(memoState.recent, id))
     // close sidebar on mobile
     if (typeof window !== "undefined" && window.innerWidth < 768) setSidebarOpen(false)
   }
@@ -1739,7 +1830,7 @@ export function ToolNotebookPage() {
                 <div className="px-2 py-3 text-center text-[12px] text-gray-400">결과 없음</div>
               )}
               {searchResults.map((doc) => (
-                <PageItem key={doc.id} doc={doc} isActive={activeMemoId === doc.id} onClick={() => openMemo(doc.id)} />
+                <PageItem key={doc.id} doc={doc} listKey="search" isActive={activeMemoId === doc.id} onClick={() => openMemo(doc.id)} />
               ))}
             </SidebarSection>
           ) : (
@@ -1747,7 +1838,7 @@ export function ToolNotebookPage() {
               {recentDocs.length > 0 && (
                 <SidebarSection title="최근" count={recentDocs.length}>
                   {recentDocs.map((doc) => (
-                    <PageItem key={doc.id} doc={doc} isActive={activeMemoId === doc.id} onClick={() => openMemo(doc.id)} />
+                    <PageItem key={doc.id} doc={doc} listKey="recent" isActive={activeMemoId === doc.id} onClick={() => openMemo(doc.id)} />
                   ))}
                 </SidebarSection>
               )}
@@ -1755,7 +1846,7 @@ export function ToolNotebookPage() {
               {favoriteDocs.length > 0 && (
                 <SidebarSection title="즐겨찾기" count={favoriteDocs.length}>
                   {favoriteDocs.map((doc) => (
-                    <PageItem key={doc.id} doc={doc} isActive={activeMemoId === doc.id} onClick={() => openMemo(doc.id)} />
+                    <PageItem key={doc.id} doc={doc} listKey="favorites" isActive={activeMemoId === doc.id} onClick={() => openMemo(doc.id)} />
                   ))}
                 </SidebarSection>
               )}
@@ -1767,14 +1858,14 @@ export function ToolNotebookPage() {
                   </div>
                 )}
                 {activeDocs.map((doc) => (
-                  <PageItem key={doc.id} doc={doc} isActive={activeMemoId === doc.id} onClick={() => openMemo(doc.id)} />
+                  <PageItem key={doc.id} doc={doc} listKey="pages" isActive={activeMemoId === doc.id} onClick={() => openMemo(doc.id)} />
                 ))}
               </SidebarSection>
 
               {trashedDocs.length > 0 && (
                 <SidebarSection title="휴지통" count={trashedDocs.length} defaultOpen={false}>
                   {trashedDocs.map((doc) => (
-                    <PageItem key={doc.id} doc={doc} isActive={activeMemoId === doc.id} onClick={() => openMemo(doc.id)} />
+                    <PageItem key={doc.id} doc={doc} listKey="trash" isActive={activeMemoId === doc.id} onClick={() => openMemo(doc.id)} />
                   ))}
                 </SidebarSection>
               )}
@@ -1963,7 +2054,7 @@ export function ToolNotebookPage() {
                     onDelete={() => deleteBlock(block.id)}
                     onDuplicate={() => duplicateBlock(block.id)}
                     onTypeChange={(type) => changeBlockType(block.id, type)}
-                    onAddAfter={() => addBlockAfter(block.id)}
+                    onAddAfter={(type) => addBlockAfter(block.id, type)}
                     onMoveUp={() => moveBlock(block.id, "up")}
                     onMoveDown={() => moveBlock(block.id, "down")}
                   />
