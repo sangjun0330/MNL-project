@@ -409,7 +409,6 @@ export function ToolMedSafetyRecentPage() {
                 {t(kindLabel(selected.result.resultKind))}
               </span>
               <span className={META_PILL_CLASS}>{formatDateTime(selected.savedAt)}</span>
-              {selected.result.model ? <span className={META_PILL_CLASS}>{selected.result.model}</span> : null}
             </div>
             <div className="mt-2 text-[22px] font-bold tracking-[-0.02em] text-ios-text">{selected.result.title}</div>
             <div className="mt-3 text-[12px] font-semibold uppercase tracking-[0.08em] text-ios-muted">{t("질문")}</div>

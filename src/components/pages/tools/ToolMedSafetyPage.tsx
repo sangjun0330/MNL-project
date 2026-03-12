@@ -198,13 +198,13 @@ function parseErrorMessage(raw: string, t: TranslateFn) {
   if (normalized.includes("openai_responses_401"))
     return t("AI API 키가 유효하지 않거나 만료되었습니다. 환경변수를 확인해 주세요.");
   if (normalized.includes("openai_responses_403_model_access")) {
-    return t("현재 계정에 gpt-5.4 모델 접근 권한이 없습니다. API 계정 권한을 확인해 주세요.");
+    return t("현재 계정에서 AI 응답 권한을 확인해 주세요.");
   }
   if (normalized.includes("openai_responses_403")) {
     return t(RETRY_WITH_DATA_MESSAGE);
   }
   if (normalized.includes("openai_responses_404") || normalized.includes("model_not_found"))
-    return t("gpt-5.4 모델을 찾을 수 없습니다. API 설정과 계정 권한을 확인해 주세요.");
+    return t("AI 응답 설정을 확인해 주세요.");
   if (normalized.includes("openai_responses_429")) return t("요청 한도가 초과되었습니다. 잠시 후 다시 시도해 주세요.");
   if (normalized.includes("openai_responses_400_continuation"))
     return t("이전 대화 상태 동기화에 실패했습니다. 새 검색으로 다시 시도해 주세요.");

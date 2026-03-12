@@ -1283,6 +1283,10 @@ const EN_EXTRA: Record<string, string> = {
     "Requested model not found. Check the model name or retry with fallback model.",
   "gpt-5.4 모델을 찾을 수 없습니다. API 설정과 계정 권한을 확인해 주세요.":
     "gpt-5.4 was not found. Please verify your API configuration and account permissions.",
+  "현재 계정에서 AI 응답 권한을 확인해 주세요.":
+    "Please verify AI response access for this account.",
+  "AI 응답 설정을 확인해 주세요.":
+    "Please verify the AI response configuration.",
   "요청 한도가 초과되었습니다. 잠시 후 다시 AI 분석 실행을 눌러 시도해 주세요.":
     "Request limit exceeded. Please tap `Run AI Analysis` again shortly.",
   "이전 대화 상태 동기화에 실패했습니다. 다시 AI 분석 실행을 눌러 새로 시도해 주세요.":
