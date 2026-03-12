@@ -1269,7 +1269,7 @@ export function ToolMedSafetyPage() {
       <div className="pointer-events-none fixed inset-x-0 bottom-0 z-50 pb-[env(safe-area-inset-bottom)] pt-8">
         <div className="pointer-events-auto mx-auto w-full max-w-[892px] px-3 pb-3 sm:px-4">
           <div
-            className={`overflow-hidden transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+            className={`overflow-hidden rounded-[28px] transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
               showSessionDecisionPrompt ? "max-h-[120px] translate-y-0 opacity-100" : "pointer-events-none max-h-0 translate-y-5 opacity-0"
             }`}
             aria-hidden={!showSessionDecisionPrompt}
@@ -1296,7 +1296,7 @@ export function ToolMedSafetyPage() {
             </div>
           </div>
           <div
-            className={`overflow-hidden transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+            className={`overflow-hidden rounded-[28px] transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
               showSessionDecisionPrompt ? "pointer-events-none max-h-0 translate-y-6 opacity-0" : "max-h-[320px] translate-y-0 opacity-100"
             }`}
             aria-hidden={showSessionDecisionPrompt}
