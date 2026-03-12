@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { asCheckoutProductId, getCheckoutProductDefinition, getPaidPlanRank } from "@/lib/billing/plans";
+import { asCheckoutProductId, getCheckoutProductDefinition, getPaidPlanRank, type CheckoutProductId, type PlanTier } from "@/lib/billing/plans";
 import { sanitizeInternalPath } from "@/lib/navigation";
 import { countRecentReadyOrdersByUser, createBillingOrder, createCustomerKey, readSubscription } from "@/lib/server/billingStore";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
@@ -13,7 +13,15 @@ function bad(status: number, message: string) {
   return NextResponse.json({ ok: false, error: message }, { status });
 }
 
-function buildOrderId(productId: "plus" | "pro" | "credit10" | "credit30") {
+function checkoutCreateOrderError(error: unknown) {
+  const message = String((error as any)?.message ?? error ?? "");
+  if (message.includes("billing_schema_outdated_search_credit_columns")) return "billing_schema_outdated_search_credit_columns";
+  if (message.includes("billing_schema_outdated_credit_pack_columns")) return "billing_schema_outdated_credit_pack_columns";
+  if (message.includes("paid_plan_downgrade_not_allowed")) return "paid_plan_downgrade_not_allowed";
+  return "failed_to_create_order";
+}
+
+function buildOrderId(productId: CheckoutProductId) {
   const stamp = Date.now().toString(36);
   const bytes = crypto.getRandomValues(new Uint8Array(6));
   const rand = Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -99,13 +107,27 @@ export async function POST(req: Request) {
   }
 
   const orderId = buildOrderId(productId);
+  let orderPlanTier: PlanTier = product.planTier ?? "free";
+  if (product.kind === "credit_pack") {
+    try {
+      const current = await readSubscription(userId);
+      if (current.tier === "free") {
+        return bad(403, "free_plan_credit_pack_not_allowed");
+      }
+      orderPlanTier = current.tier;
+    } catch {
+      return bad(500, "failed_to_read_subscription");
+    }
+  }
 
   try {
     await createBillingOrder({
       userId,
       orderId,
-      planTier: product.planTier ?? "pro",
+      planTier: orderPlanTier,
       orderKind: product.kind,
+      productId: product.id,
+      creditType: product.creditType,
       creditPackUnits: product.creditUnits,
       amount: product.priceKrw,
       currency: "KRW",
@@ -113,7 +135,7 @@ export async function POST(req: Request) {
     });
   } catch (error) {
     console.error("[billing/checkout] failed to create order", error);
-    return bad(500, "failed_to_create_order");
+    return bad(500, checkoutCreateOrderError(error));
   }
 
   const origin = resolveOrigin(req);

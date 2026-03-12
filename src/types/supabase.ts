@@ -43,6 +43,8 @@ export type Database = {
           plan_tier: string;
           order_kind: string;
           credit_pack_units: number;
+          product_id: string | null;
+          credit_type: string | null;
           amount: number;
           currency: string;
           status: string;
@@ -61,6 +63,8 @@ export type Database = {
           plan_tier: string;
           order_kind?: string;
           credit_pack_units?: number;
+          product_id?: string | null;
+          credit_type?: string | null;
           amount: number;
           currency?: string;
           status?: string;
@@ -79,6 +83,8 @@ export type Database = {
           plan_tier?: string;
           order_kind?: string;
           credit_pack_units?: number;
+          product_id?: string | null;
+          credit_type?: string | null;
           amount?: number;
           currency?: string;
           status?: string;
@@ -215,6 +221,33 @@ export type Database = {
           to_status?: string | null;
           message?: string | null;
           metadata?: Json | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      billing_analytics_events: {
+        Row: {
+          id: number;
+          user_id: string;
+          event_name: string;
+          plan_tier_snapshot: string | null;
+          props: Json | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: number;
+          user_id: string;
+          event_name: string;
+          plan_tier_snapshot?: string | null;
+          props?: Json | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: number;
+          user_id?: string;
+          event_name?: string;
+          plan_tier_snapshot?: string | null;
+          props?: Json | null;
           created_at?: string;
         };
         Relationships: [];
@@ -588,6 +621,7 @@ export type Database = {
           created_at: string | null;
           updated_at: string | null;
           last_seen: string | null;
+          onboarding_completed_at: string | null;
           subscription_tier: string;
           subscription_status: string;
           subscription_started_at: string | null;
@@ -599,6 +633,10 @@ export type Database = {
           subscription_cancel_reason: string | null;
           toss_customer_key: string | null;
           toss_last_order_id: string | null;
+          med_safety_standard_included_credits: number;
+          med_safety_standard_extra_credits: number;
+          med_safety_premium_included_credits: number;
+          med_safety_premium_extra_credits: number;
           med_safety_extra_credits: number;
           med_safety_daily_used: number;
           med_safety_usage_date: string | null;
@@ -608,6 +646,7 @@ export type Database = {
           created_at?: string | null;
           updated_at?: string | null;
           last_seen?: string | null;
+          onboarding_completed_at?: string | null;
           subscription_tier?: string;
           subscription_status?: string;
           subscription_started_at?: string | null;
@@ -619,6 +658,10 @@ export type Database = {
           subscription_cancel_reason?: string | null;
           toss_customer_key?: string | null;
           toss_last_order_id?: string | null;
+          med_safety_standard_included_credits?: number;
+          med_safety_standard_extra_credits?: number;
+          med_safety_premium_included_credits?: number;
+          med_safety_premium_extra_credits?: number;
           med_safety_extra_credits?: number;
           med_safety_daily_used?: number;
           med_safety_usage_date?: string | null;
@@ -628,6 +671,7 @@ export type Database = {
           created_at?: string | null;
           updated_at?: string | null;
           last_seen?: string | null;
+          onboarding_completed_at?: string | null;
           subscription_tier?: string;
           subscription_status?: string;
           subscription_started_at?: string | null;
@@ -639,9 +683,73 @@ export type Database = {
           subscription_cancel_reason?: string | null;
           toss_customer_key?: string | null;
           toss_last_order_id?: string | null;
+          med_safety_standard_included_credits?: number;
+          med_safety_standard_extra_credits?: number;
+          med_safety_premium_included_credits?: number;
+          med_safety_premium_extra_credits?: number;
           med_safety_extra_credits?: number;
           med_safety_daily_used?: number;
           med_safety_usage_date?: string | null;
+        };
+        Relationships: [];
+      };
+      user_service_consent_events: {
+        Row: {
+          id: number;
+          user_id: string;
+          event_type: string;
+          payload: Json;
+          created_at: string;
+        };
+        Insert: {
+          id?: number;
+          user_id: string;
+          event_type: string;
+          payload?: Json;
+          created_at?: string;
+        };
+        Update: {
+          id?: number;
+          user_id?: string;
+          event_type?: string;
+          payload?: Json;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      user_service_consents: {
+        Row: {
+          user_id: string;
+          records_storage_consented_at: string;
+          ai_usage_consented_at: string;
+          consent_completed_at: string;
+          consent_version: string;
+          privacy_version: string;
+          terms_version: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          records_storage_consented_at: string;
+          ai_usage_consented_at: string;
+          consent_completed_at: string;
+          consent_version: string;
+          privacy_version: string;
+          terms_version: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          user_id?: string;
+          records_storage_consented_at?: string;
+          ai_usage_consented_at?: string;
+          consent_completed_at?: string;
+          consent_version?: string;
+          privacy_version?: string;
+          terms_version?: string;
+          created_at?: string;
+          updated_at?: string;
         };
         Relationships: [];
       };

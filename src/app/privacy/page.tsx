@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { AppShell } from "@/components/shell/AppShell";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -14,6 +15,12 @@ export default function Page() {
     <AppShell>
       <div className="mx-auto w-full max-w-[720px] px-4 pb-24 pt-6">
         <div className="rounded-[28px] border border-[#dbe4ef] bg-white p-6">
+          <Link
+            href="/"
+            className="inline-flex h-9 items-center justify-center rounded-full border border-[#dbe4ef] bg-[#f8fbff] px-3 text-[12px] font-semibold text-[#31527a]"
+          >
+            동의 화면으로 돌아가기
+          </Link>
           <div className="text-[12px] font-semibold uppercase tracking-[0.22em] text-[#7b8fa6]">Privacy</div>
           <h1 className="mt-2 text-[24px] font-bold tracking-[-0.03em] text-[#102a43]">개인정보처리방침</h1>
           <p className="mt-3 text-[13px] leading-7 text-[#61758a]">

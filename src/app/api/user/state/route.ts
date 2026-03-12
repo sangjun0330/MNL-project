@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { ensureUserRow, loadUserState, saveUserState } from "@/lib/server/userStateStore";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
+import { userHasCompletedServiceConsent } from "@/lib/server/serviceConsentStore";
 import { sanitizeStatePayload } from "@/lib/stateSanitizer";
 import { serializeStateForSupabase } from "@/lib/statePersistence";
 
@@ -17,6 +18,9 @@ export async function GET(req: Request) {
   if (!userId) return bad(401, "login required");
 
   try {
+    if (!(await userHasCompletedServiceConsent(userId))) {
+      return bad(403, "consent_required");
+    }
     await ensureUserRow(userId);
     const row = await loadUserState(userId);
     const sanitized = row?.payload ? sanitizeStatePayload(row.payload) : null;
@@ -48,6 +52,9 @@ export async function POST(req: Request) {
   if (!state) return bad(400, "state required");
 
   try {
+    if (!(await userHasCompletedServiceConsent(userId))) {
+      return bad(403, "consent_required");
+    }
     const serialized = serializeStateForSupabase(state);
     await saveUserState({ userId, payload: serialized });
     return jsonNoStore({ ok: true, syncedAt: new Date().toISOString() });

@@ -22,6 +22,7 @@ export function SettingsPage() {
   const { status, user } = useAuthState();
   const profile = useAppStoreSelector((s) => normalizeProfileSettings(s.settings.profile));
   const [isAdmin, setIsAdmin] = useState(false);
+  const [consentCompleted, setConsentCompleted] = useState<boolean | null>(null);
   const authError = searchParams.get("authError");
   const personalizationSummary = `${chronotypePresetLabel(chronotypePresetFromValue(profile.chronotype))} · ${t("카페인")} ${caffeineSensitivityPresetLabel(
     caffeineSensitivityPresetFromValue(profile.caffeineSensitivity)
@@ -31,6 +32,7 @@ export function SettingsPage() {
     let active = true;
     if (status !== "authenticated" || !user?.userId) {
       setIsAdmin(false);
+      setConsentCompleted(null);
       return () => {
         active = false;
       };
@@ -39,20 +41,33 @@ export function SettingsPage() {
     const run = async () => {
       try {
         const headers = await authHeaders();
-        const res = await fetch("/api/admin/billing/access", {
-          method: "GET",
-          headers: {
-            "content-type": "application/json",
-            ...headers,
-          },
-          cache: "no-store",
-        });
-        const json = await res.json().catch(() => null);
+        const [adminRes, bootstrapRes] = await Promise.all([
+          fetch("/api/admin/billing/access", {
+            method: "GET",
+            headers: {
+              "content-type": "application/json",
+              ...headers,
+            },
+            cache: "no-store",
+          }),
+          fetch("/api/user/bootstrap", {
+            method: "GET",
+            headers: {
+              "content-type": "application/json",
+              ...headers,
+            },
+            cache: "no-store",
+          }),
+        ]);
+        const adminJson = await adminRes.json().catch(() => null);
+        const bootstrapJson = await bootstrapRes.json().catch(() => null);
         if (!active) return;
-        setIsAdmin(Boolean(json?.ok && json?.data?.isAdmin));
+        setIsAdmin(Boolean(adminJson?.ok && adminJson?.data?.isAdmin));
+        setConsentCompleted(Boolean(bootstrapJson?.ok && bootstrapJson?.data?.consentCompleted));
       } catch {
         if (!active) return;
         setIsAdmin(false);
+        setConsentCompleted(null);
       }
     };
 
@@ -81,6 +96,23 @@ export function SettingsPage() {
       <div className="mb-4">
         <PWAInstallButton />
       </div>
+
+      {status === "authenticated" ? (
+        <div className="mb-4 rounded-apple border border-ios-sep bg-white/95 p-4 shadow-apple-sm">
+          <div className="text-[15px] font-bold text-ios-text">{t("서비스 동의 상태")}</div>
+          <div className="mt-2 text-[13px] text-ios-sub">
+            {consentCompleted ? t("건강기록 저장 및 AI 기능 사용 동의가 완료되었습니다.") : t("서비스 동의 상태를 확인하는 중입니다.")}
+          </div>
+          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-[12.5px] font-semibold text-[color:var(--rnest-accent)]">
+            <Link href="/terms" className="underline underline-offset-4">
+              {t("이용약관")}
+            </Link>
+            <Link href="/privacy" className="underline underline-offset-4">
+              {t("개인정보처리방침")}
+            </Link>
+          </div>
+        </div>
+      ) : null}
 
       <div className="mb-3 text-[13px] text-ios-sub">{t("설정 항목을 선택해 주세요.")}</div>
 

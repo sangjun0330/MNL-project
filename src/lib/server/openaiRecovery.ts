@@ -26,6 +26,7 @@ type RecoveryHistorySummary = {
 type GenerateOpenAIRecoveryParams = {
   language: Language;
   todayISO: string;
+  modelOverride?: string | null;
   phase?: RecoveryPhase;
   todayShift: Shift;
   nextShift: Shift | null;
@@ -234,7 +235,9 @@ function normalizeApiKey() {
   return String(key).trim();
 }
 
-function resolveModel() {
+function resolveModel(modelOverride?: string | null) {
+  const direct = String(modelOverride ?? "").trim();
+  if (direct) return direct;
   const model = String(process.env.OPENAI_MODEL ?? "gpt-5.4").trim();
   return model || "gpt-5.4";
 }
@@ -1669,7 +1672,7 @@ export async function generateAIRecoveryWithOpenAI(
   const model = resolveOpenAIResponsesRequestConfig({
     apiBaseUrl: baseUrl,
     apiKey,
-    model: resolveModel(),
+    model: resolveModel(params.modelOverride),
     scope: "recovery",
   }).model;
 
@@ -1760,7 +1763,7 @@ export async function translateAIRecoveryToEnglish(
   const model = resolveOpenAIResponsesRequestConfig({
     apiBaseUrl: baseUrl,
     apiKey,
-    model: resolveModel(),
+    model: resolveModel(source.model),
     scope: "recovery",
   }).model;
 
@@ -2526,7 +2529,7 @@ async function generatePlannerOrdersWithOpenAI(
   const model = resolveOpenAIResponsesRequestConfig({
     apiBaseUrl: baseUrl,
     apiKey,
-    model: resolveModel(),
+    model: resolveModel(params.modelOverride),
     scope: "recovery",
   }).model;
 

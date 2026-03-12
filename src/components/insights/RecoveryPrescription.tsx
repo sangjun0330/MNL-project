@@ -25,6 +25,9 @@ type Line = {
   text: string;
 };
 
+let sessionUserSeed: string | null = null;
+const sessionVariantByKey = new Map<string, number>();
+
 function shiftKo(s: Shift) {
   switch (s) {
     case "D":
@@ -80,16 +83,9 @@ function pick<T>(arr: T[], seed: string) {
 }
 
 function getUserSeed() {
-  try {
-    const key = "rnest.user.seed";
-    const existing = localStorage.getItem(key);
-    if (existing) return existing;
-    const seed = `${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
-    localStorage.setItem(key, seed);
-    return seed;
-  } catch {
-    return "anon";
-  }
+  if (sessionUserSeed) return sessionUserSeed;
+  sessionUserSeed = `${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
+  return sessionUserSeed;
 }
 
 function toneLabel(t: Tone) {
@@ -793,19 +789,14 @@ export function RecoveryPrescription({ state, pivotISO }: Props) {
   const [variant, setVariant] = useState(0);
   const variantKey = useMemo(() => `rnest.recovery.variant:${pivot}`, [pivot]);
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(variantKey);
-      if (stored) {
-        const n = parseInt(stored, 10);
-        setVariant(Number.isFinite(n) ? n : 0);
-        return;
-      }
-      const n = Math.floor(Math.random() * 10_000);
-      localStorage.setItem(variantKey, String(n));
-      setVariant(n);
-    } catch {
-      // ignore
+    const stored = sessionVariantByKey.get(variantKey);
+    if (typeof stored === "number" && Number.isFinite(stored)) {
+      setVariant(stored);
+      return;
     }
+    const next = Math.floor(Math.random() * 10_000);
+    sessionVariantByKey.set(variantKey, next);
+    setVariant(next);
   }, [variantKey]);
 
   const [horizon, setHorizon] = useState<"72h" | "7d">("72h");

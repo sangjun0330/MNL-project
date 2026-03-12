@@ -1,9 +1,15 @@
 "use client";
 
 import type { BillingEntitlements } from "@/lib/billing/entitlements";
-import type { BillingOrderKind, CheckoutProductId, PlanTier } from "@/lib/billing/plans";
+import type { BillingOrderKind, CheckoutProductId, PlanTier, SearchCreditType } from "@/lib/billing/plans";
 import { getSupabaseBrowserClient } from "@/lib/auth";
 import { sanitizeInternalPath } from "@/lib/navigation";
+
+export type SearchCreditQuotaApi = {
+  includedRemaining: number;
+  extraRemaining: number;
+  totalRemaining: number;
+};
 
 export type SubscriptionApi = {
   tier: PlanTier;
@@ -18,16 +24,13 @@ export type SubscriptionApi = {
   cancelReason: string | null;
   hasPaidAccess: boolean;
   entitlements: BillingEntitlements;
+  aiRecoveryModel: string | null;
   medSafetyQuota: {
     timezone: "Asia/Seoul";
-    dailyLimit: number;
-    dailyUsed: number;
-    dailyRemaining: number;
-    extraCredits: number;
+    standard: SearchCreditQuotaApi;
+    premium: SearchCreditQuotaApi;
     totalRemaining: number;
-    usageDate: string;
-    nextResetAt: string;
-    isPro: boolean;
+    recommendedDefaultSearchType: SearchCreditType;
   };
 };
 
@@ -35,6 +38,8 @@ export type BillingOrderApi = {
   orderId: string;
   planTier: PlanTier;
   orderKind: BillingOrderKind;
+  productId: CheckoutProductId | null;
+  creditType: SearchCreditType | null;
   creditPackUnits: number;
   amount: number;
   currency: string;

@@ -20,12 +20,13 @@ const CATEGORY_CARDS: ToolCategory[] = [
   {
     id: "ai_search",
     name: "AI 임상 검색",
-    description: "임상 질문에 AI가 즉시 답변합니다.",
+    description: "임상 질문에 AI가 즉시 답변하며, Free는 월 체험 크레딧으로 먼저 경험할 수 있습니다.",
     href: "/tools/med-safety",
     tone: "guide",
     keywords: ["ai", "검색", "질문", "약물", "기구", "임상", "간호", "안전"],
     quickLinks: [
       { label: "AI 검색", href: "/tools/med-safety" },
+      { label: "플랜 보기", href: "/settings/billing/upgrade" },
       { label: "최근 기록", href: "/tools/med-safety/recent" },
     ],
     secondaryLink: { label: "최근 검색 기록", href: "/tools/med-safety/recent" },

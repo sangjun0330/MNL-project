@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useAuthState } from "@/lib/auth";
 import type { SubscriptionApi } from "@/lib/billing/client";
-import { getPlanDefinition } from "@/lib/billing/plans";
+import { getPlanDefinition, getSearchCreditMeta, type SearchCreditType } from "@/lib/billing/plans";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -27,6 +27,8 @@ const ACCENT_PILL_CLASS =
   "inline-flex items-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-3 py-1.5 text-[11px] font-semibold text-[color:var(--rnest-accent)]";
 const COMPOSER_ACTION_BTN_CLASS =
   "flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#E6E1F7] bg-white/78 text-ios-sub backdrop-blur-md transition hover:border-[color:var(--rnest-accent-border)] hover:bg-white disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-[#E6E1F7] disabled:hover:bg-white/78";
+const COMPOSER_SELECTOR_BTN_CLASS =
+  "inline-flex h-11 min-w-[92px] items-center justify-center gap-2 rounded-full border border-[#E6E1F7] bg-white/86 px-3 text-[12px] font-semibold text-ios-text backdrop-blur-md transition hover:border-[color:var(--rnest-accent-border)] hover:bg-white disabled:cursor-not-allowed disabled:opacity-45";
 const COMPOSER_SEND_BTN_CLASS =
   "flex h-11 min-w-[52px] shrink-0 items-center justify-center rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent)] px-3 text-white shadow-[0_12px_26px_rgba(123,111,208,0.22)] transition hover:bg-[color:var(--rnest-accent-strong)] disabled:cursor-not-allowed disabled:border-[#E6E1F7] disabled:bg-[#ECEAF5] disabled:text-[#A49DBD] disabled:shadow-none";
 const STREAMING_CARD_CLASS =
@@ -58,13 +60,16 @@ type AnalyzePayload = {
   fallbackReason?: string | null;
   continuationToken?: string | null;
   startedFreshSession?: boolean;
+  searchType: SearchCreditType;
+  creditBucket: "included" | "extra" | null;
 };
 
 type AnswerSectionTone = "summary" | "action" | "warning" | "compare" | "neutral";
 
 type AnswerSection = {
   title: string;
-  items: string[];
+  lead: string;
+  bodyLines: string[];
   tone: AnswerSectionTone;
 };
 
@@ -82,11 +87,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function canUseSessionStorage() {
-  return typeof window !== "undefined" && typeof window.sessionStorage !== "undefined";
+  // Service consent flow requires server-only persistence for RNest health/AI state.
+  return false;
 }
 
 function buildMedSafetySessionStorageKey(userId?: string | null) {
   return userId ? `${MED_SAFETY_SESSION_STORAGE_KEY_BASE}:${userId}` : MED_SAFETY_SESSION_STORAGE_KEY_BASE;
+}
+
+function purgeLegacyMedSafetySessionStorage() {
+  if (typeof window === "undefined" || typeof window.sessionStorage === "undefined") return;
+  try {
+    for (let index = window.sessionStorage.length - 1; index >= 0; index -= 1) {
+      const key = window.sessionStorage.key(index);
+      if (!key?.startsWith(MED_SAFETY_SESSION_STORAGE_KEY_BASE)) continue;
+      window.sessionStorage.removeItem(key);
+    }
+  } catch {
+    // Ignore storage failures.
+  }
 }
 
 function normalizePersistedMessage(value: unknown): Message | null {
@@ -240,7 +259,38 @@ function parseAnalyzePayload(payloadRaw: unknown): { ok: true; data: AnalyzePayl
       fallbackReason: node.fallbackReason == null ? null : String(node.fallbackReason),
       continuationToken: typeof node.continuationToken === "string" ? node.continuationToken : null,
       startedFreshSession: node.startedFreshSession === true,
+      searchType: node.searchType === "premium" ? "premium" : "standard",
+      creditBucket: node.creditBucket === "included" || node.creditBucket === "extra" ? node.creditBucket : null,
     },
+  };
+}
+
+function getQuotaForSearchType(
+  quota: SubscriptionApi["medSafetyQuota"] | null | undefined,
+  searchType: SearchCreditType
+) {
+  return searchType === "premium" ? quota?.premium ?? null : quota?.standard ?? null;
+}
+
+function consumeOptimisticQuota(
+  quota: SubscriptionApi["medSafetyQuota"] | null,
+  searchType: SearchCreditType
+): SubscriptionApi["medSafetyQuota"] | null {
+  if (!quota) return quota;
+  const target = getQuotaForSearchType(quota, searchType);
+  if (!target || target.totalRemaining <= 0) return quota;
+
+  const nextTarget = {
+    includedRemaining: target.includedRemaining > 0 ? target.includedRemaining - 1 : target.includedRemaining,
+    extraRemaining: target.includedRemaining > 0 ? target.extraRemaining : Math.max(0, target.extraRemaining - 1),
+    totalRemaining: Math.max(0, target.totalRemaining - 1),
+  };
+
+  return {
+    ...quota,
+    standard: searchType === "standard" ? nextTarget : quota.standard,
+    premium: searchType === "premium" ? nextTarget : quota.premium,
+    totalRemaining: Math.max(0, quota.totalRemaining - 1),
   };
 }
 
@@ -261,6 +311,23 @@ async function waitMs(ms: number) {
   await new Promise<void>((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+async function trackBillingEvent(eventName: string, planTierSnapshot: string, props?: Record<string, unknown>) {
+  try {
+    const res = await fetch("/api/billing/analytics/track", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        eventName,
+        planTierSnapshot,
+        props: props ?? null,
+      }),
+    });
+    if (!res.ok) return;
+  } catch {
+    // Ignore analytics failures in search flow.
+  }
 }
 
 async function readFileAsDataUrl(file: File) {
@@ -413,9 +480,15 @@ async function parseAnalyzeStreamResponse(args: {
   return { data: parsedData, error: parsedError };
 }
 
-function cleanAnswerLine(value: string) {
+function normalizeAnswerRawLine(value: string) {
   return String(value ?? "")
     .replace(/\u0000/g, "")
+    .replace(/\t/g, "  ")
+    .replace(/\s+$/g, "");
+}
+
+function cleanAnswerLine(value: string) {
+  return normalizeAnswerRawLine(value)
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -430,13 +503,10 @@ function normalizeQuestionInput(value: string) {
 
 function stripBulletPrefix(value: string) {
   return String(value ?? "")
+    .trimStart()
     .replace(/^[-*•·]\s+/, "")
     .replace(/^\d+[.)]\s+/, "")
     .trim();
-}
-
-function isAnswerBulletLine(value: string) {
-  return /^[-*•·]\s+/.test(value) || /^\d+[.)]\s+/.test(value);
 }
 
 const SECTION_TITLE_PATTERNS = [
@@ -464,34 +534,65 @@ function formatSectionTitle(value: string) {
   return stripBulletPrefix(cleanAnswerLine(value)).replace(/[:：]$/, "").trim() || "핵심";
 }
 
-function splitAnswerSectionItems(lines: string[]) {
-  const out: string[] = [];
-  let buffer: string[] = [];
+function trimBlankAnswerLines(lines: string[]) {
+  let start = 0;
+  let end = lines.length;
 
-  const flush = () => {
-    const text = buffer.join("\n").replace(/\n{3,}/g, "\n\n").trim();
-    if (text) out.push(stripBulletPrefix(text));
-    buffer = [];
+  while (start < end && !cleanAnswerLine(lines[start])) start += 1;
+  while (end > start && !cleanAnswerLine(lines[end - 1])) end -= 1;
+
+  return lines.slice(start, end);
+}
+
+function buildAnswerSectionContent(lines: string[]) {
+  const trimmedLines = trimBlankAnswerLines(lines.map(normalizeAnswerRawLine));
+  if (!trimmedLines.length) return null;
+
+  const [leadLine, ...bodyLines] = trimmedLines;
+  const lead = stripBulletPrefix(leadLine) || cleanAnswerLine(leadLine);
+  if (!lead) return null;
+
+  return {
+    lead,
+    bodyLines,
   };
+}
 
-  for (const raw of lines) {
-    const line = cleanAnswerLine(raw);
-    if (!line) {
-      flush();
-      continue;
-    }
-    const normalized = stripBulletPrefix(line);
-    if (!normalized) continue;
-    if (isAnswerBulletLine(line)) {
-      flush();
-      out.push(normalized);
-      continue;
-    }
-    buffer.push(normalized);
+function getAnswerIndentLevel(value: string) {
+  const leadingWhitespace = value.match(/^(\s*)/)?.[1] ?? "";
+  return Math.min(3, Math.floor(leadingWhitespace.length / 2));
+}
+
+function parseAnswerBodyLine(value: string) {
+  const raw = normalizeAnswerRawLine(value);
+  if (!cleanAnswerLine(raw)) {
+    return { kind: "blank" as const, content: "", level: 0 };
   }
 
-  flush();
-  return out.filter(Boolean);
+  const bulletMatch = raw.match(/^(\s*)[-*•·]\s+(.*)$/);
+  if (bulletMatch) {
+    return {
+      kind: "bullet" as const,
+      content: bulletMatch[2].trim(),
+      level: getAnswerIndentLevel(bulletMatch[1]),
+    };
+  }
+
+  const numberedMatch = raw.match(/^(\s*)(\d+[.)])\s+(.*)$/);
+  if (numberedMatch) {
+    return {
+      kind: "number" as const,
+      marker: numberedMatch[2],
+      content: numberedMatch[3].trim(),
+      level: getAnswerIndentLevel(numberedMatch[1]),
+    };
+  }
+
+  return {
+    kind: "text" as const,
+    content: raw.trim(),
+    level: getAnswerIndentLevel(raw),
+  };
 }
 
 function inferSectionTone(title: string, index: number): AnswerSectionTone {
@@ -514,29 +615,25 @@ function parseAnswerSections(value: string): AnswerSection[] {
   const sections: AnswerSection[] = [];
   let currentTitle = "핵심";
   let currentLines: string[] = [];
-  let pendingOrphanTitle: string | null = null;
 
   const pushCurrent = () => {
-    const items = splitAnswerSectionItems(currentLines);
-    if (!items.length) {
-      if (currentTitle !== "핵심" && currentLines.length === 0) {
-        pendingOrphanTitle = currentTitle;
-      }
+    const content = buildAnswerSectionContent(currentLines);
+    if (!content) {
       currentLines = [];
       return;
     }
-    const finalItems = pendingOrphanTitle ? [pendingOrphanTitle, ...items] : items;
-    pendingOrphanTitle = null;
     sections.push({
       title: currentTitle,
-      items: finalItems,
+      lead: content.lead,
+      bodyLines: content.bodyLines,
       tone: inferSectionTone(currentTitle, sections.length),
     });
     currentLines = [];
   };
 
   for (const rawLine of lines) {
-    const line = cleanAnswerLine(rawLine);
+    const preservedLine = normalizeAnswerRawLine(rawLine);
+    const line = cleanAnswerLine(preservedLine);
     if (!line) {
       currentLines.push("");
       continue;
@@ -546,31 +643,26 @@ function parseAnswerSections(value: string): AnswerSection[] {
       currentTitle = formatSectionTitle(line);
       continue;
     }
-    currentLines.push(line);
+    currentLines.push(preservedLine);
   }
 
   pushCurrent();
 
-  if (pendingOrphanTitle) {
-    sections.push({
-      title: pendingOrphanTitle,
-      items: [pendingOrphanTitle],
-      tone: inferSectionTone(pendingOrphanTitle, sections.length),
-    });
-  }
-
   if (sections.length) return sections;
 
-  const fallbackItems = splitAnswerSectionItems(lines);
-  if (!fallbackItems.length) {
+  const fallbackContent = buildAnswerSectionContent(lines);
+  if (!fallbackContent) {
     const rawText = String(value ?? "").trim();
-    if (rawText) return [{ title: "답변", items: [rawText], tone: "summary" }];
+    if (rawText) {
+      return [{ title: "답변", lead: rawText, bodyLines: [], tone: "summary" }];
+    }
     return [];
   }
   return [
     {
       title: "답변",
-      items: fallbackItems,
+      lead: fallbackContent.lead,
+      bodyLines: fallbackContent.bodyLines,
       tone: "summary",
     },
   ];
@@ -617,19 +709,59 @@ function AssistantAnswerSections({ content }: { content: string }) {
           >
             {section.title}
           </div>
-          <div className="mt-3 space-y-3">
-            {section.items.map((item, itemIndex) => (
-              <div
-                key={`${section.title}-${itemIndex}`}
-                className={`whitespace-pre-wrap break-words text-ios-text ${
-                  section.tone === "summary" && itemIndex === 0
-                    ? "text-[19px] font-semibold leading-8 tracking-[-0.02em]"
-                    : "text-[15px] leading-7 text-ios-text/90"
-                }`}
-              >
-                {item}
+          <div className="mt-3">
+            <div className="whitespace-pre-wrap break-words text-[19px] font-semibold leading-8 tracking-[-0.02em] text-ios-text">
+              {section.lead}
+            </div>
+            {section.bodyLines.length > 0 ? (
+              <div className="mt-4 flex flex-col gap-1.5">
+                {section.bodyLines.map((line, lineIndex) => {
+                  const parsedLine = parseAnswerBodyLine(line);
+
+                  if (parsedLine.kind === "blank") {
+                    return <div key={`${section.title}-${lineIndex}`} className="h-3" aria-hidden="true" />;
+                  }
+
+                  const indentStyle = parsedLine.level ? { marginLeft: `${parsedLine.level * 18}px` } : undefined;
+
+                  if (parsedLine.kind === "bullet") {
+                    return (
+                      <div
+                        key={`${section.title}-${lineIndex}`}
+                        className="flex items-start gap-3 text-[15px] leading-7 text-ios-text/90"
+                        style={indentStyle}
+                      >
+                        <span className="mt-[11px] h-[5px] w-[5px] shrink-0 rounded-full bg-current opacity-50" aria-hidden="true" />
+                        <div className="min-w-0 whitespace-pre-wrap break-words">{parsedLine.content}</div>
+                      </div>
+                    );
+                  }
+
+                  if (parsedLine.kind === "number") {
+                    return (
+                      <div
+                        key={`${section.title}-${lineIndex}`}
+                        className="flex items-start gap-3 text-[15px] leading-7 text-ios-text/90"
+                        style={indentStyle}
+                      >
+                        <span className="min-w-[20px] shrink-0 font-semibold text-ios-text">{parsedLine.marker}</span>
+                        <div className="min-w-0 whitespace-pre-wrap break-words">{parsedLine.content}</div>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div
+                      key={`${section.title}-${lineIndex}`}
+                      className="whitespace-pre-wrap break-words text-[15px] leading-7 text-ios-text/90"
+                      style={indentStyle}
+                    >
+                      {parsedLine.content}
+                    </div>
+                  );
+                })}
               </div>
-            ))}
+            ) : null}
           </div>
         </section>
       ))}
@@ -656,34 +788,55 @@ export function ToolMedSafetyPage() {
   const [selectedImageName, setSelectedImageName] = useState("");
   const [showSessionDecisionPrompt, setShowSessionDecisionPrompt] = useState(false);
   const [optimisticQuota, setOptimisticQuota] = useState<SubscriptionApi["medSafetyQuota"] | null>(null);
+  const [selectedSearchType, setSelectedSearchType] = useState<SearchCreditType | null>(null);
+  const [isSearchTypeMenuOpen, setIsSearchTypeMenuOpen] = useState(false);
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const [isComposerDragOver, setIsComposerDragOver] = useState(false);
   const threadEndRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const restoredSessionKeyRef = useRef<string | null>(null);
+  const searchTypeMenuRef = useRef<HTMLDivElement | null>(null);
 
   const subscriptionMedSafetyQuota = subscription?.medSafetyQuota ?? null;
   useEffect(() => {
     setOptimisticQuota(subscriptionMedSafetyQuota);
   }, [subscriptionMedSafetyQuota]);
 
+  useEffect(() => {
+    if (!subscriptionMedSafetyQuota) return;
+    setSelectedSearchType((current) => current ?? subscriptionMedSafetyQuota.recommendedDefaultSearchType);
+  }, [subscriptionMedSafetyQuota]);
+
   const medSafetyQuota = optimisticQuota ?? subscriptionMedSafetyQuota;
+  const activeTier = subscription?.tier ?? "free";
+  const isFreePlan = activeTier === "free";
+  const activeSearchType = selectedSearchType ?? medSafetyQuota?.recommendedDefaultSearchType ?? "standard";
+  const activeSearchMeta = getSearchCreditMeta(activeSearchType);
+  const selectedSearchQuota = getQuotaForSearchType(medSafetyQuota, activeSearchType);
+  const selectedQuotaRemaining = Math.max(0, Number(selectedSearchQuota?.totalRemaining ?? 0));
   const quotaRemaining = Math.max(0, Number(medSafetyQuota?.totalRemaining ?? 0));
-  const activePlanTitle = getPlanDefinition(subscription?.tier ?? "free").title;
-  const creditPurchaseHref = `${withReturnTo("/settings/billing/upgrade", "/tools/med-safety")}#search-credits`;
+  const alternateSearchType: SearchCreditType = activeSearchType === "premium" ? "standard" : "premium";
+  const alternateQuotaRemaining = Math.max(0, Number(getQuotaForSearchType(medSafetyQuota, alternateSearchType)?.totalRemaining ?? 0));
+  const standardQuotaRemaining = Math.max(0, Number(medSafetyQuota?.standard.totalRemaining ?? 0));
+  const premiumQuotaRemaining = Math.max(0, Number(medSafetyQuota?.premium.totalRemaining ?? 0));
+  const activePlanTitle = getPlanDefinition(activeTier).title;
+  const billingActionHref = isFreePlan
+    ? withReturnTo("/settings/billing/upgrade", "/tools/med-safety")
+    : `${withReturnTo("/settings/billing/upgrade", "/tools/med-safety")}#search-credits`;
   const medSafetySessionStorageKey = buildMedSafetySessionStorageKey(user?.userId ?? null);
   const quotaKnown = authStatus === "authenticated" && !billingLoading && !!medSafetyQuota;
-  const canAsk = authStatus === "authenticated" && (!quotaKnown || quotaRemaining > 0);
+  const canAsk = authStatus === "authenticated" && (!quotaKnown || selectedQuotaRemaining > 0);
   const hasConversation = messages.length > 0 || Boolean(streamingText);
   const lastAssistantMessage = [...messages].reverse().find((message) => message.role === "assistant") ?? null;
   const hasTypedInput = normalizeQuestionInput(input).length > 0;
   const isComposerLocked = showSessionDecisionPrompt;
   const canSubmit = !isComposerLocked && !isLoading && canAsk && (hasTypedInput || Boolean(selectedImage));
-  const showCreditPurchaseCta = !hasConversation || (quotaKnown && quotaRemaining <= 0);
+  const showCreditPurchaseCta = quotaKnown && selectedQuotaRemaining <= 0;
 
   useEffect(() => {
     setMounted(true);
+    purgeLegacyMedSafetySessionStorage();
   }, []);
 
   useEffect(() => {
@@ -734,6 +887,17 @@ export function ToolMedSafetyPage() {
   }, [copyMessage]);
 
   useEffect(() => {
+    if (!isSearchTypeMenuOpen) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!searchTypeMenuRef.current?.contains(event.target as Node | null)) {
+        setIsSearchTypeMenuOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", handlePointerDown);
+    return () => window.removeEventListener("pointerdown", handlePointerDown);
+  }, [isSearchTypeMenuOpen]);
+
+  useEffect(() => {
     if (!threadEndRef.current) return;
     threadEndRef.current.scrollIntoView({ block: "end" });
   }, [messages, streamingText, error]);
@@ -750,6 +914,7 @@ export function ToolMedSafetyPage() {
     composerInputRef.current?.blur();
     setIsComposerFocused(false);
     setIsComposerDragOver(false);
+    setIsSearchTypeMenuOpen(false);
   }, [isComposerLocked]);
 
   useEffect(() => {
@@ -878,21 +1043,8 @@ export function ToolMedSafetyPage() {
     void selectImageFile(file);
   }
 
-  function applyOptimisticQuotaConsume() {
-    setOptimisticQuota((prev) => {
-      if (!prev || prev.totalRemaining <= 0) return prev;
-      if (prev.extraCredits > 0) {
-        const nextExtraCredits = Math.max(0, prev.extraCredits - 1);
-        return {
-          ...prev,
-          dailyUsed: 0,
-          dailyRemaining: 0,
-          extraCredits: nextExtraCredits,
-          totalRemaining: nextExtraCredits,
-        };
-      }
-      return prev;
-    });
+  function applyOptimisticQuotaConsume(searchType: SearchCreditType) {
+    setOptimisticQuota((prev) => consumeOptimisticQuota(prev, searchType));
   }
 
   async function copyLatestAnswer() {
@@ -908,12 +1060,25 @@ export function ToolMedSafetyPage() {
   async function submitQuestion(forcedQuery?: string) {
     if (isLoading) return;
     if (isComposerLocked) return;
+    setIsSearchTypeMenuOpen(false);
     if (authStatus !== "authenticated") {
       setError(t("로그인이 필요합니다"));
       return;
     }
-    if (quotaKnown && quotaRemaining <= 0) {
-      setError(t("AI 검색 잔여 크레딧이 없습니다. 추가 크레딧을 구매하거나 Plus/Pro 플랜 크레딧을 충전한 뒤 다시 시도해 주세요."));
+    if (quotaKnown && selectedQuotaRemaining <= 0) {
+      setError(
+        alternateQuotaRemaining > 0
+          ? t(
+              isFreePlan
+                ? "선택한 검색의 잔여 크레딧이 없습니다. 채팅바의 검색 선택에서 다른 검색으로 바꾸거나, 모두 소진했다면 Plus 또는 Pro로 업그레이드해 주세요."
+                : "선택한 검색의 잔여 크레딧이 없습니다. 채팅바의 검색 선택에서 다른 검색으로 바꾸거나 추가 크레딧을 구매해 주세요."
+            )
+          : t(
+              isFreePlan
+                ? "Free 체험 크레딧이 모두 소진되었습니다. Plus 또는 Pro로 업그레이드한 뒤 다시 시도해 주세요."
+                : "AI 검색 잔여 크레딧이 없습니다. 추가 크레딧을 구매하거나 Plus/Pro 플랜 크레딧을 충전한 뒤 다시 시도해 주세요."
+            )
+      );
       return;
     }
 
@@ -956,6 +1121,7 @@ export function ToolMedSafetyPage() {
               query: question,
               locale: lang,
               stream: true,
+              searchType: activeSearchType,
               continuationToken: lastContinuationToken ?? undefined,
               ...(imageToSend ? { imageDataUrl: imageToSend } : {}),
             },
@@ -997,7 +1163,23 @@ export function ToolMedSafetyPage() {
 
       if (!response?.ok || !normalizedData) {
         setStreamingText("");
-        setError(parseErrorMessage(finalError, t));
+        if (String(finalError).toLowerCase().includes("insufficient_med_safety_credits")) {
+          setError(
+            alternateQuotaRemaining > 0
+              ? t(
+                  isFreePlan
+                    ? "선택한 검색의 잔여 크레딧이 없습니다. 채팅바의 검색 선택에서 다른 검색으로 바꾸거나, 모두 소진했다면 Plus 또는 Pro로 업그레이드해 주세요."
+                    : "선택한 검색의 잔여 크레딧이 없습니다. 채팅바의 검색 선택에서 다른 검색으로 바꾸거나 추가 크레딧을 구매해 주세요."
+                )
+              : t(
+                  isFreePlan
+                    ? "Free 체험 크레딧이 모두 소진되었습니다. Plus 또는 Pro로 업그레이드한 뒤 다시 시도해 주세요."
+                    : "AI 검색 잔여 크레딧이 없습니다. 추가 크레딧을 구매하거나 Plus/Pro 플랜 크레딧을 충전한 뒤 다시 시도해 주세요."
+                )
+          );
+        } else {
+          setError(parseErrorMessage(finalError, t));
+        }
         return;
       }
 
@@ -1019,7 +1201,7 @@ export function ToolMedSafetyPage() {
           `${parseErrorMessage(String(normalizedData.fallbackReason ?? "openai_fallback"), t)} ${t("기본 안전 모드 답변을 표시합니다.")}`
         );
       } else {
-        applyOptimisticQuotaConsume();
+        applyOptimisticQuotaConsume(normalizedData.searchType);
         setError(null);
       }
     } catch (cause: any) {
@@ -1127,7 +1309,7 @@ export function ToolMedSafetyPage() {
             <div className="mt-4 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <div className="flex flex-wrap items-center gap-2">
                 <span className={ACCENT_PILL_CLASS}>
-                  {t("크레딧")}: {quotaRemaining}
+                  {t("전체 크레딧")}: {quotaRemaining}
                 </span>
                 <span className={META_PILL_CLASS}>
                   {t("플랜")}: {activePlanTitle}
@@ -1146,10 +1328,10 @@ export function ToolMedSafetyPage() {
                 ) : null}
                 {showCreditPurchaseCta ? (
                   <Link
-                    href={creditPurchaseHref}
+                    href={billingActionHref}
                     className="inline-flex h-10 items-center justify-center rounded-full border border-[#E8E8EC] bg-white px-4 text-[12.5px] font-semibold text-ios-text"
                   >
-                    {t("추가 크레딧 구매하기")}
+                    {t(isFreePlan ? "플랜 업그레이드" : "추가 크레딧 구매하기")}
                   </Link>
                 ) : null}
                 <Link
@@ -1161,15 +1343,38 @@ export function ToolMedSafetyPage() {
               </div>
             </div>
 
-            {quotaKnown && quotaRemaining <= 0 ? (
+            {quotaKnown && selectedQuotaRemaining <= 0 ? (
               <div className="mt-4 rounded-[24px] border border-amber-200 bg-amber-50/92 px-4 py-3 text-[13px] font-semibold leading-6 text-amber-700">
-                <div>{t("남은 AI 검색 크레딧이 없습니다. 추가 크레딧을 구매하거나 Plus/Pro 플랜 크레딧을 충전한 뒤 다시 이용해 주세요.")}</div>
-                <Link
-                  href={creditPurchaseHref}
-                  className="mt-3 inline-flex h-10 items-center justify-center rounded-full border border-amber-300 bg-white px-4 text-[12.5px] font-semibold text-amber-700"
-                >
-                  {t("추가 크레딧 구매하기")}
-                </Link>
+                <div>
+                  {alternateQuotaRemaining > 0
+                    ? t(
+                        isFreePlan
+                          ? "선택한 검색 크레딧이 없습니다. 채팅바의 검색 선택에서 다른 검색으로 바꾸거나, 모두 소진했다면 Plus 또는 Pro로 업그레이드해 주세요."
+                          : "선택한 검색 크레딧이 없습니다. 채팅바의 검색 선택에서 다른 검색으로 바꾸거나 추가 크레딧을 구매해 주세요."
+                      )
+                    : t(
+                        isFreePlan
+                          ? "남은 Free 체험 크레딧이 없습니다. Plus 또는 Pro로 업그레이드한 뒤 다시 이용해 주세요."
+                          : "남은 AI 검색 크레딧이 없습니다. 추가 크레딧을 구매하거나 Plus/Pro 플랜 크레딧을 충전한 뒤 다시 이용해 주세요."
+                      )}
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {alternateQuotaRemaining > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedSearchType(alternateSearchType)}
+                      className="inline-flex h-10 items-center justify-center rounded-full border border-amber-300 bg-white px-4 text-[12.5px] font-semibold text-amber-700"
+                    >
+                      {t("{type}로 전환", { type: getSearchCreditMeta(alternateSearchType).title })}
+                    </button>
+                  ) : null}
+                  <Link
+                    href={billingActionHref}
+                    className="inline-flex h-10 items-center justify-center rounded-full border border-amber-300 bg-white px-4 text-[12.5px] font-semibold text-amber-700"
+                  >
+                    {t(isFreePlan ? "플랜 보기" : "추가 크레딧 구매하기")}
+                  </Link>
+                </div>
               </div>
             ) : null}
 
@@ -1351,7 +1556,7 @@ export function ToolMedSafetyPage() {
                   </button>
                 </div>
               ) : null}
-              <div className="grid grid-cols-[auto_1fr_auto] items-end gap-2">
+              <div className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto] items-end gap-2">
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
@@ -1387,6 +1592,68 @@ export function ToolMedSafetyPage() {
                     aria-label={t("임상 질문 입력")}
                     disabled={isComposerLocked}
                   />
+                </div>
+                <div ref={searchTypeMenuRef} className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setIsSearchTypeMenuOpen((current) => !current)}
+                    className={COMPOSER_SELECTOR_BTN_CLASS}
+                    disabled={isComposerLocked}
+                    aria-haspopup="menu"
+                    aria-expanded={isSearchTypeMenuOpen}
+                    aria-label={t("검색 유형 선택")}
+                  >
+                    <span>{t(activeSearchMeta.shortTitle)}</span>
+                    <span className="text-ios-sub">{selectedQuotaRemaining}</span>
+                    <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4 text-ios-sub" aria-hidden="true">
+                      <path d="M5 7.5l5 5 5-5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </button>
+                  {isSearchTypeMenuOpen ? (
+                    <div className="absolute bottom-[calc(100%+10px)] right-0 z-20 w-[248px] rounded-[22px] border border-[#E6E1F7] bg-white/96 p-2 shadow-[0_18px_36px_rgba(15,23,42,0.16)] backdrop-blur-xl">
+                      {(["standard", "premium"] as const).map((type) => {
+                        const meta = getSearchCreditMeta(type);
+                        const active = activeSearchType === type;
+                        const remaining = type === "standard" ? standardQuotaRemaining : premiumQuotaRemaining;
+                        return (
+                          <button
+                            key={type}
+                            type="button"
+                            onClick={() => {
+                              setSelectedSearchType(type);
+                              setIsSearchTypeMenuOpen(false);
+                              if (type !== activeSearchType) {
+                                void trackBillingEvent("search_mode_selected", subscription?.tier ?? "free", {
+                                  searchType: type,
+                                  source: "med_safety_composer_picker",
+                                });
+                              }
+                            }}
+                            className={`flex w-full items-start justify-between gap-3 rounded-[18px] px-3 py-3 text-left transition ${
+                              active ? "bg-[color:var(--rnest-accent-soft)]" : "hover:bg-[#F7F7FA]"
+                            }`}
+                            aria-pressed={active}
+                          >
+                            <div className="min-w-0">
+                              <div className={`text-[13px] font-semibold ${active ? "text-[color:var(--rnest-accent)]" : "text-ios-text"}`}>
+                                {t(meta.title)}
+                              </div>
+                              <div className="mt-0.5 text-[11.5px] leading-5 text-ios-sub">{t(meta.description)}</div>
+                            </div>
+                            <div className="shrink-0 text-right">
+                              <div className={`text-[12px] font-semibold ${active ? "text-[color:var(--rnest-accent)]" : "text-ios-text"}`}>
+                                {remaining}
+                                {t("회")}
+                              </div>
+                              {active ? (
+                                <div className="mt-1 text-[11px] text-[color:var(--rnest-accent)]">{t("현재 선택")}</div>
+                              ) : null}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
                 </div>
                 <button
                   type="button"

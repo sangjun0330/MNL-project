@@ -9,6 +9,7 @@ import {
   type AIRecoveryPlannerPayload,
 } from "@/lib/aiRecoveryPlanner";
 import type { Language } from "@/lib/i18n";
+import { getAIRecoveryModelForTier } from "@/lib/billing/plans";
 import { countHealthRecordedDays, hasHealthInput } from "@/lib/healthRecords";
 import type { AppState } from "@/lib/model";
 import { sanitizeStatePayload } from "@/lib/stateSanitizer";
@@ -112,6 +113,18 @@ async function safeReadUserId(req: NextRequest): Promise<string> {
     return await readUserIdFromRequest(req);
   } catch {
     return "";
+  }
+}
+
+async function safeHasCompletedServiceConsent(userId: string): Promise<boolean> {
+  try {
+    const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!serviceRole || !supabaseUrl) return false;
+    const { userHasCompletedServiceConsent } = await import("@/lib/server/serviceConsentStore");
+    return await userHasCompletedServiceConsent(userId);
+  } catch {
+    return false;
   }
 }
 
@@ -449,11 +462,13 @@ async function handlePlanner(
 
   const userId = await safeReadUserId(req);
   if (!userId) return bad(401, "login_required");
+  if (!(await safeHasCompletedServiceConsent(userId))) return bad(403, "consent_required");
 
   const subscription = await safeLoadSubscription(userId);
   if (!subscription?.entitlements?.recoveryPlannerAI) {
     return bad(402, "paid_plan_required_recovery_planner_ai");
   }
+  const aiRecoveryModel = getAIRecoveryModelForTier(subscription.tier);
 
   try {
     const row = await safeLoadUserState(userId);
@@ -578,6 +593,7 @@ async function handlePlanner(
       const explanationAI = await generateAIRecoveryWithOpenAI({
         language: lang,
         todayISO: today,
+        modelOverride: aiRecoveryModel,
         phase,
         todayShift,
         nextShift,
@@ -600,6 +616,7 @@ async function handlePlanner(
       language: lang,
       requestedOrderCount,
       todayISO: today,
+      modelOverride: aiRecoveryModel,
       phase,
       todayShift,
       nextShift,

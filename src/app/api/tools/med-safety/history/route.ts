@@ -3,6 +3,7 @@ import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { jsonNoStore } from "@/lib/server/requestSecurity";
 import { getPlanDefinition } from "@/lib/billing/plans";
 import type { SubscriptionSnapshot } from "@/lib/server/billingStore";
+import { userHasCompletedServiceConsent } from "@/lib/server/serviceConsentStore";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -165,6 +166,9 @@ export async function GET(req: Request) {
     const userId = await readUserIdFromRequest(req);
     if (!userId) {
       return jsonNoStore({ ok: false, error: "login_required" }, { status: 401 });
+    }
+    if (!(await userHasCompletedServiceConsent(userId))) {
+      return jsonNoStore({ ok: false, error: "consent_required" }, { status: 403 });
     }
 
     const row = await loadAIContent(userId).catch(() => null);

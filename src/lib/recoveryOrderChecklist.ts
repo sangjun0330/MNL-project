@@ -1,51 +1,40 @@
 export type RecoveryOrderDoneMap = Record<string, boolean>;
 
 const STORAGE_PREFIX = "rnest:ai-recovery-orders:done:";
+const sessionDoneByDate = new Map<string, RecoveryOrderDoneMap>();
+let legacyStoragePurged = false;
 
 function storageKey(dateISO: string) {
   return `${STORAGE_PREFIX}${dateISO}`;
 }
 
-function pruneRecoveryOrderDoneStorage(activeDateISO: string) {
+function purgeLegacyRecoveryOrderDoneStorage() {
   if (typeof window === "undefined") return;
+  if (legacyStoragePurged) return;
   try {
-    const activeKey = storageKey(activeDateISO);
     for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
       const key = window.localStorage.key(index);
       if (!key?.startsWith(STORAGE_PREFIX)) continue;
-      if (key !== activeKey) window.localStorage.removeItem(key);
+      window.localStorage.removeItem(key);
     }
   } catch {
     // ignore local persistence failures
   }
+  legacyStoragePurged = true;
+}
+
+function cloneDoneMap(value: RecoveryOrderDoneMap | undefined): RecoveryOrderDoneMap {
+  return value ? { ...value } : {};
 }
 
 export function readRecoveryOrderDone(dateISO: string): RecoveryOrderDoneMap {
-  if (typeof window === "undefined") return {};
-  pruneRecoveryOrderDoneStorage(dateISO);
-  try {
-    const raw = window.localStorage.getItem(storageKey(dateISO));
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    const next: RecoveryOrderDoneMap = {};
-    for (const [key, value] of Object.entries(parsed)) {
-      if (typeof key === "string" && key) next[key] = Boolean(value);
-    }
-    return next;
-  } catch {
-    return {};
-  }
+  purgeLegacyRecoveryOrderDoneStorage();
+  return cloneDoneMap(sessionDoneByDate.get(dateISO));
 }
 
 export function writeRecoveryOrderDone(dateISO: string, next: RecoveryOrderDoneMap) {
-  if (typeof window === "undefined") return;
-  pruneRecoveryOrderDoneStorage(dateISO);
-  try {
-    window.localStorage.setItem(storageKey(dateISO), JSON.stringify(next ?? {}));
-  } catch {
-    // ignore local persistence failures
-  }
+  purgeLegacyRecoveryOrderDoneStorage();
+  sessionDoneByDate.set(dateISO, cloneDoneMap(next ?? {}));
 }
 
 export function markRecoveryOrderDone(dateISO: string, itemId: string) {
@@ -58,8 +47,10 @@ export function markRecoveryOrderDone(dateISO: string, itemId: string) {
 }
 
 export function clearStaleRecoveryOrderDone(dateISO: string, activeIds: string[]) {
-  if (typeof window === "undefined") return;
-  pruneRecoveryOrderDoneStorage(dateISO);
+  purgeLegacyRecoveryOrderDoneStorage();
+  for (const key of Array.from(sessionDoneByDate.keys())) {
+    if (key !== dateISO) sessionDoneByDate.delete(key);
+  }
   const keep = new Set(activeIds.filter(Boolean));
   const current = readRecoveryOrderDone(dateISO);
   let changed = false;

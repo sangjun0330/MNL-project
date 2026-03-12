@@ -12,6 +12,7 @@ type AnalyzeParams = {
   query: string;
   locale: "ko" | "en";
   imageDataUrl?: string;
+  modelOverride?: string;
   previousResponseId?: string;
   conversationId?: string;
   continuationMemory?: string;
@@ -69,7 +70,9 @@ function dedupeStrings(values: string[]) {
   return out;
 }
 
-function resolveModelCandidates() {
+function resolveModelCandidates(modelOverride?: string | null) {
+  const direct = String(modelOverride ?? "").trim();
+  if (direct) return [direct];
   return [MED_SAFETY_LOCKED_MODEL];
 }
 
@@ -1064,7 +1067,7 @@ export async function translateMedSafetyToEnglish(input: {
   }
 
   const apiKey = normalizeApiKey();
-  const modelCandidates = resolveModelCandidates();
+  const modelCandidates = resolveModelCandidates(input.model ?? null);
   const apiBaseUrls = resolveApiBaseUrls();
   const maxOutputTokens = Math.max(1800, Math.min(5000, resolveMaxOutputTokens() + 1000));
   const upstreamTimeoutMs = resolveUpstreamTimeoutMs();
@@ -1124,7 +1127,7 @@ export async function translateMedSafetyToEnglish(input: {
 
 export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise<OpenAIMedSafetyOutput> {
   const apiKey = normalizeApiKey();
-  const modelCandidates = resolveModelCandidates();
+  const modelCandidates = resolveModelCandidates(params.modelOverride);
   const apiBaseUrls = resolveApiBaseUrls();
   const outputTokenCandidates = buildOutputTokenCandidates(resolveMaxOutputTokens());
   const responseVerbosity: ResponseVerbosity = "medium";

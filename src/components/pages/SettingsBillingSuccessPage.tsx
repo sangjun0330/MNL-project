@@ -9,14 +9,15 @@ import { sanitizeInternalPath } from "@/lib/navigation";
 import { useI18n } from "@/lib/useI18n";
 
 type ConfirmResult = {
-  order: {
-    orderId: string;
-    planTier: PlanTier;
-    orderKind: "subscription" | "credit_pack";
-    creditPackUnits: number;
-    amount: number;
-    status: "READY" | "DONE" | "FAILED" | "CANCELED";
-    approvedAt: string | null;
+    order: {
+      orderId: string;
+      planTier: PlanTier;
+      orderKind: "subscription" | "credit_pack";
+      productId: "plus" | "pro" | "standard10" | "standard30" | "premium10" | "premium30" | null;
+      creditPackUnits: number;
+      amount: number;
+      status: "READY" | "DONE" | "FAILED" | "CANCELED";
+      approvedAt: string | null;
   } | null;
   subscription: {
     tier: PlanTier;
@@ -119,7 +120,8 @@ export function SettingsBillingSuccessPage() {
   const planTier = result?.subscription?.tier ?? result?.order?.planTier ?? "free";
   const isCreditPack = orderKind === "credit_pack";
   const creditUnits = Math.max(0, Number(result?.order?.creditPackUnits ?? 0));
-  const creditProduct = getCheckoutProductDefinition(creditUnits >= 30 ? "credit30" : "credit10");
+  const creditProductId = result?.order?.productId ?? (creditUnits >= 30 ? "standard30" : "standard10");
+  const creditProduct = getCheckoutProductDefinition(creditProductId);
   const planDefinition = getPlanDefinition(planTier);
   const primaryHref = returnTo || "/settings/billing";
   const primaryLabel = returnTo
@@ -165,8 +167,11 @@ export function SettingsBillingSuccessPage() {
               ) : (
                 <>
                   <div className="mt-1 text-[12.5px] text-ios-sub">
-                    {t("포함 검색 크레딧")}: {planDefinition.medSafetyIncludedCredits}
-                    {t("회")}
+                    {t("포함 검색 크레딧")}: {planDefinition.includedSearchCredits.standard > 0
+                      ? `${t("기본 검색")} ${planDefinition.includedSearchCredits.standard}${t("회")}`
+                      : planDefinition.includedSearchCredits.premium > 0
+                        ? `${t("프리미엄 검색")} ${planDefinition.includedSearchCredits.premium}${t("회")}`
+                        : t("해당 없음")}
                   </div>
                   <div className="mt-1 text-[12.5px] text-ios-sub">
                     {t("만료일")}: {formatDateLabel(result.subscription?.currentPeriodEnd ?? null)}

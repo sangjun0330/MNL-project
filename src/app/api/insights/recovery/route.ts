@@ -4,6 +4,7 @@ import type { AIRecoveryApiError, AIRecoveryApiSuccess, AIRecoveryPayload } from
 import type { AIRecoveryPlannerPayload } from "@/lib/aiRecoveryPlanner";
 import type { Language } from "@/lib/i18n";
 import { countHealthRecordedDays, hasHealthInput } from "@/lib/healthRecords";
+import { getAIRecoveryModelForTier } from "@/lib/billing/plans";
 import type { AppState } from "@/lib/model";
 import { sanitizeStatePayload } from "@/lib/stateSanitizer";
 import { generateAIRecoveryWithOpenAI, translateAIRecoveryToEnglish } from "@/lib/server/openaiRecovery";
@@ -93,6 +94,19 @@ async function safeReadUserId(req: NextRequest): Promise<string> {
     return await readUserIdFromRequest(req);
   } catch {
     return "";
+  }
+}
+
+async function safeHasCompletedServiceConsent(userId: string): Promise<boolean> {
+  try {
+    const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!serviceRole || !supabaseUrl) return false;
+
+    const { userHasCompletedServiceConsent } = await import("@/lib/server/serviceConsentStore");
+    return await userHasCompletedServiceConsent(userId);
+  } catch {
+    return false;
   }
 }
 
@@ -552,11 +566,15 @@ async function handleRecovery(
   if (!userId) {
     return bad(401, "login_required");
   }
+  if (!(await safeHasCompletedServiceConsent(userId))) {
+    return bad(403, "consent_required");
+  }
 
   const subscription = await safeLoadSubscription(userId);
   if (!subscription?.entitlements?.recoveryPlannerAI) {
     return bad(402, "paid_plan_required_ai_recovery");
   }
+  const aiRecoveryModel = getAIRecoveryModelForTier(subscription.tier);
 
   try {
     // ── 2. Supabase에서 사용자 데이터 로드 시도 ──
@@ -760,6 +778,7 @@ async function handleRecovery(
     const aiKo = await generateAIRecoveryWithOpenAI({
       language: "ko",
       todayISO: today,
+      modelOverride: aiRecoveryModel,
       phase,
       todayShift,
       nextShift,
@@ -809,6 +828,7 @@ async function handleRecovery(
           const aiEn = await generateAIRecoveryWithOpenAI({
             language: "en",
             todayISO: today,
+            modelOverride: aiRecoveryModel,
             phase,
             todayShift,
             nextShift,

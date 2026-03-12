@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { todayISO, type ISODate } from "@/lib/date";
 import type { Language } from "@/lib/i18n";
-import { getPlanDefinition } from "@/lib/billing/plans";
+import { getDefaultSearchTypeForTier, getPlanDefinition, type SearchCreditType } from "@/lib/billing/plans";
 import { buildPrivateNoStoreHeaders, jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { analyzeMedSafetyWithOpenAI, translateMedSafetyToEnglish } from "@/lib/server/openaiMedSafety";
 import {
@@ -31,6 +31,7 @@ type RequestBody = {
   locale?: unknown;
   imageDataUrl?: unknown;
   stream?: unknown;
+  searchType?: unknown;
 };
 
 type MedSafetyResponseData = {
@@ -43,6 +44,8 @@ type MedSafetyResponseData = {
   fallbackReason: string | null;
   continuationToken: string | null;
   startedFreshSession: boolean;
+  searchType: SearchCreditType;
+  creditBucket: "included" | "extra" | null;
 };
 
 type MedSafetyRecentRecord = {
@@ -177,22 +180,24 @@ async function safeReadUserId(req: NextRequest): Promise<string> {
   }
 }
 
-async function safeConsumeMedSafetyCredit(userId: string): Promise<{
-  allowed: boolean;
-  source: "daily" | "extra" | null;
-  reason: string | null;
-  quota: {
-    totalRemaining: number;
-    dailyRemaining: number;
-    extraCredits: number;
-    isPro: boolean;
-  };
-}> {
+async function safeHasCompletedServiceConsent(userId: string): Promise<boolean> {
+  try {
+    const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!serviceRole || !supabaseUrl) return false;
+    const { userHasCompletedServiceConsent } = await import("@/lib/server/serviceConsentStore");
+    return await userHasCompletedServiceConsent(userId);
+  } catch {
+    return false;
+  }
+}
+
+async function safeConsumeMedSafetyCredit(userId: string, searchType: SearchCreditType) {
   const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   if (!serviceRole || !supabaseUrl) throw new Error("missing_supabase_env");
   const { consumeMedSafetyCredit } = await import("@/lib/server/billingStore");
-  return await consumeMedSafetyCredit({ userId });
+  return await consumeMedSafetyCredit({ userId, searchType });
 }
 
 async function safeReadSubscription(userId: string) {
@@ -207,14 +212,18 @@ async function safeReadSubscription(userId: string) {
   }
 }
 
-async function safeRestoreConsumedMedSafetyCredit(userId: string, source: "daily" | "extra" | null): Promise<void> {
-  if (!source) return;
+async function safeRestoreConsumedMedSafetyCredit(
+  userId: string,
+  searchType: SearchCreditType,
+  bucket: "included" | "extra" | null
+): Promise<void> {
+  if (!bucket) return;
   try {
     const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     if (!serviceRole || !supabaseUrl) return;
     const { restoreConsumedMedSafetyCredit } = await import("@/lib/server/billingStore");
-    await restoreConsumedMedSafetyCredit({ userId, source });
+    await restoreConsumedMedSafetyCredit({ userId, searchType, bucket });
   } catch {
     // ignore restore failure
   }
@@ -302,6 +311,8 @@ function normalizeRecentRecords(value: unknown, limit = MED_SAFETY_RECENT_LIMIT_
         fallbackReason: toPublicReason(resultNode.fallbackReason),
         continuationToken: typeof resultNode.continuationToken === "string" ? resultNode.continuationToken : null,
         startedFreshSession: resultNode.startedFreshSession === true,
+        searchType: resultNode.searchType === "premium" ? "premium" : "standard",
+        creditBucket: resultNode.creditBucket === "included" || resultNode.creditBucket === "extra" ? resultNode.creditBucket : null,
       },
     });
   }
@@ -370,6 +381,12 @@ function pickStreamMode(raw: unknown) {
   return value === "1" || value === "true" || value === "yes" || value === "on";
 }
 
+function pickSearchType(raw: unknown, fallback: SearchCreditType): SearchCreditType {
+  if (raw === "premium") return "premium";
+  if (raw === "standard") return "standard";
+  return fallback;
+}
+
 function estimateBase64Bytes(dataUrl: string) {
   const base64 = dataUrl.split(",", 2)[1] ?? "";
   if (!base64) return 0;
@@ -410,6 +427,8 @@ function buildResponseData(params: {
   language: Language;
   analyzedAt: number;
   analyzed: Awaited<ReturnType<typeof analyzeMedSafetyWithOpenAI>>;
+  searchType: SearchCreditType;
+  creditBucket: "included" | "extra" | null;
 }): MedSafetyResponseData {
   return {
     answer: params.analyzed.result.answer,
@@ -421,6 +440,8 @@ function buildResponseData(params: {
     fallbackReason: toPublicReason(params.analyzed.fallbackReason),
     continuationToken: null,
     startedFreshSession: false,
+    searchType: params.searchType,
+    creditBucket: params.creditBucket,
   };
 }
 
@@ -444,6 +465,7 @@ export async function POST(req: NextRequest) {
 
     const userId = await safeReadUserId(req);
     if (!userId) return bad(401, "login_required");
+    if (!(await safeHasCompletedServiceConsent(userId))) return bad(403, "consent_required");
 
     const bodyRaw = ((await req.json().catch(() => null)) ?? {}) as RequestBody;
     const locale = pickLocale(bodyRaw.locale);
@@ -465,7 +487,9 @@ export async function POST(req: NextRequest) {
       return bad(413, "image_too_large_max_6mb");
     }
 
-    const creditUse = await safeConsumeMedSafetyCredit(userId);
+    const subscription = await safeReadSubscription(userId);
+    const searchType = pickSearchType(bodyRaw.searchType, getDefaultSearchTypeForTier(subscription?.tier ?? "free"));
+    const creditUse = await safeConsumeMedSafetyCredit(userId, searchType);
     if (!creditUse.allowed) {
       return jsonNoStore(
         {
@@ -476,7 +500,7 @@ export async function POST(req: NextRequest) {
         { status: 402 }
       );
     }
-    const consumedSource = creditUse.source;
+    const consumedBucket = creditUse.bucket;
 
     const abort = new AbortController();
     const timeoutMs = resolveAnalyzeTimeoutMs();
@@ -486,7 +510,6 @@ export async function POST(req: NextRequest) {
       token: continuationToken,
       userId,
     });
-    const subscription = await safeReadSubscription(userId);
     const previousResponseId = continuationState?.previousResponseId ?? undefined;
     const conversationId = continuationState?.conversationId ?? undefined;
 
@@ -498,6 +521,7 @@ export async function POST(req: NextRequest) {
         query,
         locale: "ko",
         imageDataUrl: imageDataUrl || undefined,
+        modelOverride: searchType === "premium" ? "gpt-5.4" : "gpt-5.2",
         previousResponseId,
         conversationId,
         onTextDelta,
@@ -508,6 +532,8 @@ export async function POST(req: NextRequest) {
         language: "ko",
         analyzedAt,
         analyzed: analyzedKo,
+        searchType,
+        creditBucket: consumedBucket,
       });
 
       let payloadEn: MedSafetyResponseData | null = null;
@@ -540,6 +566,7 @@ export async function POST(req: NextRequest) {
                 query,
                 locale: "en",
                 imageDataUrl: imageDataUrl || undefined,
+                modelOverride: searchType === "premium" ? "gpt-5.4" : "gpt-5.2",
                 previousResponseId,
                 conversationId,
                 signal: abort.signal,
@@ -548,6 +575,8 @@ export async function POST(req: NextRequest) {
                 language: "en",
                 analyzedAt,
                 analyzed: analyzedEn,
+                searchType,
+                creditBucket: consumedBucket,
               });
               payloadEn.fallbackReason = mergePublicReasons("en_direct", payloadEn.fallbackReason);
             } catch {
@@ -637,14 +666,14 @@ export async function POST(req: NextRequest) {
       try {
         const { responseData, shouldCommitCredit } = await runAnalyze();
         if (!shouldCommitCredit) {
-          await safeRestoreConsumedMedSafetyCredit(userId, consumedSource);
+          await safeRestoreConsumedMedSafetyCredit(userId, searchType, consumedBucket);
         }
         return jsonNoStore({
           ok: true,
           ...responseData,
         });
       } catch (error: any) {
-        await safeRestoreConsumedMedSafetyCredit(userId, consumedSource);
+        await safeRestoreConsumedMedSafetyCredit(userId, searchType, consumedBucket);
         throw error;
       } finally {
         clearTimeout(timeout);
@@ -670,14 +699,14 @@ export async function POST(req: NextRequest) {
             pushEvent("delta", { text: chunk });
           });
           if (!shouldCommitCredit) {
-            await safeRestoreConsumedMedSafetyCredit(userId, consumedSource);
+            await safeRestoreConsumedMedSafetyCredit(userId, searchType, consumedBucket);
           }
           pushEvent("result", {
             ok: true,
             ...responseData,
           });
         } catch (error: any) {
-          await safeRestoreConsumedMedSafetyCredit(userId, consumedSource);
+          await safeRestoreConsumedMedSafetyCredit(userId, searchType, consumedBucket);
           pushEvent("error", {
             ok: false,
             error: safeErrorString(error?.message ?? error ?? "med_safety_analyze_failed"),

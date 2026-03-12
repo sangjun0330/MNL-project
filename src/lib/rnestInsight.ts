@@ -156,6 +156,9 @@ export function shiftWindow(shift: Shift, pivotDate: Date) {
 // =========================
 
 const LEGACY_PREFIX = "rnest_orders_done_";
+const sessionOrdersDoneByDate = new Map<string, Record<OrderKey, boolean>>();
+const sessionDoneKeysByDate = new Map<string, string[]>();
+let legacyOrderStoragePurged = false;
 
 export type OrderKey = "sleep_debt" | "caffeine_npo" | "hormone_duty" | "night_adapt";
 
@@ -165,117 +168,71 @@ export function storageKeyForOrdersDone(dateISO: string) {
   return `rnest:orders:done:${dateISO}`;
 }
 
-/**
- * New format: Record<OrderKey, boolean>
- * Legacy format: string[]
- */
-export function readOrdersDone(dateISO: string): Record<OrderKey, boolean> {
-  const out: Record<OrderKey, boolean> = {
+function emptyOrdersDone(): Record<OrderKey, boolean> {
+  return {
     sleep_debt: false,
     caffeine_npo: false,
     hormone_duty: false,
     night_adapt: false,
   };
+}
 
-  if (typeof window === "undefined") return out;
-
-  // 1) new record
+function purgeLegacyOrdersDoneStorage() {
+  if (typeof window === "undefined") return;
+  if (legacyOrderStoragePurged) return;
   try {
-    const raw = window.localStorage.getItem(storageKeyForOrdersDone(dateISO));
-    if (raw) {
-      const obj = JSON.parse(raw) ?? {};
-      for (const k of ORDER_KEYS) out[k] = Boolean((obj as any)[k]);
-    }
-  } catch {
-    // ignore
-  }
-
-  // 2) legacy array
-  try {
-    const raw = window.localStorage.getItem(`${LEGACY_PREFIX}${dateISO}`);
-    if (raw) {
-      const arr = JSON.parse(raw);
-      if (Array.isArray(arr)) {
-        for (const k of ORDER_KEYS) {
-          if (arr.includes(k)) out[k] = true;
-        }
+    for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+      const key = window.localStorage.key(index);
+      if (!key) continue;
+      if (key.startsWith("rnest:orders:done:") || key.startsWith(LEGACY_PREFIX)) {
+        window.localStorage.removeItem(key);
       }
     }
   } catch {
     // ignore
   }
+  legacyOrderStoragePurged = true;
+}
 
-  return out;
+/**
+ * New format: Record<OrderKey, boolean>
+ * Legacy format: string[]
+ */
+export function readOrdersDone(dateISO: string): Record<OrderKey, boolean> {
+  purgeLegacyOrdersDoneStorage();
+  const current = sessionOrdersDoneByDate.get(dateISO);
+  return current ? { ...emptyOrdersDone(), ...current } : emptyOrdersDone();
 }
 
 export function writeOrdersDone(dateISO: string, next: Record<OrderKey, boolean>) {
-  if (typeof window === "undefined") return;
-
-  // write new record
-  try {
-    window.localStorage.setItem(storageKeyForOrdersDone(dateISO), JSON.stringify(next ?? {}));
-  } catch {
-    // ignore
-  }
-
-  // keep legacy array in sync (older UI)
-  try {
-    const keys = ORDER_KEYS.filter((k) => Boolean((next as any)?.[k]));
-    window.localStorage.setItem(`${LEGACY_PREFIX}${dateISO}`, JSON.stringify(keys));
-  } catch {
-    // ignore
-  }
+  purgeLegacyOrdersDoneStorage();
+  const normalized = { ...emptyOrdersDone(), ...(next ?? {}) };
+  sessionOrdersDoneByDate.set(dateISO, normalized);
+  sessionDoneKeysByDate.set(
+    dateISO,
+    ORDER_KEYS.filter((key) => Boolean(normalized[key]))
+  );
 }
 
 /**
  * Legacy API: string[] list of done keys
  */
 export function readDoneKeys(day: ISODate): string[] {
-  const set = new Set<string>();
-
-  if (typeof window === "undefined") return [];
-
-  try {
-    const raw = window.localStorage.getItem(`${LEGACY_PREFIX}${day}`);
-    if (raw) {
-      const arr = JSON.parse(raw);
-      if (Array.isArray(arr)) arr.forEach((x) => typeof x === "string" && set.add(x));
-    }
-  } catch {
-    // ignore
+  purgeLegacyOrdersDoneStorage();
+  const set = new Set<string>(sessionDoneKeysByDate.get(day) ?? []);
+  const rec = readOrdersDone(day);
+  for (const k of ORDER_KEYS) {
+    if (rec[k]) set.add(k);
   }
-
-  // merge new record -> string list
-  try {
-    const rec = readOrdersDone(day);
-    for (const k of ORDER_KEYS) {
-      if (rec[k]) set.add(k);
-    }
-  } catch {
-    // ignore
-  }
-
   return Array.from(set);
 }
 
 export function writeDoneKeys(day: ISODate, keys: string[]) {
-  if (typeof window === "undefined") return;
-
+  purgeLegacyOrdersDoneStorage();
   const uniq = Array.from(new Set(keys.filter((x) => typeof x === "string")));
-
-  try {
-    window.localStorage.setItem(`${LEGACY_PREFIX}${day}`, JSON.stringify(uniq));
-  } catch {
-    // ignore
-  }
-
-  // also update new record for known keys
-  try {
-    const cur = readOrdersDone(day);
-    const next: Record<OrderKey, boolean> = { ...cur };
-    for (const k of ORDER_KEYS) next[k] = uniq.includes(k);
-    writeOrdersDone(day, next);
-  } catch {
-    // ignore
-  }
+  sessionDoneKeysByDate.set(day, uniq);
+  const cur = readOrdersDone(day);
+  const next: Record<OrderKey, boolean> = { ...cur };
+  for (const k of ORDER_KEYS) next[k] = uniq.includes(k);
+  writeOrdersDone(day, next);
 }

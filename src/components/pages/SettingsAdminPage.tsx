@@ -390,6 +390,40 @@ export function SettingsAdminPage() {
           `환불 완료 ${dashboard.billing.refunded}건`,
         ],
       },
+      {
+        title: "AI 검색 운영",
+        description: "Free/Plus/Pro 검색 사용량, 프리미엄 구매율, 업셀 전환율, ARPU를 별도로 확인합니다.",
+        href: "/settings/admin/ai-billing",
+        cta: "AI 과금",
+        accent: "bg-[#edf4ff] text-[#24466e]",
+        metrics: [
+          {
+            label: "Free/유료 분리",
+            value: "검색",
+            hint: "기본·프리미엄 크레딧 분석",
+            tone: "text-ios-text",
+          },
+          {
+            label: "업셀 관찰",
+            value: "Pro",
+            hint: "Plus → Pro 전환 추적",
+            tone: "text-[color:var(--rnest-accent)]",
+          },
+          {
+            label: "소진율",
+            value: "Burn",
+            hint: "크레딧 타입별 차감 추적",
+            tone: "text-ios-text",
+          },
+          {
+            label: "ARPU",
+            value: "Plan",
+            hint: "플랜별 매출성과",
+            tone: "text-ios-text",
+          },
+        ],
+        chips: ["Free 구매", "Plus 업셀", "Pro 추가구매"],
+      },
     ],
     [dashboard]
   );

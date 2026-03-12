@@ -1,15 +1,16 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { BottomNav } from "@/components/shell/BottomNav";
 import { UiPreferencesBridge } from "@/components/system/UiPreferencesBridge";
-import { useAuthState } from "@/lib/auth";
-import { hydrateState, setLocalSaveEnabled, setStorageScope, useAppStoreSelector } from "@/lib/store";
+import { getSupabaseBrowserClient, signOut, useAuthState } from "@/lib/auth";
+import { hydrateState } from "@/lib/store";
 import { emptyState } from "@/lib/model";
 import { useI18n } from "@/lib/useI18n";
 import type { SyntheticEvent } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const CloudStateSync = dynamic(
   () => import("@/components/system/CloudStateSync").then((mod) => mod.CloudStateSync),
@@ -21,26 +22,78 @@ const OnboardingGuide = dynamic(
   { ssr: false }
 );
 
+const ServiceConsentScreen = dynamic(
+  () => import("@/components/system/ServiceConsentScreen").then((mod) => mod.ServiceConsentScreen),
+  { ssr: false }
+);
+
 const AUTH_INTERACTION_GUARD_ENABLED =
   process.env.NEXT_PUBLIC_AUTH_INTERACTION_GUARD_ENABLED !== "false";
 
-function onboardingSeenStorageKey(userId?: string | null) {
-  if (!userId) return "";
-  return `rnest:onboarding:seen:${userId}`;
+type BootstrapPayload = {
+  onboardingCompleted: boolean;
+  consentCompleted: boolean;
+  hasStoredState: boolean;
+  state: any | null;
+  updatedAt: number | null;
+};
+
+type BusyStage = "onboarding" | null;
+
+function GateLoadingScreen({ message, detail }: { message: string; detail: string }) {
+  return (
+    <div className="fixed inset-0 z-[55] flex items-center justify-center bg-white/86 px-6 backdrop-blur-sm">
+      <div className="w-full max-w-[360px] rounded-apple border border-ios-sep bg-white p-5 shadow-apple">
+        <div className="text-[15px] font-semibold text-ios-text">{message}</div>
+        <div className="mt-2 text-[12.5px] text-ios-sub">{detail}</div>
+      </div>
+    </div>
+  );
 }
 
-function readOnboardingSeenLocal(userId?: string | null) {
-  if (typeof window === "undefined") return false;
-  const key = onboardingSeenStorageKey(userId);
-  if (!key) return false;
-  return window.localStorage.getItem(key) === "1";
-}
-
-function writeOnboardingSeenLocal(userId?: string | null) {
-  if (typeof window === "undefined") return;
-  const key = onboardingSeenStorageKey(userId);
-  if (!key) return;
-  window.localStorage.setItem(key, "1");
+function GateErrorScreen({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="fixed inset-0 z-[105] overflow-y-auto bg-white">
+      <div className="mx-auto flex min-h-full w-full max-w-[720px] flex-col justify-center px-5 py-10">
+        <div className="rounded-[28px] border border-[#E7EDF5] bg-[linear-gradient(180deg,#F8FBFF_0%,#FFFFFF_100%)] px-5 py-6 shadow-[0_18px_60px_rgba(15,23,42,0.08)]">
+          <div className="text-[28px] font-extrabold tracking-[-0.03em] text-[#10243E]">
+            시작 준비 중 문제가 발생했어요
+          </div>
+          <div className="mt-3 text-[14px] leading-6 text-[#49617A]">
+            계정 상태를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.
+          </div>
+          <div className="mt-6 flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={onRetry}
+              className="inline-flex h-11 items-center justify-center rounded-full bg-[#10243E] px-5 text-[14px] font-semibold text-white"
+            >
+              다시 시도
+            </button>
+            <Link
+              href="/terms"
+              className="inline-flex h-11 items-center justify-center rounded-full border border-[#D7E4F3] bg-[#EEF5FF] px-5 text-[14px] font-semibold text-[#24507A]"
+            >
+              이용약관
+            </Link>
+            <Link
+              href="/privacy"
+              className="inline-flex h-11 items-center justify-center rounded-full border border-[#D7E4F3] bg-[#EEF5FF] px-5 text-[14px] font-semibold text-[#24507A]"
+            >
+              개인정보처리방침
+            </Link>
+            <button
+              type="button"
+              onClick={() => signOut()}
+              className="inline-flex h-11 items-center justify-center rounded-full border border-[#E7EDF5] bg-white px-5 text-[14px] font-semibold text-[#10243E]"
+            >
+              로그아웃
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -48,17 +101,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { t } = useI18n();
   const { user: auth, status } = useAuthState();
-  const hasSeenOnboarding = useAppStoreSelector((s) => Boolean(s.settings?.hasSeenOnboarding));
-  const setSettings = useAppStoreSelector((s) => s.setSettings);
   const isAuthed = Boolean(auth?.userId);
   const isMedSafetyImmersive = pathname === "/tools/med-safety";
-  const [cloudReady, setCloudReady] = useState(false);
+  const isPolicyPage = pathname?.startsWith("/privacy") || pathname?.startsWith("/terms");
   const allowPrompt =
     AUTH_INTERACTION_GUARD_ENABLED &&
     !isAuthed &&
     status === "unauthenticated" &&
     !pathname?.startsWith("/settings");
   const [loginPromptOpen, setLoginPromptOpen] = useState(false);
+  const [bootstrap, setBootstrap] = useState<BootstrapPayload | null>(null);
+  const [bootstrapLoading, setBootstrapLoading] = useState(false);
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  const [busyStage, setBusyStage] = useState<BusyStage>(null);
+  const supabase = useMemo(() => getSupabaseBrowserClient(), []);
+  const bootstrapRequestRef = useRef(0);
   const goToSettings = useCallback(() => {
     setLoginPromptOpen(false);
     if (!pathname?.startsWith("/settings")) {
@@ -66,63 +123,69 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
   }, [router, pathname]);
 
-  useEffect(() => {
-    // Keep a per-user local write-ahead cache so transient sync failures
-    // or app background kills do not lose the latest inputs before server sync.
-    setLocalSaveEnabled(true);
-  }, []);
-
-  useEffect(() => {
-    if (!isAuthed) {
-      setCloudReady(false);
-      return;
+  const getAuthHeaders = useCallback(async (): Promise<Record<string, string>> => {
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      return token ? { Authorization: `Bearer ${token}` } : {};
+    } catch {
+      return {};
     }
-    if (typeof window !== "undefined") {
-      const cachedReadyUserId = (window as any).__rnestCloudReadyUserId as string | undefined;
-      if (cachedReadyUserId && (!auth?.userId || cachedReadyUserId === auth.userId)) {
-        setCloudReady(true);
+  }, [supabase]);
+
+  const loadBootstrap = useCallback(async () => {
+    if (!auth?.userId) return null;
+    const requestId = ++bootstrapRequestRef.current;
+    setBootstrapLoading(true);
+    setBootstrapError(null);
+
+    try {
+      const authHeaders = await getAuthHeaders();
+      const res = await fetch("/api/user/bootstrap", {
+        method: "GET",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        cache: "no-store",
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(String(json?.error ?? "failed_to_load_bootstrap"));
+      }
+
+      const data = (json?.data ?? null) as BootstrapPayload | null;
+      if (!data || requestId !== bootstrapRequestRef.current) return null;
+      setBootstrap(data);
+      hydrateState(data.consentCompleted && data.state ? data.state : emptyState());
+      return data;
+    } catch (error) {
+      if (requestId === bootstrapRequestRef.current) {
+        setBootstrap(null);
+        setBootstrapError((error as Error)?.message ?? "failed_to_load_bootstrap");
+        hydrateState(emptyState());
+      }
+      return null;
+    } finally {
+      if (requestId === bootstrapRequestRef.current) {
+        setBootstrapLoading(false);
       }
     }
-    const onReady = (event: Event) => {
-      const detail = (event as CustomEvent).detail;
-      if (!detail?.userId || !auth?.userId || detail.userId === auth?.userId) {
-        setCloudReady(true);
-      }
-    };
-    window.addEventListener("rnest:cloud-ready", onReady);
-    return () => window.removeEventListener("rnest:cloud-ready", onReady);
-  }, [isAuthed, auth?.userId]);
-
-  useEffect(() => {
-    if (!isAuthed || cloudReady) return;
-    const timer = window.setTimeout(() => {
-      setCloudReady(true);
-    }, 8000);
-    return () => window.clearTimeout(timer);
-  }, [isAuthed, cloudReady]);
+  }, [auth?.userId, getAuthHeaders]);
 
   useEffect(() => {
     if (status === "loading") return;
-    const uid = auth?.userId ?? null;
-    setLocalSaveEnabled(true);
-    setStorageScope(uid ?? null);
-  }, [auth?.userId, status]);
-
-  useEffect(() => {
-    const onAuthEvent = (event: Event) => {
-      const detail = (event as CustomEvent).detail as { event?: string };
-      if (detail?.event === "SIGNED_OUT") {
-        // Do not overwrite the signed-in user's cached state with an empty payload.
-        setLocalSaveEnabled(false);
-        setStorageScope(null);
-        hydrateState(emptyState());
-        setLocalSaveEnabled(true);
-        setCloudReady(false);
-      }
-    };
-    window.addEventListener("rnest:auth-event", onAuthEvent);
-    return () => window.removeEventListener("rnest:auth-event", onAuthEvent);
-  }, []);
+    if (!auth?.userId) {
+      bootstrapRequestRef.current += 1;
+      setBootstrap(null);
+      setBootstrapLoading(false);
+      setBootstrapError(null);
+      setBusyStage(null);
+      hydrateState(emptyState());
+      return;
+    }
+    void loadBootstrap();
+  }, [auth?.userId, loadBootstrap, status]);
 
   useEffect(() => {
     if (!allowPrompt && loginPromptOpen) {
@@ -154,44 +217,96 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setLoginPromptOpen(true);
   }, [shouldBlockInteraction]);
 
-  // ── Onboarding: CloudStateSync가 "완전 새 유저"일 때만 이벤트를 발행 ──
-  const [showOnboarding, setShowOnboarding] = useState(false);
-  const onboardingTriggeredRef = useRef(false);
+  const showOnboarding =
+    isAuthed &&
+    !isPolicyPage &&
+    !bootstrapLoading &&
+    !bootstrapError &&
+    !bootstrap?.onboardingCompleted &&
+    !bootstrap?.hasStoredState;
 
-  useEffect(() => {
-    if (!auth?.userId || hasSeenOnboarding) return;
-    if (!readOnboardingSeenLocal(auth.userId)) return;
-    setSettings({ hasSeenOnboarding: true });
-  }, [auth?.userId, hasSeenOnboarding, setSettings]);
+  const showConsent =
+    isAuthed &&
+    !isPolicyPage &&
+    !bootstrapLoading &&
+    !bootstrapError &&
+    !showOnboarding &&
+    !bootstrap?.consentCompleted;
 
-  useEffect(() => {
-    const handler = () => {
-      if (hasSeenOnboarding || readOnboardingSeenLocal(auth?.userId)) return;
-      if (onboardingTriggeredRef.current) return; // 세션 내 1회만
-      onboardingTriggeredRef.current = true;
-      setShowOnboarding(true);
-    };
-    window.addEventListener("rnest:show-onboarding", handler);
-    return () => window.removeEventListener("rnest:show-onboarding", handler);
-  }, [auth?.userId, hasSeenOnboarding]);
+  const canRenderContent = !isAuthed || isPolicyPage || Boolean(bootstrap?.consentCompleted);
+  const showBottomNav = !isAuthed || Boolean(bootstrap?.consentCompleted);
 
-  const handleOnboardingComplete = useCallback(() => {
-    writeOnboardingSeenLocal(auth?.userId);
-    setSettings({ hasSeenOnboarding: true });
-    onboardingTriggeredRef.current = true;
-    setShowOnboarding(false);
-  }, [auth?.userId, setSettings]);
+  const handleOnboardingComplete = useCallback(async () => {
+    if (!auth?.userId || busyStage) return;
+    setBusyStage("onboarding");
+    try {
+      const authHeaders = await getAuthHeaders();
+      const res = await fetch("/api/user/onboarding/complete", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        throw new Error(String(json?.error ?? "failed_to_complete_onboarding"));
+      }
+      await loadBootstrap();
+    } catch (error) {
+      setBootstrapError((error as Error)?.message ?? "failed_to_complete_onboarding");
+    } finally {
+      setBusyStage(null);
+    }
+  }, [auth?.userId, busyStage, getAuthHeaders, loadBootstrap]);
+
+  const handleConsentComplete = useCallback(
+    async (input: { recordsStorage: true; aiUsage: true }) => {
+      if (!auth?.userId) return;
+      try {
+        const authHeaders = await getAuthHeaders();
+        const res = await fetch("/api/privacy/consents/complete", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...authHeaders,
+          },
+          body: JSON.stringify(input),
+        });
+        const json = await res.json().catch(() => null);
+        if (!res.ok) {
+          throw new Error(String(json?.error ?? "failed_to_save_service_consent"));
+        }
+        const next = await loadBootstrap();
+        if (!next?.consentCompleted) {
+          throw new Error("failed_to_confirm_service_consent");
+        }
+      } catch (error) {
+        throw error;
+      }
+    },
+    [auth?.userId, getAuthHeaders, loadBootstrap]
+  );
+
+  const loadingCopy = bootstrapLoading
+    ? {
+        message: "계정 상태를 확인하는 중...",
+        detail: "온보딩과 동의 여부를 불러오고 있습니다.",
+      }
+    : busyStage === "onboarding"
+      ? {
+          message: "온보딩을 마무리하는 중...",
+          detail: "바로 동의 화면으로 이동합니다.",
+        }
+      : {
+          message: t("데이터 동기화 중…"),
+          detail: t("로그인 데이터를 불러오는 중입니다."),
+        };
 
   return (
     <div className="min-h-dvh w-full bg-ios-bg">
       <UiPreferencesBridge />
       <div className="safe-top" />
-      {/* 하단 네비게이션/홈 인디케이터에 컨텐츠가 가리지 않도록 safe-area 패딩을 추가 */}
-      {/*
-        캘린더/차트가 너무 작게 보인다는 피드백 반영:
-        - 데스크탑/태블릿에서 더 넓게 보이도록 컨테이너 폭 확장
-        - 모바일은 여전히 자연스럽게 full width
-      */}
       <div
         className={`mx-auto w-full ${
           isMedSafetyImmersive ? "max-w-[1180px] px-3 sm:px-5" : "max-w-[720px] px-4"
@@ -199,13 +314,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         onPointerDownCapture={handleGuardedInteraction}
         onKeyDownCapture={handleGuardedInteraction}
       >
-        {isMedSafetyImmersive ? (
-          children
-        ) : (
-          <div key={pathname} className="rnest-page-enter">
-            {children}
-          </div>
-        )}
+        {canRenderContent ? (
+          isMedSafetyImmersive ? (
+            children
+          ) : (
+            <div key={pathname} className="rnest-page-enter">
+              {children}
+            </div>
+          )
+        ) : null}
       </div>
       {allowPrompt && loginPromptOpen ? (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-6 rnest-backdrop" data-auth-modal>
@@ -227,18 +344,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       ) : null}
-      {isAuthed && !cloudReady ? (
-        <div className="fixed inset-0 z-[55] flex items-center justify-center bg-white/70 backdrop-blur-sm px-6 rnest-backdrop">
-          <div className="w-full max-w-[320px] rounded-apple border border-ios-sep bg-white p-5 shadow-apple rnest-modal">
-            <div className="text-[15px] font-semibold text-ios-text">{t("데이터 동기화 중…")}</div>
-            <div className="mt-2 text-[12.5px] text-ios-sub">{t("로그인 데이터를 불러오는 중입니다.")}</div>
-          </div>
-        </div>
+      {isAuthed && !isPolicyPage && (bootstrapLoading || busyStage === "onboarding") ? (
+        <GateLoadingScreen
+          message={loadingCopy.message}
+          detail={loadingCopy.detail}
+        />
       ) : null}
-      {isAuthed ? <CloudStateSync /> : null}
+      {isAuthed && !isPolicyPage && !bootstrapLoading && bootstrapError ? (
+        <GateErrorScreen onRetry={() => void loadBootstrap()} />
+      ) : null}
+      {isAuthed && Boolean(bootstrap?.consentCompleted) ? <CloudStateSync /> : null}
       <OnboardingGuide open={showOnboarding} onComplete={handleOnboardingComplete} />
+      {showConsent ? <ServiceConsentScreen onSubmit={handleConsentComplete} /> : null}
       <div className="safe-bottom" />
-      <BottomNav />
+      {showBottomNav ? <BottomNav /> : null}
     </div>
   );
 }

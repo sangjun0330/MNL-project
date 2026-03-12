@@ -3,11 +3,19 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { formatKrw, getCheckoutProductDefinition, getPlanDefinition, type CheckoutProductId } from "@/lib/billing/plans";
+import {
+  formatKrw,
+  getCheckoutProductDefinition,
+  getPlanDefinition,
+  getSearchCreditMeta,
+  listCreditPackProducts,
+  type CheckoutProductId,
+} from "@/lib/billing/plans";
 import {
   fetchSubscriptionSnapshot,
   formatDateLabel,
   requestPlanCheckout,
+  authHeaders,
   type SubscriptionResponse,
 } from "@/lib/billing/client";
 import { signInWithProvider, useAuthState } from "@/lib/auth";
@@ -26,11 +34,32 @@ function mapCheckoutError(raw: unknown) {
   if (text.includes("toss_key_mode_mismatch")) return "토스 클라이언트키/시크릿키 모드(test/live)가 서로 다릅니다.";
   if (text.includes("invalid_origin")) return "결제 리다이렉트 URL(origin) 설정이 올바르지 않습니다.";
   if (text.includes("checkout_http_401") || text.includes("login_required")) return "로그인 세션이 만료되었습니다. 다시 로그인 후 시도해 주세요.";
-  if (text.includes("billing_schema_outdated_credit_pack_columns"))
+  if (text.includes("billing_schema_outdated_credit_pack_columns") || text.includes("billing_schema_outdated_search_credit_columns"))
     return "서버 DB 스키마가 아직 최신이 아닙니다. 마이그레이션 적용 후 다시 시도해 주세요.";
+  if (text.includes("free_plan_credit_pack_not_allowed")) return "Free 플랜은 추가 크레딧 구매가 제공되지 않습니다. Plus 또는 Pro로 업그레이드해 주세요.";
   if (text.includes("paid_plan_downgrade_not_allowed")) return "현재 상위 플랜 이용 중에는 낮은 플랜으로 바로 결제할 수 없습니다.";
   if (text.includes("checkout_http_5") || text.includes("network")) return "결제 서버 연결이 불안정합니다. 잠시 후 다시 시도해 주세요.";
   return "결제 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.";
+}
+
+async function trackBillingEvent(eventName: string, planTierSnapshot: string, props?: Record<string, unknown>) {
+  try {
+    const headers = await authHeaders();
+    await fetch("/api/billing/analytics/track", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...headers,
+      },
+      body: JSON.stringify({
+        eventName,
+        planTierSnapshot,
+        props: props ?? null,
+      }),
+    });
+  } catch {
+    // Ignore analytics failures in UI flow.
+  }
 }
 
 export function SettingsBillingUpgradePage() {
@@ -46,14 +75,14 @@ export function SettingsBillingUpgradePage() {
   const flatSurface = "rounded-[24px] border border-ios-sep bg-white";
   const plusPlan = getPlanDefinition("plus");
   const proPlan = getPlanDefinition("pro");
-  const creditPack10 = getCheckoutProductDefinition("credit10");
-  const creditPack30 = getCheckoutProductDefinition("credit30");
-  const creditPacks = [creditPack10, creditPack30];
+  const standardCreditPacks = listCreditPackProducts("standard");
+  const premiumCreditPacks = listCreditPackProducts("premium");
   const flatButtonBase =
     "inline-flex h-11 items-center justify-center rounded-full border px-5 text-[14px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50";
   const flatButtonPrimary = `${flatButtonBase} border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]`;
   const flatButtonSecondary = `${flatButtonBase} border-ios-sep bg-[#F2F2F7] text-ios-text`;
   const returnTo = sanitizeInternalPath(searchParams.get("returnTo"), "");
+  const activeTier = subData?.subscription.tier ?? "free";
 
   const loadSubscription = useCallback(async () => {
     if (!user?.userId) {
@@ -77,13 +106,27 @@ export function SettingsBillingUpgradePage() {
     void loadSubscription();
   }, [loadSubscription]);
 
+  useEffect(() => {
+    if (status !== "authenticated" || activeTier !== "plus") return;
+    void trackBillingEvent("pro_upsell_viewed", activeTier, {
+      source: "billing_upgrade_page",
+      location: "premium_credit_section",
+    });
+  }, [activeTier, status]);
+
   const openCheckoutSheet = useCallback(
     (product: CheckoutProductId) => {
       if (!user?.userId) return;
       setError(null);
+      if (product === "pro" && activeTier === "plus") {
+        void trackBillingEvent("pro_upsell_clicked", activeTier, {
+          source: "billing_upgrade_page",
+          location: "plan_card",
+        });
+      }
       setCheckoutProduct(product);
     },
-    [user?.userId]
+    [activeTier, user?.userId]
   );
 
   const confirmCheckout = useCallback(async () => {
@@ -105,31 +148,34 @@ export function SettingsBillingUpgradePage() {
     }
   }, [checkoutProduct, returnTo, t, user?.userId]);
 
-  const activeTier = subData?.subscription.tier ?? "free";
   const activePeriodEnd = subData?.subscription.currentPeriodEnd ?? null;
   const hasPaidAccess = Boolean(subData?.subscription.hasPaidAccess);
+  const isFreePlan = activeTier === "free";
   const currentPlan = getPlanDefinition(activeTier);
   const isPlusActive = activeTier === "plus" && hasPaidAccess;
   const isProActive = activeTier === "pro" && Boolean(subData?.subscription.hasPaidAccess);
   const quota = subData?.subscription.medSafetyQuota;
   const checkoutDefinition = checkoutProduct ? getCheckoutProductDefinition(checkoutProduct) : null;
   const totalCredits = Math.max(0, Number(quota?.totalRemaining ?? 0));
+  const standardCredits = Math.max(0, Number(quota?.standard.totalRemaining ?? 0));
+  const premiumCredits = Math.max(0, Number(quota?.premium.totalRemaining ?? 0));
   const plusSummaryItems = [
     t("AI 맞춤회복"),
     t("오늘의 오더"),
-    t("검색 10회"),
-    t("기록 5개"),
+    t("기본 검색 10회"),
+    t("기본/프리미엄 구매"),
   ];
   const proSummaryItems = [
-    t("Plus 전체"),
-    t("검색 100회"),
-    t("기록 10개"),
+    t("프리미엄 검색 100회"),
+    t("더 높은 품질의 AI"),
+    t("기본/프리미엄 구매"),
   ];
   const returnLabel = returnTo.startsWith("/insights/recovery")
     ? t("회복 플래너로 돌아가기")
     : returnTo === "/insights"
       ? t("인사이트로 돌아가기")
       : t("이전 화면으로 돌아가기");
+  const currentPeriodLabel = isFreePlan ? t("다음 체험 리셋") : t("만료일");
 
   return (
     <div className="mx-auto w-full max-w-[760px] px-4 pb-24 pt-6">
@@ -177,21 +223,30 @@ export function SettingsBillingUpgradePage() {
             <div className="mt-2 text-[30px] font-extrabold tracking-[-0.03em] text-ios-text">
               {currentPlan.title}
             </div>
-            <div className="mt-1 text-[13px] text-ios-sub">{t("만료일")}: {formatDateLabel(activePeriodEnd)}</div>
+            <div className="mt-1 text-[13px] text-ios-sub">{currentPeriodLabel}: {formatDateLabel(activePeriodEnd)}</div>
             <div className="mt-3 rounded-2xl border border-ios-sep bg-[#F7F7FA] px-3 py-2 text-[12.5px] text-ios-sub">
               <div>
                 {t("보유 검색 크레딧")}: {totalCredits}
                 {t("회")}
               </div>
               <div className="mt-1">
-                {t("현재 플랜 포함 크레딧")}: {currentPlan.medSafetyIncludedCredits > 0 ? `${currentPlan.medSafetyIncludedCredits}${t("회")}` : t("해당 없음")}
+                {t("현재 플랜 포함 크레딧")}: {currentPlan.includedSearchCredits.standard > 0
+                  ? `${t("기본 검색")} ${currentPlan.includedSearchCredits.standard}${t("회")}`
+                  : currentPlan.includedSearchCredits.premium > 0
+                    ? `${t("프리미엄 검색")} ${currentPlan.includedSearchCredits.premium}${t("회")}`
+                    : t("해당 없음")}
+              </div>
+              <div className="mt-1">
+                {t("보유 현황")}: {t("기본 검색")} {standardCredits}
+                {t("회")} · {t("프리미엄 검색")} {premiumCredits}
+                {t("회")}
               </div>
             </div>
           </section>
 
           {error ? <div className="mt-3 text-[12px] text-red-600">{error}</div> : null}
 
-          <section id="search-credits" className={`${flatSurface} mt-4 p-6`}>
+          <section className={`${flatSurface} mt-4 p-6`}>
             <div className="flex items-start justify-between gap-4">
               <div>
                 <div className="text-[13px] text-ios-sub">{t("업그레이드 플랜")}</div>
@@ -220,9 +275,9 @@ export function SettingsBillingUpgradePage() {
             <div className="mt-3 rounded-2xl border border-ios-sep bg-[#F7F7FA] px-3 py-2 text-[12.5px] text-ios-sub">
               <div className="text-[12px] font-semibold text-ios-text">{t("이용 안내")}</div>
               <ul className="mt-1 list-disc space-y-0.5 pl-4">
-                <li>{t("결제 즉시 30일 플랜이 활성화되고 검색 크레딧 10회가 적립됩니다.")}</li>
+                <li>{t("결제 즉시 30일 플랜이 활성화되고 기본 검색 10회가 포함됩니다.")}</li>
                 <li>{t("AI 검색은 질문 1회당 1크레딧이 차감되며, 후속 질문도 동일하게 계산됩니다.")}</li>
-                <li>{t("최근 AI 검색 기록은 5개까지 저장되며, 검색 크레딧은 남은 수량 기준으로 사용됩니다.")}</li>
+                <li>{t("기본 검색과 프리미엄 검색 크레딧을 모두 추가 구매할 수 있습니다.")}</li>
               </ul>
             </div>
             <button
@@ -273,9 +328,9 @@ export function SettingsBillingUpgradePage() {
             <div className="mt-3 rounded-2xl border border-ios-sep bg-[#F7F7FA] px-3 py-2 text-[12.5px] text-ios-sub">
               <div className="text-[12px] font-semibold text-ios-text">{t("이용 안내")}</div>
               <ul className="mt-1 list-disc space-y-0.5 pl-4">
-                <li>{t("결제 즉시 30일 플랜이 활성화되고 검색 크레딧 100회가 적립됩니다.")}</li>
-                <li>{t("Plus 기능이 모두 포함되며, AI 검색을 자주 사용하는 경우에 적합합니다.")}</li>
-                <li>{t("AI 검색은 질문 1회당 1크레딧이 차감되며, 최근 AI 검색 기록은 10개까지 저장됩니다.")}</li>
+                <li>{t("결제 즉시 30일 플랜이 활성화되고 프리미엄 검색 100회가 포함됩니다.")}</li>
+                <li>{t("Plus 기능이 모두 포함되며, 더 높은 품질의 AI 회복 기능을 사용합니다.")}</li>
+                <li>{t("AI 검색은 질문 1회당 1크레딧이 차감되며, 기본 검색과 프리미엄 검색을 모두 추가 구매할 수 있습니다.")}</li>
               </ul>
             </div>
             <button
@@ -297,60 +352,106 @@ export function SettingsBillingUpgradePage() {
             </p>
           </section>
 
-          <section className={`${flatSurface} mt-4 p-6`}>
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <div className="text-[13px] text-ios-sub">{t("추가 구매")}</div>
-                <div className="mt-1 text-[28px] font-extrabold tracking-[-0.03em] text-ios-text">{t("AI 검색 크레딧")}</div>
-                <div className="mt-1 max-w-[480px] text-[14px] leading-relaxed text-ios-sub">{t("필요한 만큼 충전해 두고 Free, Plus, Pro 어디서든 바로 사용할 수 있습니다.")}</div>
-              </div>
-            </div>
-            <div className="mt-3 rounded-2xl border border-ios-sep bg-[#F7F7FA] px-3 py-2 text-[12.5px] text-ios-sub">
-              <div>
-                {t("현재 보유 검색 크레딧")}: {totalCredits}
-                {t("회")}
-              </div>
-              <div className="mt-1">{t("추가 구매 크레딧은 기존 잔액에 바로 합산되며, 질문 1회당 1크레딧이 차감됩니다.")}</div>
-            </div>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              {creditPacks.map((creditPack) => (
-                <div key={creditPack.id} className="rounded-[22px] border border-ios-sep bg-[#FCFCFE] p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{t(creditPack.title)}</div>
-                      <div className="mt-1 text-[12.5px] text-ios-sub">
-                        {creditPack.id === "credit10"
-                          ? t("가볍게 충전해 바로 쓰기 좋은 구성입니다.")
-                          : t("자주 검색하는 경우 한 번에 넉넉하게 충전하는 구성입니다.")}
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">
-                        {formatKrw(creditPack.priceKrw).replace(" KRW", "")}
-                      </div>
-                      <div className="text-[12px] text-ios-muted">
-                        / {creditPack.creditUnits}
-                        {t("회")}
-                      </div>
-                    </div>
+          {isFreePlan ? (
+            <section id="search-credits" className={`${flatSurface} mt-4 p-6`}>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-[13px] text-ios-sub">{t("Free 체험 안내")}</div>
+                  <div className="mt-1 text-[28px] font-extrabold tracking-[-0.03em] text-ios-text">{t("AI 검색을 먼저 가볍게 경험해 보세요")}</div>
+                  <div className="mt-1 max-w-[520px] text-[14px] leading-relaxed text-ios-sub">
+                    {t("Free 플랜에서는 매 30일마다 기본 검색 2회와 프리미엄 검색 1회가 제공됩니다. 추가 크레딧 구매는 제공되지 않습니다.")}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => openCheckoutSheet(creditPack.id)}
-                    disabled={payingCredit || loading}
-                    className={`${flatButtonPrimary} mt-4 w-full`}
-                  >
-                    {payingCredit && checkoutProduct === creditPack.id
-                      ? t("결제창 준비 중...")
-                      : t("크레딧 {count}회 구매", { count: creditPack.creditUnits })}
-                  </button>
                 </div>
-              ))}
-            </div>
-            <p className="mt-2 text-[11.5px] text-ios-muted">
-              {t("추가 크레딧은 AI 검색 1회당 1크레딧이 사용되며, 후속 질문도 동일하게 차감됩니다.")}
-            </p>
-          </section>
+              </div>
+              <div className="mt-3 rounded-2xl border border-ios-sep bg-[#F7F7FA] px-3 py-2 text-[12.5px] text-ios-sub">
+                <div>{t("이번 체험 구성")}: {t("기본 검색")} 2{t("회")} · {t("프리미엄 검색")} 1{t("회")}</div>
+                <div className="mt-1">{t("현재 보유")}: {t("기본 검색")} {standardCredits}{t("회")} · {t("프리미엄 검색")} {premiumCredits}{t("회")}</div>
+                <div className="mt-1">{currentPeriodLabel}: {formatDateLabel(activePeriodEnd)}</div>
+              </div>
+              <p className="mt-3 text-[12px] leading-6 text-ios-sub">
+                {t("체험 이후에도 더 자주 검색하려면 Plus 또는 Pro로 업그레이드해 주세요.")}
+              </p>
+            </section>
+          ) : (
+            <section id="search-credits" className={`${flatSurface} mt-4 p-6`}>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-[13px] text-ios-sub">{t("추가 구매")}</div>
+                  <div className="mt-1 text-[28px] font-extrabold tracking-[-0.03em] text-ios-text">{t("AI 검색 크레딧")}</div>
+                  <div className="mt-1 max-w-[480px] text-[14px] leading-relaxed text-ios-sub">{t("필요한 만큼 충전해 두고 Plus, Pro에서 바로 사용할 수 있습니다.")}</div>
+                </div>
+              </div>
+              <div className="mt-3 rounded-2xl border border-ios-sep bg-[#F7F7FA] px-3 py-2 text-[12.5px] text-ios-sub">
+                <div>
+                  {t("현재 보유 검색 크레딧")}: {totalCredits}
+                  {t("회")}
+                </div>
+                <div className="mt-1">
+                  {t("기본 검색")} {standardCredits}
+                  {t("회")} · {t("프리미엄 검색")} {premiumCredits}
+                  {t("회")}
+                </div>
+                <div className="mt-1">{t("추가 구매 크레딧은 기존 잔액에 바로 합산되며, 질문 1회당 1크레딧이 차감됩니다.")}</div>
+              </div>
+              <div className="mt-4 space-y-4">
+                {([
+                  { type: "standard" as const, packs: standardCreditPacks },
+                  { type: "premium" as const, packs: premiumCreditPacks },
+                ]).map(({ type, packs }) => {
+                  const meta = getSearchCreditMeta(type);
+                  return (
+                    <div key={type} className="rounded-[24px] border border-ios-sep bg-[#FAFAFC] p-4">
+                      <div className="mb-3">
+                        <div className="text-[18px] font-bold tracking-[-0.02em] text-ios-text">{t(meta.title)}</div>
+                        <div className="mt-1 text-[12.5px] text-ios-sub">{t(meta.description)}</div>
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {packs.map((creditPack) => (
+                          <div key={creditPack.id} className="rounded-[22px] border border-ios-sep bg-white p-4">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{t(creditPack.title)}</div>
+                                <div className="mt-1 text-[12.5px] text-ios-sub">
+                                  {t(creditPack.creditUnits === 10 ? meta.purchaseHint : "자주 쓰는 분을 위한 넉넉한 묶음")}
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <div className="text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">
+                                  {formatKrw(creditPack.priceKrw).replace(" KRW", "")}
+                                </div>
+                                <div className="text-[12px] text-ios-muted">
+                                  / {creditPack.creditUnits}
+                                  {t("회")}
+                                </div>
+                              </div>
+                            </div>
+                            {activeTier === "plus" && type === "premium" && creditPack.creditUnits === 30 ? (
+                              <div className="mt-3 rounded-2xl border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-3 py-2 text-[11.5px] leading-5 text-[color:var(--rnest-accent)]">
+                                {t("프리미엄 검색을 자주 사용하신다면 Pro가 더 유리합니다. Pro에서는 프리미엄 검색 100회가 기본 포함됩니다.")}
+                              </div>
+                            ) : null}
+                            <button
+                              type="button"
+                              onClick={() => openCheckoutSheet(creditPack.id)}
+                              disabled={payingCredit || loading}
+                              className={`${flatButtonPrimary} mt-4 w-full`}
+                            >
+                              {payingCredit && checkoutProduct === creditPack.id
+                                ? t("결제창 준비 중...")
+                                : t("{title} 구매", { title: creditPack.title })}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="mt-2 text-[11.5px] text-ios-muted">
+                {t("추가 크레딧은 AI 검색 1회당 1크레딧이 사용되며, 후속 질문도 동일하게 차감됩니다.")}
+              </p>
+            </section>
+          )}
 
           {returnTo ? (
             <div className="mt-4">
@@ -367,7 +468,11 @@ export function SettingsBillingUpgradePage() {
         onConfirm={() => void confirmCheckout()}
         loading={Boolean(
           ((checkoutProduct === "plus" || checkoutProduct === "pro") && paying) ||
-            ((checkoutProduct === "credit10" || checkoutProduct === "credit30") && payingCredit)
+            ((checkoutProduct === "standard10" ||
+              checkoutProduct === "standard30" ||
+              checkoutProduct === "premium10" ||
+              checkoutProduct === "premium30") &&
+              payingCredit)
         )}
         productTitle={checkoutDefinition?.title ?? ""}
         productSubtitle={

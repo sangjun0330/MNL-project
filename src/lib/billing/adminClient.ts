@@ -46,8 +46,10 @@ export type AdminRefundRequest = {
 export type AdminBillingOrder = {
   orderId: string;
   userId?: string;
-  planTier: "free" | "pro";
+  planTier: "free" | "plus" | "pro";
   orderKind: AdminBillingOrderKind;
+  productId: "plus" | "pro" | "standard10" | "standard30" | "premium10" | "premium30" | null;
+  creditType: "standard" | "premium" | null;
   creditPackUnits: number;
   amount: number;
   currency: string;

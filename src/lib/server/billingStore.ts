@@ -1,4 +1,13 @@
-import { PAID_PLAN_TIERS, getPlanDefinition, type BillingOrderKind, type PlanTier } from "@/lib/billing/plans";
+import {
+  PAID_PLAN_TIERS,
+  getDefaultSearchTypeForTier,
+  getPlanDefinition,
+  getSearchCreditMeta,
+  type BillingOrderKind,
+  type CheckoutProductId,
+  type PlanTier,
+  type SearchCreditType,
+} from "@/lib/billing/plans";
 import { buildBillingEntitlements, type BillingEntitlements } from "@/lib/billing/entitlements";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { ensureUserRow } from "@/lib/server/userStateStore";
@@ -21,26 +30,32 @@ export type SubscriptionSnapshot = {
   cancelReason: string | null;
   hasPaidAccess: boolean;
   entitlements: BillingEntitlements;
+  aiRecoveryModel: string | null;
   medSafetyQuota: MedSafetyQuotaSnapshot;
 };
 
-export type MedSafetyCreditSource = "daily" | "extra";
+export type MedSafetyCreditBucket = "included" | "extra";
+
+export type MedSafetyCreditQuota = {
+  includedRemaining: number;
+  extraRemaining: number;
+  totalRemaining: number;
+};
 
 export type MedSafetyQuotaSnapshot = {
   timezone: "Asia/Seoul";
-  dailyLimit: number;
-  dailyUsed: number;
-  dailyRemaining: number;
-  extraCredits: number;
+  standard: MedSafetyCreditQuota;
+  premium: MedSafetyCreditQuota;
+  recommendedDefaultSearchType: SearchCreditType;
+  aiRecoveryModel: string | null;
+  currentPlanTitle: string;
   totalRemaining: number;
-  usageDate: string;
-  nextResetAt: string;
-  isPro: boolean;
 };
 
 export type MedSafetyCreditConsumeResult = {
   allowed: boolean;
-  source: MedSafetyCreditSource | null;
+  searchType: SearchCreditType;
+  bucket: MedSafetyCreditBucket | null;
   quota: MedSafetyQuotaSnapshot;
   reason: string | null;
 };
@@ -50,6 +65,8 @@ export type BillingOrderSummary = {
   userId?: string;
   planTier: PlanTier;
   orderKind: BillingOrderKind;
+  productId: CheckoutProductId | null;
+  creditType: SearchCreditType | null;
   creditPackUnits: number;
   amount: number;
   currency: string;
@@ -122,6 +139,16 @@ export type BillingOrderAdminFilterInput = {
   limit?: number;
 };
 
+export type BillingAnalyticsEventName =
+  | "search_mode_selected"
+  | "credit_pack_viewed"
+  | "credit_pack_checkout_started"
+  | "credit_pack_checkout_succeeded"
+  | "pro_upsell_viewed"
+  | "pro_upsell_clicked"
+  | "plan_checkout_started"
+  | "plan_checkout_succeeded";
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MED_SAFETY_TIMEZONE = "Asia/Seoul" as const;
 const OPTIONAL_CANCEL_COLUMNS = [
@@ -134,6 +161,10 @@ const OPTIONAL_MED_SAFETY_COLUMNS = [
   "med_safety_extra_credits",
   "med_safety_daily_used",
   "med_safety_usage_date",
+  "med_safety_standard_included_credits",
+  "med_safety_standard_extra_credits",
+  "med_safety_premium_included_credits",
+  "med_safety_premium_extra_credits",
 ] as const;
 const BASE_SUBSCRIPTION_SELECT =
   "subscription_tier, subscription_status, subscription_started_at, subscription_current_period_end, subscription_updated_at, toss_customer_key";
@@ -166,7 +197,7 @@ const REFUND_REQUEST_SELECT = [
   "notify_user_sent_at",
 ].join(", ");
 const OPEN_REFUND_STATUSES = ["REQUESTED", "UNDER_REVIEW", "APPROVED", "EXECUTING", "FAILED_RETRYABLE", "PENDING"];
-const OPTIONAL_BILLING_ORDER_COLUMNS = ["order_kind", "credit_pack_units"] as const;
+const OPTIONAL_BILLING_ORDER_COLUMNS = ["order_kind", "credit_pack_units", "product_id", "credit_type"] as const;
 const BILLING_ORDER_SELECT_BASE =
   "order_id, user_id, plan_tier, amount, currency, status, order_name, payment_key, fail_code, fail_message, approved_at, created_at";
 const BILLING_ORDER_SELECT_WITH_OPTIONAL = `${BILLING_ORDER_SELECT_BASE}, ${OPTIONAL_BILLING_ORDER_COLUMNS.join(", ")}`;
@@ -293,29 +324,6 @@ function parseDate(value: string | null): Date | null {
   return Number.isFinite(d.getTime()) ? d : null;
 }
 
-function toKstDateISO(value: Date = new Date()) {
-  const formatter = new Intl.DateTimeFormat("en-CA", {
-    timeZone: MED_SAFETY_TIMEZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  const parts = formatter.formatToParts(value);
-  const year = parts.find((part) => part.type === "year")?.value ?? "";
-  const month = parts.find((part) => part.type === "month")?.value ?? "";
-  const day = parts.find((part) => part.type === "day")?.value ?? "";
-  if (/^\d{4}$/.test(year) && /^\d{2}$/.test(month) && /^\d{2}$/.test(day)) {
-    return `${year}-${month}-${day}`;
-  }
-  return value.toISOString().slice(0, 10);
-}
-
-function sanitizeIsoDate(value: unknown) {
-  const text = String(value ?? "").trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
-  return "";
-}
-
 function toNonNegativeInt(value: unknown, fallback = 0) {
   const n = Number(value);
   if (!Number.isFinite(n)) return Math.max(0, Math.round(fallback));
@@ -323,24 +331,31 @@ function toNonNegativeInt(value: unknown, fallback = 0) {
 }
 
 function buildMedSafetyQuotaSnapshot(input: {
-  hasPaidAccess: boolean;
-  usageDate: string;
-  dailyUsed: number;
-  extraCredits: number;
+  tier: PlanTier;
+  standardIncluded: number;
+  standardExtra: number;
+  premiumIncluded: number;
+  premiumExtra: number;
 }): MedSafetyQuotaSnapshot {
-  const now = new Date();
-  const today = toKstDateISO(now);
-  const normalizedExtra = toNonNegativeInt(input.extraCredits);
+  const standard: MedSafetyCreditQuota = {
+    includedRemaining: toNonNegativeInt(input.standardIncluded),
+    extraRemaining: toNonNegativeInt(input.standardExtra),
+    totalRemaining: toNonNegativeInt(input.standardIncluded) + toNonNegativeInt(input.standardExtra),
+  };
+  const premium: MedSafetyCreditQuota = {
+    includedRemaining: toNonNegativeInt(input.premiumIncluded),
+    extraRemaining: toNonNegativeInt(input.premiumExtra),
+    totalRemaining: toNonNegativeInt(input.premiumIncluded) + toNonNegativeInt(input.premiumExtra),
+  };
+  const plan = getPlanDefinition(input.tier);
   return {
     timezone: MED_SAFETY_TIMEZONE,
-    dailyLimit: 0,
-    dailyUsed: 0,
-    dailyRemaining: 0,
-    extraCredits: normalizedExtra,
-    totalRemaining: normalizedExtra,
-    usageDate: today,
-    nextResetAt: toKstDateISO(now),
-    isPro: input.hasPaidAccess,
+    standard,
+    premium,
+    recommendedDefaultSearchType: getDefaultSearchTypeForTier(input.tier),
+    aiRecoveryModel: plan.aiRecoveryModel,
+    currentPlanTitle: plan.title,
+    totalRemaining: standard.totalRemaining + premium.totalRemaining,
   };
 }
 
@@ -354,6 +369,13 @@ function hasPaidAccessFromSnapshot(input: {
   const end = parseDate(input.currentPeriodEnd);
   if (!end) return true;
   return end.getTime() > Date.now();
+}
+
+function hasIncludedSearchCreditAccess(input: {
+  tier: PlanTier;
+  hasPaidAccess: boolean;
+}) {
+  return input.tier === "free" || input.hasPaidAccess;
 }
 
 function sanitizeCancelReason(value: string | null | undefined) {
@@ -402,19 +424,73 @@ function inferCreditPackUnitsFromLegacyFields(row: any, orderKind: BillingOrderK
   if (fromOrderName?.[1]) {
     return Math.max(1, toNonNegativeInt(fromOrderName[1], 10));
   }
+  if (String(row?.order_id ?? "").toLowerCase().includes("standard30")) return 30;
+  if (String(row?.order_id ?? "").toLowerCase().includes("standard10")) return 10;
+  if (String(row?.order_id ?? "").toLowerCase().includes("premium30")) return 30;
+  if (String(row?.order_id ?? "").toLowerCase().includes("premium10")) return 10;
   if (String(row?.order_id ?? "").toLowerCase().includes("credit30")) return 30;
   if (String(row?.order_id ?? "").toLowerCase().includes("credit10")) return 10;
   return 10;
 }
 
+function inferProductIdFromLegacyFields(row: any, orderKind: BillingOrderKind): CheckoutProductId | null {
+  if (row && Object.prototype.hasOwnProperty.call(row, "product_id")) {
+    const direct = row?.product_id;
+    if (
+      direct === "plus" ||
+      direct === "pro" ||
+      direct === "standard10" ||
+      direct === "standard30" ||
+      direct === "premium10" ||
+      direct === "premium30"
+    ) {
+      return direct;
+    }
+  }
+
+  const orderId = String(row?.order_id ?? "").toLowerCase();
+  const orderName = String(row?.order_name ?? "").toLowerCase();
+  if (orderKind === "subscription") {
+    if (/(^|_)plus(_|$)/.test(orderId) || /\bplus\b/.test(orderName)) return "plus";
+    if (/(^|_)pro(_|$)/.test(orderId) || /\bpro\b/.test(orderName)) return "pro";
+    return null;
+  }
+
+  if (orderId.includes("premium30") || /premium.+30|프리미엄.+30/.test(orderName)) return "premium30";
+  if (orderId.includes("premium10") || /premium.+10|프리미엄.+10/.test(orderName)) return "premium10";
+  if (orderId.includes("standard30") || /standard.+30|기본.+30/.test(orderName)) return "standard30";
+  if (orderId.includes("standard10") || /standard.+10|기본.+10/.test(orderName)) return "standard10";
+  if (orderId.includes("credit30")) return "standard30";
+  if (orderId.includes("credit10")) return "standard10";
+  return null;
+}
+
+function inferCreditTypeFromLegacyFields(row: any, productId: CheckoutProductId | null): SearchCreditType | null {
+  if (row && Object.prototype.hasOwnProperty.call(row, "credit_type")) {
+    if (row?.credit_type === "standard" || row?.credit_type === "premium") {
+      return row.credit_type;
+    }
+  }
+  if (productId === "standard10" || productId === "standard30") return "standard";
+  if (productId === "premium10" || productId === "premium30") return "premium";
+  const orderName = String(row?.order_name ?? "").toLowerCase();
+  if (orderName.includes("premium") || orderName.includes("프리미엄")) return "premium";
+  if (inferOrderKindFromLegacyFields(row) === "credit_pack") return "standard";
+  return null;
+}
+
 function toBillingOrderSummary(row: any): BillingOrderSummary {
   const orderKind = inferOrderKindFromLegacyFields(row);
   const creditPackUnits = inferCreditPackUnitsFromLegacyFields(row, orderKind);
+  const productId = inferProductIdFromLegacyFields(row, orderKind);
+  const creditType = inferCreditTypeFromLegacyFields(row, productId);
   return {
     orderId: row?.order_id ?? "",
     userId: row?.user_id ?? undefined,
     planTier: inferPlanTierFromLegacyFields(row),
     orderKind,
+    productId,
+    creditType,
     creditPackUnits,
     amount: Number(row?.amount ?? 0),
     currency: row?.currency ?? "KRW",
@@ -519,29 +595,80 @@ function isMissingMedSafetyUsageEventTableError(error: any) {
   return message.includes("med_safety_usage_events");
 }
 
+function isMissingBillingAnalyticsTableError(error: any) {
+  const code = String(error?.code ?? "");
+  const message = String(error?.message ?? "").toLowerCase();
+  if (code === "42P01" || code === "42703") return true;
+  return message.includes("billing_analytics_events");
+}
+
 async function appendMedSafetyUsageEvent(input: {
   userId: string;
-  source: "daily" | "extra" | "restore_daily" | "restore_extra";
+  searchType: SearchCreditType;
+  bucket: MedSafetyCreditBucket;
+  eventType: "consume" | "grant" | "restore" | "expire";
   delta: number;
   reason: string;
+  planTierSnapshot?: PlanTier | null;
   metadata?: Json | null;
 }) {
   const delta = Math.round(Number(input.delta ?? 0));
   if (!Number.isFinite(delta) || delta === 0) return;
 
   const admin = getSupabaseAdmin();
+  const legacySource =
+    input.bucket === "included" ? (input.eventType === "restore" ? "restore_daily" : "daily") : input.eventType === "restore" ? "restore_extra" : "extra";
   const { error } = await admin.from("med_safety_usage_events").insert({
     user_id: input.userId,
-    source: input.source,
+    source: legacySource,
     delta,
     reason: String(input.reason ?? "").trim().slice(0, 120) || "unknown",
-    metadata: (input.metadata ?? null) as Json | null,
+    metadata: ({
+      searchType: input.searchType,
+      bucket: input.bucket,
+      eventType: input.eventType,
+      planTierSnapshot: input.planTierSnapshot ?? null,
+      ...(typeof input.metadata === "object" && input.metadata !== null ? (input.metadata as Record<string, Json>) : {}),
+    } satisfies Json) as Json,
     created_at: new Date().toISOString(),
   });
 
   if (!error) return;
   if (isMissingMedSafetyUsageEventTableError(error)) return;
   throw error;
+}
+
+async function appendBillingAnalyticsEvent(input: {
+  userId: string;
+  eventName: BillingAnalyticsEventName;
+  planTierSnapshot?: PlanTier | null;
+  props?: Json | null;
+}) {
+  const admin = getSupabaseAdmin();
+  const { error } = await admin.from("billing_analytics_events").insert({
+    user_id: input.userId,
+    event_name: input.eventName,
+    plan_tier_snapshot: input.planTierSnapshot ?? null,
+    props: (input.props ?? null) as Json | null,
+    created_at: new Date().toISOString(),
+  });
+  if (!error) return;
+  if (isMissingBillingAnalyticsTableError(error)) return;
+  throw error;
+}
+
+export async function trackBillingAnalyticsEvent(input: {
+  userId: string;
+  eventName: BillingAnalyticsEventName;
+  planTierSnapshot?: PlanTier | null;
+  props?: Json | null;
+}) {
+  await ensureUserRow(input.userId);
+  try {
+    await appendBillingAnalyticsEvent(input);
+  } catch {
+    // Analytics failures must not block product flows.
+  }
 }
 
 async function appendRefundEvent(input: {
@@ -871,20 +998,24 @@ export async function readSubscription(
 ): Promise<SubscriptionSnapshot> {
   await ensureUserRow(userId);
 
-  const { data } = await readUserSubscriptionRow(userId);
+  const { data, supportsOptionalColumns } = await readUserSubscriptionRow(userId);
 
   let tier = asPlanTier(data?.subscription_tier);
   let status = asSubscriptionStatus(data?.subscription_status);
   const startedAt = data?.subscription_started_at ?? null;
-  const currentPeriodEnd = data?.subscription_current_period_end ?? null;
+  let currentPeriodEnd = data?.subscription_current_period_end ?? null;
   let updatedAt = data?.subscription_updated_at ?? null;
   let cancelAtPeriodEnd = Boolean(data?.subscription_cancel_at_period_end);
   let cancelScheduledAt = data?.subscription_cancel_scheduled_at ?? null;
   const canceledAt = data?.subscription_canceled_at ?? null;
   const cancelReason = sanitizeCancelReason(data?.subscription_cancel_reason);
-  const medSafetyExtraCredits = toNonNegativeInt(data?.med_safety_extra_credits, 0);
-  const medSafetyDailyUsedRaw = toNonNegativeInt(data?.med_safety_daily_used, 0);
-  const medSafetyUsageDate = sanitizeIsoDate(data?.med_safety_usage_date);
+  const legacyStandardExtraCredits = toNonNegativeInt(data?.med_safety_extra_credits, 0);
+  let standardIncludedCredits = supportsOptionalColumns ? toNonNegativeInt(data?.med_safety_standard_included_credits, 0) : 0;
+  let standardExtraCredits = supportsOptionalColumns
+    ? toNonNegativeInt(data?.med_safety_standard_extra_credits, legacyStandardExtraCredits)
+    : legacyStandardExtraCredits;
+  let premiumIncludedCredits = supportsOptionalColumns ? toNonNegativeInt(data?.med_safety_premium_included_credits, 0) : 0;
+  let premiumExtraCredits = supportsOptionalColumns ? toNonNegativeInt(data?.med_safety_premium_extra_credits, 0) : 0;
 
   const endDate = parseDate(currentPeriodEnd);
   const now = Date.now();
@@ -898,24 +1029,65 @@ export async function readSubscription(
         subscription_updated_at: nowIso,
         subscription_cancel_at_period_end: false,
         subscription_cancel_scheduled_at: null,
+        med_safety_standard_included_credits: 0,
+        med_safety_premium_included_credits: 0,
       });
       tier = "free";
-      status = "expired";
+      status = "inactive";
       updatedAt = nowIso;
       cancelAtPeriodEnd = false;
       cancelScheduledAt = null;
+      standardIncludedCredits = 0;
+      premiumIncludedCredits = 0;
     } catch {
       // Keep current snapshot if expiration write fails.
     }
   }
 
+  if (tier === "free" && status !== "inactive") {
+    status = "inactive";
+  }
+
+  if (tier === "free" && supportsOptionalColumns) {
+    const freePlan = getPlanDefinition("free");
+    const freeCycleEnd = parseDate(currentPeriodEnd);
+    const shouldResetFreeTrialCycle =
+      !freeCycleEnd ||
+      freeCycleEnd.getTime() <= now ||
+      standardIncludedCredits > freePlan.includedSearchCredits.standard ||
+      premiumIncludedCredits > freePlan.includedSearchCredits.premium;
+
+    if (shouldResetFreeTrialCycle) {
+      const nowIso = new Date(now).toISOString();
+      const nextCycleEndIso = new Date(now + freePlan.periodDays * DAY_MS).toISOString();
+      try {
+        await updateUserWithOptionalSubscriptionFallback(userId, {
+          subscription_current_period_end: nextCycleEndIso,
+          subscription_updated_at: nowIso,
+          med_safety_standard_included_credits: freePlan.includedSearchCredits.standard,
+          med_safety_premium_included_credits: freePlan.includedSearchCredits.premium,
+          last_seen: nowIso,
+        });
+        currentPeriodEnd = nextCycleEndIso;
+        updatedAt = nowIso;
+        standardIncludedCredits = freePlan.includedSearchCredits.standard;
+        premiumIncludedCredits = freePlan.includedSearchCredits.premium;
+      } catch {
+        // Keep current snapshot if free cycle reset write fails.
+      }
+    }
+  }
+
   const hasPaidAccess = hasPaidAccessFromSnapshot({ tier, status, currentPeriodEnd });
+  const includedCreditAccess = hasIncludedSearchCreditAccess({ tier, hasPaidAccess });
   const medSafetyQuota = buildMedSafetyQuotaSnapshot({
-    hasPaidAccess,
-    usageDate: medSafetyUsageDate,
-    dailyUsed: medSafetyDailyUsedRaw,
-    extraCredits: medSafetyExtraCredits,
+    tier,
+    standardIncluded: includedCreditAccess ? standardIncludedCredits : 0,
+    standardExtra: standardExtraCredits,
+    premiumIncluded: includedCreditAccess ? premiumIncludedCredits : 0,
+    premiumExtra: premiumExtraCredits,
   });
+  const plan = getPlanDefinition(tier);
 
   const persistedCustomerKey = String(data?.toss_customer_key ?? "").trim();
   const normalizedCustomerKey = persistedCustomerKey.startsWith("rnest_")
@@ -939,6 +1111,7 @@ export async function readSubscription(
       hasPaidAccess,
       medSafetyTotalRemaining: medSafetyQuota.totalRemaining,
     }),
+    aiRecoveryModel: plan.aiRecoveryModel,
     medSafetyQuota,
   };
 
@@ -968,28 +1141,238 @@ function isMissingMedSafetyCreditColumnError(error: any) {
   return OPTIONAL_MED_SAFETY_COLUMNS.some((column) => isSchemaCacheMissingColumnError(error, column));
 }
 
-async function readMedSafetyCreditRow(userId: string): Promise<{
-  extraCredits: number;
-  dailyUsed: number;
-  usageDate: string;
-}> {
+type SearchCreditLedgerRow = {
+  supportsTypedColumns: boolean;
+  standardIncluded: number;
+  standardExtra: number;
+  premiumIncluded: number;
+  premiumExtra: number;
+};
+
+function toSearchCreditLedgerRow(data: any, supportsTypedColumns: boolean): SearchCreditLedgerRow {
+  const legacyStandardExtra = toNonNegativeInt(data?.med_safety_extra_credits, 0);
+  return {
+    supportsTypedColumns,
+    standardIncluded: supportsTypedColumns ? toNonNegativeInt(data?.med_safety_standard_included_credits, 0) : 0,
+    standardExtra: supportsTypedColumns
+      ? toNonNegativeInt(data?.med_safety_standard_extra_credits, legacyStandardExtra)
+      : legacyStandardExtra,
+    premiumIncluded: supportsTypedColumns ? toNonNegativeInt(data?.med_safety_premium_included_credits, 0) : 0,
+    premiumExtra: supportsTypedColumns ? toNonNegativeInt(data?.med_safety_premium_extra_credits, 0) : 0,
+  };
+}
+
+async function readSearchCreditLedgerRow(userId: string): Promise<SearchCreditLedgerRow> {
   const admin = getSupabaseAdmin();
+  const fullRes = await admin
+    .from("rnest_users")
+    .select(
+      "med_safety_extra_credits, med_safety_standard_included_credits, med_safety_standard_extra_credits, med_safety_premium_included_credits, med_safety_premium_extra_credits"
+    )
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (!fullRes.error) {
+    return toSearchCreditLedgerRow(fullRes.data, true);
+  }
+
+  if (!isMissingMedSafetyCreditColumnError(fullRes.error)) throw fullRes.error;
+
+  const fallbackRes = await admin.from("rnest_users").select("med_safety_extra_credits").eq("user_id", userId).maybeSingle();
+  if (fallbackRes.error) {
+    if (isMissingMedSafetyCreditColumnError(fallbackRes.error)) {
+      throw new Error("med_safety_credit_columns_missing");
+    }
+    throw fallbackRes.error;
+  }
+  return toSearchCreditLedgerRow(fallbackRes.data, false);
+}
+
+async function updateSearchCreditLedgerRow(input: {
+  userId: string;
+  current: SearchCreditLedgerRow;
+  next: SearchCreditLedgerRow;
+  nowIso?: string;
+}) {
+  const admin = getSupabaseAdmin();
+  const nowIso = input.nowIso ?? new Date().toISOString();
+  if (input.current.supportsTypedColumns) {
+    const { data, error } = await admin
+      .from("rnest_users")
+      .update({
+        med_safety_standard_included_credits: input.next.standardIncluded,
+        med_safety_standard_extra_credits: input.next.standardExtra,
+        med_safety_premium_included_credits: input.next.premiumIncluded,
+        med_safety_premium_extra_credits: input.next.premiumExtra,
+        med_safety_extra_credits: input.next.standardExtra,
+        last_seen: nowIso,
+      })
+      .eq("user_id", input.userId)
+      .eq("med_safety_standard_included_credits", input.current.standardIncluded)
+      .eq("med_safety_standard_extra_credits", input.current.standardExtra)
+      .eq("med_safety_premium_included_credits", input.current.premiumIncluded)
+      .eq("med_safety_premium_extra_credits", input.current.premiumExtra)
+      .select("user_id")
+      .maybeSingle();
+    if (error) {
+      if (isMissingMedSafetyCreditColumnError(error)) {
+        throw new Error("billing_schema_outdated_search_credit_columns");
+      }
+      throw error;
+    }
+    return Boolean(data);
+  }
+
+  if (
+    input.current.standardIncluded !== input.next.standardIncluded ||
+    input.current.premiumIncluded !== input.next.premiumIncluded ||
+    input.current.premiumExtra !== input.next.premiumExtra
+  ) {
+    throw new Error("billing_schema_outdated_search_credit_columns");
+  }
+
   const { data, error } = await admin
     .from("rnest_users")
-    .select("med_safety_extra_credits, med_safety_daily_used, med_safety_usage_date")
-    .eq("user_id", userId)
+    .update({
+      med_safety_extra_credits: input.next.standardExtra,
+      last_seen: nowIso,
+    })
+    .eq("user_id", input.userId)
+    .eq("med_safety_extra_credits", input.current.standardExtra)
+    .select("user_id")
     .maybeSingle();
   if (error) {
     if (isMissingMedSafetyCreditColumnError(error)) {
-      throw new Error("med_safety_credit_columns_missing");
+      throw new Error("billing_schema_outdated_search_credit_columns");
     }
     throw error;
   }
-  return {
-    extraCredits: toNonNegativeInt(data?.med_safety_extra_credits, 0),
-    dailyUsed: toNonNegativeInt(data?.med_safety_daily_used, 0),
-    usageDate: sanitizeIsoDate(data?.med_safety_usage_date),
-  };
+  return Boolean(data);
+}
+
+async function grantSearchCredits(input: {
+  userId: string;
+  searchType: SearchCreditType;
+  bucket: MedSafetyCreditBucket;
+  credits: number;
+  nowIso?: string;
+  reason?: string;
+  planTierSnapshot?: PlanTier | null;
+  metadata?: Json | null;
+}): Promise<SubscriptionSnapshot> {
+  const credits = Math.max(0, Math.round(input.credits));
+  if (credits <= 0) return readSubscription(input.userId);
+  await ensureUserRow(input.userId);
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const row = await readSearchCreditLedgerRow(input.userId);
+    const next: SearchCreditLedgerRow = { ...row };
+
+    if (input.searchType === "standard" && input.bucket === "included") next.standardIncluded += credits;
+    if (input.searchType === "standard" && input.bucket === "extra") next.standardExtra += credits;
+    if (input.searchType === "premium" && input.bucket === "included") next.premiumIncluded += credits;
+    if (input.searchType === "premium" && input.bucket === "extra") next.premiumExtra += credits;
+
+    const updated = await updateSearchCreditLedgerRow({
+      userId: input.userId,
+      current: row,
+      next,
+      nowIso: input.nowIso,
+    });
+    if (!updated) continue;
+
+    try {
+      await appendMedSafetyUsageEvent({
+        userId: input.userId,
+        searchType: input.searchType,
+        bucket: input.bucket,
+        eventType: "grant",
+        delta: credits,
+        reason: String(input.reason ?? "").trim() || "credit_grant",
+        planTierSnapshot: input.planTierSnapshot ?? null,
+        metadata:
+          (input.metadata ??
+            ({
+              grantedCredits: credits,
+            } satisfies Json)) as Json,
+      });
+    } catch {
+      // usage ledger write failure should not block credit grant
+    }
+    return readSubscription(input.userId, { skipReconcile: true });
+  }
+
+  throw new Error("med_safety_credit_race_retry_exceeded");
+}
+
+async function replaceIncludedSearchCredits(input: {
+  userId: string;
+  standardIncluded: number;
+  premiumIncluded: number;
+  nowIso?: string;
+  reason?: string;
+  planTierSnapshot?: PlanTier | null;
+  metadata?: Json | null;
+}): Promise<SubscriptionSnapshot> {
+  const standardIncluded = Math.max(0, Math.round(input.standardIncluded));
+  const premiumIncluded = Math.max(0, Math.round(input.premiumIncluded));
+  await ensureUserRow(input.userId);
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const row = await readSearchCreditLedgerRow(input.userId);
+    const next: SearchCreditLedgerRow = {
+      ...row,
+      standardIncluded,
+      premiumIncluded,
+    };
+    const updated = await updateSearchCreditLedgerRow({
+      userId: input.userId,
+      current: row,
+      next,
+      nowIso: input.nowIso,
+    });
+    if (!updated) continue;
+
+    try {
+      if (standardIncluded > 0) {
+        await appendMedSafetyUsageEvent({
+          userId: input.userId,
+          searchType: "standard",
+          bucket: "included",
+          eventType: "grant",
+          delta: standardIncluded,
+          reason: String(input.reason ?? "").trim() || "subscription_plan_grant",
+          planTierSnapshot: input.planTierSnapshot ?? null,
+          metadata: {
+            grantedCredits: standardIncluded,
+            creditType: "standard",
+            ...(typeof input.metadata === "object" && input.metadata !== null ? (input.metadata as Record<string, Json>) : {}),
+          } as Json,
+        });
+      }
+      if (premiumIncluded > 0) {
+        await appendMedSafetyUsageEvent({
+          userId: input.userId,
+          searchType: "premium",
+          bucket: "included",
+          eventType: "grant",
+          delta: premiumIncluded,
+          reason: String(input.reason ?? "").trim() || "subscription_plan_grant",
+          planTierSnapshot: input.planTierSnapshot ?? null,
+          metadata: {
+            grantedCredits: premiumIncluded,
+            creditType: "premium",
+            ...(typeof input.metadata === "object" && input.metadata !== null ? (input.metadata as Record<string, Json>) : {}),
+          } as Json,
+        });
+      }
+    } catch {
+      // usage ledger write failure should not block included credit replacement
+    }
+
+    return readSubscription(input.userId, { skipReconcile: true });
+  }
+
+  throw new Error("med_safety_credit_race_retry_exceeded");
 }
 
 export async function addMedSafetyExtraCredits(input: {
@@ -999,135 +1382,106 @@ export async function addMedSafetyExtraCredits(input: {
   reason?: string;
   metadata?: Json | null;
 }): Promise<SubscriptionSnapshot> {
-  const credits = Math.max(0, Math.round(input.credits));
-  if (credits <= 0) return readSubscription(input.userId);
-  await ensureUserRow(input.userId);
-
-  const admin = getSupabaseAdmin();
-  const nowIso = input.nowIso ?? new Date().toISOString();
-
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    const row = await readMedSafetyCreditRow(input.userId);
-    const nextExtra = row.extraCredits + credits;
-    const { data, error } = await admin
-      .from("rnest_users")
-      .update({
-        med_safety_extra_credits: nextExtra,
-        last_seen: nowIso,
-      })
-      .eq("user_id", input.userId)
-      .eq("med_safety_extra_credits", row.extraCredits)
-      .select("user_id")
-      .maybeSingle();
-    if (error) {
-      if (isMissingMedSafetyCreditColumnError(error)) {
-        throw new Error("med_safety_credit_columns_missing");
-      }
-      throw error;
-    }
-    if (data) {
-      try {
-        await appendMedSafetyUsageEvent({
-          userId: input.userId,
-          source: "extra",
-          delta: credits,
-          reason: String(input.reason ?? "").trim() || "credit_grant",
-          metadata:
-            (input.metadata ??
-              ({
-                grantedCredits: credits,
-              } satisfies Json)) as Json,
-        });
-      } catch {
-        // usage ledger write failure should not block credit grant
-      }
-      return readSubscription(input.userId, { skipReconcile: true });
-    }
-  }
-
-  throw new Error("med_safety_credit_race_retry_exceeded");
+  return grantSearchCredits({
+    userId: input.userId,
+    searchType: "standard",
+    bucket: "extra",
+    credits: input.credits,
+    nowIso: input.nowIso,
+    reason: input.reason,
+    metadata: input.metadata ?? null,
+  });
 }
 
 export async function consumeMedSafetyCredit(input: {
   userId: string;
+  searchType: SearchCreditType;
 }): Promise<MedSafetyCreditConsumeResult> {
   await ensureUserRow(input.userId);
-  const admin = getSupabaseAdmin();
   const subscription = await readSubscription(input.userId);
-  const hasPaidAccess = subscription.hasPaidAccess;
-  const today = toKstDateISO(new Date());
   const nowIso = new Date().toISOString();
+  const includedCreditAccess = hasIncludedSearchCreditAccess(subscription);
 
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    const row = await readMedSafetyCreditRow(input.userId);
-    const extraCredits = row.extraCredits;
+    const row = await readSearchCreditLedgerRow(input.userId);
+    const next: SearchCreditLedgerRow = { ...row };
+    let bucket: MedSafetyCreditBucket | null = null;
 
-    let source: MedSafetyCreditSource | null = null;
-    let nextExtra = extraCredits;
-
-    if (extraCredits > 0) {
-      source = "extra";
-      nextExtra = extraCredits - 1;
+    if (input.searchType === "standard") {
+      if (includedCreditAccess && row.standardIncluded > 0) {
+        bucket = "included";
+        next.standardIncluded -= 1;
+      } else if (row.standardExtra > 0) {
+        bucket = "extra";
+        next.standardExtra -= 1;
+      }
     } else {
+      if (!row.supportsTypedColumns) {
+        throw new Error("billing_schema_outdated_search_credit_columns");
+      }
+      if (includedCreditAccess && row.premiumIncluded > 0) {
+        bucket = "included";
+        next.premiumIncluded -= 1;
+      } else if (row.premiumExtra > 0) {
+        bucket = "extra";
+        next.premiumExtra -= 1;
+      }
+    }
+
+    if (!bucket) {
       return {
         allowed: false,
-        source: null,
+        searchType: input.searchType,
+        bucket: null,
         reason: "insufficient_med_safety_credits",
         quota: buildMedSafetyQuotaSnapshot({
-          hasPaidAccess,
-          usageDate: today,
-          dailyUsed: 0,
-          extraCredits,
+          tier: subscription.tier,
+          standardIncluded: includedCreditAccess ? row.standardIncluded : 0,
+          standardExtra: row.standardExtra,
+          premiumIncluded: includedCreditAccess ? row.premiumIncluded : 0,
+          premiumExtra: row.premiumExtra,
         }),
       };
     }
 
-    const { data, error } = await admin
-      .from("rnest_users")
-      .update({
-        med_safety_usage_date: today,
-        med_safety_daily_used: 0,
-        med_safety_extra_credits: nextExtra,
-        last_seen: nowIso,
-      })
-      .eq("user_id", input.userId)
-      .eq("med_safety_extra_credits", row.extraCredits)
-      .select("user_id")
-      .maybeSingle();
-    if (error) {
-      if (isMissingMedSafetyCreditColumnError(error)) {
-        throw new Error("med_safety_credit_columns_missing");
-      }
-      throw error;
-    }
-    if (!data) continue;
+    const updated = await updateSearchCreditLedgerRow({
+      userId: input.userId,
+      current: row,
+      next,
+      nowIso,
+    });
+    if (!updated) continue;
 
-    if (source) {
-      try {
-        await appendMedSafetyUsageEvent({
-          userId: input.userId,
-          source,
-          delta: -1,
-          reason: "med_safety_search_consume",
-          metadata: {
-            usageDate: today,
-            hasPaidAccess,
-          } as Json,
-        });
-      } catch {
-        // usage ledger write failure should not block main flow
-      }
+    try {
+      await appendMedSafetyUsageEvent({
+        userId: input.userId,
+        searchType: input.searchType,
+        bucket,
+        eventType: "consume",
+        delta: -1,
+        reason: "med_safety_search_consume",
+        planTierSnapshot: subscription.tier,
+        metadata: {
+          hasPaidAccess: subscription.hasPaidAccess,
+          usedIncludedCreditAccess: includedCreditAccess,
+          remainingAfter: input.searchType === "standard" ? next.standardIncluded + next.standardExtra : next.premiumIncluded + next.premiumExtra,
+        } as Json,
+      });
+    } catch {
+      // usage ledger write failure should not block main flow
     }
 
     return {
       allowed: true,
-      source,
+      searchType: input.searchType,
+      bucket,
       reason: null,
       quota: buildMedSafetyQuotaSnapshot({
-        hasPaidAccess,
-        usageDate: today,
-        dailyUsed: 0,
-        extraCredits: nextExtra,
+        tier: subscription.tier,
+        standardIncluded: includedCreditAccess ? next.standardIncluded : 0,
+        standardExtra: next.standardExtra,
+        premiumIncluded: includedCreditAccess ? next.premiumIncluded : 0,
+        premiumExtra: next.premiumExtra,
       }),
     };
   }
@@ -1137,47 +1491,39 @@ export async function consumeMedSafetyCredit(input: {
 
 export async function restoreConsumedMedSafetyCredit(input: {
   userId: string;
-  source: MedSafetyCreditSource;
+  searchType: SearchCreditType;
+  bucket: MedSafetyCreditBucket | null;
 }): Promise<void> {
+  if (!input.bucket) return;
   await ensureUserRow(input.userId);
-  const admin = getSupabaseAdmin();
-  const today = toKstDateISO(new Date());
+  const subscription = await readSubscription(input.userId).catch(() => null);
 
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    const row = await readMedSafetyCreditRow(input.userId);
-    const usedToday = row.usageDate === today ? row.dailyUsed : 0;
-    const extraCredits = row.extraCredits;
-    const nextDailyUsed = input.source === "daily" ? Math.max(0, usedToday - 1) : usedToday;
-    const nextExtra = input.source === "extra" ? extraCredits + 1 : extraCredits;
-    const nextUsageDate = row.usageDate || today;
+    const row = await readSearchCreditLedgerRow(input.userId);
+    const next: SearchCreditLedgerRow = { ...row };
 
-    const { data, error } = await admin
-      .from("rnest_users")
-      .update({
-        med_safety_usage_date: nextUsageDate,
-        med_safety_daily_used: nextDailyUsed,
-        med_safety_extra_credits: nextExtra,
-      })
-      .eq("user_id", input.userId)
-      .eq("med_safety_daily_used", row.dailyUsed)
-      .eq("med_safety_extra_credits", row.extraCredits)
-      .select("user_id")
-      .maybeSingle();
+    if (input.searchType === "standard" && input.bucket === "included") next.standardIncluded += 1;
+    if (input.searchType === "standard" && input.bucket === "extra") next.standardExtra += 1;
+    if (input.searchType === "premium" && input.bucket === "included") next.premiumIncluded += 1;
+    if (input.searchType === "premium" && input.bucket === "extra") next.premiumExtra += 1;
 
-    if (error) {
-      if (isMissingMedSafetyCreditColumnError(error)) return;
-      throw error;
-    }
-    if (data) {
+    const updated = await updateSearchCreditLedgerRow({
+      userId: input.userId,
+      current: row,
+      next,
+    });
+    if (updated) {
       try {
         await appendMedSafetyUsageEvent({
           userId: input.userId,
-          source: input.source === "daily" ? "restore_daily" : "restore_extra",
+          searchType: input.searchType,
+          bucket: input.bucket,
+          eventType: "restore",
           delta: 1,
           reason: "med_safety_search_restore",
+          planTierSnapshot: subscription?.tier ?? null,
           metadata: {
-            usageDate: today,
-            restoredSource: input.source,
+            restoredBucket: input.bucket,
           } as Json,
         });
       } catch {
@@ -1244,8 +1590,10 @@ export async function readBillingPurchaseSummary(userId: string): Promise<Billin
 export async function createBillingOrder(input: {
   userId: string;
   orderId: string;
-  planTier: Exclude<PlanTier, "free">;
+  planTier: PlanTier;
   orderKind?: BillingOrderKind;
+  productId?: CheckoutProductId | null;
+  creditType?: SearchCreditType | null;
   creditPackUnits?: number;
   amount: number;
   currency?: string;
@@ -1256,7 +1604,7 @@ export async function createBillingOrder(input: {
   const plan = getPlanDefinition(input.planTier);
   const orderKind: BillingOrderKind = input.orderKind === "credit_pack" ? "credit_pack" : "subscription";
   const creditPackUnits = orderKind === "credit_pack" ? Math.max(1, toNonNegativeInt(input.creditPackUnits, 10)) : 0;
-  const normalizedPersistedTier = normalizePersistedPaidPlanTier(input.planTier);
+  const normalizedPersistedTier = input.planTier === "free" ? "free" : normalizePersistedPaidPlanTier(input.planTier);
 
   await ensureUserRow(input.userId);
 
@@ -1278,6 +1626,8 @@ export async function createBillingOrder(input: {
     plan_tier: input.planTier,
     order_kind: orderKind,
     credit_pack_units: creditPackUnits,
+    product_id: input.productId ?? null,
+    credit_type: input.creditType ?? null,
     amount: Math.round(input.amount),
     currency: input.currency ?? "KRW",
     status: "READY",
@@ -1285,7 +1635,20 @@ export async function createBillingOrder(input: {
     created_at: now,
     updated_at: now,
   });
-  if (!fullInsert.error) return;
+  if (!fullInsert.error) {
+    void appendBillingAnalyticsEvent({
+      userId: input.userId,
+      eventName: orderKind === "credit_pack" ? "credit_pack_checkout_started" : "plan_checkout_started",
+      planTierSnapshot: input.planTier,
+      props: {
+        productId: input.productId ?? null,
+        creditType: input.creditType ?? null,
+        creditPackUnits,
+        amount: Math.round(input.amount),
+      } satisfies Json,
+    }).catch(() => undefined);
+    return;
+  }
 
   let lastInsertError: any = fullInsert.error;
   const canRetryWithLegacyPlanTier =
@@ -1298,6 +1661,8 @@ export async function createBillingOrder(input: {
       plan_tier: normalizedPersistedTier,
       order_kind: orderKind,
       credit_pack_units: creditPackUnits,
+      product_id: input.productId ?? null,
+      credit_type: input.creditType ?? null,
       amount: Math.round(input.amount),
       currency: input.currency ?? "KRW",
       status: "READY",
@@ -1305,8 +1670,25 @@ export async function createBillingOrder(input: {
       created_at: now,
       updated_at: now,
     });
-    if (!legacyTierInsert.error) return;
+    if (!legacyTierInsert.error) {
+      void appendBillingAnalyticsEvent({
+        userId: input.userId,
+        eventName: orderKind === "credit_pack" ? "credit_pack_checkout_started" : "plan_checkout_started",
+        planTierSnapshot: input.planTier,
+        props: {
+          productId: input.productId ?? null,
+          creditType: input.creditType ?? null,
+          creditPackUnits,
+          amount: Math.round(input.amount),
+        } satisfies Json,
+      }).catch(() => undefined);
+      return;
+    }
     lastInsertError = legacyTierInsert.error;
+  }
+
+  if (input.planTier === "free" && isPlanTierConstraintError(lastInsertError, "plan_tier")) {
+    throw new Error("billing_schema_outdated_search_credit_columns");
   }
 
   if (!isOptionalBillingOrderColumnError(lastInsertError)) throw lastInsertError;
@@ -1323,6 +1705,17 @@ export async function createBillingOrder(input: {
     updated_at: now,
   });
   if (fallbackInsert.error) throw fallbackInsert.error;
+  void appendBillingAnalyticsEvent({
+    userId: input.userId,
+    eventName: orderKind === "credit_pack" ? "credit_pack_checkout_started" : "plan_checkout_started",
+    planTierSnapshot: input.planTier,
+    props: {
+      productId: input.productId ?? null,
+      creditType: input.creditType ?? null,
+      creditPackUnits,
+      amount: Math.round(input.amount),
+    } satisfies Json,
+  }).catch(() => undefined);
 }
 
 export async function readBillingOrderByOrderId(input: {
@@ -1947,6 +2340,8 @@ export async function downgradeToFreeNow(input: {
     subscription_cancel_scheduled_at: null,
     subscription_canceled_at: nowIso,
     subscription_cancel_reason: sanitizeCancelReason(input.reason),
+    med_safety_standard_included_credits: 0,
+    med_safety_premium_included_credits: 0,
     last_seen: nowIso,
   });
   return readSubscription(input.userId);
@@ -1964,7 +2359,7 @@ export async function markBillingOrderDoneAndApplyPlan(input: {
 
   const fullOrderRes = await admin
     .from("billing_orders")
-    .select("order_id, user_id, plan_tier, order_name, order_kind, credit_pack_units, amount, status")
+    .select("order_id, user_id, plan_tier, order_name, order_kind, credit_pack_units, product_id, credit_type, amount, status")
     .eq("order_id", input.orderId)
     .eq("user_id", input.userId)
     .maybeSingle();
@@ -1999,6 +2394,8 @@ export async function markBillingOrderDoneAndApplyPlan(input: {
   const orderKind = inferOrderKindFromLegacyFields(order);
   const paidPlanTier = inferPlanTierFromLegacyFields(order);
   const creditPackUnits = inferCreditPackUnitsFromLegacyFields(order, orderKind);
+  const productId = inferProductIdFromLegacyFields(order, orderKind);
+  const creditType = inferCreditTypeFromLegacyFields(order, productId);
   if (orderKind === "subscription" && paidPlanTier === "free") {
     throw new Error("invalid_plan");
   }
@@ -2029,16 +2426,33 @@ export async function markBillingOrderDoneAndApplyPlan(input: {
   }
 
   if (orderKind === "credit_pack") {
-    await addMedSafetyExtraCredits({
+    await grantSearchCredits({
       userId: input.userId,
+      searchType: creditType ?? "standard",
+      bucket: "extra",
       credits: creditPackUnits,
       nowIso,
       reason: "credit_pack_purchase",
+      planTierSnapshot: paidPlanTier,
       metadata: {
         grantedCredits: creditPackUnits,
+        creditType: creditType ?? "standard",
+        productId,
         orderId: input.orderId,
       } as Json,
     });
+    void appendBillingAnalyticsEvent({
+      userId: input.userId,
+      eventName: "credit_pack_checkout_succeeded",
+      planTierSnapshot: paidPlanTier,
+      props: {
+        productId,
+        creditType: creditType ?? "standard",
+        creditPackUnits,
+        amount: expectedAmount,
+        orderId: input.orderId,
+      } satisfies Json,
+    }).catch(() => undefined);
     return readSubscription(input.userId, { skipReconcile: true });
   }
 
@@ -2064,19 +2478,34 @@ export async function markBillingOrderDoneAndApplyPlan(input: {
     last_seen: nowIso,
   });
 
-  if (plan.medSafetyIncludedCredits > 0) {
-    await addMedSafetyExtraCredits({
-      userId: input.userId,
-      credits: plan.medSafetyIncludedCredits,
-      nowIso,
-      reason: "subscription_plan_grant",
-      metadata: {
-        grantedCredits: plan.medSafetyIncludedCredits,
-        planTier: paidPlanTier,
-        orderId: input.orderId,
-      } as Json,
-    });
-  }
+  const includedStandardCredits = Math.max(0, plan.includedSearchCredits.standard ?? 0);
+  const includedPremiumCredits = Math.max(0, plan.includedSearchCredits.premium ?? 0);
+
+  await replaceIncludedSearchCredits({
+    userId: input.userId,
+    standardIncluded: includedStandardCredits,
+    premiumIncluded: includedPremiumCredits,
+    nowIso,
+    reason: "subscription_plan_grant",
+    planTierSnapshot: paidPlanTier,
+    metadata: {
+      planTier: paidPlanTier,
+      orderId: input.orderId,
+    } as Json,
+  });
+
+  void appendBillingAnalyticsEvent({
+    userId: input.userId,
+    eventName: "plan_checkout_succeeded",
+    planTierSnapshot: paidPlanTier,
+    props: {
+      productId,
+      amount: expectedAmount,
+      orderId: input.orderId,
+      includedStandardCredits,
+      includedPremiumCredits,
+    } satisfies Json,
+  }).catch(() => undefined);
 
   return readSubscription(input.userId, { skipReconcile: true });
 }
