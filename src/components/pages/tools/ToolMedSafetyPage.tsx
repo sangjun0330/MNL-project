@@ -28,7 +28,7 @@ const ACCENT_PILL_CLASS =
 const COMPOSER_ACTION_BTN_CLASS =
   "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#E6E1F7] bg-white/78 text-ios-sub backdrop-blur-md transition hover:border-[color:var(--rnest-accent-border)] hover:bg-white disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-[#E6E1F7] disabled:hover:bg-white/78 sm:h-11 sm:w-11";
 const COMPOSER_SELECTOR_BTN_CLASS =
-  "inline-flex h-10 min-w-[74px] items-center justify-center gap-1.5 rounded-full border border-[#E6E1F7] bg-white/86 px-2.5 text-[11.5px] font-semibold text-ios-text backdrop-blur-md transition hover:border-[color:var(--rnest-accent-border)] hover:bg-white disabled:cursor-not-allowed disabled:opacity-45 sm:h-11 sm:min-w-[82px] sm:px-3 sm:text-[12px]";
+  "inline-flex h-10 min-w-[74px] items-center justify-center gap-1.5 rounded-full border border-[#DDD6F3] bg-white/90 px-2.5 text-[11.5px] font-semibold text-ios-text shadow-[0_10px_24px_rgba(15,23,42,0.08)] backdrop-blur-xl transition hover:border-[color:var(--rnest-accent-border)] hover:bg-white/94 disabled:cursor-not-allowed disabled:opacity-45 sm:h-11 sm:min-w-[82px] sm:px-3 sm:text-[12px]";
 const COMPOSER_SEND_BTN_CLASS =
   "flex h-10 min-w-[48px] shrink-0 items-center justify-center rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent)] px-2.5 text-white shadow-[0_12px_26px_rgba(123,111,208,0.22)] transition hover:bg-[color:var(--rnest-accent-strong)] disabled:cursor-not-allowed disabled:border-[#E6E1F7] disabled:bg-[#ECEAF5] disabled:text-[#A49DBD] disabled:shadow-none sm:h-11 sm:min-w-[52px] sm:px-3";
 const STREAMING_CARD_CLASS =
@@ -815,9 +815,10 @@ export function ToolMedSafetyPage() {
   const activeSearchMeta = getSearchCreditMeta(activeSearchType);
   const selectedSearchQuota = getQuotaForSearchType(medSafetyQuota, activeSearchType);
   const selectedQuotaRemaining = Math.max(0, Number(selectedSearchQuota?.totalRemaining ?? 0));
-  const quotaRemaining = Math.max(0, Number(medSafetyQuota?.totalRemaining ?? 0));
   const alternateSearchType: SearchCreditType = activeSearchType === "premium" ? "standard" : "premium";
   const alternateQuotaRemaining = Math.max(0, Number(getQuotaForSearchType(medSafetyQuota, alternateSearchType)?.totalRemaining ?? 0));
+  const standardQuotaRemaining = Math.max(0, Number(medSafetyQuota?.standard.totalRemaining ?? 0));
+  const premiumQuotaRemaining = Math.max(0, Number(medSafetyQuota?.premium.totalRemaining ?? 0));
   const activePlanTitle = getPlanDefinition(activeTier).title;
   const billingActionHref = isFreePlan
     ? withReturnTo("/settings/billing/upgrade", "/tools/med-safety")
@@ -830,7 +831,6 @@ export function ToolMedSafetyPage() {
   const hasTypedInput = normalizeQuestionInput(input).length > 0;
   const isComposerLocked = showSessionDecisionPrompt;
   const canSubmit = !isComposerLocked && !isLoading && canAsk && (hasTypedInput || Boolean(selectedImage));
-  const showCreditPurchaseCta = quotaKnown && selectedQuotaRemaining <= 0;
 
   useEffect(() => {
     setMounted(true);
@@ -1306,14 +1306,23 @@ export function ToolMedSafetyPage() {
 
             <div className="mt-4 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center rounded-full border border-[#DCE6F2] bg-[#F5F8FD] px-3 py-1.5 text-[11px] font-semibold text-[#24415D]">
+                  {t("기본")}: {standardQuotaRemaining}
+                </span>
                 <span className={ACCENT_PILL_CLASS}>
-                  {t("전체 크레딧")}: {quotaRemaining}
+                  {t("프리미엄")}: {premiumQuotaRemaining}
                 </span>
                 <span className={META_PILL_CLASS}>
                   {t("플랜")}: {activePlanTitle}
                 </span>
               </div>
               <div className="flex flex-wrap gap-2">
+                <Link
+                  href={billingActionHref}
+                  className="inline-flex h-10 items-center justify-center rounded-full border border-[#E8E8EC] bg-white px-4 text-[12.5px] font-semibold text-ios-text"
+                >
+                  {t(isFreePlan ? "플랜 보기" : "추가 크레딧 구매")}
+                </Link>
                 {hasConversation && lastAssistantMessage ? (
                   <button type="button" onClick={() => void copyLatestAnswer()} className={SECONDARY_FLAT_BTN}>
                     {t("복사")}
@@ -1323,14 +1332,6 @@ export function ToolMedSafetyPage() {
                   <button type="button" onClick={resetConversation} className={SECONDARY_FLAT_BTN}>
                     {t("새 검색")}
                   </button>
-                ) : null}
-                {showCreditPurchaseCta ? (
-                  <Link
-                    href={billingActionHref}
-                    className="inline-flex h-10 items-center justify-center rounded-full border border-[#E8E8EC] bg-white px-4 text-[12.5px] font-semibold text-ios-text"
-                  >
-                    {t(isFreePlan ? "플랜 업그레이드" : "추가 크레딧 구매하기")}
-                  </Link>
                 ) : null}
                 <Link
                   href="/tools/med-safety/recent"
@@ -1556,133 +1557,140 @@ export function ToolMedSafetyPage() {
                   </button>
                 </div>
               ) : null}
-              <div className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto] items-end gap-1.5 sm:gap-2">
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className={COMPOSER_ACTION_BTN_CLASS}
-                  disabled={isComposerLocked}
-                  aria-label={t("이미지 첨부")}
-                >
-                  <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
-                    <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                  </svg>
-                </button>
-                <div className="flex min-h-[54px] items-end rounded-[22px] border border-[#ECE7F7] bg-white/88 px-3 py-3 transition focus-within:border-[color:var(--rnest-accent-border)] focus-within:bg-white sm:min-h-[56px] sm:px-4">
-                  <textarea
-                    ref={composerInputRef}
-                    value={input}
-                    onChange={(event) => setInput(event.target.value)}
-                    onPaste={handleComposerPaste}
-                    onFocus={() => setIsComposerFocused(true)}
-                    onBlur={() => setIsComposerFocused(false)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-                        event.preventDefault();
-                        void submitQuestion();
-                      }
-                    }}
-                    rows={1}
-                    className="max-h-[220px] min-h-[28px] flex-1 resize-none overflow-y-auto border-0 bg-transparent p-0 text-[15px] leading-7 text-ios-text shadow-none outline-none placeholder:text-ios-sub disabled:cursor-not-allowed disabled:text-ios-sub"
-                    placeholder={hasConversation ? t("예: 그럼 중심정맥으로만 줘야 하나요?") : t("예: norepinephrine 투여 시 주의사항이 뭐야?")}
-                    autoCapitalize="off"
-                    autoCorrect="off"
-                    autoComplete="off"
-                    spellCheck={false}
-                    aria-label={t("임상 질문 입력")}
-                    disabled={isComposerLocked}
-                  />
-                </div>
-                <div ref={searchTypeMenuRef} className="relative">
+              <div className="flex flex-col gap-2">
+                <div className="flex items-end gap-2">
+                  <div className="flex min-h-[56px] flex-1 items-end rounded-[22px] border border-[#ECE7F7] bg-white/88 px-3 py-3 transition focus-within:border-[color:var(--rnest-accent-border)] focus-within:bg-white sm:px-4">
+                    <textarea
+                      ref={composerInputRef}
+                      value={input}
+                      onChange={(event) => setInput(event.target.value)}
+                      onPaste={handleComposerPaste}
+                      onFocus={() => setIsComposerFocused(true)}
+                      onBlur={() => setIsComposerFocused(false)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                          event.preventDefault();
+                          void submitQuestion();
+                        }
+                      }}
+                      rows={1}
+                      className="max-h-[220px] min-h-[28px] flex-1 resize-none overflow-y-auto border-0 bg-transparent p-0 text-[16px] leading-7 text-ios-text shadow-none outline-none placeholder:text-ios-sub disabled:cursor-not-allowed disabled:text-ios-sub"
+                      placeholder={hasConversation ? t("예: 그럼 중심정맥으로만 줘야 하나요?") : t("예: norepinephrine 투여 시 주의사항이 뭐야?")}
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      autoComplete="off"
+                      spellCheck={false}
+                      aria-label={t("임상 질문 입력")}
+                      disabled={isComposerLocked}
+                    />
+                  </div>
                   <button
                     type="button"
-                    onClick={() => setIsSearchTypeMenuOpen((current) => !current)}
-                    className={COMPOSER_SELECTOR_BTN_CLASS}
-                    disabled={isComposerLocked}
-                    aria-haspopup="menu"
-                    aria-expanded={isSearchTypeMenuOpen}
-                    aria-label={t("모델 선택")}
+                    className={`${COMPOSER_SEND_BTN_CLASS} h-[56px] min-w-[56px] self-stretch rounded-[22px] px-0 sm:min-w-[60px]`}
+                    onClick={() => void submitQuestion()}
+                    disabled={!canSubmit}
+                    aria-label={isLoading ? t("질문 중...") : t("보내기")}
                   >
-                    <span>{t(activeSearchMeta.shortTitle)}</span>
-                    <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4 text-ios-sub" aria-hidden="true">
-                      <path d="M5 7.5l5 5 5-5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                    {isLoading ? (
+                      <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 animate-spin" aria-hidden="true">
+                        <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" opacity="0.3" />
+                        <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                      </svg>
+                    ) : (
+                      <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
+                        <path d="M5 12h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                        <path d="M13 6l6 6-6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className={COMPOSER_ACTION_BTN_CLASS}
+                    disabled={isComposerLocked}
+                    aria-label={t("이미지 첨부")}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
+                      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                     </svg>
                   </button>
-                  {isSearchTypeMenuOpen ? (
-                    <div className="absolute bottom-[calc(100%+10px)] right-0 z-[80] w-[220px] max-w-[calc(100vw-32px)] rounded-[22px] border border-[#E6E1F7] bg-white/96 p-2 shadow-[0_18px_36px_rgba(15,23,42,0.16)] backdrop-blur-xl">
-                      {(["standard", "premium"] as const).map((type) => {
-                        const meta = getSearchCreditMeta(type);
-                        const active = activeSearchType === type;
-                        return (
-                          <button
-                            key={type}
-                            type="button"
-                            onClick={() => {
-                              setSelectedSearchType(type);
-                              setIsSearchTypeMenuOpen(false);
-                              if (type !== activeSearchType) {
-                                void trackBillingEvent("search_mode_selected", subscription?.tier ?? "free", {
-                                  searchType: type,
-                                  source: "med_safety_composer_picker",
-                                });
-                              }
-                            }}
-                            className={`flex w-full items-start justify-between gap-3 rounded-[18px] px-3 py-3 text-left transition ${
-                              active ? "bg-[color:var(--rnest-accent-soft)]" : "hover:bg-[#F7F7FA]"
-                            }`}
-                            aria-pressed={active}
-                          >
-                            <div className="min-w-0 pr-2">
-                              <div className={`text-[13px] font-semibold ${active ? "text-[color:var(--rnest-accent)]" : "text-ios-text"}`}>
-                                {t(meta.title)}
-                              </div>
-                              <div className="mt-0.5 text-[11.5px] leading-5 text-ios-sub">{t(meta.description)}</div>
-                            </div>
-                            <span
-                              className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${
-                                active
-                                  ? "border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent)] text-white"
-                                  : "border-[#D7DCEA] bg-white text-transparent"
-                              }`}
-                              aria-hidden="true"
-                            >
-                              <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
-                                <path
-                                  fillRule="evenodd"
-                                  d="M16.704 5.29a1 1 0 0 1 .006 1.414l-7.2 7.26a1 1 0 0 1-1.42 0L3.29 9.165a1 1 0 1 1 1.42-1.408l4.09 4.123 6.49-6.543a1 1 0 0 1 1.414-.006z"
-                                  clipRule="evenodd"
-                                />
-                              </svg>
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : null}
+                  <div ref={searchTypeMenuRef} className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setIsSearchTypeMenuOpen((current) => !current)}
+                      className={COMPOSER_SELECTOR_BTN_CLASS}
+                      disabled={isComposerLocked}
+                      aria-haspopup="menu"
+                      aria-expanded={isSearchTypeMenuOpen}
+                      aria-label={t("모델 선택")}
+                    >
+                      <span>{t(activeSearchMeta.shortTitle)}</span>
+                      <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4 text-ios-sub" aria-hidden="true">
+                        <path d="M5 7.5l5 5 5-5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </button>
+                    {isSearchTypeMenuOpen ? (
+                      <div className="absolute bottom-[calc(100%+10px)] left-0 z-[80] w-[220px] max-w-[calc(100vw-32px)] rounded-[24px] border border-[#DCD7F1] bg-[rgba(247,244,255,0.82)] p-2.5 shadow-[0_22px_40px_rgba(15,23,42,0.18)] backdrop-blur-[22px]">
+                        <div className="space-y-2">
+                          {(["standard", "premium"] as const).map((type) => {
+                            const meta = getSearchCreditMeta(type);
+                            const active = activeSearchType === type;
+                            return (
+                              <button
+                                key={type}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedSearchType(type);
+                                  setIsSearchTypeMenuOpen(false);
+                                  if (type !== activeSearchType) {
+                                    void trackBillingEvent("search_mode_selected", subscription?.tier ?? "free", {
+                                      searchType: type,
+                                      source: "med_safety_composer_picker",
+                                    });
+                                  }
+                                }}
+                                className={`flex w-full items-start justify-between gap-3 rounded-[18px] border px-3 py-3 text-left backdrop-blur-md transition ${
+                                  active
+                                    ? "border-[#CFC6F5] bg-[rgba(255,255,255,0.72)] shadow-[0_12px_28px_rgba(123,111,208,0.14)]"
+                                    : "border-transparent bg-[rgba(255,255,255,0.34)] hover:border-[#E2DCF7] hover:bg-[rgba(255,255,255,0.55)]"
+                                }`}
+                                aria-pressed={active}
+                              >
+                                <div className="min-w-0 pr-2">
+                                  <div className={`text-[13px] font-semibold ${active ? "text-[color:var(--rnest-accent)]" : "text-ios-text"}`}>
+                                    {t(meta.title)}
+                                  </div>
+                                  <div className="mt-0.5 text-[11.5px] leading-5 text-ios-sub">{t(meta.description)}</div>
+                                </div>
+                                <span
+                                  className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${
+                                    active
+                                      ? "border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent)] text-white"
+                                      : "border-[#D7DCEA] bg-white text-transparent"
+                                  }`}
+                                  aria-hidden="true"
+                                >
+                                  <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
+                                    <path
+                                      fillRule="evenodd"
+                                      d="M16.704 5.29a1 1 0 0 1 .006 1.414l-7.2 7.26a1 1 0 0 1-1.42 0L3.29 9.165a1 1 0 1 1 1.42-1.408l4.09 4.123 6.49-6.543a1 1 0 0 1 1.414-.006z"
+                                      clipRule="evenodd"
+                                    />
+                                  </svg>
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  className={COMPOSER_SEND_BTN_CLASS}
-                  onClick={() => void submitQuestion()}
-                  disabled={!canSubmit}
-                  aria-label={isLoading ? t("질문 중...") : t("보내기")}
-                >
-                  {isLoading ? (
-                    <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 animate-spin" aria-hidden="true">
-                      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" opacity="0.3" />
-                      <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                    </svg>
-                  ) : (
-                    <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
-                      <path d="M5 12h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                      <path d="M13 6l6 6-6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  )}
-                </button>
               </div>
-              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] text-ios-sub">
+              <div className="mt-2 px-1 text-[11px] text-ios-sub">
                 <span>{t("환자 이름, 등록번호, 연락처 등 식별정보는 입력하지 마세요.")}</span>
-                <span>{hasConversation ? t("다른 주제로 바꾸려면 다른 질문하기를 눌러 주세요.") : t("이미지 붙여넣기/드래그도 가능합니다.")}</span>
               </div>
             </div>
           </div>
