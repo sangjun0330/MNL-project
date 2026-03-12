@@ -7,8 +7,11 @@ export type RNestMemoBlockType =
   | "numbered"
   | "checklist"
   | "callout"
+  | "quote"
+  | "toggle"
   | "divider"
   | "table"
+  | "bookmark"
 
 export type RNestMemoTableRow = {
   id: string
@@ -25,7 +28,9 @@ export type RNestMemoBlock = {
   id: string
   type: RNestMemoBlockType
   text?: string
+  detailText?: string
   checked?: boolean
+  collapsed?: boolean
   table?: RNestMemoTable
 }
 
@@ -33,6 +38,7 @@ export type RNestMemoDocument = {
   id: string
   title: string
   icon: string
+  coverStyle: string | null
   favorite: boolean
   trashedAt: number | null
   reminderAt: number | null
@@ -125,6 +131,34 @@ export type RNestMemoPreset = {
   create: () => RNestMemoDocument
 }
 
+export const memoIconOptions = [
+  "note",
+  "page",
+  "check",
+  "table",
+  "folder",
+  "clip",
+  "leaf",
+  "idea",
+  "book",
+  "spark",
+  "moon",
+  "pin",
+] as const
+
+export type RNestMemoIconId = (typeof memoIconOptions)[number]
+
+export const memoCoverOptions = [
+  "lavender-glow",
+  "soft-sky",
+  "mint-fog",
+  "sunset-blush",
+  "midnight-ink",
+  "paper-grid",
+] as const
+
+export type RNestMemoCoverId = (typeof memoCoverOptions)[number]
+
 const MAX_TITLE_LENGTH = 80
 const MAX_TAG_LENGTH = 24
 const MAX_TAGS = 8
@@ -146,6 +180,32 @@ export function createNotebookId(prefix: string) {
 function cleanText(value: unknown, maxLength: number) {
   if (typeof value !== "string") return ""
   return value.replace(/\r/g, "").replace(/\u0000/g, "").trim().slice(0, maxLength)
+}
+
+function normalizeMemoIcon(value: unknown, fallback: RNestMemoIconId): RNestMemoIconId {
+  const raw = cleanText(value, 24)
+  const legacyMap: Record<string, RNestMemoIconId> = {
+    "📝": "note",
+    "📄": "page",
+    "✅": "check",
+    "📋": "table",
+    "🗂": "folder",
+    "🧾": "clip",
+    "🌿": "leaf",
+    "💡": "idea",
+    "📚": "book",
+    "🫧": "spark",
+    "🌙": "moon",
+    "📌": "pin",
+  }
+  const normalized = (legacyMap[raw] ?? raw) as RNestMemoIconId
+  return memoIconOptions.includes(normalized) ? normalized : fallback
+}
+
+function normalizeMemoCover(value: unknown): RNestMemoCoverId | null {
+  const raw = cleanText(value, 32)
+  if (!raw) return null
+  return memoCoverOptions.includes(raw as RNestMemoCoverId) ? (raw as RNestMemoCoverId) : null
 }
 
 export function sanitizeNotebookTags(value: unknown) {
@@ -221,7 +281,12 @@ export function createMemoBlock(type: RNestMemoBlockType, input?: Partial<RNestM
     id: input?.id ?? createNotebookId("memo_block"),
     type,
     text: cleanText(input?.text, MAX_BLOCK_TEXT_LENGTH),
+    detailText:
+      type === "toggle" || type === "bookmark"
+        ? cleanText(input?.detailText, type === "bookmark" ? 240 : MAX_BLOCK_TEXT_LENGTH)
+        : undefined,
     checked: type === "checklist" ? Boolean(input?.checked) : undefined,
+    collapsed: type === "toggle" ? Boolean(input?.collapsed) : undefined,
   }
 }
 
@@ -252,22 +317,36 @@ export function coerceMemoBlockType(block: RNestMemoBlock, nextType: RNestMemoBl
     return createMemoBlock("divider", { id: block.id })
   }
 
+  if (nextType === "bookmark") {
+    const trimmed = preservedText.trim()
+    const looksLikeUrl = /^(https?:\/\/|mailto:|www\.)/i.test(trimmed)
+    return createMemoBlock("bookmark", {
+      id: block.id,
+      text: looksLikeUrl ? trimmed : "",
+      detailText: looksLikeUrl ? cleanText(block.detailText, 240) : trimmed,
+    })
+  }
+
   return createMemoBlock(nextType, {
     id: block.id,
     text: preservedText,
+    detailText: nextType === "toggle" ? cleanText(block.detailText, MAX_BLOCK_TEXT_LENGTH) : undefined,
     checked: nextType === "checklist" ? Boolean(block.checked) : undefined,
+    collapsed: nextType === "toggle" ? Boolean(block.collapsed) : undefined,
   })
 }
 
 function createMemoDocumentBase(input?: Partial<RNestMemoDocument>): RNestMemoDocument {
   const timestamp = nowTs()
-  const blocks =
-    input?.blocks?.slice(0, MAX_BLOCKS).map((block) => createMemoBlock(block.type, block)) ?? [createMemoBlock("paragraph")]
+  const candidateBlocks =
+    input?.blocks?.slice(0, MAX_BLOCKS).map((block) => createMemoBlock(block.type, block)) ?? []
+  const blocks = candidateBlocks.length > 0 ? candidateBlocks : [createMemoBlock("paragraph")]
 
   return {
     id: input?.id ?? createNotebookId("memo_doc"),
     title: cleanText(input?.title, MAX_TITLE_LENGTH) || "새 메모",
-    icon: sanitizeIcon(input?.icon, "📝"),
+    icon: normalizeMemoIcon(input?.icon, "note"),
+    coverStyle: normalizeMemoCover(input?.coverStyle),
     favorite: Boolean(input?.favorite),
     trashedAt: typeof input?.trashedAt === "number" && Number.isFinite(input.trashedAt) ? input.trashedAt : null,
     reminderAt: typeof input?.reminderAt === "number" && Number.isFinite(input.reminderAt) ? input.reminderAt : null,
@@ -283,11 +362,12 @@ export const memoPresets: RNestMemoPreset[] = [
     id: "blank",
     label: "빈 메모",
     description: "바로 입력을 시작하는 자유 메모",
-    icon: "📝",
+    icon: "note",
     create: () =>
       createMemoDocumentBase({
         title: "빈 메모",
-        icon: "📝",
+        icon: "note",
+        coverStyle: null,
         blocks: [createMemoBlock("paragraph")],
       }),
   },
@@ -295,11 +375,12 @@ export const memoPresets: RNestMemoPreset[] = [
     id: "free",
     label: "자유 메모",
     description: "짧은 정리와 핵심 메모를 빠르게 남기는 형식",
-    icon: "📄",
+    icon: "page",
     create: () =>
       createMemoDocumentBase({
         title: "자유 메모",
-        icon: "📄",
+        icon: "page",
+        coverStyle: "lavender-glow",
         blocks: [
           createMemoBlock("heading", { text: "핵심 요약" }),
           createMemoBlock("paragraph", { text: "" }),
@@ -311,11 +392,12 @@ export const memoPresets: RNestMemoPreset[] = [
     id: "checklist",
     label: "체크리스트 메모",
     description: "해야 할 일과 확인 포인트를 정리하는 형식",
-    icon: "✅",
+    icon: "check",
     create: () =>
       createMemoDocumentBase({
         title: "체크리스트 메모",
-        icon: "✅",
+        icon: "check",
+        coverStyle: "mint-fog",
         blocks: [
           createMemoBlock("heading", { text: "오늘 체크할 것" }),
           createMemoBlock("checklist", { text: "첫 번째 항목", checked: false }),
@@ -328,11 +410,12 @@ export const memoPresets: RNestMemoPreset[] = [
     id: "table",
     label: "표 포함 메모",
     description: "비교 정리나 짧은 기록표가 필요한 형식",
-    icon: "📋",
+    icon: "table",
     create: () =>
       createMemoDocumentBase({
         title: "표 포함 메모",
-        icon: "📋",
+        icon: "table",
+        coverStyle: "soft-sky",
         blocks: [
           createMemoBlock("heading", { text: "표 메모" }),
           createMemoBlock("table", {
@@ -369,6 +452,12 @@ export function memoBlockToPlainText(block: RNestMemoBlock) {
       return "---"
     case "checklist":
       return `${block.checked ? "[x]" : "[ ]"} ${cleanText(block.text, MAX_BLOCK_TEXT_LENGTH)}`
+    case "quote":
+      return `> ${cleanText(block.text, MAX_BLOCK_TEXT_LENGTH)}`
+    case "toggle":
+      return [cleanText(block.text, 240), cleanText(block.detailText, MAX_BLOCK_TEXT_LENGTH)].filter(Boolean).join("\n")
+    case "bookmark":
+      return [cleanText(block.text, 240), cleanText(block.detailText, 240)].filter(Boolean).join(" ")
     default:
       return cleanText(block.text, MAX_BLOCK_TEXT_LENGTH)
   }
@@ -425,6 +514,24 @@ export function memoDocumentToMarkdown(document: RNestMemoDocument) {
       case "callout":
         lines.push(`> ${text}`)
         break
+      case "quote":
+        lines.push(`> ${text}`)
+        break
+      case "toggle": {
+        const detail = cleanText(block.detailText, MAX_BLOCK_TEXT_LENGTH)
+        const safeTitle = text || "토글"
+        if (detail) {
+          lines.push(`<details>\n<summary>${safeTitle}</summary>\n\n${detail}\n</details>`)
+        } else {
+          lines.push(`<details>\n<summary>${safeTitle}</summary>\n</details>`)
+        }
+        break
+      }
+      case "bookmark": {
+        const label = cleanText(block.detailText, 240) || text
+        lines.push(text ? `[${label}](${text})` : label)
+        break
+      }
       default:
         lines.push(text)
         break

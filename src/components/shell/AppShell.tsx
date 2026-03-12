@@ -124,6 +124,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { user: auth, status } = useAuthState();
   const isAuthed = Boolean(auth?.userId);
   const isMedSafetyImmersive = pathname === "/tools/med-safety";
+  const isNotebookImmersive = pathname === "/tools/notebook";
   const isPolicyPage = pathname?.startsWith("/privacy") || pathname?.startsWith("/terms");
   const allowPrompt =
     AUTH_INTERACTION_GUARD_ENABLED &&
@@ -277,7 +278,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     !resolvedBootstrap?.consentCompleted;
 
   const canRenderContent = !isAuthed || isPolicyPage || Boolean(resolvedBootstrap?.consentCompleted);
-  const showBottomNav = !isAuthed || Boolean(resolvedBootstrap?.consentCompleted);
+  const showBottomNav = !isNotebookImmersive && (!isAuthed || Boolean(resolvedBootstrap?.consentCompleted));
 
   const handleOnboardingComplete = useCallback(async () => {
     if (!auth?.userId || busyStage) return;
@@ -352,13 +353,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="safe-top" />
       <div
         className={`mx-auto w-full ${
-          isMedSafetyImmersive ? "max-w-[1180px] px-3 sm:px-5" : "max-w-[720px] px-4"
-        } ${isMedSafetyImmersive ? "pb-[calc(24px+env(safe-area-inset-bottom))]" : "pb-[calc(96px+env(safe-area-inset-bottom))]"}`}
+          isNotebookImmersive ? "max-w-none" : isMedSafetyImmersive ? "max-w-[1180px] px-3 sm:px-5" : "max-w-[720px] px-4"
+        } ${isNotebookImmersive ? "pb-0" : isMedSafetyImmersive ? "pb-[calc(24px+env(safe-area-inset-bottom))]" : "pb-[calc(96px+env(safe-area-inset-bottom))]"}`}
         onPointerDownCapture={handleGuardedInteraction}
         onKeyDownCapture={handleGuardedInteraction}
       >
         {canRenderContent ? (
-          isMedSafetyImmersive ? (
+          isMedSafetyImmersive || isNotebookImmersive ? (
             children
           ) : (
             <div key={pathname} className="rnest-page-enter">

@@ -19,16 +19,15 @@ type ToolCategory = {
 const CATEGORY_CARDS: ToolCategory[] = [
   {
     id: "notebook",
-    name: "메모·기록지",
-    description: "노션 스타일의 개인 메모와 범용 기록지를 RNest 흐름에 맞게 한 화면에서 관리합니다.",
+    name: "메모",
+    description: "노션처럼 자유롭게 메모하고 정리하세요. 블록 기반 에디터로 빠르게 기록합니다.",
     href: "/tools/notebook",
     tone: "guide",
-    keywords: ["메모", "기록지", "노트", "문서", "체크리스트", "정리", "markdown", "csv"],
+    keywords: ["메모", "노트", "문서", "체크리스트", "정리", "markdown"],
     quickLinks: [
-      { label: "메모", href: "/tools/notebook?tab=memo" },
-      { label: "기록지", href: "/tools/notebook?tab=records" },
+      { label: "새 메모", href: "/tools/notebook" },
     ],
-    secondaryLink: { label: "메모·기록지 열기", href: "/tools/notebook" },
+    secondaryLink: { label: "메모 열기", href: "/tools/notebook" },
   },
   {
     id: "ai_search",
