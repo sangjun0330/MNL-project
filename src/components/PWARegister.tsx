@@ -2,6 +2,8 @@
 
 import { useEffect } from "react";
 
+const SW_VERSION = "20260313-1";
+
 /**
  * Minimal service worker registration for PWA.
  * - Works without extra packages.
@@ -11,6 +13,7 @@ export function PWARegister() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (!("serviceWorker" in navigator)) return;
+    let cleanupControllerChange: (() => void) | null = null;
 
     const onLoad = async () => {
       try {
@@ -21,7 +24,30 @@ export function PWARegister() {
           return;
         }
 
-        const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+        let refreshed = false;
+        const handleControllerChange = () => {
+          if (refreshed) return;
+          refreshed = true;
+          window.location.reload();
+        };
+        navigator.serviceWorker.addEventListener("controllerchange", handleControllerChange);
+        cleanupControllerChange = () => {
+          navigator.serviceWorker.removeEventListener("controllerchange", handleControllerChange);
+        };
+
+        const reg = await navigator.serviceWorker.register(`/sw.js?v=${SW_VERSION}`, { scope: "/" });
+        if (reg.waiting) {
+          reg.waiting.postMessage({ type: "SKIP_WAITING" });
+        }
+        reg.addEventListener("updatefound", () => {
+          const worker = reg.installing;
+          if (!worker) return;
+          worker.addEventListener("statechange", () => {
+            if (worker.state === "installed" && navigator.serviceWorker.controller) {
+              worker.postMessage({ type: "SKIP_WAITING" });
+            }
+          });
+        });
         try {
           await reg.update();
         } catch {
@@ -33,8 +59,15 @@ export function PWARegister() {
       }
     };
 
-    window.addEventListener("load", onLoad);
-    return () => window.removeEventListener("load", onLoad);
+    if (document.readyState === "complete") {
+      void onLoad();
+    } else {
+      window.addEventListener("load", onLoad);
+    }
+    return () => {
+      window.removeEventListener("load", onLoad);
+      cleanupControllerChange?.();
+    };
   }, []);
 
   return null;

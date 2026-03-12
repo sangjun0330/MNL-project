@@ -80,7 +80,11 @@ function sanitizeBlocks(blocks: unknown) {
 function sanitizeAttachments(attachments: unknown) {
   if (!Array.isArray(attachments)) return []
   return attachments
-    .map((attachment) => (attachment && typeof attachment === "object" ? createMemoAttachment(attachment as Partial<RNestMemoAttachment> & { blobKey: string }) : null))
+    .map((attachment) =>
+      attachment && typeof attachment === "object"
+        ? createMemoAttachment(attachment as Partial<RNestMemoAttachment> & { storagePath: string })
+        : null
+    )
     .filter((attachment): attachment is RNestMemoAttachment => Boolean(attachment))
 }
 
@@ -155,9 +159,9 @@ export function applyLockedMemoPayload(
 ): RNestMemoDocument {
   if (!payload) return document
   const normalized = normalizeLockedPayload(payload)
-  const attachmentBlobKeys = uniqueBlobKeys([
-    ...(document.attachmentBlobKeys ?? []),
-    ...normalized.attachments.map((attachment) => attachment.blobKey),
+  const attachmentStoragePaths = uniqueBlobKeys([
+    ...(document.attachmentStoragePaths ?? []),
+    ...normalized.attachments.map((attachment) => attachment.storagePath),
   ])
   return {
     ...document,
@@ -165,7 +169,7 @@ export function applyLockedMemoPayload(
     reminderAt: normalized.reminderAt,
     blocks: normalized.blocks,
     attachments: normalized.attachments,
-    attachmentBlobKeys,
+    attachmentStoragePaths,
   }
 }
 
@@ -177,9 +181,9 @@ export function createLockedMemoSnapshot(document: RNestMemoDocument, envelope: 
     reminderAt: null,
     blocks: [],
     attachments: [],
-    attachmentBlobKeys: uniqueBlobKeys([
-      ...(document.attachmentBlobKeys ?? []),
-      ...payload.attachments.map((attachment) => attachment.blobKey),
+    attachmentStoragePaths: uniqueBlobKeys([
+      ...(document.attachmentStoragePaths ?? []),
+      ...payload.attachments.map((attachment) => attachment.storagePath),
     ]),
     lock: envelope,
   }
@@ -193,7 +197,7 @@ export function removeLockedMemoSnapshot(
   return {
     ...next,
     lock: null,
-    attachmentBlobKeys: uniqueBlobKeys(next.attachments.map((attachment) => attachment.blobKey)),
+    attachmentStoragePaths: uniqueBlobKeys(next.attachments.map((attachment) => attachment.storagePath)),
   }
 }
 

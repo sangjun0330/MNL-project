@@ -59,10 +59,94 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
+const chunkRecoveryScript = `
+(() => {
+  try {
+    const KEY = "__rnest_chunk_recovery__";
+    const buildReloadUrl = () => {
+      const url = new URL(window.location.href);
+      url.searchParams.set("__rnest_reload", String(Date.now()));
+      return url.toString();
+    };
+    const shouldRecover = (value) => {
+      const text =
+        typeof value === "string"
+          ? value
+          : typeof value?.message === "string"
+            ? value.message
+            : value
+              ? String(value)
+              : "";
+      return /ChunkLoadError|Loading chunk [0-9]+ failed|Failed to fetch dynamically imported module/i.test(text);
+    };
+    const cleanupAndReload = () => {
+      const marker = window.location.pathname + window.location.search;
+      if (window.sessionStorage.getItem(KEY) === marker) return;
+      window.sessionStorage.setItem(KEY, marker);
+      const tasks = [];
+      if ("serviceWorker" in navigator) {
+        tasks.push(
+          navigator.serviceWorker
+            .getRegistrations()
+            .then((regs) => Promise.allSettled(regs.map((reg) => reg.unregister())))
+        );
+      }
+      if ("caches" in window) {
+        tasks.push(
+          caches
+            .keys()
+            .then((keys) =>
+              Promise.allSettled(
+                keys.filter((key) => /^rnest-cache-/i.test(key)).map((key) => caches.delete(key))
+              )
+            )
+        );
+      }
+      Promise.allSettled(tasks).finally(() => {
+        window.location.replace(buildReloadUrl());
+      });
+    };
+
+    window.addEventListener(
+      "error",
+      (event) => {
+        const target = event.target;
+        if (target instanceof HTMLScriptElement && /\\/[_]next\\/static\\/chunks\\//.test(target.src || "")) {
+          cleanupAndReload();
+          return;
+        }
+        if (shouldRecover(event.error)) {
+          cleanupAndReload();
+        }
+      },
+      true
+    );
+
+    window.addEventListener("unhandledrejection", (event) => {
+      if (shouldRecover(event.reason)) {
+        cleanupAndReload();
+      }
+    });
+
+    window.addEventListener(
+      "load",
+      () => {
+        window.sessionStorage.removeItem(KEY);
+      },
+      { once: true }
+    );
+  } catch {
+    // ignore recovery bootstrap failures
+  }
+})();
+`;
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ko">
-      <head />
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: chunkRecoveryScript }} />
+      </head>
       <body>
         <AuthProvider>
           <PWARegister />

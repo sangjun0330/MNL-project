@@ -4,7 +4,6 @@ import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState
 import {
   Bell,
   BookOpenText,
-  Camera,
   CheckSquare,
   ChevronDown,
   ChevronRight,
@@ -48,7 +47,6 @@ import {
 import { cn } from "@/lib/cn"
 import {
   coerceMemoBlockType,
-  createMemoAttachment,
   createMemoBlock,
   createMemoFromPreset,
   createMemoTableRow,
@@ -80,11 +78,7 @@ import {
   unlockLockedMemoEnvelope,
   type RNestLockedMemoPayload,
 } from "@/lib/notebookSecurity"
-import {
-  deleteMemoAttachmentBlob,
-  loadMemoAttachmentBlob,
-  saveMemoAttachmentBlob,
-} from "@/lib/notebookAttachmentStore"
+import { deleteNotebookFiles, fetchNotebookFileUrls, uploadNotebookFile } from "@/lib/notebookFiles"
 import { useAppStore } from "@/lib/store"
 import {
   Dialog,
@@ -94,6 +88,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import Image from "next/image"
 import Link from "next/link"
 
 /* ─── helpers ──────────────────────────────────────────────── */
@@ -129,10 +124,29 @@ function deriveAttachmentKind(file: File, preferred: RNestMemoAttachment["kind"]
   return "file"
 }
 
-function buildDocBlobKeys(doc: RNestMemoDocument) {
+function buildDocStoragePaths(doc: RNestMemoDocument) {
   return Array.from(
-    new Set([...(doc.attachmentBlobKeys ?? []), ...(doc.attachments ?? []).map((attachment) => attachment.blobKey)])
+    new Set([...(doc.attachmentStoragePaths ?? []), ...(doc.attachments ?? []).map((attachment) => attachment.storagePath)])
   )
+}
+
+function referencedAttachmentIds(doc: RNestMemoDocument) {
+  return Array.from(new Set(doc.blocks.map((block) => block.attachmentId).filter((value): value is string => Boolean(value))))
+}
+
+function normalizeDocAttachments(doc: RNestMemoDocument) {
+  const ids = new Set(referencedAttachmentIds(doc))
+  const attachments = doc.attachments.filter((attachment) => ids.has(attachment.id))
+  return {
+    ...doc,
+    attachments,
+    attachmentStoragePaths: Array.from(new Set(attachments.map((attachment) => attachment.storagePath))),
+  }
+}
+
+function findAttachment(doc: RNestMemoDocument, attachmentId?: string | null) {
+  if (!attachmentId) return null
+  return doc.attachments.find((attachment) => attachment.id === attachmentId) ?? null
 }
 
 function buildMemoSearchText(doc: RNestMemoDocument) {
@@ -190,6 +204,8 @@ const blockTypeLabels: Record<RNestMemoBlockType, string> = {
   divider: "구분선",
   table: "표",
   bookmark: "링크",
+  image: "사진",
+  attachment: "파일",
 }
 
 const memoIconLabelMap: Record<RNestMemoIconId, string> = {
@@ -378,6 +394,10 @@ function renderBlockTypeIcon(type: RNestMemoBlockType, className = "h-3.5 w-3.5"
       return <Table2 {...props} />
     case "bookmark":
       return <Link2 {...props} />
+    case "image":
+      return <ImageIcon {...props} />
+    case "attachment":
+      return <Paperclip {...props} />
     default:
       return <Type {...props} />
   }
@@ -840,42 +860,54 @@ function SlashMenu({
 
 function InlineBlock({
   block,
+  attachment,
+  attachmentUrl,
   onChange,
   onDelete,
+  onRemoveAttachment,
+  onOpenAttachment,
   onDuplicate,
   onTypeChange,
   onAddAfter,
+  onInsertAsset,
   onMoveUp,
   onMoveDown,
   isFirst,
   isLast,
 }: {
   block: RNestMemoBlock
+  attachment: RNestMemoAttachment | null
+  attachmentUrl?: string
   onChange: (b: RNestMemoBlock) => void
   onDelete: () => void
+  onRemoveAttachment: () => void
+  onOpenAttachment: () => void
   onDuplicate: () => void
   onTypeChange: (t: RNestMemoBlockType) => void
   onAddAfter: (type?: RNestMemoBlockType) => void
+  onInsertAsset: (kind: "image" | "attachment") => void
   onMoveUp: () => void
   onMoveDown: () => void
   isFirst: boolean
   isLast: boolean
 }) {
-  const [showTypeMenu, setShowTypeMenu] = useState(false)
+  const [showAddMenu, setShowAddMenu] = useState(false)
+  const [showActionMenu, setShowActionMenu] = useState(false)
   const [showSlashMenu, setShowSlashMenu] = useState(false)
   const [hovered, setHovered] = useState(false)
-  const menuRef = useRef<HTMLDivElement>(null)
+  const addMenuRef = useRef<HTMLDivElement>(null)
+  const actionMenuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (!showTypeMenu) return
+    if (!showAddMenu && !showActionMenu) return
     function handlePointerDown(event: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setShowTypeMenu(false)
-      }
+      if (addMenuRef.current && !addMenuRef.current.contains(event.target as Node)) setShowAddMenu(false)
+      if (actionMenuRef.current && !actionMenuRef.current.contains(event.target as Node)) setShowActionMenu(false)
     }
     function handleEscape(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        setShowTypeMenu(false)
+        setShowAddMenu(false)
+        setShowActionMenu(false)
       }
     }
     document.addEventListener("mousedown", handlePointerDown)
@@ -884,7 +916,7 @@ function InlineBlock({
       document.removeEventListener("mousedown", handlePointerDown)
       document.removeEventListener("keydown", handleEscape)
     }
-  }, [showTypeMenu])
+  }, [showAddMenu, showActionMenu])
 
   function handleCommandKeyDown(e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
@@ -919,27 +951,29 @@ function InlineBlock({
       <div
         className={cn(
           "absolute -left-10 top-0.5 flex flex-col items-center gap-0.5 transition-opacity",
-          hovered || showTypeMenu ? "opacity-100" : "opacity-0"
+          hovered || showAddMenu || showActionMenu ? "opacity-100" : "opacity-0"
         )}
       >
-        <div className="relative" ref={menuRef}>
+        <div className="relative" ref={addMenuRef}>
           <button
             type="button"
-            onClick={() => setShowTypeMenu(!showTypeMenu)}
+            onClick={() => {
+              setShowAddMenu((current) => !current)
+              setShowActionMenu(false)
+            }}
             className={cn(
-              "flex h-12 w-7 flex-col items-center justify-center gap-0.5 rounded-xl border bg-white/95 text-gray-400 shadow-sm backdrop-blur transition-colors",
-              showTypeMenu
+              "flex h-7 w-7 items-center justify-center rounded-xl border bg-white/95 text-gray-400 shadow-sm backdrop-blur transition-colors",
+              showAddMenu
                 ? "border-[color:var(--rnest-accent-border)] text-[color:var(--rnest-accent)] shadow-[0_8px_22px_rgba(123,111,208,0.16)]"
                 : "border-gray-200 hover:border-gray-300 hover:bg-white hover:text-gray-600"
             )}
-            title="블록 메뉴"
-            aria-label="블록 메뉴 열기"
-            aria-expanded={showTypeMenu}
+            title="아래에 새 블록 추가"
+            aria-label="아래에 새 블록 추가"
+            aria-expanded={showAddMenu}
           >
             <Plus className="h-3.5 w-3.5" />
-            <GripVertical className="h-3.5 w-3.5" />
           </button>
-          {showTypeMenu && (
+          {showAddMenu && (
             <div className="absolute left-0 top-full z-30 mt-2 w-56 rounded-2xl border border-gray-200 bg-white py-1.5 shadow-[0_18px_40px_rgba(15,23,42,0.14)]">
               <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-ios-muted">
                 아래에 새 블록
@@ -955,6 +989,8 @@ function InlineBlock({
                   "quote",
                   "toggle",
                   "bookmark",
+                  "image",
+                  "attachment",
                   "divider",
                   "table",
                 ] as RNestMemoBlockType[]
@@ -963,8 +999,9 @@ function InlineBlock({
                   key={`add-below-${type}`}
                   type="button"
                   onClick={() => {
-                    onAddAfter(type)
-                    setShowTypeMenu(false)
+                    if (type === "image" || type === "attachment") onInsertAsset(type)
+                    else onAddAfter(type)
+                    setShowAddMenu(false)
                   }}
                   className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-ios-text transition-colors hover:bg-gray-50"
                 >
@@ -974,32 +1011,63 @@ function InlineBlock({
                   {blockTypeLabels[type]} 추가
                 </button>
               ))}
-              <div className="mx-2 my-1.5 border-t border-gray-100" />
+            </div>
+          )}
+        </div>
+        <div className="relative" ref={actionMenuRef}>
+          <button
+            type="button"
+            onClick={() => {
+              setShowActionMenu((current) => !current)
+              setShowAddMenu(false)
+            }}
+            className={cn(
+              "flex h-7 w-7 items-center justify-center rounded-xl border bg-white/95 text-gray-400 shadow-sm backdrop-blur transition-colors",
+              showActionMenu
+                ? "border-[color:var(--rnest-accent-border)] text-[color:var(--rnest-accent)] shadow-[0_8px_22px_rgba(123,111,208,0.16)]"
+                : "border-gray-200 hover:border-gray-300 hover:bg-white hover:text-gray-600"
+            )}
+            title="현재 블록 설정"
+            aria-label="현재 블록 설정"
+            aria-expanded={showActionMenu}
+          >
+            <GripVertical className="h-3.5 w-3.5" />
+          </button>
+          {showActionMenu && (
+            <div className="absolute left-0 top-full z-30 mt-2 w-56 rounded-2xl border border-gray-200 bg-white py-1.5 shadow-[0_18px_40px_rgba(15,23,42,0.14)]">
               <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-ios-muted">
                 현재 블록 설정
               </div>
-              {(Object.keys(blockTypeLabels) as RNestMemoBlockType[]).map((type) => (
-                <button
-                  key={`convert-${type}`}
-                  type="button"
-                  onClick={() => { onTypeChange(type); setShowTypeMenu(false) }}
-                  className={cn(
-                    "flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] transition-colors",
-                    type === block.type
-                      ? "bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
-                      : "text-ios-text hover:bg-gray-50"
-                  )}
-                >
-                  <span className="inline-flex h-5 w-5 items-center justify-center rounded text-ios-sub">
-                    {renderBlockTypeIcon(type, "h-3 w-3")}
-                  </span>
-                  {blockTypeLabels[type]}로 변경
-                </button>
-              ))}
+              {(Object.keys(blockTypeLabels) as RNestMemoBlockType[])
+                .filter((type) => type !== "image" && type !== "attachment")
+                .map((type) => (
+                  <button
+                    key={`convert-${type}`}
+                    type="button"
+                    onClick={() => {
+                      onTypeChange(type)
+                      setShowActionMenu(false)
+                    }}
+                    className={cn(
+                      "flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] transition-colors",
+                      type === block.type
+                        ? "bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
+                        : "text-ios-text hover:bg-gray-50"
+                    )}
+                  >
+                    <span className="inline-flex h-5 w-5 items-center justify-center rounded text-ios-sub">
+                      {renderBlockTypeIcon(type, "h-3 w-3")}
+                    </span>
+                    {blockTypeLabels[type]}로 변경
+                  </button>
+                ))}
               <div className="mx-2 my-1 border-t border-gray-100" />
               <button
                 type="button"
-                onClick={() => { onDuplicate(); setShowTypeMenu(false) }}
+                onClick={() => {
+                  onDuplicate()
+                  setShowActionMenu(false)
+                }}
                 className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-ios-text hover:bg-gray-50"
               >
                 <Copy className="h-3.5 w-3.5" />
@@ -1008,7 +1076,10 @@ function InlineBlock({
               {!isFirst && (
                 <button
                   type="button"
-                  onClick={() => { onMoveUp(); setShowTypeMenu(false) }}
+                  onClick={() => {
+                    onMoveUp()
+                    setShowActionMenu(false)
+                  }}
                   className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-ios-text hover:bg-gray-50"
                 >
                   ↑ 위로 이동
@@ -1017,15 +1088,35 @@ function InlineBlock({
               {!isLast && (
                 <button
                   type="button"
-                  onClick={() => { onMoveDown(); setShowTypeMenu(false) }}
+                  onClick={() => {
+                    onMoveDown()
+                    setShowActionMenu(false)
+                  }}
                   className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-ios-text hover:bg-gray-50"
                 >
                   ↓ 아래로 이동
                 </button>
               )}
+              {attachment && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onOpenAttachment()
+                    setShowActionMenu(false)
+                  }}
+                  className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-ios-text hover:bg-gray-50"
+                >
+                  <Paperclip className="h-3.5 w-3.5" />
+                  파일 열기
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => { onDelete(); setShowTypeMenu(false) }}
+                onClick={() => {
+                  if (attachment) onRemoveAttachment()
+                  else onDelete()
+                  setShowActionMenu(false)
+                }}
                 className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-red-500 hover:bg-red-50"
               >
                 <Trash2 className="h-3.5 w-3.5" /> 삭제
@@ -1308,6 +1399,72 @@ function InlineBlock({
                 ) : null}
               </div>
             </div>
+          </div>
+        )}
+
+        {block.type === "image" && (
+          <div className="overflow-hidden rounded-[24px] border border-gray-200 bg-white shadow-[0_12px_28px_rgba(15,23,42,0.06)]">
+            <button
+              type="button"
+              onClick={onOpenAttachment}
+              className="block w-full bg-[color:var(--rnest-accent-soft)]/40"
+            >
+              {attachmentUrl ? (
+                <div className="relative min-h-[260px] w-full">
+                  <Image
+                    src={attachmentUrl}
+                    alt={block.text || attachment?.name || "메모 이미지"}
+                    fill
+                    unoptimized
+                    className="object-contain"
+                    sizes="(max-width: 768px) 100vw, 720px"
+                  />
+                </div>
+              ) : (
+                <div className="flex h-48 items-center justify-center text-[13px] text-ios-muted">이미지를 불러오는 중...</div>
+              )}
+            </button>
+            <div className="border-t border-gray-100 px-4 py-3">
+              <input
+                type="text"
+                value={block.text ?? ""}
+                onChange={(e) => onChange({ ...block, text: e.target.value })}
+                onKeyDown={handleCommandKeyDown}
+                placeholder="이미지 설명을 입력하세요"
+                className={cn("w-full border-none bg-transparent text-ios-sub outline-none placeholder:text-gray-300", mobileSafeInputClass)}
+              />
+            </div>
+          </div>
+        )}
+
+        {block.type === "attachment" && (
+          <div className="rounded-[22px] border border-gray-200 bg-white p-4 shadow-[0_12px_28px_rgba(15,23,42,0.06)]">
+            <div className="flex items-center gap-3">
+              <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]">
+                {renderAttachmentIcon(attachment?.kind ?? "file", "h-5 w-5")}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[14px] font-medium text-ios-text">{attachment?.name || "첨부 파일"}</p>
+                <p className="mt-1 text-[12px] text-ios-muted">
+                  {attachment ? `${formatFileSize(attachment.size)} · ${attachment.kind === "pdf" ? "PDF" : attachment.kind === "image" || attachment.kind === "scan" ? "이미지" : "파일"}` : "파일 정보를 불러오는 중"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onOpenAttachment}
+                className="inline-flex items-center gap-1 rounded-full bg-[color:var(--rnest-accent-soft)] px-3 py-1.5 text-[12px] font-medium text-[color:var(--rnest-accent)] transition-colors hover:bg-[color:var(--rnest-accent-soft)]/80"
+              >
+                열기
+              </button>
+            </div>
+            <input
+              type="text"
+              value={block.text ?? ""}
+              onChange={(e) => onChange({ ...block, text: e.target.value })}
+              onKeyDown={handleCommandKeyDown}
+              placeholder="파일 메모를 입력하세요"
+              className={cn("mt-3 w-full border-none bg-transparent text-ios-sub outline-none placeholder:text-gray-300", mobileSafeInputClass)}
+            />
           </div>
         )}
 
@@ -1629,10 +1786,10 @@ export function ToolNotebookPage() {
   const [showCoverPicker, setShowCoverPicker] = useState(false)
   const [showMoreMenu, setShowMoreMenu] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
-  const attachmentInputRef = useRef<HTMLInputElement>(null)
-  const scanInputRef = useRef<HTMLInputElement>(null)
+  const imageInputRef = useRef<HTMLInputElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const pendingAssetTargetRef = useRef<{ docId: string; blockId: string; kind: "image" | "attachment" } | null>(null)
   const unlockKeysRef = useRef<Record<string, CryptoKey>>({})
-  const attachmentUrlRef = useRef<Record<string, string>>({})
   const [unlockedPayloads, setUnlockedPayloads] = useState<Record<string, RNestLockedMemoPayload>>({})
   const [attachmentUrls, setAttachmentUrls] = useState<Record<string, string>>({})
   const [lockDialogOpen, setLockDialogOpen] = useState(false)
@@ -1759,7 +1916,8 @@ export function ToolNotebookPage() {
   const activeMemoIsUnlocked = Boolean(activeMemoRaw?.id && unlockedPayloads[activeMemoRaw.id])
   const activeMemoAttachments = useMemo(() => activeMemo?.attachments ?? [], [activeMemo])
   const activeMemoAttachmentSignature = useMemo(
-    () => activeMemoAttachments.map((attachment) => `${attachment.blobKey}:${attachment.name}:${attachment.kind}`).join("|"),
+    () =>
+      activeMemoAttachments.map((attachment) => `${attachment.storagePath}:${attachment.name}:${attachment.kind}`).join("|"),
     [activeMemoAttachments]
   )
 
@@ -1780,37 +1938,24 @@ export function ToolNotebookPage() {
   }, [activeMemoId, activeDocs])
 
   useEffect(() => {
-    const previousUrls = attachmentUrlRef.current
-    attachmentUrlRef.current = {}
     setAttachmentUrls({})
-    Object.values(previousUrls).forEach((url) => window.URL.revokeObjectURL(url))
 
     if (activeMemoAttachments.length === 0) return
 
     let cancelled = false
 
     void (async () => {
-      const nextUrls: Record<string, string> = {}
-      for (const attachment of activeMemoAttachments) {
-        const blob = await loadMemoAttachmentBlob(attachment.blobKey).catch(() => null)
-        if (!blob) continue
-        nextUrls[attachment.blobKey] = window.URL.createObjectURL(blob)
-      }
+      const nextUrls = await fetchNotebookFileUrls(activeMemoAttachments.map((attachment) => attachment.storagePath)).catch(
+        () => ({})
+      )
 
-      if (cancelled) {
-        Object.values(nextUrls).forEach((url) => window.URL.revokeObjectURL(url))
-        return
-      }
+      if (cancelled) return
 
-      attachmentUrlRef.current = nextUrls
       setAttachmentUrls(nextUrls)
     })()
 
     return () => {
       cancelled = true
-      const urls = attachmentUrlRef.current
-      attachmentUrlRef.current = {}
-      Object.values(urls).forEach((url) => window.URL.revokeObjectURL(url))
     }
   }, [
     activeMemo?.id,
@@ -1843,7 +1988,8 @@ export function ToolNotebookPage() {
   ) {
     const touchRecent = options?.touchRecent ?? true
     const touchUpdatedAt = options?.touchUpdatedAt ?? true
-    const next = touchUpdatedAt ? { ...doc, updatedAt: Date.now() } : doc
+    const normalizedDoc = normalizeDocAttachments(doc)
+    const next = touchUpdatedAt ? { ...normalizedDoc, updatedAt: Date.now() } : normalizedDoc
     const latestMemo = store.getState().memo
     commit(
       { ...latestMemo.documents, [next.id]: next },
@@ -1852,20 +1998,16 @@ export function ToolNotebookPage() {
     return next
   }
 
-  async function cleanupAttachmentBlobsIfUnused(blobKeys: string[]) {
-    const uniqueKeys = Array.from(new Set(blobKeys.filter(Boolean)))
-    if (uniqueKeys.length === 0) return
+  async function cleanupAttachmentStoragePathsIfUnused(storagePaths: string[]) {
+    const uniquePaths = Array.from(new Set(storagePaths.filter(Boolean)))
+    if (uniquePaths.length === 0) return
     const latestDocuments = store.getState().memo.documents
-    await Promise.all(
-      uniqueKeys.map(async (blobKey) => {
-        const stillUsed = Object.values(latestDocuments).some(
-          (doc) => doc && buildDocBlobKeys(doc).includes(blobKey)
-        )
-        if (!stillUsed) {
-          await deleteMemoAttachmentBlob(blobKey).catch(() => null)
-        }
-      })
-    )
+    const removable = uniquePaths.filter((storagePath) => {
+      return !Object.values(latestDocuments).some((doc) => doc && buildDocStoragePaths(doc).includes(storagePath))
+    })
+    if (removable.length > 0) {
+      await deleteNotebookFiles(removable).catch(() => null)
+    }
   }
 
   async function updateActiveMemoContent(
@@ -1913,6 +2055,15 @@ export function ToolNotebookPage() {
   }
 
   function duplicateMemo(doc: RNestMemoDocument) {
+    const attachmentIdMap = new Map<string, string>()
+    const duplicatedAttachments = doc.attachments.map((attachment) => {
+      const nextId = crypto.randomUUID()
+      attachmentIdMap.set(attachment.id, nextId)
+      return {
+        ...attachment,
+        id: nextId,
+      }
+    })
     const next: RNestMemoDocument = {
       ...doc,
       id: crypto.randomUUID(),
@@ -1922,15 +2073,16 @@ export function ToolNotebookPage() {
       trashedAt: null,
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      attachments: doc.attachments.map((attachment) => ({
-        ...attachment,
-        id: crypto.randomUUID(),
-      })),
-      attachmentBlobKeys: buildDocBlobKeys(doc),
+      attachments: duplicatedAttachments,
+      attachmentStoragePaths: buildDocStoragePaths(doc),
       blocks: doc.blocks.map((b) =>
         b.type === "table"
           ? { ...b, id: crypto.randomUUID(), table: { columns: b.table?.columns ?? ["항목", "내용"], rows: (b.table?.rows ?? []).map((r) => ({ ...r, id: crypto.randomUUID() })) } }
-          : { ...b, id: crypto.randomUUID() }
+          : {
+              ...b,
+              id: crypto.randomUUID(),
+              attachmentId: b.attachmentId ? attachmentIdMap.get(b.attachmentId) ?? b.attachmentId : undefined,
+            }
       ),
     }
     const latestMemo = store.getState().memo
@@ -1957,12 +2109,12 @@ export function ToolNotebookPage() {
 
   function deletePermanently(id: string) {
     const latestMemo = store.getState().memo
-    const blobKeys = latestMemo.documents[id] ? buildDocBlobKeys(latestMemo.documents[id] as RNestMemoDocument) : []
+    const storagePaths = latestMemo.documents[id] ? buildDocStoragePaths(latestMemo.documents[id] as RNestMemoDocument) : []
     const next = { ...latestMemo.documents }
     delete next[id]
     commit(next, latestMemo.recent.filter((i) => i !== id))
     clearUnlockSession(id)
-    void cleanupAttachmentBlobsIfUnused(blobKeys)
+    void cleanupAttachmentStoragePathsIfUnused(storagePaths)
     if (activeMemoId === id) setActiveMemoId(null)
     setToast("영구 삭제했습니다")
   }
@@ -2108,8 +2260,24 @@ export function ToolNotebookPage() {
     }
   }
 
-  async function addAttachments(fileList: FileList | null, preferredKind: RNestMemoAttachment["kind"] | null = null) {
-    if (!fileList || fileList.length === 0 || !activeMemo) return
+  function beginAssetInsert(blockId: string, kind: "image" | "attachment") {
+    if (!activeMemo) return
+    pendingAssetTargetRef.current = { docId: activeMemo.id, blockId, kind }
+    if (kind === "image") {
+      imageInputRef.current?.click()
+    } else {
+      fileInputRef.current?.click()
+    }
+  }
+
+  async function insertUploadedAssetBlocks(fileList: FileList | null, kind: "image" | "attachment") {
+    const target = pendingAssetTargetRef.current
+    pendingAssetTargetRef.current = null
+    if (!fileList || fileList.length === 0 || !activeMemo || !target) return
+    if (activeMemo.id !== target.docId) {
+      setToast("메모가 바뀌어 업로드를 취소했습니다")
+      return
+    }
 
     const existingCount = activeMemo.attachments.length
     const available = Math.max(0, 10 - existingCount)
@@ -2119,76 +2287,86 @@ export function ToolNotebookPage() {
     }
 
     const files = Array.from(fileList).slice(0, available)
-    const nextAttachments: RNestMemoAttachment[] = []
-    let skippedLarge = 0
+    const uploadedAttachments: RNestMemoAttachment[] = []
+    let largeFileCount = 0
+    let failedCount = 0
 
     for (const file of files) {
       if (file.size > 12 * 1024 * 1024) {
-        skippedLarge += 1
+        largeFileCount += 1
         continue
       }
-
-      const blobKey = crypto.randomUUID()
-      const saved = await saveMemoAttachmentBlob(blobKey, file)
-        .then(() => true)
-        .catch(() => false)
-      if (!saved) continue
-      const attachment = createMemoAttachment({
-        id: crypto.randomUUID(),
-        blobKey,
-        name: file.name || (preferredKind === "scan" ? "스캔 이미지" : "첨부 파일"),
-        mimeType: file.type || "application/octet-stream",
-        size: file.size,
-        kind: deriveAttachmentKind(file, preferredKind),
-        createdAt: Date.now(),
-      })
-      if (!attachment) continue
-      nextAttachments.push(attachment)
+      try {
+        const uploaded = await uploadNotebookFile(file, kind === "image" ? deriveAttachmentKind(file, "image") : deriveAttachmentKind(file, "file"))
+        uploadedAttachments.push(uploaded)
+      } catch {
+        failedCount += 1
+      }
     }
 
-    if (nextAttachments.length === 0) {
-      setToast(skippedLarge > 0 ? "12MB 이하 파일만 첨부할 수 있습니다" : "첨부 파일을 추가하지 못했습니다")
+    if (uploadedAttachments.length === 0) {
+      setToast(largeFileCount > 0 ? "12MB 이하 파일만 첨부할 수 있습니다" : "파일 업로드에 실패했습니다")
       return
     }
 
-    await updateActiveMemoContent((doc) => ({
-      ...doc,
-      attachments: [...doc.attachments, ...nextAttachments],
-      attachmentBlobKeys: Array.from(
-        new Set([...doc.attachmentBlobKeys, ...nextAttachments.map((attachment) => attachment.blobKey)])
-      ),
-    }))
+    await updateActiveMemoContent((doc) => {
+      const idx = doc.blocks.findIndex((block) => block.id === target.blockId)
+      const insertAt = idx >= 0 ? idx + 1 : doc.blocks.length
+      const nextBlocks = [...doc.blocks]
+      nextBlocks.splice(
+        insertAt,
+        0,
+        ...uploadedAttachments.map((attachment) =>
+          createMemoBlock(kind, {
+            text: kind === "image" ? "" : attachment.name,
+            attachmentId: attachment.id,
+          })
+        )
+      )
+      return normalizeDocAttachments({
+        ...doc,
+        blocks: nextBlocks,
+        attachments: [...doc.attachments, ...uploadedAttachments],
+        attachmentStoragePaths: Array.from(
+          new Set([...doc.attachmentStoragePaths, ...uploadedAttachments.map((attachment) => attachment.storagePath)])
+        ),
+      })
+    })
 
-    setToast(
-      preferredKind === "scan"
-        ? `스캔 ${nextAttachments.length}개를 추가했습니다`
-        : `첨부 ${nextAttachments.length}개를 추가했습니다`
-    )
+    if (failedCount > 0) {
+      setToast(`${uploadedAttachments.length}개 업로드, ${failedCount}개 실패`)
+    } else {
+      setToast(kind === "image" ? `사진 ${uploadedAttachments.length}개를 추가했습니다` : `파일 ${uploadedAttachments.length}개를 추가했습니다`)
+    }
   }
 
-  async function removeAttachment(attachmentId: string) {
+  async function removeAttachmentById(blockId: string, attachmentId: string) {
     if (!activeMemo) return
     const target = activeMemo.attachments.find((attachment) => attachment.id === attachmentId)
     if (!target) return
 
+    const previousStoragePaths = buildDocStoragePaths(activeMemo)
     await updateActiveMemoContent((doc) => {
-      const remainingAttachments = doc.attachments.filter((attachment) => attachment.id !== attachmentId)
-      const remainingBlobKeys = Array.from(new Set(remainingAttachments.map((attachment) => attachment.blobKey)))
-      return {
+      return normalizeDocAttachments({
         ...doc,
-        attachments: remainingAttachments,
-        attachmentBlobKeys: remainingBlobKeys,
-      }
+        blocks: (() => {
+          const nextBlocks = doc.blocks.filter((block) => block.id !== blockId)
+          return nextBlocks.length > 0 ? nextBlocks : [createMemoBlock("paragraph")]
+        })(),
+      })
     })
 
-    await cleanupAttachmentBlobsIfUnused([target.blobKey])
+    const nextDoc = store.getState().memo.documents[activeMemo.id]
+    const nextStoragePaths = nextDoc ? buildDocStoragePaths(nextDoc as RNestMemoDocument) : []
+    const removed = previousStoragePaths.filter((path) => !nextStoragePaths.includes(path))
+    await cleanupAttachmentStoragePathsIfUnused(removed.length > 0 ? removed : [target.storagePath])
     setToast("첨부를 제거했습니다")
   }
 
   function openAttachment(attachment: RNestMemoAttachment) {
-    const url = attachmentUrls[attachment.blobKey]
+    const url = attachmentUrls[attachment.storagePath]
     if (!url) {
-      setToast("이 기기에서만 열 수 있는 첨부입니다")
+      setToast("파일 주소를 불러오지 못했습니다")
       return
     }
     window.open(url, "_blank", "noopener,noreferrer")
@@ -2206,21 +2384,37 @@ export function ToolNotebookPage() {
 
   function changeBlockType(blockId: string, newType: RNestMemoBlockType) {
     if (!activeMemo) return
-    void updateActiveMemoContent((doc) => ({
-      ...doc,
-      blocks: doc.blocks.map((b) => (b.id === blockId ? coerceMemoBlockType(b, newType) : b)),
-    }))
+    const previousStoragePaths = buildDocStoragePaths(activeMemo)
+    void updateActiveMemoContent((doc) =>
+      normalizeDocAttachments({
+        ...doc,
+        blocks: doc.blocks.map((b) => (b.id === blockId ? coerceMemoBlockType(b, newType) : b)),
+      })
+    ).then(() => {
+      const nextDoc = store.getState().memo.documents[activeMemo.id]
+      const nextStoragePaths = nextDoc ? buildDocStoragePaths(nextDoc as RNestMemoDocument) : []
+      const removed = previousStoragePaths.filter((path) => !nextStoragePaths.includes(path))
+      void cleanupAttachmentStoragePathsIfUnused(removed)
+    })
   }
 
   function deleteBlock(blockId: string) {
     if (!activeMemo) return
-    void updateActiveMemoContent((doc) => ({
-      ...doc,
-      blocks: (() => {
-        const next = doc.blocks.filter((b) => b.id !== blockId)
-        return next.length ? next : [createMemoBlock("paragraph")]
-      })(),
-    }))
+    const previousStoragePaths = buildDocStoragePaths(activeMemo)
+    void updateActiveMemoContent((doc) =>
+      normalizeDocAttachments({
+        ...doc,
+        blocks: (() => {
+          const next = doc.blocks.filter((b) => b.id !== blockId)
+          return next.length ? next : [createMemoBlock("paragraph")]
+        })(),
+      })
+    ).then(() => {
+      const nextDoc = store.getState().memo.documents[activeMemo.id]
+      const nextStoragePaths = nextDoc ? buildDocStoragePaths(nextDoc as RNestMemoDocument) : []
+      const removed = previousStoragePaths.filter((path) => !nextStoragePaths.includes(path))
+      void cleanupAttachmentStoragePathsIfUnused(removed)
+    })
   }
 
   function addBlockAfter(blockId: string, type: RNestMemoBlockType = "paragraph") {
@@ -2274,6 +2468,7 @@ export function ToolNotebookPage() {
             : createMemoBlock(block.type, {
                 text: block.text,
                 detailText: block.detailText,
+                attachmentId: block.attachmentId,
                 checked: block.checked,
                 collapsed: block.collapsed,
               })
@@ -2650,130 +2845,27 @@ export function ToolNotebookPage() {
                 </div>
               </div>
 
-              {(!activeMemoIsLocked || activeMemoIsUnlocked) && (
-                <div className="mb-8 rounded-[28px] border border-[color:var(--rnest-accent-border)]/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.96)_0%,rgba(248,245,255,0.96)_100%)] p-4 shadow-[0_16px_36px_rgba(123,111,208,0.08)]">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-ios-muted">
-                        <Paperclip className="h-3.5 w-3.5" />
-                        첨부
-                      </div>
-                      <p className="mt-1 text-[12px] text-ios-muted">첨부와 스캔은 이 기기에 저장됩니다.</p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => attachmentInputRef.current?.click()}
-                        className="inline-flex items-center gap-1.5 rounded-full border border-[color:var(--rnest-accent-border)] bg-white px-3 py-1.5 text-[12px] font-medium text-ios-sub transition-colors hover:bg-[color:var(--rnest-accent-soft)]"
-                      >
-                        <Paperclip className="h-3.5 w-3.5" />
-                        파일 추가
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => scanInputRef.current?.click()}
-                        className="inline-flex items-center gap-1.5 rounded-full bg-[color:var(--rnest-accent-soft)] px-3 py-1.5 text-[12px] font-medium text-[color:var(--rnest-accent)] transition-colors hover:bg-[color:var(--rnest-accent-soft)]/80"
-                      >
-                        <Camera className="h-3.5 w-3.5" />
-                        스캔
-                      </button>
-                    </div>
-                  </div>
-
-                  <input
-                    ref={attachmentInputRef}
-                    type="file"
-                    multiple
-                    className="hidden"
-                    onChange={(event) => {
-                      void addAttachments(event.target.files)
-                      event.currentTarget.value = ""
-                    }}
-                  />
-                  <input
-                    ref={scanInputRef}
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    className="hidden"
-                    onChange={(event) => {
-                      void addAttachments(event.target.files, "scan")
-                      event.currentTarget.value = ""
-                    }}
-                  />
-
-                  {activeMemo.attachments.length === 0 ? (
-                    <div className="mt-4 rounded-2xl border border-dashed border-gray-200 bg-white/80 px-4 py-5 text-[13px] text-ios-muted">
-                      아직 첨부가 없습니다. 참고 이미지, PDF, 스캔을 이 메모에 붙여두세요.
-                    </div>
-                  ) : (
-                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                      {activeMemo.attachments.map((attachment) => {
-                        const previewUrl = attachmentUrls[attachment.blobKey]
-                        const isVisual = attachment.kind === "image" || attachment.kind === "scan"
-                        return (
-                          <div
-                            key={attachment.id}
-                            className="overflow-hidden rounded-2xl border border-white/70 bg-white shadow-[0_12px_28px_rgba(15,23,42,0.06)]"
-                          >
-                            <div className="flex gap-3 p-3">
-                              <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-[color:var(--rnest-accent-soft)]">
-                                {isVisual && previewUrl ? (
-                                  <div
-                                    className="h-full w-full bg-cover bg-center"
-                                    style={{ backgroundImage: `url(${previewUrl})` }}
-                                  />
-                                ) : (
-                                  <span className="text-[color:var(--rnest-accent)]">
-                                    {renderAttachmentIcon(attachment.kind, "h-6 w-6")}
-                                  </span>
-                                )}
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-start justify-between gap-2">
-                                  <div className="min-w-0">
-                                    <p className="truncate text-[13px] font-medium text-ios-text">{attachment.name}</p>
-                                    <p className="mt-1 text-[11.5px] text-ios-muted">
-                                      {formatFileSize(attachment.size)} · {attachment.kind === "scan" ? "스캔" : attachment.kind === "image" ? "이미지" : attachment.kind === "pdf" ? "PDF" : "파일"}
-                                    </p>
-                                  </div>
-                                  <span className="inline-flex items-center gap-1 rounded-full bg-[color:var(--rnest-accent-soft)] px-2 py-0.5 text-[10.5px] font-medium text-[color:var(--rnest-accent)]">
-                                    로컬
-                                  </span>
-                                </div>
-                                <div className="mt-3 flex flex-wrap gap-2">
-                                  <button
-                                    type="button"
-                                    disabled={!previewUrl}
-                                    onClick={() => openAttachment(attachment)}
-                                    className={cn(
-                                      "inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11.5px] font-medium transition-colors",
-                                      previewUrl
-                                        ? "bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)] hover:bg-[color:var(--rnest-accent-soft)]/80"
-                                        : "cursor-not-allowed bg-gray-100 text-gray-400"
-                                    )}
-                                  >
-                                    열기
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      void removeAttachment(attachment.id)
-                                    }}
-                                    className="inline-flex items-center gap-1 rounded-full border border-gray-200 px-3 py-1 text-[11.5px] font-medium text-ios-sub transition-colors hover:bg-gray-50"
-                                  >
-                                    제거
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={(event) => {
+                  void insertUploadedAssetBlocks(event.target.files, "image")
+                  event.currentTarget.value = ""
+                }}
+              />
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(event) => {
+                  void insertUploadedAssetBlocks(event.target.files, "attachment")
+                  event.currentTarget.value = ""
+                }}
+              />
 
               {activeMemoIsLocked && !activeMemoIsUnlocked ? (
                 <div className="rounded-[32px] border border-[color:var(--rnest-accent-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(248,245,255,0.98)_100%)] px-6 py-10 text-center shadow-[0_18px_42px_rgba(123,111,208,0.08)]">
@@ -2848,21 +2940,37 @@ export function ToolNotebookPage() {
 
                   {/* blocks */}
                   <div className="space-y-1 pl-10">
-                    {activeMemo.blocks.map((block, idx) => (
+                    {activeMemo.blocks.map((block, idx) => {
+                      const attachment = findAttachment(activeMemo, block.attachmentId)
+                      return (
                       <InlineBlock
                         key={block.id}
                         block={block}
+                        attachment={attachment}
+                        attachmentUrl={attachment ? attachmentUrls[attachment.storagePath] : undefined}
                         isFirst={idx === 0}
                         isLast={idx === activeMemo.blocks.length - 1}
                         onChange={(next) => updateBlock(block.id, next)}
                         onDelete={() => deleteBlock(block.id)}
+                        onRemoveAttachment={() => {
+                          if (attachment) {
+                            void removeAttachmentById(block.id, attachment.id)
+                          } else {
+                            deleteBlock(block.id)
+                          }
+                        }}
+                        onOpenAttachment={() => {
+                          if (attachment) openAttachment(attachment)
+                        }}
                         onDuplicate={() => duplicateBlock(block.id)}
                         onTypeChange={(type) => changeBlockType(block.id, type)}
                         onAddAfter={(type) => addBlockAfter(block.id, type)}
+                        onInsertAsset={(kind) => beginAssetInsert(block.id, kind)}
                         onMoveUp={() => moveBlock(block.id, "up")}
                         onMoveDown={() => moveBlock(block.id, "down")}
                       />
-                    ))}
+                      )
+                    })}
                   </div>
 
                   {/* add block */}

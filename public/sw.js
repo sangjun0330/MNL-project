@@ -1,18 +1,48 @@
-/* RNest minimal service worker (static asset cache only) */
-const CACHE = "rnest-cache-v5";
-const CORE = ["/", "/manifest.webmanifest"];
+/* RNest service worker: keep only a tiny shell cache to avoid stale Next chunks after deploy */
+const CACHE = "rnest-cache-v6";
+const CORE = [
+  "/manifest.webmanifest",
+  "/favicon.ico",
+  "/icons/apple-touch-icon.png",
+  "/icons/icon-192.png",
+  "/icons/icon-512.png",
+  "/rnest-logo.png",
+];
+
+function isShellAsset(pathname) {
+  return (
+    pathname === "/manifest.webmanifest" ||
+    pathname === "/favicon.ico" ||
+    pathname === "/rnest-logo.png" ||
+    pathname.startsWith("/icons/")
+  );
+}
+
+function shouldCache(response) {
+  return Boolean(response && response.ok && (response.type === "basic" || response.type === "default"));
+}
+
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
+});
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE).then((cache) => cache.addAll(CORE)).then(() => self.skipWaiting())
+    caches
+      .open(CACHE)
+      .then((cache) => cache.addAll(CORE))
+      .then(() => self.skipWaiting())
   );
 });
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.map((k) => (k === CACHE ? null : caches.delete(k))))
-    ).then(() => self.clients.claim())
+    caches
+      .keys()
+      .then((keys) => Promise.all(keys.map((key) => (key === CACHE ? null : caches.delete(key)))))
+      .then(() => self.clients.claim())
   );
 });
 
@@ -20,41 +50,28 @@ self.addEventListener("fetch", (event) => {
   const req = event.request;
   const url = new URL(req.url);
 
-  // Only handle same-origin GET
   if (req.method !== "GET" || url.origin !== self.location.origin) return;
 
-  // Never cache API responses.
-  if (url.pathname.startsWith("/api/")) return;
-
-  // Always fetch navigation/page HTML from network first.
-  // This avoids stale HTML -> JS version mismatch (hydration errors) after deploy.
-  if (req.mode === "navigate") {
-    event.respondWith(
-      fetch(req).catch(() => caches.match("/"))
-    );
+  // Never intercept API, page navigations, or Next build assets.
+  // Next already serves immutable chunk files; SW caching here causes stale chunk mismatches after deploy.
+  if (url.pathname.startsWith("/api/") || req.mode === "navigate" || url.pathname.startsWith("/_next/")) {
     return;
   }
 
-  // Cache-first for Next static
-  if (url.pathname.startsWith("/_next/static") || url.pathname.startsWith("/icons/")) {
-    event.respondWith(
-      caches.match(req).then((cached) => cached || fetch(req).then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(req, copy));
-        return res;
-      }))
-    );
+  if (!isShellAsset(url.pathname)) {
     return;
   }
 
-  // Other same-origin resources: network-first with fallback to cache.
   event.respondWith(
-    fetch(req)
-      .then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(req, copy));
-        return res;
-      })
-      .catch(() => caches.match(req).then((c) => c || caches.match("/")))
+    caches.match(req).then((cached) => {
+      if (cached) return cached;
+      return fetch(req).then((response) => {
+        if (shouldCache(response)) {
+          const copy = response.clone();
+          void caches.open(CACHE).then((cache) => cache.put(req, copy));
+        }
+        return response;
+      });
+    })
   );
 });

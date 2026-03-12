@@ -12,6 +12,8 @@ export type RNestMemoBlockType =
   | "divider"
   | "table"
   | "bookmark"
+  | "image"
+  | "attachment"
 
 export type RNestMemoTableRow = {
   id: string
@@ -28,7 +30,7 @@ export type RNestMemoAttachmentKind = "image" | "pdf" | "file" | "scan"
 
 export type RNestMemoAttachment = {
   id: string
-  blobKey: string
+  storagePath: string
   name: string
   mimeType: string
   size: number
@@ -52,6 +54,7 @@ export type RNestMemoBlock = {
   type: RNestMemoBlockType
   text?: string
   detailText?: string
+  attachmentId?: string
   checked?: boolean
   collapsed?: boolean
   table?: RNestMemoTable
@@ -69,7 +72,7 @@ export type RNestMemoDocument = {
   tags: string[]
   blocks: RNestMemoBlock[]
   attachments: RNestMemoAttachment[]
-  attachmentBlobKeys: string[]
+  attachmentStoragePaths: string[]
   lock: RNestMemoLockEnvelope | null
   createdAt: number
   updatedAt: number
@@ -194,7 +197,7 @@ const MAX_BLOCKS = 64
 const MAX_TABLE_ROWS = 20
 const MAX_MEMO_ATTACHMENTS = 10
 const MAX_ATTACHMENT_NAME_LENGTH = 120
-const MAX_ATTACHMENT_BLOB_KEY_LENGTH = 120
+const MAX_ATTACHMENT_STORAGE_PATH_LENGTH = 240
 const MAX_LOCK_HINT_LENGTH = 80
 const MAX_RECORD_FIELDS = 16
 const MAX_SELECT_OPTIONS = 10
@@ -273,11 +276,13 @@ function sanitizeMemoAttachment(value: unknown): RNestMemoAttachment | null {
       : mimeType === "application/pdf"
         ? "pdf"
         : "file"
-  const blobKey = cleanText(source.blobKey, MAX_ATTACHMENT_BLOB_KEY_LENGTH)
-  if (!blobKey) return null
+  const storagePath =
+    cleanText(source.storagePath, MAX_ATTACHMENT_STORAGE_PATH_LENGTH) ||
+    cleanText(source.blobKey, MAX_ATTACHMENT_STORAGE_PATH_LENGTH)
+  if (!storagePath) return null
   return {
     id: cleanText(source.id, 60) || createNotebookId("memo_attachment"),
-    blobKey,
+    storagePath,
     name: cleanText(source.name, MAX_ATTACHMENT_NAME_LENGTH) || "첨부 파일",
     mimeType,
     size:
@@ -292,7 +297,7 @@ function sanitizeMemoAttachment(value: unknown): RNestMemoAttachment | null {
   }
 }
 
-export function createMemoAttachment(input: Partial<RNestMemoAttachment> & { blobKey: string }) {
+export function createMemoAttachment(input: Partial<RNestMemoAttachment> & { storagePath: string }) {
   return sanitizeMemoAttachment(input)
 }
 
@@ -310,19 +315,19 @@ function sanitizeMemoAttachments(value: unknown) {
   return attachments
 }
 
-function sanitizeAttachmentBlobKeys(value: unknown, attachments: RNestMemoAttachment[]) {
+function sanitizeAttachmentStoragePaths(value: unknown, attachments: RNestMemoAttachment[]) {
   const seen = new Set<string>()
   const out: string[] = []
 
   for (const attachment of attachments) {
-    if (!attachment.blobKey || seen.has(attachment.blobKey)) continue
-    seen.add(attachment.blobKey)
-    out.push(attachment.blobKey)
+    if (!attachment.storagePath || seen.has(attachment.storagePath)) continue
+    seen.add(attachment.storagePath)
+    out.push(attachment.storagePath)
   }
 
   if (!Array.isArray(value)) return out
   for (const item of value) {
-    const next = cleanText(item, MAX_ATTACHMENT_BLOB_KEY_LENGTH)
+    const next = cleanText(item, MAX_ATTACHMENT_STORAGE_PATH_LENGTH)
     if (!next || seen.has(next)) continue
     seen.add(next)
     out.push(next)
@@ -383,6 +388,16 @@ export function createMemoTableRow(left = "", right = ""): RNestMemoTableRow {
 }
 
 export function createMemoBlock(type: RNestMemoBlockType, input?: Partial<RNestMemoBlock>): RNestMemoBlock {
+  if (type === "image" || type === "attachment") {
+    return {
+      id: input?.id ?? createNotebookId("memo_block"),
+      type,
+      text: cleanText(input?.text, 240),
+      detailText: undefined,
+      attachmentId: cleanText(input?.attachmentId, 60) || undefined,
+    }
+  }
+
   if (type === "table") {
     return {
       id: input?.id ?? createNotebookId("memo_block"),
@@ -417,6 +432,7 @@ export function createMemoBlock(type: RNestMemoBlockType, input?: Partial<RNestM
       type === "toggle" || type === "bookmark"
         ? cleanText(input?.detailText, type === "bookmark" ? 240 : MAX_BLOCK_TEXT_LENGTH)
         : undefined,
+    attachmentId: undefined,
     checked: type === "checklist" ? Boolean(input?.checked) : undefined,
     collapsed: type === "toggle" ? Boolean(input?.collapsed) : undefined,
   }
@@ -479,7 +495,12 @@ function createMemoDocumentBase(input?: Partial<RNestMemoDocument>): RNestMemoDo
       ? candidateBlocks
       : [createMemoBlock("paragraph")]
   const attachments = lock ? [] : sanitizeMemoAttachments(input?.attachments)
-  const attachmentBlobKeys = sanitizeAttachmentBlobKeys(input?.attachmentBlobKeys, attachments)
+  const attachmentStoragePaths = sanitizeAttachmentStoragePaths(
+    (input as Partial<RNestMemoDocument> & { attachmentStoragePaths?: string[]; attachmentBlobKeys?: string[] })
+      ?.attachmentStoragePaths ??
+      (input as Partial<RNestMemoDocument> & { attachmentBlobKeys?: string[] })?.attachmentBlobKeys,
+    attachments
+  )
 
   return {
     id: input?.id ?? createNotebookId("memo_doc"),
@@ -494,7 +515,7 @@ function createMemoDocumentBase(input?: Partial<RNestMemoDocument>): RNestMemoDo
     tags: lock ? [] : sanitizeNotebookTags(input?.tags),
     blocks,
     attachments,
-    attachmentBlobKeys,
+    attachmentStoragePaths,
     lock,
     createdAt: typeof input?.createdAt === "number" && Number.isFinite(input.createdAt) ? input.createdAt : timestamp,
     updatedAt: typeof input?.updatedAt === "number" && Number.isFinite(input.updatedAt) ? input.updatedAt : timestamp,
@@ -585,6 +606,10 @@ export function hasMeaningfulMemoState(state: RNestMemoState | null | undefined)
 
 export function memoBlockToPlainText(block: RNestMemoBlock) {
   switch (block.type) {
+    case "image":
+      return [cleanText(block.text, 240), "[이미지]"].filter(Boolean).join(" ")
+    case "attachment":
+      return [cleanText(block.text, 240), "[파일]"].filter(Boolean).join(" ")
     case "table":
       return [
         block.table?.columns.join(" | ") ?? "",
@@ -633,6 +658,16 @@ export function memoDocumentToMarkdown(document: RNestMemoDocument) {
     }
   }
   for (const block of document.blocks) {
+    if (block.type === "image") {
+      const label = cleanText(block.text, 240)
+      lines.push(label ? `![${label}](이미지)` : "![이미지](이미지)")
+      continue
+    }
+    if (block.type === "attachment") {
+      const label = cleanText(block.text, 240) || "파일"
+      lines.push(`- [파일] ${label}`)
+      continue
+    }
     if (block.type === "divider") {
       lines.push("---")
       continue
