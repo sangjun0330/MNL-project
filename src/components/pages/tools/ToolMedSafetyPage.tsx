@@ -26,7 +26,7 @@ const META_PILL_CLASS = "inline-flex items-center rounded-full border border-[#E
 const ACCENT_PILL_CLASS =
   "inline-flex items-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-3 py-1.5 text-[11px] font-semibold text-[color:var(--rnest-accent)]";
 const COMPOSER_ACTION_BTN_CLASS =
-  "flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#E6E1F7] bg-white/78 text-ios-sub backdrop-blur-md transition hover:border-[color:var(--rnest-accent-border)] hover:bg-white";
+  "flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#E6E1F7] bg-white/78 text-ios-sub backdrop-blur-md transition hover:border-[color:var(--rnest-accent-border)] hover:bg-white disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-[#E6E1F7] disabled:hover:bg-white/78";
 const COMPOSER_SEND_BTN_CLASS =
   "flex h-11 min-w-[52px] shrink-0 items-center justify-center rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent)] px-3 text-white shadow-[0_12px_26px_rgba(123,111,208,0.22)] transition hover:bg-[color:var(--rnest-accent-strong)] disabled:cursor-not-allowed disabled:border-[#E6E1F7] disabled:bg-[#ECEAF5] disabled:text-[#A49DBD] disabled:shadow-none";
 const STREAMING_CARD_CLASS =
@@ -589,7 +589,8 @@ export function ToolMedSafetyPage() {
   const hasConversation = messages.length > 0 || Boolean(streamingText);
   const lastAssistantMessage = [...messages].reverse().find((message) => message.role === "assistant") ?? null;
   const hasTypedInput = normalizeQuestionInput(input).length > 0;
-  const canSubmit = !isLoading && canAsk && (hasTypedInput || Boolean(selectedImage));
+  const isComposerLocked = showSessionDecisionPrompt;
+  const canSubmit = !isComposerLocked && !isLoading && canAsk && (hasTypedInput || Boolean(selectedImage));
 
   useEffect(() => {
     setMounted(true);
@@ -612,6 +613,13 @@ export function ToolMedSafetyPage() {
     textarea.style.height = "0px";
     textarea.style.height = `${Math.min(textarea.scrollHeight, 220)}px`;
   }, [input]);
+
+  useEffect(() => {
+    if (!isComposerLocked) return;
+    composerInputRef.current?.blur();
+    setIsComposerFocused(false);
+    setIsComposerDragOver(false);
+  }, [isComposerLocked]);
 
   function focusComposerSoon() {
     window.setTimeout(() => {
@@ -644,6 +652,7 @@ export function ToolMedSafetyPage() {
   }
 
   async function selectImageFile(file: File) {
+    if (isComposerLocked) return;
     if (!file.type.startsWith("image/")) {
       setError(t("이미지 파일만 첨부할 수 있습니다."));
       return;
@@ -677,6 +686,7 @@ export function ToolMedSafetyPage() {
   }
 
   function handleComposerPaste(event: React.ClipboardEvent<HTMLTextAreaElement>) {
+    if (isComposerLocked) return;
     const items = Array.from(event.clipboardData?.items ?? []);
     const imageItem = items.find((item) => item.kind === "file" && item.type.startsWith("image/"));
     if (!imageItem) return;
@@ -687,6 +697,7 @@ export function ToolMedSafetyPage() {
   }
 
   function handleComposerDrop(event: React.DragEvent<HTMLDivElement>) {
+    if (isComposerLocked) return;
     event.preventDefault();
     event.stopPropagation();
     setIsComposerDragOver(false);
@@ -724,6 +735,7 @@ export function ToolMedSafetyPage() {
 
   async function submitQuestion(forcedQuery?: string) {
     if (isLoading) return;
+    if (isComposerLocked) return;
     if (authStatus !== "authenticated") {
       setError(t("로그인이 필요합니다"));
       return;
@@ -1071,23 +1083,28 @@ export function ToolMedSafetyPage() {
       <div className="pointer-events-none fixed inset-x-0 bottom-0 z-50 bg-[linear-gradient(180deg,rgba(255,255,255,0)_0%,rgba(255,255,255,0.78)_20%,rgba(255,255,255,0.94)_100%)] pb-[env(safe-area-inset-bottom)] pt-8 backdrop-blur-[18px]">
         <div className="pointer-events-auto mx-auto w-full max-w-[892px] px-3 pb-3 sm:px-4">
           {showSessionDecisionPrompt ? (
-            <div className="mb-3 grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={startNewQuestionFlow}
-                className="min-h-[62px] rounded-[20px] border border-[#E8E8EC] bg-white/98 px-4 py-3 text-left shadow-[0_12px_32px_rgba(15,23,42,0.08)]"
-              >
-                <div className="text-[14px] font-semibold text-ios-text">{t("다른 질문하기")}</div>
-                <div className="mt-1 text-[11px] leading-5 text-ios-sub">{t("새 주제로 새로 시작")}</div>
-              </button>
-              <button
-                type="button"
-                onClick={continueCurrentSession}
-                className="min-h-[62px] rounded-[20px] border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-4 py-3 text-left shadow-[0_12px_28px_rgba(123,111,208,0.14)]"
-              >
-                <div className="text-[14px] font-semibold text-[color:var(--rnest-accent)]">{t("이 결과에 대한 질문하기")}</div>
-                <div className="mt-1 text-[11px] leading-5 text-[color:var(--rnest-accent)]/80">{t("같은 흐름으로 이어서 질문")}</div>
-              </button>
+            <div className="mb-3">
+              <div className="mb-2 px-1 text-[12px] font-semibold text-[color:var(--rnest-accent)]">
+                {t("다음 질문 전에는 위 두 옵션 중 하나를 먼저 선택해 주세요.")}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={startNewQuestionFlow}
+                  className="min-h-[62px] rounded-[20px] border border-[#E8E8EC] bg-white/98 px-4 py-3 text-left shadow-[0_12px_32px_rgba(15,23,42,0.08)]"
+                >
+                  <div className="text-[14px] font-semibold text-ios-text">{t("다른 질문하기")}</div>
+                  <div className="mt-1 text-[11px] leading-5 text-ios-sub">{t("새 주제로 새로 시작")}</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={continueCurrentSession}
+                  className="min-h-[62px] rounded-[20px] border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-4 py-3 text-left shadow-[0_12px_28px_rgba(123,111,208,0.14)]"
+                >
+                  <div className="text-[14px] font-semibold text-[color:var(--rnest-accent)]">{t("이 결과에 대한 질문하기")}</div>
+                  <div className="mt-1 text-[11px] leading-5 text-[color:var(--rnest-accent)]/80">{t("같은 흐름으로 이어서 질문")}</div>
+                </button>
+              </div>
             </div>
           ) : null}
           <div
@@ -1099,16 +1116,19 @@ export function ToolMedSafetyPage() {
                 : "border-white/70 bg-white/78 backdrop-blur-2xl"
             }`}
             onDragEnter={(event) => {
+              if (isComposerLocked) return;
               event.preventDefault();
               event.stopPropagation();
               setIsComposerDragOver(true);
             }}
             onDragOver={(event) => {
+              if (isComposerLocked) return;
               event.preventDefault();
               event.stopPropagation();
               if (!isComposerDragOver) setIsComposerDragOver(true);
             }}
             onDragLeave={(event) => {
+              if (isComposerLocked) return;
               event.preventDefault();
               event.stopPropagation();
               const currentTarget = event.currentTarget;
@@ -1118,6 +1138,11 @@ export function ToolMedSafetyPage() {
             }}
             onDrop={handleComposerDrop}
           >
+            {isComposerLocked ? (
+              <div className="mb-2 rounded-[18px] border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-3 py-2 text-[12px] font-medium leading-5 text-[color:var(--rnest-accent)]">
+                {t("먼저 '다른 질문하기' 또는 '이 결과에 대한 질문하기'를 선택해 주세요.")}
+              </div>
+            ) : null}
             {selectedImage ? (
               <div className="mb-2 flex items-center gap-3 rounded-[20px] border border-[#EAE6F6] bg-white/86 px-3 py-2.5">
                 <img src={selectedImage} alt="" className="h-12 w-12 rounded-[14px] object-cover" />
@@ -1142,6 +1167,7 @@ export function ToolMedSafetyPage() {
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 className={COMPOSER_ACTION_BTN_CLASS}
+                disabled={isComposerLocked}
                 aria-label={t("이미지 첨부")}
               >
                 <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
@@ -1163,13 +1189,20 @@ export function ToolMedSafetyPage() {
                     }
                   }}
                   rows={1}
-                  className="max-h-[220px] min-h-[28px] flex-1 resize-none overflow-y-auto border-0 bg-transparent p-0 text-[15px] leading-7 text-ios-text shadow-none outline-none placeholder:text-ios-sub"
-                  placeholder={hasConversation ? t("예: 그럼 중심정맥으로만 줘야 하나요?") : t("예: norepinephrine 투여 시 주의사항이 뭐야?")}
+                  className="max-h-[220px] min-h-[28px] flex-1 resize-none overflow-y-auto border-0 bg-transparent p-0 text-[15px] leading-7 text-ios-text shadow-none outline-none placeholder:text-ios-sub disabled:cursor-not-allowed disabled:text-ios-sub"
+                  placeholder={
+                    isComposerLocked
+                      ? t("먼저 위 옵션 중 하나를 선택해 주세요.")
+                      : hasConversation
+                      ? t("예: 그럼 중심정맥으로만 줘야 하나요?")
+                      : t("예: norepinephrine 투여 시 주의사항이 뭐야?")
+                  }
                   autoCapitalize="off"
                   autoCorrect="off"
                   autoComplete="off"
                   spellCheck={false}
                   aria-label={t("임상 질문 입력")}
+                  disabled={isComposerLocked}
                 />
               </div>
               <button
@@ -1195,9 +1228,11 @@ export function ToolMedSafetyPage() {
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] text-ios-sub">
               <span>{t("환자 이름, 등록번호, 연락처 등 식별정보는 입력하지 마세요.")}</span>
               <span>
-                {hasConversation
-                  ? t("Enter 전송, Shift+Enter 줄바꿈. 다른 주제면 다른 질문하기를 눌러 주세요.")
-                  : t("이미지 붙여넣기/드래그도 가능합니다. Enter로 바로 전송할 수 있습니다.")}
+                {isComposerLocked
+                  ? t("질문을 이어가려면 위에서 먼저 방식을 선택해 주세요.")
+                  : hasConversation
+                  ? t("다른 주제로 바꾸려면 다른 질문하기를 눌러 주세요.")
+                  : t("이미지 붙여넣기/드래그도 가능합니다.")}
               </span>
             </div>
           </div>

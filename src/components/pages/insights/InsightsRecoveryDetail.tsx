@@ -12,25 +12,17 @@ import { useAIRecoveryInsights } from "@/components/insights/useAIRecoveryInsigh
 import { useAIRecoveryPlanner } from "@/components/insights/useAIRecoveryPlanner";
 import { useRecoveryPlanner } from "@/components/insights/useRecoveryPlanner";
 import { useInsightsData, isInsightsLocked, INSIGHTS_MIN_DAYS, shiftKo } from "@/components/insights/useInsightsData";
-import { DetailCard, DetailChip, DETAIL_ACCENTS, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
+import { DetailChip, DETAIL_ACCENTS, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
 import { buildExplanationModule, buildFallbackModules } from "@/lib/aiRecoveryPlanner";
 import { formatKoreanDate } from "@/lib/date";
 import { withReturnTo } from "@/lib/navigation";
 import { buildRecoveryOrderProgressId } from "@/lib/recoveryPhases";
-import {
-  caffeineSensitivityPresetFromValue,
-  caffeineSensitivityPresetLabel,
-  chronotypePresetFromValue,
-  chronotypePresetLabel,
-  normalizeProfileSettings,
-} from "@/lib/recoveryPlanner";
 import {
   clearStaleRecoveryOrderDone,
   readRecoveryOrderDone,
   readRemoteRecoveryOrderDone,
   writeRecoveryOrderDone,
 } from "@/lib/recoveryOrderChecklist";
-import { useAppStoreSelector } from "@/lib/store";
 import { useI18n } from "@/lib/useI18n";
 
 export function InsightsRecoveryDetail() {
@@ -57,10 +49,6 @@ export function InsightsRecoveryDetail() {
     enabled: !isInsightsLocked(recordedDays) && planner.aiAvailable,
     phase: "after_work",
   });
-  const profile = useAppStoreSelector((s) => normalizeProfileSettings(s.settings.profile));
-  const profileSummary = `${chronotypePresetLabel(chronotypePresetFromValue(profile.chronotype))} · ${t("카페인")} ${caffeineSensitivityPresetLabel(
-    caffeineSensitivityPresetFromValue(profile.caffeineSensitivity)
-  )}`;
   const [doneMap, setDoneMap] = useState<Record<string, boolean>>({});
   const plannerDateISO = aiPlannerAfter.data?.dateISO ?? aiPlanner.data?.dateISO ?? end;
 
@@ -181,14 +169,6 @@ export function InsightsRecoveryDetail() {
         </>
       }
     >
-      {planner.aiAvailable && (aiRecovery.loading || aiPlanner.loading) ? (
-        <DetailCard className="p-5 sm:p-6">
-          <div className="text-[12px] font-semibold text-ios-sub">AI Sync</div>
-          <div className="mt-1 text-[17px] font-bold tracking-[-0.02em] text-ios-text">저장된 AI 맞춤회복과 오늘의 오더를 확인하고 있어요.</div>
-          <div className="mt-2 text-[13px] text-ios-sub">{t("현재 설정 · {summary}", { summary: profileSummary })}</div>
-        </DetailCard>
-      ) : null}
-
       {!planner.aiAvailable && !planner.billingLoading ? (
         <>
           <RecoveryAIOverviewLinkCard
