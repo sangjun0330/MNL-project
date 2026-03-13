@@ -728,25 +728,35 @@ async function handlePlanner(
 }
 
 export async function GET(req: NextRequest) {
-  return handlePlanner(req, { allowGenerate: false });
+  try {
+    return await handlePlanner(req, { allowGenerate: false });
+  } catch (err: any) {
+    console.error("[Planner GET] unhandled", err?.message ?? err);
+    return bad(500, "planner_unhandled_error");
+  }
 }
 
 export async function POST(req: NextRequest) {
-  const sameOriginError = sameOriginRequestError(req);
-  if (sameOriginError) return bad(403, sameOriginError);
-  let requestedOrderCount: number | null = null;
-  let forceGenerate = false;
-  let phase: RecoveryPhase | null = null;
-  const rawBody = await req.text().catch(() => "");
-  if (rawBody.trim()) {
-    try {
-      const body = JSON.parse(rawBody);
-      requestedOrderCount = normalizeRequestedOrderCount((body as { orderCount?: unknown } | null)?.orderCount);
-      forceGenerate = Boolean((body as { forceGenerate?: unknown } | null)?.forceGenerate);
-      phase = normalizeRecoveryPhase((body as { phase?: unknown } | null)?.phase);
-    } catch {
-      return bad(400, "invalid_json");
+  try {
+    const sameOriginError = sameOriginRequestError(req);
+    if (sameOriginError) return bad(403, sameOriginError);
+    let requestedOrderCount: number | null = null;
+    let forceGenerate = false;
+    let phase: RecoveryPhase | null = null;
+    const rawBody = await req.text().catch(() => "");
+    if (rawBody.trim()) {
+      try {
+        const body = JSON.parse(rawBody);
+        requestedOrderCount = normalizeRequestedOrderCount((body as { orderCount?: unknown } | null)?.orderCount);
+        forceGenerate = Boolean((body as { forceGenerate?: unknown } | null)?.forceGenerate);
+        phase = normalizeRecoveryPhase((body as { phase?: unknown } | null)?.phase);
+      } catch {
+        return bad(400, "invalid_json");
+      }
     }
+    return await handlePlanner(req, { allowGenerate: true, requestedOrderCount, forceGenerate, phase: phase ?? undefined });
+  } catch (err: any) {
+    console.error("[Planner POST] unhandled", err?.message ?? err);
+    return bad(500, "planner_unhandled_error");
   }
-  return handlePlanner(req, { allowGenerate: true, requestedOrderCount, forceGenerate, phase: phase ?? undefined });
 }

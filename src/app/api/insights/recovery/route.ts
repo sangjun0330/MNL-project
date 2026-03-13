@@ -909,23 +909,33 @@ async function handleRecovery(
 }
 
 export async function GET(req: NextRequest) {
-  return handleRecovery(req, { allowGenerate: false });
+  try {
+    return await handleRecovery(req, { allowGenerate: false });
+  } catch (err: any) {
+    console.error("[Recovery GET] unhandled", err?.message ?? err);
+    return bad(500, "recovery_unhandled_error");
+  }
 }
 
 export async function POST(req: NextRequest) {
-  const sameOriginError = sameOriginRequestError(req);
-  if (sameOriginError) return bad(403, sameOriginError);
-  let forceGenerate = false;
-  let phase: RecoveryPhase | null = null;
-  const rawBody = await req.text().catch(() => "");
-  if (rawBody.trim()) {
-    try {
-      const body = JSON.parse(rawBody) as { forceGenerate?: unknown; phase?: unknown } | null;
-      forceGenerate = Boolean(body?.forceGenerate);
-      phase = normalizeRecoveryPhase(body?.phase);
-    } catch {
-      return bad(400, "invalid_json");
+  try {
+    const sameOriginError = sameOriginRequestError(req);
+    if (sameOriginError) return bad(403, sameOriginError);
+    let forceGenerate = false;
+    let phase: RecoveryPhase | null = null;
+    const rawBody = await req.text().catch(() => "");
+    if (rawBody.trim()) {
+      try {
+        const body = JSON.parse(rawBody) as { forceGenerate?: unknown; phase?: unknown } | null;
+        forceGenerate = Boolean(body?.forceGenerate);
+        phase = normalizeRecoveryPhase(body?.phase);
+      } catch {
+        return bad(400, "invalid_json");
+      }
     }
+    return await handleRecovery(req, { allowGenerate: true, forceGenerate, phase: phase ?? undefined });
+  } catch (err: any) {
+    console.error("[Recovery POST] unhandled", err?.message ?? err);
+    return bad(500, "recovery_unhandled_error");
   }
-  return handleRecovery(req, { allowGenerate: true, forceGenerate, phase: phase ?? undefined });
 }

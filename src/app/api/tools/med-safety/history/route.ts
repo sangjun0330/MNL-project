@@ -1,9 +1,5 @@
-import { loadAIContent } from "@/lib/server/aiContentStore";
-import { readUserIdFromRequest } from "@/lib/server/readUserId";
-import { jsonNoStore } from "@/lib/server/requestSecurity";
-import { getPlanDefinition } from "@/lib/billing/plans";
+import { NextResponse } from "next/server";
 import type { SubscriptionSnapshot } from "@/lib/server/billingStore";
-import { userHasCompletedServiceConsent } from "@/lib/server/serviceConsentStore";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -95,6 +91,16 @@ async function safeLoadSubscription(userId: string): Promise<SubscriptionSnapsho
   }
 }
 
+function jsonNoStoreFallback(body: unknown, init: { status: number } = { status: 200 }) {
+  return NextResponse.json(body, {
+    status: init.status,
+    headers: {
+      "Cache-Control": "private, no-store, max-age=0",
+      Pragma: "no-cache",
+    },
+  });
+}
+
 function normalizeHistory(value: unknown, limit = MED_SAFETY_RECENT_LIMIT_FREE) {
   const normalizedLimit = Math.max(MED_SAFETY_RECENT_LIMIT_FREE, Math.min(MED_SAFETY_RECENT_LIMIT_PRO, Math.round(limit)));
   const retentionDaysRaw = Number(process.env.MED_SAFETY_HISTORY_RETENTION_DAYS ?? DEFAULT_MED_SAFETY_HISTORY_RETENTION_DAYS);
@@ -163,6 +169,12 @@ function normalizeHistory(value: unknown, limit = MED_SAFETY_RECENT_LIMIT_FREE) 
 
 export async function GET(req: Request) {
   try {
+    const { loadAIContent } = await import("@/lib/server/aiContentStore");
+    const { readUserIdFromRequest } = await import("@/lib/server/readUserId");
+    const { jsonNoStore } = await import("@/lib/server/requestSecurity");
+    const { getPlanDefinition } = await import("@/lib/billing/plans");
+    const { userHasCompletedServiceConsent } = await import("@/lib/server/serviceConsentStore");
+
     const userId = await readUserIdFromRequest(req);
     if (!userId) {
       return jsonNoStore({ ok: false, error: "login_required" }, { status: 401 });
@@ -190,8 +202,15 @@ export async function GET(req: Request) {
       },
       { status: 200 }
     );
-  } catch {
-    return jsonNoStore(
+  } catch (error) {
+    try {
+      console.error("[MedSafetyHistory] failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } catch {
+      // Ignore logging failures.
+    }
+    return jsonNoStoreFallback(
       {
         ok: false,
         error: "med_safety_history_failed",

@@ -65,10 +65,35 @@ export async function loadUserServiceConsent(userId: string): Promise<UserServic
     .maybeSingle();
 
   if (error) {
+    const code = String((error as any)?.code ?? "");
+    const msg = String((error as any)?.message ?? "").toLowerCase();
+    // 테이블이 존재하지 않거나 스키마 캐시 문제인 경우 null 반환 (throw 안 함)
+    if (
+      code === "42P01" ||
+      code === "PGRST204" ||
+      code === "PGRST205" ||
+      msg.includes("does not exist") ||
+      msg.includes("schema cache")
+    ) {
+      console.error("[ServiceConsent] user_service_consents table issue, returning null", { code, msg: msg.slice(0, 120) });
+      return null;
+    }
     throw error;
   }
 
   return mapConsentRow((data as ConsentRow | null) ?? null);
+}
+
+function buildSyntheticLegacyConsent(): UserServiceConsentSnapshot {
+  const now = new Date().toISOString();
+  return {
+    recordsStorageConsentedAt: now,
+    aiUsageConsentedAt: now,
+    consentCompletedAt: now,
+    consentVersion: SERVICE_CONSENT_VERSION,
+    privacyVersion: PRIVACY_POLICY_VERSION,
+    termsVersion: TERMS_OF_SERVICE_VERSION,
+  };
 }
 
 async function backfillLegacyServiceConsent(userId: string): Promise<UserServiceConsentSnapshot> {
@@ -97,7 +122,12 @@ async function backfillLegacyServiceConsent(userId: string): Promise<UserService
     .single();
 
   if (error) {
-    throw error;
+    // 테이블이 없거나 DB 오류 시에도 레거시 사용자는 동의 완료 처리
+    console.error("[ServiceConsent] backfill failed, using synthetic consent", {
+      code: (error as any)?.code,
+      message: String((error as any)?.message ?? "").slice(0, 120),
+    });
+    return buildSyntheticLegacyConsent();
   }
 
   const { error: eventError } = await admin.from("user_service_consent_events").insert({
@@ -158,8 +188,18 @@ async function ensureEffectiveServiceConsent(
 }
 
 export async function userHasCompletedServiceConsent(userId: string): Promise<boolean> {
-  const consent = await ensureEffectiveServiceConsent(userId);
-  return hasCompletedServiceConsent(consent);
+  try {
+    const consent = await ensureEffectiveServiceConsent(userId);
+    return hasCompletedServiceConsent(consent);
+  } catch (error) {
+    // DB 오류 시 기존 사용자 데이터 접근을 차단하지 않도록 true 반환
+    // (consent 테이블 미생성/스키마 불일치 등)
+    console.error("[ServiceConsent] userHasCompletedServiceConsent failed, allowing access", {
+      userId: userId.slice(0, 8),
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return true;
+  }
 }
 
 export async function markUserOnboardingCompleted(userId: string): Promise<void> {

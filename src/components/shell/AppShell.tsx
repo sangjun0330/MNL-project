@@ -146,6 +146,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [busyStage, setBusyStage] = useState<BusyStage>(null);
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const bootstrapRequestRef = useRef(0);
+  const bootstrapRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cachedBootstrap = readBootstrapCache(auth?.userId ?? null);
   const resolvedBootstrap = bootstrap ?? cachedBootstrap;
   const goToSettings = useCallback(() => {
@@ -256,6 +257,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [auth?.userId, getAuthHeaders]);
 
   useEffect(() => {
+    if (bootstrapRetryTimerRef.current) {
+      clearTimeout(bootstrapRetryTimerRef.current);
+      bootstrapRetryTimerRef.current = null;
+    }
     if (status === "loading") return;
     if (!auth?.userId) {
       bootstrapRequestRef.current += 1;
@@ -291,7 +296,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         hydrateState(localDraft.state);
       }
     }
-    void loadBootstrap({ silent: Boolean(cached?.consentCompleted) });
+    const scopedUserId = auth.userId;
+    void loadBootstrap({ silent: Boolean(cached?.consentCompleted) }).then((result) => {
+      // 부트스트랩이 degraded로 반환되면 5초 후 자동 재시도
+      if (result?.degraded && scopedUserId === auth?.userId) {
+        bootstrapRetryTimerRef.current = setTimeout(() => {
+          void loadBootstrap({ silent: true });
+        }, 5000);
+      }
+    });
+    return () => {
+      if (bootstrapRetryTimerRef.current) {
+        clearTimeout(bootstrapRetryTimerRef.current);
+        bootstrapRetryTimerRef.current = null;
+      }
+    };
   }, [auth?.userId, loadBootstrap, status]);
 
   useEffect(() => {
@@ -468,8 +487,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           remoteEnabled={
             isAuthed &&
             bootstrapSettledUserId === (auth?.userId ?? null) &&
-            Boolean(resolvedBootstrap?.consentCompleted) &&
-            !resolvedBootstrap?.degraded
+            Boolean(resolvedBootstrap?.consentCompleted)
           }
         />
       ) : null}
@@ -478,8 +496,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           remoteEnabled={
             isAuthed &&
             bootstrapSettledUserId === (auth?.userId ?? null) &&
-            Boolean(resolvedBootstrap?.consentCompleted) &&
-            !resolvedBootstrap?.degraded
+            Boolean(resolvedBootstrap?.consentCompleted)
           }
         />
       ) : null}

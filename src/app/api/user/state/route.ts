@@ -1,31 +1,34 @@
 import { NextResponse } from "next/server";
-import { ensureUserRow, loadUserState, saveUserState } from "@/lib/server/userStateStore";
-import { readUserIdFromRequest } from "@/lib/server/readUserId";
-import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
-import { userHasCompletedServiceConsent } from "@/lib/server/serviceConsentStore";
-import { sanitizeStatePayload } from "@/lib/stateSanitizer";
-import { serializeStateForSupabase } from "@/lib/statePersistence";
-import { defaultMemoState, defaultRecordState } from "@/lib/notebook";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-function bad(status: number, message: string) {
-  return jsonNoStore({ ok: false, error: message }, { status });
-}
-
-function buildFallbackAppState() {
-  return {
-    selected: null,
-    schedule: {},
-    shiftNames: {},
-    notes: {},
-    emotions: {},
-    bio: {},
-    memo: defaultMemoState(),
-    records: defaultRecordState(),
-    settings: null,
-  };
+function degradedGetResponse() {
+  return NextResponse.json(
+    {
+      ok: true,
+      state: {
+        selected: null,
+        schedule: {},
+        shiftNames: {},
+        notes: {},
+        emotions: {},
+        bio: {},
+        memo: { folders: {}, documents: {}, recent: [], personalTemplates: [] },
+        records: { templates: {}, entries: {}, recent: [] },
+        settings: null,
+      },
+      updatedAt: null,
+      degraded: true,
+    },
+    {
+      status: 200,
+      headers: {
+        "Cache-Control": "private, no-store, max-age=0",
+        Pragma: "no-cache",
+      },
+    }
+  );
 }
 
 function isUserStateStorageUnavailable(error: unknown) {
@@ -43,10 +46,19 @@ function isUserStateStorageUnavailable(error: unknown) {
 
 export async function GET(req: Request) {
   try {
+    const { jsonNoStore } = await import("@/lib/server/requestSecurity");
+    const { readUserIdFromRequest } = await import("@/lib/server/readUserId");
+    const { userHasCompletedServiceConsent } = await import("@/lib/server/serviceConsentStore");
+    const { ensureUserRow, loadUserState } = await import("@/lib/server/userStateStore");
+    const { sanitizeStatePayload } = await import("@/lib/stateSanitizer");
+    const { defaultMemoState, defaultRecordState } = await import("@/lib/notebook");
+
     const userId = await readUserIdFromRequest(req);
-    if (!userId) return bad(401, "login required");
+    if (!userId) {
+      return jsonNoStore({ ok: false, error: "login required" }, { status: 401 });
+    }
     if (!(await userHasCompletedServiceConsent(userId))) {
-      return bad(403, "consent_required");
+      return jsonNoStore({ ok: false, error: "consent_required" }, { status: 403 });
     }
     await ensureUserRow(userId);
     const row = await loadUserState(userId);
@@ -63,49 +75,78 @@ export async function GET(req: Request) {
       updatedAt: row?.updatedAt ?? null,
     });
   } catch (error) {
-    console.error("[UserState] failed_to_load_state", {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return jsonNoStore({
-      ok: true,
-      state: buildFallbackAppState(),
-      updatedAt: null,
-      degraded: true,
-    });
+    try {
+      console.error("[UserState] failed_to_load_state", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } catch {
+      // Ignore logging failures.
+    }
+    return degradedGetResponse();
   }
 }
 
 export async function POST(req: Request) {
-  const sameOriginError = sameOriginRequestError(req);
-  if (sameOriginError) return bad(403, sameOriginError);
-
-  let body: any;
   try {
-    body = await req.json();
-  } catch {
-    return bad(400, "invalid json");
-  }
+    const { jsonNoStore, sameOriginRequestError } = await import("@/lib/server/requestSecurity");
+    const { readUserIdFromRequest } = await import("@/lib/server/readUserId");
+    const { userHasCompletedServiceConsent } = await import("@/lib/server/serviceConsentStore");
+    const { saveUserState } = await import("@/lib/server/userStateStore");
+    const { serializeStateForSupabase } = await import("@/lib/statePersistence");
 
-  try {
+    const sameOriginError = sameOriginRequestError(req);
+    if (sameOriginError) {
+      return jsonNoStore({ ok: false, error: sameOriginError }, { status: 403 });
+    }
+
+    let body: any;
+    try {
+      body = await req.json();
+    } catch {
+      return jsonNoStore({ ok: false, error: "invalid json" }, { status: 400 });
+    }
+
     const userId = await readUserIdFromRequest(req);
     const state = body?.state;
 
-    if (!userId) return bad(401, "login required");
-    if (!state) return bad(400, "state required");
+    if (!userId) return jsonNoStore({ ok: false, error: "login required" }, { status: 401 });
+    if (!state) return jsonNoStore({ ok: false, error: "state required" }, { status: 400 });
 
     if (!(await userHasCompletedServiceConsent(userId))) {
-      return bad(403, "consent_required");
+      return jsonNoStore({ ok: false, error: "consent_required" }, { status: 403 });
     }
     const serialized = serializeStateForSupabase(state);
     await saveUserState({ userId, payload: serialized });
     return jsonNoStore({ ok: true, syncedAt: new Date().toISOString() });
   } catch (error) {
-    console.error("[UserState] failed_to_save_state", {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    if (isUserStateStorageUnavailable(error)) {
-      return jsonNoStore({ ok: true, syncedAt: null, degraded: true, localOnly: true });
+    try {
+      console.error("[UserState] failed_to_save_state", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } catch {
+      // Ignore logging failures.
     }
-    return bad(500, "failed_to_save_state");
+    if (isUserStateStorageUnavailable(error)) {
+      return NextResponse.json(
+        { ok: true, syncedAt: null, degraded: true, localOnly: true },
+        {
+          status: 200,
+          headers: {
+            "Cache-Control": "private, no-store, max-age=0",
+            Pragma: "no-cache",
+          },
+        }
+      );
+    }
+    return NextResponse.json(
+      { ok: false, error: "failed_to_save_state" },
+      {
+        status: 500,
+        headers: {
+          "Cache-Control": "private, no-store, max-age=0",
+          Pragma: "no-cache",
+        },
+      }
+    );
   }
 }
