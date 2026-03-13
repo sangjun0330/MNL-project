@@ -60,6 +60,9 @@ import {
   formatNotebookDateTime,
   getMemoBlockDetailText,
   getMemoBlockText,
+  getMemoDocumentTitle,
+  getMemoTableCellText,
+  getMemoTableColumnText,
   getReminderTimestampFromPreset,
   memoBlockToPlainText,
   memoCoverOptions,
@@ -69,6 +72,7 @@ import {
   memoDocumentToPlainText,
   memoPresets,
   memoReminderPresets,
+  sanitizeMemoDocument,
   sanitizeNotebookTags,
   type RNestMemoBlock,
   type RNestMemoAttachment,
@@ -80,7 +84,7 @@ import {
   type RNestMemoIconId,
   type RNestMemoState,
 } from "@/lib/notebook"
-import { normalizeNotebookLinkHref, sanitizeNotebookRichHtml } from "@/lib/notebookRichText"
+import { normalizeNotebookLinkHref, plainTextToRichHtml, sanitizeNotebookRichHtml } from "@/lib/notebookRichText"
 import {
   applyLockedMemoPayload,
   createLockedMemoEnvelope,
@@ -136,8 +140,9 @@ function downloadTextFile(fileName: string, content: string, mimeType: string) {
   window.URL.revokeObjectURL(url)
 }
 
-const PDF_EXPORT_SURFACE_WIDTH = 980
 const PDF_EXPORT_MARGIN_PT = 28
+const PDF_EXPORT_CAPTURE_SCALE = 2
+const PDF_EXPORT_MAX_CAPTURE_SCALE = 3
 
 function createPdfFieldPreview(field: HTMLInputElement | HTMLTextAreaElement) {
   const preview = document.createElement("div")
@@ -151,16 +156,20 @@ function createPdfFieldPreview(field: HTMLInputElement | HTMLTextAreaElement) {
   preview.style.border = "none"
   preview.style.background = "transparent"
   preview.style.boxShadow = "none"
+  preview.style.maxWidth = "100%"
   return preview
 }
 
 function buildPdfExportRoot(source: HTMLElement) {
+  const sourceRect = source.getBoundingClientRect()
+  const captureWidth = Math.max(1, Math.ceil(sourceRect.width))
+
   const host = document.createElement("div")
   host.setAttribute("data-pdf-export-root", "true")
   host.style.position = "fixed"
   host.style.left = "-20000px"
   host.style.top = "0"
-  host.style.width = `${PDF_EXPORT_SURFACE_WIDTH}px`
+  host.style.width = `${captureWidth}px`
   host.style.padding = "0"
   host.style.margin = "0"
   host.style.background = "#ffffff"
@@ -168,15 +177,23 @@ function buildPdfExportRoot(source: HTMLElement) {
   host.style.pointerEvents = "none"
   host.style.overflow = "visible"
 
+  const viewport = document.createElement("div")
+  viewport.style.position = "relative"
+  viewport.style.width = `${captureWidth}px`
+  viewport.style.background = "#ffffff"
+  viewport.style.overflow = "hidden"
+
   const clone = source.cloneNode(true) as HTMLElement
-  clone.style.width = "100%"
-  clone.style.maxWidth = "none"
+  clone.style.width = `${captureWidth}px`
+  clone.style.maxWidth = `${captureWidth}px`
   clone.style.margin = "0"
-  clone.style.padding = "32px 40px"
-  clone.style.boxSizing = "border-box"
   clone.style.background = "#ffffff"
   clone.style.overflow = "visible"
   clone.style.minHeight = "0"
+  clone.style.transform = "translateY(0)"
+  clone.style.transformOrigin = "top left"
+  clone.style.animation = "none"
+  clone.style.transition = "none"
 
   clone.querySelectorAll('[data-pdf-hide="true"]').forEach((element) => element.remove())
 
@@ -187,45 +204,35 @@ function buildPdfExportRoot(source: HTMLElement) {
   clone.querySelectorAll<HTMLElement>('[data-notebook-rich-input="true"], .notebook-rich-text-editor, .ProseMirror').forEach((element) => {
     element.setAttribute("contenteditable", "false")
     element.removeAttribute("data-placeholder")
-    element.style.minHeight = "0"
-    element.style.height = "auto"
-    element.style.maxWidth = "100%"
-    element.style.overflow = "visible"
-    element.style.whiteSpace = "pre-wrap"
-    element.style.wordBreak = "break-word"
-    element.style.overflowWrap = "anywhere"
+    element.style.caretColor = "transparent"
+    element.style.outline = "none"
+    element.style.animation = "none"
+    element.style.transition = "none"
   })
 
-  clone.querySelectorAll<HTMLElement>("p, div, span, a, td, th, code, mark").forEach((element) => {
-    element.style.wordBreak = "break-word"
-    element.style.overflowWrap = "anywhere"
-    element.style.maxWidth = "100%"
+  clone.querySelectorAll<HTMLElement>("*").forEach((element) => {
+    element.style.animation = "none"
+    element.style.transition = "none"
   })
 
-  clone.querySelectorAll<HTMLElement>("table").forEach((table) => {
-    table.style.width = "100%"
-    table.style.tableLayout = "fixed"
-  })
-
-  clone.querySelectorAll<HTMLElement>("img, canvas, svg").forEach((media) => {
-    media.style.maxWidth = "100%"
-    media.style.height = "auto"
-  })
-
-  clone.querySelectorAll<HTMLElement>("[style*='overflow']").forEach((element) => {
-    element.style.overflow = "visible"
-  })
-
-  host.appendChild(clone)
+  viewport.appendChild(clone)
+  host.appendChild(viewport)
   document.body.appendChild(host)
 
   return {
     host,
+    viewport,
     clone,
+    captureWidth,
     cleanup: () => {
       host.remove()
     },
   }
+}
+
+function getPdfSliceHeightPx(captureWidth: number, pdfInnerWidthPt: number, pdfInnerHeightPt: number) {
+  if (captureWidth <= 0 || pdfInnerWidthPt <= 0 || pdfInnerHeightPt <= 0) return 1
+  return Math.max(1, Math.floor((captureWidth * pdfInnerHeightPt) / pdfInnerWidthPt))
 }
 
 async function waitForPdfExportAssets(root: HTMLElement) {
@@ -263,6 +270,11 @@ function clampImageWidth(value: number | undefined | null) {
 function clampImageAspectRatio(value: number | undefined | null) {
   if (typeof value !== "number" || !Number.isFinite(value)) return 4 / 3
   return Math.min(3, Math.max(0.4, Number(value)))
+}
+
+function clampImageOffsetX(value: number | undefined | null) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0
+  return Math.min(100, Math.max(0, Number(value.toFixed(2))))
 }
 
 function deriveAttachmentKind(file: File, preferred: RNestMemoAttachment["kind"] | null = null): RNestMemoAttachment["kind"] {
@@ -557,35 +569,46 @@ function replaceBlockContent(block: RNestMemoBlock, query: string, replacement: 
   if (block.type === "table") {
     const nextTable = {
       columns: [...(block.table?.columns ?? ["항목", "내용"])] as [string, string],
+      columnHtml: [...(block.table?.columnHtml ?? ["", ""])] as [string, string],
       rows: (block.table?.rows ?? []).map((row) => ({ ...row })),
     }
     let count = 0
 
-    const firstColumn = replaceOccurrences(nextTable.columns[0], query, replacement, replaceAll)
+    const firstColumn = replaceOccurrencesInRichHtml(nextTable.columnHtml[0], query, replacement, replaceAll)
     if (firstColumn.count > 0) {
-      nextTable.columns[0] = firstColumn.value
+      nextTable.columnHtml[0] = firstColumn.html
+      nextTable.columns[0] = getMemoTableColumnText({ columns: ["", ""], columnHtml: [firstColumn.html, ""] }, 0)
       count += firstColumn.count
       if (!replaceAll) return { block: { ...block, table: nextTable }, count }
     }
 
-    const secondColumn = replaceOccurrences(nextTable.columns[1], query, replacement, replaceAll)
+    const secondColumn = replaceOccurrencesInRichHtml(nextTable.columnHtml[1], query, replacement, replaceAll)
     if (secondColumn.count > 0) {
-      nextTable.columns[1] = secondColumn.value
+      nextTable.columnHtml[1] = secondColumn.html
+      nextTable.columns[1] = getMemoTableColumnText({ columns: ["", ""], columnHtml: ["", secondColumn.html] }, 1)
       count += secondColumn.count
       if (!replaceAll) return { block: { ...block, table: nextTable }, count }
     }
 
     for (let i = 0; i < nextTable.rows.length; i += 1) {
-      const left = replaceOccurrences(nextTable.rows[i].left, query, replacement, replaceAll)
+      const left = replaceOccurrencesInRichHtml(nextTable.rows[i].leftHtml, query, replacement, replaceAll)
       if (left.count > 0) {
-        nextTable.rows[i] = { ...nextTable.rows[i], left: left.value }
+        nextTable.rows[i] = {
+          ...nextTable.rows[i],
+          left: getMemoTableCellText({ left: "", leftHtml: left.html, right: "", rightHtml: "" }, "left"),
+          leftHtml: left.html,
+        }
         count += left.count
         if (!replaceAll) return { block: { ...block, table: nextTable }, count }
       }
 
-      const right = replaceOccurrences(nextTable.rows[i].right, query, replacement, replaceAll)
+      const right = replaceOccurrencesInRichHtml(nextTable.rows[i].rightHtml, query, replacement, replaceAll)
       if (right.count > 0) {
-        nextTable.rows[i] = { ...nextTable.rows[i], right: right.value }
+        nextTable.rows[i] = {
+          ...nextTable.rows[i],
+          right: getMemoTableCellText({ left: "", leftHtml: "", right: "", rightHtml: right.html }, "right"),
+          rightHtml: right.html,
+        }
         count += right.count
         if (!replaceAll) return { block: { ...block, table: nextTable }, count }
       }
@@ -594,7 +617,7 @@ function replaceBlockContent(block: RNestMemoBlock, query: string, replacement: 
     return count > 0 ? { block: { ...block, table: nextTable }, count } : { block, count: 0 }
   }
 
-  const richTextTypes: RNestMemoBlockType[] = ["heading", "paragraph", "bulleted", "numbered", "checklist", "callout", "quote", "toggle"]
+  const richTextTypes: RNestMemoBlockType[] = ["heading", "paragraph", "bulleted", "numbered", "checklist", "callout", "quote", "toggle", "attachment"]
   let nextBlock: RNestMemoBlock = block
   let count = 0
 
@@ -639,7 +662,7 @@ function replaceBlockContent(block: RNestMemoBlock, query: string, replacement: 
   }
 
   if (nextBlock.type === "bookmark") {
-    if (count === 0 || replaceAll) applyPlainField("detailText")
+    if (count === 0 || replaceAll) applyRichField("detailText", "detailTextHtml")
   }
 
   return { block: nextBlock, count }
@@ -1440,28 +1463,42 @@ function ImageResizableBlock({
   onChange: (b: RNestMemoBlock) => void
   onKeyDown: (e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => void
 }) {
-  const containerRef = useRef<HTMLDivElement>(null)
+  const stageRef = useRef<HTMLDivElement>(null)
+  const imageRef = useRef<HTMLDivElement>(null)
   const [resizing, setResizing] = useState(false)
+  const [moving, setMoving] = useState(false)
   const [imgHovered, setImgHovered] = useState(false)
   const [loadError, setLoadError] = useState(false)
   const [previewWidthPct, setPreviewWidthPct] = useState(() => clampImageWidth(block.mediaWidth))
+  const [previewOffsetX, setPreviewOffsetX] = useState(() => clampImageOffsetX(block.mediaOffsetX))
   const [resolvedSrc, setResolvedSrc] = useState<string | null>(() => {
     if (attachment?.storagePath) {
       return getCachedNotebookImagePreview(attachment.storagePath) ?? attachmentUrl ?? null
     }
     return attachmentUrl ?? null
   })
-  const startDataRef = useRef<{ startX: number; startY: number; startW: number; startH: number; handle: string } | null>(null)
+  const resizeStartRef = useRef<{ startX: number; startW: number; handle: string } | null>(null)
+  const moveStartRef = useRef<{ startX: number; startOffsetPx: number; availableWidth: number } | null>(null)
   const previewWidthRef = useRef(previewWidthPct)
   const pendingWidthRef = useRef(previewWidthPct)
+  const previewOffsetRef = useRef(previewOffsetX)
+  const pendingOffsetRef = useRef(previewOffsetX)
   const resizeFrameRef = useRef<number | null>(null)
+  const moveFrameRef = useRef<number | null>(null)
 
   const aspectRatio = clampImageAspectRatio(block.mediaAspectRatio)
+  const canMoveImage = previewWidthPct < 100
+  const marginLeftPct = Math.max(0, ((100 - previewWidthPct) * previewOffsetX) / 100)
 
   useEffect(() => {
     previewWidthRef.current = previewWidthPct
     pendingWidthRef.current = previewWidthPct
   }, [previewWidthPct])
+
+  useEffect(() => {
+    previewOffsetRef.current = previewOffsetX
+    pendingOffsetRef.current = previewOffsetX
+  }, [previewOffsetX])
 
   useEffect(() => {
     if (!resizing) {
@@ -1471,6 +1508,15 @@ function ImageResizableBlock({
       setPreviewWidthPct(nextWidth)
     }
   }, [block.mediaWidth, resizing])
+
+  useEffect(() => {
+    if (!moving) {
+      const nextOffset = clampImageOffsetX(block.mediaOffsetX)
+      previewOffsetRef.current = nextOffset
+      pendingOffsetRef.current = nextOffset
+      setPreviewOffsetX(nextOffset)
+    }
+  }, [block.mediaOffsetX, moving])
 
   useEffect(() => {
     setLoadError(false)
@@ -1517,6 +1563,9 @@ function ImageResizableBlock({
       if (resizeFrameRef.current != null) {
         window.cancelAnimationFrame(resizeFrameRef.current)
       }
+      if (moveFrameRef.current != null) {
+        window.cancelAnimationFrame(moveFrameRef.current)
+      }
     }
   }, [])
 
@@ -1531,27 +1580,44 @@ function ImageResizableBlock({
     })
   }
 
+  function schedulePreviewOffset(nextOffset: number) {
+    previewOffsetRef.current = nextOffset
+    pendingOffsetRef.current = nextOffset
+    if (moveFrameRef.current != null) return
+    moveFrameRef.current = window.requestAnimationFrame(() => {
+      moveFrameRef.current = null
+      const offset = pendingOffsetRef.current
+      setPreviewOffsetX((current) => (current === offset ? current : offset))
+    })
+  }
+
+  function commitImageOffset(nextOffset: number) {
+    const clamped = clampImageOffsetX(nextOffset)
+    previewOffsetRef.current = clamped
+    pendingOffsetRef.current = clamped
+    setPreviewOffsetX(clamped)
+    if (Math.abs(clamped - clampImageOffsetX(block.mediaOffsetX)) > 0.05) {
+      onChange({ ...block, mediaOffsetX: clamped })
+    }
+  }
+
   function handleResizeStart(e: React.PointerEvent, handle: string) {
     e.preventDefault()
     e.stopPropagation()
-    const imgEl = containerRef.current
+    const imgEl = imageRef.current
     if (!imgEl) return
     const rect = imgEl.getBoundingClientRect()
-    startDataRef.current = {
+    resizeStartRef.current = {
       startX: e.clientX,
-      startY: e.clientY,
       startW: rect.width,
-      startH: rect.height,
       handle,
     }
     setResizing(true)
 
     function handleMove(ev: PointerEvent) {
-      if (!startDataRef.current || !containerRef.current) return
-      const parentEl = containerRef.current.parentElement
-      if (!parentEl) return
-      const parentWidth = parentEl.getBoundingClientRect().width
-      const { startX, startW, handle: h } = startDataRef.current
+      if (!resizeStartRef.current || !stageRef.current) return
+      const parentWidth = stageRef.current.getBoundingClientRect().width
+      const { startX, startW, handle: h } = resizeStartRef.current
       const dx = ev.clientX - startX
       const isLeft = h.includes("l")
       const effectiveDx = isLeft ? -dx : dx
@@ -1562,7 +1628,7 @@ function ImageResizableBlock({
 
     function handleUp() {
       const nextWidth = previewWidthRef.current
-      startDataRef.current = null
+      resizeStartRef.current = null
       if (resizeFrameRef.current != null) {
         window.cancelAnimationFrame(resizeFrameRef.current)
         resizeFrameRef.current = null
@@ -1581,7 +1647,64 @@ function ImageResizableBlock({
     window.addEventListener("pointerup", handleUp)
   }
 
-  const showHandles = imgHovered || resizing
+  function handleMoveStart(event: React.PointerEvent<HTMLDivElement>) {
+    const target = event.target as HTMLElement
+    if (
+      target.closest('[data-image-resize-handle="true"]') ||
+      target.closest('[data-image-align-control="true"]') ||
+      !canMoveImage ||
+      resizing
+    ) {
+      return
+    }
+    if (event.pointerType === "mouse" && event.button !== 0) return
+    const stageEl = stageRef.current
+    const imageEl = imageRef.current
+    if (!stageEl || !imageEl) return
+    const availableWidth = stageEl.getBoundingClientRect().width - imageEl.getBoundingClientRect().width
+    if (availableWidth <= 1) return
+
+    event.preventDefault()
+    event.stopPropagation()
+    setImgHovered(true)
+    setMoving(true)
+    moveStartRef.current = {
+      startX: event.clientX,
+      startOffsetPx: (availableWidth * previewOffsetRef.current) / 100,
+      availableWidth,
+    }
+
+    function handleMove(ev: PointerEvent) {
+      if (!moveStartRef.current) return
+      const { startX, startOffsetPx, availableWidth: width } = moveStartRef.current
+      const dx = ev.clientX - startX
+      const nextOffsetPx = Math.min(width, Math.max(0, startOffsetPx + dx))
+      const nextOffset = width <= 1 ? 0 : clampImageOffsetX((nextOffsetPx / width) * 100)
+      schedulePreviewOffset(nextOffset)
+    }
+
+    function handleUp() {
+      const nextOffset = previewOffsetRef.current
+      moveStartRef.current = null
+      if (moveFrameRef.current != null) {
+        window.cancelAnimationFrame(moveFrameRef.current)
+        moveFrameRef.current = null
+      }
+      pendingOffsetRef.current = nextOffset
+      setPreviewOffsetX(nextOffset)
+      setMoving(false)
+      window.removeEventListener("pointermove", handleMove)
+      window.removeEventListener("pointerup", handleUp)
+      if (Math.abs(nextOffset - clampImageOffsetX(block.mediaOffsetX)) > 0.05) {
+        onChange({ ...block, mediaOffsetX: nextOffset })
+      }
+    }
+
+    window.addEventListener("pointermove", handleMove)
+    window.addEventListener("pointerup", handleUp)
+  }
+
+  const showHandles = imgHovered || resizing || moving
 
   const handleClass =
     "absolute z-10 rounded-full border-2 border-[color:var(--rnest-accent)] bg-white shadow-sm transition-opacity [touch-action:none]"
@@ -1589,86 +1712,133 @@ function ImageResizableBlock({
   return (
     <div>
       {resolvedSrc && !loadError ? (
-        <div
-          className="relative inline-block"
-          style={{
-            width: `${previewWidthPct}%`,
-            willChange: resizing ? "width" : undefined,
-            transition: resizing ? "none" : "width 220ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 220ms ease",
-          }}
-          ref={containerRef}
-          onMouseEnter={() => setImgHovered(true)}
-          onMouseLeave={() => { if (!resizing) setImgHovered(false) }}
-          onPointerDown={() => setImgHovered(true)}
-        >
+        <div ref={stageRef} className="relative w-full">
           <div
-            className={cn(
-              "relative overflow-hidden rounded-lg",
-              resizing && "select-none shadow-[0_18px_36px_rgba(123,111,208,0.14)]"
-            )}
-            style={{ aspectRatio: String(aspectRatio) }}
+            className="relative inline-block max-w-full"
+            style={{
+              width: `${previewWidthPct}%`,
+              marginLeft: `${marginLeftPct}%`,
+              willChange: resizing || moving ? "width, margin-left" : undefined,
+              transition:
+                resizing || moving ? "none" : "width 220ms cubic-bezier(0.22, 1, 0.36, 1), margin-left 220ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 220ms ease",
+            }}
+            ref={imageRef}
+            onMouseEnter={() => setImgHovered(true)}
+            onMouseLeave={() => {
+              if (!resizing && !moving) setImgHovered(false)
+            }}
+            onPointerDown={handleMoveStart}
           >
-            <Image
-              src={resolvedSrc}
-              alt={block.text || attachment?.name || "메모 이미지"}
-              fill
-              unoptimized
-              className="pointer-events-none select-none object-cover"
-              sizes="(max-width: 1024px) 92vw, 720px"
-              draggable={false}
-              onLoad={(event) => {
-                setLoadError(false)
-                const nextRatio =
-                  event.currentTarget.naturalWidth > 0 && event.currentTarget.naturalHeight > 0
-                    ? event.currentTarget.naturalWidth / event.currentTarget.naturalHeight
-                    : undefined
-                if (
-                  typeof nextRatio === "number" &&
-                  Math.abs(clampImageAspectRatio(block.mediaAspectRatio) - clampImageAspectRatio(nextRatio)) > 0.01
-                ) {
-                  onChange({ ...block, mediaAspectRatio: nextRatio })
-                }
-              }}
-              onError={() => {
-                if (attachmentUrl && resolvedSrc !== attachmentUrl) {
-                  setResolvedSrc(attachmentUrl)
-                  return
-                }
-                setLoadError(true)
-              }}
-            />
+            {showHandles && canMoveImage && (
+              <div
+                data-pdf-hide="true"
+                data-image-align-control="true"
+                className="absolute right-2 top-2 z-20 flex items-center gap-1 rounded-full border border-white/80 bg-white/92 p-1 shadow-[0_12px_24px_rgba(15,23,42,0.12)] backdrop-blur"
+                onPointerDown={(event) => event.stopPropagation()}
+              >
+                {([
+                  { label: "좌", value: 0 },
+                  { label: "중", value: 50 },
+                  { label: "우", value: 100 },
+                ] as const).map((preset) => {
+                  const active = Math.abs(previewOffsetX - preset.value) <= 2
+                  return (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      data-image-align-control="true"
+                      disabled={!canMoveImage}
+                      aria-label={`이미지 ${preset.label}측 정렬`}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => commitImageOffset(preset.value)}
+                      className={cn(
+                        "flex h-7 min-w-7 items-center justify-center rounded-full px-2 text-[11px] font-medium transition-colors",
+                        active
+                          ? "bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
+                          : "text-ios-sub hover:bg-gray-100 hover:text-ios-text",
+                        !canMoveImage && "cursor-not-allowed opacity-45"
+                      )}
+                    >
+                      {preset.label}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
+            <div
+              className={cn(
+                "relative overflow-hidden rounded-lg",
+                canMoveImage && !resizing && !moving && "cursor-grab active:cursor-grabbing",
+                (resizing || moving) && "select-none shadow-[0_18px_36px_rgba(123,111,208,0.14)]"
+              )}
+              style={{ aspectRatio: String(aspectRatio), touchAction: resizing || moving ? "none" : canMoveImage ? "pan-y" : "auto" }}
+            >
+              <Image
+                src={resolvedSrc}
+                alt={block.text || attachment?.name || "메모 이미지"}
+                fill
+                unoptimized
+                className="pointer-events-none select-none object-cover"
+                sizes="(max-width: 1024px) 92vw, 720px"
+                draggable={false}
+                onLoad={(event) => {
+                  setLoadError(false)
+                  const nextRatio =
+                    event.currentTarget.naturalWidth > 0 && event.currentTarget.naturalHeight > 0
+                      ? event.currentTarget.naturalWidth / event.currentTarget.naturalHeight
+                      : undefined
+                  if (
+                    typeof nextRatio === "number" &&
+                    Math.abs(clampImageAspectRatio(block.mediaAspectRatio) - clampImageAspectRatio(nextRatio)) > 0.01
+                  ) {
+                    onChange({ ...block, mediaAspectRatio: nextRatio })
+                  }
+                }}
+                onError={() => {
+                  if (attachmentUrl && resolvedSrc !== attachmentUrl) {
+                    setResolvedSrc(attachmentUrl)
+                    return
+                  }
+                  setLoadError(true)
+                }}
+              />
+            </div>
+            {showHandles && (
+              <>
+                <div
+                  data-image-resize-handle="true"
+                  onPointerDown={(e) => handleResizeStart(e, "tl")}
+                  className={cn(handleClass, "-left-1.5 -top-1.5 h-3 w-3 cursor-nwse-resize", showHandles ? "opacity-100" : "opacity-0")}
+                />
+                <div
+                  data-image-resize-handle="true"
+                  onPointerDown={(e) => handleResizeStart(e, "tr")}
+                  className={cn(handleClass, "-right-1.5 -top-1.5 h-3 w-3 cursor-nesw-resize", showHandles ? "opacity-100" : "opacity-0")}
+                />
+                <div
+                  data-image-resize-handle="true"
+                  onPointerDown={(e) => handleResizeStart(e, "bl")}
+                  className={cn(handleClass, "-bottom-1.5 -left-1.5 h-3 w-3 cursor-nesw-resize", showHandles ? "opacity-100" : "opacity-0")}
+                />
+                <div
+                  data-image-resize-handle="true"
+                  onPointerDown={(e) => handleResizeStart(e, "br")}
+                  className={cn(handleClass, "-bottom-1.5 -right-1.5 h-3 w-3 cursor-nwse-resize", showHandles ? "opacity-100" : "opacity-0")}
+                />
+                <div
+                  data-image-resize-handle="true"
+                  onPointerDown={(e) => handleResizeStart(e, "l")}
+                  className={cn(handleClass, "-left-1.5 top-1/2 h-6 w-2 -translate-y-1/2 cursor-ew-resize rounded-full", showHandles ? "opacity-100" : "opacity-0")}
+                />
+                <div
+                  data-image-resize-handle="true"
+                  onPointerDown={(e) => handleResizeStart(e, "r")}
+                  className={cn(handleClass, "-right-1.5 top-1/2 h-6 w-2 -translate-y-1/2 cursor-ew-resize rounded-full", showHandles ? "opacity-100" : "opacity-0")}
+                />
+              </>
+            )}
           </div>
-          {/* resize handles at corners and edges */}
-          {showHandles && (
-            <>
-              {/* corner handles */}
-              <div
-                onPointerDown={(e) => handleResizeStart(e, "tl")}
-                className={cn(handleClass, "-left-1.5 -top-1.5 h-3 w-3 cursor-nwse-resize", showHandles ? "opacity-100" : "opacity-0")}
-              />
-              <div
-                onPointerDown={(e) => handleResizeStart(e, "tr")}
-                className={cn(handleClass, "-right-1.5 -top-1.5 h-3 w-3 cursor-nesw-resize", showHandles ? "opacity-100" : "opacity-0")}
-              />
-              <div
-                onPointerDown={(e) => handleResizeStart(e, "bl")}
-                className={cn(handleClass, "-bottom-1.5 -left-1.5 h-3 w-3 cursor-nesw-resize", showHandles ? "opacity-100" : "opacity-0")}
-              />
-              <div
-                onPointerDown={(e) => handleResizeStart(e, "br")}
-                className={cn(handleClass, "-bottom-1.5 -right-1.5 h-3 w-3 cursor-nwse-resize", showHandles ? "opacity-100" : "opacity-0")}
-              />
-              {/* edge handles */}
-              <div
-                onPointerDown={(e) => handleResizeStart(e, "l")}
-                className={cn(handleClass, "-left-1.5 top-1/2 h-6 w-2 -translate-y-1/2 cursor-ew-resize rounded-full", showHandles ? "opacity-100" : "opacity-0")}
-              />
-              <div
-                onPointerDown={(e) => handleResizeStart(e, "r")}
-                className={cn(handleClass, "-right-1.5 top-1/2 h-6 w-2 -translate-y-1/2 cursor-ew-resize rounded-full", showHandles ? "opacity-100" : "opacity-0")}
-              />
-            </>
-          )}
         </div>
       ) : (
         <div className="flex h-48 items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 text-[13px] text-ios-muted">
@@ -1804,6 +1974,47 @@ function InlineBlock({
       e.preventDefault()
       setShowSlashMenu(true)
     }
+  }
+
+  function updateTableColumn(index: 0 | 1, next: { text: string; html: string }) {
+    const firstColumn = getMemoTableColumnText(block.table, 0)
+    const secondColumn = getMemoTableColumnText(block.table, 1)
+    onChange({
+      ...block,
+      table: {
+        columns: [
+          index === 0 ? next.text : firstColumn,
+          index === 1 ? next.text : secondColumn,
+        ],
+        columnHtml: [
+          index === 0 ? next.html : block.table?.columnHtml?.[0] ?? (firstColumn ? plainTextToRichHtml(firstColumn) : ""),
+          index === 1 ? next.html : block.table?.columnHtml?.[1] ?? (secondColumn ? plainTextToRichHtml(secondColumn) : ""),
+        ],
+        rows: block.table?.rows ?? [createMemoTableRow()],
+      },
+    })
+  }
+
+  function updateTableRowCell(rowId: string, side: "left" | "right", next: { text: string; html: string }) {
+    onChange({
+      ...block,
+      table: {
+        columns: block.table?.columns ?? ["항목", "내용"],
+        columnHtml: block.table?.columnHtml ?? [
+          plainTextToRichHtml(getMemoTableColumnText(block.table, 0)),
+          plainTextToRichHtml(getMemoTableColumnText(block.table, 1)),
+        ],
+        rows: (block.table?.rows ?? []).map((row) =>
+          row.id === rowId
+            ? {
+                ...row,
+                [side]: next.text,
+                [side === "left" ? "leftHtml" : "rightHtml"]: next.html,
+              }
+            : row
+        ),
+      },
+    })
   }
 
   return (
@@ -2303,16 +2514,21 @@ function InlineBlock({
                     mobileSafeInputClass
                   )}
                 />
-                <input
-                  type="text"
-                  value={block.detailText ?? ""}
-                  onChange={(e) => onChange({ ...block, detailText: e.target.value })}
-                  onKeyDown={handleCommandKeyDown}
+                <NotebookRichTextField
+                  text={block.detailText}
+                  html={block.detailTextHtml}
                   placeholder="링크 제목 또는 메모"
-                  className={cn(
-                    "w-full border-none bg-transparent text-ios-sub outline-none placeholder:text-gray-300",
-                    mobileSafeFineClass
-                  )}
+                  ariaLabel="링크 제목 또는 메모"
+                  className={cn("text-ios-sub", mobileSafeFineClass)}
+                  enableSlashMenu={false}
+                  onDuplicate={onDuplicate}
+                  onChange={(next) =>
+                    onChange({
+                      ...block,
+                      detailText: next.text,
+                      detailTextHtml: next.html,
+                    })
+                  }
                 />
                 {getBookmarkMeta(block.text) ? (
                   <a
@@ -2364,13 +2580,21 @@ function InlineBlock({
                 열기
               </button>
             </div>
-            <input
-              type="text"
-              value={block.text ?? ""}
-              onChange={(e) => onChange({ ...block, text: e.target.value })}
-              onKeyDown={handleCommandKeyDown}
+            <NotebookRichTextField
+              text={block.text}
+              html={block.textHtml}
               placeholder="파일 메모를 입력하세요"
-              className={cn("mt-3 w-full border-none bg-transparent text-ios-sub outline-none placeholder:text-gray-300", mobileSafeInputClass)}
+              ariaLabel="파일 메모"
+              className={cn("mt-3 text-ios-sub", mobileSafeInputClass)}
+              enableSlashMenu={false}
+              onDuplicate={onDuplicate}
+              onChange={(next) =>
+                onChange({
+                  ...block,
+                  text: next.text,
+                  textHtml: next.html,
+                })
+              }
             />
           </div>
         )}
@@ -2381,37 +2605,29 @@ function InlineBlock({
               <thead>
                 <tr className="border-b border-gray-200 bg-gray-50">
                   <th className="px-3 py-2 text-left font-medium text-ios-sub">
-                    <input
-                      type="text"
-                      value={block.table?.columns[0] ?? "항목"}
-                      onChange={(e) =>
-                        onChange({
-                          ...block,
-                          table: {
-                            columns: [e.target.value, block.table?.columns[1] ?? "내용"],
-                            rows: block.table?.rows ?? [],
-                          },
-                        })
-                      }
-                      className="w-full border-none bg-transparent font-medium text-ios-sub outline-none"
-                      style={{ fontSize: "16px" }}
+                    <NotebookRichTextField
+                      text={getMemoTableColumnText(block.table, 0)}
+                      html={block.table?.columnHtml?.[0]}
+                      placeholder="항목"
+                      ariaLabel="표 첫 번째 헤더"
+                      className="font-medium text-ios-sub"
+                      singleLine
+                      enableSlashMenu={false}
+                      onDuplicate={onDuplicate}
+                      onChange={(next) => updateTableColumn(0, next)}
                     />
                   </th>
                   <th className="px-3 py-2 text-left font-medium text-ios-sub">
-                    <input
-                      type="text"
-                      value={block.table?.columns[1] ?? "내용"}
-                      onChange={(e) =>
-                        onChange({
-                          ...block,
-                          table: {
-                            columns: [block.table?.columns[0] ?? "항목", e.target.value],
-                            rows: block.table?.rows ?? [],
-                          },
-                        })
-                      }
-                      className="w-full border-none bg-transparent font-medium text-ios-sub outline-none"
-                      style={{ fontSize: "16px" }}
+                    <NotebookRichTextField
+                      text={getMemoTableColumnText(block.table, 1)}
+                      html={block.table?.columnHtml?.[1]}
+                      placeholder="내용"
+                      ariaLabel="표 두 번째 헤더"
+                      className="font-medium text-ios-sub"
+                      singleLine
+                      enableSlashMenu={false}
+                      onDuplicate={onDuplicate}
+                      onChange={(next) => updateTableColumn(1, next)}
                     />
                   </th>
                   <th className="w-8" />
@@ -2421,43 +2637,27 @@ function InlineBlock({
                 {(block.table?.rows ?? []).map((row) => (
                   <tr key={row.id} className="border-b border-gray-100 last:border-b-0">
                     <td className="px-3 py-2">
-                      <input
-                        type="text"
-                        value={row.left}
-                        onChange={(e) =>
-                          onChange({
-                            ...block,
-                            table: {
-                              columns: block.table?.columns ?? ["항목", "내용"],
-                              rows: (block.table?.rows ?? []).map((r) =>
-                                r.id === row.id ? { ...r, left: e.target.value } : r
-                              ),
-                            },
-                          })
-                        }
+                      <NotebookRichTextField
+                        text={getMemoTableCellText(row, "left")}
+                        html={row.leftHtml}
                         placeholder="..."
-                        className="w-full border-none bg-transparent text-ios-text outline-none placeholder:text-gray-300"
-                        style={{ fontSize: "16px" }}
+                        ariaLabel="표 왼쪽 셀"
+                        className="text-ios-text"
+                        enableSlashMenu={false}
+                        onDuplicate={onDuplicate}
+                        onChange={(next) => updateTableRowCell(row.id, "left", next)}
                       />
                     </td>
                     <td className="px-3 py-2">
-                      <input
-                        type="text"
-                        value={row.right}
-                        onChange={(e) =>
-                          onChange({
-                            ...block,
-                            table: {
-                              columns: block.table?.columns ?? ["항목", "내용"],
-                              rows: (block.table?.rows ?? []).map((r) =>
-                                r.id === row.id ? { ...r, right: e.target.value } : r
-                              ),
-                            },
-                          })
-                        }
+                      <NotebookRichTextField
+                        text={getMemoTableCellText(row, "right")}
+                        html={row.rightHtml}
                         placeholder="..."
-                        className="w-full border-none bg-transparent text-ios-text outline-none placeholder:text-gray-300"
-                        style={{ fontSize: "16px" }}
+                        ariaLabel="표 오른쪽 셀"
+                        className="text-ios-text"
+                        enableSlashMenu={false}
+                        onDuplicate={onDuplicate}
+                        onChange={(next) => updateTableRowCell(row.id, "right", next)}
                       />
                     </td>
                     <td className="px-1 py-2">
@@ -2468,6 +2668,10 @@ function InlineBlock({
                             ...block,
                             table: {
                               columns: block.table?.columns ?? ["항목", "내용"],
+                              columnHtml: block.table?.columnHtml ?? [
+                                plainTextToRichHtml(getMemoTableColumnText(block.table, 0)),
+                                plainTextToRichHtml(getMemoTableColumnText(block.table, 1)),
+                              ],
                               rows: (block.table?.rows ?? []).filter((r) => r.id !== row.id),
                             },
                           })
@@ -2488,6 +2692,10 @@ function InlineBlock({
                   ...block,
                   table: {
                     columns: block.table?.columns ?? ["항목", "내용"],
+                    columnHtml: block.table?.columnHtml ?? [
+                      plainTextToRichHtml(getMemoTableColumnText(block.table, 0)),
+                      plainTextToRichHtml(getMemoTableColumnText(block.table, 1)),
+                    ],
                     rows: [...(block.table?.rows ?? []), createMemoTableRow()],
                   },
                 })
@@ -2972,7 +3180,7 @@ export function ToolNotebookPage() {
   ) {
     const touchRecent = options?.touchRecent ?? true
     const touchUpdatedAt = options?.touchUpdatedAt ?? true
-    const normalizedDoc = normalizeDocAttachments(doc)
+    const normalizedDoc = sanitizeMemoDocument(normalizeDocAttachments(doc))
     const next = touchUpdatedAt ? { ...normalizedDoc, updatedAt: Date.now() } : normalizedDoc
     const latestMemo = store.getState().memo
     commit(
@@ -3151,8 +3359,10 @@ export function ToolNotebookPage() {
     setPdfExporting(true)
     setToast("PDF 저장을 준비하고 있습니다")
     try {
+      const html2canvasModule = await import("html2canvas")
+      const html2canvas = html2canvasModule.default
       const { jsPDF } = await import("jspdf")
-      const { clone, cleanup } = buildPdfExportRoot(pdfContentRef.current)
+      const { clone, viewport, cleanup, captureWidth } = buildPdfExportRoot(pdfContentRef.current)
       const pdf = new jsPDF({
         orientation: "portrait",
         unit: "pt",
@@ -3161,38 +3371,73 @@ export function ToolNotebookPage() {
       })
 
       const pageWidth = pdf.internal.pageSize.getWidth()
+      const pageHeight = pdf.internal.pageSize.getHeight()
       const contentWidth = pageWidth - PDF_EXPORT_MARGIN_PT * 2
-      const renderScale = Math.max(2, Math.min((window.devicePixelRatio || 1) * 2, 4))
+      const contentHeight = pageHeight - PDF_EXPORT_MARGIN_PT * 2
+      const pageSliceHeightPx = getPdfSliceHeightPx(captureWidth, contentWidth, contentHeight)
+      const renderScale = Math.max(
+        PDF_EXPORT_CAPTURE_SCALE,
+        Math.min((window.devicePixelRatio || 1) * 1.5, PDF_EXPORT_MAX_CAPTURE_SCALE)
+      )
 
       try {
         await new Promise<void>((resolve) => {
           window.requestAnimationFrame(() => resolve())
         })
         await waitForPdfExportAssets(clone)
-        await new Promise<void>((resolve, reject) => {
-          const worker = pdf.html(clone, {
-            margin: [PDF_EXPORT_MARGIN_PT, PDF_EXPORT_MARGIN_PT, PDF_EXPORT_MARGIN_PT, PDF_EXPORT_MARGIN_PT],
-            x: PDF_EXPORT_MARGIN_PT,
-            y: PDF_EXPORT_MARGIN_PT,
-            width: contentWidth,
-            windowWidth: PDF_EXPORT_SURFACE_WIDTH,
-            autoPaging: "text",
-            image: {
-              type: "png",
-              quality: 1,
-            },
-            html2canvas: {
-              backgroundColor: "#ffffff",
-              useCORS: true,
-              logging: false,
-              scale: renderScale,
-              windowWidth: PDF_EXPORT_SURFACE_WIDTH,
-              imageTimeout: 15000,
-            },
-            callback: () => resolve(),
+        const totalHeight = Math.max(Math.ceil(clone.scrollHeight), Math.ceil(clone.getBoundingClientRect().height))
+        if (totalHeight <= 0) {
+          throw new Error("pdf_export_empty")
+        }
+
+        let offsetY = 0
+        let pageIndex = 0
+        while (offsetY < totalHeight) {
+          const sliceHeight = Math.min(pageSliceHeightPx, totalHeight - offsetY)
+          if (sliceHeight <= 0) break
+
+          viewport.style.height = `${sliceHeight}px`
+          clone.style.transform = `translateY(-${offsetY}px)`
+
+          await new Promise<void>((resolve) => {
+            window.requestAnimationFrame(() => {
+              window.requestAnimationFrame(() => resolve())
+            })
           })
-          worker.catch(reject)
-        })
+
+          const canvas = await html2canvas(viewport, {
+            backgroundColor: "#ffffff",
+            useCORS: true,
+            logging: false,
+            scale: renderScale,
+            width: captureWidth,
+            height: sliceHeight,
+            windowWidth: captureWidth,
+            windowHeight: sliceHeight,
+            scrollX: 0,
+            scrollY: 0,
+            imageTimeout: 15000,
+          })
+
+          if (pageIndex > 0) {
+            pdf.addPage()
+          }
+
+          const renderedHeight = contentWidth * (canvas.height / canvas.width)
+          pdf.addImage(
+            canvas.toDataURL("image/png", 1),
+            "PNG",
+            PDF_EXPORT_MARGIN_PT,
+            PDF_EXPORT_MARGIN_PT,
+            contentWidth,
+            renderedHeight,
+            undefined,
+            "FAST"
+          )
+
+          offsetY += sliceHeight
+          pageIndex += 1
+        }
       } finally {
         cleanup()
       }
@@ -3208,7 +3453,7 @@ export function ToolNotebookPage() {
 
   function startPageRename(doc: RNestMemoDocument) {
     setEditingDocId(doc.id)
-    setPageTitleDraft(doc.title)
+    setPageTitleDraft(getMemoDocumentTitle(doc))
   }
 
   function commitPageRename(docId: string) {
@@ -3223,6 +3468,7 @@ export function ToolNotebookPage() {
       {
         ...doc,
         title: pageTitleDraft,
+        titleHtml: pageTitleDraft.trim() ? plainTextToRichHtml(pageTitleDraft) : "",
       },
       { touchRecent: false }
     )
@@ -3257,10 +3503,11 @@ export function ToolNotebookPage() {
         id: nextId,
       }
     })
-    const next: RNestMemoDocument = {
+    const next = sanitizeMemoDocument({
       ...doc,
       id: crypto.randomUUID(),
       title: `${doc.title} 복사`,
+      titleHtml: "",
       pinned: false,
       favorite: false,
       trashedAt: null,
@@ -3270,14 +3517,22 @@ export function ToolNotebookPage() {
       attachmentStoragePaths: buildDocStoragePaths(doc),
       blocks: doc.blocks.map((b) =>
         b.type === "table"
-          ? { ...b, id: crypto.randomUUID(), table: { columns: b.table?.columns ?? ["항목", "내용"], rows: (b.table?.rows ?? []).map((r) => ({ ...r, id: crypto.randomUUID() })) } }
+          ? {
+              ...b,
+              id: crypto.randomUUID(),
+              table: {
+                columns: b.table?.columns ?? ["항목", "내용"],
+                columnHtml: b.table?.columnHtml ?? ["", ""],
+                rows: (b.table?.rows ?? []).map((r) => ({ ...r, id: crypto.randomUUID() })),
+              },
+            }
           : {
               ...b,
               id: crypto.randomUUID(),
               attachmentId: b.attachmentId ? attachmentIdMap.get(b.attachmentId) ?? b.attachmentId : undefined,
             }
       ),
-    }
+    })
     const latestMemo = store.getState().memo
     commit({ ...latestMemo.documents, [next.id]: next }, insertRecent(latestMemo.recent, next.id))
     setActiveMemoId(next.id)
@@ -3549,6 +3804,7 @@ export function ToolNotebookPage() {
             text: kind === "image" ? "" : attachment.name,
             attachmentId: attachment.id,
             mediaWidth: kind === "image" ? 100 : undefined,
+            mediaOffsetX: kind === "image" ? 0 : undefined,
           })
         )
       )
@@ -3688,7 +3944,8 @@ export function ToolNotebookPage() {
                 highlight: block.highlight,
                 table: {
                   columns: block.table?.columns ?? ["항목", "내용"],
-                  rows: (block.table?.rows ?? []).map((row) => createMemoTableRow(row.left, row.right)),
+                  columnHtml: block.table?.columnHtml ?? ["", ""],
+                  rows: (block.table?.rows ?? []).map((row) => createMemoTableRow(row.left, row.right, row)),
                 },
               })
             : createMemoBlock(block.type, {
@@ -3699,6 +3956,7 @@ export function ToolNotebookPage() {
                 attachmentId: block.attachmentId,
                 mediaWidth: block.mediaWidth,
                 mediaAspectRatio: block.mediaAspectRatio,
+                mediaOffsetX: block.mediaOffsetX,
                 checked: block.checked,
                 collapsed: block.collapsed,
                 highlight: block.highlight,
@@ -3807,9 +4065,10 @@ export function ToolNotebookPage() {
 
     // Create new daily note
     const doc = createMemoFromPreset("blank")
-    const dailyDoc: RNestMemoDocument = {
+    const dailyDoc = sanitizeMemoDocument({
       ...doc,
       title: dailyTitle,
+      titleHtml: "",
       icon: "moon",
       coverStyle: null,
       blocks: [
@@ -3819,7 +4078,7 @@ export function ToolNotebookPage() {
         createMemoBlock("heading", { text: "메모" }),
         createMemoBlock("paragraph"),
       ],
-    }
+    })
     const latestMemo = store.getState().memo
     commit({ ...latestMemo.documents, [dailyDoc.id]: dailyDoc }, insertRecent(latestMemo.recent, dailyDoc.id))
     setActiveMemoId(dailyDoc.id)
@@ -4373,12 +4632,22 @@ export function ToolNotebookPage() {
               </div>
 
               {/* title */}
-              <input
-                type="text"
-                value={activeMemo.title}
-                onChange={(e) => activeMemoRaw && saveRawDoc({ ...activeMemoRaw, title: e.target.value })}
+              <NotebookRichTextField
+                text={getMemoDocumentTitle(activeMemo)}
+                html={activeMemo.titleHtml}
                 placeholder="제목 없음"
-                className="mb-2 w-full border-none bg-transparent text-[30px] font-bold tracking-[-0.03em] text-ios-text outline-none placeholder:text-gray-200 sm:text-[32px] lg:text-[36px]"
+                ariaLabel="페이지 제목"
+                className="mb-2 text-[30px] font-bold tracking-[-0.03em] text-ios-text sm:text-[32px] lg:text-[36px]"
+                singleLine
+                enableSlashMenu={false}
+                onChange={(next) => {
+                  if (!activeMemoRaw) return
+                  saveRawDoc({
+                    ...activeMemoRaw,
+                    title: next.text,
+                    titleHtml: next.html,
+                  })
+                }}
               />
 
               {/* compact tools for phone/tablet */}

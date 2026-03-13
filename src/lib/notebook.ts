@@ -24,11 +24,14 @@ export type RNestMemoBlockType =
 export type RNestMemoTableRow = {
   id: string
   left: string
+  leftHtml?: string
   right: string
+  rightHtml?: string
 }
 
 export type RNestMemoTable = {
   columns: [string, string]
+  columnHtml?: [string, string]
   rows: RNestMemoTableRow[]
 }
 
@@ -76,6 +79,7 @@ export type RNestMemoBlock = {
   attachmentId?: string
   mediaWidth?: number
   mediaAspectRatio?: number
+  mediaOffsetX?: number
   checked?: boolean
   collapsed?: boolean
   highlight?: RNestMemoHighlightColor | null
@@ -85,6 +89,7 @@ export type RNestMemoBlock = {
 export type RNestMemoDocument = {
   id: string
   title: string
+  titleHtml?: string
   icon: string
   coverStyle: string | null
   folderId: string | null
@@ -227,6 +232,7 @@ export const memoCoverOptions = [
 export type RNestMemoCoverId = (typeof memoCoverOptions)[number]
 
 const MAX_TITLE_LENGTH = 80
+const MAX_TITLE_HTML_LENGTH = 2400
 const MAX_FOLDER_NAME_LENGTH = 40
 const MAX_TAG_LENGTH = 24
 const MAX_TAGS = 8
@@ -234,6 +240,8 @@ const MAX_BLOCK_TEXT_LENGTH = 4000
 const MAX_BLOCK_HTML_LENGTH = 24000
 const MAX_BLOCKS = 64
 const MAX_TABLE_ROWS = 20
+const MAX_TABLE_CELL_TEXT_LENGTH = 500
+const MAX_TABLE_CELL_HTML_LENGTH = 6000
 const MAX_MEMO_ATTACHMENTS = 10
 const MAX_ATTACHMENT_NAME_LENGTH = 120
 const MAX_ATTACHMENT_STORAGE_PATH_LENGTH = 240
@@ -249,6 +257,11 @@ function sanitizeMediaWidth(value: unknown) {
 function sanitizeMediaAspectRatio(value: unknown) {
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined
   return Math.min(3, Math.max(0.4, Number(value.toFixed(4))))
+}
+
+function sanitizeMediaOffsetX(value: unknown) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0
+  return Math.min(100, Math.max(0, Number(value.toFixed(2))))
 }
 const MAX_RECORD_TITLE_LENGTH = 80
 
@@ -269,6 +282,14 @@ function cleanRichHtml(value: unknown) {
   return sanitizeNotebookRichHtml(value, MAX_BLOCK_HTML_LENGTH)
 }
 
+function cleanTitleRichHtml(value: unknown) {
+  return sanitizeNotebookRichHtml(value, MAX_TITLE_HTML_LENGTH)
+}
+
+function cleanTableCellRichHtml(value: unknown) {
+  return sanitizeNotebookRichHtml(value, MAX_TABLE_CELL_HTML_LENGTH)
+}
+
 function normalizeBlockHighlight(value: unknown) {
   return value && memoHighlightColors.includes(value as RNestMemoHighlightColor)
     ? (value as RNestMemoHighlightColor)
@@ -285,6 +306,30 @@ export function getMemoBlockDetailText(block: Pick<RNestMemoBlock, "detailText" 
   const plain = cleanText(block.detailText, MAX_BLOCK_TEXT_LENGTH)
   if (plain) return plain
   return cleanText(richHtmlToPlainText(block.detailTextHtml), MAX_BLOCK_TEXT_LENGTH)
+}
+
+export function getMemoDocumentTitle(document: Pick<RNestMemoDocument, "title" | "titleHtml">) {
+  const plain = cleanText(document.title, MAX_TITLE_LENGTH)
+  if (plain) return plain
+  return cleanText(richHtmlToPlainText(document.titleHtml), MAX_TITLE_LENGTH)
+}
+
+export function getMemoTableColumnText(
+  table: Pick<RNestMemoTable, "columns" | "columnHtml"> | null | undefined,
+  index: 0 | 1
+) {
+  const plain = cleanText(table?.columns?.[index], 40)
+  if (plain) return plain
+  return cleanText(richHtmlToPlainText(table?.columnHtml?.[index]), 40)
+}
+
+export function getMemoTableCellText(
+  row: Pick<RNestMemoTableRow, "left" | "leftHtml" | "right" | "rightHtml">,
+  side: "left" | "right"
+) {
+  const plain = cleanText(row[side], MAX_TABLE_CELL_TEXT_LENGTH)
+  if (plain) return plain
+  return cleanText(richHtmlToPlainText(side === "left" ? row.leftHtml : row.rightHtml), MAX_TABLE_CELL_TEXT_LENGTH)
 }
 
 function normalizeMemoIcon(value: unknown, fallback: RNestMemoIconId): RNestMemoIconId {
@@ -460,16 +505,24 @@ export function defaultNotebookState(): RNestNotebookState {
   }
 }
 
-export function createMemoTableRow(left = "", right = ""): RNestMemoTableRow {
+export function createMemoTableRow(left = "", right = "", input?: Partial<RNestMemoTableRow>): RNestMemoTableRow {
+  const nextLeft =
+    cleanText(input?.left ?? left, MAX_TABLE_CELL_TEXT_LENGTH) ||
+    cleanText(richHtmlToPlainText(input?.leftHtml), MAX_TABLE_CELL_TEXT_LENGTH)
+  const nextRight =
+    cleanText(input?.right ?? right, MAX_TABLE_CELL_TEXT_LENGTH) ||
+    cleanText(richHtmlToPlainText(input?.rightHtml), MAX_TABLE_CELL_TEXT_LENGTH)
   return {
-    id: createNotebookId("memo_row"),
-    left: cleanText(left, 500),
-    right: cleanText(right, 500),
+    id: input?.id || createNotebookId("memo_row"),
+    left: nextLeft,
+    leftHtml: cleanTableCellRichHtml(input?.leftHtml) || (nextLeft ? plainTextToRichHtml(nextLeft) : ""),
+    right: nextRight,
+    rightHtml: cleanTableCellRichHtml(input?.rightHtml) || (nextRight ? plainTextToRichHtml(nextRight) : ""),
   }
 }
 
 export function createMemoBlock(type: RNestMemoBlockType, input?: Partial<RNestMemoBlock>): RNestMemoBlock {
-  if (type === "image" || type === "attachment") {
+  if (type === "image") {
     return {
       id: input?.id ?? createNotebookId("memo_block"),
       type,
@@ -480,11 +533,35 @@ export function createMemoBlock(type: RNestMemoBlockType, input?: Partial<RNestM
       attachmentId: cleanText(input?.attachmentId, 60) || undefined,
       mediaWidth: type === "image" ? sanitizeMediaWidth(input?.mediaWidth) : undefined,
       mediaAspectRatio: type === "image" ? sanitizeMediaAspectRatio(input?.mediaAspectRatio) : undefined,
+      mediaOffsetX: type === "image" ? sanitizeMediaOffsetX(input?.mediaOffsetX) : undefined,
+      highlight: normalizeBlockHighlight(input?.highlight),
+    }
+  }
+
+  if (type === "attachment") {
+    const text =
+      cleanText(input?.text, MAX_BLOCK_TEXT_LENGTH) ||
+      cleanText(richHtmlToPlainText(input?.textHtml), MAX_BLOCK_TEXT_LENGTH)
+    return {
+      id: input?.id ?? createNotebookId("memo_block"),
+      type,
+      text,
+      textHtml: cleanRichHtml(input?.textHtml) || (text ? plainTextToRichHtml(text) : ""),
+      detailText: undefined,
+      detailTextHtml: undefined,
+      attachmentId: cleanText(input?.attachmentId, 60) || undefined,
+      mediaWidth: undefined,
+      mediaAspectRatio: undefined,
+      mediaOffsetX: undefined,
       highlight: normalizeBlockHighlight(input?.highlight),
     }
   }
 
   if (type === "table") {
+    const firstColumn =
+      cleanText(input?.table?.columns?.[0], 40) || cleanText(richHtmlToPlainText(input?.table?.columnHtml?.[0]), 40) || "항목"
+    const secondColumn =
+      cleanText(input?.table?.columns?.[1], 40) || cleanText(richHtmlToPlainText(input?.table?.columnHtml?.[1]), 40) || "내용"
     return {
       id: input?.id ?? createNotebookId("memo_block"),
       type,
@@ -492,16 +569,15 @@ export function createMemoBlock(type: RNestMemoBlockType, input?: Partial<RNestM
       detailText: undefined,
       detailTextHtml: undefined,
       table: {
-        columns: [
-          cleanText(input?.table?.columns?.[0], 40) || "항목",
-          cleanText(input?.table?.columns?.[1], 40) || "내용",
+        columns: [firstColumn, secondColumn],
+        columnHtml: [
+          cleanTableCellRichHtml(input?.table?.columnHtml?.[0]) || plainTextToRichHtml(firstColumn),
+          cleanTableCellRichHtml(input?.table?.columnHtml?.[1]) || plainTextToRichHtml(secondColumn),
         ],
         rows:
-          input?.table?.rows?.slice(0, MAX_TABLE_ROWS).map((row) => ({
-            id: row.id || createNotebookId("memo_row"),
-            left: cleanText(row.left, 500),
-            right: cleanText(row.right, 500),
-          })) ?? [createMemoTableRow()],
+          input?.table?.rows?.slice(0, MAX_TABLE_ROWS).map((row) => createMemoTableRow(row.left, row.right, row)) ?? [
+            createMemoTableRow(),
+          ],
       },
       highlight: normalizeBlockHighlight(input?.highlight),
     }
@@ -530,7 +606,7 @@ export function createMemoBlock(type: RNestMemoBlockType, input?: Partial<RNestM
         cleanText(richHtmlToPlainText(input?.detailTextHtml), type === "bookmark" ? 240 : MAX_BLOCK_TEXT_LENGTH)
       : undefined
   const detailTextHtml =
-    type === "toggle"
+    type === "toggle" || type === "bookmark"
       ? cleanRichHtml(input?.detailTextHtml) || (detailText ? plainTextToRichHtml(detailText) : "")
       : undefined
 
@@ -544,6 +620,7 @@ export function createMemoBlock(type: RNestMemoBlockType, input?: Partial<RNestM
     attachmentId: undefined,
     mediaWidth: undefined,
     mediaAspectRatio: undefined,
+    mediaOffsetX: undefined,
     checked: type === "checklist" ? Boolean(input?.checked) : undefined,
     collapsed: type === "toggle" ? Boolean(input?.collapsed) : undefined,
     highlight: normalizeBlockHighlight(input?.highlight),
@@ -556,8 +633,9 @@ export function coerceMemoBlockType(block: RNestMemoBlock, nextType: RNestMemoBl
   const preservedText =
     block.type === "table"
       ? [
-          block.table?.columns.join(" / ") ?? "",
-          ...(block.table?.rows.map((row) => `${row.left} ${row.right}`) ?? []),
+          getMemoTableColumnText(block.table, 0),
+          getMemoTableColumnText(block.table, 1),
+          ...(block.table?.rows.map((row) => `${getMemoTableCellText(row, "left")} ${getMemoTableCellText(row, "right")}`) ?? []),
         ]
           .join("\n")
           .trim()
@@ -617,6 +695,11 @@ function createMemoFolderBase(input?: Partial<RNestMemoFolder>): RNestMemoFolder
 
 function createMemoDocumentBase(input?: Partial<RNestMemoDocument>): RNestMemoDocument {
   const timestamp = nowTs()
+  const explicitTitle = input?.title != null || input?.titleHtml != null
+  const title =
+    cleanText(input?.title, MAX_TITLE_LENGTH) ||
+    cleanText(richHtmlToPlainText(input?.titleHtml), MAX_TITLE_LENGTH) ||
+    (explicitTitle ? "" : "새 메모")
   const lock = sanitizeMemoLockEnvelope(input?.lock)
   const candidateBlocks =
     input?.blocks?.slice(0, MAX_BLOCKS).map((block) => createMemoBlock(block.type, block)) ?? []
@@ -635,7 +718,8 @@ function createMemoDocumentBase(input?: Partial<RNestMemoDocument>): RNestMemoDo
 
   return {
     id: input?.id ?? createNotebookId("memo_doc"),
-    title: input?.title != null ? cleanText(input.title, MAX_TITLE_LENGTH) : "새 메모",
+    title,
+    titleHtml: cleanTitleRichHtml(input?.titleHtml) || (title ? plainTextToRichHtml(title) : ""),
     icon: normalizeMemoIcon(input?.icon, "note"),
     coverStyle: normalizeMemoCover(input?.coverStyle),
     folderId: cleanText(input?.folderId, 80) || null,
@@ -652,6 +736,10 @@ function createMemoDocumentBase(input?: Partial<RNestMemoDocument>): RNestMemoDo
     createdAt: typeof input?.createdAt === "number" && Number.isFinite(input.createdAt) ? input.createdAt : timestamp,
     updatedAt: typeof input?.updatedAt === "number" && Number.isFinite(input.updatedAt) ? input.updatedAt : timestamp,
   }
+}
+
+export function sanitizeMemoDocument(raw: Partial<RNestMemoDocument>) {
+  return createMemoDocumentBase(raw)
 }
 
 export const memoPresets: RNestMemoPreset[] = [
@@ -759,11 +847,11 @@ export function memoBlockToPlainText(block: RNestMemoBlock) {
     case "image":
       return [cleanText(block.text, 240), "[이미지]"].filter(Boolean).join(" ")
     case "attachment":
-      return [cleanText(block.text, 240), "[파일]"].filter(Boolean).join(" ")
+      return [text, "[파일]"].filter(Boolean).join(" ")
     case "table":
       return [
-        block.table?.columns.join(" | ") ?? "",
-        ...(block.table?.rows.map((row) => `${row.left} | ${row.right}`) ?? []),
+        [getMemoTableColumnText(block.table, 0), getMemoTableColumnText(block.table, 1)].filter(Boolean).join(" | "),
+        ...(block.table?.rows.map((row) => `${getMemoTableCellText(row, "left")} | ${getMemoTableCellText(row, "right")}`) ?? []),
       ]
         .join("\n")
         .trim()
@@ -776,7 +864,7 @@ export function memoBlockToPlainText(block: RNestMemoBlock) {
     case "toggle":
       return [text, detailText].filter(Boolean).join("\n")
     case "bookmark":
-      return [cleanText(block.text, 240), cleanText(block.detailText, 240)].filter(Boolean).join(" ")
+      return [cleanText(block.text, 240), detailText].filter(Boolean).join(" ")
     default:
       return text
   }
@@ -784,7 +872,7 @@ export function memoBlockToPlainText(block: RNestMemoBlock) {
 
 export function memoDocumentToPlainText(document: RNestMemoDocument) {
   return [
-    cleanText(document.title, MAX_TITLE_LENGTH),
+    getMemoDocumentTitle(document),
     document.attachments.length > 0
       ? `첨부: ${document.attachments.map((attachment) => cleanText(attachment.name, MAX_ATTACHMENT_NAME_LENGTH)).join(", ")}`
       : "",
@@ -800,7 +888,8 @@ function escapeMarkdownCell(value: string) {
 }
 
 export function memoDocumentToMarkdown(document: RNestMemoDocument) {
-  const lines: string[] = [`# ${document.title}`]
+  const titleMarkdown = richHtmlToMarkdown(document.titleHtml) || getMemoDocumentTitle(document)
+  const lines: string[] = [`# ${titleMarkdown || "제목 없음"}`]
   if (document.attachments.length > 0) {
     lines.push("## 첨부")
     for (const attachment of document.attachments) {
@@ -814,7 +903,7 @@ export function memoDocumentToMarkdown(document: RNestMemoDocument) {
       continue
     }
     if (block.type === "attachment") {
-      const label = cleanText(block.text, 240) || "파일"
+      const label = richHtmlToMarkdown(block.textHtml) || getMemoBlockText(block) || "파일"
       lines.push(`- [파일] ${label}`)
       continue
     }
@@ -823,11 +912,14 @@ export function memoDocumentToMarkdown(document: RNestMemoDocument) {
       continue
     }
     if (block.type === "table") {
-      const columns = block.table?.columns ?? ["항목", "내용"]
-      lines.push(`| ${escapeMarkdownCell(columns[0])} | ${escapeMarkdownCell(columns[1])} |`)
+      const firstColumn = richHtmlToMarkdown(block.table?.columnHtml?.[0]) || getMemoTableColumnText(block.table, 0)
+      const secondColumn = richHtmlToMarkdown(block.table?.columnHtml?.[1]) || getMemoTableColumnText(block.table, 1)
+      lines.push(`| ${escapeMarkdownCell(firstColumn || "항목")} | ${escapeMarkdownCell(secondColumn || "내용")} |`)
       lines.push("| --- | --- |")
       for (const row of block.table?.rows ?? []) {
-        lines.push(`| ${escapeMarkdownCell(row.left)} | ${escapeMarkdownCell(row.right)} |`)
+        const left = richHtmlToMarkdown(row.leftHtml) || getMemoTableCellText(row, "left")
+        const right = richHtmlToMarkdown(row.rightHtml) || getMemoTableCellText(row, "right")
+        lines.push(`| ${escapeMarkdownCell(left)} | ${escapeMarkdownCell(right)} |`)
       }
       continue
     }
@@ -867,7 +959,7 @@ export function memoDocumentToMarkdown(document: RNestMemoDocument) {
         break
       }
       case "bookmark": {
-        const label = cleanText(block.detailText, 240) || text
+        const label = richHtmlToMarkdown(block.detailTextHtml) || getMemoBlockDetailText(block) || text
         lines.push(text ? `[${label}](${text})` : label)
         break
       }

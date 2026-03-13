@@ -18,8 +18,9 @@ type RichTextValue = {
   html: string
 }
 
-function normalizePlainText(value: string) {
-  return value.replace(/\r/g, "").trim()
+function normalizePlainText(value: string, singleLine = false) {
+  const normalized = value.replace(/\r/g, "")
+  return singleLine ? normalized.replace(/\n+/g, " ").trim() : normalized.trim()
 }
 
 function buildEditorContent(html: string | null | undefined, text: string | null | undefined) {
@@ -57,6 +58,8 @@ export function NotebookRichTextField({
   ariaLabel,
   className,
   editable = true,
+  enableSlashMenu = true,
+  singleLine = false,
   onChange,
   onDuplicate,
   onRequestSlashMenu,
@@ -67,11 +70,15 @@ export function NotebookRichTextField({
   ariaLabel: string
   className?: string
   editable?: boolean
+  enableSlashMenu?: boolean
+  singleLine?: boolean
   onChange: (next: RichTextValue) => void
   onDuplicate?: () => void
   onRequestSlashMenu?: () => void
 }) {
-  const lastSnapshotRef = useRef(createSnapshot({ text: normalizePlainText(text ?? ""), html: sanitizeNotebookRichHtml(html, MAX_EDITOR_HTML_LENGTH) }))
+  const lastSnapshotRef = useRef(
+    createSnapshot({ text: normalizePlainText(text ?? "", singleLine), html: sanitizeNotebookRichHtml(html, MAX_EDITOR_HTML_LENGTH) })
+  )
   const initialContentRef = useRef(buildEditorContent(html, text))
   const defaultFormattingState = {
     isBold: false,
@@ -126,9 +133,14 @@ export function NotebookRichTextField({
         "data-notebook-rich-input": "true",
       },
       handleKeyDown(view, event) {
-        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "d") {
+        if (onDuplicate && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "d") {
           event.preventDefault()
-          onDuplicate?.()
+          onDuplicate()
+          return true
+        }
+
+        if (singleLine && event.key === "Enter") {
+          event.preventDefault()
           return true
         }
 
@@ -144,8 +156,8 @@ export function NotebookRichTextField({
           return true
         }
 
-        const currentText = normalizePlainText(view.state.doc.textContent)
-        if (event.key === "/" && !currentText) {
+        const currentText = normalizePlainText(view.state.doc.textContent, singleLine)
+        if (enableSlashMenu && event.key === "/" && !currentText) {
           event.preventDefault()
           onRequestSlashMenu?.()
           return true
@@ -155,7 +167,7 @@ export function NotebookRichTextField({
       },
     },
     onUpdate({ editor: nextEditor }) {
-      const nextText = normalizePlainText(nextEditor.getText({ blockSeparator: "\n" }))
+      const nextText = normalizePlainText(nextEditor.getText({ blockSeparator: singleLine ? " " : "\n" }), singleLine)
       const nextHtml = normalizeStoredHtml(nextEditor.getHTML(), nextText)
       const snapshot = createSnapshot({ text: nextText, html: nextHtml })
       if (snapshot === lastSnapshotRef.current) return
@@ -185,7 +197,7 @@ export function NotebookRichTextField({
   useEffect(() => {
     if (!editor) return
     const nextValue = {
-      text: normalizePlainText(text ?? ""),
+      text: normalizePlainText(text ?? "", singleLine),
       html: sanitizeNotebookRichHtml(html, MAX_EDITOR_HTML_LENGTH),
     }
     const nextSnapshot = createSnapshot(nextValue)
@@ -193,12 +205,12 @@ export function NotebookRichTextField({
 
     lastSnapshotRef.current = nextSnapshot
     const nextContent = buildEditorContent(nextValue.html, nextValue.text)
-    const currentText = normalizePlainText(editor.getText({ blockSeparator: "\n" }))
+    const currentText = normalizePlainText(editor.getText({ blockSeparator: singleLine ? " " : "\n" }), singleLine)
     const currentHtml = normalizeStoredHtml(editor.getHTML(), currentText)
 
     if (currentText === nextValue.text && currentHtml === nextValue.html) return
     editor.commands.setContent(nextContent, { emitUpdate: false })
-  }, [editor, html, text])
+  }, [editor, html, singleLine, text])
 
   if (!editor) {
     return (
