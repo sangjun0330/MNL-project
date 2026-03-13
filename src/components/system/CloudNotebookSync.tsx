@@ -12,6 +12,7 @@ import { useAppStore } from "@/lib/store";
 
 const RETRY_BASE_MS = 800;
 const RETRY_MAX_MS = 8000;
+const REMOTE_REFRESH_INTERVAL_MS = 12000;
 const LOCAL_NOTEBOOK_DRAFT_KEY = "rnest_notebook_state_v1";
 const GUEST_NOTEBOOK_DRAFT_KEY = `${LOCAL_NOTEBOOK_DRAFT_KEY}:guest`;
 
@@ -109,6 +110,7 @@ export function CloudNotebookSync() {
   const retryCountRef = useRef(0);
   const saveInFlightRef = useRef(false);
   const pendingSaveRef = useRef(false);
+  const remoteLoadInFlightRef = useRef(false);
   const latestStateRef = useRef<RNestNotebookState | null>(null);
   const latestSignatureRef = useRef("");
   const loadRequestRef = useRef(0);
@@ -288,6 +290,18 @@ export function CloudNotebookSync() {
       return currentState;
     }
 
+    if (remoteSignature === currentSignature) {
+      initializedRef.current = true;
+      latestSignatureRef.current = currentSignature;
+      latestStateRef.current = currentState;
+      writeLocalDraft(userId, currentState, {
+        dirty: false,
+        syncedAt: remoteUpdatedAt,
+      });
+      clearLocalDraft(null);
+      return currentState;
+    }
+
     applyHydratedState(remoteState);
     writeLocalDraft(userId, remoteState, {
       dirty: false,
@@ -296,6 +310,24 @@ export function CloudNotebookSync() {
     clearLocalDraft(null);
     return remoteState;
   }, [applyHydratedState, buildSignature, getAuthHeaders, getCurrentNotebookState, queueSave, status, userId]);
+
+  const refreshFromRemote = useCallback(async () => {
+    if (!userId || status !== "authenticated" || !initializedRef.current) return null;
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return null;
+    if (saveInFlightRef.current || pendingSaveRef.current || remoteLoadInFlightRef.current) return null;
+
+    const currentState = getCurrentNotebookState();
+    const currentSignature = buildSignature(currentState);
+    const localDraft = readPreferredLocalDraft(userId);
+    if (localDraft?.dirty || currentSignature !== latestSignatureRef.current) return null;
+
+    remoteLoadInFlightRef.current = true;
+    try {
+      return await loadNotebookState();
+    } finally {
+      remoteLoadInFlightRef.current = false;
+    }
+  }, [buildSignature, getCurrentNotebookState, loadNotebookState, status, userId]);
 
   useEffect(() => {
     storeRef.current = store;
@@ -309,6 +341,7 @@ export function CloudNotebookSync() {
     skipNextSaveRef.current = true;
     pendingSaveRef.current = false;
     saveInFlightRef.current = false;
+    remoteLoadInFlightRef.current = false;
     retryCountRef.current = 0;
     loadRequestRef.current += 1;
 
@@ -407,6 +440,36 @@ export function CloudNotebookSync() {
       window.removeEventListener("beforeunload", onPageHide);
     };
   }, [flushNow, status, userId]);
+
+  useEffect(() => {
+    if (!userId || status !== "authenticated") return;
+
+    const requestRefresh = () => {
+      void refreshFromRemote().catch(() => {
+        // Ignore opportunistic refresh failures.
+      });
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") requestRefresh();
+    };
+
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      requestRefresh();
+    }, REMOTE_REFRESH_INTERVAL_MS);
+
+    window.addEventListener("focus", requestRefresh);
+    window.addEventListener("pageshow", requestRefresh);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", requestRefresh);
+      window.removeEventListener("pageshow", requestRefresh);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [refreshFromRemote, status, userId]);
 
   return null;
 }

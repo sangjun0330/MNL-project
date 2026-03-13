@@ -58,6 +58,8 @@ import {
   createMemoFromPreset,
   createMemoTableRow,
   formatNotebookDateTime,
+  getMemoBlockDetailText,
+  getMemoBlockText,
   getReminderTimestampFromPreset,
   memoBlockToPlainText,
   memoCoverOptions,
@@ -78,6 +80,7 @@ import {
   type RNestMemoIconId,
   type RNestMemoState,
 } from "@/lib/notebook"
+import { normalizeNotebookLinkHref, sanitizeNotebookRichHtml } from "@/lib/notebookRichText"
 import {
   applyLockedMemoPayload,
   createLockedMemoEnvelope,
@@ -105,6 +108,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { NotebookRichTextField } from "@/components/pages/tools/notebook/NotebookRichTextField"
 import Image from "next/image"
 import Link from "next/link"
 
@@ -130,6 +134,119 @@ function downloadTextFile(fileName: string, content: string, mimeType: string) {
   a.click()
   document.body.removeChild(a)
   window.URL.revokeObjectURL(url)
+}
+
+const PDF_EXPORT_SURFACE_WIDTH = 980
+const PDF_EXPORT_MARGIN_PT = 28
+
+function createPdfFieldPreview(field: HTMLInputElement | HTMLTextAreaElement) {
+  const preview = document.createElement("div")
+  preview.className = field.className
+  preview.textContent = field.value ?? ""
+  preview.style.whiteSpace = "pre-wrap"
+  preview.style.wordBreak = "break-word"
+  preview.style.overflowWrap = "anywhere"
+  preview.style.height = "auto"
+  preview.style.minHeight = field instanceof HTMLTextAreaElement ? `${Math.max(field.scrollHeight, 24)}px` : "1.4em"
+  preview.style.border = "none"
+  preview.style.background = "transparent"
+  preview.style.boxShadow = "none"
+  return preview
+}
+
+function buildPdfExportRoot(source: HTMLElement) {
+  const host = document.createElement("div")
+  host.setAttribute("data-pdf-export-root", "true")
+  host.style.position = "fixed"
+  host.style.left = "-20000px"
+  host.style.top = "0"
+  host.style.width = `${PDF_EXPORT_SURFACE_WIDTH}px`
+  host.style.padding = "0"
+  host.style.margin = "0"
+  host.style.background = "#ffffff"
+  host.style.zIndex = "-1"
+  host.style.pointerEvents = "none"
+  host.style.overflow = "visible"
+
+  const clone = source.cloneNode(true) as HTMLElement
+  clone.style.width = "100%"
+  clone.style.maxWidth = "none"
+  clone.style.margin = "0"
+  clone.style.padding = "32px 40px"
+  clone.style.boxSizing = "border-box"
+  clone.style.background = "#ffffff"
+  clone.style.overflow = "visible"
+  clone.style.minHeight = "0"
+
+  clone.querySelectorAll('[data-pdf-hide="true"]').forEach((element) => element.remove())
+
+  clone.querySelectorAll("input, textarea").forEach((field) => {
+    field.replaceWith(createPdfFieldPreview(field as HTMLInputElement | HTMLTextAreaElement))
+  })
+
+  clone.querySelectorAll<HTMLElement>('[data-notebook-rich-input="true"], .notebook-rich-text-editor, .ProseMirror').forEach((element) => {
+    element.setAttribute("contenteditable", "false")
+    element.removeAttribute("data-placeholder")
+    element.style.minHeight = "0"
+    element.style.height = "auto"
+    element.style.maxWidth = "100%"
+    element.style.overflow = "visible"
+    element.style.whiteSpace = "pre-wrap"
+    element.style.wordBreak = "break-word"
+    element.style.overflowWrap = "anywhere"
+  })
+
+  clone.querySelectorAll<HTMLElement>("p, div, span, a, td, th, code, mark").forEach((element) => {
+    element.style.wordBreak = "break-word"
+    element.style.overflowWrap = "anywhere"
+    element.style.maxWidth = "100%"
+  })
+
+  clone.querySelectorAll<HTMLElement>("table").forEach((table) => {
+    table.style.width = "100%"
+    table.style.tableLayout = "fixed"
+  })
+
+  clone.querySelectorAll<HTMLElement>("img, canvas, svg").forEach((media) => {
+    media.style.maxWidth = "100%"
+    media.style.height = "auto"
+  })
+
+  clone.querySelectorAll<HTMLElement>("[style*='overflow']").forEach((element) => {
+    element.style.overflow = "visible"
+  })
+
+  host.appendChild(clone)
+  document.body.appendChild(host)
+
+  return {
+    host,
+    clone,
+    cleanup: () => {
+      host.remove()
+    },
+  }
+}
+
+async function waitForPdfExportAssets(root: HTMLElement) {
+  const fontReady =
+    typeof document !== "undefined" && "fonts" in document && document.fonts?.ready
+      ? document.fonts.ready.catch(() => undefined)
+      : Promise.resolve(undefined)
+
+  const imageReady = Promise.allSettled(
+    Array.from(root.querySelectorAll("img")).map((img) => {
+      if (img.complete) return Promise.resolve()
+      return new Promise<void>((resolve) => {
+        const finalize = () => resolve()
+        img.addEventListener("load", finalize, { once: true })
+        img.addEventListener("error", finalize, { once: true })
+        window.setTimeout(finalize, 5000)
+      })
+    })
+  )
+
+  await Promise.all([fontReady, imageReady])
 }
 
 function formatFileSize(bytes: number) {
@@ -376,16 +493,8 @@ function normalizeMemoIconId(icon: string): RNestMemoIconId {
 }
 
 function getSafeExternalHref(rawValue: string | null | undefined) {
-  const raw = String(rawValue ?? "").trim()
-  if (!raw) return null
-  const candidate = /^(https?:\/\/|mailto:)/i.test(raw) ? raw : raw.startsWith("www.") ? `https://${raw}` : ""
-  if (!candidate) return null
-  try {
-    const url = new URL(candidate)
-    return ["http:", "https:", "mailto:"].includes(url.protocol) ? url.toString() : null
-  } catch {
-    return null
-  }
+  const href = normalizeNotebookLinkHref(rawValue)
+  return href || null
 }
 
 function getBookmarkMeta(rawValue: string | null | undefined) {
@@ -400,6 +509,140 @@ function getBookmarkMeta(rawValue: string | null | undefined) {
   } catch {
     return { href, label: href }
   }
+}
+
+function replaceOccurrences(value: string, query: string, replacement: string, replaceAll: boolean) {
+  if (!query) return { value, count: 0 }
+  if (!replaceAll) {
+    const idx = value.indexOf(query)
+    if (idx === -1) return { value, count: 0 }
+    return {
+      value: `${value.slice(0, idx)}${replacement}${value.slice(idx + query.length)}`,
+      count: 1,
+    }
+  }
+  const matches = value.split(query).length - 1
+  return matches > 0 ? { value: value.replaceAll(query, replacement), count: matches } : { value, count: 0 }
+}
+
+function replaceOccurrencesInRichHtml(html: string | undefined, query: string, replacement: string, replaceAll: boolean) {
+  const safeHtml = sanitizeNotebookRichHtml(html, 24000)
+  if (!safeHtml || !query || typeof DOMParser === "undefined") {
+    return { html: safeHtml, count: 0 }
+  }
+
+  const parsed = new DOMParser().parseFromString(`<body>${safeHtml}</body>`, "text/html")
+  const walker = parsed.createTreeWalker(parsed.body, NodeFilter.SHOW_TEXT)
+  let node = walker.nextNode()
+  let count = 0
+  while (node) {
+    const textNode = node as Text
+    const next = replaceOccurrences(textNode.textContent ?? "", query, replacement, replaceAll)
+    if (next.count > 0) {
+      textNode.textContent = next.value
+      count += next.count
+      if (!replaceAll) break
+    }
+    node = walker.nextNode()
+  }
+  return {
+    html: count > 0 ? sanitizeNotebookRichHtml(parsed.body.innerHTML, 24000) : safeHtml,
+    count,
+  }
+}
+
+function replaceBlockContent(block: RNestMemoBlock, query: string, replacement: string, replaceAll: boolean) {
+  if (!query) return { block, count: 0 }
+
+  if (block.type === "table") {
+    const nextTable = {
+      columns: [...(block.table?.columns ?? ["항목", "내용"])] as [string, string],
+      rows: (block.table?.rows ?? []).map((row) => ({ ...row })),
+    }
+    let count = 0
+
+    const firstColumn = replaceOccurrences(nextTable.columns[0], query, replacement, replaceAll)
+    if (firstColumn.count > 0) {
+      nextTable.columns[0] = firstColumn.value
+      count += firstColumn.count
+      if (!replaceAll) return { block: { ...block, table: nextTable }, count }
+    }
+
+    const secondColumn = replaceOccurrences(nextTable.columns[1], query, replacement, replaceAll)
+    if (secondColumn.count > 0) {
+      nextTable.columns[1] = secondColumn.value
+      count += secondColumn.count
+      if (!replaceAll) return { block: { ...block, table: nextTable }, count }
+    }
+
+    for (let i = 0; i < nextTable.rows.length; i += 1) {
+      const left = replaceOccurrences(nextTable.rows[i].left, query, replacement, replaceAll)
+      if (left.count > 0) {
+        nextTable.rows[i] = { ...nextTable.rows[i], left: left.value }
+        count += left.count
+        if (!replaceAll) return { block: { ...block, table: nextTable }, count }
+      }
+
+      const right = replaceOccurrences(nextTable.rows[i].right, query, replacement, replaceAll)
+      if (right.count > 0) {
+        nextTable.rows[i] = { ...nextTable.rows[i], right: right.value }
+        count += right.count
+        if (!replaceAll) return { block: { ...block, table: nextTable }, count }
+      }
+    }
+
+    return count > 0 ? { block: { ...block, table: nextTable }, count } : { block, count: 0 }
+  }
+
+  const richTextTypes: RNestMemoBlockType[] = ["heading", "paragraph", "bulleted", "numbered", "checklist", "callout", "quote", "toggle"]
+  let nextBlock: RNestMemoBlock = block
+  let count = 0
+
+  function applyPlainField(field: "text" | "detailText") {
+    const next = replaceOccurrences(nextBlock[field] ?? "", query, replacement, replaceAll)
+    if (next.count > 0) {
+      count += next.count
+      nextBlock = { ...nextBlock, [field]: next.value }
+      return true
+    }
+    return false
+  }
+
+  function applyRichField(plainField: "text" | "detailText", htmlField: "textHtml" | "detailTextHtml") {
+    const nextRich = replaceOccurrencesInRichHtml(nextBlock[htmlField], query, replacement, replaceAll)
+    if (nextRich.count > 0) {
+      count += nextRich.count
+      nextBlock = { ...nextBlock, [htmlField]: nextRich.html }
+      if (plainField === "text") {
+        nextBlock.text = getMemoBlockText({ text: "", textHtml: nextRich.html })
+      } else {
+        nextBlock.detailText = getMemoBlockDetailText({ detailText: "", detailTextHtml: nextRich.html })
+      }
+      return true
+    }
+
+    if (!nextBlock[htmlField]) {
+      return applyPlainField(plainField)
+    }
+
+    return false
+  }
+
+  if (richTextTypes.includes(block.type)) {
+    if (applyRichField("text", "textHtml") && !replaceAll) return { block: nextBlock, count }
+  } else if (applyPlainField("text") && !replaceAll) {
+    return { block: nextBlock, count }
+  }
+
+  if (nextBlock.type === "toggle") {
+    applyRichField("detailText", "detailTextHtml")
+  }
+
+  if (nextBlock.type === "bookmark") {
+    if (count === 0 || replaceAll) applyPlainField("detailText")
+  }
+
+  return { block: nextBlock, count }
 }
 
 function renderBlockTypeIcon(type: RNestMemoBlockType, className = "h-3.5 w-3.5") {
@@ -1822,35 +2065,40 @@ function InlineBlock({
         )}
 
         {block.type === "heading" && (
-          <input
-            type="text"
-            value={block.text ?? ""}
-            onChange={(e) => onChange({ ...block, text: e.target.value })}
-            onKeyDown={handleEditorKeyDown}
+          <NotebookRichTextField
+            text={block.text}
+            html={block.textHtml}
             placeholder="제목"
-            className="w-full border-none bg-transparent text-[22px] font-bold tracking-[-0.02em] text-ios-text outline-none placeholder:text-gray-300"
-            style={{ fontSize: "max(16px, 22px)" }}
+            ariaLabel="제목"
+            className="text-[22px] font-bold tracking-[-0.02em] text-ios-text"
+            onDuplicate={onDuplicate}
+            onRequestSlashMenu={() => setShowSlashMenu(true)}
+            onChange={(next) =>
+              onChange({
+                ...block,
+                text: next.text,
+                textHtml: next.html,
+              })
+            }
           />
         )}
 
         {block.type === "paragraph" && (
-          <textarea
-            ref={autoSizeRef}
-            value={block.text ?? ""}
-            onChange={(e) => onChange({ ...block, text: e.target.value })}
-            onKeyDown={handleEditorKeyDown}
+          <NotebookRichTextField
+            text={block.text}
+            html={block.textHtml}
             placeholder="내용을 입력하세요..."
-            rows={1}
-            className={cn(
-              "w-full resize-none border-none bg-transparent leading-relaxed text-ios-text outline-none placeholder:text-gray-300",
-              mobileSafeBodyClass
-            )}
-            style={{ minHeight: "1.6em", height: "auto" }}
-            onInput={(e) => {
-              const el = e.currentTarget
-              el.style.height = "auto"
-              el.style.height = `${el.scrollHeight}px`
-            }}
+            ariaLabel="문단"
+            className={cn("leading-relaxed text-ios-text", mobileSafeBodyClass)}
+            onDuplicate={onDuplicate}
+            onRequestSlashMenu={() => setShowSlashMenu(true)}
+            onChange={(next) =>
+              onChange({
+                ...block,
+                text: next.text,
+                textHtml: next.html,
+              })
+            }
           />
         )}
 
@@ -1861,23 +2109,21 @@ function InlineBlock({
                 <circle cx="4" cy="4" r="2.2" />
               </svg>
             </span>
-            <textarea
-              ref={autoSizeRef}
-              value={block.text ?? ""}
-              onChange={(e) => onChange({ ...block, text: e.target.value })}
-              onKeyDown={handleEditorKeyDown}
+            <NotebookRichTextField
+              text={block.text}
+              html={block.textHtml}
               placeholder="목록 항목"
-              rows={1}
-              className={cn(
-                "w-full resize-none border-none bg-transparent leading-relaxed text-ios-text outline-none placeholder:text-gray-300",
-                mobileSafeBodyClass
-              )}
-              style={{ minHeight: "1.6em", height: "auto" }}
-              onInput={(e) => {
-                const el = e.currentTarget
-                el.style.height = "auto"
-                el.style.height = `${el.scrollHeight}px`
-              }}
+              ariaLabel="글머리 기호 항목"
+              className={cn("leading-relaxed text-ios-text", mobileSafeBodyClass)}
+              onDuplicate={onDuplicate}
+              onRequestSlashMenu={() => setShowSlashMenu(true)}
+              onChange={(next) =>
+                onChange({
+                  ...block,
+                  text: next.text,
+                  textHtml: next.html,
+                })
+              }
             />
           </div>
         )}
@@ -1885,23 +2131,21 @@ function InlineBlock({
         {block.type === "numbered" && (
           <div className="flex gap-2">
             <span className="mt-[2px] shrink-0 text-[15px] leading-relaxed text-ios-sub">1.</span>
-            <textarea
-              ref={autoSizeRef}
-              value={block.text ?? ""}
-              onChange={(e) => onChange({ ...block, text: e.target.value })}
-              onKeyDown={handleEditorKeyDown}
+            <NotebookRichTextField
+              text={block.text}
+              html={block.textHtml}
               placeholder="번호 항목"
-              rows={1}
-              className={cn(
-                "w-full resize-none border-transparent bg-transparent leading-relaxed text-ios-text outline-none placeholder:text-gray-300",
-                mobileSafeBodyClass
-              )}
-              style={{ minHeight: "1.6em", height: "auto" }}
-              onInput={(e) => {
-                const el = e.currentTarget
-                el.style.height = "auto"
-                el.style.height = `${el.scrollHeight}px`
-              }}
+              ariaLabel="번호 목록 항목"
+              className={cn("leading-relaxed text-ios-text", mobileSafeBodyClass)}
+              onDuplicate={onDuplicate}
+              onRequestSlashMenu={() => setShowSlashMenu(true)}
+              onChange={(next) =>
+                onChange({
+                  ...block,
+                  text: next.text,
+                  textHtml: next.html,
+                })
+              }
             />
           </div>
         )}
@@ -1924,24 +2168,25 @@ function InlineBlock({
                 </svg>
               )}
             </button>
-            <textarea
-              ref={autoSizeRef}
-              value={block.text ?? ""}
-              onChange={(e) => onChange({ ...block, text: e.target.value })}
-              onKeyDown={handleEditorKeyDown}
+            <NotebookRichTextField
+              text={block.text}
+              html={block.textHtml}
               placeholder="할 일"
-              rows={1}
+              ariaLabel="체크리스트 항목"
               className={cn(
-                "w-full resize-none border-none bg-transparent leading-relaxed outline-none placeholder:text-gray-300",
+                "leading-relaxed outline-none",
                 mobileSafeBodyClass,
                 block.checked ? "text-ios-muted line-through" : "text-ios-text"
               )}
-              style={{ minHeight: "1.6em", height: "auto" }}
-              onInput={(e) => {
-                const el = e.currentTarget
-                el.style.height = "auto"
-                el.style.height = `${el.scrollHeight}px`
-              }}
+              onDuplicate={onDuplicate}
+              onRequestSlashMenu={() => setShowSlashMenu(true)}
+              onChange={(next) =>
+                onChange({
+                  ...block,
+                  text: next.text,
+                  textHtml: next.html,
+                })
+              }
             />
           </div>
         )}
@@ -1949,23 +2194,21 @@ function InlineBlock({
         {block.type === "callout" && (
           <div className="flex gap-3 rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
             <Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--rnest-accent)]" />
-            <textarea
-              ref={autoSizeRef}
-              value={block.text ?? ""}
-              onChange={(e) => onChange({ ...block, text: e.target.value })}
-              onKeyDown={handleEditorKeyDown}
+            <NotebookRichTextField
+              text={block.text}
+              html={block.textHtml}
               placeholder="콜아웃 내용을 입력하세요"
-              rows={1}
-              className={cn(
-                "w-full resize-none border-none bg-transparent leading-relaxed text-ios-text outline-none placeholder:text-gray-300",
-                "text-[16px] md:text-[14.5px]"
-              )}
-              style={{ minHeight: "1.6em", height: "auto" }}
-              onInput={(e) => {
-                const el = e.currentTarget
-                el.style.height = "auto"
-                el.style.height = `${el.scrollHeight}px`
-              }}
+              ariaLabel="콜아웃"
+              className="leading-relaxed text-ios-text text-[16px] md:text-[14.5px]"
+              onDuplicate={onDuplicate}
+              onRequestSlashMenu={() => setShowSlashMenu(true)}
+              onChange={(next) =>
+                onChange({
+                  ...block,
+                  text: next.text,
+                  textHtml: next.html,
+                })
+              }
             />
           </div>
         )}
@@ -1973,23 +2216,21 @@ function InlineBlock({
         {block.type === "quote" && (
           <div className="flex gap-3 rounded-r-lg border-l-[3px] border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)]/45 px-4 py-3">
             <MessageSquareQuote className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--rnest-accent)]" />
-            <textarea
-              ref={autoSizeRef}
-              value={block.text ?? ""}
-              onChange={(e) => onChange({ ...block, text: e.target.value })}
-              onKeyDown={handleEditorKeyDown}
+            <NotebookRichTextField
+              text={block.text}
+              html={block.textHtml}
               placeholder="인용하거나 강조할 문장을 적어 두세요"
-              rows={1}
-              className={cn(
-                "w-full resize-none border-none bg-transparent leading-relaxed text-ios-text outline-none placeholder:text-gray-300",
-                "text-[16px] md:text-[14.5px]"
-              )}
-              style={{ minHeight: "1.6em", height: "auto" }}
-              onInput={(e) => {
-                const el = e.currentTarget
-                el.style.height = "auto"
-                el.style.height = `${el.scrollHeight}px`
-              }}
+              ariaLabel="인용"
+              className="leading-relaxed text-ios-text text-[16px] md:text-[14.5px]"
+              onDuplicate={onDuplicate}
+              onRequestSlashMenu={() => setShowSlashMenu(true)}
+              onChange={(next) =>
+                onChange({
+                  ...block,
+                  text: next.text,
+                  textHtml: next.html,
+                })
+              }
             />
           </div>
         )}
@@ -2005,37 +2246,39 @@ function InlineBlock({
               >
                 {block.collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
               </button>
-              <input
-                type="text"
-                value={block.text ?? ""}
-                onChange={(e) => onChange({ ...block, text: e.target.value })}
-                onKeyDown={handleEditorKeyDown}
+              <NotebookRichTextField
+                text={block.text}
+                html={block.textHtml}
                 placeholder="토글 제목"
-                className={cn(
-                  "w-full border-none bg-transparent font-medium text-ios-text outline-none placeholder:text-gray-300",
-                  mobileSafeInputClass
-                )}
+                ariaLabel="토글 제목"
+                className={cn("font-medium text-ios-text", mobileSafeInputClass)}
+                onDuplicate={onDuplicate}
+                onRequestSlashMenu={() => setShowSlashMenu(true)}
+                onChange={(next) =>
+                  onChange({
+                    ...block,
+                    text: next.text,
+                    textHtml: next.html,
+                  })
+                }
               />
             </div>
             {!block.collapsed && (
               <div className="border-t border-gray-100 px-4 py-3">
-                <textarea
-                  ref={autoSizeRef}
-                  value={block.detailText ?? ""}
-                  onChange={(e) => onChange({ ...block, detailText: e.target.value })}
-                  onKeyDown={handleCommandKeyDown}
+                <NotebookRichTextField
+                  text={block.detailText}
+                  html={block.detailTextHtml}
                   placeholder="토글 안쪽 내용을 입력하세요"
-                  rows={2}
-                  className={cn(
-                    "w-full resize-none border-none bg-transparent leading-relaxed text-ios-text outline-none placeholder:text-gray-300",
-                    mobileSafeInputClass
-                  )}
-                  style={{ minHeight: "3.2em", height: "auto" }}
-                  onInput={(e) => {
-                    const el = e.currentTarget
-                    el.style.height = "auto"
-                    el.style.height = `${el.scrollHeight}px`
-                  }}
+                  ariaLabel="토글 내용"
+                  className={cn("leading-relaxed text-ios-text", mobileSafeInputClass)}
+                  onDuplicate={onDuplicate}
+                  onChange={(next) =>
+                    onChange({
+                      ...block,
+                      detailText: next.text,
+                      detailTextHtml: next.html,
+                    })
+                  }
                 />
               </div>
             )}
@@ -2649,10 +2892,7 @@ export function ToolNotebookPage() {
   const activeMemoIsUnlocked = Boolean(activeMemoRaw?.id && unlockedPayloads[activeMemoRaw.id])
   const headingBlocks = useMemo(
     () =>
-      activeMemo?.blocks.filter(
-        (block): block is RNestMemoBlock & { type: "heading"; text: string } =>
-          block.type === "heading" && Boolean(block.text?.trim())
-      ) ?? [],
+      activeMemo?.blocks.filter((block): block is RNestMemoBlock => block.type === "heading" && Boolean(getMemoBlockText(block))) ?? [],
     [activeMemo]
   )
 
@@ -2799,10 +3039,12 @@ export function ToolNotebookPage() {
     if (presetId === "quick") {
       // Auto-focus first block for quick memo — pure blank canvas feel
       requestAnimationFrame(() => {
-        const firstBlock = doc.blocks[0]
-        if (!firstBlock) return
-        const el = document.querySelector<HTMLTextAreaElement>(`#memo-block-${firstBlock.id} textarea`)
-        el?.focus()
+        requestAnimationFrame(() => {
+          const firstBlock = doc.blocks[0]
+          if (!firstBlock) return
+          const el = document.querySelector<HTMLElement>(`#memo-block-${firstBlock.id} [data-notebook-rich-input="true"]`)
+          el?.focus()
+        })
       })
       setToast("빠른 메모를 시작합니다")
     } else {
@@ -2909,24 +3151,8 @@ export function ToolNotebookPage() {
     setPdfExporting(true)
     setToast("PDF 저장을 준비하고 있습니다")
     try {
-      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
-        import("html2canvas"),
-        import("jspdf"),
-      ])
-
-      const canvas = await html2canvas(pdfContentRef.current, {
-        backgroundColor: "#ffffff",
-        useCORS: true,
-        logging: false,
-        scale: Math.max(2, Math.min(window.devicePixelRatio || 1, 3)),
-        windowWidth: pdfContentRef.current.scrollWidth,
-        onclone: (clonedDoc) => {
-          clonedDoc
-            .querySelectorAll('[data-pdf-hide="true"]')
-            .forEach((element) => ((element as HTMLElement).style.display = "none"))
-        },
-      })
-
+      const { jsPDF } = await import("jspdf")
+      const { clone, cleanup } = buildPdfExportRoot(pdfContentRef.current)
       const pdf = new jsPDF({
         orientation: "portrait",
         unit: "pt",
@@ -2935,47 +3161,40 @@ export function ToolNotebookPage() {
       })
 
       const pageWidth = pdf.internal.pageSize.getWidth()
-      const pageHeight = pdf.internal.pageSize.getHeight()
-      const margin = 28
-      const contentWidth = pageWidth - margin * 2
-      const pixelPerPoint = canvas.width / contentWidth
-      const pagePixelHeight = Math.max(1, Math.floor((pageHeight - margin * 2) * pixelPerPoint))
-      const pageCanvas = document.createElement("canvas")
-      const pageContext = pageCanvas.getContext("2d")
-      if (!pageContext) throw new Error("pdf_canvas_context_missing")
+      const contentWidth = pageWidth - PDF_EXPORT_MARGIN_PT * 2
+      const renderScale = Math.max(2, Math.min((window.devicePixelRatio || 1) * 2, 4))
 
-      pageCanvas.width = canvas.width
-      let offsetY = 0
-      let pageIndex = 0
-      while (offsetY < canvas.height) {
-        const sliceHeight = Math.min(pagePixelHeight, canvas.height - offsetY)
-        pageCanvas.height = sliceHeight
-        pageContext.clearRect(0, 0, pageCanvas.width, pageCanvas.height)
-        pageContext.drawImage(
-          canvas,
-          0,
-          offsetY,
-          canvas.width,
-          sliceHeight,
-          0,
-          0,
-          pageCanvas.width,
-          sliceHeight
-        )
-        const imageData = pageCanvas.toDataURL("image/png", 1)
-        if (pageIndex > 0) pdf.addPage()
-        pdf.addImage(
-          imageData,
-          "PNG",
-          margin,
-          margin,
-          contentWidth,
-          sliceHeight / pixelPerPoint,
-          undefined,
-          "FAST"
-        )
-        offsetY += sliceHeight
-        pageIndex += 1
+      try {
+        await new Promise<void>((resolve) => {
+          window.requestAnimationFrame(() => resolve())
+        })
+        await waitForPdfExportAssets(clone)
+        await new Promise<void>((resolve, reject) => {
+          const worker = pdf.html(clone, {
+            margin: [PDF_EXPORT_MARGIN_PT, PDF_EXPORT_MARGIN_PT, PDF_EXPORT_MARGIN_PT, PDF_EXPORT_MARGIN_PT],
+            x: PDF_EXPORT_MARGIN_PT,
+            y: PDF_EXPORT_MARGIN_PT,
+            width: contentWidth,
+            windowWidth: PDF_EXPORT_SURFACE_WIDTH,
+            autoPaging: "text",
+            image: {
+              type: "png",
+              quality: 1,
+            },
+            html2canvas: {
+              backgroundColor: "#ffffff",
+              useCORS: true,
+              logging: false,
+              scale: renderScale,
+              windowWidth: PDF_EXPORT_SURFACE_WIDTH,
+              imageTimeout: 15000,
+            },
+            callback: () => resolve(),
+          })
+          worker.catch(reject)
+        })
+      } finally {
+        cleanup()
       }
 
       pdf.save(`${createSafeDownloadName(activeMemo.title || "메모", "memo")}.pdf`)
@@ -3466,6 +3685,7 @@ export function ToolNotebookPage() {
         const duplicate =
           block.type === "table"
             ? createMemoBlock("table", {
+                highlight: block.highlight,
                 table: {
                   columns: block.table?.columns ?? ["항목", "내용"],
                   rows: (block.table?.rows ?? []).map((row) => createMemoTableRow(row.left, row.right)),
@@ -3473,12 +3693,15 @@ export function ToolNotebookPage() {
               })
             : createMemoBlock(block.type, {
                 text: block.text,
+                textHtml: block.textHtml,
                 detailText: block.detailText,
+                detailTextHtml: block.detailTextHtml,
                 attachmentId: block.attachmentId,
                 mediaWidth: block.mediaWidth,
                 mediaAspectRatio: block.mediaAspectRatio,
                 checked: block.checked,
                 collapsed: block.collapsed,
+                highlight: block.highlight,
               })
         const next = [...doc.blocks]
         next.splice(idx + 1, 0, duplicate)
@@ -3518,35 +3741,42 @@ export function ToolNotebookPage() {
     if (!activeMemo || !findQuery.trim()) return
     const q = findQuery
     let replaced = 0
-    void updateActiveMemoContent((doc) => ({
-      ...doc,
-      blocks: doc.blocks.map((block) => {
-        if (!block.text?.includes(q)) return block
-        replaced++
-        return { ...block, text: block.text.replaceAll(q, replaceQuery) }
-      }),
-    }))
-    setToast(`${findMatchCount}개 항목을 바꿨습니다`)
-    setFindQuery("")
-    setReplaceQuery("")
-    setFindOpen(false)
+    void updateActiveMemoContent((doc) => {
+      const nextBlocks = doc.blocks.map((block) => {
+        const next = replaceBlockContent(block, q, replaceQuery, true)
+        replaced += next.count
+        return next.block
+      })
+      if (replaced === 0) return doc
+      return { ...doc, blocks: nextBlocks }
+    }).then(() => {
+      setToast(replaced > 0 ? `${replaced}개 항목을 바꿨습니다` : "바꿀 항목이 없습니다")
+      if (replaced > 0) {
+        setFindQuery("")
+        setReplaceQuery("")
+        setFindOpen(false)
+      }
+    })
   }
 
   function handleFindReplaceOne() {
     if (!activeMemo || !findQuery.trim()) return
     const q = findQuery
+    let replaced = 0
     void updateActiveMemoContent((doc) => {
       const nextBlocks = [...doc.blocks]
       for (let i = 0; i < nextBlocks.length; i++) {
-        const block = nextBlocks[i]
-        if (block.text?.includes(q)) {
-          nextBlocks[i] = { ...block, text: block.text.replace(q, replaceQuery) }
-          break
+        const next = replaceBlockContent(nextBlocks[i], q, replaceQuery, false)
+        if (next.count > 0) {
+          replaced = next.count
+          nextBlocks[i] = next.block
+          return { ...doc, blocks: nextBlocks }
         }
       }
-      return { ...doc, blocks: nextBlocks }
+      return doc
+    }).then(() => {
+      setToast(replaced > 0 ? "1개 항목을 바꿨습니다" : "바꿀 항목이 없습니다")
     })
-    setToast("1개 항목을 바꿨습니다")
   }
 
   /* ── highlight ── */
@@ -4285,7 +4515,7 @@ export function ToolNotebookPage() {
                                   onClick={() => jumpToBlock(block.id)}
                                   className="shrink-0 rounded-full bg-[color:var(--rnest-accent-soft)] px-3 py-1.5 text-[12px] font-medium text-[color:var(--rnest-accent)] transition-colors hover:bg-[color:var(--rnest-accent-soft)]/80"
                                 >
-                                  {block.text}
+                                  {getMemoBlockText(block)}
                                 </button>
                               ))}
                             </div>
@@ -4441,14 +4671,14 @@ export function ToolNotebookPage() {
                           </div>
                           <div className="flex flex-wrap gap-2">
                             {headingBlocks.map((block) => (
-                          <button
-                            key={block.id}
-                            type="button"
-                            onClick={() => jumpToBlock(block.id)}
-                            className="rounded-full bg-[color:var(--rnest-accent-soft)] px-3 py-1.5 text-[12px] font-medium text-[color:var(--rnest-accent)] transition-colors hover:bg-[color:var(--rnest-accent-soft)]/80"
-                          >
-                            {block.text}
-                          </button>
+                              <button
+                                key={block.id}
+                                type="button"
+                                onClick={() => jumpToBlock(block.id)}
+                                className="rounded-full bg-[color:var(--rnest-accent-soft)] px-3 py-1.5 text-[12px] font-medium text-[color:var(--rnest-accent)] transition-colors hover:bg-[color:var(--rnest-accent-soft)]/80"
+                              >
+                                {getMemoBlockText(block)}
+                              </button>
                             ))}
                           </div>
                         </div>
