@@ -22,10 +22,22 @@ type SaveOptions = {
 type LocalNotebookDraft = {
   updatedAt: number;
   state: RNestNotebookState;
+  dirty: boolean;
+  syncedAt: number | null;
+  scope: "guest" | "user";
 };
 
 function buildLocalDraftKey(userId: string) {
   return `${LOCAL_NOTEBOOK_DRAFT_KEY}:${userId}`;
+}
+
+function clearLocalDraft(userId: string | null) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(userId ? buildLocalDraftKey(userId) : GUEST_NOTEBOOK_DRAFT_KEY);
+  } catch {
+    // Ignore local backup clear failures.
+  }
 }
 
 function readLocalDraft(userId: string | null): LocalNotebookDraft | null {
@@ -38,20 +50,33 @@ function readLocalDraft(userId: string | null): LocalNotebookDraft | null {
       typeof parsed?.updatedAt === "number" && Number.isFinite(parsed.updatedAt) ? parsed.updatedAt : Date.now();
     const state = sanitizeNotebookState(parsed?.state ?? defaultNotebookState());
     if (!hasMeaningfulNotebookState(state)) return null;
-    return { updatedAt, state };
+    const dirty = typeof (parsed as { dirty?: unknown } | null)?.dirty === "boolean" ? Boolean((parsed as { dirty?: unknown }).dirty) : false;
+    const syncedAtRaw = (parsed as { syncedAt?: unknown } | null)?.syncedAt;
+    const syncedAt = typeof syncedAtRaw === "number" && Number.isFinite(syncedAtRaw) ? syncedAtRaw : null;
+    return { updatedAt, state, dirty, syncedAt, scope: userId ? "user" : "guest" };
   } catch {
     return null;
   }
 }
 
-function writeLocalDraft(userId: string | null, state: RNestNotebookState) {
+function writeLocalDraft(
+  userId: string | null,
+  state: RNestNotebookState,
+  options?: { dirty?: boolean; syncedAt?: number | null }
+) {
   if (typeof window === "undefined") return;
   try {
+    if (!hasMeaningfulNotebookState(state)) {
+      clearLocalDraft(userId);
+      return;
+    }
     window.localStorage.setItem(
       userId ? buildLocalDraftKey(userId) : GUEST_NOTEBOOK_DRAFT_KEY,
       JSON.stringify({
         updatedAt: Date.now(),
         state,
+        dirty: Boolean(options?.dirty),
+        syncedAt: typeof options?.syncedAt === "number" && Number.isFinite(options.syncedAt) ? options.syncedAt : null,
       })
     );
   } catch {
@@ -60,12 +85,11 @@ function writeLocalDraft(userId: string | null, state: RNestNotebookState) {
 }
 
 function readPreferredLocalDraft(userId: string | null) {
+  if (!userId) return readLocalDraft(null);
   const scoped = readLocalDraft(userId);
-  if (!userId) return scoped;
   const guest = readLocalDraft(null);
-  if (!guest) return scoped;
-  if (!scoped) return guest;
-  return guest.updatedAt > scoped.updatedAt ? guest : scoped;
+  if (guest?.dirty && (!scoped || guest.updatedAt > scoped.updatedAt)) return guest;
+  return scoped;
 }
 
 export function CloudNotebookSync() {
@@ -146,7 +170,7 @@ export function CloudNotebookSync() {
     (nextState: RNestNotebookState, scopedUserId: string | null) => {
       if (!scopedUserId) return;
       latestStateRef.current = nextState;
-      writeLocalDraft(scopedUserId, nextState);
+      writeLocalDraft(scopedUserId, nextState, { dirty: true });
 
       if (saveInFlightRef.current) {
         pendingSaveRef.current = true;
@@ -158,6 +182,11 @@ export function CloudNotebookSync() {
         try {
           if (currentUserIdRef.current !== scopedUserId) return;
           await saveStateViaApi(nextState);
+          writeLocalDraft(scopedUserId, nextState, {
+            dirty: false,
+            syncedAt: Date.now(),
+          });
+          clearLocalDraft(null);
           retryCountRef.current = 0;
           if (retryTimerRef.current) {
             clearTimeout(retryTimerRef.current);
@@ -198,7 +227,7 @@ export function CloudNotebookSync() {
     if (!userId || status !== "authenticated" || !initializedRef.current) return;
     const latestState = getCurrentNotebookState();
     const nextSignature = buildSignature(latestState);
-    writeLocalDraft(userId, latestState);
+    writeLocalDraft(userId, latestState, { dirty: true });
     if (nextSignature === latestSignatureRef.current) return;
     latestSignatureRef.current = nextSignature;
     latestStateRef.current = latestState;
@@ -234,22 +263,25 @@ export function CloudNotebookSync() {
     const remoteSignature = buildSignature(remoteState);
     const remoteUpdatedAt =
       typeof json?.updatedAt === "number" && Number.isFinite(json.updatedAt) ? json.updatedAt : null;
+    const remoteHasMeaningfulState = hasMeaningfulNotebookState(remoteState);
     const currentState = getCurrentNotebookState();
     const currentSignature = buildSignature(currentState);
     const localChangedWhileLoading = currentSignature !== localSignatureAtLoadStart;
     const localDraftIsNewer =
       Boolean(localDraftAtLoadStart) &&
+      Boolean(localDraftAtLoadStart?.dirty) &&
       typeof localDraftAtLoadStart?.updatedAt === "number" &&
       (remoteUpdatedAt == null || localDraftAtLoadStart.updatedAt > remoteUpdatedAt);
 
     if (
       localChangedWhileLoading ||
+      (!remoteHasMeaningfulState && hasMeaningfulNotebookState(currentState)) ||
       (localDraftIsNewer && currentSignature === buildSignature(localDraftAtLoadStart?.state ?? defaultNotebookState()))
     ) {
       initializedRef.current = true;
       latestSignatureRef.current = currentSignature;
       latestStateRef.current = currentState;
-      writeLocalDraft(userId, currentState);
+      writeLocalDraft(userId, currentState, { dirty: true });
       if (hasMeaningfulNotebookState(currentState) && currentSignature !== remoteSignature) {
         queueSave(currentState, userId);
       }
@@ -257,7 +289,11 @@ export function CloudNotebookSync() {
     }
 
     applyHydratedState(remoteState);
-    writeLocalDraft(userId, remoteState);
+    writeLocalDraft(userId, remoteState, {
+      dirty: false,
+      syncedAt: remoteUpdatedAt,
+    });
+    clearLocalDraft(null);
     return remoteState;
   }, [applyHydratedState, buildSignature, getAuthHeaders, getCurrentNotebookState, queueSave, status, userId]);
 
@@ -282,7 +318,9 @@ export function CloudNotebookSync() {
     }
 
     const localDraft = readPreferredLocalDraft(userId);
-    if (localDraft) {
+    const shouldHydrateLocalDraftImmediately =
+      Boolean(localDraft) && (!userId || status !== "authenticated" || Boolean(localDraft?.dirty));
+    if (localDraft && shouldHydrateLocalDraftImmediately) {
       applyHydratedState(localDraft.state);
     }
 
@@ -291,7 +329,7 @@ export function CloudNotebookSync() {
       const fallbackState = localDraft?.state ?? getCurrentNotebookState();
       latestSignatureRef.current = buildSignature(fallbackState);
       latestStateRef.current = fallbackState;
-      writeLocalDraft(userId, fallbackState);
+      writeLocalDraft(userId, fallbackState, { dirty: Boolean(localDraft?.dirty) });
       return;
     }
 
@@ -300,7 +338,7 @@ export function CloudNotebookSync() {
       initializedRef.current = true;
       latestSignatureRef.current = buildSignature(fallbackState);
       latestStateRef.current = fallbackState;
-      writeLocalDraft(userId, fallbackState);
+      writeLocalDraft(userId, fallbackState, { dirty: Boolean(localDraft?.dirty) });
     });
   }, [applyHydratedState, buildSignature, getCurrentNotebookState, loadNotebookState, status, userId]);
 
@@ -321,7 +359,9 @@ export function CloudNotebookSync() {
     ) {
       // During auth/bootstrap churn, never replace a meaningful local draft with an empty state.
     } else {
-      writeLocalDraft(userId ?? null, nextState);
+      writeLocalDraft(userId ?? null, nextState, {
+        dirty: !skipNextSaveRef.current,
+      });
     }
     if (!userId || status !== "authenticated" || !initializedRef.current) return;
 
@@ -331,6 +371,9 @@ export function CloudNotebookSync() {
       skipNextSaveRef.current = false;
       latestSignatureRef.current = nextSignature;
       latestStateRef.current = nextState;
+      writeLocalDraft(userId, nextState, {
+        dirty: false,
+      });
       return;
     }
 
