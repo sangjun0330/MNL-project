@@ -119,7 +119,7 @@ function formatFileSize(bytes: number) {
 
 function clampImageWidth(value: number | undefined | null) {
   if (typeof value !== "number" || !Number.isFinite(value)) return 100
-  return Math.min(100, Math.max(40, Math.round(value)))
+  return Math.min(100, Math.max(20, Math.round(value)))
 }
 
 function clampImageAspectRatio(value: number | undefined | null) {
@@ -426,6 +426,13 @@ function renderAttachmentIcon(kind: RNestMemoAttachment["kind"], className = "h-
 const mobileSafeInputClass = "text-[16px] md:text-[14px]"
 const mobileSafeBodyClass = "text-[16px] md:text-[15px]"
 const mobileSafeFineClass = "text-[16px] md:text-[12.5px]"
+
+/** Ref callback that auto-sizes a textarea on mount & when value changes */
+function autoSizeRef(el: HTMLTextAreaElement | null) {
+  if (!el) return
+  el.style.height = "auto"
+  el.style.height = `${el.scrollHeight}px`
+}
 
 const pageItemPositionCache = new Map<string, number>()
 
@@ -866,6 +873,165 @@ function SlashMenu({
   )
 }
 
+/* ─── resizable image block ───────────────────────────────── */
+
+function ImageResizableBlock({
+  block,
+  attachment,
+  attachmentUrl,
+  onChange,
+  onKeyDown,
+}: {
+  block: RNestMemoBlock
+  attachment: RNestMemoAttachment | null
+  attachmentUrl?: string
+  onChange: (b: RNestMemoBlock) => void
+  onKeyDown: (e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => void
+}) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [resizing, setResizing] = useState(false)
+  const [imgHovered, setImgHovered] = useState(false)
+  const startDataRef = useRef<{ startX: number; startY: number; startW: number; startH: number; handle: string } | null>(null)
+
+  const widthPct = clampImageWidth(block.mediaWidth)
+  const aspectRatio = clampImageAspectRatio(block.mediaAspectRatio)
+
+  function handleResizeStart(e: React.PointerEvent, handle: string) {
+    e.preventDefault()
+    e.stopPropagation()
+    const imgEl = containerRef.current
+    if (!imgEl) return
+    const rect = imgEl.getBoundingClientRect()
+    startDataRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      startW: rect.width,
+      startH: rect.height,
+      handle,
+    }
+    setResizing(true)
+
+    function handleMove(ev: PointerEvent) {
+      if (!startDataRef.current || !containerRef.current) return
+      const parentEl = containerRef.current.parentElement
+      if (!parentEl) return
+      const parentWidth = parentEl.getBoundingClientRect().width
+      const { startX, startW, handle: h } = startDataRef.current
+      const dx = ev.clientX - startX
+      const isLeft = h.includes("l")
+      const effectiveDx = isLeft ? -dx : dx
+      const newW = Math.max(100, startW + effectiveDx)
+      const newPct = Math.min(100, Math.max(20, Math.round((newW / parentWidth) * 100)))
+      onChange({ ...block, mediaWidth: newPct })
+    }
+
+    function handleUp() {
+      startDataRef.current = null
+      setResizing(false)
+      window.removeEventListener("pointermove", handleMove)
+      window.removeEventListener("pointerup", handleUp)
+    }
+
+    window.addEventListener("pointermove", handleMove)
+    window.addEventListener("pointerup", handleUp)
+  }
+
+  const showHandles = imgHovered || resizing
+
+  const handleClass =
+    "absolute z-10 bg-white border-2 border-[color:var(--rnest-accent)] rounded-full shadow-sm transition-opacity"
+
+  return (
+    <div>
+      {attachmentUrl ? (
+        <div
+          className="relative inline-block"
+          style={{ width: `${widthPct}%` }}
+          ref={containerRef}
+          onMouseEnter={() => setImgHovered(true)}
+          onMouseLeave={() => { if (!resizing) setImgHovered(false) }}
+        >
+          <div
+            className={cn(
+              "relative overflow-hidden rounded-lg",
+              resizing && "select-none"
+            )}
+            style={{ aspectRatio: String(aspectRatio) }}
+          >
+            <Image
+              src={attachmentUrl}
+              alt={block.text || attachment?.name || "메모 이미지"}
+              fill
+              unoptimized
+              className="pointer-events-none select-none object-cover"
+              sizes="(max-width: 768px) 100vw, 720px"
+              draggable={false}
+              onLoad={(event) => {
+                const nextRatio =
+                  event.currentTarget.naturalWidth > 0 && event.currentTarget.naturalHeight > 0
+                    ? event.currentTarget.naturalWidth / event.currentTarget.naturalHeight
+                    : undefined
+                if (
+                  typeof nextRatio === "number" &&
+                  Math.abs(clampImageAspectRatio(block.mediaAspectRatio) - clampImageAspectRatio(nextRatio)) > 0.01
+                ) {
+                  onChange({ ...block, mediaAspectRatio: nextRatio })
+                }
+              }}
+            />
+          </div>
+          {/* resize handles at corners and edges */}
+          {showHandles && (
+            <>
+              {/* corner handles */}
+              <div
+                onPointerDown={(e) => handleResizeStart(e, "tl")}
+                className={cn(handleClass, "-left-1.5 -top-1.5 h-3 w-3 cursor-nwse-resize", showHandles ? "opacity-100" : "opacity-0")}
+              />
+              <div
+                onPointerDown={(e) => handleResizeStart(e, "tr")}
+                className={cn(handleClass, "-right-1.5 -top-1.5 h-3 w-3 cursor-nesw-resize", showHandles ? "opacity-100" : "opacity-0")}
+              />
+              <div
+                onPointerDown={(e) => handleResizeStart(e, "bl")}
+                className={cn(handleClass, "-bottom-1.5 -left-1.5 h-3 w-3 cursor-nesw-resize", showHandles ? "opacity-100" : "opacity-0")}
+              />
+              <div
+                onPointerDown={(e) => handleResizeStart(e, "br")}
+                className={cn(handleClass, "-bottom-1.5 -right-1.5 h-3 w-3 cursor-nwse-resize", showHandles ? "opacity-100" : "opacity-0")}
+              />
+              {/* edge handles */}
+              <div
+                onPointerDown={(e) => handleResizeStart(e, "l")}
+                className={cn(handleClass, "-left-1.5 top-1/2 h-6 w-2 -translate-y-1/2 cursor-ew-resize rounded-full", showHandles ? "opacity-100" : "opacity-0")}
+              />
+              <div
+                onPointerDown={(e) => handleResizeStart(e, "r")}
+                className={cn(handleClass, "-right-1.5 top-1/2 h-6 w-2 -translate-y-1/2 cursor-ew-resize rounded-full", showHandles ? "opacity-100" : "opacity-0")}
+              />
+            </>
+          )}
+        </div>
+      ) : (
+        <div className="flex h-48 items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 text-[13px] text-ios-muted">
+          이미지를 불러오는 중...
+        </div>
+      )}
+      <input
+        type="text"
+        value={block.text ?? ""}
+        onChange={(e) => onChange({ ...block, text: e.target.value })}
+        onKeyDown={onKeyDown}
+        placeholder="이미지 설명을 입력하세요"
+        className={cn(
+          "mt-1.5 w-full border-none bg-transparent text-[13px] text-ios-muted outline-none placeholder:text-gray-300",
+          mobileSafeInputClass
+        )}
+      />
+    </div>
+  )
+}
+
 /* ─── inline block editor ─────────────────────────────────── */
 
 function InlineBlock({
@@ -908,7 +1074,21 @@ function InlineBlock({
   const [focused, setFocused] = useState(false)
   const addMenuRef = useRef<HTMLDivElement>(null)
   const actionMenuRef = useRef<HTMLDivElement>(null)
+  const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const controlsVisible = hovered || focused || showAddMenu || showActionMenu
+
+  function handleBlockMouseEnter() {
+    if (hoverTimeoutRef.current) { clearTimeout(hoverTimeoutRef.current); hoverTimeoutRef.current = null }
+    setHovered(true)
+  }
+  function handleBlockMouseLeave() {
+    // Delay hide so controls stay stable while moving between controls and block content
+    hoverTimeoutRef.current = setTimeout(() => setHovered(false), 120)
+  }
+
+  useEffect(() => {
+    return () => { if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current) }
+  }, [])
 
   useEffect(() => {
     if (!showAddMenu && !showActionMenu) return
@@ -955,9 +1135,9 @@ function InlineBlock({
   return (
     <div
       id={`memo-block-${block.id}`}
-      className="group relative scroll-mt-28"
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      className="group/block relative scroll-mt-28"
+      onMouseEnter={handleBlockMouseEnter}
+      onMouseLeave={handleBlockMouseLeave}
       onFocusCapture={() => setFocused(true)}
       onBlurCapture={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
@@ -965,14 +1145,16 @@ function InlineBlock({
         }
       }}
     >
-      {/* left controls: unified block menu */}
+      {/* left controls: unified block menu — hidden by default, visible on hover */}
       <div
         className={cn(
-          "absolute -left-16 top-1/2 z-20 flex -translate-y-1/2 items-center gap-1 transition-opacity max-md:-left-[4.75rem]",
+          "absolute -left-16 top-1/2 z-20 flex -translate-y-1/2 items-center gap-1 transition-opacity duration-150 max-md:-left-[4.75rem]",
           controlsVisible
             ? "pointer-events-auto opacity-100"
-            : "pointer-events-none opacity-0 max-md:pointer-events-auto max-md:opacity-100"
+            : "pointer-events-none opacity-0"
         )}
+        onMouseEnter={handleBlockMouseEnter}
+        onMouseLeave={handleBlockMouseLeave}
       >
         <div className="relative" ref={addMenuRef}>
           <button
@@ -982,10 +1164,10 @@ function InlineBlock({
               setShowActionMenu(false)
             }}
             className={cn(
-              "flex h-8 w-8 items-center justify-center rounded-2xl border bg-white/95 text-gray-400 shadow-sm backdrop-blur transition-colors",
+              "flex h-7 w-7 items-center justify-center rounded-lg text-gray-400 transition-colors",
               showAddMenu
-                ? "border-[color:var(--rnest-accent-border)] text-[color:var(--rnest-accent)] shadow-[0_8px_22px_rgba(123,111,208,0.16)]"
-                : "border-gray-200 hover:border-gray-300 hover:bg-white hover:text-gray-600"
+                ? "bg-gray-100 text-[color:var(--rnest-accent)]"
+                : "hover:bg-gray-100 hover:text-gray-600"
             )}
             title="아래에 새 블록 추가"
             aria-label="아래에 새 블록 추가"
@@ -1042,10 +1224,10 @@ function InlineBlock({
               setShowAddMenu(false)
             }}
             className={cn(
-              "flex h-8 w-8 items-center justify-center rounded-2xl border bg-white/95 text-gray-400 shadow-sm backdrop-blur transition-colors",
+              "flex h-7 w-7 items-center justify-center rounded-lg text-gray-400 transition-colors",
               showActionMenu
-                ? "border-[color:var(--rnest-accent-border)] text-[color:var(--rnest-accent)] shadow-[0_8px_22px_rgba(123,111,208,0.16)]"
-                : "border-gray-200 hover:border-gray-300 hover:bg-white hover:text-gray-600"
+                ? "bg-gray-100 text-[color:var(--rnest-accent)]"
+                : "hover:bg-gray-100 hover:text-gray-600"
             )}
             title="현재 블록 설정"
             aria-label="현재 블록 설정"
@@ -1177,6 +1359,7 @@ function InlineBlock({
 
         {block.type === "paragraph" && (
           <textarea
+            ref={autoSizeRef}
             value={block.text ?? ""}
             onChange={(e) => onChange({ ...block, text: e.target.value })}
             onKeyDown={handleEditorKeyDown}
@@ -1199,6 +1382,7 @@ function InlineBlock({
           <div className="flex gap-2">
             <span className="mt-[2px] shrink-0 text-[15px] leading-relaxed text-ios-sub">•</span>
             <textarea
+              ref={autoSizeRef}
               value={block.text ?? ""}
               onChange={(e) => onChange({ ...block, text: e.target.value })}
               onKeyDown={handleEditorKeyDown}
@@ -1222,6 +1406,7 @@ function InlineBlock({
           <div className="flex gap-2">
             <span className="mt-[2px] shrink-0 text-[15px] leading-relaxed text-ios-sub">1.</span>
             <textarea
+              ref={autoSizeRef}
               value={block.text ?? ""}
               onChange={(e) => onChange({ ...block, text: e.target.value })}
               onKeyDown={handleEditorKeyDown}
@@ -1260,6 +1445,7 @@ function InlineBlock({
               )}
             </button>
             <textarea
+              ref={autoSizeRef}
               value={block.text ?? ""}
               onChange={(e) => onChange({ ...block, text: e.target.value })}
               onKeyDown={handleEditorKeyDown}
@@ -1284,6 +1470,7 @@ function InlineBlock({
           <div className="flex gap-3 rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
             <Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--rnest-accent)]" />
             <textarea
+              ref={autoSizeRef}
               value={block.text ?? ""}
               onChange={(e) => onChange({ ...block, text: e.target.value })}
               onKeyDown={handleEditorKeyDown}
@@ -1307,6 +1494,7 @@ function InlineBlock({
           <div className="flex gap-3 rounded-r-lg border-l-[3px] border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)]/45 px-4 py-3">
             <MessageSquareQuote className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--rnest-accent)]" />
             <textarea
+              ref={autoSizeRef}
               value={block.text ?? ""}
               onChange={(e) => onChange({ ...block, text: e.target.value })}
               onKeyDown={handleEditorKeyDown}
@@ -1352,6 +1540,7 @@ function InlineBlock({
             {!block.collapsed && (
               <div className="border-t border-gray-100 px-4 py-3">
                 <textarea
+                  ref={autoSizeRef}
                   value={block.detailText ?? ""}
                   onChange={(e) => onChange({ ...block, detailText: e.target.value })}
                   onKeyDown={handleCommandKeyDown}
@@ -1423,96 +1612,13 @@ function InlineBlock({
         )}
 
         {block.type === "image" && (
-          <div className="overflow-hidden rounded-[24px] border border-gray-200 bg-white shadow-[0_12px_28px_rgba(15,23,42,0.06)]">
-            <div className="border-b border-gray-100 bg-[color:var(--rnest-accent-soft)]/20 px-4 py-3">
-              <div className="flex flex-wrap items-center gap-2">
-                {([
-                  { label: "작게", width: 56 },
-                  { label: "보통", width: 76 },
-                  { label: "크게", width: 100 },
-                ] as const).map((preset) => {
-                  const active = clampImageWidth(block.mediaWidth) === preset.width
-                  return (
-                    <button
-                      key={preset.label}
-                      type="button"
-                      onClick={() => onChange({ ...block, mediaWidth: preset.width })}
-                      className={cn(
-                        "rounded-full px-2.5 py-1 text-[11.5px] font-medium transition-colors",
-                        active
-                          ? "bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
-                          : "bg-white text-ios-sub shadow-[inset_0_0_0_1px_rgba(148,163,184,0.16)] hover:bg-gray-50"
-                      )}
-                    >
-                      {preset.label}
-                    </button>
-                  )
-                })}
-                <div className="ml-auto flex min-w-[180px] items-center gap-3 max-md:w-full max-md:min-w-0">
-                  <span className="shrink-0 text-[11.5px] font-medium text-ios-muted">크기</span>
-                  <input
-                    type="range"
-                    min={40}
-                    max={100}
-                    step={5}
-                    value={clampImageWidth(block.mediaWidth)}
-                    onChange={(e) => onChange({ ...block, mediaWidth: Number(e.target.value) })}
-                    className="h-1.5 w-full accent-[color:var(--rnest-accent)]"
-                  />
-                  <span className="w-9 shrink-0 text-right text-[11.5px] font-medium text-ios-muted">
-                    {clampImageWidth(block.mediaWidth)}%
-                  </span>
-                </div>
-              </div>
-            </div>
-            <div className="bg-[color:var(--rnest-accent-soft)]/30 px-4 py-4">
-              {attachmentUrl ? (
-                <div
-                  className="relative mx-auto overflow-hidden rounded-[20px] border border-white/80 bg-white shadow-[0_10px_24px_rgba(15,23,42,0.08)]"
-                  style={{
-                    width: `${clampImageWidth(block.mediaWidth)}%`,
-                    aspectRatio: String(clampImageAspectRatio(block.mediaAspectRatio)),
-                  }}
-                >
-                  <Image
-                    src={attachmentUrl}
-                    alt={block.text || attachment?.name || "메모 이미지"}
-                    fill
-                    unoptimized
-                    className="pointer-events-none select-none object-contain"
-                    sizes="(max-width: 768px) 100vw, 720px"
-                    draggable={false}
-                    onLoad={(event) => {
-                      const nextRatio =
-                        event.currentTarget.naturalWidth > 0 && event.currentTarget.naturalHeight > 0
-                          ? event.currentTarget.naturalWidth / event.currentTarget.naturalHeight
-                          : undefined
-                      if (
-                        typeof nextRatio === "number" &&
-                        Math.abs(clampImageAspectRatio(block.mediaAspectRatio) - clampImageAspectRatio(nextRatio)) > 0.01
-                      ) {
-                        onChange({ ...block, mediaAspectRatio: nextRatio })
-                      }
-                    }}
-                  />
-                </div>
-              ) : (
-                <div className="flex h-48 items-center justify-center rounded-[20px] border border-dashed border-gray-200 bg-white/80 text-[13px] text-ios-muted">
-                  이미지를 불러오는 중...
-                </div>
-              )}
-            </div>
-            <div className="border-t border-gray-100 px-4 py-3">
-              <input
-                type="text"
-                value={block.text ?? ""}
-                onChange={(e) => onChange({ ...block, text: e.target.value })}
-                onKeyDown={handleCommandKeyDown}
-                placeholder="이미지 설명을 입력하세요"
-                className={cn("w-full border-none bg-transparent text-ios-sub outline-none placeholder:text-gray-300", mobileSafeInputClass)}
-              />
-            </div>
-          </div>
+          <ImageResizableBlock
+            block={block}
+            attachment={attachment}
+            attachmentUrl={attachmentUrl}
+            onChange={onChange}
+            onKeyDown={handleCommandKeyDown}
+          />
         )}
 
         {block.type === "attachment" && (
@@ -3020,7 +3126,7 @@ export function ToolNotebookPage() {
                   )}
 
                   {/* blocks */}
-                  <div className="space-y-1 pl-10">
+                  <div className="space-y-2 pl-10">
                     {activeMemo.blocks.map((block, idx) => {
                       const attachment = findAttachment(activeMemo, block.attachmentId)
                       return (

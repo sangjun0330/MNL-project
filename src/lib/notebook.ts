@@ -206,7 +206,7 @@ const MAX_SELECT_OPTIONS = 10
 
 function sanitizeMediaWidth(value: unknown) {
   if (typeof value !== "number" || !Number.isFinite(value)) return 100
-  return Math.min(100, Math.max(40, Math.round(value)))
+  return Math.min(100, Math.max(20, Math.round(value)))
 }
 
 function sanitizeMediaAspectRatio(value: unknown) {
