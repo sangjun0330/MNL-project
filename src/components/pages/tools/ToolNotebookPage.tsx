@@ -803,6 +803,8 @@ function PageItem({
   onDraftCommit,
   onDraftCancel,
   onTrash,
+  onRestore,
+  onDeletePermanent,
 }: {
   doc: RNestMemoDocument
   summary: string
@@ -822,6 +824,8 @@ function PageItem({
   onDraftCommit?: () => void
   onDraftCancel?: () => void
   onTrash?: () => void
+  onRestore?: () => void
+  onDeletePermanent?: () => void
 }) {
   const itemRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -923,27 +927,54 @@ function PageItem({
           <Star className="h-3 w-3 fill-current text-[color:var(--rnest-accent)] opacity-60" />
         )}
       </span>
-      {(onStartEdit || onTrash) && !isEditing && (
+      {(onStartEdit || onTrash || onRestore || onDeletePermanent) && !isEditing && (
         <div className="flex shrink-0 items-center gap-0.5 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
-          {onStartEdit && (
-            <button
-              type="button"
-              onClick={onStartEdit}
-              className="flex h-7 w-7 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
-              title="이름 변경"
-            >
-              <Pencil className="h-3.5 w-3.5" />
-            </button>
-          )}
-          {onTrash && (
-            <button
-              type="button"
-              onClick={onTrash}
-              className="flex h-7 w-7 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500"
-              title="삭제"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
+          {onRestore || onDeletePermanent ? (
+            <>
+              {onRestore && (
+                <button
+                  type="button"
+                  onClick={onRestore}
+                  className="flex h-7 w-7 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-[color:var(--rnest-accent-soft)] hover:text-[color:var(--rnest-accent)]"
+                  title="복구"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                </button>
+              )}
+              {onDeletePermanent && (
+                <button
+                  type="button"
+                  onClick={onDeletePermanent}
+                  className="flex h-7 w-7 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500"
+                  title="영구 삭제"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </>
+          ) : (
+            <>
+              {onStartEdit && (
+                <button
+                  type="button"
+                  onClick={onStartEdit}
+                  className="flex h-7 w-7 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+                  title="이름 변경"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+              )}
+              {onTrash && (
+                <button
+                  type="button"
+                  onClick={onTrash}
+                  className="flex h-7 w-7 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500"
+                  title="삭제"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </>
           )}
         </div>
       )}
@@ -3417,6 +3448,17 @@ export function ToolNotebookPage() {
     setToast("내 템플릿을 만들었습니다")
   }
 
+  function removePersonalTemplate(templateId: string) {
+    const target = personalTemplates.find((template) => template.id === templateId)
+    if (!target) return
+    if (typeof window !== "undefined") {
+      const confirmed = window.confirm(`"${target.label}" 템플릿을 삭제할까요?`)
+      if (!confirmed) return
+    }
+    updatePersonalTemplates(personalTemplates.filter((template) => template.id !== templateId))
+    setToast("내 템플릿을 삭제했습니다")
+  }
+
   function createMemoFromTemplateId(templateId = "blank") {
     const template = displayedTemplates.find((item) => item.id === templateId) ?? displayedTemplates[0]
     const doc = createMemoFromTemplate(template)
@@ -4646,6 +4688,8 @@ export function ToolNotebookPage() {
                       isDragging={draggingDocId === doc.id}
                       onDragStart={(event) => handlePageDragStart(event, doc.id)}
                       onDragEnd={handlePageDragEnd}
+                      onRestore={() => restoreMemo(doc.id)}
+                      onDeletePermanent={() => deletePermanently(doc.id)}
                     />
                   ))}
                 </SidebarSection>
@@ -5276,29 +5320,14 @@ export function ToolNotebookPage() {
                 </DialogDescription>
               </DialogHeader>
 
-              <div className="mt-5 flex items-center justify-between gap-3 rounded-[22px] border border-white/80 bg-white/80 px-4 py-3">
-                <div>
-                  <div className="text-[13px] font-semibold text-ios-text">템플릿 목록</div>
-                  <div className="mt-1 text-[12px] text-ios-sub">
-                    내 템플릿이 가장 먼저 보이고, 운영 템플릿이 그 아래에 이어집니다.
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={openPersonalTemplateCreator}
-                    className="inline-flex h-10 items-center justify-center rounded-full bg-[color:var(--rnest-accent)] px-4 text-[12px] font-semibold text-white shadow-[0_16px_36px_rgba(167,139,250,0.22)] transition hover:opacity-95"
-                  >
-                    + 템플릿 만들기
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void loadTemplates()}
-                    className="inline-flex h-10 items-center justify-center rounded-full border border-[color:var(--rnest-accent-border)] px-4 text-[12px] font-semibold text-[color:var(--rnest-accent)] transition hover:bg-[color:var(--rnest-accent-soft)]"
-                  >
-                    새로고침
-                  </button>
-                </div>
+              <div className="mt-5 flex justify-end">
+                <button
+                  type="button"
+                  onClick={openPersonalTemplateCreator}
+                  className="inline-flex h-10 items-center justify-center rounded-full bg-[color:var(--rnest-accent)] px-4 text-[12px] font-semibold text-white shadow-[0_16px_36px_rgba(167,139,250,0.22)] transition hover:opacity-95"
+                >
+                  + 템플릿 만들기
+                </button>
               </div>
 
               {templatesLoading ? <div className="mt-4 text-[12px] text-ios-muted">템플릿을 불러오는 중...</div> : null}
@@ -5306,37 +5335,55 @@ export function ToolNotebookPage() {
 
               <div className="mt-5 grid gap-3 sm:grid-cols-2">
                 {renderTemplates.map((template) => (
-                  <button
-                    key={template.id}
-                    type="button"
-                    onClick={() => createMemoFromTemplateId(template.id)}
-                    className="rounded-[24px] border border-[#e7edf5] bg-white/92 p-4 text-left shadow-[0_12px_36px_rgba(17,41,75,0.05)] transition hover:-translate-y-[1px] hover:border-[color:var(--rnest-accent-border)] hover:bg-[color:var(--rnest-accent-soft)]"
-                  >
-                    <div className="flex items-start gap-3">
-                      <span className="inline-flex h-11 w-11 items-center justify-center rounded-[18px] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]">
-                        {renderMemoIcon(template.icon, "h-5 w-5")}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <div className="text-[15px] font-semibold text-ios-text">{template.label}</div>
-                          {personalTemplateIdSet.has(template.id) ? (
-                            <span className="inline-flex rounded-full bg-[rgba(167,139,250,0.14)] px-2 py-0.5 text-[10px] font-semibold text-[color:var(--rnest-accent)]">
-                              내 템플릿
-                            </span>
-                          ) : (
-                            <span className="inline-flex rounded-full bg-[#eef3fa] px-2 py-0.5 text-[10px] font-semibold text-[#5c6f86]">
-                              기본
-                            </span>
-                          )}
+                  <div key={template.id} className="relative">
+                    <button
+                      type="button"
+                      onClick={() => createMemoFromTemplateId(template.id)}
+                      className={cn(
+                        "w-full rounded-[24px] border border-[#e7edf5] bg-white/92 p-4 text-left shadow-[0_12px_36px_rgba(17,41,75,0.05)] transition hover:-translate-y-[1px] hover:border-[color:var(--rnest-accent-border)] hover:bg-[color:var(--rnest-accent-soft)]",
+                        personalTemplateIdSet.has(template.id) && "pr-14"
+                      )}
+                    >
+                      <div className="flex items-start gap-3">
+                        <span className="inline-flex h-11 w-11 items-center justify-center rounded-[18px] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]">
+                          {renderMemoIcon(template.icon, "h-5 w-5")}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <div className="text-[15px] font-semibold text-ios-text">{template.label}</div>
+                            {personalTemplateIdSet.has(template.id) ? (
+                              <span className="inline-flex rounded-full bg-[rgba(167,139,250,0.14)] px-2 py-0.5 text-[10px] font-semibold text-[color:var(--rnest-accent)]">
+                                내 템플릿
+                              </span>
+                            ) : (
+                              <span className="inline-flex rounded-full bg-[#eef3fa] px-2 py-0.5 text-[10px] font-semibold text-[#5c6f86]">
+                                기본
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-1 text-[12px] leading-5 text-ios-sub">{template.description}</div>
                         </div>
-                        <div className="mt-1 text-[12px] leading-5 text-ios-sub">{template.description}</div>
                       </div>
-                    </div>
 
-                    <div className="mt-4 rounded-[18px] border border-[#edf1f6] bg-[#fbfcfe] px-3 py-2.5 text-[12px] leading-5 text-ios-sub">
-                      {memoTemplateToPreviewText(template)}
-                    </div>
-                  </button>
+                      <div className="mt-4 rounded-[18px] border border-[#edf1f6] bg-[#fbfcfe] px-3 py-2.5 text-[12px] leading-5 text-ios-sub">
+                        {memoTemplateToPreviewText(template)}
+                      </div>
+                    </button>
+
+                    {personalTemplateIdSet.has(template.id) ? (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          removePersonalTemplate(template.id)
+                        }}
+                        aria-label={`${template.label} 템플릿 삭제`}
+                        className="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#f0d8d8] bg-white text-[#c15b5b] shadow-sm transition hover:bg-[#fff4f4]"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    ) : null}
+                  </div>
                 ))}
               </div>
 
