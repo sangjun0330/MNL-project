@@ -11,6 +11,20 @@ function bad(status: number, message: string) {
   return jsonNoStore({ ok: false, error: message }, { status })
 }
 
+function isNotebookStateStorageUnavailable(error: unknown) {
+  const code = String((error as { code?: unknown } | null)?.code ?? "").trim()
+  const message = String((error as { message?: unknown } | null)?.message ?? "").toLowerCase()
+  return (
+    message.includes("supabase admin env missing") ||
+    message.includes("notebook_state_table_missing") ||
+    code === "42P01" ||
+    code === "PGRST204" ||
+    code === "PGRST205" ||
+    (message.includes("rnest_notebook_state") && message.includes("does not exist")) ||
+    (message.includes("schema cache") && message.includes("rnest_notebook_state"))
+  )
+}
+
 export async function GET(req: Request) {
   let userId = ""
   try {
@@ -71,6 +85,9 @@ export async function POST(req: Request) {
       userId,
       error: error instanceof Error ? error.message : String(error),
     })
+    if (isNotebookStateStorageUnavailable(error)) {
+      return jsonNoStore({ ok: true, syncedAt: null, degraded: true, localOnly: true })
+    }
     return bad(500, "failed_to_save_notebook_state")
   }
 }

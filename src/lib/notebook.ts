@@ -214,6 +214,9 @@ export type RNestMemoTemplate = {
   coverStyle: string | null
   tags: string[]
   blocks: RNestMemoBlock[]
+  sourceDocId?: string | null
+  sourceDocTitle?: string
+  sourceDocUpdatedAt?: number | null
   createdAt: number
   updatedAt: number
 }
@@ -255,6 +258,7 @@ const MAX_TAG_LENGTH = 24
 const MAX_TAGS = 8
 const MAX_TEMPLATE_LABEL_LENGTH = 40
 const MAX_TEMPLATE_DESCRIPTION_LENGTH = 160
+const MAX_TEMPLATE_SOURCE_DOC_ID_LENGTH = 120
 const MAX_BLOCK_TEXT_LENGTH = 4000
 const MAX_BLOCK_HTML_LENGTH = 24000
 const MAX_BLOCKS = 64
@@ -819,6 +823,12 @@ function createMemoTemplateBase(input?: Partial<RNestMemoTemplate>): RNestMemoTe
     coverStyle: normalizeMemoCover(input?.coverStyle),
     tags: sanitizeNotebookTags(input?.tags),
     blocks: normalizeTemplateBlocks(input?.blocks, []),
+    sourceDocId: cleanText(input?.sourceDocId, MAX_TEMPLATE_SOURCE_DOC_ID_LENGTH) || null,
+    sourceDocTitle: cleanText(input?.sourceDocTitle, MAX_TITLE_LENGTH) || "",
+    sourceDocUpdatedAt:
+      typeof input?.sourceDocUpdatedAt === "number" && Number.isFinite(input.sourceDocUpdatedAt)
+        ? input.sourceDocUpdatedAt
+        : null,
     createdAt:
       typeof input?.createdAt === "number" && Number.isFinite(input.createdAt) ? input.createdAt : timestamp,
     updatedAt:
@@ -859,6 +869,9 @@ export function createMemoTemplateFromDocument(
     coverStyle: options?.coverStyle ?? normalizedDocument.coverStyle,
     tags: options?.tags ?? normalizedDocument.tags,
     blocks: normalizeTemplateBlocks(normalizedDocument.blocks, normalizedDocument.attachments),
+    sourceDocId: options?.sourceDocId ?? normalizedDocument.id,
+    sourceDocTitle: options?.sourceDocTitle ?? getMemoDocumentTitle(normalizedDocument),
+    sourceDocUpdatedAt: options?.sourceDocUpdatedAt ?? normalizedDocument.updatedAt,
     createdAt: options?.createdAt,
     updatedAt: options?.updatedAt,
   })

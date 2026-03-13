@@ -7,6 +7,7 @@ export const NOTEBOOK_STORAGE_BUCKET =
 
 const MAX_FILE_SIZE = 12 * 1024 * 1024
 const MAX_STORAGE_PATH_LENGTH = 240
+const NOTEBOOK_SIGNED_URL_TTL_SECONDS = 60 * 60
 
 function isImageType(type: string) {
   return type.startsWith("image/")
@@ -18,6 +19,19 @@ function normalizeNotebookStoragePath(path: string) {
   if (trimmed.includes("\\") || trimmed.includes("..")) return ""
   const normalized = trimmed.replace(/^\/+/, "")
   return normalized
+}
+
+function toAbsoluteSignedUrl(url: string) {
+  const trimmed = String(url ?? "").trim()
+  if (!trimmed) return ""
+  if (/^https?:\/\//i.test(trimmed)) return trimmed
+  const supabaseUrl = String(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").trim()
+  if (!supabaseUrl) return trimmed
+  try {
+    return new URL(trimmed, supabaseUrl).toString()
+  } catch {
+    return trimmed
+  }
 }
 
 async function ensureNotebookBucket() {
@@ -89,13 +103,13 @@ export async function createNotebookSignedUrls(input: { userId: string; paths: s
   )
   if (ownedPaths.length === 0) return {}
 
-  const { data, error } = await admin.storage.from(NOTEBOOK_STORAGE_BUCKET).createSignedUrls(ownedPaths, 30)
+  const { data, error } = await admin.storage.from(NOTEBOOK_STORAGE_BUCKET).createSignedUrls(ownedPaths, NOTEBOOK_SIGNED_URL_TTL_SECONDS)
   if (error) throw error
 
   const out: Record<string, string> = {}
   for (const item of data ?? []) {
     if (!item?.path || !item?.signedUrl) continue
-    out[item.path] = item.signedUrl
+    out[item.path] = toAbsoluteSignedUrl(item.signedUrl)
   }
   return out
 }

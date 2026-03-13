@@ -14,6 +14,10 @@ type SaveOptions = {
   keepalive?: boolean;
 };
 
+type SaveResult = {
+  localOnly: boolean;
+};
+
 export function CloudStateSync({ remoteEnabled = false }: { remoteEnabled?: boolean }) {
   const auth = useAuth();
   const { status } = useAuthState();
@@ -41,7 +45,7 @@ export function CloudStateSync({ remoteEnabled = false }: { remoteEnabled?: bool
   }, [supabase]);
 
   const saveStateViaApi = useCallback(
-    async (state: any, options?: SaveOptions) => {
+    async (state: any, options?: SaveOptions): Promise<SaveResult> => {
       const authHeaders = await getAuthHeaders();
       const res = await fetch("/api/user/state", {
         method: "POST",
@@ -53,10 +57,15 @@ export function CloudStateSync({ remoteEnabled = false }: { remoteEnabled?: bool
         keepalive: Boolean(options?.keepalive),
       });
 
+      const json = await res.json().catch(() => null);
+
       if (!res.ok) {
-        const json = await res.json().catch(() => null);
         throw new Error(String(json?.error ?? "failed_to_save_state"));
       }
+
+      return {
+        localOnly: Boolean(json?.localOnly || json?.degraded),
+      };
     },
     [getAuthHeaders]
   );
@@ -65,7 +74,7 @@ export function CloudStateSync({ remoteEnabled = false }: { remoteEnabled?: bool
     async (rawState: any, options?: SaveOptions) => {
       const sanitized = sanitizeStatePayload(rawState);
       const serialized = serializeStateForSupabase(sanitized);
-      await saveStateViaApi(serialized, options);
+      return saveStateViaApi(serialized, options);
     },
     [saveStateViaApi]
   );
@@ -84,7 +93,20 @@ export function CloudStateSync({ remoteEnabled = false }: { remoteEnabled?: bool
       void (async () => {
         try {
           if (currentUserIdRef.current !== scopedUserId) return;
-          await saveState(nextState);
+          const result = await saveState(nextState);
+          if (result.localOnly) {
+            retryCountRef.current = 0;
+            if (retryTimerRef.current) {
+              clearTimeout(retryTimerRef.current);
+            }
+            retryTimerRef.current = setTimeout(() => {
+              const latestState = latestStateRef.current;
+              const latestUserId = currentUserIdRef.current;
+              if (!latestState || !latestUserId) return;
+              queueSave(latestState, latestUserId);
+            }, 30_000);
+            return;
+          }
           retryCountRef.current = 0;
           if (retryTimerRef.current) {
             clearTimeout(retryTimerRef.current);

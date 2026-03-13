@@ -1,10 +1,77 @@
 import { createMemoAttachment, type RNestMemoAttachment } from "@/lib/notebook"
 
-const notebookImagePreviewCache = new Map<string, string>()
+type NotebookImagePreviewCacheEntry = {
+  url: string
+  kind: "blob" | "signed" | "proxy"
+  expiresAt: number | null
+}
+
+const NOTEBOOK_SIGNED_URL_CACHE_MS = 55 * 60 * 1000
+
+const notebookImagePreviewCache = new Map<string, NotebookImagePreviewCacheEntry>()
 const notebookImagePreviewPromiseCache = new Map<string, Promise<string>>()
 
 async function parseJson(response: Response) {
   return response.json().catch(() => null)
+}
+
+function revokePreviewEntry(entry: NotebookImagePreviewCacheEntry | undefined) {
+  if (!entry) return
+  if (entry.kind === "blob" && entry.url.startsWith("blob:")) {
+    URL.revokeObjectURL(entry.url)
+  }
+}
+
+function clearPreviewPromise(path: string, request?: Promise<string>) {
+  if (!request || notebookImagePreviewPromiseCache.get(path) === request) {
+    notebookImagePreviewPromiseCache.delete(path)
+  }
+}
+
+function setNotebookImagePreviewCache(path: string, entry: NotebookImagePreviewCacheEntry) {
+  const existing = notebookImagePreviewCache.get(path)
+  if (existing?.url === entry.url && existing?.kind === entry.kind && existing?.expiresAt === entry.expiresAt) return
+  revokePreviewEntry(existing)
+  notebookImagePreviewCache.set(path, entry)
+}
+
+function getNotebookImagePreviewCacheEntry(path: string) {
+  const cached = notebookImagePreviewCache.get(path)
+  if (!cached) return null
+  if (cached.expiresAt && cached.expiresAt <= Date.now()) {
+    revokePreviewEntry(cached)
+    notebookImagePreviewCache.delete(path)
+    return null
+  }
+  return cached
+}
+
+function normalizeSignedNotebookFileUrl(url: string) {
+  const trimmed = url.trim()
+  if (!trimmed) return ""
+  return trimmed
+}
+
+async function requestSignedNotebookImageUrl(path: string) {
+  const response = await fetch("/api/tools/notebook/files/sign", {
+    method: "POST",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ paths: [path] }),
+    cache: "no-store",
+  })
+
+  const payload = await parseJson(response)
+  if (!response.ok || !payload?.ok) {
+    throw new Error(String(payload?.error ?? "failed_to_create_notebook_file_urls"))
+  }
+
+  const signedUrl = normalizeSignedNotebookFileUrl(String(payload?.urls?.[path] ?? ""))
+  if (!signedUrl) {
+    throw new Error("notebook_image_url_missing")
+  }
+
+  return signedUrl
 }
 
 export async function uploadNotebookFile(file: File, preferredKind?: RNestMemoAttachment["kind"]) {
@@ -36,58 +103,82 @@ export function buildNotebookFileUrl(path: string, options?: { download?: boolea
 }
 
 export function getCachedNotebookImagePreview(path: string) {
-  return notebookImagePreviewCache.get(path) ?? null
+  return getNotebookImagePreviewCacheEntry(path)?.url ?? null
+}
+
+export function clearNotebookImagePreview(path: string) {
+  const cached = notebookImagePreviewCache.get(path)
+  revokePreviewEntry(cached)
+  notebookImagePreviewCache.delete(path)
+  notebookImagePreviewPromiseCache.delete(path)
 }
 
 export function seedNotebookImagePreview(path: string, file: File) {
   if (!path || !file.type.startsWith("image/")) return null
-  const existing = notebookImagePreviewCache.get(path)
-  if (existing) return existing
+  const existing = getNotebookImagePreviewCacheEntry(path)
+  if (existing) return existing.url
   const previewUrl = URL.createObjectURL(file)
-  notebookImagePreviewCache.set(path, previewUrl)
+  setNotebookImagePreviewCache(path, {
+    url: previewUrl,
+    kind: "blob",
+    expiresAt: null,
+  })
   return previewUrl
 }
 
-export async function loadNotebookImagePreview(path: string) {
+export async function loadNotebookImagePreview(path: string, options?: { forceRefresh?: boolean }) {
   if (!path) throw new Error("path_required")
-  const cached = notebookImagePreviewCache.get(path)
-  if (cached) return cached
+  if (options?.forceRefresh) {
+    clearNotebookImagePreview(path)
+  }
 
-  const pending = notebookImagePreviewPromiseCache.get(path)
+  const cached = getNotebookImagePreviewCacheEntry(path)
+  if (cached) return cached.url
+
+  const pending = options?.forceRefresh ? null : notebookImagePreviewPromiseCache.get(path)
   if (pending) return pending
 
-  const request = fetch(buildNotebookFileUrl(path), {
-    credentials: "include",
-    cache: "force-cache",
-  })
-    .then(async (response) => {
-      if (!response.ok) {
-        throw new Error("failed_to_load_notebook_image_preview")
+  const request = (async () => {
+    try {
+      const signedUrl = await requestSignedNotebookImageUrl(path)
+      setNotebookImagePreviewCache(path, {
+        url: signedUrl,
+        kind: "signed",
+        expiresAt: Date.now() + NOTEBOOK_SIGNED_URL_CACHE_MS,
+      })
+      return signedUrl
+    } catch (signedError) {
+      const proxyUrl = buildNotebookFileUrl(path)
+      setNotebookImagePreviewCache(path, {
+        url: proxyUrl,
+        kind: "proxy",
+        expiresAt: Date.now() + 2 * 60 * 1000,
+      })
+      if (signedError instanceof Error && signedError.message === "login_required") {
+        throw signedError
       }
-      const blob = await response.blob()
-      const objectUrl = URL.createObjectURL(blob)
-      notebookImagePreviewCache.set(path, objectUrl)
-      notebookImagePreviewPromiseCache.delete(path)
-      return objectUrl
+      return proxyUrl
+    }
+  })()
+
+  const wrappedRequest = request
+    .then((url) => {
+      clearPreviewPromise(path, wrappedRequest)
+      return url
     })
     .catch((error) => {
-      notebookImagePreviewPromiseCache.delete(path)
+      clearPreviewPromise(path, wrappedRequest)
       throw error
     })
 
-  notebookImagePreviewPromiseCache.set(path, request)
-  return request
+  notebookImagePreviewPromiseCache.set(path, wrappedRequest)
+  return wrappedRequest
 }
 
 export async function deleteNotebookFiles(paths: string[]) {
   if (paths.length === 0) return
   for (const path of paths) {
-    const cached = notebookImagePreviewCache.get(path)
-    if (cached && cached.startsWith("blob:")) {
-      URL.revokeObjectURL(cached)
-    }
-    notebookImagePreviewCache.delete(path)
-    notebookImagePreviewPromiseCache.delete(path)
+    clearNotebookImagePreview(path)
   }
   await fetch("/api/tools/notebook/files", {
     method: "DELETE",

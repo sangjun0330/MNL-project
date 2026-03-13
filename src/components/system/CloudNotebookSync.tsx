@@ -20,6 +20,10 @@ type SaveOptions = {
   keepalive?: boolean;
 };
 
+type SaveResult = {
+  localOnly: boolean;
+};
+
 type LocalNotebookDraft = {
   updatedAt: number;
   state: RNestNotebookState;
@@ -148,7 +152,7 @@ export function CloudNotebookSync() {
   );
 
   const saveStateViaApi = useCallback(
-    async (state: RNestNotebookState, options?: SaveOptions) => {
+    async (state: RNestNotebookState, options?: SaveOptions): Promise<SaveResult> => {
       const authHeaders = await getAuthHeaders();
       const res = await fetch("/api/tools/notebook/state", {
         method: "POST",
@@ -160,10 +164,15 @@ export function CloudNotebookSync() {
         keepalive: Boolean(options?.keepalive),
       });
 
+      const json = await res.json().catch(() => null);
+
       if (!res.ok) {
-        const json = await res.json().catch(() => null);
         throw new Error(String(json?.error ?? "failed_to_save_notebook_state"));
       }
+
+      return {
+        localOnly: Boolean(json?.localOnly || json?.degraded),
+      };
     },
     [getAuthHeaders]
   );
@@ -183,7 +192,24 @@ export function CloudNotebookSync() {
       void (async () => {
         try {
           if (currentUserIdRef.current !== scopedUserId) return;
-          await saveStateViaApi(nextState);
+          const result = await saveStateViaApi(nextState);
+          if (result.localOnly) {
+            writeLocalDraft(scopedUserId, nextState, {
+              dirty: true,
+              syncedAt: null,
+            });
+            retryCountRef.current = 0;
+            if (retryTimerRef.current) {
+              clearTimeout(retryTimerRef.current);
+            }
+            retryTimerRef.current = setTimeout(() => {
+              const latestState = latestStateRef.current;
+              const latestUserId = currentUserIdRef.current;
+              if (!latestState || !latestUserId) return;
+              queueSave(latestState, latestUserId);
+            }, 30_000);
+            return;
+          }
           writeLocalDraft(scopedUserId, nextState, {
             dirty: false,
             syncedAt: Date.now(),

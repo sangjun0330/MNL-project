@@ -103,6 +103,7 @@ import {
 } from "@/lib/notebookSecurity"
 import {
   buildNotebookFileUrl,
+  clearNotebookImagePreview,
   deleteNotebookFiles,
   getCachedNotebookImagePreview,
   loadNotebookImagePreview,
@@ -119,7 +120,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { NotebookRichTextField } from "@/components/pages/tools/notebook/NotebookRichTextField"
-import Image from "next/image"
 import Link from "next/link"
 
 /* ─── helpers ──────────────────────────────────────────────── */
@@ -1508,9 +1508,10 @@ function ImageResizableBlock({
   const [loadError, setLoadError] = useState(false)
   const [previewWidthPct, setPreviewWidthPct] = useState(() => clampImageWidth(block.mediaWidth))
   const [previewOffsetX, setPreviewOffsetX] = useState(() => clampImageOffsetX(block.mediaOffsetX))
+  const storagePath = attachment?.storagePath ?? ""
   const [resolvedSrc, setResolvedSrc] = useState<string | null>(() => {
     if (attachment?.storagePath) {
-      return getCachedNotebookImagePreview(attachment.storagePath) ?? attachmentUrl ?? null
+      return getCachedNotebookImagePreview(attachment.storagePath) ?? null
     }
     return attachmentUrl ?? null
   })
@@ -1522,6 +1523,8 @@ function ImageResizableBlock({
   const pendingOffsetRef = useRef(previewOffsetX)
   const resizeFrameRef = useRef<number | null>(null)
   const moveFrameRef = useRef<number | null>(null)
+  const imageLoadRetryCountRef = useRef(0)
+  const imageLoadRequestIdRef = useRef(0)
 
   const aspectRatio = clampImageAspectRatio(block.mediaAspectRatio)
   const canMoveImage = previewWidthPct < 100
@@ -1559,9 +1562,42 @@ function ImageResizableBlock({
     setLoadError(false)
   }, [attachment?.id, resolvedSrc])
 
+  const resolveImageSource = useCallback(
+    async (options?: { forceRefresh?: boolean }) => {
+      const path = attachment?.storagePath
+      const requestId = imageLoadRequestIdRef.current + 1
+      imageLoadRequestIdRef.current = requestId
+
+      if (!path) {
+        setResolvedSrc(attachmentUrl ?? null)
+        setLoadError(false)
+        return attachmentUrl ?? null
+      }
+
+      if (options?.forceRefresh) {
+        clearNotebookImagePreview(path)
+      }
+
+      try {
+        const previewUrl = await loadNotebookImagePreview(path, { forceRefresh: options?.forceRefresh })
+        if (imageLoadRequestIdRef.current === requestId) {
+          setResolvedSrc(previewUrl)
+          setLoadError(false)
+        }
+        return previewUrl
+      } catch (error) {
+        if (imageLoadRequestIdRef.current === requestId) {
+          setResolvedSrc(attachmentUrl ?? null)
+        }
+        throw error
+      }
+    },
+    [attachment?.storagePath, attachmentUrl]
+  )
+
   useEffect(() => {
     let cancelled = false
-    const storagePath = attachment?.storagePath
+    imageLoadRetryCountRef.current = 0
 
     if (!storagePath) {
       setResolvedSrc(attachmentUrl ?? null)
@@ -1578,7 +1614,7 @@ function ImageResizableBlock({
       }
     }
 
-    void loadNotebookImagePreview(storagePath)
+    void resolveImageSource()
       .then((previewUrl) => {
         if (!cancelled) {
           setResolvedSrc(previewUrl)
@@ -1593,7 +1629,35 @@ function ImageResizableBlock({
     return () => {
       cancelled = true
     }
-  }, [attachment?.storagePath, attachmentUrl])
+  }, [attachmentUrl, resolveImageSource, storagePath])
+
+  const retryImageLoad = useCallback(
+    (options?: { manual?: boolean }) => {
+      const path = attachment?.storagePath
+      if (!path) {
+        setLoadError(true)
+        return
+      }
+
+      const isManual = Boolean(options?.manual)
+      if (!isManual && imageLoadRetryCountRef.current >= 2) {
+        setLoadError(true)
+        return
+      }
+
+      imageLoadRetryCountRef.current += 1
+      setLoadError(false)
+      clearNotebookImagePreview(path)
+      void resolveImageSource({ forceRefresh: true }).catch(() => {
+        if (attachmentUrl && resolvedSrc !== attachmentUrl) {
+          setResolvedSrc(attachmentUrl)
+          return
+        }
+        setLoadError(true)
+      })
+    },
+    [attachment?.storagePath, attachmentUrl, resolveImageSource, resolvedSrc]
+  )
 
   useEffect(() => {
     return () => {
@@ -1811,15 +1875,13 @@ function ImageResizableBlock({
               )}
               style={{ aspectRatio: String(aspectRatio), touchAction: resizing || moving ? "none" : canMoveImage ? "pan-y" : "auto" }}
             >
-              <Image
+              <img
                 src={resolvedSrc}
                 alt={block.text || attachment?.name || "메모 이미지"}
-                fill
-                unoptimized
-                className="pointer-events-none select-none object-cover"
-                sizes="(max-width: 1024px) 92vw, 720px"
+                className="pointer-events-none absolute inset-0 h-full w-full select-none object-cover"
                 draggable={false}
                 onLoad={(event) => {
+                  imageLoadRetryCountRef.current = 0
                   setLoadError(false)
                   const nextRatio =
                     event.currentTarget.naturalWidth > 0 && event.currentTarget.naturalHeight > 0
@@ -1833,11 +1895,7 @@ function ImageResizableBlock({
                   }
                 }}
                 onError={() => {
-                  if (attachmentUrl && resolvedSrc !== attachmentUrl) {
-                    setResolvedSrc(attachmentUrl)
-                    return
-                  }
-                  setLoadError(true)
+                  retryImageLoad()
                 }}
               />
             </div>
@@ -1878,8 +1936,17 @@ function ImageResizableBlock({
           </div>
         </div>
       ) : (
-        <div className="flex h-48 items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 text-[13px] text-ios-muted">
-          {loadError ? "이미지를 불러오지 못했습니다" : "이미지를 불러오는 중..."}
+        <div className="flex h-48 flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 text-center text-[13px] text-ios-muted">
+          <span>{loadError ? "이미지를 불러오지 못했습니다" : "이미지를 불러오는 중..."}</span>
+          {loadError ? (
+            <button
+              type="button"
+              onClick={() => retryImageLoad({ manual: true })}
+              className="inline-flex items-center rounded-full border border-[color:var(--rnest-accent)] px-3 py-1.5 text-[12px] font-medium text-[color:var(--rnest-accent)] transition-colors hover:bg-[color:var(--rnest-accent-soft)]"
+            >
+              다시 불러오기
+            </button>
+          ) : null}
         </div>
       )}
       <input
