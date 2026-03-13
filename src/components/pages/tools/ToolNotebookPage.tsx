@@ -1175,7 +1175,8 @@ function InlineBlock({
   const addMenuRef = useRef<HTMLDivElement>(null)
   const actionMenuRef = useRef<HTMLDivElement>(null)
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const controlsVisible = hovered || focused || showAddMenu || showActionMenu || touchActive
+  const desktopControlsVisible = hovered || focused || showAddMenu || showActionMenu
+  const mobileControlsVisible = !focused && (showAddMenu || showActionMenu || touchActive)
 
   function handleBlockMouseEnter() {
     if (hoverTimeoutRef.current) { clearTimeout(hoverTimeoutRef.current); hoverTimeoutRef.current = null }
@@ -1265,10 +1266,10 @@ function InlineBlock({
       {/* left controls */}
       <div
         className={cn(
-          "absolute -left-12 top-2 z-20 flex items-center gap-1 transition-opacity duration-150 lg:-left-16 lg:top-1/2 lg:-translate-y-1/2",
-          controlsVisible
-            ? "pointer-events-auto opacity-100"
-            : "pointer-events-none opacity-0"
+          "z-20 mb-2 flex items-center gap-2 transition-opacity duration-150",
+          "lg:absolute lg:-left-16 lg:top-1/2 lg:mb-0 lg:gap-1 lg:-translate-y-1/2",
+          mobileControlsVisible ? "pointer-events-auto opacity-100" : "pointer-events-none h-0 overflow-hidden opacity-0 lg:h-auto lg:overflow-visible",
+          desktopControlsVisible ? "lg:pointer-events-auto lg:opacity-100" : "lg:pointer-events-none lg:opacity-0"
         )}
         onMouseEnter={handleBlockMouseEnter}
         onMouseLeave={handleBlockMouseLeave}
@@ -3712,7 +3713,7 @@ export function ToolNotebookPage() {
                   )}
 
                   {/* blocks */}
-                  <div className="space-y-3 pl-12 lg:pl-10">
+                  <div className="space-y-3 pl-0 lg:pl-10">
                     {activeMemo.blocks.map((block, idx) => {
                       const attachment = findAttachment(activeMemo, block.attachmentId)
                       return (
@@ -3748,7 +3749,7 @@ export function ToolNotebookPage() {
                   </div>
 
                   {/* add block */}
-                  <div className="mt-4 pl-12 lg:pl-10">
+                  <div className="mt-4 pl-0 lg:pl-10">
                     <AddBlockButton onSelect={appendBlock} />
                   </div>
                 </>
