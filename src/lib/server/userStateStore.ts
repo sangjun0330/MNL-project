@@ -84,6 +84,7 @@ const SERVER_MANAGED_PAYLOAD_KEYS = [
   "shopOrderBundles",
   "shopPurchaseConfirmations",
   "shopClaims",
+  "notebookState",
 ] as const;
 
 function hasMeaningfulUserData(value: unknown): boolean {

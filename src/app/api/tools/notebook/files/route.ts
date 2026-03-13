@@ -19,6 +19,24 @@ function guessFileNameFromPath(path: string) {
   return parts[parts.length - 1] || "file"
 }
 
+function buildNotebookFileHeaders(input: {
+  contentType: string
+  contentDisposition: string
+  download: boolean
+}) {
+  const headers = buildPrivateNoStoreHeaders({
+    "Content-Type": input.contentType,
+    "Content-Disposition": input.contentDisposition,
+    "X-Content-Type-Options": "nosniff",
+    "Cross-Origin-Resource-Policy": "same-origin",
+  })
+  if (!input.download) {
+    headers.set("Cache-Control", "private, max-age=120, stale-while-revalidate=600")
+    headers.delete("Pragma")
+  }
+  return headers
+}
+
 export async function GET(req: Request) {
   const userId = await readUserIdFromRequest(req)
   if (!userId) return new Response("login_required", { status: 401, headers: buildPrivateNoStoreHeaders() })
@@ -36,11 +54,10 @@ export async function GET(req: Request) {
   try {
     const { blob } = await downloadNotebookFile({ userId, path })
     const fileName = guessFileNameFromPath(path)
-    const headers = buildPrivateNoStoreHeaders({
-      "Content-Type": blob.type || "application/octet-stream",
-      "Content-Disposition": `${download ? "attachment" : "inline"}; filename*=UTF-8''${encodeContentDispositionFileName(fileName)}`,
-      "X-Content-Type-Options": "nosniff",
-      "Cross-Origin-Resource-Policy": "same-origin",
+    const headers = buildNotebookFileHeaders({
+      contentType: blob.type || "application/octet-stream",
+      contentDisposition: `${download ? "attachment" : "inline"}; filename*=UTF-8''${encodeContentDispositionFileName(fileName)}`,
+      download,
     })
     return new Response(await blob.arrayBuffer(), { status: 200, headers })
   } catch (error) {

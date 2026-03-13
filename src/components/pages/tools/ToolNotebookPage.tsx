@@ -85,7 +85,14 @@ import {
   unlockLockedMemoEnvelope,
   type RNestLockedMemoPayload,
 } from "@/lib/notebookSecurity"
-import { buildNotebookFileUrl, deleteNotebookFiles, uploadNotebookFile } from "@/lib/notebookFiles"
+import {
+  buildNotebookFileUrl,
+  deleteNotebookFiles,
+  getCachedNotebookImagePreview,
+  loadNotebookImagePreview,
+  seedNotebookImagePreview,
+  uploadNotebookFile,
+} from "@/lib/notebookFiles"
 import { useAppStore } from "@/lib/store"
 import {
   Dialog,
@@ -950,6 +957,12 @@ function ImageResizableBlock({
   const [imgHovered, setImgHovered] = useState(false)
   const [loadError, setLoadError] = useState(false)
   const [previewWidthPct, setPreviewWidthPct] = useState(() => clampImageWidth(block.mediaWidth))
+  const [resolvedSrc, setResolvedSrc] = useState<string | null>(() => {
+    if (attachment?.storagePath) {
+      return getCachedNotebookImagePreview(attachment.storagePath) ?? attachmentUrl ?? null
+    }
+    return attachmentUrl ?? null
+  })
   const startDataRef = useRef<{ startX: number; startY: number; startW: number; startH: number; handle: string } | null>(null)
   const previewWidthRef = useRef(previewWidthPct)
   const pendingWidthRef = useRef(previewWidthPct)
@@ -973,7 +986,43 @@ function ImageResizableBlock({
 
   useEffect(() => {
     setLoadError(false)
-  }, [attachmentUrl, attachment?.id])
+  }, [attachment?.id, resolvedSrc])
+
+  useEffect(() => {
+    let cancelled = false
+    const storagePath = attachment?.storagePath
+
+    if (!storagePath) {
+      setResolvedSrc(attachmentUrl ?? null)
+      return () => {
+        cancelled = true
+      }
+    }
+
+    const cached = getCachedNotebookImagePreview(storagePath)
+    if (cached) {
+      setResolvedSrc((current) => (current === cached ? current : cached))
+      return () => {
+        cancelled = true
+      }
+    }
+
+    void loadNotebookImagePreview(storagePath)
+      .then((previewUrl) => {
+        if (!cancelled) {
+          setResolvedSrc(previewUrl)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setResolvedSrc((current) => current ?? attachmentUrl ?? null)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [attachment?.storagePath, attachmentUrl])
 
   useEffect(() => {
     return () => {
@@ -1051,7 +1100,7 @@ function ImageResizableBlock({
 
   return (
     <div>
-      {attachmentUrl && !loadError ? (
+      {resolvedSrc && !loadError ? (
         <div
           className="relative inline-block"
           style={{
@@ -1072,7 +1121,7 @@ function ImageResizableBlock({
             style={{ aspectRatio: String(aspectRatio) }}
           >
             <Image
-              src={attachmentUrl}
+              src={resolvedSrc}
               alt={block.text || attachment?.name || "메모 이미지"}
               fill
               unoptimized
@@ -1092,7 +1141,13 @@ function ImageResizableBlock({
                   onChange({ ...block, mediaAspectRatio: nextRatio })
                 }
               }}
-              onError={() => setLoadError(true)}
+              onError={() => {
+                if (attachmentUrl && resolvedSrc !== attachmentUrl) {
+                  setResolvedSrc(attachmentUrl)
+                  return
+                }
+                setLoadError(true)
+              }}
             />
           </div>
           {/* resize handles at corners and edges */}
@@ -2720,6 +2775,9 @@ export function ToolNotebookPage() {
       }
       try {
         const uploaded = await uploadNotebookFile(file, kind === "image" ? deriveAttachmentKind(file, "image") : deriveAttachmentKind(file, "file"))
+        if ((uploaded.kind === "image" || uploaded.kind === "scan") && file.type.startsWith("image/")) {
+          seedNotebookImagePreview(uploaded.storagePath, file)
+        }
         uploadedAttachments.push(uploaded)
       } catch {
         failedCount += 1

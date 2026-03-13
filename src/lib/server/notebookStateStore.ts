@@ -4,7 +4,7 @@ import {
   sanitizeNotebookState,
   type RNestNotebookState,
 } from "@/lib/notebook"
-import { ensureUserRow, loadUserState } from "@/lib/server/userStateStore"
+import { ensureUserRow, loadUserState, saveUserState } from "@/lib/server/userStateStore"
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin"
 
 type NotebookStateRow = {
@@ -12,6 +12,8 @@ type NotebookStateRow = {
   payload: RNestNotebookState
   updatedAt: number
 }
+
+const LEGACY_NOTEBOOK_STATE_KEY = "notebookState"
 
 function isMissingTableError(error: unknown, tableName: string) {
   const code = String((error as { code?: unknown } | null)?.code ?? "").trim()
@@ -54,53 +56,50 @@ function extractLegacyNotebookState(payload: unknown): RNestNotebookState {
   return hasMeaningfulNotebookState(state) ? state : defaultNotebookState()
 }
 
-export async function loadNotebookState(userId: string): Promise<NotebookStateRow | null> {
-  const admin = getSupabaseAdmin()
-  const { data, error } = await admin
-    .from("rnest_notebook_state")
-    .select("user_id, payload, updated_at")
-    .eq("user_id", userId)
-    .maybeSingle()
-
-  if (error) {
-    if (isMissingTableError(error, "rnest_notebook_state")) {
-      return null
-    }
-    throw error
+function extractFallbackNotebookState(payload: unknown): RNestNotebookState {
+  if (isRecord(payload) && LEGACY_NOTEBOOK_STATE_KEY in payload) {
+    const embedded = sanitizeNotebookState(payload[LEGACY_NOTEBOOK_STATE_KEY])
+    if (hasMeaningfulNotebookState(embedded)) return embedded
   }
+  return extractLegacyNotebookState(payload)
+}
 
-  if (data) {
-    return {
-      userId: data.user_id,
-      payload: sanitizeNotebookState(data.payload),
-      updatedAt: data.updated_at ? new Date(data.updated_at).getTime() : Date.now(),
-    }
-  }
-
+async function loadNotebookStateFallback(userId: string): Promise<NotebookStateRow | null> {
   const legacyRow = await loadUserState(userId)
   if (!legacyRow?.payload) return null
 
-  const legacyState = extractLegacyNotebookState(legacyRow.payload)
-  if (!hasMeaningfulNotebookState(legacyState)) return null
+  const fallbackState = extractFallbackNotebookState(legacyRow.payload)
+  if (!hasMeaningfulNotebookState(fallbackState)) return null
 
-  await saveNotebookState({ userId, payload: legacyState })
   return {
     userId,
-    payload: legacyState,
-    updatedAt: Date.now(),
+    payload: fallbackState,
+    updatedAt: legacyRow.updatedAt ?? Date.now(),
   }
 }
 
-export async function saveNotebookState(input: { userId: string; payload: unknown }): Promise<RNestNotebookState> {
-  const admin = getSupabaseAdmin()
-  const payload = sanitizeNotebookState(input.payload)
+async function saveNotebookStateFallback(userId: string, payload: RNestNotebookState): Promise<RNestNotebookState> {
+  const existing = await loadUserState(userId)
+  const existingPayload = isRecord(existing?.payload) ? existing.payload : {}
+  await saveUserState({
+    userId,
+    payload: {
+      ...existingPayload,
+      [LEGACY_NOTEBOOK_STATE_KEY]: payload,
+    },
+  })
+  return payload
+}
 
-  await ensureUserRow(input.userId)
+async function saveNotebookStatePrimary(userId: string, payload: RNestNotebookState): Promise<RNestNotebookState> {
+  const admin = getSupabaseAdmin()
+
+  await ensureUserRow(userId)
 
   const { data: existing, error: existingError } = await admin
     .from("rnest_notebook_state")
     .select("payload")
-    .eq("user_id", input.userId)
+    .eq("user_id", userId)
     .maybeSingle()
 
   if (existingError) {
@@ -118,7 +117,7 @@ export async function saveNotebookState(input: { userId: string; payload: unknow
     .from("rnest_notebook_state")
     .upsert(
       {
-        user_id: input.userId,
+        user_id: userId,
         payload,
         updated_at: new Date().toISOString(),
       },
@@ -133,4 +132,53 @@ export async function saveNotebookState(input: { userId: string; payload: unknow
   }
 
   return payload
+}
+
+export async function loadNotebookState(userId: string): Promise<NotebookStateRow | null> {
+  const admin = getSupabaseAdmin()
+  const { data, error } = await admin
+    .from("rnest_notebook_state")
+    .select("user_id, payload, updated_at")
+    .eq("user_id", userId)
+    .maybeSingle()
+
+  if (error) {
+    if (isMissingTableError(error, "rnest_notebook_state")) {
+      return loadNotebookStateFallback(userId)
+    }
+    throw error
+  }
+
+  if (data) {
+    return {
+      userId: data.user_id,
+      payload: sanitizeNotebookState(data.payload),
+      updatedAt: data.updated_at ? new Date(data.updated_at).getTime() : Date.now(),
+    }
+  }
+
+  const fallbackRow = await loadNotebookStateFallback(userId)
+  if (!fallbackRow) return null
+
+  try {
+    await saveNotebookStatePrimary(userId, fallbackRow.payload)
+  } catch (error) {
+    if ((error as Error)?.message !== "notebook_state_table_missing") {
+      throw error
+    }
+  }
+
+  return fallbackRow
+}
+
+export async function saveNotebookState(input: { userId: string; payload: unknown }): Promise<RNestNotebookState> {
+  const payload = sanitizeNotebookState(input.payload)
+  try {
+    return await saveNotebookStatePrimary(input.userId, payload)
+  } catch (error) {
+    if ((error as Error)?.message === "notebook_state_table_missing") {
+      return saveNotebookStateFallback(input.userId, payload)
+    }
+    throw error
+  }
 }
