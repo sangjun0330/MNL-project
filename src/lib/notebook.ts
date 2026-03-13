@@ -520,7 +520,7 @@ function createMemoDocumentBase(input?: Partial<RNestMemoDocument>): RNestMemoDo
 
   return {
     id: input?.id ?? createNotebookId("memo_doc"),
-    title: cleanText(input?.title, MAX_TITLE_LENGTH) || "새 메모",
+    title: input?.title != null ? cleanText(input.title, MAX_TITLE_LENGTH) : "새 메모",
     icon: normalizeMemoIcon(input?.icon, "note"),
     coverStyle: normalizeMemoCover(input?.coverStyle),
     pinned: Boolean(input?.pinned),
@@ -539,6 +539,19 @@ function createMemoDocumentBase(input?: Partial<RNestMemoDocument>): RNestMemoDo
 }
 
 export const memoPresets: RNestMemoPreset[] = [
+  {
+    id: "quick",
+    label: "빠른 메모",
+    description: "완전 빈 캔버스 — 바로 타이핑을 시작하세요",
+    icon: "spark",
+    create: () =>
+      createMemoDocumentBase({
+        title: "",
+        icon: "spark",
+        coverStyle: null,
+        blocks: [createMemoBlock("paragraph")],
+      }),
+  },
   {
     id: "blank",
     label: "빈 메모",

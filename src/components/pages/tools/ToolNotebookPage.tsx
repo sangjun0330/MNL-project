@@ -2235,7 +2235,19 @@ export function ToolNotebookPage() {
     commit({ ...latestMemo.documents, [doc.id]: doc }, insertRecent(latestMemo.recent, doc.id))
     setActiveMemoId(doc.id)
     setQuery("")
-    setToast("새 페이지를 만들었습니다")
+
+    if (presetId === "quick") {
+      // Auto-focus first block for quick memo — pure blank canvas feel
+      requestAnimationFrame(() => {
+        const firstBlock = doc.blocks[0]
+        if (!firstBlock) return
+        const el = document.querySelector<HTMLTextAreaElement>(`#memo-block-${firstBlock.id} textarea`)
+        el?.focus()
+      })
+      setToast("빠른 메모를 시작합니다")
+    } else {
+      setToast("새 페이지를 만들었습니다")
+    }
   }
 
   function duplicateMemo(doc: RNestMemoDocument) {
