@@ -2,7 +2,7 @@ import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurit
 import { readUserIdFromRequest } from "@/lib/server/readUserId"
 import { createNotebookSignedUrls } from "@/lib/server/notebookFileStore"
 
-export const runtime = "nodejs"
+export const runtime = "edge"
 export const dynamic = "force-dynamic"
 
 function bad(status: number, error: string) {

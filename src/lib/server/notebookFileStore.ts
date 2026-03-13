@@ -40,7 +40,7 @@ export async function uploadNotebookFile(input: {
     safeName.includes(".") ? safeName.split(".").pop()?.slice(0, 12).toLowerCase() ?? "" : ""
   const path = `${input.userId}/${crypto.randomUUID()}${ext ? `.${ext}` : ""}`
   const admin: any = getSupabaseAdmin()
-  const body = Buffer.from(await file.arrayBuffer())
+  const body = await file.arrayBuffer()
 
   await ensureNotebookBucket()
 
