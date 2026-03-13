@@ -952,17 +952,21 @@ function ImageResizableBlock({
   const [previewWidthPct, setPreviewWidthPct] = useState(() => clampImageWidth(block.mediaWidth))
   const startDataRef = useRef<{ startX: number; startY: number; startW: number; startH: number; handle: string } | null>(null)
   const previewWidthRef = useRef(previewWidthPct)
+  const pendingWidthRef = useRef(previewWidthPct)
+  const resizeFrameRef = useRef<number | null>(null)
 
   const aspectRatio = clampImageAspectRatio(block.mediaAspectRatio)
 
   useEffect(() => {
     previewWidthRef.current = previewWidthPct
+    pendingWidthRef.current = previewWidthPct
   }, [previewWidthPct])
 
   useEffect(() => {
     if (!resizing) {
       const nextWidth = clampImageWidth(block.mediaWidth)
       previewWidthRef.current = nextWidth
+      pendingWidthRef.current = nextWidth
       setPreviewWidthPct(nextWidth)
     }
   }, [block.mediaWidth, resizing])
@@ -970,6 +974,25 @@ function ImageResizableBlock({
   useEffect(() => {
     setLoadError(false)
   }, [attachmentUrl, attachment?.id])
+
+  useEffect(() => {
+    return () => {
+      if (resizeFrameRef.current != null) {
+        window.cancelAnimationFrame(resizeFrameRef.current)
+      }
+    }
+  }, [])
+
+  function schedulePreviewWidth(nextWidth: number) {
+    previewWidthRef.current = nextWidth
+    pendingWidthRef.current = nextWidth
+    if (resizeFrameRef.current != null) return
+    resizeFrameRef.current = window.requestAnimationFrame(() => {
+      resizeFrameRef.current = null
+      const width = pendingWidthRef.current
+      setPreviewWidthPct((current) => (current === width ? current : width))
+    })
+  }
 
   function handleResizeStart(e: React.PointerEvent, handle: string) {
     e.preventDefault()
@@ -997,13 +1020,18 @@ function ImageResizableBlock({
       const effectiveDx = isLeft ? -dx : dx
       const newW = Math.max(100, startW + effectiveDx)
       const newPct = Math.min(100, Math.max(20, Math.round((newW / parentWidth) * 100)))
-      previewWidthRef.current = newPct
-      setPreviewWidthPct(newPct)
+      schedulePreviewWidth(newPct)
     }
 
     function handleUp() {
       const nextWidth = previewWidthRef.current
       startDataRef.current = null
+      if (resizeFrameRef.current != null) {
+        window.cancelAnimationFrame(resizeFrameRef.current)
+        resizeFrameRef.current = null
+      }
+      pendingWidthRef.current = nextWidth
+      setPreviewWidthPct(nextWidth)
       setResizing(false)
       window.removeEventListener("pointermove", handleMove)
       window.removeEventListener("pointerup", handleUp)
@@ -1019,14 +1047,18 @@ function ImageResizableBlock({
   const showHandles = imgHovered || resizing
 
   const handleClass =
-    "absolute z-10 bg-white border-2 border-[color:var(--rnest-accent)] rounded-full shadow-sm transition-opacity"
+    "absolute z-10 rounded-full border-2 border-[color:var(--rnest-accent)] bg-white shadow-sm transition-opacity [touch-action:none]"
 
   return (
     <div>
       {attachmentUrl && !loadError ? (
         <div
           className="relative inline-block"
-          style={{ width: `${previewWidthPct}%` }}
+          style={{
+            width: `${previewWidthPct}%`,
+            willChange: resizing ? "width" : undefined,
+            transition: resizing ? "none" : "width 220ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 220ms ease",
+          }}
           ref={containerRef}
           onMouseEnter={() => setImgHovered(true)}
           onMouseLeave={() => { if (!resizing) setImgHovered(false) }}
@@ -1035,7 +1067,7 @@ function ImageResizableBlock({
           <div
             className={cn(
               "relative overflow-hidden rounded-lg",
-              resizing && "select-none"
+              resizing && "select-none shadow-[0_18px_36px_rgba(123,111,208,0.14)]"
             )}
             style={{ aspectRatio: String(aspectRatio) }}
           >
@@ -2351,6 +2383,10 @@ export function ToolNotebookPage() {
     store.setMemoState({ documents: docs, recent: recent ?? memoState.recent })
   }
 
+  function getLatestMemoState() {
+    return store.getState().memo
+  }
+
   function clearUnlockSession(docId: string) {
     delete unlockKeysRef.current[docId]
     setUnlockedPayloads((current) => {
@@ -2486,30 +2522,49 @@ export function ToolNotebookPage() {
   }
 
   function trashMemo(id: string) {
-    const doc = memoState.documents[id]
+    const latestMemo = getLatestMemoState()
+    const doc = latestMemo.documents[id]
     if (!doc) return
-    saveRawDoc({ ...doc, trashedAt: Date.now(), favorite: false }, { touchRecent: false, touchUpdatedAt: false })
+    const trashedDoc = normalizeDocAttachments({ ...doc, trashedAt: Date.now(), favorite: false })
+    const nextDocuments = { ...latestMemo.documents, [id]: trashedDoc }
+    commit(nextDocuments, latestMemo.recent.filter((item) => item !== id))
     clearUnlockSession(id)
-    if (activeMemoId === id) setActiveMemoId(null)
+    if (activeMemoId === id) {
+      const nextActive = Object.values(nextDocuments)
+        .filter((item): item is RNestMemoDocument => item != null && item.trashedAt == null)
+        .sort(sortByUpdated)[0]
+      setActiveMemoId(nextActive?.id ?? null)
+    }
     setToast("휴지통으로 이동했습니다")
   }
 
   function restoreMemo(id: string) {
-    const doc = memoState.documents[id]
+    const latestMemo = getLatestMemoState()
+    const doc = latestMemo.documents[id]
     if (!doc) return
-    saveRawDoc({ ...doc, trashedAt: null }, { touchRecent: false, touchUpdatedAt: false })
+    const restoredDoc = normalizeDocAttachments({ ...doc, trashedAt: null })
+    commit(
+      { ...latestMemo.documents, [id]: restoredDoc },
+      insertRecent(latestMemo.recent, id)
+    )
+    setActiveMemoId(id)
     setToast("복구했습니다")
   }
 
   function deletePermanently(id: string) {
-    const latestMemo = store.getState().memo
+    const latestMemo = getLatestMemoState()
     const storagePaths = latestMemo.documents[id] ? buildDocStoragePaths(latestMemo.documents[id] as RNestMemoDocument) : []
     const next = { ...latestMemo.documents }
     delete next[id]
     commit(next, latestMemo.recent.filter((i) => i !== id))
     clearUnlockSession(id)
     void cleanupAttachmentStoragePathsIfUnused(storagePaths)
-    if (activeMemoId === id) setActiveMemoId(null)
+    if (activeMemoId === id) {
+      const nextActive = Object.values(next)
+        .filter((item): item is RNestMemoDocument => item != null && item.trashedAt == null)
+        .sort(sortByUpdated)[0]
+      setActiveMemoId(nextActive?.id ?? null)
+    }
     setToast("영구 삭제했습니다")
   }
 
@@ -3008,7 +3063,7 @@ export function ToolNotebookPage() {
       {/* ─── SIDEBAR ─── */}
       <aside
         className={cn(
-          "flex shrink-0 flex-col border-r border-gray-100 bg-[#F9F9F8] transition-all duration-200",
+          "flex min-h-0 shrink-0 flex-col overflow-hidden border-r border-gray-100 bg-[#F9F9F8] transition-all duration-200",
           "max-lg:fixed max-lg:inset-y-0 max-lg:left-0 max-lg:z-50 max-lg:shadow-xl",
           sidebarOpen ? "w-[260px] max-lg:w-[min(86vw,320px)]" : "w-0 overflow-hidden"
         )}
@@ -3095,7 +3150,7 @@ export function ToolNotebookPage() {
         </div>
 
         {/* page lists */}
-        <div className="flex-1 space-y-3 overflow-y-auto px-2 pb-4">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-2 pb-4 [webkit-overflow-scrolling:touch]">
           {searchResults != null ? (
             <SidebarSection title="검색 결과" count={searchResults.length}>
               {searchResults.length === 0 && (
