@@ -14,6 +14,7 @@ const SAVE_DEBOUNCE_MS = 180;
 const RETRY_BASE_MS = 800;
 const RETRY_MAX_MS = 8000;
 const LOCAL_NOTEBOOK_DRAFT_KEY = "rnest_notebook_state_v1";
+const GUEST_NOTEBOOK_DRAFT_KEY = `${LOCAL_NOTEBOOK_DRAFT_KEY}:guest`;
 
 type SaveOptions = {
   keepalive?: boolean;
@@ -29,9 +30,9 @@ function buildLocalDraftKey(userId: string) {
 }
 
 function readLocalDraft(userId: string | null): LocalNotebookDraft | null {
-  if (!userId || typeof window === "undefined") return null;
+  if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(buildLocalDraftKey(userId));
+    const raw = window.localStorage.getItem(userId ? buildLocalDraftKey(userId) : GUEST_NOTEBOOK_DRAFT_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as { updatedAt?: unknown; state?: unknown } | null;
     const updatedAt =
@@ -45,10 +46,10 @@ function readLocalDraft(userId: string | null): LocalNotebookDraft | null {
 }
 
 function writeLocalDraft(userId: string | null, state: RNestNotebookState) {
-  if (!userId || typeof window === "undefined") return;
+  if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(
-      buildLocalDraftKey(userId),
+      userId ? buildLocalDraftKey(userId) : GUEST_NOTEBOOK_DRAFT_KEY,
       JSON.stringify({
         updatedAt: Date.now(),
         state,
@@ -57,6 +58,15 @@ function writeLocalDraft(userId: string | null, state: RNestNotebookState) {
   } catch {
     // Ignore local backup failures.
   }
+}
+
+function readPreferredLocalDraft(userId: string | null) {
+  const scoped = readLocalDraft(userId);
+  if (!userId) return scoped;
+  const guest = readLocalDraft(null);
+  if (!guest) return scoped;
+  if (!scoped) return guest;
+  return guest.updatedAt > scoped.updatedAt ? guest : scoped;
 }
 
 export function CloudNotebookSync() {
@@ -203,7 +213,7 @@ export function CloudNotebookSync() {
     if (!userId || status !== "authenticated") return null;
 
     const requestId = ++loadRequestRef.current;
-    const localDraftAtLoadStart = readLocalDraft(userId);
+    const localDraftAtLoadStart = readPreferredLocalDraft(userId);
     const localStateAtLoadStart = getCurrentNotebookState();
     const localSignatureAtLoadStart = buildSignature(localStateAtLoadStart);
     const authHeaders = await getAuthHeaders();
@@ -277,11 +287,18 @@ export function CloudNotebookSync() {
       retryTimerRef.current = null;
     }
 
-    if (!userId || status !== "authenticated") return;
-
-    const localDraft = readLocalDraft(userId);
+    const localDraft = readPreferredLocalDraft(userId);
     if (localDraft) {
       applyHydratedState(localDraft.state);
+    }
+
+    if (!userId || status !== "authenticated") {
+      initializedRef.current = true;
+      const fallbackState = localDraft?.state ?? getCurrentNotebookState();
+      latestSignatureRef.current = buildSignature(fallbackState);
+      latestStateRef.current = fallbackState;
+      writeLocalDraft(userId, fallbackState);
+      return;
     }
 
     void loadNotebookState().catch(() => {
@@ -302,7 +319,17 @@ export function CloudNotebookSync() {
 
   useEffect(() => {
     const nextState = sanitizeNotebookState({ memo, records });
-    writeLocalDraft(userId, nextState);
+    const existingLocalDraft = readPreferredLocalDraft(userId ?? null);
+    if (
+      !hasMeaningfulNotebookState(nextState) &&
+      existingLocalDraft &&
+      hasMeaningfulNotebookState(existingLocalDraft.state) &&
+      (!initializedRef.current || status !== "authenticated")
+    ) {
+      // During auth/bootstrap churn, never replace a meaningful local draft with an empty state.
+    } else {
+      writeLocalDraft(userId ?? null, nextState);
+    }
     if (!userId || status !== "authenticated" || !initializedRef.current) return;
 
     const nextSignature = buildSignature(nextState);

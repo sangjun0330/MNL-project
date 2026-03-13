@@ -403,7 +403,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <GateErrorScreen onRetry={() => void loadBootstrap()} />
       ) : null}
       {isAuthed && Boolean(resolvedBootstrap?.consentCompleted) ? <CloudStateSync /> : null}
-      {isAuthed && Boolean(resolvedBootstrap?.consentCompleted) ? <CloudNotebookSync /> : null}
+      {!isPolicyPage ? <CloudNotebookSync /> : null}
       <OnboardingGuide open={showOnboarding} onComplete={handleOnboardingComplete} />
       {showConsent ? <ServiceConsentScreen onSubmit={handleConsentComplete} /> : null}
       <div className="safe-bottom" />
