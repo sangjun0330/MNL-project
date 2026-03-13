@@ -117,6 +117,16 @@ function formatFileSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)}MB`
 }
 
+function clampImageWidth(value: number | undefined | null) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 100
+  return Math.min(100, Math.max(40, Math.round(value)))
+}
+
+function clampImageAspectRatio(value: number | undefined | null) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 4 / 3
+  return Math.min(3, Math.max(0.4, Number(value)))
+}
+
 function deriveAttachmentKind(file: File, preferred: RNestMemoAttachment["kind"] | null = null): RNestMemoAttachment["kind"] {
   if (preferred) return preferred
   if (file.type.startsWith("image/")) return "image"
@@ -895,8 +905,10 @@ function InlineBlock({
   const [showActionMenu, setShowActionMenu] = useState(false)
   const [showSlashMenu, setShowSlashMenu] = useState(false)
   const [hovered, setHovered] = useState(false)
+  const [focused, setFocused] = useState(false)
   const addMenuRef = useRef<HTMLDivElement>(null)
   const actionMenuRef = useRef<HTMLDivElement>(null)
+  const controlsVisible = hovered || focused || showAddMenu || showActionMenu
 
   useEffect(() => {
     if (!showAddMenu && !showActionMenu) return
@@ -946,12 +958,20 @@ function InlineBlock({
       className="group relative scroll-mt-28"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onFocusCapture={() => setFocused(true)}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setFocused(false)
+        }
+      }}
     >
       {/* left controls: unified block menu */}
       <div
         className={cn(
-          "absolute -left-10 top-0.5 flex flex-col items-center gap-0.5 transition-opacity",
-          hovered || showAddMenu || showActionMenu ? "opacity-100" : "opacity-0"
+          "absolute -left-16 top-1/2 z-20 flex -translate-y-1/2 items-center gap-1 transition-opacity max-md:-left-[4.75rem]",
+          controlsVisible
+            ? "pointer-events-auto opacity-100"
+            : "pointer-events-none opacity-0 max-md:pointer-events-auto max-md:opacity-100"
         )}
       >
         <div className="relative" ref={addMenuRef}>
@@ -962,7 +982,7 @@ function InlineBlock({
               setShowActionMenu(false)
             }}
             className={cn(
-              "flex h-7 w-7 items-center justify-center rounded-xl border bg-white/95 text-gray-400 shadow-sm backdrop-blur transition-colors",
+              "flex h-8 w-8 items-center justify-center rounded-2xl border bg-white/95 text-gray-400 shadow-sm backdrop-blur transition-colors",
               showAddMenu
                 ? "border-[color:var(--rnest-accent-border)] text-[color:var(--rnest-accent)] shadow-[0_8px_22px_rgba(123,111,208,0.16)]"
                 : "border-gray-200 hover:border-gray-300 hover:bg-white hover:text-gray-600"
@@ -974,7 +994,7 @@ function InlineBlock({
             <Plus className="h-3.5 w-3.5" />
           </button>
           {showAddMenu && (
-            <div className="absolute left-0 top-full z-30 mt-2 w-56 rounded-2xl border border-gray-200 bg-white py-1.5 shadow-[0_18px_40px_rgba(15,23,42,0.14)]">
+            <div className="absolute left-0 top-full z-40 mt-2 w-56 rounded-2xl border border-gray-200 bg-white py-1.5 shadow-[0_18px_40px_rgba(15,23,42,0.14)]">
               <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-ios-muted">
                 아래에 새 블록
               </div>
@@ -1022,7 +1042,7 @@ function InlineBlock({
               setShowAddMenu(false)
             }}
             className={cn(
-              "flex h-7 w-7 items-center justify-center rounded-xl border bg-white/95 text-gray-400 shadow-sm backdrop-blur transition-colors",
+              "flex h-8 w-8 items-center justify-center rounded-2xl border bg-white/95 text-gray-400 shadow-sm backdrop-blur transition-colors",
               showActionMenu
                 ? "border-[color:var(--rnest-accent-border)] text-[color:var(--rnest-accent)] shadow-[0_8px_22px_rgba(123,111,208,0.16)]"
                 : "border-gray-200 hover:border-gray-300 hover:bg-white hover:text-gray-600"
@@ -1034,7 +1054,7 @@ function InlineBlock({
             <GripVertical className="h-3.5 w-3.5" />
           </button>
           {showActionMenu && (
-            <div className="absolute left-0 top-full z-30 mt-2 w-56 rounded-2xl border border-gray-200 bg-white py-1.5 shadow-[0_18px_40px_rgba(15,23,42,0.14)]">
+            <div className="absolute left-0 top-full z-40 mt-2 w-56 rounded-2xl border border-gray-200 bg-white py-1.5 shadow-[0_18px_40px_rgba(15,23,42,0.14)]">
               <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-ios-muted">
                 현재 블록 설정
               </div>
@@ -1097,7 +1117,7 @@ function InlineBlock({
                   ↓ 아래로 이동
                 </button>
               )}
-              {attachment && (
+              {attachment && block.type === "attachment" && (
                 <button
                   type="button"
                   onClick={() => {
@@ -1404,26 +1424,84 @@ function InlineBlock({
 
         {block.type === "image" && (
           <div className="overflow-hidden rounded-[24px] border border-gray-200 bg-white shadow-[0_12px_28px_rgba(15,23,42,0.06)]">
-            <button
-              type="button"
-              onClick={onOpenAttachment}
-              className="block w-full bg-[color:var(--rnest-accent-soft)]/40"
-            >
+            <div className="border-b border-gray-100 bg-[color:var(--rnest-accent-soft)]/20 px-4 py-3">
+              <div className="flex flex-wrap items-center gap-2">
+                {([
+                  { label: "작게", width: 56 },
+                  { label: "보통", width: 76 },
+                  { label: "크게", width: 100 },
+                ] as const).map((preset) => {
+                  const active = clampImageWidth(block.mediaWidth) === preset.width
+                  return (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() => onChange({ ...block, mediaWidth: preset.width })}
+                      className={cn(
+                        "rounded-full px-2.5 py-1 text-[11.5px] font-medium transition-colors",
+                        active
+                          ? "bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
+                          : "bg-white text-ios-sub shadow-[inset_0_0_0_1px_rgba(148,163,184,0.16)] hover:bg-gray-50"
+                      )}
+                    >
+                      {preset.label}
+                    </button>
+                  )
+                })}
+                <div className="ml-auto flex min-w-[180px] items-center gap-3 max-md:w-full max-md:min-w-0">
+                  <span className="shrink-0 text-[11.5px] font-medium text-ios-muted">크기</span>
+                  <input
+                    type="range"
+                    min={40}
+                    max={100}
+                    step={5}
+                    value={clampImageWidth(block.mediaWidth)}
+                    onChange={(e) => onChange({ ...block, mediaWidth: Number(e.target.value) })}
+                    className="h-1.5 w-full accent-[color:var(--rnest-accent)]"
+                  />
+                  <span className="w-9 shrink-0 text-right text-[11.5px] font-medium text-ios-muted">
+                    {clampImageWidth(block.mediaWidth)}%
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div className="bg-[color:var(--rnest-accent-soft)]/30 px-4 py-4">
               {attachmentUrl ? (
-                <div className="relative min-h-[260px] w-full">
+                <div
+                  className="relative mx-auto overflow-hidden rounded-[20px] border border-white/80 bg-white shadow-[0_10px_24px_rgba(15,23,42,0.08)]"
+                  style={{
+                    width: `${clampImageWidth(block.mediaWidth)}%`,
+                    aspectRatio: String(clampImageAspectRatio(block.mediaAspectRatio)),
+                  }}
+                >
                   <Image
                     src={attachmentUrl}
                     alt={block.text || attachment?.name || "메모 이미지"}
                     fill
                     unoptimized
-                    className="object-contain"
+                    className="pointer-events-none select-none object-contain"
                     sizes="(max-width: 768px) 100vw, 720px"
+                    draggable={false}
+                    onLoad={(event) => {
+                      const nextRatio =
+                        event.currentTarget.naturalWidth > 0 && event.currentTarget.naturalHeight > 0
+                          ? event.currentTarget.naturalWidth / event.currentTarget.naturalHeight
+                          : undefined
+                      if (
+                        typeof nextRatio === "number" &&
+                        Math.abs(clampImageAspectRatio(block.mediaAspectRatio) - clampImageAspectRatio(nextRatio)) > 0.01
+                      ) {
+                        onChange({ ...block, mediaAspectRatio: nextRatio })
+                      }
+                    }}
                   />
                 </div>
               ) : (
-                <div className="flex h-48 items-center justify-center text-[13px] text-ios-muted">이미지를 불러오는 중...</div>
+                <div className="flex h-48 items-center justify-center rounded-[20px] border border-dashed border-gray-200 bg-white/80 text-[13px] text-ios-muted">
+                  이미지를 불러오는 중...
+                </div>
               )}
-            </button>
+            </div>
             <div className="border-t border-gray-100 px-4 py-3">
               <input
                 type="text"
@@ -2320,6 +2398,7 @@ export function ToolNotebookPage() {
           createMemoBlock(kind, {
             text: kind === "image" ? "" : attachment.name,
             attachmentId: attachment.id,
+            mediaWidth: kind === "image" ? 100 : undefined,
           })
         )
       )
@@ -2469,6 +2548,8 @@ export function ToolNotebookPage() {
                 text: block.text,
                 detailText: block.detailText,
                 attachmentId: block.attachmentId,
+                mediaWidth: block.mediaWidth,
+                mediaAspectRatio: block.mediaAspectRatio,
                 checked: block.checked,
                 collapsed: block.collapsed,
               })

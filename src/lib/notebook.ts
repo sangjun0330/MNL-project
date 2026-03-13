@@ -55,6 +55,8 @@ export type RNestMemoBlock = {
   text?: string
   detailText?: string
   attachmentId?: string
+  mediaWidth?: number
+  mediaAspectRatio?: number
   checked?: boolean
   collapsed?: boolean
   table?: RNestMemoTable
@@ -201,6 +203,16 @@ const MAX_ATTACHMENT_STORAGE_PATH_LENGTH = 240
 const MAX_LOCK_HINT_LENGTH = 80
 const MAX_RECORD_FIELDS = 16
 const MAX_SELECT_OPTIONS = 10
+
+function sanitizeMediaWidth(value: unknown) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 100
+  return Math.min(100, Math.max(40, Math.round(value)))
+}
+
+function sanitizeMediaAspectRatio(value: unknown) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined
+  return Math.min(3, Math.max(0.4, Number(value.toFixed(4))))
+}
 const MAX_RECORD_TITLE_LENGTH = 80
 
 function nowTs() {
@@ -395,6 +407,8 @@ export function createMemoBlock(type: RNestMemoBlockType, input?: Partial<RNestM
       text: cleanText(input?.text, 240),
       detailText: undefined,
       attachmentId: cleanText(input?.attachmentId, 60) || undefined,
+      mediaWidth: type === "image" ? sanitizeMediaWidth(input?.mediaWidth) : undefined,
+      mediaAspectRatio: type === "image" ? sanitizeMediaAspectRatio(input?.mediaAspectRatio) : undefined,
     }
   }
 
@@ -433,6 +447,8 @@ export function createMemoBlock(type: RNestMemoBlockType, input?: Partial<RNestM
         ? cleanText(input?.detailText, type === "bookmark" ? 240 : MAX_BLOCK_TEXT_LENGTH)
         : undefined,
     attachmentId: undefined,
+    mediaWidth: undefined,
+    mediaAspectRatio: undefined,
     checked: type === "checklist" ? Boolean(input?.checked) : undefined,
     collapsed: type === "toggle" ? Boolean(input?.collapsed) : undefined,
   }

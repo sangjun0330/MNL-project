@@ -46,6 +46,11 @@ if (supabaseOrigin) {
   connectSources.push(supabaseOrigin, supabaseOrigin.replace(/^http/i, "ws"));
 }
 
+const imgSources = ["'self'", "data:", "blob:", "https://cloudflareinsights.com", tossWildcard];
+if (supabaseOrigin) {
+  imgSources.push(supabaseOrigin);
+}
+
 const scriptSources = [
   "'self'",
   "'unsafe-inline'",
@@ -68,7 +73,7 @@ const contentSecurityPolicy = [
   "object-src 'none'",
   `script-src ${scriptSources.join(" ")}`,
   "style-src 'self' 'unsafe-inline'",
-  `img-src 'self' data: blob: https://cloudflareinsights.com ${tossWildcard}`,
+  `img-src ${imgSources.join(" ")}`,
   "font-src 'self' data:",
   `connect-src ${connectSources.join(" ")}`,
   `frame-src 'self' ${tossWildcard} ${tossLegacyPayOrigin} ${daumPostcodeOrigin} ${daumWildcard}`,
