@@ -369,12 +369,13 @@ export function CloudNotebookSync() {
 
     if (skipNextSaveRef.current) {
       skipNextSaveRef.current = false;
-      latestSignatureRef.current = nextSignature;
-      latestStateRef.current = nextState;
-      writeLocalDraft(userId, nextState, {
-        dirty: false,
-      });
-      return;
+      if (nextSignature === latestSignatureRef.current) {
+        latestStateRef.current = nextState;
+        writeLocalDraft(userId, nextState, {
+          dirty: false,
+        });
+        return;
+      }
     }
 
     if (nextSignature === latestSignatureRef.current) return;

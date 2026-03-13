@@ -114,6 +114,10 @@ function insertRecent(list: string[], id: string, limit = 20) {
   return [id, ...list.filter((item) => item !== id)].slice(0, limit)
 }
 
+function createSafeDownloadName(value: string, fallback = "memo") {
+  return value.replace(/[<>:"/\\|?*\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 60) || fallback
+}
+
 function downloadTextFile(fileName: string, content: string, mimeType: string) {
   if (typeof window === "undefined") return
   const blob = new Blob([content], { type: mimeType })
@@ -121,7 +125,7 @@ function downloadTextFile(fileName: string, content: string, mimeType: string) {
   const a = document.createElement("a")
   a.style.display = "none"
   a.href = url
-  a.download = fileName.replace(/[<>:"/\\|?*\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 60) || "memo"
+  a.download = createSafeDownloadName(fileName, "memo")
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
@@ -520,6 +524,13 @@ function PageItem({
   className,
   onDragStart,
   onDragEnd,
+  isEditing = false,
+  draftTitle = "",
+  onStartEdit,
+  onDraftChange,
+  onDraftCommit,
+  onDraftCancel,
+  onTrash,
 }: {
   doc: RNestMemoDocument
   summary: string
@@ -532,8 +543,16 @@ function PageItem({
   className?: string
   onDragStart?: React.DragEventHandler<HTMLButtonElement>
   onDragEnd?: React.DragEventHandler<HTMLButtonElement>
+  isEditing?: boolean
+  draftTitle?: string
+  onStartEdit?: () => void
+  onDraftChange?: (value: string) => void
+  onDraftCommit?: () => void
+  onDraftCancel?: () => void
+  onTrash?: () => void
 }) {
-  const itemRef = useRef<HTMLButtonElement>(null)
+  const itemRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   useLayoutEffect(() => {
     const element = itemRef.current
@@ -565,17 +584,18 @@ function PageItem({
     )
   }, [doc.id, doc.updatedAt, doc.favorite, doc.pinned, doc.title, isActive, isLocked, listKey, summary])
 
+  useEffect(() => {
+    if (!isEditing) return
+    inputRef.current?.focus()
+    inputRef.current?.select()
+  }, [isEditing])
+
   return (
-    <button
+    <div
       ref={itemRef}
-      type="button"
-      onClick={onClick}
-      draggable={draggable}
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
       className={cn(
-        "group flex w-full items-start gap-2 rounded-xl px-2 py-2 text-left transition-colors",
-        draggable && "cursor-grab active:cursor-grabbing",
+        "group flex w-full items-start gap-2 rounded-xl px-2 py-2 transition-colors",
+        draggable && !isEditing && "cursor-grab active:cursor-grabbing",
         isDragging && "opacity-45",
         isActive
           ? "bg-[color:var(--rnest-accent-soft)] text-ios-text"
@@ -586,12 +606,44 @@ function PageItem({
       <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-white text-ios-sub shadow-[inset_0_0_0_1px_rgba(148,163,184,0.16)]">
         {renderMemoIcon(doc.icon, "h-4 w-4")}
       </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[13.5px] font-medium text-ios-text">{doc.title || "제목 없음"}</span>
-        <span className="block truncate pt-0.5 text-[11.5px] text-ios-muted">
-          {summary || "비어 있는 메모"}
+      {isEditing ? (
+        <span className="min-w-0 flex-1">
+          <input
+            ref={inputRef}
+            value={draftTitle}
+            onChange={(e) => onDraftChange?.(e.target.value)}
+            onBlur={onDraftCommit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault()
+                onDraftCommit?.()
+              }
+              if (e.key === "Escape") {
+                e.preventDefault()
+                onDraftCancel?.()
+              }
+            }}
+            className={cn(
+              "w-full border-none bg-transparent text-[13.5px] font-medium text-ios-text outline-none",
+              mobileSafeFineClass
+            )}
+          />
         </span>
-      </span>
+      ) : (
+        <button
+          type="button"
+          onClick={onClick}
+          draggable={draggable}
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          className="min-w-0 flex-1 text-left"
+        >
+          <span className="block truncate text-[13.5px] font-medium text-ios-text">{doc.title || "제목 없음"}</span>
+          <span className="block truncate pt-0.5 text-[11.5px] text-ios-muted">
+            {summary || "비어 있는 메모"}
+          </span>
+        </button>
+      )}
       <span className="mt-0.5 flex shrink-0 items-center gap-1 text-ios-muted">
         {doc.pinned && <Pin className="h-3 w-3 text-[color:var(--rnest-accent)]" />}
         {isLocked && <Lock className="h-3 w-3" />}
@@ -599,7 +651,31 @@ function PageItem({
           <Star className="h-3 w-3 fill-current text-[color:var(--rnest-accent)] opacity-60" />
         )}
       </span>
-    </button>
+      {(onStartEdit || onTrash) && !isEditing && (
+        <div className="flex shrink-0 items-center gap-0.5 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
+          {onStartEdit && (
+            <button
+              type="button"
+              onClick={onStartEdit}
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+              title="이름 변경"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
+          )}
+          {onTrash && (
+            <button
+              type="button"
+              onClick={onTrash}
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500"
+              title="삭제"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -994,6 +1070,7 @@ function MoreMenu({
           ? [{ id: "remove-lock", label: "잠금 제거", icon: <Shield className="h-3.5 w-3.5" /> }]
           : []),
         { id: "duplicate", label: "복제", icon: <Copy className="h-3.5 w-3.5" /> },
+        { id: "export-pdf", label: "PDF 저장", icon: <Download className="h-3.5 w-3.5" /> },
         { id: "export-txt", label: "TXT 내보내기", icon: <Download className="h-3.5 w-3.5" /> },
         { id: "export-md", label: "Markdown 내보내기", icon: <Download className="h-3.5 w-3.5" /> },
         { id: "trash", label: "삭제", icon: <Trash2 className="h-3.5 w-3.5" />, danger: true },
@@ -1513,6 +1590,7 @@ function InlineBlock({
           mobileControlsVisible ? "pointer-events-auto opacity-100" : "pointer-events-none h-0 overflow-hidden opacity-0 lg:h-auto lg:overflow-visible",
           desktopControlsVisible ? "lg:pointer-events-auto lg:opacity-100" : "lg:pointer-events-none lg:opacity-0"
         )}
+        data-pdf-hide="true"
         onMouseEnter={handleBlockMouseEnter}
         onMouseLeave={handleBlockMouseLeave}
       >
@@ -2399,13 +2477,17 @@ export function ToolNotebookPage() {
   // sort
   const [sortKey, setSortKey] = useState<MemoSortKey>("updatedAt")
   const [showSortMenu, setShowSortMenu] = useState(false)
+  const [editingDocId, setEditingDocId] = useState<string | null>(null)
+  const [pageTitleDraft, setPageTitleDraft] = useState("")
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null)
   const [folderNameDraft, setFolderNameDraft] = useState("")
   const [folderOpenState, setFolderOpenState] = useState<Record<string, boolean>>({})
   const [draggingDocId, setDraggingDocId] = useState<string | null>(null)
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null)
   const [dragOverRootPages, setDragOverRootPages] = useState(false)
+  const [pdfExporting, setPdfExporting] = useState(false)
   const sortMenuRef = useRef<HTMLDivElement>(null)
+  const pdfContentRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!showSortMenu) return
@@ -2435,6 +2517,8 @@ export function ToolNotebookPage() {
     setShowCoverPicker(false)
     setShowMoreMenu(false)
     setShowCompactTools(false)
+    setEditingDocId(null)
+    setPageTitleDraft("")
   }, [activeMemoId])
 
   useEffect(() => {
@@ -2814,6 +2898,124 @@ export function ToolNotebookPage() {
     }
   }
 
+  async function exportActiveMemoPdf() {
+    if (!activeMemo || !pdfContentRef.current || typeof window === "undefined") return
+    if (pdfExporting) return
+    if (activeMemoRaw?.lock && !activeMemoIsUnlocked) {
+      setToast("잠금 해제 후 PDF로 저장할 수 있습니다")
+      return
+    }
+
+    setPdfExporting(true)
+    setToast("PDF 저장을 준비하고 있습니다")
+    try {
+      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+        import("html2canvas"),
+        import("jspdf"),
+      ])
+
+      const canvas = await html2canvas(pdfContentRef.current, {
+        backgroundColor: "#ffffff",
+        useCORS: true,
+        logging: false,
+        scale: Math.max(2, Math.min(window.devicePixelRatio || 1, 3)),
+        windowWidth: pdfContentRef.current.scrollWidth,
+        onclone: (clonedDoc) => {
+          clonedDoc
+            .querySelectorAll('[data-pdf-hide="true"]')
+            .forEach((element) => ((element as HTMLElement).style.display = "none"))
+        },
+      })
+
+      const pdf = new jsPDF({
+        orientation: "portrait",
+        unit: "pt",
+        format: "a4",
+        compress: true,
+      })
+
+      const pageWidth = pdf.internal.pageSize.getWidth()
+      const pageHeight = pdf.internal.pageSize.getHeight()
+      const margin = 28
+      const contentWidth = pageWidth - margin * 2
+      const pixelPerPoint = canvas.width / contentWidth
+      const pagePixelHeight = Math.max(1, Math.floor((pageHeight - margin * 2) * pixelPerPoint))
+      const pageCanvas = document.createElement("canvas")
+      const pageContext = pageCanvas.getContext("2d")
+      if (!pageContext) throw new Error("pdf_canvas_context_missing")
+
+      pageCanvas.width = canvas.width
+      let offsetY = 0
+      let pageIndex = 0
+      while (offsetY < canvas.height) {
+        const sliceHeight = Math.min(pagePixelHeight, canvas.height - offsetY)
+        pageCanvas.height = sliceHeight
+        pageContext.clearRect(0, 0, pageCanvas.width, pageCanvas.height)
+        pageContext.drawImage(
+          canvas,
+          0,
+          offsetY,
+          canvas.width,
+          sliceHeight,
+          0,
+          0,
+          pageCanvas.width,
+          sliceHeight
+        )
+        const imageData = pageCanvas.toDataURL("image/png", 1)
+        if (pageIndex > 0) pdf.addPage()
+        pdf.addImage(
+          imageData,
+          "PNG",
+          margin,
+          margin,
+          contentWidth,
+          sliceHeight / pixelPerPoint,
+          undefined,
+          "FAST"
+        )
+        offsetY += sliceHeight
+        pageIndex += 1
+      }
+
+      pdf.save(`${createSafeDownloadName(activeMemo.title || "메모", "memo")}.pdf`)
+      setToast("PDF 파일을 다운로드합니다")
+    } catch {
+      setToast("PDF 저장에 실패했습니다")
+    } finally {
+      setPdfExporting(false)
+    }
+  }
+
+  function startPageRename(doc: RNestMemoDocument) {
+    setEditingDocId(doc.id)
+    setPageTitleDraft(doc.title)
+  }
+
+  function commitPageRename(docId: string) {
+    const latestMemo = getLatestMemoState()
+    const doc = latestMemo.documents[docId]
+    if (!doc) {
+      setEditingDocId(null)
+      setPageTitleDraft("")
+      return
+    }
+    saveRawDoc(
+      {
+        ...doc,
+        title: pageTitleDraft,
+      },
+      { touchRecent: false }
+    )
+    setEditingDocId(null)
+    setPageTitleDraft("")
+  }
+
+  function cancelPageRename() {
+    setEditingDocId(null)
+    setPageTitleDraft("")
+  }
+
   function handlePageDragStart(event: React.DragEvent<HTMLButtonElement>, docId: string) {
     setDraggingDocId(docId)
     event.dataTransfer.effectAllowed = "move"
@@ -2877,6 +3079,9 @@ export function ToolNotebookPage() {
         .sort(sortByUpdated)[0]
       setActiveMemoId(nextActive?.id ?? null)
     }
+    if (editingDocId === id) {
+      cancelPageRename()
+    }
     setToast("휴지통으로 이동했습니다")
   }
 
@@ -2906,6 +3111,9 @@ export function ToolNotebookPage() {
         .filter((item): item is RNestMemoDocument => item != null && item.trashedAt == null)
         .sort(sortByUpdated)[0]
       setActiveMemoId(nextActive?.id ?? null)
+    }
+    if (editingDocId === id) {
+      cancelPageRename()
     }
     setToast("영구 삭제했습니다")
   }
@@ -2962,6 +3170,9 @@ export function ToolNotebookPage() {
         break
       case "duplicate":
         duplicateMemo(activeMemoRaw)
+        break
+      case "export-pdf":
+        void exportActiveMemoPdf()
         break
       case "export-txt":
         if (activeMemoRaw.lock && !activeMemoIsUnlocked) {
@@ -3538,6 +3749,13 @@ export function ToolNotebookPage() {
                       isDragging={draggingDocId === doc.id}
                       onDragStart={(event) => handlePageDragStart(event, doc.id)}
                       onDragEnd={handlePageDragEnd}
+                      isEditing={editingDocId === doc.id}
+                      draftTitle={editingDocId === doc.id ? pageTitleDraft : doc.title}
+                      onStartEdit={() => startPageRename(doc)}
+                      onDraftChange={setPageTitleDraft}
+                      onDraftCommit={() => commitPageRename(doc.id)}
+                      onDraftCancel={cancelPageRename}
+                      onTrash={() => trashMemo(doc.id)}
                     />
                   ))}
                 </SidebarSection>
@@ -3578,6 +3796,13 @@ export function ToolNotebookPage() {
                       isDragging={draggingDocId === doc.id}
                       onDragStart={(event) => handlePageDragStart(event, doc.id)}
                       onDragEnd={handlePageDragEnd}
+                      isEditing={editingDocId === doc.id}
+                      draftTitle={editingDocId === doc.id ? pageTitleDraft : doc.title}
+                      onStartEdit={() => startPageRename(doc)}
+                      onDraftChange={setPageTitleDraft}
+                      onDraftCommit={() => commitPageRename(doc.id)}
+                      onDraftCancel={cancelPageRename}
+                      onTrash={() => trashMemo(doc.id)}
                     />
                   ))}
                 </SidebarSection>
@@ -3654,6 +3879,13 @@ export function ToolNotebookPage() {
                               onDragStart={(event) => handlePageDragStart(event, doc.id)}
                               onDragEnd={handlePageDragEnd}
                               className="px-2 py-1.5"
+                              isEditing={!doc.pinned && editingDocId === doc.id}
+                              draftTitle={!doc.pinned && editingDocId === doc.id ? pageTitleDraft : doc.title}
+                              onStartEdit={!doc.pinned ? () => startPageRename(doc) : undefined}
+                              onDraftChange={!doc.pinned ? setPageTitleDraft : undefined}
+                              onDraftCommit={!doc.pinned ? () => commitPageRename(doc.id) : undefined}
+                              onDraftCancel={!doc.pinned ? cancelPageRename : undefined}
+                              onTrash={!doc.pinned ? () => trashMemo(doc.id) : undefined}
                             />
                           ))
                         )}
@@ -3713,6 +3945,13 @@ export function ToolNotebookPage() {
                     isDragging={draggingDocId === doc.id}
                     onDragStart={(event) => handlePageDragStart(event, doc.id)}
                     onDragEnd={handlePageDragEnd}
+                    isEditing={editingDocId === doc.id}
+                    draftTitle={editingDocId === doc.id ? pageTitleDraft : doc.title}
+                    onStartEdit={() => startPageRename(doc)}
+                    onDraftChange={setPageTitleDraft}
+                    onDraftCommit={() => commitPageRename(doc.id)}
+                    onDraftCancel={cancelPageRename}
+                    onTrash={() => trashMemo(doc.id)}
                   />
                 ))}
               </SidebarSection>
@@ -3871,7 +4110,7 @@ export function ToolNotebookPage() {
         {/* editor area */}
         <div className="flex-1 overflow-y-auto">
           {activeMemo ? (
-            <div className="mx-auto w-full max-w-[720px] px-5 py-6 sm:px-6 lg:px-10 lg:py-10 xl:pl-16">
+            <div ref={pdfContentRef} className="mx-auto w-full max-w-[720px] bg-white px-5 py-6 sm:px-6 lg:px-10 lg:py-10 xl:pl-16">
               {activeMemo.coverStyle && (
                 <div
                   className={cn(
@@ -3983,6 +4222,7 @@ export function ToolNotebookPage() {
                       <button
                         type="button"
                         onClick={() => setShowCompactTools((current) => !current)}
+                        data-pdf-hide="true"
                         className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-[12px] font-medium text-ios-sub shadow-[inset_0_0_0_1px_rgba(196,181,253,0.35)] transition-colors hover:bg-[color:var(--rnest-accent-soft)]/35"
                       >
                         <Sparkles className="h-3.5 w-3.5 text-[color:var(--rnest-accent)]" />
@@ -3992,7 +4232,7 @@ export function ToolNotebookPage() {
                     </div>
 
                     {showCompactTools && (
-                      <div className="mt-3 space-y-4 rounded-[24px] border border-[color:var(--rnest-accent-border)]/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(248,245,255,0.94)_100%)] p-4 shadow-[0_14px_34px_rgba(123,111,208,0.08)]">
+                      <div data-pdf-hide="true" className="mt-3 space-y-4 rounded-[24px] border border-[color:var(--rnest-accent-border)]/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(248,245,255,0.94)_100%)] p-4 shadow-[0_14px_34px_rgba(123,111,208,0.08)]">
                         <div className="flex flex-wrap items-center gap-3">
                           <InlineTagEditor
                             tags={activeMemo.tags}
@@ -4192,7 +4432,7 @@ export function ToolNotebookPage() {
               ) : (
                 <>
                   {(headingBlocks.length > 0 || quickInsertTemplates.length > 0) && (
-                    <div className="mb-8 hidden space-y-4 lg:block">
+                    <div data-pdf-hide="true" className="mb-8 hidden space-y-4 lg:block">
                       {headingBlocks.length > 0 && (
                         <div>
                           <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-ios-muted">
@@ -4272,7 +4512,7 @@ export function ToolNotebookPage() {
                   </div>
 
                   {/* add block */}
-                  <div className="mt-4 pl-0 lg:pl-10">
+                  <div data-pdf-hide="true" className="mt-4 pl-0 lg:pl-10">
                     <AddBlockButton onSelect={appendBlock} />
                   </div>
                 </>
