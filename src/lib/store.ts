@@ -86,8 +86,10 @@ function normalizeSettings(raw: any): AppSettings {
   };
 }
 
-function applyLoadedState(loaded: AppState) {
+function applyLoadedState(loaded: AppState, options?: { preserveNotebook?: boolean }) {
   const sanitized = sanitizeStatePayload(loaded);
+  const preserveNotebook = options?.preserveNotebook ?? true;
+  const currentNotebook = state;
   state = {
     ...ssrSafeInitialState(),
     ...sanitized,
@@ -97,8 +99,8 @@ function applyLoadedState(loaded: AppState) {
     notes: (sanitized as any)?.notes ?? {},
     emotions: (sanitized as any)?.emotions ?? {},
     bio: (sanitized as any)?.bio ?? {},
-    memo: (sanitized as any)?.memo ?? emptyState().memo,
-    records: (sanitized as any)?.records ?? emptyState().records,
+    memo: preserveNotebook ? currentNotebook.memo : (sanitized as any)?.memo ?? emptyState().memo,
+    records: preserveNotebook ? currentNotebook.records : (sanitized as any)?.records ?? emptyState().records,
     settings: normalizeSettings((sanitized as any)?.settings),
   };
 
@@ -118,7 +120,7 @@ function initializeStoreOnClient() {
 
 export function hydrateState(loaded: AppState) {
   if (!loaded) return;
-  applyLoadedState(loaded);
+  applyLoadedState(loaded, { preserveNotebook: true });
   emit();
 }
 
@@ -150,7 +152,7 @@ export function purgeAllLocalState() {
   }
   for (const key of keys) window.localStorage.removeItem(key);
   window.localStorage.setItem(RESET_VERSION_KEY, RESET_VERSION);
-  applyLoadedState(emptyState());
+  applyLoadedState(emptyState(), { preserveNotebook: false });
   emit();
 }
 

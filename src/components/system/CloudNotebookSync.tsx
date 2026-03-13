@@ -10,7 +10,6 @@ import {
 } from "@/lib/notebook";
 import { useAppStore } from "@/lib/store";
 
-const SAVE_DEBOUNCE_MS = 180;
 const RETRY_BASE_MS = 800;
 const RETRY_MAX_MS = 8000;
 const LOCAL_NOTEBOOK_DRAFT_KEY = "rnest_notebook_state_v1";
@@ -82,7 +81,6 @@ export function CloudNotebookSync() {
   const storeRef = useRef(store);
   const initializedRef = useRef(false);
   const skipNextSaveRef = useRef(true);
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryCountRef = useRef(0);
   const saveInFlightRef = useRef(false);
@@ -278,10 +276,6 @@ export function CloudNotebookSync() {
     retryCountRef.current = 0;
     loadRequestRef.current += 1;
 
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = null;
-    }
     if (retryTimerRef.current) {
       clearTimeout(retryTimerRef.current);
       retryTimerRef.current = null;
@@ -312,7 +306,6 @@ export function CloudNotebookSync() {
 
   useEffect(() => {
     return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
     };
   }, []);
@@ -345,19 +338,7 @@ export function CloudNotebookSync() {
 
     latestSignatureRef.current = nextSignature;
     latestStateRef.current = nextState;
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current);
-    }
-    saveTimerRef.current = setTimeout(() => {
-      queueSave(nextState, userId);
-    }, SAVE_DEBOUNCE_MS);
-
-    return () => {
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = null;
-      }
-    };
+    queueSave(nextState, userId);
   }, [buildSignature, memo, queueSave, records, status, userId]);
 
   useEffect(() => {

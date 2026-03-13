@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { getSupabaseBrowserClient, useAuth, useAuthState } from "@/lib/auth";
 import { useAppStore } from "@/lib/store";
+import { writeAppStateDraft } from "@/lib/appStateDraft";
 import { sanitizeStatePayload } from "@/lib/stateSanitizer";
 import { serializeStateForSupabase } from "@/lib/statePersistence";
 
-const SAVE_DEBOUNCE_MS = 180;
 const RETRY_BASE_MS = 800;
 const RETRY_MAX_MS = 8000;
 
@@ -14,7 +14,7 @@ type SaveOptions = {
   keepalive?: boolean;
 };
 
-export function CloudStateSync() {
+export function CloudStateSync({ remoteEnabled = false }: { remoteEnabled?: boolean }) {
   const auth = useAuth();
   const { status } = useAuthState();
   const store = useAppStore();
@@ -23,8 +23,6 @@ export function CloudStateSync() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const currentUserIdRef = useRef<string | null>(userId);
   const storeRef = useRef(store);
-  const skipNextSaveRef = useRef(true);
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryCountRef = useRef(0);
   const saveInFlightRef = useRef(false);
@@ -142,15 +140,9 @@ export function CloudStateSync() {
     currentUserIdRef.current = userId;
     latestStateRef.current = null;
     latestSerializedSignatureRef.current = "";
-    skipNextSaveRef.current = true;
     pendingSaveRef.current = false;
     saveInFlightRef.current = false;
     retryCountRef.current = 0;
-
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = null;
-    }
     if (retryTimerRef.current) {
       clearTimeout(retryTimerRef.current);
       retryTimerRef.current = null;
@@ -159,42 +151,24 @@ export function CloudStateSync() {
 
   useEffect(() => {
     return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
     };
   }, []);
 
   useEffect(() => {
-    if (!userId || status !== "authenticated") return;
-    if (skipNextSaveRef.current) {
-      skipNextSaveRef.current = false;
-      latestSerializedSignatureRef.current = JSON.stringify(
-        serializeStateForSupabase(sanitizeStatePayload(store.getState()))
-      );
-      return;
-    }
-
     const nextState = sanitizeStatePayload(store.getState());
+    writeAppStateDraft(userId, nextState);
+
+    if (!remoteEnabled || !userId || status !== "authenticated") return;
+
     const nextSignature = JSON.stringify(serializeStateForSupabase(nextState));
     if (nextSignature === latestSerializedSignatureRef.current) return;
     latestSerializedSignatureRef.current = nextSignature;
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current);
-    }
-    saveTimerRef.current = setTimeout(() => {
-      queueSave(nextState, userId);
-    }, SAVE_DEBOUNCE_MS);
-
-    return () => {
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = null;
-      }
-    };
-  }, [queueSave, status, store, storeVersion, userId]);
+    queueSave(nextState, userId);
+  }, [queueSave, remoteEnabled, status, store, storeVersion, userId]);
 
   useEffect(() => {
-    if (!userId || status !== "authenticated") return;
+    if (!remoteEnabled || !userId || status !== "authenticated") return;
 
     const onVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
@@ -214,7 +188,7 @@ export function CloudStateSync() {
       window.removeEventListener("pagehide", onPageHide);
       window.removeEventListener("beforeunload", onPageHide);
     };
-  }, [flushNow, status, userId]);
+  }, [flushNow, remoteEnabled, status, userId]);
 
   return null;
 }

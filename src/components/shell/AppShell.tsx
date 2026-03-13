@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { BottomNav } from "@/components/shell/BottomNav";
 import { UiPreferencesBridge } from "@/components/system/UiPreferencesBridge";
 import { getSupabaseBrowserClient, signOut, useAuthState } from "@/lib/auth";
+import { readPreferredAppStateDraft } from "@/lib/appStateDraft";
 import { hydrateState } from "@/lib/store";
 import { emptyState } from "@/lib/model";
 import { useI18n } from "@/lib/useI18n";
@@ -140,6 +141,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [bootstrap, setBootstrap] = useState<BootstrapPayload | null>(null);
   const [bootstrapLoading, setBootstrapLoading] = useState(false);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  const [bootstrapSettledUserId, setBootstrapSettledUserId] = useState<string | null>(null);
   const [busyStage, setBusyStage] = useState<BusyStage>(null);
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const bootstrapRequestRef = useRef(0);
@@ -164,6 +166,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const loadBootstrap = useCallback(async (options?: { silent?: boolean }) => {
     if (!auth?.userId) return null;
+    const scopedUserId = auth.userId;
     const requestId = ++bootstrapRequestRef.current;
     const silent = options?.silent === true;
     if (!silent) {
@@ -189,15 +192,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       const data = (json?.data ?? null) as BootstrapPayload | null;
       if (!data || requestId !== bootstrapRequestRef.current) return null;
       setBootstrap(data);
-      writeBootstrapCache(auth.userId, data);
-      hydrateState(data.consentCompleted && data.state ? data.state : emptyState());
+      writeBootstrapCache(scopedUserId, data);
+      setBootstrapSettledUserId(scopedUserId);
+      const localDraft = readPreferredAppStateDraft(scopedUserId);
+      if (localDraft && (!data.updatedAt || localDraft.updatedAt > data.updatedAt)) {
+        hydrateState(localDraft.state);
+      } else {
+        hydrateState(data.consentCompleted && data.state ? data.state : emptyState());
+      }
       return data;
     } catch (error) {
       if (requestId === bootstrapRequestRef.current) {
+        setBootstrapSettledUserId(scopedUserId);
         if (!silent) {
           setBootstrap(null);
           setBootstrapError((error as Error)?.message ?? "failed_to_load_bootstrap");
-          hydrateState(emptyState());
+          const localDraft = readPreferredAppStateDraft(scopedUserId);
+          if (localDraft) {
+            hydrateState(localDraft.state);
+          }
         }
       }
       return null;
@@ -216,19 +229,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       setBootstrap(null);
       setBootstrapLoading(false);
       setBootstrapError(null);
+      setBootstrapSettledUserId(null);
       setBusyStage(null);
       hydrateState(emptyState());
       return;
     }
+    setBootstrapSettledUserId(null);
     const cached = readBootstrapCache(auth.userId);
     if (cached) {
       setBootstrap(cached);
       setBootstrapError(null);
-      hydrateState(cached.consentCompleted && cached.state ? cached.state : emptyState());
+      const localDraft = readPreferredAppStateDraft(auth.userId);
+      if (localDraft && (!cached.updatedAt || localDraft.updatedAt > cached.updatedAt)) {
+        hydrateState(localDraft.state);
+      } else {
+        hydrateState(cached.consentCompleted && cached.state ? cached.state : emptyState());
+      }
     } else {
       setBootstrap(null);
       setBootstrapError(null);
-      hydrateState(emptyState());
+      const localDraft = readPreferredAppStateDraft(auth.userId);
+      if (localDraft) {
+        hydrateState(localDraft.state);
+      }
     }
     void loadBootstrap({ silent: Boolean(cached?.consentCompleted) });
   }, [auth?.userId, loadBootstrap, status]);
@@ -402,7 +425,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {isAuthed && !isPolicyPage && !bootstrapLoading && bootstrapError && !resolvedBootstrap?.consentCompleted ? (
         <GateErrorScreen onRetry={() => void loadBootstrap()} />
       ) : null}
-      {isAuthed && Boolean(resolvedBootstrap?.consentCompleted) ? <CloudStateSync /> : null}
+      {!isPolicyPage ? (
+        <CloudStateSync
+          remoteEnabled={
+            isAuthed &&
+            bootstrapSettledUserId === (auth?.userId ?? null) &&
+            Boolean(resolvedBootstrap?.consentCompleted)
+          }
+        />
+      ) : null}
       {!isPolicyPage ? <CloudNotebookSync /> : null}
       <OnboardingGuide open={showOnboarding} onComplete={handleOnboardingComplete} />
       {showConsent ? <ServiceConsentScreen onSubmit={handleConsentComplete} /> : null}
