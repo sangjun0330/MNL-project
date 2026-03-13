@@ -2,8 +2,11 @@
 
 import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import {
+  ArrowDownAZ,
+  ArrowUpDown,
   Bell,
   BookOpenText,
+  Calendar,
   CheckSquare,
   ChevronDown,
   ChevronRight,
@@ -14,6 +17,7 @@ import {
   Folder,
   GripVertical,
   Heading1,
+  Highlighter,
   ImageIcon,
   Leaf,
   Lightbulb,
@@ -33,6 +37,7 @@ import {
   Plus,
   Quote,
   ReceiptText,
+  Replace,
   RotateCcw,
   Search,
   Shield,
@@ -54,6 +59,7 @@ import {
   getReminderTimestampFromPreset,
   memoBlockToPlainText,
   memoCoverOptions,
+  memoHighlightColors,
   memoIconOptions,
   memoDocumentToMarkdown,
   memoDocumentToPlainText,
@@ -65,6 +71,7 @@ import {
   type RNestMemoBlockType,
   type RNestMemoCoverId,
   type RNestMemoDocument,
+  type RNestMemoHighlightColor,
   type RNestMemoIconId,
   type RNestMemoState,
 } from "@/lib/notebook"
@@ -336,9 +343,11 @@ function renderMemoIcon(icon: string, className = "h-5 w-5") {
 function normalizeMemoIconId(icon: string): RNestMemoIconId {
   const legacyMap: Record<string, RNestMemoIconId> = {
     "📝": "note",
+    "🗒": "note",
     "📄": "page",
     "✅": "check",
     "📋": "table",
+    "📊": "table",
     "🗂": "folder",
     "🧾": "clip",
     "🌿": "leaf",
@@ -426,6 +435,53 @@ function renderAttachmentIcon(kind: RNestMemoAttachment["kind"], className = "h-
 const mobileSafeInputClass = "text-[16px] md:text-[14px]"
 const mobileSafeBodyClass = "text-[16px] md:text-[15px]"
 const mobileSafeFineClass = "text-[16px] md:text-[12.5px]"
+
+/* ─── highlight colors ────────────────────────────────────── */
+
+const highlightBgMap: Record<RNestMemoHighlightColor, string> = {
+  yellow: "bg-yellow-100/80",
+  green: "bg-green-100/80",
+  blue: "bg-blue-100/80",
+  pink: "bg-pink-100/80",
+  orange: "bg-orange-100/80",
+  purple: "bg-purple-100/80",
+}
+
+const highlightDotMap: Record<RNestMemoHighlightColor, string> = {
+  yellow: "bg-yellow-400",
+  green: "bg-green-400",
+  blue: "bg-blue-400",
+  pink: "bg-pink-400",
+  orange: "bg-orange-400",
+  purple: "bg-purple-400",
+}
+
+const highlightLabelMap: Record<RNestMemoHighlightColor, string> = {
+  yellow: "노랑",
+  green: "초록",
+  blue: "파랑",
+  pink: "핑크",
+  orange: "주황",
+  purple: "보라",
+}
+
+/* ─── sort options ────────────────────────────────────────── */
+
+type MemoSortKey = "updatedAt" | "createdAt" | "title"
+
+const sortOptions: { key: MemoSortKey; label: string }[] = [
+  { key: "updatedAt", label: "수정일순" },
+  { key: "createdAt", label: "생성일순" },
+  { key: "title", label: "제목순" },
+]
+
+function sortDocsByKey(docs: RNestMemoDocument[], key: MemoSortKey): RNestMemoDocument[] {
+  return [...docs].sort((a, b) => {
+    if (key === "title") return (a.title || "").localeCompare(b.title || "", "ko")
+    if (key === "createdAt") return b.createdAt - a.createdAt
+    return b.updatedAt - a.updatedAt
+  })
+}
 
 /** Ref callback that auto-sizes a textarea on mount & when value changes */
 function autoSizeRef(el: HTMLTextAreaElement | null) {
@@ -751,6 +807,7 @@ function MoreMenu({
         { id: "delete-permanent", label: "영구 삭제", icon: <Trash2 className="h-3.5 w-3.5" />, danger: true },
       ]
     : [
+        { id: "find", label: "메모 검색", icon: <Search className="h-3.5 w-3.5" /> },
         { id: "pin", label: doc.pinned ? "핀 해제" : "핀 고정", icon: doc.pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" /> },
         { id: "favorite", label: doc.favorite ? "즐겨찾기 해제" : "즐겨찾기", icon: <Star className="h-3.5 w-3.5" /> },
         {
@@ -891,10 +948,15 @@ function ImageResizableBlock({
   const containerRef = useRef<HTMLDivElement>(null)
   const [resizing, setResizing] = useState(false)
   const [imgHovered, setImgHovered] = useState(false)
+  const [loadError, setLoadError] = useState(false)
   const startDataRef = useRef<{ startX: number; startY: number; startW: number; startH: number; handle: string } | null>(null)
 
   const widthPct = clampImageWidth(block.mediaWidth)
   const aspectRatio = clampImageAspectRatio(block.mediaAspectRatio)
+
+  useEffect(() => {
+    setLoadError(false)
+  }, [attachmentUrl, attachment?.id])
 
   function handleResizeStart(e: React.PointerEvent, handle: string) {
     e.preventDefault()
@@ -943,13 +1005,14 @@ function ImageResizableBlock({
 
   return (
     <div>
-      {attachmentUrl ? (
+      {attachmentUrl && !loadError ? (
         <div
           className="relative inline-block"
           style={{ width: `${widthPct}%` }}
           ref={containerRef}
           onMouseEnter={() => setImgHovered(true)}
           onMouseLeave={() => { if (!resizing) setImgHovered(false) }}
+          onPointerDown={() => setImgHovered(true)}
         >
           <div
             className={cn(
@@ -964,9 +1027,10 @@ function ImageResizableBlock({
               fill
               unoptimized
               className="pointer-events-none select-none object-cover"
-              sizes="(max-width: 768px) 100vw, 720px"
+              sizes="(max-width: 1024px) 92vw, 720px"
               draggable={false}
               onLoad={(event) => {
+                setLoadError(false)
                 const nextRatio =
                   event.currentTarget.naturalWidth > 0 && event.currentTarget.naturalHeight > 0
                     ? event.currentTarget.naturalWidth / event.currentTarget.naturalHeight
@@ -978,6 +1042,7 @@ function ImageResizableBlock({
                   onChange({ ...block, mediaAspectRatio: nextRatio })
                 }
               }}
+              onError={() => setLoadError(true)}
             />
           </div>
           {/* resize handles at corners and edges */}
@@ -1014,9 +1079,40 @@ function ImageResizableBlock({
         </div>
       ) : (
         <div className="flex h-48 items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 text-[13px] text-ios-muted">
-          이미지를 불러오는 중...
+          {loadError ? "이미지를 불러오지 못했습니다" : "이미지를 불러오는 중..."}
         </div>
       )}
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <span className="text-[11px] font-medium text-ios-muted">크기</span>
+        {[40, 70, 100].map((preset) => (
+          <button
+            key={preset}
+            type="button"
+            onClick={() => onChange({ ...block, mediaWidth: preset })}
+            className={cn(
+              "rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors",
+              widthPct === preset
+                ? "bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
+                : "bg-gray-100 text-ios-sub hover:bg-gray-200"
+            )}
+          >
+            {preset === 40 ? "작게" : preset === 70 ? "보통" : "크게"}
+          </button>
+        ))}
+        <div className="ml-auto flex min-w-[168px] items-center gap-2">
+          <input
+            type="range"
+            min={20}
+            max={100}
+            step={1}
+            value={widthPct}
+            onChange={(event) => onChange({ ...block, mediaWidth: Number(event.target.value) })}
+            className="h-1.5 w-full accent-[color:var(--rnest-accent)]"
+            aria-label="이미지 크기 조절"
+          />
+          <span className="w-10 text-right text-[11px] tabular-nums text-ios-muted">{widthPct}%</span>
+        </div>
+      </div>
       <input
         type="text"
         value={block.text ?? ""}
@@ -1048,6 +1144,7 @@ function InlineBlock({
   onInsertAsset,
   onMoveUp,
   onMoveDown,
+  onHighlight,
   isFirst,
   isLast,
 }: {
@@ -1064,6 +1161,7 @@ function InlineBlock({
   onInsertAsset: (kind: "image" | "attachment") => void
   onMoveUp: () => void
   onMoveDown: () => void
+  onHighlight: (color: RNestMemoHighlightColor | null) => void
   isFirst: boolean
   isLast: boolean
 }) {
@@ -1145,13 +1243,14 @@ function InlineBlock({
         }
       }}
     >
-      {/* left controls: unified block menu — hidden by default, visible on hover */}
+      {/* left controls */}
       <div
         className={cn(
-          "absolute -left-16 top-1/2 z-20 flex -translate-y-1/2 items-center gap-1 transition-opacity duration-150 max-md:-left-[4.75rem]",
+          "absolute -left-12 top-2 z-20 flex items-center gap-1 transition-opacity duration-150 lg:-left-16 lg:top-1/2 lg:-translate-y-1/2",
           controlsVisible
             ? "pointer-events-auto opacity-100"
-            : "pointer-events-none opacity-0"
+            : "pointer-events-none opacity-0",
+          "max-lg:pointer-events-auto max-lg:opacity-100"
         )}
         onMouseEnter={handleBlockMouseEnter}
         onMouseLeave={handleBlockMouseLeave}
@@ -1164,7 +1263,7 @@ function InlineBlock({
               setShowActionMenu(false)
             }}
             className={cn(
-              "flex h-7 w-7 items-center justify-center rounded-lg text-gray-400 transition-colors",
+              "flex h-9 w-9 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-400 shadow-[0_8px_18px_rgba(15,23,42,0.06)] transition-colors lg:h-7 lg:w-7 lg:rounded-lg lg:border-transparent lg:bg-transparent lg:shadow-none",
               showAddMenu
                 ? "bg-gray-100 text-[color:var(--rnest-accent)]"
                 : "hover:bg-gray-100 hover:text-gray-600"
@@ -1176,7 +1275,7 @@ function InlineBlock({
             <Plus className="h-3.5 w-3.5" />
           </button>
           {showAddMenu && (
-            <div className="absolute left-0 top-full z-40 mt-2 w-56 rounded-2xl border border-gray-200 bg-white py-1.5 shadow-[0_18px_40px_rgba(15,23,42,0.14)]">
+            <div className="absolute left-0 top-full z-40 mt-2 w-56 max-w-[calc(100vw-6rem)] rounded-2xl border border-gray-200 bg-white py-1.5 shadow-[0_18px_40px_rgba(15,23,42,0.14)]">
               <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-ios-muted">
                 아래에 새 블록
               </div>
@@ -1224,7 +1323,7 @@ function InlineBlock({
               setShowAddMenu(false)
             }}
             className={cn(
-              "flex h-7 w-7 items-center justify-center rounded-lg text-gray-400 transition-colors",
+              "flex h-9 w-9 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-400 shadow-[0_8px_18px_rgba(15,23,42,0.06)] transition-colors lg:h-7 lg:w-7 lg:rounded-lg lg:border-transparent lg:bg-transparent lg:shadow-none",
               showActionMenu
                 ? "bg-gray-100 text-[color:var(--rnest-accent)]"
                 : "hover:bg-gray-100 hover:text-gray-600"
@@ -1236,7 +1335,7 @@ function InlineBlock({
             <GripVertical className="h-3.5 w-3.5" />
           </button>
           {showActionMenu && (
-            <div className="absolute left-0 top-full z-40 mt-2 w-56 rounded-2xl border border-gray-200 bg-white py-1.5 shadow-[0_18px_40px_rgba(15,23,42,0.14)]">
+            <div className="absolute left-0 top-full z-40 mt-2 w-56 max-w-[calc(100vw-6rem)] rounded-2xl border border-gray-200 bg-white py-1.5 shadow-[0_18px_40px_rgba(15,23,42,0.14)]">
               <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-ios-muted">
                 현재 블록 설정
               </div>
@@ -1299,6 +1398,44 @@ function InlineBlock({
                   ↓ 아래로 이동
                 </button>
               )}
+              <div className="mx-2 my-1 border-t border-gray-100" />
+              <div className="px-3 py-1.5">
+                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-ios-muted">
+                  하이라이트
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {memoHighlightColors.map((color) => (
+                    <button
+                      key={color}
+                      type="button"
+                      onClick={() => {
+                        onHighlight(block.highlight === color ? null : color)
+                        setShowActionMenu(false)
+                      }}
+                      className={cn(
+                        "h-6 w-6 rounded-full border-2 transition-transform hover:scale-110",
+                        highlightDotMap[color],
+                        block.highlight === color ? "border-gray-800 scale-110" : "border-transparent"
+                      )}
+                      title={highlightLabelMap[color]}
+                    />
+                  ))}
+                  {block.highlight && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onHighlight(null)
+                        setShowActionMenu(false)
+                      }}
+                      className="flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100"
+                      title="하이라이트 제거"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="mx-2 my-1 border-t border-gray-100" />
               {attachment && block.type === "attachment" && (
                 <button
                   type="button"
@@ -1329,7 +1466,7 @@ function InlineBlock({
       </div>
 
       {/* block content */}
-      <div className="min-h-[1.6em]">
+      <div className={cn("min-h-[1.6em] rounded-md transition-colors", block.highlight && highlightBgMap[block.highlight] ? `${highlightBgMap[block.highlight]} px-2 -mx-2 py-0.5` : "")}>
         {showSlashMenu && (
           <SlashMenu
             currentType={block.type}
@@ -1380,7 +1517,11 @@ function InlineBlock({
 
         {block.type === "bulleted" && (
           <div className="flex gap-2">
-            <span className="mt-[2px] shrink-0 text-[15px] leading-relaxed text-ios-sub">•</span>
+            <span className="mt-[7px] inline-flex shrink-0 items-center justify-center text-ios-sub">
+              <svg viewBox="0 0 8 8" className="h-2.5 w-2.5 fill-current" aria-hidden="true">
+                <circle cx="4" cy="4" r="2.2" />
+              </svg>
+            </span>
             <textarea
               ref={autoSizeRef}
               value={block.text ?? ""}
@@ -1969,6 +2110,7 @@ export function ToolNotebookPage() {
   const [showIconPicker, setShowIconPicker] = useState(false)
   const [showCoverPicker, setShowCoverPicker] = useState(false)
   const [showMoreMenu, setShowMoreMenu] = useState(false)
+  const [showCompactTools, setShowCompactTools] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const imageInputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -1987,9 +2129,30 @@ export function ToolNotebookPage() {
   const [lockError, setLockError] = useState<string | null>(null)
   const [unlockError, setUnlockError] = useState<string | null>(null)
 
-  // auto-close sidebar on mobile on first mount
+  // find & replace
+  const [findOpen, setFindOpen] = useState(false)
+  const [findQuery, setFindQuery] = useState("")
+  const [replaceQuery, setReplaceQuery] = useState("")
+  const [findMatchCount, setFindMatchCount] = useState(0)
+  const findInputRef = useRef<HTMLInputElement>(null)
+
+  // sort
+  const [sortKey, setSortKey] = useState<MemoSortKey>("updatedAt")
+  const [showSortMenu, setShowSortMenu] = useState(false)
+  const sortMenuRef = useRef<HTMLDivElement>(null)
+
   useEffect(() => {
-    if (typeof window !== "undefined" && window.innerWidth < 768) {
+    if (!showSortMenu) return
+    function handleClick(e: MouseEvent) {
+      if (sortMenuRef.current && !sortMenuRef.current.contains(e.target as Node)) setShowSortMenu(false)
+    }
+    document.addEventListener("mousedown", handleClick)
+    return () => document.removeEventListener("mousedown", handleClick)
+  }, [showSortMenu])
+
+  // auto-close sidebar on phone/tablet on first mount
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 1024) {
       setSidebarOpen(false)
     }
   }, [])
@@ -2005,6 +2168,7 @@ export function ToolNotebookPage() {
     setShowIconPicker(false)
     setShowCoverPicker(false)
     setShowMoreMenu(false)
+    setShowCompactTools(false)
   }, [activeMemoId])
 
   useEffect(() => {
@@ -2058,8 +2222,8 @@ export function ToolNotebookPage() {
   )
 
   const unpinnedDocs = useMemo(
-    () => activeDocs.filter((d) => !d.pinned),
-    [activeDocs]
+    () => sortDocsByKey(activeDocs.filter((d) => !d.pinned), sortKey),
+    [activeDocs, sortKey]
   )
 
   const favoriteDocs = useMemo(
@@ -2113,6 +2277,37 @@ export function ToolNotebookPage() {
       ) ?? [],
     [activeMemo]
   )
+
+  // Cmd+F / Ctrl+F to open find bar
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "f" && activeMemo) {
+        e.preventDefault()
+        setFindOpen(true)
+        requestAnimationFrame(() => findInputRef.current?.focus())
+      }
+      if (e.key === "Escape" && findOpen) {
+        setFindOpen(false)
+        setFindQuery("")
+        setReplaceQuery("")
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [activeMemo, findOpen])
+
+  // compute match count
+  useEffect(() => {
+    if (!findQuery.trim() || !activeMemo) { setFindMatchCount(0); return }
+    const q = findQuery.toLowerCase()
+    let count = 0
+    for (const block of activeMemo.blocks) {
+      const text = memoBlockToPlainText(block).toLowerCase()
+      let idx = 0
+      while ((idx = text.indexOf(q, idx)) !== -1) { count++; idx += q.length }
+    }
+    setFindMatchCount(count)
+  }, [findQuery, activeMemo])
 
   // auto-select first doc if none selected
   useEffect(() => {
@@ -2318,6 +2513,10 @@ export function ToolNotebookPage() {
   function handleMoreAction(action: string) {
     if (!activeMemoRaw || !activeMemo) return
     switch (action) {
+      case "find":
+        setFindOpen(true)
+        requestAnimationFrame(() => findInputRef.current?.focus())
+        break
       case "pin":
         saveRawDoc(
           { ...activeMemoRaw, pinned: !activeMemoRaw.pinned },
@@ -2394,8 +2593,8 @@ export function ToolNotebookPage() {
 
   function openMemo(id: string) {
     setActiveMemoId(id)
-    // close sidebar on mobile
-    if (typeof window !== "undefined" && window.innerWidth < 768) setSidebarOpen(false)
+    // close sidebar on phone/tablet
+    if (typeof window !== "undefined" && window.innerWidth < 1024) setSidebarOpen(false)
   }
 
   async function confirmLockMemo() {
@@ -2703,6 +2902,91 @@ export function ToolNotebookPage() {
     document.getElementById(`memo-block-${blockId}`)?.scrollIntoView({ behavior: "smooth", block: "start" })
   }
 
+  /* ── find & replace ── */
+
+  function handleFindReplace() {
+    if (!activeMemo || !findQuery.trim()) return
+    const q = findQuery
+    let replaced = 0
+    void updateActiveMemoContent((doc) => ({
+      ...doc,
+      blocks: doc.blocks.map((block) => {
+        if (!block.text?.includes(q)) return block
+        replaced++
+        return { ...block, text: block.text.replaceAll(q, replaceQuery) }
+      }),
+    }))
+    setToast(`${findMatchCount}개 항목을 바꿨습니다`)
+    setFindQuery("")
+    setReplaceQuery("")
+    setFindOpen(false)
+  }
+
+  function handleFindReplaceOne() {
+    if (!activeMemo || !findQuery.trim()) return
+    const q = findQuery
+    void updateActiveMemoContent((doc) => {
+      const nextBlocks = [...doc.blocks]
+      for (let i = 0; i < nextBlocks.length; i++) {
+        const block = nextBlocks[i]
+        if (block.text?.includes(q)) {
+          nextBlocks[i] = { ...block, text: block.text.replace(q, replaceQuery) }
+          break
+        }
+      }
+      return { ...doc, blocks: nextBlocks }
+    })
+    setToast("1개 항목을 바꿨습니다")
+  }
+
+  /* ── highlight ── */
+
+  function setBlockHighlight(blockId: string, color: RNestMemoHighlightColor | null) {
+    if (!activeMemo) return
+    void updateActiveMemoContent((doc) => ({
+      ...doc,
+      blocks: doc.blocks.map((b) => (b.id === blockId ? { ...b, highlight: color || undefined } : b)),
+    }))
+  }
+
+  /* ── daily note ── */
+
+  function openOrCreateDailyNote() {
+    const now = new Date()
+    const dateStr = `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, "0")}.${String(now.getDate()).padStart(2, "0")}`
+    const dayNames = ["일", "월", "화", "수", "목", "금", "토"]
+    const dayName = dayNames[now.getDay()]
+    const dailyTitle = `${dateStr} ${dayName}요일`
+
+    // Check if daily note already exists
+    const existing = activeDocs.find((d) => d.title === dailyTitle)
+    if (existing) {
+      openMemo(existing.id)
+      return
+    }
+
+    // Create new daily note
+    const doc = createMemoFromPreset("blank")
+    const dailyDoc: RNestMemoDocument = {
+      ...doc,
+      title: dailyTitle,
+      icon: "moon",
+      coverStyle: null,
+      blocks: [
+        createMemoBlock("heading", { text: "오늘 할 일" }),
+        createMemoBlock("checklist", { text: "", checked: false }),
+        createMemoBlock("divider"),
+        createMemoBlock("heading", { text: "메모" }),
+        createMemoBlock("paragraph"),
+      ],
+    }
+    const latestMemo = store.getState().memo
+    commit({ ...latestMemo.documents, [dailyDoc.id]: dailyDoc }, insertRecent(latestMemo.recent, dailyDoc.id))
+    setActiveMemoId(dailyDoc.id)
+    setQuery("")
+    setToast("오늘의 데일리 노트를 만들었습니다")
+  }
+
   /* ── render ── */
 
   return (
@@ -2713,7 +2997,7 @@ export function ToolNotebookPage() {
       {/* ─── SIDEBAR BACKDROP (mobile) ─── */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 z-40 bg-black/20 md:hidden"
+          className="fixed inset-0 z-40 bg-black/20 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
@@ -2722,8 +3006,8 @@ export function ToolNotebookPage() {
       <aside
         className={cn(
           "flex shrink-0 flex-col border-r border-gray-100 bg-[#F9F9F8] transition-all duration-200",
-          "max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:shadow-xl",
-          sidebarOpen ? "w-[260px]" : "w-0 overflow-hidden"
+          "max-lg:fixed max-lg:inset-y-0 max-lg:left-0 max-lg:z-50 max-lg:shadow-xl",
+          sidebarOpen ? "w-[260px] max-lg:w-[min(86vw,320px)]" : "w-0 overflow-hidden"
         )}
       >
         {/* sidebar header */}
@@ -2757,8 +3041,8 @@ export function ToolNotebookPage() {
           </div>
         </div>
 
-        {/* new page button */}
-        <div className="px-2 pb-3">
+        {/* action buttons */}
+        <div className="space-y-0.5 px-2 pb-3">
           <button
             type="button"
             onClick={() => createMemo("blank")}
@@ -2767,6 +3051,44 @@ export function ToolNotebookPage() {
             <Plus className="h-4 w-4" />
             새 페이지
           </button>
+          <button
+            type="button"
+            onClick={openOrCreateDailyNote}
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] font-medium text-ios-sub transition-colors hover:bg-gray-200"
+          >
+            <Calendar className="h-4 w-4" />
+            오늘 메모
+          </button>
+          <div className="relative" ref={sortMenuRef}>
+            <button
+              type="button"
+              onClick={() => setShowSortMenu(!showSortMenu)}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] font-medium text-ios-sub transition-colors hover:bg-gray-200"
+            >
+              <ArrowUpDown className="h-4 w-4" />
+              {sortOptions.find((o) => o.key === sortKey)?.label ?? "수정일순"}
+            </button>
+            {showSortMenu && (
+              <div className="absolute left-0 top-full z-30 mt-1 w-40 rounded-xl border border-gray-200 bg-white py-1 shadow-lg">
+                {sortOptions.map((option) => (
+                  <button
+                    key={option.key}
+                    type="button"
+                    onClick={() => { setSortKey(option.key); setShowSortMenu(false) }}
+                    className={cn(
+                      "flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] transition-colors",
+                      sortKey === option.key
+                        ? "bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
+                        : "text-ios-text hover:bg-gray-50"
+                    )}
+                  >
+                    {option.key === "title" ? <ArrowDownAZ className="h-3.5 w-3.5" /> : <ArrowUpDown className="h-3.5 w-3.5" />}
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* page lists */}
@@ -2880,7 +3202,7 @@ export function ToolNotebookPage() {
       {/* ─── MAIN CONTENT ─── */}
       <main className="flex flex-1 flex-col overflow-hidden">
         {/* top bar */}
-        <div className="flex h-11 shrink-0 items-center gap-2 border-b border-gray-100 px-4">
+        <div className="flex h-12 shrink-0 items-center gap-2 border-b border-gray-100 px-3 lg:h-11 lg:px-4">
           {!sidebarOpen && (
             <button
               type="button"
@@ -2897,22 +3219,38 @@ export function ToolNotebookPage() {
               <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]">
                 {renderMemoIcon(activeMemo.icon, "h-3.5 w-3.5")}
               </span>
-              <span className="truncate text-[13px] font-medium text-ios-sub">{activeMemo.title || "제목 없음"}</span>
+              <div className="min-w-0 flex-1">
+                <span className="block truncate text-[14px] font-medium text-ios-sub lg:text-[13px]">
+                  {activeMemo.title || "제목 없음"}
+                </span>
+                <span className="mt-0.5 block text-[11px] text-ios-muted lg:hidden">{relativeTime(activeMemo.updatedAt)}</span>
+              </div>
               {activeMemoRaw?.pinned && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-[color:var(--rnest-accent-soft)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--rnest-accent)]">
+                <span className="hidden items-center gap-1 rounded-full bg-[color:var(--rnest-accent-soft)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--rnest-accent)] lg:inline-flex">
                   <Pin className="h-3 w-3" />
                   고정
                 </span>
               )}
               {activeMemoIsLocked && (
-                <span className="inline-flex items-center gap-1 rounded-full border border-[color:var(--rnest-accent-border)] bg-white px-2 py-0.5 text-[11px] font-medium text-ios-sub">
+                <span className="hidden items-center gap-1 rounded-full border border-[color:var(--rnest-accent-border)] bg-white px-2 py-0.5 text-[11px] font-medium text-ios-sub lg:inline-flex">
                   {activeMemoIsUnlocked ? <LockOpen className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
                   {activeMemoIsUnlocked ? "잠금 해제됨" : "잠금 메모"}
                 </span>
               )}
-              <span className="ml-auto text-[11.5px] text-gray-400">
+              <span className="ml-auto hidden text-[11.5px] text-gray-400 lg:inline">
                 {relativeTime(activeMemo.updatedAt)}
               </span>
+              <button
+                type="button"
+                onClick={() => { setFindOpen(!findOpen); if (!findOpen) requestAnimationFrame(() => findInputRef.current?.focus()) }}
+                className={cn(
+                  "hidden h-7 w-7 items-center justify-center rounded-md transition-colors lg:flex",
+                  findOpen ? "bg-gray-100 text-[color:var(--rnest-accent)]" : "text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                )}
+                title="검색 & 바꾸기 (⌘F)"
+              >
+                <Search className="h-4 w-4" />
+              </button>
               <div className="relative">
                 <button
                   type="button"
@@ -2934,31 +3272,85 @@ export function ToolNotebookPage() {
           )}
         </div>
 
+        {/* find & replace bar */}
+        {findOpen && activeMemo && (
+          <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-gray-100 bg-gray-50/70 px-4 py-2">
+            <div className="relative flex-1 min-w-[120px] max-w-[240px]">
+              <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                value={findQuery}
+                ref={findInputRef}
+                onChange={(e) => setFindQuery(e.target.value)}
+                placeholder="검색..."
+                autoFocus
+                className="h-8 w-full rounded-lg border border-gray-200 bg-white pl-7 pr-3 text-[13px] text-ios-text outline-none placeholder:text-gray-400 focus:border-[color:var(--rnest-accent-border)] focus:ring-1 focus:ring-[color:var(--rnest-accent-border)]"
+              />
+            </div>
+            <div className="relative flex-1 min-w-[120px] max-w-[240px]">
+              <Replace className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                value={replaceQuery}
+                onChange={(e) => setReplaceQuery(e.target.value)}
+                placeholder="바꾸기..."
+                className="h-8 w-full rounded-lg border border-gray-200 bg-white pl-7 pr-3 text-[13px] text-ios-text outline-none placeholder:text-gray-400 focus:border-[color:var(--rnest-accent-border)] focus:ring-1 focus:ring-[color:var(--rnest-accent-border)]"
+              />
+            </div>
+            {findQuery.trim() && (
+              <span className="text-[12px] text-ios-muted whitespace-nowrap">{findMatchCount}개 일치</span>
+            )}
+            <button
+              type="button"
+              onClick={handleFindReplaceOne}
+              disabled={!findQuery.trim() || findMatchCount === 0}
+              className="h-8 rounded-lg border border-gray-200 bg-white px-3 text-[12px] font-medium text-ios-sub transition-colors hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+            >
+              하나 바꾸기
+            </button>
+            <button
+              type="button"
+              onClick={handleFindReplace}
+              disabled={!findQuery.trim() || findMatchCount === 0}
+              className="h-8 rounded-lg border border-gray-200 bg-white px-3 text-[12px] font-medium text-ios-sub transition-colors hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+            >
+              모두 바꾸기
+            </button>
+            <button
+              type="button"
+              onClick={() => { setFindOpen(false); setFindQuery(""); setReplaceQuery("") }}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-200 hover:text-gray-600"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+
         {/* editor area */}
         <div className="flex-1 overflow-y-auto">
           {activeMemo ? (
-            <div className="mx-auto w-full max-w-[720px] px-6 py-10 sm:px-10 md:pl-16">
+            <div className="mx-auto w-full max-w-[720px] px-5 py-6 sm:px-6 lg:px-10 lg:py-10 xl:pl-16">
               {activeMemo.coverStyle && (
                 <div
                   className={cn(
-                    "mb-5 h-28 rounded-[28px] border border-white/70 shadow-[0_20px_40px_rgba(148,163,184,0.14)]",
+                    "mb-4 h-16 rounded-[24px] border border-white/70 shadow-[0_20px_40px_rgba(148,163,184,0.14)] lg:mb-5 lg:h-28 lg:rounded-[28px]",
                     coverClassMap[(activeMemo.coverStyle as RNestMemoCoverId) ?? "lavender-glow"]
                   )}
                 />
               )}
 
               {/* page icon */}
-              <div className="relative mb-4">
+              <div className="relative mb-3 lg:mb-4">
                 <button
                   type="button"
                   onClick={() => {
                     setShowIconPicker(!showIconPicker)
                     setShowCoverPicker(false)
                   }}
-                  className="flex h-[72px] w-[72px] items-center justify-center rounded-[22px] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)] shadow-[inset_0_0_0_1px_rgba(196,181,253,0.45)] transition-transform hover:scale-[1.03]"
+                  className="flex h-14 w-14 items-center justify-center rounded-[18px] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)] shadow-[inset_0_0_0_1px_rgba(196,181,253,0.45)] transition-transform hover:scale-[1.03] lg:h-[72px] lg:w-[72px] lg:rounded-[22px]"
                   title="아이콘 변경"
                 >
-                  {renderMemoIcon(activeMemo.icon, "h-9 w-9")}
+                  {renderMemoIcon(activeMemo.icon, "h-7 w-7 lg:h-9 lg:w-9")}
                 </button>
                 {showIconPicker && (
                   <IconPicker
@@ -2975,11 +3367,175 @@ export function ToolNotebookPage() {
                 value={activeMemo.title}
                 onChange={(e) => activeMemoRaw && saveRawDoc({ ...activeMemoRaw, title: e.target.value })}
                 placeholder="제목 없음"
-                className="mb-2 w-full border-none bg-transparent text-[32px] font-bold tracking-[-0.03em] text-ios-text outline-none placeholder:text-gray-200"
+                className="mb-2 w-full border-none bg-transparent text-[30px] font-bold tracking-[-0.03em] text-ios-text outline-none placeholder:text-gray-200 sm:text-[32px] lg:text-[36px]"
               />
 
-              {/* tags + reminder row */}
-              <div className="mb-8 flex flex-wrap items-center gap-3">
+              {/* compact tools for phone/tablet */}
+              <div className="mb-5 lg:hidden">
+                {activeMemoIsLocked && !activeMemoIsUnlocked ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-3 py-1 text-[12px] font-medium text-[color:var(--rnest-accent)]">
+                      <Lock className="h-3.5 w-3.5" />
+                      잠금 메모
+                    </span>
+                    {activeMemoRaw?.pinned && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-1 text-[12px] font-medium text-ios-sub shadow-[inset_0_0_0_1px_rgba(196,181,253,0.35)]">
+                        <Pin className="h-3.5 w-3.5 text-[color:var(--rnest-accent)]" />
+                        고정됨
+                      </span>
+                    )}
+                    {activeMemoRaw?.lock?.hint && (
+                      <span className="text-[12px] text-ios-muted">힌트: {activeMemoRaw.lock.hint}</span>
+                    )}
+                    <span className="ml-auto text-[11px] text-ios-muted">{relativeTime(activeMemo.updatedAt)}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUnlockPassword("")
+                        setUnlockError(null)
+                        setUnlockDialogOpen(true)
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-[color:var(--rnest-accent-border)] bg-white px-3 py-1 text-[12px] font-medium text-ios-sub transition-colors hover:bg-[color:var(--rnest-accent-soft)]"
+                    >
+                      <LockOpen className="h-3.5 w-3.5" />
+                      잠금 해제
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-ios-muted">
+                      {activeMemoRaw?.pinned && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-[color:var(--rnest-accent-soft)] px-2.5 py-1 font-medium text-[color:var(--rnest-accent)]">
+                          <Pin className="h-3 w-3" />
+                          고정됨
+                        </span>
+                      )}
+                      {activeMemoRaw?.lock && (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-[color:var(--rnest-accent-border)] bg-white px-2.5 py-1 font-medium text-ios-sub">
+                          {activeMemoIsUnlocked ? <LockOpen className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
+                          {activeMemoIsUnlocked ? "잠금 해제됨" : "잠금 메모"}
+                        </span>
+                      )}
+                      <span className="ml-auto">{relativeTime(activeMemo.updatedAt)}</span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {activeMemo.tags.slice(0, 2).map((tag) => (
+                        <span
+                          key={tag}
+                          className="inline-flex items-center rounded-full bg-[color:var(--rnest-accent-soft)] px-3 py-1 text-[12px] font-medium text-[color:var(--rnest-accent)]"
+                        >
+                          #{tag}
+                        </span>
+                      ))}
+                      {activeMemo.tags.length > 2 && (
+                        <span className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-[12px] font-medium text-ios-sub">
+                          +{activeMemo.tags.length - 2}
+                        </span>
+                      )}
+                      {activeMemo.reminderAt && (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-[12px] font-medium text-ios-sub shadow-[inset_0_0_0_1px_rgba(196,181,253,0.35)]">
+                          <Bell className="h-3.5 w-3.5 text-[color:var(--rnest-accent)]" />
+                          리마인더
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setShowCompactTools((current) => !current)}
+                        className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-[12px] font-medium text-ios-sub shadow-[inset_0_0_0_1px_rgba(196,181,253,0.35)] transition-colors hover:bg-[color:var(--rnest-accent-soft)]/35"
+                      >
+                        <Sparkles className="h-3.5 w-3.5 text-[color:var(--rnest-accent)]" />
+                        메모 도구
+                        {showCompactTools ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                      </button>
+                    </div>
+
+                    {showCompactTools && (
+                      <div className="mt-3 space-y-4 rounded-[24px] border border-[color:var(--rnest-accent-border)]/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(248,245,255,0.94)_100%)] p-4 shadow-[0_14px_34px_rgba(123,111,208,0.08)]">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <InlineTagEditor
+                            tags={activeMemo.tags}
+                            onChange={(next) => {
+                              void updateActiveMemoContent((doc) => ({ ...doc, tags: next }))
+                            }}
+                          />
+                          <div className="hidden h-4 w-px bg-gray-200 sm:block" />
+                          <ReminderPicker
+                            reminderAt={activeMemo.reminderAt}
+                            onSet={(v) => {
+                              void updateActiveMemoContent((doc) => ({ ...doc, reminderAt: v }))
+                            }}
+                          />
+                          <div className="relative">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowCoverPicker(!showCoverPicker)
+                                setShowIconPicker(false)
+                              }}
+                              className="inline-flex items-center gap-1.5 text-[12px] text-gray-400 transition-colors hover:text-gray-500"
+                            >
+                              <Sparkles className="h-3.5 w-3.5" />
+                              {activeMemo.coverStyle
+                                ? coverLabelMap[(activeMemo.coverStyle as RNestMemoCoverId) ?? "lavender-glow"]
+                                : "커버"}
+                            </button>
+                            {showCoverPicker && (
+                              <CoverPicker
+                                value={activeMemo.coverStyle}
+                                onChange={(coverStyle) => activeMemoRaw && saveRawDoc({ ...activeMemoRaw, coverStyle })}
+                                onClose={() => setShowCoverPicker(false)}
+                              />
+                            )}
+                          </div>
+                        </div>
+
+                        {headingBlocks.length > 0 && (
+                          <div>
+                            <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-ios-muted">
+                              <NotebookPen className="h-3.5 w-3.5" />
+                              페이지 목차
+                            </div>
+                            <div className="flex gap-2 overflow-x-auto pb-1">
+                              {headingBlocks.map((block) => (
+                                <button
+                                  key={block.id}
+                                  type="button"
+                                  onClick={() => jumpToBlock(block.id)}
+                                  className="shrink-0 rounded-full bg-[color:var(--rnest-accent-soft)] px-3 py-1.5 text-[12px] font-medium text-[color:var(--rnest-accent)] transition-colors hover:bg-[color:var(--rnest-accent-soft)]/80"
+                                >
+                                  {block.text}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        <div>
+                          <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-ios-muted">
+                            <Sparkles className="h-3.5 w-3.5" />
+                            빠른 삽입
+                          </div>
+                          <div className="flex gap-2 overflow-x-auto pb-1">
+                            {quickInsertTemplates.map((template) => (
+                              <button
+                                key={template.id}
+                                type="button"
+                                onClick={() => appendTemplateBundle(template.id)}
+                                className="shrink-0 rounded-full border border-[color:var(--rnest-accent-border)] bg-white px-3 py-1.5 text-[12px] font-medium text-[color:var(--rnest-accent)] transition-colors hover:bg-[color:var(--rnest-accent-soft)]"
+                              >
+                                {template.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {/* desktop tools row */}
+              <div className="mb-8 hidden flex-wrap items-center gap-3 lg:flex">
                 {activeMemoIsLocked && !activeMemoIsUnlocked ? (
                   <>
                     <span className="inline-flex items-center gap-1.5 rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-3 py-1 text-[12px] font-medium text-[color:var(--rnest-accent)]">
@@ -3094,7 +3650,7 @@ export function ToolNotebookPage() {
               ) : (
                 <>
                   {(headingBlocks.length > 0 || quickInsertTemplates.length > 0) && (
-                    <div className="mb-8 space-y-4">
+                    <div className="mb-8 hidden space-y-4 lg:block">
                       {headingBlocks.length > 0 && (
                         <div>
                           <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-ios-muted">
@@ -3138,7 +3694,7 @@ export function ToolNotebookPage() {
                   )}
 
                   {/* blocks */}
-                  <div className="space-y-2 pl-10">
+                  <div className="space-y-3 pl-12 lg:pl-10">
                     {activeMemo.blocks.map((block, idx) => {
                       const attachment = findAttachment(activeMemo, block.attachmentId)
                       return (
@@ -3167,13 +3723,14 @@ export function ToolNotebookPage() {
                         onInsertAsset={(kind) => beginAssetInsert(block.id, kind)}
                         onMoveUp={() => moveBlock(block.id, "up")}
                         onMoveDown={() => moveBlock(block.id, "down")}
+                        onHighlight={(color) => setBlockHighlight(block.id, color)}
                       />
                       )
                     })}
                   </div>
 
                   {/* add block */}
-                  <div className="mt-4 pl-10">
+                  <div className="mt-4 pl-12 lg:pl-10">
                     <AddBlockButton onSelect={appendBlock} />
                   </div>
                 </>

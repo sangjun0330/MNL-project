@@ -49,6 +49,17 @@ export type RNestMemoLockEnvelope = {
   lockedAt: number
 }
 
+export const memoHighlightColors = [
+  "yellow",
+  "green",
+  "blue",
+  "pink",
+  "orange",
+  "purple",
+] as const
+
+export type RNestMemoHighlightColor = (typeof memoHighlightColors)[number]
+
 export type RNestMemoBlock = {
   id: string
   type: RNestMemoBlockType
@@ -59,6 +70,7 @@ export type RNestMemoBlock = {
   mediaAspectRatio?: number
   checked?: boolean
   collapsed?: boolean
+  highlight?: RNestMemoHighlightColor | null
   table?: RNestMemoTable
 }
 
@@ -232,9 +244,11 @@ function normalizeMemoIcon(value: unknown, fallback: RNestMemoIconId): RNestMemo
   const raw = cleanText(value, 24)
   const legacyMap: Record<string, RNestMemoIconId> = {
     "📝": "note",
+    "🗒": "note",
     "📄": "page",
     "✅": "check",
     "📋": "table",
+    "📊": "table",
     "🗂": "folder",
     "🧾": "clip",
     "🌿": "leaf",
@@ -269,7 +283,7 @@ export function sanitizeNotebookTags(value: unknown) {
 }
 
 function sanitizeIcon(value: unknown, fallback: string) {
-  const text = cleanText(value, 4)
+  const text = cleanText(value, 24)
   return text || fallback
 }
 
@@ -451,6 +465,7 @@ export function createMemoBlock(type: RNestMemoBlockType, input?: Partial<RNestM
     mediaAspectRatio: undefined,
     checked: type === "checklist" ? Boolean(input?.checked) : undefined,
     collapsed: type === "toggle" ? Boolean(input?.collapsed) : undefined,
+    highlight: input?.highlight && memoHighlightColors.includes(input.highlight) ? input.highlight : undefined,
   }
 }
 
@@ -836,7 +851,7 @@ export function createRecordTemplateSnapshot(input?: Partial<RNestRecordTemplate
   return {
     id: input?.id ?? createNotebookId("record_template"),
     name: cleanText(input?.name, 40) || "새 기록지",
-    icon: sanitizeIcon(input?.icon, "🗂"),
+    icon: sanitizeIcon(input?.icon, "folder"),
     fields,
     defaultSort:
       input?.defaultSort && typeof input.defaultSort.fieldId === "string"
@@ -875,7 +890,7 @@ export const builtinRecordTemplates: RNestRecordTemplate[] = [
   createRecordTemplateSnapshot({
     id: "builtin_free",
     name: "자유 기록지",
-    icon: "🗒",
+    icon: "note",
     fields: [
       createRecordField("date", { id: "date", label: "날짜", required: true }),
       createRecordField("text", { id: "focus", label: "핵심" }),
@@ -886,7 +901,7 @@ export const builtinRecordTemplates: RNestRecordTemplate[] = [
   createRecordTemplateSnapshot({
     id: "builtin_check",
     name: "체크 기록지",
-    icon: "✅",
+    icon: "check",
     fields: [
       createRecordField("date", { id: "date", label: "날짜", required: true }),
       createRecordField("checkbox", { id: "done", label: "완료" }),
@@ -898,7 +913,7 @@ export const builtinRecordTemplates: RNestRecordTemplate[] = [
   createRecordTemplateSnapshot({
     id: "builtin_table",
     name: "표형 기록지",
-    icon: "📊",
+    icon: "table",
     fields: [
       createRecordField("date", { id: "date", label: "날짜", required: true }),
       createRecordField("singleSelect", { id: "category", label: "분류", options: ["A", "B", "C"] }),
@@ -910,7 +925,7 @@ export const builtinRecordTemplates: RNestRecordTemplate[] = [
   createRecordTemplateSnapshot({
     id: "builtin_reflection",
     name: "회고 기록지",
-    icon: "🌙",
+    icon: "moon",
     fields: [
       createRecordField("date", { id: "date", label: "날짜", required: true }),
       createRecordField("singleSelect", {
@@ -1147,7 +1162,7 @@ export function recordEntriesToCsv(template: RNestRecordTemplate, entries: RNest
     .join("\n")
 }
 
-export const notebookEmojiOptions = ["📝", "📄", "✅", "📋", "🗂", "🧾", "🌿", "💡", "📚", "🫧", "🌙", "📌"]
+export const notebookEmojiOptions = [...memoIconOptions]
 
 export const memoReminderPresets: Array<{ id: string; label: string; minutes: number }> = [
   { id: "none", label: "없음", minutes: 0 },
