@@ -79,6 +79,7 @@ export type RNestMemoDocument = {
   title: string
   icon: string
   coverStyle: string | null
+  folderId: string | null
   pinned: boolean
   favorite: boolean
   trashedAt: number | null
@@ -92,7 +93,16 @@ export type RNestMemoDocument = {
   updatedAt: number
 }
 
+export type RNestMemoFolder = {
+  id: string
+  name: string
+  icon: string
+  createdAt: number
+  updatedAt: number
+}
+
 export type RNestMemoState = {
+  folders: Record<string, RNestMemoFolder | undefined>
   documents: Record<string, RNestMemoDocument | undefined>
   recent: string[]
 }
@@ -209,6 +219,7 @@ export const memoCoverOptions = [
 export type RNestMemoCoverId = (typeof memoCoverOptions)[number]
 
 const MAX_TITLE_LENGTH = 80
+const MAX_FOLDER_NAME_LENGTH = 40
 const MAX_TAG_LENGTH = 24
 const MAX_TAGS = 8
 const MAX_BLOCK_TEXT_LENGTH = 4000
@@ -397,6 +408,7 @@ function sanitizeMemoLockEnvelope(value: unknown): RNestMemoLockEnvelope | null 
 
 export function defaultMemoState(): RNestMemoState {
   return {
+    folders: {},
     documents: {},
     recent: [],
   }
@@ -527,6 +539,17 @@ export function coerceMemoBlockType(block: RNestMemoBlock, nextType: RNestMemoBl
   })
 }
 
+function createMemoFolderBase(input?: Partial<RNestMemoFolder>): RNestMemoFolder {
+  const timestamp = nowTs()
+  return {
+    id: input?.id ?? createNotebookId("memo_folder"),
+    name: cleanText(input?.name, MAX_FOLDER_NAME_LENGTH) || "새 폴더",
+    icon: normalizeMemoIcon(input?.icon, "folder"),
+    createdAt: typeof input?.createdAt === "number" && Number.isFinite(input.createdAt) ? input.createdAt : timestamp,
+    updatedAt: typeof input?.updatedAt === "number" && Number.isFinite(input.updatedAt) ? input.updatedAt : timestamp,
+  }
+}
+
 function createMemoDocumentBase(input?: Partial<RNestMemoDocument>): RNestMemoDocument {
   const timestamp = nowTs()
   const lock = sanitizeMemoLockEnvelope(input?.lock)
@@ -550,6 +573,7 @@ function createMemoDocumentBase(input?: Partial<RNestMemoDocument>): RNestMemoDo
     title: input?.title != null ? cleanText(input.title, MAX_TITLE_LENGTH) : "새 메모",
     icon: normalizeMemoIcon(input?.icon, "note"),
     coverStyle: normalizeMemoCover(input?.coverStyle),
+    folderId: cleanText(input?.folderId, 80) || null,
     pinned: Boolean(input?.pinned),
     favorite: Boolean(input?.favorite),
     trashedAt: typeof input?.trashedAt === "number" && Number.isFinite(input.trashedAt) ? input.trashedAt : null,
@@ -657,7 +681,10 @@ export function createMemoFromPreset(presetId: string) {
 
 export function hasMeaningfulMemoState(state: RNestMemoState | null | undefined) {
   if (!state) return false
-  return Object.values(state.documents ?? {}).some((document) => Boolean(document))
+  return (
+    Object.values(state.documents ?? {}).some((document) => Boolean(document)) ||
+    Object.values(state.folders ?? {}).some((folder) => Boolean(folder))
+  )
 }
 
 export function memoBlockToPlainText(block: RNestMemoBlock) {
@@ -786,6 +813,17 @@ export function memoDocumentToMarkdown(document: RNestMemoDocument) {
 
 export function sanitizeMemoState(raw: unknown): RNestMemoState {
   const source = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {}
+  const foldersSource =
+    source.folders && typeof source.folders === "object" ? (source.folders as Record<string, unknown>) : {}
+  const folders: Record<string, RNestMemoFolder | undefined> = {}
+  for (const [id, value] of Object.entries(foldersSource)) {
+    if (!value || typeof value !== "object") continue
+    const folder = createMemoFolderBase({
+      ...(value as Partial<RNestMemoFolder>),
+      id,
+    })
+    folders[folder.id] = folder
+  }
   const documentsSource =
     source.documents && typeof source.documents === "object" ? (source.documents as Record<string, unknown>) : {}
   const documents: Record<string, RNestMemoDocument | undefined> = {}
@@ -799,6 +837,9 @@ export function sanitizeMemoState(raw: unknown): RNestMemoState {
         ? (value as RNestMemoDocument).blocks
         : [createMemoBlock("paragraph")],
     })
+    if (doc.folderId && !folders[doc.folderId]) {
+      doc.folderId = null
+    }
     documents[doc.id] = doc
   }
 
@@ -809,6 +850,7 @@ export function sanitizeMemoState(raw: unknown): RNestMemoState {
     .slice(0, 20)
 
   return {
+    folders,
     documents,
     recent,
   }

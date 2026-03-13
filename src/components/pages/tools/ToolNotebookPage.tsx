@@ -15,6 +15,7 @@ import {
   File,
   FileText,
   Folder,
+  FolderPlus,
   GripVertical,
   Heading1,
   Highlighter,
@@ -32,6 +33,7 @@ import {
   MoreHorizontal,
   NotebookPen,
   Paperclip,
+  Pencil,
   Pin,
   PinOff,
   Plus,
@@ -71,6 +73,7 @@ import {
   type RNestMemoBlockType,
   type RNestMemoCoverId,
   type RNestMemoDocument,
+  type RNestMemoFolder,
   type RNestMemoHighlightColor,
   type RNestMemoIconId,
   type RNestMemoState,
@@ -490,6 +493,10 @@ function sortDocsByKey(docs: RNestMemoDocument[], key: MemoSortKey): RNestMemoDo
   })
 }
 
+function sortFoldersByName(folders: RNestMemoFolder[]) {
+  return [...folders].sort((a, b) => a.name.localeCompare(b.name, "ko"))
+}
+
 /** Ref callback that auto-sizes a textarea on mount & when value changes */
 function autoSizeRef(el: HTMLTextAreaElement | null) {
   if (!el) return
@@ -508,6 +515,11 @@ function PageItem({
   isLocked,
   listKey,
   onClick,
+  draggable = false,
+  isDragging = false,
+  className,
+  onDragStart,
+  onDragEnd,
 }: {
   doc: RNestMemoDocument
   summary: string
@@ -515,6 +527,11 @@ function PageItem({
   isLocked: boolean
   listKey: string
   onClick: () => void
+  draggable?: boolean
+  isDragging?: boolean
+  className?: string
+  onDragStart?: React.DragEventHandler<HTMLButtonElement>
+  onDragEnd?: React.DragEventHandler<HTMLButtonElement>
 }) {
   const itemRef = useRef<HTMLButtonElement>(null)
 
@@ -553,11 +570,17 @@ function PageItem({
       ref={itemRef}
       type="button"
       onClick={onClick}
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
       className={cn(
         "group flex w-full items-start gap-2 rounded-xl px-2 py-2 text-left transition-colors",
+        draggable && "cursor-grab active:cursor-grabbing",
+        isDragging && "opacity-45",
         isActive
           ? "bg-[color:var(--rnest-accent-soft)] text-ios-text"
-          : "text-ios-sub hover:bg-gray-100"
+          : "text-ios-sub hover:bg-gray-100",
+        className
       )}
     >
       <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-white text-ios-sub shadow-[inset_0_0_0_1px_rgba(148,163,184,0.16)]">
@@ -577,6 +600,151 @@ function PageItem({
         )}
       </span>
     </button>
+  )
+}
+
+function FolderItem({
+  folder,
+  docCount,
+  isOpen,
+  isActive,
+  isDropActive,
+  isEditing,
+  draftName,
+  onToggle,
+  onStartEdit,
+  onDraftChange,
+  onDraftCommit,
+  onDraftCancel,
+  onDelete,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  children,
+}: {
+  folder: RNestMemoFolder
+  docCount: number
+  isOpen: boolean
+  isActive: boolean
+  isDropActive: boolean
+  isEditing: boolean
+  draftName: string
+  onToggle: () => void
+  onStartEdit: () => void
+  onDraftChange: (value: string) => void
+  onDraftCommit: () => void
+  onDraftCancel: () => void
+  onDelete: () => void
+  onDragOver: React.DragEventHandler<HTMLDivElement>
+  onDragLeave: React.DragEventHandler<HTMLDivElement>
+  onDrop: React.DragEventHandler<HTMLDivElement>
+  children?: React.ReactNode
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!isEditing) return
+    inputRef.current?.focus()
+    inputRef.current?.select()
+  }, [isEditing])
+
+  return (
+    <div className="group">
+      <div
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+        className={cn(
+          "rounded-2xl border transition-all",
+          isDropActive
+            ? "border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)]/80 shadow-[0_10px_24px_rgba(123,111,208,0.12)]"
+            : "border-transparent"
+        )}
+      >
+        <div className="flex items-center gap-1 rounded-2xl px-1 py-0.5">
+          {isEditing ? (
+            <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl bg-white px-2 py-2 shadow-[inset_0_0_0_1px_rgba(196,181,253,0.32)]">
+              <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]">
+                {renderMemoIcon(folder.icon, "h-4 w-4")}
+              </span>
+              <input
+                ref={inputRef}
+                value={draftName}
+                onChange={(e) => onDraftChange(e.target.value)}
+                onBlur={onDraftCommit}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault()
+                    onDraftCommit()
+                  }
+                  if (e.key === "Escape") {
+                    e.preventDefault()
+                    onDraftCancel()
+                  }
+                }}
+                className={cn(
+                  "min-w-0 flex-1 border-none bg-transparent text-[13px] font-medium text-ios-text outline-none",
+                  mobileSafeFineClass
+                )}
+              />
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={onToggle}
+              className={cn(
+                "flex min-w-0 flex-1 items-center gap-2 rounded-xl px-2 py-2 text-left transition-colors",
+                isActive
+                  ? "bg-[color:var(--rnest-accent-soft)] text-ios-text"
+                  : "text-ios-sub hover:bg-gray-100"
+              )}
+            >
+              {isOpen ? <ChevronDown className="h-3.5 w-3.5 text-gray-400" /> : <ChevronRight className="h-3.5 w-3.5 text-gray-400" />}
+              <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white text-[color:var(--rnest-accent)] shadow-[inset_0_0_0_1px_rgba(196,181,253,0.3)]">
+                {renderMemoIcon(folder.icon, "h-4 w-4")}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ios-text">{folder.name}</span>
+              <span className="rounded-full bg-white px-1.5 py-0.5 text-[10.5px] font-medium text-ios-muted shadow-[inset_0_0_0_1px_rgba(226,232,240,0.8)]">
+                {docCount}
+              </span>
+            </button>
+          )}
+
+          {!isEditing && (
+            <div className="flex items-center gap-0.5 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
+              <button
+                type="button"
+                onClick={onStartEdit}
+                className="flex h-7 w-7 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+                title="이름 변경"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={onDelete}
+                className="flex h-7 w-7 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500"
+                title="폴더 삭제"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+        </div>
+
+        {isDropActive && (
+          <div className="px-3 pb-2 pt-0.5 text-[11px] font-medium text-[color:var(--rnest-accent)]">
+            여기에 놓으면 폴더에 추가됩니다
+          </div>
+        )}
+      </div>
+
+      {isOpen && children ? (
+        <div className="ml-7 mt-1 space-y-0.5 border-l border-[color:var(--rnest-accent-border)]/60 pl-3">
+          {children}
+        </div>
+      ) : null}
+    </div>
   )
 }
 
@@ -2231,6 +2399,12 @@ export function ToolNotebookPage() {
   // sort
   const [sortKey, setSortKey] = useState<MemoSortKey>("updatedAt")
   const [showSortMenu, setShowSortMenu] = useState(false)
+  const [editingFolderId, setEditingFolderId] = useState<string | null>(null)
+  const [folderNameDraft, setFolderNameDraft] = useState("")
+  const [folderOpenState, setFolderOpenState] = useState<Record<string, boolean>>({})
+  const [draggingDocId, setDraggingDocId] = useState<string | null>(null)
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null)
+  const [dragOverRootPages, setDragOverRootPages] = useState(false)
   const sortMenuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -2264,6 +2438,12 @@ export function ToolNotebookPage() {
   }, [activeMemoId])
 
   useEffect(() => {
+    const folderId = activeMemoId ? memoState.documents[activeMemoId]?.folderId ?? null : null
+    if (!folderId) return
+    setFolderOpenState((current) => (current[folderId] === false ? { ...current, [folderId]: true } : current))
+  }, [activeMemoId, memoState.documents])
+
+  useEffect(() => {
     function clearUnlockedState() {
       unlockKeysRef.current = {}
       setUnlockedPayloads({})
@@ -2291,6 +2471,14 @@ export function ToolNotebookPage() {
     [memoState.documents]
   )
 
+  const allFolders = useMemo(
+    () =>
+      sortFoldersByName(
+        Object.values(memoState.folders).filter((folder): folder is RNestMemoFolder => Boolean(folder))
+      ),
+    [memoState.folders]
+  )
+
   const activeDocs = useMemo(
     () => allDocs.filter((d) => d.trashedAt == null),
     [allDocs]
@@ -2313,10 +2501,26 @@ export function ToolNotebookPage() {
     [activeDocs]
   )
 
-  const unpinnedDocs = useMemo(
-    () => sortDocsByKey(activeDocs.filter((d) => !d.pinned), sortKey),
+  const rootDocs = useMemo(
+    () => sortDocsByKey(activeDocs.filter((d) => !d.pinned && !d.folderId), sortKey),
     [activeDocs, sortKey]
   )
+
+  const folderDocsByFolderId = useMemo(() => {
+    const next: Record<string, RNestMemoDocument[]> = {}
+    for (const folder of allFolders) next[folder.id] = []
+    const sorted = sortDocsByKey(activeDocs.filter((d) => Boolean(d.folderId)), sortKey)
+    for (const doc of sorted) {
+      if (!doc.folderId || !next[doc.folderId]) continue
+      next[doc.folderId].push(doc)
+    }
+    for (const folderId of Object.keys(next)) {
+      next[folderId] = [...next[folderId]].sort(
+        (a, b) => Number(b.pinned) - Number(a.pinned) || 0
+      )
+    }
+    return next
+  }, [activeDocs, allFolders, sortKey])
 
   const favoriteDocs = useMemo(
     () => activeDocs.filter((d) => d.favorite),
@@ -2333,6 +2537,11 @@ export function ToolNotebookPage() {
   const trashedDocs = useMemo(
     () => allDocs.filter((d) => d.trashedAt != null),
     [allDocs]
+  )
+
+  const draggingDoc = useMemo(
+    () => activeDocs.find((doc) => doc.id === draggingDocId) ?? null,
+    [activeDocs, draggingDocId]
   )
 
   const searchResults = useMemo(() => {
@@ -2403,8 +2612,17 @@ export function ToolNotebookPage() {
 
   /* ── state operations ── */
 
-  function commit(docs: Record<string, RNestMemoDocument | undefined>, recent?: string[]) {
-    store.setMemoState({ documents: docs, recent: recent ?? memoState.recent })
+  function commit(
+    docs: Record<string, RNestMemoDocument | undefined>,
+    recent?: string[],
+    folders?: Record<string, RNestMemoFolder | undefined>
+  ) {
+    const latestMemo = store.getState().memo
+    store.setMemoState({
+      folders: folders ?? latestMemo.folders,
+      documents: docs,
+      recent: recent ?? latestMemo.recent,
+    })
   }
 
   function getLatestMemoState() {
@@ -2506,6 +2724,106 @@ export function ToolNotebookPage() {
     } else {
       setToast("새 페이지를 만들었습니다")
     }
+  }
+
+  function createFolder() {
+    const latestMemo = getLatestMemoState()
+    const timestamp = Date.now()
+    const folder: RNestMemoFolder = {
+      id: crypto.randomUUID(),
+      name: "새 폴더",
+      icon: "folder",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }
+    commit(latestMemo.documents, latestMemo.recent, {
+      ...latestMemo.folders,
+      [folder.id]: folder,
+    })
+    setFolderOpenState((current) => ({ ...current, [folder.id]: true }))
+    setEditingFolderId(folder.id)
+    setFolderNameDraft(folder.name)
+    setToast("폴더를 만들었습니다")
+  }
+
+  function commitFolderRename(folderId: string) {
+    const latestMemo = getLatestMemoState()
+    const folder = latestMemo.folders[folderId]
+    if (!folder) {
+      setEditingFolderId(null)
+      setFolderNameDraft("")
+      return
+    }
+    const nextName = folderNameDraft.trim() || "새 폴더"
+    commit(latestMemo.documents, latestMemo.recent, {
+      ...latestMemo.folders,
+      [folderId]: {
+        ...folder,
+        name: nextName,
+        updatedAt: Date.now(),
+      },
+    })
+    setEditingFolderId(null)
+    setFolderNameDraft("")
+  }
+
+  function cancelFolderRename() {
+    setEditingFolderId(null)
+    setFolderNameDraft("")
+  }
+
+  function deleteFolder(folderId: string) {
+    const latestMemo = getLatestMemoState()
+    const folder = latestMemo.folders[folderId]
+    if (!folder) return
+    const nextFolders = { ...latestMemo.folders }
+    delete nextFolders[folderId]
+    const nextDocuments: Record<string, RNestMemoDocument | undefined> = { ...latestMemo.documents }
+    for (const doc of Object.values(latestMemo.documents)) {
+      if (!doc || doc.folderId !== folderId) continue
+      nextDocuments[doc.id] = { ...doc, folderId: null }
+    }
+    commit(nextDocuments, latestMemo.recent, nextFolders)
+    setFolderOpenState((current) => {
+      if (!(folderId in current)) return current
+      const next = { ...current }
+      delete next[folderId]
+      return next
+    })
+    if (editingFolderId === folderId) {
+      cancelFolderRename()
+    }
+    setToast("폴더를 삭제하고 페이지를 바깥으로 이동했습니다")
+  }
+
+  function moveDocToFolder(docId: string, folderId: string | null) {
+    const latestMemo = getLatestMemoState()
+    const doc = latestMemo.documents[docId]
+    if (!doc) return
+    if (folderId && !latestMemo.folders[folderId]) return
+    if ((doc.folderId ?? null) === folderId) return
+    saveRawDoc(
+      { ...doc, folderId },
+      { touchRecent: false, touchUpdatedAt: false }
+    )
+    if (folderId) {
+      setFolderOpenState((current) => ({ ...current, [folderId]: true }))
+      setToast("폴더에 페이지를 추가했습니다")
+    } else {
+      setToast("페이지를 폴더 밖으로 이동했습니다")
+    }
+  }
+
+  function handlePageDragStart(event: React.DragEvent<HTMLButtonElement>, docId: string) {
+    setDraggingDocId(docId)
+    event.dataTransfer.effectAllowed = "move"
+    event.dataTransfer.setData("text/plain", docId)
+  }
+
+  function handlePageDragEnd() {
+    setDraggingDocId(null)
+    setDragOverFolderId(null)
+    setDragOverRootPages(false)
   }
 
   function duplicateMemo(doc: RNestMemoDocument) {
@@ -3134,6 +3452,14 @@ export function ToolNotebookPage() {
           </button>
           <button
             type="button"
+            onClick={createFolder}
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] font-medium text-ios-sub transition-colors hover:bg-gray-200"
+          >
+            <FolderPlus className="h-4 w-4" />
+            폴더 만들기
+          </button>
+          <button
+            type="button"
             onClick={openOrCreateDailyNote}
             className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] font-medium text-ios-sub transition-colors hover:bg-gray-200"
           >
@@ -3188,6 +3514,10 @@ export function ToolNotebookPage() {
                   listKey="search"
                   isActive={activeMemoId === doc.id}
                   onClick={() => openMemo(doc.id)}
+                  draggable
+                  isDragging={draggingDocId === doc.id}
+                  onDragStart={(event) => handlePageDragStart(event, doc.id)}
+                  onDragEnd={handlePageDragEnd}
                 />
               ))}
             </SidebarSection>
@@ -3204,6 +3534,10 @@ export function ToolNotebookPage() {
                       listKey="pinned"
                       isActive={activeMemoId === doc.id}
                       onClick={() => openMemo(doc.id)}
+                      draggable
+                      isDragging={draggingDocId === doc.id}
+                      onDragStart={(event) => handlePageDragStart(event, doc.id)}
+                      onDragEnd={handlePageDragEnd}
                     />
                   ))}
                 </SidebarSection>
@@ -3220,6 +3554,10 @@ export function ToolNotebookPage() {
                       listKey="recent"
                       isActive={activeMemoId === doc.id}
                       onClick={() => openMemo(doc.id)}
+                      draggable
+                      isDragging={draggingDocId === doc.id}
+                      onDragStart={(event) => handlePageDragStart(event, doc.id)}
+                      onDragEnd={handlePageDragEnd}
                     />
                   ))}
                 </SidebarSection>
@@ -3236,18 +3574,133 @@ export function ToolNotebookPage() {
                       listKey="favorites"
                       isActive={activeMemoId === doc.id}
                       onClick={() => openMemo(doc.id)}
+                      draggable
+                      isDragging={draggingDocId === doc.id}
+                      onDragStart={(event) => handlePageDragStart(event, doc.id)}
+                      onDragEnd={handlePageDragEnd}
                     />
                   ))}
                 </SidebarSection>
               )}
 
-              <SidebarSection title="페이지" count={unpinnedDocs.length}>
+              <SidebarSection key={`folders-${allFolders.length > 0 ? "filled" : "empty"}`} title="폴더" count={allFolders.length}>
+                {allFolders.length === 0 ? (
+                  <div className="px-2 py-4 text-[12px] leading-5 text-gray-400">
+                    폴더를 만들면 비슷한 메모를 한곳에 정리할 수 있습니다
+                  </div>
+                ) : (
+                  allFolders.map((folder) => {
+                    const docs = folderDocsByFolderId[folder.id] ?? []
+                    const isOpen = folderOpenState[folder.id] ?? true
+                    return (
+                      <FolderItem
+                        key={folder.id}
+                        folder={folder}
+                        docCount={docs.length}
+                        isOpen={isOpen}
+                        isActive={activeMemoRaw?.folderId === folder.id}
+                        isDropActive={dragOverFolderId === folder.id}
+                        isEditing={editingFolderId === folder.id}
+                        draftName={editingFolderId === folder.id ? folderNameDraft : folder.name}
+                        onToggle={() =>
+                          setFolderOpenState((current) => ({
+                            ...current,
+                            [folder.id]: !(current[folder.id] ?? true),
+                          }))
+                        }
+                        onStartEdit={() => {
+                          setEditingFolderId(folder.id)
+                          setFolderNameDraft(folder.name)
+                          setFolderOpenState((current) => ({ ...current, [folder.id]: true }))
+                        }}
+                        onDraftChange={setFolderNameDraft}
+                        onDraftCommit={() => commitFolderRename(folder.id)}
+                        onDraftCancel={cancelFolderRename}
+                        onDelete={() => deleteFolder(folder.id)}
+                        onDragOver={(event) => {
+                          if (!draggingDocId) return
+                          event.preventDefault()
+                          event.dataTransfer.dropEffect = "move"
+                          setDragOverRootPages(false)
+                          setDragOverFolderId(folder.id)
+                          setFolderOpenState((current) => ({ ...current, [folder.id]: true }))
+                        }}
+                        onDragLeave={() => {
+                          setDragOverFolderId((current) => (current === folder.id ? null : current))
+                        }}
+                        onDrop={(event) => {
+                          event.preventDefault()
+                          const docId = event.dataTransfer.getData("text/plain") || draggingDocId
+                          if (docId) moveDocToFolder(docId, folder.id)
+                          handlePageDragEnd()
+                        }}
+                      >
+                        {docs.length === 0 ? (
+                          <div className="rounded-xl px-2 py-2 text-[11.5px] text-gray-400">
+                            아직 폴더 안에 페이지가 없습니다
+                          </div>
+                        ) : (
+                          docs.map((doc) => (
+                            <PageItem
+                              key={doc.id}
+                              doc={getRenderableDoc(doc)}
+                              summary={buildSummary(getRenderableDoc(doc))}
+                              isLocked={Boolean(doc.lock && !unlockedPayloads[doc.id])}
+                              listKey={`folder:${folder.id}`}
+                              isActive={activeMemoId === doc.id}
+                              onClick={() => openMemo(doc.id)}
+                              draggable
+                              isDragging={draggingDocId === doc.id}
+                              onDragStart={(event) => handlePageDragStart(event, doc.id)}
+                              onDragEnd={handlePageDragEnd}
+                              className="px-2 py-1.5"
+                            />
+                          ))
+                        )}
+                      </FolderItem>
+                    )
+                  })
+                )}
+              </SidebarSection>
+
+              <SidebarSection title="페이지" count={rootDocs.length}>
+                {draggingDoc?.folderId ? (
+                  <div
+                    onDragOver={(event) => {
+                      event.preventDefault()
+                      event.dataTransfer.dropEffect = "move"
+                      setDragOverFolderId(null)
+                      setDragOverRootPages(true)
+                    }}
+                    onDragLeave={() => setDragOverRootPages(false)}
+                    onDrop={(event) => {
+                      event.preventDefault()
+                      const docId = event.dataTransfer.getData("text/plain") || draggingDocId
+                      if (docId) moveDocToFolder(docId, null)
+                      handlePageDragEnd()
+                    }}
+                    className={cn(
+                      "mb-1 rounded-2xl border border-dashed px-3 py-2 text-[11.5px] font-medium transition-colors",
+                      dragOverRootPages
+                        ? "border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
+                        : "border-gray-200 text-ios-muted"
+                    )}
+                  >
+                    폴더 밖으로 이동
+                  </div>
+                ) : null}
+
                 {activeDocs.length === 0 && (
                   <div className="px-2 py-6 text-center text-[12px] text-gray-400">
                     아직 메모가 없습니다
                   </div>
                 )}
-                {unpinnedDocs.map((doc) => (
+                {activeDocs.length > 0 && rootDocs.length === 0 && (
+                  <div className="px-2 py-3 text-center text-[12px] text-gray-400">
+                    모든 페이지가 폴더 안에 있습니다
+                  </div>
+                )}
+                {rootDocs.map((doc) => (
                   <PageItem
                     key={doc.id}
                     doc={getRenderableDoc(doc)}
@@ -3256,6 +3709,10 @@ export function ToolNotebookPage() {
                     listKey="pages"
                     isActive={activeMemoId === doc.id}
                     onClick={() => openMemo(doc.id)}
+                    draggable
+                    isDragging={draggingDocId === doc.id}
+                    onDragStart={(event) => handlePageDragStart(event, doc.id)}
+                    onDragEnd={handlePageDragEnd}
                   />
                 ))}
               </SidebarSection>
@@ -3271,6 +3728,10 @@ export function ToolNotebookPage() {
                       listKey="trash"
                       isActive={activeMemoId === doc.id}
                       onClick={() => openMemo(doc.id)}
+                      draggable
+                      isDragging={draggingDocId === doc.id}
+                      onDragStart={(event) => handlePageDragStart(event, doc.id)}
+                      onDragEnd={handlePageDragEnd}
                     />
                   ))}
                 </SidebarSection>
