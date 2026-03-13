@@ -949,10 +949,23 @@ function ImageResizableBlock({
   const [resizing, setResizing] = useState(false)
   const [imgHovered, setImgHovered] = useState(false)
   const [loadError, setLoadError] = useState(false)
+  const [previewWidthPct, setPreviewWidthPct] = useState(() => clampImageWidth(block.mediaWidth))
   const startDataRef = useRef<{ startX: number; startY: number; startW: number; startH: number; handle: string } | null>(null)
+  const previewWidthRef = useRef(previewWidthPct)
 
-  const widthPct = clampImageWidth(block.mediaWidth)
   const aspectRatio = clampImageAspectRatio(block.mediaAspectRatio)
+
+  useEffect(() => {
+    previewWidthRef.current = previewWidthPct
+  }, [previewWidthPct])
+
+  useEffect(() => {
+    if (!resizing) {
+      const nextWidth = clampImageWidth(block.mediaWidth)
+      previewWidthRef.current = nextWidth
+      setPreviewWidthPct(nextWidth)
+    }
+  }, [block.mediaWidth, resizing])
 
   useEffect(() => {
     setLoadError(false)
@@ -984,14 +997,19 @@ function ImageResizableBlock({
       const effectiveDx = isLeft ? -dx : dx
       const newW = Math.max(100, startW + effectiveDx)
       const newPct = Math.min(100, Math.max(20, Math.round((newW / parentWidth) * 100)))
-      onChange({ ...block, mediaWidth: newPct })
+      previewWidthRef.current = newPct
+      setPreviewWidthPct(newPct)
     }
 
     function handleUp() {
+      const nextWidth = previewWidthRef.current
       startDataRef.current = null
       setResizing(false)
       window.removeEventListener("pointermove", handleMove)
       window.removeEventListener("pointerup", handleUp)
+      if (nextWidth !== clampImageWidth(block.mediaWidth)) {
+        onChange({ ...block, mediaWidth: nextWidth })
+      }
     }
 
     window.addEventListener("pointermove", handleMove)
@@ -1008,7 +1026,7 @@ function ImageResizableBlock({
       {attachmentUrl && !loadError ? (
         <div
           className="relative inline-block"
-          style={{ width: `${widthPct}%` }}
+          style={{ width: `${previewWidthPct}%` }}
           ref={containerRef}
           onMouseEnter={() => setImgHovered(true)}
           onMouseLeave={() => { if (!resizing) setImgHovered(false) }}
@@ -1082,37 +1100,6 @@ function ImageResizableBlock({
           {loadError ? "이미지를 불러오지 못했습니다" : "이미지를 불러오는 중..."}
         </div>
       )}
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <span className="text-[11px] font-medium text-ios-muted">크기</span>
-        {[40, 70, 100].map((preset) => (
-          <button
-            key={preset}
-            type="button"
-            onClick={() => onChange({ ...block, mediaWidth: preset })}
-            className={cn(
-              "rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors",
-              widthPct === preset
-                ? "bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
-                : "bg-gray-100 text-ios-sub hover:bg-gray-200"
-            )}
-          >
-            {preset === 40 ? "작게" : preset === 70 ? "보통" : "크게"}
-          </button>
-        ))}
-        <div className="ml-auto flex min-w-[168px] items-center gap-2">
-          <input
-            type="range"
-            min={20}
-            max={100}
-            step={1}
-            value={widthPct}
-            onChange={(event) => onChange({ ...block, mediaWidth: Number(event.target.value) })}
-            className="h-1.5 w-full accent-[color:var(--rnest-accent)]"
-            aria-label="이미지 크기 조절"
-          />
-          <span className="w-10 text-right text-[11px] tabular-nums text-ios-muted">{widthPct}%</span>
-        </div>
-      </div>
       <input
         type="text"
         value={block.text ?? ""}
@@ -2287,6 +2274,10 @@ export function ToolNotebookPage() {
       activeMemoAttachments.map((attachment) => `${attachment.storagePath}:${attachment.name}:${attachment.kind}`).join("|"),
     [activeMemoAttachments]
   )
+  const activeMemoAttachmentPathSignature = useMemo(
+    () => activeMemoAttachments.map((attachment) => attachment.storagePath).join("\u001f"),
+    [activeMemoAttachments]
+  )
 
   const headingBlocks = useMemo(
     () =>
@@ -2336,30 +2327,23 @@ export function ToolNotebookPage() {
   }, [activeMemoId, activeDocs])
 
   useEffect(() => {
-    setAttachmentUrls({})
-
-    if (activeMemoAttachments.length === 0) return
+    const storagePaths = activeMemoAttachmentPathSignature ? activeMemoAttachmentPathSignature.split("\u001f").filter(Boolean) : []
+    if (!activeMemo?.id || storagePaths.length === 0) return
 
     let cancelled = false
 
     void (async () => {
-      const nextUrls = await fetchNotebookFileUrls(activeMemoAttachments.map((attachment) => attachment.storagePath)).catch(
-        () => ({})
-      )
+      const nextUrls = await fetchNotebookFileUrls(storagePaths).catch(() => ({}))
 
-      if (cancelled) return
+      if (cancelled || Object.keys(nextUrls).length === 0) return
 
-      setAttachmentUrls(nextUrls)
+      setAttachmentUrls((current) => ({ ...current, ...nextUrls }))
     })()
 
     return () => {
       cancelled = true
     }
-  }, [
-    activeMemo?.id,
-    activeMemoAttachments,
-    activeMemoAttachmentSignature,
-  ])
+  }, [activeMemo?.id, activeMemoAttachmentPathSignature])
 
   /* ── state operations ── */
 
