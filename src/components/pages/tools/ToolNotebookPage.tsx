@@ -1170,10 +1170,12 @@ function InlineBlock({
   const [showSlashMenu, setShowSlashMenu] = useState(false)
   const [hovered, setHovered] = useState(false)
   const [focused, setFocused] = useState(false)
+  const [touchActive, setTouchActive] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
   const addMenuRef = useRef<HTMLDivElement>(null)
   const actionMenuRef = useRef<HTMLDivElement>(null)
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const controlsVisible = hovered || focused || showAddMenu || showActionMenu
+  const controlsVisible = hovered || focused || showAddMenu || showActionMenu || touchActive
 
   function handleBlockMouseEnter() {
     if (hoverTimeoutRef.current) { clearTimeout(hoverTimeoutRef.current); hoverTimeoutRef.current = null }
@@ -1208,6 +1210,17 @@ function InlineBlock({
     }
   }, [showAddMenu, showActionMenu])
 
+  useEffect(() => {
+    if (!touchActive && !showAddMenu && !showActionMenu) return
+    function handlePointerDown(event: PointerEvent) {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
+        setTouchActive(false)
+      }
+    }
+    document.addEventListener("pointerdown", handlePointerDown)
+    return () => document.removeEventListener("pointerdown", handlePointerDown)
+  }, [touchActive, showAddMenu, showActionMenu])
+
   function handleCommandKeyDown(e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
       e.preventDefault()
@@ -1232,10 +1245,16 @@ function InlineBlock({
 
   return (
     <div
+      ref={rootRef}
       id={`memo-block-${block.id}`}
       className="group/block relative scroll-mt-28"
       onMouseEnter={handleBlockMouseEnter}
       onMouseLeave={handleBlockMouseLeave}
+      onPointerDownCapture={(event) => {
+        if (event.pointerType && event.pointerType !== "mouse") {
+          setTouchActive(true)
+        }
+      }}
       onFocusCapture={() => setFocused(true)}
       onBlurCapture={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
@@ -1249,8 +1268,7 @@ function InlineBlock({
           "absolute -left-12 top-2 z-20 flex items-center gap-1 transition-opacity duration-150 lg:-left-16 lg:top-1/2 lg:-translate-y-1/2",
           controlsVisible
             ? "pointer-events-auto opacity-100"
-            : "pointer-events-none opacity-0",
-          "max-lg:pointer-events-auto max-lg:opacity-100"
+            : "pointer-events-none opacity-0"
         )}
         onMouseEnter={handleBlockMouseEnter}
         onMouseLeave={handleBlockMouseLeave}
