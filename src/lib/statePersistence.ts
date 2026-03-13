@@ -1,5 +1,6 @@
 import type { AppState } from "@/lib/model";
 import { sanitizeStatePayload } from "@/lib/stateSanitizer";
+import { defaultMemoState, defaultRecordState } from "@/lib/notebook";
 
 const BIO_FIELDS = [
   "sleepHours",
@@ -38,6 +39,8 @@ export function serializeStateForSupabase(raw: unknown): AppState {
     ...sanitized,
     bio: { ...(sanitized.bio ?? {}) },
     emotions: { ...(sanitized.emotions ?? {}) },
+    memo: defaultMemoState(),
+    records: defaultRecordState(),
   };
 
   const dateSet = new Set<string>([

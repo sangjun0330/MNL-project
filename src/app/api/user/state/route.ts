@@ -5,6 +5,7 @@ import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurit
 import { userHasCompletedServiceConsent } from "@/lib/server/serviceConsentStore";
 import { sanitizeStatePayload } from "@/lib/stateSanitizer";
 import { serializeStateForSupabase } from "@/lib/statePersistence";
+import { defaultMemoState, defaultRecordState } from "@/lib/notebook";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -23,7 +24,13 @@ export async function GET(req: Request) {
     }
     await ensureUserRow(userId);
     const row = await loadUserState(userId);
-    const sanitized = row?.payload ? sanitizeStatePayload(row.payload) : null;
+    const sanitized = row?.payload
+      ? {
+          ...sanitizeStatePayload(row.payload),
+          memo: defaultMemoState(),
+          records: defaultRecordState(),
+        }
+      : null;
     return jsonNoStore({
       ok: true,
       state: sanitized,

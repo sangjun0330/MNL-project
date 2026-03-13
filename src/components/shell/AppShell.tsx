@@ -17,6 +17,11 @@ const CloudStateSync = dynamic(
   { ssr: false }
 );
 
+const CloudNotebookSync = dynamic(
+  () => import("@/components/system/CloudNotebookSync").then((mod) => mod.CloudNotebookSync),
+  { ssr: false }
+);
+
 const OnboardingGuide = dynamic(
   () => import("@/components/system/OnboardingGuide").then((mod) => mod.OnboardingGuide),
   { ssr: false }
@@ -398,6 +403,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <GateErrorScreen onRetry={() => void loadBootstrap()} />
       ) : null}
       {isAuthed && Boolean(resolvedBootstrap?.consentCompleted) ? <CloudStateSync /> : null}
+      {isAuthed && Boolean(resolvedBootstrap?.consentCompleted) ? <CloudNotebookSync /> : null}
       <OnboardingGuide open={showOnboarding} onComplete={handleOnboardingComplete} />
       {showConsent ? <ServiceConsentScreen onSubmit={handleConsentComplete} /> : null}
       <div className="safe-bottom" />

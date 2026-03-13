@@ -615,6 +615,27 @@ export type Database = {
         };
         Relationships: [];
       };
+      rnest_notebook_state: {
+        Row: {
+          user_id: string;
+          payload: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          payload?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          user_id?: string;
+          payload?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       rnest_users: {
         Row: {
           user_id: string;

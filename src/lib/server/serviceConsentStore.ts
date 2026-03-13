@@ -9,6 +9,7 @@ import {
 import { ensureUserRow, loadUserState } from "@/lib/server/userStateStore";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { sanitizeStatePayload } from "@/lib/stateSanitizer";
+import { defaultMemoState, defaultRecordState } from "@/lib/notebook";
 
 type ConsentRow = {
   user_id: string;
@@ -164,7 +165,14 @@ export async function loadUserBootstrap(userId: string): Promise<{
     consentCompleted,
     hasStoredState,
     consent,
-    state: consentCompleted && stateRow?.payload ? sanitizeStatePayload(stateRow.payload) : null,
+    state:
+      consentCompleted && stateRow?.payload
+        ? {
+            ...sanitizeStatePayload(stateRow.payload),
+            memo: defaultMemoState(),
+            records: defaultRecordState(),
+          }
+        : null,
     updatedAt: consentCompleted ? (stateRow?.updatedAt ?? null) : null,
   };
 }

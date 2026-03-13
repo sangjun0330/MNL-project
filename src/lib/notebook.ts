@@ -167,6 +167,11 @@ export type RNestRecordState = {
   recent: string[]
 }
 
+export type RNestNotebookState = {
+  memo: RNestMemoState
+  records: RNestRecordState
+}
+
 export type RNestMemoPreset = {
   id: string
   label: string
@@ -402,6 +407,13 @@ export function defaultRecordState(): RNestRecordState {
     templates: {},
     entries: {},
     recent: [],
+  }
+}
+
+export function defaultNotebookState(): RNestNotebookState {
+  return {
+    memo: defaultMemoState(),
+    records: defaultRecordState(),
   }
 }
 
@@ -1055,6 +1067,11 @@ export function hasMeaningfulRecordState(state: RNestRecordState | null | undefi
   )
 }
 
+export function hasMeaningfulNotebookState(state: RNestNotebookState | null | undefined) {
+  if (!state) return false
+  return hasMeaningfulMemoState(state.memo) || hasMeaningfulRecordState(state.records)
+}
+
 export function sanitizeRecordState(raw: unknown): RNestRecordState {
   const source = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {}
   const templatesSource =
@@ -1163,6 +1180,14 @@ export function recordEntriesToCsv(template: RNestRecordTemplate, entries: RNest
 }
 
 export const notebookEmojiOptions = [...memoIconOptions]
+
+export function sanitizeNotebookState(raw: unknown): RNestNotebookState {
+  const source = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {}
+  return {
+    memo: sanitizeMemoState(source.memo),
+    records: sanitizeRecordState(source.records),
+  }
+}
 
 export const memoReminderPresets: Array<{ id: string; label: string; minutes: number }> = [
   { id: "none", label: "없음", minutes: 0 },

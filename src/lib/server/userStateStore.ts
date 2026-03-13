@@ -1,5 +1,4 @@
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
-import { hasMeaningfulMemoState, hasMeaningfulRecordState } from "@/lib/notebook";
 
 type UserStateRow = {
   userId: string;
@@ -95,8 +94,6 @@ function hasMeaningfulUserData(value: unknown): boolean {
     countRecordKeys(value.emotions) > 0 ||
     countRecordKeys(value.bio) > 0 ||
     countRecordKeys(value.shiftNames) > 0 ||
-    hasMeaningfulMemoState(value.memo as any) ||
-    hasMeaningfulRecordState(value.records as any) ||
     hasMeaningfulMenstrualSettings(value)
   );
 }
@@ -125,15 +122,6 @@ function mergeProtectedMaps(nextPayload: Record<string, unknown>, existingPayloa
       };
     }
   }
-
-  if (hasMeaningfulMemoState(existingPayload.memo as any) && !hasMeaningfulMemoState(nextPayload.memo as any)) {
-    merged.memo = existingPayload.memo
-  }
-
-  if (hasMeaningfulRecordState(existingPayload.records as any) && !hasMeaningfulRecordState(nextPayload.records as any)) {
-    merged.records = existingPayload.records
-  }
-
   return merged;
 }
 

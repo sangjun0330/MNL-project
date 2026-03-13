@@ -2,9 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { getSupabaseBrowserClient, useAuth, useAuthState } from "@/lib/auth";
+import { defaultNotebookState, sanitizeNotebookState, type RNestNotebookState } from "@/lib/notebook";
 import { useAppStore } from "@/lib/store";
-import { sanitizeStatePayload } from "@/lib/stateSanitizer";
-import { serializeStateForSupabase } from "@/lib/statePersistence";
 
 const SAVE_DEBOUNCE_MS = 180;
 const RETRY_BASE_MS = 800;
@@ -14,23 +13,26 @@ type SaveOptions = {
   keepalive?: boolean;
 };
 
-export function CloudStateSync() {
+export function CloudNotebookSync() {
   const auth = useAuth();
   const { status } = useAuthState();
   const store = useAppStore();
-  const storeVersion = (store as any).__v ?? 0;
   const userId = auth?.userId ?? null;
+  const memo = store.memo;
+  const records = store.records;
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
+
   const currentUserIdRef = useRef<string | null>(userId);
-  const storeRef = useRef(store);
+  const initializedRef = useRef(false);
   const skipNextSaveRef = useRef(true);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryCountRef = useRef(0);
   const saveInFlightRef = useRef(false);
   const pendingSaveRef = useRef(false);
-  const latestStateRef = useRef<any>(null);
-  const latestSerializedSignatureRef = useRef("");
+  const latestStateRef = useRef<RNestNotebookState | null>(null);
+  const latestSignatureRef = useRef("");
+  const loadRequestRef = useRef(0);
 
   const getAuthHeaders = useCallback(async (): Promise<Record<string, string>> => {
     try {
@@ -42,10 +44,12 @@ export function CloudStateSync() {
     }
   }, [supabase]);
 
+  const buildSignature = useCallback((state: RNestNotebookState) => JSON.stringify(state), []);
+
   const saveStateViaApi = useCallback(
-    async (state: any, options?: SaveOptions) => {
+    async (state: RNestNotebookState, options?: SaveOptions) => {
       const authHeaders = await getAuthHeaders();
-      const res = await fetch("/api/user/state", {
+      const res = await fetch("/api/tools/notebook/state", {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -57,23 +61,14 @@ export function CloudStateSync() {
 
       if (!res.ok) {
         const json = await res.json().catch(() => null);
-        throw new Error(String(json?.error ?? "failed_to_save_state"));
+        throw new Error(String(json?.error ?? "failed_to_save_notebook_state"));
       }
     },
     [getAuthHeaders]
   );
 
-  const saveState = useCallback(
-    async (rawState: any, options?: SaveOptions) => {
-      const sanitized = sanitizeStatePayload(rawState);
-      const serialized = serializeStateForSupabase(sanitized);
-      await saveStateViaApi(serialized, options);
-    },
-    [saveStateViaApi]
-  );
-
   const queueSave = useCallback(
-    (nextState: any, scopedUserId: string | null) => {
+    (nextState: RNestNotebookState, scopedUserId: string | null) => {
       if (!scopedUserId) return;
       latestStateRef.current = nextState;
 
@@ -86,7 +81,7 @@ export function CloudStateSync() {
       void (async () => {
         try {
           if (currentUserIdRef.current !== scopedUserId) return;
-          await saveState(nextState);
+          await saveStateViaApi(nextState);
           retryCountRef.current = 0;
           if (retryTimerRef.current) {
             clearTimeout(retryTimerRef.current);
@@ -120,32 +115,59 @@ export function CloudStateSync() {
         }
       })();
     },
-    [saveState]
+    [saveStateViaApi]
   );
 
   const flushNow = useCallback(() => {
-    if (!userId || status !== "authenticated") return;
-    const latestState = sanitizeStatePayload(storeRef.current.getState());
-    const nextSignature = JSON.stringify(serializeStateForSupabase(latestState));
-    if (nextSignature === latestSerializedSignatureRef.current) return;
-    latestSerializedSignatureRef.current = nextSignature;
-    void saveState(latestState, { keepalive: true }).catch(() => {
-      // Ignore page-hide sync failures.
+    if (!userId || status !== "authenticated" || !initializedRef.current) return;
+    const latestState = sanitizeNotebookState({ memo: store.memo, records: store.records });
+    const nextSignature = buildSignature(latestState);
+    if (nextSignature === latestSignatureRef.current) return;
+    latestSignatureRef.current = nextSignature;
+    void saveStateViaApi(latestState, { keepalive: true }).catch(() => {
+      // ignore page-hide sync failures
     });
-  }, [saveState, status, userId]);
+  }, [buildSignature, saveStateViaApi, status, store.memo, store.records, userId]);
 
-  useEffect(() => {
-    storeRef.current = store;
-  }, [store]);
+  const loadNotebookState = useCallback(async () => {
+    if (!userId || status !== "authenticated") return null;
+
+    const requestId = ++loadRequestRef.current;
+    const authHeaders = await getAuthHeaders();
+    const res = await fetch("/api/tools/notebook/state", {
+      method: "GET",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders,
+      },
+      cache: "no-store",
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) {
+      throw new Error(String(json?.error ?? "failed_to_load_notebook_state"));
+    }
+
+    if (requestId !== loadRequestRef.current) return null;
+
+    const nextState = sanitizeNotebookState(json?.state ?? defaultNotebookState());
+    latestSignatureRef.current = buildSignature(nextState);
+    skipNextSaveRef.current = true;
+    initializedRef.current = true;
+    store.setMemoState(nextState.memo);
+    store.setRecordState(nextState.records);
+    return nextState;
+  }, [buildSignature, getAuthHeaders, status, store, userId]);
 
   useEffect(() => {
     currentUserIdRef.current = userId;
+    initializedRef.current = false;
     latestStateRef.current = null;
-    latestSerializedSignatureRef.current = "";
+    latestSignatureRef.current = "";
     skipNextSaveRef.current = true;
     pendingSaveRef.current = false;
     saveInFlightRef.current = false;
     retryCountRef.current = 0;
+    loadRequestRef.current += 1;
 
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
@@ -155,7 +177,14 @@ export function CloudStateSync() {
       clearTimeout(retryTimerRef.current);
       retryTimerRef.current = null;
     }
-  }, [userId]);
+
+    if (!userId || status !== "authenticated") return;
+
+    void loadNotebookState().catch(() => {
+      initializedRef.current = true;
+      latestSignatureRef.current = buildSignature(defaultNotebookState());
+    });
+  }, [buildSignature, loadNotebookState, status, userId]);
 
   useEffect(() => {
     return () => {
@@ -165,19 +194,20 @@ export function CloudStateSync() {
   }, []);
 
   useEffect(() => {
-    if (!userId || status !== "authenticated") return;
+    if (!userId || status !== "authenticated" || !initializedRef.current) return;
+
+    const nextState = sanitizeNotebookState({ memo, records });
+    const nextSignature = buildSignature(nextState);
+
     if (skipNextSaveRef.current) {
       skipNextSaveRef.current = false;
-      latestSerializedSignatureRef.current = JSON.stringify(
-        serializeStateForSupabase(sanitizeStatePayload(store.getState()))
-      );
+      latestSignatureRef.current = nextSignature;
       return;
     }
 
-    const nextState = sanitizeStatePayload(store.getState());
-    const nextSignature = JSON.stringify(serializeStateForSupabase(nextState));
-    if (nextSignature === latestSerializedSignatureRef.current) return;
-    latestSerializedSignatureRef.current = nextSignature;
+    if (nextSignature === latestSignatureRef.current) return;
+
+    latestSignatureRef.current = nextSignature;
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
     }
@@ -191,7 +221,7 @@ export function CloudStateSync() {
         saveTimerRef.current = null;
       }
     };
-  }, [queueSave, status, store, storeVersion, userId]);
+  }, [buildSignature, memo, queueSave, records, status, userId]);
 
   useEffect(() => {
     if (!userId || status !== "authenticated") return;

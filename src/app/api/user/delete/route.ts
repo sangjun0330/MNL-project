@@ -11,6 +11,20 @@ function bad(status: number, message: string) {
   return jsonNoStore({ ok: false, error: message }, { status });
 }
 
+function isMissingTableError(error: unknown, tableName: string) {
+  const code = String((error as { code?: unknown } | null)?.code ?? "").trim();
+  const message = String((error as { message?: unknown } | null)?.message ?? "").toLowerCase();
+  return (
+    code === "42P01" ||
+    code === "42703" ||
+    code === "PGRST204" ||
+    code === "PGRST205" ||
+    (message.includes("schema cache") && message.includes(tableName)) ||
+    (message.includes("relation") && message.includes(tableName)) ||
+    (message.includes(tableName) && message.includes("does not exist"))
+  );
+}
+
 function extractBearerToken(req: Request): string | null {
   const header = String(req.headers.get("authorization") ?? "").trim();
   if (!header) return null;
@@ -66,13 +80,19 @@ export async function DELETE(req: Request) {
       return bad(500, "failed_to_delete_account");
     }
 
-    // 3. rnest_users (사용자 프로필)
+    // 3. rnest_notebook_state (메모/기록지 전용 상태)
+    const notebookStateDelete = await admin.from("rnest_notebook_state").delete().eq("user_id", userId);
+    if (notebookStateDelete.error && !isMissingTableError(notebookStateDelete.error, "rnest_notebook_state")) {
+      return bad(500, "failed_to_delete_account");
+    }
+
+    // 4. rnest_users (사용자 프로필)
     const usersDelete = await admin.from("rnest_users").delete().eq("user_id", userId);
     if (usersDelete.error) {
       return bad(500, "failed_to_delete_account");
     }
 
-    // 4. Supabase Auth 유저 삭제
+    // 5. Supabase Auth 유저 삭제
     const authDelete = await admin.auth.admin.deleteUser(userId);
     if (authDelete.error) {
       return bad(500, "failed_to_delete_account");
