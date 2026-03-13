@@ -23,6 +23,7 @@ export function CloudNotebookSync() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 
   const currentUserIdRef = useRef<string | null>(userId);
+  const storeRef = useRef(store);
   const initializedRef = useRef(false);
   const skipNextSaveRef = useRef(true);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -120,14 +121,15 @@ export function CloudNotebookSync() {
 
   const flushNow = useCallback(() => {
     if (!userId || status !== "authenticated" || !initializedRef.current) return;
-    const latestState = sanitizeNotebookState({ memo: store.memo, records: store.records });
+    const latestStore = storeRef.current;
+    const latestState = sanitizeNotebookState({ memo: latestStore.memo, records: latestStore.records });
     const nextSignature = buildSignature(latestState);
     if (nextSignature === latestSignatureRef.current) return;
     latestSignatureRef.current = nextSignature;
     void saveStateViaApi(latestState, { keepalive: true }).catch(() => {
       // ignore page-hide sync failures
     });
-  }, [buildSignature, saveStateViaApi, status, store.memo, store.records, userId]);
+  }, [buildSignature, saveStateViaApi, status, userId]);
 
   const loadNotebookState = useCallback(async () => {
     if (!userId || status !== "authenticated") return null;
@@ -153,10 +155,14 @@ export function CloudNotebookSync() {
     latestSignatureRef.current = buildSignature(nextState);
     skipNextSaveRef.current = true;
     initializedRef.current = true;
-    store.setMemoState(nextState.memo);
-    store.setRecordState(nextState.records);
+    storeRef.current.setMemoState(nextState.memo);
+    storeRef.current.setRecordState(nextState.records);
     return nextState;
-  }, [buildSignature, getAuthHeaders, status, store, userId]);
+  }, [buildSignature, getAuthHeaders, status, userId]);
+
+  useEffect(() => {
+    storeRef.current = store;
+  }, [store]);
 
   useEffect(() => {
     currentUserIdRef.current = userId;

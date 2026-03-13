@@ -1,13 +1,55 @@
-import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity"
+import { buildPrivateNoStoreHeaders, jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity"
 import { userHasCompletedServiceConsent } from "@/lib/server/serviceConsentStore"
 import { readUserIdFromRequest } from "@/lib/server/readUserId"
-import { removeNotebookFiles, uploadNotebookFile } from "@/lib/server/notebookFileStore"
+import { downloadNotebookFile, removeNotebookFiles, uploadNotebookFile } from "@/lib/server/notebookFileStore"
 
 export const runtime = "edge"
 export const dynamic = "force-dynamic"
 
 function bad(status: number, error: string) {
   return jsonNoStore({ ok: false, error }, { status })
+}
+
+function encodeContentDispositionFileName(fileName: string) {
+  return encodeURIComponent(fileName).replace(/['()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)
+}
+
+function guessFileNameFromPath(path: string) {
+  const parts = path.split("/")
+  return parts[parts.length - 1] || "file"
+}
+
+export async function GET(req: Request) {
+  const userId = await readUserIdFromRequest(req)
+  if (!userId) return new Response("login_required", { status: 401, headers: buildPrivateNoStoreHeaders() })
+  if (!(await userHasCompletedServiceConsent(userId))) {
+    return new Response("consent_required", { status: 403, headers: buildPrivateNoStoreHeaders() })
+  }
+
+  const url = new URL(req.url)
+  const path = String(url.searchParams.get("path") ?? "").trim()
+  const download = url.searchParams.get("download") === "1"
+  if (!path) {
+    return new Response("path_required", { status: 400, headers: buildPrivateNoStoreHeaders() })
+  }
+
+  try {
+    const { blob } = await downloadNotebookFile({ userId, path })
+    const fileName = guessFileNameFromPath(path)
+    const headers = buildPrivateNoStoreHeaders({
+      "Content-Type": blob.type || "application/octet-stream",
+      "Content-Disposition": `${download ? "attachment" : "inline"}; filename*=UTF-8''${encodeContentDispositionFileName(fileName)}`,
+      "X-Content-Type-Options": "nosniff",
+      "Cross-Origin-Resource-Policy": "same-origin",
+    })
+    return new Response(await blob.arrayBuffer(), { status: 200, headers })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : ""
+    if (message === "forbidden_notebook_file") {
+      return new Response("forbidden_notebook_file", { status: 403, headers: buildPrivateNoStoreHeaders() })
+    }
+    return new Response("failed_to_open_notebook_file", { status: 500, headers: buildPrivateNoStoreHeaders() })
+  }
 }
 
 export async function POST(req: Request) {

@@ -25,18 +25,11 @@ export async function uploadNotebookFile(file: File, preferredKind?: RNestMemoAt
   return attachment
 }
 
-export async function fetchNotebookFileUrls(paths: string[]) {
-  const response = await fetch("/api/tools/notebook/files/sign", {
-    method: "POST",
-    credentials: "include",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ paths }),
-  })
-  const payload = await parseJson(response)
-  if (!response.ok || !payload?.ok) {
-    throw new Error(payload?.error || "failed_to_create_notebook_file_urls")
-  }
-  return (payload.urls ?? {}) as Record<string, string>
+export function buildNotebookFileUrl(path: string, options?: { download?: boolean }) {
+  const params = new URLSearchParams()
+  params.set("path", path)
+  if (options?.download) params.set("download", "1")
+  return `/api/tools/notebook/files?${params.toString()}`
 }
 
 export async function deleteNotebookFiles(paths: string[]) {

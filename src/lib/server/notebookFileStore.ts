@@ -6,9 +6,18 @@ export const NOTEBOOK_STORAGE_BUCKET =
   "rnest-notebook"
 
 const MAX_FILE_SIZE = 12 * 1024 * 1024
+const MAX_STORAGE_PATH_LENGTH = 240
 
 function isImageType(type: string) {
   return type.startsWith("image/")
+}
+
+function normalizeNotebookStoragePath(path: string) {
+  const trimmed = String(path ?? "").trim()
+  if (!trimmed || trimmed.length > MAX_STORAGE_PATH_LENGTH) return ""
+  if (trimmed.includes("\\") || trimmed.includes("..")) return ""
+  const normalized = trimmed.replace(/^\/+/, "")
+  return normalized
 }
 
 async function ensureNotebookBucket() {
@@ -22,7 +31,8 @@ async function ensureNotebookBucket() {
 }
 
 export function isNotebookStoragePathOwnedByUser(userId: string, path: string) {
-  return path.startsWith(`${userId}/`)
+  const normalized = normalizeNotebookStoragePath(path)
+  return Boolean(normalized) && normalized.startsWith(`${userId}/`)
 }
 
 export async function uploadNotebookFile(input: {
@@ -70,10 +80,16 @@ export async function uploadNotebookFile(input: {
 
 export async function createNotebookSignedUrls(input: { userId: string; paths: string[] }) {
   const admin: any = getSupabaseAdmin()
-  const ownedPaths = Array.from(new Set(input.paths.filter((path) => isNotebookStoragePathOwnedByUser(input.userId, path))))
+  const ownedPaths = Array.from(
+    new Set(
+      input.paths
+        .map((path) => normalizeNotebookStoragePath(path))
+        .filter((path) => isNotebookStoragePathOwnedByUser(input.userId, path))
+    )
+  )
   if (ownedPaths.length === 0) return {}
 
-  const { data, error } = await admin.storage.from(NOTEBOOK_STORAGE_BUCKET).createSignedUrls(ownedPaths, 60 * 60)
+  const { data, error } = await admin.storage.from(NOTEBOOK_STORAGE_BUCKET).createSignedUrls(ownedPaths, 30)
   if (error) throw error
 
   const out: Record<string, string> = {}
@@ -86,7 +102,29 @@ export async function createNotebookSignedUrls(input: { userId: string; paths: s
 
 export async function removeNotebookFiles(input: { userId: string; paths: string[] }) {
   const admin: any = getSupabaseAdmin()
-  const ownedPaths = Array.from(new Set(input.paths.filter((path) => isNotebookStoragePathOwnedByUser(input.userId, path))))
+  const ownedPaths = Array.from(
+    new Set(
+      input.paths
+        .map((path) => normalizeNotebookStoragePath(path))
+        .filter((path) => isNotebookStoragePathOwnedByUser(input.userId, path))
+    )
+  )
   if (ownedPaths.length === 0) return
   await admin.storage.from(NOTEBOOK_STORAGE_BUCKET).remove(ownedPaths)
+}
+
+export async function downloadNotebookFile(input: { userId: string; path: string }) {
+  const admin: any = getSupabaseAdmin()
+  const path = normalizeNotebookStoragePath(input.path)
+  if (!isNotebookStoragePathOwnedByUser(input.userId, path)) {
+    throw new Error("forbidden_notebook_file")
+  }
+
+  const { data, error } = await admin.storage.from(NOTEBOOK_STORAGE_BUCKET).download(path)
+  if (error) throw error
+
+  return {
+    path,
+    blob: data as Blob,
+  }
 }

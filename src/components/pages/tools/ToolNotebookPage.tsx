@@ -85,7 +85,7 @@ import {
   unlockLockedMemoEnvelope,
   type RNestLockedMemoPayload,
 } from "@/lib/notebookSecurity"
-import { deleteNotebookFiles, fetchNotebookFileUrls, uploadNotebookFile } from "@/lib/notebookFiles"
+import { buildNotebookFileUrl, deleteNotebookFiles, uploadNotebookFile } from "@/lib/notebookFiles"
 import { useAppStore } from "@/lib/store"
 import {
   Dialog,
@@ -2155,7 +2155,6 @@ export function ToolNotebookPage() {
   const pendingAssetTargetRef = useRef<{ docId: string; blockId: string; kind: "image" | "attachment" } | null>(null)
   const unlockKeysRef = useRef<Record<string, CryptoKey>>({})
   const [unlockedPayloads, setUnlockedPayloads] = useState<Record<string, RNestLockedMemoPayload>>({})
-  const [attachmentUrls, setAttachmentUrls] = useState<Record<string, string>>({})
   const [lockDialogOpen, setLockDialogOpen] = useState(false)
   const [unlockDialogOpen, setUnlockDialogOpen] = useState(false)
   const [lockPassword, setLockPassword] = useState("")
@@ -2300,17 +2299,6 @@ export function ToolNotebookPage() {
 
   const activeMemoIsLocked = Boolean(activeMemoRaw?.lock)
   const activeMemoIsUnlocked = Boolean(activeMemoRaw?.id && unlockedPayloads[activeMemoRaw.id])
-  const activeMemoAttachments = useMemo(() => activeMemo?.attachments ?? [], [activeMemo])
-  const activeMemoAttachmentSignature = useMemo(
-    () =>
-      activeMemoAttachments.map((attachment) => `${attachment.storagePath}:${attachment.name}:${attachment.kind}`).join("|"),
-    [activeMemoAttachments]
-  )
-  const activeMemoAttachmentPathSignature = useMemo(
-    () => activeMemoAttachments.map((attachment) => attachment.storagePath).join("\u001f"),
-    [activeMemoAttachments]
-  )
-
   const headingBlocks = useMemo(
     () =>
       activeMemo?.blocks.filter(
@@ -2357,25 +2345,6 @@ export function ToolNotebookPage() {
       setActiveMemoId(activeDocs[0].id)
     }
   }, [activeMemoId, activeDocs])
-
-  useEffect(() => {
-    const storagePaths = activeMemoAttachmentPathSignature ? activeMemoAttachmentPathSignature.split("\u001f").filter(Boolean) : []
-    if (!activeMemo?.id || storagePaths.length === 0) return
-
-    let cancelled = false
-
-    void (async () => {
-      const nextUrls = await fetchNotebookFileUrls(storagePaths).catch(() => ({}))
-
-      if (cancelled || Object.keys(nextUrls).length === 0) return
-
-      setAttachmentUrls((current) => ({ ...current, ...nextUrls }))
-    })()
-
-    return () => {
-      cancelled = true
-    }
-  }, [activeMemo?.id, activeMemoAttachmentPathSignature])
 
   /* ── state operations ── */
 
@@ -2818,11 +2787,7 @@ export function ToolNotebookPage() {
   }
 
   function openAttachment(attachment: RNestMemoAttachment) {
-    const url = attachmentUrls[attachment.storagePath]
-    if (!url) {
-      setToast("파일 주소를 불러오지 못했습니다")
-      return
-    }
+    const url = buildNotebookFileUrl(attachment.storagePath)
     window.open(url, "_blank", "noopener,noreferrer")
   }
 
@@ -3760,7 +3725,7 @@ export function ToolNotebookPage() {
                         key={block.id}
                         block={block}
                         attachment={attachment}
-                        attachmentUrl={attachment ? attachmentUrls[attachment.storagePath] : undefined}
+                        attachmentUrl={attachment ? buildNotebookFileUrl(attachment.storagePath) : undefined}
                         isFirst={idx === 0}
                         isLast={idx === activeMemo.blocks.length - 1}
                         onChange={(next) => updateBlock(block.id, next)}
