@@ -1,6 +1,6 @@
 "use client"
 
-import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import {
   ArrowDownAZ,
   ArrowUpDown,
@@ -55,8 +55,11 @@ import { cn } from "@/lib/cn"
 import {
   coerceMemoBlockType,
   createMemoBlock,
-  createMemoFromPreset,
+  createMemoTemplateFromDocument,
+  createNotebookId,
+  createMemoFromTemplate,
   createMemoTableRow,
+  defaultMemoTemplates,
   formatNotebookDateTime,
   getMemoBlockDetailText,
   getMemoBlockText,
@@ -64,15 +67,17 @@ import {
   getMemoTableCellText,
   getMemoTableColumnText,
   getReminderTimestampFromPreset,
+  memoTemplateToPreviewText,
   memoBlockToPlainText,
   memoCoverOptions,
   memoHighlightColors,
   memoIconOptions,
   memoDocumentToMarkdown,
   memoDocumentToPlainText,
-  memoPresets,
   memoReminderPresets,
+  NOTEBOOK_TEMPLATE_SYNC_EVENT_KEY,
   sanitizeMemoDocument,
+  sanitizeMemoTemplate,
   sanitizeNotebookTags,
   type RNestMemoBlock,
   type RNestMemoAttachment,
@@ -83,6 +88,7 @@ import {
   type RNestMemoHighlightColor,
   type RNestMemoIconId,
   type RNestMemoState,
+  type RNestMemoTemplate,
 } from "@/lib/notebook"
 import { normalizeNotebookLinkHref, plainTextToRichHtml, sanitizeNotebookRichHtml } from "@/lib/notebookRichText"
 import {
@@ -2937,6 +2943,17 @@ export function ToolNotebookPage() {
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null)
   const [dragOverRootPages, setDragOverRootPages] = useState(false)
   const [pdfExporting, setPdfExporting] = useState(false)
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false)
+  const [templatesLoading, setTemplatesLoading] = useState(false)
+  const [templateError, setTemplateError] = useState<string | null>(null)
+  const [personalTemplateDialogOpen, setPersonalTemplateDialogOpen] = useState(false)
+  const [personalTemplateName, setPersonalTemplateName] = useState("")
+  const [personalTemplateDescription, setPersonalTemplateDescription] = useState("")
+  const [personalTemplateSource, setPersonalTemplateSource] = useState<"current" | "blank">("blank")
+  const [personalTemplateCreateError, setPersonalTemplateCreateError] = useState<string | null>(null)
+  const [availableTemplates, setAvailableTemplates] = useState<RNestMemoTemplate[]>(() =>
+    defaultMemoTemplates.map((template) => sanitizeMemoTemplate(template))
+  )
   const sortMenuRef = useRef<HTMLDivElement>(null)
   const pdfContentRef = useRef<HTMLDivElement>(null)
 
@@ -2995,6 +3012,87 @@ export function ToolNotebookPage() {
       document.removeEventListener("visibilitychange", handleVisibilityChange)
     }
   }, [])
+
+  const defaultTemplates = useMemo(
+    () => defaultMemoTemplates.map((template) => sanitizeMemoTemplate(template)),
+    []
+  )
+
+  const personalTemplates = useMemo(
+    () => (memoState.personalTemplates ?? []).map((template) => sanitizeMemoTemplate(template)),
+    [memoState.personalTemplates]
+  )
+
+  const personalTemplateIdSet = useMemo(
+    () => new Set(personalTemplates.map((template) => template.id)),
+    [personalTemplates]
+  )
+
+  const displayedTemplates = useMemo(
+    () => {
+      const seen = new Set<string>()
+      const merged: RNestMemoTemplate[] = []
+      const sharedTemplates = availableTemplates.length > 0 ? availableTemplates : defaultTemplates
+      for (const template of [...personalTemplates, ...sharedTemplates]) {
+        const normalized = sanitizeMemoTemplate(template)
+        if (seen.has(normalized.id)) continue
+        seen.add(normalized.id)
+        merged.push(normalized)
+      }
+      return merged
+    },
+    [availableTemplates, defaultTemplates, personalTemplates]
+  )
+
+  const loadTemplates = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) setTemplatesLoading(true)
+    try {
+      const res = await fetch("/api/tools/notebook/templates", {
+        method: "GET",
+        headers: {
+          "content-type": "application/json",
+        },
+        cache: "no-store",
+      })
+      const json = await res.json().catch(() => null)
+      if (!res.ok || !json?.ok || !Array.isArray(json?.templates)) {
+        throw new Error(String(json?.error ?? `failed_to_load_templates:${res.status}`))
+      }
+      const nextTemplates = json.templates.map((template: RNestMemoTemplate) => sanitizeMemoTemplate(template))
+      setAvailableTemplates(nextTemplates.length > 0 ? nextTemplates : defaultTemplates)
+      setTemplateError(null)
+      return nextTemplates
+    } catch {
+      if (!options?.silent) {
+        setTemplateError("템플릿을 불러오지 못해 기본 템플릿으로 표시합니다")
+      }
+      return defaultTemplates
+    } finally {
+      if (!options?.silent) setTemplatesLoading(false)
+    }
+  }, [defaultTemplates])
+
+  useEffect(() => {
+    void loadTemplates({ silent: true })
+  }, [loadTemplates])
+
+  useEffect(() => {
+    function handleFocus() {
+      void loadTemplates({ silent: true })
+    }
+
+    function handleStorage(event: StorageEvent) {
+      if (event.key !== NOTEBOOK_TEMPLATE_SYNC_EVENT_KEY) return
+      void loadTemplates({ silent: true })
+    }
+
+    window.addEventListener("focus", handleFocus)
+    window.addEventListener("storage", handleStorage)
+    return () => {
+      window.removeEventListener("focus", handleFocus)
+      window.removeEventListener("storage", handleStorage)
+    }
+  }, [loadTemplates])
 
   /* ── derived lists ── */
 
@@ -3098,6 +3196,7 @@ export function ToolNotebookPage() {
 
   const activeMemoIsLocked = Boolean(activeMemoRaw?.lock)
   const activeMemoIsUnlocked = Boolean(activeMemoRaw?.id && unlockedPayloads[activeMemoRaw.id])
+  const canUseActiveMemoAsPersonalTemplate = Boolean(activeMemo && (!activeMemoRaw?.lock || activeMemoIsUnlocked))
   const headingBlocks = useMemo(
     () =>
       activeMemo?.blocks.filter((block): block is RNestMemoBlock => block.type === "heading" && Boolean(getMemoBlockText(block))) ?? [],
@@ -3147,18 +3246,28 @@ export function ToolNotebookPage() {
   function commit(
     docs: Record<string, RNestMemoDocument | undefined>,
     recent?: string[],
-    folders?: Record<string, RNestMemoFolder | undefined>
+    folders?: Record<string, RNestMemoFolder | undefined>,
+    personalTemplates?: RNestMemoTemplate[]
   ) {
     const latestMemo = store.getState().memo
     store.setMemoState({
       folders: folders ?? latestMemo.folders,
       documents: docs,
       recent: recent ?? latestMemo.recent,
+      personalTemplates: personalTemplates ?? latestMemo.personalTemplates ?? [],
     })
   }
 
   function getLatestMemoState() {
     return store.getState().memo
+  }
+
+  function updatePersonalTemplates(nextTemplates: RNestMemoTemplate[]) {
+    const latestMemo = getLatestMemoState()
+    commit(latestMemo.documents, latestMemo.recent, latestMemo.folders, nextTemplates)
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(NOTEBOOK_TEMPLATE_SYNC_EVENT_KEY, String(Date.now()))
+    }
   }
 
   function clearUnlockSession(docId: string) {
@@ -3237,14 +3346,74 @@ export function ToolNotebookPage() {
     return saved
   }
 
-  function createMemo(presetId = "blank") {
-    const doc = createMemoFromPreset(presetId)
+  async function openTemplatePicker() {
+    setTemplateDialogOpen(true)
+    setTemplateError(null)
+    await loadTemplates()
+  }
+
+  function openPersonalTemplateCreator() {
+    const defaultSource: "current" | "blank" = canUseActiveMemoAsPersonalTemplate ? "current" : "blank"
+    const activeTitle = activeMemo ? getMemoDocumentTitle(activeMemo) : ""
+    const suggestedBaseName = activeTitle || "내 템플릿"
+    const existingNames = new Set(personalTemplates.map((template) => template.label.trim()).filter(Boolean))
+    let suggestedName = suggestedBaseName
+    if (existingNames.has(suggestedName)) {
+      suggestedName = `${suggestedBaseName} ${personalTemplates.length + 1}`.slice(0, 40)
+    }
+    setPersonalTemplateName(suggestedName)
+    setPersonalTemplateDescription(
+      defaultSource === "current"
+        ? "현재 페이지를 기반으로 만든 개인 템플릿입니다."
+        : "직접 시작점을 만들 수 있는 개인 템플릿입니다."
+    )
+    setPersonalTemplateSource(defaultSource)
+    setPersonalTemplateCreateError(null)
+    setPersonalTemplateDialogOpen(true)
+  }
+
+  function createPersonalTemplate() {
+    const nextLabel = personalTemplateName.trim()
+    if (!nextLabel) {
+      setPersonalTemplateCreateError("템플릿 이름을 입력해 주세요")
+      return
+    }
+
+    const timestamp = Date.now()
+    const baseTemplate =
+      personalTemplateSource === "current" && canUseActiveMemoAsPersonalTemplate && activeMemo
+        ? createMemoTemplateFromDocument(activeMemo, {
+            id: createNotebookId("memo_template"),
+            label: nextLabel,
+            description: personalTemplateDescription.trim() || "현재 페이지를 기반으로 만든 개인 템플릿입니다.",
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          })
+        : sanitizeMemoTemplate({
+            ...(defaultTemplates.find((template) => template.id === "blank") ?? defaultTemplates[0]),
+            id: createNotebookId("memo_template"),
+            label: nextLabel,
+            description: personalTemplateDescription.trim() || "직접 시작점을 만들 수 있는 개인 템플릿입니다.",
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          })
+
+    updatePersonalTemplates([baseTemplate, ...personalTemplates])
+    setPersonalTemplateDialogOpen(false)
+    setPersonalTemplateCreateError(null)
+    setToast("내 템플릿을 만들었습니다")
+  }
+
+  function createMemoFromTemplateId(templateId = "blank") {
+    const template = displayedTemplates.find((item) => item.id === templateId) ?? displayedTemplates[0]
+    const doc = createMemoFromTemplate(template)
     const latestMemo = store.getState().memo
     commit({ ...latestMemo.documents, [doc.id]: doc }, insertRecent(latestMemo.recent, doc.id))
     setActiveMemoId(doc.id)
     setQuery("")
+    setTemplateDialogOpen(false)
 
-    if (presetId === "quick") {
+    if (template?.id === "quick") {
       // Auto-focus first block for quick memo — pure blank canvas feel
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
@@ -4064,7 +4233,11 @@ export function ToolNotebookPage() {
     }
 
     // Create new daily note
-    const doc = createMemoFromPreset("blank")
+    const doc = createMemoFromTemplate(
+      displayedTemplates.find((template) => template.id === "blank") ??
+        defaultMemoTemplates.find((template) => template.id === "blank") ??
+        defaultMemoTemplates[0]
+    )
     const dailyDoc = sanitizeMemoDocument({
       ...doc,
       title: dailyTitle,
@@ -4144,7 +4317,7 @@ export function ToolNotebookPage() {
         <div className="space-y-0.5 px-2 pb-3">
           <button
             type="button"
-            onClick={() => createMemo("blank")}
+            onClick={() => void openTemplatePicker()}
             className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] font-medium text-ios-sub transition-colors hover:bg-gray-200"
           >
             <Plus className="h-4 w-4" />
@@ -5054,23 +5227,228 @@ export function ToolNotebookPage() {
                 </p>
               </div>
               <div className="flex flex-wrap justify-center gap-2">
-                {memoPresets.map((preset) => (
+                {displayedTemplates.slice(0, 4).map((template) => (
                   <button
-                    key={preset.id}
+                    key={template.id}
                     type="button"
-                    onClick={() => createMemo(preset.id)}
+                    onClick={() => createMemoFromTemplateId(template.id)}
                     className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-[13.5px] text-ios-text shadow-sm transition-colors hover:border-[color:var(--rnest-accent-border)] hover:bg-[color:var(--rnest-accent-soft)]"
                   >
                     <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]">
-                      {renderMemoIcon(preset.icon, "h-4 w-4")}
+                      {renderMemoIcon(template.icon, "h-4 w-4")}
                     </span>
-                    {preset.label}
+                    {template.label}
                   </button>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => void openTemplatePicker()}
+                  className="flex items-center gap-2 rounded-xl border border-dashed border-[color:var(--rnest-accent-border)] bg-white px-4 py-2.5 text-[13.5px] font-medium text-[color:var(--rnest-accent)] shadow-sm transition-colors hover:bg-[color:var(--rnest-accent-soft)]"
+                >
+                  <Plus className="h-4 w-4" />
+                  전체 템플릿
+                </button>
               </div>
             </div>
           )}
         </div>
+
+        <Dialog open={templateDialogOpen} onOpenChange={setTemplateDialogOpen}>
+          <DialogContent className="rounded-[30px] border-0 bg-white p-0 shadow-[0_30px_80px_rgba(15,23,42,0.18)] sm:max-w-[760px]">
+            <div className="rounded-[30px] bg-[linear-gradient(180deg,rgba(250,245,255,0.98)_0%,rgba(255,255,255,0.98)_100%)] p-6">
+              <DialogHeader>
+                <DialogTitle className="text-[24px] tracking-[-0.03em] text-ios-text">새 페이지 템플릿 선택</DialogTitle>
+                <DialogDescription className="text-[13px] leading-relaxed text-ios-sub">
+                  현재 운영 중인 템플릿 목록에서 시작할 메모 형식을 선택하세요.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="mt-5 flex items-center justify-between gap-3 rounded-[22px] border border-white/80 bg-white/80 px-4 py-3">
+                <div>
+                  <div className="text-[13px] font-semibold text-ios-text">템플릿 목록</div>
+                  <div className="mt-1 text-[12px] text-ios-sub">
+                    내 템플릿이 가장 먼저 보이고, 운영 템플릿이 그 아래에 이어집니다.
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={openPersonalTemplateCreator}
+                    className="inline-flex h-10 items-center justify-center rounded-full bg-[color:var(--rnest-accent)] px-4 text-[12px] font-semibold text-white shadow-[0_16px_36px_rgba(167,139,250,0.22)] transition hover:opacity-95"
+                  >
+                    + 템플릿 만들기
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void loadTemplates()}
+                    className="inline-flex h-10 items-center justify-center rounded-full border border-[color:var(--rnest-accent-border)] px-4 text-[12px] font-semibold text-[color:var(--rnest-accent)] transition hover:bg-[color:var(--rnest-accent-soft)]"
+                  >
+                    새로고침
+                  </button>
+                </div>
+              </div>
+
+              {templatesLoading ? <div className="mt-4 text-[12px] text-ios-muted">템플릿을 불러오는 중...</div> : null}
+              {templateError ? <div className="mt-4 text-[12px] text-amber-600">{templateError}</div> : null}
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                {displayedTemplates.map((template) => (
+                  <button
+                    key={template.id}
+                    type="button"
+                    onClick={() => createMemoFromTemplateId(template.id)}
+                    className="rounded-[24px] border border-[#e7edf5] bg-white/92 p-4 text-left shadow-[0_12px_36px_rgba(17,41,75,0.05)] transition hover:-translate-y-[1px] hover:border-[color:var(--rnest-accent-border)] hover:bg-[color:var(--rnest-accent-soft)]"
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="inline-flex h-11 w-11 items-center justify-center rounded-[18px] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]">
+                        {renderMemoIcon(template.icon, "h-5 w-5")}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <div className="text-[15px] font-semibold text-ios-text">{template.label}</div>
+                          {personalTemplateIdSet.has(template.id) ? (
+                            <span className="inline-flex rounded-full bg-[rgba(167,139,250,0.14)] px-2 py-0.5 text-[10px] font-semibold text-[color:var(--rnest-accent)]">
+                              내 템플릿
+                            </span>
+                          ) : (
+                            <span className="inline-flex rounded-full bg-[#eef3fa] px-2 py-0.5 text-[10px] font-semibold text-[#5c6f86]">
+                              기본
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-1 text-[12px] leading-5 text-ios-sub">{template.description}</div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 rounded-[18px] border border-[#edf1f6] bg-[#fbfcfe] px-3 py-2.5 text-[12px] leading-5 text-ios-sub">
+                      {memoTemplateToPreviewText(template)}
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              <DialogFooter className="mt-6 gap-2 sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => setTemplateDialogOpen(false)}
+                  className="inline-flex h-11 items-center justify-center rounded-full border border-gray-200 px-4 text-[13px] font-medium text-ios-sub transition-colors hover:bg-gray-50"
+                >
+                  닫기
+                </button>
+              </DialogFooter>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog
+          open={personalTemplateDialogOpen}
+          onOpenChange={(open) => {
+            setPersonalTemplateDialogOpen(open)
+            if (!open) {
+              setPersonalTemplateCreateError(null)
+            }
+          }}
+        >
+          <DialogContent className="rounded-[28px] border-0 bg-white p-0 shadow-[0_30px_80px_rgba(15,23,42,0.18)] sm:max-w-[520px]">
+            <div className="rounded-[28px] bg-[linear-gradient(180deg,rgba(250,245,255,0.98)_0%,rgba(255,255,255,0.98)_100%)] p-6">
+              <DialogHeader>
+                <DialogTitle className="text-[22px] tracking-[-0.02em] text-ios-text">내 템플릿 만들기</DialogTitle>
+                <DialogDescription className="text-[13px] leading-relaxed text-ios-sub">
+                  직접 만든 템플릿은 템플릿 목록의 가장 앞에 표시되고, 메모 동기화와 함께 내 기기들에 반영됩니다.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="mt-5 space-y-4">
+                <label className="block">
+                  <div className="mb-2 text-[12px] font-semibold text-ios-sub">템플릿 이름</div>
+                  <input
+                    type="text"
+                    value={personalTemplateName}
+                    onChange={(event) => setPersonalTemplateName(event.target.value)}
+                    placeholder="예: 내 발표 노트"
+                    className={cn(
+                      "h-11 w-full rounded-2xl border border-gray-200 bg-white px-4 text-ios-text outline-none focus:border-[color:var(--rnest-accent-border)] focus:ring-2 focus:ring-[color:var(--rnest-accent-soft)]",
+                      mobileSafeInputClass
+                    )}
+                  />
+                </label>
+
+                <label className="block">
+                  <div className="mb-2 text-[12px] font-semibold text-ios-sub">설명</div>
+                  <textarea
+                    value={personalTemplateDescription}
+                    onChange={(event) => setPersonalTemplateDescription(event.target.value)}
+                    placeholder="템플릿 설명을 입력하세요"
+                    className={cn(
+                      "min-h-[92px] w-full rounded-[22px] border border-gray-200 bg-white px-4 py-3 text-ios-text outline-none focus:border-[color:var(--rnest-accent-border)] focus:ring-2 focus:ring-[color:var(--rnest-accent-soft)]",
+                      mobileSafeInputClass
+                    )}
+                  />
+                </label>
+
+                <div>
+                  <div className="mb-2 text-[12px] font-semibold text-ios-sub">시작 방식</div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={() => setPersonalTemplateSource("current")}
+                      disabled={!canUseActiveMemoAsPersonalTemplate}
+                      className={cn(
+                        "rounded-[20px] border px-4 py-3 text-left transition",
+                        personalTemplateSource === "current"
+                          ? "border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)]"
+                          : "border-gray-200 bg-white",
+                        !canUseActiveMemoAsPersonalTemplate && "cursor-not-allowed opacity-50"
+                      )}
+                    >
+                      <div className="text-[13px] font-semibold text-ios-text">현재 페이지 기반</div>
+                      <div className="mt-1 text-[12px] leading-5 text-ios-sub">
+                        {canUseActiveMemoAsPersonalTemplate
+                          ? `${getMemoDocumentTitle(activeMemo ?? { title: "", titleHtml: "" }) || "현재 메모"} 내용을 템플릿으로 저장`
+                          : "잠금 메모이거나 선택된 페이지가 없어 사용할 수 없습니다"}
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setPersonalTemplateSource("blank")}
+                      className={cn(
+                        "rounded-[20px] border px-4 py-3 text-left transition",
+                        personalTemplateSource === "blank"
+                          ? "border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)]"
+                          : "border-gray-200 bg-white"
+                      )}
+                    >
+                      <div className="text-[13px] font-semibold text-ios-text">빈 템플릿 기반</div>
+                      <div className="mt-1 text-[12px] leading-5 text-ios-sub">
+                        기본 빈 메모를 시작점으로 두고 제목과 설명만 먼저 저장합니다.
+                      </div>
+                    </button>
+                  </div>
+                </div>
+
+                {personalTemplateCreateError ? <div className="text-[12px] text-red-500">{personalTemplateCreateError}</div> : null}
+              </div>
+
+              <DialogFooter className="mt-6 gap-2 sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => setPersonalTemplateDialogOpen(false)}
+                  className="inline-flex h-11 items-center justify-center rounded-full border border-gray-200 px-4 text-[13px] font-medium text-ios-sub transition-colors hover:bg-gray-50"
+                >
+                  취소
+                </button>
+                <button
+                  type="button"
+                  onClick={createPersonalTemplate}
+                  className="inline-flex h-11 items-center justify-center rounded-full bg-[color:var(--rnest-accent)] px-4 text-[13px] font-semibold text-white shadow-[0_16px_36px_rgba(167,139,250,0.22)]"
+                >
+                  템플릿 만들기
+                </button>
+              </DialogFooter>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         <Dialog
           open={lockDialogOpen}

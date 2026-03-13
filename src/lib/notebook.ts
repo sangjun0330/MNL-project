@@ -118,6 +118,7 @@ export type RNestMemoState = {
   folders: Record<string, RNestMemoFolder | undefined>
   documents: Record<string, RNestMemoDocument | undefined>
   recent: string[]
+  personalTemplates: RNestMemoTemplate[]
 }
 
 export type RNestRecordFieldType =
@@ -203,6 +204,22 @@ export type RNestMemoPreset = {
   create: () => RNestMemoDocument
 }
 
+export type RNestMemoTemplate = {
+  id: string
+  label: string
+  description: string
+  icon: RNestMemoIconId
+  title: string
+  titleHtml?: string
+  coverStyle: string | null
+  tags: string[]
+  blocks: RNestMemoBlock[]
+  createdAt: number
+  updatedAt: number
+}
+
+export const NOTEBOOK_TEMPLATE_SYNC_EVENT_KEY = "rnest_notebook_templates_updated_at"
+
 export const memoIconOptions = [
   "note",
   "page",
@@ -236,9 +253,12 @@ const MAX_TITLE_HTML_LENGTH = 2400
 const MAX_FOLDER_NAME_LENGTH = 40
 const MAX_TAG_LENGTH = 24
 const MAX_TAGS = 8
+const MAX_TEMPLATE_LABEL_LENGTH = 40
+const MAX_TEMPLATE_DESCRIPTION_LENGTH = 160
 const MAX_BLOCK_TEXT_LENGTH = 4000
 const MAX_BLOCK_HTML_LENGTH = 24000
 const MAX_BLOCKS = 64
+const MAX_MEMO_TEMPLATES = 24
 const MAX_TABLE_ROWS = 20
 const MAX_TABLE_CELL_TEXT_LENGTH = 500
 const MAX_TABLE_CELL_HTML_LENGTH = 6000
@@ -487,6 +507,7 @@ export function defaultMemoState(): RNestMemoState {
     folders: {},
     documents: {},
     recent: [],
+    personalTemplates: [],
   }
 }
 
@@ -742,6 +763,149 @@ export function sanitizeMemoDocument(raw: Partial<RNestMemoDocument>) {
   return createMemoDocumentBase(raw)
 }
 
+function normalizeTemplateBlock(
+  block: RNestMemoBlock,
+  attachmentsById: Record<string, RNestMemoAttachment | undefined>
+): RNestMemoBlock {
+  if (block.type === "image") {
+    const attachment = block.attachmentId ? attachmentsById[block.attachmentId] : null
+    const label = cleanText(block.text, 240) || cleanText(attachment?.name, MAX_ATTACHMENT_NAME_LENGTH) || "이미지"
+    return createMemoBlock("paragraph", {
+      text: `[이미지 자리] ${label}`.trim(),
+      highlight: block.highlight,
+    })
+  }
+
+  if (block.type === "attachment") {
+    const attachment = block.attachmentId ? attachmentsById[block.attachmentId] : null
+    const label =
+      getMemoBlockText(block) || cleanText(attachment?.name, MAX_ATTACHMENT_NAME_LENGTH) || "첨부 파일"
+    return createMemoBlock("paragraph", {
+      text: `[파일 자리] ${label}`.trim(),
+      highlight: block.highlight,
+    })
+  }
+
+  return createMemoBlock(block.type, block)
+}
+
+function normalizeTemplateBlocks(
+  blocks: RNestMemoBlock[] | null | undefined,
+  attachments: RNestMemoAttachment[] | null | undefined
+) {
+  const attachmentsById = Object.fromEntries((attachments ?? []).map((attachment) => [attachment.id, attachment]))
+  const normalized = (blocks ?? [])
+    .slice(0, MAX_BLOCKS)
+    .map((block) => normalizeTemplateBlock(block, attachmentsById))
+  return normalized.length > 0 ? normalized : [createMemoBlock("paragraph")]
+}
+
+function createMemoTemplateBase(input?: Partial<RNestMemoTemplate>): RNestMemoTemplate {
+  const timestamp = nowTs()
+  const explicitTitle = input?.title != null || input?.titleHtml != null
+  const label = cleanText(input?.label, MAX_TEMPLATE_LABEL_LENGTH) || "새 템플릿"
+  const title =
+    cleanText(input?.title, MAX_TITLE_LENGTH) ||
+    cleanText(richHtmlToPlainText(input?.titleHtml), MAX_TITLE_LENGTH) ||
+    (explicitTitle ? "" : label)
+
+  return {
+    id: input?.id ?? createNotebookId("memo_template"),
+    label,
+    description: cleanText(input?.description, MAX_TEMPLATE_DESCRIPTION_LENGTH) || "새 페이지에 바로 적용할 메모 템플릿입니다.",
+    icon: normalizeMemoIcon(input?.icon, "note"),
+    title,
+    titleHtml: cleanTitleRichHtml(input?.titleHtml) || (title ? plainTextToRichHtml(title) : ""),
+    coverStyle: normalizeMemoCover(input?.coverStyle),
+    tags: sanitizeNotebookTags(input?.tags),
+    blocks: normalizeTemplateBlocks(input?.blocks, []),
+    createdAt:
+      typeof input?.createdAt === "number" && Number.isFinite(input.createdAt) ? input.createdAt : timestamp,
+    updatedAt:
+      typeof input?.updatedAt === "number" && Number.isFinite(input.updatedAt) ? input.updatedAt : timestamp,
+  }
+}
+
+export function sanitizeMemoTemplate(raw: Partial<RNestMemoTemplate>) {
+  return createMemoTemplateBase(raw)
+}
+
+export function sanitizeMemoTemplates(value: unknown) {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const templates: RNestMemoTemplate[] = []
+  for (const item of value) {
+    const template = sanitizeMemoTemplate((item as Partial<RNestMemoTemplate>) ?? {})
+    if (!template.id || seen.has(template.id)) continue
+    seen.add(template.id)
+    templates.push(template)
+    if (templates.length >= MAX_MEMO_TEMPLATES) break
+  }
+  return templates
+}
+
+export function createMemoTemplateFromDocument(
+  document: Partial<RNestMemoDocument>,
+  options?: Partial<RNestMemoTemplate>
+) {
+  const normalizedDocument = sanitizeMemoDocument(document)
+  return createMemoTemplateBase({
+    id: options?.id,
+    label: (options?.label ?? normalizedDocument.title) || "새 템플릿",
+    description: options?.description,
+    icon: normalizeMemoIcon(options?.icon ?? normalizedDocument.icon, "note"),
+    title: normalizedDocument.title,
+    titleHtml: normalizedDocument.titleHtml,
+    coverStyle: options?.coverStyle ?? normalizedDocument.coverStyle,
+    tags: options?.tags ?? normalizedDocument.tags,
+    blocks: normalizeTemplateBlocks(normalizedDocument.blocks, normalizedDocument.attachments),
+    createdAt: options?.createdAt,
+    updatedAt: options?.updatedAt,
+  })
+}
+
+export function createMemoFromTemplate(template: Partial<RNestMemoTemplate>) {
+  const normalizedTemplate = sanitizeMemoTemplate(template)
+  const document = createMemoDocumentBase({
+    title: normalizedTemplate.title,
+    titleHtml: normalizedTemplate.titleHtml,
+    icon: normalizedTemplate.icon,
+    coverStyle: normalizedTemplate.coverStyle,
+    tags: normalizedTemplate.tags,
+    blocks: normalizedTemplate.blocks,
+  })
+  return {
+    ...document,
+    blocks: document.blocks.map((block) => ({
+      ...block,
+      id: createNotebookId("memo_block"),
+      table: block.table
+        ? {
+            ...block.table,
+            rows: block.table.rows.map((row) => ({
+              ...row,
+              id: createNotebookId("memo_row"),
+            })),
+          }
+        : undefined,
+    })),
+  }
+}
+
+export function memoTemplateToPreviewText(template: Pick<RNestMemoTemplate, "description" | "blocks" | "title" | "titleHtml">) {
+  const body =
+    template.blocks
+      .map((block) => memoBlockToPlainText(block))
+      .find((value) => Boolean(cleanText(value, 180))) ?? ""
+  return (
+    cleanText(body, 180) ||
+    cleanText(template.description, MAX_TEMPLATE_DESCRIPTION_LENGTH) ||
+    cleanText(template.title, MAX_TITLE_LENGTH) ||
+    cleanText(richHtmlToPlainText(template.titleHtml), MAX_TITLE_LENGTH) ||
+    "빈 템플릿"
+  )
+}
+
 export const memoPresets: RNestMemoPreset[] = [
   {
     id: "quick",
@@ -827,6 +991,17 @@ export const memoPresets: RNestMemoPreset[] = [
   },
 ]
 
+export const defaultMemoTemplates: RNestMemoTemplate[] = memoPresets.map((preset) =>
+  createMemoTemplateFromDocument(preset.create(), {
+    id: preset.id,
+    label: preset.label,
+    description: preset.description,
+    icon: normalizeMemoIcon(preset.icon, "note"),
+    createdAt: 0,
+    updatedAt: 0,
+  })
+)
+
 export function createMemoFromPreset(presetId: string) {
   const preset = memoPresets.find((item) => item.id === presetId) ?? memoPresets[0]
   return preset.create()
@@ -836,7 +1011,8 @@ export function hasMeaningfulMemoState(state: RNestMemoState | null | undefined)
   if (!state) return false
   return (
     Object.values(state.documents ?? {}).some((document) => Boolean(document)) ||
-    Object.values(state.folders ?? {}).some((folder) => Boolean(folder))
+    Object.values(state.folders ?? {}).some((folder) => Boolean(folder)) ||
+    (state.personalTemplates?.length ?? 0) > 0
   )
 }
 
@@ -1009,10 +1185,13 @@ export function sanitizeMemoState(raw: unknown): RNestMemoState {
     .filter((id, index, list) => Boolean(id) && Boolean(documents[id]) && list.indexOf(id) === index)
     .slice(0, 20)
 
+  const personalTemplates = sanitizeMemoTemplates(source.personalTemplates)
+
   return {
     folders,
     documents,
     recent,
+    personalTemplates,
   }
 }
 

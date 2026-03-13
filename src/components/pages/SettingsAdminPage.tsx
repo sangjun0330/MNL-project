@@ -423,6 +423,40 @@ export function SettingsAdminPage() {
         ],
         chips: ["Free 구매", "Plus 업셀", "Pro 추가구매"],
       },
+      {
+        title: "메모 템플릿 운영",
+        description: "새 페이지 생성 팝업에 노출되는 메모 템플릿을 등록하고, 순서와 설명을 실시간으로 관리합니다.",
+        href: "/settings/admin/notebook-templates",
+        cta: "템플릿 관리",
+        accent: "bg-[#f1ecff] text-[#5b46a9]",
+        metrics: [
+          {
+            label: "생성 플로우",
+            value: "Popup",
+            hint: "새 페이지 버튼 직결",
+            tone: "text-ios-text",
+          },
+          {
+            label: "관리 범위",
+            value: "Template",
+            hint: "추가·수정·삭제·순서",
+            tone: "text-[color:var(--rnest-accent)]",
+          },
+          {
+            label: "콘텐츠 원본",
+            value: "Memo",
+            hint: "기존 메모에서 불러오기",
+            tone: "text-ios-text",
+          },
+          {
+            label: "배포 반영",
+            value: "Live",
+            hint: "저장 후 바로 사용",
+            tone: "text-ios-text",
+          },
+        ],
+        chips: ["메모 템플릿", "팝업 선택", "운영자 관리"],
+      },
     ],
     [dashboard]
   );
