@@ -2946,6 +2946,8 @@ export function ToolNotebookPage() {
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false)
   const [templatesLoading, setTemplatesLoading] = useState(false)
   const [templateError, setTemplateError] = useState<string | null>(null)
+  const [templateUiReady, setTemplateUiReady] = useState(false)
+  const [timeUiReady, setTimeUiReady] = useState(false)
   const [personalTemplateDialogOpen, setPersonalTemplateDialogOpen] = useState(false)
   const [personalTemplateName, setPersonalTemplateName] = useState("")
   const [personalTemplateDescription, setPersonalTemplateDescription] = useState("")
@@ -3013,6 +3015,11 @@ export function ToolNotebookPage() {
     }
   }, [])
 
+  useEffect(() => {
+    setTemplateUiReady(true)
+    setTimeUiReady(true)
+  }, [])
+
   const defaultTemplates = useMemo(
     () => defaultMemoTemplates.map((template) => sanitizeMemoTemplate(template)),
     []
@@ -3042,6 +3049,12 @@ export function ToolNotebookPage() {
       return merged
     },
     [availableTemplates, defaultTemplates, personalTemplates]
+  )
+
+  const renderTemplates = templateUiReady ? displayedTemplates : defaultTemplates
+  const formatUpdatedAtLabel = useCallback(
+    (timestamp: number) => (timeUiReady ? relativeTime(timestamp) : formatNotebookDateTime(timestamp)),
+    [timeUiReady]
   )
 
   const loadTemplates = useCallback(async (options?: { silent?: boolean }) => {
@@ -4666,7 +4679,7 @@ export function ToolNotebookPage() {
                 <span className="block truncate text-[14px] font-medium text-ios-sub lg:text-[13px]">
                   {activeMemo.title || "제목 없음"}
                 </span>
-                <span className="mt-0.5 block text-[11px] text-ios-muted lg:hidden">{relativeTime(activeMemo.updatedAt)}</span>
+                <span className="mt-0.5 block text-[11px] text-ios-muted lg:hidden">{formatUpdatedAtLabel(activeMemo.updatedAt)}</span>
               </div>
               {activeMemoRaw?.pinned && (
                 <span className="hidden items-center gap-1 rounded-full bg-[color:var(--rnest-accent-soft)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--rnest-accent)] lg:inline-flex">
@@ -4681,7 +4694,7 @@ export function ToolNotebookPage() {
                 </span>
               )}
               <span className="ml-auto hidden text-[11.5px] text-gray-400 lg:inline">
-                {relativeTime(activeMemo.updatedAt)}
+                {formatUpdatedAtLabel(activeMemo.updatedAt)}
               </span>
               <button
                 type="button"
@@ -4840,7 +4853,7 @@ export function ToolNotebookPage() {
                     {activeMemoRaw?.lock?.hint && (
                       <span className="text-[12px] text-ios-muted">힌트: {activeMemoRaw.lock.hint}</span>
                     )}
-                    <span className="ml-auto text-[11px] text-ios-muted">{relativeTime(activeMemo.updatedAt)}</span>
+                    <span className="ml-auto text-[11px] text-ios-muted">{formatUpdatedAtLabel(activeMemo.updatedAt)}</span>
                     <button
                       type="button"
                       onClick={() => {
@@ -4869,7 +4882,7 @@ export function ToolNotebookPage() {
                           {activeMemoIsUnlocked ? "잠금 해제됨" : "잠금 메모"}
                         </span>
                       )}
-                      <span className="ml-auto">{relativeTime(activeMemo.updatedAt)}</span>
+                      <span className="ml-auto">{formatUpdatedAtLabel(activeMemo.updatedAt)}</span>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       {activeMemo.tags.slice(0, 2).map((tag) => (
@@ -5227,7 +5240,7 @@ export function ToolNotebookPage() {
                 </p>
               </div>
               <div className="flex flex-wrap justify-center gap-2">
-                {displayedTemplates.slice(0, 4).map((template) => (
+                {renderTemplates.slice(0, 4).map((template) => (
                   <button
                     key={template.id}
                     type="button"
@@ -5292,7 +5305,7 @@ export function ToolNotebookPage() {
               {templateError ? <div className="mt-4 text-[12px] text-amber-600">{templateError}</div> : null}
 
               <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                {displayedTemplates.map((template) => (
+                {renderTemplates.map((template) => (
                   <button
                     key={template.id}
                     type="button"

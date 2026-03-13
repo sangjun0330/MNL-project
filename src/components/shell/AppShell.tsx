@@ -208,14 +208,41 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     } catch (error) {
       if (requestId === bootstrapRequestRef.current) {
         setBootstrapSettledUserId(scopedUserId);
-        if (!silent) {
-          setBootstrap(null);
-          setBootstrapError((error as Error)?.message ?? "failed_to_load_bootstrap");
-          const localDraft = readPreferredAppStateDraft(scopedUserId);
-          if (localDraft && hasMeaningfulAppState(localDraft.state)) {
-            hydrateState(localDraft.state);
-          }
+        const localDraft = readPreferredAppStateDraft(scopedUserId);
+        if (localDraft && hasMeaningfulAppState(localDraft.state)) {
+          const fallbackBootstrap = {
+            onboardingCompleted: true,
+            consentCompleted: true,
+            hasStoredState: true,
+            consent: null,
+            state: localDraft.state,
+            updatedAt: localDraft.updatedAt,
+          } as BootstrapPayload;
+          setBootstrap(fallbackBootstrap);
+          setBootstrapError(null);
+          hydrateState(localDraft.state);
+          writeBootstrapCache(scopedUserId, fallbackBootstrap);
+          return fallbackBootstrap;
         }
+        const fallbackBootstrap = {
+          onboardingCompleted: true,
+          consentCompleted: true,
+          hasStoredState: false,
+          consent: null,
+          state: emptyState(),
+          updatedAt: null,
+        } as BootstrapPayload;
+        setBootstrap(fallbackBootstrap);
+        hydrateState(emptyState());
+        writeBootstrapCache(scopedUserId, fallbackBootstrap);
+        if (!silent) {
+          console.error("[AppShell] failed_to_load_bootstrap_using_empty_fallback", {
+            userId: scopedUserId,
+            error: (error as Error)?.message ?? "failed_to_load_bootstrap",
+          });
+        }
+        setBootstrapError(null);
+        return fallbackBootstrap;
       }
       return null;
     } finally {

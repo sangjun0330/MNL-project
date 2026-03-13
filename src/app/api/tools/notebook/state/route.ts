@@ -12,10 +12,11 @@ function bad(status: number, message: string) {
 }
 
 export async function GET(req: Request) {
-  const userId = await readUserIdFromRequest(req)
-  if (!userId) return bad(401, "login required")
-
+  let userId = ""
   try {
+    userId = await readUserIdFromRequest(req)
+    if (!userId) return bad(401, "login required")
+
     if (!(await userHasCompletedServiceConsent(userId))) {
       return bad(403, "consent_required")
     }
@@ -26,8 +27,17 @@ export async function GET(req: Request) {
       state: row?.payload ?? defaultNotebookState(),
       updatedAt: row?.updatedAt ?? null,
     })
-  } catch {
-    return bad(500, "failed_to_load_notebook_state")
+  } catch (error) {
+    console.error("[NotebookState] failed_to_load_notebook_state", {
+      userId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return jsonNoStore({
+      ok: true,
+      state: defaultNotebookState(),
+      updatedAt: null,
+      degraded: true,
+    })
   }
 }
 
@@ -42,20 +52,25 @@ export async function POST(req: Request) {
     return bad(400, "invalid json")
   }
 
-  const userId = await readUserIdFromRequest(req)
-  const state = (body as { state?: unknown } | null)?.state
-
-  if (!userId) return bad(401, "login required")
-  if (!state) return bad(400, "state required")
-
+  let userId = ""
   try {
+    userId = await readUserIdFromRequest(req)
+    const state = (body as { state?: unknown } | null)?.state
+
+    if (!userId) return bad(401, "login required")
+    if (!state) return bad(400, "state required")
+
     if (!(await userHasCompletedServiceConsent(userId))) {
       return bad(403, "consent_required")
     }
 
     await saveNotebookState({ userId, payload: sanitizeNotebookState(state) })
     return jsonNoStore({ ok: true, syncedAt: new Date().toISOString() })
-  } catch {
+  } catch (error) {
+    console.error("[NotebookState] failed_to_save_notebook_state", {
+      userId,
+      error: error instanceof Error ? error.message : String(error),
+    })
     return bad(500, "failed_to_save_notebook_state")
   }
 }

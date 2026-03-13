@@ -100,6 +100,7 @@ export function NotebookRichTextField({
         codeBlock: false,
         heading: false,
         horizontalRule: false,
+        link: false,
         orderedList: false,
       }),
       Highlight.configure({ multicolor: false }),

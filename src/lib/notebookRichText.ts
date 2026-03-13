@@ -163,9 +163,10 @@ export function sanitizeNotebookRichHtml(value: unknown, maxLength: number) {
   if (typeof value !== "string") return ""
   const source = value.replace(/\u0000/g, "").trim()
   if (!source) return ""
-  if (typeof DOMParser !== "undefined") {
-    return sanitizeNotebookRichHtmlWithDom(source, maxLength)
-  }
+  // Keep sanitization deterministic across SSR and client hydration.
+  // Using DOMParser in the browser produced markup that could differ from the
+  // regex fallback on the server, which then surfaced as React hydration
+  // mismatches on notebook entry for rich-text content.
   return sanitizeNotebookRichHtmlFallback(source, maxLength)
 }
 
