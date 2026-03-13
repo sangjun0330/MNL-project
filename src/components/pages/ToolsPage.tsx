@@ -18,21 +18,9 @@ type ToolCategory = {
 
 const CATEGORY_CARDS: ToolCategory[] = [
   {
-    id: "notebook",
-    name: "메모",
-    description: "노션처럼 자유롭게 메모하고 정리하세요. 블록 기반 에디터로 빠르게 기록합니다.",
-    href: "/tools/notebook",
-    tone: "guide",
-    keywords: ["메모", "노트", "문서", "체크리스트", "정리", "markdown"],
-    quickLinks: [
-      { label: "새 메모", href: "/tools/notebook" },
-    ],
-    secondaryLink: { label: "메모 열기", href: "/tools/notebook" },
-  },
-  {
     id: "ai_search",
     name: "AI 임상 검색",
-    description: "임상 질문에 AI가 즉시 답변하며, Free는 월 체험 크레딧으로 먼저 경험할 수 있습니다.",
+    description: "약물, 처치, 간호 질문을 빠르게 확인하고 핵심 답변을 바로 찾는 임상 검색 도구입니다.",
     href: "/tools/med-safety",
     tone: "guide",
     keywords: ["ai", "검색", "질문", "약물", "기구", "임상", "간호", "안전"],
@@ -44,9 +32,19 @@ const CATEGORY_CARDS: ToolCategory[] = [
     secondaryLink: { label: "최근 검색 기록", href: "/tools/med-safety/recent" },
   },
   {
+    id: "notebook",
+    name: "메모",
+    description: "메모, 체크리스트, 사진, 파일을 페이지별로 정리하고 개인 기록을 한곳에서 관리하는 도구입니다.",
+    href: "/tools/notebook",
+    tone: "guide",
+    keywords: ["메모", "노트", "문서", "체크리스트", "정리", "markdown"],
+    quickLinks: [{ label: "새 메모", href: "/tools/notebook" }],
+    secondaryLink: { label: "메모 열기", href: "/tools/notebook" },
+  },
+  {
     id: "calculators",
     name: "통합 간호 계산기",
-    description: "투약·주입·평가·임상 계산기를 한 페이지에서 전환합니다.",
+    description: "투약, 주입, 평가, 신체 수치 계산을 한 화면에서 빠르게 전환해 확인하는 계산 도구입니다.",
     href: "/tools/nurse-calculators",
     tone: "calculator",
     keywords: [
@@ -79,7 +77,25 @@ const CATEGORY_CARDS: ToolCategory[] = [
   },
 ];
 
-function CategoryIcon({ tone }: { tone: ToolCategory["tone"] }) {
+function CategoryIcon({ id, tone }: { id: ToolCategory["id"]; tone: ToolCategory["tone"] }) {
+  if (id === "notebook") {
+    return (
+      <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+        <path
+          d="M8 4.75h9.1l4.15 4.15V22a1.75 1.75 0 0 1-1.75 1.75H8A1.75 1.75 0 0 1 6.25 22V6.5A1.75 1.75 0 0 1 8 4.75Z"
+          fill="#F1EEFF"
+          stroke="#7C6CE0"
+          strokeWidth="1.6"
+          strokeLinejoin="round"
+        />
+        <path d="M17.1 4.75V8.5a.8.8 0 0 0 .8.8h3.35" stroke="#7C6CE0" strokeWidth="1.6" strokeLinejoin="round" />
+        <path d="M10 12h8" stroke="#7C6CE0" strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M10 15.75h8" stroke="#7C6CE0" strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M10 19.5h5" stroke="#7C6CE0" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
   if (tone === "guide") {
     return (
       <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
@@ -146,7 +162,7 @@ export function ToolsPage() {
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div className="flex min-w-0 gap-4">
                   <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[20px] border border-ios-sep bg-[#F7F8FA]">
-                    <CategoryIcon tone={card.tone} />
+                    <CategoryIcon id={card.id} tone={card.tone} />
                   </div>
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
