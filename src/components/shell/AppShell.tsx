@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { BottomNav } from "@/components/shell/BottomNav";
 import { UiPreferencesBridge } from "@/components/system/UiPreferencesBridge";
 import { getSupabaseBrowserClient, signOut, useAuthState } from "@/lib/auth";
-import { readPreferredAppStateDraft } from "@/lib/appStateDraft";
+import { hasMeaningfulAppState, readPreferredAppStateDraft } from "@/lib/appStateDraft";
 import { hydrateState } from "@/lib/store";
 import { emptyState } from "@/lib/model";
 import { useI18n } from "@/lib/useI18n";
@@ -195,7 +195,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       writeBootstrapCache(scopedUserId, data);
       setBootstrapSettledUserId(scopedUserId);
       const localDraft = readPreferredAppStateDraft(scopedUserId);
-      if (localDraft && (!data.updatedAt || localDraft.updatedAt > data.updatedAt)) {
+      if (
+        localDraft &&
+        hasMeaningfulAppState(localDraft.state) &&
+        (!data.updatedAt || localDraft.updatedAt > data.updatedAt)
+      ) {
         hydrateState(localDraft.state);
       } else {
         hydrateState(data.consentCompleted && data.state ? data.state : emptyState());
@@ -208,7 +212,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           setBootstrap(null);
           setBootstrapError((error as Error)?.message ?? "failed_to_load_bootstrap");
           const localDraft = readPreferredAppStateDraft(scopedUserId);
-          if (localDraft) {
+          if (localDraft && hasMeaningfulAppState(localDraft.state)) {
             hydrateState(localDraft.state);
           }
         }
@@ -240,7 +244,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       setBootstrap(cached);
       setBootstrapError(null);
       const localDraft = readPreferredAppStateDraft(auth.userId);
-      if (localDraft && (!cached.updatedAt || localDraft.updatedAt > cached.updatedAt)) {
+      if (
+        localDraft &&
+        hasMeaningfulAppState(localDraft.state) &&
+        (!cached.updatedAt || localDraft.updatedAt > cached.updatedAt)
+      ) {
         hydrateState(localDraft.state);
       } else {
         hydrateState(cached.consentCompleted && cached.state ? cached.state : emptyState());
@@ -249,7 +257,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       setBootstrap(null);
       setBootstrapError(null);
       const localDraft = readPreferredAppStateDraft(auth.userId);
-      if (localDraft) {
+      if (localDraft && hasMeaningfulAppState(localDraft.state)) {
         hydrateState(localDraft.state);
       }
     }
