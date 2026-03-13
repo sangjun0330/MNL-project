@@ -97,7 +97,7 @@ function readPreferredLocalDraft(userId: string | null) {
   return scoped;
 }
 
-export function CloudNotebookSync() {
+export function CloudNotebookSync({ remoteEnabled = false }: { remoteEnabled?: boolean }) {
   const auth = useAuth();
   const { status } = useAuthState();
   const store = useAppStore();
@@ -252,7 +252,7 @@ export function CloudNotebookSync() {
   );
 
   const flushNow = useCallback(() => {
-    if (!userId || status !== "authenticated" || !initializedRef.current) return;
+    if (!remoteEnabled || !userId || status !== "authenticated" || !initializedRef.current) return;
     const latestState = getCurrentNotebookState();
     const nextSignature = buildSignature(latestState);
     writeLocalDraft(userId, latestState, { dirty: true });
@@ -262,10 +262,10 @@ export function CloudNotebookSync() {
     void saveStateViaApi(latestState, { keepalive: true }).catch(() => {
       // Ignore page-hide sync failures.
     });
-  }, [buildSignature, getCurrentNotebookState, saveStateViaApi, status, userId]);
+  }, [buildSignature, getCurrentNotebookState, remoteEnabled, saveStateViaApi, status, userId]);
 
   const loadNotebookState = useCallback(async () => {
-    if (!userId || status !== "authenticated") return null;
+    if (!remoteEnabled || !userId || status !== "authenticated") return null;
 
     const requestId = ++loadRequestRef.current;
     const localDraftAtLoadStart = readPreferredLocalDraft(userId);
@@ -283,6 +283,9 @@ export function CloudNotebookSync() {
     const json = await res.json().catch(() => null);
     if (!res.ok) {
       throw new Error(String(json?.error ?? "failed_to_load_notebook_state"));
+    }
+    if (json?.degraded || json?.localOnly) {
+      throw new Error("notebook_state_degraded");
     }
 
     if (requestId !== loadRequestRef.current) return null;
@@ -335,10 +338,10 @@ export function CloudNotebookSync() {
     });
     clearLocalDraft(null);
     return remoteState;
-  }, [applyHydratedState, buildSignature, getAuthHeaders, getCurrentNotebookState, queueSave, status, userId]);
+  }, [applyHydratedState, buildSignature, getAuthHeaders, getCurrentNotebookState, queueSave, remoteEnabled, status, userId]);
 
   const refreshFromRemote = useCallback(async () => {
-    if (!userId || status !== "authenticated" || !initializedRef.current) return null;
+    if (!remoteEnabled || !userId || status !== "authenticated" || !initializedRef.current) return null;
     if (typeof document !== "undefined" && document.visibilityState === "hidden") return null;
     if (saveInFlightRef.current || pendingSaveRef.current || remoteLoadInFlightRef.current) return null;
 
@@ -353,7 +356,7 @@ export function CloudNotebookSync() {
     } finally {
       remoteLoadInFlightRef.current = false;
     }
-  }, [buildSignature, getCurrentNotebookState, loadNotebookState, status, userId]);
+  }, [buildSignature, getCurrentNotebookState, loadNotebookState, remoteEnabled, status, userId]);
 
   useEffect(() => {
     storeRef.current = store;
@@ -383,7 +386,7 @@ export function CloudNotebookSync() {
       applyHydratedState(localDraft.state);
     }
 
-    if (!userId || status !== "authenticated") {
+    if (!userId || status !== "authenticated" || !remoteEnabled) {
       initializedRef.current = true;
       const fallbackState = localDraft?.state ?? getCurrentNotebookState();
       latestSignatureRef.current = buildSignature(fallbackState);
@@ -399,7 +402,7 @@ export function CloudNotebookSync() {
       latestStateRef.current = fallbackState;
       writeLocalDraft(userId, fallbackState, { dirty: Boolean(localDraft?.dirty) });
     });
-  }, [applyHydratedState, buildSignature, getCurrentNotebookState, loadNotebookState, status, userId]);
+  }, [applyHydratedState, buildSignature, getCurrentNotebookState, loadNotebookState, remoteEnabled, status, userId]);
 
   useEffect(() => {
     return () => {
@@ -422,7 +425,7 @@ export function CloudNotebookSync() {
         dirty: !skipNextSaveRef.current,
       });
     }
-    if (!userId || status !== "authenticated" || !initializedRef.current) return;
+    if (!remoteEnabled || !userId || status !== "authenticated" || !initializedRef.current) return;
 
     const nextSignature = buildSignature(nextState);
 
@@ -442,10 +445,10 @@ export function CloudNotebookSync() {
     latestSignatureRef.current = nextSignature;
     latestStateRef.current = nextState;
     queueSave(nextState, userId);
-  }, [buildSignature, memo, queueSave, records, status, userId]);
+  }, [buildSignature, memo, queueSave, records, remoteEnabled, status, userId]);
 
   useEffect(() => {
-    if (!userId || status !== "authenticated") return;
+    if (!remoteEnabled || !userId || status !== "authenticated") return;
 
     const onVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
@@ -465,10 +468,10 @@ export function CloudNotebookSync() {
       window.removeEventListener("pagehide", onPageHide);
       window.removeEventListener("beforeunload", onPageHide);
     };
-  }, [flushNow, status, userId]);
+  }, [flushNow, remoteEnabled, status, userId]);
 
   useEffect(() => {
-    if (!userId || status !== "authenticated") return;
+    if (!remoteEnabled || !userId || status !== "authenticated") return;
 
     const requestRefresh = () => {
       void refreshFromRemote().catch(() => {
@@ -495,7 +498,7 @@ export function CloudNotebookSync() {
       window.removeEventListener("pageshow", requestRefresh);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [refreshFromRemote, status, userId]);
+  }, [refreshFromRemote, remoteEnabled, status, userId]);
 
   return null;
 }

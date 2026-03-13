@@ -7,6 +7,7 @@ type NotebookImagePreviewCacheEntry = {
 }
 
 const NOTEBOOK_SIGNED_URL_CACHE_MS = 55 * 60 * 1000
+const NOTEBOOK_PROXY_URL_CACHE_MS = 15 * 1000
 
 const notebookImagePreviewCache = new Map<string, NotebookImagePreviewCacheEntry>()
 const notebookImagePreviewPromiseCache = new Map<string, Promise<string>>()
@@ -53,11 +54,23 @@ function normalizeSignedNotebookFileUrl(url: string) {
 }
 
 async function requestSignedNotebookImageUrl(path: string) {
+  const urls = await requestNotebookSignedUrls([path])
+  const signedUrl = normalizeSignedNotebookFileUrl(String(urls[path] ?? ""))
+  if (!signedUrl) {
+    throw new Error("notebook_image_url_missing")
+  }
+  return signedUrl
+}
+
+export async function requestNotebookSignedUrls(paths: string[]) {
+  const uniquePaths = Array.from(new Set(paths.map((path) => String(path ?? "").trim()).filter(Boolean)))
+  if (uniquePaths.length === 0) return {} as Record<string, string>
+
   const response = await fetch("/api/tools/notebook/files/sign", {
     method: "POST",
     credentials: "include",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ paths: [path] }),
+    body: JSON.stringify({ paths: uniquePaths }),
     cache: "no-store",
   })
 
@@ -66,12 +79,24 @@ async function requestSignedNotebookImageUrl(path: string) {
     throw new Error(String(payload?.error ?? "failed_to_create_notebook_file_urls"))
   }
 
-  const signedUrl = normalizeSignedNotebookFileUrl(String(payload?.urls?.[path] ?? ""))
-  if (!signedUrl) {
-    throw new Error("notebook_image_url_missing")
-  }
+  const urls = Object.fromEntries(
+    Object.entries(payload?.urls ?? {}).map(([path, url]) => [path, normalizeSignedNotebookFileUrl(String(url ?? ""))])
+  ) as Record<string, string>
 
-  return signedUrl
+  return urls
+}
+
+export async function loadNotebookFileAccessUrl(path: string, options?: { download?: boolean }) {
+  const trimmedPath = String(path ?? "").trim()
+  if (!trimmedPath) throw new Error("path_required")
+  try {
+    const urls = await requestNotebookSignedUrls([trimmedPath])
+    const signedUrl = normalizeSignedNotebookFileUrl(String(urls[trimmedPath] ?? ""))
+    if (signedUrl) return signedUrl
+  } catch {
+    // Fall back to proxy URL when signed URL creation fails.
+  }
+  return buildNotebookFileUrl(trimmedPath, options)
 }
 
 export async function uploadNotebookFile(file: File, preferredKind?: RNestMemoAttachment["kind"]) {
@@ -152,11 +177,8 @@ export async function loadNotebookImagePreview(path: string, options?: { forceRe
       setNotebookImagePreviewCache(path, {
         url: proxyUrl,
         kind: "proxy",
-        expiresAt: Date.now() + 2 * 60 * 1000,
+        expiresAt: Date.now() + NOTEBOOK_PROXY_URL_CACHE_MS,
       })
-      if (signedError instanceof Error && signedError.message === "login_required") {
-        throw signedError
-      }
       return proxyUrl
     }
   })()

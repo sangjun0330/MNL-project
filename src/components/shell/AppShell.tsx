@@ -42,6 +42,7 @@ type BootstrapPayload = {
   hasStoredState: boolean;
   state: any | null;
   updatedAt: number | null;
+  degraded?: boolean;
 };
 
 type BusyStage = "onboarding" | null;
@@ -217,6 +218,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             consent: null,
             state: localDraft.state,
             updatedAt: localDraft.updatedAt,
+            degraded: true,
           } as BootstrapPayload;
           setBootstrap(fallbackBootstrap);
           setBootstrapError(null);
@@ -231,6 +233,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           consent: null,
           state: emptyState(),
           updatedAt: null,
+          degraded: true,
         } as BootstrapPayload;
         setBootstrap(fallbackBootstrap);
         hydrateState(emptyState());
@@ -465,11 +468,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           remoteEnabled={
             isAuthed &&
             bootstrapSettledUserId === (auth?.userId ?? null) &&
-            Boolean(resolvedBootstrap?.consentCompleted)
+            Boolean(resolvedBootstrap?.consentCompleted) &&
+            !resolvedBootstrap?.degraded
           }
         />
       ) : null}
-      {!isPolicyPage ? <CloudNotebookSync /> : null}
+      {!isPolicyPage ? (
+        <CloudNotebookSync
+          remoteEnabled={
+            isAuthed &&
+            bootstrapSettledUserId === (auth?.userId ?? null) &&
+            Boolean(resolvedBootstrap?.consentCompleted) &&
+            !resolvedBootstrap?.degraded
+          }
+        />
+      ) : null}
       <OnboardingGuide open={showOnboarding} onComplete={handleOnboardingComplete} />
       {showConsent ? <ServiceConsentScreen onSubmit={handleConsentComplete} /> : null}
       <div className="safe-bottom" />

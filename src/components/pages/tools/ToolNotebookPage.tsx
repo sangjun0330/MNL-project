@@ -106,6 +106,7 @@ import {
   clearNotebookImagePreview,
   deleteNotebookFiles,
   getCachedNotebookImagePreview,
+  loadNotebookFileAccessUrl,
   loadNotebookImagePreview,
   seedNotebookImagePreview,
   uploadNotebookFile,
@@ -4139,9 +4140,14 @@ export function ToolNotebookPage() {
     setToast("첨부를 제거했습니다")
   }
 
-  function openAttachment(attachment: RNestMemoAttachment) {
-    const url = buildNotebookFileUrl(attachment.storagePath)
-    window.open(url, "_blank", "noopener,noreferrer")
+  async function openAttachment(attachment: RNestMemoAttachment) {
+    try {
+      const url = await loadNotebookFileAccessUrl(attachment.storagePath)
+      window.open(url, "_blank", "noopener,noreferrer")
+    } catch {
+      const fallbackUrl = buildNotebookFileUrl(attachment.storagePath)
+      window.open(fallbackUrl, "_blank", "noopener,noreferrer")
+    }
   }
 
   /* ── block operations ── */

@@ -99,6 +99,43 @@ function hasMeaningfulUserData(value: unknown): boolean {
   );
 }
 
+function preserveMissingPayloadDomains(nextPayload: Record<string, unknown>, existingPayload: Record<string, unknown>) {
+  const keys = ["schedule", "shiftNames", "notes", "emotions", "bio", "settings"] as const;
+  let merged: Record<string, unknown> | null = null;
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(nextPayload, key)) continue;
+    if (!Object.prototype.hasOwnProperty.call(existingPayload, key)) continue;
+    if (!merged) merged = { ...nextPayload };
+    merged[key] = existingPayload[key];
+  }
+  return merged ?? nextPayload;
+}
+
+function mergeScheduleSafely(nextPayload: Record<string, unknown>, existingPayload: Record<string, unknown>) {
+  const existingSchedule = isRecord(existingPayload.schedule) ? existingPayload.schedule : null;
+  if (!existingSchedule || Object.keys(existingSchedule).length === 0) return nextPayload;
+
+  const nextSchedule = isRecord(nextPayload.schedule) ? nextPayload.schedule : null;
+  if (!nextSchedule) {
+    return {
+      ...nextPayload,
+      schedule: existingSchedule,
+    };
+  }
+
+  const mergedSchedule = {
+    ...existingSchedule,
+    ...nextSchedule,
+  };
+
+  if (isJsonEqual(mergedSchedule, nextSchedule)) return nextPayload;
+
+  return {
+    ...nextPayload,
+    schedule: mergedSchedule,
+  };
+}
+
 function mergeProtectedMaps(nextPayload: Record<string, unknown>, existingPayload: Record<string, unknown>) {
   const protectedKeys = ["schedule", "notes", "emotions", "bio", "shiftNames"] as const;
   const merged: Record<string, unknown> = { ...nextPayload };
@@ -192,6 +229,19 @@ export async function saveUserState(input: { userId: string; payload: any }): Pr
     !hasMeaningfulUserData(nextPayload)
   ) {
     nextPayload = mergeProtectedMaps(nextPayload, existingPayload);
+  }
+
+  // Partial payload writers can omit app-state domains entirely; keep the existing domains in that case.
+  if (isRecord(nextPayload) && existingPayload) {
+    nextPayload = preserveMissingPayloadDomains(nextPayload, existingPayload);
+  }
+
+  // Schedule currently supports overwrite/update flows but not true deletion.
+  // If an incoming payload suddenly drops dates, preserve existing dates and only let the new payload
+  // override values for dates it actually sent. This prevents degraded bootstrap/local fallback states
+  // from wiping future schedule history.
+  if (isRecord(nextPayload) && existingPayload) {
+    nextPayload = mergeScheduleSafely(nextPayload, existingPayload);
   }
 
   // Keep menstrual cycle settings from being accidentally reset by a partial/default payload,
