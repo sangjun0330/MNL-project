@@ -2,16 +2,62 @@
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { getSupabaseBrowserClient, useAuth, useAuthState } from "@/lib/auth";
-import { defaultNotebookState, sanitizeNotebookState, type RNestNotebookState } from "@/lib/notebook";
+import {
+  defaultNotebookState,
+  hasMeaningfulNotebookState,
+  sanitizeNotebookState,
+  type RNestNotebookState,
+} from "@/lib/notebook";
 import { useAppStore } from "@/lib/store";
 
 const SAVE_DEBOUNCE_MS = 180;
 const RETRY_BASE_MS = 800;
 const RETRY_MAX_MS = 8000;
+const LOCAL_NOTEBOOK_DRAFT_KEY = "rnest_notebook_state_v1";
 
 type SaveOptions = {
   keepalive?: boolean;
 };
+
+type LocalNotebookDraft = {
+  updatedAt: number;
+  state: RNestNotebookState;
+};
+
+function buildLocalDraftKey(userId: string) {
+  return `${LOCAL_NOTEBOOK_DRAFT_KEY}:${userId}`;
+}
+
+function readLocalDraft(userId: string | null): LocalNotebookDraft | null {
+  if (!userId || typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(buildLocalDraftKey(userId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { updatedAt?: unknown; state?: unknown } | null;
+    const updatedAt =
+      typeof parsed?.updatedAt === "number" && Number.isFinite(parsed.updatedAt) ? parsed.updatedAt : Date.now();
+    const state = sanitizeNotebookState(parsed?.state ?? defaultNotebookState());
+    if (!hasMeaningfulNotebookState(state)) return null;
+    return { updatedAt, state };
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalDraft(userId: string | null, state: RNestNotebookState) {
+  if (!userId || typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      buildLocalDraftKey(userId),
+      JSON.stringify({
+        updatedAt: Date.now(),
+        state,
+      })
+    );
+  } catch {
+    // Ignore local backup failures.
+  }
+}
 
 export function CloudNotebookSync() {
   const auth = useAuth();
@@ -47,6 +93,26 @@ export function CloudNotebookSync() {
 
   const buildSignature = useCallback((state: RNestNotebookState) => JSON.stringify(state), []);
 
+  const getCurrentNotebookState = useCallback(() => {
+    const latestStore = storeRef.current;
+    return sanitizeNotebookState({
+      memo: latestStore.memo,
+      records: latestStore.records,
+    });
+  }, []);
+
+  const applyHydratedState = useCallback(
+    (nextState: RNestNotebookState) => {
+      latestSignatureRef.current = buildSignature(nextState);
+      latestStateRef.current = nextState;
+      skipNextSaveRef.current = true;
+      initializedRef.current = true;
+      storeRef.current.setMemoState(nextState.memo);
+      storeRef.current.setRecordState(nextState.records);
+    },
+    [buildSignature]
+  );
+
   const saveStateViaApi = useCallback(
     async (state: RNestNotebookState, options?: SaveOptions) => {
       const authHeaders = await getAuthHeaders();
@@ -72,6 +138,7 @@ export function CloudNotebookSync() {
     (nextState: RNestNotebookState, scopedUserId: string | null) => {
       if (!scopedUserId) return;
       latestStateRef.current = nextState;
+      writeLocalDraft(scopedUserId, nextState);
 
       if (saveInFlightRef.current) {
         pendingSaveRef.current = true;
@@ -121,20 +188,24 @@ export function CloudNotebookSync() {
 
   const flushNow = useCallback(() => {
     if (!userId || status !== "authenticated" || !initializedRef.current) return;
-    const latestStore = storeRef.current;
-    const latestState = sanitizeNotebookState({ memo: latestStore.memo, records: latestStore.records });
+    const latestState = getCurrentNotebookState();
     const nextSignature = buildSignature(latestState);
+    writeLocalDraft(userId, latestState);
     if (nextSignature === latestSignatureRef.current) return;
     latestSignatureRef.current = nextSignature;
+    latestStateRef.current = latestState;
     void saveStateViaApi(latestState, { keepalive: true }).catch(() => {
-      // ignore page-hide sync failures
+      // Ignore page-hide sync failures.
     });
-  }, [buildSignature, saveStateViaApi, status, userId]);
+  }, [buildSignature, getCurrentNotebookState, saveStateViaApi, status, userId]);
 
   const loadNotebookState = useCallback(async () => {
     if (!userId || status !== "authenticated") return null;
 
     const requestId = ++loadRequestRef.current;
+    const localDraftAtLoadStart = readLocalDraft(userId);
+    const localStateAtLoadStart = getCurrentNotebookState();
+    const localSignatureAtLoadStart = buildSignature(localStateAtLoadStart);
     const authHeaders = await getAuthHeaders();
     const res = await fetch("/api/tools/notebook/state", {
       method: "GET",
@@ -151,14 +222,36 @@ export function CloudNotebookSync() {
 
     if (requestId !== loadRequestRef.current) return null;
 
-    const nextState = sanitizeNotebookState(json?.state ?? defaultNotebookState());
-    latestSignatureRef.current = buildSignature(nextState);
-    skipNextSaveRef.current = true;
-    initializedRef.current = true;
-    storeRef.current.setMemoState(nextState.memo);
-    storeRef.current.setRecordState(nextState.records);
-    return nextState;
-  }, [buildSignature, getAuthHeaders, status, userId]);
+    const remoteState = sanitizeNotebookState(json?.state ?? defaultNotebookState());
+    const remoteSignature = buildSignature(remoteState);
+    const remoteUpdatedAt =
+      typeof json?.updatedAt === "number" && Number.isFinite(json.updatedAt) ? json.updatedAt : null;
+    const currentState = getCurrentNotebookState();
+    const currentSignature = buildSignature(currentState);
+    const localChangedWhileLoading = currentSignature !== localSignatureAtLoadStart;
+    const localDraftIsNewer =
+      Boolean(localDraftAtLoadStart) &&
+      typeof localDraftAtLoadStart?.updatedAt === "number" &&
+      (remoteUpdatedAt == null || localDraftAtLoadStart.updatedAt > remoteUpdatedAt);
+
+    if (
+      localChangedWhileLoading ||
+      (localDraftIsNewer && currentSignature === buildSignature(localDraftAtLoadStart?.state ?? defaultNotebookState()))
+    ) {
+      initializedRef.current = true;
+      latestSignatureRef.current = currentSignature;
+      latestStateRef.current = currentState;
+      writeLocalDraft(userId, currentState);
+      if (hasMeaningfulNotebookState(currentState) && currentSignature !== remoteSignature) {
+        queueSave(currentState, userId);
+      }
+      return currentState;
+    }
+
+    applyHydratedState(remoteState);
+    writeLocalDraft(userId, remoteState);
+    return remoteState;
+  }, [applyHydratedState, buildSignature, getAuthHeaders, getCurrentNotebookState, queueSave, status, userId]);
 
   useEffect(() => {
     storeRef.current = store;
@@ -186,11 +279,19 @@ export function CloudNotebookSync() {
 
     if (!userId || status !== "authenticated") return;
 
+    const localDraft = readLocalDraft(userId);
+    if (localDraft) {
+      applyHydratedState(localDraft.state);
+    }
+
     void loadNotebookState().catch(() => {
+      const fallbackState = localDraft?.state ?? getCurrentNotebookState();
       initializedRef.current = true;
-      latestSignatureRef.current = buildSignature(defaultNotebookState());
+      latestSignatureRef.current = buildSignature(fallbackState);
+      latestStateRef.current = fallbackState;
+      writeLocalDraft(userId, fallbackState);
     });
-  }, [buildSignature, loadNotebookState, status, userId]);
+  }, [applyHydratedState, buildSignature, getCurrentNotebookState, loadNotebookState, status, userId]);
 
   useEffect(() => {
     return () => {
@@ -200,20 +301,23 @@ export function CloudNotebookSync() {
   }, []);
 
   useEffect(() => {
+    const nextState = sanitizeNotebookState({ memo, records });
+    writeLocalDraft(userId, nextState);
     if (!userId || status !== "authenticated" || !initializedRef.current) return;
 
-    const nextState = sanitizeNotebookState({ memo, records });
     const nextSignature = buildSignature(nextState);
 
     if (skipNextSaveRef.current) {
       skipNextSaveRef.current = false;
       latestSignatureRef.current = nextSignature;
+      latestStateRef.current = nextState;
       return;
     }
 
     if (nextSignature === latestSignatureRef.current) return;
 
     latestSignatureRef.current = nextSignature;
+    latestStateRef.current = nextState;
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
     }
