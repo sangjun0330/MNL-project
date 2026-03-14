@@ -485,17 +485,16 @@ async function handlePlanner(
   const phase = normalizeRecoveryPhase(options?.phase ?? url.searchParams.get("phase"));
   const cacheOnly = !allowGenerate || url.searchParams.get("cacheOnly") === "1";
 
-  const userId = await safeReadUserId(req);
-  if (!userId) return bad(401, "login_required");
-  if (!(await safeHasCompletedServiceConsent(userId))) return bad(403, "consent_required");
-
-  const subscription = await safeLoadSubscription(userId);
-  if (subscription && !subscription.entitlements?.recoveryPlannerAI) {
-    return bad(402, "paid_plan_required_recovery_planner_ai");
-  }
-  const aiRecoveryModel = getAIRecoveryModelForTier(subscription?.tier ?? "pro");
-
   try {
+    const userId = await safeReadUserId(req);
+    if (!userId) return bad(401, "login_required");
+    if (!(await safeHasCompletedServiceConsent(userId))) return bad(403, "consent_required");
+
+    const subscription = await safeLoadSubscription(userId);
+    if (subscription && !subscription.entitlements?.recoveryPlannerAI) {
+      return bad(402, "paid_plan_required_recovery_planner_ai");
+    }
+    const aiRecoveryModel = getAIRecoveryModelForTier(subscription?.tier ?? "pro");
     const row = await safeLoadUserState(userId);
     if (!row?.payload) return bad(404, "state_not_found");
 

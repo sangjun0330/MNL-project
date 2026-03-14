@@ -572,22 +572,22 @@ async function handleRecovery(
   const phase = normalizeRecoveryPhase(options?.phase ?? url.searchParams.get("phase"));
   const cacheOnly = !allowGenerate || url.searchParams.get("cacheOnly") === "1";
 
-  // ── 1. 사용자 인증 시도 (실패해도 계속 진행) ──
-  const userId = await safeReadUserId(req);
-  if (!userId) {
-    return bad(401, "login_required");
-  }
-  if (!(await safeHasCompletedServiceConsent(userId))) {
-    return bad(403, "consent_required");
-  }
-
-  const subscription = await safeLoadSubscription(userId);
-  if (subscription && !subscription.entitlements?.recoveryPlannerAI) {
-    return bad(402, "paid_plan_required_ai_recovery");
-  }
-  const aiRecoveryModel = getAIRecoveryModelForTier(subscription?.tier ?? "pro");
-
   try {
+    // ── 1. 사용자 인증 시도 (실패해도 계속 진행) ──
+    const userId = await safeReadUserId(req);
+    if (!userId) {
+      return bad(401, "login_required");
+    }
+    if (!(await safeHasCompletedServiceConsent(userId))) {
+      return bad(403, "consent_required");
+    }
+
+    const subscription = await safeLoadSubscription(userId);
+    if (subscription && !subscription.entitlements?.recoveryPlannerAI) {
+      return bad(402, "paid_plan_required_ai_recovery");
+    }
+    const aiRecoveryModel = getAIRecoveryModelForTier(subscription?.tier ?? "pro");
+
     // ── 2. Supabase에서 사용자 데이터 로드 시도 ──
     const row = await safeLoadUserState(userId);
     if (!row?.payload) {
