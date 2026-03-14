@@ -37,6 +37,11 @@ import type { Shift } from "@/lib/types";
 import { computeVitalsRange } from "@/lib/vitals";
 import type { Json } from "@/types/supabase";
 import type { SubscriptionSnapshot } from "@/lib/server/billingStore";
+import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import { userHasCompletedServiceConsent } from "@/lib/server/serviceConsentStore";
+import { loadUserState } from "@/lib/server/userStateStore";
+import { readSubscription } from "@/lib/server/billingStore";
+import { loadAIContent, saveAIContent } from "@/lib/server/aiContentStore";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -108,7 +113,6 @@ async function safeReadUserId(req: NextRequest): Promise<string> {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     if (!supabaseUrl || !supabaseAnon) return "";
-    const { readUserIdFromRequest } = await import("@/lib/server/readUserId");
     return await readUserIdFromRequest(req);
   } catch {
     return "";
@@ -120,7 +124,6 @@ async function safeHasCompletedServiceConsent(userId: string): Promise<boolean> 
     const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     if (!serviceRole || !supabaseUrl) return false;
-    const { userHasCompletedServiceConsent } = await import("@/lib/server/serviceConsentStore");
     return await userHasCompletedServiceConsent(userId);
   } catch {
     return false;
@@ -132,7 +135,6 @@ async function safeLoadUserState(userId: string): Promise<{ payload: unknown } |
     const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     if (!serviceRole || !supabaseUrl) return null;
-    const { loadUserState } = await import("@/lib/server/userStateStore");
     return await loadUserState(userId);
   } catch {
     return null;
@@ -146,7 +148,6 @@ async function safeLoadAIContent(
     const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     if (!serviceRole || !supabaseUrl) return null;
-    const { loadAIContent } = await import("@/lib/server/aiContentStore");
     const row = await loadAIContent(userId);
     if (!row) return null;
     return {
@@ -164,7 +165,6 @@ async function safeLoadSubscription(userId: string): Promise<SubscriptionSnapsho
     const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     if (!serviceRole || !supabaseUrl) return null;
-    const { readSubscription } = await import("@/lib/server/billingStore");
     return await readSubscription(userId);
   } catch {
     return null;
@@ -182,7 +182,6 @@ async function safeSaveAIContent(
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     if (!serviceRole || !supabaseUrl) return "missing_supabase_env";
 
-    const { saveAIContent } = await import("@/lib/server/aiContentStore");
     const existing = await safeLoadAIContent(userId);
     const previous = isRecord(existing?.data) ? existing.data : {};
     const incoming = isRecord(data) ? data : {};
