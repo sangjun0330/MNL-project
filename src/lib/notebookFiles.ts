@@ -105,16 +105,19 @@ export async function loadNotebookFileAccessUrl(path: string, options?: { downlo
 }
 
 export async function uploadNotebookFile(file: File, preferredKind?: RNestMemoAttachment["kind"]) {
-  const form = new FormData()
-  form.set("file", file)
-  if (preferredKind) form.set("preferredKind", preferredKind)
   const authHeaders = await getBrowserAuthHeaders()
 
   const response = await fetch("/api/tools/notebook/files", {
     method: "POST",
-    body: form,
+    body: file,
     credentials: "include",
-    headers: authHeaders,
+    headers: {
+      ...authHeaders,
+      "content-type": file.type || "application/octet-stream",
+      "x-rnest-file-name": encodeURIComponent(file.name || "upload"),
+      "x-rnest-file-type": file.type || "application/octet-stream",
+      ...(preferredKind ? { "x-rnest-file-kind": preferredKind } : {}),
+    },
   })
 
   const payload = await parseJson(response)

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { useAuthState } from "@/lib/auth";
+import { getBrowserAuthHeaders, useAuthState } from "@/lib/auth";
 import type { SubscriptionApi } from "@/lib/billing/client";
 import { getPlanDefinition, getSearchCreditMeta, type SearchCreditType } from "@/lib/billing/plans";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
@@ -364,10 +364,14 @@ async function fetchAnalyzeWithTimeout(body: Record<string, unknown>, timeoutMs:
     }, timeoutMs);
   });
   try {
+    const authHeaders = await getBrowserAuthHeaders();
     return (await Promise.race([
       fetch("/api/tools/med-safety/analyze", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders,
+        },
         body: JSON.stringify(body),
         cache: "no-store",
         signal: controller.signal,

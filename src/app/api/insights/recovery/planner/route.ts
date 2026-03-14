@@ -723,6 +723,19 @@ async function handlePlanner(
 
     return jsonNoStore({ ok: true, data: payload } satisfies AIRecoveryPlannerApiSuccess);
   } catch (err: any) {
+    try {
+      console.error("[Planner] handle_failed", {
+        cacheOnly,
+        phase,
+        requestedOrderCount,
+        error: err?.message ?? err,
+      });
+    } catch {
+      // Ignore logging failure.
+    }
+    if (cacheOnly) {
+      return jsonNoStore({ ok: true, data: null } satisfies AIRecoveryPlannerApiSuccess);
+    }
     return bad(500, typeof err?.message === "string" && err.message.trim() ? err.message.trim() : "openai_generation_failed");
   }
 }
@@ -732,7 +745,7 @@ export async function GET(req: NextRequest) {
     return await handlePlanner(req, { allowGenerate: false });
   } catch (err: any) {
     console.error("[Planner GET] unhandled", err?.message ?? err);
-    return bad(500, "planner_unhandled_error");
+    return jsonNoStore({ ok: true, data: null } satisfies AIRecoveryPlannerApiSuccess);
   }
 }
 

@@ -48,6 +48,21 @@ function isNotebookFileMissingError(error: unknown) {
   )
 }
 
+function decodeUploadFileName(value: string) {
+  const trimmed = String(value ?? "").trim()
+  if (!trimmed) return ""
+  try {
+    return decodeURIComponent(trimmed)
+  } catch {
+    return trimmed
+  }
+}
+
+function normalizePreferredKind(value: string): "image" | "scan" | "file" | "pdf" | undefined {
+  const trimmed = String(value ?? "").trim()
+  return trimmed === "image" || trimmed === "scan" || trimmed === "file" || trimmed === "pdf" ? trimmed : undefined
+}
+
 export async function GET(req: Request) {
   const url = new URL(req.url)
   const path = String(url.searchParams.get("path") ?? "").trim()
@@ -100,18 +115,33 @@ export async function POST(req: Request) {
     if (!userId) return bad(401, "login_required")
     if (!(await userHasCompletedServiceConsent(userId))) return bad(403, "consent_required")
 
-    const form = await req.formData().catch(() => null)
-    const file = form?.get("file")
-    const preferredKind = String(form?.get("preferredKind") ?? "").trim()
+    const headerFileName = decodeUploadFileName(req.headers.get("x-rnest-file-name") ?? "")
+    const headerFileType = String(req.headers.get("x-rnest-file-type") ?? "").trim() || "application/octet-stream"
+    let file: File | null = null
+    let preferredKind = normalizePreferredKind(req.headers.get("x-rnest-file-kind") ?? "")
+
+    if (headerFileName) {
+      const body = await req.arrayBuffer().catch(() => null)
+      if (body) {
+        file = new File([body], headerFileName, { type: headerFileType })
+      }
+    }
+
+    if (!(file instanceof File)) {
+      const form = await req.formData().catch(() => null)
+      const formFile = form?.get("file")
+      preferredKind = preferredKind ?? normalizePreferredKind(String(form?.get("preferredKind") ?? ""))
+      if (formFile instanceof File) {
+        file = formFile
+      }
+    }
+
     if (!(file instanceof File)) return bad(400, "file_required")
 
     const attachment = await uploadNotebookFile({
       userId,
       file,
-      preferredKind:
-        preferredKind === "image" || preferredKind === "scan" || preferredKind === "file" || preferredKind === "pdf"
-          ? preferredKind
-          : undefined,
+      preferredKind,
     })
     return jsonNoStore({ ok: true, attachment })
   } catch (error) {

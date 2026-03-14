@@ -1,6 +1,7 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity"
 import { requireBillingAdmin } from "@/lib/server/billingAdminAuth"
 import { loadNotebookTemplates, saveNotebookTemplates } from "@/lib/server/notebookTemplateStore"
+import { defaultMemoTemplates, sanitizeMemoTemplate } from "@/lib/notebook"
 
 export const runtime = "edge"
 export const dynamic = "force-dynamic"
@@ -18,7 +19,12 @@ export async function GET() {
       updatedAt: row.updatedAt,
     })
   } catch {
-    return bad(500, "failed_to_load_notebook_templates")
+    return jsonNoStore({
+      ok: true,
+      templates: defaultMemoTemplates.map((template) => sanitizeMemoTemplate(template)),
+      updatedAt: null,
+      degraded: true,
+    })
   }
 }
 

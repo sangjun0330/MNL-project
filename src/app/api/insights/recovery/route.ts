@@ -902,8 +902,18 @@ async function handleRecovery(
 
     return jsonNoStore(body);
   } catch (err: any) {
-    // 502 is sometimes replaced by Cloudflare HTML error pages.
-    // Use 500 so client can read JSON error details.
+    try {
+      console.error("[Recovery] handle_failed", {
+        cacheOnly,
+        phase,
+        error: err?.message ?? err,
+      });
+    } catch {
+      // Ignore logging failure.
+    }
+    if (cacheOnly) {
+      return jsonNoStore({ ok: true, data: null } satisfies AIRecoveryApiSuccess);
+    }
     return bad(500, typeof err?.message === "string" && err.message.trim() ? err.message.trim() : "openai_generation_failed");
   }
 }
@@ -913,7 +923,7 @@ export async function GET(req: NextRequest) {
     return await handleRecovery(req, { allowGenerate: false });
   } catch (err: any) {
     console.error("[Recovery GET] unhandled", err?.message ?? err);
-    return bad(500, "recovery_unhandled_error");
+    return jsonNoStore({ ok: true, data: null } satisfies AIRecoveryApiSuccess);
   }
 }
 
