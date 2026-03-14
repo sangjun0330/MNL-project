@@ -200,8 +200,13 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
     setRemoteData(null);
 
     const run = async () => {
+      let cached: AIRecoveryPlannerPayload | null = null;
       try {
-        const cached = await fetchAIRecoveryPlanner(lang, phase, true);
+        try {
+          cached = await fetchAIRecoveryPlanner(lang, phase, true);
+        } catch {
+          cached = null;
+        }
         if (!active) return;
 
         if (cached && cached.language === lang && cached.phase === phase && !forceGenerate) {

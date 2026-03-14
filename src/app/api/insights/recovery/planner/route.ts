@@ -16,10 +16,6 @@ import { countHealthRecordedDays, hasHealthInput } from "@/lib/healthRecords";
 import type { AppState } from "@/lib/model";
 import { sanitizeStatePayload } from "@/lib/stateSanitizer";
 import {
-  generateAIRecoveryPlannerModulesWithOpenAI,
-  generateAIRecoveryWithOpenAI,
-} from "@/lib/server/openaiRecovery";
-import {
   buildAfterWorkMissingLabels,
   buildRecoveryOrderProgressId,
   buildRecoveryPhaseState,
@@ -440,10 +436,21 @@ function readPlannerPhasePayload(
   return legacy?.engine === "openai" ? legacy : null;
 }
 
+type RecoveryThreadSummary = {
+  startRecoveryHeadline?: string | null;
+  startFocusLabel?: string | null;
+  startPrimaryAction?: string | null;
+  startAvoidAction?: string | null;
+  totalStartOrderCount?: number;
+  completedStartOrderCount?: number;
+  completedStartOrders?: Array<{ id: string; title: string }>;
+  pendingStartOrders?: Array<{ id: string; title: string }>;
+}
+
 function buildRecoveryThread(
   startPlanner: AIRecoveryPlannerPayload | null,
   completedIds: string[]
-): NonNullable<Parameters<typeof generateAIRecoveryWithOpenAI>[0]["recoveryThread"]> | null {
+): RecoveryThreadSummary | null {
   if (!startPlanner) return null;
   const completed = new Set(completedIds);
   const startOrders = startPlanner.result.orders.items ?? [];
@@ -590,6 +597,7 @@ async function handlePlanner(
     }
 
     try {
+      const { generateAIRecoveryPlannerModulesWithOpenAI, generateAIRecoveryWithOpenAI } = await import("@/lib/server/openaiRecovery");
       let plannerDebug: string | null = null;
       let explanationDebug: string | null = null;
       let plannerModel: string | null = null;

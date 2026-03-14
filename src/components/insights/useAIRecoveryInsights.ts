@@ -169,8 +169,13 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
     setRemoteData(null);
 
     const run = async () => {
+      let cached: AIRecoveryPayload | null = null;
       try {
-        const cached = await fetchAIRecovery(lang, dateISO, phase, true);
+        try {
+          cached = await fetchAIRecovery(lang, dateISO, phase, true);
+        } catch {
+          cached = null;
+        }
         if (!active) return;
 
         if (cached && cached.language === lang && cached.phase === phase && !forceGenerate) {

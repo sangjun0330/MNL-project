@@ -8,7 +8,6 @@ import { countHealthRecordedDays, hasHealthInput } from "@/lib/healthRecords";
 import { getAIRecoveryModelForTier } from "@/lib/billing/plans";
 import type { AppState } from "@/lib/model";
 import { sanitizeStatePayload } from "@/lib/stateSanitizer";
-import { generateAIRecoveryWithOpenAI, translateAIRecoveryToEnglish } from "@/lib/server/openaiRecovery";
 import {
   buildAfterWorkMissingLabels,
   buildRecoveryOrderProgressId,
@@ -451,10 +450,21 @@ function readPlannerPhasePayload(
   return null;
 }
 
+type RecoveryThreadSummary = {
+  startRecoveryHeadline?: string | null;
+  startFocusLabel?: string | null;
+  startPrimaryAction?: string | null;
+  startAvoidAction?: string | null;
+  totalStartOrderCount?: number;
+  completedStartOrderCount?: number;
+  completedStartOrders?: Array<{ id: string; title: string }>;
+  pendingStartOrders?: Array<{ id: string; title: string }>;
+}
+
 function buildRecoveryThreadFromPlanner(
   plannerPayload: AIRecoveryPlannerPayload | null,
   completedIds: string[]
-): NonNullable<Parameters<typeof generateAIRecoveryWithOpenAI>[0]["recoveryThread"]> | null {
+): RecoveryThreadSummary | null {
   if (!plannerPayload) return null;
   const completed = new Set(completedIds);
   const startOrders = plannerPayload.result.orders.items ?? [];
@@ -694,6 +704,7 @@ async function handleRecovery(
       }
       if (lang === "en" && koVariant && koIsCurrent) {
         try {
+          const { translateAIRecoveryToEnglish } = await import("@/lib/server/openaiRecovery");
           const translated = await translateAIRecoveryToEnglish({
             result: koVariant.result,
             generatedText: koVariant.generatedText ?? "",
@@ -777,6 +788,7 @@ async function handleRecovery(
 
     try {
       // ── 4. OpenAI 한국어 단일 생성(영어는 번역 캐시) ──
+      const { generateAIRecoveryWithOpenAI, translateAIRecoveryToEnglish } = await import("@/lib/server/openaiRecovery");
       const aiKo = await generateAIRecoveryWithOpenAI({
         language: "ko",
         todayISO: today,
