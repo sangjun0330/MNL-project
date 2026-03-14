@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AIRecoveryPlannerPayload } from "@/lib/aiRecoveryPlanner";
 import { todayISO } from "@/lib/date";
-import { useAuthState } from "@/lib/auth";
+import { getBrowserAuthHeaders, useAuthState } from "@/lib/auth";
 import { useI18n } from "@/lib/useI18n";
 import { useInsightsData } from "@/components/insights/useInsightsData";
 import { DEFAULT_RECOVERY_PHASE, normalizeRecoveryPhase, type RecoveryPhase } from "@/lib/recoveryPhases";
@@ -67,10 +67,16 @@ async function fetchAIRecoveryPlanner(
 ): Promise<AIRecoveryPlannerPayload | null> {
   const cacheOnlyQuery = cacheOnly ? "&cacheOnly=1" : "";
   const method = cacheOnly ? "GET" : "POST";
+  const authHeaders = await getBrowserAuthHeaders();
   const res = await fetch(`/api/insights/recovery/planner?lang=${lang}&phase=${phase}${cacheOnlyQuery}`, {
     method,
     cache: "no-store",
-    headers: cacheOnly ? undefined : { "Content-Type": "application/json" },
+    headers: cacheOnly
+      ? authHeaders
+      : {
+          "Content-Type": "application/json",
+          ...authHeaders,
+        },
     body:
       cacheOnly
         ? undefined

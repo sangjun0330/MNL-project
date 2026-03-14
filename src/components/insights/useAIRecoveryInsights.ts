@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AIRecoveryPayload } from "@/lib/aiRecoveryContract";
 import { todayISO } from "@/lib/date";
 import { useInsightsData } from "@/components/insights/useInsightsData";
-import { useAuthState } from "@/lib/auth";
+import { getBrowserAuthHeaders, useAuthState } from "@/lib/auth";
 import { DEFAULT_RECOVERY_PHASE, normalizeRecoveryPhase, type RecoveryPhase } from "@/lib/recoveryPhases";
 import { useI18n } from "@/lib/useI18n";
 
@@ -54,10 +54,16 @@ async function fetchAIRecovery(
 ): Promise<AIRecoveryPayload | null> {
   const cacheOnlyQuery = cacheOnly ? "&cacheOnly=1" : "";
   const method = cacheOnly ? "GET" : "POST";
+  const authHeaders = await getBrowserAuthHeaders();
   const res = await fetch(`/api/insights/recovery?lang=${lang}&phase=${phase}${cacheOnlyQuery}`, {
     method,
     cache: "no-store",
-    headers: cacheOnly ? undefined : { "Content-Type": "application/json" },
+    headers: cacheOnly
+      ? authHeaders
+      : {
+          "Content-Type": "application/json",
+          ...authHeaders,
+        },
     body: cacheOnly ? undefined : JSON.stringify({ forceGenerate, phase }),
   });
 

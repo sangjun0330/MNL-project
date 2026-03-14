@@ -1,5 +1,9 @@
 import { getRouteSupabaseClient } from "@/lib/server/supabaseRouteClient";
 import { isAuthEmailAllowed } from "@/lib/server/authAccess";
+import { createClient } from "@supabase/supabase-js";
+import type { Database } from "@/types/supabase";
+
+let bearerSupabaseClient: ReturnType<typeof createClient<Database>> | null = null;
 
 function extractBearerToken(req: Request): string | null {
   const header = req.headers.get("authorization") ?? "";
@@ -8,24 +12,42 @@ function extractBearerToken(req: Request): string | null {
   return scheme.toLowerCase() === "bearer" ? token : null;
 }
 
+function getBearerSupabaseClient() {
+  if (bearerSupabaseClient) return bearerSupabaseClient;
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseAnon) {
+    throw new Error("Supabase env missing (NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY)");
+  }
+  bearerSupabaseClient = createClient<Database>(supabaseUrl, supabaseAnon, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
+  return bearerSupabaseClient;
+}
+
 export async function readUserIdFromRequest(req: Request): Promise<string> {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!supabaseUrl || !supabaseAnon) return "";
 
-  const supabase = await getRouteSupabaseClient();
   const bearer = extractBearerToken(req);
 
   if (bearer) {
     // Bearer 토큰이 명시적으로 제공된 경우: 해당 토큰으로만 인증.
     // 토큰이 무효하더라도 cookie 기반 인증으로 폴스루하지 않아
     // 토큰 위조나 세션 혼용 공격을 방지한다.
+    const supabase = getBearerSupabaseClient();
     const { data, error } = await supabase.auth.getUser(bearer);
     if (!error && data.user?.id && isAuthEmailAllowed(data.user.email ?? null)) return data.user.id;
     return "";
   }
 
   // Bearer 토큰이 없을 때만 cookie 기반 인증 시도
+  const supabase = await getRouteSupabaseClient();
   const { data } = await supabase.auth.getUser();
   if (data.user?.id && isAuthEmailAllowed(data.user.email ?? null)) return data.user.id;
   return "";

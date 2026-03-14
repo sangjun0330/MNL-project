@@ -173,6 +173,18 @@ export function useAuth(): AuthUser | null {
   return useAuthState().user ?? null;
 }
 
+export async function getBrowserAuthHeaders(): Promise<Record<string, string>> {
+  if (typeof window === "undefined") return {};
+  try {
+    const supabase = getSupabaseBrowserClient();
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  } catch {
+    return {};
+  }
+}
+
 export function signInWithProvider(provider: "google" = "google") {
   const supabase = getSupabaseBrowserClient();
   const isBrowser = typeof window !== "undefined";

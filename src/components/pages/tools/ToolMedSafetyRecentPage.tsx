@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useAuthState } from "@/lib/auth";
+import { getBrowserAuthHeaders, useAuthState } from "@/lib/auth";
 import { useI18n } from "@/lib/useI18n";
 import { buildStructuredCopyText, copyTextToClipboard } from "@/lib/structuredCopy";
 import { AnimatedCopyLabel } from "@/components/ui/AnimatedCopyLabel";
@@ -286,8 +286,10 @@ export function ToolMedSafetyRecentPage() {
       setLoading(true);
       setError(null);
       try {
+        const authHeaders = await getBrowserAuthHeaders();
         const res = await fetch("/api/tools/med-safety/history", {
           method: "GET",
+          headers: authHeaders,
           cache: "no-store",
         });
         const json = (await res.json().catch(() => null)) as

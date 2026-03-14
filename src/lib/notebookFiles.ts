@@ -1,4 +1,5 @@
 import { createMemoAttachment, type RNestMemoAttachment } from "@/lib/notebook"
+import { getBrowserAuthHeaders } from "@/lib/auth"
 
 type NotebookImagePreviewCacheEntry = {
   url: string
@@ -65,11 +66,15 @@ async function requestSignedNotebookImageUrl(path: string) {
 export async function requestNotebookSignedUrls(paths: string[]) {
   const uniquePaths = Array.from(new Set(paths.map((path) => String(path ?? "").trim()).filter(Boolean)))
   if (uniquePaths.length === 0) return {} as Record<string, string>
+  const authHeaders = await getBrowserAuthHeaders()
 
   const response = await fetch("/api/tools/notebook/files/sign", {
     method: "POST",
     credentials: "include",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      ...authHeaders,
+    },
     body: JSON.stringify({ paths: uniquePaths }),
     cache: "no-store",
   })
@@ -103,11 +108,13 @@ export async function uploadNotebookFile(file: File, preferredKind?: RNestMemoAt
   const form = new FormData()
   form.set("file", file)
   if (preferredKind) form.set("preferredKind", preferredKind)
+  const authHeaders = await getBrowserAuthHeaders()
 
   const response = await fetch("/api/tools/notebook/files", {
     method: "POST",
     body: form,
     credentials: "include",
+    headers: authHeaders,
   })
 
   const payload = await parseJson(response)
@@ -202,10 +209,14 @@ export async function deleteNotebookFiles(paths: string[]) {
   for (const path of paths) {
     clearNotebookImagePreview(path)
   }
+  const authHeaders = await getBrowserAuthHeaders()
   await fetch("/api/tools/notebook/files", {
     method: "DELETE",
     credentials: "include",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      ...authHeaders,
+    },
     body: JSON.stringify({ paths }),
   })
 }

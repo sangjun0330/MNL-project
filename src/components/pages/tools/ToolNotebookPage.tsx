@@ -112,6 +112,7 @@ import {
   uploadNotebookFile,
 } from "@/lib/notebookFiles"
 import { useAppStore } from "@/lib/store"
+import { getBrowserAuthHeaders } from "@/lib/auth"
 import {
   Dialog,
   DialogContent,
@@ -3159,10 +3160,12 @@ export function ToolNotebookPage() {
   const loadTemplates = useCallback(async (options?: { silent?: boolean }) => {
     if (!options?.silent) setTemplatesLoading(true)
     try {
+      const authHeaders = await getBrowserAuthHeaders()
       const res = await fetch("/api/tools/notebook/templates", {
         method: "GET",
         headers: {
           "content-type": "application/json",
+          ...authHeaders,
         },
         cache: "no-store",
       })
