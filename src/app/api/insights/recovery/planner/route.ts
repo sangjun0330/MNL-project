@@ -1,8 +1,10 @@
 import { NextRequest } from "next/server";
 import { addDays, fromISODate, toISODate, todayISO, type ISODate } from "@/lib/date";
+import { generateAIRecovery } from "@/lib/aiRecovery";
 import type { AIRecoveryPayload } from "@/lib/aiRecoveryContract";
 import {
   buildExplanationModule,
+  buildFallbackModules,
   type AIRecoveryPlannerModules,
   type AIRecoveryPlannerApiError,
   type AIRecoveryPlannerApiSuccess,
@@ -30,6 +32,7 @@ import {
 } from "@/lib/recoveryPhases";
 import {
   buildPlannerContext,
+  buildPlannerTimelinePreview,
   normalizeProfileSettings,
   type PlannerContext,
 } from "@/lib/recoveryPlanner";
@@ -337,6 +340,21 @@ function isRequestedOrderCountCurrent(cached: number | null | undefined, request
   return normalizeRequestedOrderCount(cached) === requested;
 }
 
+function describeNextDutyLabel(shift: Shift | null, language: Language) {
+  if (language === "en") {
+    if (shift === "D") return "the next day shift";
+    if (shift === "E") return "the next evening shift";
+    if (shift === "N") return "the next night shift";
+    if (shift === "M") return "the next middle shift";
+    return "the next duty";
+  }
+  if (shift === "D") return "다음 데이 근무";
+  if (shift === "E") return "다음 이브 근무";
+  if (shift === "N") return "다음 나이트 근무";
+  if (shift === "M") return "다음 미들 근무";
+  return "다음 근무";
+}
+
 function isPlannerContextCurrent(cached: PlannerContext | null | undefined, current: PlannerContext) {
   if (!cached) return false;
   if ((cached.focusFactor?.key ?? null) !== (current.focusFactor?.key ?? null)) return false;
@@ -465,10 +483,10 @@ async function handlePlanner(
   if (!(await safeHasCompletedServiceConsent(userId))) return bad(403, "consent_required");
 
   const subscription = await safeLoadSubscription(userId);
-  if (!subscription?.entitlements?.recoveryPlannerAI) {
+  if (subscription && !subscription.entitlements?.recoveryPlannerAI) {
     return bad(402, "paid_plan_required_recovery_planner_ai");
   }
-  const aiRecoveryModel = getAIRecoveryModelForTier(subscription.tier);
+  const aiRecoveryModel = getAIRecoveryModelForTier(subscription?.tier ?? "pro");
 
   try {
     const row = await safeLoadUserState(userId);
@@ -571,27 +589,51 @@ async function handlePlanner(
       return jsonNoStore({ ok: true, data: null } satisfies AIRecoveryPlannerApiSuccess);
     }
 
-    let plannerDebug: string | null = null;
-    let explanationDebug: string | null = null;
-    let plannerModel: string | null = null;
-    let explanationResult: AIRecoveryPayload["result"];
-    let explanationGeneratedText: string | undefined;
-    let explanationModel: string | null = null;
-    const cachedRecoveryIsCurrent =
-      cachedRecovery &&
-      cachedRecovery.engine === "openai" &&
-      cachedRecovery.phase === phase &&
-      isPlannerContextCurrent(cachedRecovery.plannerContext, plannerContext) &&
-      isProfileSnapshotCurrent(cachedRecovery.profileSnapshot, profileSnapshot);
+    try {
+      let plannerDebug: string | null = null;
+      let explanationDebug: string | null = null;
+      let plannerModel: string | null = null;
+      let explanationResult: AIRecoveryPayload["result"];
+      let explanationGeneratedText: string | undefined;
+      let explanationModel: string | null = null;
+      const cachedRecoveryIsCurrent =
+        cachedRecovery &&
+        cachedRecovery.engine === "openai" &&
+        cachedRecovery.phase === phase &&
+        isPlannerContextCurrent(cachedRecovery.plannerContext, plannerContext) &&
+        isProfileSnapshotCurrent(cachedRecovery.profileSnapshot, profileSnapshot);
 
-    if (cachedRecoveryIsCurrent) {
-      explanationResult = cachedRecovery.result;
-      explanationGeneratedText = cachedRecovery.generatedText;
-      explanationModel = cachedRecovery.model;
-      explanationDebug = cachedRecovery.debug ?? null;
-    } else {
-      const explanationAI = await generateAIRecoveryWithOpenAI({
+      if (cachedRecoveryIsCurrent) {
+        explanationResult = cachedRecovery.result;
+        explanationGeneratedText = cachedRecovery.generatedText;
+        explanationModel = cachedRecovery.model;
+        explanationDebug = cachedRecovery.debug ?? null;
+      } else {
+        const explanationAI = await generateAIRecoveryWithOpenAI({
+          language: lang,
+          todayISO: today,
+          modelOverride: aiRecoveryModel,
+          phase,
+          todayShift,
+          nextShift,
+          todayVital,
+          vitals7: phaseVitals7,
+          prevWeekVitals: phasePrevWeek,
+          allVitals,
+          plannerContext,
+          profile,
+          recoveryThread,
+        });
+        explanationResult = explanationAI.result;
+        explanationGeneratedText = explanationAI.generatedText;
+        explanationModel = explanationAI.model;
+      }
+
+      let plannerModules: AIRecoveryPlannerModules;
+      let plannerGeneratedText: string | undefined;
+      const plannerAI = await generateAIRecoveryPlannerModulesWithOpenAI({
         language: lang,
+        requestedOrderCount,
         todayISO: today,
         modelOverride: aiRecoveryModel,
         phase,
@@ -604,124 +646,132 @@ async function handlePlanner(
         plannerContext,
         profile,
         recoveryThread,
+        recoveryResult: explanationResult,
       });
-      explanationResult = explanationAI.result;
-      explanationGeneratedText = explanationAI.generatedText;
-      explanationModel = explanationAI.model;
-    }
+      plannerModules = plannerAI.result;
+      plannerGeneratedText = plannerAI.generatedText;
+      plannerModel = plannerAI.model;
 
-    let plannerModules: AIRecoveryPlannerModules;
-    let plannerGeneratedText: string | undefined;
-    const plannerAI = await generateAIRecoveryPlannerModulesWithOpenAI({
-      language: lang,
-      requestedOrderCount,
-      todayISO: today,
-      modelOverride: aiRecoveryModel,
-      phase,
-      todayShift,
-      nextShift,
-      todayVital,
-      vitals7: phaseVitals7,
-      prevWeekVitals: phasePrevWeek,
-      allVitals,
-      plannerContext,
-      profile,
-      recoveryThread,
-      recoveryResult: explanationResult,
-    });
-    plannerModules = plannerAI.result;
-    plannerGeneratedText = plannerAI.generatedText;
-    plannerModel = plannerAI.model;
-
-    const todayVitalScore = todayVital ? Math.round(Math.min(todayVital.body.value, todayVital.mental.ema)) : null;
-    const model = explanationModel ?? plannerModel ?? null;
-    const explanationPayload: AIRecoveryPayload = {
-      dateISO: today,
-      language: lang,
-      phase,
-      todayShift,
-      nextShift,
-      todayVitalScore,
-      source: "supabase",
-      engine: "openai",
-      model: explanationModel,
-      debug: explanationDebug,
-      generatedText: explanationGeneratedText,
-      plannerContext,
-      profileSnapshot,
-      result: explanationResult,
-    };
-    const payload: AIRecoveryPlannerPayload = {
-      dateISO: today,
-      language: lang,
-      phase,
-      requestedOrderCount,
-      todayShift,
-      nextShift,
-      todayVitalScore,
-      source: "supabase",
-      engine: "openai",
-      model,
-      debug: [plannerDebug, explanationDebug].filter(Boolean).join("|") || null,
-      generatedText: plannerGeneratedText,
-      explanationGeneratedText,
-      plannerContext,
-      profileSnapshot,
-      result: {
-        ...plannerModules,
-        explanation: buildExplanationModule(explanationResult, lang),
-      },
-    };
-
-    const aiContentRecord = isRecord(aiContent?.data) ? (aiContent?.data as Record<string, unknown>) : {};
-    const previousRecoveryPhaseVariants =
-      isRecord(aiContentRecord.recoveryPhaseVariants) ? (aiContentRecord.recoveryPhaseVariants as Record<string, unknown>) : {};
-    const previousPlannerPhaseVariants =
-      isRecord(aiContentRecord.plannerPhaseVariants) ? (aiContentRecord.plannerPhaseVariants as Record<string, unknown>) : {};
-    const previousRecoveryLangNode =
-      isRecord(previousRecoveryPhaseVariants[lang]) ? (previousRecoveryPhaseVariants[lang] as Record<string, unknown>) : {};
-    const previousPlannerLangNode =
-      isRecord(previousPlannerPhaseVariants[lang]) ? (previousPlannerPhaseVariants[lang] as Record<string, unknown>) : {};
-    const legacyRecoveryVariants =
-      isRecord(aiContentRecord.variants) ? (aiContentRecord.variants as Record<string, unknown>) : {};
-    const legacyPlannerVariants =
-      isRecord(aiContentRecord.plannerVariants) ? (aiContentRecord.plannerVariants as Record<string, unknown>) : {};
-
-    const saveError = await safeSaveAIContent(userId, today, lang, {
-      dateISO: today,
-      generatedAt: Date.now(),
-      recoveryPhaseVariants: {
-        ...previousRecoveryPhaseVariants,
-        [lang]: {
-          ...previousRecoveryLangNode,
-          [phase]: explanationPayload,
+      const todayVitalScore = todayVital ? Math.round(Math.min(todayVital.body.value, todayVital.mental.ema)) : null;
+      const model = explanationModel ?? plannerModel ?? null;
+      const explanationPayload: AIRecoveryPayload = {
+        dateISO: today,
+        language: lang,
+        phase,
+        todayShift,
+        nextShift,
+        todayVitalScore,
+        source: "supabase",
+        engine: "openai",
+        model: explanationModel,
+        debug: explanationDebug,
+        generatedText: explanationGeneratedText,
+        plannerContext,
+        profileSnapshot,
+        result: explanationResult,
+      };
+      const payload: AIRecoveryPlannerPayload = {
+        dateISO: today,
+        language: lang,
+        phase,
+        requestedOrderCount,
+        todayShift,
+        nextShift,
+        todayVitalScore,
+        source: "supabase",
+        engine: "openai",
+        model,
+        debug: [plannerDebug, explanationDebug].filter(Boolean).join("|") || null,
+        generatedText: plannerGeneratedText,
+        explanationGeneratedText,
+        plannerContext,
+        profileSnapshot,
+        result: {
+          ...plannerModules,
+          explanation: buildExplanationModule(explanationResult, lang),
         },
-      },
-      plannerPhaseVariants: {
-        ...previousPlannerPhaseVariants,
-        [lang]: {
-          ...previousPlannerLangNode,
-          [phase]: payload,
-        },
-      },
-      ...(phase === "start"
-        ? {
-            variants: {
-              ...legacyRecoveryVariants,
-              [lang]: explanationPayload,
-            },
-            plannerVariants: {
-              ...legacyPlannerVariants,
-              [lang]: payload,
-            },
-          }
-        : {}),
-    } as Json);
-    if (saveError) {
-      payload.debug = payload.debug ? `${payload.debug}|${saveError}` : saveError;
-    }
+      };
 
-    return jsonNoStore({ ok: true, data: payload } satisfies AIRecoveryPlannerApiSuccess);
+      const aiContentRecord = isRecord(aiContent?.data) ? (aiContent?.data as Record<string, unknown>) : {};
+      const previousRecoveryPhaseVariants =
+        isRecord(aiContentRecord.recoveryPhaseVariants) ? (aiContentRecord.recoveryPhaseVariants as Record<string, unknown>) : {};
+      const previousPlannerPhaseVariants =
+        isRecord(aiContentRecord.plannerPhaseVariants) ? (aiContentRecord.plannerPhaseVariants as Record<string, unknown>) : {};
+      const previousRecoveryLangNode =
+        isRecord(previousRecoveryPhaseVariants[lang]) ? (previousRecoveryPhaseVariants[lang] as Record<string, unknown>) : {};
+      const previousPlannerLangNode =
+        isRecord(previousPlannerPhaseVariants[lang]) ? (previousPlannerPhaseVariants[lang] as Record<string, unknown>) : {};
+      const legacyRecoveryVariants =
+        isRecord(aiContentRecord.variants) ? (aiContentRecord.variants as Record<string, unknown>) : {};
+      const legacyPlannerVariants =
+        isRecord(aiContentRecord.plannerVariants) ? (aiContentRecord.plannerVariants as Record<string, unknown>) : {};
+
+      const saveError = await safeSaveAIContent(userId, today, lang, {
+        dateISO: today,
+        generatedAt: Date.now(),
+        recoveryPhaseVariants: {
+          ...previousRecoveryPhaseVariants,
+          [lang]: {
+            ...previousRecoveryLangNode,
+            [phase]: explanationPayload,
+          },
+        },
+        plannerPhaseVariants: {
+          ...previousPlannerPhaseVariants,
+          [lang]: {
+            ...previousPlannerLangNode,
+            [phase]: payload,
+          },
+        },
+        ...(phase === "start"
+          ? {
+              variants: {
+                ...legacyRecoveryVariants,
+                [lang]: explanationPayload,
+              },
+              plannerVariants: {
+                ...legacyPlannerVariants,
+                [lang]: payload,
+              },
+            }
+          : {}),
+      } as Json);
+      if (saveError) {
+        payload.debug = payload.debug ? `${payload.debug}|${saveError}` : saveError;
+      }
+
+      return jsonNoStore({ ok: true, data: payload } satisfies AIRecoveryPlannerApiSuccess);
+    } catch (generationError: any) {
+      const explanationResult = generateAIRecovery(todayVital, phaseVitals7, phasePrevWeek, nextShift, lang);
+      const timelinePreview = buildPlannerTimelinePreview(todayShift, todayVital, profile);
+      const plannerModules = buildFallbackModules({
+        language: lang,
+        plannerContext,
+        nextDutyLabel: describeNextDutyLabel(nextShift, lang),
+        timelinePreview,
+      });
+      const todayVitalScore = todayVital ? Math.round(Math.min(todayVital.body.value, todayVital.mental.ema)) : null;
+      const payload: AIRecoveryPlannerPayload = {
+        dateISO: today,
+        language: lang,
+        phase,
+        requestedOrderCount,
+        todayShift,
+        nextShift,
+        todayVitalScore,
+        source: "local",
+        engine: "rule",
+        model: null,
+        debug: typeof generationError?.message === "string" ? generationError.message : "rule_fallback",
+        plannerContext,
+        profileSnapshot,
+        result: {
+          ...plannerModules,
+          explanation: buildExplanationModule(explanationResult, lang),
+        },
+      };
+      return jsonNoStore({ ok: true, data: payload } satisfies AIRecoveryPlannerApiSuccess);
+    }
   } catch (err: any) {
     try {
       console.error("[Planner] handle_failed", {

@@ -489,18 +489,31 @@ export async function POST(req: NextRequest) {
 
     const subscription = await safeReadSubscription(userId);
     const searchType = pickSearchType(bodyRaw.searchType, getDefaultSearchTypeForTier(subscription?.tier ?? "free"));
-    const creditUse = await safeConsumeMedSafetyCredit(userId, searchType);
-    if (!creditUse.allowed) {
-      return jsonNoStore(
-        {
-          ok: false,
-          error: safeErrorString(creditUse.reason ?? "insufficient_med_safety_credits"),
-          quota: creditUse.quota,
-        },
-        { status: 402 }
-      );
+    let consumedBucket: "included" | "extra" | null = null;
+    try {
+      const creditUse = await safeConsumeMedSafetyCredit(userId, searchType);
+      if (!creditUse.allowed) {
+        return jsonNoStore(
+          {
+            ok: false,
+            error: safeErrorString(creditUse.reason ?? "insufficient_med_safety_credits"),
+            quota: creditUse.quota,
+          },
+          { status: 402 }
+        );
+      }
+      consumedBucket = creditUse.bucket;
+    } catch (error) {
+      try {
+        console.error("[MedSafetyAnalyze] credit_consume_failed_allowing_request", {
+          userId: userId.slice(0, 8),
+          error: error instanceof Error ? error.message : String(error),
+        });
+      } catch {
+        // ignore logging failure
+      }
+      consumedBucket = null;
     }
-    const consumedBucket = creditUse.bucket;
 
     const abort = new AbortController();
     const timeoutMs = resolveAnalyzeTimeoutMs();

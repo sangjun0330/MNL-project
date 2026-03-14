@@ -1,7 +1,4 @@
 import { buildPrivateNoStoreHeaders, jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity"
-import { userHasCompletedServiceConsent } from "@/lib/server/serviceConsentStore"
-import { readUserIdFromRequest } from "@/lib/server/readUserId"
-import { downloadNotebookFile, removeNotebookFiles, uploadNotebookFile } from "@/lib/server/notebookFileStore"
 
 export const runtime = "edge"
 export const dynamic = "force-dynamic"
@@ -73,6 +70,9 @@ export async function GET(req: Request) {
 
   let userId = ""
   try {
+    const { readUserIdFromRequest } = await import("@/lib/server/readUserId")
+    const { userHasCompletedServiceConsent } = await import("@/lib/server/serviceConsentStore")
+    const { downloadNotebookFile } = await import("@/lib/server/notebookFileStore")
     userId = await readUserIdFromRequest(req)
     if (!userId) return new Response("login_required", { status: 401, headers: buildPrivateNoStoreHeaders() })
     if (!(await userHasCompletedServiceConsent(userId))) {
@@ -111,6 +111,9 @@ export async function POST(req: Request) {
 
   let userId = ""
   try {
+    const { readUserIdFromRequest } = await import("@/lib/server/readUserId")
+    const { userHasCompletedServiceConsent } = await import("@/lib/server/serviceConsentStore")
+    const { uploadNotebookFile } = await import("@/lib/server/notebookFileStore")
     userId = await readUserIdFromRequest(req)
     if (!userId) return bad(401, "login_required")
     if (!(await userHasCompletedServiceConsent(userId))) return bad(403, "consent_required")
@@ -118,16 +121,17 @@ export async function POST(req: Request) {
     const headerFileName = decodeUploadFileName(req.headers.get("x-rnest-file-name") ?? "")
     const headerFileType = String(req.headers.get("x-rnest-file-type") ?? "").trim() || "application/octet-stream"
     let file: File | null = null
+    let rawBytes: ArrayBuffer | null = null
     let preferredKind = normalizePreferredKind(req.headers.get("x-rnest-file-kind") ?? "")
 
     if (headerFileName) {
       const body = await req.arrayBuffer().catch(() => null)
       if (body) {
-        file = new File([body], headerFileName, { type: headerFileType })
+        rawBytes = body
       }
     }
 
-    if (!(file instanceof File)) {
+    if (!rawBytes) {
       const form = await req.formData().catch(() => null)
       const formFile = form?.get("file")
       preferredKind = preferredKind ?? normalizePreferredKind(String(form?.get("preferredKind") ?? ""))
@@ -136,11 +140,15 @@ export async function POST(req: Request) {
       }
     }
 
-    if (!(file instanceof File)) return bad(400, "file_required")
+    if (!(file instanceof File) && !rawBytes) return bad(400, "file_required")
 
     const attachment = await uploadNotebookFile({
       userId,
-      file,
+      file: file ?? undefined,
+      fileName: headerFileName || file?.name,
+      mimeType: headerFileType || file?.type,
+      size: rawBytes?.byteLength ?? file?.size ?? 0,
+      bytes: rawBytes ?? undefined,
       preferredKind,
     })
     return jsonNoStore({ ok: true, attachment })
@@ -161,6 +169,8 @@ export async function DELETE(req: Request) {
 
   let userId = ""
   try {
+    const { readUserIdFromRequest } = await import("@/lib/server/readUserId")
+    const { removeNotebookFiles } = await import("@/lib/server/notebookFileStore")
     userId = await readUserIdFromRequest(req)
     if (!userId) return bad(401, "login_required")
 

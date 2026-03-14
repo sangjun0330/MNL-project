@@ -63,12 +63,6 @@ function presentError(error: string, t: (key: string) => string) {
       t("다시 생성 버튼으로 새 응답을 다시 요청해 주세요."),
     ];
   }
-  if (error.includes("invalid_engine")) {
-    return [
-      t("이전 규칙형 결과는 더 이상 표시하지 않아요."),
-      t("AI에서 새 결과를 다시 생성해 주세요."),
-    ];
-  }
   if (error.includes("unsupported_country_region_territory")) {
     return [
       t("OpenAI 요청이 지역 정책으로 거절됐어요."),

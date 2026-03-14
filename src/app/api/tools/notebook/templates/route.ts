@@ -1,6 +1,4 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity"
-import { requireBillingAdmin } from "@/lib/server/billingAdminAuth"
-import { loadNotebookTemplates, saveNotebookTemplates } from "@/lib/server/notebookTemplateStore"
 import { defaultMemoTemplates, sanitizeMemoTemplate } from "@/lib/notebook"
 
 export const runtime = "edge"
@@ -12,6 +10,7 @@ function bad(status: number, message: string) {
 
 export async function GET() {
   try {
+    const { loadNotebookTemplates } = await import("@/lib/server/notebookTemplateStore")
     const row = await loadNotebookTemplates()
     return jsonNoStore({
       ok: true,
@@ -32,6 +31,7 @@ export async function PUT(req: Request) {
   const originError = sameOriginRequestError(req)
   if (originError) return bad(403, originError)
 
+  const { requireBillingAdmin } = await import("@/lib/server/billingAdminAuth")
   const admin = await requireBillingAdmin(req)
   if (!admin.ok) return bad(admin.status, admin.error)
 
@@ -46,6 +46,7 @@ export async function PUT(req: Request) {
   if (!templates) return bad(400, "templates_required")
 
   try {
+    const { saveNotebookTemplates } = await import("@/lib/server/notebookTemplateStore")
     const saved = await saveNotebookTemplates({ templates })
     return jsonNoStore({
       ok: true,

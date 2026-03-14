@@ -44,6 +44,17 @@ async function ensureNotebookBucket() {
   })
 }
 
+function isNotebookBucketMissingError(error: unknown) {
+  const message = String((error as { message?: unknown } | null)?.message ?? "").toLowerCase()
+  const statusCode = Number((error as { statusCode?: unknown } | null)?.statusCode ?? NaN)
+  return (
+    statusCode === 404 ||
+    message.includes("bucket not found") ||
+    message.includes("not found") ||
+    (message.includes("bucket") && message.includes("does not exist"))
+  )
+}
+
 export function isNotebookStoragePathOwnedByUser(userId: string, path: string) {
   const normalized = normalizeNotebookStoragePath(path)
   return Boolean(normalized) && normalized.startsWith(`${userId}/`)
@@ -51,27 +62,45 @@ export function isNotebookStoragePathOwnedByUser(userId: string, path: string) {
 
 export async function uploadNotebookFile(input: {
   userId: string
-  file: File
+  file?: File
+  fileName?: string
+  mimeType?: string
+  size?: number
+  bytes?: ArrayBuffer
   preferredKind?: "image" | "scan" | "file" | "pdf"
 }) {
-  if (input.file.size > MAX_FILE_SIZE) {
+  const fileName = input.file?.name || input.fileName || "upload"
+  const mimeType = input.file?.type || input.mimeType || "application/octet-stream"
+  const size = input.file?.size ?? input.size ?? 0
+  const body = input.bytes ?? (input.file ? await input.file.arrayBuffer() : null)
+
+  if (!body) {
+    throw new Error("file_required")
+  }
+
+  if (size > MAX_FILE_SIZE) {
     throw new Error("file_too_large")
   }
 
-  const file = input.file
-  const safeName = file.name.replace(/[^\w.\-() ]+/g, "_").trim() || "upload"
+  const safeName = fileName.replace(/[^\w.\-() ]+/g, "_").trim() || "upload"
   const ext =
     safeName.includes(".") ? safeName.split(".").pop()?.slice(0, 12).toLowerCase() ?? "" : ""
   const path = `${input.userId}/${crypto.randomUUID()}${ext ? `.${ext}` : ""}`
   const admin: any = getSupabaseAdmin()
-  const body = await file.arrayBuffer()
 
-  await ensureNotebookBucket()
-
-  const { error } = await admin.storage.from(NOTEBOOK_STORAGE_BUCKET).upload(path, body, {
-    contentType: file.type || "application/octet-stream",
+  let { error } = await admin.storage.from(NOTEBOOK_STORAGE_BUCKET).upload(path, body, {
+    contentType: mimeType,
     upsert: false,
   })
+
+  if (error && isNotebookBucketMissingError(error)) {
+    await ensureNotebookBucket()
+    const retry = await admin.storage.from(NOTEBOOK_STORAGE_BUCKET).upload(path, body, {
+      contentType: mimeType,
+      upsert: false,
+    })
+    error = retry.error
+  }
 
   if (error) {
     throw error
@@ -79,14 +108,14 @@ export async function uploadNotebookFile(input: {
 
   const kind =
     input.preferredKind ||
-    (isImageType(file.type) ? "image" : file.type === "application/pdf" ? "pdf" : "file")
+    (isImageType(mimeType) ? "image" : mimeType === "application/pdf" ? "pdf" : "file")
 
   return {
     id: crypto.randomUUID(),
     storagePath: path,
-    name: file.name || "첨부 파일",
-    mimeType: file.type || "application/octet-stream",
-    size: file.size,
+    name: fileName || "첨부 파일",
+    mimeType,
+    size,
     kind,
     createdAt: Date.now(),
   }

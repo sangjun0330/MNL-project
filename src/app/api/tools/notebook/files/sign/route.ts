@@ -1,7 +1,4 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity"
-import { readUserIdFromRequest } from "@/lib/server/readUserId"
-import { createNotebookSignedUrls } from "@/lib/server/notebookFileStore"
-import { userHasCompletedServiceConsent } from "@/lib/server/serviceConsentStore"
 
 export const runtime = "edge"
 export const dynamic = "force-dynamic"
@@ -16,6 +13,9 @@ export async function POST(req: Request) {
 
   let userId = ""
   try {
+    const { readUserIdFromRequest } = await import("@/lib/server/readUserId")
+    const { createNotebookSignedUrls } = await import("@/lib/server/notebookFileStore")
+    const { userHasCompletedServiceConsent } = await import("@/lib/server/serviceConsentStore")
     userId = await readUserIdFromRequest(req)
     if (!userId) return bad(401, "login_required")
     if (!(await userHasCompletedServiceConsent(userId))) return bad(403, "consent_required")

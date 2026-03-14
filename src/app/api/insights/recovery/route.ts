@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { addDays, fromISODate, toISODate, todayISO, type ISODate } from "@/lib/date";
+import { generateAIRecovery } from "@/lib/aiRecovery";
 import type { AIRecoveryApiError, AIRecoveryApiSuccess, AIRecoveryPayload } from "@/lib/aiRecoveryContract";
 import type { AIRecoveryPlannerPayload } from "@/lib/aiRecoveryPlanner";
 import type { Language } from "@/lib/i18n";
@@ -571,10 +572,10 @@ async function handleRecovery(
   }
 
   const subscription = await safeLoadSubscription(userId);
-  if (!subscription?.entitlements?.recoveryPlannerAI) {
+  if (subscription && !subscription.entitlements?.recoveryPlannerAI) {
     return bad(402, "paid_plan_required_ai_recovery");
   }
-  const aiRecoveryModel = getAIRecoveryModelForTier(subscription.tier);
+  const aiRecoveryModel = getAIRecoveryModelForTier(subscription?.tier ?? "pro");
 
   try {
     // ── 2. Supabase에서 사용자 데이터 로드 시도 ──
@@ -774,133 +775,166 @@ async function handleRecovery(
       return jsonNoStore({ ok: true, data: null } satisfies AIRecoveryApiSuccess);
     }
 
-    // ── 4. OpenAI 한국어 단일 생성(영어는 번역 캐시) ──
-    const aiKo = await generateAIRecoveryWithOpenAI({
-      language: "ko",
-      todayISO: today,
-      modelOverride: aiRecoveryModel,
-      phase,
-      todayShift,
-      nextShift,
-      todayVital,
-      vitals7: phaseVitals7,
-      prevWeekVitals: phasePrevWeek,
-      allVitals,
-      plannerContext,
-      profile,
-      recoveryThread,
-    });
-    const todayVitalScore = todayVital
-      ? Math.round(Math.min(todayVital.body.value, todayVital.mental.ema))
-      : null;
+    try {
+      // ── 4. OpenAI 한국어 단일 생성(영어는 번역 캐시) ──
+      const aiKo = await generateAIRecoveryWithOpenAI({
+        language: "ko",
+        todayISO: today,
+        modelOverride: aiRecoveryModel,
+        phase,
+        todayShift,
+        nextShift,
+        todayVital,
+        vitals7: phaseVitals7,
+        prevWeekVitals: phasePrevWeek,
+        allVitals,
+        plannerContext,
+        profile,
+        recoveryThread,
+      });
+      const todayVitalScore = todayVital
+        ? Math.round(Math.min(todayVital.body.value, todayVital.mental.ema))
+        : null;
 
-    const payloadKo: AIRecoveryPayload = {
-      dateISO: today,
-      language: "ko",
-      phase,
-      todayShift,
-      nextShift,
-      todayVitalScore,
-      source: "supabase",
-      engine: aiKo.engine,
-      model: aiKo.model,
-      debug: aiKo.debug,
-      generatedText: aiKo.generatedText,
-      plannerContext,
-      profileSnapshot,
-      result: aiKo.result,
-    };
+      const payloadKo: AIRecoveryPayload = {
+        dateISO: today,
+        language: "ko",
+        phase,
+        todayShift,
+        nextShift,
+        todayVitalScore,
+        source: "supabase",
+        engine: aiKo.engine,
+        model: aiKo.model,
+        debug: aiKo.debug,
+        generatedText: aiKo.generatedText,
+        plannerContext,
+        profileSnapshot,
+        result: aiKo.result,
+      };
 
-    let payloadEn: AIRecoveryPayload | null = null;
-    if (lang === "en") {
-      try {
-        const translated = await translateAIRecoveryToEnglish(aiKo);
-        payloadEn = {
-          ...payloadKo,
-          language: "en",
-          model: translated.model ?? payloadKo.model,
-          debug: translated.debug,
-          generatedText: translated.generatedText,
-          result: translated.result,
-        };
-      } catch {
+      let payloadEn: AIRecoveryPayload | null = null;
+      if (lang === "en") {
         try {
-          const aiEn = await generateAIRecoveryWithOpenAI({
-            language: "en",
-            todayISO: today,
-            modelOverride: aiRecoveryModel,
-            phase,
-            todayShift,
-            nextShift,
-            todayVital,
-            vitals7: phaseVitals7,
-            prevWeekVitals: phasePrevWeek,
-            allVitals,
-            plannerContext,
-            profile,
-            recoveryThread,
-          });
+          const translated = await translateAIRecoveryToEnglish(aiKo);
           payloadEn = {
             ...payloadKo,
             language: "en",
-            model: aiEn.model ?? payloadKo.model,
-            debug: aiEn.debug ? `en_direct:${aiEn.debug}` : "en_direct",
-            generatedText: aiEn.generatedText,
-            result: aiEn.result,
+            model: translated.model ?? payloadKo.model,
+            debug: translated.debug,
+            generatedText: translated.generatedText,
+            result: translated.result,
           };
         } catch {
-          payloadEn = null;
+          try {
+            const aiEn = await generateAIRecoveryWithOpenAI({
+              language: "en",
+              todayISO: today,
+              modelOverride: aiRecoveryModel,
+              phase,
+              todayShift,
+              nextShift,
+              todayVital,
+              vitals7: phaseVitals7,
+              prevWeekVitals: phasePrevWeek,
+              allVitals,
+              plannerContext,
+              profile,
+              recoveryThread,
+            });
+            payloadEn = {
+              ...payloadKo,
+              language: "en",
+              model: aiEn.model ?? payloadKo.model,
+              debug: aiEn.debug ? `en_direct:${aiEn.debug}` : "en_direct",
+              generatedText: aiEn.generatedText,
+              result: aiEn.result,
+            };
+          } catch {
+            payloadEn = null;
+          }
         }
       }
-    }
 
-    const saveError = await safeSaveAIContent(userId, today, "ko", {
-      dateISO: today,
-      generatedAt: Date.now(),
-      recoveryPhaseVariants: {
-        ...(isRecord(aiContent?.data) && isRecord((aiContent?.data as Record<string, unknown>).recoveryPhaseVariants)
-          ? ((aiContent?.data as Record<string, unknown>).recoveryPhaseVariants as Record<string, unknown>)
-          : {}),
-        ko: {
-          ...(isRecord(aiContent?.data) &&
-          isRecord((aiContent?.data as Record<string, unknown>).recoveryPhaseVariants) &&
-          isRecord((((aiContent?.data as Record<string, unknown>).recoveryPhaseVariants as Record<string, unknown>).ko))
-            ? ((((aiContent?.data as Record<string, unknown>).recoveryPhaseVariants as Record<string, unknown>).ko) as Record<string, unknown>)
+      const saveError = await safeSaveAIContent(userId, today, "ko", {
+        dateISO: today,
+        generatedAt: Date.now(),
+        recoveryPhaseVariants: {
+          ...(isRecord(aiContent?.data) && isRecord((aiContent?.data as Record<string, unknown>).recoveryPhaseVariants)
+            ? ((aiContent?.data as Record<string, unknown>).recoveryPhaseVariants as Record<string, unknown>)
             : {}),
-          [phase]: payloadKo,
+          ko: {
+            ...(isRecord(aiContent?.data) &&
+            isRecord((aiContent?.data as Record<string, unknown>).recoveryPhaseVariants) &&
+            isRecord((((aiContent?.data as Record<string, unknown>).recoveryPhaseVariants as Record<string, unknown>).ko))
+              ? ((((aiContent?.data as Record<string, unknown>).recoveryPhaseVariants as Record<string, unknown>).ko) as Record<string, unknown>)
+              : {}),
+            [phase]: payloadKo,
+          },
+          ...(payloadEn
+            ? {
+                en: {
+                  ...(isRecord(aiContent?.data) &&
+                  isRecord((aiContent?.data as Record<string, unknown>).recoveryPhaseVariants) &&
+                  isRecord((((aiContent?.data as Record<string, unknown>).recoveryPhaseVariants as Record<string, unknown>).en))
+                    ? ((((aiContent?.data as Record<string, unknown>).recoveryPhaseVariants as Record<string, unknown>).en) as Record<string, unknown>)
+                    : {}),
+                  [phase]: payloadEn,
+                },
+              }
+            : {}),
         },
-        ...(payloadEn
+        ...(phase === "start"
           ? {
-              en: {
-                ...(isRecord(aiContent?.data) &&
-                isRecord((aiContent?.data as Record<string, unknown>).recoveryPhaseVariants) &&
-                isRecord((((aiContent?.data as Record<string, unknown>).recoveryPhaseVariants as Record<string, unknown>).en))
-                  ? ((((aiContent?.data as Record<string, unknown>).recoveryPhaseVariants as Record<string, unknown>).en) as Record<string, unknown>)
-                  : {}),
-                [phase]: payloadEn,
+              variants: {
+                ko: payloadKo,
+                ...(payloadEn ? { en: payloadEn } : {}),
               },
             }
           : {}),
-      },
-      ...(phase === "start"
-        ? {
-            variants: {
-              ko: payloadKo,
-              ...(payloadEn ? { en: payloadEn } : {}),
-            },
-          }
-        : {}),
-    } as Json);
-    if (saveError) {
-      payloadKo.debug = payloadKo.debug ? `${payloadKo.debug}|${saveError}` : saveError;
-      if (payloadEn) {
-        payloadEn.debug = payloadEn.debug ? `${payloadEn.debug}|${saveError}` : saveError;
+      } as Json);
+      if (saveError) {
+        payloadKo.debug = payloadKo.debug ? `${payloadKo.debug}|${saveError}` : saveError;
+        if (payloadEn) {
+          payloadEn.debug = payloadEn.debug ? `${payloadEn.debug}|${saveError}` : saveError;
+        }
       }
+
+      const body: AIRecoveryApiSuccess = { ok: true, data: lang === "en" ? payloadEn ?? payloadKo : payloadKo };
+      return jsonNoStore(body);
+    } catch (generationError: any) {
+      const todayVitalScore = todayVital
+        ? Math.round(Math.min(todayVital.body.value, todayVital.mental.ema))
+        : null;
+      const fallbackKoResult = generateAIRecovery(todayVital, phaseVitals7, phasePrevWeek, nextShift, "ko");
+      const fallbackKo: AIRecoveryPayload = {
+        dateISO: today,
+        language: "ko",
+        phase,
+        todayShift,
+        nextShift,
+        todayVitalScore,
+        source: "local",
+        engine: "rule",
+        model: null,
+        debug: typeof generationError?.message === "string" ? generationError.message : "rule_fallback",
+        plannerContext,
+        profileSnapshot,
+        result: fallbackKoResult,
+      };
+      const fallbackEn =
+        lang === "en"
+          ? ({
+              ...fallbackKo,
+              language: "en" as const,
+              result: generateAIRecovery(todayVital, phaseVitals7, phasePrevWeek, nextShift, "en"),
+            } satisfies AIRecoveryPayload)
+          : null;
+      return jsonNoStore({
+        ok: true,
+        data: lang === "en" ? fallbackEn ?? fallbackKo : fallbackKo,
+      } satisfies AIRecoveryApiSuccess);
     }
-
-    const body: AIRecoveryApiSuccess = { ok: true, data: lang === "en" ? payloadEn ?? payloadKo : payloadKo };
-
-    return jsonNoStore(body);
   } catch (err: any) {
     try {
       console.error("[Recovery] handle_failed", {
