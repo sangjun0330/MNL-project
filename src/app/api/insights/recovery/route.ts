@@ -29,6 +29,8 @@ import { userHasCompletedServiceConsent } from "@/lib/server/serviceConsentStore
 import { loadUserState } from "@/lib/server/userStateStore";
 import { loadAIContent, saveAIContent } from "@/lib/server/aiContentStore";
 import { readSubscription } from "@/lib/server/billingStore";
+import { generateAIRecoveryWithOpenAI, translateAIRecoveryToEnglish } from "@/lib/server/openaiRecovery";
+import { readRecoveryOrderCompletedIds } from "@/lib/server/recoveryOrderStore";
 
 // Cloudflare Pages requires Edge runtime for non-static routes.
 export const runtime = "edge";
@@ -669,8 +671,11 @@ async function handleRecovery(
     const startCompletedIds =
       phase === "after_work" && cachedStartPlanner
         ? await (async () => {
-            const { readRecoveryOrderCompletedIds } = await import("@/lib/server/recoveryOrderStore");
-            return await readRecoveryOrderCompletedIds(userId, today);
+            try {
+              return await readRecoveryOrderCompletedIds(userId, today);
+            } catch {
+              return [];
+            }
           })()
         : [];
     const recoveryThread = phase === "after_work" ? buildRecoveryThreadFromPlanner(cachedStartPlanner, startCompletedIds) : null;
@@ -702,7 +707,6 @@ async function handleRecovery(
       }
       if (lang === "en" && koVariant && koIsCurrent) {
         try {
-          const { translateAIRecoveryToEnglish } = await import("@/lib/server/openaiRecovery");
           const translated = await translateAIRecoveryToEnglish({
             result: koVariant.result,
             generatedText: koVariant.generatedText ?? "",
@@ -786,7 +790,6 @@ async function handleRecovery(
 
     try {
       // ── 4. OpenAI 한국어 단일 생성(영어는 번역 캐시) ──
-      const { generateAIRecoveryWithOpenAI, translateAIRecoveryToEnglish } = await import("@/lib/server/openaiRecovery");
       const aiKo = await generateAIRecoveryWithOpenAI({
         language: "ko",
         todayISO: today,

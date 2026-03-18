@@ -559,61 +559,77 @@ function buildUserPrompt(language: Language, context: ReturnType<typeof buildUse
 }
 
 function extractResponsesText(json: any): string {
-  const direct = json?.output_text;
-  if (typeof direct === "string" && direct.trim()) return direct.trim();
-  if (Array.isArray(direct)) {
-    const joined = direct
-      .map((item) => (typeof item === "string" ? item : ""))
-      .join("")
-      .trim();
-    if (joined) return joined;
-  }
+  const chunks: string[] = [];
+  const seen = new Set<string>();
+  const append = (raw: unknown) => {
+    if (typeof raw !== "string") return;
+    const value = raw.replace(/\r/g, "").trim();
+    if (!value) return;
+    const key = value.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    chunks.push(value);
+  };
+  const appendFromTextLike = (value: unknown) => {
+    if (!value) return;
+    if (typeof value === "string") {
+      append(value);
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) appendFromTextLike(item);
+      return;
+    }
+    if (typeof value !== "object") return;
+    const node = value as Record<string, unknown>;
+    append(node.value);
+    append(node.text);
+    if (typeof node.text === "object" && node.text) {
+      append((node.text as Record<string, unknown>).value);
+    }
+    append(node.output_text);
+    append(node.transcript);
+  };
+
+  appendFromTextLike(json?.choices?.[0]?.message?.content);
+  appendFromTextLike(json?.output_text);
 
   const output = Array.isArray(json?.output) ? json.output : [];
-  const chunks: string[] = [];
   for (const item of output) {
-    if (typeof item?.text === "string" && item.text.trim()) {
-      chunks.push(item.text.trim());
-    }
-    if (item?.json && typeof item.json === "object") {
-      chunks.push(JSON.stringify(item.json));
-    }
-    if (item?.parsed && typeof item.parsed === "object") {
-      chunks.push(JSON.stringify(item.parsed));
-    }
+    appendFromTextLike(item?.output_text);
+    appendFromTextLike(item?.text);
+    appendFromTextLike(item?.transcript);
     const content = Array.isArray(item?.content) ? item.content : [];
     for (const part of content) {
-      const text = typeof part?.text === "string" ? part.text : "";
-      if (text) chunks.push(text);
-      if (part?.json && typeof part.json === "object") {
-        chunks.push(JSON.stringify(part.json));
-      }
-      if (part?.parsed && typeof part.parsed === "object") {
-        chunks.push(JSON.stringify(part.parsed));
-      }
+      appendFromTextLike(part?.output_text);
+      appendFromTextLike(part?.text);
+      appendFromTextLike(part?.transcript);
+      appendFromTextLike(part);
     }
   }
-  return chunks.join("").trim();
+
+  return chunks.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 async function callResponsesApi(args: {
   apiKey: string;
+  apiBaseUrl: string;
   model: string;
   developerPrompt: string;
   userPrompt: string;
   signal: AbortSignal;
   maxOutputTokens: number;
+  upstreamTimeoutMs: number;
   logFeature: RecoveryOpenAILogFeature;
   language: Language;
   dateISO: string;
   phase?: RecoveryPhase;
 }): Promise<TextAttempt> {
-  const { apiKey, model, developerPrompt, userPrompt, signal, maxOutputTokens, logFeature, language, dateISO, phase = "start" } = args;
+  const { apiKey, apiBaseUrl, model, developerPrompt, userPrompt, signal, maxOutputTokens, upstreamTimeoutMs, logFeature, language, dateISO, phase = "start" } = args;
   const storeResponses = resolveStoreResponses();
-  const reasoningEffort = "low";
   const verbosity = logFeature === "recovery_translate" ? "low" : "medium";
   const requestConfig = resolveOpenAIResponsesRequestConfig({
-    apiBaseUrl: resolveApiBaseUrl(),
+    apiBaseUrl,
     apiKey,
     model,
     scope: "recovery",
@@ -641,9 +657,7 @@ async function callResponsesApi(args: {
       format: { type: "text" },
       verbosity,
     },
-    reasoning: {
-      effort: reasoningEffort,
-    },
+    reasoning: { effort: "low" as const },
     max_output_tokens: maxOutputTokens,
     tools: [],
     store: storeResponses,
@@ -657,23 +671,44 @@ async function callResponsesApi(args: {
     },
   };
 
-  // 네트워크 수준 오류(DNS 실패, 연결 거부, 타임아웃 등)를 catch해 에러 문자열로 반환
+  // 상위 AbortSignal과 별도의 per-request 타임아웃 컨트롤러 사용
+  const requestAbort = new AbortController();
+  let timedOut = false;
+  const onParentAbort = () => requestAbort.abort();
+  if (signal.aborted) {
+    onParentAbort();
+  } else {
+    signal.addEventListener("abort", onParentAbort);
+  }
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    requestAbort.abort();
+  }, upstreamTimeoutMs);
+
   let response: Response;
   try {
     response = await fetch(requestConfig.requestUrl, {
       method: "POST",
       headers: requestConfig.headers,
       body: JSON.stringify(payload),
-      signal,
+      signal: requestAbort.signal,
     });
   } catch (cause: any) {
-    // AbortError는 상위에서 처리하므로 그대로 throw
-    if (cause?.name === "AbortError") throw cause;
+    clearTimeout(timeout);
+    signal.removeEventListener("abort", onParentAbort);
+    if (timedOut) {
+      return {
+        text: null,
+        error: `openai_timeout_upstream_model:${requestConfig.model}`,
+      };
+    }
     return {
       text: null,
       error: `openai_network_${truncateError(String(cause?.message ?? cause ?? "fetch_failed"))}`,
     };
   }
+  clearTimeout(timeout);
+  signal.removeEventListener("abort", onParentAbort);
 
   if (!response.ok) {
     const raw = await response.text().catch(() => "");
@@ -1685,13 +1720,19 @@ export async function generateAIRecoveryWithOpenAI(
   try {
     let lastError = `openai_request_failed_model:${model}`;
     for (let attemptIndex = 0; attemptIndex < 3; attemptIndex += 1) {
+      if (controller.signal.aborted) {
+        lastError = `openai_timeout_model:${model}`;
+        break;
+      }
       const attempt = await callResponsesApi({
         apiKey,
+        apiBaseUrl: baseUrl,
         model,
         developerPrompt,
         userPrompt,
         signal: controller.signal,
         maxOutputTokens: Math.min(3400, maxOutputTokens + attemptIndex * 500),
+        upstreamTimeoutMs: 28_000,
         logFeature: "recovery_explanation",
         language: params.language,
         dateISO: params.todayISO,
@@ -1744,9 +1785,6 @@ export async function generateAIRecoveryWithOpenAI(
     }
     throw new Error(lastError);
   } catch (err: any) {
-    if (err?.name === "AbortError") {
-      throw new Error(`openai_timeout_model:${model}`);
-    }
     if (typeof err?.message === "string" && err.message.trim()) {
       throw new Error(err.message.trim());
     }
@@ -1755,6 +1793,7 @@ export async function generateAIRecoveryWithOpenAI(
     clearTimeout(timer);
   }
 }
+
 export async function translateAIRecoveryToEnglish(
   source: OpenAIRecoveryOutput
 ): Promise<OpenAIRecoveryOutput> {
@@ -1866,12 +1905,14 @@ export async function translateAIRecoveryToEnglish(
     try {
       const attempt = await callResponsesApi({
         apiKey,
+        apiBaseUrl: baseUrl,
         model,
         developerPrompt: "You are a professional Korean-to-English translator for nurse wellness content.",
         userPrompt: buildTranslatePrompt(targetLines, strictNoKorean),
         signal: controller.signal,
         // 번역은 길이가 길어지기 쉬워 생성보다 넉넉하게 허용
         maxOutputTokens: Math.max(resolveMaxOutputTokens(), 2600),
+        upstreamTimeoutMs: 28_000,
         logFeature: "recovery_translate",
         language: "en",
         dateISO: "translation",
@@ -2553,13 +2594,19 @@ async function generatePlannerOrdersWithOpenAI(
   try {
     let lastError = `openai_request_failed_model:${model}`;
     for (let attemptIndex = 0; attemptIndex < 3; attemptIndex += 1) {
+      if (controller.signal.aborted) {
+        lastError = `openai_timeout_model:${model}`;
+        break;
+      }
       const attempt = await callResponsesApi({
         apiKey,
+        apiBaseUrl: baseUrl,
         model,
         developerPrompt,
         userPrompt,
         signal: controller.signal,
         maxOutputTokens: Math.min(3200, maxOutputTokens + attemptIndex * 400),
+        upstreamTimeoutMs: 32_000,
         logFeature: "planner_orders",
         language: params.language,
         dateISO: params.todayISO,
@@ -2604,9 +2651,6 @@ async function generatePlannerOrdersWithOpenAI(
     }
     throw new Error(lastError);
   } catch (err: any) {
-    if (err?.name === "AbortError") {
-      throw new Error(`openai_timeout_model:${model}`);
-    }
     if (typeof err?.message === "string" && err.message.trim()) {
       throw new Error(err.message.trim());
     }
