@@ -43,6 +43,7 @@ import { loadUserState } from "@/lib/server/userStateStore";
 import { readSubscription } from "@/lib/server/billingStore";
 import { loadAIContent, saveAIContent } from "@/lib/server/aiContentStore";
 import { generateAIRecoveryPlannerModulesWithOpenAI, generateAIRecoveryWithOpenAI } from "@/lib/server/openaiRecovery";
+import { readRecoveryOrderCompletedIds } from "@/lib/server/recoveryOrderStore";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -570,7 +571,6 @@ async function handlePlanner(
       phase === "after_work" && cachedStartPlanner
         ? await (async () => {
             try {
-              const { readRecoveryOrderCompletedIds } = await import("@/lib/server/recoveryOrderStore");
               return await readRecoveryOrderCompletedIds(userId, today);
             } catch {
               return [];
