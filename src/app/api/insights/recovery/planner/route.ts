@@ -1,20 +1,16 @@
 import { NextRequest } from "next/server";
 import { addDays, fromISODate, toISODate, todayISO, type ISODate } from "@/lib/date";
-import { generateAIRecovery } from "@/lib/aiRecovery";
 import type { AIRecoveryPayload } from "@/lib/aiRecoveryContract";
-import {
-  buildExplanationModule,
-  buildFallbackModules,
-  type AIRecoveryPlannerModules,
-  type AIRecoveryPlannerApiError,
-  type AIRecoveryPlannerApiSuccess,
-  type AIRecoveryPlannerPayload,
+import type {
+  AIRecoveryPlannerModules,
+  AIRecoveryPlannerApiError,
+  AIRecoveryPlannerApiSuccess,
+  AIRecoveryPlannerPayload,
 } from "@/lib/aiRecoveryPlanner";
 import type { Language } from "@/lib/i18n";
 import { getAIRecoveryModelForTier } from "@/lib/billing/plans";
-import { countHealthRecordedDays, hasHealthInput } from "@/lib/healthRecords";
+import { hasHealthInput } from "@/lib/healthRecords";
 import type { AppState } from "@/lib/model";
-import { sanitizeStatePayload } from "@/lib/stateSanitizer";
 import {
   buildAfterWorkMissingLabels,
   buildRecoveryOrderProgressId,
@@ -33,17 +29,14 @@ import {
   type PlannerContext,
 } from "@/lib/recoveryPlanner";
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
+import {
+  buildRecoveryStateWindowPayload,
+  countHealthRecordedDaysFromRawPayload,
+  isRecord,
+} from "@/lib/server/recoveryRouteRuntime";
 import type { Shift } from "@/lib/types";
-import { computeVitalsRange } from "@/lib/vitals";
 import type { Json } from "@/types/supabase";
 import type { SubscriptionSnapshot } from "@/lib/server/billingStore";
-import { readUserIdFromRequest } from "@/lib/server/readUserId";
-import { userHasCompletedServiceConsent } from "@/lib/server/serviceConsentStore";
-import { loadUserState } from "@/lib/server/userStateStore";
-import { readSubscription } from "@/lib/server/billingStore";
-import { loadAIContent, saveAIContent } from "@/lib/server/aiContentStore";
-import { generateAIRecoveryPlannerModulesWithOpenAI, generateAIRecoveryWithOpenAI } from "@/lib/server/openaiRecovery";
-import { readRecoveryOrderCompletedIds } from "@/lib/server/recoveryOrderStore";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -64,8 +57,7 @@ function normalizeRequestedOrderCount(value: unknown): number | null {
   return Math.max(1, Math.min(5, parsed));
 }
 
-function normalizePayloadToState(payload: unknown, languageHint: Language | null): AppState {
-  const sanitized = sanitizeStatePayload(payload);
+function withLanguageHint(sanitized: AppState, languageHint: Language | null): AppState {
   if (!languageHint) return sanitized;
   return {
     ...sanitized,
@@ -115,6 +107,7 @@ async function safeReadUserId(req: NextRequest): Promise<string> {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     if (!supabaseUrl || !supabaseAnon) return "";
+    const { readUserIdFromRequest } = await import("@/lib/server/readUserId");
     return await readUserIdFromRequest(req);
   } catch {
     return "";
@@ -126,6 +119,7 @@ async function safeHasCompletedServiceConsent(userId: string): Promise<boolean> 
     const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     if (!serviceRole || !supabaseUrl) return false;
+    const { userHasCompletedServiceConsent } = await import("@/lib/server/serviceConsentStore");
     return await userHasCompletedServiceConsent(userId);
   } catch {
     return false;
@@ -137,6 +131,7 @@ async function safeLoadUserState(userId: string): Promise<{ payload: unknown } |
     const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     if (!serviceRole || !supabaseUrl) return null;
+    const { loadUserState } = await import("@/lib/server/userStateStore");
     return await loadUserState(userId);
   } catch {
     return null;
@@ -150,6 +145,7 @@ async function safeLoadAIContent(
     const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     if (!serviceRole || !supabaseUrl) return null;
+    const { loadAIContent } = await import("@/lib/server/aiContentStore");
     const row = await loadAIContent(userId);
     if (!row) return null;
     return {
@@ -167,6 +163,7 @@ async function safeLoadSubscription(userId: string): Promise<SubscriptionSnapsho
     const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     if (!serviceRole || !supabaseUrl) return null;
+    const { readSubscription } = await import("@/lib/server/billingStore");
     return await readSubscription(userId);
   } catch {
     return null;
@@ -189,6 +186,7 @@ async function safeSaveAIContent(
     const incoming = isRecord(data) ? data : {};
     const merged = { ...previous, ...incoming };
 
+    const { saveAIContent } = await import("@/lib/server/aiContentStore");
     await saveAIContent({ userId, dateISO, language, data: merged as Json });
     return null;
   } catch {
@@ -196,8 +194,16 @@ async function safeSaveAIContent(
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+async function safeReadRecoveryOrderCompletedIds(userId: string, dateISO: ISODate): Promise<string[]> {
+  try {
+    const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!serviceRole || !supabaseUrl) return [];
+    const { readRecoveryOrderCompletedIds } = await import("@/lib/server/recoveryOrderStore");
+    return await readRecoveryOrderCompletedIds(userId, dateISO);
+  } catch {
+    return [];
+  }
 }
 
 function asLanguage(value: unknown): Language | null {
@@ -612,7 +618,7 @@ async function handlePlanner(
       phase === "after_work" && cachedStartPlanner
         ? await (async () => {
             try {
-              return await readRecoveryOrderCompletedIds(userId, today);
+              return await safeReadRecoveryOrderCompletedIds(userId, today);
             } catch {
               return [];
             }
@@ -637,6 +643,10 @@ async function handlePlanner(
     }
 
     try {
+      const {
+        generateAIRecoveryPlannerModulesWithOpenAI,
+        generateAIRecoveryWithOpenAI,
+      } = await import("@/lib/server/openaiRecovery");
       let plannerDebug: string | null = null;
       let explanationDebug: string | null = null;
       let plannerModel: string | null = null;

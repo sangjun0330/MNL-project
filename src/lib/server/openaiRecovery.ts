@@ -235,6 +235,25 @@ function normalizeApiKey() {
   return String(key).trim();
 }
 
+function splitModelList(raw: string) {
+  return String(raw ?? "")
+    .split(/[,\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function dedupeStrings(values: string[]) {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const key = value.toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(value);
+  }
+  return out;
+}
+
 function resolveModel(modelOverride?: string | null) {
   const direct = String(modelOverride ?? "").trim();
   if (direct) return direct;
@@ -242,15 +261,26 @@ function resolveModel(modelOverride?: string | null) {
   return model || "gpt-5.4";
 }
 
-// OPENAI_RECOVERY_BASE_URL → OPENAI_BASE_URL 순서로 폴백
-// 프록시/대체 엔드포인트 설정 시 사용 (와이파이 지역 정책 우회 등)
-function resolveApiBaseUrl(): string {
-  const raw = String(
-    process.env.OPENAI_RECOVERY_BASE_URL ??
-    process.env.OPENAI_BASE_URL ??
-    "https://api.openai.com/v1"
-  ).trim();
-  return normalizeOpenAIResponsesBaseUrl(raw || "https://api.openai.com/v1");
+// Recovery가 별도 gateway를 못 받아도 med-safety가 이미 쓰는 gateway를 재사용할 수 있게 한다.
+// 운영에서 AI 임상검색만 정상이고 recovery만 실패하는 경우를 줄이기 위한 폴백 순서다.
+function resolveApiBaseUrls(): string[] {
+  const configured = dedupeStrings(
+    [
+      ...splitModelList(process.env.OPENAI_RECOVERY_BASE_URLS ?? ""),
+      String(process.env.OPENAI_RECOVERY_BASE_URL ?? "").trim(),
+      ...splitModelList(process.env.OPENAI_MED_SAFETY_BASE_URLS ?? ""),
+      String(process.env.OPENAI_MED_SAFETY_BASE_URL ?? "").trim(),
+      String(process.env.OPENAI_BASE_URL ?? "").trim(),
+    ]
+      .map((item) => normalizeOpenAIResponsesBaseUrl(item))
+      .filter(Boolean)
+  );
+  return configured.length ? configured : ["https://api.openai.com/v1"];
+}
+
+function pickApiBaseUrlForAttempt(apiBaseUrls: string[], attemptIndex: number): string {
+  if (!apiBaseUrls.length) return "https://api.openai.com/v1";
+  return apiBaseUrls[Math.min(attemptIndex, apiBaseUrls.length - 1)] ?? apiBaseUrls[0];
 }
 
 // 재시도 가능한 에러 여부 판단
@@ -1703,11 +1733,12 @@ export async function generateAIRecoveryWithOpenAI(
   params: GenerateOpenAIRecoveryParams
 ): Promise<OpenAIRecoveryOutput> {
   const apiKey = normalizeApiKey();
-  const baseUrl = resolveApiBaseUrl();
+  const apiBaseUrls = resolveApiBaseUrls();
+  const modelName = resolveModel(params.modelOverride);
   const model = resolveOpenAIResponsesRequestConfig({
-    apiBaseUrl: baseUrl,
+    apiBaseUrl: apiBaseUrls[0] ?? "https://api.openai.com/v1",
     apiKey,
-    model: resolveModel(params.modelOverride),
+    model: modelName,
     scope: "recovery",
   }).model;
 
@@ -1724,10 +1755,17 @@ export async function generateAIRecoveryWithOpenAI(
         lastError = `openai_timeout_model:${model}`;
         break;
       }
+      const currentBaseUrl = pickApiBaseUrlForAttempt(apiBaseUrls, attemptIndex);
+      const currentModel = resolveOpenAIResponsesRequestConfig({
+        apiBaseUrl: currentBaseUrl,
+        apiKey,
+        model: modelName,
+        scope: "recovery",
+      }).model;
       const attempt = await callResponsesApi({
         apiKey,
-        apiBaseUrl: baseUrl,
-        model,
+        apiBaseUrl: currentBaseUrl,
+        model: currentModel,
         developerPrompt,
         userPrompt,
         signal: controller.signal,
@@ -1740,7 +1778,7 @@ export async function generateAIRecoveryWithOpenAI(
       });
 
       if (!attempt.text) {
-        lastError = attempt.error ?? `openai_request_failed_model:${model}`;
+        lastError = attempt.error ?? `openai_request_failed_model:${currentModel}`;
         // 지역 제한·인증 오류처럼 재시도가 의미 없는 영구 오류는 즉시 종료
         if (!isRetryableRecoveryError(lastError)) break;
         // 재시도 가능한 오류는 짧은 딜레이 후 재시도
@@ -1753,19 +1791,19 @@ export async function generateAIRecoveryWithOpenAI(
       const rawText = attempt.text.trim();
       const parsedObject = parseJsonObject(rawText);
       if (!parsedObject) {
-        lastError = `openai_recovery_non_json_model:${model}`;
+        lastError = `openai_recovery_non_json_model:${currentModel}`;
         continue;
       }
       const parsed = parseRecoveryJsonResult(parsedObject);
       if (!parsed) {
-        lastError = `openai_recovery_invalid_shape_model:${model}`;
+        lastError = `openai_recovery_invalid_shape_model:${currentModel}`;
         continue;
       }
       const safeSections = context.menstrualTrackingEnabled
         ? parsed.sections
         : parsed.sections.filter((section) => section.category !== "menstrual");
       if (!safeSections.length) {
-        lastError = `openai_recovery_empty_sections_model:${model}`;
+        lastError = `openai_recovery_empty_sections_model:${currentModel}`;
         continue;
       }
       const weeklyFallback = buildFallbackWeeklySummary(params);
@@ -1779,7 +1817,7 @@ export async function generateAIRecoveryWithOpenAI(
         result: mergedResult,
         generatedText,
         engine: "openai",
-        model,
+        model: currentModel,
         debug: null,
       };
     }
@@ -1798,7 +1836,8 @@ export async function translateAIRecoveryToEnglish(
   source: OpenAIRecoveryOutput
 ): Promise<OpenAIRecoveryOutput> {
   const apiKey = normalizeApiKey();
-  const baseUrl = resolveApiBaseUrl();
+  const apiBaseUrls = resolveApiBaseUrls();
+  const baseUrl = apiBaseUrls[0] ?? "https://api.openai.com/v1";
   const model = resolveOpenAIResponsesRequestConfig({
     apiBaseUrl: baseUrl,
     apiKey,
@@ -2566,11 +2605,12 @@ async function generatePlannerOrdersWithOpenAI(
   module: AIPlannerChecklistModule;
 }> {
   const apiKey = normalizeApiKey();
-  const baseUrl = resolveApiBaseUrl();
+  const apiBaseUrls = resolveApiBaseUrls();
+  const modelName = resolveModel(params.modelOverride);
   const model = resolveOpenAIResponsesRequestConfig({
-    apiBaseUrl: baseUrl,
+    apiBaseUrl: apiBaseUrls[0] ?? "https://api.openai.com/v1",
     apiKey,
-    model: resolveModel(params.modelOverride),
+    model: modelName,
     scope: "recovery",
   }).model;
 
@@ -2598,10 +2638,17 @@ async function generatePlannerOrdersWithOpenAI(
         lastError = `openai_timeout_model:${model}`;
         break;
       }
+      const currentBaseUrl = pickApiBaseUrlForAttempt(apiBaseUrls, attemptIndex);
+      const currentModel = resolveOpenAIResponsesRequestConfig({
+        apiBaseUrl: currentBaseUrl,
+        apiKey,
+        model: modelName,
+        scope: "recovery",
+      }).model;
       const attempt = await callResponsesApi({
         apiKey,
-        apiBaseUrl: baseUrl,
-        model,
+        apiBaseUrl: currentBaseUrl,
+        model: currentModel,
         developerPrompt,
         userPrompt,
         signal: controller.signal,
@@ -2614,7 +2661,7 @@ async function generatePlannerOrdersWithOpenAI(
       });
 
       if (!attempt.text) {
-        lastError = attempt.error ?? `openai_request_failed_model:${model}`;
+        lastError = attempt.error ?? `openai_request_failed_model:${currentModel}`;
         if (!isRetryableRecoveryError(lastError)) break;
         if (attemptIndex < 2) {
           await new Promise((r) => setTimeout(r, 1000 * (attemptIndex + 1)));
@@ -2625,7 +2672,7 @@ async function generatePlannerOrdersWithOpenAI(
       const generatedText = attempt.text.trim();
       const parsed = parseJsonObject(generatedText);
       if (!parsed) {
-        lastError = `openai_planner_orders_non_json_model:${model}`;
+        lastError = `openai_planner_orders_non_json_model:${currentModel}`;
         continue;
       }
 
@@ -2643,11 +2690,11 @@ async function generatePlannerOrdersWithOpenAI(
         checklistModule.items.length > 5 ||
         (targetCount != null && checklistModule.items.length !== targetCount)
       ) {
-        lastError = `openai_planner_orders_incomplete_model:${model}`;
+        lastError = `openai_planner_orders_incomplete_model:${currentModel}`;
         continue;
       }
 
-      return { generatedText, model, module: checklistModule };
+      return { generatedText, model: currentModel, module: checklistModule };
     }
     throw new Error(lastError);
   } catch (err: any) {
