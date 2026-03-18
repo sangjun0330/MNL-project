@@ -1,29 +1,31 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { addDays, fromISODate, toISODate, todayISO, type ISODate } from "@/lib/date";
-import { generateAIRecovery } from "@/lib/aiRecovery";
 import type { AIRecoveryApiError, AIRecoveryApiSuccess, AIRecoveryPayload } from "@/lib/aiRecoveryContract";
 import type { AIRecoveryPlannerPayload } from "@/lib/aiRecoveryPlanner";
 import type { Language } from "@/lib/i18n";
-import { countHealthRecordedDays, hasHealthInput } from "@/lib/healthRecords";
-import { getAIRecoveryModelForTier } from "@/lib/billing/plans";
+import { hasHealthInput } from "@/lib/healthRecords";
 import type { AppState } from "@/lib/model";
-import { sanitizeStatePayload } from "@/lib/stateSanitizer";
 import {
-  buildAfterWorkMissingLabels,
   buildRecoveryOrderProgressId,
-  buildRecoveryPhaseState,
-  getAfterWorkReadiness,
   normalizeRecoveryPhase,
-  stripStartPhaseDynamicInputs,
-  stripStartPhaseDynamicInputsFromVitals,
   type RecoveryPhase,
 } from "@/lib/recoveryPhases";
 import type { Shift } from "@/lib/types";
-import { computeVitalsRange } from "@/lib/vitals";
 import type { Json } from "@/types/supabase";
-import type { SubscriptionSnapshot } from "@/lib/server/billingStore";
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
-import { buildPlannerContext, normalizeProfileSettings, type PlannerContext } from "@/lib/recoveryPlanner";
+import type { PlannerContext } from "@/lib/recoveryPlanner";
+import {
+  buildRecoveryStateWindowPayload,
+  countHealthRecordedDaysFromRawPayload,
+  isRecord,
+  normalizeRecoveryRouteState,
+  safeHasCompletedServiceConsent,
+  safeLoadAIContent,
+  safeLoadSubscription,
+  safeLoadUserState,
+  safeReadUserId,
+  safeSaveAIContent,
+} from "@/lib/server/recoveryRouteRuntime";
 
 // Cloudflare Pages requires Edge runtime for non-static routes.
 export const runtime = "edge";
@@ -35,18 +37,6 @@ export const preferredRegion = ["iad1", "sfo1", "fra1"];
 function toLanguage(value: string | null): Language | null {
   if (value === "ko" || value === "en") return value;
   return null;
-}
-
-function normalizePayloadToState(payload: unknown, languageHint: Language | null): AppState {
-  const sanitized = sanitizeStatePayload(payload);
-  if (!languageHint) return sanitized;
-  return {
-    ...sanitized,
-    settings: {
-      ...sanitized.settings,
-      language: languageHint,
-    },
-  };
 }
 
 function readShift(schedule: AppState["schedule"], iso: ISODate): Shift | null {
@@ -83,105 +73,6 @@ function bad(status: number, error: string) {
   return jsonNoStore(body, { status });
 }
 
-async function safeReadUserId(req: NextRequest): Promise<string> {
-  try {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    if (!supabaseUrl || !supabaseAnon) return "";
-
-    const { readUserIdFromRequest } = await import("@/lib/server/readUserId");
-    return await readUserIdFromRequest(req);
-  } catch {
-    return "";
-  }
-}
-
-async function safeHasCompletedServiceConsent(userId: string): Promise<boolean> {
-  try {
-    const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    if (!serviceRole || !supabaseUrl) return false;
-
-    const { userHasCompletedServiceConsent } = await import("@/lib/server/serviceConsentStore");
-    return await userHasCompletedServiceConsent(userId);
-  } catch {
-    return false;
-  }
-}
-
-// ✅ 안전하게 user state 로드 - Supabase service role key 없어도 crash 안 됨
-async function safeLoadUserState(userId: string): Promise<{ payload: unknown } | null> {
-  try {
-    const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    if (!serviceRole || !supabaseUrl) return null;
-
-    const { loadUserState } = await import("@/lib/server/userStateStore");
-    return await loadUserState(userId);
-  } catch {
-    return null;
-  }
-}
-
-async function safeLoadAIContent(userId: string): Promise<{
-  dateISO: ISODate;
-  language: Language;
-  data: Json;
-} | null> {
-  try {
-    const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    if (!serviceRole || !supabaseUrl) return null;
-
-    const { loadAIContent } = await import("@/lib/server/aiContentStore");
-    const row = await loadAIContent(userId);
-    if (!row) return null;
-    return {
-      dateISO: row.dateISO,
-      language: row.language,
-      data: row.data,
-    };
-  } catch {
-    return null;
-  }
-}
-
-async function safeLoadSubscription(userId: string): Promise<SubscriptionSnapshot | null> {
-  try {
-    const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    if (!serviceRole || !supabaseUrl) return null;
-    const { readSubscription } = await import("@/lib/server/billingStore");
-    return await readSubscription(userId);
-  } catch {
-    return null;
-  }
-}
-
-async function safeSaveAIContent(
-  userId: string,
-  dateISO: ISODate,
-  language: Language,
-  data: Json
-): Promise<string | null> {
-  try {
-    const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    if (!serviceRole || !supabaseUrl) return "missing_supabase_env";
-
-    const existing = await safeLoadAIContent(userId);
-    const previous = isRecord(existing?.data) ? existing.data : {};
-    const incoming = isRecord(data) ? data : {};
-    const merged = { ...previous, ...incoming };
-
-    const { saveAIContent } = await import("@/lib/server/aiContentStore");
-    await saveAIContent({ userId, dateISO, language, data: merged as Json });
-    return null;
-  } catch {
-    return "save_ai_content_failed";
-  }
-}
-
 async function safeReadRecoveryOrderCompletedIds(userId: string, dateISO: ISODate): Promise<string[]> {
   try {
     const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -192,10 +83,6 @@ async function safeReadRecoveryOrderCompletedIds(userId: string, dateISO: ISODat
   } catch {
     return [];
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function asLanguage(value: unknown): Language | null {
@@ -273,7 +160,12 @@ function asProfileSnapshot(value: unknown): AIRecoveryPayload["profileSnapshot"]
 }
 
 function normalizeProfileSnapshot(value: AIRecoveryPayload["profileSnapshot"]) {
-  const profile = normalizeProfileSettings(value ?? null);
+  const chronotypeRaw = Number(value?.chronotype ?? 0.5);
+  const sensitivityRaw = Number(value?.caffeineSensitivity ?? 1);
+  const profile = {
+    chronotype: Math.max(0, Math.min(1, Number.isFinite(chronotypeRaw) ? chronotypeRaw : 0.5)),
+    caffeineSensitivity: Math.max(0.5, Math.min(1.5, Number.isFinite(sensitivityRaw) ? sensitivityRaw : 1)),
+  };
   return {
     chronotype: Number(profile.chronotype.toFixed(2)),
     caffeineSensitivity: Number(profile.caffeineSensitivity.toFixed(2)),
@@ -646,13 +538,33 @@ async function handleRecovery(
     }
 
     // ── FULL PATH: non-cacheOnly (POST / forceGenerate) 전용 ──
+    const [
+      { getAIRecoveryModelForTier },
+      {
+        buildAfterWorkMissingLabels,
+        buildRecoveryPhaseState,
+        getAfterWorkReadiness,
+        stripStartPhaseDynamicInputs,
+        stripStartPhaseDynamicInputsFromVitals,
+      },
+      { buildPlannerContext, normalizeProfileSettings },
+      { computeVitalsRange },
+      { generateAIRecovery },
+    ] = await Promise.all([
+      import("@/lib/billing/plans"),
+      import("@/lib/recoveryPhases"),
+      import("@/lib/recoveryPlanner"),
+      import("@/lib/vitals"),
+      import("@/lib/aiRecovery"),
+    ]);
     const aiRecoveryModel = getAIRecoveryModelForTier(subscription?.tier ?? "pro");
-    const state = normalizePayloadToState(row.payload, null);
-    const lang = (langHint ?? state.settings.language ?? "ko") as Language;
-    const recordedDays = countHealthRecordedDays({ bio: state.bio, emotions: state.emotions });
+    const recordedDays = countHealthRecordedDaysFromRawPayload(row.payload);
     if (recordedDays < 3) {
       return bad(403, "insights_locked_min_3_days");
     }
+    const vitalsLookbackISO = toISODate(addDays(fromISODate(today), -90));
+    const state = normalizeRecoveryRouteState(buildRecoveryStateWindowPayload(row.payload, vitalsLookbackISO), null);
+    const lang = (langHint ?? state.settings.language ?? "ko") as Language;
     const readiness = getAfterWorkReadiness(state, today);
     if (phase === "after_work" && !readiness.ready) {
       return bad(409, `after_work_inputs_required:${buildAfterWorkMissingLabels(readiness.recordedLabels).slice(0, 3).join(",")}`);
@@ -662,13 +574,7 @@ async function handleRecovery(
     // computeVitalsRange는 start 파라미터와 무관하게 state의 가장 오래된 데이터부터
     // 순차 계산(EMA warmup)한다. 전체 state를 그대로 전달하면 1년치 데이터를 처리해
     // Cloudflare Workers CPU 시간 제한을 초과하므로, 90일 슬라이싱된 state를 사용한다.
-    const vitalsLookbackISO = toISODate(addDays(fromISODate(today), -90));
-    const vitalsState = {
-      ...phaseState,
-      bio: Object.fromEntries(Object.entries(phaseState.bio ?? {}).filter(([k]) => k >= vitalsLookbackISO)),
-      emotions: Object.fromEntries(Object.entries(phaseState.emotions ?? {}).filter(([k]) => k >= vitalsLookbackISO)),
-      schedule: Object.fromEntries(Object.entries(phaseState.schedule ?? {}).filter(([k]) => k >= vitalsLookbackISO)),
-    };
+    const vitalsState = phaseState;
 
     const start = toISODate(addDays(fromISODate(today), -13));
     const vitals14 = computeVitalsRange({
