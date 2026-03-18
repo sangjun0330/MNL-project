@@ -648,9 +648,20 @@ async function handleRecovery(
     }
     const phaseState = buildRecoveryPhaseState(state, today, phase);
 
+    // computeVitalsRange는 start 파라미터와 무관하게 state의 가장 오래된 데이터부터
+    // 순차 계산(EMA warmup)한다. 전체 state를 그대로 전달하면 1년치 데이터를 처리해
+    // Cloudflare Workers CPU 시간 제한을 초과하므로, 90일 슬라이싱된 state를 사용한다.
+    const vitalsLookbackISO = toISODate(addDays(fromISODate(today), -90));
+    const vitalsState = {
+      ...phaseState,
+      bio: Object.fromEntries(Object.entries(phaseState.bio ?? {}).filter(([k]) => k >= vitalsLookbackISO)),
+      emotions: Object.fromEntries(Object.entries(phaseState.emotions ?? {}).filter(([k]) => k >= vitalsLookbackISO)),
+      schedule: Object.fromEntries(Object.entries(phaseState.schedule ?? {}).filter(([k]) => k >= vitalsLookbackISO)),
+    };
+
     const start = toISODate(addDays(fromISODate(today), -13));
     const vitals14 = computeVitalsRange({
-      state: phaseState,
+      state: vitalsState,
       start,
       end: today,
       disableTodayCarryISO: phase === "start" ? today : null,
@@ -687,7 +698,7 @@ async function handleRecovery(
       recordedDates[0] && recordedDates[0] < ninetyDaysAgo ? ninetyDaysAgo : (recordedDates[0] ?? today);
     const historyDateSet = new Set(recordedDates);
     const allVitalsRaw = computeVitalsRange({
-      state: phaseState,
+      state: vitalsState,
       start: historyStart,
       end: today,
       disableTodayCarryISO: phase === "start" ? today : null,
