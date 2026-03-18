@@ -793,10 +793,7 @@ async function handlePlanner(
     } catch {
       // Ignore logging failure.
     }
-    if (cacheOnly) {
-      return jsonNoStore({ ok: true, data: null } satisfies AIRecoveryPlannerApiSuccess);
-    }
-    return bad(500, typeof err?.message === "string" && err.message.trim() ? err.message.trim() : "openai_generation_failed");
+    return jsonNoStore({ ok: true, data: null } satisfies AIRecoveryPlannerApiSuccess);
   }
 }
 
@@ -830,6 +827,6 @@ export async function POST(req: NextRequest) {
     return await handlePlanner(req, { allowGenerate: true, requestedOrderCount, forceGenerate, phase: phase ?? undefined });
   } catch (err: any) {
     console.error("[Planner POST] unhandled", err?.message ?? err);
-    return bad(500, "planner_unhandled_error");
+    return jsonNoStore({ ok: true, data: null } satisfies AIRecoveryPlannerApiSuccess);
   }
 }
