@@ -38,23 +38,33 @@ type NarrativeSection = {
 
 type TranslateFn = (key: string, vars?: Record<string, string | number>) => string;
 
-const FLAT_CARD_CLASS = "rounded-[28px] border border-ios-sep bg-white shadow-none";
-const META_PILL_CLASS = "inline-flex items-center rounded-full border border-ios-sep bg-[#F7F7F8] px-2.5 py-1 text-[11px] font-semibold text-ios-sub";
+const FLAT_CARD_CLASS = "rounded-[30px] border border-[rgba(214,214,220,0.85)] bg-white/95 shadow-[0_18px_48px_rgba(124,95,165,0.06)]";
+const META_PILL_CLASS =
+  "inline-flex items-center rounded-full border border-[rgba(216,213,225,0.9)] bg-[rgba(247,245,251,0.95)] px-2.5 py-1 text-[11px] font-semibold text-[#6F6783]";
 const PRIMARY_ACTION_CLASS =
   "h-11 flex-1 rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent)] px-4 text-[14px] font-semibold text-white shadow-none hover:bg-[color:var(--rnest-accent)]/90";
 const SECONDARY_ACTION_CLASS =
   "h-11 flex-1 rounded-full border border-ios-sep bg-white px-4 text-[14px] font-semibold text-ios-text shadow-none hover:bg-ios-bg";
 const HERO_CARD_CLASS =
-  "overflow-hidden rounded-[32px] border border-ios-sep bg-[radial-gradient(circle_at_top_right,rgba(255,234,214,0.72),transparent_36%),linear-gradient(180deg,#FFFFFF_0%,#FCFCFD_100%)] p-5 shadow-none";
-const GROUP_CARD_CLASS = "rounded-[30px] border border-ios-sep bg-[#FCFCFD] p-3 shadow-none md:p-4";
-const ITEM_CARD_CLASS = "rounded-[24px] border border-ios-sep bg-white p-4 transition";
-const ITEM_CARD_ACTIVE_CLASS = "border-[color:var(--rnest-accent-border)] bg-[#FFF9F4] shadow-[0_12px_30px_rgba(16,24,40,0.06)]";
-const ITEM_CARD_IDLE_CLASS = "hover:border-[color:var(--rnest-accent-border)] hover:bg-[#FFFDFC]";
+  "overflow-hidden rounded-[36px] border border-[rgba(224,220,232,0.95)] bg-[radial-gradient(circle_at_top_right,rgba(231,220,255,0.92),transparent_34%),radial-gradient(circle_at_bottom_left,rgba(247,242,255,0.88),transparent_38%),linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(249,246,255,0.96)_100%)] p-5 shadow-[0_24px_80px_rgba(124,95,165,0.08)] md:p-6";
+const STAT_CARD_CLASS =
+  "rounded-[26px] border border-[rgba(226,223,234,0.95)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,246,252,0.94))] px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]";
+const LIST_PANEL_CLASS =
+  "rounded-[32px] border border-[rgba(224,220,232,0.95)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,247,252,0.95))] p-4 shadow-[0_18px_54px_rgba(124,95,165,0.06)] md:p-5";
+const GROUP_CARD_CLASS = "space-y-3";
+const ITEM_CARD_CLASS =
+  "rounded-[26px] border border-[rgba(224,220,232,0.92)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(250,249,252,0.96))] p-4 transition duration-200";
+const ITEM_CARD_ACTIVE_CLASS =
+  "border-[rgba(188,168,243,0.95)] bg-[linear-gradient(180deg,rgba(251,248,255,1),rgba(246,241,255,0.96))] shadow-[0_18px_40px_rgba(167,139,250,0.12)]";
+const ITEM_CARD_IDLE_CLASS = "hover:border-[rgba(196,181,253,0.95)] hover:bg-[rgba(250,247,255,0.92)]";
 const QUICK_ACTION_CLASS =
-  "inline-flex h-10 items-center justify-center rounded-full border border-ios-sep bg-white px-4 text-[12.5px] font-semibold text-ios-text";
+  "inline-flex h-10 items-center justify-center rounded-full border border-[rgba(220,216,229,0.95)] bg-white px-4 text-[12.5px] font-semibold text-ios-text";
 const QUICK_ACTION_PRIMARY_CLASS =
-  "inline-flex h-10 items-center justify-center rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] px-4 text-[12.5px] font-semibold text-[color:var(--rnest-accent)]";
-const DETAIL_PANEL_CLASS = "rounded-[30px] border border-ios-sep bg-white p-4 shadow-none";
+  "inline-flex h-10 items-center justify-center rounded-full border border-[rgba(188,168,243,0.95)] bg-[rgba(240,233,255,0.95)] px-4 text-[12.5px] font-semibold text-[color:var(--rnest-accent)]";
+const DETAIL_PANEL_CLASS =
+  "rounded-[32px] border border-[rgba(224,220,232,0.95)] bg-[linear-gradient(180deg,rgba(255,255,255,0.99),rgba(248,245,252,0.97))] p-4 shadow-[0_22px_60px_rgba(124,95,165,0.08)] md:p-5";
+const DETAIL_SECTION_CLASS =
+  "rounded-[24px] border border-[rgba(227,220,239,0.95)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(249,246,253,0.96))] px-4 py-4 shadow-[0_10px_24px_rgba(124,95,165,0.04)]";
 const TWO_LINE_CLAMP_STYLE = {
   display: "-webkit-box",
   WebkitBoxOrient: "vertical" as const,
@@ -322,7 +332,7 @@ export function ToolMedSafetyRecentPage() {
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
-    const media = window.matchMedia("(min-width: 1024px)");
+    const media = window.matchMedia("(min-width: 1280px)");
     const sync = () => {
       const next = media.matches;
       setIsDesktop(next);
@@ -407,19 +417,19 @@ export function ToolMedSafetyRecentPage() {
 
   const detailContent = selected ? (
     <div className="space-y-4">
-      <div className="rounded-[26px] border border-[color:var(--rnest-accent-border)] bg-[linear-gradient(180deg,#FFFDFC_0%,#FFF8F2_100%)] p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="rounded-[28px] border border-[rgba(199,183,243,0.9)] bg-[radial-gradient(circle_at_top_right,rgba(232,224,255,0.9),transparent_38%),linear-gradient(180deg,rgba(255,255,255,0.98),rgba(247,241,255,0.94))] p-4 md:p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center rounded-full bg-[color:var(--rnest-accent-soft)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--rnest-accent)]">
+              <span className="inline-flex items-center rounded-full border border-[rgba(188,168,243,0.9)] bg-[rgba(240,233,255,0.96)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--rnest-accent)]">
                 {t(kindLabel(selected.result.resultKind))}
               </span>
               <span className={META_PILL_CLASS}>{formatDateTime(selected.savedAt)}</span>
             </div>
-            <div className="mt-2 text-[22px] font-bold tracking-[-0.02em] text-ios-text">{selected.result.title}</div>
-            <div className="mt-3 text-[12px] font-semibold uppercase tracking-[0.08em] text-ios-muted">{t("질문")}</div>
+            <div className="mt-3 text-[24px] font-bold tracking-[-0.03em] text-ios-text md:text-[28px]">{selected.result.title}</div>
+            <div className="mt-4 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#8B839B]">{t("질문")}</div>
             <div className="mt-1 text-[14px] font-semibold leading-6 text-ios-text">{selected.request.query || "-"}</div>
-            <div className="mt-4 text-[12px] font-semibold uppercase tracking-[0.08em] text-ios-muted">{t("요약")}</div>
+            <div className="mt-4 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#8B839B]">{t("요약")}</div>
             <div className="mt-1 text-[15px] leading-7 text-ios-text">{selected.result.summary}</div>
           </div>
           {isDesktop ? (
@@ -440,12 +450,12 @@ export function ToolMedSafetyRecentPage() {
       {selectedSections.length ? (
         <div className="space-y-3">
           {selectedSections.map((section, index) => (
-            <section key={`${section.title}-${index}`} className="rounded-[24px] border border-ios-sep bg-white px-4 py-4 shadow-[0_10px_24px_rgba(16,24,40,0.03)]">
+            <section key={`${section.title}-${index}`} className={DETAIL_SECTION_CLASS}>
               <div className="text-[18px] font-bold tracking-[-0.02em] text-ios-text">{t(section.title || "상세 결과")}</div>
               <div className="mt-3 space-y-2">
                 {section.items.map((entry, entryIndex) => (
                   <div key={`${section.title}-${entryIndex}`} className="text-[14px] leading-7 text-ios-text">
-                    - {entry}
+                    {entry}
                   </div>
                 ))}
               </div>
@@ -453,55 +463,55 @@ export function ToolMedSafetyRecentPage() {
           ))}
         </div>
       ) : (
-        <div className="rounded-[24px] border border-ios-sep bg-white px-4 py-4 shadow-[0_10px_24px_rgba(16,24,40,0.03)]">
+        <div className={DETAIL_SECTION_CLASS}>
           <div className="whitespace-pre-wrap break-words text-[14px] leading-7 text-ios-text">{selected.result.answer}</div>
         </div>
       )}
     </div>
   ) : (
-    <div className="rounded-[24px] border border-dashed border-ios-sep bg-[#FCFCFD] px-4 py-5 text-[14px] leading-6 text-ios-sub">
+    <div className="rounded-[24px] border border-dashed border-[rgba(221,216,232,0.95)] bg-[rgba(249,247,252,0.88)] px-4 py-5 text-[14px] leading-6 text-ios-sub">
       {t("선택한 검색 결과가 여기 표시됩니다.")}
     </div>
   );
 
   return (
     <>
-      <div className="mx-auto w-full max-w-[1120px] space-y-4 px-2 pb-24 pt-4">
+      <div className="mx-auto w-full max-w-[1180px] space-y-5 px-2 pb-24 pt-4 sm:px-3">
         <Card className={HERO_CARD_CLASS}>
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <div className="text-[31px] font-extrabold tracking-[-0.02em] text-ios-text">{t("최근 AI 검색 기록")}</div>
-                <span className="inline-flex items-center rounded-full bg-[color:var(--rnest-accent-soft)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--rnest-accent)]">
+                <div className="text-[31px] font-extrabold tracking-[-0.03em] text-ios-text md:text-[36px]">{t("최근 AI 검색 기록")}</div>
+                <span className="inline-flex items-center rounded-full border border-[rgba(188,168,243,0.9)] bg-[rgba(240,233,255,0.96)] px-3 py-1 text-[11px] font-semibold text-[color:var(--rnest-accent)]">
                   {t("최근 {count}건", { count: historyLimit })}
                 </span>
               </div>
-              <div className="mt-2 max-w-[760px] text-[13px] leading-6 text-ios-sub">
+              <div className="mt-2 max-w-[760px] text-[13px] leading-6 text-ios-sub md:text-[14px]">
                 {t("완료된 검색만 저장되며, 항목별로 질문과 답변을 다시 열 수 있습니다.")}
               </div>
             </div>
             <Link
               href="/tools/med-safety"
-              className="inline-flex h-11 items-center justify-center rounded-full border border-[color:var(--rnest-accent)] bg-white px-4 text-[12.5px] font-semibold text-[color:var(--rnest-accent)]"
+              className="inline-flex h-11 items-center justify-center rounded-full border border-[rgba(188,168,243,0.95)] bg-white/92 px-5 text-[13px] font-semibold text-[color:var(--rnest-accent)]"
             >
               {t("AI 검색기로")}
             </Link>
           </div>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            <div className="rounded-[24px] border border-ios-sep bg-white/90 px-4 py-4">
+          <div className="mt-5 grid gap-3 md:grid-cols-3">
+            <div className={STAT_CARD_CLASS}>
               <div className="text-[12px] font-semibold text-ios-sub">{t("최근 저장")}</div>
               <div className="mt-2 text-[28px] font-bold tracking-[-0.03em] text-ios-text">{items.length}</div>
               <div className="mt-1 text-[12px] text-ios-sub">{t("완료 검색만 저장")}</div>
             </div>
-            <div className="rounded-[24px] border border-ios-sep bg-white/90 px-4 py-4">
+            <div className={STAT_CARD_CLASS}>
               <div className="text-[12px] font-semibold text-ios-sub">{t("마지막 저장")}</div>
               <div className="mt-2 text-[18px] font-bold tracking-[-0.02em] text-ios-text">
                 {latestSavedAt ? formatDateTime(latestSavedAt) : "-"}
               </div>
               <div className="mt-1 text-[12px] text-ios-sub">{t("계정별로 동기화됩니다.")}</div>
             </div>
-            <div className="rounded-[24px] border border-ios-sep bg-white/90 px-4 py-4">
+            <div className={STAT_CARD_CLASS}>
               <div className="text-[12px] font-semibold text-ios-sub">{t("복사")}</div>
               <div className="mt-2 text-[18px] font-bold tracking-[-0.02em] text-ios-text">{t("바로 복사 가능")}</div>
               <div className="mt-1 text-[12px] text-ios-sub">{t("질문과 답변이 함께 복사됩니다.")}</div>
@@ -540,72 +550,95 @@ export function ToolMedSafetyRecentPage() {
             </div>
           </Card>
         ) : (
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.08fr)_minmax(360px,0.92fr)]">
+          <div className="grid gap-5 xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)]">
             <div className="space-y-4">
-              {groupedItems.map((group) => (
-                <section key={group.key} className={GROUP_CARD_CLASS}>
-                  <div className="mb-3 flex items-center justify-between gap-3">
+              <Card className={LIST_PANEL_CLASS}>
+                <div className="flex flex-col gap-4 border-b border-[rgba(226,223,234,0.95)] pb-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
                     <div>
-                      <div className="text-[16px] font-bold tracking-[-0.01em] text-ios-text">{group.label}</div>
-                      <div className="mt-1 text-[12px] text-ios-sub">{t("질문과 요약을 먼저 보고, 전체 보기에서 답변 전문을 확인합니다.")}</div>
+                      <div className="text-[22px] font-bold tracking-[-0.03em] text-ios-text">{t("저장된 질문 라이브러리")}</div>
+                      <div className="mt-1 text-[13px] leading-6 text-ios-sub">
+                        {t("질문 제목과 요약을 빠르게 훑고, 필요한 항목만 열어 자세히 확인할 수 있습니다.")}
+                      </div>
                     </div>
-                    <span className={META_PILL_CLASS}>{t("{count}건", { count: group.items.length })}</span>
+                    <span className="inline-flex items-center rounded-full border border-[rgba(188,168,243,0.9)] bg-[rgba(240,233,255,0.96)] px-3 py-1 text-[11px] font-semibold text-[color:var(--rnest-accent)]">
+                      {t("총 {count}건", { count: items.length })}
+                    </span>
                   </div>
+                </div>
 
-                  <div className="space-y-2">
-                    {group.items.map((item) => {
-                      const isActive = selected?.id === item.id;
-                      return (
-                        <article key={item.id} className={`${ITEM_CARD_CLASS} ${isActive ? ITEM_CARD_ACTIVE_CLASS : ITEM_CARD_IDLE_CLASS}`}>
-                          <button type="button" onClick={() => handleOpenItem(item)} className="w-full text-left">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0 flex-1">
-                                <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text sm:text-[18px]">{item.result.title}</div>
-                                <div className="mt-2 flex flex-wrap items-center gap-2">
-                                  <span className="inline-flex shrink-0 items-center rounded-full bg-[color:var(--rnest-accent-soft)] px-2.5 py-1 text-[10.5px] font-semibold text-[color:var(--rnest-accent)]">
-                                    {t(kindLabel(item.result.resultKind))}
+                <div className="mt-5 space-y-6">
+                  {groupedItems.map((group) => (
+                    <section key={group.key} className={GROUP_CARD_CLASS}>
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-[17px] font-bold tracking-[-0.02em] text-ios-text">{group.label}</div>
+                          <div className="mt-1 text-[12px] leading-5 text-ios-sub">{t("질문과 요약을 먼저 보고 필요할 때만 전체 답변을 엽니다.")}</div>
+                        </div>
+                        <span className={META_PILL_CLASS}>{t("{count}건", { count: group.items.length })}</span>
+                      </div>
+
+                      <div className="space-y-3">
+                        {group.items.map((item) => {
+                          const isActive = selected?.id === item.id;
+                          return (
+                            <article key={item.id} className={`${ITEM_CARD_CLASS} ${isActive ? ITEM_CARD_ACTIVE_CLASS : ITEM_CARD_IDLE_CLASS}`}>
+                              <button type="button" onClick={() => handleOpenItem(item)} className="w-full text-left">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="inline-flex shrink-0 items-center rounded-full border border-[rgba(188,168,243,0.88)] bg-[rgba(240,233,255,0.95)] px-2.5 py-1 text-[10.5px] font-semibold text-[color:var(--rnest-accent)]">
+                                        {t(kindLabel(item.result.resultKind))}
+                                      </span>
+                                      {item.request.mode ? <span className={META_PILL_CLASS}>{t(modeLabel(item.request.mode))}</span> : null}
+                                      {item.request.situation ? <span className={META_PILL_CLASS}>{t(situationLabel(item.request.situation))}</span> : null}
+                                    </div>
+                                    <div className="mt-3 text-[17px] font-bold tracking-[-0.03em] text-ios-text sm:text-[19px]">
+                                      {item.result.title}
+                                    </div>
+                                  </div>
+                                  <span className="inline-flex shrink-0 items-center rounded-full border border-[rgba(220,216,229,0.95)] bg-white px-3 py-1.5 text-[11px] font-semibold text-ios-sub">
+                                    {formatListTime(item.savedAt)}
                                   </span>
-                                  {item.request.mode ? <span className={META_PILL_CLASS}>{t(modeLabel(item.request.mode))}</span> : null}
-                                  {item.request.situation ? <span className={META_PILL_CLASS}>{t(situationLabel(item.request.situation))}</span> : null}
                                 </div>
+
+                                <div className="mt-3 text-[14px] font-semibold leading-6 text-ios-text" style={TWO_LINE_CLAMP_STYLE}>
+                                  {item.request.query || "-"}
+                                </div>
+
+                                <div className="mt-2 text-[13.5px] leading-6 text-ios-sub" style={TWO_LINE_CLAMP_STYLE}>
+                                  {shortText(item.result.summary || item.result.answer || "-", 120)}
+                                </div>
+                              </button>
+
+                              <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+                                <button type="button" onClick={() => void handleCopyItem(item)} className={QUICK_ACTION_CLASS}>
+                                  <AnimatedCopyLabel copied={copiedKey === `item:${item.id}`} label={t("복사")} />
+                                </button>
+                                <button type="button" onClick={() => handleOpenItem(item)} className={QUICK_ACTION_PRIMARY_CLASS}>
+                                  {t("전체 보기")}
+                                </button>
                               </div>
-                              <span className="inline-flex shrink-0 items-center rounded-full border border-ios-sep bg-white px-3 py-1.5 text-[11px] font-semibold text-ios-sub">
-                                {formatListTime(item.savedAt)}
-                              </span>
-                            </div>
-
-                            <div className="mt-3 text-[14px] font-semibold leading-6 text-ios-text" style={TWO_LINE_CLAMP_STYLE}>
-                              {item.request.query || "-"}
-                            </div>
-
-                            <div className="mt-2 text-[13.5px] leading-6 text-ios-sub" style={TWO_LINE_CLAMP_STYLE}>
-                              {shortText(item.result.summary || item.result.answer || "-", 120)}
-                            </div>
-                          </button>
-
-                          <div className="mt-4 flex items-center justify-end gap-2">
-                            <button type="button" onClick={() => void handleCopyItem(item)} className={QUICK_ACTION_CLASS}>
-                              <AnimatedCopyLabel copied={copiedKey === `item:${item.id}`} label={t("복사")} />
-                            </button>
-                            <button type="button" onClick={() => handleOpenItem(item)} className={QUICK_ACTION_PRIMARY_CLASS}>
-                              {t("전체 보기")}
-                            </button>
-                          </div>
-                        </article>
-                      );
-                    })}
-                  </div>
-                </section>
-              ))}
+                            </article>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              </Card>
             </div>
 
-            <div className="hidden lg:block">
-              <div className="sticky top-4">
+            <div className="hidden xl:block">
+              <div className="space-y-4">
                 <Card className={DETAIL_PANEL_CLASS}>
-                  <div className="mb-3">
-                    <div className="text-[12px] font-semibold uppercase tracking-[0.08em] text-ios-muted">{t("선택한 결과")}</div>
-                    <div className="mt-1 text-[20px] font-bold tracking-[-0.02em] text-ios-text">
+                  <div className="mb-4 border-b border-[rgba(226,223,234,0.95)] pb-4">
+                    <div className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[#8B839B]">{t("선택한 결과")}</div>
+                    <div className="mt-2 text-[24px] font-bold tracking-[-0.03em] text-ios-text">
                       {selected?.result.title || t("최근 검색 상세")}
+                    </div>
+                    <div className="mt-2 text-[13px] leading-6 text-ios-sub">
+                      {t("오른쪽 패널에서 질문, 요약, 상세 답변을 한 번에 읽을 수 있습니다.")}
                     </div>
                   </div>
                   {detailContent}
