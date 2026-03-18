@@ -1,6 +1,11 @@
 import { NextRequest } from "next/server";
 import { addDays, fromISODate, toISODate, todayISO, type ISODate } from "@/lib/date";
+import { generateAIRecovery } from "@/lib/aiRecovery";
 import type { AIRecoveryPayload } from "@/lib/aiRecoveryContract";
+import {
+  buildExplanationModule,
+  buildFallbackModules,
+} from "@/lib/aiRecoveryPlanner";
 import type {
   AIRecoveryPlannerModules,
   AIRecoveryPlannerApiError,
@@ -9,8 +14,9 @@ import type {
 } from "@/lib/aiRecoveryPlanner";
 import type { Language } from "@/lib/i18n";
 import { getAIRecoveryModelForTier } from "@/lib/billing/plans";
-import { hasHealthInput } from "@/lib/healthRecords";
+import { countHealthRecordedDays, hasHealthInput } from "@/lib/healthRecords";
 import type { AppState } from "@/lib/model";
+import { sanitizeStatePayload } from "@/lib/stateSanitizer";
 import {
   buildAfterWorkMissingLabels,
   buildRecoveryOrderProgressId,
@@ -29,12 +35,8 @@ import {
   type PlannerContext,
 } from "@/lib/recoveryPlanner";
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
-import {
-  buildRecoveryStateWindowPayload,
-  countHealthRecordedDaysFromRawPayload,
-  isRecord,
-} from "@/lib/server/recoveryRouteRuntime";
 import type { Shift } from "@/lib/types";
+import { computeVitalsRange } from "@/lib/vitals";
 import type { Json } from "@/types/supabase";
 import type { SubscriptionSnapshot } from "@/lib/server/billingStore";
 
@@ -57,7 +59,8 @@ function normalizeRequestedOrderCount(value: unknown): number | null {
   return Math.max(1, Math.min(5, parsed));
 }
 
-function withLanguageHint(sanitized: AppState, languageHint: Language | null): AppState {
+function normalizePayloadToState(payload: unknown, languageHint: Language | null): AppState {
+  const sanitized = sanitizeStatePayload(payload);
   if (!languageHint) return sanitized;
   return {
     ...sanitized,
@@ -66,6 +69,10 @@ function withLanguageHint(sanitized: AppState, languageHint: Language | null): A
       language: languageHint,
     },
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function readShift(schedule: AppState["schedule"], iso: ISODate): Shift | null {
