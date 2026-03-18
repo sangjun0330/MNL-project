@@ -3,7 +3,7 @@ import {
   sanitizeMemoTemplate,
   sanitizeMemoTemplates,
   type RNestMemoTemplate,
-} from "@/lib/notebook"
+} from "@/lib/server/notebookTemplateRuntime"
 import { todayISO } from "@/lib/date"
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin"
 import type { Json } from "@/types/supabase"

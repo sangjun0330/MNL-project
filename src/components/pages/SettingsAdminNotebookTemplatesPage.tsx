@@ -580,23 +580,23 @@ export function SettingsAdminNotebookTemplatesPage() {
           {accessState === "granted" ? (
             <>
               <section className="rounded-[34px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.97),rgba(244,248,252,0.95))] p-6 shadow-[0_22px_70px_rgba(17,41,75,0.08)]">
-                <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
                   <div className="min-w-0">
                     <Badge variant="outline" className="border-[#dbe4ef] bg-white text-[11px] text-[#17324d]">
                       Template Workspace
                     </Badge>
-                    <div className="mt-3 text-[28px] font-bold tracking-[-0.04em] text-ios-text">
-                      메모에서 템플릿을 만들고 바로 배포
+                    <div className="mt-3 text-[26px] font-bold tracking-[-0.04em] text-ios-text sm:text-[30px]">
+                      메모 템플릿 운영을 한 화면에서 정리
                     </div>
-                    <p className="mt-3 max-w-[760px] text-[13px] leading-6 text-ios-sub">
-                      왼쪽에서 운영 템플릿을 고르고, 오른쪽에서 원본 메모를 선택해 새 템플릿을 만들거나 기존 템플릿 본문을 다시 반영합니다.
+                    <p className="mt-3 max-w-[760px] text-[13px] leading-6 text-ios-sub sm:text-[13.5px]">
+                      템플릿 목록, 원본 메모 연결, 설정, 미리보기를 서로 겹치지 않는 작업 흐름으로 다시 정리했습니다. 목록에서 템플릿을 고른 뒤 아래 작업공간에서 바로 수정하고 저장하면 됩니다.
                     </p>
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-col gap-2 sm:flex-row">
                     <button
                       type="button"
                       onClick={() => void load()}
-                      className="inline-flex items-center gap-2 rounded-2xl border border-[#d9e2ee] bg-white px-3 py-2.5 text-[12px] font-semibold text-[#41556f]"
+                      className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl border border-[#d9e2ee] bg-white px-4 py-2.5 text-[12px] font-semibold text-[#41556f]"
                     >
                       <RefreshCw className="h-3.5 w-3.5" />
                       새로고침
@@ -605,7 +605,7 @@ export function SettingsAdminNotebookTemplatesPage() {
                       type="button"
                       onClick={saveTemplateList}
                       disabled={saving || templates.length === 0 || !dirty}
-                      className="inline-flex items-center gap-2 rounded-2xl bg-[color:var(--rnest-accent)] px-4 py-2.5 text-[12px] font-semibold text-white shadow-[0_16px_36px_rgba(167,139,250,0.28)] disabled:opacity-60"
+                      className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl bg-[color:var(--rnest-accent)] px-5 py-2.5 text-[12px] font-semibold text-white shadow-[0_16px_36px_rgba(167,139,250,0.28)] disabled:opacity-60"
                     >
                       <Save className="h-3.5 w-3.5" />
                       {saving ? "저장 중..." : dirty ? "변경 저장" : "저장 완료"}
@@ -613,7 +613,7 @@ export function SettingsAdminNotebookTemplatesPage() {
                   </div>
                 </div>
 
-                <div className="mt-5 grid gap-3 md:grid-cols-4">
+                <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                   <InfoPill label="운영 템플릿" value={`${templates.length}개`} />
                   <InfoPill label="메모 원본" value={`${sourceDocs.length}개`} />
                   <InfoPill label="현재 선택" value={selectedTemplate?.label || "없음"} />
@@ -642,42 +642,48 @@ export function SettingsAdminNotebookTemplatesPage() {
                 ) : null}
               </section>
 
-              <div className="mt-5 grid gap-5 xl:grid-cols-[340px_minmax(0,1fr)]">
-                <aside className="min-w-0 space-y-5">
+              <div className="mt-6 grid gap-6 2xl:grid-cols-[360px_minmax(0,1fr)]">
+                <aside className="min-w-0 self-start 2xl:sticky 2xl:top-6">
                   <section className="rounded-[30px] border border-white/80 bg-white/95 p-5 shadow-[0_16px_40px_rgba(17,41,75,0.06)]">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-[20px] font-bold tracking-[-0.03em] text-ios-text">운영 템플릿</div>
-                        <div className="mt-1 text-[12px] leading-5 text-ios-sub">
-                          새 페이지 팝업에는 이 순서대로 템플릿이 표시됩니다.
+                    <div className="flex flex-col gap-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-[20px] font-bold tracking-[-0.03em] text-ios-text">운영 템플릿 목록</div>
+                          <div className="mt-1 text-[12px] leading-5 text-ios-sub">
+                            새 페이지 팝업에는 이 순서대로 템플릿이 표시됩니다.
+                          </div>
                         </div>
+                        <Badge variant="secondary" className="border-[#d9e2ee] bg-[#f7f9fc] text-[11px] text-[#41556f]">
+                          {templates.length}개
+                        </Badge>
                       </div>
-                      <Badge variant="secondary" className="border-[#d9e2ee] bg-[#f7f9fc] text-[11px] text-[#41556f]">
-                        {templates.length}개
-                      </Badge>
+
+                      <div className="grid gap-2 sm:grid-cols-2 2xl:grid-cols-1">
+                        <button
+                          type="button"
+                          onClick={createBlankTemplateItem}
+                          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl border border-[#d9e2ee] bg-white px-3 py-2.5 text-[12px] font-semibold text-[#41556f]"
+                        >
+                          <FilePlus2 className="h-3.5 w-3.5" />
+                          빈 템플릿 추가
+                        </button>
+                        <button
+                          type="button"
+                          onClick={createTemplateFromSelectedMemo}
+                          disabled={!selectedSourceDoc || Boolean(selectedSourceDoc?.lock)}
+                          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl bg-[color:var(--rnest-accent)] px-3 py-2.5 text-[12px] font-semibold text-white shadow-[0_16px_30px_rgba(167,139,250,0.22)] disabled:opacity-60"
+                        >
+                          <FilePlus2 className="h-3.5 w-3.5" />
+                          선택 메모로 생성
+                        </button>
+                      </div>
+
+                      <div className="rounded-[22px] border border-[#e7edf5] bg-[#fbfcfe] px-4 py-3 text-[12px] leading-6 text-ios-sub">
+                        새 템플릿 초안은 저장 전까지 이 화면에서만 유지됩니다. 선택 후 오른쪽 작업공간에서 이름, 본문 연결, 태그를 정리하면 됩니다.
+                      </div>
                     </div>
 
-                    <div className="mt-4 grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={createBlankTemplateItem}
-                        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-[#d9e2ee] bg-white px-3 py-2.5 text-[12px] font-semibold text-[#41556f]"
-                      >
-                        <FilePlus2 className="h-3.5 w-3.5" />
-                        빈 템플릿
-                      </button>
-                      <button
-                        type="button"
-                        onClick={createTemplateFromSelectedMemo}
-                        disabled={!selectedSourceDoc || Boolean(selectedSourceDoc?.lock)}
-                        className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[color:var(--rnest-accent)] px-3 py-2.5 text-[12px] font-semibold text-white shadow-[0_16px_30px_rgba(167,139,250,0.22)] disabled:opacity-60"
-                      >
-                        <FilePlus2 className="h-3.5 w-3.5" />
-                        메모로 생성
-                      </button>
-                    </div>
-
-                    <div className="mt-4 max-h-[calc(100vh-280px)] space-y-3 overflow-y-auto pr-1">
+                    <div className="mt-5 max-h-[min(58vh,720px)] space-y-3 overflow-y-auto pr-1 2xl:max-h-[calc(100vh-300px)]">
                       {templates.map((template, index) => (
                         <TemplateListCard
                           key={template.id}
@@ -691,265 +697,289 @@ export function SettingsAdminNotebookTemplatesPage() {
                       ))}
                     </div>
                   </section>
-
-                  <section className="rounded-[30px] border border-white/80 bg-white/95 p-5 shadow-[0_16px_40px_rgba(17,41,75,0.06)]">
-                    <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">선택 템플릿 작업</div>
-                    <div className="mt-3 grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => moveTemplateItem(-1)}
-                        disabled={!selectedTemplate || selectedTemplateIndex <= 0}
-                        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-[#d9e2ee] bg-white px-3 py-2.5 text-[12px] font-semibold text-[#41556f] disabled:opacity-50"
-                      >
-                        <ArrowUp className="h-3.5 w-3.5" />
-                        위로
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => moveTemplateItem(1)}
-                        disabled={!selectedTemplate || selectedTemplateIndex < 0 || selectedTemplateIndex >= templates.length - 1}
-                        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-[#d9e2ee] bg-white px-3 py-2.5 text-[12px] font-semibold text-[#41556f] disabled:opacity-50"
-                      >
-                        <ArrowDown className="h-3.5 w-3.5" />
-                        아래로
-                      </button>
-                      <button
-                        type="button"
-                        onClick={duplicateTemplateItem}
-                        disabled={!selectedTemplate}
-                        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-[#d9e2ee] bg-white px-3 py-2.5 text-[12px] font-semibold text-[#41556f] disabled:opacity-50"
-                      >
-                        <Copy className="h-3.5 w-3.5" />
-                        복제
-                      </button>
-                      <button
-                        type="button"
-                        onClick={removeTemplateItem}
-                        disabled={!selectedTemplate || templates.length <= 1}
-                        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-[#f2d8d8] bg-white px-3 py-2.5 text-[12px] font-semibold text-[#b04a4a] disabled:opacity-50"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        삭제
-                      </button>
-                    </div>
-
-                    <div className="mt-4 rounded-[22px] border border-[#e7edf5] bg-[#fbfcfe] px-4 py-3 text-[12px] leading-6 text-ios-sub">
-                      새 템플릿은 메모에서 직접 만들 수 있고, 저장 전까지는 이 화면에서만 초안 상태로 유지됩니다.
-                    </div>
-                  </section>
                 </aside>
 
                 <section className="min-w-0 space-y-5">
                   {selectedTemplate ? (
-                    <div className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_340px]">
-                      <div className="min-w-0 space-y-5">
-                        <section className="rounded-[30px] border border-white/80 bg-white/95 p-5 shadow-[0_16px_40px_rgba(17,41,75,0.06)]">
-                          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                            <div>
-                              <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">메모 원본 연결</div>
-                              <div className="mt-1 text-[12px] leading-5 text-ios-sub">
-                                메모를 선택한 뒤 새 템플릿을 만들거나, 현재 선택한 템플릿 본문을 다시 반영할 수 있습니다.
-                              </div>
+                    <>
+                      <section className="overflow-hidden rounded-[30px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(245,247,255,0.96))] p-5 shadow-[0_16px_40px_rgba(17,41,75,0.06)]">
+                        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="inline-flex h-12 w-12 items-center justify-center rounded-[18px] bg-[color:var(--rnest-accent-soft)] text-[15px] font-bold uppercase text-[color:var(--rnest-accent)]">
+                                {selectedTemplate.icon.slice(0, 1)}
+                              </span>
+                              {defaultTemplateIdSet.has(selectedTemplate.id) ? (
+                                <Badge variant="secondary" className="border-transparent bg-[#eef3fa] text-[11px] text-[#5c6f86]">
+                                  기본 템플릿
+                                </Badge>
+                              ) : (
+                                <Badge variant="secondary" className="border-transparent bg-[rgba(167,139,250,0.12)] text-[11px] text-[color:var(--rnest-accent)]">
+                                  운영 템플릿
+                                </Badge>
+                              )}
+                              {dirty ? (
+                                <Badge variant="secondary" className="border-transparent bg-[#fff4d8] text-[11px] text-[#9a5a00]">
+                                  저장 전 변경 있음
+                                </Badge>
+                              ) : null}
                             </div>
-                            <div className="flex flex-wrap gap-2">
-                              <button
-                                type="button"
-                                onClick={() => void load()}
-                                className="inline-flex items-center gap-2 rounded-2xl border border-[#d9e2ee] bg-white px-3 py-2.5 text-[12px] font-semibold text-[#41556f]"
-                              >
-                                <RefreshCw className="h-3.5 w-3.5" />
-                                메모 새로고침
-                              </button>
-                              <Link
-                                href="/tools/notebook"
-                                className="inline-flex items-center gap-2 rounded-2xl border border-[#d9e2ee] bg-white px-3 py-2.5 text-[12px] font-semibold text-[#41556f]"
-                              >
-                                메모 열기
-                              </Link>
+                            <div className="mt-4 text-[26px] font-bold tracking-[-0.04em] text-ios-text">
+                              {selectedTemplate.label || "이름 없는 템플릿"}
+                            </div>
+                            <div className="mt-2 max-w-[760px] text-[13px] leading-6 text-ios-sub">
+                              {selectedTemplate.description || "설명이 아직 없습니다. 아래 템플릿 설정에서 설명과 새 페이지 제목을 정리하세요."}
+                            </div>
+                            <div className="mt-4 flex flex-wrap gap-2">
+                              <Badge variant="secondary" className="border-[#d9e2ee] bg-white text-[11px] text-[#41556f]">
+                                {selectedTemplateIndex >= 0 ? `${selectedTemplateIndex + 1}번째 노출` : "순서 미정"}
+                              </Badge>
+                              <Badge variant="secondary" className="border-[#d9e2ee] bg-white text-[11px] text-[#41556f]">
+                                새 페이지 제목: {selectedTemplate.title || "미입력"}
+                              </Badge>
+                              {selectedTemplate.tags.length > 0 ? (
+                                <Badge variant="secondary" className="border-[#d9e2ee] bg-white text-[11px] text-[#41556f]">
+                                  태그 {selectedTemplate.tags.length}개
+                                </Badge>
+                              ) : null}
                             </div>
                           </div>
 
-                          <div className="relative mt-4">
-                            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ios-muted" />
+                          <div className="grid gap-2 sm:grid-cols-2 lg:w-[320px]">
+                            <button
+                              type="button"
+                              onClick={() => moveTemplateItem(-1)}
+                              disabled={selectedTemplateIndex <= 0}
+                              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl border border-[#d9e2ee] bg-white px-3 py-2.5 text-[12px] font-semibold text-[#41556f] disabled:opacity-50"
+                            >
+                              <ArrowUp className="h-3.5 w-3.5" />
+                              위로
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => moveTemplateItem(1)}
+                              disabled={selectedTemplateIndex < 0 || selectedTemplateIndex >= templates.length - 1}
+                              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl border border-[#d9e2ee] bg-white px-3 py-2.5 text-[12px] font-semibold text-[#41556f] disabled:opacity-50"
+                            >
+                              <ArrowDown className="h-3.5 w-3.5" />
+                              아래로
+                            </button>
+                            <button
+                              type="button"
+                              onClick={duplicateTemplateItem}
+                              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl border border-[#d9e2ee] bg-white px-3 py-2.5 text-[12px] font-semibold text-[#41556f] disabled:opacity-50"
+                            >
+                              <Copy className="h-3.5 w-3.5" />
+                              복제
+                            </button>
+                            <button
+                              type="button"
+                              onClick={removeTemplateItem}
+                              disabled={templates.length <= 1}
+                              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl border border-[#f2d8d8] bg-white px-3 py-2.5 text-[12px] font-semibold text-[#b04a4a] disabled:opacity-50"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              삭제
+                            </button>
+                          </div>
+                        </div>
+                      </section>
+
+                      <section className="rounded-[30px] border border-white/80 bg-white/95 p-5 shadow-[0_16px_40px_rgba(17,41,75,0.06)]">
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                          <div>
+                            <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">메모 원본 연결</div>
+                            <div className="mt-1 text-[12px] leading-5 text-ios-sub">
+                              메모를 선택한 뒤 새 템플릿을 만들거나, 현재 템플릿 본문을 다시 반영할 수 있습니다.
+                            </div>
+                          </div>
+                          <div className="flex flex-col gap-2 sm:flex-row">
+                            <button
+                              type="button"
+                              onClick={() => void load()}
+                              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl border border-[#d9e2ee] bg-white px-4 py-2.5 text-[12px] font-semibold text-[#41556f]"
+                            >
+                              <RefreshCw className="h-3.5 w-3.5" />
+                              메모 새로고침
+                            </button>
+                            <Link
+                              href="/tools/notebook"
+                              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl border border-[#d9e2ee] bg-white px-4 py-2.5 text-[12px] font-semibold text-[#41556f]"
+                            >
+                              메모 열기
+                            </Link>
+                          </div>
+                        </div>
+
+                        <div className="relative mt-4">
+                          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ios-muted" />
+                          <input
+                            value={sourceQuery}
+                            onChange={(event) => setSourceQuery(event.target.value)}
+                            placeholder="원본 메모 검색"
+                            className="h-11 w-full rounded-2xl border border-[#dbe4ef] bg-[#fbfcfe] pl-10 pr-4 text-[14px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent-border)]"
+                          />
+                        </div>
+
+                        <div className="mt-4 max-h-[420px] space-y-3 overflow-y-auto pr-1">
+                          {filteredSourceDocs.length > 0 ? (
+                            filteredSourceDocs.map((doc) => (
+                              <SourceDocCard
+                                key={doc.id}
+                                document={doc}
+                                selected={doc.id === selectedSourceDocId}
+                                stale={selectedTemplate.sourceDocId === doc.id && doc.updatedAt > (selectedTemplate.sourceDocUpdatedAt ?? 0)}
+                                onSelect={() => setSelectedSourceDocId(doc.id)}
+                              />
+                            ))
+                          ) : (
+                            <div className="rounded-[22px] border border-dashed border-[#dbe4ef] bg-[#fbfcfe] px-4 py-5 text-[12px] leading-5 text-ios-muted">
+                              검색 조건에 맞는 메모가 없습니다.
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                          <button
+                            type="button"
+                            onClick={createTemplateFromSelectedMemo}
+                            disabled={!selectedSourceDoc || Boolean(selectedSourceDoc?.lock)}
+                            className="inline-flex min-h-11 items-center justify-center rounded-2xl bg-[color:var(--rnest-accent)] px-4 py-2.5 text-[12px] font-semibold text-white shadow-[0_16px_30px_rgba(167,139,250,0.22)] disabled:opacity-60"
+                          >
+                            선택 메모로 새 템플릿 만들기
+                          </button>
+                          <button
+                            type="button"
+                            onClick={applySourceDocToTemplate}
+                            disabled={!selectedSourceDoc || Boolean(selectedSourceDoc?.lock)}
+                            className="inline-flex min-h-11 items-center justify-center rounded-2xl border border-[#d9e2ee] bg-white px-4 py-2.5 text-[12px] font-semibold text-[#41556f] disabled:opacity-60"
+                          >
+                            현재 템플릿 본문 덮어쓰기
+                          </button>
+                        </div>
+                      </section>
+
+                      <section className="rounded-[30px] border border-white/80 bg-white/95 p-5 shadow-[0_16px_40px_rgba(17,41,75,0.06)]">
+                        <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">템플릿 설정</div>
+                        <div className="mt-4 grid gap-4 md:grid-cols-2">
+                          <label className="block">
+                            <div className="mb-2 text-[12px] font-semibold text-ios-sub">목록 이름</div>
                             <input
-                              value={sourceQuery}
-                              onChange={(event) => setSourceQuery(event.target.value)}
-                              placeholder="원본 메모 검색"
-                              className="h-11 w-full rounded-2xl border border-[#dbe4ef] bg-[#fbfcfe] pl-10 pr-4 text-[14px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent-border)]"
+                              value={selectedTemplate.label}
+                              onChange={(event) =>
+                                updateTemplate(selectedTemplate.id, (template) => ({
+                                  ...template,
+                                  label: event.target.value,
+                                  updatedAt: Date.now(),
+                                }))
+                              }
+                              placeholder="템플릿 이름"
+                              className="h-11 w-full rounded-2xl border border-[#dbe4ef] bg-[#fbfcfe] px-4 text-[14px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent-border)]"
                             />
-                          </div>
+                          </label>
 
-                          <div className="mt-4 max-h-[420px] space-y-3 overflow-y-auto pr-1">
-                            {filteredSourceDocs.length > 0 ? (
-                              filteredSourceDocs.map((doc) => (
-                                <SourceDocCard
-                                  key={doc.id}
-                                  document={doc}
-                                  selected={doc.id === selectedSourceDocId}
-                                  stale={selectedTemplate?.sourceDocId === doc.id && doc.updatedAt > (selectedTemplate.sourceDocUpdatedAt ?? 0)}
-                                  onSelect={() => setSelectedSourceDocId(doc.id)}
-                                />
-                              ))
-                            ) : (
-                              <div className="rounded-[22px] border border-dashed border-[#dbe4ef] bg-[#fbfcfe] px-4 py-5 text-[12px] leading-5 text-ios-muted">
-                                검색 조건에 맞는 메모가 없습니다.
-                              </div>
-                            )}
-                          </div>
+                          <label className="block">
+                            <div className="mb-2 text-[12px] font-semibold text-ios-sub">새 페이지 제목</div>
+                            <input
+                              value={selectedTemplate.title}
+                              onChange={(event) =>
+                                updateTemplate(selectedTemplate.id, (template) => ({
+                                  ...template,
+                                  title: event.target.value,
+                                  titleHtml: plainTextToRichHtml(event.target.value),
+                                  updatedAt: Date.now(),
+                                }))
+                              }
+                              placeholder="새 페이지 제목"
+                              className="h-11 w-full rounded-2xl border border-[#dbe4ef] bg-[#fbfcfe] px-4 text-[14px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent-border)]"
+                            />
+                          </label>
 
-                          <div className="mt-4 flex flex-wrap gap-2">
-                            <button
-                              type="button"
-                              onClick={createTemplateFromSelectedMemo}
-                              disabled={!selectedSourceDoc || Boolean(selectedSourceDoc?.lock)}
-                              className="rounded-2xl bg-[color:var(--rnest-accent)] px-4 py-2.5 text-[12px] font-semibold text-white shadow-[0_16px_30px_rgba(167,139,250,0.22)] disabled:opacity-60"
+                          <label className="block md:col-span-2">
+                            <div className="mb-2 text-[12px] font-semibold text-ios-sub">설명</div>
+                            <textarea
+                              value={selectedTemplate.description}
+                              onChange={(event) =>
+                                updateTemplate(selectedTemplate.id, (template) => ({
+                                  ...template,
+                                  description: event.target.value,
+                                  updatedAt: Date.now(),
+                                }))
+                              }
+                              placeholder="템플릿 설명"
+                              className="min-h-[120px] w-full rounded-[22px] border border-[#dbe4ef] bg-[#fbfcfe] px-4 py-3 text-[14px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent-border)]"
+                            />
+                          </label>
+
+                          <label className="block">
+                            <div className="mb-2 text-[12px] font-semibold text-ios-sub">아이콘</div>
+                            <select
+                              value={selectedTemplate.icon}
+                              onChange={(event) =>
+                                updateTemplate(selectedTemplate.id, (template) => ({
+                                  ...template,
+                                  icon: event.target.value as RNestMemoTemplate["icon"],
+                                  updatedAt: Date.now(),
+                                }))
+                              }
+                              className="h-11 w-full rounded-2xl border border-[#dbe4ef] bg-[#fbfcfe] px-4 text-[14px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent-border)]"
                             >
-                              선택 메모로 새 템플릿 만들기
-                            </button>
-                            <button
-                              type="button"
-                              onClick={applySourceDocToTemplate}
-                              disabled={!selectedTemplate || !selectedSourceDoc || Boolean(selectedSourceDoc?.lock)}
-                              className="rounded-2xl border border-[#d9e2ee] bg-white px-4 py-2.5 text-[12px] font-semibold text-[#41556f] disabled:opacity-60"
+                              {memoIconOptions.map((icon) => (
+                                <option key={icon} value={icon}>
+                                  {icon}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+
+                          <label className="block">
+                            <div className="mb-2 text-[12px] font-semibold text-ios-sub">커버</div>
+                            <select
+                              value={selectedTemplate.coverStyle ?? ""}
+                              onChange={(event) =>
+                                updateTemplate(selectedTemplate.id, (template) => ({
+                                  ...template,
+                                  coverStyle: event.target.value || null,
+                                  updatedAt: Date.now(),
+                                }))
+                              }
+                              className="h-11 w-full rounded-2xl border border-[#dbe4ef] bg-[#fbfcfe] px-4 text-[14px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent-border)]"
                             >
-                              현재 템플릿 본문 덮어쓰기
-                            </button>
-                          </div>
-                        </section>
+                              <option value="">없음</option>
+                              {memoCoverOptions.map((cover) => (
+                                <option key={cover} value={cover}>
+                                  {cover}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
 
+                          <label className="block md:col-span-2">
+                            <div className="mb-2 text-[12px] font-semibold text-ios-sub">기본 태그</div>
+                            <input
+                              value={selectedTemplate.tags.join(", ")}
+                              onChange={(event) =>
+                                updateTemplate(selectedTemplate.id, (template) => ({
+                                  ...template,
+                                  tags: sanitizeNotebookTags(
+                                    event.target.value
+                                      .split(",")
+                                      .map((item) => item.trim())
+                                      .filter(Boolean)
+                                  ),
+                                  updatedAt: Date.now(),
+                                }))
+                              }
+                              placeholder="예: 회의, 발표, 프로젝트"
+                              className="h-11 w-full rounded-2xl border border-[#dbe4ef] bg-[#fbfcfe] px-4 text-[14px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent-border)]"
+                            />
+                          </label>
+                        </div>
+                      </section>
+
+                      <div className="grid gap-5 xl:grid-cols-2">
                         <section className="rounded-[30px] border border-white/80 bg-white/95 p-5 shadow-[0_16px_40px_rgba(17,41,75,0.06)]">
-                          <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">템플릿 설정</div>
-                          <div className="mt-4 grid gap-4 md:grid-cols-2">
-                            <label className="block">
-                              <div className="mb-2 text-[12px] font-semibold text-ios-sub">목록 이름</div>
-                              <input
-                                value={selectedTemplate.label}
-                                onChange={(event) =>
-                                  updateTemplate(selectedTemplate.id, (template) => ({
-                                    ...template,
-                                    label: event.target.value,
-                                    updatedAt: Date.now(),
-                                  }))
-                                }
-                                placeholder="템플릿 이름"
-                                className="h-11 w-full rounded-2xl border border-[#dbe4ef] bg-[#fbfcfe] px-4 text-[14px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent-border)]"
-                              />
-                            </label>
-
-                            <label className="block">
-                              <div className="mb-2 text-[12px] font-semibold text-ios-sub">새 페이지 제목</div>
-                              <input
-                                value={selectedTemplate.title}
-                                onChange={(event) =>
-                                  updateTemplate(selectedTemplate.id, (template) => ({
-                                    ...template,
-                                    title: event.target.value,
-                                    titleHtml: plainTextToRichHtml(event.target.value),
-                                    updatedAt: Date.now(),
-                                  }))
-                                }
-                                placeholder="새 페이지 제목"
-                                className="h-11 w-full rounded-2xl border border-[#dbe4ef] bg-[#fbfcfe] px-4 text-[14px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent-border)]"
-                              />
-                            </label>
-
-                            <label className="block md:col-span-2">
-                              <div className="mb-2 text-[12px] font-semibold text-ios-sub">설명</div>
-                              <textarea
-                                value={selectedTemplate.description}
-                                onChange={(event) =>
-                                  updateTemplate(selectedTemplate.id, (template) => ({
-                                    ...template,
-                                    description: event.target.value,
-                                    updatedAt: Date.now(),
-                                  }))
-                                }
-                                placeholder="템플릿 설명"
-                                className="min-h-[120px] w-full rounded-[22px] border border-[#dbe4ef] bg-[#fbfcfe] px-4 py-3 text-[14px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent-border)]"
-                              />
-                            </label>
-
-                            <label className="block">
-                              <div className="mb-2 text-[12px] font-semibold text-ios-sub">아이콘</div>
-                              <select
-                                value={selectedTemplate.icon}
-                                onChange={(event) =>
-                                  updateTemplate(selectedTemplate.id, (template) => ({
-                                    ...template,
-                                    icon: event.target.value as RNestMemoTemplate["icon"],
-                                    updatedAt: Date.now(),
-                                  }))
-                                }
-                                className="h-11 w-full rounded-2xl border border-[#dbe4ef] bg-[#fbfcfe] px-4 text-[14px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent-border)]"
-                              >
-                                {memoIconOptions.map((icon) => (
-                                  <option key={icon} value={icon}>
-                                    {icon}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-
-                            <label className="block">
-                              <div className="mb-2 text-[12px] font-semibold text-ios-sub">커버</div>
-                              <select
-                                value={selectedTemplate.coverStyle ?? ""}
-                                onChange={(event) =>
-                                  updateTemplate(selectedTemplate.id, (template) => ({
-                                    ...template,
-                                    coverStyle: event.target.value || null,
-                                    updatedAt: Date.now(),
-                                  }))
-                                }
-                                className="h-11 w-full rounded-2xl border border-[#dbe4ef] bg-[#fbfcfe] px-4 text-[14px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent-border)]"
-                              >
-                                <option value="">없음</option>
-                                {memoCoverOptions.map((cover) => (
-                                  <option key={cover} value={cover}>
-                                    {cover}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-
-                            <label className="block md:col-span-2">
-                              <div className="mb-2 text-[12px] font-semibold text-ios-sub">기본 태그</div>
-                              <input
-                                value={selectedTemplate.tags.join(", ")}
-                                onChange={(event) =>
-                                  updateTemplate(selectedTemplate.id, (template) => ({
-                                    ...template,
-                                    tags: sanitizeNotebookTags(
-                                      event.target.value
-                                        .split(",")
-                                        .map((item) => item.trim())
-                                        .filter(Boolean)
-                                    ),
-                                    updatedAt: Date.now(),
-                                  }))
-                                }
-                                placeholder="예: 회의, 발표, 프로젝트"
-                                className="h-11 w-full rounded-2xl border border-[#dbe4ef] bg-[#fbfcfe] px-4 text-[14px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent-border)]"
-                              />
-                            </label>
-                          </div>
-                        </section>
-                      </div>
-
-                      <div className="min-w-0 space-y-5">
-                        <section className="rounded-[30px] border border-white/80 bg-white/95 p-5 shadow-[0_16px_40px_rgba(17,41,75,0.06)]">
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">미리보기</div>
-                            {defaultTemplateIdSet.has(selectedTemplate.id) ? (
-                              <Badge variant="secondary" className="border-transparent bg-[#eef3fa] text-[11px] text-[#5c6f86]">
-                                기본 템플릿
-                              </Badge>
-                            ) : (
-                              <Badge variant="secondary" className="border-transparent bg-[rgba(167,139,250,0.12)] text-[11px] text-[color:var(--rnest-accent)]">
-                                운영 템플릿
-                              </Badge>
-                            )}
-                          </div>
+                          <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">미리보기</div>
 
                           <div className="mt-4 overflow-hidden rounded-[26px] border border-[#e7edf5] bg-[linear-gradient(180deg,#FBFCFE_0%,#FFFFFF_100%)] p-5">
                             <div className="inline-flex h-12 w-12 items-center justify-center rounded-[18px] bg-[color:var(--rnest-accent-soft)] text-[15px] font-bold uppercase text-[color:var(--rnest-accent)]">
@@ -980,62 +1010,64 @@ export function SettingsAdminNotebookTemplatesPage() {
                           </div>
                         </section>
 
-                        <section className="rounded-[30px] border border-white/80 bg-white/95 p-5 shadow-[0_16px_40px_rgba(17,41,75,0.06)]">
-                          <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">원본 메모 연결 상태</div>
+                        <section className="space-y-5">
+                          <section className="rounded-[30px] border border-white/80 bg-white/95 p-5 shadow-[0_16px_40px_rgba(17,41,75,0.06)]">
+                            <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">원본 메모 연결 상태</div>
 
-                          {selectedTemplate.sourceDocId ? (
-                            <div className="mt-4 rounded-[22px] border border-[#e7edf5] bg-[#fbfcfe] p-4">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <div className="text-[13px] font-semibold text-ios-text">
-                                  {selectedTemplate.sourceDocTitle || "연결된 메모"}
+                            {selectedTemplate.sourceDocId ? (
+                              <div className="mt-4 rounded-[22px] border border-[#e7edf5] bg-[#fbfcfe] p-4">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <div className="text-[13px] font-semibold text-ios-text">
+                                    {selectedTemplate.sourceDocTitle || "연결된 메모"}
+                                  </div>
+                                  {selectedTemplateSourceDoc ? (
+                                    <Badge variant="secondary" className="border-transparent bg-[#eef3fa] text-[11px] text-[#5c6f86]">
+                                      연결됨
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="secondary" className="border-transparent bg-[#f4e8e8] text-[11px] text-[#a24a4a]">
+                                      찾을 수 없음
+                                    </Badge>
+                                  )}
+                                  {sourceNeedsSync ? (
+                                    <Badge variant="secondary" className="border-transparent bg-[#fff4d8] text-[11px] text-[#9a5a00]">
+                                      원본 업데이트됨
+                                    </Badge>
+                                  ) : null}
                                 </div>
-                                {selectedTemplateSourceDoc ? (
-                                  <Badge variant="secondary" className="border-transparent bg-[#eef3fa] text-[11px] text-[#5c6f86]">
-                                    연결됨
-                                  </Badge>
-                                ) : (
-                                  <Badge variant="secondary" className="border-transparent bg-[#f4e8e8] text-[11px] text-[#a24a4a]">
-                                    찾을 수 없음
-                                  </Badge>
-                                )}
-                                {sourceNeedsSync ? (
-                                  <Badge variant="secondary" className="border-transparent bg-[#fff4d8] text-[11px] text-[#9a5a00]">
-                                    원본 업데이트됨
-                                  </Badge>
-                                ) : null}
+                                <div className="mt-2 text-[12px] leading-5 text-ios-sub">
+                                  마지막 연결 시점:{" "}
+                                  {selectedTemplate.sourceDocUpdatedAt
+                                    ? formatNotebookDateTime(selectedTemplate.sourceDocUpdatedAt)
+                                    : "기록 없음"}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={syncTemplateFromLinkedSource}
+                                  disabled={!selectedTemplateSourceDoc || Boolean(selectedTemplateSourceDoc?.lock)}
+                                  className="mt-4 inline-flex min-h-11 items-center justify-center rounded-2xl border border-[#d9e2ee] bg-white px-4 py-2.5 text-[12px] font-semibold text-[#41556f] disabled:opacity-60"
+                                >
+                                  연결된 원본 메모 다시 반영
+                                </button>
                               </div>
-                              <div className="mt-2 text-[12px] leading-5 text-ios-sub">
-                                마지막 연결 시점:{" "}
-                                {selectedTemplate.sourceDocUpdatedAt
-                                  ? formatNotebookDateTime(selectedTemplate.sourceDocUpdatedAt)
-                                  : "기록 없음"}
+                            ) : (
+                              <div className="mt-4 rounded-[22px] border border-dashed border-[#dbe4ef] bg-[#fbfcfe] px-4 py-5 text-[12px] leading-5 text-ios-muted">
+                                아직 원본 메모와 연결되지 않았습니다. 위 메모 목록에서 선택한 뒤 새 템플릿을 만들거나 현재 템플릿 본문을 덮어쓰면 연결 정보가 저장됩니다.
                               </div>
-                              <button
-                                type="button"
-                                onClick={syncTemplateFromLinkedSource}
-                                disabled={!selectedTemplateSourceDoc || Boolean(selectedTemplateSourceDoc?.lock)}
-                                className="mt-4 rounded-2xl border border-[#d9e2ee] bg-white px-4 py-2.5 text-[12px] font-semibold text-[#41556f] disabled:opacity-60"
-                              >
-                                연결된 원본 메모 다시 반영
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="mt-4 rounded-[22px] border border-dashed border-[#dbe4ef] bg-[#fbfcfe] px-4 py-5 text-[12px] leading-5 text-ios-muted">
-                              아직 원본 메모와 연결되지 않았습니다. 왼쪽 메모 목록에서 선택한 뒤 새 템플릿을 만들거나 현재 템플릿 본문을 덮어쓰면 연결 정보가 저장됩니다.
-                            </div>
-                          )}
-                        </section>
+                            )}
+                          </section>
 
-                        <section className="rounded-[30px] border border-white/80 bg-white/95 p-5 shadow-[0_16px_40px_rgba(17,41,75,0.06)]">
-                          <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">운영 메모</div>
-                          <div className="mt-3 space-y-2 text-[12px] leading-6 text-ios-sub">
-                            <p>템플릿 본문은 메모에서 가져온 블록 구조를 사용합니다.</p>
-                            <p>잠금 메모는 본문을 읽을 수 없어 템플릿 원본으로 쓸 수 없습니다.</p>
-                            <p>이미지와 파일 첨부 블록은 템플릿 저장 시 자리표시 텍스트로 정리됩니다.</p>
-                          </div>
+                          <section className="rounded-[30px] border border-white/80 bg-white/95 p-5 shadow-[0_16px_40px_rgba(17,41,75,0.06)]">
+                            <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">운영 메모</div>
+                            <div className="mt-3 space-y-2 text-[12px] leading-6 text-ios-sub">
+                              <p>템플릿 본문은 메모에서 가져온 블록 구조를 사용합니다.</p>
+                              <p>잠금 메모는 본문을 읽을 수 없어 템플릿 원본으로 쓸 수 없습니다.</p>
+                              <p>이미지와 파일 첨부 블록은 템플릿 저장 시 자리표시 텍스트로 정리됩니다.</p>
+                            </div>
+                          </section>
                         </section>
                       </div>
-                    </div>
+                    </>
                   ) : (
                     <div className="rounded-[28px] border border-dashed border-[#dbe4ef] bg-white/92 px-5 py-6 text-[13px] text-ios-sub">
                       왼쪽 목록에서 템플릿을 선택하거나 새 템플릿을 추가하세요.

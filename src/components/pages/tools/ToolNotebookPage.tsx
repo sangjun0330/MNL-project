@@ -5387,91 +5387,121 @@ export function ToolNotebookPage() {
         </div>
 
         <Dialog open={templateDialogOpen} onOpenChange={setTemplateDialogOpen}>
-          <DialogContent className="rounded-[30px] border-0 bg-white p-0 shadow-[0_30px_80px_rgba(15,23,42,0.18)] sm:max-w-[760px]">
-            <div className="rounded-[30px] bg-[linear-gradient(180deg,rgba(250,245,255,0.98)_0%,rgba(255,255,255,0.98)_100%)] p-6">
-              <DialogHeader>
-                <DialogTitle className="text-[24px] tracking-[-0.03em] text-ios-text">새 페이지 템플릿 선택</DialogTitle>
-                <DialogDescription className="text-[13px] leading-relaxed text-ios-sub">
-                  현재 운영 중인 템플릿 목록에서 시작할 메모 형식을 선택하세요.
-                </DialogDescription>
-              </DialogHeader>
+          <DialogContent className="[&>button]:hidden w-[calc(100vw-16px)] max-w-[760px] overflow-hidden rounded-[32px] border-0 bg-white p-0 shadow-[0_30px_80px_rgba(15,23,42,0.18)] sm:w-full">
+            <div className="flex max-h-[calc(100dvh-16px)] flex-col rounded-[32px] bg-[linear-gradient(180deg,rgba(250,245,255,0.98)_0%,rgba(255,255,255,0.98)_100%)]">
+              <div className="border-b border-white/80 bg-[rgba(255,255,255,0.78)] px-5 pb-4 pt-5 backdrop-blur sm:px-6 sm:pt-6">
+                <div className="flex items-start justify-between gap-3">
+                  <DialogHeader className="min-w-0 space-y-2 text-left">
+                    <DialogTitle className="text-[22px] tracking-[-0.03em] text-ios-text sm:text-[24px]">
+                      새 페이지 템플릿 선택
+                    </DialogTitle>
+                    <DialogDescription className="text-[13px] leading-relaxed text-ios-sub">
+                      현재 운영 중인 템플릿 목록에서 시작할 메모 형식을 선택하세요.
+                    </DialogDescription>
+                  </DialogHeader>
 
-              <div className="mt-5 flex justify-end">
-                <button
-                  type="button"
-                  onClick={openPersonalTemplateCreator}
-                  className="inline-flex h-10 items-center justify-center rounded-full bg-[color:var(--rnest-accent)] px-4 text-[12px] font-semibold text-white shadow-[0_16px_36px_rgba(167,139,250,0.22)] transition hover:opacity-95"
-                >
-                  + 템플릿 만들기
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => setTemplateDialogOpen(false)}
+                    className="inline-flex h-10 shrink-0 items-center justify-center rounded-full border border-[#dde6f0] bg-white px-4 text-[12px] font-semibold text-[#49607b] shadow-sm transition hover:bg-[#f8fbff]"
+                  >
+                    닫기
+                  </button>
+                </div>
+
+                <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="inline-flex items-center gap-2 rounded-full border border-[#e4ebf4] bg-white/92 px-3 py-2 text-[12px] font-medium text-[#536b86]">
+                    <span className="inline-flex h-2 w-2 rounded-full bg-[color:var(--rnest-accent)]" />
+                    사용 가능한 템플릿 {renderTemplates.length}개
+                  </div>
+                  <button
+                    type="button"
+                    onClick={openPersonalTemplateCreator}
+                    className="inline-flex h-11 items-center justify-center rounded-full bg-[color:var(--rnest-accent)] px-5 text-[13px] font-semibold text-white shadow-[0_18px_42px_rgba(167,139,250,0.22)] transition hover:-translate-y-[1px] hover:opacity-95"
+                  >
+                    + 템플릿 만들기
+                  </button>
+                </div>
               </div>
 
-              {templatesLoading ? <div className="mt-4 text-[12px] text-ios-muted">템플릿을 불러오는 중...</div> : null}
-              {templateError ? <div className="mt-4 text-[12px] text-amber-600">{templateError}</div> : null}
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-5 pt-4 [-webkit-overflow-scrolling:touch] sm:px-6 sm:pb-6">
+                {templatesLoading ? (
+                  <div className="rounded-[20px] border border-[#e7edf5] bg-white/85 px-4 py-3 text-[12px] text-ios-muted">
+                    템플릿을 불러오는 중...
+                  </div>
+                ) : null}
 
-              <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                {renderTemplates.map((template) => (
-                  <div key={template.id} className="relative">
-                    <button
-                      type="button"
-                      onClick={() => createMemoFromTemplateId(template.id)}
-                      className={cn(
-                        "w-full rounded-[24px] border border-[#e7edf5] bg-white/92 p-4 text-left shadow-[0_12px_36px_rgba(17,41,75,0.05)] transition hover:-translate-y-[1px] hover:border-[color:var(--rnest-accent-border)] hover:bg-[color:var(--rnest-accent-soft)]",
-                        personalTemplateIdSet.has(template.id) && "pr-14"
-                      )}
-                    >
-                      <div className="flex items-start gap-3">
-                        <span className="inline-flex h-11 w-11 items-center justify-center rounded-[18px] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]">
-                          {renderMemoIcon(template.icon, "h-5 w-5")}
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <div className="text-[15px] font-semibold text-ios-text">{template.label}</div>
-                            {personalTemplateIdSet.has(template.id) ? (
-                              <span className="inline-flex rounded-full bg-[rgba(167,139,250,0.14)] px-2 py-0.5 text-[10px] font-semibold text-[color:var(--rnest-accent)]">
-                                내 템플릿
-                              </span>
-                            ) : (
-                              <span className="inline-flex rounded-full bg-[#eef3fa] px-2 py-0.5 text-[10px] font-semibold text-[#5c6f86]">
-                                기본
-                              </span>
-                            )}
-                          </div>
-                          <div className="mt-1 text-[12px] leading-5 text-ios-sub">{template.description}</div>
-                        </div>
-                      </div>
+                {templateError ? (
+                  <div className="mt-3 rounded-[20px] border border-[#f6dcb3] bg-[#fff7ea] px-4 py-3 text-[12px] leading-5 text-[#b26a11]">
+                    {templateError}
+                  </div>
+                ) : null}
 
-                      <div className="mt-4 rounded-[18px] border border-[#edf1f6] bg-[#fbfcfe] px-3 py-2.5 text-[12px] leading-5 text-ios-sub">
-                        {memoTemplateToPreviewText(template)}
-                      </div>
-                    </button>
-
-                    {personalTemplateIdSet.has(template.id) ? (
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  {renderTemplates.map((template) => (
+                    <div key={template.id} className="relative">
                       <button
                         type="button"
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          removePersonalTemplate(template.id)
-                        }}
-                        aria-label={`${template.label} 템플릿 삭제`}
-                        className="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#f0d8d8] bg-white text-[#c15b5b] shadow-sm transition hover:bg-[#fff4f4]"
+                        onClick={() => createMemoFromTemplateId(template.id)}
+                        className={cn(
+                          "w-full rounded-[26px] border border-[#e7edf5] bg-white/96 p-4 text-left shadow-[0_14px_34px_rgba(17,41,75,0.05)] transition hover:-translate-y-[1px] hover:border-[color:var(--rnest-accent-border)] hover:bg-[color:var(--rnest-accent-soft)]",
+                          "touch-manipulation",
+                          personalTemplateIdSet.has(template.id) && "pr-14"
+                        )}
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
+                        <div className="flex items-start gap-3">
+                          <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-[18px] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]">
+                            {renderMemoIcon(template.icon, "h-5 w-5")}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="text-[16px] font-semibold text-ios-text">{template.label}</div>
+                              {personalTemplateIdSet.has(template.id) ? (
+                                <span className="inline-flex rounded-full bg-[rgba(167,139,250,0.14)] px-2 py-0.5 text-[10px] font-semibold text-[color:var(--rnest-accent)]">
+                                  내 템플릿
+                                </span>
+                              ) : (
+                                <span className="inline-flex rounded-full bg-[#eef3fa] px-2 py-0.5 text-[10px] font-semibold text-[#5c6f86]">
+                                  기본
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-1 text-[13px] leading-6 text-ios-sub">{template.description}</div>
+                          </div>
+                        </div>
 
-              <DialogFooter className="mt-6 gap-2 sm:justify-end">
-                <button
-                  type="button"
-                  onClick={() => setTemplateDialogOpen(false)}
-                  className="inline-flex h-11 items-center justify-center rounded-full border border-gray-200 px-4 text-[13px] font-medium text-ios-sub transition-colors hover:bg-gray-50"
-                >
-                  닫기
-                </button>
-              </DialogFooter>
+                        <div className="mt-4 rounded-[18px] border border-[#edf1f6] bg-[#fbfcfe] px-3 py-3 text-[12px] leading-5 text-ios-sub">
+                          {memoTemplateToPreviewText(template)}
+                        </div>
+                      </button>
+
+                      {personalTemplateIdSet.has(template.id) ? (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            removePersonalTemplate(template.id)
+                          }}
+                          aria-label={`${template.label} 템플릿 삭제`}
+                          className="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#f0d8d8] bg-white text-[#c15b5b] shadow-sm transition hover:bg-[#fff4f4]"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+
+                <DialogFooter className="mt-5 gap-2 sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setTemplateDialogOpen(false)}
+                    className="inline-flex h-11 items-center justify-center rounded-full border border-gray-200 px-4 text-[13px] font-medium text-ios-sub transition-colors hover:bg-gray-50"
+                  >
+                    닫기
+                  </button>
+                </DialogFooter>
+              </div>
             </div>
           </DialogContent>
         </Dialog>
@@ -5485,103 +5515,121 @@ export function ToolNotebookPage() {
             }
           }}
         >
-          <DialogContent className="rounded-[28px] border-0 bg-white p-0 shadow-[0_30px_80px_rgba(15,23,42,0.18)] sm:max-w-[520px]">
-            <div className="rounded-[28px] bg-[linear-gradient(180deg,rgba(250,245,255,0.98)_0%,rgba(255,255,255,0.98)_100%)] p-6">
-              <DialogHeader>
-                <DialogTitle className="text-[22px] tracking-[-0.02em] text-ios-text">내 템플릿 만들기</DialogTitle>
-                <DialogDescription className="text-[13px] leading-relaxed text-ios-sub">
-                  직접 만든 템플릿은 템플릿 목록의 가장 앞에 표시되고, 메모 동기화와 함께 내 기기들에 반영됩니다.
-                </DialogDescription>
-              </DialogHeader>
+          <DialogContent className="[&>button]:hidden w-[calc(100vw-16px)] max-w-[520px] overflow-hidden rounded-[30px] border-0 bg-white p-0 shadow-[0_30px_80px_rgba(15,23,42,0.18)] sm:w-full">
+            <div className="flex max-h-[calc(100dvh-16px)] flex-col rounded-[30px] bg-[linear-gradient(180deg,rgba(250,245,255,0.98)_0%,rgba(255,255,255,0.98)_100%)]">
+              <div className="border-b border-white/80 bg-[rgba(255,255,255,0.76)] px-5 pb-4 pt-5 backdrop-blur sm:px-6 sm:pt-6">
+                <div className="flex items-start justify-between gap-3">
+                  <DialogHeader className="min-w-0 space-y-2 text-left">
+                    <DialogTitle className="text-[22px] tracking-[-0.02em] text-ios-text">내 템플릿 만들기</DialogTitle>
+                    <DialogDescription className="text-[13px] leading-relaxed text-ios-sub">
+                      직접 만든 템플릿은 목록의 가장 앞에 표시되고, 메모 동기화와 함께 내 기기들에 반영됩니다.
+                    </DialogDescription>
+                  </DialogHeader>
 
-              <div className="mt-5 space-y-4">
-                <label className="block">
-                  <div className="mb-2 text-[12px] font-semibold text-ios-sub">템플릿 이름</div>
-                  <input
-                    type="text"
-                    value={personalTemplateName}
-                    onChange={(event) => setPersonalTemplateName(event.target.value)}
-                    placeholder="예: 내 발표 노트"
-                    className={cn(
-                      "h-11 w-full rounded-2xl border border-gray-200 bg-white px-4 text-ios-text outline-none focus:border-[color:var(--rnest-accent-border)] focus:ring-2 focus:ring-[color:var(--rnest-accent-soft)]",
-                      mobileSafeInputClass
-                    )}
-                  />
-                </label>
-
-                <label className="block">
-                  <div className="mb-2 text-[12px] font-semibold text-ios-sub">설명</div>
-                  <textarea
-                    value={personalTemplateDescription}
-                    onChange={(event) => setPersonalTemplateDescription(event.target.value)}
-                    placeholder="템플릿 설명을 입력하세요"
-                    className={cn(
-                      "min-h-[92px] w-full rounded-[22px] border border-gray-200 bg-white px-4 py-3 text-ios-text outline-none focus:border-[color:var(--rnest-accent-border)] focus:ring-2 focus:ring-[color:var(--rnest-accent-soft)]",
-                      mobileSafeInputClass
-                    )}
-                  />
-                </label>
-
-                <div>
-                  <div className="mb-2 text-[12px] font-semibold text-ios-sub">시작 방식</div>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <button
-                      type="button"
-                      onClick={() => setPersonalTemplateSource("current")}
-                      disabled={!canUseActiveMemoAsPersonalTemplate}
-                      className={cn(
-                        "rounded-[20px] border px-4 py-3 text-left transition",
-                        personalTemplateSource === "current"
-                          ? "border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)]"
-                          : "border-gray-200 bg-white",
-                        !canUseActiveMemoAsPersonalTemplate && "cursor-not-allowed opacity-50"
-                      )}
-                    >
-                      <div className="text-[13px] font-semibold text-ios-text">현재 페이지 기반</div>
-                      <div className="mt-1 text-[12px] leading-5 text-ios-sub">
-                        {canUseActiveMemoAsPersonalTemplate
-                          ? `${getMemoDocumentTitle(activeMemo ?? { title: "", titleHtml: "" }) || "현재 메모"} 내용을 템플릿으로 저장`
-                          : "잠금 메모이거나 선택된 페이지가 없어 사용할 수 없습니다"}
-                      </div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setPersonalTemplateSource("blank")}
-                      className={cn(
-                        "rounded-[20px] border px-4 py-3 text-left transition",
-                        personalTemplateSource === "blank"
-                          ? "border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)]"
-                          : "border-gray-200 bg-white"
-                      )}
-                    >
-                      <div className="text-[13px] font-semibold text-ios-text">빈 템플릿 기반</div>
-                      <div className="mt-1 text-[12px] leading-5 text-ios-sub">
-                        기본 빈 메모를 시작점으로 두고 제목과 설명만 먼저 저장합니다.
-                      </div>
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPersonalTemplateDialogOpen(false)}
+                    className="inline-flex h-10 shrink-0 items-center justify-center rounded-full border border-[#dde6f0] bg-white px-4 text-[12px] font-semibold text-[#49607b] shadow-sm transition hover:bg-[#f8fbff]"
+                  >
+                    닫기
+                  </button>
                 </div>
-
-                {personalTemplateCreateError ? <div className="text-[12px] text-red-500">{personalTemplateCreateError}</div> : null}
               </div>
 
-              <DialogFooter className="mt-6 gap-2 sm:justify-end">
-                <button
-                  type="button"
-                  onClick={() => setPersonalTemplateDialogOpen(false)}
-                  className="inline-flex h-11 items-center justify-center rounded-full border border-gray-200 px-4 text-[13px] font-medium text-ios-sub transition-colors hover:bg-gray-50"
-                >
-                  취소
-                </button>
-                <button
-                  type="button"
-                  onClick={createPersonalTemplate}
-                  className="inline-flex h-11 items-center justify-center rounded-full bg-[color:var(--rnest-accent)] px-4 text-[13px] font-semibold text-white shadow-[0_16px_36px_rgba(167,139,250,0.22)]"
-                >
-                  템플릿 만들기
-                </button>
-              </DialogFooter>
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-5 pt-4 [-webkit-overflow-scrolling:touch] sm:px-6 sm:pb-6">
+                <div className="space-y-4">
+                  <label className="block">
+                    <div className="mb-2 text-[12px] font-semibold text-ios-sub">템플릿 이름</div>
+                    <input
+                      type="text"
+                      value={personalTemplateName}
+                      onChange={(event) => setPersonalTemplateName(event.target.value)}
+                      placeholder="예: 내 발표 노트"
+                      className={cn(
+                        "h-11 w-full rounded-2xl border border-gray-200 bg-white px-4 text-ios-text outline-none focus:border-[color:var(--rnest-accent-border)] focus:ring-2 focus:ring-[color:var(--rnest-accent-soft)]",
+                        mobileSafeInputClass
+                      )}
+                    />
+                  </label>
+
+                  <label className="block">
+                    <div className="mb-2 text-[12px] font-semibold text-ios-sub">설명</div>
+                    <textarea
+                      value={personalTemplateDescription}
+                      onChange={(event) => setPersonalTemplateDescription(event.target.value)}
+                      placeholder="템플릿 설명을 입력하세요"
+                      className={cn(
+                        "min-h-[108px] w-full rounded-[22px] border border-gray-200 bg-white px-4 py-3 text-ios-text outline-none focus:border-[color:var(--rnest-accent-border)] focus:ring-2 focus:ring-[color:var(--rnest-accent-soft)]",
+                        mobileSafeInputClass
+                      )}
+                    />
+                  </label>
+
+                  <div>
+                    <div className="mb-2 text-[12px] font-semibold text-ios-sub">시작 방식</div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        onClick={() => setPersonalTemplateSource("current")}
+                        disabled={!canUseActiveMemoAsPersonalTemplate}
+                        className={cn(
+                          "rounded-[20px] border px-4 py-3 text-left transition",
+                          personalTemplateSource === "current"
+                            ? "border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)]"
+                            : "border-gray-200 bg-white",
+                          !canUseActiveMemoAsPersonalTemplate && "cursor-not-allowed opacity-50"
+                        )}
+                      >
+                        <div className="text-[13px] font-semibold text-ios-text">현재 페이지 기반</div>
+                        <div className="mt-1 text-[12px] leading-5 text-ios-sub">
+                          {canUseActiveMemoAsPersonalTemplate
+                            ? `${getMemoDocumentTitle(activeMemo ?? { title: "", titleHtml: "" }) || "현재 메모"} 내용을 템플릿으로 저장`
+                            : "잠금 메모이거나 선택된 페이지가 없어 사용할 수 없습니다"}
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setPersonalTemplateSource("blank")}
+                        className={cn(
+                          "rounded-[20px] border px-4 py-3 text-left transition",
+                          personalTemplateSource === "blank"
+                            ? "border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)]"
+                            : "border-gray-200 bg-white"
+                        )}
+                      >
+                        <div className="text-[13px] font-semibold text-ios-text">빈 템플릿 기반</div>
+                        <div className="mt-1 text-[12px] leading-5 text-ios-sub">
+                          기본 빈 메모를 시작점으로 두고 제목과 설명만 먼저 저장합니다.
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {personalTemplateCreateError ? (
+                    <div className="rounded-[18px] border border-[#f0d8d8] bg-[#fff5f5] px-4 py-3 text-[12px] leading-5 text-[#b04a4a]">
+                      {personalTemplateCreateError}
+                    </div>
+                  ) : null}
+                </div>
+
+                <DialogFooter className="mt-6 gap-2 sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setPersonalTemplateDialogOpen(false)}
+                    className="inline-flex h-11 items-center justify-center rounded-full border border-gray-200 px-4 text-[13px] font-medium text-ios-sub transition-colors hover:bg-gray-50"
+                  >
+                    취소
+                  </button>
+                  <button
+                    type="button"
+                    onClick={createPersonalTemplate}
+                    className="inline-flex h-11 items-center justify-center rounded-full bg-[color:var(--rnest-accent)] px-4 text-[13px] font-semibold text-white shadow-[0_16px_36px_rgba(167,139,250,0.22)]"
+                  >
+                    템플릿 만들기
+                  </button>
+                </DialogFooter>
+              </div>
             </div>
           </DialogContent>
         </Dialog>

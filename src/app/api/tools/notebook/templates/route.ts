@@ -1,5 +1,5 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity"
-import { defaultMemoTemplates, sanitizeMemoTemplate } from "@/lib/notebook"
+import { defaultMemoTemplates, sanitizeMemoTemplate } from "@/lib/server/notebookTemplateRuntime"
 
 export const runtime = "edge"
 export const dynamic = "force-dynamic"
