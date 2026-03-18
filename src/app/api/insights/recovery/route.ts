@@ -586,23 +586,64 @@ async function handleRecovery(
     if (subscription && !subscription.entitlements?.recoveryPlannerAI) {
       return bad(402, "paid_plan_required_ai_recovery");
     }
-    const aiRecoveryModel = getAIRecoveryModelForTier(subscription?.tier ?? "pro");
 
-    // ── 2. Supabase에서 사용자 데이터 로드 시도 ──
+    // ── 2. Supabase에서 사용자 데이터 로드 ──
     const row = await safeLoadUserState(userId);
     if (!row?.payload) {
+      if (cacheOnly) return jsonNoStore({ ok: true, data: null } satisfies AIRecoveryApiSuccess);
       return bad(404, "state_not_found");
     }
 
+    const today = todayISO();
+
+    // ── FAST PATH: cacheOnly는 DB 조회만 하고 CPU 연산 완전 건너뜀 ──
+    // computeVitalsRange(historyStart→today)는 수백 날짜를 동기 처리하므로
+    // Cloudflare Workers CPU 시간 제한(10~30ms)을 초과하면 try-catch 밖에서
+    // Worker가 강제 종료되어 500이 반환됨. cacheOnly 요청은 OpenAI 호출이
+    // 불필요하므로 캐시만 조회하고 즉시 반환한다.
+    if (cacheOnly) {
+      const rawPayload = isRecord(row.payload) ? (row.payload as Record<string, unknown>) : {};
+      const rawLang = isRecord(rawPayload.settings)
+        ? (rawPayload.settings as Record<string, unknown>).language
+        : null;
+      const lang = (langHint ??
+        (rawLang === "ko" || rawLang === "en" ? (rawLang as Language) : null) ??
+        "ko") as Language;
+
+      const aiContent = await safeLoadAIContent(userId);
+      if (aiContent && aiContent.dateISO === today) {
+        const cached = readRecoveryPhasePayload(aiContent.data, today, lang, phase);
+        if (cached) return jsonNoStore({ ok: true, data: cached } satisfies AIRecoveryApiSuccess);
+        if (phase === "start") {
+          const legacy = readAIContentVariants(aiContent.data, today)[lang] ?? null;
+          if (legacy?.engine === "openai") return jsonNoStore({ ok: true, data: legacy } satisfies AIRecoveryApiSuccess);
+        }
+      }
+      if (phase === "start") {
+        const legacyCached = readServerCachedAI(row.payload, today, lang);
+        if (legacyCached) {
+          void safeSaveAIContent(userId, today, legacyCached.language, {
+            dateISO: today,
+            generatedAt: Date.now(),
+            recoveryPhaseVariants: { [legacyCached.language]: { start: legacyCached } },
+            variants: { ko: legacyCached },
+          } as Json);
+          return jsonNoStore({ ok: true, data: legacyCached } satisfies AIRecoveryApiSuccess);
+        }
+      }
+      return jsonNoStore({ ok: true, data: null } satisfies AIRecoveryApiSuccess);
+    }
+
+    // ── FULL PATH: non-cacheOnly (POST / forceGenerate) 전용 ──
+    const aiRecoveryModel = getAIRecoveryModelForTier(subscription?.tier ?? "pro");
     const state = normalizePayloadToState(row.payload, null);
     const lang = (langHint ?? state.settings.language ?? "ko") as Language;
-    const today = todayISO();
     const recordedDays = countHealthRecordedDays({ bio: state.bio, emotions: state.emotions });
     if (recordedDays < 3) {
       return bad(403, "insights_locked_min_3_days");
     }
     const readiness = getAfterWorkReadiness(state, today);
-    if (phase === "after_work" && !readiness.ready && !cacheOnly) {
+    if (phase === "after_work" && !readiness.ready) {
       return bad(409, `after_work_inputs_required:${buildAfterWorkMissingLabels(readiness.recordedLabels).slice(0, 3).join(",")}`);
     }
     const phaseState = buildRecoveryPhaseState(state, today, phase);
@@ -640,7 +681,10 @@ async function handleRecovery(
         }
       : null;
     const recordedDates = collectRecordedDates(phaseState);
-    const historyStart = recordedDates[0] ?? today;
+    // 최대 90일만 처리: 전체 기록 처리 시 Cloudflare Workers CPU 시간 제한 초과
+    const ninetyDaysAgo = toISODate(addDays(fromISODate(today), -90));
+    const historyStart =
+      recordedDates[0] && recordedDates[0] < ninetyDaysAgo ? ninetyDaysAgo : (recordedDates[0] ?? today);
     const historyDateSet = new Set(recordedDates);
     const allVitalsRaw = computeVitalsRange({
       state: phaseState,
