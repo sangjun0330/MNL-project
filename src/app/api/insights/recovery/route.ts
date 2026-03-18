@@ -958,10 +958,7 @@ async function handleRecovery(
     } catch {
       // Ignore logging failure.
     }
-    if (cacheOnly) {
-      return jsonNoStore({ ok: true, data: null } satisfies AIRecoveryApiSuccess);
-    }
-    return bad(500, typeof err?.message === "string" && err.message.trim() ? err.message.trim() : "openai_generation_failed");
+    return jsonNoStore({ ok: true, data: null } satisfies AIRecoveryApiSuccess);
   }
 }
 
@@ -993,6 +990,6 @@ export async function POST(req: NextRequest) {
     return await handleRecovery(req, { allowGenerate: true, forceGenerate, phase: phase ?? undefined });
   } catch (err: any) {
     console.error("[Recovery POST] unhandled", err?.message ?? err);
-    return bad(500, "recovery_unhandled_error");
+    return jsonNoStore({ ok: true, data: null } satisfies AIRecoveryApiSuccess);
   }
 }
