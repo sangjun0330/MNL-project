@@ -142,7 +142,7 @@ export type PersonalizationAccuracy = {
  *
  * 참고:
  * - shift(근무표)는 schedule이 있을 때만 커버리지 증가
- * - menstrual은 (주기 설정이 켜져 있고 시작일이 있으면) 기간 전체 커버리지 1로 간주
+ * - menstrual은 설정만으로 100%로 보지 않고, 관측 여부 + posterior confidence를 함께 반영
  */
 export function computePersonalizationAccuracy(args: {
   state: AppState;
@@ -178,12 +178,13 @@ export function computePersonalizationAccuracy(args: {
     menstrualC = 0,
     moodC = 0;
 
-  const menstrualOn = Boolean(state.settings?.menstrual?.enabled && state.settings?.menstrual?.lastPeriodStart);
+  const vitalByISO = new Map(vitals.map((v) => [v.dateISO, v]));
 
   for (const iso of dates) {
     const b = (state.bio ?? {})[iso];
     const e = (state.emotions ?? {})[iso];
     const s = (state.schedule ?? {})[iso];
+    const vital = vitalByISO.get(iso);
 
     if (s) shiftC += 1;
 
@@ -192,9 +193,17 @@ export function computePersonalizationAccuracy(args: {
     if (b && b.activity !== null && b.activity !== undefined) activityC += 1;
     if (b && b.caffeineMg !== null && b.caffeineMg !== undefined) caffeineC += 1;
 
-    // menstrual: 설정 기반이면 전체 1로 처리, 아니면 symptomSeverity 입력 기반
-    if (!menstrualOn) {
-      if (b && b.symptomSeverity !== null && b.symptomSeverity !== undefined) menstrualC += 1;
+    if (vital?.menstrual?.enabled) {
+      const direct =
+        vital.menstrual.isObservedToday ||
+        vital.menstrual.observedFlow != null ||
+        vital.menstrual.observedStatus != null;
+      const weightedCoverage = direct
+        ? 1
+        : clamp01((vital.menstrual.confidence ?? 0) * 0.75 + (vital.menstrual.expectedImpact > 0.08 ? 0.1 : 0));
+      menstrualC += weightedCoverage;
+    } else if (b && b.symptomSeverity !== null && b.symptomSeverity !== undefined) {
+      menstrualC += 0.35;
     }
 
     if (e && e.mood !== null && e.mood !== undefined) moodC += 1;
@@ -206,7 +215,7 @@ export function computePersonalizationAccuracy(args: {
   coverage.activity = clamp01(activityC / days);
   coverage.caffeine = clamp01(caffeineC / days);
   coverage.mood = clamp01(moodC / days);
-  coverage.menstrual = menstrualOn ? 1 : clamp01(menstrualC / days);
+  coverage.menstrual = clamp01(menstrualC / days);
 
   // 3) accuracy percent
   const sum = (Object.keys(weights) as FactorKey[]).reduce((a, k) => a + weights[k] * coverage[k], 0);

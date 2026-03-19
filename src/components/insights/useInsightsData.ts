@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import type { ISODate } from "@/lib/date";
 import { addDays, fromISODate, toISODate, todayISO } from "@/lib/date";
 import type { Shift } from "@/lib/types";
-import { menstrualContextForDate } from "@/lib/menstrual";
+import { inferMenstrualPosterior } from "@/lib/menstrualProbability";
 import { useAppStore } from "@/lib/store";
 import { computeVitalsRange, type DailyVital } from "@/lib/vitals";
 import { computePersonalizationAccuracy, topFactors } from "@/lib/insightsV2";
@@ -110,8 +110,17 @@ export function useInsightsData() {
   const hasTodayShift = Boolean(todayShiftFromSchedule);
   const todayShift: Shift = todayShiftFromSchedule ?? todayVital?.shift ?? "OFF";
   const menstrual = useMemo(
-    () => menstrualContextForDate(end, state.settings?.menstrual ?? null),
-    [end, state.settings]
+    () =>
+      todayVital?.menstrual ??
+      inferMenstrualPosterior({
+        iso: end,
+        settings: state.settings?.menstrual ?? null,
+        bioMap: state.bio,
+        schedule: state.schedule,
+        inputReliability: 0.35,
+        shift: todayShift,
+      }),
+    [end, state.bio, state.schedule, state.settings?.menstrual, todayShift, todayVital]
   );
 
   const accuracy = useMemo(

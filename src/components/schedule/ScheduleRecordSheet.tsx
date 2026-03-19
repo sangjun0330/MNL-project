@@ -93,6 +93,8 @@ export function ScheduleRecordSheet({
   const [napText, setNapText] = useState<string>("");
   const [activity, setActivity] = useState<ActivityLevel>(1);
   const [symptomSeverity, setSymptomSeverity] = useState<0 | 1 | 2 | 3>(0);
+  const [menstrualStatus, setMenstrualStatus] = useState<"none" | "pms" | "period">("none");
+  const [menstrualFlow, setMenstrualFlow] = useState<0 | 1 | 2 | 3>(0);
   const [workEventTags, setWorkEventTags] = useState<string[]>([]);
   const [workEventCustomTag, setWorkEventCustomTag] = useState<string>("");
   const [workEventNote, setWorkEventNote] = useState<string>("");
@@ -118,6 +120,7 @@ export function ScheduleRecordSheet({
   const showMoreOpenedRef = useRef(false);
   const activityTouchedRef = useRef(false);
   const symptomTouchedRef = useRef(false);
+  const menstrualTouchedRef = useRef(false);
   const napTouchedRef = useRef(false);
 
   const stressOptions = useMemo(
@@ -136,6 +139,14 @@ export function ScheduleRecordSheet({
       { value: "1", label: t("보통") },
       { value: "2", label: t("많음") },
       { value: "3", label: t("빡셈") },
+    ],
+    [t]
+  );
+  const menstrualStatusOptions = useMemo(
+    () => [
+      { value: "none", label: t("없음") },
+      { value: "pms", label: "PMS" },
+      { value: "period", label: t("생리") },
     ],
     [t]
   );
@@ -235,6 +246,14 @@ export function ScheduleRecordSheet({
     markSaved();
   };
 
+  const saveMenstrualNow = (status: "none" | "pms" | "period", flow: 0 | 1 | 2 | 3) => {
+    store.setBioForDate(iso, {
+      menstrualStatus: status === "none" ? null : status,
+      menstrualFlow: flow,
+    });
+    markSaved();
+  };
+
   const saveWorkEventsNow = (tagsInput: string[], noteInput: string) => {
     const tags = normalizeWorkEventTags(tagsInput);
     const note = noteInput.replace(/\s+/g, " ").trim().slice(0, 280);
@@ -284,6 +303,12 @@ export function ScheduleRecordSheet({
     setNapText((bio as any).napHours == null ? "" : String((bio as any).napHours));
     setActivity((bio.activity ?? 1) as ActivityLevel);
     setSymptomSeverity((Number((bio as any).symptomSeverity ?? 0) as any) as 0 | 1 | 2 | 3);
+    setMenstrualStatus(
+      bio.menstrualStatus === "pms" || bio.menstrualStatus === "period"
+        ? bio.menstrualStatus
+        : (Number((bio as any).menstrualFlow ?? 0) > 0 ? "period" : "none")
+    );
+    setMenstrualFlow((clamp(Number((bio as any).menstrualFlow ?? 0), 0, 3) as any) as 0 | 1 | 2 | 3);
     setWorkEventTags(Array.isArray((bio as any).workEventTags) ? normalizeWorkEventTags((bio as any).workEventTags as string[]) : []);
     setWorkEventCustomTag("");
     setWorkEventNote(typeof (bio as any).workEventNote === "string" ? String((bio as any).workEventNote) : "");
@@ -292,6 +317,7 @@ export function ScheduleRecordSheet({
     showMoreOpenedRef.current = false;
     activityTouchedRef.current = false;
     symptomTouchedRef.current = false;
+    menstrualTouchedRef.current = false;
     napTouchedRef.current = false;
 
     // 메모
@@ -461,6 +487,26 @@ export function ScheduleRecordSheet({
     markSaved();
   };
 
+  const setMenstrualStatusQuick = (value: string) => {
+    const nextStatus = (value === "pms" || value === "period" ? value : "none") as "none" | "pms" | "period";
+    menstrualTouchedRef.current = true;
+    setMenstrualStatus(nextStatus);
+    const nextFlow =
+      nextStatus === "period"
+        ? (menstrualFlow === 0 ? 1 : menstrualFlow)
+        : 0;
+    if (nextFlow !== menstrualFlow) setMenstrualFlow(nextFlow);
+    saveMenstrualNow(nextStatus, nextFlow);
+  };
+
+  const setMenstrualFlowQuick = (value: 0 | 1 | 2 | 3) => {
+    menstrualTouchedRef.current = true;
+    setMenstrualFlow(value);
+    const nextStatus = value > 0 ? "period" : menstrualStatus;
+    if (nextStatus !== menstrualStatus) setMenstrualStatus(nextStatus);
+    saveMenstrualNow(nextStatus, value);
+  };
+
   const toggleWorkEventTag = (tag: string) => {
     setWorkEventTags((prev) => {
       const exists = prev.includes(tag);
@@ -530,6 +576,7 @@ export function ScheduleRecordSheet({
       saveStressNow(stress);
       if (menstrualEnabled && showMoreOpenedRef.current) {
         saveSymptomNow(symptomSeverity);
+        if (menstrualTouchedRef.current) saveMenstrualNow(menstrualStatus, menstrualFlow);
       }
       const hasAdditionalInput =
         activityTouchedRef.current || symptomTouchedRef.current || napTouchedRef.current;
@@ -955,6 +1002,41 @@ export function ScheduleRecordSheet({
                           </button>
                         );
                       })}
+                    </div>
+                  </div>
+                ) : null}
+
+                {menstrualEnabled ? (
+                  <div className="rounded-2xl border border-ios-sep bg-ios-bg p-3">
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <div className="text-[12px] font-semibold text-ios-muted">{t("생리 상태")}</div>
+                      <div className="text-[11px] font-semibold text-ios-muted">{t("직접 기록이 우선 반영돼요")}</div>
+                    </div>
+                    <Segmented
+                      value={menstrualStatus as any}
+                      options={menstrualStatusOptions as any}
+                      onChange={setMenstrualStatusQuick}
+                    />
+                    <div className="mt-3">
+                      <div className="mb-2 text-[12px] font-semibold text-ios-muted">{t("출혈 강도")}</div>
+                      <div className="grid grid-cols-4 gap-2">
+                        {([0, 1, 2, 3] as const).map((v) => {
+                          const active = menstrualFlow === v;
+                          return (
+                            <button
+                              key={v}
+                              type="button"
+                              onClick={() => setMenstrualFlowQuick(v)}
+                              className={cn(
+                                "rounded-2xl border px-2 py-2 text-center",
+                                active ? "border-[var(--rnest-accent)] bg-[var(--rnest-accent)] text-white" : "border-ios-sep bg-white"
+                              )}
+                            >
+                              <div className="text-[12px] font-semibold">{v === 0 ? t("없음") : v}</div>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                 ) : null}

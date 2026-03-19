@@ -23,6 +23,9 @@ export type DailyHealthSnapshot = {
     caffeineLastAt?: string | null;
     activity?: number | null;
     symptomSeverity?: number | null;
+    menstrualStatus?: "none" | "pms" | "period" | null;
+    menstrualFlow?: 0 | 1 | 2 | 3 | null;
+    shiftOvertimeHours?: number | null;
     workEventTags?: string[] | null;
     workEventNote?: string | null;
   };
@@ -92,6 +95,18 @@ export function buildDailyHealthSnapshot(opts: {
         caffeineLastAt: (bioRaw as any).caffeineLastAt ?? null,
         activity: bioRaw.activity ?? null,
         symptomSeverity: (bioRaw as any).symptomSeverity ?? null,
+        menstrualStatus:
+          bioRaw.menstrualStatus === "none" || bioRaw.menstrualStatus === "pms" || bioRaw.menstrualStatus === "period"
+            ? bioRaw.menstrualStatus
+            : null,
+        menstrualFlow:
+          bioRaw.menstrualFlow == null
+            ? null
+            : (Math.max(0, Math.min(3, Math.round(Number(bioRaw.menstrualFlow)))) as 0 | 1 | 2 | 3),
+        shiftOvertimeHours:
+          (bioRaw as any).shiftOvertimeHours == null
+            ? null
+            : Math.max(0, Math.min(8, Math.round(Number((bioRaw as any).shiftOvertimeHours) * 2) / 2)),
         workEventTags: Array.isArray((bioRaw as any).workEventTags)
           ? ((bioRaw as any).workEventTags as unknown[])
               .map((item) => (typeof item === "string" ? item.replace(/\s+/g, " ").trim() : ""))

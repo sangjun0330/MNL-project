@@ -3,6 +3,7 @@ import type { ISODate } from "@/lib/date";
 import { addDays, diffDays, fromISODate, toISODate } from "@/lib/date";
 import { menstrualContextForDate } from "@/lib/menstrual";
 import type { MenstrualPhase } from "@/lib/menstrual";
+import { inferMenstrualPosterior, type MenstrualPosterior } from "@/lib/menstrualProbability";
 import type { AppState, BioInputs, EmotionEntry } from "@/lib/model";
 import { hasHealthInput } from "@/lib/healthRecords";
 import type { Shift } from "@/lib/types";
@@ -25,11 +26,13 @@ export type DailyVital = {
     mood?: number | null; // 1..5
     caffeineMg?: number | null;
     symptomSeverity?: number | null; // 0..3
+    menstrualStatus?: "none" | "pms" | "period" | null;
+    menstrualFlow?: number | null; // 0..3
     workEventTags?: string[] | null;
     workEventNote?: string | null;
   };
 
-  menstrual: ReturnType<typeof menstrualContextForDate>;
+  menstrual: MenstrualPosterior;
 
   body: {
     value: number; // 0..100
@@ -142,21 +145,30 @@ function defaultShiftFallback(): Shift {
 function normalizeBio(bio?: BioInputs | null): BioInputs {
   return {
     sleepHours: bio?.sleepHours ?? null,
-    napHours: (bio as any)?.napHours ?? null,
-    stress: (bio?.stress ?? null) as any,
-    activity: (bio?.activity ?? null) as any,
-    mood: (bio as any)?.mood ?? null,
+    napHours: bio?.napHours ?? null,
+    stress: bio?.stress ?? null,
+    activity: bio?.activity ?? null,
+    mood: bio?.mood ?? null,
     caffeineMg: bio?.caffeineMg ?? null,
-    symptomSeverity: (bio as any)?.symptomSeverity ?? null,
-    workEventTags: Array.isArray((bio as any)?.workEventTags)
-      ? ((bio as any).workEventTags as unknown[])
+    symptomSeverity: bio?.symptomSeverity ?? null,
+    menstrualStatus:
+      bio?.menstrualStatus === "none" || bio?.menstrualStatus === "pms" || bio?.menstrualStatus === "period"
+        ? bio.menstrualStatus
+        : null,
+    menstrualFlow:
+      bio?.menstrualFlow == null
+        ? null
+        : (clamp(Number(bio.menstrualFlow), 0, 3) as 0 | 1 | 2 | 3),
+    shiftOvertimeHours: bio?.shiftOvertimeHours == null ? null : clamp(Number(bio.shiftOvertimeHours), 0, 8),
+    workEventTags: Array.isArray(bio?.workEventTags)
+      ? bio.workEventTags
           .map((item) => (typeof item === "string" ? item.replace(/\s+/g, " ").trim() : ""))
           .filter(Boolean)
           .slice(0, 8)
       : null,
     workEventNote:
-      typeof (bio as any)?.workEventNote === "string"
-        ? String((bio as any).workEventNote).replace(/\s+/g, " ").trim().slice(0, 280)
+      typeof bio?.workEventNote === "string"
+        ? bio.workEventNote.replace(/\s+/g, " ").trim().slice(0, 280)
         : null,
   };
 }
@@ -295,6 +307,9 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
   const recentSymptomObs: NumericObservation[] = [];
 
   const computed = new Map<ISODate, DailyVital>();
+  // FIX-04: EMA 스무딩용 이전 값 추적 (PMC EWMA 연구: alpha 0.05-0.10 권장, 반응성 위해 0.15)
+  const EMA_ALPHA = 0.15;
+  let prevMentalEma: number | null = null;
 
   for (let i = 0; i <= computeDays; i++) {
     const iso = toISODate(addDays(fromISODate(computeStart), i));
@@ -304,37 +319,41 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
     const emotion = emotions[iso] as EmotionEntry | undefined;
     const bio = normalizeBio(bioMap[iso] as BioInputs | undefined);
 
-    const menstrual = menstrualContextForDate(iso, menstrualSettings);
+    const legacyMenstrual = menstrualContextForDate(iso, menstrualSettings);
 
     const lmp = menstrualSettings?.enabled ? (menstrualSettings?.lastPeriodStart ?? null) : null;
     const cycleLen = menstrualSettings?.cycleLength ?? 28;
     const periodLen = menstrualSettings?.periodLength ?? 5;
 
     const rawSleep = bio.sleepHours ?? null;
-    const rawNap = (bio as any).napHours ?? null;
-    const rawStress = (bio.stress ?? null) as number | null;
-    const rawActivity = (bio.activity ?? null) as number | null;
-    const rawMood = (bio as any).mood ?? emotion?.mood ?? null;
+    const rawNap = bio.napHours ?? null;
+    const rawStress: number | null = bio.stress ?? null;
+    const rawActivity: number | null = bio.activity ?? null;
+    const rawMood = bio.mood ?? emotion?.mood ?? null;
     const rawCaffeineMg = bio.caffeineMg ?? null;
     const rawCaffeineLastAt: string | null = null;
     const rawSleepQuality = null;
     const rawSleepTiming = "auto";
     const rawFatigueLevel = null;
-    const rawMenstrualStatus = null;
-    const rawMenstrualFlow = null;
-    const rawOvertimeHours = null;
-    const rawSymptomSeverityInput = (bio as any).symptomSeverity;
+    const rawMenstrualStatus =
+      bio.menstrualStatus === "none" || bio.menstrualStatus === "pms" || bio.menstrualStatus === "period"
+        ? bio.menstrualStatus
+        : null;
+    const rawMenstrualFlow =
+      bio.menstrualFlow == null ? null : (clamp(Number(bio.menstrualFlow), 0, 3) as 0 | 1 | 2 | 3);
+    const rawOvertimeHours = bio.shiftOvertimeHours == null ? null : clamp(Number(bio.shiftOvertimeHours), 0, 8);
+    const rawSymptomSeverityInput = bio.symptomSeverity;
     const rawSymptomSeverity =
       rawSymptomSeverityInput == null ? null : clamp(Number(rawSymptomSeverityInput), 0, 3);
-    const rawWorkEventTags = Array.isArray((bio as any).workEventTags)
-      ? ((bio as any).workEventTags as unknown[])
+    const rawWorkEventTags = Array.isArray(bio.workEventTags)
+      ? bio.workEventTags
           .map((item) => (typeof item === "string" ? item.replace(/\s+/g, " ").trim() : ""))
           .filter(Boolean)
           .slice(0, 8)
       : null;
     const rawWorkEventNote =
-      typeof (bio as any).workEventNote === "string"
-        ? String((bio as any).workEventNote).replace(/\s+/g, " ").trim().slice(0, 280)
+      typeof bio.workEventNote === "string"
+        ? bio.workEventNote.replace(/\s+/g, " ").trim().slice(0, 280)
         : null;
 
     const hasAnyRawInput = hasHealthInput(bio, emotion ?? null);
@@ -371,8 +390,11 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
       const gap = diffDays(iso, prev.iso);
       if (gap >= 1 && gap <= 2) {
         const baseline = targetSleepHoursForShift(shift);
-        const carry = gap === 1 ? 0.72 : 0.48;
-        const shiftAdj = prev.shift === shift ? 0.06 : -0.04;
+        // FIX-09: N↔비N 전환 시 수면 패턴이 완전히 다름 → carry/shiftAdj 차별화
+        const isNightTransition = (prev.shift === "N") !== (shift === "N");
+        const baseCarry = gap === 1 ? 0.72 : 0.48;
+        const carry = isNightTransition ? baseCarry * 0.5 : baseCarry;
+        const shiftAdj = prev.shift === shift ? 0.06 : isNightTransition ? -0.15 : -0.04;
         const weight = clamp(carry + shiftAdj, 0.35, 0.86);
         effectiveSleepHours = round1(clamp(prev.value * weight + baseline * (1 - weight), 4.5, 10));
         estimatedSleep = true;
@@ -447,8 +469,8 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
       estimatedCaffeine = true;
     }
 
-    if (!blockTodayCarry && effectiveSymptomSeverity == null && menstrual.enabled) {
-      const phaseBaseline = baselineSymptomByPhase(menstrual.phase);
+    if (!blockTodayCarry && effectiveSymptomSeverity == null && legacyMenstrual.enabled) {
+      const phaseBaseline = baselineSymptomByPhase(legacyMenstrual.phase);
       const flowBaseline = clamp(Number(rawMenstrualFlow ?? 0), 0, 3) * 0.25;
       const cycleBaseline = clamp(phaseBaseline + flowBaseline, 0, 3);
       if (recentSymptomObs.length) {
@@ -471,7 +493,8 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
     const observedActivity = rawActivity != null ? 1 : 0;
     const observedMood = rawMood != null ? 1 : 0;
     const observedCaffeine = rawCaffeineMg != null || rawCaffeineLastAt != null ? 1 : 0;
-    const observedMenstrual = rawSymptomSeverity != null ? 1 : 0;
+    const observedMenstrual =
+      rawSymptomSeverity != null || rawMenstrualStatus != null || rawMenstrualFlow != null ? 1 : 0;
 
     const estimatedSignals =
       (estimatedSleep ? 1 : 0) +
@@ -508,6 +531,17 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
       inputReliability = clamp(inputReliability * staleFactor, 0.35, 1);
     }
 
+    const menstrual = inferMenstrualPosterior({
+      iso,
+      settings: menstrualSettings,
+      bioMap,
+      schedule,
+      symptomSeverity: effectiveSymptomSeverity,
+      symptomObserved: rawSymptomSeverity != null,
+      inputReliability,
+      shift,
+    });
+
     const sleepQuality = rawSleepQuality;
     const sleepTiming = rawSleepTiming;
     const caffeineLastAt = effectiveCaffeineLastAt;
@@ -516,8 +550,8 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
     const menstrualFlow = rawMenstrualFlow;
     const overtimeHours = rawOvertimeHours;
 
-    const stressLvl = clamp(Number((effectiveStress ?? 1) as any) + 1, 1, 4);
-    const activityLvl = clamp(Number((effectiveActivity ?? 1) as any) + 1, 1, 4);
+    const stressLvl = clamp(Number(effectiveStress ?? 1) + 1, 1, 4);
+    const activityLvl = clamp(Number(effectiveActivity ?? 1) + 1, 1, 4);
     const moodLvl = clamp(Number(effectiveMood ?? 3), 1, 5);
 
     const prevISO = toISODate(addDays(fromISODate(iso), -1));
@@ -548,6 +582,7 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
         symptomSeverity: effectiveSymptomSeverity ?? 0,
         menstrualStatus,
         menstrualFlow,
+        menstrualImpactOverride: menstrual.expectedImpact,
         prevShift,
         nightStreak,
         nightsIn30,
@@ -581,7 +616,7 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
     const mentalChange = Math.round((mentalValue - prevMB) * 10) / 10;
 
     // ✅ 인사이트용 요인 점수(0..1) - depletion + sleep suppression 기반
-    const d = res.diagnostics as any;
+    const d = res.diagnostics;
     const sri = Number(d.SRI ?? d.SRS ?? 1);
     const csi = Number(d.CSI ?? d.CMF ?? 0);
     const cif = Number(d.CIF ?? 1);
@@ -597,7 +632,8 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
     const hasActivitySignal = effectiveActivity != null;
     const hasCaffeineSignal = effectiveCaffeineMg != null && Number(effectiveCaffeineMg) > 0;
     const hasMenstrualSignal =
-      Boolean(menstrual.enabled) && menstrual.phase !== "none";
+      Boolean(menstrual.enabled) &&
+      (menstrual.isObservedToday || menstrual.expectedImpact >= 0.06 || menstrual.confidence >= 0.45);
     const hasMoodSignal = effectiveMood != null;
 
     const sleepImpact = hasSleepSignal ? clamp((1 - sri) + Number(d.debt_n ?? 0), 0, 2) : 0;
@@ -605,7 +641,17 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
     const activityImpact = hasActivitySignal ? clamp(Number(d.activity_n ?? 0), 0, 1) : 0;
     const shiftImpact = hasShiftSignal ? clamp(csi, 0, 1) : 0;
     const caffeineImpact = hasCaffeineSignal ? clamp(1 - cif, 0, 1) : 0;
-    const menstrualImpact = hasMenstrualSignal ? clamp(1 - mif, 0, 1) : 0;
+    const posteriorMenstrualImpact = clamp(menstrual.expectedImpact / 0.45, 0, 1);
+    const engineMenstrualImpact = clamp(1 - mif, 0, 1);
+    const menstrualImpact = hasMenstrualSignal
+      ? clamp(
+          menstrual.isObservedToday
+            ? Math.max(engineMenstrualImpact, posteriorMenstrualImpact)
+            : posteriorMenstrualImpact * clamp(0.55 + menstrual.confidence * 0.45, 0.4, 1),
+          0,
+          1
+        )
+      : 0;
     const moodImpact = hasMoodSignal ? clamp(Number(d.mood_bad_n ?? 0) + (1 - mf), 0, 1) : 0;
     const sum = sleepImpact + stressImpact + activityImpact + shiftImpact + caffeineImpact + menstrualImpact + moodImpact;
     const factors = sum > 0
@@ -630,11 +676,13 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
       inputs: {
         sleepHours: effectiveSleepHours,
         napHours: effectiveNapHours,
-        stress: (effectiveStress ?? null) as any,
-        activity: (effectiveActivity ?? null) as any,
+        stress: effectiveStress ?? null,
+        activity: effectiveActivity ?? null,
         mood: effectiveMood,
         caffeineMg: effectiveCaffeineMg,
         symptomSeverity: effectiveSymptomSeverity,
+        menstrualStatus,
+        menstrualFlow,
         workEventTags: rawWorkEventTags,
         workEventNote: rawWorkEventNote,
       },
@@ -646,9 +694,18 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
       },
       mental: {
         raw: mentalValue,
-        ema: mentalValue,
+        // FIX-04: 실제 EMA 스무딩 적용 — 엔진 관성 이후 추가 UI 스무딩
+        ema: clamp(
+          Math.round((EMA_ALPHA * mentalValue + (1 - EMA_ALPHA) * (prevMentalEma ?? mentalValue)) * 10) / 10,
+          0, 100
+        ),
         change: mentalChange,
-        tone: toneFromScore(mentalValue),
+        tone: toneFromScore(
+          clamp(
+            Math.round((EMA_ALPHA * mentalValue + (1 - EMA_ALPHA) * (prevMentalEma ?? mentalValue)) * 10) / 10,
+            0, 100
+          )
+        ),
       },
       burnout,
       engine: {
@@ -678,6 +735,10 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
       },
       factors,
     });
+
+    // FIX-04: EMA 상태 갱신
+    const storedVital = computed.get(iso);
+    prevMentalEma = storedVital?.mental.ema ?? mentalValue;
   }
 
   // 반환 범위만 잘라서 정렬

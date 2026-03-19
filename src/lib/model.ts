@@ -43,9 +43,7 @@ export type BioInputs = {
   // v2.0: (여성) 통증/증상 강도
   // 0=없음, 1~3=강도
   symptomSeverity?: 0 | 1 | 2 | 3 | null;
-  // deprecated: 저장/알고리즘 미사용 (UI 호환용 타입만 유지)
   menstrualStatus?: "none" | "pms" | "period" | null;
-  // deprecated: 저장/알고리즘 미사용 (UI 호환용 타입만 유지)
   menstrualFlow?: 0 | 1 | 2 | 3 | null;
   // deprecated: 저장/알고리즘 미사용 (UI 호환용 타입만 유지)
   shiftOvertimeHours?: number | null;

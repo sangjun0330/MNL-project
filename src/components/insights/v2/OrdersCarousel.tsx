@@ -80,8 +80,13 @@ export function OrdersCarousel({ vital, pivotISO }: { vital: DailyVital | null; 
     const csi = vital.engine?.CSI ?? vital.engine?.CMF ?? 0;
     const cif = vital.engine?.CIF ?? (1 - (vital.engine?.CSD ?? 0));
     const slf = vital.engine?.SLF ?? 0;
-    const mif = vital.engine?.MIF ?? 1;
-    const phase = vital.menstrual?.phase ?? "none";
+    const menstrualLoad = vital.menstrual?.expectedImpact ?? 0;
+    const menstrualPct = Math.round((menstrualLoad / 0.45) * 100);
+    const phase = vital.menstrual?.dominantPhase ?? "uncertain";
+    const menstrualReady =
+      vital.menstrual?.isObservedToday ||
+      (vital.menstrual?.confidence ?? 0) >= 0.45 ||
+      menstrualLoad >= 0.08;
 
     const list: OrderCard[] = [];
 
@@ -116,13 +121,17 @@ export function OrdersCarousel({ vital, pivotISO }: { vital: DailyVital | null; 
     }
 
     // 3) 호르몬 & 듀티 (나이트 + PMS/생리)
-    if (shift === "N" && (phase === "pms" || phase === "period" || mif <= 0.85)) {
+    if (
+      shift === "N" &&
+      menstrualReady &&
+      (phase === "pms" || phase === "period" || phase === "late_period_tail" || menstrualLoad >= 0.12)
+    ) {
       list.push({
         key: "hormone_duty",
         icon: "🩸",
         titleEn: "Hormone & Duty",
         titleKo: "호르몬 & 듀티 이중고",
-        detail: `주기 영향(MIF ${Math.round(mif * 100)}%) + 나이트가 겹쳤습니다. 통증·피로가 빠르게 올라갈 수 있어요.`,
+        detail: `주기 영향 ${menstrualPct}% + 나이트가 겹쳤습니다. 통증·피로가 빠르게 올라갈 수 있어요.`,
         tone: "pink",
         actionLabel: "증상 기록",
       });

@@ -1,7 +1,8 @@
 // src/lib/rnestBatteryEngine.ts
-// Nurse Shift-Work Recovery Engine v3.0
+// Nurse Shift-Work Recovery Engine v3.1
 // - Implements SRI/CSI/SLF/MIF/CIF/MF based recovery model
 // - Deterministic and profile-aware
+// - v3.1: Evidence-based parameter calibration (PSG, Folkard, Borbely, NASA-TLX)
 
 import type { ISODate } from "@/lib/date";
 import { diffDays } from "@/lib/date";
@@ -9,7 +10,7 @@ import type { Shift } from "@/lib/types";
 
 export type RNestProfile = {
   chronotype: number; // 0..1
-  caffeineSensitivity: number; // 0.5..1.5
+  caffeineSensitivity: number; // 0.5..1.8 (FIX-06: 경구피임약 커버 위해 상한 확대)
 };
 
 export type RNestHiddenState = {
@@ -40,6 +41,7 @@ export type RNestDailyInputs = {
   symptomSeverity?: number; // 0..3
   menstrualStatus?: "none" | "pms" | "period" | null;
   menstrualFlow?: number | null; // 0..3
+  menstrualImpactOverride?: number | null; // 0..0.45
   // shift/circadian derived
   prevShift?: Shift;
   nightStreak?: number;
@@ -131,8 +133,9 @@ function resolveSleepTiming(timing: RNestDailyInputs["sleepTiming"], shift: Shif
 
 function circadianFactor(timing: "night" | "day" | "mixed") {
   if (timing === "night") return 1.0;
-  if (timing === "mixed") return 0.9;
-  return 0.8;
+  // FIX-05: PSG 연구 반영 — 낮잠 수면효율 83% vs 밤잠 90% + REM/SWE 질 저하 보정
+  if (timing === "mixed") return 0.85;
+  return 0.72;
 }
 
 function defaultSleepStartHour(shift: Shift, timing: "night" | "day" | "mixed") {
@@ -169,7 +172,8 @@ function caffeineAtSleep(opts: {
   caffeineSensitivity: number;
 }) {
   const { caffeineMg, caffeineLastAt, shift, timing, caffeineSensitivity } = opts;
-  const halfLife = 5.0 * clamp(caffeineSensitivity, 0.5, 1.5);
+  // FIX-06: 경구피임약 복용 시 반감기 7.88h (Abernethy 1985) 커버를 위해 상한 확대
+  const halfLife = 5.0 * clamp(caffeineSensitivity, 0.5, 1.8);
 
   const parsed = parseTimeHHMM(caffeineLastAt);
   const sleepStartHour = defaultSleepStartHour(shift, timing);
@@ -212,9 +216,12 @@ function updateSleepDebt(opts: {
   const target_sleep = targetSleepHours(shift);
   const deficit = target_sleep - sleep_for_debt; // +: 부족, -: 초과 수면
 
-  // 첫 유효 수면 기록은 "그날 부족분" 중심으로 보수적으로 시작
+  // FIX-08: 간호사 평균 수면 5.5-6.4h (actigraphy 연구), 목표 7-7.5h
+  // → 평균 부채 ~1-1.5h/일. 신규 사용자에게 보수적 초기 부채 2h 부여
   if (!hasPriorSleepLog && sleepDebtPrev <= 0.01) {
-    const seeded = clamp(Math.max(0, deficit), 0, 4.5);
+    const INITIAL_DEBT_SEED = 2.0;
+    const todayDeficit = clamp(Math.max(0, deficit), 0, 4.5);
+    const seeded = clamp(INITIAL_DEBT_SEED + todayDeficit * 0.5, 0, 5.0);
     return { sleep_debt_next: seeded, debt_n: clamp(seeded / 10, 0, 1) };
   }
 
@@ -255,7 +262,12 @@ function computeCSI(opts: {
     shift === "D" ? 0.08 :
     0.02;
 
-  const nightConsecLoad = shift === "N" ? 0.09 * Math.max(0, nightStreak - 1) : 0;
+  // FIX-07: 비선형 가속 — 3일차 +17%, 4일차 +36% 사고위험 (Folkard & Tucker, CDC/NIOSH)
+  const nightConsecLoad = (() => {
+    if (shift !== "N" || nightStreak <= 1) return 0;
+    const extra = nightStreak - 1;
+    return clamp(0.08 * extra + 0.015 * extra * extra, 0, 0.50);
+  })();
   const quickPenalty = quickReturnHours != null && quickReturnHours < 11 ? 0.16 : 0;
   const monthlyPenalty = nightsIn30 > 15 ? 0.12 : nightsIn30 > 8 ? 0.06 : 0;
   const longPenalty = (shiftLengthHours ?? 0) + (overtimeHours ?? 0) >= 12 ? 0.08 : 0;
@@ -321,7 +333,7 @@ export function defaultRNestState(): RNestHiddenState {
 
 export function stepRNestBatteryEngine(state: RNestHiddenState, inputs: RNestDailyInputs, profile: RNestProfile): RNestDailyResult {
   const chronotype = clamp(Number(profile.chronotype ?? 0.5), 0, 1);
-  const caffeineSensitivity = clamp(Number(profile.caffeineSensitivity ?? 1.0), 0.5, 1.5);
+  const caffeineSensitivity = clamp(Number(profile.caffeineSensitivity ?? 1.0), 0.5, 1.8);
 
   const shift = inputs.shift;
   const hasSleepDurationLog = inputs.sleepHours != null || inputs.napHours != null;
@@ -405,7 +417,8 @@ export function stepRNestBatteryEngine(state: RNestHiddenState, inputs: RNestDai
   });
 
   const SLF = clamp(0.7 * stress_n + 0.3 * fatigue_n, 0, 1);
-  const MF = clamp(1 - 0.1 * mood_bad_n, 0.85, 1);
+  // FIX-01: 간호사 감정노동 반영 — 우울 58.82%, 공감피로 80% (Meta-analysis 2024)
+  const MF = clamp(1 - 0.25 * mood_bad_n, 0.70, 1);
 
   const predicted = menstrualPhase({
     dateISO: inputs.dateISO,
@@ -419,18 +432,27 @@ export function stepRNestBatteryEngine(state: RNestHiddenState, inputs: RNestDai
   const pmsSignal = inputs.menstrualStatus === "pms";
   const phase = periodSignal ? "period" : pmsSignal ? "pms" : predicted.phase;
 
-  // Fuse predicted cycle phase + daily symptoms/flow into menstrual impact.
+  // FIX-10: PSG 데이터 기반 보정 — 생리기 수면효율 83.0% vs 여포기 89.9% (EPISONO)
+  // 교대근무 생리 교란 OR 1.22-1.30 (Meta-analysis n=195,538)
   const phaseBaseImpact =
-    phase === "period" ? 0.16 :
-    phase === "pms" ? 0.11 :
-    phase === "luteal" ? 0.06 :
-    phase === "follicular" ? 0.02 :
+    phase === "period" ? 0.18 :
+    phase === "pms" ? 0.13 :
+    phase === "luteal" ? 0.07 :
+    phase === "follicular" ? 0.01 :
     phase === "ovulation" ? 0.01 :
     0.0;
   const symptomImpact = sym_n * 0.2;
   const flowImpact = menstrualFlow * 0.03;
-  const nightPhaseImpact = shift === "N" && (phase === "period" || phase === "pms") ? 0.04 : 0;
-  const menstrualImpactRaw = clamp(phaseBaseImpact + symptomImpact + flowImpact + nightPhaseImpact, 0, 0.45);
+  // FIX-10: 이브닝/미들 교대도 생리 교차 페널티 추가
+  const shiftPhaseImpact = (() => {
+    if (phase !== "period" && phase !== "pms") return 0;
+    if (shift === "N") return 0.06;
+    if (shift === "E" || shift === "M") return 0.03;
+    return 0;
+  })();
+  const menstrualImpactRaw = inputs.menstrualImpactOverride != null
+    ? clamp(Number(inputs.menstrualImpactOverride), 0, 0.45)
+    : clamp(phaseBaseImpact + symptomImpact + flowImpact + shiftPhaseImpact, 0, 0.45);
   const MIF = clamp(1 - menstrualImpactRaw, 0.55, 1.0);
 
   const menstrualImpact = clamp(1 - MIF, 0, 0.6);
@@ -445,11 +467,10 @@ export function stepRNestBatteryEngine(state: RNestHiddenState, inputs: RNestDai
   const menstrualPenalty = (1 - MIF) * 100;
   const moodPenalty = mood_bad_n * 5;
   const activityPenalty = activity_n * 5;
-  const uncertaintyPenalty = clamp((1 - inputReliability) * 14, 0, 10);
-  const stalePenalty =
-    daysSinceAnyInput != null && daysSinceAnyInput > 2
-      ? clamp((daysSinceAnyInput - 2) * 1.2, 0, 8)
-      : 0;
+  // FIX-03: stalePenalty 제거 → inputReliability에 이미 staleFactor 반영됨
+  // uncertaintyPenalty 계수를 14→18로 올려 흡수
+  const uncertaintyPenalty = clamp((1 - inputReliability) * 18, 0, 14);
+  const stalePenalty = 0; // FIX-03: 이중 페널티 해소 — diagnostics 호환용 0 유지
 
   const totalPenalty =
     sleepPenalty +
@@ -459,8 +480,7 @@ export function stepRNestBatteryEngine(state: RNestHiddenState, inputs: RNestDai
     menstrualPenalty +
     moodPenalty +
     activityPenalty +
-    uncertaintyPenalty +
-    stalePenalty;
+    uncertaintyPenalty;
   const recoveryScore = clamp(100 - totalPenalty, 0, 100);
 
   const bodyPenalty =
@@ -469,23 +489,33 @@ export function stepRNestBatteryEngine(state: RNestHiddenState, inputs: RNestDai
     csiPenalty * 0.6 +
     activityPenalty * 1.2 +
     menstrualPenalty * 0.8 +
-    uncertaintyPenalty * 0.8 +
-    stalePenalty * 0.7;
+    uncertaintyPenalty * 0.8;
   const mentalPenalty =
     sleepPenalty * 0.5 +
     debtPenalty * 0.5 +
     csiPenalty * 0.7 +
     stressPenalty * 1.0 +
-    moodPenalty * 1.5 +
+    // FIX-01: 감정노동 가중치 1.5→2.0 (번아웃 54%, 공감피로 80%)
+    moodPenalty * 2.0 +
     menstrualPenalty * 0.5 +
-    uncertaintyPenalty * 0.9 +
-    stalePenalty * 0.9;
+    // FIX-02: 고강도 활동의 정신적 소모 반영 (NASA-TLX 정신부담 82.8/100)
+    activityPenalty * 0.4 +
+    uncertaintyPenalty * 0.9;
 
   const bodyTarget = clamp(100 - bodyPenalty, 0, 100);
   const mentalTarget = clamp(100 - mentalPenalty, 0, 100);
 
-  const BB = clamp(round1(state.BB * 0.65 + bodyTarget * 0.35), 0, 100);
-  const MB = clamp(round1(state.MB * 0.65 + mentalTarget * 0.35), 0, 100);
+  // FIX-11: Borbely 모델 반영 — 배터리 상태에 따른 동적 관성 계수
+  // 저배터리 시 회복 가속, 고배터리 시 감소 저항
+  const bodyInertia = bodyTarget >= state.BB
+    ? 0.60 + 0.10 * (state.BB / 100)
+    : 0.65 + 0.05 * (1 - state.BB / 100);
+  const mentalInertia = mentalTarget >= state.MB
+    ? 0.58 + 0.12 * (state.MB / 100)
+    : 0.63 + 0.07 * (1 - state.MB / 100);
+
+  const BB = clamp(round1(state.BB * bodyInertia + bodyTarget * (1 - bodyInertia)), 0, 100);
+  const MB = clamp(round1(state.MB * mentalInertia + mentalTarget * (1 - mentalInertia)), 0, 100);
 
   const nextState: RNestHiddenState = {
     BB,

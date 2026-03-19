@@ -15,8 +15,13 @@ export function hasHealthInput(bio?: BioInputs | null, emotion?: EmotionEntry | 
   if (hasValue(bio.stress)) return true;
   if (hasValue(bio.activity)) return true;
   if (hasValue(bio.mood)) return true;
-  if (typeof bio.caffeineMg === "number" && bio.caffeineMg > 0) return true;
-  if (typeof bio.symptomSeverity === "number" && bio.symptomSeverity > 0) return true;
+  if (hasValue(bio.caffeineMg)) return true;
+  if (hasValue(bio.symptomSeverity)) return true;
+  if (hasValue(bio.menstrualStatus)) return true;
+  if (hasValue(bio.menstrualFlow)) return true;
+  if (hasValue(bio.shiftOvertimeHours)) return true;
+  if (Array.isArray(bio.workEventTags) && bio.workEventTags.length > 0) return true;
+  if (typeof bio.workEventNote === "string" && bio.workEventNote.trim().length > 0) return true;
 
   return false;
 }

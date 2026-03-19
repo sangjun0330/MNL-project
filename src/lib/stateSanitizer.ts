@@ -162,6 +162,38 @@ function sanitizeBio(entry: unknown): BioInputs | undefined {
     }
   }
 
+  if (hasOwn(source, "menstrualStatus")) {
+    touched = true;
+    if (source.menstrualStatus == null) out.menstrualStatus = null;
+    else if (
+      source.menstrualStatus === "none" ||
+      source.menstrualStatus === "pms" ||
+      source.menstrualStatus === "period"
+    ) {
+      out.menstrualStatus = source.menstrualStatus;
+    }
+  }
+
+  if (hasOwn(source, "menstrualFlow")) {
+    touched = true;
+    if (source.menstrualFlow == null) out.menstrualFlow = null;
+    else {
+      const menstrualFlow = asFiniteNumber(source.menstrualFlow);
+      if (menstrualFlow != null) out.menstrualFlow = clamp(Math.round(menstrualFlow), 0, 3) as BioInputs["menstrualFlow"];
+    }
+  }
+
+  if (hasOwn(source, "shiftOvertimeHours")) {
+    touched = true;
+    if (source.shiftOvertimeHours == null) out.shiftOvertimeHours = null;
+    else {
+      const shiftOvertimeHours = asFiniteNumber(source.shiftOvertimeHours);
+      if (shiftOvertimeHours != null) {
+        out.shiftOvertimeHours = clamp(Math.round(shiftOvertimeHours * 2) / 2, 0, 8) as BioInputs["shiftOvertimeHours"];
+      }
+    }
+  }
+
   if (hasOwn(source, "workEventTags")) {
     touched = true;
     if (source.workEventTags == null) out.workEventTags = null;

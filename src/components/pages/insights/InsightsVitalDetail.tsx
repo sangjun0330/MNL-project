@@ -111,7 +111,7 @@ export function InsightsVitalDetail() {
   }, [todayVital]);
   const slf = useMemo(() => Math.round(((todayVital?.engine?.SLF ?? 0) as number) * 100), [todayVital]);
   const cycleImpact = useMemo(() => {
-    const raw = 1 - ((todayVital?.engine?.MIF ?? 1) as number);
+    const raw = (todayVital?.menstrual?.expectedImpact ?? 0) / 0.45;
     return Math.round(Math.max(0, Math.min(1, raw)) * 100);
   }, [todayVital]);
   const status = useMemo(() => statusFromScore(todayDisplay ?? 0), [todayDisplay]);
@@ -133,7 +133,9 @@ export function InsightsVitalDetail() {
       Boolean(
         todayVital &&
         todayVital.menstrual.enabled &&
-        todayVital.menstrual.phase !== "none"
+        (todayVital.menstrual.isObservedToday ||
+          todayVital.menstrual.expectedImpact >= 0.06 ||
+          todayVital.menstrual.confidence >= 0.45)
       ),
     [todayVital]
   );

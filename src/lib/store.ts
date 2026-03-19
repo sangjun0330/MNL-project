@@ -240,6 +240,9 @@ function setEmotionForDate(iso: ISODate, emo: EmotionEntry) {
     caffeineMg: null,
     mood: null,
     symptomSeverity: null,
+    menstrualStatus: null,
+    menstrualFlow: null,
+    shiftOvertimeHours: null,
     workEventTags: null,
     workEventNote: null,
   };

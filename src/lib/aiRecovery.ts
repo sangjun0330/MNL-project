@@ -4,7 +4,7 @@
 // - 카테고리별 조건부 가이드를 줄글로 생성
 
 import type { DailyVital } from "@/lib/vitals";
-import type { MenstrualContext, MenstrualPhase } from "@/lib/menstrual";
+import type { MenstrualPhase } from "@/lib/menstrual";
 import type { Shift } from "@/lib/types";
 import type { Language } from "@/lib/i18n";
 
@@ -372,19 +372,23 @@ function buildMenstrualSection(
   const mc = today.menstrual;
   if (!mc.enabled) return null;
 
-  const phase = mc.phase;
+  const phase = mc.dominantPhase;
   const symptom = today.inputs.symptomSeverity ?? 0;
   const shift = today.shift;
+  const confidence = mc.confidence ?? 0;
+  const highLikelihood = (mc.phaseProbabilities.period ?? 0) + (mc.phaseProbabilities.pms ?? 0) >= 0.45;
+
+  if (!mc.isObservedToday && confidence < 0.45 && !highLikelihood) return null;
 
   // Skip if phase has minimal impact
-  if (phase === "follicular" || phase === "ovulation") {
+  if (phase === "follicular" || phase === "ovulation_window") {
     // Positive phases - show brief encouraging message
     if (lang === "en") {
       return {
         category: "menstrual",
         severity: "info",
         title: "Menstrual Cycle",
-        description: `Currently in ${phaseLabel(phase, lang)} phase (Day ${mc.dayInCycle ?? "?"} of cycle). This is your energy peak period.`,
+        description: `Currently in ${phaseLabel(phase === "ovulation_window" ? "ovulation" : "follicular", lang)} phase (Day ${mc.dayInCycle ?? "?"} of cycle). This is a relatively stable window.`,
         tips: [
           "This is a good window for more intense exercise or catching up on tasks.",
           "Energy levels are naturally higher — make the most of it.",
@@ -395,7 +399,7 @@ function buildMenstrualSection(
       category: "menstrual",
       severity: "info",
       title: "생리주기",
-      description: `현재 ${phaseLabel(phase, lang)} (주기 ${mc.dayInCycle ?? "?"}일차)예요. 에너지가 높은 구간입니다.`,
+      description: `현재 ${phaseLabel(phase === "ovulation_window" ? "ovulation" : "follicular", lang)} (주기 ${mc.dayInCycle ?? "?"}일차)예요. 비교적 안정적인 구간입니다.`,
       tips: [
         "강도 높은 운동이나 밀린 일을 하기 좋은 시기예요.",
         "에너지가 자연스럽게 높은 구간이니 활용해보세요.",
@@ -403,7 +407,7 @@ function buildMenstrualSection(
     };
   }
 
-  if (phase === "none" || phase === "luteal") {
+  if (phase === "uncertain" || phase === "luteal") {
     // Luteal: show if approaching PMS
     const pmsDays = 5; // default
     const pmsStart = mc.cycleLength - pmsDays;
@@ -438,18 +442,24 @@ function buildMenstrualSection(
   }
 
   // PMS or Period
-  const severity: RecoverySeverity = symptom >= 2 ? "warning" : "caution";
+  const severity: RecoverySeverity =
+    symptom >= 2 || mc.expectedImpact >= 0.22 ? "warning" : "caution";
   const tips: string[] = [];
+  const tentative = !mc.isObservedToday && confidence < 0.72;
 
   if (lang === "en") {
     let desc = "";
     if (phase === "pms") {
-      desc = `Currently in the PMS phase (Day ${mc.dayInCycle ?? "?"} of cycle). You may feel more fatigued and sensitive.`;
+      desc = tentative
+        ? `PMS is likely around this point in the cycle (confidence ${Math.round(confidence * 100)}%). Fatigue and sensitivity may rise.`
+        : `Currently in the PMS phase (Day ${mc.dayInCycle ?? "?"} of cycle). You may feel more fatigued and sensitive.`;
     } else {
-      desc = `Currently on your period (Day ${mc.dayInCycle ?? "?"} of cycle).`;
+      desc = tentative
+        ? `Period-related recovery load is likely active today (confidence ${Math.round(confidence * 100)}%).`
+        : `Currently on your period (Day ${mc.dayInCycle ?? "?"} of cycle).`;
     }
 
-    if (phase === "period" && shift === "N") {
+    if ((phase === "period" || phase === "late_period_tail") && shift === "N") {
       tips.push("Period + night shift: Keep a hot pack, warm drinks, and iron supplements ready.");
     }
     if (phase === "pms") {
@@ -468,12 +478,16 @@ function buildMenstrualSection(
   // Korean
   let desc = "";
   if (phase === "pms") {
-    desc = `현재 PMS 기간 (주기 ${mc.dayInCycle ?? "?"}일차)이에요. 평소보다 피로감과 예민함이 높아질 수 있어요.`;
+    desc = tentative
+      ? `현재 주기상 PMS 가능성이 높아요. 평소보다 피로감과 예민함이 올라갈 수 있어요.`
+      : `현재 PMS 기간 (주기 ${mc.dayInCycle ?? "?"}일차)이에요. 평소보다 피로감과 예민함이 높아질 수 있어요.`;
   } else {
-    desc = `현재 생리 중 (주기 ${mc.dayInCycle ?? "?"}일차)이에요.`;
+    desc = tentative
+      ? `현재 생리 관련 회복 부담 가능성이 있어요. 몸을 더 보수적으로 다루는 게 좋아요.`
+      : `현재 생리 중 (주기 ${mc.dayInCycle ?? "?"}일차)이에요.`;
   }
 
-  if (phase === "period" && shift === "N") {
+  if ((phase === "period" || phase === "late_period_tail") && shift === "N") {
     tips.push("생리 중 나이트 근무: 핫팩, 따뜻한 음료, 철분 보충을 미리 준비하세요.");
   }
   if (phase === "pms") {
@@ -648,14 +662,21 @@ function buildCompoundAlert(
   const factors: string[] = [];
   const nightStreak = today.engine?.nightStreak ?? 0;
   const debt = today.engine?.sleepDebtHours ?? 0;
-  const phase = today.menstrual.phase;
+  const phase = today.menstrual.dominantPhase;
   const stress = today.inputs.stress ?? 1;
   const bodyBattery = today.body.value;
   const mentalBattery = today.mental.ema;
 
   if (nightStreak >= 2) factors.push(lang === "en" ? `Night ${nightStreak}` : `나이트${nightStreak}일차`);
   if (debt >= 4) factors.push(lang === "en" ? `Sleep debt ${round1(debt)}h` : `수면빚${round1(debt)}h`);
-  if (phase === "period" || phase === "pms") factors.push(lang === "en" ? phaseLabel(phase, "en") : phaseLabel(phase, "ko"));
+  if (
+    phase === "period" ||
+    phase === "late_period_tail" ||
+    (phase === "pms" && today.menstrual.confidence >= 0.45)
+  ) {
+    const labelPhase = phase === "late_period_tail" ? "period" : phase;
+    factors.push(lang === "en" ? phaseLabel(labelPhase, "en") : phaseLabel(labelPhase, "ko"));
+  }
   if (stress >= 3) factors.push(lang === "en" ? "High stress" : "고스트레스");
   if (bodyBattery < 25) factors.push(lang === "en" ? "Low body battery" : "바디배터리 위험");
   if (mentalBattery < 25) factors.push(lang === "en" ? "Low mental battery" : "멘탈배터리 위험");

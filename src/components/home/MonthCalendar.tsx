@@ -8,7 +8,7 @@ import type { ISODate } from "@/lib/date";
 import { addDays, addMonths, formatMonthTitle, startOfMonth, toISODate, todayISO } from "@/lib/date";
 import type { Shift } from "@/lib/types";
 import type { BioInputs, EmotionEntry, MenstrualSettings } from "@/lib/model";
-import { menstrualContextForDate } from "@/lib/menstrual";
+import { inferMenstrualPosterior, type MenstrualPosterior } from "@/lib/menstrualProbability";
 import { useAppStoreSelector } from "@/lib/store";
 import { useI18n } from "@/lib/useI18n";
 
@@ -60,13 +60,13 @@ function workEventSummary(bio?: BioInputs | null) {
   return note || "";
 }
 
-function phaseColor(phase: string) {
-  if (phase === "period") return "bg-rose-500";
-  if (phase === "pms") return "bg-amber-500";
-  if (phase === "ovulation") return "bg-sky-500";
-  if (phase === "follicular") return "bg-blue-500";
-  if (phase === "luteal") return "bg-indigo-600";
-  return "bg-transparent";
+function phaseColor(phase: MenstrualPosterior["visualPhase"]) {
+  if (phase === "period") return "#F43F5E";
+  if (phase === "pms") return "#F59E0B";
+  if (phase === "ovulation") return "#38BDF8";
+  if (phase === "follicular") return "#3B82F6";
+  if (phase === "luteal") return "#4F46E5";
+  return "transparent";
 }
 
 export function MonthCalendar({
@@ -118,8 +118,8 @@ export function MonthCalendar({
     return weeks.slice(first, last + 1).flat();
   }, [start, month]);
 
-  const menstrualPhaseByISO = useMemo(() => {
-    const m = new Map<ISODate, string>();
+  const menstrualByISO = useMemo(() => {
+    const m = new Map<ISODate, MenstrualPosterior>();
 
     if (!menstrualEffective?.enabled || !menstrualEffective.lastPeriodStart) return m;
 
@@ -131,19 +131,17 @@ export function MonthCalendar({
     }
 
     for (const iso of all) {
-      const ctx = menstrualContextForDate(iso, menstrualEffective);
-      if (
-        ctx.phase === "period" ||
-        ctx.phase === "pms" ||
-        ctx.phase === "ovulation" ||
-        ctx.phase === "follicular" ||
-        ctx.phase === "luteal"
-      ) {
-        m.set(iso, ctx.phase);
-      }
+      const posterior = inferMenstrualPosterior({
+        iso,
+        settings: menstrualEffective,
+        bioMap: bio,
+        schedule,
+        shift: schedule[iso] ?? "OFF",
+      });
+      if (posterior.visualPhase) m.set(iso, posterior);
     }
     return m;
-  }, [grid, menstrualEffective]);
+  }, [bio, grid, menstrualEffective, schedule]);
 
   const today = todayISO();
 
@@ -291,11 +289,15 @@ export function MonthCalendar({
             const workEvent = workEventSummary(bio?.[iso]);
             const emo = emotions?.[iso];
 
-            const phase = menstrualPhaseByISO.get(iso);
-            const prevPhase = menstrualPhaseByISO.get(toISODate(addDays(cell.d, -1)));
-            const nextPhase = menstrualPhaseByISO.get(toISODate(addDays(cell.d, 1)));
+            const menstrualPosterior = menstrualByISO.get(iso);
+            const phase = menstrualPosterior?.visualPhase ?? null;
+            const prevPosterior = menstrualByISO.get(toISODate(addDays(cell.d, -1)));
+            const nextPosterior = menstrualByISO.get(toISODate(addDays(cell.d, 1)));
+            const prevPhase = prevPosterior?.visualPhase ?? null;
+            const nextPhase = nextPosterior?.visualPhase ?? null;
             const roundL = !!phase && prevPhase !== phase;
             const roundR = !!phase && nextPhase !== phase;
+            const phaseTint = phaseColor(phase);
 
             const shiftVisible = cell.inMonth && !!shift && (!scheduleAppliedFrom || cell.iso >= scheduleAppliedFrom);
             const workEventVisible = cell.inMonth && !!workEvent;
@@ -397,12 +399,25 @@ export function MonthCalendar({
                   {/* 생리주기 줄 */}
                   {cell.inMonth && phase ? (
                     <div
-                      className={cn(
-                        "-mx-2 mt-0.5 h-[3px]",
-                        roundL ? "rounded-l-full" : "",
-                        roundR ? "rounded-r-full" : "",
-                        phaseColor(phase)
-                      )}
+                      className={cn("-mx-2 mt-0.5", roundL ? "rounded-l-full" : "", roundR ? "rounded-r-full" : "")}
+                      style={
+                        menstrualPosterior?.visualLevel === "possible"
+                          ? {
+                              height: 0,
+                              borderTop: `2px dashed ${phaseTint}`,
+                              opacity: 0.55,
+                            }
+                          : {
+                              height: 3,
+                              backgroundColor: phaseTint,
+                              opacity:
+                                menstrualPosterior?.visualLevel === "confirmed"
+                                  ? 1
+                                  : menstrualPosterior?.visualLevel === "probable"
+                                    ? 0.62
+                                    : 0.4,
+                            }
+                      }
                     />
                   ) : (
                     <div className="mt-0.5 h-[3px]" />
