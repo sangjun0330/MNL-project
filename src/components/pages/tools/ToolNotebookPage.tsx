@@ -369,14 +369,6 @@ function getElementNaturalBounds(element: HTMLElement, cloneTop: number) {
   }
 }
 
-function getNaturalPositionInSource(source: HTMLElement, element: HTMLElement) {
-  const sourceRect = source.getBoundingClientRect()
-  const rect = element.getBoundingClientRect()
-  return {
-    top: rect.top - sourceRect.top + source.scrollTop,
-    bottom: rect.bottom - sourceRect.top + source.scrollTop,
-  }
-}
 
 function isUsablePdfSliceHeight(nextHeight: number, desiredSliceHeight: number) {
   if (nextHeight <= 0) return false
@@ -680,6 +672,7 @@ function buildPdfLayoutWithPageSpacers(
     setPageSpacerAppliedHeight(spacer, desiredHeight >= 12 ? desiredHeight : 0)
   }
 
+  void root.offsetHeight // force reflow after spacer height changes
   plan = buildPdfSlicePlan(root, captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
   return {
     plan,
@@ -692,39 +685,13 @@ function buildPdfLayoutWithPageSpacers(
   }
 }
 
-function mapPdfBreakMarkersFromPlan(source: HTMLElement, plan: PdfSlicePlan): PdfBreakMarker[] {
-  return plan.slices.slice(0, -1).map((slice, index) => {
-    const anchor = slice.breakAnchor
-    if (!anchor?.blockId || !anchor.edge) {
-      return {
-        y: Math.floor(anchor?.naturalY ?? slice.offsetY + slice.height),
-        pageFrom: index + 1,
-        pageTo: index + 2,
-        target: anchor?.target,
-      }
-    }
-    const sourceBlock = source.querySelector<HTMLElement>(`#${CSS.escape(anchor.blockId)}`)
-    if (!sourceBlock) {
-      return {
-        y: Math.floor(anchor.naturalY),
-        pageFrom: index + 1,
-        pageTo: index + 2,
-        target: anchor.target,
-      }
-    }
-    const sourceAnchorTarget =
-      anchor.target === "page-spacer-filler"
-        ? sourceBlock.querySelector<HTMLElement>('[data-page-spacer-filler="true"]') ?? sourceBlock
-        : sourceBlock
-    const sourceBounds = getNaturalPositionInSource(source, sourceAnchorTarget)
-    const base = anchor.edge === "bottom" ? sourceBounds.bottom : sourceBounds.top
-    return {
-      y: Math.floor(base + (anchor.delta ?? 0)),
-      pageFrom: index + 1,
-      pageTo: index + 2,
-      target: anchor.target,
-    }
-  })
+function mapPdfBreakMarkersFromPlan(_source: HTMLElement, plan: PdfSlicePlan): PdfBreakMarker[] {
+  return plan.slices.slice(0, -1).map((slice, index) => ({
+    y: Math.floor(slice.breakAnchor?.naturalY ?? (slice.offsetY + slice.height)),
+    pageFrom: index + 1,
+    pageTo: index + 2,
+    target: slice.breakAnchor?.target,
+  }))
 }
 
 function deriveAttachmentKind(file: File, preferred: RNestMemoAttachment["kind"] | null = null): RNestMemoAttachment["kind"] {
@@ -2933,7 +2900,9 @@ function InlineBlock({
         className={cn(
           "z-20 mb-2 flex items-center gap-2 transition-opacity duration-150",
           "lg:absolute lg:-left-16 lg:top-1/2 lg:mb-0 lg:gap-1 lg:-translate-y-1/2",
-          mobileControlsVisible ? "pointer-events-auto opacity-100" : "pointer-events-none h-0 overflow-hidden opacity-0 lg:h-auto lg:overflow-visible",
+          showPdfBreaks
+            ? "pointer-events-none h-0 overflow-hidden opacity-0 lg:h-auto lg:overflow-visible"
+            : mobileControlsVisible ? "pointer-events-auto opacity-100" : "pointer-events-none h-0 overflow-hidden opacity-0 lg:h-auto lg:overflow-visible",
           desktopControlsVisible ? "lg:pointer-events-auto lg:opacity-100" : "lg:pointer-events-none lg:opacity-0"
         )}
         data-pdf-hide="true"
@@ -3239,71 +3208,67 @@ function InlineBlock({
             data-page-spacer-block-id={block.id}
             data-page-spacer-mode={pageSpacerMode}
             data-page-spacer-manual-height={pageSpacerManualHeight}
-            className={cn("relative", !showPdfBreaks && "py-2")}
+            className={cn("group/spacer relative", !showPdfBreaks && "py-1")}
           >
             <div
               data-page-spacer-ui="true"
               className={cn(
                 "z-10",
                 showPdfBreaks
-                  ? "pointer-events-none absolute right-3 top-3"
-                  : "pointer-events-none relative"
+                  ? "pointer-events-none absolute right-2 top-1"
+                  : "relative"
               )}
             >
-              <div className={cn("flex items-center gap-3", showPdfBreaks ? "" : "px-3")}>
-                {!showPdfBreaks && <div className="h-px flex-1 bg-[#E7EAF2]" />}
-                <div className="pointer-events-auto inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[#E7EAF2] bg-white/96 px-2 py-1 shadow-[0_8px_24px_rgba(15,23,42,0.06)] backdrop-blur">
-                <button
-                  type="button"
-                  title={pageSpacerMode === "next-page" ? "수동 간격으로 전환" : "다음 페이지 시작으로 전환"}
-                  onClick={() =>
-                    onChange({
-                      ...block,
-                      spacerMode: pageSpacerMode === "next-page" ? "manual" : "next-page",
-                    })
-                  }
-                  className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium tracking-[-0.01em] text-[#6F62D9] transition-colors hover:bg-[#F5F2FF]"
-                >
-                  {pageSpacerMode === "next-page" ? (
-                    <>
-                      <ArrowUpDown className="h-3 w-3" />
-                      {showPdfBreaks ? "페이지 맞춤" : "다음 페이지"}
-                    </>
-                  ) : (
-                    <>PDF {pageSpacerManualHeight}px</>
+              {showPdfBreaks ? (
+                /* 미리보기 모드: 작은 뱃지만 */
+                <span className="inline-flex items-center rounded-md bg-gray-100/80 px-1.5 py-0.5 text-[10px] font-medium text-gray-400">
+                  {pageSpacerMode === "next-page" ? "페이지 맞춤" : `${pageSpacerManualHeight}px`}
+                </span>
+              ) : (
+                /* 편집 모드: 얇은 선 + 중앙 pill */
+                <div className="flex items-center gap-2 px-1">
+                  <div className="h-px flex-1 bg-gray-200" />
+                  <button
+                    type="button"
+                    title={pageSpacerMode === "next-page" ? "수동 간격으로 전환" : "다음 페이지 시작으로 전환"}
+                    onClick={() =>
+                      onChange({
+                        ...block,
+                        spacerMode: pageSpacerMode === "next-page" ? "manual" : "next-page",
+                      })
+                    }
+                    className="inline-flex shrink-0 items-center gap-1 rounded-full bg-gray-50 px-2.5 py-0.5 text-[11px] font-medium text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700"
+                  >
+                    {pageSpacerMode === "next-page" ? "페이지 구분" : `${pageSpacerManualHeight}px`}
+                  </button>
+                  {pageSpacerMode === "manual" && (
+                    <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover/spacer:opacity-100">
+                      <button
+                        type="button"
+                        onClick={() => onChange({ ...block, spacerHeight: clampPageSpacerHeight(pageSpacerManualHeight - 24) })}
+                        className="flex h-5 w-5 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+                        aria-label="간격 줄이기"
+                      >
+                        <Minus className="h-2.5 w-2.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onChange({ ...block, spacerHeight: clampPageSpacerHeight(pageSpacerManualHeight + 24) })}
+                        className="flex h-5 w-5 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+                        aria-label="간격 늘리기"
+                      >
+                        <Plus className="h-2.5 w-2.5" />
+                      </button>
+                    </div>
                   )}
-                </button>
-                {pageSpacerMode === "manual" && (
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => onChange({ ...block, spacerHeight: clampPageSpacerHeight(pageSpacerManualHeight - 24) })}
-                      className="flex h-6 w-6 items-center justify-center rounded-full border border-[#E7EAF2] bg-white text-[#8A90A5] transition-colors hover:bg-[#F8F9FC] hover:text-[#586074]"
-                      aria-label="PDF 간격 줄이기"
-                    >
-                      <Minus className="h-3 w-3" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onChange({ ...block, spacerHeight: clampPageSpacerHeight(pageSpacerManualHeight + 24) })}
-                      className="flex h-6 w-6 items-center justify-center rounded-full border border-[#E7EAF2] bg-white text-[#8A90A5] transition-colors hover:bg-[#F8F9FC] hover:text-[#586074]"
-                      aria-label="PDF 간격 늘리기"
-                    >
-                      <Plus className="h-3 w-3" />
-                    </button>
-                  </div>
-                )}
+                  <div className="h-px flex-1 bg-gray-200" />
                 </div>
-                {!showPdfBreaks && <div className="h-px flex-1 bg-[#E7EAF2]" />}
-              </div>
+              )}
             </div>
             <div
               data-page-spacer-filler="true"
               style={{ height: showPdfBreaks ? pageSpacerPreviewGap : 0 }}
-              className={cn(
-                "overflow-hidden transition-[height] duration-200",
-                showPdfBreaks ? "bg-transparent" : ""
-              )}
+              className="overflow-hidden transition-[height] duration-200"
             />
           </div>
         )}
@@ -6998,7 +6963,7 @@ export function ToolNotebookPage() {
                         type="button"
                         onClick={() => setShowCompactTools((current) => !current)}
                         data-pdf-hide="true"
-                        className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-[12px] font-medium text-ios-sub shadow-[inset_0_0_0_1px_rgba(196,181,253,0.35)] transition-colors hover:bg-[color:var(--rnest-accent-soft)]/35"
+                        className={cn("ml-auto inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-[12px] font-medium text-ios-sub shadow-[inset_0_0_0_1px_rgba(196,181,253,0.35)] transition-colors hover:bg-[color:var(--rnest-accent-soft)]/35", showPdfBreaks && "hidden")}
                       >
                         <Sparkles className="h-3.5 w-3.5 text-[color:var(--rnest-accent)]" />
                         메모 도구
@@ -7006,7 +6971,7 @@ export function ToolNotebookPage() {
                       </button>
                     </div>
 
-                    {showCompactTools && (
+                    {showCompactTools && !showPdfBreaks && (
                       <div data-pdf-hide="true" className="mt-3 space-y-4 rounded-[24px] border border-[color:var(--rnest-accent-border)]/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(248,245,255,0.94)_100%)] p-4 shadow-[0_14px_34px_rgba(123,111,208,0.08)]">
                         <div className="flex flex-wrap items-center gap-3">
                           <InlineTagEditor
