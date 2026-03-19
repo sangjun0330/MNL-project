@@ -209,6 +209,7 @@ type PdfBreakAnchor = {
   blockId?: string
   edge?: "top" | "bottom"
   delta?: number
+  target?: "block" | "page-spacer-filler"
 }
 
 function createPdfFieldPreview(field: HTMLInputElement | HTMLTextAreaElement) {
@@ -291,6 +292,14 @@ function buildPdfExportRoot(source: HTMLElement) {
   // 페이지 구분선 위치와 실제 PDF 페이지가 전혀 맞지 않는 근본 원인이었음
   clone.querySelectorAll<HTMLElement>('[data-page-spacer-ui="true"]').forEach((element) => {
     element.style.display = "none"
+  })
+  clone.querySelectorAll<HTMLElement>('[data-page-spacer-filler="true"]').forEach((element) => {
+    element.style.border = "0"
+    element.style.background = "transparent"
+    element.style.boxShadow = "none"
+    element.style.outline = "none"
+    element.style.borderRadius = "0"
+    element.style.opacity = "1"
   })
 
   viewport.appendChild(clone)
@@ -427,6 +436,8 @@ function findSafeSlice(
   for (const { block, top: blockNaturalTop, bottom: blockNaturalBottom } of blockBounds) {
     if (blockNaturalTop < cutNaturalY && blockNaturalBottom > cutNaturalY) {
       if (block.dataset.pageSpacerBlock === "true") {
+        const filler = block.querySelector<HTMLElement>('[data-page-spacer-filler="true"]') ?? block
+        const fillerBounds = getElementNaturalBounds(filler, cloneTop)
         return {
           offsetY: currentOffsetY,
           height: desiredSliceHeight,
@@ -434,7 +445,8 @@ function findSafeSlice(
             naturalY: cutNaturalY,
             blockId: block.id,
             edge: "top",
-            delta: Math.floor(cutNaturalY - blockNaturalTop),
+            delta: Math.floor(cutNaturalY - fillerBounds.top),
+            target: "page-spacer-filler",
           },
         }
       }
@@ -448,6 +460,7 @@ function findSafeSlice(
             blockId: block.id,
             edge: "top",
             delta: -PDF_BREAK_PADDING_PX,
+            target: "block",
           },
         }
       }
@@ -473,6 +486,7 @@ function findSafeSlice(
         blockId: nextBlock.block.id,
         edge: "top",
         delta: Math.floor(cutNaturalY - nextBlock.top),
+        target: "block",
       },
     }
   }
@@ -485,6 +499,7 @@ function findSafeSlice(
         blockId: previousBlock.block.id,
         edge: "bottom",
         delta: Math.floor(cutNaturalY - previousBlock.bottom),
+        target: "block",
       },
     }
   }
@@ -680,7 +695,11 @@ function mapPdfBreakPositionsFromPlan(source: HTMLElement, plan: PdfSlicePlan) {
     if (!sourceBlock) {
       return Math.floor(anchor.naturalY)
     }
-    const sourceBounds = getNaturalPositionInSource(source, sourceBlock)
+    const sourceAnchorTarget =
+      anchor.target === "page-spacer-filler"
+        ? sourceBlock.querySelector<HTMLElement>('[data-page-spacer-filler="true"]') ?? sourceBlock
+        : sourceBlock
+    const sourceBounds = getNaturalPositionInSource(source, sourceAnchorTarget)
     const base = anchor.edge === "bottom" ? sourceBounds.bottom : sourceBounds.top
     return Math.floor(base + (anchor.delta ?? 0))
   })
@@ -3200,69 +3219,59 @@ function InlineBlock({
             data-page-spacer-manual-height={pageSpacerManualHeight}
             className="relative"
           >
-            {/* ── Apple-style 미니멀 구분선 UI ── */}
-            {/* data-pdf-export 시 display:none 처리로 레이아웃에서 완전 제거됨 */}
             <div
               data-page-spacer-ui="true"
-              className="flex items-center gap-2.5 py-1.5"
+              className="flex items-center gap-3 py-2"
             >
-              <div className="h-px flex-1 bg-gray-200" />
-              <div className="flex shrink-0 items-center gap-1.5">
-                {/* 모드 전환 칩: 탭하면 수동 ↔ 다음 페이지 토글 */}
+              <div className="h-px flex-1 bg-[#E7EAF2]" />
+              <div className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[#E7EAF2] bg-white/95 px-2 py-1 shadow-[0_6px_20px_rgba(15,23,42,0.06)] backdrop-blur">
                 <button
                   type="button"
-                  title={pageSpacerMode === "next-page" ? "클릭하여 수동 간격으로 전환" : "클릭하여 다음 페이지로 전환"}
+                  title={pageSpacerMode === "next-page" ? "수동 간격으로 전환" : "다음 페이지 시작으로 전환"}
                   onClick={() =>
                     onChange({
                       ...block,
                       spacerMode: pageSpacerMode === "next-page" ? "manual" : "next-page",
                     })
                   }
-                  className="flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2.5 py-0.5 text-[11px] font-medium text-gray-400 shadow-sm transition-colors hover:border-gray-300 hover:text-gray-600"
+                  className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium tracking-[-0.01em] text-[#6F62D9] transition-colors hover:bg-[#F5F2FF]"
                 >
                   {pageSpacerMode === "next-page" ? (
                     <>
-                      <ArrowUpDown className="h-2.5 w-2.5" />
+                      <ArrowUpDown className="h-3 w-3" />
                       다음 페이지
                     </>
                   ) : (
-                    <>{pageSpacerManualHeight}px</>
+                    <>PDF {pageSpacerManualHeight}px</>
                   )}
                 </button>
-                {/* 수동 모드: 높이 ±24 조절 버튼 */}
                 {pageSpacerMode === "manual" && (
-                  <>
+                  <div className="flex items-center gap-1">
                     <button
                       type="button"
                       onClick={() => onChange({ ...block, spacerHeight: clampPageSpacerHeight(pageSpacerManualHeight - 24) })}
-                      className="flex h-5 w-5 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-sm transition-colors hover:text-gray-600"
+                      className="flex h-6 w-6 items-center justify-center rounded-full border border-[#E7EAF2] bg-white text-[#8A90A5] transition-colors hover:bg-[#F8F9FC] hover:text-[#586074]"
                       aria-label="PDF 간격 줄이기"
                     >
-                      <Minus className="h-2.5 w-2.5" />
+                      <Minus className="h-3 w-3" />
                     </button>
                     <button
                       type="button"
                       onClick={() => onChange({ ...block, spacerHeight: clampPageSpacerHeight(pageSpacerManualHeight + 24) })}
-                      className="flex h-5 w-5 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-sm transition-colors hover:text-gray-600"
+                      className="flex h-6 w-6 items-center justify-center rounded-full border border-[#E7EAF2] bg-white text-[#8A90A5] transition-colors hover:bg-[#F8F9FC] hover:text-[#586074]"
                       aria-label="PDF 간격 늘리기"
                     >
-                      <Plus className="h-2.5 w-2.5" />
+                      <Plus className="h-3 w-3" />
                     </button>
-                  </>
+                  </div>
                 )}
               </div>
-              <div className="h-px flex-1 bg-gray-200" />
+              <div className="h-px flex-1 bg-[#E7EAF2]" />
             </div>
-            {/* 실제 PDF 간격 미리보기 (showPdfBreaks 시에만 표시) */}
             <div
               data-page-spacer-filler="true"
               style={{ height: showPdfBreaks ? pageSpacerPreviewGap : 0 }}
-              className={cn(
-                "overflow-hidden transition-[height,opacity] duration-200",
-                showPdfBreaks && pageSpacerPreviewGap > 0
-                  ? "rounded-lg border border-dashed border-[#007AFF]/20 bg-[#007AFF]/[0.03] opacity-100"
-                  : "opacity-0"
-              )}
+              className="overflow-hidden transition-[height] duration-200"
             />
           </div>
         )}
@@ -7295,15 +7304,17 @@ export function ToolNotebookPage() {
                   key={y}
                   data-pdf-hide="true"
                   aria-hidden="true"
-                  style={{ top: y, position: "absolute", left: 0, right: 0 }}
+                  style={{ top: y, position: "absolute", left: 0, right: 0, height: 0 }}
                   className="pointer-events-none z-20"
                 >
-                  <div className="flex items-center gap-2 px-3">
-                    <div className="h-px flex-1 border-t border-dashed border-[#007AFF]/40" />
-                    <span className="shrink-0 rounded-full bg-[#007AFF] px-2.5 py-0.5 text-[9px] font-bold tracking-wide text-white">
-                      {i + 1}P · {i + 2}P
+                  <div className="relative h-0 px-3">
+                    <div className="absolute left-3 right-3 top-0 h-px bg-[#D6DAE5]" />
+                    <span
+                      className="absolute left-1/2 top-0 shrink-0 rounded-full border border-[#E6E8F1] bg-white/96 px-3 py-1 text-[10px] font-semibold tracking-[-0.01em] text-[#6F62D9] shadow-[0_10px_24px_rgba(15,23,42,0.08)]"
+                      style={{ transform: "translate(-50%, calc(-100% - 6px))" }}
+                    >
+                      {i + 1}P → {i + 2}P
                     </span>
-                    <div className="h-px flex-1 border-t border-dashed border-[#007AFF]/40" />
                   </div>
                 </div>
               ))}
