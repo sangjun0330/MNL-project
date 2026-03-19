@@ -190,12 +190,20 @@ const PDF_INNER_BREAK_SELECTOR = [
 type PdfSlice = {
   offsetY: number
   height: number
+  breakAnchor?: PdfBreakAnchor
 }
 
 type PdfSlicePlan = {
   totalHeight: number
   pageSliceHeightPx: number
   slices: PdfSlice[]
+}
+
+type PdfBreakAnchor = {
+  naturalY: number
+  blockId?: string
+  edge?: "top" | "bottom"
+  delta?: number
 }
 
 function createPdfFieldPreview(field: HTMLInputElement | HTMLTextAreaElement) {
@@ -329,13 +337,22 @@ function getElementNaturalBounds(element: HTMLElement, cloneTop: number) {
   }
 }
 
+function getNaturalPositionInSource(source: HTMLElement, element: HTMLElement) {
+  const sourceRect = source.getBoundingClientRect()
+  const rect = element.getBoundingClientRect()
+  return {
+    top: rect.top - sourceRect.top + source.scrollTop,
+    bottom: rect.bottom - sourceRect.top + source.scrollTop,
+  }
+}
+
 function isUsablePdfSliceHeight(nextHeight: number, desiredSliceHeight: number) {
   if (nextHeight <= 0) return false
   const minimum = Math.min(PDF_MIN_SAFE_SLICE_HEIGHT_PX, Math.max(32, desiredSliceHeight - 24))
   return nextHeight >= minimum
 }
 
-function findSafeInnerSliceHeight(
+function findSafeInnerSlice(
   block: HTMLElement,
   currentOffsetY: number,
   cutNaturalY: number,
@@ -357,11 +374,19 @@ function findSafeInnerSliceHeight(
   if (bestBottom > currentOffsetY) {
     const safeHeight = Math.min(desiredSliceHeight, Math.floor(bestBottom - currentOffsetY))
     if (isUsablePdfSliceHeight(safeHeight, desiredSliceHeight)) {
-      return safeHeight
+      return {
+        height: safeHeight,
+        anchor: {
+          naturalY: currentOffsetY + safeHeight,
+          blockId: block.id,
+          edge: "top" as const,
+          delta: Math.floor(bestBottom - getElementNaturalBounds(block, cloneTop).top),
+        },
+      }
     }
   }
 
-  return desiredSliceHeight
+  return null
 }
 
 // Find a clean page-break position that avoids slicing through a memo block.
@@ -369,29 +394,77 @@ function findSafeInnerSliceHeight(
 //    clone에 translateY(-X)가 적용되어 있어도
 //    block.top - clone.top 은 항상 content 내 자연 위치를 반환한다.
 //    (offsetTop/offsetParent 방식은 clone이 position:relative가 아닐 때 잘못 누적되는 버그가 있었음)
-function findSafeSliceHeight(
+function findSafeSlice(
   desiredSliceHeight: number,
   currentOffsetY: number,
   clone: HTMLElement
-): number {
-  if (desiredSliceHeight <= 0) return desiredSliceHeight
+): PdfSlice {
+  if (desiredSliceHeight <= 0) {
+    return { offsetY: currentOffsetY, height: desiredSliceHeight, breakAnchor: { naturalY: currentOffsetY + desiredSliceHeight } }
+  }
   const cutNaturalY = currentOffsetY + desiredSliceHeight
   const cloneTop = clone.getBoundingClientRect().top
-  const blockEls = clone.querySelectorAll<HTMLElement>('[id^="memo-block-"]')
-  for (const block of Array.from(blockEls)) {
-    const { top: blockNaturalTop, bottom: blockNaturalBottom } = getElementNaturalBounds(block, cloneTop)
+  const blockBounds = Array.from(clone.querySelectorAll<HTMLElement>('[id^="memo-block-"]')).map((block) => {
+    const bounds = getElementNaturalBounds(block, cloneTop)
+    return { block, ...bounds }
+  })
+  for (const { block, top: blockNaturalTop, bottom: blockNaturalBottom } of blockBounds) {
     if (blockNaturalTop < cutNaturalY && blockNaturalBottom > cutNaturalY) {
       const safeHeight = Math.floor(blockNaturalTop - currentOffsetY - PDF_BREAK_PADDING_PX)
       if (safeHeight > 0 && safeHeight < desiredSliceHeight && isUsablePdfSliceHeight(safeHeight, desiredSliceHeight)) {
-        return safeHeight
+        return {
+          offsetY: currentOffsetY,
+          height: safeHeight,
+          breakAnchor: {
+            naturalY: currentOffsetY + safeHeight,
+            blockId: block.id,
+            edge: "top",
+            delta: -PDF_BREAK_PADDING_PX,
+          },
+        }
       }
-      const innerSafeHeight = findSafeInnerSliceHeight(block, currentOffsetY, cutNaturalY, desiredSliceHeight, cloneTop)
-      if (innerSafeHeight > 0 && innerSafeHeight < desiredSliceHeight) {
-        return innerSafeHeight
+      const innerSafeSlice = findSafeInnerSlice(block, currentOffsetY, cutNaturalY, desiredSliceHeight, cloneTop)
+      if (innerSafeSlice && innerSafeSlice.height > 0 && innerSafeSlice.height < desiredSliceHeight) {
+        return {
+          offsetY: currentOffsetY,
+          height: innerSafeSlice.height,
+          breakAnchor: innerSafeSlice.anchor,
+        }
       }
     }
   }
-  return desiredSliceHeight
+
+  const nextBlock = blockBounds.find(({ top }) => top >= cutNaturalY)
+  const previousBlock = [...blockBounds].reverse().find(({ bottom }) => bottom <= cutNaturalY)
+  if (nextBlock) {
+    return {
+      offsetY: currentOffsetY,
+      height: desiredSliceHeight,
+      breakAnchor: {
+        naturalY: cutNaturalY,
+        blockId: nextBlock.block.id,
+        edge: "top",
+        delta: Math.floor(cutNaturalY - nextBlock.top),
+      },
+    }
+  }
+  if (previousBlock) {
+    return {
+      offsetY: currentOffsetY,
+      height: desiredSliceHeight,
+      breakAnchor: {
+        naturalY: cutNaturalY,
+        blockId: previousBlock.block.id,
+        edge: "bottom",
+        delta: Math.floor(cutNaturalY - previousBlock.bottom),
+      },
+    }
+  }
+  return {
+    offsetY: currentOffsetY,
+    height: desiredSliceHeight,
+    breakAnchor: { naturalY: cutNaturalY },
+  }
 }
 
 function buildPdfSlicePlan(clone: HTMLElement, captureWidth: number, pdfInnerWidthPt: number, pdfInnerHeightPt: number): PdfSlicePlan {
@@ -402,10 +475,10 @@ function buildPdfSlicePlan(clone: HTMLElement, captureWidth: number, pdfInnerWid
   let offsetY = 0
   while (offsetY < totalHeight) {
     let sliceHeight = Math.min(pageSliceHeightPx, totalHeight - offsetY)
-    sliceHeight = findSafeSliceHeight(sliceHeight, offsetY, clone)
-    if (sliceHeight <= 0) break
-    slices.push({ offsetY, height: sliceHeight })
-    offsetY += sliceHeight
+    const slice = findSafeSlice(sliceHeight, offsetY, clone)
+    if (slice.height <= 0) break
+    slices.push(slice)
+    offsetY += slice.height
   }
 
   return {
@@ -429,7 +502,19 @@ async function measurePdfBreakPositions(source: HTMLElement) {
       PDF_PAGE_HEIGHT_PT - PDF_EXPORT_MARGIN_PT * 2
     )
     if (plan.totalHeight <= 0) return []
-    return plan.slices.slice(0, -1).map((slice) => Math.floor(slice.offsetY + slice.height))
+    return plan.slices.slice(0, -1).map((slice) => {
+      const anchor = slice.breakAnchor
+      if (!anchor?.blockId || !anchor.edge) {
+        return Math.floor(anchor?.naturalY ?? slice.offsetY + slice.height)
+      }
+      const sourceBlock = source.querySelector<HTMLElement>(`#${CSS.escape(anchor.blockId)}`)
+      if (!sourceBlock) {
+        return Math.floor(anchor.naturalY)
+      }
+      const sourceBounds = getNaturalPositionInSource(source, sourceBlock)
+      const base = anchor.edge === "bottom" ? sourceBounds.bottom : sourceBounds.top
+      return Math.floor(base + (anchor.delta ?? 0))
+    })
   } finally {
     cleanup()
   }
