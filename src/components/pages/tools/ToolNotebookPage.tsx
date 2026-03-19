@@ -3246,12 +3246,12 @@ function InlineBlock({
               className={cn(
                 "z-10",
                 showPdfBreaks
-                  ? "pointer-events-none absolute inset-x-0 top-0"
+                  ? "pointer-events-none absolute right-3 top-3"
                   : "pointer-events-none relative"
               )}
             >
-              <div className="flex items-center gap-3 px-3">
-                <div className="h-px flex-1 bg-[#E7EAF2]" />
+              <div className={cn("flex items-center gap-3", showPdfBreaks ? "" : "px-3")}>
+                {!showPdfBreaks && <div className="h-px flex-1 bg-[#E7EAF2]" />}
                 <div className="pointer-events-auto inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[#E7EAF2] bg-white/96 px-2 py-1 shadow-[0_8px_24px_rgba(15,23,42,0.06)] backdrop-blur">
                 <button
                   type="button"
@@ -3267,7 +3267,7 @@ function InlineBlock({
                   {pageSpacerMode === "next-page" ? (
                     <>
                       <ArrowUpDown className="h-3 w-3" />
-                      다음 페이지
+                      {showPdfBreaks ? "페이지 맞춤" : "다음 페이지"}
                     </>
                   ) : (
                     <>PDF {pageSpacerManualHeight}px</>
@@ -3294,13 +3294,16 @@ function InlineBlock({
                   </div>
                 )}
                 </div>
-                <div className="h-px flex-1 bg-[#E7EAF2]" />
+                {!showPdfBreaks && <div className="h-px flex-1 bg-[#E7EAF2]" />}
               </div>
             </div>
             <div
               data-page-spacer-filler="true"
               style={{ height: showPdfBreaks ? pageSpacerPreviewGap : 0 }}
-              className="overflow-hidden transition-[height] duration-200"
+              className={cn(
+                "overflow-hidden transition-[height] duration-200",
+                showPdfBreaks ? "bg-transparent" : ""
+              )}
             />
           </div>
         )}
@@ -7328,7 +7331,7 @@ export function ToolNotebookPage() {
               )}
 
               {/* PDF page break indicators */}
-              {showPdfBreaks && pdfBreakMarkers.filter((marker) => marker.target !== "page-spacer-filler").map((marker) => (
+              {showPdfBreaks && pdfBreakMarkers.map((marker) => (
                 <div
                   key={`${marker.pageFrom}-${marker.pageTo}-${marker.y}`}
                   data-pdf-hide="true"
