@@ -685,9 +685,42 @@ function buildPdfLayoutWithPageSpacers(
   }
 }
 
-function mapPdfBreakMarkersFromPlan(_source: HTMLElement, plan: PdfSlicePlan): PdfBreakMarker[] {
+function escapeDomIdForSelector(id: string) {
+  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
+    return CSS.escape(id)
+  }
+  return id.replace(/([ !"#$%&'()*+,./:;<=>?@[\\\]^`{|}~])/g, "\\$1")
+}
+
+function resolvePdfBreakMarkerY(source: HTMLElement, anchor?: PdfBreakAnchor, fallbackNaturalY?: number) {
+  const fallback = Math.max(0, Math.floor(fallbackNaturalY ?? 0))
+  if (!anchor?.blockId) return fallback
+
+  const selector = `#${escapeDomIdForSelector(anchor.blockId)}`
+  const block = source.querySelector<HTMLElement>(selector)
+  if (!block) return fallback
+
+  const sourceTop = source.getBoundingClientRect().top
+  if (anchor.target === "page-spacer-filler") {
+    const filler = block.querySelector<HTMLElement>('[data-page-spacer-filler="true"]') ?? block
+    const fillerBounds = getElementNaturalBounds(filler, sourceTop)
+    if (typeof anchor.delta === "number" && Number.isFinite(anchor.delta)) {
+      return Math.max(0, Math.floor(fillerBounds.top + anchor.delta))
+    }
+    return Math.max(0, Math.floor(fillerBounds.top))
+  }
+
+  const blockBounds = getElementNaturalBounds(block, sourceTop)
+  const base = anchor.edge === "bottom" ? blockBounds.bottom : blockBounds.top
+  if (typeof anchor.delta === "number" && Number.isFinite(anchor.delta)) {
+    return Math.max(0, Math.floor(base + anchor.delta))
+  }
+  return Math.max(0, Math.floor(base))
+}
+
+function mapPdfBreakMarkersFromPlan(source: HTMLElement, plan: PdfSlicePlan): PdfBreakMarker[] {
   return plan.slices.slice(0, -1).map((slice, index) => ({
-    y: Math.floor(slice.breakAnchor?.naturalY ?? (slice.offsetY + slice.height)),
+    y: resolvePdfBreakMarkerY(source, slice.breakAnchor, slice.breakAnchor?.naturalY ?? (slice.offsetY + slice.height)),
     pageFrom: index + 1,
     pageTo: index + 2,
     target: slice.breakAnchor?.target,
@@ -1978,28 +2011,28 @@ function MoreMenu({
 
   const items = doc.trashedAt != null
     ? [
-        { id: "restore", label: "복구", icon: <RotateCcw className="h-3.5 w-3.5" /> },
-        { id: "delete-permanent", label: "영구 삭제", icon: <Trash2 className="h-3.5 w-3.5" />, danger: true },
-      ]
+      { id: "restore", label: "복구", icon: <RotateCcw className="h-3.5 w-3.5" /> },
+      { id: "delete-permanent", label: "영구 삭제", icon: <Trash2 className="h-3.5 w-3.5" />, danger: true },
+    ]
     : [
-        { id: "find", label: "메모 검색", icon: <Search className="h-3.5 w-3.5" /> },
-        { id: "pin", label: doc.pinned ? "핀 해제" : "핀 고정", icon: doc.pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" /> },
-        { id: "favorite", label: doc.favorite ? "즐겨찾기 해제" : "즐겨찾기", icon: <Star className="h-3.5 w-3.5" /> },
-        {
-          id: doc.lock ? (isUnlocked ? "relock" : "unlock") : "lock",
-          label: doc.lock ? (isUnlocked ? "다시 잠그기" : "잠금 해제") : "잠금 설정",
-          icon: doc.lock ? (isUnlocked ? <Lock className="h-3.5 w-3.5" /> : <LockOpen className="h-3.5 w-3.5" />) : <Shield className="h-3.5 w-3.5" />,
-        },
-        ...(doc.lock && isUnlocked
-          ? [{ id: "remove-lock", label: "잠금 제거", icon: <Shield className="h-3.5 w-3.5" /> }]
-          : []),
-        { id: "duplicate", label: "복제", icon: <Copy className="h-3.5 w-3.5" /> },
-        { id: "import-text", label: "텍스트 가져오기", icon: <Download className="h-3.5 w-3.5" /> },
-        { id: "export-pdf", label: "PDF 저장", icon: <Download className="h-3.5 w-3.5" /> },
-        { id: "export-txt", label: "TXT 내보내기", icon: <Download className="h-3.5 w-3.5" /> },
-        { id: "export-md", label: "Markdown 내보내기", icon: <Download className="h-3.5 w-3.5" /> },
-        { id: "trash", label: "삭제", icon: <Trash2 className="h-3.5 w-3.5" />, danger: true },
-      ]
+      { id: "find", label: "메모 검색", icon: <Search className="h-3.5 w-3.5" /> },
+      { id: "pin", label: doc.pinned ? "핀 해제" : "핀 고정", icon: doc.pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" /> },
+      { id: "favorite", label: doc.favorite ? "즐겨찾기 해제" : "즐겨찾기", icon: <Star className="h-3.5 w-3.5" /> },
+      {
+        id: doc.lock ? (isUnlocked ? "relock" : "unlock") : "lock",
+        label: doc.lock ? (isUnlocked ? "다시 잠그기" : "잠금 해제") : "잠금 설정",
+        icon: doc.lock ? (isUnlocked ? <Lock className="h-3.5 w-3.5" /> : <LockOpen className="h-3.5 w-3.5" />) : <Shield className="h-3.5 w-3.5" />,
+      },
+      ...(doc.lock && isUnlocked
+        ? [{ id: "remove-lock", label: "잠금 제거", icon: <Shield className="h-3.5 w-3.5" /> }]
+        : []),
+      { id: "duplicate", label: "복제", icon: <Copy className="h-3.5 w-3.5" /> },
+      { id: "import-text", label: "텍스트 가져오기", icon: <Download className="h-3.5 w-3.5" /> },
+      { id: "export-pdf", label: "PDF 저장", icon: <Download className="h-3.5 w-3.5" /> },
+      { id: "export-txt", label: "TXT 내보내기", icon: <Download className="h-3.5 w-3.5" /> },
+      { id: "export-md", label: "Markdown 내보내기", icon: <Download className="h-3.5 w-3.5" /> },
+      { id: "trash", label: "삭제", icon: <Trash2 className="h-3.5 w-3.5" />, danger: true },
+    ]
 
   return (
     <div
@@ -2862,11 +2895,11 @@ function InlineBlock({
   const pageSpacerManualHeight = clampPageSpacerHeight(block.spacerHeight)
   const pageSpacerPreviewGap = showPdfBreaks
     ? Math.max(
-        0,
-        Math.round(
-          pdfSpacerPreviewHeight ?? (pageSpacerMode === "manual" ? pageSpacerManualHeight : 0)
-        )
+      0,
+      Math.round(
+        pdfSpacerPreviewHeight ?? (pageSpacerMode === "manual" ? pageSpacerManualHeight : 0)
       )
+    )
     : 0
 
   return (
@@ -3824,108 +3857,108 @@ function InlineBlock({
               const table = upgradeMemoTableToV2(block.table)
               return (
                 <>
-            <table className="w-full text-[13.5px]">
-              <thead>
-                <tr className="border-b border-gray-200 bg-gray-50">
-                  {table.columns.map((column, columnIndex) => (
-                    <th key={`col-${columnIndex}`} className="min-w-[180px] px-3 py-2 text-left font-medium text-ios-sub">
-                      <div className="flex items-center gap-2">
-                        <NotebookRichTextField
-                          text={getMemoTableColumnText(table, columnIndex)}
-                          html={table.columnHtml?.[columnIndex]}
-                          placeholder={`열 ${columnIndex + 1}`}
-                          ariaLabel={`표 ${columnIndex + 1}번째 헤더`}
-                          className="font-medium text-ios-sub"
-                          singleLine
-                          enableSlashMenu={false}
-                          onDuplicate={onDuplicate}
-                          onChange={(next) => updateTableColumn(columnIndex, next)}
-                        />
-                        {table.columns.length > 2 && (
-                          <button
-                            type="button"
-                            onClick={() => removeTableColumn(columnIndex)}
-                            className="flex h-6 w-6 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                          >
-                            <X className="h-3 w-3" />
-                          </button>
-                        )}
-                      </div>
-                    </th>
-                  ))}
-                  <th className="w-8" />
-                </tr>
-              </thead>
-              <tbody>
-                {table.rows.map((row) => (
-                  <tr key={row.id} className="border-b border-gray-100 last:border-b-0">
-                    {getMemoTableRowCells(row, table).map((cell, columnIndex) => (
-                      <td key={`${row.id}-${columnIndex}`} className="px-3 py-2">
-                        <NotebookRichTextField
-                          text={cell.text}
-                          html={cell.textHtml}
-                          placeholder="..."
-                          ariaLabel={`표 셀 ${columnIndex + 1}`}
-                          className="text-ios-text"
-                          enableSlashMenu={false}
-                          onDuplicate={onDuplicate}
-                          onChange={(next) => updateTableRowCell(row.id, columnIndex, next)}
-                        />
-                      </td>
-                    ))}
-                    <td className="px-1 py-2">
+                  <table className="w-full text-[13.5px]">
+                    <thead>
+                      <tr className="border-b border-gray-200 bg-gray-50">
+                        {table.columns.map((column, columnIndex) => (
+                          <th key={`col-${columnIndex}`} className="min-w-[180px] px-3 py-2 text-left font-medium text-ios-sub">
+                            <div className="flex items-center gap-2">
+                              <NotebookRichTextField
+                                text={getMemoTableColumnText(table, columnIndex)}
+                                html={table.columnHtml?.[columnIndex]}
+                                placeholder={`열 ${columnIndex + 1}`}
+                                ariaLabel={`표 ${columnIndex + 1}번째 헤더`}
+                                className="font-medium text-ios-sub"
+                                singleLine
+                                enableSlashMenu={false}
+                                onDuplicate={onDuplicate}
+                                onChange={(next) => updateTableColumn(columnIndex, next)}
+                              />
+                              {table.columns.length > 2 && (
+                                <button
+                                  type="button"
+                                  onClick={() => removeTableColumn(columnIndex)}
+                                  className="flex h-6 w-6 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              )}
+                            </div>
+                          </th>
+                        ))}
+                        <th className="w-8" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {table.rows.map((row) => (
+                        <tr key={row.id} className="border-b border-gray-100 last:border-b-0">
+                          {getMemoTableRowCells(row, table).map((cell, columnIndex) => (
+                            <td key={`${row.id}-${columnIndex}`} className="px-3 py-2">
+                              <NotebookRichTextField
+                                text={cell.text}
+                                html={cell.textHtml}
+                                placeholder="..."
+                                ariaLabel={`표 셀 ${columnIndex + 1}`}
+                                className="text-ios-text"
+                                enableSlashMenu={false}
+                                onDuplicate={onDuplicate}
+                                onChange={(next) => updateTableRowCell(row.id, columnIndex, next)}
+                              />
+                            </td>
+                          ))}
+                          <td className="px-1 py-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onChange({
+                                  ...block,
+                                  table: {
+                                    ...table,
+                                    rows: table.rows.filter((r) => r.id !== row.id),
+                                  },
+                                })
+                              }
+                              className="flex h-6 w-6 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div className="flex flex-wrap gap-2 border-t border-gray-100 px-3 py-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onChange({
+                          ...block,
+                          table: {
+                            ...table,
+                            rows: [
+                              ...table.rows,
+                              {
+                                ...createMemoTableRow(),
+                                cells: Array.from({ length: table.columns.length }, () => createMemoTableCell()),
+                              },
+                            ],
+                          },
+                        })
+                      }
+                      className="rounded-full border border-gray-200 px-3 py-1.5 text-[12px] font-medium text-gray-500 hover:bg-gray-50 hover:text-gray-700"
+                    >
+                      + 새 행
+                    </button>
+                    {notebookFeatureFlags.tableV2 && table.columns.length < 8 && (
                       <button
                         type="button"
-                        onClick={() =>
-                          onChange({
-                            ...block,
-                            table: {
-                              ...table,
-                              rows: table.rows.filter((r) => r.id !== row.id),
-                            },
-                          })
-                        }
-                        className="flex h-6 w-6 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                        onClick={addTableColumn}
+                        className="rounded-full border border-[color:var(--rnest-accent-border)] px-3 py-1.5 text-[12px] font-medium text-[color:var(--rnest-accent)] hover:bg-[color:var(--rnest-accent-soft)]"
                       >
-                        <X className="h-3 w-3" />
+                        + 새 열
                       </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <div className="flex flex-wrap gap-2 border-t border-gray-100 px-3 py-2">
-              <button
-                type="button"
-                onClick={() =>
-                  onChange({
-                    ...block,
-                    table: {
-                      ...table,
-                      rows: [
-                        ...table.rows,
-                        {
-                          ...createMemoTableRow(),
-                          cells: Array.from({ length: table.columns.length }, () => createMemoTableCell()),
-                        },
-                      ],
-                    },
-                  })
-                }
-                className="rounded-full border border-gray-200 px-3 py-1.5 text-[12px] font-medium text-gray-500 hover:bg-gray-50 hover:text-gray-700"
-              >
-                + 새 행
-              </button>
-              {notebookFeatureFlags.tableV2 && table.columns.length < 8 && (
-                <button
-                  type="button"
-                  onClick={addTableColumn}
-                  className="rounded-full border border-[color:var(--rnest-accent-border)] px-3 py-1.5 text-[12px] font-medium text-[color:var(--rnest-accent)] hover:bg-[color:var(--rnest-accent-soft)]"
-                >
-                  + 새 열
-                </button>
-              )}
-            </div>
+                    )}
+                  </div>
                 </>
               )
             })()}
@@ -5078,20 +5111,20 @@ export function ToolNotebookPage() {
     const baseTemplate =
       personalTemplateSource === "current" && canUseActiveMemoAsPersonalTemplate && activeMemo
         ? createMemoTemplateFromDocument(activeMemo, {
-            id: createNotebookId("memo_template"),
-            label: nextLabel,
-            description: personalTemplateDescription.trim() || "현재 페이지를 기반으로 만든 개인 템플릿입니다.",
-            createdAt: timestamp,
-            updatedAt: timestamp,
-          })
+          id: createNotebookId("memo_template"),
+          label: nextLabel,
+          description: personalTemplateDescription.trim() || "현재 페이지를 기반으로 만든 개인 템플릿입니다.",
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        })
         : sanitizeMemoTemplate({
-            ...(defaultTemplates.find((template) => template.id === "blank") ?? defaultTemplates[0]),
-            id: createNotebookId("memo_template"),
-            label: nextLabel,
-            description: personalTemplateDescription.trim() || "직접 시작점을 만들 수 있는 개인 템플릿입니다.",
-            createdAt: timestamp,
-            updatedAt: timestamp,
-          })
+          ...(defaultTemplates.find((template) => template.id === "blank") ?? defaultTemplates[0]),
+          id: createNotebookId("memo_template"),
+          label: nextLabel,
+          description: personalTemplateDescription.trim() || "직접 시작점을 만들 수 있는 개인 템플릿입니다.",
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        })
 
     updatePersonalTemplates([baseTemplate, ...personalTemplates])
     setPersonalTemplateDialogOpen(false)
@@ -6143,20 +6176,19 @@ export function ToolNotebookPage() {
       }
 
       const nextTarget = getBlockDropTarget(activeMemo.blocks, event.clientY)
-      setBlockReorderState((current) =>
-        {
-          const nextState =
-            current && current.activeBlockId === session.activeBlockId
-              ? {
-                  ...current,
-                  offsetY: event.clientY - session.startY,
-                  overBlockId: nextTarget?.overBlockId ?? current.overBlockId,
-                  placement: nextTarget?.placement ?? current.placement,
-                }
-              : current
-          blockReorderStateRef.current = nextState
-          return nextState
-        }
+      setBlockReorderState((current) => {
+        const nextState =
+          current && current.activeBlockId === session.activeBlockId
+            ? {
+              ...current,
+              offsetY: event.clientY - session.startY,
+              overBlockId: nextTarget?.overBlockId ?? current.overBlockId,
+              placement: nextTarget?.placement ?? current.placement,
+            }
+            : current
+        blockReorderStateRef.current = nextState
+        return nextState
+      }
       )
     }
 
@@ -6274,8 +6306,8 @@ export function ToolNotebookPage() {
     // Create new daily note
     const doc = createMemoFromTemplate(
       displayedTemplates.find((template) => template.id === "blank") ??
-        defaultMemoTemplates.find((template) => template.id === "blank") ??
-        defaultMemoTemplates[0]
+      defaultMemoTemplates.find((template) => template.id === "blank") ??
+      defaultMemoTemplates[0]
     )
     const dailyDoc = sanitizeMemoDocument({
       ...doc,
@@ -7846,7 +7878,7 @@ export function ToolNotebookPage() {
                   }}
                   className="inline-flex h-11 items-center justify-center rounded-full bg-[color:var(--rnest-accent-soft)] px-5 text-[13px] font-medium text-[color:var(--rnest-accent)] transition-colors hover:bg-[color:var(--rnest-accent-soft)]/80 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {unlockBusy ? "열는 중..." : "잠금 해제"}
+                  {unlockBusy ? "여는 중..." : "잠금 해제"}
                 </button>
               </DialogFooter>
             </div>
