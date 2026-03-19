@@ -10,7 +10,8 @@ import { AnimatedCopyLabel } from "@/components/ui/AnimatedCopyLabel";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { createMemoBlock, sanitizeMemoDocument } from "@/lib/notebook";
+import { sanitizeMemoDocument } from "@/lib/notebook";
+import { buildMedSafetyMemoBlocks } from "@/lib/medSafetyMemo";
 import { useAppStore } from "@/lib/store";
 
 type MedSafetyRecentItem = {
@@ -425,44 +426,17 @@ export function ToolMedSafetyRecentPage() {
     const answer = item.result.answer || ""
     const summary = item.result.summary || ""
     const title = (item.result.title || query).slice(0, 80)
-
-    const blocks: ReturnType<typeof createMemoBlock>[] = []
-
-    blocks.push(
-      createMemoBlock("callout", {
-        text: "⚠️ AI 참고 정보 — 의료 판단 대체 불가",
-        detailText:
-          "본 결과는 참고용 자동 생성 정보이며 의료행위 판단의 근거로 사용할 수 없습니다. 모든 처치는 병원 지침, 처방, 의료진 확인을 우선해 결정해 주세요.",
-      })
-    )
-    blocks.push(createMemoBlock("heading", { text: "질문" }))
-    blocks.push(createMemoBlock("quote", { text: query || "—" }))
-    if (summary && summary.trim()) {
-      blocks.push(createMemoBlock("divider"))
-      blocks.push(createMemoBlock("heading", { text: "요약" }))
-      blocks.push(createMemoBlock("paragraph", { text: summary.trim() }))
-    }
-    blocks.push(createMemoBlock("divider"))
-    blocks.push(createMemoBlock("heading", { text: "AI 분석 결과" }))
-
-    const sections = parseNarrativeSections(answer)
-    if (sections.length > 0) {
-      for (const sec of sections) {
-        if (sections.length > 1 || sec.title !== "상세 결과") {
-          blocks.push(createMemoBlock("paragraph", { text: "▸ " + sec.title }))
-        }
-        for (const entry of sec.items) {
-          if (entry.trim()) blocks.push(createMemoBlock("bulleted", { text: entry.trim() }))
-        }
-      }
-    } else if (answer.trim()) {
-      blocks.push(createMemoBlock("paragraph", { text: answer.trim() }))
-    }
-
-    blocks.push(createMemoBlock("divider"))
-    const kindStr = item.result.resultKind === "medication" ? "의약품" : item.result.resultKind === "device" ? "의료기구" : "임상 질문"
-    const dateStr = new Date(item.savedAt).toLocaleDateString("ko-KR")
-    blocks.push(createMemoBlock("paragraph", { text: `🤖 AI 임상 검색 · ${dateStr} · ${kindStr} · RNest` }))
+    const blocks = buildMedSafetyMemoBlocks({
+      query,
+      answer,
+      summary,
+      savedAt: item.savedAt,
+      resultKind: item.result.resultKind,
+      mode: item.request.mode ?? null,
+      situation: item.request.situation ?? null,
+      queryIntent: item.request.queryIntent ?? null,
+      model: item.result.model ?? null,
+    })
 
     const doc = sanitizeMemoDocument({
       title,

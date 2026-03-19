@@ -54,12 +54,16 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/cn"
 import {
+  builtinRecordTemplates,
   coerceMemoBlockType,
   createMemoBlock,
+  createMemoFromPreset,
+  createMemoTableCell,
   createMemoTemplateFromDocument,
   createNotebookId,
   createMemoFromTemplate,
   createMemoTableRow,
+  detectNotebookEmbedProvider,
   defaultMemoTemplates,
   formatNotebookDateTime,
   getMemoBlockDetailText,
@@ -67,6 +71,7 @@ import {
   getMemoDocumentTitle,
   getMemoTableCellText,
   getMemoTableColumnText,
+  getMemoTableRowCells,
   getReminderTimestampFromPreset,
   memoTemplateToPreviewText,
   memoBlockToPlainText,
@@ -77,9 +82,14 @@ import {
   memoDocumentToPlainText,
   memoReminderPresets,
   NOTEBOOK_TEMPLATE_SYNC_EVENT_KEY,
+  notebookFeatureFlags,
+  recordFieldValueToText,
+  resolveRecordTemplate,
   sanitizeMemoDocument,
   sanitizeMemoTemplate,
   sanitizeNotebookTags,
+  upgradeMemoTableToV2,
+  createRecordEntryFromTemplate,
   type RNestMemoBlock,
   type RNestMemoAttachment,
   type RNestMemoBlockType,
@@ -90,7 +100,10 @@ import {
   type RNestMemoIconId,
   type RNestMemoState,
   type RNestMemoTemplate,
+  type RNestRecordEntry,
+  type RNestRecordTemplate,
 } from "@/lib/notebook"
+import { importTextToBlocks } from "@/lib/notebookImport"
 import { normalizeNotebookLinkHref, plainTextToRichHtml, sanitizeNotebookRichHtml } from "@/lib/notebookRichText"
 import {
   applyLockedMemoPayload,
@@ -154,6 +167,36 @@ const PDF_EXPORT_CAPTURE_SCALE = 2
 const PDF_EXPORT_MAX_CAPTURE_SCALE = 3
 const PDF_PAGE_WIDTH_PT = 595.28
 const PDF_PAGE_HEIGHT_PT = 841.89
+const PDF_BREAK_PADDING_PX = 8
+const PDF_MIN_SAFE_SLICE_HEIGHT_PX = 96
+const PDF_INNER_BREAK_SELECTOR = [
+  "p",
+  "li",
+  "blockquote",
+  "pre",
+  "table tr",
+  "figcaption",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  '[data-notebook-rich-input="true"] > *',
+  ".notebook-rich-text-editor > *",
+  ".ProseMirror > *",
+].join(", ")
+
+type PdfSlice = {
+  offsetY: number
+  height: number
+}
+
+type PdfSlicePlan = {
+  totalHeight: number
+  pageSliceHeightPx: number
+  slices: PdfSlice[]
+}
 
 function createPdfFieldPreview(field: HTMLInputElement | HTMLTextAreaElement) {
   const preview = document.createElement("div")
@@ -277,6 +320,50 @@ function getPdfSliceHeightPx(captureWidth: number, pdfInnerWidthPt: number, pdfI
   return Math.max(1, Math.floor((captureWidth * pdfInnerHeightPt) / pdfInnerWidthPt))
 }
 
+function getElementNaturalBounds(element: HTMLElement, cloneTop: number) {
+  const rect = element.getBoundingClientRect()
+  return {
+    top: rect.top - cloneTop,
+    bottom: rect.bottom - cloneTop,
+    height: rect.height,
+  }
+}
+
+function isUsablePdfSliceHeight(nextHeight: number, desiredSliceHeight: number) {
+  if (nextHeight <= 0) return false
+  const minimum = Math.min(PDF_MIN_SAFE_SLICE_HEIGHT_PX, Math.max(32, desiredSliceHeight - 24))
+  return nextHeight >= minimum
+}
+
+function findSafeInnerSliceHeight(
+  block: HTMLElement,
+  currentOffsetY: number,
+  cutNaturalY: number,
+  desiredSliceHeight: number,
+  cloneTop: number
+) {
+  const candidates = Array.from(block.querySelectorAll<HTMLElement>(PDF_INNER_BREAK_SELECTOR))
+  let bestBottom = -1
+
+  for (const element of candidates) {
+    const bounds = getElementNaturalBounds(element, cloneTop)
+    if (bounds.height <= 2) continue
+    if (bounds.bottom <= currentOffsetY + 24) continue
+    if (bounds.bottom <= cutNaturalY - 4) {
+      bestBottom = Math.max(bestBottom, bounds.bottom)
+    }
+  }
+
+  if (bestBottom > currentOffsetY) {
+    const safeHeight = Math.min(desiredSliceHeight, Math.floor(bestBottom - currentOffsetY))
+    if (isUsablePdfSliceHeight(safeHeight, desiredSliceHeight)) {
+      return safeHeight
+    }
+  }
+
+  return desiredSliceHeight
+}
+
 // Find a clean page-break position that avoids slicing through a memo block.
 // ✅ getBoundingClientRect() 방식 사용:
 //    clone에 translateY(-X)가 적용되어 있어도
@@ -292,17 +379,60 @@ function findSafeSliceHeight(
   const cloneTop = clone.getBoundingClientRect().top
   const blockEls = clone.querySelectorAll<HTMLElement>('[id^="memo-block-"]')
   for (const block of Array.from(blockEls)) {
-    const r = block.getBoundingClientRect()
-    const blockNaturalTop = r.top - cloneTop
-    const blockNaturalBottom = r.bottom - cloneTop
+    const { top: blockNaturalTop, bottom: blockNaturalBottom } = getElementNaturalBounds(block, cloneTop)
     if (blockNaturalTop < cutNaturalY && blockNaturalBottom > cutNaturalY) {
-      const safeHeight = blockNaturalTop - currentOffsetY - 8
-      if (safeHeight > 0 && safeHeight < desiredSliceHeight) {
+      const safeHeight = Math.floor(blockNaturalTop - currentOffsetY - PDF_BREAK_PADDING_PX)
+      if (safeHeight > 0 && safeHeight < desiredSliceHeight && isUsablePdfSliceHeight(safeHeight, desiredSliceHeight)) {
         return safeHeight
+      }
+      const innerSafeHeight = findSafeInnerSliceHeight(block, currentOffsetY, cutNaturalY, desiredSliceHeight, cloneTop)
+      if (innerSafeHeight > 0 && innerSafeHeight < desiredSliceHeight) {
+        return innerSafeHeight
       }
     }
   }
   return desiredSliceHeight
+}
+
+function buildPdfSlicePlan(clone: HTMLElement, captureWidth: number, pdfInnerWidthPt: number, pdfInnerHeightPt: number): PdfSlicePlan {
+  const pageSliceHeightPx = getPdfSliceHeightPx(captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
+  const totalHeight = Math.max(Math.ceil(clone.scrollHeight), Math.ceil(clone.getBoundingClientRect().height))
+  const slices: PdfSlice[] = []
+
+  let offsetY = 0
+  while (offsetY < totalHeight) {
+    let sliceHeight = Math.min(pageSliceHeightPx, totalHeight - offsetY)
+    sliceHeight = findSafeSliceHeight(sliceHeight, offsetY, clone)
+    if (sliceHeight <= 0) break
+    slices.push({ offsetY, height: sliceHeight })
+    offsetY += sliceHeight
+  }
+
+  return {
+    totalHeight,
+    pageSliceHeightPx,
+    slices,
+  }
+}
+
+async function measurePdfBreakPositions(source: HTMLElement) {
+  const { clone, captureWidth, cleanup } = buildPdfExportRoot(source)
+  try {
+    await new Promise<void>((resolve) => {
+      window.requestAnimationFrame(() => resolve())
+    })
+    await waitForPdfExportAssets(clone)
+    const plan = buildPdfSlicePlan(
+      clone,
+      captureWidth,
+      PDF_PAGE_WIDTH_PT - PDF_EXPORT_MARGIN_PT * 2,
+      PDF_PAGE_HEIGHT_PT - PDF_EXPORT_MARGIN_PT * 2
+    )
+    if (plan.totalHeight <= 0) return []
+    return plan.slices.slice(0, -1).map((slice) => Math.floor(slice.offsetY + slice.height))
+  } finally {
+    cleanup()
+  }
 }
 
 async function waitForPdfExportAssets(root: HTMLElement) {
@@ -361,7 +491,13 @@ function buildDocStoragePaths(doc: RNestMemoDocument) {
 }
 
 function referencedAttachmentIds(doc: RNestMemoDocument) {
-  return Array.from(new Set(doc.blocks.map((block) => block.attachmentId).filter((value): value is string => Boolean(value))))
+  return Array.from(
+    new Set(
+      doc.blocks
+        .flatMap((block) => [block.attachmentId, ...(block.attachmentIds ?? [])])
+        .filter((value): value is string => Boolean(value))
+    )
+  )
 }
 
 function normalizeDocAttachments(doc: RNestMemoDocument) {
@@ -406,6 +542,131 @@ function buildSummary(doc: RNestMemoDocument) {
   return ""
 }
 
+function cloneJsonLike<T>(value: T): T {
+  if (value == null) return value
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
+function cloneMemoBlockForDuplicate(
+  block: RNestMemoBlock,
+  attachmentIdMap?: Map<string, string>
+): RNestMemoBlock {
+  const mapAttachmentId = (attachmentId?: string) => {
+    if (!attachmentId) return undefined
+    return attachmentIdMap?.get(attachmentId) ?? attachmentId
+  }
+
+  if (block.type === "table") {
+    const table = upgradeMemoTableToV2(block.table)
+    return createMemoBlock("table", {
+      highlight: block.highlight,
+      table: {
+        version: 2,
+        columns: [...table.columns],
+        columnHtml: [...(table.columnHtml ?? table.columns.map((column) => plainTextToRichHtml(column)))],
+        headerRow: table.headerRow,
+        columnWidths: [...(table.columnWidths ?? [])],
+        alignments: [...(table.alignments ?? [])],
+        rows: table.rows.map((row) =>
+          createMemoTableRow(row.left, row.right, {
+            ...row,
+            id: undefined,
+            cells: getMemoTableRowCells(row, table).map((cell) =>
+              createMemoTableCell(cell.text, {
+                ...cell,
+                id: undefined,
+              })
+            ),
+          })
+        ),
+      },
+    })
+  }
+
+  return createMemoBlock(block.type, {
+    text: block.text,
+    textHtml: block.textHtml,
+    detailText: block.detailText,
+    detailTextHtml: block.detailTextHtml,
+    attachmentId: mapAttachmentId(block.attachmentId),
+    attachmentIds: block.attachmentIds?.map((attachmentId) => mapAttachmentId(attachmentId)).filter(Boolean) as
+      | string[]
+      | undefined,
+    mediaWidth: block.mediaWidth,
+    mediaAspectRatio: block.mediaAspectRatio,
+    mediaOffsetX: block.mediaOffsetX,
+    checked: block.checked,
+    collapsed: block.collapsed,
+    highlight: block.highlight,
+    code: block.code,
+    language: block.language,
+    wrap: block.wrap,
+    url: block.url,
+    provider: block.provider,
+    titleSnapshot: block.titleSnapshot,
+    targetDocId: block.targetDocId,
+    recordTemplateId: block.recordTemplateId,
+    recordVisibleFieldIds: block.recordVisibleFieldIds ? [...block.recordVisibleFieldIds] : undefined,
+    recordSort: block.recordSort ? { ...block.recordSort } : undefined,
+    recordFilters: block.recordFilters?.map((filter) => ({
+      ...filter,
+      values: filter.values ? [...filter.values] : undefined,
+    })),
+    unsupportedType: block.unsupportedType,
+    unsupportedPayload: cloneJsonLike(block.unsupportedPayload),
+  })
+}
+
+type MemoDocTreeNode = {
+  doc: RNestMemoDocument
+  children: MemoDocTreeNode[]
+}
+
+function buildMemoDocTree(docs: RNestMemoDocument[], sortKey: MemoSortKey): MemoDocTreeNode[] {
+  const scoped = sortDocsByKey(docs, sortKey)
+  const docMap = new Map(scoped.map((doc) => [doc.id, doc]))
+  const grouped = new Map<string | null, RNestMemoDocument[]>()
+
+  for (const doc of scoped) {
+    const parentId = doc.parentDocId && docMap.has(doc.parentDocId) ? doc.parentDocId : null
+    const bucket = grouped.get(parentId) ?? []
+    bucket.push(doc)
+    grouped.set(parentId, bucket)
+  }
+
+  const build = (parentId: string | null): MemoDocTreeNode[] =>
+    (grouped.get(parentId) ?? []).map((doc) => ({
+      doc,
+      children: build(doc.id),
+    }))
+
+  return build(null)
+}
+
+function collectDocSubtreeIds(
+  documents: Record<string, RNestMemoDocument | undefined>,
+  rootDocId: string
+) {
+  const collected = new Set<string>()
+  const stack = [rootDocId]
+  while (stack.length > 0) {
+    const currentId = stack.pop()
+    if (!currentId || collected.has(currentId)) continue
+    collected.add(currentId)
+    for (const doc of Object.values(documents)) {
+      if (doc?.parentDocId === currentId && !collected.has(doc.id)) {
+        stack.push(doc.id)
+      }
+    }
+  }
+  return Array.from(collected)
+}
+
+function isEditableSurfaceTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false
+  return Boolean(target.closest('[data-notebook-rich-input="true"], input, textarea, select, [contenteditable="true"]'))
+}
+
 function sortByUpdated(a: RNestMemoDocument, b: RNestMemoDocument) {
   return b.updatedAt - a.updatedAt
 }
@@ -423,6 +684,7 @@ function relativeTime(ts: number) {
 }
 
 const blockTypeLabels: Record<RNestMemoBlockType, string> = {
+  unsupported: "지원 안 되는 블록",
   paragraph: "텍스트",
   heading: "제목",
   bulleted: "글머리 기호",
@@ -434,6 +696,11 @@ const blockTypeLabels: Record<RNestMemoBlockType, string> = {
   divider: "구분선",
   table: "표",
   bookmark: "링크",
+  code: "코드",
+  pageLink: "문서 링크",
+  embed: "임베드",
+  gallery: "갤러리",
+  recordView: "기록 보기",
   image: "사진",
   attachment: "파일",
 }
@@ -515,6 +782,11 @@ const slashCommands: SlashCommand[] = [
   { id: "quote", label: "인용", description: "짧은 인용/요약", blockType: "quote" },
   { id: "toggle", label: "토글", description: "접고 펼치는 메모", blockType: "toggle" },
   { id: "bookmark", label: "링크", description: "참고 링크 저장", blockType: "bookmark" },
+  { id: "code", label: "코드", description: "코드 블록", blockType: "code" },
+  { id: "pageLink", label: "문서 링크", description: "다른 메모 연결", blockType: "pageLink" },
+  { id: "embed", label: "임베드", description: "허용된 링크 미리보기", blockType: "embed" },
+  { id: "gallery", label: "갤러리", description: "여러 이미지를 묶어서 표시", blockType: "gallery" },
+  { id: "recordView", label: "기록 보기", description: "노트 안에 기록 그리드 연결", blockType: "recordView" },
   { id: "divider", label: "구분선", description: "섹션 나누기", blockType: "divider" },
   { id: "table", label: "표", description: "간단한 2열 표", blockType: "table" },
   { id: "duplicate", label: "블록 복제", description: "현재 블록을 복사", action: "duplicate" },
@@ -637,54 +909,86 @@ function replaceBlockContent(block: RNestMemoBlock, query: string, replacement: 
   if (!query) return { block, count: 0 }
 
   if (block.type === "table") {
+    const baseTable = block.table ? upgradeMemoTableToV2(block.table) : upgradeMemoTableToV2(undefined)
     const nextTable = {
-      columns: [...(block.table?.columns ?? ["항목", "내용"])] as [string, string],
-      columnHtml: [...(block.table?.columnHtml ?? ["", ""])] as [string, string],
-      rows: (block.table?.rows ?? []).map((row) => ({ ...row })),
+      ...baseTable,
+      columnHtml: [...(baseTable.columnHtml ?? baseTable.columns.map((column) => plainTextToRichHtml(column)))],
+      rows: (baseTable.rows ?? []).map((row) => ({ ...row, cells: row.cells ? [...row.cells] : row.cells })),
     }
     let count = 0
 
-    const firstColumn = replaceOccurrencesInRichHtml(nextTable.columnHtml[0], query, replacement, replaceAll)
-    if (firstColumn.count > 0) {
-      nextTable.columnHtml[0] = firstColumn.html
-      nextTable.columns[0] = getMemoTableColumnText({ columns: ["", ""], columnHtml: [firstColumn.html, ""] }, 0)
-      count += firstColumn.count
-      if (!replaceAll) return { block: { ...block, table: nextTable }, count }
-    }
-
-    const secondColumn = replaceOccurrencesInRichHtml(nextTable.columnHtml[1], query, replacement, replaceAll)
-    if (secondColumn.count > 0) {
-      nextTable.columnHtml[1] = secondColumn.html
-      nextTable.columns[1] = getMemoTableColumnText({ columns: ["", ""], columnHtml: ["", secondColumn.html] }, 1)
-      count += secondColumn.count
-      if (!replaceAll) return { block: { ...block, table: nextTable }, count }
-    }
-
-    for (let i = 0; i < nextTable.rows.length; i += 1) {
-      const left = replaceOccurrencesInRichHtml(nextTable.rows[i].leftHtml, query, replacement, replaceAll)
-      if (left.count > 0) {
-        nextTable.rows[i] = {
-          ...nextTable.rows[i],
-          left: getMemoTableCellText({ left: "", leftHtml: left.html, right: "", rightHtml: "" }, "left"),
-          leftHtml: left.html,
-        }
-        count += left.count
+    for (let columnIndex = 0; columnIndex < nextTable.columns.length; columnIndex += 1) {
+      const nextColumn = replaceOccurrencesInRichHtml(nextTable.columnHtml[columnIndex], query, replacement, replaceAll)
+      if (nextColumn.count > 0) {
+        nextTable.columnHtml[columnIndex] = nextColumn.html
+        nextTable.columns[columnIndex] = getMemoTableColumnText({ columns: nextTable.columns, columnHtml: nextTable.columnHtml }, columnIndex)
+        count += nextColumn.count
         if (!replaceAll) return { block: { ...block, table: nextTable }, count }
       }
+    }
 
-      const right = replaceOccurrencesInRichHtml(nextTable.rows[i].rightHtml, query, replacement, replaceAll)
-      if (right.count > 0) {
-        nextTable.rows[i] = {
-          ...nextTable.rows[i],
-          right: getMemoTableCellText({ left: "", leftHtml: "", right: "", rightHtml: right.html }, "right"),
-          rightHtml: right.html,
+    for (let rowIndex = 0; rowIndex < nextTable.rows.length; rowIndex += 1) {
+      const cells = getMemoTableRowCells(nextTable.rows[rowIndex], nextTable)
+      const nextCells = [...cells]
+      for (let columnIndex = 0; columnIndex < nextCells.length; columnIndex += 1) {
+        const replaced = replaceOccurrencesInRichHtml(nextCells[columnIndex]?.textHtml, query, replacement, replaceAll)
+        if (replaced.count === 0) continue
+        nextCells[columnIndex] = {
+          ...nextCells[columnIndex],
+          text: getMemoTableCellText({ left: "", leftHtml: "", right: "", rightHtml: "", cells: [{ ...nextCells[columnIndex], textHtml: replaced.html }] }, 0),
+          textHtml: replaced.html,
         }
-        count += right.count
+        nextTable.rows[rowIndex] = {
+          ...nextTable.rows[rowIndex],
+          left: nextCells[0]?.text ?? "",
+          leftHtml: nextCells[0]?.textHtml ?? "",
+          right: nextCells[1]?.text ?? "",
+          rightHtml: nextCells[1]?.textHtml ?? "",
+          cells: nextCells,
+        }
+        count += replaced.count
         if (!replaceAll) return { block: { ...block, table: nextTable }, count }
       }
     }
 
     return count > 0 ? { block: { ...block, table: nextTable }, count } : { block, count: 0 }
+  }
+
+  if (block.type === "code") {
+    const next = replaceOccurrences(block.code ?? "", query, replacement, replaceAll)
+    if (next.count === 0) return { block, count: 0 }
+    return {
+      block: {
+        ...block,
+        code: next.value,
+      },
+      count: next.count,
+    }
+  }
+
+  if (block.type === "pageLink" || block.type === "embed" || block.type === "recordView" || block.type === "unsupported") {
+    const next = replaceOccurrences(
+      block.type === "embed" ? block.titleSnapshot ?? block.text ?? "" : block.type === "pageLink" ? block.titleSnapshot ?? block.text ?? "" : block.text ?? "",
+      query,
+      replacement,
+      replaceAll
+    )
+    if (next.count === 0) return { block, count: 0 }
+    return {
+      block:
+        block.type === "embed"
+          ? { ...block, titleSnapshot: next.value, text: next.value }
+          : block.type === "pageLink"
+            ? { ...block, titleSnapshot: next.value, text: next.value }
+            : { ...block, text: next.value },
+      count: next.count,
+    }
+  }
+
+  if (block.type === "gallery") {
+    const next = replaceOccurrences(block.text ?? "", query, replacement, replaceAll)
+    if (next.count === 0) return { block, count: 0 }
+    return { block: { ...block, text: next.value }, count: next.count }
   }
 
   const richTextTypes: RNestMemoBlockType[] = ["heading", "paragraph", "bulleted", "numbered", "checklist", "callout", "quote", "toggle", "attachment"]
@@ -741,6 +1045,8 @@ function replaceBlockContent(block: RNestMemoBlock, query: string, replacement: 
 function renderBlockTypeIcon(type: RNestMemoBlockType, className = "h-3.5 w-3.5") {
   const props = { className, strokeWidth: 1.8 }
   switch (type) {
+    case "unsupported":
+      return <Shield {...props} />
     case "paragraph":
       return <Type {...props} />
     case "heading":
@@ -763,6 +1069,16 @@ function renderBlockTypeIcon(type: RNestMemoBlockType, className = "h-3.5 w-3.5"
       return <Table2 {...props} />
     case "bookmark":
       return <Link2 {...props} />
+    case "code":
+      return <FileText {...props} />
+    case "pageLink":
+      return <FileText {...props} />
+    case "embed":
+      return <Link2 {...props} />
+    case "gallery":
+      return <ImageIcon {...props} />
+    case "recordView":
+      return <ReceiptText {...props} />
     case "image":
       return <ImageIcon {...props} />
     case "attachment":
@@ -825,6 +1141,8 @@ const sortOptions: { key: MemoSortKey; label: string }[] = [
   { key: "title", label: "제목순" },
 ]
 
+const NOTEBOOK_IMPORT_BLOCK_LIMIT = 64
+
 function sortDocsByKey(docs: RNestMemoDocument[], key: MemoSortKey): RNestMemoDocument[] {
   return [...docs].sort((a, b) => {
     if (key === "title") return (a.title || "").localeCompare(b.title || "", "ko")
@@ -853,6 +1171,8 @@ function PageItem({
   summary,
   isActive,
   isLocked,
+  depth = 0,
+  isDropActive = false,
   listKey,
   onClick,
   draggable = false,
@@ -860,6 +1180,9 @@ function PageItem({
   className,
   onDragStart,
   onDragEnd,
+  onDragOver,
+  onDragLeave,
+  onDrop,
   isEditing = false,
   draftTitle = "",
   onStartEdit,
@@ -874,6 +1197,8 @@ function PageItem({
   summary: string
   isActive: boolean
   isLocked: boolean
+  depth?: number
+  isDropActive?: boolean
   listKey: string
   onClick: () => void
   draggable?: boolean
@@ -881,6 +1206,9 @@ function PageItem({
   className?: string
   onDragStart?: React.DragEventHandler<HTMLButtonElement>
   onDragEnd?: React.DragEventHandler<HTMLButtonElement>
+  onDragOver?: React.DragEventHandler<HTMLDivElement>
+  onDragLeave?: React.DragEventHandler<HTMLDivElement>
+  onDrop?: React.DragEventHandler<HTMLDivElement>
   isEditing?: boolean
   draftTitle?: string
   onStartEdit?: () => void
@@ -933,15 +1261,20 @@ function PageItem({
   return (
     <div
       ref={itemRef}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
       className={cn(
         "group flex w-full items-start gap-2 rounded-xl px-2 py-2 transition-colors",
         draggable && !isEditing && "cursor-grab active:cursor-grabbing",
         isDragging && "opacity-45",
+        isDropActive && "ring-1 ring-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)]/60",
         isActive
           ? "bg-[color:var(--rnest-accent-soft)] text-ios-text"
           : "text-ios-sub hover:bg-gray-100",
         className
       )}
+      style={depth > 0 ? { marginLeft: `${Math.min(depth, 5) * 14}px` } : undefined}
     >
       <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-white text-ios-sub shadow-[inset_0_0_0_1px_rgba(148,163,184,0.16)]">
         {renderMemoIcon(doc.icon, "h-4 w-4")}
@@ -1437,6 +1770,7 @@ function MoreMenu({
           ? [{ id: "remove-lock", label: "잠금 제거", icon: <Shield className="h-3.5 w-3.5" /> }]
           : []),
         { id: "duplicate", label: "복제", icon: <Copy className="h-3.5 w-3.5" /> },
+        { id: "import-text", label: "텍스트 가져오기", icon: <Download className="h-3.5 w-3.5" /> },
         { id: "export-pdf", label: "PDF 저장", icon: <Download className="h-3.5 w-3.5" /> },
         { id: "export-txt", label: "TXT 내보내기", icon: <Download className="h-3.5 w-3.5" /> },
         { id: "export-md", label: "Markdown 내보내기", icon: <Download className="h-3.5 w-3.5" /> },
@@ -2055,14 +2389,20 @@ function InlineBlock({
   block,
   attachment,
   attachmentUrl,
+  docAttachments,
+  allDocs,
+  recordTemplates,
+  recordEntriesByTemplateId,
   onChange,
   onDelete,
   onRemoveAttachment,
   onOpenAttachment,
+  onOpenDoc,
   onDuplicate,
   onTypeChange,
   onAddAfter,
   onInsertAsset,
+  onQuickAddRecordEntry,
   onMoveUp,
   onMoveDown,
   onHighlight,
@@ -2076,14 +2416,20 @@ function InlineBlock({
   block: RNestMemoBlock
   attachment: RNestMemoAttachment | null
   attachmentUrl?: string
+  docAttachments: RNestMemoAttachment[]
+  allDocs: RNestMemoDocument[]
+  recordTemplates: RNestRecordTemplate[]
+  recordEntriesByTemplateId: Record<string, RNestRecordEntry[]>
   onChange: (b: RNestMemoBlock) => void
   onDelete: () => void
   onRemoveAttachment: () => void
   onOpenAttachment: () => void
+  onOpenDoc: (docId: string) => void
   onDuplicate: () => void
   onTypeChange: (t: RNestMemoBlockType) => void
   onAddAfter: (type?: RNestMemoBlockType) => void
-  onInsertAsset: (kind: "image" | "attachment") => void
+  onInsertAsset: (kind: "image" | "attachment" | "gallery") => void
+  onQuickAddRecordEntry: (templateId: string) => void
   onMoveUp: () => void
   onMoveDown: () => void
   onHighlight: (color: RNestMemoHighlightColor | null) => void
@@ -2186,46 +2532,102 @@ function InlineBlock({
     }
   }
 
-  function updateTableColumn(index: 0 | 1, next: { text: string; html: string }) {
-    const firstColumn = getMemoTableColumnText(block.table, 0)
-    const secondColumn = getMemoTableColumnText(block.table, 1)
+  function updateTableColumn(index: number, next: { text: string; html: string }) {
+    const table = block.table ? upgradeMemoTableToV2(block.table) : upgradeMemoTableToV2(undefined)
+    const columns = [...table.columns]
+    const columnHtml = [...(table.columnHtml ?? columns.map((column) => plainTextToRichHtml(column)))]
+    columns[index] = next.text || `열 ${index + 1}`
+    columnHtml[index] = next.html || plainTextToRichHtml(columns[index])
     onChange({
       ...block,
       table: {
-        columns: [
-          index === 0 ? next.text : firstColumn,
-          index === 1 ? next.text : secondColumn,
-        ],
-        columnHtml: [
-          index === 0 ? next.html : block.table?.columnHtml?.[0] ?? (firstColumn ? plainTextToRichHtml(firstColumn) : ""),
-          index === 1 ? next.html : block.table?.columnHtml?.[1] ?? (secondColumn ? plainTextToRichHtml(secondColumn) : ""),
-        ],
-        rows: block.table?.rows ?? [createMemoTableRow()],
+        ...table,
+        columns,
+        columnHtml,
       },
     })
   }
 
-  function updateTableRowCell(rowId: string, side: "left" | "right", next: { text: string; html: string }) {
+  function updateTableRowCell(rowId: string, side: "left" | "right" | number, next: { text: string; html: string }) {
+    const table = block.table ? upgradeMemoTableToV2(block.table) : upgradeMemoTableToV2(undefined)
     onChange({
       ...block,
       table: {
-        columns: block.table?.columns ?? ["항목", "내용"],
-        columnHtml: block.table?.columnHtml ?? [
-          plainTextToRichHtml(getMemoTableColumnText(block.table, 0)),
-          plainTextToRichHtml(getMemoTableColumnText(block.table, 1)),
-        ],
-        rows: (block.table?.rows ?? []).map((row) =>
-          row.id === rowId
-            ? {
-                ...row,
-                [side]: next.text,
-                [side === "left" ? "leftHtml" : "rightHtml"]: next.html,
-              }
-            : row
-        ),
+        ...table,
+        rows: table.rows.map((row) => {
+          if (row.id !== rowId) return row
+          const cells = getMemoTableRowCells(row, table)
+          const cellIndex = typeof side === "number" ? side : side === "left" ? 0 : 1
+          const nextCells = Array.from({ length: table.columns.length }, (_, index) =>
+            createMemoTableCell(index === cellIndex ? next.text : cells[index]?.text || "", {
+              ...(cells[index] ?? {}),
+              textHtml: index === cellIndex ? next.html : cells[index]?.textHtml,
+            })
+          )
+          return {
+            ...row,
+            left: nextCells[0]?.text ?? "",
+            leftHtml: nextCells[0]?.textHtml ?? "",
+            right: nextCells[1]?.text ?? "",
+            rightHtml: nextCells[1]?.textHtml ?? "",
+            cells: nextCells,
+          }
+        }),
       },
     })
   }
+
+  function addTableColumn() {
+    const table = upgradeMemoTableToV2(block.table)
+    if (table.columns.length >= 8) return
+    onChange({
+      ...block,
+      table: {
+        ...table,
+        columns: [...table.columns, `열 ${table.columns.length + 1}`],
+        columnHtml: [...(table.columnHtml ?? table.columns.map((column) => plainTextToRichHtml(column))), plainTextToRichHtml(`열 ${table.columns.length + 1}`)],
+        columnWidths: [...(table.columnWidths ?? table.columns.map(() => 240)), 240],
+        alignments: [...(table.alignments ?? table.columns.map(() => "left")), "left"],
+        rows: table.rows.map((row) => ({
+          ...row,
+          cells: [...getMemoTableRowCells(row, table), createMemoTableCell()],
+        })),
+      },
+    })
+  }
+
+  function removeTableColumn(index: number) {
+    const table = upgradeMemoTableToV2(block.table)
+    if (table.columns.length <= 2) return
+    onChange({
+      ...block,
+      table: {
+        ...table,
+        columns: table.columns.filter((_, columnIndex) => columnIndex !== index),
+        columnHtml: (table.columnHtml ?? []).filter((_, columnIndex) => columnIndex !== index),
+        columnWidths: (table.columnWidths ?? []).filter((_, columnIndex) => columnIndex !== index),
+        alignments: (table.alignments ?? []).filter((_, columnIndex) => columnIndex !== index),
+        rows: table.rows.map((row) => {
+          const nextCells = getMemoTableRowCells(row, table).filter((_, columnIndex) => columnIndex !== index)
+          return {
+            ...row,
+            left: nextCells[0]?.text ?? "",
+            leftHtml: nextCells[0]?.textHtml ?? "",
+            right: nextCells[1]?.text ?? "",
+            rightHtml: nextCells[1]?.textHtml ?? "",
+            cells: nextCells,
+          }
+        }),
+      },
+    })
+  }
+
+  const linkedDoc = block.targetDocId ? allDocs.find((doc) => doc.id === block.targetDocId) ?? null : null
+  const customRecordTemplates = Object.fromEntries(recordTemplates.map((template) => [template.id, template]))
+  const recordTemplate = block.recordTemplateId ? resolveRecordTemplate(block.recordTemplateId, customRecordTemplates) : null
+  const recordEntries = recordTemplate
+    ? (recordEntriesByTemplateId[recordTemplate.id] ?? []).slice(0, 6)
+    : []
 
   return (
     <div
@@ -2300,6 +2702,11 @@ function InlineBlock({
                   "quote",
                   "toggle",
                   "bookmark",
+                  "code",
+                  "pageLink",
+                  "embed",
+                  "gallery",
+                  "recordView",
                   "image",
                   "attachment",
                   "divider",
@@ -2310,7 +2717,7 @@ function InlineBlock({
                   key={`add-below-${type}`}
                   type="button"
                   onClick={() => {
-                    if (type === "image" || type === "attachment") onInsertAsset(type)
+                    if (type === "image" || type === "attachment" || type === "gallery") onInsertAsset(type)
                     else onAddAfter(type)
                     setShowAddMenu(false)
                   }}
@@ -2397,7 +2804,7 @@ function InlineBlock({
                 현재 블록 설정
               </div>
               {(Object.keys(blockTypeLabels) as RNestMemoBlockType[])
-                .filter((type) => type !== "image" && type !== "attachment")
+                .filter((type) => !["image", "attachment", "unsupported"].includes(type))
                 .map((type) => (
                   <button
                     key={`convert-${type}`}
@@ -2814,6 +3221,227 @@ function InlineBlock({
           </div>
         )}
 
+        {block.type === "code" && (
+          <div className="rounded-2xl border border-slate-200 bg-slate-950 text-slate-100 shadow-[0_18px_40px_rgba(15,23,42,0.14)]">
+            <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 px-3 py-2">
+              <input
+                type="text"
+                value={block.language ?? "text"}
+                onChange={(event) => onChange({ ...block, language: event.target.value || "text" })}
+                onKeyDown={handleCommandKeyDown}
+                placeholder="language"
+                className="h-8 w-28 rounded-lg border border-slate-700 bg-slate-900 px-2 text-[12px] text-slate-100 outline-none placeholder:text-slate-500"
+              />
+              <button
+                type="button"
+                onClick={() => onChange({ ...block, wrap: block.wrap === false })}
+                className={cn(
+                  "rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors",
+                  block.wrap === false
+                    ? "bg-slate-800 text-slate-300"
+                    : "bg-[color:var(--rnest-accent)]/15 text-[color:var(--rnest-accent)]"
+                )}
+              >
+                {block.wrap === false ? "가로 스크롤" : "자동 줄바꿈"}
+              </button>
+            </div>
+            <textarea
+              value={block.code ?? ""}
+              onChange={(event) => onChange({ ...block, code: event.target.value })}
+              onKeyDown={handleEditorKeyDown}
+              spellCheck={false}
+              placeholder="코드를 입력하세요"
+              className={cn(
+                "min-h-[180px] w-full resize-y border-none bg-transparent px-4 py-3 font-mono text-[13px] leading-6 text-slate-100 outline-none placeholder:text-slate-500",
+                block.wrap === false ? "whitespace-pre overflow-x-auto" : "whitespace-pre-wrap break-words"
+              )}
+            />
+            <div className="border-t border-slate-800 px-3 py-2">
+              <NotebookRichTextField
+                text={block.detailText}
+                html={block.detailTextHtml}
+                placeholder="코드 설명"
+                ariaLabel="코드 설명"
+                className="text-[13px] text-slate-300"
+                enableSlashMenu={false}
+                onDuplicate={onDuplicate}
+                onChange={(next) => onChange({ ...block, detailText: next.text, detailTextHtml: next.html })}
+              />
+            </div>
+          </div>
+        )}
+
+        {block.type === "pageLink" && (
+          <div className="rounded-2xl border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)]/45 p-4 shadow-[0_14px_28px_rgba(123,111,208,0.08)]">
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={block.targetDocId ?? ""}
+                onChange={(event) => {
+                  const nextDoc = allDocs.find((doc) => doc.id === event.target.value) ?? null
+                  onChange({
+                    ...block,
+                    targetDocId: nextDoc?.id,
+                    titleSnapshot: nextDoc ? nextDoc.title : block.titleSnapshot,
+                    text: nextDoc ? nextDoc.title : block.text,
+                  })
+                }}
+                className="min-w-[180px] rounded-xl border border-white/80 bg-white px-3 py-2 text-[13px] text-ios-text outline-none"
+              >
+                <option value="">문서 선택</option>
+                {allDocs.map((doc) => (
+                  <option key={doc.id} value={doc.id}>
+                    {doc.title || "제목 없음"}
+                  </option>
+                ))}
+              </select>
+              {linkedDoc ? (
+                <button
+                  type="button"
+                  onClick={() => onOpenDoc(linkedDoc.id)}
+                  className="rounded-full border border-[color:var(--rnest-accent-border)] bg-white px-3 py-1.5 text-[12px] font-medium text-[color:var(--rnest-accent)] transition-colors hover:bg-[color:var(--rnest-accent-soft)]"
+                >
+                  문서 열기
+                </button>
+              ) : null}
+            </div>
+            <NotebookRichTextField
+              text={block.titleSnapshot ?? block.text}
+              html={undefined}
+              placeholder="링크로 보일 제목"
+              ariaLabel="문서 링크 제목"
+              className="mt-3 text-[15px] font-semibold text-ios-text"
+              enableSlashMenu={false}
+              onDuplicate={onDuplicate}
+              onChange={(next) =>
+                onChange({
+                  ...block,
+                  titleSnapshot: next.text,
+                  text: next.text,
+                })
+              }
+            />
+            <p className="mt-1 text-[12px] text-ios-muted">
+              {linkedDoc ? `현재 연결: ${linkedDoc.title || "제목 없음"}` : "아직 연결된 문서가 없습니다"}
+            </p>
+          </div>
+        )}
+
+        {block.type === "embed" && (
+          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_14px_28px_rgba(15,23,42,0.06)]">
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="url"
+                value={block.url ?? ""}
+                onChange={(event) => {
+                  const nextUrl = event.target.value
+                  onChange({
+                    ...block,
+                    url: nextUrl,
+                    text: block.titleSnapshot || nextUrl,
+                    provider: detectNotebookEmbedProvider(nextUrl),
+                  })
+                }}
+                onKeyDown={handleCommandKeyDown}
+                placeholder="https://"
+                className={cn(
+                  "min-w-[220px] flex-1 rounded-xl border border-gray-200 bg-white px-3 py-2 text-ios-text outline-none placeholder:text-gray-300",
+                  mobileSafeInputClass
+                )}
+              />
+              <span className="rounded-full bg-[color:var(--rnest-accent-soft)] px-2.5 py-1 text-[11px] font-medium text-[color:var(--rnest-accent)]">
+                {detectNotebookEmbedProvider(block.url ?? "")}
+              </span>
+            </div>
+            <NotebookRichTextField
+              text={block.titleSnapshot}
+              html={undefined}
+              placeholder="미리보기 제목"
+              ariaLabel="임베드 제목"
+              className="mt-3 text-[14px] font-medium text-ios-text"
+              enableSlashMenu={false}
+              onDuplicate={onDuplicate}
+              onChange={(next) =>
+                onChange({
+                  ...block,
+                  titleSnapshot: next.text,
+                  text: next.text || block.url,
+                })
+              }
+            />
+            {block.url ? (
+              <a
+                href={block.url}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-2 inline-flex items-center gap-1.5 text-[12.5px] text-[color:var(--rnest-accent)] hover:underline"
+              >
+                외부 링크 열기
+                <Link2 className="h-3.5 w-3.5" />
+              </a>
+            ) : null}
+          </div>
+        )}
+
+        {block.type === "gallery" && (
+          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_14px_28px_rgba(15,23,42,0.06)]">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <NotebookRichTextField
+                text={block.text}
+                html={block.textHtml}
+                placeholder="갤러리 제목"
+                ariaLabel="갤러리 제목"
+                className="min-w-[180px] flex-1 text-[15px] font-semibold text-ios-text"
+                enableSlashMenu={false}
+                onDuplicate={onDuplicate}
+                onChange={(next) => onChange({ ...block, text: next.text, textHtml: next.html })}
+              />
+              <button
+                type="button"
+                onClick={() => onInsertAsset("gallery")}
+                className="rounded-full border border-[color:var(--rnest-accent-border)] bg-white px-3 py-1.5 text-[12px] font-medium text-[color:var(--rnest-accent)] transition-colors hover:bg-[color:var(--rnest-accent-soft)]"
+              >
+                사진 추가
+              </button>
+            </div>
+            {(block.attachmentIds?.length ?? 0) === 0 ? (
+              <div className="mt-3 flex h-28 items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-gray-50 text-[13px] text-ios-muted">
+                아직 추가된 사진이 없습니다
+              </div>
+            ) : (
+              <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3">
+                {(block.attachmentIds ?? []).map((attachmentId) => {
+                  const galleryAttachment = docAttachments.find((item) => item.id === attachmentId) ?? null
+                  return (
+                    <div key={attachmentId} className="group relative overflow-hidden rounded-2xl border border-gray-100 bg-gray-50">
+                      {galleryAttachment ? (
+                        <img
+                          src={buildNotebookFileUrl(galleryAttachment.storagePath)}
+                          alt={galleryAttachment.name}
+                          className="h-32 w-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-32 items-center justify-center text-[12px] text-ios-muted">이미지 없음</div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onChange({
+                            ...block,
+                            attachmentIds: (block.attachmentIds ?? []).filter((id) => id !== attachmentId),
+                          })
+                        }
+                        className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-white opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         {block.type === "image" && (
           <ImageResizableBlock
             block={block}
@@ -2864,66 +3492,60 @@ function InlineBlock({
         )}
 
         {block.type === "table" && (
-          <div className="overflow-x-auto rounded-lg border border-gray-200">
+          <div className="overflow-x-auto rounded-xl border border-gray-200">
+            {(() => {
+              const table = upgradeMemoTableToV2(block.table)
+              return (
+                <>
             <table className="w-full text-[13.5px]">
               <thead>
                 <tr className="border-b border-gray-200 bg-gray-50">
-                  <th className="px-3 py-2 text-left font-medium text-ios-sub">
-                    <NotebookRichTextField
-                      text={getMemoTableColumnText(block.table, 0)}
-                      html={block.table?.columnHtml?.[0]}
-                      placeholder="항목"
-                      ariaLabel="표 첫 번째 헤더"
-                      className="font-medium text-ios-sub"
-                      singleLine
-                      enableSlashMenu={false}
-                      onDuplicate={onDuplicate}
-                      onChange={(next) => updateTableColumn(0, next)}
-                    />
-                  </th>
-                  <th className="px-3 py-2 text-left font-medium text-ios-sub">
-                    <NotebookRichTextField
-                      text={getMemoTableColumnText(block.table, 1)}
-                      html={block.table?.columnHtml?.[1]}
-                      placeholder="내용"
-                      ariaLabel="표 두 번째 헤더"
-                      className="font-medium text-ios-sub"
-                      singleLine
-                      enableSlashMenu={false}
-                      onDuplicate={onDuplicate}
-                      onChange={(next) => updateTableColumn(1, next)}
-                    />
-                  </th>
+                  {table.columns.map((column, columnIndex) => (
+                    <th key={`col-${columnIndex}`} className="min-w-[180px] px-3 py-2 text-left font-medium text-ios-sub">
+                      <div className="flex items-center gap-2">
+                        <NotebookRichTextField
+                          text={getMemoTableColumnText(table, columnIndex)}
+                          html={table.columnHtml?.[columnIndex]}
+                          placeholder={`열 ${columnIndex + 1}`}
+                          ariaLabel={`표 ${columnIndex + 1}번째 헤더`}
+                          className="font-medium text-ios-sub"
+                          singleLine
+                          enableSlashMenu={false}
+                          onDuplicate={onDuplicate}
+                          onChange={(next) => updateTableColumn(columnIndex, next)}
+                        />
+                        {table.columns.length > 2 && (
+                          <button
+                            type="button"
+                            onClick={() => removeTableColumn(columnIndex)}
+                            className="flex h-6 w-6 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        )}
+                      </div>
+                    </th>
+                  ))}
                   <th className="w-8" />
                 </tr>
               </thead>
               <tbody>
-                {(block.table?.rows ?? []).map((row) => (
+                {table.rows.map((row) => (
                   <tr key={row.id} className="border-b border-gray-100 last:border-b-0">
-                    <td className="px-3 py-2">
-                      <NotebookRichTextField
-                        text={getMemoTableCellText(row, "left")}
-                        html={row.leftHtml}
-                        placeholder="..."
-                        ariaLabel="표 왼쪽 셀"
-                        className="text-ios-text"
-                        enableSlashMenu={false}
-                        onDuplicate={onDuplicate}
-                        onChange={(next) => updateTableRowCell(row.id, "left", next)}
-                      />
-                    </td>
-                    <td className="px-3 py-2">
-                      <NotebookRichTextField
-                        text={getMemoTableCellText(row, "right")}
-                        html={row.rightHtml}
-                        placeholder="..."
-                        ariaLabel="표 오른쪽 셀"
-                        className="text-ios-text"
-                        enableSlashMenu={false}
-                        onDuplicate={onDuplicate}
-                        onChange={(next) => updateTableRowCell(row.id, "right", next)}
-                      />
-                    </td>
+                    {getMemoTableRowCells(row, table).map((cell, columnIndex) => (
+                      <td key={`${row.id}-${columnIndex}`} className="px-3 py-2">
+                        <NotebookRichTextField
+                          text={cell.text}
+                          html={cell.textHtml}
+                          placeholder="..."
+                          ariaLabel={`표 셀 ${columnIndex + 1}`}
+                          className="text-ios-text"
+                          enableSlashMenu={false}
+                          onDuplicate={onDuplicate}
+                          onChange={(next) => updateTableRowCell(row.id, columnIndex, next)}
+                        />
+                      </td>
+                    ))}
                     <td className="px-1 py-2">
                       <button
                         type="button"
@@ -2931,12 +3553,8 @@ function InlineBlock({
                           onChange({
                             ...block,
                             table: {
-                              columns: block.table?.columns ?? ["항목", "내용"],
-                              columnHtml: block.table?.columnHtml ?? [
-                                plainTextToRichHtml(getMemoTableColumnText(block.table, 0)),
-                                plainTextToRichHtml(getMemoTableColumnText(block.table, 1)),
-                              ],
-                              rows: (block.table?.rows ?? []).filter((r) => r.id !== row.id),
+                              ...table,
+                              rows: table.rows.filter((r) => r.id !== row.id),
                             },
                           })
                         }
@@ -2949,25 +3567,131 @@ function InlineBlock({
                 ))}
               </tbody>
             </table>
-            <button
-              type="button"
-              onClick={() =>
-                onChange({
-                  ...block,
-                  table: {
-                    columns: block.table?.columns ?? ["항목", "내용"],
-                    columnHtml: block.table?.columnHtml ?? [
-                      plainTextToRichHtml(getMemoTableColumnText(block.table, 0)),
-                      plainTextToRichHtml(getMemoTableColumnText(block.table, 1)),
-                    ],
-                    rows: [...(block.table?.rows ?? []), createMemoTableRow()],
-                  },
-                })
-              }
-              className="w-full border-t border-gray-100 px-3 py-2 text-left text-[12.5px] text-gray-400 hover:bg-gray-50 hover:text-gray-600"
-            >
-              + 새 행
-            </button>
+            <div className="flex flex-wrap gap-2 border-t border-gray-100 px-3 py-2">
+              <button
+                type="button"
+                onClick={() =>
+                  onChange({
+                    ...block,
+                    table: {
+                      ...table,
+                      rows: [
+                        ...table.rows,
+                        {
+                          ...createMemoTableRow(),
+                          cells: Array.from({ length: table.columns.length }, () => createMemoTableCell()),
+                        },
+                      ],
+                    },
+                  })
+                }
+                className="rounded-full border border-gray-200 px-3 py-1.5 text-[12px] font-medium text-gray-500 hover:bg-gray-50 hover:text-gray-700"
+              >
+                + 새 행
+              </button>
+              {notebookFeatureFlags.tableV2 && table.columns.length < 8 && (
+                <button
+                  type="button"
+                  onClick={addTableColumn}
+                  className="rounded-full border border-[color:var(--rnest-accent-border)] px-3 py-1.5 text-[12px] font-medium text-[color:var(--rnest-accent)] hover:bg-[color:var(--rnest-accent-soft)]"
+                >
+                  + 새 열
+                </button>
+              )}
+            </div>
+                </>
+              )
+            })()}
+          </div>
+        )}
+
+        {block.type === "recordView" && (
+          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_14px_28px_rgba(15,23,42,0.06)]">
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={block.recordTemplateId ?? ""}
+                onChange={(event) => onChange({ ...block, recordTemplateId: event.target.value || undefined })}
+                className="min-w-[180px] rounded-xl border border-gray-200 bg-white px-3 py-2 text-[13px] text-ios-text outline-none"
+              >
+                <option value="">기록지 선택</option>
+                {recordTemplates.map((template) => (
+                  <option key={template.id} value={template.id}>
+                    {template.name}
+                  </option>
+                ))}
+              </select>
+              {recordTemplate ? (
+                <button
+                  type="button"
+                  onClick={() => onQuickAddRecordEntry(recordTemplate.id)}
+                  className="rounded-full border border-[color:var(--rnest-accent-border)] bg-white px-3 py-1.5 text-[12px] font-medium text-[color:var(--rnest-accent)] transition-colors hover:bg-[color:var(--rnest-accent-soft)]"
+                >
+                  빠른 추가
+                </button>
+              ) : null}
+            </div>
+            <NotebookRichTextField
+              text={block.text}
+              html={undefined}
+              placeholder="기록 보기 제목"
+              ariaLabel="기록 보기 제목"
+              className="mt-3 text-[15px] font-semibold text-ios-text"
+              enableSlashMenu={false}
+              onDuplicate={onDuplicate}
+              onChange={(next) => onChange({ ...block, text: next.text })}
+            />
+            {recordTemplate ? (
+              <div className="mt-3 overflow-x-auto rounded-2xl border border-gray-100">
+                <table className="w-full min-w-[420px] text-[12.5px]">
+                  <thead className="bg-gray-50 text-ios-muted">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium">제목</th>
+                      {recordTemplate.fields
+                        .filter((field) => !block.recordVisibleFieldIds || block.recordVisibleFieldIds.includes(field.id))
+                        .slice(0, 3)
+                        .map((field) => (
+                          <th key={field.id} className="px-3 py-2 text-left font-medium">
+                            {field.label}
+                          </th>
+                        ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recordEntries.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="px-3 py-4 text-center text-ios-muted">
+                          아직 연결된 기록이 없습니다
+                        </td>
+                      </tr>
+                    ) : (
+                      recordEntries.map((entry) => (
+                        <tr key={entry.id} className="border-t border-gray-100">
+                          <td className="px-3 py-2 font-medium text-ios-text">{entry.title}</td>
+                          {recordTemplate.fields
+                            .filter((field) => !block.recordVisibleFieldIds || block.recordVisibleFieldIds.includes(field.id))
+                            .slice(0, 3)
+                            .map((field) => (
+                              <td key={field.id} className="px-3 py-2 text-ios-sub">
+                                {recordFieldValueToText(entry.values[field.id]) || "-"}
+                              </td>
+                            ))}
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="mt-3 rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-[13px] text-ios-muted">
+                연결할 기록지를 선택하면 노트 안에서 최근 항목을 함께 볼 수 있습니다
+              </div>
+            )}
+          </div>
+        )}
+
+        {block.type === "unsupported" && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800">
+            현재 버전에서 편집할 수 없는 블록입니다. 타입: {block.unsupportedType || "unknown"}
           </div>
         )}
       </div>
@@ -3157,6 +3881,7 @@ function ReminderPicker({
 export function ToolNotebookPage() {
   const store = useAppStore()
   const memoState = store.memo
+  const recordState = store.records
 
   const [query, setQuery] = useState("")
   const queryDeferred = useDeferredValue(query.trim().toLowerCase())
@@ -3168,7 +3893,7 @@ export function ToolNotebookPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const imageInputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const pendingAssetTargetRef = useRef<{ docId: string; blockId: string; kind: "image" | "attachment" } | null>(null)
+  const pendingAssetTargetRef = useRef<{ docId: string; blockId: string; kind: "image" | "attachment" | "gallery" } | null>(null)
   const unlockKeysRef = useRef<Record<string, CryptoKey>>({})
   const [unlockedPayloads, setUnlockedPayloads] = useState<Record<string, RNestLockedMemoPayload>>({})
   const undoSnapshotsRef = useRef<Record<string, MemoUndoSnapshot[]>>({})
@@ -3203,7 +3928,9 @@ export function ToolNotebookPage() {
   const [folderOpenState, setFolderOpenState] = useState<Record<string, boolean>>({})
   const [draggingDocId, setDraggingDocId] = useState<string | null>(null)
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null)
+  const [dragOverParentDocId, setDragOverParentDocId] = useState<string | null>(null)
   const [dragOverRootPages, setDragOverRootPages] = useState(false)
+  const [editorDropActive, setEditorDropActive] = useState(false)
   const [pdfExporting, setPdfExporting] = useState(false)
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false)
   const [templatesLoading, setTemplatesLoading] = useState(false)
@@ -3215,6 +3942,9 @@ export function ToolNotebookPage() {
   const [personalTemplateDescription, setPersonalTemplateDescription] = useState("")
   const [personalTemplateSource, setPersonalTemplateSource] = useState<"current" | "blank">("blank")
   const [personalTemplateCreateError, setPersonalTemplateCreateError] = useState<string | null>(null)
+  const [importDialogOpen, setImportDialogOpen] = useState(false)
+  const [importTextValue, setImportTextValue] = useState("")
+  const [importError, setImportError] = useState<string | null>(null)
   const [blockReorderState, setBlockReorderState] = useState<ActiveBlockReorderState | null>(null)
   const [showPdfBreaks, setShowPdfBreaks] = useState(false)
   const [pdfBreakPositions, setPdfBreakPositions] = useState<number[]>([])
@@ -3241,58 +3971,76 @@ export function ToolNotebookPage() {
     blockReorderStateRef.current = blockReorderState
   }, [blockReorderState])
 
-  // PDF page break position computation
-  // ✅ 실제 PDF 내보내기와 동일한 블록 경계 감지 로직을 사용해 구분선 위치를 정확히 맞춤
-  //    (이전: 균등 간격 → 실제 PDF와 불일치 / 수정: findSafeSliceHeight와 동일 알고리즘)
   useEffect(() => {
     if (!showPdfBreaks || !pdfContentRef.current) {
       setPdfBreakPositions([])
       return
     }
-    const compute = () => {
-      const el = pdfContentRef.current
-      if (!el) return
-      const elRect = el.getBoundingClientRect()
-      const captureWidth = Math.max(1, elRect.width)
-      const contentWidthPt = PDF_PAGE_WIDTH_PT - PDF_EXPORT_MARGIN_PT * 2
-      const contentHeightPt = PDF_PAGE_HEIGHT_PT - PDF_EXPORT_MARGIN_PT * 2
-      const pageH = getPdfSliceHeightPx(captureWidth, contentWidthPt, contentHeightPt)
-      const totalH = el.scrollHeight
-      const elTop = elRect.top
-      const elScrollTop = el.scrollTop || 0
-      // 스크롤 위치와 무관하게 콘텐츠 내 절대 위치를 얻음:
-      // blockTop_content = block.getBoundingClientRect().top - elTop + elScrollTop
-      const blockEls = Array.from(el.querySelectorAll<HTMLElement>('[id^="memo-block-"]'))
+    const node = pdfContentRef.current
+    let cancelled = false
+    let frameId = 0
+    let timeoutId = 0
+    let computeToken = 0
 
-      const breaks: number[] = []
-      let offsetY = 0
-      while (offsetY < totalH) {
-        let sliceH = Math.min(pageH, totalH - offsetY)
-        const cutY = offsetY + sliceH
-        for (const block of blockEls) {
-          const br = block.getBoundingClientRect()
-          const blockTop = br.top - elTop + elScrollTop
-          const blockBottom = blockTop + br.height
-          if (blockTop < cutY && blockBottom > cutY) {
-            const safe = blockTop - offsetY - 8
-            if (safe > 0 && safe < sliceH) {
-              sliceH = safe
-              break
-            }
-          }
+    const run = async () => {
+      const currentNode = pdfContentRef.current
+      if (!currentNode) return
+      const token = ++computeToken
+      try {
+        const positions = await measurePdfBreakPositions(currentNode)
+        if (!cancelled && token === computeToken) {
+          setPdfBreakPositions(positions)
         }
-        if (sliceH <= 0) break
-        offsetY += sliceH
-        if (offsetY < totalH) {
-          breaks.push(Math.floor(offsetY))
+      } catch {
+        if (!cancelled && token === computeToken) {
+          setPdfBreakPositions([])
         }
       }
-      setPdfBreakPositions(breaks)
     }
-    compute()
-    const obs = new ResizeObserver(compute)
-    obs.observe(pdfContentRef.current)
-    return () => obs.disconnect()
+
+    const schedule = () => {
+      window.clearTimeout(timeoutId)
+      window.cancelAnimationFrame(frameId)
+      timeoutId = window.setTimeout(() => {
+        frameId = window.requestAnimationFrame(() => {
+          void run()
+        })
+      }, 80)
+    }
+
+    schedule()
+
+    const resizeObserver = new ResizeObserver(() => schedule())
+    resizeObserver.observe(node)
+    const mutationObserver = new MutationObserver((mutations) => {
+      const shouldRecompute = mutations.some((mutation) => {
+        const target =
+          mutation.target instanceof Element
+            ? mutation.target
+            : mutation.target instanceof Text
+              ? mutation.target.parentElement
+              : null
+        return !target?.closest('[data-pdf-hide="true"]')
+      })
+      if (shouldRecompute) {
+        schedule()
+      }
+    })
+    mutationObserver.observe(node, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+    })
+    window.addEventListener("resize", schedule)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timeoutId)
+      window.cancelAnimationFrame(frameId)
+      resizeObserver.disconnect()
+      mutationObserver.disconnect()
+      window.removeEventListener("resize", schedule)
+    }
   }, [showPdfBreaks, activeMemoId])
 
   useEffect(() => {
@@ -3476,6 +4224,27 @@ export function ToolNotebookPage() {
     [memoState.folders]
   )
 
+  const allRecordTemplates = useMemo(
+    () => [
+      ...builtinRecordTemplates,
+      ...Object.values(recordState.templates).filter((template): template is RNestRecordTemplate => Boolean(template)),
+    ],
+    [recordState.templates]
+  )
+
+  const recordEntriesByTemplateId = useMemo(() => {
+    const next: Record<string, RNestRecordEntry[]> = {}
+    for (const entry of Object.values(recordState.entries).filter((item): item is RNestRecordEntry => Boolean(item))) {
+      if (entry.trashedAt != null) continue
+      if (!next[entry.templateId]) next[entry.templateId] = []
+      next[entry.templateId].push(entry)
+    }
+    for (const templateId of Object.keys(next)) {
+      next[templateId] = [...next[templateId]].sort((a, b) => b.updatedAt - a.updatedAt)
+    }
+    return next
+  }, [recordState.entries])
+
   const activeDocs = useMemo(
     () => allDocs.filter((d) => d.trashedAt == null),
     [allDocs]
@@ -3493,13 +4262,85 @@ export function ToolNotebookPage() {
     return renderedDocs[doc.id] ?? doc
   }
 
+  const renderPageTree = useCallback(
+    (nodes: MemoDocTreeNode[], listKey: string, depth = 0) =>
+      nodes.map((node) => {
+        const doc = node.doc
+        return (
+          <Fragment key={`${listKey}:${doc.id}`}>
+            <PageItem
+              doc={getRenderableDoc(doc)}
+              summary={buildSummary(getRenderableDoc(doc))}
+              isLocked={Boolean(doc.lock && !unlockedPayloads[doc.id])}
+              listKey={listKey}
+              depth={depth}
+              isDropActive={dragOverParentDocId === doc.id}
+              isActive={activeMemoId === doc.id}
+              onClick={() => openMemo(doc.id)}
+              draggable
+              isDragging={draggingDocId === doc.id}
+              onDragStart={(event) => handlePageDragStart(event, doc.id)}
+              onDragEnd={handlePageDragEnd}
+              onDragOver={(event) => {
+                if (!draggingDocId || draggingDocId === doc.id) return
+                event.preventDefault()
+                event.dataTransfer.dropEffect = "move"
+                setDragOverRootPages(false)
+                setDragOverFolderId(doc.folderId ?? null)
+                setDragOverParentDocId(doc.id)
+              }}
+              onDragLeave={(event) => {
+                if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+                setDragOverParentDocId((current) => (current === doc.id ? null : current))
+              }}
+              onDrop={(event) => {
+                event.preventDefault()
+                const droppedDocId = event.dataTransfer.getData("text/plain") || draggingDocId
+                if (droppedDocId) {
+                  moveDocPlacement(droppedDocId, doc.folderId ?? null, doc.id)
+                }
+                handlePageDragEnd()
+              }}
+              className="px-2 py-1.5"
+              isEditing={editingDocId === doc.id}
+              draftTitle={editingDocId === doc.id ? pageTitleDraft : doc.title}
+              onStartEdit={() => startPageRename(doc)}
+              onDraftChange={setPageTitleDraft}
+              onDraftCommit={() => commitPageRename(doc.id)}
+              onDraftCancel={cancelPageRename}
+              onTrash={() => trashMemo(doc.id)}
+            />
+            {node.children.length > 0 ? (
+              <div className="space-y-1">
+                {renderPageTree(node.children, listKey, depth + 1)}
+              </div>
+            ) : null}
+          </Fragment>
+        )
+      }),
+    [
+      activeMemoId,
+      dragOverParentDocId,
+      draggingDocId,
+      editingDocId,
+      pageTitleDraft,
+      unlockedPayloads,
+      renderedDocs,
+    ]
+  )
+
   const pinnedDocs = useMemo(
     () => activeDocs.filter((d) => d.pinned),
     [activeDocs]
   )
 
   const rootDocs = useMemo(
-    () => sortDocsByKey(activeDocs.filter((d) => !d.pinned && !d.folderId), sortKey),
+    () => sortDocsByKey(activeDocs.filter((d) => !d.pinned && !d.folderId && !d.parentDocId), sortKey),
+    [activeDocs, sortKey]
+  )
+
+  const rootDocTree = useMemo(
+    () => buildMemoDocTree(activeDocs.filter((d) => !d.pinned && !d.folderId), sortKey),
     [activeDocs, sortKey]
   )
 
@@ -3518,6 +4359,14 @@ export function ToolNotebookPage() {
     }
     return next
   }, [activeDocs, allFolders, sortKey])
+
+  const folderDocTreesByFolderId = useMemo(() => {
+    const next: Record<string, MemoDocTreeNode[]> = {}
+    for (const folder of allFolders) {
+      next[folder.id] = buildMemoDocTree((folderDocsByFolderId[folder.id] ?? []).filter((doc) => doc.folderId === folder.id), sortKey)
+    }
+    return next
+  }, [allFolders, folderDocsByFolderId, sortKey])
 
   const favoriteDocs = useMemo(
     () => activeDocs.filter((d) => d.favorite),
@@ -3561,6 +4410,17 @@ export function ToolNotebookPage() {
   const activeMemoIsLocked = Boolean(activeMemoRaw?.lock)
   const activeMemoIsUnlocked = Boolean(activeMemoRaw?.id && unlockedPayloads[activeMemoRaw.id])
   const canUseActiveMemoAsPersonalTemplate = Boolean(activeMemo && (!activeMemoRaw?.lock || activeMemoIsUnlocked))
+  const currentTemplateWarningLabels = useMemo(() => {
+    if (!activeMemo) return []
+    const degradableTypes: RNestMemoBlockType[] = ["unsupported", "image", "attachment", "gallery", "pageLink", "recordView", "embed"]
+    return Array.from(
+      new Set(
+        activeMemo.blocks
+          .filter((block) => degradableTypes.includes(block.type))
+          .map((block) => blockTypeLabels[block.type])
+      )
+    )
+  }, [activeMemo])
   const canUndoActiveMemo = useMemo(() => {
     void undoVersion
     if (!activeMemoRaw) return false
@@ -3706,6 +4566,39 @@ export function ToolNotebookPage() {
       touchRecent ? insertRecent(latestMemo.recent, next.id) : latestMemo.recent
     )
     return next
+  }
+
+  function openMemoDoc(docId: string) {
+    if (!memoState.documents[docId]) return
+    setActiveMemoId(docId)
+    const latestMemo = getLatestMemoState()
+    commit(latestMemo.documents, insertRecent(latestMemo.recent, docId), latestMemo.folders, latestMemo.personalTemplates)
+  }
+
+  function quickAddRecordEntry(templateId: string) {
+    const customTemplates = Object.fromEntries(
+      Object.values(recordState.templates)
+        .filter((template): template is RNestRecordTemplate => Boolean(template))
+        .map((template) => [template.id, template])
+    )
+    const template = resolveRecordTemplate(templateId, customTemplates)
+    if (!template) {
+      setToast("기록지를 찾을 수 없습니다")
+      return
+    }
+    const latestRecords = store.getState().records
+    const entry = createRecordEntryFromTemplate(template, {
+      title: `${template.name} 기록`,
+    })
+    store.setRecordState({
+      ...latestRecords,
+      entries: {
+        ...latestRecords.entries,
+        [entry.id]: entry,
+      },
+      recent: [entry.id, ...(latestRecords.recent ?? []).filter((id) => id !== entry.id)].slice(0, 20),
+    })
+    setToast(`${template.name} 기록을 추가했습니다`)
   }
 
   async function cleanupAttachmentStoragePathsIfUnused(storagePaths: string[]) {
@@ -3862,7 +4755,11 @@ export function ToolNotebookPage() {
     updatePersonalTemplates([baseTemplate, ...personalTemplates])
     setPersonalTemplateDialogOpen(false)
     setPersonalTemplateCreateError(null)
-    setToast("내 템플릿을 만들었습니다")
+    setToast(
+      personalTemplateSource === "current" && currentTemplateWarningLabels.length > 0
+        ? "내 템플릿을 만들었습니다 · 일부 블록은 단순화되어 저장됩니다"
+        : "내 템플릿을 만들었습니다"
+    )
   }
 
   function removePersonalTemplate(templateId: string) {
@@ -3956,7 +4853,7 @@ export function ToolNotebookPage() {
     const nextDocuments: Record<string, RNestMemoDocument | undefined> = { ...latestMemo.documents }
     for (const doc of Object.values(latestMemo.documents)) {
       if (!doc || doc.folderId !== folderId) continue
-      nextDocuments[doc.id] = { ...doc, folderId: null }
+      nextDocuments[doc.id] = { ...doc, folderId: null, parentDocId: null }
     }
     commit(nextDocuments, latestMemo.recent, nextFolders)
     setFolderOpenState((current) => {
@@ -3971,22 +4868,74 @@ export function ToolNotebookPage() {
     setToast("폴더를 삭제하고 페이지를 바깥으로 이동했습니다")
   }
 
-  function moveDocToFolder(docId: string, folderId: string | null) {
+  function wouldCreateDocCycle(
+    documents: Record<string, RNestMemoDocument | undefined>,
+    movingDocId: string,
+    nextParentDocId: string | null
+  ) {
+    let cursorId = nextParentDocId
+    while (cursorId) {
+      if (cursorId === movingDocId) return true
+      const cursor = documents[cursorId]
+      cursorId = cursor?.parentDocId ?? null
+    }
+    return false
+  }
+
+  function moveDocPlacement(docId: string, nextFolderId: string | null, nextParentDocId: string | null) {
     const latestMemo = getLatestMemoState()
     const doc = latestMemo.documents[docId]
     if (!doc) return
-    if (folderId && !latestMemo.folders[folderId]) return
-    if ((doc.folderId ?? null) === folderId) return
-    saveRawDoc(
-      { ...doc, folderId },
-      { touchRecent: false, touchUpdatedAt: false }
-    )
-    if (folderId) {
-      setFolderOpenState((current) => ({ ...current, [folderId]: true }))
+
+    const parentDoc = nextParentDocId ? latestMemo.documents[nextParentDocId] ?? null : null
+    if (nextParentDocId && !parentDoc) return
+    if (nextParentDocId && wouldCreateDocCycle(latestMemo.documents, docId, nextParentDocId)) {
+      setToast("페이지를 자기 자신의 하위 페이지로 이동할 수 없습니다")
+      return
+    }
+
+    const resolvedFolderId = parentDoc ? parentDoc.folderId ?? null : nextFolderId
+    if (parentDoc && (parentDoc.folderId ?? null) !== resolvedFolderId) return
+    if ((doc.folderId ?? null) === (resolvedFolderId ?? null) && (doc.parentDocId ?? null) === (nextParentDocId ?? null)) {
+      return
+    }
+    const nextDocuments = { ...latestMemo.documents }
+    const subtreeIds = collectDocSubtreeIds(latestMemo.documents, docId)
+    for (const subtreeDocId of subtreeIds) {
+      const subtreeDoc = latestMemo.documents[subtreeDocId]
+      if (!subtreeDoc) continue
+      if (subtreeDocId === docId) {
+        nextDocuments[subtreeDocId] = {
+          ...subtreeDoc,
+          folderId: resolvedFolderId ?? null,
+          parentDocId: nextParentDocId ?? null,
+          updatedAt: Date.now(),
+        }
+        continue
+      }
+      nextDocuments[subtreeDocId] = {
+        ...subtreeDoc,
+        folderId: resolvedFolderId ?? null,
+      }
+    }
+    commit(nextDocuments, latestMemo.recent, latestMemo.folders, latestMemo.personalTemplates)
+
+    if (resolvedFolderId) {
+      setFolderOpenState((current) => ({ ...current, [resolvedFolderId]: true }))
+    }
+    if (nextParentDocId) {
+      setToast("하위 페이지로 이동했습니다")
+    } else if (resolvedFolderId) {
       setToast("폴더에 페이지를 추가했습니다")
     } else {
       setToast("페이지를 폴더 밖으로 이동했습니다")
     }
+  }
+
+  function moveDocToFolder(docId: string, folderId: string | null) {
+    const latestMemo = getLatestMemoState()
+    if (folderId && !latestMemo.folders[folderId]) return
+    moveDocPlacement(docId, folderId, null)
   }
 
   async function exportActiveMemoPdf() {
@@ -4015,7 +4964,6 @@ export function ToolNotebookPage() {
       const pageHeight = pdf.internal.pageSize.getHeight()
       const contentWidth = pageWidth - PDF_EXPORT_MARGIN_PT * 2
       const contentHeight = pageHeight - PDF_EXPORT_MARGIN_PT * 2
-      const pageSliceHeightPx = getPdfSliceHeightPx(captureWidth, contentWidth, contentHeight)
       const renderScale = Math.max(
         PDF_EXPORT_CAPTURE_SCALE,
         Math.min((window.devicePixelRatio || 1) * 1.5, PDF_EXPORT_MAX_CAPTURE_SCALE)
@@ -4026,20 +4974,15 @@ export function ToolNotebookPage() {
           window.requestAnimationFrame(() => resolve())
         })
         await waitForPdfExportAssets(clone)
-        const totalHeight = Math.max(Math.ceil(clone.scrollHeight), Math.ceil(clone.getBoundingClientRect().height))
-        if (totalHeight <= 0) {
+        const plan = buildPdfSlicePlan(clone, captureWidth, contentWidth, contentHeight)
+        if (plan.totalHeight <= 0 || plan.slices.length <= 0) {
           throw new Error("pdf_export_empty")
         }
 
-        let offsetY = 0
         let pageIndex = 0
-        while (offsetY < totalHeight) {
-          let sliceHeight = Math.min(pageSliceHeightPx, totalHeight - offsetY)
-          sliceHeight = findSafeSliceHeight(sliceHeight, offsetY, clone)
-          if (sliceHeight <= 0) break
-
-          viewport.style.height = `${sliceHeight}px`
-          clone.style.transform = `translateY(-${offsetY}px)`
+        for (const slice of plan.slices) {
+          viewport.style.height = `${slice.height}px`
+          clone.style.transform = `translateY(-${slice.offsetY}px)`
 
           await new Promise<void>((resolve) => {
             window.requestAnimationFrame(() => {
@@ -4053,9 +4996,9 @@ export function ToolNotebookPage() {
             logging: false,
             scale: renderScale,
             width: captureWidth,
-            height: sliceHeight,
+            height: slice.height,
             windowWidth: captureWidth,
-            windowHeight: sliceHeight,
+            windowHeight: slice.height,
             scrollX: 0,
             scrollY: 0,
             imageTimeout: 15000,
@@ -4065,7 +5008,7 @@ export function ToolNotebookPage() {
             pdf.addPage()
           }
 
-          const renderedHeight = contentWidth * (canvas.height / canvas.width)
+          const renderedHeight = Math.min(contentHeight, contentWidth * (canvas.height / canvas.width))
           pdf.addImage(
             canvas.toDataURL("image/png", 1),
             "PNG",
@@ -4077,7 +5020,6 @@ export function ToolNotebookPage() {
             "FAST"
           )
 
-          offsetY += sliceHeight
           pageIndex += 1
         }
       } finally {
@@ -4132,6 +5074,7 @@ export function ToolNotebookPage() {
   function handlePageDragEnd() {
     setDraggingDocId(null)
     setDragOverFolderId(null)
+    setDragOverParentDocId(null)
     setDragOverRootPages(false)
   }
 
@@ -4157,23 +5100,7 @@ export function ToolNotebookPage() {
       updatedAt: Date.now(),
       attachments: duplicatedAttachments,
       attachmentStoragePaths: buildDocStoragePaths(doc),
-      blocks: doc.blocks.map((b) =>
-        b.type === "table"
-          ? {
-              ...b,
-              id: crypto.randomUUID(),
-              table: {
-                columns: b.table?.columns ?? ["항목", "내용"],
-                columnHtml: b.table?.columnHtml ?? ["", ""],
-                rows: (b.table?.rows ?? []).map((r) => ({ ...r, id: crypto.randomUUID() })),
-              },
-            }
-          : {
-              ...b,
-              id: crypto.randomUUID(),
-              attachmentId: b.attachmentId ? attachmentIdMap.get(b.attachmentId) ?? b.attachmentId : undefined,
-            }
-      ),
+      blocks: doc.blocks.map((block) => cloneMemoBlockForDuplicate(block, attachmentIdMap)),
     })
     const latestMemo = store.getState().memo
     commit({ ...latestMemo.documents, [next.id]: next }, insertRecent(latestMemo.recent, next.id))
@@ -4287,6 +5214,14 @@ export function ToolNotebookPage() {
       case "duplicate":
         duplicateMemo(activeMemoRaw)
         break
+      case "import-text":
+        if (activeMemoRaw.lock && !activeMemoIsUnlocked) {
+          setToast("잠금 해제 후 가져올 수 있습니다")
+          break
+        }
+        setImportError(null)
+        setImportDialogOpen(true)
+        break
       case "export-pdf":
         void exportActiveMemoPdf()
         break
@@ -4382,20 +5317,75 @@ export function ToolNotebookPage() {
     }
   }
 
-  function beginAssetInsert(blockId: string, kind: "image" | "attachment") {
+  function getDefaultBlockInsertTarget(doc: RNestMemoDocument, kind: "image" | "attachment" | "gallery") {
+    const lastBlock = doc.blocks[doc.blocks.length - 1]
+    return {
+      docId: doc.id,
+      blockId: lastBlock?.id ?? createMemoBlock("paragraph").id,
+      kind,
+    }
+  }
+
+  function resolveInsertKindFromFiles(files: File[]) {
+    if (files.length === 0) return "attachment" as const
+    const everyImage = files.every((file) => file.type.startsWith("image/"))
+    if (!everyImage) return "attachment" as const
+    return files.length > 1 ? ("gallery" as const) : ("image" as const)
+  }
+
+  async function appendImportedBlocks(rawValue: string, sourceLabel: string) {
+    if (!activeMemo) return
+    const importedBlocks = importTextToBlocks(rawValue)
+    if (importedBlocks.length === 0) {
+      setImportError("가져올 내용을 찾지 못했습니다")
+      return
+    }
+    const canReplaceStarter =
+      activeMemo.attachments.length === 0 &&
+      activeMemo.blocks.length === 1 &&
+      activeMemo.blocks[0]?.type === "paragraph" &&
+      !getMemoBlockText(activeMemo.blocks[0]) &&
+      !getMemoBlockDetailText(activeMemo.blocks[0])
+    const remainingSlots = canReplaceStarter ? NOTEBOOK_IMPORT_BLOCK_LIMIT : Math.max(0, NOTEBOOK_IMPORT_BLOCK_LIMIT - activeMemo.blocks.length)
+    const nextImportedBlocks = importedBlocks.slice(0, remainingSlots)
+    if (nextImportedBlocks.length === 0) {
+      setImportError("이 메모에는 더 이상 블록을 추가할 수 없습니다")
+      return
+    }
+    await updateActiveMemoContent((doc) => {
+      return {
+        ...doc,
+        blocks: canReplaceStarter ? nextImportedBlocks : [...doc.blocks, ...nextImportedBlocks],
+      }
+    })
+    setImportDialogOpen(false)
+    setImportError(null)
+    setImportTextValue("")
+    setToast(
+      importedBlocks.length > nextImportedBlocks.length
+        ? `${sourceLabel} ${nextImportedBlocks.length}개 블록만 가져왔습니다`
+        : `${sourceLabel} ${nextImportedBlocks.length}개 블록으로 가져왔습니다`
+    )
+  }
+
+  function beginAssetInsert(blockId: string, kind: "image" | "attachment" | "gallery") {
     if (!activeMemo) return
     pendingAssetTargetRef.current = { docId: activeMemo.id, blockId, kind }
-    if (kind === "image") {
+    if (kind === "image" || kind === "gallery") {
       imageInputRef.current?.click()
     } else {
       fileInputRef.current?.click()
     }
   }
 
-  async function insertUploadedAssetBlocks(fileList: FileList | null, kind: "image" | "attachment") {
-    const target = pendingAssetTargetRef.current
+  async function insertUploadedAssetFiles(
+    files: File[],
+    kind: "image" | "attachment" | "gallery",
+    targetOverride?: { docId: string; blockId: string; kind: "image" | "attachment" | "gallery" } | null
+  ) {
+    const target = targetOverride ?? pendingAssetTargetRef.current
     pendingAssetTargetRef.current = null
-    if (!fileList || fileList.length === 0 || !activeMemo || !target) return
+    if (files.length === 0 || !activeMemo || !target) return
     if (activeMemo.id !== target.docId) {
       setToast("메모가 바뀌어 업로드를 취소했습니다")
       return
@@ -4408,18 +5398,18 @@ export function ToolNotebookPage() {
       return
     }
 
-    const files = Array.from(fileList).slice(0, available)
+    const nextFiles = files.slice(0, available)
     const uploadedAttachments: RNestMemoAttachment[] = []
     let largeFileCount = 0
     let failedCount = 0
 
-    for (const file of files) {
+    for (const file of nextFiles) {
       if (file.size > 12 * 1024 * 1024) {
         largeFileCount += 1
         continue
       }
       try {
-        const uploaded = await uploadNotebookFile(file, kind === "image" ? deriveAttachmentKind(file, "image") : deriveAttachmentKind(file, "file"))
+        const uploaded = await uploadNotebookFile(file, kind === "attachment" ? deriveAttachmentKind(file, "file") : deriveAttachmentKind(file, "image"))
         if ((uploaded.kind === "image" || uploaded.kind === "scan") && file.type.startsWith("image/")) {
           seedNotebookImagePreview(uploaded.storagePath, file)
         }
@@ -4438,18 +5428,37 @@ export function ToolNotebookPage() {
       const idx = doc.blocks.findIndex((block) => block.id === target.blockId)
       const insertAt = idx >= 0 ? idx + 1 : doc.blocks.length
       const nextBlocks = [...doc.blocks]
-      nextBlocks.splice(
-        insertAt,
-        0,
-        ...uploadedAttachments.map((attachment) =>
-          createMemoBlock(kind, {
-            text: kind === "image" ? "" : attachment.name,
-            attachmentId: attachment.id,
-            mediaWidth: kind === "image" ? 100 : undefined,
-            mediaOffsetX: kind === "image" ? 0 : undefined,
-          })
+      if (kind === "gallery") {
+        const targetBlock = nextBlocks[idx]
+        if (targetBlock?.type === "gallery") {
+          nextBlocks[idx] = {
+            ...targetBlock,
+            attachmentIds: Array.from(new Set([...(targetBlock.attachmentIds ?? []), ...uploadedAttachments.map((attachment) => attachment.id)])).slice(0, 8),
+          }
+        } else {
+          nextBlocks.splice(
+            insertAt,
+            0,
+            createMemoBlock("gallery", {
+              text: "새 갤러리",
+              attachmentIds: uploadedAttachments.map((attachment) => attachment.id),
+            })
+          )
+        }
+      } else {
+        nextBlocks.splice(
+          insertAt,
+          0,
+          ...uploadedAttachments.map((attachment) =>
+            createMemoBlock(kind, {
+              text: kind === "image" ? "" : attachment.name,
+              attachmentId: attachment.id,
+              mediaWidth: kind === "image" ? 100 : undefined,
+              mediaOffsetX: kind === "image" ? 0 : undefined,
+            })
+          )
         )
-      )
+      }
       return normalizeDocAttachments({
         ...doc,
         blocks: nextBlocks,
@@ -4463,8 +5472,71 @@ export function ToolNotebookPage() {
     if (failedCount > 0) {
       setToast(`${uploadedAttachments.length}개 업로드, ${failedCount}개 실패`)
     } else {
-      setToast(kind === "image" ? `사진 ${uploadedAttachments.length}개를 추가했습니다` : `파일 ${uploadedAttachments.length}개를 추가했습니다`)
+      setToast(
+        kind === "attachment"
+          ? `파일 ${uploadedAttachments.length}개를 추가했습니다`
+          : kind === "gallery"
+            ? `갤러리에 사진 ${uploadedAttachments.length}개를 추가했습니다`
+            : `사진 ${uploadedAttachments.length}개를 추가했습니다`
+      )
     }
+  }
+
+  async function insertUploadedAssetBlocks(fileList: FileList | null, kind: "image" | "attachment" | "gallery") {
+    await insertUploadedAssetFiles(Array.from(fileList ?? []), kind)
+  }
+
+  function handleEditorSurfacePaste(event: React.ClipboardEvent<HTMLDivElement>) {
+    if (!activeMemo || draggingDocId || isEditableSurfaceTarget(event.target)) return
+
+    const clipboardFiles = Array.from(event.clipboardData.files ?? [])
+    if (clipboardFiles.length > 0) {
+      const kind = resolveInsertKindFromFiles(clipboardFiles)
+      event.preventDefault()
+      void insertUploadedAssetFiles(
+        clipboardFiles,
+        kind,
+        getDefaultBlockInsertTarget(activeMemo, kind)
+      )
+      return
+    }
+
+    const text = event.clipboardData.getData("text/plain").trim()
+    if (!text) return
+    event.preventDefault()
+    void appendImportedBlocks(text, "붙여넣은 내용을")
+  }
+
+  function handleEditorSurfaceDragOver(event: React.DragEvent<HTMLDivElement>) {
+    if (draggingDocId || isEditableSurfaceTarget(event.target)) return
+    const hasFiles = event.dataTransfer.items && Array.from(event.dataTransfer.items).some((item) => item.kind === "file")
+    const hasText = Array.from(event.dataTransfer.types ?? []).some((type) => type === "text/plain" || type === "text/uri-list")
+    if (!hasFiles && !hasText) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = "copy"
+    setEditorDropActive(true)
+  }
+
+  function handleEditorSurfaceDragLeave(event: React.DragEvent<HTMLDivElement>) {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+    setEditorDropActive(false)
+  }
+
+  function handleEditorSurfaceDrop(event: React.DragEvent<HTMLDivElement>) {
+    setEditorDropActive(false)
+    if (!activeMemo || draggingDocId || isEditableSurfaceTarget(event.target)) return
+
+    const files = Array.from(event.dataTransfer.files ?? [])
+    const rawText = event.dataTransfer.getData("text/plain") || event.dataTransfer.getData("text/uri-list")
+    if (files.length === 0 && !rawText.trim()) return
+
+    event.preventDefault()
+    if (files.length > 0) {
+      const kind = resolveInsertKindFromFiles(files)
+      void insertUploadedAssetFiles(files, kind, getDefaultBlockInsertTarget(activeMemo, kind))
+      return
+    }
+    void appendImportedBlocks(rawText, "드롭한 내용을")
   }
 
   async function removeAttachmentById(blockId: string, attachmentId: string) {
@@ -4585,29 +5657,7 @@ export function ToolNotebookPage() {
         const idx = doc.blocks.findIndex((b) => b.id === blockId)
         if (idx === -1) return doc.blocks
         const block = doc.blocks[idx]
-        const duplicate =
-          block.type === "table"
-            ? createMemoBlock("table", {
-                highlight: block.highlight,
-                table: {
-                  columns: block.table?.columns ?? ["항목", "내용"],
-                  columnHtml: block.table?.columnHtml ?? ["", ""],
-                  rows: (block.table?.rows ?? []).map((row) => createMemoTableRow(row.left, row.right, row)),
-                },
-              })
-            : createMemoBlock(block.type, {
-                text: block.text,
-                textHtml: block.textHtml,
-                detailText: block.detailText,
-                detailTextHtml: block.detailTextHtml,
-                attachmentId: block.attachmentId,
-                mediaWidth: block.mediaWidth,
-                mediaAspectRatio: block.mediaAspectRatio,
-                mediaOffsetX: block.mediaOffsetX,
-                checked: block.checked,
-                collapsed: block.collapsed,
-                highlight: block.highlight,
-              })
+        const duplicate = cloneMemoBlockForDuplicate(block)
         const next = [...doc.blocks]
         next.splice(idx + 1, 0, duplicate)
         return next
@@ -5095,6 +6145,7 @@ export function ToolNotebookPage() {
                 ) : (
                   allFolders.map((folder) => {
                     const docs = folderDocsByFolderId[folder.id] ?? []
+                    const docTree = folderDocTreesByFolderId[folder.id] ?? []
                     const isOpen = folderOpenState[folder.id] ?? true
                     return (
                       <FolderItem
@@ -5126,6 +6177,7 @@ export function ToolNotebookPage() {
                           event.preventDefault()
                           event.dataTransfer.dropEffect = "move"
                           setDragOverRootPages(false)
+                          setDragOverParentDocId(null)
                           setDragOverFolderId(folder.id)
                           setFolderOpenState((current) => ({ ...current, [folder.id]: true }))
                         }}
@@ -5144,29 +6196,7 @@ export function ToolNotebookPage() {
                             아직 폴더 안에 페이지가 없습니다
                           </div>
                         ) : (
-                          docs.map((doc) => (
-                            <PageItem
-                              key={doc.id}
-                              doc={getRenderableDoc(doc)}
-                              summary={buildSummary(getRenderableDoc(doc))}
-                              isLocked={Boolean(doc.lock && !unlockedPayloads[doc.id])}
-                              listKey={`folder:${folder.id}`}
-                              isActive={activeMemoId === doc.id}
-                              onClick={() => openMemo(doc.id)}
-                              draggable
-                              isDragging={draggingDocId === doc.id}
-                              onDragStart={(event) => handlePageDragStart(event, doc.id)}
-                              onDragEnd={handlePageDragEnd}
-                              className="px-2 py-1.5"
-                              isEditing={!doc.pinned && editingDocId === doc.id}
-                              draftTitle={!doc.pinned && editingDocId === doc.id ? pageTitleDraft : doc.title}
-                              onStartEdit={!doc.pinned ? () => startPageRename(doc) : undefined}
-                              onDraftChange={!doc.pinned ? setPageTitleDraft : undefined}
-                              onDraftCommit={!doc.pinned ? () => commitPageRename(doc.id) : undefined}
-                              onDraftCancel={!doc.pinned ? cancelPageRename : undefined}
-                              onTrash={!doc.pinned ? () => trashMemo(doc.id) : undefined}
-                            />
-                          ))
+                          renderPageTree(docTree, `folder:${folder.id}`)
                         )}
                       </FolderItem>
                     )
@@ -5181,6 +6211,7 @@ export function ToolNotebookPage() {
                       event.preventDefault()
                       event.dataTransfer.dropEffect = "move"
                       setDragOverFolderId(null)
+                      setDragOverParentDocId(null)
                       setDragOverRootPages(true)
                     }}
                     onDragLeave={() => setDragOverRootPages(false)}
@@ -5211,28 +6242,7 @@ export function ToolNotebookPage() {
                     모든 페이지가 폴더 안에 있습니다
                   </div>
                 )}
-                {rootDocs.map((doc) => (
-                  <PageItem
-                    key={doc.id}
-                    doc={getRenderableDoc(doc)}
-                    summary={buildSummary(getRenderableDoc(doc))}
-                    isLocked={Boolean(doc.lock && !unlockedPayloads[doc.id])}
-                    listKey="pages"
-                    isActive={activeMemoId === doc.id}
-                    onClick={() => openMemo(doc.id)}
-                    draggable
-                    isDragging={draggingDocId === doc.id}
-                    onDragStart={(event) => handlePageDragStart(event, doc.id)}
-                    onDragEnd={handlePageDragEnd}
-                    isEditing={editingDocId === doc.id}
-                    draftTitle={editingDocId === doc.id ? pageTitleDraft : doc.title}
-                    onStartEdit={() => startPageRename(doc)}
-                    onDraftChange={setPageTitleDraft}
-                    onDraftCommit={() => commitPageRename(doc.id)}
-                    onDraftCancel={cancelPageRename}
-                    onTrash={() => trashMemo(doc.id)}
-                  />
-                ))}
+                {renderPageTree(rootDocTree, "pages")}
               </SidebarSection>
 
               {trashedDocs.length > 0 && (
@@ -5437,9 +6447,28 @@ export function ToolNotebookPage() {
         )}
 
         {/* editor area */}
-        <div className="flex-1 overflow-y-auto">
+        <div
+          className={cn(
+            "flex-1 overflow-y-auto transition-colors",
+            editorDropActive && "bg-[color:var(--rnest-accent-soft)]/35"
+          )}
+          onPasteCapture={handleEditorSurfacePaste}
+          onDragOver={handleEditorSurfaceDragOver}
+          onDragLeave={handleEditorSurfaceDragLeave}
+          onDrop={handleEditorSurfaceDrop}
+        >
           {activeMemo ? (
             <div ref={pdfContentRef} className="relative mx-auto w-full max-w-[720px] bg-white px-5 py-6 sm:px-6 lg:px-10 lg:py-10 xl:pl-16">
+              {editorDropActive && (
+                <div
+                  data-pdf-hide="true"
+                  className="pointer-events-none absolute inset-3 z-20 rounded-[28px] border-2 border-dashed border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)]/50"
+                >
+                  <div className="flex h-full items-center justify-center text-[13px] font-medium text-[color:var(--rnest-accent)]">
+                    파일이나 텍스트를 놓으면 메모로 가져옵니다
+                  </div>
+                </div>
+              )}
               {activeMemo.coverStyle && (
                 <div
                   className={cn(
@@ -5838,6 +6867,10 @@ export function ToolNotebookPage() {
                             block={block}
                             attachment={attachment}
                             attachmentUrl={attachment ? buildNotebookFileUrl(attachment.storagePath) : undefined}
+                            docAttachments={activeMemo.attachments}
+                            allDocs={activeDocs}
+                            recordTemplates={allRecordTemplates}
+                            recordEntriesByTemplateId={recordEntriesByTemplateId}
                             isFirst={idx === 0}
                             isLast={idx === activeMemo.blocks.length - 1}
                             isDragging={blockReorderState?.activeBlockId === block.id}
@@ -5862,6 +6895,8 @@ export function ToolNotebookPage() {
                             onTypeChange={(type) => changeBlockType(block.id, type)}
                             onAddAfter={(type) => addBlockAfter(block.id, type)}
                             onInsertAsset={(kind) => beginAssetInsert(block.id, kind)}
+                            onOpenDoc={openMemoDoc}
+                            onQuickAddRecordEntry={quickAddRecordEntry}
                             onMoveUp={() => moveBlock(block.id, "up")}
                             onMoveDown={() => moveBlock(block.id, "down")}
                             onHighlight={(color) => setBlockHighlight(block.id, color)}
@@ -6185,6 +7220,11 @@ export function ToolNotebookPage() {
                         </div>
                       </button>
                     </div>
+                    {personalTemplateSource === "current" && currentTemplateWarningLabels.length > 0 ? (
+                      <div className="mt-3 rounded-[18px] border border-[#f6dcb3] bg-[#fff7ea] px-4 py-3 text-[12px] leading-5 text-[#b26a11]">
+                        템플릿에서는 {currentTemplateWarningLabels.join(", ")} 블록이 단순 텍스트/링크 형태로 변환되어 저장됩니다.
+                      </div>
+                    ) : null}
                   </div>
 
                   {personalTemplateCreateError ? (
@@ -6208,6 +7248,85 @@ export function ToolNotebookPage() {
                     className="inline-flex h-11 items-center justify-center rounded-full bg-[color:var(--rnest-accent)] px-4 text-[13px] font-semibold text-white shadow-[0_16px_36px_rgba(167,139,250,0.22)]"
                   >
                     템플릿 만들기
+                  </button>
+                </DialogFooter>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog
+          open={importDialogOpen}
+          onOpenChange={(open) => {
+            setImportDialogOpen(open)
+            if (!open) {
+              setImportError(null)
+              setImportTextValue("")
+            }
+          }}
+        >
+          <DialogContent className="[&>button]:hidden w-[calc(100vw-16px)] max-w-[560px] overflow-hidden rounded-[30px] border-0 bg-white p-0 shadow-[0_30px_80px_rgba(15,23,42,0.18)] sm:w-full">
+            <div className="flex max-h-[calc(100dvh-16px)] flex-col rounded-[30px] bg-[linear-gradient(180deg,rgba(250,245,255,0.98)_0%,rgba(255,255,255,0.98)_100%)]">
+              <div className="border-b border-white/80 bg-[rgba(255,255,255,0.76)] px-5 pb-4 pt-5 backdrop-blur sm:px-6 sm:pt-6">
+                <div className="flex items-start justify-between gap-3">
+                  <DialogHeader className="min-w-0 space-y-2 text-left">
+                    <DialogTitle className="text-[22px] tracking-[-0.02em] text-ios-text">텍스트 가져오기</DialogTitle>
+                    <DialogDescription className="text-[13px] leading-relaxed text-ios-sub">
+                      Markdown, 일반 텍스트, 링크를 붙여 넣으면 현재 메모 아래에 안전하게 블록으로 변환합니다.
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  <button
+                    type="button"
+                    onClick={() => setImportDialogOpen(false)}
+                    className="inline-flex h-10 shrink-0 items-center justify-center rounded-full border border-[#dde6f0] bg-white px-4 text-[12px] font-semibold text-[#49607b] shadow-sm transition hover:bg-[#f8fbff]"
+                  >
+                    닫기
+                  </button>
+                </div>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-5 pt-4 [-webkit-overflow-scrolling:touch] sm:px-6 sm:pb-6">
+                <textarea
+                  value={importTextValue}
+                  onChange={(event) => setImportTextValue(event.target.value)}
+                  placeholder="여기에 텍스트나 Markdown을 붙여 넣으세요"
+                  className={cn(
+                    "min-h-[240px] w-full rounded-[24px] border border-gray-200 bg-white px-4 py-4 text-ios-text outline-none focus:border-[color:var(--rnest-accent-border)] focus:ring-2 focus:ring-[color:var(--rnest-accent-soft)]",
+                    mobileSafeInputClass
+                  )}
+                />
+                {importError ? (
+                  <div className="mt-3 rounded-[18px] border border-[#f0d8d8] bg-[#fff5f5] px-4 py-3 text-[12px] leading-5 text-[#b04a4a]">
+                    {importError}
+                  </div>
+                ) : (
+                  <div className="mt-3 rounded-[18px] border border-[#edf1f6] bg-[#fbfcfe] px-4 py-3 text-[12px] leading-5 text-ios-muted">
+                    코드 펜스, 제목, 목록, 체크리스트, 인용, 표, URL은 자동으로 블록으로 변환됩니다.
+                  </div>
+                )}
+
+                <DialogFooter className="mt-5 gap-2 sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setImportDialogOpen(false)}
+                    className="inline-flex h-11 items-center justify-center rounded-full border border-gray-200 px-4 text-[13px] font-medium text-ios-sub transition-colors hover:bg-gray-50"
+                  >
+                    취소
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextValue = importTextValue.trim()
+                      if (!nextValue) {
+                        setImportError("가져올 텍스트를 입력해 주세요.")
+                        return
+                      }
+                      void appendImportedBlocks(nextValue, "가져온 내용을")
+                    }}
+                    className="inline-flex h-11 items-center justify-center rounded-full bg-[color:var(--rnest-accent)] px-4 text-[13px] font-semibold text-white shadow-[0_16px_36px_rgba(167,139,250,0.22)]"
+                  >
+                    블록으로 가져오기
                   </button>
                 </DialogFooter>
               </div>
