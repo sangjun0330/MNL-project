@@ -346,7 +346,11 @@ export function inferMenstrualPosterior(args: InferArgs): MenstrualPosterior {
     fallback: clamp(settings?.pmsDays ?? 4, 2, 8),
   });
 
-  const sigmaCycle = clamp(cycleStats.sigma + Math.max(0, 3 - cycleStats.count) * 0.6, 1.8, 8);
+  // BUG-FIX: 관측 데이터 없을 때 sigma를 과도하게 넓히지 않음
+  // (기존: count=0 → sigmaCycle=5.3 → sigmaForPrior=7.1 → follicular가 모든 날짜에서 승리)
+  const sigmaCycle = cycleStats.count >= 2
+    ? clamp(cycleStats.sigma, 1.8, 6)
+    : clamp(2.2 + Math.max(0, 2 - cycleStats.count) * 0.4, 1.8, 3.5);
   const sigmaPeriod = clamp(periodStats.sigma + Math.max(0, 2 - periodStats.count) * 0.4, 0.8, 3);
   const recentNightCount = schedule
     ? Array.from({ length: 30 }).reduce<number>((count, _, index) => {
@@ -360,7 +364,9 @@ export function inferMenstrualPosterior(args: InferArgs): MenstrualPosterior {
   const anchor = recentStartCandidates.length
     ? recentStartCandidates[recentStartCandidates.length - 1].startISO
     : (settings?.lastPeriodStart ?? null);
-  const daySinceAnchor = anchor ? Math.max(0, diffDays(iso, anchor)) : 0;
+  // BUG-FIX: Math.max(0, ...) 제거 — 음수(앵커 이전 날짜)를 0으로 클램핑하면
+  // 해당 날짜가 전부 cyc=0(생리 첫날)이 되어 이전 날짜 전체가 빨간색이 되는 버그
+  const rawDaySince = anchor ? diffDays(iso, anchor) : 0;
   const muCycle = clamp(cycleStats.mean, 20, 45);
   const muPeriod = clamp(periodStats.mean, 2, 10);
 
@@ -368,10 +374,11 @@ export function inferMenstrualPosterior(args: InferArgs): MenstrualPosterior {
   if (!anchor) {
     prior.uncertain = 1;
   } else {
-    const sigmaForPrior = clamp(sigmaCycle + irregularityScore * 3, 1.5, 9);
+    const sigmaForPrior = clamp(sigmaCycle + irregularityScore * 1.5, 1.5, 5.5);
     for (let cycleLen = 20; cycleLen <= 45; cycleLen++) {
       const weight = gaussianWeight(cycleLen, muCycle, sigmaForPrior);
-      const cyc = ((daySinceAnchor % cycleLen) + cycleLen) % cycleLen;
+      // 음수 rawDaySince도 모듈러 연산으로 올바르게 사이클 내 위치 계산
+      const cyc = ((rawDaySince % cycleLen) + cycleLen) % cycleLen;
       const periodLen = clamp(Math.round(muPeriod), 2, 10);
       const pmsLead = clamp(muPmsLead, 2, 8);
       const ovulationDay = clamp(Math.round(cycleLen - (settings?.lutealLength ?? 14)), 6, cycleLen - 8);
@@ -480,7 +487,10 @@ export function inferMenstrualPosterior(args: InferArgs): MenstrualPosterior {
   const visualPhase = toVisualPhase(dominantPhase);
   const phase = compatibleLegacyPhase(dominantPhase, confidence, fallback.phase);
   const label = phaseLabel(dominantPhase, confidence, enabled);
-  const dayInCycle = anchor ? ((daySinceAnchor % Math.max(20, Math.round(muCycle))) + 1) : fallback.dayInCycle;
+  // BUG-FIX: rawDaySince 음수 처리 — 양방향 모듈러 연산으로 올바른 사이클 내 날짜 계산
+  const muCycleRounded = Math.max(20, Math.round(muCycle));
+  const cyclePosForDisplay = ((rawDaySince % muCycleRounded) + muCycleRounded) % muCycleRounded;
+  const dayInCycle = anchor ? cyclePosForDisplay + 1 : fallback.dayInCycle;
 
   return {
     ...fallback,

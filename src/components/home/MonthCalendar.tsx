@@ -61,11 +61,11 @@ function workEventSummary(bio?: BioInputs | null) {
 }
 
 function phaseColor(phase: MenstrualPosterior["visualPhase"]) {
-  if (phase === "period") return "#F43F5E";
-  if (phase === "pms") return "#F59E0B";
-  if (phase === "ovulation") return "#38BDF8";
-  if (phase === "follicular") return "#3B82F6";
-  if (phase === "luteal") return "#4F46E5";
+  if (phase === "period") return "#F43F5E";    // rose-500 = 생리 기간
+  if (phase === "pms") return "#F59E0B";       // amber-500 = 생리 직전 기간
+  if (phase === "ovulation") return "#0EA5E9"; // sky-500 = 컨디션 안정 기간 (범례 일치)
+  if (phase === "follicular") return "#0EA5E9"; // sky-500 = 컨디션 안정 기간 (범례 일치)
+  if (phase === "luteal") return "#0284C7";    // sky-600 = 컨디션 변화가 큰 날 (범례 일치)
   return "transparent";
 }
 
