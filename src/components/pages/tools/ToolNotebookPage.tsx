@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { Fragment, type MutableRefObject, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import {
   ArrowDownAZ,
   ArrowUpDown,
@@ -41,6 +41,7 @@ import {
   ReceiptText,
   Replace,
   RotateCcw,
+  RotateCw,
   Search,
   Shield,
   Sparkles,
@@ -1968,6 +1969,27 @@ function ImageResizableBlock({
 
 /* ─── inline block editor ─────────────────────────────────── */
 
+type MemoUndoSnapshot = {
+  rawDoc: RNestMemoDocument
+  unlockedPayload: RNestLockedMemoPayload | null
+}
+
+type BlockDropPlacement = "before" | "after"
+
+type BlockReorderGesture = {
+  activeBlockId: string
+  pointerId: number
+  pointerType: string
+  startX: number
+  startY: number
+}
+
+type ActiveBlockReorderState = BlockReorderGesture & {
+  overBlockId: string
+  placement: BlockDropPlacement
+  offsetY: number
+}
+
 function InlineBlock({
   block,
   attachment,
@@ -1983,8 +2005,12 @@ function InlineBlock({
   onMoveUp,
   onMoveDown,
   onHighlight,
+  onRequestReorderStart,
+  onRootReady,
   isFirst,
   isLast,
+  isDragging,
+  dragOffsetY,
 }: {
   block: RNestMemoBlock
   attachment: RNestMemoAttachment | null
@@ -2000,8 +2026,12 @@ function InlineBlock({
   onMoveUp: () => void
   onMoveDown: () => void
   onHighlight: (color: RNestMemoHighlightColor | null) => void
+  onRequestReorderStart: (gesture: BlockReorderGesture) => void
+  onRootReady?: (node: HTMLDivElement | null) => void
   isFirst: boolean
   isLast: boolean
+  isDragging?: boolean
+  dragOffsetY?: number
 }) {
   const [showAddMenu, setShowAddMenu] = useState(false)
   const [showActionMenu, setShowActionMenu] = useState(false)
@@ -2013,8 +2043,18 @@ function InlineBlock({
   const addMenuRef = useRef<HTMLDivElement>(null)
   const actionMenuRef = useRef<HTMLDivElement>(null)
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const actionHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const actionGestureRef = useRef<BlockReorderGesture | null>(null)
+  const suppressActionClickRef = useRef(false)
   const desktopControlsVisible = hovered || focused || showAddMenu || showActionMenu
   const mobileControlsVisible = !focused && (showAddMenu || showActionMenu || touchActive)
+
+  function clearActionHold() {
+    if (actionHoldTimerRef.current) {
+      clearTimeout(actionHoldTimerRef.current)
+      actionHoldTimerRef.current = null
+    }
+  }
 
   function handleBlockMouseEnter() {
     if (hoverTimeoutRef.current) { clearTimeout(hoverTimeoutRef.current); hoverTimeoutRef.current = null }
@@ -2026,7 +2066,10 @@ function InlineBlock({
   }
 
   useEffect(() => {
-    return () => { if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current) }
+    return () => {
+      if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current)
+      clearActionHold()
+    }
   }, [])
 
   useEffect(() => {
@@ -2125,9 +2168,16 @@ function InlineBlock({
 
   return (
     <div
-      ref={rootRef}
+      ref={(node) => {
+        rootRef.current = node
+        onRootReady?.(node)
+      }}
       id={`memo-block-${block.id}`}
-      className="group/block relative scroll-mt-28"
+      className={cn(
+        "group/block relative scroll-mt-28 transition-shadow",
+        isDragging && "z-30 pointer-events-none rounded-2xl shadow-[0_24px_50px_rgba(139,92,246,0.18)]"
+      )}
+      style={isDragging ? { transform: `translateY(${dragOffsetY ?? 0}px)`, opacity: 0.88, transition: "none" } : undefined}
       onMouseEnter={handleBlockMouseEnter}
       onMouseLeave={handleBlockMouseLeave}
       onPointerDownCapture={(event) => {
@@ -2217,18 +2267,65 @@ function InlineBlock({
         <div className="relative" ref={actionMenuRef}>
           <button
             type="button"
-            onClick={() => {
+            onPointerDown={(event) => {
+              if (event.button !== 0) return
+              suppressActionClickRef.current = false
+              actionGestureRef.current = {
+                activeBlockId: block.id,
+                pointerId: event.pointerId,
+                pointerType: event.pointerType || "mouse",
+                startX: event.clientX,
+                startY: event.clientY,
+              }
+              clearActionHold()
+              actionHoldTimerRef.current = setTimeout(() => {
+                const gesture = actionGestureRef.current
+                if (!gesture) return
+                suppressActionClickRef.current = true
+                setShowActionMenu(false)
+                setShowAddMenu(false)
+                onRequestReorderStart(gesture)
+              }, (event.pointerType || "mouse") === "mouse" ? 180 : 260)
+            }}
+            onPointerMove={(event) => {
+              const gesture = actionGestureRef.current
+              if (!gesture || gesture.pointerId !== event.pointerId || suppressActionClickRef.current) return
+              if (Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY) > 8) {
+                clearActionHold()
+              }
+            }}
+            onPointerUp={(event) => {
+              if (actionGestureRef.current?.pointerId === event.pointerId) {
+                clearActionHold()
+                actionGestureRef.current = null
+              }
+            }}
+            onPointerCancel={(event) => {
+              if (actionGestureRef.current?.pointerId === event.pointerId) {
+                clearActionHold()
+                actionGestureRef.current = null
+              }
+            }}
+            onClick={(event) => {
+              clearActionHold()
+              actionGestureRef.current = null
+              if (suppressActionClickRef.current) {
+                event.preventDefault()
+                event.stopPropagation()
+                suppressActionClickRef.current = false
+                return
+              }
               setShowActionMenu((current) => !current)
               setShowAddMenu(false)
             }}
             className={cn(
-              "flex h-9 w-9 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-400 shadow-[0_8px_18px_rgba(15,23,42,0.06)] transition-colors lg:h-7 lg:w-7 lg:rounded-lg lg:border-transparent lg:bg-transparent lg:shadow-none",
+              "flex h-9 w-9 touch-none items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-400 shadow-[0_8px_18px_rgba(15,23,42,0.06)] transition-colors lg:h-7 lg:w-7 lg:rounded-lg lg:border-transparent lg:bg-transparent lg:shadow-none",
               showActionMenu
                 ? "bg-gray-100 text-[color:var(--rnest-accent)]"
-                : "hover:bg-gray-100 hover:text-gray-600"
+                : "cursor-grab hover:bg-gray-100 hover:text-gray-600 active:cursor-grabbing"
             )}
-            title="현재 블록 설정"
-            aria-label="현재 블록 설정"
+            title="짧게 누르면 블록 설정, 길게 누르면 위치 이동"
+            aria-label="짧게 누르면 블록 설정, 길게 누르면 위치 이동"
             aria-expanded={showActionMenu}
           >
             <GripVertical className="h-3.5 w-3.5" />
@@ -3013,6 +3110,10 @@ export function ToolNotebookPage() {
   const pendingAssetTargetRef = useRef<{ docId: string; blockId: string; kind: "image" | "attachment" } | null>(null)
   const unlockKeysRef = useRef<Record<string, CryptoKey>>({})
   const [unlockedPayloads, setUnlockedPayloads] = useState<Record<string, RNestLockedMemoPayload>>({})
+  const undoSnapshotsRef = useRef<Record<string, MemoUndoSnapshot[]>>({})
+  const redoSnapshotsRef = useRef<Record<string, MemoUndoSnapshot[]>>({})
+  const undoCaptureBlockedRef = useRef(false)
+  const [undoVersion, setUndoVersion] = useState(0)
   const [lockDialogOpen, setLockDialogOpen] = useState(false)
   const [unlockDialogOpen, setUnlockDialogOpen] = useState(false)
   const [lockPassword, setLockPassword] = useState("")
@@ -3053,11 +3154,16 @@ export function ToolNotebookPage() {
   const [personalTemplateDescription, setPersonalTemplateDescription] = useState("")
   const [personalTemplateSource, setPersonalTemplateSource] = useState<"current" | "blank">("blank")
   const [personalTemplateCreateError, setPersonalTemplateCreateError] = useState<string | null>(null)
+  const [blockReorderState, setBlockReorderState] = useState<ActiveBlockReorderState | null>(null)
   const [availableTemplates, setAvailableTemplates] = useState<RNestMemoTemplate[]>(() =>
     defaultMemoTemplates.map((template) => sanitizeMemoTemplate(template))
   )
   const sortMenuRef = useRef<HTMLDivElement>(null)
   const pdfContentRef = useRef<HTMLDivElement>(null)
+  const blockNodesRef = useRef<Record<string, HTMLDivElement | null>>({})
+  const blockReorderStateRef = useRef<ActiveBlockReorderState | null>(null)
+  const blockReorderGestureRef = useRef<BlockReorderGesture | null>(null)
+  const blockReorderCleanupRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     if (!showSortMenu) return
@@ -3067,6 +3173,19 @@ export function ToolNotebookPage() {
     document.addEventListener("mousedown", handleClick)
     return () => document.removeEventListener("mousedown", handleClick)
   }, [showSortMenu])
+
+  useEffect(() => {
+    blockReorderStateRef.current = blockReorderState
+  }, [blockReorderState])
+
+  useEffect(() => {
+    return () => {
+      blockReorderCleanupRef.current?.()
+      if (typeof document !== "undefined") {
+        document.body.style.userSelect = ""
+      }
+    }
+  }, [])
 
   // auto-close sidebar on phone/tablet on first mount
   useEffect(() => {
@@ -3312,6 +3431,16 @@ export function ToolNotebookPage() {
   const activeMemoIsLocked = Boolean(activeMemoRaw?.lock)
   const activeMemoIsUnlocked = Boolean(activeMemoRaw?.id && unlockedPayloads[activeMemoRaw.id])
   const canUseActiveMemoAsPersonalTemplate = Boolean(activeMemo && (!activeMemoRaw?.lock || activeMemoIsUnlocked))
+  const canUndoActiveMemo = useMemo(() => {
+    void undoVersion
+    if (!activeMemoRaw) return false
+    return (undoSnapshotsRef.current[activeMemoRaw.id]?.length ?? 0) > 0
+  }, [activeMemoRaw, undoVersion])
+  const canRestoreActiveMemo = useMemo(() => {
+    void undoVersion
+    if (!activeMemoRaw) return false
+    return (redoSnapshotsRef.current[activeMemoRaw.id]?.length ?? 0) > 0
+  }, [activeMemoRaw, undoVersion])
   const headingBlocks = useMemo(
     () =>
       activeMemo?.blocks.filter((block): block is RNestMemoBlock => block.type === "heading" && Boolean(getMemoBlockText(block))) ?? [],
@@ -3395,6 +3524,37 @@ export function ToolNotebookPage() {
     })
   }
 
+  function cloneNotebookSnapshot<T>(value: T): T {
+    if (typeof structuredClone === "function") {
+      return structuredClone(value)
+    }
+    return JSON.parse(JSON.stringify(value)) as T
+  }
+
+  function buildMemoHistorySnapshot(docId: string, rawDoc: RNestMemoDocument): MemoUndoSnapshot {
+    return {
+      rawDoc: cloneNotebookSnapshot(rawDoc),
+      unlockedPayload: unlockedPayloads[docId] ? cloneNotebookSnapshot(unlockedPayloads[docId]) : null,
+    }
+  }
+
+  function pushHistorySnapshot(
+    targetRef: MutableRefObject<Record<string, MemoUndoSnapshot[]>>,
+    docId: string,
+    snapshot: MemoUndoSnapshot
+  ) {
+    const current = targetRef.current[docId] ?? []
+    targetRef.current[docId] = [...current.slice(-59), snapshot]
+  }
+
+  function pushUndoSnapshot(docId: string, rawDoc: RNestMemoDocument) {
+    if (undoCaptureBlockedRef.current) return
+    if (!activeMemoRaw || docId !== activeMemoRaw.id) return
+    pushHistorySnapshot(undoSnapshotsRef, docId, buildMemoHistorySnapshot(docId, rawDoc))
+    redoSnapshotsRef.current[docId] = []
+    setUndoVersion((version) => version + 1)
+  }
+
   function saveRawDoc(
     doc: RNestMemoDocument,
     options?: {
@@ -3407,6 +3567,10 @@ export function ToolNotebookPage() {
     const normalizedDoc = sanitizeMemoDocument(normalizeDocAttachments(doc))
     const next = touchUpdatedAt ? { ...normalizedDoc, updatedAt: Date.now() } : normalizedDoc
     const latestMemo = store.getState().memo
+    const previousRawDoc = latestMemo.documents[next.id]
+    if (previousRawDoc) {
+      pushUndoSnapshot(next.id, previousRawDoc)
+    }
     commit(
       { ...latestMemo.documents, [next.id]: next },
       touchRecent ? insertRecent(latestMemo.recent, next.id) : latestMemo.recent
@@ -3459,6 +3623,58 @@ export function ToolNotebookPage() {
     const saved = saveRawDoc(nextRaw, options)
     setUnlockedPayloads((current) => ({ ...current, [activeMemoRaw.id]: nextPayload }))
     return saved
+  }
+
+  function undoActiveMemoChange() {
+    if (!activeMemoRaw) return
+    const currentSnapshots = undoSnapshotsRef.current[activeMemoRaw.id] ?? []
+    const snapshot = currentSnapshots[currentSnapshots.length - 1]
+    if (!snapshot) return
+
+    pushHistorySnapshot(redoSnapshotsRef, activeMemoRaw.id, buildMemoHistorySnapshot(activeMemoRaw.id, activeMemoRaw))
+    undoSnapshotsRef.current[activeMemoRaw.id] = currentSnapshots.slice(0, -1)
+    undoCaptureBlockedRef.current = true
+    try {
+      saveRawDoc(snapshot.rawDoc, { touchRecent: false, touchUpdatedAt: false })
+      if (snapshot.unlockedPayload && (!snapshot.rawDoc.lock || unlockKeysRef.current[snapshot.rawDoc.id])) {
+        setUnlockedPayloads((current) => ({
+          ...current,
+          [snapshot.rawDoc.id]: cloneNotebookSnapshot(snapshot.unlockedPayload as RNestLockedMemoPayload),
+        }))
+      } else {
+        clearUnlockSession(snapshot.rawDoc.id)
+      }
+      setToast("이전 상태로 되돌렸습니다")
+    } finally {
+      undoCaptureBlockedRef.current = false
+      setUndoVersion((version) => version + 1)
+    }
+  }
+
+  function restoreActiveMemoChange() {
+    if (!activeMemoRaw) return
+    const currentSnapshots = redoSnapshotsRef.current[activeMemoRaw.id] ?? []
+    const snapshot = currentSnapshots[currentSnapshots.length - 1]
+    if (!snapshot) return
+
+    pushHistorySnapshot(undoSnapshotsRef, activeMemoRaw.id, buildMemoHistorySnapshot(activeMemoRaw.id, activeMemoRaw))
+    redoSnapshotsRef.current[activeMemoRaw.id] = currentSnapshots.slice(0, -1)
+    undoCaptureBlockedRef.current = true
+    try {
+      saveRawDoc(snapshot.rawDoc, { touchRecent: false, touchUpdatedAt: false })
+      if (snapshot.unlockedPayload && (!snapshot.rawDoc.lock || unlockKeysRef.current[snapshot.rawDoc.id])) {
+        setUnlockedPayloads((current) => ({
+          ...current,
+          [snapshot.rawDoc.id]: cloneNotebookSnapshot(snapshot.unlockedPayload as RNestLockedMemoPayload),
+        }))
+      } else {
+        clearUnlockSession(snapshot.rawDoc.id)
+      }
+      setToast("원래 상태로 복구했습니다")
+    } finally {
+      undoCaptureBlockedRef.current = false
+      setUndoVersion((version) => version + 1)
+    }
   }
 
   async function openTemplatePicker() {
@@ -4288,6 +4504,145 @@ export function ToolNotebookPage() {
     setToast(`${template.label} 구성을 추가했습니다`)
   }
 
+  function cleanupBlockReorderSession() {
+    blockReorderCleanupRef.current?.()
+    blockReorderCleanupRef.current = null
+    blockReorderGestureRef.current = null
+    blockReorderStateRef.current = null
+    if (typeof document !== "undefined") {
+      document.body.style.userSelect = ""
+    }
+  }
+
+  function getBlockDropTarget(blocks: RNestMemoBlock[], clientY: number) {
+    const entries = blocks
+      .map((block) => {
+        const node = blockNodesRef.current[block.id]
+        if (!node) return null
+        return { blockId: block.id, rect: node.getBoundingClientRect() }
+      })
+      .filter((entry): entry is { blockId: string; rect: DOMRect } => Boolean(entry))
+
+    if (entries.length === 0) return null
+
+    for (const entry of entries) {
+      const midpoint = entry.rect.top + entry.rect.height / 2
+      if (clientY < midpoint) {
+        return { overBlockId: entry.blockId, placement: "before" as BlockDropPlacement }
+      }
+    }
+
+    return {
+      overBlockId: entries[entries.length - 1].blockId,
+      placement: "after" as BlockDropPlacement,
+    }
+  }
+
+  function reorderBlocks(
+    blocks: RNestMemoBlock[],
+    activeBlockId: string,
+    overBlockId: string,
+    placement: BlockDropPlacement
+  ) {
+    const fromIndex = blocks.findIndex((block) => block.id === activeBlockId)
+    const overIndex = blocks.findIndex((block) => block.id === overBlockId)
+    if (fromIndex === -1 || overIndex === -1) return blocks
+
+    const next = [...blocks]
+    const [moved] = next.splice(fromIndex, 1)
+    let insertIndex = placement === "before" ? overIndex : overIndex + 1
+    if (fromIndex < insertIndex) insertIndex -= 1
+    insertIndex = Math.max(0, Math.min(insertIndex, next.length))
+    next.splice(insertIndex, 0, moved)
+    return next
+  }
+
+  function startBlockReorder(gesture: BlockReorderGesture) {
+    if (!activeMemo) return
+
+    cleanupBlockReorderSession()
+    const initialTarget = getBlockDropTarget(activeMemo.blocks, gesture.startY) ?? {
+      overBlockId: gesture.activeBlockId,
+      placement: "after" as BlockDropPlacement,
+    }
+    const initialState: ActiveBlockReorderState = {
+      ...gesture,
+      overBlockId: initialTarget.overBlockId,
+      placement: initialTarget.placement,
+      offsetY: 0,
+    }
+    blockReorderGestureRef.current = gesture
+    setShowMoreMenu(false)
+    blockReorderStateRef.current = initialState
+    setBlockReorderState(initialState)
+    if (typeof document !== "undefined") {
+      document.body.style.userSelect = "none"
+    }
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const session = blockReorderGestureRef.current
+      if (!session || event.pointerId !== session.pointerId) return
+      event.preventDefault()
+
+      if (typeof window !== "undefined") {
+        if (event.clientY < 96) window.scrollBy(0, -18)
+        else if (event.clientY > window.innerHeight - 96) window.scrollBy(0, 18)
+      }
+
+      const nextTarget = getBlockDropTarget(activeMemo.blocks, event.clientY)
+      setBlockReorderState((current) =>
+        {
+          const nextState =
+            current && current.activeBlockId === session.activeBlockId
+              ? {
+                  ...current,
+                  offsetY: event.clientY - session.startY,
+                  overBlockId: nextTarget?.overBlockId ?? current.overBlockId,
+                  placement: nextTarget?.placement ?? current.placement,
+                }
+              : current
+          blockReorderStateRef.current = nextState
+          return nextState
+        }
+      )
+    }
+
+    const handlePointerEnd = (event: PointerEvent) => {
+      const session = blockReorderGestureRef.current
+      if (!session || event.pointerId !== session.pointerId) return
+
+      const currentState = blockReorderStateRef.current
+      cleanupBlockReorderSession()
+      blockReorderStateRef.current = null
+      setBlockReorderState(null)
+
+      if (!currentState) return
+      const reordered = reorderBlocks(
+        activeMemo.blocks,
+        currentState.activeBlockId,
+        currentState.overBlockId,
+        currentState.placement
+      )
+      const changed = reordered.some((block, index) => block.id !== activeMemo.blocks[index]?.id)
+      if (!changed) return
+
+      void updateActiveMemoContent((doc) => ({
+        ...doc,
+        blocks: reorderBlocks(doc.blocks, currentState.activeBlockId, currentState.overBlockId, currentState.placement),
+      }))
+      setToast("블록 순서를 바꿨습니다")
+    }
+
+    window.addEventListener("pointermove", handlePointerMove, { passive: false })
+    window.addEventListener("pointerup", handlePointerEnd)
+    window.addEventListener("pointercancel", handlePointerEnd)
+    blockReorderCleanupRef.current = () => {
+      window.removeEventListener("pointermove", handlePointerMove)
+      window.removeEventListener("pointerup", handlePointerEnd)
+      window.removeEventListener("pointercancel", handlePointerEnd)
+    }
+  }
+
   function jumpToBlock(blockId: string) {
     if (typeof document === "undefined") return
     document.getElementById(`memo-block-${blockId}`)?.scrollIntoView({ behavior: "smooth", block: "start" })
@@ -4827,6 +5182,36 @@ export function ToolNotebookPage() {
               >
                 <Search className="h-4 w-4" />
               </button>
+              <button
+                type="button"
+                onClick={undoActiveMemoChange}
+                disabled={!canUndoActiveMemo}
+                className={cn(
+                  "flex h-7 w-7 items-center justify-center rounded-md transition-colors",
+                  canUndoActiveMemo
+                    ? "text-gray-400 hover:bg-gray-100 hover:text-[color:var(--rnest-accent)]"
+                    : "cursor-not-allowed text-gray-200"
+                )}
+                title="이전 상태로 되돌리기"
+                aria-label="이전 상태로 되돌리기"
+              >
+                <RotateCcw className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={restoreActiveMemoChange}
+                disabled={!canRestoreActiveMemo}
+                className={cn(
+                  "flex h-7 w-7 items-center justify-center rounded-md transition-colors",
+                  canRestoreActiveMemo
+                    ? "text-gray-400 hover:bg-gray-100 hover:text-[color:var(--rnest-accent)]"
+                    : "cursor-not-allowed text-gray-200"
+                )}
+                title="원래 상태로 복구"
+                aria-label="원래 상태로 복구"
+              >
+                <RotateCw className="h-4 w-4" />
+              </button>
               <div className="relative">
                 <button
                   type="button"
@@ -5284,34 +5669,62 @@ export function ToolNotebookPage() {
                   <div className="space-y-3 pl-0 lg:pl-10">
                     {activeMemo.blocks.map((block, idx) => {
                       const attachment = findAttachment(activeMemo, block.attachmentId)
+                      const showBeforeIndicator =
+                        blockReorderState?.activeBlockId !== block.id &&
+                        blockReorderState?.overBlockId === block.id &&
+                        blockReorderState?.placement === "before"
+                      const showAfterIndicator =
+                        blockReorderState?.activeBlockId !== block.id &&
+                        blockReorderState?.overBlockId === block.id &&
+                        blockReorderState?.placement === "after"
                       return (
-                      <InlineBlock
-                        key={block.id}
-                        block={block}
-                        attachment={attachment}
-                        attachmentUrl={attachment ? buildNotebookFileUrl(attachment.storagePath) : undefined}
-                        isFirst={idx === 0}
-                        isLast={idx === activeMemo.blocks.length - 1}
-                        onChange={(next) => updateBlock(block.id, next)}
-                        onDelete={() => deleteBlock(block.id)}
-                        onRemoveAttachment={() => {
-                          if (attachment) {
-                            void removeAttachmentById(block.id, attachment.id)
-                          } else {
-                            deleteBlock(block.id)
-                          }
-                        }}
-                        onOpenAttachment={() => {
-                          if (attachment) openAttachment(attachment)
-                        }}
-                        onDuplicate={() => duplicateBlock(block.id)}
-                        onTypeChange={(type) => changeBlockType(block.id, type)}
-                        onAddAfter={(type) => addBlockAfter(block.id, type)}
-                        onInsertAsset={(kind) => beginAssetInsert(block.id, kind)}
-                        onMoveUp={() => moveBlock(block.id, "up")}
-                        onMoveDown={() => moveBlock(block.id, "down")}
-                        onHighlight={(color) => setBlockHighlight(block.id, color)}
-                      />
+                        <Fragment key={block.id}>
+                          {showBeforeIndicator && (
+                            <div
+                              aria-hidden="true"
+                              className="h-1 rounded-full bg-[color:var(--rnest-accent)]/75 shadow-[0_0_0_4px_rgba(196,181,253,0.22)]"
+                            />
+                          )}
+                          <InlineBlock
+                            block={block}
+                            attachment={attachment}
+                            attachmentUrl={attachment ? buildNotebookFileUrl(attachment.storagePath) : undefined}
+                            isFirst={idx === 0}
+                            isLast={idx === activeMemo.blocks.length - 1}
+                            isDragging={blockReorderState?.activeBlockId === block.id}
+                            dragOffsetY={blockReorderState?.activeBlockId === block.id ? (blockReorderState?.offsetY ?? 0) : 0}
+                            onRootReady={(node) => {
+                              if (node) blockNodesRef.current[block.id] = node
+                              else delete blockNodesRef.current[block.id]
+                            }}
+                            onChange={(next) => updateBlock(block.id, next)}
+                            onDelete={() => deleteBlock(block.id)}
+                            onRemoveAttachment={() => {
+                              if (attachment) {
+                                void removeAttachmentById(block.id, attachment.id)
+                              } else {
+                                deleteBlock(block.id)
+                              }
+                            }}
+                            onOpenAttachment={() => {
+                              if (attachment) openAttachment(attachment)
+                            }}
+                            onDuplicate={() => duplicateBlock(block.id)}
+                            onTypeChange={(type) => changeBlockType(block.id, type)}
+                            onAddAfter={(type) => addBlockAfter(block.id, type)}
+                            onInsertAsset={(kind) => beginAssetInsert(block.id, kind)}
+                            onMoveUp={() => moveBlock(block.id, "up")}
+                            onMoveDown={() => moveBlock(block.id, "down")}
+                            onHighlight={(color) => setBlockHighlight(block.id, color)}
+                            onRequestReorderStart={startBlockReorder}
+                          />
+                          {showAfterIndicator && (
+                            <div
+                              aria-hidden="true"
+                              className="h-1 rounded-full bg-[color:var(--rnest-accent)]/75 shadow-[0_0_0_4px_rgba(196,181,253,0.22)]"
+                            />
+                          )}
+                        </Fragment>
                       )
                     })}
                   </div>
