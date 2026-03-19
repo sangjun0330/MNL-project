@@ -230,6 +230,37 @@ function buildPdfExportRoot(source: HTMLElement) {
   host.appendChild(viewport)
   document.body.appendChild(host)
 
+  // ✅ CSS 커스텀 프로퍼티(var(--rnest-accent) 등) 인라인화
+  // html2canvas는 CSS 변수를 직접 파싱하지 못해 배경색·테두리색·아이콘색이 사라질 수 있음.
+  // clone이 실제 DOM에 붙은 이후 getComputedStyle()로 완전히 해석된 값을 inline style로 주입.
+  const COLOR_PROPS = [
+    "color",
+    "background-color",
+    "border-top-color",
+    "border-right-color",
+    "border-bottom-color",
+    "border-left-color",
+  ]
+  const SVG_TAGS = new Set(["svg", "path", "line", "circle", "rect", "polyline", "polygon", "ellipse"])
+  clone.querySelectorAll<HTMLElement>("*").forEach((el) => {
+    try {
+      const cs = window.getComputedStyle(el)
+      for (const prop of COLOR_PROPS) {
+        const val = cs.getPropertyValue(prop)
+        if (val) el.style.setProperty(prop, val)
+      }
+      const tag = el.tagName.toLowerCase()
+      if (SVG_TAGS.has(tag)) {
+        const stroke = cs.getPropertyValue("stroke")
+        const fill = cs.getPropertyValue("fill")
+        if (stroke && stroke !== "none") el.setAttribute("stroke", stroke)
+        if (fill && fill !== "none") el.setAttribute("fill", fill)
+      }
+    } catch {
+      // getComputedStyle 실패 시 무시
+    }
+  })
+
   return {
     host,
     viewport,
@@ -246,7 +277,11 @@ function getPdfSliceHeightPx(captureWidth: number, pdfInnerWidthPt: number, pdfI
   return Math.max(1, Math.floor((captureWidth * pdfInnerHeightPt) / pdfInnerWidthPt))
 }
 
-// Find a clean page-break position that avoids slicing through a memo block
+// Find a clean page-break position that avoids slicing through a memo block.
+// ✅ getBoundingClientRect() 방식 사용:
+//    clone에 translateY(-X)가 적용되어 있어도
+//    block.top - clone.top 은 항상 content 내 자연 위치를 반환한다.
+//    (offsetTop/offsetParent 방식은 clone이 position:relative가 아닐 때 잘못 누적되는 버그가 있었음)
 function findSafeSliceHeight(
   desiredSliceHeight: number,
   currentOffsetY: number,
@@ -254,17 +289,14 @@ function findSafeSliceHeight(
 ): number {
   if (desiredSliceHeight <= 0) return desiredSliceHeight
   const cutNaturalY = currentOffsetY + desiredSliceHeight
+  const cloneTop = clone.getBoundingClientRect().top
   const blockEls = clone.querySelectorAll<HTMLElement>('[id^="memo-block-"]')
   for (const block of Array.from(blockEls)) {
-    let blockNaturalTop = 0
-    let el: HTMLElement | null = block
-    while (el && el !== clone) {
-      blockNaturalTop += el.offsetTop
-      el = el.offsetParent as HTMLElement | null
-    }
-    const blockNaturalBottom = blockNaturalTop + block.offsetHeight
+    const r = block.getBoundingClientRect()
+    const blockNaturalTop = r.top - cloneTop
+    const blockNaturalBottom = r.bottom - cloneTop
     if (blockNaturalTop < cutNaturalY && blockNaturalBottom > cutNaturalY) {
-      const safeHeight = blockNaturalTop - currentOffsetY - 6
+      const safeHeight = blockNaturalTop - currentOffsetY - 8
       if (safeHeight > 0 && safeHeight < desiredSliceHeight) {
         return safeHeight
       }
@@ -3210,6 +3242,8 @@ export function ToolNotebookPage() {
   }, [blockReorderState])
 
   // PDF page break position computation
+  // ✅ 실제 PDF 내보내기와 동일한 블록 경계 감지 로직을 사용해 구분선 위치를 정확히 맞춤
+  //    (이전: 균등 간격 → 실제 PDF와 불일치 / 수정: findSafeSliceHeight와 동일 알고리즘)
   useEffect(() => {
     if (!showPdfBreaks || !pdfContentRef.current) {
       setPdfBreakPositions([])
@@ -3218,15 +3252,40 @@ export function ToolNotebookPage() {
     const compute = () => {
       const el = pdfContentRef.current
       if (!el) return
-      const rect = el.getBoundingClientRect()
-      const captureWidth = Math.max(1, rect.width)
+      const elRect = el.getBoundingClientRect()
+      const captureWidth = Math.max(1, elRect.width)
       const contentWidthPt = PDF_PAGE_WIDTH_PT - PDF_EXPORT_MARGIN_PT * 2
       const contentHeightPt = PDF_PAGE_HEIGHT_PT - PDF_EXPORT_MARGIN_PT * 2
       const pageH = getPdfSliceHeightPx(captureWidth, contentWidthPt, contentHeightPt)
       const totalH = el.scrollHeight
+      const elTop = elRect.top
+      const elScrollTop = el.scrollTop || 0
+      // 스크롤 위치와 무관하게 콘텐츠 내 절대 위치를 얻음:
+      // blockTop_content = block.getBoundingClientRect().top - elTop + elScrollTop
+      const blockEls = Array.from(el.querySelectorAll<HTMLElement>('[id^="memo-block-"]'))
+
       const breaks: number[] = []
-      for (let y = pageH; y < totalH; y += pageH) {
-        breaks.push(Math.floor(y))
+      let offsetY = 0
+      while (offsetY < totalH) {
+        let sliceH = Math.min(pageH, totalH - offsetY)
+        const cutY = offsetY + sliceH
+        for (const block of blockEls) {
+          const br = block.getBoundingClientRect()
+          const blockTop = br.top - elTop + elScrollTop
+          const blockBottom = blockTop + br.height
+          if (blockTop < cutY && blockBottom > cutY) {
+            const safe = blockTop - offsetY - 8
+            if (safe > 0 && safe < sliceH) {
+              sliceH = safe
+              break
+            }
+          }
+        }
+        if (sliceH <= 0) break
+        offsetY += sliceH
+        if (offsetY < totalH) {
+          breaks.push(Math.floor(offsetY))
+        }
       }
       setPdfBreakPositions(breaks)
     }
