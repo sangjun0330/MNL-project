@@ -285,9 +285,12 @@ function buildPdfExportRoot(source: HTMLElement) {
   clone.querySelectorAll<HTMLElement>('[data-page-spacer-block="true"]').forEach((element) => {
     element.style.position = "relative"
   })
+  // ✅ visibility:hidden → display:none 수정
+  // visibility:hidden은 레이아웃에 공간을 그대로 차지해
+  // buildPdfSlicePlan의 totalHeight에 UI 카드 높이(~150px)가 포함되어
+  // 페이지 구분선 위치와 실제 PDF 페이지가 전혀 맞지 않는 근본 원인이었음
   clone.querySelectorAll<HTMLElement>('[data-page-spacer-ui="true"]').forEach((element) => {
-    element.style.visibility = "hidden"
-    element.style.pointerEvents = "none"
+    element.style.display = "none"
   })
 
   viewport.appendChild(clone)
@@ -644,9 +647,13 @@ function buildPdfLayoutWithPageSpacers(
     plan = buildPdfSlicePlan(root, captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
     const bounds = getElementNaturalBounds(spacer, cloneTop)
     const slice = findSliceForNaturalPosition(plan, bounds.bottom)
+    // ✅ slice.height → plan.pageSliceHeightPx 수정
+    // 마지막 슬라이스는 totalHeight가 pageHeight보다 짧을 때 slice.height < pageSliceHeightPx가 됨
+    // 이 경우 slice.offsetY + slice.height는 실제 다음 페이지 시작이 아닌 문서 끝을 가리킴
+    // plan.pageSliceHeightPx를 사용하면 "현재 슬라이스의 이상적 페이지 경계"가 정확히 계산됨
     const desiredHeight =
       slice && bounds.bottom > slice.offsetY + 4
-        ? Math.max(0, Math.floor(slice.offsetY + slice.height - bounds.bottom))
+        ? Math.max(0, Math.floor(slice.offsetY + plan.pageSliceHeightPx - bounds.bottom))
         : 0
     setPageSpacerAppliedHeight(spacer, desiredHeight >= 12 ? desiredHeight : 0)
   }
@@ -3193,103 +3200,68 @@ function InlineBlock({
             data-page-spacer-manual-height={pageSpacerManualHeight}
             className="relative"
           >
+            {/* ── Apple-style 미니멀 구분선 UI ── */}
+            {/* data-pdf-export 시 display:none 처리로 레이아웃에서 완전 제거됨 */}
             <div
               data-page-spacer-ui="true"
-              className={cn(
-                "rounded-2xl border border-dashed border-[#C7BAFF] bg-[linear-gradient(135deg,rgba(245,243,255,0.96),rgba(255,255,255,0.98))] p-3 text-ios-text shadow-[0_12px_28px_rgba(123,111,208,0.08)]",
-                showPdfBreaks && "mb-0"
-              )}
+              className="flex items-center gap-2.5 py-1.5"
             >
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-[color:var(--rnest-accent-soft)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--rnest-accent)]">
-                  <ArrowUpDown className="h-3 w-3" />
-                  {pageSpacerMode === "next-page" ? "다음 PDF 페이지 시작" : `PDF 간격 ${pageSpacerManualHeight}px`}
-                </span>
-                <div className="ml-auto flex flex-wrap items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => onChange({ ...block, spacerMode: "manual", spacerHeight: pageSpacerManualHeight })}
-                    className={cn(
-                      "rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors",
-                      pageSpacerMode === "manual"
-                        ? "bg-[color:var(--rnest-accent)] text-white"
-                        : "border border-gray-200 bg-white text-ios-muted hover:bg-gray-50"
-                    )}
-                  >
-                    수동
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onChange({ ...block, spacerMode: "next-page", spacerHeight: pageSpacerManualHeight })}
-                    className={cn(
-                      "rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors",
-                      pageSpacerMode === "next-page"
-                        ? "bg-[color:var(--rnest-accent)] text-white"
-                        : "border border-gray-200 bg-white text-ios-muted hover:bg-gray-50"
-                    )}
-                  >
-                    다음 페이지
-                  </button>
-                </div>
-              </div>
-              {pageSpacerMode === "manual" ? (
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <div className="inline-flex items-center rounded-full border border-gray-200 bg-white">
+              <div className="h-px flex-1 bg-gray-200" />
+              <div className="flex shrink-0 items-center gap-1.5">
+                {/* 모드 전환 칩: 탭하면 수동 ↔ 다음 페이지 토글 */}
+                <button
+                  type="button"
+                  title={pageSpacerMode === "next-page" ? "클릭하여 수동 간격으로 전환" : "클릭하여 다음 페이지로 전환"}
+                  onClick={() =>
+                    onChange({
+                      ...block,
+                      spacerMode: pageSpacerMode === "next-page" ? "manual" : "next-page",
+                    })
+                  }
+                  className="flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2.5 py-0.5 text-[11px] font-medium text-gray-400 shadow-sm transition-colors hover:border-gray-300 hover:text-gray-600"
+                >
+                  {pageSpacerMode === "next-page" ? (
+                    <>
+                      <ArrowUpDown className="h-2.5 w-2.5" />
+                      다음 페이지
+                    </>
+                  ) : (
+                    <>{pageSpacerManualHeight}px</>
+                  )}
+                </button>
+                {/* 수동 모드: 높이 ±24 조절 버튼 */}
+                {pageSpacerMode === "manual" && (
+                  <>
                     <button
                       type="button"
                       onClick={() => onChange({ ...block, spacerHeight: clampPageSpacerHeight(pageSpacerManualHeight - 24) })}
-                      className="flex h-8 w-8 items-center justify-center text-ios-muted transition-colors hover:bg-gray-50 hover:text-ios-text"
+                      className="flex h-5 w-5 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-sm transition-colors hover:text-gray-600"
                       aria-label="PDF 간격 줄이기"
                     >
-                      <Minus className="h-3.5 w-3.5" />
+                      <Minus className="h-2.5 w-2.5" />
                     </button>
-                    <span className="min-w-[68px] text-center text-[12px] font-semibold text-ios-text">
-                      {pageSpacerManualHeight}px
-                    </span>
                     <button
                       type="button"
                       onClick={() => onChange({ ...block, spacerHeight: clampPageSpacerHeight(pageSpacerManualHeight + 24) })}
-                      className="flex h-8 w-8 items-center justify-center text-ios-muted transition-colors hover:bg-gray-50 hover:text-ios-text"
+                      className="flex h-5 w-5 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-sm transition-colors hover:text-gray-600"
                       aria-label="PDF 간격 늘리기"
                     >
-                      <Plus className="h-3.5 w-3.5" />
+                      <Plus className="h-2.5 w-2.5" />
                     </button>
-                  </div>
-                  {PAGE_SPACER_PRESETS.map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() => onChange({ ...block, spacerHeight: preset })}
-                      className={cn(
-                        "rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
-                        pageSpacerManualHeight === preset
-                          ? "border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
-                          : "border-gray-200 bg-white text-ios-muted hover:bg-gray-50"
-                      )}
-                    >
-                      {preset}px
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className="mt-3 text-[12px] leading-relaxed text-ios-muted">
-                  이 블록 뒤의 내용을 다음 PDF 페이지 시작으로 밀어냅니다.
-                </p>
-              )}
-              <p className="mt-2 text-[11.5px] leading-relaxed text-ios-muted">
-                {showPdfBreaks
-                  ? `현재 PDF 기준 반영 높이 ${pageSpacerPreviewGap}px`
-                  : "평소 편집 화면에서는 작게 보이고, PDF 구분선 표시 중에만 실제 높이로 펼쳐집니다."}
-              </p>
+                  </>
+                )}
+              </div>
+              <div className="h-px flex-1 bg-gray-200" />
             </div>
+            {/* 실제 PDF 간격 미리보기 (showPdfBreaks 시에만 표시) */}
             <div
               data-page-spacer-filler="true"
               style={{ height: showPdfBreaks ? pageSpacerPreviewGap : 0 }}
               className={cn(
-                "overflow-hidden rounded-2xl border-dashed transition-[height,opacity] duration-200",
+                "overflow-hidden transition-[height,opacity] duration-200",
                 showPdfBreaks && pageSpacerPreviewGap > 0
-                  ? "mt-2 border border-[#007AFF]/20 bg-[linear-gradient(180deg,rgba(0,122,255,0.02),rgba(123,111,208,0.04))] opacity-100"
-                  : "mt-0 border-transparent bg-transparent opacity-0"
+                  ? "rounded-lg border border-dashed border-[#007AFF]/20 bg-[#007AFF]/[0.03] opacity-100"
+                  : "opacity-0"
               )}
             />
           </div>
