@@ -539,9 +539,26 @@ async function measurePdfLayout(source: HTMLElement) {
     await waitForPdfExportAssets(clone)
     const { pdfInnerWidthPt, pdfInnerHeightPt } = getPdfInnerBounds()
     const layout = buildPdfLayoutWithPageSpacers(clone, captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
+    const cloneStyles = window.getComputedStyle(clone)
+    const verticalPadding =
+      (Number.parseFloat(cloneStyles.paddingTop || "0") || 0) +
+      (Number.parseFloat(cloneStyles.paddingBottom || "0") || 0)
     return {
+      previewHtml: clone.innerHTML,
+      previewHeight: Math.max(
+        0,
+        Math.ceil(Math.max(clone.scrollHeight, clone.getBoundingClientRect().height) - verticalPadding)
+      ),
       spacerHeights: layout.spacerHeights,
-      breakMarkers: layout.plan.totalHeight > 0 ? mapPdfBreakMarkersFromPlan(source, layout.plan) : [],
+      breakMarkers:
+        layout.plan.totalHeight > 0
+          ? layout.plan.slices.slice(0, -1).map((slice, index) => ({
+            y: Math.max(0, Math.floor(slice.breakAnchor?.naturalY ?? (slice.offsetY + slice.height))),
+            pageFrom: index + 1,
+            pageTo: index + 2,
+            target: slice.breakAnchor?.target,
+          }))
+          : [],
     }
   } finally {
     cleanup()
@@ -682,45 +699,6 @@ function buildPdfLayoutWithPageSpacers(
       ])
     ) as Record<string, number>,
   }
-}
-
-function escapeDomIdForSelector(id: string) {
-  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
-    return CSS.escape(id)
-  }
-  return id.replace(/([ !"#$%&'()*+,./:;<=>?@[\\\]^`{|}~])/g, "\\$1")
-}
-
-function resolvePdfBreakMarkerY(source: HTMLElement, anchor?: PdfBreakAnchor, fallbackNaturalY?: number) {
-  const fallback = Math.max(0, Math.floor(fallbackNaturalY ?? 0))
-  if (!anchor?.blockId) return fallback
-
-  const selector = `#${escapeDomIdForSelector(anchor.blockId)}`
-  const block = source.querySelector<HTMLElement>(selector)
-  if (!block) return fallback
-
-  const sourceTop = source.getBoundingClientRect().top
-  if (anchor.target === "page-spacer-filler") {
-    const filler = block.querySelector<HTMLElement>('[data-page-spacer-filler="true"]') ?? block
-    const fillerBounds = getElementNaturalBounds(filler, sourceTop)
-    return Math.max(0, Math.floor(fillerBounds.top))
-  }
-
-  const blockBounds = getElementNaturalBounds(block, sourceTop)
-  const base = anchor.edge === "bottom" ? blockBounds.bottom : blockBounds.top
-  if (typeof anchor.delta === "number" && Number.isFinite(anchor.delta)) {
-    return Math.max(0, Math.floor(base + anchor.delta))
-  }
-  return Math.max(0, Math.floor(base))
-}
-
-function mapPdfBreakMarkersFromPlan(source: HTMLElement, plan: PdfSlicePlan): PdfBreakMarker[] {
-  return plan.slices.slice(0, -1).map((slice, index) => ({
-    y: resolvePdfBreakMarkerY(source, slice.breakAnchor, slice.breakAnchor?.naturalY ?? (slice.offsetY + slice.height)),
-    pageFrom: index + 1,
-    pageTo: index + 2,
-    target: slice.breakAnchor?.target,
-  }))
 }
 
 function deriveAttachmentKind(file: File, preferred: RNestMemoAttachment["kind"] | null = null): RNestMemoAttachment["kind"] {
@@ -4292,6 +4270,8 @@ export function ToolNotebookPage() {
   const [showPdfBreaks, setShowPdfBreaks] = useState(false)
   const [pdfBreakMarkers, setPdfBreakMarkers] = useState<PdfBreakMarker[]>([])
   const [pdfSpacerPreviewHeights, setPdfSpacerPreviewHeights] = useState<Record<string, number>>({})
+  const [pdfPreviewHtml, setPdfPreviewHtml] = useState("")
+  const [pdfPreviewHeight, setPdfPreviewHeight] = useState(0)
   const [availableTemplates, setAvailableTemplates] = useState<RNestMemoTemplate[]>(() =>
     defaultMemoTemplates.map((template) => sanitizeMemoTemplate(template))
   )
@@ -4325,6 +4305,8 @@ export function ToolNotebookPage() {
     if (!showPdfBreaks || !pdfContentRef.current) {
       setPdfBreakMarkers([])
       setPdfSpacerPreviewHeights({})
+      setPdfPreviewHtml("")
+      setPdfPreviewHeight(0)
       return
     }
     const node = pdfContentRef.current
@@ -4340,17 +4322,16 @@ export function ToolNotebookPage() {
       try {
         const layout = await measurePdfLayout(currentNode)
         if (!cancelled && token === computeToken) {
-          const nextKey = pageSpacerHeightMapToKey(layout.spacerHeights)
-          if (nextKey !== pageSpacerHeightMapToKey(pdfSpacerPreviewHeightsRef.current)) {
-            setPdfSpacerPreviewHeights(layout.spacerHeights)
-            setPdfBreakMarkers([])
-            return
-          }
+          setPdfSpacerPreviewHeights(layout.spacerHeights)
+          setPdfPreviewHtml(layout.previewHtml)
+          setPdfPreviewHeight(layout.previewHeight)
           setPdfBreakMarkers(layout.breakMarkers)
         }
       } catch {
         if (!cancelled && token === computeToken) {
           setPdfBreakMarkers([])
+          setPdfPreviewHtml("")
+          setPdfPreviewHeight(0)
         }
       }
     }
@@ -6845,7 +6826,11 @@ export function ToolNotebookPage() {
           onDrop={handleEditorSurfaceDrop}
         >
           {activeMemo ? (
-            <div ref={pdfContentRef} className="relative mx-auto w-full max-w-[720px] bg-white px-5 py-6 sm:px-6 lg:px-10 lg:py-10 xl:pl-16">
+            <div
+              ref={pdfContentRef}
+              className="relative mx-auto w-full max-w-[720px] bg-white px-5 py-6 sm:px-6 lg:px-10 lg:py-10 xl:pl-16"
+              style={showPdfBreaks && pdfPreviewHeight > 0 ? { minHeight: pdfPreviewHeight } : undefined}
+            >
               {editorDropActive && (
                 <div
                   data-pdf-hide="true"
@@ -6856,6 +6841,7 @@ export function ToolNotebookPage() {
                   </div>
                 </div>
               )}
+              <div className={cn(showPdfBreaks && "pointer-events-none invisible select-none")}>
               {activeMemo.coverStyle && (
                 <div
                   className={cn(
@@ -7313,27 +7299,6 @@ export function ToolNotebookPage() {
                 </>
               )}
 
-              {/* PDF page break indicators */}
-              {showPdfBreaks && pdfBreakMarkers.map((marker) => (
-                <div
-                  key={`${marker.pageFrom}-${marker.pageTo}-${marker.y}`}
-                  data-pdf-hide="true"
-                  aria-hidden="true"
-                  style={{ top: marker.y, position: "absolute", left: 0, right: 0, height: 0 }}
-                  className="pointer-events-none z-20"
-                >
-                  <div className="relative h-0 px-3">
-                    <div className="absolute left-3 right-3 top-0 h-px bg-[#D6DAE5]" />
-                    <span
-                      className="absolute left-1/2 top-0 shrink-0 rounded-full border border-[#E6E8F1] bg-white/96 px-3 py-1 text-[10px] font-semibold tracking-[-0.01em] text-[#6F62D9] shadow-[0_10px_24px_rgba(15,23,42,0.08)]"
-                      style={{ transform: "translate(-50%, calc(-100% - 6px))" }}
-                    >
-                      {marker.pageFrom}P → {marker.pageTo}P
-                    </span>
-                  </div>
-                </div>
-              ))}
-
               {/* footer info */}
               {activeMemo.trashedAt != null && (
                 <div className="mt-8 flex items-center gap-3 rounded-lg border border-orange-200 bg-orange-50 px-4 py-3">
@@ -7355,6 +7320,38 @@ export function ToolNotebookPage() {
                   >
                     영구 삭제
                   </button>
+                </div>
+              )}
+              </div>
+
+              {showPdfBreaks && pdfPreviewHtml && (
+                <div
+                  data-pdf-hide="true"
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-0 z-20 bg-white px-5 py-6 sm:px-6 lg:px-10 lg:py-10 xl:pl-16"
+                >
+                  <div
+                    className="relative"
+                    style={{ minHeight: pdfPreviewHeight || undefined }}
+                    dangerouslySetInnerHTML={{ __html: pdfPreviewHtml }}
+                  />
+                  {pdfBreakMarkers.map((marker) => (
+                    <div
+                      key={`${marker.pageFrom}-${marker.pageTo}-${marker.y}`}
+                      style={{ top: marker.y, position: "absolute", left: 0, right: 0, height: 0 }}
+                      className="pointer-events-none"
+                    >
+                      <div className="relative h-0 px-3">
+                        <div className="absolute left-3 right-3 top-0 h-px bg-[#D6DAE5]" />
+                        <span
+                          className="absolute left-1/2 top-0 shrink-0 rounded-full border border-[#E6E8F1] bg-white/96 px-3 py-1 text-[10px] font-semibold tracking-[-0.01em] text-[#6F62D9] shadow-[0_10px_24px_rgba(15,23,42,0.08)]"
+                          style={{ transform: "translate(-50%, calc(-100% - 6px))" }}
+                        >
+                          {marker.pageFrom}P → {marker.pageTo}P
+                        </span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
