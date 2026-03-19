@@ -152,6 +152,8 @@ function downloadTextFile(fileName: string, content: string, mimeType: string) {
 const PDF_EXPORT_MARGIN_PT = 28
 const PDF_EXPORT_CAPTURE_SCALE = 2
 const PDF_EXPORT_MAX_CAPTURE_SCALE = 3
+const PDF_PAGE_WIDTH_PT = 595.28
+const PDF_PAGE_HEIGHT_PT = 841.89
 
 function createPdfFieldPreview(field: HTMLInputElement | HTMLTextAreaElement) {
   const preview = document.createElement("div")
@@ -242,6 +244,33 @@ function buildPdfExportRoot(source: HTMLElement) {
 function getPdfSliceHeightPx(captureWidth: number, pdfInnerWidthPt: number, pdfInnerHeightPt: number) {
   if (captureWidth <= 0 || pdfInnerWidthPt <= 0 || pdfInnerHeightPt <= 0) return 1
   return Math.max(1, Math.floor((captureWidth * pdfInnerHeightPt) / pdfInnerWidthPt))
+}
+
+// Find a clean page-break position that avoids slicing through a memo block
+function findSafeSliceHeight(
+  desiredSliceHeight: number,
+  currentOffsetY: number,
+  clone: HTMLElement
+): number {
+  if (desiredSliceHeight <= 0) return desiredSliceHeight
+  const cutNaturalY = currentOffsetY + desiredSliceHeight
+  const blockEls = clone.querySelectorAll<HTMLElement>('[id^="memo-block-"]')
+  for (const block of Array.from(blockEls)) {
+    let blockNaturalTop = 0
+    let el: HTMLElement | null = block
+    while (el && el !== clone) {
+      blockNaturalTop += el.offsetTop
+      el = el.offsetParent as HTMLElement | null
+    }
+    const blockNaturalBottom = blockNaturalTop + block.offsetHeight
+    if (blockNaturalTop < cutNaturalY && blockNaturalBottom > cutNaturalY) {
+      const safeHeight = blockNaturalTop - currentOffsetY - 6
+      if (safeHeight > 0 && safeHeight < desiredSliceHeight) {
+        return safeHeight
+      }
+    }
+  }
+  return desiredSliceHeight
 }
 
 async function waitForPdfExportAssets(root: HTMLElement) {
@@ -3155,6 +3184,8 @@ export function ToolNotebookPage() {
   const [personalTemplateSource, setPersonalTemplateSource] = useState<"current" | "blank">("blank")
   const [personalTemplateCreateError, setPersonalTemplateCreateError] = useState<string | null>(null)
   const [blockReorderState, setBlockReorderState] = useState<ActiveBlockReorderState | null>(null)
+  const [showPdfBreaks, setShowPdfBreaks] = useState(false)
+  const [pdfBreakPositions, setPdfBreakPositions] = useState<number[]>([])
   const [availableTemplates, setAvailableTemplates] = useState<RNestMemoTemplate[]>(() =>
     defaultMemoTemplates.map((template) => sanitizeMemoTemplate(template))
   )
@@ -3178,6 +3209,33 @@ export function ToolNotebookPage() {
     blockReorderStateRef.current = blockReorderState
   }, [blockReorderState])
 
+  // PDF page break position computation
+  useEffect(() => {
+    if (!showPdfBreaks || !pdfContentRef.current) {
+      setPdfBreakPositions([])
+      return
+    }
+    const compute = () => {
+      const el = pdfContentRef.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      const captureWidth = Math.max(1, rect.width)
+      const contentWidthPt = PDF_PAGE_WIDTH_PT - PDF_EXPORT_MARGIN_PT * 2
+      const contentHeightPt = PDF_PAGE_HEIGHT_PT - PDF_EXPORT_MARGIN_PT * 2
+      const pageH = getPdfSliceHeightPx(captureWidth, contentWidthPt, contentHeightPt)
+      const totalH = el.scrollHeight
+      const breaks: number[] = []
+      for (let y = pageH; y < totalH; y += pageH) {
+        breaks.push(Math.floor(y))
+      }
+      setPdfBreakPositions(breaks)
+    }
+    compute()
+    const obs = new ResizeObserver(compute)
+    obs.observe(pdfContentRef.current)
+    return () => obs.disconnect()
+  }, [showPdfBreaks, activeMemoId])
+
   useEffect(() => {
     return () => {
       blockReorderCleanupRef.current?.()
@@ -3191,6 +3249,19 @@ export function ToolNotebookPage() {
   useEffect(() => {
     if (typeof window !== "undefined" && window.innerWidth < 1024) {
       setSidebarOpen(false)
+    }
+  }, [])
+
+  // open specific memo passed via sessionStorage (e.g. from AI search "메모에 정리하기")
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const pendingId = sessionStorage.getItem("rnest_notebook_open")
+    if (!pendingId) return
+    sessionStorage.removeItem("rnest_notebook_open")
+    const doc = store.getState().memo.documents[pendingId]
+    if (doc) {
+      setActiveMemoId(pendingId)
+      if (window.innerWidth >= 1024) setSidebarOpen(true)
     }
   }, [])
   const [toast, setToast] = useState<string | null>(null)
@@ -3904,7 +3975,8 @@ export function ToolNotebookPage() {
         let offsetY = 0
         let pageIndex = 0
         while (offsetY < totalHeight) {
-          const sliceHeight = Math.min(pageSliceHeightPx, totalHeight - offsetY)
+          let sliceHeight = Math.min(pageSliceHeightPx, totalHeight - offsetY)
+          sliceHeight = findSafeSliceHeight(sliceHeight, offsetY, clone)
           if (sliceHeight <= 0) break
 
           viewport.style.height = `${sliceHeight}px`
@@ -5184,6 +5256,24 @@ export function ToolNotebookPage() {
               </button>
               <button
                 type="button"
+                onClick={() => setShowPdfBreaks((v) => !v)}
+                className={cn(
+                  "hidden h-7 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium transition-colors lg:flex",
+                  showPdfBreaks
+                    ? "bg-[#007AFF]/10 text-[#007AFF]"
+                    : "text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                )}
+                title={showPdfBreaks ? "PDF 페이지 구분선 숨기기" : "PDF 페이지 구분선 표시"}
+              >
+                <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5" aria-hidden="true">
+                  <rect x="1" y="1" width="14" height="14" rx="2" stroke="currentColor" strokeWidth="1.4" />
+                  <line x1="1" y1="5.5" x2="15" y2="5.5" stroke="currentColor" strokeWidth="1" strokeDasharray="2 1.5" />
+                  <line x1="1" y1="10.5" x2="15" y2="10.5" stroke="currentColor" strokeWidth="1" strokeDasharray="2 1.5" />
+                </svg>
+                PDF
+              </button>
+              <button
+                type="button"
                 onClick={undoActiveMemoChange}
                 disabled={!canUndoActiveMemo}
                 className={cn(
@@ -5290,7 +5380,7 @@ export function ToolNotebookPage() {
         {/* editor area */}
         <div className="flex-1 overflow-y-auto">
           {activeMemo ? (
-            <div ref={pdfContentRef} className="mx-auto w-full max-w-[720px] bg-white px-5 py-6 sm:px-6 lg:px-10 lg:py-10 xl:pl-16">
+            <div ref={pdfContentRef} className="relative mx-auto w-full max-w-[720px] bg-white px-5 py-6 sm:px-6 lg:px-10 lg:py-10 xl:pl-16">
               {activeMemo.coverStyle && (
                 <div
                   className={cn(
@@ -5735,6 +5825,25 @@ export function ToolNotebookPage() {
                   </div>
                 </>
               )}
+
+              {/* PDF page break indicators */}
+              {showPdfBreaks && pdfBreakPositions.map((y, i) => (
+                <div
+                  key={y}
+                  data-pdf-hide="true"
+                  aria-hidden="true"
+                  style={{ top: y, position: "absolute", left: 0, right: 0 }}
+                  className="pointer-events-none z-20"
+                >
+                  <div className="flex items-center gap-2 px-3">
+                    <div className="h-px flex-1 border-t border-dashed border-[#007AFF]/40" />
+                    <span className="shrink-0 rounded-full bg-[#007AFF] px-2.5 py-0.5 text-[9px] font-bold tracking-wide text-white">
+                      {i + 1}P · {i + 2}P
+                    </span>
+                    <div className="h-px flex-1 border-t border-dashed border-[#007AFF]/40" />
+                  </div>
+                </div>
+              ))}
 
               {/* footer info */}
               {activeMemo.trashedAt != null && (

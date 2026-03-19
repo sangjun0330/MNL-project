@@ -13,6 +13,8 @@ import { Card } from "@/components/ui/Card";
 import { withReturnTo } from "@/lib/navigation";
 import { buildStructuredCopyText, copyTextToClipboard } from "@/lib/structuredCopy";
 import { useI18n } from "@/lib/useI18n";
+import { createMemoBlock, sanitizeMemoDocument } from "@/lib/notebook";
+import { useAppStore } from "@/lib/store";
 
 const FLAT_CARD_CLASS = "rounded-[32px] border border-[#E8E8EC] bg-white shadow-[0_18px_50px_rgba(15,23,42,0.04)]";
 const PAGE_TITLE_CLASS = "text-[24px] font-bold tracking-[-0.015em] text-ios-text md:text-[26px]";
@@ -884,6 +886,7 @@ function AssistantAnswerSections({ content }: { content: string }) {
 
 export function ToolMedSafetyPage() {
   const router = useRouter();
+  const store = useAppStore();
   const { t, lang } = useI18n();
   const { user, status: authStatus } = useAuthState();
   const { loading: billingLoading, subscription, reload: reloadBilling } = useBillingAccess();
@@ -1409,6 +1412,103 @@ export function ToolMedSafetyPage() {
     );
   }
 
+  function buildMedSafetyMemoBlocks(
+    query: string,
+    answer: string,
+    summary: string
+  ) {
+    const blocks: ReturnType<typeof createMemoBlock>[] = []
+
+    blocks.push(
+      createMemoBlock("callout", {
+        text: "⚠️ AI 참고 정보 — 의료 판단 대체 불가",
+        detailText:
+          "본 결과는 참고용 자동 생성 정보이며 의료행위 판단의 근거로 사용할 수 없습니다. 모든 처치는 병원 지침, 처방, 의료진 확인을 우선해 결정해 주세요.",
+      })
+    )
+    blocks.push(createMemoBlock("heading", { text: "질문" }))
+    blocks.push(createMemoBlock("quote", { text: query || "—" }))
+
+    if (summary && summary.trim() && summary !== query) {
+      blocks.push(createMemoBlock("divider"))
+      blocks.push(createMemoBlock("heading", { text: "요약" }))
+      blocks.push(createMemoBlock("paragraph", { text: summary.trim() }))
+    }
+
+    blocks.push(createMemoBlock("divider"))
+    blocks.push(createMemoBlock("heading", { text: "AI 분석 결과" }))
+
+    const rawLines = (answer || "")
+      .replace(/\r/g, "")
+      .split("\n")
+      .map((l) => l.trim())
+
+    let currentSectionTitle = ""
+    let currentItems: string[] = []
+
+    const flushSection = () => {
+      if (currentSectionTitle) {
+        blocks.push(createMemoBlock("paragraph", { text: currentSectionTitle }))
+      }
+      for (const ln of currentItems) {
+        if (!ln) continue
+        const cleaned = ln.replace(/^[-*•·]\s+/, "").replace(/^\d+[.)]\s+/, "").trim()
+        if (cleaned) blocks.push(createMemoBlock("bulleted", { text: cleaned }))
+      }
+      currentItems = []
+      currentSectionTitle = ""
+    }
+
+    for (const line of rawLines) {
+      if (!line) { currentItems.push(""); continue }
+      if (/[:：]$/.test(line) && line.replace(/[:：]$/, "").trim().length <= 56) {
+        flushSection()
+        currentSectionTitle = "▸ " + line.replace(/[:：]$/, "").trim()
+        continue
+      }
+      currentItems.push(line)
+    }
+    flushSection()
+
+    blocks.push(createMemoBlock("divider"))
+    blocks.push(
+      createMemoBlock("paragraph", {
+        text: `🤖 AI 임상 검색 · ${new Date().toLocaleDateString("ko-KR")} · RNest`,
+      })
+    )
+    return blocks
+  }
+
+  function saveLastAnswerToMemo() {
+    if (!lastAssistantMessage) return
+    const query = lastUserMessage?.content || lastSubmittedQuery || ""
+    const answer = lastAssistantMessage.content || ""
+    const summary = latestAnswerSummary || ""
+    const title = (lastSubmittedQuery || query || t("AI 임상 검색 결과")).slice(0, 80)
+
+    const blocks = buildMedSafetyMemoBlocks(query, answer, summary)
+    const doc = sanitizeMemoDocument({
+      title,
+      icon: "book",
+      blocks,
+      tags: ["AI검색"],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    })
+
+    const latestMemo = store.getState().memo
+    store.setMemoState({
+      ...latestMemo,
+      documents: { ...latestMemo.documents, [doc.id]: doc },
+      recent: [doc.id, ...latestMemo.recent.filter((id) => id !== doc.id)].slice(0, 20),
+    })
+
+    if (typeof window !== "undefined") {
+      try { sessionStorage.setItem("rnest_notebook_open", doc.id) } catch {}
+    }
+    router.push("/tools/notebook")
+  }
+
   return (
     <>
       <input
@@ -1462,6 +1562,11 @@ export function ToolMedSafetyPage() {
                 {hasConversation && lastAssistantMessage ? (
                   <button type="button" onClick={() => void copyLatestAnswer()} className={SECONDARY_FLAT_BTN}>
                     <AnimatedCopyLabel copied={copiedKey === "latest-answer"} label={t("복사")} />
+                  </button>
+                ) : null}
+                {hasConversation && lastAssistantMessage ? (
+                  <button type="button" onClick={saveLastAnswerToMemo} className={PRIMARY_FLAT_BTN}>
+                    {t("메모에 정리하기")}
                   </button>
                 ) : null}
                 {hasConversation ? (
@@ -1554,6 +1659,20 @@ export function ToolMedSafetyPage() {
                           <span>{message.role === "user" ? t("나") : t("AI")}</span>
                           <span>{formatTime(message.timestamp)}</span>
                           {message.source === "openai_fallback" ? <span>{t("기본 안전 모드")}</span> : null}
+                          {message.role === "assistant" && message.id === lastAssistantMessage?.id ? (
+                            <button
+                              type="button"
+                              onClick={saveLastAnswerToMemo}
+                              className="ml-1 inline-flex items-center gap-1.5 rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-3 py-1 text-[11px] font-semibold text-[color:var(--rnest-accent)] transition hover:opacity-80"
+                            >
+                              <svg viewBox="0 0 16 16" fill="none" className="h-3 w-3" aria-hidden="true">
+                                <path d="M3 2h7l3 3v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
+                                <path d="M10 2v3H6V2" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+                                <path d="M4 11h8M4 13h5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                              </svg>
+                              {t("메모에 정리하기")}
+                            </button>
+                          ) : null}
                         </div>
                       </div>
                     </div>

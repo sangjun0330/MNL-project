@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { getBrowserAuthHeaders, useAuthState } from "@/lib/auth";
 import { useI18n } from "@/lib/useI18n";
 import { buildStructuredCopyText, copyTextToClipboard } from "@/lib/structuredCopy";
@@ -9,6 +10,8 @@ import { AnimatedCopyLabel } from "@/components/ui/AnimatedCopyLabel";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { createMemoBlock, sanitizeMemoDocument } from "@/lib/notebook";
+import { useAppStore } from "@/lib/store";
 
 type MedSafetyRecentItem = {
   id: string;
@@ -260,6 +263,8 @@ function buildRecentCopyText(item: MedSafetyRecentItem, t: TranslateFn) {
 export function ToolMedSafetyRecentPage() {
   const { status } = useAuthState();
   const { t } = useI18n();
+  const router = useRouter();
+  const store = useAppStore();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<MedSafetyRecentItem[]>([]);
@@ -415,6 +420,70 @@ export function ToolMedSafetyRecentPage() {
     if (!isDesktop) setDetailOpen(true);
   }
 
+  function saveRecentItemToMemo(item: MedSafetyRecentItem) {
+    const query = item.request.query || ""
+    const answer = item.result.answer || ""
+    const summary = item.result.summary || ""
+    const title = (item.result.title || query).slice(0, 80)
+
+    const blocks: ReturnType<typeof createMemoBlock>[] = []
+
+    blocks.push(
+      createMemoBlock("callout", {
+        text: "⚠️ AI 참고 정보 — 의료 판단 대체 불가",
+        detailText:
+          "본 결과는 참고용 자동 생성 정보이며 의료행위 판단의 근거로 사용할 수 없습니다. 모든 처치는 병원 지침, 처방, 의료진 확인을 우선해 결정해 주세요.",
+      })
+    )
+    blocks.push(createMemoBlock("heading", { text: "질문" }))
+    blocks.push(createMemoBlock("quote", { text: query || "—" }))
+    if (summary && summary.trim()) {
+      blocks.push(createMemoBlock("divider"))
+      blocks.push(createMemoBlock("heading", { text: "요약" }))
+      blocks.push(createMemoBlock("paragraph", { text: summary.trim() }))
+    }
+    blocks.push(createMemoBlock("divider"))
+    blocks.push(createMemoBlock("heading", { text: "AI 분석 결과" }))
+
+    const sections = parseNarrativeSections(answer)
+    if (sections.length > 0) {
+      for (const sec of sections) {
+        if (sections.length > 1 || sec.title !== "상세 결과") {
+          blocks.push(createMemoBlock("paragraph", { text: "▸ " + sec.title }))
+        }
+        for (const entry of sec.items) {
+          if (entry.trim()) blocks.push(createMemoBlock("bulleted", { text: entry.trim() }))
+        }
+      }
+    } else if (answer.trim()) {
+      blocks.push(createMemoBlock("paragraph", { text: answer.trim() }))
+    }
+
+    blocks.push(createMemoBlock("divider"))
+    const kindStr = item.result.resultKind === "medication" ? "의약품" : item.result.resultKind === "device" ? "의료기구" : "임상 질문"
+    const dateStr = new Date(item.savedAt).toLocaleDateString("ko-KR")
+    blocks.push(createMemoBlock("paragraph", { text: `🤖 AI 임상 검색 · ${dateStr} · ${kindStr} · RNest` }))
+
+    const doc = sanitizeMemoDocument({
+      title,
+      icon: "book",
+      blocks,
+      tags: ["AI검색"],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    })
+    const latestMemo = store.getState().memo
+    store.setMemoState({
+      ...latestMemo,
+      documents: { ...latestMemo.documents, [doc.id]: doc },
+      recent: [doc.id, ...latestMemo.recent.filter((id) => id !== doc.id)].slice(0, 20),
+    })
+    if (typeof window !== "undefined") {
+      try { sessionStorage.setItem("rnest_notebook_open", doc.id) } catch {}
+    }
+    router.push("/tools/notebook")
+  }
+
   const detailContent = selected ? (
     <div className="space-y-4">
       <div className="rounded-[28px] border border-[rgba(199,183,243,0.9)] bg-[radial-gradient(circle_at_top_right,rgba(232,224,255,0.9),transparent_38%),linear-gradient(180deg,rgba(255,255,255,0.98),rgba(247,241,255,0.94))] p-4 md:p-5">
@@ -433,9 +502,14 @@ export function ToolMedSafetyRecentPage() {
             <div className="mt-1 text-[15px] leading-7 text-ios-text">{selected.result.summary}</div>
           </div>
           {isDesktop ? (
-            <button type="button" onClick={() => void handleCopySelected()} className={QUICK_ACTION_PRIMARY_CLASS}>
-              <AnimatedCopyLabel copied={copiedKey === "selected"} label={t("답변 복사")} />
-            </button>
+            <div className="flex shrink-0 flex-col items-end gap-2">
+              <button type="button" onClick={() => void handleCopySelected()} className={QUICK_ACTION_PRIMARY_CLASS}>
+                <AnimatedCopyLabel copied={copiedKey === "selected"} label={t("답변 복사")} />
+              </button>
+              <button type="button" onClick={() => saveRecentItemToMemo(selected)} className={QUICK_ACTION_PRIMARY_CLASS}>
+                {t("메모에 정리하기")}
+              </button>
+            </div>
           ) : null}
         </div>
       </div>
@@ -615,6 +689,9 @@ export function ToolMedSafetyRecentPage() {
                                 <button type="button" onClick={() => void handleCopyItem(item)} className={QUICK_ACTION_CLASS}>
                                   <AnimatedCopyLabel copied={copiedKey === `item:${item.id}`} label={t("복사")} />
                                 </button>
+                                <button type="button" onClick={() => saveRecentItemToMemo(item)} className={QUICK_ACTION_CLASS}>
+                                  {t("메모에 정리하기")}
+                                </button>
                                 <button type="button" onClick={() => handleOpenItem(item)} className={QUICK_ACTION_PRIMARY_CLASS}>
                                   {t("전체 보기")}
                                 </button>
@@ -658,12 +735,17 @@ export function ToolMedSafetyRecentPage() {
         maxHeightClassName="max-h-[82dvh]"
         footer={
           selected ? (
-            <div className="flex gap-2">
-              <Button className={PRIMARY_ACTION_CLASS} onClick={() => void handleCopySelected()}>
-                <AnimatedCopyLabel copied={copiedKey === "selected"} label={t("답변 복사")} />
-              </Button>
-              <Button variant="secondary" className={SECONDARY_ACTION_CLASS} onClick={() => setDetailOpen(false)}>
-                {t("닫기")}
+            <div className="flex flex-col gap-2">
+              <div className="flex gap-2">
+                <Button className={PRIMARY_ACTION_CLASS} onClick={() => void handleCopySelected()}>
+                  <AnimatedCopyLabel copied={copiedKey === "selected"} label={t("답변 복사")} />
+                </Button>
+                <Button variant="secondary" className={SECONDARY_ACTION_CLASS} onClick={() => setDetailOpen(false)}>
+                  {t("닫기")}
+                </Button>
+              </div>
+              <Button className={`${SECONDARY_ACTION_CLASS} w-full`} onClick={() => saveRecentItemToMemo(selected)}>
+                {t("메모에 정리하기")}
               </Button>
             </div>
           ) : null
