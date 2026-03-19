@@ -98,6 +98,7 @@ import {
   type RNestMemoFolder,
   type RNestMemoHighlightColor,
   type RNestMemoIconId,
+  type RNestMemoSpacerMode,
   type RNestMemoState,
   type RNestMemoTemplate,
   type RNestRecordEntry,
@@ -169,6 +170,10 @@ const PDF_PAGE_WIDTH_PT = 595.28
 const PDF_PAGE_HEIGHT_PT = 841.89
 const PDF_BREAK_PADDING_PX = 8
 const PDF_MIN_SAFE_SLICE_HEIGHT_PX = 96
+const PAGE_SPACER_DEFAULT_HEIGHT = 96
+const PAGE_SPACER_MIN_HEIGHT = 24
+const PAGE_SPACER_MAX_HEIGHT = 2400
+const PAGE_SPACER_PRESETS = [48, 96, 160, 240] as const
 const PDF_INNER_BREAK_SELECTOR = [
   "p",
   "li",
@@ -275,6 +280,14 @@ function buildPdfExportRoot(source: HTMLElement) {
   clone.querySelectorAll<HTMLElement>("*").forEach((element) => {
     element.style.animation = "none"
     element.style.transition = "none"
+  })
+
+  clone.querySelectorAll<HTMLElement>('[data-page-spacer-block="true"]').forEach((element) => {
+    element.style.position = "relative"
+  })
+  clone.querySelectorAll<HTMLElement>('[data-page-spacer-ui="true"]').forEach((element) => {
+    element.style.visibility = "hidden"
+    element.style.pointerEvents = "none"
   })
 
   viewport.appendChild(clone)
@@ -410,6 +423,18 @@ function findSafeSlice(
   })
   for (const { block, top: blockNaturalTop, bottom: blockNaturalBottom } of blockBounds) {
     if (blockNaturalTop < cutNaturalY && blockNaturalBottom > cutNaturalY) {
+      if (block.dataset.pageSpacerBlock === "true") {
+        return {
+          offsetY: currentOffsetY,
+          height: desiredSliceHeight,
+          breakAnchor: {
+            naturalY: cutNaturalY,
+            blockId: block.id,
+            edge: "top",
+            delta: Math.floor(cutNaturalY - blockNaturalTop),
+          },
+        }
+      }
       const safeHeight = Math.floor(blockNaturalTop - currentOffsetY - PDF_BREAK_PADDING_PX)
       if (safeHeight > 0 && safeHeight < desiredSliceHeight && isUsablePdfSliceHeight(safeHeight, desiredSliceHeight)) {
         return {
@@ -488,33 +513,19 @@ function buildPdfSlicePlan(clone: HTMLElement, captureWidth: number, pdfInnerWid
   }
 }
 
-async function measurePdfBreakPositions(source: HTMLElement) {
+async function measurePdfLayout(source: HTMLElement) {
   const { clone, captureWidth, cleanup } = buildPdfExportRoot(source)
   try {
     await new Promise<void>((resolve) => {
       window.requestAnimationFrame(() => resolve())
     })
     await waitForPdfExportAssets(clone)
-    const plan = buildPdfSlicePlan(
-      clone,
-      captureWidth,
-      PDF_PAGE_WIDTH_PT - PDF_EXPORT_MARGIN_PT * 2,
-      PDF_PAGE_HEIGHT_PT - PDF_EXPORT_MARGIN_PT * 2
-    )
-    if (plan.totalHeight <= 0) return []
-    return plan.slices.slice(0, -1).map((slice) => {
-      const anchor = slice.breakAnchor
-      if (!anchor?.blockId || !anchor.edge) {
-        return Math.floor(anchor?.naturalY ?? slice.offsetY + slice.height)
-      }
-      const sourceBlock = source.querySelector<HTMLElement>(`#${CSS.escape(anchor.blockId)}`)
-      if (!sourceBlock) {
-        return Math.floor(anchor.naturalY)
-      }
-      const sourceBounds = getNaturalPositionInSource(source, sourceBlock)
-      const base = anchor.edge === "bottom" ? sourceBounds.bottom : sourceBounds.top
-      return Math.floor(base + (anchor.delta ?? 0))
-    })
+    const { pdfInnerWidthPt, pdfInnerHeightPt } = getPdfInnerBounds()
+    const layout = buildPdfLayoutWithPageSpacers(clone, captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
+    return {
+      spacerHeights: layout.spacerHeights,
+      breakPositions: layout.plan.totalHeight > 0 ? mapPdfBreakPositionsFromPlan(source, layout.plan) : [],
+    }
   } finally {
     cleanup()
   }
@@ -560,6 +571,112 @@ function clampImageAspectRatio(value: number | undefined | null) {
 function clampImageOffsetX(value: number | undefined | null) {
   if (typeof value !== "number" || !Number.isFinite(value)) return 0
   return Math.min(100, Math.max(0, Number(value.toFixed(2))))
+}
+
+function clampPageSpacerHeight(value: number | undefined | null) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return PAGE_SPACER_DEFAULT_HEIGHT
+  return Math.min(PAGE_SPACER_MAX_HEIGHT, Math.max(PAGE_SPACER_MIN_HEIGHT, Math.round(value)))
+}
+
+function normalizePageSpacerMode(value: unknown): RNestMemoSpacerMode {
+  return value === "next-page" ? "next-page" : "manual"
+}
+
+function pageSpacerHeightMapToKey(map: Record<string, number>) {
+  return Object.entries(map)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([id, height]) => `${id}:${Math.max(0, Math.round(height))}`)
+    .join("|")
+}
+
+function getPdfInnerBounds() {
+  return {
+    pdfInnerWidthPt: PDF_PAGE_WIDTH_PT - PDF_EXPORT_MARGIN_PT * 2,
+    pdfInnerHeightPt: PDF_PAGE_HEIGHT_PT - PDF_EXPORT_MARGIN_PT * 2,
+  }
+}
+
+function getPageSpacerElements(root: HTMLElement) {
+  return Array.from(root.querySelectorAll<HTMLElement>('[data-page-spacer-block="true"]'))
+}
+
+function setPageSpacerAppliedHeight(spacer: HTMLElement, height: number) {
+  const nextHeight = Math.max(0, Math.round(height))
+  spacer.dataset.pageSpacerAppliedHeight = String(nextHeight)
+  spacer.style.setProperty("--rnest-page-spacer-height", `${nextHeight}px`)
+  const filler = spacer.querySelector<HTMLElement>('[data-page-spacer-filler="true"]')
+  if (filler) {
+    filler.style.height = `${nextHeight}px`
+  }
+}
+
+function initializePageSpacerLayout(root: HTMLElement) {
+  const spacers = getPageSpacerElements(root)
+  for (const spacer of spacers) {
+    const mode = normalizePageSpacerMode(spacer.dataset.pageSpacerMode)
+    const manualHeight = clampPageSpacerHeight(Number(spacer.dataset.pageSpacerManualHeight))
+    setPageSpacerAppliedHeight(spacer, mode === "manual" ? manualHeight : 0)
+  }
+  return spacers
+}
+
+function findSliceForNaturalPosition(plan: PdfSlicePlan, naturalY: number) {
+  return (
+    plan.slices.find((slice) => naturalY >= slice.offsetY - 1 && naturalY <= slice.offsetY + slice.height + 1) ??
+    plan.slices.at(-1) ??
+    null
+  )
+}
+
+function buildPdfLayoutWithPageSpacers(
+  root: HTMLElement,
+  captureWidth: number,
+  pdfInnerWidthPt: number,
+  pdfInnerHeightPt: number
+) {
+  const spacers = initializePageSpacerLayout(root)
+  const nextPageSpacers = spacers.filter((spacer) => normalizePageSpacerMode(spacer.dataset.pageSpacerMode) === "next-page")
+
+  let plan = buildPdfSlicePlan(root, captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
+  const cloneTop = root.getBoundingClientRect().top
+
+  for (const spacer of nextPageSpacers) {
+    plan = buildPdfSlicePlan(root, captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
+    const bounds = getElementNaturalBounds(spacer, cloneTop)
+    const slice = findSliceForNaturalPosition(plan, bounds.bottom)
+    const desiredHeight =
+      slice && bounds.bottom > slice.offsetY + 4
+        ? Math.max(0, Math.floor(slice.offsetY + slice.height - bounds.bottom))
+        : 0
+    setPageSpacerAppliedHeight(spacer, desiredHeight >= 12 ? desiredHeight : 0)
+  }
+
+  plan = buildPdfSlicePlan(root, captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
+  return {
+    plan,
+    spacerHeights: Object.fromEntries(
+      spacers.map((spacer) => [
+        spacer.dataset.pageSpacerBlockId || spacer.id,
+        Math.max(0, Math.round(Number(spacer.dataset.pageSpacerAppliedHeight || 0))),
+      ])
+    ) as Record<string, number>,
+  }
+}
+
+function mapPdfBreakPositionsFromPlan(source: HTMLElement, plan: PdfSlicePlan) {
+  return plan.slices.slice(0, -1).map((slice) => {
+    const anchor = slice.breakAnchor
+    if (!anchor?.blockId || !anchor.edge) {
+      return Math.floor(anchor?.naturalY ?? slice.offsetY + slice.height)
+    }
+    const sourceBlock = source.querySelector<HTMLElement>(`#${CSS.escape(anchor.blockId)}`)
+    if (!sourceBlock) {
+      return Math.floor(anchor.naturalY)
+    }
+    const sourceBounds = getNaturalPositionInSource(source, sourceBlock)
+    const base = anchor.edge === "bottom" ? sourceBounds.bottom : sourceBounds.top
+    return Math.floor(base + (anchor.delta ?? 0))
+  })
 }
 
 function deriveAttachmentKind(file: File, preferred: RNestMemoAttachment["kind"] | null = null): RNestMemoAttachment["kind"] {
@@ -683,6 +800,8 @@ function cloneMemoBlockForDuplicate(
     checked: block.checked,
     collapsed: block.collapsed,
     highlight: block.highlight,
+    spacerMode: block.spacerMode,
+    spacerHeight: block.spacerHeight,
     code: block.code,
     language: block.language,
     wrap: block.wrap,
@@ -779,6 +898,7 @@ const blockTypeLabels: Record<RNestMemoBlockType, string> = {
   quote: "인용",
   toggle: "토글",
   divider: "구분선",
+  pageSpacer: "PDF 간격",
   table: "표",
   bookmark: "링크",
   code: "코드",
@@ -866,6 +986,7 @@ const slashCommands: SlashCommand[] = [
   { id: "callout", label: "콜아웃", description: "중요한 메모 강조", blockType: "callout" },
   { id: "quote", label: "인용", description: "짧은 인용/요약", blockType: "quote" },
   { id: "toggle", label: "토글", description: "접고 펼치는 메모", blockType: "toggle" },
+  { id: "pageSpacer", label: "PDF 간격", description: "PDF 페이지 맞춤용 간격", blockType: "pageSpacer" },
   { id: "bookmark", label: "링크", description: "참고 링크 저장", blockType: "bookmark" },
   { id: "code", label: "코드", description: "코드 블록", blockType: "code" },
   { id: "pageLink", label: "문서 링크", description: "다른 메모 연결", blockType: "pageLink" },
@@ -1150,6 +1271,8 @@ function renderBlockTypeIcon(type: RNestMemoBlockType, className = "h-3.5 w-3.5"
       return <ChevronRight {...props} />
     case "divider":
       return <Minus {...props} />
+    case "pageSpacer":
+      return <ArrowUpDown {...props} />
     case "table":
       return <Table2 {...props} />
     case "bookmark":
@@ -1782,6 +1905,7 @@ function BlockTypeMenu({
     "callout",
     "quote",
     "toggle",
+    "pageSpacer",
     "bookmark",
     "divider",
     "table",
@@ -2488,6 +2612,7 @@ function InlineBlock({
   onAddAfter,
   onInsertAsset,
   onQuickAddRecordEntry,
+  onSendToNextPdfPage,
   onMoveUp,
   onMoveDown,
   onHighlight,
@@ -2495,6 +2620,8 @@ function InlineBlock({
   onRootReady,
   isFirst,
   isLast,
+  showPdfBreaks,
+  pdfSpacerPreviewHeight,
   isDragging,
   dragOffsetY,
 }: {
@@ -2515,6 +2642,7 @@ function InlineBlock({
   onAddAfter: (type?: RNestMemoBlockType) => void
   onInsertAsset: (kind: "image" | "attachment" | "gallery") => void
   onQuickAddRecordEntry: (templateId: string) => void
+  onSendToNextPdfPage: () => void
   onMoveUp: () => void
   onMoveDown: () => void
   onHighlight: (color: RNestMemoHighlightColor | null) => void
@@ -2522,6 +2650,8 @@ function InlineBlock({
   onRootReady?: (node: HTMLDivElement | null) => void
   isFirst: boolean
   isLast: boolean
+  showPdfBreaks: boolean
+  pdfSpacerPreviewHeight?: number
   isDragging?: boolean
   dragOffsetY?: number
 }) {
@@ -2713,6 +2843,16 @@ function InlineBlock({
   const recordEntries = recordTemplate
     ? (recordEntriesByTemplateId[recordTemplate.id] ?? []).slice(0, 6)
     : []
+  const pageSpacerMode = normalizePageSpacerMode(block.spacerMode)
+  const pageSpacerManualHeight = clampPageSpacerHeight(block.spacerHeight)
+  const pageSpacerPreviewGap = showPdfBreaks
+    ? Math.max(
+        0,
+        Math.round(
+          pdfSpacerPreviewHeight ?? (pageSpacerMode === "manual" ? pageSpacerManualHeight : 0)
+        )
+      )
+    : 0
 
   return (
     <div
@@ -2786,6 +2926,7 @@ function InlineBlock({
                   "callout",
                   "quote",
                   "toggle",
+                  "pageSpacer",
                   "bookmark",
                   "code",
                   "pageLink",
@@ -2923,6 +3064,19 @@ function InlineBlock({
                 <Copy className="h-3.5 w-3.5" />
                 블록 복제
               </button>
+              {block.type !== "pageSpacer" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onSendToNextPdfPage()
+                    setShowActionMenu(false)
+                  }}
+                  className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-ios-text hover:bg-gray-50"
+                >
+                  <ArrowUpDown className="h-3.5 w-3.5" />
+                  다음 PDF 페이지에서 시작
+                </button>
+              )}
               {!isFirst && (
                 <button
                   type="button"
@@ -3028,6 +3182,116 @@ function InlineBlock({
         {block.type === "divider" && (
           <div className="py-3">
             <hr className="border-gray-200" />
+          </div>
+        )}
+
+        {block.type === "pageSpacer" && (
+          <div
+            data-page-spacer-block="true"
+            data-page-spacer-block-id={block.id}
+            data-page-spacer-mode={pageSpacerMode}
+            data-page-spacer-manual-height={pageSpacerManualHeight}
+            className="relative"
+          >
+            <div
+              data-page-spacer-ui="true"
+              className={cn(
+                "rounded-2xl border border-dashed border-[#C7BAFF] bg-[linear-gradient(135deg,rgba(245,243,255,0.96),rgba(255,255,255,0.98))] p-3 text-ios-text shadow-[0_12px_28px_rgba(123,111,208,0.08)]",
+                showPdfBreaks && "mb-0"
+              )}
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-[color:var(--rnest-accent-soft)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--rnest-accent)]">
+                  <ArrowUpDown className="h-3 w-3" />
+                  {pageSpacerMode === "next-page" ? "다음 PDF 페이지 시작" : `PDF 간격 ${pageSpacerManualHeight}px`}
+                </span>
+                <div className="ml-auto flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => onChange({ ...block, spacerMode: "manual", spacerHeight: pageSpacerManualHeight })}
+                    className={cn(
+                      "rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors",
+                      pageSpacerMode === "manual"
+                        ? "bg-[color:var(--rnest-accent)] text-white"
+                        : "border border-gray-200 bg-white text-ios-muted hover:bg-gray-50"
+                    )}
+                  >
+                    수동
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onChange({ ...block, spacerMode: "next-page", spacerHeight: pageSpacerManualHeight })}
+                    className={cn(
+                      "rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors",
+                      pageSpacerMode === "next-page"
+                        ? "bg-[color:var(--rnest-accent)] text-white"
+                        : "border border-gray-200 bg-white text-ios-muted hover:bg-gray-50"
+                    )}
+                  >
+                    다음 페이지
+                  </button>
+                </div>
+              </div>
+              {pageSpacerMode === "manual" ? (
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <div className="inline-flex items-center rounded-full border border-gray-200 bg-white">
+                    <button
+                      type="button"
+                      onClick={() => onChange({ ...block, spacerHeight: clampPageSpacerHeight(pageSpacerManualHeight - 24) })}
+                      className="flex h-8 w-8 items-center justify-center text-ios-muted transition-colors hover:bg-gray-50 hover:text-ios-text"
+                      aria-label="PDF 간격 줄이기"
+                    >
+                      <Minus className="h-3.5 w-3.5" />
+                    </button>
+                    <span className="min-w-[68px] text-center text-[12px] font-semibold text-ios-text">
+                      {pageSpacerManualHeight}px
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onChange({ ...block, spacerHeight: clampPageSpacerHeight(pageSpacerManualHeight + 24) })}
+                      className="flex h-8 w-8 items-center justify-center text-ios-muted transition-colors hover:bg-gray-50 hover:text-ios-text"
+                      aria-label="PDF 간격 늘리기"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                  {PAGE_SPACER_PRESETS.map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => onChange({ ...block, spacerHeight: preset })}
+                      className={cn(
+                        "rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
+                        pageSpacerManualHeight === preset
+                          ? "border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
+                          : "border-gray-200 bg-white text-ios-muted hover:bg-gray-50"
+                      )}
+                    >
+                      {preset}px
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-3 text-[12px] leading-relaxed text-ios-muted">
+                  이 블록 뒤의 내용을 다음 PDF 페이지 시작으로 밀어냅니다.
+                </p>
+              )}
+              <p className="mt-2 text-[11.5px] leading-relaxed text-ios-muted">
+                {showPdfBreaks
+                  ? `현재 PDF 기준 반영 높이 ${pageSpacerPreviewGap}px`
+                  : "평소 편집 화면에서는 작게 보이고, PDF 구분선 표시 중에만 실제 높이로 펼쳐집니다."}
+              </p>
+            </div>
+            <div
+              data-page-spacer-filler="true"
+              style={{ height: showPdfBreaks ? pageSpacerPreviewGap : 0 }}
+              className={cn(
+                "overflow-hidden rounded-2xl border-dashed transition-[height,opacity] duration-200",
+                showPdfBreaks && pageSpacerPreviewGap > 0
+                  ? "mt-2 border border-[#007AFF]/20 bg-[linear-gradient(180deg,rgba(0,122,255,0.02),rgba(123,111,208,0.04))] opacity-100"
+                  : "mt-0 border-transparent bg-transparent opacity-0"
+              )}
+            />
           </div>
         )}
 
@@ -4033,6 +4297,7 @@ export function ToolNotebookPage() {
   const [blockReorderState, setBlockReorderState] = useState<ActiveBlockReorderState | null>(null)
   const [showPdfBreaks, setShowPdfBreaks] = useState(false)
   const [pdfBreakPositions, setPdfBreakPositions] = useState<number[]>([])
+  const [pdfSpacerPreviewHeights, setPdfSpacerPreviewHeights] = useState<Record<string, number>>({})
   const [availableTemplates, setAvailableTemplates] = useState<RNestMemoTemplate[]>(() =>
     defaultMemoTemplates.map((template) => sanitizeMemoTemplate(template))
   )
@@ -4042,6 +4307,8 @@ export function ToolNotebookPage() {
   const blockReorderStateRef = useRef<ActiveBlockReorderState | null>(null)
   const blockReorderGestureRef = useRef<BlockReorderGesture | null>(null)
   const blockReorderCleanupRef = useRef<(() => void) | null>(null)
+  const pdfSpacerPreviewHeightsRef = useRef<Record<string, number>>({})
+  const pdfSpacerPreviewKey = useMemo(() => pageSpacerHeightMapToKey(pdfSpacerPreviewHeights), [pdfSpacerPreviewHeights])
 
   useEffect(() => {
     if (!showSortMenu) return
@@ -4057,8 +4324,13 @@ export function ToolNotebookPage() {
   }, [blockReorderState])
 
   useEffect(() => {
+    pdfSpacerPreviewHeightsRef.current = pdfSpacerPreviewHeights
+  }, [pdfSpacerPreviewHeights])
+
+  useEffect(() => {
     if (!showPdfBreaks || !pdfContentRef.current) {
       setPdfBreakPositions([])
+      setPdfSpacerPreviewHeights({})
       return
     }
     const node = pdfContentRef.current
@@ -4072,9 +4344,15 @@ export function ToolNotebookPage() {
       if (!currentNode) return
       const token = ++computeToken
       try {
-        const positions = await measurePdfBreakPositions(currentNode)
+        const layout = await measurePdfLayout(currentNode)
         if (!cancelled && token === computeToken) {
-          setPdfBreakPositions(positions)
+          const nextKey = pageSpacerHeightMapToKey(layout.spacerHeights)
+          if (nextKey !== pageSpacerHeightMapToKey(pdfSpacerPreviewHeightsRef.current)) {
+            setPdfSpacerPreviewHeights(layout.spacerHeights)
+            setPdfBreakPositions([])
+            return
+          }
+          setPdfBreakPositions(layout.breakPositions)
         }
       } catch {
         if (!cancelled && token === computeToken) {
@@ -4126,7 +4404,7 @@ export function ToolNotebookPage() {
       mutationObserver.disconnect()
       window.removeEventListener("resize", schedule)
     }
-  }, [showPdfBreaks, activeMemoId])
+  }, [showPdfBreaks, activeMemoId, pdfSpacerPreviewKey])
 
   useEffect(() => {
     return () => {
@@ -5049,6 +5327,7 @@ export function ToolNotebookPage() {
       const pageHeight = pdf.internal.pageSize.getHeight()
       const contentWidth = pageWidth - PDF_EXPORT_MARGIN_PT * 2
       const contentHeight = pageHeight - PDF_EXPORT_MARGIN_PT * 2
+      const { pdfInnerWidthPt, pdfInnerHeightPt } = getPdfInnerBounds()
       const renderScale = Math.max(
         PDF_EXPORT_CAPTURE_SCALE,
         Math.min((window.devicePixelRatio || 1) * 1.5, PDF_EXPORT_MAX_CAPTURE_SCALE)
@@ -5059,7 +5338,7 @@ export function ToolNotebookPage() {
           window.requestAnimationFrame(() => resolve())
         })
         await waitForPdfExportAssets(clone)
-        const plan = buildPdfSlicePlan(clone, captureWidth, contentWidth, contentHeight)
+        const { plan } = buildPdfLayoutWithPageSpacers(clone, captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
         if (plan.totalHeight <= 0 || plan.slices.length <= 0) {
           throw new Error("pdf_export_empty")
         }
@@ -5714,6 +5993,36 @@ export function ToolNotebookPage() {
         return next
       })(),
     }))
+  }
+
+  function insertNextPageSpacerBefore(blockId: string) {
+    if (!activeMemo) return
+    const currentIndex = activeMemo.blocks.findIndex((block) => block.id === blockId)
+    const currentPrevious = currentIndex > 0 ? activeMemo.blocks[currentIndex - 1] : null
+    if (currentPrevious?.type === "pageSpacer" && normalizePageSpacerMode(currentPrevious.spacerMode) === "next-page") {
+      setShowPdfBreaks(true)
+      setToast("바로 위에 이미 다음 PDF 페이지 시작 블록이 있습니다")
+      return
+    }
+    void updateActiveMemoContent((doc) => ({
+      ...doc,
+      blocks: (() => {
+        const idx = doc.blocks.findIndex((b) => b.id === blockId)
+        if (idx === -1) return doc.blocks
+        const next = [...doc.blocks]
+        next.splice(
+          idx,
+          0,
+          createMemoBlock("pageSpacer", {
+            spacerMode: "next-page",
+            spacerHeight: PAGE_SPACER_DEFAULT_HEIGHT,
+          })
+        )
+        return next
+      })(),
+    }))
+    setShowPdfBreaks(true)
+    setToast("다음 PDF 페이지 시작 블록을 추가했습니다")
   }
 
   function moveBlock(blockId: string, direction: "up" | "down") {
@@ -6982,10 +7291,13 @@ export function ToolNotebookPage() {
                             onInsertAsset={(kind) => beginAssetInsert(block.id, kind)}
                             onOpenDoc={openMemoDoc}
                             onQuickAddRecordEntry={quickAddRecordEntry}
+                            onSendToNextPdfPage={() => insertNextPageSpacerBefore(block.id)}
                             onMoveUp={() => moveBlock(block.id, "up")}
                             onMoveDown={() => moveBlock(block.id, "down")}
                             onHighlight={(color) => setBlockHighlight(block.id, color)}
                             onRequestReorderStart={startBlockReorder}
+                            showPdfBreaks={showPdfBreaks}
+                            pdfSpacerPreviewHeight={pdfSpacerPreviewHeights[block.id]}
                           />
                           {showAfterIndicator && (
                             <div aria-hidden="true" className="flex items-center gap-1.5 py-0.5">

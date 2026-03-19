@@ -13,6 +13,7 @@ export const notebookFeatureFlags = {
   tableV2: true,
   import: true,
   pageLink: true,
+  pageSpacer: true,
   gallery: true,
   embed: true,
   recordView: true,
@@ -29,6 +30,7 @@ export const memoBlockTypes = [
   "quote",
   "toggle",
   "divider",
+  "pageSpacer",
   "table",
   "bookmark",
   "image",
@@ -42,6 +44,7 @@ export const memoBlockTypes = [
 ] as const
 
 export type RNestMemoBlockType = (typeof memoBlockTypes)[number]
+export type RNestMemoSpacerMode = "manual" | "next-page"
 
 export type RNestMemoTableAlign = "left" | "center" | "right"
 
@@ -120,6 +123,8 @@ export type RNestMemoBlock = {
   collapsed?: boolean
   highlight?: RNestMemoHighlightColor | null
   table?: RNestMemoTable
+  spacerMode?: RNestMemoSpacerMode
+  spacerHeight?: number
   code?: string
   language?: string
   wrap?: boolean
@@ -329,6 +334,9 @@ const MAX_TITLE_SNAPSHOT_LENGTH = 120
 const MAX_RECORD_FIELDS = 16
 const MAX_SELECT_OPTIONS = 10
 const MAX_RECORD_VIEW_FIELDS = 8
+const MIN_PAGE_SPACER_HEIGHT = 24
+const MAX_PAGE_SPACER_HEIGHT = 2400
+const DEFAULT_PAGE_SPACER_HEIGHT = 96
 
 function sanitizeMediaWidth(value: unknown) {
   if (typeof value !== "number" || !Number.isFinite(value)) return 100
@@ -511,6 +519,15 @@ function sanitizeTableWidth(value: unknown) {
 
 function sanitizeTableAlign(value: unknown): RNestMemoTableAlign {
   return value === "center" || value === "right" ? value : "left"
+}
+
+function sanitizePageSpacerHeight(value: unknown) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_PAGE_SPACER_HEIGHT
+  return Math.min(MAX_PAGE_SPACER_HEIGHT, Math.max(MIN_PAGE_SPACER_HEIGHT, Math.round(value)))
+}
+
+function sanitizePageSpacerMode(value: unknown): RNestMemoSpacerMode {
+  return value === "next-page" ? "next-page" : "manual"
 }
 
 function normalizeMemoIcon(value: unknown, fallback: RNestMemoIconId): RNestMemoIconId {
@@ -912,6 +929,19 @@ export function createMemoBlock(type: RNestMemoBlockType | string, input?: Parti
     }
   }
 
+  if (normalizedType === "pageSpacer") {
+    return {
+      ...base,
+      type: normalizedType,
+      text: undefined,
+      textHtml: undefined,
+      detailText: undefined,
+      detailTextHtml: undefined,
+      spacerMode: sanitizePageSpacerMode(input?.spacerMode),
+      spacerHeight: sanitizePageSpacerHeight(input?.spacerHeight),
+    }
+  }
+
   if (normalizedType === "code") {
     const code =
       cleanCodeText(input?.code, MAX_CODE_TEXT_LENGTH) ||
@@ -1061,6 +1091,15 @@ export function coerceMemoBlockType(block: RNestMemoBlock, nextType: RNestMemoBl
 
   if (nextType === "divider") {
     return createMemoBlock("divider", { id: block.id, highlight: block.highlight })
+  }
+
+  if (nextType === "pageSpacer") {
+    return createMemoBlock("pageSpacer", {
+      id: block.id,
+      highlight: block.highlight,
+      spacerMode: "manual",
+      spacerHeight: DEFAULT_PAGE_SPACER_HEIGHT,
+    })
   }
 
   if (nextType === "bookmark") {
@@ -1512,6 +1551,8 @@ export function memoBlockToPlainText(block: RNestMemoBlock) {
         .trim()
     case "divider":
       return "---"
+    case "pageSpacer":
+      return ""
     case "checklist":
       return `${block.checked ? "[x]" : "[ ]"} ${text}`
     case "quote":
@@ -1587,6 +1628,16 @@ export function memoDocumentToMarkdown(document: RNestMemoDocument) {
     }
     if (block.type === "divider") {
       lines.push("---")
+      continue
+    }
+    if (block.type === "pageSpacer") {
+      const spacerMode = block.spacerMode === "next-page" ? "next-page" : "manual"
+      const spacerHeight = sanitizePageSpacerHeight(block.spacerHeight)
+      lines.push(
+        spacerMode === "next-page"
+          ? "<!-- RNEST_PAGE_SPACER next-page -->"
+          : `<!-- RNEST_PAGE_SPACER manual ${spacerHeight}px -->`
+      )
       continue
     }
     if (block.type === "table") {
