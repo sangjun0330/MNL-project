@@ -639,7 +639,7 @@ function initializePageSpacerLayout(root: HTMLElement) {
 
 function findSliceForNaturalPosition(plan: PdfSlicePlan, naturalY: number) {
   return (
-    plan.slices.find((slice) => naturalY >= slice.offsetY - 1 && naturalY <= slice.offsetY + slice.height + 1) ??
+    plan.slices.find((slice) => naturalY >= slice.offsetY - 1 && naturalY < slice.offsetY + slice.height - 1) ??
     plan.slices.at(-1) ??
     null
   )
@@ -661,13 +661,12 @@ function buildPdfLayoutWithPageSpacers(
     plan = buildPdfSlicePlan(root, captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
     const bounds = getElementNaturalBounds(spacer, cloneTop)
     const slice = findSliceForNaturalPosition(plan, bounds.bottom)
-    // ✅ slice.height → plan.pageSliceHeightPx 수정
-    // 마지막 슬라이스는 totalHeight가 pageHeight보다 짧을 때 slice.height < pageSliceHeightPx가 됨
-    // 이 경우 slice.offsetY + slice.height는 실제 다음 페이지 시작이 아닌 문서 끝을 가리킴
-    // plan.pageSliceHeightPx를 사용하면 "현재 슬라이스의 이상적 페이지 경계"가 정확히 계산됨
+    const targetBreakY =
+      slice?.breakAnchor?.naturalY ??
+      (slice ? slice.offsetY + slice.height : 0)
     const desiredHeight =
       slice && bounds.bottom > slice.offsetY + 4
-        ? Math.max(0, Math.floor(slice.offsetY + plan.pageSliceHeightPx - bounds.bottom))
+        ? Math.max(0, Math.floor(targetBreakY - bounds.bottom))
         : 0
     setPageSpacerAppliedHeight(spacer, desiredHeight >= 12 ? desiredHeight : 0)
   }
@@ -704,9 +703,6 @@ function resolvePdfBreakMarkerY(source: HTMLElement, anchor?: PdfBreakAnchor, fa
   if (anchor.target === "page-spacer-filler") {
     const filler = block.querySelector<HTMLElement>('[data-page-spacer-filler="true"]') ?? block
     const fillerBounds = getElementNaturalBounds(filler, sourceTop)
-    if (typeof anchor.delta === "number" && Number.isFinite(anchor.delta)) {
-      return Math.max(0, Math.floor(fillerBounds.top + anchor.delta))
-    }
     return Math.max(0, Math.floor(fillerBounds.top))
   }
 
@@ -2893,14 +2889,6 @@ function InlineBlock({
     : []
   const pageSpacerMode = normalizePageSpacerMode(block.spacerMode)
   const pageSpacerManualHeight = clampPageSpacerHeight(block.spacerHeight)
-  const pageSpacerPreviewGap = showPdfBreaks
-    ? Math.max(
-      0,
-      Math.round(
-        pdfSpacerPreviewHeight ?? (pageSpacerMode === "manual" ? pageSpacerManualHeight : 0)
-      )
-    )
-    : 0
 
   return (
     <div
@@ -3252,12 +3240,7 @@ function InlineBlock({
                   : "relative"
               )}
             >
-              {showPdfBreaks ? (
-                /* 미리보기 모드: 작은 뱃지만 */
-                <span className="inline-flex items-center rounded-md bg-gray-100/80 px-1.5 py-0.5 text-[10px] font-medium text-gray-400">
-                  {pageSpacerMode === "next-page" ? "페이지 맞춤" : `${pageSpacerManualHeight}px`}
-                </span>
-              ) : (
+              {showPdfBreaks ? null : (
                 /* 편집 모드: 얇은 선 + 중앙 pill */
                 <div className="flex items-center gap-2 px-1">
                   <div className="h-px flex-1 bg-gray-200" />
@@ -3300,7 +3283,7 @@ function InlineBlock({
             </div>
             <div
               data-page-spacer-filler="true"
-              style={{ height: showPdfBreaks ? pageSpacerPreviewGap : 0 }}
+              style={{ height: 0 }}
               className="overflow-hidden transition-[height] duration-200"
             />
           </div>
