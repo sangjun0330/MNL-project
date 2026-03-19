@@ -83,6 +83,7 @@ export function DailyLogSheet({
 }) {
   const store = useAppStore();
   const { t } = useI18n();
+  const menstrualEnabled = Boolean(store.settings.menstrual?.enabled);
 
   const presets = useMemo(() => {
     const pos = store.settings.emotionTagsPositive ?? [];
@@ -406,46 +407,100 @@ export function DailyLogSheet({
           </div>
 
           <div className="mt-4">
-            <div className="mb-2 text-[12px] font-semibold text-ios-muted">증상 강도</div>
-            <Segmented
-              value={symptom as any}
-              options={symptomOptions as any}
-              onChange={(v) => {
-                setSymptomTouched(true);
-                setSymptom(String(v));
-              }}
-            />
-          </div>
-
-          <div className="mt-4">
-            <div className="mb-2 text-[12px] font-semibold text-ios-muted">생리 상태</div>
-            <Segmented
-              value={menstrualStatus as any}
-              options={menstrualStatusOptions as any}
-              onChange={(v) => {
-                setMenstrualStatusTouched(true);
-                setMenstrualStatus(String(v));
-              }}
-            />
-          </div>
-
-          <div className="mt-4">
-            <div className="mb-2 text-[12px] font-semibold text-ios-muted">출혈 강도</div>
-            <Segmented
-              value={menstrualFlow as any}
-              options={menstrualFlowOptions as any}
-              onChange={(v) => {
-                setMenstrualFlowTouched(true);
-                setMenstrualFlow(String(v));
-              }}
-            />
-          </div>
-
-          <div className="mt-4">
             <div className="mb-2 text-[12px] font-semibold text-ios-muted">근무 연장 (h)</div>
             <Input inputMode="numeric" value={overtime} onChange={(e) => setOvertime(e.target.value)} placeholder="예: 2" />
           </div>
         </div>
+
+        {/* 생리 기록 — 기능 ON일 때만 노출 */}
+        {menstrualEnabled ? (
+          <div className="rounded-2xl border border-rose-200 bg-white p-4">
+            {/* 섹션 헤더 */}
+            <div className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-rose-400" />
+              <div className="text-[13px] font-semibold text-rose-600">{t("생리 기록")}</div>
+              <div className="ml-auto text-[11px] font-medium text-rose-400/80">{t("직접 기록이 알고리즘에 우선 반영돼요")}</div>
+            </div>
+
+            {/* 생리 상태 */}
+            <div className="mt-3">
+              <div className="mb-2 text-[12px] font-semibold text-ios-muted">{t("생리 상태")}</div>
+              <Segmented
+                value={menstrualStatus as any}
+                options={menstrualStatusOptionsT as any}
+                onChange={(v) => {
+                  setMenstrualStatusTouched(true);
+                  const next = String(v);
+                  setMenstrualStatus(next);
+                  // 생리 선택 시 출혈 강도 자동 최소값 설정
+                  if (next === "period" && Number(menstrualFlow) === 0) {
+                    setMenstrualFlowTouched(true);
+                    setMenstrualFlow("1");
+                  }
+                  // 없음 선택 시 출혈도 초기화
+                  if (next === "none") {
+                    setMenstrualFlowTouched(true);
+                    setMenstrualFlow("0");
+                  }
+                }}
+              />
+            </div>
+
+            {/* 출혈 강도 — 생리 상태일 때만 강조 */}
+            <div className="mt-3">
+              <div className="mb-2 flex items-center justify-between">
+                <div className="text-[12px] font-semibold text-ios-muted">{t("출혈 강도")}</div>
+                <div className="text-[11px] text-ios-muted">{t("없음 · 약 · 보통 · 많음")}</div>
+              </div>
+              <div className="grid grid-cols-4 gap-2">
+                {([
+                  { value: "0", label: t("없음") },
+                  { value: "1", label: t("약") },
+                  { value: "2", label: t("보통") },
+                  { value: "3", label: t("많음") },
+                ] as const).map((opt) => {
+                  const active = menstrualFlow === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => {
+                        setMenstrualFlowTouched(true);
+                        setMenstrualFlow(opt.value);
+                        // 출혈 있으면 생리 상태 자동 설정
+                        if (Number(opt.value) > 0 && menstrualStatus !== "period") {
+                          setMenstrualStatusTouched(true);
+                          setMenstrualStatus("period");
+                        }
+                      }}
+                      className={cn(
+                        "rounded-xl border py-2.5 text-center text-[13px] font-semibold transition",
+                        active
+                          ? "border-rose-500 bg-rose-500 text-white"
+                          : "border-ios-sep bg-white text-ios-text hover:bg-rose-50"
+                      )}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 증상 강도 */}
+            <div className="mt-3">
+              <div className="mb-2 text-[12px] font-semibold text-ios-muted">{t("증상 강도")}</div>
+              <Segmented
+                value={symptom as any}
+                options={symptomOptionsT as any}
+                onChange={(v) => {
+                  setSymptomTouched(true);
+                  setSymptom(String(v));
+                }}
+              />
+            </div>
+          </div>
+        ) : null}
 
         {/* Emotion */}
         <div className="rounded-2xl border border-ios-sep bg-white p-4">

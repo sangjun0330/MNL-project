@@ -147,7 +147,24 @@ export function InsightsPage() {
           </>
         ) : null}
         <span className="opacity-40">·</span>
-        <span>{menstrual.enabled ? t(menstrual.label) : t("주기")}</span>
+        {menstrual.enabled ? (
+          <span
+            className={
+              menstrual.visualLevel === "confirmed"
+                ? "font-semibold text-rose-500"
+                : menstrual.visualLevel === "probable"
+                  ? "text-rose-400"
+                  : "text-ios-sub"
+            }
+          >
+            {t(menstrual.label)}
+            {menstrual.confidence >= 0.6 && menstrual.expectedNextStartP50 && menstrual.dominantPhase !== "period"
+              ? ` · ${formatKoreanDate(menstrual.expectedNextStartP50)} ${t("예상")}`
+              : null}
+          </span>
+        ) : (
+          <span>{t("주기")}</span>
+        )}
         <span className="opacity-40">·</span>
         <span>Vital {todayDisplay ?? "—"}</span>
       </div>

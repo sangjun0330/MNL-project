@@ -304,14 +304,17 @@ export function MenstrualSettingsForm() {
                 ) : null}
               </div>
 
-              <div className="flex flex-wrap gap-2">
-                <Button variant="secondary" onClick={setTodayAsStart} className="rnest-pill-photo">
-                  {t("오늘로 설정")}
-                </Button>
-                <Button variant="secondary" onClick={() => updateLastStart(null)} className="rnest-pill-photo-muted">
-                  {t("비우기")}
-                </Button>
-              </div>
+              {/* 모바일에서는 네이티브 date picker가 버튼 위에 오버레이되므로 별도 버튼 불필요 */}
+              {!isCoarsePointer ? (
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="secondary" onClick={setTodayAsStart} className="rnest-pill-photo">
+                    {t("오늘로 설정")}
+                  </Button>
+                  <Button variant="secondary" onClick={() => updateLastStart(null)} className="rnest-pill-photo-muted">
+                    {t("비우기")}
+                  </Button>
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -368,43 +371,79 @@ export function MenstrualSettingsForm() {
         ) : null}
       </div>
 
-      {/* ✅ 설명 박스 그대로 */}
+      {/* 색상 및 확률 안내 박스 */}
       <div className="mt-4 rounded-2xl border border-ios-sep bg-white p-4">
         <div className="text-[14px] font-semibold">{t("캘린더 색상 안내")}</div>
         <div className="mt-1 text-[12.5px] text-ios-muted">
-          {t("생리 주기에 따라 컨디션 흐름을 한눈에 볼 수 있도록 색상 막대가 표시돼요.")}
+          {t("건강기록과 주기를 함께 분석해 날짜별 생리 가능성을 색상으로 표시해요.")}
         </div>
 
-        <div className="mt-4 grid gap-2">
+        <div className="mt-4 grid gap-3">
+          {/* 생리 기간 */}
           <div className="flex items-center gap-3">
-            <span className="h-[6px] w-10 rounded-full bg-rose-500" />
+            <span className="h-[4px] w-10 rounded-full bg-rose-500" />
             <div className="text-[13px]">
               <span className="font-semibold">{t("생리 기간")}</span>{" "}
               <span className="text-black/60">{t("(피로도가 높을 수 있어요)")}</span>
             </div>
           </div>
 
+          {/* 생리 직전 */}
           <div className="flex items-center gap-3">
-            <span className="h-[6px] w-10 rounded-full bg-amber-500" />
+            <span className="h-[4px] w-10 rounded-full bg-amber-500" />
             <div className="text-[13px]">
               <span className="font-semibold">{t("생리 직전 기간")}</span>{" "}
               <span className="text-black/60">{t("(예민함/피로감이 생기기 쉬워요)")}</span>
             </div>
           </div>
 
+          {/* 컨디션 안정 */}
           <div className="flex items-center gap-3">
-            <span className="h-[6px] w-10 rounded-full bg-sky-500" />
+            <span className="h-[4px] w-10 rounded-full bg-sky-500" />
             <div className="text-[13px]">
               <span className="font-semibold">{t("컨디션 안정 기간")}</span>{" "}
               <span className="text-black/60">{t("(회복이 잘 되는 편이에요)")}</span>
             </div>
           </div>
 
+          {/* 컨디션 변화 */}
           <div className="flex items-center gap-3">
-            <span className="h-[6px] w-10 rounded-full bg-sky-600" />
+            <span className="h-[4px] w-10 rounded-full bg-sky-600" />
             <div className="text-[13px]">
               <span className="font-semibold">{t("컨디션 변화가 큰 날")}</span>{" "}
               <span className="text-black/60">{t("(변동이 클 수 있어요)")}</span>
+            </div>
+          </div>
+
+          {/* 구분선 */}
+          <div className="my-1 border-t border-ios-sep" />
+
+          {/* 투명도 범례 */}
+          <div className="grid gap-2">
+            <div className="text-[12px] font-semibold text-ios-muted">{t("막대 스타일 = 예측 확신도")}</div>
+            <div className="flex items-center gap-3">
+              <span className="h-[4px] w-10 rounded-full bg-rose-500" style={{ opacity: 1 }} />
+              <div className="text-[12px] text-black/70">
+                <span className="font-semibold">{t("진한 실선")}</span>{" "}
+                <span className="text-black/50">{t("— 직접 기록 또는 높은 확신")}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="h-[4px] w-10 rounded-full bg-rose-500" style={{ opacity: 0.62 }} />
+              <div className="text-[12px] text-black/70">
+                <span className="font-semibold">{t("연한 실선")}</span>{" "}
+                <span className="text-black/50">{t("— 가능성 높음 (추정)")}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              {/* 점선 시뮬레이션 */}
+              <svg width="40" height="4" aria-hidden="true">
+                <line x1="0" y1="2" x2="40" y2="2" stroke="#F43F5E" strokeWidth="2" strokeDasharray="4 3" strokeLinecap="round" />
+              </svg>
+              <div className="text-[12px] text-black/70">
+                <span className="font-semibold">{t("점선")}</span>{" "}
+                <span className="text-black/50">{t("— 가능성 있음 (낮은 확신)")}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -412,12 +451,10 @@ export function MenstrualSettingsForm() {
         <div className="mt-4 rounded-xl bg-black/[0.03] p-3">
           <div className="text-[13px] font-semibold">{t("어떻게 계산되나요?")}</div>
           <div className="mt-1 text-[12.5px] leading-5 text-black/65">
-            {t("마지막 생리 시작일과 평균 주기를 기준으로 몸의 리듬을 자동 계산해요.")}
+            {t("건강기록(증상, 출혈, 기분, 수면)과 과거 주기 데이터를 함께 분석해, 날짜별 생리 가능성을 확률로 계산해요.")}
             <br />
-            <span className="font-semibold text-black/70">{t("✔ 생리 중")}</span>
-            {t("에는 피로가 높게,")}{" "}
-            <span className="font-semibold text-black/70">{t("✔ 생리 직전")}</span>
-            {t("에는 컨디션 저하 가능성이 있는 기간으로 표시돼요.")}
+            <span className="font-semibold text-black/70">{t("✔ 직접 기록할수록")}</span>
+            {t(" 예측이 더 정확해지고, 개인 리듬에 맞게 학습돼요.")}
             <br />
             {t("이 표시는 건강 상태를 진단하기 위한 것이 아니라")}{" "}
             <span className="font-semibold text-black/70">{t("일정/컨디션 관리 참고용")}</span>
