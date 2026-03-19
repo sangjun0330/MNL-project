@@ -7207,7 +7207,10 @@ export function ToolNotebookPage() {
               ) : (
                 <>
                   {(headingBlocks.length > 0 || quickInsertTemplates.length > 0) && (
-                    <div data-pdf-hide="true" className="mb-8 hidden space-y-4 lg:block">
+                    <div
+                      data-pdf-hide="true"
+                      className={cn("mb-8 hidden space-y-4 lg:block", showPdfBreaks && "hidden")}
+                    >
                       {headingBlocks.length > 0 && (
                         <div>
                           <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-ios-muted">
@@ -7324,7 +7327,7 @@ export function ToolNotebookPage() {
                   </div>
 
                   {/* add block */}
-                  <div data-pdf-hide="true" className="mt-4 pl-0 lg:pl-10">
+                  <div data-pdf-hide="true" className={cn("mt-4 pl-0 lg:pl-10", showPdfBreaks && "hidden")}>
                     <AddBlockButton onSelect={appendBlock} />
                   </div>
                 </>
