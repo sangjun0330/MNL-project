@@ -68,6 +68,13 @@ function buildFetchMonths(): string {
 export function SocialPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const handleBack = useCallback(() => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back();
+    } else {
+      router.push("/");
+    }
+  }, [router]);
   const { status, user } = useAuthState();
   const currentUserId = user?.userId ?? null;
   const month = useMemo(() => currentMonth(), []);
@@ -834,7 +841,7 @@ export function SocialPage() {
         <div className="flex items-center justify-between pt-1">
           <button
             type="button"
-            onClick={() => router.back()}
+            onClick={handleBack}
             className="flex h-9 w-9 items-center justify-center rounded-full text-ios-muted transition hover:bg-ios-sep/40 active:opacity-60"
             aria-label="뒤로"
           >
@@ -860,7 +867,7 @@ export function SocialPage() {
         <div className="flex items-center justify-between pt-1">
           <button
             type="button"
-            onClick={() => router.back()}
+            onClick={handleBack}
             className="flex h-9 w-9 items-center justify-center rounded-full text-ios-muted transition hover:bg-ios-sep/40 active:opacity-60"
             aria-label="뒤로"
           >
@@ -908,7 +915,7 @@ export function SocialPage() {
       <div className="flex items-center justify-between pt-1">
         <button
           type="button"
-          onClick={() => router.back()}
+          onClick={handleBack}
           className="flex h-9 w-9 items-center justify-center rounded-full text-ios-muted transition hover:bg-ios-sep/40 active:opacity-60"
           aria-label="뒤로"
         >

@@ -2175,9 +2175,9 @@ function InlineBlock({
       id={`memo-block-${block.id}`}
       className={cn(
         "group/block relative scroll-mt-28 transition-shadow",
-        isDragging && "z-30 pointer-events-none rounded-2xl shadow-[0_24px_50px_rgba(139,92,246,0.18)]"
+        isDragging && "z-30 pointer-events-none rounded-2xl bg-white shadow-[0_8px_30px_rgba(0,0,0,0.12),0_2px_8px_rgba(0,0,0,0.06)]"
       )}
-      style={isDragging ? { transform: `translateY(${dragOffsetY ?? 0}px)`, opacity: 0.88, transition: "none" } : undefined}
+      style={isDragging ? { transform: `translateY(${dragOffsetY ?? 0}px) scale(1.018)`, opacity: 1, transition: "none" } : undefined}
       onMouseEnter={handleBlockMouseEnter}
       onMouseLeave={handleBlockMouseLeave}
       onPointerDownCapture={(event) => {
@@ -2319,10 +2319,10 @@ function InlineBlock({
               setShowAddMenu(false)
             }}
             className={cn(
-              "flex h-9 w-9 touch-none items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-400 shadow-[0_8px_18px_rgba(15,23,42,0.06)] transition-colors lg:h-7 lg:w-7 lg:rounded-lg lg:border-transparent lg:bg-transparent lg:shadow-none",
+              "flex h-9 w-9 touch-none items-center justify-center rounded-xl border border-gray-100 bg-white/90 text-gray-300 shadow-[0_2px_8px_rgba(15,23,42,0.06)] transition-all duration-150 lg:h-7 lg:w-7 lg:rounded-lg lg:border-transparent lg:bg-transparent lg:shadow-none",
               showActionMenu
-                ? "bg-gray-100 text-[color:var(--rnest-accent)]"
-                : "cursor-grab hover:bg-gray-100 hover:text-gray-600 active:cursor-grabbing"
+                ? "border-gray-200 bg-gray-50 text-[color:var(--rnest-accent)] shadow-[0_2px_8px_rgba(15,23,42,0.08)]"
+                : "cursor-grab hover:border-gray-200 hover:bg-gray-50 hover:text-gray-500 active:cursor-grabbing active:scale-95"
             )}
             title="짧게 누르면 블록 설정, 길게 누르면 위치 이동"
             aria-label="짧게 누르면 블록 설정, 길게 누르면 위치 이동"
@@ -5680,10 +5680,10 @@ export function ToolNotebookPage() {
                       return (
                         <Fragment key={block.id}>
                           {showBeforeIndicator && (
-                            <div
-                              aria-hidden="true"
-                              className="h-1 rounded-full bg-[color:var(--rnest-accent)]/75 shadow-[0_0_0_4px_rgba(196,181,253,0.22)]"
-                            />
+                            <div aria-hidden="true" className="flex items-center gap-1.5 py-0.5">
+                              <div className="h-[5px] w-[5px] shrink-0 rounded-full bg-[#007AFF]" />
+                              <div className="h-[2px] flex-1 rounded-full bg-[#007AFF]/70" />
+                            </div>
                           )}
                           <InlineBlock
                             block={block}
@@ -5719,10 +5719,10 @@ export function ToolNotebookPage() {
                             onRequestReorderStart={startBlockReorder}
                           />
                           {showAfterIndicator && (
-                            <div
-                              aria-hidden="true"
-                              className="h-1 rounded-full bg-[color:var(--rnest-accent)]/75 shadow-[0_0_0_4px_rgba(196,181,253,0.22)]"
-                            />
+                            <div aria-hidden="true" className="flex items-center gap-1.5 py-0.5">
+                              <div className="h-[5px] w-[5px] shrink-0 rounded-full bg-[#007AFF]" />
+                              <div className="h-[2px] flex-1 rounded-full bg-[#007AFF]/70" />
+                            </div>
                           )}
                         </Fragment>
                       )

@@ -522,6 +522,13 @@ export function SocialGroupChallengePage({
   challengeId: rawChallengeId,
 }: Props) {
   const router = useRouter();
+  const handleBack = useCallback(() => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back();
+    } else {
+      router.push("/social");
+    }
+  }, [router]);
   const { user } = useAuthState();
   const currentUserId = user?.userId ?? null;
 
@@ -638,7 +645,7 @@ export function SocialGroupChallengePage({
     <div className="flex items-center justify-between pt-1">
       <button
         type="button"
-        onClick={() => router.back()}
+        onClick={handleBack}
         className="flex h-9 w-9 items-center justify-center rounded-full text-ios-muted transition hover:bg-ios-sep/40 active:opacity-60"
         aria-label="뒤로"
       >
