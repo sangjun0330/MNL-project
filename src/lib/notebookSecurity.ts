@@ -16,7 +16,6 @@ const decoder = new TextDecoder()
 export type RNestLockedMemoPayload = {
   version: 1
   tags: string[]
-  reminderAt: number | null
   blocks: RNestMemoBlock[]
   attachments: RNestMemoAttachment[]
 }
@@ -92,10 +91,6 @@ function normalizeLockedPayload(payload: Partial<RNestLockedMemoPayload>): RNest
   return {
     version: 1,
     tags: sanitizeNotebookTags(payload.tags),
-    reminderAt:
-      typeof payload.reminderAt === "number" && Number.isFinite(payload.reminderAt)
-        ? payload.reminderAt
-        : null,
     blocks: sanitizeBlocks(payload.blocks),
     attachments: sanitizeAttachments(payload.attachments),
   }
@@ -147,7 +142,6 @@ async function encryptWithKey(
 export function createLockedMemoPayloadFromDocument(document: RNestMemoDocument): RNestLockedMemoPayload {
   return normalizeLockedPayload({
     tags: document.tags,
-    reminderAt: document.reminderAt,
     blocks: document.blocks,
     attachments: document.attachments,
   })
@@ -166,7 +160,6 @@ export function applyLockedMemoPayload(
   return {
     ...document,
     tags: normalized.tags,
-    reminderAt: normalized.reminderAt,
     blocks: normalized.blocks,
     attachments: normalized.attachments,
     attachmentStoragePaths,
@@ -178,7 +171,6 @@ export function createLockedMemoSnapshot(document: RNestMemoDocument, envelope: 
   return {
     ...document,
     tags: [],
-    reminderAt: null,
     blocks: [],
     attachments: [],
     attachmentStoragePaths: uniqueBlobKeys([

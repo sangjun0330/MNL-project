@@ -4,7 +4,6 @@ import { Fragment, type MutableRefObject, useCallback, useDeferredValue, useEffe
 import {
   ArrowDownAZ,
   ArrowUpDown,
-  Bell,
   BookOpenText,
   Calendar,
   CheckSquare,
@@ -72,7 +71,6 @@ import {
   getMemoTableCellText,
   getMemoTableColumnText,
   getMemoTableRowCells,
-  getReminderTimestampFromPreset,
   memoTemplateToPreviewText,
   memoBlockToPlainText,
   memoCoverOptions,
@@ -80,7 +78,6 @@ import {
   memoIconOptions,
   memoDocumentToMarkdown,
   memoDocumentToPlainText,
-  memoReminderPresets,
   NOTEBOOK_TEMPLATE_SYNC_EVENT_KEY,
   notebookFeatureFlags,
   recordFieldValueToText,
@@ -4558,61 +4555,6 @@ function InlineTagEditor({
   )
 }
 
-/* ─── reminder picker (subtle) ────────────────────────────── */
-
-function ReminderPicker({
-  reminderAt,
-  onSet,
-}: {
-  reminderAt: number | null
-  onSet: (v: number | null) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener("mousedown", handleClick)
-    return () => document.removeEventListener("mousedown", handleClick)
-  }, [open])
-
-  return (
-    <div className="relative" ref={ref}>
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        className={cn(
-          "inline-flex items-center gap-1.5 text-[12px] transition-colors",
-          reminderAt ? "text-[color:var(--rnest-accent)]" : "text-gray-400 hover:text-gray-500"
-        )}
-      >
-        <Bell className="h-3.5 w-3.5" />
-        {reminderAt ? formatNotebookDateTime(reminderAt) : "리마인더"}
-      </button>
-      {open && (
-        <div className="absolute left-0 top-full z-30 mt-1 w-44 rounded-xl border border-gray-200 bg-white py-1 shadow-lg">
-          {memoReminderPresets.map((preset) => (
-            <button
-              key={preset.id}
-              type="button"
-              onClick={() => {
-                onSet(getReminderTimestampFromPreset(preset.id))
-                setOpen(false)
-              }}
-              className="flex w-full items-center px-3 py-2 text-left text-[13px] text-ios-text hover:bg-gray-50"
-            >
-              {preset.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
 /* ─── main component ──────────────────────────────────────── */
 
 export function ToolNotebookPage() {
@@ -7601,12 +7543,6 @@ export function ToolNotebookPage() {
                           +{activeMemo.tags.length - 2}
                         </span>
                       )}
-                      {activeMemo.reminderAt && (
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-[12px] font-medium text-ios-sub shadow-[inset_0_0_0_1px_rgba(196,181,253,0.35)]">
-                          <Bell className="h-3.5 w-3.5 text-[color:var(--rnest-accent)]" />
-                          리마인더
-                        </span>
-                      )}
                       <button
                         type="button"
                         onClick={() => setShowCompactTools((current) => !current)}
@@ -7629,12 +7565,6 @@ export function ToolNotebookPage() {
                             }}
                           />
                           <div className="hidden h-4 w-px bg-gray-200 sm:block" />
-                          <ReminderPicker
-                            reminderAt={activeMemo.reminderAt}
-                            onSet={(v) => {
-                              void updateActiveMemoContent((doc) => ({ ...doc, reminderAt: v }))
-                            }}
-                          />
                           <div className="relative">
                             <button
                               type="button"
@@ -7737,13 +7667,6 @@ export function ToolNotebookPage() {
                       }}
                     />
                     <span className="text-gray-200">|</span>
-                    <ReminderPicker
-                      reminderAt={activeMemo.reminderAt}
-                      onSet={(v) => {
-                        void updateActiveMemoContent((doc) => ({ ...doc, reminderAt: v }))
-                      }}
-                    />
-                    <span className="text-gray-200">|</span>
                   </>
                 )}
                 <div className="relative">
@@ -7799,7 +7722,7 @@ export function ToolNotebookPage() {
                   </div>
                   <h3 className="mt-5 text-[22px] font-semibold tracking-[-0.02em] text-ios-text">잠금 메모입니다</h3>
                   <p className="mx-auto mt-2 max-w-md text-[14px] leading-relaxed text-ios-sub">
-                    본문, 태그, 리마인더, 첨부 목록은 암호화되어 있습니다. 읽거나 수정하려면 잠금 해제가 필요합니다.
+                    본문, 태그, 첨부 목록은 암호화되어 있습니다. 읽거나 수정하려면 잠금 해제가 필요합니다.
                   </p>
                   {activeMemoRaw?.lock?.hint && (
                     <p className="mt-3 text-[12px] text-ios-muted">힌트: {activeMemoRaw.lock.hint}</p>
@@ -8512,7 +8435,7 @@ export function ToolNotebookPage() {
               <DialogHeader>
                 <DialogTitle className="text-[22px] tracking-[-0.02em] text-ios-text">잠금 메모 설정</DialogTitle>
                 <DialogDescription className="text-[13px] leading-relaxed text-ios-sub">
-                  본문, 태그, 리마인더, 첨부 목록을 암호화해 보호합니다. 제목과 아이콘은 목록에서 보이도록 남겨둡니다.
+                  본문, 태그, 첨부 목록을 암호화해 보호합니다. 제목과 아이콘은 목록에서 보이도록 남겨둡니다.
                 </DialogDescription>
               </DialogHeader>
 

@@ -152,7 +152,6 @@ export type RNestMemoDocument = {
   pinned: boolean
   favorite: boolean
   trashedAt: number | null
-  reminderAt: number | null
   tags: string[]
   blocks: RNestMemoBlock[]
   attachments: RNestMemoAttachment[]
@@ -1203,8 +1202,6 @@ function createMemoDocumentBase(input?: Partial<RNestMemoDocument>): RNestMemoDo
     pinned: Boolean(input?.pinned),
     favorite: Boolean(input?.favorite),
     trashedAt: typeof input?.trashedAt === "number" && Number.isFinite(input.trashedAt) ? input.trashedAt : null,
-    reminderAt:
-      lock || typeof input?.reminderAt !== "number" || !Number.isFinite(input.reminderAt) ? null : input.reminderAt,
     tags: lock ? [] : sanitizeNotebookTags(input?.tags),
     blocks,
     attachments,
@@ -2254,25 +2251,6 @@ export function sanitizeNotebookState(raw: unknown): RNestNotebookState {
     memo: sanitizeMemoState(source.memo),
     records: sanitizeRecordState(source.records),
   }
-}
-
-export const memoReminderPresets: Array<{ id: string; label: string; minutes: number }> = [
-  { id: "none", label: "없음", minutes: 0 },
-  { id: "30m", label: "30분 뒤", minutes: 30 },
-  { id: "2h", label: "2시간 뒤", minutes: 120 },
-  { id: "tomorrow", label: "내일 오전 9시", minutes: -1 },
-]
-
-export function getReminderTimestampFromPreset(presetId: string) {
-  if (presetId === "none") return null
-  if (presetId === "tomorrow") {
-    const base = new Date()
-    base.setDate(base.getDate() + 1)
-    base.setHours(9, 0, 0, 0)
-    return base.getTime()
-  }
-  const preset = memoReminderPresets.find((item) => item.id === presetId)
-  return preset ? nowTs() + preset.minutes * 60 * 1000 : null
 }
 
 export function formatNotebookDateTime(value: number | null | undefined) {
