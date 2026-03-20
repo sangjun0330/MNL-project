@@ -4398,6 +4398,7 @@ export function ToolNotebookPage() {
       setPdfPreviewError(null)
       return
     }
+    setPdfPreviewPages([])
     const node = pdfContentRef.current
     const observedSource = getPdfObservedSource(node)
     let cancelled = false
@@ -6978,7 +6979,10 @@ export function ToolNotebookPage() {
               <div
                 data-pdf-preview-source="true"
                 className={cn(
-                  showingPdfPreview &&
+                  // Keep the measured source in the same layout state from the first preview render.
+                  // When this toggled only after pages arrived, the observer scheduled a second render
+                  // against a different DOM geometry, which could move forced page starts backward.
+                  showPdfBreaks &&
                     "pointer-events-none absolute inset-x-0 top-0 opacity-0"
                 )}
               >
