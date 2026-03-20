@@ -63,6 +63,7 @@ export function NotebookRichTextField({
   onChange,
   onDuplicate,
   onInsertBlankBlockBefore,
+  onBackspaceAtStart,
   onRequestSlashMenu,
 }: {
   text?: string
@@ -76,6 +77,7 @@ export function NotebookRichTextField({
   onChange: (next: RichTextValue) => void
   onDuplicate?: () => void
   onInsertBlankBlockBefore?: () => void
+  onBackspaceAtStart?: () => void
   onRequestSlashMenu?: () => void
 }) {
   const lastSnapshotRef = useRef(
@@ -147,6 +149,15 @@ export function NotebookRichTextField({
           if (empty && from === to && from === 1) {
             event.preventDefault()
             onInsertBlankBlockBefore()
+            return true
+          }
+        }
+
+        if (event.key === "Backspace" && onBackspaceAtStart) {
+          const { from, to, empty } = view.state.selection
+          if (empty && from === to && from === 1) {
+            event.preventDefault()
+            onBackspaceAtStart()
             return true
           }
         }

@@ -1,11 +1,20 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity"
-import { defaultMemoTemplates, sanitizeMemoTemplate } from "@/lib/server/notebookTemplateRuntime"
 
 export const runtime = "edge"
 export const dynamic = "force-dynamic"
 
 function bad(status: number, message: string) {
   return jsonNoStore({ ok: false, error: message }, { status })
+}
+
+async function loadDefaultTemplateFallback() {
+  try {
+    const { defaultMemoTemplates, sanitizeMemoTemplate } = await import("@/lib/server/notebookTemplateRuntime")
+    return defaultMemoTemplates.map((template) => sanitizeMemoTemplate(template))
+  } catch (error) {
+    console.error("[NotebookTemplates] failed_to_load_default_templates", error)
+    return []
+  }
 }
 
 export async function GET() {
@@ -20,7 +29,7 @@ export async function GET() {
   } catch {
     return jsonNoStore({
       ok: true,
-      templates: defaultMemoTemplates.map((template) => sanitizeMemoTemplate(template)),
+      templates: await loadDefaultTemplateFallback(),
       updatedAt: null,
       degraded: true,
     })
