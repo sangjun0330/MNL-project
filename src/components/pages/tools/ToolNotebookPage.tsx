@@ -704,12 +704,46 @@ function initializePageSpacerLayout(root: HTMLElement) {
   return spacers
 }
 
-function findSliceForNaturalPosition(plan: PdfSlicePlan, naturalY: number) {
-  return (
-    plan.slices.find((slice) => naturalY >= slice.offsetY - 1 && naturalY < slice.offsetY + slice.height - 1) ??
-    plan.slices.at(-1) ??
-    null
+/**
+ * 완전히 새로 설계한 spacer 높이 계산 — 단순 모듈러 연산 방식.
+ *
+ * 핵심 원리: spacer의 현재 위치를 pageHeightPx로 나눈 나머지(posOnPage)를 구하고,
+ * pageHeightPx - posOnPage 만큼 filler를 채워 spacer 하단이 정확히 페이지 경계에 오도록 한다.
+ * 이전 방식은 slice plan의 breakAnchor를 사용했는데, 이 값은 블록 경계 조정으로 인해
+ * 실제 페이지 높이보다 작아서 filler가 부족하고 spacer 뒤 콘텐츠가 같은 페이지에 남는 버그가 있었다.
+ */
+function computeSpacerFillHeights(
+  root: HTMLElement,
+  pageHeightPx: number
+) {
+  const spacers = initializePageSpacerLayout(root)
+  const nextPageSpacers = spacers.filter(
+    (spacer) => normalizePageSpacerMode(spacer.dataset.pageSpacerMode) === "next-page"
   )
+
+  const rootTop = root.getBoundingClientRect().top
+
+  // 각 next-page spacer를 문서 순서대로 처리 (앞쪽 spacer가 뒤쪽 spacer 위치에 영향을 줌)
+  for (const spacer of nextPageSpacers) {
+    void root.offsetHeight // 이전 spacer 반영 후 reflow
+    const spacerBottom = spacer.getBoundingClientRect().bottom - rootTop
+    const posOnPage = spacerBottom % pageHeightPx
+    // spacer가 이미 페이지 경계 근처(4px 이내)면 채우지 않음
+    const fillHeight = posOnPage < 4 ? 0 : Math.ceil(pageHeightPx - posOnPage)
+    setPageSpacerAppliedHeight(spacer, fillHeight >= 12 ? fillHeight : 0)
+  }
+
+  void root.offsetHeight // 최종 reflow
+
+  return {
+    spacers,
+    spacerHeights: Object.fromEntries(
+      spacers.map((spacer) => [
+        spacer.dataset.pageSpacerBlockId || spacer.id,
+        Math.max(0, Math.round(Number(spacer.dataset.pageSpacerAppliedHeight || 0))),
+      ])
+    ) as Record<string, number>,
+  }
 }
 
 function buildPdfLayoutWithPageSpacers(
@@ -718,38 +752,10 @@ function buildPdfLayoutWithPageSpacers(
   pdfInnerWidthPt: number,
   pdfInnerHeightPt: number
 ) {
-  const spacers = initializePageSpacerLayout(root)
-  const nextPageSpacers = spacers.filter((spacer) => normalizePageSpacerMode(spacer.dataset.pageSpacerMode) === "next-page")
-
-  let plan = buildPdfSlicePlan(root, captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
-  const cloneTop = root.getBoundingClientRect().top
-
-  for (const spacer of nextPageSpacers) {
-    plan = buildPdfSlicePlan(root, captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
-    const bounds = getElementNaturalBounds(spacer, cloneTop)
-    const slice = findSliceForNaturalPosition(plan, bounds.bottom)
-    // ✅ 핵심 수정: 안전 조정된 breakAnchor가 아니라 전체 페이지 높이를 사용
-    // breakAnchor.naturalY는 블록 경계에 맞춰 조정된 위치라서
-    // filler가 페이지 끝까지 채우지 못하고, spacer 뒤 콘텐츠가 같은 페이지에 남는 버그 발생
-    const pageEndY = slice ? slice.offsetY + plan.pageSliceHeightPx : 0
-    const desiredHeight =
-      slice && bounds.bottom > slice.offsetY + 4
-        ? Math.max(0, Math.floor(pageEndY - bounds.bottom))
-        : 0
-    setPageSpacerAppliedHeight(spacer, desiredHeight >= 12 ? desiredHeight : 0)
-  }
-
-  void root.offsetHeight // force reflow after spacer height changes
-  plan = buildPdfSlicePlan(root, captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
-  return {
-    plan,
-    spacerHeights: Object.fromEntries(
-      spacers.map((spacer) => [
-        spacer.dataset.pageSpacerBlockId || spacer.id,
-        Math.max(0, Math.round(Number(spacer.dataset.pageSpacerAppliedHeight || 0))),
-      ])
-    ) as Record<string, number>,
-  }
+  const pageHeightPx = getPdfSliceHeightPx(captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
+  const { spacerHeights } = computeSpacerFillHeights(root, pageHeightPx)
+  const plan = buildPdfSlicePlan(root, captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
+  return { plan, spacerHeights }
 }
 
 function deriveAttachmentKind(file: File, preferred: RNestMemoAttachment["kind"] | null = null): RNestMemoAttachment["kind"] {
@@ -4366,30 +4372,32 @@ export function ToolNotebookPage() {
     const run = async () => {
       const currentNode = pdfContentRef.current
       if (!currentNode) return
+      const contentSource = currentNode.querySelector<HTMLElement>('[data-pdf-preview-source="true"]') ?? currentNode
+      // contentSource가 hidden(display:none)이면 측정 불가 — PDF 미리보기 전환 후 재트리거 시 스킵
+      if (contentSource.offsetHeight === 0) return
       const token = ++computeToken
       if (!cancelled) setPdfPreviewBusy(true)
       try {
-        const layout = await renderPdfPages(currentNode)
-        if (!cancelled && token === computeToken) {
-          // ① 소스 DOM에 spacer filler 높이 적용 (먼저 적용해야 에디터 레이아웃이 PDF와 동기화됨)
-          if (layout.spacerHeights) {
-            const spacers = currentNode.querySelectorAll<HTMLElement>('[data-page-spacer-block="true"]')
-            for (const spacer of spacers) {
-              const id = spacer.dataset.pageSpacerBlockId || spacer.id
-              const height = layout.spacerHeights[id] ?? 0
-              const filler = spacer.querySelector<HTMLElement>('[data-page-spacer-filler="true"]')
-              if (filler) {
-                const currentH = parseFloat(filler.style.height || "0") || 0
-                if (Math.abs(currentH - height) > 1) {
-                  filler.style.height = `${height}px`
-                }
-              }
-            }
-          }
+        // ✅ 핵심 수정: captureWidth는 반드시 currentNode(outer container) 기준
+        // renderPdfPages→buildPdfExportRoot가 currentNode.width를 captureWidth로 사용하므로
+        // 소스 계산도 동일한 width를 써야 pageHeightPx가 일치한다.
+        // contentSource.width는 padding 제외된 값이라 clone과 pageHeightPx가 달라지는 근본 원인이었음.
+        const captureWidth = Math.max(1, Math.ceil(currentNode.getBoundingClientRect().width))
+        const { pdfInnerWidthPt, pdfInnerHeightPt } = getPdfInnerBounds()
+        const pageHeightPx = getPdfSliceHeightPx(captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
 
-          // ② 페이지 구분선 위치 계산
-          if (layout.slicePlan && layout.slicePlan.slices.length > 1) {
-            const markers = layout.slicePlan.slices.slice(0, -1).map((slice, i) => ({
+        // ① 소스 DOM에서 spacer filler 높이 계산
+        // root = currentNode (padding 포함) — clone과 동일한 기준점
+        // spacerBottom이 padding을 포함한 절대 위치이므로 modular 연산이 clone과 일치
+        computeSpacerFillHeights(currentNode, pageHeightPx)
+
+        // ② 소스 DOM에서 페이지 구분선 위치 계산
+        // buildPdfSlicePlan도 currentNode 기준 — clone의 slice plan과 동일한 결과
+        const sourcePlan = buildPdfSlicePlan(currentNode, captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
+        if (!cancelled && token === computeToken) {
+          if (sourcePlan.slices.length > 1) {
+            // slice offsetY/height는 이미 currentNode(pdfContentRef) 기준이므로 추가 변환 불필요
+            const markers = sourcePlan.slices.slice(0, -1).map((slice, i) => ({
               y: Math.floor(slice.offsetY + slice.height),
               pageFrom: i + 1,
               pageTo: i + 2,
@@ -4398,8 +4406,11 @@ export function ToolNotebookPage() {
           } else {
             setPdfBreakMarkers([])
           }
+        }
 
-          // ③ PDF 미리보기 페이지 설정 (마지막에 — 이때 showingPdfPreview가 true가 됨)
+        // ③ PDF 페이지 이미지 렌더링
+        const layout = await renderPdfPages(currentNode)
+        if (!cancelled && token === computeToken) {
           setPdfPreviewPages(layout.pages)
         }
       } catch {
