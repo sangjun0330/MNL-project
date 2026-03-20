@@ -127,7 +127,6 @@ import {
 } from "@/lib/notebookFiles"
 import {
   buildResolvedPdfLayoutKey,
-  resolvePdfLayout,
   type MeasuredPdfBlockBounds,
   type ResolvedPdfLayout,
 } from "@/lib/notebookPdfLayout"
@@ -171,6 +170,7 @@ function downloadTextFile(fileName: string, content: string, mimeType: string) {
 const PDF_EXPORT_MARGIN_PT = 28
 const PDF_EXPORT_CAPTURE_SCALE = 2
 const PDF_EXPORT_MAX_CAPTURE_SCALE = 3
+const PDF_EXPORT_CONTENT_DENSITY_MULTIPLIER = 1.5
 const PDF_PAGE_WIDTH_PT = 595.28
 const PDF_PAGE_HEIGHT_PT = 841.89
 const PDF_BREAK_PADDING_PX = 8
@@ -318,10 +318,11 @@ function getPdfObservedSource(root: HTMLElement) {
 
 function buildPdfExportRoot(source: HTMLElement) {
   const sourceRect = source.getBoundingClientRect()
-  const captureWidth = Math.max(
+  const baseCaptureWidth = Math.max(
     1,
     Math.ceil(source.scrollWidth || sourceRect.width || source.parentElement?.getBoundingClientRect().width || 0)
   )
+  const captureWidth = Math.max(1, Math.ceil(baseCaptureWidth * PDF_EXPORT_CONTENT_DENSITY_MULTIPLIER))
 
   const host = document.createElement("div")
   host.setAttribute("data-pdf-export-root", "true")
@@ -346,6 +347,7 @@ function buildPdfExportRoot(source: HTMLElement) {
   clone.style.width = `${captureWidth}px`
   clone.style.maxWidth = `${captureWidth}px`
   clone.style.margin = "0"
+  clone.style.paddingBottom = `${PDF_BREAK_PADDING_PX * 2}px`
   clone.style.background = "#ffffff"
   clone.style.overflow = "visible"
   clone.style.minHeight = "0"
@@ -577,7 +579,7 @@ function findSafeSlice(
   for (const { block, top: blockNaturalTop, bottom: blockNaturalBottom } of blockBounds) {
     if (blockNaturalTop < cutNaturalY && blockNaturalBottom > cutNaturalY) {
       const safeHeight = Math.floor(blockNaturalTop - currentOffsetY - PDF_BREAK_PADDING_PX)
-      if (safeHeight > 0 && safeHeight < desiredSliceHeight && isUsablePdfSliceHeight(safeHeight, desiredSliceHeight)) {
+      if (safeHeight > 0 && safeHeight < desiredSliceHeight) {
         return {
           offsetY: currentOffsetY,
           height: safeHeight,
@@ -657,6 +659,68 @@ function buildPdfSlicePlan(clone: HTMLElement, captureWidth: number, pdfInnerWid
   }
 }
 
+function buildResolvedPdfLayoutFromSlicePlan(
+  layoutKey: string,
+  plan: PdfSlicePlan,
+  sourceBlocks: RNestMemoBlock[],
+  measuredBlocks: Record<string, MeasuredPdfBlockBounds>
+): ResolvedPdfLayout {
+  const orderedBlocks = sourceBlocks
+    .filter((block) => block.type !== "pageSpacer")
+    .map((block) => measuredBlocks[block.id])
+    .filter((block): block is MeasuredPdfBlockBounds => Boolean(block))
+
+  const slices = plan.slices.length
+    ? plan.slices
+    : [
+        {
+          offsetY: 0,
+          height: Math.max(1, plan.totalHeight),
+        },
+      ]
+
+  const pages = slices.map((slice, index) => {
+    const startY = slice.offsetY
+    const endY = slice.offsetY + slice.height
+    const pageBlocks = orderedBlocks.filter((block) => block.bottom > startY + 0.5 && block.top < endY - 0.5)
+
+    return {
+      pageNumber: index + 1,
+      startY,
+      endY,
+      height: Math.max(1, slice.height),
+      blockIds: pageBlocks.map((block) => block.blockId),
+      firstBlockId: pageBlocks[0]?.blockId,
+      lastBlockId: pageBlocks[pageBlocks.length - 1]?.blockId,
+      hardBreakBeforeBlockId: slice.breakAnchor?.target === "forced-page-start" ? slice.breakAnchor.blockId : undefined,
+    }
+  })
+
+  const placements = pages.flatMap((page) =>
+    orderedBlocks
+      .filter((block) => block.bottom > page.startY + 0.5 && block.top < page.endY - 0.5)
+      .map((block) => ({
+        blockId: block.blockId,
+        pageNumber: page.pageNumber,
+        sliceStartY: Math.max(page.startY, block.top),
+        sliceEndY: Math.min(page.endY, block.bottom),
+        blockTop: block.top,
+        blockBottom: block.bottom,
+        startsPage: block.top <= page.startY + 0.5,
+        endsPage: block.bottom >= page.endY - 0.5,
+        isSplit: block.top < page.startY + 0.5 || block.bottom > page.endY - 0.5,
+      }))
+  )
+
+  return {
+    key: layoutKey,
+    totalHeight: Math.max(1, plan.totalHeight),
+    pageHeightPx: Math.max(1, plan.pageSliceHeightPx),
+    pages,
+    placements,
+  }
+}
+
 function waitForNextPaint() {
   return new Promise<void>((resolve) => {
     window.requestAnimationFrame(() => resolve())
@@ -720,21 +784,27 @@ type ClonePdfBlockHandle = {
   element: HTMLElement
   top: number
   bottom: number
+  left: number
+  width: number
   forcedStart: boolean
   duplicateElement: HTMLElement | null
 }
 
 function getClonePdfBlockHandles(clone: HTMLElement, measuredBlocks: Record<string, MeasuredPdfBlockBounds>) {
+  const cloneRect = clone.getBoundingClientRect()
   return Array.from(clone.querySelectorAll<HTMLElement>('[id^="memo-block-"]'))
     .map<ClonePdfBlockHandle | null>((element) => {
       const blockId = element.id.replace(/^memo-block-/, "")
       const measured = measuredBlocks[blockId]
       if (!blockId || !measured) return null
+      const rect = element.getBoundingClientRect()
       return {
         blockId,
         element,
         top: measured.top,
         bottom: measured.bottom,
+        left: rect.left - cloneRect.left,
+        width: rect.width,
         forcedStart: element.dataset.pdfForcePageStart === "true",
         duplicateElement: null,
       }
@@ -760,9 +830,10 @@ function createForcedStartPdfDuplicates(clone: HTMLElement, blocks: ClonePdfBloc
     duplicate.removeAttribute("data-pdf-force-page-start")
     duplicate.querySelectorAll<HTMLElement>("[id]").forEach((node) => node.removeAttribute("id"))
     duplicate.style.position = "absolute"
-    duplicate.style.left = "0"
+    duplicate.style.left = `${Math.max(0, Math.round(block.left))}px`
     duplicate.style.top = `${Math.max(0, Math.round(block.top))}px`
-    duplicate.style.width = "100%"
+    duplicate.style.width = `${Math.max(1, Math.round(block.width))}px`
+    duplicate.style.maxWidth = `${Math.max(1, Math.round(block.width))}px`
     duplicate.style.margin = "0"
     duplicate.style.visibility = "hidden"
     duplicate.style.opacity = "0"
@@ -858,25 +929,22 @@ async function renderPdfPages(source: HTMLElement, options: RenderPdfPagesOption
       PDF_EXPORT_CAPTURE_SCALE,
       Math.min((window.devicePixelRatio || 1) * 1.5, PDF_EXPORT_MAX_CAPTURE_SCALE)
     )
-    const totalHeight = Math.max(Math.ceil(clone.scrollHeight), Math.ceil(clone.getBoundingClientRect().height))
-    const pageHeightPx = getPdfSliceHeightPx(captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
     const measuredBlocks = measurePdfBlockBounds(clone)
     const cloneBlocks = getClonePdfBlockHandles(clone, measuredBlocks)
     createForcedStartPdfDuplicates(clone, cloneBlocks)
-    const layout = resolvePdfLayout({
-      layoutKey: buildResolvedPdfLayoutKey({
+    const plan = buildPdfSlicePlan(clone, captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
+    const layout = buildResolvedPdfLayoutFromSlicePlan(
+      buildResolvedPdfLayoutKey({
         docId: options.doc.id,
         updatedAt: options.doc.updatedAt,
         captureWidth,
-        pageHeightPx,
-        totalHeight,
+        pageHeightPx: plan.pageSliceHeightPx,
+        totalHeight: plan.totalHeight,
       }),
-      totalHeight,
-      pageHeightPx,
-      sourceBlocks: options.doc.blocks,
-      measuredBlocks,
-      minPageHeightPx: PDF_MIN_SAFE_SLICE_HEIGHT_PX,
-    })
+      plan,
+      options.doc.blocks,
+      measuredBlocks
+    )
     options.onLayout?.(layout)
     if (layout.totalHeight <= 0 || layout.pages.length <= 0) {
       throw new Error("pdf_export_empty")
@@ -8266,7 +8334,7 @@ export function ToolNotebookPage() {
                   <DialogHeader className="min-w-0 space-y-2 text-left">
                     <DialogTitle className="text-[22px] tracking-[-0.02em] text-ios-text">텍스트 가져오기</DialogTitle>
                     <DialogDescription className="text-[13px] leading-relaxed text-ios-sub">
-                      Markdown, 일반 텍스트, 링크를 붙여 넣으면 현재 메모 아래에 안전하게 블록으로 변환합니다.
+                      Markdown이나 일반 텍스트를 붙여 넣으면 제목, 목록, 체크리스트, 콜아웃, 토글, 표, 코드, 링크, 페이지 구분선을 문맥에 맞게 블록으로 변환합니다.
                     </DialogDescription>
                   </DialogHeader>
 
@@ -8296,7 +8364,7 @@ export function ToolNotebookPage() {
                   </div>
                 ) : (
                   <div className="mt-3 rounded-[18px] border border-[#edf1f6] bg-[#fbfcfe] px-4 py-3 text-[12px] leading-5 text-ios-muted">
-                    코드 펜스, 제목, 목록, 체크리스트, 인용, 표, URL은 자동으로 블록으로 변환됩니다.
+                    코드 펜스, ATX/setext 제목, 목록, 체크리스트, 인용/콜아웃, details 토글, 표 정렬, URL/Markdown 링크, 페이지 구분선 주석을 자동으로 해석합니다.
                   </div>
                 )}
 

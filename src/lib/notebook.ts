@@ -1602,132 +1602,204 @@ function escapeMarkdownCell(value: string) {
   return value.replace(/\|/g, "\\|").replace(/\n/g, " ")
 }
 
+function normalizeMarkdownSnippet(value: string) {
+  return value.replace(/\r/g, "").replace(/\n{3,}/g, "\n\n").trim()
+}
+
+function prefixMarkdownQuote(value: string, firstLinePrefix = "> ") {
+  const normalized = normalizeMarkdownSnippet(value)
+  if (!normalized) return firstLinePrefix.trimEnd()
+  const lines = normalized.split("\n")
+  return lines
+    .map((line, index) => {
+      if (index === 0) return `${firstLinePrefix}${line}`.trimEnd()
+      return line ? `> ${line}` : ">"
+    })
+    .join("\n")
+}
+
+function formatMarkdownListItem(marker: string, value: string) {
+  const normalized = normalizeMarkdownSnippet(value)
+  if (!normalized) return marker
+  const lines = normalized.split("\n")
+  return [`${marker} ${lines[0]}`.trimEnd(), ...lines.slice(1).map((line) => (line ? `  ${line}` : "  "))].join("\n")
+}
+
+function tableAlignmentToMarkdown(align: RNestMemoTableAlign | undefined) {
+  if (align === "center") return ":---:"
+  if (align === "right") return "---:"
+  return "---"
+}
+
+function getMemoBlockMarkdownText(block: Pick<RNestMemoBlock, "text" | "textHtml">) {
+  return normalizeMarkdownSnippet(richHtmlToMarkdown(block.textHtml) || getMemoBlockText(block))
+}
+
+function getMemoBlockDetailMarkdownText(block: Pick<RNestMemoBlock, "detailText" | "detailTextHtml">) {
+  return normalizeMarkdownSnippet(richHtmlToMarkdown(block.detailTextHtml) || getMemoBlockDetailText(block))
+}
+
+function serializeMemoTableToMarkdown(table: RNestMemoTable | null | undefined) {
+  const columnCount = Array.isArray(table?.columns) ? Math.max(2, table?.columns.length) : 2
+  const headers = Array.from({ length: columnCount }, (_, index) =>
+    richHtmlToMarkdown(table?.columnHtml?.[index]) || getMemoTableColumnText(table, index) || `열 ${index + 1}`
+  )
+  const alignments = Array.from({ length: columnCount }, (_, index) => tableAlignmentToMarkdown(table?.alignments?.[index]))
+  const rows = (table?.rows ?? []).map((row) => {
+    const cells = getMemoTableRowCells(row, table).map((cell) =>
+      escapeMarkdownCell(normalizeMarkdownSnippet(richHtmlToMarkdown(cell.textHtml) || cleanText(cell.text, MAX_TABLE_CELL_TEXT_LENGTH)))
+    )
+    return `| ${Array.from({ length: columnCount }, (_, index) => cells[index] ?? "").join(" | ")} |`
+  })
+
+  return [
+    `| ${headers.map((value) => escapeMarkdownCell(normalizeMarkdownSnippet(value) || "")).join(" | ")} |`,
+    `| ${alignments.join(" | ")} |`,
+    ...rows,
+  ].join("\n")
+}
+
 export function memoDocumentToMarkdown(document: RNestMemoDocument) {
   const titleMarkdown = richHtmlToMarkdown(document.titleHtml) || getMemoDocumentTitle(document)
-  const lines: string[] = [`# ${titleMarkdown || "제목 없음"}`]
+  const sections: string[] = [`# ${normalizeMarkdownSnippet(titleMarkdown || "제목 없음") || "제목 없음"}`]
+  const listBuffer: string[] = []
+
+  function flushListBuffer() {
+    if (listBuffer.length === 0) return
+    sections.push(listBuffer.join("\n"))
+    listBuffer.length = 0
+  }
+
   if (document.attachments.length > 0) {
-    lines.push("## 첨부")
-    for (const attachment of document.attachments) {
-      lines.push(`- ${cleanText(attachment.name, MAX_ATTACHMENT_NAME_LENGTH)}`)
-    }
+    sections.push(["## 첨부", ...document.attachments.map((attachment) => `- ${cleanText(attachment.name, MAX_ATTACHMENT_NAME_LENGTH)}`)].join("\n"))
   }
   for (const block of document.blocks) {
+    if (block.type === "bulleted") {
+      const text = getMemoBlockMarkdownText(block)
+      if (text) listBuffer.push(formatMarkdownListItem("-", text))
+      continue
+    }
+    if (block.type === "numbered") {
+      const text = getMemoBlockMarkdownText(block)
+      if (text) listBuffer.push(formatMarkdownListItem("1.", text))
+      continue
+    }
+    if (block.type === "checklist") {
+      const text = getMemoBlockMarkdownText(block)
+      if (text) listBuffer.push(formatMarkdownListItem(`- [${block.checked ? "x" : " "}]`, text))
+      continue
+    }
+
+    flushListBuffer()
+
     if (block.type === "image") {
-      const label = cleanText(block.text, 240)
-      lines.push(label ? `![${label}](이미지)` : "![이미지](이미지)")
+      const attachment = document.attachments.find((item) => item.id === block.attachmentId)
+      const label = cleanText(block.text, 240) || cleanText(attachment?.name, MAX_ATTACHMENT_NAME_LENGTH) || "이미지"
+      const href = cleanText(attachment?.name, MAX_ATTACHMENT_NAME_LENGTH) || "image"
+      sections.push(`![${label}](${href})`)
       continue
     }
     if (block.type === "attachment") {
-      const label = richHtmlToMarkdown(block.textHtml) || getMemoBlockText(block) || "파일"
-      lines.push(`- [파일] ${label}`)
+      const attachment = document.attachments.find((item) => item.id === block.attachmentId)
+      const label = richHtmlToMarkdown(block.textHtml) || getMemoBlockText(block) || cleanText(attachment?.name, MAX_ATTACHMENT_NAME_LENGTH) || "파일"
+      const href = cleanText(attachment?.name, MAX_ATTACHMENT_NAME_LENGTH) || "file"
+      sections.push(`[${normalizeMarkdownSnippet(label) || "파일"}](${href})`)
       continue
     }
     if (block.type === "gallery") {
+      const galleryLines: string[] = []
       for (const attachmentId of block.attachmentIds ?? []) {
         const attachment = document.attachments.find((item) => item.id === attachmentId)
         const label = cleanText(attachment?.name, MAX_ATTACHMENT_NAME_LENGTH) || "이미지"
-        lines.push(`![${label}](이미지)`)
+        galleryLines.push(`![${label}](${label})`)
       }
       if (block.text) {
-        lines.push(cleanText(block.text, 240))
+        galleryLines.push(normalizeMarkdownSnippet(cleanText(block.text, 240)))
       }
+      if (galleryLines.length > 0) sections.push(galleryLines.join("\n"))
       continue
     }
     if (block.type === "divider") {
-      lines.push("---")
+      sections.push("---")
       continue
     }
     if (block.type === "pageSpacer") {
       if (block.spacerMode === "next-page") {
-        lines.push("<!-- RNEST_PAGE_SPACER next-page -->")
+        sections.push("<!-- RNEST_PAGE_BREAK -->")
+      } else if (block.spacerMode === "blank-space") {
+        sections.push(`<!-- RNEST_BLANK_SPACE ${Math.max(1, Math.min(12, block.spacerHeight ?? 1))} -->`)
       }
       continue
     }
     if (block.type === "table") {
-      const columnCount = Array.isArray(block.table?.columns) ? Math.max(2, block.table?.columns.length) : 2
-      const headers = Array.from({ length: columnCount }, (_, index) =>
-        richHtmlToMarkdown(block.table?.columnHtml?.[index]) || getMemoTableColumnText(block.table, index) || `열 ${index + 1}`
-      )
-      lines.push(`| ${headers.map((value) => escapeMarkdownCell(value)).join(" | ")} |`)
-      lines.push(`| ${headers.map(() => "---").join(" | ")} |`)
-      for (const row of block.table?.rows ?? []) {
-        const cells = getMemoTableRowCells(row, block.table).map((cell) => richHtmlToMarkdown(cell.textHtml) || cleanText(cell.text, MAX_TABLE_CELL_TEXT_LENGTH))
-        lines.push(`| ${cells.map((value) => escapeMarkdownCell(value)).join(" | ")} |`)
-      }
+      sections.push(serializeMemoTableToMarkdown(block.table))
       continue
     }
     if (block.type === "code") {
       const language = cleanText(block.language, MAX_CODE_LANGUAGE_LENGTH) || "text"
-      lines.push(`\`\`\`${language}\n${cleanText(block.code, MAX_CODE_TEXT_LENGTH)}\n\`\`\``)
+      const codeBlock = `\`\`\`${language}\n${cleanText(block.code, MAX_CODE_TEXT_LENGTH)}\n\`\`\``
+      const caption = getMemoBlockDetailMarkdownText(block)
+      sections.push(caption ? `${codeBlock}\n\n_${caption}_` : codeBlock)
       continue
     }
     if (block.type === "pageLink") {
       const title = cleanText(block.titleSnapshot ?? block.text, MAX_TITLE_SNAPSHOT_LENGTH) || "페이지 링크"
       const target = cleanText(block.targetDocId, 120)
-      lines.push(target ? `[${title}](rnest://memo/${target})` : `[[${title}]]`)
+      sections.push(target ? `[${title}](rnest://memo/${target})` : `[[${title}]]`)
       continue
     }
     if (block.type === "embed") {
       const href = cleanText(block.url ?? block.text, MAX_URL_LENGTH)
       const title = cleanText(block.titleSnapshot, MAX_TITLE_SNAPSHOT_LENGTH) || href || "링크"
-      lines.push(href ? `[${title}](${href})` : title)
+      sections.push(href ? `[${title}](${href})` : title)
       continue
     }
     if (block.type === "recordView") {
       const label = cleanText(block.text, 120) || cleanText(block.recordTemplateId, 120) || "기록 보기"
-      lines.push(`> [기록 보기] ${label}`)
+      sections.push(prefixMarkdownQuote(`기록 보기: ${label}`, "> [!INFO] "))
       continue
     }
     if (block.type === "unsupported") {
-      lines.push(`> [지원되지 않는 블록: ${cleanText(block.unsupportedType, 40) || "알 수 없음"}]`)
+      sections.push(prefixMarkdownQuote(`지원되지 않는 블록: ${cleanText(block.unsupportedType, 40) || "알 수 없음"}`, "> [!WARNING] "))
       continue
     }
-    const text =
-      block.type === "bookmark" ? cleanText(block.text, MAX_BLOCK_TEXT_LENGTH) : richHtmlToMarkdown(block.textHtml) || getMemoBlockText(block)
-    if (!text) {
-      lines.push("")
-      continue
-    }
+    const text = block.type === "bookmark" ? cleanText(block.text, MAX_BLOCK_TEXT_LENGTH) : getMemoBlockMarkdownText(block)
+    if (!text) continue
+
     switch (block.type) {
       case "heading":
-        lines.push(`## ${text}`)
-        break
-      case "bulleted":
-        lines.push(`- ${text}`)
-        break
-      case "numbered":
-        lines.push(`1. ${text}`)
-        break
-      case "checklist":
-        lines.push(`- [${block.checked ? "x" : " "}] ${text}`)
+        sections.push(`## ${text}`)
         break
       case "callout":
-        lines.push(`> ${text}`)
+        sections.push(prefixMarkdownQuote(text, "> [!NOTE] "))
         break
       case "quote":
-        lines.push(`> ${text}`)
+        sections.push(prefixMarkdownQuote(text))
         break
       case "toggle": {
-        const detail = richHtmlToMarkdown(block.detailTextHtml) || getMemoBlockDetailText(block)
-        const safeTitle = text || "토글"
+        const detail = getMemoBlockDetailMarkdownText(block)
+        const safeTitle = normalizeMarkdownSnippet(text.replace(/\n+/g, " ")) || "토글"
         if (detail) {
-          lines.push(`<details>\n<summary>${safeTitle}</summary>\n\n${detail}\n</details>`)
+          sections.push(`<details>\n<summary>${safeTitle}</summary>\n\n${detail}\n</details>`)
         } else {
-          lines.push(`<details>\n<summary>${safeTitle}</summary>\n</details>`)
+          sections.push(`<details>\n<summary>${safeTitle}</summary>\n</details>`)
         }
         break
       }
       case "bookmark": {
-        const label = richHtmlToMarkdown(block.detailTextHtml) || getMemoBlockDetailText(block) || text
-        lines.push(text ? `[${label}](${text})` : label)
+        const label = getMemoBlockDetailMarkdownText(block) || text
+        sections.push(text ? `[${label}](${text})` : label)
         break
       }
       default:
-        lines.push(text)
+        sections.push(text)
         break
     }
   }
-  return lines.join("\n\n").replace(/\n{3,}/g, "\n\n").trim()
+
+  flushListBuffer()
+
+  return sections.join("\n\n").replace(/\n{3,}/g, "\n\n").trim()
 }
 
 export function sanitizeMemoState(raw: unknown): RNestMemoState {
