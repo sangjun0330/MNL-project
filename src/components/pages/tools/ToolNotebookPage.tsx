@@ -705,32 +705,71 @@ function initializePageSpacerLayout(root: HTMLElement) {
 }
 
 /**
- * 완전히 새로 설계한 spacer 높이 계산 — 단순 모듈러 연산 방식.
+ * Slice-plan 기반 spacer 높이 계산.
  *
- * 핵심 원리: spacer의 현재 위치를 pageHeightPx로 나눈 나머지(posOnPage)를 구하고,
- * pageHeightPx - posOnPage 만큼 filler를 채워 spacer 하단이 정확히 페이지 경계에 오도록 한다.
- * 이전 방식은 slice plan의 breakAnchor를 사용했는데, 이 값은 블록 경계 조정으로 인해
- * 실제 페이지 높이보다 작아서 filler가 부족하고 spacer 뒤 콘텐츠가 같은 페이지에 남는 버그가 있었다.
+ * 이전 모듈러 연산 방식(spacerBottom % pageHeightPx)은 이상적 페이지 경계를 기준으로 했지만,
+ * findSafeSlice가 블록 경계를 피해 페이지 높이를 조정하면 실제 페이지 경계와 불일치하여
+ * spacer 뒤 콘텐츠가 다음 페이지 상단이 아닌 중간에 위치하는 버그가 있었다.
+ *
+ * 새 방식: 각 spacer마다 실제 slice plan을 빌드하여 spacer가 속한 페이지의 끝 위치를
+ * 정확히 알아내고, 그 위치까지 filler를 채운다.
  */
 function computeSpacerFillHeights(
   root: HTMLElement,
-  pageHeightPx: number
+  captureWidth: number,
+  pdfInnerWidthPt: number,
+  pdfInnerHeightPt: number
 ) {
   const spacers = initializePageSpacerLayout(root)
   const nextPageSpacers = spacers.filter(
     (spacer) => normalizePageSpacerMode(spacer.dataset.pageSpacerMode) === "next-page"
   )
 
+  if (nextPageSpacers.length === 0) {
+    void root.offsetHeight
+    return {
+      spacers,
+      spacerHeights: Object.fromEntries(
+        spacers.map((spacer) => [
+          spacer.dataset.pageSpacerBlockId || spacer.id,
+          Math.max(0, Math.round(Number(spacer.dataset.pageSpacerAppliedHeight || 0))),
+        ])
+      ) as Record<string, number>,
+    }
+  }
+
   const rootTop = root.getBoundingClientRect().top
 
   // 각 next-page spacer를 문서 순서대로 처리 (앞쪽 spacer가 뒤쪽 spacer 위치에 영향을 줌)
   for (const spacer of nextPageSpacers) {
     void root.offsetHeight // 이전 spacer 반영 후 reflow
+
+    // 현재 상태에서 실제 slice plan을 빌드하여 spacer가 속한 페이지의 끝 위치를 찾음
+    const tempPlan = buildPdfSlicePlan(root, captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
     const spacerBottom = spacer.getBoundingClientRect().bottom - rootTop
-    const posOnPage = spacerBottom % pageHeightPx
-    // spacer가 이미 페이지 경계 근처(4px 이내)면 채우지 않음
-    const fillHeight = posOnPage < 4 ? 0 : Math.ceil(pageHeightPx - posOnPage)
-    setPageSpacerAppliedHeight(spacer, fillHeight >= 12 ? fillHeight : 0)
+
+    // spacer가 속한 slice(페이지)의 끝 Y 위치를 찾음
+    let cumulativeY = 0
+    let targetSliceEnd = -1
+    for (const slice of tempPlan.slices) {
+      const sliceEnd = cumulativeY + slice.height
+      if (spacerBottom <= sliceEnd + 4) {
+        targetSliceEnd = sliceEnd
+        break
+      }
+      cumulativeY += slice.height
+    }
+
+    if (targetSliceEnd < 0) continue
+
+    // 현재 페이지에서 남은 공간 = 페이지 끝 - spacer 하단
+    const fillHeight = targetSliceEnd - spacerBottom
+    if (fillHeight >= 12) {
+      setPageSpacerAppliedHeight(spacer, Math.ceil(fillHeight))
+    } else if (fillHeight >= 0) {
+      // 이미 페이지 경계 근처(12px 이내)면 채우지 않음
+      setPageSpacerAppliedHeight(spacer, 0)
+    }
   }
 
   void root.offsetHeight // 최종 reflow
@@ -752,8 +791,7 @@ function buildPdfLayoutWithPageSpacers(
   pdfInnerWidthPt: number,
   pdfInnerHeightPt: number
 ) {
-  const pageHeightPx = getPdfSliceHeightPx(captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
-  const { spacerHeights } = computeSpacerFillHeights(root, pageHeightPx)
+  const { spacerHeights } = computeSpacerFillHeights(root, captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
   const plan = buildPdfSlicePlan(root, captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
   return { plan, spacerHeights }
 }
@@ -4381,15 +4419,12 @@ export function ToolNotebookPage() {
         // ✅ 핵심 수정: captureWidth는 반드시 currentNode(outer container) 기준
         // renderPdfPages→buildPdfExportRoot가 currentNode.width를 captureWidth로 사용하므로
         // 소스 계산도 동일한 width를 써야 pageHeightPx가 일치한다.
-        // contentSource.width는 padding 제외된 값이라 clone과 pageHeightPx가 달라지는 근본 원인이었음.
         const captureWidth = Math.max(1, Math.ceil(currentNode.getBoundingClientRect().width))
         const { pdfInnerWidthPt, pdfInnerHeightPt } = getPdfInnerBounds()
-        const pageHeightPx = getPdfSliceHeightPx(captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
 
         // ① 소스 DOM에서 spacer filler 높이 계산
-        // root = currentNode (padding 포함) — clone과 동일한 기준점
-        // spacerBottom이 padding을 포함한 절대 위치이므로 modular 연산이 clone과 일치
-        computeSpacerFillHeights(currentNode, pageHeightPx)
+        // slice plan 기반: 실제 페이지 경계에 맞춰 filler를 채움
+        computeSpacerFillHeights(currentNode, captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
 
         // ② 소스 DOM에서 페이지 구분선 위치 계산
         // buildPdfSlicePlan도 currentNode 기준 — clone의 slice plan과 동일한 결과
