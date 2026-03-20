@@ -8,11 +8,13 @@ import { useI18n } from "@/lib/useI18n";
 import { buildStructuredCopyText, copyTextToClipboard } from "@/lib/structuredCopy";
 import { AnimatedCopyLabel } from "@/components/ui/AnimatedCopyLabel";
 import { BottomSheet } from "@/components/ui/BottomSheet";
-import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { sanitizeMemoDocument } from "@/lib/notebook";
 import { buildMedSafetyMemoBlocks } from "@/lib/medSafetyMemo";
 import { useAppStore } from "@/lib/store";
+import { ChevronRight } from "lucide-react";
+
+/* ── Types ── */
 
 type MedSafetyRecentItem = {
   id: string;
@@ -42,39 +44,21 @@ type NarrativeSection = {
 
 type TranslateFn = (key: string, vars?: Record<string, string | number>) => string;
 
-const FLAT_CARD_CLASS = "rounded-[30px] border border-[rgba(214,214,220,0.85)] bg-white/95 shadow-[0_18px_48px_rgba(124,95,165,0.06)]";
-const META_PILL_CLASS =
-  "inline-flex items-center rounded-full border border-[rgba(216,213,225,0.9)] bg-[rgba(247,245,251,0.95)] px-2.5 py-1 text-[11px] font-semibold text-[#6F6783]";
-const PRIMARY_ACTION_CLASS =
-  "h-11 flex-1 rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent)] px-4 text-[14px] font-semibold text-white shadow-none hover:bg-[color:var(--rnest-accent)]/90";
-const SECONDARY_ACTION_CLASS =
-  "h-11 flex-1 rounded-full border border-ios-sep bg-white px-4 text-[14px] font-semibold text-ios-text shadow-none hover:bg-ios-bg";
-const HERO_CARD_CLASS =
-  "overflow-hidden rounded-[36px] border border-[rgba(224,220,232,0.95)] bg-[radial-gradient(circle_at_top_right,rgba(231,220,255,0.92),transparent_34%),radial-gradient(circle_at_bottom_left,rgba(247,242,255,0.88),transparent_38%),linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(249,246,255,0.96)_100%)] p-5 shadow-[0_24px_80px_rgba(124,95,165,0.08)] md:p-6";
-const STAT_CARD_CLASS =
-  "rounded-[26px] border border-[rgba(226,223,234,0.95)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,246,252,0.94))] px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]";
-const LIST_PANEL_CLASS =
-  "rounded-[32px] border border-[rgba(224,220,232,0.95)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,247,252,0.95))] p-4 shadow-[0_18px_54px_rgba(124,95,165,0.06)] md:p-5";
-const GROUP_CARD_CLASS = "space-y-3";
-const ITEM_CARD_CLASS =
-  "rounded-[26px] border border-[rgba(224,220,232,0.92)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(250,249,252,0.96))] p-4 transition duration-200";
-const ITEM_CARD_ACTIVE_CLASS =
-  "border-[rgba(188,168,243,0.95)] bg-[linear-gradient(180deg,rgba(251,248,255,1),rgba(246,241,255,0.96))] shadow-[0_18px_40px_rgba(167,139,250,0.12)]";
-const ITEM_CARD_IDLE_CLASS = "hover:border-[rgba(196,181,253,0.95)] hover:bg-[rgba(250,247,255,0.92)]";
-const QUICK_ACTION_CLASS =
-  "inline-flex h-10 items-center justify-center rounded-full border border-[rgba(220,216,229,0.95)] bg-white px-4 text-[12.5px] font-semibold text-ios-text";
-const QUICK_ACTION_PRIMARY_CLASS =
-  "inline-flex h-10 items-center justify-center rounded-full border border-[rgba(188,168,243,0.95)] bg-[rgba(240,233,255,0.95)] px-4 text-[12.5px] font-semibold text-[color:var(--rnest-accent)]";
-const DETAIL_PANEL_CLASS =
-  "rounded-[32px] border border-[rgba(224,220,232,0.95)] bg-[linear-gradient(180deg,rgba(255,255,255,0.99),rgba(248,245,252,0.97))] p-4 shadow-[0_22px_60px_rgba(124,95,165,0.08)] md:p-5";
-const DETAIL_SECTION_CLASS =
-  "rounded-[24px] border border-[rgba(227,220,239,0.95)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(249,246,253,0.96))] px-4 py-4 shadow-[0_10px_24px_rgba(124,95,165,0.04)]";
-const TWO_LINE_CLAMP_STYLE = {
-  display: "-webkit-box",
-  WebkitBoxOrient: "vertical" as const,
-  WebkitLineClamp: 2,
-  overflow: "hidden",
-};
+/* ── Design tokens ── */
+
+const PILL = "inline-flex items-center rounded-full px-3 py-1.5 text-[11px] font-semibold";
+const PILL_ACCENT = `${PILL} border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]`;
+const PILL_GRAY = `${PILL} border border-gray-200 bg-gray-50 text-gray-500`;
+const BTN_PRIMARY =
+  "inline-flex h-9 items-center justify-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-4 text-[11px] font-semibold text-[color:var(--rnest-accent)] transition-colors hover:brightness-95 active:brightness-90";
+const BTN_SECONDARY =
+  "inline-flex h-9 items-center justify-center rounded-full border border-gray-200 bg-gray-50 px-4 text-[11px] font-semibold text-gray-500 transition-colors hover:bg-gray-100 active:bg-gray-200";
+const BTN_BOTTOM_PRIMARY =
+  "h-11 flex-1 rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-4 text-[13px] font-semibold text-[color:var(--rnest-accent)] hover:brightness-95";
+const BTN_BOTTOM_SECONDARY =
+  "h-11 flex-1 rounded-full border border-gray-200 bg-gray-50 px-4 text-[13px] font-semibold text-gray-500 hover:bg-gray-100";
+
+/* ── Utility functions (unchanged) ── */
 
 function isHeadingLine(value: string) {
   const line = String(value ?? "").trim();
@@ -261,6 +245,8 @@ function buildRecentCopyText(item: MedSafetyRecentItem, t: TranslateFn) {
   });
 }
 
+/* ── Component ── */
+
 export function ToolMedSafetyRecentPage() {
   const { status } = useAuthState();
   const { t } = useI18n();
@@ -422,10 +408,10 @@ export function ToolMedSafetyRecentPage() {
   }
 
   function saveRecentItemToMemo(item: MedSafetyRecentItem) {
-    const query = item.request.query || ""
-    const answer = item.result.answer || ""
-    const summary = item.result.summary || ""
-    const title = (item.result.title || query).slice(0, 80)
+    const query = item.request.query || "";
+    const answer = item.result.answer || "";
+    const summary = item.result.summary || "";
+    const title = (item.result.title || query).slice(0, 80);
     const blocks = buildMedSafetyMemoBlocks({
       query,
       answer,
@@ -436,7 +422,7 @@ export function ToolMedSafetyRecentPage() {
       situation: item.request.situation ?? null,
       queryIntent: item.request.queryIntent ?? null,
       model: item.result.model ?? null,
-    })
+    });
 
     const doc = sanitizeMemoDocument({
       title,
@@ -445,261 +431,206 @@ export function ToolMedSafetyRecentPage() {
       tags: ["AI검색"],
       createdAt: Date.now(),
       updatedAt: Date.now(),
-    })
-    const latestMemo = store.getState().memo
+    });
+    const latestMemo = store.getState().memo;
     store.setMemoState({
       ...latestMemo,
       documents: { ...latestMemo.documents, [doc.id]: doc },
       recent: [doc.id, ...latestMemo.recent.filter((id) => id !== doc.id)].slice(0, 20),
-    })
+    });
     if (typeof window !== "undefined") {
-      try { sessionStorage.setItem("rnest_notebook_open", doc.id) } catch {}
+      try {
+        sessionStorage.setItem("rnest_notebook_open", doc.id);
+      } catch {}
     }
-    router.push("/tools/notebook")
+    router.push("/tools/notebook");
   }
 
+  /* ── Detail content (shared between desktop panel & mobile bottom sheet) ── */
+
   const detailContent = selected ? (
-    <div className="space-y-4">
-      <div className="rounded-[28px] border border-[rgba(199,183,243,0.9)] bg-[radial-gradient(circle_at_top_right,rgba(232,224,255,0.9),transparent_38%),linear-gradient(180deg,rgba(255,255,255,0.98),rgba(247,241,255,0.94))] p-4 md:p-5">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center rounded-full border border-[rgba(188,168,243,0.9)] bg-[rgba(240,233,255,0.96)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--rnest-accent)]">
-                {t(kindLabel(selected.result.resultKind))}
-              </span>
-              <span className={META_PILL_CLASS}>{formatDateTime(selected.savedAt)}</span>
-            </div>
-            <div className="mt-3 text-[24px] font-bold tracking-[-0.03em] text-ios-text md:text-[28px]">{selected.result.title}</div>
-            <div className="mt-4 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#8B839B]">{t("질문")}</div>
-            <div className="mt-1 text-[14px] font-semibold leading-6 text-ios-text">{selected.request.query || "-"}</div>
-            <div className="mt-4 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#8B839B]">{t("요약")}</div>
-            <div className="mt-1 text-[15px] leading-7 text-ios-text">{selected.result.summary}</div>
-          </div>
-          {isDesktop ? (
-            <div className="flex shrink-0 flex-col items-end gap-2">
-              <button type="button" onClick={() => void handleCopySelected()} className={QUICK_ACTION_PRIMARY_CLASS}>
-                <AnimatedCopyLabel copied={copiedKey === "selected"} label={t("답변 복사")} />
-              </button>
-              <button type="button" onClick={() => saveRecentItemToMemo(selected)} className={QUICK_ACTION_PRIMARY_CLASS}>
-                {t("메모에 정리하기")}
-              </button>
-            </div>
-          ) : null}
+    <div className="space-y-5">
+      {/* Header */}
+      <div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={PILL_ACCENT}>{t(kindLabel(selected.result.resultKind))}</span>
+          <span className={PILL_GRAY}>{formatDateTime(selected.savedAt)}</span>
         </div>
+        <h2 className="mt-3 text-[22px] font-bold tracking-[-0.02em] text-gray-900 md:text-[24px]">
+          {selected.result.title}
+        </h2>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {selected.request.mode ? <span className={META_PILL_CLASS}>{t(modeLabel(selected.request.mode))}</span> : null}
-        {selected.request.situation ? <span className={META_PILL_CLASS}>{t(situationLabel(selected.request.situation))}</span> : null}
-        {selected.request.queryIntent ? <span className={META_PILL_CLASS}>{t(queryIntentLabel(selected.request.queryIntent))}</span> : null}
-        <span className={META_PILL_CLASS}>{t("{count}섹션", { count: selectedSections.length || 1 })}</span>
+      {/* Actions (desktop only — mobile uses BottomSheet footer) */}
+      {isDesktop && (
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => void handleCopySelected()} className={BTN_PRIMARY}>
+            <AnimatedCopyLabel copied={copiedKey === "selected"} label={t("답변 복사")} />
+          </button>
+          <button type="button" onClick={() => saveRecentItemToMemo(selected)} className={BTN_SECONDARY}>
+            {t("메모에 정리하기")}
+          </button>
+        </div>
+      )}
+
+      {/* Question */}
+      <div className="rounded-xl bg-[#FAFAFB] px-4 py-3">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-400">{t("질문")}</div>
+        <div className="mt-1.5 text-[14px] leading-6 text-gray-900">{selected.request.query || "-"}</div>
       </div>
 
+      {/* Summary */}
+      <div>
+        <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-400">{t("요약")}</div>
+        <div className="mt-1.5 text-[15px] leading-7 text-gray-800">{selected.result.summary}</div>
+      </div>
+
+      <hr className="border-gray-100" />
+
+      {/* Sections */}
       {selectedSections.length ? (
-        <div className="space-y-3">
+        <div className="space-y-5">
           {selectedSections.map((section, index) => (
-            <section key={`${section.title}-${index}`} className={DETAIL_SECTION_CLASS}>
-              <div className="text-[18px] font-bold tracking-[-0.02em] text-ios-text">{t(section.title || "상세 결과")}</div>
-              <div className="mt-3 space-y-2">
+            <section key={`${section.title}-${index}`}>
+              <h3 className="text-[15px] font-semibold text-gray-900">{t(section.title || "상세 결과")}</h3>
+              <div className="mt-2 space-y-1.5">
                 {section.items.map((entry, entryIndex) => (
-                  <div key={`${section.title}-${entryIndex}`} className="text-[14px] leading-7 text-ios-text">
+                  <p key={`${section.title}-${entryIndex}`} className="text-[14px] leading-7 text-gray-700">
                     {entry}
-                  </div>
+                  </p>
                 ))}
               </div>
             </section>
           ))}
         </div>
       ) : (
-        <div className={DETAIL_SECTION_CLASS}>
-          <div className="whitespace-pre-wrap break-words text-[14px] leading-7 text-ios-text">{selected.result.answer}</div>
+        <div className="whitespace-pre-wrap break-words text-[14px] leading-7 text-gray-700">
+          {selected.result.answer}
+        </div>
+      )}
+
+      {/* Meta pills */}
+      {(selected.request.mode || selected.request.situation || selected.request.queryIntent) && (
+        <div className="flex flex-wrap gap-1.5 pt-1">
+          {selected.request.mode ? <span className={PILL_GRAY}>{t(modeLabel(selected.request.mode))}</span> : null}
+          {selected.request.situation ? <span className={PILL_GRAY}>{t(situationLabel(selected.request.situation))}</span> : null}
+          {selected.request.queryIntent ? <span className={PILL_GRAY}>{t(queryIntentLabel(selected.request.queryIntent))}</span> : null}
         </div>
       )}
     </div>
   ) : (
-    <div className="rounded-[24px] border border-dashed border-[rgba(221,216,232,0.95)] bg-[rgba(249,247,252,0.88)] px-4 py-5 text-[14px] leading-6 text-ios-sub">
+    <div className="py-12 text-center text-[14px] text-gray-400">
       {t("선택한 검색 결과가 여기 표시됩니다.")}
     </div>
   );
 
+  /* ── Render ── */
+
   return (
     <>
-      <div className="mx-auto w-full max-w-[1180px] space-y-5 px-2 pb-24 pt-4 sm:px-3">
-        <Card className={HERO_CARD_CLASS}>
-          <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="text-[31px] font-extrabold tracking-[-0.03em] text-ios-text md:text-[36px]">{t("최근 AI 검색 기록")}</div>
-                <span className="inline-flex items-center rounded-full border border-[rgba(188,168,243,0.9)] bg-[rgba(240,233,255,0.96)] px-3 py-1 text-[11px] font-semibold text-[color:var(--rnest-accent)]">
-                  {t("최근 {count}건", { count: historyLimit })}
-                </span>
-              </div>
-              <div className="mt-2 max-w-[760px] text-[13px] leading-6 text-ios-sub md:text-[14px]">
-                {t("완료된 검색만 저장되며, 항목별로 질문과 답변을 다시 열 수 있습니다.")}
-              </div>
-            </div>
-            <Link
-              href="/tools/med-safety"
-              className="inline-flex h-11 items-center justify-center rounded-full border border-[rgba(188,168,243,0.95)] bg-white/92 px-5 text-[13px] font-semibold text-[color:var(--rnest-accent)]"
-            >
-              {t("AI 검색기로")}
-            </Link>
+      <div className="mx-auto w-full max-w-[1120px] px-4 pb-24 pt-6 sm:px-6">
+        {/* ── Header ── */}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-[26px] font-bold tracking-[-0.02em] text-gray-900 sm:text-[28px]">
+              {t("최근 검색 기록")}
+            </h1>
+            {items.length > 0 && (
+              <p className="mt-1 text-[13px] text-gray-500">
+                {t("{count}건 저장", { count: items.length })}
+                {latestSavedAt ? ` · ${t("마지막")} ${formatDateTime(latestSavedAt)}` : ""}
+              </p>
+            )}
           </div>
+          <Link href="/tools/med-safety" className={BTN_SECONDARY}>
+            {t("AI 검색기로")}
+          </Link>
+        </div>
 
-          <div className="mt-5 grid gap-3 md:grid-cols-3">
-            <div className={STAT_CARD_CLASS}>
-              <div className="text-[12px] font-semibold text-ios-sub">{t("최근 저장")}</div>
-              <div className="mt-2 text-[28px] font-bold tracking-[-0.03em] text-ios-text">{items.length}</div>
-              <div className="mt-1 text-[12px] text-ios-sub">{t("완료 검색만 저장")}</div>
-            </div>
-            <div className={STAT_CARD_CLASS}>
-              <div className="text-[12px] font-semibold text-ios-sub">{t("마지막 저장")}</div>
-              <div className="mt-2 text-[18px] font-bold tracking-[-0.02em] text-ios-text">
-                {latestSavedAt ? formatDateTime(latestSavedAt) : "-"}
-              </div>
-              <div className="mt-1 text-[12px] text-ios-sub">{t("계정별로 동기화됩니다.")}</div>
-            </div>
-            <div className={STAT_CARD_CLASS}>
-              <div className="text-[12px] font-semibold text-ios-sub">{t("복사")}</div>
-              <div className="mt-2 text-[18px] font-bold tracking-[-0.02em] text-ios-text">{t("바로 복사 가능")}</div>
-              <div className="mt-1 text-[12px] text-ios-sub">{t("질문과 답변이 함께 복사됩니다.")}</div>
-            </div>
-          </div>
-        </Card>
-
-        {status !== "authenticated" ? (
-          <Card className={`p-5 ${FLAT_CARD_CLASS}`}>
-            <div className="space-y-3">
-              <div className="text-[19px] font-bold text-ios-text">{t("로그인이 필요합니다")}</div>
-              <div className="text-[13px] leading-6 text-ios-sub">{t("최근 검색 기록은 계정별로 저장됩니다.")}</div>
-              <Link href="/settings/account" className="inline-flex h-10 items-center justify-center rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)] px-4 text-[13px] font-semibold text-[color:var(--rnest-accent)]">
+        {/* ── Main content ── */}
+        <div className="mt-6">
+          {status !== "authenticated" ? (
+            <div className="rounded-2xl border border-gray-100 bg-white px-5 py-8 text-center">
+              <div className="text-[17px] font-semibold text-gray-900">{t("로그인이 필요합니다")}</div>
+              <p className="mt-2 text-[13px] text-gray-500">{t("최근 검색 기록은 계정별로 저장됩니다.")}</p>
+              <Link
+                href="/settings/account"
+                className="mt-4 inline-flex h-10 items-center justify-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-5 text-[11px] font-semibold text-[color:var(--rnest-accent)] hover:brightness-95"
+              >
                 {t("로그인/계정 설정")}
               </Link>
             </div>
-          </Card>
-        ) : loading ? (
-          <Card className={`p-5 ${FLAT_CARD_CLASS}`}>
-            <div className="space-y-2">
-              <div className="text-[17px] font-bold text-ios-text">{t("최근 기록을 불러오는 중...")}</div>
-              <div className="text-[13px] leading-6 text-ios-sub">{t("계정에 저장된 완료 검색 결과를 정리하고 있습니다.")}</div>
+          ) : loading ? (
+            <div className="rounded-2xl border border-gray-100 bg-white px-5 py-10 text-center">
+              <div className="text-[15px] font-semibold text-gray-700">{t("최근 기록을 불러오는 중...")}</div>
+              <p className="mt-1 text-[13px] text-gray-400">{t("계정에 저장된 완료 검색 결과를 정리하고 있습니다.")}</p>
             </div>
-          </Card>
-        ) : error ? (
-          <Card className={`p-4 ${FLAT_CARD_CLASS}`}>
-            <div className="rounded-[24px] border border-red-200 bg-red-50 px-4 py-4 text-[14px] font-semibold text-red-700">
+          ) : error ? (
+            <div className="rounded-2xl border border-red-100 bg-red-50 px-5 py-5 text-[14px] font-medium text-red-700">
               {t("최근 기록 조회에 실패했습니다.")} ({error})
             </div>
-          </Card>
-        ) : !items.length ? (
-          <Card className={`p-5 ${FLAT_CARD_CLASS}`}>
-            <div className="space-y-2">
-              <div className="text-[18px] font-bold text-ios-text">{t("저장된 기록이 없습니다")}</div>
-              <div className="text-[13px] leading-6 text-ios-sub">{t("아직 저장된 최근 검색 결과가 없습니다. AI 검색 실행 후 다시 확인해 주세요.")}</div>
+          ) : !items.length ? (
+            <div className="rounded-2xl border border-gray-100 bg-white px-5 py-10 text-center">
+              <div className="text-[16px] font-semibold text-gray-800">{t("저장된 기록이 없습니다")}</div>
+              <p className="mt-2 text-[13px] text-gray-500">
+                {t("아직 저장된 최근 검색 결과가 없습니다. AI 검색 실행 후 다시 확인해 주세요.")}
+              </p>
             </div>
-          </Card>
-        ) : (
-          <div className="grid gap-5 xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)]">
-            <div className="space-y-4">
-              <Card className={LIST_PANEL_CLASS}>
-                <div className="flex flex-col gap-4 border-b border-[rgba(226,223,234,0.95)] pb-4">
-                  <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-                    <div>
-                      <div className="text-[22px] font-bold tracking-[-0.03em] text-ios-text">{t("저장된 질문 라이브러리")}</div>
-                      <div className="mt-1 text-[13px] leading-6 text-ios-sub">
-                        {t("질문 제목과 요약을 빠르게 훑고, 필요한 항목만 열어 자세히 확인할 수 있습니다.")}
-                      </div>
+          ) : (
+            <div className="grid gap-6 xl:grid-cols-[380px_1fr]">
+              {/* ── Left: List ── */}
+              <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white">
+                {groupedItems.map((group, groupIndex) => (
+                  <div key={group.key}>
+                    {groupIndex > 0 && <hr className="border-gray-50" />}
+                    <div className="px-4 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-[0.06em] text-gray-400">
+                      {group.label} · {group.items.length}
                     </div>
-                    <span className="inline-flex items-center rounded-full border border-[rgba(188,168,243,0.9)] bg-[rgba(240,233,255,0.96)] px-3 py-1 text-[11px] font-semibold text-[color:var(--rnest-accent)]">
-                      {t("총 {count}건", { count: items.length })}
-                    </span>
+                    {group.items.map((item) => {
+                      const isActive = selected?.id === item.id;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => handleOpenItem(item)}
+                          className={`flex w-full items-center gap-3 border-l-[3px] px-4 py-3 text-left transition-colors ${
+                            isActive
+                              ? "border-l-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)]"
+                              : "border-l-transparent hover:bg-gray-50"
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className={PILL_ACCENT}>{t(kindLabel(item.result.resultKind))}</span>
+                              <span className="text-[11px] text-gray-400">{formatListTime(item.savedAt)}</span>
+                            </div>
+                            <div className="mt-1.5 truncate text-[14px] font-semibold text-gray-900">
+                              {item.result.title}
+                            </div>
+                            <div className="mt-0.5 truncate text-[12px] text-gray-500">
+                              {shortText(item.request.query || "-", 60)}
+                            </div>
+                          </div>
+                          <ChevronRight className="h-4 w-4 shrink-0 text-gray-300 xl:hidden" />
+                        </button>
+                      );
+                    })}
                   </div>
-                </div>
+                ))}
+              </div>
 
-                <div className="mt-5 space-y-6">
-                  {groupedItems.map((group) => (
-                    <section key={group.key} className={GROUP_CARD_CLASS}>
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <div className="text-[17px] font-bold tracking-[-0.02em] text-ios-text">{group.label}</div>
-                          <div className="mt-1 text-[12px] leading-5 text-ios-sub">{t("질문과 요약을 먼저 보고 필요할 때만 전체 답변을 엽니다.")}</div>
-                        </div>
-                        <span className={META_PILL_CLASS}>{t("{count}건", { count: group.items.length })}</span>
-                      </div>
-
-                      <div className="space-y-3">
-                        {group.items.map((item) => {
-                          const isActive = selected?.id === item.id;
-                          return (
-                            <article key={item.id} className={`${ITEM_CARD_CLASS} ${isActive ? ITEM_CARD_ACTIVE_CLASS : ITEM_CARD_IDLE_CLASS}`}>
-                              <button type="button" onClick={() => handleOpenItem(item)} className="w-full text-left">
-                                <div className="flex items-start justify-between gap-3">
-                                  <div className="min-w-0 flex-1">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      <span className="inline-flex shrink-0 items-center rounded-full border border-[rgba(188,168,243,0.88)] bg-[rgba(240,233,255,0.95)] px-2.5 py-1 text-[10.5px] font-semibold text-[color:var(--rnest-accent)]">
-                                        {t(kindLabel(item.result.resultKind))}
-                                      </span>
-                                      {item.request.mode ? <span className={META_PILL_CLASS}>{t(modeLabel(item.request.mode))}</span> : null}
-                                      {item.request.situation ? <span className={META_PILL_CLASS}>{t(situationLabel(item.request.situation))}</span> : null}
-                                    </div>
-                                    <div className="mt-3 text-[17px] font-bold tracking-[-0.03em] text-ios-text sm:text-[19px]">
-                                      {item.result.title}
-                                    </div>
-                                  </div>
-                                  <span className="inline-flex shrink-0 items-center rounded-full border border-[rgba(220,216,229,0.95)] bg-white px-3 py-1.5 text-[11px] font-semibold text-ios-sub">
-                                    {formatListTime(item.savedAt)}
-                                  </span>
-                                </div>
-
-                                <div className="mt-3 text-[14px] font-semibold leading-6 text-ios-text" style={TWO_LINE_CLAMP_STYLE}>
-                                  {item.request.query || "-"}
-                                </div>
-
-                                <div className="mt-2 text-[13.5px] leading-6 text-ios-sub" style={TWO_LINE_CLAMP_STYLE}>
-                                  {shortText(item.result.summary || item.result.answer || "-", 120)}
-                                </div>
-                              </button>
-
-                              <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
-                                <button type="button" onClick={() => void handleCopyItem(item)} className={QUICK_ACTION_CLASS}>
-                                  <AnimatedCopyLabel copied={copiedKey === `item:${item.id}`} label={t("복사")} />
-                                </button>
-                                <button type="button" onClick={() => saveRecentItemToMemo(item)} className={QUICK_ACTION_CLASS}>
-                                  {t("메모에 정리하기")}
-                                </button>
-                                <button type="button" onClick={() => handleOpenItem(item)} className={QUICK_ACTION_PRIMARY_CLASS}>
-                                  {t("전체 보기")}
-                                </button>
-                              </div>
-                            </article>
-                          );
-                        })}
-                      </div>
-                    </section>
-                  ))}
-                </div>
-              </Card>
-            </div>
-
-            <div className="hidden xl:block">
-              <div className="space-y-4">
-                <Card className={DETAIL_PANEL_CLASS}>
-                  <div className="mb-4 border-b border-[rgba(226,223,234,0.95)] pb-4">
-                    <div className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[#8B839B]">{t("선택한 결과")}</div>
-                    <div className="mt-2 text-[24px] font-bold tracking-[-0.03em] text-ios-text">
-                      {selected?.result.title || t("최근 검색 상세")}
-                    </div>
-                    <div className="mt-2 text-[13px] leading-6 text-ios-sub">
-                      {t("오른쪽 패널에서 질문, 요약, 상세 답변을 한 번에 읽을 수 있습니다.")}
-                    </div>
-                  </div>
+              {/* ── Right: Detail (desktop) ── */}
+              <div className="hidden xl:block">
+                <div className="sticky top-6 rounded-2xl border border-gray-100 bg-white p-5 md:p-6">
                   {detailContent}
-                </Card>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
+      {/* ── Mobile: BottomSheet ── */}
       <BottomSheet
         open={!isDesktop && detailOpen && Boolean(selected)}
         onClose={() => setDetailOpen(false)}
@@ -711,14 +642,17 @@ export function ToolMedSafetyRecentPage() {
           selected ? (
             <div className="flex flex-col gap-2">
               <div className="flex gap-2">
-                <Button className={PRIMARY_ACTION_CLASS} onClick={() => void handleCopySelected()}>
+                <Button className={BTN_BOTTOM_PRIMARY} onClick={() => void handleCopySelected()}>
                   <AnimatedCopyLabel copied={copiedKey === "selected"} label={t("답변 복사")} />
                 </Button>
-                <Button variant="secondary" className={SECONDARY_ACTION_CLASS} onClick={() => setDetailOpen(false)}>
+                <Button variant="secondary" className={BTN_BOTTOM_SECONDARY} onClick={() => setDetailOpen(false)}>
                   {t("닫기")}
                 </Button>
               </div>
-              <Button className={`${SECONDARY_ACTION_CLASS} w-full`} onClick={() => saveRecentItemToMemo(selected)}>
+              <Button
+                className={`${BTN_BOTTOM_SECONDARY} w-full`}
+                onClick={() => saveRecentItemToMemo(selected)}
+              >
                 {t("메모에 정리하기")}
               </Button>
             </div>
@@ -728,8 +662,9 @@ export function ToolMedSafetyRecentPage() {
         {detailContent}
       </BottomSheet>
 
+      {/* ── Toast ── */}
       {copyMessage ? (
-        <div className="pointer-events-none fixed bottom-[calc(92px+env(safe-area-inset-bottom))] left-1/2 z-[120] -translate-x-1/2 rounded-full bg-black px-4 py-2 text-[12px] font-semibold text-white shadow-lg">
+        <div className="pointer-events-none fixed bottom-[calc(92px+env(safe-area-inset-bottom))] left-1/2 z-[120] -translate-x-1/2 rounded-full bg-gray-900 px-4 py-2 text-[12px] font-semibold text-white shadow-lg">
           {copyMessage}
         </div>
       ) : null}

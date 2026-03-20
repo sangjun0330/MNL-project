@@ -235,9 +235,16 @@ function createPdfFieldPreview(field: HTMLInputElement | HTMLTextAreaElement) {
   return preview
 }
 
+function getPdfObservedSource(root: HTMLElement) {
+  return root.querySelector<HTMLElement>('[data-pdf-preview-source="true"]') ?? root
+}
+
 function buildPdfExportRoot(source: HTMLElement) {
   const sourceRect = source.getBoundingClientRect()
-  const captureWidth = Math.max(1, Math.ceil(sourceRect.width))
+  const captureWidth = Math.max(
+    1,
+    Math.ceil(source.scrollWidth || sourceRect.width || source.parentElement?.getBoundingClientRect().width || 0)
+  )
 
   const host = document.createElement("div")
   host.setAttribute("data-pdf-export-root", "true")
@@ -269,6 +276,15 @@ function buildPdfExportRoot(source: HTMLElement) {
   clone.style.transformOrigin = "top left"
   clone.style.animation = "none"
   clone.style.transition = "none"
+  clone.style.position = "relative"
+  clone.style.left = "auto"
+  clone.style.right = "auto"
+  clone.style.top = "auto"
+  clone.style.bottom = "auto"
+  clone.style.opacity = "1"
+  clone.style.visibility = "visible"
+  clone.style.zIndex = "auto"
+  clone.style.pointerEvents = "auto"
 
   clone.querySelectorAll('[data-pdf-hide="true"]').forEach((element) => element.remove())
 
@@ -290,6 +306,24 @@ function buildPdfExportRoot(source: HTMLElement) {
     element.style.transition = "none"
   })
 
+  ;([clone, ...Array.from(clone.querySelectorAll<HTMLElement>('[data-pdf-preview-source="true"]'))]).forEach((element) => {
+    if (!(element instanceof HTMLElement)) return
+    if (element.hasAttribute("data-pdf-preview-source")) {
+      element.removeAttribute("aria-hidden")
+      element.style.position = "relative"
+      element.style.left = "auto"
+      element.style.right = "auto"
+      element.style.top = "auto"
+      element.style.bottom = "auto"
+      element.style.opacity = "1"
+      element.style.visibility = "visible"
+      element.style.zIndex = "auto"
+      element.style.pointerEvents = "auto"
+      element.style.userSelect = "auto"
+      element.style.transform = "none"
+    }
+  })
+
   clone.querySelectorAll<HTMLElement>('[data-page-spacer-block="true"]').forEach((element) => {
     element.style.position = "relative"
     element.style.height = "0"
@@ -298,13 +332,6 @@ function buildPdfExportRoot(source: HTMLElement) {
     element.style.margin = "0"
     element.style.border = "0"
     element.style.overflow = "visible"
-  })
-  clone.querySelectorAll<HTMLElement>('[data-pdf-preview-source="true"]').forEach((element) => {
-    element.classList.remove("hidden")
-    element.classList.remove("invisible", "pointer-events-none", "select-none")
-    element.style.visibility = "visible"
-    element.style.pointerEvents = "auto"
-    element.style.userSelect = "auto"
   })
   // ✅ visibility:hidden → display:none 수정
   // visibility:hidden은 레이아웃에 공간을 그대로 차지해
@@ -455,7 +482,7 @@ function findSafeSlice(
   if (forcedPageStart) {
     const breakY = Math.floor(forcedPageStart.top)
     const forcedHeight = breakY - currentOffsetY
-    if (forcedHeight > 0 && isUsablePdfSliceHeight(forcedHeight, desiredSliceHeight)) {
+    if (forcedHeight > 0) {
       return {
         offsetY: currentOffsetY,
         height: forcedHeight,
@@ -556,7 +583,7 @@ function buildPdfSlicePlan(clone: HTMLElement, captureWidth: number, pdfInnerWid
 async function renderPdfPages(source: HTMLElement) {
   const html2canvasModule = await import("html2canvas")
   const html2canvas = html2canvasModule.default
-  const { clone, viewport, cleanup, captureWidth } = buildPdfExportRoot(source)
+  const { clone, viewport, cleanup, captureWidth } = buildPdfExportRoot(getPdfObservedSource(source))
   try {
     await new Promise<void>((resolve) => {
       window.requestAnimationFrame(() => resolve())
@@ -625,7 +652,7 @@ async function renderPdfPages(source: HTMLElement) {
 }
 
 async function computePdfLayout(source: HTMLElement) {
-  const { clone, cleanup, captureWidth } = buildPdfExportRoot(source)
+  const { clone, cleanup, captureWidth } = buildPdfExportRoot(getPdfObservedSource(source))
   try {
     await new Promise<void>((resolve) => {
       window.requestAnimationFrame(() => resolve())
@@ -3272,9 +3299,9 @@ function InlineBlock({
 
       {/* block content */}
       <div className={cn("min-h-[1.6em] rounded-md transition-colors", block.highlight && highlightBgMap[block.highlight] ? `${highlightBgMap[block.highlight]} px-2 -mx-2 py-0.5` : "")}>
-        {startsNextPdfPage && (
-          <div data-pdf-hide="true" className="mb-4">
-            <div className="flex items-center gap-3 px-1">
+        {pdfSpacerMarker && (
+          <div data-pdf-hide="true" aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 z-10 h-0 -translate-y-1/2 px-1">
+            <div className="flex items-center gap-3">
               <div className="h-px flex-1 bg-[#D8DEE8]" />
               <div className="inline-flex items-center rounded-full border border-[#E6E8F1] bg-white/98 px-3 py-1 text-[11px] font-semibold tracking-[-0.01em] text-[color:var(--rnest-accent)] shadow-[0_10px_24px_rgba(15,23,42,0.08)]">
                 {pageSpacerBoundaryLabel}
@@ -4367,8 +4394,7 @@ export function ToolNotebookPage() {
       return
     }
     const node = pdfContentRef.current
-    const observedSource =
-      node.querySelector<HTMLElement>('[data-pdf-preview-source="true"]') ?? node
+    const observedSource = getPdfObservedSource(node)
     let cancelled = false
     let frameId = 0
     let timeoutId = 0
@@ -4377,9 +4403,6 @@ export function ToolNotebookPage() {
     const run = async () => {
       const currentNode = pdfContentRef.current
       if (!currentNode) return
-      const contentSource = currentNode.querySelector<HTMLElement>('[data-pdf-preview-source="true"]') ?? currentNode
-      // contentSource가 hidden(display:none)이면 측정 불가 — PDF 미리보기 전환 후 재트리거 시 스킵
-      if (contentSource.offsetHeight === 0) return
       const token = ++computeToken
       if (!cancelled) setPdfPreviewBusy(true)
       try {
@@ -4427,7 +4450,8 @@ export function ToolNotebookPage() {
             : mutation.target instanceof Text
               ? mutation.target.parentElement
               : null
-        return !target?.closest('[data-pdf-hide="true"]')
+        if (!target || target.closest('[data-pdf-hide="true"]')) return false
+        return true
       })
       if (shouldRecompute) {
         schedule()
@@ -4437,6 +4461,7 @@ export function ToolNotebookPage() {
       subtree: true,
       childList: true,
       characterData: true,
+      attributes: true,
     })
     window.addEventListener("resize", schedule)
 
@@ -5362,13 +5387,7 @@ export function ToolNotebookPage() {
     setToast("PDF 저장을 준비하고 있습니다")
     try {
       const { jsPDF } = await import("jspdf")
-      const rendered =
-        showPdfBreaks && pdfPreviewPages.length > 0
-          ? {
-              contentWidth: PDF_PAGE_WIDTH_PT - PDF_EXPORT_MARGIN_PT * 2,
-              pages: pdfPreviewPages,
-            }
-          : await renderPdfPages(pdfContentRef.current)
+      const rendered = await renderPdfPages(pdfContentRef.current)
       const pdf = new jsPDF({
         orientation: "portrait",
         unit: "pt",
@@ -6898,10 +6917,9 @@ export function ToolNotebookPage() {
               )}
               <div
                 data-pdf-preview-source="true"
-                aria-hidden={showingPdfPreview ? true : undefined}
                 className={cn(
                   showingPdfPreview &&
-                    "pointer-events-none absolute inset-x-0 top-0 -z-10 opacity-0 [visibility:hidden]"
+                    "pointer-events-none absolute inset-x-0 top-0 opacity-0"
                 )}
               >
               {activeMemo.coverStyle && (
