@@ -170,12 +170,18 @@ function downloadTextFile(fileName: string, content: string, mimeType: string) {
 const PDF_EXPORT_MARGIN_PT = 28
 const PDF_EXPORT_CAPTURE_SCALE = 2
 const PDF_EXPORT_MAX_CAPTURE_SCALE = 3
-const PDF_EXPORT_CONTENT_DENSITY_MULTIPLIER = 1.5
+const PDF_EXPORT_DEFAULT_CONTENT_DENSITY_MULTIPLIER = 1.5
+const PDF_EXPORT_CONTENT_DENSITY_STORAGE_KEY = "rnest:notebook:pdf-content-density"
 const PDF_PAGE_WIDTH_PT = 595.28
 const PDF_PAGE_HEIGHT_PT = 841.89
 const PDF_BREAK_PADDING_PX = 8
 const PDF_MIN_SAFE_SLICE_HEIGHT_PX = 96
 const BLANK_SPACE_UNIT_PX = 36
+const PDF_CONTENT_DENSITY_OPTIONS = [
+  { value: 1, label: "1.0x" },
+  { value: 1.25, label: "1.25x" },
+  { value: 1.5, label: "1.5x" },
+] as const
 const PDF_INNER_BREAK_SELECTOR = [
   "p",
   "li",
@@ -224,6 +230,7 @@ type PdfRenderSnapshot = {
   contentWidth: number
   contentHeight: number
   captureWidth: number
+  contentDensityMultiplier: number
   renderedAt: number
 }
 
@@ -234,9 +241,17 @@ type PdfRenderCacheEntry = PdfRenderSnapshot & {
 
 type RenderPdfPagesOptions = {
   doc: RNestMemoDocument
+  contentDensityMultiplier: number
   onLayout?: (layout: ResolvedPdfLayout) => void
   onPageRendered?: (page: PdfPreviewPage, completed: number, total: number) => void
   shouldCancel?: () => boolean
+}
+
+function sanitizePdfContentDensityMultiplier(value: unknown) {
+  const nextValue = typeof value === "number" ? value : Number(value)
+  if (!Number.isFinite(nextValue)) return PDF_EXPORT_DEFAULT_CONTENT_DENSITY_MULTIPLIER
+  const matched = PDF_CONTENT_DENSITY_OPTIONS.find((option) => Math.abs(option.value - nextValue) < 0.001)
+  return matched?.value ?? PDF_EXPORT_DEFAULT_CONTENT_DENSITY_MULTIPLIER
 }
 
 type PdfBreakAnchor = {
@@ -316,13 +331,13 @@ function getPdfObservedSource(root: HTMLElement) {
   return root.querySelector<HTMLElement>('[data-pdf-preview-source="true"]') ?? root
 }
 
-function buildPdfExportRoot(source: HTMLElement) {
+function buildPdfExportRoot(source: HTMLElement, contentDensityMultiplier: number) {
   const sourceRect = source.getBoundingClientRect()
   const baseCaptureWidth = Math.max(
     1,
     Math.ceil(source.scrollWidth || sourceRect.width || source.parentElement?.getBoundingClientRect().width || 0)
   )
-  const captureWidth = Math.max(1, Math.ceil(baseCaptureWidth * PDF_EXPORT_CONTENT_DENSITY_MULTIPLIER))
+  const captureWidth = Math.max(1, Math.ceil(baseCaptureWidth * sanitizePdfContentDensityMultiplier(contentDensityMultiplier)))
 
   const host = document.createElement("div")
   host.setAttribute("data-pdf-export-root", "true")
@@ -366,6 +381,10 @@ function buildPdfExportRoot(source: HTMLElement) {
   clone.style.pointerEvents = "auto"
 
   clone.querySelectorAll('[data-pdf-hide="true"]').forEach((element) => element.remove())
+
+  clone.querySelectorAll<HTMLElement>("[data-pdf-export-only='true']").forEach((element) => {
+    element.style.display = element.dataset.pdfExportDisplay || "block"
+  })
 
   clone.querySelectorAll("input, textarea").forEach((field) => {
     field.replaceWith(createPdfFieldPreview(field as HTMLInputElement | HTMLTextAreaElement))
@@ -913,7 +932,8 @@ function getPdfRenderedHeightPt(canvas: HTMLCanvasElement, contentWidth: number,
 async function renderPdfPages(source: HTMLElement, options: RenderPdfPagesOptions) {
   const html2canvasModule = await import("html2canvas")
   const html2canvas = html2canvasModule.default
-  const { clone, viewport, cleanup, captureWidth } = buildPdfExportRoot(getPdfObservedSource(source))
+  const contentDensityMultiplier = sanitizePdfContentDensityMultiplier(options.contentDensityMultiplier)
+  const { clone, viewport, cleanup, captureWidth } = buildPdfExportRoot(getPdfObservedSource(source), contentDensityMultiplier)
   try {
     throwIfPdfRenderCancelled(options.shouldCancel)
     await waitForNextPaint()
@@ -994,6 +1014,7 @@ async function renderPdfPages(source: HTMLElement, options: RenderPdfPagesOption
       pages,
       layout,
       captureWidth,
+      contentDensityMultiplier,
       renderedAt: Date.now(),
     }
   } finally {
@@ -4664,6 +4685,10 @@ export function ToolNotebookPage() {
   const [importTextValue, setImportTextValue] = useState("")
   const [importError, setImportError] = useState<string | null>(null)
   const [blockReorderState, setBlockReorderState] = useState<ActiveBlockReorderState | null>(null)
+  const [pdfContentDensityMultiplier, setPdfContentDensityMultiplier] = useState(() => {
+    if (typeof window === "undefined") return PDF_EXPORT_DEFAULT_CONTENT_DENSITY_MULTIPLIER
+    return sanitizePdfContentDensityMultiplier(window.localStorage.getItem(PDF_EXPORT_CONTENT_DENSITY_STORAGE_KEY))
+  })
   const [pdfViewMode, setPdfViewMode] = useState<PdfViewMode>("editor")
   const [pdfRenderState, setPdfRenderState] = useState<PdfRenderState>("idle")
   const [pdfPreviewDirty, setPdfPreviewDirty] = useState(false)
@@ -4681,6 +4706,7 @@ export function ToolNotebookPage() {
   const pdfContentRef = useRef<HTMLDivElement>(null)
   const pdfRenderCacheRef = useRef<PdfRenderCacheEntry | null>(null)
   const pdfRenderJobIdRef = useRef(0)
+  const pdfContentDensityRef = useRef(pdfContentDensityMultiplier)
   const blockNodesRef = useRef<Record<string, HTMLDivElement | null>>({})
   const blockReorderStateRef = useRef<ActiveBlockReorderState | null>(null)
   const blockReorderGestureRef = useRef<BlockReorderGesture | null>(null)
@@ -4688,6 +4714,10 @@ export function ToolNotebookPage() {
   const showPdfBreaks = pdfViewMode === "preview"
   const showingPdfPreview = pdfViewMode === "preview" && pdfPreviewPages.length > 0
   const pdfPreviewBusy = pdfRenderState === "layouting" || pdfRenderState === "rasterizing"
+  const handlePdfContentDensityChange = useCallback((nextValue: number) => {
+    const sanitized = sanitizePdfContentDensityMultiplier(nextValue)
+    setPdfContentDensityMultiplier((current) => (Math.abs(current - sanitized) < 0.001 ? current : sanitized))
+  }, [])
 
   useEffect(() => {
     if (!showSortMenu) return
@@ -5065,6 +5095,7 @@ export function ToolNotebookPage() {
     () => (activeMemoRaw ? renderedDocs[activeMemoRaw.id] ?? activeMemoRaw : null),
     [activeMemoRaw, renderedDocs]
   )
+  const activeMemoExportTags = useMemo(() => sanitizeNotebookTags(activeMemo?.tags ?? []), [activeMemo?.tags])
 
   const activeMemoIsLocked = Boolean(activeMemoRaw?.lock)
   const activeMemoIsUnlocked = Boolean(activeMemoRaw?.id && unlockedPayloads[activeMemoRaw.id])
@@ -5134,7 +5165,8 @@ export function ToolNotebookPage() {
         !pdfPreviewDirty &&
         cachedSnapshot &&
         cachedSnapshot.docId === activeMemo.id &&
-        cachedSnapshot.docUpdatedAt === activeMemo.updatedAt
+        cachedSnapshot.docUpdatedAt === activeMemo.updatedAt &&
+        Math.abs(cachedSnapshot.contentDensityMultiplier - pdfContentDensityMultiplier) < 0.001
 
       if (canReuseCache) {
         restorePdfSnapshotFromCache(cachedSnapshot)
@@ -5153,6 +5185,7 @@ export function ToolNotebookPage() {
       try {
         const snapshot = await renderPdfPages(pdfContentRef.current, {
           doc: activeMemo,
+          contentDensityMultiplier: pdfContentDensityMultiplier,
           shouldCancel: () => pdfRenderJobIdRef.current !== jobId,
           onLayout: (layout) => {
             if (pdfRenderJobIdRef.current !== jobId) return
@@ -5195,7 +5228,7 @@ export function ToolNotebookPage() {
         return null
       }
     },
-    [activeMemo, pdfPreviewDirty, restorePdfSnapshotFromCache]
+    [activeMemo, pdfContentDensityMultiplier, pdfPreviewDirty, restorePdfSnapshotFromCache]
   )
 
   const openPdfPreview = useCallback(
@@ -5208,6 +5241,7 @@ export function ToolNotebookPage() {
         !cachedSnapshot ||
         cachedSnapshot.docId !== activeMemo.id ||
         cachedSnapshot.docUpdatedAt !== activeMemo.updatedAt ||
+        Math.abs(cachedSnapshot.contentDensityMultiplier - pdfContentDensityMultiplier) >= 0.001 ||
         pdfPreviewDirty
 
       if (!shouldRender) {
@@ -5216,7 +5250,7 @@ export function ToolNotebookPage() {
       }
       await runPdfRender({ force: true })
     },
-    [activeMemo, pdfPreviewDirty, restorePdfSnapshotFromCache, runPdfRender]
+    [activeMemo, pdfContentDensityMultiplier, pdfPreviewDirty, restorePdfSnapshotFromCache, runPdfRender]
   )
 
   const closePdfPreview = useCallback(() => {
@@ -5226,6 +5260,26 @@ export function ToolNotebookPage() {
       setPdfRenderState("idle")
     }
   }, [pdfRenderState])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    window.localStorage.setItem(PDF_EXPORT_CONTENT_DENSITY_STORAGE_KEY, String(pdfContentDensityMultiplier))
+  }, [pdfContentDensityMultiplier])
+
+  useEffect(() => {
+    const previousValue = pdfContentDensityRef.current
+    if (Math.abs(previousValue - pdfContentDensityMultiplier) < 0.001) return
+    pdfContentDensityRef.current = pdfContentDensityMultiplier
+    pdfRenderCacheRef.current = null
+    setPdfPreviewDirty(true)
+    setPdfRenderedAt(null)
+    setPdfLayoutCacheKey(null)
+    setPdfBitmapCacheKey(null)
+    setPdfPreviewError(null)
+    if (showPdfBreaks && activeMemo) {
+      void runPdfRender({ force: true })
+    }
+  }, [activeMemo, pdfContentDensityMultiplier, runPdfRender, showPdfBreaks])
 
   useEffect(() => {
     if (!activeMemo) {
@@ -5257,14 +5311,19 @@ export function ToolNotebookPage() {
       const cachedSnapshot = pdfRenderCacheRef.current
       if (!root || !cachedSnapshot || !activeMemo) return
       if (cachedSnapshot.docId !== activeMemo.id) return
-      const captureWidth = Math.max(1, Math.ceil(getPdfObservedSource(root).getBoundingClientRect().width || root.clientWidth || 0))
+      const captureWidth = Math.max(
+        1,
+        Math.ceil(
+          (getPdfObservedSource(root).getBoundingClientRect().width || root.clientWidth || 0) * pdfContentDensityMultiplier
+        )
+      )
       if (Math.abs(captureWidth - cachedSnapshot.captureWidth) >= 2) {
         setPdfPreviewDirty(true)
       }
     }
     window.addEventListener("resize", handleResize)
     return () => window.removeEventListener("resize", handleResize)
-  }, [activeMemo])
+  }, [activeMemo, pdfContentDensityMultiplier])
 
   // Cmd+F / Ctrl+F to open find bar
   useEffect(() => {
@@ -5784,11 +5843,13 @@ export function ToolNotebookPage() {
         !pdfPreviewDirty &&
         cachedSnapshot &&
         cachedSnapshot.docId === activeMemo.id &&
-        cachedSnapshot.docUpdatedAt === activeMemo.updatedAt
+        cachedSnapshot.docUpdatedAt === activeMemo.updatedAt &&
+        Math.abs(cachedSnapshot.contentDensityMultiplier - pdfContentDensityMultiplier) < 0.001
       const rendered = shouldReuseCache
         ? cachedSnapshot
         : await renderPdfPages(pdfContentRef.current, {
             doc: activeMemo,
+            contentDensityMultiplier: pdfContentDensityMultiplier,
           })
 
       if (!shouldReuseCache) {
@@ -7257,14 +7318,14 @@ export function ToolNotebookPage() {
                   void openPdfPreview()
                 }}
                 className={cn(
-                  "hidden h-8 items-center gap-2 rounded-full border px-3.5 text-[11px] font-semibold tracking-[-0.01em] transition-colors lg:flex",
+                  "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-[10.5px] font-semibold tracking-[-0.01em] transition-colors sm:h-8 sm:gap-2 sm:px-3.5 sm:text-[11px]",
                   showPdfBreaks
                     ? "border-[#BFDBFE] bg-[#EFF6FF] text-[#007AFF]"
                     : "border-[#E5E7EB] bg-white text-[#5B6577] hover:border-[#D0D7E2] hover:bg-[#F8FAFC] hover:text-[#111827]"
                 )}
                 title={showPdfBreaks ? "편집 화면으로 돌아가기" : "PDF 미리보기"}
               >
-                <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5" aria-hidden="true">
+                <svg viewBox="0 0 16 16" fill="none" className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" aria-hidden="true">
                   <rect x="1" y="1" width="14" height="14" rx="2" stroke="currentColor" strokeWidth="1.4" />
                   <line x1="1" y1="5.5" x2="15" y2="5.5" stroke="currentColor" strokeWidth="1" strokeDasharray="2 1.5" />
                   <line x1="1" y1="10.5" x2="15" y2="10.5" stroke="currentColor" strokeWidth="1" strokeDasharray="2 1.5" />
@@ -7414,6 +7475,7 @@ export function ToolNotebookPage() {
               >
               {activeMemo.coverStyle && (
                 <div
+                  data-pdf-hide="true"
                   className={cn(
                     "mb-4 h-16 rounded-[24px] border border-white/70 shadow-[0_20px_40px_rgba(148,163,184,0.14)] lg:mb-5 lg:h-28 lg:rounded-[28px]",
                     coverClassMap[(activeMemo.coverStyle as RNestMemoCoverId) ?? "lavender-glow"]
@@ -7422,7 +7484,7 @@ export function ToolNotebookPage() {
               )}
 
               {/* page icon */}
-              <div className="relative mb-3 lg:mb-4">
+              <div data-pdf-hide="true" className="relative mb-3 lg:mb-4">
                 <button
                   type="button"
                   onClick={() => {
@@ -7462,8 +7524,25 @@ export function ToolNotebookPage() {
                 }}
               />
 
+              {activeMemoExportTags.length > 0 && (
+                <div
+                  data-pdf-export-only="true"
+                  data-pdf-export-display="flex"
+                  className="mb-5 hidden flex-wrap items-center gap-2"
+                >
+                  {activeMemoExportTags.map((tag) => (
+                    <span
+                      key={`pdf-tag-${tag}`}
+                      className="inline-flex items-center rounded-full bg-[color:var(--rnest-accent-soft)] px-3 py-1 text-[12px] font-medium leading-none text-[color:var(--rnest-accent)]"
+                    >
+                      #{tag}
+                    </span>
+                  ))}
+                </div>
+              )}
+
               {/* compact tools for phone/tablet */}
-              <div className="mb-5 lg:hidden">
+              <div data-pdf-hide="true" className="mb-5 lg:hidden">
                 {activeMemoIsLocked && !activeMemoIsUnlocked ? (
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="inline-flex items-center gap-1.5 rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-3 py-1 text-[12px] font-medium text-[color:var(--rnest-accent)]">
@@ -7628,7 +7707,7 @@ export function ToolNotebookPage() {
               </div>
 
               {/* desktop tools row */}
-              <div className="mb-8 hidden flex-wrap items-center gap-3 lg:flex">
+              <div data-pdf-hide="true" className="mb-8 hidden flex-wrap items-center gap-3 lg:flex">
                 {activeMemoIsLocked && !activeMemoIsUnlocked ? (
                   <>
                     <span className="inline-flex items-center gap-1.5 rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-3 py-1 text-[12px] font-medium text-[color:var(--rnest-accent)]">
@@ -7922,6 +8001,29 @@ export function ToolNotebookPage() {
                     <div>
                       <p className="text-[12px] font-semibold tracking-[-0.01em] text-[#111827]">PDF 미리보기</p>
                       <p className="mt-1 text-[12px] text-[#6B7280]">편집의 다음 PDF 페이지 시작 선을 그대로 기준으로 사용합니다.</p>
+                      <div className="mt-2 inline-flex items-center gap-1 rounded-full border border-[#E5E7EB] bg-[#F8FAFC] p-1">
+                        <span className="px-2 text-[10px] font-semibold tracking-[-0.01em] text-[#6B7280]">내용량</span>
+                        {PDF_CONTENT_DENSITY_OPTIONS.map((option) => {
+                          const active = Math.abs(option.value - pdfContentDensityMultiplier) < 0.001
+                          return (
+                            <button
+                              key={`pdf-density-${option.value}`}
+                              type="button"
+                              onClick={() => handlePdfContentDensityChange(option.value)}
+                              disabled={pdfPreviewBusy}
+                              className={cn(
+                                "inline-flex h-7 items-center rounded-full px-2.5 text-[11px] font-semibold tracking-[-0.01em] transition-colors",
+                                active
+                                  ? "bg-white text-[#111827] shadow-[0_1px_2px_rgba(15,23,42,0.08)]"
+                                  : "text-[#6B7280] hover:text-[#374151]",
+                                pdfPreviewBusy && !active && "cursor-wait text-[#9CA3AF]"
+                              )}
+                            >
+                              {option.label}
+                            </button>
+                          )
+                        })}
+                      </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="inline-flex items-center rounded-full border border-[#E5E7EB] bg-white px-3 py-1 text-[11px] font-medium text-[#4B5563]">
