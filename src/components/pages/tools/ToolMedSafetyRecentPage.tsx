@@ -7,12 +7,10 @@ import { getBrowserAuthHeaders, useAuthState } from "@/lib/auth";
 import { useI18n } from "@/lib/useI18n";
 import { buildStructuredCopyText, copyTextToClipboard } from "@/lib/structuredCopy";
 import { AnimatedCopyLabel } from "@/components/ui/AnimatedCopyLabel";
-import { BottomSheet } from "@/components/ui/BottomSheet";
-import { Button } from "@/components/ui/Button";
 import { sanitizeMemoDocument } from "@/lib/notebook";
 import { buildMedSafetyMemoBlocks } from "@/lib/medSafetyMemo";
 import { useAppStore } from "@/lib/store";
-import { ChevronRight } from "lucide-react";
+import { ArrowLeft, ChevronRight } from "lucide-react";
 
 /* ── Types ── */
 
@@ -53,10 +51,6 @@ const BTN_PRIMARY =
   "inline-flex h-9 items-center justify-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-4 text-[11px] font-semibold text-[color:var(--rnest-accent)] transition-colors hover:brightness-95 active:brightness-90";
 const BTN_SECONDARY =
   "inline-flex h-9 items-center justify-center rounded-full border border-gray-200 bg-gray-50 px-4 text-[11px] font-semibold text-gray-500 transition-colors hover:bg-gray-100 active:bg-gray-200";
-const BTN_BOTTOM_PRIMARY =
-  "h-11 flex-1 rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-4 text-[13px] font-semibold text-[color:var(--rnest-accent)] hover:brightness-95";
-const BTN_BOTTOM_SECONDARY =
-  "h-11 flex-1 rounded-full border border-gray-200 bg-gray-50 px-4 text-[13px] font-semibold text-gray-500 hover:bg-gray-100";
 
 /* ── Utility functions (unchanged) ── */
 
@@ -257,8 +251,7 @@ export function ToolMedSafetyRecentPage() {
   const [items, setItems] = useState<MedSafetyRecentItem[]>([]);
   const [historyLimit, setHistoryLimit] = useState(5);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [isDesktop, setIsDesktop] = useState(false);
+  const [view, setView] = useState<"list" | "detail">("list");
   const [copyMessage, setCopyMessage] = useState("");
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
@@ -280,7 +273,7 @@ export function ToolMedSafetyRecentPage() {
       setItems([]);
       setHistoryLimit(5);
       setSelectedId(null);
-      setDetailOpen(false);
+      setView("list");
       return;
     }
 
@@ -323,29 +316,14 @@ export function ToolMedSafetyRecentPage() {
   }, [status]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return undefined;
-    const media = window.matchMedia("(min-width: 1280px)");
-    const sync = () => {
-      const next = media.matches;
-      setIsDesktop(next);
-      if (next) setDetailOpen(false);
-    };
-    sync();
-    if (typeof media.addEventListener === "function") {
-      media.addEventListener("change", sync);
-      return () => media.removeEventListener("change", sync);
-    }
-    media.addListener(sync);
-    return () => media.removeListener(sync);
-  }, []);
-
-  useEffect(() => {
     if (!items.length) {
       setSelectedId(null);
+      setView("list");
       return;
     }
-    if (!selectedId || !items.some((item) => item.id === selectedId)) {
-      setSelectedId(items[0]!.id);
+    if (selectedId && !items.some((item) => item.id === selectedId)) {
+      setSelectedId(null);
+      setView("list");
     }
   }, [items, selectedId]);
 
@@ -372,7 +350,7 @@ export function ToolMedSafetyRecentPage() {
       }));
   }, [items, t]);
 
-  const selected = useMemo(() => items.find((item) => item.id === selectedId) ?? items[0] ?? null, [items, selectedId]);
+  const selected = useMemo(() => items.find((item) => item.id === selectedId) ?? null, [items, selectedId]);
   const selectedSections = useMemo(() => parseNarrativeSections(selected?.result.answer ?? ""), [selected]);
   const selectedCopyText = useMemo(() => {
     if (!selected) return "";
@@ -404,7 +382,12 @@ export function ToolMedSafetyRecentPage() {
 
   function handleOpenItem(item: MedSafetyRecentItem) {
     setSelectedId(item.id);
-    if (!isDesktop) setDetailOpen(true);
+    setView("detail");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function handleBackToList() {
+    setView("list");
   }
 
   function saveRecentItemToMemo(item: MedSafetyRecentItem) {
@@ -445,84 +428,6 @@ export function ToolMedSafetyRecentPage() {
     }
     router.push("/tools/notebook");
   }
-
-  /* ── Detail content (shared between desktop panel & mobile bottom sheet) ── */
-
-  const detailContent = selected ? (
-    <div className="space-y-5">
-      {/* Header */}
-      <div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className={PILL_ACCENT}>{t(kindLabel(selected.result.resultKind))}</span>
-          <span className={PILL_GRAY}>{formatDateTime(selected.savedAt)}</span>
-        </div>
-        <h2 className="mt-3 text-[22px] font-bold tracking-[-0.02em] text-gray-900 md:text-[24px]">
-          {selected.result.title}
-        </h2>
-      </div>
-
-      {/* Actions (desktop only — mobile uses BottomSheet footer) */}
-      {isDesktop && (
-        <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => void handleCopySelected()} className={BTN_PRIMARY}>
-            <AnimatedCopyLabel copied={copiedKey === "selected"} label={t("답변 복사")} />
-          </button>
-          <button type="button" onClick={() => saveRecentItemToMemo(selected)} className={BTN_SECONDARY}>
-            {t("메모에 정리하기")}
-          </button>
-        </div>
-      )}
-
-      {/* Question */}
-      <div className="rounded-xl bg-[#FAFAFB] px-4 py-3">
-        <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-400">{t("질문")}</div>
-        <div className="mt-1.5 text-[14px] leading-6 text-gray-900">{selected.request.query || "-"}</div>
-      </div>
-
-      {/* Summary */}
-      <div>
-        <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-400">{t("요약")}</div>
-        <div className="mt-1.5 text-[15px] leading-7 text-gray-800">{selected.result.summary}</div>
-      </div>
-
-      <hr className="border-gray-100" />
-
-      {/* Sections */}
-      {selectedSections.length ? (
-        <div className="space-y-5">
-          {selectedSections.map((section, index) => (
-            <section key={`${section.title}-${index}`}>
-              <h3 className="text-[15px] font-semibold text-gray-900">{t(section.title || "상세 결과")}</h3>
-              <div className="mt-2 space-y-1.5">
-                {section.items.map((entry, entryIndex) => (
-                  <p key={`${section.title}-${entryIndex}`} className="text-[14px] leading-7 text-gray-700">
-                    {entry}
-                  </p>
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
-      ) : (
-        <div className="whitespace-pre-wrap break-words text-[14px] leading-7 text-gray-700">
-          {selected.result.answer}
-        </div>
-      )}
-
-      {/* Meta pills */}
-      {(selected.request.mode || selected.request.situation || selected.request.queryIntent) && (
-        <div className="flex flex-wrap gap-1.5 pt-1">
-          {selected.request.mode ? <span className={PILL_GRAY}>{t(modeLabel(selected.request.mode))}</span> : null}
-          {selected.request.situation ? <span className={PILL_GRAY}>{t(situationLabel(selected.request.situation))}</span> : null}
-          {selected.request.queryIntent ? <span className={PILL_GRAY}>{t(queryIntentLabel(selected.request.queryIntent))}</span> : null}
-        </div>
-      )}
-    </div>
-  ) : (
-    <div className="py-12 text-center text-[14px] text-gray-400">
-      {t("선택한 검색 결과가 여기 표시됩니다.")}
-    </div>
-  );
 
   /* ── Render ── */
 
@@ -576,91 +481,118 @@ export function ToolMedSafetyRecentPage() {
                 {t("아직 저장된 최근 검색 결과가 없습니다. AI 검색 실행 후 다시 확인해 주세요.")}
               </p>
             </div>
-          ) : (
-            <div className="grid gap-6 xl:grid-cols-[380px_1fr]">
-              {/* ── Left: List ── */}
-              <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white">
-                {groupedItems.map((group, groupIndex) => (
-                  <div key={group.key}>
-                    {groupIndex > 0 && <hr className="border-gray-50" />}
-                    <div className="px-4 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-[0.06em] text-gray-400">
-                      {group.label} · {group.items.length}
-                    </div>
-                    {group.items.map((item) => {
-                      const isActive = selected?.id === item.id;
-                      return (
-                        <button
-                          key={item.id}
-                          type="button"
-                          onClick={() => handleOpenItem(item)}
-                          className={`flex w-full items-center gap-3 border-l-[3px] px-4 py-3 text-left transition-colors ${
-                            isActive
-                              ? "border-l-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent-soft)]"
-                              : "border-l-transparent hover:bg-gray-50"
-                          }`}
-                        >
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-1.5">
-                              <span className={PILL_ACCENT}>{t(kindLabel(item.result.resultKind))}</span>
-                              <span className="text-[11px] text-gray-400">{formatListTime(item.savedAt)}</span>
-                            </div>
-                            <div className="mt-1.5 truncate text-[14px] font-semibold text-gray-900">
-                              {item.result.title}
-                            </div>
-                            <div className="mt-0.5 truncate text-[12px] text-gray-500">
-                              {shortText(item.request.query || "-", 60)}
-                            </div>
-                          </div>
-                          <ChevronRight className="h-4 w-4 shrink-0 text-gray-300 xl:hidden" />
-                        </button>
-                      );
-                    })}
+          ) : view === "list" ? (
+            /* ── List View ── */
+            <div className="space-y-5">
+              {groupedItems.map((group, groupIndex) => (
+                <section key={group.key}>
+                  <div className="px-1 pb-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-gray-400">
+                    {group.label} · {group.items.length}
                   </div>
-                ))}
-              </div>
+                  <div className="space-y-2">
+                    {group.items.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => handleOpenItem(item)}
+                        className="group flex w-full items-center gap-4 rounded-2xl border border-gray-100 bg-white px-5 py-4 text-left transition-colors hover:border-[color:var(--rnest-accent-border)] hover:bg-[color:var(--rnest-accent-soft)]"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className={PILL_ACCENT}>{t(kindLabel(item.result.resultKind))}</span>
+                            <span className="text-[11px] text-gray-400">{formatListTime(item.savedAt)}</span>
+                          </div>
+                          <div className="mt-2 truncate text-[15px] font-semibold text-gray-900">
+                            {item.result.title}
+                          </div>
+                          <div className="mt-1 truncate text-[13px] text-gray-500">
+                            {shortText(item.request.query || "-", 80)}
+                          </div>
+                        </div>
+                        <ChevronRight className="h-4 w-4 shrink-0 text-gray-300 transition-colors group-hover:text-[color:var(--rnest-accent)]" />
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+          ) : selected ? (
+            /* ── Detail View ── */
+            <div>
+              <button
+                type="button"
+                onClick={handleBackToList}
+                className="mb-5 inline-flex items-center gap-1.5 text-[13px] font-semibold text-gray-500 transition-colors hover:text-gray-900"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                {t("목록으로")}
+              </button>
 
-              {/* ── Right: Detail (desktop) ── */}
-              <div className="hidden xl:block">
-                <div className="sticky top-6 rounded-2xl border border-gray-100 bg-white p-5 md:p-6">
-                  {detailContent}
+              <div className="rounded-2xl border border-gray-100 bg-white p-5 sm:p-6">
+                {/* Header pills */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={PILL_ACCENT}>{t(kindLabel(selected.result.resultKind))}</span>
+                  <span className={PILL_GRAY}>{formatDateTime(selected.savedAt)}</span>
+                  {selected.request.mode ? <span className={PILL_GRAY}>{t(modeLabel(selected.request.mode))}</span> : null}
+                  {selected.request.situation ? <span className={PILL_GRAY}>{t(situationLabel(selected.request.situation))}</span> : null}
+                  {selected.request.queryIntent ? <span className={PILL_GRAY}>{t(queryIntentLabel(selected.request.queryIntent))}</span> : null}
                 </div>
+
+                {/* Title */}
+                <h2 className="mt-4 text-[22px] font-bold tracking-[-0.02em] text-gray-900 sm:text-[24px]">
+                  {selected.result.title}
+                </h2>
+
+                {/* Action buttons */}
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button type="button" onClick={() => void handleCopySelected()} className={BTN_PRIMARY}>
+                    <AnimatedCopyLabel copied={copiedKey === "selected"} label={t("답변 복사")} />
+                  </button>
+                  <button type="button" onClick={() => saveRecentItemToMemo(selected)} className={BTN_SECONDARY}>
+                    {t("메모에 정리하기")}
+                  </button>
+                </div>
+
+                {/* Question box */}
+                <div className="mt-5 rounded-xl bg-[#FAFAFB] px-4 py-3">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-400">{t("질문")}</div>
+                  <div className="mt-1.5 text-[14px] leading-6 text-gray-900">{selected.request.query || "-"}</div>
+                </div>
+
+                {/* Summary */}
+                <div className="mt-5">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-400">{t("요약")}</div>
+                  <div className="mt-1.5 text-[15px] leading-7 text-gray-800">{selected.result.summary}</div>
+                </div>
+
+                <hr className="my-5 border-gray-100" />
+
+                {/* Parsed sections */}
+                {selectedSections.length ? (
+                  <div className="space-y-5">
+                    {selectedSections.map((section, index) => (
+                      <section key={`${section.title}-${index}`}>
+                        <h3 className="text-[15px] font-semibold text-gray-900">{t(section.title || "상세 결과")}</h3>
+                        <div className="mt-2 space-y-1.5">
+                          {section.items.map((entry, entryIndex) => (
+                            <p key={`${section.title}-${entryIndex}`} className="text-[14px] leading-7 text-gray-700">
+                              {entry}
+                            </p>
+                          ))}
+                        </div>
+                      </section>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="whitespace-pre-wrap break-words text-[14px] leading-7 text-gray-700">
+                    {selected.result.answer}
+                  </div>
+                )}
               </div>
             </div>
-          )}
+          ) : null}
         </div>
       </div>
-
-      {/* ── Mobile: BottomSheet ── */}
-      <BottomSheet
-        open={!isDesktop && detailOpen && Boolean(selected)}
-        onClose={() => setDetailOpen(false)}
-        variant="appstore"
-        title={selected?.result.title || t("최근 검색 상세")}
-        subtitle={selected ? `${t("분석 시각")}: ${formatDateTime(selected.savedAt)}` : ""}
-        maxHeightClassName="max-h-[82dvh]"
-        footer={
-          selected ? (
-            <div className="flex flex-col gap-2">
-              <div className="flex gap-2">
-                <Button className={BTN_BOTTOM_PRIMARY} onClick={() => void handleCopySelected()}>
-                  <AnimatedCopyLabel copied={copiedKey === "selected"} label={t("답변 복사")} />
-                </Button>
-                <Button variant="secondary" className={BTN_BOTTOM_SECONDARY} onClick={() => setDetailOpen(false)}>
-                  {t("닫기")}
-                </Button>
-              </div>
-              <Button
-                className={`${BTN_BOTTOM_SECONDARY} w-full`}
-                onClick={() => saveRecentItemToMemo(selected)}
-              >
-                {t("메모에 정리하기")}
-              </Button>
-            </div>
-          ) : null
-        }
-      >
-        {detailContent}
-      </BottomSheet>
 
       {/* ── Toast ── */}
       {copyMessage ? (
