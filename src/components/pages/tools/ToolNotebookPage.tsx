@@ -249,6 +249,20 @@ function getLeadingSpacerInfo(blocks: RNestMemoBlock[], index: number) {
   }
 }
 
+function PdfPageStartIndicator() {
+  return (
+    <div data-pdf-hide="true" aria-hidden="true" className="pointer-events-none px-1">
+      <div className="flex items-center gap-3">
+        <div className="h-px flex-1 bg-[#D8DEE8]" />
+        <div className="inline-flex items-center rounded-full border border-[#E6E8F1] bg-white/98 px-3 py-1 text-[11px] font-semibold tracking-[-0.01em] text-[color:var(--rnest-accent)] shadow-[0_10px_24px_rgba(15,23,42,0.08)]">
+          다음 PDF 페이지 시작
+        </div>
+        <div className="h-px flex-1 bg-[#D8DEE8]" />
+      </div>
+    </div>
+  )
+}
+
 function createPdfFieldPreview(field: HTMLInputElement | HTMLTextAreaElement) {
   const preview = document.createElement("div")
   preview.className = field.className
@@ -7348,33 +7362,10 @@ export function ToolNotebookPage() {
                   {/* blocks */}
                   <div className="space-y-3 pl-0 lg:pl-10">
                     {activeMemo.blocks.map((block, idx) => {
-                      if (isNextPageSpacer(block)) {
-                        return (
-                          <div key={block.id} data-pdf-hide="true" aria-hidden="true" className="pointer-events-none px-1">
-                            <div className="flex items-center gap-3">
-                              <div className="h-px flex-1 bg-[#D8DEE8]" />
-                              <div className="inline-flex items-center rounded-full border border-[#E6E8F1] bg-white/98 px-3 py-1 text-[11px] font-semibold tracking-[-0.01em] text-[color:var(--rnest-accent)] shadow-[0_10px_24px_rgba(15,23,42,0.08)]">
-                                다음 PDF 페이지 시작
-                              </div>
-                              <div className="h-px flex-1 bg-[#D8DEE8]" />
-                            </div>
-                          </div>
-                        )
-                      }
-                      if (isBlankSpaceSpacer(block)) {
-                        const { startsNextPdfPage } = getLeadingSpacerInfo(activeMemo.blocks, idx)
-                        return (
-                          <div
-                            key={block.id}
-                            id={`memo-block-${block.id}`}
-                            aria-hidden="true"
-                            data-pdf-force-page-start={startsNextPdfPage ? "true" : undefined}
-                            style={{ height: `${getBlankSpaceUnits(block) * BLANK_SPACE_UNIT_PX}px` }}
-                          />
-                        )
-                      }
+                      if (block.type === "pageSpacer") return null
                       const attachment = findAttachment(activeMemo, block.attachmentId)
-                      const { startsNextPdfPage } = getLeadingSpacerInfo(activeMemo.blocks, idx)
+                      const { startsNextPdfPage, blankSpaceBlock } = getLeadingSpacerInfo(activeMemo.blocks, idx)
+                      const blankSpaceHeightPx = startsNextPdfPage ? 0 : getBlankSpaceUnits(blankSpaceBlock) * BLANK_SPACE_UNIT_PX
                       const visibleBlockIndex = activeMemo.blocks
                         .slice(0, idx + 1)
                         .filter((entry) => entry.type !== "pageSpacer").length - 1
@@ -7394,6 +7385,13 @@ export function ToolNotebookPage() {
                               <div className="h-[5px] w-[5px] shrink-0 rounded-full bg-[#007AFF]" />
                               <div className="h-[2px] flex-1 rounded-full bg-[#007AFF]/70" />
                             </div>
+                          )}
+                          {startsNextPdfPage && <PdfPageStartIndicator />}
+                          {blankSpaceHeightPx > 0 && (
+                            <div
+                              aria-hidden="true"
+                              style={{ height: `${blankSpaceHeightPx}px` }}
+                            />
                           )}
                           <InlineBlock
                             block={block}
