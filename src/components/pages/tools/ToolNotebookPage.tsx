@@ -3312,43 +3312,50 @@ function InlineBlock({
               )}
             >
               {showPdfBreaks ? null : (
-                /* 편집 모드: 얇은 선 + 중앙 pill */
-                <div className="flex items-center gap-2 px-1">
-                  <div className="h-px flex-1 bg-gray-200" />
-                  <button
-                    type="button"
-                    title={pageSpacerMode === "next-page" ? "수동 간격으로 전환" : "다음 페이지 시작으로 전환"}
-                    onClick={() =>
-                      onChange({
-                        ...block,
-                        spacerMode: pageSpacerMode === "next-page" ? "manual" : "next-page",
-                      })
-                    }
-                    className="inline-flex shrink-0 items-center gap-1 rounded-full bg-gray-50 px-2.5 py-0.5 text-[11px] font-medium text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700"
-                  >
-                    {pageSpacerMode === "next-page" ? "페이지 구분" : `${pageSpacerManualHeight}px`}
-                  </button>
-                  {pageSpacerMode === "manual" && (
-                    <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover/spacer:opacity-100">
-                      <button
-                        type="button"
-                        onClick={() => onChange({ ...block, spacerHeight: clampPageSpacerHeight(pageSpacerManualHeight - 24) })}
-                        className="flex h-5 w-5 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
-                        aria-label="간격 줄이기"
-                      >
-                        <Minus className="h-2.5 w-2.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onChange({ ...block, spacerHeight: clampPageSpacerHeight(pageSpacerManualHeight + 24) })}
-                        className="flex h-5 w-5 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
-                        aria-label="간격 늘리기"
-                      >
-                        <Plus className="h-2.5 w-2.5" />
-                      </button>
-                    </div>
-                  )}
-                  <div className="h-px flex-1 bg-gray-200" />
+                /* 편집 모드: 실제 경계처럼 보이는 선은 제거하고 의미만 남긴다.
+                   정확한 페이지 위치는 PDF 미리보기 카드가 단일 소스 오브 트루스다. */
+                <div className="pointer-events-none relative flex items-center justify-between gap-3 px-1">
+                  <div className="pointer-events-auto inline-flex min-w-0 items-center gap-2 rounded-full border border-[#E6E8F1] bg-white/95 px-3 py-1.5 shadow-[0_8px_20px_rgba(15,23,42,0.06)]">
+                    <button
+                      type="button"
+                      title={pageSpacerMode === "next-page" ? "수동 간격으로 전환" : "다음 페이지 시작으로 전환"}
+                      onClick={() =>
+                        onChange({
+                          ...block,
+                          spacerMode: pageSpacerMode === "next-page" ? "manual" : "next-page",
+                        })
+                      }
+                      className="inline-flex min-w-0 items-center gap-1.5 rounded-full text-[11px] font-medium text-[#667085] transition-colors hover:text-[#4B5565]"
+                    >
+                      <ArrowUpDown className="h-3 w-3 shrink-0 text-[color:var(--rnest-accent)]" />
+                      <span className="truncate">
+                        {pageSpacerMode === "next-page" ? "다음 PDF 페이지 시작" : `PDF 간격 ${pageSpacerManualHeight}px`}
+                      </span>
+                    </button>
+                    {pageSpacerMode === "manual" && (
+                      <div className="flex items-center rounded-full bg-[#F8F9FC] p-0.5 opacity-0 transition-opacity group-hover/spacer:opacity-100">
+                        <button
+                          type="button"
+                          onClick={() => onChange({ ...block, spacerHeight: clampPageSpacerHeight(pageSpacerManualHeight - 24) })}
+                          className="flex h-7 w-7 items-center justify-center rounded-full text-[#8A90A2] transition-colors hover:bg-white hover:text-[#667085]"
+                          aria-label="간격 줄이기"
+                        >
+                          <Minus className="h-3 w-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onChange({ ...block, spacerHeight: clampPageSpacerHeight(pageSpacerManualHeight + 24) })}
+                          className="flex h-7 w-7 items-center justify-center rounded-full text-[#8A90A2] transition-colors hover:bg-white hover:text-[#667085]"
+                          aria-label="간격 늘리기"
+                        >
+                          <Plus className="h-3 w-3" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <span className="hidden text-[11px] font-medium text-[#98A2B3] lg:inline">
+                    정확한 페이지 위치는 PDF 미리보기와 동일
+                  </span>
                 </div>
               )}
             </div>
@@ -4363,7 +4370,6 @@ export function ToolNotebookPage() {
   const [showPdfBreaks, setShowPdfBreaks] = useState(false)
   const [pdfPreviewPages, setPdfPreviewPages] = useState<PdfPreviewPage[]>([])
   const [pdfPreviewBusy, setPdfPreviewBusy] = useState(false)
-  const [pdfBreakMarkers, setPdfBreakMarkers] = useState<{ y: number; pageFrom: number; pageTo: number }[]>([])
   const [availableTemplates, setAvailableTemplates] = useState<RNestMemoTemplate[]>(() =>
     defaultMemoTemplates.map((template) => sanitizeMemoTemplate(template))
   )
@@ -4392,7 +4398,6 @@ export function ToolNotebookPage() {
     if (!showPdfBreaks || !pdfContentRef.current) {
       setPdfPreviewPages([])
       setPdfPreviewBusy(false)
-      setPdfBreakMarkers([])
       // filler 높이 초기화
       if (pdfContentRef.current) {
         pdfContentRef.current.querySelectorAll<HTMLElement>('[data-page-spacer-filler="true"]').forEach((f) => { f.style.height = "0px" })
@@ -4435,47 +4440,9 @@ export function ToolNotebookPage() {
             }
           }
         }
-
-        // ③ 블록 ID 기반 좌표 매핑으로 break markers 위치 계산
-        // 클론의 slice plan에서 breakAnchor.blockId를 통해 소스 DOM의 같은 블록을 찾고,
-        // 소스 DOM에서의 실제 위치에 break marker를 배치
-        void currentNode.offsetHeight // spacer fill 적용 후 reflow
-        const plan = layout.slicePlan
-        if (plan && plan.slices.length > 1) {
-          const nodeTop = currentNode.getBoundingClientRect().top
-          const markers: Array<{ y: number; pageFrom: number; pageTo: number }> = []
-
-          for (let i = 0; i < plan.slices.length - 1; i++) {
-            const slice = plan.slices[i]
-            const anchor = slice.breakAnchor
-
-            if (anchor?.blockId) {
-              // 같은 block ID로 소스 DOM에서 블록 찾기
-              const sourceBlock = currentNode.querySelector<HTMLElement>(`#${CSS.escape(anchor.blockId)}`)
-              if (sourceBlock) {
-                const blockRect = sourceBlock.getBoundingClientRect()
-                let y: number
-                if (anchor.edge === "bottom") {
-                  y = blockRect.bottom - nodeTop
-                } else {
-                  y = blockRect.top - nodeTop + (anchor.delta || 0)
-                }
-                markers.push({ y: Math.floor(y), pageFrom: i + 1, pageTo: i + 2 })
-              }
-            } else {
-              // 블록 앵커 없으면 raw offset 사용 (fallback)
-              markers.push({ y: Math.floor(slice.offsetY + slice.height), pageFrom: i + 1, pageTo: i + 2 })
-            }
-          }
-
-          setPdfBreakMarkers(markers)
-        } else {
-          setPdfBreakMarkers([])
-        }
       } catch {
         if (!cancelled && token === computeToken) {
           setPdfPreviewPages([])
-          setPdfBreakMarkers([])
         }
       } finally {
         if (!cancelled && token === computeToken) {
@@ -4528,7 +4495,6 @@ export function ToolNotebookPage() {
       window.removeEventListener("resize", schedule)
       // filler 높이 초기화
       node.querySelectorAll<HTMLElement>('[data-page-spacer-filler="true"]').forEach((f) => { f.style.height = "0px" })
-      setPdfBreakMarkers([])
     }
   }, [showPdfBreaks, activeMemoId])
 
@@ -6804,14 +6770,14 @@ export function ToolNotebookPage() {
                     ? "bg-[#007AFF]/10 text-[#007AFF]"
                     : "text-gray-400 hover:bg-gray-100 hover:text-gray-600"
                 )}
-                title={showPdfBreaks ? "PDF 미리보기 닫기" : "PDF 미리보기"}
+                title={showPdfBreaks ? "편집 화면으로 돌아가기" : "PDF 미리보기"}
               >
                 <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5" aria-hidden="true">
                   <rect x="1" y="1" width="14" height="14" rx="2" stroke="currentColor" strokeWidth="1.4" />
                   <line x1="1" y1="5.5" x2="15" y2="5.5" stroke="currentColor" strokeWidth="1" strokeDasharray="2 1.5" />
                   <line x1="1" y1="10.5" x2="15" y2="10.5" stroke="currentColor" strokeWidth="1" strokeDasharray="2 1.5" />
                 </svg>
-                {showPdfBreaks ? "미리보기" : "PDF"}
+                {showPdfBreaks ? "편집" : "PDF"}
               </button>
               <button
                 type="button"
@@ -6944,7 +6910,14 @@ export function ToolNotebookPage() {
                   </div>
                 </div>
               )}
-              <div data-pdf-preview-source="true" className={cn(showingPdfPreview && "hidden")}>
+              <div
+                data-pdf-preview-source="true"
+                aria-hidden={showingPdfPreview ? true : undefined}
+                className={cn(
+                  showingPdfPreview &&
+                    "pointer-events-none absolute inset-x-0 top-0 -z-10 opacity-0 [visibility:hidden]"
+                )}
+              >
               {activeMemo.coverStyle && (
                 <div
                   className={cn(
@@ -7426,28 +7399,21 @@ export function ToolNotebookPage() {
               )}
               </div>
 
-              {showPdfBreaks && !showingPdfPreview && pdfBreakMarkers.map((marker) => (
+              {showPdfBreaks && showingPdfPreview && (
                 <div
-                  key={`pdf-break-${marker.pageFrom}`}
                   data-pdf-hide="true"
                   aria-hidden="true"
-                  style={{ top: marker.y, position: "absolute", left: 0, right: 0, height: 0 }}
-                  className="pointer-events-none z-20"
+                  className="space-y-6 rounded-[32px] border border-[#E6E8F1] bg-[linear-gradient(180deg,rgba(245,247,252,0.98)_0%,rgba(238,242,249,0.96)_100%)] p-5 shadow-[0_28px_64px_rgba(15,23,42,0.08)]"
                 >
-                  <div className="relative h-0 px-3">
-                    <div className="absolute left-3 right-3 top-0 h-px bg-[#D6DAE5]" />
-                    <span
-                      className="absolute left-1/2 top-0 shrink-0 rounded-full border border-[#E6E8F1] bg-white/96 px-3 py-1 text-[10px] font-semibold tracking-[-0.01em] text-[#6F62D9] shadow-[0_10px_24px_rgba(15,23,42,0.08)]"
-                      style={{ transform: "translate(-50%, calc(-100% - 6px))" }}
-                    >
-                      {marker.pageFrom}P → {marker.pageTo}P
-                    </span>
+                  <div className="flex items-center justify-between gap-3 px-1">
+                    <div>
+                      <p className="text-[12px] font-semibold uppercase tracking-[0.18em] text-[#7C8497]">PDF 미리보기</p>
+                      <p className="mt-1 text-[13px] text-[#667085]">이 화면과 실제 다운로드 PDF가 같은 페이지 기준을 사용합니다.</p>
+                    </div>
+                    <div className="inline-flex items-center rounded-full border border-[#E6E8F1] bg-white px-3 py-1 text-[11px] font-medium text-[#7C8497] shadow-[0_10px_20px_rgba(15,23,42,0.06)]">
+                      {pdfPreviewPages.length} 페이지
+                    </div>
                   </div>
-                </div>
-              ))}
-
-              {showPdfBreaks && showingPdfPreview && (
-                <div data-pdf-hide="true" aria-hidden="true" className="space-y-6">
                   {pdfPreviewPages.map((page) => (
                     <div
                       key={`pdf-preview-page-${page.pageNumber}`}
