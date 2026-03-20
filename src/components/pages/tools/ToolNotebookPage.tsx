@@ -125,6 +125,12 @@ import {
   seedNotebookImagePreview,
   uploadNotebookFile,
 } from "@/lib/notebookFiles"
+import {
+  buildResolvedPdfLayoutKey,
+  resolvePdfLayout,
+  type MeasuredPdfBlockBounds,
+  type ResolvedPdfLayout,
+} from "@/lib/notebookPdfLayout"
 import { useAppStore } from "@/lib/store"
 import { getBrowserAuthHeaders } from "@/lib/auth"
 import {
@@ -204,6 +210,33 @@ type PdfPreviewPage = {
   pageNumber: number
   imageDataUrl: string
   renderedHeightPt: number
+}
+
+type PdfViewMode = "editor" | "preview"
+
+type PdfRenderState = "idle" | "layouting" | "rasterizing" | "ready" | "error"
+
+type PdfRenderSnapshot = {
+  layout: ResolvedPdfLayout
+  pages: PdfPreviewPage[]
+  pageWidth: number
+  pageHeight: number
+  contentWidth: number
+  contentHeight: number
+  captureWidth: number
+  renderedAt: number
+}
+
+type PdfRenderCacheEntry = PdfRenderSnapshot & {
+  docId: string
+  docUpdatedAt: number
+}
+
+type RenderPdfPagesOptions = {
+  doc: RNestMemoDocument
+  onLayout?: (layout: ResolvedPdfLayout) => void
+  onPageRendered?: (page: PdfPreviewPage, completed: number, total: number) => void
+  shouldCancel?: () => boolean
 }
 
 type PdfBreakAnchor = {
@@ -624,15 +657,78 @@ function buildPdfSlicePlan(clone: HTMLElement, captureWidth: number, pdfInnerWid
   }
 }
 
-async function renderPdfPages(source: HTMLElement) {
+function waitForNextPaint() {
+  return new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => resolve())
+  })
+}
+
+function waitForDoublePaint() {
+  return new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => resolve())
+    })
+  })
+}
+
+function yieldPdfRasterization() {
+  if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+    return new Promise<void>((resolve) => {
+      window.requestIdleCallback(() => resolve(), { timeout: 120 })
+    })
+  }
+  return new Promise<void>((resolve) => {
+    window.setTimeout(() => resolve(), 0)
+  })
+}
+
+function createPdfRenderCancelledError() {
+  const error = new Error("pdf_render_cancelled")
+  error.name = "PdfRenderCancelledError"
+  return error
+}
+
+function throwIfPdfRenderCancelled(shouldCancel?: () => boolean) {
+  if (shouldCancel?.()) {
+    throw createPdfRenderCancelledError()
+  }
+}
+
+function isPdfRenderCancelled(error: unknown) {
+  return error instanceof Error && error.name === "PdfRenderCancelledError"
+}
+
+function measurePdfBlockBounds(clone: HTMLElement) {
+  const cloneTop = clone.getBoundingClientRect().top
+  const measuredBlocks: Record<string, MeasuredPdfBlockBounds> = {}
+  clone.querySelectorAll<HTMLElement>('[id^="memo-block-"]').forEach((element) => {
+    const blockId = element.id.replace(/^memo-block-/, "")
+    if (!blockId) return
+    const bounds = getElementNaturalBounds(element, cloneTop)
+    measuredBlocks[blockId] = {
+      blockId,
+      top: bounds.top,
+      bottom: bounds.bottom,
+      height: bounds.height,
+    }
+  })
+  return measuredBlocks
+}
+
+function getPdfRenderedHeightPt(canvas: HTMLCanvasElement, contentWidth: number, contentHeight: number) {
+  if (!canvas.width || !canvas.height) return contentHeight
+  return Math.min(contentHeight, contentWidth * (canvas.height / canvas.width))
+}
+
+async function renderPdfPages(source: HTMLElement, options: RenderPdfPagesOptions) {
   const html2canvasModule = await import("html2canvas")
   const html2canvas = html2canvasModule.default
   const { clone, viewport, cleanup, captureWidth } = buildPdfExportRoot(getPdfObservedSource(source))
   try {
-    await new Promise<void>((resolve) => {
-      window.requestAnimationFrame(() => resolve())
-    })
+    throwIfPdfRenderCancelled(options.shouldCancel)
+    await waitForNextPaint()
     await waitForPdfExportAssets(clone)
+    throwIfPdfRenderCancelled(options.shouldCancel)
 
     const pageWidth = PDF_PAGE_WIDTH_PT
     const pageHeight = PDF_PAGE_HEIGHT_PT
@@ -643,22 +739,37 @@ async function renderPdfPages(source: HTMLElement) {
       PDF_EXPORT_CAPTURE_SCALE,
       Math.min((window.devicePixelRatio || 1) * 1.5, PDF_EXPORT_MAX_CAPTURE_SCALE)
     )
-
-    const plan = buildPdfSlicePlan(clone, captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
-    if (plan.totalHeight <= 0 || plan.slices.length <= 0) {
+    const totalHeight = Math.max(Math.ceil(clone.scrollHeight), Math.ceil(clone.getBoundingClientRect().height))
+    const pageHeightPx = getPdfSliceHeightPx(captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
+    const measuredBlocks = measurePdfBlockBounds(clone)
+    const layout = resolvePdfLayout({
+      layoutKey: buildResolvedPdfLayoutKey({
+        docId: options.doc.id,
+        updatedAt: options.doc.updatedAt,
+        captureWidth,
+        pageHeightPx,
+        totalHeight,
+      }),
+      totalHeight,
+      pageHeightPx,
+      sourceBlocks: options.doc.blocks,
+      measuredBlocks,
+      minPageHeightPx: PDF_MIN_SAFE_SLICE_HEIGHT_PX,
+    })
+    options.onLayout?.(layout)
+    if (layout.totalHeight <= 0 || layout.pages.length <= 0) {
       throw new Error("pdf_export_empty")
     }
 
     const pages: PdfPreviewPage[] = []
-    for (const slice of plan.slices) {
-      viewport.style.height = `${slice.height}px`
-      clone.style.transform = `translateY(-${slice.offsetY}px)`
+    for (const page of layout.pages) {
+      throwIfPdfRenderCancelled(options.shouldCancel)
+      const sliceHeight = Math.max(1, Math.ceil(page.height))
+      viewport.style.height = `${sliceHeight}px`
+      clone.style.transform = `translateY(-${page.startY}px)`
 
-      await new Promise<void>((resolve) => {
-        window.requestAnimationFrame(() => {
-          window.requestAnimationFrame(() => resolve())
-        })
-      })
+      await waitForDoublePaint()
+      throwIfPdfRenderCancelled(options.shouldCancel)
 
       const canvas = await html2canvas(viewport, {
         backgroundColor: "#ffffff",
@@ -666,19 +777,22 @@ async function renderPdfPages(source: HTMLElement) {
         logging: false,
         scale: renderScale,
         width: captureWidth,
-        height: slice.height,
+        height: sliceHeight,
         windowWidth: captureWidth,
-        windowHeight: slice.height,
+        windowHeight: sliceHeight,
         scrollX: 0,
         scrollY: 0,
         imageTimeout: 15000,
       })
 
-      pages.push({
+      const nextPage: PdfPreviewPage = {
         pageNumber: pages.length + 1,
         imageDataUrl: canvas.toDataURL("image/png", 1),
-        renderedHeightPt: Math.min(contentHeight, contentWidth * (canvas.height / canvas.width)),
-      })
+        renderedHeightPt: getPdfRenderedHeightPt(canvas, contentWidth, contentHeight),
+      }
+      pages.push(nextPage)
+      options.onPageRendered?.(nextPage, pages.length, layout.pages.length)
+      await yieldPdfRasterization()
     }
 
     return {
@@ -687,7 +801,9 @@ async function renderPdfPages(source: HTMLElement) {
       contentWidth,
       contentHeight,
       pages,
-      slicePlan: plan,
+      layout,
+      captureWidth,
+      renderedAt: Date.now(),
     }
   } finally {
     cleanup()
@@ -4357,20 +4473,30 @@ export function ToolNotebookPage() {
   const [importTextValue, setImportTextValue] = useState("")
   const [importError, setImportError] = useState<string | null>(null)
   const [blockReorderState, setBlockReorderState] = useState<ActiveBlockReorderState | null>(null)
-  const [showPdfBreaks, setShowPdfBreaks] = useState(false)
+  const [pdfViewMode, setPdfViewMode] = useState<PdfViewMode>("editor")
+  const [pdfRenderState, setPdfRenderState] = useState<PdfRenderState>("idle")
+  const [pdfPreviewDirty, setPdfPreviewDirty] = useState(false)
+  const [pdfLayoutCacheKey, setPdfLayoutCacheKey] = useState<string | null>(null)
+  const [pdfBitmapCacheKey, setPdfBitmapCacheKey] = useState<string | null>(null)
   const [pdfPreviewPages, setPdfPreviewPages] = useState<PdfPreviewPage[]>([])
-  const [pdfPreviewBusy, setPdfPreviewBusy] = useState(false)
   const [pdfPreviewError, setPdfPreviewError] = useState<string | null>(null)
+  const [pdfExpectedPageCount, setPdfExpectedPageCount] = useState(0)
+  const [pdfRenderProgress, setPdfRenderProgress] = useState({ completed: 0, total: 0 })
+  const [pdfRenderedAt, setPdfRenderedAt] = useState<number | null>(null)
   const [availableTemplates, setAvailableTemplates] = useState<RNestMemoTemplate[]>(() =>
     defaultMemoTemplates.map((template) => sanitizeMemoTemplate(template))
   )
   const sortMenuRef = useRef<HTMLDivElement>(null)
   const pdfContentRef = useRef<HTMLDivElement>(null)
+  const pdfRenderCacheRef = useRef<PdfRenderCacheEntry | null>(null)
+  const pdfRenderJobIdRef = useRef(0)
   const blockNodesRef = useRef<Record<string, HTMLDivElement | null>>({})
   const blockReorderStateRef = useRef<ActiveBlockReorderState | null>(null)
   const blockReorderGestureRef = useRef<BlockReorderGesture | null>(null)
   const blockReorderCleanupRef = useRef<(() => void) | null>(null)
-  const showingPdfPreview = showPdfBreaks && pdfPreviewPages.length > 0
+  const showPdfBreaks = pdfViewMode === "preview"
+  const showingPdfPreview = pdfViewMode === "preview" && pdfPreviewPages.length > 0
+  const pdfPreviewBusy = pdfRenderState === "layouting" || pdfRenderState === "rasterizing"
 
   useEffect(() => {
     if (!showSortMenu) return
@@ -4384,99 +4510,6 @@ export function ToolNotebookPage() {
   useEffect(() => {
     blockReorderStateRef.current = blockReorderState
   }, [blockReorderState])
-
-  useEffect(() => {
-    if (!pdfContentRef.current) {
-      setPdfPreviewPages([])
-      setPdfPreviewBusy(false)
-      setPdfPreviewError(null)
-      return
-    }
-    if (!showPdfBreaks) {
-      setPdfPreviewPages([])
-      setPdfPreviewBusy(false)
-      setPdfPreviewError(null)
-      return
-    }
-    setPdfPreviewPages([])
-    const node = pdfContentRef.current
-    const observedSource = getPdfObservedSource(node)
-    let cancelled = false
-    let frameId = 0
-    let timeoutId = 0
-    let computeToken = 0
-
-    const run = async () => {
-      const currentNode = pdfContentRef.current
-      if (!currentNode) return
-      const token = ++computeToken
-      if (!cancelled) {
-        setPdfPreviewBusy(true)
-        setPdfPreviewError(null)
-      }
-      try {
-        const rendered = await renderPdfPages(currentNode)
-        if (cancelled || token !== computeToken) return
-        setPdfPreviewPages(rendered.pages)
-      } catch (error) {
-        if (!cancelled && token === computeToken) {
-          console.error("[NotebookPdfPreview] failed_to_render_preview", error)
-          setPdfPreviewPages([])
-          setPdfPreviewError("PDF 미리보기를 생성하지 못했습니다")
-        }
-      } finally {
-        if (!cancelled && token === computeToken) {
-          setPdfPreviewBusy(false)
-        }
-      }
-    }
-
-    const schedule = () => {
-      window.clearTimeout(timeoutId)
-      window.cancelAnimationFrame(frameId)
-      timeoutId = window.setTimeout(() => {
-        frameId = window.requestAnimationFrame(() => {
-          void run()
-        })
-      }, 80)
-    }
-
-    schedule()
-
-    const resizeObserver = new ResizeObserver(() => schedule())
-    resizeObserver.observe(observedSource)
-    const mutationObserver = new MutationObserver((mutations) => {
-      const shouldRecompute = mutations.some((mutation) => {
-        const target =
-          mutation.target instanceof Element
-            ? mutation.target
-            : mutation.target instanceof Text
-              ? mutation.target.parentElement
-              : null
-        if (!target || target.closest('[data-pdf-hide="true"]')) return false
-        return true
-      })
-      if (shouldRecompute) {
-        schedule()
-      }
-    })
-    mutationObserver.observe(observedSource, {
-      subtree: true,
-      childList: true,
-      characterData: true,
-      attributes: true,
-    })
-    window.addEventListener("resize", schedule)
-
-    return () => {
-      cancelled = true
-      window.clearTimeout(timeoutId)
-      window.cancelAnimationFrame(frameId)
-      resizeObserver.disconnect()
-      mutationObserver.disconnect()
-      window.removeEventListener("resize", schedule)
-    }
-  }, [showPdfBreaks, activeMemoId])
 
   useEffect(() => {
     return () => {
@@ -4871,6 +4904,176 @@ export function ToolNotebookPage() {
       activeMemo?.blocks.filter((block): block is RNestMemoBlock => block.type === "heading" && Boolean(getMemoBlockText(block))) ?? [],
     [activeMemo]
   )
+
+  const restorePdfSnapshotFromCache = useCallback((snapshot: PdfRenderCacheEntry) => {
+    setPdfPreviewPages(snapshot.pages)
+    setPdfPreviewError(null)
+    setPdfExpectedPageCount(snapshot.layout.pages.length)
+    setPdfLayoutCacheKey(snapshot.layout.key)
+    setPdfBitmapCacheKey(`${snapshot.layout.key}:${snapshot.pages.length}`)
+    setPdfRenderProgress({ completed: snapshot.pages.length, total: snapshot.layout.pages.length })
+    setPdfRenderedAt(snapshot.renderedAt)
+    setPdfRenderState("ready")
+  }, [])
+
+  const resetPdfPreviewState = useCallback((options?: { clearCache?: boolean; clearPages?: boolean }) => {
+    pdfRenderJobIdRef.current += 1
+    if (options?.clearCache) {
+      pdfRenderCacheRef.current = null
+      setPdfPreviewDirty(false)
+      setPdfRenderedAt(null)
+      setPdfLayoutCacheKey(null)
+      setPdfBitmapCacheKey(null)
+    }
+    if (options?.clearPages ?? options?.clearCache) {
+      setPdfPreviewPages([])
+    }
+    setPdfPreviewError(null)
+    setPdfExpectedPageCount(0)
+    setPdfRenderProgress({ completed: 0, total: 0 })
+    setPdfRenderState("idle")
+  }, [])
+
+  const runPdfRender = useCallback(
+    async (options?: { force?: boolean }) => {
+      if (!activeMemo || !pdfContentRef.current || typeof window === "undefined") return null
+      const cachedSnapshot = pdfRenderCacheRef.current
+      const canReuseCache =
+        !options?.force &&
+        !pdfPreviewDirty &&
+        cachedSnapshot &&
+        cachedSnapshot.docId === activeMemo.id &&
+        cachedSnapshot.docUpdatedAt === activeMemo.updatedAt
+
+      if (canReuseCache) {
+        restorePdfSnapshotFromCache(cachedSnapshot)
+        return cachedSnapshot
+      }
+
+      const jobId = pdfRenderJobIdRef.current + 1
+      pdfRenderJobIdRef.current = jobId
+      setPdfPreviewError(null)
+      setPdfPreviewPages([])
+      setPdfExpectedPageCount(0)
+      setPdfRenderProgress({ completed: 0, total: 0 })
+      setPdfRenderState("layouting")
+      await waitForDoublePaint()
+
+      try {
+        const snapshot = await renderPdfPages(pdfContentRef.current, {
+          doc: activeMemo,
+          shouldCancel: () => pdfRenderJobIdRef.current !== jobId,
+          onLayout: (layout) => {
+            if (pdfRenderJobIdRef.current !== jobId) return
+            setPdfRenderState("rasterizing")
+            setPdfExpectedPageCount(layout.pages.length)
+            setPdfLayoutCacheKey(layout.key)
+            setPdfRenderProgress({ completed: 0, total: layout.pages.length })
+          },
+          onPageRendered: (page, completed, total) => {
+            if (pdfRenderJobIdRef.current !== jobId) return
+            setPdfPreviewPages((current) => [...current, page])
+            setPdfRenderProgress({ completed, total })
+          },
+        })
+        if (pdfRenderJobIdRef.current !== jobId) return null
+        const cacheEntry: PdfRenderCacheEntry = {
+          ...snapshot,
+          docId: activeMemo.id,
+          docUpdatedAt: activeMemo.updatedAt,
+        }
+        pdfRenderCacheRef.current = cacheEntry
+        setPdfBitmapCacheKey(`${snapshot.layout.key}:${snapshot.pages.length}`)
+        setPdfRenderedAt(snapshot.renderedAt)
+        setPdfPreviewDirty(false)
+        setPdfRenderState("ready")
+        return cacheEntry
+      } catch (error) {
+        if (isPdfRenderCancelled(error)) {
+          if (pdfRenderJobIdRef.current === jobId) {
+            setPdfRenderState("idle")
+          }
+          return null
+        }
+        console.error("[NotebookPdfPreview] failed_to_render_preview", error)
+        if (pdfRenderJobIdRef.current === jobId) {
+          setPdfPreviewPages([])
+          setPdfPreviewError("PDF 미리보기를 생성하지 못했습니다")
+          setPdfRenderState("error")
+        }
+        return null
+      }
+    },
+    [activeMemo, pdfPreviewDirty, restorePdfSnapshotFromCache]
+  )
+
+  const openPdfPreview = useCallback(
+    async (options?: { force?: boolean }) => {
+      if (!activeMemo) return
+      setPdfViewMode("preview")
+      const cachedSnapshot = pdfRenderCacheRef.current
+      const shouldRender =
+        options?.force ||
+        !cachedSnapshot ||
+        cachedSnapshot.docId !== activeMemo.id ||
+        cachedSnapshot.docUpdatedAt !== activeMemo.updatedAt ||
+        pdfPreviewDirty
+
+      if (!shouldRender) {
+        restorePdfSnapshotFromCache(cachedSnapshot)
+        return
+      }
+      await runPdfRender({ force: true })
+    },
+    [activeMemo, pdfPreviewDirty, restorePdfSnapshotFromCache, runPdfRender]
+  )
+
+  const closePdfPreview = useCallback(() => {
+    pdfRenderJobIdRef.current += 1
+    setPdfViewMode("editor")
+    if (pdfRenderState !== "ready") {
+      setPdfRenderState("idle")
+    }
+  }, [pdfRenderState])
+
+  useEffect(() => {
+    if (!activeMemo) {
+      setPdfViewMode("editor")
+      resetPdfPreviewState({ clearCache: true, clearPages: true })
+    }
+  }, [activeMemo, resetPdfPreviewState])
+
+  useEffect(() => {
+    setPdfViewMode("editor")
+    resetPdfPreviewState({ clearCache: true, clearPages: true })
+  }, [activeMemoId, resetPdfPreviewState])
+
+  useEffect(() => {
+    const cachedSnapshot = pdfRenderCacheRef.current
+    if (!activeMemo || !cachedSnapshot) return
+    if (cachedSnapshot.docId !== activeMemo.id) return
+    if (cachedSnapshot.docUpdatedAt === activeMemo.updatedAt) return
+    setPdfPreviewDirty(true)
+    if (pdfViewMode === "preview") {
+      setPdfPreviewError(null)
+    }
+  }, [activeMemo, pdfViewMode])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    function handleResize() {
+      const root = pdfContentRef.current
+      const cachedSnapshot = pdfRenderCacheRef.current
+      if (!root || !cachedSnapshot || !activeMemo) return
+      if (cachedSnapshot.docId !== activeMemo.id) return
+      const captureWidth = Math.max(1, Math.ceil(getPdfObservedSource(root).getBoundingClientRect().width || root.clientWidth || 0))
+      if (Math.abs(captureWidth - cachedSnapshot.captureWidth) >= 2) {
+        setPdfPreviewDirty(true)
+      }
+    }
+    window.addEventListener("resize", handleResize)
+    return () => window.removeEventListener("resize", handleResize)
+  }, [activeMemo])
 
   // Cmd+F / Ctrl+F to open find bar
   useEffect(() => {
@@ -5385,7 +5588,34 @@ export function ToolNotebookPage() {
     setToast("PDF 저장을 준비하고 있습니다")
     try {
       const { jsPDF } = await import("jspdf")
-      const rendered = await renderPdfPages(pdfContentRef.current)
+      const cachedSnapshot = pdfRenderCacheRef.current
+      const shouldReuseCache =
+        !pdfPreviewDirty &&
+        cachedSnapshot &&
+        cachedSnapshot.docId === activeMemo.id &&
+        cachedSnapshot.docUpdatedAt === activeMemo.updatedAt
+      const rendered = shouldReuseCache
+        ? cachedSnapshot
+        : await renderPdfPages(pdfContentRef.current, {
+            doc: activeMemo,
+          })
+
+      if (!shouldReuseCache) {
+        const cacheEntry: PdfRenderCacheEntry = {
+          ...rendered,
+          docId: activeMemo.id,
+          docUpdatedAt: activeMemo.updatedAt,
+        }
+        pdfRenderCacheRef.current = cacheEntry
+        setPdfPreviewDirty(false)
+        setPdfPreviewPages(rendered.pages)
+        setPdfExpectedPageCount(rendered.layout.pages.length)
+        setPdfLayoutCacheKey(rendered.layout.key)
+        setPdfBitmapCacheKey(`${rendered.layout.key}:${rendered.pages.length}`)
+        setPdfRenderedAt(rendered.renderedAt)
+        setPdfRenderProgress({ completed: rendered.pages.length, total: rendered.layout.pages.length })
+        setPdfRenderState("ready")
+      }
       const pdf = new jsPDF({
         orientation: "portrait",
         unit: "pt",
@@ -6097,7 +6327,6 @@ export function ToolNotebookPage() {
         return next
       })(),
     }))
-    setShowPdfBreaks(true)
     if (!options?.quiet) setToast("다음 PDF 페이지 시작 블록을 추가했습니다")
   }
 
@@ -6829,12 +7058,18 @@ export function ToolNotebookPage() {
               </button>
               <button
                 type="button"
-                onClick={() => setShowPdfBreaks((v) => !v)}
+                onClick={() => {
+                  if (showPdfBreaks) {
+                    closePdfPreview()
+                    return
+                  }
+                  void openPdfPreview()
+                }}
                 className={cn(
-                  "hidden h-7 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium transition-colors lg:flex",
+                  "hidden h-8 items-center gap-2 rounded-full border px-3.5 text-[11px] font-semibold tracking-[-0.01em] transition-colors lg:flex",
                   showPdfBreaks
-                    ? "bg-[#007AFF]/10 text-[#007AFF]"
-                    : "text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                    ? "border-[#BFDBFE] bg-[#EFF6FF] text-[#007AFF]"
+                    : "border-[#E5E7EB] bg-white text-[#5B6577] hover:border-[#D0D7E2] hover:bg-[#F8FAFC] hover:text-[#111827]"
                 )}
                 title={showPdfBreaks ? "편집 화면으로 돌아가기" : "PDF 미리보기"}
               >
@@ -7484,58 +7719,118 @@ export function ToolNotebookPage() {
               )}
               </div>
 
-              {showPdfBreaks && showingPdfPreview && (
+              {showPdfBreaks && (
                 <div
                   data-pdf-hide="true"
+                  data-pdf-layout-key={pdfLayoutCacheKey ?? undefined}
+                  data-pdf-bitmap-key={pdfBitmapCacheKey ?? undefined}
                   aria-hidden="true"
-                  className="space-y-6 rounded-[32px] border border-[#E6E8F1] bg-[linear-gradient(180deg,rgba(245,247,252,0.98)_0%,rgba(238,242,249,0.96)_100%)] p-5 shadow-[0_28px_64px_rgba(15,23,42,0.08)]"
+                  className="space-y-4 rounded-[28px] border border-[#E5E7EB] bg-[#F5F6F8]/95 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.06)]"
                 >
-                  <div className="flex items-center justify-between gap-3 px-1">
+                  <div className="flex flex-wrap items-start justify-between gap-3 rounded-[22px] border border-white/80 bg-white/80 px-4 py-3 backdrop-blur-sm">
                     <div>
-                      <p className="text-[12px] font-semibold uppercase tracking-[0.18em] text-[#7C8497]">PDF 미리보기</p>
-                      <p className="mt-1 text-[13px] text-[#667085]">이 화면과 실제 다운로드 PDF가 같은 페이지 기준을 사용합니다.</p>
+                      <p className="text-[12px] font-semibold tracking-[-0.01em] text-[#111827]">PDF 미리보기</p>
+                      <p className="mt-1 text-[12px] text-[#6B7280]">편집의 다음 PDF 페이지 시작 선을 그대로 기준으로 사용합니다.</p>
                     </div>
-                    <div className="inline-flex items-center rounded-full border border-[#E6E8F1] bg-white px-3 py-1 text-[11px] font-medium text-[#7C8497] shadow-[0_10px_20px_rgba(15,23,42,0.06)]">
-                      {pdfPreviewPages.length} 페이지
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="inline-flex items-center rounded-full border border-[#E5E7EB] bg-white px-3 py-1 text-[11px] font-medium text-[#4B5563]">
+                        {pdfExpectedPageCount || pdfPreviewPages.length || 0} 페이지
+                      </span>
+                      {pdfPreviewDirty ? (
+                        <span className="inline-flex items-center rounded-full border border-[#FED7AA] bg-[#FFF7ED] px-3 py-1 text-[11px] font-medium text-[#C2410C]">
+                          업데이트 필요
+                        </span>
+                      ) : pdfRenderedAt ? (
+                        <span className="inline-flex items-center rounded-full border border-[#E5E7EB] bg-white px-3 py-1 text-[11px] font-medium text-[#6B7280]">
+                          {formatUpdatedAtLabel(pdfRenderedAt)}
+                        </span>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => void openPdfPreview({ force: true })}
+                        disabled={pdfPreviewBusy}
+                        className={cn(
+                          "inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[11px] font-semibold tracking-[-0.01em] transition-colors",
+                          pdfPreviewBusy
+                            ? "cursor-wait border-[#E5E7EB] bg-[#F3F4F6] text-[#9CA3AF]"
+                            : "border-[#D1D5DB] bg-white text-[#374151] hover:border-[#C7D2FE] hover:bg-[#F8FAFC]"
+                        )}
+                      >
+                        <RotateCw className={cn("h-3.5 w-3.5", pdfPreviewBusy && "animate-spin")} />
+                        새로고침
+                      </button>
                     </div>
                   </div>
-                  {pdfPreviewPages.map((page) => (
-                    <div
-                      key={`pdf-preview-page-${page.pageNumber}`}
-                      className="rounded-[30px] border border-[#E6E8F1] bg-[#F4F6FB] p-4 shadow-[0_24px_48px_rgba(15,23,42,0.08)]"
-                    >
-                      <div className="relative aspect-[595.28/841.89] overflow-hidden rounded-[22px] border border-[#E9ECF3] bg-white shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
-                        <div
-                          className="absolute overflow-hidden bg-white"
-                          style={{
-                            left: `${(PDF_EXPORT_MARGIN_PT / PDF_PAGE_WIDTH_PT) * 100}%`,
-                            right: `${(PDF_EXPORT_MARGIN_PT / PDF_PAGE_WIDTH_PT) * 100}%`,
-                            top: `${(PDF_EXPORT_MARGIN_PT / PDF_PAGE_HEIGHT_PT) * 100}%`,
-                            bottom: `${(PDF_EXPORT_MARGIN_PT / PDF_PAGE_HEIGHT_PT) * 100}%`,
-                          }}
-                        >
-                          <img
-                            src={page.imageDataUrl}
-                            alt={`PDF page ${page.pageNumber}`}
-                            className="block w-full select-none"
-                            draggable={false}
-                          />
-                        </div>
+
+                  {(pdfRenderState === "layouting" || pdfRenderState === "rasterizing") && (
+                    <div className="space-y-2 rounded-[20px] border border-white/70 bg-white/80 px-4 py-3">
+                      <div className="flex items-center justify-between gap-3 text-[12px] font-medium text-[#6B7280]">
+                        <span>
+                          {pdfRenderState === "layouting"
+                            ? "페이지 경계를 계산하고 있습니다"
+                            : `페이지를 렌더링하고 있습니다 (${pdfRenderProgress.completed}/${pdfRenderProgress.total || pdfExpectedPageCount || 0})`}
+                        </span>
+                        <span>{Math.max(pdfRenderProgress.total, pdfExpectedPageCount, pdfPreviewPages.length)}p</span>
                       </div>
-                      <div className="mt-3 flex items-center justify-center text-[11px] font-medium tracking-[-0.01em] text-[#7C8497]">
-                        {page.pageNumber} / {pdfPreviewPages.length}
+                      <div className="h-1.5 overflow-hidden rounded-full bg-[#E5E7EB]">
+                        <div
+                          className="h-full rounded-full bg-[#111827] transition-[width] duration-200"
+                          style={{
+                            width: `${Math.max(
+                              6,
+                              Math.min(
+                                100,
+                                ((pdfRenderProgress.completed || (pdfRenderState === "layouting" ? 0.25 : 0)) /
+                                  Math.max(1, pdfRenderProgress.total || pdfExpectedPageCount || 1)) *
+                                  100
+                              )
+                            )}%`,
+                          }}
+                        />
                       </div>
                     </div>
-                  ))}
-                </div>
-              )}
+                  )}
 
-              {showPdfBreaks && !showingPdfPreview && (
-                <div
-                  data-pdf-hide="true"
-                  className="flex min-h-[240px] items-center justify-center rounded-[28px] border border-[#E6E8F1] bg-[#F7F7FA] text-[13px] font-medium text-[#7C8497]"
-                >
-                  {pdfPreviewError ?? (pdfPreviewBusy ? "PDF 페이지를 렌더링하고 있습니다" : "PDF 페이지 미리보기를 준비하고 있습니다")}
+                  {pdfPreviewError ? (
+                    <div className="flex min-h-[220px] items-center justify-center rounded-[24px] border border-[#FECACA] bg-[#FEF2F2] px-4 text-[13px] font-medium text-[#B91C1C]">
+                      {pdfPreviewError}
+                    </div>
+                  ) : showingPdfPreview ? (
+                    <div className="space-y-4">
+                      {pdfPreviewPages.map((page) => (
+                        <div
+                          key={`pdf-preview-page-${page.pageNumber}`}
+                          className="rounded-[24px] border border-[#E5E7EB] bg-[#EEF1F4] p-3 shadow-[0_8px_20px_rgba(15,23,42,0.05)]"
+                        >
+                          <div className="relative aspect-[595.28/841.89] overflow-hidden rounded-[18px] border border-[#E5E7EB] bg-white">
+                            <div
+                              className="absolute overflow-hidden bg-white"
+                              style={{
+                                left: `${(PDF_EXPORT_MARGIN_PT / PDF_PAGE_WIDTH_PT) * 100}%`,
+                                right: `${(PDF_EXPORT_MARGIN_PT / PDF_PAGE_WIDTH_PT) * 100}%`,
+                                top: `${(PDF_EXPORT_MARGIN_PT / PDF_PAGE_HEIGHT_PT) * 100}%`,
+                                bottom: `${(PDF_EXPORT_MARGIN_PT / PDF_PAGE_HEIGHT_PT) * 100}%`,
+                              }}
+                            >
+                              <img
+                                src={page.imageDataUrl}
+                                alt={`PDF page ${page.pageNumber}`}
+                                className="block w-full select-none"
+                                draggable={false}
+                              />
+                            </div>
+                          </div>
+                          <div className="mt-2 flex items-center justify-center text-[11px] font-medium text-[#6B7280]">
+                            {page.pageNumber} / {pdfExpectedPageCount || pdfPreviewPages.length}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex min-h-[240px] items-center justify-center rounded-[24px] border border-[#E5E7EB] bg-white/80 px-4 text-[13px] font-medium text-[#6B7280]">
+                      {pdfPreviewBusy ? "PDF 페이지를 렌더링하고 있습니다" : "PDF 버튼을 눌러 만든 최신 결과를 여기에 표시합니다"}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
