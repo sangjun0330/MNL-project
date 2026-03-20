@@ -44,7 +44,7 @@ export const memoBlockTypes = [
 ] as const
 
 export type RNestMemoBlockType = (typeof memoBlockTypes)[number]
-export type RNestMemoSpacerMode = "next-page"
+export type RNestMemoSpacerMode = "next-page" | "blank-space"
 
 export type RNestMemoTableAlign = "left" | "center" | "right"
 
@@ -792,6 +792,10 @@ function normalizeMemoTable(input: RNestMemoTable | null | undefined): RNestMemo
   }
 }
 
+function normalizeMemoSpacerMode(value: unknown): RNestMemoSpacerMode {
+  return value === "blank-space" ? "blank-space" : "next-page"
+}
+
 export function upgradeMemoTableToV2(input: RNestMemoTable | null | undefined): RNestMemoTable {
   return normalizeMemoTable({
     ...(input ?? buildDefaultMemoTable()),
@@ -929,6 +933,7 @@ export function createMemoBlock(type: RNestMemoBlockType | string, input?: Parti
   }
 
   if (normalizedType === "pageSpacer") {
+    const spacerMode = normalizeMemoSpacerMode(input?.spacerMode)
     return {
       ...base,
       type: normalizedType,
@@ -936,8 +941,11 @@ export function createMemoBlock(type: RNestMemoBlockType | string, input?: Parti
       textHtml: undefined,
       detailText: undefined,
       detailTextHtml: undefined,
-      spacerMode: "next-page",
-      spacerHeight: 0,
+      spacerMode,
+      spacerHeight:
+        spacerMode === "blank-space"
+          ? Math.max(1, Math.min(12, Math.round(Number(input?.spacerHeight ?? 1) || 1)))
+          : 0,
     }
   }
 
@@ -1630,7 +1638,9 @@ export function memoDocumentToMarkdown(document: RNestMemoDocument) {
       continue
     }
     if (block.type === "pageSpacer") {
-      lines.push("<!-- RNEST_PAGE_SPACER next-page -->")
+      if (block.spacerMode === "next-page") {
+        lines.push("<!-- RNEST_PAGE_SPACER next-page -->")
+      }
       continue
     }
     if (block.type === "table") {

@@ -169,6 +169,7 @@ const PDF_PAGE_WIDTH_PT = 595.28
 const PDF_PAGE_HEIGHT_PT = 841.89
 const PDF_BREAK_PADDING_PX = 8
 const PDF_MIN_SAFE_SLICE_HEIGHT_PX = 96
+const BLANK_SPACE_UNIT_PX = 36
 const PDF_INNER_BREAK_SELECTOR = [
   "p",
   "li",
@@ -211,6 +212,41 @@ type PdfBreakAnchor = {
   edge?: "top" | "bottom"
   delta?: number
   target?: "block" | "page-spacer-filler" | "page-spacer-marker" | "forced-page-start"
+}
+
+function isNextPageSpacer(block: RNestMemoBlock | null | undefined) {
+  return block?.type === "pageSpacer" && block.spacerMode !== "blank-space"
+}
+
+function isBlankSpaceSpacer(block: RNestMemoBlock | null | undefined) {
+  return block?.type === "pageSpacer" && block.spacerMode === "blank-space"
+}
+
+function getBlankSpaceUnits(block: RNestMemoBlock | null | undefined) {
+  if (!isBlankSpaceSpacer(block)) return 0
+  const units = Number(block?.spacerHeight ?? 1) || 1
+  return Math.max(1, Math.min(12, Math.round(units)))
+}
+
+function getLeadingSpacerInfo(blocks: RNestMemoBlock[], index: number) {
+  let cursor = index - 1
+  let startsNextPdfPage = false
+  let blankSpaceBlock: RNestMemoBlock | null = null
+  let insertIndex = index
+
+  while (cursor >= 0 && blocks[cursor]?.type === "pageSpacer") {
+    const spacer = blocks[cursor]
+    insertIndex = cursor
+    if (isNextPageSpacer(spacer)) startsNextPdfPage = true
+    if (isBlankSpaceSpacer(spacer) && !blankSpaceBlock) blankSpaceBlock = spacer
+    cursor -= 1
+  }
+
+  return {
+    startsNextPdfPage,
+    blankSpaceBlock,
+    insertIndex,
+  }
 }
 
 function createPdfFieldPreview(field: HTMLInputElement | HTMLTextAreaElement) {
@@ -470,12 +506,12 @@ function findSafeSlice(
   // 강제 페이지 시작 마커가 현재 페이지 범위 안에 있으면,
   // 해당 블록의 top에서 무조건 페이지를 끊는다.
   const forcedPageStart = blockBounds.find(
-    ({ block, top }) => block.dataset.pdfForcePageStart === "true" && top > currentOffsetY + 1 && top <= cutNaturalY + 1
+    ({ block, top }) => block.dataset.pdfForcePageStart === "true" && top > currentOffsetY && top <= cutNaturalY + 1
   )
 
   if (forcedPageStart) {
-    const breakY = Math.floor(forcedPageStart.top)
-    const forcedHeight = breakY - currentOffsetY
+    const forcedHeight = Math.max(1, Math.ceil(forcedPageStart.top - currentOffsetY))
+    const breakY = currentOffsetY + forcedHeight
     if (forcedHeight > 0) {
       return {
         offsetY: currentOffsetY,
@@ -2716,7 +2752,7 @@ function InlineBlock({
   onOpenDoc: (docId: string) => void
   onDuplicate: () => void
   onInsertBlankBefore: () => void
-  onRemoveBlankBefore: () => void
+  onRemoveBlankBefore: () => boolean
   onTypeChange: (t: RNestMemoBlockType) => void
   onAddAfter: (type?: RNestMemoBlockType) => void
   onInsertAsset: (kind: "image" | "attachment" | "gallery") => void
@@ -2817,8 +2853,8 @@ function InlineBlock({
     const selectionStart = typeof e.currentTarget.selectionStart === "number" ? e.currentTarget.selectionStart : null
     const selectionEnd = typeof e.currentTarget.selectionEnd === "number" ? e.currentTarget.selectionEnd : null
     if (e.key !== "Backspace" || selectionStart !== 0 || selectionEnd !== 0) return false
+    if (!onRemoveBlankBefore()) return false
     e.preventDefault()
-    onRemoveBlankBefore()
     return true
   }
 
@@ -3260,18 +3296,6 @@ function InlineBlock({
 
       {/* block content */}
       <div className={cn("min-h-[1.6em] rounded-md transition-colors", block.highlight && highlightBgMap[block.highlight] ? `${highlightBgMap[block.highlight]} px-2 -mx-2 py-0.5` : "")}>
-        {startsNextPdfPage && (
-          <div data-pdf-hide="true" aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 z-10 h-0 -translate-y-1/2 px-1">
-            <div className="flex items-center gap-3">
-              <div className="h-px flex-1 bg-[#D8DEE8]" />
-              <div className="inline-flex items-center rounded-full border border-[#E6E8F1] bg-white/98 px-3 py-1 text-[11px] font-semibold tracking-[-0.01em] text-[color:var(--rnest-accent)] shadow-[0_10px_24px_rgba(15,23,42,0.08)]">
-                다음 PDF 페이지 시작
-              </div>
-              <div className="h-px flex-1 bg-[#D8DEE8]" />
-            </div>
-          </div>
-        )}
-
         {showSlashMenu && (
           <SlashMenu
             currentType={block.type}
@@ -5975,19 +5999,80 @@ export function ToolNotebookPage() {
     }))
   }
 
+  function insertBlankSpaceBefore(blockId: string) {
+    if (!activeMemo) return
+    void updateActiveMemoContent((doc) => ({
+      ...doc,
+      blocks: (() => {
+        const idx = doc.blocks.findIndex((block) => block.id === blockId)
+        if (idx === -1) return doc.blocks
+        const next = [...doc.blocks]
+        const { blankSpaceBlock, insertIndex, startsNextPdfPage } = getLeadingSpacerInfo(next, idx)
+        if (blankSpaceBlock) {
+          return next.map((entry) =>
+            entry.id === blankSpaceBlock.id
+              ? {
+                  ...entry,
+                  spacerHeight: getBlankSpaceUnits(entry) + 1,
+                }
+              : entry
+          )
+        }
+        const blankSpacer = createMemoBlock("pageSpacer", {
+          spacerMode: "blank-space",
+          spacerHeight: 1,
+        })
+        next.splice(startsNextPdfPage ? insertIndex + 1 : insertIndex, 0, blankSpacer)
+        return next
+      })(),
+    }))
+  }
+
+  function removeBlankSpaceBefore(blockId: string) {
+    if (!activeMemo) return false
+    const currentIndex = activeMemo.blocks.findIndex((block) => block.id === blockId)
+    if (currentIndex === -1) return false
+    if (!getLeadingSpacerInfo(activeMemo.blocks, currentIndex).blankSpaceBlock) return false
+    void updateActiveMemoContent((doc) => ({
+      ...doc,
+      blocks: (() => {
+        const idx = doc.blocks.findIndex((block) => block.id === blockId)
+        if (idx === -1) return doc.blocks
+        const next = [...doc.blocks]
+        const { blankSpaceBlock } = getLeadingSpacerInfo(next, idx)
+        if (!blankSpaceBlock) return doc.blocks
+        const units = getBlankSpaceUnits(blankSpaceBlock)
+        if (units <= 1) {
+          return next.filter((entry) => entry.id !== blankSpaceBlock.id)
+        }
+        return next.map((entry) =>
+          entry.id === blankSpaceBlock.id
+            ? {
+                ...entry,
+                spacerHeight: units - 1,
+              }
+            : entry
+        )
+      })(),
+    }))
+    return true
+  }
+
   function ensureNextPageSpacerBefore(blockId: string, options?: { quiet?: boolean }) {
     if (!activeMemo) return
     const currentIndex = activeMemo.blocks.findIndex((block) => block.id === blockId)
-    const currentPrevious = currentIndex > 0 ? activeMemo.blocks[currentIndex - 1] : null
-    if (currentPrevious?.type === "pageSpacer") return
+    if (currentIndex === -1) return
+    const { startsNextPdfPage } = getLeadingSpacerInfo(activeMemo.blocks, currentIndex)
+    if (startsNextPdfPage) return
     void updateActiveMemoContent((doc) => ({
       ...doc,
       blocks: (() => {
         const idx = doc.blocks.findIndex((b) => b.id === blockId)
         if (idx === -1) return doc.blocks
         const next = [...doc.blocks]
+        const { insertIndex } = getLeadingSpacerInfo(next, idx)
         next.splice(
-          idx,
+          insertIndex,
           0,
           createMemoBlock("pageSpacer", {
             spacerMode: "next-page",
@@ -6004,11 +6089,23 @@ export function ToolNotebookPage() {
   function removeNextPageSpacerBefore(blockId: string, options?: { quiet?: boolean }) {
     if (!activeMemo) return
     const currentIndex = activeMemo.blocks.findIndex((block) => block.id === blockId)
-    const currentPrevious = currentIndex > 0 ? activeMemo.blocks[currentIndex - 1] : null
-    if (currentPrevious?.type !== "pageSpacer") return
+    if (currentIndex === -1) return
+    const { startsNextPdfPage } = getLeadingSpacerInfo(activeMemo.blocks, currentIndex)
+    if (!startsNextPdfPage) return
     void updateActiveMemoContent((doc) => ({
       ...doc,
-      blocks: doc.blocks.filter((block) => block.id !== currentPrevious.id),
+      blocks: (() => {
+        const idx = doc.blocks.findIndex((entry) => entry.id === blockId)
+        if (idx === -1) return doc.blocks
+        const next = [...doc.blocks]
+        for (let cursor = idx - 1; cursor >= 0 && next[cursor]?.type === "pageSpacer"; cursor -= 1) {
+          if (isNextPageSpacer(next[cursor])) {
+            next.splice(cursor, 1)
+            break
+          }
+        }
+        return next
+      })(),
     }))
     if (!options?.quiet) setToast("다음 PDF 페이지 시작을 해제했습니다")
   }
@@ -6016,8 +6113,8 @@ export function ToolNotebookPage() {
   function toggleNextPageSpacerBefore(blockId: string) {
     if (!activeMemo) return
     const currentIndex = activeMemo.blocks.findIndex((block) => block.id === blockId)
-    const currentPrevious = currentIndex > 0 ? activeMemo.blocks[currentIndex - 1] : null
-    if (currentPrevious?.type === "pageSpacer") {
+    if (currentIndex === -1) return
+    if (getLeadingSpacerInfo(activeMemo.blocks, currentIndex).startsNextPdfPage) {
       removeNextPageSpacerBefore(blockId)
       return
     }
@@ -7251,10 +7348,33 @@ export function ToolNotebookPage() {
                   {/* blocks */}
                   <div className="space-y-3 pl-0 lg:pl-10">
                     {activeMemo.blocks.map((block, idx) => {
-                      if (block.type === "pageSpacer") return null
+                      if (isNextPageSpacer(block)) {
+                        return (
+                          <div key={block.id} data-pdf-hide="true" aria-hidden="true" className="pointer-events-none px-1">
+                            <div className="flex items-center gap-3">
+                              <div className="h-px flex-1 bg-[#D8DEE8]" />
+                              <div className="inline-flex items-center rounded-full border border-[#E6E8F1] bg-white/98 px-3 py-1 text-[11px] font-semibold tracking-[-0.01em] text-[color:var(--rnest-accent)] shadow-[0_10px_24px_rgba(15,23,42,0.08)]">
+                                다음 PDF 페이지 시작
+                              </div>
+                              <div className="h-px flex-1 bg-[#D8DEE8]" />
+                            </div>
+                          </div>
+                        )
+                      }
+                      if (isBlankSpaceSpacer(block)) {
+                        const { startsNextPdfPage } = getLeadingSpacerInfo(activeMemo.blocks, idx)
+                        return (
+                          <div
+                            key={block.id}
+                            id={`memo-block-${block.id}`}
+                            aria-hidden="true"
+                            data-pdf-force-page-start={startsNextPdfPage ? "true" : undefined}
+                            style={{ height: `${getBlankSpaceUnits(block) * BLANK_SPACE_UNIT_PX}px` }}
+                          />
+                        )
+                      }
                       const attachment = findAttachment(activeMemo, block.attachmentId)
-                      const previousRawBlock = idx > 0 ? activeMemo.blocks[idx - 1] : null
-                      const startsNextPdfPage = previousRawBlock?.type === "pageSpacer"
+                      const { startsNextPdfPage } = getLeadingSpacerInfo(activeMemo.blocks, idx)
                       const visibleBlockIndex = activeMemo.blocks
                         .slice(0, idx + 1)
                         .filter((entry) => entry.type !== "pageSpacer").length - 1
@@ -7304,8 +7424,8 @@ export function ToolNotebookPage() {
                               if (attachment) openAttachment(attachment)
                             }}
                             onDuplicate={() => duplicateBlock(block.id)}
-                            onInsertBlankBefore={() => ensureNextPageSpacerBefore(block.id, { quiet: true })}
-                            onRemoveBlankBefore={() => removeNextPageSpacerBefore(block.id, { quiet: true })}
+                            onInsertBlankBefore={() => insertBlankSpaceBefore(block.id)}
+                            onRemoveBlankBefore={() => removeBlankSpaceBefore(block.id)}
                             onTypeChange={(type) => changeBlockType(block.id, type)}
                             onAddAfter={(type) => addBlockAfter(block.id, type)}
                             onInsertAsset={(kind) => beginAssetInsert(block.id, kind)}
