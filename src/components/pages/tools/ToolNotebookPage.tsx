@@ -721,11 +721,12 @@ type ClonePdfBlockHandle = {
   top: number
   bottom: number
   forcedStart: boolean
+  duplicateElement: HTMLElement | null
 }
 
 function getClonePdfBlockHandles(clone: HTMLElement, measuredBlocks: Record<string, MeasuredPdfBlockBounds>) {
   return Array.from(clone.querySelectorAll<HTMLElement>('[id^="memo-block-"]'))
-    .map((element) => {
+    .map<ClonePdfBlockHandle | null>((element) => {
       const blockId = element.id.replace(/^memo-block-/, "")
       const measured = measuredBlocks[blockId]
       if (!blockId || !measured) return null
@@ -735,15 +736,53 @@ function getClonePdfBlockHandles(clone: HTMLElement, measuredBlocks: Record<stri
         top: measured.top,
         bottom: measured.bottom,
         forcedStart: element.dataset.pdfForcePageStart === "true",
-      } satisfies ClonePdfBlockHandle
+        duplicateElement: null,
+      }
     })
     .filter((entry): entry is ClonePdfBlockHandle => Boolean(entry))
+}
+
+function createForcedStartPdfDuplicates(clone: HTMLElement, blocks: ClonePdfBlockHandle[]) {
+  const forcedStartBlocks = blocks.filter((block) => block.forcedStart)
+  if (forcedStartBlocks.length === 0) return
+
+  const overlay = document.createElement("div")
+  overlay.setAttribute("data-pdf-forced-start-duplicates", "true")
+  overlay.style.position = "absolute"
+  overlay.style.inset = "0"
+  overlay.style.pointerEvents = "none"
+  overlay.style.overflow = "visible"
+  overlay.style.zIndex = "3"
+
+  for (const block of forcedStartBlocks) {
+    const duplicate = block.element.cloneNode(true) as HTMLElement
+    duplicate.removeAttribute("id")
+    duplicate.removeAttribute("data-pdf-force-page-start")
+    duplicate.querySelectorAll<HTMLElement>("[id]").forEach((node) => node.removeAttribute("id"))
+    duplicate.style.position = "absolute"
+    duplicate.style.left = "0"
+    duplicate.style.top = `${Math.max(0, Math.round(block.top))}px`
+    duplicate.style.width = "100%"
+    duplicate.style.margin = "0"
+    duplicate.style.visibility = "hidden"
+    duplicate.style.opacity = "0"
+    duplicate.style.pointerEvents = "none"
+    duplicate.style.zIndex = "1"
+    overlay.appendChild(duplicate)
+    block.duplicateElement = duplicate
+  }
+
+  clone.appendChild(overlay)
 }
 
 function resetPdfBlockVisibility(blocks: ClonePdfBlockHandle[]) {
   for (const block of blocks) {
     block.element.style.visibility = "visible"
     block.element.style.opacity = "1"
+    if (block.duplicateElement) {
+      block.duplicateElement.style.visibility = "hidden"
+      block.duplicateElement.style.opacity = "0"
+    }
   }
 }
 
@@ -752,17 +791,29 @@ function hidePdfBlockForCapture(block: ClonePdfBlockHandle) {
   block.element.style.opacity = "0"
 }
 
+function showPdfBlockDuplicateForCapture(block: ClonePdfBlockHandle) {
+  if (!block.duplicateElement) return
+  block.duplicateElement.style.visibility = "visible"
+  block.duplicateElement.style.opacity = "1"
+}
+
 function applyHardPdfPageBlockVisibility(page: ResolvedPdfLayout["pages"][number], blocks: ClonePdfBlockHandle[]) {
   resetPdfBlockVisibility(blocks)
 
   const forcedStartIndex = page.firstBlockId
     ? blocks.findIndex((block) => block.blockId === page.firstBlockId && block.forcedStart)
     : -1
+  const forcedStartBlock = forcedStartIndex >= 0 ? blocks[forcedStartIndex] ?? null : null
 
   if (forcedStartIndex > 0) {
     for (let index = 0; index < forcedStartIndex; index += 1) {
       hidePdfBlockForCapture(blocks[index]!)
     }
+  }
+
+  if (forcedStartBlock) {
+    hidePdfBlockForCapture(forcedStartBlock)
+    showPdfBlockDuplicateForCapture(forcedStartBlock)
   }
 
   if (page.hardBreakBeforeBlockId) {
@@ -811,6 +862,7 @@ async function renderPdfPages(source: HTMLElement, options: RenderPdfPagesOption
     const pageHeightPx = getPdfSliceHeightPx(captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
     const measuredBlocks = measurePdfBlockBounds(clone)
     const cloneBlocks = getClonePdfBlockHandles(clone, measuredBlocks)
+    createForcedStartPdfDuplicates(clone, cloneBlocks)
     const layout = resolvePdfLayout({
       layoutKey: buildResolvedPdfLayoutKey({
         docId: options.doc.id,
