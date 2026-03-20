@@ -810,20 +810,18 @@ type ClonePdfBlockHandle = {
 }
 
 function getClonePdfBlockHandles(clone: HTMLElement, measuredBlocks: Record<string, MeasuredPdfBlockBounds>) {
-  const cloneRect = clone.getBoundingClientRect()
   return Array.from(clone.querySelectorAll<HTMLElement>('[id^="memo-block-"]'))
     .map<ClonePdfBlockHandle | null>((element) => {
       const blockId = element.id.replace(/^memo-block-/, "")
       const measured = measuredBlocks[blockId]
       if (!blockId || !measured) return null
-      const rect = element.getBoundingClientRect()
       return {
         blockId,
         element,
         top: measured.top,
         bottom: measured.bottom,
-        left: rect.left - cloneRect.left,
-        width: rect.width,
+        left: element.offsetLeft,
+        width: element.offsetWidth,
         forcedStart: element.dataset.pdfForcePageStart === "true",
         duplicateElement: null,
       }
