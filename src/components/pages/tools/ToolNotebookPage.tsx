@@ -204,11 +204,10 @@ type PdfSlicePlan = {
   slices: PdfSlice[]
 }
 
-type PdfBreakMarker = {
-  y: number
-  pageFrom: number
-  pageTo: number
-  target?: PdfBreakAnchor["target"]
+type PdfPreviewPage = {
+  pageNumber: number
+  offsetY: number
+  height: number
 }
 
 type PdfBreakAnchor = {
@@ -292,6 +291,13 @@ function buildPdfExportRoot(source: HTMLElement) {
 
   clone.querySelectorAll<HTMLElement>('[data-page-spacer-block="true"]').forEach((element) => {
     element.style.position = "relative"
+  })
+  clone.querySelectorAll<HTMLElement>('[data-pdf-preview-source="true"]').forEach((element) => {
+    element.classList.remove("hidden")
+    element.classList.remove("invisible", "pointer-events-none", "select-none")
+    element.style.visibility = "visible"
+    element.style.pointerEvents = "auto"
+    element.style.userSelect = "auto"
   })
   // ✅ visibility:hidden → display:none 수정
   // visibility:hidden은 레이아웃에 공간을 그대로 차지해
@@ -539,26 +545,14 @@ async function measurePdfLayout(source: HTMLElement) {
     await waitForPdfExportAssets(clone)
     const { pdfInnerWidthPt, pdfInnerHeightPt } = getPdfInnerBounds()
     const layout = buildPdfLayoutWithPageSpacers(clone, captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
-    const cloneStyles = window.getComputedStyle(clone)
-    const verticalPadding =
-      (Number.parseFloat(cloneStyles.paddingTop || "0") || 0) +
-      (Number.parseFloat(cloneStyles.paddingBottom || "0") || 0)
     return {
       previewHtml: clone.innerHTML,
-      previewHeight: Math.max(
-        0,
-        Math.ceil(Math.max(clone.scrollHeight, clone.getBoundingClientRect().height) - verticalPadding)
-      ),
+      previewPages: layout.plan.slices.map((slice, index) => ({
+        pageNumber: index + 1,
+        offsetY: slice.offsetY,
+        height: slice.height,
+      })),
       spacerHeights: layout.spacerHeights,
-      breakMarkers:
-        layout.plan.totalHeight > 0
-          ? layout.plan.slices.slice(0, -1).map((slice, index) => ({
-            y: Math.max(0, Math.floor(slice.breakAnchor?.naturalY ?? (slice.offsetY + slice.height))),
-            pageFrom: index + 1,
-            pageTo: index + 2,
-            target: slice.breakAnchor?.target,
-          }))
-          : [],
     }
   } finally {
     cleanup()
@@ -4268,10 +4262,9 @@ export function ToolNotebookPage() {
   const [importError, setImportError] = useState<string | null>(null)
   const [blockReorderState, setBlockReorderState] = useState<ActiveBlockReorderState | null>(null)
   const [showPdfBreaks, setShowPdfBreaks] = useState(false)
-  const [pdfBreakMarkers, setPdfBreakMarkers] = useState<PdfBreakMarker[]>([])
   const [pdfSpacerPreviewHeights, setPdfSpacerPreviewHeights] = useState<Record<string, number>>({})
   const [pdfPreviewHtml, setPdfPreviewHtml] = useState("")
-  const [pdfPreviewHeight, setPdfPreviewHeight] = useState(0)
+  const [pdfPreviewPages, setPdfPreviewPages] = useState<PdfPreviewPage[]>([])
   const [availableTemplates, setAvailableTemplates] = useState<RNestMemoTemplate[]>(() =>
     defaultMemoTemplates.map((template) => sanitizeMemoTemplate(template))
   )
@@ -4283,6 +4276,7 @@ export function ToolNotebookPage() {
   const blockReorderCleanupRef = useRef<(() => void) | null>(null)
   const pdfSpacerPreviewHeightsRef = useRef<Record<string, number>>({})
   const pdfSpacerPreviewKey = useMemo(() => pageSpacerHeightMapToKey(pdfSpacerPreviewHeights), [pdfSpacerPreviewHeights])
+  const showingPdfPreview = showPdfBreaks && pdfPreviewHtml.length > 0 && pdfPreviewPages.length > 0
 
   useEffect(() => {
     if (!showSortMenu) return
@@ -4303,10 +4297,9 @@ export function ToolNotebookPage() {
 
   useEffect(() => {
     if (!showPdfBreaks || !pdfContentRef.current) {
-      setPdfBreakMarkers([])
       setPdfSpacerPreviewHeights({})
       setPdfPreviewHtml("")
-      setPdfPreviewHeight(0)
+      setPdfPreviewPages([])
       return
     }
     const node = pdfContentRef.current
@@ -4324,14 +4317,12 @@ export function ToolNotebookPage() {
         if (!cancelled && token === computeToken) {
           setPdfSpacerPreviewHeights(layout.spacerHeights)
           setPdfPreviewHtml(layout.previewHtml)
-          setPdfPreviewHeight(layout.previewHeight)
-          setPdfBreakMarkers(layout.breakMarkers)
+          setPdfPreviewPages(layout.previewPages)
         }
       } catch {
         if (!cancelled && token === computeToken) {
-          setPdfBreakMarkers([])
           setPdfPreviewHtml("")
-          setPdfPreviewHeight(0)
+          setPdfPreviewPages([])
         }
       }
     }
@@ -6829,7 +6820,6 @@ export function ToolNotebookPage() {
             <div
               ref={pdfContentRef}
               className="relative mx-auto w-full max-w-[720px] bg-white px-5 py-6 sm:px-6 lg:px-10 lg:py-10 xl:pl-16"
-              style={showPdfBreaks && pdfPreviewHeight > 0 ? { minHeight: pdfPreviewHeight } : undefined}
             >
               {editorDropActive && (
                 <div
@@ -6841,7 +6831,7 @@ export function ToolNotebookPage() {
                   </div>
                 </div>
               )}
-              <div className={cn(showPdfBreaks && "pointer-events-none invisible select-none")}>
+              <div data-pdf-preview-source="true" className={cn(showingPdfPreview && "hidden")}>
               {activeMemo.coverStyle && (
                 <div
                   className={cn(
@@ -7324,34 +7314,28 @@ export function ToolNotebookPage() {
               )}
               </div>
 
-              {showPdfBreaks && pdfPreviewHtml && (
-                <div
-                  data-pdf-hide="true"
-                  aria-hidden="true"
-                  className="pointer-events-none absolute inset-0 z-20 bg-white px-5 py-6 sm:px-6 lg:px-10 lg:py-10 xl:pl-16"
-                >
-                  <div
-                    className="relative"
-                    style={{ minHeight: pdfPreviewHeight || undefined }}
-                    dangerouslySetInnerHTML={{ __html: pdfPreviewHtml }}
-                  />
-                  {pdfBreakMarkers.map((marker) => (
-                    <div
-                      key={`${marker.pageFrom}-${marker.pageTo}-${marker.y}`}
-                      style={{ top: marker.y, position: "absolute", left: 0, right: 0, height: 0 }}
-                      className="pointer-events-none"
-                    >
-                      <div className="relative h-0 px-3">
-                        <div className="absolute left-3 right-3 top-0 h-px bg-[#D6DAE5]" />
-                        <span
-                          className="absolute left-1/2 top-0 shrink-0 rounded-full border border-[#E6E8F1] bg-white/96 px-3 py-1 text-[10px] font-semibold tracking-[-0.01em] text-[#6F62D9] shadow-[0_10px_24px_rgba(15,23,42,0.08)]"
-                          style={{ transform: "translate(-50%, calc(-100% - 6px))" }}
-                        >
-                          {marker.pageFrom}P → {marker.pageTo}P
-                        </span>
+              {showPdfBreaks && (
+                <div data-pdf-hide="true" aria-hidden="true" className={cn("space-y-5", showingPdfPreview ? "block" : "hidden")}>
+                  {pdfPreviewPages.map((page) => (
+                    <div key={`pdf-preview-page-${page.pageNumber}`} className="overflow-hidden rounded-[28px] border border-[#E6E8F1] bg-[#F7F7FA] p-3 shadow-[0_20px_40px_rgba(15,23,42,0.06)]">
+                      <div className="overflow-hidden rounded-[20px] border border-[#ECEFF5] bg-white shadow-[0_1px_3px_rgba(15,23,42,0.06)]" style={{ height: page.height }}>
+                        <div
+                          className="pointer-events-none select-none"
+                          style={{ transform: `translateY(-${page.offsetY}px)` }}
+                          dangerouslySetInnerHTML={{ __html: pdfPreviewHtml }}
+                        />
+                      </div>
+                      <div className="mt-2 flex items-center justify-center text-[11px] font-medium tracking-[-0.01em] text-[#7C8497]">
+                        {page.pageNumber} / {pdfPreviewPages.length}
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {showPdfBreaks && !showingPdfPreview && (
+                <div data-pdf-hide="true" className="flex min-h-[240px] items-center justify-center rounded-[28px] border border-[#E6E8F1] bg-[#F7F7FA] text-[13px] font-medium text-[#7C8497]">
+                  PDF 페이지 미리보기를 준비하고 있습니다
                 </div>
               )}
             </div>
