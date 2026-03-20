@@ -44,7 +44,7 @@ export const memoBlockTypes = [
 ] as const
 
 export type RNestMemoBlockType = (typeof memoBlockTypes)[number]
-export type RNestMemoSpacerMode = "manual" | "next-page"
+export type RNestMemoSpacerMode = "next-page"
 
 export type RNestMemoTableAlign = "left" | "center" | "right"
 
@@ -334,9 +334,7 @@ const MAX_TITLE_SNAPSHOT_LENGTH = 120
 const MAX_RECORD_FIELDS = 16
 const MAX_SELECT_OPTIONS = 10
 const MAX_RECORD_VIEW_FIELDS = 8
-const MIN_PAGE_SPACER_HEIGHT = 24
-const MAX_PAGE_SPACER_HEIGHT = 2400
-const DEFAULT_PAGE_SPACER_HEIGHT = 96
+const DEFAULT_PAGE_SPACER_HEIGHT = 0
 
 function sanitizeMediaWidth(value: unknown) {
   if (typeof value !== "number" || !Number.isFinite(value)) return 100
@@ -523,11 +521,12 @@ function sanitizeTableAlign(value: unknown): RNestMemoTableAlign {
 
 function sanitizePageSpacerHeight(value: unknown) {
   if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_PAGE_SPACER_HEIGHT
-  return Math.min(MAX_PAGE_SPACER_HEIGHT, Math.max(MIN_PAGE_SPACER_HEIGHT, Math.round(value)))
+  return 0
 }
 
 function sanitizePageSpacerMode(value: unknown): RNestMemoSpacerMode {
-  return value === "next-page" ? "next-page" : "manual"
+  void value
+  return "next-page"
 }
 
 function normalizeMemoIcon(value: unknown, fallback: RNestMemoIconId): RNestMemoIconId {
@@ -937,8 +936,8 @@ export function createMemoBlock(type: RNestMemoBlockType | string, input?: Parti
       textHtml: undefined,
       detailText: undefined,
       detailTextHtml: undefined,
-      spacerMode: sanitizePageSpacerMode(input?.spacerMode),
-      spacerHeight: sanitizePageSpacerHeight(input?.spacerHeight),
+      spacerMode: "next-page",
+      spacerHeight: 0,
     }
   }
 
@@ -1097,8 +1096,8 @@ export function coerceMemoBlockType(block: RNestMemoBlock, nextType: RNestMemoBl
     return createMemoBlock("pageSpacer", {
       id: block.id,
       highlight: block.highlight,
-      spacerMode: "manual",
-      spacerHeight: DEFAULT_PAGE_SPACER_HEIGHT,
+      spacerMode: "next-page",
+      spacerHeight: 0,
     })
   }
 
@@ -1631,13 +1630,7 @@ export function memoDocumentToMarkdown(document: RNestMemoDocument) {
       continue
     }
     if (block.type === "pageSpacer") {
-      const spacerMode = block.spacerMode === "next-page" ? "next-page" : "manual"
-      const spacerHeight = sanitizePageSpacerHeight(block.spacerHeight)
-      lines.push(
-        spacerMode === "next-page"
-          ? "<!-- RNEST_PAGE_SPACER next-page -->"
-          : `<!-- RNEST_PAGE_SPACER manual ${spacerHeight}px -->`
-      )
+      lines.push("<!-- RNEST_PAGE_SPACER next-page -->")
       continue
     }
     if (block.type === "table") {
