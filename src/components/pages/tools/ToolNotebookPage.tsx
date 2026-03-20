@@ -715,6 +715,74 @@ function measurePdfBlockBounds(clone: HTMLElement) {
   return measuredBlocks
 }
 
+type ClonePdfBlockHandle = {
+  blockId: string
+  element: HTMLElement
+  top: number
+  bottom: number
+  forcedStart: boolean
+}
+
+function getClonePdfBlockHandles(clone: HTMLElement, measuredBlocks: Record<string, MeasuredPdfBlockBounds>) {
+  return Array.from(clone.querySelectorAll<HTMLElement>('[id^="memo-block-"]'))
+    .map((element) => {
+      const blockId = element.id.replace(/^memo-block-/, "")
+      const measured = measuredBlocks[blockId]
+      if (!blockId || !measured) return null
+      return {
+        blockId,
+        element,
+        top: measured.top,
+        bottom: measured.bottom,
+        forcedStart: element.dataset.pdfForcePageStart === "true",
+      } satisfies ClonePdfBlockHandle
+    })
+    .filter((entry): entry is ClonePdfBlockHandle => Boolean(entry))
+}
+
+function resetPdfBlockVisibility(blocks: ClonePdfBlockHandle[]) {
+  for (const block of blocks) {
+    block.element.style.visibility = "visible"
+    block.element.style.opacity = "1"
+  }
+}
+
+function hidePdfBlockForCapture(block: ClonePdfBlockHandle) {
+  block.element.style.visibility = "hidden"
+  block.element.style.opacity = "0"
+}
+
+function applyHardPdfPageBlockVisibility(page: ResolvedPdfLayout["pages"][number], blocks: ClonePdfBlockHandle[]) {
+  resetPdfBlockVisibility(blocks)
+
+  const forcedStartIndex = page.firstBlockId
+    ? blocks.findIndex((block) => block.blockId === page.firstBlockId && block.forcedStart)
+    : -1
+
+  if (forcedStartIndex > 0) {
+    for (let index = 0; index < forcedStartIndex; index += 1) {
+      hidePdfBlockForCapture(blocks[index]!)
+    }
+  }
+
+  if (page.hardBreakBeforeBlockId) {
+    const hardBreakIndex = blocks.findIndex((block) => block.blockId === page.hardBreakBeforeBlockId)
+    if (hardBreakIndex >= 0) {
+      for (let index = hardBreakIndex; index < blocks.length; index += 1) {
+        hidePdfBlockForCapture(blocks[index]!)
+      }
+    }
+  }
+
+  const beforeGuardY = page.startY + 2
+  const afterGuardY = page.endY - 2
+  for (const block of blocks) {
+    if (block.bottom <= beforeGuardY || block.top >= afterGuardY) {
+      hidePdfBlockForCapture(block)
+    }
+  }
+}
+
 function getPdfRenderedHeightPt(canvas: HTMLCanvasElement, contentWidth: number, contentHeight: number) {
   if (!canvas.width || !canvas.height) return contentHeight
   return Math.min(contentHeight, contentWidth * (canvas.height / canvas.width))
@@ -742,6 +810,7 @@ async function renderPdfPages(source: HTMLElement, options: RenderPdfPagesOption
     const totalHeight = Math.max(Math.ceil(clone.scrollHeight), Math.ceil(clone.getBoundingClientRect().height))
     const pageHeightPx = getPdfSliceHeightPx(captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
     const measuredBlocks = measurePdfBlockBounds(clone)
+    const cloneBlocks = getClonePdfBlockHandles(clone, measuredBlocks)
     const layout = resolvePdfLayout({
       layoutKey: buildResolvedPdfLayoutKey({
         docId: options.doc.id,
@@ -765,6 +834,7 @@ async function renderPdfPages(source: HTMLElement, options: RenderPdfPagesOption
     for (const page of layout.pages) {
       throwIfPdfRenderCancelled(options.shouldCancel)
       const sliceHeight = Math.max(1, Math.ceil(page.height))
+      applyHardPdfPageBlockVisibility(page, cloneBlocks)
       viewport.style.height = `${sliceHeight}px`
       clone.style.transform = `translateY(-${page.startY}px)`
 
@@ -794,6 +864,7 @@ async function renderPdfPages(source: HTMLElement, options: RenderPdfPagesOption
       options.onPageRendered?.(nextPage, pages.length, layout.pages.length)
       await yieldPdfRasterization()
     }
+    resetPdfBlockVisibility(cloneBlocks)
 
     return {
       pageWidth,
