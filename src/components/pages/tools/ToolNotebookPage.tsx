@@ -216,7 +216,7 @@ type PdfBreakAnchor = {
   blockId?: string
   edge?: "top" | "bottom"
   delta?: number
-  target?: "block" | "page-spacer-filler" | "page-spacer-marker"
+  target?: "block" | "page-spacer-filler" | "page-spacer-marker" | "forced-page-start"
 }
 
 function createPdfFieldPreview(field: HTMLInputElement | HTMLTextAreaElement) {
@@ -447,21 +447,13 @@ function findSafeSlice(
   })
 
   // 강제 페이지 시작 마커가 현재 페이지 범위 안에 있으면,
-  // 그 마커 다음 실제 콘텐츠 블록의 top에서 무조건 페이지를 끊는다.
-  const markerIndex = blockBounds.findIndex(
-    ({ block, top }) =>
-      block.dataset.pageSpacerBlock === "true" &&
-      top > currentOffsetY + 1 &&
-      top <= cutNaturalY + 1
+  // 해당 블록의 top에서 무조건 페이지를 끊는다.
+  const forcedPageStart = blockBounds.find(
+    ({ block, top }) => block.dataset.pdfForcePageStart === "true" && top > currentOffsetY + 1 && top <= cutNaturalY + 1
   )
 
-  if (markerIndex >= 0) {
-    const marker = blockBounds[markerIndex]
-    const nextContent = blockBounds
-      .slice(markerIndex + 1)
-      .find(({ block, top }) => block.dataset.pageSpacerBlock !== "true" && top > currentOffsetY + 1)
-
-    const breakY = Math.floor(nextContent?.top ?? marker.top)
+  if (forcedPageStart) {
+    const breakY = Math.floor(forcedPageStart.top)
     const forcedHeight = breakY - currentOffsetY
     if (forcedHeight > 0 && isUsablePdfSliceHeight(forcedHeight, desiredSliceHeight)) {
       return {
@@ -469,10 +461,10 @@ function findSafeSlice(
         height: forcedHeight,
         breakAnchor: {
           naturalY: breakY,
-          blockId: marker.block.id,
+          blockId: forcedPageStart.block.id,
           edge: "top",
           delta: 0,
-          target: "page-spacer-marker",
+          target: "forced-page-start",
         },
       }
     }
@@ -480,9 +472,6 @@ function findSafeSlice(
 
   for (const { block, top: blockNaturalTop, bottom: blockNaturalBottom } of blockBounds) {
     if (blockNaturalTop < cutNaturalY && blockNaturalBottom > cutNaturalY) {
-      if (block.dataset.pageSpacerBlock === "true") {
-        continue
-      }
       const safeHeight = Math.floor(blockNaturalTop - currentOffsetY - PDF_BREAK_PADDING_PX)
       if (safeHeight > 0 && safeHeight < desiredSliceHeight && isUsablePdfSliceHeight(safeHeight, desiredSliceHeight)) {
         return {
@@ -663,7 +652,7 @@ function buildPdfSpacerMarkers(slicePlan: PdfSlicePlan) {
   const markers: Record<string, PdfSpacerMarker> = {}
   slicePlan.slices.forEach((slice, index) => {
     if (index >= slicePlan.slices.length - 1) return
-    if (slice.breakAnchor?.target !== "page-spacer-filler" || !slice.breakAnchor.blockId) return
+    if (slice.breakAnchor?.target !== "forced-page-start" || !slice.breakAnchor.blockId) return
     markers[slice.breakAnchor.blockId] = {
       blockId: slice.breakAnchor.blockId,
       pageFrom: index + 1,
@@ -2712,6 +2701,7 @@ function InlineBlock({
   onOpenAttachment,
   onOpenDoc,
   onDuplicate,
+  onInsertBlankBefore,
   onTypeChange,
   onAddAfter,
   onInsertAsset,
@@ -2725,6 +2715,7 @@ function InlineBlock({
   isFirst,
   isLast,
   showPdfBreaks,
+  startsNextPdfPage,
   pdfSpacerMarker,
   isDragging,
   dragOffsetY,
@@ -2742,6 +2733,7 @@ function InlineBlock({
   onOpenAttachment: () => void
   onOpenDoc: (docId: string) => void
   onDuplicate: () => void
+  onInsertBlankBefore: () => void
   onTypeChange: (t: RNestMemoBlockType) => void
   onAddAfter: (type?: RNestMemoBlockType) => void
   onInsertAsset: (kind: "image" | "attachment" | "gallery") => void
@@ -2755,6 +2747,7 @@ function InlineBlock({
   isFirst: boolean
   isLast: boolean
   showPdfBreaks: boolean
+  startsNextPdfPage?: boolean
   pdfSpacerMarker?: PdfSpacerMarker | null
   isDragging?: boolean
   dragOffsetY?: number
@@ -2833,6 +2826,15 @@ function InlineBlock({
     return () => document.removeEventListener("pointerdown", handlePointerDown)
   }, [touchActive, showAddMenu, showActionMenu])
 
+  function handleInsertBlankBeforeFromInput(e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
+    const selectionStart = typeof e.currentTarget.selectionStart === "number" ? e.currentTarget.selectionStart : null
+    const selectionEnd = typeof e.currentTarget.selectionEnd === "number" ? e.currentTarget.selectionEnd : null
+    if (e.key !== "Enter" || selectionStart !== 0 || selectionEnd !== 0) return false
+    e.preventDefault()
+    onInsertBlankBefore()
+    return true
+  }
+
   function handleCommandKeyDown(e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
       e.preventDefault()
@@ -2846,6 +2848,7 @@ function InlineBlock({
   }
 
   function handleEditorKeyDown(e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
+    if (handleInsertBlankBeforeFromInput(e)) return
     handleCommandKeyDown(e)
     if (e.defaultPrevented) return
     const currentValue = "value" in e.currentTarget ? String(e.currentTarget.value ?? "") : ""
@@ -2962,6 +2965,7 @@ function InlineBlock({
         "group/block relative scroll-mt-28 transition-shadow",
         isDragging && "z-30 pointer-events-none rounded-2xl bg-white shadow-[0_8px_30px_rgba(0,0,0,0.12),0_2px_8px_rgba(0,0,0,0.06)]"
       )}
+      data-pdf-force-page-start={startsNextPdfPage ? "true" : undefined}
       style={isDragging ? { transform: `translateY(${dragOffsetY ?? 0}px) scale(1.018)`, opacity: 1, transition: "none" } : undefined}
       onMouseEnter={handleBlockMouseEnter}
       onMouseLeave={handleBlockMouseLeave}
@@ -3172,7 +3176,7 @@ function InlineBlock({
                   className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-ios-text hover:bg-gray-50"
                 >
                   <ArrowUpDown className="h-3.5 w-3.5" />
-                  다음 PDF 페이지에서 시작
+                  {startsNextPdfPage ? "다음 PDF 페이지 시작 해제" : "다음 PDF 페이지에서 시작"}
                 </button>
               )}
               {!isFirst && (
@@ -3268,6 +3272,18 @@ function InlineBlock({
 
       {/* block content */}
       <div className={cn("min-h-[1.6em] rounded-md transition-colors", block.highlight && highlightBgMap[block.highlight] ? `${highlightBgMap[block.highlight]} px-2 -mx-2 py-0.5` : "")}>
+        {startsNextPdfPage && (
+          <div data-pdf-hide="true" className="mb-4">
+            <div className="flex items-center gap-3 px-1">
+              <div className="h-px flex-1 bg-[#D8DEE8]" />
+              <div className="inline-flex items-center rounded-full border border-[#E6E8F1] bg-white/98 px-3 py-1 text-[11px] font-semibold tracking-[-0.01em] text-[color:var(--rnest-accent)] shadow-[0_10px_24px_rgba(15,23,42,0.08)]">
+                {pageSpacerBoundaryLabel}
+              </div>
+              <div className="h-px flex-1 bg-[#D8DEE8]" />
+            </div>
+          </div>
+        )}
+
         {showSlashMenu && (
           <SlashMenu
             currentType={block.type}
@@ -3283,36 +3299,6 @@ function InlineBlock({
           </div>
         )}
 
-        {block.type === "pageSpacer" && (
-          <div
-            data-page-spacer-block="true"
-            data-page-spacer-block-id={block.id}
-            data-page-spacer-mode="next-page"
-            className="relative h-0"
-          >
-            <div
-              data-page-spacer-ui="true"
-              className={cn(
-                "pointer-events-none absolute inset-x-0 top-0 z-10",
-                showPdfBreaks ? "hidden" : ""
-              )}
-            >
-              <div className="flex -translate-y-1/2 items-center gap-3 px-1">
-                <div className="h-px flex-1 bg-[#D8DEE8]" />
-                <div className="inline-flex items-center rounded-full border border-[#E6E8F1] bg-white/98 px-3 py-1 text-[11px] font-semibold tracking-[-0.01em] text-[color:var(--rnest-accent)] shadow-[0_10px_24px_rgba(15,23,42,0.08)]">
-                  {pageSpacerBoundaryLabel}
-                </div>
-                <div className="h-px flex-1 bg-[#D8DEE8]" />
-              </div>
-            </div>
-            <div
-              data-page-spacer-filler="true"
-              style={{ height: 0 }}
-              className="h-0 overflow-hidden"
-            />
-          </div>
-        )}
-
         {block.type === "heading" && (
           <NotebookRichTextField
             text={block.text}
@@ -3321,6 +3307,7 @@ function InlineBlock({
             ariaLabel="제목"
             className="text-[22px] font-bold tracking-[-0.02em] text-ios-text"
             onDuplicate={onDuplicate}
+            onInsertBlankBlockBefore={onInsertBlankBefore}
             onRequestSlashMenu={() => setShowSlashMenu(true)}
             onChange={(next) =>
               onChange({
@@ -3340,6 +3327,7 @@ function InlineBlock({
             ariaLabel="문단"
             className={cn("leading-relaxed text-ios-text", mobileSafeBodyClass)}
             onDuplicate={onDuplicate}
+            onInsertBlankBlockBefore={onInsertBlankBefore}
             onRequestSlashMenu={() => setShowSlashMenu(true)}
             onChange={(next) =>
               onChange({
@@ -3365,6 +3353,7 @@ function InlineBlock({
               ariaLabel="글머리 기호 항목"
               className={cn("leading-relaxed text-ios-text", mobileSafeBodyClass)}
               onDuplicate={onDuplicate}
+              onInsertBlankBlockBefore={onInsertBlankBefore}
               onRequestSlashMenu={() => setShowSlashMenu(true)}
               onChange={(next) =>
                 onChange({
@@ -3387,6 +3376,7 @@ function InlineBlock({
               ariaLabel="번호 목록 항목"
               className={cn("leading-relaxed text-ios-text", mobileSafeBodyClass)}
               onDuplicate={onDuplicate}
+              onInsertBlankBlockBefore={onInsertBlankBefore}
               onRequestSlashMenu={() => setShowSlashMenu(true)}
               onChange={(next) =>
                 onChange({
@@ -3428,6 +3418,7 @@ function InlineBlock({
                 block.checked ? "text-ios-muted line-through" : "text-ios-text"
               )}
               onDuplicate={onDuplicate}
+              onInsertBlankBlockBefore={onInsertBlankBefore}
               onRequestSlashMenu={() => setShowSlashMenu(true)}
               onChange={(next) =>
                 onChange({
@@ -3450,6 +3441,7 @@ function InlineBlock({
               ariaLabel="콜아웃"
               className="leading-relaxed text-ios-text text-[16px] md:text-[14.5px]"
               onDuplicate={onDuplicate}
+              onInsertBlankBlockBefore={onInsertBlankBefore}
               onRequestSlashMenu={() => setShowSlashMenu(true)}
               onChange={(next) =>
                 onChange({
@@ -3472,6 +3464,7 @@ function InlineBlock({
               ariaLabel="인용"
               className="leading-relaxed text-ios-text text-[16px] md:text-[14.5px]"
               onDuplicate={onDuplicate}
+              onInsertBlankBlockBefore={onInsertBlankBefore}
               onRequestSlashMenu={() => setShowSlashMenu(true)}
               onChange={(next) =>
                 onChange({
@@ -3502,6 +3495,7 @@ function InlineBlock({
                 ariaLabel="토글 제목"
                 className={cn("font-medium text-ios-text", mobileSafeInputClass)}
                 onDuplicate={onDuplicate}
+                onInsertBlankBlockBefore={onInsertBlankBefore}
                 onRequestSlashMenu={() => setShowSlashMenu(true)}
                 onChange={(next) =>
                   onChange({
@@ -3545,7 +3539,10 @@ function InlineBlock({
                   type="url"
                   value={block.text ?? ""}
                   onChange={(e) => onChange({ ...block, text: e.target.value })}
-                  onKeyDown={handleCommandKeyDown}
+                  onKeyDown={(event) => {
+                    if (handleInsertBlankBeforeFromInput(event)) return
+                    handleCommandKeyDown(event)
+                  }}
                   placeholder="https://example.com"
                   className={cn(
                     "w-full border-none bg-transparent font-medium text-ios-text outline-none placeholder:text-gray-300",
@@ -3671,15 +3668,16 @@ function InlineBlock({
                 </button>
               ) : null}
             </div>
-            <NotebookRichTextField
-              text={block.titleSnapshot ?? block.text}
-              html={undefined}
+              <NotebookRichTextField
+                text={block.titleSnapshot ?? block.text}
+                html={undefined}
               placeholder="링크로 보일 제목"
               ariaLabel="문서 링크 제목"
-              className="mt-3 text-[15px] font-semibold text-ios-text"
-              enableSlashMenu={false}
-              onDuplicate={onDuplicate}
-              onChange={(next) =>
+                className="mt-3 text-[15px] font-semibold text-ios-text"
+                enableSlashMenu={false}
+                onDuplicate={onDuplicate}
+                onInsertBlankBlockBefore={onInsertBlankBefore}
+                onChange={(next) =>
                 onChange({
                   ...block,
                   titleSnapshot: next.text,
@@ -3708,7 +3706,10 @@ function InlineBlock({
                     provider: detectNotebookEmbedProvider(nextUrl),
                   })
                 }}
-                onKeyDown={handleCommandKeyDown}
+                onKeyDown={(event) => {
+                  if (handleInsertBlankBeforeFromInput(event)) return
+                  handleCommandKeyDown(event)
+                }}
                 placeholder="https://"
                 className={cn(
                   "min-w-[220px] flex-1 rounded-xl border border-gray-200 bg-white px-3 py-2 text-ios-text outline-none placeholder:text-gray-300",
@@ -3727,6 +3728,7 @@ function InlineBlock({
               className="mt-3 text-[14px] font-medium text-ios-text"
               enableSlashMenu={false}
               onDuplicate={onDuplicate}
+              onInsertBlankBlockBefore={onInsertBlankBefore}
               onChange={(next) =>
                 onChange({
                   ...block,
@@ -3760,6 +3762,7 @@ function InlineBlock({
                 className="min-w-[180px] flex-1 text-[15px] font-semibold text-ios-text"
                 enableSlashMenu={false}
                 onDuplicate={onDuplicate}
+                onInsertBlankBlockBefore={onInsertBlankBefore}
                 onChange={(next) => onChange({ ...block, text: next.text, textHtml: next.html })}
               />
               <button
@@ -4005,6 +4008,7 @@ function InlineBlock({
               className="mt-3 text-[15px] font-semibold text-ios-text"
               enableSlashMenu={false}
               onDuplicate={onDuplicate}
+              onInsertBlankBlockBefore={onInsertBlankBefore}
               onChange={(next) => onChange({ ...block, text: next.text })}
             />
             {recordTemplate ? (
@@ -5993,13 +5997,42 @@ export function ToolNotebookPage() {
     }))
   }
 
+  function insertBlankParagraphBefore(blockId: string) {
+    if (!activeMemo) return
+    const blankBlock = createMemoBlock("paragraph")
+    void updateActiveMemoContent((doc) => ({
+      ...doc,
+      blocks: (() => {
+        const idx = doc.blocks.findIndex((b) => b.id === blockId)
+        if (idx === -1) return doc.blocks
+        const next = [...doc.blocks]
+        next.splice(idx, 0, blankBlock)
+        return next
+      })(),
+    })).then((savedDoc) => {
+      if (!savedDoc || typeof window === "undefined") return
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const target = document.querySelector<HTMLElement>(
+            `#memo-block-${blankBlock.id} [data-notebook-rich-input="true"]`
+          )
+          target?.focus()
+        })
+      })
+    })
+  }
+
   function insertNextPageSpacerBefore(blockId: string) {
     if (!activeMemo) return
     const currentIndex = activeMemo.blocks.findIndex((block) => block.id === blockId)
     const currentPrevious = currentIndex > 0 ? activeMemo.blocks[currentIndex - 1] : null
     if (currentPrevious?.type === "pageSpacer") {
+      void updateActiveMemoContent((doc) => ({
+        ...doc,
+        blocks: doc.blocks.filter((block) => block.id !== currentPrevious.id),
+      }))
       setShowPdfBreaks(true)
-      setToast("바로 위에 이미 다음 PDF 페이지 시작 블록이 있습니다")
+      setToast("다음 PDF 페이지 시작을 해제했습니다")
       return
     }
     void updateActiveMemoContent((doc) => ({
@@ -7251,7 +7284,14 @@ export function ToolNotebookPage() {
                   {/* blocks */}
                   <div className="space-y-3 pl-0 lg:pl-10">
                     {activeMemo.blocks.map((block, idx) => {
+                      if (block.type === "pageSpacer") return null
                       const attachment = findAttachment(activeMemo, block.attachmentId)
+                      const previousRawBlock = idx > 0 ? activeMemo.blocks[idx - 1] : null
+                      const startsNextPdfPage = previousRawBlock?.type === "pageSpacer"
+                      const visibleBlockIndex = activeMemo.blocks
+                        .slice(0, idx + 1)
+                        .filter((entry) => entry.type !== "pageSpacer").length - 1
+                      const visibleBlockCount = activeMemo.blocks.filter((entry) => entry.type !== "pageSpacer").length
                       const showBeforeIndicator =
                         blockReorderState?.activeBlockId !== block.id &&
                         blockReorderState?.overBlockId === block.id &&
@@ -7276,8 +7316,8 @@ export function ToolNotebookPage() {
                             allDocs={activeDocs}
                             recordTemplates={allRecordTemplates}
                             recordEntriesByTemplateId={recordEntriesByTemplateId}
-                            isFirst={idx === 0}
-                            isLast={idx === activeMemo.blocks.length - 1}
+                            isFirst={visibleBlockIndex === 0}
+                            isLast={visibleBlockIndex === visibleBlockCount - 1}
                             isDragging={blockReorderState?.activeBlockId === block.id}
                             dragOffsetY={blockReorderState?.activeBlockId === block.id ? (blockReorderState?.offsetY ?? 0) : 0}
                             onRootReady={(node) => {
@@ -7297,6 +7337,7 @@ export function ToolNotebookPage() {
                               if (attachment) openAttachment(attachment)
                             }}
                             onDuplicate={() => duplicateBlock(block.id)}
+                            onInsertBlankBefore={() => insertBlankParagraphBefore(block.id)}
                             onTypeChange={(type) => changeBlockType(block.id, type)}
                             onAddAfter={(type) => addBlockAfter(block.id, type)}
                             onInsertAsset={(kind) => beginAssetInsert(block.id, kind)}
@@ -7308,6 +7349,7 @@ export function ToolNotebookPage() {
                             onHighlight={(color) => setBlockHighlight(block.id, color)}
                             onRequestReorderStart={startBlockReorder}
                             showPdfBreaks={showPdfBreaks}
+                            startsNextPdfPage={startsNextPdfPage}
                             pdfSpacerMarker={pdfSpacerMarkers[block.id] ?? null}
                           />
                           {showAfterIndicator && (
