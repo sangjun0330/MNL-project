@@ -556,7 +556,7 @@ async function renderPdfPages(source: HTMLElement) {
       Math.min((window.devicePixelRatio || 1) * 1.5, PDF_EXPORT_MAX_CAPTURE_SCALE)
     )
 
-    const { plan } = buildPdfLayoutWithPageSpacers(clone, captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
+    const { plan, spacerHeights } = buildPdfLayoutWithPageSpacers(clone, captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
     if (plan.totalHeight <= 0 || plan.slices.length <= 0) {
       throw new Error("pdf_export_empty")
     }
@@ -599,6 +599,8 @@ async function renderPdfPages(source: HTMLElement) {
       contentWidth,
       contentHeight,
       pages,
+      spacerHeights,
+      slicePlan: plan,
     }
   } finally {
     cleanup()
@@ -3293,7 +3295,7 @@ function InlineBlock({
             <div
               data-page-spacer-filler="true"
               style={{ height: 0 }}
-              className="overflow-hidden transition-[height] duration-200"
+              className={cn("overflow-hidden", !showPdfBreaks && "transition-[height] duration-200")}
             />
           </div>
         )}
@@ -4301,6 +4303,7 @@ export function ToolNotebookPage() {
   const [showPdfBreaks, setShowPdfBreaks] = useState(false)
   const [pdfPreviewPages, setPdfPreviewPages] = useState<PdfPreviewPage[]>([])
   const [pdfPreviewBusy, setPdfPreviewBusy] = useState(false)
+  const [pdfBreakMarkers, setPdfBreakMarkers] = useState<{ y: number; pageFrom: number; pageTo: number }[]>([])
   const [availableTemplates, setAvailableTemplates] = useState<RNestMemoTemplate[]>(() =>
     defaultMemoTemplates.map((template) => sanitizeMemoTemplate(template))
   )
@@ -4329,6 +4332,11 @@ export function ToolNotebookPage() {
     if (!showPdfBreaks || !pdfContentRef.current) {
       setPdfPreviewPages([])
       setPdfPreviewBusy(false)
+      setPdfBreakMarkers([])
+      // filler 높이 초기화
+      if (pdfContentRef.current) {
+        pdfContentRef.current.querySelectorAll<HTMLElement>('[data-page-spacer-filler="true"]').forEach((f) => { f.style.height = "0px" })
+      }
       return
     }
     const node = pdfContentRef.current
@@ -4348,10 +4356,39 @@ export function ToolNotebookPage() {
         const layout = await renderPdfPages(currentNode)
         if (!cancelled && token === computeToken) {
           setPdfPreviewPages(layout.pages)
+
+          // 소스 DOM에 spacer filler 높이 적용 (에디터 레이아웃을 PDF와 동기화)
+          if (layout.spacerHeights) {
+            const spacers = currentNode.querySelectorAll<HTMLElement>('[data-page-spacer-block="true"]')
+            for (const spacer of spacers) {
+              const id = spacer.dataset.pageSpacerBlockId || spacer.id
+              const height = layout.spacerHeights[id] ?? 0
+              const filler = spacer.querySelector<HTMLElement>('[data-page-spacer-filler="true"]')
+              if (filler) {
+                const currentH = parseFloat(filler.style.height || "0") || 0
+                if (Math.abs(currentH - height) > 1) {
+                  filler.style.height = `${height}px`
+                }
+              }
+            }
+          }
+
+          // 페이지 구분선 위치 계산
+          if (layout.slicePlan && layout.slicePlan.slices.length > 1) {
+            const markers = layout.slicePlan.slices.slice(0, -1).map((slice, i) => ({
+              y: Math.floor(slice.offsetY + slice.height),
+              pageFrom: i + 1,
+              pageTo: i + 2,
+            }))
+            setPdfBreakMarkers(markers)
+          } else {
+            setPdfBreakMarkers([])
+          }
         }
       } catch {
         if (!cancelled && token === computeToken) {
           setPdfPreviewPages([])
+          setPdfBreakMarkers([])
         }
       } finally {
         if (!cancelled && token === computeToken) {
@@ -4402,6 +4439,9 @@ export function ToolNotebookPage() {
       resizeObserver.disconnect()
       mutationObserver.disconnect()
       window.removeEventListener("resize", schedule)
+      // filler 높이 초기화
+      node.querySelectorAll<HTMLElement>('[data-page-spacer-filler="true"]').forEach((f) => { f.style.height = "0px" })
+      setPdfBreakMarkers([])
     }
   }, [showPdfBreaks, activeMemoId])
 
@@ -7298,6 +7338,26 @@ export function ToolNotebookPage() {
                 </div>
               )}
               </div>
+
+              {showPdfBreaks && !showingPdfPreview && pdfBreakMarkers.map((marker) => (
+                <div
+                  key={`pdf-break-${marker.pageFrom}`}
+                  data-pdf-hide="true"
+                  aria-hidden="true"
+                  style={{ top: marker.y, position: "absolute", left: 0, right: 0, height: 0 }}
+                  className="pointer-events-none z-20"
+                >
+                  <div className="relative h-0 px-3">
+                    <div className="absolute left-3 right-3 top-0 h-px bg-[#D6DAE5]" />
+                    <span
+                      className="absolute left-1/2 top-0 shrink-0 rounded-full border border-[#E6E8F1] bg-white/96 px-3 py-1 text-[10px] font-semibold tracking-[-0.01em] text-[#6F62D9] shadow-[0_10px_24px_rgba(15,23,42,0.08)]"
+                      style={{ transform: "translate(-50%, calc(-100% - 6px))" }}
+                    >
+                      {marker.pageFrom}P → {marker.pageTo}P
+                    </span>
+                  </div>
+                </div>
+              ))}
 
               {showPdfBreaks && showingPdfPreview && (
                 <div data-pdf-hide="true" aria-hidden="true" className="space-y-6">
