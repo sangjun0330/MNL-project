@@ -441,8 +441,23 @@ function findSafeSlice(
   for (const { block, top: blockNaturalTop, bottom: blockNaturalBottom } of blockBounds) {
     if (blockNaturalTop < cutNaturalY && blockNaturalBottom > cutNaturalY) {
       if (block.dataset.pageSpacerBlock === "true") {
-        const filler = block.querySelector<HTMLElement>('[data-page-spacer-filler="true"]') ?? block
-        const fillerBounds = getElementNaturalBounds(filler, cloneTop)
+        // spacer 블록의 하단(filler 끝)에서 페이지를 잘라야 함.
+        // 그래야 spacer 뒤의 콘텐츠가 다음 페이지로 넘어감.
+        const cutAtBottom = Math.floor(blockNaturalBottom - currentOffsetY)
+        if (cutAtBottom > 0 && cutAtBottom <= desiredSliceHeight) {
+          return {
+            offsetY: currentOffsetY,
+            height: cutAtBottom,
+            breakAnchor: {
+              naturalY: currentOffsetY + cutAtBottom,
+              blockId: block.id,
+              edge: "bottom",
+              delta: 0,
+              target: "page-spacer-filler",
+            },
+          }
+        }
+        // filler가 페이지보다 크면 filler 중간에서 자름 (빈 공간이라 OK)
         return {
           offsetY: currentOffsetY,
           height: desiredSliceHeight,
@@ -450,7 +465,7 @@ function findSafeSlice(
             naturalY: cutNaturalY,
             blockId: block.id,
             edge: "top",
-            delta: Math.floor(cutNaturalY - fillerBounds.top),
+            delta: Math.floor(cutNaturalY - blockNaturalTop),
             target: "page-spacer-filler",
           },
         }
@@ -713,12 +728,13 @@ function buildPdfLayoutWithPageSpacers(
     plan = buildPdfSlicePlan(root, captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
     const bounds = getElementNaturalBounds(spacer, cloneTop)
     const slice = findSliceForNaturalPosition(plan, bounds.bottom)
-    const targetBreakY =
-      slice?.breakAnchor?.naturalY ??
-      (slice ? slice.offsetY + slice.height : 0)
+    // ✅ 핵심 수정: 안전 조정된 breakAnchor가 아니라 전체 페이지 높이를 사용
+    // breakAnchor.naturalY는 블록 경계에 맞춰 조정된 위치라서
+    // filler가 페이지 끝까지 채우지 못하고, spacer 뒤 콘텐츠가 같은 페이지에 남는 버그 발생
+    const pageEndY = slice ? slice.offsetY + plan.pageSliceHeightPx : 0
     const desiredHeight =
       slice && bounds.bottom > slice.offsetY + 4
-        ? Math.max(0, Math.floor(targetBreakY - bounds.bottom))
+        ? Math.max(0, Math.floor(pageEndY - bounds.bottom))
         : 0
     setPageSpacerAppliedHeight(spacer, desiredHeight >= 12 ? desiredHeight : 0)
   }
@@ -4355,9 +4371,7 @@ export function ToolNotebookPage() {
       try {
         const layout = await renderPdfPages(currentNode)
         if (!cancelled && token === computeToken) {
-          setPdfPreviewPages(layout.pages)
-
-          // 소스 DOM에 spacer filler 높이 적용 (에디터 레이아웃을 PDF와 동기화)
+          // ① 소스 DOM에 spacer filler 높이 적용 (먼저 적용해야 에디터 레이아웃이 PDF와 동기화됨)
           if (layout.spacerHeights) {
             const spacers = currentNode.querySelectorAll<HTMLElement>('[data-page-spacer-block="true"]')
             for (const spacer of spacers) {
@@ -4373,7 +4387,7 @@ export function ToolNotebookPage() {
             }
           }
 
-          // 페이지 구분선 위치 계산
+          // ② 페이지 구분선 위치 계산
           if (layout.slicePlan && layout.slicePlan.slices.length > 1) {
             const markers = layout.slicePlan.slices.slice(0, -1).map((slice, i) => ({
               y: Math.floor(slice.offsetY + slice.height),
@@ -4384,6 +4398,9 @@ export function ToolNotebookPage() {
           } else {
             setPdfBreakMarkers([])
           }
+
+          // ③ PDF 미리보기 페이지 설정 (마지막에 — 이때 showingPdfPreview가 true가 됨)
+          setPdfPreviewPages(layout.pages)
         }
       } catch {
         if (!cancelled && token === computeToken) {
