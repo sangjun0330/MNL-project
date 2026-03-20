@@ -4416,37 +4416,61 @@ export function ToolNotebookPage() {
       const token = ++computeToken
       if (!cancelled) setPdfPreviewBusy(true)
       try {
-        // ✅ 핵심 수정: captureWidth는 반드시 currentNode(outer container) 기준
-        // renderPdfPages→buildPdfExportRoot가 currentNode.width를 captureWidth로 사용하므로
-        // 소스 계산도 동일한 width를 써야 pageHeightPx가 일치한다.
-        const captureWidth = Math.max(1, Math.ceil(currentNode.getBoundingClientRect().width))
-        const { pdfInnerWidthPt, pdfInnerHeightPt } = getPdfInnerBounds()
+        // ① 클론에서 PDF 렌더링 (spacer fill + slice plan + 페이지 이미지 모두 클론에서 계산)
+        // 소스 DOM에서 독립 계산하지 않음 — 소스와 클론의 레이아웃 차이
+        // (input→preview 교체, data-pdf-hide 요소 제거 등)가 불일치의 근본 원인이었음
+        const layout = await renderPdfPages(currentNode)
+        if (cancelled || token !== computeToken) return
 
-        // ① 소스 DOM에서 spacer filler 높이 계산
-        // slice plan 기반: 실제 페이지 경계에 맞춰 filler를 채움
-        computeSpacerFillHeights(currentNode, captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
+        setPdfPreviewPages(layout.pages)
 
-        // ② 소스 DOM에서 페이지 구분선 위치 계산
-        // buildPdfSlicePlan도 currentNode 기준 — clone의 slice plan과 동일한 결과
-        const sourcePlan = buildPdfSlicePlan(currentNode, captureWidth, pdfInnerWidthPt, pdfInnerHeightPt)
-        if (!cancelled && token === computeToken) {
-          if (sourcePlan.slices.length > 1) {
-            // slice offsetY/height는 이미 currentNode(pdfContentRef) 기준이므로 추가 변환 불필요
-            const markers = sourcePlan.slices.slice(0, -1).map((slice, i) => ({
-              y: Math.floor(slice.offsetY + slice.height),
-              pageFrom: i + 1,
-              pageTo: i + 2,
-            }))
-            setPdfBreakMarkers(markers)
-          } else {
-            setPdfBreakMarkers([])
+        // ② 클론에서 계산된 spacer fill 높이를 소스 DOM에 적용
+        if (layout.spacerHeights) {
+          const spacers = currentNode.querySelectorAll<HTMLElement>('[data-page-spacer-block="true"]')
+          for (const spacer of spacers) {
+            const id = spacer.dataset.pageSpacerBlockId || spacer.id
+            const height = layout.spacerHeights[id]
+            if (height !== undefined) {
+              setPageSpacerAppliedHeight(spacer, height)
+            }
           }
         }
 
-        // ③ PDF 페이지 이미지 렌더링
-        const layout = await renderPdfPages(currentNode)
-        if (!cancelled && token === computeToken) {
-          setPdfPreviewPages(layout.pages)
+        // ③ 블록 ID 기반 좌표 매핑으로 break markers 위치 계산
+        // 클론의 slice plan에서 breakAnchor.blockId를 통해 소스 DOM의 같은 블록을 찾고,
+        // 소스 DOM에서의 실제 위치에 break marker를 배치
+        void currentNode.offsetHeight // spacer fill 적용 후 reflow
+        const plan = layout.slicePlan
+        if (plan && plan.slices.length > 1) {
+          const nodeTop = currentNode.getBoundingClientRect().top
+          const markers: Array<{ y: number; pageFrom: number; pageTo: number }> = []
+
+          for (let i = 0; i < plan.slices.length - 1; i++) {
+            const slice = plan.slices[i]
+            const anchor = slice.breakAnchor
+
+            if (anchor?.blockId) {
+              // 같은 block ID로 소스 DOM에서 블록 찾기
+              const sourceBlock = currentNode.querySelector<HTMLElement>(`#${CSS.escape(anchor.blockId)}`)
+              if (sourceBlock) {
+                const blockRect = sourceBlock.getBoundingClientRect()
+                let y: number
+                if (anchor.edge === "bottom") {
+                  y = blockRect.bottom - nodeTop
+                } else {
+                  y = blockRect.top - nodeTop + (anchor.delta || 0)
+                }
+                markers.push({ y: Math.floor(y), pageFrom: i + 1, pageTo: i + 2 })
+              }
+            } else {
+              // 블록 앵커 없으면 raw offset 사용 (fallback)
+              markers.push({ y: Math.floor(slice.offsetY + slice.height), pageFrom: i + 1, pageTo: i + 2 })
+            }
+          }
+
+          setPdfBreakMarkers(markers)
+        } else {
+          setPdfBreakMarkers([])
         }
       } catch {
         if (!cancelled && token === computeToken) {
