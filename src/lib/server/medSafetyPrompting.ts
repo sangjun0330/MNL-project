@@ -897,6 +897,7 @@ export function assembleMedSafetyDeveloperPrompt(
   options?: {
     runtimeMode?: MedSafetyRuntimeMode;
     hasImage?: boolean;
+    query?: string;
   }
 ): MedSafetyPromptAssembly {
   const blueprint = buildMedSafetyPromptBlueprint(decision, { hasImage: options?.hasImage, query: options?.query });
