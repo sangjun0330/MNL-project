@@ -12,6 +12,7 @@ import {
   buildTinyRouterUserPrompt,
   parseQualityGateDecision,
   parseTinyRouterDecision,
+  resolveMedSafetyRuntimeMode,
   shouldRunQualityGate,
   shouldUseTinyRouter,
   type MedSafetyPromptAssembly,
@@ -175,10 +176,6 @@ function resolveMaxOutputTokens() {
   if (!Number.isFinite(raw)) return 16000;
   const rounded = Math.round(raw);
   return Math.max(4000, Math.min(32000, rounded));
-}
-
-function resolveActiveRuntimeMode(): MedSafetyRuntimeMode {
-  return "legacy";
 }
 
 function resolveNetworkRetryCount() {
@@ -1940,7 +1937,7 @@ async function runQualityGateAndRepair(args: {
 
 export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise<OpenAIMedSafetyOutput> {
   const apiKey = normalizeApiKey();
-  const runtimeMode = resolveActiveRuntimeMode();
+  const runtimeMode = resolveMedSafetyRuntimeMode();
   const modelCandidates = resolveModelCandidates(params.modelOverride);
   const apiBaseUrls = resolveApiBaseUrls();
   const upstreamTimeoutMs = resolveUpstreamTimeoutMs();

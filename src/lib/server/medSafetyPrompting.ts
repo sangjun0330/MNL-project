@@ -527,7 +527,7 @@ function inferFormat(input: { answerDepth: MedSafetyAnswerDepth; risk: MedSafety
 }
 
 export function resolveMedSafetyRuntimeMode(): MedSafetyRuntimeMode {
-  const raw = String(process.env.OPENAI_MED_SAFETY_RUNTIME_MODE ?? "legacy")
+  const raw = String(process.env.OPENAI_MED_SAFETY_RUNTIME_MODE ?? "hybrid_live")
     .trim()
     .toLowerCase();
   if (raw === "hybrid_shadow") return "hybrid_shadow";
