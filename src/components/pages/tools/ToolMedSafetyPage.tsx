@@ -1155,6 +1155,39 @@ function StreamingAnswerSections({ content }: { content: string }) {
   );
 }
 
+const THINKING_MESSAGES = [
+  "임상 정보를 검토하고 있어요...",
+  "관련 지식을 확인하고 있어요...",
+  "안전 기준을 살펴보고 있어요...",
+  "답변을 구성하고 있어요...",
+  "핵심 내용을 정리하고 있어요...",
+];
+
+function ThinkingIndicator({ streamPhase }: { streamPhase: "idle" | "connecting" | "reasoning" | "writing" }) {
+  const [msgIndex, setMsgIndex] = useState(0);
+
+  useEffect(() => {
+    if (streamPhase !== "reasoning") return;
+    const timer = setInterval(() => {
+      setMsgIndex((prev) => (prev + 1) % THINKING_MESSAGES.length);
+    }, 2200);
+    return () => clearInterval(timer);
+  }, [streamPhase]);
+
+  return (
+    <div className="min-w-0 flex-1">
+      <div className="text-[14px] font-semibold text-[color:var(--rnest-accent)]">
+        {streamPhase === "connecting" ? "AI에 연결 중..." : THINKING_MESSAGES[msgIndex]}
+      </div>
+      <div className="mt-2 flex items-center gap-1.5">
+        <span className="inline-block h-2 w-2 animate-[bounce_1s_ease-in-out_infinite] rounded-full bg-[color:var(--rnest-accent)] opacity-60" />
+        <span className="inline-block h-2 w-2 animate-[bounce_1s_ease-in-out_0.15s_infinite] rounded-full bg-[color:var(--rnest-accent)] opacity-60" />
+        <span className="inline-block h-2 w-2 animate-[bounce_1s_ease-in-out_0.3s_infinite] rounded-full bg-[color:var(--rnest-accent)] opacity-60" />
+      </div>
+    </div>
+  );
+}
+
 export function ToolMedSafetyPage() {
   const router = useRouter();
   const store = useAppStore();
@@ -1947,23 +1980,7 @@ export function ToolMedSafetyPage() {
                             <span className="absolute inset-0 animate-ping rounded-full border-2 border-[color:var(--rnest-accent)] opacity-30" />
                             <span className="absolute inset-0 animate-[spin_3s_linear_infinite] rounded-full border-2 border-transparent border-t-[color:var(--rnest-accent)] opacity-60" />
                           </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="text-[14px] font-semibold text-[color:var(--rnest-accent)]">
-                              {streamPhase === "connecting" ? t("AI에 연결 중...") : t("질문을 분석하고 있어요...")}
-                            </div>
-                            {reasoningText ? (
-                              <div className="mt-1.5 text-[13px] leading-5 text-ios-sub">
-                                <span className="whitespace-pre-wrap break-words">{reasoningText}</span>
-                                <span className="ml-0.5 inline-block h-[14px] w-[2px] animate-pulse rounded-full bg-[color:var(--rnest-accent)] align-middle" />
-                              </div>
-                            ) : (
-                              <div className="mt-2 flex items-center gap-1.5">
-                                <span className="inline-block h-2 w-2 animate-[bounce_1s_ease-in-out_infinite] rounded-full bg-[color:var(--rnest-accent)] opacity-60" />
-                                <span className="inline-block h-2 w-2 animate-[bounce_1s_ease-in-out_0.15s_infinite] rounded-full bg-[color:var(--rnest-accent)] opacity-60" />
-                                <span className="inline-block h-2 w-2 animate-[bounce_1s_ease-in-out_0.3s_infinite] rounded-full bg-[color:var(--rnest-accent)] opacity-60" />
-                              </div>
-                            )}
-                          </div>
+                          <ThinkingIndicator streamPhase={streamPhase} />
                         </div>
                       </div>
                     </div>
