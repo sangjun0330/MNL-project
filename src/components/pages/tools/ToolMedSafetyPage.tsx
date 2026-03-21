@@ -73,6 +73,8 @@ type AnswerSection = {
   lead: string;
   bodyLines: string[];
   tone: AnswerSectionTone;
+  /** true when this section is a sub-section split from a larger parent section */
+  continuation?: boolean;
 };
 
 type PersistedMedSafetySession = {
@@ -777,6 +779,99 @@ function parseAnswerSections(value: string): AnswerSection[] {
   ];
 }
 
+/**
+ * Detects whether a body line looks like a sub-heading within a section.
+ * e.g. "리버설 에이전트: 무엇을 준비하나", "모니터링할 Coagulation lab: 무엇을 봐야 하나"
+ */
+function looksLikeSubHeading(line: string, nextLine?: string | null): boolean {
+  const cleaned = cleanAnswerLine(line);
+  if (!cleaned) return false;
+  // Must not be a structured line (bullet, number, label)
+  if (looksLikeStructuredAnswerLine(cleaned)) return false;
+  // Must be relatively short
+  if (cleaned.length > 50) return false;
+  // Must not end with sentence terminators
+  if (/[.。]$/.test(cleaned)) return false;
+  if (/니다$|습니다$|세요$|시오$|랍니다$/.test(cleaned)) return false;
+  // Must end with question-like pattern, or contain a colon mid-line
+  const hasColon = /[:：]/.test(cleaned);
+  const endsLikeQuestion = /[하나요까지인가]$/.test(cleaned);
+  const nextIsStructured = nextLine ? looksLikeStructuredAnswerLine(cleanAnswerLine(nextLine)) : false;
+  if ((hasColon || endsLikeQuestion) && nextIsStructured) return true;
+  // Short line followed by bullets
+  if (cleaned.length <= 30 && nextIsStructured) return true;
+  return false;
+}
+
+/**
+ * Post-process sections: split any section that contains sub-headings in its
+ * body into multiple continuation sections, each getting its own card.
+ */
+function splitSectionSubHeadings(sections: AnswerSection[]): AnswerSection[] {
+  const result: AnswerSection[] = [];
+  for (const section of sections) {
+    if (section.bodyLines.length < 3) {
+      result.push(section);
+      continue;
+    }
+    // Scan body lines for sub-headings
+    const subSections: { subTitle: string | null; lines: string[] }[] = [];
+    let current: { subTitle: string | null; lines: string[] } = { subTitle: null, lines: [] };
+    for (let i = 0; i < section.bodyLines.length; i++) {
+      const line = section.bodyLines[i];
+      const nextLine = i + 1 < section.bodyLines.length ? section.bodyLines[i + 1] : null;
+      if (looksLikeSubHeading(line, nextLine) && current.lines.some((l) => cleanAnswerLine(l))) {
+        subSections.push(current);
+        current = { subTitle: cleanAnswerLine(line), lines: [] };
+      } else {
+        current.lines.push(line);
+      }
+    }
+    subSections.push(current);
+
+    if (subSections.length <= 1) {
+      // No sub-headings found, keep as-is
+      result.push(section);
+      continue;
+    }
+
+    // First chunk keeps the original title
+    const firstChunk = subSections[0];
+    const firstContent = buildAnswerSectionContent(firstChunk.lines);
+    if (firstContent) {
+      result.push({
+        title: section.title,
+        lead: section.lead,
+        bodyLines: firstChunk.lines,
+        tone: section.tone,
+      });
+    } else {
+      result.push({
+        title: section.title,
+        lead: section.lead,
+        bodyLines: [],
+        tone: section.tone,
+      });
+    }
+
+    // Subsequent chunks become continuation sections
+    for (let i = 1; i < subSections.length; i++) {
+      const chunk = subSections[i];
+      const content = buildAnswerSectionContent(chunk.lines);
+      if (content) {
+        result.push({
+          title: chunk.subTitle || section.title,
+          lead: content.lead,
+          bodyLines: content.bodyLines,
+          tone: section.tone,
+          continuation: true,
+        });
+      }
+    }
+  }
+  return result;
+}
+
 function sectionCardClass(tone: AnswerSectionTone) {
   if (tone === "summary") {
     return "rounded-[28px] border border-[#E4E8F1] bg-[linear-gradient(180deg,#FFFFFF_0%,#F8FAFF_100%)] px-5 py-4 shadow-[0_16px_34px_rgba(15,23,42,0.04)]";
@@ -801,8 +896,83 @@ function sectionTitleClass(tone: AnswerSectionTone) {
   return "bg-[#F2F3F5] text-ios-sub";
 }
 
+function connectorColor(tone: AnswerSectionTone) {
+  if (tone === "summary") return "border-[#D4DEEF]";
+  if (tone === "action") return "border-[#C5DBC8]";
+  if (tone === "warning") return "border-[#E8D5B8]";
+  if (tone === "compare") return "border-[#CFD8E6]";
+  return "border-[#DDDDE0]";
+}
+
+function SectionBodyLines({ section, bodyTextClass }: { section: AnswerSection; bodyTextClass: string }) {
+  if (!section.bodyLines.length) return null;
+  return (
+    <div className="mt-4 flex flex-col gap-1.5">
+      {section.bodyLines.map((line, lineIndex) => {
+        const parsedLine = parseAnswerBodyLine(line);
+
+        if (parsedLine.kind === "blank") {
+          return <div key={`${section.title}-${lineIndex}`} className="h-3" aria-hidden="true" />;
+        }
+
+        const indentStyle = parsedLine.level ? { marginLeft: `${parsedLine.level * 18}px` } : undefined;
+
+        if (parsedLine.kind === "bullet") {
+          return (
+            <div
+              key={`${section.title}-${lineIndex}`}
+              className={`flex items-start gap-3 ${bodyTextClass}`}
+              style={indentStyle}
+            >
+              <span className="mt-[11px] h-[5px] w-[5px] shrink-0 rounded-full bg-current opacity-50" aria-hidden="true" />
+              <div className="min-w-0 whitespace-pre-wrap break-words">{parsedLine.content}</div>
+            </div>
+          );
+        }
+
+        if (parsedLine.kind === "number") {
+          return (
+            <div
+              key={`${section.title}-${lineIndex}`}
+              className={`flex items-start gap-3 ${bodyTextClass}`}
+              style={indentStyle}
+            >
+              <span className="min-w-[20px] shrink-0 font-semibold text-ios-text">{parsedLine.marker}</span>
+              <div className="min-w-0 whitespace-pre-wrap break-words">{parsedLine.content}</div>
+            </div>
+          );
+        }
+
+        if (parsedLine.kind === "label") {
+          return (
+            <div
+              key={`${section.title}-${lineIndex}`}
+              className={`flex items-start gap-3 ${bodyTextClass}`}
+              style={indentStyle}
+            >
+              <span className="min-w-[24px] shrink-0 font-semibold text-[color:var(--rnest-accent)]">{parsedLine.marker}</span>
+              <div className="min-w-0 whitespace-pre-wrap break-words">{parsedLine.content}</div>
+            </div>
+          );
+        }
+
+        return (
+          <div
+            key={`${section.title}-${lineIndex}`}
+            className={`whitespace-pre-wrap break-words ${bodyTextClass}`}
+            style={indentStyle}
+          >
+            {parsedLine.content}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function AssistantAnswerSections({ content }: { content: string }) {
-  const sections = parseAnswerSections(content);
+  const rawSections = parseAnswerSections(content);
+  const sections = splitSectionSubHeadings(rawSections);
   if (!sections.length) {
     return <div className="whitespace-pre-wrap break-words text-[15px] leading-7 text-ios-text">{content}</div>;
   }
@@ -811,85 +981,48 @@ function AssistantAnswerSections({ content }: { content: string }) {
   const bodyTextClass = "text-[15px] leading-7 text-ios-text/90";
 
   return (
-    <div className="space-y-4">
-      {sections.map((section, sectionIndex) => (
-        <section key={`${section.title}-${sectionIndex}`} className={sectionCardClass(section.tone)}>
-          <div
-            className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold tracking-[0.01em] ${sectionTitleClass(
-              section.tone
-            )}`}
-          >
-            {section.title}
-          </div>
-          <div className="mt-3">
-            <div className={leadTextClass}>
-              {section.lead}
-            </div>
-            {section.bodyLines.length > 0 ? (
-              <div className="mt-4 flex flex-col gap-1.5">
-                {section.bodyLines.map((line, lineIndex) => {
-                  const parsedLine = parseAnswerBodyLine(line);
+    <div className="flex flex-col">
+      {sections.map((section, sectionIndex) => {
+        const nextSection = sectionIndex + 1 < sections.length ? sections[sectionIndex + 1] : null;
+        const isConnectedToNext = nextSection?.continuation && nextSection.tone === section.tone;
+        const isContinuation = section.continuation;
 
-                  if (parsedLine.kind === "blank") {
-                    return <div key={`${section.title}-${lineIndex}`} className="h-3" aria-hidden="true" />;
-                  }
-
-                  const indentStyle = parsedLine.level ? { marginLeft: `${parsedLine.level * 18}px` } : undefined;
-
-                  if (parsedLine.kind === "bullet") {
-                    return (
-                      <div
-                        key={`${section.title}-${lineIndex}`}
-                        className={`flex items-start gap-3 ${bodyTextClass}`}
-                        style={indentStyle}
-                      >
-                        <span className="mt-[11px] h-[5px] w-[5px] shrink-0 rounded-full bg-current opacity-50" aria-hidden="true" />
-                        <div className="min-w-0 whitespace-pre-wrap break-words">{parsedLine.content}</div>
-                      </div>
-                    );
-                  }
-
-                  if (parsedLine.kind === "number") {
-                    return (
-                      <div
-                        key={`${section.title}-${lineIndex}`}
-                        className={`flex items-start gap-3 ${bodyTextClass}`}
-                        style={indentStyle}
-                      >
-                        <span className="min-w-[20px] shrink-0 font-semibold text-ios-text">{parsedLine.marker}</span>
-                        <div className="min-w-0 whitespace-pre-wrap break-words">{parsedLine.content}</div>
-                      </div>
-                    );
-                  }
-
-                  if (parsedLine.kind === "label") {
-                    return (
-                      <div
-                        key={`${section.title}-${lineIndex}`}
-                        className={`flex items-start gap-3 ${bodyTextClass}`}
-                        style={indentStyle}
-                      >
-                        <span className="min-w-[24px] shrink-0 font-semibold text-[color:var(--rnest-accent)]">{parsedLine.marker}</span>
-                        <div className="min-w-0 whitespace-pre-wrap break-words">{parsedLine.content}</div>
-                      </div>
-                    );
-                  }
-
-                  return (
-                    <div
-                      key={`${section.title}-${lineIndex}`}
-                      className={`whitespace-pre-wrap break-words ${bodyTextClass}`}
-                      style={indentStyle}
-                    >
-                      {parsedLine.content}
-                    </div>
-                  );
-                })}
+        return (
+          <div key={`${section.title}-${sectionIndex}`}>
+            {/* Connector line from previous card */}
+            {isContinuation ? (
+              <div className="flex justify-center py-0">
+                <div className={`h-3 w-px border-l-2 border-dashed ${connectorColor(section.tone)} opacity-70`} />
               </div>
+            ) : sectionIndex > 0 ? (
+              <div className="h-4" />
             ) : null}
+
+            <section className={sectionCardClass(section.tone)}>
+              {/* Continuation cards: smaller inline title, not a pill */}
+              {isContinuation ? (
+                <div className="text-[13px] font-semibold text-ios-text/70">
+                  {section.title}
+                </div>
+              ) : (
+                <div
+                  className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold tracking-[0.01em] ${sectionTitleClass(
+                    section.tone
+                  )}`}
+                >
+                  {section.title}
+                </div>
+              )}
+              <div className={isContinuation ? "mt-2" : "mt-3"}>
+                <div className={leadTextClass}>
+                  {section.lead}
+                </div>
+                <SectionBodyLines section={section} bodyTextClass={bodyTextClass} />
+              </div>
+            </section>
           </div>
-        </section>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -899,13 +1032,64 @@ function AssistantAnswerSections({ content }: { content: string }) {
  * in real-time and renders each completed section as a card immediately.
  * The last (in-progress) section shows a typing cursor.
  */
+function StreamingBodyLines({ section, bodyTextClass, isLastSection }: { section: AnswerSection; bodyTextClass: string; isLastSection: boolean }) {
+  if (!section.bodyLines.length) return null;
+  return (
+    <div className="mt-4 flex flex-col gap-1.5">
+      {section.bodyLines.map((line, lineIndex) => {
+        const parsedLine = parseAnswerBodyLine(line);
+        const isLastLine = isLastSection && lineIndex === section.bodyLines.length - 1;
+
+        if (parsedLine.kind === "blank") {
+          return <div key={`${section.title}-${lineIndex}`} className="h-3" aria-hidden="true" />;
+        }
+
+        const indentStyle = parsedLine.level ? { marginLeft: `${parsedLine.level * 18}px` } : undefined;
+        const cursor = isLastLine ? (
+          <span className="ml-0.5 inline-block h-[18px] w-[2px] animate-pulse rounded-full bg-[color:var(--rnest-accent)] align-middle" />
+        ) : null;
+
+        if (parsedLine.kind === "bullet") {
+          return (
+            <div key={`${section.title}-${lineIndex}`} className={`flex items-start gap-3 ${bodyTextClass}`} style={indentStyle}>
+              <span className="mt-[11px] h-[5px] w-[5px] shrink-0 rounded-full bg-current opacity-50" aria-hidden="true" />
+              <div className="min-w-0 whitespace-pre-wrap break-words">{parsedLine.content}{cursor}</div>
+            </div>
+          );
+        }
+        if (parsedLine.kind === "number") {
+          return (
+            <div key={`${section.title}-${lineIndex}`} className={`flex items-start gap-3 ${bodyTextClass}`} style={indentStyle}>
+              <span className="min-w-[20px] shrink-0 font-semibold text-ios-text">{parsedLine.marker}</span>
+              <div className="min-w-0 whitespace-pre-wrap break-words">{parsedLine.content}{cursor}</div>
+            </div>
+          );
+        }
+        if (parsedLine.kind === "label") {
+          return (
+            <div key={`${section.title}-${lineIndex}`} className={`flex items-start gap-3 ${bodyTextClass}`} style={indentStyle}>
+              <span className="min-w-[24px] shrink-0 font-semibold text-[color:var(--rnest-accent)]">{parsedLine.marker}</span>
+              <div className="min-w-0 whitespace-pre-wrap break-words">{parsedLine.content}{cursor}</div>
+            </div>
+          );
+        }
+        return (
+          <div key={`${section.title}-${lineIndex}`} className={`whitespace-pre-wrap break-words ${bodyTextClass}`} style={indentStyle}>
+            {parsedLine.content}{cursor}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function StreamingAnswerSections({ content }: { content: string }) {
-  const sections = parseAnswerSections(content);
+  const rawSections = parseAnswerSections(content);
+  const sections = splitSectionSubHeadings(rawSections);
   if (!sections.length) {
-    // Not enough text to parse into sections yet — show raw text in a neutral card
     if (!content.trim()) return null;
     return (
-      <div className="space-y-4">
+      <div className="flex flex-col">
         <section className={sectionCardClass("summary")}>
           <div className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold tracking-[0.01em] ${sectionTitleClass("summary")}`}>
             핵심
@@ -925,97 +1109,46 @@ function StreamingAnswerSections({ content }: { content: string }) {
   const bodyTextClass = "text-[15px] leading-7 text-ios-text/90";
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col">
       {sections.map((section, sectionIndex) => {
         const isLastSection = sectionIndex === sections.length - 1;
+        const isContinuation = section.continuation;
+
         return (
-          <section
-            key={`${section.title}-${sectionIndex}`}
-            className={`${sectionCardClass(section.tone)} transition-all duration-300 ease-out`}
-            style={isLastSection ? undefined : { animation: "none" }}
-          >
-            <div
-              className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold tracking-[0.01em] ${sectionTitleClass(
-                section.tone
-              )}`}
-            >
-              {section.title}
-            </div>
-            <div className="mt-3">
-              <div className={leadTextClass}>
-                {section.lead}
-                {isLastSection && section.bodyLines.length === 0 ? (
-                  <span className="ml-0.5 inline-block h-[18px] w-[2px] animate-pulse rounded-full bg-[color:var(--rnest-accent)] align-middle" />
-                ) : null}
+          <div key={`${section.title}-${sectionIndex}`}>
+            {isContinuation ? (
+              <div className="flex justify-center py-0">
+                <div className={`h-3 w-px border-l-2 border-dashed ${connectorColor(section.tone)} opacity-70`} />
               </div>
-              {section.bodyLines.length > 0 ? (
-                <div className="mt-4 flex flex-col gap-1.5">
-                  {section.bodyLines.map((line, lineIndex) => {
-                    const parsedLine = parseAnswerBodyLine(line);
-                    const isLastLine = isLastSection && lineIndex === section.bodyLines.length - 1;
+            ) : sectionIndex > 0 ? (
+              <div className="h-4" />
+            ) : null}
 
-                    if (parsedLine.kind === "blank") {
-                      return <div key={`${section.title}-${lineIndex}`} className="h-3" aria-hidden="true" />;
-                    }
-
-                    const indentStyle = parsedLine.level ? { marginLeft: `${parsedLine.level * 18}px` } : undefined;
-                    const cursor = isLastLine ? (
-                      <span className="ml-0.5 inline-block h-[18px] w-[2px] animate-pulse rounded-full bg-[color:var(--rnest-accent)] align-middle" />
-                    ) : null;
-
-                    if (parsedLine.kind === "bullet") {
-                      return (
-                        <div
-                          key={`${section.title}-${lineIndex}`}
-                          className={`flex items-start gap-3 ${bodyTextClass}`}
-                          style={indentStyle}
-                        >
-                          <span className="mt-[11px] h-[5px] w-[5px] shrink-0 rounded-full bg-current opacity-50" aria-hidden="true" />
-                          <div className="min-w-0 whitespace-pre-wrap break-words">{parsedLine.content}{cursor}</div>
-                        </div>
-                      );
-                    }
-
-                    if (parsedLine.kind === "number") {
-                      return (
-                        <div
-                          key={`${section.title}-${lineIndex}`}
-                          className={`flex items-start gap-3 ${bodyTextClass}`}
-                          style={indentStyle}
-                        >
-                          <span className="min-w-[20px] shrink-0 font-semibold text-ios-text">{parsedLine.marker}</span>
-                          <div className="min-w-0 whitespace-pre-wrap break-words">{parsedLine.content}{cursor}</div>
-                        </div>
-                      );
-                    }
-
-                    if (parsedLine.kind === "label") {
-                      return (
-                        <div
-                          key={`${section.title}-${lineIndex}`}
-                          className={`flex items-start gap-3 ${bodyTextClass}`}
-                          style={indentStyle}
-                        >
-                          <span className="min-w-[24px] shrink-0 font-semibold text-[color:var(--rnest-accent)]">{parsedLine.marker}</span>
-                          <div className="min-w-0 whitespace-pre-wrap break-words">{parsedLine.content}{cursor}</div>
-                        </div>
-                      );
-                    }
-
-                    return (
-                      <div
-                        key={`${section.title}-${lineIndex}`}
-                        className={`whitespace-pre-wrap break-words ${bodyTextClass}`}
-                        style={indentStyle}
-                      >
-                        {parsedLine.content}{cursor}
-                      </div>
-                    );
-                  })}
+            <section className={`${sectionCardClass(section.tone)} transition-all duration-300 ease-out`}>
+              {isContinuation ? (
+                <div className="text-[13px] font-semibold text-ios-text/70">
+                  {section.title}
                 </div>
-              ) : null}
-            </div>
-          </section>
+              ) : (
+                <div
+                  className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold tracking-[0.01em] ${sectionTitleClass(
+                    section.tone
+                  )}`}
+                >
+                  {section.title}
+                </div>
+              )}
+              <div className={isContinuation ? "mt-2" : "mt-3"}>
+                <div className={leadTextClass}>
+                  {section.lead}
+                  {isLastSection && section.bodyLines.length === 0 ? (
+                    <span className="ml-0.5 inline-block h-[18px] w-[2px] animate-pulse rounded-full bg-[color:var(--rnest-accent)] align-middle" />
+                  ) : null}
+                </div>
+                <StreamingBodyLines section={section} bodyTextClass={bodyTextClass} isLastSection={isLastSection} />
+              </div>
+            </section>
+          </div>
         );
       })}
     </div>
