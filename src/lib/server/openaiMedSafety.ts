@@ -1301,7 +1301,7 @@ async function callResponsesApi(args: {
         tools: [],
         store: storeResponses,
       };
-  if (onTextDelta && !compatMode) body.stream = true;
+  if (onTextDelta) body.stream = true;
   if (previousResponseId) body.previous_response_id = previousResponseId;
   else if (conversationId) body.conversation = conversationId;
 
@@ -1516,6 +1516,7 @@ async function generateAnswerWithPrompt(args: {
             verbosity: args.profile.verbosity,
             reasoningEffort,
             storeResponses: args.storeResponses,
+            onTextDelta: allowStreamDelta ? args.onTextDelta : undefined,
             compatMode: true,
           });
           if (!statelessRetry.error && statelessRetry.text) {
@@ -1675,7 +1676,7 @@ export async function translateMedSafetyToEnglish(input: {
   const apiKey = normalizeApiKey();
   const modelCandidates = resolveModelCandidates(input.model ?? null);
   const apiBaseUrls = resolveApiBaseUrls();
-  const maxOutputTokens = Math.max(2400, Math.min(7000, resolveMaxOutputTokens() + 1000));
+  const maxOutputTokens = Math.max(4000, Math.min(20000, resolveMaxOutputTokens() + 2000));
   const upstreamTimeoutMs = resolveUpstreamTimeoutMs();
   const networkRetries = resolveNetworkRetryCount();
   const networkRetryBaseMs = resolveNetworkRetryBaseMs();
