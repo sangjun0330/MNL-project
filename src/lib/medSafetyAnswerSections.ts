@@ -25,7 +25,11 @@ const EXPLICIT_SECTION_TITLE_PATTERNS = [
   /^(구분포인트|감별포인트|비교|차이|선택기준)$/i,
   /^(보통이렇게생각합니다)$/i,
   /^(주의|주의점|위험|경고|보고기준|호출기준|중단기준|보고예시|보고문구|sbar|sbar예시)$/i,
-  /^.+(포인트|확인할것|예시|기준|주의|설명|정리|대응|할일|점)$/i,
+  /^(즉시보고신호|보고신호|즉시보고|노티전확인|노티포인트)$/i,
+  /^(질문에대한직접답|직접답|직접답변)$/i,
+  /^(실무적으로는|실무적으로|실무정리|실무요약|실무포인트)$/i,
+  /^(핵심관찰포인트|관찰포인트|모니터링포인트)$/i,
+  /^.+(포인트|확인할것|예시|기준|주의|설명|정리|대응|할일|점|신호|의미)$/i,
 ];
 
 function normalizeAnswerRawLine(value: string) {
@@ -85,6 +89,16 @@ function looksLikeSentence(value: string) {
   return false;
 }
 
+function looksLikeQuestionHeading(value: string) {
+  const trimmed = cleanAnswerLine(value);
+  if (!trimmed) return false;
+  if (!/[?？]$/.test(trimmed)) return false;
+  if (trimmed.length > 60) return false;
+  if (/^(왜|그럼|그러면|만약|언제|어떻게|어디서|무엇이|뭐가|어떤|~는|~은|현재)/.test(trimmed)) return true;
+  if (/^.{2,30}(인가|하나|되나|일까|인지|할까)\s*[?？]$/.test(trimmed)) return true;
+  return false;
+}
+
 function looksLikeTopLevelSectionHeading(value: string, context: SectionHeadingContext = {}) {
   const normalized = cleanAnswerLine(value);
   if (!normalized) return false;
@@ -106,11 +120,19 @@ function looksLikeTopLevelSectionHeading(value: string, context: SectionHeadingC
     return previousLineBlank;
   }
 
+  if (previousLineBlank && looksLikeQuestionHeading(normalized) && hasNextLine) {
+    return true;
+  }
+
   if (!previousLineBlank) return false;
   if (looksLikeSentence(normalized)) return false;
   if (key.length > 36) return false;
 
   if (nextLineIsLead) return true;
+
+  if (hasNextLine && key.length <= 24 && !looksLikeSentence(normalized)) {
+    return true;
+  }
 
   return false;
 }
@@ -130,9 +152,9 @@ function trimBlankLines(lines: string[]) {
 function inferSectionTone(title: string, index: number): MedSafetyAnswerSectionTone {
   const normalized = normalizeHeadingKey(title);
   if (index === 0 || /(핵심|요약|결론|정의|임상의미|정리)/.test(normalized)) return "summary";
-  if (/(지금할일|즉시대응|조치|확인|실무포인트|간호포인트|노티|보고예시|보고문구|sbar|예시)/.test(normalized)) return "action";
-  if (/(주의|위험|경고|보고|호출|중단|stop)/.test(normalized)) return "warning";
-  if (/(비교|차이|선택기준|구분포인트|감별포인트)/.test(normalized)) return "compare";
+  if (/(지금할일|즉시대응|조치|확인|실무포인트|실무적으로|간호포인트|노티|보고예시|보고문구|sbar|예시)/.test(normalized)) return "action";
+  if (/(주의|위험|경고|보고신호|즉시보고|호출|중단|stop)/.test(normalized)) return "warning";
+  if (/(비교|차이|선택기준|구분포인트|감별포인트|직접답)/.test(normalized)) return "compare";
   return "neutral";
 }
 

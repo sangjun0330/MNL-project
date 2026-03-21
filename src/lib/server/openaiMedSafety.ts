@@ -21,7 +21,6 @@ import {
   type MedSafetyRouteDecision,
   type MedSafetyRuntimeMode,
 } from "@/lib/server/medSafetyPrompting";
-import { buildMedSafetySectionBodyText, parseMedSafetyAnswerSections } from "@/lib/medSafetyAnswerSections";
 
 export type ClinicalMode = "ward" | "er" | "icu";
 export type ClinicalSituation = "general" | "pre_admin" | "during_admin" | "event_response";
@@ -172,10 +171,10 @@ function resolveStoreResponses() {
 }
 
 function resolveMaxOutputTokens() {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_MAX_OUTPUT_TOKENS ?? 9000);
-  if (!Number.isFinite(raw)) return 9000;
+  const raw = Number(process.env.OPENAI_MED_SAFETY_MAX_OUTPUT_TOKENS ?? 16000);
+  if (!Number.isFinite(raw)) return 16000;
   const rounded = Math.round(raw);
-  return Math.max(2400, Math.min(12000, rounded));
+  return Math.max(4000, Math.min(32000, rounded));
 }
 
 function resolveActiveRuntimeMode(): MedSafetyRuntimeMode {
@@ -246,38 +245,6 @@ function stripMarkdownDecorations(text: string) {
     .replace(/\*\*([^*]+)\*\*/g, "$1")
     .replace(/__([^_]+)__/g, "$1")
     .replace(/`([^`]+)`/g, "$1");
-}
-
-function dedupeAnswerLines(lines: string[]) {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const raw of lines) {
-    const line = String(raw ?? "")
-      .replace(/\s+/g, " ")
-      .trim();
-    if (!line) continue;
-    const key = line.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(line);
-  }
-  return out;
-}
-
-function sanitizeAnswerText(text: string) {
-  const lines = dedupeAnswerLines(
-    stripMarkdownDecorations(text)
-      .replace(/^\s*---+\s*$/gm, "")
-      .replace(/\n{3,}/g, "\n\n")
-      .split("\n")
-      .map((line) =>
-        line
-          .replace(/^\s*•\s*/g, "- ")
-          .replace(/^\s*\d+[.)]\s+/g, "- ")
-          .trimEnd()
-      )
-  );
-  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function normalizeDeliveredAnswerText(text: string) {
@@ -492,11 +459,15 @@ export const MED_SAFETY_LEGACY_DENSE_CORE_PROMPT_REFERENCE = [
   "- 불필요한 면책문구를 길게 반복하지 않는다.",
   "- 영어 의학용어가 필요하면 괄호로 짧게 병기할 수 있으나, 설명의 중심은 한국어로 둔다.",
   "",
-  "[섹션 구분 형식 — 반드시 준수]",
-  "- 여러 줄 답변은 \"소제목:\" 한 줄 -> 다음 줄 일반 텍스트 리드 문장 -> 이후 \"- \" bullet 순서로 쓴다.",
-  "- 새 섹션 전에는 빈 줄 2개를 둔다.",
-  "- 각 섹션 첫 줄은 bullet로 시작하지 않는다.",
-  "- 섹션 안의 작은 묶음 제목은 콜론/마침표 없는 아주 짧은 한 줄로만 쓰고, 바로 아래에 \"- \" bullet을 둔다.",
+  "[카드 3단 구조 — 반드시 준수]",
+  "- 답변은 반드시 '카드 3단 구조'로 작성한다. 각 카드(섹션)는 다음 3개 층으로 구성된다:",
+  "  1층(태그): 짧은 소제목 한 줄. 예: 핵심, 지금 할 일, 핵심 관찰 포인트, 즉시 보고 신호, 질문에 대한 직접 답, 구분 포인트, 실무적으로는, 자세한 설명, 주의, 보고 기준 등.",
+  "  2층(리드): 해당 섹션의 핵심을 한 문장으로 요약한 일반 텍스트 리드 문장. bullet이 아닌 완결 문장이어야 한다.",
+  "  3층(본문): 세부 내용을 \"* \" 또는 \"- \" bullet, 또는 일반 텍스트 문장으로 이어간다.",
+  "- 첫 카드 앞에는 결론 문단을 별도 제목 없이 1~3문장으로 먼저 쓴다.",
+  "- 새 카드(섹션) 전에는 빈 줄 2개를 둔다.",
+  "- 각 카드의 첫 줄(리드)은 bullet로 시작하지 않는다.",
+  "- 카드 안의 작은 묶음 제목은 콜론/마침표 없는 짧은 한 줄로 쓰고 바로 아래에 bullet을 둔다.",
   "- 소제목 없이 불릿만 나열하지 않는다. 내용이 2가지 이상의 주제를 다루면 반드시 소제목으로 분리한다.",
   "",
   "[답변 길이 원칙]",
@@ -520,14 +491,17 @@ function buildDeveloperPrompt(locale: "ko" | "en") {
     return [
       MED_SAFETY_LEGACY_DENSE_CORE_PROMPT_REFERENCE,
       "",
-      "[OUTPUT_RENDERING_OVERRIDE]",
+      "[OUTPUT_RENDERING_OVERRIDE — CARD 3-LAYER STRUCTURE]",
       "- The final answer must be usable as-is without any downstream rewriting.",
-      "- Write a direct conclusion paragraph first with no title.",
-      "- Then use plain top-level headings only when they are truly needed.",
+      "- Every answer must follow a 'card 3-layer structure'. Each card (section) consists of:",
+      '  Layer 1 (tag): A short section title on its own line. Examples: "Key points", "What to do now", "Key observation points", "Immediate report signals", "Direct answer", "Distinction points", "In practice", "Detailed explanation", "Caution", "Reporting criteria".',
+      "  Layer 2 (lead): A single summary sentence of the section's core point. Must be a plain text sentence, NOT a bullet.",
+      '  Layer 3 (body): Detailed content using "* " or "- " bullets, or plain text sentences.',
+      "- Write a direct conclusion paragraph first with no title (1-3 sentences). This becomes the first card.",
+      "- Separate each new card (section) with 2 blank lines.",
+      "- The first line of each card (lead) must NOT start with a bullet.",
       '- Do not use vague headings such as "Summary", "Details", or "Detailed explanation".',
-      '- Prefer specific headings such as "Key points", "What to check now", "Before notifying the physician", "Reporting phrasing", or "Caution" when they fit.',
-      '- If a section has a lead line, write it as "Lead: ..." on its own first line, then continue with the body.',
-      "- Do not use markdown emphasis such as **, __, or backticks.",
+      "- Do not use markdown emphasis such as **, __, backticks, ##, tables, or code blocks.",
       "- Keep enough detail to avoid truncating clinically important reasoning.",
       "",
       "[LANGUAGE_OVERRIDE]",
@@ -537,16 +511,18 @@ function buildDeveloperPrompt(locale: "ko" | "en") {
   return [
     MED_SAFETY_LEGACY_DENSE_CORE_PROMPT_REFERENCE,
     "",
-    "[최종 출력 형식 고정 규칙]",
+    "[최종 출력 형식 고정 규칙 — 카드 3단 구조]",
     "- 최종 답변은 후처리 없이 실제 로그 원문으로 바로 써도 되는 형태로 작성한다.",
-    "- 첫 문단은 결론 문단으로 작성하고, 별도 제목 없이 바로 시작한다.",
-    "- 그 다음부터 필요한 경우에만 plain text 상위 제목을 한 줄로 쓴다.",
-    "- 상위 제목은 내용에 맞는 구체 제목을 사용한다.",
-    '- 예: "핵심", "구분 포인트", "지금 이 값에서 실무적으로 보는 판단 포인트", "보통 이렇게 생각합니다", "주치의 노티 전 지금 확인할 것", "노티할 때 핵심 문장 예시", "주의".',
-    '- "요약", "상세", "자세한 설명"처럼 두루뭉술한 제목은 쓰지 않는다.',
-    '- 섹션 첫 줄이 리드이면 반드시 "리드 문장: ..." 형식으로 한 줄에 쓴다.',
-    "- 리드 아래 본문은 일반 문장 또는 - bullet로만 이어간다.",
-    "- 마크다운 강조(**, __, 백틱)는 쓰지 않는다.",
+    "- 답변은 반드시 '카드 3단 구조'로 작성한다. 각 카드(섹션)는 다음 3개 층으로 구성된다:",
+    "  1층(태그): 짧은 소제목 한 줄. 예: 핵심, 지금 할 일, 핵심 관찰 포인트, 즉시 보고 신호, 질문에 대한 직접 답, 구분 포인트, 실무적으로는, 자세한 설명, 주의, 보고 기준 등.",
+    "  2층(리드): 해당 섹션의 핵심을 한 문장으로 요약한 일반 텍스트 리드 문장. bullet이 아닌 완결 문장이어야 한다.",
+    "  3층(본문): 세부 내용을 \"* \" 또는 \"- \" bullet, 또는 일반 텍스트 문장으로 이어간다.",
+    "- 첫 카드 앞에는 결론 문단을 별도 제목 없이 1~3문장으로 먼저 쓴다.",
+    "- 새 카드(섹션) 전에는 빈 줄 2개를 둔다.",
+    "- 각 카드의 첫 줄(리드)은 bullet로 시작하지 않는다.",
+    "- 카드 안의 작은 묶음 제목은 콜론/마침표 없는 짧은 한 줄로 쓰고 바로 아래에 bullet을 둔다.",
+    '- 소제목은 내용에 맞는 구체 제목을 사용한다. "요약", "상세"처럼 두루뭉술한 제목은 쓰지 않는다.',
+    "- 마크다운 강조(**, __, 백틱, ##, 표, 코드블록)는 쓰지 않는다.",
     "- 임상적으로 필요한 설명은 중간에 잘리지 않도록 충분히 끝까지 쓴다.",
   ].join("\n");
 }
@@ -1029,20 +1005,14 @@ async function readResponsesEventStream(args: {
   let lastEventPayload: any = null;
   let streamError: string | null = null;
   let usage: ResponsesUsage | null = null;
-  let emittedSectionCount = 0;
+  let emittedCharCount = 0;
 
-  const flushSectionChunks = async (text: string, options?: { includeLastSection?: boolean }) => {
-    const normalized = normalizeDeliveredAnswerText(text);
-    if (!normalized) return;
-    const sections = parseMedSafetyAnswerSections(normalized);
-    if (!sections.length) return;
-    const readyCount = options?.includeLastSection ? sections.length : Math.max(0, sections.length - 1);
-    for (let index = emittedSectionCount; index < readyCount; index += 1) {
-      const chunk = buildSectionStreamChunk(sections[index]!, index);
-      if (!chunk.trim()) continue;
-      await onTextDelta(chunk);
-      emittedSectionCount = index + 1;
-    }
+  const flushRawDelta = async (text: string) => {
+    if (text.length <= emittedCharCount) return;
+    const delta = text.slice(emittedCharCount);
+    if (!delta) return;
+    await onTextDelta(delta);
+    emittedCharCount = text.length;
   };
 
   const trackMeta = (node: any) => {
@@ -1090,7 +1060,7 @@ async function readResponsesEventStream(args: {
     const delta = extractResponsesDelta(event);
     if (!delta) return;
     rawText += delta;
-    await flushSectionChunks(rawText);
+    await flushRawDelta(rawText);
   };
 
   try {
@@ -1149,7 +1119,7 @@ async function readResponsesEventStream(args: {
       usage: usage ?? extractResponsesUsage(fallbackNode),
     };
   }
-  await flushSectionChunks(finalText, { includeLastSection: true });
+  await flushRawDelta(finalText);
   return {
     text: finalText,
     error: null,
@@ -1159,14 +1129,6 @@ async function readResponsesEventStream(args: {
   };
 }
 
-function buildSectionStreamChunk(section: { title: string; lead: string; bodyLines: string[] }, index: number) {
-  const sectionBody = buildMedSafetySectionBodyText(section);
-  const lines = [section.title];
-  if (sectionBody) lines.push(sectionBody);
-  const prefix = index > 0 ? "\n\n" : "";
-  return `${prefix}${lines.join("\n")}`;
-}
-
 async function emitSectionStreamFallback(args: {
   text: string;
   onTextDelta: TextDeltaHandler;
@@ -1174,22 +1136,7 @@ async function emitSectionStreamFallback(args: {
 }) {
   const normalized = normalizeDeliveredAnswerText(args.text);
   if (!normalized) return;
-
-  const sections = parseMedSafetyAnswerSections(normalized);
-  if (!sections.length) {
-    await args.onTextDelta(normalized);
-    return;
-  }
-
-  for (let index = 0; index < sections.length; index += 1) {
-    if (args.signal.aborted) throw new Error("openai_timeout_retry_aborted");
-    const chunk = buildSectionStreamChunk(sections[index]!, index);
-    if (!chunk.trim()) continue;
-      await args.onTextDelta(chunk);
-      if (index + 1 < sections.length) {
-      await sleepWithAbort(180, args.signal);
-      }
-  }
+  await args.onTextDelta(normalized);
 }
 
 function isRetryableOpenAIError(error: string) {

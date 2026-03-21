@@ -220,13 +220,17 @@ const SAFETY_AND_CERTAINTY_SPINE = [
 
 const RENDERING_AND_LENGTH_CONTRACT = [
   "[RENDERING_AND_LENGTH_CONTRACT]",
-  "- 첫 1~2문장 안에 결론을 먼저 쓴다.",
-  '- 여러 줄 답변은 "소제목:" 한 줄 -> 다음 줄 일반 텍스트 리드 문장 -> 이후 "- " bullet 순서로 쓴다.',
-  "- 새 섹션 전에는 빈 줄 2개를 둔다.",
-  "- 섹션 첫 줄은 bullet로 시작하지 않는다.",
-  '- 섹션 안의 작은 묶음 제목은 콜론/마침표 없는 아주 짧은 한 줄로만 쓰고, 바로 아래에 "- " bullet을 둔다.',
-  '- "**", "__", 백틱 같은 마크다운 강조는 쓰지 않는다.',
-  "- bullet은 완결 문장만 남기고 과하게 길어지지 않게 쓴다.",
+  "- 답변은 반드시 '카드 3단 구조'로 작성한다. 각 카드(섹션)는 다음 3개 층으로 구성된다:",
+  "  1층(태그): 짧은 소제목 한 줄. 예: 핵심, 지금 할 일, 주의, 구분 포인트, 핵심 관찰 포인트, 즉시 보고 신호, 질문에 대한 직접 답, 자세한 설명 등.",
+  "  2층(리드): 해당 섹션의 핵심을 한 문장으로 요약한 일반 텍스트 리드 문장. bullet이 아닌 완결 문장이어야 한다.",
+  '  3층(본문): 세부 내용을 "* " 또는 "- " bullet, 또는 일반 텍스트 문장으로 이어간다.',
+  "- 첫 카드 앞에는 결론 문단을 별도 제목 없이 1~3문장으로 먼저 쓴다. 이 결론 문단도 하나의 카드가 된다.",
+  "- 새 카드(섹션) 전에는 빈 줄 2개를 둔다.",
+  "- 각 카드의 첫 줄(리드)은 bullet로 시작하지 않는다.",
+  "- 카드 안의 작은 묶음 제목은 콜론/마침표 없는 짧은 한 줄로 쓰고 바로 아래에 bullet을 둔다.",
+  '- "**", "__", 백틱, ##, 표, 코드블록 같은 마크다운 장식은 쓰지 않는다.',
+  "- bullet은 완결 문장으로 쓰고 과하게 길어지지 않게 한다.",
+  "- 임상적으로 필요한 설명은 중간에 잘리지 않도록 충분히 끝까지 쓴다.",
 ].join("\n");
 
 const RISK_ESCALATION_DELTA = [
@@ -266,9 +270,11 @@ const FORMAT_SHORT = [
 
 const FORMAT_SECTIONED = [
   "[FORMAT_DELTA]",
-  '- 소제목은 "핵심:", "지금 할 일:", "확인할 것:", "주의:", "보고 기준:", "구분 포인트:" 같은 짧은 제목형을 우선한다.',
-  "- 소제목 줄 다음 첫 줄은 일반 텍스트 리드 문장으로 쓴다.",
+  '- 소제목은 구체적 내용에 맞는 짧은 제목을 쓴다. 예: "핵심", "지금 할 일", "핵심 관찰 포인트", "즉시 보고 신호", "질문에 대한 직접 답", "구분 포인트", "실무적으로는", "자세한 설명", "주의", "보고 기준".',
+  "- 소제목 줄 다음 첫 줄은 반드시 일반 텍스트 리드 문장(bullet 아님)으로 쓴다.",
+  "- 리드 문장 아래에 본문 bullet을 이어간다.",
   "- 작은 소카테고리는 콜론 없이 짧게 쓴다.",
+  '- "요약", "상세", "자세한 설명" 같은 두루뭉술한 제목은 피하고 구체적으로 쓴다.',
 ].join("\n");
 
 const APPENDIX_SBAR = [
@@ -963,7 +969,7 @@ export function buildPromptProfile(args: {
     return {
       reasoningEfforts: ["low"],
       verbosity: "medium",
-      outputTokenCandidates: isPremiumSearch ? [4200, 3400, 2600] : [3600, 3000, 2400],
+      outputTokenCandidates: isPremiumSearch ? [8000, 6000, 4800] : [6000, 5000, 4000],
       qualityLevel: "balanced",
     };
   }
@@ -978,16 +984,16 @@ export function buildPromptProfile(args: {
       outputTokenCandidates:
         decision.answerDepth === "detailed"
           ? decision.risk === "high" || Boolean(hasImage)
-            ? [9000, 7600, 6200]
-            : [7600, 6200, 5200]
-          : [6200, 5000, 4000],
+            ? [16000, 12000, 9000]
+            : [12000, 9000, 7000]
+          : [10000, 8000, 6000],
       qualityLevel: "balanced",
     };
   }
   return {
     reasoningEfforts: ["low"],
     verbosity: "high",
-    outputTokenCandidates: isPremiumSearch ? [5600, 4600, 3600] : [4600, 3600, 2800],
+    outputTokenCandidates: isPremiumSearch ? [10000, 8000, 6000] : [8000, 6000, 5000],
     qualityLevel: "balanced",
   };
 }
