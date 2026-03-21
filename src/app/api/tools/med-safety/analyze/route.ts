@@ -532,6 +532,7 @@ export async function POST(req: NextRequest) {
       const analyzedAt = Date.now();
       const today = todayISO();
       const shouldGenerateEnglishVariant = shouldGenerateKoEnglishVariant(runtimeMode);
+      const effectiveOnTextDelta = locale === "ko" ? onTextDelta : undefined;
 
       const analyzedKo = await analyzeMedSafetyWithOpenAI({
         query,
@@ -540,7 +541,7 @@ export async function POST(req: NextRequest) {
         modelOverride: searchType === "premium" ? "gpt-5.4" : "gpt-5.2",
         previousResponseId,
         conversationId,
-        onTextDelta,
+        onTextDelta: effectiveOnTextDelta,
         signal: abort.signal,
       });
 

@@ -104,6 +104,9 @@ const CORE_SAFETY = [
   "너는 간호사를 위한 임상 검색 AI다.",
   "가장 중요한 목표는 간호사가 지금 무엇을 이해해야 하고 무엇을 해야 하는지 빠르고 정확하고 안전하게 알려주는 것이다.",
   "답변은 교과서식 장황한 설명이 아니라 현장에서 바로 쓰이는 실무형이어야 한다.",
+  "첫 문장 또는 첫 2문장 안에 사용자가 가장 궁금해할 핵심 답을 먼저 준다.",
+  "질문이 혼합형이면 행동과 안전을 먼저 두고 배경 설명은 그 다음에 둔다.",
+  "답변은 빠른 판단, 실무 행동, 기억 보조가 함께 되도록 구성한다.",
   "사실을 지어내지 않는다.",
   "확실하지 않은 내용은 추정하지 않는다.",
   "진단이나 처방 결정을 대신하지 않는다.",
@@ -134,6 +137,7 @@ const INTENT_COMPARE = [
   "[현재 질문은 비교/구분 질문이다.]",
   "- 먼저 핵심 차이를 1~2줄로 요약한다.",
   "- 그 다음 실무적으로 가장 빨리 보는 구분 포인트를 따로 뺀다.",
+  "- 가능하면 1) 핵심 차이 2) 가장 빨리 보는 구분 포인트 3) 자세한 차이와 대응 순서를 따른다.",
   "- 이후 필요하면 자세한 차이와 대응을 덧붙인다.",
   "- 비교는 설명만 하지 말고 실제 판단에 도움이 되는 방향으로 정리한다.",
 ].join("\n");
@@ -347,7 +351,7 @@ function inferFormat(input: { answerDepth: MedSafetyAnswerDepth; risk: MedSafety
 }
 
 export function resolveMedSafetyRuntimeMode(): MedSafetyRuntimeMode {
-  const raw = String(process.env.OPENAI_MED_SAFETY_RUNTIME_MODE ?? "legacy")
+  const raw = String(process.env.OPENAI_MED_SAFETY_RUNTIME_MODE ?? "hybrid_live")
     .trim()
     .toLowerCase();
   if (raw === "hybrid_shadow") return "hybrid_shadow";

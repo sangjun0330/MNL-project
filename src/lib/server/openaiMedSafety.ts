@@ -1432,35 +1432,47 @@ async function runQualityGateAndRepair(args: {
     };
   }
 
-  const repairAttempt = await callResponsesApiWithRetry({
-    apiKey: args.apiKey,
-    model: args.model,
-    developerPrompt: buildRepairDeveloperPrompt(args.developerPrompt, args.locale),
-    userPrompt: buildRepairUserPrompt({
-      query: args.query,
-      answer: args.answer,
-      locale: args.locale,
-      decision: args.decision,
-      repairInstructions: modelDecision.repairInstructions,
-    }),
-    apiBaseUrl: args.apiBaseUrl,
-    signal: args.signal,
-    maxOutputTokens: args.profile.outputTokenCandidates[0] ?? 1800,
-    upstreamTimeoutMs: args.upstreamTimeoutMs,
-    verbosity: args.profile.verbosity,
-    reasoningEffort: args.profile.reasoningEfforts[0] ?? "medium",
-    storeResponses: false,
-    retries: args.networkRetries,
-    retryBaseMs: args.networkRetryBaseMs,
-  });
-
-  if (!repairAttempt.error && repairAttempt.text) {
-    return {
-      answer: sanitizeAnswerText(repairAttempt.text),
-      gateDecision: modelDecision,
-      usage: sumUsages(gateAttempt.usage, repairAttempt.usage),
-      repaired: true,
-    };
+  let repairAttempt: ResponsesAttempt = {
+    text: null,
+    error: "repair_not_attempted",
+    responseId: null,
+    conversationId: null,
+    usage: null,
+  };
+  for (let reasoningIndex = 0; reasoningIndex < args.profile.reasoningEfforts.length; reasoningIndex += 1) {
+    const reasoningEffort = args.profile.reasoningEfforts[reasoningIndex] ?? "medium";
+    repairAttempt = await callResponsesApiWithRetry({
+      apiKey: args.apiKey,
+      model: args.model,
+      developerPrompt: buildRepairDeveloperPrompt(args.developerPrompt, args.locale),
+      userPrompt: buildRepairUserPrompt({
+        query: args.query,
+        answer: args.answer,
+        locale: args.locale,
+        decision: args.decision,
+        repairInstructions: modelDecision.repairInstructions,
+      }),
+      apiBaseUrl: args.apiBaseUrl,
+      signal: args.signal,
+      maxOutputTokens: args.profile.outputTokenCandidates[0] ?? 1800,
+      upstreamTimeoutMs: args.upstreamTimeoutMs,
+      verbosity: args.profile.verbosity,
+      reasoningEffort,
+      storeResponses: false,
+      retries: args.networkRetries,
+      retryBaseMs: args.networkRetryBaseMs,
+    });
+    if (!repairAttempt.error && repairAttempt.text) {
+      return {
+        answer: sanitizeAnswerText(repairAttempt.text),
+        gateDecision: modelDecision,
+        usage: sumUsages(gateAttempt.usage, repairAttempt.usage),
+        repaired: true,
+      };
+    }
+    if (!isReasoningEffortRejected(repairAttempt.error ?? "") || reasoningIndex + 1 >= args.profile.reasoningEfforts.length) {
+      break;
+    }
   }
 
   return {
