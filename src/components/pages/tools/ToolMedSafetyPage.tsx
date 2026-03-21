@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getBrowserAuthHeaders, useAuthState } from "@/lib/auth";
 import type { SubscriptionApi } from "@/lib/billing/client";
 import { getPlanDefinition, getSearchCreditMeta, type SearchCreditType } from "@/lib/billing/plans";
@@ -1291,24 +1291,132 @@ function StreamingAnswerSections({ content }: { content: string }) {
   );
 }
 
-function ThinkingIndicator({ streamPhase, reasoningText }: { streamPhase: "idle" | "connecting" | "reasoning" | "writing"; reasoningText: string }) {
+/* ── Thinking indicator messages ── */
+const THINKING_GENERIC = [
+  "질문을 분석하고 있어요...",
+  "임상 근거를 확인하고 있어요...",
+  "핵심 내용을 정리하고 있어요...",
+  "답변을 구성하고 있어요...",
+];
+const THINKING_DRUG = [
+  "약물 정보를 검토하고 있어요...",
+  "투여 기준과 주의사항을 확인하고 있어요...",
+  "용량 및 경로 안전성을 점검하고 있어요...",
+  "약물 상호작용을 살펴보고 있어요...",
+  "답변을 구성하고 있어요...",
+];
+const THINKING_DEVICE = [
+  "장비 관련 정보를 검토하고 있어요...",
+  "알람 원인과 대응 방법을 확인하고 있어요...",
+  "세팅 기준을 점검하고 있어요...",
+  "실무 대응 절차를 정리하고 있어요...",
+  "답변을 구성하고 있어요...",
+];
+const THINKING_VENT = [
+  "인공호흡기 세팅을 분석하고 있어요...",
+  "환기 전략과 폐보호 원칙을 확인하고 있어요...",
+  "ABGA 수치를 해석하고 있어요...",
+  "모드별 조정 기준을 점검하고 있어요...",
+  "답변을 구성하고 있어요...",
+];
+const THINKING_LAB = [
+  "검사 수치를 분석하고 있어요...",
+  "정상 범위와 임상적 의미를 확인하고 있어요...",
+  "이상 수치의 원인을 살펴보고 있어요...",
+  "보고 기준을 점검하고 있어요...",
+  "답변을 구성하고 있어요...",
+];
+const THINKING_EMERGENCY = [
+  "응급 상황을 판단하고 있어요...",
+  "즉시 행동 지침을 확인하고 있어요...",
+  "보고 및 호출 기준을 점검하고 있어요...",
+  "안전 우선순위를 정리하고 있어요...",
+  "답변을 구성하고 있어요...",
+];
+const THINKING_COMPARE = [
+  "비교 대상을 분석하고 있어요...",
+  "핵심 차이점을 정리하고 있어요...",
+  "실무적 구분 포인트를 확인하고 있어요...",
+  "선택 기준을 점검하고 있어요...",
+  "답변을 구성하고 있어요...",
+];
+const THINKING_PROCEDURE = [
+  "절차 및 프로토콜을 확인하고 있어요...",
+  "단계별 순서를 정리하고 있어요...",
+  "주의사항과 안전 기준을 점검하고 있어요...",
+  "실무 체크포인트를 확인하고 있어요...",
+  "답변을 구성하고 있어요...",
+];
+const THINKING_IV = [
+  "수액 및 주입 정보를 검토하고 있어요...",
+  "주입 속도와 경로를 확인하고 있어요...",
+  "혈관 접근 안전성을 점검하고 있어요...",
+  "호환성과 주의사항을 확인하고 있어요...",
+  "답변을 구성하고 있어요...",
+];
+const THINKING_VITALS = [
+  "활력징후를 분석하고 있어요...",
+  "정상 범위와 변동 의미를 확인하고 있어요...",
+  "관련 원인과 대응을 점검하고 있어요...",
+  "보고 기준을 정리하고 있어요...",
+  "답변을 구성하고 있어요...",
+];
+
+function pickThinkingMessages(query: string): string[] {
+  const q = query.toLowerCase();
+  // Ventilator / respiratory
+  if (/vent|인공호흡|환기|peep|fio2|abga|pco2|po2|산소포화|spo2|모드|pcv|vcv|cpap|ps\b|simv|tidal|vte/i.test(q))
+    return THINKING_VENT;
+  // Emergency / critical
+  if (/응급|심정지|쇼크|아나필|code\s*blue|cpr|제세동|급변|의식\s*저하|호흡\s*정지|심실세동|arrest/i.test(q))
+    return THINKING_EMERGENCY;
+  // Drug / medication
+  if (/약|투여|용량|희석|mg|mcg|ml\/hr|주입\s*속도|부작용|금기|kcl|nacl|dopamine|norepinephrine|heparin|insulin|vancomycin|항생제|진통제|승압제|수혈|혈액제제|리버설|reversal/i.test(q))
+    return THINKING_DRUG;
+  // IV / vascular access
+  if (/수액|말초|중심정맥|피브이|peripheral|central\s*line|cv\s*line|picc|포트|혈관통|정맥염|침윤|extravasation|iv\s*push|bolus/i.test(q))
+    return THINKING_IV;
+  // Lab / numeric
+  if (/수치|검사|정상\s*범위|lab|cbc|bmp|cmp|전해질|크레아티닌|bun|ast|alt|bilirubin|hemoglobin|hb|hct|platelet|inr|pt|aptt|fibrinogen|lactate|troponin|bnp|crp|procalcitonin|해석|계산/i.test(q))
+    return THINKING_LAB;
+  // Vitals
+  if (/활력징후|vital|혈압|맥박|체온|호흡수|산소|bp|hr\b|rr\b|bt\b|spo2|저혈압|고혈압|빈맥|서맥|발열/i.test(q))
+    return THINKING_VITALS;
+  // Compare
+  if (/차이|비교|구분|vs|뭐가\s*달라|헷갈|어떤\s*걸\s*써/i.test(q))
+    return THINKING_COMPARE;
+  // Device / equipment
+  if (/펌프|라인|카테터|튜브|드레싱|모니터|기구|장비|알람|필터|산소\s*장비|suction|석션|흡인/i.test(q))
+    return THINKING_DEVICE;
+  // Procedure
+  if (/절차|프로토콜|단계|순서|준비|세팅|체크리스트|확인사항|간호중재/i.test(q))
+    return THINKING_PROCEDURE;
+  return THINKING_GENERIC;
+}
+
+function ThinkingIndicator({ streamPhase, query }: { streamPhase: "idle" | "connecting" | "reasoning" | "writing"; query: string }) {
+  const messages = useMemo(() => pickThinkingMessages(query), [query]);
+  const [msgIndex, setMsgIndex] = useState(0);
+
+  useEffect(() => {
+    if (streamPhase !== "reasoning") return;
+    setMsgIndex(0);
+    const timer = setInterval(() => {
+      setMsgIndex((prev) => (prev + 1) % messages.length);
+    }, 2400);
+    return () => clearInterval(timer);
+  }, [streamPhase, messages]);
+
   return (
     <div className="min-w-0 flex-1">
       <div className="text-[14px] font-semibold text-[color:var(--rnest-accent)]">
-        {streamPhase === "connecting" ? "AI에 연결 중..." : "질문을 분석하고 있어요..."}
+        {streamPhase === "connecting" ? "AI에 연결 중..." : messages[msgIndex]}
       </div>
-      {reasoningText ? (
-        <div className="mt-1.5 text-[13px] leading-5 text-ios-sub">
-          <span className="whitespace-pre-wrap break-words">{reasoningText}</span>
-          <span className="ml-0.5 inline-block h-[14px] w-[2px] animate-pulse rounded-full bg-[color:var(--rnest-accent)] align-middle" />
-        </div>
-      ) : (
-        <div className="mt-2 flex items-center gap-1.5">
-          <span className="inline-block h-2 w-2 animate-[bounce_1s_ease-in-out_infinite] rounded-full bg-[color:var(--rnest-accent)] opacity-60" />
-          <span className="inline-block h-2 w-2 animate-[bounce_1s_ease-in-out_0.15s_infinite] rounded-full bg-[color:var(--rnest-accent)] opacity-60" />
-          <span className="inline-block h-2 w-2 animate-[bounce_1s_ease-in-out_0.3s_infinite] rounded-full bg-[color:var(--rnest-accent)] opacity-60" />
-        </div>
-      )}
+      <div className="mt-2 flex items-center gap-1.5">
+        <span className="inline-block h-2 w-2 animate-[bounce_1s_ease-in-out_infinite] rounded-full bg-[color:var(--rnest-accent)] opacity-60" />
+        <span className="inline-block h-2 w-2 animate-[bounce_1s_ease-in-out_0.15s_infinite] rounded-full bg-[color:var(--rnest-accent)] opacity-60" />
+        <span className="inline-block h-2 w-2 animate-[bounce_1s_ease-in-out_0.3s_infinite] rounded-full bg-[color:var(--rnest-accent)] opacity-60" />
+      </div>
     </div>
   );
 }
@@ -2105,7 +2213,7 @@ export function ToolMedSafetyPage() {
                             <span className="absolute inset-0 animate-ping rounded-full border-2 border-[color:var(--rnest-accent)] opacity-30" />
                             <span className="absolute inset-0 animate-[spin_3s_linear_infinite] rounded-full border-2 border-transparent border-t-[color:var(--rnest-accent)] opacity-60" />
                           </div>
-                          <ThinkingIndicator streamPhase={streamPhase} reasoningText={reasoningText} />
+                          <ThinkingIndicator streamPhase={streamPhase} query={lastSubmittedQuery} />
                         </div>
                       </div>
                     </div>
