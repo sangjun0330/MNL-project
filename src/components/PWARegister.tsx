@@ -28,7 +28,9 @@ export function PWARegister() {
         const handleControllerChange = () => {
           if (refreshed) return;
           refreshed = true;
-          window.location.reload();
+          if (document.visibilityState === "hidden") {
+            window.location.reload();
+          }
         };
         navigator.serviceWorker.addEventListener("controllerchange", handleControllerChange);
         cleanupControllerChange = () => {

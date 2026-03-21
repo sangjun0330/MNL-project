@@ -39,7 +39,7 @@
   --rnest-dur-fast: 180ms;    /* quick interactions */
   --rnest-dur-med: 300ms;     /* medium transitions */
   --rnest-dur-slow: 420ms;    /* slower animations */
-  --rnest-dur-page: 480ms;    /* page transitions */
+  --rnest-dur-page: 260ms;    /* page transitions */
   --rnest-dur-sheet: 500ms;   /* bottom sheet slide */
   --rnest-dur-modal: 400ms;   /* modal/dialog animations */
 
@@ -102,33 +102,28 @@ body.rnest-sheet-open {
 
 @keyframes rnestPageEnter {
   from {
-    opacity: 0;
-    transform: translate3d(0, 16px, 0) scale(0.97);
-    filter: blur(4px);
+    opacity: 0.5;
+    transform: translate3d(0, 6px, 0);
   }
   to {
     opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
-    filter: blur(0);
+    transform: translate3d(0, 0, 0);
   }
 }
 
 @keyframes rnestPageExit {
   from {
     opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
-    filter: blur(0);
+    transform: translate3d(0, 0, 0);
   }
   to {
     opacity: 0;
-    transform: translate3d(0, -8px, 0) scale(0.985);
-    filter: blur(2px);
+    transform: translate3d(0, -6px, 0);
   }
 }
 
 .rnest-page-enter {
   animation: rnestPageEnter var(--rnest-dur-page) var(--rnest-ease-apple) both;
-  will-change: transform, opacity, filter;
 }
 
 /* ===================================
@@ -407,23 +402,19 @@ body.rnest-sheet-open {
 
 .rnest-page-enter > div > div:nth-child(1),
 .rnest-page-enter > section:nth-child(1),
-.rnest-page-enter > div > section:nth-child(1) { animation-delay: 60ms; }
+.rnest-page-enter > div > section:nth-child(1) { animation-delay: 30ms; }
 
 .rnest-page-enter > div > div:nth-child(2),
 .rnest-page-enter > section:nth-child(2),
-.rnest-page-enter > div > section:nth-child(2) { animation-delay: 120ms; }
+.rnest-page-enter > div > section:nth-child(2) { animation-delay: 60ms; }
 
 .rnest-page-enter > div > div:nth-child(3),
 .rnest-page-enter > section:nth-child(3),
-.rnest-page-enter > div > section:nth-child(3) { animation-delay: 180ms; }
+.rnest-page-enter > div > section:nth-child(3) { animation-delay: 90ms; }
 
-.rnest-page-enter > div > div:nth-child(4),
-.rnest-page-enter > section:nth-child(4),
-.rnest-page-enter > div > section:nth-child(4) { animation-delay: 240ms; }
-
-.rnest-page-enter > div > div:nth-child(n+5),
-.rnest-page-enter > section:nth-child(n+5),
-.rnest-page-enter > div > section:nth-child(n+5) { animation-delay: 300ms; }
+.rnest-page-enter > div > div:nth-child(n+4),
+.rnest-page-enter > section:nth-child(n+4),
+.rnest-page-enter > div > section:nth-child(n+4) { animation-delay: 100ms; }
 
 /* ===================================
    Interactive Press Feedback
@@ -452,12 +443,12 @@ button:not([class*="rnest-nav"]):active {
 
 @keyframes rnestPageEnterMobile {
   from {
-    opacity: 0;
-    transform: translate3d(0, 12px, 0) scale(0.98);
+    opacity: 0.5;
+    transform: translate3d(0, 4px, 0);
   }
   to {
     opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
+    transform: translate3d(0, 0, 0);
   }
 }
 

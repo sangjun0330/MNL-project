@@ -21,6 +21,7 @@ import {
 } from "@/lib/shop";
 import { findShopCarrierOptionByCode, findShopCarrierOptionByLabel, SHOP_CARRIER_OPTIONS } from "@/lib/shopShipping";
 import { useI18n } from "@/lib/useI18n";
+import { setIfOrdersChanged } from "@/lib/setIfChanged";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -1191,6 +1192,7 @@ export function ShopAdminPage() {
   const { status, user } = useAuthState();
   const [accessState, setAccessState] = useState<"checking" | "allowed" | "blocked">("checking");
   const mountedRef = useRef(true);
+  const ordersFpRef = useRef("");
 
   // Catalog (includes inactive for admin)
   const [catalog, setCatalog] = useState<(ShopProduct & { active?: boolean })[]>(SHOP_PRODUCTS);
@@ -1279,10 +1281,12 @@ export function ShopAdminPage() {
         if (!res.ok || !json?.ok || !Array.isArray(json?.data?.orders)) throw new Error();
 
         const nextOrders = json.data.orders as ShopAdminOrderSummary[];
-        setOrders(nextOrders);
-        setShippingDrafts((current) =>
-          mergeShippingDraftMaps(nextOrders, current, readStoredShippingDrafts(shippingDraftStorageKey))
-        );
+        const changed = setIfOrdersChanged(setOrders, nextOrders, ordersFpRef);
+        if (changed) {
+          setShippingDrafts((current) =>
+            mergeShippingDraftMaps(nextOrders, current, readStoredShippingDrafts(shippingDraftStorageKey))
+          );
+        }
       } catch {
         if (!mountedRef.current || input?.silent) return;
         setNoticeTone("error");
@@ -1419,7 +1423,7 @@ export function ShopAdminPage() {
       void loadAdminClaims({ showLoading: false, silent: true });
     };
 
-    const intervalId = window.setInterval(refreshIfVisible, 15000); // 30s → 15s: 관리자 배송처리 응답성 개선
+    const intervalId = window.setInterval(refreshIfVisible, 30_000);
     window.addEventListener("focus", refreshIfVisible);
     document.addEventListener("visibilitychange", refreshIfVisible);
 

@@ -11,6 +11,7 @@ import { translate } from "@/lib/i18n";
 import { useI18n } from "@/lib/useI18n";
 import { ShopBackLink } from "@/components/shop/ShopBackLink";
 import { useShopOrderRealtimeRefresh } from "@/components/shop/useShopOrderRealtimeRefresh";
+import { setIfOrdersChanged } from "@/lib/setIfChanged";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 
@@ -166,6 +167,7 @@ export function ShopOrdersPage() {
   const [trackingByOrderId, setTrackingByOrderId] = useState<Record<string, ShopOrderTrackingSnapshot>>({});
   const [trackingLoadingId, setTrackingLoadingId] = useState<string | null>(null);
   const mountedRef = useRef(true);
+  const ordersFpRef = useRef("");
 
   const totalPages = Math.max(1, Math.ceil(total / ORDERS_PER_PAGE));
   const currentOffset = (page - 1) * ORDERS_PER_PAGE;
@@ -199,7 +201,8 @@ export function ShopOrdersPage() {
         const json = await res.json().catch(() => null);
         if (!mountedRef.current) return;
         if (!res.ok || !json?.ok || !Array.isArray(json?.data?.orders)) throw new Error();
-        setOrders(json.data.orders as ShopOrderSummary[]);
+        const nextOrders = json.data.orders as ShopOrderSummary[];
+        setIfOrdersChanged(setOrders, nextOrders, ordersFpRef);
         setTotal(Math.max(0, Number(json?.data?.total ?? 0)));
       } catch {
         if (!mountedRef.current) return;
@@ -213,6 +216,13 @@ export function ShopOrdersPage() {
     },
     [fetchLimit, fetchOffset, status, user?.userId]
   );
+
+  const { lastRealtimeAt } = useShopOrderRealtimeRefresh({
+    enabled: status === "authenticated",
+    userId: user?.userId ?? null,
+    scope: "shop-orders-page",
+    onRefresh: () => loadOrders(false),
+  });
 
   useEffect(() => {
     let active = true;
@@ -228,10 +238,11 @@ export function ShopOrdersPage() {
     const refreshIfVisible = () => {
       if (document.visibilityState !== "visible") return;
       if (!active) return;
+      if (Date.now() - lastRealtimeAt.current < 30_000) return;
       void loadOrders(false);
     };
 
-    const intervalId = window.setInterval(refreshIfVisible, 15000); // 30s → 15s: ShopOrderDetailPage와 폴링 주기 통일
+    const intervalId = window.setInterval(refreshIfVisible, 30_000);
     window.addEventListener("focus", refreshIfVisible);
     document.addEventListener("visibilitychange", refreshIfVisible);
 
@@ -241,14 +252,7 @@ export function ShopOrdersPage() {
       window.removeEventListener("focus", refreshIfVisible);
       document.removeEventListener("visibilitychange", refreshIfVisible);
     };
-  }, [loadOrders, status, user?.userId]);
-
-  useShopOrderRealtimeRefresh({
-    enabled: status === "authenticated",
-    userId: user?.userId ?? null,
-    scope: "shop-orders-page",
-    onRefresh: () => loadOrders(false),
-  });
+  }, [loadOrders, status, user?.userId, lastRealtimeAt]);
 
   const loadTrackingSnapshot = useCallback(
     async (order: ShopOrderSummary, force = false) => {

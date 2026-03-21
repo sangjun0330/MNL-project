@@ -9,6 +9,7 @@ import { translate } from "@/lib/i18n";
 import { useI18n } from "@/lib/useI18n";
 import { ShopBackLink } from "@/components/shop/ShopBackLink";
 import { useShopOrderRealtimeRefresh } from "@/components/shop/useShopOrderRealtimeRefresh";
+import { orderDetailFingerprint } from "@/lib/setIfChanged";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 
@@ -282,6 +283,7 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
   const [orderInfoExpanded, setOrderInfoExpanded] = useState(false);
   const [followupExpanded, setFollowupExpanded] = useState(false);
   const mountedRef = useRef(true);
+  const orderFpRef = useRef("");
 
   useEffect(() => {
     mountedRef.current = true;
@@ -311,7 +313,12 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
         const json = await res.json().catch(() => null);
         if (!mountedRef.current) return;
         if (!res.ok || !json?.ok || !json?.data?.order) throw new Error(String(json?.error ?? `http_${res.status}`));
-        setOrder(json.data.order as ShopOrderDetail);
+        const nextOrder = json.data.order as ShopOrderDetail;
+        const nextFp = orderDetailFingerprint(nextOrder);
+        if (nextFp !== orderFpRef.current) {
+          orderFpRef.current = nextFp;
+          setOrder(nextOrder);
+        }
       } catch {
         if (!mountedRef.current) return;
         if (showLoading) {
@@ -419,6 +426,16 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
     [loadOrder, order, status, t]
   );
 
+  const { lastRealtimeAt } = useShopOrderRealtimeRefresh({
+    enabled: status === "authenticated",
+    userId: user?.userId ?? null,
+    scope: `shop-order-${orderId}`,
+    onRefresh: () => {
+      void loadOrder(false);
+      void loadClaims(false);
+    },
+  });
+
   useEffect(() => {
     if (status !== "authenticated") {
       setLoading(false);
@@ -431,11 +448,12 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
 
     const refreshIfVisible = () => {
       if (document.visibilityState !== "visible") return;
+      if (Date.now() - lastRealtimeAt.current < 30_000) return;
       void loadOrder(false);
       void loadClaims(false);
     };
 
-    const intervalId = window.setInterval(refreshIfVisible, 15000); // 30s → 15s: 실시간 연동 실패 시 폴링 응답성 개선
+    const intervalId = window.setInterval(refreshIfVisible, 30_000);
     window.addEventListener("focus", refreshIfVisible);
     document.addEventListener("visibilitychange", refreshIfVisible);
 
@@ -444,17 +462,7 @@ export function ShopOrderDetailPage({ orderId }: { orderId: string }) {
       window.removeEventListener("focus", refreshIfVisible);
       document.removeEventListener("visibilitychange", refreshIfVisible);
     };
-  }, [loadClaims, loadOrder, status]);
-
-  useShopOrderRealtimeRefresh({
-    enabled: status === "authenticated",
-    userId: user?.userId ?? null,
-    scope: `shop-order-${orderId}`,
-    onRefresh: () => {
-      void loadOrder(false);
-      void loadClaims(false);
-    },
-  });
+  }, [loadClaims, loadOrder, status, lastRealtimeAt]);
 
   useEffect(() => {
     if (status !== "authenticated" || !order || order.status !== "SHIPPED" || !order.trackingNumber) {

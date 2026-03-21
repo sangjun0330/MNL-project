@@ -11,7 +11,7 @@ import { hydrateState } from "@/lib/store";
 import { emptyState } from "@/lib/model";
 import { useI18n } from "@/lib/useI18n";
 import type { SyntheticEvent } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 const CloudStateSync = dynamic(
   () => import("@/components/system/CloudStateSync").then((mod) => mod.CloudStateSync),
@@ -54,12 +54,28 @@ let bootstrapCache: {
 
 function readBootstrapCache(userId?: string | null) {
   if (!userId) return null;
-  if (bootstrapCache?.userId !== userId) return null;
-  return bootstrapCache.payload;
+  if (bootstrapCache?.userId === userId) return bootstrapCache.payload;
+  try {
+    if (typeof sessionStorage !== "undefined" && sessionStorage.getItem(`rnest_consent_${userId}`) === "1") {
+      return {
+        onboardingCompleted: true,
+        consentCompleted: true,
+        hasStoredState: false,
+        state: null,
+        updatedAt: null,
+      } as BootstrapPayload;
+    }
+  } catch {}
+  return null;
 }
 
 function writeBootstrapCache(userId: string, payload: BootstrapPayload) {
   bootstrapCache = { userId, payload };
+  try {
+    if (typeof sessionStorage !== "undefined" && payload.consentCompleted) {
+      sessionStorage.setItem(`rnest_consent_${userId}`, "1");
+    }
+  } catch {}
 }
 
 function clearBootstrapCache(userId?: string | null) {
@@ -365,6 +381,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const canRenderContent = !isAuthed || isPolicyPage || Boolean(resolvedBootstrap?.consentCompleted);
   const showBottomNav = !isNotebookImmersive && (!isAuthed || Boolean(resolvedBootstrap?.consentCompleted));
 
+  const pageRef = useRef<HTMLDivElement>(null);
+  const prevPathnameRef = useRef(pathname);
+
+  useLayoutEffect(() => {
+    if (pathname !== prevPathnameRef.current) {
+      prevPathnameRef.current = pathname;
+      const el = pageRef.current;
+      if (el) {
+        el.classList.remove("rnest-page-enter");
+        void el.offsetWidth;
+        el.classList.add("rnest-page-enter");
+      }
+    }
+  }, [pathname]);
+
   const handleOnboardingComplete = useCallback(async () => {
     if (!auth?.userId || busyStage) return;
     setBusyStage("onboarding");
@@ -447,7 +478,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           isMedSafetyImmersive || isNotebookImmersive ? (
             children
           ) : (
-            <div key={pathname} className="rnest-page-enter">
+            <div ref={pageRef} className="rnest-page-enter">
               {children}
             </div>
           )

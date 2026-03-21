@@ -20,6 +20,7 @@ export function useShopOrderRealtimeRefresh(input: UseShopOrderRealtimeRefreshIn
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryDelayRef = useRef(INITIAL_RETRY_DELAY_MS);
   const cleanedUpRef = useRef(false);
+  const lastRealtimeAtRef = useRef(0);
   const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
@@ -40,6 +41,7 @@ export function useShopOrderRealtimeRefresh(input: UseShopOrderRealtimeRefreshIn
 
     const scheduleRefresh = () => {
       if (timerRef.current) return;
+      lastRealtimeAtRef.current = Date.now();
       timerRef.current = setTimeout(() => {
         timerRef.current = null;
         void refreshRef.current();
@@ -111,4 +113,6 @@ export function useShopOrderRealtimeRefresh(input: UseShopOrderRealtimeRefreshIn
       void supabase.removeChannel(channel);
     };
   }, [input.enabled, input.scope, input.userId, retryCount]);
+
+  return { lastRealtimeAt: lastRealtimeAtRef };
 }

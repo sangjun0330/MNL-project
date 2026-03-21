@@ -90,12 +90,12 @@ export function SocialPage() {
   const [friendsSchedule, setFriendsSchedule] = useState<FriendsScheduleData | null>(null);
   const [profile, setProfile] = useState<SocialProfile | null>(null);
   const [friendMeta, setFriendMeta] = useState<Record<string, FriendMeta>>({});
-  const [connectionsLoading, setConnectionsLoading] = useState(true);
-  const [scheduleLoading, setScheduleLoading] = useState(true);
-  const [profileLoading, setProfileLoading] = useState(true);
+  const [connectionsLoading, setConnectionsLoading] = useState(false);
+  const [scheduleLoading, setScheduleLoading] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(false);
   const [connectionsError, setConnectionsError] = useState(false);
   const [groups, setGroups] = useState<SocialGroupSummary[]>([]);
-  const [groupsLoading, setGroupsLoading] = useState(true);
+  const [groupsLoading, setGroupsLoading] = useState(false);
   const [groupsError, setGroupsError] = useState(false);
 
   const [activeTab, setActiveTab] = useState<SocialViewTab>(groupInviteToken ? "groups" : "friends");
