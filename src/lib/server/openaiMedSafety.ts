@@ -1,8 +1,6 @@
 import { normalizeOpenAIResponsesBaseUrl, resolveOpenAIResponsesRequestConfig } from "@/lib/server/openaiGateway";
 import {
   assembleMedSafetyDeveloperPrompt,
-  buildCompactMedSafetyBasePrompt,
-  buildConservativeRouteDecision,
   buildDeterministicRouteDecision,
   buildHeuristicQualityDecision,
   buildPromptProfile,
@@ -59,6 +57,46 @@ type ResponsesUsage = {
   inputTokens: number | null;
   outputTokens: number | null;
   totalTokens: number | null;
+  cachedInputTokens: number | null;
+  reasoningTokens: number | null;
+};
+
+export type MedSafetyUsageBreakdown = {
+  router: ResponsesUsage | null;
+  main: ResponsesUsage | null;
+  gate: ResponsesUsage | null;
+  repair: ResponsesUsage | null;
+  translation: ResponsesUsage | null;
+  total: ResponsesUsage | null;
+  visibleAnswerChars: number;
+  visibleAnswerLines: number;
+  assembledPromptChars: number | null;
+  selectedContracts: string[];
+  runtimeMode: MedSafetyRuntimeMode;
+  routeDecision: {
+    intent: MedSafetyRouteDecision["intent"];
+    risk: MedSafetyRouteDecision["risk"];
+    entityClarity: MedSafetyRouteDecision["entityClarity"];
+    answerDepth: MedSafetyRouteDecision["answerDepth"];
+    needsEscalation: boolean;
+    needsSbar: boolean;
+    format: MedSafetyRouteDecision["format"];
+    source: MedSafetyRouteDecision["source"];
+    confidence: MedSafetyRouteDecision["confidence"];
+  } | null;
+};
+
+export type MedSafetyShadowComparison = {
+  legacyAnswer: string;
+  hybridAnswer: string | null;
+  legacyUsage: ResponsesUsage | null;
+  hybridUsage: ResponsesUsage | null;
+  heuristicVerdict: string;
+  heuristicRepairInstructions: string;
+  pairwiseQualityFlags: string[];
+  verbosityFlags: string[];
+  overlong: boolean;
+  selectedContracts: string[];
 };
 
 const MED_SAFETY_LOCKED_MODEL = "gpt-5.4";
@@ -72,6 +110,8 @@ export type OpenAIMedSafetyOutput = {
   openaiConversationId: string | null;
   routeDecision?: MedSafetyRouteDecision | null;
   runtimeMode?: MedSafetyRuntimeMode;
+  usageBreakdown?: MedSafetyUsageBreakdown | null;
+  shadowComparison?: MedSafetyShadowComparison | null;
 };
 
 function normalizeApiKey() {
@@ -136,19 +176,6 @@ function resolveMaxOutputTokens() {
   if (!Number.isFinite(raw)) return 5000;
   const rounded = Math.round(raw);
   return Math.max(1400, Math.min(8000, rounded));
-}
-
-function buildOutputTokenCandidates(maxOutputTokens: number) {
-  const requested = Math.max(1400, Math.round(maxOutputTokens));
-  const out: number[] = [];
-  const seen = new Set<number>();
-  for (const raw of [requested, 2800, 2400, 2000, 1600, 1400]) {
-    const value = Math.max(1400, Math.min(requested, Math.round(raw)));
-    if (!Number.isFinite(value) || seen.has(value)) continue;
-    seen.add(value);
-    out.push(value);
-  }
-  return out.length ? out : [requested];
 }
 
 function resolveNetworkRetryCount() {
@@ -487,7 +514,15 @@ export const MED_SAFETY_LEGACY_DENSE_CORE_PROMPT_REFERENCE = [
 ].join("\n");
 
 function buildDeveloperPrompt(locale: "ko" | "en") {
-  return buildCompactMedSafetyBasePrompt(locale);
+  if (locale === "en") {
+    return [
+      MED_SAFETY_LEGACY_DENSE_CORE_PROMPT_REFERENCE,
+      "",
+      "[LANGUAGE_OVERRIDE]",
+      "- 위 규칙을 유지하되 최종 답변만 자연스러운 bedside clinical English로 작성한다.",
+    ].join("\n");
+  }
+  return MED_SAFETY_LEGACY_DENSE_CORE_PROMPT_REFERENCE;
 }
 
 function buildPromptDisciplineDiagnostics(
@@ -499,13 +534,17 @@ function buildPromptDisciplineDiagnostics(
   if (!decision) {
     return {
       qualityLevel,
-      confidenceDiscipline: "compact_base_only",
+      confidenceDiscipline: "legacy_or_base_only",
       specificitySuppression: false,
       assumptionDisclosure: "not_applicable",
       basePromptChars: assembly?.basePromptChars ?? null,
       finalPromptChars: assembly?.finalPromptChars ?? null,
-      selectedDeltaIds: assembly?.selectedDeltaIds ?? [],
-      droppedDeltaIds: assembly?.droppedDeltaIds ?? [],
+      selectedContractIds: assembly?.selectedContractIds ?? [],
+      droppedContractIds: assembly?.droppedContractIds ?? [],
+      openingMode: assembly?.blueprint.openingMode ?? null,
+      subjectFocus: assembly?.blueprint.subjectFocus ?? null,
+      mixedIntent: assembly?.blueprint.mixedIntent ?? null,
+      followupPolicy: assembly?.blueprint.followupPolicy ?? null,
       budgetClass: assembly?.budgetClass ?? null,
     };
   }
@@ -530,8 +569,12 @@ function buildPromptDisciplineDiagnostics(
           : "not_required",
     basePromptChars: assembly?.basePromptChars ?? null,
     finalPromptChars: assembly?.finalPromptChars ?? null,
-    selectedDeltaIds: assembly?.selectedDeltaIds ?? [],
-    droppedDeltaIds: assembly?.droppedDeltaIds ?? [],
+    selectedContractIds: assembly?.selectedContractIds ?? [],
+    droppedContractIds: assembly?.droppedContractIds ?? [],
+    openingMode: assembly?.blueprint.openingMode ?? null,
+    subjectFocus: assembly?.blueprint.subjectFocus ?? null,
+    mixedIntent: assembly?.blueprint.mixedIntent ?? null,
+    followupPolicy: assembly?.blueprint.followupPolicy ?? null,
     budgetClass: assembly?.budgetClass ?? null,
   };
 }
@@ -660,14 +703,26 @@ function normalizeUsageNode(value: unknown): ResponsesUsage | null {
   const node = value as Record<string, unknown>;
   const inputTokens = readNumberFromUnknown(node.input_tokens ?? node.prompt_tokens ?? node.inputTokens);
   const outputTokens = readNumberFromUnknown(node.output_tokens ?? node.completion_tokens ?? node.outputTokens);
+  const inputDetails =
+    (node.input_tokens_details as Record<string, unknown> | undefined) ??
+    (node.prompt_tokens_details as Record<string, unknown> | undefined) ??
+    (node.inputTokensDetails as Record<string, unknown> | undefined);
+  const outputDetails =
+    (node.output_tokens_details as Record<string, unknown> | undefined) ??
+    (node.completion_tokens_details as Record<string, unknown> | undefined) ??
+    (node.outputTokensDetails as Record<string, unknown> | undefined);
+  const cachedInputTokens = readNumberFromUnknown(inputDetails?.cached_tokens ?? inputDetails?.cachedTokens);
+  const reasoningTokens = readNumberFromUnknown(outputDetails?.reasoning_tokens ?? outputDetails?.reasoningTokens);
   const totalTokens =
     readNumberFromUnknown(node.total_tokens ?? node.totalTokens) ??
     (inputTokens != null || outputTokens != null ? (inputTokens ?? 0) + (outputTokens ?? 0) : null);
-  if (inputTokens == null && outputTokens == null && totalTokens == null) return null;
+  if (inputTokens == null && outputTokens == null && totalTokens == null && cachedInputTokens == null && reasoningTokens == null) return null;
   return {
     inputTokens,
     outputTokens,
     totalTokens,
+    cachedInputTokens,
+    reasoningTokens,
   };
 }
 
@@ -692,7 +747,110 @@ function sumUsages(...values: Array<ResponsesUsage | null | undefined>): Respons
     inputTokens: sum(normalized.map((item) => item.inputTokens)),
     outputTokens: sum(normalized.map((item) => item.outputTokens)),
     totalTokens: sum(normalized.map((item) => item.totalTokens)),
+    cachedInputTokens: sum(normalized.map((item) => item.cachedInputTokens)),
+    reasoningTokens: sum(normalized.map((item) => item.reasoningTokens)),
   };
+}
+
+function serializeRouteDecision(decision: MedSafetyRouteDecision | null | undefined) {
+  if (!decision) return null;
+  return {
+    intent: decision.intent,
+    risk: decision.risk,
+    entityClarity: decision.entityClarity,
+    answerDepth: decision.answerDepth,
+    needsEscalation: decision.needsEscalation,
+    needsSbar: decision.needsSbar,
+    format: decision.format,
+    source: decision.source,
+    confidence: decision.confidence,
+  };
+}
+
+function countVisibleAnswerLines(answer: string) {
+  return normalizeText(answer)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean).length;
+}
+
+function parseIssueCodes(raw: string) {
+  return String(raw ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function mergeQualityDecisions(heuristic: MedSafetyQualityDecision, model: MedSafetyQualityDecision | null) {
+  if (!model) return heuristic;
+  const priority = (verdict: MedSafetyQualityDecision["verdict"]) =>
+    verdict === "repair_required" ? 2 : verdict === "pass_but_verbose" ? 1 : 0;
+  const chosen = priority(model.verdict) >= priority(heuristic.verdict) ? model.verdict : heuristic.verdict;
+  const mergedIssues = Array.from(new Set([...parseIssueCodes(heuristic.repairInstructions), ...parseIssueCodes(model.repairInstructions)]));
+  return {
+    verdict: chosen,
+    repairInstructions: mergedIssues.join(","),
+  } satisfies MedSafetyQualityDecision;
+}
+
+function buildUsageBreakdown(args: {
+  runtimeMode: MedSafetyRuntimeMode;
+  routeDecision: MedSafetyRouteDecision | null;
+  routerUsage?: ResponsesUsage | null;
+  mainUsage?: ResponsesUsage | null;
+  gateUsage?: ResponsesUsage | null;
+  repairUsage?: ResponsesUsage | null;
+  translationUsage?: ResponsesUsage | null;
+  answer: string;
+  assembledPromptChars?: number | null;
+  selectedContracts?: string[];
+}) {
+  return {
+    router: args.routerUsage ?? null,
+    main: args.mainUsage ?? null,
+    gate: args.gateUsage ?? null,
+    repair: args.repairUsage ?? null,
+    translation: args.translationUsage ?? null,
+    total: sumUsages(args.routerUsage, args.mainUsage, args.gateUsage, args.repairUsage, args.translationUsage),
+    visibleAnswerChars: normalizeText(args.answer).length,
+    visibleAnswerLines: countVisibleAnswerLines(args.answer),
+    assembledPromptChars: args.assembledPromptChars ?? null,
+    selectedContracts: args.selectedContracts ?? [],
+    runtimeMode: args.runtimeMode,
+    routeDecision: serializeRouteDecision(args.routeDecision),
+  } satisfies MedSafetyUsageBreakdown;
+}
+
+function buildDefaultPromptProfile(): MedSafetyPromptProfile {
+  return {
+    reasoningEfforts: ["medium"],
+    verbosity: "low",
+    outputTokenCandidates: [1200, 900, 700],
+    qualityLevel: "balanced",
+  };
+}
+
+function buildShadowFallbackDecision(
+  deterministic: MedSafetyRouteDecision,
+  args: {
+    imageDataUrl?: string;
+    error?: string | null;
+  }
+) {
+  const next: MedSafetyRouteDecision = {
+    ...deterministic,
+    answerDepth:
+      args.imageDataUrl && deterministic.answerDepth === "short"
+        ? "standard"
+        : deterministic.answerDepth,
+    format:
+      args.imageDataUrl && deterministic.format === "short"
+        ? "sectioned"
+        : deterministic.format,
+    confidence: deterministic.confidence === "high" && !args.imageDataUrl ? "high" : "medium",
+    reason: [deterministic.reason, "tiny_router_failed", args.error ? truncateError(args.error, 120) : ""].filter(Boolean).join(", "),
+  };
+  return next;
 }
 
 function extractResponsesDelta(event: any): string {
@@ -1171,6 +1329,165 @@ async function callResponsesApiWithRetry(
   return last;
 }
 
+async function generateAnswerWithPrompt(args: {
+  apiKey: string;
+  model: string;
+  developerPrompt: string;
+  userPrompt: string;
+  apiBaseUrl: string;
+  imageDataUrl?: string;
+  previousResponseId?: string;
+  conversationId?: string;
+  signal: AbortSignal;
+  upstreamTimeoutMs: number;
+  storeResponses: boolean;
+  profile: MedSafetyPromptProfile;
+  onTextDelta?: TextDeltaHandler;
+  allowStreaming?: boolean;
+  networkRetries: number;
+  networkRetryBaseMs: number;
+}): Promise<{
+  answerText: string | null;
+  responseId: string | null;
+  conversationId: string | null;
+  usage: ResponsesUsage | null;
+  stage: string;
+  streamed: boolean;
+  reasoningEffort: MedSafetyReasoningEffort;
+  maxOutputTokens: number;
+  error: string | null;
+}> {
+  const reasoningEfforts = args.profile.reasoningEfforts;
+  const outputTokenCandidates = args.profile.outputTokenCandidates;
+
+  reasoningLoop: for (let reasoningIndex = 0; reasoningIndex < reasoningEfforts.length; reasoningIndex += 1) {
+    const reasoningEffort = reasoningEfforts[reasoningIndex]!;
+    tokenLoop: for (let tokenIndex = 0; tokenIndex < outputTokenCandidates.length; tokenIndex += 1) {
+      const outputTokenLimit = outputTokenCandidates[tokenIndex]!;
+      const allowStreamDelta =
+        Boolean(args.allowStreaming) && Boolean(args.onTextDelta) && reasoningIndex === 0 && tokenIndex === 0;
+
+      const attempt = await callResponsesApiWithRetry({
+        apiKey: args.apiKey,
+        model: args.model,
+        developerPrompt: args.developerPrompt,
+        userPrompt: args.userPrompt,
+        apiBaseUrl: args.apiBaseUrl,
+        imageDataUrl: args.imageDataUrl,
+        previousResponseId: args.previousResponseId,
+        conversationId: args.conversationId,
+        signal: args.signal,
+        maxOutputTokens: outputTokenLimit,
+        upstreamTimeoutMs: args.upstreamTimeoutMs,
+        verbosity: args.profile.verbosity,
+        reasoningEffort,
+        storeResponses: args.storeResponses,
+        onTextDelta: allowStreamDelta ? args.onTextDelta : undefined,
+        retries: allowStreamDelta ? 0 : args.networkRetries,
+        retryBaseMs: args.networkRetryBaseMs,
+      });
+      if (!attempt.error && attempt.text) {
+        return {
+          answerText: attempt.text,
+          responseId: attempt.responseId,
+          conversationId: attempt.conversationId,
+          usage: attempt.usage,
+          stage: "main",
+          streamed: allowStreamDelta,
+          reasoningEffort,
+          maxOutputTokens: outputTokenLimit,
+          error: null,
+        };
+      }
+      if (attempt.error) {
+        if (isReasoningEffortRejected(attempt.error)) {
+          if (reasoningIndex + 1 < reasoningEfforts.length) continue reasoningLoop;
+          return {
+            answerText: null,
+            responseId: attempt.responseId,
+            conversationId: attempt.conversationId,
+            usage: attempt.usage,
+            stage: "main",
+            streamed: false,
+            reasoningEffort,
+            maxOutputTokens: outputTokenLimit,
+            error: attempt.error,
+          };
+        }
+        if (isBadRequestError(attempt.error) && tokenIndex === 0) {
+          const statelessRetry = await callResponsesApi({
+            apiKey: args.apiKey,
+            model: args.model,
+            developerPrompt: args.developerPrompt,
+            userPrompt: args.userPrompt,
+            apiBaseUrl: args.apiBaseUrl,
+            imageDataUrl: args.imageDataUrl,
+            signal: args.signal,
+            maxOutputTokens: outputTokenLimit,
+            upstreamTimeoutMs: args.upstreamTimeoutMs,
+            verbosity: args.profile.verbosity,
+            reasoningEffort,
+            storeResponses: args.storeResponses,
+            compatMode: true,
+          });
+          if (!statelessRetry.error && statelessRetry.text) {
+            return {
+              answerText: statelessRetry.text,
+              responseId: statelessRetry.responseId,
+              conversationId: statelessRetry.conversationId,
+              usage: statelessRetry.usage,
+              stage: "main_compat",
+              streamed: false,
+              reasoningEffort,
+              maxOutputTokens: outputTokenLimit,
+              error: null,
+            };
+          }
+          if (isTokenLimitError(statelessRetry.error ?? "")) continue tokenLoop;
+          if (isReasoningEffortRejected(statelessRetry.error ?? "") && reasoningIndex + 1 < reasoningEfforts.length) {
+            continue reasoningLoop;
+          }
+          return {
+            answerText: null,
+            responseId: statelessRetry.responseId,
+            conversationId: statelessRetry.conversationId,
+            usage: sumUsages(attempt.usage, statelessRetry.usage),
+            stage: "main_compat",
+            streamed: false,
+            reasoningEffort,
+            maxOutputTokens: outputTokenLimit,
+            error: statelessRetry.error ?? attempt.error,
+          };
+        }
+        if (isTokenLimitError(attempt.error)) continue tokenLoop;
+        return {
+          answerText: null,
+          responseId: attempt.responseId,
+          conversationId: attempt.conversationId,
+          usage: attempt.usage,
+          stage: "main",
+          streamed: false,
+          reasoningEffort,
+          maxOutputTokens: outputTokenLimit,
+          error: attempt.error,
+        };
+      }
+    }
+  }
+
+  return {
+    answerText: null,
+    responseId: null,
+    conversationId: null,
+    usage: null,
+    stage: "main",
+    streamed: false,
+    reasoningEffort: args.profile.reasoningEfforts[0] ?? "medium",
+    maxOutputTokens: args.profile.outputTokenCandidates[0] ?? 1200,
+    error: "openai_empty_text",
+  };
+}
+
 function buildFallbackAnswer(query: string, locale: "ko" | "en", note: string) {
   const safeQuery = normalizeText(query) || (locale === "en" ? "your question" : "질문 내용");
   const issue = locale === "en" ? describeFallbackIssueEn(note) : describeFallbackIssueKo(note);
@@ -1365,7 +1682,6 @@ async function resolveRouteDecision(args: {
     return { decision: deterministic, usage: null };
   }
 
-  const fallback = buildConservativeRouteDecision("tiny_router_fallback");
   const attempt = await callResponsesApiWithRetry({
     apiKey: args.apiKey,
     model: args.model,
@@ -1392,20 +1708,20 @@ async function resolveRouteDecision(args: {
     };
   }
   return {
-    decision: {
-      ...fallback,
-      reason: attempt.error ?? fallback.reason,
-    },
+    decision: buildShadowFallbackDecision(deterministic, {
+      imageDataUrl: args.imageDataUrl,
+      error: attempt.error,
+    }),
     usage: attempt.usage,
   };
 }
 
 async function runQualityGateAndRepair(args: {
-  runtimeMode: MedSafetyRuntimeMode;
   query: string;
   locale: "ko" | "en";
   answer: string;
   decision: MedSafetyRouteDecision;
+  promptAssembly?: MedSafetyPromptAssembly | null;
   apiKey: string;
   model: string;
   apiBaseUrl: string;
@@ -1420,54 +1736,57 @@ async function runQualityGateAndRepair(args: {
 }): Promise<{
   answer: string;
   gateDecision: MedSafetyQualityDecision | null;
-  usage: ResponsesUsage | null;
+  gateUsage: ResponsesUsage | null;
+  repairUsage: ResponsesUsage | null;
+  totalUsage: ResponsesUsage | null;
   repaired: boolean;
 }> {
   const heuristicDecision = buildHeuristicQualityDecision(args.answer, args.decision);
-  if (
-    !shouldRunQualityGate({
-      decision: args.decision,
-      isPremiumSearch: args.isPremiumSearch,
-      hasImage: args.hasImage,
-      answer: args.answer,
-    })
-  ) {
-    return {
-      answer: args.answer,
-      gateDecision: heuristicDecision.verdict === "repair_required" ? heuristicDecision : null,
-      usage: null,
-      repaired: false,
-    };
-  }
-
-  const gateAttempt = await callResponsesApiWithRetry({
-    apiKey: args.apiKey,
-    model: args.model,
-    developerPrompt: buildQualityGateDeveloperPrompt(),
-    userPrompt: buildQualityGateUserPrompt({
-      query: args.query,
-      answer: args.answer,
-      locale: args.locale,
-      decision: args.decision,
-    }),
-    apiBaseUrl: args.apiBaseUrl,
-    signal: args.signal,
-    maxOutputTokens: 220,
-    upstreamTimeoutMs: Math.max(20_000, Math.min(args.upstreamTimeoutMs, 45_000)),
-    verbosity: "low",
-    reasoningEffort: args.isPremiumSearch ? "medium" : "low",
-    storeResponses: false,
-    retries: args.networkRetries,
-    retryBaseMs: args.networkRetryBaseMs,
+  const shouldCallModelGate = shouldRunQualityGate({
+    decision: args.decision,
+    isPremiumSearch: args.isPremiumSearch,
+    hasImage: args.hasImage,
+    answer: args.answer,
   });
 
-  const modelDecision =
-    !gateAttempt.error && gateAttempt.text ? parseQualityGateDecision(gateAttempt.text) : heuristicDecision;
-  if (modelDecision.verdict !== "repair_required" || !args.allowRepair) {
+  let gateUsage: ResponsesUsage | null = null;
+  let modelDecision: MedSafetyQualityDecision | null = null;
+  if (shouldCallModelGate) {
+    const gateAttempt = await callResponsesApiWithRetry({
+      apiKey: args.apiKey,
+      model: args.model,
+      developerPrompt: buildQualityGateDeveloperPrompt(),
+      userPrompt: buildQualityGateUserPrompt({
+        query: args.query,
+        answer: args.answer,
+        locale: args.locale,
+        decision: args.decision,
+        promptAssembly: args.promptAssembly ?? null,
+      }),
+      apiBaseUrl: args.apiBaseUrl,
+      signal: args.signal,
+      maxOutputTokens: 220,
+      upstreamTimeoutMs: Math.max(20_000, Math.min(args.upstreamTimeoutMs, 45_000)),
+      verbosity: "low",
+      reasoningEffort: args.isPremiumSearch ? "medium" : "low",
+      storeResponses: false,
+      retries: args.networkRetries,
+      retryBaseMs: args.networkRetryBaseMs,
+    });
+    gateUsage = gateAttempt.usage;
+    if (!gateAttempt.error && gateAttempt.text) {
+      modelDecision = parseQualityGateDecision(gateAttempt.text);
+    }
+  }
+
+  const finalGateDecision = mergeQualityDecisions(heuristicDecision, modelDecision);
+  if (finalGateDecision.verdict === "pass" || !args.allowRepair) {
     return {
       answer: args.answer,
-      gateDecision: modelDecision,
-      usage: gateAttempt.usage,
+      gateDecision: finalGateDecision,
+      gateUsage,
+      repairUsage: null,
+      totalUsage: gateUsage,
       repaired: false,
     };
   }
@@ -1490,11 +1809,12 @@ async function runQualityGateAndRepair(args: {
         answer: args.answer,
         locale: args.locale,
         decision: args.decision,
-        repairInstructions: modelDecision.repairInstructions,
+        repairInstructions: finalGateDecision.repairInstructions,
+        promptAssembly: args.promptAssembly ?? null,
       }),
       apiBaseUrl: args.apiBaseUrl,
       signal: args.signal,
-      maxOutputTokens: args.profile.outputTokenCandidates[0] ?? 1800,
+      maxOutputTokens: args.profile.outputTokenCandidates[0] ?? 1200,
       upstreamTimeoutMs: args.upstreamTimeoutMs,
       verbosity: args.profile.verbosity,
       reasoningEffort,
@@ -1505,8 +1825,10 @@ async function runQualityGateAndRepair(args: {
     if (!repairAttempt.error && repairAttempt.text) {
       return {
         answer: sanitizeAnswerText(repairAttempt.text),
-        gateDecision: modelDecision,
-        usage: sumUsages(gateAttempt.usage, repairAttempt.usage),
+        gateDecision: finalGateDecision,
+        gateUsage,
+        repairUsage: repairAttempt.usage,
+        totalUsage: sumUsages(gateUsage, repairAttempt.usage),
         repaired: true,
       };
     }
@@ -1517,8 +1839,10 @@ async function runQualityGateAndRepair(args: {
 
   return {
     answer: args.answer,
-    gateDecision: modelDecision,
-    usage: sumUsages(gateAttempt.usage, repairAttempt.usage),
+    gateDecision: finalGateDecision,
+    gateUsage,
+    repairUsage: repairAttempt.usage,
+    totalUsage: sumUsages(gateUsage, repairAttempt.usage),
     repaired: false,
   };
 }
@@ -1533,7 +1857,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
   const networkRetries = resolveNetworkRetryCount();
   const networkRetryBaseMs = resolveNetworkRetryBaseMs();
   const storeResponses = resolveStoreResponses();
-  const baseDeveloperPrompt = buildDeveloperPrompt(params.locale);
+  const legacyDeveloperPrompt = buildDeveloperPrompt(params.locale);
   const userPrompt = buildUserPrompt(params.query, params.locale);
   const memoryAwareUserPrompt = buildUserPromptWithContinuationMemory(userPrompt, params.continuationMemory, params.locale);
   const startedAt = Date.now();
@@ -1541,92 +1865,6 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
   let selectedModel = modelCandidates[0] ?? MED_SAFETY_LOCKED_MODEL;
   let lastError = "openai_request_failed";
   let lastRouteDecision: MedSafetyRouteDecision | null = null;
-
-  const finalizeSuccessfulAttempt = async (args: {
-    answerText: string;
-    responseId: string | null;
-    conversationId: string | null;
-    model: string;
-    apiBaseUrl: string;
-    developerPrompt: string;
-    routeDecision: MedSafetyRouteDecision;
-    promptAssembly: MedSafetyPromptAssembly;
-    profile: MedSafetyPromptProfile;
-    usage: ResponsesUsage | null;
-    routeUsage: ResponsesUsage | null;
-    allowRepair: boolean;
-    isPremiumSearch: boolean;
-    streamed: boolean;
-    reasoningEffort: MedSafetyReasoningEffort;
-    maxOutputTokens: number;
-    stage: string;
-  }) => {
-    let finalAnswer = sanitizeAnswerText(args.answerText);
-
-    logHybridDiagnostics({
-      runtimeMode,
-      stage: args.stage,
-      model: args.model,
-      routeDecision: args.routeDecision,
-      usage: sumUsages(args.routeUsage, args.usage),
-      promptChars: args.developerPrompt.length,
-      extra: {
-        streamed: args.streamed,
-        reasoningEffort: args.reasoningEffort,
-        maxOutputTokens: args.maxOutputTokens,
-        mainPromptMode: runtimeMode === "hybrid_shadow" ? "compact_base_only" : "compact_base_plus_selected_deltas",
-        ...buildPromptDisciplineDiagnostics(args.routeDecision, args.profile, args.promptAssembly),
-      },
-    });
-
-    const allowRepair = runtimeMode !== "hybrid_shadow" && args.allowRepair;
-    const quality = await runQualityGateAndRepair({
-      runtimeMode,
-      query: params.query,
-      locale: params.locale,
-      answer: finalAnswer,
-      decision: args.routeDecision,
-      apiKey,
-      model: args.model,
-      apiBaseUrl: args.apiBaseUrl,
-      signal: params.signal,
-      upstreamTimeoutMs,
-      networkRetries,
-      networkRetryBaseMs,
-      profile: args.profile,
-      hasImage: Boolean(params.imageDataUrl),
-      isPremiumSearch: args.isPremiumSearch,
-      allowRepair,
-    });
-    finalAnswer = sanitizeAnswerText(quality.answer);
-    logHybridDiagnostics({
-      runtimeMode,
-      stage: "quality_gate",
-      model: args.model,
-      routeDecision: args.routeDecision,
-      usage: quality.usage,
-      promptChars: args.developerPrompt.length,
-      extra: {
-        verdict: quality.gateDecision?.verdict ?? "not_run",
-        repaired: quality.repaired,
-        allowRepair,
-        repairReason: quality.gateDecision?.repairInstructions ? truncateError(quality.gateDecision.repairInstructions, 320) : null,
-        ...buildPromptDisciplineDiagnostics(args.routeDecision, args.profile, args.promptAssembly),
-      },
-    });
-
-    const result = buildAnalyzeResult(params.query, finalAnswer);
-    return {
-      result,
-      model: args.model,
-      rawText: result.answer,
-      fallbackReason: null,
-      openaiResponseId: args.responseId,
-      openaiConversationId: args.conversationId,
-      routeDecision: args.routeDecision,
-      runtimeMode,
-    } satisfies OpenAIMedSafetyOutput;
-  };
 
   for (let modelIndex = 0; modelIndex < modelCandidates.length; modelIndex += 1) {
     if (Date.now() - startedAt > totalBudgetMs) {
@@ -1649,10 +1887,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
       let routeDecision: MedSafetyRouteDecision;
       let routeUsage: ResponsesUsage | null = null;
       let promptProfile: MedSafetyPromptProfile = {
-        reasoningEfforts: ["medium"],
-        verbosity: "medium",
-        outputTokenCandidates: buildOutputTokenCandidates(resolveMaxOutputTokens()),
-        qualityLevel: "balanced",
+        ...buildDefaultPromptProfile(),
       };
       const resolvedRoute = await resolveRouteDecision({
         runtimeMode,
@@ -1674,17 +1909,26 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         decision: routeDecision,
         model: candidateModel,
         isPremiumSearch,
+        hasImage: Boolean(params.imageDataUrl),
       });
       const promptAssembly = assembleMedSafetyDeveloperPrompt(routeDecision, params.locale, {
         runtimeMode,
         hasImage: Boolean(params.imageDataUrl),
+        query: params.query,
       });
-      const mainDeveloperPrompt =
-        runtimeMode === "hybrid_shadow" ? baseDeveloperPrompt : promptAssembly.developerPrompt;
-      const responseVerbosity = promptProfile.verbosity;
-      const reasoningEfforts = promptProfile.reasoningEfforts;
-      const outputTokenCandidates = promptProfile.outputTokenCandidates;
-      const shouldSuppressStreamingForQuality = false;
+      const mainDeveloperPrompt = runtimeMode === "hybrid_live" ? promptAssembly.developerPrompt : legacyDeveloperPrompt;
+      const shouldSuppressStreamingForQuality =
+        runtimeMode === "hybrid_live" &&
+        shouldRunQualityGate({
+          decision: routeDecision,
+          isPremiumSearch,
+          hasImage: Boolean(params.imageDataUrl),
+        });
+      const allowStreaming =
+        Boolean(params.onTextDelta) &&
+        modelIndex === 0 &&
+        baseIndex === 0 &&
+        !shouldSuppressStreamingForQuality;
 
       logHybridDiagnostics({
         runtimeMode,
@@ -1694,130 +1938,187 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         usage: routeUsage,
         promptChars: mainDeveloperPrompt.length,
         extra: {
-          mainPromptMode: runtimeMode === "hybrid_shadow" ? "compact_base_only" : "compact_base_plus_selected_deltas",
+          mainPromptMode: runtimeMode === "hybrid_live" ? "behavioral_contract_v2" : "legacy_monolithic",
           actualPromptChars: mainDeveloperPrompt.length,
           tokenCandidates: promptProfile.outputTokenCandidates.join(","),
           reasoningEfforts: promptProfile.reasoningEfforts.join(","),
           ...buildPromptDisciplineDiagnostics(routeDecision, promptProfile, promptAssembly),
         },
       });
-
-      reasoningLoop: for (let reasoningIndex = 0; reasoningIndex < reasoningEfforts.length; reasoningIndex += 1) {
-        const reasoningEffort = reasoningEfforts[reasoningIndex]!;
-        tokenLoop: for (let tokenIndex = 0; tokenIndex < outputTokenCandidates.length; tokenIndex += 1) {
-          if (Date.now() - startedAt > totalBudgetMs) {
-            lastError = "openai_timeout_total_budget";
-            break reasoningLoop;
-          }
-          const outputTokenLimit = outputTokenCandidates[tokenIndex]!;
-          const allowStreamDelta =
-            Boolean(params.onTextDelta) &&
-            modelIndex === 0 &&
-            baseIndex === 0 &&
-            reasoningIndex === 0 &&
-            tokenIndex === 0 &&
-            !shouldSuppressStreamingForQuality;
-
-          const attempt = await callResponsesApiWithRetry({
-            apiKey,
-            model: candidateModel,
-            developerPrompt: mainDeveloperPrompt,
-            userPrompt: shouldUseContinuationIds ? userPrompt : memoryAwareUserPrompt,
-            apiBaseUrl,
-            imageDataUrl: params.imageDataUrl,
-            previousResponseId,
-            conversationId,
-            signal: params.signal,
-            maxOutputTokens: outputTokenLimit,
-            upstreamTimeoutMs,
-            verbosity: responseVerbosity,
-            reasoningEffort,
-            storeResponses,
-            onTextDelta: allowStreamDelta ? params.onTextDelta : undefined,
-            retries: allowStreamDelta ? 0 : networkRetries,
-            retryBaseMs: networkRetryBaseMs,
-          });
-          if (!attempt.error && attempt.text) {
-            return finalizeSuccessfulAttempt({
-              answerText: attempt.text,
-              responseId: attempt.responseId,
-              conversationId: attempt.conversationId,
-              model: candidateModel,
-              apiBaseUrl,
-              developerPrompt: mainDeveloperPrompt,
-              routeDecision,
-              promptAssembly,
-              profile: promptProfile,
-              usage: attempt.usage,
-              routeUsage,
-              allowRepair: !allowStreamDelta,
-              isPremiumSearch,
-              streamed: allowStreamDelta,
-              reasoningEffort,
-              maxOutputTokens: outputTokenLimit,
-              stage: "main",
-            });
-          }
-          if (attempt.error) {
-            if (isReasoningEffortRejected(attempt.error)) {
-              lastError = attempt.error;
-              if (reasoningIndex + 1 < reasoningEfforts.length) continue reasoningLoop;
-              break reasoningLoop;
-            }
-            if (isBadRequestError(attempt.error) && tokenIndex === 0) {
-              const statelessRetry = await callResponsesApi({
-                apiKey,
-                model: candidateModel,
-                developerPrompt: mainDeveloperPrompt,
-                userPrompt: memoryAwareUserPrompt,
-                apiBaseUrl,
-                imageDataUrl: params.imageDataUrl,
-                signal: params.signal,
-                maxOutputTokens: outputTokenLimit,
-                upstreamTimeoutMs,
-                verbosity: responseVerbosity,
-                reasoningEffort,
-                storeResponses,
-                compatMode: true,
-              });
-              if (!statelessRetry.error && statelessRetry.text) {
-                return finalizeSuccessfulAttempt({
-                  answerText: statelessRetry.text,
-                  responseId: statelessRetry.responseId,
-                  conversationId: statelessRetry.conversationId,
-                  model: candidateModel,
-                  apiBaseUrl,
-                  developerPrompt: mainDeveloperPrompt,
-                  routeDecision,
-                  promptAssembly,
-                  profile: promptProfile,
-                  usage: statelessRetry.usage,
-                  routeUsage,
-                  allowRepair: true,
-                  isPremiumSearch,
-                  streamed: false,
-                  reasoningEffort,
-                  maxOutputTokens: outputTokenLimit,
-                  stage: "main_compat",
-                });
-              }
-              lastError = statelessRetry.error ?? attempt.error;
-              if (isReasoningEffortRejected(lastError)) {
-                if (reasoningIndex + 1 < reasoningEfforts.length) continue reasoningLoop;
-                break reasoningLoop;
-              }
-              if (isTokenLimitError(lastError)) continue tokenLoop;
-              break reasoningLoop;
-            }
-            lastError = attempt.error;
-            if (isTokenLimitError(attempt.error)) continue tokenLoop;
-            break reasoningLoop;
-          }
-          lastError = "openai_empty_text";
-          if (tokenIndex + 1 < outputTokenCandidates.length) continue tokenLoop;
-          break reasoningLoop;
-        }
+      const primaryUserPrompt = shouldUseContinuationIds ? userPrompt : memoryAwareUserPrompt;
+      const mainAttempt = await generateAnswerWithPrompt({
+        apiKey,
+        model: candidateModel,
+        developerPrompt: mainDeveloperPrompt,
+        userPrompt: primaryUserPrompt,
+        apiBaseUrl,
+        imageDataUrl: params.imageDataUrl,
+        previousResponseId,
+        conversationId,
+        signal: params.signal,
+        upstreamTimeoutMs,
+        storeResponses,
+        profile: promptProfile,
+        onTextDelta: allowStreaming ? params.onTextDelta : undefined,
+        allowStreaming,
+        networkRetries,
+        networkRetryBaseMs,
+      });
+      if (mainAttempt.error || !mainAttempt.answerText) {
+        lastError = mainAttempt.error ?? "openai_empty_text";
+        continue;
       }
+
+      let finalAnswer = sanitizeAnswerText(mainAttempt.answerText);
+      let gateUsage: ResponsesUsage | null = null;
+      let repairUsage: ResponsesUsage | null = null;
+      let shadowComparison: MedSafetyShadowComparison | null = null;
+
+      logHybridDiagnostics({
+        runtimeMode,
+        stage: mainAttempt.stage,
+        model: candidateModel,
+        routeDecision,
+        usage: sumUsages(routeUsage, mainAttempt.usage),
+        promptChars: mainDeveloperPrompt.length,
+        extra: {
+          streamed: mainAttempt.streamed,
+          reasoningEffort: mainAttempt.reasoningEffort,
+          maxOutputTokens: mainAttempt.maxOutputTokens,
+          mainPromptMode: runtimeMode === "hybrid_live" ? "behavioral_contract_v2" : "legacy_monolithic",
+          ...buildPromptDisciplineDiagnostics(routeDecision, promptProfile, promptAssembly),
+        },
+      });
+
+      if (runtimeMode === "hybrid_live") {
+        const quality = await runQualityGateAndRepair({
+          query: params.query,
+          locale: params.locale,
+          answer: finalAnswer,
+          decision: routeDecision,
+          promptAssembly,
+          apiKey,
+          model: candidateModel,
+          apiBaseUrl,
+          signal: params.signal,
+          upstreamTimeoutMs,
+          networkRetries,
+          networkRetryBaseMs,
+          profile: promptProfile,
+          hasImage: Boolean(params.imageDataUrl),
+          isPremiumSearch,
+          allowRepair: !mainAttempt.streamed,
+        });
+        finalAnswer = sanitizeAnswerText(quality.answer);
+        gateUsage = quality.gateUsage;
+        repairUsage = quality.repairUsage;
+        logHybridDiagnostics({
+          runtimeMode,
+          stage: "quality_gate",
+          model: candidateModel,
+          routeDecision,
+          usage: quality.totalUsage,
+          promptChars: mainDeveloperPrompt.length,
+          extra: {
+            verdict: quality.gateDecision?.verdict ?? "not_run",
+            repaired: quality.repaired,
+            allowRepair: !mainAttempt.streamed,
+            repairReason: quality.gateDecision?.repairInstructions ? truncateError(quality.gateDecision.repairInstructions, 320) : null,
+            ...buildPromptDisciplineDiagnostics(routeDecision, promptProfile, promptAssembly),
+          },
+        });
+      } else if (runtimeMode === "hybrid_shadow") {
+        const hybridAttempt = await generateAnswerWithPrompt({
+          apiKey,
+          model: candidateModel,
+          developerPrompt: promptAssembly.developerPrompt,
+          userPrompt: primaryUserPrompt,
+          apiBaseUrl,
+          imageDataUrl: params.imageDataUrl,
+          previousResponseId,
+          conversationId,
+          signal: params.signal,
+          upstreamTimeoutMs,
+          storeResponses: false,
+          profile: promptProfile,
+          allowStreaming: false,
+          networkRetries,
+          networkRetryBaseMs,
+        });
+        const hybridAnswer = hybridAttempt.answerText ? sanitizeAnswerText(hybridAttempt.answerText) : null;
+        const hybridHeuristic = hybridAnswer ? buildHeuristicQualityDecision(hybridAnswer, routeDecision) : null;
+        const pairwiseQualityFlags: string[] = [];
+        const verbosityFlags: string[] = [];
+        if (!hybridAnswer) {
+          pairwiseQualityFlags.push("hybrid_failed");
+        } else {
+          if (hybridHeuristic?.verdict === "repair_required") pairwiseQualityFlags.push("hybrid_requires_repair");
+          if (hybridHeuristic?.verdict === "pass_but_verbose") pairwiseQualityFlags.push("hybrid_verbose");
+          if (normalizeText(hybridAnswer).length > normalizeText(finalAnswer).length) {
+            pairwiseQualityFlags.push("hybrid_longer_than_legacy");
+            verbosityFlags.push("more_chars_than_legacy");
+          }
+          if (countVisibleAnswerLines(hybridAnswer) > countVisibleAnswerLines(finalAnswer)) {
+            verbosityFlags.push("more_lines_than_legacy");
+          }
+          if ((hybridAttempt.usage?.reasoningTokens ?? 0) > 0) {
+            pairwiseQualityFlags.push("hybrid_reasoning_tokens_present");
+          }
+        }
+        shadowComparison = {
+          legacyAnswer: finalAnswer,
+          hybridAnswer,
+          legacyUsage: mainAttempt.usage,
+          hybridUsage: hybridAttempt.usage,
+          heuristicVerdict: hybridHeuristic?.verdict ?? "hybrid_failed",
+          heuristicRepairInstructions: hybridHeuristic?.repairInstructions ?? truncateError(hybridAttempt.error ?? "", 220),
+          pairwiseQualityFlags,
+          verbosityFlags,
+          overlong: Boolean(hybridHeuristic?.repairInstructions.includes("overlong_answer")),
+          selectedContracts: promptAssembly.selectedContractIds,
+        };
+        logHybridDiagnostics({
+          runtimeMode,
+          stage: "shadow_compare",
+          model: candidateModel,
+          routeDecision,
+          usage: sumUsages(routeUsage, mainAttempt.usage, hybridAttempt.usage),
+          promptChars: promptAssembly.finalPromptChars,
+          extra: {
+            legacyPromptChars: legacyDeveloperPrompt.length,
+            hybridPromptChars: promptAssembly.finalPromptChars,
+            heuristicVerdict: shadowComparison.heuristicVerdict,
+            heuristicRepairInstructions: shadowComparison.heuristicRepairInstructions,
+            pairwiseQualityFlags: shadowComparison.pairwiseQualityFlags,
+            verbosityFlags: shadowComparison.verbosityFlags,
+            selectedContracts: promptAssembly.selectedContractIds,
+          },
+        });
+      }
+
+      const result = buildAnalyzeResult(params.query, finalAnswer);
+      return {
+        result,
+        model: candidateModel,
+        rawText: result.answer,
+        fallbackReason: null,
+        openaiResponseId: mainAttempt.responseId,
+        openaiConversationId: mainAttempt.conversationId,
+        routeDecision,
+        runtimeMode,
+        usageBreakdown: buildUsageBreakdown({
+          runtimeMode,
+          routeDecision,
+          routerUsage: routeUsage,
+          mainUsage: mainAttempt.usage,
+          gateUsage,
+          repairUsage,
+          answer: result.answer,
+          assembledPromptChars: mainDeveloperPrompt.length,
+          selectedContracts: runtimeMode === "legacy" ? [] : promptAssembly.selectedContractIds,
+        }),
+        shadowComparison,
+      };
     }
   }
 
@@ -1831,5 +2132,12 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
     openaiConversationId: null,
     routeDecision: lastRouteDecision,
     runtimeMode,
+    usageBreakdown: buildUsageBreakdown({
+      runtimeMode,
+      routeDecision: lastRouteDecision,
+      answer: fallbackAnswer,
+      selectedContracts: [],
+    }),
+    shadowComparison: null,
   };
 }

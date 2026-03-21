@@ -8,7 +8,7 @@ import {
   createMedSafetyContinuationToken,
   readMedSafetyContinuationToken,
 } from "@/lib/server/medSafetyContinuation";
-import { resolveMedSafetyRuntimeMode, shouldGenerateKoEnglishVariant } from "@/lib/server/medSafetyPrompting";
+import { shouldGenerateKoEnglishVariant } from "@/lib/server/medSafetyPrompting";
 import type { Json } from "@/types/supabase";
 
 export const runtime = "edge";
@@ -526,14 +526,12 @@ export async function POST(req: NextRequest) {
     });
     const previousResponseId = continuationState?.previousResponseId ?? undefined;
     const conversationId = continuationState?.conversationId ?? undefined;
-    const runtimeMode = resolveMedSafetyRuntimeMode();
-
     const runAnalyze = async (
       onTextDelta?: (delta: string) => void | Promise<void>,
     ) => {
       const analyzedAt = Date.now();
       const today = todayISO();
-      const shouldGenerateEnglishVariant = shouldGenerateKoEnglishVariant(runtimeMode);
+      const shouldGenerateEnglishVariant = shouldGenerateKoEnglishVariant();
       const effectiveOnTextDelta = locale === "ko" ? onTextDelta : undefined;
 
       const analyzedKo = await analyzeMedSafetyWithOpenAI({
