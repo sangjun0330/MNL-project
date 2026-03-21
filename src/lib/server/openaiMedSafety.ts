@@ -1,6 +1,7 @@
 import { normalizeOpenAIResponsesBaseUrl, resolveOpenAIResponsesRequestConfig } from "@/lib/server/openaiGateway";
 import {
   assembleMedSafetyDeveloperPrompt,
+  buildCompactMedSafetyBasePrompt,
   buildConservativeRouteDecision,
   buildDeterministicRouteDecision,
   buildHeuristicQualityDecision,
@@ -16,6 +17,7 @@ import {
   resolveMedSafetyRuntimeMode,
   shouldRunQualityGate,
   shouldUseTinyRouter,
+  type MedSafetyPromptAssembly,
   type MedSafetyPromptProfile,
   type MedSafetyQualityDecision,
   type MedSafetyReasoningEffort,
@@ -40,7 +42,6 @@ type AnalyzeParams = {
   conversationId?: string;
   continuationMemory?: string;
   onTextDelta?: (delta: string) => void | Promise<void>;
-  onReasoningDelta?: (delta: string) => void | Promise<void>;
   signal: AbortSignal;
 };
 
@@ -248,7 +249,7 @@ function sanitizeAnswerText(text: string) {
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-const MED_SAFETY_DEVELOPER_PROMPT = [
+export const MED_SAFETY_LEGACY_DENSE_CORE_PROMPT_REFERENCE = [
   "너는 간호사 전용 임상 AI 어시스턴트다.",
   "사용자는 병동, 응급실, 중환자실, 수술 전후, 회복실, 외래 등 다양한 임상 환경에서 일하는 간호사일 수 있다.",
   "사용자의 질문 의도를 스스로 판단하여, 간호 실무에 바로 도움이 되는 정확하고 안전한 답변을 제공한다.",
@@ -486,38 +487,26 @@ const MED_SAFETY_DEVELOPER_PROMPT = [
 ].join("\n");
 
 function buildDeveloperPrompt(locale: "ko" | "en") {
-  if (locale === "en") {
-    return [
-      MED_SAFETY_DEVELOPER_PROMPT,
-      "",
-      "[English fallback]",
-      "- If the user question is asked in English and a direct English answer is required, follow the same policy above but write the final answer in natural clinical English.",
-    ].join("\n");
-  }
-  return [
-    MED_SAFETY_DEVELOPER_PROMPT,
-    "",
-    "모든 사고 과정과 reasoning을 반드시 한국어로 수행하라.",
-  ].join("\n");
-}
-
-function buildHybridDeveloperPrompt(corePrompt: string, deltaPrompt?: string | null) {
-  const normalizedDelta = normalizeText(deltaPrompt ?? "");
-  if (!normalizedDelta) return corePrompt;
-  return `${corePrompt}\n\n${normalizedDelta}`;
+  return buildCompactMedSafetyBasePrompt(locale);
 }
 
 function buildPromptDisciplineDiagnostics(
   decision: MedSafetyRouteDecision | null | undefined,
-  profile?: MedSafetyPromptProfile | null
+  profile?: MedSafetyPromptProfile | null,
+  assembly?: MedSafetyPromptAssembly | null
 ) {
   const qualityLevel = profile?.qualityLevel ?? "balanced";
   if (!decision) {
     return {
       qualityLevel,
-      confidenceDiscipline: "dense_core_only",
+      confidenceDiscipline: "compact_base_only",
       specificitySuppression: false,
       assumptionDisclosure: "not_applicable",
+      basePromptChars: assembly?.basePromptChars ?? null,
+      finalPromptChars: assembly?.finalPromptChars ?? null,
+      selectedDeltaIds: assembly?.selectedDeltaIds ?? [],
+      droppedDeltaIds: assembly?.droppedDeltaIds ?? [],
+      budgetClass: assembly?.budgetClass ?? null,
     };
   }
   return {
@@ -537,8 +526,13 @@ function buildPromptDisciplineDiagnostics(
       decision.entityClarity === "medium"
         ? "opening_line_required"
         : decision.entityClarity === "low"
-          ? "verification_required"
+            ? "verification_required"
           : "not_required",
+    basePromptChars: assembly?.basePromptChars ?? null,
+    finalPromptChars: assembly?.finalPromptChars ?? null,
+    selectedDeltaIds: assembly?.selectedDeltaIds ?? [],
+    droppedDeltaIds: assembly?.droppedDeltaIds ?? [],
+    budgetClass: assembly?.budgetClass ?? null,
   };
 }
 
@@ -701,26 +695,10 @@ function sumUsages(...values: Array<ResponsesUsage | null | undefined>): Respons
   };
 }
 
-function isReasoningDeltaEvent(event: any): boolean {
-  const eventType = String(event?.type ?? "");
-  return eventType.includes("reasoning") && eventType.includes("delta");
-}
-
-function extractReasoningDelta(event: any): string {
-  if (!isReasoningDeltaEvent(event)) return "";
-  const direct = readStringFromUnknown(event?.delta);
-  if (direct) return direct;
-  const summaryDelta = readStringFromUnknown(event?.summary?.delta);
-  if (summaryDelta) return summaryDelta;
-  return "";
-}
-
 function extractResponsesDelta(event: any): string {
   const eventType = String(event?.type ?? "");
   if (!eventType || !eventType.includes("delta")) return "";
-
-  // Skip reasoning delta events — those are handled separately
-  if (isReasoningDeltaEvent(event)) return "";
+  if (eventType.includes("reasoning")) return "";
 
   const direct = readStringFromUnknown(event?.delta);
   if (direct) return direct;
@@ -741,9 +719,8 @@ async function readResponsesEventStream(args: {
   response: Response;
   model: string;
   onTextDelta: TextDeltaHandler;
-  onReasoningDelta?: TextDeltaHandler;
 }): Promise<ResponsesAttempt> {
-  const { response, model, onTextDelta, onReasoningDelta } = args;
+  const { response, model, onTextDelta } = args;
   const contentType = String(response.headers.get("content-type") ?? "").toLowerCase();
   if (!contentType.includes("text/event-stream")) {
     const fallbackJson = await response.json().catch(() => null);
@@ -846,13 +823,6 @@ async function readResponsesEventStream(args: {
       streamError = `openai_stream_error_model:${model}_${truncateError(errorMessage)}`;
       return;
     }
-    // Handle reasoning summary deltas separately
-    const reasoningDelta = extractReasoningDelta(event);
-    if (reasoningDelta && onReasoningDelta) {
-      await onReasoningDelta(reasoningDelta);
-      return;
-    }
-
     const delta = extractResponsesDelta(event);
     if (!delta) return;
     rawText += delta;
@@ -1014,7 +984,6 @@ async function callResponsesApi(args: {
   storeResponses: boolean;
   compatMode?: boolean;
   onTextDelta?: TextDeltaHandler;
-  onReasoningDelta?: TextDeltaHandler;
 }): Promise<ResponsesAttempt> {
   const {
     apiKey,
@@ -1082,7 +1051,7 @@ async function callResponsesApi(args: {
           format: { type: "text" as const },
           verbosity,
         },
-        reasoning: { effort: reasoningEffort, summary: "auto" },
+        reasoning: { effort: reasoningEffort },
         max_output_tokens: maxOutputTokens,
         tools: [],
         store: storeResponses,
@@ -1150,7 +1119,6 @@ async function callResponsesApi(args: {
       response,
       model: requestConfig.model,
       onTextDelta,
-      onReasoningDelta: args.onReasoningDelta,
     });
   }
 
@@ -1446,7 +1414,6 @@ async function runQualityGateAndRepair(args: {
   networkRetries: number;
   networkRetryBaseMs: number;
   profile: MedSafetyPromptProfile;
-  developerPrompt: string;
   hasImage: boolean;
   isPremiumSearch: boolean;
   allowRepair: boolean;
@@ -1517,7 +1484,7 @@ async function runQualityGateAndRepair(args: {
     repairAttempt = await callResponsesApiWithRetry({
       apiKey: args.apiKey,
       model: args.model,
-      developerPrompt: buildRepairDeveloperPrompt(args.developerPrompt, args.locale),
+      developerPrompt: buildRepairDeveloperPrompt(args.locale),
       userPrompt: buildRepairUserPrompt({
         query: args.query,
         answer: args.answer,
@@ -1561,14 +1528,12 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
   const runtimeMode = resolveMedSafetyRuntimeMode();
   const modelCandidates = resolveModelCandidates(params.modelOverride);
   const apiBaseUrls = resolveApiBaseUrls();
-  const legacyOutputTokenCandidates = buildOutputTokenCandidates(resolveMaxOutputTokens());
-  const legacyResponseVerbosity: ResponseVerbosity = "medium";
   const upstreamTimeoutMs = resolveUpstreamTimeoutMs();
   const totalBudgetMs = Math.max(resolveTotalBudgetMs(), Math.min(900_000, upstreamTimeoutMs + 120_000));
   const networkRetries = resolveNetworkRetryCount();
   const networkRetryBaseMs = resolveNetworkRetryBaseMs();
   const storeResponses = resolveStoreResponses();
-  const legacyDeveloperPrompt = buildDeveloperPrompt(params.locale);
+  const baseDeveloperPrompt = buildDeveloperPrompt(params.locale);
   const userPrompt = buildUserPrompt(params.query, params.locale);
   const memoryAwareUserPrompt = buildUserPromptWithContinuationMemory(userPrompt, params.continuationMemory, params.locale);
   const startedAt = Date.now();
@@ -1584,7 +1549,8 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
     model: string;
     apiBaseUrl: string;
     developerPrompt: string;
-    routeDecision: MedSafetyRouteDecision | null;
+    routeDecision: MedSafetyRouteDecision;
+    promptAssembly: MedSafetyPromptAssembly;
     profile: MedSafetyPromptProfile;
     usage: ResponsesUsage | null;
     routeUsage: ResponsesUsage | null;
@@ -1608,52 +1574,46 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         streamed: args.streamed,
         reasoningEffort: args.reasoningEffort,
         maxOutputTokens: args.maxOutputTokens,
-        ...buildPromptDisciplineDiagnostics(args.routeDecision, args.profile),
+        mainPromptMode: runtimeMode === "hybrid_shadow" ? "compact_base_only" : "compact_base_plus_selected_deltas",
+        ...buildPromptDisciplineDiagnostics(args.routeDecision, args.profile, args.promptAssembly),
       },
     });
 
-    if (runtimeMode !== "legacy" && args.routeDecision) {
-      const allowRepair = runtimeMode === "hybrid_live" && args.allowRepair;
-      const qualityDeveloperPrompt = buildHybridDeveloperPrompt(
-        legacyDeveloperPrompt,
-        assembleMedSafetyDeveloperPrompt(args.routeDecision, params.locale)
-      );
-      const quality = await runQualityGateAndRepair({
-        runtimeMode,
-        query: params.query,
-        locale: params.locale,
-        answer: finalAnswer,
-        decision: args.routeDecision,
-        apiKey,
-        model: args.model,
-        apiBaseUrl: args.apiBaseUrl,
-        signal: params.signal,
-        upstreamTimeoutMs,
-        networkRetries,
-        networkRetryBaseMs,
-        profile: args.profile,
-        developerPrompt: runtimeMode === "hybrid_live" ? args.developerPrompt : qualityDeveloperPrompt,
-        hasImage: Boolean(params.imageDataUrl),
-        isPremiumSearch: args.isPremiumSearch,
+    const allowRepair = runtimeMode !== "hybrid_shadow" && args.allowRepair;
+    const quality = await runQualityGateAndRepair({
+      runtimeMode,
+      query: params.query,
+      locale: params.locale,
+      answer: finalAnswer,
+      decision: args.routeDecision,
+      apiKey,
+      model: args.model,
+      apiBaseUrl: args.apiBaseUrl,
+      signal: params.signal,
+      upstreamTimeoutMs,
+      networkRetries,
+      networkRetryBaseMs,
+      profile: args.profile,
+      hasImage: Boolean(params.imageDataUrl),
+      isPremiumSearch: args.isPremiumSearch,
+      allowRepair,
+    });
+    finalAnswer = sanitizeAnswerText(quality.answer);
+    logHybridDiagnostics({
+      runtimeMode,
+      stage: "quality_gate",
+      model: args.model,
+      routeDecision: args.routeDecision,
+      usage: quality.usage,
+      promptChars: args.developerPrompt.length,
+      extra: {
+        verdict: quality.gateDecision?.verdict ?? "not_run",
+        repaired: quality.repaired,
         allowRepair,
-      });
-      finalAnswer = sanitizeAnswerText(quality.answer);
-      logHybridDiagnostics({
-        runtimeMode,
-        stage: "quality_gate",
-        model: args.model,
-        routeDecision: args.routeDecision,
-        usage: quality.usage,
-        promptChars: args.developerPrompt.length,
-        extra: {
-          verdict: quality.gateDecision?.verdict ?? "not_run",
-          repaired: quality.repaired,
-          allowRepair,
-          repairReason: quality.gateDecision?.repairInstructions ? truncateError(quality.gateDecision.repairInstructions, 320) : null,
-          ...buildPromptDisciplineDiagnostics(args.routeDecision, args.profile),
-        },
-      });
-    }
+        repairReason: quality.gateDecision?.repairInstructions ? truncateError(quality.gateDecision.repairInstructions, 320) : null,
+        ...buildPromptDisciplineDiagnostics(args.routeDecision, args.profile, args.promptAssembly),
+      },
+    });
 
     const result = buildAnalyzeResult(params.query, finalAnswer);
     return {
@@ -1686,68 +1646,61 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
       const conversationId = useContinuationState ? params.conversationId : undefined;
       const shouldUseContinuationIds = Boolean(previousResponseId || conversationId);
       const isPremiumSearch = isPremiumSearchModel(candidateModel);
-      let routeDecision: MedSafetyRouteDecision | null = null;
+      let routeDecision: MedSafetyRouteDecision;
       let routeUsage: ResponsesUsage | null = null;
-      let deltaDeveloperPrompt = "";
-      let hybridDeveloperPrompt = legacyDeveloperPrompt;
       let promptProfile: MedSafetyPromptProfile = {
         reasoningEfforts: ["medium"],
-        verbosity: legacyResponseVerbosity,
-        outputTokenCandidates: legacyOutputTokenCandidates,
+        verbosity: "medium",
+        outputTokenCandidates: buildOutputTokenCandidates(resolveMaxOutputTokens()),
         qualityLevel: "balanced",
       };
+      const resolvedRoute = await resolveRouteDecision({
+        runtimeMode,
+        query: params.query,
+        locale: params.locale,
+        imageDataUrl: params.imageDataUrl,
+        apiKey,
+        model: candidateModel,
+        apiBaseUrl,
+        signal: params.signal,
+        upstreamTimeoutMs,
+        networkRetries,
+        networkRetryBaseMs,
+      });
+      routeDecision = resolvedRoute.decision;
+      routeUsage = resolvedRoute.usage;
+      lastRouteDecision = routeDecision;
+      promptProfile = buildPromptProfile({
+        decision: routeDecision,
+        model: candidateModel,
+        isPremiumSearch,
+      });
+      const promptAssembly = assembleMedSafetyDeveloperPrompt(routeDecision, params.locale, {
+        runtimeMode,
+        hasImage: Boolean(params.imageDataUrl),
+      });
+      const mainDeveloperPrompt =
+        runtimeMode === "hybrid_shadow" ? baseDeveloperPrompt : promptAssembly.developerPrompt;
+      const responseVerbosity = promptProfile.verbosity;
+      const reasoningEfforts = promptProfile.reasoningEfforts;
+      const outputTokenCandidates = promptProfile.outputTokenCandidates;
+      const shouldSuppressStreamingForQuality = false;
 
-      if (runtimeMode !== "legacy") {
-        const resolvedRoute = await resolveRouteDecision({
-          runtimeMode,
-          query: params.query,
-          locale: params.locale,
-          imageDataUrl: params.imageDataUrl,
-          apiKey,
-          model: candidateModel,
-          apiBaseUrl,
-          signal: params.signal,
-          upstreamTimeoutMs,
-          networkRetries,
-          networkRetryBaseMs,
-        });
-        routeDecision = resolvedRoute.decision;
-        routeUsage = resolvedRoute.usage;
-        lastRouteDecision = routeDecision;
-        deltaDeveloperPrompt = assembleMedSafetyDeveloperPrompt(routeDecision, params.locale);
-        hybridDeveloperPrompt = buildHybridDeveloperPrompt(legacyDeveloperPrompt, deltaDeveloperPrompt);
-        promptProfile = buildPromptProfile({
-          decision: routeDecision,
-          model: candidateModel,
-          isPremiumSearch,
-        });
-        logHybridDiagnostics({
-          runtimeMode,
-          stage: "router",
-          model: candidateModel,
-          routeDecision,
-          usage: routeUsage,
-          promptChars: hybridDeveloperPrompt.length,
-          extra: {
-            mainPromptMode: runtimeMode === "hybrid_live" ? "dense_core_plus_delta" : "dense_core_only",
-            actualPromptChars: (runtimeMode === "hybrid_live" ? hybridDeveloperPrompt : legacyDeveloperPrompt).length,
-            deltaPromptChars: deltaDeveloperPrompt.length,
-            reasoningEfforts: promptProfile.reasoningEfforts.join(","),
-            tokenCandidates: promptProfile.outputTokenCandidates.join(","),
-            ...buildPromptDisciplineDiagnostics(routeDecision, promptProfile),
-          },
-        });
-      }
-
-      const usesHybridExecution = runtimeMode === "hybrid_live" && Boolean(routeDecision);
-      const mainDeveloperPrompt = usesHybridExecution ? hybridDeveloperPrompt : legacyDeveloperPrompt;
-      const responseVerbosity = usesHybridExecution ? promptProfile.verbosity : legacyResponseVerbosity;
-      const reasoningEfforts = usesHybridExecution ? promptProfile.reasoningEfforts : (["medium"] as MedSafetyReasoningEffort[]);
-      const outputTokenCandidates = usesHybridExecution ? promptProfile.outputTokenCandidates : legacyOutputTokenCandidates;
-      const shouldSuppressStreamingForQuality =
-        runtimeMode === "hybrid_shadow" || !routeDecision
-          ? false
-          : false;
+      logHybridDiagnostics({
+        runtimeMode,
+        stage: "router",
+        model: candidateModel,
+        routeDecision,
+        usage: routeUsage,
+        promptChars: mainDeveloperPrompt.length,
+        extra: {
+          mainPromptMode: runtimeMode === "hybrid_shadow" ? "compact_base_only" : "compact_base_plus_selected_deltas",
+          actualPromptChars: mainDeveloperPrompt.length,
+          tokenCandidates: promptProfile.outputTokenCandidates.join(","),
+          reasoningEfforts: promptProfile.reasoningEfforts.join(","),
+          ...buildPromptDisciplineDiagnostics(routeDecision, promptProfile, promptAssembly),
+        },
+      });
 
       reasoningLoop: for (let reasoningIndex = 0; reasoningIndex < reasoningEfforts.length; reasoningIndex += 1) {
         const reasoningEffort = reasoningEfforts[reasoningIndex]!;
@@ -1781,7 +1734,6 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
             reasoningEffort,
             storeResponses,
             onTextDelta: allowStreamDelta ? params.onTextDelta : undefined,
-            onReasoningDelta: allowStreamDelta ? params.onReasoningDelta : undefined,
             retries: allowStreamDelta ? 0 : networkRetries,
             retryBaseMs: networkRetryBaseMs,
           });
@@ -1794,6 +1746,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
               apiBaseUrl,
               developerPrompt: mainDeveloperPrompt,
               routeDecision,
+              promptAssembly,
               profile: promptProfile,
               usage: attempt.usage,
               routeUsage,
@@ -1836,6 +1789,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
                   apiBaseUrl,
                   developerPrompt: mainDeveloperPrompt,
                   routeDecision,
+                  promptAssembly,
                   profile: promptProfile,
                   usage: statelessRetry.usage,
                   routeUsage,

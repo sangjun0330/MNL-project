@@ -411,10 +411,9 @@ function parseSseBlock(block: string): { event: string; data: string } | null {
 async function parseAnalyzeStreamResponse(args: {
   response: Response;
   onDelta: (text: string) => void;
-  onReasoningDelta?: (text: string) => void;
   onStart?: () => void;
 }): Promise<{ data: AnalyzePayload | null; error: string | null }> {
-  const { response, onDelta, onReasoningDelta, onStart } = args;
+  const { response, onDelta, onStart } = args;
   const contentType = String(response.headers.get("content-type") ?? "").toLowerCase();
   if (!contentType.includes("text/event-stream")) {
     const payloadRaw = (await response.json().catch(() => null)) as unknown;
@@ -452,11 +451,6 @@ async function parseAnalyzeStreamResponse(args: {
     const eventType = parsedBlock.event || String((payload as any)?.type ?? "");
     if (eventType === "start") {
       if (onStart) onStart();
-      return;
-    }
-    if (eventType === "reasoning") {
-      const text = typeof (payload as any)?.text === "string" ? (payload as any).text : "";
-      if (text && onReasoningDelta) onReasoningDelta(text);
       return;
     }
     if (eventType === "delta") {
@@ -1394,12 +1388,12 @@ function pickThinkingMessages(query: string): string[] {
   return THINKING_GENERIC;
 }
 
-function ThinkingIndicator({ streamPhase, query }: { streamPhase: "idle" | "connecting" | "reasoning" | "writing"; query: string }) {
+function ThinkingIndicator({ streamPhase, query }: { streamPhase: "idle" | "connecting" | "writing"; query: string }) {
   const messages = useMemo(() => pickThinkingMessages(query), [query]);
   const [msgIndex, setMsgIndex] = useState(0);
 
   useEffect(() => {
-    if (streamPhase !== "reasoning") return;
+    if (streamPhase === "idle") return;
     setMsgIndex(0);
     const timer = setInterval(() => {
       setMsgIndex((prev) => (prev + 1) % messages.length);
@@ -1433,8 +1427,7 @@ export function ToolMedSafetyPage() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [streamingText, setStreamingText] = useState("");
-  const [reasoningText, setReasoningText] = useState("");
-  const [streamPhase, setStreamPhase] = useState<"idle" | "connecting" | "reasoning" | "writing">("idle");
+  const [streamPhase, setStreamPhase] = useState<"idle" | "connecting" | "writing">("idle");
   const [lastContinuationToken, setLastContinuationToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copyMessage, setCopyMessage] = useState("");
@@ -1806,7 +1799,6 @@ export function ToolMedSafetyPage() {
     userHasScrolledUpRef.current = false;
     setIsLoading(true);
     setStreamingText("");
-    setReasoningText("");
     setStreamPhase("connecting");
     setError(null);
     setShowSessionDecisionPrompt(false);
@@ -1837,19 +1829,7 @@ export function ToolMedSafetyPage() {
             const streamed = await parseAnalyzeStreamResponse({
               response,
               onStart: () => {
-                setStreamPhase("reasoning");
-              },
-              onReasoningDelta: (text) => {
-                if (!text) return;
-                setStreamPhase("reasoning");
-                setReasoningText((prev) => {
-                  const accumulated = `${prev}${text}`;
-                  // Split by sentence-ending punctuation (Korean/English)
-                  const sentences = accumulated.split(/(?<=[.!?。다요])\s*/g).filter(Boolean);
-                  if (sentences.length <= 2) return accumulated;
-                  // Keep only the last 2 sentences
-                  return sentences.slice(-2).join(" ");
-                });
+                setStreamPhase("connecting");
               },
               onDelta: (text) => {
                 if (!text) return;
@@ -1877,12 +1857,12 @@ export function ToolMedSafetyPage() {
           if (attempt >= maxClientRetries) break;
         }
 
-        setStreamingText(""); setReasoningText(""); setStreamPhase("connecting");
+        setStreamingText(""); setStreamPhase("connecting");
         await waitMs(Math.min(2200, 500 * (attempt + 1)) + Math.floor(Math.random() * 180));
       }
 
       if (!response?.ok || !normalizedData) {
-        setStreamingText(""); setReasoningText(""); setStreamPhase("idle");
+        setStreamingText(""); setStreamPhase("idle");
         if (String(finalError).toLowerCase().includes("insufficient_med_safety_credits")) {
           setError(
             alternateQuotaRemaining > 0
@@ -1903,7 +1883,7 @@ export function ToolMedSafetyPage() {
         return;
       }
 
-      setStreamingText(""); setReasoningText(""); setStreamPhase("idle");
+      setStreamingText(""); setStreamPhase("idle");
       const assistantMessage: Message = {
         id: `assistant-${normalizedData.analyzedAt.toString(36)}`,
         role: "assistant",
@@ -1925,7 +1905,7 @@ export function ToolMedSafetyPage() {
         setError(null);
       }
     } catch (cause: any) {
-      setStreamingText(""); setReasoningText(""); setStreamPhase("idle");
+      setStreamingText(""); setStreamPhase("idle");
       setError(parseErrorMessage(String(cause?.message ?? "med_safety_analyze_failed"), t));
     } finally {
       setIsLoading(false); setStreamPhase("idle");

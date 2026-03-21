@@ -35,6 +35,36 @@ export type MedSafetyQualityDecision = {
   repairInstructions: string;
 };
 
+export type MedSafetyPromptBudgetClass = "shadow_static" | "standard" | "high_risk_or_image";
+
+export type MedSafetyPromptDeltaId =
+  | "opening"
+  | "trust"
+  | "knowledge"
+  | "action"
+  | "compare"
+  | "numeric"
+  | "device"
+  | "entity"
+  | "risk"
+  | "density_short"
+  | "density_standard"
+  | "density_detailed"
+  | "format_sectioned"
+  | "appendix_sbar"
+  | "language_en";
+
+export type MedSafetyPromptAssembly = {
+  developerPrompt: string;
+  basePrompt: string;
+  selectedDeltaIds: MedSafetyPromptDeltaId[];
+  droppedDeltaIds: MedSafetyPromptDeltaId[];
+  basePromptChars: number;
+  finalPromptChars: number;
+  budgetClass: MedSafetyPromptBudgetClass;
+  budgetChars: number;
+};
+
 type RouteInput = {
   query: string;
   locale: "ko" | "en";
@@ -102,131 +132,95 @@ const UNSUPPORTED_SPECIFICITY_PATTERNS = [
 const DUPLICATE_LINE_EXEMPT_PATTERNS = [/^핵심[:：]?$/i, /^지금\s*할\s*일[:：]?$/i, /^주의[:：]?$/i, /^보고\s*기준[:：]?$/i];
 const LONG_ANSWER_CHAR_THRESHOLD = 1100;
 
-const CORE_SAFETY = [
-  "[추가 품질 보강 규칙을 적용한다.]",
-  "- 기본 안전 원칙은 이미 적용되어 있다고 가정하고, 이번 답변에서는 정확도와 신뢰도를 더 엄격하게 관리한다.",
-  "- 확실하지 않은 사실은 확인된 것처럼 단정하지 않는다.",
-  "- 일반 원칙과 기관별, 제조사별, 제품별 세부 기준을 명확히 구분한다.",
-  "- 높은 확신이 없으면 용량, 속도, 희석, 경로, 호환성, 세팅값, 교체주기, 적응증 세부 기준은 일반 원칙 수준까지만 답한다.",
-  "- 기관 의존 정보나 제조사 의존 정보는 반드시 기관 프로토콜, 약제부, 제조사 IFU 확인이 필요하다고 연결한다.",
-  "- 고위험 질문에서 정보 확신이 낮으면 자세한 추정보다 제한된 답변, 확인 필요, 즉시 안전 행동을 우선한다.",
-  "- 대상 식별이 MEDIUM이면 첫 문장 안에서 어떤 전제로 설명하는지 짧게 밝히고, 위험해질 수 있는 세부 임상 지시는 제한한다.",
-  "- 첫 1~2문장 안에 핵심 답을 주고, 그 뒤에는 실무 판단과 행동이 바로 보이도록 밀도 있게 정리한다.",
-  "- compare 질문은 가장 빨리 보는 구분점을 반드시 살리고, numeric 질문은 기준, 의미, 보고 기준을 빠뜨리지 않는다.",
-  "- action/device 질문은 지금 할 일, 지금 확인할 것, 중단/보고/호출 기준을 우선한다.",
-  "- 작은 묶음이 여럿 필요한 섹션에서는 짧은 소카테고리 한 줄을 먼저 두고, 그 아래 세부 항목을 정리한다.",
-  "- filler, 반복, 근거 없는 manufacturer-level specificity는 제거한다.",
-].join("\n");
-
-const INTENT_KNOWLEDGE = [
-  "[현재 질문은 정보/지식 질문이다.]",
-  "- 첫 1~2문장 안에 핵심 정의와 임상적 의미를 먼저 말한다.",
-  "- 그 다음 간호사 관점에서 중요한 정보만 선별해 설명한다.",
-  "- 관련 있을 때만 정의/분류, 작동 원리 또는 기전, 사용 목적, 실무상 관찰 포인트, 흔한 주의점, 보고가 필요한 위험 신호를 포함한다.",
-  "- 관련 없는 항목은 억지로 채우지 않는다.",
-].join("\n");
-
-const INTENT_ACTION = [
-  "[현재 질문은 행동/대응 질문이다.]",
-  "- 설명보다 즉시 실행 가능한 행동을 우선한다.",
-  "- 가능하면 핵심 판단, 지금 할 일, 확인할 수치/관찰 포인트, 흔한 원인 후보, 중단/보고/호출 기준 순으로 정리한다.",
-  "- 즉시 위험이 의심되면 stop rule과 escalation을 분명히 적는다.",
-  "- 배경 설명은 행동에 필요한 만큼만 짧게 붙인다.",
-].join("\n");
-
-const INTENT_COMPARE = [
-  "[현재 질문은 비교/구분 질문이다.]",
-  "- 먼저 핵심 차이를 1~2줄로 요약한다.",
-  "- 그 다음 실무적으로 가장 빨리 보는 구분 포인트를 따로 뺀다.",
-  "- 가능하면 1) 핵심 차이 2) 가장 빨리 보는 구분 포인트 3) 자세한 차이와 대응 순서를 따른다.",
-  "- 이후 필요하면 자세한 차이와 대응을 덧붙인다.",
-  "- 비교는 설명만 하지 말고 실제 판단에 도움이 되는 방향으로 정리한다.",
-].join("\n");
-
-const INTENT_NUMERIC = [
-  "[현재 질문은 수치/해석/계산 질문이다.]",
-  "- 먼저 일반적인 정상 또는 기준 범위를 말한다.",
-  "- 이어서 현재 수치의 임상적 의미를 설명한다.",
-  "- 이상 수치일 때 간호사가 바로 확인할 포인트를 함께 제시한다.",
-  "- 언제 보고해야 하는지 분명히 적는다.",
-  "- 기관별 기준 차이가 있을 수 있으면 일반 기준임을 밝히고 기관 기준 확인을 권고한다.",
-].join("\n");
-
-const INTENT_DEVICE = [
-  "[현재 질문은 절차/기구/알람/장비 질문이다.]",
-  "- 원리 설명보다 실무 대응을 우선한다.",
-  "- 가능하면 문제 원인 후보, 지금 확인할 것, 바로 할 수 있는 조치, 사용 중단/보고/호출 기준 순으로 답한다.",
-  "- 장비 세팅값, 교체주기, 조작법, 사용 조건이 기관/제조사마다 다르면 단정하지 말고 IFU 또는 기관 프로토콜 확인을 권고한다.",
-].join("\n");
-
-const ENTITY_AMBIGUITY = [
-  "[대상 식별 규칙을 적용한다.]",
-  "- 대상 식별이 애매하면 가장 유력한 해석을 짧은 전제로 밝히고 일반적이고 안전한 범위에서만 답한다.",
-  "- 식별이 완료되지 않았거나 혼동 위험이 큰 상태에서는 용량, 주입속도, 희석, 투여 경로, 금기, 호환성, 장비 세팅값, 조작 순서, 고위험 대응 지시를 단정하지 않는다.",
-  "- 필요한 경우 후보 1~3개를 짧게 제시하고 정확한 명칭 확인을 권고한다.",
-  "- 대상과 무관하게 공통으로 적용되는 일반 안전 원칙은 제공할 수 있다.",
-].join("\n");
-
-const HIGH_RISK_ESCALATION = [
-  "[현재 질문은 고위험 또는 escalation이 필요한 질문이다.]",
-  "- 첫 문장 또는 첫 섹션에서 가장 큰 위험과 즉시 행동을 먼저 제시한다.",
-  "- 애매한 표현보다 보수적으로 답한다.",
-  "- 즉시 위험이 의심되면 상황에 맞게 중단, 분리, clamp, 산소 공급, 호출, 보고 등의 우선순위를 분명히 쓴다.",
-  "- 관찰만으로 끝내지 말고 언제 즉시 보고/호출해야 하는지도 명확히 적는다.",
-].join("\n");
-
-const DEPTH_SHORT = [
-  "[답변 밀도는 short다.]",
-  "- 핵심 답을 첫 문장에서 바로 준다.",
-  "- 최대 3~5개의 짧은 bullets 안에서 끝내는 것을 우선한다.",
-  "- 배경 설명과 사례는 꼭 필요할 때만 넣는다.",
-].join("\n");
-
-const DEPTH_STANDARD = [
-  "[답변 밀도는 standard다.]",
-  "- 핵심 답을 먼저 주고 필요한 범위에서만 구조화한다.",
-  "- 2~4개의 실무적으로 중요한 포인트만 남긴다.",
-  "- 중복 설명 없이 밀도 있게 쓴다.",
-].join("\n");
-
-const DEPTH_DETAILED = [
-  "[답변 밀도는 detailed다.]",
-  "- 안전과 판단 포인트를 충분히 자세하게 쓰되 장황하게 늘어놓지 않는다.",
-  "- 각 단락과 bullet은 반드시 새 정보를 담아야 한다.",
-  "- 설명, 구분, 대응, 보고 기준을 분리해 가독성을 높인다.",
-].join("\n");
-
-const FORMAT_SHORT = [
-  "[출력 형식은 short다.]",
-  "- 한국어 존댓말을 사용한다.",
-  "- 마크다운 장식(##, **, 표, 코드블록)은 사용하지 않는다.",
+const COMPACT_BASE_SCAFFOLD = [
+  "너는 간호사 대상 임상검색 AI다.",
+  "- 첫 1~2문장에 핵심 답을 먼저 쓴다.",
+  "- 위험이 있으면 설명보다 행동과 보고 기준을 먼저 쓴다.",
+  "- 확실하지 않은 사실은 단정하지 않는다.",
+  "- 기관 프로토콜, 약제부, 제조사 IFU가 최종 기준이다.",
   "- 일반 텍스트와 불릿(-)만 사용한다.",
-  "- 섹션은 최소화하고 첫 문장 또는 첫 2문장 안에 핵심 답을 준다.",
 ].join("\n");
 
-const FORMAT_SECTIONED = [
-  "[출력 형식은 sectioned다.]",
-  "- 한국어 존댓말을 사용한다.",
-  "- 마크다운 장식(##, **, 표, 코드블록)은 사용하지 않는다.",
-  "- 일반 텍스트와 불릿(-)만 사용한다.",
-  "- 필요하면 핵심:, 지금 할 일:, 구분 포인트:, 자세한 설명:, 주의:, 보고 기준:, 기억 포인트: 같은 짧은 소제목을 사용한다.",
-  "- 여러 섹션이 있으면 각 섹션 사이를 반드시 빈 줄 2개로 구분한다.",
-  "- 각 소제목 바로 아래 첫 줄은 그 섹션의 핵심을 요약하는 리드 문장으로 쓴다.",
-  "- 리드 문장은 불릿으로 시작하지 않는다.",
-  "- 한 섹션 안에서 작은 묶음을 나눌 필요가 있으면 양, 색, 점도/이물, 즉시 보고/호출처럼 짧은 소카테고리 한 줄을 먼저 쓰고 그 아래 세부 bullet을 둔다.",
-  "- 작은 소카테고리 줄은 리드 문장과는 구분되는 본문용 짧은 라벨로 쓴다.",
-  "- 소제목 없이 불릿만 나열하지 않는다.",
+const DELTA_OPENING = [
+  "[opening]",
+  "- 혼합 질문이면 행동과 안전을 먼저 두고 배경 설명은 뒤로 보낸다.",
+  "- 첫 문장부터 현장 판단에 바로 쓸 수 있게 밀도 있게 쓴다.",
 ].join("\n");
 
-const SBAR_APPENDIX = [
-  "[필요하면 답변 끝에 짧은 SBAR 예시를 붙인다.]",
-  "- SBAR는 실제 보고에 바로 쓸 수 있을 정도로만 짧고 구체적으로 작성한다.",
-  "- SBAR가 본문을 압도하지 않게 한다.",
+const DELTA_TRUST = [
+  "[trust]",
+  "- 일반 원칙과 기관별/제품별 세부를 섞지 않는다.",
+  "- 확신이 낮으면 용량, 속도, 희석, 경로, 호환성, 세팅, 교체주기, 적응증 세부는 일반 원칙 수준까지만 답한다.",
+  "- 근거 없는 manufacturer-level specificity, filler, 반복 문장은 넣지 않는다.",
 ].join("\n");
 
-const LANGUAGE_EN = [
-  "[출력 언어는 영어다.]",
-  "- 위 정책을 그대로 유지하되 최종 답변만 자연스러운 bedside clinical English로 작성한다.",
+const DELTA_KNOWLEDGE = [
+  "[knowledge]",
+  "- 핵심 정의와 임상적 의미를 먼저 말하고, 필요한 관찰 포인트와 위험 신호만 남긴다.",
+].join("\n");
+
+const DELTA_ACTION = [
+  "[action]",
+  "- 핵심 판단, 지금 할 일, 지금 확인할 것, 원인 후보, 중단/보고/호출 기준 순으로 답한다.",
+].join("\n");
+
+const DELTA_COMPARE = [
+  "[compare]",
+  "- 1) 핵심 차이 2) 가장 빨리 보는 구분점 3) 자세한 차이와 대응 순서를 우선한다.",
+].join("\n");
+
+const DELTA_NUMERIC = [
+  "[numeric]",
+  "- 일반 기준 범위, 현재 의미, 바로 확인할 것, 보고 기준을 빠뜨리지 않는다.",
+].join("\n");
+
+const DELTA_DEVICE = [
+  "[device]",
+  "- 원리 설명보다 문제 원인 후보, 지금 확인할 것, 바로 할 조치, 중단/보고/호출 기준을 우선한다.",
+].join("\n");
+
+const DELTA_ENTITY = [
+  "[entity]",
+  "- 식별이 HIGH가 아니면 첫 문장 근처에 어떤 전제로 설명하는지 짧게 밝힌다.",
+  "- 식별이 애매하면 용량, 속도, 희석, 경로, 호환성, 세팅값, 고위험 조작은 단정하지 않는다.",
+].join("\n");
+
+const DELTA_RISK = [
+  "[risk]",
+  "- 고위험이면 첫 섹션 상단에 가장 큰 위험과 즉시 행동을 둔다.",
+  "- 상세 추정보다 보수적 답변, 확인 필요, 중단/분리/clamp/산소/보고/호출 우선순위를 분명히 쓴다.",
+].join("\n");
+
+const DELTA_DENSITY_SHORT = [
+  "[density_short]",
+  "- 3~5개 안쪽의 짧은 bullet과 짧은 핵심 문장으로 끝내는 것을 우선한다.",
+].join("\n");
+
+const DELTA_DENSITY_STANDARD = [
+  "[density_standard]",
+  "- 2~4개의 중요한 포인트만 남기고 중복 없이 정리한다.",
+].join("\n");
+
+const DELTA_DENSITY_DETAILED = [
+  "[density_detailed]",
+  "- 자세히 쓰되 각 bullet은 새 정보만 담고, 설명/대응/보고 기준을 분리해 읽히게 한다.",
+].join("\n");
+
+const DELTA_FORMAT_SECTIONED = [
+  "[format_sectioned]",
+  "- 필요하면 핵심:, 지금 할 일:, 구분 포인트:, 주의:, 보고 기준:, 기억 포인트: 같은 짧은 소제목을 쓴다.",
+  "- 섹션 사이에는 빈 줄 2개를 넣고, 각 소제목 아래 첫 줄은 요약 리드 문장으로 쓴다.",
+  "- 한 섹션 안에서 양, 색, 점도/이물, 즉시 보고/호출 같은 짧은 소카테고리를 먼저 두고 그 아래 세부 bullet을 둔다.",
+].join("\n");
+
+const DELTA_APPENDIX_SBAR = [
+  "[appendix_sbar]",
+  "- 필요할 때만 답변 끝에 아주 짧은 SBAR 예시를 붙인다.",
+].join("\n");
+
+const DELTA_LANGUAGE_EN = [
+  "[language_en]",
+  "- 위 정책은 유지하고 최종 답변만 자연스러운 bedside clinical English로 쓴다.",
 ].join("\n");
 
 const QUALITY_GATE_DEVELOPER_PROMPT = [
@@ -234,7 +228,20 @@ const QUALITY_GATE_DEVELOPER_PROMPT = [
   "Do not rewrite the answer.",
   "Return JSON only.",
   "Allowed JSON shape:",
-  '{"verdict":"pass|repair_required","repairInstructions":"string"}',
+  '{"verdict":"pass|repair_required","repairInstructions":"comma-separated issue codes"}',
+  "Use only these issue codes when repair is needed:",
+  "- missing_immediate_action",
+  "- missing_escalation_threshold",
+  "- missing_assumption_disclosure",
+  "- unsafe_specificity_for_ambiguous_entity",
+  "- missing_local_authority_caveat",
+  "- weak_section_structure",
+  "- duplicate_lines",
+  "- filler_detected",
+  "- unsupported_specificity",
+  "- missing_fast_distinction",
+  "- missing_numeric_core",
+  "- missing_action_core",
   "Return repair_required if any of the following is true:",
   "- uncertain or weakly supported facts are stated with unjustified certainty",
   "- general principles and institution-specific or manufacturer-specific details are blurred together",
@@ -249,9 +256,16 @@ const QUALITY_GATE_DEVELOPER_PROMPT = [
   "- compare answer misses the fastest practical distinction",
   "- numeric answer misses one of baseline range, meaning, or reporting threshold",
   "- device/action answer is weak on what to check now or what to do now",
-  "If repair is needed, the repairInstructions must prioritize deleting unsafe specificity, adding assumption disclosure or uncertainty, and strengthening immediate actions or reporting thresholds.",
+  "If repair is needed, return 1 to 4 issue codes only.",
   "If the answer is already strong and trustworthy, return pass.",
 ].join("\n");
+
+type PromptDeltaSpec = {
+  id: MedSafetyPromptDeltaId;
+  text: string;
+  optional: boolean;
+  dropPriority: number;
+};
 
 function normalizeText(value: unknown) {
   return String(value ?? "")
@@ -510,32 +524,182 @@ export function parseTinyRouterDecision(raw: string, fallback: MedSafetyRouteDec
 }
 
 function resolveIntentModule(intent: MedSafetyIntent) {
-  if (intent === "action") return INTENT_ACTION;
-  if (intent === "compare") return INTENT_COMPARE;
-  if (intent === "numeric") return INTENT_NUMERIC;
-  if (intent === "device") return INTENT_DEVICE;
-  return INTENT_KNOWLEDGE;
+  if (intent === "action") return DELTA_ACTION;
+  if (intent === "compare") return DELTA_COMPARE;
+  if (intent === "numeric") return DELTA_NUMERIC;
+  if (intent === "device") return DELTA_DEVICE;
+  return DELTA_KNOWLEDGE;
 }
 
 function resolveDepthModule(answerDepth: MedSafetyAnswerDepth) {
-  if (answerDepth === "short") return DEPTH_SHORT;
-  if (answerDepth === "detailed") return DEPTH_DETAILED;
-  return DEPTH_STANDARD;
+  if (answerDepth === "short") return DELTA_DENSITY_SHORT;
+  if (answerDepth === "detailed") return DELTA_DENSITY_DETAILED;
+  return DELTA_DENSITY_STANDARD;
 }
 
-function resolveFormatModule(format: MedSafetyFormat) {
-  return format === "short" ? FORMAT_SHORT : FORMAT_SECTIONED;
+export function buildCompactMedSafetyBasePrompt(locale: "ko" | "en" = "ko") {
+  if (locale === "en") {
+    return `${COMPACT_BASE_SCAFFOLD}\n- 최종 답변은 자연스러운 bedside clinical English로 작성한다.`;
+  }
+  return COMPACT_BASE_SCAFFOLD;
 }
 
-export function assembleMedSafetyDeveloperPrompt(decision: MedSafetyRouteDecision, locale: "ko" | "en") {
-  const modules = [CORE_SAFETY, resolveIntentModule(decision.intent)];
-  if (decision.entityClarity !== "high") modules.push(ENTITY_AMBIGUITY);
-  if (decision.risk === "high" || decision.needsEscalation) modules.push(HIGH_RISK_ESCALATION);
-  modules.push(resolveDepthModule(decision.answerDepth));
-  modules.push(resolveFormatModule(decision.format));
-  if (decision.needsSbar) modules.push(SBAR_APPENDIX);
-  if (locale === "en") modules.push(LANGUAGE_EN);
-  return modules.join("\n\n");
+function buildSelectedDeltaSpecs(args: {
+  decision: MedSafetyRouteDecision;
+  locale: "ko" | "en";
+  runtimeMode?: MedSafetyRuntimeMode;
+}) {
+  const { decision, locale, runtimeMode } = args;
+  if (runtimeMode === "hybrid_shadow") {
+    return [] satisfies PromptDeltaSpec[];
+  }
+
+  const deltas: PromptDeltaSpec[] = [
+    { id: "opening", text: DELTA_OPENING, optional: false, dropPriority: 999 },
+    { id: "trust", text: DELTA_TRUST, optional: false, dropPriority: 999 },
+    {
+      id:
+        decision.intent === "action"
+          ? "action"
+          : decision.intent === "compare"
+            ? "compare"
+            : decision.intent === "numeric"
+              ? "numeric"
+              : decision.intent === "device"
+                ? "device"
+                : "knowledge",
+      text: resolveIntentModule(decision.intent),
+      optional: false,
+      dropPriority: 999,
+    },
+  ];
+
+  if (decision.entityClarity !== "high") {
+    deltas.push({ id: "entity", text: DELTA_ENTITY, optional: false, dropPriority: 999 });
+  }
+  if (decision.risk === "high" || decision.needsEscalation) {
+    deltas.push({ id: "risk", text: DELTA_RISK, optional: false, dropPriority: 999 });
+  }
+
+  const densityId: MedSafetyPromptDeltaId =
+    decision.answerDepth === "short"
+      ? "density_short"
+      : decision.answerDepth === "detailed"
+        ? "density_detailed"
+        : "density_standard";
+  deltas.push({
+    id: densityId,
+    text: resolveDepthModule(decision.answerDepth),
+    optional: true,
+    dropPriority: decision.answerDepth === "detailed" ? 2 : 4,
+  });
+
+  if (decision.format === "sectioned") {
+    deltas.push({
+      id: "format_sectioned",
+      text: DELTA_FORMAT_SECTIONED,
+      optional: true,
+      dropPriority: 3,
+    });
+  }
+  if (decision.needsSbar) {
+    deltas.push({
+      id: "appendix_sbar",
+      text: DELTA_APPENDIX_SBAR,
+      optional: true,
+      dropPriority: 1,
+    });
+  }
+  if (locale === "en") {
+    deltas.push({
+      id: "language_en",
+      text: DELTA_LANGUAGE_EN,
+      optional: false,
+      dropPriority: 999,
+    });
+  }
+  return deltas;
+}
+
+function resolvePromptBudget(args: {
+  decision: MedSafetyRouteDecision;
+  runtimeMode?: MedSafetyRuntimeMode;
+  hasImage?: boolean;
+}) {
+  if (args.runtimeMode === "legacy" || args.runtimeMode === "hybrid_shadow") {
+    return {
+      budgetClass: "shadow_static" as const,
+      budgetChars: 1600,
+    };
+  }
+  if (args.hasImage || args.decision.risk === "high") {
+    return {
+      budgetClass: "high_risk_or_image" as const,
+      budgetChars: 3000,
+    };
+  }
+  return {
+    budgetClass: "standard" as const,
+    budgetChars: 2200,
+  };
+}
+
+function joinPromptParts(basePrompt: string, specs: PromptDeltaSpec[]) {
+  const parts = [basePrompt.trim(), ...specs.map((spec) => spec.text.trim()).filter(Boolean)].filter(Boolean);
+  return parts.join("\n\n").trim();
+}
+
+export function assembleMedSafetyDeveloperPrompt(
+  decision: MedSafetyRouteDecision,
+  locale: "ko" | "en",
+  options?: {
+    runtimeMode?: MedSafetyRuntimeMode;
+    hasImage?: boolean;
+  }
+): MedSafetyPromptAssembly {
+  const basePrompt = buildCompactMedSafetyBasePrompt(locale);
+  const selectedSpecs = buildSelectedDeltaSpecs({
+    decision,
+    locale,
+    runtimeMode: options?.runtimeMode,
+  });
+  const { budgetClass, budgetChars } = resolvePromptBudget({
+    decision,
+    runtimeMode: options?.runtimeMode,
+    hasImage: options?.hasImage,
+  });
+
+  const keptSpecs = [...selectedSpecs];
+  const droppedDeltaIds: MedSafetyPromptDeltaId[] = [];
+
+  while (joinPromptParts(basePrompt, keptSpecs).length > budgetChars) {
+    const dropCandidateIndex = keptSpecs.findIndex((spec) => spec.optional && spec.dropPriority === 1);
+    if (dropCandidateIndex >= 0) {
+      droppedDeltaIds.push(keptSpecs[dropCandidateIndex]!.id);
+      keptSpecs.splice(dropCandidateIndex, 1);
+      continue;
+    }
+    const optionalSpecs = keptSpecs
+      .map((spec, index) => ({ spec, index }))
+      .filter((entry) => entry.spec.optional)
+      .sort((a, b) => a.spec.dropPriority - b.spec.dropPriority || a.index - b.index);
+    if (!optionalSpecs.length) break;
+    const target = optionalSpecs[0]!;
+    droppedDeltaIds.push(target.spec.id);
+    keptSpecs.splice(target.index, 1);
+  }
+
+  const developerPrompt = joinPromptParts(basePrompt, keptSpecs);
+  return {
+    developerPrompt,
+    basePrompt,
+    selectedDeltaIds: keptSpecs.map((spec) => spec.id),
+    droppedDeltaIds,
+    basePromptChars: basePrompt.length,
+    finalPromptChars: developerPrompt.length,
+    budgetClass,
+    budgetChars,
+  };
 }
 
 export function buildPromptProfile(args: {
@@ -619,39 +783,45 @@ export function parseQualityGateDecision(raw: string): MedSafetyQualityDecision 
   } catch {
     return {
       verdict: "repair_required",
-      repairInstructions: "답변의 안전성, 구체성, 구조를 다시 확인하고 부족한 즉시 행동, 보고 기준, 모호성 경고를 보강하라.",
+      repairInstructions: "missing_immediate_action,missing_escalation_threshold,missing_assumption_disclosure",
     };
   }
 }
 
-export function buildRepairDeveloperPrompt(baseDeveloperPrompt: string, locale: "ko" | "en") {
-  const repairTail =
-    locale === "en"
-      ? [
-          "[Repair mode]",
-          "- Revise the existing answer without changing its clinical intent.",
-          "- Preserve correct content and structure when possible.",
-          "- Fix only the issues listed in the repair instructions.",
-          "- Do not add new unsupported clinical specifics.",
-          "- If certainty is limited, explicitly state the working assumption or need for verification.",
-          "- Remove unsupported specificity, duplicated filler, and weak generic wording.",
-          "- Prefer tighter action/report wording over expanding background explanation.",
-          "- Preserve strong lead sentences and section structure when they are already correct.",
-          "- Return final plain text answer only.",
-        ].join("\n")
-      : [
-          "[Repair mode]",
-          "- 기존 답변의 임상적 의도는 유지하되 부족한 부분만 보강하라.",
-          "- 맞는 내용과 구조는 가능한 한 유지하라.",
-          "- repair instructions에 적힌 문제만 고쳐라.",
-          "- 새롭고 근거 없는 임상 세부사항을 덧붙이지 마라.",
-          "- 확신이 낮으면 어떤 전제로 설명하는지 또는 무엇을 확인해야 하는지 분명히 밝혀라.",
-          "- 근거 없는 구체성, 중복 문장, 힘 빠진 일반론을 제거하라.",
-          "- 배경 설명을 늘리기보다 즉시 행동과 보고 기준을 더 선명하게 다듬어라.",
-          "- 이미 좋은 리드 문장과 섹션 구조는 유지하라.",
-          "- 최종 답변 평문만 반환하라.",
-        ].join("\n");
-  return `${baseDeveloperPrompt}\n\n${repairTail}`;
+export function buildRepairDeveloperPrompt(locale: "ko" | "en") {
+  return locale === "en"
+    ? [
+        "You are revising a nurse-facing clinical answer.",
+        "Keep the clinical intent. Fix only the listed issue codes.",
+        "Delete unsupported specifics instead of inventing new facts.",
+        "If certainty is limited, disclose the working assumption or verification need.",
+        "Strengthen immediate action, what to check now, and reporting thresholds when requested.",
+        "Keep good lead sentences, section structure, and small subcategory labels when already correct.",
+        "Issue code guide:",
+        "- missing_immediate_action: move the immediate action to the top.",
+        "- missing_escalation_threshold: add clear stop/report/call criteria.",
+        "- missing_assumption_disclosure: disclose the working assumption near the start.",
+        "- unsafe_specificity_for_ambiguous_entity or missing_local_authority_caveat: delete unsafe specifics or add protocol/IFU/pharmacy caveat.",
+        "- weak_section_structure: restore short section headings and lead sentences.",
+        "- missing_fast_distinction or missing_numeric_core or missing_action_core: add the missing core structure only.",
+        "Return final plain text answer only.",
+      ].join("\n")
+    : [
+        "너는 간호사 대상 임상답변을 수정하는 QA 편집기다.",
+        "기존 답변의 임상적 의도는 유지하고 issue code에 해당하는 부분만 고쳐라.",
+        "새 정보를 지어내지 말고, 근거 없는 구체성은 삭제하는 쪽을 우선한다.",
+        "확신이 낮으면 전제 공개나 확인 필요성을 앞부분에 분명히 밝혀라.",
+        "요청된 경우 즉시 행동, 지금 확인할 것, 보고 기준을 더 선명하게 다듬어라.",
+        "이미 좋은 리드 문장, 섹션 구조, 작은 소카테고리는 유지하라.",
+        "Issue code guide:",
+        "- missing_immediate_action: 상단에 즉시 행동을 올린다.",
+        "- missing_escalation_threshold: 중단/보고/호출 기준을 보강한다.",
+        "- missing_assumption_disclosure: 시작부에 전제 또는 확인 필요성을 밝힌다.",
+        "- unsafe_specificity_for_ambiguous_entity 또는 missing_local_authority_caveat: 위험한 구체성을 지우거나 기관 프로토콜/약제부/IFU 확인 문구를 넣는다.",
+        "- weak_section_structure: 짧은 소제목과 리드 문장 구조를 복원한다.",
+        "- missing_fast_distinction 또는 missing_numeric_core 또는 missing_action_core: 빠진 핵심 구조만 보강한다.",
+        "최종 답변 평문만 반환하라.",
+      ].join("\n");
 }
 
 export function buildRepairUserPrompt(args: {
@@ -673,7 +843,9 @@ export function buildRepairUserPrompt(args: {
     `confidence=${args.decision.confidence}`,
     `source=${args.decision.source}`,
     "",
-    args.locale === "en" ? `Repair instructions: ${normalizeText(args.repairInstructions)}` : `수정 지시: ${normalizeText(args.repairInstructions)}`,
+    args.locale === "en"
+      ? `Issue codes: ${normalizeText(args.repairInstructions)}`
+      : `Issue codes: ${normalizeText(args.repairInstructions)}`,
     "",
     args.locale === "en" ? "Current answer:" : "현재 답변:",
     normalizeText(args.answer),
@@ -750,52 +922,52 @@ function includesLocalAuthorityCaveat(text: string) {
 function findHeuristicRepairIssues(answer: string, decision: MedSafetyRouteDecision) {
   const issues: string[] = [];
   if (decision.risk === "high" && !hasImmediateActionNearTop(answer)) {
-    issues.push("고위험 질문인데 답변 상단에 즉시 행동이 충분히 드러나지 않습니다.");
+    issues.push("missing_immediate_action");
   }
   if (decision.needsEscalation && !includesEscalationSignals(answer)) {
-    issues.push("중단/보고/호출 기준이 약합니다.");
+    issues.push("missing_escalation_threshold");
   }
   if (decision.entityClarity === "medium" && !hasAssumptionDisclosureNearTop(answer)) {
-    issues.push("대상 식별이 MEDIUM인데 답변 시작부에 전제나 확인 필요성이 충분히 드러나지 않습니다.");
+    issues.push("missing_assumption_disclosure");
   }
   if (decision.entityClarity !== "high" && /(용량|속도|희석|경로|호환성|세팅)/i.test(answer) && !/(확인|추정|가능성|정확한 명칭)/i.test(answer)) {
-    issues.push("대상 식별이 애매한데 구체 임상 지시가 단정적으로 보입니다.");
+    issues.push("unsafe_specificity_for_ambiguous_entity");
   }
   if ((decision.entityClarity !== "high" || decision.risk === "high") && includesRiskySpecificity(answer) && !includesLocalAuthorityCaveat(answer)) {
-    issues.push("위험하거나 애매한 질문인데 기관별 또는 대상별로 달라질 수 있는 구체성이 충분한 단서 없이 제시됩니다.");
+    issues.push("missing_local_authority_caveat");
   }
   if (decision.format === "sectioned" && !hasSectionStructure(answer)) {
-    issues.push("sectioned 형식인데 섹션 구조가 약합니다.");
+    issues.push("weak_section_structure");
   }
   if (countDuplicateLines(answer) >= 2) {
-    issues.push("중복 문장이 있습니다.");
+    issues.push("duplicate_lines");
   }
   if (FILLER_PATTERNS.some((pattern) => pattern.test(answer))) {
-    issues.push("힘이 약한 일반론 또는 filler 문장이 있습니다.");
+    issues.push("filler_detected");
   }
   if (UNSUPPORTED_SPECIFICITY_PATTERNS.some((pattern) => pattern.test(answer))) {
-    issues.push("근거 없는 세팅/제조사 수준 구체성이 보입니다.");
+    issues.push("unsupported_specificity");
   }
   if (decision.intent === "compare" && !includesFastDistinction(answer)) {
-    issues.push("비교 질문인데 가장 빨리 보는 구분점이 약합니다.");
+    issues.push("missing_fast_distinction");
   }
   if (decision.intent === "numeric" && !includesNumericCore(answer)) {
-    issues.push("수치 질문인데 기준, 의미, 보고 기준 중 일부가 부족합니다.");
+    issues.push("missing_numeric_core");
   }
   if ((decision.intent === "action" || decision.intent === "device") && !includesActionCore(answer)) {
-    issues.push("action/device 질문인데 지금 확인할 것과 바로 할 조치가 약합니다.");
+    issues.push("missing_action_core");
   }
   return issues;
 }
 
 export function buildHeuristicQualityDecision(answer: string, decision: MedSafetyRouteDecision): MedSafetyQualityDecision {
-  const issues = findHeuristicRepairIssues(answer, decision);
+  const issues = Array.from(new Set(findHeuristicRepairIssues(answer, decision)));
   if (!issues.length) {
     return { verdict: "pass", repairInstructions: "" };
   }
   return {
     verdict: "repair_required",
-    repairInstructions: issues.slice(0, 4).join(" "),
+    repairInstructions: issues.slice(0, 4).join(","),
   };
 }
 
