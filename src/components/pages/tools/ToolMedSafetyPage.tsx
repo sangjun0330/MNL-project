@@ -688,6 +688,118 @@ function parseAnswerBodyLine(value: string) {
   };
 }
 
+type DisplayBodyLine =
+  | { kind: "blank"; level: number; content: string }
+  | { kind: "bullet"; level: number; content: string }
+  | { kind: "number"; level: number; content: string; marker: string }
+  | { kind: "label"; level: number; content: string; marker: string }
+  | { kind: "text"; level: number; content: string }
+  | { kind: "subheading"; level: number; content: string };
+
+function countWords(value: string) {
+  return String(value ?? "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+}
+
+function extractParsedLineContent(line: ReturnType<typeof parseAnswerBodyLine>) {
+  if (line.kind === "blank") return "";
+  return line.content;
+}
+
+function looksLikeInlineBodySubheading(raw: string, nextRaw?: string | null) {
+  const parsed = parseAnswerBodyLine(raw);
+  if (parsed.kind === "blank") return false;
+
+  const text = stripBulletPrefix(cleanAnswerLine(extractParsedLineContent(parsed)));
+  const nextText = stripBulletPrefix(cleanAnswerLine(String(nextRaw ?? "")));
+  if (!text || !nextText) return false;
+  if (/[.。!?？！:]$/.test(text)) return false;
+  if (/니다$|습니다$|세요$|시오$|랍니다$|있습니다$|없습니다$|입니다$|합니다$/.test(text)) return false;
+
+  const wordCount = countWords(text);
+  const headingSuffix =
+    /(쪽|기준|예시|권장|해석|포인트|할 일|확인|양|색|점도\/이물|삽입부\/주변|이물|주변)$/;
+
+  if (headingSuffix.test(text) && wordCount <= 5 && text.length <= 30) return true;
+  if (/라면$/.test(text) && text.length <= 34) return true;
+  if ((wordCount <= 2 || (text.includes("/") && wordCount <= 3)) && text.length <= 18) return true;
+
+  return false;
+}
+
+function buildDisplayBodyLines(lines: string[]): DisplayBodyLine[] {
+  const parsedLines = lines.map((line) => parseAnswerBodyLine(line));
+  const out: DisplayBodyLine[] = [];
+  let nestedLevel = 0;
+
+  const findNextNonBlankRaw = (startIndex: number) => {
+    for (let index = startIndex; index < lines.length; index += 1) {
+      if (parsedLines[index]?.kind !== "blank") return lines[index] ?? "";
+    }
+    return "";
+  };
+
+  for (let index = 0; index < parsedLines.length; index += 1) {
+    const parsedLine = parsedLines[index]!;
+    if (parsedLine.kind === "blank") {
+      out.push({
+        kind: "blank",
+        level: 0,
+        content: "",
+      });
+      continue;
+    }
+
+    const nextNonBlankRaw = findNextNonBlankRaw(index + 1);
+    if (looksLikeInlineBodySubheading(lines[index] ?? "", nextNonBlankRaw)) {
+      nestedLevel = parsedLine.level + 1;
+      out.push({
+        kind: "subheading",
+        level: parsedLine.level,
+        content: stripBulletPrefix(cleanAnswerLine(extractParsedLineContent(parsedLine))),
+      });
+      continue;
+    }
+
+    const effectiveLevel = nestedLevel > 0 ? Math.max(parsedLine.level, nestedLevel) : parsedLine.level;
+    if (parsedLine.kind === "bullet") {
+      out.push({
+        kind: "bullet",
+        level: effectiveLevel,
+        content: parsedLine.content,
+      });
+      continue;
+    }
+    if (parsedLine.kind === "number") {
+      out.push({
+        kind: "number",
+        level: effectiveLevel,
+        content: parsedLine.content,
+        marker: parsedLine.marker,
+      });
+      continue;
+    }
+    if (parsedLine.kind === "label") {
+      out.push({
+        kind: "label",
+        level: effectiveLevel,
+        content: parsedLine.content,
+        marker: parsedLine.marker,
+      });
+      continue;
+    }
+    out.push({
+      kind: "text",
+      level: effectiveLevel,
+      content: parsedLine.content,
+    });
+  }
+
+  return out;
+}
+
 function inferSectionTone(title: string, index: number): AnswerSectionTone {
   const normalized = String(title ?? "")
     .replace(/\s+/g, "")
@@ -906,10 +1018,10 @@ function connectorColor(tone: AnswerSectionTone) {
 
 function SectionBodyLines({ section, bodyTextClass }: { section: AnswerSection; bodyTextClass: string }) {
   if (!section.bodyLines.length) return null;
+  const displayLines = buildDisplayBodyLines(section.bodyLines);
   return (
     <div className="mt-4 flex flex-col gap-1.5">
-      {section.bodyLines.map((line, lineIndex) => {
-        const parsedLine = parseAnswerBodyLine(line);
+      {displayLines.map((parsedLine, lineIndex) => {
 
         if (parsedLine.kind === "blank") {
           return <div key={`${section.title}-${lineIndex}`} className="h-3" aria-hidden="true" />;
@@ -952,6 +1064,18 @@ function SectionBodyLines({ section, bodyTextClass }: { section: AnswerSection; 
             >
               <span className="min-w-[24px] shrink-0 font-semibold text-[color:var(--rnest-accent)]">{parsedLine.marker}</span>
               <div className="min-w-0 whitespace-pre-wrap break-words">{parsedLine.content}</div>
+            </div>
+          );
+        }
+
+        if (parsedLine.kind === "subheading") {
+          return (
+            <div
+              key={`${section.title}-${lineIndex}`}
+              className="whitespace-pre-wrap break-words pt-1 text-[14.5px] font-semibold leading-7 text-ios-text/72"
+              style={indentStyle}
+            >
+              {parsedLine.content}
             </div>
           );
         }
@@ -1034,11 +1158,11 @@ function AssistantAnswerSections({ content }: { content: string }) {
  */
 function StreamingBodyLines({ section, bodyTextClass, isLastSection }: { section: AnswerSection; bodyTextClass: string; isLastSection: boolean }) {
   if (!section.bodyLines.length) return null;
+  const displayLines = buildDisplayBodyLines(section.bodyLines);
   return (
     <div className="mt-4 flex flex-col gap-1.5">
-      {section.bodyLines.map((line, lineIndex) => {
-        const parsedLine = parseAnswerBodyLine(line);
-        const isLastLine = isLastSection && lineIndex === section.bodyLines.length - 1;
+      {displayLines.map((parsedLine, lineIndex) => {
+        const isLastLine = isLastSection && lineIndex === displayLines.length - 1;
 
         if (parsedLine.kind === "blank") {
           return <div key={`${section.title}-${lineIndex}`} className="h-3" aria-hidden="true" />;
@@ -1070,6 +1194,18 @@ function StreamingBodyLines({ section, bodyTextClass, isLastSection }: { section
             <div key={`${section.title}-${lineIndex}`} className={`flex items-start gap-3 ${bodyTextClass}`} style={indentStyle}>
               <span className="min-w-[24px] shrink-0 font-semibold text-[color:var(--rnest-accent)]">{parsedLine.marker}</span>
               <div className="min-w-0 whitespace-pre-wrap break-words">{parsedLine.content}{cursor}</div>
+            </div>
+          );
+        }
+        if (parsedLine.kind === "subheading") {
+          return (
+            <div
+              key={`${section.title}-${lineIndex}`}
+              className="whitespace-pre-wrap break-words pt-1 text-[14.5px] font-semibold leading-7 text-ios-text/72"
+              style={indentStyle}
+            >
+              {parsedLine.content}
+              {cursor}
             </div>
           );
         }
@@ -1155,35 +1291,24 @@ function StreamingAnswerSections({ content }: { content: string }) {
   );
 }
 
-const THINKING_MESSAGES = [
-  "임상 정보를 검토하고 있어요...",
-  "관련 지식을 확인하고 있어요...",
-  "안전 기준을 살펴보고 있어요...",
-  "답변을 구성하고 있어요...",
-  "핵심 내용을 정리하고 있어요...",
-];
-
-function ThinkingIndicator({ streamPhase }: { streamPhase: "idle" | "connecting" | "reasoning" | "writing" }) {
-  const [msgIndex, setMsgIndex] = useState(0);
-
-  useEffect(() => {
-    if (streamPhase !== "reasoning") return;
-    const timer = setInterval(() => {
-      setMsgIndex((prev) => (prev + 1) % THINKING_MESSAGES.length);
-    }, 2200);
-    return () => clearInterval(timer);
-  }, [streamPhase]);
-
+function ThinkingIndicator({ streamPhase, reasoningText }: { streamPhase: "idle" | "connecting" | "reasoning" | "writing"; reasoningText: string }) {
   return (
     <div className="min-w-0 flex-1">
       <div className="text-[14px] font-semibold text-[color:var(--rnest-accent)]">
-        {streamPhase === "connecting" ? "AI에 연결 중..." : THINKING_MESSAGES[msgIndex]}
+        {streamPhase === "connecting" ? "AI에 연결 중..." : "질문을 분석하고 있어요..."}
       </div>
-      <div className="mt-2 flex items-center gap-1.5">
-        <span className="inline-block h-2 w-2 animate-[bounce_1s_ease-in-out_infinite] rounded-full bg-[color:var(--rnest-accent)] opacity-60" />
-        <span className="inline-block h-2 w-2 animate-[bounce_1s_ease-in-out_0.15s_infinite] rounded-full bg-[color:var(--rnest-accent)] opacity-60" />
-        <span className="inline-block h-2 w-2 animate-[bounce_1s_ease-in-out_0.3s_infinite] rounded-full bg-[color:var(--rnest-accent)] opacity-60" />
-      </div>
+      {reasoningText ? (
+        <div className="mt-1.5 text-[13px] leading-5 text-ios-sub">
+          <span className="whitespace-pre-wrap break-words">{reasoningText}</span>
+          <span className="ml-0.5 inline-block h-[14px] w-[2px] animate-pulse rounded-full bg-[color:var(--rnest-accent)] align-middle" />
+        </div>
+      ) : (
+        <div className="mt-2 flex items-center gap-1.5">
+          <span className="inline-block h-2 w-2 animate-[bounce_1s_ease-in-out_infinite] rounded-full bg-[color:var(--rnest-accent)] opacity-60" />
+          <span className="inline-block h-2 w-2 animate-[bounce_1s_ease-in-out_0.15s_infinite] rounded-full bg-[color:var(--rnest-accent)] opacity-60" />
+          <span className="inline-block h-2 w-2 animate-[bounce_1s_ease-in-out_0.3s_infinite] rounded-full bg-[color:var(--rnest-accent)] opacity-60" />
+        </div>
+      )}
     </div>
   );
 }
@@ -1980,7 +2105,7 @@ export function ToolMedSafetyPage() {
                             <span className="absolute inset-0 animate-ping rounded-full border-2 border-[color:var(--rnest-accent)] opacity-30" />
                             <span className="absolute inset-0 animate-[spin_3s_linear_infinite] rounded-full border-2 border-transparent border-t-[color:var(--rnest-accent)] opacity-60" />
                           </div>
-                          <ThinkingIndicator streamPhase={streamPhase} />
+                          <ThinkingIndicator streamPhase={streamPhase} reasoningText={reasoningText} />
                         </div>
                       </div>
                     </div>
