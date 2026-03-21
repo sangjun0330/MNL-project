@@ -1173,10 +1173,35 @@ export function ToolMedSafetyPage() {
     return () => window.removeEventListener("pointerdown", handlePointerDown);
   }, [isSearchTypeMenuOpen]);
 
+  const userHasScrolledUpRef = useRef(false);
+
+  // Track whether user has manually scrolled away from bottom
+  useEffect(() => {
+    const handleScroll = () => {
+      const distanceFromBottom =
+        document.documentElement.scrollHeight -
+        window.scrollY -
+        window.innerHeight;
+      // If user scrolled up more than 150px from bottom, respect their scroll position
+      userHasScrolledUpRef.current = distanceFromBottom > 150;
+    };
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  // Auto-scroll only for new messages/errors, or during streaming when user is near bottom
   useEffect(() => {
     if (!threadEndRef.current) return;
+    if (userHasScrolledUpRef.current && streamingText) return; // user scrolled up during streaming — don't force
+    threadEndRef.current.scrollIntoView({ block: "end", behavior: "smooth" });
+  }, [messages, error]);
+
+  // During streaming, only scroll if user is at the bottom
+  useEffect(() => {
+    if (!threadEndRef.current || !streamingText) return;
+    if (userHasScrolledUpRef.current) return;
     threadEndRef.current.scrollIntoView({ block: "end" });
-  }, [messages, streamingText, error]);
+  }, [streamingText]);
 
   useEffect(() => {
     const textarea = composerInputRef.current;
@@ -1379,6 +1404,7 @@ export function ToolMedSafetyPage() {
     setInput("");
     setSelectedImage(null);
     setSelectedImageName("");
+    userHasScrolledUpRef.current = false;
     setIsLoading(true);
     setStreamingText("");
     setReasoningText("");
@@ -1417,7 +1443,14 @@ export function ToolMedSafetyPage() {
               onReasoningDelta: (text) => {
                 if (!text) return;
                 setStreamPhase("reasoning");
-                setReasoningText((prev) => `${prev}${text}`);
+                setReasoningText((prev) => {
+                  const accumulated = `${prev}${text}`;
+                  // Split by sentence-ending punctuation (Korean/English)
+                  const sentences = accumulated.split(/(?<=[.!?。다요])\s*/g).filter(Boolean);
+                  if (sentences.length <= 2) return accumulated;
+                  // Keep only the last 2 sentences
+                  return sentences.slice(-2).join(" ");
+                });
               },
               onDelta: (text) => {
                 if (!text) return;
@@ -1770,35 +1803,33 @@ export function ToolMedSafetyPage() {
 
                   {isLoading && streamPhase !== "idle" && !streamingText ? (
                     <div className="flex justify-start">
-                      <div className="w-full max-w-[860px] min-w-0">
-                        <div className="rounded-[28px] border border-[#E4E8F1] bg-[linear-gradient(180deg,#FFFFFF_0%,#F8FAFF_100%)] px-5 py-4 shadow-[0_16px_34px_rgba(15,23,42,0.04)]">
-                          <div className="flex items-start gap-3">
-                            <div className="relative mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center">
-                              <img
-                                src="/rnest-logo.png"
-                                alt="RNest"
-                                className="h-8 w-8 rounded-full object-cover"
-                              />
-                              <span className="absolute inset-0 animate-ping rounded-full border-2 border-[color:var(--rnest-accent)] opacity-30" />
-                              <span className="absolute inset-0 animate-[spin_3s_linear_infinite] rounded-full border-2 border-transparent border-t-[color:var(--rnest-accent)] opacity-60" />
+                      <div className="w-full max-w-[860px] min-w-0 px-2">
+                        <div className="flex items-start gap-3">
+                          <div className="relative mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center">
+                            <img
+                              src="/rnest-logo.png"
+                              alt="RNest"
+                              className="h-8 w-8 rounded-full object-cover"
+                            />
+                            <span className="absolute inset-0 animate-ping rounded-full border-2 border-[color:var(--rnest-accent)] opacity-30" />
+                            <span className="absolute inset-0 animate-[spin_3s_linear_infinite] rounded-full border-2 border-transparent border-t-[color:var(--rnest-accent)] opacity-60" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="text-[14px] font-semibold text-[color:var(--rnest-accent)]">
+                              {streamPhase === "connecting" ? t("AI에 연결 중...") : t("질문을 분석하고 있어요...")}
                             </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="text-[14px] font-semibold text-[color:var(--rnest-accent)]">
-                                {streamPhase === "connecting" ? t("AI에 연결 중...") : t("질문을 분석하고 있어요...")}
+                            {reasoningText ? (
+                              <div className="mt-1.5 text-[13px] leading-5 text-ios-sub">
+                                <span className="whitespace-pre-wrap break-words">{reasoningText}</span>
+                                <span className="ml-0.5 inline-block h-[14px] w-[2px] animate-pulse rounded-full bg-[color:var(--rnest-accent)] align-middle" />
                               </div>
-                              {reasoningText ? (
-                                <div className="mt-1.5 text-[13px] leading-5 text-ios-sub">
-                                  <span className="whitespace-pre-wrap break-words">{reasoningText}</span>
-                                  <span className="ml-0.5 inline-block h-[14px] w-[2px] animate-pulse rounded-full bg-[color:var(--rnest-accent)] align-middle" />
-                                </div>
-                              ) : (
-                                <div className="mt-2 flex items-center gap-1.5">
-                                  <span className="inline-block h-2 w-2 animate-[bounce_1s_ease-in-out_infinite] rounded-full bg-[color:var(--rnest-accent)] opacity-60" />
-                                  <span className="inline-block h-2 w-2 animate-[bounce_1s_ease-in-out_0.15s_infinite] rounded-full bg-[color:var(--rnest-accent)] opacity-60" />
-                                  <span className="inline-block h-2 w-2 animate-[bounce_1s_ease-in-out_0.3s_infinite] rounded-full bg-[color:var(--rnest-accent)] opacity-60" />
-                                </div>
-                              )}
-                            </div>
+                            ) : (
+                              <div className="mt-2 flex items-center gap-1.5">
+                                <span className="inline-block h-2 w-2 animate-[bounce_1s_ease-in-out_infinite] rounded-full bg-[color:var(--rnest-accent)] opacity-60" />
+                                <span className="inline-block h-2 w-2 animate-[bounce_1s_ease-in-out_0.15s_infinite] rounded-full bg-[color:var(--rnest-accent)] opacity-60" />
+                                <span className="inline-block h-2 w-2 animate-[bounce_1s_ease-in-out_0.3s_infinite] rounded-full bg-[color:var(--rnest-accent)] opacity-60" />
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>
