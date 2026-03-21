@@ -812,7 +812,7 @@ function parseAnswerSections(value: string): AnswerSection[] {
     .split("\n");
 
   const sections: AnswerSection[] = [];
-  let currentTitle = "핵심";
+  let currentTitle: string | null = null;
   let currentLines: string[] = [];
 
   const pushCurrent = () => {
@@ -821,11 +821,12 @@ function parseAnswerSections(value: string): AnswerSection[] {
       currentLines = [];
       return;
     }
+    const resolvedTitle = currentTitle || (sections.length === 0 ? "요약" : "답변");
     sections.push({
-      title: currentTitle,
+      title: resolvedTitle,
       lead: content.lead,
       bodyLines: content.bodyLines,
-      tone: inferSectionTone(currentTitle, sections.length),
+      tone: inferSectionTone(resolvedTitle, sections.length),
     });
     currentLines = [];
   };
@@ -877,7 +878,7 @@ function parseAnswerSections(value: string): AnswerSection[] {
   }
   return [
     {
-      title: "답변",
+      title: "요약",
       lead: fallbackContent.lead,
       bodyLines: fallbackContent.bodyLines,
       tone: "summary",
@@ -914,68 +915,7 @@ function looksLikeSubHeading(line: string, nextLine?: string | null): boolean {
  * body into multiple continuation sections, each getting its own card.
  */
 function splitSectionSubHeadings(sections: AnswerSection[]): AnswerSection[] {
-  const result: AnswerSection[] = [];
-  for (const section of sections) {
-    if (section.bodyLines.length < 3) {
-      result.push(section);
-      continue;
-    }
-    // Scan body lines for sub-headings
-    const subSections: { subTitle: string | null; lines: string[] }[] = [];
-    let current: { subTitle: string | null; lines: string[] } = { subTitle: null, lines: [] };
-    for (let i = 0; i < section.bodyLines.length; i++) {
-      const line = section.bodyLines[i];
-      const nextLine = i + 1 < section.bodyLines.length ? section.bodyLines[i + 1] : null;
-      if (looksLikeSubHeading(line, nextLine) && current.lines.some((l) => cleanAnswerLine(l))) {
-        subSections.push(current);
-        current = { subTitle: cleanAnswerLine(line), lines: [] };
-      } else {
-        current.lines.push(line);
-      }
-    }
-    subSections.push(current);
-
-    if (subSections.length <= 1) {
-      // No sub-headings found, keep as-is
-      result.push(section);
-      continue;
-    }
-
-    // First chunk keeps the original title
-    const firstChunk = subSections[0];
-    const firstContent = buildAnswerSectionContent(firstChunk.lines);
-    if (firstContent) {
-      result.push({
-        title: section.title,
-        lead: section.lead,
-        bodyLines: firstChunk.lines,
-        tone: section.tone,
-      });
-    } else {
-      result.push({
-        title: section.title,
-        lead: section.lead,
-        bodyLines: [],
-        tone: section.tone,
-      });
-    }
-
-    // Subsequent chunks become continuation sections
-    for (let i = 1; i < subSections.length; i++) {
-      const chunk = subSections[i];
-      const content = buildAnswerSectionContent(chunk.lines);
-      if (content) {
-        result.push({
-          title: chunk.subTitle || section.title,
-          lead: content.lead,
-          bodyLines: content.bodyLines,
-          tone: section.tone,
-          continuation: true,
-        });
-      }
-    }
-  }
-  return result;
+  return sections;
 }
 
 function sectionCardClass(tone: AnswerSectionTone) {

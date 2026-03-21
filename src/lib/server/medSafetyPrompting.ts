@@ -225,6 +225,7 @@ const RENDERING_AND_LENGTH_CONTRACT = [
   "- 새 섹션 전에는 빈 줄 2개를 둔다.",
   "- 섹션 첫 줄은 bullet로 시작하지 않는다.",
   '- 섹션 안의 작은 묶음 제목은 콜론/마침표 없는 아주 짧은 한 줄로만 쓰고, 바로 아래에 "- " bullet을 둔다.',
+  '- "**", "__", 백틱 같은 마크다운 강조는 쓰지 않는다.',
   "- bullet은 완결 문장만 남기고 과하게 길어지지 않게 쓴다.",
 ].join("\n");
 
@@ -325,6 +326,8 @@ const QUALITY_GATE_DEVELOPER_PROMPT = [
   "- ambiguous entity answer asserts dose/rate/dilution/route/compatibility/device setting as if verified",
   "- high-risk low-confidence answer becomes more detailed instead of more conservative",
   "- sectioned answer lacks clear section structure or lead sentence",
+  "- a short heading-like line with or without a colon counts as a valid section heading if it is followed by a lead sentence and then detail lines",
+  "- do not require extra small subcategory labels when the current prose structure is already clear and clinically usable",
   "- duplicated filler or generic weak sentences reduce decision usefulness",
   "- unsupported manufacturer-specific specificity appears",
   "- compare answer misses the fastest practical distinction",
@@ -1063,6 +1066,8 @@ export function buildRepairDeveloperPrompt(locale: "ko" | "en") {
         "Keep the clinical intent. Fix only the listed issue codes.",
         "Delete unsupported specifics instead of inventing new facts.",
         "Prefer compression, reordering, and removing weak filler over adding new explanation.",
+        "Preserve correct sentences, line order, section order, and indentation as much as possible.",
+        "Do not replace a clinically correct answer with a shorter paraphrased summary.",
         "If certainty is limited, disclose the working assumption or verification need.",
         "Strengthen immediate action, what to check now, and reporting thresholds when requested.",
         "Keep good lead sentences, section structure, and small subcategory labels when already correct.",
@@ -1084,6 +1089,8 @@ export function buildRepairDeveloperPrompt(locale: "ko" | "en") {
         "기존 답변의 임상적 의도는 유지하고 issue code에 해당하는 부분만 고쳐라.",
         "새 정보를 지어내지 말고, 근거 없는 구체성은 삭제하는 쪽을 우선한다.",
         "설명을 늘리기보다 압축, 재배치, 군더더기 제거를 우선한다.",
+        "맞는 문장, 줄 순서, 섹션 순서, 들여쓰기는 최대한 그대로 유지하라.",
+        "임상적으로 맞는 답변을 더 짧은 요약문으로 바꿔치기하지 마라.",
         "확신이 낮으면 전제 공개나 확인 필요성을 앞부분에 분명히 밝혀라.",
         "요청된 경우 즉시 행동, 지금 확인할 것, 보고 기준을 더 선명하게 다듬어라.",
         "이미 좋은 리드 문장, 섹션 구조, 작은 소카테고리는 유지하라.",
@@ -1180,6 +1187,13 @@ function hasSmallCategoryStructure(text: string) {
   return false;
 }
 
+function countBulletLines(text: string) {
+  return normalizeText(text)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^-\s+/.test(line)).length;
+}
+
 function isOverlongAnswer(text: string, decision: MedSafetyRouteDecision) {
   const length = normalizeText(text).length;
   if (decision.answerDepth === "short") return length > 520;
@@ -1217,10 +1231,59 @@ function countDuplicateLines(text: string) {
 function hasSectionStructure(text: string) {
   const lines = normalizeText(text)
     .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const headings = lines.filter((line) => /[:：]$/.test(line) && line.length <= 20);
-  return headings.length >= 2;
+    .map((line) => line.trim());
+  let headings = 0;
+
+  const getPrevNonEmpty = (index: number) => {
+    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+      const candidate = lines[cursor]?.trim();
+      if (candidate) return candidate;
+    }
+    return "";
+  };
+
+  const getNextNonEmpty = (index: number) => {
+    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+      const candidate = lines[cursor]?.trim();
+      if (candidate) return candidate;
+    }
+    return "";
+  };
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    if (!line) continue;
+    if (/^-\s+/.test(line) || /^\d+[.)]\s+/.test(line)) continue;
+    const previous = getPrevNonEmpty(index);
+    const next = getNextNonEmpty(index);
+    if (!next || /^-\s+/.test(next) || /^\d+[.)]\s+/.test(next)) continue;
+
+    const normalized = line.replace(/\s+/g, "");
+    const strongHeading =
+      (/[:：]$/.test(line) && line.length <= 24) ||
+      /^(핵심|요약|정의|임상의미|지금할일|확인할것|주의|위험|보고기준|호출기준|원인후보|비교|차이|구분포인트|자세한설명|기억포인트|이케이스에서같이봐야하는점|sbar|보고문구)$/.test(
+        normalized
+      );
+    const softHeading =
+      !previous &&
+      line.length <= 20 &&
+      !/[.。!?？！:]$/.test(line) &&
+      !/니다$|습니다$|세요$|시오$/.test(line);
+
+    if (strongHeading || softHeading) headings += 1;
+  }
+
+  return headings >= 2;
+}
+
+function shouldRequireSmallCategoryStructure(text: string, decision: MedSafetyRouteDecision) {
+  if (decision.format !== "sectioned") return false;
+  if (!(decision.intent === "compare" || decision.intent === "numeric" || decision.intent === "action" || decision.intent === "device")) {
+    return false;
+  }
+  const bulletCount = countBulletLines(text);
+  if (bulletCount < 6) return false;
+  return /(포인트|기준|항목|체크|원인 후보|확인할 것|보고 기준|양상|색|점도|조건)/i.test(text);
 }
 
 function hasImmediateActionNearTop(text: string) {
@@ -1292,8 +1355,7 @@ function findHeuristicRepairIssues(answer: string, decision: MedSafetyRouteDecis
     issues.push("weak_section_structure");
   }
   if (
-    decision.format === "sectioned" &&
-    (decision.intent === "compare" || decision.intent === "numeric" || decision.intent === "action" || decision.intent === "device") &&
+    shouldRequireSmallCategoryStructure(answer, decision) &&
     !hasSmallCategoryStructure(answer)
   ) {
     issues.push("missing_small_category_structure");

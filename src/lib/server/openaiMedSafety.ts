@@ -469,6 +469,7 @@ export const MED_SAFETY_LEGACY_DENSE_CORE_PROMPT_REFERENCE = [
   "- 한국어 존댓말로 작성한다.",
   "- 마크다운 장식(##, **, 표, 코드블록)은 사용하지 않는다.",
   "- 일반 텍스트와 불릿(-)만 사용한다.",
+  "- 특히 **, __, 백틱 같은 마크다운 강조는 쓰지 않는다.",
   "- 필요하면 \"핵심:\", \"지금 할 일:\", \"구분 포인트:\", \"주의:\", \"헷갈리는 점:\", \"보고 기준:\", \"기억 포인트:\"처럼 짧은 소제목을 사용한다.",
   "- 첫 문장 또는 첫 2문장 안에 사용자가 가장 궁금해할 핵심 답을 준다.",
   "- 모든 불릿은 새로운 정보를 담는 완결된 문장으로 작성한다.",
@@ -768,6 +769,60 @@ function parseIssueCodes(raw: string) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function normalizeComparableAnswerLine(line: string) {
+  return stripMarkdownDecorations(String(line ?? ""))
+    .replace(/^[-*•·]\s+/, "")
+    .replace(/^\d+[.)]\s+/, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function computeLineRetentionRatio(original: string, repaired: string) {
+  const originalLines = normalizeText(original)
+    .split("\n")
+    .map((line) => normalizeComparableAnswerLine(line))
+    .filter(Boolean);
+  if (!originalLines.length) return 1;
+
+  const repairedLines = normalizeText(repaired)
+    .split("\n")
+    .map((line) => normalizeComparableAnswerLine(line))
+    .filter(Boolean);
+  const repairedSet = new Set(repairedLines);
+
+  let matched = 0;
+  for (const line of originalLines) {
+    if (repairedSet.has(line)) {
+      matched += 1;
+      continue;
+    }
+    if (line.length >= 24 && repairedLines.some((candidate) => candidate.includes(line) || line.includes(candidate))) {
+      matched += 1;
+    }
+  }
+  return matched / originalLines.length;
+}
+
+function shouldAcceptRepairedAnswer(original: string, repaired: string, repairInstructions: string) {
+  const originalText = normalizeText(original);
+  const repairedText = normalizeText(repaired);
+  if (!originalText || !repairedText) return false;
+  if (originalText === repairedText) return true;
+
+  const repairedRatio = repairedText.length / Math.max(1, originalText.length);
+  const retentionRatio = computeLineRetentionRatio(originalText, repairedText);
+  const issues = parseIssueCodes(repairInstructions);
+  const verboseOnly =
+    issues.length > 0 &&
+    issues.every((issue) => ["duplicate_lines", "filler_detected", "overlong_answer", "forbidden_followup"].includes(issue));
+
+  if (verboseOnly) {
+    return retentionRatio >= 0.35 && repairedRatio >= 0.5;
+  }
+  return retentionRatio >= 0.55 || repairedRatio >= 0.88;
 }
 
 function mergeQualityDecisions(heuristic: MedSafetyQualityDecision, model: MedSafetyQualityDecision | null) {
@@ -1812,13 +1867,15 @@ async function runQualityGateAndRepair(args: {
       retryBaseMs: args.networkRetryBaseMs,
     });
     if (!repairAttempt.error && repairAttempt.text) {
+      const repairedAnswer = sanitizeAnswerText(repairAttempt.text);
+      const acceptRepair = shouldAcceptRepairedAnswer(args.answer, repairedAnswer, finalGateDecision.repairInstructions);
       return {
-        answer: sanitizeAnswerText(repairAttempt.text),
+        answer: acceptRepair ? repairedAnswer : args.answer,
         gateDecision: finalGateDecision,
         gateUsage,
         repairUsage: repairAttempt.usage,
         totalUsage: sumUsages(gateUsage, repairAttempt.usage),
-        repaired: true,
+        repaired: acceptRepair,
       };
     }
     if (!isReasoningEffortRejected(repairAttempt.error ?? "") || reasoningIndex + 1 >= args.profile.reasoningEfforts.length) {
