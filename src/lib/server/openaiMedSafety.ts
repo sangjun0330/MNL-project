@@ -75,6 +75,7 @@ export type MedSafetyUsageBreakdown = {
   runtimeMode: MedSafetyRuntimeMode;
   routeDecision: {
     intent: MedSafetyRouteDecision["intent"];
+    secondaryIntents: MedSafetyRouteDecision["secondaryIntents"];
     risk: MedSafetyRouteDecision["risk"];
     entityClarity: MedSafetyRouteDecision["entityClarity"];
     answerDepth: MedSafetyRouteDecision["answerDepth"];
@@ -83,6 +84,23 @@ export type MedSafetyUsageBreakdown = {
     format: MedSafetyRouteDecision["format"];
     source: MedSafetyRouteDecision["source"];
     confidence: MedSafetyRouteDecision["confidence"];
+    urgencyLevel: MedSafetyRouteDecision["urgencyLevel"];
+    workflowStage: MedSafetyRouteDecision["workflowStage"];
+    notificationNeed: MedSafetyRouteDecision["notificationNeed"];
+    reversibleCauseSweep: boolean;
+    trendNeed: boolean;
+    thresholdNeed: boolean;
+    counterfactualNeed: boolean;
+    exceptionNeed: boolean;
+    pairedProblemNeed: boolean;
+    scriptNeed: boolean;
+    checklistDepth: MedSafetyRouteDecision["checklistDepth"];
+    measurementDependency: MedSafetyRouteDecision["measurementDependency"];
+    mandatoryArtifacts: MedSafetyRouteDecision["mandatoryArtifacts"];
+    sectionEmphasis: MedSafetyRouteDecision["sectionEmphasis"];
+    communicationArtifacts: MedSafetyRouteDecision["communicationArtifacts"];
+    dangerBias: MedSafetyRouteDecision["dangerBias"];
+    detailBias: MedSafetyRouteDecision["detailBias"];
   } | null;
 };
 
@@ -544,6 +562,10 @@ function buildPromptDisciplineDiagnostics(
       subjectFocus: assembly?.blueprint.subjectFocus ?? null,
       mixedIntent: assembly?.blueprint.mixedIntent ?? null,
       followupPolicy: assembly?.blueprint.followupPolicy ?? null,
+      requiredArtifacts: assembly?.blueprint.requiredArtifacts ?? [],
+      optionalArtifacts: assembly?.blueprint.optionalArtifacts ?? [],
+      sectionEmphasis: assembly?.blueprint.sectionEmphasis ?? [],
+      domainCoverageTargets: assembly?.blueprint.domainCoverageTargets ?? [],
       budgetClass: assembly?.budgetClass ?? null,
     };
   }
@@ -574,6 +596,10 @@ function buildPromptDisciplineDiagnostics(
     subjectFocus: assembly?.blueprint.subjectFocus ?? null,
     mixedIntent: assembly?.blueprint.mixedIntent ?? null,
     followupPolicy: assembly?.blueprint.followupPolicy ?? null,
+    requiredArtifacts: assembly?.blueprint.requiredArtifacts ?? [],
+    optionalArtifacts: assembly?.blueprint.optionalArtifacts ?? [],
+    sectionEmphasis: assembly?.blueprint.sectionEmphasis ?? [],
+    domainCoverageTargets: assembly?.blueprint.domainCoverageTargets ?? [],
     budgetClass: assembly?.budgetClass ?? null,
   };
 }
@@ -757,6 +783,7 @@ function serializeRouteDecision(decision: MedSafetyRouteDecision | null | undefi
   if (!decision) return null;
   return {
     intent: decision.intent,
+    secondaryIntents: decision.secondaryIntents,
     risk: decision.risk,
     entityClarity: decision.entityClarity,
     answerDepth: decision.answerDepth,
@@ -765,6 +792,23 @@ function serializeRouteDecision(decision: MedSafetyRouteDecision | null | undefi
     format: decision.format,
     source: decision.source,
     confidence: decision.confidence,
+    urgencyLevel: decision.urgencyLevel,
+    workflowStage: decision.workflowStage,
+    notificationNeed: decision.notificationNeed,
+    reversibleCauseSweep: decision.reversibleCauseSweep,
+    trendNeed: decision.trendNeed,
+    thresholdNeed: decision.thresholdNeed,
+    counterfactualNeed: decision.counterfactualNeed,
+    exceptionNeed: decision.exceptionNeed,
+    pairedProblemNeed: decision.pairedProblemNeed,
+    scriptNeed: decision.scriptNeed,
+    checklistDepth: decision.checklistDepth,
+    measurementDependency: decision.measurementDependency,
+    mandatoryArtifacts: decision.mandatoryArtifacts,
+    sectionEmphasis: decision.sectionEmphasis,
+    communicationArtifacts: decision.communicationArtifacts,
+    dangerBias: decision.dangerBias,
+    detailBias: decision.detailBias,
   };
 }
 
@@ -841,10 +885,23 @@ function mergeQualityDecisions(heuristic: MedSafetyQualityDecision, model: MedSa
   const priority = (verdict: MedSafetyQualityDecision["verdict"]) =>
     verdict === "repair_required" ? 2 : verdict === "pass_but_verbose" ? 1 : 0;
   const chosen = priority(model.verdict) >= priority(heuristic.verdict) ? model.verdict : heuristic.verdict;
-  const mergedIssues = Array.from(new Set([...parseIssueCodes(heuristic.repairInstructions), ...parseIssueCodes(model.repairInstructions)]));
+  const mergedIssues = Array.from(new Set([...heuristic.issues, ...model.issues]));
+  const mergedCriticalIssues = Array.from(new Set([...heuristic.criticalIssues, ...model.criticalIssues]));
+  const mergedScores = {
+    directness: Math.max(heuristic.scores.directness, model.scores.directness),
+    bedside_actionability: Math.max(heuristic.scores.bedside_actionability, model.scores.bedside_actionability),
+    exception_quality: Math.max(heuristic.scores.exception_quality, model.scores.exception_quality),
+    reporting_utility: Math.max(heuristic.scores.reporting_utility, model.scores.reporting_utility),
+    checklist_density: Math.max(heuristic.scores.checklist_density, model.scores.checklist_density),
+    safety_guardrails: Math.max(heuristic.scores.safety_guardrails, model.scores.safety_guardrails),
+    paired_problem_coverage: Math.max(heuristic.scores.paired_problem_coverage, model.scores.paired_problem_coverage),
+  };
   return {
     verdict: chosen,
     repairInstructions: mergedIssues.join(","),
+    issues: mergedIssues,
+    criticalIssues: mergedCriticalIssues,
+    scores: mergedScores,
   } satisfies MedSafetyQualityDecision;
 }
 
@@ -880,7 +937,7 @@ function buildDefaultPromptProfile(): MedSafetyPromptProfile {
   return {
     reasoningEfforts: ["high", "medium"],
     verbosity: "medium",
-    outputTokenCandidates: [9000, 7600, 6200],
+    outputTokenCandidates: [12000, 9500, 7600],
     qualityLevel: "balanced",
   };
 }
@@ -1827,7 +1884,7 @@ async function runQualityGateAndRepair(args: {
   totalUsage: ResponsesUsage | null;
   repaired: boolean;
 }> {
-  const heuristicDecision = buildHeuristicQualityDecision(args.answer, args.decision);
+  const heuristicDecision = buildHeuristicQualityDecision(args.answer, args.decision, args.promptAssembly?.blueprint ?? null);
   const shouldCallModelGate = shouldRunQualityGate({
     decision: args.decision,
     isPremiumSearch: args.isPremiumSearch,
@@ -1835,7 +1892,7 @@ async function runQualityGateAndRepair(args: {
     answer: args.answer,
   });
 
-  let gateUsage: ResponsesUsage | null = null;
+  let gateUsageTotal: ResponsesUsage | null = null;
   let modelDecision: MedSafetyQualityDecision | null = null;
   if (shouldCallModelGate) {
     const gateAttempt = await callResponsesApiWithRetry({
@@ -1859,7 +1916,7 @@ async function runQualityGateAndRepair(args: {
       retries: args.networkRetries,
       retryBaseMs: args.networkRetryBaseMs,
     });
-    gateUsage = gateAttempt.usage;
+    gateUsageTotal = gateAttempt.usage;
     if (!gateAttempt.error && gateAttempt.text) {
       modelDecision = parseQualityGateDecision(gateAttempt.text);
     }
@@ -1870,68 +1927,130 @@ async function runQualityGateAndRepair(args: {
     return {
       answer: args.answer,
       gateDecision: finalGateDecision,
-      gateUsage,
+      gateUsage: gateUsageTotal,
       repairUsage: null,
-      totalUsage: gateUsage,
+      totalUsage: gateUsageTotal,
       repaired: false,
     };
   }
 
-  let repairAttempt: ResponsesAttempt = {
+  let currentAnswer = args.answer;
+  let currentGateDecision = finalGateDecision;
+  let repairUsageTotal: ResponsesUsage | null = null;
+  let anyRepairAccepted = false;
+  let lastRepairAttempt: ResponsesAttempt = {
     text: null,
     error: "repair_not_attempted",
     responseId: null,
     conversationId: null,
     usage: null,
   };
-  for (let reasoningIndex = 0; reasoningIndex < args.profile.reasoningEfforts.length; reasoningIndex += 1) {
-    const reasoningEffort = args.profile.reasoningEfforts[reasoningIndex] ?? "medium";
-    repairAttempt = await callResponsesApiWithRetry({
-      apiKey: args.apiKey,
-      model: args.model,
-      developerPrompt: buildRepairDeveloperPrompt(args.locale),
-      userPrompt: buildRepairUserPrompt({
-        query: args.query,
-        answer: args.answer,
-        locale: args.locale,
-        decision: args.decision,
-        repairInstructions: finalGateDecision.repairInstructions,
-        promptAssembly: args.promptAssembly ?? null,
-      }),
-      apiBaseUrl: args.apiBaseUrl,
-      signal: args.signal,
-      maxOutputTokens: args.profile.outputTokenCandidates[0] ?? 1200,
-      upstreamTimeoutMs: args.upstreamTimeoutMs,
-      verbosity: args.profile.verbosity,
-      reasoningEffort,
-      storeResponses: false,
-      retries: args.networkRetries,
-      retryBaseMs: args.networkRetryBaseMs,
-    });
-    if (!repairAttempt.error && repairAttempt.text) {
-      const repairedAnswer = normalizeDeliveredAnswerText(repairAttempt.text);
-      const acceptRepair = shouldAcceptRepairedAnswer(args.answer, repairedAnswer, finalGateDecision.repairInstructions);
-      return {
-        answer: acceptRepair ? repairedAnswer : args.answer,
-        gateDecision: finalGateDecision,
-        gateUsage,
-        repairUsage: repairAttempt.usage,
-        totalUsage: sumUsages(gateUsage, repairAttempt.usage),
-        repaired: acceptRepair,
-      };
-    }
-    if (!isReasoningEffortRejected(repairAttempt.error ?? "") || reasoningIndex + 1 >= args.profile.reasoningEfforts.length) {
-      break;
+  const maxRepairPasses = args.decision.risk === "high" || args.decision.urgencyLevel === "critical" ? 2 : 1;
+
+  for (let passIndex = 0; passIndex < maxRepairPasses; passIndex += 1) {
+    for (let reasoningIndex = 0; reasoningIndex < args.profile.reasoningEfforts.length; reasoningIndex += 1) {
+      const reasoningEffort = args.profile.reasoningEfforts[reasoningIndex] ?? "medium";
+      lastRepairAttempt = await callResponsesApiWithRetry({
+        apiKey: args.apiKey,
+        model: args.model,
+        developerPrompt: buildRepairDeveloperPrompt(args.locale),
+        userPrompt: buildRepairUserPrompt({
+          query: args.query,
+          answer: currentAnswer,
+          locale: args.locale,
+          decision: args.decision,
+          repairInstructions: currentGateDecision.repairInstructions,
+          promptAssembly: args.promptAssembly ?? null,
+        }),
+        apiBaseUrl: args.apiBaseUrl,
+        signal: args.signal,
+        maxOutputTokens: args.profile.outputTokenCandidates[0] ?? 1200,
+        upstreamTimeoutMs: args.upstreamTimeoutMs,
+        verbosity: args.profile.verbosity,
+        reasoningEffort,
+        storeResponses: false,
+        retries: args.networkRetries,
+        retryBaseMs: args.networkRetryBaseMs,
+      });
+      repairUsageTotal = sumUsages(repairUsageTotal, lastRepairAttempt.usage);
+      if (!lastRepairAttempt.error && lastRepairAttempt.text) {
+        const repairedAnswer = normalizeDeliveredAnswerText(lastRepairAttempt.text);
+        const acceptRepair = shouldAcceptRepairedAnswer(currentAnswer, repairedAnswer, currentGateDecision.repairInstructions);
+        if (!acceptRepair) {
+          return {
+            answer: currentAnswer,
+            gateDecision: currentGateDecision,
+            gateUsage: gateUsageTotal,
+            repairUsage: repairUsageTotal,
+            totalUsage: sumUsages(gateUsageTotal, repairUsageTotal),
+            repaired: anyRepairAccepted,
+          };
+        }
+
+        currentAnswer = repairedAnswer;
+        anyRepairAccepted = true;
+        const postHeuristic = buildHeuristicQualityDecision(currentAnswer, args.decision, args.promptAssembly?.blueprint ?? null);
+        let postModelDecision: MedSafetyQualityDecision | null = null;
+        if (shouldCallModelGate && (postHeuristic.verdict !== "pass" || passIndex + 1 < maxRepairPasses)) {
+          const postGateAttempt = await callResponsesApiWithRetry({
+            apiKey: args.apiKey,
+            model: args.model,
+            developerPrompt: buildQualityGateDeveloperPrompt(),
+            userPrompt: buildQualityGateUserPrompt({
+              query: args.query,
+              answer: currentAnswer,
+              locale: args.locale,
+              decision: args.decision,
+              promptAssembly: args.promptAssembly ?? null,
+            }),
+            apiBaseUrl: args.apiBaseUrl,
+            signal: args.signal,
+            maxOutputTokens: 260,
+            upstreamTimeoutMs: Math.max(20_000, Math.min(args.upstreamTimeoutMs, 45_000)),
+            verbosity: "low",
+            reasoningEffort: args.isPremiumSearch ? "medium" : "low",
+            storeResponses: false,
+            retries: args.networkRetries,
+            retryBaseMs: args.networkRetryBaseMs,
+          });
+          gateUsageTotal = sumUsages(gateUsageTotal, postGateAttempt.usage);
+          if (!postGateAttempt.error && postGateAttempt.text) {
+            postModelDecision = parseQualityGateDecision(postGateAttempt.text);
+          }
+        }
+        currentGateDecision = mergeQualityDecisions(postHeuristic, postModelDecision);
+        if (currentGateDecision.verdict === "pass" || !currentGateDecision.criticalIssues.length || passIndex + 1 >= maxRepairPasses) {
+          return {
+            answer: currentAnswer,
+            gateDecision: currentGateDecision,
+            gateUsage: gateUsageTotal,
+            repairUsage: repairUsageTotal,
+            totalUsage: sumUsages(gateUsageTotal, repairUsageTotal),
+            repaired: anyRepairAccepted,
+          };
+        }
+        break;
+      }
+      if (!isReasoningEffortRejected(lastRepairAttempt.error ?? "") || reasoningIndex + 1 >= args.profile.reasoningEfforts.length) {
+        return {
+          answer: currentAnswer,
+          gateDecision: currentGateDecision,
+          gateUsage: gateUsageTotal,
+          repairUsage: repairUsageTotal,
+          totalUsage: sumUsages(gateUsageTotal, repairUsageTotal),
+          repaired: anyRepairAccepted,
+        };
+      }
     }
   }
 
   return {
-    answer: args.answer,
-    gateDecision: finalGateDecision,
-    gateUsage,
-    repairUsage: repairAttempt.usage,
-    totalUsage: sumUsages(gateUsage, repairAttempt.usage),
-    repaired: false,
+    answer: currentAnswer,
+    gateDecision: currentGateDecision,
+    gateUsage: gateUsageTotal,
+    repairUsage: repairUsageTotal ?? lastRepairAttempt.usage,
+    totalUsage: sumUsages(gateUsageTotal, repairUsageTotal ?? lastRepairAttempt.usage),
+    repaired: anyRepairAccepted,
   };
 }
 
@@ -2018,7 +2137,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         usage: routeUsage,
         promptChars: mainDeveloperPrompt.length,
         extra: {
-          mainPromptMode: runtimeMode === "hybrid_live" ? "behavioral_contract_v2" : "legacy_monolithic",
+          mainPromptMode: runtimeMode === "hybrid_live" ? "behavioral_contract_v3" : "legacy_monolithic",
           actualPromptChars: mainDeveloperPrompt.length,
           tokenCandidates: promptProfile.outputTokenCandidates.join(","),
           reasoningEfforts: promptProfile.reasoningEfforts.join(","),
@@ -2065,7 +2184,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
           streamed: mainAttempt.streamed,
           reasoningEffort: mainAttempt.reasoningEffort,
           maxOutputTokens: mainAttempt.maxOutputTokens,
-          mainPromptMode: runtimeMode === "hybrid_live" ? "behavioral_contract_v2" : "legacy_monolithic",
+          mainPromptMode: runtimeMode === "hybrid_live" ? "behavioral_contract_v3" : "legacy_monolithic",
           ...buildPromptDisciplineDiagnostics(routeDecision, promptProfile, promptAssembly),
         },
       });
@@ -2126,7 +2245,9 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
           networkRetryBaseMs,
         });
         const hybridAnswer = hybridAttempt.answerText ? normalizeDeliveredAnswerText(hybridAttempt.answerText) : null;
-        const hybridHeuristic = hybridAnswer ? buildHeuristicQualityDecision(hybridAnswer, routeDecision) : null;
+        const hybridHeuristic = hybridAnswer
+          ? buildHeuristicQualityDecision(hybridAnswer, routeDecision, promptAssembly.blueprint)
+          : null;
         const pairwiseQualityFlags: string[] = [];
         const verbosityFlags: string[] = [];
         if (!hybridAnswer) {
