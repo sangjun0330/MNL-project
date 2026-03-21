@@ -8,6 +8,7 @@ export type MedSafetyRouteSource = "rules" | "model";
 export type MedSafetyQualityVerdict = "pass" | "repair_required";
 export type MedSafetyReasoningEffort = "low" | "medium" | "high";
 export type MedSafetyVerbosity = "low" | "medium" | "high";
+export type MedSafetyQualityLevel = "balanced";
 
 export type MedSafetyRouteDecision = {
   intent: MedSafetyIntent;
@@ -26,6 +27,7 @@ export type MedSafetyPromptProfile = {
   reasoningEfforts: MedSafetyReasoningEffort[];
   verbosity: MedSafetyVerbosity;
   outputTokenCandidates: number[];
+  qualityLevel: MedSafetyQualityLevel;
 };
 
 export type MedSafetyQualityDecision = {
@@ -101,20 +103,19 @@ const DUPLICATE_LINE_EXEMPT_PATTERNS = [/^핵심[:：]?$/i, /^지금\s*할\s*일
 const LONG_ANSWER_CHAR_THRESHOLD = 1100;
 
 const CORE_SAFETY = [
-  "너는 간호사를 위한 임상 검색 AI다.",
-  "가장 중요한 목표는 간호사가 지금 무엇을 이해해야 하고 무엇을 해야 하는지 빠르고 정확하고 안전하게 알려주는 것이다.",
-  "답변은 교과서식 장황한 설명이 아니라 현장에서 바로 쓰이는 실무형이어야 한다.",
-  "첫 문장 또는 첫 2문장 안에 사용자가 가장 궁금해할 핵심 답을 먼저 준다.",
-  "질문이 혼합형이면 행동과 안전을 먼저 두고 배경 설명은 그 다음에 둔다.",
-  "답변은 빠른 판단, 실무 행동, 기억 보조가 함께 되도록 구성한다.",
-  "사실을 지어내지 않는다.",
-  "확실하지 않은 내용은 추정하지 않는다.",
-  "진단이나 처방 결정을 대신하지 않는다.",
-  "최종 기준은 기관 프로토콜, 의사 지시, 약제부 지침, 제조사 IFU다.",
-  "위험이 있으면 설명보다 행동과 안전을 먼저 제시한다.",
-  "질문이 요구하지 않은 정보를 과도하게 덧붙이지 않는다.",
-  "같은 의미를 반복하지 않는다.",
-  "현장에 도움이 적은 일반론과 빈 문장은 제거한다.",
+  "[추가 품질 보강 규칙을 적용한다.]",
+  "- 기본 안전 원칙은 이미 적용되어 있다고 가정하고, 이번 답변에서는 정확도와 신뢰도를 더 엄격하게 관리한다.",
+  "- 확실하지 않은 사실은 확인된 것처럼 단정하지 않는다.",
+  "- 일반 원칙과 기관별, 제조사별, 제품별 세부 기준을 명확히 구분한다.",
+  "- 높은 확신이 없으면 용량, 속도, 희석, 경로, 호환성, 세팅값, 교체주기, 적응증 세부 기준은 일반 원칙 수준까지만 답한다.",
+  "- 기관 의존 정보나 제조사 의존 정보는 반드시 기관 프로토콜, 약제부, 제조사 IFU 확인이 필요하다고 연결한다.",
+  "- 고위험 질문에서 정보 확신이 낮으면 자세한 추정보다 제한된 답변, 확인 필요, 즉시 안전 행동을 우선한다.",
+  "- 대상 식별이 MEDIUM이면 첫 문장 안에서 어떤 전제로 설명하는지 짧게 밝히고, 위험해질 수 있는 세부 임상 지시는 제한한다.",
+  "- 첫 1~2문장 안에 핵심 답을 주고, 그 뒤에는 실무 판단과 행동이 바로 보이도록 밀도 있게 정리한다.",
+  "- compare 질문은 가장 빨리 보는 구분점을 반드시 살리고, numeric 질문은 기준, 의미, 보고 기준을 빠뜨리지 않는다.",
+  "- action/device 질문은 지금 할 일, 지금 확인할 것, 중단/보고/호출 기준을 우선한다.",
+  "- 작은 묶음이 여럿 필요한 섹션에서는 짧은 소카테고리 한 줄을 먼저 두고, 그 아래 세부 항목을 정리한다.",
+  "- filler, 반복, 근거 없는 manufacturer-level specificity는 제거한다.",
 ].join("\n");
 
 const INTENT_KNOWLEDGE = [
@@ -212,6 +213,8 @@ const FORMAT_SECTIONED = [
   "- 여러 섹션이 있으면 각 섹션 사이를 반드시 빈 줄 2개로 구분한다.",
   "- 각 소제목 바로 아래 첫 줄은 그 섹션의 핵심을 요약하는 리드 문장으로 쓴다.",
   "- 리드 문장은 불릿으로 시작하지 않는다.",
+  "- 한 섹션 안에서 작은 묶음을 나눌 필요가 있으면 양, 색, 점도/이물, 즉시 보고/호출처럼 짧은 소카테고리 한 줄을 먼저 쓰고 그 아래 세부 bullet을 둔다.",
+  "- 작은 소카테고리 줄은 리드 문장과는 구분되는 본문용 짧은 라벨로 쓴다.",
   "- 소제목 없이 불릿만 나열하지 않는다.",
 ].join("\n");
 
@@ -233,16 +236,21 @@ const QUALITY_GATE_DEVELOPER_PROMPT = [
   "Allowed JSON shape:",
   '{"verdict":"pass|repair_required","repairInstructions":"string"}',
   "Return repair_required if any of the following is true:",
+  "- uncertain or weakly supported facts are stated with unjustified certainty",
+  "- general principles and institution-specific or manufacturer-specific details are blurred together",
   "- high-risk answer does not put immediate action near the top",
   "- escalation is needed but stop/report/call criteria are missing",
+  "- a medium-clarity entity answer does not briefly disclose the working assumption near the start",
   "- ambiguous entity answer asserts dose/rate/dilution/route/compatibility/device setting as if verified",
+  "- high-risk low-confidence answer becomes more detailed instead of more conservative",
   "- sectioned answer lacks clear section structure or lead sentence",
   "- duplicated filler or generic weak sentences reduce decision usefulness",
   "- unsupported manufacturer-specific specificity appears",
   "- compare answer misses the fastest practical distinction",
   "- numeric answer misses one of baseline range, meaning, or reporting threshold",
   "- device/action answer is weak on what to check now or what to do now",
-  "If the answer is already strong, return pass.",
+  "If repair is needed, the repairInstructions must prioritize deleting unsafe specificity, adding assumption disclosure or uncertainty, and strengthening immediate actions or reporting thresholds.",
+  "If the answer is already strong and trustworthy, return pass.",
 ].join("\n");
 
 function normalizeText(value: unknown) {
@@ -543,6 +551,7 @@ export function buildPromptProfile(args: {
       reasoningEfforts: isPremiumSearch ? ["medium"] : ["low"],
       verbosity: "low",
       outputTokenCandidates: [2000, 1600, 1400],
+      qualityLevel: "balanced",
     };
   }
   if (decision.risk === "high" || decision.entityClarity !== "high" || decision.answerDepth === "detailed") {
@@ -550,12 +559,14 @@ export function buildPromptProfile(args: {
       reasoningEfforts: supportsHighReasoning ? ["high", "medium"] : ["medium"],
       verbosity: "medium",
       outputTokenCandidates: [5000, 4200, 3600],
+      qualityLevel: "balanced",
     };
   }
   return {
     reasoningEfforts: ["medium"],
     verbosity: "medium",
     outputTokenCandidates: [4000, 3400, 2800],
+    qualityLevel: "balanced",
   };
 }
 
@@ -589,6 +600,8 @@ export function buildQualityGateUserPrompt(args: {
     `needsEscalation=${String(args.decision.needsEscalation)}`,
     `needsSbar=${String(args.decision.needsSbar)}`,
     `format=${args.decision.format}`,
+    `confidence=${args.decision.confidence}`,
+    `source=${args.decision.source}`,
     "",
     args.locale === "en" ? "Answer to review:" : "검토할 답변:",
     normalizeText(args.answer),
@@ -619,7 +632,11 @@ export function buildRepairDeveloperPrompt(baseDeveloperPrompt: string, locale: 
           "- Revise the existing answer without changing its clinical intent.",
           "- Preserve correct content and structure when possible.",
           "- Fix only the issues listed in the repair instructions.",
+          "- Do not add new unsupported clinical specifics.",
+          "- If certainty is limited, explicitly state the working assumption or need for verification.",
           "- Remove unsupported specificity, duplicated filler, and weak generic wording.",
+          "- Prefer tighter action/report wording over expanding background explanation.",
+          "- Preserve strong lead sentences and section structure when they are already correct.",
           "- Return final plain text answer only.",
         ].join("\n")
       : [
@@ -627,7 +644,11 @@ export function buildRepairDeveloperPrompt(baseDeveloperPrompt: string, locale: 
           "- 기존 답변의 임상적 의도는 유지하되 부족한 부분만 보강하라.",
           "- 맞는 내용과 구조는 가능한 한 유지하라.",
           "- repair instructions에 적힌 문제만 고쳐라.",
+          "- 새롭고 근거 없는 임상 세부사항을 덧붙이지 마라.",
+          "- 확신이 낮으면 어떤 전제로 설명하는지 또는 무엇을 확인해야 하는지 분명히 밝혀라.",
           "- 근거 없는 구체성, 중복 문장, 힘 빠진 일반론을 제거하라.",
+          "- 배경 설명을 늘리기보다 즉시 행동과 보고 기준을 더 선명하게 다듬어라.",
+          "- 이미 좋은 리드 문장과 섹션 구조는 유지하라.",
           "- 최종 답변 평문만 반환하라.",
         ].join("\n");
   return `${baseDeveloperPrompt}\n\n${repairTail}`;
@@ -649,6 +670,8 @@ export function buildRepairUserPrompt(args: {
     `needsEscalation=${String(args.decision.needsEscalation)}`,
     `needsSbar=${String(args.decision.needsSbar)}`,
     `format=${args.decision.format}`,
+    `confidence=${args.decision.confidence}`,
+    `source=${args.decision.source}`,
     "",
     args.locale === "en" ? `Repair instructions: ${normalizeText(args.repairInstructions)}` : `수정 지시: ${normalizeText(args.repairInstructions)}`,
     "",
@@ -690,6 +713,14 @@ function hasImmediateActionNearTop(text: string) {
   return /(중단|멈추|바로|즉시|확인|보고|호출|clamp|산소|분리)/i.test(top);
 }
 
+function hasAssumptionDisclosureNearTop(text: string) {
+  const top = normalizeText(text)
+    .split("\n")
+    .slice(0, 6)
+    .join("\n");
+  return /(의미하신 것으로|보고 설명|전제로|가정하면|추정|정확한 명칭|확인이 필요|확인 필요|assuming|if you mean)/i.test(top);
+}
+
 function includesEscalationSignals(text: string) {
   return /(중단|멈추|보고|호출|clamp|산소|분리|의사에게|상급자에게)/i.test(text);
 }
@@ -706,6 +737,16 @@ function includesActionCore(text: string) {
   return /(확인|체크|관찰)/i.test(text) && /(조치|대응|중단|보고|호출)/i.test(text);
 }
 
+function includesRiskySpecificity(text: string) {
+  return /(\b\d+(?:\.\d+)?\s*(?:mg|mcg|g|kg|mL|ml|cc|units?|u|amp|vial|mEq|mmol|gtt\/min|drops?\/min|ml\/hr|cc\/hr|L\/min|l\/min|psi|mmhg|fr|gauge)\b)|(희석[^\n]{0,18}\d)|(속도[^\n]{0,18}\d)|(세팅[^\n]{0,18}\d)|(교체주기[^\n]{0,18}\d)/i.test(
+    text
+  );
+}
+
+function includesLocalAuthorityCaveat(text: string) {
+  return /(기관 프로토콜|기관 기준|약제부|제조사|ifu|local protocol|pharmacy|manufacturer)/i.test(text);
+}
+
 function findHeuristicRepairIssues(answer: string, decision: MedSafetyRouteDecision) {
   const issues: string[] = [];
   if (decision.risk === "high" && !hasImmediateActionNearTop(answer)) {
@@ -714,8 +755,14 @@ function findHeuristicRepairIssues(answer: string, decision: MedSafetyRouteDecis
   if (decision.needsEscalation && !includesEscalationSignals(answer)) {
     issues.push("중단/보고/호출 기준이 약합니다.");
   }
+  if (decision.entityClarity === "medium" && !hasAssumptionDisclosureNearTop(answer)) {
+    issues.push("대상 식별이 MEDIUM인데 답변 시작부에 전제나 확인 필요성이 충분히 드러나지 않습니다.");
+  }
   if (decision.entityClarity !== "high" && /(용량|속도|희석|경로|호환성|세팅)/i.test(answer) && !/(확인|추정|가능성|정확한 명칭)/i.test(answer)) {
     issues.push("대상 식별이 애매한데 구체 임상 지시가 단정적으로 보입니다.");
+  }
+  if ((decision.entityClarity !== "high" || decision.risk === "high") && includesRiskySpecificity(answer) && !includesLocalAuthorityCaveat(answer)) {
+    issues.push("위험하거나 애매한 질문인데 기관별 또는 대상별로 달라질 수 있는 구체성이 충분한 단서 없이 제시됩니다.");
   }
   if (decision.format === "sectioned" && !hasSectionStructure(answer)) {
     issues.push("sectioned 형식인데 섹션 구조가 약합니다.");

@@ -501,6 +501,47 @@ function buildDeveloperPrompt(locale: "ko" | "en") {
   ].join("\n");
 }
 
+function buildHybridDeveloperPrompt(corePrompt: string, deltaPrompt?: string | null) {
+  const normalizedDelta = normalizeText(deltaPrompt ?? "");
+  if (!normalizedDelta) return corePrompt;
+  return `${corePrompt}\n\n${normalizedDelta}`;
+}
+
+function buildPromptDisciplineDiagnostics(
+  decision: MedSafetyRouteDecision | null | undefined,
+  profile?: MedSafetyPromptProfile | null
+) {
+  const qualityLevel = profile?.qualityLevel ?? "balanced";
+  if (!decision) {
+    return {
+      qualityLevel,
+      confidenceDiscipline: "dense_core_only",
+      specificitySuppression: false,
+      assumptionDisclosure: "not_applicable",
+    };
+  }
+  return {
+    qualityLevel,
+    confidenceDiscipline:
+      decision.risk === "high" && decision.entityClarity !== "high"
+        ? "constrained_high_risk"
+        : decision.entityClarity === "medium"
+          ? "assumption_disclosed_general_only"
+          : decision.entityClarity === "low"
+            ? "verification_before_specifics"
+            : decision.risk === "high"
+              ? "safety_first_verified_only"
+              : "standard",
+    specificitySuppression: decision.risk === "high" || decision.entityClarity !== "high",
+    assumptionDisclosure:
+      decision.entityClarity === "medium"
+        ? "opening_line_required"
+        : decision.entityClarity === "low"
+          ? "verification_required"
+          : "not_required",
+  };
+}
+
 function buildUserPrompt(query: string, locale: "ko" | "en") {
   const normalizedQuery = normalizeText(query);
   if (locale === "en") {
@@ -1567,11 +1608,16 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         streamed: args.streamed,
         reasoningEffort: args.reasoningEffort,
         maxOutputTokens: args.maxOutputTokens,
+        ...buildPromptDisciplineDiagnostics(args.routeDecision, args.profile),
       },
     });
 
     if (runtimeMode !== "legacy" && args.routeDecision) {
       const allowRepair = runtimeMode === "hybrid_live" && args.allowRepair;
+      const qualityDeveloperPrompt = buildHybridDeveloperPrompt(
+        legacyDeveloperPrompt,
+        assembleMedSafetyDeveloperPrompt(args.routeDecision, params.locale)
+      );
       const quality = await runQualityGateAndRepair({
         runtimeMode,
         query: params.query,
@@ -1586,7 +1632,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         networkRetries,
         networkRetryBaseMs,
         profile: args.profile,
-        developerPrompt: runtimeMode === "hybrid_live" ? args.developerPrompt : assembleMedSafetyDeveloperPrompt(args.routeDecision, params.locale),
+        developerPrompt: runtimeMode === "hybrid_live" ? args.developerPrompt : qualityDeveloperPrompt,
         hasImage: Boolean(params.imageDataUrl),
         isPremiumSearch: args.isPremiumSearch,
         allowRepair,
@@ -1603,6 +1649,8 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
           verdict: quality.gateDecision?.verdict ?? "not_run",
           repaired: quality.repaired,
           allowRepair,
+          repairReason: quality.gateDecision?.repairInstructions ? truncateError(quality.gateDecision.repairInstructions, 320) : null,
+          ...buildPromptDisciplineDiagnostics(args.routeDecision, args.profile),
         },
       });
     }
@@ -1640,11 +1688,13 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
       const isPremiumSearch = isPremiumSearchModel(candidateModel);
       let routeDecision: MedSafetyRouteDecision | null = null;
       let routeUsage: ResponsesUsage | null = null;
-      let assembledDeveloperPrompt = legacyDeveloperPrompt;
+      let deltaDeveloperPrompt = "";
+      let hybridDeveloperPrompt = legacyDeveloperPrompt;
       let promptProfile: MedSafetyPromptProfile = {
         reasoningEfforts: ["medium"],
         verbosity: legacyResponseVerbosity,
         outputTokenCandidates: legacyOutputTokenCandidates,
+        qualityLevel: "balanced",
       };
 
       if (runtimeMode !== "legacy") {
@@ -1664,7 +1714,8 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         routeDecision = resolvedRoute.decision;
         routeUsage = resolvedRoute.usage;
         lastRouteDecision = routeDecision;
-        assembledDeveloperPrompt = assembleMedSafetyDeveloperPrompt(routeDecision, params.locale);
+        deltaDeveloperPrompt = assembleMedSafetyDeveloperPrompt(routeDecision, params.locale);
+        hybridDeveloperPrompt = buildHybridDeveloperPrompt(legacyDeveloperPrompt, deltaDeveloperPrompt);
         promptProfile = buildPromptProfile({
           decision: routeDecision,
           model: candidateModel,
@@ -1676,18 +1727,20 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
           model: candidateModel,
           routeDecision,
           usage: routeUsage,
-          promptChars: assembledDeveloperPrompt.length,
+          promptChars: hybridDeveloperPrompt.length,
           extra: {
-            mainPromptMode: runtimeMode === "hybrid_shadow" ? "legacy" : "modular",
-            actualPromptChars: (runtimeMode === "hybrid_live" ? assembledDeveloperPrompt : legacyDeveloperPrompt).length,
+            mainPromptMode: runtimeMode === "hybrid_live" ? "dense_core_plus_delta" : "dense_core_only",
+            actualPromptChars: (runtimeMode === "hybrid_live" ? hybridDeveloperPrompt : legacyDeveloperPrompt).length,
+            deltaPromptChars: deltaDeveloperPrompt.length,
             reasoningEfforts: promptProfile.reasoningEfforts.join(","),
             tokenCandidates: promptProfile.outputTokenCandidates.join(","),
+            ...buildPromptDisciplineDiagnostics(routeDecision, promptProfile),
           },
         });
       }
 
       const usesHybridExecution = runtimeMode === "hybrid_live" && Boolean(routeDecision);
-      const mainDeveloperPrompt = usesHybridExecution ? assembledDeveloperPrompt : legacyDeveloperPrompt;
+      const mainDeveloperPrompt = usesHybridExecution ? hybridDeveloperPrompt : legacyDeveloperPrompt;
       const responseVerbosity = usesHybridExecution ? promptProfile.verbosity : legacyResponseVerbosity;
       const reasoningEfforts = usesHybridExecution ? promptProfile.reasoningEfforts : (["medium"] as MedSafetyReasoningEffort[]);
       const outputTokenCandidates = usesHybridExecution ? promptProfile.outputTokenCandidates : legacyOutputTokenCandidates;
