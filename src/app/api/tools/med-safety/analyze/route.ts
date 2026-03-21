@@ -528,11 +528,15 @@ export async function POST(req: NextRequest) {
     const conversationId = continuationState?.conversationId ?? undefined;
     const runtimeMode = resolveMedSafetyRuntimeMode();
 
-    const runAnalyze = async (onTextDelta?: (delta: string) => void | Promise<void>) => {
+    const runAnalyze = async (
+      onTextDelta?: (delta: string) => void | Promise<void>,
+      onReasoningDelta?: (delta: string) => void | Promise<void>,
+    ) => {
       const analyzedAt = Date.now();
       const today = todayISO();
       const shouldGenerateEnglishVariant = shouldGenerateKoEnglishVariant(runtimeMode);
       const effectiveOnTextDelta = locale === "ko" ? onTextDelta : undefined;
+      const effectiveOnReasoningDelta = locale === "ko" ? onReasoningDelta : undefined;
 
       const analyzedKo = await analyzeMedSafetyWithOpenAI({
         query,
@@ -542,6 +546,7 @@ export async function POST(req: NextRequest) {
         previousResponseId,
         conversationId,
         onTextDelta: effectiveOnTextDelta,
+        onReasoningDelta: effectiveOnReasoningDelta,
         signal: abort.signal,
       });
 
@@ -712,11 +717,18 @@ export async function POST(req: NextRequest) {
 
         pushEvent("start", { ok: true });
         try {
-          const { responseData, shouldCommitCredit } = await runAnalyze(async (delta) => {
-            const chunk = String(delta ?? "");
-            if (!chunk) return;
-            pushEvent("delta", { text: chunk });
-          });
+          const { responseData, shouldCommitCredit } = await runAnalyze(
+            async (delta) => {
+              const chunk = String(delta ?? "");
+              if (!chunk) return;
+              pushEvent("delta", { text: chunk });
+            },
+            async (reasoningDelta) => {
+              const chunk = String(reasoningDelta ?? "");
+              if (!chunk) return;
+              pushEvent("reasoning", { text: chunk });
+            }
+          );
           if (!shouldCommitCredit) {
             await safeRestoreConsumedMedSafetyCredit(userId, searchType, consumedBucket);
           }

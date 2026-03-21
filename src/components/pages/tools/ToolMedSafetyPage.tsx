@@ -409,8 +409,10 @@ function parseSseBlock(block: string): { event: string; data: string } | null {
 async function parseAnalyzeStreamResponse(args: {
   response: Response;
   onDelta: (text: string) => void;
+  onReasoningDelta?: (text: string) => void;
+  onStart?: () => void;
 }): Promise<{ data: AnalyzePayload | null; error: string | null }> {
-  const { response, onDelta } = args;
+  const { response, onDelta, onReasoningDelta, onStart } = args;
   const contentType = String(response.headers.get("content-type") ?? "").toLowerCase();
   if (!contentType.includes("text/event-stream")) {
     const payloadRaw = (await response.json().catch(() => null)) as unknown;
@@ -446,6 +448,15 @@ async function parseAnalyzeStreamResponse(args: {
     }
 
     const eventType = parsedBlock.event || String((payload as any)?.type ?? "");
+    if (eventType === "start") {
+      if (onStart) onStart();
+      return;
+    }
+    if (eventType === "reasoning") {
+      const text = typeof (payload as any)?.text === "string" ? (payload as any).text : "";
+      if (text && onReasoningDelta) onReasoningDelta(text);
+      return;
+    }
     if (eventType === "delta") {
       const text = typeof (payload as any)?.text === "string" ? (payload as any).text : "";
       if (text) onDelta(text);
@@ -1023,6 +1034,8 @@ export function ToolMedSafetyPage() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [streamingText, setStreamingText] = useState("");
+  const [reasoningText, setReasoningText] = useState("");
+  const [streamPhase, setStreamPhase] = useState<"idle" | "connecting" | "reasoning" | "writing">("idle");
   const [lastContinuationToken, setLastContinuationToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copyMessage, setCopyMessage] = useState("");
@@ -1368,6 +1381,8 @@ export function ToolMedSafetyPage() {
     setSelectedImageName("");
     setIsLoading(true);
     setStreamingText("");
+    setReasoningText("");
+    setStreamPhase("connecting");
     setError(null);
     setShowSessionDecisionPrompt(false);
     setLastSubmittedQuery(question);
@@ -1396,8 +1411,17 @@ export function ToolMedSafetyPage() {
           if (response.ok && contentType.includes("text/event-stream")) {
             const streamed = await parseAnalyzeStreamResponse({
               response,
+              onStart: () => {
+                setStreamPhase("reasoning");
+              },
+              onReasoningDelta: (text) => {
+                if (!text) return;
+                setStreamPhase("reasoning");
+                setReasoningText((prev) => `${prev}${text}`);
+              },
               onDelta: (text) => {
                 if (!text) return;
+                setStreamPhase("writing");
                 setStreamingText((prev) => `${prev}${text}`);
               },
             });
@@ -1421,12 +1445,12 @@ export function ToolMedSafetyPage() {
           if (attempt >= maxClientRetries) break;
         }
 
-        setStreamingText("");
+        setStreamingText(""); setReasoningText(""); setStreamPhase("connecting");
         await waitMs(Math.min(2200, 500 * (attempt + 1)) + Math.floor(Math.random() * 180));
       }
 
       if (!response?.ok || !normalizedData) {
-        setStreamingText("");
+        setStreamingText(""); setReasoningText(""); setStreamPhase("idle");
         if (String(finalError).toLowerCase().includes("insufficient_med_safety_credits")) {
           setError(
             alternateQuotaRemaining > 0
@@ -1447,7 +1471,7 @@ export function ToolMedSafetyPage() {
         return;
       }
 
-      setStreamingText("");
+      setStreamingText(""); setReasoningText(""); setStreamPhase("idle");
       const assistantMessage: Message = {
         id: `assistant-${normalizedData.analyzedAt.toString(36)}`,
         role: "assistant",
@@ -1469,10 +1493,10 @@ export function ToolMedSafetyPage() {
         setError(null);
       }
     } catch (cause: any) {
-      setStreamingText("");
+      setStreamingText(""); setReasoningText(""); setStreamPhase("idle");
       setError(parseErrorMessage(String(cause?.message ?? "med_safety_analyze_failed"), t));
     } finally {
-      setIsLoading(false);
+      setIsLoading(false); setStreamPhase("idle");
       void reloadBilling();
     }
   }
@@ -1743,6 +1767,43 @@ export function ToolMedSafetyPage() {
                       </div>
                     </div>
                   ))}
+
+                  {isLoading && streamPhase !== "idle" && !streamingText ? (
+                    <div className="flex justify-start">
+                      <div className="w-full max-w-[860px] min-w-0">
+                        <div className="rounded-[28px] border border-[#E4E8F1] bg-[linear-gradient(180deg,#FFFFFF_0%,#F8FAFF_100%)] px-5 py-4 shadow-[0_16px_34px_rgba(15,23,42,0.04)]">
+                          <div className="flex items-start gap-3">
+                            <div className="relative mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center">
+                              <img
+                                src="/rnest-logo.png"
+                                alt="RNest"
+                                className="h-8 w-8 rounded-full object-cover"
+                              />
+                              <span className="absolute inset-0 animate-ping rounded-full border-2 border-[color:var(--rnest-accent)] opacity-30" />
+                              <span className="absolute inset-0 animate-[spin_3s_linear_infinite] rounded-full border-2 border-transparent border-t-[color:var(--rnest-accent)] opacity-60" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="text-[14px] font-semibold text-[color:var(--rnest-accent)]">
+                                {streamPhase === "connecting" ? t("AI에 연결 중...") : t("질문을 분석하고 있어요...")}
+                              </div>
+                              {reasoningText ? (
+                                <div className="mt-1.5 text-[13px] leading-5 text-ios-sub">
+                                  <span className="whitespace-pre-wrap break-words">{reasoningText}</span>
+                                  <span className="ml-0.5 inline-block h-[14px] w-[2px] animate-pulse rounded-full bg-[color:var(--rnest-accent)] align-middle" />
+                                </div>
+                              ) : (
+                                <div className="mt-2 flex items-center gap-1.5">
+                                  <span className="inline-block h-2 w-2 animate-[bounce_1s_ease-in-out_infinite] rounded-full bg-[color:var(--rnest-accent)] opacity-60" />
+                                  <span className="inline-block h-2 w-2 animate-[bounce_1s_ease-in-out_0.15s_infinite] rounded-full bg-[color:var(--rnest-accent)] opacity-60" />
+                                  <span className="inline-block h-2 w-2 animate-[bounce_1s_ease-in-out_0.3s_infinite] rounded-full bg-[color:var(--rnest-accent)] opacity-60" />
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
 
                   {streamingText ? (
                     <div className="flex justify-start">

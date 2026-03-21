@@ -40,6 +40,7 @@ type AnalyzeParams = {
   conversationId?: string;
   continuationMemory?: string;
   onTextDelta?: (delta: string) => void | Promise<void>;
+  onReasoningDelta?: (delta: string) => void | Promise<void>;
   signal: AbortSignal;
 };
 
@@ -130,8 +131,8 @@ function resolveStoreResponses() {
 }
 
 function resolveMaxOutputTokens() {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_MAX_OUTPUT_TOKENS ?? 3200);
-  if (!Number.isFinite(raw)) return 3200;
+  const raw = Number(process.env.OPENAI_MED_SAFETY_MAX_OUTPUT_TOKENS ?? 5000);
+  if (!Number.isFinite(raw)) return 5000;
   const rounded = Math.round(raw);
   return Math.max(1400, Math.min(8000, rounded));
 }
@@ -655,9 +656,26 @@ function sumUsages(...values: Array<ResponsesUsage | null | undefined>): Respons
   };
 }
 
+function isReasoningDeltaEvent(event: any): boolean {
+  const eventType = String(event?.type ?? "");
+  return eventType.includes("reasoning") && eventType.includes("delta");
+}
+
+function extractReasoningDelta(event: any): string {
+  if (!isReasoningDeltaEvent(event)) return "";
+  const direct = readStringFromUnknown(event?.delta);
+  if (direct) return direct;
+  const summaryDelta = readStringFromUnknown(event?.summary?.delta);
+  if (summaryDelta) return summaryDelta;
+  return "";
+}
+
 function extractResponsesDelta(event: any): string {
   const eventType = String(event?.type ?? "");
   if (!eventType || !eventType.includes("delta")) return "";
+
+  // Skip reasoning delta events — those are handled separately
+  if (isReasoningDeltaEvent(event)) return "";
 
   const direct = readStringFromUnknown(event?.delta);
   if (direct) return direct;
@@ -678,8 +696,9 @@ async function readResponsesEventStream(args: {
   response: Response;
   model: string;
   onTextDelta: TextDeltaHandler;
+  onReasoningDelta?: TextDeltaHandler;
 }): Promise<ResponsesAttempt> {
-  const { response, model, onTextDelta } = args;
+  const { response, model, onTextDelta, onReasoningDelta } = args;
   const contentType = String(response.headers.get("content-type") ?? "").toLowerCase();
   if (!contentType.includes("text/event-stream")) {
     const fallbackJson = await response.json().catch(() => null);
@@ -782,6 +801,13 @@ async function readResponsesEventStream(args: {
       streamError = `openai_stream_error_model:${model}_${truncateError(errorMessage)}`;
       return;
     }
+    // Handle reasoning summary deltas separately
+    const reasoningDelta = extractReasoningDelta(event);
+    if (reasoningDelta && onReasoningDelta) {
+      await onReasoningDelta(reasoningDelta);
+      return;
+    }
+
     const delta = extractResponsesDelta(event);
     if (!delta) return;
     rawText += delta;
@@ -943,6 +969,7 @@ async function callResponsesApi(args: {
   storeResponses: boolean;
   compatMode?: boolean;
   onTextDelta?: TextDeltaHandler;
+  onReasoningDelta?: TextDeltaHandler;
 }): Promise<ResponsesAttempt> {
   const {
     apiKey,
@@ -1010,7 +1037,7 @@ async function callResponsesApi(args: {
           format: { type: "text" as const },
           verbosity,
         },
-        reasoning: { effort: reasoningEffort },
+        reasoning: { effort: reasoningEffort, summary: "auto" },
         max_output_tokens: maxOutputTokens,
         tools: [],
         store: storeResponses,
@@ -1078,6 +1105,7 @@ async function callResponsesApi(args: {
       response,
       model: requestConfig.model,
       onTextDelta,
+      onReasoningDelta: args.onReasoningDelta,
     });
   }
 
@@ -1660,15 +1688,9 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
       const reasoningEfforts = usesHybridExecution ? promptProfile.reasoningEfforts : (["medium"] as MedSafetyReasoningEffort[]);
       const outputTokenCandidates = usesHybridExecution ? promptProfile.outputTokenCandidates : legacyOutputTokenCandidates;
       const shouldSuppressStreamingForQuality =
-        runtimeMode === "hybrid_live"
-          ? true
-          : runtimeMode === "hybrid_shadow" || !routeDecision
-            ? false
-            : shouldRunQualityGate({
-                decision: routeDecision,
-                isPremiumSearch,
-                hasImage: Boolean(params.imageDataUrl),
-              });
+        runtimeMode === "hybrid_shadow" || !routeDecision
+          ? false
+          : false;
 
       reasoningLoop: for (let reasoningIndex = 0; reasoningIndex < reasoningEfforts.length; reasoningIndex += 1) {
         const reasoningEffort = reasoningEfforts[reasoningIndex]!;
@@ -1702,6 +1724,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
             reasoningEffort,
             storeResponses,
             onTextDelta: allowStreamDelta ? params.onTextDelta : undefined,
+            onReasoningDelta: allowStreamDelta ? params.onReasoningDelta : undefined,
             retries: allowStreamDelta ? 0 : networkRetries,
             retryBaseMs: networkRetryBaseMs,
           });

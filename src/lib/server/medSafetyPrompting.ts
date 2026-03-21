@@ -542,20 +542,20 @@ export function buildPromptProfile(args: {
     return {
       reasoningEfforts: isPremiumSearch ? ["medium"] : ["low"],
       verbosity: "low",
-      outputTokenCandidates: [1000, 900],
+      outputTokenCandidates: [2000, 1600, 1400],
     };
   }
   if (decision.risk === "high" || decision.entityClarity !== "high" || decision.answerDepth === "detailed") {
     return {
       reasoningEfforts: supportsHighReasoning ? ["high", "medium"] : ["medium"],
       verbosity: "medium",
-      outputTokenCandidates: [2600, 2200, 1800],
+      outputTokenCandidates: [5000, 4200, 3600],
     };
   }
   return {
     reasoningEfforts: ["medium"],
     verbosity: "medium",
-    outputTokenCandidates: [1800, 1500, 1200],
+    outputTokenCandidates: [4000, 3400, 2800],
   };
 }
 
