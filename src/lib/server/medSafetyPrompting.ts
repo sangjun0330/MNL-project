@@ -967,7 +967,7 @@ export function buildPromptProfile(args: {
 
   if (isVerySimple) {
     return {
-      reasoningEfforts: ["low"],
+      reasoningEfforts: ["high", "medium"],
       verbosity: "medium",
       outputTokenCandidates: isPremiumSearch ? [8000, 6000, 4800] : [6000, 5000, 4000],
       qualityLevel: "balanced",
@@ -979,8 +979,8 @@ export function buildPromptProfile(args: {
       supportsHighReasoning &&
       (decision.risk === "high" && (Boolean(hasImage) || decision.entityClarity !== "high" || decision.confidence === "medium"));
     return {
-      reasoningEfforts: allowHighReasoning ? ["low", "medium"] : ["low"],
-      verbosity: "high",
+      reasoningEfforts: allowHighReasoning ? ["high", "medium"] : ["medium"],
+      verbosity: "medium",
       outputTokenCandidates:
         decision.answerDepth === "detailed"
           ? decision.risk === "high" || Boolean(hasImage)
@@ -991,8 +991,8 @@ export function buildPromptProfile(args: {
     };
   }
   return {
-    reasoningEfforts: ["low"],
-    verbosity: "high",
+    reasoningEfforts: supportsHighReasoning ? ["high", "medium"] : ["medium"],
+    verbosity: "medium",
     outputTokenCandidates: isPremiumSearch ? [10000, 8000, 6000] : [8000, 6000, 5000],
     qualityLevel: "balanced",
   };

@@ -878,8 +878,8 @@ function buildUsageBreakdown(args: {
 
 function buildDefaultPromptProfile(): MedSafetyPromptProfile {
   return {
-    reasoningEfforts: ["low"],
-    verbosity: "high",
+    reasoningEfforts: ["high", "medium"],
+    verbosity: "medium",
     outputTokenCandidates: [9000, 7600, 6200],
     qualityLevel: "balanced",
   };
