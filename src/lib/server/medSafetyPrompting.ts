@@ -521,7 +521,7 @@ function inferFormat(input: { answerDepth: MedSafetyAnswerDepth; risk: MedSafety
 }
 
 export function resolveMedSafetyRuntimeMode(): MedSafetyRuntimeMode {
-  const raw = String(process.env.OPENAI_MED_SAFETY_RUNTIME_MODE ?? "hybrid_live")
+  const raw = String(process.env.OPENAI_MED_SAFETY_RUNTIME_MODE ?? "legacy")
     .trim()
     .toLowerCase();
   if (raw === "hybrid_shadow") return "hybrid_shadow";
@@ -700,7 +700,9 @@ function inferOpeningMode(decision: MedSafetyRouteDecision) {
 
 function buildSectionOrder(decision: MedSafetyRouteDecision) {
   if (decision.intent === "compare") {
-    return decision.risk === "high" ? ["핵심", "구분 포인트", "지금 할 일", "자세한 설명", "보고 기준"] : ["핵심", "구분 포인트", "자세한 설명"];
+    return decision.risk === "high"
+      ? ["핵심", "구분 포인트", "지금 할 일", "실무적으로 같이 볼 점", "보고 기준"]
+      : ["핵심", "구분 포인트", "실무적으로 같이 볼 점"];
   }
   if (decision.intent === "numeric") {
     return decision.needsEscalation ? ["핵심", "지금 확인할 것", "지금 할 일", "보고 기준"] : ["핵심", "지금 확인할 것", "보고 기준"];
@@ -710,7 +712,7 @@ function buildSectionOrder(decision: MedSafetyRouteDecision) {
       ? ["핵심", "지금 할 일", "지금 확인할 것", "원인 후보", "보고 기준"]
       : ["핵심", "지금 할 일", "지금 확인할 것", "보고 기준"];
   }
-  return decision.format === "short" ? ["핵심"] : ["핵심", "자세한 설명", "주의"];
+  return decision.format === "short" ? ["핵심"] : ["핵심", "실무적으로 같이 볼 점", "주의"];
 }
 
 function buildMustIncludeSections(decision: MedSafetyRouteDecision) {
@@ -959,9 +961,9 @@ export function buildPromptProfile(args: {
 
   if (isVerySimple) {
     return {
-      reasoningEfforts: isPremiumSearch ? ["medium"] : ["low"],
-      verbosity: "low",
-      outputTokenCandidates: isPremiumSearch ? [1800, 1400, 1100] : [1500, 1200, 900],
+      reasoningEfforts: ["low"],
+      verbosity: "medium",
+      outputTokenCandidates: isPremiumSearch ? [4200, 3400, 2600] : [3600, 3000, 2400],
       qualityLevel: "balanced",
     };
   }
@@ -971,21 +973,21 @@ export function buildPromptProfile(args: {
       supportsHighReasoning &&
       (decision.risk === "high" && (Boolean(hasImage) || decision.entityClarity !== "high" || decision.confidence === "medium"));
     return {
-      reasoningEfforts: allowHighReasoning ? ["high", "medium"] : ["medium"],
-      verbosity: decision.answerDepth === "detailed" && isPremiumSearch ? "medium" : "low",
+      reasoningEfforts: allowHighReasoning ? ["low", "medium"] : ["low"],
+      verbosity: "high",
       outputTokenCandidates:
         decision.answerDepth === "detailed"
           ? decision.risk === "high" || Boolean(hasImage)
-            ? [5200, 4200, 3400]
-            : [4200, 3400, 2800]
-          : [3200, 2600, 2100],
+            ? [9000, 7600, 6200]
+            : [7600, 6200, 5200]
+          : [6200, 5000, 4000],
       qualityLevel: "balanced",
     };
   }
   return {
-    reasoningEfforts: ["medium"],
-    verbosity: isPremiumSearch ? "medium" : "low",
-    outputTokenCandidates: isPremiumSearch ? [3000, 2400, 1900] : [2400, 1900, 1500],
+    reasoningEfforts: ["low"],
+    verbosity: "high",
+    outputTokenCandidates: isPremiumSearch ? [5600, 4600, 3600] : [4600, 3600, 2800],
     qualityLevel: "balanced",
   };
 }
@@ -1261,7 +1263,7 @@ function hasSectionStructure(text: string) {
     const normalized = line.replace(/\s+/g, "");
     const strongHeading =
       (/[:：]$/.test(line) && line.length <= 24) ||
-      /^(핵심|요약|정의|임상의미|지금할일|확인할것|주의|위험|보고기준|호출기준|원인후보|비교|차이|구분포인트|자세한설명|기억포인트|이케이스에서같이봐야하는점|sbar|보고문구)$/.test(
+      /^(핵심|요약|결론|정의|임상의미|지금할일|지금확인할것|확인할것|주의|위험|보고기준|호출기준|원인후보|비교|차이|구분포인트|실무적으로같이볼점|기억포인트|이케이스에서같이봐야하는점|sbar|보고문구|주치의노티전지금확인할것|노티할때핵심문장예시)$/.test(
         normalized
       );
     const softHeading =

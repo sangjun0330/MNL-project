@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 // GET /api/social/events — 최근 50건 (7일 이내), unread 먼저
 export async function GET(req: Request) {
   const userId = await readUserIdFromRequest(req);
-  if (!userId) return jsonNoStore({ ok: false, error: "login_required" }, { status: 401 });
+  if (!userId) return jsonNoStore({ ok: true, data: { events: [], unreadCount: 0 } });
 
   const admin = getSupabaseAdmin();
 

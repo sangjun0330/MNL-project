@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 // 하위 호환: ?month=YYYY-MM 단일 파라미터도 동작
 export async function GET(req: Request) {
   const userId = await readUserIdFromRequest(req);
-  if (!userId) return jsonNoStore({ ok: false, error: "login_required" }, { status: 401 });
+  if (!userId) return jsonNoStore({ ok: true, data: { friends: [], commonOffDays: [] } });
 
   const url = new URL(req.url);
   // months=2026-03,2026-04 또는 month=2026-03 (하위 호환)

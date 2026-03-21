@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 // GET /api/social/friends/meta — 내 모든 friend_meta 조회
 export async function GET(req: Request) {
   const userId = await readUserIdFromRequest(req);
-  if (!userId) return jsonNoStore({ ok: false, error: "login_required" }, { status: 401 });
+  if (!userId) return jsonNoStore({ ok: true, data: {} });
 
   const admin = getSupabaseAdmin();
 

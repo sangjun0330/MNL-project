@@ -724,7 +724,7 @@ function StreamingAnswerSections({ content }: { content: string }) {
       <div className="flex flex-col">
         <section className={sectionCardClass("summary")}>
           <div className={`inline-flex items-center rounded-[14px] border px-3 py-1.5 text-[11.5px] font-semibold tracking-[0.01em] ${sectionTitleClass("summary")}`}>
-            핵심
+            결론
           </div>
           <div className="mt-3.5">
             <div className="whitespace-pre-wrap break-words text-[15.5px] font-semibold leading-7 tracking-[-0.012em] text-ios-text">
@@ -999,7 +999,7 @@ export function ToolMedSafetyPage() {
               title: section.title,
               body: buildMedSafetySectionBodyText(section),
             }))
-          : [{ title: t("요약"), body: lastAssistantMessage.content }],
+          : [{ title: t("결론"), body: lastAssistantMessage.content }],
       })
     : "";
 
@@ -1093,7 +1093,7 @@ export function ToolMedSafetyPage() {
     if (!threadEndRef.current) return;
     if (userHasScrolledUpRef.current && streamingText) return; // user scrolled up during streaming — don't force
     threadEndRef.current.scrollIntoView({ block: "end", behavior: "smooth" });
-  }, [messages, error]);
+  }, [messages, error, streamingText]);
 
   // During streaming, only scroll if user is at the bottom
   useEffect(() => {

@@ -34,7 +34,7 @@ function rowToPrefs(row: any) {
 // GET /api/social/preferences — 없으면 기본값 반환
 export async function GET(req: Request) {
   const userId = await readUserIdFromRequest(req);
-  if (!userId) return jsonNoStore({ ok: false, error: "login_required" }, { status: 401 });
+  if (!userId) return jsonNoStore({ ok: true, data: DEFAULT_PREFS });
 
   const admin = getSupabaseAdmin();
 

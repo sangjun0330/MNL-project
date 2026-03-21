@@ -24,6 +24,19 @@ function degradedNotebookResponse() {
   )
 }
 
+function localOnlyNotebookSaveResponse() {
+  return NextResponse.json(
+    { ok: true, syncedAt: null, degraded: true, localOnly: true },
+    {
+      status: 200,
+      headers: {
+        "Cache-Control": "private, no-store, max-age=0",
+        Pragma: "no-cache",
+      },
+    }
+  )
+}
+
 function isNotebookStateStorageUnavailable(error: unknown) {
   const code = String((error as { code?: unknown } | null)?.code ?? "").trim()
   const message = String((error as { message?: unknown } | null)?.message ?? "").toLowerCase()
@@ -48,11 +61,11 @@ export async function GET(req: Request) {
 
     const userId = await readUserIdFromRequest(req)
     if (!userId) {
-      return jsonNoStore({ ok: false, error: "login required" }, { status: 401 })
+      return degradedNotebookResponse()
     }
 
     if (!(await userHasCompletedServiceConsent(userId))) {
-      return jsonNoStore({ ok: false, error: "consent_required" }, { status: 403 })
+      return degradedNotebookResponse()
     }
 
     const row = await loadNotebookState(userId)
@@ -96,11 +109,11 @@ export async function POST(req: Request) {
     const userId = await readUserIdFromRequest(req)
     const state = (body as { state?: unknown } | null)?.state
 
-    if (!userId) return jsonNoStore({ ok: false, error: "login required" }, { status: 401 })
+    if (!userId) return localOnlyNotebookSaveResponse()
     if (!state) return jsonNoStore({ ok: false, error: "state required" }, { status: 400 })
 
     if (!(await userHasCompletedServiceConsent(userId))) {
-      return jsonNoStore({ ok: false, error: "consent_required" }, { status: 403 })
+      return localOnlyNotebookSaveResponse()
     }
 
     await saveNotebookState({ userId, payload: sanitizeNotebookState(state) })
@@ -114,16 +127,7 @@ export async function POST(req: Request) {
       // Ignore logging failures.
     }
     if (isNotebookStateStorageUnavailable(error)) {
-      return NextResponse.json(
-        { ok: true, syncedAt: null, degraded: true, localOnly: true },
-        {
-          status: 200,
-          headers: {
-            "Cache-Control": "private, no-store, max-age=0",
-            Pragma: "no-cache",
-          },
-        }
-      )
+      return localOnlyNotebookSaveResponse()
     }
     return NextResponse.json(
       { ok: false, error: "failed_to_save_notebook_state" },

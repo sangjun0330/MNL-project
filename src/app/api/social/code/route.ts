@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 // GET /api/social/code — 내 코드 조회 (없으면 자동 생성)
 export async function GET(req: Request) {
   const userId = await readUserIdFromRequest(req);
-  if (!userId) return jsonNoStore({ ok: false, error: "login_required" }, { status: 401 });
+  if (!userId) return jsonNoStore({ ok: true, data: { code: null, createdAt: null } });
 
   try {
     const socialCode = await getOrCreateSocialCode(userId);

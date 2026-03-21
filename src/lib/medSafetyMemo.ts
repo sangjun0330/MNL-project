@@ -169,7 +169,7 @@ export function buildMedSafetyMemoBlocks(input: BuildMedSafetyMemoInput) {
 
   if (summary && summary !== query) {
     blocks.push(createMemoBlock("divider"))
-    blocks.push(createMemoBlock("heading", { text: "한눈에 요약" }))
+    blocks.push(createMemoBlock("heading", { text: "결론" }))
     blocks.push(createMemoBlock(summary.length <= 160 ? "callout" : "paragraph", { text: summary }))
   }
 

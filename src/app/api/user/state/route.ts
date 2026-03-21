@@ -31,6 +31,19 @@ function degradedGetResponse() {
   );
 }
 
+function localOnlySaveResponse() {
+  return NextResponse.json(
+    { ok: true, syncedAt: null, degraded: true, localOnly: true },
+    {
+      status: 200,
+      headers: {
+        "Cache-Control": "private, no-store, max-age=0",
+        Pragma: "no-cache",
+      },
+    }
+  );
+}
+
 function isUserStateStorageUnavailable(error: unknown) {
   const code = String((error as { code?: unknown } | null)?.code ?? "").trim();
   const message = String((error as { message?: unknown } | null)?.message ?? "").toLowerCase();
@@ -55,10 +68,10 @@ export async function GET(req: Request) {
 
     const userId = await readUserIdFromRequest(req);
     if (!userId) {
-      return jsonNoStore({ ok: false, error: "login required" }, { status: 401 });
+      return degradedGetResponse();
     }
     if (!(await userHasCompletedServiceConsent(userId))) {
-      return jsonNoStore({ ok: false, error: "consent_required" }, { status: 403 });
+      return degradedGetResponse();
     }
     await ensureUserRow(userId);
     const row = await loadUserState(userId);
@@ -109,11 +122,11 @@ export async function POST(req: Request) {
     const userId = await readUserIdFromRequest(req);
     const state = body?.state;
 
-    if (!userId) return jsonNoStore({ ok: false, error: "login required" }, { status: 401 });
+    if (!userId) return localOnlySaveResponse();
     if (!state) return jsonNoStore({ ok: false, error: "state required" }, { status: 400 });
 
     if (!(await userHasCompletedServiceConsent(userId))) {
-      return jsonNoStore({ ok: false, error: "consent_required" }, { status: 403 });
+      return localOnlySaveResponse();
     }
     const serialized = serializeStateForSupabase(state);
     await saveUserState({ userId, payload: serialized });
@@ -127,16 +140,7 @@ export async function POST(req: Request) {
       // Ignore logging failures.
     }
     if (isUserStateStorageUnavailable(error)) {
-      return NextResponse.json(
-        { ok: true, syncedAt: null, degraded: true, localOnly: true },
-        {
-          status: 200,
-          headers: {
-            "Cache-Control": "private, no-store, max-age=0",
-            Pragma: "no-cache",
-          },
-        }
-      );
+      return localOnlySaveResponse();
     }
     return NextResponse.json(
       { ok: false, error: "failed_to_save_state" },

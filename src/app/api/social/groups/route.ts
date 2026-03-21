@@ -23,7 +23,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
   const userId = await readUserIdFromRequest(req);
-  if (!userId) return jsonNoStore({ ok: false, error: "login_required" }, { status: 401 });
+  if (!userId) return jsonNoStore({ ok: true, data: { groups: [] } });
 
   const admin = getSupabaseAdmin();
 

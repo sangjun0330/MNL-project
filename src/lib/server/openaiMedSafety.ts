@@ -12,7 +12,6 @@ import {
   buildTinyRouterUserPrompt,
   parseQualityGateDecision,
   parseTinyRouterDecision,
-  resolveMedSafetyRuntimeMode,
   shouldRunQualityGate,
   shouldUseTinyRouter,
   type MedSafetyPromptAssembly,
@@ -177,6 +176,10 @@ function resolveMaxOutputTokens() {
   if (!Number.isFinite(raw)) return 9000;
   const rounded = Math.round(raw);
   return Math.max(2400, Math.min(12000, rounded));
+}
+
+function resolveActiveRuntimeMode(): MedSafetyRuntimeMode {
+  return "legacy";
 }
 
 function resolveNetworkRetryCount() {
@@ -517,11 +520,35 @@ function buildDeveloperPrompt(locale: "ko" | "en") {
     return [
       MED_SAFETY_LEGACY_DENSE_CORE_PROMPT_REFERENCE,
       "",
+      "[OUTPUT_RENDERING_OVERRIDE]",
+      "- The final answer must be usable as-is without any downstream rewriting.",
+      "- Write a direct conclusion paragraph first with no title.",
+      "- Then use plain top-level headings only when they are truly needed.",
+      '- Do not use vague headings such as "Summary", "Details", or "Detailed explanation".',
+      '- Prefer specific headings such as "Key points", "What to check now", "Before notifying the physician", "Reporting phrasing", or "Caution" when they fit.',
+      '- If a section has a lead line, write it as "Lead: ..." on its own first line, then continue with the body.',
+      "- Do not use markdown emphasis such as **, __, or backticks.",
+      "- Keep enough detail to avoid truncating clinically important reasoning.",
+      "",
       "[LANGUAGE_OVERRIDE]",
       "- 위 규칙을 유지하되 최종 답변만 자연스러운 bedside clinical English로 작성한다.",
     ].join("\n");
   }
-  return MED_SAFETY_LEGACY_DENSE_CORE_PROMPT_REFERENCE;
+  return [
+    MED_SAFETY_LEGACY_DENSE_CORE_PROMPT_REFERENCE,
+    "",
+    "[최종 출력 형식 고정 규칙]",
+    "- 최종 답변은 후처리 없이 실제 로그 원문으로 바로 써도 되는 형태로 작성한다.",
+    "- 첫 문단은 결론 문단으로 작성하고, 별도 제목 없이 바로 시작한다.",
+    "- 그 다음부터 필요한 경우에만 plain text 상위 제목을 한 줄로 쓴다.",
+    "- 상위 제목은 내용에 맞는 구체 제목을 사용한다.",
+    '- 예: "핵심", "구분 포인트", "지금 이 값에서 실무적으로 보는 판단 포인트", "보통 이렇게 생각합니다", "주치의 노티 전 지금 확인할 것", "노티할 때 핵심 문장 예시", "주의".',
+    '- "요약", "상세", "자세한 설명"처럼 두루뭉술한 제목은 쓰지 않는다.',
+    '- 섹션 첫 줄이 리드이면 반드시 "리드 문장: ..." 형식으로 한 줄에 쓴다.',
+    "- 리드 아래 본문은 일반 문장 또는 - bullet로만 이어간다.",
+    "- 마크다운 강조(**, __, 백틱)는 쓰지 않는다.",
+    "- 임상적으로 필요한 설명은 중간에 잘리지 않도록 충분히 끝까지 쓴다.",
+  ].join("\n");
 }
 
 function buildPromptDisciplineDiagnostics(
@@ -584,11 +611,13 @@ function buildUserPrompt(query: string, locale: "ko" | "en") {
     return [
       `User question: ${normalizedQuery}`,
       "Answer directly in the format that best fits the user's intent, and if there is any risk, present safety and immediate actions first.",
+      "Preserve the raw answer structure so section titles and lead lines can be rendered directly.",
     ].join("\n");
   }
   return [
     `사용자 질문: ${normalizedQuery}`,
     "질문 의도에 가장 잘 맞는 형태로 직접 답하고, 위험 가능성이 있으면 안전과 행동을 먼저 제시하라.",
+    "섹션 제목과 리드 문장은 화면에서 그대로 렌더링될 수 있게 원문 형식을 보존하라.",
   ].join("\n");
 }
 
@@ -876,9 +905,9 @@ function buildUsageBreakdown(args: {
 
 function buildDefaultPromptProfile(): MedSafetyPromptProfile {
   return {
-    reasoningEfforts: ["medium"],
-    verbosity: "low",
-    outputTokenCandidates: [2200, 1700, 1300],
+    reasoningEfforts: ["low"],
+    verbosity: "high",
+    outputTokenCandidates: [9000, 7600, 6200],
     qualityLevel: "balanced",
   };
 }
@@ -1000,6 +1029,21 @@ async function readResponsesEventStream(args: {
   let lastEventPayload: any = null;
   let streamError: string | null = null;
   let usage: ResponsesUsage | null = null;
+  let emittedSectionCount = 0;
+
+  const flushSectionChunks = async (text: string, options?: { includeLastSection?: boolean }) => {
+    const normalized = normalizeDeliveredAnswerText(text);
+    if (!normalized) return;
+    const sections = parseMedSafetyAnswerSections(normalized);
+    if (!sections.length) return;
+    const readyCount = options?.includeLastSection ? sections.length : Math.max(0, sections.length - 1);
+    for (let index = emittedSectionCount; index < readyCount; index += 1) {
+      const chunk = buildSectionStreamChunk(sections[index]!, index);
+      if (!chunk.trim()) continue;
+      await onTextDelta(chunk);
+      emittedSectionCount = index + 1;
+    }
+  };
 
   const trackMeta = (node: any) => {
     if (!node || typeof node !== "object") return;
@@ -1046,7 +1090,7 @@ async function readResponsesEventStream(args: {
     const delta = extractResponsesDelta(event);
     if (!delta) return;
     rawText += delta;
-    await onTextDelta(delta);
+    await flushSectionChunks(rawText);
   };
 
   try {
@@ -1105,6 +1149,7 @@ async function readResponsesEventStream(args: {
       usage: usage ?? extractResponsesUsage(fallbackNode),
     };
   }
+  await flushSectionChunks(finalText, { includeLastSection: true });
   return {
     text: finalText,
     error: null,
@@ -1140,10 +1185,10 @@ async function emitSectionStreamFallback(args: {
     if (args.signal.aborted) throw new Error("openai_timeout_retry_aborted");
     const chunk = buildSectionStreamChunk(sections[index]!, index);
     if (!chunk.trim()) continue;
-    await args.onTextDelta(chunk);
-    if (index + 1 < sections.length) {
-      await sleepWithAbort(24, args.signal);
-    }
+      await args.onTextDelta(chunk);
+      if (index + 1 < sections.length) {
+      await sleepWithAbort(180, args.signal);
+      }
   }
 }
 
@@ -1947,7 +1992,7 @@ async function runQualityGateAndRepair(args: {
 
 export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise<OpenAIMedSafetyOutput> {
   const apiKey = normalizeApiKey();
-  const runtimeMode = resolveMedSafetyRuntimeMode();
+  const runtimeMode = resolveActiveRuntimeMode();
   const modelCandidates = resolveModelCandidates(params.modelOverride);
   const apiBaseUrls = resolveApiBaseUrls();
   const upstreamTimeoutMs = resolveUpstreamTimeoutMs();

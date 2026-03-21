@@ -25,7 +25,7 @@ const EXPLICIT_SECTION_TITLE_PATTERNS = [
   /^(구분포인트|감별포인트|비교|차이|선택기준)$/i,
   /^(보통이렇게생각합니다)$/i,
   /^(주의|주의점|위험|경고|보고기준|호출기준|중단기준|보고예시|보고문구|sbar|sbar예시)$/i,
-  /^.+(포인트|확인할것|예시|기준|주의|설명|정리|대응|할일)$/i,
+  /^.+(포인트|확인할것|예시|기준|주의|설명|정리|대응|할일|점)$/i,
 ];
 
 function normalizeAnswerRawLine(value: string) {
@@ -97,9 +97,13 @@ function looksLikeTopLevelSectionHeading(value: string, context: SectionHeadingC
   const previousLineBlank = !cleanAnswerLine(context.previousLine ?? "");
   const nextLine = cleanAnswerLine(context.nextLine ?? "");
   const nextLineIsLead = Boolean(extractLeadText(nextLine));
+  const hasNextLine = Boolean(nextLine);
 
   if (EXPLICIT_SECTION_TITLE_PATTERNS.some((pattern) => pattern.test(key))) {
-    return previousLineBlank || nextLineIsLead;
+    if (!hasNextLine) return false;
+    if (nextLineIsLead) return true;
+    if (key.length <= 32 && !looksLikeSentence(normalized)) return true;
+    return previousLineBlank;
   }
 
   if (!previousLineBlank) return false;
@@ -240,7 +244,7 @@ export function parseMedSafetyAnswerSections(value: string): MedSafetyAnswerSect
       currentLines = [];
       return;
     }
-    const resolvedTitle = currentTitle || (sections.length === 0 ? "요약" : "상세");
+    const resolvedTitle = currentTitle || (sections.length === 0 ? "결론" : "추가 설명");
     sections.push({
       title: resolvedTitle,
       lead: content.lead,
@@ -288,13 +292,13 @@ export function parseMedSafetyAnswerSections(value: string): MedSafetyAnswerSect
   if (!fallback) {
     const rawText = normalizeMedSafetyAnswerText(value);
     return rawText
-      ? [{ title: "요약", lead: rawText, bodyLines: [], tone: "summary" }]
+      ? [{ title: "결론", lead: rawText, bodyLines: [], tone: "summary" }]
       : [];
   }
 
   return [
     {
-      title: "요약",
+      title: "결론",
       lead: fallback.lead,
       bodyLines: fallback.bodyLines,
       tone: "summary",
