@@ -56,7 +56,8 @@ export async function GET(req: Request) {
       const email = data.user?.email ?? null;
       if (!isAuthEmailAllowed(email)) {
         authError = "unauthorized_email";
-        console.warn("[AuthCallback] blocked sign-in for non-allowlisted email");
+        const masked = email ? email.replace(/(.{2}).*@/, "$1***@") : "(empty)";
+        console.warn("[AuthCallback] blocked sign-in for non-allowlisted email: %s", masked);
         await supabase.auth.signOut();
       }
       const userId = data.user?.id;
@@ -64,7 +65,8 @@ export async function GET(req: Request) {
         const exists = await hasExistingAppUser(userId);
         if (!exists) {
           authError = "unauthorized_new_user";
-          console.warn("[AuthCallback] blocked sign-in for user without existing app record");
+          const masked = email ? email.replace(/(.{2}).*@/, "$1***@") : "(empty)";
+          console.warn("[AuthCallback] blocked new user without existing app record: %s", masked);
           await supabase.auth.signOut();
         }
       }

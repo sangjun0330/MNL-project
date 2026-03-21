@@ -5,7 +5,7 @@ import { ShopCheckoutSuccessPage } from "@/components/pages/ShopCheckoutSuccessP
 export default function Page() {
   return (
     <AppShell>
-      <Suspense fallback={<div className="min-h-[40dvh] rounded-apple bg-white/70" />}>
+      <Suspense fallback={null}>
         <ShopCheckoutSuccessPage />
       </Suspense>
     </AppShell>

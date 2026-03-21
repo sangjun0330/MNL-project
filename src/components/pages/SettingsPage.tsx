@@ -23,6 +23,7 @@ export function SettingsPage() {
   const profile = useAppStoreSelector((s) => normalizeProfileSettings(s.settings.profile));
   const [isAdmin, setIsAdmin] = useState(false);
   const authError = searchParams.get("authError");
+  const authHint = searchParams.get("authHint");
   const personalizationSummary = `${chronotypePresetLabel(chronotypePresetFromValue(profile.chronotype))} · ${t("카페인")} ${caffeineSensitivityPresetLabel(
     caffeineSensitivityPresetFromValue(profile.caffeineSensitivity)
   )}`;
@@ -71,9 +72,19 @@ export function SettingsPage() {
 
       {authError ? (
         <div className="mb-4 rounded-apple border border-[#F3D7A8] bg-[#FFF8EC] px-4 py-3 text-[13px] leading-6 text-[#8A5A12] shadow-apple-sm">
-          {authError === "unauthorized_email" || authError === "unauthorized_new_user"
-            ? t("이 계정은 현재 테스트 허용 목록에 없어 로그인할 수 없어요.")
-            : t("Google 로그인 처리에 실패했어요. 잠시 후 다시 시도해 주세요.")}
+          {authError === "unauthorized_email" || authError === "unauthorized_new_user" ? (
+            <>
+              {t("이 계정은 현재 테스트 허용 목록에 없어 로그인할 수 없어요.")}
+              {authHint === "allowlist" ? (
+                <span className="block mt-1 text-[12px] text-[#8A5A12]/70">
+                  {t("관리자에게 계정 등록을 요청해 주세요.")}{" "}
+                  <a href="mailto:rnest0330@gmail.com" className="underline">rnest0330@gmail.com</a>
+                </span>
+              ) : null}
+            </>
+          ) : (
+            t("Google 로그인 처리에 실패했어요. 잠시 후 다시 시도해 주세요.")
+          )}
         </div>
       ) : null}
 

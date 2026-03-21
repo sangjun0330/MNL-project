@@ -5,7 +5,7 @@ import { SettingsBillingSuccessPage } from "@/components/pages/SettingsBillingSu
 export default function Page() {
   return (
     <AppShell>
-      <Suspense fallback={<div className="min-h-[40dvh] rounded-apple bg-white/70" />}>
+      <Suspense fallback={null}>
         <SettingsBillingSuccessPage />
       </Suspense>
     </AppShell>

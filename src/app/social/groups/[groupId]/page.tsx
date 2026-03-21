@@ -12,7 +12,7 @@ export default async function GroupDetailPage({
   const { groupId } = await params;
   return (
     <AppShell>
-      <Suspense fallback={<div className="min-h-[40dvh] rounded-apple bg-white/70" />}>
+      <Suspense fallback={null}>
         <SocialGroupPage groupId={groupId} />
       </Suspense>
     </AppShell>

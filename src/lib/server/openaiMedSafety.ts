@@ -1,4 +1,27 @@
 import { normalizeOpenAIResponsesBaseUrl, resolveOpenAIResponsesRequestConfig } from "@/lib/server/openaiGateway";
+import {
+  assembleMedSafetyDeveloperPrompt,
+  buildConservativeRouteDecision,
+  buildDeterministicRouteDecision,
+  buildHeuristicQualityDecision,
+  buildPromptProfile,
+  buildQualityGateDeveloperPrompt,
+  buildQualityGateUserPrompt,
+  buildRepairDeveloperPrompt,
+  buildRepairUserPrompt,
+  buildTinyRouterDeveloperPrompt,
+  buildTinyRouterUserPrompt,
+  parseQualityGateDecision,
+  parseTinyRouterDecision,
+  resolveMedSafetyRuntimeMode,
+  shouldRunQualityGate,
+  shouldUseTinyRouter,
+  type MedSafetyPromptProfile,
+  type MedSafetyQualityDecision,
+  type MedSafetyReasoningEffort,
+  type MedSafetyRouteDecision,
+  type MedSafetyRuntimeMode,
+} from "@/lib/server/medSafetyPrompting";
 
 export type ClinicalMode = "ward" | "er" | "icu";
 export type ClinicalSituation = "general" | "pre_admin" | "during_admin" | "event_response";
@@ -25,10 +48,16 @@ type ResponsesAttempt = {
   error: string | null;
   responseId: string | null;
   conversationId: string | null;
+  usage: ResponsesUsage | null;
 };
 
 type TextDeltaHandler = (delta: string) => void | Promise<void>;
 type ResponseVerbosity = "low" | "medium" | "high";
+type ResponsesUsage = {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+};
 
 const MED_SAFETY_LOCKED_MODEL = "gpt-5.4";
 
@@ -39,6 +68,8 @@ export type OpenAIMedSafetyOutput = {
   fallbackReason: string | null;
   openaiResponseId: string | null;
   openaiConversationId: string | null;
+  routeDecision?: MedSafetyRouteDecision | null;
+  runtimeMode?: MedSafetyRuntimeMode;
 };
 
 function normalizeApiKey() {
@@ -575,6 +606,55 @@ function readStringFromUnknown(value: unknown): string {
   return "";
 }
 
+function readNumberFromUnknown(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function normalizeUsageNode(value: unknown): ResponsesUsage | null {
+  if (!value || typeof value !== "object") return null;
+  const node = value as Record<string, unknown>;
+  const inputTokens = readNumberFromUnknown(node.input_tokens ?? node.prompt_tokens ?? node.inputTokens);
+  const outputTokens = readNumberFromUnknown(node.output_tokens ?? node.completion_tokens ?? node.outputTokens);
+  const totalTokens =
+    readNumberFromUnknown(node.total_tokens ?? node.totalTokens) ??
+    (inputTokens != null || outputTokens != null ? (inputTokens ?? 0) + (outputTokens ?? 0) : null);
+  if (inputTokens == null && outputTokens == null && totalTokens == null) return null;
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+  };
+}
+
+function extractResponsesUsage(json: any): ResponsesUsage | null {
+  return (
+    normalizeUsageNode(json?.usage) ??
+    normalizeUsageNode(json?.response?.usage) ??
+    normalizeUsageNode(json?.metrics?.usage) ??
+    null
+  );
+}
+
+function sumUsages(...values: Array<ResponsesUsage | null | undefined>): ResponsesUsage | null {
+  const normalized = values.filter((value): value is ResponsesUsage => Boolean(value));
+  if (!normalized.length) return null;
+  const sum = (items: Array<number | null>) => {
+    const usable = items.filter((item): item is number => typeof item === "number" && Number.isFinite(item));
+    if (!usable.length) return null;
+    return usable.reduce((total, item) => total + item, 0);
+  };
+  return {
+    inputTokens: sum(normalized.map((item) => item.inputTokens)),
+    outputTokens: sum(normalized.map((item) => item.outputTokens)),
+    totalTokens: sum(normalized.map((item) => item.totalTokens)),
+  };
+}
+
 function extractResponsesDelta(event: any): string {
   const eventType = String(event?.type ?? "");
   if (!eventType || !eventType.includes("delta")) return "";
@@ -612,6 +692,7 @@ async function readResponsesEventStream(args: {
         error: `openai_empty_text_model:${model}`,
         responseId: fallbackResponseId,
         conversationId: fallbackConversationId,
+        usage: extractResponsesUsage(fallbackJson),
       };
     }
     await onTextDelta(fallbackText);
@@ -620,6 +701,7 @@ async function readResponsesEventStream(args: {
       error: null,
       responseId: fallbackResponseId,
       conversationId: fallbackConversationId,
+      usage: extractResponsesUsage(fallbackJson),
     };
   }
 
@@ -634,6 +716,7 @@ async function readResponsesEventStream(args: {
         error: `openai_empty_text_model:${model}`,
         responseId: fallbackResponseId,
         conversationId: fallbackConversationId,
+        usage: extractResponsesUsage(fallbackJson),
       };
     }
     await onTextDelta(fallbackText);
@@ -642,6 +725,7 @@ async function readResponsesEventStream(args: {
       error: null,
       responseId: fallbackResponseId,
       conversationId: fallbackConversationId,
+      usage: extractResponsesUsage(fallbackJson),
     };
   }
 
@@ -654,6 +738,7 @@ async function readResponsesEventStream(args: {
   let completedResponse: Record<string, unknown> | null = null;
   let lastEventPayload: any = null;
   let streamError: string | null = null;
+  let usage: ResponsesUsage | null = null;
 
   const trackMeta = (node: any) => {
     if (!node || typeof node !== "object") return;
@@ -682,10 +767,12 @@ async function readResponsesEventStream(args: {
     trackMeta(event);
     if (event?.response && typeof event.response === "object") {
       trackMeta(event.response);
+      usage = extractResponsesUsage(event.response) ?? usage;
     }
     const eventType = String(event?.type ?? "");
     if (eventType === "response.completed" && event?.response && typeof event.response === "object") {
       completedResponse = event.response as Record<string, unknown>;
+      usage = extractResponsesUsage(event.response) ?? usage;
     }
     if (eventType === "error") {
       const errorMessage =
@@ -731,6 +818,7 @@ async function readResponsesEventStream(args: {
       error: `openai_stream_parse_failed_model:${model}_${truncateError(String(cause?.message ?? cause ?? "unknown_error"))}`,
       responseId,
       conversationId,
+      usage,
     };
   }
 
@@ -740,6 +828,7 @@ async function readResponsesEventStream(args: {
       error: streamError,
       responseId,
       conversationId,
+      usage,
     };
   }
 
@@ -752,6 +841,7 @@ async function readResponsesEventStream(args: {
       error: `openai_empty_text_model:${model}`,
       responseId,
       conversationId,
+      usage: usage ?? extractResponsesUsage(fallbackNode),
     };
   }
   return {
@@ -759,6 +849,7 @@ async function readResponsesEventStream(args: {
     error: null,
     responseId,
     conversationId,
+    usage: usage ?? extractResponsesUsage(fallbackNode),
   };
 }
 
@@ -770,6 +861,49 @@ function isRetryableOpenAIError(error: string) {
   if (/openai_responses_(408|409|425|429|500|502|503|504)/.test(e)) return true;
   if (/openai_responses_403/.test(e) && /(html|forbidden|proxy|firewall|blocked|access denied|cloudflare)/.test(e)) return true;
   return false;
+}
+
+function isReasoningEffortRejected(error: string) {
+  const e = String(error ?? "").toLowerCase();
+  if (!isBadRequestError(e)) return false;
+  return /(reasoning|effort|unsupported value|unsupported parameter|invalid.*reasoning)/i.test(e);
+}
+
+function logHybridDiagnostics(args: {
+  runtimeMode: MedSafetyRuntimeMode;
+  stage: string;
+  model: string;
+  routeDecision?: MedSafetyRouteDecision | null;
+  usage?: ResponsesUsage | null;
+  promptChars?: number;
+  extra?: Record<string, unknown>;
+}) {
+  if (args.runtimeMode === "legacy") return;
+  try {
+    console.info("[MedSafetyHybrid] %s", JSON.stringify({
+      runtimeMode: args.runtimeMode,
+      stage: args.stage,
+      model: args.model,
+      routeDecision: args.routeDecision
+        ? {
+            intent: args.routeDecision.intent,
+            risk: args.routeDecision.risk,
+            entityClarity: args.routeDecision.entityClarity,
+            answerDepth: args.routeDecision.answerDepth,
+            needsEscalation: args.routeDecision.needsEscalation,
+            needsSbar: args.routeDecision.needsSbar,
+            format: args.routeDecision.format,
+            source: args.routeDecision.source,
+            confidence: args.routeDecision.confidence,
+          }
+        : null,
+      usage: args.usage ?? null,
+      promptChars: typeof args.promptChars === "number" ? args.promptChars : null,
+      ...(args.extra ?? {}),
+    }));
+  } catch {
+    // ignore logging failures
+  }
 }
 
 async function sleepWithAbort(ms: number, signal: AbortSignal) {
@@ -805,6 +939,7 @@ async function callResponsesApi(args: {
   maxOutputTokens: number;
   upstreamTimeoutMs: number;
   verbosity: ResponseVerbosity;
+  reasoningEffort: MedSafetyReasoningEffort;
   storeResponses: boolean;
   compatMode?: boolean;
   onTextDelta?: TextDeltaHandler;
@@ -822,6 +957,7 @@ async function callResponsesApi(args: {
     maxOutputTokens,
     upstreamTimeoutMs,
     verbosity,
+    reasoningEffort,
     storeResponses,
     compatMode,
     onTextDelta,
@@ -838,6 +974,7 @@ async function callResponsesApi(args: {
       error: requestConfig.missingCredential,
       responseId: null,
       conversationId: null,
+      usage: null,
     };
   }
 
@@ -873,7 +1010,7 @@ async function callResponsesApi(args: {
           format: { type: "text" as const },
           verbosity,
         },
-        reasoning: { effort: "medium" as const },
+        reasoning: { effort: reasoningEffort },
         max_output_tokens: maxOutputTokens,
         tools: [],
         store: storeResponses,
@@ -911,6 +1048,7 @@ async function callResponsesApi(args: {
         error: `openai_timeout_upstream_model:${requestConfig.model}`,
         responseId: null,
         conversationId: null,
+        usage: null,
       };
     }
     return {
@@ -918,6 +1056,7 @@ async function callResponsesApi(args: {
       error: `openai_network_${truncateError(String(cause?.message ?? cause ?? "fetch_failed"))}`,
       responseId: null,
       conversationId: null,
+      usage: null,
     };
   }
   clearTimeout(timeout);
@@ -930,6 +1069,7 @@ async function callResponsesApi(args: {
       error: `openai_responses_${response.status}_model:${requestConfig.model}_${truncateError(raw || "unknown_error")}`,
       responseId: null,
       conversationId: null,
+      usage: null,
     };
   }
 
@@ -951,9 +1091,10 @@ async function callResponsesApi(args: {
       error: `openai_empty_text_model:${requestConfig.model}`,
       responseId,
       conversationId: conversationResponseId,
+      usage: extractResponsesUsage(json),
     };
   }
-  return { text, error: null, responseId, conversationId: conversationResponseId };
+  return { text, error: null, responseId, conversationId: conversationResponseId, usage: extractResponsesUsage(json) };
 }
 
 async function callResponsesApiWithRetry(
@@ -964,7 +1105,7 @@ async function callResponsesApiWithRetry(
 ): Promise<ResponsesAttempt> {
   const { retries, retryBaseMs, ...rest } = args;
   let attempt = 0;
-  let last: ResponsesAttempt = { text: null, error: "openai_request_failed", responseId: null, conversationId: null };
+  let last: ResponsesAttempt = { text: null, error: "openai_request_failed", responseId: null, conversationId: null, usage: null };
 
   while (attempt <= retries) {
     last = await callResponsesApi(rest);
@@ -980,6 +1121,7 @@ async function callResponsesApiWithRetry(
         error: "openai_timeout_retry_aborted",
         responseId: null,
         conversationId: null,
+        usage: null,
       };
     }
     attempt += 1;
@@ -1120,6 +1262,7 @@ export async function translateMedSafetyToEnglish(input: {
         maxOutputTokens,
         upstreamTimeoutMs: timeoutForAttempt,
         verbosity: "medium",
+        reasoningEffort: "medium",
         storeResponses: false,
         retries: networkRetries,
         retryBaseMs: networkRetryBaseMs,
@@ -1143,24 +1286,295 @@ export async function translateMedSafetyToEnglish(input: {
   throw new Error(lastError);
 }
 
+function isPremiumSearchModel(model: string | null | undefined) {
+  return String(model ?? "").trim().toLowerCase() === "gpt-5.4";
+}
+
+async function resolveRouteDecision(args: {
+  runtimeMode: MedSafetyRuntimeMode;
+  query: string;
+  locale: "ko" | "en";
+  imageDataUrl?: string;
+  apiKey: string;
+  model: string;
+  apiBaseUrl: string;
+  signal: AbortSignal;
+  upstreamTimeoutMs: number;
+  networkRetries: number;
+  networkRetryBaseMs: number;
+}): Promise<{ decision: MedSafetyRouteDecision; usage: ResponsesUsage | null }> {
+  const deterministic = buildDeterministicRouteDecision({
+    query: args.query,
+    locale: args.locale,
+    imageDataUrl: args.imageDataUrl,
+  });
+  if (args.runtimeMode === "legacy") {
+    return { decision: deterministic, usage: null };
+  }
+  if (
+    !shouldUseTinyRouter(
+      {
+        query: args.query,
+        locale: args.locale,
+        imageDataUrl: args.imageDataUrl,
+      },
+      deterministic
+    )
+  ) {
+    return { decision: deterministic, usage: null };
+  }
+
+  const fallback = buildConservativeRouteDecision("tiny_router_fallback");
+  const attempt = await callResponsesApiWithRetry({
+    apiKey: args.apiKey,
+    model: args.model,
+    developerPrompt: buildTinyRouterDeveloperPrompt(args.locale),
+    userPrompt: buildTinyRouterUserPrompt({
+      query: args.query,
+      locale: args.locale,
+      imageDataUrl: args.imageDataUrl,
+    }),
+    apiBaseUrl: args.apiBaseUrl,
+    signal: args.signal,
+    maxOutputTokens: 120,
+    upstreamTimeoutMs: Math.max(20_000, Math.min(args.upstreamTimeoutMs, 45_000)),
+    verbosity: "low",
+    reasoningEffort: "low",
+    storeResponses: false,
+    retries: args.networkRetries,
+    retryBaseMs: args.networkRetryBaseMs,
+  });
+  if (!attempt.error && attempt.text) {
+    return {
+      decision: parseTinyRouterDecision(attempt.text, deterministic),
+      usage: attempt.usage,
+    };
+  }
+  return {
+    decision: {
+      ...fallback,
+      reason: attempt.error ?? fallback.reason,
+    },
+    usage: attempt.usage,
+  };
+}
+
+async function runQualityGateAndRepair(args: {
+  runtimeMode: MedSafetyRuntimeMode;
+  query: string;
+  locale: "ko" | "en";
+  answer: string;
+  decision: MedSafetyRouteDecision;
+  apiKey: string;
+  model: string;
+  apiBaseUrl: string;
+  signal: AbortSignal;
+  upstreamTimeoutMs: number;
+  networkRetries: number;
+  networkRetryBaseMs: number;
+  profile: MedSafetyPromptProfile;
+  developerPrompt: string;
+  hasImage: boolean;
+  isPremiumSearch: boolean;
+  allowRepair: boolean;
+}): Promise<{
+  answer: string;
+  gateDecision: MedSafetyQualityDecision | null;
+  usage: ResponsesUsage | null;
+  repaired: boolean;
+}> {
+  const heuristicDecision = buildHeuristicQualityDecision(args.answer, args.decision);
+  if (
+    !shouldRunQualityGate({
+      decision: args.decision,
+      isPremiumSearch: args.isPremiumSearch,
+      hasImage: args.hasImage,
+      answer: args.answer,
+    })
+  ) {
+    return {
+      answer: args.answer,
+      gateDecision: heuristicDecision.verdict === "repair_required" ? heuristicDecision : null,
+      usage: null,
+      repaired: false,
+    };
+  }
+
+  const gateAttempt = await callResponsesApiWithRetry({
+    apiKey: args.apiKey,
+    model: args.model,
+    developerPrompt: buildQualityGateDeveloperPrompt(),
+    userPrompt: buildQualityGateUserPrompt({
+      query: args.query,
+      answer: args.answer,
+      locale: args.locale,
+      decision: args.decision,
+    }),
+    apiBaseUrl: args.apiBaseUrl,
+    signal: args.signal,
+    maxOutputTokens: 220,
+    upstreamTimeoutMs: Math.max(20_000, Math.min(args.upstreamTimeoutMs, 45_000)),
+    verbosity: "low",
+    reasoningEffort: args.isPremiumSearch ? "medium" : "low",
+    storeResponses: false,
+    retries: args.networkRetries,
+    retryBaseMs: args.networkRetryBaseMs,
+  });
+
+  const modelDecision =
+    !gateAttempt.error && gateAttempt.text ? parseQualityGateDecision(gateAttempt.text) : heuristicDecision;
+  if (modelDecision.verdict !== "repair_required" || !args.allowRepair) {
+    return {
+      answer: args.answer,
+      gateDecision: modelDecision,
+      usage: gateAttempt.usage,
+      repaired: false,
+    };
+  }
+
+  const repairAttempt = await callResponsesApiWithRetry({
+    apiKey: args.apiKey,
+    model: args.model,
+    developerPrompt: buildRepairDeveloperPrompt(args.developerPrompt, args.locale),
+    userPrompt: buildRepairUserPrompt({
+      query: args.query,
+      answer: args.answer,
+      locale: args.locale,
+      decision: args.decision,
+      repairInstructions: modelDecision.repairInstructions,
+    }),
+    apiBaseUrl: args.apiBaseUrl,
+    signal: args.signal,
+    maxOutputTokens: args.profile.outputTokenCandidates[0] ?? 1800,
+    upstreamTimeoutMs: args.upstreamTimeoutMs,
+    verbosity: args.profile.verbosity,
+    reasoningEffort: args.profile.reasoningEfforts[0] ?? "medium",
+    storeResponses: false,
+    retries: args.networkRetries,
+    retryBaseMs: args.networkRetryBaseMs,
+  });
+
+  if (!repairAttempt.error && repairAttempt.text) {
+    return {
+      answer: sanitizeAnswerText(repairAttempt.text),
+      gateDecision: modelDecision,
+      usage: sumUsages(gateAttempt.usage, repairAttempt.usage),
+      repaired: true,
+    };
+  }
+
+  return {
+    answer: args.answer,
+    gateDecision: modelDecision,
+    usage: sumUsages(gateAttempt.usage, repairAttempt.usage),
+    repaired: false,
+  };
+}
+
 export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise<OpenAIMedSafetyOutput> {
   const apiKey = normalizeApiKey();
+  const runtimeMode = resolveMedSafetyRuntimeMode();
   const modelCandidates = resolveModelCandidates(params.modelOverride);
   const apiBaseUrls = resolveApiBaseUrls();
-  const outputTokenCandidates = buildOutputTokenCandidates(resolveMaxOutputTokens());
-  const responseVerbosity: ResponseVerbosity = "medium";
+  const legacyOutputTokenCandidates = buildOutputTokenCandidates(resolveMaxOutputTokens());
+  const legacyResponseVerbosity: ResponseVerbosity = "medium";
   const upstreamTimeoutMs = resolveUpstreamTimeoutMs();
   const totalBudgetMs = Math.max(resolveTotalBudgetMs(), Math.min(900_000, upstreamTimeoutMs + 120_000));
   const networkRetries = resolveNetworkRetryCount();
   const networkRetryBaseMs = resolveNetworkRetryBaseMs();
   const storeResponses = resolveStoreResponses();
-  const developerPrompt = buildDeveloperPrompt(params.locale);
+  const legacyDeveloperPrompt = buildDeveloperPrompt(params.locale);
   const userPrompt = buildUserPrompt(params.query, params.locale);
   const memoryAwareUserPrompt = buildUserPromptWithContinuationMemory(userPrompt, params.continuationMemory, params.locale);
   const startedAt = Date.now();
 
   let selectedModel = modelCandidates[0] ?? MED_SAFETY_LOCKED_MODEL;
   let lastError = "openai_request_failed";
+  let lastRouteDecision: MedSafetyRouteDecision | null = null;
+
+  const finalizeSuccessfulAttempt = async (args: {
+    answerText: string;
+    responseId: string | null;
+    conversationId: string | null;
+    model: string;
+    apiBaseUrl: string;
+    developerPrompt: string;
+    routeDecision: MedSafetyRouteDecision | null;
+    profile: MedSafetyPromptProfile;
+    usage: ResponsesUsage | null;
+    routeUsage: ResponsesUsage | null;
+    allowRepair: boolean;
+    isPremiumSearch: boolean;
+    streamed: boolean;
+    reasoningEffort: MedSafetyReasoningEffort;
+    maxOutputTokens: number;
+    stage: string;
+  }) => {
+    let finalAnswer = sanitizeAnswerText(args.answerText);
+
+    logHybridDiagnostics({
+      runtimeMode,
+      stage: args.stage,
+      model: args.model,
+      routeDecision: args.routeDecision,
+      usage: sumUsages(args.routeUsage, args.usage),
+      promptChars: args.developerPrompt.length,
+      extra: {
+        streamed: args.streamed,
+        reasoningEffort: args.reasoningEffort,
+        maxOutputTokens: args.maxOutputTokens,
+      },
+    });
+
+    if (runtimeMode !== "legacy" && args.routeDecision) {
+      const allowRepair = runtimeMode === "hybrid_live" && args.allowRepair;
+      const quality = await runQualityGateAndRepair({
+        runtimeMode,
+        query: params.query,
+        locale: params.locale,
+        answer: finalAnswer,
+        decision: args.routeDecision,
+        apiKey,
+        model: args.model,
+        apiBaseUrl: args.apiBaseUrl,
+        signal: params.signal,
+        upstreamTimeoutMs,
+        networkRetries,
+        networkRetryBaseMs,
+        profile: args.profile,
+        developerPrompt: runtimeMode === "hybrid_live" ? args.developerPrompt : assembleMedSafetyDeveloperPrompt(args.routeDecision, params.locale),
+        hasImage: Boolean(params.imageDataUrl),
+        isPremiumSearch: args.isPremiumSearch,
+        allowRepair,
+      });
+      finalAnswer = sanitizeAnswerText(quality.answer);
+      logHybridDiagnostics({
+        runtimeMode,
+        stage: "quality_gate",
+        model: args.model,
+        routeDecision: args.routeDecision,
+        usage: quality.usage,
+        promptChars: args.developerPrompt.length,
+        extra: {
+          verdict: quality.gateDecision?.verdict ?? "not_run",
+          repaired: quality.repaired,
+          allowRepair,
+        },
+      });
+    }
+
+    const result = buildAnalyzeResult(params.query, finalAnswer);
+    return {
+      result,
+      model: args.model,
+      rawText: result.answer,
+      fallbackReason: null,
+      openaiResponseId: args.responseId,
+      openaiConversationId: args.conversationId,
+      routeDecision: args.routeDecision,
+      runtimeMode,
+    } satisfies OpenAIMedSafetyOutput;
+  };
 
   for (let modelIndex = 0; modelIndex < modelCandidates.length; modelIndex += 1) {
     if (Date.now() - startedAt > totalBudgetMs) {
@@ -1179,80 +1593,184 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
       const previousResponseId = useContinuationState ? params.previousResponseId : undefined;
       const conversationId = useContinuationState ? params.conversationId : undefined;
       const shouldUseContinuationIds = Boolean(previousResponseId || conversationId);
-      for (let tokenIndex = 0; tokenIndex < outputTokenCandidates.length; tokenIndex += 1) {
-        if (Date.now() - startedAt > totalBudgetMs) {
-          lastError = "openai_timeout_total_budget";
-          break;
-        }
-        const outputTokenLimit = outputTokenCandidates[tokenIndex]!;
-        const allowStreamDelta = Boolean(params.onTextDelta) && modelIndex === 0 && baseIndex === 0 && tokenIndex === 0;
-        const attempt = await callResponsesApiWithRetry({
+      const isPremiumSearch = isPremiumSearchModel(candidateModel);
+      let routeDecision: MedSafetyRouteDecision | null = null;
+      let routeUsage: ResponsesUsage | null = null;
+      let assembledDeveloperPrompt = legacyDeveloperPrompt;
+      let promptProfile: MedSafetyPromptProfile = {
+        reasoningEfforts: ["medium"],
+        verbosity: legacyResponseVerbosity,
+        outputTokenCandidates: legacyOutputTokenCandidates,
+      };
+
+      if (runtimeMode !== "legacy") {
+        const resolvedRoute = await resolveRouteDecision({
+          runtimeMode,
+          query: params.query,
+          locale: params.locale,
+          imageDataUrl: params.imageDataUrl,
           apiKey,
           model: candidateModel,
-          developerPrompt,
-          userPrompt: shouldUseContinuationIds ? userPrompt : memoryAwareUserPrompt,
           apiBaseUrl,
-          imageDataUrl: params.imageDataUrl,
-          previousResponseId,
-          conversationId,
           signal: params.signal,
-          maxOutputTokens: outputTokenLimit,
           upstreamTimeoutMs,
-          verbosity: responseVerbosity,
-          storeResponses,
-          onTextDelta: allowStreamDelta ? params.onTextDelta : undefined,
-          retries: allowStreamDelta ? 0 : networkRetries,
-          retryBaseMs: networkRetryBaseMs,
+          networkRetries,
+          networkRetryBaseMs,
         });
-        if (!attempt.error && attempt.text) {
-          const result = buildAnalyzeResult(params.query, attempt.text);
-          return {
-            result,
-            model: candidateModel,
-            rawText: result.answer,
-            fallbackReason: null,
-            openaiResponseId: attempt.responseId,
-            openaiConversationId: attempt.conversationId,
-          };
-        }
-        if (attempt.error) {
-          if (isBadRequestError(attempt.error) && tokenIndex === 0) {
-            const statelessRetry = await callResponsesApi({
-              apiKey,
-              model: candidateModel,
-              developerPrompt,
-              userPrompt,
-              apiBaseUrl,
-              imageDataUrl: params.imageDataUrl,
-              signal: params.signal,
-              maxOutputTokens: outputTokenLimit,
-              upstreamTimeoutMs,
-              verbosity: responseVerbosity,
-              storeResponses,
-              compatMode: true,
-            });
-            if (!statelessRetry.error && statelessRetry.text) {
-              const result = buildAnalyzeResult(params.query, statelessRetry.text);
-              return {
-                result,
-                model: candidateModel,
-                rawText: result.answer,
-                fallbackReason: null,
-                openaiResponseId: statelessRetry.responseId,
-                openaiConversationId: statelessRetry.conversationId,
-              };
-            }
-            lastError = statelessRetry.error ?? attempt.error;
-            if (isTokenLimitError(lastError)) continue;
-            break;
+        routeDecision = resolvedRoute.decision;
+        routeUsage = resolvedRoute.usage;
+        lastRouteDecision = routeDecision;
+        assembledDeveloperPrompt = assembleMedSafetyDeveloperPrompt(routeDecision, params.locale);
+        promptProfile = buildPromptProfile({
+          decision: routeDecision,
+          model: candidateModel,
+          isPremiumSearch,
+        });
+        logHybridDiagnostics({
+          runtimeMode,
+          stage: "router",
+          model: candidateModel,
+          routeDecision,
+          usage: routeUsage,
+          promptChars: assembledDeveloperPrompt.length,
+          extra: {
+            mainPromptMode: runtimeMode === "hybrid_shadow" ? "legacy" : "modular",
+            actualPromptChars: (runtimeMode === "hybrid_live" ? assembledDeveloperPrompt : legacyDeveloperPrompt).length,
+            reasoningEfforts: promptProfile.reasoningEfforts.join(","),
+            tokenCandidates: promptProfile.outputTokenCandidates.join(","),
+          },
+        });
+      }
+
+      const usesHybridExecution = runtimeMode === "hybrid_live" && Boolean(routeDecision);
+      const mainDeveloperPrompt = usesHybridExecution ? assembledDeveloperPrompt : legacyDeveloperPrompt;
+      const responseVerbosity = usesHybridExecution ? promptProfile.verbosity : legacyResponseVerbosity;
+      const reasoningEfforts = usesHybridExecution ? promptProfile.reasoningEfforts : (["medium"] as MedSafetyReasoningEffort[]);
+      const outputTokenCandidates = usesHybridExecution ? promptProfile.outputTokenCandidates : legacyOutputTokenCandidates;
+      const shouldSuppressStreamingForQuality =
+        runtimeMode === "hybrid_live"
+          ? true
+          : runtimeMode === "hybrid_shadow" || !routeDecision
+            ? false
+            : shouldRunQualityGate({
+                decision: routeDecision,
+                isPremiumSearch,
+                hasImage: Boolean(params.imageDataUrl),
+              });
+
+      reasoningLoop: for (let reasoningIndex = 0; reasoningIndex < reasoningEfforts.length; reasoningIndex += 1) {
+        const reasoningEffort = reasoningEfforts[reasoningIndex]!;
+        tokenLoop: for (let tokenIndex = 0; tokenIndex < outputTokenCandidates.length; tokenIndex += 1) {
+          if (Date.now() - startedAt > totalBudgetMs) {
+            lastError = "openai_timeout_total_budget";
+            break reasoningLoop;
           }
-          lastError = attempt.error;
-          if (isTokenLimitError(attempt.error)) continue;
-          break;
+          const outputTokenLimit = outputTokenCandidates[tokenIndex]!;
+          const allowStreamDelta =
+            Boolean(params.onTextDelta) &&
+            modelIndex === 0 &&
+            baseIndex === 0 &&
+            reasoningIndex === 0 &&
+            tokenIndex === 0 &&
+            !shouldSuppressStreamingForQuality;
+
+          const attempt = await callResponsesApiWithRetry({
+            apiKey,
+            model: candidateModel,
+            developerPrompt: mainDeveloperPrompt,
+            userPrompt: shouldUseContinuationIds ? userPrompt : memoryAwareUserPrompt,
+            apiBaseUrl,
+            imageDataUrl: params.imageDataUrl,
+            previousResponseId,
+            conversationId,
+            signal: params.signal,
+            maxOutputTokens: outputTokenLimit,
+            upstreamTimeoutMs,
+            verbosity: responseVerbosity,
+            reasoningEffort,
+            storeResponses,
+            onTextDelta: allowStreamDelta ? params.onTextDelta : undefined,
+            retries: allowStreamDelta ? 0 : networkRetries,
+            retryBaseMs: networkRetryBaseMs,
+          });
+          if (!attempt.error && attempt.text) {
+            return finalizeSuccessfulAttempt({
+              answerText: attempt.text,
+              responseId: attempt.responseId,
+              conversationId: attempt.conversationId,
+              model: candidateModel,
+              apiBaseUrl,
+              developerPrompt: mainDeveloperPrompt,
+              routeDecision,
+              profile: promptProfile,
+              usage: attempt.usage,
+              routeUsage,
+              allowRepair: !allowStreamDelta,
+              isPremiumSearch,
+              streamed: allowStreamDelta,
+              reasoningEffort,
+              maxOutputTokens: outputTokenLimit,
+              stage: "main",
+            });
+          }
+          if (attempt.error) {
+            if (isReasoningEffortRejected(attempt.error)) {
+              lastError = attempt.error;
+              if (reasoningIndex + 1 < reasoningEfforts.length) continue reasoningLoop;
+              break reasoningLoop;
+            }
+            if (isBadRequestError(attempt.error) && tokenIndex === 0) {
+              const statelessRetry = await callResponsesApi({
+                apiKey,
+                model: candidateModel,
+                developerPrompt: mainDeveloperPrompt,
+                userPrompt: memoryAwareUserPrompt,
+                apiBaseUrl,
+                imageDataUrl: params.imageDataUrl,
+                signal: params.signal,
+                maxOutputTokens: outputTokenLimit,
+                upstreamTimeoutMs,
+                verbosity: responseVerbosity,
+                reasoningEffort,
+                storeResponses,
+                compatMode: true,
+              });
+              if (!statelessRetry.error && statelessRetry.text) {
+                return finalizeSuccessfulAttempt({
+                  answerText: statelessRetry.text,
+                  responseId: statelessRetry.responseId,
+                  conversationId: statelessRetry.conversationId,
+                  model: candidateModel,
+                  apiBaseUrl,
+                  developerPrompt: mainDeveloperPrompt,
+                  routeDecision,
+                  profile: promptProfile,
+                  usage: statelessRetry.usage,
+                  routeUsage,
+                  allowRepair: true,
+                  isPremiumSearch,
+                  streamed: false,
+                  reasoningEffort,
+                  maxOutputTokens: outputTokenLimit,
+                  stage: "main_compat",
+                });
+              }
+              lastError = statelessRetry.error ?? attempt.error;
+              if (isReasoningEffortRejected(lastError)) {
+                if (reasoningIndex + 1 < reasoningEfforts.length) continue reasoningLoop;
+                break reasoningLoop;
+              }
+              if (isTokenLimitError(lastError)) continue tokenLoop;
+              break reasoningLoop;
+            }
+            lastError = attempt.error;
+            if (isTokenLimitError(attempt.error)) continue tokenLoop;
+            break reasoningLoop;
+          }
+          lastError = "openai_empty_text";
+          if (tokenIndex + 1 < outputTokenCandidates.length) continue tokenLoop;
+          break reasoningLoop;
         }
-        lastError = "openai_empty_text";
-        if (tokenIndex + 1 < outputTokenCandidates.length) continue;
-        break;
       }
     }
   }
@@ -1265,5 +1783,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
     fallbackReason: lastError,
     openaiResponseId: null,
     openaiConversationId: null,
+    routeDecision: lastRouteDecision,
+    runtimeMode,
   };
 }

@@ -8,6 +8,7 @@ import {
   createMedSafetyContinuationToken,
   readMedSafetyContinuationToken,
 } from "@/lib/server/medSafetyContinuation";
+import { resolveMedSafetyRuntimeMode, shouldGenerateKoEnglishVariant } from "@/lib/server/medSafetyPrompting";
 import type { Json } from "@/types/supabase";
 
 export const runtime = "edge";
@@ -525,10 +526,12 @@ export async function POST(req: NextRequest) {
     });
     const previousResponseId = continuationState?.previousResponseId ?? undefined;
     const conversationId = continuationState?.conversationId ?? undefined;
+    const runtimeMode = resolveMedSafetyRuntimeMode();
 
     const runAnalyze = async (onTextDelta?: (delta: string) => void | Promise<void>) => {
       const analyzedAt = Date.now();
       const today = todayISO();
+      const shouldGenerateEnglishVariant = shouldGenerateKoEnglishVariant(runtimeMode);
 
       const analyzedKo = await analyzeMedSafetyWithOpenAI({
         query,
@@ -550,56 +553,58 @@ export async function POST(req: NextRequest) {
       });
 
       let payloadEn: MedSafetyResponseData | null = null;
-      const translateController = new AbortController();
-      const relayAbort = () => translateController.abort();
-      const translateTimeoutMs = locale === "en" ? 18_000 : 7_000;
-      const translateTimer = setTimeout(() => translateController.abort(), translateTimeoutMs);
-      abort.signal.addEventListener("abort", relayAbort);
-      try {
-        const translated = await translateMedSafetyToEnglish({
-          answer: analyzedKo.result.answer,
-          rawText: analyzedKo.rawText,
-          model: analyzedKo.model,
-          signal: translateController.signal,
-        });
-        payloadEn = {
-          ...payloadKo,
-          answer: translated.result.answer,
-          language: "en",
-          model: translated.model ?? payloadKo.model,
-          fallbackReason: mergePublicReasons(payloadKo.fallbackReason, translated.debug),
-        };
-      } catch {
-        if (locale === "en") {
-          const elapsed = Date.now() - routeStartedAt;
-          const remainingMs = timeoutMs - elapsed;
-          if (remainingMs > 10_000) {
-            try {
-              const analyzedEn = await analyzeMedSafetyWithOpenAI({
-                query,
-                locale: "en",
-                imageDataUrl: imageDataUrl || undefined,
-                modelOverride: searchType === "premium" ? "gpt-5.4" : "gpt-5.2",
-                previousResponseId,
-                conversationId,
-                signal: abort.signal,
-              });
-              payloadEn = buildResponseData({
-                language: "en",
-                analyzedAt,
-                analyzed: analyzedEn,
-                searchType,
-                creditBucket: consumedBucket,
-              });
-              payloadEn.fallbackReason = mergePublicReasons("en_direct", payloadEn.fallbackReason);
-            } catch {
-              payloadEn = null;
+      if (locale === "en" || shouldGenerateEnglishVariant) {
+        const translateController = new AbortController();
+        const relayAbort = () => translateController.abort();
+        const translateTimeoutMs = locale === "en" ? 18_000 : 7_000;
+        const translateTimer = setTimeout(() => translateController.abort(), translateTimeoutMs);
+        abort.signal.addEventListener("abort", relayAbort);
+        try {
+          const translated = await translateMedSafetyToEnglish({
+            answer: analyzedKo.result.answer,
+            rawText: analyzedKo.rawText,
+            model: analyzedKo.model,
+            signal: translateController.signal,
+          });
+          payloadEn = {
+            ...payloadKo,
+            answer: translated.result.answer,
+            language: "en",
+            model: translated.model ?? payloadKo.model,
+            fallbackReason: mergePublicReasons(payloadKo.fallbackReason, translated.debug),
+          };
+        } catch {
+          if (locale === "en") {
+            const elapsed = Date.now() - routeStartedAt;
+            const remainingMs = timeoutMs - elapsed;
+            if (remainingMs > 10_000) {
+              try {
+                const analyzedEn = await analyzeMedSafetyWithOpenAI({
+                  query,
+                  locale: "en",
+                  imageDataUrl: imageDataUrl || undefined,
+                  modelOverride: searchType === "premium" ? "gpt-5.4" : "gpt-5.2",
+                  previousResponseId,
+                  conversationId,
+                  signal: abort.signal,
+                });
+                payloadEn = buildResponseData({
+                  language: "en",
+                  analyzedAt,
+                  analyzed: analyzedEn,
+                  searchType,
+                  creditBucket: consumedBucket,
+                });
+                payloadEn.fallbackReason = mergePublicReasons("en_direct", payloadEn.fallbackReason);
+              } catch {
+                payloadEn = null;
+              }
             }
           }
+        } finally {
+          clearTimeout(translateTimer);
+          abort.signal.removeEventListener("abort", relayAbort);
         }
-      } finally {
-        clearTimeout(translateTimer);
-        abort.signal.removeEventListener("abort", relayAbort);
       }
 
       const nextContinuationToken = await createMedSafetyContinuationToken({
