@@ -1805,11 +1805,11 @@ export function ToolMedSafetyPage() {
                     <div className="flex justify-start">
                       <div className="w-full max-w-[860px] min-w-0 px-2">
                         <div className="flex items-start gap-3">
-                          <div className="relative mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center">
+                          <div className="relative mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center">
                             <img
-                              src="/rnest-logo.png"
+                              src="/icons/icon-192.png"
                               alt="RNest"
-                              className="h-8 w-8 rounded-full object-cover"
+                              className="h-9 w-9 rounded-full bg-white object-contain p-0.5"
                             />
                             <span className="absolute inset-0 animate-ping rounded-full border-2 border-[color:var(--rnest-accent)] opacity-30" />
                             <span className="absolute inset-0 animate-[spin_3s_linear_infinite] rounded-full border-2 border-transparent border-t-[color:var(--rnest-accent)] opacity-60" />

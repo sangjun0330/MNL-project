@@ -494,7 +494,11 @@ function buildDeveloperPrompt(locale: "ko" | "en") {
       "- If the user question is asked in English and a direct English answer is required, follow the same policy above but write the final answer in natural clinical English.",
     ].join("\n");
   }
-  return MED_SAFETY_DEVELOPER_PROMPT;
+  return [
+    MED_SAFETY_DEVELOPER_PROMPT,
+    "",
+    "모든 사고 과정과 reasoning을 반드시 한국어로 수행하라.",
+  ].join("\n");
 }
 
 function buildUserPrompt(query: string, locale: "ko" | "en") {
