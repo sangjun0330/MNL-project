@@ -22,6 +22,7 @@ import {
   type MedSafetyRouteDecision,
   type MedSafetyRuntimeMode,
 } from "@/lib/server/medSafetyPrompting";
+import { buildMedSafetySectionBodyText, parseMedSafetyAnswerSections } from "@/lib/medSafetyAnswerSections";
 
 export type ClinicalMode = "ward" | "er" | "icu";
 export type ClinicalSituation = "general" | "pre_admin" | "during_admin" | "event_response";
@@ -172,10 +173,10 @@ function resolveStoreResponses() {
 }
 
 function resolveMaxOutputTokens() {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_MAX_OUTPUT_TOKENS ?? 5000);
-  if (!Number.isFinite(raw)) return 5000;
+  const raw = Number(process.env.OPENAI_MED_SAFETY_MAX_OUTPUT_TOKENS ?? 9000);
+  if (!Number.isFinite(raw)) return 9000;
   const rounded = Math.round(raw);
-  return Math.max(1400, Math.min(8000, rounded));
+  return Math.max(2400, Math.min(12000, rounded));
 }
 
 function resolveNetworkRetryCount() {
@@ -274,6 +275,14 @@ function sanitizeAnswerText(text: string) {
       )
   );
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function normalizeDeliveredAnswerText(text: string) {
+  return String(text ?? "")
+    .replace(/\r/g, "")
+    .replace(/\u0000/g, "")
+    .replace(/\n{4,}/g, "\n\n\n")
+    .trim();
 }
 
 export const MED_SAFETY_LEGACY_DENSE_CORE_PROMPT_REFERENCE = [
@@ -869,7 +878,7 @@ function buildDefaultPromptProfile(): MedSafetyPromptProfile {
   return {
     reasoningEfforts: ["medium"],
     verbosity: "low",
-    outputTokenCandidates: [1200, 900, 700],
+    outputTokenCandidates: [2200, 1700, 1300],
     qualityLevel: "balanced",
   };
 }
@@ -921,8 +930,9 @@ async function readResponsesEventStream(args: {
   response: Response;
   model: string;
   onTextDelta: TextDeltaHandler;
+  signal: AbortSignal;
 }): Promise<ResponsesAttempt> {
-  const { response, model, onTextDelta } = args;
+  const { response, model, onTextDelta, signal } = args;
   const contentType = String(response.headers.get("content-type") ?? "").toLowerCase();
   if (!contentType.includes("text/event-stream")) {
     const fallbackJson = await response.json().catch(() => null);
@@ -938,7 +948,11 @@ async function readResponsesEventStream(args: {
         usage: extractResponsesUsage(fallbackJson),
       };
     }
-    await onTextDelta(fallbackText);
+    await emitSectionStreamFallback({
+      text: fallbackText,
+      onTextDelta,
+      signal,
+    });
     return {
       text: fallbackText,
       error: null,
@@ -962,7 +976,11 @@ async function readResponsesEventStream(args: {
         usage: extractResponsesUsage(fallbackJson),
       };
     }
-    await onTextDelta(fallbackText);
+    await emitSectionStreamFallback({
+      text: fallbackText,
+      onTextDelta,
+      signal,
+    });
     return {
       text: fallbackText,
       error: null,
@@ -1094,6 +1112,39 @@ async function readResponsesEventStream(args: {
     conversationId,
     usage: usage ?? extractResponsesUsage(fallbackNode),
   };
+}
+
+function buildSectionStreamChunk(section: { title: string; lead: string; bodyLines: string[] }, index: number) {
+  const sectionBody = buildMedSafetySectionBodyText(section);
+  const lines = [section.title];
+  if (sectionBody) lines.push(sectionBody);
+  const prefix = index > 0 ? "\n\n" : "";
+  return `${prefix}${lines.join("\n")}`;
+}
+
+async function emitSectionStreamFallback(args: {
+  text: string;
+  onTextDelta: TextDeltaHandler;
+  signal: AbortSignal;
+}) {
+  const normalized = normalizeDeliveredAnswerText(args.text);
+  if (!normalized) return;
+
+  const sections = parseMedSafetyAnswerSections(normalized);
+  if (!sections.length) {
+    await args.onTextDelta(normalized);
+    return;
+  }
+
+  for (let index = 0; index < sections.length; index += 1) {
+    if (args.signal.aborted) throw new Error("openai_timeout_retry_aborted");
+    const chunk = buildSectionStreamChunk(sections[index]!, index);
+    if (!chunk.trim()) continue;
+    await args.onTextDelta(chunk);
+    if (index + 1 < sections.length) {
+      await sleepWithAbort(24, args.signal);
+    }
+  }
 }
 
 function isRetryableOpenAIError(error: string) {
@@ -1321,6 +1372,7 @@ async function callResponsesApi(args: {
       response,
       model: requestConfig.model,
       onTextDelta,
+      signal,
     });
   }
 
@@ -1599,7 +1651,7 @@ function describeFallbackIssueEn(note: string) {
 
 function buildAnalyzeResult(query: string, answer: string): MedSafetyAnalysisResult {
   return {
-    answer: sanitizeAnswerText(answer),
+    answer: normalizeDeliveredAnswerText(answer),
     query: normalizeText(query),
   };
 }
@@ -1615,7 +1667,7 @@ export async function translateMedSafetyToEnglish(input: {
   model: string | null;
   debug: string | null;
 }> {
-  const sourceText = sanitizeAnswerText(input.answer || input.rawText);
+  const sourceText = normalizeDeliveredAnswerText(input.answer || input.rawText);
   if (!sourceText) {
     return {
       result: {
@@ -1631,7 +1683,7 @@ export async function translateMedSafetyToEnglish(input: {
   const apiKey = normalizeApiKey();
   const modelCandidates = resolveModelCandidates(input.model ?? null);
   const apiBaseUrls = resolveApiBaseUrls();
-  const maxOutputTokens = Math.max(1800, Math.min(5000, resolveMaxOutputTokens() + 1000));
+  const maxOutputTokens = Math.max(2400, Math.min(7000, resolveMaxOutputTokens() + 1000));
   const upstreamTimeoutMs = resolveUpstreamTimeoutMs();
   const networkRetries = resolveNetworkRetryCount();
   const networkRetryBaseMs = resolveNetworkRetryBaseMs();
@@ -1670,7 +1722,7 @@ export async function translateMedSafetyToEnglish(input: {
         retryBaseMs: networkRetryBaseMs,
       });
       if (!attempt.error && attempt.text) {
-        const translated = sanitizeAnswerText(attempt.text);
+        const translated = normalizeDeliveredAnswerText(attempt.text);
         return {
           result: {
             answer: translated,
@@ -1867,7 +1919,7 @@ async function runQualityGateAndRepair(args: {
       retryBaseMs: args.networkRetryBaseMs,
     });
     if (!repairAttempt.error && repairAttempt.text) {
-      const repairedAnswer = sanitizeAnswerText(repairAttempt.text);
+      const repairedAnswer = normalizeDeliveredAnswerText(repairAttempt.text);
       const acceptRepair = shouldAcceptRepairedAnswer(args.answer, repairedAnswer, finalGateDecision.repairInstructions);
       return {
         answer: acceptRepair ? repairedAnswer : args.answer,
@@ -1963,18 +2015,10 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         query: params.query,
       });
       const mainDeveloperPrompt = runtimeMode === "hybrid_live" ? promptAssembly.developerPrompt : legacyDeveloperPrompt;
-      const shouldSuppressStreamingForQuality =
-        runtimeMode === "hybrid_live" &&
-        shouldRunQualityGate({
-          decision: routeDecision,
-          isPremiumSearch,
-          hasImage: Boolean(params.imageDataUrl),
-        });
       const allowStreaming =
         Boolean(params.onTextDelta) &&
         modelIndex === 0 &&
-        baseIndex === 0 &&
-        !shouldSuppressStreamingForQuality;
+        baseIndex === 0;
 
       logHybridDiagnostics({
         runtimeMode,
@@ -2015,7 +2059,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         continue;
       }
 
-      let finalAnswer = sanitizeAnswerText(mainAttempt.answerText);
+      let finalAnswer = normalizeDeliveredAnswerText(mainAttempt.answerText);
       let gateUsage: ResponsesUsage | null = null;
       let repairUsage: ResponsesUsage | null = null;
       let shadowComparison: MedSafetyShadowComparison | null = null;
@@ -2055,7 +2099,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
           isPremiumSearch,
           allowRepair: !mainAttempt.streamed,
         });
-        finalAnswer = sanitizeAnswerText(quality.answer);
+        finalAnswer = normalizeDeliveredAnswerText(quality.answer);
         gateUsage = quality.gateUsage;
         repairUsage = quality.repairUsage;
         logHybridDiagnostics({
@@ -2091,7 +2135,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
           networkRetries,
           networkRetryBaseMs,
         });
-        const hybridAnswer = hybridAttempt.answerText ? sanitizeAnswerText(hybridAttempt.answerText) : null;
+        const hybridAnswer = hybridAttempt.answerText ? normalizeDeliveredAnswerText(hybridAttempt.answerText) : null;
         const hybridHeuristic = hybridAnswer ? buildHeuristicQualityDecision(hybridAnswer, routeDecision) : null;
         const pairwiseQualityFlags: string[] = [];
         const verbosityFlags: string[] = [];

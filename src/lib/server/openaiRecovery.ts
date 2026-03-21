@@ -77,7 +77,7 @@ type CategoryMeta = {
   hints: string[];
 };
 
-const DEFAULT_MAX_OUTPUT_TOKENS = 1800;
+const DEFAULT_MAX_OUTPUT_TOKENS = 3200;
 
 const CATEGORY_ORDER: CategoryMeta[] = [
   { category: "sleep", titleKo: "수면", titleEn: "Sleep", hints: ["수면", "sleep", "sleep debt"] },
@@ -213,7 +213,7 @@ function buildHistorySummary(vitals: DailyVital[]): RecoveryHistorySummary | nul
 function resolveMaxOutputTokens() {
   const raw = Number(process.env.OPENAI_MAX_OUTPUT_TOKENS ?? DEFAULT_MAX_OUTPUT_TOKENS);
   if (!Number.isFinite(raw)) return DEFAULT_MAX_OUTPUT_TOKENS;
-  return Math.round(clamp(raw, 700, 3500));
+  return Math.round(clamp(raw, 1200, 5200));
 }
 
 function resolveStoreResponses() {
@@ -1745,7 +1745,7 @@ export async function generateAIRecoveryWithOpenAI(
   const context = buildUserContext(params);
   const developerPrompt = buildDeveloperPrompt(params.language, params.phase ?? "start");
   const userPrompt = buildUserPrompt(params.language, context, params.phase ?? "start");
-  const maxOutputTokens = Math.max(resolveMaxOutputTokens(), 2200);
+  const maxOutputTokens = Math.max(resolveMaxOutputTokens(), 3200);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 35_000);
   try {
@@ -1769,7 +1769,7 @@ export async function generateAIRecoveryWithOpenAI(
         developerPrompt,
         userPrompt,
         signal: controller.signal,
-        maxOutputTokens: Math.min(3400, maxOutputTokens + attemptIndex * 500),
+        maxOutputTokens: Math.min(5200, maxOutputTokens + attemptIndex * 600),
         upstreamTimeoutMs: 28_000,
         logFeature: "recovery_explanation",
         language: params.language,
@@ -1950,7 +1950,7 @@ export async function translateAIRecoveryToEnglish(
         userPrompt: buildTranslatePrompt(targetLines, strictNoKorean),
         signal: controller.signal,
         // 번역은 길이가 길어지기 쉬워 생성보다 넉넉하게 허용
-        maxOutputTokens: Math.max(resolveMaxOutputTokens(), 2600),
+        maxOutputTokens: Math.max(resolveMaxOutputTokens(), 3600),
         upstreamTimeoutMs: 28_000,
         logFeature: "recovery_translate",
         language: "en",
@@ -2627,7 +2627,7 @@ async function generatePlannerOrdersWithOpenAI(
     phase: params.phase ?? "start",
     requestedOrderCount: params.requestedOrderCount,
   });
-  const maxOutputTokens = Math.max(resolveMaxOutputTokens(), 2200);
+  const maxOutputTokens = Math.max(resolveMaxOutputTokens(), 3200);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 40_000);
 
@@ -2652,7 +2652,7 @@ async function generatePlannerOrdersWithOpenAI(
         developerPrompt,
         userPrompt,
         signal: controller.signal,
-        maxOutputTokens: Math.min(3200, maxOutputTokens + attemptIndex * 400),
+        maxOutputTokens: Math.min(5000, maxOutputTokens + attemptIndex * 500),
         upstreamTimeoutMs: 32_000,
         logFeature: "planner_orders",
         language: params.language,

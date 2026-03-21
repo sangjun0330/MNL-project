@@ -961,7 +961,7 @@ export function buildPromptProfile(args: {
     return {
       reasoningEfforts: isPremiumSearch ? ["medium"] : ["low"],
       verbosity: "low",
-      outputTokenCandidates: isPremiumSearch ? [900, 720, 560] : [700, 560, 440],
+      outputTokenCandidates: isPremiumSearch ? [1800, 1400, 1100] : [1500, 1200, 900],
       qualityLevel: "balanced",
     };
   }
@@ -976,16 +976,16 @@ export function buildPromptProfile(args: {
       outputTokenCandidates:
         decision.answerDepth === "detailed"
           ? decision.risk === "high" || Boolean(hasImage)
-            ? [2400, 2000, 1700]
-            : [1900, 1600, 1350]
-          : [1500, 1250, 1050],
+            ? [5200, 4200, 3400]
+            : [4200, 3400, 2800]
+          : [3200, 2600, 2100],
       qualityLevel: "balanced",
     };
   }
   return {
     reasoningEfforts: ["medium"],
     verbosity: isPremiumSearch ? "medium" : "low",
-    outputTokenCandidates: isPremiumSearch ? [1400, 1150, 950] : [1200, 980, 820],
+    outputTokenCandidates: isPremiumSearch ? [3000, 2400, 1900] : [2400, 1900, 1500],
     qualityLevel: "balanced",
   };
 }

@@ -15,6 +15,14 @@ import { buildStructuredCopyText, copyTextToClipboard } from "@/lib/structuredCo
 import { useI18n } from "@/lib/useI18n";
 import { sanitizeMemoDocument } from "@/lib/notebook";
 import { buildMedSafetyMemoBlocks } from "@/lib/medSafetyMemo";
+import {
+  buildMedSafetyDisplayLines,
+  buildMedSafetySectionBodyText,
+  normalizeMedSafetyAnswerText,
+  parseMedSafetyAnswerSections,
+  type MedSafetyAnswerSection as AnswerSection,
+  type MedSafetyAnswerSectionTone as AnswerSectionTone,
+} from "@/lib/medSafetyAnswerSections";
 import { useAppStore } from "@/lib/store";
 
 const FLAT_CARD_CLASS = "rounded-[32px] border border-[#E8E8EC] bg-white shadow-[0_18px_50px_rgba(15,23,42,0.04)]";
@@ -64,17 +72,6 @@ type AnalyzePayload = {
   startedFreshSession?: boolean;
   searchType: SearchCreditType;
   creditBucket: "included" | "extra" | null;
-};
-
-type AnswerSectionTone = "summary" | "action" | "warning" | "compare" | "neutral";
-
-type AnswerSection = {
-  title: string;
-  lead: string;
-  bodyLines: string[];
-  tone: AnswerSectionTone;
-  /** true when this section is a sub-section split from a larger parent section */
-  continuation?: boolean;
 };
 
 type PersistedMedSafetySession = {
@@ -181,11 +178,7 @@ function clearPersistedMedSafetySession(storageKey: string) {
 }
 
 function normalizeMultilineText(value: unknown) {
-  return String(value ?? "")
-    .replace(/\r/g, "")
-    .replace(/\u0000/g, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  return normalizeMedSafetyAnswerText(value);
 }
 
 function formatTime(value: number) {
@@ -501,413 +494,12 @@ async function parseAnalyzeStreamResponse(args: {
   return { data: parsedData, error: parsedError };
 }
 
-function normalizeAnswerRawLine(value: string) {
-  return String(value ?? "")
-    .replace(/\u0000/g, "")
-    .replace(/\t/g, "  ")
-    .replace(/\s+$/g, "");
-}
-
-function cleanAnswerLine(value: string) {
-  return normalizeAnswerRawLine(value)
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 function normalizeQuestionInput(value: string) {
   return String(value ?? "")
     .replace(/\r/g, "")
     .replace(/\u0000/g, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-}
-
-function stripBulletPrefix(value: string) {
-  return String(value ?? "")
-    .trimStart()
-    .replace(/^[-*•·]\s+/, "")
-    .replace(/^\d+[.)]\s+/, "")
-    .trim();
-}
-
-function stripHeadingAnnotations(value: string) {
-  return String(value ?? "")
-    .replace(/\([^)]*\)/g, "")
-    .replace(/（[^）]*）/g, "")
-    .replace(/\[[^\]]*\]/g, "")
-    .replace(/\s+/g, "")
-    .trim();
-}
-
-function normalizeSectionHeadingKey(value: string) {
-  return stripHeadingAnnotations(
-    stripBulletPrefix(cleanAnswerLine(value))
-      .replace(/^[“"'`]+/, "")
-      .replace(/[”"'`]+$/, "")
-      .replace(/[:：?？]$/, "")
-  ).toLowerCase();
-}
-
-const SECTION_TITLE_PATTERNS = [
-  /^(핵심|핵심요약|핵심해석|핵심판단|요약|정의|임상의미|핵심질문)$/,
-  /^(지금할일|즉시대응|즉시조치|바로할수있는조치|실무포인트|간호포인트|관찰포인트|확인포인트)$/,
-  /^(확인할것|확인할수치|확인질문|추가로확인할것|추가로정확히해석하려면|추가로몇가지만확인해주시면)$/,
-  /^(주의|위험|보고기준|호출기준|중단기준|중단\/보고\/호출기준|stoprule|escalation)$/,
-  /^(원인후보|문제원인후보|원인|감별포인트)$/,
-  /^(비교|차이|선택기준)$/,
-  /^(해석|수치해석|기전|적응증|모니터링|투여\/간호핵심|투여\/모니터링핵심)$/,
-  /^(sbar|간단sbar예시|보고문구|보고예시|sbar예시)$/,
-  /^(페니라민주면되나요|항히스타민주면되나요|스테로이드도줘야하나요|에피네프린이먼저인상황인지가핵심입니다)$/,
-];
-
-function looksLikeStructuredAnswerLine(value: string) {
-  const raw = String(value ?? "").trimStart();
-  if (!raw) return false;
-  if (/^[-*•·]\s+/.test(raw)) return true;
-  if (/^\d+[.)]\s+/.test(raw)) return true;
-  if (/^[A-Za-z][A-Za-z0-9/+ -]{0,12}:\s*/.test(raw)) return true;
-  return false;
-}
-
-function looksLikeSectionHeading(
-  value: string,
-  context?: {
-    previousNonEmptyLine?: string | null;
-    nextNonEmptyLine?: string | null;
-  }
-) {
-  const line = cleanAnswerLine(value);
-  if (!line) return false;
-  const normalized = stripBulletPrefix(line);
-  if (!normalized) return false;
-  if (looksLikeStructuredAnswerLine(line)) return false;
-
-  const headingKey = normalizeSectionHeadingKey(normalized);
-  if (!headingKey) return false;
-
-  if (/[:：]$/.test(normalized) && headingKey.length <= 28) return true;
-  if (/[?？]$/.test(normalized) && headingKey.length <= 28) return true;
-  if (SECTION_TITLE_PATTERNS.some((pattern) => pattern.test(headingKey))) return true;
-
-  const previousNonEmptyLine = cleanAnswerLine(context?.previousNonEmptyLine ?? "");
-  const nextNonEmptyLine = cleanAnswerLine(context?.nextNonEmptyLine ?? "");
-  const nextLooksStructured = looksLikeStructuredAnswerLine(nextNonEmptyLine);
-  const startsNewBlock = !previousNonEmptyLine || nextLooksStructured;
-
-  if (
-    startsNewBlock &&
-    headingKey.length <= 24 &&
-    !/[.。]$/.test(normalized) &&
-    !/니다$/.test(headingKey) &&
-    !/습니다$/.test(headingKey)
-  ) {
-    return true;
-  }
-
-  return false;
-}
-
-function formatSectionTitle(value: string) {
-  return stripBulletPrefix(cleanAnswerLine(value)).replace(/[:：]$/, "").trim() || "핵심";
-}
-
-function trimBlankAnswerLines(lines: string[]) {
-  let start = 0;
-  let end = lines.length;
-
-  while (start < end && !cleanAnswerLine(lines[start])) start += 1;
-  while (end > start && !cleanAnswerLine(lines[end - 1])) end -= 1;
-
-  return lines.slice(start, end);
-}
-
-function buildAnswerSectionContent(lines: string[]) {
-  const trimmedLines = trimBlankAnswerLines(lines.map(normalizeAnswerRawLine));
-  if (!trimmedLines.length) return null;
-
-  const [leadLine, ...bodyLines] = trimmedLines;
-  const lead = stripBulletPrefix(leadLine) || cleanAnswerLine(leadLine);
-  if (!lead) return null;
-
-  return {
-    lead,
-    bodyLines,
-  };
-}
-
-function getAnswerIndentLevel(value: string) {
-  const leadingWhitespace = value.match(/^(\s*)/)?.[1] ?? "";
-  return Math.min(3, Math.floor(leadingWhitespace.length / 2));
-}
-
-function parseAnswerBodyLine(value: string) {
-  const raw = normalizeAnswerRawLine(value);
-  if (!cleanAnswerLine(raw)) {
-    return { kind: "blank" as const, content: "", level: 0 };
-  }
-
-  const bulletMatch = raw.match(/^(\s*)[-*•·]\s+(.*)$/);
-  if (bulletMatch) {
-    return {
-      kind: "bullet" as const,
-      content: bulletMatch[2].trim(),
-      level: getAnswerIndentLevel(bulletMatch[1]),
-    };
-  }
-
-  const numberedMatch = raw.match(/^(\s*)(\d+[.)])\s+(.*)$/);
-  if (numberedMatch) {
-    return {
-      kind: "number" as const,
-      marker: numberedMatch[2],
-      content: numberedMatch[3].trim(),
-      level: getAnswerIndentLevel(numberedMatch[1]),
-    };
-  }
-
-  const labelMatch = raw.match(/^(\s*)([A-Za-z][A-Za-z0-9/+ -]{0,12}:)\s*(.*)$/);
-  if (labelMatch) {
-    return {
-      kind: "label" as const,
-      marker: labelMatch[2],
-      content: labelMatch[3].trim(),
-      level: getAnswerIndentLevel(labelMatch[1]),
-    };
-  }
-
-  return {
-    kind: "text" as const,
-    content: raw.trim(),
-    level: getAnswerIndentLevel(raw),
-  };
-}
-
-type DisplayBodyLine =
-  | { kind: "blank"; level: number; content: string }
-  | { kind: "bullet"; level: number; content: string }
-  | { kind: "number"; level: number; content: string; marker: string }
-  | { kind: "label"; level: number; content: string; marker: string }
-  | { kind: "text"; level: number; content: string }
-  | { kind: "subheading"; level: number; content: string };
-
-function countWords(value: string) {
-  return String(value ?? "")
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean).length;
-}
-
-function extractParsedLineContent(line: ReturnType<typeof parseAnswerBodyLine>) {
-  if (line.kind === "blank") return "";
-  return line.content;
-}
-
-function looksLikeInlineBodySubheading(raw: string, nextRaw?: string | null) {
-  const parsed = parseAnswerBodyLine(raw);
-  if (parsed.kind === "blank") return false;
-
-  const text = stripBulletPrefix(cleanAnswerLine(extractParsedLineContent(parsed)));
-  const nextText = stripBulletPrefix(cleanAnswerLine(String(nextRaw ?? "")));
-  if (!text || !nextText) return false;
-  if (/[.。!?？！:]$/.test(text)) return false;
-  if (/니다$|습니다$|세요$|시오$|랍니다$|있습니다$|없습니다$|입니다$|합니다$/.test(text)) return false;
-
-  const wordCount = countWords(text);
-  const headingSuffix =
-    /(쪽|기준|예시|권장|해석|포인트|할 일|확인|양|색|점도\/이물|삽입부\/주변|이물|주변)$/;
-
-  if (headingSuffix.test(text) && wordCount <= 5 && text.length <= 30) return true;
-  if (/라면$/.test(text) && text.length <= 34) return true;
-  if ((wordCount <= 2 || (text.includes("/") && wordCount <= 3)) && text.length <= 18) return true;
-
-  return false;
-}
-
-function buildDisplayBodyLines(lines: string[]): DisplayBodyLine[] {
-  const parsedLines = lines.map((line) => parseAnswerBodyLine(line));
-  const out: DisplayBodyLine[] = [];
-  let nestedLevel = 0;
-
-  const findNextNonBlankRaw = (startIndex: number) => {
-    for (let index = startIndex; index < lines.length; index += 1) {
-      if (parsedLines[index]?.kind !== "blank") return lines[index] ?? "";
-    }
-    return "";
-  };
-
-  for (let index = 0; index < parsedLines.length; index += 1) {
-    const parsedLine = parsedLines[index]!;
-    if (parsedLine.kind === "blank") {
-      out.push({
-        kind: "blank",
-        level: 0,
-        content: "",
-      });
-      continue;
-    }
-
-    const nextNonBlankRaw = findNextNonBlankRaw(index + 1);
-    if (looksLikeInlineBodySubheading(lines[index] ?? "", nextNonBlankRaw)) {
-      nestedLevel = parsedLine.level + 1;
-      out.push({
-        kind: "subheading",
-        level: parsedLine.level,
-        content: stripBulletPrefix(cleanAnswerLine(extractParsedLineContent(parsedLine))),
-      });
-      continue;
-    }
-
-    const effectiveLevel = nestedLevel > 0 ? Math.max(parsedLine.level, nestedLevel) : parsedLine.level;
-    if (parsedLine.kind === "bullet") {
-      out.push({
-        kind: "bullet",
-        level: effectiveLevel,
-        content: parsedLine.content,
-      });
-      continue;
-    }
-    if (parsedLine.kind === "number") {
-      out.push({
-        kind: "number",
-        level: effectiveLevel,
-        content: parsedLine.content,
-        marker: parsedLine.marker,
-      });
-      continue;
-    }
-    if (parsedLine.kind === "label") {
-      out.push({
-        kind: "label",
-        level: effectiveLevel,
-        content: parsedLine.content,
-        marker: parsedLine.marker,
-      });
-      continue;
-    }
-    out.push({
-      kind: "text",
-      level: effectiveLevel,
-      content: parsedLine.content,
-    });
-  }
-
-  return out;
-}
-
-function inferSectionTone(title: string, index: number): AnswerSectionTone {
-  const normalized = String(title ?? "")
-    .replace(/\s+/g, "")
-    .toLowerCase();
-
-  if (index === 0 || /(핵심|요약|정의|임상의미)/.test(normalized)) return "summary";
-  if (/(지금할일|즉시대응|조치|확인|실무포인트|간호포인트|sbar|페니라민|항히스타민|스테로이드)/.test(normalized)) return "action";
-  if (/(주의|위험|보고|호출|중단|stop)/.test(normalized)) return "warning";
-  if (/(비교|차이|선택기준)/.test(normalized)) return "compare";
-  return "neutral";
-}
-
-function parseAnswerSections(value: string): AnswerSection[] {
-  const lines = String(value ?? "")
-    .replace(/\r/g, "")
-    .split("\n");
-
-  const sections: AnswerSection[] = [];
-  let currentTitle: string | null = null;
-  let currentLines: string[] = [];
-
-  const pushCurrent = () => {
-    const content = buildAnswerSectionContent(currentLines);
-    if (!content) {
-      currentLines = [];
-      return;
-    }
-    const resolvedTitle = currentTitle || (sections.length === 0 ? "요약" : "답변");
-    sections.push({
-      title: resolvedTitle,
-      lead: content.lead,
-      bodyLines: content.bodyLines,
-      tone: inferSectionTone(resolvedTitle, sections.length),
-    });
-    currentLines = [];
-  };
-
-  for (let index = 0; index < lines.length; index += 1) {
-    const rawLine = lines[index];
-    const preservedLine = normalizeAnswerRawLine(rawLine);
-    const line = cleanAnswerLine(preservedLine);
-    if (!line) {
-      currentLines.push("");
-      continue;
-    }
-
-    let previousNonEmptyLine: string | null = null;
-    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
-      const candidate = cleanAnswerLine(lines[cursor]);
-      if (!candidate) continue;
-      previousNonEmptyLine = candidate;
-      break;
-    }
-
-    let nextNonEmptyLine: string | null = null;
-    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
-      const candidate = cleanAnswerLine(lines[cursor]);
-      if (!candidate) continue;
-      nextNonEmptyLine = candidate;
-      break;
-    }
-
-    if (looksLikeSectionHeading(line, { previousNonEmptyLine, nextNonEmptyLine })) {
-      pushCurrent();
-      currentTitle = formatSectionTitle(line);
-      continue;
-    }
-    currentLines.push(preservedLine);
-  }
-
-  pushCurrent();
-
-  if (sections.length) return sections;
-
-  const fallbackContent = buildAnswerSectionContent(lines);
-  if (!fallbackContent) {
-    const rawText = String(value ?? "").trim();
-    if (rawText) {
-      return [{ title: "답변", lead: rawText, bodyLines: [], tone: "summary" }];
-    }
-    return [];
-  }
-  return [
-    {
-      title: "요약",
-      lead: fallbackContent.lead,
-      bodyLines: fallbackContent.bodyLines,
-      tone: "summary",
-    },
-  ];
-}
-
-/**
- * Detects whether a body line looks like a sub-heading within a section.
- * e.g. "리버설 에이전트: 무엇을 준비하나", "모니터링할 Coagulation lab: 무엇을 봐야 하나"
- */
-function looksLikeSubHeading(line: string, nextLine?: string | null): boolean {
-  const cleaned = cleanAnswerLine(line);
-  if (!cleaned) return false;
-  // Must not be a structured line (bullet, number, label)
-  if (looksLikeStructuredAnswerLine(cleaned)) return false;
-  // Must be relatively short
-  if (cleaned.length > 50) return false;
-  // Must not end with sentence terminators
-  if (/[.。]$/.test(cleaned)) return false;
-  if (/니다$|습니다$|세요$|시오$|랍니다$/.test(cleaned)) return false;
-  // Must end with question-like pattern, or contain a colon mid-line
-  const hasColon = /[:：]/.test(cleaned);
-  const endsLikeQuestion = /[하나요까지인가]$/.test(cleaned);
-  const nextIsStructured = nextLine ? looksLikeStructuredAnswerLine(cleanAnswerLine(nextLine)) : false;
-  if ((hasColon || endsLikeQuestion) && nextIsStructured) return true;
-  // Short line followed by bullets
-  if (cleaned.length <= 30 && nextIsStructured) return true;
-  return false;
 }
 
 /**
@@ -920,26 +512,26 @@ function splitSectionSubHeadings(sections: AnswerSection[]): AnswerSection[] {
 
 function sectionCardClass(tone: AnswerSectionTone) {
   if (tone === "summary") {
-    return "rounded-[28px] border border-[#E4E8F1] bg-[linear-gradient(180deg,#FFFFFF_0%,#F8FAFF_100%)] px-5 py-4 shadow-[0_16px_34px_rgba(15,23,42,0.04)]";
+    return "rounded-[28px] border border-[#DCE5F2] bg-[linear-gradient(180deg,#FFFFFF_0%,#F7FAFF_100%)] px-5 py-5 shadow-[0_16px_34px_rgba(15,23,42,0.04)]";
   }
   if (tone === "action") {
-    return "rounded-[28px] border border-[#DCE8DE] bg-[linear-gradient(180deg,#FDFFFC_0%,#F6FBF4_100%)] px-5 py-4";
+    return "rounded-[28px] border border-[#D7E7DA] bg-[linear-gradient(180deg,#FFFFFF_0%,#F6FBF5_100%)] px-5 py-5";
   }
   if (tone === "warning") {
-    return "rounded-[28px] border border-[#F0DFC9] bg-[linear-gradient(180deg,#FFFDF9_0%,#FFF7EF_100%)] px-5 py-4";
+    return "rounded-[28px] border border-[#F0DEC4] bg-[linear-gradient(180deg,#FFFDF9_0%,#FFF7EE_100%)] px-5 py-5";
   }
   if (tone === "compare") {
-    return "rounded-[28px] border border-[#DFE6F0] bg-[linear-gradient(180deg,#FFFFFF_0%,#F8FAFD_100%)] px-5 py-4";
+    return "rounded-[28px] border border-[#DDE5F0] bg-[linear-gradient(180deg,#FFFFFF_0%,#F8FAFD_100%)] px-5 py-5";
   }
-  return "rounded-[28px] border border-[#E8E8EC] bg-[#FCFCFD] px-5 py-4";
+  return "rounded-[28px] border border-[#E6E8ED] bg-[#FCFCFD] px-5 py-5";
 }
 
 function sectionTitleClass(tone: AnswerSectionTone) {
-  if (tone === "summary") return "bg-[#EDF3FF] text-[#32568A]";
-  if (tone === "action") return "bg-[#EAF6E8] text-[#2F6B36]";
-  if (tone === "warning") return "bg-[#FFF0DE] text-[#9B5C1C]";
-  if (tone === "compare") return "bg-[#EEF3FA] text-[#46617E]";
-  return "bg-[#F2F3F5] text-ios-sub";
+  if (tone === "summary") return "border-[#D4E0F3] bg-[#EEF4FF] text-[#31598B]";
+  if (tone === "action") return "border-[#CFE0D2] bg-[#ECF7EC] text-[#2E6A35]";
+  if (tone === "warning") return "border-[#EACFAE] bg-[#FFF1DF] text-[#9A5B1B]";
+  if (tone === "compare") return "border-[#D8E0EC] bg-[#F1F5FA] text-[#48627E]";
+  return "border-[#E0E3E8] bg-[#F3F4F6] text-ios-sub";
 }
 
 function connectorColor(tone: AnswerSectionTone) {
@@ -952,11 +544,10 @@ function connectorColor(tone: AnswerSectionTone) {
 
 function SectionBodyLines({ section, bodyTextClass }: { section: AnswerSection; bodyTextClass: string }) {
   if (!section.bodyLines.length) return null;
-  const displayLines = buildDisplayBodyLines(section.bodyLines);
+  const displayLines = buildMedSafetyDisplayLines(section.bodyLines);
   return (
-    <div className="mt-4 flex flex-col gap-1.5">
+    <div className={section.lead ? "mt-4 flex flex-col gap-1.5" : "mt-0.5 flex flex-col gap-1.5"}>
       {displayLines.map((parsedLine, lineIndex) => {
-
         if (parsedLine.kind === "blank") {
           return <div key={`${section.title}-${lineIndex}`} className="h-3" aria-hidden="true" />;
         }
@@ -1002,18 +593,6 @@ function SectionBodyLines({ section, bodyTextClass }: { section: AnswerSection; 
           );
         }
 
-        if (parsedLine.kind === "subheading") {
-          return (
-            <div
-              key={`${section.title}-${lineIndex}`}
-              className="whitespace-pre-wrap break-words pt-1 text-[14.5px] font-semibold leading-7 text-ios-text/72"
-              style={indentStyle}
-            >
-              {parsedLine.content}
-            </div>
-          );
-        }
-
         return (
           <div
             key={`${section.title}-${lineIndex}`}
@@ -1029,20 +608,18 @@ function SectionBodyLines({ section, bodyTextClass }: { section: AnswerSection; 
 }
 
 function AssistantAnswerSections({ content }: { content: string }) {
-  const rawSections = parseAnswerSections(content);
+  const rawSections = parseMedSafetyAnswerSections(content);
   const sections = splitSectionSubHeadings(rawSections);
   if (!sections.length) {
     return <div className="whitespace-pre-wrap break-words text-[15px] leading-7 text-ios-text">{content}</div>;
   }
 
-  const leadTextClass = "whitespace-pre-wrap break-words text-[15.5px] font-normal leading-7 tracking-[-0.01em] text-ios-text";
+  const leadTextClass = "whitespace-pre-wrap break-words text-[15.5px] font-semibold leading-7 tracking-[-0.012em] text-ios-text";
   const bodyTextClass = "text-[15px] leading-7 text-ios-text/90";
 
   return (
     <div className="flex flex-col">
       {sections.map((section, sectionIndex) => {
-        const nextSection = sectionIndex + 1 < sections.length ? sections[sectionIndex + 1] : null;
-        const isConnectedToNext = nextSection?.continuation && nextSection.tone === section.tone;
         const isContinuation = section.continuation;
 
         return (
@@ -1057,24 +634,21 @@ function AssistantAnswerSections({ content }: { content: string }) {
             ) : null}
 
             <section className={sectionCardClass(section.tone)}>
-              {/* Continuation cards: smaller inline title, not a pill */}
               {isContinuation ? (
                 <div className="text-[13px] font-semibold text-ios-text/70">
                   {section.title}
                 </div>
               ) : (
                 <div
-                  className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold tracking-[0.01em] ${sectionTitleClass(
+                  className={`inline-flex items-center rounded-[14px] border px-3 py-1.5 text-[11.5px] font-semibold tracking-[0.01em] ${sectionTitleClass(
                     section.tone
                   )}`}
                 >
                   {section.title}
                 </div>
               )}
-              <div className={isContinuation ? "mt-2" : "mt-3"}>
-                <div className={leadTextClass}>
-                  {section.lead}
-                </div>
+              <div className={isContinuation ? "mt-2.5" : "mt-3.5"}>
+                {section.lead ? <div className={leadTextClass}>{section.lead}</div> : null}
                 <SectionBodyLines section={section} bodyTextClass={bodyTextClass} />
               </div>
             </section>
@@ -1092,9 +666,9 @@ function AssistantAnswerSections({ content }: { content: string }) {
  */
 function StreamingBodyLines({ section, bodyTextClass, isLastSection }: { section: AnswerSection; bodyTextClass: string; isLastSection: boolean }) {
   if (!section.bodyLines.length) return null;
-  const displayLines = buildDisplayBodyLines(section.bodyLines);
+  const displayLines = buildMedSafetyDisplayLines(section.bodyLines);
   return (
-    <div className="mt-4 flex flex-col gap-1.5">
+    <div className={section.lead ? "mt-4 flex flex-col gap-1.5" : "mt-0.5 flex flex-col gap-1.5"}>
       {displayLines.map((parsedLine, lineIndex) => {
         const isLastLine = isLastSection && lineIndex === displayLines.length - 1;
 
@@ -1131,18 +705,6 @@ function StreamingBodyLines({ section, bodyTextClass, isLastSection }: { section
             </div>
           );
         }
-        if (parsedLine.kind === "subheading") {
-          return (
-            <div
-              key={`${section.title}-${lineIndex}`}
-              className="whitespace-pre-wrap break-words pt-1 text-[14.5px] font-semibold leading-7 text-ios-text/72"
-              style={indentStyle}
-            >
-              {parsedLine.content}
-              {cursor}
-            </div>
-          );
-        }
         return (
           <div key={`${section.title}-${lineIndex}`} className={`whitespace-pre-wrap break-words ${bodyTextClass}`} style={indentStyle}>
             {parsedLine.content}{cursor}
@@ -1154,18 +716,18 @@ function StreamingBodyLines({ section, bodyTextClass, isLastSection }: { section
 }
 
 function StreamingAnswerSections({ content }: { content: string }) {
-  const rawSections = parseAnswerSections(content);
+  const rawSections = parseMedSafetyAnswerSections(content);
   const sections = splitSectionSubHeadings(rawSections);
   if (!sections.length) {
     if (!content.trim()) return null;
     return (
       <div className="flex flex-col">
         <section className={sectionCardClass("summary")}>
-          <div className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold tracking-[0.01em] ${sectionTitleClass("summary")}`}>
+          <div className={`inline-flex items-center rounded-[14px] border px-3 py-1.5 text-[11.5px] font-semibold tracking-[0.01em] ${sectionTitleClass("summary")}`}>
             핵심
           </div>
-          <div className="mt-3">
-            <div className="whitespace-pre-wrap break-words text-[15.5px] font-normal leading-7 tracking-[-0.01em] text-ios-text">
+          <div className="mt-3.5">
+            <div className="whitespace-pre-wrap break-words text-[15.5px] font-semibold leading-7 tracking-[-0.012em] text-ios-text">
               {content}
               <span className="ml-0.5 inline-block h-[18px] w-[2px] animate-pulse rounded-full bg-[color:var(--rnest-accent)] align-middle" />
             </div>
@@ -1175,7 +737,7 @@ function StreamingAnswerSections({ content }: { content: string }) {
     );
   }
 
-  const leadTextClass = "whitespace-pre-wrap break-words text-[15.5px] font-normal leading-7 tracking-[-0.01em] text-ios-text";
+  const leadTextClass = "whitespace-pre-wrap break-words text-[15.5px] font-semibold leading-7 tracking-[-0.012em] text-ios-text";
   const bodyTextClass = "text-[15px] leading-7 text-ios-text/90";
 
   return (
@@ -1201,20 +763,22 @@ function StreamingAnswerSections({ content }: { content: string }) {
                 </div>
               ) : (
                 <div
-                  className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold tracking-[0.01em] ${sectionTitleClass(
+                  className={`inline-flex items-center rounded-[14px] border px-3 py-1.5 text-[11.5px] font-semibold tracking-[0.01em] ${sectionTitleClass(
                     section.tone
                   )}`}
                 >
                   {section.title}
                 </div>
               )}
-              <div className={isContinuation ? "mt-2" : "mt-3"}>
-                <div className={leadTextClass}>
-                  {section.lead}
-                  {isLastSection && section.bodyLines.length === 0 ? (
-                    <span className="ml-0.5 inline-block h-[18px] w-[2px] animate-pulse rounded-full bg-[color:var(--rnest-accent)] align-middle" />
-                  ) : null}
-                </div>
+              <div className={isContinuation ? "mt-2.5" : "mt-3.5"}>
+                {section.lead ? (
+                  <div className={leadTextClass}>
+                    {section.lead}
+                    {isLastSection && section.bodyLines.length === 0 ? (
+                      <span className="ml-0.5 inline-block h-[18px] w-[2px] animate-pulse rounded-full bg-[color:var(--rnest-accent)] align-middle" />
+                    ) : null}
+                  </div>
+                ) : null}
                 <StreamingBodyLines section={section} bodyTextClass={bodyTextClass} isLastSection={isLastSection} />
               </div>
             </section>
@@ -1421,7 +985,8 @@ export function ToolMedSafetyPage() {
   const hasTypedInput = normalizeQuestionInput(input).length > 0;
   const isComposerLocked = showSessionDecisionPrompt;
   const canSubmit = !isComposerLocked && !isLoading && canAsk && (hasTypedInput || Boolean(selectedImage));
-  const latestAnswerSummary = lastAssistantMessage ? parseAnswerSections(lastAssistantMessage.content)[0]?.lead ?? "" : "";
+  const latestParsedSections = lastAssistantMessage ? parseMedSafetyAnswerSections(lastAssistantMessage.content) : [];
+  const latestAnswerSummary = latestParsedSections[0]?.lead || buildMedSafetySectionBodyText(latestParsedSections[0] ?? { lead: "", bodyLines: [] });
   const latestCopyText = lastAssistantMessage
     ? buildStructuredCopyText({
         title: lastSubmittedQuery || lastUserMessage?.content || t("AI 임상 검색 결과"),
@@ -1429,10 +994,12 @@ export function ToolMedSafetyPage() {
           `${t("분석 시각")}: ${formatCopyDateTime(lastAssistantMessage.timestamp)}`,
           `${t("유형")}: ${t("임상 질문")}`,
         ],
-        sections: [
-          { title: t("요약"), body: latestAnswerSummary || lastAssistantMessage.content },
-          { title: t("상세 결과"), body: lastAssistantMessage.content },
-        ],
+        sections: latestParsedSections.length
+          ? latestParsedSections.map((section) => ({
+              title: section.title,
+              body: buildMedSafetySectionBodyText(section),
+            }))
+          : [{ title: t("요약"), body: lastAssistantMessage.content }],
       })
     : "";
 
