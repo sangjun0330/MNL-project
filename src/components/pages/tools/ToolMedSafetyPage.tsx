@@ -35,8 +35,6 @@ const COMPOSER_SELECTOR_BTN_CLASS =
   "inline-flex h-10 min-w-[74px] items-center justify-center gap-1.5 rounded-full border border-[#DDD6F3] bg-white/90 px-2.5 text-[11.5px] font-semibold text-ios-text shadow-[0_10px_24px_rgba(15,23,42,0.08)] backdrop-blur-xl transition hover:border-[color:var(--rnest-accent-border)] hover:bg-white/94 disabled:cursor-not-allowed disabled:opacity-45 sm:h-11 sm:min-w-[82px] sm:px-3 sm:text-[12px]";
 const COMPOSER_SEND_BTN_CLASS =
   "flex h-10 min-w-[48px] shrink-0 items-center justify-center rounded-full border border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent)] px-2.5 text-white shadow-[0_12px_26px_rgba(123,111,208,0.22)] transition hover:bg-[color:var(--rnest-accent-strong)] disabled:cursor-not-allowed disabled:border-[#E6E1F7] disabled:bg-[#ECEAF5] disabled:text-[#A49DBD] disabled:shadow-none sm:h-11 sm:min-w-[52px] sm:px-3";
-const STREAMING_CARD_CLASS =
-  "rounded-[30px] border border-[#E7E8ED] bg-white px-5 py-4 text-[15px] leading-7 text-ios-text shadow-[0_18px_36px_rgba(15,23,42,0.04)]";
 const OPEN_LAYOUT_CLASS =
   "relative min-h-[calc(100dvh-120px)] overflow-hidden bg-[radial-gradient(circle_at_top,#FFFFFF_0%,#FAFAFB_42%,#F4F5F7_100%)]";
 const MED_SAFETY_CLIENT_TIMEOUT_MS = 480_000;
@@ -885,6 +883,134 @@ function AssistantAnswerSections({ content }: { content: string }) {
   );
 }
 
+/**
+ * Streaming variant: parses the accumulating streamingText into sections
+ * in real-time and renders each completed section as a card immediately.
+ * The last (in-progress) section shows a typing cursor.
+ */
+function StreamingAnswerSections({ content }: { content: string }) {
+  const sections = parseAnswerSections(content);
+  if (!sections.length) {
+    // Not enough text to parse into sections yet — show raw text in a neutral card
+    if (!content.trim()) return null;
+    return (
+      <div className="space-y-4">
+        <section className={sectionCardClass("summary")}>
+          <div className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold tracking-[0.01em] ${sectionTitleClass("summary")}`}>
+            핵심
+          </div>
+          <div className="mt-3">
+            <div className="whitespace-pre-wrap break-words text-[15.5px] font-normal leading-7 tracking-[-0.01em] text-ios-text">
+              {content}
+              <span className="ml-0.5 inline-block h-[18px] w-[2px] animate-pulse rounded-full bg-[color:var(--rnest-accent)] align-middle" />
+            </div>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  const leadTextClass = "whitespace-pre-wrap break-words text-[15.5px] font-normal leading-7 tracking-[-0.01em] text-ios-text";
+  const bodyTextClass = "text-[15px] leading-7 text-ios-text/90";
+
+  return (
+    <div className="space-y-4">
+      {sections.map((section, sectionIndex) => {
+        const isLastSection = sectionIndex === sections.length - 1;
+        return (
+          <section
+            key={`${section.title}-${sectionIndex}`}
+            className={`${sectionCardClass(section.tone)} transition-all duration-300 ease-out`}
+            style={isLastSection ? undefined : { animation: "none" }}
+          >
+            <div
+              className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold tracking-[0.01em] ${sectionTitleClass(
+                section.tone
+              )}`}
+            >
+              {section.title}
+            </div>
+            <div className="mt-3">
+              <div className={leadTextClass}>
+                {section.lead}
+                {isLastSection && section.bodyLines.length === 0 ? (
+                  <span className="ml-0.5 inline-block h-[18px] w-[2px] animate-pulse rounded-full bg-[color:var(--rnest-accent)] align-middle" />
+                ) : null}
+              </div>
+              {section.bodyLines.length > 0 ? (
+                <div className="mt-4 flex flex-col gap-1.5">
+                  {section.bodyLines.map((line, lineIndex) => {
+                    const parsedLine = parseAnswerBodyLine(line);
+                    const isLastLine = isLastSection && lineIndex === section.bodyLines.length - 1;
+
+                    if (parsedLine.kind === "blank") {
+                      return <div key={`${section.title}-${lineIndex}`} className="h-3" aria-hidden="true" />;
+                    }
+
+                    const indentStyle = parsedLine.level ? { marginLeft: `${parsedLine.level * 18}px` } : undefined;
+                    const cursor = isLastLine ? (
+                      <span className="ml-0.5 inline-block h-[18px] w-[2px] animate-pulse rounded-full bg-[color:var(--rnest-accent)] align-middle" />
+                    ) : null;
+
+                    if (parsedLine.kind === "bullet") {
+                      return (
+                        <div
+                          key={`${section.title}-${lineIndex}`}
+                          className={`flex items-start gap-3 ${bodyTextClass}`}
+                          style={indentStyle}
+                        >
+                          <span className="mt-[11px] h-[5px] w-[5px] shrink-0 rounded-full bg-current opacity-50" aria-hidden="true" />
+                          <div className="min-w-0 whitespace-pre-wrap break-words">{parsedLine.content}{cursor}</div>
+                        </div>
+                      );
+                    }
+
+                    if (parsedLine.kind === "number") {
+                      return (
+                        <div
+                          key={`${section.title}-${lineIndex}`}
+                          className={`flex items-start gap-3 ${bodyTextClass}`}
+                          style={indentStyle}
+                        >
+                          <span className="min-w-[20px] shrink-0 font-semibold text-ios-text">{parsedLine.marker}</span>
+                          <div className="min-w-0 whitespace-pre-wrap break-words">{parsedLine.content}{cursor}</div>
+                        </div>
+                      );
+                    }
+
+                    if (parsedLine.kind === "label") {
+                      return (
+                        <div
+                          key={`${section.title}-${lineIndex}`}
+                          className={`flex items-start gap-3 ${bodyTextClass}`}
+                          style={indentStyle}
+                        >
+                          <span className="min-w-[24px] shrink-0 font-semibold text-[color:var(--rnest-accent)]">{parsedLine.marker}</span>
+                          <div className="min-w-0 whitespace-pre-wrap break-words">{parsedLine.content}{cursor}</div>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div
+                        key={`${section.title}-${lineIndex}`}
+                        className={`whitespace-pre-wrap break-words ${bodyTextClass}`}
+                        style={indentStyle}
+                      >
+                        {parsedLine.content}{cursor}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
 export function ToolMedSafetyPage() {
   const router = useRouter();
   const store = useAppStore();
@@ -1621,9 +1747,7 @@ export function ToolMedSafetyPage() {
                   {streamingText ? (
                     <div className="flex justify-start">
                       <div className="w-full max-w-[860px] min-w-0">
-                        <div className={STREAMING_CARD_CLASS}>
-                          <div className="whitespace-pre-wrap break-words">{streamingText}</div>
-                        </div>
+                        <StreamingAnswerSections content={streamingText} />
                         <div className="mt-2 flex flex-wrap items-center gap-2 px-1 text-[11px] text-ios-sub">
                           <span>{t("AI")}</span>
                           <span>{t("작성 중...")}</span>
