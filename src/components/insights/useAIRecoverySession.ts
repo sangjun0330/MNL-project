@@ -78,11 +78,11 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       const shouldAutoGenerate =
         args.autoGenerate !== false &&
         json.data.gate.allowed &&
-        !json.data.session &&
+        (!json.data.session || (json.data.session.status === "fallback" && json.data.quota.canGenerateSession)) &&
         !autoRequestedRef.current.has(key);
       if (shouldAutoGenerate) {
         autoRequestedRef.current.add(key);
-        await generateInternal(false, key);
+        await generateInternal(Boolean(json.data.session), key);
       }
     } catch (nextError) {
       setData(null);

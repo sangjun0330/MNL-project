@@ -377,10 +377,23 @@ function readGenerationCounts(session: AIRecoverySlotPayload | null | undefined)
   const raw = isRecord((session as { generationCounts?: unknown }).generationCounts)
     ? ((session as { generationCounts?: Record<string, unknown> }).generationCounts ?? {})
     : null;
-  if (!raw) return { brief: 1, orders: 1 };
-  const brief = Math.max(0, Math.round(Number(raw.brief) || 0));
-  const orders = Math.max(0, Math.round(Number(raw.orders) || 0));
-  if (brief === 0 && orders === 0) return { brief: 1, orders: 1 };
+  if (!raw) {
+    return {
+      brief: session.status === "ready" || Boolean(session.openaiMeta?.briefResponseId) ? 1 : 0,
+      orders: session.status === "ready" || Boolean(session.openaiMeta?.ordersResponseId) ? 1 : 0,
+    };
+  }
+  let brief = Math.max(0, Math.round(Number(raw.brief) || 0));
+  let orders = Math.max(0, Math.round(Number(raw.orders) || 0));
+
+  if (session.status !== "ready") {
+    if (!session.openaiMeta?.briefResponseId) brief = 0;
+    if (!session.openaiMeta?.ordersResponseId) orders = 0;
+  }
+
+  if (brief === 0 && orders === 0) {
+    return session.status === "ready" ? { brief: 1, orders: 1 } : { brief: 0, orders: 0 };
+  }
   return { brief, orders };
 }
 
@@ -650,8 +663,39 @@ function isCandidate(value: AIRecoveryCandidate | null): value is AIRecoveryCand
   return Boolean(value);
 }
 
+function parseLooseJson(text: string) {
+  const normalized = String(text ?? "").trim();
+  const codeFence = normalized.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)?.[1]?.trim() ?? normalized;
+  const candidates = [
+    codeFence,
+    (() => {
+      const start = codeFence.indexOf("{");
+      const end = codeFence.lastIndexOf("}");
+      return start >= 0 && end > start ? codeFence.slice(start, end + 1) : "";
+    })(),
+    (() => {
+      const start = codeFence.indexOf("[");
+      const end = codeFence.lastIndexOf("]");
+      return start >= 0 && end > start ? codeFence.slice(start, end + 1) : "";
+    })(),
+  ];
+
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    const trimmed = candidate.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      // Try next candidate shape.
+    }
+  }
+  throw new Error("json_parse_failed");
+}
+
 function parseBriefJson(text: string, snapshot: RecoverySnapshot): AIRecoveryBrief {
-  const parsed = JSON.parse(text);
+  const parsed = parseLooseJson(text);
   if (!isRecord(parsed)) throw new Error("brief_not_object");
 
   const candidateActions = Array.isArray(parsed.candidateActions)
@@ -747,7 +791,7 @@ function isOrder(value: AIRecoveryOrder | null): value is AIRecoveryOrder {
 }
 
 function parseOrdersJson(text: string, slot: AIRecoverySlot, selectedCandidates: AIRecoveryCandidate[]): AIRecoveryOrder[] {
-  const parsed = JSON.parse(text);
+  const parsed = parseLooseJson(text);
   const rawOrders: unknown[] | null = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.orders) ? parsed.orders : null;
   if (!rawOrders) throw new Error("orders_not_array");
   const out = rawOrders
@@ -1395,6 +1439,7 @@ function buildStoredSession(args: {
 }) {
   const now = new Date().toISOString();
   const previousCounts = readGenerationCounts(args.previousSession);
+  const shouldCountGeneration = args.flow.status === "ready";
   return {
     status: args.flow.status,
     generatedAt: now,
@@ -1411,8 +1456,8 @@ function buildStoredSession(args: {
     },
     orders: args.flow.orders,
     generationCounts: {
-      brief: previousCounts.brief + 1,
-      orders: previousCounts.orders + 1,
+      brief: shouldCountGeneration ? previousCounts.brief + 1 : previousCounts.brief,
+      orders: shouldCountGeneration ? previousCounts.orders + 1 : previousCounts.orders,
     },
     openaiMeta: args.flow.openaiMeta,
   } satisfies AIRecoverySlotPayload;
@@ -1658,7 +1703,7 @@ export async function regenerateAIRecoveryOrders(args: {
     orders,
     generationCounts: {
       ...readGenerationCounts(session),
-      orders: readGenerationCounts(session).orders + 1,
+      orders: status === "ready" ? readGenerationCounts(session).orders + 1 : readGenerationCounts(session).orders,
     },
     openaiMeta: {
       ...session.openaiMeta,

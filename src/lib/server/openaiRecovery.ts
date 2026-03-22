@@ -239,6 +239,17 @@ function safeJsonParse(raw: string) {
   }
 }
 
+function buildCompatStructuredDeveloperPrompt(args: StructuredRequestArgs) {
+  return [
+    args.developerPrompt,
+    "",
+    "반드시 JSON 하나만 출력하라.",
+    "설명, 머리말, 코드블록, 마크다운을 붙이지 마라.",
+    "아래 JSON schema의 키 구조를 그대로 지켜라.",
+    JSON.stringify(args.schema),
+  ].join("\n");
+}
+
 async function postStructuredRequest(
   baseUrl: string,
   args: StructuredRequestArgs,
@@ -261,34 +272,22 @@ async function postStructuredRequest(
   args.signal.addEventListener("abort", onAbort, { once: true });
 
   try {
-    const useCompatChatCompletions = requestConfig.usesCompatEndpoint;
-    const requestUrl = useCompatChatCompletions
-      ? requestConfig.requestUrl.replace(/\/responses$/i, "/chat/completions")
-      : requestConfig.requestUrl;
-    const requestBody = useCompatChatCompletions
+    const useCompatMode = requestConfig.usesCompatEndpoint;
+    const requestUrl = requestConfig.requestUrl;
+    const requestBody = useCompatMode
       ? {
           model: requestConfig.model,
-          store: resolveStoreResponses(),
-          reasoning_effort: args.reasoningEffort,
-          max_completion_tokens: resolveMaxOutputTokens(args.maxOutputTokens ?? 2400),
-          messages: [
+          input: [
             {
               role: "developer",
-              content: args.developerPrompt,
+              content: [{ type: "input_text", text: buildCompatStructuredDeveloperPrompt(args) }],
             },
             {
               role: "user",
-              content: args.userPrompt,
+              content: [{ type: "input_text", text: args.userPrompt }],
             },
           ],
-          response_format: {
-            type: "json_schema",
-            json_schema: {
-              name: args.schemaName,
-              strict: true,
-              schema: args.schema,
-            },
-          },
+          max_output_tokens: resolveMaxOutputTokens(args.maxOutputTokens ?? 2400),
         }
       : {
           model: requestConfig.model,
