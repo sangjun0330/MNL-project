@@ -72,10 +72,12 @@ export type MedSafetyUsageBreakdown = {
   visibleAnswerLines: number;
   assembledPromptChars: number | null;
   selectedContracts: string[];
+  selectedMicroPacks: string[];
+  projectedDirectiveCount: number | null;
+  droppedProjectionCount: number | null;
   runtimeMode: MedSafetyRuntimeMode;
   routeDecision: {
     intent: MedSafetyRouteDecision["intent"];
-    secondaryIntents: MedSafetyRouteDecision["secondaryIntents"];
     risk: MedSafetyRouteDecision["risk"];
     entityClarity: MedSafetyRouteDecision["entityClarity"];
     answerDepth: MedSafetyRouteDecision["answerDepth"];
@@ -86,21 +88,9 @@ export type MedSafetyUsageBreakdown = {
     confidence: MedSafetyRouteDecision["confidence"];
     urgencyLevel: MedSafetyRouteDecision["urgencyLevel"];
     workflowStage: MedSafetyRouteDecision["workflowStage"];
-    notificationNeed: MedSafetyRouteDecision["notificationNeed"];
-    reversibleCauseSweep: boolean;
-    trendNeed: boolean;
-    thresholdNeed: boolean;
-    counterfactualNeed: boolean;
-    exceptionNeed: boolean;
-    pairedProblemNeed: boolean;
-    scriptNeed: boolean;
-    checklistDepth: MedSafetyRouteDecision["checklistDepth"];
-    measurementDependency: MedSafetyRouteDecision["measurementDependency"];
-    mandatoryArtifacts: MedSafetyRouteDecision["mandatoryArtifacts"];
-    sectionEmphasis: MedSafetyRouteDecision["sectionEmphasis"];
-    communicationArtifacts: MedSafetyRouteDecision["communicationArtifacts"];
-    dangerBias: MedSafetyRouteDecision["dangerBias"];
-    detailBias: MedSafetyRouteDecision["detailBias"];
+    detailProfile: MedSafetyRouteDecision["detailProfile"];
+    communicationProfile: MedSafetyRouteDecision["communicationProfile"];
+    exceptionProfile: MedSafetyRouteDecision["exceptionProfile"];
   } | null;
 };
 
@@ -559,13 +549,12 @@ function buildPromptDisciplineDiagnostics(
       selectedContractIds: assembly?.selectedContractIds ?? [],
       droppedContractIds: assembly?.droppedContractIds ?? [],
       openingMode: assembly?.blueprint.openingMode ?? null,
-      subjectFocus: assembly?.blueprint.subjectFocus ?? null,
-      mixedIntent: assembly?.blueprint.mixedIntent ?? null,
-      followupPolicy: assembly?.blueprint.followupPolicy ?? null,
-      requiredArtifacts: assembly?.blueprint.requiredArtifacts ?? [],
-      optionalArtifacts: assembly?.blueprint.optionalArtifacts ?? [],
-      sectionEmphasis: assembly?.blueprint.sectionEmphasis ?? [],
-      domainCoverageTargets: assembly?.blueprint.domainCoverageTargets ?? [],
+      visiblePacks: assembly?.blueprint.packPlan.visiblePacks ?? [],
+      selectedMicroPacks: assembly?.blueprint.packPlan.selectedMicroPacks ?? [],
+      sectionHints: assembly?.blueprint.sectionHints ?? [],
+      lengthPlan: assembly?.blueprint.lengthPlan ?? null,
+      projectedDirectiveCount: assembly?.blueprint.projection.activeDirectiveKeys.length ?? null,
+      droppedProjectionCount: assembly?.blueprint.projection.droppedDirectiveKeys.length ?? null,
       budgetClass: assembly?.budgetClass ?? null,
     };
   }
@@ -593,13 +582,12 @@ function buildPromptDisciplineDiagnostics(
     selectedContractIds: assembly?.selectedContractIds ?? [],
     droppedContractIds: assembly?.droppedContractIds ?? [],
     openingMode: assembly?.blueprint.openingMode ?? null,
-    subjectFocus: assembly?.blueprint.subjectFocus ?? null,
-    mixedIntent: assembly?.blueprint.mixedIntent ?? null,
-    followupPolicy: assembly?.blueprint.followupPolicy ?? null,
-    requiredArtifacts: assembly?.blueprint.requiredArtifacts ?? [],
-    optionalArtifacts: assembly?.blueprint.optionalArtifacts ?? [],
-    sectionEmphasis: assembly?.blueprint.sectionEmphasis ?? [],
-    domainCoverageTargets: assembly?.blueprint.domainCoverageTargets ?? [],
+    visiblePacks: assembly?.blueprint.packPlan.visiblePacks ?? [],
+    selectedMicroPacks: assembly?.blueprint.packPlan.selectedMicroPacks ?? [],
+    sectionHints: assembly?.blueprint.sectionHints ?? [],
+    lengthPlan: assembly?.blueprint.lengthPlan ?? null,
+    projectedDirectiveCount: assembly?.blueprint.projection.activeDirectiveKeys.length ?? null,
+    droppedProjectionCount: assembly?.blueprint.projection.droppedDirectiveKeys.length ?? null,
     budgetClass: assembly?.budgetClass ?? null,
   };
 }
@@ -783,7 +771,6 @@ function serializeRouteDecision(decision: MedSafetyRouteDecision | null | undefi
   if (!decision) return null;
   return {
     intent: decision.intent,
-    secondaryIntents: decision.secondaryIntents,
     risk: decision.risk,
     entityClarity: decision.entityClarity,
     answerDepth: decision.answerDepth,
@@ -794,21 +781,9 @@ function serializeRouteDecision(decision: MedSafetyRouteDecision | null | undefi
     confidence: decision.confidence,
     urgencyLevel: decision.urgencyLevel,
     workflowStage: decision.workflowStage,
-    notificationNeed: decision.notificationNeed,
-    reversibleCauseSweep: decision.reversibleCauseSweep,
-    trendNeed: decision.trendNeed,
-    thresholdNeed: decision.thresholdNeed,
-    counterfactualNeed: decision.counterfactualNeed,
-    exceptionNeed: decision.exceptionNeed,
-    pairedProblemNeed: decision.pairedProblemNeed,
-    scriptNeed: decision.scriptNeed,
-    checklistDepth: decision.checklistDepth,
-    measurementDependency: decision.measurementDependency,
-    mandatoryArtifacts: decision.mandatoryArtifacts,
-    sectionEmphasis: decision.sectionEmphasis,
-    communicationArtifacts: decision.communicationArtifacts,
-    dangerBias: decision.dangerBias,
-    detailBias: decision.detailBias,
+    detailProfile: decision.detailProfile,
+    communicationProfile: decision.communicationProfile,
+    exceptionProfile: decision.exceptionProfile,
   };
 }
 
@@ -872,7 +847,7 @@ function shouldAcceptRepairedAnswer(original: string, repaired: string, repairIn
   const issues = parseIssueCodes(repairInstructions);
   const verboseOnly =
     issues.length > 0 &&
-    issues.every((issue) => ["duplicate_lines", "filler_detected", "overlong_answer", "forbidden_followup"].includes(issue));
+    issues.every((issue) => issue === "verbosity_gap");
 
   if (verboseOnly) {
     return retentionRatio >= 0.35 && repairedRatio >= 0.5;
@@ -889,12 +864,10 @@ function mergeQualityDecisions(heuristic: MedSafetyQualityDecision, model: MedSa
   const mergedCriticalIssues = Array.from(new Set([...heuristic.criticalIssues, ...model.criticalIssues]));
   const mergedScores = {
     directness: Math.max(heuristic.scores.directness, model.scores.directness),
-    bedside_actionability: Math.max(heuristic.scores.bedside_actionability, model.scores.bedside_actionability),
-    exception_quality: Math.max(heuristic.scores.exception_quality, model.scores.exception_quality),
+    bedside_utility: Math.max(heuristic.scores.bedside_utility, model.scores.bedside_utility),
     reporting_utility: Math.max(heuristic.scores.reporting_utility, model.scores.reporting_utility),
-    checklist_density: Math.max(heuristic.scores.checklist_density, model.scores.checklist_density),
+    exception_quality: Math.max(heuristic.scores.exception_quality, model.scores.exception_quality),
     safety_guardrails: Math.max(heuristic.scores.safety_guardrails, model.scores.safety_guardrails),
-    paired_problem_coverage: Math.max(heuristic.scores.paired_problem_coverage, model.scores.paired_problem_coverage),
   };
   return {
     verdict: chosen,
@@ -916,6 +889,9 @@ function buildUsageBreakdown(args: {
   answer: string;
   assembledPromptChars?: number | null;
   selectedContracts?: string[];
+  selectedMicroPacks?: string[];
+  projectedDirectiveCount?: number | null;
+  droppedProjectionCount?: number | null;
 }) {
   return {
     router: args.routerUsage ?? null,
@@ -928,6 +904,9 @@ function buildUsageBreakdown(args: {
     visibleAnswerLines: countVisibleAnswerLines(args.answer),
     assembledPromptChars: args.assembledPromptChars ?? null,
     selectedContracts: args.selectedContracts ?? [],
+    selectedMicroPacks: args.selectedMicroPacks ?? [],
+    projectedDirectiveCount: args.projectedDirectiveCount ?? null,
+    droppedProjectionCount: args.droppedProjectionCount ?? null,
     runtimeMode: args.runtimeMode,
     routeDecision: serializeRouteDecision(args.routeDecision),
   } satisfies MedSafetyUsageBreakdown;
@@ -937,7 +916,7 @@ function buildDefaultPromptProfile(): MedSafetyPromptProfile {
   return {
     reasoningEfforts: ["high", "medium"],
     verbosity: "medium",
-    outputTokenCandidates: [12000, 9500, 7600],
+    outputTokenCandidates: [2400, 1800, 1300],
     qualityLevel: "balanced",
   };
 }
@@ -1833,10 +1812,11 @@ async function resolveRouteDecision(args: {
       query: args.query,
       locale: args.locale,
       imageDataUrl: args.imageDataUrl,
+      deterministic,
     }),
     apiBaseUrl: args.apiBaseUrl,
     signal: args.signal,
-    maxOutputTokens: 120,
+    maxOutputTokens: 180,
     upstreamTimeoutMs: Math.max(20_000, Math.min(args.upstreamTimeoutMs, 45_000)),
     verbosity: "low",
     reasoningEffort: "low",
@@ -1846,7 +1826,11 @@ async function resolveRouteDecision(args: {
   });
   if (!attempt.error && attempt.text) {
     return {
-      decision: parseTinyRouterDecision(attempt.text, deterministic),
+      decision: parseTinyRouterDecision(attempt.text, deterministic, {
+        query: args.query,
+        locale: args.locale,
+        imageDataUrl: args.imageDataUrl,
+      }),
       usage: attempt.usage,
     };
   }
@@ -1945,7 +1929,10 @@ async function runQualityGateAndRepair(args: {
     conversationId: null,
     usage: null,
   };
-  const maxRepairPasses = args.decision.risk === "high" || args.decision.urgencyLevel === "critical" ? 2 : 1;
+  const allowSecondRepairPass =
+    args.decision.risk === "high" &&
+    currentGateDecision.issues.some((issue) => ["notify_gap", "exception_gap", "safety_gap"].includes(issue));
+  const maxRepairPasses = allowSecondRepairPass ? 2 : 1;
 
   for (let passIndex = 0; passIndex < maxRepairPasses; passIndex += 1) {
     for (let reasoningIndex = 0; reasoningIndex < args.profile.reasoningEfforts.length; reasoningIndex += 1) {
@@ -2005,7 +1992,7 @@ async function runQualityGateAndRepair(args: {
             }),
             apiBaseUrl: args.apiBaseUrl,
             signal: args.signal,
-            maxOutputTokens: 260,
+            maxOutputTokens: 220,
             upstreamTimeoutMs: Math.max(20_000, Math.min(args.upstreamTimeoutMs, 45_000)),
             verbosity: "low",
             reasoningEffort: args.isPremiumSearch ? "medium" : "low",
@@ -2137,7 +2124,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         usage: routeUsage,
         promptChars: mainDeveloperPrompt.length,
         extra: {
-          mainPromptMode: runtimeMode === "hybrid_live" ? "behavioral_contract_v3" : "legacy_monolithic",
+          mainPromptMode: runtimeMode === "hybrid_live" ? "behavioral_contract_rich_internal_sparse_prompt" : "legacy_monolithic",
           actualPromptChars: mainDeveloperPrompt.length,
           tokenCandidates: promptProfile.outputTokenCandidates.join(","),
           reasoningEfforts: promptProfile.reasoningEfforts.join(","),
@@ -2184,7 +2171,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
           streamed: mainAttempt.streamed,
           reasoningEffort: mainAttempt.reasoningEffort,
           maxOutputTokens: mainAttempt.maxOutputTokens,
-          mainPromptMode: runtimeMode === "hybrid_live" ? "behavioral_contract_v3" : "legacy_monolithic",
+          mainPromptMode: runtimeMode === "hybrid_live" ? "behavioral_contract_rich_internal_sparse_prompt" : "legacy_monolithic",
           ...buildPromptDisciplineDiagnostics(routeDecision, promptProfile, promptAssembly),
         },
       });
@@ -2275,7 +2262,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
           heuristicRepairInstructions: hybridHeuristic?.repairInstructions ?? truncateError(hybridAttempt.error ?? "", 220),
           pairwiseQualityFlags,
           verbosityFlags,
-          overlong: Boolean(hybridHeuristic?.repairInstructions.includes("overlong_answer")),
+          overlong: Boolean(hybridHeuristic?.repairInstructions.includes("verbosity_gap")),
           selectedContracts: promptAssembly.selectedContractIds,
         };
         logHybridDiagnostics({
@@ -2317,6 +2304,9 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
           answer: result.answer,
           assembledPromptChars: mainDeveloperPrompt.length,
           selectedContracts: runtimeMode === "legacy" ? [] : promptAssembly.selectedContractIds,
+          selectedMicroPacks: runtimeMode === "legacy" ? [] : promptAssembly.blueprint.packPlan.selectedMicroPacks,
+          projectedDirectiveCount: runtimeMode === "legacy" ? null : promptAssembly.blueprint.projection.activeDirectiveKeys.length,
+          droppedProjectionCount: runtimeMode === "legacy" ? null : promptAssembly.blueprint.projection.droppedDirectiveKeys.length,
         }),
         shadowComparison,
       };
@@ -2338,6 +2328,9 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
       routeDecision: lastRouteDecision,
       answer: fallbackAnswer,
       selectedContracts: [],
+      selectedMicroPacks: [],
+      projectedDirectiveCount: null,
+      droppedProjectionCount: null,
     }),
     shadowComparison: null,
   };

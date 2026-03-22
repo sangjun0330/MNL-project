@@ -1,6 +1,3 @@
-export const MED_SAFETY_RUNTIME_MODES = ["legacy", "hybrid_shadow", "hybrid_live"] as const;
-export type MedSafetyRuntimeMode = (typeof MED_SAFETY_RUNTIME_MODES)[number];
-
 export const MED_SAFETY_INTENTS = ["knowledge", "action", "compare", "numeric", "device"] as const;
 export type MedSafetyIntent = (typeof MED_SAFETY_INTENTS)[number];
 
@@ -16,11 +13,78 @@ export type MedSafetyAnswerDepth = (typeof MED_SAFETY_ANSWER_DEPTHS)[number];
 export const MED_SAFETY_FORMATS = ["short", "sectioned"] as const;
 export type MedSafetyFormat = (typeof MED_SAFETY_FORMATS)[number];
 
-export const MED_SAFETY_ROUTE_SOURCES = ["rules", "model"] as const;
-export type MedSafetyRouteSource = (typeof MED_SAFETY_ROUTE_SOURCES)[number];
+export const MED_SAFETY_URGENCY_LEVELS = ["routine", "urgent", "critical"] as const;
+export type MedSafetyUrgencyLevel = (typeof MED_SAFETY_URGENCY_LEVELS)[number];
 
-export const MED_SAFETY_QUALITY_VERDICTS = ["pass", "repair_required", "pass_but_verbose"] as const;
-export type MedSafetyQualityVerdict = (typeof MED_SAFETY_QUALITY_VERDICTS)[number];
+export const MED_SAFETY_WORKFLOW_STAGES = [
+  "interpretation",
+  "decision",
+  "pre_notification",
+  "active_deterioration",
+] as const;
+export type MedSafetyWorkflowStage = (typeof MED_SAFETY_WORKFLOW_STAGES)[number];
+
+export const MED_SAFETY_PRIORITY_MODES = ["balanced", "action_first", "notify_first", "safety_first"] as const;
+export type MedSafetyPriorityMode = (typeof MED_SAFETY_PRIORITY_MODES)[number];
+
+export const MED_SAFETY_DETAIL_PROFILES = ["lean", "bedside", "paired", "deep"] as const;
+export type MedSafetyDetailProfile = (typeof MED_SAFETY_DETAIL_PROFILES)[number];
+
+export const MED_SAFETY_COMMUNICATION_PROFILES = ["none", "payload", "script"] as const;
+export type MedSafetyCommunicationProfile = (typeof MED_SAFETY_COMMUNICATION_PROFILES)[number];
+
+export const MED_SAFETY_EXCEPTION_PROFILES = ["none", "light", "full"] as const;
+export type MedSafetyExceptionProfile = (typeof MED_SAFETY_EXCEPTION_PROFILES)[number];
+
+export const MED_SAFETY_SPECIFICITY_RISKS = ["low", "guarded", "high"] as const;
+export type MedSafetySpecificityRisk = (typeof MED_SAFETY_SPECIFICITY_RISKS)[number];
+
+export const MED_SAFETY_COMPRESSION_TARGETS = ["tight", "balanced", "compressed_detailed"] as const;
+export type MedSafetyCompressionTarget = (typeof MED_SAFETY_COMPRESSION_TARGETS)[number];
+
+export const MED_SAFETY_OPENING_MODES = ["direct", "action_first", "compare_first", "numeric_first"] as const;
+export type MedSafetyOpeningMode = (typeof MED_SAFETY_OPENING_MODES)[number];
+
+export const MED_SAFETY_PROMPT_PACK_IDS = [
+  "direct_core_pack",
+  "bedside_pack",
+  "exception_pack",
+  "notify_pack",
+  "paired_problem_pack",
+] as const;
+export type MedSafetyPromptPackId = (typeof MED_SAFETY_PROMPT_PACK_IDS)[number];
+
+export const MED_SAFETY_MICRO_PACK_IDS = [
+  "direct_core",
+  "severity_frame",
+  "bedside_check",
+  "reversible_cause",
+  "false_worsening",
+  "exception_boundary",
+  "measurement_guard",
+  "notify_payload",
+  "notify_script",
+  "paired_problem_split",
+] as const;
+export type MedSafetyMicroPackId = (typeof MED_SAFETY_MICRO_PACK_IDS)[number];
+
+export const MED_SAFETY_PROJECTION_DIRECTIVE_KEYS = [
+  "openingDirective",
+  "priorityDirective",
+  "coverageDirective",
+  "exceptionDirective",
+  "communicationDirective",
+  "safetyDirective",
+  "compressionDirective",
+  "renderDirective",
+] as const;
+export type MedSafetyProjectionDirectiveKey = (typeof MED_SAFETY_PROJECTION_DIRECTIVE_KEYS)[number];
+
+export const MED_SAFETY_LENGTH_PLANS = ["tight", "standard", "expanded"] as const;
+export type MedSafetyLengthPlan = (typeof MED_SAFETY_LENGTH_PLANS)[number];
+
+export const MED_SAFETY_RUNTIME_MODES = ["legacy", "hybrid_live", "hybrid_shadow"] as const;
+export type MedSafetyRuntimeMode = (typeof MED_SAFETY_RUNTIME_MODES)[number];
 
 export const MED_SAFETY_REASONING_EFFORTS = ["low", "medium", "high"] as const;
 export type MedSafetyReasoningEffort = (typeof MED_SAFETY_REASONING_EFFORTS)[number];
@@ -28,251 +92,188 @@ export type MedSafetyReasoningEffort = (typeof MED_SAFETY_REASONING_EFFORTS)[num
 export const MED_SAFETY_VERBOSITIES = ["low", "medium", "high"] as const;
 export type MedSafetyVerbosity = (typeof MED_SAFETY_VERBOSITIES)[number];
 
-export type MedSafetyQualityLevel = "balanced";
+export const MED_SAFETY_PROMPT_BUDGET_CLASSES = ["legacy", "shadow", "standard", "high_risk_or_image"] as const;
+export type MedSafetyPromptBudgetClass = (typeof MED_SAFETY_PROMPT_BUDGET_CLASSES)[number];
 
-export const MED_SAFETY_SUBJECT_FOCI = [
-  "medication",
-  "device",
-  "lab",
-  "procedure",
-  "patient_state",
-  "general",
-] as const;
-export type MedSafetySubjectFocus = (typeof MED_SAFETY_SUBJECT_FOCI)[number];
+export const MED_SAFETY_CONFIDENCES = ["low", "medium", "high"] as const;
+export type MedSafetyConfidence = (typeof MED_SAFETY_CONFIDENCES)[number];
 
-export const MED_SAFETY_URGENCY_LEVELS = ["routine", "prompt", "urgent", "critical"] as const;
-export type MedSafetyUrgencyLevel = (typeof MED_SAFETY_URGENCY_LEVELS)[number];
-
-export const MED_SAFETY_WORKFLOW_STAGES = [
-  "orientation",
-  "interpretation",
-  "decision",
-  "pre_notification",
-  "active_deterioration",
-  "post_action_review",
-] as const;
-export type MedSafetyWorkflowStage = (typeof MED_SAFETY_WORKFLOW_STAGES)[number];
-
-export const MED_SAFETY_NOTIFICATION_NEEDS = ["none", "prepare", "now", "immediate"] as const;
-export type MedSafetyNotificationNeed = (typeof MED_SAFETY_NOTIFICATION_NEEDS)[number];
-
-export const MED_SAFETY_CHECKLIST_DEPTHS = ["brief", "standard", "dense"] as const;
-export type MedSafetyChecklistDepth = (typeof MED_SAFETY_CHECKLIST_DEPTHS)[number];
-
-export const MED_SAFETY_MEASUREMENT_DEPENDENCIES = ["low", "medium", "high"] as const;
-export type MedSafetyMeasurementDependency = (typeof MED_SAFETY_MEASUREMENT_DEPENDENCIES)[number];
-
-export const MED_SAFETY_DANGER_BIASES = ["standard", "elevated", "maximal"] as const;
-export type MedSafetyDangerBias = (typeof MED_SAFETY_DANGER_BIASES)[number];
-
-export const MED_SAFETY_DETAIL_BIASES = ["standard", "high", "very_high"] as const;
-export type MedSafetyDetailBias = (typeof MED_SAFETY_DETAIL_BIASES)[number];
-
-export const MED_SAFETY_OPENING_MODES = ["direct", "action_first", "compare_first", "numeric_first"] as const;
-export type MedSafetyOpeningMode = (typeof MED_SAFETY_OPENING_MODES)[number];
-
-export const MED_SAFETY_ARTIFACT_IDS = [
-  "direct_answer",
-  "severity_frame",
-  "immediate_action",
-  "bedside_recheck",
-  "reversible_cause_sweep",
-  "false_worsening_sweep",
-  "why_recommended_path",
-  "why_this_before_that",
-  "when_not_to_do_that",
-  "exception_boundary",
-  "counterfactual",
-  "measurement_dependency",
-  "paired_problem_handling",
-  "notification_payload",
-  "notification_script",
-  "urgent_red_flags",
-  "protocol_caveat",
-  "memory_point",
-  "mini_case",
-] as const;
-export type MedSafetyArtifactId = (typeof MED_SAFETY_ARTIFACT_IDS)[number];
-
-export const MED_SAFETY_ARTIFACT_DEPTHS = ["brief", "standard", "dense"] as const;
-export type MedSafetyArtifactDepth = (typeof MED_SAFETY_ARTIFACT_DEPTHS)[number];
-
-export const MED_SAFETY_QUALITY_SCORE_AXES = [
-  "directness",
-  "bedside_actionability",
-  "exception_quality",
-  "reporting_utility",
-  "checklist_density",
-  "safety_guardrails",
-  "paired_problem_coverage",
-] as const;
-export type MedSafetyQualityScoreAxis = (typeof MED_SAFETY_QUALITY_SCORE_AXES)[number];
-export type MedSafetyQualityScores = Record<MedSafetyQualityScoreAxis, number>;
-
-export const MED_SAFETY_QUALITY_ISSUE_CODES = [
-  "missing_conclusion_first",
-  "mixed_question_order",
-  "missing_immediate_action",
-  "missing_escalation_threshold",
-  "missing_assumption_disclosure",
-  "unsafe_specificity_for_ambiguous_entity",
-  "missing_local_authority_caveat",
-  "weak_section_structure",
-  "missing_small_category_structure",
-  "duplicate_lines",
-  "filler_detected",
-  "unsupported_specificity",
-  "missing_fast_distinction",
-  "missing_numeric_core",
-  "missing_action_core",
-  "overlong_answer",
-  "forbidden_followup",
-  "missing_reversible_cause_sweep",
-  "missing_false_worsening_exclusion",
-  "missing_notification_payload",
-  "missing_notification_script",
-  "missing_exception_boundary",
-  "missing_counterfactual",
-  "missing_measurement_dependency",
-  "missing_paired_problem_handling",
-  "missing_red_flags",
-  "insufficient_checklist_domain_coverage",
-  "generic_bedside_language",
-  "overcompressed_high_risk_answer",
-  "missing_protocol_caveat",
-] as const;
-export type MedSafetyQualityIssueCode = (typeof MED_SAFETY_QUALITY_ISSUE_CODES)[number];
-
-export const MED_SAFETY_CRITICAL_QUALITY_ISSUE_CODES = [
-  "missing_immediate_action",
-  "missing_escalation_threshold",
-  "unsafe_specificity_for_ambiguous_entity",
-  "missing_reversible_cause_sweep",
-  "missing_notification_payload",
-  "missing_notification_script",
-  "missing_exception_boundary",
-  "missing_counterfactual",
-  "missing_measurement_dependency",
-  "missing_paired_problem_handling",
-  "missing_red_flags",
-  "overcompressed_high_risk_answer",
-  "missing_protocol_caveat",
-] as const;
+export const MED_SAFETY_ROUTE_SOURCES = ["rules", "model"] as const;
+export type MedSafetyRouteSource = (typeof MED_SAFETY_ROUTE_SOURCES)[number];
 
 export const MED_SAFETY_PROMPT_CONTRACT_IDS = [
-  "core_role_goal_spine",
-  "core_decision_priority_spine",
-  "core_safety_certainty_spine",
-  "core_rendering_discipline_spine",
-  "intent_knowledge_spine",
-  "intent_action_spine",
-  "intent_compare_spine",
-  "intent_numeric_spine",
-  "intent_device_spine",
-  "risk_high_spine",
-  "risk_medium_spine",
-  "artifact_planner_blueprint",
-  "artifact_direct_answer",
-  "artifact_severity_frame",
-  "artifact_immediate_action",
-  "artifact_bedside_recheck",
-  "artifact_reversible_cause_sweep",
-  "artifact_false_worsening_sweep",
-  "artifact_why_recommended_path",
-  "artifact_why_this_before_that",
-  "artifact_when_not_to_do_that",
-  "artifact_exception_boundary",
-  "artifact_counterfactual",
-  "artifact_measurement_dependency",
-  "artifact_paired_problem",
-  "artifact_notification_payload",
-  "artifact_notification_script",
-  "artifact_red_flags",
-  "artifact_protocol_caveat",
-  "artifact_memory_point",
-  "artifact_mini_case",
-  "domain_ventilator_abga",
-  "domain_oxygenation",
-  "domain_infusion_device",
-  "domain_medication_safety",
-  "domain_line_tube",
-  "domain_escalation_reporting",
-  "density_checklist_contract",
-  "density_domain_coverage_contract",
-  "density_exception_balance_contract",
-  "output_heading_discipline",
-  "output_lead_sentence_discipline",
-  "output_no_filler_discipline",
-  "anti_failure_specificity_guard",
-  "anti_failure_budget_guard",
-  "language_delta",
+  "base_role_goal",
+  "base_decision_priority",
+  "base_safety_certainty",
+  "base_render_discipline",
+  "intent_knowledge",
+  "intent_action",
+  "intent_compare",
+  "intent_numeric",
+  "risk_high_modifier",
+  "risk_mixed_modifier",
+  "communication_modifier",
+  "exception_modifier",
+  "ambiguity_modifier",
+  "domain_vent_abga",
+  "domain_med_device",
+  "domain_reporting",
+  "output_safety_guard",
+  "output_no_meta_guard",
 ] as const;
 export type MedSafetyPromptContractId = (typeof MED_SAFETY_PROMPT_CONTRACT_IDS)[number];
 
-export type MedSafetyRouteDecision = {
-  intent: MedSafetyIntent;
-  secondaryIntents: MedSafetyIntent[];
-  risk: MedSafetyRisk;
-  entityClarity: MedSafetyEntityClarity;
-  answerDepth: MedSafetyAnswerDepth;
-  needsEscalation: boolean;
-  needsSbar: boolean;
-  format: MedSafetyFormat;
-  source: MedSafetyRouteSource;
-  confidence: "high" | "medium";
-  urgencyLevel: MedSafetyUrgencyLevel;
-  workflowStage: MedSafetyWorkflowStage;
-  notificationNeed: MedSafetyNotificationNeed;
-  reversibleCauseSweep: boolean;
-  trendNeed: boolean;
-  thresholdNeed: boolean;
-  counterfactualNeed: boolean;
-  exceptionNeed: boolean;
-  pairedProblemNeed: boolean;
-  scriptNeed: boolean;
-  checklistDepth: MedSafetyChecklistDepth;
-  measurementDependency: MedSafetyMeasurementDependency;
-  mandatoryArtifacts: MedSafetyArtifactId[];
-  sectionEmphasis: string[];
-  dangerBias: MedSafetyDangerBias;
-  detailBias: MedSafetyDetailBias;
-  communicationArtifacts: MedSafetyArtifactId[];
+export const MED_SAFETY_REPAIR_ISSUE_FAMILIES = [
+  "action_gap",
+  "bedside_gap",
+  "notify_gap",
+  "exception_gap",
+  "safety_gap",
+  "structure_gap",
+  "verbosity_gap",
+] as const;
+export type MedSafetyRepairIssueFamily = (typeof MED_SAFETY_REPAIR_ISSUE_FAMILIES)[number];
+
+export const MED_SAFETY_CRITICAL_REPAIR_ISSUE_FAMILIES = [
+  "notify_gap",
+  "exception_gap",
+  "safety_gap",
+] as const satisfies readonly MedSafetyRepairIssueFamily[];
+
+export const MED_SAFETY_QUALITY_VERDICTS = ["pass", "repair_required", "pass_but_verbose"] as const;
+export type MedSafetyQualityVerdict = (typeof MED_SAFETY_QUALITY_VERDICTS)[number];
+
+export const MED_SAFETY_QUALITY_SCORE_AXES = [
+  "directness",
+  "bedside_utility",
+  "reporting_utility",
+  "exception_quality",
+  "safety_guardrails",
+] as const;
+export type MedSafetyQualityScoreAxis = (typeof MED_SAFETY_QUALITY_SCORE_AXES)[number];
+
+export const MED_SAFETY_ATOMIC_QUALITY_CHECK_IDS = [
+  "direct_answer_top",
+  "immediate_action_top",
+  "card_structure",
+  "bedside_domain_coverage",
+  "reversible_cause_coverage",
+  "false_worsening_exclusion",
+  "notify_payload_complete",
+  "notify_script_useful",
+  "exception_boundary_quality",
+  "measurement_guard_quality",
+  "paired_problem_separation",
+  "protocol_caveat_presence",
+  "unsafe_specificity",
+  "repetition_density",
+  "verbosity_overshoot",
+  "forbidden_followup",
+] as const;
+export type MedSafetyAtomicQualityCheckId = (typeof MED_SAFETY_ATOMIC_QUALITY_CHECK_IDS)[number];
+
+export type MedSafetySubjectFocus = "general" | "medication" | "device" | "lab" | "patient_state";
+
+export type MedSafetyEvidenceSignals = {
+  intentScores: Record<MedSafetyIntent, number>;
+  intentFamiliesMatched: number;
+  mixedIntent: boolean;
+  asksSelection: boolean;
+  asksInterpretation: boolean;
+  asksThreshold: boolean;
+  asksImmediateAction: boolean;
+  asksTrendReview: boolean;
+  needsEntityDisambiguation: boolean;
+  preNotification: boolean;
+  bedsideSweep: boolean;
+  falseWorseningRisk: boolean;
+  pairedProblem: boolean;
+  mixedNumericAction: boolean;
+  mentionsVentilation: boolean;
+  mentionsABGA: boolean;
+  mentionsOxygenation: boolean;
+  mentionsMedication: boolean;
+  mentionsLineOrTube: boolean;
+  mentionsCompatibility: boolean;
+  mentionsSetting: boolean;
+  mentionsPatientState: boolean;
+  mentionsAlarm: boolean;
+  hasSuddenMarker: boolean;
+  hasHighRiskMarker: boolean;
+  wantsScript: boolean;
+  subjectFocus: MedSafetySubjectFocus;
+};
+
+export type MedSafetyRouterRefinement = {
+  intentOverride?: MedSafetyIntent;
+  riskOverride?: MedSafetyRisk;
+  entityClarityOverride?: MedSafetyEntityClarity;
+  urgencyOverride?: MedSafetyUrgencyLevel;
+  detailProfileOverride?: MedSafetyDetailProfile;
+  communicationProfileOverride?: MedSafetyCommunicationProfile;
+  exceptionProfileOverride?: MedSafetyExceptionProfile;
+  pairedProblemOverride?: boolean;
   reason: string;
 };
 
-export type MedSafetyPromptProfile = {
-  reasoningEfforts: MedSafetyReasoningEffort[];
-  verbosity: MedSafetyVerbosity;
-  outputTokenCandidates: number[];
-  qualityLevel: MedSafetyQualityLevel;
+export type MedSafetyInternalDecision = {
+  intent: MedSafetyIntent;
+  secondaryIntentCluster: MedSafetyIntent[];
+  risk: MedSafetyRisk;
+  entityClarity: MedSafetyEntityClarity;
+  answerDepth: MedSafetyAnswerDepth;
+  urgencyLevel: MedSafetyUrgencyLevel;
+  workflowStage: MedSafetyWorkflowStage;
+  priorityMode: MedSafetyPriorityMode;
+  detailProfile: MedSafetyDetailProfile;
+  communicationProfile: MedSafetyCommunicationProfile;
+  exceptionProfile: MedSafetyExceptionProfile;
+  pairedProblemNeed: boolean;
+  measurementGuardNeed: boolean;
+  reversibleCauseNeed: boolean;
+  falseWorseningNeed: boolean;
+  reportingNeed: boolean;
+  specificityRisk: MedSafetySpecificityRisk;
+  protocolCaveatNeed: boolean;
+  compressionTarget: MedSafetyCompressionTarget;
+  needsEscalation: boolean;
+  needsSbar: boolean;
+  format: MedSafetyFormat;
+  confidence: MedSafetyConfidence;
+  source: MedSafetyRouteSource;
+  reason: string;
 };
 
-export type MedSafetyQualityDecision = {
-  verdict: MedSafetyQualityVerdict;
-  repairInstructions: string;
-  issues: MedSafetyQualityIssueCode[];
-  criticalIssues: MedSafetyQualityIssueCode[];
-  scores: MedSafetyQualityScores;
+export type MedSafetyMicroPackScoreMap = Partial<Record<MedSafetyMicroPackId, number>>;
+
+export type MedSafetyPackPlan = {
+  visiblePacks: MedSafetyPromptPackId[];
+  selectedMicroPacks: MedSafetyMicroPackId[];
+  deferredMicroPacks: MedSafetyMicroPackId[];
+  droppedMicroPacks: MedSafetyMicroPackId[];
+  microPackScores: MedSafetyMicroPackScoreMap;
 };
 
-export type MedSafetyPromptBudgetClass = "legacy" | "shadow" | "standard" | "high_risk_or_image";
+export type MedSafetyPromptProjection = {
+  openingDirective: string;
+  priorityDirective: string;
+  coverageDirective: string | null;
+  exceptionDirective: string | null;
+  communicationDirective: string | null;
+  safetyDirective: string;
+  compressionDirective: string;
+  renderDirective: string;
+  activeDirectiveKeys: MedSafetyProjectionDirectiveKey[];
+  droppedDirectiveKeys: MedSafetyProjectionDirectiveKey[];
+};
 
 export type MedSafetyPromptBlueprint = {
   openingMode: MedSafetyOpeningMode;
-  requiredArtifacts: MedSafetyArtifactId[];
-  optionalArtifacts: MedSafetyArtifactId[];
-  artifactOrder: MedSafetyArtifactId[];
-  artifactQuota: Partial<Record<MedSafetyArtifactId, number>>;
-  artifactDepth: Partial<Record<MedSafetyArtifactId, MedSafetyArtifactDepth>>;
-  coreArtifactPack: MedSafetyArtifactId[];
-  extendedArtifactPack: MedSafetyArtifactId[];
+  sectionHints: string[];
   mustNotAssert: string[];
-  subjectFocus: MedSafetySubjectFocus;
-  mixedIntent: boolean;
-  followupPolicy: "forbid" | "limited";
-  sectionEmphasis: string[];
-  communicationArtifacts: MedSafetyArtifactId[];
-  domainCoverageTargets: string[];
+  lengthPlan: MedSafetyLengthPlan;
+  packPlan: MedSafetyPackPlan;
+  projection: MedSafetyPromptProjection;
 };
 
 export type MedSafetyPromptContractSet = {
@@ -292,3 +293,28 @@ export type MedSafetyPromptAssembly = {
   budgetClass: MedSafetyPromptBudgetClass;
   budgetChars: number;
 };
+
+export type MedSafetyPromptProfile = {
+  reasoningEfforts: MedSafetyReasoningEffort[];
+  verbosity: MedSafetyVerbosity;
+  outputTokenCandidates: number[];
+  qualityLevel: "balanced";
+};
+
+export type MedSafetyQualityScores = Record<MedSafetyQualityScoreAxis, number>;
+
+export type MedSafetyQualityProfile = {
+  atomicFailures: MedSafetyAtomicQualityCheckId[];
+  issueFamilies: MedSafetyRepairIssueFamily[];
+};
+
+export type MedSafetyQualityDecision = {
+  verdict: MedSafetyQualityVerdict;
+  repairInstructions: string;
+  issues: MedSafetyRepairIssueFamily[];
+  criticalIssues: MedSafetyRepairIssueFamily[];
+  scores: MedSafetyQualityScores;
+  profile?: MedSafetyQualityProfile | null;
+};
+
+export type MedSafetyRouteDecision = MedSafetyInternalDecision;

@@ -1,24 +1,26 @@
 import type {
-  MedSafetyArtifactDepth,
-  MedSafetyArtifactId,
+  MedSafetyInternalDecision,
+  MedSafetyMicroPackId,
+  MedSafetyPackPlan,
   MedSafetyPromptBlueprint,
-  MedSafetyRouteDecision,
+  MedSafetyPromptPackId,
+  MedSafetyPromptProjection,
+  MedSafetyProjectionDirectiveKey,
 } from "@/lib/server/medSafetyTypes";
 import type { MedSafetyQuestionSignals } from "@/lib/server/medSafetySignalLexicon";
-import { countPatternHits } from "@/lib/server/medSafetySignalLexicon";
 
 const PBW_PATTERNS = [/\bpbw\b/i, /predicted body weight/i, /예상\s*체중/i];
-
-function uniqueArtifacts(items: MedSafetyArtifactId[]) {
-  return Array.from(new Set(items));
-}
 
 function uniqueStrings(items: string[]) {
   return Array.from(new Set(items.filter(Boolean)));
 }
 
-function inferOpeningMode(decision: MedSafetyRouteDecision) {
-  if (decision.urgencyLevel === "critical" || decision.intent === "action" || decision.intent === "device") {
+function uniquePacks(items: MedSafetyPromptPackId[]) {
+  return Array.from(new Set(items));
+}
+
+function inferOpeningMode(decision: MedSafetyInternalDecision) {
+  if (decision.priorityMode === "notify_first" || decision.priorityMode === "action_first" || decision.priorityMode === "safety_first") {
     return "action_first" as const;
   }
   if (decision.intent === "compare") return "compare_first" as const;
@@ -26,202 +28,240 @@ function inferOpeningMode(decision: MedSafetyRouteDecision) {
   return "direct" as const;
 }
 
-function buildDefaultSectionEmphasis(decision: MedSafetyRouteDecision, signals: MedSafetyQuestionSignals) {
-  const emphasis: string[] = ["핵심 판단"];
-  if (decision.mandatoryArtifacts.includes("immediate_action")) emphasis.push("지금 할 일");
-  if (decision.mandatoryArtifacts.includes("bedside_recheck")) {
-    emphasis.push(decision.workflowStage === "pre_notification" ? "노티 전 지금 확인할 것" : "지금 확인할 것");
-  }
-  if (decision.mandatoryArtifacts.includes("why_this_before_that") || decision.mandatoryArtifacts.includes("why_recommended_path")) {
-    emphasis.push("왜 이 순서로 보는지");
-  }
-  if (decision.mandatoryArtifacts.includes("counterfactual") || decision.mandatoryArtifacts.includes("exception_boundary")) {
-    emphasis.push("헷갈리기 쉬운 예외");
-  }
-  if (decision.pairedProblemNeed || signals.mentionsPairedVentOxyProblem) {
-    emphasis.push("같이 봐야 할 문제");
-  }
-  if (decision.notificationNeed !== "none") emphasis.push("주치의 노티 포인트");
-  if (decision.mandatoryArtifacts.includes("urgent_red_flags")) emphasis.push("즉시 보고 신호");
-  return uniqueStrings(emphasis);
+function buildMicroPackScores(decision: MedSafetyInternalDecision, signals: MedSafetyQuestionSignals) {
+  const clinicalRiskWeight = decision.risk === "high" ? 4 : decision.risk === "medium" ? 2 : 1;
+  const actionabilityWeight =
+    decision.priorityMode === "action_first" || decision.priorityMode === "notify_first" || decision.priorityMode === "safety_first" ? 3 : 1;
+  const reportingWeight = decision.reportingNeed ? (decision.communicationProfile === "script" ? 4 : 3) : 0;
+  const exceptionWeight = decision.exceptionProfile === "full" ? 4 : decision.exceptionProfile === "light" ? 2 : 0;
+  const ambiguityWeight = decision.entityClarity === "low" ? 3 : decision.entityClarity === "medium" ? 2 : 0;
+  const pairedProblemWeight = decision.pairedProblemNeed ? 4 : 0;
+  const lengthPenalty = decision.compressionTarget === "tight" ? 2 : decision.compressionTarget === "compressed_detailed" ? 1 : 0;
+
+  const scores: Partial<Record<MedSafetyMicroPackId, number>> = {
+    direct_core: 100,
+    severity_frame:
+      clinicalRiskWeight * 2 +
+      (decision.intent === "numeric" || decision.intent === "compare" ? 2 : 0) +
+      (decision.pairedProblemNeed ? 2 : 0) -
+      1,
+    bedside_check:
+      actionabilityWeight * 2 +
+      (decision.detailProfile === "bedside" || decision.detailProfile === "paired" ? 4 : 0) +
+      (signals.bedsideSweep ? 2 : 0) -
+      lengthPenalty,
+    reversible_cause:
+      (decision.reversibleCauseNeed ? 7 : 0) +
+      (signals.mentionsAlarm || signals.mentionsLineOrTube || signals.mentionsVentilation ? 2 : 0) -
+      lengthPenalty,
+    false_worsening:
+      (decision.falseWorseningNeed ? 7 : 0) +
+      (signals.falseWorseningRisk || signals.hasSuddenMarker ? 2 : 0) -
+      lengthPenalty,
+    exception_boundary:
+      exceptionWeight * 2 +
+      (decision.intent === "compare" ? 2 : 0) +
+      (signals.mixedNumericAction ? 2 : 0) -
+      lengthPenalty,
+    measurement_guard:
+      (decision.measurementGuardNeed ? 6 : 0) +
+      ambiguityWeight +
+      (signals.mentionsABGA || signals.mentionsSetting ? 2 : 0) -
+      lengthPenalty,
+    notify_payload:
+      reportingWeight * 2 +
+      (decision.workflowStage === "pre_notification" ? 2 : 0) -
+      lengthPenalty,
+    notify_script:
+      (decision.communicationProfile === "script" ? 8 : 0) +
+      (decision.priorityMode === "notify_first" ? 2 : 0) -
+      lengthPenalty,
+    paired_problem_split:
+      pairedProblemWeight * 2 +
+      (decision.detailProfile === "paired" ? 2 : 0) -
+      lengthPenalty,
+  };
+
+  return scores;
 }
 
-function buildDomainCoverageTargets(decision: MedSafetyRouteDecision, signals: MedSafetyQuestionSignals) {
-  const domains: string[] = [];
-  if (signals.mentionsPatientState || decision.urgencyLevel !== "routine") domains.push("patient");
-  if (signals.mentionsVentilation || signals.mentionsAlarm || signals.mentionsSetting) domains.push("ventilator_waveform");
-  if (signals.mentionsLineOrTube || signals.mentionsAlarm) domains.push("tube_circuit");
-  if (signals.mentionsProcedure || decision.reversibleCauseSweep) domains.push("secretion_or_obstruction");
-  if (signals.mentionsMeasurementError || decision.measurementDependency !== "low") domains.push("measurement_error_or_sampling");
-  if (signals.mentionsOxygenation || signals.mentionsABGA || decision.pairedProblemNeed) domains.push("oxygenation_strategy");
-  if (decision.notificationNeed !== "none") domains.push("notification_payload");
-  return uniqueStrings(domains);
+function selectMicroPacks(scores: Partial<Record<MedSafetyMicroPackId, number>>, decision: MedSafetyInternalDecision) {
+  const ranked = (Object.entries(scores) as Array<[MedSafetyMicroPackId, number]>)
+    .sort((a, b) => b[1] - a[1])
+    .filter(([, score]) => score > 0);
+  const maxSelected = decision.answerDepth === "short" ? 4 : decision.answerDepth === "detailed" ? 8 : 6;
+  const selectedMicroPacks = ranked.slice(0, maxSelected).map(([pack]) => pack);
+  const deferredMicroPacks = ranked.slice(maxSelected).map(([pack]) => pack);
+  return { selectedMicroPacks, deferredMicroPacks };
 }
 
-function buildMustNotAssert(decision: MedSafetyRouteDecision, signals: MedSafetyQuestionSignals, query: string) {
+function mapMicroToVisiblePacks(microPacks: MedSafetyMicroPackId[]) {
+  const visible: MedSafetyPromptPackId[] = ["direct_core_pack"];
+  if (microPacks.some((pack) => ["bedside_check", "reversible_cause", "false_worsening"].includes(pack))) visible.push("bedside_pack");
+  if (microPacks.some((pack) => ["exception_boundary", "measurement_guard"].includes(pack))) visible.push("exception_pack");
+  if (microPacks.some((pack) => ["notify_payload", "notify_script"].includes(pack))) visible.push("notify_pack");
+  if (microPacks.includes("paired_problem_split")) visible.push("paired_problem_pack");
+  return uniquePacks(visible);
+}
+
+function buildMustNotAssert(decision: MedSafetyInternalDecision, signals: MedSafetyQuestionSignals, query: string) {
   const items: string[] = [];
   if (decision.entityClarity !== "high") {
-    items.push("검증되지 않은 용량", "검증되지 않은 속도", "검증되지 않은 희석", "검증되지 않은 경로", "검증되지 않은 세팅값");
+    items.push("확인되지 않은 용량, 속도, 희석, 경로", "정체가 확실하지 않은 대상에 대한 구체 세팅값");
   }
-  if (decision.risk === "high") {
-    items.push("기관별 또는 제조사별 세부 수치", "확인되지 않은 compatibility 결론");
-  }
-  if (signals.mentionsCompatibility) {
-    items.push("검증되지 않은 Y-site 혼합 가능 결론");
-  }
-  if (signals.mentionsSetting) {
-    items.push("모델 미확인 상태의 구체 세팅 지시");
-  }
-  if ((signals.mentionsABGA || signals.mentionsVentilation) && countPatternHits(query, PBW_PATTERNS) === 0) {
+  if (signals.mentionsCompatibility) items.push("검증되지 않은 호환성 단정");
+  if (signals.mentionsSetting) items.push("모델 미확인 상태의 구체 조작값");
+  if ((signals.mentionsABGA || signals.mentionsVentilation) && !PBW_PATTERNS.some((pattern) => pattern.test(query))) {
     items.push("PBW 확인 없는 Vt 적정성 단정");
   }
+  if (decision.protocolCaveatNeed) items.push("기관 또는 제조사 고유 수치의 임의 제시");
   return uniqueStrings(items);
 }
 
-function buildCoreArtifacts(decision: MedSafetyRouteDecision, signals: MedSafetyQuestionSignals) {
-  const artifacts: MedSafetyArtifactId[] = ["direct_answer"];
-  if (decision.risk !== "low" || decision.intent === "numeric" || decision.pairedProblemNeed) artifacts.push("severity_frame");
-  if (decision.urgencyLevel !== "routine" || decision.intent === "action" || decision.intent === "device") artifacts.push("immediate_action");
-  if (decision.checklistDepth !== "brief" || signals.mentionsVentilation || signals.mentionsPreNotification) artifacts.push("bedside_recheck");
-  if (decision.reversibleCauseSweep) artifacts.push("reversible_cause_sweep");
-  if (signals.asksFalseWorseningSweep || decision.reversibleCauseSweep || signals.mentionsMeasurementError || signals.mentionsSuddenDeterioration) {
-    artifacts.push("false_worsening_sweep");
+function buildSectionHints(decision: MedSafetyInternalDecision, visiblePacks: MedSafetyPromptPackId[]) {
+  const hints: string[] = ["핵심 판단"];
+  if (decision.priorityMode !== "balanced") hints.push("지금 할 일");
+  if (visiblePacks.includes("bedside_pack")) {
+    hints.push(decision.workflowStage === "pre_notification" ? "노티 전 지금 확인할 것" : "지금 확인할 것");
   }
-  if (decision.intent === "compare" || decision.secondaryIntents.length > 0 || signals.mentionsNumericActionMix) {
-    artifacts.push("why_this_before_that");
-  }
-  if (decision.intent !== "knowledge" || decision.pairedProblemNeed) artifacts.push("why_recommended_path");
-  if (decision.exceptionNeed) artifacts.push("when_not_to_do_that", "exception_boundary");
-  if (decision.counterfactualNeed) artifacts.push("counterfactual");
-  if (decision.measurementDependency !== "low") artifacts.push("measurement_dependency");
-  if (decision.pairedProblemNeed) artifacts.push("paired_problem_handling");
-  if (decision.notificationNeed !== "none") artifacts.push("notification_payload");
-  if (decision.scriptNeed) artifacts.push("notification_script");
-  if (decision.needsEscalation || decision.urgencyLevel !== "routine") artifacts.push("urgent_red_flags");
-  if (decision.risk === "high" || decision.entityClarity !== "high" || decision.notificationNeed !== "none") artifacts.push("protocol_caveat");
-  return uniqueArtifacts(artifacts);
+  if (visiblePacks.includes("paired_problem_pack")) hints.push("같이 봐야 할 문제");
+  if (visiblePacks.includes("exception_pack")) hints.push("헷갈리기 쉬운 예외");
+  if (visiblePacks.includes("notify_pack")) hints.push("주치의 노티 포인트");
+  if (decision.needsEscalation || decision.urgencyLevel !== "routine") hints.push("즉시 보고 신호");
+  return uniqueStrings(hints).slice(0, 5);
 }
 
-function buildOptionalArtifacts(decision: MedSafetyRouteDecision, signals: MedSafetyQuestionSignals, hasImage: boolean) {
-  const artifacts: MedSafetyArtifactId[] = [];
-  if (decision.answerDepth === "detailed" && (decision.intent === "compare" || signals.asksSelection)) {
-    artifacts.push("memory_point");
-  }
-  if (!hasImage && decision.answerDepth === "detailed" && decision.entityClarity === "high" && decision.risk !== "high") {
-    artifacts.push("mini_case");
-  }
-  return uniqueArtifacts(artifacts.filter((artifact) => !decision.mandatoryArtifacts.includes(artifact)));
+function inferLengthPlan(decision: MedSafetyInternalDecision, hasImage: boolean) {
+  if (decision.answerDepth === "short" || decision.compressionTarget === "tight") return "tight" as const;
+  if (decision.risk === "high" || decision.answerDepth === "detailed" || hasImage) return "expanded" as const;
+  return "standard" as const;
 }
 
-function buildArtifactOrder(requiredArtifacts: MedSafetyArtifactId[], optionalArtifacts: MedSafetyArtifactId[]) {
-  const preferred: MedSafetyArtifactId[] = [
-    "direct_answer",
-    "severity_frame",
-    "immediate_action",
-    "bedside_recheck",
-    "reversible_cause_sweep",
-    "false_worsening_sweep",
-    "why_this_before_that",
-    "why_recommended_path",
-    "counterfactual",
-    "when_not_to_do_that",
-    "exception_boundary",
-    "measurement_dependency",
-    "paired_problem_handling",
-    "notification_payload",
-    "notification_script",
-    "urgent_red_flags",
-    "protocol_caveat",
-    "memory_point",
-    "mini_case",
+function buildProjection(decision: MedSafetyInternalDecision, packPlan: MedSafetyPackPlan, locale: "ko" | "en"): MedSafetyPromptProjection {
+  const includeCoverage = packPlan.visiblePacks.includes("bedside_pack") || packPlan.visiblePacks.includes("paired_problem_pack");
+  const includeException = packPlan.visiblePacks.includes("exception_pack");
+  const includeCommunication = packPlan.visiblePacks.includes("notify_pack");
+
+  const activeDirectiveKeys: MedSafetyProjectionDirectiveKey[] = [
+    "openingDirective",
+    "priorityDirective",
+    "safetyDirective",
+    "compressionDirective",
+    "renderDirective",
   ];
-  const requested = new Set<MedSafetyArtifactId>([...requiredArtifacts, ...optionalArtifacts]);
-  return preferred.filter((artifact) => requested.has(artifact));
-}
+  if (includeCoverage) activeDirectiveKeys.push("coverageDirective");
+  if (includeException) activeDirectiveKeys.push("exceptionDirective");
+  if (includeCommunication) activeDirectiveKeys.push("communicationDirective");
 
-function buildArtifactQuota(decision: MedSafetyRouteDecision) {
-  const quota: Partial<Record<MedSafetyArtifactId, number>> = {
-    direct_answer: 1,
-    severity_frame: decision.risk === "high" ? 3 : 2,
-    immediate_action: decision.urgencyLevel === "critical" ? 4 : 3,
-    bedside_recheck: decision.checklistDepth === "dense" ? 5 : decision.checklistDepth === "standard" ? 4 : 3,
-    reversible_cause_sweep: decision.reversibleCauseSweep ? (decision.checklistDepth === "dense" ? 5 : 3) : 0,
-    false_worsening_sweep: decision.reversibleCauseSweep ? 2 : 1,
-    why_this_before_that: 2,
-    why_recommended_path: 2,
-    counterfactual: 3,
-    when_not_to_do_that: 2,
-    exception_boundary: 2,
-    measurement_dependency: decision.measurementDependency === "high" ? 3 : 2,
-    paired_problem_handling: 3,
-    notification_payload: decision.notificationNeed === "immediate" ? 5 : 4,
-    notification_script: 3,
-    urgent_red_flags: decision.urgencyLevel === "critical" ? 4 : 3,
-    protocol_caveat: 1,
-    memory_point: 2,
-    mini_case: 1,
-  };
-  return quota;
-}
-
-function buildArtifactDepth(decision: MedSafetyRouteDecision, artifacts: MedSafetyArtifactId[]) {
-  const depth: Partial<Record<MedSafetyArtifactId, MedSafetyArtifactDepth>> = {};
-  for (const artifact of artifacts) {
-    depth[artifact] =
-      artifact === "bedside_recheck" || artifact === "reversible_cause_sweep"
-        ? decision.checklistDepth === "dense"
-          ? "dense"
-          : "standard"
-        : artifact === "notification_payload" || artifact === "notification_script"
-          ? decision.notificationNeed === "immediate"
-            ? "dense"
-            : "standard"
-          : artifact === "counterfactual" || artifact === "exception_boundary"
-            ? decision.detailBias === "very_high"
-              ? "dense"
-              : "standard"
-            : decision.answerDepth === "short"
-              ? "brief"
-              : "standard";
+  if (locale === "en") {
+    return {
+      openingDirective:
+        "Begin with a titleless conclusion that states the preferred action or interpretation, then explain only the reasoning that changes the bedside next step.",
+      priorityDirective:
+        decision.priorityMode === "notify_first"
+          ? "Put action and clinician-facing reporting before background explanation."
+          : decision.priorityMode === "safety_first"
+            ? "Put immediate safety and stop-report boundaries before mechanism or teaching points."
+            : decision.priorityMode === "action_first"
+              ? "Put what to do now before background explanation."
+              : "Keep the answer balanced, but do not let background explanation delay the direct answer.",
+      coverageDirective: includeCoverage
+        ? packPlan.visiblePacks.includes("paired_problem_pack")
+          ? "Separate the linked problems instead of blending them, and keep bedside checks focused on what would change the next lever."
+          : "Use one bedside card only, focused on the checks most likely to change the next decision: patient effect, waveform or circuit state, and reversible or false-worsening causes."
+        : null,
+      exceptionDirective: includeException
+        ? "Add a compact boundary card that states when the main recommendation stops being safe and which missing measurement or identifier would change the choice."
+        : null,
+      communicationDirective: includeCommunication
+        ? decision.communicationProfile === "script"
+          ? "Include a compact notify card with the minimum useful report payload and a 2-3 sentence script that can be read aloud naturally."
+          : "Include a compact notify card with only the minimum report payload the clinician needs for the next decision."
+        : null,
+      safetyDirective:
+        decision.protocolCaveatNeed || decision.specificityRisk !== "low"
+          ? "Stay conservative on specifics. Do not invent unsupported numbers, settings, or compatibility claims, and use protocol or manufacturer caveats only where they materially protect safety."
+          : "Do not add unsupported specifics or generic filler.",
+      compressionDirective:
+        decision.compressionTarget === "tight"
+          ? "Keep it tight: conclusion plus only the cards that materially change action, safety, or reporting."
+          : decision.compressionTarget === "compressed_detailed"
+            ? "Be detailed only where the detail changes the choice. Remove educational padding and repeated warnings."
+            : "Keep the answer compressed and high density rather than long.",
+      renderDirective:
+        "Output plain text only. Use a titleless conclusion first, then short cards with concrete headings, one lead sentence, and 2-4 bullets. Do not expose internal planning language.",
+      activeDirectiveKeys,
+      droppedDirectiveKeys: [],
+    };
   }
-  return depth;
+
+  return {
+    openingDirective:
+      "첫 문단은 제목 없는 결론으로 시작하고, 추천 선택이나 핵심 해석을 먼저 말한 뒤 그 선택을 바꾸는 이유만 짧게 덧붙인다.",
+    priorityDirective:
+      decision.priorityMode === "notify_first"
+        ? "배경 설명보다 지금 할 일과 어떻게 보고할지를 먼저 둔다."
+        : decision.priorityMode === "safety_first"
+          ? "기전 설명보다 즉시 위험, 중단 기준, 보고 경계를 먼저 둔다."
+          : decision.priorityMode === "action_first"
+            ? "배경 설명보다 지금 할 행동을 먼저 둔다."
+            : "직접 답을 먼저 주되, 배경 설명이 판단을 지연시키지 않게 한다.",
+    coverageDirective: includeCoverage
+      ? packPlan.visiblePacks.includes("paired_problem_pack")
+        ? "얽혀 있는 두 문제를 섞지 말고 분리해 다루며, bedside 확인은 다음 선택을 바꾸는 항목만 남긴다."
+        : "bedside 카드는 하나만 쓰고, 환자 상태, waveform 또는 circuit 상태, reversible cause나 false worsening 배제처럼 다음 선택을 바꾸는 확인만 남긴다."
+      : null,
+    exceptionDirective: includeException
+      ? "현재 추천이 언제부터 위험해지는지와, 어떤 누락 측정값이나 식별 정보가 선택을 바꾸는지 짧은 예외 카드로 정리한다."
+      : null,
+    communicationDirective: includeCommunication
+      ? decision.communicationProfile === "script"
+        ? "노티 카드는 최소한의 핵심 데이터 묶음과 2~3문장 실제 보고 문장까지 포함한다."
+        : "노티 카드는 다음 의사결정에 필요한 최소한의 데이터 묶음만 남긴다."
+      : null,
+    safetyDirective:
+      decision.protocolCaveatNeed || decision.specificityRisk !== "low"
+        ? "근거 없는 수치, 세팅값, 호환성 결론을 만들지 말고, 안전을 지키는 데 필요할 때만 프로토콜이나 제조사 확인 caveat를 남긴다."
+        : "근거 없는 구체값과 반복 경고를 넣지 않는다.",
+    compressionDirective:
+      decision.compressionTarget === "tight"
+        ? "결론과 실제로 행동을 바꾸는 카드만 남겨 짧게 쓴다."
+        : decision.compressionTarget === "compressed_detailed"
+          ? "상세하더라도 선택을 바꾸는 디테일만 남기고 교육용 설명과 반복 경고는 뺀다."
+          : "길이보다 판단 밀도를 높이는 쪽으로 압축한다.",
+    renderDirective:
+      "최종 출력은 평문만 사용하고, 제목 없는 결론 뒤에 구체 제목 카드들을 배치한다. 각 카드는 리드 1문장과 2~4개 bullet만 사용하며 내부 기획 용어는 노출하지 않는다.",
+    activeDirectiveKeys,
+    droppedDirectiveKeys: [],
+  };
 }
 
 export function buildMedSafetyPromptBlueprint(
-  decision: MedSafetyRouteDecision,
+  decision: MedSafetyInternalDecision,
   options: {
     hasImage?: boolean;
     query?: string;
+    locale: "ko" | "en";
     signals: MedSafetyQuestionSignals;
   }
 ): MedSafetyPromptBlueprint {
-  const requiredArtifacts = uniqueArtifacts(
-    decision.mandatoryArtifacts.length ? decision.mandatoryArtifacts : buildCoreArtifacts(decision, options.signals)
-  );
-  const optionalArtifacts = buildOptionalArtifacts(decision, options.signals, Boolean(options.hasImage));
-  const artifactOrder = buildArtifactOrder(requiredArtifacts, optionalArtifacts);
-  const domainCoverageTargets = buildDomainCoverageTargets(decision, options.signals);
-  const sectionEmphasis =
-    decision.sectionEmphasis.length > 0 ? decision.sectionEmphasis : buildDefaultSectionEmphasis(decision, options.signals);
+  const scores = buildMicroPackScores(decision, options.signals);
+  const { selectedMicroPacks, deferredMicroPacks } = selectMicroPacks(scores, decision);
+  const visiblePacks = mapMicroToVisiblePacks(selectedMicroPacks);
+  const packPlan: MedSafetyPackPlan = {
+    visiblePacks,
+    selectedMicroPacks,
+    deferredMicroPacks,
+    droppedMicroPacks: [],
+    microPackScores: scores,
+  };
 
   return {
     openingMode: inferOpeningMode(decision),
-    requiredArtifacts,
-    optionalArtifacts,
-    artifactOrder,
-    artifactQuota: buildArtifactQuota(decision),
-    artifactDepth: buildArtifactDepth(decision, artifactOrder),
-    coreArtifactPack: requiredArtifacts.filter((artifact) =>
-      ["direct_answer", "immediate_action", "exception_boundary", "urgent_red_flags", "protocol_caveat"].includes(artifact)
-    ),
-    extendedArtifactPack: optionalArtifacts,
+    sectionHints: buildSectionHints(decision, visiblePacks),
     mustNotAssert: buildMustNotAssert(decision, options.signals, String(options.query ?? "")),
-    subjectFocus: options.signals.subjectFocus,
-    mixedIntent: options.signals.mixedIntent,
-    followupPolicy:
-      decision.entityClarity !== "high" || decision.risk === "high" || Boolean(options.hasImage) ? "limited" : "forbid",
-    sectionEmphasis,
-    communicationArtifacts: decision.communicationArtifacts,
-    domainCoverageTargets,
+    lengthPlan: inferLengthPlan(decision, Boolean(options.hasImage)),
+    packPlan,
+    projection: buildProjection(decision, packPlan, options.locale),
   };
 }
