@@ -68,6 +68,7 @@ export async function POST(req: Request) {
     ) {
       return bad(403, message);
     }
+    if (message.startsWith("ai_recovery_")) return bad(502, message);
     return jsonNoStore({ ok: false, error: "ai_recovery_orders_failed" }, { status: 500 });
   }
 }

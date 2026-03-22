@@ -44,6 +44,9 @@ export async function POST(req: Request) {
     if (message === "session_generation_limit_reached") {
       return jsonNoStore({ ok: false, error: message }, { status: 403 });
     }
+    if (message.startsWith("ai_recovery_")) {
+      return jsonNoStore({ ok: false, error: message }, { status: 502 });
+    }
     return jsonNoStore({ ok: false, error: "ai_recovery_generate_failed" }, { status: 500 });
   }
 }

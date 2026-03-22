@@ -201,7 +201,8 @@ export function getAIRecoveryErrorMessage(code: unknown) {
   if (value === "candidate_ids_not_found") return "후보를 다시 골라 주세요.";
   if (value === "ai_recovery_session_missing") return "먼저 AI 맞춤회복을 만들어 주세요.";
   if (value === "order_id_invalid" || value === "order_id_not_found") return "오더를 다시 불러와 주세요.";
+  if (value === "ai_recovery_openai_failed" || value === "ai_recovery_orders_failed") return "AI 연결이 잠시 불안정해요. 다시 시도해 주세요.";
   if (value.startsWith("http_")) return "잠시 후 다시 시도해 주세요.";
-  if (value.startsWith("ai_recovery_")) return "잠시 후 다시 시도해 주세요.";
+  if (value.startsWith("ai_recovery_")) return "AI 연결이 잠시 불안정해요. 다시 시도해 주세요.";
   return "잠시 후 다시 시도해 주세요.";
 }

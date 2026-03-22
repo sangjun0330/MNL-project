@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
+import { AIRecoveryLoadingOverlay } from "@/components/insights/AIRecoveryLoadingOverlay";
 import { useAIRecoverySession } from "@/components/insights/useAIRecoverySession";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { useRecoveryPlanner } from "@/components/insights/useRecoveryPlanner";
@@ -184,6 +185,10 @@ export function InsightsRecoveryOrdersDetail() {
   const maxReached = selectedIds.length >= 5;
   const canRegenerateSession = response?.quota.canGenerateSession ?? !currentSession;
   const canRegenerateOrders = response?.quota.canRegenerateOrders ?? !currentSession;
+  const showGeneratingOverlay = Boolean(
+    response?.gate.allowed &&
+      (session.generating || session.savingOrders || (!currentSession && session.loading))
+  );
 
   const toggleCandidate = (candidateId: string) => {
     setSelectedIds((current) => {
@@ -209,6 +214,13 @@ export function InsightsRecoveryOrdersDetail() {
         </>
       }
     >
+      {showGeneratingOverlay ? (
+        <AIRecoveryLoadingOverlay
+          title={currentSession ? "AI 오더 정리중.." : "AI 맞춤회복 분석중.."}
+          detail={currentSession ? "고른 후보를 오더로 바꾸는 중이에요." : "먼저 AI 해설을 만드는 중이에요."}
+        />
+      ) : null}
+
       <DetailCard
         className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
         style={{
@@ -317,6 +329,11 @@ export function InsightsRecoveryOrdersDetail() {
         <DetailCard className="p-5 sm:p-6">
           <div className="text-[16px] font-bold text-ios-text">준비 중이에요.</div>
           <p className="mt-2 text-[13px] text-ios-sub">저장된 결과를 먼저 확인하고 필요하면 다시 만들어요.</p>
+        </DetailCard>
+      ) : !session.error && response?.gate.allowed ? (
+        <DetailCard className="p-5 sm:p-6">
+          <div className="text-[17px] font-bold tracking-[-0.02em] text-ios-text">아직 AI 오더가 없어요.</div>
+          <p className="mt-2 text-[13px] leading-6 text-ios-sub">먼저 AI 맞춤회복을 만들거나 다시 시도해 주세요.</p>
         </DetailCard>
       ) : null}
     </InsightDetailShell>

@@ -704,24 +704,34 @@ function parseBriefJson(text: string, snapshot: RecoverySnapshot): AIRecoveryBri
   if (candidateActions.length === 0) throw new Error("brief_candidate_actions_empty");
 
   const sectionsSource = Array.isArray(parsed.sections) ? parsed.sections : [];
+  if (sectionsSource.length < 3) throw new Error("brief_sections_invalid");
   const sectionTitles = ["회복 포커스", "주의 신호", "이번 주 흐름"] as const;
   const sectionKeys: Array<AIRecoveryBriefSection["key"]> = ["focus", "signal", "weekly"];
   const sections = sectionTitles.map((title, index) => {
     const source = sectionsSource[index];
+    const body = trimText(isRecord(source) ? source.body : source, 320);
+    if (!body) throw new Error(`brief_section_body_missing_${index + 1}`);
     return {
       key: sectionKeys[index],
       title,
-      body: trimText(isRecord(source) ? source.body : source, 320) || buildFallbackSections(snapshot)[index].body,
+      body,
     };
   });
 
+  const headline = trimText(parsed.headline, 120);
+  const summary = trimText(parsed.summary, 360);
+  const weeklyNote = trimText(parsed.weeklyNote, 240);
+  if (!headline) throw new Error("brief_headline_missing");
+  if (!summary) throw new Error("brief_summary_missing");
+  if (!weeklyNote) throw new Error("brief_weekly_note_missing");
+
   const brief: AIRecoveryBrief = {
-    headline: trimText(parsed.headline, 120) || buildFallbackBrief(snapshot).headline,
-    summary: trimText(parsed.summary, 360) || buildFallbackBrief(snapshot).summary,
+    headline,
+    summary,
     tone: normalizeTone(parsed.tone, snapshot.plannerContext.plannerTone),
     topDrivers: asStringArray(parsed.topDrivers, 4, 64),
     sections,
-    weeklyNote: trimText(parsed.weeklyNote, 240) || buildFallbackBrief(snapshot).weeklyNote,
+    weeklyNote,
     candidateActions: candidateActions.slice(0, AI_RECOVERY_MAX_CANDIDATES),
     defaultSelectionIds: [],
     dataGaps: asStringArray(parsed.dataGaps, 8, 80),
@@ -766,23 +776,24 @@ function parseOrderRecord(
   const workHint = trimText(raw.workHint, 160);
   const safetyNote = trimText(raw.safetyNote, 160);
   const candidateId = trimText(raw.candidateId, 140);
-  const fallbackCandidate = selectedCandidates[index] ?? selectedCandidates[0];
-  const resolvedCandidateId = resolveCandidateIdAlias(selectedCandidates, candidateId) ?? fallbackCandidate?.id;
+  const resolvedCandidateId = resolveCandidateIdAlias(selectedCandidates, candidateId);
   const steps = asStringArray(raw.steps, 4, 120).slice(0, 4);
-  if (!title || !whyNow || !resolvedCandidateId) return null;
+  const minutes = Number(raw.minutes);
+  if (!title || !whyNow || !executionWindow || !successCheck || !avoid || !workHint || !safetyNote || !resolvedCandidateId) return null;
+  if (steps.length < 2) return null;
+  if (!Number.isFinite(minutes)) return null;
   return {
     id: buildOrderId(slot, trimText(raw.id, 48) || title, index),
     candidateId: resolvedCandidateId,
     title,
     whyNow,
-    executionWindow: executionWindow || (slot === "wake" ? "기상 후 30분 안" : "퇴근 후 2시간 안"),
-    steps: steps.length >= 2 ? steps : buildFallbackSteps(slot, fallbackCandidate).slice(0, 3),
-    successCheck: successCheck || "체크 가능한 회복 행동을 실제로 마쳤습니다.",
-    avoid: avoid || "과한 자극과 일정 추가는 피합니다.",
-    workHint: workHint || "실행 가능한 범위만 남기고 페이스를 낮춥니다.",
-    minutes: clamp(Math.round(Number(raw.minutes) || fallbackCandidate.minutes || 10), slot === "wake" ? 3 : 5, slot === "wake" ? 15 : 30),
-    safetyNote:
-      safetyNote || "생활 회복용 오더입니다. 증상이 심하거나 업무 안전이 흔들리면 현장 판단과 정식 도움 요청을 우선합니다.",
+    executionWindow,
+    steps,
+    successCheck,
+    avoid,
+    workHint,
+    minutes: clamp(Math.round(minutes), slot === "wake" ? 3 : 5, slot === "wake" ? 15 : 30),
+    safetyNote,
   };
 }
 
@@ -1265,10 +1276,6 @@ async function runOpenAIFlow(args: {
 }) {
   const briefReasoningEffort = resolveReasoningEffort(args.model, "brief");
   const ordersReasoningEffort = resolveReasoningEffort(args.model, "orders");
-  const fallbackBrief = buildFallbackBrief(args.snapshot);
-  const fallbackSelectedIds = getSelectionIds(fallbackBrief, args.selectedCandidateIds);
-  const fallbackSelectedCandidates = fallbackBrief.candidateActions.filter((item) => fallbackSelectedIds.includes(item.id));
-  const fallbackOrders = buildFallbackOrders(args.snapshot.slot, fallbackSelectedCandidates, args.snapshot);
 
   const baseMeta = {
     briefResponseId: null,
@@ -1294,66 +1301,39 @@ async function runOpenAIFlow(args: {
   });
 
   if (!briefResult.ok) {
-    return {
-      status: "fallback",
-      brief: fallbackBrief,
-      orders: fallbackOrders,
-      selectionIds: fallbackSelectedIds,
-      reasoningEffort: briefReasoningEffort,
+    console.error("[AIRecovery] brief_request_failed", {
       model: args.model,
-      openaiMeta: {
-        ...baseMeta,
-        fallbackReason: briefResult.error,
-      },
-    } satisfies OpenAIFlowResult;
+      slot: args.snapshot.slot,
+      dateISO: args.snapshot.dateISO,
+      error: briefResult.error,
+    });
+    throw new Error("ai_recovery_openai_failed");
   }
 
   let brief: AIRecoveryBrief;
   try {
     brief = parseBriefJson(briefResult.text, args.snapshot);
   } catch (error) {
-    return {
-      status: "fallback",
-      brief: fallbackBrief,
-      orders: fallbackOrders,
-      selectionIds: fallbackSelectedIds,
-      reasoningEffort: briefReasoningEffort,
+    console.error("[AIRecovery] brief_parse_failed", {
       model: args.model,
-      openaiMeta: {
-        ...baseMeta,
-        briefResponseId: briefResult.responseId,
-        usage: {
-          brief: briefResult.usage,
-          orders: null,
-          total: combineAIRecoveryUsages(briefResult.usage),
-        },
-        fallbackReason: `brief_parse_failed:${trimText((error as Error)?.message ?? error, 120)}`,
-      },
-    } satisfies OpenAIFlowResult;
+      slot: args.snapshot.slot,
+      dateISO: args.snapshot.dateISO,
+      responseId: briefResult.responseId,
+      error: trimText((error as Error)?.message ?? error, 160),
+    });
+    throw new Error("ai_recovery_openai_failed");
   }
 
   const selectionIds = getSelectionIds(brief, args.selectedCandidateIds);
   const selectedCandidates = brief.candidateActions.filter((item) => selectionIds.includes(item.id));
   if (selectedCandidates.length === 0) {
-    const fallbackSelectionIds = getSelectionIds(fallbackBrief, args.selectedCandidateIds);
-    return {
-      status: "fallback",
-      brief: fallbackBrief,
-      orders: buildFallbackOrders(args.snapshot.slot, fallbackBrief.candidateActions.filter((item) => fallbackSelectionIds.includes(item.id)), args.snapshot),
-      selectionIds: fallbackSelectionIds,
-      reasoningEffort: briefReasoningEffort,
+    console.error("[AIRecovery] brief_selection_empty", {
       model: args.model,
-      openaiMeta: {
-        ...baseMeta,
-        briefResponseId: briefResult.responseId,
-        usage: {
-          brief: briefResult.usage,
-          orders: null,
-          total: combineAIRecoveryUsages(briefResult.usage),
-        },
-        fallbackReason: "brief_selection_empty",
-      },
-    } satisfies OpenAIFlowResult;
+      slot: args.snapshot.slot,
+      dateISO: args.snapshot.dateISO,
+      responseId: briefResult.responseId,
+    });
+    throw new Error("ai_recovery_openai_failed");
   }
 
   const ordersResult = await runAIRecoveryStructuredRequest({
@@ -1368,24 +1348,14 @@ async function runOpenAIFlow(args: {
   });
 
   if (!ordersResult.ok) {
-    return {
-      status: "fallback",
-      brief,
-      orders: buildFallbackOrders(args.snapshot.slot, selectedCandidates, args.snapshot),
-      selectionIds,
-      reasoningEffort: briefReasoningEffort,
+    console.error("[AIRecovery] orders_request_failed", {
       model: args.model,
-      openaiMeta: {
-        ...baseMeta,
-        briefResponseId: briefResult.responseId,
-        usage: {
-          brief: briefResult.usage,
-          orders: null,
-          total: combineAIRecoveryUsages(briefResult.usage),
-        },
-        fallbackReason: `orders:${ordersResult.error}`,
-      },
-    } satisfies OpenAIFlowResult;
+      slot: args.snapshot.slot,
+      dateISO: args.snapshot.dateISO,
+      briefResponseId: briefResult.responseId,
+      error: ordersResult.error,
+    });
+    throw new Error("ai_recovery_openai_failed");
   }
 
   try {
@@ -1410,25 +1380,15 @@ async function runOpenAIFlow(args: {
       },
     } satisfies OpenAIFlowResult;
   } catch (error) {
-    return {
-      status: "fallback",
-      brief,
-      orders: buildFallbackOrders(args.snapshot.slot, selectedCandidates, args.snapshot),
-      selectionIds,
-      reasoningEffort: briefReasoningEffort,
+    console.error("[AIRecovery] orders_parse_failed", {
       model: args.model,
-      openaiMeta: {
-        ...baseMeta,
-        briefResponseId: briefResult.responseId,
-        ordersResponseId: ordersResult.responseId,
-        usage: {
-          brief: briefResult.usage,
-          orders: ordersResult.usage,
-          total: combineAIRecoveryUsages(briefResult.usage, ordersResult.usage),
-        },
-        fallbackReason: `orders_parse_failed:${trimText((error as Error)?.message ?? error, 120)}`,
-      },
-    } satisfies OpenAIFlowResult;
+      slot: args.snapshot.slot,
+      dateISO: args.snapshot.dateISO,
+      briefResponseId: briefResult.responseId,
+      ordersResponseId: ordersResult.responseId,
+      error: trimText((error as Error)?.message ?? error, 160),
+    });
+    throw new Error("ai_recovery_openai_failed");
   }
 }
 
@@ -1478,10 +1438,10 @@ export async function readAIRecoverySessionView(args: {
     payload,
   });
   const { session, completions } = await safeReadRecoverySlot({ userId: args.userId, dateISO, slot });
-  const visibleSession = gate.allowed ? session : null;
+  const visibleSession = gate.allowed && session?.status === "ready" ? session : null;
   const orderIds = visibleSession?.orders?.map((item) => item.id) ?? [];
   const filteredCompletions = filterCompletionIdsForOrders(completions, orderIds);
-  const quota = buildGenerationQuota(subscription?.tier ?? null, visibleSession);
+  const quota = buildGenerationQuota(subscription?.tier ?? null, session);
   return {
     dateISO,
     slot,
@@ -1548,7 +1508,12 @@ export async function generateAIRecoverySession(args: {
   }
 
   const quota = buildGenerationQuota(subscription?.tier ?? null, existingSession);
-  if (!args.force && existingSession && existingSession.inputSignature === snapshot.inputSignature && existingSession.language === snapshot.language) {
+  if (
+    !args.force &&
+    existingSession?.status === "ready" &&
+    existingSession.inputSignature === snapshot.inputSignature &&
+    existingSession.language === snapshot.language
+  ) {
     return {
       gate,
       session: existingSession,
@@ -1583,7 +1548,7 @@ export async function generateAIRecoverySession(args: {
     };
   }
 
-  if (existingSession && !quota.canGenerateSession) {
+  if (existingSession?.status === "ready" && !quota.canGenerateSession) {
     throw new Error("session_generation_limit_reached");
   }
 
@@ -1669,33 +1634,33 @@ export async function regenerateAIRecoveryOrders(args: {
     maxOutputTokens: 2200,
   });
 
-  let orders: AIRecoveryOrder[];
-  let status: AIRecoveryStatus = session.status;
-  let fallbackReason: string | null = session.openaiMeta.fallbackReason ?? null;
-  let ordersResponseId: string | null = null;
-  let ordersUsage = null;
   if (!ordersResult.ok) {
-    orders = buildFallbackOrders(args.slot, selectedCandidates, snapshot);
-    status = "fallback";
-    fallbackReason = `orders:${ordersResult.error}`;
-  } else {
-    try {
-      orders = parseOrdersJson(ordersResult.text, args.slot, selectedCandidates);
-      ordersResponseId = ordersResult.responseId;
-      ordersUsage = ordersResult.usage;
-      fallbackReason = null;
-    } catch (error) {
-      orders = buildFallbackOrders(args.slot, selectedCandidates, snapshot);
-      status = "fallback";
-      fallbackReason = `orders_parse_failed:${trimText((error as Error)?.message ?? error, 120)}`;
-      ordersResponseId = ordersResult.responseId;
-      ordersUsage = ordersResult.usage;
-    }
+    console.error("[AIRecovery] regenerate_orders_request_failed", {
+      model,
+      slot: args.slot,
+      dateISO: args.dateISO,
+      error: ordersResult.error,
+    });
+    throw new Error("ai_recovery_orders_failed");
+  }
+
+  let orders: AIRecoveryOrder[];
+  try {
+    orders = parseOrdersJson(ordersResult.text, args.slot, selectedCandidates);
+  } catch (error) {
+    console.error("[AIRecovery] regenerate_orders_parse_failed", {
+      model,
+      slot: args.slot,
+      dateISO: args.dateISO,
+      responseId: ordersResult.responseId,
+      error: trimText((error as Error)?.message ?? error, 160),
+    });
+    throw new Error("ai_recovery_orders_failed");
   }
 
   const nextSession: AIRecoverySlotPayload = {
     ...session,
-    status,
+    status: "ready",
     selection: {
       selectedCandidateIds: selectedIds,
       updatedAt: new Date().toISOString(),
@@ -1703,17 +1668,17 @@ export async function regenerateAIRecoveryOrders(args: {
     orders,
     generationCounts: {
       ...readGenerationCounts(session),
-      orders: status === "ready" ? readGenerationCounts(session).orders + 1 : readGenerationCounts(session).orders,
+      orders: readGenerationCounts(session).orders + 1,
     },
     openaiMeta: {
       ...session.openaiMeta,
-      ordersResponseId,
+      ordersResponseId: ordersResult.responseId,
       usage: {
         brief: session.openaiMeta.usage.brief,
-        orders: ordersUsage,
-        total: combineAIRecoveryUsages(session.openaiMeta.usage.brief, ordersUsage),
+        orders: ordersResult.usage,
+        total: combineAIRecoveryUsages(session.openaiMeta.usage.brief, ordersResult.usage),
       },
-      fallbackReason,
+      fallbackReason: null,
     },
   };
   await writeAIRecoverySlot({

@@ -245,8 +245,6 @@ function buildCompatStructuredDeveloperPrompt(args: StructuredRequestArgs) {
     "",
     "반드시 JSON 하나만 출력하라.",
     "설명, 머리말, 코드블록, 마크다운을 붙이지 마라.",
-    "아래 JSON schema의 키 구조를 그대로 지켜라.",
-    JSON.stringify(args.schema),
   ].join("\n");
 }
 
@@ -270,24 +268,32 @@ async function postStructuredRequest(
   const timeout = setTimeout(() => controller.abort("upstream_timeout"), resolveUpstreamTimeoutMs());
   const onAbort = () => controller.abort("caller_aborted");
   args.signal.addEventListener("abort", onAbort, { once: true });
+  const useCompatMode = requestConfig.usesCompatEndpoint;
+  const requestUrl = useCompatMode ? requestConfig.requestUrl.replace(/\/responses$/i, "/chat/completions") : requestConfig.requestUrl;
 
   try {
-    const useCompatMode = requestConfig.usesCompatEndpoint;
-    const requestUrl = requestConfig.requestUrl;
     const requestBody = useCompatMode
       ? {
           model: requestConfig.model,
-          input: [
+          messages: [
             {
-              role: "developer",
-              content: [{ type: "input_text", text: buildCompatStructuredDeveloperPrompt(args) }],
+              role: "system",
+              content: buildCompatStructuredDeveloperPrompt(args),
             },
             {
               role: "user",
-              content: [{ type: "input_text", text: args.userPrompt }],
+              content: args.userPrompt,
             },
           ],
-          max_output_tokens: resolveMaxOutputTokens(args.maxOutputTokens ?? 2400),
+          response_format: {
+            type: "json_schema",
+            json_schema: {
+              name: args.schemaName,
+              strict: true,
+              schema: args.schema,
+            },
+          },
+          max_completion_tokens: resolveMaxOutputTokens(args.maxOutputTokens ?? 2400),
         }
       : {
           model: requestConfig.model,
@@ -316,6 +322,12 @@ async function postStructuredRequest(
           },
         };
 
+    console.info("[AIRecovery] openai_request_start", {
+      model: requestConfig.model,
+      url: requestUrl,
+      compat: useCompatMode,
+    });
+
     const response = await fetch(requestUrl, {
       method: "POST",
       headers: requestConfig.headers,
@@ -333,6 +345,11 @@ async function postStructuredRequest(
       };
     }
     if (!response.ok) {
+      console.error("[AIRecovery] openai_request_failed", {
+        model: requestConfig.model,
+        url: requestUrl,
+        status: response.status,
+      });
       return {
         error: `openai_responses_${response.status}_model:${requestConfig.model}_${truncateError(raw || "unknown_error")}`,
       };
@@ -353,6 +370,12 @@ async function postStructuredRequest(
   } catch (error) {
     const name = String((error as any)?.name ?? "");
     const cause = String((error as any)?.message ?? error ?? "");
+    console.error("[AIRecovery] openai_request_exception", {
+      model: requestConfig.model,
+      url: requestUrl,
+      name,
+      cause: truncateError(cause || "fetch_failed"),
+    });
     if (name === "AbortError" || cause.includes("upstream_timeout")) {
       return {
         error: `openai_timeout_upstream_model:${requestConfig.model}`,

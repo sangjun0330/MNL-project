@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
+import { AIRecoveryLoadingOverlay } from "@/components/insights/AIRecoveryLoadingOverlay";
 import { useAIRecoverySession } from "@/components/insights/useAIRecoverySession";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { useRecoveryPlanner } from "@/components/insights/useRecoveryPlanner";
@@ -142,6 +143,7 @@ export function InsightsAIRecoveryDetail() {
   const maxReached = selectedIds.length >= 5;
   const canRegenerateSession = response?.quota.canGenerateSession ?? !currentSession;
   const canRegenerateOrders = response?.quota.canRegenerateOrders ?? !currentSession;
+  const showGeneratingOverlay = Boolean(response?.gate.allowed && (session.generating || (!currentSession && session.loading)));
 
   const toggleCandidate = (candidateId: string) => {
     setSelectedIds((current) => {
@@ -168,6 +170,8 @@ export function InsightsAIRecoveryDetail() {
         </>
       }
     >
+      {showGeneratingOverlay ? <AIRecoveryLoadingOverlay title="AI 맞춤회복 분석중.." detail="최근 기록을 읽고 회복 해설을 만드는 중이에요." /> : null}
+
       <DetailCard className="p-5 sm:p-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
@@ -239,7 +243,6 @@ export function InsightsAIRecoveryDetail() {
           >
             <div className="flex flex-wrap items-center gap-2">
               <ToneChip tone={brief.tone} />
-              {currentSession?.status === "fallback" ? <DetailChip color={DETAIL_ACCENTS.pink}>기본 응답</DetailChip> : null}
               {brief.topDrivers.map((item) => (
                 <DetailChip key={item} color={DETAIL_ACCENTS.navy}>
                   {item}
@@ -318,6 +321,13 @@ export function InsightsAIRecoveryDetail() {
             ) : null}
           </DetailCard>
         </>
+      ) : null}
+
+      {!brief && !session.error && !showGeneratingOverlay && response?.gate.allowed ? (
+        <DetailCard className="p-5 sm:p-6">
+          <div className="text-[17px] font-bold tracking-[-0.02em] text-ios-text">AI 결과를 기다리는 중이에요.</div>
+          <p className="mt-2 text-[13px] leading-6 text-ios-sub">아직 결과가 없으면 다시 만들기를 눌러 주세요.</p>
+        </DetailCard>
       ) : null}
     </InsightDetailShell>
   );
