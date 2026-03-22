@@ -1,5 +1,5 @@
 /* RNest service worker: keep only a tiny shell cache to avoid stale Next chunks after deploy */
-const CACHE = "rnest-cache-v6";
+const CACHE = "rnest-cache-v7";
 const CORE = [
   "/manifest.webmanifest",
   "/favicon.ico",

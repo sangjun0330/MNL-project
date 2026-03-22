@@ -13,7 +13,7 @@ import { useAIRecoveryPlanner } from "@/components/insights/useAIRecoveryPlanner
 import { useRecoveryPlanner } from "@/components/insights/useRecoveryPlanner";
 import { useInsightsData, isInsightsLocked, INSIGHTS_MIN_DAYS, shiftKo } from "@/components/insights/useInsightsData";
 import { DetailChip, DETAIL_ACCENTS, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
-import { buildExplanationModule, buildFallbackModules } from "@/lib/aiRecoveryPlanner";
+import { buildExplanationModule, buildFallbackModules, buildPlannerPayloadFromRecoveryPayload } from "@/lib/aiRecoveryPlanner";
 import { formatKoreanDate } from "@/lib/date";
 import { withReturnTo } from "@/lib/navigation";
 import { buildRecoveryOrderProgressId } from "@/lib/recoveryPhases";
@@ -49,14 +49,17 @@ export function InsightsRecoveryDetail() {
     enabled: !isInsightsLocked(recordedDays) && planner.aiAvailable,
     phase: "after_work",
   });
+  const startDisplayPlanner = aiPlanner.data ?? buildPlannerPayloadFromRecoveryPayload(aiRecovery.data, 3, "overview_recovery_cache");
+  const afterDisplayPlanner =
+    aiPlannerAfter.data ?? buildPlannerPayloadFromRecoveryPayload(aiRecoveryAfter.data, 3, "overview_recovery_cache");
   const [doneMap, setDoneMap] = useState<Record<string, boolean>>({});
-  const plannerDateISO = aiPlannerAfter.data?.dateISO ?? aiPlanner.data?.dateISO ?? end;
+  const plannerDateISO = afterDisplayPlanner?.dateISO ?? startDisplayPlanner?.dateISO ?? end;
 
   useEffect(() => {
     let active = true;
     const activeIds = [
-      ...(aiPlanner.data?.result.orders.items.map((item) => buildRecoveryOrderProgressId("start", item.id)) ?? []),
-      ...(aiPlannerAfter.data?.result.orders.items.map((item) => buildRecoveryOrderProgressId("after_work", item.id)) ?? []),
+      ...(startDisplayPlanner?.result.orders.items.map((item) => buildRecoveryOrderProgressId("start", item.id)) ?? []),
+      ...(afterDisplayPlanner?.result.orders.items.map((item) => buildRecoveryOrderProgressId("after_work", item.id)) ?? []),
     ];
     if (activeIds.length) {
       clearStaleRecoveryOrderDone(plannerDateISO, activeIds);
@@ -82,7 +85,7 @@ export function InsightsRecoveryDetail() {
     return () => {
       active = false;
     };
-  }, [aiPlanner.data, aiPlannerAfter.data, plannerDateISO]);
+  }, [afterDisplayPlanner, plannerDateISO, startDisplayPlanner]);
 
   if (isInsightsLocked(recordedDays)) {
     return (
@@ -111,10 +114,10 @@ export function InsightsRecoveryDetail() {
     timelinePreview: planner.timelinePreview,
   });
 
-  const explanationModule = aiPlannerAfter.data?.result.explanation
-    ? aiPlannerAfter.data.result.explanation
-    : aiPlanner.data?.result.explanation
-      ? aiPlanner.data.result.explanation
+  const explanationModule = afterDisplayPlanner?.result.explanation
+    ? afterDisplayPlanner.result.explanation
+    : startDisplayPlanner?.result.explanation
+      ? startDisplayPlanner.result.explanation
       : aiRecoveryAfter.data
         ? buildExplanationModule(aiRecoveryAfter.data.result, aiRecoveryAfter.data.language)
         : aiRecovery.data
@@ -132,11 +135,11 @@ export function InsightsRecoveryDetail() {
         },
       };
 
-  const ordersModule = aiPlannerAfter.data?.result.orders ?? aiPlanner.data?.result.orders ?? fallbackModules.orders;
+  const ordersModule = afterDisplayPlanner?.result.orders ?? startDisplayPlanner?.result.orders ?? fallbackModules.orders;
 
-  const startOrders = aiPlanner.data?.result.orders.items ?? [];
-  const afterOrders = aiPlannerAfter.data?.result.orders.items ?? [];
-  const plannerReady = Boolean(aiPlanner.data || aiPlannerAfter.data);
+  const startOrders = startDisplayPlanner?.result.orders.items ?? [];
+  const afterOrders = afterDisplayPlanner?.result.orders.items ?? [];
+  const plannerReady = Boolean(startDisplayPlanner || afterDisplayPlanner);
   const activeOrders = plannerReady
     ? [
         ...startOrders.filter((item) => !doneMap[buildRecoveryOrderProgressId("start", item.id)]),

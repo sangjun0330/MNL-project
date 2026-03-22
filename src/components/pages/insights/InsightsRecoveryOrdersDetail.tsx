@@ -12,10 +12,11 @@ import {
   RecoveryStageHeroCard,
 } from "@/components/insights/RecoveryPlannerFlowCards";
 import { RecoveryPlannerUpgradeCard } from "@/components/insights/RecoveryPlannerUpgradeCard";
+import { useAIRecoveryInsights } from "@/components/insights/useAIRecoveryInsights";
 import { useAIRecoveryPlanner } from "@/components/insights/useAIRecoveryPlanner";
 import { useRecoveryPlanner } from "@/components/insights/useRecoveryPlanner";
 import { DetailCard, DetailChip, DETAIL_ACCENTS, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
-import { buildFallbackModules } from "@/lib/aiRecoveryPlanner";
+import { buildFallbackModules, buildPlannerPayloadFromRecoveryPayload } from "@/lib/aiRecoveryPlanner";
 import { formatKoreanDate } from "@/lib/date";
 import {
   clearStaleRecoveryOrderDone,
@@ -49,6 +50,16 @@ export function InsightsRecoveryOrdersDetail() {
   const searchParams = useSearchParams();
   const { end, recordedDays, syncLabel, todayShift, hasTodayShift, state } = useInsightsData();
   const planner = useRecoveryPlanner();
+  const startRecovery = useAIRecoveryInsights({
+    mode: "cache",
+    enabled: planner.aiAvailable && !isInsightsLocked(recordedDays),
+    phase: "start",
+  });
+  const afterRecovery = useAIRecoveryInsights({
+    mode: "cache",
+    enabled: planner.aiAvailable && !isInsightsLocked(recordedDays),
+    phase: "after_work",
+  });
   const startPlanner = useAIRecoveryPlanner({
     mode: "cache",
     enabled: planner.aiAvailable && !isInsightsLocked(recordedDays),
@@ -101,12 +112,16 @@ export function InsightsRecoveryOrdersDetail() {
     timelinePreview: planner.timelinePreview,
   });
 
-  const plannerDateISO = startPlanner.data?.dateISO ?? afterPlanner.data?.dateISO ?? end;
-  const startOrdersModule = startPlanner.data?.result.orders ?? null;
-  const afterOrdersModule = afterPlanner.data?.result.orders ?? null;
+  const startDisplayPlanner =
+    startPlanner.data ?? buildPlannerPayloadFromRecoveryPayload(startRecovery.data, selectedOrderCount, "orders_recovery_cache");
+  const afterDisplayPlanner =
+    afterPlanner.data ?? buildPlannerPayloadFromRecoveryPayload(afterRecovery.data, selectedOrderCount, "orders_recovery_cache");
+  const plannerDateISO = startDisplayPlanner?.dateISO ?? afterDisplayPlanner?.dateISO ?? end;
+  const startOrdersModule = startDisplayPlanner?.result.orders ?? null;
+  const afterOrdersModule = afterDisplayPlanner?.result.orders ?? null;
   const progressIdsKey = [
-    ...(startPlanner.data?.result.orders.items.map((item) => buildRecoveryOrderProgressId("start", item.id)) ?? []),
-    ...(afterPlanner.data?.result.orders.items.map((item) => buildRecoveryOrderProgressId("after_work", item.id)) ?? []),
+    ...(startDisplayPlanner?.result.orders.items.map((item) => buildRecoveryOrderProgressId("start", item.id)) ?? []),
+    ...(afterDisplayPlanner?.result.orders.items.map((item) => buildRecoveryOrderProgressId("after_work", item.id)) ?? []),
   ].join("|");
 
   useEffect(() => {
@@ -228,12 +243,12 @@ export function InsightsRecoveryOrdersDetail() {
               {
                 value: "start",
                 label: "아침",
-                hint: startPlanner.data ? `${activeStartItems.length}개 남음` : "생성 전",
+                hint: startDisplayPlanner ? `${activeStartItems.length}개 남음` : "생성 전",
               },
               {
                 value: "after_work",
                 label: "퇴근 후",
-                hint: afterPlanner.data ? `${activeAfterItems.length}개 남음` : afterWorkReadiness.ready ? "생성 가능" : "기록 대기",
+                hint: afterDisplayPlanner ? `${activeAfterItems.length}개 남음` : afterWorkReadiness.ready ? "생성 가능" : "기록 대기",
               },
             ]}
           />
@@ -297,7 +312,7 @@ export function InsightsRecoveryOrdersDetail() {
         </>
       ) : null}
 
-      {planner.aiAvailable && (startPlanner.loading || afterPlanner.loading) ? (
+      {planner.aiAvailable && (startPlanner.loading || afterPlanner.loading || startRecovery.loading || afterRecovery.loading) ? (
         <DetailCard
           className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
           style={{ background: "linear-gradient(180deg, rgba(250,251,255,0.98) 0%, rgba(255,255,255,0.96) 100%)" }}
@@ -308,7 +323,7 @@ export function InsightsRecoveryOrdersDetail() {
         </DetailCard>
       ) : null}
 
-      {planner.aiAvailable && startPlanner.error ? (
+      {planner.aiAvailable && startPlanner.error && !startDisplayPlanner ? (
         <DetailCard className="p-5 sm:p-6">
           <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">오늘 시작 오더를 불러오지 못했어요.</div>
           <p className="mt-2 text-[14px] leading-6 text-ios-sub">기존 fallback 오더를 대신 보여주지 않고, 다시 생성할 수 있게 유지하고 있어요.</p>
@@ -321,7 +336,7 @@ export function InsightsRecoveryOrdersDetail() {
         </DetailCard>
       ) : null}
 
-      {planner.aiAvailable && !startPlanner.loading && !startPlanner.error && !startPlanner.data ? (
+      {planner.aiAvailable && !startPlanner.loading && !startRecovery.loading && !startDisplayPlanner ? (
         <DetailCard
           className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
           style={{ background: "linear-gradient(180deg, rgba(246,248,252,0.98) 0%, #FFFFFF 82%)" }}
@@ -343,7 +358,7 @@ export function InsightsRecoveryOrdersDetail() {
         </DetailCard>
       ) : null}
 
-      {planner.aiAvailable && startPlanner.data ? (
+      {planner.aiAvailable && startDisplayPlanner ? (
         <>
           {activePhase === "start" ? (
             <>
@@ -396,7 +411,7 @@ export function InsightsRecoveryOrdersDetail() {
                     ))}
                   </div>
                 </DetailCard>
-              ) : !afterPlanner.data ? (
+              ) : !afterDisplayPlanner ? (
                 <DetailCard
                   className="px-5 py-6 sm:px-6"
                   style={{
@@ -409,7 +424,7 @@ export function InsightsRecoveryOrdersDetail() {
                   <div className="mt-4 flex flex-wrap gap-2">
                     <DetailChip color="#315CA8">현재 선택 {selectedOrderCount}개</DetailChip>
                   </div>
-                  {afterPlanner.error ? (
+                  {afterPlanner.error && !afterDisplayPlanner ? (
                     <p className="mt-3 text-[13px] leading-6 text-[#8F2943]">
                       {afterPlanner.error.includes("after_work_inputs_required")
                         ? "오늘 기록이 더 필요해요. 스트레스·카페인·활동·기분·근무 메모 중 2개 이상이 입력되면 열립니다."

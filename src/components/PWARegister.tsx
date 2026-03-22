@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 
-const SW_VERSION = "20260313-1";
+const SW_VERSION = "20260322-2";
 
 /**
  * Minimal service worker registration for PWA.
