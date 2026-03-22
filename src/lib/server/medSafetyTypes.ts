@@ -80,6 +80,65 @@ export const MED_SAFETY_PROJECTION_DIRECTIVE_KEYS = [
 ] as const;
 export type MedSafetyProjectionDirectiveKey = (typeof MED_SAFETY_PROJECTION_DIRECTIVE_KEYS)[number];
 
+export const MED_SAFETY_DEFAULT_CLAUSE_IDS = [
+  "default_role_and_goal",
+  "default_practical_plus_learning",
+  "default_risk_first",
+  "default_action_order",
+  "default_compare_priority",
+  "default_device_troubleshooting",
+  "default_uncertainty_protocol",
+  "default_opening_direct_answer",
+] as const;
+export type MedSafetyDefaultClauseId = (typeof MED_SAFETY_DEFAULT_CLAUSE_IDS)[number];
+
+export const MED_SAFETY_SEMANTIC_COVERAGE_TAGS = [
+  "role_goal",
+  "practical_over_textbook",
+  "practical_plus_learning",
+  "knowledge_meaning_focus",
+  "numeric_action_link",
+  "risk_action_first",
+  "mixed_action_safety_first",
+  "mixed_priority_delta",
+  "action_question_order",
+  "compare_priority",
+  "high_risk_stop_report",
+  "device_troubleshooting_first",
+  "device_tracing_stop_rule",
+  "uncertainty_guard",
+  "ambiguity_specificity_guard",
+  "protocol_caveat",
+  "direct_answer_early",
+  "brevity_and_readability",
+  "non_empty_answer",
+  "no_internal_terms",
+  "locale_natural_language",
+  "vent_oxygenation_split",
+  "paired_problem_split",
+  "bedside_checks",
+  "exception_boundary",
+  "measurement_guard",
+  "reporting_bundle",
+  "notify_payload",
+  "notify_script",
+  "render_card_shape",
+] as const;
+export type MedSafetySemanticCoverageTag = (typeof MED_SAFETY_SEMANTIC_COVERAGE_TAGS)[number];
+
+export const MED_SAFETY_PROMPT_LINE_SECTIONS = [
+  "principles",
+  "question_fit",
+  "priority",
+  "coverage",
+  "boundary",
+  "output",
+] as const;
+export type MedSafetyPromptLineSection = (typeof MED_SAFETY_PROMPT_LINE_SECTIONS)[number];
+
+export const MED_SAFETY_PROMPT_LINE_SOURCES = ["default", "base", "contract", "projection"] as const;
+export type MedSafetyPromptLineSource = (typeof MED_SAFETY_PROMPT_LINE_SOURCES)[number];
+
 export const MED_SAFETY_LENGTH_PLANS = ["tight", "standard", "expanded"] as const;
 export type MedSafetyLengthPlan = (typeof MED_SAFETY_LENGTH_PLANS)[number];
 
@@ -274,6 +333,15 @@ export type MedSafetyPromptBlueprint = {
   lengthPlan: MedSafetyLengthPlan;
   packPlan: MedSafetyPackPlan;
   projection: MedSafetyPromptProjection;
+};
+
+export type MedSafetyPromptLineDescriptor = {
+  text: string;
+  source: MedSafetyPromptLineSource;
+  section: MedSafetyPromptLineSection;
+  coverageTags: MedSafetySemanticCoverageTag[];
+  isQuestionSpecific: boolean;
+  defaultClauseId?: MedSafetyDefaultClauseId;
 };
 
 export type MedSafetyPromptContractSet = {

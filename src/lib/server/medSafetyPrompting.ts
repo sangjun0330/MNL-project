@@ -29,12 +29,15 @@ import {
   type MedSafetyPromptAssembly,
   type MedSafetyPromptBlueprint,
   type MedSafetyPromptContractId,
+  type MedSafetyPromptLineDescriptor,
+  type MedSafetyPromptLineSection,
   type MedSafetyPromptProfile,
   type MedSafetyRepairIssueFamily,
   type MedSafetyRisk,
   type MedSafetyRouteDecision,
   type MedSafetyRouterRefinement,
   type MedSafetyRuntimeMode,
+  type MedSafetySemanticCoverageTag,
   type MedSafetyUrgencyLevel,
 } from "@/lib/server/medSafetyTypes";
 
@@ -67,16 +70,8 @@ type PromptBudgetFit = {
   lines: string[];
 };
 
-type PromptVisualSectionId =
-  | "role"
-  | "question_fit"
-  | "priority"
-  | "coverage"
-  | "boundary"
-  | "output";
-
 type PromptVisualSection = {
-  id: PromptVisualSectionId;
+  id: MedSafetyPromptLineSection;
   title: string;
   lines: string[];
 };
@@ -444,51 +439,448 @@ function buildCompactRouteSummary(decision: MedSafetyInternalDecision) {
   ].join(" ");
 }
 
-function buildBaseSpineLines(locale: "ko" | "en") {
+function buildPromptLineDescriptor(args: MedSafetyPromptLineDescriptor): MedSafetyPromptLineDescriptor {
+  return {
+    ...args,
+    text: normalizeText(args.text),
+    coverageTags: uniqueStrings(args.coverageTags),
+  };
+}
+
+function buildDefaultClauseDescriptors(locale: "ko" | "en"): MedSafetyPromptLineDescriptor[] {
   if (locale === "en") {
     return [
-      "You write nurse-facing clinical answer cards that are safe, compressed, and directly usable at the bedside.",
-      "If a detail is uncertain, do not invent settings, doses, compatibility, or device-specific numbers.",
-      "You must return a non-empty final answer to the user's actual question. Never stop at planning only.",
-      "Use natural bedside clinical English.",
+      buildPromptLineDescriptor({
+        text: "You are a clinical AI for nurses. The top priority of every answer is to tell the nurse, quickly and clearly, what this situation means and what to do next.",
+        source: "default",
+        section: "principles",
+        coverageTags: ["role_goal"],
+        isQuestionSpecific: false,
+        defaultClauseId: "default_role_and_goal",
+      }),
+      buildPromptLineDescriptor({
+        text: "Favor information that can be used immediately in clinical practice over textbook explanation. Write so the key distinction and decision point are easy to remember, combining practical guidance with learning value.",
+        source: "default",
+        section: "principles",
+        coverageTags: ["practical_over_textbook", "practical_plus_learning"],
+        isQuestionSpecific: false,
+        defaultClauseId: "default_practical_plus_learning",
+      }),
+      buildPromptLineDescriptor({
+        text: "In risky situations, put action and escalation before explanation. If the question is mixed, put action and safety first and background explanation after.",
+        source: "default",
+        section: "principles",
+        coverageTags: ["risk_action_first", "mixed_action_safety_first"],
+        isQuestionSpecific: false,
+        defaultClauseId: "default_risk_first",
+      }),
+      buildPromptLineDescriptor({
+        text: "For action or response questions, organize the answer around the key judgment, what to do now, what to check, common cause candidates, and when to stop or report.",
+        source: "default",
+        section: "principles",
+        coverageTags: ["action_question_order"],
+        isQuestionSpecific: false,
+        defaultClauseId: "default_action_order",
+      }),
+      buildPromptLineDescriptor({
+        text: "For comparison questions, show the practical distinction that clinicians check first.",
+        source: "default",
+        section: "principles",
+        coverageTags: ["compare_priority"],
+        isQuestionSpecific: false,
+        defaultClauseId: "default_compare_priority",
+      }),
+      buildPromptLineDescriptor({
+        text: "For equipment or device questions, prioritize troubleshooting and immediate corrective action over mechanism.",
+        source: "default",
+        section: "principles",
+        coverageTags: ["device_troubleshooting_first"],
+        isQuestionSpecific: false,
+        defaultClauseId: "default_device_troubleshooting",
+      }),
+      buildPromptLineDescriptor({
+        text: "Do not guess when details are uncertain. The final authority is local protocol, clinician orders, pharmacy guidance, and the manufacturer IFU.",
+        source: "default",
+        section: "principles",
+        coverageTags: ["uncertainty_guard", "protocol_caveat"],
+        isQuestionSpecific: false,
+        defaultClauseId: "default_uncertainty_protocol",
+      }),
+      buildPromptLineDescriptor({
+        text: "Give the core answer within the first 1-2 sentences, and keep the wording short, readable, and non-repetitive.",
+        source: "default",
+        section: "principles",
+        coverageTags: ["direct_answer_early", "brevity_and_readability"],
+        isQuestionSpecific: false,
+        defaultClauseId: "default_opening_direct_answer",
+      }),
     ];
   }
+
   return [
-    "너는 간호사가 bedside에서 바로 쓰는 임상 판단 카드를 작성한다.",
-    "확실하지 않으면 세팅값, 용량, 호환성, 기구 고유 수치를 지어내지 않는다.",
-    "반드시 사용자의 실제 질문에 대한 비어 있지 않은 최종 답변을 작성한다. 계획만 세우고 멈추지 않는다.",
-    "최종 답변은 자연스러운 한국어 존댓말로 쓴다.",
+    buildPromptLineDescriptor({
+      text: "너는 간호사 전용 임상 AI다. 답변의 최우선 목표는 간호사가 지금 이 상황에서 무엇을 이해해야 하고 무엇을 해야 하는지 빠르고 명확하게 알려주는 것이다.",
+      source: "default",
+      section: "principles",
+      coverageTags: ["role_goal"],
+      isQuestionSpecific: false,
+      defaultClauseId: "default_role_and_goal",
+    }),
+    buildPromptLineDescriptor({
+      text: "답변은 교과서식 설명보다 임상 실무에서 바로 쓸 수 있는 정보 중심으로 작성한다. 동시에 핵심 차이와 판단 포인트가 기억되도록, 실무형이면서 학습형으로 쓴다.",
+      source: "default",
+      section: "principles",
+      coverageTags: ["practical_over_textbook", "practical_plus_learning"],
+      isQuestionSpecific: false,
+      defaultClauseId: "default_practical_plus_learning",
+    }),
+    buildPromptLineDescriptor({
+      text: "위험 상황에서는 설명보다 행동과 escalation을 먼저 제시한다. 질문이 혼합형이면 행동과 안전을 먼저, 배경 설명은 그 다음에 둔다.",
+      source: "default",
+      section: "principles",
+      coverageTags: ["risk_action_first", "mixed_action_safety_first"],
+      isQuestionSpecific: false,
+      defaultClauseId: "default_risk_first",
+    }),
+    buildPromptLineDescriptor({
+      text: "행동/대응 질문은 가능하면 핵심 판단, 지금 할 일, 확인 포인트, 흔한 원인 후보, 중단/보고 기준 순으로 정리한다.",
+      source: "default",
+      section: "principles",
+      coverageTags: ["action_question_order"],
+      isQuestionSpecific: false,
+      defaultClauseId: "default_action_order",
+    }),
+    buildPromptLineDescriptor({
+      text: "비교 질문은 실무적으로 가장 빨리 보는 구분 포인트를 먼저 제시한다.",
+      source: "default",
+      section: "principles",
+      coverageTags: ["compare_priority"],
+      isQuestionSpecific: false,
+      defaultClauseId: "default_compare_priority",
+    }),
+    buildPromptLineDescriptor({
+      text: "장비/기구 질문은 원리보다 트러블슈팅과 바로 할 조치를 우선한다.",
+      source: "default",
+      section: "principles",
+      coverageTags: ["device_troubleshooting_first"],
+      isQuestionSpecific: false,
+      defaultClauseId: "default_device_troubleshooting",
+    }),
+    buildPromptLineDescriptor({
+      text: "불확실한 내용은 추정하지 않는다. 최종 기준은 기관 프로토콜, 의사 지시, 약제부, 제조사 IFU다.",
+      source: "default",
+      section: "principles",
+      coverageTags: ["uncertainty_guard", "protocol_caveat"],
+      isQuestionSpecific: false,
+      defaultClauseId: "default_uncertainty_protocol",
+    }),
+    buildPromptLineDescriptor({
+      text: "첫 1~2문장 안에 핵심 답을 주고, 반복 없이 짧고 읽기 쉽게 쓴다.",
+      source: "default",
+      section: "principles",
+      coverageTags: ["direct_answer_early", "brevity_and_readability"],
+      isQuestionSpecific: false,
+      defaultClauseId: "default_opening_direct_answer",
+    }),
   ];
 }
 
-function buildSectionTitle(id: PromptVisualSectionId, locale: "ko" | "en") {
-  const ko: Record<PromptVisualSectionId, string> = {
-    role: "[역할]",
+function buildBaseSpineDescriptors(locale: "ko" | "en"): MedSafetyPromptLineDescriptor[] {
+  if (locale === "en") {
+    return [
+      buildPromptLineDescriptor({
+        text: "You must return a non-empty final answer to the user's actual question. Never stop at planning only.",
+        source: "base",
+        section: "output",
+        coverageTags: ["non_empty_answer"],
+        isQuestionSpecific: false,
+      }),
+      buildPromptLineDescriptor({
+        text: "Do not expose route, pack, artifact, or any internal planning language.",
+        source: "base",
+        section: "output",
+        coverageTags: ["no_internal_terms"],
+        isQuestionSpecific: false,
+      }),
+      buildPromptLineDescriptor({
+        text: "Use natural bedside clinical English.",
+        source: "base",
+        section: "output",
+        coverageTags: ["locale_natural_language"],
+        isQuestionSpecific: false,
+      }),
+    ];
+  }
+
+  return [
+    buildPromptLineDescriptor({
+      text: "반드시 사용자의 실제 질문에 대한 비어 있지 않은 최종 답변을 작성한다. 계획만 세우고 멈추지 않는다.",
+      source: "base",
+      section: "output",
+      coverageTags: ["non_empty_answer"],
+      isQuestionSpecific: false,
+    }),
+    buildPromptLineDescriptor({
+      text: "route, pack, artifact 같은 내부 설계 용어는 출력하지 않는다.",
+      source: "base",
+      section: "output",
+      coverageTags: ["no_internal_terms"],
+      isQuestionSpecific: false,
+    }),
+    buildPromptLineDescriptor({
+      text: "최종 답변은 자연스러운 한국어 존댓말로 쓴다.",
+      source: "base",
+      section: "output",
+      coverageTags: ["locale_natural_language"],
+      isQuestionSpecific: false,
+    }),
+  ];
+}
+
+function buildBaseSpineLines(locale: "ko" | "en") {
+  return buildBaseSpineDescriptors(locale).map((descriptor) => descriptor.text);
+}
+
+function buildDefaultPrincipleLines(locale: "ko" | "en") {
+  return buildDefaultClauseDescriptors(locale).map((descriptor) => descriptor.text);
+}
+
+function buildSectionTitle(id: MedSafetyPromptLineSection, locale: "ko" | "en") {
+  const ko: Record<MedSafetyPromptLineSection, string> = {
+    principles: "[기본 원칙]",
     question_fit: "[질문 맞춤 초점]",
     priority: "[우선순위]",
     coverage: "[확인 범위]",
     boundary: "[예외·보고·안전]",
     output: "[출력 형식]",
   };
-  const en: Record<PromptVisualSectionId, string> = {
-    role: "[ROLE]",
-    question_fit: "[QUESTION_FIT]",
+  const en: Record<MedSafetyPromptLineSection, string> = {
+    principles: "[CORE PRINCIPLES]",
+    question_fit: "[QUESTION FIT]",
     priority: "[PRIORITY]",
     coverage: "[COVERAGE]",
-    boundary: "[BOUNDARY_AND_SAFETY]",
-    output: "[OUTPUT_SHAPE]",
+    boundary: "[BOUNDARY AND SAFETY]",
+    output: "[OUTPUT SHAPE]",
   };
   return locale === "en" ? en[id] : ko[id];
 }
 
-function buildMacroContractLines(contractIds: MedSafetyPromptContractId[], locale: "ko" | "en") {
+function buildContractDescriptor(id: MedSafetyPromptContractId, locale: "ko" | "en"): MedSafetyPromptLineDescriptor | null {
+  const ko: Partial<Record<MedSafetyPromptContractId, MedSafetyPromptLineDescriptor>> = {
+    intent_knowledge: buildPromptLineDescriptor({
+      text: "이번 질문에서는 정의 나열보다 임상 의미와 간호 판단 포인트를 먼저 남긴다.",
+      source: "contract",
+      section: "question_fit",
+      coverageTags: ["practical_over_textbook", "knowledge_meaning_focus"],
+      isQuestionSpecific: true,
+    }),
+    intent_action: buildPromptLineDescriptor({
+      text: "이번 질문에서 실제 행동 순서를 바꾸는 확인만 남기고, 배경 설명은 그 순서를 바꾸는 범위만 둔다.",
+      source: "contract",
+      section: "question_fit",
+      coverageTags: ["action_question_order", "mixed_priority_delta"],
+      isQuestionSpecific: true,
+    }),
+    intent_compare: buildPromptLineDescriptor({
+      text: "이번 비교에서는 가장 빨리 선택을 가르는 구분 포인트부터 보여준다.",
+      source: "contract",
+      section: "question_fit",
+      coverageTags: ["compare_priority"],
+      isQuestionSpecific: true,
+    }),
+    intent_numeric: buildPromptLineDescriptor({
+      text: "숫자 자체 설명보다 숫자가 지금 의미하는 판단과 다음 행동 연결만 남긴다.",
+      source: "contract",
+      section: "question_fit",
+      coverageTags: ["numeric_action_link"],
+      isQuestionSpecific: true,
+    }),
+    risk_high_modifier: buildPromptLineDescriptor({
+      text: "이번 질문에서는 즉시 중단·보고 기준과 escalation 신호를 흐리지 않는다.",
+      source: "contract",
+      section: "priority",
+      coverageTags: ["high_risk_stop_report"],
+      isQuestionSpecific: true,
+    }),
+    risk_mixed_modifier: buildPromptLineDescriptor({
+      text: "행동과 설명이 섞인 질문이므로 배경은 선택을 바꾸는 포인트만 남긴다.",
+      source: "contract",
+      section: "priority",
+      coverageTags: ["mixed_action_safety_first", "mixed_priority_delta"],
+      isQuestionSpecific: true,
+    }),
+    communication_modifier: buildPromptLineDescriptor({
+      text: "보고가 필요하면 mode·setting, 환자 상태, 핵심 수치, 이미 확인한 항목을 한 묶음으로 정리한다.",
+      source: "contract",
+      section: "boundary",
+      coverageTags: ["reporting_bundle", "notify_payload"],
+      isQuestionSpecific: true,
+    }),
+    exception_modifier: buildPromptLineDescriptor({
+      text: "주 추천이 언제 깨지는지와 대안을 열게 만드는 조건을 짧게 분리한다.",
+      source: "contract",
+      section: "boundary",
+      coverageTags: ["exception_boundary"],
+      isQuestionSpecific: true,
+    }),
+    ambiguity_modifier: buildPromptLineDescriptor({
+      text: "대상이 완전히 특정되지 않으면 세팅, 용량, 호환성, 기구 고유값을 단정하지 않는다.",
+      source: "contract",
+      section: "boundary",
+      coverageTags: ["uncertainty_guard", "ambiguity_specificity_guard"],
+      isQuestionSpecific: true,
+    }),
+    domain_vent_abga: buildPromptLineDescriptor({
+      text: "이번 질문에서는 환기 문제와 산소화 문제를 섞지 말고 분리해 각 레버를 설명한다.",
+      source: "contract",
+      section: "question_fit",
+      coverageTags: ["vent_oxygenation_split", "paired_problem_split"],
+      isQuestionSpecific: true,
+    }),
+    domain_med_device: buildPromptLineDescriptor({
+      text: "이번 질문에서는 원리 설명을 늘리기보다 line tracing, stop rule, patient response, alarm context처럼 바로 조치를 바꾸는 신호를 먼저 둔다.",
+      source: "contract",
+      section: "question_fit",
+      coverageTags: ["device_troubleshooting_first", "device_tracing_stop_rule"],
+      isQuestionSpecific: true,
+    }),
+    domain_reporting: buildPromptLineDescriptor({
+      text: "이번 질문에서는 왜 보고가 필요한지보다, 다음 의사결정에 필요한 최소 데이터 묶음을 먼저 보여준다.",
+      source: "contract",
+      section: "question_fit",
+      coverageTags: ["reporting_bundle"],
+      isQuestionSpecific: true,
+    }),
+    output_safety_guard: buildPromptLineDescriptor({
+      text: "기관·제조사 고유 기준은 안전을 지키는 데 필요할 때만 짧게 남긴다.",
+      source: "contract",
+      section: "boundary",
+      coverageTags: ["protocol_caveat"],
+      isQuestionSpecific: false,
+    }),
+    output_no_meta_guard: buildPromptLineDescriptor({
+      text: "route, pack, artifact 같은 내부 설계 용어는 절대 출력하지 않는다.",
+      source: "contract",
+      section: "output",
+      coverageTags: ["no_internal_terms"],
+      isQuestionSpecific: false,
+    }),
+  };
+
+  const en: Partial<Record<MedSafetyPromptContractId, MedSafetyPromptLineDescriptor>> = {
+    intent_knowledge: buildPromptLineDescriptor({
+      text: "For this question, keep the clinical meaning and nursing decision point ahead of definition-style explanation.",
+      source: "contract",
+      section: "question_fit",
+      coverageTags: ["practical_over_textbook", "knowledge_meaning_focus"],
+      isQuestionSpecific: true,
+    }),
+    intent_action: buildPromptLineDescriptor({
+      text: "For this question, keep only the checks that would change the action order, and keep background explanation only where it changes that order.",
+      source: "contract",
+      section: "question_fit",
+      coverageTags: ["action_question_order", "mixed_priority_delta"],
+      isQuestionSpecific: true,
+    }),
+    intent_compare: buildPromptLineDescriptor({
+      text: "For this comparison, start with the practical split that changes the choice fastest.",
+      source: "contract",
+      section: "question_fit",
+      coverageTags: ["compare_priority"],
+      isQuestionSpecific: true,
+    }),
+    intent_numeric: buildPromptLineDescriptor({
+      text: "Keep the link between the number, its meaning, and the next action rather than expanding numeric teaching.",
+      source: "contract",
+      section: "question_fit",
+      coverageTags: ["numeric_action_link"],
+      isQuestionSpecific: true,
+    }),
+    risk_high_modifier: buildPromptLineDescriptor({
+      text: "Keep immediate stop-report boundaries and escalation triggers explicit for this question.",
+      source: "contract",
+      section: "priority",
+      coverageTags: ["high_risk_stop_report"],
+      isQuestionSpecific: true,
+    }),
+    risk_mixed_modifier: buildPromptLineDescriptor({
+      text: "Because this question mixes action and explanation, keep background only where it changes the next choice.",
+      source: "contract",
+      section: "priority",
+      coverageTags: ["mixed_action_safety_first", "mixed_priority_delta"],
+      isQuestionSpecific: true,
+    }),
+    communication_modifier: buildPromptLineDescriptor({
+      text: "If reporting is needed, group mode or setting, patient status, key numbers, and what is already checked into one bundle.",
+      source: "contract",
+      section: "boundary",
+      coverageTags: ["reporting_bundle", "notify_payload"],
+      isQuestionSpecific: true,
+    }),
+    exception_modifier: buildPromptLineDescriptor({
+      text: "Separate briefly when the main recommendation stops being safe and what opens the alternative path.",
+      source: "contract",
+      section: "boundary",
+      coverageTags: ["exception_boundary"],
+      isQuestionSpecific: true,
+    }),
+    ambiguity_modifier: buildPromptLineDescriptor({
+      text: "If the target is not fully identified, do not lock in settings, doses, compatibility, or device-specific values.",
+      source: "contract",
+      section: "boundary",
+      coverageTags: ["uncertainty_guard", "ambiguity_specificity_guard"],
+      isQuestionSpecific: true,
+    }),
+    domain_vent_abga: buildPromptLineDescriptor({
+      text: "For this question, separate ventilation from oxygenation so each lever stays tied to its own purpose.",
+      source: "contract",
+      section: "question_fit",
+      coverageTags: ["vent_oxygenation_split", "paired_problem_split"],
+      isQuestionSpecific: true,
+    }),
+    domain_med_device: buildPromptLineDescriptor({
+      text: "For this question, prioritize line tracing, stop rules, patient response, and alarm context over mechanism explanation.",
+      source: "contract",
+      section: "question_fit",
+      coverageTags: ["device_troubleshooting_first", "device_tracing_stop_rule"],
+      isQuestionSpecific: true,
+    }),
+    domain_reporting: buildPromptLineDescriptor({
+      text: "For this question, show the minimum data bundle that helps the next clinical decision rather than explaining why reporting matters.",
+      source: "contract",
+      section: "question_fit",
+      coverageTags: ["reporting_bundle"],
+      isQuestionSpecific: true,
+    }),
+    output_safety_guard: buildPromptLineDescriptor({
+      text: "Mention site-specific or manufacturer-specific thresholds only when they materially protect safety.",
+      source: "contract",
+      section: "boundary",
+      coverageTags: ["protocol_caveat"],
+      isQuestionSpecific: false,
+    }),
+    output_no_meta_guard: buildPromptLineDescriptor({
+      text: "Do not expose route, pack, artifact, or any internal planning language.",
+      source: "contract",
+      section: "output",
+      coverageTags: ["no_internal_terms"],
+      isQuestionSpecific: false,
+    }),
+  };
+
+  const table = locale === "en" ? en : ko;
+  return table[id] ?? null;
+}
+
+function buildMacroContractDescriptors(contractIds: MedSafetyPromptContractId[], locale: "ko" | "en") {
   const selected = new Set(contractIds);
-  const lines: string[] = [];
+  const descriptors: MedSafetyPromptLineDescriptor[] = [];
 
   const pushFirst = (ids: MedSafetyPromptContractId[]) => {
     for (const id of ids) {
       if (!selected.has(id)) continue;
-      lines.push(buildContractText(id, locale));
+      const descriptor = buildContractDescriptor(id, locale);
+      if (descriptor) descriptors.push(descriptor);
       return;
     }
   };
@@ -496,29 +888,177 @@ function buildMacroContractLines(contractIds: MedSafetyPromptContractId[], local
   pushFirst(["intent_action", "intent_compare", "intent_numeric", "intent_knowledge"]);
   pushFirst(["risk_high_modifier", "risk_mixed_modifier"]);
   pushFirst(["domain_vent_abga", "domain_med_device", "domain_reporting"]);
-  pushFirst(["communication_modifier", "exception_modifier", "ambiguity_modifier"]);
+  pushFirst(["communication_modifier", "exception_modifier", "ambiguity_modifier", "output_safety_guard", "output_no_meta_guard"]);
 
-  const deduped: string[] = [];
+  const deduped: MedSafetyPromptLineDescriptor[] = [];
   const seen = new Set<string>();
-  for (const line of lines) {
-    const key = normalizePromptLineForDedupe(line);
+  for (const descriptor of descriptors) {
+    const key = normalizePromptLineForDedupe(descriptor.text);
     if (!key || seen.has(key)) continue;
     seen.add(key);
-    deduped.push(line);
+    deduped.push(descriptor);
   }
   return deduped.slice(0, 4);
 }
 
-function pickProjectionLines(
+function buildProjectionDescriptors(
   projection: MedSafetyPromptBlueprint["projection"],
   keys: MedSafetyPromptBlueprint["projection"]["activeDirectiveKeys"]
 ) {
-  const picked: Partial<Record<keyof MedSafetyPromptBlueprint["projection"], string>> = {};
+  const descriptors: MedSafetyPromptLineDescriptor[] = [];
   for (const key of keys) {
     const value = projection[key];
-    if (typeof value === "string" && value.trim()) picked[key] = value.trim();
+    if (typeof value !== "string" || !value.trim()) continue;
+    const text = value.trim();
+    if (key === "openingDirective") {
+      descriptors.push(
+        buildPromptLineDescriptor({
+          text,
+          source: "projection",
+          section: "priority",
+          coverageTags: ["direct_answer_early", "brevity_and_readability"],
+          isQuestionSpecific: false,
+        })
+      );
+      continue;
+    }
+    if (key === "priorityDirective") {
+      descriptors.push(
+        buildPromptLineDescriptor({
+          text,
+          source: "projection",
+          section: "priority",
+          coverageTags: ["risk_action_first", "mixed_action_safety_first"],
+          isQuestionSpecific: false,
+        })
+      );
+      continue;
+    }
+    if (key === "coverageDirective") {
+      descriptors.push(
+        buildPromptLineDescriptor({
+          text,
+          source: "projection",
+          section: "coverage",
+          coverageTags:
+            /환기 문제와 산소화 문제|ventilation from oxygenation|linked problems|얽혀 있는 두 문제/i.test(text)
+              ? ["bedside_checks", "vent_oxygenation_split", "paired_problem_split"]
+              : ["bedside_checks"],
+          isQuestionSpecific: true,
+        })
+      );
+      continue;
+    }
+    if (key === "exceptionDirective") {
+      descriptors.push(
+        buildPromptLineDescriptor({
+          text,
+          source: "projection",
+          section: "boundary",
+          coverageTags: ["exception_boundary", "measurement_guard"],
+          isQuestionSpecific: true,
+        })
+      );
+      continue;
+    }
+    if (key === "communicationDirective") {
+      descriptors.push(
+        buildPromptLineDescriptor({
+          text,
+          source: "projection",
+          section: "boundary",
+          coverageTags: /2-3 sentence|2~3문장/i.test(text) ? ["notify_payload", "notify_script"] : ["notify_payload"],
+          isQuestionSpecific: true,
+        })
+      );
+      continue;
+    }
+    if (key === "safetyDirective") {
+      descriptors.push(
+        buildPromptLineDescriptor({
+          text,
+          source: "projection",
+          section: "boundary",
+          coverageTags: ["uncertainty_guard", "protocol_caveat"],
+          isQuestionSpecific: false,
+        })
+      );
+      continue;
+    }
+    if (key === "compressionDirective") {
+      descriptors.push(
+        buildPromptLineDescriptor({
+          text,
+          source: "projection",
+          section: "output",
+          coverageTags: ["brevity_and_readability"],
+          isQuestionSpecific: false,
+        })
+      );
+      continue;
+    }
+    if (key === "renderDirective") {
+      descriptors.push(
+        buildPromptLineDescriptor({
+          text,
+          source: "projection",
+          section: "output",
+          coverageTags: ["render_card_shape", "no_internal_terms"],
+          isQuestionSpecific: false,
+        })
+      );
+    }
   }
-  return picked;
+  return descriptors;
+}
+
+function applySemanticOverlapSuppression(
+  defaultDescriptors: MedSafetyPromptLineDescriptor[],
+  dynamicDescriptors: MedSafetyPromptLineDescriptor[]
+) {
+  const kept: MedSafetyPromptLineDescriptor[] = [];
+  const defaultNormalizeds = defaultDescriptors.map((descriptor) => normalizePromptLineForDedupe(descriptor.text)).filter(Boolean);
+  const defaultTagSet = new Set<MedSafetySemanticCoverageTag>(defaultDescriptors.flatMap((descriptor) => descriptor.coverageTags));
+  const seenNormalized = new Set(defaultNormalizeds);
+
+  for (const descriptor of dynamicDescriptors) {
+    const normalized = normalizePromptLineForDedupe(descriptor.text);
+    if (!normalized) continue;
+
+    const uniqueTags = descriptor.coverageTags.filter((tag) => !defaultTagSet.has(tag));
+    const overlapsDefaultTag = descriptor.coverageTags.some((tag) => defaultTagSet.has(tag));
+    const nearDefault = defaultNormalizeds.some((base) => base.includes(normalized) || normalized.includes(base));
+
+    if (seenNormalized.has(normalized)) continue;
+    if (overlapsDefaultTag && uniqueTags.length === 0) continue;
+    if (!descriptor.isQuestionSpecific && nearDefault) continue;
+
+    const existingIndex = kept.findIndex((item) => normalizePromptLineForDedupe(item.text) === normalized);
+    if (existingIndex >= 0) {
+      if (!kept[existingIndex]!.isQuestionSpecific && descriptor.isQuestionSpecific) kept[existingIndex] = descriptor;
+      continue;
+    }
+
+    kept.push(descriptor);
+    seenNormalized.add(normalized);
+  }
+
+  return kept;
+}
+
+function buildPromptLineDescriptors(args: {
+  locale: "ko" | "en";
+  contractIds: MedSafetyPromptContractId[];
+  blueprint: MedSafetyPromptBlueprint;
+  directiveKeys: MedSafetyPromptBlueprint["projection"]["activeDirectiveKeys"];
+}) {
+  const defaultDescriptors = buildDefaultClauseDescriptors(args.locale);
+  const dynamicDescriptors = [
+    ...buildMacroContractDescriptors(args.contractIds, args.locale),
+    ...buildProjectionDescriptors(args.blueprint.projection, args.directiveKeys),
+    ...buildBaseSpineDescriptors(args.locale),
+  ];
+  return [...defaultDescriptors, ...applySemanticOverlapSuppression(defaultDescriptors, dynamicDescriptors)];
 }
 
 function buildPromptSections(args: {
@@ -527,66 +1067,34 @@ function buildPromptSections(args: {
   blueprint: MedSafetyPromptBlueprint;
   directiveKeys: MedSafetyPromptBlueprint["projection"]["activeDirectiveKeys"];
 }) {
-  const sections: PromptVisualSection[] = [];
-  const roleLines = buildBaseSpineLines(args.locale);
-  const macroLines = buildMacroContractLines(args.contractIds, args.locale);
-  const projection = pickProjectionLines(args.blueprint.projection, args.directiveKeys);
+  const descriptors = buildPromptLineDescriptors(args);
+  const orderedSections: MedSafetyPromptLineSection[] = ["principles", "question_fit", "priority", "coverage", "boundary", "output"];
 
-  sections.push({
-    id: "role",
-    title: buildSectionTitle("role", args.locale),
-    lines: roleLines,
-  });
+  return orderedSections
+    .map((sectionId) => {
+      const sectionLines = descriptors
+        .filter((descriptor) => descriptor.section === sectionId)
+        .map((descriptor) => descriptor.text.trim());
+      return {
+        id: sectionId,
+        title: buildSectionTitle(sectionId, args.locale),
+        lines: sectionLines,
+      } satisfies PromptVisualSection;
+    })
+    .filter((section) => section.lines.length);
+}
 
-  if (macroLines.length) {
-    sections.push({
-      id: "question_fit",
-      title: buildSectionTitle("question_fit", args.locale),
-      lines: macroLines,
-    });
-  }
-
-  const priorityLines = [projection.openingDirective, projection.priorityDirective].filter((value): value is string => Boolean(value));
-  if (priorityLines.length) {
-    sections.push({
-      id: "priority",
-      title: buildSectionTitle("priority", args.locale),
-      lines: priorityLines,
-    });
-  }
-
-  const coverageLines = [projection.coverageDirective].filter((value): value is string => Boolean(value));
-  if (coverageLines.length) {
-    sections.push({
-      id: "coverage",
-      title: buildSectionTitle("coverage", args.locale),
-      lines: coverageLines,
-    });
-  }
-
-  const boundaryLines = [
-    projection.exceptionDirective,
-    projection.communicationDirective,
-    projection.safetyDirective,
-  ].filter((value): value is string => Boolean(value));
-  if (boundaryLines.length) {
-    sections.push({
-      id: "boundary",
-      title: buildSectionTitle("boundary", args.locale),
-      lines: boundaryLines,
-    });
-  }
-
-  const outputLines = [projection.compressionDirective, projection.renderDirective].filter((value): value is string => Boolean(value));
-  if (outputLines.length) {
-    sections.push({
-      id: "output",
-      title: buildSectionTitle("output", args.locale),
-      lines: outputLines,
-    });
-  }
-
-  return sections;
+function buildFixedBasePrompt(locale: "ko" | "en") {
+  return formatPromptSections(
+    ["principles", "output"].map((sectionId) => ({
+      id: sectionId as MedSafetyPromptLineSection,
+      title: buildSectionTitle(sectionId as MedSafetyPromptLineSection, locale),
+      lines:
+        sectionId === "principles"
+          ? buildDefaultPrincipleLines(locale)
+          : buildBaseSpineLines(locale),
+    }))
+  ).join("\n");
 }
 
 function formatPromptSections(sections: PromptVisualSection[]) {
@@ -609,51 +1117,6 @@ function formatPromptSections(sections: PromptVisualSection[]) {
 
   while (out.length && out[out.length - 1] === "") out.pop();
   return out;
-}
-
-function buildContractText(id: MedSafetyPromptContractId, locale: "ko" | "en") {
-  const ko: Record<MedSafetyPromptContractId, string> = {
-    base_role_goal: "실무 판단과 행동에 바로 쓰이는 답을 만든다.",
-    base_decision_priority: "배경 설명보다 결론과 다음 행동을 앞에 둔다.",
-    base_safety_certainty: "안전에 영향을 주는 세부값은 확인된 범위에서만 말한다.",
-    base_render_discipline: "제목 없는 결론 뒤에 짧은 카드들을 두고, 각 카드는 리드 1문장과 2~4개 bullet만 쓴다.",
-    intent_knowledge: "정의 나열보다 임상 의미와 간호 판단 포인트만 남긴다.",
-    intent_action: "행동 질문이므로 지금 할 조치와 확인 순서를 배경 설명보다 먼저 둔다.",
-    intent_compare: "선택 기준과 차이를 먼저 보여주고, 실무에서 먼저 보는 구분축만 남긴다.",
-    intent_numeric: "수치는 해석과 다음 행동을 연결하고, 숫자 자체의 장황한 풀이를 줄인다.",
-    risk_high_modifier: "고위험 질문이므로 stop-report 기준과 즉시 escalation 신호를 흐리지 않는다.",
-    risk_mixed_modifier: "설명과 행동이 섞인 질문이므로 행동과 안전을 먼저, 배경은 선택을 바꾸는 범위만 둔다.",
-    communication_modifier: "보고가 필요하면 mode·setting, 환자 상태, 핵심 수치, 이미 확인한 항목을 묶어서 정리한다.",
-    exception_modifier: "주 추천이 언제 깨지는지와 대안을 열게 만드는 조건을 짧게 분리한다.",
-    ambiguity_modifier: "대상이 완전히 특정되지 않으면 구체 조작값, 용량, 호환성, 세팅은 단정하지 않는다.",
-    domain_vent_abga: "환기 문제와 산소화 문제는 섞지 말고 분리해 각 레버를 설명한다.",
-    domain_med_device: "약물·라인·기구 질문은 기전보다 tracing, stop rule, patient response, alarm context를 우선한다.",
-    domain_reporting: "보고가 핵심이면 왜 중요한지보다 어떤 데이터 묶음이 의사결정을 돕는지 먼저 보여준다.",
-    output_safety_guard: "근거 없는 숫자와 기관·제조사 고유 기준을 임의로 만들지 않는다.",
-    output_no_meta_guard: "route, pack, artifact 같은 내부 설계 용어는 절대 출력하지 않는다.",
-  };
-
-  const en: Record<MedSafetyPromptContractId, string> = {
-    base_role_goal: "Produce nurse-facing clinical cards that can be used immediately at the bedside.",
-    base_decision_priority: "Place the direct answer and next action before background explanation.",
-    base_safety_certainty: "Use only confirmed specifics when a detail changes safety.",
-    base_render_discipline: "Use a titleless conclusion first, then short cards with one lead sentence and 2-4 bullets each.",
-    intent_knowledge: "Keep only the clinical meaning and nursing decision points, not textbook definition lists.",
-    intent_action: "Because this is an action question, put what to do and what to check before background explanation.",
-    intent_compare: "Show the selection criteria and practical distinction first.",
-    intent_numeric: "Link numbers to meaning and next action instead of expanding into long numeric teaching.",
-    risk_high_modifier: "For high-risk questions, keep stop-report boundaries and escalation signals explicit.",
-    risk_mixed_modifier: "When explanation and action are mixed, keep action and safety ahead of background teaching.",
-    communication_modifier: "If reporting is needed, group mode or setting, patient status, key numbers, and already checked items into one useful handoff.",
-    exception_modifier: "State briefly when the main recommendation stops being safe and what opens the alternative path.",
-    ambiguity_modifier: "If the target is not fully identified, do not lock in settings, doses, compatibility, or device-specific specifics.",
-    domain_vent_abga: "Separate ventilation from oxygenation and keep each lever tied to its purpose.",
-    domain_med_device: "For medication, line, and device questions, prioritize tracing, stop rules, patient response, and alarm context over mechanism teaching.",
-    domain_reporting: "If reporting is central, show the minimum data bundle that helps the clinician decide next.",
-    output_safety_guard: "Do not invent unsupported numbers or site-specific protocols.",
-    output_no_meta_guard: "Do not expose route, pack, artifact, or any internal planning language.",
-  };
-  return locale === "en" ? en[id] : ko[id];
 }
 
 function scoreOptionalContracts(decision: MedSafetyInternalDecision, query: string) {
@@ -902,7 +1365,7 @@ export function assembleMedSafetyDeveloperPrompt(
     contractIds: [...BASE_CONTRACT_IDS, ...candidateOptionalIds],
     optionalContractIds: candidateOptionalIds,
   };
-  const basePrompt = buildBaseSpineLines(locale).join("\n");
+  const basePrompt = buildFixedBasePrompt(locale);
   const fit = buildPromptBudgetFit({
     locale,
     decision,
@@ -1015,7 +1478,7 @@ export function shouldAcceptIssueFamily(value: unknown) {
 }
 
 export function buildHybridBehavioralBasePrompt(locale: "ko" | "en") {
-  return buildBaseSpineLines(locale).join("\n");
+  return buildFixedBasePrompt(locale);
 }
 
 export function shouldGenerateKoEnglishVariant() {
