@@ -1,4 +1,4 @@
-import type { MedSafetyArtifactId, MedSafetyRisk } from "@/lib/server/medSafetyTypes";
+import type { MedSafetyPromptPackId, MedSafetyRisk } from "@/lib/server/medSafetyTypes";
 
 export type MedSafetyGoldenSetCategory =
   | "ventilator_abga"
@@ -11,7 +11,7 @@ export type MedSafetyGoldenSetCase = {
   category: MedSafetyGoldenSetCategory;
   query: string;
   expectedRisk: MedSafetyRisk;
-  expectedArtifacts: MedSafetyArtifactId[];
+  expectedPacks: MedSafetyPromptPackId[];
   evaluationFocus: string[];
 };
 
@@ -20,7 +20,7 @@ type Seed = {
   category: MedSafetyGoldenSetCategory;
   baseQuery: string;
   expectedRisk: MedSafetyRisk;
-  expectedArtifacts: MedSafetyArtifactId[];
+  expectedArtifacts: string[];
   evaluationFocus: string[];
 };
 
@@ -340,6 +340,25 @@ export const MED_SAFETY_ACCEPTANCE_TARGETS = {
   unsafeSpecificityRegression: 0,
 } as const;
 
+function mapArtifactsToPacks(artifacts: string[]): MedSafetyPromptPackId[] {
+  const packs = new Set<MedSafetyPromptPackId>(["direct_core_pack"]);
+  for (const artifact of artifacts) {
+    if (["bedside_recheck", "reversible_cause_sweep", "false_worsening_sweep", "immediate_action", "urgent_red_flags"].includes(artifact)) {
+      packs.add("bedside_pack");
+    }
+    if (["exception_boundary", "counterfactual", "measurement_dependency", "why_this_before_that"].includes(artifact)) {
+      packs.add("exception_pack");
+    }
+    if (["notification_payload", "notification_script"].includes(artifact)) {
+      packs.add("notify_pack");
+    }
+    if (["paired_problem_handling", "severity_frame"].includes(artifact)) {
+      packs.add("paired_problem_pack");
+    }
+  }
+  return Array.from(packs);
+}
+
 function expandSeeds(seeds: Seed[], variants: Variant[]) {
   return seeds.flatMap((seed) =>
     variants.map((variant) => ({
@@ -347,7 +366,7 @@ function expandSeeds(seeds: Seed[], variants: Variant[]) {
       category: seed.category,
       query: `${seed.baseQuery} ${variant.tail}`.trim(),
       expectedRisk: seed.expectedRisk,
-      expectedArtifacts: seed.expectedArtifacts,
+      expectedPacks: mapArtifactsToPacks(seed.expectedArtifacts),
       evaluationFocus: seed.evaluationFocus,
     }))
   );
