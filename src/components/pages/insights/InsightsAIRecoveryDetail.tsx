@@ -14,7 +14,6 @@ import {
   RecoveryPhaseTabs,
   RecoveryStageHeroCard,
 } from "@/components/insights/RecoveryPlannerFlowCards";
-import { useAIRecoveryInsights } from "@/components/insights/useAIRecoveryInsights";
 import { useAIRecoveryPlanner } from "@/components/insights/useAIRecoveryPlanner";
 import { INSIGHTS_MIN_DAYS, isInsightsLocked, useInsightsData } from "@/components/insights/useInsightsData";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
@@ -22,12 +21,9 @@ import { useAuthState } from "@/lib/auth";
 import { authHeaders } from "@/lib/billing/client";
 import { TodaySleepRequiredSheet } from "@/components/insights/TodaySleepRequiredSheet";
 import type { AIRecoveryPlannerPayload } from "@/lib/aiRecoveryPlanner";
-import { buildExplanationModule, buildFallbackModules } from "@/lib/aiRecoveryPlanner";
-import type { AIRecoveryPayload } from "@/lib/aiRecoveryContract";
 import { addDays, fromISODate, toISODate, todayISO, type ISODate } from "@/lib/date";
 import { hasHealthInput } from "@/lib/healthRecords";
 import { sanitizeInternalPath, withReturnTo } from "@/lib/navigation";
-import { buildPlannerTimelinePreview } from "@/lib/recoveryPlanner";
 import {
   buildAfterWorkMissingLabels,
   buildRecoveryOrderProgressId,
@@ -319,89 +315,6 @@ function normalizeRequestedOrderCountParam(value: string | null) {
   const parsed = Math.round(Number(value));
   if (!Number.isFinite(parsed)) return 3;
   return Math.max(1, Math.min(5, parsed));
-}
-
-function describeClientNextDutyLabel(shift: AIRecoveryPayload["nextShift"], language: "ko" | "en") {
-  if (language === "en") {
-    if (shift === "D") return "the next day shift";
-    if (shift === "E") return "the next evening shift";
-    if (shift === "N") return "the next night shift";
-    if (shift === "M") return "the next middle shift";
-    return "the next duty";
-  }
-  if (shift === "D") return "다음 데이 근무";
-  if (shift === "E") return "다음 이브 근무";
-  if (shift === "N") return "다음 나이트 근무";
-  if (shift === "M") return "다음 미들 근무";
-  return "다음 근무";
-}
-
-function buildClientFallbackPlannerPayload(
-  recoveryPayload: AIRecoveryPayload | null,
-  requestedOrderCount: number
-): AIRecoveryPlannerPayload | null {
-  if (!recoveryPayload || recoveryPayload.engine !== "openai") return null;
-
-  const plannerContext =
-    recoveryPayload.plannerContext ??
-    (() => {
-      const firstSection = recoveryPayload.result.sections?.[0] ?? null;
-      const ordersTop3 = (recoveryPayload.result.sections ?? [])
-        .flatMap((section) => {
-          const tips = section.tips?.length ? section.tips : section.description ? [section.description] : [];
-          return tips.map((tip, index) => ({
-            rank: index + 1,
-            title: section.title,
-            text: tip,
-          }));
-        })
-        .slice(0, Math.max(1, Math.min(5, requestedOrderCount)));
-      return {
-        focusFactor: null,
-        primaryAction: firstSection?.tips?.[0] ?? firstSection?.description ?? null,
-        avoidAction:
-          recoveryPayload.result.sections
-            .flatMap((section) => section.tips ?? [])
-            .find((tip) => /(피하|줄이|미루|보류|중단|낮추|avoid|skip|limit|hold|pause|reduce|delay)/i.test(tip)) ?? null,
-        nextDuty: recoveryPayload.nextShift ?? null,
-        nextDutyDate: null,
-        plannerTone: "stable" as const,
-        ordersTop3,
-      };
-    })();
-
-  const fallbackModules = buildFallbackModules({
-    language: recoveryPayload.language,
-    plannerContext,
-    nextDutyLabel: describeClientNextDutyLabel(recoveryPayload.nextShift, recoveryPayload.language),
-    timelinePreview: buildPlannerTimelinePreview(
-      recoveryPayload.todayShift,
-      null,
-      recoveryPayload.profileSnapshot ? (recoveryPayload.profileSnapshot as any) : undefined
-    ),
-  });
-
-  return {
-    dateISO: recoveryPayload.dateISO,
-    language: recoveryPayload.language,
-    phase: recoveryPayload.phase,
-    requestedOrderCount,
-    todayShift: recoveryPayload.todayShift,
-    nextShift: recoveryPayload.nextShift,
-    todayVitalScore: recoveryPayload.todayVitalScore,
-    source: recoveryPayload.source,
-    engine: "openai",
-    model: recoveryPayload.model,
-    debug: [recoveryPayload.debug, "client_recovery_fallback"].filter(Boolean).join("|") || null,
-    generatedText: recoveryPayload.generatedText,
-    explanationGeneratedText: recoveryPayload.generatedText,
-    plannerContext,
-    profileSnapshot: recoveryPayload.profileSnapshot,
-    result: {
-      ...fallbackModules,
-      explanation: buildExplanationModule(recoveryPayload.result, recoveryPayload.language),
-    },
-  };
 }
 
 // 시작 회복은 근무 패턴 때문에 시간 제한을 두지 않는다.
@@ -1056,30 +969,12 @@ export function InsightsAIRecoveryDetail() {
     autoGenerate: false,
     phase: "start",
   });
-  const startRecoveryAI = useAIRecoveryInsights({
-    mode: "generate",
-    enabled: !insightsLocked && hasPlannerAIAccess,
-    autoGenerate: false,
-    phase: "start",
-  });
   const afterPlannerAI = useAIRecoveryPlanner({
     mode: "generate",
     enabled: !insightsLocked && hasPlannerAIAccess,
     autoGenerate: false,
     phase: "after_work",
   });
-  const afterRecoveryAI = useAIRecoveryInsights({
-    mode: "generate",
-    enabled: !insightsLocked && hasPlannerAIAccess,
-    autoGenerate: false,
-    phase: "after_work",
-  });
-  const startRecoveryFallbackData = startRecoveryAI.data;
-  const startRecoveryFallbackGenerating = startRecoveryAI.generating;
-  const triggerStartRecoveryFallback = startRecoveryAI.startGenerate;
-  const afterRecoveryFallbackData = afterRecoveryAI.data;
-  const afterRecoveryFallbackGenerating = afterRecoveryAI.generating;
-  const triggerAfterRecoveryFallback = afterRecoveryAI.startGenerate;
   const initialRequestedOrderCount = normalizeRequestedOrderCountParam(searchParams.get("orderCount"));
   const preferredPhase = normalizeRecoveryPhase(searchParams.get("phase"));
   const [activePhase, setActivePhase] = useState<RecoveryPhase>(preferredPhase);
@@ -1169,31 +1064,13 @@ export function InsightsAIRecoveryDetail() {
   }, [afterPlannerAI, afterWorkReadiness.ready, isAdminOrDev, selectedOrderCount]);
 
   useEffect(() => {
-    if (startPlannerAI.error && !startPlannerAI.data && !startRecoveryFallbackData && !startRecoveryFallbackGenerating) {
-      triggerStartRecoveryFallback();
-    }
-  }, [startPlannerAI.error, startPlannerAI.data, startRecoveryFallbackData, startRecoveryFallbackGenerating, triggerStartRecoveryFallback]);
-
-  useEffect(() => {
-    if (afterPlannerAI.error && !afterPlannerAI.data && !afterRecoveryFallbackData && !afterRecoveryFallbackGenerating) {
-      triggerAfterRecoveryFallback();
-    }
-  }, [afterPlannerAI.error, afterPlannerAI.data, afterRecoveryFallbackData, afterRecoveryFallbackGenerating, triggerAfterRecoveryFallback]);
-
-  useEffect(() => {
-    if (!startPlannerAI.generating && !afterPlannerAI.generating && !startRecoveryAI.generating && !afterRecoveryAI.generating) {
+    if (!startPlannerAI.generating && !afterPlannerAI.generating) {
       setActiveGeneratingPhase(null);
     }
-  }, [afterPlannerAI.generating, afterRecoveryAI.generating, startPlannerAI.generating, startRecoveryAI.generating]);
+  }, [afterPlannerAI.generating, startPlannerAI.generating]);
 
-  const startDisplayPayload = useMemo(
-    () => startPlannerAI.data ?? buildClientFallbackPlannerPayload(startRecoveryAI.data, selectedOrderCount),
-    [selectedOrderCount, startPlannerAI.data, startRecoveryAI.data]
-  );
-  const afterDisplayPayload = useMemo(
-    () => afterPlannerAI.data ?? buildClientFallbackPlannerPayload(afterRecoveryAI.data, selectedOrderCount),
-    [afterPlannerAI.data, afterRecoveryAI.data, selectedOrderCount]
-  );
+  const startDisplayPayload = startPlannerAI.data;
+  const afterDisplayPayload = afterPlannerAI.data;
 
   const plannerDateISO = startDisplayPayload?.dateISO ?? afterDisplayPayload?.dateISO ?? today;
   useEffect(() => {
@@ -1234,7 +1111,7 @@ export function InsightsAIRecoveryDetail() {
     !insightsLocked &&
     !billingLoading &&
     hasPlannerAIAccess &&
-    (startPlannerAI.generating || afterPlannerAI.generating || startRecoveryAI.generating || afterRecoveryAI.generating);
+    (startPlannerAI.generating || afterPlannerAI.generating);
   const startErrorLines = useMemo(() => (startPlannerAI.error ? presentError(startPlannerAI.error, t) : []), [startPlannerAI.error, t]);
   const afterErrorLines = useMemo(() => (afterPlannerAI.error ? presentError(afterPlannerAI.error, t) : []), [afterPlannerAI.error, t]);
   const toggleSectionExpanded = useCallback((phase: RecoveryPhase, category: RecoverySection["category"]) => {

@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AIRecoveryPlannerPayload } from "@/lib/aiRecoveryPlanner";
+import type { AIRecoveryPayload } from "@/lib/aiRecoveryContract";
+import { buildPlannerPayloadFromRecoveryPayload, type AIRecoveryPlannerPayload } from "@/lib/aiRecoveryPlanner";
 import { todayISO } from "@/lib/date";
 import { getBrowserAuthHeaders, useAuthState } from "@/lib/auth";
 import { useI18n } from "@/lib/useI18n";
@@ -42,6 +43,17 @@ function isUsableOpenAIPlannerPayload(
   if (payload.language !== lang || payload.phase !== phase) return false;
   if (payload.engine !== "openai") return false;
   return Boolean(payload.generatedText?.trim() && payload.explanationGeneratedText?.trim());
+}
+
+function isUsableOpenAIRecoveryPayload(
+  payload: AIRecoveryPayload | null | undefined,
+  lang: "ko" | "en",
+  phase: RecoveryPhase
+): payload is AIRecoveryPayload {
+  if (!payload) return false;
+  if (payload.language !== lang || payload.phase !== phase) return false;
+  if (payload.engine !== "openai") return false;
+  return Boolean(payload.generatedText?.trim());
 }
 
 function clearPlannerPhaseCache(userId: string, lang: "ko" | "en", dateISO: string, phase: RecoveryPhase) {
@@ -121,6 +133,55 @@ async function fetchAIRecoveryPlanner(
   return payload;
 }
 
+async function fetchAIRecoveryExplanation(
+  lang: "ko" | "en",
+  phase: RecoveryPhase,
+  cacheOnly: boolean,
+  forceGenerate = false
+): Promise<AIRecoveryPayload | null> {
+  const cacheOnlyQuery = cacheOnly ? "&cacheOnly=1" : "";
+  const method = cacheOnly ? "GET" : "POST";
+  const authHeaders = await getBrowserAuthHeaders();
+  const res = await fetch(`/api/insights/recovery?lang=${lang}&phase=${phase}${cacheOnlyQuery}`, {
+    method,
+    cache: "no-store",
+    headers: cacheOnly
+      ? authHeaders
+      : {
+          "Content-Type": "application/json",
+          ...authHeaders,
+        },
+    body: cacheOnly ? undefined : JSON.stringify({ forceGenerate, phase }),
+  });
+
+  const text = await res.text().catch(() => "");
+  let json: any = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    const snippet = text.slice(0, 180).replace(/\s+/g, " ").trim();
+    throw new Error(`http_${res.status}_non_json:${snippet || "empty"}`);
+  }
+
+  if (!res.ok || !json?.ok) {
+    throw new Error(json?.error ?? `http_${res.status}`);
+  }
+
+  const payload = (json?.data ?? null) as AIRecoveryPayload | null;
+  return payload;
+}
+
+async function buildPlannerFallbackFromRecovery(
+  lang: "ko" | "en",
+  phase: RecoveryPhase,
+  requestedOrderCount?: number | null,
+  options?: { forceGenerate?: boolean; debugTag?: string }
+) {
+  const recoveryPayload = await fetchAIRecoveryExplanation(lang, phase, !options?.forceGenerate, Boolean(options?.forceGenerate));
+  if (!isUsableOpenAIRecoveryPayload(recoveryPayload, lang, phase)) return null;
+  return buildPlannerPayloadFromRecoveryPayload(recoveryPayload, requestedOrderCount, options?.debugTag);
+}
+
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -128,7 +189,8 @@ function wait(ms: number) {
 async function recoverPlannerPayloadAfterError(
   lang: "ko" | "en",
   phase: RecoveryPhase,
-  requestedOrderCount?: number | null
+  requestedOrderCount?: number | null,
+  allowRecoveryGenerate = false
 ) {
   const targetCount = normalizeRequestedOrderCount(requestedOrderCount);
   let fallback: AIRecoveryPlannerPayload | null = null;
@@ -141,6 +203,25 @@ async function recoverPlannerPayloadAfterError(
       fallback = fallback ?? cached;
     } catch {
       // another request may still be saving the result; keep polling briefly
+    }
+    try {
+      const recoveryBacked = await buildPlannerFallbackFromRecovery(lang, phase, requestedOrderCount, {
+        debugTag: "planner_hook_recovery_cache_rescue",
+      });
+      if (recoveryBacked) return recoveryBacked;
+    } catch {
+      // recovery cache may still be empty while the server is saving it
+    }
+  }
+  if (allowRecoveryGenerate) {
+    try {
+      const generatedFromRecovery = await buildPlannerFallbackFromRecovery(lang, phase, requestedOrderCount, {
+        forceGenerate: true,
+        debugTag: "planner_hook_recovery_generate_rescue",
+      });
+      if (generatedFromRecovery) return generatedFromRecovery;
+    } catch {
+      // if explanation generation also fails, surface the original planner error
     }
   }
   return fallback;
@@ -229,6 +310,7 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
     let active = true;
     const forceGenerate = mode === "generate" && manualGenerateState.count > 0 && manualGenerateState.count !== lastConsumedCountRef.current;
     const requestedOrderCount = forceGenerate ? manualGenerateState.orderCount : null;
+    const shouldGenerate = mode === "generate" && (autoGenerate || forceGenerate);
 
     const fromSession = sessionDailyCache.get(key) ?? null;
     if (fromSession && isUsableOpenAIPlannerPayload(fromSession, lang, phase) && !forceGenerate) {
@@ -264,7 +346,22 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
           return;
         }
 
-        const shouldGenerate = mode === "generate" && (autoGenerate || forceGenerate);
+        if (!forceGenerate) {
+          try {
+            const recoveryBacked = await buildPlannerFallbackFromRecovery(lang, phase, requestedOrderCount, {
+              debugTag: "planner_hook_recovery_cache_bootstrap",
+            });
+            if (!active) return;
+            if (recoveryBacked) {
+              sessionDailyCache.set(key, recoveryBacked);
+              setRemoteData(recoveryBacked);
+              return;
+            }
+          } catch {
+            // recovery cache bootstrap is best-effort
+          }
+        }
+
         if (!shouldGenerate) return;
 
         setGenerating(true);
@@ -302,7 +399,7 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
         setRemoteData(generated);
       } catch (err: any) {
         if (!active) return;
-        const recovered = await recoverPlannerPayloadAfterError(lang, phase, requestedOrderCount);
+        const recovered = await recoverPlannerPayloadAfterError(lang, phase, requestedOrderCount, shouldGenerate);
         if (!active) return;
         if (recovered) {
           sessionDailyCache.set(key, recovered);

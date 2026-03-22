@@ -56,6 +56,15 @@ function hasOwn(obj: Record<string, unknown>, key: string) {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
+function mergeJsonValue(previous: unknown, incoming: unknown): unknown {
+  if (!isRecord(previous) || !isRecord(incoming)) return incoming;
+  const merged: Record<string, unknown> = { ...previous };
+  for (const [key, value] of Object.entries(incoming)) {
+    merged[key] = key in previous ? mergeJsonValue(previous[key], value) : value;
+  }
+  return merged;
+}
+
 function sanitizeTagList(value: unknown, maxItems = 8, maxLength = 28) {
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();
@@ -467,7 +476,7 @@ export async function safeSaveAIContent(
     const existing = await safeLoadAIContent(userId);
     const previous = isRecord(existing?.data) ? existing.data : {};
     const incoming = isRecord(data) ? data : {};
-    const merged = { ...previous, ...incoming };
+    const merged = mergeJsonValue(previous, incoming);
 
     await saveAIContent({ userId, dateISO, language, data: merged as Json });
     return null;

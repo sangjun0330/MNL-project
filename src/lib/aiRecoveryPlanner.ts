@@ -1,8 +1,9 @@
 import type { AIRecoveryResult } from "@/lib/aiRecovery";
+import type { AIRecoveryPayload } from "@/lib/aiRecoveryContract";
 import type { ISODate } from "@/lib/date";
 import type { Language } from "@/lib/i18n";
 import type { ProfileSettings } from "@/lib/model";
-import type { PlannerContext, PlannerTimelinePreview } from "@/lib/recoveryPlanner";
+import { buildPlannerTimelinePreview, type PlannerContext, type PlannerTimelinePreview } from "@/lib/recoveryPlanner";
 import type { RecoveryPhase } from "@/lib/recoveryPhases";
 import type { Shift } from "@/lib/types";
 
@@ -135,6 +136,60 @@ function sanitizeChecklistId(value: string, fallback: string) {
   return normalized || fallback;
 }
 
+function normalizeRequestedOrderCount(value: number | null | undefined) {
+  if (value == null || String(value).trim() === "") return 3;
+  const parsed = Math.round(Number(value));
+  if (!Number.isFinite(parsed)) return 3;
+  return Math.max(1, Math.min(5, parsed));
+}
+
+function describeNextDutyLabel(shift: Shift | null, language: Language) {
+  if (language === "en") {
+    if (shift === "D") return "the next day shift";
+    if (shift === "E") return "the next evening shift";
+    if (shift === "N") return "the next night shift";
+    if (shift === "M") return "the next middle shift";
+    return "the next duty";
+  }
+  if (shift === "D") return "다음 데이 근무";
+  if (shift === "E") return "다음 이브 근무";
+  if (shift === "N") return "다음 나이트 근무";
+  if (shift === "M") return "다음 미들 근무";
+  return "다음 근무";
+}
+
+function derivePlannerContextFromRecoveryPayload(
+  recoveryPayload: AIRecoveryPayload,
+  requestedOrderCount: number
+): PlannerContext {
+  if (recoveryPayload.plannerContext) return recoveryPayload.plannerContext;
+
+  const firstSection = recoveryPayload.result.sections?.[0] ?? null;
+  const ordersTop3 = (recoveryPayload.result.sections ?? [])
+    .flatMap((section) => {
+      const tips = section.tips?.length ? section.tips : section.description ? [section.description] : [];
+      return tips.map((tip, index) => ({
+        rank: index + 1,
+        title: section.title,
+        text: tip,
+      }));
+    })
+    .slice(0, Math.max(1, Math.min(5, requestedOrderCount)));
+
+  return {
+    focusFactor: null,
+    primaryAction: firstSection?.tips?.[0] ?? firstSection?.description ?? null,
+    avoidAction:
+      recoveryPayload.result.sections
+        .flatMap((section) => section.tips ?? [])
+        .find((tip) => /(피하|줄이|미루|보류|중단|낮추|avoid|skip|limit|hold|pause|reduce|delay)/i.test(tip)) ?? null,
+    nextDuty: recoveryPayload.nextShift ?? null,
+    nextDutyDate: null,
+    plannerTone: "stable",
+    ordersTop3,
+  };
+}
+
 export function buildExplanationModule(result: AIRecoveryResult, language: Language): AIPlannerExplanationModule {
   return {
     eyebrow: language === "en" ? "AI Recovery" : "AI Recovery",
@@ -201,6 +256,56 @@ export function buildFallbackModules(args: {
           ? "Each order is concrete, small enough to finish today, and includes timing context."
           : "각 오더는 오늘 안에 실행 가능한 크기로 만들고, 언제 하면 좋은지도 함께 붙였습니다.",
       items: orders,
+    },
+  };
+}
+
+export function buildPlannerPayloadFromRecoveryPayload(
+  recoveryPayload: AIRecoveryPayload | null | undefined,
+  requestedOrderCount?: number | null,
+  debugTag?: string | null
+): AIRecoveryPlannerPayload | null {
+  if (!recoveryPayload || recoveryPayload.engine !== "openai" || !recoveryPayload.generatedText?.trim()) {
+    return null;
+  }
+
+  const normalizedOrderCount = normalizeRequestedOrderCount(requestedOrderCount);
+  const plannerContext = derivePlannerContextFromRecoveryPayload(recoveryPayload, normalizedOrderCount);
+  const fallbackModules = buildFallbackModules({
+    language: recoveryPayload.language,
+    plannerContext,
+    nextDutyLabel: describeNextDutyLabel(recoveryPayload.nextShift, recoveryPayload.language),
+    timelinePreview: buildPlannerTimelinePreview(
+      recoveryPayload.todayShift,
+      null,
+      recoveryPayload.profileSnapshot
+        ? {
+            chronotype: recoveryPayload.profileSnapshot.chronotype,
+            caffeineSensitivity: recoveryPayload.profileSnapshot.caffeineSensitivity,
+          }
+        : undefined
+    ),
+  });
+
+  return {
+    dateISO: recoveryPayload.dateISO,
+    language: recoveryPayload.language,
+    phase: recoveryPayload.phase,
+    requestedOrderCount: normalizedOrderCount,
+    todayShift: recoveryPayload.todayShift,
+    nextShift: recoveryPayload.nextShift,
+    todayVitalScore: recoveryPayload.todayVitalScore,
+    source: recoveryPayload.source,
+    engine: "openai",
+    model: recoveryPayload.model,
+    debug: [recoveryPayload.debug, debugTag].filter(Boolean).join("|") || null,
+    generatedText: recoveryPayload.generatedText,
+    explanationGeneratedText: recoveryPayload.generatedText,
+    plannerContext,
+    profileSnapshot: recoveryPayload.profileSnapshot,
+    result: {
+      ...fallbackModules,
+      explanation: buildExplanationModule(recoveryPayload.result, recoveryPayload.language),
     },
   };
 }
