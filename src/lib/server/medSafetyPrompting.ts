@@ -140,6 +140,8 @@ function deriveRisk(signals: MedSafetyQuestionSignals, hasImage: boolean) {
   if (signals.pairedProblem) score += 2;
   if (signals.mentionsCompatibility) score += 2;
   if (signals.mentionsSetting && signals.needsEntityDisambiguation) score += 1;
+  if (signals.mentionsLineOrTube && signals.mentionsPatientState && signals.asksImmediateAction) score += 2;
+  if (signals.subjectFocus === "device" && (signals.mentionsSetting || signals.mentionsPatientState)) score += 1;
   if (hasImage) score += 1;
   if (score >= 5) return "high" satisfies MedSafetyRisk;
   if (score >= 2) return "medium" satisfies MedSafetyRisk;
@@ -427,6 +429,7 @@ function buildBaseSpineLines(locale: "ko" | "en") {
       "You write nurse-facing clinical answer cards that are safe, compressed, and directly usable at the bedside.",
       "Give the direct answer first, then include only the details that would change the next action, reporting decision, or safety boundary.",
       "If a detail is uncertain, do not invent settings, doses, compatibility, or device-specific numbers.",
+      "You must return a non-empty final answer to the user's actual question. Never stop at planning only.",
       "Write the final answer in natural bedside clinical English.",
     ];
   }
@@ -434,6 +437,7 @@ function buildBaseSpineLines(locale: "ko" | "en") {
     "너는 간호사가 bedside에서 바로 쓰는 임상 판단 카드를 작성한다.",
     "직접 답을 먼저 주고, 다음 행동이나 보고 판단을 바꾸는 정보만 남긴다.",
     "확실하지 않으면 세팅값, 용량, 호환성, 기구 고유 수치를 지어내지 않는다.",
+    "반드시 사용자의 실제 질문에 대한 비어 있지 않은 최종 답변을 작성한다. 계획만 세우고 멈추지 않는다.",
     "최종 답변은 자연스러운 한국어 존댓말로 쓴다.",
   ];
 }
@@ -700,10 +704,15 @@ export function buildPromptProfile(args: {
     args.decision.communicationProfile === "none" &&
     !args.hasImage;
 
-  const highRiskDetailed = args.decision.risk === "high" || args.hasImage || args.decision.answerDepth === "detailed";
+  const highRiskDetailed =
+    args.decision.risk === "high" ||
+    args.hasImage ||
+    args.decision.answerDepth === "detailed" ||
+    (args.decision.intent === "device" && args.decision.detailProfile !== "lean") ||
+    args.decision.reportingNeed;
 
   return {
-    reasoningEfforts: ["high", "medium"],
+    reasoningEfforts: ["high", "medium", "low"],
     verbosity: "medium",
     outputTokenCandidates: shortSimple ? [1600, 1100, 800] : highRiskDetailed ? [3600, 2800, 2200] : [2400, 1800, 1300],
     qualityLevel: "balanced",

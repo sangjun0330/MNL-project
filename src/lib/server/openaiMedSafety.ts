@@ -692,6 +692,13 @@ function extractResponsesText(json: any): string {
   return chunks.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+function buildEmptyTextError(model: string, payload: any) {
+  const status = typeof payload?.status === "string" ? payload.status : "unknown";
+  const incompleteReason =
+    typeof payload?.incomplete_details?.reason === "string" ? payload.incomplete_details.reason : "none";
+  return `openai_empty_text_model:${model}_status:${status}_incomplete:${incompleteReason}`;
+}
+
 function extractConversationId(json: any): string | null {
   const conversationFromString = typeof json?.conversation === "string" ? json.conversation : "";
   const conversationFromObject = typeof json?.conversation?.id === "string" ? json.conversation.id : "";
@@ -914,7 +921,7 @@ function buildUsageBreakdown(args: {
 
 function buildDefaultPromptProfile(): MedSafetyPromptProfile {
   return {
-    reasoningEfforts: ["high", "medium"],
+    reasoningEfforts: ["high", "medium", "low"],
     verbosity: "medium",
     outputTokenCandidates: [2400, 1800, 1300],
     qualityLevel: "balanced",
@@ -980,7 +987,7 @@ async function readResponsesEventStream(args: {
     if (!fallbackText) {
       return {
         text: null,
-        error: `openai_empty_text_model:${model}`,
+        error: buildEmptyTextError(model, fallbackJson),
         responseId: fallbackResponseId,
         conversationId: fallbackConversationId,
         usage: extractResponsesUsage(fallbackJson),
@@ -1008,7 +1015,7 @@ async function readResponsesEventStream(args: {
     if (!fallbackText) {
       return {
         text: null,
-        error: `openai_empty_text_model:${model}`,
+        error: buildEmptyTextError(model, fallbackJson),
         responseId: fallbackResponseId,
         conversationId: fallbackConversationId,
         usage: extractResponsesUsage(fallbackJson),
@@ -1146,7 +1153,7 @@ async function readResponsesEventStream(args: {
   if (!finalText) {
     return {
       text: null,
-      error: `openai_empty_text_model:${model}`,
+      error: buildEmptyTextError(model, fallbackNode),
       responseId,
       conversationId,
       usage: usage ?? extractResponsesUsage(fallbackNode),
@@ -1176,10 +1183,28 @@ function isRetryableOpenAIError(error: string) {
   const e = String(error ?? "").toLowerCase();
   if (!e) return false;
   if (e.startsWith("openai_network_")) return true;
-  if (e.includes("openai_empty_text_")) return true;
   if (/openai_responses_(408|409|425|429|500|502|503|504)/.test(e)) return true;
   if (/openai_responses_403/.test(e) && /(html|forbidden|proxy|firewall|blocked|access denied|cloudflare)/.test(e)) return true;
   return false;
+}
+
+function isEmptyTextError(error: string) {
+  return String(error ?? "").toLowerCase().includes("openai_empty_text");
+}
+
+function buildNonEmptyRescueDirective(locale: "ko" | "en") {
+  if (locale === "en") {
+    return [
+      "Return a visible final answer now.",
+      "Do not stop at planning, hidden analysis, or empty output.",
+      "Begin immediately with the bedside answer itself.",
+    ].join(" ");
+  }
+  return [
+    "반드시 보이는 최종 답변을 지금 바로 작성한다.",
+    "계획이나 숨은 분석만 하고 멈추거나 빈 출력으로 끝내지 않는다.",
+    "답변 본문부터 바로 시작한다.",
+  ].join(" ");
 }
 
 function isReasoningEffortRejected(error: string) {
@@ -1408,7 +1433,7 @@ async function callResponsesApi(args: {
   if (!text) {
     return {
       text: null,
-      error: `openai_empty_text_model:${requestConfig.model}`,
+      error: buildEmptyTextError(requestConfig.model, json),
       responseId,
       conversationId: conversationResponseId,
       usage: extractResponsesUsage(json),
@@ -1453,6 +1478,7 @@ async function callResponsesApiWithRetry(
 async function generateAnswerWithPrompt(args: {
   apiKey: string;
   model: string;
+  locale: "ko" | "en";
   developerPrompt: string;
   userPrompt: string;
   apiBaseUrl: string;
@@ -1480,6 +1506,7 @@ async function generateAnswerWithPrompt(args: {
 }> {
   const reasoningEfforts = args.profile.reasoningEfforts;
   const outputTokenCandidates = args.profile.outputTokenCandidates;
+  let lastEmptyAttempt: ResponsesAttempt | null = null;
 
   reasoningLoop: for (let reasoningIndex = 0; reasoningIndex < reasoningEfforts.length; reasoningIndex += 1) {
     const reasoningEffort = reasoningEfforts[reasoningIndex]!;
@@ -1521,6 +1548,11 @@ async function generateAnswerWithPrompt(args: {
         };
       }
       if (attempt.error) {
+        if (isEmptyTextError(attempt.error)) {
+          lastEmptyAttempt = attempt;
+          if (reasoningIndex + 1 < reasoningEfforts.length) continue reasoningLoop;
+          break tokenLoop;
+        }
         if (isReasoningEffortRejected(attempt.error)) {
           if (reasoningIndex + 1 < reasoningEfforts.length) continue reasoningLoop;
           return {
@@ -1597,16 +1629,82 @@ async function generateAnswerWithPrompt(args: {
     }
   }
 
+  const rescueOutputLimit = Math.min(
+    5200,
+    Math.max(outputTokenCandidates[0] ?? 1200, lastEmptyAttempt?.usage?.outputTokens ?? 0, 2200) + 800
+  );
+  const rescueReasoningEffort: MedSafetyReasoningEffort =
+    (reasoningEfforts.includes("low") ? "low" : reasoningEfforts[reasoningEfforts.length - 1]) ?? "medium";
+  const rescueDeveloperPrompt = `${args.developerPrompt}\n${buildNonEmptyRescueDirective(args.locale)}`;
+
+  const statelessRescue = await callResponsesApi({
+    apiKey: args.apiKey,
+    model: args.model,
+    developerPrompt: rescueDeveloperPrompt,
+    userPrompt: args.userPrompt,
+    apiBaseUrl: args.apiBaseUrl,
+    imageDataUrl: args.imageDataUrl,
+    signal: args.signal,
+    maxOutputTokens: rescueOutputLimit,
+    upstreamTimeoutMs: args.upstreamTimeoutMs,
+    verbosity: args.profile.verbosity,
+    reasoningEffort: rescueReasoningEffort,
+    storeResponses: args.storeResponses,
+  });
+  if (!statelessRescue.error && statelessRescue.text) {
+    return {
+      answerText: statelessRescue.text,
+      responseId: statelessRescue.responseId,
+      conversationId: statelessRescue.conversationId,
+      usage: sumUsages(lastEmptyAttempt?.usage, statelessRescue.usage),
+      stage: "main_rescue_stateless",
+      streamed: false,
+      reasoningEffort: rescueReasoningEffort,
+      maxOutputTokens: rescueOutputLimit,
+      error: null,
+    };
+  }
+
+  const compatRescue = await callResponsesApi({
+    apiKey: args.apiKey,
+    model: args.model,
+    developerPrompt: rescueDeveloperPrompt,
+    userPrompt: args.userPrompt,
+    apiBaseUrl: args.apiBaseUrl,
+    imageDataUrl: args.imageDataUrl,
+    signal: args.signal,
+    maxOutputTokens: rescueOutputLimit,
+    upstreamTimeoutMs: args.upstreamTimeoutMs,
+    verbosity: args.profile.verbosity,
+    reasoningEffort: rescueReasoningEffort,
+    storeResponses: args.storeResponses,
+    compatMode: true,
+  });
+  if (!compatRescue.error && compatRescue.text) {
+    return {
+      answerText: compatRescue.text,
+      responseId: compatRescue.responseId,
+      conversationId: compatRescue.conversationId,
+      usage: sumUsages(lastEmptyAttempt?.usage, statelessRescue.usage, compatRescue.usage),
+      stage: "main_rescue_compat",
+      streamed: false,
+      reasoningEffort: rescueReasoningEffort,
+      maxOutputTokens: rescueOutputLimit,
+      error: null,
+    };
+  }
+
   return {
     answerText: null,
-    responseId: null,
-    conversationId: null,
-    usage: null,
+    responseId: compatRescue.responseId ?? statelessRescue.responseId ?? lastEmptyAttempt?.responseId ?? null,
+    conversationId:
+      compatRescue.conversationId ?? statelessRescue.conversationId ?? lastEmptyAttempt?.conversationId ?? null,
+    usage: sumUsages(lastEmptyAttempt?.usage, statelessRescue.usage, compatRescue.usage),
     stage: "main",
     streamed: false,
-    reasoningEffort: args.profile.reasoningEfforts[0] ?? "medium",
-    maxOutputTokens: args.profile.outputTokenCandidates[0] ?? 1200,
-    error: "openai_empty_text",
+    reasoningEffort: rescueReasoningEffort,
+    maxOutputTokens: rescueOutputLimit,
+    error: compatRescue.error ?? statelessRescue.error ?? lastEmptyAttempt?.error ?? "openai_empty_text",
   };
 }
 
@@ -2135,6 +2233,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
       const mainAttempt = await generateAnswerWithPrompt({
         apiKey,
         model: candidateModel,
+        locale: params.locale,
         developerPrompt: mainDeveloperPrompt,
         userPrompt: primaryUserPrompt,
         apiBaseUrl,
@@ -2217,6 +2316,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         const hybridAttempt = await generateAnswerWithPrompt({
           apiKey,
           model: candidateModel,
+          locale: params.locale,
           developerPrompt: promptAssembly.developerPrompt,
           userPrompt: primaryUserPrompt,
           apiBaseUrl,

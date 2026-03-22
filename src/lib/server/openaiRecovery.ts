@@ -657,7 +657,8 @@ async function callResponsesApi(args: {
 }): Promise<TextAttempt> {
   const { apiKey, apiBaseUrl, model, developerPrompt, userPrompt, signal, maxOutputTokens, upstreamTimeoutMs, logFeature, language, dateISO, phase = "start" } = args;
   const storeResponses = resolveStoreResponses();
-  const verbosity = logFeature === "recovery_translate" ? "low" : "medium";
+  const verbosity = "low" as const;
+  const reasoningEffort = logFeature === "recovery_translate" ? ("low" as const) : ("high" as const);
   const requestConfig = resolveOpenAIResponsesRequestConfig({
     apiBaseUrl,
     apiKey,
@@ -687,7 +688,7 @@ async function callResponsesApi(args: {
       format: { type: "text" },
       verbosity,
     },
-    reasoning: { effort: "low" as const },
+    reasoning: { effort: reasoningEffort },
     max_output_tokens: maxOutputTokens,
     tools: [],
     store: storeResponses,
@@ -1453,6 +1454,16 @@ function parseJsonObject(raw: string): Record<string, unknown> | null {
     const parsed = JSON.parse(fenced);
     return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : null;
   } catch {
+    const firstBrace = fenced.indexOf("{");
+    const lastBrace = fenced.lastIndexOf("}");
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      try {
+        const parsed = JSON.parse(fenced.slice(firstBrace, lastBrace + 1));
+        return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : null;
+      } catch {
+        return null;
+      }
+    }
     return null;
   }
 }
@@ -1464,6 +1475,64 @@ function asString(value: unknown): string {
 function asStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.map((item) => asString(item)).filter(Boolean);
+}
+
+function pickFirstString(row: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = asString(row[key]);
+    if (value) return value;
+  }
+  return "";
+}
+
+function asNarrativeArray(value: unknown): string[] {
+  if (typeof value === "string") {
+    const text = value.trim();
+    return text ? [text] : [];
+  }
+  if (!Array.isArray(value)) return [];
+  return value
+    .flatMap((item) => {
+      if (typeof item === "string") return [item];
+      if (!item || typeof item !== "object") return [];
+      const row = item as Record<string, unknown>;
+      return [
+        asString(row.title),
+        asString(row.text),
+        asString(row.body),
+        asString(row.description),
+        asString(row.reason),
+        asString(row.message),
+      ].filter(Boolean);
+    })
+    .filter(Boolean);
+}
+
+function inferRecoveryCategoryFromText(text: string): RecoverySection["category"] | null {
+  const normalized = normalizeComparableText(text);
+  if (!normalized) return null;
+  for (const meta of CATEGORY_ORDER) {
+    if (meta.hints.some((hint) => normalized.includes(normalizeComparableText(hint)))) {
+      return meta.category;
+    }
+  }
+  if (/(집중|멘탈|감정|기분|focus|mood|emotion)/i.test(text)) return "stress";
+  if (/(리듬|생체|night|circadian|교대)/i.test(text)) return "shift";
+  return null;
+}
+
+function collectRecoveryTips(row: Record<string, unknown>, description: string) {
+  return dedupeNarrativeStrings(
+    [
+      ...asNarrativeArray(row.tips),
+      ...asNarrativeArray(row.actions),
+      ...asNarrativeArray(row.actionItems),
+      ...asNarrativeArray(row.recommendations),
+      ...asNarrativeArray(row.items),
+    ],
+    2,
+    [description]
+  );
 }
 
 function asRecoveryCategory(value: unknown): RecoverySection["category"] | null {
@@ -1503,15 +1572,21 @@ function parseRecoveryJsonResult(candidate: Record<string, unknown>): AIRecovery
   const headline = asString(candidate.headline);
   if (!headline) return null;
 
-  const sectionsRaw = Array.isArray(candidate.sections) ? candidate.sections : [];
+  const sectionsRaw = Array.isArray(candidate.sections)
+    ? candidate.sections
+    : Array.isArray(candidate.items)
+      ? candidate.items
+      : [];
   const sections = sectionsRaw
     .map((item) => {
       const row = typeof item === "object" && item !== null ? (item as Record<string, unknown>) : null;
       if (!row) return null;
-      const category = asRecoveryCategory(row.category);
-      const title = asString(row.title);
-      const description = asString(row.description);
-      const tips = dedupeNarrativeStrings(asStringArray(row.tips), 2, [description]);
+      const title = pickFirstString(row, ["title", "heading", "name", "label"]);
+      const description = pickFirstString(row, ["description", "summary", "body", "reason", "whyNow", "why", "message"]);
+      const tips = collectRecoveryTips(row, description);
+      const category =
+        asRecoveryCategory(row.category) ??
+        inferRecoveryCategoryFromText([title, description, ...tips].filter(Boolean).join(" "));
       if (!category || !title || !description || !tips.length) return null;
       return {
         category,
@@ -2587,12 +2662,16 @@ function parsePlannerChecklistModule(
   requestedOrderCount?: number | null
 ): AIPlannerChecklistModule {
   const row = typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
-  const items = parsePlannerChecklistItems(row.items, language, requestedOrderCount);
+  const items = parsePlannerChecklistItems(
+    row.items ?? (typeof row.orders === "object" && row.orders !== null ? (row.orders as Record<string, unknown>).items : null),
+    language,
+    requestedOrderCount
+  );
   return {
-    eyebrow: asString(row.eyebrow) || "Today Orders",
-    title: asString(row.title),
-    headline: asString(row.headline),
-    summary: asString(row.summary),
+    eyebrow: pickFirstString(row, ["eyebrow"]) || "Today Orders",
+    title: pickFirstString(row, ["title", "name"]),
+    headline: pickFirstString(row, ["headline", "head", "tagline"]),
+    summary: pickFirstString(row, ["summary", "description", "body"]),
     items,
   };
 }
