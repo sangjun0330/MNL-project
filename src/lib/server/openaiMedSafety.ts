@@ -181,10 +181,10 @@ function resolveStoreResponses() {
 }
 
 function resolveMaxOutputTokens() {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_MAX_OUTPUT_TOKENS ?? 16000);
-  if (!Number.isFinite(raw)) return 16000;
+  const raw = Number(process.env.OPENAI_MED_SAFETY_MAX_OUTPUT_TOKENS ?? 22000);
+  if (!Number.isFinite(raw)) return 22000;
   const rounded = Math.round(raw);
-  return Math.max(4000, Math.min(32000, rounded));
+  return Math.max(8000, Math.min(32000, rounded));
 }
 
 function resolveNetworkRetryCount() {
@@ -924,7 +924,7 @@ function buildDefaultPromptProfile(): MedSafetyPromptProfile {
   return {
     reasoningEfforts: ["high", "medium", "low"],
     verbosity: "medium",
-    outputTokenCandidates: [2400, 1800, 1300],
+    outputTokenCandidates: [7200, 5600, 4200],
     qualityLevel: "balanced",
   };
 }
@@ -1631,8 +1631,8 @@ async function generateAnswerWithPrompt(args: {
   }
 
   const rescueOutputLimit = Math.min(
-    5200,
-    Math.max(outputTokenCandidates[0] ?? 1200, lastEmptyAttempt?.usage?.outputTokens ?? 0, 2200) + 800
+    resolveMaxOutputTokens(),
+    Math.max(outputTokenCandidates[0] ?? 2400, lastEmptyAttempt?.usage?.outputTokens ?? 0, 4800) + 2400
   );
   const rescueReasoningEffort: MedSafetyReasoningEffort =
     (reasoningEfforts.includes("low") ? "low" : reasoningEfforts[reasoningEfforts.length - 1]) ?? "medium";
@@ -1808,7 +1808,7 @@ export async function translateMedSafetyToEnglish(input: {
   const apiKey = normalizeApiKey();
   const modelCandidates = resolveModelCandidates(input.model ?? null);
   const apiBaseUrls = resolveApiBaseUrls();
-  const maxOutputTokens = Math.max(4000, Math.min(20000, resolveMaxOutputTokens() + 2000));
+  const maxOutputTokens = Math.max(8000, Math.min(28000, resolveMaxOutputTokens() + 4000));
   const upstreamTimeoutMs = resolveUpstreamTimeoutMs();
   const networkRetries = resolveNetworkRetryCount();
   const networkRetryBaseMs = resolveNetworkRetryBaseMs();

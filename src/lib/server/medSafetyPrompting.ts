@@ -879,7 +879,7 @@ export function buildPromptProfile(args: {
   return {
     reasoningEfforts: ["high", "medium", "low"],
     verbosity: "medium",
-    outputTokenCandidates: shortSimple ? [1600, 1100, 800] : highRiskDetailed ? [3600, 2800, 2200] : [2400, 1800, 1300],
+    outputTokenCandidates: shortSimple ? [3600, 2800, 2200] : highRiskDetailed ? [12000, 9600, 7600] : [7200, 5600, 4200],
     qualityLevel: "balanced",
   };
 }
