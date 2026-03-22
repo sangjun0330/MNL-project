@@ -160,14 +160,14 @@ export function SettingsBillingUpgradePage() {
   const standardCredits = Math.max(0, Number(quota?.standard.totalRemaining ?? 0));
   const premiumCredits = Math.max(0, Number(quota?.premium.totalRemaining ?? 0));
   const plusSummaryItems = [
-    t("AI 맞춤회복"),
-    t("오늘의 오더"),
+    t("회복 플래너"),
+    t("오더 화면"),
     t("기본 검색 10회"),
     t("기본/프리미엄 구매"),
   ];
   const proSummaryItems = [
     t("프리미엄 검색 100회"),
-    t("더 높은 품질의 AI"),
+    t("더 높은 품질의 AI 검색"),
     t("기본/프리미엄 구매"),
   ];
   const returnLabel = returnTo.startsWith("/insights/recovery")

@@ -181,23 +181,12 @@ export function InsightsPage() {
                 ? `${t("회복 포커스")} · ${planner.focusFactor.label}`
                 : t("오늘의 회복 우선순위를 확인해 보세요.")
             }
-            detail={
-              planner.primaryAction
-                ? `${t("지금 할 1개")} · ${planner.primaryAction}`
-                : t("AI 맞춤회복과 오늘의 오더를 한 흐름으로 볼 수 있어요.")
-            }
+            detail={t("맞춤회복과 오늘의 오더 화면 구조만 유지 중입니다.")}
             chips={(
               <>
                 <DetailChip color={DETAIL_ACCENTS.mint}>{planner.nextDutyLabel}</DetailChip>
                 {planner.nextDuty ? <DetailChip color={DETAIL_ACCENTS.mint}>다음 {shiftKo(planner.nextDuty)}</DetailChip> : null}
-                {planner.ordersTop3.slice(0, planner.fullAccess ? 2 : 1).map((item) => (
-                  <DetailChip key={`${item.rank}-${item.title}`} color={DETAIL_ACCENTS.mint}>
-                    오더 {item.rank} · {item.title}
-                  </DetailChip>
-                ))}
-                {!planner.fullAccess && !planner.billingLoading ? (
-                  <DetailChip color={DETAIL_ACCENTS.pink}>{t("전체는 Pro")}</DetailChip>
-                ) : null}
+                <DetailChip color={DETAIL_ACCENTS.navy}>UI skeleton</DetailChip>
               </>
             )}
             valueColor={DETAIL_ACCENTS.mint}

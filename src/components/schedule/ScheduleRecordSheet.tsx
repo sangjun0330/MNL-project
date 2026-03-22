@@ -617,7 +617,7 @@ export function ScheduleRecordSheet({
         </div>
         {sleepFirstMode && canEditHealth ? (
           <div className="rounded-2xl border border-[#1B274733] bg-[#1B27470F] px-4 py-3 text-[12.5px] font-semibold text-[#1B2747]">
-            {t("AI 맞춤회복 분석 전, 오늘 수면 기록을 먼저 입력해 주세요.")}
+            {t("회복 플래너 화면을 보기 전, 오늘 수면 기록을 먼저 입력해 주세요.")}
           </div>
         ) : null}
 

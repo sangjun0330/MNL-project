@@ -11,20 +11,10 @@ import { computeVitalsRange, vitalMapByISO } from "@/lib/vitals";
 import { useI18n } from "@/lib/useI18n";
 import { buildShopRecommendations, getShopImageSrc, formatShopPrice, SHOP_PRODUCTS } from "@/lib/shop";
 import type { ShopProduct } from "@/lib/shop";
-
-import { useAIRecoveryInsights } from "@/components/insights/useAIRecoveryInsights";
-import { useAIRecoveryPlanner } from "@/components/insights/useAIRecoveryPlanner";
 import { useRecoveryPlanner } from "@/components/insights/useRecoveryPlanner";
 import { BatteryGauge } from "@/components/home/BatteryGauge";
 import { WeekStrip } from "@/components/home/WeekStrip";
 import { HomeSocialCard } from "@/components/home/HomeSocialCard";
-import {
-  clearStaleRecoveryOrderDone,
-  readRecoveryOrderDone,
-  readRemoteRecoveryOrderDone,
-  writeRecoveryOrderDone,
-} from "@/lib/recoveryOrderChecklist";
-import { buildRecoveryOrderProgressId } from "@/lib/recoveryPhases";
 
 function isReasonableISODate(v: any): v is ISODate {
   if (!isISODate(v)) return false;
@@ -52,18 +42,6 @@ function cleanText(v?: string | null) {
   if (!v) return null;
   const out = String(v).replace(/\r\n/g, "\n").trim();
   return out || null;
-}
-
-function aiSummaryFallback(
-  t: (key: string, vars?: Record<string, any>) => string,
-  opts: { loading: boolean; generating: boolean; error: string | null }
-) {
-  if (opts.loading || opts.generating) return t("저장된 AI 맞춤회복을 확인하고 있어요...");
-  if (opts.error?.includes("requires_today_sleep")) return t("오늘 수면 입력 후 바로 AI 맞춤회복을 시작해요.");
-  if (opts.error?.includes("plan") || opts.error?.includes("subscription"))
-    return t("AI 맞춤회복은 Plus 이상 플랜에서 사용할 수 있어요.");
-  if (opts.error?.includes("auth")) return t("로그인 후 오늘의 AI 맞춤회복을 확인할 수 있어요.");
-  return t("AI 맞춤회복에서 오늘 플랜의 이유를 확인해요.");
 }
 
 // ── Icons ────────────────────────────────────────────────────────
@@ -198,149 +176,13 @@ export default function Home() {
   }, []);
 
   const planner = useRecoveryPlanner();
-  const aiRecovery = useAIRecoveryInsights({ mode: "cache", enabled: deferredReady && planner.aiAvailable, phase: "start" });
-  const aiRecoveryAfter = useAIRecoveryInsights({
-    mode: "cache",
-    enabled: deferredReady && planner.aiAvailable,
-    phase: "after_work",
-  });
-  const aiPlanner = useAIRecoveryPlanner({ mode: "cache", enabled: deferredReady && planner.aiAvailable, phase: "start" });
-  const aiPlannerAfter = useAIRecoveryPlanner({
-    mode: "cache",
-    enabled: deferredReady && planner.aiAvailable,
-    phase: "after_work",
-  });
-  const [plannerDoneMap, setPlannerDoneMap] = useState<Record<string, boolean>>({});
-  const activeExplanationModule = aiPlannerAfter.data?.result.explanation ?? aiPlanner.data?.result.explanation ?? null;
-  const aiPlannerHeadline = useMemo(() => {
-    const candidates = [
-      activeExplanationModule?.recovery.headline,
-      activeExplanationModule?.headline,
-      aiRecoveryAfter.data?.result?.headline,
-      aiRecovery.data?.result?.headline,
-    ];
-    for (const candidate of candidates) {
-      if (typeof candidate !== "string") continue;
-      const line = candidate.replace(/\s+/g, " ").trim();
-      if (line) return line;
-    }
-    return null;
-  }, [
-    activeExplanationModule?.headline,
-    activeExplanationModule?.recovery.headline,
-    aiRecoveryAfter.data?.result?.headline,
-    aiRecovery.data?.result?.headline,
-  ]);
-  const aiCardLoading = !aiPlannerHeadline && (
-    aiRecovery.loading ||
-    aiRecovery.generating ||
-    aiRecoveryAfter.loading ||
-    aiRecoveryAfter.generating ||
-    aiPlanner.loading ||
-    aiPlanner.generating ||
-    aiPlannerAfter.loading ||
-    aiPlannerAfter.generating
-  );
   const aiHeadline = useMemo(() => {
-    if (planner.state === "needs_records") return t("기록을 3일 이상 쌓으면 AI 맞춤회복도 열려요.");
-    if (aiPlannerHeadline) return aiPlannerHeadline;
-    if (!planner.aiAvailable && !planner.billingLoading) return t("AI 맞춤회복은 Plus 이상 플랜에서 열립니다.");
-    return aiSummaryFallback(t, {
-      loading: aiCardLoading,
-      generating: !aiCardLoading && (aiRecovery.generating || aiRecoveryAfter.generating || aiPlanner.generating || aiPlannerAfter.generating),
-      error: aiRecoveryAfter.error ?? aiPlannerAfter.error ?? aiRecovery.error ?? aiPlanner.error,
-    });
-  }, [
-    aiCardLoading,
-    aiPlanner.generating,
-    aiPlanner.error,
-    aiPlannerAfter.generating,
-    aiPlannerAfter.error,
-    aiPlannerHeadline,
-    aiRecovery.error,
-    aiRecovery.generating,
-    aiRecoveryAfter.error,
-    aiRecoveryAfter.generating,
-    planner.aiAvailable,
-    planner.billingLoading,
-    planner.state,
-    t,
-  ]);
-
-  const plannerDateISO = aiPlannerAfter.data?.dateISO ?? aiPlanner.data?.dateISO ?? todayISO();
-  const startPlannerOrders = useMemo(() => aiPlanner.data?.result.orders.items ?? [], [aiPlanner.data]);
-  const afterPlannerOrders = useMemo(() => aiPlannerAfter.data?.result.orders.items ?? [], [aiPlannerAfter.data]);
-  const plannerOrderIdsKey = useMemo(
-    () =>
-      [
-        ...startPlannerOrders.map((item) => buildRecoveryOrderProgressId("start", item.id)),
-        ...afterPlannerOrders.map((item) => buildRecoveryOrderProgressId("after_work", item.id)),
-      ].join("|"),
-    [afterPlannerOrders, startPlannerOrders]
-  );
-
-  useEffect(() => {
-    let active = true;
-    const activeIds = plannerOrderIdsKey ? plannerOrderIdsKey.split("|") : [];
-    if (activeIds.length) {
-      clearStaleRecoveryOrderDone(plannerDateISO, activeIds);
-    }
-    const localDone = readRecoveryOrderDone(plannerDateISO);
-    setPlannerDoneMap(localDone);
-    if (!activeIds.length) {
-      return () => {
-        active = false;
-      };
-    }
-    void (async () => {
-      const remoteDone = await readRemoteRecoveryOrderDone(plannerDateISO);
-      if (!active) return;
-      const keep = new Set(activeIds);
-      const merged: Record<string, boolean> = {};
-      for (const [id, done] of Object.entries({ ...remoteDone, ...localDone })) {
-        if (done && keep.has(id)) merged[id] = true;
-      }
-      setPlannerDoneMap(merged);
-      writeRecoveryOrderDone(plannerDateISO, merged);
-    })();
-    return () => {
-      active = false;
-    };
-  }, [plannerDateISO, plannerOrderIdsKey]);
-
-  const activeStartPlannerOrders = useMemo(
-    () => startPlannerOrders.filter((item) => !plannerDoneMap[buildRecoveryOrderProgressId("start", item.id)]),
-    [plannerDoneMap, startPlannerOrders]
-  );
-  const activeAfterPlannerOrders = useMemo(
-    () => afterPlannerOrders.filter((item) => !plannerDoneMap[buildRecoveryOrderProgressId("after_work", item.id)]),
-    [afterPlannerOrders, plannerDoneMap]
-  );
-  const plannerPreviewOrder =
-    activeAfterPlannerOrders[0] ??
-    activeStartPlannerOrders[0] ??
-    afterPlannerOrders[0] ??
-    startPlannerOrders[0] ??
-    null;
-  const plannerTotalOrders = startPlannerOrders.length + afterPlannerOrders.length;
-  const plannerRemainingCount = activeStartPlannerOrders.length + activeAfterPlannerOrders.length;
-  const plannerAllDone = planner.aiAvailable && plannerTotalOrders > 0 && plannerRemainingCount === 0;
-  const plannerPreviewTitle =
-    planner.state === "needs_records"
-      ? t("오늘의 오더")
-      : plannerAllDone
-        ? t("오늘의 오더를 모두 완료했어요.")
-      : planner.aiAvailable && plannerPreviewOrder
-        ? plannerPreviewOrder.title
-        : planner.ordersTop3[0]?.title ?? t("오늘의 오더를 준비 중이에요.");
-  const plannerPreviewBody =
-    planner.state === "needs_records"
-      ? t("건강 기록을 3일 이상 쌓으면 오늘 실행할 오더가 여기에 보여요.")
-      : plannerAllDone
-        ? t("필요하면 전체 보기에서 오늘 회복 흐름을 다시 확인할 수 있어요.")
-      : planner.aiAvailable && plannerPreviewOrder
-        ? plannerPreviewOrder.body
-        : planner.primaryAction ?? t("AI 맞춤회복에서 오늘 실행할 오더를 함께 정리합니다.");
+    if (planner.state === "needs_records") return t("기록이 쌓이면 맞춤회복 카드 구조가 여기에 표시됩니다.");
+    if (planner.focusFactor?.label) return `${planner.focusFactor.label} 중심 안내 화면 구조만 유지 중입니다.`;
+    return t("현재는 AI 없이 회복 카드 구조만 유지 중입니다.");
+  }, [planner.focusFactor?.label, planner.state, t]);
+  const plannerPreviewTitle = t("오늘의 오더");
+  const plannerPreviewBody = t("현재는 맞춤회복과 오더 화면의 UI 뼈대만 유지하고 있습니다.");
 
   const selectedDateLabel = useMemo(() => formatKoreanDate(homeSelected), [homeSelected]);
 
@@ -483,36 +325,15 @@ export default function Home() {
           </Link>
         </div>
 
-        {aiCardLoading ? (
-          <div className="mt-3 space-y-2">
-            <div
-              className="h-4 w-4/5 animate-pulse rounded-full"
-              style={{ background: "var(--rnest-sep)" }}
-            />
-            <div
-              className="h-4 w-3/5 animate-pulse rounded-full"
-              style={{ background: "var(--rnest-sep)" }}
-            />
-          </div>
-        ) : (
-          <p
-            className="mt-3 text-[15px] font-semibold leading-snug tracking-[-0.01em]"
-            style={{
-              color: aiPlannerHeadline
-                ? "var(--rnest-text)"
-                : "var(--rnest-sub)",
-            }}
-          >
-            {aiHeadline}
-          </p>
-        )}
+        <p
+          className="mt-3 text-[15px] font-semibold leading-snug tracking-[-0.01em]"
+          style={{ color: "var(--rnest-text)" }}
+        >
+          {aiHeadline}
+        </p>
 
         <p className="mt-2 text-[13px] leading-relaxed" style={{ color: "var(--rnest-sub)" }}>
-          {planner.state === "needs_records"
-            ? t("회복 플래너가 열리면 AI 맞춤회복도 함께 볼 수 있어요.")
-            : planner.aiAvailable
-              ? t("회복 플래너가 왜 이런 우선순위를 잡았는지 AI가 설명해 줍니다.")
-              : t("AI 맞춤회복은 Plus 이상 플랜에서 열립니다.")}
+          {t("AI 파이프라인 없이도 카드 레이아웃과 이동 동선은 그대로 확인할 수 있습니다.")}
         </p>
 
         <div className="mt-4 flex flex-wrap gap-2">
@@ -521,6 +342,12 @@ export default function Home() {
             style={{ borderColor: "var(--rnest-sep)", color: "var(--rnest-text)" }}
           >
             {planner.focusFactor ? `${t("회복 포커스")} ${planner.focusFactor.label}` : t("오늘 회복")}
+          </span>
+          <span
+            className="inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold"
+            style={{ borderColor: "var(--rnest-sep)", color: "var(--rnest-sub)" }}
+          >
+            UI skeleton
           </span>
         </div>
       </div>
@@ -574,21 +401,13 @@ export default function Home() {
           >
             {planner.state === "needs_records" ? t("현재 {count}일 기록됨", { count: planner.recordedDays }) : planner.nextDutyLabel}
           </span>
-          {planner.aiAvailable && plannerTotalOrders > 0 ? (
-            <span
-              className="inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold"
-              style={{ borderColor: "var(--rnest-sep)", color: "var(--rnest-sub)" }}
-            >
-              {plannerRemainingCount > 0 ? t("남은 오더 {count}개", { count: plannerRemainingCount }) : t("오늘 오더 완료")}
-            </span>
-          ) : null}
+          <span
+            className="inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold"
+            style={{ borderColor: "var(--rnest-sep)", color: "var(--rnest-sub)" }}
+          >
+            {t("정적 오더 레이아웃")}
+          </span>
         </div>
-
-        {!planner.fullAccess && !planner.billingLoading ? (
-          <div className="mt-3 inline-flex items-center rounded-full bg-[#FFF5E8] px-2.5 py-1 text-[11px] font-semibold text-[#A05A00]">
-            {t("요약은 무료 · 전체 플랜은 Pro")}
-          </div>
-        ) : null}
       </Link>
 
       {/* ── Condition (compact) ── */}

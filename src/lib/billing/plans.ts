@@ -109,7 +109,7 @@ const PLAN_MAP: Record<PlanTier, PlanDefinition> = {
   plus: {
     tier: "plus",
     title: "Plus",
-    description: "AI 맞춤회복과 오늘의 오더를 중심으로 쓰는 플랜입니다. 기본 검색 10회가 포함됩니다.",
+    description: "회복 플래너 화면과 기본 검색을 함께 쓰는 플랜입니다. 기본 검색 10회가 포함됩니다.",
     priceKrw: 9900,
     periodDays: DEFAULT_PERIOD_DAYS,
     orderName: "RNest Plus Monthly",
@@ -122,8 +122,8 @@ const PLAN_MAP: Record<PlanTier, PlanDefinition> = {
     medSafetyIncludedCredits: 10,
     medSafetyHistoryLimit: 5,
     features: [
-      "AI 맞춤회복 전체 이용",
-      "오늘의 오더 체크리스트",
+      "회복 플래너 화면",
+      "오늘의 오더 화면",
       "기본 검색 10회 포함",
       "기본 검색/프리미엄 검색 추가 구매 가능",
       "최근 AI 검색 기록 5개 저장",
@@ -132,7 +132,7 @@ const PLAN_MAP: Record<PlanTier, PlanDefinition> = {
   pro: {
     tier: "pro",
     title: "Pro",
-    description: "더 높은 품질의 AI 회복 기능과 프리미엄 검색을 많이 쓰는 플랜입니다. 프리미엄 검색 100회가 포함됩니다.",
+    description: "프리미엄 검색을 많이 쓰는 플랜입니다. 프리미엄 검색 100회가 포함됩니다.",
     priceKrw: 14900,
     periodDays: DEFAULT_PERIOD_DAYS,
     orderName: "RNest Pro Monthly",
@@ -148,7 +148,7 @@ const PLAN_MAP: Record<PlanTier, PlanDefinition> = {
       "Plus 플랜의 모든 기능",
       "프리미엄 검색 100회 포함",
       "기본 검색/프리미엄 검색 추가 구매 가능",
-      "더 높은 품질의 AI 맞춤회복 및 오늘의 오더",
+      "더 높은 품질의 AI 검색",
       "최근 AI 검색 기록 10개 저장",
     ],
   },

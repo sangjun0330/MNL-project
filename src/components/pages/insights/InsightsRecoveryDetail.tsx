@@ -1,91 +1,57 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
-import { RecoveryPlannerUpgradeCard } from "@/components/insights/RecoveryPlannerUpgradeCard";
-import {
-  RecoveryAIOverviewLinkCard,
-  RecoveryOrdersLinkCard,
-} from "@/components/insights/RecoveryPlannerFlowCards";
-import { useAIRecoveryInsights } from "@/components/insights/useAIRecoveryInsights";
-import { useAIRecoveryPlanner } from "@/components/insights/useAIRecoveryPlanner";
 import { useRecoveryPlanner } from "@/components/insights/useRecoveryPlanner";
 import { useInsightsData, isInsightsLocked, INSIGHTS_MIN_DAYS, shiftKo } from "@/components/insights/useInsightsData";
-import { DetailChip, DETAIL_ACCENTS, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
-import { buildExplanationModule, buildFallbackModules, buildPlannerPayloadFromRecoveryPayload } from "@/lib/aiRecoveryPlanner";
+import { DetailCard, DetailChip, DETAIL_ACCENTS, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
 import { formatKoreanDate } from "@/lib/date";
-import { withReturnTo } from "@/lib/navigation";
-import { buildRecoveryOrderProgressId } from "@/lib/recoveryPhases";
-import {
-  clearStaleRecoveryOrderDone,
-  readRecoveryOrderDone,
-  readRemoteRecoveryOrderDone,
-  writeRecoveryOrderDone,
-} from "@/lib/recoveryOrderChecklist";
 import { useI18n } from "@/lib/useI18n";
+
+function RecoverySkeletonLinkCard({
+  href,
+  label,
+  title,
+  headline,
+  summary,
+  chips,
+}: {
+  href: string;
+  label: string;
+  title: string;
+  headline: string;
+  summary: string;
+  chips?: ReactNode;
+}) {
+  return (
+    <Link href={href} className="block">
+      <DetailCard
+        className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
+        style={{
+          background: "linear-gradient(180deg, rgba(250,251,255,0.98) 0%, rgba(255,255,255,0.96) 100%)",
+          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.92), 0 16px 40px rgba(15,36,74,0.04)",
+        }}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0 max-w-[680px]">
+            <div className="text-[10.5px] font-semibold tracking-[0.18em] text-[color:var(--rnest-accent)]">{label}</div>
+            <div className="mt-1 text-[18px] font-bold tracking-[-0.03em] text-ios-text">{title}</div>
+            <p className="mt-3 break-keep text-[16px] font-bold leading-7 tracking-[-0.03em] text-ios-text">{headline}</p>
+            <p className="mt-2 break-keep text-[13px] leading-6 text-ios-sub">{summary}</p>
+          </div>
+          <div className="text-[24px] text-black/28">›</div>
+        </div>
+        {chips ? <div className="mt-4 flex flex-wrap gap-2">{chips}</div> : null}
+      </DetailCard>
+    </Link>
+  );
+}
 
 export function InsightsRecoveryDetail() {
   const { t } = useI18n();
   const { end, recordedDays, syncLabel, todayShift, hasTodayShift } = useInsightsData();
   const planner = useRecoveryPlanner();
-  const aiRecovery = useAIRecoveryInsights({
-    mode: "cache",
-    enabled: !isInsightsLocked(recordedDays) && planner.aiAvailable,
-    phase: "start",
-  });
-  const aiRecoveryAfter = useAIRecoveryInsights({
-    mode: "cache",
-    enabled: !isInsightsLocked(recordedDays) && planner.aiAvailable,
-    phase: "after_work",
-  });
-  const aiPlanner = useAIRecoveryPlanner({
-    mode: "cache",
-    enabled: !isInsightsLocked(recordedDays) && planner.aiAvailable,
-    phase: "start",
-  });
-  const aiPlannerAfter = useAIRecoveryPlanner({
-    mode: "cache",
-    enabled: !isInsightsLocked(recordedDays) && planner.aiAvailable,
-    phase: "after_work",
-  });
-  const startDisplayPlanner = aiPlanner.data ?? buildPlannerPayloadFromRecoveryPayload(aiRecovery.data, 3, "overview_recovery_cache");
-  const afterDisplayPlanner =
-    aiPlannerAfter.data ?? buildPlannerPayloadFromRecoveryPayload(aiRecoveryAfter.data, 3, "overview_recovery_cache");
-  const [doneMap, setDoneMap] = useState<Record<string, boolean>>({});
-  const plannerDateISO = afterDisplayPlanner?.dateISO ?? startDisplayPlanner?.dateISO ?? end;
-
-  useEffect(() => {
-    let active = true;
-    const activeIds = [
-      ...(startDisplayPlanner?.result.orders.items.map((item) => buildRecoveryOrderProgressId("start", item.id)) ?? []),
-      ...(afterDisplayPlanner?.result.orders.items.map((item) => buildRecoveryOrderProgressId("after_work", item.id)) ?? []),
-    ];
-    if (activeIds.length) {
-      clearStaleRecoveryOrderDone(plannerDateISO, activeIds);
-    }
-    const localDone = readRecoveryOrderDone(plannerDateISO);
-    setDoneMap(localDone);
-    if (!activeIds.length) {
-      return () => {
-        active = false;
-      };
-    }
-    void (async () => {
-      const remoteDone = await readRemoteRecoveryOrderDone(plannerDateISO);
-      if (!active) return;
-      const keep = new Set(activeIds);
-      const merged: Record<string, boolean> = {};
-      for (const [id, done] of Object.entries({ ...remoteDone, ...localDone })) {
-        if (done && keep.has(id)) merged[id] = true;
-      }
-      setDoneMap(merged);
-      writeRecoveryOrderDone(plannerDateISO, merged);
-    })();
-    return () => {
-      active = false;
-    };
-  }, [afterDisplayPlanner, plannerDateISO, startDisplayPlanner]);
 
   if (isInsightsLocked(recordedDays)) {
     return (
@@ -99,70 +65,11 @@ export function InsightsRecoveryDetail() {
     );
   }
 
-  const fallbackModules = buildFallbackModules({
-    language: "ko",
-    plannerContext: {
-      focusFactor: planner.focusFactor,
-      primaryAction: planner.primaryAction,
-      avoidAction: planner.avoidAction,
-      nextDuty: planner.nextDuty,
-      nextDutyDate: planner.nextDutyDate,
-      plannerTone: planner.tone,
-      ordersTop3: planner.ordersTop3,
-    },
-    nextDutyLabel: planner.nextDutyLabel,
-    timelinePreview: planner.timelinePreview,
-  });
-
-  const explanationModule = afterDisplayPlanner?.result.explanation
-    ? afterDisplayPlanner.result.explanation
-    : startDisplayPlanner?.result.explanation
-      ? startDisplayPlanner.result.explanation
-      : aiRecoveryAfter.data
-        ? buildExplanationModule(aiRecoveryAfter.data.result, aiRecoveryAfter.data.language)
-        : aiRecovery.data
-          ? buildExplanationModule(aiRecovery.data.result, aiRecovery.data.language)
-      : {
-        title: "AI 맞춤회복",
-        eyebrow: "AI Recovery",
-        headline: planner.focusFactor ? `${planner.focusFactor.label} 중심 회복` : planner.primaryAction ?? "오늘 회복 우선순위를 확인해 보세요.",
-        summary: "오늘 회복이 어디에 집중되어야 하는지, 왜 그게 중요한지 AI 기준으로 정리합니다.",
-        recovery: {
-          headline: planner.primaryAction ?? "오늘 회복 우선순위를 확인해 보세요.",
-          compoundAlert: null,
-          sections: [],
-          weeklySummary: null,
-        },
-      };
-
-  const ordersModule = afterDisplayPlanner?.result.orders ?? startDisplayPlanner?.result.orders ?? fallbackModules.orders;
-
-  const startOrders = startDisplayPlanner?.result.orders.items ?? [];
-  const afterOrders = afterDisplayPlanner?.result.orders.items ?? [];
-  const plannerReady = Boolean(startDisplayPlanner || afterDisplayPlanner);
-  const activeOrders = plannerReady
-    ? [
-        ...startOrders.filter((item) => !doneMap[buildRecoveryOrderProgressId("start", item.id)]),
-        ...afterOrders.filter((item) => !doneMap[buildRecoveryOrderProgressId("after_work", item.id)]),
-      ]
-    : [];
-  const completedCount = plannerReady ? startOrders.length + afterOrders.length - activeOrders.length : 0;
-  const recoveryReady = Boolean(aiPlannerAfter.data?.result.explanation || aiPlanner.data?.result.explanation || aiRecoveryAfter.data || aiRecovery.data);
-  const personalizationHref = withReturnTo("/settings/personalization", "/insights/recovery");
-
   return (
     <InsightDetailShell
       title="회복 플래너"
       subtitle={formatKoreanDate(end)}
-      meta="AI 맞춤회복과 오늘의 오더를 한 흐름으로 보고, 바로 실행까지 이어가세요."
-      right={
-        <Link
-          href={personalizationHref}
-          className="inline-flex h-9 items-center justify-center rounded-full border border-[#DCE6FF] bg-white px-3 text-[11px] font-semibold text-[#315CA8] shadow-apple-sm"
-        >
-          개인화
-        </Link>
-      }
+      meta="맞춤회복과 오늘의 오더 화면의 UI 구조만 유지 중입니다."
       chips={
         <>
           <DetailChip color={DETAIL_ACCENTS.mint}>{planner.nextDutyLabel}</DetailChip>
@@ -172,44 +79,46 @@ export function InsightsRecoveryDetail() {
         </>
       }
     >
-      {!planner.aiAvailable && !planner.billingLoading ? (
-        <>
-          <RecoveryAIOverviewLinkCard
-            href="/insights/recovery/ai"
-            module={explanationModule}
-            focusLabel={planner.focusFactor?.label ?? null}
-            ready={recoveryReady}
-          />
-          <RecoveryOrdersLinkCard
-            href="/insights/recovery/orders"
-            module={ordersModule}
-            ready={plannerReady}
-            activeCount={plannerReady ? activeOrders.length : null}
-            completedCount={plannerReady ? completedCount : null}
-          />
-          <RecoveryPlannerUpgradeCard
-            title="AI 맞춤회복과 오늘의 오더 전체는 Plus 이상 플랜에서 열립니다."
-            description="AI가 왜 이 회복을 먼저 봐야 하는지 설명하고, 바로 체크할 수 있는 오늘의 오더까지 함께 제공합니다."
-            returnTo="/insights/recovery"
-          />
-        </>
-      ) : (
-        <>
-          <RecoveryAIOverviewLinkCard
-            href="/insights/recovery/ai"
-            module={explanationModule}
-            focusLabel={planner.focusFactor?.label ?? null}
-            ready={recoveryReady}
-          />
-          <RecoveryOrdersLinkCard
-            href="/insights/recovery/orders"
-            module={ordersModule}
-            ready={plannerReady}
-            activeCount={plannerReady ? activeOrders.length : null}
-            completedCount={plannerReady ? completedCount : null}
-          />
-        </>
-      )}
+      <RecoverySkeletonLinkCard
+        href="/insights/recovery/ai"
+        label="AI CUSTOMIZED RECOVERY"
+        title="AI 맞춤회복"
+        headline="해설 카드 구조만 남겨 둔 정적 화면입니다."
+        summary="헤드라인, 요약, 섹션 배치 같은 UI 뼈대만 유지하고 생성 파이프라인과 서버 연동은 제거했습니다."
+        chips={
+          <>
+            <DetailChip color={DETAIL_ACCENTS.navy}>UI skeleton</DetailChip>
+            {planner.focusFactor ? <DetailChip color={DETAIL_ACCENTS.mint}>회복 포커스 {planner.focusFactor.label}</DetailChip> : null}
+          </>
+        }
+      />
+
+      <RecoverySkeletonLinkCard
+        href="/insights/recovery/orders"
+        label="TODAY ORDERS"
+        title="오늘의 오더"
+        headline="체크리스트 카드 구조만 유지 중입니다."
+        summary="오더 개수 선택, 단계 구분, 체크리스트 카드 위치는 남겨 두고 생성·진행도 저장 시스템은 제거했습니다."
+        chips={
+          <>
+            <DetailChip color={DETAIL_ACCENTS.navy}>Checklist skeleton</DetailChip>
+            <DetailChip color={DETAIL_ACCENTS.mint}>1-5개 오더 레이아웃</DetailChip>
+          </>
+        }
+      />
+
+      <DetailCard className="p-5 sm:p-6">
+        <div className="text-[12px] font-semibold text-ios-sub">Recovery Notes</div>
+        <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-ios-text">현재 유지 범위</div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <DetailChip color={DETAIL_ACCENTS.mint}>허브 카드 2개</DetailChip>
+          <DetailChip color={DETAIL_ACCENTS.navy}>상세 화면 골격</DetailChip>
+          <DetailChip color={DETAIL_ACCENTS.navy}>이동 동선</DetailChip>
+        </div>
+        <p className="mt-3 text-[14px] leading-relaxed text-ios-sub">
+          회복 허브는 계속 열리지만, 내부 데이터는 더 이상 생성하거나 저장하지 않습니다. 인사이트 메인 통계와 에너지 도둑 화면은 그대로 유지됩니다.
+        </p>
+      </DetailCard>
     </InsightDetailShell>
   );
 }

@@ -172,10 +172,10 @@ export function ServiceConsentScreen({ onSubmit }: Props) {
             시작 전에 동의만 마무리해 주세요
           </h1>
           <p className="mt-3 max-w-[560px] text-[14px] leading-6 text-[#51667C]">
-            RNest는 기록을 클라우드에 저장하고, AI 맞춤회복을 위해 외부 AI 클라우드를 사용합니다. 아래 두 항목에 모두 동의해야 앱을 사용할 수 있습니다.
+            RNest는 기록을 클라우드에 저장하고, AI 검색을 위해 외부 AI 클라우드를 사용합니다. 아래 두 항목에 모두 동의해야 앱을 사용할 수 있습니다.
           </p>
           <div className="mt-5 rounded-[20px] border border-[#E7ECF3] bg-[#F8FBFE] px-4 py-3 text-[12.5px] leading-5 text-[#5A6E84]">
-            동의하지 않으면 기록 저장, 일정 연동, AI 맞춤회복, AI 검색을 사용할 수 없습니다.
+            동의하지 않으면 기록 저장, 일정 연동, AI 검색을 사용할 수 없습니다.
           </div>
         </div>
 

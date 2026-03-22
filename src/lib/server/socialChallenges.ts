@@ -15,7 +15,6 @@ import type {
 } from "@/types/social";
 import type { ISODate } from "@/lib/date";
 import { computeMemberWeeklyVitals } from "@/lib/server/socialGroups";
-import { countRecoveryOrderCompletionsFromPayload } from "@/lib/server/recoveryOrderStore";
 
 // ── 상수 ──────────────────────────────────────────────────────
 export const MAX_ACTIVE_CHALLENGES_PER_GROUP = 5;
@@ -30,7 +29,6 @@ const CHALLENGE_METRICS = new Set<ChallengeMetric>([
   "activity",
   "caffeine",
   "mood",
-  "order_completion",
 ]);
 
 const CHALLENGE_TYPES = new Set<ChallengeType>([
@@ -70,8 +68,7 @@ function normalizeMetric(value: unknown): ChallengeMetric {
     value === "stress" ||
     value === "activity" ||
     value === "caffeine" ||
-    value === "mood" ||
-    value === "order_completion"
+    value === "mood"
   ) {
     return value;
   }
@@ -138,11 +135,9 @@ function rowToEntry(row: any): ChallengeEntry {
 
 type MemberChallengeSnapshot = {
   vitals: ReturnType<typeof computeMemberWeeklyVitals>;
-  orderCompletionCount: number | null;
 };
 
 function metricSnapshotValue(metric: ChallengeMetric, snapshot: MemberChallengeSnapshot): number | null {
-  if (metric === "order_completion") return snapshot.orderCompletionCount;
   const vitals = snapshot.vitals;
   if (!vitals) return null;
   if (metric === "sleep") return vitals.weeklyAvgSleep ?? null;
@@ -176,7 +171,6 @@ async function loadChallengeSnapshotMap(
   for (const userId of userIds) {
     snapshotMap.set(userId, {
       vitals: null,
-      orderCompletionCount: 0,
     });
   }
 
@@ -186,7 +180,6 @@ async function loadChallengeSnapshotMap(
     const payload = (row.payload ?? {}) as Record<string, unknown>;
     snapshotMap.set(userId, {
       vitals: computeMemberWeeklyVitals(payload, todayISO),
-      orderCompletionCount: countRecoveryOrderCompletionsFromPayload(payload, todayISO, 7),
     });
   }
 
@@ -280,7 +273,7 @@ async function syncChallengeRows(admin: any, challengeRows: any[]): Promise<void
         const nextUpdate = buildEntrySyncUpdate({
           challenge,
           entry,
-          snapshot: snapshotMap.get(String(entry.user_id ?? "")) ?? { vitals: null, orderCompletionCount: 0 },
+          snapshot: snapshotMap.get(String(entry.user_id ?? "")) ?? { vitals: null },
           nowIso,
           todayISO,
         });
