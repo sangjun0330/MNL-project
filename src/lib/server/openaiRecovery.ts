@@ -749,12 +749,37 @@ async function callResponsesApi(args: {
     };
   }
 
-  const json = await response.json().catch(() => null);
+  // response body를 text로 먼저 읽어 JSON 파싱 실패 시 원인 파악 가능하게 함
+  const rawBody = await response.text().catch(() => "");
+  let json: any = null;
+  try {
+    json = rawBody ? JSON.parse(rawBody) : null;
+  } catch {
+    // JSON 파싱 실패 — rawBody 로그로 원인 파악
+    const snippet = rawBody.slice(0, 300).replace(/\s+/g, " ").trim();
+    console.error(`[callResponsesApi] response.json parse failed`, { model: requestConfig.model, logFeature, snippet: snippet || "(empty)" });
+    return {
+      text: null,
+      error: `openai_response_json_parse_failed_model:${requestConfig.model}_snippet:${truncateError(snippet || "empty_body")}`,
+    };
+  }
   const text = extractResponsesText(json);
   if (!text) {
     const status = typeof json?.status === "string" ? json.status : "unknown";
     const incompleteReason =
       typeof json?.incomplete_details?.reason === "string" ? json.incomplete_details.reason : "none";
+    const outputLength = Array.isArray(json?.output) ? json.output.length : -1;
+    const hasOutputText = typeof json?.output_text === "string" && json.output_text.length > 0;
+    console.error(`[callResponsesApi] extractResponsesText returned empty`, {
+      model: requestConfig.model,
+      logFeature,
+      status,
+      incompleteReason,
+      outputLength,
+      hasOutputText,
+      bodyLength: rawBody.length,
+      snippet: rawBody.slice(0, 300).replace(/\s+/g, " ").trim(),
+    });
     return {
       text: null,
       error: `openai_empty_text_model:${requestConfig.model}_status:${status}_incomplete:${incompleteReason}`,
@@ -1854,6 +1879,7 @@ export async function generateAIRecoveryWithOpenAI(
 
       if (!attempt.text) {
         lastError = attempt.error ?? `openai_request_failed_model:${currentModel}`;
+        console.error(`[generateAIRecoveryWithOpenAI] attempt ${attemptIndex} no text`, { error: lastError });
         // 지역 제한·인증 오류처럼 재시도가 의미 없는 영구 오류는 즉시 종료
         if (!isRetryableRecoveryError(lastError)) break;
         // 재시도 가능한 오류는 짧은 딜레이 후 재시도
@@ -1867,11 +1893,21 @@ export async function generateAIRecoveryWithOpenAI(
       const parsedObject = parseJsonObject(rawText);
       if (!parsedObject) {
         lastError = `openai_recovery_non_json_model:${currentModel}`;
+        console.error(`[generateAIRecoveryWithOpenAI] attempt ${attemptIndex} non-json`, { snippet: rawText.slice(0, 200) });
         continue;
       }
       const parsed = parseRecoveryJsonResult(parsedObject);
       if (!parsed) {
         lastError = `openai_recovery_invalid_shape_model:${currentModel}`;
+        const keys = Object.keys(parsedObject).join(",");
+        const headline = asString(parsedObject.headline);
+        const sectionsRaw = Array.isArray(parsedObject.sections) ? parsedObject.sections : Array.isArray(parsedObject.items) ? parsedObject.items : [];
+        console.error(`[generateAIRecoveryWithOpenAI] attempt ${attemptIndex} invalid_shape`, {
+          keys,
+          hasHeadline: Boolean(headline),
+          sectionsCount: sectionsRaw.length,
+          firstSection: sectionsRaw[0] ? JSON.stringify(sectionsRaw[0]).slice(0, 200) : null,
+        });
         continue;
       }
       const safeSections = context.menstrualTrackingEnabled
@@ -2652,7 +2688,8 @@ function parsePlannerChecklistItems(
 
   const deduped = items.filter((item, index) => items.findIndex((candidate) => candidate.id === item.id) === index);
   if (!deduped.length) return [];
-  if (targetCount != null && deduped.length !== targetCount) return [];
+  // 요청 수와 정확히 일치하지 않아도 ±1 범위이면 허용 (모델이 항상 정확한 수를 반환하지 않을 수 있음)
+  if (targetCount != null && Math.abs(deduped.length - targetCount) > 1) return [];
   return deduped.slice(0, targetCount ?? 5);
 }
 
@@ -2741,6 +2778,7 @@ async function generatePlannerOrdersWithOpenAI(
 
       if (!attempt.text) {
         lastError = attempt.error ?? `openai_request_failed_model:${currentModel}`;
+        console.error(`[generatePlannerOrdersWithOpenAI] attempt ${attemptIndex} no text`, { error: lastError });
         if (!isRetryableRecoveryError(lastError)) break;
         if (attemptIndex < 2) {
           await new Promise((r) => setTimeout(r, 1000 * (attemptIndex + 1)));
@@ -2752,6 +2790,7 @@ async function generatePlannerOrdersWithOpenAI(
       const parsed = parseJsonObject(generatedText);
       if (!parsed) {
         lastError = `openai_planner_orders_non_json_model:${currentModel}`;
+        console.error(`[generatePlannerOrdersWithOpenAI] attempt ${attemptIndex} non-json`, { snippet: generatedText.slice(0, 200) });
         continue;
       }
 
@@ -2761,15 +2800,26 @@ async function generatePlannerOrdersWithOpenAI(
         params.requestedOrderCount
       );
       const targetCount = normalizeRequestedOrderCount(params.requestedOrderCount);
+      // 아이템 수가 요청 수와 정확히 일치하지 않아도 ±1 범위 내이면 허용
+      // 모델이 항상 정확한 수를 반환하지 않을 수 있으므로 유연하게 처리
+      const itemCountOk =
+        checklistModule.items.length >= 1 &&
+        checklistModule.items.length <= 5 &&
+        (targetCount == null || Math.abs(checklistModule.items.length - targetCount) <= 1);
       if (
         !checklistModule.title ||
         !checklistModule.headline ||
         !checklistModule.summary ||
-        checklistModule.items.length < 1 ||
-        checklistModule.items.length > 5 ||
-        (targetCount != null && checklistModule.items.length !== targetCount)
+        !itemCountOk
       ) {
         lastError = `openai_planner_orders_incomplete_model:${currentModel}`;
+        console.error(`[generatePlannerOrdersWithOpenAI] attempt ${attemptIndex} validation failed`, {
+          hasTitle: Boolean(checklistModule.title),
+          hasHeadline: Boolean(checklistModule.headline),
+          hasSummary: Boolean(checklistModule.summary),
+          itemCount: checklistModule.items.length,
+          targetCount,
+        });
         continue;
       }
 

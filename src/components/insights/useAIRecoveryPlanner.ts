@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AIRecoveryPlannerPayload } from "@/lib/aiRecoveryPlanner";
 import { todayISO } from "@/lib/date";
 import { getBrowserAuthHeaders, useAuthState } from "@/lib/auth";
@@ -28,6 +28,8 @@ type HookResult = {
 };
 
 const inFlightGenerate = new Map<string, Promise<AIRecoveryPlannerPayload | null>>();
+// forceGenerate 경로도 동일한 deduplication 적용
+const inFlightForceGenerate = new Map<string, Promise<AIRecoveryPlannerPayload | null>>();
 const sessionDailyCache = new Map<string, AIRecoveryPlannerPayload>();
 const DEFAULT_ORDER_COUNT = 3;
 
@@ -160,6 +162,8 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
   }, [lang, phase, user?.userId]);
 
   const isStoreHydrated = state.selected !== ("1970-01-01" as any);
+  // 마지막으로 소비(consumed)한 manualGenerateState.count를 추적해 중복 실행 방지
+  const lastConsumedCountRef = useRef(0);
 
   useEffect(() => {
     if (!enabled) {
@@ -182,7 +186,7 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
     const currentRequestedOrderCount = manualGenerateState.orderCount;
     const key = requestKey(user.userId, lang, dateISO, phase, currentRequestedOrderCount);
     let active = true;
-    const forceGenerate = mode === "generate" && manualGenerateState.count > 0;
+    const forceGenerate = mode === "generate" && manualGenerateState.count > 0 && manualGenerateState.count !== lastConsumedCountRef.current;
     const requestedOrderCount = forceGenerate ? manualGenerateState.orderCount : null;
 
     const fromSession = sessionDailyCache.get(key) ?? null;
@@ -219,13 +223,27 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
           return;
         }
 
-        const shouldGenerate = mode === "generate" && (autoGenerate || manualGenerateState.count > 0);
+        const shouldGenerate = mode === "generate" && (autoGenerate || forceGenerate);
         if (!shouldGenerate) return;
 
         setGenerating(true);
-        const generated = forceGenerate
-          ? await fetchAIRecoveryPlanner(lang, phase, false, requestedOrderCount, true)
-          : await getOrStartGenerate(user.userId, lang, dateISO, phase, requestedOrderCount);
+        // forceGenerate도 deduplication 적용: 동일 키에 대해 진행 중인 요청이 있으면 재사용
+        let generated: AIRecoveryPlannerPayload | null;
+        if (forceGenerate) {
+          const forceKey = key;
+          const existing = inFlightForceGenerate.get(forceKey);
+          if (existing) {
+            generated = await existing;
+          } else {
+            const promise = fetchAIRecoveryPlanner(lang, phase, false, requestedOrderCount, true).finally(() => {
+              inFlightForceGenerate.delete(forceKey);
+            });
+            inFlightForceGenerate.set(forceKey, promise);
+            generated = await promise;
+          }
+        } else {
+          generated = await getOrStartGenerate(user.userId, lang, dateISO, phase, requestedOrderCount);
+        }
         if (!active) return;
         if (!generated) {
           throw new Error("ai_recovery_planner_empty_payload");
@@ -240,10 +258,8 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
         setError(err?.message ?? "network_error");
       } finally {
         if (active) {
-          if (manualGenerateState.count > 0) {
-            setManualGenerateState((current) =>
-              current.count > 0 ? { count: 0, orderCount: current.orderCount } : current
-            );
+          if (forceGenerate) {
+            lastConsumedCountRef.current = manualGenerateState.count;
           }
           setGenerating(false);
           setLoading(false);
