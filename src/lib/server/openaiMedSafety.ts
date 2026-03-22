@@ -1869,6 +1869,13 @@ function isPremiumSearchModel(model: string | null | undefined) {
   return String(model ?? "").trim().toLowerCase() === "gpt-5.4";
 }
 
+function resolveInternalUtilityModel(answerModel: string) {
+  const configured = String(process.env.OPENAI_MED_SAFETY_INTERNAL_MODEL ?? "").trim();
+  if (configured) return configured;
+  if (isPremiumSearchModel(answerModel)) return "gpt-5.2";
+  return answerModel;
+}
+
 async function resolveRouteDecision(args: {
   runtimeMode: MedSafetyRuntimeMode;
   query: string;
@@ -1968,12 +1975,17 @@ async function runQualityGateAndRepair(args: {
   repaired: boolean;
 }> {
   const heuristicDecision = buildHeuristicQualityDecision(args.answer, args.decision, args.promptAssembly?.blueprint ?? null);
-  const shouldCallModelGate = shouldRunQualityGate({
-    decision: args.decision,
-    isPremiumSearch: args.isPremiumSearch,
-    hasImage: args.hasImage,
-    answer: args.answer,
-  });
+  // If the visible answer was already streamed to the client, there is nothing left
+  // for the model gate to repair. In that case, keep only the local heuristic gate
+  // to avoid a second premium-model request that cannot change the delivered answer.
+  const shouldCallModelGate =
+    args.allowRepair &&
+    shouldRunQualityGate({
+      decision: args.decision,
+      isPremiumSearch: args.isPremiumSearch,
+      hasImage: args.hasImage,
+      answer: args.answer,
+    });
 
   let gateUsageTotal: ResponsesUsage | null = null;
   let modelDecision: MedSafetyQualityDecision | null = null;
@@ -2176,6 +2188,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
       const conversationId = useContinuationState ? params.conversationId : undefined;
       const shouldUseContinuationIds = Boolean(previousResponseId || conversationId);
       const isPremiumSearch = isPremiumSearchModel(candidateModel);
+      const internalUtilityModel = resolveInternalUtilityModel(candidateModel);
       let routeDecision: MedSafetyRouteDecision;
       let routeUsage: ResponsesUsage | null = null;
       let promptProfile: MedSafetyPromptProfile = {
@@ -2187,7 +2200,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         locale: params.locale,
         imageDataUrl: params.imageDataUrl,
         apiKey,
-        model: candidateModel,
+        model: internalUtilityModel,
         apiBaseUrl,
         signal: params.signal,
         upstreamTimeoutMs,
@@ -2218,11 +2231,12 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
       logHybridDiagnostics({
         runtimeMode,
         stage: "router",
-        model: candidateModel,
+        model: internalUtilityModel,
         routeDecision,
         usage: routeUsage,
         promptChars: mainDeveloperPrompt.length,
         extra: {
+          answerModel: candidateModel,
           mainPromptMode: runtimeMode === "hybrid_live" ? "behavioral_contract_rich_internal_sparse_prompt" : "legacy_monolithic",
           actualPromptChars: mainDeveloperPrompt.length,
           tokenCandidates: promptProfile.outputTokenCandidates.join(","),
@@ -2284,7 +2298,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
           decision: routeDecision,
           promptAssembly,
           apiKey,
-          model: candidateModel,
+          model: internalUtilityModel,
           apiBaseUrl,
           signal: params.signal,
           upstreamTimeoutMs,
@@ -2301,11 +2315,12 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         logHybridDiagnostics({
           runtimeMode,
           stage: "quality_gate",
-          model: candidateModel,
+          model: internalUtilityModel,
           routeDecision,
           usage: quality.totalUsage,
           promptChars: mainDeveloperPrompt.length,
           extra: {
+            answerModel: candidateModel,
             verdict: quality.gateDecision?.verdict ?? "not_run",
             repaired: quality.repaired,
             allowRepair: !mainAttempt.streamed,
