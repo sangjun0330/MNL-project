@@ -137,10 +137,31 @@ function inferLengthPlan(decision: MedSafetyInternalDecision, hasImage: boolean)
   return "standard" as const;
 }
 
-function buildProjection(decision: MedSafetyInternalDecision, packPlan: MedSafetyPackPlan, locale: "ko" | "en"): MedSafetyPromptProjection {
+function shouldIncludeFastDistinctionPoint(decision: MedSafetyInternalDecision, signals: MedSafetyQuestionSignals) {
+  if (decision.intent === "compare") return true;
+  if (signals.mixedNumericAction || signals.asksSelection || signals.asksThreshold) return true;
+  if (signals.mentionsAlarm || signals.mentionsLineOrTube) return true;
+  return false;
+}
+
+function shouldIncludeQuickCheckSequence(decision: MedSafetyInternalDecision, signals: MedSafetyQuestionSignals) {
+  if (decision.intent === "action") return true;
+  if (signals.bedsideSweep || signals.falseWorseningRisk || signals.preNotification) return true;
+  if (signals.mentionsAlarm || signals.mentionsLineOrTube || signals.mentionsSetting) return true;
+  return false;
+}
+
+function buildProjection(
+  decision: MedSafetyInternalDecision,
+  packPlan: MedSafetyPackPlan,
+  locale: "ko" | "en",
+  signals: MedSafetyQuestionSignals
+): MedSafetyPromptProjection {
   const includeCoverage = packPlan.visiblePacks.includes("bedside_pack") || packPlan.visiblePacks.includes("paired_problem_pack");
   const includeException = packPlan.visiblePacks.includes("exception_pack");
   const includeCommunication = packPlan.visiblePacks.includes("notify_pack");
+  const needsFastDistinctionPoint = shouldIncludeFastDistinctionPoint(decision, signals);
+  const needsQuickCheckSequence = shouldIncludeQuickCheckSequence(decision, signals);
 
   const activeDirectiveKeys: MedSafetyProjectionDirectiveKey[] = [
     "openingDirective",
@@ -190,6 +211,8 @@ function buildProjection(decision: MedSafetyInternalDecision, packPlan: MedSafet
             : "Keep the answer compressed and high density rather than long. Use a conclusion plus at most 4 short cards.",
       renderDirective:
         "Output plain text only. Use a titleless conclusion first, then short cards with concrete headings. Each card must have one lead sentence and only 2-3 bullets. Do not expose internal planning language.",
+      needsFastDistinctionPoint,
+      needsQuickCheckSequence,
       activeDirectiveKeys,
       droppedDirectiveKeys: [],
     };
@@ -231,6 +254,8 @@ function buildProjection(decision: MedSafetyInternalDecision, packPlan: MedSafet
           : "길이보다 판단 밀도를 높이는 쪽으로 압축하고, 전체는 결론 뒤 최대 4개 카드까지만 쓴다.",
     renderDirective:
       "최종 출력은 평문만 사용하고, 제목 없는 결론 뒤에 구체 제목 카드들을 배치한다. 각 카드는 리드 1문장과 2~3개 bullet만 사용하며 내부 기획 용어는 노출하지 않는다.",
+    needsFastDistinctionPoint,
+    needsQuickCheckSequence,
     activeDirectiveKeys,
     droppedDirectiveKeys: [],
   };
@@ -262,6 +287,6 @@ export function buildMedSafetyPromptBlueprint(
     mustNotAssert: buildMustNotAssert(decision, options.signals, String(options.query ?? "")),
     lengthPlan: inferLengthPlan(decision, Boolean(options.hasImage)),
     packPlan,
-    projection: buildProjection(decision, packPlan, options.locale),
+    projection: buildProjection(decision, packPlan, options.locale, options.signals),
   };
 }

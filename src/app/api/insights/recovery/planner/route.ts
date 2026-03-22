@@ -573,18 +573,20 @@ async function handlePlanner(
       }
     }
 
+    // ── 상태를 try 바깥에 선언해 outer catch에서도 AI 결과 보존 ──
+    let explanationResult: AIRecoveryPayload["result"] | null = null;
+    let explanationGeneratedText: string | undefined;
+    let explanationModel: string | null = null;
+    let explanationDebug: string | null = null;
+    let explanationEngine: "openai" | "rule" = "rule";
+
     try {
       const {
         generateAIRecoveryPlannerModulesWithOpenAI,
         generateAIRecoveryWithOpenAI,
       } = await import("@/lib/server/openaiRecovery");
       let plannerDebug: string | null = null;
-      let explanationDebug: string | null = null;
       let plannerModel: string | null = null;
-      let explanationResult: AIRecoveryPayload["result"];
-      let explanationGeneratedText: string | undefined;
-      let explanationModel: string | null = null;
-      let explanationEngine: "openai" | "rule" = "rule";
       const cachedRecoveryIsCurrent =
         cachedRecovery &&
         cachedRecovery.engine === "openai" &&
@@ -756,7 +758,17 @@ async function handlePlanner(
 
       return jsonNoStore({ ok: true, data: payload } satisfies AIRecoveryPlannerApiSuccess);
     } catch (generationError: any) {
-      const explanationResult = generateAIRecovery(todayVital, phaseVitals7, phasePrevWeek, nextShift, lang);
+      // explanationResult가 이미 AI로 성공했으면 보존, 아니면 rule fallback
+      try {
+        console.error("[Planner] outer_catch", {
+          phase,
+          explanationEngine,
+          hasExplanationResult: Boolean(explanationResult),
+          error: generationError?.message ?? generationError,
+        });
+      } catch { /* ignore logging failure */ }
+      const finalExplanation = explanationResult ?? generateAIRecovery(todayVital, phaseVitals7, phasePrevWeek, nextShift, lang);
+      const finalEngine = explanationResult && explanationEngine === "openai" ? "openai" as const : "rule" as const;
       const timelinePreview = buildPlannerTimelinePreview(todayShift, todayVital, profile);
       const plannerModules = buildFallbackModules({
         language: lang,
@@ -764,7 +776,10 @@ async function handlePlanner(
         nextDutyLabel: describeNextDutyLabel(nextShift, lang),
         timelinePreview,
       });
+      const fallbackPlannerText = stringifyPlannerGeneratedText(lang, plannerModules.orders, explanationGeneratedText);
       const todayVitalScore = todayVital ? Math.round(Math.min(todayVital.body.value, todayVital.mental.ema)) : null;
+      const hasUsableText = Boolean(fallbackPlannerText?.trim() && explanationGeneratedText?.trim());
+      const debugMsg = typeof generationError?.message === "string" ? generationError.message : "rule_fallback";
       const payload: AIRecoveryPlannerPayload = {
         dateISO: today,
         language: lang,
@@ -773,17 +788,62 @@ async function handlePlanner(
         todayShift,
         nextShift,
         todayVitalScore,
-        source: "local",
-        engine: "rule",
-        model: null,
-        debug: typeof generationError?.message === "string" ? generationError.message : "rule_fallback",
+        source: finalEngine === "openai" ? "supabase" : "local",
+        engine: hasUsableText ? finalEngine : "rule",
+        model: explanationModel,
+        debug: explanationDebug ? `${debugMsg}|${explanationDebug}` : debugMsg,
+        generatedText: fallbackPlannerText,
+        explanationGeneratedText,
         plannerContext,
         profileSnapshot,
         result: {
           ...plannerModules,
-          explanation: buildExplanationModule(explanationResult, lang),
+          explanation: buildExplanationModule(finalExplanation, lang),
         },
       };
+
+      // AI explanation이 성공했었으면 Supabase에 저장해서 다음 요청에서 캐시로 활용
+      if (finalEngine === "openai" && explanationResult) {
+        try {
+          const explanationPayload: AIRecoveryPayload = {
+            dateISO: today,
+            language: lang,
+            phase,
+            todayShift,
+            nextShift,
+            todayVitalScore,
+            source: "supabase",
+            engine: "openai",
+            model: explanationModel,
+            debug: explanationDebug,
+            generatedText: explanationGeneratedText,
+            plannerContext,
+            profileSnapshot,
+            result: explanationResult,
+          };
+          const existingContent = await safeLoadAIContent(userId);
+          const existingData = isRecord(existingContent?.data) ? (existingContent.data as Record<string, unknown>) : {};
+          const prevRecPhase = isRecord(existingData.recoveryPhaseVariants) ? (existingData.recoveryPhaseVariants as Record<string, unknown>) : {};
+          const prevRecLang = isRecord(prevRecPhase[lang]) ? (prevRecPhase[lang] as Record<string, unknown>) : {};
+          await safeSaveAIContent(userId, today, lang, {
+            dateISO: today,
+            generatedAt: Date.now(),
+            recoveryPhaseVariants: {
+              ...prevRecPhase,
+              [lang]: { ...prevRecLang, [phase]: explanationPayload },
+            },
+            ...(phase === "start" ? {
+              variants: {
+                ...(isRecord(existingData.variants) ? existingData.variants : {}),
+                [lang]: explanationPayload,
+              },
+            } : {}),
+          } as Json);
+        } catch {
+          // best-effort save; ignore failures
+        }
+      }
+
       return jsonNoStore({ ok: true, data: payload } satisfies AIRecoveryPlannerApiSuccess);
     }
   } catch (err: any) {

@@ -57,8 +57,15 @@ function cleanAnswerLine(value: string) {
     .trim();
 }
 
+function unwrapBracketWrappedHeading(value: string) {
+  const cleaned = cleanAnswerLine(value);
+  const match = cleaned.match(/^(?:\[(.+)\]|【(.+)】|〔(.+)〕)$/);
+  const inner = match?.[1] ?? match?.[2] ?? match?.[3] ?? "";
+  return inner.trim() || cleaned;
+}
+
 function normalizeHeadingKey(value: string) {
-  return cleanAnswerLine(value)
+  return unwrapBracketWrappedHeading(value)
     .replace(/^\s*["'`“”‘’]+/, "")
     .replace(/["'`“”‘’]+\s*$/, "")
     .replace(/\([^)]*\)/g, "")
@@ -149,7 +156,7 @@ function looksLikeTopLevelSectionHeading(value: string, context: SectionHeadingC
 }
 
 function formatSectionTitle(value: string) {
-  return stripBulletPrefix(cleanAnswerLine(value)).replace(/[:：]$/, "").trim() || "핵심";
+  return stripBulletPrefix(unwrapBracketWrappedHeading(value)).replace(/[:：]$/, "").trim() || "핵심";
 }
 
 function trimBlankLines(lines: string[]) {

@@ -483,14 +483,6 @@ function buildDefaultClauseDescriptors(locale: "ko" | "en"): MedSafetyPromptLine
         defaultClauseId: "default_action_order",
       }),
       buildPromptLineDescriptor({
-        text: "For comparison questions, show the practical distinction that clinicians check first.",
-        source: "default",
-        section: "principles",
-        coverageTags: ["compare_priority"],
-        isQuestionSpecific: false,
-        defaultClauseId: "default_compare_priority",
-      }),
-      buildPromptLineDescriptor({
         text: "For equipment or device questions, prioritize troubleshooting and immediate corrective action over mechanism.",
         source: "default",
         section: "principles",
@@ -513,6 +505,30 @@ function buildDefaultClauseDescriptors(locale: "ko" | "en"): MedSafetyPromptLine
         coverageTags: ["direct_answer_early", "brevity_and_readability"],
         isQuestionSpecific: false,
         defaultClauseId: "default_opening_direct_answer",
+      }),
+      buildPromptLineDescriptor({
+        text: '"Quick distinction point": Give only a one-line key differentiator based on waveform, numeric value, or symptom. (One line only, without explanation)',
+        source: "default",
+        section: "principles",
+        coverageTags: ["fast_distinction_point"],
+        isQuestionSpecific: false,
+        defaultClauseId: "default_fast_distinction_point",
+      }),
+      buildPromptLineDescriptor({
+        text: '"Quick check sequence": Give a one-line 3-5 step check flow using arrows (→).',
+        source: "default",
+        section: "principles",
+        coverageTags: ["quick_check_sequence"],
+        isQuestionSpecific: false,
+        defaultClauseId: "default_quick_check_sequence",
+      }),
+      buildPromptLineDescriptor({
+        text: "Add those two elements only when they are needed, and do not let them make the answer longer.",
+        source: "default",
+        section: "principles",
+        coverageTags: ["quick_elements_length_guard", "brevity_and_readability"],
+        isQuestionSpecific: false,
+        defaultClauseId: "default_quick_elements_length_guard",
       }),
     ];
   }
@@ -551,14 +567,6 @@ function buildDefaultClauseDescriptors(locale: "ko" | "en"): MedSafetyPromptLine
       defaultClauseId: "default_action_order",
     }),
     buildPromptLineDescriptor({
-      text: "비교 질문은 실무적으로 가장 빨리 보는 구분 포인트를 먼저 제시한다.",
-      source: "default",
-      section: "principles",
-      coverageTags: ["compare_priority"],
-      isQuestionSpecific: false,
-      defaultClauseId: "default_compare_priority",
-    }),
-    buildPromptLineDescriptor({
       text: "장비/기구 질문은 원리보다 트러블슈팅과 바로 할 조치를 우선한다.",
       source: "default",
       section: "principles",
@@ -581,6 +589,30 @@ function buildDefaultClauseDescriptors(locale: "ko" | "en"): MedSafetyPromptLine
       coverageTags: ["direct_answer_early", "brevity_and_readability"],
       isQuestionSpecific: false,
       defaultClauseId: "default_opening_direct_answer",
+    }),
+    buildPromptLineDescriptor({
+      text: "“빠른 구분 포인트”: 파형/수치/증상 기준으로 한 줄 핵심 특징만 제시한다. (설명 없이 한 줄)",
+      source: "default",
+      section: "principles",
+      coverageTags: ["fast_distinction_point"],
+      isQuestionSpecific: false,
+      defaultClauseId: "default_fast_distinction_point",
+    }),
+    buildPromptLineDescriptor({
+      text: "“빠른 확인 순서”: 3~5단계 확인 흐름을 화살표(→)로 한 줄로 제시한다.",
+      source: "default",
+      section: "principles",
+      coverageTags: ["quick_check_sequence"],
+      isQuestionSpecific: false,
+      defaultClauseId: "default_quick_check_sequence",
+    }),
+    buildPromptLineDescriptor({
+      text: "두 요소는 필요할 때만 추가하고, 답변 길이를 늘리지 않는다.",
+      source: "default",
+      section: "principles",
+      coverageTags: ["quick_elements_length_guard", "brevity_and_readability"],
+      isQuestionSpecific: false,
+      defaultClauseId: "default_quick_elements_length_guard",
     }),
   ];
 }
@@ -682,10 +714,10 @@ function buildContractDescriptor(id: MedSafetyPromptContractId, locale: "ko" | "
       isQuestionSpecific: true,
     }),
     intent_compare: buildPromptLineDescriptor({
-      text: "이번 비교에서는 가장 빨리 선택을 가르는 구분 포인트부터 보여준다.",
+      text: "이번 비교에서는 후보 설명을 길게 나열하지 말고 실제 선택을 바꾸는 기준만 남긴다.",
       source: "contract",
       section: "question_fit",
-      coverageTags: ["compare_priority"],
+      coverageTags: ["mixed_priority_delta"],
       isQuestionSpecific: true,
     }),
     intent_numeric: buildPromptLineDescriptor({
@@ -1009,6 +1041,33 @@ function buildProjectionDescriptors(
       );
     }
   }
+
+  if (projection.needsFastDistinctionPoint) {
+    descriptors.push(
+      buildPromptLineDescriptor({
+        text:
+          "이번 답변에는 “빠른 구분 포인트”를 한 줄만 추가하고, 설명 문장은 붙이지 않는다.",
+        source: "projection",
+        section: "question_fit",
+        coverageTags: ["fast_distinction_point"],
+        isQuestionSpecific: true,
+      })
+    );
+  }
+
+  if (projection.needsQuickCheckSequence) {
+    descriptors.push(
+      buildPromptLineDescriptor({
+        text:
+          "이번 답변에는 “빠른 확인 순서”를 3~5단계 화살표 한 줄로만 추가한다.",
+        source: "projection",
+        section: "coverage",
+        coverageTags: ["quick_check_sequence"],
+        isQuestionSpecific: true,
+      })
+    );
+  }
+
   return descriptors;
 }
 
@@ -1030,7 +1089,8 @@ function applySemanticOverlapSuppression(
     const nearDefault = defaultNormalizeds.some((base) => base.includes(normalized) || normalized.includes(base));
 
     if (seenNormalized.has(normalized)) continue;
-    if (overlapsDefaultTag && uniqueTags.length === 0) continue;
+    if (overlapsDefaultTag && uniqueTags.length === 0 && !descriptor.isQuestionSpecific) continue;
+    if (overlapsDefaultTag && uniqueTags.length === 0 && descriptor.isQuestionSpecific && nearDefault) continue;
     if (!descriptor.isQuestionSpecific && nearDefault) continue;
 
     const existingIndex = kept.findIndex((item) => normalizePromptLineForDedupe(item.text) === normalized);

@@ -538,7 +538,7 @@ function buildStressSection(
     } else if (mentalBattery < 30) {
       desc = `Mental battery is at ${Math.round(mentalBattery)}. You're running on empty emotionally.`;
     } else {
-      desc = `Stress level ${stress}/3, mood ${mood}/5. Worth paying attention to your emotional state.`;
+      desc = `Stress is ${stress <= 1 ? "mild" : "moderate"} and mood is ${mood >= 4 ? "good" : mood === 3 ? "average" : "low"}. Worth paying attention to your emotional state.`;
     }
 
     tips.push("After your shift, take 10 minutes of complete stillness — no phone, just breathing.");
@@ -564,7 +564,7 @@ function buildStressSection(
   } else if (mentalBattery < 30) {
     desc = `멘탈 배터리가 ${Math.round(mentalBattery)}이에요. 감정적으로 많이 소진된 상태입니다.`;
   } else {
-    desc = `스트레스 ${stress}/3, 기분 ${mood}/5 상태예요. 감정 상태에 주의를 기울여보세요.`;
+    desc = `스트레스가 ${stress <= 1 ? "조금 있는 편" : "꽤 있는 편"}이고, 기분이 ${mood >= 4 ? "괜찮은" : mood === 3 ? "보통인" : "가라앉은"} 상태예요. 감정 상태에 주의를 기울여보세요.`;
   }
 
   tips.push("퇴근 후 10분만 아무것도 안 하는 시간을 가져보세요. 핸드폰도 잠시 내려놓기.");
@@ -611,7 +611,7 @@ function buildActivitySection(
         desc = "Rest day with low battery. Keep activity very light today — recovery first.";
       }
     } else {
-      desc = `Activity level is ${activity}/3 with body battery at ${Math.round(bodyBattery)}.`;
+      desc = `Activity level is ${activity <= 1 ? "light" : activity === 2 ? "moderate" : "intense"} with body battery at ${Math.round(bodyBattery)}.`;
     }
 
     if (shift === "OFF" || shift === "VAC") {
@@ -638,7 +638,7 @@ function buildActivitySection(
       desc = "OFF인데 배터리가 낮아요. 오늘은 아주 가볍게만 움직이고 회복에 집중하세요.";
     }
   } else {
-    desc = `활동량 ${activity}/3, 바디 배터리 ${Math.round(bodyBattery)} 상태예요.`;
+    desc = `활동량이 ${activity <= 1 ? "가벼운" : activity === 2 ? "보통" : "격렬한"} 편이고, 바디 배터리는 ${Math.round(bodyBattery)} 상태예요.`;
   }
 
   if (shift === "OFF" || shift === "VAC") {

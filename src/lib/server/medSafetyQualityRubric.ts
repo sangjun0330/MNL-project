@@ -108,6 +108,17 @@ function hasCardStructure(text: string) {
   return headings >= 2;
 }
 
+function hasFastDistinctionPoint(text: string) {
+  return /빠른\s*구분\s*포인트[^\n]*[:：][^\n]+/i.test(normalizeText(text));
+}
+
+function hasQuickCheckSequence(text: string) {
+  const normalized = normalizeText(text);
+  const match = normalized.match(/빠른\s*확인\s*순서[^\n]*[:：][^\n]+/i)?.[0] ?? "";
+  const arrowCount = (match.match(/→/g) ?? []).length;
+  return arrowCount >= 2 && arrowCount <= 4;
+}
+
 function includesProtocolCaveat(text: string) {
   return /(기관 프로토콜|기관 기준|약제부|제조사|ifu|pharmacy|manufacturer)/i.test(text);
 }
@@ -202,6 +213,14 @@ function buildAtomicChecks(
     },
     { id: "card_structure", passed: decision.format === "short" ? true : hasCardStructure(normalized) },
     {
+      id: "fast_distinction_point_present",
+      passed: blueprint?.projection.needsFastDistinctionPoint ? hasFastDistinctionPoint(normalized) : true,
+    },
+    {
+      id: "quick_check_sequence_present",
+      passed: blueprint?.projection.needsQuickCheckSequence ? hasQuickCheckSequence(normalized) : true,
+    },
+    {
       id: "bedside_domain_coverage",
       passed: hasPack(blueprint, "bedside_pack") ? hasBedsideDomainCoverage(normalized) : true,
     },
@@ -272,7 +291,8 @@ function mapAtomicFailuresToFamilies(failed: MedSafetyAtomicQualityCheckId[], de
     families.add("exception_gap");
   }
   if (failed.includes("unsafe_specificity") || failed.includes("protocol_caveat_presence")) families.add("safety_gap");
-  if (failed.includes("card_structure")) families.add("structure_gap");
+  if (failed.includes("card_structure") || failed.includes("fast_distinction_point_present")) families.add("structure_gap");
+  if (failed.includes("quick_check_sequence_present")) families.add("bedside_gap");
   if (failed.includes("repetition_density") || failed.includes("verbosity_overshoot") || failed.includes("forbidden_followup")) {
     families.add("verbosity_gap");
   }

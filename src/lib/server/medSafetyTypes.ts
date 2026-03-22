@@ -89,6 +89,9 @@ export const MED_SAFETY_DEFAULT_CLAUSE_IDS = [
   "default_device_troubleshooting",
   "default_uncertainty_protocol",
   "default_opening_direct_answer",
+  "default_fast_distinction_point",
+  "default_quick_check_sequence",
+  "default_quick_elements_length_guard",
 ] as const;
 export type MedSafetyDefaultClauseId = (typeof MED_SAFETY_DEFAULT_CLAUSE_IDS)[number];
 
@@ -123,6 +126,9 @@ export const MED_SAFETY_SEMANTIC_COVERAGE_TAGS = [
   "notify_payload",
   "notify_script",
   "render_card_shape",
+  "fast_distinction_point",
+  "quick_check_sequence",
+  "quick_elements_length_guard",
 ] as const;
 export type MedSafetySemanticCoverageTag = (typeof MED_SAFETY_SEMANTIC_COVERAGE_TAGS)[number];
 
@@ -215,6 +221,8 @@ export const MED_SAFETY_ATOMIC_QUALITY_CHECK_IDS = [
   "direct_answer_top",
   "immediate_action_top",
   "card_structure",
+  "fast_distinction_point_present",
+  "quick_check_sequence_present",
   "bedside_domain_coverage",
   "reversible_cause_coverage",
   "false_worsening_exclusion",
@@ -322,6 +330,8 @@ export type MedSafetyPromptProjection = {
   safetyDirective: string;
   compressionDirective: string;
   renderDirective: string;
+  needsFastDistinctionPoint: boolean;
+  needsQuickCheckSequence: boolean;
   activeDirectiveKeys: MedSafetyProjectionDirectiveKey[];
   droppedDirectiveKeys: MedSafetyProjectionDirectiveKey[];
 };

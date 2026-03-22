@@ -104,7 +104,7 @@ function normalizeNarrativeText(text: string, lang: "ko" | "en") {
   out = out.replace(/\bplannerContext\b/gi, lang === "en" ? "today's recovery focus" : "오늘 회복 기준");
   out = out.replace(/\bplanner\b/gi, lang === "en" ? "recovery flow" : "회복 흐름");
 
-  out = out.replace(/스트레스\s*\(?\s*([0-3])\s*\)?/g, (_, raw) => {
+  out = out.replace(/스트레스\s*\(?\s*([0-3])\s*(?:\/\s*3\s*)?\)?/g, (_, raw) => {
     const n = Number(raw);
     if (n <= 0) return "스트레스가 거의 없는 편";
     if (n === 1) return "스트레스가 조금 있는 편";
@@ -112,7 +112,7 @@ function normalizeNarrativeText(text: string, lang: "ko" | "en") {
     return "스트레스가 높은 편";
   });
 
-  out = out.replace(/기분\s*\(?\s*([1-5])\s*\)?/g, (_, raw) => {
+  out = out.replace(/기분\s*\(?\s*([1-5])\s*(?:\/\s*5\s*)?\)?/g, (_, raw) => {
     const n = Number(raw);
     if (n <= 1) return "기분이 많이 가라앉은 상태";
     if (n === 2) return "기분이 다소 가라앉은 상태";
