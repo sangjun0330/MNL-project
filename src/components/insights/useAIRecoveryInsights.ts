@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { AIRecoveryPayload } from "@/lib/aiRecoveryContract";
+import { isValidAIRecoveryPayload, type AIRecoveryPayload } from "@/lib/aiRecoveryContract";
 import { todayISO } from "@/lib/date";
 import { useInsightsData } from "@/components/insights/useInsightsData";
 import { getBrowserAuthHeaders, useAuthState } from "@/lib/auth";
@@ -36,10 +36,11 @@ function isUsableOpenAIRecoveryPayload(
   lang: "ko" | "en",
   phase: RecoveryPhase
 ): payload is AIRecoveryPayload {
-  if (!payload) return false;
-  if (payload.language !== lang || payload.phase !== phase) return false;
-  if (payload.engine !== "openai") return false;
-  return Boolean(payload.generatedText?.trim());
+  return Boolean(
+    isValidAIRecoveryPayload(payload, lang, phase) &&
+      payload.engine === "openai" &&
+      payload.generatedText?.trim()
+  );
 }
 
 function clearRecoveryPhaseCache(userId: string, lang: "ko" | "en", dateISO: string, phase: RecoveryPhase) {
@@ -93,6 +94,9 @@ async function fetchAIRecovery(
 
   const payload = (json?.data ?? null) as AIRecoveryPayload | null;
   if (!payload) return null;
+  if (!isValidAIRecoveryPayload(payload, lang, phase)) {
+    throw new Error("ai_recovery_invalid_payload_shape");
+  }
   if (payload.engine !== "openai") {
     throw new Error(payload.debug ?? "ai_recovery_rule_fallback");
   }

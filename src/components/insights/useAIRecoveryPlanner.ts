@@ -2,7 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AIRecoveryPayload } from "@/lib/aiRecoveryContract";
-import { buildPlannerPayloadFromRecoveryPayload, type AIRecoveryPlannerPayload } from "@/lib/aiRecoveryPlanner";
+import { isValidAIRecoveryPayload } from "@/lib/aiRecoveryContract";
+import {
+  buildPlannerPayloadFromRecoveryPayload,
+  isValidAIRecoveryPlannerPayload,
+  type AIRecoveryPlannerPayload,
+} from "@/lib/aiRecoveryPlanner";
 import { todayISO } from "@/lib/date";
 import { getBrowserAuthHeaders, useAuthState } from "@/lib/auth";
 import { useI18n } from "@/lib/useI18n";
@@ -39,10 +44,12 @@ function isUsableOpenAIPlannerPayload(
   lang: "ko" | "en",
   phase: RecoveryPhase
 ): payload is AIRecoveryPlannerPayload {
-  if (!payload) return false;
-  if (payload.language !== lang || payload.phase !== phase) return false;
-  if (payload.engine !== "openai") return false;
-  return Boolean(payload.generatedText?.trim() && payload.explanationGeneratedText?.trim());
+  return Boolean(
+    isValidAIRecoveryPlannerPayload(payload, lang, phase) &&
+      payload.engine === "openai" &&
+      payload.generatedText?.trim() &&
+      payload.explanationGeneratedText?.trim()
+  );
 }
 
 function isUsableOpenAIRecoveryPayload(
@@ -50,10 +57,11 @@ function isUsableOpenAIRecoveryPayload(
   lang: "ko" | "en",
   phase: RecoveryPhase
 ): payload is AIRecoveryPayload {
-  if (!payload) return false;
-  if (payload.language !== lang || payload.phase !== phase) return false;
-  if (payload.engine !== "openai") return false;
-  return Boolean(payload.generatedText?.trim());
+  return Boolean(
+    isValidAIRecoveryPayload(payload, lang, phase) &&
+      payload.engine === "openai" &&
+      payload.generatedText?.trim()
+  );
 }
 
 function clearPlannerPhaseCache(userId: string, lang: "ko" | "en", dateISO: string, phase: RecoveryPhase) {
@@ -127,6 +135,9 @@ async function fetchAIRecoveryPlanner(
 
   const payload = (json?.data ?? null) as AIRecoveryPlannerPayload | null;
   if (!payload) return null;
+  if (!isValidAIRecoveryPlannerPayload(payload, lang, phase)) {
+    throw new Error("ai_recovery_planner_invalid_payload_shape");
+  }
   if (payload.engine !== "openai") {
     throw new Error(payload.debug ?? "ai_recovery_planner_rule_fallback");
   }
@@ -168,6 +179,9 @@ async function fetchAIRecoveryExplanation(
   }
 
   const payload = (json?.data ?? null) as AIRecoveryPayload | null;
+  if (payload && !isValidAIRecoveryPayload(payload, lang, phase)) {
+    throw new Error("ai_recovery_invalid_payload_shape");
+  }
   return payload;
 }
 

@@ -1,11 +1,13 @@
 import { NextRequest } from "next/server";
 import { addDays, fromISODate, toISODate, todayISO, type ISODate } from "@/lib/date";
-import type { AIRecoveryPayload } from "@/lib/aiRecoveryContract";
-import type {
+import { normalizeAIRecoveryResult, type AIRecoveryPayload } from "@/lib/aiRecoveryContract";
+import {
   AIRecoveryPlannerModules,
   AIRecoveryPlannerApiError,
   AIRecoveryPlannerApiSuccess,
   AIRecoveryPlannerPayload,
+  buildPlannerPayloadFromRecoveryPayload,
+  normalizeAIRecoveryPlannerResult,
 } from "@/lib/aiRecoveryPlanner";
 import type { Language } from "@/lib/i18n";
 import { hasHealthInput } from "@/lib/healthRecords";
@@ -158,8 +160,10 @@ function normalizeProfileSnapshot(value: AIRecoveryPlannerPayload["profileSnapsh
 }
 
 function asRecoveryPayload(candidate: unknown, fallbackLang: Language): AIRecoveryPayload | null {
-  if (!isRecord(candidate) || !isRecord(candidate.result)) return null;
+  if (!isRecord(candidate)) return null;
   if (typeof candidate.dateISO !== "string") return null;
+  const result = normalizeAIRecoveryResult(candidate.result);
+  if (!result) return null;
   const language = asLanguage(candidate.language) ?? fallbackLang;
   const engine = candidate.engine === "rule" ? "rule" : "openai";
   const generatedText = typeof candidate.generatedText === "string" ? candidate.generatedText : undefined;
@@ -180,7 +184,7 @@ function asRecoveryPayload(candidate: unknown, fallbackLang: Language): AIRecove
     generatedText,
     plannerContext: plannerContext ?? undefined,
     profileSnapshot: profileSnapshot ?? undefined,
-    result: candidate.result as AIRecoveryPayload["result"],
+    result,
   };
 }
 
@@ -203,9 +207,10 @@ function hasChecklistOrdersShape(value: unknown) {
 }
 
 function asPlannerPayload(candidate: unknown, fallbackLang: Language): AIRecoveryPlannerPayload | null {
-  if (!isRecord(candidate) || !isRecord(candidate.result)) return null;
+  if (!isRecord(candidate)) return null;
   if (typeof candidate.dateISO !== "string") return null;
-  if (!hasChecklistOrdersShape(candidate.result)) return null;
+  const result = normalizeAIRecoveryPlannerResult(candidate.result);
+  if (!result || !hasChecklistOrdersShape(result)) return null;
   const language = asLanguage(candidate.language) ?? fallbackLang;
   const engine = candidate.engine === "rule" ? "rule" : "openai";
   const generatedText = typeof candidate.generatedText === "string" ? candidate.generatedText : undefined;
@@ -230,7 +235,7 @@ function asPlannerPayload(candidate: unknown, fallbackLang: Language): AIRecover
     explanationGeneratedText,
     plannerContext: plannerContext ?? undefined,
     profileSnapshot: profileSnapshot ?? undefined,
-    result: candidate.result as AIRecoveryPlannerPayload["result"],
+    result,
   };
 }
 
@@ -501,6 +506,43 @@ async function handlePlanner(
       if (aiContent && aiContent.dateISO === today) {
         const cached = readPlannerPhasePayload(aiContent.data, today, lang, phase);
         if (cached) return jsonNoStore({ ok: true, data: cached } satisfies AIRecoveryPlannerApiSuccess);
+        const cachedRecovery = readRecoveryPhasePayload(aiContent.data, today, lang, phase);
+        if (cachedRecovery?.engine === "openai") {
+          const recoveredPlanner = buildPlannerPayloadFromRecoveryPayload(
+            cachedRecovery,
+            requestedOrderCount,
+            "planner_cache_recovered_from_recovery"
+          );
+          if (recoveredPlanner) {
+            const aiContentRecord = isRecord(aiContent.data) ? (aiContent.data as Record<string, unknown>) : {};
+            const previousPlannerPhaseVariants =
+              isRecord(aiContentRecord.plannerPhaseVariants) ? (aiContentRecord.plannerPhaseVariants as Record<string, unknown>) : {};
+            const previousPlannerLangNode =
+              isRecord(previousPlannerPhaseVariants[lang]) ? (previousPlannerPhaseVariants[lang] as Record<string, unknown>) : {};
+            const legacyPlannerVariants =
+              isRecord(aiContentRecord.plannerVariants) ? (aiContentRecord.plannerVariants as Record<string, unknown>) : {};
+            void safeSaveAIContent(userId, today, lang, {
+              dateISO: today,
+              generatedAt: Date.now(),
+              plannerPhaseVariants: {
+                ...previousPlannerPhaseVariants,
+                [lang]: {
+                  ...previousPlannerLangNode,
+                  [phase]: recoveredPlanner,
+                },
+              },
+              ...(phase === "start"
+                ? {
+                    plannerVariants: {
+                      ...legacyPlannerVariants,
+                      [lang]: recoveredPlanner,
+                    },
+                  }
+                : {}),
+            } as Json);
+            return jsonNoStore({ ok: true, data: recoveredPlanner } satisfies AIRecoveryPlannerApiSuccess);
+          }
+        }
       }
       return jsonNoStore({ ok: true, data: null } satisfies AIRecoveryPlannerApiSuccess);
     }

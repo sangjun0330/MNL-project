@@ -1,7 +1,12 @@
 import { NextRequest } from "next/server";
 import { addDays, fromISODate, toISODate, todayISO, type ISODate } from "@/lib/date";
-import type { AIRecoveryApiError, AIRecoveryApiSuccess, AIRecoveryPayload } from "@/lib/aiRecoveryContract";
-import type { AIRecoveryPlannerPayload } from "@/lib/aiRecoveryPlanner";
+import {
+  normalizeAIRecoveryResult,
+  type AIRecoveryApiError,
+  type AIRecoveryApiSuccess,
+  type AIRecoveryPayload,
+} from "@/lib/aiRecoveryContract";
+import { normalizeAIRecoveryPlannerResult, type AIRecoveryPlannerPayload } from "@/lib/aiRecoveryPlanner";
 import type { Language } from "@/lib/i18n";
 import { hasHealthInput } from "@/lib/healthRecords";
 import type { AppState } from "@/lib/model";
@@ -90,8 +95,10 @@ function asLanguage(value: unknown): Language | null {
 }
 
 function asPayload(candidate: unknown, fallbackLang: Language): AIRecoveryPayload | null {
-  if (!isRecord(candidate) || !isRecord(candidate.result)) return null;
+  if (!isRecord(candidate)) return null;
   if (typeof candidate.dateISO !== "string") return null;
+  const result = normalizeAIRecoveryResult(candidate.result);
+  if (!result) return null;
   const language = asLanguage(candidate.language) ?? fallbackLang;
   const engine = candidate.engine === "rule" ? "rule" : "openai";
   const generatedText = typeof candidate.generatedText === "string" ? candidate.generatedText : undefined;
@@ -112,7 +119,7 @@ function asPayload(candidate: unknown, fallbackLang: Language): AIRecoveryPayloa
     generatedText,
     plannerContext: plannerContext ?? undefined,
     profileSnapshot: profileSnapshot ?? undefined,
-    result: candidate.result as AIRecoveryPayload["result"],
+    result,
   };
 }
 
@@ -187,8 +194,10 @@ function hasChecklistOrdersShape(value: unknown) {
 }
 
 function asPlannerPayload(candidate: unknown, fallbackLang: Language): AIRecoveryPlannerPayload | null {
-  if (!isRecord(candidate) || !isRecord(candidate.result) || !hasChecklistOrdersShape(candidate.result)) return null;
+  if (!isRecord(candidate)) return null;
   if (typeof candidate.dateISO !== "string") return null;
+  const result = normalizeAIRecoveryPlannerResult(candidate.result);
+  if (!result || !hasChecklistOrdersShape(result)) return null;
   const language = asLanguage(candidate.language) ?? fallbackLang;
   const engine = candidate.engine === "rule" ? "rule" : "openai";
   const generatedText = typeof candidate.generatedText === "string" ? candidate.generatedText : undefined;
@@ -213,7 +222,7 @@ function asPlannerPayload(candidate: unknown, fallbackLang: Language): AIRecover
     explanationGeneratedText,
     plannerContext: plannerContext ?? undefined,
     profileSnapshot: profileSnapshot ?? undefined,
-    result: candidate.result as AIRecoveryPlannerPayload["result"],
+    result,
   };
 }
 
@@ -223,8 +232,8 @@ function asPlannerRecoveryPayload(candidate: unknown, fallbackLang: Language): A
   if (typeof planner.dateISO !== "string" || !planner.result || typeof planner.result !== "object") return null;
   const explanation = (planner.result as Record<string, unknown>).explanation;
   if (!explanation || typeof explanation !== "object") return null;
-  const recovery = (explanation as Record<string, unknown>).recovery;
-  if (!recovery || typeof recovery !== "object") return null;
+  const recovery = normalizeAIRecoveryResult((explanation as Record<string, unknown>).recovery);
+  if (!recovery) return null;
   const language = asLanguage((planner as any).language) ?? fallbackLang;
   const engine = planner.engine === "rule" ? "rule" : "openai";
   const generatedText =
@@ -249,7 +258,7 @@ function asPlannerRecoveryPayload(candidate: unknown, fallbackLang: Language): A
     generatedText,
     plannerContext: planner.plannerContext,
     profileSnapshot: planner.profileSnapshot,
-    result: recovery as AIRecoveryPayload["result"],
+    result: recovery,
   };
 }
 

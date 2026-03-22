@@ -1,5 +1,5 @@
 import type { AIRecoveryResult } from "@/lib/aiRecovery";
-import type { AIRecoveryPayload } from "@/lib/aiRecoveryContract";
+import { isValidAIRecoveryPayload, normalizeAIRecoveryResult, type AIRecoveryPayload } from "@/lib/aiRecoveryContract";
 import type { ISODate } from "@/lib/date";
 import type { Language } from "@/lib/i18n";
 import type { ProfileSettings } from "@/lib/model";
@@ -100,6 +100,91 @@ export type AIRecoveryPlannerApiError = {
   ok: false;
   error: string;
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeChecklistItem(value: unknown) {
+  if (!isRecord(value)) return null;
+  const id = asString(value.id);
+  const title = asString(value.title);
+  const body = asString(value.body);
+  const when = asString(value.when);
+  if (!id || !title || !body || !when) return null;
+  return {
+    id,
+    title,
+    body,
+    when,
+    reason: asString(value.reason) || null,
+    chips: Array.isArray(value.chips)
+      ? value.chips.map((item) => asString(item)).filter(Boolean).slice(0, 5)
+      : [],
+  } satisfies AIPlannerChecklistItem;
+}
+
+function normalizeChecklistModule(value: unknown) {
+  if (!isRecord(value)) return null;
+  const items = Array.isArray(value.items)
+    ? value.items
+        .map((item) => normalizeChecklistItem(item))
+        .filter((item): item is NonNullable<ReturnType<typeof normalizeChecklistItem>> => Boolean(item))
+        .slice(0, 5)
+    : [];
+  if (!items.length) return null;
+  return {
+    eyebrow: asString(value.eyebrow),
+    title: asString(value.title),
+    headline: asString(value.headline),
+    summary: asString(value.summary),
+    items,
+  } satisfies AIPlannerChecklistModule;
+}
+
+function normalizeExplanationModule(value: unknown) {
+  if (!isRecord(value)) return null;
+  const recovery = normalizeAIRecoveryResult(value.recovery);
+  if (!recovery) return null;
+  return {
+    eyebrow: asString(value.eyebrow),
+    title: asString(value.title),
+    headline: asString(value.headline),
+    summary: asString(value.summary),
+    recovery,
+  } satisfies AIPlannerExplanationModule;
+}
+
+export function normalizeAIRecoveryPlannerResult(value: unknown): AIRecoveryPlannerResult | null {
+  if (!isRecord(value)) return null;
+  const orders = normalizeChecklistModule(value.orders);
+  const explanation = normalizeExplanationModule(value.explanation);
+  if (!orders || !explanation) return null;
+  return {
+    heroTitle: asString(value.heroTitle),
+    heroSummary: asString(value.heroSummary),
+    orders,
+    explanation,
+  };
+}
+
+export function isValidAIRecoveryPlannerPayload(
+  payload: AIRecoveryPlannerPayload | null | undefined,
+  language?: Language,
+  phase?: RecoveryPhase
+): payload is AIRecoveryPlannerPayload {
+  if (!payload) return false;
+  if (language && payload.language !== language) return false;
+  if (phase && payload.phase !== phase) return false;
+  if (payload.engine === "openai" && (!payload.generatedText?.trim() || !payload.explanationGeneratedText?.trim())) {
+    return false;
+  }
+  return Boolean(normalizeAIRecoveryPlannerResult(payload.result));
+}
 
 function compactNarrative(value: string, fallback: string) {
   const text = String(value ?? "")
@@ -265,7 +350,7 @@ export function buildPlannerPayloadFromRecoveryPayload(
   requestedOrderCount?: number | null,
   debugTag?: string | null
 ): AIRecoveryPlannerPayload | null {
-  if (!recoveryPayload || recoveryPayload.engine !== "openai" || !recoveryPayload.generatedText?.trim()) {
+  if (!isValidAIRecoveryPayload(recoveryPayload) || recoveryPayload.engine !== "openai" || !recoveryPayload.generatedText?.trim()) {
     return null;
   }
 
