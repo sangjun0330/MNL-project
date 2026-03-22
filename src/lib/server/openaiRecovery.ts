@@ -137,7 +137,34 @@ function appendTextParts(out: string[], value: unknown) {
   }
 }
 
+function appendChatMessageContent(out: string[], value: unknown) {
+  if (typeof value === "string" && value.trim()) {
+    out.push(value);
+    return;
+  }
+  if (!Array.isArray(value)) return;
+  for (const part of value) {
+    if (typeof part === "string" && part.trim()) {
+      out.push(part);
+      continue;
+    }
+    if (!part || typeof part !== "object") continue;
+    const record = part as Record<string, unknown>;
+    const text = readString(record.text);
+    if (text && text.trim()) {
+      out.push(text);
+    }
+  }
+}
+
 function extractOutputText(json: any): string {
+  if (Array.isArray(json?.choices)) {
+    const parts: string[] = [];
+    for (const choice of json.choices) {
+      appendChatMessageContent(parts, choice?.message?.content);
+    }
+    return parts.join("\n").trim();
+  }
   const parts: string[] = [];
   if (typeof json?.output_text === "string") {
     parts.push(json.output_text);
@@ -159,11 +186,11 @@ function extractOutputText(json: any): string {
 function readUsage(json: any): AIRecoveryUsage | null {
   const usage = json?.usage;
   if (!usage || typeof usage !== "object") return null;
-  const inputTokens = Number(usage.input_tokens);
-  const outputTokens = Number(usage.output_tokens);
+  const inputTokens = Number(usage.input_tokens ?? usage.prompt_tokens);
+  const outputTokens = Number(usage.output_tokens ?? usage.completion_tokens);
   const totalTokens = Number(usage.total_tokens);
-  const cachedInputTokens = Number(usage.input_tokens_details?.cached_tokens);
-  const reasoningTokens = Number(usage.output_tokens_details?.reasoning_tokens);
+  const cachedInputTokens = Number(usage.input_tokens_details?.cached_tokens ?? usage.prompt_tokens_details?.cached_tokens);
+  const reasoningTokens = Number(usage.output_tokens_details?.reasoning_tokens ?? usage.completion_tokens_details?.reasoning_tokens);
   const asNullable = (value: number) => (Number.isFinite(value) ? Math.round(value) : null);
   return {
     inputTokens: asNullable(inputTokens),
@@ -234,36 +261,67 @@ async function postStructuredRequest(
   args.signal.addEventListener("abort", onAbort, { once: true });
 
   try {
-    const response = await fetch(requestConfig.requestUrl, {
+    const useCompatChatCompletions = requestConfig.usesCompatEndpoint;
+    const requestUrl = useCompatChatCompletions
+      ? requestConfig.requestUrl.replace(/\/responses$/i, "/chat/completions")
+      : requestConfig.requestUrl;
+    const requestBody = useCompatChatCompletions
+      ? {
+          model: requestConfig.model,
+          store: resolveStoreResponses(),
+          reasoning_effort: args.reasoningEffort,
+          max_completion_tokens: resolveMaxOutputTokens(args.maxOutputTokens ?? 2400),
+          messages: [
+            {
+              role: "developer",
+              content: args.developerPrompt,
+            },
+            {
+              role: "user",
+              content: args.userPrompt,
+            },
+          ],
+          response_format: {
+            type: "json_schema",
+            json_schema: {
+              name: args.schemaName,
+              strict: true,
+              schema: args.schema,
+            },
+          },
+        }
+      : {
+          model: requestConfig.model,
+          store: resolveStoreResponses(),
+          reasoning: {
+            effort: args.reasoningEffort,
+          },
+          max_output_tokens: resolveMaxOutputTokens(args.maxOutputTokens ?? 2400),
+          input: [
+            {
+              role: "developer",
+              content: [{ type: "input_text", text: args.developerPrompt }],
+            },
+            {
+              role: "user",
+              content: [{ type: "input_text", text: args.userPrompt }],
+            },
+          ],
+          text: {
+            format: {
+              type: "json_schema",
+              name: args.schemaName,
+              strict: true,
+              schema: args.schema,
+            },
+          },
+        };
+
+    const response = await fetch(requestUrl, {
       method: "POST",
       headers: requestConfig.headers,
       signal: controller.signal,
-      body: JSON.stringify({
-        model: requestConfig.model,
-        store: resolveStoreResponses(),
-        reasoning: {
-          effort: args.reasoningEffort,
-        },
-        max_output_tokens: resolveMaxOutputTokens(args.maxOutputTokens ?? 2400),
-        input: [
-          {
-            role: "developer",
-            content: [{ type: "input_text", text: args.developerPrompt }],
-          },
-          {
-            role: "user",
-            content: [{ type: "input_text", text: args.userPrompt }],
-          },
-        ],
-        text: {
-          format: {
-            type: "json_schema",
-            name: args.schemaName,
-            strict: true,
-            schema: args.schema,
-          },
-        },
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     const raw = await response.text();

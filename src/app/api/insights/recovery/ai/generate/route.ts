@@ -1,31 +1,31 @@
 import type { ISODate } from "@/lib/date";
 import { isISODate, todayISO } from "@/lib/date";
 import { isAIRecoverySlot } from "@/lib/aiRecovery";
-import { generateAIRecoverySession } from "@/lib/server/aiRecovery";
-import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
-import { readUserIdFromRequest } from "@/lib/server/readUserId";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-function bad(status: number, error: string) {
-  return jsonNoStore({ ok: false, error }, { status });
-}
-
 export async function POST(req: Request) {
-  const originError = sameOriginRequestError(req);
-  if (originError) return bad(403, originError);
-
-  const userId = await readUserIdFromRequest(req);
-  if (!userId) return bad(401, "login_required");
-
-  const body = await req.json().catch(() => null);
-  const dateISO = isISODate(body?.dateISO ?? "") ? (body.dateISO as ISODate) : todayISO();
-  const slot = isAIRecoverySlot(body?.slot) ? body.slot : "wake";
-  const force = Boolean(body?.force);
-  const payloadOverride = body?.state;
-
   try {
+    const [{ jsonNoStore, sameOriginRequestError }, { readUserIdFromRequest }, { generateAIRecoverySession }] = await Promise.all([
+      import("@/lib/server/requestSecurity"),
+      import("@/lib/server/readUserId"),
+      import("@/lib/server/aiRecovery"),
+    ]);
+    const bad = (status: number, error: string) => jsonNoStore({ ok: false, error }, { status });
+
+    const originError = sameOriginRequestError(req);
+    if (originError) return bad(403, originError);
+
+    const userId = await readUserIdFromRequest(req);
+    if (!userId) return bad(401, "login_required");
+
+    const body = await req.json().catch(() => null);
+    const dateISO = isISODate(body?.dateISO ?? "") ? (body.dateISO as ISODate) : todayISO();
+    const slot = isAIRecoverySlot(body?.slot) ? body.slot : "wake";
+    const force = Boolean(body?.force);
+    const payloadOverride = body?.state;
+
     const data = await generateAIRecoverySession({
       userId,
       dateISO,
@@ -38,12 +38,12 @@ export async function POST(req: Request) {
   } catch (error) {
     const message = String((error as any)?.message ?? error ?? "");
     console.error("[AIRecovery] generate_failed", {
-      userId: userId.slice(0, 8),
-      dateISO,
-      slot,
       message,
     });
-    if (message === "session_generation_limit_reached") return bad(403, message);
-    return bad(500, "ai_recovery_generate_failed");
+    const { jsonNoStore } = await import("@/lib/server/requestSecurity");
+    if (message === "session_generation_limit_reached") {
+      return jsonNoStore({ ok: false, error: message }, { status: 403 });
+    }
+    return jsonNoStore({ ok: false, error: "ai_recovery_generate_failed" }, { status: 500 });
   }
 }

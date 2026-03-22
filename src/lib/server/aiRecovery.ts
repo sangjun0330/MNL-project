@@ -25,6 +25,7 @@ import {
   type AIRecoveryStatus,
   type AIRecoveryTone,
 } from "@/lib/aiRecovery";
+import { buildBillingEntitlements } from "@/lib/billing/entitlements";
 import { getAIRecoveryModelForTier, type PlanTier } from "@/lib/billing/plans";
 import { countHealthRecordedDays, hasHealthInput } from "@/lib/healthRecords";
 import { computePersonalizationAccuracy, topFactors, type FactorKey } from "@/lib/insightsV2";
@@ -40,6 +41,7 @@ import { userHasCompletedServiceConsent } from "@/lib/server/serviceConsentStore
 import { loadAIRecoveryDomains, readAIRecoverySlot, writeAIRecoveryCompletions, writeAIRecoverySlot } from "@/lib/server/aiRecoveryStateStore";
 import { readSubscription } from "@/lib/server/billingStore";
 import { combineAIRecoveryUsages, runAIRecoveryStructuredRequest } from "@/lib/server/openaiRecovery";
+import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { sanitizeStatePayload } from "@/lib/stateSanitizer";
 import type { Shift } from "@/lib/types";
 import { computeVitalsRange, type DailyVital } from "@/lib/vitals";
@@ -80,6 +82,26 @@ type OpenAIFlowResult = {
   reasoningEffort: AIRecoveryEffort;
   model: string;
   openaiMeta: AIRecoveryOpenAIMeta;
+};
+
+type RecoverySubscriptionSnapshot = {
+  tier: PlanTier;
+  hasPaidAccess: boolean;
+  entitlements: {
+    recoveryPlannerAI: boolean;
+  };
+  aiRecoveryModel: string | null;
+};
+
+type LoadedRecoveryDomains = Awaited<ReturnType<typeof loadAIRecoveryDomains>>;
+type LoadedRecoverySlot = Awaited<ReturnType<typeof readAIRecoverySlot>>;
+
+type SafeLoadedRecoveryDomains = LoadedRecoveryDomains & {
+  storageAvailable: boolean;
+};
+
+type SafeLoadedRecoverySlot = LoadedRecoverySlot & {
+  storageAvailable: boolean;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -195,6 +217,140 @@ function buildSignature(value: unknown) {
   const hexA = (hashA >>> 0).toString(16).padStart(8, "0");
   const hexB = (hashB >>> 0).toString(16).padStart(8, "0");
   return `sig:${hexA}${hexB}`;
+}
+
+function safeUserLogId(userId: string) {
+  return String(userId ?? "").slice(0, 8);
+}
+
+function asRecoveryPlanTier(value: unknown): PlanTier {
+  if (value === "plus" || value === "pro") return value;
+  return "free";
+}
+
+function asRecoverySubscriptionStatus(value: unknown): "inactive" | "active" | "expired" {
+  if (value === "active" || value === "expired") return value;
+  return "inactive";
+}
+
+function hasPaidAccessForRecovery(args: {
+  tier: PlanTier;
+  status: "inactive" | "active" | "expired";
+  currentPeriodEnd: string | null;
+}) {
+  if (args.tier === "free") return false;
+  if (args.status !== "active") return false;
+  const endMs = args.currentPeriodEnd ? Date.parse(args.currentPeriodEnd) : NaN;
+  if (!Number.isFinite(endMs)) return true;
+  return endMs > Date.now();
+}
+
+function projectRecoverySubscription(args: {
+  tier: PlanTier;
+  status: "inactive" | "active" | "expired";
+  currentPeriodEnd: string | null;
+}): RecoverySubscriptionSnapshot {
+  const hasPaidAccess = hasPaidAccessForRecovery(args);
+  return {
+    tier: args.tier,
+    hasPaidAccess,
+    entitlements: {
+      recoveryPlannerAI: buildBillingEntitlements({
+        tier: args.tier,
+        hasPaidAccess,
+        medSafetyTotalRemaining: 0,
+      }).recoveryPlannerAI,
+    },
+    aiRecoveryModel: getAIRecoveryModelForTier(args.tier),
+  };
+}
+
+async function readRecoverySubscriptionSnapshot(userId: string): Promise<RecoverySubscriptionSnapshot | null> {
+  try {
+    const subscription = await readSubscription(userId);
+    return {
+      tier: subscription.tier,
+      hasPaidAccess: subscription.hasPaidAccess,
+      entitlements: {
+        recoveryPlannerAI: Boolean(subscription.entitlements.recoveryPlannerAI),
+      },
+      aiRecoveryModel: subscription.aiRecoveryModel,
+    };
+  } catch (error) {
+    console.error("[AIRecovery] read_subscription_failed_primary", {
+      userId: safeUserLogId(userId),
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  try {
+    const admin = getSupabaseAdmin();
+    const { data, error } = await admin
+      .from("rnest_users")
+      .select("subscription_tier, subscription_status, subscription_current_period_end")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return projectRecoverySubscription({ tier: "free", status: "inactive", currentPeriodEnd: null });
+    return projectRecoverySubscription({
+      tier: asRecoveryPlanTier(data.subscription_tier),
+      status: asRecoverySubscriptionStatus(data.subscription_status),
+      currentPeriodEnd: typeof data.subscription_current_period_end === "string" ? data.subscription_current_period_end : null,
+    });
+  } catch (error) {
+    console.error("[AIRecovery] read_subscription_failed_fallback", {
+      userId: safeUserLogId(userId),
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+async function safeLoadRecoveryDomains(userId: string): Promise<SafeLoadedRecoveryDomains> {
+  try {
+    return {
+      ...(await loadAIRecoveryDomains(userId)),
+      storageAvailable: true,
+    };
+  } catch (error) {
+    console.error("[AIRecovery] load_domains_failed", {
+      userId: safeUserLogId(userId),
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      payload: {},
+      aiRecoveryDaily: {},
+      recoveryOrderCompletions: {},
+      storageAvailable: false,
+    };
+  }
+}
+
+async function safeReadRecoverySlot(args: {
+  userId: string;
+  dateISO: ISODate;
+  slot: AIRecoverySlot;
+}): Promise<SafeLoadedRecoverySlot> {
+  try {
+    return {
+      ...(await readAIRecoverySlot(args)),
+      storageAvailable: true,
+    };
+  } catch (error) {
+    console.error("[AIRecovery] read_slot_failed", {
+      userId: safeUserLogId(args.userId),
+      dateISO: args.dateISO,
+      slot: args.slot,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      session: null,
+      completions: [],
+      aiRecoveryDaily: {},
+      recoveryOrderCompletions: {},
+      storageAvailable: false,
+    };
+  }
 }
 
 function computeDefaultSelectionCount(args: {
@@ -1006,8 +1162,10 @@ async function resolveGate(args: {
     };
   }
 
-  const subscription = await readSubscription(args.userId);
-  const hasAIEntitlement = Boolean(subscription.hasPaidAccess && subscription.entitlements.recoveryPlannerAI && subscription.aiRecoveryModel);
+  const subscription = await readRecoverySubscriptionSnapshot(args.userId);
+  const hasAIEntitlement = Boolean(
+    subscription?.hasPaidAccess && subscription?.entitlements.recoveryPlannerAI && subscription?.aiRecoveryModel
+  );
   if (!hasAIEntitlement) {
     return {
       gate: {
@@ -1267,14 +1425,14 @@ export async function readAIRecoverySessionView(args: {
 }) {
   const dateISO = isISODate(args.dateISO ?? "") ? (args.dateISO as ISODate) : todayISO();
   const slot = args.slot === "postShift" ? "postShift" : "wake";
-  const { payload } = await loadAIRecoveryDomains(args.userId);
+  const { payload } = await safeLoadRecoveryDomains(args.userId);
   const { gate, snapshot, subscription } = await resolveGate({
     userId: args.userId,
     slot,
     dateISO,
     payload,
   });
-  const { session, completions } = await readAIRecoverySlot({ userId: args.userId, dateISO, slot });
+  const { session, completions } = await safeReadRecoverySlot({ userId: args.userId, dateISO, slot });
   const visibleSession = gate.allowed ? session : null;
   const orderIds = visibleSession?.orders?.map((item) => item.id) ?? [];
   const filteredCompletions = filterCompletionIdsForOrders(completions, orderIds);
@@ -1310,26 +1468,17 @@ export async function generateAIRecoverySession(args: {
   let canPersistSession = false;
 
   if (args.payloadOverride == null) {
-    const loaded = await loadAIRecoveryDomains(args.userId);
+    const loaded = await safeLoadRecoveryDomains(args.userId);
     payload = loaded.payload;
-    const existing = await readAIRecoverySlot({ userId: args.userId, dateISO: args.dateISO, slot: args.slot });
+    const existing = await safeReadRecoverySlot({ userId: args.userId, dateISO: args.dateISO, slot: args.slot });
     existingSession = existing.session;
     existingCompletions = existing.completions;
-    canPersistSession = true;
+    canPersistSession = loaded.storageAvailable && existing.storageAvailable;
   } else {
-    try {
-      const existing = await readAIRecoverySlot({ userId: args.userId, dateISO: args.dateISO, slot: args.slot });
-      existingSession = existing.session;
-      existingCompletions = existing.completions;
-      canPersistSession = true;
-    } catch (error) {
-      console.error("[AIRecovery] storage_read_fallback_to_client_state", {
-        userId: args.userId.slice(0, 8),
-        dateISO: args.dateISO,
-        slot: args.slot,
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
+    const existing = await safeReadRecoverySlot({ userId: args.userId, dateISO: args.dateISO, slot: args.slot });
+    existingSession = existing.session;
+    existingCompletions = existing.completions;
+    canPersistSession = existing.storageAvailable;
   }
 
   const { gate, snapshot, subscription } = await resolveGate({
@@ -1439,7 +1588,7 @@ export async function regenerateAIRecoveryOrders(args: {
   candidateIds: string[];
   signal: AbortSignal;
 }) {
-  const { payload } = await loadAIRecoveryDomains(args.userId);
+  const { payload } = await safeLoadRecoveryDomains(args.userId);
   const { gate, snapshot, subscription } = await resolveGate({
     userId: args.userId,
     slot: args.slot,
@@ -1450,7 +1599,7 @@ export async function regenerateAIRecoveryOrders(args: {
     throw new Error(gate.code ?? "ai_recovery_gate_blocked");
   }
 
-  const { session, completions } = await readAIRecoverySlot({ userId: args.userId, dateISO: args.dateISO, slot: args.slot });
+  const { session, completions } = await safeReadRecoverySlot({ userId: args.userId, dateISO: args.dateISO, slot: args.slot });
   if (!session?.brief) throw new Error("ai_recovery_session_missing");
   const quota = buildGenerationQuota(subscription?.tier ?? null, session);
   if (!quota.canRegenerateOrders) throw new Error("orders_generation_limit_reached");
@@ -1551,7 +1700,7 @@ export async function toggleAIRecoveryCompletion(args: {
   if (!orderId.startsWith("aiRecovery:")) {
     throw new Error("order_id_invalid");
   }
-  const { aiRecoveryDaily } = await loadAIRecoveryDomains(args.userId);
+  const { aiRecoveryDaily } = await safeLoadRecoveryDomains(args.userId);
   const day = aiRecoveryDaily[args.dateISO];
   const allowedOrderIds = [
     ...(day?.wake?.orders ?? []),
