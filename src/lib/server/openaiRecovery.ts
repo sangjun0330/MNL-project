@@ -120,6 +120,10 @@ function isRetryableError(error: string) {
   return /openai_responses_(408|409|425|429|500|502|503|504)/.test(value);
 }
 
+function isBadRequestError(error: string) {
+  return /openai_responses_400/i.test(String(error ?? ""));
+}
+
 function readString(value: unknown) {
   return typeof value === "string" ? value : null;
 }
@@ -245,13 +249,16 @@ function buildCompatStructuredDeveloperPrompt(args: StructuredRequestArgs) {
     "",
     "반드시 JSON 하나만 출력하라.",
     "설명, 머리말, 코드블록, 마크다운을 붙이지 마라.",
+    "아래 JSON schema의 키 구조를 그대로 지켜라.",
+    JSON.stringify(args.schema),
   ].join("\n");
 }
 
 async function postStructuredRequest(
   baseUrl: string,
   args: StructuredRequestArgs,
-  apiKey: string
+  apiKey: string,
+  compatMode = false
 ): Promise<StructuredRequestSuccess | StructuredRequestFailure> {
   const requestConfig = resolveOpenAIResponsesRequestConfig({
     apiBaseUrl: baseUrl,
@@ -268,32 +275,23 @@ async function postStructuredRequest(
   const timeout = setTimeout(() => controller.abort("upstream_timeout"), resolveUpstreamTimeoutMs());
   const onAbort = () => controller.abort("caller_aborted");
   args.signal.addEventListener("abort", onAbort, { once: true });
-  const useCompatMode = requestConfig.usesCompatEndpoint;
-  const requestUrl = useCompatMode ? requestConfig.requestUrl.replace(/\/responses$/i, "/chat/completions") : requestConfig.requestUrl;
+  const requestUrl = requestConfig.requestUrl;
 
   try {
-    const requestBody = useCompatMode
+    const requestBody = compatMode
       ? {
           model: requestConfig.model,
-          messages: [
+          input: [
             {
-              role: "system",
-              content: buildCompatStructuredDeveloperPrompt(args),
+              role: "developer",
+              content: [{ type: "input_text", text: buildCompatStructuredDeveloperPrompt(args) }],
             },
             {
               role: "user",
-              content: args.userPrompt,
+              content: [{ type: "input_text", text: args.userPrompt }],
             },
           ],
-          response_format: {
-            type: "json_schema",
-            json_schema: {
-              name: args.schemaName,
-              strict: true,
-              schema: args.schema,
-            },
-          },
-          max_completion_tokens: resolveMaxOutputTokens(args.maxOutputTokens ?? 2400),
+          max_output_tokens: resolveMaxOutputTokens(args.maxOutputTokens ?? 2400),
         }
       : {
           model: requestConfig.model,
@@ -325,7 +323,7 @@ async function postStructuredRequest(
     console.info("[AIRecovery] openai_request_start", {
       model: requestConfig.model,
       url: requestUrl,
-      compat: useCompatMode,
+      compat: compatMode,
     });
 
     const response = await fetch(requestUrl, {
@@ -408,13 +406,22 @@ export async function runAIRecoveryStructuredRequest(args: StructuredRequestArgs
         return { ok: false, error: "openai_timeout_total_budget" };
       }
 
-      const result = await postStructuredRequest(baseUrl, args, apiKey);
+      const result = await postStructuredRequest(baseUrl, args, apiKey, false);
       if ("text" in result) {
         return { ok: true, ...result };
       }
 
-      lastError = result.error;
-      if (!isRetryableError(result.error) || attempt >= retries) break;
+      let effectiveError = result.error;
+      if (isBadRequestError(result.error)) {
+        const compatResult = await postStructuredRequest(baseUrl, args, apiKey, true);
+        if ("text" in compatResult) {
+          return { ok: true, ...compatResult };
+        }
+        effectiveError = compatResult.error || result.error;
+      }
+
+      lastError = effectiveError;
+      if (!isRetryableError(effectiveError) || attempt >= retries) break;
 
       const delay = retryBaseMs * (attempt + 1);
       if (Date.now() - startedAt + delay > totalBudgetMs) {
