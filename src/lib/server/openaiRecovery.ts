@@ -2726,12 +2726,26 @@ function parsePlannerChecklistItems(
 
   const items: AIPlannerChecklistItem[] = [];
   for (const item of value) {
+    if (typeof item === "string") {
+      const text = item.replace(/\s+/g, " ").trim();
+      if (!text) continue;
+      items.push({
+        id: slugifyChecklistId(text, `order_${items.length + 1}`),
+        title: text.length > 28 ? `${text.slice(0, 25).trimEnd()}...` : text,
+        body: text,
+        when: normalizeChecklistWhen("", language),
+        reason: text,
+        chips: [],
+      });
+      if (items.length >= 5) break;
+      continue;
+    }
     const row = typeof item === "object" && item !== null ? (item as Record<string, unknown>) : null;
     if (!row) continue;
-    const title = asString(row.title);
-    const body = asString(row.body);
-    const reason = asString(row.reason);
-    if (!title || !body || !reason) continue;
+    const title = pickFirstString(row, ["title", "name", "label", "headline"]);
+    const body = pickFirstString(row, ["body", "text", "summary", "description", "action", "message", "reason"]);
+    const reason = pickFirstString(row, ["reason", "why", "whyNow", "description", "summary", "body", "message"]) || body || title;
+    if (!title || !body) continue;
     const rawId = asString(row.id) || title;
     const id = slugifyChecklistId(rawId, slugifyChecklistId(title, `order_${items.length + 1}`));
     items.push({

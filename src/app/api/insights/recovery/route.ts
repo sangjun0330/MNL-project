@@ -891,6 +891,15 @@ async function handleRecovery(
       const body: AIRecoveryApiSuccess = { ok: true, data: lang === "en" ? payloadEn ?? payloadKo : payloadKo };
       return jsonNoStore(body);
     } catch (generationError: any) {
+      const staleCurrent = aiContent && aiContent.dateISO === today ? readRecoveryPhasePayload(aiContent.data, today, lang, phase) : null;
+      if (
+        staleCurrent &&
+        staleCurrent.engine === "openai" &&
+        isPlannerContextCurrent(staleCurrent.plannerContext, plannerContext) &&
+        isProfileSnapshotCurrent(staleCurrent.profileSnapshot, profileSnapshot)
+      ) {
+        return jsonNoStore({ ok: true, data: staleCurrent } satisfies AIRecoveryApiSuccess);
+      }
       return bad(
         502,
         typeof generationError?.message === "string" && generationError.message.trim()

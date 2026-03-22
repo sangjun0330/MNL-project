@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { addDays, fromISODate, toISODate, todayISO, type ISODate } from "@/lib/date";
 import type { AIRecoveryPayload } from "@/lib/aiRecoveryContract";
 import type {
+  AIRecoveryPlannerModules,
   AIRecoveryPlannerApiError,
   AIRecoveryPlannerApiSuccess,
   AIRecoveryPlannerPayload,
@@ -238,6 +239,40 @@ function isRequestedOrderCountCurrent(cached: number | null | undefined, request
   return normalizeRequestedOrderCount(cached) === requested;
 }
 
+function describeNextDutyLabel(shift: Shift | null, language: Language) {
+  if (language === "en") {
+    if (shift === "D") return "the next day shift";
+    if (shift === "E") return "the next evening shift";
+    if (shift === "N") return "the next night shift";
+    if (shift === "M") return "the next middle shift";
+    return "the next duty";
+  }
+  if (shift === "D") return "다음 데이 근무";
+  if (shift === "E") return "다음 이브 근무";
+  if (shift === "N") return "다음 나이트 근무";
+  if (shift === "M") return "다음 미들 근무";
+  return "다음 근무";
+}
+
+function stringifyPlannerGeneratedText(
+  language: Language,
+  module: AIRecoveryPlannerModules["orders"],
+  explanationGeneratedText?: string
+) {
+  return JSON.stringify(
+    {
+      language,
+      title: module.title,
+      headline: module.headline,
+      summary: module.summary,
+      items: module.items,
+      explanationGeneratedText: explanationGeneratedText ?? "",
+    },
+    null,
+    2
+  );
+}
+
 function isPlannerContextCurrent(cached: PlannerContext | null | undefined, current: PlannerContext) {
   if (!cached) return false;
   if ((cached.focusFactor?.key ?? null) !== (current.focusFactor?.key ?? null)) return false;
@@ -421,9 +456,9 @@ async function handlePlanner(
         stripStartPhaseDynamicInputs,
         stripStartPhaseDynamicInputsFromVitals,
       },
-      { buildPlannerContext, normalizeProfileSettings },
+      { buildPlannerContext, buildPlannerTimelinePreview, normalizeProfileSettings },
       { computeVitalsRange },
-      { buildExplanationModule },
+      { buildExplanationModule, buildFallbackModules },
     ] = await Promise.all([
       import("@/lib/billing/plans"),
       import("@/lib/recoveryPhases"),
@@ -549,6 +584,7 @@ async function handlePlanner(
         generateAIRecoveryWithOpenAI,
       } = await import("@/lib/server/openaiRecovery");
       let plannerModel: string | null = null;
+      let plannerDebug: string | null = null;
       const cachedRecoveryIsCurrent =
         cachedRecovery &&
         cachedRecovery.engine === "openai" &&
@@ -592,30 +628,51 @@ async function handlePlanner(
         }
       }
 
-      const plannerAI = await generateAIRecoveryPlannerModulesWithOpenAI({
-        language: lang,
-        requestedOrderCount,
-        todayISO: today,
-        modelOverride: aiRecoveryModel,
-        phase,
-        todayShift,
-        nextShift,
-        todayVital,
-        vitals7: phaseVitals7,
-        prevWeekVitals: phasePrevWeek,
-        allVitals,
-        plannerContext,
-        profile,
-        recoveryThread,
-        recoveryResult: explanationResult,
-      });
-      const plannerModules = plannerAI.result;
-      const plannerGeneratedText = plannerAI.generatedText;
-      plannerModel = plannerAI.model;
+      let plannerModules: AIRecoveryPlannerModules;
+      let plannerGeneratedText: string | undefined;
+      try {
+        const plannerAI = await generateAIRecoveryPlannerModulesWithOpenAI({
+          language: lang,
+          requestedOrderCount,
+          todayISO: today,
+          modelOverride: aiRecoveryModel,
+          phase,
+          todayShift,
+          nextShift,
+          todayVital,
+          vitals7: phaseVitals7,
+          prevWeekVitals: phasePrevWeek,
+          allVitals,
+          plannerContext,
+          profile,
+          recoveryThread,
+          recoveryResult: explanationResult,
+        });
+        plannerModules = plannerAI.result;
+        plannerGeneratedText = plannerAI.generatedText;
+        plannerModel = plannerAI.model;
+      } catch (plannerError: any) {
+        if (!(explanationResult && explanationEngine === "openai")) {
+          throw plannerError;
+        }
+        const timelinePreview = buildPlannerTimelinePreview(todayShift, todayVital, profile);
+        plannerModules = buildFallbackModules({
+          language: lang,
+          plannerContext,
+          nextDutyLabel: describeNextDutyLabel(nextShift, lang),
+          timelinePreview,
+        });
+        plannerGeneratedText = stringifyPlannerGeneratedText(lang, plannerModules.orders, explanationGeneratedText);
+        plannerModel = explanationModel;
+        plannerDebug =
+          typeof plannerError?.message === "string" && plannerError.message.trim()
+            ? plannerError.message.trim()
+            : "planner_rule_fallback";
+      }
 
       const todayVitalScore = todayVital ? Math.round(Math.min(todayVital.body.value, todayVital.mental.ema)) : null;
       const model = explanationModel ?? plannerModel ?? null;
-      const hasUsablePlannerOpenAIText = Boolean(plannerGeneratedText?.trim() && explanationGeneratedText?.trim());
+      const hasUsableOpenAIExplanation = Boolean(explanationEngine === "openai" && explanationGeneratedText?.trim());
       const explanationPayload: AIRecoveryPayload = {
         dateISO: today,
         language: lang,
@@ -640,10 +697,10 @@ async function handlePlanner(
         todayShift,
         nextShift,
         todayVitalScore,
-        source: hasUsablePlannerOpenAIText ? "supabase" : "local",
-        engine: hasUsablePlannerOpenAIText ? "openai" : "rule",
+        source: hasUsableOpenAIExplanation ? "supabase" : "local",
+        engine: hasUsableOpenAIExplanation ? "openai" : "rule",
         model,
-        debug: explanationDebug,
+        debug: [plannerDebug, explanationDebug].filter(Boolean).join("|") || null,
         generatedText: plannerGeneratedText,
         explanationGeneratedText,
         plannerContext,
@@ -712,6 +769,17 @@ async function handlePlanner(
           error: generationError?.message ?? generationError,
         });
       } catch { /* ignore logging failure */ }
+      const stalePlanner = aiContent && aiContent.dateISO === today ? readPlannerPhasePayload(aiContent.data, today, lang, phase) : null;
+      if (
+        stalePlanner &&
+        stalePlanner.engine === "openai" &&
+        stalePlanner.phase === phase &&
+        isPlannerContextCurrent(stalePlanner.plannerContext, plannerContext) &&
+        isProfileSnapshotCurrent(stalePlanner.profileSnapshot, profileSnapshot) &&
+        isRequestedOrderCountCurrent(stalePlanner.requestedOrderCount, requestedOrderCount)
+      ) {
+        return jsonNoStore({ ok: true, data: stalePlanner } satisfies AIRecoveryPlannerApiSuccess);
+      }
       if (explanationResult && explanationEngine === "openai") {
         try {
           const todayVitalScore = todayVital ? Math.round(Math.min(todayVital.body.value, todayVital.mental.ema)) : null;
@@ -752,6 +820,43 @@ async function handlePlanner(
         } catch {
           // best-effort save; ignore failures
         }
+
+        const timelinePreview = buildPlannerTimelinePreview(todayShift, todayVital, profile);
+        const plannerModules = buildFallbackModules({
+          language: lang,
+          plannerContext,
+          nextDutyLabel: describeNextDutyLabel(nextShift, lang),
+          timelinePreview,
+        });
+        const plannerGeneratedText = stringifyPlannerGeneratedText(lang, plannerModules.orders, explanationGeneratedText);
+        const todayVitalScore = todayVital ? Math.round(Math.min(todayVital.body.value, todayVital.mental.ema)) : null;
+        const payload: AIRecoveryPlannerPayload = {
+          dateISO: today,
+          language: lang,
+          phase,
+          requestedOrderCount,
+          todayShift,
+          nextShift,
+          todayVitalScore,
+          source: "supabase",
+          engine: "openai",
+          model: explanationModel,
+          debug: [
+            typeof generationError?.message === "string" ? generationError.message.trim() : "planner_generation_failed",
+            explanationDebug,
+          ]
+            .filter(Boolean)
+            .join("|"),
+          generatedText: plannerGeneratedText,
+          explanationGeneratedText,
+          plannerContext,
+          profileSnapshot,
+          result: {
+            ...plannerModules,
+            explanation: buildExplanationModule(explanationResult, lang),
+          },
+        };
+        return jsonNoStore({ ok: true, data: payload } satisfies AIRecoveryPlannerApiSuccess);
       }
 
       return bad(
