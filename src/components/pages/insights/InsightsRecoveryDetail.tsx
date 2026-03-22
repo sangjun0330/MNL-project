@@ -58,7 +58,7 @@ export function InsightsRecoveryDetail() {
       <InsightDetailShell
         title="회복 플래너"
         subtitle={formatKoreanDate(end)}
-        meta={t("건강 기록 3일 이상부터 회복 플래너가 열립니다.")}
+        meta={t("건강 기록 3일 이상부터 볼 수 있어요.")}
       >
         <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />
       </InsightDetailShell>
@@ -69,7 +69,7 @@ export function InsightsRecoveryDetail() {
     <InsightDetailShell
       title="회복 플래너"
       subtitle={formatKoreanDate(end)}
-      meta="맞춤회복과 오늘의 오더 화면의 UI 구조만 유지 중입니다."
+      meta="AI 회복 해설과 오늘 할 오더를 함께 볼 수 있어요."
       chips={
         <>
           <DetailChip color={DETAIL_ACCENTS.mint}>{planner.nextDutyLabel}</DetailChip>
@@ -83,11 +83,11 @@ export function InsightsRecoveryDetail() {
         href="/insights/recovery/ai"
         label="AI CUSTOMIZED RECOVERY"
         title="AI 맞춤회복"
-        headline="해설 카드 구조만 남겨 둔 정적 화면입니다."
-        summary="헤드라인, 요약, 섹션 배치 같은 UI 뼈대만 유지하고 생성 파이프라인과 서버 연동은 제거했습니다."
+        headline="오늘 기록과 최근 14일 흐름으로 회복 포인트를 정리해 줘요."
+        summary="기상 후와 퇴근 후 기준으로 해설과 오더 후보를 보여줘요."
         chips={
           <>
-            <DetailChip color={DETAIL_ACCENTS.navy}>UI skeleton</DetailChip>
+            <DetailChip color={DETAIL_ACCENTS.navy}>AI 해설</DetailChip>
             {planner.focusFactor ? <DetailChip color={DETAIL_ACCENTS.mint}>회복 포커스 {planner.focusFactor.label}</DetailChip> : null}
           </>
         }
@@ -97,26 +97,26 @@ export function InsightsRecoveryDetail() {
         href="/insights/recovery/orders"
         label="TODAY ORDERS"
         title="오늘의 오더"
-        headline="체크리스트 카드 구조만 유지 중입니다."
-        summary="오더 개수 선택, 단계 구분, 체크리스트 카드 위치는 남겨 두고 생성·진행도 저장 시스템은 제거했습니다."
+        headline="선택한 후보를 바로 할 수 있는 오더로 바꿔 줘요."
+        summary="1~5개 후보를 다시 고르고, 오더를 다시 만들고, 완료 체크까지 할 수 있어요."
         chips={
           <>
-            <DetailChip color={DETAIL_ACCENTS.navy}>Checklist skeleton</DetailChip>
-            <DetailChip color={DETAIL_ACCENTS.mint}>1-5개 오더 레이아웃</DetailChip>
+            <DetailChip color={DETAIL_ACCENTS.navy}>실행 오더</DetailChip>
+            <DetailChip color={DETAIL_ACCENTS.mint}>1-5개 선택</DetailChip>
           </>
         }
       />
 
       <DetailCard className="p-5 sm:p-6">
-        <div className="text-[12px] font-semibold text-ios-sub">Recovery Notes</div>
-        <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-ios-text">현재 유지 범위</div>
+        <div className="text-[12px] font-semibold text-ios-sub">안내</div>
+        <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-ios-text">지금 되는 것</div>
         <div className="mt-3 flex flex-wrap gap-2">
-          <DetailChip color={DETAIL_ACCENTS.mint}>허브 카드 2개</DetailChip>
-          <DetailChip color={DETAIL_ACCENTS.navy}>상세 화면 골격</DetailChip>
-          <DetailChip color={DETAIL_ACCENTS.navy}>이동 동선</DetailChip>
+          <DetailChip color={DETAIL_ACCENTS.mint}>AI 해설 + 후보 선택</DetailChip>
+          <DetailChip color={DETAIL_ACCENTS.navy}>오더 재생성</DetailChip>
+          <DetailChip color={DETAIL_ACCENTS.navy}>완료 체크 저장</DetailChip>
         </div>
         <p className="mt-3 text-[14px] leading-relaxed text-ios-sub">
-          회복 허브는 계속 열리지만, 내부 데이터는 더 이상 생성하거나 저장하지 않습니다. 인사이트 메인 통계와 에너지 도둑 화면은 그대로 유지됩니다.
+          AI 해설 결과와 오더 완료 상태는 기존 기록과 따로 안전하게 저장돼요.
         </p>
       </DetailCard>
     </InsightDetailShell>
