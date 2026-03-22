@@ -1301,9 +1301,37 @@ export async function generateAIRecoverySession(args: {
   dateISO: ISODate;
   slot: AIRecoverySlot;
   force?: boolean;
+  payloadOverride?: unknown;
   signal: AbortSignal;
 }) {
-  const { payload } = await loadAIRecoveryDomains(args.userId);
+  let payload = args.payloadOverride ?? {};
+  let existingSession: AIRecoverySlotPayload | null = null;
+  let existingCompletions: string[] = [];
+  let canPersistSession = false;
+
+  if (args.payloadOverride == null) {
+    const loaded = await loadAIRecoveryDomains(args.userId);
+    payload = loaded.payload;
+    const existing = await readAIRecoverySlot({ userId: args.userId, dateISO: args.dateISO, slot: args.slot });
+    existingSession = existing.session;
+    existingCompletions = existing.completions;
+    canPersistSession = true;
+  } else {
+    try {
+      const existing = await readAIRecoverySlot({ userId: args.userId, dateISO: args.dateISO, slot: args.slot });
+      existingSession = existing.session;
+      existingCompletions = existing.completions;
+      canPersistSession = true;
+    } catch (error) {
+      console.error("[AIRecovery] storage_read_fallback_to_client_state", {
+        userId: args.userId.slice(0, 8),
+        dateISO: args.dateISO,
+        slot: args.slot,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   const { gate, snapshot, subscription } = await resolveGate({
     userId: args.userId,
     slot: args.slot,
@@ -1325,14 +1353,12 @@ export async function generateAIRecoverySession(args: {
     };
   }
 
-  const existing = await readAIRecoverySlot({ userId: args.userId, dateISO: args.dateISO, slot: args.slot });
-  const existingSession = existing.session;
   const quota = buildGenerationQuota(subscription?.tier ?? null, existingSession);
   if (!args.force && existingSession && existingSession.inputSignature === snapshot.inputSignature && existingSession.language === snapshot.language) {
     return {
       gate,
       session: existingSession,
-      completions: filterCompletionIdsForOrders(existing.completions, existingSession.orders.map((item) => item.id)),
+      completions: filterCompletionIdsForOrders(existingCompletions, existingSession.orders.map((item) => item.id)),
       quota,
       slotLabel: getAIRecoverySlotLabel(args.slot, snapshot.todayShift),
       slotDescription: getAIRecoverySlotDescription(args.slot, snapshot.todayShift),
@@ -1374,17 +1400,28 @@ export async function generateAIRecoverySession(args: {
   });
   const session = buildStoredSession({ snapshot, flow, previousSession: existingSession });
   const nextQuota = buildGenerationQuota(subscription?.tier ?? null, session);
-  await writeAIRecoverySlot({
-    userId: args.userId,
-    dateISO: args.dateISO,
-    slot: args.slot,
-    session,
-  });
+  if (canPersistSession) {
+    try {
+      await writeAIRecoverySlot({
+        userId: args.userId,
+        dateISO: args.dateISO,
+        slot: args.slot,
+        session,
+      });
+    } catch (error) {
+      console.error("[AIRecovery] storage_write_failed_returning_transient_session", {
+        userId: args.userId.slice(0, 8),
+        dateISO: args.dateISO,
+        slot: args.slot,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 
   return {
     gate,
     session,
-    completions: filterCompletionIdsForOrders(existing.completions, session.orders.map((item) => item.id)),
+    completions: filterCompletionIdsForOrders(existingCompletions, session.orders.map((item) => item.id)),
     quota: nextQuota,
     slotLabel: getAIRecoverySlotLabel(args.slot, snapshot.todayShift),
     slotDescription: getAIRecoverySlotDescription(args.slot, snapshot.todayShift),

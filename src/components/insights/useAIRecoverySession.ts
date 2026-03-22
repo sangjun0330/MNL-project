@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { ISODate } from "@/lib/date";
 import { getAIRecoveryErrorMessage, type AIRecoverySessionResponse, type AIRecoverySlot } from "@/lib/aiRecovery";
+import { serializeStateForSupabase } from "@/lib/statePersistence";
+import { useAppStore } from "@/lib/store";
 
 type SessionData = AIRecoverySessionResponse["data"];
 
@@ -31,6 +33,7 @@ async function readJson<T>(response: Response): Promise<T | null> {
 }
 
 export function useAIRecoverySession(args: HookArgs): HookState {
+  const store = useAppStore();
   const [data, setData] = useState<SessionData | null>(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
@@ -43,6 +46,14 @@ export function useAIRecoverySession(args: HookArgs): HookState {
 
   const setFriendlyError = (value: unknown) => {
     setError(getAIRecoveryErrorMessage(value));
+  };
+
+  const buildStatePayload = () => {
+    try {
+      return serializeStateForSupabase(store.getState());
+    } catch {
+      return null;
+    }
   };
 
   const load = async () => {
@@ -74,7 +85,8 @@ export function useAIRecoverySession(args: HookArgs): HookState {
         await generateInternal(false, key);
       }
     } catch (nextError) {
-      setFriendlyError((nextError as any)?.message ?? nextError ?? "ai_recovery_load_failed");
+      setData(null);
+      setError(null);
     } finally {
       setLoading(false);
     }
@@ -94,6 +106,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
           dateISO: args.dateISO,
           slot: args.slot,
           force,
+          state: buildStatePayload(),
         }),
       });
       const json = await readJson<{ ok?: boolean; error?: string; data?: SessionData }>(response);

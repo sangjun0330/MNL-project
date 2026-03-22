@@ -5,6 +5,7 @@ export type OpenAIResponsesRequestConfig = {
   headers: Record<string, string>;
   model: string;
   usesCloudflareGateway: boolean;
+  usesCompatEndpoint: boolean;
   authMode: "direct" | "request_header" | "stored_key";
   missingCredential: string | null;
 };
@@ -140,17 +141,25 @@ export function normalizeOpenAIResponsesBaseUrl(raw: string) {
   if (!isCloudflareGatewayBaseUrl(stripped)) return stripped || DEFAULT_OPENAI_BASE_URL;
 
   if (/\/compat$/i.test(stripped)) {
-    return stripped.replace(/\/compat$/i, "/openai");
+    return stripped;
+  }
+  if (/\/openai$/i.test(stripped)) {
+    return stripped.replace(/\/openai$/i, "/compat");
   }
   if (/\/v1\/[^/]+\/[^/]+$/i.test(stripped)) {
-    return `${stripped}/openai`;
+    return `${stripped}/compat`;
   }
   return stripped;
 }
 
-function normalizeOpenAIResponsesModel(model: string) {
+function normalizeOpenAIResponsesModel(model: string, options: { usesCloudflareGateway: boolean; usesCompatEndpoint: boolean }) {
   const trimmed = trimEnv(model);
-  if (!trimmed) return "gpt-5.4";
+  if (!trimmed) {
+    return options.usesCloudflareGateway && options.usesCompatEndpoint ? "openai/gpt-5.4" : "gpt-5.4";
+  }
+  if (options.usesCloudflareGateway && options.usesCompatEndpoint) {
+    return /^openai\//i.test(trimmed) ? trimmed : `openai/${trimmed}`;
+  }
   return trimmed.replace(/^openai\//i, "");
 }
 
@@ -162,6 +171,7 @@ export function resolveOpenAIResponsesRequestConfig(args: {
 }): OpenAIResponsesRequestConfig {
   const normalizedBaseUrl = normalizeOpenAIResponsesBaseUrl(args.apiBaseUrl);
   const usesCloudflareGateway = isCloudflareGatewayBaseUrl(normalizedBaseUrl);
+  const usesCompatEndpoint = usesCloudflareGateway && /\/compat$/i.test(normalizedBaseUrl);
   const gatewayToken = resolveGatewayToken(args.scope);
   const authMode = usesCloudflareGateway
     ? resolveGatewayAuthMode(args.scope, trimEnv(args.apiKey), gatewayToken)
@@ -173,15 +183,22 @@ export function resolveOpenAIResponsesRequestConfig(args: {
     "Content-Type": "application/json",
   };
 
-  if (usesCloudflareGateway && authMode === "stored_key") {
+  if (usesCloudflareGateway && usesCompatEndpoint && authMode === "stored_key") {
+    const compatToken = gatewayToken || openAIApiKey;
+    if (compatToken) {
+      headers.Authorization = `Bearer ${compatToken}`;
+    }
+  } else if (usesCloudflareGateway && authMode === "stored_key") {
     if (gatewayToken) {
       headers["cf-aig-authorization"] = `Bearer ${gatewayToken}`;
     }
-    // Fallback: Cloudflare BYOK(stored key)가 CF 대시보드에 미설정된 경우에도
-    // Authorization 헤더를 함께 전송해 OpenAI 인증이 통과되도록 함.
-    // BYOK가 설정된 경우 CF가 stored key를 우선 사용하므로 이 헤더는 무시됨.
     if (openAIApiKey) {
       headers.Authorization = `Bearer ${openAIApiKey}`;
+    }
+  } else if (usesCloudflareGateway && usesCompatEndpoint && authMode === "request_header") {
+    const compatToken = openAIApiKey || gatewayToken;
+    if (compatToken) {
+      headers.Authorization = `Bearer ${compatToken}`;
     }
   } else if (usesCloudflareGateway && authMode === "request_header") {
     if (openAIApiKey) {
@@ -195,8 +212,12 @@ export function resolveOpenAIResponsesRequestConfig(args: {
   }
 
   let missingCredential: string | null = null;
-  if (usesCloudflareGateway && authMode === "stored_key" && !gatewayToken && !openAIApiKey) {
+  if (usesCloudflareGateway && usesCompatEndpoint && authMode === "stored_key" && !gatewayToken && !openAIApiKey) {
     missingCredential = "missing_cf_aig_token_and_openai_api_key";
+  } else if (usesCloudflareGateway && authMode === "stored_key" && !gatewayToken && !openAIApiKey) {
+    missingCredential = "missing_cf_aig_token_and_openai_api_key";
+  } else if (usesCloudflareGateway && usesCompatEndpoint && authMode === "request_header" && !openAIApiKey && !gatewayToken) {
+    missingCredential = "missing_openai_api_key";
   } else if ((authMode === "request_header" || authMode === "direct") && !openAIApiKey) {
     missingCredential = "missing_openai_api_key";
   }
@@ -204,10 +225,11 @@ export function resolveOpenAIResponsesRequestConfig(args: {
   return {
     requestUrl: `${normalizedBaseUrl}/responses`,
     headers,
-    // Cloudflare's provider-native OpenAI Responses endpoint expects plain model ids
-    // like "gpt-5.4". The "openai/..." prefix is only for the unified /compat APIs.
-    model: normalizeOpenAIResponsesModel(args.model),
+    // Cloudflare Gateway screenshot flow uses the unified /compat endpoint with
+    // Authorization: Bearer <CF_AIG_TOKEN> and provider-prefixed model ids.
+    model: normalizeOpenAIResponsesModel(args.model, { usesCloudflareGateway, usesCompatEndpoint }),
     usesCloudflareGateway,
+    usesCompatEndpoint,
     authMode,
     missingCredential,
   };

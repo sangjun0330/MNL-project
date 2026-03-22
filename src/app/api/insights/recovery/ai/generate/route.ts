@@ -23,6 +23,7 @@ export async function POST(req: Request) {
   const dateISO = isISODate(body?.dateISO ?? "") ? (body.dateISO as ISODate) : todayISO();
   const slot = isAIRecoverySlot(body?.slot) ? body.slot : "wake";
   const force = Boolean(body?.force);
+  const payloadOverride = body?.state;
 
   try {
     const data = await generateAIRecoverySession({
@@ -30,11 +31,18 @@ export async function POST(req: Request) {
       dateISO,
       slot,
       force,
+      payloadOverride,
       signal: req.signal,
     });
     return jsonNoStore({ ok: true, data });
   } catch (error) {
     const message = String((error as any)?.message ?? error ?? "");
+    console.error("[AIRecovery] generate_failed", {
+      userId: userId.slice(0, 8),
+      dateISO,
+      slot,
+      message,
+    });
     if (message === "session_generation_limit_reached") return bad(403, message);
     return bad(500, "ai_recovery_generate_failed");
   }
