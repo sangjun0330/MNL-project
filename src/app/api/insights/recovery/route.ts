@@ -549,13 +549,11 @@ async function handleRecovery(
       },
       { buildPlannerContext, normalizeProfileSettings },
       { computeVitalsRange },
-      { generateAIRecovery },
     ] = await Promise.all([
       import("@/lib/billing/plans"),
       import("@/lib/recoveryPhases"),
       import("@/lib/recoveryPlanner"),
       import("@/lib/vitals"),
-      import("@/lib/aiRecovery"),
     ]);
     const aiRecoveryModel = getAIRecoveryModelForTier(subscription?.tier ?? "pro");
     const recordedDays = countHealthRecordedDaysFromRawPayload(row.payload);
@@ -893,37 +891,12 @@ async function handleRecovery(
       const body: AIRecoveryApiSuccess = { ok: true, data: lang === "en" ? payloadEn ?? payloadKo : payloadKo };
       return jsonNoStore(body);
     } catch (generationError: any) {
-      const todayVitalScore = todayVital
-        ? Math.round(Math.min(todayVital.body.value, todayVital.mental.ema))
-        : null;
-      const fallbackKoResult = generateAIRecovery(todayVital, phaseVitals7, phasePrevWeek, nextShift, "ko");
-      const fallbackKo: AIRecoveryPayload = {
-        dateISO: today,
-        language: "ko",
-        phase,
-        todayShift,
-        nextShift,
-        todayVitalScore,
-        source: "local",
-        engine: "rule",
-        model: null,
-        debug: typeof generationError?.message === "string" ? generationError.message : "rule_fallback",
-        plannerContext,
-        profileSnapshot,
-        result: fallbackKoResult,
-      };
-      const fallbackEn =
-        lang === "en"
-          ? ({
-              ...fallbackKo,
-              language: "en" as const,
-              result: generateAIRecovery(todayVital, phaseVitals7, phasePrevWeek, nextShift, "en"),
-            } satisfies AIRecoveryPayload)
-          : null;
-      return jsonNoStore({
-        ok: true,
-        data: lang === "en" ? fallbackEn ?? fallbackKo : fallbackKo,
-      } satisfies AIRecoveryApiSuccess);
+      return bad(
+        502,
+        typeof generationError?.message === "string" && generationError.message.trim()
+          ? generationError.message.trim()
+          : "ai_recovery_failed"
+      );
     }
   } catch (err: any) {
     try {

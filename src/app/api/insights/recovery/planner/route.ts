@@ -2,7 +2,6 @@ import { NextRequest } from "next/server";
 import { addDays, fromISODate, toISODate, todayISO, type ISODate } from "@/lib/date";
 import type { AIRecoveryPayload } from "@/lib/aiRecoveryContract";
 import type {
-  AIRecoveryPlannerModules,
   AIRecoveryPlannerApiError,
   AIRecoveryPlannerApiSuccess,
   AIRecoveryPlannerPayload,
@@ -239,40 +238,6 @@ function isRequestedOrderCountCurrent(cached: number | null | undefined, request
   return normalizeRequestedOrderCount(cached) === requested;
 }
 
-function describeNextDutyLabel(shift: Shift | null, language: Language) {
-  if (language === "en") {
-    if (shift === "D") return "the next day shift";
-    if (shift === "E") return "the next evening shift";
-    if (shift === "N") return "the next night shift";
-    if (shift === "M") return "the next middle shift";
-    return "the next duty";
-  }
-  if (shift === "D") return "다음 데이 근무";
-  if (shift === "E") return "다음 이브 근무";
-  if (shift === "N") return "다음 나이트 근무";
-  if (shift === "M") return "다음 미들 근무";
-  return "다음 근무";
-}
-
-function stringifyPlannerGeneratedText(
-  language: Language,
-  module: AIRecoveryPlannerModules["orders"],
-  explanationGeneratedText?: string
-) {
-  return JSON.stringify(
-    {
-      language,
-      title: module.title,
-      headline: module.headline,
-      summary: module.summary,
-      items: module.items,
-      explanationGeneratedText: explanationGeneratedText ?? "",
-    },
-    null,
-    2
-  );
-}
-
 function isPlannerContextCurrent(cached: PlannerContext | null | undefined, current: PlannerContext) {
   if (!cached) return false;
   if ((cached.focusFactor?.key ?? null) !== (current.focusFactor?.key ?? null)) return false;
@@ -456,17 +421,15 @@ async function handlePlanner(
         stripStartPhaseDynamicInputs,
         stripStartPhaseDynamicInputsFromVitals,
       },
-      { buildPlannerContext, buildPlannerTimelinePreview, normalizeProfileSettings },
+      { buildPlannerContext, normalizeProfileSettings },
       { computeVitalsRange },
-      { buildExplanationModule, buildFallbackModules },
-      { generateAIRecovery },
+      { buildExplanationModule },
     ] = await Promise.all([
       import("@/lib/billing/plans"),
       import("@/lib/recoveryPhases"),
       import("@/lib/recoveryPlanner"),
       import("@/lib/vitals"),
       import("@/lib/aiRecoveryPlanner"),
-      import("@/lib/aiRecovery"),
     ]);
     const aiRecoveryModel = getAIRecoveryModelForTier(subscription?.tier ?? "pro");
     const recordedDays = countHealthRecordedDaysFromRawPayload(row.payload);
@@ -585,7 +548,6 @@ async function handlePlanner(
         generateAIRecoveryPlannerModulesWithOpenAI,
         generateAIRecoveryWithOpenAI,
       } = await import("@/lib/server/openaiRecovery");
-      let plannerDebug: string | null = null;
       let plannerModel: string | null = null;
       const cachedRecoveryIsCurrent =
         cachedRecovery &&
@@ -622,50 +584,34 @@ async function handlePlanner(
           explanationModel = explanationAI.model;
           explanationEngine = "openai";
         } catch (explanationError: any) {
-          explanationResult = generateAIRecovery(todayVital, phaseVitals7, phasePrevWeek, nextShift, lang);
-          explanationGeneratedText = undefined;
-          explanationModel = null;
-          explanationDebug =
-            typeof explanationError?.message === "string" ? explanationError.message : "explanation_rule_fallback";
-          explanationEngine = "rule";
+          throw new Error(
+            typeof explanationError?.message === "string" && explanationError.message.trim()
+              ? explanationError.message.trim()
+              : "ai_recovery_explanation_failed"
+          );
         }
       }
 
-      let plannerModules: AIRecoveryPlannerModules;
-      let plannerGeneratedText: string | undefined;
-      try {
-        const plannerAI = await generateAIRecoveryPlannerModulesWithOpenAI({
-          language: lang,
-          requestedOrderCount,
-          todayISO: today,
-          modelOverride: aiRecoveryModel,
-          phase,
-          todayShift,
-          nextShift,
-          todayVital,
-          vitals7: phaseVitals7,
-          prevWeekVitals: phasePrevWeek,
-          allVitals,
-          plannerContext,
-          profile,
-          recoveryThread,
-          recoveryResult: explanationResult,
-        });
-        plannerModules = plannerAI.result;
-        plannerGeneratedText = plannerAI.generatedText;
-        plannerModel = plannerAI.model;
-      } catch (plannerError: any) {
-        const timelinePreview = buildPlannerTimelinePreview(todayShift, todayVital, profile);
-        plannerModules = buildFallbackModules({
-          language: lang,
-          plannerContext,
-          nextDutyLabel: describeNextDutyLabel(nextShift, lang),
-          timelinePreview,
-        });
-        plannerGeneratedText = stringifyPlannerGeneratedText(lang, plannerModules.orders, explanationGeneratedText);
-        plannerModel = explanationModel;
-        plannerDebug = typeof plannerError?.message === "string" ? plannerError.message : "planner_rule_fallback";
-      }
+      const plannerAI = await generateAIRecoveryPlannerModulesWithOpenAI({
+        language: lang,
+        requestedOrderCount,
+        todayISO: today,
+        modelOverride: aiRecoveryModel,
+        phase,
+        todayShift,
+        nextShift,
+        todayVital,
+        vitals7: phaseVitals7,
+        prevWeekVitals: phasePrevWeek,
+        allVitals,
+        plannerContext,
+        profile,
+        recoveryThread,
+        recoveryResult: explanationResult,
+      });
+      const plannerModules = plannerAI.result;
+      const plannerGeneratedText = plannerAI.generatedText;
+      plannerModel = plannerAI.model;
 
       const todayVitalScore = todayVital ? Math.round(Math.min(todayVital.body.value, todayVital.mental.ema)) : null;
       const model = explanationModel ?? plannerModel ?? null;
@@ -697,7 +643,7 @@ async function handlePlanner(
         source: hasUsablePlannerOpenAIText ? "supabase" : "local",
         engine: hasUsablePlannerOpenAIText ? "openai" : "rule",
         model,
-        debug: [plannerDebug, explanationDebug].filter(Boolean).join("|") || null,
+        debug: explanationDebug,
         generatedText: plannerGeneratedText,
         explanationGeneratedText,
         plannerContext,
@@ -758,7 +704,6 @@ async function handlePlanner(
 
       return jsonNoStore({ ok: true, data: payload } satisfies AIRecoveryPlannerApiSuccess);
     } catch (generationError: any) {
-      // explanationResult가 이미 AI로 성공했으면 보존, 아니면 rule fallback
       try {
         console.error("[Planner] outer_catch", {
           phase,
@@ -767,44 +712,9 @@ async function handlePlanner(
           error: generationError?.message ?? generationError,
         });
       } catch { /* ignore logging failure */ }
-      const finalExplanation = explanationResult ?? generateAIRecovery(todayVital, phaseVitals7, phasePrevWeek, nextShift, lang);
-      const finalEngine = explanationResult && explanationEngine === "openai" ? "openai" as const : "rule" as const;
-      const timelinePreview = buildPlannerTimelinePreview(todayShift, todayVital, profile);
-      const plannerModules = buildFallbackModules({
-        language: lang,
-        plannerContext,
-        nextDutyLabel: describeNextDutyLabel(nextShift, lang),
-        timelinePreview,
-      });
-      const fallbackPlannerText = stringifyPlannerGeneratedText(lang, plannerModules.orders, explanationGeneratedText);
-      const todayVitalScore = todayVital ? Math.round(Math.min(todayVital.body.value, todayVital.mental.ema)) : null;
-      const hasUsableText = Boolean(fallbackPlannerText?.trim() && explanationGeneratedText?.trim());
-      const debugMsg = typeof generationError?.message === "string" ? generationError.message : "rule_fallback";
-      const payload: AIRecoveryPlannerPayload = {
-        dateISO: today,
-        language: lang,
-        phase,
-        requestedOrderCount,
-        todayShift,
-        nextShift,
-        todayVitalScore,
-        source: finalEngine === "openai" ? "supabase" : "local",
-        engine: hasUsableText ? finalEngine : "rule",
-        model: explanationModel,
-        debug: explanationDebug ? `${debugMsg}|${explanationDebug}` : debugMsg,
-        generatedText: fallbackPlannerText,
-        explanationGeneratedText,
-        plannerContext,
-        profileSnapshot,
-        result: {
-          ...plannerModules,
-          explanation: buildExplanationModule(finalExplanation, lang),
-        },
-      };
-
-      // AI explanation이 성공했었으면 Supabase에 저장해서 다음 요청에서 캐시로 활용
-      if (finalEngine === "openai" && explanationResult) {
+      if (explanationResult && explanationEngine === "openai") {
         try {
+          const todayVitalScore = todayVital ? Math.round(Math.min(todayVital.body.value, todayVital.mental.ema)) : null;
           const explanationPayload: AIRecoveryPayload = {
             dateISO: today,
             language: lang,
@@ -844,7 +754,12 @@ async function handlePlanner(
         }
       }
 
-      return jsonNoStore({ ok: true, data: payload } satisfies AIRecoveryPlannerApiSuccess);
+      return bad(
+        502,
+        typeof generationError?.message === "string" && generationError.message.trim()
+          ? generationError.message.trim()
+          : "ai_recovery_planner_failed"
+      );
     }
   } catch (err: any) {
     try {

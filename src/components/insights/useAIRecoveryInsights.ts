@@ -31,6 +31,17 @@ type HookResult = {
 const inFlightGenerate = new Map<string, Promise<AIRecoveryPayload | null>>();
 const sessionDailyCache = new Map<string, AIRecoveryPayload>();
 
+function isUsableOpenAIRecoveryPayload(
+  payload: AIRecoveryPayload | null | undefined,
+  lang: "ko" | "en",
+  phase: RecoveryPhase
+): payload is AIRecoveryPayload {
+  if (!payload) return false;
+  if (payload.language !== lang || payload.phase !== phase) return false;
+  if (payload.engine !== "openai") return false;
+  return Boolean(payload.generatedText?.trim());
+}
+
 function clearRecoveryPhaseCache(userId: string, lang: "ko" | "en", dateISO: string, phase: RecoveryPhase) {
   const prefix = `${userId}:${lang}:${dateISO}:${phase}`;
   for (const key of Array.from(sessionDailyCache.keys())) {
@@ -82,6 +93,9 @@ async function fetchAIRecovery(
 
   const payload = (json?.data ?? null) as AIRecoveryPayload | null;
   if (!payload) return null;
+  if (payload.engine !== "openai") {
+    throw new Error(payload.debug ?? "ai_recovery_rule_fallback");
+  }
   return payload;
 }
 
@@ -121,12 +135,14 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
     // 세션 캐시 클리어 후 재시도
     const dateISO = todayISO();
     clearRecoveryPhaseCache(user?.userId ?? "guest", lang, dateISO, phase);
+    setRemoteData(null);
     setError(null);
     setRetryCount((c) => c + 1);
   }, [lang, phase, user?.userId]);
   const startGenerate = useCallback(() => {
     const dateISO = todayISO();
     clearRecoveryPhaseCache(user?.userId ?? "guest", lang, dateISO, phase);
+    setRemoteData(null);
     setError(null);
     setManualGenerateCount((c) => c + 1);
   }, [lang, phase, user?.userId]);
@@ -155,7 +171,7 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
     const forceGenerate = mode === "generate" && manualGenerateCount > 0;
 
     const fromSession = sessionDailyCache.get(key) ?? null;
-    if (fromSession && fromSession.language === lang && !forceGenerate) {
+    if (fromSession && isUsableOpenAIRecoveryPayload(fromSession, lang, phase) && !forceGenerate) {
       setRemoteData(fromSession);
       setError(null);
       setGenerating(false);
@@ -164,7 +180,7 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
         active = false;
       };
     }
-    if (fromSession && fromSession.language !== lang) {
+    if (fromSession && !isUsableOpenAIRecoveryPayload(fromSession, lang, phase)) {
       sessionDailyCache.delete(key);
     }
 
@@ -182,7 +198,7 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
         }
         if (!active) return;
 
-        if (cached && cached.language === lang && cached.phase === phase && !forceGenerate) {
+        if (cached && isUsableOpenAIRecoveryPayload(cached, lang, phase) && !forceGenerate) {
           sessionDailyCache.set(key, cached);
           setRemoteData(cached);
           return;
@@ -199,6 +215,10 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
         if (!generated) {
           throw new Error("ai_recovery_empty_payload");
         }
+        if (!isUsableOpenAIRecoveryPayload(generated, lang, phase)) {
+          const generatedEngine = (generated as AIRecoveryPayload | null)?.engine;
+          throw new Error(generatedEngine === "rule" ? "ai_recovery_rule_fallback_blocked" : "ai_recovery_non_openai_payload");
+        }
         if (generated.language !== lang || generated.phase !== phase) {
           throw new Error("ai_recovery_mismatched_payload");
         }
@@ -206,6 +226,7 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
         setRemoteData(generated);
       } catch (err: any) {
         if (!active) return;
+        setRemoteData(null);
         setError(err?.message ?? "network_error");
       } finally {
         if (active) {

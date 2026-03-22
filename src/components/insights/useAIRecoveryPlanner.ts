@@ -33,6 +33,17 @@ const inFlightForceGenerate = new Map<string, Promise<AIRecoveryPlannerPayload |
 const sessionDailyCache = new Map<string, AIRecoveryPlannerPayload>();
 const DEFAULT_ORDER_COUNT = 3;
 
+function isUsableOpenAIPlannerPayload(
+  payload: AIRecoveryPlannerPayload | null | undefined,
+  lang: "ko" | "en",
+  phase: RecoveryPhase
+): payload is AIRecoveryPlannerPayload {
+  if (!payload) return false;
+  if (payload.language !== lang || payload.phase !== phase) return false;
+  if (payload.engine !== "openai") return false;
+  return Boolean(payload.generatedText?.trim() && payload.explanationGeneratedText?.trim());
+}
+
 function clearPlannerPhaseCache(userId: string, lang: "ko" | "en", dateISO: string, phase: RecoveryPhase) {
   const prefix = `${userId}:${lang}:${dateISO}:${phase}:`;
   for (const key of Array.from(sessionDailyCache.keys())) {
@@ -104,6 +115,9 @@ async function fetchAIRecoveryPlanner(
 
   const payload = (json?.data ?? null) as AIRecoveryPlannerPayload | null;
   if (!payload) return null;
+  if (payload.engine !== "openai") {
+    throw new Error(payload.debug ?? "ai_recovery_planner_rule_fallback");
+  }
   return payload;
 }
 
@@ -147,6 +161,7 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
   const retry = useCallback(() => {
     const dateISO = todayISO();
     clearPlannerPhaseCache(user?.userId ?? "guest", lang, dateISO, phase);
+    setRemoteData(null);
     setError(null);
     setRetryCount((c) => c + 1);
   }, [lang, phase, user?.userId]);
@@ -154,6 +169,7 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
   const startGenerate = useCallback((orderCount?: number) => {
     const dateISO = todayISO();
     clearPlannerPhaseCache(user?.userId ?? "guest", lang, dateISO, phase);
+    setRemoteData(null);
     setError(null);
     setManualGenerateState((current) => ({
       count: current.count + 1,
@@ -190,7 +206,7 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
     const requestedOrderCount = forceGenerate ? manualGenerateState.orderCount : null;
 
     const fromSession = sessionDailyCache.get(key) ?? null;
-    if (fromSession && fromSession.language === lang && !forceGenerate) {
+    if (fromSession && isUsableOpenAIPlannerPayload(fromSession, lang, phase) && !forceGenerate) {
       setRemoteData(fromSession);
       setError(null);
       setGenerating(false);
@@ -199,7 +215,7 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
         active = false;
       };
     }
-    if (fromSession && fromSession.language !== lang) {
+    if (fromSession && !isUsableOpenAIPlannerPayload(fromSession, lang, phase)) {
       sessionDailyCache.delete(key);
     }
 
@@ -217,7 +233,7 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
         }
         if (!active) return;
 
-        if (cached && cached.language === lang && cached.phase === phase && !forceGenerate) {
+        if (cached && isUsableOpenAIPlannerPayload(cached, lang, phase) && !forceGenerate) {
           sessionDailyCache.set(key, cached);
           setRemoteData(cached);
           return;
@@ -248,6 +264,12 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
         if (!generated) {
           throw new Error("ai_recovery_planner_empty_payload");
         }
+        if (!isUsableOpenAIPlannerPayload(generated, lang, phase)) {
+          const generatedEngine = (generated as AIRecoveryPlannerPayload | null)?.engine;
+          throw new Error(
+            generatedEngine === "rule" ? "ai_recovery_planner_rule_fallback_blocked" : "ai_recovery_planner_non_openai_payload"
+          );
+        }
         if (generated.language !== lang || generated.phase !== phase) {
           throw new Error("ai_recovery_planner_mismatched_payload");
         }
@@ -255,6 +277,7 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
         setRemoteData(generated);
       } catch (err: any) {
         if (!active) return;
+        setRemoteData(null);
         setError(err?.message ?? "network_error");
       } finally {
         if (active) {

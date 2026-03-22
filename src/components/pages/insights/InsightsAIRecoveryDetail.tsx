@@ -502,26 +502,10 @@ function RecoverySectionRow({
 }) {
   const theme = CATEGORY_THEME[meta.key];
   const descriptionText = normalizeNarrativeText(section.description || "", lang);
-  const tips = (section.tips ?? [])
-    .map((tip) => normalizeNarrativeText(tip, lang))
-    .filter(Boolean);
-  const recommendationPool = [...tips];
-
-  if (recommendationPool.length < 3) {
-    const derived = splitBulletLines(descriptionText).filter(Boolean);
-    for (const item of derived) {
-      if (recommendationPool.includes(item)) continue;
-      recommendationPool.push(item);
-    }
-  }
-
-  const recommendations = recommendationPool.slice(0, 3);
+  const tips = (section.tips ?? []).map((tip) => normalizeNarrativeText(tip, lang)).filter(Boolean);
   const severity = section.severity ?? "info";
-  const primaryText = recommendations[0] ?? descriptionText;
-  const supportingText = descriptionText && descriptionText !== primaryText ? descriptionText : recommendations[1] ?? "";
-  const extraRecommendations = recommendations.filter((tip) => tip !== primaryText).slice(descriptionText && descriptionText !== primaryText ? 0 : 1);
-  const visibleRecommendations = expanded ? extraRecommendations : [];
-  const hasExtraContent = Boolean(supportingText || extraRecommendations.length);
+  const visibleRecommendations = expanded || tips.length <= 2 ? tips : tips.slice(0, 2);
+  const hasExtraContent = tips.length > 2;
   const toggleLabel = expanded ? (lang === "en" ? "Show less" : "접기") : (lang === "en" ? "More" : "더 보기");
   const titleText = normalizeRecoveryCopy(section.title || t(meta.titleKey));
 
@@ -555,16 +539,10 @@ function RecoverySectionRow({
           ) : null}
         </div>
 
-        {primaryText ? (
-          <p className="mt-3 break-keep text-[16px] font-semibold leading-[1.7] tracking-[-0.025em] text-ios-text">{primaryText}</p>
-        ) : null}
-
-        {supportingText ? (
-          <div className="mt-3 rounded-[18px] border border-[rgba(16,33,70,0.06)] bg-white/76 px-3.5 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
-            <p className="break-keep text-[13px] leading-6 text-[#5E6C84]" style={expanded ? undefined : clampStyle(2)}>
-              {supportingText}
-            </p>
-          </div>
+        {descriptionText ? (
+          <p className="mt-3 break-keep text-[16px] font-semibold leading-[1.7] tracking-[-0.025em] text-ios-text">
+            {descriptionText}
+          </p>
         ) : null}
 
         {visibleRecommendations.length ? (

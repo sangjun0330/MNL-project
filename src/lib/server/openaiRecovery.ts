@@ -1497,6 +1497,12 @@ function asString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function asRecordNode(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
 function asStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.map((item) => asString(item)).filter(Boolean);
@@ -1544,6 +1550,44 @@ function inferRecoveryCategoryFromText(text: string): RecoverySection["category"
   if (/(집중|멘탈|감정|기분|focus|mood|emotion)/i.test(text)) return "stress";
   if (/(리듬|생체|night|circadian|교대)/i.test(text)) return "shift";
   return null;
+}
+
+function collectRecoveryResultCandidates(candidate: Record<string, unknown>) {
+  const nodes: Record<string, unknown>[] = [];
+  const seen = new Set<Record<string, unknown>>();
+  const push = (value: unknown) => {
+    const node = asRecordNode(value);
+    if (!node || seen.has(node)) return;
+    seen.add(node);
+    nodes.push(node);
+  };
+
+  push(candidate);
+  push(candidate.result);
+  push(candidate.recovery);
+  push(candidate.explanation);
+  push(candidate.payload);
+  push(candidate.data);
+  push(candidate.response);
+  push(candidate.output);
+
+  const result = asRecordNode(candidate.result);
+  const explanation = asRecordNode(candidate.explanation);
+  const payload = asRecordNode(candidate.payload);
+  const data = asRecordNode(candidate.data);
+
+  push(result?.recovery);
+  push(result?.explanation);
+  push(asRecordNode(result?.explanation)?.recovery);
+  push(explanation?.recovery);
+  push(payload?.result);
+  push(payload?.recovery);
+  push(asRecordNode(payload?.result)?.recovery);
+  push(data?.result);
+  push(data?.recovery);
+  push(asRecordNode(data?.result)?.recovery);
+
+  return nodes;
 }
 
 function collectRecoveryTips(row: Record<string, unknown>, description: string) {
@@ -1594,87 +1638,105 @@ function dedupeNarrativeStrings(values: string[], limit: number, blocked: string
 }
 
 function parseRecoveryJsonResult(candidate: Record<string, unknown>): AIRecoveryResult | null {
-  const headline = asString(candidate.headline);
-  if (!headline) return null;
+  for (const node of collectRecoveryResultCandidates(candidate)) {
+    const headline = pickFirstString(node, ["headline", "title", "summary", "message"]);
+    if (!headline) continue;
 
-  const sectionsRaw = Array.isArray(candidate.sections)
-    ? candidate.sections
-    : Array.isArray(candidate.items)
-      ? candidate.items
+    const sectionsRaw = Array.isArray(node.sections)
+      ? node.sections
+      : Array.isArray(node.items)
+        ? node.items
+        : Array.isArray(node.categories)
+          ? node.categories
+          : [];
+    const sections = sectionsRaw
+      .map((item) => {
+        const row = asRecordNode(item);
+        if (!row) return null;
+        const title = pickFirstString(row, ["title", "heading", "name", "label"]);
+        const description = pickFirstString(row, [
+          "description",
+          "summary",
+          "body",
+          "reason",
+          "whyNow",
+          "why",
+          "message",
+          "text",
+        ]);
+        const tips = collectRecoveryTips(row, description);
+        const category =
+          asRecoveryCategory(row.category) ??
+          inferRecoveryCategoryFromText([title, description, ...tips].filter(Boolean).join(" "));
+        if (!category || !title || (!description && !tips.length)) return null;
+
+        const safeDescription = description || tips[0] || "";
+        const safeTips = description ? tips : tips.slice(1);
+        return {
+          category,
+          severity: asRecoverySeverity(row.severity, `${title} ${safeDescription} ${safeTips.join(" ")}`),
+          title,
+          description: safeDescription,
+          tips: safeTips,
+        } satisfies RecoverySection;
+      })
+      .filter((section): section is RecoverySection => Boolean(section))
+      .slice(0, 4);
+
+    if (!sections.length) continue;
+
+    const compoundRaw =
+      asRecordNode(node.compoundAlert) ??
+      asRecordNode(node.alert) ??
+      asRecordNode(node.warning);
+    const compoundAlert =
+      compoundRaw && asString(compoundRaw.message)
+        ? {
+            factors: dedupeNarrativeStrings(asStringArray(compoundRaw.factors), 4),
+            message: asString(compoundRaw.message),
+          }
+        : null;
+
+    const weeklyRaw =
+      asRecordNode(node.weeklySummary) ??
+      asRecordNode(node.weekly) ??
+      asRecordNode(node.weeklyNote);
+    const topDrains = Array.isArray(weeklyRaw?.topDrains)
+      ? weeklyRaw!.topDrains
+          .map((item) => {
+            const row = asRecordNode(item);
+            if (!row) return null;
+            const label = asString(row.label);
+            const pct = Number(row.pct);
+            if (!label || !Number.isFinite(pct)) return null;
+            return {
+              label,
+              pct: Math.round(clamp(pct, 0, 100)),
+            };
+          })
+          .filter((item): item is { label: string; pct: number } => Boolean(item))
+          .slice(0, 3)
       : [];
-  const sections = sectionsRaw
-    .map((item) => {
-      const row = typeof item === "object" && item !== null ? (item as Record<string, unknown>) : null;
-      if (!row) return null;
-      const title = pickFirstString(row, ["title", "heading", "name", "label"]);
-      const description = pickFirstString(row, ["description", "summary", "body", "reason", "whyNow", "why", "message"]);
-      const tips = collectRecoveryTips(row, description);
-      const category =
-        asRecoveryCategory(row.category) ??
-        inferRecoveryCategoryFromText([title, description, ...tips].filter(Boolean).join(" "));
-      if (!category || !title || !description || !tips.length) return null;
-      return {
-        category,
-        severity: asRecoverySeverity(row.severity, `${title} ${description} ${tips.join(" ")}`),
-        title,
-        description,
-        tips,
-      } satisfies RecoverySection;
-    })
-    .filter((section): section is RecoverySection => Boolean(section))
-    .slice(0, 4);
+    const weeklySummary =
+      weeklyRaw && (asString(weeklyRaw.personalInsight) || asString(weeklyRaw.nextWeekPreview) || topDrains.length)
+        ? {
+            avgBattery: Math.round(clamp(Number(weeklyRaw.avgBattery), 0, 100)),
+            prevAvgBattery: Math.round(clamp(Number(weeklyRaw.prevAvgBattery), 0, 100)),
+            topDrains,
+            personalInsight: asString(weeklyRaw.personalInsight),
+            nextWeekPreview: asString(weeklyRaw.nextWeekPreview),
+          }
+        : null;
 
-  if (!sections.length) return null;
+    return {
+      headline,
+      compoundAlert,
+      sections,
+      weeklySummary,
+    };
+  }
 
-  const compoundRaw =
-    typeof candidate.compoundAlert === "object" && candidate.compoundAlert !== null
-      ? (candidate.compoundAlert as Record<string, unknown>)
-      : null;
-  const compoundAlert =
-    compoundRaw && asString(compoundRaw.message)
-      ? {
-          factors: dedupeNarrativeStrings(asStringArray(compoundRaw.factors), 4),
-          message: asString(compoundRaw.message),
-        }
-      : null;
-
-  const weeklyRaw =
-    typeof candidate.weeklySummary === "object" && candidate.weeklySummary !== null
-      ? (candidate.weeklySummary as Record<string, unknown>)
-      : null;
-  const topDrains = Array.isArray(weeklyRaw?.topDrains)
-    ? weeklyRaw!.topDrains
-        .map((item) => {
-          const row = typeof item === "object" && item !== null ? (item as Record<string, unknown>) : null;
-          if (!row) return null;
-          const label = asString(row.label);
-          const pct = Number(row.pct);
-          if (!label || !Number.isFinite(pct)) return null;
-          return {
-            label,
-            pct: Math.round(clamp(pct, 0, 100)),
-          };
-        })
-        .filter((item): item is { label: string; pct: number } => Boolean(item))
-        .slice(0, 3)
-    : [];
-  const weeklySummary =
-    weeklyRaw && (asString(weeklyRaw.personalInsight) || asString(weeklyRaw.nextWeekPreview) || topDrains.length)
-      ? {
-          avgBattery: Math.round(clamp(Number(weeklyRaw.avgBattery), 0, 100)),
-          prevAvgBattery: Math.round(clamp(Number(weeklyRaw.prevAvgBattery), 0, 100)),
-          topDrains,
-          personalInsight: asString(weeklyRaw.personalInsight),
-          nextWeekPreview: asString(weeklyRaw.nextWeekPreview),
-        }
-      : null;
-
-  return {
-    headline,
-    compoundAlert,
-    sections,
-    weeklySummary,
-  };
+  return null;
 }
 
 function shapeMatches(source: TranslationBundle, translated: TranslationBundle) {
@@ -2698,19 +2760,66 @@ function parsePlannerChecklistModule(
   language: Language,
   requestedOrderCount?: number | null
 ): AIPlannerChecklistModule {
-  const row = typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
-  const items = parsePlannerChecklistItems(
-    row.items ?? (typeof row.orders === "object" && row.orders !== null ? (row.orders as Record<string, unknown>).items : null),
-    language,
-    requestedOrderCount
-  );
-  return {
-    eyebrow: pickFirstString(row, ["eyebrow"]) || "Today Orders",
-    title: pickFirstString(row, ["title", "name"]),
-    headline: pickFirstString(row, ["headline", "head", "tagline"]),
-    summary: pickFirstString(row, ["summary", "description", "body"]),
-    items,
+  const baseRow = asRecordNode(value) ?? {};
+  const rows: Record<string, unknown>[] = [];
+  const seen = new Set<Record<string, unknown>>();
+  const push = (candidate: unknown) => {
+    const row = asRecordNode(candidate);
+    if (!row || seen.has(row)) return;
+    seen.add(row);
+    rows.push(row);
   };
+
+  push(baseRow);
+  push(baseRow.orders);
+  push(baseRow.checklist);
+  push(baseRow.result);
+  push(asRecordNode(baseRow.result)?.orders);
+  push(asRecordNode(baseRow.result)?.checklist);
+  push(baseRow.payload);
+  push(asRecordNode(baseRow.payload)?.orders);
+  push(asRecordNode(baseRow.payload)?.checklist);
+  push(baseRow.data);
+  push(asRecordNode(baseRow.data)?.orders);
+  push(asRecordNode(baseRow.data)?.checklist);
+
+  let best: AIPlannerChecklistModule = {
+    eyebrow: "Today Orders",
+    title: "",
+    headline: "",
+    summary: "",
+    items: [],
+  };
+
+  for (const row of rows) {
+    const items = parsePlannerChecklistItems(
+      row.items ??
+        asRecordNode(row.orders)?.items ??
+        asRecordNode(row.checklist)?.items,
+      language,
+      requestedOrderCount
+    );
+    const next: AIPlannerChecklistModule = {
+      eyebrow: pickFirstString(row, ["eyebrow"]) || best.eyebrow || "Today Orders",
+      title: pickFirstString(row, ["title", "name", "label"]),
+      headline: pickFirstString(row, ["headline", "head", "tagline", "subtitle"]),
+      summary: pickFirstString(row, ["summary", "description", "body", "message"]),
+      items,
+    };
+    if (next.items.length > best.items.length) {
+      best = next;
+      continue;
+    }
+    if (
+      next.items.length === best.items.length &&
+      [next.title, next.headline, next.summary].filter(Boolean).length >
+        [best.title, best.headline, best.summary].filter(Boolean).length
+    ) {
+      best = next;
+    }
+  }
+
+  return best;
 }
 
 async function generatePlannerOrdersWithOpenAI(
@@ -2806,17 +2915,9 @@ async function generatePlannerOrdersWithOpenAI(
         checklistModule.items.length >= 1 &&
         checklistModule.items.length <= 5 &&
         (targetCount == null || Math.abs(checklistModule.items.length - targetCount) <= 1);
-      if (
-        !checklistModule.title ||
-        !checklistModule.headline ||
-        !checklistModule.summary ||
-        !itemCountOk
-      ) {
+      if (!itemCountOk) {
         lastError = `openai_planner_orders_incomplete_model:${currentModel}`;
         console.error(`[generatePlannerOrdersWithOpenAI] attempt ${attemptIndex} validation failed`, {
-          hasTitle: Boolean(checklistModule.title),
-          hasHeadline: Boolean(checklistModule.headline),
-          hasSummary: Boolean(checklistModule.summary),
           itemCount: checklistModule.items.length,
           targetCount,
         });
