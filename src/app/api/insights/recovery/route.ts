@@ -891,6 +891,14 @@ async function handleRecovery(
       const body: AIRecoveryApiSuccess = { ok: true, data: lang === "en" ? payloadEn ?? payloadKo : payloadKo };
       return jsonNoStore(body);
     } catch (generationError: any) {
+      const refreshedAIContent = await safeLoadAIContent(userId).catch(() => null);
+      const refreshedCurrent =
+        refreshedAIContent && refreshedAIContent.dateISO === today
+          ? readRecoveryPhasePayload(refreshedAIContent.data, today, lang, phase)
+          : null;
+      if (refreshedCurrent && refreshedCurrent.engine === "openai") {
+        return jsonNoStore({ ok: true, data: refreshedCurrent } satisfies AIRecoveryApiSuccess);
+      }
       const staleCurrent = aiContent && aiContent.dateISO === today ? readRecoveryPhasePayload(aiContent.data, today, lang, phase) : null;
       if (
         staleCurrent &&

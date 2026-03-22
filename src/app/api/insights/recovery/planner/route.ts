@@ -273,6 +273,65 @@ function stringifyPlannerGeneratedText(
   );
 }
 
+function buildPlannerPayloadFromExplanation(args: {
+  language: Language;
+  phase: RecoveryPhase;
+  requestedOrderCount: number | null;
+  today: ISODate;
+  todayShift: Shift;
+  nextShift: Shift | null;
+  todayVitalScore: number | null;
+  plannerContext: PlannerContext;
+  profileSnapshot: NonNullable<AIRecoveryPlannerPayload["profileSnapshot"]>;
+  explanationResult: AIRecoveryPayload["result"];
+  explanationGeneratedText?: string;
+  explanationModel?: string | null;
+  explanationDebug?: string | null;
+  fallbackModules: AIRecoveryPlannerModules;
+  buildExplanationModule: (result: AIRecoveryPayload["result"], language: Language) => AIRecoveryPlannerPayload["result"]["explanation"];
+  debugTag?: string | null;
+}): AIRecoveryPlannerPayload {
+  const {
+    language,
+    phase,
+    requestedOrderCount,
+    today,
+    todayShift,
+    nextShift,
+    todayVitalScore,
+    plannerContext,
+    profileSnapshot,
+    explanationResult,
+    explanationGeneratedText,
+    explanationModel,
+    explanationDebug,
+    fallbackModules,
+    buildExplanationModule,
+    debugTag,
+  } = args;
+  return {
+    dateISO: today,
+    language,
+    phase,
+    requestedOrderCount,
+    todayShift,
+    nextShift,
+    todayVitalScore,
+    source: "supabase",
+    engine: "openai",
+    model: explanationModel ?? null,
+    debug: [debugTag, explanationDebug].filter(Boolean).join("|") || null,
+    generatedText: stringifyPlannerGeneratedText(language, fallbackModules.orders, explanationGeneratedText),
+    explanationGeneratedText,
+    plannerContext,
+    profileSnapshot,
+    result: {
+      ...fallbackModules,
+      explanation: buildExplanationModule(explanationResult, language),
+    },
+  };
+}
+
 function isPlannerContextCurrent(cached: PlannerContext | null | undefined, current: PlannerContext) {
   if (!cached) return false;
   if ((cached.focusFactor?.key ?? null) !== (current.focusFactor?.key ?? null)) return false;
@@ -618,6 +677,7 @@ async function handlePlanner(
           explanationResult = explanationAI.result;
           explanationGeneratedText = explanationAI.generatedText;
           explanationModel = explanationAI.model;
+          explanationDebug = explanationAI.debug ?? null;
           explanationEngine = "openai";
         } catch (explanationError: any) {
           throw new Error(
@@ -627,6 +687,106 @@ async function handlePlanner(
           );
         }
       }
+
+      const saveProvisionalPlannerPayload = async (debugTag: string) => {
+        if (!(explanationResult && explanationEngine === "openai" && explanationGeneratedText?.trim())) return null;
+        try {
+          const timelinePreview = buildPlannerTimelinePreview(todayShift, todayVital, profile);
+          const fallbackModules = buildFallbackModules({
+            language: lang,
+            plannerContext,
+            nextDutyLabel: describeNextDutyLabel(nextShift, lang),
+            timelinePreview,
+          });
+          const todayVitalScore = todayVital ? Math.round(Math.min(todayVital.body.value, todayVital.mental.ema)) : null;
+          const explanationPayload: AIRecoveryPayload = {
+            dateISO: today,
+            language: lang,
+            phase,
+            todayShift,
+            nextShift,
+            todayVitalScore,
+            source: "supabase",
+            engine: "openai",
+            model: explanationModel,
+            debug: explanationDebug,
+            generatedText: explanationGeneratedText,
+            plannerContext,
+            profileSnapshot,
+            result: explanationResult,
+          };
+          const provisionalPlannerPayload = buildPlannerPayloadFromExplanation({
+            language: lang,
+            phase,
+            requestedOrderCount,
+            today,
+            todayShift,
+            nextShift,
+            todayVitalScore,
+            plannerContext,
+            profileSnapshot,
+            explanationResult,
+            explanationGeneratedText,
+            explanationModel,
+            explanationDebug,
+            fallbackModules,
+            buildExplanationModule,
+            debugTag,
+          });
+          const aiContentRecord = isRecord(aiContent?.data) ? (aiContent?.data as Record<string, unknown>) : {};
+          const previousRecoveryPhaseVariants =
+            isRecord(aiContentRecord.recoveryPhaseVariants) ? (aiContentRecord.recoveryPhaseVariants as Record<string, unknown>) : {};
+          const previousPlannerPhaseVariants =
+            isRecord(aiContentRecord.plannerPhaseVariants) ? (aiContentRecord.plannerPhaseVariants as Record<string, unknown>) : {};
+          const previousRecoveryLangNode =
+            isRecord(previousRecoveryPhaseVariants[lang]) ? (previousRecoveryPhaseVariants[lang] as Record<string, unknown>) : {};
+          const previousPlannerLangNode =
+            isRecord(previousPlannerPhaseVariants[lang]) ? (previousPlannerPhaseVariants[lang] as Record<string, unknown>) : {};
+          const legacyRecoveryVariants =
+            isRecord(aiContentRecord.variants) ? (aiContentRecord.variants as Record<string, unknown>) : {};
+          const legacyPlannerVariants =
+            isRecord(aiContentRecord.plannerVariants) ? (aiContentRecord.plannerVariants as Record<string, unknown>) : {};
+
+          await safeSaveAIContent(userId, today, lang, {
+            dateISO: today,
+            generatedAt: Date.now(),
+            recoveryPhaseVariants: {
+              ...previousRecoveryPhaseVariants,
+              [lang]: {
+                ...previousRecoveryLangNode,
+                [phase]: explanationPayload,
+              },
+            },
+            plannerPhaseVariants: {
+              ...previousPlannerPhaseVariants,
+              [lang]: {
+                ...previousPlannerLangNode,
+                [phase]: provisionalPlannerPayload,
+              },
+            },
+            ...(phase === "start"
+              ? {
+                  variants: {
+                    ...legacyRecoveryVariants,
+                    [lang]: explanationPayload,
+                  },
+                  plannerVariants: {
+                    ...legacyPlannerVariants,
+                    [lang]: provisionalPlannerPayload,
+                  },
+                }
+              : {}),
+          } as Json);
+          return provisionalPlannerPayload;
+        } catch {
+          return null;
+        }
+      };
+
+      const provisionalPlannerPayload =
+        explanationEngine === "openai" && explanationGeneratedText?.trim()
+          ? await saveProvisionalPlannerPayload("provisional_explanation_ready")
+          : null;
 
       let plannerModules: AIRecoveryPlannerModules;
       let plannerGeneratedText: string | undefined;
@@ -655,14 +815,21 @@ async function handlePlanner(
         if (!(explanationResult && explanationEngine === "openai")) {
           throw plannerError;
         }
-        const timelinePreview = buildPlannerTimelinePreview(todayShift, todayVital, profile);
-        plannerModules = buildFallbackModules({
-          language: lang,
-          plannerContext,
-          nextDutyLabel: describeNextDutyLabel(nextShift, lang),
-          timelinePreview,
-        });
-        plannerGeneratedText = stringifyPlannerGeneratedText(lang, plannerModules.orders, explanationGeneratedText);
+        plannerModules =
+          provisionalPlannerPayload?.result
+            ? {
+                heroTitle: provisionalPlannerPayload.result.heroTitle,
+                heroSummary: provisionalPlannerPayload.result.heroSummary,
+                orders: provisionalPlannerPayload.result.orders,
+              }
+            : buildFallbackModules({
+                language: lang,
+                plannerContext,
+                nextDutyLabel: describeNextDutyLabel(nextShift, lang),
+                timelinePreview: buildPlannerTimelinePreview(todayShift, todayVital, profile),
+              });
+        plannerGeneratedText =
+          provisionalPlannerPayload?.generatedText ?? stringifyPlannerGeneratedText(lang, plannerModules.orders, explanationGeneratedText);
         plannerModel = explanationModel;
         plannerDebug =
           typeof plannerError?.message === "string" && plannerError.message.trim()
@@ -769,6 +936,14 @@ async function handlePlanner(
           error: generationError?.message ?? generationError,
         });
       } catch { /* ignore logging failure */ }
+      const refreshedAIContent = await safeLoadAIContent(userId).catch(() => null);
+      const refreshedPlanner =
+        refreshedAIContent && refreshedAIContent.dateISO === today
+          ? readPlannerPhasePayload(refreshedAIContent.data, today, lang, phase)
+          : null;
+      if (refreshedPlanner && refreshedPlanner.engine === "openai" && refreshedPlanner.phase === phase) {
+        return jsonNoStore({ ok: true, data: refreshedPlanner } satisfies AIRecoveryPlannerApiSuccess);
+      }
       const stalePlanner = aiContent && aiContent.dateISO === today ? readPlannerPhasePayload(aiContent.data, today, lang, phase) : null;
       if (
         stalePlanner &&

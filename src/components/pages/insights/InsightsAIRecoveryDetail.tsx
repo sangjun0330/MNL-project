@@ -14,6 +14,7 @@ import {
   RecoveryPhaseTabs,
   RecoveryStageHeroCard,
 } from "@/components/insights/RecoveryPlannerFlowCards";
+import { useAIRecoveryInsights } from "@/components/insights/useAIRecoveryInsights";
 import { useAIRecoveryPlanner } from "@/components/insights/useAIRecoveryPlanner";
 import { INSIGHTS_MIN_DAYS, isInsightsLocked, useInsightsData } from "@/components/insights/useInsightsData";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
@@ -21,9 +22,12 @@ import { useAuthState } from "@/lib/auth";
 import { authHeaders } from "@/lib/billing/client";
 import { TodaySleepRequiredSheet } from "@/components/insights/TodaySleepRequiredSheet";
 import type { AIRecoveryPlannerPayload } from "@/lib/aiRecoveryPlanner";
+import { buildExplanationModule, buildFallbackModules } from "@/lib/aiRecoveryPlanner";
+import type { AIRecoveryPayload } from "@/lib/aiRecoveryContract";
 import { addDays, fromISODate, toISODate, todayISO, type ISODate } from "@/lib/date";
 import { hasHealthInput } from "@/lib/healthRecords";
 import { sanitizeInternalPath, withReturnTo } from "@/lib/navigation";
+import { buildPlannerTimelinePreview } from "@/lib/recoveryPlanner";
 import {
   buildAfterWorkMissingLabels,
   buildRecoveryOrderProgressId,
@@ -315,6 +319,89 @@ function normalizeRequestedOrderCountParam(value: string | null) {
   const parsed = Math.round(Number(value));
   if (!Number.isFinite(parsed)) return 3;
   return Math.max(1, Math.min(5, parsed));
+}
+
+function describeClientNextDutyLabel(shift: AIRecoveryPayload["nextShift"], language: "ko" | "en") {
+  if (language === "en") {
+    if (shift === "D") return "the next day shift";
+    if (shift === "E") return "the next evening shift";
+    if (shift === "N") return "the next night shift";
+    if (shift === "M") return "the next middle shift";
+    return "the next duty";
+  }
+  if (shift === "D") return "다음 데이 근무";
+  if (shift === "E") return "다음 이브 근무";
+  if (shift === "N") return "다음 나이트 근무";
+  if (shift === "M") return "다음 미들 근무";
+  return "다음 근무";
+}
+
+function buildClientFallbackPlannerPayload(
+  recoveryPayload: AIRecoveryPayload | null,
+  requestedOrderCount: number
+): AIRecoveryPlannerPayload | null {
+  if (!recoveryPayload || recoveryPayload.engine !== "openai") return null;
+
+  const plannerContext =
+    recoveryPayload.plannerContext ??
+    (() => {
+      const firstSection = recoveryPayload.result.sections?.[0] ?? null;
+      const ordersTop3 = (recoveryPayload.result.sections ?? [])
+        .flatMap((section) => {
+          const tips = section.tips?.length ? section.tips : section.description ? [section.description] : [];
+          return tips.map((tip, index) => ({
+            rank: index + 1,
+            title: section.title,
+            text: tip,
+          }));
+        })
+        .slice(0, Math.max(1, Math.min(5, requestedOrderCount)));
+      return {
+        focusFactor: null,
+        primaryAction: firstSection?.tips?.[0] ?? firstSection?.description ?? null,
+        avoidAction:
+          recoveryPayload.result.sections
+            .flatMap((section) => section.tips ?? [])
+            .find((tip) => /(피하|줄이|미루|보류|중단|낮추|avoid|skip|limit|hold|pause|reduce|delay)/i.test(tip)) ?? null,
+        nextDuty: recoveryPayload.nextShift ?? null,
+        nextDutyDate: null,
+        plannerTone: "stable" as const,
+        ordersTop3,
+      };
+    })();
+
+  const fallbackModules = buildFallbackModules({
+    language: recoveryPayload.language,
+    plannerContext,
+    nextDutyLabel: describeClientNextDutyLabel(recoveryPayload.nextShift, recoveryPayload.language),
+    timelinePreview: buildPlannerTimelinePreview(
+      recoveryPayload.todayShift,
+      null,
+      recoveryPayload.profileSnapshot ? (recoveryPayload.profileSnapshot as any) : undefined
+    ),
+  });
+
+  return {
+    dateISO: recoveryPayload.dateISO,
+    language: recoveryPayload.language,
+    phase: recoveryPayload.phase,
+    requestedOrderCount,
+    todayShift: recoveryPayload.todayShift,
+    nextShift: recoveryPayload.nextShift,
+    todayVitalScore: recoveryPayload.todayVitalScore,
+    source: recoveryPayload.source,
+    engine: "openai",
+    model: recoveryPayload.model,
+    debug: [recoveryPayload.debug, "client_recovery_fallback"].filter(Boolean).join("|") || null,
+    generatedText: recoveryPayload.generatedText,
+    explanationGeneratedText: recoveryPayload.generatedText,
+    plannerContext,
+    profileSnapshot: recoveryPayload.profileSnapshot,
+    result: {
+      ...fallbackModules,
+      explanation: buildExplanationModule(recoveryPayload.result, recoveryPayload.language),
+    },
+  };
 }
 
 // 시작 회복은 근무 패턴 때문에 시간 제한을 두지 않는다.
@@ -969,12 +1056,30 @@ export function InsightsAIRecoveryDetail() {
     autoGenerate: false,
     phase: "start",
   });
+  const startRecoveryAI = useAIRecoveryInsights({
+    mode: "generate",
+    enabled: !insightsLocked && hasPlannerAIAccess,
+    autoGenerate: false,
+    phase: "start",
+  });
   const afterPlannerAI = useAIRecoveryPlanner({
     mode: "generate",
     enabled: !insightsLocked && hasPlannerAIAccess,
     autoGenerate: false,
     phase: "after_work",
   });
+  const afterRecoveryAI = useAIRecoveryInsights({
+    mode: "generate",
+    enabled: !insightsLocked && hasPlannerAIAccess,
+    autoGenerate: false,
+    phase: "after_work",
+  });
+  const startRecoveryFallbackData = startRecoveryAI.data;
+  const startRecoveryFallbackGenerating = startRecoveryAI.generating;
+  const triggerStartRecoveryFallback = startRecoveryAI.startGenerate;
+  const afterRecoveryFallbackData = afterRecoveryAI.data;
+  const afterRecoveryFallbackGenerating = afterRecoveryAI.generating;
+  const triggerAfterRecoveryFallback = afterRecoveryAI.startGenerate;
   const initialRequestedOrderCount = normalizeRequestedOrderCountParam(searchParams.get("orderCount"));
   const preferredPhase = normalizeRecoveryPhase(searchParams.get("phase"));
   const [activePhase, setActivePhase] = useState<RecoveryPhase>(preferredPhase);
@@ -1064,15 +1169,36 @@ export function InsightsAIRecoveryDetail() {
   }, [afterPlannerAI, afterWorkReadiness.ready, isAdminOrDev, selectedOrderCount]);
 
   useEffect(() => {
-    if (!startPlannerAI.generating && !afterPlannerAI.generating) {
+    if (startPlannerAI.error && !startPlannerAI.data && !startRecoveryFallbackData && !startRecoveryFallbackGenerating) {
+      triggerStartRecoveryFallback();
+    }
+  }, [startPlannerAI.error, startPlannerAI.data, startRecoveryFallbackData, startRecoveryFallbackGenerating, triggerStartRecoveryFallback]);
+
+  useEffect(() => {
+    if (afterPlannerAI.error && !afterPlannerAI.data && !afterRecoveryFallbackData && !afterRecoveryFallbackGenerating) {
+      triggerAfterRecoveryFallback();
+    }
+  }, [afterPlannerAI.error, afterPlannerAI.data, afterRecoveryFallbackData, afterRecoveryFallbackGenerating, triggerAfterRecoveryFallback]);
+
+  useEffect(() => {
+    if (!startPlannerAI.generating && !afterPlannerAI.generating && !startRecoveryAI.generating && !afterRecoveryAI.generating) {
       setActiveGeneratingPhase(null);
     }
-  }, [afterPlannerAI.generating, startPlannerAI.generating]);
+  }, [afterPlannerAI.generating, afterRecoveryAI.generating, startPlannerAI.generating, startRecoveryAI.generating]);
 
-  const plannerDateISO = startPlannerAI.data?.dateISO ?? afterPlannerAI.data?.dateISO ?? today;
+  const startDisplayPayload = useMemo(
+    () => startPlannerAI.data ?? buildClientFallbackPlannerPayload(startRecoveryAI.data, selectedOrderCount),
+    [selectedOrderCount, startPlannerAI.data, startRecoveryAI.data]
+  );
+  const afterDisplayPayload = useMemo(
+    () => afterPlannerAI.data ?? buildClientFallbackPlannerPayload(afterRecoveryAI.data, selectedOrderCount),
+    [afterPlannerAI.data, afterRecoveryAI.data, selectedOrderCount]
+  );
+
+  const plannerDateISO = startDisplayPayload?.dateISO ?? afterDisplayPayload?.dateISO ?? today;
   useEffect(() => {
     let active = true;
-    const startIds = startPlannerAI.data?.result.orders.items.map((item) => buildRecoveryOrderProgressId("start", item.id)) ?? [];
+    const startIds = startDisplayPayload?.result.orders.items.map((item) => buildRecoveryOrderProgressId("start", item.id)) ?? [];
     if (startIds.length) {
       clearStaleRecoveryOrderDone(plannerDateISO, startIds);
     }
@@ -1097,9 +1223,9 @@ export function InsightsAIRecoveryDetail() {
     return () => {
       active = false;
     };
-  }, [plannerDateISO, startPlannerAI.data]);
+  }, [plannerDateISO, startDisplayPayload]);
 
-  const startOrders = startPlannerAI.data?.result.orders.items ?? [];
+  const startOrders = startDisplayPayload?.result.orders.items ?? [];
   const completedStartCount = startOrders.filter((item) => startDoneMap[buildRecoveryOrderProgressId("start", item.id)]).length;
   const startProgressText =
     startOrders.length > 0 ? t("아침 오더 완료 {done}/{total}", { done: completedStartCount, total: startOrders.length }) : t("아침 오더 대기");
@@ -1108,7 +1234,7 @@ export function InsightsAIRecoveryDetail() {
     !insightsLocked &&
     !billingLoading &&
     hasPlannerAIAccess &&
-    (startPlannerAI.generating || afterPlannerAI.generating);
+    (startPlannerAI.generating || afterPlannerAI.generating || startRecoveryAI.generating || afterRecoveryAI.generating);
   const startErrorLines = useMemo(() => (startPlannerAI.error ? presentError(startPlannerAI.error, t) : []), [startPlannerAI.error, t]);
   const afterErrorLines = useMemo(() => (afterPlannerAI.error ? presentError(afterPlannerAI.error, t) : []), [afterPlannerAI.error, t]);
   const toggleSectionExpanded = useCallback((phase: RecoveryPhase, category: RecoverySection["category"]) => {
@@ -1117,13 +1243,13 @@ export function InsightsAIRecoveryDetail() {
       [`${phase}:${category}`]: !current[`${phase}:${category}`],
     }));
   }, []);
-  const afterContinuityNode = startPlannerAI.data ? (
+  const afterContinuityNode = startDisplayPayload ? (
     <div className="rounded-[24px] border border-[#DCE6FF] bg-[#F6F9FF] px-4 py-4 sm:px-5">
       <div className="grid gap-2 sm:grid-cols-3">
         <div>
           <div className="text-[11px] font-semibold tracking-[0.08em] text-ios-muted">{t("아침 기준")}</div>
           <p className="mt-1 break-keep text-[14px] leading-6 text-ios-text">
-            {normalizeRecoveryCopy(startPlannerAI.data.result.explanation.recovery.headline || t("아침 회복이 먼저 기준이 됩니다."))}
+            {normalizeRecoveryCopy(startDisplayPayload.result.explanation.recovery.headline || t("아침 회복이 먼저 기준이 됩니다."))}
           </p>
         </div>
         <div>
@@ -1144,12 +1270,12 @@ export function InsightsAIRecoveryDetail() {
 
   const activeStatusText =
     activePhase === "after_work"
-      ? afterPlannerAI.data
+      ? afterDisplayPayload
         ? t("업데이트 완료")
         : afterWorkReadiness.ready
           ? t("생성 준비 완료")
           : t("기록 대기")
-      : startPlannerAI.data
+      : startDisplayPayload
         ? t("생성 완료")
         : needsHealthInputGuide
           ? t("필수 기록 필요")
@@ -1213,12 +1339,12 @@ export function InsightsAIRecoveryDetail() {
               {
                 value: "start",
                 label: t("아침 회복"),
-                hint: startPlannerAI.data ? t("생성됨") : needsHealthInputGuide ? t("필수 기록 필요") : t("생성 가능"),
+                hint: startDisplayPayload ? t("생성됨") : needsHealthInputGuide ? t("필수 기록 필요") : t("생성 가능"),
               },
               {
                 value: "after_work",
                 label: t("퇴근 후 회복"),
-                hint: afterPlannerAI.data ? t("업데이트됨") : afterWorkReadiness.ready ? t("생성 가능") : t("기록 대기"),
+                hint: afterDisplayPayload ? t("업데이트됨") : afterWorkReadiness.ready ? t("생성 가능") : t("기록 대기"),
               },
             ]}
           />
@@ -1247,7 +1373,7 @@ export function InsightsAIRecoveryDetail() {
                 <RecoveryMetaPill color="#315CA8">{recoveryPhaseTitle(activePhase, uiLang)}</RecoveryMetaPill>
                 <RecoveryMetaPill color="#1B2747">{activeStatusText}</RecoveryMetaPill>
                 <RecoveryMetaPill color="#5E6C84">{formatRecoveryDate(plannerDateISO, uiLang)}</RecoveryMetaPill>
-                {startPlannerAI.data ? <RecoveryMetaPill color="#5E6C84">{startProgressText}</RecoveryMetaPill> : null}
+                {startDisplayPayload ? <RecoveryMetaPill color="#5E6C84">{startProgressText}</RecoveryMetaPill> : null}
               </div>
 
               <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_200px] lg:items-end">
@@ -1256,7 +1382,7 @@ export function InsightsAIRecoveryDetail() {
                   onChange={setSelectedOrderCount}
                   helper={t("아침과 퇴근 후에 같은 기준 개수를 사용해요.")}
                 />
-                {isAdminOrDev && activePhase === "start" && startPlannerAI.data ? (
+                {isAdminOrDev && activePhase === "start" && startDisplayPayload ? (
                   <button
                     type="button"
                     onClick={startAnalysis}
@@ -1264,7 +1390,7 @@ export function InsightsAIRecoveryDetail() {
                   >
                     {t("아침 회복과 오더 {count}개 다시 생성", { count: selectedOrderCount })}
                   </button>
-                ) : isAdminOrDev && activePhase === "after_work" && afterPlannerAI.data ? (
+                ) : isAdminOrDev && activePhase === "after_work" && afterDisplayPayload ? (
                   <button
                     type="button"
                     onClick={startAfterWorkAnalysis}
@@ -1288,7 +1414,7 @@ export function InsightsAIRecoveryDetail() {
       {!insightsLocked && hasPlannerAIAccess ? (
         <>
           {activePhase === "start" ? (
-            !startPlannerAI.data ? (
+            !startDisplayPayload ? (
               <DetailCard
                 className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
                 style={{
@@ -1318,7 +1444,7 @@ export function InsightsAIRecoveryDetail() {
                 <div className="mt-4 flex flex-wrap gap-2">
                   <RecoveryMetaPill color="#315CA8">{t("선택 오더 {count}개", { count: selectedOrderCount })}</RecoveryMetaPill>
                 </div>
-                {startPlannerAI.error ? (
+                {startPlannerAI.error && !startDisplayPayload ? (
                   <div className="mt-4 rounded-[18px] bg-[#FFF7F8] px-3.5 py-3 text-[13px] leading-6 text-[#8F2943]">
                     {startErrorLines.map((line, idx) => (
                       <p key={`start-error-${idx}`}>{line}</p>
@@ -1333,7 +1459,7 @@ export function InsightsAIRecoveryDetail() {
                   >
                     {needsHealthInputGuide
                       ? t("필수 기록 입력하러 가기")
-                      : startPlannerAI.error
+                      : startPlannerAI.error && !startDisplayPayload
                         ? t("오늘 시작 회복과 오더 {count}개 다시 불러오기", { count: selectedOrderCount })
                         : t("오늘 시작 회복과 오더 {count}개 생성하기", { count: selectedOrderCount })}
                   </button>
@@ -1346,14 +1472,14 @@ export function InsightsAIRecoveryDetail() {
             ) : (
               <RecoveryPhaseResultCard
                 phase="start"
-                payload={startPlannerAI.data}
+                payload={startDisplayPayload}
                 t={t}
                 expandedSections={expandedSections}
                 onToggleExpanded={(category) => toggleSectionExpanded("start", category)}
                 ordersHref={`${ordersHref}${ordersHref.includes("?") ? "&" : "?"}phase=start`}
               />
             )
-          ) : !startPlannerAI.data ? (
+          ) : !startDisplayPayload ? (
             <DetailCard
               className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
               style={{
@@ -1398,7 +1524,7 @@ export function InsightsAIRecoveryDetail() {
                 {t("오늘 기록 입력하러 가기")}
               </button>
             </DetailCard>
-          ) : !afterPlannerAI.data ? (
+          ) : !afterDisplayPayload ? (
             <DetailCard
               className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
               style={{
@@ -1412,7 +1538,7 @@ export function InsightsAIRecoveryDetail() {
               <div className="mt-4 flex flex-wrap gap-2">
                 <RecoveryMetaPill color="#315CA8">{t("선택 오더 {count}개", { count: selectedOrderCount })}</RecoveryMetaPill>
               </div>
-              {afterPlannerAI.error ? (
+              {afterPlannerAI.error && !afterDisplayPayload ? (
                 <div className="mt-4 rounded-[18px] bg-[#FFF7F8] px-3.5 py-3 text-[13px] leading-6 text-[#8F2943]">
                   {afterErrorLines.map((line, idx) => (
                     <p key={`after-error-${idx}`}>{line}</p>
@@ -1426,7 +1552,7 @@ export function InsightsAIRecoveryDetail() {
                   onClick={startAfterWorkAnalysis}
                   className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] text-[14px] font-semibold text-[color:var(--rnest-accent)]"
                 >
-                  {afterPlannerAI.error
+                  {afterPlannerAI.error && !afterDisplayPayload
                     ? t("퇴근 후 회복과 오더 {count}개 다시 불러오기", { count: selectedOrderCount })
                     : t("퇴근 후 회복과 오더 {count}개 업데이트하기", { count: selectedOrderCount })}
                 </button>
@@ -1439,7 +1565,7 @@ export function InsightsAIRecoveryDetail() {
           ) : (
             <RecoveryPhaseResultCard
               phase="after_work"
-              payload={afterPlannerAI.data}
+              payload={afterDisplayPayload}
               t={t}
               expandedSections={expandedSections}
               onToggleExpanded={(category) => toggleSectionExpanded("after_work", category)}
