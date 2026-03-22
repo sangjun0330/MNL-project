@@ -1339,10 +1339,22 @@ export function buildPromptProfile(args: {
     (args.decision.intent === "device" && args.decision.detailProfile !== "lean") ||
     args.decision.reportingNeed;
 
+  const ultraComplex =
+    args.hasImage ||
+    args.decision.communicationProfile === "script" ||
+    args.decision.pairedProblemNeed ||
+    args.decision.entityClarity !== "high";
+
   return {
-    reasoningEfforts: ["high", "medium", "low"],
+    reasoningEfforts: shortSimple
+      ? ["low", "medium"]
+      : ultraComplex
+        ? ["medium", "high", "low"]
+        : highRiskDetailed
+          ? ["medium", "low", "high"]
+          : ["medium", "low"],
     verbosity: "medium",
-    outputTokenCandidates: shortSimple ? [3600, 2800, 2200] : highRiskDetailed ? [12000, 9600, 7600] : [7200, 5600, 4200],
+    outputTokenCandidates: shortSimple ? [1600, 1200, 900] : highRiskDetailed ? [3000, 2700, 2400] : [2400, 2100, 1800],
     qualityLevel: "balanced",
   };
 }

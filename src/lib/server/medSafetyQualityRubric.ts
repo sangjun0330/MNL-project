@@ -179,9 +179,9 @@ function hasForbiddenFollowup(text: string, decision: MedSafetyInternalDecision)
 
 function isOverlongAnswer(text: string, decision: MedSafetyInternalDecision) {
   const length = normalizeText(text).length;
-  if (decision.answerDepth === "short") return length > 650;
-  if (decision.risk === "high") return length > 3000;
-  return length > 2100;
+  if (decision.answerDepth === "short") return length > 700;
+  if (decision.risk === "high" || decision.answerDepth === "detailed") return length > 1800;
+  return length > 1400;
 }
 
 function scoreFromBoolean(value: boolean, pass = 3, fail = 0) {

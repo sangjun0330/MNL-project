@@ -89,7 +89,7 @@ function selectMicroPacks(scores: Partial<Record<MedSafetyMicroPackId, number>>,
   const ranked = (Object.entries(scores) as Array<[MedSafetyMicroPackId, number]>)
     .sort((a, b) => b[1] - a[1])
     .filter(([, score]) => score > 0);
-  const maxSelected = decision.answerDepth === "short" ? 4 : decision.answerDepth === "detailed" ? 8 : 6;
+  const maxSelected = decision.answerDepth === "short" ? 3 : decision.answerDepth === "detailed" ? 5 : 4;
   const selectedMicroPacks = ranked.slice(0, maxSelected).map(([pack]) => pack);
   const deferredMicroPacks = ranked.slice(maxSelected).map(([pack]) => pack);
   return { selectedMicroPacks, deferredMicroPacks };
@@ -184,12 +184,12 @@ function buildProjection(decision: MedSafetyInternalDecision, packPlan: MedSafet
           : "Do not add unsupported specifics or generic filler.",
       compressionDirective:
         decision.compressionTarget === "tight"
-          ? "Keep it tight: conclusion plus only the cards that materially change action, safety, or reporting."
+          ? "Keep it tight: use a conclusion plus at most 3 short cards, only if they materially change action, safety, or reporting."
           : decision.compressionTarget === "compressed_detailed"
-            ? "Be detailed only where the detail changes the choice. Remove educational padding and repeated warnings."
-            : "Keep the answer compressed and high density rather than long.",
+            ? "Be detailed only where the detail changes the choice. Keep the whole answer to a conclusion plus at most 4 short cards, and remove educational padding and repeated warnings."
+            : "Keep the answer compressed and high density rather than long. Use a conclusion plus at most 4 short cards.",
       renderDirective:
-        "Output plain text only. Use a titleless conclusion first, then short cards with concrete headings, one lead sentence, and 2-4 bullets. Do not expose internal planning language.",
+        "Output plain text only. Use a titleless conclusion first, then short cards with concrete headings. Each card must have one lead sentence and only 2-3 bullets. Do not expose internal planning language.",
       activeDirectiveKeys,
       droppedDirectiveKeys: [],
     };
@@ -225,12 +225,12 @@ function buildProjection(decision: MedSafetyInternalDecision, packPlan: MedSafet
         : "근거 없는 구체값과 반복 경고를 넣지 않는다.",
     compressionDirective:
       decision.compressionTarget === "tight"
-        ? "결론과 실제로 행동을 바꾸는 카드만 남겨 짧게 쓴다."
+        ? "결론과 실제로 행동을 바꾸는 카드만 남겨 짧게 쓰고, 전체는 결론 뒤 최대 3개 카드까지만 쓴다."
         : decision.compressionTarget === "compressed_detailed"
-          ? "상세하더라도 선택을 바꾸는 디테일만 남기고 교육용 설명과 반복 경고는 뺀다."
-          : "길이보다 판단 밀도를 높이는 쪽으로 압축한다.",
+          ? "상세하더라도 선택을 바꾸는 디테일만 남기고 교육용 설명과 반복 경고는 빼며, 전체는 결론 뒤 최대 4개 카드까지만 쓴다."
+          : "길이보다 판단 밀도를 높이는 쪽으로 압축하고, 전체는 결론 뒤 최대 4개 카드까지만 쓴다.",
     renderDirective:
-      "최종 출력은 평문만 사용하고, 제목 없는 결론 뒤에 구체 제목 카드들을 배치한다. 각 카드는 리드 1문장과 2~4개 bullet만 사용하며 내부 기획 용어는 노출하지 않는다.",
+      "최종 출력은 평문만 사용하고, 제목 없는 결론 뒤에 구체 제목 카드들을 배치한다. 각 카드는 리드 1문장과 2~3개 bullet만 사용하며 내부 기획 용어는 노출하지 않는다.",
     activeDirectiveKeys,
     droppedDirectiveKeys: [],
   };

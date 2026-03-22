@@ -242,6 +242,74 @@ function splitBulletLines(text: string) {
   return sentenceItems.length > 1 ? sentenceItems : [normalized];
 }
 
+function pickFirstMeaningfulText(values: Array<string | null | undefined>) {
+  for (const value of values) {
+    const text = String(value ?? "").replace(/\s+/g, " ").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function deriveRecoverySummaryText(
+  payload: AIRecoveryPlannerPayload,
+  phase: RecoveryPhase,
+  lang: "ko" | "en",
+  t: (key: string, vars?: Record<string, any>) => string
+) {
+  const recovery = payload.result.explanation.recovery;
+  return pickFirstMeaningfulText([
+    payload.result.explanation.summary,
+    recovery.compoundAlert?.message,
+    recovery.sections?.[0]?.description,
+    recovery.sections?.[0]?.tips?.[0],
+    recoveryPhaseDescription(phase, lang),
+    t("오늘 회복 우선순위를 확인해 보세요."),
+  ]);
+}
+
+function derivePrimaryActionText(
+  payload: AIRecoveryPlannerPayload,
+  t: (key: string, vars?: Record<string, any>) => string
+) {
+  const recovery = payload.result.explanation.recovery;
+  return pickFirstMeaningfulText([
+    payload.result.orders.items?.[0]?.body,
+    recovery.sections?.[0]?.tips?.[0],
+    payload.plannerContext?.primaryAction,
+    t("회복 루틴을 먼저 고정해요."),
+  ]);
+}
+
+function deriveAvoidActionText(
+  payload: AIRecoveryPlannerPayload,
+  t: (key: string, vars?: Record<string, any>) => string
+) {
+  const recovery = payload.result.explanation.recovery;
+  const aiAvoidTip = recovery.sections
+    .flatMap((section) => section.tips ?? [])
+    .find((tip) => /(피하|줄이|미루|보류|쉬|중단|낮추|avoid|skip|limit|hold|pause|reduce|delay)/i.test(tip));
+  const cautionDescription = recovery.sections.find((section) => section.severity !== "info")?.description;
+  return pickFirstMeaningfulText([
+    aiAvoidTip,
+    recovery.compoundAlert?.message,
+    cautionDescription,
+    payload.plannerContext?.avoidAction,
+    t("늦은 자극을 줄여요."),
+  ]);
+}
+
+function deriveFocusLabel(
+  payload: AIRecoveryPlannerPayload,
+  t: (key: string, vars?: Record<string, any>) => string
+) {
+  const recovery = payload.result.explanation.recovery;
+  return pickFirstMeaningfulText([
+    recovery.sections?.[0]?.title,
+    payload.plannerContext?.focusFactor?.label,
+    t("오늘 회복"),
+  ]);
+}
+
 function normalizeRequestedOrderCountParam(value: string | null) {
   if (value == null || String(value).trim() === "") return 3;
   const parsed = Math.round(Number(value));
@@ -690,12 +758,12 @@ function RecoveryPhaseResultCard({
       .filter(Boolean);
   }, [recoveryResult?.compoundAlert?.message, lang]);
 
-  const plannerContext = payload.plannerContext ?? null;
   const phaseKeyPrefix = `${phase}:`;
   const headlineText = normalizeNarrativeText(recoveryResult?.headline || t("요약이 비어 있어요."), lang);
-  const focusLabel = normalizeRecoveryCopy(plannerContext?.focusFactor?.label ?? t("오늘 회복"));
-  const primaryActionText = normalizeNarrativeText(plannerContext?.primaryAction ?? t("회복 루틴을 먼저 고정해요."), lang);
-  const avoidActionText = normalizeNarrativeText(plannerContext?.avoidAction ?? t("늦은 자극을 줄여요."), lang);
+  const summaryText = normalizeNarrativeText(deriveRecoverySummaryText(payload, phase, lang, t), lang);
+  const focusLabel = normalizeRecoveryCopy(deriveFocusLabel(payload, t));
+  const primaryActionText = normalizeNarrativeText(derivePrimaryActionText(payload, t), lang);
+  const avoidActionText = normalizeNarrativeText(deriveAvoidActionText(payload, t), lang);
 
   return (
     <>
@@ -704,7 +772,7 @@ function RecoveryPhaseResultCard({
         title={phase === "after_work" ? t("퇴근 후 회복 해설") : t("오늘 시작 회복 해설")}
         status={recoveryPhaseTitle(phase, lang)}
         headline={headlineText}
-        summary={recoveryPhaseDescription(phase, lang)}
+        summary={summaryText}
         action={
           <Link
             href={ordersHref}
