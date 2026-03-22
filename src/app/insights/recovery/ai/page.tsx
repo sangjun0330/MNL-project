@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { AppShell } from "@/components/shell/AppShell";
 import { InsightsAIRecoveryDetail } from "@/components/pages/insights/InsightsAIRecoveryDetail";
 
+export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 export default function Page() {
