@@ -130,7 +130,7 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
   const autoGenerate = options?.autoGenerate ?? mode !== "generate";
   const phase = normalizeRecoveryPhase(options?.phase ?? DEFAULT_RECOVERY_PHASE);
   const { lang } = useI18n();
-  const { user } = useAuthState();
+  const { user, status: authStatus } = useAuthState();
   const { state } = useInsightsData();
   const [remoteData, setRemoteData] = useState<AIRecoveryPlannerPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -146,7 +146,6 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
     const dateISO = todayISO();
     clearPlannerPhaseCache(user?.userId ?? "guest", lang, dateISO, phase);
     setError(null);
-    setRemoteData(null);
     setRetryCount((c) => c + 1);
   }, [lang, phase, user?.userId]);
 
@@ -154,7 +153,6 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
     const dateISO = todayISO();
     clearPlannerPhaseCache(user?.userId ?? "guest", lang, dateISO, phase);
     setError(null);
-    setRemoteData(null);
     setManualGenerateState((current) => ({
       count: current.count + 1,
       orderCount: normalizeRequestedOrderCount(orderCount),
@@ -171,11 +169,18 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
       setLoading(false);
       return;
     }
+    if (authStatus === "loading") return;
+    if (authStatus !== "authenticated" || !user?.userId) {
+      setError(null);
+      setGenerating(false);
+      setLoading(false);
+      return;
+    }
     if (!isStoreHydrated) return;
 
     const dateISO = todayISO();
     const currentRequestedOrderCount = manualGenerateState.orderCount;
-    const key = requestKey(user?.userId ?? "guest", lang, dateISO, phase, currentRequestedOrderCount);
+    const key = requestKey(user.userId, lang, dateISO, phase, currentRequestedOrderCount);
     let active = true;
     const forceGenerate = mode === "generate" && manualGenerateState.count > 0;
     const requestedOrderCount = forceGenerate ? manualGenerateState.orderCount : null;
@@ -197,7 +202,6 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
     setLoading(true);
     setGenerating(false);
     setError(null);
-    setRemoteData(null);
 
     const run = async () => {
       let cached: AIRecoveryPlannerPayload | null = null;
@@ -221,17 +225,26 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
         setGenerating(true);
         const generated = forceGenerate
           ? await fetchAIRecoveryPlanner(lang, phase, false, requestedOrderCount, true)
-          : await getOrStartGenerate(user?.userId ?? "guest", lang, dateISO, phase, requestedOrderCount);
+          : await getOrStartGenerate(user.userId, lang, dateISO, phase, requestedOrderCount);
         if (!active) return;
-        if (generated && generated.language === lang && generated.phase === phase) {
-          sessionDailyCache.set(key, generated);
+        if (!generated) {
+          throw new Error("ai_recovery_planner_empty_payload");
         }
-        setRemoteData(generated ?? null);
+        if (generated.language !== lang || generated.phase !== phase) {
+          throw new Error("ai_recovery_planner_mismatched_payload");
+        }
+        sessionDailyCache.set(key, generated);
+        setRemoteData(generated);
       } catch (err: any) {
         if (!active) return;
         setError(err?.message ?? "network_error");
       } finally {
         if (active) {
+          if (manualGenerateState.count > 0) {
+            setManualGenerateState((current) =>
+              current.count > 0 ? { count: 0, orderCount: current.orderCount } : current
+            );
+          }
           setGenerating(false);
           setLoading(false);
         }
@@ -242,7 +255,7 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
     return () => {
       active = false;
     };
-  }, [autoGenerate, enabled, isStoreHydrated, lang, manualGenerateState.count, manualGenerateState.orderCount, mode, phase, retryCount, user?.userId]);
+  }, [authStatus, autoGenerate, enabled, isStoreHydrated, lang, manualGenerateState.count, manualGenerateState.orderCount, mode, phase, retryCount, user?.userId]);
 
   return useMemo(
     () => ({

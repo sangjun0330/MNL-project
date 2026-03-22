@@ -108,7 +108,7 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
   const autoGenerate = options?.autoGenerate ?? mode !== "generate";
   const phase = normalizeRecoveryPhase(options?.phase ?? DEFAULT_RECOVERY_PHASE);
   const { lang } = useI18n();
-  const { user } = useAuthState();
+  const { user, status: authStatus } = useAuthState();
   const { state } = useInsightsData();
   const [remoteData, setRemoteData] = useState<AIRecoveryPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -122,14 +122,12 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
     const dateISO = todayISO();
     clearRecoveryPhaseCache(user?.userId ?? "guest", lang, dateISO, phase);
     setError(null);
-    setRemoteData(null);
     setRetryCount((c) => c + 1);
   }, [lang, phase, user?.userId]);
   const startGenerate = useCallback(() => {
     const dateISO = todayISO();
     clearRecoveryPhaseCache(user?.userId ?? "guest", lang, dateISO, phase);
     setError(null);
-    setRemoteData(null);
     setManualGenerateCount((c) => c + 1);
   }, [lang, phase, user?.userId]);
 
@@ -143,9 +141,16 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
       setLoading(false);
       return;
     }
+    if (authStatus === "loading") return;
+    if (authStatus !== "authenticated" || !user?.userId) {
+      setError(null);
+      setGenerating(false);
+      setLoading(false);
+      return;
+    }
     if (!isStoreHydrated) return;
     const dateISO = todayISO();
-    const key = requestKey(user?.userId ?? "guest", lang, dateISO, phase);
+    const key = requestKey(user.userId, lang, dateISO, phase);
     let active = true;
     const forceGenerate = mode === "generate" && manualGenerateCount > 0;
 
@@ -166,7 +171,6 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
     setLoading(true);
     setGenerating(false);
     setError(null);
-    setRemoteData(null);
 
     const run = async () => {
       let cached: AIRecoveryPayload | null = null;
@@ -184,25 +188,30 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
           return;
         }
 
-        setRemoteData(null);
-
         const shouldGenerate = mode === "generate" && (autoGenerate || manualGenerateCount > 0);
         if (!shouldGenerate) return;
 
         setGenerating(true);
         const generated = forceGenerate
           ? await fetchAIRecovery(lang, dateISO, phase, false, true)
-          : await getOrStartGenerate(user?.userId ?? "guest", lang, dateISO, phase);
+          : await getOrStartGenerate(user.userId, lang, dateISO, phase);
         if (!active) return;
-        if (generated && generated.language === lang && generated.phase === phase) {
-          sessionDailyCache.set(key, generated);
+        if (!generated) {
+          throw new Error("ai_recovery_empty_payload");
         }
-        setRemoteData(generated ?? null);
+        if (generated.language !== lang || generated.phase !== phase) {
+          throw new Error("ai_recovery_mismatched_payload");
+        }
+        sessionDailyCache.set(key, generated);
+        setRemoteData(generated);
       } catch (err: any) {
         if (!active) return;
         setError(err?.message ?? "network_error");
       } finally {
         if (active) {
+          if (manualGenerateCount > 0) {
+            setManualGenerateCount((current) => (current > 0 ? 0 : current));
+          }
           setGenerating(false);
           setLoading(false);
         }
@@ -213,7 +222,7 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
     return () => {
       active = false;
     };
-  }, [enabled, isStoreHydrated, lang, mode, phase, retryCount, autoGenerate, manualGenerateCount, user?.userId]);
+  }, [authStatus, enabled, isStoreHydrated, lang, mode, phase, retryCount, autoGenerate, manualGenerateCount, user?.userId]);
 
   return useMemo(
     () => ({

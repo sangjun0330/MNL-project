@@ -21,7 +21,7 @@ import { useAuthState } from "@/lib/auth";
 import { authHeaders } from "@/lib/billing/client";
 import { TodaySleepRequiredSheet } from "@/components/insights/TodaySleepRequiredSheet";
 import type { AIRecoveryPlannerPayload } from "@/lib/aiRecoveryPlanner";
-import { addDays, formatKoreanDate, fromISODate, toISODate, todayISO } from "@/lib/date";
+import { addDays, fromISODate, toISODate, todayISO, type ISODate } from "@/lib/date";
 import { hasHealthInput } from "@/lib/healthRecords";
 import { sanitizeInternalPath, withReturnTo } from "@/lib/navigation";
 import {
@@ -318,11 +318,25 @@ function normalizeRequestedOrderCountParam(value: string | null) {
 }
 
 // 시작 회복은 근무 패턴 때문에 시간 제한을 두지 않는다.
-function isWithinGenerationWindow(phase: RecoveryPhase): boolean {
+function isWithinGenerationWindow(phase: RecoveryPhase, hour: number | null): boolean {
   if (phase === "start") return true;
-  const hour = new Date().getHours();
+  if (hour == null) return false;
   if (phase === "after_work") return hour >= 15;
   return false;
+}
+
+function formatRecoveryDate(iso: ISODate, lang: "ko" | "en") {
+  const [y, m, d] = iso.split("-");
+  if (lang === "en") {
+    const date = new Date(Date.UTC(Number(y), Number(m) - 1, Number(d), 12, 0, 0, 0));
+    return new Intl.DateTimeFormat("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+      timeZone: "UTC",
+    }).format(date);
+  }
+  return `${y}. ${m}. ${d}.`;
 }
 
 const CATEGORIES: Array<{
@@ -784,7 +798,7 @@ function RecoveryPhaseResultCard({
         chips={
           <>
             <RecoveryMetaPill color="#1B2747">{focusLabel}</RecoveryMetaPill>
-            <RecoveryMetaPill color="#5E6C84">{formatKoreanDate(payload.dateISO)}</RecoveryMetaPill>
+            <RecoveryMetaPill color="#5E6C84">{formatRecoveryDate(payload.dateISO, lang)}</RecoveryMetaPill>
             {orderedSections.length ? <RecoveryMetaPill color="#5E6C84">{t("해설 {count}개", { count: orderedSections.length })}</RecoveryMetaPill> : null}
           </>
         }
@@ -931,11 +945,19 @@ export function InsightsAIRecoveryDetail() {
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
   const [activeGeneratingPhase, setActiveGeneratingPhase] = useState<RecoveryPhase | null>(null);
   const [startDoneMap, setStartDoneMap] = useState<Record<string, boolean>>({});
+  const [clientHour, setClientHour] = useState<number | null>(null);
   const { recordedDays, state } = useInsightsData();
   const insightsLocked = isInsightsLocked(recordedDays);
   const { hasEntitlement, loading: billingLoading } = useBillingAccess();
   const { user, status: authStatus } = useAuthState();
   const [isAdminOrDev, setIsAdminOrDev] = useState(false);
+
+  useEffect(() => {
+    const syncHour = () => setClientHour(new Date().getHours());
+    syncHour();
+    const intervalId = window.setInterval(syncHour, 60_000);
+    return () => window.clearInterval(intervalId);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -1003,7 +1025,7 @@ export function InsightsAIRecoveryDetail() {
     if (missingTodaySleep && missingYesterdayHealth) {
       return {
         title: t("필수 기록 2개가 필요해요"),
-        subtitle: `${formatKoreanDate(today)} · ${formatKoreanDate(yesterday)} · ${t("AI 맞춤회복 분석 전 필수")}`,
+        subtitle: `${formatRecoveryDate(today, uiLang)} · ${formatRecoveryDate(yesterday, uiLang)} · ${t("AI 맞춤회복 분석 전 필수")}`,
         primary: t("오늘 수면 기록과 전날 건강 기록을 먼저 입력해 주세요."),
         description: t("두 항목이 있어야 회복 플래너 해설 우선순위를 정확하게 계산할 수 있어요."),
         hint: t("확인을 누르면 오늘 기록 화면(수면 우선)으로 이동합니다."),
@@ -1014,7 +1036,7 @@ export function InsightsAIRecoveryDetail() {
     if (missingTodaySleep) {
       return {
         title: t("오늘 수면 기록이 필요해요"),
-        subtitle: `${formatKoreanDate(today)} · ${t("AI 맞춤회복 분석 전 필수")}`,
+        subtitle: `${formatRecoveryDate(today, uiLang)} · ${t("AI 맞춤회복 분석 전 필수")}`,
         primary: t("먼저 오늘 수면 시간을 입력해 주세요."),
         description: t("오늘 수면 기록이 있어야 회복 플래너 해설 정확도가 올라갑니다."),
         hint: t("확인을 누르면 오늘 기록 화면으로 이동합니다."),
@@ -1024,13 +1046,13 @@ export function InsightsAIRecoveryDetail() {
 
     return {
       title: t("전날 건강 기록이 필요해요"),
-      subtitle: `${formatKoreanDate(yesterday)} · ${t("AI 맞춤회복 분석 전 필수")}`,
+      subtitle: `${formatRecoveryDate(yesterday, uiLang)} · ${t("AI 맞춤회복 분석 전 필수")}`,
       primary: t("먼저 전날 건강 기록을 입력해 주세요."),
       description: t("전날 기록이 있어야 추세 기반 회복 플래너 해설을 정확히 계산할 수 있어요."),
       hint: t("확인을 누르면 전날 기록 화면으로 이동합니다."),
       route: "/schedule?openHealthLog=yesterday",
     } as const;
-  }, [hasTodaySleep, hasYesterdayRecord, t, today, yesterday]);
+  }, [hasTodaySleep, hasYesterdayRecord, t, today, uiLang, yesterday]);
 
   const moveToRequiredHealthLog = useCallback(() => {
     setOpenInputGuide(false);
@@ -1158,7 +1180,7 @@ export function InsightsAIRecoveryDetail() {
   return (
     <InsightDetailShell
       title={t("AI 맞춤회복")}
-      subtitle={formatKoreanDate(plannerDateISO)}
+      subtitle={formatRecoveryDate(plannerDateISO, uiLang)}
       meta={
         activePhase === "after_work"
           ? t("퇴근 후 탭에서 오늘 실제 기록을 반영한 밤 회복 업데이트를 확인합니다.")
@@ -1246,7 +1268,7 @@ export function InsightsAIRecoveryDetail() {
               <div className="flex flex-wrap gap-2">
                 <RecoveryMetaPill color="#315CA8">{recoveryPhaseTitle(activePhase, uiLang)}</RecoveryMetaPill>
                 <RecoveryMetaPill color="#1B2747">{activeStatusText}</RecoveryMetaPill>
-                <RecoveryMetaPill color="#5E6C84">{formatKoreanDate(plannerDateISO)}</RecoveryMetaPill>
+                <RecoveryMetaPill color="#5E6C84">{formatRecoveryDate(plannerDateISO, uiLang)}</RecoveryMetaPill>
                 {startPlannerAI.data ? <RecoveryMetaPill color="#5E6C84">{startProgressText}</RecoveryMetaPill> : null}
               </div>
 
@@ -1325,7 +1347,7 @@ export function InsightsAIRecoveryDetail() {
                     ))}
                   </div>
                 ) : null}
-                {isAdminOrDev || isWithinGenerationWindow("start") ? (
+                {isAdminOrDev || isWithinGenerationWindow("start", clientHour) ? (
                   <button
                     type="button"
                     onClick={startAnalysis}
@@ -1420,7 +1442,7 @@ export function InsightsAIRecoveryDetail() {
                 </div>
               ) : null}
               {afterContinuityNode}
-              {isAdminOrDev || isWithinGenerationWindow("after_work") ? (
+              {isAdminOrDev || isWithinGenerationWindow("after_work", clientHour) ? (
                 <button
                   type="button"
                   onClick={startAfterWorkAnalysis}
