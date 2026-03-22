@@ -1,4 +1,5 @@
 import { normalizeOpenAIResponsesBaseUrl, resolveOpenAIResponsesRequestConfig } from "@/lib/server/openaiGateway";
+import { canonicalizeMedSafetyAnswerText } from "@/lib/medSafetyAnswerSections";
 import {
   assembleMedSafetyDeveloperPrompt,
   buildDeterministicRouteDecision,
@@ -491,7 +492,7 @@ export const MED_SAFETY_LEGACY_DENSE_CORE_PROMPT_REFERENCE = [
   "- 답변은 “급할 때 바로 쓰는 카드”와 “짧게 공부되는 설명”의 중간지점이어야 한다.",
 ].join("\n");
 
-function buildDeveloperPrompt(locale: "ko" | "en") {
+function buildLegacyDeveloperPrompt(locale: "ko" | "en") {
   if (locale === "en") {
     return [
       MED_SAFETY_LEGACY_DENSE_CORE_PROMPT_REFERENCE,
@@ -1775,7 +1776,7 @@ function describeFallbackIssueEn(note: string) {
 
 function buildAnalyzeResult(query: string, answer: string): MedSafetyAnalysisResult {
   return {
-    answer: normalizeDeliveredAnswerText(answer),
+    answer: canonicalizeMedSafetyAnswerText(normalizeDeliveredAnswerText(answer)),
     query: normalizeText(query),
   };
 }
@@ -1993,7 +1994,7 @@ async function runQualityGateAndRepair(args: {
       maxOutputTokens: 220,
       upstreamTimeoutMs: Math.max(20_000, Math.min(args.upstreamTimeoutMs, 45_000)),
       verbosity: "low",
-      reasoningEffort: args.isPremiumSearch ? "medium" : "low",
+      reasoningEffort: "medium",
       storeResponses: false,
       retries: args.networkRetries,
       retryBaseMs: args.networkRetryBaseMs,
@@ -2093,7 +2094,7 @@ async function runQualityGateAndRepair(args: {
             maxOutputTokens: 220,
             upstreamTimeoutMs: Math.max(20_000, Math.min(args.upstreamTimeoutMs, 45_000)),
             verbosity: "low",
-            reasoningEffort: args.isPremiumSearch ? "medium" : "low",
+            reasoningEffort: "medium",
             storeResponses: false,
             retries: args.networkRetries,
             retryBaseMs: args.networkRetryBaseMs,
@@ -2149,7 +2150,6 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
   const networkRetries = resolveNetworkRetryCount();
   const networkRetryBaseMs = resolveNetworkRetryBaseMs();
   const storeResponses = resolveStoreResponses();
-  const legacyDeveloperPrompt = buildDeveloperPrompt(params.locale);
   const userPrompt = buildUserPrompt(params.query, params.locale);
   const memoryAwareUserPrompt = buildUserPromptWithContinuationMemory(userPrompt, params.continuationMemory, params.locale);
   const startedAt = Date.now();
@@ -2208,7 +2208,8 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         hasImage: Boolean(params.imageDataUrl),
         query: params.query,
       });
-      const mainDeveloperPrompt = runtimeMode === "hybrid_live" ? promptAssembly.developerPrompt : legacyDeveloperPrompt;
+      const mainDeveloperPrompt =
+        runtimeMode === "hybrid_live" ? promptAssembly.developerPrompt : buildLegacyDeveloperPrompt(params.locale);
       const allowStreaming =
         Boolean(params.onTextDelta) &&
         modelIndex === 0 &&
@@ -2373,7 +2374,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
           usage: sumUsages(routeUsage, mainAttempt.usage, hybridAttempt.usage),
           promptChars: promptAssembly.finalPromptChars,
           extra: {
-            legacyPromptChars: legacyDeveloperPrompt.length,
+            legacyPromptChars: buildLegacyDeveloperPrompt(params.locale).length,
             hybridPromptChars: promptAssembly.finalPromptChars,
             heuristicVerdict: shadowComparison.heuristicVerdict,
             heuristicRepairInstructions: shadowComparison.heuristicRepairInstructions,

@@ -40,8 +40,19 @@ function normalizeAnswerRawLine(value: string) {
     .replace(/\s+$/g, "");
 }
 
+function stripMarkdownDecorations(value: string) {
+  return String(value ?? "")
+    .replace(/^\s{0,3}#{1,6}\s+/, "")
+    .replace(/^\s*>\s?/, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\*([^*\n]+)\*/g, "$1")
+    .replace(/_([^_\n]+)_/g, "$1");
+}
+
 function cleanAnswerLine(value: string) {
-  return normalizeAnswerRawLine(value)
+  return stripMarkdownDecorations(normalizeAnswerRawLine(value))
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -68,7 +79,7 @@ function stripBulletPrefix(value: string) {
 }
 
 function extractLeadText(value: string) {
-  const match = normalizeAnswerRawLine(value).match(/^\s*리드\s*문장\s*[:：]\s*(.+)\s*$/i);
+  const match = cleanAnswerLine(value).match(/^리드\s*문장\s*[:：]\s*(.+)\s*$/i);
   return match?.[1]?.trim() ?? null;
 }
 
@@ -215,7 +226,7 @@ export function parseMedSafetyDisplayLine(value: string): MedSafetyAnswerDisplay
   if (bulletMatch) {
     return {
       kind: "bullet",
-      content: bulletMatch[2].trim(),
+      content: cleanAnswerLine(bulletMatch[2]),
       level: getIndentLevel(bulletMatch[1]),
     };
   }
@@ -225,7 +236,7 @@ export function parseMedSafetyDisplayLine(value: string): MedSafetyAnswerDisplay
     return {
       kind: "number",
       marker: numberedMatch[2],
-      content: numberedMatch[3].trim(),
+      content: cleanAnswerLine(numberedMatch[3]),
       level: getIndentLevel(numberedMatch[1]),
     };
   }
@@ -235,16 +246,26 @@ export function parseMedSafetyDisplayLine(value: string): MedSafetyAnswerDisplay
     return {
       kind: "label",
       marker: labelMatch[2],
-      content: labelMatch[3].trim(),
+      content: cleanAnswerLine(labelMatch[3]),
       level: getIndentLevel(labelMatch[1]),
     };
   }
 
   return {
     kind: "text",
-    content: raw.trim(),
+    content: cleanAnswerLine(raw),
     level: getIndentLevel(raw),
   };
+}
+
+function renderCanonicalDisplayLine(value: string) {
+  const parsed = parseMedSafetyDisplayLine(value);
+  if (parsed.kind === "blank") return "";
+  const indent = parsed.level > 0 ? "  ".repeat(parsed.level) : "";
+  if (parsed.kind === "bullet") return `${indent}- ${parsed.content}`.trimEnd();
+  if (parsed.kind === "number") return `${indent}${parsed.marker} ${parsed.content}`.trimEnd();
+  if (parsed.kind === "label") return `${indent}${parsed.marker} ${parsed.content}`.trimEnd();
+  return `${indent}${parsed.content}`.trimEnd();
 }
 
 export function buildMedSafetyDisplayLines(lines: string[]): MedSafetyAnswerDisplayLine[] {
@@ -326,6 +347,35 @@ export function parseMedSafetyAnswerSections(value: string): MedSafetyAnswerSect
       tone: "summary",
     },
   ];
+}
+
+export function canonicalizeMedSafetyAnswerText(value: unknown) {
+  const normalized = normalizeMedSafetyAnswerText(value);
+  if (!normalized) return "";
+
+  const sections = parseMedSafetyAnswerSections(normalized);
+  if (!sections.length) return normalized;
+
+  const output: string[] = [];
+
+  sections.forEach((section, index) => {
+    const isImplicitConclusion = index === 0 && normalizeHeadingKey(section.title) === "결론";
+    const lead = cleanAnswerLine(section.lead);
+    const body = section.bodyLines
+      .map((line) => renderCanonicalDisplayLine(line))
+      .filter((line) => line.trim().length > 0);
+
+    if (output.length) {
+      output.push("");
+      output.push("");
+    }
+
+    if (!isImplicitConclusion) output.push(formatSectionTitle(section.title));
+    if (lead) output.push(lead);
+    output.push(...body);
+  });
+
+  return output.join("\n").replace(/\n{4,}/g, "\n\n\n").trim();
 }
 
 export function buildMedSafetySectionBodyText(section: Pick<MedSafetyAnswerSection, "lead" | "bodyLines">) {

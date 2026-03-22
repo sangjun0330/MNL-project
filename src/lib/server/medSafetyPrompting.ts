@@ -67,6 +67,20 @@ type PromptBudgetFit = {
   lines: string[];
 };
 
+type PromptVisualSectionId =
+  | "role"
+  | "question_fit"
+  | "priority"
+  | "coverage"
+  | "boundary"
+  | "output";
+
+type PromptVisualSection = {
+  id: PromptVisualSectionId;
+  title: string;
+  lines: string[];
+};
+
 const BASE_CONTRACT_IDS: MedSafetyPromptContractId[] = [
   "base_role_goal",
   "base_decision_priority",
@@ -101,6 +115,13 @@ const CONTRACT_DROP_ORDER: MedSafetyPromptContractId[] = [
 
 function uniqueStrings<T extends string>(items: T[]) {
   return Array.from(new Set(items.filter(Boolean))) as T[];
+}
+
+function normalizePromptLineForDedupe(value: string) {
+  return normalizeText(value)
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/["'`.,:;!?()[\]{}_\-]/g, "");
 }
 
 function clampReason(text: string, max = 120) {
@@ -427,19 +448,167 @@ function buildBaseSpineLines(locale: "ko" | "en") {
   if (locale === "en") {
     return [
       "You write nurse-facing clinical answer cards that are safe, compressed, and directly usable at the bedside.",
-      "Give the direct answer first, then include only the details that would change the next action, reporting decision, or safety boundary.",
       "If a detail is uncertain, do not invent settings, doses, compatibility, or device-specific numbers.",
       "You must return a non-empty final answer to the user's actual question. Never stop at planning only.",
-      "Write the final answer in natural bedside clinical English.",
+      "Use natural bedside clinical English.",
     ];
   }
   return [
     "너는 간호사가 bedside에서 바로 쓰는 임상 판단 카드를 작성한다.",
-    "직접 답을 먼저 주고, 다음 행동이나 보고 판단을 바꾸는 정보만 남긴다.",
     "확실하지 않으면 세팅값, 용량, 호환성, 기구 고유 수치를 지어내지 않는다.",
     "반드시 사용자의 실제 질문에 대한 비어 있지 않은 최종 답변을 작성한다. 계획만 세우고 멈추지 않는다.",
     "최종 답변은 자연스러운 한국어 존댓말로 쓴다.",
   ];
+}
+
+function buildSectionTitle(id: PromptVisualSectionId, locale: "ko" | "en") {
+  const ko: Record<PromptVisualSectionId, string> = {
+    role: "[역할]",
+    question_fit: "[질문 맞춤 초점]",
+    priority: "[우선순위]",
+    coverage: "[확인 범위]",
+    boundary: "[예외·보고·안전]",
+    output: "[출력 형식]",
+  };
+  const en: Record<PromptVisualSectionId, string> = {
+    role: "[ROLE]",
+    question_fit: "[QUESTION_FIT]",
+    priority: "[PRIORITY]",
+    coverage: "[COVERAGE]",
+    boundary: "[BOUNDARY_AND_SAFETY]",
+    output: "[OUTPUT_SHAPE]",
+  };
+  return locale === "en" ? en[id] : ko[id];
+}
+
+function buildMacroContractLines(contractIds: MedSafetyPromptContractId[], locale: "ko" | "en") {
+  const selected = new Set(contractIds);
+  const lines: string[] = [];
+
+  const pushFirst = (ids: MedSafetyPromptContractId[]) => {
+    for (const id of ids) {
+      if (!selected.has(id)) continue;
+      lines.push(buildContractText(id, locale));
+      return;
+    }
+  };
+
+  pushFirst(["intent_action", "intent_compare", "intent_numeric", "intent_knowledge"]);
+  pushFirst(["risk_high_modifier", "risk_mixed_modifier"]);
+  pushFirst(["domain_vent_abga", "domain_med_device", "domain_reporting"]);
+  pushFirst(["communication_modifier", "exception_modifier", "ambiguity_modifier"]);
+
+  const deduped: string[] = [];
+  const seen = new Set<string>();
+  for (const line of lines) {
+    const key = normalizePromptLineForDedupe(line);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(line);
+  }
+  return deduped.slice(0, 4);
+}
+
+function pickProjectionLines(
+  projection: MedSafetyPromptBlueprint["projection"],
+  keys: MedSafetyPromptBlueprint["projection"]["activeDirectiveKeys"]
+) {
+  const picked: Partial<Record<keyof MedSafetyPromptBlueprint["projection"], string>> = {};
+  for (const key of keys) {
+    const value = projection[key];
+    if (typeof value === "string" && value.trim()) picked[key] = value.trim();
+  }
+  return picked;
+}
+
+function buildPromptSections(args: {
+  locale: "ko" | "en";
+  contractIds: MedSafetyPromptContractId[];
+  blueprint: MedSafetyPromptBlueprint;
+  directiveKeys: MedSafetyPromptBlueprint["projection"]["activeDirectiveKeys"];
+}) {
+  const sections: PromptVisualSection[] = [];
+  const roleLines = buildBaseSpineLines(args.locale);
+  const macroLines = buildMacroContractLines(args.contractIds, args.locale);
+  const projection = pickProjectionLines(args.blueprint.projection, args.directiveKeys);
+
+  sections.push({
+    id: "role",
+    title: buildSectionTitle("role", args.locale),
+    lines: roleLines,
+  });
+
+  if (macroLines.length) {
+    sections.push({
+      id: "question_fit",
+      title: buildSectionTitle("question_fit", args.locale),
+      lines: macroLines,
+    });
+  }
+
+  const priorityLines = [projection.openingDirective, projection.priorityDirective].filter((value): value is string => Boolean(value));
+  if (priorityLines.length) {
+    sections.push({
+      id: "priority",
+      title: buildSectionTitle("priority", args.locale),
+      lines: priorityLines,
+    });
+  }
+
+  const coverageLines = [projection.coverageDirective].filter((value): value is string => Boolean(value));
+  if (coverageLines.length) {
+    sections.push({
+      id: "coverage",
+      title: buildSectionTitle("coverage", args.locale),
+      lines: coverageLines,
+    });
+  }
+
+  const boundaryLines = [
+    projection.exceptionDirective,
+    projection.communicationDirective,
+    projection.safetyDirective,
+  ].filter((value): value is string => Boolean(value));
+  if (boundaryLines.length) {
+    sections.push({
+      id: "boundary",
+      title: buildSectionTitle("boundary", args.locale),
+      lines: boundaryLines,
+    });
+  }
+
+  const outputLines = [projection.compressionDirective, projection.renderDirective].filter((value): value is string => Boolean(value));
+  if (outputLines.length) {
+    sections.push({
+      id: "output",
+      title: buildSectionTitle("output", args.locale),
+      lines: outputLines,
+    });
+  }
+
+  return sections;
+}
+
+function formatPromptSections(sections: PromptVisualSection[]) {
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  for (const section of sections) {
+    const uniqueLines: string[] = [];
+    for (const line of section.lines) {
+      const normalized = normalizePromptLineForDedupe(line);
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      uniqueLines.push(line.trim());
+    }
+    if (!uniqueLines.length) continue;
+    if (out.length) out.push("");
+    out.push(section.title);
+    for (const line of uniqueLines) out.push(`- ${line}`);
+  }
+
+  while (out.length && out[out.length - 1] === "") out.pop();
+  return out;
 }
 
 function buildContractText(id: MedSafetyPromptContractId, locale: "ko" | "en") {
@@ -547,18 +716,14 @@ function buildPromptBudgetFit(args: {
   const droppedDirectiveKeys = [...args.blueprint.projection.droppedDirectiveKeys];
 
   const buildLines = (contractIds: MedSafetyPromptContractId[], directiveKeys: MedSafetyPromptBlueprint["projection"]["activeDirectiveKeys"]) => {
-    const lines = [...buildBaseSpineLines(args.locale)];
-    for (const contractId of contractIds) {
-      if (BASE_CONTRACT_IDS.includes(contractId)) continue;
-      lines.push(buildContractText(contractId, args.locale));
-    }
-
-    const projection = args.blueprint.projection;
-    for (const key of directiveKeys) {
-      const value = projection[key];
-      if (typeof value === "string" && value.trim()) lines.push(value.trim());
-    }
-    return lines;
+    return formatPromptSections(
+      buildPromptSections({
+        locale: args.locale,
+        contractIds,
+        blueprint: args.blueprint,
+        directiveKeys,
+      })
+    );
   };
 
   let lines = buildLines(selectedContractIds, activeDirectiveKeys);
@@ -793,7 +958,8 @@ export function shouldRunQualityGate(args: {
   hasImage: boolean;
   answer: string;
 }) {
-  if (args.hasImage || args.isPremiumSearch) return true;
+  if (args.hasImage) return true;
+  if (args.decision.format === "sectioned") return true;
   if (args.decision.risk === "high") return true;
   if (args.decision.reportingNeed || args.decision.communicationProfile !== "none") return true;
   if (args.decision.entityClarity !== "high") return true;

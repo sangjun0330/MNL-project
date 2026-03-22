@@ -18,6 +18,7 @@ import { buildMedSafetyMemoBlocks } from "@/lib/medSafetyMemo";
 import {
   buildMedSafetyDisplayLines,
   buildMedSafetySectionBodyText,
+  canonicalizeMedSafetyAnswerText,
   normalizeMedSafetyAnswerText,
   parseMedSafetyAnswerSections,
   type MedSafetyAnswerSection as AnswerSection,
@@ -178,7 +179,7 @@ function clearPersistedMedSafetySession(storageKey: string) {
 }
 
 function normalizeMultilineText(value: unknown) {
-  return normalizeMedSafetyAnswerText(value);
+  return canonicalizeMedSafetyAnswerText(normalizeMedSafetyAnswerText(value));
 }
 
 function formatTime(value: number) {
