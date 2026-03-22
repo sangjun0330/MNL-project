@@ -780,6 +780,47 @@ async function handlePlanner(
       ) {
         return jsonNoStore({ ok: true, data: stalePlanner } satisfies AIRecoveryPlannerApiSuccess);
       }
+      if (stalePlanner && stalePlanner.engine === "openai" && stalePlanner.phase === phase) {
+        return jsonNoStore({ ok: true, data: stalePlanner } satisfies AIRecoveryPlannerApiSuccess);
+      }
+      if (cachedRecovery && cachedRecovery.engine === "openai" && cachedRecovery.phase === phase) {
+        const timelinePreview = buildPlannerTimelinePreview(todayShift, todayVital, profile);
+        const plannerModules = buildFallbackModules({
+          language: lang,
+          plannerContext,
+          nextDutyLabel: describeNextDutyLabel(nextShift, lang),
+          timelinePreview,
+        });
+        const todayVitalScore = todayVital ? Math.round(Math.min(todayVital.body.value, todayVital.mental.ema)) : null;
+        const payload: AIRecoveryPlannerPayload = {
+          dateISO: today,
+          language: lang,
+          phase,
+          requestedOrderCount,
+          todayShift,
+          nextShift,
+          todayVitalScore,
+          source: "supabase",
+          engine: "openai",
+          model: cachedRecovery.model,
+          debug: [
+            typeof generationError?.message === "string" ? generationError.message.trim() : "planner_generation_failed",
+            cachedRecovery.debug,
+            "loose_cached_recovery_rescue",
+          ]
+            .filter(Boolean)
+            .join("|"),
+          generatedText: stringifyPlannerGeneratedText(lang, plannerModules.orders, cachedRecovery.generatedText),
+          explanationGeneratedText: cachedRecovery.generatedText,
+          plannerContext,
+          profileSnapshot,
+          result: {
+            ...plannerModules,
+            explanation: buildExplanationModule(cachedRecovery.result, lang),
+          },
+        };
+        return jsonNoStore({ ok: true, data: payload } satisfies AIRecoveryPlannerApiSuccess);
+      }
       if (explanationResult && explanationEngine === "openai") {
         try {
           const todayVitalScore = todayVital ? Math.round(Math.min(todayVital.body.value, todayVital.mental.ema)) : null;

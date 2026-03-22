@@ -1637,6 +1637,90 @@ function dedupeNarrativeStrings(values: string[], limit: number, blocked: string
   return out;
 }
 
+function splitLooseNarrativeChunks(text: string) {
+  const source = String(text ?? "")
+    .replace(/\r/g, "\n")
+    .replace(/^```json\s*/gi, "")
+    .replace(/^```\s*/gm, "")
+    .replace(/\s*```$/gm, "")
+    .replace(/\u00a0/g, " ")
+    .trim();
+  if (!source) return [];
+
+  const rawLines = source
+    .split(/\n+/)
+    .map((line) =>
+      line
+        .replace(/^(?:[-*•·]|\d+[).:\-])\s*/, "")
+        .replace(/\s+/g, " ")
+        .trim()
+    )
+    .filter(Boolean);
+
+  const lines: string[] = [];
+  for (const line of rawLines) {
+    const lastIndex = lines.length - 1;
+    const shouldAppend =
+      lastIndex >= 0 &&
+      !/[.!?]$/.test(lines[lastIndex] ?? "") &&
+      !/^(?:[A-D]\s*[).:\-]|\[[A-D]\])/i.test(line);
+    if (shouldAppend) {
+      lines[lastIndex] = `${lines[lastIndex]} ${line}`.replace(/\s+/g, " ").trim();
+      continue;
+    }
+    lines.push(line);
+  }
+
+  const expanded =
+    lines.length <= 1
+      ? lines
+          .join(" ")
+          .split(/(?<=[.!?]|다\.|요\.)\s+/)
+          .map((line) => line.replace(/\s+/g, " ").trim())
+          .filter(Boolean)
+      : lines;
+
+  return dedupeNarrativeStrings(expanded, 10);
+}
+
+function salvageRecoveryResultFromText(text: string, language: Language): AIRecoveryResult | null {
+  const structured = parseResultFromGeneratedText(text, language);
+  if (structured.sections.length) return structured;
+
+  const chunks = splitLooseNarrativeChunks(text);
+  if (!chunks.length) return null;
+
+  const headline =
+    structured.headline?.trim() ||
+    chunks[0] ||
+    (language === "ko" ? "오늘 회복 우선순위를 먼저 정리해 볼게요." : "Let's set today's recovery priority first.");
+  const sectionCandidates = dedupeNarrativeStrings(
+    chunks.filter((chunk) => normalizeComparableText(chunk) !== normalizeComparableText(headline)),
+    5
+  );
+  const description =
+    sectionCandidates[0] ||
+    (language === "ko" ? "오늘 회복 흐름에서 가장 중요한 부분부터 바로 챙겨 보세요." : "Start with the part of recovery that matters most today.");
+  const tips = dedupeNarrativeStrings(sectionCandidates.slice(1), 2, [description]);
+  const category = inferRecoveryCategoryFromText([headline, description, ...tips].join(" ")) ?? "sleep";
+  const meta = CATEGORY_ORDER.find((item) => item.category === category);
+
+  return {
+    headline,
+    compoundAlert: structured.compoundAlert,
+    sections: [
+      {
+        category,
+        severity: parseSeverity(`${headline} ${description} ${tips.join(" ")}`),
+        title: meta ? (language === "ko" ? meta.titleKo : meta.titleEn) : language === "ko" ? "오늘 회복" : "Recovery",
+        description,
+        tips,
+      },
+    ],
+    weeklySummary: structured.weeklySummary,
+  };
+}
+
 function parseRecoveryJsonResult(candidate: Record<string, unknown>): AIRecoveryResult | null {
   for (const node of collectRecoveryResultCandidates(candidate)) {
     const headline = pickFirstString(node, ["headline", "title", "summary", "message"]);
@@ -1909,7 +1993,7 @@ export async function generateAIRecoveryWithOpenAI(
   const userPrompt = buildUserPrompt(params.language, context, params.phase ?? "start");
   const maxOutputTokens = Math.max(resolveMaxOutputTokens(), 7200);
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 35_000);
+  const timer = setTimeout(() => controller.abort(), 45_000);
   try {
     let lastError = `openai_request_failed_model:${model}`;
     for (let attemptIndex = 0; attemptIndex < 3; attemptIndex += 1) {
@@ -1932,7 +2016,7 @@ export async function generateAIRecoveryWithOpenAI(
         userPrompt,
         signal: controller.signal,
         maxOutputTokens: Math.min(12000, maxOutputTokens + attemptIndex * 1200),
-        upstreamTimeoutMs: 28_000,
+        upstreamTimeoutMs: 40_000,
         logFeature: "recovery_explanation",
         language: params.language,
         dateISO: params.todayISO,
@@ -1954,11 +2038,28 @@ export async function generateAIRecoveryWithOpenAI(
       const rawText = attempt.text.trim();
       const parsedObject = parseJsonObject(rawText);
       if (!parsedObject) {
+        const salvaged = salvageRecoveryResultFromText(rawText, params.language);
+        if (salvaged) {
+          const weeklyFallback = buildFallbackWeeklySummary(params);
+          const mergedResult: AIRecoveryResult = {
+            ...salvaged,
+            sections: salvaged.sections,
+            weeklySummary: mergeWeeklySummary(salvaged.weeklySummary, weeklyFallback),
+          };
+          const generatedText = buildStructuredTextFromResult(mergedResult, params.language);
+          return {
+            result: mergedResult,
+            generatedText,
+            engine: "openai",
+            model: currentModel,
+            debug: "text_salvage_non_json",
+          };
+        }
         lastError = `openai_recovery_non_json_model:${currentModel}`;
         console.error(`[generateAIRecoveryWithOpenAI] attempt ${attemptIndex} non-json`, { snippet: rawText.slice(0, 200) });
         continue;
       }
-      const parsed = parseRecoveryJsonResult(parsedObject);
+      const parsed = parseRecoveryJsonResult(parsedObject) ?? salvageRecoveryResultFromText(rawText, params.language);
       if (!parsed) {
         lastError = `openai_recovery_invalid_shape_model:${currentModel}`;
         const keys = Object.keys(parsedObject).join(",");
@@ -2113,7 +2214,7 @@ export async function translateAIRecoveryToEnglish(
 
   const translateChunk = async (targetLines: string[], strictNoKorean = false) => {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 35_000);
+    const timer = setTimeout(() => controller.abort(), 40_000);
     try {
       const attempt = await callResponsesApi({
         apiKey,
@@ -2124,7 +2225,7 @@ export async function translateAIRecoveryToEnglish(
         signal: controller.signal,
         // 번역은 길이가 길어지기 쉬워 생성보다 넉넉하게 허용
         maxOutputTokens: Math.max(resolveMaxOutputTokens(), 7200),
-        upstreamTimeoutMs: 28_000,
+        upstreamTimeoutMs: 35_000,
         logFeature: "recovery_translate",
         language: "en",
         dateISO: "translation",
@@ -2836,6 +2937,62 @@ function parsePlannerChecklistModule(
   return best;
 }
 
+function deriveChecklistTitle(text: string, language: Language) {
+  const clean = String(text ?? "").replace(/\s+/g, " ").trim();
+  if (!clean) return language === "ko" ? "오늘 오더" : "Today Order";
+  const separated = clean.match(/^(.+?)(?:\s*[:|-]\s+)(.+)$/);
+  const source = separated?.[1]?.trim() || clean;
+  if (source.length <= 28) return source;
+  return `${source.slice(0, 25).trimEnd()}...`;
+}
+
+function salvagePlannerChecklistModuleFromText(
+  text: string,
+  language: Language,
+  requestedOrderCount?: number | null
+): AIPlannerChecklistModule {
+  const targetCount = normalizeRequestedOrderCount(requestedOrderCount);
+  const source = String(text ?? "")
+    .replace(/\r/g, "\n")
+    .replace(/^```json\s*/gi, "")
+    .replace(/^```\s*/gm, "")
+    .replace(/\s*```$/gm, "")
+    .trim();
+  const rawLines = cleanLines(source).filter((line) => !/^```/.test(line));
+  const numberedBlocks = Array.from(
+    source.matchAll(/(?:^|\n)\s*(?:\d+\s*[).:\-]|[-*•·])\s*([\s\S]*?)(?=(?:\n\s*(?:\d+\s*[).:\-]|[-*•·])\s*)|$)/g)
+  )
+    .map((match) => match[1].replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const candidateBodies =
+    numberedBlocks.length > 0 ? numberedBlocks : splitLooseNarrativeChunks(source).slice(0, Math.max(targetCount, 3));
+  const items = dedupeNarrativeStrings(candidateBodies, 5).map((body, index) => ({
+    id: slugifyChecklistId(body, `order_${index + 1}`),
+    title: deriveChecklistTitle(body, language),
+    body,
+    when: normalizeChecklistWhen(body, language),
+    reason: body,
+    chips: [],
+  }));
+
+  const nonItemLines = rawLines.filter((line) => !/^(?:\d+\s*[).:\-]|[-*•·])\s*/.test(line));
+  const defaultTitle = language === "ko" ? "오늘 오더" : "Today Orders";
+  const defaultHeadline =
+    language === "ko" ? "지금 바로 이어서 실행할 회복 오더예요." : "These are the next recovery orders to execute.";
+  const defaultSummary =
+    language === "ko"
+      ? "AI가 생성한 원문을 그대로 정리해 오늘 바로 실행할 오더로 묶었습니다."
+      : "These orders were organized directly from the AI output for today's flow.";
+
+  return {
+    eyebrow: language === "ko" ? "오늘 오더" : "Today Orders",
+    title: nonItemLines[0] || defaultTitle,
+    headline: nonItemLines[1] || items[0]?.title || defaultHeadline,
+    summary: nonItemLines[2] || items[0]?.reason || defaultSummary,
+    items: items.slice(0, targetCount),
+  };
+}
+
 async function generatePlannerOrdersWithOpenAI(
   params: GenerateOpenAIRecoveryPlannerParams
 ): Promise<{
@@ -2868,7 +3025,7 @@ async function generatePlannerOrdersWithOpenAI(
   });
   const maxOutputTokens = Math.max(resolveMaxOutputTokens(), 7200);
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 40_000);
+  const timer = setTimeout(() => controller.abort(), 44_000);
 
   try {
     let lastError = `openai_request_failed_model:${model}`;
@@ -2892,7 +3049,7 @@ async function generatePlannerOrdersWithOpenAI(
         userPrompt,
         signal: controller.signal,
         maxOutputTokens: Math.min(12000, maxOutputTokens + attemptIndex * 1000),
-        upstreamTimeoutMs: 32_000,
+        upstreamTimeoutMs: 36_000,
         logFeature: "planner_orders",
         language: params.language,
         dateISO: params.todayISO,
@@ -2912,6 +3069,14 @@ async function generatePlannerOrdersWithOpenAI(
       const generatedText = attempt.text.trim();
       const parsed = parseJsonObject(generatedText);
       if (!parsed) {
+        const textModule = salvagePlannerChecklistModuleFromText(
+          generatedText,
+          params.language,
+          params.requestedOrderCount
+        );
+        if (textModule.items.length) {
+          return { generatedText, model: currentModel, module: textModule };
+        }
         lastError = `openai_planner_orders_non_json_model:${currentModel}`;
         console.error(`[generatePlannerOrdersWithOpenAI] attempt ${attemptIndex} non-json`, { snippet: generatedText.slice(0, 200) });
         continue;
@@ -2930,6 +3095,14 @@ async function generatePlannerOrdersWithOpenAI(
         checklistModule.items.length <= 5 &&
         (targetCount == null || Math.abs(checklistModule.items.length - targetCount) <= 1);
       if (!itemCountOk) {
+        const salvaged = salvagePlannerChecklistModuleFromText(
+          generatedText,
+          params.language,
+          params.requestedOrderCount
+        );
+        if (salvaged.items.length) {
+          return { generatedText, model: currentModel, module: salvaged };
+        }
         lastError = `openai_planner_orders_incomplete_model:${currentModel}`;
         console.error(`[generatePlannerOrdersWithOpenAI] attempt ${attemptIndex} validation failed`, {
           itemCount: checklistModule.items.length,

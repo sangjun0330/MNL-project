@@ -121,6 +121,31 @@ async function fetchAIRecoveryPlanner(
   return payload;
 }
 
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function recoverPlannerPayloadAfterError(
+  lang: "ko" | "en",
+  phase: RecoveryPhase,
+  requestedOrderCount?: number | null
+) {
+  const targetCount = normalizeRequestedOrderCount(requestedOrderCount);
+  let fallback: AIRecoveryPlannerPayload | null = null;
+  for (let attemptIndex = 0; attemptIndex < 4; attemptIndex += 1) {
+    await wait(attemptIndex === 0 ? 900 : 1500);
+    try {
+      const cached = await fetchAIRecoveryPlanner(lang, phase, true);
+      if (!cached || !isUsableOpenAIPlannerPayload(cached, lang, phase)) continue;
+      if (normalizeRequestedOrderCount(cached.requestedOrderCount) === targetCount) return cached;
+      fallback = fallback ?? cached;
+    } catch {
+      // another request may still be saving the result; keep polling briefly
+    }
+  }
+  return fallback;
+}
+
 function getOrStartGenerate(
   userId: string,
   lang: "ko" | "en",
@@ -277,6 +302,14 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
         setRemoteData(generated);
       } catch (err: any) {
         if (!active) return;
+        const recovered = await recoverPlannerPayloadAfterError(lang, phase, requestedOrderCount);
+        if (!active) return;
+        if (recovered) {
+          sessionDailyCache.set(key, recovered);
+          setRemoteData(recovered);
+          setError(null);
+          return;
+        }
         setRemoteData(null);
         setError(err?.message ?? "network_error");
       } finally {

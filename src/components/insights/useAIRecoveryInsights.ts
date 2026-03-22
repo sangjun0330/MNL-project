@@ -99,6 +99,23 @@ async function fetchAIRecovery(
   return payload;
 }
 
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function recoverRecoveryPayloadAfterError(lang: "ko" | "en", dateISO: string, phase: RecoveryPhase) {
+  for (let attemptIndex = 0; attemptIndex < 4; attemptIndex += 1) {
+    await wait(attemptIndex === 0 ? 900 : 1500);
+    try {
+      const cached = await fetchAIRecovery(lang, dateISO, phase, true);
+      if (cached && isUsableOpenAIRecoveryPayload(cached, lang, phase)) return cached;
+    } catch {
+      // another request may still be saving the result; keep polling briefly
+    }
+  }
+  return null;
+}
+
 function getOrStartGenerate(userId: string, lang: "ko" | "en", dateISO: string, phase: RecoveryPhase) {
   const key = requestKey(userId, lang, dateISO, phase);
   const existing = inFlightGenerate.get(key);
@@ -226,6 +243,14 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
         setRemoteData(generated);
       } catch (err: any) {
         if (!active) return;
+        const recovered = await recoverRecoveryPayloadAfterError(lang, dateISO, phase);
+        if (!active) return;
+        if (recovered) {
+          sessionDailyCache.set(key, recovered);
+          setRemoteData(recovered);
+          setError(null);
+          return;
+        }
         setRemoteData(null);
         setError(err?.message ?? "network_error");
       } finally {

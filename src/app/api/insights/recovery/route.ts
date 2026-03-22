@@ -900,6 +900,9 @@ async function handleRecovery(
       ) {
         return jsonNoStore({ ok: true, data: staleCurrent } satisfies AIRecoveryApiSuccess);
       }
+      if (staleCurrent && staleCurrent.engine === "openai") {
+        return jsonNoStore({ ok: true, data: staleCurrent } satisfies AIRecoveryApiSuccess);
+      }
       return bad(
         502,
         typeof generationError?.message === "string" && generationError.message.trim()
