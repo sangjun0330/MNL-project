@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { ISODate } from "@/lib/date";
 import { addDays, fromISODate, isISODate, toISODate, todayISO } from "@/lib/date";
 import {
@@ -183,7 +182,19 @@ function listHistoryDates(endISO: ISODate, days = 14) {
 }
 
 function buildSignature(value: unknown) {
-  return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
+  const source = JSON.stringify(value);
+  let hashA = 2166136261;
+  let hashB = 2166136261;
+  for (let index = 0; index < source.length; index += 1) {
+    const code = source.charCodeAt(index);
+    hashA ^= code;
+    hashA = Math.imul(hashA, 16777619);
+    hashB ^= code + (index & 255);
+    hashB = Math.imul(hashB, 16777619);
+  }
+  const hexA = (hashA >>> 0).toString(16).padStart(8, "0");
+  const hexB = (hashB >>> 0).toString(16).padStart(8, "0");
+  return `sig:${hexA}${hexB}`;
 }
 
 function computeDefaultSelectionCount(args: {

@@ -4,7 +4,7 @@ import { readAIRecoverySessionView } from "@/lib/server/aiRecovery";
 import { jsonNoStore } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 function bad(status: number, error: string) {
