@@ -138,12 +138,7 @@ export function InsightsRecoveryOrdersDetail() {
         </>
       }
     >
-      {showGeneratingOverlay ? (
-        <AIRecoveryLoadingOverlay
-          title={currentSession ? "AI 오더 정리중.." : "AI 맞춤회복 분석중.."}
-          detail={currentSession ? "오더를 체크리스트로 정리하는 중이에요." : "먼저 AI 해설을 만드는 중이에요."}
-        />
-      ) : null}
+      {showGeneratingOverlay ? <AIRecoveryLoadingOverlay mode="orders" /> : null}
 
       <DetailCard
         className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"

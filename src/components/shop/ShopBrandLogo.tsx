@@ -1,17 +1,13 @@
 "use client";
 
-import Image from "next/image";
+import { RNestLogo } from "@/components/brand/RNestLogo";
+import { cn } from "@/lib/cn";
 
 export function ShopBrandLogo({ className = "" }: { className?: string }) {
   return (
-    <Image
-      src="/rnest-logo.png"
-      alt="RNest"
-      width={3200}
-      height={720}
-      className={className}
-      priority
-    />
+    <span className={cn("inline-flex items-center text-[#161616]", className)}>
+      <RNestLogo className="h-auto w-full" />
+    </span>
   );
 }
 

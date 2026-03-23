@@ -352,7 +352,7 @@ export function InsightsAIRecoveryDetail() {
         </>
       }
     >
-      {showGeneratingOverlay ? <AIRecoveryLoadingOverlay title="AI 맞춤회복 분석중.." detail="버튼으로 요청한 해설과 오더를 만드는 중이에요." /> : null}
+      {showGeneratingOverlay ? <AIRecoveryLoadingOverlay mode="recovery" /> : null}
 
       {session.error ? (
         <Surface className="border-[#F3D0D6] bg-[#FFF7F8]">
