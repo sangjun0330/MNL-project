@@ -96,7 +96,7 @@ export function InsightsRecoveryOrdersDetail() {
   const session = useAIRecoverySession({
     dateISO: end,
     slot,
-    autoGenerate: true,
+    autoGenerate: false,
     enabled: !isInsightsLocked(recordedDays) && billing.hasEntitlement("recoveryPlannerAI"),
   });
   const activeData = session.data?.slot === slot && session.data?.dateISO === end ? session.data : null;
@@ -121,9 +121,8 @@ export function InsightsRecoveryOrdersDetail() {
   const currentSession = response?.session ?? null;
   const ordersPayload = currentSession?.orders ?? null;
   const orders = ordersPayload?.items ?? [];
-  const canGenerateSession = response?.quota.canGenerateSession ?? !currentSession;
   const canRegenerateOrders = response?.quota.canRegenerateOrders ?? !currentSession;
-  const showGeneratingOverlay = Boolean(response?.gate.allowed && (session.generating || session.savingOrders || (!currentSession && session.loading)));
+  const showGeneratingOverlay = Boolean(response?.gate.allowed && session.savingOrders);
 
   return (
     <InsightDetailShell
@@ -157,16 +156,22 @@ export function InsightsRecoveryOrdersDetail() {
           <div>
             <div className="text-[10.5px] font-semibold tracking-[0.18em] text-[color:var(--rnest-accent)]">TODAY ORDERS</div>
             <div className="mt-1 text-[20px] font-bold tracking-[-0.03em] text-ios-text">오늘의 오더 체크리스트</div>
-            <p className="mt-2 text-[13px] leading-6 text-ios-sub">타이밍과 이유가 붙은 실행 문장으로 바로 확인할 수 있어요.</p>
+            <p className="mt-2 text-[13px] leading-6 text-ios-sub">
+              {currentSession ? "타이밍과 이유가 붙은 실행 문장으로 바로 확인할 수 있어요." : "AI 호출은 해설 페이지의 만들기 버튼에서만 시작됩니다."}
+            </p>
           </div>
-          <Button
-            variant="secondary"
-            className="h-11 px-5"
-            disabled={session.generating || session.savingOrders || billing.loading || (currentSession ? !canRegenerateOrders : !canGenerateSession)}
-            onClick={() => void (currentSession ? session.regenerateOrders() : session.generate(true))}
-          >
-            {session.generating || session.savingOrders ? "만드는 중…" : currentSession ? "오더 다시 만들기" : "만들기"}
-          </Button>
+          {currentSession ? (
+            <Button variant="secondary" className="h-11 px-5" disabled={session.savingOrders || billing.loading || !canRegenerateOrders} onClick={() => void session.regenerateOrders()}>
+              {session.savingOrders ? "만드는 중…" : "오더 다시 만들기"}
+            </Button>
+          ) : (
+            <Link
+              href="/insights/recovery/ai"
+              className="inline-flex h-11 items-center justify-center rounded-full border border-ios-sep bg-white px-5 text-[13px] font-semibold text-ios-text"
+            >
+              해설 만들러 가기
+            </Link>
+          )}
         </div>
         {currentSession && !canRegenerateOrders ? <p className="text-[12px] text-ios-sub">오늘 오더 다시 만들기는 끝났어요.</p> : null}
       </DetailCard>
@@ -208,7 +213,7 @@ export function InsightsRecoveryOrdersDetail() {
       ) : !session.error && response?.gate.allowed ? (
         <DetailCard className="p-5 sm:p-6">
           <div className="text-[17px] font-bold tracking-[-0.02em] text-ios-text">아직 AI 오더가 없어요.</div>
-          <p className="mt-2 text-[13px] leading-6 text-ios-sub">먼저 AI 맞춤회복을 만들거나 다시 시도해 주세요.</p>
+          <p className="mt-2 text-[13px] leading-6 text-ios-sub">AI 맞춤회복 페이지에서 만들기를 눌러 해설을 먼저 생성해 주세요.</p>
         </DetailCard>
       ) : null}
     </InsightDetailShell>

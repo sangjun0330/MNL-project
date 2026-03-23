@@ -409,6 +409,41 @@ function resolveSectionSeverity(value: unknown, fallback: AIRecoveryBriefSection
   return fallback;
 }
 
+function shouldIncludeMenstrualBriefCategory(snapshot: RecoverySnapshot, data?: ReturnType<typeof buildStartRecoveryPromptData>) {
+  if (data) return Boolean(data.menstrualCategoryVisible);
+  return Boolean(snapshot.state.settings?.menstrual?.enabled && snapshot.todayVital?.menstrual?.enabled && snapshot.todayVital?.menstrual?.label);
+}
+
+function getFixedBriefCategories(snapshot: RecoverySnapshot, data: ReturnType<typeof buildStartRecoveryPromptData>) {
+  return [
+    "sleep",
+    "shift",
+    "caffeine",
+    ...(shouldIncludeMenstrualBriefCategory(snapshot, data) ? (["menstrual"] as const) : []),
+    "stress",
+    "activity",
+  ] satisfies AIRecoveryBriefSection["category"][];
+}
+
+function getBriefCategoryTitle(category: AIRecoveryBriefSection["category"]) {
+  switch (category) {
+    case "sleep":
+      return "수면";
+    case "shift":
+      return "교대근무";
+    case "caffeine":
+      return "카페인";
+    case "menstrual":
+      return "생리주기";
+    case "stress":
+      return "스트레스&감정";
+    case "activity":
+      return "신체활동";
+    default:
+      return "해설";
+  }
+}
+
 function buildStartRecoveryPromptData(snapshot: RecoverySnapshot) {
   const state = snapshot.state;
   const recordedDates = listRecordedDates(state, snapshot.dateISO);
@@ -465,6 +500,7 @@ function buildStartRecoveryPromptData(snapshot: RecoverySnapshot) {
   const historyVitals = recordedDates
     .map((iso) => vitalByISO.get(iso))
     .filter((vital): vital is DailyVital => Boolean(vital));
+  const menstrualCategoryVisible = Boolean(state.settings?.menstrual?.enabled && snapshot.todayVital?.menstrual?.enabled && snapshot.todayVital?.menstrual?.label);
   const topWorkTags = collectTopTags(
     recordedDates.flatMap((iso) => (Array.isArray(state.bio?.[iso]?.workEventTags) ? (state.bio?.[iso]?.workEventTags ?? []).filter(Boolean) : [])),
     5
@@ -510,6 +546,7 @@ function buildStartRecoveryPromptData(snapshot: RecoverySnapshot) {
       todayInputPolicy: "오늘은 수면만 포함하고, 같은 날 스트레스·카페인·활동·기분·근무메모는 의도적으로 제외했습니다.",
     },
     menstrualTrackingEnabled: Boolean(state.settings?.menstrual?.enabled),
+    menstrualCategoryVisible,
     shift: {
       today: shiftLabel(snapshot.todayShift),
       next: snapshot.plannerContext.nextDuty ? shiftLabel(snapshot.plannerContext.nextDuty) : null,
@@ -547,6 +584,14 @@ function buildStartRecoveryPromptData(snapshot: RecoverySnapshot) {
       plannerTone: snapshot.plannerContext.plannerTone,
       ordersTop3: snapshot.plannerContext.ordersTop3,
     },
+    fixedSectionOrder: [
+      "sleep",
+      "shift",
+      "caffeine",
+      ...(menstrualCategoryVisible ? ["menstrual"] : []),
+      "stress",
+      "activity",
+    ],
     history: {
       totalRecords: recordedDates.length,
       firstRecord: recordedDates[0] ?? null,
@@ -672,6 +717,34 @@ function buildSectionTips(snapshot: RecoverySnapshot, category: AIRecoveryBriefS
   }
 }
 
+function buildNormalizedBriefSections(
+  snapshot: RecoverySnapshot,
+  sections: AIRecoveryBriefSection[],
+  data = buildStartRecoveryPromptData(snapshot)
+): AIRecoveryBriefSection[] {
+  const byCategory = new Map<AIRecoveryBriefSection["category"], AIRecoveryBriefSection>();
+  for (const section of sections) {
+    if (!byCategory.has(section.category)) {
+      byCategory.set(section.category, section);
+    }
+  }
+
+  return getFixedBriefCategories(snapshot, data).map((category) => {
+    const source = byCategory.get(category);
+    const fallbackTips = buildSectionTips(snapshot, category);
+    return {
+      category,
+      severity: resolveSectionSeverity(source?.severity, buildSectionSeverity(snapshot, category)),
+      title: trimText(source?.title, 40) || getBriefCategoryTitle(category),
+      description: trimText(source?.description, 240) || buildSectionDescription(snapshot, data, category),
+      tips: [
+        trimText(source?.tips?.[0], 160) || fallbackTips[0],
+        trimText(source?.tips?.[1], 160) || fallbackTips[1],
+      ] as [string, string],
+    };
+  });
+}
+
 function buildFallbackCompoundAlert(snapshot: RecoverySnapshot, data: ReturnType<typeof buildStartRecoveryPromptData>) {
   const factors: string[] = [];
   if ((data.today.sleepHours ?? 0) < 6.5) factors.push("수면 압박");
@@ -690,39 +763,7 @@ function buildFallbackCompoundAlert(snapshot: RecoverySnapshot, data: ReturnType
 }
 
 function buildFallbackSections(snapshot: RecoverySnapshot, data: ReturnType<typeof buildStartRecoveryPromptData>): AIRecoveryBriefSection[] {
-  const ordered = [
-    normalizeBriefCategory(snapshot.plannerContext.focusFactor?.key),
-    "sleep",
-    snapshot.plannerContext.nextDuty ? "shift" : "stress",
-    data.menstrualTrackingEnabled ? "menstrual" : "activity",
-    "caffeine",
-    "stress",
-    "activity",
-  ] as AIRecoveryBriefSection["category"][];
-  const seen = new Set<string>();
-  const categories = ordered.filter((category) => {
-    if (seen.has(category)) return false;
-    seen.add(category);
-    return true;
-  });
-  return categories.slice(0, 3).map((category) => ({
-    category,
-    severity: buildSectionSeverity(snapshot, category),
-    title:
-      category === "sleep"
-        ? "아침 수면 전환"
-        : category === "shift"
-          ? "다음 근무 버퍼"
-          : category === "caffeine"
-            ? "첫 각성 강도"
-            : category === "menstrual"
-              ? "따뜻한 완화 시작"
-              : category === "stress"
-                ? "긴장 낮추기"
-                : "짧은 순환 깨우기",
-    description: buildSectionDescription(snapshot, data, category),
-    tips: buildSectionTips(snapshot, category),
-  }));
+  return buildNormalizedBriefSections(snapshot, [], data);
 }
 
 function buildFallbackBrief(snapshot: RecoverySnapshot): AIRecoveryBrief {
@@ -923,7 +964,7 @@ function parseBriefJson(text: string, snapshot: RecoverySnapshot): AIRecoveryBri
   const parsed = parseLooseJson(text);
   if (!isRecord(parsed)) throw new Error("brief_not_object");
   const sectionsSource = Array.isArray(parsed.sections) ? parsed.sections : [];
-  if (sectionsSource.length < 2 || sectionsSource.length > 4) throw new Error("brief_sections_invalid");
+  if (sectionsSource.length < 2 || sectionsSource.length > 6) throw new Error("brief_sections_invalid");
   const fallbackCategory = normalizeBriefCategory(snapshot.plannerContext.focusFactor?.key);
   const sections = sectionsSource.map((source, index) => {
     if (!isRecord(source)) throw new Error(`brief_section_invalid_${index + 1}`);
@@ -940,6 +981,7 @@ function parseBriefJson(text: string, snapshot: RecoverySnapshot): AIRecoveryBri
       tips: [tips[0]!, tips[1]!] as [string, string],
     };
   });
+  const normalizedSections = buildNormalizedBriefSections(snapshot, sections);
   const headline = trimText(parsed.headline, 120);
   if (!headline) throw new Error("brief_headline_missing");
   const compoundAlert = (() => {
@@ -973,7 +1015,7 @@ function parseBriefJson(text: string, snapshot: RecoverySnapshot): AIRecoveryBri
   return {
     headline,
     compoundAlert,
-    sections,
+    sections: normalizedSections,
     weeklySummary: {
       avgBattery: round1(avgBattery),
       prevAvgBattery: round1(prevAvgBattery),
@@ -1051,7 +1093,7 @@ function buildBriefSchema() {
       sections: {
         type: "array",
         minItems: 2,
-        maxItems: 4,
+        maxItems: 6,
         items: {
           type: "object",
           additionalProperties: false,
@@ -1148,7 +1190,10 @@ function buildBriefUserPrompt(snapshot: RecoverySnapshot) {
     "",
     "headline은 오늘 시작에서 가장 중요한 축을 1~2문장으로 정리",
     "headline에는 가능하면 focusFactor 또는 primaryAction의 맥락을 자연스럽게 녹일 것",
-    "sections는 정말 중요한 카테고리만 2~4개 선택",
+    "sections는 고정 카테고리 순서대로 작성",
+    "필수 카테고리 순서: sleep, shift, caffeine, stress, activity",
+    "menstrualCategoryVisible가 true면 menstrual을 caffeine 다음에 포함, false면 menstrual 제외",
+    "같은 카테고리 중복 금지",
     "각 section.description은 왜 이 카테고리가 지금 중요한지 실제 데이터 2가지 이상에 기대어 1문장으로 설명",
     "각 section.tips는 정확히 2개, 서로 겹치지 않는 실행 행동으로 작성",
     "tips는 추상 조언이 아니라 시작 타이밍/장소/시간/방법 중 최소 2개가 보이게 작성",
@@ -1168,8 +1213,7 @@ function buildBriefUserPrompt(snapshot: RecoverySnapshot) {
     "",
     "compoundAlert는 위험 요소 2개 이상이 동시에 뚜렷할 때만 작성, 아니면 null",
     "sections.category 값은 sleep, shift, caffeine, menstrual, stress, activity 중에서만 선택",
-    "menstrualTrackingEnabled가 true이므로 생리주기 섹션 포함 여부를 이에 맞출 것",
-    "sections는 우선순위가 높은 순서대로 배열",
+    "sections는 위 고정 순서대로 배열",
     "weeklySummary.personalInsight와 weeklySummary.nextWeekPreview는 서로 다른 내용으로 작성",
     "weeklySummary.topDrains는 0~3개",
     "[JSON shape]",
@@ -1730,6 +1774,10 @@ function buildStoredSession(args: {
   const previousCounts = readGenerationCounts(args.previousSession);
   const shouldCountGeneration =
     args.flow.status === "ready" && Boolean(args.flow.openaiMeta.briefResponseId || args.flow.openaiMeta.ordersResponseId);
+  const normalizedBrief = {
+    ...args.flow.brief,
+    sections: buildNormalizedBriefSections(args.snapshot, Array.isArray(args.flow.brief.sections) ? args.flow.brief.sections : []),
+  };
   return {
     status: args.flow.status,
     generatedAt: now,
@@ -1739,7 +1787,7 @@ function buildStoredSession(args: {
     promptVersion: AI_RECOVERY_PROMPT_VERSION,
     inputSignature: args.snapshot.inputSignature,
     context: args.snapshot.contextMeta,
-    brief: args.flow.brief,
+    brief: normalizedBrief,
     selection: {
       selectedCandidateIds: [],
       updatedAt: now,
@@ -1750,6 +1798,19 @@ function buildStoredSession(args: {
       orders: shouldCountGeneration ? previousCounts.orders + 1 : previousCounts.orders,
     },
     openaiMeta: args.flow.openaiMeta,
+  } satisfies AIRecoverySlotPayload;
+}
+
+function normalizeStoredSession(snapshot: RecoverySnapshot, session: AIRecoverySlotPayload): AIRecoverySlotPayload;
+function normalizeStoredSession(snapshot: RecoverySnapshot, session: AIRecoverySlotPayload | null | undefined): AIRecoverySlotPayload | null;
+function normalizeStoredSession(snapshot: RecoverySnapshot, session: AIRecoverySlotPayload | null | undefined) {
+  if (!session?.brief) return session ?? null;
+  return {
+    ...session,
+    brief: {
+      ...session.brief,
+      sections: buildNormalizedBriefSections(snapshot, Array.isArray(session.brief.sections) ? session.brief.sections : []),
+    },
   } satisfies AIRecoverySlotPayload;
 }
 
@@ -1769,7 +1830,7 @@ export async function readAIRecoverySessionView(args: {
   });
   const { session, completions } = await safeReadRecoverySlot({ userId: args.userId, dateISO, slot });
   const visibleSession =
-    gate.allowed && session?.status === "ready" && session.promptVersion === AI_RECOVERY_PROMPT_VERSION ? session : null;
+    gate.allowed && session?.status === "ready" && session.promptVersion === AI_RECOVERY_PROMPT_VERSION ? normalizeStoredSession(snapshot, session) : null;
   const orderIds = visibleSession?.orders?.items.map((item) => item.id) ?? [];
   const filteredCompletions = filterCompletionIdsForOrders(completions, orderIds);
   const quota = buildGenerationQuota(subscription?.tier ?? null, session);
@@ -1851,10 +1912,11 @@ export async function generateAIRecoverySession(args: {
     existingSession.language === snapshot.language &&
     existingSession.promptVersion === AI_RECOVERY_PROMPT_VERSION
   ) {
+    const normalizedSession = normalizeStoredSession(snapshot, existingSession);
     return {
       gate,
-      session: existingSession,
-      completions: filterCompletionIdsForOrders(existingCompletions, existingSession.orders?.items.map((item) => item.id) ?? []),
+      session: normalizedSession,
+      completions: filterCompletionIdsForOrders(existingCompletions, normalizedSession?.orders?.items.map((item) => item.id) ?? []),
       quota,
       slotLabel: getAIRecoverySlotLabel(args.slot, snapshot.todayShift),
       slotDescription: getAIRecoverySlotDescription(args.slot, snapshot.todayShift),
@@ -1894,7 +1956,7 @@ export async function generateAIRecoverySession(args: {
     model,
     signal: args.signal,
   });
-  const session = buildStoredSession({ snapshot, flow, previousSession: existingSession });
+  const session = normalizeStoredSession(snapshot, buildStoredSession({ snapshot, flow, previousSession: existingSession }));
   const nextQuota = buildGenerationQuota(subscription?.tier ?? null, session);
   if (canPersistSession) {
     try {
@@ -1949,10 +2011,10 @@ export async function regenerateAIRecoveryOrders(args: {
   if (!session?.brief) throw new Error("ai_recovery_session_missing");
   const quota = buildGenerationQuota(subscription?.tier ?? null, session);
   if (!quota.canRegenerateOrders) throw new Error("orders_generation_limit_reached");
-  const brief = session.brief;
+  const brief = normalizeStoredSession(snapshot, session)?.brief ?? session.brief;
   if (args.slot !== "wake") {
     const orders = buildFallbackOrders(snapshot);
-    const nextSession: AIRecoverySlotPayload = {
+    const nextSession = normalizeStoredSession(snapshot, {
       ...session,
       status: "ready",
       selection: {
@@ -1967,7 +2029,7 @@ export async function regenerateAIRecoveryOrders(args: {
         ...session.openaiMeta,
         fallbackReason: "wake_only_prompt_contract",
       },
-    };
+    });
     await writeAIRecoverySlot({
       userId: args.userId,
       dateISO: args.dateISO,
@@ -2053,7 +2115,7 @@ export async function regenerateAIRecoveryOrders(args: {
     }
   }
 
-  const nextSession: AIRecoverySlotPayload = {
+  const nextSession = normalizeStoredSession(snapshot, {
     ...session,
     status: "ready",
     selection: {
@@ -2075,7 +2137,7 @@ export async function regenerateAIRecoveryOrders(args: {
       },
       fallbackReason: null,
     },
-  };
+  });
   await writeAIRecoverySlot({
     userId: args.userId,
     dateISO: args.dateISO,
