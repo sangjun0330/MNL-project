@@ -193,37 +193,33 @@ function RecoverySectionRow({
 }) {
   const meta = CATEGORY_META[section.category];
   return (
-    <div className="border-t border-black/[0.06] py-6 first:border-t-0 first:pt-0 last:pb-0">
-      <div className="flex items-start gap-4">
+    <Surface className="px-5 py-5 sm:px-6">
+      <div className="flex flex-wrap items-center gap-3">
         <CategoryIcon category={section.category} />
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="text-[16px] font-semibold tracking-[-0.02em] text-[#111827]">{meta.label}</div>
-            <SeverityPill severity={section.severity} />
-          </div>
-          <p className="mt-3 break-keep text-[15px] leading-7 text-[#2D3440]">{section.description}</p>
-          <button
-            type="button"
-            onClick={onToggle}
-            className="mt-4 inline-flex items-center gap-1 text-[13px] font-semibold text-[#4F7BFF] transition hover:text-[#355FDC]"
-          >
-            {expanded ? "추천 행동 접기" : "추천 행동 더 보기"}
-          </button>
-          {expanded ? (
-            <div className="mt-4 space-y-3 border-t border-black/[0.06] pt-4">
-              {section.tips.map((tip, index) => (
-                <div key={`${section.category}:${index}`} className="flex items-start gap-3">
-                  <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#F3F5F8] text-[12px] font-semibold text-[#667085]">
-                    {index + 1}
-                  </span>
-                  <p className="break-keep text-[14px] leading-6 text-[#4B5563]">{tip}</p>
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </div>
+        <div className="text-[20px] font-semibold tracking-[-0.03em] text-[#111827]">{meta.label}</div>
+        <SeverityPill severity={section.severity} />
       </div>
-    </div>
+      <p className="mt-5 break-keep text-[15px] leading-7 text-[#2D3440]">{section.description}</p>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="mt-4 inline-flex items-center gap-1 text-[13px] font-semibold text-[#4F7BFF] transition hover:text-[#355FDC]"
+      >
+        {expanded ? "추천 행동 접기" : "추천 행동 더 보기"}
+      </button>
+      {expanded ? (
+        <div className="mt-4 space-y-3 border-t border-black/[0.06] pt-4">
+          {section.tips.map((tip, index) => (
+            <div key={`${section.category}:${index}`} className="flex items-start gap-3">
+              <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#F3F5F8] text-[12px] font-semibold text-[#667085]">
+                {index + 1}
+              </span>
+              <p className="break-keep text-[14px] leading-6 text-[#4B5563]">{tip}</p>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </Surface>
   );
 }
 
@@ -388,7 +384,7 @@ export function InsightsAIRecoveryDetail() {
         <>
           <Surface>
             <div className="text-[11px] font-semibold tracking-[0.2em] text-[#8C95A6]">AI CUSTOMIZED RECOVERY</div>
-            <div className="mt-3 break-keep text-[30px] font-semibold tracking-[-0.05em] text-[#111827]">{brief.headline}</div>
+            <div className="mt-3 break-keep text-[24px] font-semibold leading-[1.45] tracking-[-0.04em] text-[#111827] sm:text-[27px]">{brief.headline}</div>
             <div className="mt-5 flex flex-wrap gap-2">
               {brief.weeklySummary?.avgBattery != null ? <SummaryMetric label="주간 배터리" value={`${Math.round(brief.weeklySummary.avgBattery)}점`} /> : null}
               {brief.weeklySummary?.prevAvgBattery != null ? <SummaryMetric label="이전 흐름" value={`${Math.round(brief.weeklySummary.prevAvgBattery)}점`} /> : null}
@@ -417,11 +413,11 @@ export function InsightsAIRecoveryDetail() {
             </div>
           </Surface>
 
-          <Surface>
+          <div className="px-1">
             <div className="text-[11px] font-semibold tracking-[0.18em] text-[#8C95A6]">TODAY EXPLANATION</div>
-            <div className="mt-2 text-[24px] font-semibold tracking-[-0.04em] text-[#111827]">오늘 회복 해설</div>
+            <div className="mt-2 text-[20px] font-semibold tracking-[-0.04em] text-[#111827]">오늘 회복 해설</div>
             <p className="mt-3 break-keep text-[14px] leading-6 text-[#667085]">카테고리별 해설은 한 줄씩 먼저 보고, 추천 행동 2개는 더 보기로 펼쳐 확인하세요.</p>
-            <div className="mt-2">
+            <div className="mt-5 grid gap-4">
               {sectionList.map((section) => (
                 <RecoverySectionRow
                   key={section.category}
@@ -436,7 +432,7 @@ export function InsightsAIRecoveryDetail() {
                 />
               ))}
             </div>
-          </Surface>
+          </div>
 
           {ordersPayload ? (
             <Surface>
