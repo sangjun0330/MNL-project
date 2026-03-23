@@ -2,7 +2,7 @@ import type { ISODate } from "@/lib/date";
 import { isISODate, todayISO } from "@/lib/date";
 import { isAIRecoverySlot } from "@/lib/aiRecovery";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 export const dynamic = "force-dynamic";
 export const preferredRegion = ["iad1", "sfo1", "fra1"];
 
