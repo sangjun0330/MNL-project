@@ -58,9 +58,8 @@ function OrderCard({
               </DetailChip>
             ))}
           </div>
-          <div className="mt-3 break-keep text-[18px] font-bold leading-[1.55] tracking-[-0.03em] text-ios-text">{order.title}</div>
-          <p className="mt-2 break-keep text-[14px] leading-7 text-ios-text">{(order as any).body}</p>
-          <p className="mt-2 text-[13px] leading-6 text-ios-sub">{(order as any).reason}</p>
+          <p className="mt-3 break-keep text-[17px] font-semibold leading-[1.75] tracking-[-0.03em] text-ios-text">{(order as any).body}</p>
+          <p className="mt-2 break-keep text-[13px] leading-6 text-ios-sub">{(order as any).reason}</p>
         </div>
       </div>
     </DetailCard>

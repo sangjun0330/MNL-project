@@ -2,11 +2,14 @@ import type { ISODate } from "@/lib/date";
 import { isISODate, todayISO } from "@/lib/date";
 import { isAIRecoverySlot } from "@/lib/aiRecovery";
 
-export const runtime = "edge";
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const preferredRegion = ["iad1", "sfo1", "fra1"];
 
 export async function POST(req: Request) {
+  let userId: string | null = null;
+  let dateISO: ISODate = todayISO();
+  let slot: "wake" | "postShift" = "wake";
   try {
     const [{ jsonNoStore, sameOriginRequestError }, { readUserIdFromRequest }, { generateAIRecoverySession }] = await Promise.all([
       import("@/lib/server/requestSecurity"),
@@ -18,12 +21,12 @@ export async function POST(req: Request) {
     const originError = sameOriginRequestError(req);
     if (originError) return bad(403, originError);
 
-    const userId = await readUserIdFromRequest(req);
+    userId = await readUserIdFromRequest(req);
     if (!userId) return bad(401, "login_required");
 
     const body = await req.json().catch(() => null);
-    const dateISO = isISODate(body?.dateISO ?? "") ? (body.dateISO as ISODate) : todayISO();
-    const slot = isAIRecoverySlot(body?.slot) ? body.slot : "wake";
+    dateISO = isISODate(body?.dateISO ?? "") ? (body.dateISO as ISODate) : todayISO();
+    slot = isAIRecoverySlot(body?.slot) ? body.slot : "wake";
     const force = Boolean(body?.force);
     const payloadOverride = body?.state;
 
@@ -41,7 +44,26 @@ export async function POST(req: Request) {
     console.error("[AIRecovery] generate_failed", {
       message,
     });
-    const { jsonNoStore } = await import("@/lib/server/requestSecurity");
+    const [{ jsonNoStore }, { readAIRecoverySessionView }] = await Promise.all([
+      import("@/lib/server/requestSecurity"),
+      import("@/lib/server/aiRecovery"),
+    ]);
+    if (userId) {
+      try {
+        const recovered = await readAIRecoverySessionView({
+          userId,
+          dateISO,
+          slot,
+        });
+        if (recovered.session) {
+          return jsonNoStore({ ok: true, data: recovered });
+        }
+      } catch (recoveryError) {
+        console.error("[AIRecovery] generate_failed_recovery_read_failed", {
+          message: recoveryError instanceof Error ? recoveryError.message : String(recoveryError),
+        });
+      }
+    }
     if (message === "session_generation_limit_reached") {
       return jsonNoStore({ ok: false, error: message }, { status: 403 });
     }

@@ -74,6 +74,23 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     }
   };
 
+  const fetchSessionView = async (context: string) => {
+    const response = await fetch(`/api/insights/recovery/ai?date=${args.dateISO}&slot=${args.slot}`, {
+      method: "GET",
+      cache: "no-store",
+    });
+    const json = await readJson<{ ok?: boolean; error?: string; detail?: string | null; data?: SessionData }>(response);
+    if (!response.ok || !json?.ok || !json.data) {
+      console.error(`[AIRecovery] client_${context}_failed`, {
+        status: response.status,
+        error: json?.error ?? null,
+        detail: json?.detail ?? null,
+      });
+      throw new Error(String(json?.error ?? `http_${response.status}`));
+    }
+    return normalizeData(json.data);
+  };
+
   const load = async () => {
     const requestId = nextDataRequestId();
     if (!args.enabled) {
@@ -85,30 +102,18 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`/api/insights/recovery/ai?date=${args.dateISO}&slot=${args.slot}`, {
-        method: "GET",
-        cache: "no-store",
-      });
-      const json = await readJson<{ ok?: boolean; error?: string; detail?: string | null; data?: SessionData }>(response);
-      if (!response.ok || !json?.ok || !json.data) {
-        console.error("[AIRecovery] client_load_failed", {
-          status: response.status,
-          error: json?.error ?? null,
-          detail: json?.detail ?? null,
-        });
-        throw new Error(String(json?.error ?? `http_${response.status}`));
-      }
+      const nextData = await fetchSessionView("load");
       if (!isCurrentDataRequest(requestId)) return;
-      setData(normalizeData(json.data));
+      setData(nextData);
       const shouldAutoGenerate =
         args.autoGenerate !== false &&
-        json.data.gate.allowed &&
-        !json.data.session &&
-        json.data.quota.canGenerateSession &&
+        nextData?.gate.allowed &&
+        !nextData.session &&
+        nextData.quota.canGenerateSession &&
         !autoRequestedRef.current.has(key);
       if (shouldAutoGenerate) {
         autoRequestedRef.current.add(key);
-        await generateInternal(Boolean(json.data.session), key);
+        await generateInternal(Boolean(nextData.session), key);
       }
     } catch (nextError) {
       if (!isCurrentDataRequest(requestId)) return;
@@ -151,6 +156,13 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     } catch (nextError) {
       if (autoKey) autoRequestedRef.current.delete(autoKey);
       if (!isCurrentDataRequest(requestId)) return;
+      try {
+        const recovered = await fetchSessionView("generate_recover");
+        if (!isCurrentDataRequest(requestId)) return;
+        setData(recovered);
+        setError(null);
+        return;
+      } catch {}
       setFriendlyError((nextError as any)?.message ?? nextError ?? "ai_recovery_generate_failed");
     } finally {
       setGenerating(false);
@@ -186,6 +198,13 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       setData(normalizeData(json.data));
     } catch (nextError) {
       if (!isCurrentDataRequest(requestId)) return;
+      try {
+        const recovered = await fetchSessionView("orders_recover");
+        if (!isCurrentDataRequest(requestId)) return;
+        setData(recovered);
+        setError(null);
+        return;
+      } catch {}
       setFriendlyError((nextError as any)?.message ?? nextError ?? "ai_recovery_orders_failed");
     } finally {
       setSavingOrders(false);
