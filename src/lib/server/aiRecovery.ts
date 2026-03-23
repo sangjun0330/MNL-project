@@ -1,7 +1,7 @@
 import type { ISODate } from "@/lib/date";
 import { addDays, fromISODate, isISODate, toISODate, todayISO } from "@/lib/date";
 import {
-  AI_RECOVERY_MAX_CANDIDATES,
+  AI_RECOVERY_ORDER_COUNT,
   AI_RECOVERY_PROMPT_VERSION,
   filterCompletionIdsForOrders,
   getAIRecoverySlotDescription,
@@ -9,8 +9,6 @@ import {
   normalizeAIRecoveryLanguage,
   type AIRecoveryBrief,
   type AIRecoveryBriefSection,
-  type AIRecoveryCandidate,
-  type AIRecoveryCandidateEffort,
   type AIRecoveryContextMeta,
   type AIRecoveryEffort,
   type AIRecoveryGate,
@@ -19,8 +17,8 @@ import {
   type AIRecoveryLanguage,
   type AIRecoveryOpenAIMeta,
   type AIRecoveryOrder,
+  type AIRecoveryOrdersPayload,
   type AIRecoverySlot,
-  type AIRecoverySlotFit,
   type AIRecoverySlotPayload,
   type AIRecoveryStatus,
   type AIRecoveryTone,
@@ -30,6 +28,7 @@ import { getAIRecoveryModelForTier, type PlanTier } from "@/lib/billing/plans";
 import { countHealthRecordedDays, hasHealthInput } from "@/lib/healthRecords";
 import { computePersonalizationAccuracy, topFactors, type FactorKey } from "@/lib/insightsV2";
 import type { AppState, BioInputs, EmotionEntry } from "@/lib/model";
+import { buildRecoveryPhaseState } from "@/lib/recoveryPhases";
 import {
   buildPlannerContext,
   formatRelativeDutyKorean,
@@ -77,8 +76,7 @@ type RecoverySnapshot = {
 type OpenAIFlowResult = {
   status: AIRecoveryStatus;
   brief: AIRecoveryBrief;
-  orders: AIRecoveryOrder[];
-  selectionIds: string[];
+  orders: AIRecoveryOrdersPayload;
   reasoningEffort: AIRecoveryEffort;
   model: string;
   openaiMeta: AIRecoveryOpenAIMeta;
@@ -134,19 +132,6 @@ function asStringArray(value: unknown, maxItems = 8, maxLength = 80) {
   return out;
 }
 
-function normalizeTone(value: unknown, fallback: AIRecoveryTone): AIRecoveryTone {
-  return value === "stable" || value === "noti" || value === "warning" ? value : fallback;
-}
-
-function normalizeEffort(value: unknown, fallback: AIRecoveryCandidateEffort): AIRecoveryCandidateEffort {
-  return value === "low" || value === "medium" || value === "high" ? value : fallback;
-}
-
-function normalizeSlotFit(value: unknown, slot: AIRecoverySlot): AIRecoverySlotFit {
-  if (value === "wake" || value === "postShift" || value === "both") return value;
-  return slot;
-}
-
 function buildAsciiSlug(raw: string, fallback: string) {
   const normalized = raw
     .toLowerCase()
@@ -156,12 +141,8 @@ function buildAsciiSlug(raw: string, fallback: string) {
   return normalized || fallback;
 }
 
-function buildCandidateId(slot: AIRecoverySlot, source: string, index: number) {
-  return `aiRecovery:${slot}:candidate:${buildAsciiSlug(source, `candidate_${index + 1}`)}`;
-}
-
 function buildOrderId(slot: AIRecoverySlot, source: string, index: number) {
-  return `aiRecovery:${slot}:${buildAsciiSlug(source, `order_${index + 1}`)}`;
+  return `${slot}_${buildAsciiSlug(source, `order_${index + 1}`)}`;
 }
 
 function normalizedMood(bio: BioInputs | null | undefined, emotion: EmotionEntry | null | undefined) {
@@ -182,6 +163,14 @@ function shiftLabel(shift: Shift | null) {
 function readDailyPersistedRow(state: AppState, iso: ISODate) {
   const bio = state.bio?.[iso] ?? null;
   const emotion = state.emotions?.[iso] ?? null;
+  const workEventTags = Array.isArray(bio?.workEventTags)
+    ? bio.workEventTags
+        .map((item) => trimText(item, 40))
+        .filter(Boolean)
+        .slice(0, 8)
+    : [];
+  const workEventNote = trimText(bio?.workEventNote, 280);
+  const note = trimText(state.notes?.[iso], 280);
   return {
     dateISO: iso,
     sleepHours: bio?.sleepHours ?? null,
@@ -191,6 +180,9 @@ function readDailyPersistedRow(state: AppState, iso: ISODate) {
     caffeineMg: bio?.caffeineMg ?? null,
     mood: normalizedMood(bio, emotion),
     symptomSeverity: bio?.symptomSeverity ?? null,
+    workEventTags,
+    workEventNote: workEventNote || "-",
+    note: note || "-",
   };
 }
 
@@ -353,17 +345,489 @@ async function safeReadRecoverySlot(args: {
   }
 }
 
-function computeDefaultSelectionCount(args: {
-  tone: AIRecoveryTone;
-  candidateCount: number;
-  todayVitalScore: number | null;
-  sleepDebtHours: number;
-  nightStreak: number;
-}) {
-  if (args.candidateCount <= 0) return 0;
-  let desired = args.tone === "warning" ? 4 : args.tone === "noti" ? 3 : 2;
-  if ((args.todayVitalScore ?? 100) <= 45 || args.sleepDebtHours >= 6 || args.nightStreak >= 2) desired = 5;
-  return clamp(desired, 1, args.candidateCount);
+function average(values: number[]) {
+  if (values.length === 0) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function toFiniteNumbers(values: unknown[]) {
+  return values.flatMap((value) => (typeof value === "number" && Number.isFinite(value) ? [value] : []));
+}
+
+function round1(value: number) {
+  return Math.round(value * 10) / 10;
+}
+
+function listRecordedDates(state: AppState, endISO: ISODate) {
+  const dates = new Set<ISODate>();
+  for (const raw of new Set([...Object.keys(state.bio ?? {}), ...Object.keys(state.emotions ?? {})])) {
+    if (!isISODate(raw)) continue;
+    const iso = raw as ISODate;
+    if (iso > endISO) continue;
+    if (!hasHealthInput(state.bio?.[iso] ?? null, state.emotions?.[iso] ?? null)) continue;
+    dates.add(iso);
+  }
+  return [...dates].sort();
+}
+
+function countBy<T extends string>(values: T[]) {
+  const counts = new Map<T, number>();
+  for (const value of values) {
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function collectTopTags(tags: string[], limit = 3) {
+  return [...countBy(tags).entries()]
+    .sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])))
+    .slice(0, limit)
+    .map(([tag, count]) => ({ tag, count }));
+}
+
+function slotToRecoveryPhase(slot: AIRecoverySlot) {
+  return slot === "postShift" ? "after_work" : "start";
+}
+
+function normalizeBriefCategory(key: string | null | undefined): AIRecoveryBriefSection["category"] {
+  if (key === "sleep" || key === "shift" || key === "caffeine" || key === "menstrual" || key === "stress" || key === "activity") {
+    return key;
+  }
+  if (key === "mood") return "stress";
+  return "sleep";
+}
+
+function resolveSectionCategory(value: unknown, fallback: AIRecoveryBriefSection["category"]): AIRecoveryBriefSection["category"] {
+  if (value === "sleep" || value === "shift" || value === "caffeine" || value === "menstrual" || value === "stress" || value === "activity") {
+    return value;
+  }
+  return fallback;
+}
+
+function resolveSectionSeverity(value: unknown, fallback: AIRecoveryBriefSection["severity"]): AIRecoveryBriefSection["severity"] {
+  if (value === "info" || value === "caution" || value === "warning") return value;
+  return fallback;
+}
+
+function buildStartRecoveryPromptData(snapshot: RecoverySnapshot) {
+  const state = snapshot.state;
+  const recordedDates = listRecordedDates(state, snapshot.dateISO);
+  const firstRecorded = recordedDates[0] ?? snapshot.dateISO;
+  const allVitals = computeVitalsRange({ state, start: firstRecorded, end: snapshot.dateISO });
+  const vitalByISO = new Map(allVitals.map((item) => [item.dateISO, item] as const));
+  const recent7Dates = listHistoryDates(snapshot.dateISO, 7);
+  const prev7End = toISODate(addDays(fromISODate(snapshot.dateISO), -7));
+  const prev7Dates = listHistoryDates(prev7End, 7);
+  const todayBio = state.bio?.[snapshot.dateISO] ?? null;
+  const profile = normalizeProfileSettings(state.settings?.profile);
+  const recentVitalsRows = recent7Dates.map((iso) => {
+    const bio = state.bio?.[iso] ?? null;
+    const emotion = state.emotions?.[iso] ?? null;
+    const vital = vitalByISO.get(iso) ?? null;
+    const row: Record<string, unknown> = {
+      dateISO: iso,
+      shift: shiftLabel((state.schedule?.[iso] as Shift | undefined) ?? vital?.shift ?? "OFF"),
+      sleepHours: bio?.sleepHours ?? null,
+      napHours: bio?.napHours ?? null,
+      symptomSeverity: bio?.symptomSeverity ?? null,
+    };
+    if (iso !== snapshot.dateISO) {
+      row.stress = bio?.stress ?? null;
+      row.activity = bio?.activity ?? null;
+      row.mood = normalizedMood(bio, emotion) ?? "-";
+      row.caffeineMg = bio?.caffeineMg ?? null;
+      row.workEventTags = Array.isArray(bio?.workEventTags) ? bio?.workEventTags.filter(Boolean).slice(0, 8) : [];
+      row.workEventNote = trimText(bio?.workEventNote, 280) || "-";
+      row.note = trimText(state.notes?.[iso], 280) || "-";
+    }
+    return row;
+  });
+  const weeklyWorkRows = recent7Dates
+    .filter((iso) => iso !== snapshot.dateISO)
+    .map((iso) => ({
+      tags: Array.isArray(state.bio?.[iso]?.workEventTags) ? (state.bio?.[iso]?.workEventTags ?? []).filter(Boolean) : [],
+      workEventNote: trimText(state.bio?.[iso]?.workEventNote, 280),
+      note: trimText(state.notes?.[iso], 280),
+    }));
+  const weeklyEventTags = weeklyWorkRows.flatMap((row) => row.tags);
+  const weeklyNotes = weeklyWorkRows
+    .flatMap((row) => [row.workEventNote, row.note])
+    .filter(Boolean)
+    .slice(0, 3);
+  const recentScores = recent7Dates
+    .map((iso) => vitalByISO.get(iso))
+    .filter((vital): vital is DailyVital => Boolean(vital))
+    .map((vital) => vitalDisplayScore(vital));
+  const prevScores = prev7Dates
+    .map((iso) => vitalByISO.get(iso))
+    .filter((vital): vital is DailyVital => Boolean(vital))
+    .map((vital) => vitalDisplayScore(vital));
+  const historyVitals = recordedDates
+    .map((iso) => vitalByISO.get(iso))
+    .filter((vital): vital is DailyVital => Boolean(vital));
+  const topWorkTags = collectTopTags(
+    recordedDates.flatMap((iso) => (Array.isArray(state.bio?.[iso]?.workEventTags) ? (state.bio?.[iso]?.workEventTags ?? []).filter(Boolean) : [])),
+    5
+  );
+  const recurringSignals = [
+    {
+      label: "mood_low",
+      count: recordedDates.filter((iso) => {
+        const mood = normalizedMood(state.bio?.[iso] ?? null, state.emotions?.[iso] ?? null);
+        return mood != null && mood <= 2;
+      }).length,
+    },
+    {
+      label: "stress_high",
+      count: recordedDates.filter((iso) => (state.bio?.[iso]?.stress ?? -1) >= 2).length,
+    },
+    {
+      label: "caffeine_high",
+      count: recordedDates.filter((iso) => (state.bio?.[iso]?.caffeineMg ?? -1) >= 200).length,
+    },
+    {
+      label: "night_shift",
+      count: recordedDates.filter((iso) => ((state.schedule?.[iso] as Shift | undefined) ?? vitalByISO.get(iso)?.shift ?? "OFF") === "N").length,
+    },
+    {
+      label: "sleep_short",
+      count: recordedDates.filter((iso) => {
+        const value = state.bio?.[iso]?.sleepHours;
+        return typeof value === "number" && value < 6;
+      }).length,
+    },
+  ]
+    .filter((item) => item.count > 0)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 4);
+  return {
+    language: snapshot.language,
+    dateISO: snapshot.dateISO,
+    phase: {
+      id: "start",
+      title: "오늘 시작 회복",
+      purpose: "전날 기록과 오늘 수면만 기준으로 하루 시작 회복 방향을 정합니다.",
+      todayInputPolicy: "오늘은 수면만 포함하고, 같은 날 스트레스·카페인·활동·기분·근무메모는 의도적으로 제외했습니다.",
+    },
+    menstrualTrackingEnabled: Boolean(state.settings?.menstrual?.enabled),
+    shift: {
+      today: shiftLabel(snapshot.todayShift),
+      next: snapshot.plannerContext.nextDuty ? shiftLabel(snapshot.plannerContext.nextDuty) : null,
+    },
+    today: {
+      sleepHours: todayBio?.sleepHours ?? null,
+      napHours: todayBio?.napHours ?? null,
+      symptomSeverity: todayBio?.symptomSeverity ?? null,
+      menstrualLabel: snapshot.todayVital?.menstrual?.label ?? null,
+      menstrualTracking: Boolean(state.settings?.menstrual?.enabled),
+      sleepDebtHours: round1(snapshot.sleepDebtHours),
+      nightStreak: snapshot.nightStreak,
+    },
+    weekly: {
+      avgVital7: Math.round(average(recentScores) ?? 0),
+      avgVitalPrev7: Math.round(average(prevScores) ?? 0),
+      recordsIn7Days: recent7Dates.filter((iso) => hasHealthInput(state.bio?.[iso] ?? null, state.emotions?.[iso] ?? null)).length,
+      workEvents: {
+        daysWithEvents: weeklyWorkRows.filter((row) => row.tags.length > 0 || row.workEventNote || row.note).length,
+        topTags: collectTopTags(weeklyEventTags, 3),
+        notes: weeklyNotes,
+      },
+      recentVitals7: recentVitalsRows,
+    },
+    profile: {
+      chronotype: profile.chronotype,
+      caffeineSensitivity: profile.caffeineSensitivity,
+    },
+    plannerContext: {
+      focusFactor: snapshot.plannerContext.focusFactor,
+      primaryAction: snapshot.plannerContext.primaryAction,
+      avoidAction: snapshot.plannerContext.avoidAction,
+      nextDuty: snapshot.plannerContext.nextDuty,
+      nextDutyDate: snapshot.plannerContext.nextDutyDate,
+      plannerTone: snapshot.plannerContext.plannerTone,
+      ordersTop3: snapshot.plannerContext.ordersTop3,
+    },
+    history: {
+      totalRecords: recordedDates.length,
+      firstRecord: recordedDates[0] ?? null,
+      lastRecord: recordedDates.at(-1) ?? null,
+      avgVital: round1(average(historyVitals.map((vital) => vitalDisplayScore(vital))) ?? 0),
+      avgSleepHours: round1(
+        average(toFiniteNumbers(recordedDates.map((iso) => state.bio?.[iso]?.sleepHours))) ?? 0
+      ),
+      avgStress: round1(
+        average(toFiniteNumbers(recordedDates.map((iso) => state.bio?.[iso]?.stress))) ?? 0
+      ),
+      avgCaffeineMg: round1(
+        average(toFiniteNumbers(recordedDates.map((iso) => state.bio?.[iso]?.caffeineMg))) ?? 0
+      ),
+      avgMood: round1(
+        average(toFiniteNumbers(recordedDates.map((iso) => normalizedMood(state.bio?.[iso] ?? null, state.emotions?.[iso] ?? null)))) ?? 0
+      ),
+      nightShiftDays: recordedDates.filter(
+        (iso) => ((state.schedule?.[iso] as Shift | undefined) ?? vitalByISO.get(iso)?.shift ?? "OFF") === "N"
+      ).length,
+      offDays: recordedDates.filter(
+        (iso) => ((state.schedule?.[iso] as Shift | undefined) ?? vitalByISO.get(iso)?.shift ?? "OFF") === "OFF"
+      ).length,
+      topWorkTags,
+      recurringSignals,
+    },
+    recoveryThread: null,
+  };
+}
+
+function buildSectionSeverity(snapshot: RecoverySnapshot, category: AIRecoveryBriefSection["category"]): AIRecoveryBriefSection["severity"] {
+  if (category === "sleep") {
+    if ((snapshot.contextMeta.todaySleepHours ?? 0) < 6 || snapshot.sleepDebtHours >= 3) return "warning";
+    if ((snapshot.contextMeta.todaySleepHours ?? 0) < 7 || snapshot.sleepDebtHours >= 1.5) return "caution";
+    return "info";
+  }
+  if (category === "menstrual") {
+    if ((snapshot.state.bio?.[snapshot.dateISO]?.symptomSeverity ?? 0) >= 2) return "warning";
+    return snapshot.plannerContext.focusFactor?.key === "menstrual" ? "caution" : "info";
+  }
+  if (category === "shift") {
+    if (snapshot.nightStreak >= 2) return "warning";
+    return snapshot.plannerContext.nextDuty && snapshot.plannerContext.nextDuty !== "OFF" ? "caution" : "info";
+  }
+  if (category === "caffeine") {
+    return snapshot.topFactorRows.some((item) => item.key === "caffeine" && item.pct >= 0.18) ? "caution" : "info";
+  }
+  if (category === "stress") {
+    return snapshot.topFactorRows.some((item) => item.key === "stress" && item.pct >= 0.18) ? "caution" : "info";
+  }
+  return "info";
+}
+
+function buildSectionDescription(snapshot: RecoverySnapshot, data: ReturnType<typeof buildStartRecoveryPromptData>, category: AIRecoveryBriefSection["category"]) {
+  const nextDutyText = snapshot.plannerContext.nextDuty ? shiftLabel(snapshot.plannerContext.nextDuty) : "다음 근무";
+  const stressHighCount = data.history.recurringSignals.find((item) => item.label === "stress_high")?.count ?? 0;
+  const moodLowCount = data.history.recurringSignals.find((item) => item.label === "mood_low")?.count ?? 0;
+  const lowActivityCount = data.weekly.recentVitals7.filter((item) => typeof item.activity === "number" && item.activity <= 1).length;
+  switch (category) {
+    case "sleep":
+      return `오늘 수면이 ${data.today.sleepHours ?? 0}시간이고 남아 있는 수면부채가 ${data.today.sleepDebtHours}시간이라, 지난주보다 내려간 주간 배터리를 아침부터 덜 쓰는 편이 좋습니다.`;
+    case "shift":
+      return `오늘 일정이 ${shiftLabel(snapshot.todayShift)}이고 다음 근무가 ${nextDutyText}라, 최근 7일 배터리 ${data.weekly.avgVital7} 흐름을 흔들지 않도록 시작 기준을 먼저 잡는 편이 중요합니다.`;
+    case "caffeine":
+      return `최근 반복 패턴에 카페인 소모가 자주 잡혔고 평균 섭취량도 ${data.history.avgCaffeineMg}mg 수준이라, 오늘 첫 각성 전략을 가볍게 가져가는 편이 수면 흐름을 지키기 쉽습니다.`;
+    case "menstrual":
+      return `오늘은 ${data.today.menstrualLabel ?? "주기 흐름"} 구간으로 표시되고 증상 강도도 ${data.today.symptomSeverity ?? 0}으로 기록돼 있어, 따뜻함과 수분 쪽 시작 루틴이 회복 버퍼를 만들기 좋습니다.`;
+    case "stress":
+      return `최근 기록에서 스트레스가 높은 날이 ${stressHighCount}번 있었고 기분이 가라앉은 날도 ${moodLowCount}번 겹쳐, 시작 순간의 긴장을 낮추는 편이 하루 소모를 줄입니다.`;
+    case "activity":
+      return `최근 7일에 움직임이 낮은 날이 ${lowActivityCount}번 있었고 주간 배터리도 ${data.weekly.avgVital7}로 내려와 있어, 몸을 세게 쓰지 않는 짧은 순환 자극이 먼저 필요합니다.`;
+    default:
+      return `오늘 수면과 최근 배터리 흐름을 보면, 시작 리듬을 조용하게 고정하는 편이 회복에 유리합니다.`;
+  }
+}
+
+function buildSectionTips(snapshot: RecoverySnapshot, category: AIRecoveryBriefSection["category"]): [string, string] {
+  const workday = snapshot.todayShift !== "OFF" && snapshot.todayShift !== "VAC";
+  switch (category) {
+    case "sleep":
+      return [
+        "지금 물 한 컵을 마신 뒤 창가나 밝은 복도에서 3분만 서서 몸을 천천히 깨우세요.",
+        workday
+          ? "출근 전 씻고 나와 앉은 자리에서 2분만 목과 어깨를 천천히 풀어 수면 관성을 떼세요."
+          : "세수나 샤워를 마친 뒤 소파 대신 의자에 앉아 2분만 목과 어깨를 천천히 풀어 주세요.",
+      ];
+    case "shift":
+      return [
+        workday
+          ? "출근 준비를 시작할 때 가방 앞주머니에 물병을 넣고, 근무 시작 전 첫 휴식 타이밍 하나만 미리 정하세요."
+          : "오전 일정을 시작하기 전에 물병과 필요한 물건을 한곳에 모아 두고, 오늘 꼭 할 일 한 가지만 남기세요.",
+        workday
+          ? "집을 나서기 전 일정 앱이나 메모를 1분만 보고 오늘 꼭 필요한 일 한 가지를 정한 뒤 출발하세요."
+          : "오전 외출이나 집안일을 시작하기 전에 1분만 서서 동선을 정리하고, 무거운 일정은 한 칸 뒤로 미루세요.",
+      ];
+    case "caffeine":
+      return [
+        "지금 첫 음료를 고를 때 큰 컵 커피보다 물 한 컵이나 연한 음료를 먼저 마시고 20분 뒤 필요하면 결정하세요.",
+        "출근 전 카페인을 마신다면 오늘은 한 번만 정하고, 점심 이후 추가 섭취는 메모에 막아 두세요.",
+      ];
+    case "menstrual":
+      return [
+        "지금 물이나 미지근한 차를 먼저 마시고, 가능하면 배를 덮을 수 있는 얇은 겉옷을 바로 챙기세요.",
+        "세수나 샤워 뒤 2분 동안 허리와 골반 주변을 가볍게 늘려 몸을 부드럽게 깨우세요.",
+      ];
+    case "stress":
+      return [
+        "현관을 나서기 전 60초만 서서 숨을 길게 내쉬는 호흡을 6번 반복하고, 첫 업무 한 가지를 머릿속으로 정하세요.",
+        workday
+          ? "출근 전 이동 중에는 메신저를 닫고, 엘리베이터나 복도에서 어깨를 세 번 천천히 내리세요."
+          : "오전 할 일을 시작하기 전 휴대폰 알림을 10분만 끄고, 의자에서 어깨를 세 번 천천히 내리세요.",
+      ];
+    case "activity":
+      return [
+        "양치 후 제자리에서 2분만 걷거나 발목을 번갈아 들어 혈액순환을 먼저 올리세요.",
+        "집을 나서기 전 문 옆에서 종아리와 가슴을 30초씩 늘려 몸이 굳지 않게 시작하세요.",
+      ];
+    default:
+      return [
+        "지금 물 한 컵을 먼저 마신 뒤 1분만 숨을 길게 내쉬며 속도를 늦추세요.",
+        "앉은 자리에서 2분만 목과 어깨를 풀고, 오늘 첫 일정 하나만 정한 뒤 움직이세요.",
+      ];
+  }
+}
+
+function buildFallbackCompoundAlert(snapshot: RecoverySnapshot, data: ReturnType<typeof buildStartRecoveryPromptData>) {
+  const factors: string[] = [];
+  if ((data.today.sleepHours ?? 0) < 6.5) factors.push("수면 압박");
+  if (data.today.sleepDebtHours >= 2.5) factors.push("수면부채");
+  if (data.weekly.avgVitalPrev7 - data.weekly.avgVital7 >= 5) factors.push("주간 배터리 하락");
+  if ((data.today.symptomSeverity ?? 0) >= 2) factors.push("증상 강도");
+  if (snapshot.nightStreak >= 2) factors.push("야간 연속 근무");
+  if (factors.length < 2) return null;
+  return {
+    factors: factors.slice(0, 3),
+    message:
+      factors.includes("증상 강도") || factors.includes("야간 연속 근무")
+        ? "오늘 시작은 속도를 올리기보다 자극과 소모를 먼저 낮추는 쪽이 안전합니다."
+        : "오늘은 회복 버퍼를 먼저 만들어 두는 편이 하루 전체 페이스를 지키기 쉽습니다.",
+  };
+}
+
+function buildFallbackSections(snapshot: RecoverySnapshot, data: ReturnType<typeof buildStartRecoveryPromptData>): AIRecoveryBriefSection[] {
+  const ordered = [
+    normalizeBriefCategory(snapshot.plannerContext.focusFactor?.key),
+    "sleep",
+    snapshot.plannerContext.nextDuty ? "shift" : "stress",
+    data.menstrualTrackingEnabled ? "menstrual" : "activity",
+    "caffeine",
+    "stress",
+    "activity",
+  ] as AIRecoveryBriefSection["category"][];
+  const seen = new Set<string>();
+  const categories = ordered.filter((category) => {
+    if (seen.has(category)) return false;
+    seen.add(category);
+    return true;
+  });
+  return categories.slice(0, 3).map((category) => ({
+    category,
+    severity: buildSectionSeverity(snapshot, category),
+    title:
+      category === "sleep"
+        ? "아침 수면 전환"
+        : category === "shift"
+          ? "다음 근무 버퍼"
+          : category === "caffeine"
+            ? "첫 각성 강도"
+            : category === "menstrual"
+              ? "따뜻한 완화 시작"
+              : category === "stress"
+                ? "긴장 낮추기"
+                : "짧은 순환 깨우기",
+    description: buildSectionDescription(snapshot, data, category),
+    tips: buildSectionTips(snapshot, category),
+  }));
+}
+
+function buildFallbackBrief(snapshot: RecoverySnapshot): AIRecoveryBrief {
+  const data = buildStartRecoveryPromptData(snapshot);
+  const focusLine = snapshot.plannerContext.primaryAction ?? "오늘은 아침 자극을 낮추는 쪽으로 시작하세요.";
+  return {
+    headline:
+      snapshot.slot === "wake"
+        ? `${focusLine}`
+        : "저녁에는 자극을 줄이고 회복 모드로 천천히 전환하세요.",
+    compoundAlert: buildFallbackCompoundAlert(snapshot, data),
+    sections: buildFallbackSections(snapshot, data),
+    weeklySummary: {
+      avgBattery: data.weekly.avgVital7,
+      prevAvgBattery: data.weekly.avgVitalPrev7,
+      topDrains: snapshot.topFactorRows.slice(0, 3).map((item) => ({ label: item.label, pct: round1(item.pct) })),
+      personalInsight:
+        snapshot.plannerContext.focusFactor?.label != null
+          ? `최근 흐름에서는 ${snapshot.plannerContext.focusFactor.label} 쪽 소모가 반복될수록 배터리가 빨리 내려가, 시작 10분을 조용하게 쓰는 날이 더 안정적입니다.`
+          : "최근 흐름에서는 아침 첫 10분을 조용하게 쓰는 날이 배터리 낭비를 덜 만들었습니다.",
+      nextWeekPreview: snapshot.plannerContext.nextDutyDate
+        ? `${formatRelativeDutyKorean(snapshot.plannerContext.nextDutyDate, snapshot.dateISO)} ${shiftLabel(snapshot.plannerContext.nextDuty)} 대비로 오늘 시작 루틴을 가볍게 고정해 두면 다음 리듬 전환이 덜 거칠어집니다.`
+        : "다음 근무가 가까워질수록 오늘처럼 시작 루틴을 짧게 고정하는 편이 배터리 하락을 막기 쉽습니다.",
+    },
+  };
+}
+
+function buildFallbackOrders(snapshot: RecoverySnapshot): AIRecoveryOrdersPayload {
+  const data = buildStartRecoveryPromptData(snapshot);
+  const focusCategory = normalizeBriefCategory(snapshot.plannerContext.focusFactor?.key);
+  const workday = snapshot.todayShift !== "OFF" && snapshot.todayShift !== "VAC";
+  const items: AIRecoveryOrder[] = [
+    focusCategory === "menstrual"
+      ? {
+          id: buildOrderId(snapshot.slot, "warm_start", 0),
+          title: "따뜻한 시작 루틴",
+          body: "지금 물이나 미지근한 차를 먼저 마시고, 씻은 뒤 2분만 허리와 골반 주변을 천천히 풀어 주세요.",
+          when: "지금",
+          reason: `오늘은 ${data.today.menstrualLabel ?? "주기 흐름"} 구간이고 증상 강도도 ${data.today.symptomSeverity ?? 0}으로 기록돼 있어, 따뜻함과 수분으로 자극을 낮추는 시작이 회복 버퍼를 만들기 좋습니다.`,
+          chips: ["온기", "수분"],
+        }
+      : {
+          id: buildOrderId(snapshot.slot, "light_wake_up", 0),
+          title: "빛으로 몸 깨우기",
+          body: "지금 물 한 컵을 마신 뒤 창가나 밝은 복도에서 3분만 서서 몸을 천천히 깨우세요.",
+          when: "지금",
+          reason: `오늘 수면은 ${data.today.sleepHours ?? 0}시간이지만 수면부채가 ${data.today.sleepDebtHours}시간 남아 있어, 강한 자극보다 부드러운 각성 전환이 집중력을 지키기 쉽습니다.`,
+          chips: ["빛", "수분"],
+        },
+    {
+      id: buildOrderId(snapshot.slot, "short_mobility", 1),
+      title: "2분 순환 깨우기",
+      body: "양치나 세수 뒤 제자리에서 2분만 걷거나 발목을 번갈아 들어 몸의 순환을 먼저 올리세요.",
+      when: workday ? "지금" : "오전 중",
+      reason: `최근 7일에 움직임이 낮은 날이 ${data.weekly.recentVitals7.filter((item) => typeof item.activity === "number" && item.activity <= 1).length}번 있었고 주간 배터리도 ${data.weekly.avgVital7}로 내려와 있어, 짧은 움직임이 회복 스위치를 켜는 데 유리합니다.`,
+      chips: ["움직임"],
+    },
+    {
+      id: buildOrderId(snapshot.slot, "one_priority", 2),
+      title: workday ? "출근 전 한 가지 기준" : "오전 한 가지 기준",
+      body: workday
+        ? "출근 준비를 시작할 때 일정 앱이나 메모를 1분만 보고, 오늘 꼭 필요한 일 한 가지만 정한 뒤 집을 나서세요."
+        : "오전 일정을 시작하기 전에 메모를 1분만 보고, 오늘 꼭 끝낼 일 한 가지만 남겨 두세요.",
+      when: workday ? "출근 전" : "오후 전",
+      reason: `다음 근무가 ${snapshot.plannerContext.nextDuty ? shiftLabel(snapshot.plannerContext.nextDuty) : "예정된 일정"}이고 최근 배터리 흐름도 지난주보다 낮아, 시작 단계에서 해야 할 일을 줄여 두는 편이 과소모를 막기 쉽습니다.`,
+      chips: ["우선순위", "안전"],
+    },
+    {
+      id: buildOrderId(snapshot.slot, "micro_reset", 3),
+      title: workday ? "근무 중 60초 리셋" : "오전 60초 리셋",
+      body: workday
+        ? "근무 중 첫 숨 고를 틈이 오면 벽이나 의자 옆에 서서 60초만 숨을 길게 내쉬고 어깨를 세 번 천천히 내리세요."
+        : "오전 중 한 번은 의자에서 일어나 60초만 숨을 길게 내쉬고 어깨를 세 번 천천히 내리세요.",
+      when: workday ? "근무 중" : "저녁 전",
+      reason: `최근 기록에서 스트레스 높은 날이 ${data.history.recurringSignals.find((item) => item.label === "stress_high")?.count ?? 0}번 있었고 기분 저하도 반복돼, 짧은 감압 신호를 중간에 넣는 편이 소진을 늦춥니다.`,
+      chips: ["리셋"],
+    },
+  ];
+  return {
+    title: "오늘의 오더",
+    headline: snapshot.plannerContext.primaryAction ?? "자극을 낮추는 가벼운 시작부터 잡아주세요.",
+    summary: "오늘 수면, 주간 배터리 흐름, 반복 소모 패턴을 함께 보면 아침에 마찰이 낮은 네 가지 행동부터 고르는 편이 맞습니다.",
+    items: items.slice(0, AI_RECOVERY_ORDER_COUNT),
+  };
+}
+
+function buildFallbackFlow(snapshot: RecoverySnapshot, model: string): OpenAIFlowResult {
+  return {
+    status: "ready",
+    brief: buildFallbackBrief(snapshot),
+    orders: buildFallbackOrders(snapshot),
+    reasoningEffort: "low",
+    model,
+    openaiMeta: {
+      briefResponseId: null,
+      ordersResponseId: null,
+      usage: {
+        brief: null,
+        orders: null,
+        total: null,
+      },
+      fallbackReason: "wake_only_prompt_contract",
+      gatewayProfile: "med_safety_shared",
+    },
+  };
 }
 
 function resolveGenerationLimit(tier: PlanTier | null | undefined): AIRecoveryGenerationCounts {
@@ -374,6 +838,7 @@ function resolveGenerationLimit(tier: PlanTier | null | undefined): AIRecoveryGe
 
 function readGenerationCounts(session: AIRecoverySlotPayload | null | undefined): AIRecoveryGenerationCounts {
   if (!session) return { brief: 0, orders: 0 };
+  if (session.promptVersion !== AI_RECOVERY_PROMPT_VERSION) return { brief: 0, orders: 0 };
   const raw = isRecord((session as { generationCounts?: unknown }).generationCounts)
     ? ((session as { generationCounts?: Record<string, unknown> }).generationCounts ?? {})
     : null;
@@ -413,190 +878,6 @@ function resolveReasoningEffort(model: string, kind: "brief" | "orders"): AIReco
   return "low";
 }
 
-function getCandidateTemplate(key: string, slot: AIRecoverySlot) {
-  const wake = slot === "wake";
-  const common = {
-    effort: "low" as const,
-    minutes: wake ? 8 : 15,
-    slotFit: slot,
-  };
-  switch (key) {
-    case "sleep":
-      return {
-        ...common,
-        title: wake ? "수면 회복 앵커" : "수면 모드 복구",
-        why: wake ? "수면부채와 리듬 흔들림이 오늘 집중력을 먼저 떨어뜨릴 수 있습니다." : "퇴근 후 각성 잔존을 빨리 낮춰야 실제 회복 수면으로 이어집니다.",
-        expectedBenefit: wake ? "근무 초반 집중력과 피로 버퍼를 조금 더 확보합니다." : "잠들기 전 긴장을 낮추고 다음 듀티까지 회복 여유를 만듭니다.",
-      };
-    case "stress":
-      return {
-        ...common,
-        title: wake ? "60초 감압 리셋" : "퇴근 후 긴장 해제",
-        why: "스트레스 부하가 높아 과소모를 막는 짧은 감압 루틴이 필요합니다.",
-        expectedBenefit: "실수 가능성을 낮추고 에너지 분산을 줄입니다.",
-      };
-    case "activity":
-      return {
-        ...common,
-        title: wake ? "가벼운 순환 깨우기" : "가벼운 회복 걷기",
-        why: "활동 리듬이 내려가 있어 아주 짧은 움직임으로 회복 스위치를 켜는 편이 유리합니다.",
-        expectedBenefit: "몸이 덜 무겁고 멘탈 회복 속도가 안정됩니다.",
-      };
-    case "caffeine":
-      return {
-        ...common,
-        title: wake ? "카페인 컷오프 정리" : "저녁 카페인 종료",
-        why: "카페인 잔존이 수면 회복을 방해할 가능성이 있습니다.",
-        expectedBenefit: "필요한 각성만 쓰고 늦은 시간 회복 방해를 줄입니다.",
-      };
-    case "shift":
-      return {
-        ...common,
-        title: wake ? "교대 리듬 준비" : "다음 듀티 버퍼 준비",
-        why: "교대 스케줄 영향이 커서 오늘 리듬을 작은 기준점으로 잡는 것이 중요합니다.",
-        expectedBenefit: "근무 전환 피로를 줄이고 다음 듀티 적응을 돕습니다.",
-      };
-    case "menstrual":
-      return {
-        ...common,
-        title: wake ? "따뜻한 완화 루틴" : "증상 완화 루틴",
-        why: "주기/증상 영향이 회복 체감에 반영되고 있습니다.",
-        expectedBenefit: "불편감이 덜 올라오고 회복 루틴을 유지하기 쉬워집니다.",
-      };
-    case "mood":
-      return {
-        ...common,
-        title: wake ? "멘탈 배터리 보호" : "감정 부하 낮추기",
-        why: "기분 저하가 에너지 회복 체감과 업무 페이스에 함께 영향을 줍니다.",
-        expectedBenefit: "오늘 할 일을 덜 버겁게 느끼고 페이스를 지키기 쉽습니다.",
-      };
-    default:
-      return {
-        ...common,
-        title: wake ? "회복 루틴 고정" : "저자극 회복 루틴",
-        why: "오늘 회복 우선순위를 한 가지라도 고정하는 편이 컨디션 유지에 유리합니다.",
-        expectedBenefit: "에너지 낭비를 줄이고 회복 흐름을 만듭니다.",
-      };
-  }
-}
-
-function buildFallbackCandidates(snapshot: RecoverySnapshot) {
-  const sources = snapshot.topFactorRows.length
-    ? snapshot.topFactorRows.map((item) => item.key)
-    : (["sleep", "stress", "shift"] as FactorKey[]);
-  return sources.slice(0, AI_RECOVERY_MAX_CANDIDATES).map((key, index) => {
-    const template = getCandidateTemplate(key, snapshot.slot);
-    return {
-      id: buildCandidateId(snapshot.slot, key, index),
-      title: template.title,
-      why: template.why,
-      expectedBenefit: template.expectedBenefit,
-      effort: template.effort,
-      minutes: template.minutes,
-      slotFit: template.slotFit,
-      driverRefs: [key],
-    } satisfies AIRecoveryCandidate;
-  });
-}
-
-function buildFallbackSections(snapshot: RecoverySnapshot): AIRecoveryBriefSection[] {
-  const focusText =
-    snapshot.plannerContext.primaryAction ??
-    (snapshot.slot === "wake"
-      ? "오늘은 출근 전 회복 기준점을 하나 먼저 잡아 두는 편이 안전합니다."
-      : "오늘은 퇴근 후 자극을 줄이고 회복 모드 전환을 빨리 시작하는 편이 좋습니다.");
-  const signalText =
-    snapshot.plannerContext.avoidAction ??
-    (snapshot.sleepDebtHours >= 3
-      ? `수면부채 ${Math.round(snapshot.sleepDebtHours * 10) / 10}h가 누적되어 있어 무리한 일정 추가는 피하는 편이 좋습니다.`
-      : "피로 신호가 커지기 전에 짧은 리셋과 저자극 루틴을 먼저 확보하는 편이 좋습니다.");
-  const weeklyText = snapshot.topFactorRows.length
-    ? `최근 2주 흐름에서는 ${snapshot.topFactorRows
-        .slice(0, 2)
-        .map((item) => item.label)
-        .join(", ")} 영향이 상대적으로 크게 보였습니다.`
-    : "최근 2주 흐름은 데이터가 충분하지 않아 보수적으로 해석해야 합니다.";
-
-  return [
-    { key: "focus", title: "회복 포커스", body: focusText },
-    { key: "signal", title: "주의 신호", body: signalText },
-    { key: "weekly", title: "이번 주 흐름", body: weeklyText },
-  ];
-}
-
-function buildFallbackBrief(snapshot: RecoverySnapshot): AIRecoveryBrief {
-  const candidates = buildFallbackCandidates(snapshot);
-  const count = computeDefaultSelectionCount({
-    tone: snapshot.plannerContext.plannerTone,
-    candidateCount: candidates.length,
-    todayVitalScore: snapshot.todayDisplay,
-    sleepDebtHours: snapshot.sleepDebtHours,
-    nightStreak: snapshot.nightStreak,
-  });
-  return {
-    headline:
-      snapshot.slot === "wake"
-        ? snapshot.todayDisplay != null && snapshot.todayDisplay <= 45
-          ? "오늘 아침은 회복 우선으로 시작하는 편이 안전합니다."
-          : "오늘 아침은 회복 기준점을 먼저 잡아 두는 편이 좋습니다."
-        : snapshot.todayShift === "OFF" || snapshot.todayShift === "VAC"
-          ? "오늘 저녁은 자극을 줄이고 회복 흐름을 정리하는 편이 좋습니다."
-          : "퇴근 후에는 감압과 수면 보호를 먼저 가져가는 편이 좋습니다.",
-    summary:
-      snapshot.slot === "wake"
-        ? `오늘 수면 ${snapshot.contextMeta.todaySleepHours ?? "-"}시간과 최근 14일 흐름을 기준으로 보면 ${snapshot.plannerContext.focusFactor?.label ?? "회복 리듬"} 관리가 우선입니다. 근무 전에 짧고 확실한 회복 행동부터 고르는 편이 유리합니다.`
-        : `${snapshot.todayShift === "OFF" || snapshot.todayShift === "VAC" ? "저녁 회복" : "퇴근 후 회복"}에서는 ${snapshot.plannerContext.focusFactor?.label ?? "과소모 방지"}가 핵심입니다. 자극을 낮추고 다음 듀티까지 이어질 회복 루틴을 짧게 고르는 편이 좋습니다.`,
-    tone: snapshot.plannerContext.plannerTone,
-    topDrivers: snapshot.topFactorRows.slice(0, 4).map((item) => `${item.label} ${Math.round(item.pct * 100)}%`),
-    sections: buildFallbackSections(snapshot),
-    weeklyNote: snapshot.plannerContext.nextDutyDate
-      ? `${formatRelativeDutyKorean(snapshot.plannerContext.nextDutyDate, snapshot.dateISO)} ${shiftLabel(snapshot.plannerContext.nextDuty)} 대비로 회복 루틴을 가볍게 고정하는 편이 좋습니다.`
-      : "다음 근무 일정이 가까우면 수면과 자극 조절부터 먼저 챙기는 편이 좋습니다.",
-    candidateActions: candidates,
-    defaultSelectionIds: candidates.slice(0, count).map((item) => item.id),
-    dataGaps: [],
-  };
-}
-
-function buildFallbackSteps(slot: AIRecoverySlot, candidate: AIRecoveryCandidate) {
-  if (slot === "wake") {
-    return [
-      "물 1컵이나 물 5모금으로 몸을 먼저 깨웁니다.",
-      `${candidate.title}에 맞는 짧은 행동을 ${Math.max(3, Math.min(candidate.minutes, 15))}분 안에 끝냅니다.`,
-      "출근 전에는 오늘 꼭 지킬 한 가지 기준만 남깁니다.",
-    ];
-  }
-  return [
-    "집에 도착하면 조도와 소음을 먼저 낮춥니다.",
-    `${candidate.title}에 맞는 회복 행동을 ${Math.max(5, Math.min(candidate.minutes, 30))}분 안에 끝냅니다.`,
-    "다음 수면이나 다음 듀티 준비를 위해 화면/카페인 자극을 더 늘리지 않습니다.",
-  ];
-}
-
-function buildFallbackOrders(slot: AIRecoverySlot, candidates: AIRecoveryCandidate[], snapshot: RecoverySnapshot) {
-  return candidates.map((candidate, index) => ({
-    id: buildOrderId(slot, candidate.title || candidate.id, index),
-    candidateId: candidate.id,
-    title: candidate.title,
-    whyNow: candidate.why,
-    executionWindow:
-      slot === "wake"
-        ? "기상 후 30분 안"
-        : snapshot.todayShift === "OFF" || snapshot.todayShift === "VAC"
-          ? "저녁 루틴 시작 전"
-          : "퇴근 후 2시간 안",
-    steps: buildFallbackSteps(slot, candidate).slice(0, slot === "wake" ? 3 : 3),
-    successCheck: slot === "wake" ? "출근 전 한 가지 회복 행동을 실제로 끝냈습니다." : "잠들기 전 자극을 낮춘 회복 행동을 실제로 끝냈습니다.",
-    avoid: slot === "wake" ? "아침부터 과한 목표를 추가하지 않습니다." : "퇴근 후 화면, 카페인, 추가 일정으로 각성을 다시 올리지 않습니다.",
-    workHint:
-      slot === "wake"
-        ? "근무 초반 페이스를 낮추고 마이크로 브레이크를 더 믿어도 됩니다."
-        : "다음 듀티를 위해 오늘은 완벽한 루틴보다 자극 감소가 우선입니다.",
-    minutes: clamp(candidate.minutes, slot === "wake" ? 3 : 5, slot === "wake" ? 15 : 30),
-    safetyNote: "생활 회복용 오더입니다. 증상이 심하거나 업무 안전이 흔들리면 현장 판단과 정식 도움 요청을 우선합니다.",
-  })) satisfies AIRecoveryOrder[];
-}
-
 function publicErrorMessage(code: string | null) {
   if (!code) return null;
   if (code === "plan_upgrade_required") return "Plus 또는 Pro에서 사용할 수 있어요.";
@@ -605,61 +886,6 @@ function publicErrorMessage(code: string | null) {
   if (code === "wake_sleep_required") return "오늘 수면을 먼저 기록해 주세요.";
   if (code === "slot_not_available") return "아직 이 시간대가 아니에요.";
   return "지금은 만들 수 없어요.";
-}
-
-function getSelectionIds(brief: AIRecoveryBrief, requestedIds?: string[]) {
-  const allowed = new Set(brief.candidateActions.map((item) => item.id));
-  const input = Array.isArray(requestedIds) ? requestedIds : brief.defaultSelectionIds;
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const item of input) {
-    if (typeof item !== "string") continue;
-    const trimmed = item.trim();
-    if (!trimmed || !allowed.has(trimmed) || seen.has(trimmed)) continue;
-    seen.add(trimmed);
-    out.push(trimmed);
-    if (out.length >= AI_RECOVERY_MAX_CANDIDATES) break;
-  }
-  return out;
-}
-
-function matchesCandidateAlias(candidateId: string, rawValue: unknown) {
-  const trimmed = trimText(rawValue, 140);
-  if (!trimmed) return false;
-  if (candidateId === trimmed) return true;
-  const slug = buildAsciiSlug(trimmed, "");
-  return Boolean(slug) && candidateId.endsWith(`:${slug}`);
-}
-
-function resolveCandidateIdAlias(candidates: AIRecoveryCandidate[], rawValue: unknown) {
-  for (const candidate of candidates) {
-    if (matchesCandidateAlias(candidate.id, rawValue)) return candidate.id;
-  }
-  return null;
-}
-
-function parseCandidateRecord(raw: unknown, slot: AIRecoverySlot, index: number): AIRecoveryCandidate | null {
-  if (!isRecord(raw)) return null;
-  const title = trimText(raw.title, 80);
-  const why = trimText(raw.why, 220);
-  const expectedBenefit = trimText(raw.expectedBenefit, 220);
-  if (!title || !why || !expectedBenefit) return null;
-  const driverRefs = asStringArray(raw.driverRefs, 4, 40);
-  const rawId = trimText(raw.id, 48) || title;
-  return {
-    id: buildCandidateId(slot, rawId, index),
-    title,
-    why,
-    expectedBenefit,
-    effort: normalizeEffort(raw.effort, "low"),
-    minutes: clamp(Math.round(Number(raw.minutes) || (slot === "wake" ? 8 : 15)), slot === "wake" ? 3 : 5, slot === "wake" ? 15 : 30),
-    slotFit: normalizeSlotFit(raw.slotFit, slot),
-    driverRefs: driverRefs.length ? driverRefs : ["general"],
-  };
-}
-
-function isCandidate(value: AIRecoveryCandidate | null): value is AIRecoveryCandidate {
-  return Boolean(value);
 }
 
 function parseLooseJson(text: string) {
@@ -696,103 +922,82 @@ function parseLooseJson(text: string) {
 function parseBriefJson(text: string, snapshot: RecoverySnapshot): AIRecoveryBrief {
   const parsed = parseLooseJson(text);
   if (!isRecord(parsed)) throw new Error("brief_not_object");
-
-  const candidateActions = Array.isArray(parsed.candidateActions)
-    ? parsed.candidateActions.map((item, index) => parseCandidateRecord(item, snapshot.slot, index)).filter(isCandidate)
-    : [];
-  if (candidateActions.length === 0) throw new Error("brief_candidate_actions_empty");
-
   const sectionsSource = Array.isArray(parsed.sections) ? parsed.sections : [];
-  if (sectionsSource.length < 3) throw new Error("brief_sections_invalid");
-  const sectionTitles = ["회복 포커스", "주의 신호", "이번 주 흐름"] as const;
-  const sectionKeys: Array<AIRecoveryBriefSection["key"]> = ["focus", "signal", "weekly"];
-  const sections = sectionTitles.map((title, index) => {
-    const source = sectionsSource[index];
-    const body = trimText(isRecord(source) ? source.body : source, 320);
-    if (!body) throw new Error(`brief_section_body_missing_${index + 1}`);
+  if (sectionsSource.length < 2 || sectionsSource.length > 4) throw new Error("brief_sections_invalid");
+  const fallbackCategory = normalizeBriefCategory(snapshot.plannerContext.focusFactor?.key);
+  const sections = sectionsSource.map((source, index) => {
+    if (!isRecord(source)) throw new Error(`brief_section_invalid_${index + 1}`);
+    const title = trimText(source.title, 40);
+    const description = trimText(source.description, 240);
+    const tips = asStringArray(source.tips, 2, 160);
+    if (!title || !description || tips.length !== 2) throw new Error(`brief_section_invalid_${index + 1}`);
+    const firstFallback = index === 0 ? fallbackCategory : index === 1 ? "sleep" : "shift";
     return {
-      key: sectionKeys[index],
+      category: resolveSectionCategory(source.category, firstFallback),
+      severity: resolveSectionSeverity(source.severity, "info"),
       title,
-      body,
+      description,
+      tips: [tips[0]!, tips[1]!] as [string, string],
     };
   });
-
   const headline = trimText(parsed.headline, 120);
-  const summary = trimText(parsed.summary, 360);
-  const weeklyNote = trimText(parsed.weeklyNote, 240);
   if (!headline) throw new Error("brief_headline_missing");
-  if (!summary) throw new Error("brief_summary_missing");
-  if (!weeklyNote) throw new Error("brief_weekly_note_missing");
-
-  const brief: AIRecoveryBrief = {
+  const compoundAlert = (() => {
+    if (parsed.compoundAlert == null) return null;
+    if (!isRecord(parsed.compoundAlert)) throw new Error("brief_compound_alert_invalid");
+    const factors = asStringArray(parsed.compoundAlert.factors, 3, 60);
+    const message = trimText(parsed.compoundAlert.message, 200);
+    if (factors.length < 2 || !message) throw new Error("brief_compound_alert_invalid");
+    return { factors, message };
+  })();
+  const weeklySummarySource = isRecord(parsed.weeklySummary) ? parsed.weeklySummary : null;
+  if (!weeklySummarySource) throw new Error("brief_weekly_summary_missing");
+  const personalInsight = trimText(weeklySummarySource.personalInsight, 220);
+  const nextWeekPreview = trimText(weeklySummarySource.nextWeekPreview, 220);
+  if (!personalInsight || !nextWeekPreview) throw new Error("brief_weekly_summary_text_missing");
+  const avgBattery = Number(weeklySummarySource.avgBattery);
+  const prevAvgBattery = Number(weeklySummarySource.prevAvgBattery);
+  if (!Number.isFinite(avgBattery) || !Number.isFinite(prevAvgBattery)) throw new Error("brief_weekly_summary_numbers_invalid");
+  const topDrains = Array.isArray(weeklySummarySource.topDrains)
+    ? weeklySummarySource.topDrains
+        .map((item) => {
+          if (!isRecord(item)) return null;
+          const label = trimText(item.label, 40);
+          const pct = Number(item.pct);
+          if (!label || !Number.isFinite(pct)) return null;
+          return { label, pct };
+        })
+        .filter((item): item is { label: string; pct: number } => Boolean(item))
+        .slice(0, 3)
+    : [];
+  return {
     headline,
-    summary,
-    tone: normalizeTone(parsed.tone, snapshot.plannerContext.plannerTone),
-    topDrivers: asStringArray(parsed.topDrivers, 4, 64),
+    compoundAlert,
     sections,
-    weeklyNote,
-    candidateActions: candidateActions.slice(0, AI_RECOVERY_MAX_CANDIDATES),
-    defaultSelectionIds: [],
-    dataGaps: asStringArray(parsed.dataGaps, 8, 80),
+    weeklySummary: {
+      avgBattery: round1(avgBattery),
+      prevAvgBattery: round1(prevAvgBattery),
+      topDrains,
+      personalInsight,
+      nextWeekPreview,
+    },
   };
-
-  const count = computeDefaultSelectionCount({
-    tone: brief.tone,
-    candidateCount: brief.candidateActions.length,
-    todayVitalScore: snapshot.todayDisplay,
-    sleepDebtHours: snapshot.sleepDebtHours,
-    nightStreak: snapshot.nightStreak,
-  });
-  const requestedDefaultIds = asStringArray(parsed.defaultSelectionIds, AI_RECOVERY_MAX_CANDIDATES, 120);
-  const normalizedDefaultIds: string[] = [];
-  const seen = new Set<string>();
-  for (const requestedId of requestedDefaultIds) {
-    const resolvedId = resolveCandidateIdAlias(brief.candidateActions, requestedId);
-    if (!resolvedId || seen.has(resolvedId)) continue;
-    seen.add(resolvedId);
-    normalizedDefaultIds.push(resolvedId);
-    if (normalizedDefaultIds.length >= count) break;
-  }
-  brief.defaultSelectionIds = normalizedDefaultIds.length
-    ? normalizedDefaultIds
-    : brief.candidateActions.slice(0, count).map((item) => item.id);
-
-  return brief;
 }
 
-function parseOrderRecord(
-  raw: unknown,
-  slot: AIRecoverySlot,
-  selectedCandidates: AIRecoveryCandidate[],
-  index: number
-): AIRecoveryOrder | null {
+function parseOrderRecord(raw: unknown, slot: AIRecoverySlot, index: number): AIRecoveryOrder | null {
   if (!isRecord(raw)) return null;
   const title = trimText(raw.title, 80);
-  const whyNow = trimText(raw.whyNow, 220);
-  const executionWindow = trimText(raw.executionWindow, 120);
-  const successCheck = trimText(raw.successCheck, 160);
-  const avoid = trimText(raw.avoid, 160);
-  const workHint = trimText(raw.workHint, 160);
-  const safetyNote = trimText(raw.safetyNote, 160);
-  const candidateId = trimText(raw.candidateId, 140);
-  const resolvedCandidateId = resolveCandidateIdAlias(selectedCandidates, candidateId);
-  const steps = asStringArray(raw.steps, 4, 120).slice(0, 4);
-  const minutes = Number(raw.minutes);
-  if (!title || !whyNow || !executionWindow || !successCheck || !avoid || !workHint || !safetyNote || !resolvedCandidateId) return null;
-  if (steps.length < 2) return null;
-  if (!Number.isFinite(minutes)) return null;
+  const body = trimText(raw.body, 220);
+  const when = trimText(raw.when, 24);
+  const reason = trimText(raw.reason, 220);
+  if (!title || !body || !when || !reason) return null;
   return {
     id: buildOrderId(slot, trimText(raw.id, 48) || title, index),
-    candidateId: resolvedCandidateId,
     title,
-    whyNow,
-    executionWindow,
-    steps,
-    successCheck,
-    avoid,
-    workHint,
-    minutes: clamp(Math.round(minutes), slot === "wake" ? 3 : 5, slot === "wake" ? 15 : 30),
-    safetyNote,
+    body,
+    when,
+    reason,
+    chips: asStringArray(raw.chips, 3, 24),
   };
 }
 
@@ -800,15 +1005,24 @@ function isOrder(value: AIRecoveryOrder | null): value is AIRecoveryOrder {
   return Boolean(value);
 }
 
-function parseOrdersJson(text: string, slot: AIRecoverySlot, selectedCandidates: AIRecoveryCandidate[]): AIRecoveryOrder[] {
+function parseOrdersJson(text: string, slot: AIRecoverySlot): AIRecoveryOrdersPayload {
   const parsed = parseLooseJson(text);
-  const rawOrders: unknown[] | null = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.orders) ? parsed.orders : null;
-  if (!rawOrders) throw new Error("orders_not_array");
-  const out = rawOrders
-    .map((item: unknown, index: number) => parseOrderRecord(item, slot, selectedCandidates, index))
+  if (!isRecord(parsed)) throw new Error("orders_not_object");
+  const title = trimText(parsed.title, 80);
+  const headline = trimText(parsed.headline, 180);
+  const summary = trimText(parsed.summary, 220);
+  if (!title || !headline || !summary) throw new Error("orders_meta_missing");
+  const rawItems = Array.isArray(parsed.items) ? parsed.items : [];
+  const items = rawItems
+    .map((item: unknown, index: number) => parseOrderRecord(item, slot, index))
     .filter(isOrder);
-  if (out.length !== selectedCandidates.length) throw new Error("orders_count_mismatch");
-  return out;
+  if (items.length !== AI_RECOVERY_ORDER_COUNT) throw new Error("orders_count_mismatch");
+  return {
+    title,
+    headline,
+    summary,
+    items,
+  };
 }
 
 function buildBriefSchema() {
@@ -817,55 +1031,70 @@ function buildBriefSchema() {
     additionalProperties: false,
     properties: {
       headline: { type: "string" },
-      summary: { type: "string" },
-      tone: { type: "string", enum: ["stable", "noti", "warning"] },
-      topDrivers: {
-        type: "array",
-        items: { type: "string" },
+      compoundAlert: {
+        anyOf: [
+          { type: "null" },
+          {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              factors: {
+                type: "array",
+                items: { type: "string" },
+              },
+              message: { type: "string" },
+            },
+            required: ["factors", "message"],
+          },
+        ],
       },
       sections: {
         type: "array",
+        minItems: 2,
+        maxItems: 4,
         items: {
           type: "object",
           additionalProperties: false,
           properties: {
-            body: { type: "string" },
-          },
-          required: ["body"],
-        },
-      },
-      weeklyNote: { type: "string" },
-      candidateActions: {
-        type: "array",
-        items: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            id: { type: "string" },
+            category: { type: "string", enum: ["sleep", "shift", "caffeine", "menstrual", "stress", "activity"] },
+            severity: { type: "string", enum: ["info", "caution", "warning"] },
             title: { type: "string" },
-            why: { type: "string" },
-            expectedBenefit: { type: "string" },
-            effort: { type: "string", enum: ["low", "medium", "high"] },
-            minutes: { type: "number" },
-            slotFit: { type: "string", enum: ["wake", "postShift", "both"] },
-            driverRefs: {
+            description: { type: "string" },
+            tips: {
               type: "array",
+              minItems: 2,
+              maxItems: 2,
               items: { type: "string" },
             },
           },
-          required: ["id", "title", "why", "expectedBenefit", "effort", "minutes", "slotFit", "driverRefs"],
+          required: ["category", "severity", "title", "description", "tips"],
         },
       },
-      defaultSelectionIds: {
-        type: "array",
-        items: { type: "string" },
-      },
-      dataGaps: {
-        type: "array",
-        items: { type: "string" },
+      weeklySummary: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          avgBattery: { type: "number" },
+          prevAvgBattery: { type: "number" },
+          topDrains: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                label: { type: "string" },
+                pct: { type: "number" },
+              },
+              required: ["label", "pct"],
+            },
+          },
+          personalInsight: { type: "string" },
+          nextWeekPreview: { type: "string" },
+        },
+        required: ["avgBattery", "prevAvgBattery", "topDrains", "personalInsight", "nextWeekPreview"],
       },
     },
-    required: ["headline", "summary", "tone", "topDrivers", "sections", "weeklyNote", "candidateActions", "defaultSelectionIds", "dataGaps"],
+    required: ["headline", "compoundAlert", "sections", "weeklySummary"],
   };
 }
 
@@ -874,177 +1103,162 @@ function buildOrdersSchema() {
     type: "object",
     additionalProperties: false,
     properties: {
-      orders: {
+      title: { type: "string" },
+      headline: { type: "string" },
+      summary: { type: "string" },
+      items: {
         type: "array",
+        minItems: AI_RECOVERY_ORDER_COUNT,
+        maxItems: AI_RECOVERY_ORDER_COUNT,
         items: {
           type: "object",
           additionalProperties: false,
           properties: {
             id: { type: "string" },
-            candidateId: { type: "string" },
             title: { type: "string" },
-            whyNow: { type: "string" },
-            executionWindow: { type: "string" },
-            steps: {
+            body: { type: "string" },
+            when: { type: "string" },
+            reason: { type: "string" },
+            chips: {
               type: "array",
               items: { type: "string" },
             },
-            successCheck: { type: "string" },
-            avoid: { type: "string" },
-            workHint: { type: "string" },
-            minutes: { type: "number" },
-            safetyNote: { type: "string" },
           },
-          required: ["id", "candidateId", "title", "whyNow", "executionWindow", "steps", "successCheck", "avoid", "workHint", "minutes", "safetyNote"],
+          required: ["id", "title", "body", "when", "reason"],
         },
       },
     },
-    required: ["orders"],
+    required: ["title", "headline", "summary", "items"],
   };
 }
 
-function buildBriefDeveloperPrompt(slot: AIRecoverySlot) {
-  return [
-    "너는 간호사용 비의료 회복 코치다.",
-    "이 기능은 생활 회복 + 비의료 업무조언만 제공한다.",
-    "진단, 약물, 처치, 검사 지시를 절대 하지 마라.",
-    "제공된 숫자와 사실만 사용하고, 없는 데이터를 추정하지 마라.",
-    "개인 메모, 일정 노트, 근무 이벤트 텍스트 같은 사생활 정보는 입력에 포함되지 않는다. 건강 데이터와 시스템 지표만 해석하라.",
-    "근무 지속 가능성과 회복 실행 가능성을 우선한다.",
-    `현재 슬롯은 ${slot === "wake" ? "wake(기상 후)" : "postShift(퇴근 후/저녁 회복)"}다.`,
-    "사용자가 고를 수 있는 실행 후보를 최대 5개 제안하라.",
-    "모든 문장은 짧고 단순하게 작성하라.",
-    "headline은 1문장, 28자 안팎으로 작성하라.",
-    "summary는 2문장으로 끝내고 길게 설명하지 마라.",
-    "sections의 body는 각각 1~2문장만 작성하라.",
-    "weeklyNote는 짧은 한 줄만 작성하라.",
-    "candidate why와 expectedBenefit도 각각 1문장만 작성하라.",
-    "sections는 정확히 3개여야 하며 body만 채운다. 제목은 시스템이 고정한다.",
-    "candidateActions.id는 ASCII slug로 작성한다.",
-    "defaultSelectionIds는 candidateActions 안에 있는 id만 사용한다.",
-    "출력은 반드시 JSON schema를 정확히 따른다.",
-  ].join("\n");
+function buildBriefDeveloperPrompt(_slot: AIRecoverySlot) {
+  return `너는 교대근무 간호사를 위한 프리미엄 AI 시작 회복 해설 엔진이야. 전날 기록과 오늘 수면만 기준으로 오늘 하루를 어떻게 시작해야 하는지 정교하게 설명한다. 같은 날 스트레스·카페인·활동·기분·근무메모는 시작 회복 입력에서 제외된 항목이므로, 오늘 상태를 추정하거나 단정하지 말고 그 미입력 사실을 설명의 중심으로 끌어오지도 마라. 출력은 반드시 JSON 하나만 반환한다. 전문적이고 신뢰 가능한 회복 코칭 톤을 유지하되, 문장은 짧고 정확하며 바로 실행 장면이 떠오르게 써라. generic한 문장, 반복 문장, 빈약한 요약, '꾸준한 관리가 중요합니다'처럼 힘 빠진 마무리, 같은 내용의 재진술을 금지한다. 각 section은 정말 중요한 카테고리만 고르고, description은 왜 지금 중요한지 한 문장, tips는 서로 겹치지 않는 실행 행동 2개만 작성한다. plannerContext가 이미 정한 우선순위와 충돌하는 새 계획을 만들지 말고, 내부 시스템 용어(planner, plannerContext, recoveryThread, focusFactor, primaryAction 등)와 데이터 필드명(napHours, menstrualLabel, sleepDebtHours, nightStreak, caffeineMg, symptomSeverity, vitalScore, csi, sri, cif, slf, mif, next, today, mood, stress, activity 등)은 절대 사용자 문구에 노출하지 마라. ISO 날짜(2026-03-13 등)를 괄호 안에 넣거나 본문에 직접 쓰지 말고, '오늘', '내일', '모레', '다음 근무일' 같은 자연어로만 표현하라.`;
 }
 
 function buildBriefUserPrompt(snapshot: RecoverySnapshot) {
   return [
-    "<task>",
-    `${snapshot.slot === "wake" ? "오늘 아침 회복 우선순위를 설명하고 바로 고를 수 있는 후보를 제안해라." : "퇴근 후 또는 저녁 회복 우선순위를 설명하고 바로 고를 수 있는 후보를 제안해라."}`,
-    "</task>",
-    "<slotContext>",
-    JSON.stringify(
-      {
-        slot: snapshot.slot,
-        dateISO: snapshot.dateISO,
-        todayShift: snapshot.todayShift,
-        nextDuty: snapshot.plannerContext.nextDuty,
-        nextDutyDate: snapshot.plannerContext.nextDutyDate,
-        slotLabel: getAIRecoverySlotLabel(snapshot.slot, snapshot.todayShift),
-      },
-      null,
-      2
-    ),
-    "</slotContext>",
-    "<todayPersistedData>",
-    JSON.stringify(snapshot.todayRow, null, 2),
-    "</todayPersistedData>",
-    "<history14dPersistedData>",
-    JSON.stringify(snapshot.historyRows, null, 2),
-    "</history14dPersistedData>",
-    "<derivedMetrics>",
-    JSON.stringify(snapshot.derivedMetrics, null, 2),
-    "</derivedMetrics>",
-    "<plannerContext>",
-    JSON.stringify(
-      {
-        plannerTone: snapshot.plannerContext.plannerTone,
-        focusFactor: snapshot.plannerContext.focusFactor,
-        primaryAction: snapshot.plannerContext.primaryAction,
-        avoidAction: snapshot.plannerContext.avoidAction,
-        nextDuty: snapshot.plannerContext.nextDuty,
-        nextDutyDate: snapshot.plannerContext.nextDutyDate,
-        ordersTop3: snapshot.plannerContext.ordersTop3,
-      },
-      null,
-      2
-    ),
-    "</plannerContext>",
-    "<cycleContext>",
-    JSON.stringify(snapshot.cycleContext, null, 2),
-    "</cycleContext>",
-    "<safetyScope>",
-    "허용 범위: 수면, 수분, 카페인, 빛, 호흡, 스트레칭, 짧은 휴식, 업무 페이스 조절, 저자극 루틴, 실수 방지.",
-    "금지 범위: 진단, 투약, 처치, 검사 지시, 임상 판단 대체, 제공되지 않은 숫자 생성.",
-    "</safetyScope>",
+    "사용자의 기록과 계산된 회복 지표를 바탕으로 AI 맞춤회복 JSON을 작성하세요.",
+    "반드시 JSON 하나만 출력하세요. 코드펜스, 설명문, 마크다운 금지.",
+    "",
+    "plannerContext가 있으면 그 우선순위와 반드시 정렬하세요.",
+    "plannerContext.focusFactor 또는 plannerContext.primaryAction과 충돌하는 새 계획을 만들지 마세요.",
+    "지금은 오늘 시작 회복 단계입니다. 오늘 수면을 제외한 같은 날 동적 입력은 분석 입력에서 제외됐으므로, 오늘 상태를 추정하지도 말고 그 미입력 사실 자체를 설명의 중심으로 끌어오지도 마세요.",
+    "[핵심 목표]",
+    "",
+    "headline은 오늘 시작에서 가장 중요한 축을 1~2문장으로 정리",
+    "headline에는 가능하면 focusFactor 또는 primaryAction의 맥락을 자연스럽게 녹일 것",
+    "sections는 정말 중요한 카테고리만 2~4개 선택",
+    "각 section.description은 왜 이 카테고리가 지금 중요한지 실제 데이터 2가지 이상에 기대어 1문장으로 설명",
+    "각 section.tips는 정확히 2개, 서로 겹치지 않는 실행 행동으로 작성",
+    "tips는 추상 조언이 아니라 시작 타이밍/장소/시간/방법 중 최소 2개가 보이게 작성",
+    "description과 tips는 같은 문장을 반복하지 말 것",
+    "[품질 기준]",
+    "",
+    "'꾸준한 관리가 중요합니다', '신경 쓰세요', '활용해보세요' 같은 generic 마무리 금지",
+    "같은 의미를 문장만 바꿔 반복 금지",
+    "카테고리 title은 맥락이 보이는 짧은 제목으로 작성",
+    "수치(수면, 카페인, 활동, 기분, 스트레스)는 Data JSON에 있는 값만 사용하고 임의 수치 금지",
+    "숫자 태그형 표현 금지. 예: 스트레스(2), 기분4 금지",
+    "데이터 필드명을 괄호에 넣어 노출 금지. 예: 낮잠이 있었던 날이라(napHours), 기분과 스트레스가(mood, stress), 다음 근무가 D(next), 오늘은 OFF이며(today) → 이런 괄호 주석 절대 금지",
+    "ISO 날짜(2026-03-13 등)를 본문/괄호에 직접 쓰지 말고 '오늘', '내일', '다음 근무일' 같은 자연어만 사용",
+    "카페인 수치는 필요할 때만 자연어로 한 번만 설명",
+    "시작 회복 단계에서는 같은 날 스트레스/카페인/활동/기분을 오늘 상태처럼 말하지 말 것",
+    "[JSON 규칙]",
+    "",
+    "compoundAlert는 위험 요소 2개 이상이 동시에 뚜렷할 때만 작성, 아니면 null",
+    "sections.category 값은 sleep, shift, caffeine, menstrual, stress, activity 중에서만 선택",
+    "menstrualTrackingEnabled가 true이므로 생리주기 섹션 포함 여부를 이에 맞출 것",
+    "sections는 우선순위가 높은 순서대로 배열",
+    "weeklySummary.personalInsight와 weeklySummary.nextWeekPreview는 서로 다른 내용으로 작성",
+    "weeklySummary.topDrains는 0~3개",
+    "[JSON shape]",
+    "{",
+    "\"headline\": \"string\",",
+    "\"compoundAlert\": {",
+    "\"factors\": [",
+    "\"string\"",
+    "],",
+    "\"message\": \"string\"",
+    "},",
+    "\"sections\": [",
+    "{",
+    "\"category\": \"sleep|shift|caffeine|menstrual|stress|activity\",",
+    "\"severity\": \"info|caution|warning\",",
+    "\"title\": \"string\",",
+    "\"description\": \"string\",",
+    "\"tips\": [",
+    "\"string\",",
+    "\"string\"",
+    "]",
+    "}",
+    "],",
+    "\"weeklySummary\": {",
+    "\"avgBattery\": \"number\",",
+    "\"prevAvgBattery\": \"number\",",
+    "\"topDrains\": [",
+    "{",
+    "\"label\": \"string\",",
+    "\"pct\": \"number\"",
+    "}",
+    "],",
+    "\"personalInsight\": \"string\",",
+    "\"nextWeekPreview\": \"string\"",
+    "}",
+    "}",
+    "",
+    "[데이터(JSON)]",
+    JSON.stringify(buildStartRecoveryPromptData(snapshot), null, 2),
   ].join("\n");
 }
 
-function buildOrdersDeveloperPrompt(slot: AIRecoverySlot) {
-  return [
-    "너는 선택된 회복 후보를 바로 실행 가능한 간호사 회복 오더로 변환하는 시스템이다.",
-    "선택된 후보 외 새로운 후보를 만들지 마라.",
-    "오더 수는 선택 수와 정확히 일치해야 한다.",
-    "각 오더는 독립 체크가 가능해야 한다.",
-    "각 오더의 steps는 2~4개여야 한다.",
-    slot === "wake" ? "wake 오더는 3~15분 안에 가능한 짧은 실행 위주다." : "postShift 오더는 5~30분 안에 가능한 감압/수면 보호 위주다.",
-    "모든 문장은 짧고 단순하게 작성하라.",
-    "title은 짧게, whyNow는 1문장만 작성하라.",
-    "executionWindow, successCheck, avoid, workHint, safetyNote도 각각 짧은 1문장만 작성하라.",
-    "steps는 짧은 행동 문장으로만 작성하라.",
-    "개인 메모, 일정 노트, 근무 이벤트 텍스트 같은 사생활 정보는 입력에 포함되지 않는다. 건강 데이터와 시스템 지표만 사용하라.",
-    "진단, 약물, 처치, 검사 지시는 절대 금지한다.",
-    "candidateId는 입력으로 받은 selectedCandidates의 id만 써라.",
-    "id는 ASCII slug로 작성한다.",
-    "출력은 반드시 JSON schema를 정확히 따른다.",
-  ].join("\n");
+function buildOrdersDeveloperPrompt(_slot: AIRecoverySlot) {
+  return `너는 RNest의 AI 오늘의 오더 생성 엔진이야. AI 맞춤회복 결과를 최상위 기준으로 삼고, 전체 건강기록 히스토리와 오늘 상태를 함께 읽어 회복 행동 체크리스트를 만든다. 지금은 오늘 시작 오더 단계다. 아침에 바로 실행할 수 있는 낮은 마찰의 스타터 오더를 우선 만든다. 시작 단계에서는 오늘 수면 외의 같은 날 스트레스·카페인·활동·기분·근무메모를 분석 근거나 오더 설명 중심으로 끌어오지 말고, 그 미입력 사실을 오더 문구에 굳이 적지 않는다. 오더는 추상적인 조언이 아니라 실제로 체크 가능한 행동이어야 한다. 가능하면 정확히 4개의 오더를 반환하고, 데이터가 정말 부족할 때만 더 적게 작성한다. 중요하지 않은 항목은 과감히 제외하되, 선택한 개수 안에서 우선순위가 분명해야 한다. 응답은 JSON 하나만 반환하고, title/headline/summary/items를 모두 채워야 한다. headline은 오늘 오더 흐름의 핵심을 한 문장으로, summary는 왜 이 오더 구성이 맞는지 한 문장으로 적는다. 각 오더는 title, body, when, reason을 가져야 하고, id는 영어 snake_case로 안정적으로 작성한다. when은 긴 문장이 아니라 '지금', '근무 중', '퇴근 직후', '잠들기 전'처럼 아주 짧은 타이밍 라벨만 쓴다. chips는 선택 사항이며 0~3개, 한두 단어 수준의 짧은 태그만 쓴다. 오더는 지금 컨디션에서도 실행할 수 있을 정도로 낮은 마찰이어야 하고, 한 번에 하나씩 끝낼 수 있어야 한다. body는 실제 실행 문장으로 쓰고, 가능하면 시간/횟수/조건을 포함해 바로 행동할 수 있게 만든다. body에는 시작 트리거를 넣어 사용자가 언제 시작할지 바로 알 수 있게 한다. 예: 출근 전, 다음 투약 전, 퇴근 직후, 잠들기 전. 제네릭한 '쉬기/눕기/눈감기' 표현만으로 끝내지 말고, 언제/어디서/무엇을/얼마나 중 최소 2개를 드러내 실행 장면이 그려지게 만든다. reason은 사용자의 개인 상태(수면, 교대, 기분, 스트레스, 활동, 카페인, 생리주기, 최근 반복 패턴)와 연결해 왜 이 행동이 회복에 유리한지 설명한다. 시작 오더는 '지금', '출근 전', '근무 중' 타이밍 중심으로 구성하고, 하루 시작에 과한 행동을 요구하지 않는다. 오늘 데이터가 극심한 피로나 수면부채를 분명히 가리키는 경우가 아니면 막연한 휴식 오더를 남발하지 않는다. 오더가 3개 이상이면 실수 방지/집중 리셋, 짧은 신체 회복, 정서 안정 또는 수면 전환 중 최소 2개 이상 영역이 섞이게 만든다. title은 행동만 적지 말고 맥락이 보이게 만든다. 예: '근무 중 3분 걷기 리셋', '퇴근 후 10분 감각 낮추기'. 서로 거의 같은 행동을 다른 말로 반복하지 말고, 같은 타이밍 오더가 과하게 몰리지 않게 조정한다. generic한 문장('휴식하기', '컨디션 관리하기', '꾸준히 해보기')만으로는 절대 끝내지 말고, 왜 지금 필요한지와 실행 장면이 보여야 한다. reason은 description 재진술처럼 짧게 얼버무리지 말고, 개인 기록 패턴 2가지 이상과 연결되면 더 좋다. 타임라인은 별도 섹션으로 만들지 말고 when/reason 안에 녹여라. 내부 시스템 용어(planner, plannerContext, recoveryThread, focusFactor 등)와 데이터 필드명(napHours, menstrualLabel, sleepDebtHours, nightStreak, caffeineMg, symptomSeverity, vitalScore, csi, sri, cif, slf, mif, next, today, mood, stress, activity 등)을 title, body, reason, headline, summary 어디에도 괄호나 본문에 노출하지 마라. ISO 날짜(2026-03-13 등)를 괄호나 본문에 직접 쓰지 말고, '오늘', '내일', '다음 근무일' 같은 자연어로만 표현하라. 출력은 JSON 하나만 반환한다.`;
 }
 
-function buildOrdersUserPrompt(snapshot: RecoverySnapshot, brief: AIRecoveryBrief, selectedCandidates: AIRecoveryCandidate[]) {
+function buildOrdersUserPrompt(snapshot: RecoverySnapshot, brief: AIRecoveryBrief) {
   return [
-    "<task>",
-    "selectedCandidates를 바로 실행 가능한 오더로 변환해라.",
-    "</task>",
-    "<slotContext>",
-    JSON.stringify(
-      {
-        slot: snapshot.slot,
-        dateISO: snapshot.dateISO,
-        todayShift: snapshot.todayShift,
-        nextDuty: snapshot.plannerContext.nextDuty,
-        nextDutyDate: snapshot.plannerContext.nextDutyDate,
-      },
-      null,
-      2
-    ),
-    "</slotContext>",
-    "<briefSummary>",
-    JSON.stringify(
-      {
-        headline: brief.headline,
-        summary: brief.summary,
-        tone: brief.tone,
-        topDrivers: brief.topDrivers,
-      },
-      null,
-      2
-    ),
-    "</briefSummary>",
-    "<selectedCandidates>",
-    JSON.stringify(selectedCandidates, null, 2),
-    "</selectedCandidates>",
-    "<todayPersistedData>",
-    JSON.stringify(snapshot.todayRow, null, 2),
-    "</todayPersistedData>",
-    "<derivedMetrics>",
-    JSON.stringify(snapshot.derivedMetrics, null, 2),
-    "</derivedMetrics>",
-    "<workConstraints>",
-    JSON.stringify(snapshot.workConstraints, null, 2),
-    "</workConstraints>",
-    "<safetyScope>",
-    "선택된 후보만 변환한다. 새로운 후보/새 임상 추정 금지.",
-    "생활 회복, 저자극 루틴, 짧은 실행, 실수 방지 중심으로 작성한다.",
-    "</safetyScope>",
+    "오늘의 오더 체크리스트용 JSON을 작성하세요.",
+    "반드시 JSON 하나만 출력하세요. 코드펜스 금지, 설명문 금지.",
+    "",
+    "[목표]",
+    "",
+    "AI 맞춤회복을 실제 행동 체크리스트로 바꾸기",
+    "오늘 가장 중요한 오더를 4개로 맞춰 고르기",
+    "타이밍 정보는 when과 reason에 자연스럽게 녹이기",
+    "사용자가 지금 컨디션에서도 바로 실천할 수 있게 마찰을 낮추기",
+    "하루를 시작할 때 바로 실행할 수 있는 스타터 오더가 되게 만들기",
+    "[제약]",
+    "",
+    "items 길이는 정확히 4",
+    "id는 영어 snake_case",
+    "title, headline, summary는 모두 비워 두지 말 것",
+    "title은 행동 중심의 짧은 문장",
+    "headline은 오늘 오더 흐름의 핵심을 한 문장으로 정리",
+    "summary는 왜 이 오더 구성이 맞는지 한 문장으로 정리",
+    "body는 체크리스트 한 줄처럼 짧고 분명하게, 가능하면 시간/횟수/조건을 포함",
+    "body 안에 시작 트리거를 넣어 언제 시작하는지 바로 보이게 할 것",
+    "when은 12자 안팎의 아주 짧은 타이밍 라벨만 사용",
+    "reason은 왜 지금 필요한지, 사용자의 현재 패턴과 연결해 한 문장으로 설명",
+    "chips는 0~3개, 짧은 키워드만 사용",
+    "today / weekly / history / plannerContext / AI Recovery Brief JSON을 모두 보고 판단",
+    "시작 단계에서는 오늘 수면 외 같은 날 동적 입력을 reason의 근거로 끌어오지 말 것",
+    "전체 건강기록을 봤을 때 반복적으로 회복을 방해하는 패턴이 있으면 우선순위에 반영",
+    "작은 행동이지만 회복 효과가 크고 실수/소진을 줄이는 방향을 우선",
+    "막연한 '쉬기/눕기/눈감기' 표현만 쓰지 말고, 왜 지금 그 행동을 해야 하는지 실행 장면이 보이게 작성",
+    "'컨디션 관리하기', '회복하기', '휴식하기'처럼 generic한 제목/문장 금지",
+    "items가 3개 이상이면 집중·안전, 짧은 움직임, 정서 안정/수면 전환 중 최소 2개 이상 영역이 섞이게 구성",
+    "시작 단계에서는 when이 '지금', '출근 전', '근무 중' 쪽으로 자연스럽게 분산되게 구성",
+    "같은 행동을 표현만 바꿔 중복 생성하지 말 것",
+    "Data JSON에 없는 수치를 새로 만들지 말 것 [선택된 오더 개수] 4",
+    "",
+    "+ 앞에서 생성된 ai맞춤회복 해설",
+    "",
+    "[데이터(JSON)]",
+    JSON.stringify(buildStartRecoveryPromptData(snapshot), null, 2),
+    "",
+    "[AI Recovery Brief JSON]",
+    JSON.stringify(brief, null, 2),
   ].join("\n");
 }
 
@@ -1120,7 +1334,9 @@ function buildSnapshotSignaturePayload(snapshot: Omit<RecoverySnapshot, "inputSi
 }
 
 function buildRecoverySnapshot(args: { payload: unknown; dateISO: ISODate; slot: AIRecoverySlot }): RecoverySnapshot {
-  const state = sanitizeStatePayload(args.payload);
+  const rawState = sanitizeStatePayload(args.payload);
+  const phase = slotToRecoveryPhase(args.slot);
+  const state = buildRecoveryPhaseState(rawState, args.dateISO, phase);
   const language = normalizeAIRecoveryLanguage(state.settings?.language);
   const recordedDays = countHealthRecordedDays({ bio: state.bio, emotions: state.emotions });
   const historyDates = listHistoryDates(args.dateISO, 14);
@@ -1194,6 +1410,7 @@ function buildRecoverySnapshot(args: { payload: unknown; dateISO: ISODate; slot:
     pmsDays: state.settings?.menstrual?.pmsDays ?? null,
     sensitivity: state.settings?.menstrual?.sensitivity ?? null,
     todaySymptomSeverity: state.bio?.[args.dateISO]?.symptomSeverity ?? null,
+    todayLabel: todayVital?.menstrual?.label ?? null,
   };
   const baseSnapshot = {
     state,
@@ -1317,8 +1534,10 @@ async function runOpenAIFlow(args: {
   snapshot: RecoverySnapshot;
   model: string;
   signal: AbortSignal;
-  selectedCandidateIds?: string[];
 }) {
+  if (args.snapshot.slot !== "wake") {
+    return buildFallbackFlow(args.snapshot, args.model);
+  }
   const briefReasoningEffort = resolveReasoningEffort(args.model, "brief");
   const ordersReasoningEffort = resolveReasoningEffort(args.model, "orders");
 
@@ -1398,23 +1617,11 @@ async function runOpenAIFlow(args: {
     }
   }
 
-  const selectionIds = getSelectionIds(brief, args.selectedCandidateIds);
-  const selectedCandidates = brief.candidateActions.filter((item) => selectionIds.includes(item.id));
-  if (selectedCandidates.length === 0) {
-    console.error("[AIRecovery] brief_selection_empty", {
-      model: args.model,
-      slot: args.snapshot.slot,
-      dateISO: args.snapshot.dateISO,
-      responseId: briefResult.responseId,
-    });
-    throw new Error("ai_recovery_openai_failed:brief_selection_empty");
-  }
-
   const ordersResult = await runAIRecoveryStructuredRequest({
     model: args.model,
     reasoningEffort: ordersReasoningEffort,
     developerPrompt: buildOrdersDeveloperPrompt(args.snapshot.slot),
-    userPrompt: buildOrdersUserPrompt(args.snapshot, brief, selectedCandidates),
+    userPrompt: buildOrdersUserPrompt(args.snapshot, brief),
     schemaName: "ai_recovery_orders",
     schema: buildOrdersSchema(),
     signal: args.signal,
@@ -1433,12 +1640,11 @@ async function runOpenAIFlow(args: {
   }
 
   try {
-    const orders = parseOrdersJson(ordersResult.text, args.snapshot.slot, selectedCandidates);
+    const orders = parseOrdersJson(ordersResult.text, args.snapshot.slot);
     return {
       status: "ready",
       brief,
       orders,
-      selectionIds,
       reasoningEffort: briefReasoningEffort,
       model: args.model,
       openaiMeta: {
@@ -1482,12 +1688,11 @@ async function runOpenAIFlow(args: {
       throw new Error(`ai_recovery_openai_failed:${repairedOrders.error}`);
     }
     try {
-      const orders = parseOrdersJson(repairedOrders.text, args.snapshot.slot, selectedCandidates);
+      const orders = parseOrdersJson(repairedOrders.text, args.snapshot.slot);
       return {
         status: "ready",
         brief,
         orders,
-        selectionIds,
         reasoningEffort: briefReasoningEffort,
         model: args.model,
         openaiMeta: {
@@ -1523,7 +1728,8 @@ function buildStoredSession(args: {
 }) {
   const now = new Date().toISOString();
   const previousCounts = readGenerationCounts(args.previousSession);
-  const shouldCountGeneration = args.flow.status === "ready";
+  const shouldCountGeneration =
+    args.flow.status === "ready" && Boolean(args.flow.openaiMeta.briefResponseId || args.flow.openaiMeta.ordersResponseId);
   return {
     status: args.flow.status,
     generatedAt: now,
@@ -1535,7 +1741,7 @@ function buildStoredSession(args: {
     context: args.snapshot.contextMeta,
     brief: args.flow.brief,
     selection: {
-      selectedCandidateIds: args.flow.selectionIds,
+      selectedCandidateIds: [],
       updatedAt: now,
     },
     orders: args.flow.orders,
@@ -1562,8 +1768,9 @@ export async function readAIRecoverySessionView(args: {
     payload,
   });
   const { session, completions } = await safeReadRecoverySlot({ userId: args.userId, dateISO, slot });
-  const visibleSession = gate.allowed && session?.status === "ready" ? session : null;
-  const orderIds = visibleSession?.orders?.map((item) => item.id) ?? [];
+  const visibleSession =
+    gate.allowed && session?.status === "ready" && session.promptVersion === AI_RECOVERY_PROMPT_VERSION ? session : null;
+  const orderIds = visibleSession?.orders?.items.map((item) => item.id) ?? [];
   const filteredCompletions = filterCompletionIdsForOrders(completions, orderIds);
   const quota = buildGenerationQuota(subscription?.tier ?? null, session);
   return {
@@ -1574,7 +1781,12 @@ export async function readAIRecoverySessionView(args: {
     language: snapshot.language,
     gate,
     session: visibleSession,
-    stale: Boolean(visibleSession && (visibleSession.inputSignature !== snapshot.inputSignature || visibleSession.language !== snapshot.language)),
+    stale: Boolean(
+      visibleSession &&
+        (visibleSession.inputSignature !== snapshot.inputSignature ||
+          visibleSession.language !== snapshot.language ||
+          visibleSession.promptVersion !== AI_RECOVERY_PROMPT_VERSION)
+    ),
     completions: filteredCompletions,
     quota,
     hasAIEntitlement: Boolean(subscription?.hasPaidAccess && subscription?.entitlements.recoveryPlannerAI),
@@ -1636,12 +1848,13 @@ export async function generateAIRecoverySession(args: {
     !args.force &&
     existingSession?.status === "ready" &&
     existingSession.inputSignature === snapshot.inputSignature &&
-    existingSession.language === snapshot.language
+    existingSession.language === snapshot.language &&
+    existingSession.promptVersion === AI_RECOVERY_PROMPT_VERSION
   ) {
     return {
       gate,
       session: existingSession,
-      completions: filterCompletionIdsForOrders(existingCompletions, existingSession.orders.map((item) => item.id)),
+      completions: filterCompletionIdsForOrders(existingCompletions, existingSession.orders?.items.map((item) => item.id) ?? []),
       quota,
       slotLabel: getAIRecoverySlotLabel(args.slot, snapshot.todayShift),
       slotDescription: getAIRecoverySlotDescription(args.slot, snapshot.todayShift),
@@ -1704,7 +1917,7 @@ export async function generateAIRecoverySession(args: {
   return {
     gate,
     session,
-    completions: filterCompletionIdsForOrders(existingCompletions, session.orders.map((item) => item.id)),
+    completions: filterCompletionIdsForOrders(existingCompletions, session.orders?.items.map((item) => item.id) ?? []),
     quota: nextQuota,
     slotLabel: getAIRecoverySlotLabel(args.slot, snapshot.todayShift),
     slotDescription: getAIRecoverySlotDescription(args.slot, snapshot.todayShift),
@@ -1719,7 +1932,6 @@ export async function regenerateAIRecoveryOrders(args: {
   userId: string;
   dateISO: ISODate;
   slot: AIRecoverySlot;
-  candidateIds: string[];
   signal: AbortSignal;
 }) {
   const { payload } = await safeLoadRecoveryDomains(args.userId);
@@ -1738,12 +1950,42 @@ export async function regenerateAIRecoveryOrders(args: {
   const quota = buildGenerationQuota(subscription?.tier ?? null, session);
   if (!quota.canRegenerateOrders) throw new Error("orders_generation_limit_reached");
   const brief = session.brief;
-  const selectedIds = getSelectionIds(brief, args.candidateIds);
-  if (selectedIds.length < 1 || selectedIds.length > AI_RECOVERY_MAX_CANDIDATES) {
-    throw new Error("candidate_ids_invalid_count");
+  if (args.slot !== "wake") {
+    const orders = buildFallbackOrders(snapshot);
+    const nextSession: AIRecoverySlotPayload = {
+      ...session,
+      status: "ready",
+      selection: {
+        selectedCandidateIds: [],
+        updatedAt: new Date().toISOString(),
+      },
+      orders,
+      generationCounts: {
+        ...readGenerationCounts(session),
+      },
+      openaiMeta: {
+        ...session.openaiMeta,
+        fallbackReason: "wake_only_prompt_contract",
+      },
+    };
+    await writeAIRecoverySlot({
+      userId: args.userId,
+      dateISO: args.dateISO,
+      slot: args.slot,
+      session: nextSession,
+    });
+    return {
+      gate,
+      session: nextSession,
+      completions: filterCompletionIdsForOrders(completions, nextSession.orders?.items.map((item) => item.id) ?? []),
+      quota: buildGenerationQuota(subscription?.tier ?? null, nextSession),
+      slotLabel: getAIRecoverySlotLabel(args.slot, snapshot.todayShift),
+      slotDescription: getAIRecoverySlotDescription(args.slot, snapshot.todayShift),
+      stale: false,
+      language: snapshot.language,
+      model: session.model,
+    };
   }
-  const selectedCandidates = brief.candidateActions.filter((item) => selectedIds.includes(item.id));
-  if (selectedCandidates.length !== selectedIds.length) throw new Error("candidate_ids_not_found");
 
   const model = session.model;
   const ordersReasoningEffort = resolveReasoningEffort(model, "orders");
@@ -1751,7 +1993,7 @@ export async function regenerateAIRecoveryOrders(args: {
     model,
     reasoningEffort: ordersReasoningEffort,
     developerPrompt: buildOrdersDeveloperPrompt(snapshot.slot),
-    userPrompt: buildOrdersUserPrompt(snapshot, brief, selectedCandidates),
+    userPrompt: buildOrdersUserPrompt(snapshot, brief),
     schemaName: "ai_recovery_orders",
     schema: buildOrdersSchema(),
     signal: args.signal,
@@ -1768,9 +2010,9 @@ export async function regenerateAIRecoveryOrders(args: {
     throw new Error(`ai_recovery_orders_failed:${ordersResult.error}`);
   }
 
-  let orders: AIRecoveryOrder[];
+  let orders: AIRecoveryOrdersPayload;
   try {
-    orders = parseOrdersJson(ordersResult.text, args.slot, selectedCandidates);
+    orders = parseOrdersJson(ordersResult.text, args.slot);
   } catch (error) {
     console.error("[AIRecovery] regenerate_orders_parse_failed", {
       model,
@@ -1798,7 +2040,7 @@ export async function regenerateAIRecoveryOrders(args: {
       throw new Error(`ai_recovery_orders_failed:${repairedOrders.error}`);
     }
     try {
-      orders = parseOrdersJson(repairedOrders.text, args.slot, selectedCandidates);
+      orders = parseOrdersJson(repairedOrders.text, args.slot);
     } catch (repairParseError) {
       console.error("[AIRecovery] regenerate_orders_repair_parse_failed", {
         model,
@@ -1815,7 +2057,7 @@ export async function regenerateAIRecoveryOrders(args: {
     ...session,
     status: "ready",
     selection: {
-      selectedCandidateIds: selectedIds,
+      selectedCandidateIds: [],
       updatedAt: new Date().toISOString(),
     },
     orders,
@@ -1843,7 +2085,7 @@ export async function regenerateAIRecoveryOrders(args: {
   return {
     gate,
     session: nextSession,
-    completions: filterCompletionIdsForOrders(completions, nextSession.orders.map((item) => item.id)),
+    completions: filterCompletionIdsForOrders(completions, nextSession.orders?.items.map((item) => item.id) ?? []),
     quota: buildGenerationQuota(subscription?.tier ?? null, nextSession),
     slotLabel: getAIRecoverySlotLabel(args.slot, snapshot.todayShift),
     slotDescription: getAIRecoverySlotDescription(args.slot, snapshot.todayShift),
@@ -1866,8 +2108,8 @@ export async function toggleAIRecoveryCompletion(args: {
   const { aiRecoveryDaily } = await safeLoadRecoveryDomains(args.userId);
   const day = aiRecoveryDaily[args.dateISO];
   const allowedOrderIds = [
-    ...(day?.wake?.orders ?? []),
-    ...(day?.postShift?.orders ?? []),
+    ...(day?.wake?.orders?.items ?? []),
+    ...(day?.postShift?.orders?.items ?? []),
   ].map((item) => item.id);
   if (!allowedOrderIds.includes(orderId)) {
     throw new Error("order_id_not_found");

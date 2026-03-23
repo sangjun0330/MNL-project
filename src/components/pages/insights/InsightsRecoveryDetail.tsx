@@ -83,8 +83,8 @@ export function InsightsRecoveryDetail() {
         href="/insights/recovery/ai"
         label="AI CUSTOMIZED RECOVERY"
         title="AI 맞춤회복"
-        headline="오늘 기록과 최근 14일 흐름으로 회복 포인트를 정리해 줘요."
-        summary="기상 후와 퇴근 후 기준으로 해설과 오더 후보를 보여줘요."
+        headline="오늘 기록과 최근 흐름으로 회복 포인트를 정리해 줘요."
+        summary="해설과 오늘의 오더 체크리스트를 바로 이어서 볼 수 있어요."
         chips={
           <>
             <DetailChip color={DETAIL_ACCENTS.navy}>AI 해설</DetailChip>
@@ -97,12 +97,12 @@ export function InsightsRecoveryDetail() {
         href="/insights/recovery/orders"
         label="TODAY ORDERS"
         title="오늘의 오더"
-        headline="선택한 후보를 바로 할 수 있는 오더로 바꿔 줘요."
-        summary="1~5개 후보를 다시 고르고, 오더를 다시 만들고, 완료 체크까지 할 수 있어요."
+        headline="타이밍이 붙은 실행 문장으로 바로 확인해요."
+        summary="체크리스트를 열어 한 번에 하나씩 실행할 수 있어요."
         chips={
           <>
             <DetailChip color={DETAIL_ACCENTS.navy}>실행 오더</DetailChip>
-            <DetailChip color={DETAIL_ACCENTS.mint}>1-5개 선택</DetailChip>
+            <DetailChip color={DETAIL_ACCENTS.mint}>체크리스트</DetailChip>
           </>
         }
       />
@@ -111,7 +111,7 @@ export function InsightsRecoveryDetail() {
         <div className="text-[12px] font-semibold text-ios-sub">안내</div>
         <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-ios-text">지금 되는 것</div>
         <div className="mt-3 flex flex-wrap gap-2">
-          <DetailChip color={DETAIL_ACCENTS.mint}>AI 해설 + 후보 선택</DetailChip>
+          <DetailChip color={DETAIL_ACCENTS.mint}>AI 해설 + 오더</DetailChip>
           <DetailChip color={DETAIL_ACCENTS.navy}>오더 재생성</DetailChip>
           <DetailChip color={DETAIL_ACCENTS.navy}>완료 체크 저장</DetailChip>
         </div>

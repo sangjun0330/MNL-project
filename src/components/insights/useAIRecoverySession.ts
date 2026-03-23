@@ -24,7 +24,7 @@ type HookState = {
   error: string | null;
   reload: () => Promise<void>;
   generate: (force?: boolean) => Promise<void>;
-  regenerateOrders: (candidateIds: string[]) => Promise<void>;
+  regenerateOrders: () => Promise<void>;
   toggleCompletion: (orderId: string, completed: boolean) => Promise<void>;
 };
 
@@ -133,7 +133,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     }
   };
 
-  const regenerateOrders = async (candidateIds: string[]) => {
+  const regenerateOrders = async () => {
     if (!args.enabled) return;
     setSavingOrders(true);
     setError(null);
@@ -146,7 +146,6 @@ export function useAIRecoverySession(args: HookArgs): HookState {
         body: JSON.stringify({
           dateISO: args.dateISO,
           slot: args.slot,
-          candidateIds,
         }),
       });
       const json = await readJson<{ ok?: boolean; error?: string; detail?: string | null; data?: SessionData }>(response);
