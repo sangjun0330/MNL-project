@@ -128,81 +128,108 @@ function readString(value: unknown) {
   return typeof value === "string" ? value : null;
 }
 
-function appendTextParts(out: string[], value: unknown) {
-  if (typeof value === "string" && value.trim()) {
-    out.push(value);
-    return;
+function readNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
   }
-  if (!value || typeof value !== "object") return;
-  const record = value as Record<string, unknown>;
-  const text = readString(record.text) ?? readString(record.output_text);
-  if (text && text.trim()) {
-    out.push(text);
-  }
-}
-
-function appendChatMessageContent(out: string[], value: unknown) {
-  if (typeof value === "string" && value.trim()) {
-    out.push(value);
-    return;
-  }
-  if (!Array.isArray(value)) return;
-  for (const part of value) {
-    if (typeof part === "string" && part.trim()) {
-      out.push(part);
-      continue;
-    }
-    if (!part || typeof part !== "object") continue;
-    const record = part as Record<string, unknown>;
-    const text = readString(record.text);
-    if (text && text.trim()) {
-      out.push(text);
-    }
-  }
+  return null;
 }
 
 function extractOutputText(json: any): string {
-  if (Array.isArray(json?.choices)) {
-    const parts: string[] = [];
-    for (const choice of json.choices) {
-      appendChatMessageContent(parts, choice?.message?.content);
+  const chunks: string[] = [];
+  const seen = new Set<string>();
+  const append = (raw: unknown) => {
+    if (typeof raw !== "string") return;
+    const value = raw.replace(/\r/g, "").trim();
+    if (!value) return;
+    const key = value.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    chunks.push(value);
+  };
+  const appendFromTextLike = (value: unknown) => {
+    if (!value) return;
+    if (typeof value === "string") {
+      append(value);
+      return;
     }
-    return parts.join("\n").trim();
-  }
-  const parts: string[] = [];
-  if (typeof json?.output_text === "string") {
-    parts.push(json.output_text);
-  }
-  if (Array.isArray(json?.output)) {
-    for (const item of json.output) {
-      appendTextParts(parts, item?.content);
-      if (Array.isArray(item?.content)) {
-        for (const part of item.content) appendTextParts(parts, part);
-      }
+    if (Array.isArray(value)) {
+      for (const item of value) appendFromTextLike(item);
+      return;
+    }
+    if (typeof value !== "object") return;
+    const node = value as Record<string, unknown>;
+    append(node.value);
+    append(node.text);
+    if (typeof node.text === "object" && node.text) {
+      append((node.text as Record<string, unknown>).value);
+    }
+    append(node.output_text);
+    append(node.transcript);
+  };
+
+  appendFromTextLike(json?.choices?.[0]?.message?.content);
+  appendFromTextLike(json?.output_text);
+
+  const output = Array.isArray(json?.output) ? json.output : [];
+  for (const item of output) {
+    appendFromTextLike(item?.output_text);
+    appendFromTextLike(item?.text);
+    appendFromTextLike(item?.transcript);
+    const content = Array.isArray(item?.content) ? item.content : [];
+    for (const part of content) {
+      appendFromTextLike(part?.output_text);
+      appendFromTextLike(part?.text);
+      appendFromTextLike(part?.transcript);
+      appendFromTextLike(part);
     }
   }
-  if (Array.isArray(json?.content)) {
-    for (const part of json.content) appendTextParts(parts, part);
+
+  const messageContent = Array.isArray(json?.message?.content) ? json.message.content : [];
+  for (const part of messageContent) {
+    appendFromTextLike(part?.text);
+    appendFromTextLike(part?.output_text);
+    appendFromTextLike(part?.transcript);
+    appendFromTextLike(part);
   }
-  return parts.join("\n").trim();
+
+  return chunks.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function normalizeUsageNode(value: unknown): AIRecoveryUsage | null {
+  if (!value || typeof value !== "object") return null;
+  const node = value as Record<string, unknown>;
+  const inputTokens = readNumber(node.input_tokens ?? node.prompt_tokens ?? node.inputTokens);
+  const outputTokens = readNumber(node.output_tokens ?? node.completion_tokens ?? node.outputTokens);
+  const inputDetails =
+    (node.input_tokens_details as Record<string, unknown> | undefined) ??
+    (node.prompt_tokens_details as Record<string, unknown> | undefined) ??
+    (node.inputTokensDetails as Record<string, unknown> | undefined);
+  const outputDetails =
+    (node.output_tokens_details as Record<string, unknown> | undefined) ??
+    (node.completion_tokens_details as Record<string, unknown> | undefined) ??
+    (node.outputTokensDetails as Record<string, unknown> | undefined);
+  const cachedInputTokens = readNumber(inputDetails?.cached_tokens ?? inputDetails?.cachedTokens);
+  const reasoningTokens = readNumber(outputDetails?.reasoning_tokens ?? outputDetails?.reasoningTokens);
+  const totalTokens =
+    readNumber(node.total_tokens ?? node.totalTokens) ??
+    (inputTokens != null || outputTokens != null ? (inputTokens ?? 0) + (outputTokens ?? 0) : null);
+  if (inputTokens == null && outputTokens == null && totalTokens == null && cachedInputTokens == null && reasoningTokens == null) {
+    return null;
+  }
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    cachedInputTokens,
+    reasoningTokens,
+  };
 }
 
 function readUsage(json: any): AIRecoveryUsage | null {
-  const usage = json?.usage;
-  if (!usage || typeof usage !== "object") return null;
-  const inputTokens = Number(usage.input_tokens ?? usage.prompt_tokens);
-  const outputTokens = Number(usage.output_tokens ?? usage.completion_tokens);
-  const totalTokens = Number(usage.total_tokens);
-  const cachedInputTokens = Number(usage.input_tokens_details?.cached_tokens ?? usage.prompt_tokens_details?.cached_tokens);
-  const reasoningTokens = Number(usage.output_tokens_details?.reasoning_tokens ?? usage.completion_tokens_details?.reasoning_tokens);
-  const asNullable = (value: number) => (Number.isFinite(value) ? Math.round(value) : null);
-  return {
-    inputTokens: asNullable(inputTokens),
-    outputTokens: asNullable(outputTokens),
-    totalTokens: asNullable(totalTokens),
-    cachedInputTokens: asNullable(cachedInputTokens),
-    reasoningTokens: asNullable(reasoningTokens),
-  };
+  return normalizeUsageNode(json?.usage) ?? normalizeUsageNode(json?.response?.usage) ?? normalizeUsageNode(json?.metrics?.usage) ?? null;
 }
 
 function mergeUsage(values: Array<AIRecoveryUsage | null | undefined>): AIRecoveryUsage | null {
@@ -254,6 +281,13 @@ function buildCompatStructuredDeveloperPrompt(args: StructuredRequestArgs) {
   ].join("\n");
 }
 
+function buildEmptyTextError(model: string, payload: any) {
+  const status = typeof payload?.status === "string" ? payload.status : "unknown";
+  const incompleteReason =
+    typeof payload?.incomplete_details?.reason === "string" ? payload.incomplete_details.reason : "none";
+  return `openai_empty_text_model:${model}_status:${status}_incomplete:${incompleteReason}`;
+}
+
 async function postStructuredRequest(
   baseUrl: string,
   args: StructuredRequestArgs,
@@ -295,15 +329,10 @@ async function postStructuredRequest(
         }
       : {
           model: requestConfig.model,
-          store: resolveStoreResponses(),
-          reasoning: {
-            effort: args.reasoningEffort,
-          },
-          max_output_tokens: resolveMaxOutputTokens(args.maxOutputTokens ?? 2400),
           input: [
             {
               role: "developer",
-              content: [{ type: "input_text", text: args.developerPrompt }],
+              content: [{ type: "input_text", text: buildCompatStructuredDeveloperPrompt(args) }],
             },
             {
               role: "user",
@@ -311,13 +340,15 @@ async function postStructuredRequest(
             },
           ],
           text: {
-            format: {
-              type: "json_schema",
-              name: args.schemaName,
-              strict: true,
-              schema: args.schema,
-            },
+            format: { type: "text" },
+            verbosity: "medium",
           },
+          reasoning: {
+            effort: args.reasoningEffort,
+          },
+          max_output_tokens: resolveMaxOutputTokens(args.maxOutputTokens ?? 2400),
+          tools: [],
+          store: resolveStoreResponses(),
         };
 
     console.info("[AIRecovery] openai_request_start", {
@@ -356,7 +387,7 @@ async function postStructuredRequest(
     const text = extractOutputText(json);
     if (!text) {
       return {
-        error: `openai_empty_text_model:${requestConfig.model}`,
+        error: buildEmptyTextError(requestConfig.model, json),
       };
     }
 

@@ -1039,6 +1039,42 @@ function buildOrdersUserPrompt(snapshot: RecoverySnapshot, brief: AIRecoveryBrie
   ].join("\n");
 }
 
+function buildJsonRepairDeveloperPrompt(schemaName: string, schema: Record<string, unknown>) {
+  return [
+    "너는 JSON 정리기다.",
+    "사용자 입력의 의미를 바꾸지 마라.",
+    "새 정보, 새 해석, 새 문장을 추가하지 마라.",
+    "입력 텍스트에서 확인되는 내용만 사용해 정확한 JSON 하나만 출력하라.",
+    "설명, 코드블록, 머리말, 마크다운, 주석을 붙이지 마라.",
+    `대상 schema 이름: ${schemaName}`,
+    JSON.stringify(schema),
+  ].join("\n");
+}
+
+function buildJsonRepairUserPrompt(rawText: string) {
+  return ["<rawOutput>", rawText, "</rawOutput>"].join("\n");
+}
+
+async function repairAIRecoveryJson(args: {
+  model: string;
+  schemaName: string;
+  schema: Record<string, unknown>;
+  rawText: string;
+  signal: AbortSignal;
+  maxOutputTokens: number;
+}) {
+  return await runAIRecoveryStructuredRequest({
+    model: args.model,
+    reasoningEffort: "low",
+    developerPrompt: buildJsonRepairDeveloperPrompt(args.schemaName, args.schema),
+    userPrompt: buildJsonRepairUserPrompt(args.rawText),
+    schemaName: `${args.schemaName}_repair`,
+    schema: args.schema,
+    signal: args.signal,
+    maxOutputTokens: args.maxOutputTokens,
+  });
+}
+
 function deriveWorkConstraints(input: {
   slot: AIRecoverySlot;
   todayShift: Shift;
@@ -1307,7 +1343,7 @@ async function runOpenAIFlow(args: {
       dateISO: args.snapshot.dateISO,
       error: briefResult.error,
     });
-    throw new Error("ai_recovery_openai_failed");
+    throw new Error(`ai_recovery_openai_failed:${briefResult.error}`);
   }
 
   let brief: AIRecoveryBrief;
@@ -1321,7 +1357,36 @@ async function runOpenAIFlow(args: {
       responseId: briefResult.responseId,
       error: trimText((error as Error)?.message ?? error, 160),
     });
-    throw new Error("ai_recovery_openai_failed");
+    const repairedBrief = await repairAIRecoveryJson({
+      model: args.model,
+      schemaName: "ai_recovery_brief",
+      schema: buildBriefSchema(),
+      rawText: briefResult.text,
+      signal: args.signal,
+      maxOutputTokens: 2600,
+    });
+    if (!repairedBrief.ok) {
+      console.error("[AIRecovery] brief_repair_failed", {
+        model: args.model,
+        slot: args.snapshot.slot,
+        dateISO: args.snapshot.dateISO,
+        responseId: briefResult.responseId,
+        error: repairedBrief.error,
+      });
+      throw new Error(`ai_recovery_openai_failed:${repairedBrief.error}`);
+    }
+    try {
+      brief = parseBriefJson(repairedBrief.text, args.snapshot);
+    } catch (repairParseError) {
+      console.error("[AIRecovery] brief_repair_parse_failed", {
+        model: args.model,
+        slot: args.snapshot.slot,
+        dateISO: args.snapshot.dateISO,
+        responseId: repairedBrief.responseId,
+        error: trimText((repairParseError as Error)?.message ?? repairParseError, 160),
+      });
+      throw new Error(`ai_recovery_openai_failed:brief_repair_parse_failed`);
+    }
   }
 
   const selectionIds = getSelectionIds(brief, args.selectedCandidateIds);
@@ -1333,7 +1398,7 @@ async function runOpenAIFlow(args: {
       dateISO: args.snapshot.dateISO,
       responseId: briefResult.responseId,
     });
-    throw new Error("ai_recovery_openai_failed");
+    throw new Error("ai_recovery_openai_failed:brief_selection_empty");
   }
 
   const ordersResult = await runAIRecoveryStructuredRequest({
@@ -1355,7 +1420,7 @@ async function runOpenAIFlow(args: {
       briefResponseId: briefResult.responseId,
       error: ordersResult.error,
     });
-    throw new Error("ai_recovery_openai_failed");
+    throw new Error(`ai_recovery_openai_failed:${ordersResult.error}`);
   }
 
   try {
@@ -1388,7 +1453,57 @@ async function runOpenAIFlow(args: {
       ordersResponseId: ordersResult.responseId,
       error: trimText((error as Error)?.message ?? error, 160),
     });
-    throw new Error("ai_recovery_openai_failed");
+    const repairedOrders = await repairAIRecoveryJson({
+      model: args.model,
+      schemaName: "ai_recovery_orders",
+      schema: buildOrdersSchema(),
+      rawText: ordersResult.text,
+      signal: args.signal,
+      maxOutputTokens: 2200,
+    });
+    if (!repairedOrders.ok) {
+      console.error("[AIRecovery] orders_repair_failed", {
+        model: args.model,
+        slot: args.snapshot.slot,
+        dateISO: args.snapshot.dateISO,
+        briefResponseId: briefResult.responseId,
+        ordersResponseId: ordersResult.responseId,
+        error: repairedOrders.error,
+      });
+      throw new Error(`ai_recovery_openai_failed:${repairedOrders.error}`);
+    }
+    try {
+      const orders = parseOrdersJson(repairedOrders.text, args.snapshot.slot, selectedCandidates);
+      return {
+        status: "ready",
+        brief,
+        orders,
+        selectionIds,
+        reasoningEffort: briefReasoningEffort,
+        model: args.model,
+        openaiMeta: {
+          ...baseMeta,
+          briefResponseId: briefResult.responseId,
+          ordersResponseId: repairedOrders.responseId,
+          usage: {
+            brief: briefResult.usage,
+            orders: repairedOrders.usage,
+            total: combineAIRecoveryUsages(briefResult.usage, repairedOrders.usage),
+          },
+          fallbackReason: null,
+        },
+      } satisfies OpenAIFlowResult;
+    } catch (repairParseError) {
+      console.error("[AIRecovery] orders_repair_parse_failed", {
+        model: args.model,
+        slot: args.snapshot.slot,
+        dateISO: args.snapshot.dateISO,
+        briefResponseId: briefResult.responseId,
+        ordersResponseId: repairedOrders.responseId,
+        error: trimText((repairParseError as Error)?.message ?? repairParseError, 160),
+      });
+      throw new Error("ai_recovery_openai_failed:orders_repair_parse_failed");
+    }
   }
 }
 
@@ -1641,7 +1756,7 @@ export async function regenerateAIRecoveryOrders(args: {
       dateISO: args.dateISO,
       error: ordersResult.error,
     });
-    throw new Error("ai_recovery_orders_failed");
+    throw new Error(`ai_recovery_orders_failed:${ordersResult.error}`);
   }
 
   let orders: AIRecoveryOrder[];
@@ -1655,7 +1770,36 @@ export async function regenerateAIRecoveryOrders(args: {
       responseId: ordersResult.responseId,
       error: trimText((error as Error)?.message ?? error, 160),
     });
-    throw new Error("ai_recovery_orders_failed");
+    const repairedOrders = await repairAIRecoveryJson({
+      model,
+      schemaName: "ai_recovery_orders",
+      schema: buildOrdersSchema(),
+      rawText: ordersResult.text,
+      signal: args.signal,
+      maxOutputTokens: 2200,
+    });
+    if (!repairedOrders.ok) {
+      console.error("[AIRecovery] regenerate_orders_repair_failed", {
+        model,
+        slot: args.slot,
+        dateISO: args.dateISO,
+        responseId: ordersResult.responseId,
+        error: repairedOrders.error,
+      });
+      throw new Error(`ai_recovery_orders_failed:${repairedOrders.error}`);
+    }
+    try {
+      orders = parseOrdersJson(repairedOrders.text, args.slot, selectedCandidates);
+    } catch (repairParseError) {
+      console.error("[AIRecovery] regenerate_orders_repair_parse_failed", {
+        model,
+        slot: args.slot,
+        dateISO: args.dateISO,
+        responseId: repairedOrders.responseId,
+        error: trimText((repairParseError as Error)?.message ?? repairParseError, 160),
+      });
+      throw new Error("ai_recovery_orders_failed:orders_repair_parse_failed");
+    }
   }
 
   const nextSession: AIRecoverySlotPayload = {

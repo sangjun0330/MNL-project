@@ -3,6 +3,7 @@ import { isAIRecoverySlot } from "@/lib/aiRecovery";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
+export const preferredRegion = ["iad1", "sfo1", "fra1"];
 
 export async function GET(req: Request) {
   try {

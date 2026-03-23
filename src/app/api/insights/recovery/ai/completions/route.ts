@@ -3,6 +3,7 @@ import { isISODate, todayISO } from "@/lib/date";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
+export const preferredRegion = ["iad1", "sfo1", "fra1"];
 
 export async function POST(req: Request) {
   try {

@@ -4,6 +4,7 @@ import { AI_RECOVERY_MAX_CANDIDATES, isAIRecoverySlot } from "@/lib/aiRecovery";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
+export const preferredRegion = ["iad1", "sfo1", "fra1"];
 
 function readCandidateIds(value: unknown) {
   if (!Array.isArray(value)) return [];
@@ -68,7 +69,10 @@ export async function POST(req: Request) {
     ) {
       return bad(403, message);
     }
-    if (message.startsWith("ai_recovery_")) return bad(502, message);
+    if (message.startsWith("ai_recovery_")) {
+      const [error, ...rest] = message.split(":");
+      return jsonNoStore({ ok: false, error, detail: rest.join(":") || null }, { status: 502 });
+    }
     return jsonNoStore({ ok: false, error: "ai_recovery_orders_failed" }, { status: 500 });
   }
 }

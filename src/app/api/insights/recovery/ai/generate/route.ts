@@ -4,6 +4,7 @@ import { isAIRecoverySlot } from "@/lib/aiRecovery";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
+export const preferredRegion = ["iad1", "sfo1", "fra1"];
 
 export async function POST(req: Request) {
   try {
@@ -45,7 +46,8 @@ export async function POST(req: Request) {
       return jsonNoStore({ ok: false, error: message }, { status: 403 });
     }
     if (message.startsWith("ai_recovery_")) {
-      return jsonNoStore({ ok: false, error: message }, { status: 502 });
+      const [error, ...rest] = message.split(":");
+      return jsonNoStore({ ok: false, error, detail: rest.join(":") || null }, { status: 502 });
     }
     return jsonNoStore({ ok: false, error: "ai_recovery_generate_failed" }, { status: 500 });
   }
