@@ -70,8 +70,13 @@ export function useAIRecoverySession(args: HookArgs): HookState {
         method: "GET",
         cache: "no-store",
       });
-      const json = await readJson<{ ok?: boolean; error?: string; data?: SessionData }>(response);
+      const json = await readJson<{ ok?: boolean; error?: string; detail?: string | null; data?: SessionData }>(response);
       if (!response.ok || !json?.ok || !json.data) {
+        console.error("[AIRecovery] client_load_failed", {
+          status: response.status,
+          error: json?.error ?? null,
+          detail: json?.detail ?? null,
+        });
         throw new Error(String(json?.error ?? `http_${response.status}`));
       }
       setData(json.data);
@@ -110,8 +115,13 @@ export function useAIRecoverySession(args: HookArgs): HookState {
           state: buildStatePayload(),
         }),
       });
-      const json = await readJson<{ ok?: boolean; error?: string; data?: SessionData }>(response);
+      const json = await readJson<{ ok?: boolean; error?: string; detail?: string | null; data?: SessionData }>(response);
       if (!response.ok || !json?.ok || !json.data) {
+        console.error("[AIRecovery] client_generate_failed", {
+          status: response.status,
+          error: json?.error ?? null,
+          detail: json?.detail ?? null,
+        });
         throw new Error(String(json?.error ?? `http_${response.status}`));
       }
       setData(json.data);
@@ -139,8 +149,13 @@ export function useAIRecoverySession(args: HookArgs): HookState {
           candidateIds,
         }),
       });
-      const json = await readJson<{ ok?: boolean; error?: string; data?: SessionData }>(response);
+      const json = await readJson<{ ok?: boolean; error?: string; detail?: string | null; data?: SessionData }>(response);
       if (!response.ok || !json?.ok || !json.data) {
+        console.error("[AIRecovery] client_orders_failed", {
+          status: response.status,
+          error: json?.error ?? null,
+          detail: json?.detail ?? null,
+        });
         throw new Error(String(json?.error ?? `http_${response.status}`));
       }
       setData(json.data);

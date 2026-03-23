@@ -409,9 +409,8 @@ function buildGenerationQuota(tier: PlanTier | null | undefined, session: AIReco
 }
 
 function resolveReasoningEffort(model: string, kind: "brief" | "orders"): AIRecoveryEffort {
-  const isProModel = model === "gpt-5.4";
-  if (kind === "brief") return isProModel ? "high" : "medium";
-  return isProModel ? "medium" : "low";
+  if (kind === "brief") return model === "gpt-5.4" ? "medium" : "low";
+  return "low";
 }
 
 function getCandidateTemplate(key: string, slot: AIRecoverySlot) {
@@ -914,6 +913,12 @@ function buildBriefDeveloperPrompt(slot: AIRecoverySlot) {
     "근무 지속 가능성과 회복 실행 가능성을 우선한다.",
     `현재 슬롯은 ${slot === "wake" ? "wake(기상 후)" : "postShift(퇴근 후/저녁 회복)"}다.`,
     "사용자가 고를 수 있는 실행 후보를 최대 5개 제안하라.",
+    "모든 문장은 짧고 단순하게 작성하라.",
+    "headline은 1문장, 28자 안팎으로 작성하라.",
+    "summary는 2문장으로 끝내고 길게 설명하지 마라.",
+    "sections의 body는 각각 1~2문장만 작성하라.",
+    "weeklyNote는 짧은 한 줄만 작성하라.",
+    "candidate why와 expectedBenefit도 각각 1문장만 작성하라.",
     "sections는 정확히 3개여야 하며 body만 채운다. 제목은 시스템이 고정한다.",
     "candidateActions.id는 ASCII slug로 작성한다.",
     "defaultSelectionIds는 candidateActions 안에 있는 id만 사용한다.",
@@ -982,6 +987,10 @@ function buildOrdersDeveloperPrompt(slot: AIRecoverySlot) {
     "각 오더는 독립 체크가 가능해야 한다.",
     "각 오더의 steps는 2~4개여야 한다.",
     slot === "wake" ? "wake 오더는 3~15분 안에 가능한 짧은 실행 위주다." : "postShift 오더는 5~30분 안에 가능한 감압/수면 보호 위주다.",
+    "모든 문장은 짧고 단순하게 작성하라.",
+    "title은 짧게, whyNow는 1문장만 작성하라.",
+    "executionWindow, successCheck, avoid, workHint, safetyNote도 각각 짧은 1문장만 작성하라.",
+    "steps는 짧은 행동 문장으로만 작성하라.",
     "개인 메모, 일정 노트, 근무 이벤트 텍스트 같은 사생활 정보는 입력에 포함되지 않는다. 건강 데이터와 시스템 지표만 사용하라.",
     "진단, 약물, 처치, 검사 지시는 절대 금지한다.",
     "candidateId는 입력으로 받은 selectedCandidates의 id만 써라.",

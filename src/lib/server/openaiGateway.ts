@@ -73,6 +73,8 @@ function resolveGatewayToken(scope: OpenAIRequestScope) {
       : [
           process.env.OPENAI_RECOVERY_GATEWAY_TOKEN,
           process.env.OPENAI_RECOVERY_CF_AIG_TOKEN,
+          process.env.OPENAI_MED_SAFETY_GATEWAY_TOKEN,
+          process.env.OPENAI_MED_SAFETY_CF_AIG_TOKEN,
           process.env.CF_AIG_TOKEN,
           process.env.CLOUDFLARE_AI_GATEWAY_TOKEN,
           process.env.OPENAI_GATEWAY_TOKEN,
@@ -90,6 +92,7 @@ function resolveStoredKeyFlag(scope: OpenAIRequestScope) {
         ]
       : [
           process.env.OPENAI_RECOVERY_GATEWAY_USE_STORED_KEY,
+          process.env.OPENAI_MED_SAFETY_GATEWAY_USE_STORED_KEY,
           process.env.OPENAI_GATEWAY_USE_STORED_KEY,
         ];
   for (const raw of values) {
@@ -108,6 +111,7 @@ function resolveGatewayAuthMode(scope: OpenAIRequestScope, openAIApiKey: string,
         ]
       : [
           process.env.OPENAI_RECOVERY_GATEWAY_AUTH_MODE,
+          process.env.OPENAI_MED_SAFETY_GATEWAY_AUTH_MODE,
           process.env.OPENAI_GATEWAY_AUTH_MODE,
         ];
 

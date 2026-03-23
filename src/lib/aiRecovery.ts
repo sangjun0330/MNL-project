@@ -42,6 +42,8 @@ export type AIRecoveryBrief = {
   dataGaps: string[];
 };
 
+export type AIRecoveryResult = AIRecoveryBrief;
+
 export type AIRecoveryOrder = {
   id: string;
   candidateId: string;

@@ -68,36 +68,36 @@ function resolveBaseUrls() {
 }
 
 function resolveStoreResponses() {
-  const raw = trimEnv(process.env.OPENAI_MED_SAFETY_STORE || process.env.OPENAI_STORE || "true").toLowerCase();
+  const raw = trimEnv(process.env.OPENAI_RECOVERY_STORE || process.env.OPENAI_MED_SAFETY_STORE || process.env.OPENAI_STORE || "true").toLowerCase();
   return !["0", "false", "off", "no"].includes(raw);
 }
 
 function resolveMaxOutputTokens(fallback: number) {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_MAX_OUTPUT_TOKENS ?? fallback);
+  const raw = Number(process.env.OPENAI_RECOVERY_MAX_OUTPUT_TOKENS ?? process.env.OPENAI_MED_SAFETY_MAX_OUTPUT_TOKENS ?? fallback);
   if (!Number.isFinite(raw)) return fallback;
   return Math.max(1400, Math.min(8000, Math.round(raw)));
 }
 
 function resolveNetworkRetryCount() {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_NETWORK_RETRIES ?? 1);
+  const raw = Number(process.env.OPENAI_RECOVERY_NETWORK_RETRIES ?? process.env.OPENAI_MED_SAFETY_NETWORK_RETRIES ?? 1);
   if (!Number.isFinite(raw)) return 1;
   return Math.max(0, Math.min(3, Math.round(raw)));
 }
 
 function resolveNetworkRetryBaseMs() {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_NETWORK_RETRY_BASE_MS ?? 700);
+  const raw = Number(process.env.OPENAI_RECOVERY_NETWORK_RETRY_BASE_MS ?? process.env.OPENAI_MED_SAFETY_NETWORK_RETRY_BASE_MS ?? 700);
   if (!Number.isFinite(raw)) return 700;
   return Math.max(200, Math.min(3000, Math.round(raw)));
 }
 
 function resolveUpstreamTimeoutMs() {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_UPSTREAM_TIMEOUT_MS ?? 120_000);
+  const raw = Number(process.env.OPENAI_RECOVERY_UPSTREAM_TIMEOUT_MS ?? process.env.OPENAI_MED_SAFETY_UPSTREAM_TIMEOUT_MS ?? 120_000);
   if (!Number.isFinite(raw)) return 120_000;
   return Math.max(60_000, Math.min(300_000, Math.round(raw)));
 }
 
 function resolveTotalBudgetMs() {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_TOTAL_BUDGET_MS ?? 420_000);
+  const raw = Number(process.env.OPENAI_RECOVERY_TOTAL_BUDGET_MS ?? process.env.OPENAI_MED_SAFETY_TOTAL_BUDGET_MS ?? 420_000);
   if (!Number.isFinite(raw)) return 420_000;
   return Math.max(120_000, Math.min(900_000, Math.round(raw)));
 }
@@ -122,6 +122,11 @@ function isRetryableError(error: string) {
 
 function isBadRequestError(error: string) {
   return /openai_responses_400/i.test(String(error ?? ""));
+}
+
+function needsMoreOutputTokens(error: string) {
+  const value = String(error ?? "").toLowerCase();
+  return value.includes("incomplete:max_output_tokens") || value.includes("openai_responses_400_token_limit");
 }
 
 function readString(value: unknown) {
@@ -281,6 +286,10 @@ function buildCompatStructuredDeveloperPrompt(args: StructuredRequestArgs) {
   ].join("\n");
 }
 
+function buildStructuredTextDeveloperPrompt(args: StructuredRequestArgs) {
+  return buildCompatStructuredDeveloperPrompt(args);
+}
+
 function buildEmptyTextError(model: string, payload: any) {
   const status = typeof payload?.status === "string" ? payload.status : "unknown";
   const incompleteReason =
@@ -332,7 +341,7 @@ async function postStructuredRequest(
           input: [
             {
               role: "developer",
-              content: [{ type: "input_text", text: buildCompatStructuredDeveloperPrompt(args) }],
+              content: [{ type: "input_text", text: buildStructuredTextDeveloperPrompt(args) }],
             },
             {
               role: "user",
@@ -428,6 +437,7 @@ export async function runAIRecoveryStructuredRequest(args: StructuredRequestArgs
   const baseUrls = resolveBaseUrls();
 
   let lastError = "openai_request_failed";
+  let retriedWithMoreTokens = false;
   for (const baseUrl of baseUrls) {
     for (let attempt = 0; attempt <= retries; attempt += 1) {
       if (args.signal.aborted) {
@@ -449,6 +459,28 @@ export async function runAIRecoveryStructuredRequest(args: StructuredRequestArgs
           return { ok: true, ...compatResult };
         }
         effectiveError = compatResult.error || result.error;
+      }
+
+      if (needsMoreOutputTokens(effectiveError) && !retriedWithMoreTokens) {
+        retriedWithMoreTokens = true;
+        const boostedArgs = {
+          ...args,
+          reasoningEffort: (args.reasoningEffort === "high" ? "medium" : "low") as AIRecoveryEffort,
+          maxOutputTokens: Math.min((args.maxOutputTokens ?? 2400) + 1800, 5200),
+        };
+        console.info("[AIRecovery] openai_retry_more_tokens", {
+          model: args.model,
+          baseUrl,
+          previousReasoningEffort: args.reasoningEffort,
+          nextReasoningEffort: boostedArgs.reasoningEffort,
+          previousMaxOutputTokens: args.maxOutputTokens ?? 2400,
+          nextMaxOutputTokens: boostedArgs.maxOutputTokens,
+        });
+        const boostedResult = await postStructuredRequest(baseUrl, boostedArgs, apiKey, false);
+        if ("text" in boostedResult) {
+          return { ok: true, ...boostedResult };
+        }
+        effectiveError = boostedResult.error;
       }
 
       lastError = effectiveError;
