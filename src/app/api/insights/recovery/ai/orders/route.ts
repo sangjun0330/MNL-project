@@ -71,7 +71,7 @@ export async function POST(req: Request) {
     }
     if (message.startsWith("ai_recovery_")) {
       const [error, ...rest] = message.split(":");
-      return jsonNoStore({ ok: false, error, detail: rest.join(":") || null }, { status: 502 });
+      return jsonNoStore({ ok: false, error, detail: rest.join(":") || null }, { status: 500 });
     }
     return jsonNoStore({ ok: false, error: "ai_recovery_orders_failed" }, { status: 500 });
   }

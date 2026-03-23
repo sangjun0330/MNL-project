@@ -145,13 +145,13 @@ export function normalizeOpenAIResponsesBaseUrl(raw: string) {
   if (!isCloudflareGatewayBaseUrl(stripped)) return stripped || DEFAULT_OPENAI_BASE_URL;
 
   if (/\/compat$/i.test(stripped)) {
-    return stripped;
+    return stripped.replace(/\/compat$/i, "/openai");
   }
   if (/\/openai$/i.test(stripped)) {
-    return stripped.replace(/\/openai$/i, "/compat");
+    return stripped;
   }
   if (/\/v1\/[^/]+\/[^/]+$/i.test(stripped)) {
-    return `${stripped}/compat`;
+    return `${stripped}/openai`;
   }
   return stripped;
 }
@@ -229,8 +229,8 @@ export function resolveOpenAIResponsesRequestConfig(args: {
   return {
     requestUrl: `${normalizedBaseUrl}/responses`,
     headers,
-    // Cloudflare Gateway screenshot flow uses the unified /compat endpoint with
-    // Authorization: Bearer <CF_AIG_TOKEN> and provider-prefixed model ids.
+    // Cloudflare Gateway canonical path for this project is /openai/responses.
+    // /compat or /openai/chat/completions inputs are normalized to /openai.
     model: normalizeOpenAIResponsesModel(args.model, { usesCloudflareGateway, usesCompatEndpoint }),
     usesCloudflareGateway,
     usesCompatEndpoint,
