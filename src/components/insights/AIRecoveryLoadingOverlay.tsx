@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { RNestMark } from "@/components/brand/RNestLogo";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
 
 type LoadingMode = "recovery" | "orders";
@@ -22,182 +22,187 @@ type LoadingCopy = {
 
 type AIRecoveryLoadingOverlayProps = {
   mode: LoadingMode;
+  open: boolean;
 };
 
 const LOADING_COPY: Record<LoadingMode, LoadingCopy> = {
   recovery: {
     eyebrow: "AI CUSTOMIZED RECOVERY",
     title: "AI 맞춤회복을 준비하고 있어요",
-    estimate: "보통 12~18초 정도 걸립니다.",
-    helper: "네트워크 상태나 데이터 양에 따라 조금 달라질 수 있어요.",
+    estimate: "보통 16~22초 정도 걸립니다.",
+    helper: "완료되면 자동으로 닫히고 해설 화면으로 바로 돌아갑니다.",
     steps: [
       {
         title: "건강 데이터를 확인하고 있어요",
         detail: "오늘 수면과 최근 기록을 먼저 모아서 읽고 있습니다.",
-        durationMs: 1700,
+        durationMs: 2600,
       },
       {
         title: "회복 흐름을 분석하고 있어요",
         detail: "최근 회복 패턴과 반복 신호를 비교하고 있습니다.",
-        durationMs: 2200,
+        durationMs: 3000,
       },
       {
         title: "교대근무 리듬을 맞추고 있어요",
         detail: "다음 근무와 현재 컨디션 흐름을 함께 정리하고 있습니다.",
-        durationMs: 1900,
+        durationMs: 2800,
       },
       {
         title: "맞춤회복 해설을 작성하고 있어요",
         detail: "오늘 먼저 봐야 할 카테고리별 해설을 만들고 있습니다.",
-        durationMs: 2800,
+        durationMs: 3400,
       },
       {
         title: "추천 행동을 다듬고 있어요",
         detail: "바로 실행할 수 있는 행동 2개씩을 정교하게 정리하고 있습니다.",
-        durationMs: 2200,
+        durationMs: 3200,
       },
       {
         title: "오늘의 오더까지 묶고 있어요",
         detail: "결과를 검토한 뒤 화면에 반영할 준비를 마무리하고 있습니다.",
-        durationMs: 1800,
+        durationMs: 2600,
       },
     ],
   },
   orders: {
     eyebrow: "TODAY ORDERS",
     title: "오늘의 오더를 다시 정리하고 있어요",
-    estimate: "보통 8~12초 정도 걸립니다.",
-    helper: "이미 생성된 해설을 기준으로 체크리스트를 다시 다듬고 있어요.",
+    estimate: "보통 10~14초 정도 걸립니다.",
+    helper: "완료되면 자동으로 닫히고 체크리스트만 남습니다.",
     steps: [
       {
         title: "기존 해설을 불러오고 있어요",
         detail: "현재 맞춤회복 해설과 오늘 상태를 함께 확인하고 있습니다.",
-        durationMs: 1300,
+        durationMs: 2200,
       },
       {
         title: "실행 우선순위를 고르고 있어요",
         detail: "지금 바로 할 행동과 뒤로 미룰 행동을 다시 정리하고 있습니다.",
-        durationMs: 1800,
+        durationMs: 2600,
       },
       {
         title: "오더 문장을 정리하고 있어요",
         detail: "체크 가능한 실행 문장으로 다시 쓰고 있습니다.",
-        durationMs: 2000,
+        durationMs: 2900,
       },
       {
         title: "타이밍을 맞추고 있어요",
         detail: "지금, 근무 중, 퇴근 후 흐름으로 순서를 다듬고 있습니다.",
-        durationMs: 1700,
+        durationMs: 2400,
       },
       {
         title: "최종 확인 중이에요",
         detail: "체크리스트 저장과 화면 반영 직전 단계입니다.",
-        durationMs: 1500,
+        durationMs: 2200,
       },
     ],
   },
 };
 
-function getCurrentStepIndex(steps: LoadingStep[], elapsedMs: number) {
-  let boundary = 0;
-  for (let index = 0; index < steps.length; index += 1) {
-    boundary += steps[index]!.durationMs;
-    if (elapsedMs < boundary) return index;
-  }
-  return steps.length - 1;
-}
-
-function LoadingStepRow({
-  step,
-  index,
-  currentIndex,
-}: {
-  step: LoadingStep;
-  index: number;
-  currentIndex: number;
-}) {
-  const done = index < currentIndex;
-  const active = index === currentIndex;
-  return (
-    <div
-      className={cn(
-        "flex items-start gap-3 rounded-[18px] px-3 py-2 transition",
-        active ? "bg-[#F6F8FD]" : "bg-transparent"
-      )}
-    >
-      <span
-        className={cn(
-          "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold",
-          done ? "bg-[#111827] text-white" : active ? "bg-[#DDE7FF] text-[#315CA8]" : "bg-[#EEF1F5] text-[#98A2B3]"
-        )}
-      >
-        {done ? "✓" : index + 1}
-      </span>
-      <div className="min-w-0 flex-1 text-left">
-        <div className={cn("text-[13px] font-semibold", active || done ? "text-[#111827]" : "text-[#98A2B3]")}>{step.title}</div>
-        {active ? <p className="mt-1 break-keep text-[12px] leading-5 text-[#667085]">{step.detail}</p> : null}
-      </div>
-    </div>
-  );
-}
-
-export function AIRecoveryLoadingOverlay({ mode }: AIRecoveryLoadingOverlayProps) {
+export function AIRecoveryLoadingOverlay({ mode, open }: AIRecoveryLoadingOverlayProps) {
   const copy = LOADING_COPY[mode];
-  const totalDurationMs = useMemo(() => copy.steps.reduce((sum, step) => sum + step.durationMs, 0), [copy.steps]);
-  const [elapsedMs, setElapsedMs] = useState(0);
+  const [mounted, setMounted] = useState(open);
+  const [visible, setVisible] = useState(open);
+  const [portalEl, setPortalEl] = useState<HTMLElement | null>(null);
+  const [currentIndex, setCurrentIndex] = useState(0);
 
   useEffect(() => {
-    const startedAt = performance.now();
-    const update = () => setElapsedMs(performance.now() - startedAt);
-    update();
-    const id = window.setInterval(update, 120);
-    return () => window.clearInterval(id);
-  }, [mode]);
+    setPortalEl(typeof document !== "undefined" ? document.body : null);
+  }, []);
 
-  const currentIndex = getCurrentStepIndex(copy.steps, elapsedMs);
-  const currentStep = copy.steps[currentIndex] ?? copy.steps[copy.steps.length - 1]!;
-  const progressPct = Math.min(elapsedMs / totalDurationMs, 1) * 100;
+  useEffect(() => {
+    if (open) {
+      setMounted(true);
+      setCurrentIndex(0);
+      const timeoutId = window.setTimeout(() => setVisible(true), 16);
+      return () => window.clearTimeout(timeoutId);
+    }
+    setVisible(false);
+    const timeoutId = window.setTimeout(() => setMounted(false), 220);
+    return () => window.clearTimeout(timeoutId);
+  }, [open]);
 
-  return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-white/90 px-6 backdrop-blur-sm">
-      <div className="max-h-[82vh] w-full max-w-[360px] overflow-auto rounded-[30px] border border-black/[0.06] bg-white px-6 py-7 shadow-[0_20px_60px_rgba(15,23,42,0.12)]">
-        <div className="mx-auto flex h-[84px] w-[84px] items-center justify-center rounded-[28px] bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.98),_rgba(236,239,244,0.92))] shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_16px_30px_rgba(15,23,42,0.08)]">
-          <RNestMark className="h-[52px] w-[88px]" />
-        </div>
+  useEffect(() => {
+    if (!mounted) return;
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousRootOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overflow = previousRootOverflow;
+    };
+  }, [mounted]);
 
-        <div className="mt-5 text-center">
-          <div className="text-[10.5px] font-semibold tracking-[0.22em] text-[#8A93A3]">{copy.eyebrow}</div>
-          <div className="mt-2 text-[20px] font-semibold tracking-[-0.03em] text-[#111827]">{copy.title}</div>
-          <p className="mt-2 break-keep text-[13px] leading-6 text-[#667085]">
-            {copy.estimate}
-            <br />
-            {copy.helper}
-          </p>
-        </div>
+  useEffect(() => {
+    if (!open) return;
+    let timeoutId: number | undefined;
+    let cancelled = false;
 
-        <div className="mt-5 rounded-[24px] bg-[#F7F8FB] p-4 text-left">
-          <div className="flex items-center justify-between gap-3">
-            <div className="text-[11px] font-semibold tracking-[0.16em] text-[#8A93A3]">
-              현재 단계 {currentIndex + 1}/{copy.steps.length}
+    const scheduleNext = (index: number) => {
+      if (index >= copy.steps.length - 1) return;
+      timeoutId = window.setTimeout(() => {
+        if (cancelled) return;
+        setCurrentIndex(index + 1);
+        scheduleNext(index + 1);
+      }, copy.steps[index]!.durationMs);
+    };
+
+    setCurrentIndex(0);
+    scheduleNext(0);
+
+    return () => {
+      cancelled = true;
+      if (timeoutId != null) window.clearTimeout(timeoutId);
+    };
+  }, [open, copy.steps]);
+
+  if (!mounted || !portalEl) return null;
+
+  const currentStep = copy.steps[Math.min(currentIndex, copy.steps.length - 1)]!;
+
+  return createPortal(
+    <div
+      className={cn("fixed inset-0 z-[120] transition-opacity duration-300", visible ? "opacity-100" : "opacity-0")}
+      aria-live="polite"
+      aria-busy={open}
+    >
+      <div className="absolute inset-0 bg-white/55 backdrop-blur-xl" />
+      <div
+        className="relative flex min-h-[100dvh] items-center justify-center px-5"
+        style={{
+          paddingTop: "max(24px, env(safe-area-inset-top))",
+          paddingBottom: "max(24px, env(safe-area-inset-bottom))",
+        }}
+      >
+        <div
+          role="dialog"
+          aria-modal="true"
+          className={cn(
+            "w-full max-w-[420px] rounded-[34px] border border-white/70 bg-white/88 px-7 py-8 text-center shadow-[0_24px_80px_rgba(15,23,42,0.14)] backdrop-blur-2xl transition-all duration-300",
+            visible ? "translate-y-0 scale-100" : "translate-y-2 scale-[0.985]"
+          )}
+        >
+          <div className="text-[10.5px] font-semibold tracking-[0.22em] text-[#98A2B3]">{copy.eyebrow}</div>
+          <div className="mt-3 break-keep text-[30px] font-semibold leading-[1.2] tracking-[-0.05em] text-[#111827] sm:text-[32px]">
+            {copy.title}
+          </div>
+          <p className="mt-4 break-keep text-[15px] leading-7 text-[#5F6B7C]">{copy.estimate}</p>
+
+          <div className="mt-10 text-[12px] font-semibold tracking-[0.16em] text-[#98A2B3]">
+            현재 단계 {currentIndex + 1} / {copy.steps.length}
+          </div>
+          <div key={`${mode}:${currentIndex}`} className="mt-4 animate-in fade-in duration-500">
+            <div className="break-keep text-[24px] font-semibold leading-[1.35] tracking-[-0.04em] text-[#111827] sm:text-[26px]">
+              {currentStep.title}
             </div>
-            <div className="text-[11px] font-medium text-[#98A2B3]">{Math.round(progressPct)}%</div>
+            <p className="mt-4 break-keep text-[16px] leading-7 text-[#5F6B7C]">{currentStep.detail}</p>
           </div>
-          <div className="mt-2 text-[16px] font-semibold tracking-[-0.02em] text-[#111827]">{currentStep.title}</div>
-          <p className="mt-1 break-keep text-[12.5px] leading-5 text-[#667085]">{currentStep.detail}</p>
-          <div className="mt-4 h-2 overflow-hidden rounded-full bg-black/[0.06]">
-            <div
-              className="h-full rounded-full bg-[linear-gradient(90deg,#2E5BFF_0%,#7A96FF_100%)] transition-[width] duration-300"
-              style={{ width: `${progressPct}%` }}
-            />
-          </div>
-        </div>
 
-        <div className="mt-4 space-y-1">
-          {copy.steps.map((step, index) => (
-            <LoadingStepRow key={`${mode}:${step.title}`} step={step} index={index} currentIndex={currentIndex} />
-          ))}
+          <p className="mt-10 break-keep text-[13px] leading-6 text-[#98A2B3]">{copy.helper}</p>
         </div>
       </div>
-    </div>
+    </div>,
+    portalEl
   );
 }

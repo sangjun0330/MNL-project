@@ -138,7 +138,7 @@ export function InsightsRecoveryOrdersDetail() {
         </>
       }
     >
-      {showGeneratingOverlay ? <AIRecoveryLoadingOverlay mode="orders" /> : null}
+      <AIRecoveryLoadingOverlay mode="orders" open={showGeneratingOverlay} />
 
       <DetailCard
         className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"

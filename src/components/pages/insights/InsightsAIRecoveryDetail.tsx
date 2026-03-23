@@ -352,7 +352,7 @@ export function InsightsAIRecoveryDetail() {
         </>
       }
     >
-      {showGeneratingOverlay ? <AIRecoveryLoadingOverlay mode="recovery" /> : null}
+      <AIRecoveryLoadingOverlay mode="recovery" open={showGeneratingOverlay} />
 
       {session.error ? (
         <Surface className="border-[#F3D0D6] bg-[#FFF7F8]">
