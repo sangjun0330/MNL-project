@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ComponentType, type SVGProps } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentType, type SVGProps } from "react";
 import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { AIRecoveryLoadingOverlay } from "@/components/insights/AIRecoveryLoadingOverlay";
+import { AIRecoverySlotTabs } from "@/components/insights/AIRecoverySlotTabs";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { useAIRecoverySession } from "@/components/insights/useAIRecoverySession";
 import { INSIGHTS_MIN_DAYS, isInsightsLocked, useInsightsData } from "@/components/insights/useInsightsData";
@@ -224,11 +226,13 @@ function RecoverySectionRow({
 }
 
 function RecoveryActionPanel({
+  slotLabel,
   hasSession,
   disabled,
   onCreate,
   canRegenerate,
 }: {
+  slotLabel: string;
   hasSession: boolean;
   disabled: boolean;
   onCreate: () => void;
@@ -239,9 +243,9 @@ function RecoveryActionPanel({
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <div className="text-[11px] font-semibold tracking-[0.18em] text-[#8C95A6]">{hasSession ? "REGENERATE" : "CREATE"}</div>
-          <div className="mt-2 text-[22px] font-semibold tracking-[-0.04em] text-[#111827]">{hasSession ? "오늘 회복 해설 다시 만들기" : "오늘 회복 해설 만들기"}</div>
+          <div className="mt-2 text-[22px] font-semibold tracking-[-0.04em] text-[#111827]">{hasSession ? `${slotLabel} 회복 해설 다시 만들기` : `${slotLabel} 회복 해설 만들기`}</div>
           <p className="mt-2 break-keep text-[14px] leading-6 text-[#667085]">
-            {hasSession ? "현재 해설이 있으면 그대로 두고, 정말 필요할 때만 새로 생성하세요." : "AI는 버튼을 누를 때만 호출됩니다. 저장된 해설이 없으면 여기서 시작하세요."}
+            {hasSession ? `${slotLabel} 해설이 이미 있으면 그대로 두고, 꼭 필요할 때만 다시 생성하세요.` : `AI는 버튼을 누를 때만 호출됩니다. ${slotLabel} 결과가 없으면 여기서 시작하세요.`}
           </p>
         </div>
         <Button variant={hasSession ? "secondary" : "primary"} className="h-11 px-5 text-[14px]" disabled={disabled} onClick={onCreate}>
@@ -276,12 +280,16 @@ function PaywallNotice() {
   );
 }
 
-export function InsightsAIRecoveryDetail() {
+export function InsightsAIRecoveryDetail({ initialSlot = "wake" }: { initialSlot?: AIRecoverySlot }) {
   const { t } = useI18n();
+  const router = useRouter();
+  const pathname = usePathname();
   const billing = useBillingAccess();
   const { end, recordedDays, syncLabel } = useInsightsData();
   const planner = useRecoveryPlanner();
-  const slot: AIRecoverySlot = "wake";
+  const [slot, setSlot] = useState<AIRecoverySlot>(initialSlot);
+  const postShiftRedirectedRef = useRef(false);
+  const slotLabel = slot === "wake" ? "기상 후" : "퇴근 후";
   const session = useAIRecoverySession({
     dateISO: end,
     slot,
@@ -303,11 +311,38 @@ export function InsightsAIRecoveryDetail() {
   }, [brief?.sections]);
 
   useEffect(() => {
+    setSlot(initialSlot);
+  }, [initialSlot]);
+
+  useEffect(() => {
     setExpandedSections({});
-  }, [currentSession?.generatedAt, end]);
+  }, [currentSession?.generatedAt, end, slot]);
+
+  useEffect(() => {
+    if (response?.gate.code !== "post_shift_health_required") {
+      postShiftRedirectedRef.current = false;
+      return;
+    }
+    if (postShiftRedirectedRef.current) return;
+    postShiftRedirectedRef.current = true;
+    router.replace("/schedule?openHealthLog=today", { scroll: false });
+  }, [response?.gate.code, router]);
+
+  const updateSlot = (nextSlot: AIRecoverySlot) => {
+    if (nextSlot === slot) return;
+    setSlot(nextSlot);
+    const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+    if (nextSlot === "wake") params.delete("slot");
+    else params.set("slot", nextSlot);
+    const nextQuery = params.toString();
+    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
+  };
+
+  const ordersHref = slot === "postShift" ? "/insights/recovery/orders?slot=postShift" : "/insights/recovery/orders";
 
   const actionPanel = response?.gate.allowed ? (
     <RecoveryActionPanel
+      slotLabel={slotLabel}
       hasSession={Boolean(currentSession)}
       disabled={session.generating || billing.loading || (Boolean(currentSession) && !canRegenerateSession)}
       onCreate={() => void session.generate(true)}
@@ -341,7 +376,7 @@ export function InsightsAIRecoveryDetail() {
     <InsightDetailShell
       title="AI 맞춤회복"
       subtitle={formatKoreanDate(end)}
-      meta={response?.slotDescription ?? "오늘 기록과 최근 흐름으로 회복 포인트를 정리합니다."}
+      meta={response?.slotDescription ?? (slot === "wake" ? "전날 기록과 오늘 수면으로 하루 시작 회복 포인트를 정리합니다." : "오늘 기록을 바탕으로 퇴근 후 회복과 밤 전환 포인트를 정리합니다.")}
       tone="navy"
       backHref="/insights/recovery"
       chips={
@@ -353,6 +388,10 @@ export function InsightsAIRecoveryDetail() {
       }
     >
       <AIRecoveryLoadingOverlay mode="recovery" open={showGeneratingOverlay} />
+
+      <div className="px-1">
+        <AIRecoverySlotTabs value={slot} onChange={updateSlot} />
+      </div>
 
       {session.error ? (
         <Surface className="border-[#F3D0D6] bg-[#FFF7F8]">
@@ -372,6 +411,16 @@ export function InsightsAIRecoveryDetail() {
                 className="inline-flex h-11 items-center justify-center rounded-full bg-black px-5 text-[13px] font-semibold text-white"
               >
                 오늘 수면 기록하기
+              </Link>
+            </div>
+          ) : null}
+          {response.gate.code === "post_shift_health_required" ? (
+            <div className="mt-5">
+              <Link
+                href="/schedule?openHealthLog=today"
+                className="inline-flex h-11 items-center justify-center rounded-full bg-black px-5 text-[13px] font-semibold text-white"
+              >
+                오늘 건강 기록하기
               </Link>
             </div>
           ) : null}
@@ -415,7 +464,7 @@ export function InsightsAIRecoveryDetail() {
 
           <div className="px-1">
             <div className="text-[11px] font-semibold tracking-[0.18em] text-[#8C95A6]">TODAY EXPLANATION</div>
-            <div className="mt-2 text-[20px] font-semibold tracking-[-0.04em] text-[#111827]">오늘 회복 해설</div>
+            <div className="mt-2 text-[20px] font-semibold tracking-[-0.04em] text-[#111827]">{slotLabel} 회복 해설</div>
             <p className="mt-3 break-keep text-[14px] leading-6 text-[#667085]">카테고리별 해설은 한 줄씩 먼저 보고, 추천 행동 2개는 더 보기로 펼쳐 확인하세요.</p>
             <div className="mt-5 grid gap-4">
               {sectionList.map((section) => (
@@ -442,13 +491,13 @@ export function InsightsAIRecoveryDetail() {
               <p className="mt-3 break-keep text-[14px] leading-6 text-[#667085]">{ordersPayload.summary}</p>
               <div className="mt-5 flex flex-wrap gap-3">
                 <Link
-                  href="/insights/recovery/orders"
+                  href={ordersHref}
                   className="inline-flex h-11 items-center justify-center rounded-full bg-black px-5 text-[13px] font-semibold text-white"
                 >
                   오더 보기
                 </Link>
                 <Link
-                  href="/insights/recovery/orders"
+                  href={ordersHref}
                   className="inline-flex h-11 items-center justify-center rounded-full border border-black/[0.08] bg-white px-5 text-[13px] font-semibold text-[#111827]"
                 >
                   체크리스트 열기
@@ -461,8 +510,8 @@ export function InsightsAIRecoveryDetail() {
         </>
       ) : !session.error && response?.gate.allowed && !session.loading ? (
         <Surface>
-          <div className="text-[22px] font-semibold tracking-[-0.03em] text-[#111827]">아직 생성된 해설이 없어요.</div>
-          <p className="mt-3 text-[14px] leading-6 text-[#667085]">위 만들기 버튼을 누를 때만 AI가 호출되고, 생성이 끝나면 해설과 오더가 아래에 정리됩니다.</p>
+          <div className="text-[22px] font-semibold tracking-[-0.03em] text-[#111827]">아직 {slotLabel} 해설이 없어요.</div>
+          <p className="mt-3 text-[14px] leading-6 text-[#667085]">위 만들기 버튼을 누를 때만 AI가 호출되고, 생성이 끝나면 {slotLabel} 해설과 오더가 바로 아래에 정리됩니다.</p>
         </Surface>
       ) : null}
     </InsightDetailShell>

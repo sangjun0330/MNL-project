@@ -1,7 +1,7 @@
 import type { ISODate } from "@/lib/date";
 import type { Shift } from "@/lib/types";
 
-export const AI_RECOVERY_PROMPT_VERSION = "2026-03-23.v2";
+export const AI_RECOVERY_PROMPT_VERSION = "2026-03-24.v5";
 export const AI_RECOVERY_RETENTION_DAYS = 8;
 export const AI_RECOVERY_ORDER_COUNT = 4;
 
@@ -168,12 +168,12 @@ export function isAIRecoverySlot(value: unknown): value is AIRecoverySlot {
 
 export function getAIRecoverySlotLabel(slot: AIRecoverySlot, todayShift: Shift | null | undefined) {
   if (slot === "wake") return "기상 후";
-  return todayShift === "OFF" || todayShift === "VAC" ? "저녁 회복" : "퇴근 후";
+  return "퇴근 후";
 }
 
 export function getAIRecoverySlotDescription(slot: AIRecoverySlot, todayShift: Shift | null | undefined) {
   if (slot === "wake") return "전날 기록과 오늘 수면을 기준으로 하루 시작 회복 방향을 정리합니다.";
-  return todayShift === "OFF" || todayShift === "VAC" ? "저녁에 바로 할 회복 행동을 정리합니다." : "퇴근 후 바로 할 회복 행동을 정리합니다.";
+  return "퇴근 후 바로 할 회복 행동을 정리합니다.";
 }
 
 export function normalizeAIRecoveryLanguage(value: unknown): AIRecoveryLanguage {
@@ -203,6 +203,7 @@ export function getAIRecoveryErrorMessage(code: unknown) {
   if (value === "service_consent_required") return "서비스 동의 후 사용할 수 있어요.";
   if (value === "needs_more_records") return "건강 기록이 3일 이상 필요해요.";
   if (value === "wake_sleep_required") return "오늘 수면을 먼저 기록해 주세요.";
+  if (value === "post_shift_health_required") return "퇴근 후 회복을 만들려면 오늘 건강 정보 2개 이상을 더 기록해 주세요.";
   if (value === "slot_not_available") return "아직 이 시간대가 아니에요.";
   if (value === "session_generation_limit_reached") return "오늘 해설 다시 만들기는 끝났어요.";
   if (value === "orders_generation_limit_reached") return "오늘 오더 다시 만들기는 끝났어요.";

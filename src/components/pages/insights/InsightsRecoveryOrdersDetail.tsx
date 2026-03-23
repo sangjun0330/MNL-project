@@ -1,8 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { AIRecoveryLoadingOverlay } from "@/components/insights/AIRecoveryLoadingOverlay";
+import { AIRecoverySlotTabs } from "@/components/insights/AIRecoverySlotTabs";
 import { useAIRecoverySession } from "@/components/insights/useAIRecoverySession";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { useRecoveryPlanner } from "@/components/insights/useRecoveryPlanner";
@@ -64,7 +67,7 @@ function OrderCard({
   );
 }
 
-function PaywallNotice() {
+function PaywallNotice({ aiHref }: { aiHref: string }) {
   return (
     <DetailCard className="p-6">
       <div className="text-[18px] font-bold text-ios-text">AI 오더는 Plus 또는 Pro에서 사용할 수 있어요.</div>
@@ -77,7 +80,7 @@ function PaywallNotice() {
           플랜 보기
         </Link>
         <Link
-          href="/insights/recovery/ai"
+          href={aiHref}
           className="inline-flex h-11 items-center justify-center rounded-full border border-ios-sep bg-white px-5 text-[13px] font-semibold text-ios-text"
         >
           AI 회복 보기
@@ -87,12 +90,16 @@ function PaywallNotice() {
   );
 }
 
-export function InsightsRecoveryOrdersDetail() {
+export function InsightsRecoveryOrdersDetail({ initialSlot = "wake" }: { initialSlot?: AIRecoverySlot }) {
   const { t } = useI18n();
+  const router = useRouter();
+  const pathname = usePathname();
   const billing = useBillingAccess();
   const { end, recordedDays, syncLabel, todayShift, hasTodayShift } = useInsightsData();
   const planner = useRecoveryPlanner();
-  const slot: AIRecoverySlot = "wake";
+  const [slot, setSlot] = useState<AIRecoverySlot>(initialSlot);
+  const slotLabel = slot === "wake" ? "기상 후" : "퇴근 후";
+  const aiHref = slot === "postShift" ? "/insights/recovery/ai?slot=postShift" : "/insights/recovery/ai";
   const session = useAIRecoverySession({
     dateISO: end,
     slot,
@@ -100,6 +107,10 @@ export function InsightsRecoveryOrdersDetail() {
     enabled: !isInsightsLocked(recordedDays) && billing.hasEntitlement("recoveryPlannerAI"),
   });
   const activeData = session.data?.slot === slot && session.data?.dateISO === end ? session.data : null;
+
+  useEffect(() => {
+    setSlot(initialSlot);
+  }, [initialSlot]);
 
   if (isInsightsLocked(recordedDays)) {
     return (
@@ -112,7 +123,7 @@ export function InsightsRecoveryOrdersDetail() {
   if (!billing.loading && !billing.hasEntitlement("recoveryPlannerAI")) {
     return (
       <InsightDetailShell title="오늘의 오더" subtitle={formatKoreanDate(end)} meta="AI 오더는 Plus 또는 Pro에서 사용할 수 있어요." backHref="/insights/recovery">
-        <PaywallNotice />
+        <PaywallNotice aiHref={aiHref} />
       </InsightDetailShell>
     );
   }
@@ -124,11 +135,21 @@ export function InsightsRecoveryOrdersDetail() {
   const canRegenerateOrders = response?.quota.canRegenerateOrders ?? !currentSession;
   const showGeneratingOverlay = Boolean(response?.gate.allowed && session.savingOrders);
 
+  const updateSlot = (nextSlot: AIRecoverySlot) => {
+    if (nextSlot === slot) return;
+    setSlot(nextSlot);
+    const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+    if (nextSlot === "wake") params.delete("slot");
+    else params.set("slot", nextSlot);
+    const nextQuery = params.toString();
+    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
+  };
+
   return (
     <InsightDetailShell
       title="오늘의 오더"
       subtitle={formatKoreanDate(end)}
-      meta={response?.slotDescription ?? "바로 실행할 체크리스트를 보여줍니다."}
+      meta={response?.slotDescription ?? (slot === "wake" ? "기상 후 바로 실행할 체크리스트를 보여줍니다." : "퇴근 후 바로 실행할 체크리스트를 보여줍니다.")}
       backHref="/insights/recovery"
       chips={
         <>
@@ -140,6 +161,10 @@ export function InsightsRecoveryOrdersDetail() {
     >
       <AIRecoveryLoadingOverlay mode="orders" open={showGeneratingOverlay} />
 
+      <div className="px-1">
+        <AIRecoverySlotTabs value={slot} onChange={updateSlot} />
+      </div>
+
       <DetailCard
         className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
         style={{
@@ -150,7 +175,7 @@ export function InsightsRecoveryOrdersDetail() {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <div className="text-[10.5px] font-semibold tracking-[0.18em] text-[color:var(--rnest-accent)]">TODAY ORDERS</div>
-            <div className="mt-1 text-[20px] font-bold tracking-[-0.03em] text-ios-text">오늘의 오더 체크리스트</div>
+            <div className="mt-1 text-[20px] font-bold tracking-[-0.03em] text-ios-text">{slotLabel} 오더 체크리스트</div>
             <p className="mt-2 text-[13px] leading-6 text-ios-sub">
               {currentSession ? "타이밍과 이유가 붙은 실행 문장으로 바로 확인할 수 있어요." : "AI 호출은 해설 페이지의 만들기 버튼에서만 시작됩니다."}
             </p>
@@ -161,7 +186,7 @@ export function InsightsRecoveryOrdersDetail() {
             </Button>
           ) : (
             <Link
-              href="/insights/recovery/ai"
+              href={aiHref}
               className="inline-flex h-11 items-center justify-center rounded-full border border-ios-sep bg-white px-5 text-[13px] font-semibold text-ios-text"
             >
               해설 만들러 가기
@@ -182,6 +207,16 @@ export function InsightsRecoveryOrdersDetail() {
         <DetailCard className="p-5 sm:p-6">
           <div className="text-[17px] font-bold tracking-[-0.02em] text-ios-text">지금은 만들 수 없어요.</div>
           <p className="mt-2 text-[13px] leading-6 text-ios-sub">{response.gate.message}</p>
+          {response.gate.code === "post_shift_health_required" ? (
+            <div className="mt-4">
+              <Link
+                href="/schedule?openHealthLog=today"
+                className="inline-flex h-11 items-center justify-center rounded-full bg-black px-5 text-[13px] font-semibold text-white"
+              >
+                오늘 건강 기록하기
+              </Link>
+            </div>
+          ) : null}
         </DetailCard>
       ) : null}
 
@@ -208,7 +243,7 @@ export function InsightsRecoveryOrdersDetail() {
       ) : !session.error && response?.gate.allowed ? (
         <DetailCard className="p-5 sm:p-6">
           <div className="text-[17px] font-bold tracking-[-0.02em] text-ios-text">아직 AI 오더가 없어요.</div>
-          <p className="mt-2 text-[13px] leading-6 text-ios-sub">AI 맞춤회복 페이지에서 만들기를 눌러 해설을 먼저 생성해 주세요.</p>
+          <p className="mt-2 text-[13px] leading-6 text-ios-sub">AI 맞춤회복 페이지에서 {slotLabel} 만들기를 눌러 해설을 먼저 생성해 주세요.</p>
         </DetailCard>
       ) : null}
     </InsightDetailShell>
