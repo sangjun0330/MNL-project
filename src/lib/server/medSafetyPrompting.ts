@@ -1415,10 +1415,10 @@ export function buildPromptProfile(args: {
           : ["medium", "low"],
     verbosity: "medium",
     outputTokenCandidates: shortSimple
-      ? [2400, 1800, 1350]
+      ? [3600, 3000, 2400]
       : highRiskDetailed
-        ? [4500, 4050, 3600]
-        : [3600, 3150, 2700],
+        ? [7000, 6200, 5400]
+        : [5400, 4800, 4200],
     qualityLevel: "balanced",
   };
 }

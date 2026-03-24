@@ -181,10 +181,10 @@ function resolveStoreResponses() {
 }
 
 function resolveMaxOutputTokens() {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_MAX_OUTPUT_TOKENS ?? 9000);
-  if (!Number.isFinite(raw)) return 9000;
+  const raw = Number(process.env.OPENAI_MED_SAFETY_MAX_OUTPUT_TOKENS ?? 14000);
+  if (!Number.isFinite(raw)) return 14000;
   const rounded = Math.round(raw);
-  return Math.max(4800, Math.min(18000, rounded));
+  return Math.max(8000, Math.min(24000, rounded));
 }
 
 function resolveNetworkRetryCount() {
@@ -924,7 +924,7 @@ function buildDefaultPromptProfile(): MedSafetyPromptProfile {
   return {
     reasoningEfforts: ["medium", "low"],
     verbosity: "medium",
-    outputTokenCandidates: [3600, 3150, 2700],
+    outputTokenCandidates: [5400, 4800, 4200],
     qualityLevel: "balanced",
   };
 }
