@@ -16,6 +16,7 @@ import type { AIRecoveryBriefSection, AIRecoverySlot } from "@/lib/aiRecovery";
 import { cn } from "@/lib/cn";
 import { formatKoreanDate } from "@/lib/date";
 import { useI18n } from "@/lib/useI18n";
+import type { AIRecoverySessionResponse } from "@/lib/aiRecovery";
 
 type SectionCategory = AIRecoveryBriefSection["category"];
 type SectionSeverity = AIRecoveryBriefSection["severity"];
@@ -280,7 +281,13 @@ function PaywallNotice() {
   );
 }
 
-export function InsightsAIRecoveryDetail({ initialSlot = "wake" }: { initialSlot?: AIRecoverySlot }) {
+export function InsightsAIRecoveryDetail({
+  initialSlot = "wake",
+  initialData = null,
+}: {
+  initialSlot?: AIRecoverySlot;
+  initialData?: AIRecoverySessionResponse["data"] | null;
+}) {
   const { t } = useI18n();
   const router = useRouter();
   const pathname = usePathname();
@@ -295,6 +302,7 @@ export function InsightsAIRecoveryDetail({ initialSlot = "wake" }: { initialSlot
     slot,
     autoGenerate: false,
     enabled: !isInsightsLocked(recordedDays) && billing.hasEntitlement("recoveryPlannerAI"),
+    initialData,
   });
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
   const activeData = session.data?.slot === slot && session.data?.dateISO === end ? session.data : null;
@@ -304,6 +312,7 @@ export function InsightsAIRecoveryDetail({ initialSlot = "wake" }: { initialSlot
   const ordersPayload = currentSession?.orders ?? null;
   const canRegenerateSession = response?.quota.canGenerateSession ?? !currentSession;
   const showGeneratingOverlay = Boolean(response?.gate.allowed && session.generating);
+  const showGenerationControls = Boolean(response?.showGenerationControls);
   const sectionList = useMemo(() => {
     const sections = Array.isArray(brief?.sections) ? brief.sections : [];
     const byCategory = new Map(sections.map((section) => [section.category, section] as const));
@@ -340,7 +349,7 @@ export function InsightsAIRecoveryDetail({ initialSlot = "wake" }: { initialSlot
 
   const ordersHref = slot === "postShift" ? "/insights/recovery/orders?slot=postShift" : "/insights/recovery/orders";
 
-  const actionPanel = response?.gate.allowed ? (
+  const actionPanel = response?.gate.allowed && (!currentSession || showGenerationControls) ? (
     <RecoveryActionPanel
       slotLabel={slotLabel}
       hasSession={Boolean(currentSession)}

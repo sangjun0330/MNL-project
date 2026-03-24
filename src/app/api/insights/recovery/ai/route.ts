@@ -7,21 +7,22 @@ export const preferredRegion = ["iad1", "sfo1", "fra1"];
 
 export async function GET(req: Request) {
   try {
-    const [{ jsonNoStore }, { readUserIdFromRequest }, { readAIRecoverySessionView }] = await Promise.all([
+    const [{ jsonNoStore }, { readAuthIdentityFromRequest }, { readAIRecoverySessionView }] = await Promise.all([
       import("@/lib/server/requestSecurity"),
       import("@/lib/server/readUserId"),
       import("@/lib/server/aiRecovery"),
     ]);
     const bad = (status: number, error: string) => jsonNoStore({ ok: false, error }, { status });
 
-    const userId = await readUserIdFromRequest(req);
-    if (!userId) return bad(401, "login_required");
+    const identity = await readAuthIdentityFromRequest(req);
+    if (!identity.userId) return bad(401, "login_required");
 
     const url = new URL(req.url);
     const dateISO = url.searchParams.get("date");
     const slot = url.searchParams.get("slot");
     const data = await readAIRecoverySessionView({
-      userId,
+      userId: identity.userId,
+      userEmail: identity.email,
       dateISO: isISODate(dateISO ?? "") ? (dateISO as ISODate) : todayISO(),
       slot: isAIRecoverySlot(slot) ? slot : "wake",
     });

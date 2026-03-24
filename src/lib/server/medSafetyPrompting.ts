@@ -1414,7 +1414,11 @@ export function buildPromptProfile(args: {
           ? ["medium", "low", "high"]
           : ["medium", "low"],
     verbosity: "medium",
-    outputTokenCandidates: shortSimple ? [1600, 1200, 900] : highRiskDetailed ? [3000, 2700, 2400] : [2400, 2100, 1800],
+    outputTokenCandidates: shortSimple
+      ? [2400, 1800, 1350]
+      : highRiskDetailed
+        ? [4500, 4050, 3600]
+        : [3600, 3150, 2700],
     qualityLevel: "balanced",
   };
 }

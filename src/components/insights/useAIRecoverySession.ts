@@ -13,6 +13,7 @@ type HookArgs = {
   slot: AIRecoverySlot;
   autoGenerate?: boolean;
   enabled?: boolean;
+  initialData?: SessionData | null;
 };
 
 type HookState = {
@@ -34,14 +35,36 @@ async function readJson<T>(response: Response): Promise<T | null> {
 
 export function useAIRecoverySession(args: HookArgs): HookState {
   const store = useAppStore();
-  const [data, setData] = useState<SessionData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const normalizeData = (value: SessionData | null | undefined): SessionData | null => {
+    if (!value) return null;
+    return {
+      ...value,
+      dateISO: value.dateISO ?? args.dateISO,
+      slot: value.slot ?? args.slot,
+      todaySlots: value.todaySlots ?? { wakeReady: false, postShiftReady: false, allReady: false },
+      orderStats:
+        value.orderStats ??
+        {
+          todayWakeCompleted: 0,
+          todayPostShiftCompleted: 0,
+          todayTotalCompleted: 0,
+          weekTotalCompleted: 0,
+        },
+      showGenerationControls: value.showGenerationControls ?? false,
+      hasAIEntitlement: value.hasAIEntitlement ?? Boolean(args.enabled),
+    } satisfies SessionData;
+  };
+
+  const initialData = normalizeData(args.initialData);
+  const [data, setData] = useState<SessionData | null>(initialData);
+  const [loading, setLoading] = useState(!initialData);
   const [generating, setGenerating] = useState(false);
   const [savingOrders, setSavingOrders] = useState(false);
   const [togglingCompletion, setTogglingCompletion] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const autoRequestedRef = useRef(new Set<string>());
   const dataRequestRef = useRef(0);
+  const hydratedInitialKeyRef = useRef(initialData ? `${initialData.dateISO}:${initialData.slot}` : null);
 
   const key = `${args.dateISO}:${args.slot}`;
 
@@ -51,16 +74,6 @@ export function useAIRecoverySession(args: HookArgs): HookState {
   };
 
   const isCurrentDataRequest = (requestId: number) => dataRequestRef.current === requestId;
-
-  const normalizeData = (value: SessionData | null | undefined): SessionData | null => {
-    if (!value) return null;
-    return {
-      ...value,
-      dateISO: value.dateISO ?? args.dateISO,
-      slot: value.slot ?? args.slot,
-      hasAIEntitlement: value.hasAIEntitlement ?? Boolean(args.enabled),
-    } satisfies SessionData;
-  };
 
   const setFriendlyError = (value: unknown) => {
     setError(getAIRecoveryErrorMessage(value));
@@ -216,8 +229,21 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     setTogglingCompletion(orderId);
     setError(null);
     const previous = data.completions;
+    const previousStats = data.orderStats;
     const next = completed ? Array.from(new Set([...previous, orderId])) : previous.filter((item) => item !== orderId);
-    setData({ ...data, completions: next });
+    const changed = previous.includes(orderId) !== next.includes(orderId);
+    const delta = changed ? (completed ? 1 : -1) : 0;
+    const optimisticStats =
+      delta === 0
+        ? previousStats
+        : {
+            ...previousStats,
+            todayWakeCompleted: previousStats.todayWakeCompleted + (args.slot === "wake" ? delta : 0),
+            todayPostShiftCompleted: previousStats.todayPostShiftCompleted + (args.slot === "postShift" ? delta : 0),
+            todayTotalCompleted: previousStats.todayTotalCompleted + delta,
+            weekTotalCompleted: previousStats.weekTotalCompleted + delta,
+          };
+    setData({ ...data, completions: next, orderStats: optimisticStats });
     try {
       const response = await fetch("/api/insights/recovery/ai/completions", {
         method: "POST",
@@ -230,14 +256,15 @@ export function useAIRecoverySession(args: HookArgs): HookState {
           completed,
         }),
       });
-      const json = await readJson<{ ok?: boolean; error?: string; data?: { completions?: string[] } }>(response);
+      const json = await readJson<{ ok?: boolean; error?: string; data?: { completions?: string[]; orderStats?: SessionData["orderStats"] } }>(response);
       if (!response.ok || !json?.ok) {
         throw new Error(String(json?.error ?? `http_${response.status}`));
       }
       const completions = Array.isArray(json?.data?.completions) ? json.data?.completions ?? [] : [];
-      setData((current) => (current ? { ...current, completions } : current));
+      const orderStats = json?.data?.orderStats ?? optimisticStats;
+      setData((current) => (current ? { ...current, completions, orderStats } : current));
     } catch (nextError) {
-      setData((current) => (current ? { ...current, completions: previous } : current));
+      setData((current) => (current ? { ...current, completions: previous, orderStats: previousStats } : current));
       setFriendlyError((nextError as any)?.message ?? nextError ?? "ai_recovery_completion_failed");
     } finally {
       setTogglingCompletion(null);
@@ -245,6 +272,18 @@ export function useAIRecoverySession(args: HookArgs): HookState {
   };
 
   useEffect(() => {
+    if (initialData && initialData.dateISO === args.dateISO && initialData.slot === args.slot) {
+      setData(initialData);
+      setLoading(false);
+      setError(null);
+    }
+  }, [initialData, args.dateISO, args.slot]);
+
+  useEffect(() => {
+    if (hydratedInitialKeyRef.current === key) {
+      hydratedInitialKeyRef.current = null;
+      return;
+    }
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [args.dateISO, args.slot, args.enabled]);

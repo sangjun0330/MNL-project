@@ -15,6 +15,7 @@ import { INSIGHTS_MIN_DAYS, isInsightsLocked, shiftKo, useInsightsData } from "@
 import type { AIRecoveryOrder, AIRecoverySlot } from "@/lib/aiRecovery";
 import { formatKoreanDate } from "@/lib/date";
 import { useI18n } from "@/lib/useI18n";
+import type { AIRecoverySessionResponse } from "@/lib/aiRecovery";
 
 function OrderCard({
   order,
@@ -89,7 +90,22 @@ function PaywallNotice({ aiHref }: { aiHref: string }) {
   );
 }
 
-export function InsightsRecoveryOrdersDetail({ initialSlot = "wake" }: { initialSlot?: AIRecoverySlot }) {
+function StatPill({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-[22px] border border-ios-sep bg-[#F7F8FB] px-4 py-3">
+      <div className="text-[11px] font-semibold tracking-[0.04em] text-ios-sub">{label}</div>
+      <div className="mt-1 text-[18px] font-bold tracking-[-0.03em] text-ios-text">{value}</div>
+    </div>
+  );
+}
+
+export function InsightsRecoveryOrdersDetail({
+  initialSlot = "wake",
+  initialData = null,
+}: {
+  initialSlot?: AIRecoverySlot;
+  initialData?: AIRecoverySessionResponse["data"] | null;
+}) {
   const { t } = useI18n();
   const router = useRouter();
   const pathname = usePathname();
@@ -104,6 +120,7 @@ export function InsightsRecoveryOrdersDetail({ initialSlot = "wake" }: { initial
     slot,
     autoGenerate: false,
     enabled: !isInsightsLocked(recordedDays) && billing.hasEntitlement("recoveryPlannerAI"),
+    initialData,
   });
   const activeData = session.data?.slot === slot && session.data?.dateISO === end ? session.data : null;
 
@@ -131,8 +148,10 @@ export function InsightsRecoveryOrdersDetail({ initialSlot = "wake" }: { initial
   const currentSession = response?.session ?? null;
   const ordersPayload = currentSession?.orders ?? null;
   const orders = ordersPayload?.items ?? [];
+  const visibleOrders = orders.filter((order) => !(response?.completions?.includes(order.id) ?? false));
   const canRegenerateOrders = response?.quota.canRegenerateOrders ?? !currentSession;
   const showGeneratingOverlay = Boolean(response?.gate.allowed && session.savingOrders);
+  const showGenerationControls = Boolean(response?.showGenerationControls);
 
   const updateSlot = (nextSlot: AIRecoverySlot) => {
     if (nextSlot === slot) return;
@@ -164,6 +183,17 @@ export function InsightsRecoveryOrdersDetail({ initialSlot = "wake" }: { initial
         <AIRecoverySlotTabs value={slot} onChange={updateSlot} />
       </div>
 
+      <DetailCard className="p-5 sm:p-6">
+        <div className="text-[11px] font-semibold tracking-[0.18em] text-[color:var(--rnest-accent)]">ORDER STATS</div>
+        <div className="mt-2 text-[20px] font-bold tracking-[-0.03em] text-ios-text">오늘 오더 성공 횟수</div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <StatPill label="오늘 기상 후 합계" value={`${response?.orderStats.todayWakeCompleted ?? 0}회`} />
+          <StatPill label="오늘 퇴근 후 합계" value={`${response?.orderStats.todayPostShiftCompleted ?? 0}회`} />
+          <StatPill label="오늘 총합 합계" value={`${response?.orderStats.todayTotalCompleted ?? 0}회`} />
+          <StatPill label="일주일 합계" value={`${response?.orderStats.weekTotalCompleted ?? 0}회`} />
+        </div>
+      </DetailCard>
+
       <DetailCard
         className="overflow-hidden px-5 py-5 sm:px-6 sm:py-6"
         style={{
@@ -179,20 +209,20 @@ export function InsightsRecoveryOrdersDetail({ initialSlot = "wake" }: { initial
               {currentSession ? "타이밍과 이유가 붙은 실행 문장으로 바로 확인할 수 있어요." : "AI 호출은 해설 페이지의 만들기 버튼에서만 시작됩니다."}
             </p>
           </div>
-          {currentSession ? (
+          {currentSession && showGenerationControls ? (
             <Button variant="secondary" className="h-11 px-5" disabled={session.savingOrders || billing.loading || !canRegenerateOrders} onClick={() => void session.regenerateOrders()}>
               {session.savingOrders ? "만드는 중…" : "오더 다시 만들기"}
             </Button>
-          ) : (
+          ) : !currentSession ? (
             <Link
               href={aiHref}
               className="inline-flex h-11 items-center justify-center rounded-full border border-ios-sep bg-white px-5 text-[13px] font-semibold text-ios-text"
             >
               해설 만들러 가기
             </Link>
-          )}
+          ) : null}
         </div>
-        {currentSession && !canRegenerateOrders ? <p className="text-[12px] text-ios-sub">오늘 오더 다시 만들기는 끝났어요.</p> : null}
+        {currentSession && showGenerationControls && !canRegenerateOrders ? <p className="text-[12px] text-ios-sub">오늘 오더 다시 만들기는 끝났어요.</p> : null}
       </DetailCard>
 
       {session.error ? (
@@ -227,17 +257,22 @@ export function InsightsRecoveryOrdersDetail({ initialSlot = "wake" }: { initial
         </DetailCard>
       ) : null}
 
-      {orders.length ? (
+      {visibleOrders.length ? (
         <div className="grid gap-3">
-          {orders.map((order) => {
+          {visibleOrders.map((order) => {
             const checked = response?.completions?.includes(order.id) ?? false;
-            return <OrderCard key={order.id} order={order} checked={checked} busy={session.togglingCompletion === order.id} onToggle={() => void session.toggleCompletion(order.id, !checked)} />;
+            return <OrderCard key={order.id} order={order} checked={checked} busy={session.togglingCompletion === order.id} onToggle={() => void session.toggleCompletion(order.id, true)} />;
           })}
         </div>
       ) : session.loading ? (
         <DetailCard className="p-5 sm:p-6">
           <div className="text-[16px] font-bold text-ios-text">준비 중이에요.</div>
           <p className="mt-2 text-[13px] text-ios-sub">저장된 결과를 먼저 확인하고 필요하면 다시 만들어요.</p>
+        </DetailCard>
+      ) : orders.length > 0 ? (
+        <DetailCard className="p-5 sm:p-6">
+          <div className="text-[17px] font-bold tracking-[-0.02em] text-ios-text">오늘 오더를 모두 체크했어요.</div>
+          <p className="mt-2 text-[13px] leading-6 text-ios-sub">완료한 오더는 통계에 반영되고, 남은 오더가 생기면 여기 다시 나타납니다.</p>
         </DetailCard>
       ) : !session.error && response?.gate.allowed ? (
         <DetailCard className="p-5 sm:p-6">

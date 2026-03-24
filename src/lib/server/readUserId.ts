@@ -3,6 +3,11 @@ import { isAuthEmailAllowed } from "@/lib/server/authAccess";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/supabase";
 
+export type ServerAuthIdentity = {
+  userId: string;
+  email: string | null;
+};
+
 let bearerSupabaseClient: ReturnType<typeof createClient<Database>> | null = null;
 
 function extractBearerToken(req: Request): string | null {
@@ -30,9 +35,14 @@ function getBearerSupabaseClient() {
 }
 
 export async function readUserIdFromRequest(req: Request): Promise<string> {
+  const identity = await readAuthIdentityFromRequest(req);
+  return identity.userId;
+}
+
+export async function readAuthIdentityFromRequest(req: Request): Promise<ServerAuthIdentity> {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!supabaseUrl || !supabaseAnon) return "";
+  if (!supabaseUrl || !supabaseAnon) return { userId: "", email: null };
 
   const bearer = extractBearerToken(req);
 
@@ -42,13 +52,44 @@ export async function readUserIdFromRequest(req: Request): Promise<string> {
     // 토큰 위조나 세션 혼용 공격을 방지한다.
     const supabase = getBearerSupabaseClient();
     const { data, error } = await supabase.auth.getUser(bearer);
-    if (!error && data.user?.id && isAuthEmailAllowed(data.user.email ?? null)) return data.user.id;
-    return "";
+    if (!error && data.user?.id && isAuthEmailAllowed(data.user.email ?? null)) {
+      return {
+        userId: data.user.id,
+        email: data.user.email ?? null,
+      };
+    }
+    return { userId: "", email: null };
   }
 
   // Bearer 토큰이 없을 때만 cookie 기반 인증 시도
   const supabase = await getRouteSupabaseClient();
   const { data } = await supabase.auth.getUser();
-  if (data.user?.id && isAuthEmailAllowed(data.user.email ?? null)) return data.user.id;
-  return "";
+  if (data.user?.id && isAuthEmailAllowed(data.user.email ?? null)) {
+    return {
+      userId: data.user.id,
+      email: data.user.email ?? null,
+    };
+  }
+  return { userId: "", email: null };
+}
+
+export async function readUserIdFromServer(): Promise<string> {
+  const identity = await readAuthIdentityFromServer();
+  return identity.userId;
+}
+
+export async function readAuthIdentityFromServer(): Promise<ServerAuthIdentity> {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseAnon) return { userId: "", email: null };
+
+  const supabase = await getRouteSupabaseClient();
+  const { data } = await supabase.auth.getUser();
+  if (data.user?.id && isAuthEmailAllowed(data.user.email ?? null)) {
+    return {
+      userId: data.user.id,
+      email: data.user.email ?? null,
+    };
+  }
+  return { userId: "", email: null };
 }

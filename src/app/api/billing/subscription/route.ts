@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { listRecentBillingOrders, readBillingPurchaseSummary, readSubscription } from "@/lib/server/billingStore";
-import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import { readAuthIdentityFromRequest } from "@/lib/server/readUserId";
 import { DEFAULT_BILLING_ENTITLEMENTS } from "@/lib/billing/entitlements";
+import { isPrivilegedRecoveryTesterIdentity } from "@/lib/server/authAccess";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -11,8 +12,8 @@ function bad(status: number, message: string) {
 }
 
 export async function GET(req: Request) {
-  const userId = await readUserIdFromRequest(req);
-  if (!userId) {
+  const identity = await readAuthIdentityFromRequest(req);
+  if (!identity.userId) {
     return NextResponse.json({
       ok: true,
       data: {
@@ -51,15 +52,29 @@ export async function GET(req: Request) {
 
   try {
     const [subscription, orders, purchaseSummary] = await Promise.all([
-      readSubscription(userId),
-      listRecentBillingOrders(userId, 12),
-      readBillingPurchaseSummary(userId),
+      readSubscription(identity.userId),
+      listRecentBillingOrders(identity.userId, 12),
+      readBillingPurchaseSummary(identity.userId),
     ]);
+    const isPrivilegedTester = isPrivilegedRecoveryTesterIdentity({
+      userId: identity.userId,
+      email: identity.email,
+    });
+    const effectiveSubscription = isPrivilegedTester
+      ? {
+          ...subscription,
+          entitlements: {
+            ...subscription.entitlements,
+            recoveryPlannerAI: true,
+          },
+          aiRecoveryModel: subscription.aiRecoveryModel ?? "gpt-5.4",
+        }
+      : subscription;
 
     return NextResponse.json({
       ok: true,
       data: {
-        subscription,
+        subscription: effectiveSubscription,
         orders,
         purchaseSummary,
       },

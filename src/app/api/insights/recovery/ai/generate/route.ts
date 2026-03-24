@@ -8,10 +8,11 @@ export const preferredRegion = ["iad1", "sfo1", "fra1"];
 
 export async function POST(req: Request) {
   let userId: string | null = null;
+  let userEmail: string | null = null;
   let dateISO: ISODate = todayISO();
   let slot: "wake" | "postShift" = "wake";
   try {
-    const [{ jsonNoStore, sameOriginRequestError }, { readUserIdFromRequest }, { generateAIRecoverySession }] = await Promise.all([
+    const [{ jsonNoStore, sameOriginRequestError }, { readAuthIdentityFromRequest }, { generateAIRecoverySession }] = await Promise.all([
       import("@/lib/server/requestSecurity"),
       import("@/lib/server/readUserId"),
       import("@/lib/server/aiRecovery"),
@@ -21,7 +22,9 @@ export async function POST(req: Request) {
     const originError = sameOriginRequestError(req);
     if (originError) return bad(403, originError);
 
-    userId = await readUserIdFromRequest(req);
+    const identity = await readAuthIdentityFromRequest(req);
+    userId = identity.userId;
+    userEmail = identity.email;
     if (!userId) return bad(401, "login_required");
 
     const body = await req.json().catch(() => null);
@@ -32,6 +35,7 @@ export async function POST(req: Request) {
 
     const data = await generateAIRecoverySession({
       userId,
+      userEmail,
       dateISO,
       slot,
       force,
@@ -52,6 +56,7 @@ export async function POST(req: Request) {
       try {
         const recovered = await readAIRecoverySessionView({
           userId,
+          userEmail,
           dateISO,
           slot,
         });

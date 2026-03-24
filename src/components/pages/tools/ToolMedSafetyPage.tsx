@@ -20,6 +20,7 @@ import {
   buildMedSafetySectionBodyText,
   canonicalizeMedSafetyAnswerText,
   normalizeMedSafetyAnswerText,
+  parseMedSafetyDisplayLine,
   parseMedSafetyAnswerSections,
   type MedSafetyAnswerSection as AnswerSection,
   type MedSafetyAnswerSectionTone as AnswerSectionTone,
@@ -503,12 +504,169 @@ function normalizeQuestionInput(value: string) {
     .trim();
 }
 
+function trimSectionLines(lines: string[]) {
+  let start = 0;
+  let end = lines.length;
+  while (start < end && !String(lines[start] ?? "").trim()) start += 1;
+  while (end > start && !String(lines[end - 1] ?? "").trim()) end -= 1;
+  return lines.slice(start, end);
+}
+
+function buildSplitSectionContent(lines: string[]) {
+  const trimmedLines = trimSectionLines(lines.map((line) => String(line ?? "").replace(/\r/g, "")));
+  if (!trimmedLines.length) return null;
+
+  const firstParsed = parseMedSafetyDisplayLine(trimmedLines[0]);
+  if (firstParsed.kind === "bullet" || firstParsed.kind === "number" || firstParsed.kind === "label") {
+    return {
+      lead: "",
+      bodyLines: trimmedLines,
+    };
+  }
+
+  return {
+    lead: trimmedLines[0]!.trim(),
+    bodyLines: trimmedLines.slice(1),
+  };
+}
+
+function normalizeSplitHeading(value: string) {
+  return String(value ?? "")
+    .replace(/\r/g, "")
+    .replace(/\u0000/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/^\s*["'`“”‘’]+/, "")
+    .replace(/["'`“”‘’]+\s*$/, "")
+    .replace(/[:：]\s*$/, "")
+    .trim();
+}
+
+function inferSplitSectionTone(title: string, fallback: AnswerSectionTone): AnswerSectionTone {
+  const normalized = normalizeSplitHeading(title).toLowerCase();
+  if (!normalized) return fallback;
+  if (/(결론|핵심|요약|정리)/.test(normalized)) return "summary";
+  if (/(주의|위험|경고|보고|호출|중단|에스컬|악화|금기)/.test(normalized)) return "warning";
+  if (/(비교|차이|구분|질문|영향|의미|선택|판단)/.test(normalized)) return "compare";
+  if (/(실무|대응|조치|확인|순서|모니터링|우선순위|포인트|관찰)/.test(normalized)) return "action";
+  return fallback;
+}
+
+function hasInlineLabelContent(value: string) {
+  const trimmed = normalizeSplitHeading(value);
+  const colonIndex = trimmed.search(/[:：]/);
+  return colonIndex > 0 && colonIndex < trimmed.length - 1;
+}
+
+function isSubSectionHeadingCandidate(line: string, nextNonEmptyLine: string | null) {
+  const heading = normalizeSplitHeading(line);
+  if (!heading || !nextNonEmptyLine) return false;
+  if (hasInlineLabelContent(heading)) return false;
+
+  const parsed = parseMedSafetyDisplayLine(heading);
+  if (parsed.kind !== "text") return false;
+
+  if (heading.length > 72) return false;
+  if (/[.。!！]$/.test(heading)) return false;
+  if (/(니다|습니다|하세요|합니다|됩니다|있습니다|없습니다|필요합니다|어렵습니다|바랍니다)$/.test(heading)) {
+    return false;
+  }
+
+  if (/[?？]$/.test(heading)) return true;
+
+  const nextParsed = parseMedSafetyDisplayLine(nextNonEmptyLine);
+  const nextIsStructured =
+    nextParsed.kind === "bullet" || nextParsed.kind === "number" || nextParsed.kind === "label";
+
+  if (!nextIsStructured && heading.length > 42) return false;
+
+  return /(영향|우선순위|기준|질문|의미|판단|포인트|순서|보고|중단|관찰|모니터링|대응|확인|선택|비교|요약|정리|핵심|차이)/.test(
+    heading
+  );
+}
+
 /**
  * Post-process sections: split any section that contains sub-headings in its
  * body into multiple continuation sections, each getting its own card.
  */
 function splitSectionSubHeadings(sections: AnswerSection[]): AnswerSection[] {
-  return sections;
+  return sections.flatMap((section) => {
+    if (!section.bodyLines.length) return [section];
+
+    const introBodyLines: string[] = [];
+    const continuationSections: AnswerSection[] = [];
+    let currentSubHeading: string | null = null;
+    let currentSubLines: string[] = [];
+    let foundSplit = false;
+
+    const pushContinuation = () => {
+      if (!currentSubHeading) return;
+      const content = buildSplitSectionContent(currentSubLines);
+      if (!content) {
+        currentSubHeading = null;
+        currentSubLines = [];
+        return;
+      }
+      continuationSections.push({
+        title: currentSubHeading,
+        lead: content.lead,
+        bodyLines: content.bodyLines,
+        tone: inferSplitSectionTone(currentSubHeading, section.tone),
+        continuation: true,
+      });
+      currentSubHeading = null;
+      currentSubLines = [];
+    };
+
+    for (let index = 0; index < section.bodyLines.length; index += 1) {
+      const line = section.bodyLines[index] ?? "";
+      const trimmed = String(line ?? "").trim();
+
+      let nextNonEmptyLine: string | null = null;
+      for (let cursor = index + 1; cursor < section.bodyLines.length; cursor += 1) {
+        const candidate = String(section.bodyLines[cursor] ?? "").trim();
+        if (!candidate) continue;
+        nextNonEmptyLine = section.bodyLines[cursor] ?? "";
+        break;
+      }
+
+      if (trimmed && isSubSectionHeadingCandidate(line, nextNonEmptyLine)) {
+        foundSplit = true;
+        pushContinuation();
+        currentSubHeading = normalizeSplitHeading(line);
+        continue;
+      }
+
+      if (currentSubHeading) currentSubLines.push(line);
+      else introBodyLines.push(line);
+    }
+
+    pushContinuation();
+
+    if (!foundSplit || !continuationSections.length) {
+      return [section];
+    }
+
+    const introContent = buildSplitSectionContent(introBodyLines);
+    const output: AnswerSection[] = [];
+
+    if (section.lead || introContent?.lead || (introContent?.bodyLines.length ?? 0) > 0) {
+      output.push({
+        ...section,
+        lead: section.lead || introContent?.lead || "",
+        bodyLines: introContent?.bodyLines ?? [],
+      });
+    }
+
+    if (!output.length) {
+      const [firstContinuation, ...rest] = continuationSections;
+      return [
+        { ...firstContinuation, continuation: section.continuation },
+        ...rest,
+      ];
+    }
+
+    return [...output, ...continuationSections];
+  });
 }
 
 function sectionCardClass(tone: AnswerSectionTone) {
@@ -986,7 +1144,9 @@ export function ToolMedSafetyPage() {
   const hasTypedInput = normalizeQuestionInput(input).length > 0;
   const isComposerLocked = showSessionDecisionPrompt;
   const canSubmit = !isComposerLocked && !isLoading && canAsk && (hasTypedInput || Boolean(selectedImage));
-  const latestParsedSections = lastAssistantMessage ? parseMedSafetyAnswerSections(lastAssistantMessage.content) : [];
+  const latestParsedSections = lastAssistantMessage
+    ? splitSectionSubHeadings(parseMedSafetyAnswerSections(lastAssistantMessage.content))
+    : [];
   const latestAnswerSummary = latestParsedSections[0]?.lead || buildMedSafetySectionBodyText(latestParsedSections[0] ?? { lead: "", bodyLines: [] });
   const latestCopyText = lastAssistantMessage
     ? buildStructuredCopyText({

@@ -36,6 +36,7 @@ import {
   type PlannerContext,
 } from "@/lib/recoveryPlanner";
 import { statusFromScore, vitalDisplayScore } from "@/lib/rnestInsight";
+import { isPrivilegedRecoveryTesterIdentity } from "@/lib/server/authAccess";
 import { userHasCompletedServiceConsent } from "@/lib/server/serviceConsentStore";
 import { loadAIRecoveryDomains, readAIRecoverySlot, writeAIRecoveryCompletions, writeAIRecoverySlot } from "@/lib/server/aiRecoveryStateStore";
 import { readSubscription } from "@/lib/server/billingStore";
@@ -85,6 +86,7 @@ type OpenAIFlowResult = {
 type RecoverySubscriptionSnapshot = {
   tier: PlanTier;
   hasPaidAccess: boolean;
+  isPrivilegedTester: boolean;
   entitlements: {
     recoveryPlannerAI: boolean;
   };
@@ -143,6 +145,52 @@ function buildAsciiSlug(raw: string, fallback: string) {
 
 function buildOrderId(slot: AIRecoverySlot, source: string, index: number) {
   return `${slot}_${buildAsciiSlug(source, `order_${index + 1}`)}`;
+}
+
+function readReadyOrderIds(session: AIRecoverySlotPayload | null | undefined) {
+  if (session?.status !== "ready") return [];
+  return Array.isArray(session.orders?.items) ? session.orders.items.map((item) => item.id) : [];
+}
+
+function countMatchingCompletions(completions: unknown, orderIds: string[]) {
+  return filterCompletionIdsForOrders(completions, orderIds).length;
+}
+
+function buildTodaySlotStatus(day: LoadedRecoveryDomains["aiRecoveryDaily"][ISODate] | undefined) {
+  const wakeReady = day?.wake?.status === "ready";
+  const postShiftReady = day?.postShift?.status === "ready";
+  return {
+    wakeReady,
+    postShiftReady,
+    allReady: wakeReady && postShiftReady,
+  };
+}
+
+function buildRecoveryOrderStats(args: {
+  dateISO: ISODate;
+  aiRecoveryDaily: LoadedRecoveryDomains["aiRecoveryDaily"];
+  recoveryOrderCompletions: LoadedRecoveryDomains["recoveryOrderCompletions"];
+}) {
+  const todayDay = args.aiRecoveryDaily[args.dateISO];
+  const todayCompletions = args.recoveryOrderCompletions[args.dateISO] ?? [];
+  const todayWakeCompleted = countMatchingCompletions(todayCompletions, readReadyOrderIds(todayDay?.wake ?? null));
+  const todayPostShiftCompleted = countMatchingCompletions(todayCompletions, readReadyOrderIds(todayDay?.postShift ?? null));
+
+  let weekTotalCompleted = 0;
+  for (let offset = 0; offset < 7; offset += 1) {
+    const iso = toISODate(addDays(fromISODate(args.dateISO), -offset));
+    const day = args.aiRecoveryDaily[iso];
+    const completions = args.recoveryOrderCompletions[iso] ?? [];
+    const allowedOrderIds = [...readReadyOrderIds(day?.wake ?? null), ...readReadyOrderIds(day?.postShift ?? null)];
+    weekTotalCompleted += countMatchingCompletions(completions, allowedOrderIds);
+  }
+
+  return {
+    todayWakeCompleted,
+    todayPostShiftCompleted,
+    todayTotalCompleted: todayWakeCompleted + todayPostShiftCompleted,
+    weekTotalCompleted,
+  };
 }
 
 function normalizedMood(bio: BioInputs | null | undefined, emotion: EmotionEntry | null | undefined) {
@@ -295,32 +343,40 @@ function projectRecoverySubscription(args: {
   tier: PlanTier;
   status: "inactive" | "active" | "expired";
   currentPeriodEnd: string | null;
+  isPrivilegedTester?: boolean;
 }): RecoverySubscriptionSnapshot {
   const hasPaidAccess = hasPaidAccessForRecovery(args);
+  const isPrivilegedTester = Boolean(args.isPrivilegedTester);
   return {
     tier: args.tier,
     hasPaidAccess,
+    isPrivilegedTester,
     entitlements: {
-      recoveryPlannerAI: buildBillingEntitlements({
+      recoveryPlannerAI: isPrivilegedTester || buildBillingEntitlements({
         tier: args.tier,
         hasPaidAccess,
         medSafetyTotalRemaining: 0,
       }).recoveryPlannerAI,
     },
-    aiRecoveryModel: getAIRecoveryModelForTier(args.tier),
+    aiRecoveryModel: isPrivilegedTester ? "gpt-5.4" : getAIRecoveryModelForTier(args.tier),
   };
 }
 
-async function readRecoverySubscriptionSnapshot(userId: string): Promise<RecoverySubscriptionSnapshot | null> {
+async function readRecoverySubscriptionSnapshot(userId: string, userEmail?: string | null): Promise<RecoverySubscriptionSnapshot | null> {
+  const isPrivilegedTester = isPrivilegedRecoveryTesterIdentity({
+    userId,
+    email: userEmail ?? null,
+  });
   try {
     const subscription = await readSubscription(userId);
     return {
       tier: subscription.tier,
       hasPaidAccess: subscription.hasPaidAccess,
+      isPrivilegedTester,
       entitlements: {
-        recoveryPlannerAI: Boolean(subscription.entitlements.recoveryPlannerAI),
+        recoveryPlannerAI: isPrivilegedTester || Boolean(subscription.entitlements.recoveryPlannerAI),
       },
-      aiRecoveryModel: subscription.aiRecoveryModel,
+      aiRecoveryModel: isPrivilegedTester ? "gpt-5.4" : subscription.aiRecoveryModel,
     };
   } catch (error) {
     console.error("[AIRecovery] read_subscription_failed_primary", {
@@ -337,11 +393,12 @@ async function readRecoverySubscriptionSnapshot(userId: string): Promise<Recover
       .eq("user_id", userId)
       .maybeSingle();
     if (error) throw error;
-    if (!data) return projectRecoverySubscription({ tier: "free", status: "inactive", currentPeriodEnd: null });
+    if (!data) return projectRecoverySubscription({ tier: "free", status: "inactive", currentPeriodEnd: null, isPrivilegedTester });
     return projectRecoverySubscription({
       tier: asRecoveryPlanTier(data.subscription_tier),
       status: asRecoverySubscriptionStatus(data.subscription_status),
       currentPeriodEnd: typeof data.subscription_current_period_end === "string" ? data.subscription_current_period_end : null,
+      isPrivilegedTester,
     });
   } catch (error) {
     console.error("[AIRecovery] read_subscription_failed_fallback", {
@@ -1063,9 +1120,13 @@ function readGenerationCounts(session: AIRecoverySlotPayload | null | undefined)
   return { brief, orders };
 }
 
-function buildGenerationQuota(tier: PlanTier | null | undefined, session: AIRecoverySlotPayload | null | undefined): AIRecoveryGenerationQuota {
+function buildGenerationQuota(
+  tier: PlanTier | null | undefined,
+  session: AIRecoverySlotPayload | null | undefined,
+  isPrivilegedTester = false
+): AIRecoveryGenerationQuota {
   const used = readGenerationCounts(session);
-  const limit = resolveGenerationLimit(tier);
+  const limit = isPrivilegedTester ? { brief: 9999, orders: 9999 } : resolveGenerationLimit(tier);
   return {
     used,
     limit,
@@ -1715,6 +1776,7 @@ function buildRecoverySnapshot(args: { payload: unknown; dateISO: ISODate; slot:
 
 async function resolveGate(args: {
   userId: string;
+  userEmail?: string | null;
   slot: AIRecoverySlot;
   dateISO: ISODate;
   payload: unknown;
@@ -1733,9 +1795,10 @@ async function resolveGate(args: {
     };
   }
 
-  const subscription = await readRecoverySubscriptionSnapshot(args.userId);
+  const subscription = await readRecoverySubscriptionSnapshot(args.userId, args.userEmail);
   const hasAIEntitlement = Boolean(
-    subscription?.hasPaidAccess && subscription?.entitlements.recoveryPlannerAI && subscription?.aiRecoveryModel
+    subscription?.isPrivilegedTester ||
+      (subscription?.hasPaidAccess && subscription?.entitlements.recoveryPlannerAI && subscription?.aiRecoveryModel)
   );
   if (!hasAIEntitlement) {
     return {
@@ -2038,14 +2101,16 @@ function normalizeStoredSession(snapshot: RecoverySnapshot, session: AIRecoveryS
 
 export async function readAIRecoverySessionView(args: {
   userId: string;
+  userEmail?: string | null;
   dateISO?: string | null;
   slot?: string | null;
 }) {
   const dateISO = isISODate(args.dateISO ?? "") ? (args.dateISO as ISODate) : todayISO();
   const slot = args.slot === "postShift" ? "postShift" : "wake";
-  const { payload } = await safeLoadRecoveryDomains(args.userId);
+  const { payload, aiRecoveryDaily, recoveryOrderCompletions } = await safeLoadRecoveryDomains(args.userId);
   const { gate, snapshot, subscription } = await resolveGate({
     userId: args.userId,
+    userEmail: args.userEmail,
     slot,
     dateISO,
     payload,
@@ -2054,7 +2119,13 @@ export async function readAIRecoverySessionView(args: {
   const visibleSession = gate.allowed && session?.status === "ready" ? normalizeStoredSession(snapshot, session) : null;
   const orderIds = visibleSession?.orders?.items.map((item) => item.id) ?? [];
   const filteredCompletions = filterCompletionIdsForOrders(completions, orderIds);
-  const quota = buildGenerationQuota(subscription?.tier ?? null, session);
+  const quota = buildGenerationQuota(subscription?.tier ?? null, session, Boolean(subscription?.isPrivilegedTester));
+  const todaySlots = buildTodaySlotStatus(aiRecoveryDaily[dateISO]);
+  const orderStats = buildRecoveryOrderStats({
+    dateISO,
+    aiRecoveryDaily,
+    recoveryOrderCompletions,
+  });
   return {
     dateISO,
     slot,
@@ -2070,8 +2141,11 @@ export async function readAIRecoverySessionView(args: {
           visibleSession.promptVersion !== AI_RECOVERY_PROMPT_VERSION)
     ),
     completions: filteredCompletions,
+    todaySlots,
+    orderStats,
+    showGenerationControls: Boolean(subscription?.isPrivilegedTester),
     quota,
-    hasAIEntitlement: Boolean(subscription?.hasPaidAccess && subscription?.entitlements.recoveryPlannerAI),
+    hasAIEntitlement: Boolean(subscription?.isPrivilegedTester || (subscription?.hasPaidAccess && subscription?.entitlements.recoveryPlannerAI)),
     model: subscription?.aiRecoveryModel ?? (subscription?.tier ? getAIRecoveryModelForTier(subscription.tier) : null),
     tier: subscription?.tier ?? null,
   };
@@ -2079,6 +2153,7 @@ export async function readAIRecoverySessionView(args: {
 
 export async function generateAIRecoverySession(args: {
   userId: string;
+  userEmail?: string | null;
   dateISO: ISODate;
   slot: AIRecoverySlot;
   force?: boolean;
@@ -2089,23 +2164,20 @@ export async function generateAIRecoverySession(args: {
   let existingSession: AIRecoverySlotPayload | null = null;
   let existingCompletions: string[] = [];
   let canPersistSession = false;
+  let loadedDomains: SafeLoadedRecoveryDomains | null = null;
 
+  loadedDomains = await safeLoadRecoveryDomains(args.userId);
   if (args.payloadOverride == null) {
-    const loaded = await safeLoadRecoveryDomains(args.userId);
-    payload = loaded.payload;
-    const existing = await safeReadRecoverySlot({ userId: args.userId, dateISO: args.dateISO, slot: args.slot });
-    existingSession = existing.session;
-    existingCompletions = existing.completions;
-    canPersistSession = loaded.storageAvailable && existing.storageAvailable;
-  } else {
-    const existing = await safeReadRecoverySlot({ userId: args.userId, dateISO: args.dateISO, slot: args.slot });
-    existingSession = existing.session;
-    existingCompletions = existing.completions;
-    canPersistSession = existing.storageAvailable;
+    payload = loadedDomains.payload;
   }
+  const existing = await safeReadRecoverySlot({ userId: args.userId, dateISO: args.dateISO, slot: args.slot });
+  existingSession = existing.session;
+  existingCompletions = existing.completions;
+  canPersistSession = loadedDomains.storageAvailable && existing.storageAvailable;
 
   const { gate, snapshot, subscription } = await resolveGate({
     userId: args.userId,
+    userEmail: args.userEmail,
     slot: args.slot,
     dateISO: args.dateISO,
     payload,
@@ -2117,18 +2189,25 @@ export async function generateAIRecoverySession(args: {
       gate,
       session: null,
       completions: [] as string[],
-      quota: buildGenerationQuota(subscription?.tier ?? null, null),
+      quota: buildGenerationQuota(subscription?.tier ?? null, null, Boolean(subscription?.isPrivilegedTester)),
       slotLabel: getAIRecoverySlotLabel(args.slot, snapshot.todayShift),
       slotDescription: getAIRecoverySlotDescription(args.slot, snapshot.todayShift),
       stale: false,
       language: snapshot.language,
-      hasAIEntitlement: Boolean(subscription?.hasPaidAccess && subscription?.entitlements.recoveryPlannerAI),
+      todaySlots: buildTodaySlotStatus(loadedDomains.aiRecoveryDaily[args.dateISO]),
+      orderStats: buildRecoveryOrderStats({
+        dateISO: args.dateISO,
+        aiRecoveryDaily: loadedDomains.aiRecoveryDaily,
+        recoveryOrderCompletions: loadedDomains.recoveryOrderCompletions,
+      }),
+      showGenerationControls: Boolean(subscription?.isPrivilegedTester),
+      hasAIEntitlement: Boolean(subscription?.isPrivilegedTester || (subscription?.hasPaidAccess && subscription?.entitlements.recoveryPlannerAI)),
       model: subscription?.aiRecoveryModel ?? null,
       tier: subscription?.tier ?? null,
     };
   }
 
-  const quota = buildGenerationQuota(subscription?.tier ?? null, existingSession);
+  const quota = buildGenerationQuota(subscription?.tier ?? null, existingSession, Boolean(subscription?.isPrivilegedTester));
   if (
     !args.force &&
     existingSession?.status === "ready" &&
@@ -2143,6 +2222,13 @@ export async function generateAIRecoverySession(args: {
       gate,
       session: normalizedSession,
       completions: filterCompletionIdsForOrders(existingCompletions, normalizedSession?.orders?.items.map((item) => item.id) ?? []),
+      todaySlots: buildTodaySlotStatus(loadedDomains.aiRecoveryDaily[args.dateISO]),
+      orderStats: buildRecoveryOrderStats({
+        dateISO: args.dateISO,
+        aiRecoveryDaily: loadedDomains.aiRecoveryDaily,
+        recoveryOrderCompletions: loadedDomains.recoveryOrderCompletions,
+      }),
+      showGenerationControls: Boolean(subscription?.isPrivilegedTester),
       quota,
       slotLabel: getAIRecoverySlotLabel(args.slot, snapshot.todayShift),
       slotDescription: getAIRecoverySlotDescription(args.slot, snapshot.todayShift),
@@ -2171,6 +2257,13 @@ export async function generateAIRecoverySession(args: {
       slotDescription: getAIRecoverySlotDescription(args.slot, snapshot.todayShift),
       stale: false,
       language: snapshot.language,
+      showGenerationControls: Boolean(subscription?.isPrivilegedTester),
+      todaySlots: buildTodaySlotStatus(loadedDomains.aiRecoveryDaily[args.dateISO]),
+      orderStats: buildRecoveryOrderStats({
+        dateISO: args.dateISO,
+        aiRecoveryDaily: loadedDomains.aiRecoveryDaily,
+        recoveryOrderCompletions: loadedDomains.recoveryOrderCompletions,
+      }),
       hasAIEntitlement: false,
       model: null,
       tier: subscription?.tier ?? null,
@@ -2187,7 +2280,7 @@ export async function generateAIRecoverySession(args: {
     signal: args.signal,
   });
   const session = normalizeStoredSession(snapshot, buildStoredSession({ snapshot, flow, previousSession: existingSession }));
-  const nextQuota = buildGenerationQuota(subscription?.tier ?? null, session);
+  const nextQuota = buildGenerationQuota(subscription?.tier ?? null, session, Boolean(subscription?.isPrivilegedTester));
   if (canPersistSession) {
     try {
       await writeAIRecoverySlot({
@@ -2205,6 +2298,20 @@ export async function generateAIRecoverySession(args: {
       });
     }
   }
+  const nextDaily: SafeLoadedRecoveryDomains["aiRecoveryDaily"] = {
+    ...loadedDomains.aiRecoveryDaily,
+    [args.dateISO]: {
+      version: 1,
+      ...(loadedDomains.aiRecoveryDaily[args.dateISO] ?? {}),
+      [args.slot]: session,
+    },
+  };
+  const todaySlots = buildTodaySlotStatus(nextDaily[args.dateISO]);
+  const orderStats = buildRecoveryOrderStats({
+    dateISO: args.dateISO,
+    aiRecoveryDaily: nextDaily,
+    recoveryOrderCompletions: loadedDomains.recoveryOrderCompletions,
+  });
 
   return {
     dateISO: args.dateISO,
@@ -2212,6 +2319,9 @@ export async function generateAIRecoverySession(args: {
     gate,
     session,
     completions: filterCompletionIdsForOrders(existingCompletions, session.orders?.items.map((item) => item.id) ?? []),
+    todaySlots,
+    orderStats,
+    showGenerationControls: Boolean(subscription?.isPrivilegedTester),
     quota: nextQuota,
     slotLabel: getAIRecoverySlotLabel(args.slot, snapshot.todayShift),
     slotDescription: getAIRecoverySlotDescription(args.slot, snapshot.todayShift),
@@ -2225,13 +2335,16 @@ export async function generateAIRecoverySession(args: {
 
 export async function regenerateAIRecoveryOrders(args: {
   userId: string;
+  userEmail?: string | null;
   dateISO: ISODate;
   slot: AIRecoverySlot;
   signal: AbortSignal;
 }) {
-  const { payload } = await safeLoadRecoveryDomains(args.userId);
+  const loadedDomains = await safeLoadRecoveryDomains(args.userId);
+  const { payload } = loadedDomains;
   const { gate, snapshot, subscription } = await resolveGate({
     userId: args.userId,
+    userEmail: args.userEmail,
     slot: args.slot,
     dateISO: args.dateISO,
     payload,
@@ -2242,7 +2355,7 @@ export async function regenerateAIRecoveryOrders(args: {
 
   const { session, completions } = await safeReadRecoverySlot({ userId: args.userId, dateISO: args.dateISO, slot: args.slot });
   if (!session?.brief) throw new Error("ai_recovery_session_missing");
-  const quota = buildGenerationQuota(subscription?.tier ?? null, session);
+  const quota = buildGenerationQuota(subscription?.tier ?? null, session, Boolean(subscription?.isPrivilegedTester));
   if (!quota.canRegenerateOrders) throw new Error("orders_generation_limit_reached");
   const brief = normalizeStoredSession(snapshot, session)?.brief ?? session.brief;
 
@@ -2341,13 +2454,28 @@ export async function regenerateAIRecoveryOrders(args: {
     slot: args.slot,
     session: nextSession,
   });
+  const nextDaily: SafeLoadedRecoveryDomains["aiRecoveryDaily"] = {
+    ...loadedDomains.aiRecoveryDaily,
+    [args.dateISO]: {
+      version: 1,
+      ...(loadedDomains.aiRecoveryDaily[args.dateISO] ?? {}),
+      [args.slot]: nextSession,
+    },
+  };
   return {
     dateISO: args.dateISO,
     slot: args.slot,
     gate,
     session: nextSession,
     completions: filterCompletionIdsForOrders(completions, nextSession.orders?.items.map((item) => item.id) ?? []),
-    quota: buildGenerationQuota(subscription?.tier ?? null, nextSession),
+    todaySlots: buildTodaySlotStatus(nextDaily[args.dateISO]),
+    orderStats: buildRecoveryOrderStats({
+      dateISO: args.dateISO,
+      aiRecoveryDaily: nextDaily,
+      recoveryOrderCompletions: loadedDomains.recoveryOrderCompletions,
+    }),
+    showGenerationControls: Boolean(subscription?.isPrivilegedTester),
+    quota: buildGenerationQuota(subscription?.tier ?? null, nextSession, Boolean(subscription?.isPrivilegedTester)),
     slotLabel: getAIRecoverySlotLabel(args.slot, snapshot.todayShift),
     slotDescription: getAIRecoverySlotDescription(args.slot, snapshot.todayShift),
     stale: false,
@@ -2365,10 +2493,10 @@ export async function toggleAIRecoveryCompletion(args: {
   completed: boolean;
 }) {
   const orderId = trimText(args.orderId, 180);
-  if (!orderId.startsWith("aiRecovery:")) {
+  if (!orderId) {
     throw new Error("order_id_invalid");
   }
-  const { aiRecoveryDaily } = await safeLoadRecoveryDomains(args.userId);
+  const { aiRecoveryDaily, recoveryOrderCompletions } = await safeLoadRecoveryDomains(args.userId);
   const day = aiRecoveryDaily[args.dateISO];
   const allowedOrderIds = [
     ...(day?.wake?.orders?.items ?? []),
@@ -2381,7 +2509,16 @@ export async function toggleAIRecoveryCompletion(args: {
     ...args,
     orderId,
   });
+  const nextRecoveryOrderCompletions: SafeLoadedRecoveryDomains["recoveryOrderCompletions"] = {
+    ...recoveryOrderCompletions,
+    [args.dateISO]: nextCompletions,
+  };
   return {
     completions: filterCompletionIdsForOrders(nextCompletions, allowedOrderIds),
+    orderStats: buildRecoveryOrderStats({
+      dateISO: args.dateISO,
+      aiRecoveryDaily,
+      recoveryOrderCompletions: nextRecoveryOrderCompletions,
+    }),
   };
 }

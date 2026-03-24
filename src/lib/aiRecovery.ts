@@ -65,6 +65,19 @@ export type AIRecoveryOrdersPayload = {
   items: AIRecoveryOrder[];
 };
 
+export type AIRecoveryTodaySlots = {
+  wakeReady: boolean;
+  postShiftReady: boolean;
+  allReady: boolean;
+};
+
+export type AIRecoveryOrderStats = {
+  todayWakeCompleted: number;
+  todayPostShiftCompleted: number;
+  todayTotalCompleted: number;
+  weekTotalCompleted: number;
+};
+
 export type AIRecoveryContextMeta = {
   historyStart: ISODate;
   historyEnd: ISODate;
@@ -155,6 +168,9 @@ export type AIRecoverySessionResponse = {
     session: AIRecoverySlotPayload | null;
     stale: boolean;
     completions: string[];
+    todaySlots: AIRecoveryTodaySlots;
+    orderStats: AIRecoveryOrderStats;
+    showGenerationControls: boolean;
     quota: AIRecoveryGenerationQuota;
     hasAIEntitlement: boolean;
     model: string | null;
