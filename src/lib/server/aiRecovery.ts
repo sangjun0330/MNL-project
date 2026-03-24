@@ -1596,6 +1596,186 @@ function buildBriefUserPrompt(snapshot: RecoverySnapshot, model: string) {
   ].join("\n");
 }
 
+function buildProBriefPlannerSchema() {
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      headline: { type: "string" },
+      compoundAlert: {
+        anyOf: [
+          { type: "null" },
+          {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              factors: {
+                type: "array",
+                items: { type: "string" },
+              },
+              message: { type: "string" },
+            },
+            required: ["factors", "message"],
+          },
+        ],
+      },
+      sections: {
+        type: "array",
+        minItems: 2,
+        maxItems: 4,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            category: { type: "string", enum: ["sleep", "shift", "caffeine", "menstrual", "stress", "activity"] },
+            title: { type: "string" },
+            description: { type: "string" },
+          },
+          required: ["category", "title", "description"],
+        },
+      },
+      weeklySummary: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          personalInsight: { type: "string" },
+          nextWeekPreview: { type: "string" },
+        },
+        required: ["personalInsight", "nextWeekPreview"],
+      },
+    },
+    required: ["headline", "compoundAlert", "sections", "weeklySummary"],
+  };
+}
+
+function buildProBriefPlanningContext(snapshot: RecoverySnapshot) {
+  const data = buildStartRecoveryPromptData(snapshot);
+  return {
+    phase: data.phase,
+    today: {
+      sleepHours: data.today.sleepHours,
+      napHours: data.today.napHours,
+      sleepDebtHours: data.today.sleepDebtHours,
+      symptomSeverity: data.today.symptomSeverity,
+      menstrualLabel: data.today.menstrualLabel,
+      nightStreak: data.today.nightStreak,
+    },
+    weekly: {
+      avgVital7: data.weekly.avgVital7,
+      avgVitalPrev7: data.weekly.avgVitalPrev7,
+      recordsIn7Days: data.weekly.recordsIn7Days,
+      avgSleepHours: data.history.avgSleepHours,
+      avgStress: data.history.avgStress,
+      avgCaffeineMg: data.history.avgCaffeineMg,
+      avgMood: data.history.avgMood,
+    },
+    topFactors: snapshot.topFactorRows.slice(0, 3),
+    recurringSignals: data.history.recurringSignals,
+    plannerContext: {
+      focusFactor: data.plannerContext.focusFactor?.label ?? null,
+      primaryAction: data.plannerContext.primaryAction,
+      avoidAction: data.plannerContext.avoidAction,
+      nextDuty: data.shift.next,
+      nextDutyDate: data.plannerContext.nextDutyDate,
+      plannerTone: data.plannerContext.plannerTone,
+    },
+    recentTrend: data.weekly.recentVitals7.slice(-3).map((row) => ({
+      dateISO: row.dateISO,
+      shift: row.shift,
+      sleepHours: row.sleepHours,
+      napHours: row.napHours,
+      stress: row.stress ?? null,
+      activity: row.activity ?? null,
+      mood: row.mood ?? null,
+      caffeineMg: row.caffeineMg ?? null,
+      symptomSeverity: row.symptomSeverity ?? null,
+    })),
+    fixedSectionOrder: data.fixedSectionOrder,
+  };
+}
+
+function buildProBriefPlannerDeveloperPrompt(slot: AIRecoverySlot) {
+  if (slot === "postShift") {
+    return [
+      "너는 교대근무 간호사를 위한 Pro 회복 해설 분석기입니다.",
+      "완성형 전체 해설 JSON을 길게 쓰지 말고, 가장 중요한 회복 축과 핵심 섹션 설명 초안만 설계하세요.",
+      "headline은 해설 전체를 아우르는 한 문장만 작성하세요.",
+      "sections는 가장 중요한 카테고리 2~4개만 고르세요.",
+      "각 section.description은 지금 중요한 이유를 한 문장으로만 쓰세요.",
+      "weeklySummary 두 문장은 반복 없이 밀도 높게 작성하세요.",
+      "반드시 JSON 하나만 출력하세요.",
+    ].join(" ");
+  }
+  return [
+    "너는 교대근무 간호사를 위한 Pro 회복 해설 분석기입니다.",
+    "완성형 전체 해설 JSON을 길게 쓰지 말고, 가장 중요한 회복 축과 핵심 섹션 설명 초안만 설계하세요.",
+    "headline은 해설 전체를 아우르는 한 문장만 작성하세요.",
+    "sections는 가장 중요한 카테고리 2~4개만 고르세요.",
+    "각 section.description은 지금 중요한 이유를 한 문장으로만 쓰세요.",
+    "weeklySummary 두 문장은 반복 없이 밀도 높게 작성하세요.",
+    "반드시 JSON 하나만 출력하세요.",
+  ].join(" ");
+}
+
+function buildProBriefPlannerUserPrompt(snapshot: RecoverySnapshot) {
+  const context = buildProBriefPlanningContext(snapshot);
+  return [
+    "아래 compact context만 근거로 Pro 회복 해설의 핵심 초안을 작성하세요.",
+    "headline은 반드시 한 문장만 사용하세요.",
+    "sections는 중요 카테고리만 2~4개 선택하세요.",
+    "tips는 작성하지 마세요.",
+    "weeklySummary.personalInsight와 nextWeekPreview는 서로 다른 내용을 써야 합니다.",
+    "모든 문장은 한국어 존댓말 '입니다/합니다'체로 작성하세요.",
+    "",
+    "[compactContext]",
+    JSON.stringify(context, null, 2),
+  ].join("\n");
+}
+
+function parseProBriefPlannerJson(text: string, snapshot: RecoverySnapshot): AIRecoveryBrief {
+  const parsed = parseLooseJson(text);
+  if (!isRecord(parsed)) throw new Error("pro_brief_planner_not_object");
+  const data = buildStartRecoveryPromptData(snapshot);
+  const sectionsSource = Array.isArray(parsed.sections) ? parsed.sections : [];
+  if (sectionsSource.length < 1) throw new Error("pro_brief_planner_sections_missing");
+  const sections = sectionsSource.slice(0, 4).map((source, index) => {
+    if (!isRecord(source)) throw new Error(`pro_brief_planner_section_invalid_${index + 1}`);
+    return {
+      category: resolveSectionCategory(source.category, index === 0 ? normalizeBriefCategory(snapshot.plannerContext.focusFactor?.key) : "sleep"),
+      severity: "info" as const,
+      title: trimText(source.title, 40),
+      description: trimText(source.description, 240),
+      tips: ["", ""] as [string, string],
+    };
+  });
+  const headline = trimText(parsed.headline, 160);
+  if (!headline) throw new Error("pro_brief_planner_headline_missing");
+  const weeklySummarySource = isRecord(parsed.weeklySummary) ? parsed.weeklySummary : null;
+  if (!weeklySummarySource) throw new Error("pro_brief_planner_weekly_summary_missing");
+  const personalInsight = trimText(weeklySummarySource.personalInsight, 220);
+  const nextWeekPreview = trimText(weeklySummarySource.nextWeekPreview, 220);
+  if (!personalInsight || !nextWeekPreview) throw new Error("pro_brief_planner_weekly_summary_text_missing");
+  const compoundAlert = (() => {
+    if (!isRecord(parsed.compoundAlert)) return buildFallbackCompoundAlert(snapshot, data);
+    const factors = asStringArray(parsed.compoundAlert.factors, 3, 60);
+    const message = trimText(parsed.compoundAlert.message, 200);
+    if (factors.length < 2 || !message) return buildFallbackCompoundAlert(snapshot, data);
+    return { factors, message };
+  })();
+  return {
+    headline,
+    compoundAlert,
+    sections: buildNormalizedBriefSections(snapshot, sections, data),
+    weeklySummary: {
+      avgBattery: data.weekly.avgVital7,
+      prevAvgBattery: data.weekly.avgVitalPrev7,
+      topDrains: snapshot.topFactorRows.slice(0, 3).map((item) => ({ label: item.label, pct: round1(item.pct) })),
+      personalInsight,
+      nextWeekPreview,
+    },
+  };
+}
+
 function buildOrdersDeveloperPrompt(slot: AIRecoverySlot) {
   if (slot === "postShift") {
     return `너는 RNest의 교대근무 간호사용 프리미엄 AI 퇴근 후 오더 생성기입니다. 방금 생성된 AI 맞춤회복 해설을 최우선 기준으로 읽고, 해설의 우선순위를 실제 행동 오더 4개로 번역하세요. 해설에 없는 새 큰 계획을 만들지 말고, 해설의 핵심을 더 짧고 더 실행 가능한 문장으로 압축하세요. 지금은 퇴근 후 오더 단계입니다. 퇴근 직후, 집 도착 후, 잠들기 전으로 이어지는 낮은 마찰의 회복 오더를 우선 만드세요. JSON 하나만 반환하세요. headline은 오늘 밤 오더 흐름의 핵심 한 문장, summary는 왜 이 구성이 맞는지 한 문장, 각 item은 title, body, when, reason을 가져야 합니다. body는 한 문장으로 끝내고 바로 체크 가능한 행동이어야 하며 시간·횟수·장소·조건 중 2개 이상이 가능하면 드러나야 합니다. generic한 문장, 같은 행동 반복, 내부 시스템 용어와 원시 데이터 필드명 노출, ISO 날짜 직접 표기를 금지하세요. headline, summary, reason은 '입니다/합니다'체 한국어 존댓말로 작성하고, body는 반드시 '하세요/해주세요'체로 작성하세요. '-다'체와 명령형 반말은 금지하세요.`;
@@ -1990,97 +2170,164 @@ async function runOpenAIFlow(args: {
       },
     }) satisfies OpenAIFlowResult;
 
-  const briefResult = await runAIRecoveryStructuredRequest({
-    model: args.model,
-    reasoningEffort: briefReasoningEffort,
-    developerPrompt: buildBriefDeveloperPrompt(args.snapshot.slot, args.model),
-    userPrompt: buildBriefUserPrompt(args.snapshot, args.model),
-    schemaName: "ai_recovery_brief",
-    schema: buildBriefSchema(),
-    signal: args.signal,
-    maxOutputTokens: briefMaxOutputTokens,
-  });
-
-  if (!briefResult.ok) {
-    console.error("[AIRecovery] brief_request_failed", {
-      model: args.model,
-      slot: args.snapshot.slot,
-      dateISO: args.snapshot.dateISO,
-      error: briefResult.error,
-    });
-    return {
-      ...buildFallbackFlow(args.snapshot, args.model),
-      openaiMeta: {
-        ...baseMeta,
-        fallbackReason: `brief_fallback:${briefResult.error}`,
-      },
-    } satisfies OpenAIFlowResult;
-  }
-
   let brief: AIRecoveryBrief;
-  try {
-    brief = parseBriefJson(briefResult.text, args.snapshot);
-  } catch (error) {
-    console.error("[AIRecovery] brief_parse_failed", {
+  let briefSource: { responseId: string | null; usage: AIRecoveryUsage | null };
+  if (isGpt54RecoveryModel(args.model)) {
+    const plannerResult = await runAIRecoveryStructuredRequest({
       model: args.model,
-      slot: args.snapshot.slot,
-      dateISO: args.snapshot.dateISO,
-      responseId: briefResult.responseId,
-      error: trimText((error as Error)?.message ?? error, 160),
+      reasoningEffort: briefReasoningEffort,
+      developerPrompt: buildProBriefPlannerDeveloperPrompt(args.snapshot.slot),
+      userPrompt: buildProBriefPlannerUserPrompt(args.snapshot),
+      schemaName: "ai_recovery_brief_planner",
+      schema: buildProBriefPlannerSchema(),
+      signal: args.signal,
+      maxOutputTokens: 1800,
     });
-    const repairedBrief = await repairAIRecoveryJson({
+
+    if (!plannerResult.ok) {
+      console.error("[AIRecovery] pro_brief_planner_failed", {
+        model: args.model,
+        slot: args.snapshot.slot,
+        dateISO: args.snapshot.dateISO,
+        error: plannerResult.error,
+      });
+      return {
+        ...buildFallbackFlow(args.snapshot, args.model),
+        openaiMeta: {
+          ...baseMeta,
+          fallbackReason: `pro_brief_planner_fallback:${plannerResult.error}`,
+        },
+      } satisfies OpenAIFlowResult;
+    }
+
+    try {
+      brief = parseProBriefPlannerJson(plannerResult.text, args.snapshot);
+      briefSource = {
+        responseId: plannerResult.responseId,
+        usage: plannerResult.usage,
+      };
+    } catch (error) {
+      console.error("[AIRecovery] pro_brief_planner_parse_failed", {
+        model: args.model,
+        slot: args.snapshot.slot,
+        dateISO: args.snapshot.dateISO,
+        responseId: plannerResult.responseId,
+        error: trimText((error as Error)?.message ?? error, 160),
+      });
+      return {
+        ...buildFallbackFlow(args.snapshot, args.model),
+        openaiMeta: {
+          ...baseMeta,
+          briefResponseId: plannerResult.responseId,
+          usage: {
+            brief: plannerResult.usage,
+            orders: null,
+            total: combineAIRecoveryUsages(plannerResult.usage, null),
+          },
+          fallbackReason: "pro_brief_planner_parse_fallback",
+        },
+      } satisfies OpenAIFlowResult;
+    }
+  } else {
+    const briefResult = await runAIRecoveryStructuredRequest({
       model: args.model,
+      reasoningEffort: briefReasoningEffort,
+      developerPrompt: buildBriefDeveloperPrompt(args.snapshot.slot, args.model),
+      userPrompt: buildBriefUserPrompt(args.snapshot, args.model),
       schemaName: "ai_recovery_brief",
       schema: buildBriefSchema(),
-      rawText: briefResult.text,
       signal: args.signal,
       maxOutputTokens: briefMaxOutputTokens,
     });
-    if (!repairedBrief.ok) {
-      console.error("[AIRecovery] brief_repair_failed", {
+
+    if (!briefResult.ok) {
+      console.error("[AIRecovery] brief_request_failed", {
+        model: args.model,
+        slot: args.snapshot.slot,
+        dateISO: args.snapshot.dateISO,
+        error: briefResult.error,
+      });
+      return {
+        ...buildFallbackFlow(args.snapshot, args.model),
+        openaiMeta: {
+          ...baseMeta,
+          fallbackReason: `brief_fallback:${briefResult.error}`,
+        },
+      } satisfies OpenAIFlowResult;
+    }
+
+    try {
+      brief = parseBriefJson(briefResult.text, args.snapshot);
+      briefSource = {
+        responseId: briefResult.responseId,
+        usage: briefResult.usage,
+      };
+    } catch (error) {
+      console.error("[AIRecovery] brief_parse_failed", {
         model: args.model,
         slot: args.snapshot.slot,
         dateISO: args.snapshot.dateISO,
         responseId: briefResult.responseId,
-        error: repairedBrief.error,
+        error: trimText((error as Error)?.message ?? error, 160),
       });
-      return {
-        ...buildFallbackFlow(args.snapshot, args.model),
-        openaiMeta: {
-          ...baseMeta,
-          briefResponseId: briefResult.responseId,
-          usage: {
-            brief: briefResult.usage,
-            orders: null,
-            total: combineAIRecoveryUsages(briefResult.usage, null),
-          },
-          fallbackReason: `brief_repair_fallback:${repairedBrief.error}`,
-        },
-      } satisfies OpenAIFlowResult;
-    }
-    try {
-      brief = parseBriefJson(repairedBrief.text, args.snapshot);
-    } catch (repairParseError) {
-      console.error("[AIRecovery] brief_repair_parse_failed", {
+      const repairedBrief = await repairAIRecoveryJson({
         model: args.model,
-        slot: args.snapshot.slot,
-        dateISO: args.snapshot.dateISO,
-        responseId: repairedBrief.responseId,
-        error: trimText((repairParseError as Error)?.message ?? repairParseError, 160),
+        schemaName: "ai_recovery_brief",
+        schema: buildBriefSchema(),
+        rawText: briefResult.text,
+        signal: args.signal,
+        maxOutputTokens: briefMaxOutputTokens,
       });
-      return {
-        ...buildFallbackFlow(args.snapshot, args.model),
-        openaiMeta: {
-          ...baseMeta,
-          briefResponseId: repairedBrief.responseId ?? briefResult.responseId,
-          usage: {
-            brief: repairedBrief.usage ?? briefResult.usage,
-            orders: null,
-            total: combineAIRecoveryUsages(repairedBrief.usage ?? briefResult.usage, null),
+      if (!repairedBrief.ok) {
+        console.error("[AIRecovery] brief_repair_failed", {
+          model: args.model,
+          slot: args.snapshot.slot,
+          dateISO: args.snapshot.dateISO,
+          responseId: briefResult.responseId,
+          error: repairedBrief.error,
+        });
+        return {
+          ...buildFallbackFlow(args.snapshot, args.model),
+          openaiMeta: {
+            ...baseMeta,
+            briefResponseId: briefResult.responseId,
+            usage: {
+              brief: briefResult.usage,
+              orders: null,
+              total: combineAIRecoveryUsages(briefResult.usage, null),
+            },
+            fallbackReason: `brief_repair_fallback:${repairedBrief.error}`,
           },
-          fallbackReason: "brief_repair_parse_fallback",
-        },
-      } satisfies OpenAIFlowResult;
+        } satisfies OpenAIFlowResult;
+      }
+      try {
+        brief = parseBriefJson(repairedBrief.text, args.snapshot);
+        briefSource = {
+          responseId: repairedBrief.responseId ?? briefResult.responseId,
+          usage: repairedBrief.usage ?? briefResult.usage,
+        };
+      } catch (repairParseError) {
+        console.error("[AIRecovery] brief_repair_parse_failed", {
+          model: args.model,
+          slot: args.snapshot.slot,
+          dateISO: args.snapshot.dateISO,
+          responseId: repairedBrief.responseId,
+          error: trimText((repairParseError as Error)?.message ?? repairParseError, 160),
+        });
+        return {
+          ...buildFallbackFlow(args.snapshot, args.model),
+          openaiMeta: {
+            ...baseMeta,
+            briefResponseId: repairedBrief.responseId ?? briefResult.responseId,
+            usage: {
+              brief: repairedBrief.usage ?? briefResult.usage,
+              orders: null,
+              total: combineAIRecoveryUsages(repairedBrief.usage ?? briefResult.usage, null),
+            },
+            fallbackReason: "brief_repair_parse_fallback",
+          },
+        } satisfies OpenAIFlowResult;
+      }
     }
   }
 
@@ -2100,12 +2347,12 @@ async function runOpenAIFlow(args: {
       model: args.model,
       slot: args.snapshot.slot,
       dateISO: args.snapshot.dateISO,
-      briefResponseId: briefResult.responseId,
+      briefResponseId: briefSource.responseId,
       error: ordersResult.error,
     });
     return buildOrdersFallback({
       brief,
-      briefResult,
+      briefResult: briefSource,
       fallbackReason: `orders_fallback:${ordersResult.error}`,
     });
   }
@@ -2120,12 +2367,12 @@ async function runOpenAIFlow(args: {
       model: args.model,
       openaiMeta: {
         ...baseMeta,
-        briefResponseId: briefResult.responseId,
+        briefResponseId: briefSource.responseId,
         ordersResponseId: ordersResult.responseId,
         usage: {
-          brief: briefResult.usage,
+          brief: briefSource.usage,
           orders: ordersResult.usage,
-          total: combineAIRecoveryUsages(briefResult.usage, ordersResult.usage),
+          total: combineAIRecoveryUsages(briefSource.usage, ordersResult.usage),
         },
         fallbackReason: null,
       },
@@ -2135,7 +2382,7 @@ async function runOpenAIFlow(args: {
       model: args.model,
       slot: args.snapshot.slot,
       dateISO: args.snapshot.dateISO,
-      briefResponseId: briefResult.responseId,
+      briefResponseId: briefSource.responseId,
       ordersResponseId: ordersResult.responseId,
       error: trimText((error as Error)?.message ?? error, 160),
     });
@@ -2152,13 +2399,13 @@ async function runOpenAIFlow(args: {
         model: args.model,
         slot: args.snapshot.slot,
         dateISO: args.snapshot.dateISO,
-        briefResponseId: briefResult.responseId,
+        briefResponseId: briefSource.responseId,
         ordersResponseId: ordersResult.responseId,
         error: repairedOrders.error,
       });
       return buildOrdersFallback({
         brief,
-        briefResult,
+        briefResult: briefSource,
         ordersResponseId: ordersResult.responseId,
         ordersUsage: ordersResult.usage,
         fallbackReason: `orders_repair_fallback:${repairedOrders.error}`,
@@ -2174,12 +2421,12 @@ async function runOpenAIFlow(args: {
         model: args.model,
         openaiMeta: {
           ...baseMeta,
-          briefResponseId: briefResult.responseId,
+          briefResponseId: briefSource.responseId,
           ordersResponseId: repairedOrders.responseId,
           usage: {
-            brief: briefResult.usage,
+            brief: briefSource.usage,
             orders: repairedOrders.usage,
-            total: combineAIRecoveryUsages(briefResult.usage, repairedOrders.usage),
+            total: combineAIRecoveryUsages(briefSource.usage, repairedOrders.usage),
           },
           fallbackReason: null,
         },
@@ -2189,13 +2436,13 @@ async function runOpenAIFlow(args: {
         model: args.model,
         slot: args.snapshot.slot,
         dateISO: args.snapshot.dateISO,
-        briefResponseId: briefResult.responseId,
+        briefResponseId: briefSource.responseId,
         ordersResponseId: repairedOrders.responseId,
         error: trimText((repairParseError as Error)?.message ?? repairParseError, 160),
       });
       return buildOrdersFallback({
         brief,
-        briefResult,
+        briefResult: briefSource,
         ordersResponseId: repairedOrders.responseId ?? ordersResult.responseId,
         ordersUsage: repairedOrders.usage ?? ordersResult.usage,
         fallbackReason: "orders_repair_parse_fallback",
