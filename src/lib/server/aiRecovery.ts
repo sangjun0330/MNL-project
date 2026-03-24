@@ -339,6 +339,15 @@ function hasPaidAccessForRecovery(args: {
   return endMs > Date.now();
 }
 
+function resolveAIRecoveryModelForSubscription(args: {
+  tier: PlanTier;
+  isPrivilegedTester?: boolean;
+}) {
+  const planModel = getAIRecoveryModelForTier(args.tier);
+  if (planModel) return planModel;
+  return args.isPrivilegedTester ? "gpt-5.4" : null;
+}
+
 function projectRecoverySubscription(args: {
   tier: PlanTier;
   status: "inactive" | "active" | "expired";
@@ -358,7 +367,10 @@ function projectRecoverySubscription(args: {
         medSafetyTotalRemaining: 0,
       }).recoveryPlannerAI,
     },
-    aiRecoveryModel: isPrivilegedTester ? "gpt-5.4" : getAIRecoveryModelForTier(args.tier),
+    aiRecoveryModel: resolveAIRecoveryModelForSubscription({
+      tier: args.tier,
+      isPrivilegedTester,
+    }),
   };
 }
 
@@ -376,7 +388,10 @@ async function readRecoverySubscriptionSnapshot(userId: string, userEmail?: stri
       entitlements: {
         recoveryPlannerAI: isPrivilegedTester || Boolean(subscription.entitlements.recoveryPlannerAI),
       },
-      aiRecoveryModel: isPrivilegedTester ? "gpt-5.4" : subscription.aiRecoveryModel,
+      aiRecoveryModel: resolveAIRecoveryModelForSubscription({
+        tier: subscription.tier,
+        isPrivilegedTester,
+      }),
     };
   } catch (error) {
     console.error("[AIRecovery] read_subscription_failed_primary", {
@@ -1073,7 +1088,7 @@ function buildFallbackFlow(snapshot: RecoverySnapshot, model: string): OpenAIFlo
     status: "ready",
     brief: buildFallbackBrief(snapshot),
     orders: buildFallbackOrders(snapshot),
-    reasoningEffort: "low",
+    reasoningEffort: resolveReasoningEffort(model, "brief"),
     model,
     openaiMeta: {
       briefResponseId: null,
@@ -1137,7 +1152,7 @@ function buildGenerationQuota(
 }
 
 function resolveReasoningEffort(model: string, kind: "brief" | "orders"): AIRecoveryEffort {
-  if (kind === "brief") return model === "gpt-5.4" ? "medium" : "low";
+  if (kind === "brief") return "high";
   return "low";
 }
 

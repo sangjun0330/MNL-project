@@ -48,27 +48,7 @@ export async function POST(req: Request) {
     console.error("[AIRecovery] generate_failed", {
       message,
     });
-    const [{ jsonNoStore }, { readAIRecoverySessionView }] = await Promise.all([
-      import("@/lib/server/requestSecurity"),
-      import("@/lib/server/aiRecovery"),
-    ]);
-    if (userId) {
-      try {
-        const recovered = await readAIRecoverySessionView({
-          userId,
-          userEmail,
-          dateISO,
-          slot,
-        });
-        if (recovered.session) {
-          return jsonNoStore({ ok: true, data: recovered });
-        }
-      } catch (recoveryError) {
-        console.error("[AIRecovery] generate_failed_recovery_read_failed", {
-          message: recoveryError instanceof Error ? recoveryError.message : String(recoveryError),
-        });
-      }
-    }
+    const [{ jsonNoStore }] = await Promise.all([import("@/lib/server/requestSecurity")]);
     if (message === "session_generation_limit_reached") {
       return jsonNoStore({ ok: false, error: message }, { status: 403 });
     }

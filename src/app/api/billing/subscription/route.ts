@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { listRecentBillingOrders, readBillingPurchaseSummary, readSubscription } from "@/lib/server/billingStore";
+import { getAIRecoveryModelForTier } from "@/lib/billing/plans";
 import { readAuthIdentityFromRequest } from "@/lib/server/readUserId";
 import { DEFAULT_BILLING_ENTITLEMENTS } from "@/lib/billing/entitlements";
 import { isPrivilegedRecoveryTesterIdentity } from "@/lib/server/authAccess";
@@ -60,6 +61,7 @@ export async function GET(req: Request) {
       userId: identity.userId,
       email: identity.email,
     });
+    const effectiveModel = getAIRecoveryModelForTier(subscription.tier) ?? (isPrivilegedTester ? "gpt-5.4" : null);
     const effectiveSubscription = isPrivilegedTester
       ? {
           ...subscription,
@@ -67,9 +69,12 @@ export async function GET(req: Request) {
             ...subscription.entitlements,
             recoveryPlannerAI: true,
           },
-          aiRecoveryModel: subscription.aiRecoveryModel ?? "gpt-5.4",
+          aiRecoveryModel: effectiveModel,
         }
-      : subscription;
+      : {
+          ...subscription,
+          aiRecoveryModel: effectiveModel,
+        };
 
     return NextResponse.json({
       ok: true,
