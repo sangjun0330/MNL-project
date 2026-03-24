@@ -935,11 +935,12 @@ function buildFallbackSections(snapshot: RecoverySnapshot, data: ReturnType<type
 
 function buildFallbackBrief(snapshot: RecoverySnapshot): AIRecoveryBrief {
   const data = buildStartRecoveryPromptData(snapshot);
-  const focusLine = snapshot.plannerContext.primaryAction ?? "오늘은 아침 자극을 낮추는 쪽으로 시작하세요.";
   const afterWork = snapshot.slot === "postShift";
   return {
     headline:
-      afterWork ? "퇴근 후에는 자극을 줄이고 회복 모드로 천천히 전환하세요." : `${focusLine}`,
+      afterWork
+        ? "퇴근 후에는 자극을 줄이고 회복 모드로 천천히 전환해 주세요."
+        : "오늘은 아침 자극을 서둘러 올리기보다 회복 여유를 먼저 남기는 시작이 좋습니다.",
     compoundAlert: buildFallbackCompoundAlert(snapshot, data),
     sections: buildFallbackSections(snapshot, data),
     weeklySummary: {
@@ -1441,9 +1442,9 @@ function buildOrdersSchema() {
 
 function buildBriefDeveloperPrompt(slot: AIRecoverySlot) {
   if (slot === "postShift") {
-    return `너는 교대근무 간호사를 위한 프리미엄 AI 퇴근 후 회복 해설 엔진이다. 오늘 실제 건강 기록과 최근 반복 패턴만 근거로 퇴근 후부터 잠들기 전까지의 회복 우선순위를 정교하게 설명한다. 데이터에 없는 오늘 상태를 꾸며내거나 과장하지 마라. JSON 하나만 반환하라. 문장은 짧고 정확하게 쓰고, generic한 문장·반복 문장·힘 빠진 마무리를 금지한다. section은 정말 중요한 카테고리만 고르고 description은 왜 지금 중요한지 한 문장, tips는 서로 겹치지 않는 실행 행동 2개로 작성한다. 내부 시스템 용어와 원시 데이터 필드명은 절대 노출하지 말고 날짜는 자연어로만 표현하라.`;
+    return `너는 교대근무 간호사를 위한 프리미엄 AI 퇴근 후 회복 해설 엔진입니다. 오늘 실제 건강 기록과 최근 반복 패턴만 근거로 퇴근 후부터 잠들기 전까지의 회복 우선순위를 정교하게 설명하세요. 데이터에 없는 오늘 상태를 꾸며내거나 과장하지 마세요. JSON 하나만 반환하세요. 문장은 짧고 정확하게 쓰고, generic한 문장·반복 문장·힘 빠진 마무리를 금지하세요. section은 정말 중요한 카테고리만 고르고 description은 왜 지금 중요한지 한 문장, tips는 서로 겹치지 않는 실행 행동 2개로 작성하세요. 내부 시스템 용어와 원시 데이터 필드명은 절대 노출하지 말고 날짜는 자연어로만 표현하세요. 모든 서술문은 한국어 존댓말로만 작성하고, '-다'체와 명령형 반말은 금지하세요. 설명 문장은 '입니다/합니다'체를 사용하고, 행동 문장은 '하세요/해주세요'체를 사용하세요.`;
   }
-  return `너는 교대근무 간호사를 위한 프리미엄 AI 기상 후 회복 해설 엔진이다. 전날까지의 건강 기록과 오늘 수면만 근거로 오늘 하루의 시작 회복 우선순위를 정교하게 설명한다. 같은 날 스트레스·카페인·활동·기분·증상은 추정하거나 단정하지 마라. JSON 하나만 반환하라. 문장은 짧고 정확하게 쓰고, generic한 문장·반복 문장·힘 빠진 마무리를 금지한다. section은 정말 중요한 카테고리만 고르고 description은 왜 지금 중요한지 한 문장, tips는 서로 겹치지 않는 실행 행동 2개로 작성한다. 내부 시스템 용어와 원시 데이터 필드명은 절대 노출하지 말고 날짜는 자연어로만 표현하라.`;
+  return `너는 교대근무 간호사를 위한 프리미엄 AI 기상 후 회복 해설 엔진입니다. 전날까지의 건강 기록과 오늘 수면만 근거로 오늘 하루의 시작 회복 우선순위를 정교하게 설명하세요. 같은 날 스트레스·카페인·활동·기분·증상은 추정하거나 단정하지 마세요. JSON 하나만 반환하세요. 문장은 짧고 정확하게 쓰고, generic한 문장·반복 문장·힘 빠진 마무리를 금지하세요. section은 정말 중요한 카테고리만 고르고 description은 왜 지금 중요한지 한 문장, tips는 서로 겹치지 않는 실행 행동 2개로 작성하세요. 내부 시스템 용어와 원시 데이터 필드명은 절대 노출하지 말고 날짜는 자연어로만 표현하세요. 모든 서술문은 한국어 존댓말로만 작성하고, '-다'체와 명령형 반말은 금지하세요. 설명 문장은 '입니다/합니다'체를 사용하고, 행동 문장은 '하세요/해주세요'체를 사용하세요.`;
 }
 
 function buildBriefUserPrompt(snapshot: RecoverySnapshot) {
@@ -1469,6 +1470,9 @@ function buildBriefUserPrompt(snapshot: RecoverySnapshot) {
     "같은 카테고리 중복 금지",
     "각 section.description은 왜 이 카테고리가 지금 중요한지 실제 데이터 2가지 이상에 기대어 1문장으로 설명",
     "각 section.tips는 정확히 2개, 서로 겹치지 않는 실행 행동으로 작성",
+    "headline, compoundAlert.message, section.description, weeklySummary.personalInsight, weeklySummary.nextWeekPreview는 반드시 '입니다/합니다'체 한국어 존댓말로 작성",
+    "section.tips는 반드시 '하세요/해주세요'체 한국어 존댓말로 작성",
+    "'-다', '-해라', '-가라', '-마라' 같은 표현 금지",
     afterWork
       ? "tips는 추상 조언이 아니라 퇴근 직후/집 도착 후/잠들기 전 중 자연스러운 타이밍과 장소·시간·방법 중 최소 2개가 보이게 작성"
       : "tips는 추상 조언이 아니라 시작 타이밍/장소/시간/방법 중 최소 2개가 보이게 작성",
@@ -1536,9 +1540,9 @@ function buildBriefUserPrompt(snapshot: RecoverySnapshot) {
 
 function buildOrdersDeveloperPrompt(slot: AIRecoverySlot) {
   if (slot === "postShift") {
-    return `너는 RNest의 교대근무 간호사용 프리미엄 AI 퇴근 후 오더 생성기다. 방금 생성된 AI 맞춤회복 해설을 최우선 기준으로 읽고, 해설의 우선순위를 실제 행동 오더 4개로 번역하라. 해설에 없는 새 큰 계획을 만들지 말고, 해설의 핵심을 더 짧고 더 실행 가능한 문장으로 압축하라. 지금은 퇴근 후 오더 단계다. 퇴근 직후, 집 도착 후, 잠들기 전으로 이어지는 낮은 마찰의 회복 오더를 우선 만든다. JSON 하나만 반환하라. headline은 오늘 밤 오더 흐름의 핵심 한 문장, summary는 왜 이 구성이 맞는지 한 문장, 각 item은 title, body, when, reason을 가져야 한다. body는 한 문장으로 끝내고 바로 체크 가능한 행동이어야 하며 시간·횟수·장소·조건 중 2개 이상이 가능하면 드러나야 한다. generic한 문장, 같은 행동 반복, 내부 시스템 용어와 원시 데이터 필드명 노출, ISO 날짜 직접 표기를 금지한다.`;
+    return `너는 RNest의 교대근무 간호사용 프리미엄 AI 퇴근 후 오더 생성기입니다. 방금 생성된 AI 맞춤회복 해설을 최우선 기준으로 읽고, 해설의 우선순위를 실제 행동 오더 4개로 번역하세요. 해설에 없는 새 큰 계획을 만들지 말고, 해설의 핵심을 더 짧고 더 실행 가능한 문장으로 압축하세요. 지금은 퇴근 후 오더 단계입니다. 퇴근 직후, 집 도착 후, 잠들기 전으로 이어지는 낮은 마찰의 회복 오더를 우선 만드세요. JSON 하나만 반환하세요. headline은 오늘 밤 오더 흐름의 핵심 한 문장, summary는 왜 이 구성이 맞는지 한 문장, 각 item은 title, body, when, reason을 가져야 합니다. body는 한 문장으로 끝내고 바로 체크 가능한 행동이어야 하며 시간·횟수·장소·조건 중 2개 이상이 가능하면 드러나야 합니다. generic한 문장, 같은 행동 반복, 내부 시스템 용어와 원시 데이터 필드명 노출, ISO 날짜 직접 표기를 금지하세요. headline, summary, reason은 '입니다/합니다'체 한국어 존댓말로 작성하고, body는 반드시 '하세요/해주세요'체로 작성하세요. '-다'체와 명령형 반말은 금지하세요.`;
   }
-  return `너는 RNest의 교대근무 간호사용 프리미엄 AI 기상 후 오더 생성기다. 방금 생성된 AI 맞춤회복 해설을 최우선 기준으로 읽고, 해설의 우선순위를 실제 행동 오더 4개로 번역하라. 해설에 없는 새 큰 계획을 만들지 말고, 해설의 핵심을 더 짧고 더 실행 가능한 문장으로 압축하라. 지금은 기상 후 오더 단계다. 아침에 바로 실행할 수 있는 낮은 마찰의 스타터 오더를 우선 만든다. JSON 하나만 반환하라. headline은 오늘 오더 흐름의 핵심 한 문장, summary는 왜 이 구성이 맞는지 한 문장, 각 item은 title, body, when, reason을 가져야 한다. body는 한 문장으로 끝내고 바로 체크 가능한 행동이어야 하며 시간·횟수·장소·조건 중 2개 이상이 가능하면 드러나야 한다. generic한 문장, 같은 행동 반복, 내부 시스템 용어와 원시 데이터 필드명 노출, ISO 날짜 직접 표기를 금지한다.`;
+  return `너는 RNest의 교대근무 간호사용 프리미엄 AI 기상 후 오더 생성기입니다. 방금 생성된 AI 맞춤회복 해설을 최우선 기준으로 읽고, 해설의 우선순위를 실제 행동 오더 4개로 번역하세요. 해설에 없는 새 큰 계획을 만들지 말고, 해설의 핵심을 더 짧고 더 실행 가능한 문장으로 압축하세요. 지금은 기상 후 오더 단계입니다. 아침에 바로 실행할 수 있는 낮은 마찰의 스타터 오더를 우선 만드세요. JSON 하나만 반환하세요. headline은 오늘 오더 흐름의 핵심 한 문장, summary는 왜 이 구성이 맞는지 한 문장, 각 item은 title, body, when, reason을 가져야 합니다. body는 한 문장으로 끝내고 바로 체크 가능한 행동이어야 하며 시간·횟수·장소·조건 중 2개 이상이 가능하면 드러나야 합니다. generic한 문장, 같은 행동 반복, 내부 시스템 용어와 원시 데이터 필드명 노출, ISO 날짜 직접 표기를 금지하세요. headline, summary, reason은 '입니다/합니다'체 한국어 존댓말로 작성하고, body는 반드시 '하세요/해주세요'체로 작성하세요. '-다'체와 명령형 반말은 금지하세요.`;
 }
 
 function buildOrdersUserPrompt(snapshot: RecoverySnapshot, brief: AIRecoveryBrief) {
@@ -1564,6 +1568,9 @@ function buildOrdersUserPrompt(snapshot: RecoverySnapshot, brief: AIRecoveryBrie
     "headline은 오늘 오더 흐름의 핵심을 한 문장으로 정리",
     "summary는 왜 이 오더 구성이 맞는지 한 문장으로 정리",
     "body는 카드에서 가장 크게 보이는 핵심 오더 문장이고, 한 문장으로 짧고 분명하게 작성",
+    "headline, summary, reason은 반드시 '입니다/합니다'체 한국어 존댓말로 작성",
+    "body는 반드시 '하세요/해주세요'체 한국어 존댓말로 작성",
+    "'-다', '-해라', '-가라', '-마라' 같은 표현 금지",
     "body 안에 시작 트리거를 넣어 언제 시작하는지 바로 보이게 하고, 가능하면 시간/횟수/장소/조건 중 2개 이상 포함",
     "when은 12자 안팎의 아주 짧은 타이밍 라벨만 사용",
     "reason은 body 아래에 붙는 근거 문장으로, 왜 지금 필요한지 brief의 우선순위와 연결해 한 문장으로 설명",
@@ -1593,11 +1600,12 @@ function buildOrdersUserPrompt(snapshot: RecoverySnapshot, brief: AIRecoveryBrie
 
 function buildJsonRepairDeveloperPrompt(schemaName: string, schema: Record<string, unknown>) {
   return [
-    "너는 JSON 정리기다.",
-    "사용자 입력의 의미를 바꾸지 마라.",
-    "새 정보, 새 해석, 새 문장을 추가하지 마라.",
-    "입력 텍스트에서 확인되는 내용만 사용해 정확한 JSON 하나만 출력하라.",
-    "설명, 코드블록, 머리말, 마크다운, 주석을 붙이지 마라.",
+    "너는 JSON 정리기입니다.",
+    "사용자 입력의 의미를 바꾸지 마세요.",
+    "새 정보, 새 해석, 새 문장을 추가하지 마세요.",
+    "입력 텍스트에서 확인되는 내용만 사용해 정확한 JSON 하나만 출력하세요.",
+    "설명, 코드블록, 머리말, 마크다운, 주석을 붙이지 마세요.",
+    "한국어 문장이 있으면 원래 의미를 바꾸지 않는 범위에서 존댓말 '입니다/합니다/하세요/해주세요' 체를 유지하세요.",
     `대상 schema 이름: ${schemaName}`,
     JSON.stringify(schema),
   ].join("\n");

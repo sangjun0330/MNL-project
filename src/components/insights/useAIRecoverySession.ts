@@ -87,6 +87,17 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     }
   };
 
+  const clearVisibleSession = () => {
+    setData((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        session: null,
+        stale: false,
+      };
+    });
+  };
+
   const fetchSessionView = async (context: string) => {
     const response = await fetch(`/api/insights/recovery/ai?date=${args.dateISO}&slot=${args.slot}`, {
       method: "GET",
@@ -140,8 +151,10 @@ export function useAIRecoverySession(args: HookArgs): HookState {
   const generateInternal = async (force = false, autoKey?: string) => {
     if (!args.enabled) return;
     const requestId = nextDataRequestId();
+    const previousGeneratedAt = data?.session?.generatedAt ?? null;
     setGenerating(true);
     setError(null);
+    clearVisibleSession();
     try {
       const response = await fetch("/api/insights/recovery/ai/generate", {
         method: "POST",
@@ -172,9 +185,12 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       try {
         const recovered = await fetchSessionView("generate_recover");
         if (!isCurrentDataRequest(requestId)) return;
-        setData(recovered);
-        setError(null);
-        return;
+        const recoveredGeneratedAt = recovered?.session?.generatedAt ?? null;
+        if (recoveredGeneratedAt && recoveredGeneratedAt !== previousGeneratedAt) {
+          setData(recovered);
+          setError(null);
+          return;
+        }
       } catch {}
       setFriendlyError((nextError as any)?.message ?? nextError ?? "ai_recovery_generate_failed");
     } finally {
