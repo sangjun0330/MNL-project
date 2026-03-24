@@ -1,7 +1,7 @@
 import type { ISODate } from "@/lib/date";
 import type { Shift } from "@/lib/types";
 
-export const AI_RECOVERY_PROMPT_VERSION = "2026-03-24.v6";
+export const AI_RECOVERY_PROMPT_VERSION = "2026-03-24.v7";
 export const AI_RECOVERY_RETENTION_DAYS = 8;
 export const AI_RECOVERY_ORDER_COUNT = 4;
 

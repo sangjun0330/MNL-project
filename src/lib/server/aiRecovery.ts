@@ -262,7 +262,7 @@ function buildWakePromptTodayHealthRow(state: AppState, iso: ISODate) {
 
 function buildAIRecoveryPromptHealthPayload(snapshot: RecoverySnapshot) {
   const historyEnd = toISODate(addDays(fromISODate(snapshot.dateISO), -1));
-  const historyRows = listHistoryDates(historyEnd, 14)
+  const historyRows = listHistoryDates(historyEnd, 7)
     .filter((iso) => hasHealthInput(snapshot.state.bio?.[iso] ?? null, snapshot.state.emotions?.[iso] ?? null))
     .map((iso) => buildPromptHealthRow(snapshot.state, iso));
   return {
@@ -270,7 +270,7 @@ function buildAIRecoveryPromptHealthPayload(snapshot: RecoverySnapshot) {
       snapshot.slot === "wake"
         ? buildWakePromptTodayHealthRow(snapshot.state, snapshot.dateISO)
         : buildPromptHealthRow(snapshot.state, snapshot.dateISO),
-    historyHealth14: historyRows,
+    historyHealth7: historyRows,
   };
 }
 
@@ -1140,6 +1140,21 @@ function resolveReasoningEffort(model: string, kind: "brief" | "orders"): AIReco
   return "low";
 }
 
+function readRecoveryMaxOutputEnv(name: string) {
+  const raw = Number(process.env[name] ?? "");
+  if (!Number.isFinite(raw)) return null;
+  return raw;
+}
+
+function resolveRecoveryFlowMaxOutputTokens(kind: "brief" | "orders") {
+  const fallback = kind === "brief" ? 2200 : 1400;
+  const explicit =
+    readRecoveryMaxOutputEnv(kind === "brief" ? "OPENAI_RECOVERY_BRIEF_MAX_OUTPUT_TOKENS" : "OPENAI_RECOVERY_ORDERS_MAX_OUTPUT_TOKENS") ??
+    readRecoveryMaxOutputEnv("OPENAI_RECOVERY_MAX_OUTPUT_TOKENS") ??
+    fallback;
+  return clamp(explicit, kind === "brief" ? 1800 : 1400, kind === "brief" ? 3200 : 2200);
+}
+
 function publicErrorMessage(code: string | null) {
   if (!code) return null;
   if (code === "plan_upgrade_required") return "Plus 또는 Pro에서 사용할 수 있어요.";
@@ -1185,22 +1200,22 @@ function parseLooseJson(text: string) {
 function parseBriefJson(text: string, snapshot: RecoverySnapshot): AIRecoveryBrief {
   const parsed = parseLooseJson(text);
   if (!isRecord(parsed)) throw new Error("brief_not_object");
-  const sectionsSource = Array.isArray(parsed.sections) ? parsed.sections : [];
-  if (sectionsSource.length < 2 || sectionsSource.length > 6) throw new Error("brief_sections_invalid");
+  const sectionsSource = Array.isArray(parsed.sections) ? parsed.sections : Array.isArray(parsed.cards) ? parsed.cards : [];
+  if (sectionsSource.length < 1) throw new Error("brief_sections_invalid");
   const fallbackCategory = normalizeBriefCategory(snapshot.plannerContext.focusFactor?.key);
-  const sections = sectionsSource.map((source, index) => {
+  const sections = sectionsSource.slice(0, 6).map((source, index) => {
     if (!isRecord(source)) throw new Error(`brief_section_invalid_${index + 1}`);
-    const title = trimText(source.title, 40);
-    const description = trimText(source.description, 240);
-    const tips = asStringArray(source.tips, 2, 160);
-    if (!title || !description || tips.length !== 2) throw new Error(`brief_section_invalid_${index + 1}`);
+    const title = trimText(source.title ?? source.heading, 40);
+    const description = trimText(source.description ?? source.summary, 240);
+    const tips = asStringArray(source.tips ?? source.actions, 2, 160);
+    if (!title && !description && tips.length === 0) throw new Error(`brief_section_invalid_${index + 1}`);
     const firstFallback = index === 0 ? fallbackCategory : index === 1 ? "sleep" : "shift";
     return {
       category: resolveSectionCategory(source.category, firstFallback),
       severity: resolveSectionSeverity(source.severity, "info"),
       title,
       description,
-      tips: [tips[0]!, tips[1]!] as [string, string],
+      tips: [tips[0] ?? "", tips[1] ?? ""] as [string, string],
     };
   });
   const normalizedSections = buildNormalizedBriefSections(snapshot, sections);
@@ -1297,7 +1312,13 @@ function parseOrdersJson(text: string, slot: AIRecoverySlot): AIRecoveryOrdersPa
   const title = trimText(parsed.title, 80) || getDefaultOrdersTitle(slot);
   const headline = trimText(parsed.headline, 180) || trimText(parsed.summary, 180) || getDefaultOrdersHeadline(slot);
   const summary = trimText(parsed.summary, 220) || getDefaultOrdersSummary(slot);
-  const rawItems = Array.isArray(parsed.items) ? parsed.items : [];
+  const rawItems = Array.isArray(parsed.items)
+    ? parsed.items
+    : Array.isArray(parsed.orders)
+      ? parsed.orders
+      : Array.isArray(parsed.checklist)
+        ? parsed.checklist
+        : [];
   const items = rawItems
     .map((item: unknown, index: number) => parseOrderRecord(item, slot, index))
     .filter(isOrder)
@@ -1420,9 +1441,9 @@ function buildOrdersSchema() {
 
 function buildBriefDeveloperPrompt(slot: AIRecoverySlot) {
   if (slot === "postShift") {
-    return `너는 교대근무 간호사를 위한 프리미엄 AI 퇴근 후 회복 해설 엔진이야. 오늘 실제 건강 기록과 최근 반복 패턴을 기준으로 퇴근 후부터 잠들기 전까지 어떻게 회복해야 하는지 정교하게 설명한다. 퇴근 후 단계에서는 오늘 스트레스·카페인·활동·기분·수면·증상 같은 건강 데이터를 적극적으로 사용하되, 데이터에 없는 오늘 상태를 꾸며내거나 과장하지 마라. 출력은 반드시 JSON 하나만 반환한다. 전문적이고 신뢰 가능한 회복 코칭 톤을 유지하되, 문장은 짧고 정확하며 바로 실행 장면이 떠오르게 써라. generic한 문장, 반복 문장, 빈약한 요약, '꾸준한 관리가 중요합니다'처럼 힘 빠진 마무리, 같은 내용의 재진술을 금지한다. 각 section은 정말 중요한 카테고리만 고르고, description은 왜 지금 중요한지 한 문장, tips는 서로 겹치지 않는 실행 행동 2개만 작성한다. plannerContext가 이미 정한 우선순위와 충돌하는 새 계획을 만들지 말고, 내부 시스템 용어(planner, plannerContext, recoveryThread, focusFactor, primaryAction 등)와 데이터 필드명(napHours, menstrualLabel, sleepDebtHours, nightStreak, caffeineMg, symptomSeverity, vitalScore, csi, sri, cif, slf, mif, next, today, mood, stress, activity 등)은 절대 사용자 문구에 노출하지 마라. ISO 날짜(2026-03-13 등)를 괄호 안에 넣거나 본문에 직접 쓰지 말고, '오늘', '내일', '다음 근무일', '오늘 밤' 같은 자연어로만 표현하라.`;
+    return `너는 교대근무 간호사를 위한 프리미엄 AI 퇴근 후 회복 해설 엔진이다. 오늘 실제 건강 기록과 최근 반복 패턴만 근거로 퇴근 후부터 잠들기 전까지의 회복 우선순위를 정교하게 설명한다. 데이터에 없는 오늘 상태를 꾸며내거나 과장하지 마라. JSON 하나만 반환하라. 문장은 짧고 정확하게 쓰고, generic한 문장·반복 문장·힘 빠진 마무리를 금지한다. section은 정말 중요한 카테고리만 고르고 description은 왜 지금 중요한지 한 문장, tips는 서로 겹치지 않는 실행 행동 2개로 작성한다. 내부 시스템 용어와 원시 데이터 필드명은 절대 노출하지 말고 날짜는 자연어로만 표현하라.`;
   }
-  return `너는 교대근무 간호사를 위한 프리미엄 AI 기상 후 회복 해설 엔진이야. 전날까지의 건강 기록과 오늘 수면만 기준으로 오늘 하루를 어떻게 시작해야 하는지 정교하게 설명한다. 같은 날 스트레스·카페인·활동·기분·증상 기록은 기상 후 회복 입력에서 제외된 항목이므로, 오늘 상태를 추정하거나 단정하지 말고 그 미입력 사실을 설명의 중심으로 끌어오지도 마라. 출력은 반드시 JSON 하나만 반환한다. 전문적이고 신뢰 가능한 회복 코칭 톤을 유지하되, 문장은 짧고 정확하며 바로 실행 장면이 떠오르게 써라. generic한 문장, 반복 문장, 빈약한 요약, '꾸준한 관리가 중요합니다'처럼 힘 빠진 마무리, 같은 내용의 재진술을 금지한다. 각 section은 정말 중요한 카테고리만 고르고, description은 왜 지금 중요한지 한 문장, tips는 서로 겹치지 않는 실행 행동 2개만 작성한다. plannerContext가 이미 정한 우선순위와 충돌하는 새 계획을 만들지 말고, 내부 시스템 용어(planner, plannerContext, recoveryThread, focusFactor, primaryAction 등)와 데이터 필드명(napHours, menstrualLabel, sleepDebtHours, nightStreak, caffeineMg, symptomSeverity, vitalScore, csi, sri, cif, slf, mif, next, today, mood, stress, activity 등)은 절대 사용자 문구에 노출하지 마라. ISO 날짜(2026-03-13 등)를 괄호 안에 넣거나 본문에 직접 쓰지 말고, '오늘', '내일', '모레', '다음 근무일' 같은 자연어로만 표현하라.`;
+  return `너는 교대근무 간호사를 위한 프리미엄 AI 기상 후 회복 해설 엔진이다. 전날까지의 건강 기록과 오늘 수면만 근거로 오늘 하루의 시작 회복 우선순위를 정교하게 설명한다. 같은 날 스트레스·카페인·활동·기분·증상은 추정하거나 단정하지 마라. JSON 하나만 반환하라. 문장은 짧고 정확하게 쓰고, generic한 문장·반복 문장·힘 빠진 마무리를 금지한다. section은 정말 중요한 카테고리만 고르고 description은 왜 지금 중요한지 한 문장, tips는 서로 겹치지 않는 실행 행동 2개로 작성한다. 내부 시스템 용어와 원시 데이터 필드명은 절대 노출하지 말고 날짜는 자연어로만 표현하라.`;
 }
 
 function buildBriefUserPrompt(snapshot: RecoverySnapshot) {
@@ -1436,8 +1457,8 @@ function buildBriefUserPrompt(snapshot: RecoverySnapshot) {
     "plannerContext가 있으면 그 우선순위와 반드시 정렬하세요.",
     "plannerContext.focusFactor 또는 plannerContext.primaryAction과 충돌하는 새 계획을 만들지 마세요.",
     afterWork
-      ? "지금은 퇴근 후 회복 단계입니다. 오늘 건강 데이터 전체와 어제까지 최근 14일 건강 데이터를 사용할 수 있지만, 데이터에 없는 오늘 상태를 꾸며내지는 마세요."
-      : "지금은 기상 후 회복 단계입니다. 오늘은 수면 시간만 사용할 수 있고, 나머지 판단은 어제까지 최근 14일 건강 데이터만으로 해야 합니다.",
+      ? "지금은 퇴근 후 회복 단계입니다. 오늘 건강 데이터 전체와 어제까지 최근 7일 건강 데이터를 사용할 수 있지만, 데이터에 없는 오늘 상태를 꾸며내지는 마세요."
+      : "지금은 기상 후 회복 단계입니다. 오늘은 수면 시간만 사용할 수 있고, 나머지 판단은 어제까지 최근 7일 건강 데이터만으로 해야 합니다.",
     "[핵심 목표]",
     "",
     `headline은 ${phaseLabel} 회복에서 가장 중요한 축을 1~2문장으로 정리`,
@@ -1454,12 +1475,10 @@ function buildBriefUserPrompt(snapshot: RecoverySnapshot) {
     "description과 tips는 같은 문장을 반복하지 말 것",
     "[품질 기준]",
     "",
-    "'꾸준한 관리가 중요합니다', '신경 쓰세요', '활용해보세요' 같은 generic 마무리 금지",
-    "같은 의미를 문장만 바꿔 반복 금지",
+    "generic 마무리와 같은 의미 반복 금지",
     "카테고리 title은 맥락이 보이는 짧은 제목으로 작성",
     "수치(수면, 카페인, 활동, 기분, 스트레스)는 Data JSON에 있는 값만 사용하고 임의 수치 금지",
-    "숫자 태그형 표현 금지. 예: 스트레스(2), 기분4 금지",
-    "데이터 필드명을 괄호에 넣어 노출 금지. 예: 낮잠이 있었던 날이라(napHours), 기분과 스트레스가(mood, stress), 다음 근무가 D(next), 오늘은 OFF이며(today) → 이런 괄호 주석 절대 금지",
+    "숫자 태그형 표현과 데이터 필드명 괄호 노출 금지",
     "ISO 날짜(2026-03-13 등)를 본문/괄호에 직접 쓰지 말고 '오늘', '내일', '다음 근무일' 같은 자연어만 사용",
     "카페인 수치는 필요할 때만 자연어로 한 번만 설명",
     afterWork
@@ -1510,21 +1529,19 @@ function buildBriefUserPrompt(snapshot: RecoverySnapshot) {
     "[오늘 건강 데이터(JSON)]",
     JSON.stringify(promptHealth.todayHealth, null, 2),
     "",
-    "[어제까지 최근 14일 건강 데이터(JSON)]",
-    JSON.stringify(promptHealth.historyHealth14, null, 2),
+    "[어제까지 최근 7일 건강 데이터(JSON)]",
+    JSON.stringify(promptHealth.historyHealth7, null, 2),
   ].join("\n");
 }
 
 function buildOrdersDeveloperPrompt(slot: AIRecoverySlot) {
   if (slot === "postShift") {
-    return `너는 RNest의 교대근무 간호사용 프리미엄 AI 퇴근 후 오더 생성기다. 반드시 방금 생성된 AI 맞춤회복 해설을 최우선 기준으로 읽고, 해설의 우선순위를 실제 행동 오더로 번역해야 한다. 해설에 없는 새 큰 계획을 만들지 말고, 해설이 말한 회복 축을 더 짧고 더 실행 가능한 문장으로 압축하라. 지금은 퇴근 후 오더 단계다. 퇴근 직후, 집 도착 후, 잠들기 전으로 이어지는 낮은 마찰의 회복 오더를 우선 만든다. 퇴근 후 단계에서는 오늘 스트레스·카페인·활동·기분·수면·증상 같은 건강 데이터를 근거로 사용해도 되지만, 데이터에 없는 상태를 꾸며내거나 막연한 과장 문장을 만들지 마라. 출력은 JSON 하나만 반환한다. headline은 오늘 밤 오더 흐름의 핵심을 한 문장으로, summary는 왜 이 오더 구성이 맞는지 한 문장으로 적는다. 각 오더는 title, body, when, reason을 가져야 한다. title은 카드 상단의 작은 맥락 라벨이므로 짧게 쓴다. body는 카드에서 가장 크게 보이는 핵심 실행 문장이고, 반드시 한 문장으로 끝내며 사용자가 바로 체크할 수 있는 오더여야 한다. body에는 시작 트리거와 실행 장면이 보여야 하고, 가능하면 시간·횟수·장소·조건 중 2개 이상이 드러나야 한다. reason은 body 아래에 붙는 근거 문장으로, 왜 지금 이 오더가 필요한지 개인 기록과 반복 패턴을 연결해 한 문장으로 설명한다. when은 긴 문장이 아니라 '퇴근 직후', '집 도착 후', '잠들기 전'처럼 아주 짧은 타이밍 라벨만 쓴다. chips는 선택 사항이며 0~3개, 한두 단어 수준의 짧은 태그만 쓴다. 오더는 지금 컨디션에서도 실행할 수 있을 정도로 낮은 마찰이어야 하고, 한 번에 하나씩 끝낼 수 있어야 한다. 추상적인 조언, 설명만 길고 행동이 없는 문장, 같은 행동의 반복, generic한 문장('휴식하기', '컨디션 관리하기', '꾸준히 해보기')은 금지한다. 퇴근 후 오더는 밤 자극을 올리는 행동을 권하지 말고, 감압·짧은 신체 이완·수면 전환 중 최소 2개 이상 영역이 섞이게 만든다. 내부 시스템 용어(planner, plannerContext, recoveryThread, focusFactor 등)와 데이터 필드명(napHours, menstrualLabel, sleepDebtHours, nightStreak, caffeineMg, symptomSeverity, vitalScore, csi, sri, cif, slf, mif, next, today, mood, stress, activity 등)을 title, body, reason, headline, summary 어디에도 노출하지 마라. ISO 날짜를 직접 쓰지 말고 '오늘', '내일', '다음 근무일', '오늘 밤' 같은 자연어만 사용하라.`;
+    return `너는 RNest의 교대근무 간호사용 프리미엄 AI 퇴근 후 오더 생성기다. 방금 생성된 AI 맞춤회복 해설을 최우선 기준으로 읽고, 해설의 우선순위를 실제 행동 오더 4개로 번역하라. 해설에 없는 새 큰 계획을 만들지 말고, 해설의 핵심을 더 짧고 더 실행 가능한 문장으로 압축하라. 지금은 퇴근 후 오더 단계다. 퇴근 직후, 집 도착 후, 잠들기 전으로 이어지는 낮은 마찰의 회복 오더를 우선 만든다. JSON 하나만 반환하라. headline은 오늘 밤 오더 흐름의 핵심 한 문장, summary는 왜 이 구성이 맞는지 한 문장, 각 item은 title, body, when, reason을 가져야 한다. body는 한 문장으로 끝내고 바로 체크 가능한 행동이어야 하며 시간·횟수·장소·조건 중 2개 이상이 가능하면 드러나야 한다. generic한 문장, 같은 행동 반복, 내부 시스템 용어와 원시 데이터 필드명 노출, ISO 날짜 직접 표기를 금지한다.`;
   }
-  return `너는 RNest의 교대근무 간호사용 프리미엄 AI 기상 후 오더 생성기다. 반드시 방금 생성된 AI 맞춤회복 해설을 최우선 기준으로 읽고, 해설의 우선순위를 실제 행동 오더로 번역해야 한다. 해설에 없는 새 큰 계획을 만들지 말고, 해설이 말한 회복 축을 더 짧고 더 실행 가능한 문장으로 압축하라. 지금은 기상 후 오더 단계다. 아침에 바로 실행할 수 있는 낮은 마찰의 스타터 오더를 우선 만든다. 기상 후 단계에서는 오늘 수면 외의 같은 날 스트레스·카페인·활동·기분·증상 기록을 분석 근거나 오더 설명 중심으로 끌어오지 말고, 그 미입력 사실을 오더 문구에 굳이 적지 않는다. 출력은 JSON 하나만 반환한다. headline은 오늘 오더 흐름의 핵심을 한 문장으로, summary는 왜 이 오더 구성이 맞는지 한 문장으로 적는다. 각 오더는 title, body, when, reason을 가져야 한다. title은 카드 상단의 작은 맥락 라벨이므로 짧게 쓴다. body는 카드에서 가장 크게 보이는 핵심 실행 문장이고, 반드시 한 문장으로 끝내며 사용자가 바로 체크할 수 있는 오더여야 한다. body에는 시작 트리거와 실행 장면이 보여야 하고, 가능하면 시간·횟수·장소·조건 중 2개 이상이 드러나야 한다. reason은 body 아래에 붙는 근거 문장으로, 왜 지금 이 오더가 필요한지 개인 기록과 반복 패턴을 연결해 한 문장으로 설명한다. when은 긴 문장이 아니라 '지금', '출근 전', '근무 중'처럼 아주 짧은 타이밍 라벨만 쓴다. chips는 선택 사항이며 0~3개, 한두 단어 수준의 짧은 태그만 쓴다. 오더는 지금 컨디션에서도 실행할 수 있을 정도로 낮은 마찰이어야 하고, 한 번에 하나씩 끝낼 수 있어야 한다. 추상적인 조언, 설명만 길고 행동이 없는 문장, 같은 행동의 반복, generic한 문장('휴식하기', '컨디션 관리하기', '꾸준히 해보기')은 금지한다. 기상 후 오더는 '지금', '출근 전', '근무 중' 타이밍 중심으로 분산하고, 실수 방지·집중 리셋·짧은 신체 회복·정서 안정/수면 전환 중 최소 2개 이상 영역이 섞이게 만든다. 내부 시스템 용어(planner, plannerContext, recoveryThread, focusFactor 등)와 데이터 필드명(napHours, menstrualLabel, sleepDebtHours, nightStreak, caffeineMg, symptomSeverity, vitalScore, csi, sri, cif, slf, mif, next, today, mood, stress, activity 등)을 title, body, reason, headline, summary 어디에도 노출하지 마라. ISO 날짜를 직접 쓰지 말고 '오늘', '내일', '다음 근무일' 같은 자연어만 사용하라.`;
+  return `너는 RNest의 교대근무 간호사용 프리미엄 AI 기상 후 오더 생성기다. 방금 생성된 AI 맞춤회복 해설을 최우선 기준으로 읽고, 해설의 우선순위를 실제 행동 오더 4개로 번역하라. 해설에 없는 새 큰 계획을 만들지 말고, 해설의 핵심을 더 짧고 더 실행 가능한 문장으로 압축하라. 지금은 기상 후 오더 단계다. 아침에 바로 실행할 수 있는 낮은 마찰의 스타터 오더를 우선 만든다. JSON 하나만 반환하라. headline은 오늘 오더 흐름의 핵심 한 문장, summary는 왜 이 구성이 맞는지 한 문장, 각 item은 title, body, when, reason을 가져야 한다. body는 한 문장으로 끝내고 바로 체크 가능한 행동이어야 하며 시간·횟수·장소·조건 중 2개 이상이 가능하면 드러나야 한다. generic한 문장, 같은 행동 반복, 내부 시스템 용어와 원시 데이터 필드명 노출, ISO 날짜 직접 표기를 금지한다.`;
 }
 
 function buildOrdersUserPrompt(snapshot: RecoverySnapshot, brief: AIRecoveryBrief) {
-  const afterWork = snapshot.slot === "postShift";
-  const promptHealth = buildAIRecoveryPromptHealthPayload(snapshot);
   return [
     "오늘의 오더 체크리스트용 JSON을 작성하세요.",
     "반드시 JSON 하나만 출력하세요. 코드펜스 금지, 설명문 금지.",
@@ -1535,7 +1552,9 @@ function buildOrdersUserPrompt(snapshot: RecoverySnapshot, brief: AIRecoveryBrie
     "오늘 가장 중요한 오더를 4개로 맞춰 고르기",
     "타이밍 정보는 when과 reason에 자연스럽게 녹이기",
     "사용자가 지금 컨디션에서도 바로 실천할 수 있게 마찰을 낮추기",
-    afterWork ? "퇴근 후부터 잠들기 전까지 바로 실행할 수 있는 저자극 회복 오더가 되게 만들기" : "하루를 시작할 때 바로 실행할 수 있는 스타터 오더가 되게 만들기",
+    snapshot.slot === "postShift"
+      ? "퇴근 후부터 잠들기 전까지 바로 실행할 수 있는 저자극 회복 오더가 되게 만들기"
+      : "하루를 시작할 때 바로 실행할 수 있는 스타터 오더가 되게 만들기",
     "[제약]",
     "",
     "items 길이는 정확히 4",
@@ -1547,30 +1566,25 @@ function buildOrdersUserPrompt(snapshot: RecoverySnapshot, brief: AIRecoveryBrie
     "body는 카드에서 가장 크게 보이는 핵심 오더 문장이고, 한 문장으로 짧고 분명하게 작성",
     "body 안에 시작 트리거를 넣어 언제 시작하는지 바로 보이게 하고, 가능하면 시간/횟수/장소/조건 중 2개 이상 포함",
     "when은 12자 안팎의 아주 짧은 타이밍 라벨만 사용",
-    "reason은 body 아래에 붙는 근거 문장으로, 왜 지금 필요한지 사용자의 현재 패턴과 연결해 한 문장으로 설명",
+    "reason은 body 아래에 붙는 근거 문장으로, 왜 지금 필요한지 brief의 우선순위와 연결해 한 문장으로 설명",
     "chips는 0~3개, 짧은 키워드만 사용",
     "AI Recovery Brief JSON을 최우선 기준으로 보고, 해설의 우선순위를 실행 오더로 번역",
-    "오늘 건강 데이터와 최근 14일 건강 데이터는 해설을 뒷받침하는 근거로만 사용",
-    afterWork ? "퇴근 후 단계에서는 오늘 건강 데이터 전체를 근거로 사용할 수 있지만, 없는 상태를 만들어 reason에 쓰지 말 것" : "기상 후 단계에서는 오늘 수면 외 같은 날 동적 입력을 reason의 근거로 끌어오지 말 것",
+    "brief에 없는 새 건강 해석이나 새 큰 계획을 추가하지 말 것",
     "전체 건강기록을 봤을 때 반복적으로 회복을 방해하는 패턴이 있으면 우선순위에 반영",
     "작은 행동이지만 회복 효과가 크고 실수/소진을 줄이는 방향을 우선",
     "막연한 '쉬기/눕기/눈감기' 표현만 쓰지 말고, 왜 지금 그 행동을 해야 하는지 실행 장면이 보이게 작성",
     "'컨디션 관리하기', '회복하기', '휴식하기'처럼 generic한 제목/문장 금지",
     "items가 3개 이상이면 집중·안전, 짧은 움직임, 정서 안정/수면 전환 중 최소 2개 이상 영역이 섞이게 구성",
-    afterWork ? "퇴근 후 단계에서는 when이 '퇴근 직후', '집 도착 후', '잠들기 전' 쪽으로 자연스럽게 분산되게 구성" : "기상 후 단계에서는 when이 '지금', '출근 전', '근무 중' 쪽으로 자연스럽게 분산되게 구성",
+    snapshot.slot === "postShift"
+      ? "퇴근 후 단계에서는 when이 '퇴근 직후', '집 도착 후', '잠들기 전' 쪽으로 자연스럽게 분산되게 구성"
+      : "기상 후 단계에서는 when이 '지금', '출근 전', '근무 중' 쪽으로 자연스럽게 분산되게 구성",
     "같은 행동을 표현만 바꿔 중복 생성하지 말 것",
-    "Data JSON에 없는 수치를 새로 만들지 말 것 [선택된 오더 개수] 4",
+    "brief에 없는 수치나 상태를 새로 만들지 말 것 [선택된 오더 개수] 4",
     "",
     "[해설 기반 변환 규칙]",
     "아래 AI Recovery Brief JSON의 headline, sections, weeklySummary를 읽고 그대로 실행 가능한 오더로 바꿀 것",
     "해설 description을 그대로 베끼지 말고 행동 한 문장으로 압축할 것",
     "같은 해설 포인트를 서로 다른 말로 중복 오더화하지 말 것",
-    "",
-    "[오늘 건강 데이터(JSON)]",
-    JSON.stringify(promptHealth.todayHealth, null, 2),
-    "",
-    "[어제까지 최근 14일 건강 데이터(JSON)]",
-    JSON.stringify(promptHealth.historyHealth14, null, 2),
     "",
     "[AI Recovery Brief JSON]",
     JSON.stringify(brief, null, 2),
@@ -1869,6 +1883,8 @@ async function runOpenAIFlow(args: {
 }) {
   const briefReasoningEffort = resolveReasoningEffort(args.model, "brief");
   const ordersReasoningEffort = resolveReasoningEffort(args.model, "orders");
+  const briefMaxOutputTokens = resolveRecoveryFlowMaxOutputTokens("brief");
+  const ordersMaxOutputTokens = resolveRecoveryFlowMaxOutputTokens("orders");
 
   const baseMeta = {
     briefResponseId: null,
@@ -1890,7 +1906,7 @@ async function runOpenAIFlow(args: {
     schemaName: "ai_recovery_brief",
     schema: buildBriefSchema(),
     signal: args.signal,
-    maxOutputTokens: 2600,
+    maxOutputTokens: briefMaxOutputTokens,
   });
 
   if (!briefResult.ok) {
@@ -1920,7 +1936,7 @@ async function runOpenAIFlow(args: {
       schema: buildBriefSchema(),
       rawText: briefResult.text,
       signal: args.signal,
-      maxOutputTokens: 2600,
+      maxOutputTokens: briefMaxOutputTokens,
     });
     if (!repairedBrief.ok) {
       console.error("[AIRecovery] brief_repair_failed", {
@@ -1954,7 +1970,7 @@ async function runOpenAIFlow(args: {
     schemaName: "ai_recovery_orders",
     schema: buildOrdersSchema(),
     signal: args.signal,
-    maxOutputTokens: 2200,
+    maxOutputTokens: ordersMaxOutputTokens,
   });
 
   if (!ordersResult.ok) {
@@ -2003,7 +2019,7 @@ async function runOpenAIFlow(args: {
       schema: buildOrdersSchema(),
       rawText: ordersResult.text,
       signal: args.signal,
-      maxOutputTokens: 2200,
+      maxOutputTokens: ordersMaxOutputTokens,
     });
     if (!repairedOrders.ok) {
       console.error("[AIRecovery] orders_repair_failed", {

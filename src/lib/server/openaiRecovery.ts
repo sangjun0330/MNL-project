@@ -72,9 +72,15 @@ function resolveStoreResponses() {
   return !["0", "false", "off", "no"].includes(raw);
 }
 
-function resolveMaxOutputTokens(fallback: number) {
-  const raw = Number(process.env.OPENAI_RECOVERY_MAX_OUTPUT_TOKENS ?? process.env.OPENAI_MED_SAFETY_MAX_OUTPUT_TOKENS ?? fallback);
-  if (!Number.isFinite(raw)) return fallback;
+function resolveConfiguredMaxOutputTokens() {
+  const raw = Number(process.env.OPENAI_RECOVERY_MAX_OUTPUT_TOKENS ?? "");
+  if (!Number.isFinite(raw)) return null;
+  return raw;
+}
+
+function resolveMaxOutputTokens(explicit?: number) {
+  const raw = explicit != null && Number.isFinite(explicit) ? explicit : resolveConfiguredMaxOutputTokens() ?? 2400;
+  if (!Number.isFinite(raw)) return 2400;
   return Math.max(1400, Math.min(8000, Math.round(raw)));
 }
 
@@ -279,9 +285,9 @@ function buildCompatStructuredDeveloperPrompt(args: StructuredRequestArgs) {
   return [
     args.developerPrompt,
     "",
-    "반드시 JSON 하나만 출력하라.",
-    "설명, 머리말, 코드블록, 마크다운을 붙이지 마라.",
-    "아래 JSON schema의 키 구조를 그대로 지켜라.",
+    "JSON 하나만 출력하라.",
+    "설명, 코드블록, 마크다운 금지.",
+    "아래 schema의 키 구조를 지켜라.",
     JSON.stringify(args.schema),
   ].join("\n");
 }
