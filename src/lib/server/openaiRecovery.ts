@@ -132,7 +132,11 @@ function isBadRequestError(error: string) {
 
 function needsMoreOutputTokens(error: string) {
   const value = String(error ?? "").toLowerCase();
-  return value.includes("incomplete:max_output_tokens") || value.includes("openai_responses_400_token_limit");
+  return (
+    value.includes("incomplete:max_output_tokens") ||
+    value.includes("openai_responses_400_token_limit") ||
+    value.includes("openai_empty_text_model:")
+  );
 }
 
 function readString(value: unknown) {

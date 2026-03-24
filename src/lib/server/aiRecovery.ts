@@ -22,6 +22,7 @@ import {
   type AIRecoverySlotPayload,
   type AIRecoveryStatus,
   type AIRecoveryTone,
+  type AIRecoveryUsage,
 } from "@/lib/aiRecovery";
 import { buildBillingEntitlements } from "@/lib/billing/entitlements";
 import { getAIRecoveryModelForTier, type PlanTier } from "@/lib/billing/plans";
@@ -1131,7 +1132,13 @@ function readGenerationCounts(session: AIRecoverySlotPayload | null | undefined)
   }
 
   if (brief === 0 && orders === 0) {
-    return session.status === "ready" ? { brief: 1, orders: 1 } : { brief: 0, orders: 0 };
+    if (session.openaiMeta?.briefResponseId || session.openaiMeta?.ordersResponseId) {
+      return {
+        brief: session.openaiMeta?.briefResponseId ? 1 : 0,
+        orders: session.openaiMeta?.ordersResponseId ? 1 : 0,
+      };
+    }
+    return { brief: 0, orders: 0 };
   }
   return { brief, orders };
 }
@@ -1168,7 +1175,7 @@ function resolveRecoveryFlowMaxOutputTokens(kind: "brief" | "orders") {
     readRecoveryMaxOutputEnv(kind === "brief" ? "OPENAI_RECOVERY_BRIEF_MAX_OUTPUT_TOKENS" : "OPENAI_RECOVERY_ORDERS_MAX_OUTPUT_TOKENS") ??
     readRecoveryMaxOutputEnv("OPENAI_RECOVERY_MAX_OUTPUT_TOKENS") ??
     fallback;
-  return clamp(explicit, kind === "brief" ? 1800 : 1400, kind === "brief" ? 3200 : 2200);
+  return clamp(explicit, kind === "brief" ? 2200 : 1400, kind === "brief" ? 3600 : 2200);
 }
 
 function publicErrorMessage(code: string | null) {
@@ -1921,6 +1928,32 @@ async function runOpenAIFlow(args: {
     gatewayProfile: "med_safety_shared" as const,
   };
 
+  const buildOrdersFallback = (input: {
+    brief: AIRecoveryBrief;
+    briefResult: { responseId: string | null; usage: AIRecoveryUsage | null };
+    ordersResponseId?: string | null;
+    ordersUsage?: AIRecoveryUsage | null;
+    fallbackReason: string;
+  }) =>
+    ({
+      status: "ready",
+      brief: input.brief,
+      orders: buildFallbackOrders(args.snapshot),
+      reasoningEffort: briefReasoningEffort,
+      model: args.model,
+      openaiMeta: {
+        ...baseMeta,
+        briefResponseId: input.briefResult.responseId,
+        ordersResponseId: input.ordersResponseId ?? null,
+        usage: {
+          brief: input.briefResult.usage,
+          orders: input.ordersUsage ?? null,
+          total: combineAIRecoveryUsages(input.briefResult.usage, input.ordersUsage ?? null),
+        },
+        fallbackReason: input.fallbackReason,
+      },
+    }) satisfies OpenAIFlowResult;
+
   const briefResult = await runAIRecoveryStructuredRequest({
     model: args.model,
     reasoningEffort: briefReasoningEffort,
@@ -1939,7 +1972,13 @@ async function runOpenAIFlow(args: {
       dateISO: args.snapshot.dateISO,
       error: briefResult.error,
     });
-    throw new Error(`ai_recovery_openai_failed:${briefResult.error}`);
+    return {
+      ...buildFallbackFlow(args.snapshot, args.model),
+      openaiMeta: {
+        ...baseMeta,
+        fallbackReason: `brief_fallback:${briefResult.error}`,
+      },
+    } satisfies OpenAIFlowResult;
   }
 
   let brief: AIRecoveryBrief;
@@ -1969,7 +2008,19 @@ async function runOpenAIFlow(args: {
         responseId: briefResult.responseId,
         error: repairedBrief.error,
       });
-      throw new Error(`ai_recovery_openai_failed:${repairedBrief.error}`);
+      return {
+        ...buildFallbackFlow(args.snapshot, args.model),
+        openaiMeta: {
+          ...baseMeta,
+          briefResponseId: briefResult.responseId,
+          usage: {
+            brief: briefResult.usage,
+            orders: null,
+            total: combineAIRecoveryUsages(briefResult.usage, null),
+          },
+          fallbackReason: `brief_repair_fallback:${repairedBrief.error}`,
+        },
+      } satisfies OpenAIFlowResult;
     }
     try {
       brief = parseBriefJson(repairedBrief.text, args.snapshot);
@@ -1981,7 +2032,19 @@ async function runOpenAIFlow(args: {
         responseId: repairedBrief.responseId,
         error: trimText((repairParseError as Error)?.message ?? repairParseError, 160),
       });
-      throw new Error(`ai_recovery_openai_failed:brief_repair_parse_failed`);
+      return {
+        ...buildFallbackFlow(args.snapshot, args.model),
+        openaiMeta: {
+          ...baseMeta,
+          briefResponseId: repairedBrief.responseId ?? briefResult.responseId,
+          usage: {
+            brief: repairedBrief.usage ?? briefResult.usage,
+            orders: null,
+            total: combineAIRecoveryUsages(repairedBrief.usage ?? briefResult.usage, null),
+          },
+          fallbackReason: "brief_repair_parse_fallback",
+        },
+      } satisfies OpenAIFlowResult;
     }
   }
 
@@ -2004,7 +2067,11 @@ async function runOpenAIFlow(args: {
       briefResponseId: briefResult.responseId,
       error: ordersResult.error,
     });
-    throw new Error(`ai_recovery_openai_failed:${ordersResult.error}`);
+    return buildOrdersFallback({
+      brief,
+      briefResult,
+      fallbackReason: `orders_fallback:${ordersResult.error}`,
+    });
   }
 
   try {
@@ -2053,7 +2120,13 @@ async function runOpenAIFlow(args: {
         ordersResponseId: ordersResult.responseId,
         error: repairedOrders.error,
       });
-      throw new Error(`ai_recovery_openai_failed:${repairedOrders.error}`);
+      return buildOrdersFallback({
+        brief,
+        briefResult,
+        ordersResponseId: ordersResult.responseId,
+        ordersUsage: ordersResult.usage,
+        fallbackReason: `orders_repair_fallback:${repairedOrders.error}`,
+      });
     }
     try {
       const orders = parseOrdersJson(repairedOrders.text, args.snapshot.slot);
@@ -2084,7 +2157,13 @@ async function runOpenAIFlow(args: {
         ordersResponseId: repairedOrders.responseId,
         error: trimText((repairParseError as Error)?.message ?? repairParseError, 160),
       });
-      throw new Error("ai_recovery_openai_failed:orders_repair_parse_failed");
+      return buildOrdersFallback({
+        brief,
+        briefResult,
+        ordersResponseId: repairedOrders.responseId ?? ordersResult.responseId,
+        ordersUsage: repairedOrders.usage ?? ordersResult.usage,
+        fallbackReason: "orders_repair_parse_fallback",
+      });
     }
   }
 }
@@ -2096,8 +2175,8 @@ function buildStoredSession(args: {
 }) {
   const now = new Date().toISOString();
   const previousCounts = readGenerationCounts(args.previousSession);
-  const shouldCountGeneration =
-    args.flow.status === "ready" && Boolean(args.flow.openaiMeta.briefResponseId || args.flow.openaiMeta.ordersResponseId);
+  const shouldCountBrief = args.flow.status === "ready" && Boolean(args.flow.openaiMeta.briefResponseId);
+  const shouldCountOrders = args.flow.status === "ready" && Boolean(args.flow.openaiMeta.ordersResponseId);
   const normalizedBrief = {
     ...args.flow.brief,
     sections: buildNormalizedBriefSections(args.snapshot, Array.isArray(args.flow.brief.sections) ? args.flow.brief.sections : []),
@@ -2118,8 +2197,8 @@ function buildStoredSession(args: {
     },
     orders: args.flow.orders,
     generationCounts: {
-      brief: shouldCountGeneration ? previousCounts.brief + 1 : previousCounts.brief,
-      orders: shouldCountGeneration ? previousCounts.orders + 1 : previousCounts.orders,
+      brief: shouldCountBrief ? previousCounts.brief + 1 : previousCounts.brief,
+      orders: shouldCountOrders ? previousCounts.orders + 1 : previousCounts.orders,
     },
     openaiMeta: args.flow.openaiMeta,
   } satisfies AIRecoverySlotPayload;
