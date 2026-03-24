@@ -27,11 +27,22 @@ export async function POST(req: Request) {
     userEmail = identity.email;
     if (!userId) return bad(401, "login_required");
 
-    const body = await req.json().catch(() => null);
+    const body = await req.json().catch((error) => {
+      console.warn("[AIRecovery] generate_body_parse_failed", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    });
     dateISO = isISODate(body?.dateISO ?? "") ? (body.dateISO as ISODate) : todayISO();
     slot = isAIRecoverySlot(body?.slot) ? body.slot : "wake";
     const force = Boolean(body?.force);
     const payloadOverride = body?.state;
+    console.info("[AIRecovery] generate_route_received", {
+      dateISO,
+      slot,
+      force,
+      hasPayloadOverride: payloadOverride != null,
+    });
 
     const data = await generateAIRecoverySession({
       userId,

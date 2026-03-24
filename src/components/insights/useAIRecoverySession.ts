@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { ISODate } from "@/lib/date";
+import { addDays, fromISODate, toISODate, type ISODate } from "@/lib/date";
 import { getAIRecoveryErrorMessage, type AIRecoverySessionResponse, type AIRecoverySlot } from "@/lib/aiRecovery";
 import { serializeStateForSupabase } from "@/lib/statePersistence";
 import { useAppStore } from "@/lib/store";
+import type { AppState } from "@/lib/model";
 
 type SessionData = AIRecoverySessionResponse["data"];
 
@@ -79,9 +80,49 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     setError(getAIRecoveryErrorMessage(value));
   };
 
+  const listRequestDates = (pivotISO: ISODate, daysBefore: number, daysAfter: number) => {
+    const pivot = fromISODate(pivotISO);
+    const out: ISODate[] = [];
+    for (let offset = -daysBefore; offset <= daysAfter; offset += 1) {
+      out.push(toISODate(addDays(pivot, offset)));
+    }
+    return out;
+  };
+
+  const pickDateMap = <T,>(map: Record<string, T | undefined> | undefined, dates: ISODate[]) => {
+    const out: Record<string, T | undefined> = {};
+    for (const iso of dates) {
+      if (map?.[iso] !== undefined) out[iso] = map[iso];
+    }
+    return out;
+  };
+
+  const buildRecoveryStatePayload = (raw: AppState) => {
+    const serialized = serializeStateForSupabase(raw);
+    const bioDates = Object.keys(serialized.bio ?? {});
+    const emotionDates = Object.keys(serialized.emotions ?? {});
+    const noteDates = Object.keys(serialized.notes ?? {});
+    const allHealthDates = new Set<ISODate>([...bioDates, ...emotionDates, ...noteDates] as ISODate[]);
+    const dateWindow = listRequestDates(args.dateISO, 21, 21);
+    const healthDates = [...allHealthDates].filter((iso) => iso <= args.dateISO).sort().slice(-21);
+    const includedDates = Array.from(new Set<ISODate>([...dateWindow, ...healthDates])).sort();
+
+    return {
+      selected: serialized.selected,
+      schedule: pickDateMap(serialized.schedule as Record<string, AppState["schedule"][ISODate]>, includedDates),
+      shiftNames: {},
+      notes: pickDateMap(serialized.notes as Record<string, AppState["notes"][ISODate]>, includedDates),
+      emotions: pickDateMap(serialized.emotions as Record<string, AppState["emotions"][ISODate]>, includedDates),
+      bio: pickDateMap(serialized.bio as Record<string, AppState["bio"][ISODate]>, includedDates),
+      memo: serialized.memo,
+      records: serialized.records,
+      settings: serialized.settings,
+    } satisfies AppState;
+  };
+
   const buildStatePayload = () => {
     try {
-      return serializeStateForSupabase(store.getState());
+      return buildRecoveryStatePayload(store.getState());
     } catch {
       return null;
     }

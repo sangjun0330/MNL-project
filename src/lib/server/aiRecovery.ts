@@ -104,6 +104,14 @@ type RecoveryPromptRequest = {
   verbosity?: "low" | "medium";
 };
 
+function didAIRecoveryReachOpenAI(meta: AIRecoveryOpenAIMeta | null | undefined) {
+  return Boolean(meta?.briefResponseId || meta?.ordersResponseId);
+}
+
+function isTransientOpenAIFallback(meta: AIRecoveryOpenAIMeta | null | undefined) {
+  return Boolean(meta?.fallbackReason) && !didAIRecoveryReachOpenAI(meta);
+}
+
 type LoadedRecoveryDomains = Awaited<ReturnType<typeof loadAIRecoveryDomains>>;
 type LoadedRecoverySlot = Awaited<ReturnType<typeof readAIRecoverySlot>>;
 
@@ -2727,7 +2735,24 @@ export async function generateAIRecoverySession(args: {
     dateISO: args.dateISO,
     payload,
   });
+  console.info("[AIRecovery] generate_session_start", {
+    userId: safeUserLogId(args.userId),
+    dateISO: args.dateISO,
+    slot: args.slot,
+    forced: Boolean(args.force),
+    payloadOverride: args.payloadOverride != null,
+    tier: subscription?.tier ?? null,
+    model: subscription?.aiRecoveryModel ?? null,
+    gateAllowed: gate.allowed,
+    gateCode: gate.code,
+  });
   if (!gate.allowed) {
+    console.warn("[AIRecovery] generate_session_gate_blocked", {
+      userId: safeUserLogId(args.userId),
+      dateISO: args.dateISO,
+      slot: args.slot,
+      gateCode: gate.code,
+    });
     return {
       dateISO: args.dateISO,
       slot: args.slot,
@@ -2760,6 +2785,12 @@ export async function generateAIRecoverySession(args: {
     existingSession.language === snapshot.language &&
     existingSession.promptVersion === AI_RECOVERY_PROMPT_VERSION
   ) {
+    console.info("[AIRecovery] generate_session_reused_cached", {
+      userId: safeUserLogId(args.userId),
+      dateISO: args.dateISO,
+      slot: args.slot,
+      model: existingSession.model,
+    });
     const normalizedSession = normalizeStoredSession(snapshot, existingSession);
     return {
       dateISO: args.dateISO,
@@ -2787,6 +2818,12 @@ export async function generateAIRecoverySession(args: {
 
   const model = subscription?.aiRecoveryModel ?? (subscription?.tier ? getAIRecoveryModelForTier(subscription.tier) : null);
   if (!model) {
+    console.warn("[AIRecovery] generate_session_missing_model", {
+      userId: safeUserLogId(args.userId),
+      dateISO: args.dateISO,
+      slot: args.slot,
+      tier: subscription?.tier ?? null,
+    });
     return {
       dateISO: args.dateISO,
       slot: args.slot,
@@ -2819,15 +2856,43 @@ export async function generateAIRecoverySession(args: {
     throw new Error("session_generation_limit_reached");
   }
 
-  const flow = await runOpenAIFlow({
+  let flow = await runOpenAIFlow({
     snapshot,
     model,
     tier: subscription?.tier ?? null,
     signal: args.signal,
   });
+  if (isTransientOpenAIFallback(flow.openaiMeta)) {
+    console.warn("[AIRecovery] generate_session_retrying_after_transient_fallback", {
+      userId: safeUserLogId(args.userId),
+      dateISO: args.dateISO,
+      slot: args.slot,
+      model,
+      reason: flow.openaiMeta.fallbackReason,
+    });
+    const retriedFlow = await runOpenAIFlow({
+      snapshot,
+      model,
+      tier: subscription?.tier ?? null,
+      signal: args.signal,
+    });
+    if (didAIRecoveryReachOpenAI(retriedFlow.openaiMeta) || !isTransientOpenAIFallback(retriedFlow.openaiMeta)) {
+      flow = retriedFlow;
+    } else {
+      console.warn("[AIRecovery] generate_session_retry_still_transient_fallback", {
+        userId: safeUserLogId(args.userId),
+        dateISO: args.dateISO,
+        slot: args.slot,
+        model,
+        reason: retriedFlow.openaiMeta.fallbackReason,
+      });
+      flow = retriedFlow;
+    }
+  }
   const session = normalizeStoredSession(snapshot, buildStoredSession({ snapshot, flow, previousSession: existingSession }));
   const nextQuota = buildGenerationQuota(subscription?.tier ?? null, session, Boolean(subscription?.isPrivilegedTester));
-  if (canPersistSession) {
+  const shouldPersistSession = canPersistSession && !isTransientOpenAIFallback(session.openaiMeta);
+  if (shouldPersistSession) {
     try {
       await writeAIRecoverySlot({
         userId: args.userId,
@@ -2843,6 +2908,14 @@ export async function generateAIRecoverySession(args: {
         message: error instanceof Error ? error.message : String(error),
       });
     }
+  } else if (canPersistSession && isTransientOpenAIFallback(session.openaiMeta)) {
+    console.warn("[AIRecovery] skipping_persist_for_transient_fallback", {
+      userId: safeUserLogId(args.userId),
+      dateISO: args.dateISO,
+      slot: args.slot,
+      model,
+      reason: session.openaiMeta.fallbackReason,
+    });
   }
   const nextDaily: SafeLoadedRecoveryDomains["aiRecoveryDaily"] = {
     ...loadedDomains.aiRecoveryDaily,
