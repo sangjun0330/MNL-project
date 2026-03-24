@@ -259,6 +259,10 @@ function normalizeModelId(model: string) {
   return String(model ?? "").trim().toLowerCase().replace(/^openai\//, "");
 }
 
+function isGpt54Model(model: string) {
+  return /^gpt-5\.4(?:$|[-_])/i.test(normalizeModelId(model));
+}
+
 function modelSupportsStructuredOutputs(model: string) {
   const normalized = normalizeModelId(model);
   if (!normalized) return false;
@@ -383,7 +387,14 @@ function buildEmptyTextError(model: string, payload: any) {
   const status = typeof payload?.status === "string" ? payload.status : "unknown";
   const incompleteReason =
     typeof payload?.incomplete_details?.reason === "string" ? payload.incomplete_details.reason : "none";
-  return `openai_empty_text_model:${model}_status:${status}_incomplete:${incompleteReason}`;
+  const outputTypes = Array.isArray(payload?.output)
+    ? payload.output
+        .map((item: any) => (typeof item?.type === "string" ? item.type : "unknown"))
+        .filter(Boolean)
+        .join(",")
+    : "none";
+  const reasoningTokens = readNumber(payload?.usage?.output_tokens_details?.reasoning_tokens) ?? 0;
+  return `openai_empty_text_model:${model}_status:${status}_incomplete:${incompleteReason}_output:${outputTypes}_reasoning_tokens:${reasoningTokens}`;
 }
 
 async function postStructuredRequest(
@@ -581,10 +592,14 @@ export async function runAIRecoveryStructuredRequest(args: StructuredRequestArgs
 
       if (needsMoreOutputTokens(effectiveError) && !retriedWithMoreTokens) {
         retriedWithMoreTokens = true;
+        const nextMaxOutputTokens =
+          args.reasoningEffort === "high" && isGpt54Model(args.model)
+            ? Math.min(Math.max(args.maxOutputTokens ?? 2400, 5200) + 2000, 7200)
+            : Math.min((args.maxOutputTokens ?? 2400) + 1800, 5200);
         const boostedArgs = {
           ...args,
           reasoningEffort: downgradeReasoningEffort(args.reasoningEffort),
-          maxOutputTokens: Math.min((args.maxOutputTokens ?? 2400) + 1800, 5200),
+          maxOutputTokens: nextMaxOutputTokens,
         };
         console.info("[AIRecovery] openai_retry_more_tokens", {
           model: args.model,

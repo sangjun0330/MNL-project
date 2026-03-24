@@ -1168,19 +1168,26 @@ function resolveReasoningEffort(model: string, kind: "brief" | "orders"): AIReco
   return "low";
 }
 
+function isGpt54RecoveryModel(model: string) {
+  return /^gpt-5\.4(?:$|[-_])/i.test(String(model ?? "").trim().toLowerCase());
+}
+
 function readRecoveryMaxOutputEnv(name: string) {
   const raw = Number(process.env[name] ?? "");
   if (!Number.isFinite(raw)) return null;
   return raw;
 }
 
-function resolveRecoveryFlowMaxOutputTokens(kind: "brief" | "orders") {
+function resolveRecoveryFlowMaxOutputTokens(kind: "brief" | "orders", model?: string) {
   const fallback = kind === "brief" ? 3200 : 1400;
   const explicit =
     readRecoveryMaxOutputEnv(kind === "brief" ? "OPENAI_RECOVERY_BRIEF_MAX_OUTPUT_TOKENS" : "OPENAI_RECOVERY_ORDERS_MAX_OUTPUT_TOKENS") ??
     readRecoveryMaxOutputEnv("OPENAI_RECOVERY_MAX_OUTPUT_TOKENS") ??
     fallback;
   const scaled = Math.round(explicit * 1.5);
+  if (kind === "brief" && isGpt54RecoveryModel(model ?? "")) {
+    return clamp(Math.round(scaled * 1.25), 5200, 7200);
+  }
   return clamp(scaled, kind === "brief" ? 3600 : 1500, kind === "brief" ? 6300 : 3300);
 }
 
@@ -1490,10 +1497,9 @@ function buildProBriefDeveloperPromptAddon(model: string) {
   const normalized = String(model ?? "").trim().toLowerCase();
   if (!/^gpt-5\.4(?:$|[-_])/.test(normalized)) return "";
   return [
-    "이번 해설은 Pro 플랜용 고해상도 회복 해설로 작성하세요.",
-    "headline 아래 본문은 더 꼼꼼하고 자세하게 쓰되, 같은 의미를 반복하지 말고 근거와 우선순위를 더 촘촘하게 연결하세요.",
-    "각 section.description은 지금 중요한 이유를 데이터 흐름과 실제 회복 순서까지 보이게 더 정밀하게 설명하세요.",
-    "weeklySummary.personalInsight와 nextWeekPreview는 최근 반복 패턴, 회복 저해 요인, 다음 회복 흐름을 더 입체적으로 해설하세요.",
+    "이번 해설은 Pro 플랜용 회복 해설입니다.",
+    "근거와 회복 우선순위 연결은 더 꼼꼼히 설명하되, 같은 의미 반복은 금지하세요.",
+    "weeklySummary는 최근 반복 패턴과 다음 회복 흐름을 더 입체적으로 정리하세요.",
   ].join(" ");
 }
 
@@ -1943,8 +1949,8 @@ async function runOpenAIFlow(args: {
 }) {
   const briefReasoningEffort = resolveReasoningEffort(args.model, "brief");
   const ordersReasoningEffort = resolveReasoningEffort(args.model, "orders");
-  const briefMaxOutputTokens = resolveRecoveryFlowMaxOutputTokens("brief");
-  const ordersMaxOutputTokens = resolveRecoveryFlowMaxOutputTokens("orders");
+  const briefMaxOutputTokens = resolveRecoveryFlowMaxOutputTokens("brief", args.model);
+  const ordersMaxOutputTokens = resolveRecoveryFlowMaxOutputTokens("orders", args.model);
 
   const baseMeta = {
     briefResponseId: null,
@@ -2519,7 +2525,7 @@ export async function regenerateAIRecoveryOrders(args: {
     schemaName: "ai_recovery_orders",
     schema: buildOrdersSchema(),
     signal: args.signal,
-    maxOutputTokens: resolveRecoveryFlowMaxOutputTokens("orders"),
+    maxOutputTokens: resolveRecoveryFlowMaxOutputTokens("orders", model),
   });
 
   if (!ordersResult.ok) {
@@ -2549,7 +2555,7 @@ export async function regenerateAIRecoveryOrders(args: {
       schema: buildOrdersSchema(),
       rawText: ordersResult.text,
       signal: args.signal,
-      maxOutputTokens: resolveRecoveryFlowMaxOutputTokens("orders"),
+      maxOutputTokens: resolveRecoveryFlowMaxOutputTokens("orders", model),
     });
     if (!repairedOrders.ok) {
       console.error("[AIRecovery] regenerate_orders_repair_failed", {
