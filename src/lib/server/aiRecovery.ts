@@ -1160,8 +1160,10 @@ function buildGenerationQuota(
 
 function resolveReasoningEffort(model: string, kind: "brief" | "orders"): AIRecoveryEffort {
   const normalized = String(model ?? "").trim().toLowerCase();
+  const isGpt54Model = /^gpt-5\.4(?:$|[-_])/i.test(normalized);
   const isDedicatedProModel = normalized.includes("gpt-5.2-pro") || normalized.includes("gpt-5.4-pro");
   if (kind === "orders") return "low";
+  if (isGpt54Model) return "high";
   if (isDedicatedProModel) return "medium";
   return "low";
 }
@@ -1255,7 +1257,7 @@ function parseBriefJson(text: string, snapshot: RecoverySnapshot): AIRecoveryBri
     };
   });
   const normalizedSections = buildNormalizedBriefSections(snapshot, sections);
-  const headline = trimText(parsed.headline, 120);
+  const headline = trimText(parsed.headline, 160);
   if (!headline) throw new Error("brief_headline_missing");
   const compoundAlert = (() => {
     if (parsed.compoundAlert == null) return null;
@@ -1475,14 +1477,26 @@ function buildOrdersSchema() {
   };
 }
 
-function buildBriefDeveloperPrompt(slot: AIRecoverySlot) {
+function buildBriefDeveloperPrompt(slot: AIRecoverySlot, model: string) {
+  const addon = buildProBriefDeveloperPromptAddon(model);
   if (slot === "postShift") {
-    return `너는 교대근무 간호사를 위한 프리미엄 AI 퇴근 후 회복 해설 엔진입니다. 오늘 실제 건강 기록과 최근 반복 패턴만 근거로 퇴근 후부터 잠들기 전까지의 회복 우선순위를 정교하게 설명하세요. 데이터에 없는 오늘 상태를 꾸며내거나 과장하지 마세요. JSON 하나만 반환하세요. 문장은 짧고 정확하게 쓰고, generic한 문장·반복 문장·힘 빠진 마무리를 금지하세요. section은 정말 중요한 카테고리만 고르고 description은 왜 지금 중요한지 한 문장, tips는 서로 겹치지 않는 실행 행동 2개로 작성하세요. 내부 시스템 용어와 원시 데이터 필드명은 절대 노출하지 말고 날짜는 자연어로만 표현하세요. 모든 서술문은 한국어 존댓말로만 작성하고, '-다'체와 명령형 반말은 금지하세요. 설명 문장은 '입니다/합니다'체를 사용하고, 행동 문장은 '하세요/해주세요'체를 사용하세요.`;
+    return `너는 교대근무 간호사를 위한 프리미엄 AI 퇴근 후 회복 해설 엔진입니다. 오늘 실제 건강 기록과 최근 반복 패턴만 근거로 퇴근 후부터 잠들기 전까지의 회복 우선순위를 정교하게 설명하세요. 데이터에 없는 오늘 상태를 꾸며내거나 과장하지 마세요. JSON 하나만 반환하세요. 문장은 짧고 정확하게 쓰고, generic한 문장·반복 문장·힘 빠진 마무리를 금지하세요. section은 정말 중요한 카테고리만 고르고 description은 왜 지금 중요한지 한 문장, tips는 서로 겹치지 않는 실행 행동 2개로 작성하세요. 내부 시스템 용어와 원시 데이터 필드명은 절대 노출하지 말고 날짜는 자연어로만 표현하세요. 모든 서술문은 한국어 존댓말로만 작성하고, '-다'체와 명령형 반말은 금지하세요. 설명 문장은 '입니다/합니다'체를 사용하고, 행동 문장은 '하세요/해주세요'체를 사용하세요.${addon ? ` ${addon}` : ""}`;
   }
-  return `너는 교대근무 간호사를 위한 프리미엄 AI 기상 후 회복 해설 엔진입니다. 전날까지의 건강 기록과 오늘 수면만 근거로 오늘 하루의 시작 회복 우선순위를 정교하게 설명하세요. 같은 날 스트레스·카페인·활동·기분·증상은 추정하거나 단정하지 마세요. JSON 하나만 반환하세요. 문장은 짧고 정확하게 쓰고, generic한 문장·반복 문장·힘 빠진 마무리를 금지하세요. section은 정말 중요한 카테고리만 고르고 description은 왜 지금 중요한지 한 문장, tips는 서로 겹치지 않는 실행 행동 2개로 작성하세요. 내부 시스템 용어와 원시 데이터 필드명은 절대 노출하지 말고 날짜는 자연어로만 표현하세요. 모든 서술문은 한국어 존댓말로만 작성하고, '-다'체와 명령형 반말은 금지하세요. 설명 문장은 '입니다/합니다'체를 사용하고, 행동 문장은 '하세요/해주세요'체를 사용하세요.`;
+  return `너는 교대근무 간호사를 위한 프리미엄 AI 기상 후 회복 해설 엔진입니다. 전날까지의 건강 기록과 오늘 수면만 근거로 오늘 하루의 시작 회복 우선순위를 정교하게 설명하세요. 같은 날 스트레스·카페인·활동·기분·증상은 추정하거나 단정하지 마세요. JSON 하나만 반환하세요. 문장은 짧고 정확하게 쓰고, generic한 문장·반복 문장·힘 빠진 마무리를 금지하세요. section은 정말 중요한 카테고리만 고르고 description은 왜 지금 중요한지 한 문장, tips는 서로 겹치지 않는 실행 행동 2개로 작성하세요. 내부 시스템 용어와 원시 데이터 필드명은 절대 노출하지 말고 날짜는 자연어로만 표현하세요. 모든 서술문은 한국어 존댓말로만 작성하고, '-다'체와 명령형 반말은 금지하세요. 설명 문장은 '입니다/합니다'체를 사용하고, 행동 문장은 '하세요/해주세요'체를 사용하세요.${addon ? ` ${addon}` : ""}`;
 }
 
-function buildBriefUserPrompt(snapshot: RecoverySnapshot) {
+function buildProBriefDeveloperPromptAddon(model: string) {
+  const normalized = String(model ?? "").trim().toLowerCase();
+  if (!/^gpt-5\.4(?:$|[-_])/.test(normalized)) return "";
+  return [
+    "이번 해설은 Pro 플랜용 고해상도 회복 해설로 작성하세요.",
+    "headline 아래 본문은 더 꼼꼼하고 자세하게 쓰되, 같은 의미를 반복하지 말고 근거와 우선순위를 더 촘촘하게 연결하세요.",
+    "각 section.description은 지금 중요한 이유를 데이터 흐름과 실제 회복 순서까지 보이게 더 정밀하게 설명하세요.",
+    "weeklySummary.personalInsight와 nextWeekPreview는 최근 반복 패턴, 회복 저해 요인, 다음 회복 흐름을 더 입체적으로 해설하세요.",
+  ].join(" ");
+}
+
+function buildBriefUserPrompt(snapshot: RecoverySnapshot, model: string) {
   const afterWork = snapshot.slot === "postShift";
   const phaseLabel = slotPromptLabel(snapshot.slot);
   const promptHealth = buildAIRecoveryPromptHealthPayload(snapshot);
@@ -1497,7 +1511,9 @@ function buildBriefUserPrompt(snapshot: RecoverySnapshot) {
       : "지금은 기상 후 회복 단계입니다. 오늘은 수면 시간만 사용할 수 있고, 나머지 판단은 어제까지 최근 7일 건강 데이터만으로 해야 합니다.",
     "[핵심 목표]",
     "",
-    `headline은 ${phaseLabel} 회복에서 가장 중요한 축을 1~2문장으로 정리`,
+    `headline은 ${phaseLabel} 회복 전체를 관통하는 핵심을 담은 한 문장만 작성`,
+    "headline은 해설 전체를 아우르는 깊이 있는 대표 문장으로 쓰되, 반드시 한 문장만 사용",
+    "headline은 문장을 두 개 이상 이어붙이지 말고, 문장 분리 부호도 한 문장 범위를 넘기지 말 것",
     "headline에는 가능하면 focusFactor 또는 primaryAction의 맥락을 자연스럽게 녹일 것",
     "sections는 고정 카테고리 순서대로 작성",
     "필수 카테고리 순서: sleep, shift, caffeine, stress, activity",
@@ -1970,8 +1986,8 @@ async function runOpenAIFlow(args: {
   const briefResult = await runAIRecoveryStructuredRequest({
     model: args.model,
     reasoningEffort: briefReasoningEffort,
-    developerPrompt: buildBriefDeveloperPrompt(args.snapshot.slot),
-    userPrompt: buildBriefUserPrompt(args.snapshot),
+    developerPrompt: buildBriefDeveloperPrompt(args.snapshot.slot, args.model),
+    userPrompt: buildBriefUserPrompt(args.snapshot, args.model),
     schemaName: "ai_recovery_brief",
     schema: buildBriefSchema(),
     signal: args.signal,
