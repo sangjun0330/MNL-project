@@ -85,27 +85,27 @@ function resolveMaxOutputTokens(explicit?: number) {
 }
 
 function resolveNetworkRetryCount() {
-  const raw = Number(process.env.OPENAI_RECOVERY_NETWORK_RETRIES ?? process.env.OPENAI_MED_SAFETY_NETWORK_RETRIES ?? 1);
-  if (!Number.isFinite(raw)) return 1;
-  return Math.max(0, Math.min(3, Math.round(raw)));
+  const raw = Number(process.env.OPENAI_RECOVERY_NETWORK_RETRIES ?? process.env.OPENAI_MED_SAFETY_NETWORK_RETRIES ?? 0);
+  if (!Number.isFinite(raw)) return 0;
+  return Math.max(0, Math.min(2, Math.round(raw)));
 }
 
 function resolveNetworkRetryBaseMs() {
-  const raw = Number(process.env.OPENAI_RECOVERY_NETWORK_RETRY_BASE_MS ?? process.env.OPENAI_MED_SAFETY_NETWORK_RETRY_BASE_MS ?? 700);
-  if (!Number.isFinite(raw)) return 700;
-  return Math.max(200, Math.min(3000, Math.round(raw)));
+  const raw = Number(process.env.OPENAI_RECOVERY_NETWORK_RETRY_BASE_MS ?? process.env.OPENAI_MED_SAFETY_NETWORK_RETRY_BASE_MS ?? 500);
+  if (!Number.isFinite(raw)) return 500;
+  return Math.max(200, Math.min(2000, Math.round(raw)));
 }
 
 function resolveUpstreamTimeoutMs() {
-  const raw = Number(process.env.OPENAI_RECOVERY_UPSTREAM_TIMEOUT_MS ?? process.env.OPENAI_MED_SAFETY_UPSTREAM_TIMEOUT_MS ?? 120_000);
-  if (!Number.isFinite(raw)) return 120_000;
-  return Math.max(60_000, Math.min(300_000, Math.round(raw)));
+  const raw = Number(process.env.OPENAI_RECOVERY_UPSTREAM_TIMEOUT_MS ?? process.env.OPENAI_MED_SAFETY_UPSTREAM_TIMEOUT_MS ?? 45_000);
+  if (!Number.isFinite(raw)) return 45_000;
+  return Math.max(10_000, Math.min(45_000, Math.round(raw)));
 }
 
 function resolveTotalBudgetMs() {
-  const raw = Number(process.env.OPENAI_RECOVERY_TOTAL_BUDGET_MS ?? process.env.OPENAI_MED_SAFETY_TOTAL_BUDGET_MS ?? 420_000);
-  if (!Number.isFinite(raw)) return 420_000;
-  return Math.max(120_000, Math.min(900_000, Math.round(raw)));
+  const raw = Number(process.env.OPENAI_RECOVERY_TOTAL_BUDGET_MS ?? process.env.OPENAI_MED_SAFETY_TOTAL_BUDGET_MS ?? 55_000);
+  if (!Number.isFinite(raw)) return 55_000;
+  return Math.max(20_000, Math.min(55_000, Math.round(raw)));
 }
 
 function truncateError(raw: string, size = 220) {
@@ -247,6 +247,16 @@ function readUsage(json: any): AIRecoveryUsage | null {
   return normalizeUsageNode(json?.usage) ?? normalizeUsageNode(json?.response?.usage) ?? normalizeUsageNode(json?.metrics?.usage) ?? null;
 }
 
+function normalizeModelId(model: string) {
+  return String(model ?? "").trim().toLowerCase().replace(/^openai\//, "");
+}
+
+function modelSupportsStructuredOutputs(model: string) {
+  const normalized = normalizeModelId(model);
+  if (!normalized) return false;
+  return !normalized.includes("gpt-5.2-pro") && !normalized.includes("gpt-5.4-pro");
+}
+
 function mergeUsage(values: Array<AIRecoveryUsage | null | undefined>): AIRecoveryUsage | null {
   let hasValue = false;
   let inputTokens = 0;
@@ -283,6 +293,53 @@ function safeJsonParse(raw: string) {
   } catch {
     return null;
   }
+}
+
+function toStructuredJsonText(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value === "string") {
+    const parsed = safeJsonParse(value);
+    if (parsed && typeof parsed === "object") {
+      return JSON.stringify(parsed);
+    }
+    return null;
+  }
+  if (typeof value !== "object") return null;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return null;
+  }
+}
+
+function extractStructuredJsonText(json: any): string | null {
+  const queue: unknown[] = [
+    json?.output_parsed,
+    json?.response?.output_parsed,
+    json?.parsed,
+    json?.response?.parsed,
+    json?.output,
+    json?.message?.content,
+  ];
+  const visited = new Set<unknown>();
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (current == null || visited.has(current)) continue;
+    if (typeof current === "object") visited.add(current);
+
+    if (typeof current === "object" && current !== null && !Array.isArray(current)) {
+      const node = current as Record<string, unknown>;
+      const direct = toStructuredJsonText(node.parsed ?? node.output_parsed ?? null);
+      if (direct) return direct;
+      queue.push(node.content, node.message, node.output, node.response);
+      continue;
+    }
+
+    if (Array.isArray(current)) {
+      for (const item of current) queue.push(item);
+    }
+  }
+  return null;
 }
 
 function buildCompatStructuredDeveloperPrompt(args: StructuredRequestArgs) {
@@ -331,6 +388,7 @@ async function postStructuredRequest(
   const requestUrl = requestConfig.requestUrl;
 
   try {
+    const useNativeStructuredOutputs = !compatMode && modelSupportsStructuredOutputs(requestConfig.model);
     const requestBody = compatMode
       ? {
           model: requestConfig.model,
@@ -358,10 +416,19 @@ async function postStructuredRequest(
               content: [{ type: "input_text", text: args.userPrompt }],
             },
           ],
-          text: {
-            format: { type: "text" },
-            verbosity: "medium",
-          },
+          text: useNativeStructuredOutputs
+            ? {
+                format: {
+                  type: "json_schema",
+                  name: args.schemaName,
+                  schema: args.schema,
+                  strict: true,
+                },
+              }
+            : {
+                format: { type: "text" },
+                verbosity: "medium",
+              },
           reasoning: {
             effort: args.reasoningEffort,
           },
@@ -404,14 +471,15 @@ async function postStructuredRequest(
     }
 
     const text = extractOutputText(json);
-    if (!text) {
+    const structuredText = text || extractStructuredJsonText(json);
+    if (!structuredText) {
       return {
         error: buildEmptyTextError(requestConfig.model, json),
       };
     }
 
     return {
-      text,
+      text: structuredText,
       responseId: readString(json?.id),
       usage: readUsage(json),
     };

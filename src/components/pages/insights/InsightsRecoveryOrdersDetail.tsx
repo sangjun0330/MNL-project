@@ -113,22 +113,41 @@ export function InsightsRecoveryOrdersDetail({
   const { end, recordedDays, syncLabel, todayShift, hasTodayShift } = useInsightsData();
   const planner = useRecoveryPlanner();
   const [slot, setSlot] = useState<AIRecoverySlot>(initialSlot);
+  const [hydrated, setHydrated] = useState(false);
   const slotLabel = slot === "wake" ? "기상 후" : "퇴근 후";
   const aiHref = slot === "postShift" ? "/insights/recovery/ai?slot=postShift" : "/insights/recovery/ai";
+  const hasInitialAccess = Boolean(initialData?.session || initialData?.hasAIEntitlement || initialData?.model);
+  const insightsLocked = hydrated && !hasInitialAccess && isInsightsLocked(recordedDays);
+  const aiEnabled = Boolean(initialData?.hasAIEntitlement) || (hydrated && billing.hasEntitlement("recoveryPlannerAI"));
   const session = useAIRecoverySession({
     dateISO: end,
     slot,
     autoGenerate: false,
-    enabled: !isInsightsLocked(recordedDays) && billing.hasEntitlement("recoveryPlannerAI"),
+    enabled: !insightsLocked && aiEnabled,
     initialData,
   });
   const activeData = session.data?.slot === slot && session.data?.dateISO === end ? session.data : null;
 
   useEffect(() => {
+    setHydrated(true);
+  }, []);
+
+  useEffect(() => {
     setSlot(initialSlot);
   }, [initialSlot]);
 
-  if (isInsightsLocked(recordedDays)) {
+  if (!hydrated && !initialData) {
+    return (
+      <InsightDetailShell title="오늘의 오더" subtitle={formatKoreanDate(end)} meta="현재 상태를 확인하고 있어요." backHref="/insights/recovery">
+        <DetailCard className="p-5 sm:p-6">
+          <div className="text-[16px] font-bold text-ios-text">불러오는 중이에요.</div>
+          <p className="mt-2 text-[13px] text-ios-sub">저장된 오더와 현재 접근 권한을 함께 확인하고 있습니다.</p>
+        </DetailCard>
+      </InsightDetailShell>
+    );
+  }
+
+  if (insightsLocked) {
     return (
       <InsightDetailShell title="오늘의 오더" subtitle={formatKoreanDate(end)} meta={t("건강 기록 3일 이상부터 볼 수 있어요.")} backHref="/insights/recovery">
         <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />
@@ -136,7 +155,7 @@ export function InsightsRecoveryOrdersDetail({
     );
   }
 
-  if (!billing.loading && !billing.hasEntitlement("recoveryPlannerAI")) {
+  if (hydrated && !hasInitialAccess && !billing.loading && !billing.hasEntitlement("recoveryPlannerAI")) {
     return (
       <InsightDetailShell title="오늘의 오더" subtitle={formatKoreanDate(end)} meta="AI 오더는 Plus 또는 Pro에서 사용할 수 있어요." backHref="/insights/recovery">
         <PaywallNotice aiHref={aiHref} />
@@ -171,9 +190,9 @@ export function InsightsRecoveryOrdersDetail({
       backHref="/insights/recovery"
       chips={
         <>
-          <DetailChip color={DETAIL_ACCENTS.mint}>{planner.nextDutyLabel}</DetailChip>
-          {hasTodayShift ? <DetailChip color={DETAIL_ACCENTS.navy}>{shiftKo(todayShift)}</DetailChip> : null}
-          <DetailChip color={DETAIL_ACCENTS.navy}>{syncLabel}</DetailChip>
+          {hydrated ? <DetailChip color={DETAIL_ACCENTS.mint}>{planner.nextDutyLabel}</DetailChip> : null}
+          {hydrated && hasTodayShift ? <DetailChip color={DETAIL_ACCENTS.navy}>{shiftKo(todayShift)}</DetailChip> : null}
+          {hydrated ? <DetailChip color={DETAIL_ACCENTS.navy}>{syncLabel}</DetailChip> : null}
         </>
       }
     >
@@ -232,7 +251,7 @@ export function InsightsRecoveryOrdersDetail({
         </DetailCard>
       ) : null}
 
-      {response && !response.gate.allowed ? (
+      {response && !response.gate.allowed && !currentSession ? (
         <DetailCard className="p-5 sm:p-6">
           <div className="text-[17px] font-bold tracking-[-0.02em] text-ios-text">지금은 만들 수 없어요.</div>
           <p className="mt-2 text-[13px] leading-6 text-ios-sub">{response.gate.message}</p>

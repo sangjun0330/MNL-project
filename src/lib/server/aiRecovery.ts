@@ -1159,7 +1159,10 @@ function buildGenerationQuota(
 }
 
 function resolveReasoningEffort(model: string, kind: "brief" | "orders"): AIRecoveryEffort {
-  if (kind === "brief") return "high";
+  const normalized = String(model ?? "").trim().toLowerCase();
+  const isProModel = normalized.includes("gpt-5.2-pro") || normalized.includes("gpt-5.4-pro");
+  if (isProModel) return "medium";
+  if (kind === "brief") return "medium";
   return "low";
 }
 
@@ -1170,12 +1173,22 @@ function readRecoveryMaxOutputEnv(name: string) {
 }
 
 function resolveRecoveryFlowMaxOutputTokens(kind: "brief" | "orders") {
-  const fallback = kind === "brief" ? 2200 : 1400;
+  const fallback = kind === "brief" ? 3200 : 1400;
   const explicit =
     readRecoveryMaxOutputEnv(kind === "brief" ? "OPENAI_RECOVERY_BRIEF_MAX_OUTPUT_TOKENS" : "OPENAI_RECOVERY_ORDERS_MAX_OUTPUT_TOKENS") ??
     readRecoveryMaxOutputEnv("OPENAI_RECOVERY_MAX_OUTPUT_TOKENS") ??
     fallback;
-  return clamp(explicit, kind === "brief" ? 2200 : 1400, kind === "brief" ? 3600 : 2200);
+  return clamp(explicit, kind === "brief" ? 2400 : 1000, kind === "brief" ? 4200 : 2200);
+}
+
+function canRevealExistingSessionForGate(gate: AIRecoveryGate) {
+  if (gate.allowed) return true;
+  return (
+    gate.code === "needs_more_records" ||
+    gate.code === "wake_sleep_required" ||
+    gate.code === "post_shift_health_required" ||
+    gate.code === "slot_not_available"
+  );
 }
 
 function publicErrorMessage(code: string | null) {
@@ -2234,7 +2247,8 @@ export async function readAIRecoverySessionView(args: {
     payload,
   });
   const { session, completions } = await safeReadRecoverySlot({ userId: args.userId, dateISO, slot });
-  const visibleSession = gate.allowed && session?.status === "ready" ? normalizeStoredSession(snapshot, session) : null;
+  const visibleSession =
+    canRevealExistingSessionForGate(gate) && session?.status === "ready" ? normalizeStoredSession(snapshot, session) : null;
   const orderIds = visibleSession?.orders?.items.map((item) => item.id) ?? [];
   const filteredCompletions = filterCompletionIdsForOrders(completions, orderIds);
   const quota = buildGenerationQuota(subscription?.tier ?? null, session, Boolean(subscription?.isPrivilegedTester));
@@ -2254,7 +2268,8 @@ export async function readAIRecoverySessionView(args: {
     session: visibleSession,
     stale: Boolean(
       visibleSession &&
-        (visibleSession.inputSignature !== snapshot.inputSignature ||
+        (!gate.allowed ||
+          visibleSession.inputSignature !== snapshot.inputSignature ||
           visibleSession.language !== snapshot.language ||
           visibleSession.promptVersion !== AI_RECOVERY_PROMPT_VERSION)
     ),
@@ -2487,7 +2502,7 @@ export async function regenerateAIRecoveryOrders(args: {
     schemaName: "ai_recovery_orders",
     schema: buildOrdersSchema(),
     signal: args.signal,
-    maxOutputTokens: 2200,
+    maxOutputTokens: resolveRecoveryFlowMaxOutputTokens("orders"),
   });
 
   if (!ordersResult.ok) {
@@ -2517,7 +2532,7 @@ export async function regenerateAIRecoveryOrders(args: {
       schema: buildOrdersSchema(),
       rawText: ordersResult.text,
       signal: args.signal,
-      maxOutputTokens: 2200,
+      maxOutputTokens: resolveRecoveryFlowMaxOutputTokens("orders"),
     });
     if (!repairedOrders.ok) {
       console.error("[AIRecovery] regenerate_orders_repair_failed", {

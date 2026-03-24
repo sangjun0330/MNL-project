@@ -295,13 +295,17 @@ export function InsightsAIRecoveryDetail({
   const { end, recordedDays, syncLabel } = useInsightsData();
   const planner = useRecoveryPlanner();
   const [slot, setSlot] = useState<AIRecoverySlot>(initialSlot);
+  const [hydrated, setHydrated] = useState(false);
   const postShiftRedirectedRef = useRef(false);
   const slotLabel = slot === "wake" ? "기상 후" : "퇴근 후";
+  const hasInitialAccess = Boolean(initialData?.session || initialData?.hasAIEntitlement || initialData?.model);
+  const insightsLocked = hydrated && !hasInitialAccess && isInsightsLocked(recordedDays);
+  const aiEnabled = Boolean(initialData?.hasAIEntitlement) || (hydrated && billing.hasEntitlement("recoveryPlannerAI"));
   const session = useAIRecoverySession({
     dateISO: end,
     slot,
     autoGenerate: false,
-    enabled: !isInsightsLocked(recordedDays) && billing.hasEntitlement("recoveryPlannerAI"),
+    enabled: !insightsLocked && aiEnabled,
     initialData,
   });
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
@@ -318,6 +322,10 @@ export function InsightsAIRecoveryDetail({
     const byCategory = new Map(sections.map((section) => [section.category, section] as const));
     return CATEGORY_ORDER.map((category) => byCategory.get(category)).filter((section): section is AIRecoveryBriefSection => Boolean(section));
   }, [brief?.sections]);
+
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
 
   useEffect(() => {
     setSlot(initialSlot);
@@ -359,7 +367,18 @@ export function InsightsAIRecoveryDetail({
     />
   ) : null;
 
-  if (isInsightsLocked(recordedDays)) {
+  if (!hydrated && !initialData) {
+    return (
+      <InsightDetailShell title="AI 맞춤회복" subtitle={formatKoreanDate(end)} meta="현재 상태를 확인하고 있어요." tone="navy" backHref="/insights/recovery">
+        <Surface>
+          <div className="text-[18px] font-semibold tracking-[-0.03em] text-[#111827]">불러오는 중이에요.</div>
+          <p className="mt-3 text-[14px] leading-6 text-[#667085]">저장된 해설과 현재 접근 권한을 함께 확인하고 있습니다.</p>
+        </Surface>
+      </InsightDetailShell>
+    );
+  }
+
+  if (insightsLocked) {
     return (
       <InsightDetailShell title="AI 맞춤회복" subtitle={formatKoreanDate(end)} meta={t("건강 기록 3일 이상부터 볼 수 있어요.")} tone="navy" backHref="/insights/recovery">
         <InsightsLockedNotice recordedDays={recordedDays} minDays={INSIGHTS_MIN_DAYS} />
@@ -367,7 +386,7 @@ export function InsightsAIRecoveryDetail({
     );
   }
 
-  if (!billing.loading && !billing.hasEntitlement("recoveryPlannerAI")) {
+  if (hydrated && !hasInitialAccess && !billing.loading && !billing.hasEntitlement("recoveryPlannerAI")) {
     return (
       <InsightDetailShell
         title="AI 맞춤회복"
@@ -390,8 +409,8 @@ export function InsightsAIRecoveryDetail({
       backHref="/insights/recovery"
       chips={
         <>
-          <DetailChip color={DETAIL_ACCENTS.mint}>{planner.nextDutyLabel}</DetailChip>
-          <DetailChip color={DETAIL_ACCENTS.navy}>{syncLabel}</DetailChip>
+          {hydrated ? <DetailChip color={DETAIL_ACCENTS.mint}>{planner.nextDutyLabel}</DetailChip> : null}
+          {hydrated ? <DetailChip color={DETAIL_ACCENTS.navy}>{syncLabel}</DetailChip> : null}
           {response?.stale ? <DetailChip color={DETAIL_ACCENTS.pink}>업데이트 필요</DetailChip> : null}
         </>
       }
@@ -409,7 +428,7 @@ export function InsightsAIRecoveryDetail({
         </Surface>
       ) : null}
 
-      {response && !response.gate.allowed ? (
+      {response && !response.gate.allowed && !currentSession ? (
         <Surface>
           <div className="text-[22px] font-semibold tracking-[-0.03em] text-[#111827]">지금은 만들 수 없어요.</div>
           <p className="mt-3 text-[14px] leading-6 text-[#667085]">{response.gate.message}</p>
