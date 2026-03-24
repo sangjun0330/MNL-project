@@ -10,6 +10,7 @@ type StructuredRequestArgs = {
   schema: Record<string, unknown>;
   signal: AbortSignal;
   maxOutputTokens?: number;
+  verbosity?: "low" | "medium";
 };
 
 type StructuredRequestSuccess = {
@@ -437,7 +438,7 @@ async function postStructuredRequest(
           ],
           text: {
             format: { type: "text" },
-            verbosity: "low",
+            verbosity: args.verbosity ?? "low",
           },
           reasoning: {
             effort: downgradeReasoningEffort(args.reasoningEffort),
@@ -469,7 +470,7 @@ async function postStructuredRequest(
               }
             : {
                 format: { type: "text" },
-                verbosity: "medium",
+                verbosity: args.verbosity ?? "medium",
               },
           reasoning: {
             effort: args.reasoningEffort,

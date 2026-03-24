@@ -94,6 +94,16 @@ type RecoverySubscriptionSnapshot = {
   aiRecoveryModel: string | null;
 };
 
+type RecoveryPromptProfile = "plus" | "pro";
+
+type RecoveryPromptRequest = {
+  developerPrompt: string;
+  userPrompt: string;
+  reasoningEffort: AIRecoveryEffort;
+  maxOutputTokens: number;
+  verbosity?: "low" | "medium";
+};
+
 type LoadedRecoveryDomains = Awaited<ReturnType<typeof loadAIRecoveryDomains>>;
 type LoadedRecoverySlot = Awaited<ReturnType<typeof readAIRecoverySlot>>;
 
@@ -261,9 +271,9 @@ function buildWakePromptTodayHealthRow(state: AppState, iso: ISODate) {
   };
 }
 
-function buildAIRecoveryPromptHealthPayload(snapshot: RecoverySnapshot) {
+function buildAIRecoveryPromptHealthPayload(snapshot: RecoverySnapshot, historyDays = 7) {
   const historyEnd = toISODate(addDays(fromISODate(snapshot.dateISO), -1));
-  const historyRows = listHistoryDates(historyEnd, 7)
+  const historyRows = listHistoryDates(historyEnd, historyDays)
     .filter((iso) => hasHealthInput(snapshot.state.bio?.[iso] ?? null, snapshot.state.emotions?.[iso] ?? null))
     .map((iso) => buildPromptHealthRow(snapshot.state, iso));
   return {
@@ -271,7 +281,7 @@ function buildAIRecoveryPromptHealthPayload(snapshot: RecoverySnapshot) {
       snapshot.slot === "wake"
         ? buildWakePromptTodayHealthRow(snapshot.state, snapshot.dateISO)
         : buildPromptHealthRow(snapshot.state, snapshot.dateISO),
-    historyHealth7: historyRows,
+    historyHealth: historyRows,
   };
 }
 
@@ -1085,11 +1095,12 @@ function buildFallbackOrders(snapshot: RecoverySnapshot): AIRecoveryOrdersPayloa
 }
 
 function buildFallbackFlow(snapshot: RecoverySnapshot, model: string): OpenAIFlowResult {
+  const profile = resolveRecoveryPromptProfile(null, model);
   return {
     status: "ready",
     brief: buildFallbackBrief(snapshot),
     orders: buildFallbackOrders(snapshot),
-    reasoningEffort: resolveReasoningEffort(model, "brief"),
+    reasoningEffort: resolveReasoningEffort(profile, "brief"),
     model,
     openaiMeta: {
       briefResponseId: null,
@@ -1158,18 +1169,19 @@ function buildGenerationQuota(
   };
 }
 
-function resolveReasoningEffort(model: string, kind: "brief" | "orders"): AIRecoveryEffort {
-  const normalized = String(model ?? "").trim().toLowerCase();
-  const isGpt54Model = /^gpt-5\.4(?:$|[-_])/i.test(normalized);
-  const isDedicatedProModel = normalized.includes("gpt-5.2-pro") || normalized.includes("gpt-5.4-pro");
-  if (kind === "orders") return "low";
-  if (isGpt54Model) return "high";
-  if (isDedicatedProModel) return "medium";
-  return "low";
-}
-
 function isGpt54RecoveryModel(model: string) {
   return /^gpt-5\.4(?:$|[-_])/i.test(String(model ?? "").trim().toLowerCase());
+}
+
+function resolveRecoveryPromptProfile(tier: PlanTier | null | undefined, model: string): RecoveryPromptProfile {
+  if (tier === "pro") return "pro";
+  if (tier === "plus") return "plus";
+  return isGpt54RecoveryModel(model) ? "pro" : "plus";
+}
+
+function resolveReasoningEffort(profile: RecoveryPromptProfile, kind: "brief" | "orders"): AIRecoveryEffort {
+  if (kind === "orders") return "low";
+  return profile === "pro" ? "high" : "low";
 }
 
 function readRecoveryMaxOutputEnv(name: string) {
@@ -1178,15 +1190,18 @@ function readRecoveryMaxOutputEnv(name: string) {
   return raw;
 }
 
-function resolveRecoveryFlowMaxOutputTokens(kind: "brief" | "orders", model?: string) {
-  const fallback = kind === "brief" ? 3200 : 1400;
+function resolveRecoveryFlowMaxOutputTokens(kind: "brief" | "orders", profile: RecoveryPromptProfile) {
+  const fallback = kind === "brief" ? (profile === "pro" ? 4800 : 3200) : profile === "pro" ? 1800 : 1400;
   const explicit =
     readRecoveryMaxOutputEnv(kind === "brief" ? "OPENAI_RECOVERY_BRIEF_MAX_OUTPUT_TOKENS" : "OPENAI_RECOVERY_ORDERS_MAX_OUTPUT_TOKENS") ??
     readRecoveryMaxOutputEnv("OPENAI_RECOVERY_MAX_OUTPUT_TOKENS") ??
     fallback;
   const scaled = Math.round(explicit * 1.5);
-  if (kind === "brief" && isGpt54RecoveryModel(model ?? "")) {
-    return clamp(Math.round(scaled * 1.25), 5200, 7200);
+  if (kind === "brief" && profile === "pro") {
+    return clamp(Math.max(scaled, 7200), 7200, 8000);
+  }
+  if (kind === "orders" && profile === "pro") {
+    return clamp(Math.max(scaled, 2100), 2100, 3600);
   }
   return clamp(scaled, kind === "brief" ? 3600 : 1500, kind === "brief" ? 6300 : 3300);
 }
@@ -1485,28 +1500,167 @@ function buildOrdersSchema() {
   };
 }
 
-function buildBriefDeveloperPrompt(slot: AIRecoverySlot, model: string) {
-  const addon = buildProBriefDeveloperPromptAddon(model);
+function buildPlusBriefDeveloperPrompt(slot: AIRecoverySlot) {
   if (slot === "postShift") {
-    return `너는 교대근무 간호사를 위한 프리미엄 AI 퇴근 후 회복 해설 엔진입니다. 오늘 실제 건강 기록과 최근 반복 패턴만 근거로 퇴근 후부터 잠들기 전까지의 회복 우선순위를 정교하게 설명하세요. 데이터에 없는 오늘 상태를 꾸며내거나 과장하지 마세요. JSON 하나만 반환하세요. 문장은 짧고 정확하게 쓰고, generic한 문장·반복 문장·힘 빠진 마무리를 금지하세요. section은 정말 중요한 카테고리만 고르고 description은 왜 지금 중요한지 한 문장, tips는 서로 겹치지 않는 실행 행동 2개로 작성하세요. 내부 시스템 용어와 원시 데이터 필드명은 절대 노출하지 말고 날짜는 자연어로만 표현하세요. 모든 서술문은 한국어 존댓말로만 작성하고, '-다'체와 명령형 반말은 금지하세요. 설명 문장은 '입니다/합니다'체를 사용하고, 행동 문장은 '하세요/해주세요'체를 사용하세요.${addon ? ` ${addon}` : ""}`;
+    return "너는 교대근무 간호사를 위한 Plus AI 퇴근 후 회복 해설 엔진입니다. 오늘 실제 건강 기록과 최근 반복 패턴만 근거로 퇴근 후부터 잠들기 전까지의 회복 우선순위를 정교하게 설명하세요. 데이터에 없는 오늘 상태를 꾸며내거나 과장하지 마세요. JSON 하나만 반환하세요. 문장은 짧고 정확하게 쓰고, generic한 문장·반복 문장·힘 빠진 마무리를 금지하세요. section은 정말 중요한 카테고리만 고르고 description은 왜 지금 중요한지 한 문장, tips는 서로 겹치지 않는 실행 행동 2개로 작성하세요. 내부 시스템 용어와 원시 데이터 필드명은 절대 노출하지 말고 날짜는 자연어로만 표현하세요. 모든 서술문은 한국어 존댓말로만 작성하고, '-다'체와 명령형 반말은 금지하세요. 설명 문장은 '입니다/합니다'체를 사용하고, 행동 문장은 '하세요/해주세요'체를 사용하세요.";
   }
-  return `너는 교대근무 간호사를 위한 프리미엄 AI 기상 후 회복 해설 엔진입니다. 전날까지의 건강 기록과 오늘 수면만 근거로 오늘 하루의 시작 회복 우선순위를 정교하게 설명하세요. 같은 날 스트레스·카페인·활동·기분·증상은 추정하거나 단정하지 마세요. JSON 하나만 반환하세요. 문장은 짧고 정확하게 쓰고, generic한 문장·반복 문장·힘 빠진 마무리를 금지하세요. section은 정말 중요한 카테고리만 고르고 description은 왜 지금 중요한지 한 문장, tips는 서로 겹치지 않는 실행 행동 2개로 작성하세요. 내부 시스템 용어와 원시 데이터 필드명은 절대 노출하지 말고 날짜는 자연어로만 표현하세요. 모든 서술문은 한국어 존댓말로만 작성하고, '-다'체와 명령형 반말은 금지하세요. 설명 문장은 '입니다/합니다'체를 사용하고, 행동 문장은 '하세요/해주세요'체를 사용하세요.${addon ? ` ${addon}` : ""}`;
+  return "너는 교대근무 간호사를 위한 Plus AI 기상 후 회복 해설 엔진입니다. 전날까지의 건강 기록과 오늘 수면만 근거로 오늘 하루의 시작 회복 우선순위를 정교하게 설명하세요. 같은 날 스트레스·카페인·활동·기분·증상은 추정하거나 단정하지 마세요. JSON 하나만 반환하세요. 문장은 짧고 정확하게 쓰고, generic한 문장·반복 문장·힘 빠진 마무리를 금지하세요. section은 정말 중요한 카테고리만 고르고 description은 왜 지금 중요한지 한 문장, tips는 서로 겹치지 않는 실행 행동 2개로 작성하세요. 내부 시스템 용어와 원시 데이터 필드명은 절대 노출하지 말고 날짜는 자연어로만 표현하세요. 모든 서술문은 한국어 존댓말로만 작성하고, '-다'체와 명령형 반말은 금지하세요. 설명 문장은 '입니다/합니다'체를 사용하고, 행동 문장은 '하세요/해주세요'체를 사용하세요.";
 }
 
-function buildProBriefDeveloperPromptAddon(model: string) {
-  const normalized = String(model ?? "").trim().toLowerCase();
-  if (!/^gpt-5\.4(?:$|[-_])/.test(normalized)) return "";
+function buildProBriefDeveloperPrompt(slot: AIRecoverySlot) {
+  if (slot === "postShift") {
+    return [
+      "너는 교대근무 간호사를 위한 프리미엄 AI 퇴근 후 회복 해설 엔진입니다.",
+      "목표는 오늘 퇴근 직후, 사용자가 왜 지금 이 회복 우선순위를 먼저 챙겨야 하는지 짧고 정교하게 이해시키는 것입니다.",
+      "",
+      "판단 근거:",
+      "- 오늘 현재 시점에서는 오늘 건강 정보 전체를 직접 사용할 수 있습니다.",
+      "- 나머지 판단은 반드시 어제까지 최근 14일 기록만 근거로 해야 합니다.",
+      "- 데이터에 없는 오늘 상태는 추정하거나 단정하지 마세요.",
+      "",
+      "출력 규칙:",
+      "- 반드시 제공된 JSON schema에 맞는 JSON 객체 하나만 출력하세요.",
+      "- 설명문, 코드블록, 마크다운, 여분 텍스트는 금지합니다.",
+      "- 내부 시스템 용어, 계산식, 점수 산식, 원시 데이터 필드명은 절대 노출하지 마세요.",
+      "- 날짜는 ISO 형식이나 숫자 태그로 쓰지 말고 자연어로만 표현하세요.",
+      "",
+      "문체 규칙:",
+      "- 모든 서술은 한국어 존댓말로 작성하세요.",
+      "- headline, description, summary, alert 문장은 반드시 '입니다/합니다'체로 작성하세요.",
+      "- 행동 문장은 반드시 '하세요/해주세요'체로 작성하세요.",
+      "- '-다', 반말, 명령형 반말, generic한 위로, 힘 빠진 마무리는 금지합니다.",
+      "- 문장은 짧고 밀도 있게 작성하고, 같은 의미 반복은 피하세요.",
+      "",
+      "품질 기준:",
+      "- headline은 오늘 회복 전체를 관통하는 핵심 1문장만 작성하세요.",
+      "- headline은 가장 중요한 회복 축을 중심에 두고, 필요하면 plannerContext의 focusFactor 또는 primaryAction 맥락을 자연스럽게 녹이세요.",
+      "- 각 section.description은 왜 이 항목이 지금 중요한지 실제 데이터 2가지 이상을 엮어 1문장으로 설명하세요.",
+      "- 가능하면 오늘 건강 정보 1개와 최근 14일 패턴 1개 이상을 함께 연결하세요.",
+      "- 각 section.tips는 정확히 2개만 작성하세요.",
+      "- tips는 서로 겹치지 않는 바로 실행 가능한 행동이어야 합니다.",
+      "- tips에는 시작 시점, 시간, 장소, 방법 중 최소 2개 이상이 드러나야 합니다.",
+      "- title은 짧지만 맥락이 느껴지게 작성하세요.",
+      "- weeklySummary.personalInsight와 weeklySummary.nextWeekPreview는 서로 다른 내용을 작성하세요.",
+      "",
+      "우선순위 해석:",
+      "- 오늘 건강 정보는 현재 회복 전환 상태의 직접 근거입니다.",
+      "- 최근 14일 기록은 반복 패턴, 누적 부담, 회복 실패 경향의 근거입니다.",
+      "- 근거가 강한 항목은 선명하게 쓰고, 근거가 약한 항목은 과장하지 마세요.",
+      "- 짧게 쓰되 얕지 않게, 바로 납득되는 이유와 행동이 보이게 작성하세요.",
+      "",
+      "추가 규칙:",
+      "- plannerContext가 있으면 그 우선순위와 반드시 정렬하세요.",
+      "- plannerContext.focusFactor 또는 plannerContext.primaryAction과 충돌하는 새 계획은 만들지 마세요.",
+      "- description과 tips가 같은 말을 반복하지 않게 하세요.",
+      "- section끼리도 비슷한 팁을 반복하지 마세요.",
+      "- compoundAlert는 위험 요소 2개 이상이 동시에 뚜렷할 때만 작성하고, 아니면 null로 두세요.",
+    ].join("\n");
+  }
   return [
-    "이번 해설은 Pro 플랜용 회복 해설입니다.",
-    "근거와 회복 우선순위 연결은 더 꼼꼼히 설명하되, 같은 의미 반복은 금지하세요.",
-    "weeklySummary는 최근 반복 패턴과 다음 회복 흐름을 더 입체적으로 정리하세요.",
-  ].join(" ");
+    "너는 교대근무 간호사를 위한 프리미엄 AI 기상 후 회복 해설 엔진입니다.",
+    "목표는 오늘 기상 직후, 사용자가 왜 지금 이 회복 우선순위를 먼저 챙겨야 하는지 짧고 정교하게 이해시키는 것입니다.",
+    "",
+    "판단 근거:",
+    "- 오늘 현재 시점에서는 오늘 수면 정보만 직접 사용할 수 있습니다.",
+    "- 나머지 판단은 반드시 어제까지 최근 14일 기록만 근거로 해야 합니다.",
+    "- 같은 날 스트레스, 카페인, 활동, 기분, 증상은 아직 발생하지 않았을 수 있으므로 오늘 상태처럼 추정하거나 단정하지 마세요.",
+    "",
+    "출력 규칙:",
+    "- 반드시 제공된 JSON schema에 맞는 JSON 객체 하나만 출력하세요.",
+    "- 설명문, 코드블록, 마크다운, 여분 텍스트는 금지합니다.",
+    "- 내부 시스템 용어, 계산식, 점수 산식, 원시 데이터 필드명은 절대 노출하지 마세요.",
+    "- 날짜는 ISO 형식이나 숫자 태그로 쓰지 말고 자연어로만 표현하세요.",
+    "",
+    "문체 규칙:",
+    "- 모든 서술은 한국어 존댓말로 작성하세요.",
+    "- headline, description, summary, alert 문장은 반드시 '입니다/합니다'체로 작성하세요.",
+    "- 행동 문장은 반드시 '하세요/해주세요'체로 작성하세요.",
+    "- '-다', 반말, 명령형 반말, generic한 위로, 힘 빠진 마무리는 금지합니다.",
+    "- 문장은 짧고 밀도 있게 작성하고, 같은 의미 반복은 피하세요.",
+    "",
+    "품질 기준:",
+    "- headline은 오늘 회복 전체를 관통하는 핵심 1문장만 작성하세요.",
+    "- headline은 가장 중요한 회복 축을 중심에 두고, 필요하면 plannerContext의 focusFactor 또는 primaryAction 맥락을 자연스럽게 녹이세요.",
+    "- 각 section.description은 왜 이 항목이 지금 중요한지 실제 데이터 2가지 이상을 엮어 1문장으로 설명하세요.",
+    "- 가능하면 오늘 수면 1개와 최근 14일 패턴 1개 이상을 함께 연결하세요.",
+    "- 각 section.tips는 정확히 2개만 작성하세요.",
+    "- tips는 서로 겹치지 않는 바로 실행 가능한 행동이어야 합니다.",
+    "- tips에는 시작 시점, 시간, 장소, 방법 중 최소 2개 이상이 드러나야 합니다.",
+    "- title은 짧지만 맥락이 느껴지게 작성하세요.",
+    "- weeklySummary.personalInsight와 weeklySummary.nextWeekPreview는 서로 다른 내용을 작성하세요.",
+    "",
+    "우선순위 해석:",
+    "- 오늘 수면은 현재 회복 시작 상태의 직접 근거입니다.",
+    "- 최근 14일 기록은 반복 패턴, 누적 부담, 회복 실패 경향의 근거입니다.",
+    "- 근거가 강한 항목은 선명하게 쓰고, 근거가 약한 항목은 과장하지 마세요.",
+    "- 짧게 쓰되 얕지 않게, 바로 납득되는 이유와 행동이 보이게 작성하세요.",
+    "",
+    "추가 규칙:",
+    "- plannerContext가 있으면 그 우선순위와 반드시 정렬하세요.",
+    "- plannerContext.focusFactor 또는 plannerContext.primaryAction과 충돌하는 새 계획은 만들지 마세요.",
+    "- description과 tips가 같은 말을 반복하지 않게 하세요.",
+    "- section끼리도 비슷한 팁을 반복하지 마세요.",
+    "- compoundAlert는 위험 요소 2개 이상이 동시에 뚜렷할 때만 작성하고, 아니면 null로 두세요.",
+  ].join("\n");
 }
 
-function buildBriefUserPrompt(snapshot: RecoverySnapshot, model: string) {
+function buildBriefDeveloperPrompt(slot: AIRecoverySlot, profile: RecoveryPromptProfile) {
+  return profile === "pro" ? buildProBriefDeveloperPrompt(slot) : buildPlusBriefDeveloperPrompt(slot);
+}
+
+function buildBriefPromptJsonShapeLines() {
+  return [
+    "[JSON shape]",
+    "{",
+    "\"headline\": \"string\",",
+    "\"compoundAlert\": {",
+    "\"factors\": [",
+    "\"string\"",
+    "],",
+    "\"message\": \"string\"",
+    "},",
+    "\"sections\": [",
+    "{",
+    "\"category\": \"sleep|shift|caffeine|menstrual|stress|activity\",",
+    "\"severity\": \"info|caution|warning\",",
+    "\"title\": \"string\",",
+    "\"description\": \"string\",",
+    "\"tips\": [",
+    "\"string\",",
+    "\"string\"",
+    "]",
+    "}",
+    "],",
+    "\"weeklySummary\": {",
+    "\"avgBattery\": \"number\",",
+    "\"prevAvgBattery\": \"number\",",
+    "\"topDrains\": [",
+    "{",
+    "\"label\": \"string\",",
+    "\"pct\": \"number\"",
+    "}",
+    "],",
+    "\"personalInsight\": \"string\",",
+    "\"nextWeekPreview\": \"string\"",
+    "}",
+    "}",
+  ];
+}
+
+function buildBriefPromptDataLines(snapshot: RecoverySnapshot, historyDays: 7 | 14) {
+  const promptHealth = buildAIRecoveryPromptHealthPayload(snapshot, historyDays);
+  return [
+    "[오늘 건강 데이터(JSON)]",
+    JSON.stringify(promptHealth.todayHealth, null, 2),
+    "",
+    historyDays === 14 ? "[어제까지 최근 14일 건강 데이터(JSON)]" : "[어제까지 최근 7일 건강 데이터(JSON)]",
+    JSON.stringify(promptHealth.historyHealth, null, 2),
+  ];
+}
+
+function buildPlusBriefUserPrompt(snapshot: RecoverySnapshot) {
   const afterWork = snapshot.slot === "postShift";
   const phaseLabel = slotPromptLabel(snapshot.slot);
-  const promptHealth = buildAIRecoveryPromptHealthPayload(snapshot);
   return [
     "사용자의 기록과 계산된 회복 지표를 바탕으로 AI 맞춤회복 JSON을 작성하세요.",
     "반드시 JSON 하나만 출력하세요. 코드펜스, 설명문, 마크다운 금지.",
@@ -1553,238 +1707,182 @@ function buildBriefUserPrompt(snapshot: RecoverySnapshot, model: string) {
     "sections는 위 고정 순서대로 배열",
     "weeklySummary.personalInsight와 weeklySummary.nextWeekPreview는 서로 다른 내용으로 작성",
     "weeklySummary.topDrains는 0~3개",
-    "[JSON shape]",
-    "{",
-    "\"headline\": \"string\",",
-    "\"compoundAlert\": {",
-    "\"factors\": [",
-    "\"string\"",
-    "],",
-    "\"message\": \"string\"",
-    "},",
-    "\"sections\": [",
-    "{",
-    "\"category\": \"sleep|shift|caffeine|menstrual|stress|activity\",",
-    "\"severity\": \"info|caution|warning\",",
-    "\"title\": \"string\",",
-    "\"description\": \"string\",",
-    "\"tips\": [",
-    "\"string\",",
-    "\"string\"",
-    "]",
-    "}",
-    "],",
-    "\"weeklySummary\": {",
-    "\"avgBattery\": \"number\",",
-    "\"prevAvgBattery\": \"number\",",
-    "\"topDrains\": [",
-    "{",
-    "\"label\": \"string\",",
-    "\"pct\": \"number\"",
-    "}",
-    "],",
-    "\"personalInsight\": \"string\",",
-    "\"nextWeekPreview\": \"string\"",
-    "}",
-    "}",
+    ...buildBriefPromptJsonShapeLines(),
     "",
-    "[오늘 건강 데이터(JSON)]",
-    JSON.stringify(promptHealth.todayHealth, null, 2),
-    "",
-    "[어제까지 최근 7일 건강 데이터(JSON)]",
-    JSON.stringify(promptHealth.historyHealth7, null, 2),
+    ...buildBriefPromptDataLines(snapshot, 7),
   ].join("\n");
 }
 
-function buildProBriefPlannerSchema() {
-  return {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      headline: { type: "string" },
-      compoundAlert: {
-        anyOf: [
-          { type: "null" },
-          {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              factors: {
-                type: "array",
-                items: { type: "string" },
-              },
-              message: { type: "string" },
-            },
-            required: ["factors", "message"],
-          },
-        ],
-      },
-      sections: {
-        type: "array",
-        minItems: 2,
-        maxItems: 4,
-        items: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            category: { type: "string", enum: ["sleep", "shift", "caffeine", "menstrual", "stress", "activity"] },
-            title: { type: "string" },
-            description: { type: "string" },
-          },
-          required: ["category", "title", "description"],
-        },
-      },
-      weeklySummary: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          personalInsight: { type: "string" },
-          nextWeekPreview: { type: "string" },
-        },
-        required: ["personalInsight", "nextWeekPreview"],
-      },
-    },
-    required: ["headline", "compoundAlert", "sections", "weeklySummary"],
-  };
-}
-
-
-function buildProBriefPlanningContext(snapshot: RecoverySnapshot) {
-  const data = buildStartRecoveryPromptData(snapshot);
-  return {
-    phase: data.phase,
-    today: {
-      sleepHours: data.today.sleepHours,
-      napHours: data.today.napHours,
-      sleepDebtHours: data.today.sleepDebtHours,
-      symptomSeverity: data.today.symptomSeverity,
-      menstrualLabel: data.today.menstrualLabel,
-      nightStreak: data.today.nightStreak,
-    },
-    weekly: {
-      avgVital7: data.weekly.avgVital7,
-      avgVitalPrev7: data.weekly.avgVitalPrev7,
-      recordsIn7Days: data.weekly.recordsIn7Days,
-      avgSleepHours: data.history.avgSleepHours,
-      avgStress: data.history.avgStress,
-      avgCaffeineMg: data.history.avgCaffeineMg,
-      avgMood: data.history.avgMood,
-    },
-    topFactors: snapshot.topFactorRows.slice(0, 3),
-    recurringSignals: data.history.recurringSignals,
-    plannerContext: {
-      focusFactor: data.plannerContext.focusFactor?.label ?? null,
-      primaryAction: data.plannerContext.primaryAction,
-      avoidAction: data.plannerContext.avoidAction,
-      nextDuty: data.shift.next,
-      nextDutyDate: data.plannerContext.nextDutyDate,
-      plannerTone: data.plannerContext.plannerTone,
-    },
-    recentTrend: data.weekly.recentVitals7.slice(-3).map((row) => ({
-      dateISO: row.dateISO,
-      shift: row.shift,
-      sleepHours: row.sleepHours,
-      napHours: row.napHours,
-      stress: row.stress ?? null,
-      activity: row.activity ?? null,
-      mood: row.mood ?? null,
-      caffeineMg: row.caffeineMg ?? null,
-      symptomSeverity: row.symptomSeverity ?? null,
-    })),
-    fixedSectionOrder: data.fixedSectionOrder,
-  };
-}
-
-function buildProBriefPlannerDeveloperPrompt(slot: AIRecoverySlot) {
-  if (slot === "postShift") {
+function buildProBriefUserPrompt(snapshot: RecoverySnapshot) {
+  if (snapshot.slot === "postShift") {
     return [
-      "너는 교대근무 간호사를 위한 Pro 회복 해설 분석기입니다.",
-      "완성형 전체 해설 JSON을 길게 쓰지 말고, 가장 중요한 회복 축과 핵심 섹션 설명 초안만 설계하세요.",
-      "headline은 해설 전체를 아우르는 한 문장만 작성하세요.",
-      "sections는 가장 중요한 카테고리 2~4개만 고르세요.",
-      "각 section.description은 지금 중요한 이유를 한 문장으로만 쓰세요.",
-      "weeklySummary 두 문장은 반복 없이 밀도 높게 작성하세요.",
-      "반드시 JSON 하나만 출력하세요.",
-    ].join(" ");
+      "사용자의 기록과 계산된 회복 지표를 바탕으로 AI 맞춤회복 JSON을 작성하세요.",
+      "반드시 JSON 객체 하나만 출력하세요. 코드펜스, 설명문, 마크다운, 여분 텍스트는 금지합니다.",
+      "",
+      "현재 시점:",
+      "- 지금은 퇴근 후 회복 단계입니다.",
+      "- 오늘 현재 데이터는 오늘 건강 정보 전체를 사용할 수 있습니다.",
+      "- 나머지 판단은 반드시 어제까지 최근 14일 건강 데이터만 근거로 해야 합니다.",
+      "- 데이터에 없는 오늘 상태는 오늘 상태처럼 해석하거나 예측하지 마세요.",
+      "",
+      "plannerContext 규칙:",
+      "- plannerContext가 있으면 그 우선순위에 맞춰 작성하세요.",
+      "- plannerContext.focusFactor 또는 plannerContext.primaryAction과 충돌하는 새 계획은 만들지 마세요.",
+      "- 충돌 없이 같은 방향으로 더 구체화하는 방식으로 작성하세요.",
+      "",
+      "headline 규칙:",
+      "- headline은 퇴근 후 회복 전체를 관통하는 핵심 1문장만 작성하세요.",
+      "- 문장을 두 개 이상 이어붙이지 마세요.",
+      "- 가능하면 plannerContext의 맥락을 자연스럽게 반영하세요.",
+      "- 오늘 가장 먼저 챙겨야 할 회복 축이 드러나야 합니다.",
+      "",
+      "sections 규칙:",
+      "- sections는 고정 순서대로 작성하세요: sleep, shift, caffeine, stress, activity",
+      "- menstrualCategoryVisible가 true면 caffeine 다음에 menstrual을 포함하세요.",
+      "- menstrualCategoryVisible가 false면 menstrual은 제외하세요.",
+      "- category 중복은 금지합니다.",
+      "- category 값은 sleep, shift, caffeine, menstrual, stress, activity 중 하나만 사용하세요.",
+      "",
+      "각 section.description 규칙:",
+      "- 왜 이 카테고리가 지금 중요한지 1문장으로 설명하세요.",
+      "- 반드시 실제 데이터 2가지 이상에 기대어 작성하세요.",
+      "- 가능하면 오늘 건강 정보 1개와 최근 14일 패턴 1개 이상을 함께 엮으세요.",
+      "- 단순 나열이 아니라 우선순위의 이유가 보이게 작성하세요.",
+      "- 숫자는 필요할 때만 최소한으로 사용하세요.",
+      "",
+      "각 section.tips 규칙:",
+      "- 정확히 2개만 작성하세요.",
+      "- 서로 겹치지 않는 실행 행동으로 작성하세요.",
+      "- 추상 조언이 아니라 바로 실행 가능한 행동이어야 합니다.",
+      "- 시작 시점, 시간, 장소, 방법 중 최소 2개 이상이 드러나야 합니다.",
+      "- section.description을 반복하지 말고 실제 행동으로 이어지게 작성하세요.",
+      "",
+      "문체 규칙:",
+      "- headline, compoundAlert.message, section.description, weeklySummary.personalInsight, weeklySummary.nextWeekPreview는 반드시 '입니다/합니다'체 한국어 존댓말로 작성하세요.",
+      "- section.tips는 반드시 '하세요/해주세요'체 한국어 존댓말로 작성하세요.",
+      "- '-다', '-해라', '-가라', '-마라' 같은 표현은 금지합니다.",
+      "",
+      "품질 규칙:",
+      "- generic한 문장, 의미 반복, 힘 빠진 마무리를 금지합니다.",
+      "- title은 짧지만 맥락이 보이게 작성하세요.",
+      "- 수면, 카페인, 활동, 기분, 스트레스 관련 수치는 Data JSON에 있는 값만 사용하세요.",
+      "- 임의 수치, 임의 원인, 임의 날짜를 만들지 마세요.",
+      "- 데이터 필드명, 숫자 태그형 표현, 괄호 속 원시 키 이름은 노출하지 마세요.",
+      "- 날짜는 '오늘', '내일', '다음 근무일', '최근 2주' 같은 자연어만 사용하세요.",
+      "- 데이터에 없는 오늘 스트레스·카페인·활동·기분·증상은 새로 만들지 마세요.",
+      "",
+      "요약 규칙:",
+      "- weeklySummary.personalInsight와 weeklySummary.nextWeekPreview는 서로 다른 내용을 작성하세요.",
+      "- personalInsight는 최근 14일 패턴에서 드러난 개인 회복 특성이나 취약점을 설명하세요.",
+      "- nextWeekPreview는 다음 근무 흐름을 앞두고 미리 조정하면 좋은 포인트를 설명하세요.",
+      "- weeklySummary.topDrains는 0~3개로 작성하세요.",
+      "",
+      "경고 규칙:",
+      "- compoundAlert는 위험 요소 2개 이상이 동시에 뚜렷할 때만 작성하세요.",
+      "- 그렇지 않으면 null로 작성하세요.",
+      "",
+      ...buildBriefPromptJsonShapeLines(),
+      "",
+      "아래는 최근 14일간 유저 건강정보 JSON 데이터입니다.",
+      ...buildBriefPromptDataLines(snapshot, 14),
+    ].join("\n");
   }
   return [
-    "너는 교대근무 간호사를 위한 Pro 회복 해설 분석기입니다.",
-    "완성형 전체 해설 JSON을 길게 쓰지 말고, 가장 중요한 회복 축과 핵심 섹션 설명 초안만 설계하세요.",
-    "headline은 해설 전체를 아우르는 한 문장만 작성하세요.",
-    "sections는 가장 중요한 카테고리 2~4개만 고르세요.",
-    "각 section.description은 지금 중요한 이유를 한 문장으로만 쓰세요.",
-    "weeklySummary 두 문장은 반복 없이 밀도 높게 작성하세요.",
-    "반드시 JSON 하나만 출력하세요.",
-  ].join(" ");
-}
-
-function buildProBriefPlannerUserPrompt(snapshot: RecoverySnapshot) {
-  const context = buildProBriefPlanningContext(snapshot);
-  return [
-    "아래 compact context만 근거로 Pro 회복 해설의 핵심 초안을 작성하세요.",
-    "headline은 반드시 한 문장만 사용하세요.",
-    "sections는 중요 카테고리만 2~4개 선택하세요.",
-    "tips는 작성하지 마세요.",
-    "weeklySummary.personalInsight와 nextWeekPreview는 서로 다른 내용을 써야 합니다.",
-    "모든 문장은 한국어 존댓말 '입니다/합니다'체로 작성하세요.",
+    "사용자의 기록과 계산된 회복 지표를 바탕으로 AI 맞춤회복 JSON을 작성하세요.",
+    "반드시 JSON 객체 하나만 출력하세요. 코드펜스, 설명문, 마크다운, 여분 텍스트는 금지합니다.",
     "",
-    "[compactContext]",
-    JSON.stringify(context, null, 2),
+    "현재 시점:",
+    "- 지금은 기상 후 회복 단계입니다.",
+    "- 오늘 현재 데이터로 사용할 수 있는 것은 수면 정보뿐입니다.",
+    "- 나머지 판단은 반드시 어제까지 최근 14일 건강 데이터만 근거로 해야 합니다.",
+    "- 같은 날 스트레스, 카페인, 활동, 기분, 증상은 오늘 상태처럼 해석하거나 예측하지 마세요.",
+    "",
+    "plannerContext 규칙:",
+    "- plannerContext가 있으면 그 우선순위에 맞춰 작성하세요.",
+    "- plannerContext.focusFactor 또는 plannerContext.primaryAction과 충돌하는 새 계획은 만들지 마세요.",
+    "- 충돌 없이 같은 방향으로 더 구체화하는 방식으로 작성하세요.",
+    "",
+    "headline 규칙:",
+    "- headline은 기상 후 회복 전체를 관통하는 핵심 1문장만 작성하세요.",
+    "- 문장을 두 개 이상 이어붙이지 마세요.",
+    "- 가능하면 plannerContext의 맥락을 자연스럽게 반영하세요.",
+    "- 오늘 가장 먼저 챙겨야 할 회복 축이 드러나야 합니다.",
+    "",
+    "sections 규칙:",
+    "- sections는 고정 순서대로 작성하세요: sleep, shift, caffeine, stress, activity",
+    "- menstrualCategoryVisible가 true면 caffeine 다음에 menstrual을 포함하세요.",
+    "- menstrualCategoryVisible가 false면 menstrual은 제외하세요.",
+    "- category 중복은 금지합니다.",
+    "- category 값은 sleep, shift, caffeine, menstrual, stress, activity 중 하나만 사용하세요.",
+    "",
+    "각 section.description 규칙:",
+    "- 왜 이 카테고리가 지금 중요한지 1문장으로 설명하세요.",
+    "- 반드시 실제 데이터 2가지 이상에 기대어 작성하세요.",
+    "- 가능하면 오늘 수면 정보 1개와 최근 14일 패턴 1개 이상을 함께 엮으세요.",
+    "- 단순 나열이 아니라 우선순위의 이유가 보이게 작성하세요.",
+    "- 숫자는 필요할 때만 최소한으로 사용하세요.",
+    "",
+    "각 section.tips 규칙:",
+    "- 정확히 2개만 작성하세요.",
+    "- 서로 겹치지 않는 실행 행동으로 작성하세요.",
+    "- 추상 조언이 아니라 바로 실행 가능한 행동이어야 합니다.",
+    "- 시작 시점, 시간, 장소, 방법 중 최소 2개 이상이 드러나야 합니다.",
+    "- section.description을 반복하지 말고 실제 행동으로 이어지게 작성하세요.",
+    "",
+    "문체 규칙:",
+    "- headline, compoundAlert.message, section.description, weeklySummary.personalInsight, weeklySummary.nextWeekPreview는 반드시 '입니다/합니다'체 한국어 존댓말로 작성하세요.",
+    "- section.tips는 반드시 '하세요/해주세요'체 한국어 존댓말로 작성하세요.",
+    "- '-다', '-해라', '-가라', '-마라' 같은 표현은 금지합니다.",
+    "",
+    "품질 규칙:",
+    "- generic한 문장, 의미 반복, 힘 빠진 마무리를 금지합니다.",
+    "- title은 짧지만 맥락이 보이게 작성하세요.",
+    "- 수면, 카페인, 활동, 기분, 스트레스 관련 수치는 Data JSON에 있는 값만 사용하세요.",
+    "- 임의 수치, 임의 원인, 임의 날짜를 만들지 마세요.",
+    "- 데이터 필드명, 숫자 태그형 표현, 괄호 속 원시 키 이름은 노출하지 마세요.",
+    "- 날짜는 '오늘', '내일', '다음 근무일', '최근 2주' 같은 자연어만 사용하세요.",
+    "- 같은 날 스트레스·카페인·활동·기분을 오늘 상태처럼 말하지 마세요.",
+    "",
+    "요약 규칙:",
+    "- weeklySummary.personalInsight와 weeklySummary.nextWeekPreview는 서로 다른 내용을 작성하세요.",
+    "- personalInsight는 최근 14일 패턴에서 드러난 개인 회복 특성이나 취약점을 설명하세요.",
+    "- nextWeekPreview는 다음 근무 흐름을 앞두고 미리 조정하면 좋은 포인트를 설명하세요.",
+    "- weeklySummary.topDrains는 0~3개로 작성하세요.",
+    "",
+    "경고 규칙:",
+    "- compoundAlert는 위험 요소 2개 이상이 동시에 뚜렷할 때만 작성하세요.",
+    "- 그렇지 않으면 null로 작성하세요.",
+    "",
+    ...buildBriefPromptJsonShapeLines(),
+    "",
+    "아래는 최근 14일간 유저 건강정보 JSON 데이터입니다.",
+    ...buildBriefPromptDataLines(snapshot, 14),
   ].join("\n");
 }
 
-function parseProBriefPlannerJson(text: string, snapshot: RecoverySnapshot): AIRecoveryBrief {
-  const parsed = parseLooseJson(text);
-  if (!isRecord(parsed)) throw new Error("pro_brief_planner_not_object");
-  const data = buildStartRecoveryPromptData(snapshot);
-  const sectionsSource = Array.isArray(parsed.sections) ? parsed.sections : [];
-  if (sectionsSource.length < 1) throw new Error("pro_brief_planner_sections_missing");
-  const sections = sectionsSource.slice(0, 4).map((source, index) => {
-    if (!isRecord(source)) throw new Error(`pro_brief_planner_section_invalid_${index + 1}`);
-    return {
-      category: resolveSectionCategory(source.category, index === 0 ? normalizeBriefCategory(snapshot.plannerContext.focusFactor?.key) : "sleep"),
-      severity: "info" as const,
-      title: trimText(source.title, 40),
-      description: trimText(source.description, 240),
-      tips: ["", ""] as [string, string],
-    };
-  });
-  const headline = trimText(parsed.headline, 160);
-  if (!headline) throw new Error("pro_brief_planner_headline_missing");
-  const weeklySummarySource = isRecord(parsed.weeklySummary) ? parsed.weeklySummary : null;
-  if (!weeklySummarySource) throw new Error("pro_brief_planner_weekly_summary_missing");
-  const personalInsight = trimText(weeklySummarySource.personalInsight, 220);
-  const nextWeekPreview = trimText(weeklySummarySource.nextWeekPreview, 220);
-  if (!personalInsight || !nextWeekPreview) throw new Error("pro_brief_planner_weekly_summary_text_missing");
-  const compoundAlert = (() => {
-    if (!isRecord(parsed.compoundAlert)) return buildFallbackCompoundAlert(snapshot, data);
-    const factors = asStringArray(parsed.compoundAlert.factors, 3, 60);
-    const message = trimText(parsed.compoundAlert.message, 200);
-    if (factors.length < 2 || !message) return buildFallbackCompoundAlert(snapshot, data);
-    return { factors, message };
-  })();
-  return {
-    headline,
-    compoundAlert,
-    sections: buildNormalizedBriefSections(snapshot, sections, data),
-    weeklySummary: {
-      avgBattery: data.weekly.avgVital7,
-      prevAvgBattery: data.weekly.avgVitalPrev7,
-      topDrains: snapshot.topFactorRows.slice(0, 3).map((item) => ({ label: item.label, pct: round1(item.pct) })),
-      personalInsight,
-      nextWeekPreview,
-    },
-  };
+function buildBriefUserPrompt(snapshot: RecoverySnapshot, profile: RecoveryPromptProfile) {
+  return profile === "pro" ? buildProBriefUserPrompt(snapshot) : buildPlusBriefUserPrompt(snapshot);
 }
 
-function buildOrdersDeveloperPrompt(slot: AIRecoverySlot) {
+function buildPlusOrdersDeveloperPrompt(slot: AIRecoverySlot) {
   if (slot === "postShift") {
-    return `너는 RNest의 교대근무 간호사용 프리미엄 AI 퇴근 후 오더 생성기입니다. 방금 생성된 AI 맞춤회복 해설을 최우선 기준으로 읽고, 해설의 우선순위를 실제 행동 오더 4개로 번역하세요. 해설에 없는 새 큰 계획을 만들지 말고, 해설의 핵심을 더 짧고 더 실행 가능한 문장으로 압축하세요. 지금은 퇴근 후 오더 단계입니다. 퇴근 직후, 집 도착 후, 잠들기 전으로 이어지는 낮은 마찰의 회복 오더를 우선 만드세요. JSON 하나만 반환하세요. headline은 오늘 밤 오더 흐름의 핵심 한 문장, summary는 왜 이 구성이 맞는지 한 문장, 각 item은 title, body, when, reason을 가져야 합니다. body는 한 문장으로 끝내고 바로 체크 가능한 행동이어야 하며 시간·횟수·장소·조건 중 2개 이상이 가능하면 드러나야 합니다. generic한 문장, 같은 행동 반복, 내부 시스템 용어와 원시 데이터 필드명 노출, ISO 날짜 직접 표기를 금지하세요. headline, summary, reason은 '입니다/합니다'체 한국어 존댓말로 작성하고, body는 반드시 '하세요/해주세요'체로 작성하세요. '-다'체와 명령형 반말은 금지하세요.`;
+    return "너는 RNest의 교대근무 간호사용 Plus AI 퇴근 후 오더 생성기입니다. 방금 생성된 AI 맞춤회복 해설을 최우선 기준으로 읽고, 해설의 우선순위를 실제 행동 오더 4개로 번역하세요. 해설에 없는 새 큰 계획을 만들지 말고, 해설의 핵심을 더 짧고 더 실행 가능한 문장으로 압축하세요. 지금은 퇴근 후 오더 단계입니다. 퇴근 직후, 집 도착 후, 잠들기 전으로 이어지는 낮은 마찰의 회복 오더를 우선 만드세요. JSON 하나만 반환하세요. headline은 오늘 밤 오더 흐름의 핵심 한 문장, summary는 왜 이 구성이 맞는지 한 문장, 각 item은 title, body, when, reason을 가져야 합니다. body는 한 문장으로 끝내고 바로 체크 가능한 행동이어야 하며 시간·횟수·장소·조건 중 2개 이상이 가능하면 드러나야 합니다. generic한 문장, 같은 행동 반복, 내부 시스템 용어와 원시 데이터 필드명 노출, ISO 날짜 직접 표기를 금지하세요. headline, summary, reason은 '입니다/합니다'체 한국어 존댓말로 작성하고, body는 반드시 '하세요/해주세요'체로 작성하세요. '-다'체와 명령형 반말은 금지하세요.";
   }
-  return `너는 RNest의 교대근무 간호사용 프리미엄 AI 기상 후 오더 생성기입니다. 방금 생성된 AI 맞춤회복 해설을 최우선 기준으로 읽고, 해설의 우선순위를 실제 행동 오더 4개로 번역하세요. 해설에 없는 새 큰 계획을 만들지 말고, 해설의 핵심을 더 짧고 더 실행 가능한 문장으로 압축하세요. 지금은 기상 후 오더 단계입니다. 아침에 바로 실행할 수 있는 낮은 마찰의 스타터 오더를 우선 만드세요. JSON 하나만 반환하세요. headline은 오늘 오더 흐름의 핵심 한 문장, summary는 왜 이 구성이 맞는지 한 문장, 각 item은 title, body, when, reason을 가져야 합니다. body는 한 문장으로 끝내고 바로 체크 가능한 행동이어야 하며 시간·횟수·장소·조건 중 2개 이상이 가능하면 드러나야 합니다. generic한 문장, 같은 행동 반복, 내부 시스템 용어와 원시 데이터 필드명 노출, ISO 날짜 직접 표기를 금지하세요. headline, summary, reason은 '입니다/합니다'체 한국어 존댓말로 작성하고, body는 반드시 '하세요/해주세요'체로 작성하세요. '-다'체와 명령형 반말은 금지하세요.`;
+  return "너는 RNest의 교대근무 간호사용 Plus AI 기상 후 오더 생성기입니다. 방금 생성된 AI 맞춤회복 해설을 최우선 기준으로 읽고, 해설의 우선순위를 실제 행동 오더 4개로 번역하세요. 해설에 없는 새 큰 계획을 만들지 말고, 해설의 핵심을 더 짧고 더 실행 가능한 문장으로 압축하세요. 지금은 기상 후 오더 단계입니다. 아침에 바로 실행할 수 있는 낮은 마찰의 스타터 오더를 우선 만드세요. JSON 하나만 반환하세요. headline은 오늘 오더 흐름의 핵심 한 문장, summary는 왜 이 구성이 맞는지 한 문장, 각 item은 title, body, when, reason을 가져야 합니다. body는 한 문장으로 끝내고 바로 체크 가능한 행동이어야 하며 시간·횟수·장소·조건 중 2개 이상이 가능하면 드러나야 합니다. generic한 문장, 같은 행동 반복, 내부 시스템 용어와 원시 데이터 필드명 노출, ISO 날짜 직접 표기를 금지하세요. headline, summary, reason은 '입니다/합니다'체 한국어 존댓말로 작성하고, body는 반드시 '하세요/해주세요'체로 작성하세요. '-다'체와 명령형 반말은 금지하세요.";
 }
 
-function buildOrdersUserPrompt(snapshot: RecoverySnapshot, brief: AIRecoveryBrief) {
+function buildProOrdersDeveloperPrompt(slot: AIRecoverySlot) {
+  if (slot === "postShift") {
+    return "너는 RNest의 교대근무 간호사용 Pro AI 퇴근 후 오더 생성기입니다. 방금 생성된 Pro AI 맞춤회복 해설을 최우선 기준으로 읽고, 핵심 우선순위를 실제 행동 오더 4개로 정밀하게 번역하세요. 해설에 없는 새 건강 해석이나 새 큰 계획은 만들지 말고, 해설의 이유와 실행 타이밍이 더 선명하게 보이도록 압축하세요. 지금은 퇴근 후 오더 단계입니다. 퇴근 직후, 집 도착 후, 잠들기 전 흐름 안에서 저마찰 회복 오더를 우선 배치하세요. JSON 하나만 반환하세요. headline은 오늘 밤 오더 흐름의 핵심 한 문장, summary는 왜 이 4개가 맞는지 한 문장, 각 item은 title, body, when, reason을 가져야 합니다. body는 한 문장으로 끝내고 바로 체크 가능한 행동이어야 하며 시간·횟수·장소·조건 중 2개 이상이 보이게 작성하세요. generic한 문장, 같은 행동 반복, 내부 시스템 용어와 원시 데이터 필드명 노출, ISO 날짜 직접 표기를 금지하세요. headline, summary, reason은 '입니다/합니다'체 한국어 존댓말로 작성하고, body는 반드시 '하세요/해주세요'체로 작성하세요. '-다'체와 명령형 반말은 금지하세요.";
+  }
+  return "너는 RNest의 교대근무 간호사용 Pro AI 기상 후 오더 생성기입니다. 방금 생성된 Pro AI 맞춤회복 해설을 최우선 기준으로 읽고, 핵심 우선순위를 실제 행동 오더 4개로 정밀하게 번역하세요. 해설에 없는 새 건강 해석이나 새 큰 계획은 만들지 말고, 해설의 이유와 실행 타이밍이 더 선명하게 보이도록 압축하세요. 지금은 기상 후 오더 단계입니다. 아침에 바로 실행할 수 있는 낮은 마찰의 스타터 오더를 우선 만드세요. JSON 하나만 반환하세요. headline은 오늘 오더 흐름의 핵심 한 문장, summary는 왜 이 4개가 맞는지 한 문장, 각 item은 title, body, when, reason을 가져야 합니다. body는 한 문장으로 끝내고 바로 체크 가능한 행동이어야 하며 시간·횟수·장소·조건 중 2개 이상이 보이게 작성하세요. generic한 문장, 같은 행동 반복, 내부 시스템 용어와 원시 데이터 필드명 노출, ISO 날짜 직접 표기를 금지하세요. headline, summary, reason은 '입니다/합니다'체 한국어 존댓말로 작성하고, body는 반드시 '하세요/해주세요'체로 작성하세요. '-다'체와 명령형 반말은 금지하세요.";
+}
+
+function buildOrdersDeveloperPrompt(slot: AIRecoverySlot, profile: RecoveryPromptProfile) {
+  return profile === "pro" ? buildProOrdersDeveloperPrompt(slot) : buildPlusOrdersDeveloperPrompt(slot);
+}
+
+function buildPlusOrdersUserPrompt(snapshot: RecoverySnapshot, brief: AIRecoveryBrief) {
   return [
     "오늘의 오더 체크리스트용 JSON을 작성하세요.",
     "반드시 JSON 하나만 출력하세요. 코드펜스 금지, 설명문 금지.",
@@ -1835,6 +1933,61 @@ function buildOrdersUserPrompt(snapshot: RecoverySnapshot, brief: AIRecoveryBrie
     "[AI Recovery Brief JSON]",
     JSON.stringify(brief, null, 2),
   ].join("\n");
+}
+
+function buildProOrdersUserPrompt(snapshot: RecoverySnapshot, brief: AIRecoveryBrief) {
+  return [
+    "오늘의 Pro 오더 체크리스트용 JSON을 작성하세요.",
+    "반드시 JSON 하나만 출력하세요. 코드펜스 금지, 설명문 금지.",
+    "",
+    "[목표]",
+    "",
+    "Pro AI 맞춤회복 해설의 우선순위를 실제 행동 체크리스트 4개로 정밀하게 번역하기",
+    "오늘 가장 중요한 오더 4개만 남기기",
+    "오더 문장만 봐도 시작 타이밍과 이유가 바로 연결되게 만들기",
+    "사용자가 지금 컨디션에서도 바로 실천할 수 있게 마찰을 낮추기",
+    snapshot.slot === "postShift"
+      ? "퇴근 후부터 잠들기 전까지 바로 이어지는 저자극 회복 오더가 되게 만들기"
+      : "하루를 시작할 때 바로 실행할 수 있는 스타터 오더가 되게 만들기",
+    "[제약]",
+    "",
+    "items 길이는 정확히 4",
+    "id는 영어 snake_case",
+    "title, headline, summary는 모두 비워 두지 말 것",
+    "title은 카드 상단의 작은 맥락 라벨이므로 4~12자 수준으로 짧게",
+    "headline은 오늘 오더 흐름의 핵심을 한 문장으로 정리",
+    "summary는 왜 이 오더 구성이 맞는지 한 문장으로 정리",
+    "body는 카드에서 가장 크게 보이는 핵심 오더 문장이고, 한 문장으로 짧고 분명하게 작성",
+    "headline, summary, reason은 반드시 '입니다/합니다'체 한국어 존댓말로 작성",
+    "body는 반드시 '하세요/해주세요'체 한국어 존댓말로 작성",
+    "'-다', '-해라', '-가라', '-마라' 같은 표현 금지",
+    "body 안에 시작 트리거를 넣어 언제 시작하는지 바로 보이게 하고, 가능하면 시간/횟수/장소/조건 중 2개 이상 포함",
+    "when은 12자 안팎의 아주 짧은 타이밍 라벨만 사용",
+    "reason은 why 한 문장으로, brief의 우선순위와 직접 연결해 왜 지금 필요한지 설명",
+    "chips는 0~3개, 짧은 키워드만 사용",
+    "AI Recovery Brief JSON을 최우선 기준으로 보고, 해설의 우선순위를 실행 오더로 번역",
+    "brief에 없는 새 건강 해석이나 새 큰 계획을 추가하지 말 것",
+    "작은 행동이지만 회복 효과가 크고 실수/소진을 줄이는 방향을 우선",
+    "막연한 '쉬기/눕기/눈감기' 표현만 쓰지 말고, 실행 장면과 이유가 같이 보이게 작성",
+    "'컨디션 관리하기', '회복하기', '휴식하기'처럼 generic한 제목/문장 금지",
+    snapshot.slot === "postShift"
+      ? "퇴근 후 단계에서는 when이 '퇴근 직후', '집 도착 후', '잠들기 전' 쪽으로 자연스럽게 분산되게 구성"
+      : "기상 후 단계에서는 when이 '지금', '출근 전', '근무 중' 쪽으로 자연스럽게 분산되게 구성",
+    "같은 행동을 표현만 바꿔 중복 생성하지 말 것",
+    "brief에 없는 수치나 상태를 새로 만들지 말 것 [선택된 오더 개수] 4",
+    "",
+    "[해설 기반 변환 규칙]",
+    "아래 AI Recovery Brief JSON의 headline, sections, weeklySummary를 읽고 그대로 실행 가능한 오더로 바꿀 것",
+    "해설 description을 그대로 베끼지 말고 행동 한 문장으로 압축할 것",
+    "같은 해설 포인트를 서로 다른 말로 중복 오더화하지 말 것",
+    "",
+    "[AI Recovery Brief JSON]",
+    JSON.stringify(brief, null, 2),
+  ].join("\n");
+}
+
+function buildOrdersUserPrompt(snapshot: RecoverySnapshot, brief: AIRecoveryBrief, profile: RecoveryPromptProfile) {
+  return profile === "pro" ? buildProOrdersUserPrompt(snapshot, brief) : buildPlusOrdersUserPrompt(snapshot, brief);
 }
 
 function buildJsonRepairDeveloperPrompt(schemaName: string, schema: Record<string, unknown>) {
@@ -2123,15 +2276,46 @@ async function resolveGate(args: {
   };
 }
 
+function buildBriefPromptRequest(args: {
+  snapshot: RecoverySnapshot;
+  model: string;
+  profile: RecoveryPromptProfile;
+}): RecoveryPromptRequest {
+  return {
+    developerPrompt: buildBriefDeveloperPrompt(args.snapshot.slot, args.profile),
+    userPrompt: buildBriefUserPrompt(args.snapshot, args.profile),
+    reasoningEffort: resolveReasoningEffort(args.profile, "brief"),
+    maxOutputTokens: resolveRecoveryFlowMaxOutputTokens("brief", args.profile),
+    verbosity: args.profile === "pro" ? "low" : "medium",
+  };
+}
+
+function buildOrdersPromptRequest(args: {
+  snapshot: RecoverySnapshot;
+  brief: AIRecoveryBrief;
+  profile: RecoveryPromptProfile;
+}): RecoveryPromptRequest {
+  return {
+    developerPrompt: buildOrdersDeveloperPrompt(args.snapshot.slot, args.profile),
+    userPrompt: buildOrdersUserPrompt(args.snapshot, args.brief, args.profile),
+    reasoningEffort: resolveReasoningEffort(args.profile, "orders"),
+    maxOutputTokens: resolveRecoveryFlowMaxOutputTokens("orders", args.profile),
+    verbosity: "medium",
+  };
+}
+
 async function runOpenAIFlow(args: {
   snapshot: RecoverySnapshot;
   model: string;
+  tier: PlanTier | null | undefined;
   signal: AbortSignal;
 }) {
-  const briefReasoningEffort = resolveReasoningEffort(args.model, "brief");
-  const ordersReasoningEffort = resolveReasoningEffort(args.model, "orders");
-  const briefMaxOutputTokens = resolveRecoveryFlowMaxOutputTokens("brief", args.model);
-  const ordersMaxOutputTokens = resolveRecoveryFlowMaxOutputTokens("orders", args.model);
+  const profile = resolveRecoveryPromptProfile(args.tier, args.model);
+  const briefRequest = buildBriefPromptRequest({
+    snapshot: args.snapshot,
+    model: args.model,
+    profile,
+  });
 
   const baseMeta = {
     briefResponseId: null,
@@ -2156,7 +2340,7 @@ async function runOpenAIFlow(args: {
       status: "ready",
       brief: input.brief,
       orders: buildFallbackOrders(args.snapshot),
-      reasoningEffort: briefReasoningEffort,
+      reasoningEffort: briefRequest.reasoningEffort,
       model: args.model,
       openaiMeta: {
         ...baseMeta,
@@ -2171,176 +2355,133 @@ async function runOpenAIFlow(args: {
       },
     }) satisfies OpenAIFlowResult;
 
+  const briefResult = await runAIRecoveryStructuredRequest({
+    model: args.model,
+    reasoningEffort: briefRequest.reasoningEffort,
+    developerPrompt: briefRequest.developerPrompt,
+    userPrompt: briefRequest.userPrompt,
+    schemaName: "ai_recovery_brief",
+    schema: buildBriefSchema(),
+    signal: args.signal,
+    maxOutputTokens: briefRequest.maxOutputTokens,
+    verbosity: briefRequest.verbosity,
+  });
+
+  if (!briefResult.ok) {
+    console.error("[AIRecovery] brief_request_failed", {
+      model: args.model,
+      tier: args.tier,
+      profile,
+      slot: args.snapshot.slot,
+      dateISO: args.snapshot.dateISO,
+      error: briefResult.error,
+    });
+    return {
+      ...buildFallbackFlow(args.snapshot, args.model),
+      openaiMeta: {
+        ...baseMeta,
+        fallbackReason: `brief_fallback:${briefResult.error}`,
+      },
+    } satisfies OpenAIFlowResult;
+  }
+
   let brief: AIRecoveryBrief;
   let briefSource: { responseId: string | null; usage: AIRecoveryUsage | null };
-  if (isGpt54RecoveryModel(args.model)) {
-    const plannerResult = await runAIRecoveryStructuredRequest({
+  try {
+    brief = parseBriefJson(briefResult.text, args.snapshot);
+    briefSource = {
+      responseId: briefResult.responseId,
+      usage: briefResult.usage,
+    };
+  } catch (error) {
+    console.error("[AIRecovery] brief_parse_failed", {
       model: args.model,
-      reasoningEffort: briefReasoningEffort,
-      developerPrompt: buildProBriefPlannerDeveloperPrompt(args.snapshot.slot),
-      userPrompt: buildProBriefPlannerUserPrompt(args.snapshot),
-      schemaName: "ai_recovery_brief_planner",
-      schema: buildProBriefPlannerSchema(),
-      signal: args.signal,
-      maxOutputTokens: 1800,
+      tier: args.tier,
+      profile,
+      slot: args.snapshot.slot,
+      dateISO: args.snapshot.dateISO,
+      responseId: briefResult.responseId,
+      error: trimText((error as Error)?.message ?? error, 160),
     });
-
-    if (!plannerResult.ok) {
-      console.error("[AIRecovery] pro_brief_planner_failed", {
-        model: args.model,
-        slot: args.snapshot.slot,
-        dateISO: args.snapshot.dateISO,
-        error: plannerResult.error,
-      });
-      return {
-        ...buildFallbackFlow(args.snapshot, args.model),
-        openaiMeta: {
-          ...baseMeta,
-          fallbackReason: `pro_brief_planner_fallback:${plannerResult.error}`,
-        },
-      } satisfies OpenAIFlowResult;
-    }
-
-    try {
-      brief = parseProBriefPlannerJson(plannerResult.text, args.snapshot);
-      briefSource = {
-        responseId: plannerResult.responseId,
-        usage: plannerResult.usage,
-      };
-    } catch (error) {
-      console.error("[AIRecovery] pro_brief_planner_parse_failed", {
-        model: args.model,
-        slot: args.snapshot.slot,
-        dateISO: args.snapshot.dateISO,
-        responseId: plannerResult.responseId,
-        error: trimText((error as Error)?.message ?? error, 160),
-      });
-      return {
-        ...buildFallbackFlow(args.snapshot, args.model),
-        openaiMeta: {
-          ...baseMeta,
-          briefResponseId: plannerResult.responseId,
-          usage: {
-            brief: plannerResult.usage,
-            orders: null,
-            total: combineAIRecoveryUsages(plannerResult.usage, null),
-          },
-          fallbackReason: "pro_brief_planner_parse_fallback",
-        },
-      } satisfies OpenAIFlowResult;
-    }
-  } else {
-    const briefResult = await runAIRecoveryStructuredRequest({
+    const repairedBrief = await repairAIRecoveryJson({
       model: args.model,
-      reasoningEffort: briefReasoningEffort,
-      developerPrompt: buildBriefDeveloperPrompt(args.snapshot.slot, args.model),
-      userPrompt: buildBriefUserPrompt(args.snapshot, args.model),
       schemaName: "ai_recovery_brief",
       schema: buildBriefSchema(),
+      rawText: briefResult.text,
       signal: args.signal,
-      maxOutputTokens: briefMaxOutputTokens,
+      maxOutputTokens: briefRequest.maxOutputTokens,
     });
-
-    if (!briefResult.ok) {
-      console.error("[AIRecovery] brief_request_failed", {
+    if (!repairedBrief.ok) {
+      console.error("[AIRecovery] brief_repair_failed", {
         model: args.model,
+        tier: args.tier,
+        profile,
         slot: args.snapshot.slot,
         dateISO: args.snapshot.dateISO,
-        error: briefResult.error,
+        responseId: briefResult.responseId,
+        error: repairedBrief.error,
       });
       return {
         ...buildFallbackFlow(args.snapshot, args.model),
         openaiMeta: {
           ...baseMeta,
-          fallbackReason: `brief_fallback:${briefResult.error}`,
+          briefResponseId: briefResult.responseId,
+          usage: {
+            brief: briefResult.usage,
+            orders: null,
+            total: combineAIRecoveryUsages(briefResult.usage, null),
+          },
+          fallbackReason: `brief_repair_fallback:${repairedBrief.error}`,
         },
       } satisfies OpenAIFlowResult;
     }
-
     try {
-      brief = parseBriefJson(briefResult.text, args.snapshot);
+      brief = parseBriefJson(repairedBrief.text, args.snapshot);
       briefSource = {
-        responseId: briefResult.responseId,
-        usage: briefResult.usage,
+        responseId: repairedBrief.responseId ?? briefResult.responseId,
+        usage: repairedBrief.usage ?? briefResult.usage,
       };
-    } catch (error) {
-      console.error("[AIRecovery] brief_parse_failed", {
+    } catch (repairParseError) {
+      console.error("[AIRecovery] brief_repair_parse_failed", {
         model: args.model,
+        tier: args.tier,
+        profile,
         slot: args.snapshot.slot,
         dateISO: args.snapshot.dateISO,
-        responseId: briefResult.responseId,
-        error: trimText((error as Error)?.message ?? error, 160),
+        responseId: repairedBrief.responseId,
+        error: trimText((repairParseError as Error)?.message ?? repairParseError, 160),
       });
-      const repairedBrief = await repairAIRecoveryJson({
-        model: args.model,
-        schemaName: "ai_recovery_brief",
-        schema: buildBriefSchema(),
-        rawText: briefResult.text,
-        signal: args.signal,
-        maxOutputTokens: briefMaxOutputTokens,
-      });
-      if (!repairedBrief.ok) {
-        console.error("[AIRecovery] brief_repair_failed", {
-          model: args.model,
-          slot: args.snapshot.slot,
-          dateISO: args.snapshot.dateISO,
-          responseId: briefResult.responseId,
-          error: repairedBrief.error,
-        });
-        return {
-          ...buildFallbackFlow(args.snapshot, args.model),
-          openaiMeta: {
-            ...baseMeta,
-            briefResponseId: briefResult.responseId,
-            usage: {
-              brief: briefResult.usage,
-              orders: null,
-              total: combineAIRecoveryUsages(briefResult.usage, null),
-            },
-            fallbackReason: `brief_repair_fallback:${repairedBrief.error}`,
+      return {
+        ...buildFallbackFlow(args.snapshot, args.model),
+        openaiMeta: {
+          ...baseMeta,
+          briefResponseId: repairedBrief.responseId ?? briefResult.responseId,
+          usage: {
+            brief: repairedBrief.usage ?? briefResult.usage,
+            orders: null,
+            total: combineAIRecoveryUsages(repairedBrief.usage ?? briefResult.usage, null),
           },
-        } satisfies OpenAIFlowResult;
-      }
-      try {
-        brief = parseBriefJson(repairedBrief.text, args.snapshot);
-        briefSource = {
-          responseId: repairedBrief.responseId ?? briefResult.responseId,
-          usage: repairedBrief.usage ?? briefResult.usage,
-        };
-      } catch (repairParseError) {
-        console.error("[AIRecovery] brief_repair_parse_failed", {
-          model: args.model,
-          slot: args.snapshot.slot,
-          dateISO: args.snapshot.dateISO,
-          responseId: repairedBrief.responseId,
-          error: trimText((repairParseError as Error)?.message ?? repairParseError, 160),
-        });
-        return {
-          ...buildFallbackFlow(args.snapshot, args.model),
-          openaiMeta: {
-            ...baseMeta,
-            briefResponseId: repairedBrief.responseId ?? briefResult.responseId,
-            usage: {
-              brief: repairedBrief.usage ?? briefResult.usage,
-              orders: null,
-              total: combineAIRecoveryUsages(repairedBrief.usage ?? briefResult.usage, null),
-            },
-            fallbackReason: "brief_repair_parse_fallback",
-          },
-        } satisfies OpenAIFlowResult;
-      }
+          fallbackReason: "brief_repair_parse_fallback",
+        },
+      } satisfies OpenAIFlowResult;
     }
   }
 
+  const ordersRequest = buildOrdersPromptRequest({
+    snapshot: args.snapshot,
+    brief,
+    profile,
+  });
   const ordersResult = await runAIRecoveryStructuredRequest({
     model: args.model,
-    reasoningEffort: ordersReasoningEffort,
-    developerPrompt: buildOrdersDeveloperPrompt(args.snapshot.slot),
-    userPrompt: buildOrdersUserPrompt(args.snapshot, brief),
+    reasoningEffort: ordersRequest.reasoningEffort,
+    developerPrompt: ordersRequest.developerPrompt,
+    userPrompt: ordersRequest.userPrompt,
     schemaName: "ai_recovery_orders",
     schema: buildOrdersSchema(),
     signal: args.signal,
-    maxOutputTokens: ordersMaxOutputTokens,
+    maxOutputTokens: ordersRequest.maxOutputTokens,
+    verbosity: ordersRequest.verbosity,
   });
 
   if (!ordersResult.ok) {
@@ -2364,7 +2505,7 @@ async function runOpenAIFlow(args: {
       status: "ready",
       brief,
       orders,
-      reasoningEffort: briefReasoningEffort,
+      reasoningEffort: briefRequest.reasoningEffort,
       model: args.model,
       openaiMeta: {
         ...baseMeta,
@@ -2393,7 +2534,7 @@ async function runOpenAIFlow(args: {
       schema: buildOrdersSchema(),
       rawText: ordersResult.text,
       signal: args.signal,
-      maxOutputTokens: ordersMaxOutputTokens,
+      maxOutputTokens: ordersRequest.maxOutputTokens,
     });
     if (!repairedOrders.ok) {
       console.error("[AIRecovery] orders_repair_failed", {
@@ -2418,7 +2559,7 @@ async function runOpenAIFlow(args: {
         status: "ready",
         brief,
         orders,
-        reasoningEffort: briefReasoningEffort,
+        reasoningEffort: briefRequest.reasoningEffort,
         model: args.model,
         openaiMeta: {
           ...baseMeta,
@@ -2681,6 +2822,7 @@ export async function generateAIRecoverySession(args: {
   const flow = await runOpenAIFlow({
     snapshot,
     model,
+    tier: subscription?.tier ?? null,
     signal: args.signal,
   });
   const session = normalizeStoredSession(snapshot, buildStoredSession({ snapshot, flow, previousSession: existingSession }));
@@ -2764,16 +2906,22 @@ export async function regenerateAIRecoveryOrders(args: {
   const brief = normalizeStoredSession(snapshot, session)?.brief ?? session.brief;
 
   const model = session.model;
-  const ordersReasoningEffort = resolveReasoningEffort(model, "orders");
+  const profile = resolveRecoveryPromptProfile(subscription?.tier ?? null, model);
+  const ordersRequest = buildOrdersPromptRequest({
+    snapshot,
+    brief,
+    profile,
+  });
   const ordersResult = await runAIRecoveryStructuredRequest({
     model,
-    reasoningEffort: ordersReasoningEffort,
-    developerPrompt: buildOrdersDeveloperPrompt(snapshot.slot),
-    userPrompt: buildOrdersUserPrompt(snapshot, brief),
+    reasoningEffort: ordersRequest.reasoningEffort,
+    developerPrompt: ordersRequest.developerPrompt,
+    userPrompt: ordersRequest.userPrompt,
     schemaName: "ai_recovery_orders",
     schema: buildOrdersSchema(),
     signal: args.signal,
-    maxOutputTokens: resolveRecoveryFlowMaxOutputTokens("orders", model),
+    maxOutputTokens: ordersRequest.maxOutputTokens,
+    verbosity: ordersRequest.verbosity,
   });
 
   if (!ordersResult.ok) {
@@ -2803,7 +2951,7 @@ export async function regenerateAIRecoveryOrders(args: {
       schema: buildOrdersSchema(),
       rawText: ordersResult.text,
       signal: args.signal,
-      maxOutputTokens: resolveRecoveryFlowMaxOutputTokens("orders", model),
+      maxOutputTokens: ordersRequest.maxOutputTokens,
     });
     if (!repairedOrders.ok) {
       console.error("[AIRecovery] regenerate_orders_repair_failed", {
