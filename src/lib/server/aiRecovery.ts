@@ -1180,7 +1180,8 @@ function resolveRecoveryFlowMaxOutputTokens(kind: "brief" | "orders") {
     readRecoveryMaxOutputEnv(kind === "brief" ? "OPENAI_RECOVERY_BRIEF_MAX_OUTPUT_TOKENS" : "OPENAI_RECOVERY_ORDERS_MAX_OUTPUT_TOKENS") ??
     readRecoveryMaxOutputEnv("OPENAI_RECOVERY_MAX_OUTPUT_TOKENS") ??
     fallback;
-  return clamp(explicit, kind === "brief" ? 2400 : 1000, kind === "brief" ? 4200 : 2200);
+  const scaled = Math.round(explicit * 1.5);
+  return clamp(scaled, kind === "brief" ? 3600 : 1500, kind === "brief" ? 6300 : 3300);
 }
 
 function canRevealExistingSessionForGate(gate: AIRecoveryGate) {
