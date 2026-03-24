@@ -123,7 +123,7 @@ export type AIRecoveryOpenAIMeta = {
     total: AIRecoveryUsage | null;
   };
   fallbackReason: string | null;
-  gatewayProfile: "med_safety_shared";
+  gatewayProfile: "recovery_shared";
 };
 
 export type AIRecoverySlotPayload = {

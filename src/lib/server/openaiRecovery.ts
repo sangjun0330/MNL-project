@@ -59,9 +59,13 @@ function dedupe(values: string[]) {
 }
 
 function resolveBaseUrls() {
-  const list = splitList(process.env.OPENAI_MED_SAFETY_BASE_URLS ?? "").map((item) => normalizeOpenAIResponsesBaseUrl(item));
+  const list = splitList(process.env.OPENAI_RECOVERY_BASE_URLS ?? process.env.OPENAI_MED_SAFETY_BASE_URLS ?? "").map((item) =>
+    normalizeOpenAIResponsesBaseUrl(item)
+  );
   const single = normalizeOpenAIResponsesBaseUrl(
-    trimEnv(process.env.OPENAI_MED_SAFETY_BASE_URL) || trimEnv(process.env.OPENAI_BASE_URL)
+    trimEnv(process.env.OPENAI_RECOVERY_BASE_URL) ||
+      trimEnv(process.env.OPENAI_MED_SAFETY_BASE_URL) ||
+      trimEnv(process.env.OPENAI_BASE_URL)
   );
   const configured = dedupe([...list, single]).filter(Boolean);
   return configured.length ? configured : ["https://api.openai.com/v1"];
@@ -137,6 +141,10 @@ function needsMoreOutputTokens(error: string) {
     value.includes("openai_responses_400_token_limit") ||
     value.includes("openai_empty_text_model:")
   );
+}
+
+function isEmptyTextError(error: string) {
+  return String(error ?? "").toLowerCase().includes("openai_empty_text_model:");
 }
 
 function readString(value: unknown) {
@@ -254,7 +262,11 @@ function normalizeModelId(model: string) {
 function modelSupportsStructuredOutputs(model: string) {
   const normalized = normalizeModelId(model);
   if (!normalized) return false;
-  return !normalized.includes("gpt-5.2-pro") && !normalized.includes("gpt-5.4-pro");
+  // Recovery prompts are large enough that native json_schema responses on current GPT-5.2/5.4
+  // tiers can consume the output budget without emitting a final answer. Keep prompt-based JSON
+  // generation for these models until the upstream path is reliable in this workload.
+  if (/^gpt-5\.(2|4)(?:$|[-_])/i.test(normalized)) return false;
+  return true;
 }
 
 function mergeUsage(values: Array<AIRecoveryUsage | null | undefined>): AIRecoveryUsage | null {
@@ -354,7 +366,17 @@ function buildCompatStructuredDeveloperPrompt(args: StructuredRequestArgs) {
 }
 
 function buildStructuredTextDeveloperPrompt(args: StructuredRequestArgs) {
-  return buildCompatStructuredDeveloperPrompt(args);
+  return [
+    args.developerPrompt,
+    "",
+    "제공된 JSON schema에 맞는 JSON 객체 하나만 출력하라.",
+    "설명, 코드블록, 마크다운 금지.",
+  ].join("\n");
+}
+
+function downgradeReasoningEffort(effort: AIRecoveryEffort): AIRecoveryEffort {
+  if (effort === "high") return "medium";
+  return "low";
 }
 
 function buildEmptyTextError(model: string, payload: any) {
@@ -374,7 +396,7 @@ async function postStructuredRequest(
     apiBaseUrl: baseUrl,
     apiKey,
     model: args.model,
-    scope: "med_safety",
+    scope: "recovery",
   });
 
   if (requestConfig.missingCredential) {
@@ -402,7 +424,16 @@ async function postStructuredRequest(
               content: [{ type: "input_text", text: args.userPrompt }],
             },
           ],
+          text: {
+            format: { type: "text" },
+            verbosity: "low",
+          },
+          reasoning: {
+            effort: downgradeReasoningEffort(args.reasoningEffort),
+          },
           max_output_tokens: resolveMaxOutputTokens(args.maxOutputTokens ?? 2400),
+          tools: [],
+          store: resolveStoreResponses(),
         }
       : {
           model: requestConfig.model,
@@ -531,7 +562,16 @@ export async function runAIRecoveryStructuredRequest(args: StructuredRequestArgs
       }
 
       let effectiveError = result.error;
-      if (isBadRequestError(result.error)) {
+      const shouldTryCompatFallback =
+        modelSupportsStructuredOutputs(args.model) && (isBadRequestError(result.error) || needsMoreOutputTokens(result.error));
+      let retryInCompatMode = false;
+      if (shouldTryCompatFallback) {
+        retryInCompatMode = true;
+        console.warn("[AIRecovery] openai_retry_text_json_fallback", {
+          model: args.model,
+          baseUrl,
+          error: result.error,
+        });
         const compatResult = await postStructuredRequest(baseUrl, args, apiKey, true);
         if ("text" in compatResult) {
           return { ok: true, ...compatResult };
@@ -543,7 +583,7 @@ export async function runAIRecoveryStructuredRequest(args: StructuredRequestArgs
         retriedWithMoreTokens = true;
         const boostedArgs = {
           ...args,
-          reasoningEffort: (args.reasoningEffort === "high" ? "medium" : "low") as AIRecoveryEffort,
+          reasoningEffort: downgradeReasoningEffort(args.reasoningEffort),
           maxOutputTokens: Math.min((args.maxOutputTokens ?? 2400) + 1800, 5200),
         };
         console.info("[AIRecovery] openai_retry_more_tokens", {
@@ -554,7 +594,7 @@ export async function runAIRecoveryStructuredRequest(args: StructuredRequestArgs
           previousMaxOutputTokens: args.maxOutputTokens ?? 2400,
           nextMaxOutputTokens: boostedArgs.maxOutputTokens,
         });
-        const boostedResult = await postStructuredRequest(baseUrl, boostedArgs, apiKey, false);
+        const boostedResult = await postStructuredRequest(baseUrl, boostedArgs, apiKey, retryInCompatMode || isEmptyTextError(effectiveError));
         if ("text" in boostedResult) {
           return { ok: true, ...boostedResult };
         }

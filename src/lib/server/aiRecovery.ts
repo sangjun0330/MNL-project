@@ -1100,7 +1100,7 @@ function buildFallbackFlow(snapshot: RecoverySnapshot, model: string): OpenAIFlo
         total: null,
       },
       fallbackReason: "ai_recovery_fallback",
-      gatewayProfile: "med_safety_shared",
+      gatewayProfile: "recovery_shared",
     },
   };
 }
@@ -1160,9 +1160,9 @@ function buildGenerationQuota(
 
 function resolveReasoningEffort(model: string, kind: "brief" | "orders"): AIRecoveryEffort {
   const normalized = String(model ?? "").trim().toLowerCase();
-  const isProModel = normalized.includes("gpt-5.2-pro") || normalized.includes("gpt-5.4-pro");
-  if (isProModel) return "medium";
-  if (kind === "brief") return "medium";
+  const isDedicatedProModel = normalized.includes("gpt-5.2-pro") || normalized.includes("gpt-5.4-pro");
+  if (kind === "orders") return "low";
+  if (isDedicatedProModel) return "medium";
   return "low";
 }
 
@@ -1938,7 +1938,7 @@ async function runOpenAIFlow(args: {
       total: null,
     },
     fallbackReason: null,
-    gatewayProfile: "med_safety_shared" as const,
+    gatewayProfile: "recovery_shared" as const,
   };
 
   const buildOrdersFallback = (input: {
