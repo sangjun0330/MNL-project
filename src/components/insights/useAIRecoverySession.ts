@@ -64,8 +64,11 @@ export function useAIRecoverySession(args: HookArgs): HookState {
   const [togglingCompletion, setTogglingCompletion] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const autoRequestedRef = useRef(new Set<string>());
+  const autoOrdersRequestedRef = useRef(new Set<string>());
   const dataRequestRef = useRef(0);
   const hydratedInitialKeyRef = useRef(initialData ? `${initialData.dateISO}:${initialData.slot}` : null);
+  const generateInFlightRef = useRef(false);
+  const ordersInFlightRef = useRef(false);
 
   const key = `${args.dateISO}:${args.slot}`;
 
@@ -139,6 +142,12 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     });
   };
 
+  const buildAutoOrdersKey = (value: SessionData | null) => {
+    const generatedAt = value?.session?.generatedAt;
+    if (!value?.session?.brief || value.session.orders || !generatedAt) return null;
+    return `${value.dateISO}:${value.slot}:${generatedAt}`;
+  };
+
   const fetchSessionView = async (context: string) => {
     const response = await fetch(`/api/insights/recovery/ai?date=${args.dateISO}&slot=${args.slot}`, {
       method: "GET",
@@ -170,6 +179,11 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       const nextData = await fetchSessionView("load");
       if (!isCurrentDataRequest(requestId)) return;
       setData(nextData);
+      const autoOrdersKey = buildAutoOrdersKey(nextData);
+      if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && nextData?.quota.canRegenerateOrders) {
+        autoOrdersRequestedRef.current.add(autoOrdersKey);
+        void regenerateOrdersInternal(true);
+      }
       const shouldAutoGenerate =
         args.autoGenerate !== false &&
         nextData?.gate.allowed &&
@@ -189,8 +203,62 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     }
   };
 
+  const regenerateOrdersInternal = async (auto = false) => {
+    if (!args.enabled) return;
+    if (ordersInFlightRef.current) return;
+    ordersInFlightRef.current = true;
+    const requestId = nextDataRequestId();
+    setSavingOrders(true);
+    if (!auto) setError(null);
+    try {
+      const response = await fetch("/api/insights/recovery/ai/orders", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          dateISO: args.dateISO,
+          slot: args.slot,
+        }),
+      });
+      const json = await readJson<{ ok?: boolean; error?: string; detail?: string | null; data?: SessionData }>(response);
+      if (!response.ok || !json?.ok || !json.data) {
+        console.error("[AIRecovery] client_orders_failed", {
+          status: response.status,
+          error: json?.error ?? null,
+          detail: json?.detail ?? null,
+          auto,
+        });
+        throw new Error(String(json?.error ?? `http_${response.status}`));
+      }
+      if (!isCurrentDataRequest(requestId)) return;
+      setData(normalizeData(json.data));
+    } catch (nextError) {
+      if (!isCurrentDataRequest(requestId)) return;
+      try {
+        const recovered = await fetchSessionView(auto ? "orders_auto_recover" : "orders_recover");
+        if (!isCurrentDataRequest(requestId)) return;
+        setData(recovered);
+        if (!auto) setError(null);
+        return;
+      } catch {}
+      if (auto) {
+        console.warn("[AIRecovery] client_orders_auto_failed", {
+          message: (nextError as any)?.message ?? String(nextError),
+        });
+      } else {
+        setFriendlyError((nextError as any)?.message ?? nextError ?? "ai_recovery_orders_failed");
+      }
+    } finally {
+      ordersInFlightRef.current = false;
+      setSavingOrders(false);
+    }
+  };
+
   const generateInternal = async (force = false, autoKey?: string) => {
     if (!args.enabled) return;
+    if (generateInFlightRef.current) return;
+    generateInFlightRef.current = true;
     const requestId = nextDataRequestId();
     const previousGeneratedAt = data?.session?.generatedAt ?? null;
     setGenerating(true);
@@ -219,7 +287,13 @@ export function useAIRecoverySession(args: HookArgs): HookState {
         throw new Error(String(json?.error ?? `http_${response.status}`));
       }
       if (!isCurrentDataRequest(requestId)) return;
-      setData(normalizeData(json.data));
+      const nextData = normalizeData(json.data);
+      setData(nextData);
+      const autoOrdersKey = buildAutoOrdersKey(nextData);
+      if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && nextData?.quota.canRegenerateOrders) {
+        autoOrdersRequestedRef.current.add(autoOrdersKey);
+        void regenerateOrdersInternal(true);
+      }
     } catch (nextError) {
       if (autoKey) autoRequestedRef.current.delete(autoKey);
       if (!isCurrentDataRequest(requestId)) return;
@@ -230,54 +304,18 @@ export function useAIRecoverySession(args: HookArgs): HookState {
         if (recoveredGeneratedAt && recoveredGeneratedAt !== previousGeneratedAt) {
           setData(recovered);
           setError(null);
+          const autoOrdersKey = buildAutoOrdersKey(recovered);
+          if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && recovered?.quota.canRegenerateOrders) {
+            autoOrdersRequestedRef.current.add(autoOrdersKey);
+            void regenerateOrdersInternal(true);
+          }
           return;
         }
       } catch {}
       setFriendlyError((nextError as any)?.message ?? nextError ?? "ai_recovery_generate_failed");
     } finally {
+      generateInFlightRef.current = false;
       setGenerating(false);
-    }
-  };
-
-  const regenerateOrders = async () => {
-    if (!args.enabled) return;
-    const requestId = nextDataRequestId();
-    setSavingOrders(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/insights/recovery/ai/orders", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          dateISO: args.dateISO,
-          slot: args.slot,
-        }),
-      });
-      const json = await readJson<{ ok?: boolean; error?: string; detail?: string | null; data?: SessionData }>(response);
-      if (!response.ok || !json?.ok || !json.data) {
-        console.error("[AIRecovery] client_orders_failed", {
-          status: response.status,
-          error: json?.error ?? null,
-          detail: json?.detail ?? null,
-        });
-        throw new Error(String(json?.error ?? `http_${response.status}`));
-      }
-      if (!isCurrentDataRequest(requestId)) return;
-      setData(normalizeData(json.data));
-    } catch (nextError) {
-      if (!isCurrentDataRequest(requestId)) return;
-      try {
-        const recovered = await fetchSessionView("orders_recover");
-        if (!isCurrentDataRequest(requestId)) return;
-        setData(recovered);
-        setError(null);
-        return;
-      } catch {}
-      setFriendlyError((nextError as any)?.message ?? nextError ?? "ai_recovery_orders_failed");
-    } finally {
-      setSavingOrders(false);
     }
   };
 
@@ -333,7 +371,13 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       setData(initialData);
       setLoading(false);
       setError(null);
+      const autoOrdersKey = buildAutoOrdersKey(initialData);
+      if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && initialData?.quota.canRegenerateOrders) {
+        autoOrdersRequestedRef.current.add(autoOrdersKey);
+        void regenerateOrdersInternal(true);
+      }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialData, args.dateISO, args.slot]);
 
   useEffect(() => {
@@ -354,7 +398,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     error,
     reload: load,
     generate: generateInternal,
-    regenerateOrders,
+    regenerateOrders: () => regenerateOrdersInternal(false),
     toggleCompletion,
   };
 }

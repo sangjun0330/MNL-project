@@ -78,7 +78,7 @@ type RecoverySnapshot = {
 type OpenAIFlowResult = {
   status: AIRecoveryStatus;
   brief: AIRecoveryBrief;
-  orders: AIRecoveryOrdersPayload;
+  orders: AIRecoveryOrdersPayload | null;
   reasoningEffort: AIRecoveryEffort;
   model: string;
   openaiMeta: AIRecoveryOpenAIMeta;
@@ -1107,7 +1107,7 @@ function buildFallbackFlow(snapshot: RecoverySnapshot, model: string): OpenAIFlo
   return {
     status: "ready",
     brief: buildFallbackBrief(snapshot),
-    orders: buildFallbackOrders(snapshot),
+    orders: null,
     reasoningEffort: resolveReasoningEffort(profile, "brief"),
     model,
     openaiMeta: {
@@ -1269,44 +1269,44 @@ function parseLooseJson(text: string) {
 function parseBriefJson(text: string, snapshot: RecoverySnapshot): AIRecoveryBrief {
   const parsed = parseLooseJson(text);
   if (!isRecord(parsed)) throw new Error("brief_not_object");
+  const fallbackBrief = buildFallbackBrief(snapshot);
   const sectionsSource = Array.isArray(parsed.sections) ? parsed.sections : Array.isArray(parsed.cards) ? parsed.cards : [];
-  if (sectionsSource.length < 1) throw new Error("brief_sections_invalid");
   const fallbackCategory = normalizeBriefCategory(snapshot.plannerContext.focusFactor?.key);
-  const sections = sectionsSource.slice(0, 6).map((source, index) => {
-    if (!isRecord(source)) throw new Error(`brief_section_invalid_${index + 1}`);
-    const title = trimText(source.title ?? source.heading, 40);
-    const description = trimText(source.description ?? source.summary, 240);
-    const tips = asStringArray(source.tips ?? source.actions, 2, 160);
-    if (!title && !description && tips.length === 0) throw new Error(`brief_section_invalid_${index + 1}`);
-    const firstFallback = index === 0 ? fallbackCategory : index === 1 ? "sleep" : "shift";
-    return {
-      category: resolveSectionCategory(source.category, firstFallback),
-      severity: resolveSectionSeverity(source.severity, "info"),
-      title,
-      description,
-      tips: [tips[0] ?? "", tips[1] ?? ""] as [string, string],
-    };
-  });
+  const sections = sectionsSource
+    .slice(0, 6)
+    .map((source, index) => {
+      if (!isRecord(source)) return null;
+      const title = trimText(source.title ?? source.heading, 40);
+      const description = trimText(source.description ?? source.summary, 240);
+      const tips = asStringArray(source.tips ?? source.actions, 2, 160);
+      if (!title && !description && tips.length === 0) return null;
+      const firstFallback = index === 0 ? fallbackCategory : index === 1 ? "sleep" : "shift";
+      return {
+        category: resolveSectionCategory(source.category, firstFallback),
+        severity: resolveSectionSeverity(source.severity, "info"),
+        title,
+        description,
+        tips: [tips[0] ?? "", tips[1] ?? ""] as [string, string],
+      };
+    })
+    .filter((section): section is AIRecoveryBriefSection => Boolean(section));
   const normalizedSections = buildNormalizedBriefSections(snapshot, sections);
   const headline = trimText(parsed.headline, 160);
   if (!headline) throw new Error("brief_headline_missing");
   const compoundAlert = (() => {
     if (parsed.compoundAlert == null) return null;
-    if (!isRecord(parsed.compoundAlert)) throw new Error("brief_compound_alert_invalid");
+    if (!isRecord(parsed.compoundAlert)) return null;
     const factors = asStringArray(parsed.compoundAlert.factors, 3, 60);
     const message = trimText(parsed.compoundAlert.message, 200);
-    if (factors.length < 2 || !message) throw new Error("brief_compound_alert_invalid");
+    if (factors.length < 2 || !message) return null;
     return { factors, message };
   })();
   const weeklySummarySource = isRecord(parsed.weeklySummary) ? parsed.weeklySummary : null;
-  if (!weeklySummarySource) throw new Error("brief_weekly_summary_missing");
-  const personalInsight = trimText(weeklySummarySource.personalInsight, 220);
-  const nextWeekPreview = trimText(weeklySummarySource.nextWeekPreview, 220);
-  if (!personalInsight || !nextWeekPreview) throw new Error("brief_weekly_summary_text_missing");
-  const avgBattery = Number(weeklySummarySource.avgBattery);
-  const prevAvgBattery = Number(weeklySummarySource.prevAvgBattery);
-  if (!Number.isFinite(avgBattery) || !Number.isFinite(prevAvgBattery)) throw new Error("brief_weekly_summary_numbers_invalid");
-  const topDrains = Array.isArray(weeklySummarySource.topDrains)
+  const personalInsight = trimText(weeklySummarySource?.personalInsight, 220) || fallbackBrief.weeklySummary.personalInsight;
+  const nextWeekPreview = trimText(weeklySummarySource?.nextWeekPreview, 220) || fallbackBrief.weeklySummary.nextWeekPreview;
+  const avgBattery = Number(weeklySummarySource?.avgBattery);
+  const prevAvgBattery = Number(weeklySummarySource?.prevAvgBattery);
+  const topDrains = Array.isArray(weeklySummarySource?.topDrains)
     ? weeklySummarySource.topDrains
         .map((item) => {
           if (!isRecord(item)) return null;
@@ -1317,14 +1317,14 @@ function parseBriefJson(text: string, snapshot: RecoverySnapshot): AIRecoveryBri
         })
         .filter((item): item is { label: string; pct: number } => Boolean(item))
         .slice(0, 3)
-    : [];
+    : fallbackBrief.weeklySummary.topDrains;
   return {
     headline,
     compoundAlert,
     sections: normalizedSections,
     weeklySummary: {
-      avgBattery: round1(avgBattery),
-      prevAvgBattery: round1(prevAvgBattery),
+      avgBattery: Number.isFinite(avgBattery) ? round1(avgBattery) : fallbackBrief.weeklySummary.avgBattery,
+      prevAvgBattery: Number.isFinite(prevAvgBattery) ? round1(prevAvgBattery) : fallbackBrief.weeklySummary.prevAvgBattery,
       topDrains,
       personalInsight,
       nextWeekPreview,
@@ -2152,7 +2152,7 @@ function buildOrdersPromptRequest(args: {
   };
 }
 
-async function runOpenAIFlow(args: {
+async function runOpenAIBriefFlow(args: {
   snapshot: RecoverySnapshot;
   model: string;
   tier: PlanTier | null | undefined;
@@ -2176,32 +2176,6 @@ async function runOpenAIFlow(args: {
     fallbackReason: null,
     gatewayProfile: "recovery_shared" as const,
   };
-
-  const buildOrdersFallback = (input: {
-    brief: AIRecoveryBrief;
-    briefResult: { responseId: string | null; usage: AIRecoveryUsage | null };
-    ordersResponseId?: string | null;
-    ordersUsage?: AIRecoveryUsage | null;
-    fallbackReason: string;
-  }) =>
-    ({
-      status: "ready",
-      brief: input.brief,
-      orders: buildFallbackOrders(args.snapshot),
-      reasoningEffort: briefRequest.reasoningEffort,
-      model: args.model,
-      openaiMeta: {
-        ...baseMeta,
-        briefResponseId: input.briefResult.responseId,
-        ordersResponseId: input.ordersResponseId ?? null,
-        usage: {
-          brief: input.briefResult.usage,
-          orders: input.ordersUsage ?? null,
-          total: combineAIRecoveryUsages(input.briefResult.usage, input.ordersUsage ?? null),
-        },
-        fallbackReason: input.fallbackReason,
-      },
-    }) satisfies OpenAIFlowResult;
 
   const briefResult = await runAIRecoveryStructuredRequest({
     model: args.model,
@@ -2315,130 +2289,23 @@ async function runOpenAIFlow(args: {
     }
   }
 
-  const ordersRequest = buildOrdersPromptRequest({
-    snapshot: args.snapshot,
+  return {
+    status: "ready",
     brief,
-    profile,
-  });
-  const ordersResult = await runAIRecoveryStructuredRequest({
+    orders: null,
+    reasoningEffort: briefRequest.reasoningEffort,
     model: args.model,
-    reasoningEffort: ordersRequest.reasoningEffort,
-    developerPrompt: ordersRequest.developerPrompt,
-    userPrompt: ordersRequest.userPrompt,
-    schemaName: "ai_recovery_orders",
-    schema: buildOrdersSchema(),
-    signal: args.signal,
-    maxOutputTokens: ordersRequest.maxOutputTokens,
-    verbosity: ordersRequest.verbosity,
-  });
-
-  if (!ordersResult.ok) {
-    console.error("[AIRecovery] orders_request_failed", {
-      model: args.model,
-      slot: args.snapshot.slot,
-      dateISO: args.snapshot.dateISO,
+    openaiMeta: {
+      ...baseMeta,
       briefResponseId: briefSource.responseId,
-      error: ordersResult.error,
-    });
-    return buildOrdersFallback({
-      brief,
-      briefResult: briefSource,
-      fallbackReason: `orders_fallback:${ordersResult.error}`,
-    });
-  }
-
-  try {
-    const orders = parseOrdersJson(ordersResult.text, args.snapshot.slot);
-    return {
-      status: "ready",
-      brief,
-      orders,
-      reasoningEffort: briefRequest.reasoningEffort,
-      model: args.model,
-      openaiMeta: {
-        ...baseMeta,
-        briefResponseId: briefSource.responseId,
-        ordersResponseId: ordersResult.responseId,
-        usage: {
-          brief: briefSource.usage,
-          orders: ordersResult.usage,
-          total: combineAIRecoveryUsages(briefSource.usage, ordersResult.usage),
-        },
-        fallbackReason: null,
+      usage: {
+        brief: briefSource.usage,
+        orders: null,
+        total: combineAIRecoveryUsages(briefSource.usage, null),
       },
-    } satisfies OpenAIFlowResult;
-  } catch (error) {
-    console.error("[AIRecovery] orders_parse_failed", {
-      model: args.model,
-      slot: args.snapshot.slot,
-      dateISO: args.snapshot.dateISO,
-      briefResponseId: briefSource.responseId,
-      ordersResponseId: ordersResult.responseId,
-      error: trimText((error as Error)?.message ?? error, 160),
-    });
-    const repairedOrders = await repairAIRecoveryJson({
-      model: args.model,
-      schemaName: "ai_recovery_orders",
-      schema: buildOrdersSchema(),
-      rawText: ordersResult.text,
-      signal: args.signal,
-      maxOutputTokens: ordersRequest.maxOutputTokens,
-    });
-    if (!repairedOrders.ok) {
-      console.error("[AIRecovery] orders_repair_failed", {
-        model: args.model,
-        slot: args.snapshot.slot,
-        dateISO: args.snapshot.dateISO,
-        briefResponseId: briefSource.responseId,
-        ordersResponseId: ordersResult.responseId,
-        error: repairedOrders.error,
-      });
-      return buildOrdersFallback({
-        brief,
-        briefResult: briefSource,
-        ordersResponseId: ordersResult.responseId,
-        ordersUsage: ordersResult.usage,
-        fallbackReason: `orders_repair_fallback:${repairedOrders.error}`,
-      });
-    }
-    try {
-      const orders = parseOrdersJson(repairedOrders.text, args.snapshot.slot);
-      return {
-        status: "ready",
-        brief,
-        orders,
-        reasoningEffort: briefRequest.reasoningEffort,
-        model: args.model,
-        openaiMeta: {
-          ...baseMeta,
-          briefResponseId: briefSource.responseId,
-          ordersResponseId: repairedOrders.responseId,
-          usage: {
-            brief: briefSource.usage,
-            orders: repairedOrders.usage,
-            total: combineAIRecoveryUsages(briefSource.usage, repairedOrders.usage),
-          },
-          fallbackReason: null,
-        },
-      } satisfies OpenAIFlowResult;
-    } catch (repairParseError) {
-      console.error("[AIRecovery] orders_repair_parse_failed", {
-        model: args.model,
-        slot: args.snapshot.slot,
-        dateISO: args.snapshot.dateISO,
-        briefResponseId: briefSource.responseId,
-        ordersResponseId: repairedOrders.responseId,
-        error: trimText((repairParseError as Error)?.message ?? repairParseError, 160),
-      });
-      return buildOrdersFallback({
-        brief,
-        briefResult: briefSource,
-        ordersResponseId: repairedOrders.responseId ?? ordersResult.responseId,
-        ordersUsage: repairedOrders.usage ?? ordersResult.usage,
-        fallbackReason: "orders_repair_parse_fallback",
-      });
-    }
-  }
+      fallbackReason: null,
+    },
+  } satisfies OpenAIFlowResult;
 }
 
 function buildStoredSession(args: {
@@ -2696,7 +2563,7 @@ export async function generateAIRecoverySession(args: {
     throw new Error("session_generation_limit_reached");
   }
 
-  let flow = await runOpenAIFlow({
+  let flow = await runOpenAIBriefFlow({
     snapshot,
     model,
     tier: subscription?.tier ?? null,
@@ -2710,7 +2577,7 @@ export async function generateAIRecoverySession(args: {
       model,
       reason: flow.openaiMeta.fallbackReason,
     });
-    const retriedFlow = await runOpenAIFlow({
+    const retriedFlow = await runOpenAIBriefFlow({
       snapshot,
       model,
       tier: subscription?.tier ?? null,

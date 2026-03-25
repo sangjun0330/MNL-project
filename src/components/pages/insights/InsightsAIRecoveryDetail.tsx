@@ -532,6 +532,29 @@ export function InsightsAIRecoveryDetail({
                 </Link>
               </div>
             </Surface>
+          ) : brief ? (
+            <Surface>
+              <div className="text-[11px] font-semibold tracking-[0.18em] text-[#8C95A6]">TODAY ORDER</div>
+              <div className="mt-2 text-[23px] font-semibold tracking-[-0.04em] text-[#111827]">
+                {session.savingOrders ? "오늘 오더를 정리하고 있어요." : "오더를 아직 정리하는 중이에요."}
+              </div>
+              <p className="mt-3 break-keep text-[14px] leading-6 text-[#667085]">
+                해설은 먼저 표시했고, 오더는 별도 생성으로 이어 붙이고 있습니다. 몇 초 더 걸릴 수 있습니다.
+              </p>
+              {!session.savingOrders ? (
+                <div className="mt-5 flex flex-wrap gap-3">
+                  <Button variant="secondary" className="h-11 px-5 text-[13px]" onClick={() => void session.regenerateOrders()}>
+                    오더 다시 불러오기
+                  </Button>
+                  <Link
+                    href={ordersHref}
+                    className="inline-flex h-11 items-center justify-center rounded-full border border-black/[0.08] bg-white px-5 text-[13px] font-semibold text-[#111827]"
+                  >
+                    오더 페이지 보기
+                  </Link>
+                </div>
+              ) : null}
+            </Surface>
           ) : null}
 
           {actionPanel}
