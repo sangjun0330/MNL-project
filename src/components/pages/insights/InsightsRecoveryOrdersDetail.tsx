@@ -169,14 +169,16 @@ export function InsightsRecoveryOrdersDetail({
   const currentSession = response?.session ?? null;
   const ordersPayload = currentSession?.orders ?? null;
   const orders = ordersPayload?.items ?? [];
-  const completionSet = new Set(response?.completions ?? []);
-  const pendingOrders = orders.filter((order) => !completionSet.has(order.id));
-  const completedOrders = orders.filter((order) => completionSet.has(order.id));
   const canRegenerateOrders = response?.quota.canRegenerateOrders ?? !currentSession;
   const showGeneratingOverlay = Boolean(response?.gate.allowed && session.savingOrders);
   const showGenerationControls = Boolean(response?.showGenerationControls);
+  const [localCompletions, setLocalCompletions] = useState<string[]>(response?.completions ?? []);
   const [recentlyCompletedIds, setRecentlyCompletedIds] = useState<string[]>([]);
+  const [transientCompletedIds, setTransientCompletedIds] = useState<string[]>([]);
   const previousCompletionsRef = useRef<string[]>(response?.completions ?? []);
+  const completionSet = new Set(localCompletions);
+  const pendingOrders = orders.filter((order) => !completionSet.has(order.id) || transientCompletedIds.includes(order.id));
+  const completedOrders = orders.filter((order) => completionSet.has(order.id) && !transientCompletedIds.includes(order.id));
 
   useEffect(() => {
     setHydrated(true);
@@ -191,6 +193,8 @@ export function InsightsRecoveryOrdersDetail({
     const previousSet = new Set(previousCompletionsRef.current);
     const newlyCompleted = nextCompletions.filter((id) => !previousSet.has(id));
     previousCompletionsRef.current = nextCompletions;
+    setLocalCompletions(nextCompletions);
+    setTransientCompletedIds((current) => current.filter((id) => nextCompletions.includes(id)));
     if (!newlyCompleted.length) return;
     setRecentlyCompletedIds((current) => Array.from(new Set([...current, ...newlyCompleted])));
     const timers = newlyCompleted.map((id) =>
@@ -202,6 +206,26 @@ export function InsightsRecoveryOrdersDetail({
       for (const timer of timers) window.clearTimeout(timer);
     };
   }, [response?.completions]);
+
+  useEffect(() => {
+    setLocalCompletions(response?.completions ?? []);
+    setTransientCompletedIds([]);
+    setRecentlyCompletedIds([]);
+    previousCompletionsRef.current = response?.completions ?? [];
+  }, [currentSession?.generatedAt, slot, end]);
+
+  const handleToggleCompletion = (orderId: string) => {
+    setLocalCompletions((current) => (current.includes(orderId) ? current : [...current, orderId]));
+    setTransientCompletedIds((current) => (current.includes(orderId) ? current : [...current, orderId]));
+    setRecentlyCompletedIds((current) => (current.includes(orderId) ? current : [...current, orderId]));
+    window.setTimeout(() => {
+      setTransientCompletedIds((current) => current.filter((item) => item !== orderId));
+    }, 520);
+    window.setTimeout(() => {
+      setRecentlyCompletedIds((current) => current.filter((item) => item !== orderId));
+    }, 850);
+    void session.toggleCompletion(orderId, true);
+  };
 
   if (!hydrated && !initialData) {
     return (
@@ -342,7 +366,14 @@ export function InsightsRecoveryOrdersDetail({
           </div>
           <div className="grid gap-3">
             {pendingOrders.map((order) => (
-              <OrderCard key={order.id} order={order} checked={false} busy={session.togglingCompletion === order.id} onToggle={() => void session.toggleCompletion(order.id, true)} />
+              <OrderCard
+                key={order.id}
+                order={order}
+                checked={completionSet.has(order.id)}
+                busy={session.togglingCompletion === order.id}
+                recentlyCompleted={recentlyCompletedIds.includes(order.id)}
+                onToggle={() => handleToggleCompletion(order.id)}
+              />
             ))}
           </div>
         </div>
