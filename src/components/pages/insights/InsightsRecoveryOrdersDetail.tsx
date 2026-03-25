@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { AIRecoveryLoadingOverlay } from "@/components/insights/AIRecoveryLoadingOverlay";
@@ -17,50 +17,88 @@ import { formatKoreanDate } from "@/lib/date";
 import { useI18n } from "@/lib/useI18n";
 import type { AIRecoverySessionResponse } from "@/lib/aiRecovery";
 
+function ImmediateNavButton({
+  href,
+  className,
+  children,
+}: {
+  href: string;
+  className: string;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        if (typeof window !== "undefined") window.location.assign(href);
+      }}
+      className={className}
+    >
+      {children}
+    </button>
+  );
+}
+
 function OrderCard({
   order,
   checked,
   busy,
+  recentlyCompleted,
   onToggle,
 }: {
   order: AIRecoveryOrder;
   checked: boolean;
   busy: boolean;
-  onToggle: () => void;
+  recentlyCompleted?: boolean;
+  onToggle?: () => void;
 }) {
   const chips = Array.isArray((order as any).chips) ? ((order as any).chips as string[]) : [];
 
   return (
     <DetailCard
-      className="overflow-hidden px-5 py-5 sm:px-6"
+      className={`overflow-hidden px-5 py-5 transition-all duration-300 sm:px-6 motion-reduce:transition-none ${
+        checked ? "border-[#D9EBDD]" : ""
+      } ${recentlyCompleted ? "scale-[1.01] shadow-[0_18px_42px_rgba(25,65,48,0.10)]" : ""}`}
       style={{
-        background:
-          "radial-gradient(circle at top right, rgba(173,196,255,0.14), transparent 30%), linear-gradient(180deg, rgba(250,251,255,0.98) 0%, rgba(255,255,255,0.96) 100%)",
-        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.92), 0 16px 36px rgba(15,36,74,0.05)",
+        background: checked
+          ? "radial-gradient(circle at top right, rgba(177,230,204,0.28), transparent 34%), linear-gradient(180deg, rgba(247,252,248,0.98) 0%, rgba(242,250,245,0.96) 100%)"
+          : "radial-gradient(circle at top right, rgba(173,196,255,0.14), transparent 30%), linear-gradient(180deg, rgba(250,251,255,0.98) 0%, rgba(255,255,255,0.96) 100%)",
+        boxShadow: checked
+          ? "inset 0 1px 0 rgba(255,255,255,0.94), 0 16px 36px rgba(40,112,74,0.08)"
+          : "inset 0 1px 0 rgba(255,255,255,0.92), 0 16px 36px rgba(15,36,74,0.05)",
       }}
     >
       <div className="flex items-start gap-4">
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || checked || !onToggle}
           onClick={onToggle}
-          className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-[13px] font-bold ${
-            checked ? "border-[#1B2747] bg-[#1B2747] text-white" : "border-[#1B2747] bg-white text-[#1B2747]"
+          aria-label={checked ? "완료된 오더" : "오더 완료하기"}
+          className={`relative mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-[13px] font-bold transition-all duration-300 motion-reduce:transition-none ${
+            checked ? "border-[#1E6B47] bg-[#1E6B47] text-white" : "border-[#1B2747] bg-white text-[#1B2747]"
           } ${busy ? "opacity-50" : ""}`}
         >
-          {checked ? "✓" : ""}
+          {recentlyCompleted ? <span className="absolute inset-0 rounded-full bg-[#CFEFDD] opacity-70 animate-ping" aria-hidden="true" /> : null}
+          <span className={`relative transition-transform duration-300 motion-reduce:transition-none ${recentlyCompleted ? "scale-110" : "scale-100"}`}>
+            {checked ? "✓" : ""}
+          </span>
         </button>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <DetailChip color={DETAIL_ACCENTS.navy}>{(order as any).when ?? "지금"}</DetailChip>
+            <DetailChip color={checked ? DETAIL_ACCENTS.mint : DETAIL_ACCENTS.navy}>{(order as any).when ?? "지금"}</DetailChip>
             {chips.slice(0, 3).map((chip) => (
               <DetailChip key={chip} color={checked ? DETAIL_ACCENTS.mint : DETAIL_ACCENTS.navy}>
                 {chip}
               </DetailChip>
             ))}
+            {checked ? <DetailChip color={DETAIL_ACCENTS.mint}>완료</DetailChip> : null}
           </div>
-          <p className="mt-3 break-keep text-[17px] font-semibold leading-[1.75] tracking-[-0.03em] text-ios-text">{(order as any).body}</p>
-          <p className="mt-2 break-keep text-[13px] leading-6 text-ios-sub">{(order as any).reason}</p>
+          <p className={`mt-3 break-keep text-[17px] font-semibold leading-[1.75] tracking-[-0.03em] transition-colors duration-300 motion-reduce:transition-none ${checked ? "text-[#234533]" : "text-ios-text"}`}>
+            {(order as any).body}
+          </p>
+          <p className={`mt-2 break-keep text-[13px] leading-6 transition-colors duration-300 motion-reduce:transition-none ${checked ? "text-[#5C7367]" : "text-ios-sub"}`}>
+            {(order as any).reason}
+          </p>
         </div>
       </div>
     </DetailCard>
@@ -127,6 +165,18 @@ export function InsightsRecoveryOrdersDetail({
     initialData,
   });
   const activeData = session.data?.slot === slot && session.data?.dateISO === end ? session.data : null;
+  const response = activeData;
+  const currentSession = response?.session ?? null;
+  const ordersPayload = currentSession?.orders ?? null;
+  const orders = ordersPayload?.items ?? [];
+  const completionSet = new Set(response?.completions ?? []);
+  const pendingOrders = orders.filter((order) => !completionSet.has(order.id));
+  const completedOrders = orders.filter((order) => completionSet.has(order.id));
+  const canRegenerateOrders = response?.quota.canRegenerateOrders ?? !currentSession;
+  const showGeneratingOverlay = Boolean(response?.gate.allowed && session.savingOrders);
+  const showGenerationControls = Boolean(response?.showGenerationControls);
+  const [recentlyCompletedIds, setRecentlyCompletedIds] = useState<string[]>([]);
+  const previousCompletionsRef = useRef<string[]>(response?.completions ?? []);
 
   useEffect(() => {
     setHydrated(true);
@@ -135,6 +185,23 @@ export function InsightsRecoveryOrdersDetail({
   useEffect(() => {
     setSlot(initialSlot);
   }, [initialSlot]);
+
+  useEffect(() => {
+    const nextCompletions = response?.completions ?? [];
+    const previousSet = new Set(previousCompletionsRef.current);
+    const newlyCompleted = nextCompletions.filter((id) => !previousSet.has(id));
+    previousCompletionsRef.current = nextCompletions;
+    if (!newlyCompleted.length) return;
+    setRecentlyCompletedIds((current) => Array.from(new Set([...current, ...newlyCompleted])));
+    const timers = newlyCompleted.map((id) =>
+      window.setTimeout(() => {
+        setRecentlyCompletedIds((current) => current.filter((item) => item !== id));
+      }, 850),
+    );
+    return () => {
+      for (const timer of timers) window.clearTimeout(timer);
+    };
+  }, [response?.completions]);
 
   if (!hydrated && !initialData) {
     return (
@@ -162,15 +229,6 @@ export function InsightsRecoveryOrdersDetail({
       </InsightDetailShell>
     );
   }
-
-  const response = activeData;
-  const currentSession = response?.session ?? null;
-  const ordersPayload = currentSession?.orders ?? null;
-  const orders = ordersPayload?.items ?? [];
-  const visibleOrders = orders.filter((order) => !(response?.completions?.includes(order.id) ?? false));
-  const canRegenerateOrders = response?.quota.canRegenerateOrders ?? !currentSession;
-  const showGeneratingOverlay = Boolean(response?.gate.allowed && session.savingOrders);
-  const showGenerationControls = Boolean(response?.showGenerationControls);
 
   const updateSlot = (nextSlot: AIRecoverySlot) => {
     if (nextSlot === slot) return;
@@ -257,12 +315,12 @@ export function InsightsRecoveryOrdersDetail({
           <p className="mt-2 text-[13px] leading-6 text-ios-sub">{response.gate.message}</p>
           {response.gate.code === "post_shift_health_required" ? (
             <div className="mt-4">
-              <Link
+              <ImmediateNavButton
                 href="/schedule?openHealthLog=today"
                 className="inline-flex h-11 items-center justify-center rounded-full bg-black px-5 text-[13px] font-semibold text-white"
               >
                 오늘 건강 기록하기
-              </Link>
+              </ImmediateNavButton>
             </div>
           ) : null}
         </DetailCard>
@@ -276,12 +334,17 @@ export function InsightsRecoveryOrdersDetail({
         </DetailCard>
       ) : null}
 
-      {visibleOrders.length ? (
-        <div className="grid gap-3">
-          {visibleOrders.map((order) => {
-            const checked = response?.completions?.includes(order.id) ?? false;
-            return <OrderCard key={order.id} order={order} checked={checked} busy={session.togglingCompletion === order.id} onToggle={() => void session.toggleCompletion(order.id, true)} />;
-          })}
+      {pendingOrders.length ? (
+        <div className="space-y-3">
+          <div className="px-1">
+            <div className="text-[11px] font-semibold tracking-[0.16em] text-ios-sub">지금 바로 할 오더</div>
+            <p className="mt-1 text-[13px] leading-6 text-ios-sub">체크하면 바로 완료 상태로 반영되고 아래 완료 목록에 정리됩니다.</p>
+          </div>
+          <div className="grid gap-3">
+            {pendingOrders.map((order) => (
+              <OrderCard key={order.id} order={order} checked={false} busy={session.togglingCompletion === order.id} onToggle={() => void session.toggleCompletion(order.id, true)} />
+            ))}
+          </div>
         </div>
       ) : session.loading ? (
         <DetailCard className="p-5 sm:p-6">
@@ -291,13 +354,33 @@ export function InsightsRecoveryOrdersDetail({
       ) : orders.length > 0 ? (
         <DetailCard className="p-5 sm:p-6">
           <div className="text-[17px] font-bold tracking-[-0.02em] text-ios-text">오늘 오더를 모두 체크했어요.</div>
-          <p className="mt-2 text-[13px] leading-6 text-ios-sub">완료한 오더는 통계에 반영되고, 남은 오더가 생기면 여기 다시 나타납니다.</p>
+          <p className="mt-2 text-[13px] leading-6 text-ios-sub">완료한 오더는 아래에 남아 있고, 통계도 바로 반영됩니다.</p>
         </DetailCard>
       ) : !session.error && response?.gate.allowed ? (
         <DetailCard className="p-5 sm:p-6">
           <div className="text-[17px] font-bold tracking-[-0.02em] text-ios-text">아직 AI 오더가 없어요.</div>
           <p className="mt-2 text-[13px] leading-6 text-ios-sub">AI 맞춤회복 페이지에서 {slotLabel} 만들기를 눌러 해설을 먼저 생성해 주세요.</p>
         </DetailCard>
+      ) : null}
+
+      {completedOrders.length ? (
+        <div className="space-y-3">
+          <div className="px-1">
+            <div className="text-[11px] font-semibold tracking-[0.16em] text-ios-sub">완료한 오더</div>
+            <p className="mt-1 text-[13px] leading-6 text-ios-sub">방금 체크한 항목도 여기에서 바로 확인할 수 있어요.</p>
+          </div>
+          <div className="grid gap-3">
+            {completedOrders.map((order) => (
+              <OrderCard
+                key={order.id}
+                order={order}
+                checked
+                busy={false}
+                recentlyCompleted={recentlyCompletedIds.includes(order.id)}
+              />
+            ))}
+          </div>
+        </div>
       ) : null}
     </InsightDetailShell>
   );

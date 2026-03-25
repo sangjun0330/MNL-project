@@ -15,6 +15,7 @@ import { useRecoveryPlanner } from "@/components/insights/useRecoveryPlanner";
 import { BatteryGauge } from "@/components/home/BatteryGauge";
 import { WeekStrip } from "@/components/home/WeekStrip";
 import { HomeSocialCard } from "@/components/home/HomeSocialCard";
+import type { AIRecoveryOrder, AIRecoverySessionResponse } from "@/lib/aiRecovery";
 
 function isReasonableISODate(v: any): v is ISODate {
   if (!isISODate(v)) return false;
@@ -42,6 +43,21 @@ function cleanText(v?: string | null) {
   if (!v) return null;
   const out = String(v).replace(/\r\n/g, "\n").trim();
   return out || null;
+}
+
+type RecoverySessionData = AIRecoverySessionResponse["data"];
+
+function isRenderableRecoveryData(value: RecoverySessionData | null | undefined): value is RecoverySessionData {
+  if (!value?.session?.brief) return false;
+  if (value.session.status !== "ready") return false;
+  if (value.session.openaiMeta?.fallbackReason) return false;
+  return true;
+}
+
+function compareRecoveryDataDesc(a: RecoverySessionData, b: RecoverySessionData) {
+  const aTs = Date.parse(a.session?.generatedAt ?? "") || 0;
+  const bTs = Date.parse(b.session?.generatedAt ?? "") || 0;
+  return bTs - aTs;
 }
 
 // ── Icons ────────────────────────────────────────────────────────
@@ -87,6 +103,7 @@ function IconSparkle() {
 
 export default function Home() {
   const { t } = useI18n();
+  const aiPreviewDateISO = todayISO();
   const store = useAppStoreSelector(
     (s) => ({
       selected: s.selected,
@@ -110,6 +127,8 @@ export default function Home() {
   );
 
   const [homeSelected, setHomeSelected] = useState<ISODate>(() => todayISO());
+  const [recoveryPreviewVersion, setRecoveryPreviewVersion] = useState(0);
+  const [homeRecoveryViews, setHomeRecoveryViews] = useState<RecoverySessionData[]>([]);
   useEffect(() => {
     const raw = (store.selected as any) ?? null;
     if (raw != null && !isReasonableISODate(raw)) {
@@ -176,13 +195,87 @@ export default function Home() {
   }, []);
 
   const planner = useRecoveryPlanner();
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+
+    const load = async () => {
+      try {
+        const [wakeRes, postShiftRes] = await Promise.all([
+          fetch(`/api/insights/recovery/ai?date=${aiPreviewDateISO}&slot=wake`, {
+            method: "GET",
+            cache: "no-store",
+            signal: controller.signal,
+          }),
+          fetch(`/api/insights/recovery/ai?date=${aiPreviewDateISO}&slot=postShift`, {
+            method: "GET",
+            cache: "no-store",
+            signal: controller.signal,
+          }),
+        ]);
+        const [wakeJson, postShiftJson] = await Promise.all([
+          wakeRes.json().catch(() => null),
+          postShiftRes.json().catch(() => null),
+        ]);
+        if (cancelled) return;
+        const nextViews = [wakeJson?.data ?? null, postShiftJson?.data ?? null].filter(isRenderableRecoveryData).sort(compareRecoveryDataDesc);
+        setHomeRecoveryViews(nextViews);
+      } catch (error) {
+        if (controller.signal.aborted || cancelled) return;
+        console.warn("[Home] recovery_preview_load_failed", {
+          message: error instanceof Error ? error.message : String(error),
+          dateISO: aiPreviewDateISO,
+        });
+        setHomeRecoveryViews([]);
+      }
+    };
+
+    void load();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [aiPreviewDateISO, recoveryPreviewVersion]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const refresh = () => setRecoveryPreviewVersion((current) => current + 1);
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, []);
+
+  const latestRecoveryView = useMemo(() => homeRecoveryViews[0] ?? null, [homeRecoveryViews]);
+  const latestBriefHeadline = latestRecoveryView?.session?.brief?.headline?.trim() || null;
+  const latestOrdersSession = useMemo(
+    () =>
+      homeRecoveryViews.find((view) => Array.isArray(view.session?.orders?.items) && (view.session?.orders?.items.length ?? 0) > 0) ??
+      null,
+    [homeRecoveryViews],
+  );
+  const latestPendingOrder = useMemo(() => {
+    if (!latestOrdersSession?.session?.orders?.items?.length) return null;
+    const completed = new Set(latestOrdersSession.completions ?? []);
+    return latestOrdersSession.session.orders.items.find((item) => !completed.has(item.id)) ?? null;
+  }, [latestOrdersSession]);
+  const latestOrderTitle = latestPendingOrder?.title?.trim() || null;
+  const latestOrdersCompleted =
+    Boolean(latestOrdersSession?.session?.orders?.items?.length) &&
+    !latestPendingOrder;
+
   const aiHeadline = useMemo(() => {
     if (planner.state === "needs_records") return t("기록이 쌓이면 맞춤회복 카드 구조가 여기에 표시됩니다.");
     if (planner.focusFactor?.label) return `${planner.focusFactor.label} 중심 안내 화면 구조만 유지 중입니다.`;
     return t("현재는 AI 없이 회복 카드 구조만 유지 중입니다.");
   }, [planner.focusFactor?.label, planner.state, t]);
-  const plannerPreviewTitle = t("오늘의 오더");
-  const plannerPreviewBody = t("현재는 맞춤회복과 오더 화면의 UI 뼈대만 유지하고 있습니다.");
+  const plannerPreviewTitle = latestOrderTitle ?? (latestOrdersCompleted ? t("오늘 오더를 모두 완료했어요.") : t("오늘의 오더"));
 
   const selectedDateLabel = useMemo(() => formatKoreanDate(homeSelected), [homeSelected]);
 
@@ -329,32 +422,13 @@ export default function Home() {
           className="mt-3 text-[15px] font-semibold leading-snug tracking-[-0.01em]"
           style={{ color: "var(--rnest-text)" }}
         >
-          {aiHeadline}
+          {latestBriefHeadline ?? aiHeadline}
         </p>
-
-        <p className="mt-2 text-[13px] leading-relaxed" style={{ color: "var(--rnest-sub)" }}>
-          {t("AI 파이프라인 없이도 카드 레이아웃과 이동 동선은 그대로 확인할 수 있습니다.")}
-        </p>
-
-        <div className="mt-4 flex flex-wrap gap-2">
-          <span
-            className="inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold"
-            style={{ borderColor: "var(--rnest-sep)", color: "var(--rnest-text)" }}
-          >
-            {planner.focusFactor ? `${t("회복 포커스")} ${planner.focusFactor.label}` : t("오늘 회복")}
-          </span>
-          <span
-            className="inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold"
-            style={{ borderColor: "var(--rnest-sep)", color: "var(--rnest-sub)" }}
-          >
-            UI skeleton
-          </span>
-        </div>
       </div>
 
       {/* ── Recovery Planner Card ── */}
       <Link
-        href="/insights/recovery"
+        href="/insights/recovery/orders"
         className="block rounded-[22px] px-4 py-4 shadow-apple-sm active:opacity-95"
         style={{ background: "var(--rnest-card)" }}
       >
@@ -390,24 +464,6 @@ export default function Home() {
         >
           {plannerPreviewTitle}
         </p>
-        <p className="mt-2 text-[13px] leading-relaxed" style={{ color: "var(--rnest-sub)" }}>
-          {plannerPreviewBody}
-        </p>
-
-        <div className="mt-4 flex flex-wrap gap-2">
-          <span
-            className="inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold"
-            style={{ borderColor: "var(--rnest-sep)", color: "var(--rnest-sub)" }}
-          >
-            {planner.state === "needs_records" ? t("현재 {count}일 기록됨", { count: planner.recordedDays }) : planner.nextDutyLabel}
-          </span>
-          <span
-            className="inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold"
-            style={{ borderColor: "var(--rnest-sep)", color: "var(--rnest-sub)" }}
-          >
-            {t("정적 오더 레이아웃")}
-          </span>
-        </div>
       </Link>
 
       {/* ── Condition (compact) ── */}

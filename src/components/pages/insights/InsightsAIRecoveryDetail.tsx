@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ComponentType, type SVGProps } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode, type SVGProps } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
@@ -281,6 +281,28 @@ function PaywallNotice() {
   );
 }
 
+function ImmediateNavButton({
+  href,
+  className,
+  children,
+}: {
+  href: string;
+  className: string;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        if (typeof window !== "undefined") window.location.assign(href);
+      }}
+      className={className}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function InsightsAIRecoveryDetail({
   initialSlot = "wake",
   initialData = null,
@@ -434,22 +456,22 @@ export function InsightsAIRecoveryDetail({
           <p className="mt-3 text-[14px] leading-6 text-[#667085]">{response.gate.message}</p>
           {response.gate.code === "wake_sleep_required" ? (
             <div className="mt-5">
-              <Link
+              <ImmediateNavButton
                 href="/schedule?openHealthLog=today&focus=sleep"
                 className="inline-flex h-11 items-center justify-center rounded-full bg-black px-5 text-[13px] font-semibold text-white"
               >
                 오늘 수면 기록하기
-              </Link>
+              </ImmediateNavButton>
             </div>
           ) : null}
           {response.gate.code === "post_shift_health_required" ? (
             <div className="mt-5">
-              <Link
+              <ImmediateNavButton
                 href="/schedule?openHealthLog=today"
                 className="inline-flex h-11 items-center justify-center rounded-full bg-black px-5 text-[13px] font-semibold text-white"
               >
                 오늘 건강 기록하기
-              </Link>
+              </ImmediateNavButton>
             </div>
           ) : null}
         </Surface>
@@ -518,18 +540,12 @@ export function InsightsAIRecoveryDetail({
               <div className="mt-4 break-keep text-[20px] font-semibold leading-8 tracking-[-0.04em] text-[#111827]">{ordersPayload.headline}</div>
               <p className="mt-3 break-keep text-[14px] leading-6 text-[#667085]">{ordersPayload.summary}</p>
               <div className="mt-5 flex flex-wrap gap-3">
-                <Link
+                <ImmediateNavButton
                   href={ordersHref}
                   className="inline-flex h-11 items-center justify-center rounded-full bg-black px-5 text-[13px] font-semibold text-white"
                 >
                   오더 보기
-                </Link>
-                <Link
-                  href={ordersHref}
-                  className="inline-flex h-11 items-center justify-center rounded-full border border-black/[0.08] bg-white px-5 text-[13px] font-semibold text-[#111827]"
-                >
-                  체크리스트 열기
-                </Link>
+                </ImmediateNavButton>
               </div>
             </Surface>
           ) : brief ? (

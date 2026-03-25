@@ -68,6 +68,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
   const dataRequestRef = useRef(0);
   const generateInFlightRef = useRef(false);
   const ordersInFlightRef = useRef(false);
+  const togglingCompletionRef = useRef<string | null>(null);
 
   const key = `${args.dateISO}:${args.slot}`;
 
@@ -111,6 +112,37 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     if (!incomingOrdersId && currentOrdersId) return current;
 
     return incoming;
+  };
+
+  const isSameRenderedSession = (current: SessionData | null, incoming: SessionData | null) => {
+    if (!current?.session || !incoming?.session) return false;
+    if (current.dateISO !== incoming.dateISO || current.slot !== incoming.slot) return false;
+    if ((current.session.generatedAt ?? "") !== (incoming.session.generatedAt ?? "")) return false;
+    const currentBriefId = current.session.openaiMeta?.briefResponseId ?? "";
+    const incomingBriefId = incoming.session.openaiMeta?.briefResponseId ?? "";
+    const currentOrdersId = current.session.openaiMeta?.ordersResponseId ?? "";
+    const incomingOrdersId = incoming.session.openaiMeta?.ordersResponseId ?? "";
+    if ((currentBriefId || incomingBriefId) && currentBriefId !== incomingBriefId) return false;
+    if ((currentOrdersId || incomingOrdersId) && currentOrdersId !== incomingOrdersId) return false;
+    return true;
+  };
+
+  const mergeInteractiveState = (current: SessionData | null, incoming: SessionData | null): SessionData | null => {
+    if (!current || !incoming) return incoming;
+    if (!togglingCompletionRef.current) return incoming;
+    if (!isSameRenderedSession(current, incoming)) return incoming;
+    return {
+      ...incoming,
+      completions: current.completions,
+      orderStats: current.orderStats,
+    };
+  };
+
+  const adoptIncomingData = (incoming: SessionData | null) => {
+    setData((current) => {
+      const merged = mergeInteractiveState(current, incoming);
+      return pickLatestData(current, merged);
+    });
   };
 
   const listRequestDates = (pivotISO: ISODate, daysBefore: number, daysAfter: number) => {
@@ -198,7 +230,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     try {
       const nextData = await fetchSessionView("load");
       if (!isCurrentDataRequest(requestId)) return;
-      setData((current) => pickLatestData(current, nextData));
+      adoptIncomingData(nextData);
       const autoOrdersKey = buildAutoOrdersKey(nextData);
       if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && nextData?.quota.canRegenerateOrders) {
         autoOrdersRequestedRef.current.add(autoOrdersKey);
@@ -252,14 +284,14 @@ export function useAIRecoverySession(args: HookArgs): HookState {
         throw new Error(String(json?.error ?? `http_${response.status}`));
       }
       if (!isCurrentDataRequest(requestId)) return;
-      setData((current) => pickLatestData(current, normalizeData(json.data)));
+      adoptIncomingData(normalizeData(json.data));
       void load();
     } catch (nextError) {
       if (!isCurrentDataRequest(requestId)) return;
       try {
         const recovered = await fetchSessionView(auto ? "orders_auto_recover" : "orders_recover");
         if (!isCurrentDataRequest(requestId)) return;
-        setData((current) => pickLatestData(current, recovered));
+        adoptIncomingData(recovered);
         if (!auto) setError(null);
         return;
       } catch {}
@@ -308,7 +340,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       }
       if (!isCurrentDataRequest(requestId)) return;
       const nextData = normalizeData(json.data);
-      setData((current) => pickLatestData(current, nextData));
+      adoptIncomingData(nextData);
       void load();
       const autoOrdersKey = buildAutoOrdersKey(nextData);
       if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && nextData?.quota.canRegenerateOrders) {
@@ -323,7 +355,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
         if (!isCurrentDataRequest(requestId)) return;
         const recoveredGeneratedAt = recovered?.session?.generatedAt ?? null;
         if (recovered?.session && (recoveredGeneratedAt !== previousGeneratedAt || previousGeneratedAt != null)) {
-          setData((current) => pickLatestData(current, recovered));
+          adoptIncomingData(recovered);
           setError(null);
           const autoOrdersKey = buildAutoOrdersKey(recovered);
           if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && recovered?.quota.canRegenerateOrders) {
@@ -342,6 +374,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
 
   const toggleCompletion = async (orderId: string, completed: boolean) => {
     if (!args.enabled || !data) return;
+    togglingCompletionRef.current = orderId;
     setTogglingCompletion(orderId);
     setError(null);
     const previous = data.completions;
@@ -359,7 +392,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
             todayTotalCompleted: previousStats.todayTotalCompleted + delta,
             weekTotalCompleted: previousStats.weekTotalCompleted + delta,
           };
-    setData({ ...data, completions: next, orderStats: optimisticStats });
+    setData((current) => (current ? { ...current, completions: next, orderStats: optimisticStats } : current));
     try {
       const response = await fetch("/api/insights/recovery/ai/completions", {
         method: "POST",
@@ -383,6 +416,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       setData((current) => (current ? { ...current, completions: previous, orderStats: previousStats } : current));
       setFriendlyError((nextError as any)?.message ?? nextError ?? "ai_recovery_completion_failed");
     } finally {
+      togglingCompletionRef.current = null;
       setTogglingCompletion(null);
     }
   };
