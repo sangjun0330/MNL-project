@@ -39,9 +39,14 @@ function degradedResponse() {
 
 export async function GET(req: Request) {
   try {
-    const { jsonNoStore } = await import("@/lib/server/requestSecurity");
+    const { jsonNoStore, sameOriginRequestError } = await import("@/lib/server/requestSecurity");
     const { readUserIdFromRequest } = await import("@/lib/server/readUserId");
     const { loadUserBootstrap } = await import("@/lib/server/serviceConsentStore");
+
+    const originError = sameOriginRequestError(req);
+    if (originError) {
+      return jsonNoStore({ ok: false, error: originError }, { status: 403 });
+    }
 
     const userId = await readUserIdFromRequest(req);
     if (!userId) {

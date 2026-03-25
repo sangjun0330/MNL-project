@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { AIRecoveryLoadingOverlay } from "@/components/insights/AIRecoveryLoadingOverlay";
@@ -27,19 +27,13 @@ function ImmediateNavButton({
   children: ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      onClick={() => {
-        if (typeof window !== "undefined") window.location.assign(href);
-      }}
-      className={className}
-    >
+    <Link href={href} className={className} prefetch={false}>
       {children}
-    </button>
+    </Link>
   );
 }
 
-function OrderCard({
+const OrderCard = memo(function OrderCard({
   order,
   checked,
   busy,
@@ -103,7 +97,7 @@ function OrderCard({
       </div>
     </DetailCard>
   );
-}
+});
 
 function PaywallNotice({ aiHref }: { aiHref: string }) {
   return (
@@ -176,9 +170,11 @@ export function InsightsRecoveryOrdersDetail({
   const [recentlyCompletedIds, setRecentlyCompletedIds] = useState<string[]>([]);
   const [transientCompletedIds, setTransientCompletedIds] = useState<string[]>([]);
   const previousCompletionsRef = useRef<string[]>(response?.completions ?? []);
-  const completionSet = new Set(localCompletions);
-  const pendingOrders = orders.filter((order) => !completionSet.has(order.id) || transientCompletedIds.includes(order.id));
-  const completedOrders = orders.filter((order) => completionSet.has(order.id) && !transientCompletedIds.includes(order.id));
+  const toggleTimersRef = useRef<number[]>([]);
+  const completionSet = useMemo(() => new Set(localCompletions), [localCompletions]);
+  const transientSet = useMemo(() => new Set(transientCompletedIds), [transientCompletedIds]);
+  const pendingOrders = useMemo(() => orders.filter((order) => !completionSet.has(order.id) || transientSet.has(order.id)), [orders, completionSet, transientSet]);
+  const completedOrders = useMemo(() => orders.filter((order) => completionSet.has(order.id) && !transientSet.has(order.id)), [orders, completionSet, transientSet]);
 
   useEffect(() => {
     setHydrated(true);
@@ -214,18 +210,26 @@ export function InsightsRecoveryOrdersDetail({
     previousCompletionsRef.current = response?.completions ?? [];
   }, [currentSession?.generatedAt, slot, end]);
 
-  const handleToggleCompletion = (orderId: string) => {
+  const handleToggleCompletion = useCallback((orderId: string) => {
     setLocalCompletions((current) => (current.includes(orderId) ? current : [...current, orderId]));
     setTransientCompletedIds((current) => (current.includes(orderId) ? current : [...current, orderId]));
     setRecentlyCompletedIds((current) => (current.includes(orderId) ? current : [...current, orderId]));
-    window.setTimeout(() => {
+    const t1 = window.setTimeout(() => {
       setTransientCompletedIds((current) => current.filter((item) => item !== orderId));
     }, 520);
-    window.setTimeout(() => {
+    const t2 = window.setTimeout(() => {
       setRecentlyCompletedIds((current) => current.filter((item) => item !== orderId));
     }, 850);
+    toggleTimersRef.current.push(t1, t2);
     void session.toggleCompletion(orderId, true);
-  };
+  }, [session.toggleCompletion]);
+
+  useEffect(() => {
+    return () => {
+      for (const t of toggleTimersRef.current) window.clearTimeout(t);
+      toggleTimersRef.current = [];
+    };
+  }, []);
 
   if (!hydrated && !initialData) {
     return (
@@ -288,10 +292,10 @@ export function InsightsRecoveryOrdersDetail({
         <div className="text-[11px] font-semibold tracking-[0.18em] text-[color:var(--rnest-accent)]">ORDER STATS</div>
         <div className="mt-2 text-[20px] font-bold tracking-[-0.03em] text-ios-text">오늘 오더 성공 횟수</div>
         <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <StatPill label="오늘 기상 후 합계" value={`${response?.orderStats.todayWakeCompleted ?? 0}회`} />
-          <StatPill label="오늘 퇴근 후 합계" value={`${response?.orderStats.todayPostShiftCompleted ?? 0}회`} />
-          <StatPill label="오늘 총합 합계" value={`${response?.orderStats.todayTotalCompleted ?? 0}회`} />
-          <StatPill label="일주일 합계" value={`${response?.orderStats.weekTotalCompleted ?? 0}회`} />
+          <StatPill label="오늘 기상 후 합계" value={`${response?.orderStats?.todayWakeCompleted ?? 0}회`} />
+          <StatPill label="오늘 퇴근 후 합계" value={`${response?.orderStats?.todayPostShiftCompleted ?? 0}회`} />
+          <StatPill label="오늘 총합 합계" value={`${response?.orderStats?.todayTotalCompleted ?? 0}회`} />
+          <StatPill label="일주일 합계" value={`${response?.orderStats?.weekTotalCompleted ?? 0}회`} />
         </div>
       </DetailCard>
 

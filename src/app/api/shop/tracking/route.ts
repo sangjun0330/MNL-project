@@ -35,6 +35,7 @@ export async function GET(req: Request) {
   const force = url.searchParams.get("force") === "1";
 
   if (!orderId) return jsonNoStore({ ok: false, error: "missing_order_id" }, { status: 400 });
+  if (!/^[A-Za-z0-9_-]{6,64}$/.test(orderId)) return jsonNoStore({ ok: false, error: "invalid_order_id" }, { status: 400 });
 
   let order;
   try {

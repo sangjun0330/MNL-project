@@ -265,7 +265,7 @@ export default function Home() {
     const completed = new Set(latestOrdersSession.completions ?? []);
     return latestOrdersSession.session.orders.items.find((item) => !completed.has(item.id)) ?? null;
   }, [latestOrdersSession]);
-  const latestOrderTitle = latestPendingOrder?.title?.trim() || null;
+  const latestOrderTitle = latestPendingOrder?.body?.trim() || latestPendingOrder?.title?.trim() || null;
   const latestOrdersCompleted =
     Boolean(latestOrdersSession?.session?.orders?.items?.length) &&
     !latestPendingOrder;
@@ -459,7 +459,7 @@ export default function Home() {
           {t("오늘의 오더")}
         </div>
         <p
-          className="mt-1 text-[20px] font-bold leading-tight tracking-[-0.02em]"
+          className="mt-1 text-[17px] font-semibold leading-snug tracking-[-0.02em]"
           style={{ color: "var(--rnest-text)" }}
         >
           {plannerPreviewTitle}

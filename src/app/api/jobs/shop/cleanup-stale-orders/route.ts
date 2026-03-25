@@ -30,6 +30,21 @@ function readSecret() {
   return secret || null;
 }
 
+/** Constant-time string comparison to prevent timing attacks on secrets. */
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) {
+    // Compare against b anyway to keep timing consistent
+    let mismatch = 1;
+    for (let i = 0; i < b.length; i++) mismatch |= b.charCodeAt(i);
+    return mismatch === 0; // always false
+  }
+  let mismatch = 0;
+  for (let i = 0; i < a.length; i++) {
+    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return mismatch === 0;
+}
+
 function isAuthorized(req: Request): boolean {
   const secret = readSecret();
   // Vercel Cron은 CRON_SECRET 환경변수를 Bearer 토큰으로 자동 주입합니다
@@ -37,8 +52,8 @@ function isAuthorized(req: Request): boolean {
   const auth = String(req.headers.get("authorization") ?? "").trim();
   if (auth.toLowerCase().startsWith("bearer ")) {
     const token = auth.slice(7).trim();
-    if (secret && token === secret) return true;
-    if (cronSecret && token === cronSecret) return true;
+    if (secret && timingSafeEqual(token, secret)) return true;
+    if (cronSecret && timingSafeEqual(token, cronSecret)) return true;
   }
   return false;
 }

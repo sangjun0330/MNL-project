@@ -64,22 +64,23 @@ function buildSyncLabel(percent: number, daysWithAnyInput: number) {
 
 export function useInsightsData() {
   const state = useAppStore();
+  const { bio, emotions, schedule, settings, notes } = state;
 
   const end = todayISO();
   const start = toISODate(addDays(fromISODate(end), -6));
 
-  const vitals = useMemo(() => computeVitalsRange({ state, start, end }), [state, start, end]);
+  const vitals = useMemo(() => computeVitalsRange({ state, start, end }), [bio, emotions, schedule, settings, notes, start, end]);
   const vmap = useMemo(() => new Map(vitals.map((v) => [v.dateISO, v])), [vitals]);
   const recordedDateSet = useMemo(() => {
     const set = new Set<ISODate>();
     for (let i = 0; i < 7; i++) {
       const iso = toISODate(addDays(fromISODate(start), i));
-      const b = (state.bio ?? {})[iso] ?? null;
-      const e = (state.emotions ?? {})[iso] ?? null;
+      const b = (bio ?? {})[iso] ?? null;
+      const e = (emotions ?? {})[iso] ?? null;
       if (hasHealthInput(b, e)) set.add(iso);
     }
     return set;
-  }, [state.bio, state.emotions, start]);
+  }, [bio, emotions, start]);
   const vitalsRecorded = useMemo(
     () =>
       vitals.filter((v) => {
@@ -106,7 +107,7 @@ export function useInsightsData() {
     [todayHasInput, todayVitalCandidate]
   );
 
-  const todayShiftFromSchedule = state.schedule?.[end] as Shift | undefined;
+  const todayShiftFromSchedule = schedule?.[end] as Shift | undefined;
   const hasTodayShift = Boolean(todayShiftFromSchedule);
   const todayShift: Shift = todayShiftFromSchedule ?? todayVital?.shift ?? "OFF";
   const menstrual = useMemo(
@@ -114,30 +115,30 @@ export function useInsightsData() {
       todayVital?.menstrual ??
       inferMenstrualPosterior({
         iso: end,
-        settings: state.settings?.menstrual ?? null,
-        bioMap: state.bio,
-        schedule: state.schedule,
+        settings: settings?.menstrual ?? null,
+        bioMap: bio,
+        schedule,
         inputReliability: 0.35,
         shift: todayShift,
       }),
-    [end, state.bio, state.schedule, state.settings?.menstrual, todayShift, todayVital]
+    [end, bio, schedule, settings?.menstrual, todayShift, todayVital]
   );
 
   const accuracy = useMemo(
     () => computePersonalizationAccuracy({ state, start, end, vitals }),
-    [state, start, end, vitals]
+    [bio, emotions, schedule, settings, notes, start, end, vitals]
   );
 
   const daysWithAnyInput = useMemo(() => {
     let c = 0;
     for (let i = 0; i < 7; i++) {
       const iso = toISODate(addDays(fromISODate(start), i));
-      const b = (state.bio ?? {})[iso] ?? null;
-      const e = (state.emotions ?? {})[iso] ?? null;
+      const b = (bio ?? {})[iso] ?? null;
+      const e = (emotions ?? {})[iso] ?? null;
       if (hasHealthInput(b, e)) c += 1;
     }
     return c;
-  }, [state, start]);
+  }, [bio, emotions, start]);
 
   const syncLabel = useMemo(
     () => buildSyncLabel(accuracy.percent, daysWithAnyInput),
@@ -145,8 +146,8 @@ export function useInsightsData() {
   );
 
   const recordedDays = useMemo(
-    () => countHealthRecordedDays({ bio: state.bio, emotions: state.emotions }),
-    [state.bio, state.emotions]
+    () => countHealthRecordedDays({ bio, emotions }),
+    [bio, emotions]
   );
   const hasInsightData = useMemo(() => vitalsRecorded.length > 0, [vitalsRecorded]);
 

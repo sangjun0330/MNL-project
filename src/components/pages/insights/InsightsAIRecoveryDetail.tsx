@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode, type SVGProps } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode, type SVGProps } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
@@ -185,7 +185,7 @@ function SummaryMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function RecoverySectionRow({
+const RecoverySectionRow = memo(function RecoverySectionRow({
   section,
   expanded,
   onToggle,
@@ -224,7 +224,7 @@ function RecoverySectionRow({
       ) : null}
     </Surface>
   );
-}
+});
 
 function RecoveryActionPanel({
   slotLabel,
@@ -291,15 +291,9 @@ function ImmediateNavButton({
   children: ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      onClick={() => {
-        if (typeof window !== "undefined") window.location.assign(href);
-      }}
-      className={className}
-    >
+    <Link href={href} className={className} prefetch={false}>
       {children}
-    </button>
+    </Link>
   );
 }
 
@@ -331,6 +325,9 @@ export function InsightsAIRecoveryDetail({
     initialData,
   });
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
+  const toggleSection = useCallback((category: string) => {
+    setExpandedSections((current) => ({ ...current, [category]: !current[category] }));
+  }, []);
   const activeData = session.data?.slot === slot && session.data?.dateISO === end ? session.data : null;
   const response = activeData;
   const currentSession = response?.session ?? null;
@@ -522,12 +519,7 @@ export function InsightsAIRecoveryDetail({
                   key={section.category}
                   section={section}
                   expanded={Boolean(expandedSections[section.category])}
-                  onToggle={() =>
-                    setExpandedSections((current) => ({
-                      ...current,
-                      [section.category]: !current[section.category],
-                    }))
-                  }
+                  onToggle={() => toggleSection(section.category)}
                 />
               ))}
             </div>

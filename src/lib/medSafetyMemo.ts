@@ -167,12 +167,6 @@ export function buildMedSafetyMemoBlocks(input: BuildMedSafetyMemoInput) {
     blocks.push(createMemoBlock("quote", { text: query }))
   }
 
-  if (summary && summary !== query) {
-    blocks.push(createMemoBlock("divider"))
-    blocks.push(createMemoBlock("heading", { text: "결론" }))
-    blocks.push(createMemoBlock(summary.length <= 160 ? "callout" : "paragraph", { text: summary }))
-  }
-
   if (sections.length > 0) {
     blocks.push(createMemoBlock("divider"))
     blocks.push(createMemoBlock("heading", { text: "AI 분석 정리" }))
@@ -249,14 +243,6 @@ export function buildMedSafetyMemoBlocks(input: BuildMedSafetyMemoInput) {
       )
     }
   }
-
-  blocks.push(createMemoBlock("divider"))
-  blocks.push(
-    createMemoBlock("toggle", {
-      text: "검색 메타",
-      detailText: metaLines(input).join("\n"),
-    })
-  )
 
   return blocks
 }
