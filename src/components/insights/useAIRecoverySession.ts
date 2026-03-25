@@ -66,7 +66,6 @@ export function useAIRecoverySession(args: HookArgs): HookState {
   const autoRequestedRef = useRef(new Set<string>());
   const autoOrdersRequestedRef = useRef(new Set<string>());
   const dataRequestRef = useRef(0);
-  const hydratedInitialKeyRef = useRef(initialData ? `${initialData.dateISO}:${initialData.slot}` : null);
   const generateInFlightRef = useRef(false);
   const ordersInFlightRef = useRef(false);
 
@@ -81,6 +80,32 @@ export function useAIRecoverySession(args: HookArgs): HookState {
 
   const setFriendlyError = (value: unknown) => {
     setError(getAIRecoveryErrorMessage(value));
+  };
+
+  const pickLatestData = (current: SessionData | null, incoming: SessionData | null): SessionData | null => {
+    if (!incoming) return current;
+    if (!current) return incoming;
+    const currentSession = current.session;
+    const incomingSession = incoming.session;
+    if (!incomingSession) return currentSession ? current : incoming;
+    if (!currentSession) return incoming;
+
+    const currentTs = Date.parse(currentSession.generatedAt || "") || 0;
+    const incomingTs = Date.parse(incomingSession.generatedAt || "") || 0;
+    if (incomingTs > currentTs) return incoming;
+    if (incomingTs < currentTs) return current;
+
+    const currentHasOrders = Boolean(currentSession.orders?.items?.length);
+    const incomingHasOrders = Boolean(incomingSession.orders?.items?.length);
+    if (incomingHasOrders && !currentHasOrders) return incoming;
+    if (!incomingHasOrders && currentHasOrders) return current;
+
+    const currentOrdersId = currentSession.openaiMeta?.ordersResponseId ?? "";
+    const incomingOrdersId = incomingSession.openaiMeta?.ordersResponseId ?? "";
+    if (incomingOrdersId && !currentOrdersId) return incoming;
+    if (!incomingOrdersId && currentOrdersId) return current;
+
+    return incoming;
   };
 
   const listRequestDates = (pivotISO: ISODate, daysBefore: number, daysAfter: number) => {
@@ -178,7 +203,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     try {
       const nextData = await fetchSessionView("load");
       if (!isCurrentDataRequest(requestId)) return;
-      setData(nextData);
+      setData((current) => pickLatestData(current, nextData));
       const autoOrdersKey = buildAutoOrdersKey(nextData);
       if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && nextData?.quota.canRegenerateOrders) {
         autoOrdersRequestedRef.current.add(autoOrdersKey);
@@ -232,13 +257,13 @@ export function useAIRecoverySession(args: HookArgs): HookState {
         throw new Error(String(json?.error ?? `http_${response.status}`));
       }
       if (!isCurrentDataRequest(requestId)) return;
-      setData(normalizeData(json.data));
+      setData((current) => pickLatestData(current, normalizeData(json.data)));
     } catch (nextError) {
       if (!isCurrentDataRequest(requestId)) return;
       try {
         const recovered = await fetchSessionView(auto ? "orders_auto_recover" : "orders_recover");
         if (!isCurrentDataRequest(requestId)) return;
-        setData(recovered);
+        setData((current) => pickLatestData(current, recovered));
         if (!auto) setError(null);
         return;
       } catch {}
@@ -288,7 +313,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       }
       if (!isCurrentDataRequest(requestId)) return;
       const nextData = normalizeData(json.data);
-      setData(nextData);
+      setData((current) => pickLatestData(current, nextData));
       const autoOrdersKey = buildAutoOrdersKey(nextData);
       if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && nextData?.quota.canRegenerateOrders) {
         autoOrdersRequestedRef.current.add(autoOrdersKey);
@@ -302,7 +327,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
         if (!isCurrentDataRequest(requestId)) return;
         const recoveredGeneratedAt = recovered?.session?.generatedAt ?? null;
         if (recoveredGeneratedAt && recoveredGeneratedAt !== previousGeneratedAt) {
-          setData(recovered);
+          setData((current) => pickLatestData(current, recovered));
           setError(null);
           const autoOrdersKey = buildAutoOrdersKey(recovered);
           if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && recovered?.quota.canRegenerateOrders) {
@@ -368,23 +393,13 @@ export function useAIRecoverySession(args: HookArgs): HookState {
 
   useEffect(() => {
     if (initialData && initialData.dateISO === args.dateISO && initialData.slot === args.slot) {
-      setData(initialData);
+      setData((current) => pickLatestData(current, initialData));
       setLoading(false);
       setError(null);
-      const autoOrdersKey = buildAutoOrdersKey(initialData);
-      if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && initialData?.quota.canRegenerateOrders) {
-        autoOrdersRequestedRef.current.add(autoOrdersKey);
-        void regenerateOrdersInternal(true);
-      }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialData, args.dateISO, args.slot]);
 
   useEffect(() => {
-    if (hydratedInitialKeyRef.current === key) {
-      hydratedInitialKeyRef.current = null;
-      return;
-    }
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [args.dateISO, args.slot, args.enabled]);
