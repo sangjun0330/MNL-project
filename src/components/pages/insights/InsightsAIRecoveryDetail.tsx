@@ -10,7 +10,7 @@ import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice
 import { useAIRecoverySession } from "@/components/insights/useAIRecoverySession";
 import { INSIGHTS_MIN_DAYS, isInsightsLocked, useInsightsData } from "@/components/insights/useInsightsData";
 import { DetailChip, DETAIL_ACCENTS, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
-import { Button } from "@/components/ui/Button";
+
 import type { AIRecoveryBriefSection, AIRecoverySlot } from "@/lib/aiRecovery";
 import { cn } from "@/lib/cn";
 import { formatKoreanDate } from "@/lib/date";
@@ -248,9 +248,9 @@ function RecoveryActionPanel({
             {hasSession ? `${slotLabel} 해설이 이미 있으면 그대로 두고, 꼭 필요할 때만 다시 생성하세요.` : `AI는 버튼을 누를 때만 호출됩니다. ${slotLabel} 결과가 없으면 여기서 시작하세요.`}
           </p>
         </div>
-        <Button variant={hasSession ? "secondary" : "primary"} className="h-11 px-5 text-[14px]" disabled={disabled} onClick={onCreate}>
+        <PillButton variant={hasSession ? "outline" : "primary"} disabled={disabled} onClick={onCreate}>
           {hasSession ? "다시 만들기" : "만들기"}
-        </Button>
+        </PillButton>
       </div>
       {hasSession && !canRegenerate ? <p className="mt-3 text-[12px] text-[#8A93A3]">오늘 해설 다시 만들기는 끝났어요.</p> : null}
     </Surface>
@@ -262,37 +262,55 @@ function PaywallNotice() {
     <Surface>
       <div className="text-[22px] font-semibold tracking-[-0.03em] text-[#111827]">AI 맞춤회복은 Plus 또는 Pro에서 사용할 수 있어요.</div>
       <p className="mt-3 text-[14px] leading-6 text-[#667085]">AI 해설과 오늘의 오더를 함께 볼 수 있어요.</p>
-      <div className="mt-5 flex gap-2">
-        <Link
-          href="/settings/billing/upgrade"
-          className="inline-flex h-11 items-center justify-center rounded-full bg-black px-5 text-[13px] font-semibold text-white"
-        >
-          플랜 보기
-        </Link>
-        <Link
-          href="/insights/recovery"
-          className="inline-flex h-11 items-center justify-center rounded-full border border-black/[0.08] bg-white px-5 text-[13px] font-semibold text-[#111827]"
-        >
-          회복으로 돌아가기
-        </Link>
+      <div className="mt-5 flex flex-wrap gap-3">
+        <PillLink href="/settings/billing/upgrade">플랜 보기 ›</PillLink>
+        <PillLink href="/insights/recovery" variant="outline">회복으로 돌아가기</PillLink>
       </div>
     </Surface>
   );
 }
 
-function ImmediateNavButton({
+function PillLink({
   href,
-  className,
+  variant = "primary",
   children,
 }: {
   href: string;
-  className: string;
+  variant?: "primary" | "outline";
   children: ReactNode;
 }) {
+  const base = "inline-flex h-12 items-center justify-center rounded-full px-6 text-[14px] font-semibold transition-opacity active:opacity-70";
+  const cls =
+    variant === "primary"
+      ? `${base} border-2 border-[#B8B0E8] text-[#6B5CE7]`
+      : `${base} bg-[#F0EEFA] text-[#6B5CE7]`;
   return (
-    <Link href={href} className={className} prefetch={false}>
+    <Link href={href} className={cls} prefetch={false}>
       {children}
     </Link>
+  );
+}
+
+function PillButton({
+  variant = "primary",
+  disabled,
+  onClick,
+  children,
+}: {
+  variant?: "primary" | "outline";
+  disabled?: boolean;
+  onClick?: () => void;
+  children: ReactNode;
+}) {
+  const base = "inline-flex h-12 items-center justify-center rounded-full px-6 text-[14px] font-semibold transition-opacity active:opacity-70 disabled:opacity-40 disabled:cursor-not-allowed";
+  const cls =
+    variant === "primary"
+      ? `${base} border-2 border-[#B8B0E8] text-[#6B5CE7]`
+      : `${base} bg-[#F0EEFA] text-[#6B5CE7]`;
+  return (
+    <button type="button" className={cls} disabled={disabled} onClick={onClick}>
+      {children}
+    </button>
   );
 }
 
@@ -449,22 +467,12 @@ export function InsightsAIRecoveryDetail({
           <p className="mt-3 text-[14px] leading-6 text-[#667085]">{response.gate.message}</p>
           {response.gate.code === "wake_sleep_required" ? (
             <div className="mt-5">
-              <ImmediateNavButton
-                href="/schedule?openHealthLog=today&focus=sleep"
-                className="inline-flex h-11 items-center justify-center rounded-full bg-black px-5 text-[13px] font-semibold text-white"
-              >
-                오늘 수면 기록하기
-              </ImmediateNavButton>
+              <PillLink href="/schedule?openHealthLog=today&focus=sleep">오늘 수면 기록하기 ›</PillLink>
             </div>
           ) : null}
           {response.gate.code === "post_shift_health_required" ? (
             <div className="mt-5">
-              <ImmediateNavButton
-                href="/schedule?openHealthLog=today"
-                className="inline-flex h-11 items-center justify-center rounded-full bg-black px-5 text-[13px] font-semibold text-white"
-              >
-                오늘 건강 기록하기
-              </ImmediateNavButton>
+              <PillLink href="/schedule?openHealthLog=today">오늘 건강 기록하기 ›</PillLink>
             </div>
           ) : null}
         </Surface>
@@ -524,12 +532,7 @@ export function InsightsAIRecoveryDetail({
               <div className="mt-4 break-keep text-[20px] font-semibold leading-8 tracking-[-0.04em] text-[#111827]">{ordersPayload.headline}</div>
               <p className="mt-3 break-keep text-[14px] leading-6 text-[#667085]">{ordersPayload.summary}</p>
               <div className="mt-5 flex flex-wrap gap-3">
-                <ImmediateNavButton
-                  href={ordersHref}
-                  className="inline-flex h-11 items-center justify-center rounded-full bg-black px-5 text-[13px] font-semibold text-white"
-                >
-                  오더 보기
-                </ImmediateNavButton>
+                <PillLink href={ordersHref}>오더 보기 ›</PillLink>
               </div>
             </Surface>
           ) : brief ? (
@@ -543,15 +546,8 @@ export function InsightsAIRecoveryDetail({
               </p>
               {!session.savingOrders ? (
                 <div className="mt-5 flex flex-wrap gap-3">
-                  <Button variant="secondary" className="h-11 px-5 text-[13px]" onClick={() => void session.regenerateOrders()}>
-                    오더 다시 불러오기
-                  </Button>
-                  <Link
-                    href={ordersHref}
-                    className="inline-flex h-11 items-center justify-center rounded-full border border-black/[0.08] bg-white px-5 text-[13px] font-semibold text-[#111827]"
-                  >
-                    오더 페이지 보기
-                  </Link>
+                  <PillButton variant="outline" onClick={() => void session.regenerateOrders()}>오더 다시 불러오기</PillButton>
+                  <PillLink href={ordersHref} variant="outline">오더 페이지 보기 ›</PillLink>
                 </div>
               ) : null}
             </Surface>

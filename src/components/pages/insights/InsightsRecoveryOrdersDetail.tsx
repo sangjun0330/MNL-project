@@ -9,26 +9,54 @@ import { AIRecoverySlotTabs } from "@/components/insights/AIRecoverySlotTabs";
 import { useAIRecoverySession } from "@/components/insights/useAIRecoverySession";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { DetailCard, DetailChip, DETAIL_ACCENTS, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
-import { Button } from "@/components/ui/Button";
+
 import { INSIGHTS_MIN_DAYS, isInsightsLocked, shiftKo, useInsightsData } from "@/components/insights/useInsightsData";
 import type { AIRecoveryOrder, AIRecoverySlot } from "@/lib/aiRecovery";
 import { formatKoreanDate } from "@/lib/date";
 import { useI18n } from "@/lib/useI18n";
 import type { AIRecoverySessionResponse } from "@/lib/aiRecovery";
 
-function ImmediateNavButton({
+function PillLink({
   href,
-  className,
+  variant = "primary",
   children,
 }: {
   href: string;
-  className: string;
+  variant?: "primary" | "outline";
   children: ReactNode;
 }) {
+  const base = "inline-flex h-12 items-center justify-center rounded-full px-6 text-[14px] font-semibold transition-opacity active:opacity-70";
+  const cls =
+    variant === "primary"
+      ? `${base} border-2 border-[#B8B0E8] text-[#6B5CE7]`
+      : `${base} bg-[#F0EEFA] text-[#6B5CE7]`;
   return (
-    <Link href={href} className={className} prefetch={false}>
+    <Link href={href} className={cls} prefetch={false}>
       {children}
     </Link>
+  );
+}
+
+function PillButton({
+  variant = "primary",
+  disabled,
+  onClick,
+  children,
+}: {
+  variant?: "primary" | "outline";
+  disabled?: boolean;
+  onClick?: () => void;
+  children: ReactNode;
+}) {
+  const base = "inline-flex h-12 items-center justify-center rounded-full px-6 text-[14px] font-semibold transition-opacity active:opacity-70 disabled:opacity-40 disabled:cursor-not-allowed";
+  const cls =
+    variant === "primary"
+      ? `${base} border-2 border-[#B8B0E8] text-[#6B5CE7]`
+      : `${base} bg-[#F0EEFA] text-[#6B5CE7]`;
+  return (
+    <button type="button" className={cls} disabled={disabled} onClick={onClick}>
+      {children}
+    </button>
   );
 }
 
@@ -103,19 +131,9 @@ function PaywallNotice({ aiHref }: { aiHref: string }) {
     <DetailCard className="p-6">
       <div className="text-[18px] font-bold text-ios-text">AI 오더는 Plus 또는 Pro에서 사용할 수 있어요.</div>
       <p className="mt-2 text-[13px] leading-6 text-ios-sub">AI 회복 결과를 바로 실행 가능한 체크리스트로 보여줘요.</p>
-      <div className="mt-5 flex gap-2">
-        <Link
-          href="/settings/billing/upgrade"
-          className="inline-flex h-11 items-center justify-center rounded-full bg-black px-5 text-[13px] font-semibold text-white"
-        >
-          플랜 보기
-        </Link>
-        <Link
-          href={aiHref}
-          className="inline-flex h-11 items-center justify-center rounded-full border border-ios-sep bg-white px-5 text-[13px] font-semibold text-ios-text"
-        >
-          AI 회복 보기
-        </Link>
+      <div className="mt-5 flex flex-wrap gap-3">
+        <PillLink href="/settings/billing/upgrade">플랜 보기 ›</PillLink>
+        <PillLink href={aiHref} variant="outline">AI 회복 보기</PillLink>
       </div>
     </DetailCard>
   );
@@ -311,16 +329,11 @@ export function InsightsRecoveryOrdersDetail({
             </p>
           </div>
           {currentSession && showGenerationControls ? (
-            <Button variant="secondary" className="h-11 px-5" disabled={session.savingOrders || billing.loading || !canRegenerateOrders} onClick={() => void session.regenerateOrders()}>
+            <PillButton variant="outline" disabled={session.savingOrders || billing.loading || !canRegenerateOrders} onClick={() => void session.regenerateOrders()}>
               {session.savingOrders ? "만드는 중…" : "오더 다시 만들기"}
-            </Button>
+            </PillButton>
           ) : !currentSession ? (
-            <Link
-              href={aiHref}
-              className="inline-flex h-11 items-center justify-center rounded-full border border-ios-sep bg-white px-5 text-[13px] font-semibold text-ios-text"
-            >
-              해설 만들러 가기
-            </Link>
+            <PillLink href={aiHref}>해설 만들러 가기 ›</PillLink>
           ) : null}
         </div>
         {currentSession && showGenerationControls && !canRegenerateOrders ? <p className="text-[12px] text-ios-sub">오늘 오더 다시 만들기는 끝났어요.</p> : null}
@@ -339,12 +352,7 @@ export function InsightsRecoveryOrdersDetail({
           <p className="mt-2 text-[13px] leading-6 text-ios-sub">{response.gate.message}</p>
           {response.gate.code === "post_shift_health_required" ? (
             <div className="mt-4">
-              <ImmediateNavButton
-                href="/schedule?openHealthLog=today"
-                className="inline-flex h-11 items-center justify-center rounded-full bg-black px-5 text-[13px] font-semibold text-white"
-              >
-                오늘 건강 기록하기
-              </ImmediateNavButton>
+              <PillLink href="/schedule?openHealthLog=today">오늘 건강 기록하기 ›</PillLink>
             </div>
           ) : null}
         </DetailCard>

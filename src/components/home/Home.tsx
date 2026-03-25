@@ -273,9 +273,9 @@ export default function Home() {
   const aiHeadline = useMemo(() => {
     if (planner.state === "needs_records") return t("기록이 쌓이면 맞춤회복 카드 구조가 여기에 표시됩니다.");
     if (planner.focusFactor?.label) return `${planner.focusFactor.label} 중심 안내 화면 구조만 유지 중입니다.`;
-    return t("현재는 AI 없이 회복 카드 구조만 유지 중입니다.");
+    return t("오늘의 AI 해설을 만들어 보세요!");
   }, [planner.focusFactor?.label, planner.state, t]);
-  const plannerPreviewTitle = latestOrderTitle ?? (latestOrdersCompleted ? t("오늘 오더를 모두 완료했어요.") : t("오늘의 오더"));
+  const plannerPreviewTitle = latestOrderTitle ?? (latestOrdersCompleted ? t("오늘 오더를 모두 완료했어요.") : t("오늘의 오더를 만들어 보세요!"));
 
   const selectedDateLabel = useMemo(() => formatKoreanDate(homeSelected), [homeSelected]);
 
