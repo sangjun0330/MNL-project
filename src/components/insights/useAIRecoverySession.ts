@@ -90,6 +90,11 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     if (!incomingSession) return currentSession ? current : incoming;
     if (!currentSession) return incoming;
 
+    const currentIsFallback = currentSession.status === "fallback" || Boolean(currentSession.openaiMeta?.fallbackReason);
+    const incomingIsFallback = incomingSession.status === "fallback" || Boolean(incomingSession.openaiMeta?.fallbackReason);
+    if (!incomingIsFallback && currentIsFallback) return incoming;
+    if (incomingIsFallback && !currentIsFallback) return current;
+
     const currentTs = Date.parse(currentSession.generatedAt || "") || 0;
     const incomingTs = Date.parse(incomingSession.generatedAt || "") || 0;
     if (incomingTs > currentTs) return incoming;
@@ -170,6 +175,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
   const buildAutoOrdersKey = (value: SessionData | null) => {
     const generatedAt = value?.session?.generatedAt;
     if (!value?.session?.brief || value.session.orders || !generatedAt) return null;
+    if (value.session.status === "fallback" || value.session.openaiMeta?.fallbackReason) return null;
     return `${value.dateISO}:${value.slot}:${generatedAt}`;
   };
 
@@ -258,6 +264,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       }
       if (!isCurrentDataRequest(requestId)) return;
       setData((current) => pickLatestData(current, normalizeData(json.data)));
+      void load();
     } catch (nextError) {
       if (!isCurrentDataRequest(requestId)) return;
       try {
@@ -314,6 +321,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       if (!isCurrentDataRequest(requestId)) return;
       const nextData = normalizeData(json.data);
       setData((current) => pickLatestData(current, nextData));
+      void load();
       const autoOrdersKey = buildAutoOrdersKey(nextData);
       if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && nextData?.quota.canRegenerateOrders) {
         autoOrdersRequestedRef.current.add(autoOrdersKey);
@@ -326,7 +334,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
         const recovered = await fetchSessionView("generate_recover");
         if (!isCurrentDataRequest(requestId)) return;
         const recoveredGeneratedAt = recovered?.session?.generatedAt ?? null;
-        if (recoveredGeneratedAt && recoveredGeneratedAt !== previousGeneratedAt) {
+        if (recovered?.session && (recoveredGeneratedAt !== previousGeneratedAt || previousGeneratedAt != null)) {
           setData((current) => pickLatestData(current, recovered));
           setError(null);
           const autoOrdersKey = buildAutoOrdersKey(recovered);

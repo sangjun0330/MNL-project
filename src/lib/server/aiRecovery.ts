@@ -112,6 +112,21 @@ function isTransientOpenAIFallback(meta: AIRecoveryOpenAIMeta | null | undefined
   return Boolean(meta?.fallbackReason) && !didAIRecoveryReachOpenAI(meta);
 }
 
+function isStoredFallbackSession(snapshot: RecoverySnapshot, session: AIRecoverySlotPayload | null | undefined) {
+  if (!session?.brief) return session?.status === "fallback" || Boolean(session?.openaiMeta?.fallbackReason);
+  if (session.status === "fallback" || Boolean(session.openaiMeta?.fallbackReason)) return true;
+  const fallbackBrief = buildFallbackBrief(snapshot);
+  return (
+    session.brief.headline === fallbackBrief.headline &&
+    session.brief.weeklySummary.personalInsight === fallbackBrief.weeklySummary.personalInsight &&
+    session.brief.weeklySummary.nextWeekPreview === fallbackBrief.weeklySummary.nextWeekPreview
+  );
+}
+
+function canRenderStoredSession(snapshot: RecoverySnapshot, session: AIRecoverySlotPayload | null | undefined) {
+  return Boolean(session?.brief) && session?.status === "ready" && !isStoredFallbackSession(snapshot, session);
+}
+
 type LoadedRecoveryDomains = Awaited<ReturnType<typeof loadAIRecoveryDomains>>;
 type LoadedRecoverySlot = Awaited<ReturnType<typeof readAIRecoverySlot>>;
 
@@ -1105,7 +1120,7 @@ function buildFallbackOrders(snapshot: RecoverySnapshot): AIRecoveryOrdersPayloa
 function buildFallbackFlow(snapshot: RecoverySnapshot, model: string): OpenAIFlowResult {
   const profile = resolveRecoveryPromptProfile(null, model);
   return {
-    status: "ready",
+    status: "fallback",
     brief: buildFallbackBrief(snapshot),
     orders: null,
     reasoningEffort: resolveReasoningEffort(profile, "brief"),
@@ -1133,6 +1148,9 @@ function resolveGenerationLimit(tier: PlanTier | null | undefined): AIRecoveryGe
 function readGenerationCounts(session: AIRecoverySlotPayload | null | undefined): AIRecoveryGenerationCounts {
   if (!session) return { brief: 0, orders: 0 };
   if (session.promptVersion !== AI_RECOVERY_PROMPT_VERSION) return { brief: 0, orders: 0 };
+  if (session.status === "fallback" || Boolean(session.openaiMeta?.fallbackReason)) {
+    return { brief: 0, orders: 0 };
+  }
   const raw = isRecord((session as { generationCounts?: unknown }).generationCounts)
     ? ((session as { generationCounts?: Record<string, unknown> }).generationCounts ?? {})
     : null;
@@ -2315,14 +2333,15 @@ function buildStoredSession(args: {
 }) {
   const now = new Date().toISOString();
   const previousCounts = readGenerationCounts(args.previousSession);
-  const shouldCountBrief = args.flow.status === "ready" && Boolean(args.flow.openaiMeta.briefResponseId);
-  const shouldCountOrders = args.flow.status === "ready" && Boolean(args.flow.openaiMeta.ordersResponseId);
+  const nextStatus: AIRecoveryStatus = args.flow.openaiMeta.fallbackReason ? "fallback" : args.flow.status;
+  const shouldCountBrief = nextStatus === "ready" && Boolean(args.flow.openaiMeta.briefResponseId);
+  const shouldCountOrders = nextStatus === "ready" && Boolean(args.flow.openaiMeta.ordersResponseId);
   const normalizedBrief = {
     ...args.flow.brief,
     sections: buildNormalizedBriefSections(args.snapshot, Array.isArray(args.flow.brief.sections) ? args.flow.brief.sections : []),
   };
   return {
-    status: args.flow.status,
+    status: nextStatus,
     generatedAt: now,
     model: args.flow.model,
     reasoningEffort: args.flow.reasoningEffort,
@@ -2375,7 +2394,7 @@ export async function readAIRecoverySessionView(args: {
   });
   const { session, completions } = await safeReadRecoverySlot({ userId: args.userId, dateISO, slot });
   const visibleSession =
-    canRevealExistingSessionForGate(gate) && session?.status === "ready" ? normalizeStoredSession(snapshot, session) : null;
+    canRevealExistingSessionForGate(gate) && canRenderStoredSession(snapshot, session) ? normalizeStoredSession(snapshot, session) : null;
   const orderIds = visibleSession?.orders?.items.map((item) => item.id) ?? [];
   const filteredCompletions = filterCompletionIdsForOrders(completions, orderIds);
   const quota = buildGenerationQuota(subscription?.tier ?? null, session, Boolean(subscription?.isPrivilegedTester));
@@ -2485,26 +2504,26 @@ export async function generateAIRecoverySession(args: {
   }
 
   const quota = buildGenerationQuota(subscription?.tier ?? null, existingSession, Boolean(subscription?.isPrivilegedTester));
+  const existingRenderableSession = canRenderStoredSession(snapshot, existingSession) ? normalizeStoredSession(snapshot, existingSession) : null;
   if (
     !args.force &&
-    existingSession?.status === "ready" &&
-    existingSession.inputSignature === snapshot.inputSignature &&
-    existingSession.language === snapshot.language &&
-    existingSession.promptVersion === AI_RECOVERY_PROMPT_VERSION
+    existingRenderableSession &&
+    existingRenderableSession.inputSignature === snapshot.inputSignature &&
+    existingRenderableSession.language === snapshot.language &&
+    existingRenderableSession.promptVersion === AI_RECOVERY_PROMPT_VERSION
   ) {
     console.info("[AIRecovery] generate_session_reused_cached", {
       userId: safeUserLogId(args.userId),
       dateISO: args.dateISO,
       slot: args.slot,
-      model: existingSession.model,
+      model: existingRenderableSession.model,
     });
-    const normalizedSession = normalizeStoredSession(snapshot, existingSession);
     return {
       dateISO: args.dateISO,
       slot: args.slot,
       gate,
-      session: normalizedSession,
-      completions: filterCompletionIdsForOrders(existingCompletions, normalizedSession?.orders?.items.map((item) => item.id) ?? []),
+      session: existingRenderableSession,
+      completions: filterCompletionIdsForOrders(existingCompletions, existingRenderableSession.orders?.items.map((item) => item.id) ?? []),
       todaySlots: buildTodaySlotStatus(loadedDomains.aiRecoveryDaily[args.dateISO]),
       orderStats: buildRecoveryOrderStats({
         dateISO: args.dateISO,
@@ -2559,7 +2578,7 @@ export async function generateAIRecoverySession(args: {
     };
   }
 
-  if (existingSession?.status === "ready" && !quota.canGenerateSession) {
+  if (existingRenderableSession && !quota.canGenerateSession) {
     throw new Error("session_generation_limit_reached");
   }
 
@@ -2597,15 +2616,17 @@ export async function generateAIRecoverySession(args: {
     }
   }
   const session = normalizeStoredSession(snapshot, buildStoredSession({ snapshot, flow, previousSession: existingSession }));
+  const renderableSession = canRenderStoredSession(snapshot, session) ? session : null;
+  const reusableExistingSession = existingRenderableSession;
   const nextQuota = buildGenerationQuota(subscription?.tier ?? null, session, Boolean(subscription?.isPrivilegedTester));
-  const shouldPersistSession = canPersistSession && !isTransientOpenAIFallback(session.openaiMeta);
+  const shouldPersistSession = canPersistSession && Boolean(renderableSession) && !isTransientOpenAIFallback(session.openaiMeta);
   if (shouldPersistSession) {
     try {
       await writeAIRecoverySlot({
         userId: args.userId,
         dateISO: args.dateISO,
         slot: args.slot,
-        session,
+        session: renderableSession!,
       });
     } catch (error) {
       console.error("[AIRecovery] storage_write_failed_returning_transient_session", {
@@ -2624,12 +2645,16 @@ export async function generateAIRecoverySession(args: {
       reason: session.openaiMeta.fallbackReason,
     });
   }
+  const returnedSession = renderableSession ?? reusableExistingSession ?? null;
+  if (!returnedSession && isStoredFallbackSession(snapshot, session)) {
+    throw new Error(`ai_recovery_generate_failed:${session.openaiMeta.fallbackReason ?? "brief_fallback"}`);
+  }
   const nextDaily: SafeLoadedRecoveryDomains["aiRecoveryDaily"] = {
     ...loadedDomains.aiRecoveryDaily,
     [args.dateISO]: {
       version: 1,
       ...(loadedDomains.aiRecoveryDaily[args.dateISO] ?? {}),
-      [args.slot]: session,
+      ...(returnedSession ? { [args.slot]: returnedSession } : {}),
     },
   };
   const todaySlots = buildTodaySlotStatus(nextDaily[args.dateISO]);
@@ -2643,8 +2668,8 @@ export async function generateAIRecoverySession(args: {
     dateISO: args.dateISO,
     slot: args.slot,
     gate,
-    session,
-    completions: filterCompletionIdsForOrders(existingCompletions, session.orders?.items.map((item) => item.id) ?? []),
+    session: returnedSession,
+    completions: filterCompletionIdsForOrders(existingCompletions, returnedSession?.orders?.items.map((item) => item.id) ?? []),
     todaySlots,
     orderStats,
     showGenerationControls: Boolean(subscription?.isPrivilegedTester),
@@ -2680,12 +2705,13 @@ export async function regenerateAIRecoveryOrders(args: {
   }
 
   const { session, completions } = await safeReadRecoverySlot({ userId: args.userId, dateISO: args.dateISO, slot: args.slot });
-  if (!session?.brief) throw new Error("ai_recovery_session_missing");
-  const quota = buildGenerationQuota(subscription?.tier ?? null, session, Boolean(subscription?.isPrivilegedTester));
+  if (!canRenderStoredSession(snapshot, session)) throw new Error("ai_recovery_session_missing");
+  const storedSession = normalizeStoredSession(snapshot, session)!;
+  const quota = buildGenerationQuota(subscription?.tier ?? null, storedSession, Boolean(subscription?.isPrivilegedTester));
   if (!quota.canRegenerateOrders) throw new Error("orders_generation_limit_reached");
-  const brief = normalizeStoredSession(snapshot, session)?.brief ?? session.brief;
+  const brief = storedSession.brief!;
 
-  const model = session.model;
+  const model = storedSession.model;
   const profile = resolveRecoveryPromptProfile(subscription?.tier ?? null, model);
   const ordersRequest = buildOrdersPromptRequest({
     snapshot,
@@ -2758,7 +2784,7 @@ export async function regenerateAIRecoveryOrders(args: {
   }
 
   const nextSession = normalizeStoredSession(snapshot, {
-    ...session,
+    ...storedSession,
     status: "ready",
     selection: {
       selectedCandidateIds: [],
@@ -2766,18 +2792,18 @@ export async function regenerateAIRecoveryOrders(args: {
     },
     orders,
     generationCounts: {
-      ...readGenerationCounts(session),
-      orders: readGenerationCounts(session).orders + 1,
+      ...readGenerationCounts(storedSession),
+      orders: readGenerationCounts(storedSession).orders + 1,
     },
     openaiMeta: {
-      ...session.openaiMeta,
+      ...storedSession.openaiMeta,
       ordersResponseId: ordersResult.responseId,
       usage: {
-        brief: session.openaiMeta.usage.brief,
+        brief: storedSession.openaiMeta.usage.brief,
         orders: ordersResult.usage,
-        total: combineAIRecoveryUsages(session.openaiMeta.usage.brief, ordersResult.usage),
+        total: combineAIRecoveryUsages(storedSession.openaiMeta.usage.brief, ordersResult.usage),
       },
-      fallbackReason: null,
+      fallbackReason: storedSession.openaiMeta.fallbackReason,
     },
   });
   await writeAIRecoverySlot({
