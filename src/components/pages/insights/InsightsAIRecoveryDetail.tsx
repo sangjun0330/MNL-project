@@ -1,8 +1,7 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode, type SVGProps } from "react";
-import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { memo, useCallback, useEffect, useMemo, useState, type ComponentType, type ReactNode, type SVGProps } from "react";
+import { usePathname } from "next/navigation";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { AIRecoveryLoadingOverlay } from "@/components/insights/AIRecoveryLoadingOverlay";
 import { AIRecoverySlotTabs } from "@/components/insights/AIRecoverySlotTabs";
@@ -285,9 +284,9 @@ function PillLink({
       ? `${base} border-2 border-[#B8B0E8] text-[#6B5CE7]`
       : `${base} bg-[#F0EEFA] text-[#6B5CE7]`;
   return (
-    <Link href={href} className={cls} prefetch={false}>
+    <a href={href} className={cls} data-auth-allow>
       {children}
-    </Link>
+    </a>
   );
 }
 
@@ -322,13 +321,11 @@ export function InsightsAIRecoveryDetail({
   initialData?: AIRecoverySessionResponse["data"] | null;
 }) {
   const { t } = useI18n();
-  const router = useRouter();
   const pathname = usePathname();
   const billing = useBillingAccess();
   const { end, recordedDays } = useInsightsData();
   const [slot, setSlot] = useState<AIRecoverySlot>(initialSlot);
   const [hydrated, setHydrated] = useState(false);
-  const postShiftRedirectedRef = useRef(false);
   const slotLabel = slot === "wake" ? "기상 후" : "퇴근 후";
   const hasInitialAccess = Boolean(initialData?.session || initialData?.hasAIEntitlement || initialData?.model);
   const insightsLocked = hydrated && !hasInitialAccess && isInsightsLocked(recordedDays);
@@ -370,24 +367,16 @@ export function InsightsAIRecoveryDetail({
     setExpandedSections({});
   }, [currentSession?.generatedAt, end, slot]);
 
-  useEffect(() => {
-    if (response?.gate.code !== "post_shift_health_required") {
-      postShiftRedirectedRef.current = false;
-      return;
-    }
-    if (postShiftRedirectedRef.current) return;
-    postShiftRedirectedRef.current = true;
-    router.replace("/schedule?openHealthLog=today", { scroll: false });
-  }, [response?.gate.code, router]);
-
   const updateSlot = (nextSlot: AIRecoverySlot) => {
     if (nextSlot === slot) return;
     setSlot(nextSlot);
-    const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
     if (nextSlot === "wake") params.delete("slot");
     else params.set("slot", nextSlot);
     const nextQuery = params.toString();
-    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
+    const nextPath = pathname || window.location.pathname;
+    window.history.replaceState(window.history.state, "", nextQuery ? `${nextPath}?${nextQuery}` : nextPath);
   };
 
   const ordersHref = slot === "postShift" ? "/insights/recovery/orders?slot=postShift" : "/insights/recovery/orders";

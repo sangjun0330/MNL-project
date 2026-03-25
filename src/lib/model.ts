@@ -77,6 +77,7 @@ export type MenstrualSettings = {
 };
 
 export type AppSettings = {
+  schedulePatternEnabled?: boolean;
   defaultSchedulePattern?: string; // e.g. D2E2N2OFF2
   schedulePatternAppliedFrom?: ISODate | null;
 
@@ -149,6 +150,7 @@ export function defaultMenstrualSettings(): MenstrualSettings {
 
 export function defaultSettings(): AppSettings {
   return {
+    schedulePatternEnabled: true,
     defaultSchedulePattern: "D2E2N2M2OFF2",
     schedulePatternAppliedFrom: null,
     emotionTagsPositive: [],

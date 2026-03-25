@@ -205,6 +205,7 @@ function sanitizeBio(entry: unknown): BioInputs | undefined {
 
 function defaultSettings(): AppSettings {
   return {
+    schedulePatternEnabled: true,
     defaultSchedulePattern: "D2E2N2M2OFF2",
     schedulePatternAppliedFrom: null,
     emotionTagsPositive: [],
@@ -240,6 +241,12 @@ function sanitizeSettings(raw: unknown): AppSettings {
 
   return {
     ...defaults,
+    schedulePatternEnabled: Boolean(loaded.schedulePatternEnabled ?? defaults.schedulePatternEnabled),
+    defaultSchedulePattern:
+      typeof loaded.defaultSchedulePattern === "string"
+        ? loaded.defaultSchedulePattern.replace(/\s+/g, "").trim().slice(0, 80)
+        : defaults.defaultSchedulePattern,
+    schedulePatternAppliedFrom: asIso(loaded.schedulePatternAppliedFrom) ?? defaults.schedulePatternAppliedFrom ?? null,
     language: loaded.language === "en" ? "en" : "ko",
     hasSeenOnboarding: Boolean(loaded.hasSeenOnboarding ?? defaults.hasSeenOnboarding),
     menstrual: {

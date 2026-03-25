@@ -47,6 +47,9 @@ function compactSettings(settings: AppSettings) {
   const defaults = defaultSettings();
   const next: Partial<AppSettings> = {};
 
+  if (settings.schedulePatternEnabled !== defaults.schedulePatternEnabled) {
+    next.schedulePatternEnabled = Boolean(settings.schedulePatternEnabled);
+  }
   if (settings.defaultSchedulePattern && settings.defaultSchedulePattern !== defaults.defaultSchedulePattern) {
     next.defaultSchedulePattern = settings.defaultSchedulePattern;
   }

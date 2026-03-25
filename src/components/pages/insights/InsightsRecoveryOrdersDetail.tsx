@@ -1,8 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { AIRecoveryLoadingOverlay } from "@/components/insights/AIRecoveryLoadingOverlay";
 import { AIRecoverySlotTabs } from "@/components/insights/AIRecoverySlotTabs";
@@ -31,9 +30,9 @@ function PillLink({
       ? `${base} border-2 border-[#B8B0E8] text-[#6B5CE7]`
       : `${base} bg-[#F0EEFA] text-[#6B5CE7]`;
   return (
-    <Link href={href} className={cls} prefetch={false}>
+    <a href={href} className={cls} data-auth-allow>
       {children}
-    </Link>
+    </a>
   );
 }
 
@@ -156,7 +155,6 @@ export function InsightsRecoveryOrdersDetail({
   initialData?: AIRecoverySessionResponse["data"] | null;
 }) {
   const { t } = useI18n();
-  const router = useRouter();
   const pathname = usePathname();
   const billing = useBillingAccess();
   const { end, recordedDays, todayShift, hasTodayShift } = useInsightsData();
@@ -178,15 +176,17 @@ export function InsightsRecoveryOrdersDetail({
   const response = activeData;
   const currentSession = response?.session ?? null;
   const ordersPayload = currentSession?.orders ?? null;
-  const orders = ordersPayload?.items ?? [];
+  const orders = useMemo(() => ordersPayload?.items ?? [], [ordersPayload?.items]);
+  const responseCompletions = useMemo(() => response?.completions ?? [], [response?.completions]);
   const canRegenerateOrders = response?.quota.canRegenerateOrders ?? !currentSession;
   const showGeneratingOverlay = Boolean(response?.gate.allowed && session.savingOrders);
   const showGenerationControls = Boolean(response?.showGenerationControls);
-  const [localCompletions, setLocalCompletions] = useState<string[]>(response?.completions ?? []);
+  const [localCompletions, setLocalCompletions] = useState<string[]>(responseCompletions);
   const [recentlyCompletedIds, setRecentlyCompletedIds] = useState<string[]>([]);
   const [transientCompletedIds, setTransientCompletedIds] = useState<string[]>([]);
-  const previousCompletionsRef = useRef<string[]>(response?.completions ?? []);
+  const previousCompletionsRef = useRef<string[]>(responseCompletions);
   const toggleTimersRef = useRef<number[]>([]);
+  const toggleCompletion = session.toggleCompletion;
   const completionSet = useMemo(() => new Set(localCompletions), [localCompletions]);
   const transientSet = useMemo(() => new Set(transientCompletedIds), [transientCompletedIds]);
   const pendingOrders = useMemo(() => orders.filter((order) => !completionSet.has(order.id) || transientSet.has(order.id)), [orders, completionSet, transientSet]);
@@ -201,7 +201,7 @@ export function InsightsRecoveryOrdersDetail({
   }, [initialSlot]);
 
   useEffect(() => {
-    const nextCompletions = response?.completions ?? [];
+    const nextCompletions = responseCompletions;
     const previousSet = new Set(previousCompletionsRef.current);
     const newlyCompleted = nextCompletions.filter((id) => !previousSet.has(id));
     previousCompletionsRef.current = nextCompletions;
@@ -217,14 +217,14 @@ export function InsightsRecoveryOrdersDetail({
     return () => {
       for (const timer of timers) window.clearTimeout(timer);
     };
-  }, [response?.completions]);
+  }, [responseCompletions]);
 
   useEffect(() => {
-    setLocalCompletions(response?.completions ?? []);
+    setLocalCompletions(responseCompletions);
     setTransientCompletedIds([]);
     setRecentlyCompletedIds([]);
-    previousCompletionsRef.current = response?.completions ?? [];
-  }, [currentSession?.generatedAt, slot, end]);
+    previousCompletionsRef.current = responseCompletions;
+  }, [currentSession?.generatedAt, end, responseCompletions, slot]);
 
   const handleToggleCompletion = useCallback((orderId: string) => {
     setLocalCompletions((current) => (current.includes(orderId) ? current : [...current, orderId]));
@@ -237,8 +237,8 @@ export function InsightsRecoveryOrdersDetail({
       setRecentlyCompletedIds((current) => current.filter((item) => item !== orderId));
     }, 850);
     toggleTimersRef.current.push(t1, t2);
-    void session.toggleCompletion(orderId, true);
-  }, [session.toggleCompletion]);
+    void toggleCompletion(orderId, true);
+  }, [toggleCompletion]);
 
   useEffect(() => {
     return () => {
@@ -277,11 +277,13 @@ export function InsightsRecoveryOrdersDetail({
   const updateSlot = (nextSlot: AIRecoverySlot) => {
     if (nextSlot === slot) return;
     setSlot(nextSlot);
-    const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
     if (nextSlot === "wake") params.delete("slot");
     else params.set("slot", nextSlot);
     const nextQuery = params.toString();
-    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
+    const nextPath = pathname || window.location.pathname;
+    window.history.replaceState(window.history.state, "", nextQuery ? `${nextPath}?${nextQuery}` : nextPath);
   };
 
   return (

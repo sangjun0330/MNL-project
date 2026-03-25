@@ -59,6 +59,14 @@ function normalizeSettings(raw: any): AppSettings {
   const base = defaultSettings();
   const loaded = raw ?? {};
   const { theme: _ignoredTheme, ...loadedWithoutTheme } = loaded;
+  const schedulePatternAppliedFrom =
+    typeof loaded?.schedulePatternAppliedFrom === "string" && /^\d{4}-\d{2}-\d{2}$/.test(loaded.schedulePatternAppliedFrom)
+      ? (loaded.schedulePatternAppliedFrom as ISODate)
+      : base.schedulePatternAppliedFrom ?? null;
+  const defaultSchedulePattern =
+    typeof loaded?.defaultSchedulePattern === "string"
+      ? loaded.defaultSchedulePattern.replace(/\s+/g, "").trim().slice(0, 80)
+      : base.defaultSchedulePattern;
 
   // menstrual: 구버전(startISO) → 신버전(lastPeriodStart) 호환
   const menstrualLoaded = loaded?.menstrual ?? {};
@@ -67,6 +75,9 @@ function normalizeSettings(raw: any): AppSettings {
   return {
     ...base,
     ...loadedWithoutTheme,
+    schedulePatternEnabled: Boolean(loaded?.schedulePatternEnabled ?? base.schedulePatternEnabled),
+    defaultSchedulePattern,
+    schedulePatternAppliedFrom,
     menstrual: {
       ...base.menstrual,
       ...menstrualLoaded,
@@ -266,9 +277,32 @@ function clearEmotionForDate(iso: ISODate) {
   const nextBioMap = { ...(state.bio ?? {}) };
   const currentBio = nextBioMap[iso];
   if (currentBio) {
-    nextBioMap[iso] = { ...currentBio, mood: null };
+    const nextBio = { ...currentBio, mood: null };
+    if (hasMeaningfulBioEntry(nextBio)) nextBioMap[iso] = nextBio;
+    else delete nextBioMap[iso];
   }
   setState({ emotions: nextEmotions, bio: nextBioMap });
+}
+
+function hasMeaningfulBioEntry(entry: BioInputs | null | undefined) {
+  if (!entry) return false;
+  if (entry.sleepHours != null) return true;
+  if (entry.napHours != null) return true;
+  if (entry.sleepQuality != null) return true;
+  if (entry.sleepTiming != null) return true;
+  if (entry.stress != null) return true;
+  if (entry.activity != null) return true;
+  if (entry.caffeineMg != null) return true;
+  if (entry.caffeineLastAt != null) return true;
+  if (entry.fatigueLevel != null) return true;
+  if (entry.mood != null) return true;
+  if (entry.symptomSeverity != null) return true;
+  if (entry.menstrualStatus != null) return true;
+  if (entry.menstrualFlow != null) return true;
+  if (entry.shiftOvertimeHours != null) return true;
+  if (Array.isArray(entry.workEventTags) && entry.workEventTags.length > 0) return true;
+  if (typeof entry.workEventNote === "string" && entry.workEventNote.trim().length > 0) return true;
+  return false;
 }
 
 function setBioForDate(iso: ISODate, patch: Partial<BioInputs>) {
@@ -280,6 +314,9 @@ function setBioForDate(iso: ISODate, patch: Partial<BioInputs>) {
     caffeineMg: null,
     mood: null,
     symptomSeverity: null,
+    menstrualStatus: null,
+    menstrualFlow: null,
+    shiftOvertimeHours: null,
     workEventTags: null,
     workEventNote: null,
   };
@@ -307,12 +344,12 @@ function setBioForDate(iso: ISODate, patch: Partial<BioInputs>) {
         },
       }
     : (state.emotions ?? {});
+  const nextBioMap = { ...(state.bio ?? {}) };
+  if (hasMeaningfulBioEntry(nextBio)) nextBioMap[iso] = nextBio;
+  else delete nextBioMap[iso];
 
   setState({
-    bio: {
-      ...(state.bio ?? {}),
-      [iso]: nextBio,
-    },
+    bio: nextBioMap,
     emotions: nextEmotions,
     settings: nextSettings,
   });

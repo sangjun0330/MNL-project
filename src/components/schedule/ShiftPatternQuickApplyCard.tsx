@@ -19,6 +19,7 @@ export function ShiftPatternQuickApplyCard({ selectedISO }: { selectedISO: ISODa
   const [mode, setMode] = useState<Mode>("fill-empty");
   const [days, setDays] = useState(60);
   const [startISO, setStartISO] = useState<ISODate>(selectedISO);
+  const patternEnabled = Boolean(store.settings.schedulePatternEnabled ?? true);
 
   // ✅ “현재 패턴”을 input으로 직접 수정 가능하게
   const savedPattern = store.settings.defaultSchedulePattern ?? "";
@@ -48,8 +49,12 @@ export function ShiftPatternQuickApplyCard({ selectedISO }: { selectedISO: ISODa
     setStartISO(selectedISO);
   }, [selectedISO]);
 
+  useEffect(() => {
+    setPatternInput(savedPattern);
+  }, [savedPattern]);
+
   const apply = () => {
-    if (!parsedPattern.length) return;
+    if (!patternEnabled || !parsedPattern.length) return;
 
     const patch = applyPatternToSchedule({
       pattern: parsedPattern,
@@ -62,12 +67,11 @@ export function ShiftPatternQuickApplyCard({ selectedISO }: { selectedISO: ISODa
     store.batchSetSchedule(patch);
 
     // ✅ 저장: 홈/일정 공통으로 “적용 시작일 이후만” 표시되게 기준값 저장
-    // (store.settings 타입에 없을 수 있어 any 처리)
     store.setSettings({
-      ...(store.settings as any),
       defaultSchedulePattern: patternInput.trim(),
       schedulePatternAppliedFrom: startISO,
-    } as any);
+      schedulePatternEnabled: true,
+    });
   };
 
   return (
@@ -77,73 +81,89 @@ export function ShiftPatternQuickApplyCard({ selectedISO }: { selectedISO: ISODa
           <div className="text-[14px] font-semibold">{t("기본 패턴 빠른 적용")}</div>
           <div className="mt-1 text-[12.5px] text-ios-muted">{t("선택한 날짜부터 자동 채우기")}</div>
         </div>
-
-        {/* ✅ 여기 있던 “패턴 수정” 텍스트/링크 삭제 */}
-        <div />
+        <Button
+          variant="secondary"
+          onClick={() => store.setSettings({ schedulePatternEnabled: !patternEnabled })}
+          className={patternEnabled ? "rnest-pill-photo is-active min-w-[72px]" : "rnest-pill-photo-muted min-w-[72px]"}
+        >
+          {patternEnabled ? "ON" : "OFF"}
+        </Button>
       </div>
 
-      <div className="mt-4 rounded-2xl border border-ios-sep bg-white p-4">
-        <div className="flex items-center justify-between gap-2">
-          <div className="text-[12.5px] text-ios-muted">{t("현재 패턴")}</div>
-          <div className="text-[12px] font-semibold text-ios-muted">{t("예: D, M, E, N, OFF")}</div>
-        </div>
-
-        {/* ✅ 직접 입력 input */}
-        <input
-          value={patternInput}
-          onChange={(e) => setPatternInput(e.target.value)}
-          placeholder={t("예: D2E2N2M2OFF2")}
-          className="mt-2 w-full rounded-xl border border-ios-sep bg-white px-3 py-2 text-[14px] font-semibold outline-none focus:ring-2 focus:ring-black/10"
-          inputMode="text"
-          autoCapitalize="characters"
-        />
-
-        {parsedPattern.length === 0 ? (
-          <div className="mt-2 text-[12.5px] text-ios-muted">{t("패턴 형식 예: D2E2N2M2OFF2")}</div>
-        ) : null}
+      <div className="mt-2 text-[12.5px] text-ios-muted">
+        {patternEnabled
+          ? t("ON이면 선택한 날짜부터 패턴을 자동으로 채울 수 있어요.")
+          : t("OFF면 3교대 패턴 자동 채우기를 적용하지 않습니다.")}
       </div>
 
-      <div className="mt-4 rounded-2xl border border-ios-sep bg-white p-4">
-        <div className="flex items-center justify-between gap-3">
-          <div className="text-[12.5px] font-semibold text-ios-muted">{t("적용 시작일")}</div>
-          <button
-            type="button"
-            onClick={() => setStartISO(selectedISO)}
-            className="rnest-pill-photo px-2.5 py-1 text-[11px]"
-          >
-            {t("선택일로")}
-          </button>
-        </div>
-        <div className="mt-2 overflow-hidden rounded-xl border border-ios-sep bg-white px-3 py-2">
+      <div className={patternEnabled ? "mt-4" : "mt-4 pointer-events-none opacity-45"} aria-disabled={!patternEnabled}>
+        <div className="rounded-2xl border border-ios-sep bg-white p-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-[12.5px] text-ios-muted">{t("현재 패턴")}</div>
+            <div className="text-[12px] font-semibold text-ios-muted">{t("예: D, M, E, N, OFF")}</div>
+          </div>
+
           <input
-            type="date"
-            value={startISO}
-            onChange={(e) => setStartISO(e.target.value as ISODate)}
-            className="w-full min-w-0 appearance-none bg-transparent text-[14px] font-semibold outline-none"
+            value={patternInput}
+            onChange={(e) => setPatternInput(e.target.value)}
+            placeholder={t("예: D2E2N2M2OFF2")}
+            className="mt-2 w-full rounded-xl border border-ios-sep bg-white px-3 py-2 text-[14px] font-semibold outline-none focus:ring-2 focus:ring-black/10"
+            inputMode="text"
+            autoCapitalize="characters"
           />
-        </div>
-        <div className="mt-2 text-[12px] text-ios-muted">{t("이 날짜부터 패턴을 적용합니다.")}</div>
-      </div>
 
-      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div>
-          <div className="mb-2 text-[12px] font-semibold text-ios-muted">{t("적용 방식")}</div>
-          <Segmented value={mode as any} options={modeOptions as any} onChange={(v) => setMode(v as Mode)} />
+          {parsedPattern.length === 0 ? (
+            <div className="mt-2 text-[12.5px] text-ios-muted">{t("패턴 형식 예: D2E2N2M2OFF2")}</div>
+          ) : null}
         </div>
 
-        <div>
-          <div className="mb-2 text-[12px] font-semibold text-ios-muted">{t("적용 기간")}</div>
-          <Segmented value={String(days) as any} options={daysOptions as any} onChange={(v) => setDays(Number(v))} />
+        <div className="mt-4 rounded-2xl border border-ios-sep bg-white p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-[12.5px] font-semibold text-ios-muted">{t("적용 시작일")}</div>
+            <button
+              type="button"
+              onClick={() => setStartISO(selectedISO)}
+              className="rnest-pill-photo px-2.5 py-1 text-[11px]"
+            >
+              {t("선택일로")}
+            </button>
+          </div>
+          <div className="mt-2 overflow-hidden rounded-xl border border-ios-sep bg-white px-3 py-2">
+            <input
+              type="date"
+              value={startISO}
+              onChange={(e) => setStartISO(e.target.value as ISODate)}
+              className="w-full min-w-0 appearance-none bg-transparent text-[14px] font-semibold outline-none"
+            />
+          </div>
+          <div className="mt-2 text-[12px] text-ios-muted">{t("이 날짜부터 패턴을 적용합니다.")}</div>
         </div>
-      </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-2">
-        <Button variant="secondary" onClick={apply} className="rnest-pill-photo w-full justify-center px-3 text-center text-[12.5px]">
-          {t("선택 시작일 적용")}
-        </Button>
-        <Button variant="secondary" onClick={() => store.setSelected(selectedISO)} className="rnest-pill-photo w-full justify-center px-3 text-center text-[12.5px]">
-          {t("선택일 유지")}
-        </Button>
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div>
+            <div className="mb-2 text-[12px] font-semibold text-ios-muted">{t("적용 방식")}</div>
+            <Segmented value={mode as any} options={modeOptions as any} onChange={(v) => setMode(v as Mode)} />
+          </div>
+
+          <div>
+            <div className="mb-2 text-[12px] font-semibold text-ios-muted">{t("적용 기간")}</div>
+            <Segmented value={String(days) as any} options={daysOptions as any} onChange={(v) => setDays(Number(v))} />
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <Button
+            variant="secondary"
+            onClick={apply}
+            disabled={!patternEnabled || parsedPattern.length === 0}
+            className="rnest-pill-photo w-full justify-center px-3 text-center text-[12.5px]"
+          >
+            {t("선택 시작일 적용")}
+          </Button>
+          <Button variant="secondary" onClick={() => store.setSelected(selectedISO)} className="rnest-pill-photo w-full justify-center px-3 text-center text-[12.5px]">
+            {t("선택일 유지")}
+          </Button>
+        </div>
       </div>
     </Card>
   );

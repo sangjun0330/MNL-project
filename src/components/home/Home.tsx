@@ -272,7 +272,7 @@ export default function Home() {
 
   const aiHeadline = useMemo(() => {
     if (planner.state === "needs_records") return t("기록이 쌓이면 맞춤회복 카드 구조가 여기에 표시됩니다.");
-    if (planner.focusFactor?.label) return `${planner.focusFactor.label} 중심 안내 화면 구조만 유지 중입니다.`;
+    if (planner.focusFactor?.label) return `오늘 맞춤회복 해설을 만들어 보세요!.`;
     return t("오늘의 AI 해설을 만들어 보세요!");
   }, [planner.focusFactor?.label, planner.state, t]);
   const plannerPreviewTitle = latestOrderTitle ?? (latestOrdersCompleted ? t("오늘 오더를 모두 완료했어요.") : t("오늘의 오더를 만들어 보세요!"));
@@ -414,7 +414,7 @@ export default function Home() {
               color: "var(--rnest-accent)",
             }}
           >
-            {t("이유 보기")} ›
+            {t("맞춤 회복 가기")} ›
           </Link>
         </div>
 
@@ -451,7 +451,7 @@ export default function Home() {
               color: "var(--rnest-accent)",
             }}
           >
-            {t("전체 보기")} ›
+            {t("오늘 오더 보기")} ›
           </span>
         </div>
 
@@ -500,7 +500,7 @@ export default function Home() {
           >
             {recordedDays < 3
               ? t("건강 기록을 최소 3일 이상 입력해야 컨디션 지표가 보여요.")
-              : t("기록이 아직 없어서 오늘 지표가 비어 있어.")}
+              : t("기록이 아직 없어서 오늘 지표가 비어 있어요.")}
             {recordedDays < 3 && (
               <span
                 className="ml-1 font-semibold"

@@ -26,6 +26,21 @@ type UserCreatedRow = {
   onboarding_completed_at: string | null;
 };
 
+function isServiceConsentSchemaUnavailableError(error: unknown) {
+  const code = String((error as any)?.code ?? "").toUpperCase();
+  const message = String((error as any)?.message ?? "").toLowerCase();
+  return (
+    code === "42P01" ||
+    code === "42703" ||
+    code === "PGRST204" ||
+    code === "PGRST205" ||
+    message.includes("does not exist") ||
+    message.includes("schema cache") ||
+    message.includes("could not find the table") ||
+    message.includes("could not find the column")
+  );
+}
+
 function mapConsentRow(row: ConsentRow | null): UserServiceConsentSnapshot | null {
   if (!row) return null;
   return {
@@ -65,18 +80,14 @@ export async function loadUserServiceConsent(userId: string): Promise<UserServic
     .maybeSingle();
 
   if (error) {
-    const code = String((error as any)?.code ?? "");
-    const msg = String((error as any)?.message ?? "").toLowerCase();
-    // 테이블이 존재하지 않거나 스키마 캐시 문제인 경우 null 반환 (throw 안 함)
-    if (
-      code === "42P01" ||
-      code === "PGRST204" ||
-      code === "PGRST205" ||
-      msg.includes("does not exist") ||
-      msg.includes("schema cache")
-    ) {
-      console.error("[ServiceConsent] user_service_consents table issue, returning null", { code, msg: msg.slice(0, 120) });
-      return null;
+    // 신규 가입자를 동의 화면에서 막지 않도록, 동의 스키마/캐시 문제는
+    // 일시적인 인프라 degraded 상태로 보고 synthetic consent로 우회한다.
+    if (isServiceConsentSchemaUnavailableError(error)) {
+      console.error("[ServiceConsent] user_service_consents schema unavailable, using synthetic consent", {
+        code: (error as any)?.code,
+        message: String((error as any)?.message ?? "").slice(0, 120),
+      });
+      return buildSyntheticLegacyConsent();
     }
     throw error;
   }
@@ -217,6 +228,14 @@ export async function markUserOnboardingCompleted(userId: string): Promise<void>
     .eq("user_id", userId);
 
   if (error) {
+    if (isServiceConsentSchemaUnavailableError(error)) {
+      console.error("[ServiceConsent] onboarding_completed_at schema unavailable, skipping onboarding write", {
+        userId: userId.slice(0, 8),
+        code: (error as any)?.code,
+        message: String((error as any)?.message ?? "").slice(0, 160),
+      });
+      return;
+    }
     throw error;
   }
 }
@@ -256,6 +275,14 @@ export async function completeUserServiceConsent(userId: string): Promise<UserSe
     .single();
 
   if (error) {
+    if (isServiceConsentSchemaUnavailableError(error)) {
+      console.error("[ServiceConsent] consent schema unavailable during save, using synthetic consent", {
+        userId: userId.slice(0, 8),
+        code: (error as any)?.code,
+        message: String((error as any)?.message ?? "").slice(0, 200),
+      });
+      return buildSyntheticLegacyConsent();
+    }
     console.error("[ServiceConsent] user_service_consents upsert failed", {
       userId: userId.slice(0, 8),
       code: (error as any)?.code,

@@ -235,6 +235,12 @@ function sanitizeSettings(raw: unknown): AppSettings {
 
   return {
     ...defaults,
+    schedulePatternEnabled: Boolean(loaded.schedulePatternEnabled ?? defaults.schedulePatternEnabled),
+    defaultSchedulePattern:
+      typeof loaded.defaultSchedulePattern === "string"
+        ? loaded.defaultSchedulePattern.replace(/\s+/g, "").trim().slice(0, 80)
+        : defaults.defaultSchedulePattern,
+    schedulePatternAppliedFrom: asIso(loaded.schedulePatternAppliedFrom) ?? defaults.schedulePatternAppliedFrom ?? null,
     language: loaded.language === "en" ? "en" : "ko",
     hasSeenOnboarding: Boolean(loaded.hasSeenOnboarding ?? defaults.hasSeenOnboarding),
     menstrual: {

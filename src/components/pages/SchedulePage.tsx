@@ -200,8 +200,8 @@ export function SchedulePage() {
     setSelected(iso);
     setSleepFirstMode(iso === today && focus === "sleep");
     setOpenLog(true);
-    router.replace("/schedule", { scroll: false });
-  }, [router]);
+    window.history.replaceState(window.history.state, "", "/schedule");
+  }, []);
 
   // 월간 범위
   const range = useMemo(() => ({

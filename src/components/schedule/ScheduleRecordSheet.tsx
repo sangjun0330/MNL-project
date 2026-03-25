@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ISODate } from "@/lib/date";
 import { diffDays, formatKoreanDate, todayISO } from "@/lib/date";
-import type { ActivityLevel, MoodScore, StressLevel, BioInputs, EmotionEntry } from "@/lib/model";
+import type { ActivityLevel, MoodScore, StressLevel, EmotionEntry } from "@/lib/model";
 import type { Shift } from "@/lib/types";
 import { SHIFT_LABELS, shiftColor } from "@/lib/types";
 import { useAppStore } from "@/lib/store";
@@ -16,7 +16,6 @@ import { cn } from "@/lib/cn";
 import { useI18n } from "@/lib/useI18n";
 import { useAuthState } from "@/lib/auth";
 import { authHeaders } from "@/lib/billing/client";
-
 
 function clamp(n: number, min: number, max: number) {
   const v = Number.isFinite(n) ? n : min;
@@ -48,6 +47,34 @@ function normalizeWorkEventTags(tags: string[]) {
     if (next.length >= 8) break;
   }
   return next;
+}
+
+function normalizeSleepValue(raw: string) {
+  const n = raw.trim() === "" ? null : Number(raw);
+  return n == null || Number.isNaN(n) ? null : clamp(Math.round(n * 2) / 2, 0, 16);
+}
+
+function normalizeCaffeineValue(raw: string) {
+  const n = raw.trim() === "" ? null : Number(raw);
+  return n == null || Number.isNaN(n) ? null : clamp(Math.round(n), 0, 1000);
+}
+
+function normalizeNapValue(raw: string, opts?: { forceZero?: boolean }) {
+  const trimmed = raw.trim();
+  const n = trimmed === "" ? (opts?.forceZero ? 0 : null) : Number(raw);
+  return n == null || Number.isNaN(n) ? null : clamp(Math.round(n * 2) / 2, 0, 4);
+}
+
+function normalizeWorkEventNote(noteInput: string) {
+  return noteInput.replace(/\s+/g, " ").trim().slice(0, 280);
+}
+
+function sameStringArray(a: string[], b: string[]) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
 }
 
 type SaveState = "idle" | "saving" | "saved";
@@ -117,11 +144,10 @@ export function ScheduleRecordSheet({
   const workEventNoteDebounce = useRef<any>(null);
   const skipWorkEventNoteSync = useRef(true);
   const sleepInputRef = useRef<HTMLInputElement | null>(null);
-  const showMoreOpenedRef = useRef(false);
-  const activityTouchedRef = useRef(false);
-  const symptomTouchedRef = useRef(false);
-  const menstrualTouchedRef = useRef(false);
+  const sleepTouchedRef = useRef(false);
+  const caffeineTouchedRef = useRef(false);
   const napTouchedRef = useRef(false);
+  const workEventTouchedRef = useRef(false);
 
   const stressOptions = useMemo(
     () => [
@@ -215,34 +241,20 @@ export function ScheduleRecordSheet({
   };
 
   const saveSleepNow = (raw: string) => {
-    const n = raw.trim() === "" ? null : Number(raw);
-    const v = n == null || Number.isNaN(n) ? null : clamp(Math.round(n * 2) / 2, 0, 16);
+    const v = normalizeSleepValue(raw);
     store.setBioForDate(iso, { sleepHours: v });
     markSaved();
   };
 
   const saveCaffeineNow = (raw: string) => {
-    const n = raw.trim() === "" ? null : Number(raw);
-    const v = n == null || Number.isNaN(n) ? null : clamp(Math.round(n), 0, 1000);
+    const v = normalizeCaffeineValue(raw);
     store.setBioForDate(iso, { caffeineMg: v });
     markSaved();
   };
 
   const saveNapNow = (raw: string, opts?: { forceZero?: boolean }) => {
-    const trimmed = raw.trim();
-    const n = trimmed === "" ? (opts?.forceZero ? 0 : null) : Number(raw);
-    const v = n == null || Number.isNaN(n) ? null : clamp(Math.round(n * 2) / 2, 0, 4);
+    const v = normalizeNapValue(raw, opts);
     store.setBioForDate(iso, { napHours: v });
-    markSaved();
-  };
-
-  const saveStressNow = (value: StressLevel) => {
-    store.setBioForDate(iso, { stress: value });
-    markSaved();
-  };
-
-  const saveSymptomNow = (value: 0 | 1 | 2 | 3) => {
-    store.setBioForDate(iso, { symptomSeverity: value });
     markSaved();
   };
 
@@ -256,7 +268,7 @@ export function ScheduleRecordSheet({
 
   const saveWorkEventsNow = (tagsInput: string[], noteInput: string) => {
     const tags = normalizeWorkEventTags(tagsInput);
-    const note = noteInput.replace(/\s+/g, " ").trim().slice(0, 280);
+    const note = normalizeWorkEventNote(noteInput);
     store.setBioForDate(iso, {
       workEventTags: tags.length ? tags : null,
       workEventNote: note ? note : null,
@@ -314,11 +326,10 @@ export function ScheduleRecordSheet({
     setWorkEventNote(typeof (bio as any).workEventNote === "string" ? String((bio as any).workEventNote) : "");
     skipNapSync.current = true;
     skipWorkEventNoteSync.current = true;
-    showMoreOpenedRef.current = false;
-    activityTouchedRef.current = false;
-    symptomTouchedRef.current = false;
-    menstrualTouchedRef.current = false;
+    sleepTouchedRef.current = false;
+    caffeineTouchedRef.current = false;
     napTouchedRef.current = false;
+    workEventTouchedRef.current = false;
 
     // 메모
     setNote(curNote);
@@ -353,7 +364,10 @@ export function ScheduleRecordSheet({
       return;
     }
     if (noteDebounce.current) clearTimeout(noteDebounce.current);
-    noteDebounce.current = setTimeout(() => saveNoteNow(note), 450);
+    noteDebounce.current = setTimeout(() => {
+      noteDebounce.current = null;
+      saveNoteNow(note);
+    }, 450);
     return () => {
       if (noteDebounce.current) clearTimeout(noteDebounce.current);
     };
@@ -367,7 +381,11 @@ export function ScheduleRecordSheet({
       return;
     }
     if (sleepDebounce.current) clearTimeout(sleepDebounce.current);
-    sleepDebounce.current = setTimeout(() => saveSleepNow(sleepText), 450);
+    if (!sleepTouchedRef.current) return;
+    sleepDebounce.current = setTimeout(() => {
+      sleepDebounce.current = null;
+      saveSleepNow(sleepText);
+    }, 450);
     return () => {
       if (sleepDebounce.current) clearTimeout(sleepDebounce.current);
     };
@@ -381,7 +399,11 @@ export function ScheduleRecordSheet({
       return;
     }
     if (caffeineDebounce.current) clearTimeout(caffeineDebounce.current);
-    caffeineDebounce.current = setTimeout(() => saveCaffeineNow(caffeineText), 450);
+    if (!caffeineTouchedRef.current) return;
+    caffeineDebounce.current = setTimeout(() => {
+      caffeineDebounce.current = null;
+      saveCaffeineNow(caffeineText);
+    }, 450);
     return () => {
       if (caffeineDebounce.current) clearTimeout(caffeineDebounce.current);
     };
@@ -395,7 +417,11 @@ export function ScheduleRecordSheet({
       return;
     }
     if (napDebounce.current) clearTimeout(napDebounce.current);
-    napDebounce.current = setTimeout(() => saveNapNow(napText), 450);
+    if (!napTouchedRef.current) return;
+    napDebounce.current = setTimeout(() => {
+      napDebounce.current = null;
+      saveNapNow(napText);
+    }, 450);
     return () => {
       if (napDebounce.current) clearTimeout(napDebounce.current);
     };
@@ -409,7 +435,11 @@ export function ScheduleRecordSheet({
       return;
     }
     if (workEventNoteDebounce.current) clearTimeout(workEventNoteDebounce.current);
-    workEventNoteDebounce.current = setTimeout(() => saveWorkEventsNow(workEventTags, workEventNote), 450);
+    if (!workEventTouchedRef.current) return;
+    workEventNoteDebounce.current = setTimeout(() => {
+      workEventNoteDebounce.current = null;
+      saveWorkEventsNow(workEventTags, workEventNote);
+    }, 450);
     return () => {
       if (workEventNoteDebounce.current) clearTimeout(workEventNoteDebounce.current);
     };
@@ -423,7 +453,10 @@ export function ScheduleRecordSheet({
       return;
     }
     if (shiftNameDebounce.current) clearTimeout(shiftNameDebounce.current);
-    shiftNameDebounce.current = setTimeout(() => saveShiftNameNow(shiftNameText), 450);
+    shiftNameDebounce.current = setTimeout(() => {
+      shiftNameDebounce.current = null;
+      saveShiftNameNow(shiftNameText);
+    }, 450);
     return () => {
       if (shiftNameDebounce.current) clearTimeout(shiftNameDebounce.current);
     };
@@ -433,6 +466,8 @@ export function ScheduleRecordSheet({
   const quickCaffeine = (cups: number) => {
     const mgPerCup = 120;
     const mg = clamp(cups * mgPerCup, 0, 1000);
+    caffeineTouchedRef.current = true;
+    skipCaffeineSync.current = true;
     setCaffeineText(String(mg));
     store.setBioForDate(iso, { caffeineMg: mg });
     markSaved();
@@ -442,6 +477,8 @@ export function ScheduleRecordSheet({
     const base = sleepText.trim() === "" ? 7 : Number(sleepText);
     const cur = Number.isFinite(base) ? base : 7;
     const next = clamp(Math.round((cur + delta) * 2) / 2, 0, 16);
+    sleepTouchedRef.current = true;
+    skipSleepSync.current = true;
     setSleepText(String(next));
     store.setBioForDate(iso, { sleepHours: next });
     markSaved();
@@ -449,6 +486,8 @@ export function ScheduleRecordSheet({
 
   const setSleepChip = (hours: number) => {
     const next = clamp(Math.round(hours * 2) / 2, 0, 16);
+    sleepTouchedRef.current = true;
+    skipSleepSync.current = true;
     setSleepText(String(next));
     store.setBioForDate(iso, { sleepHours: next });
     markSaved();
@@ -474,14 +513,12 @@ export function ScheduleRecordSheet({
 
   const setActivityQuick = (v: string) => {
     const a = Number(v) as ActivityLevel;
-    activityTouchedRef.current = true;
     setActivity(a);
     store.setBioForDate(iso, { activity: a });
     markSaved();
   };
 
   const setSymptomQuick = (v: 0 | 1 | 2 | 3) => {
-    symptomTouchedRef.current = true;
     setSymptomSeverity(v);
     store.setBioForDate(iso, { symptomSeverity: v });
     markSaved();
@@ -489,7 +526,6 @@ export function ScheduleRecordSheet({
 
   const setMenstrualStatusQuick = (value: string) => {
     const nextStatus = (value === "pms" || value === "period" ? value : "none") as "none" | "pms" | "period";
-    menstrualTouchedRef.current = true;
     setMenstrualStatus(nextStatus);
     const nextFlow =
       nextStatus === "period"
@@ -500,7 +536,6 @@ export function ScheduleRecordSheet({
   };
 
   const setMenstrualFlowQuick = (value: 0 | 1 | 2 | 3) => {
-    menstrualTouchedRef.current = true;
     setMenstrualFlow(value);
     const nextStatus = value > 0 ? "period" : menstrualStatus;
     if (nextStatus !== menstrualStatus) setMenstrualStatus(nextStatus);
@@ -508,6 +543,7 @@ export function ScheduleRecordSheet({
   };
 
   const toggleWorkEventTag = (tag: string) => {
+    workEventTouchedRef.current = true;
     setWorkEventTags((prev) => {
       const exists = prev.includes(tag);
       const next = normalizeWorkEventTags(exists ? prev.filter((item) => item !== tag) : [...prev, tag]);
@@ -519,6 +555,7 @@ export function ScheduleRecordSheet({
   const addCustomWorkEventTag = () => {
     const normalized = workEventCustomTag.replace(/\s+/g, " ").trim().slice(0, 28);
     if (!normalized) return;
+    workEventTouchedRef.current = true;
     setWorkEventCustomTag("");
     setWorkEventTags((prev) => {
       const next = normalizeWorkEventTags([...prev, normalized]);
@@ -537,6 +574,7 @@ export function ScheduleRecordSheet({
   const setNapQuick = (hours: number) => {
     const next = clamp(Math.round(hours * 2) / 2, 0, 4);
     napTouchedRef.current = true;
+    skipNapSync.current = true;
     setNapText(String(next));
     store.setBioForDate(iso, { napHours: next });
     markSaved();
@@ -548,44 +586,79 @@ export function ScheduleRecordSheet({
     () => workEventTags.filter((tag) => !WORK_EVENT_PRESET_SET.has(tag)),
     [workEventTags]
   );
-  const trimmedWorkEventNote = workEventNote.replace(/\s+/g, " ").trim();
+  const trimmedWorkEventNote = normalizeWorkEventNote(workEventNote);
 
   const handleWorkEventNoteSheetClose = () => {
+    const latestState = storeRef.current.getState();
+    const latestBio = latestState.bio?.[iso];
+    const nextTags = normalizeWorkEventTags(workEventTags);
+    const savedTags = normalizeWorkEventTags(Array.isArray(latestBio?.workEventTags) ? latestBio.workEventTags : []);
+    const savedNote = normalizeWorkEventNote(typeof latestBio?.workEventNote === "string" ? latestBio.workEventNote : "");
+
     if (workEventNoteDebounce.current) {
       clearTimeout(workEventNoteDebounce.current);
       workEventNoteDebounce.current = null;
     }
-    saveWorkEventsNow(workEventTags, workEventNote);
+    if (
+      workEventTouchedRef.current &&
+      (!sameStringArray(nextTags, savedTags) || trimmedWorkEventNote !== savedNote)
+    ) {
+      saveWorkEventsNow(workEventTags, workEventNote);
+    }
     setWorkEventNoteSheetOpen(false);
   };
 
   const handleClose = () => {
+    const latestState = storeRef.current.getState();
+    const latestBio = latestState.bio?.[iso];
+
     if (noteDebounce.current) {
       clearTimeout(noteDebounce.current);
       noteDebounce.current = null;
+    }
+    if (note !== (latestState.notes?.[iso] ?? "")) {
       saveNoteNow(note);
     }
     if (shiftNameDebounce.current) {
       clearTimeout(shiftNameDebounce.current);
       shiftNameDebounce.current = null;
+    }
+    if (shiftNameText !== (latestState.shiftNames?.[iso] ?? "")) {
       saveShiftNameNow(shiftNameText);
     }
     if (canEditHealth) {
-      saveSleepNow(sleepText);
-      saveCaffeineNow(caffeineText);
-      saveStressNow(stress);
-      if (menstrualEnabled && showMoreOpenedRef.current) {
-        saveSymptomNow(symptomSeverity);
-        if (menstrualTouchedRef.current) saveMenstrualNow(menstrualStatus, menstrualFlow);
+      if (sleepDebounce.current) {
+        clearTimeout(sleepDebounce.current);
+        sleepDebounce.current = null;
       }
-      const hasAdditionalInput =
-        activityTouchedRef.current || symptomTouchedRef.current || napTouchedRef.current;
-      saveNapNow(napText, { forceZero: hasAdditionalInput && napText.trim() === "" });
+      if (sleepTouchedRef.current && normalizeSleepValue(sleepText) !== (latestBio?.sleepHours ?? null)) saveSleepNow(sleepText);
+
+      if (caffeineDebounce.current) {
+        clearTimeout(caffeineDebounce.current);
+        caffeineDebounce.current = null;
+      }
+      if (caffeineTouchedRef.current && normalizeCaffeineValue(caffeineText) !== (latestBio?.caffeineMg ?? null)) {
+        saveCaffeineNow(caffeineText);
+      }
+
+      if (napDebounce.current) {
+        clearTimeout(napDebounce.current);
+        napDebounce.current = null;
+      }
+      if (napTouchedRef.current && normalizeNapValue(napText) !== (latestBio?.napHours ?? null)) saveNapNow(napText);
+
       if (workEventNoteDebounce.current) {
         clearTimeout(workEventNoteDebounce.current);
         workEventNoteDebounce.current = null;
       }
-      saveWorkEventsNow(workEventTags, workEventNote);
+      if (workEventTouchedRef.current) {
+        const nextTags = normalizeWorkEventTags(workEventTags);
+        const savedTags = normalizeWorkEventTags(Array.isArray(latestBio?.workEventTags) ? latestBio.workEventTags : []);
+        const savedNote = normalizeWorkEventNote(typeof latestBio?.workEventNote === "string" ? latestBio.workEventNote : "");
+        if (!sameStringArray(nextTags, savedTags) || trimmedWorkEventNote !== savedNote) {
+          saveWorkEventsNow(workEventTags, workEventNote);
+        }
+      }
     }
     setWorkEventNoteSheetOpen(false);
     onClose();
@@ -738,8 +811,16 @@ export function ScheduleRecordSheet({
                   ref={sleepInputRef}
                   inputMode="decimal"
                   value={sleepText}
-                  onChange={(e) => setSleepText(e.target.value)}
-                  onBlur={() => saveSleepNow(sleepText)}
+                  onChange={(e) => {
+                    sleepTouchedRef.current = true;
+                    setSleepText(e.target.value);
+                  }}
+                  onBlur={() => {
+                    if (!sleepDebounce.current) return;
+                    clearTimeout(sleepDebounce.current);
+                    sleepDebounce.current = null;
+                    saveSleepNow(sleepText);
+                  }}
                   placeholder={t("예: 6.5")}
                 />
               </div>
@@ -818,8 +899,16 @@ export function ScheduleRecordSheet({
                 <Input
                   inputMode="numeric"
                   value={caffeineText}
-                  onChange={(e) => setCaffeineText(e.target.value)}
-                  onBlur={() => saveCaffeineNow(caffeineText)}
+                  onChange={(e) => {
+                    caffeineTouchedRef.current = true;
+                    setCaffeineText(e.target.value);
+                  }}
+                  onBlur={() => {
+                    if (!caffeineDebounce.current) return;
+                    clearTimeout(caffeineDebounce.current);
+                    caffeineDebounce.current = null;
+                    saveCaffeineNow(caffeineText);
+                  }}
                   placeholder={t("mg 직접 입력(예: 150)")}
                 />
               </div>
@@ -951,13 +1040,7 @@ export function ScheduleRecordSheet({
           <div className="rounded-2xl border border-ios-sep bg-white p-4">
             <button
               type="button"
-              onClick={() =>
-                setShowMore((v) => {
-                  const next = !v;
-                  if (next) showMoreOpenedRef.current = true;
-                  return next;
-                })
-              }
+              onClick={() => setShowMore((v) => !v)}
               className="flex w-full items-center justify-between"
             >
               <div className="min-w-0">
@@ -1059,11 +1142,14 @@ export function ScheduleRecordSheet({
           <div className="text-[12.5px] leading-5 text-ios-sub">{t("예: 코드블루 1건 대응, 인계 지연 30분")}</div>
           <Textarea
             value={workEventNote}
-            onChange={(e) => setWorkEventNote(e.target.value)}
+            onChange={(e) => {
+              workEventTouchedRef.current = true;
+              setWorkEventNote(e.target.value);
+            }}
             placeholder={t("상세 메모를 입력하세요")}
             rows={4}
           />
-          <div className="text-[11.5px] text-ios-muted">{t("닫으면 자동 저장됩니다.")}</div>
+          <div className="text-[11.5px] text-ios-muted">{t("입력한 내용만 저장됩니다.")}</div>
           <Button variant="secondary" onClick={handleWorkEventNoteSheetClose}>
             {t("완료")}
           </Button>
