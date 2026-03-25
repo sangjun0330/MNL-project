@@ -225,7 +225,16 @@ export async function completeUserServiceConsent(userId: string): Promise<UserSe
   const admin = getSupabaseAdmin();
   const now = new Date().toISOString();
 
-  await ensureUserRow(userId);
+  try {
+    await ensureUserRow(userId);
+  } catch (ensureErr) {
+    console.error("[ServiceConsent] ensureUserRow failed in completeUserServiceConsent", {
+      userId: userId.slice(0, 8),
+      code: (ensureErr as any)?.code,
+      message: String((ensureErr as any)?.message ?? ensureErr).slice(0, 200),
+    });
+    throw ensureErr;
+  }
 
   const row = {
     user_id: userId,
@@ -247,6 +256,11 @@ export async function completeUserServiceConsent(userId: string): Promise<UserSe
     .single();
 
   if (error) {
+    console.error("[ServiceConsent] user_service_consents upsert failed", {
+      userId: userId.slice(0, 8),
+      code: (error as any)?.code,
+      message: String((error as any)?.message ?? "").slice(0, 200),
+    });
     throw error;
   }
 

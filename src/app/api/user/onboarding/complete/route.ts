@@ -19,7 +19,12 @@ export async function POST(req: Request) {
   try {
     await markUserOnboardingCompleted(userId);
     return jsonNoStore({ ok: true });
-  } catch {
+  } catch (err) {
+    console.error("[OnboardingComplete] failed_to_complete_onboarding", {
+      userId: String(userId).slice(0, 8),
+      code: (err as any)?.code,
+      message: String((err as any)?.message ?? err).slice(0, 200),
+    });
     return jsonNoStore({ ok: false, error: "failed_to_complete_onboarding" }, { status: 500 });
   }
 }
