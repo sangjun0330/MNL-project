@@ -158,9 +158,7 @@ export function useInsightsData() {
 
   const bestWorst = useMemo(() => {
     if (vitalsRecorded.length < 2) return { best: null as DailyVital | null, worst: null as DailyVital | null };
-    const sorted = [...vitalsRecorded].sort(
-      (a, b) => Math.min(b.body.value, b.mental.ema) - Math.min(a.body.value, a.mental.ema)
-    );
+    const sorted = [...vitalsRecorded].sort((a, b) => vitalDisplayScore(b) - vitalDisplayScore(a));
     return { best: sorted[0] ?? null, worst: sorted[sorted.length - 1] ?? null };
   }, [vitalsRecorded]);
 

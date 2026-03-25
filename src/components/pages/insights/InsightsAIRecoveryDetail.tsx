@@ -9,7 +9,6 @@ import { AIRecoverySlotTabs } from "@/components/insights/AIRecoverySlotTabs";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { useAIRecoverySession } from "@/components/insights/useAIRecoverySession";
 import { INSIGHTS_MIN_DAYS, isInsightsLocked, useInsightsData } from "@/components/insights/useInsightsData";
-import { useRecoveryPlanner } from "@/components/insights/useRecoveryPlanner";
 import { DetailChip, DETAIL_ACCENTS, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
 import { Button } from "@/components/ui/Button";
 import type { AIRecoveryBriefSection, AIRecoverySlot } from "@/lib/aiRecovery";
@@ -308,8 +307,7 @@ export function InsightsAIRecoveryDetail({
   const router = useRouter();
   const pathname = usePathname();
   const billing = useBillingAccess();
-  const { end, recordedDays, syncLabel } = useInsightsData();
-  const planner = useRecoveryPlanner();
+  const { end, recordedDays } = useInsightsData();
   const [slot, setSlot] = useState<AIRecoverySlot>(initialSlot);
   const [hydrated, setHydrated] = useState(false);
   const postShiftRedirectedRef = useRef(false);
@@ -428,8 +426,6 @@ export function InsightsAIRecoveryDetail({
       backHref="/insights/recovery"
       chips={
         <>
-          {hydrated ? <DetailChip color={DETAIL_ACCENTS.mint}>{planner.nextDutyLabel}</DetailChip> : null}
-          {hydrated ? <DetailChip color={DETAIL_ACCENTS.navy}>{syncLabel}</DetailChip> : null}
           {response?.stale ? <DetailChip color={DETAIL_ACCENTS.pink}>업데이트 필요</DetailChip> : null}
         </>
       }
@@ -481,10 +477,6 @@ export function InsightsAIRecoveryDetail({
           <Surface>
             <div className="text-[11px] font-semibold tracking-[0.2em] text-[#8C95A6]">AI CUSTOMIZED RECOVERY</div>
             <div className="mt-3 break-keep text-[24px] font-semibold leading-[1.45] tracking-[-0.04em] text-[#111827] sm:text-[27px]">{brief.headline}</div>
-            <div className="mt-5 flex flex-wrap gap-2">
-              {brief.weeklySummary?.avgBattery != null ? <SummaryMetric label="주간 배터리" value={`${Math.round(brief.weeklySummary.avgBattery)}점`} /> : null}
-              {brief.weeklySummary?.prevAvgBattery != null ? <SummaryMetric label="이전 흐름" value={`${Math.round(brief.weeklySummary.prevAvgBattery)}점`} /> : null}
-            </div>
             {brief.compoundAlert ? (
               <div className="mt-5 rounded-[24px] bg-[#FFF6F7] px-4 py-4">
                 <div className="flex flex-wrap gap-2">

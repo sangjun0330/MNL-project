@@ -1,6 +1,6 @@
-export const SERVICE_CONSENT_VERSION = "2026-03-12-1";
-export const PRIVACY_POLICY_VERSION = "2026-03-12";
-export const TERMS_OF_SERVICE_VERSION = "2026-03-12";
+export const SERVICE_CONSENT_VERSION = "2026-03-25-1";
+export const PRIVACY_POLICY_VERSION = "2026-03-25";
+export const TERMS_OF_SERVICE_VERSION = "2026-03-25";
 export const SERVICE_CONSENT_GATE_RELEASED_AT = "2026-03-12T00:00:00+09:00";
 
 export type ServiceConsentItemKey = "records_storage" | "ai_usage";

@@ -131,7 +131,7 @@ export function AIRecoveryLoadingOverlay({ mode, open }: AIRecoveryLoadingOverla
     <div
       className={cn(
         "fixed inset-0 z-[120] transition-all duration-500",
-        visible ? "opacity-100" : "opacity-0",
+        visible ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none",
       )}
       aria-live="polite"
       aria-busy={open}
@@ -154,8 +154,8 @@ export function AIRecoveryLoadingOverlay({ mode, open }: AIRecoveryLoadingOverla
             visible ? "translate-y-0 opacity-100" : "translate-y-4 opacity-0",
           )}
         >
-          <div className="rnest-loading-breathe">
-            <RNestMark className="h-[52px] w-[90px] text-[#161616]/85" />
+          <div className="rnest-loading-breathe" style={{ overflow: "visible" }}>
+            <RNestMark className="h-[72px] w-[124px] text-[#161616]" />
           </div>
         </div>
 

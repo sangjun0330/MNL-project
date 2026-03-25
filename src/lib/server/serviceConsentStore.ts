@@ -257,7 +257,11 @@ export async function completeUserServiceConsent(userId: string): Promise<UserSe
   });
 
   if (eventError) {
-    throw eventError;
+    // 이벤트 로그 실패는 동의 저장 자체를 실패시키지 않음
+    console.error("[ServiceConsent] failed_to_log_consent_event", {
+      code: (eventError as any)?.code,
+      message: String((eventError as any)?.message ?? "").slice(0, 120),
+    });
   }
 
   return mapConsentRow(data as ConsentRow)!;

@@ -49,7 +49,7 @@ export function statusFromScore(score: number): VitalStatus {
 
 export function vitalDisplayScore(vital?: { body: { value: number }; mental: { ema: number } } | null): number {
   if (!vital) return 0;
-  return Math.round(Math.min(vital.body.value, vital.mental.ema));
+  return Math.round((vital.body.value + vital.mental.ema) / 2);
 }
 
 export function statusLabel(status: VitalStatus) {

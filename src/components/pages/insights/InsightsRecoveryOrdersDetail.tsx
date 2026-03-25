@@ -8,7 +8,6 @@ import { AIRecoveryLoadingOverlay } from "@/components/insights/AIRecoveryLoadin
 import { AIRecoverySlotTabs } from "@/components/insights/AIRecoverySlotTabs";
 import { useAIRecoverySession } from "@/components/insights/useAIRecoverySession";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
-import { useRecoveryPlanner } from "@/components/insights/useRecoveryPlanner";
 import { DetailCard, DetailChip, DETAIL_ACCENTS, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
 import { Button } from "@/components/ui/Button";
 import { INSIGHTS_MIN_DAYS, isInsightsLocked, shiftKo, useInsightsData } from "@/components/insights/useInsightsData";
@@ -142,8 +141,7 @@ export function InsightsRecoveryOrdersDetail({
   const router = useRouter();
   const pathname = usePathname();
   const billing = useBillingAccess();
-  const { end, recordedDays, syncLabel, todayShift, hasTodayShift } = useInsightsData();
-  const planner = useRecoveryPlanner();
+  const { end, recordedDays, todayShift, hasTodayShift } = useInsightsData();
   const [slot, setSlot] = useState<AIRecoverySlot>(initialSlot);
   const [hydrated, setHydrated] = useState(false);
   const slotLabel = slot === "wake" ? "기상 후" : "퇴근 후";
@@ -276,9 +274,7 @@ export function InsightsRecoveryOrdersDetail({
       backHref="/insights/recovery"
       chips={
         <>
-          {hydrated ? <DetailChip color={DETAIL_ACCENTS.mint}>{planner.nextDutyLabel}</DetailChip> : null}
           {hydrated && hasTodayShift ? <DetailChip color={DETAIL_ACCENTS.navy}>{shiftKo(todayShift)}</DetailChip> : null}
-          {hydrated ? <DetailChip color={DETAIL_ACCENTS.navy}>{syncLabel}</DetailChip> : null}
         </>
       }
     >

@@ -186,14 +186,6 @@ function buildOrderId(slot: AIRecoverySlot, source: string, index: number) {
   return `${slot}_${buildAsciiSlug(source, `order_${index + 1}`)}`;
 }
 
-function readReadyOrderIds(session: AIRecoverySlotPayload | null | undefined) {
-  if (session?.status !== "ready") return [];
-  return Array.isArray(session.orders?.items) ? session.orders.items.map((item) => item.id) : [];
-}
-
-function countMatchingCompletions(completions: unknown, orderIds: string[]) {
-  return filterCompletionIdsForOrders(completions, orderIds).length;
-}
 
 function buildTodaySlotStatus(day: LoadedRecoveryDomains["aiRecoveryDaily"][ISODate] | undefined) {
   const wakeReady = day?.wake?.status === "ready";
@@ -205,23 +197,33 @@ function buildTodaySlotStatus(day: LoadedRecoveryDomains["aiRecoveryDaily"][ISOD
   };
 }
 
+function countCompletionsBySlot(completions: unknown, slot: AIRecoverySlot) {
+  if (!Array.isArray(completions)) return 0;
+  const prefix = `${slot}_`;
+  return completions.filter((id) => typeof id === "string" && id.startsWith(prefix)).length;
+}
+
+function countAllCompletions(completions: unknown) {
+  if (!Array.isArray(completions)) return 0;
+  return completions.filter((id) => typeof id === "string" && id.length > 0).length;
+}
+
 function buildRecoveryOrderStats(args: {
   dateISO: ISODate;
   aiRecoveryDaily: LoadedRecoveryDomains["aiRecoveryDaily"];
   recoveryOrderCompletions: LoadedRecoveryDomains["recoveryOrderCompletions"];
 }) {
-  const todayDay = args.aiRecoveryDaily[args.dateISO];
+  // Count completions by slot prefix to accumulate across regenerations.
+  // Old completions remain valid even after order regeneration.
   const todayCompletions = args.recoveryOrderCompletions[args.dateISO] ?? [];
-  const todayWakeCompleted = countMatchingCompletions(todayCompletions, readReadyOrderIds(todayDay?.wake ?? null));
-  const todayPostShiftCompleted = countMatchingCompletions(todayCompletions, readReadyOrderIds(todayDay?.postShift ?? null));
+  const todayWakeCompleted = countCompletionsBySlot(todayCompletions, "wake");
+  const todayPostShiftCompleted = countCompletionsBySlot(todayCompletions, "postShift");
 
   let weekTotalCompleted = 0;
   for (let offset = 0; offset < 7; offset += 1) {
     const iso = toISODate(addDays(fromISODate(args.dateISO), -offset));
-    const day = args.aiRecoveryDaily[iso];
     const completions = args.recoveryOrderCompletions[iso] ?? [];
-    const allowedOrderIds = [...readReadyOrderIds(day?.wake ?? null), ...readReadyOrderIds(day?.postShift ?? null)];
-    weekTotalCompleted += countMatchingCompletions(completions, allowedOrderIds);
+    weekTotalCompleted += countAllCompletions(completions);
   }
 
   return {

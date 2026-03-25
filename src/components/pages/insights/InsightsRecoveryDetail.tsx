@@ -50,7 +50,7 @@ function RecoverySkeletonLinkCard({
 
 export function InsightsRecoveryDetail() {
   const { t } = useI18n();
-  const { end, recordedDays, syncLabel, todayShift, hasTodayShift } = useInsightsData();
+  const { end, recordedDays, todayShift, hasTodayShift } = useInsightsData();
   const planner = useRecoveryPlanner();
 
   if (isInsightsLocked(recordedDays)) {
@@ -72,10 +72,7 @@ export function InsightsRecoveryDetail() {
       meta="AI 회복 해설과 오늘 할 오더를 함께 볼 수 있어요."
       chips={
         <>
-          <DetailChip color={DETAIL_ACCENTS.mint}>{planner.nextDutyLabel}</DetailChip>
-          {planner.nextDuty ? <DetailChip color={DETAIL_ACCENTS.mint}>다음 {shiftKo(planner.nextDuty)}</DetailChip> : null}
           {hasTodayShift ? <DetailChip color={DETAIL_ACCENTS.navy}>{shiftKo(todayShift)}</DetailChip> : null}
-          <DetailChip color={DETAIL_ACCENTS.navy}>{syncLabel}</DetailChip>
         </>
       }
     >

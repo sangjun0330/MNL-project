@@ -5,7 +5,7 @@ import { useInsightsData, fmtMD, shiftKo, isInsightsLocked, INSIGHTS_MIN_DAYS } 
 import { formatKoreanDate } from "@/lib/date";
 import { TrendChart } from "@/components/insights/TrendChart";
 import { Pill } from "@/components/ui/Pill";
-import { statusFromScore } from "@/lib/rnestInsight";
+import { statusFromScore, vitalDisplayScore } from "@/lib/rnestInsight";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { useI18n } from "@/lib/useI18n";
 
@@ -113,17 +113,13 @@ export function InsightsTrendsDetail() {
               <div className="rounded-2xl border border-ios-sep bg-ios-bg p-4">
                 <div className="text-[12px] font-semibold text-ios-sub">Best</div>
                 <div className="mt-1 text-[15px] font-semibold">
-                  {`${fmtMD(bestWorst.best.dateISO)} · ${shiftKo(bestWorst.best.shift)} · Vital ${Math.round(
-                    Math.min(bestWorst.best.body.value, bestWorst.best.mental.ema)
-                  )}`}
+                  {`${fmtMD(bestWorst.best.dateISO)} · ${shiftKo(bestWorst.best.shift)} · Vital ${vitalDisplayScore(bestWorst.best)}`}
                 </div>
               </div>
               <div className="rounded-2xl border border-ios-sep bg-ios-bg p-4">
                 <div className="text-[12px] font-semibold text-ios-sub">Worst</div>
                 <div className="mt-1 text-[15px] font-semibold">
-                  {`${fmtMD(bestWorst.worst.dateISO)} · ${shiftKo(bestWorst.worst.shift)} · Vital ${Math.round(
-                    Math.min(bestWorst.worst.body.value, bestWorst.worst.mental.ema)
-                  )}`}
+                  {`${fmtMD(bestWorst.worst.dateISO)} · ${shiftKo(bestWorst.worst.shift)} · Vital ${vitalDisplayScore(bestWorst.worst)}`}
                 </div>
               </div>
             </div>

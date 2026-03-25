@@ -29,7 +29,12 @@ export async function POST(req: Request) {
   try {
     const consent = await completeUserServiceConsent(userId);
     return jsonNoStore({ ok: true, data: consent });
-  } catch {
+  } catch (err) {
+    console.error("[ConsentComplete] failed_to_save_service_consent", {
+      userId: String(userId).slice(0, 8),
+      code: (err as any)?.code,
+      message: String((err as any)?.message ?? err).slice(0, 200),
+    });
     return jsonNoStore({ ok: false, error: "failed_to_save_service_consent" }, { status: 500 });
   }
 }

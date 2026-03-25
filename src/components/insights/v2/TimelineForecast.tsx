@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { cn } from "@/lib/cn";
 import type { Shift } from "@/lib/types";
 import type { DailyVital } from "@/lib/vitals";
-import { round1, statusColor, statusFromScore, type VitalStatus, RNEST_COLORS } from "@/lib/rnestInsight";
+import { round1, statusColor, statusFromScore, type VitalStatus, RNEST_COLORS, vitalDisplayScore } from "@/lib/rnestInsight";
 
 type PhaseItem = {
   title: string;
@@ -37,7 +37,7 @@ export function TimelineForecast({
 }) {
   const displayScore = useMemo(() => {
     if (!vital) return 50;
-    return Math.round(Math.min(vital.body.value, vital.mental.ema));
+    return vitalDisplayScore(vital);
   }, [vital]);
 
   const status: VitalStatus = useMemo(() => statusFromScore(displayScore), [displayScore]);
