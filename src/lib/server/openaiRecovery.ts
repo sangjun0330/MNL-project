@@ -101,16 +101,22 @@ function resolveNetworkRetryBaseMs() {
   return Math.max(200, Math.min(2000, Math.round(raw)));
 }
 
-function resolveUpstreamTimeoutMs() {
-  const raw = Number(process.env.OPENAI_RECOVERY_UPSTREAM_TIMEOUT_MS ?? process.env.OPENAI_MED_SAFETY_UPSTREAM_TIMEOUT_MS ?? 45_000);
-  if (!Number.isFinite(raw)) return 45_000;
-  return Math.max(10_000, Math.min(45_000, Math.round(raw)));
+function resolveUpstreamTimeoutMs(model?: string) {
+  const is54 = isGpt54Model(model ?? "");
+  const fallback = is54 ? 95_000 : 45_000;
+  const max = is54 ? 120_000 : 45_000;
+  const raw = Number(process.env.OPENAI_RECOVERY_UPSTREAM_TIMEOUT_MS ?? process.env.OPENAI_MED_SAFETY_UPSTREAM_TIMEOUT_MS ?? fallback);
+  if (!Number.isFinite(raw)) return fallback;
+  return Math.max(10_000, Math.min(max, Math.round(raw)));
 }
 
-function resolveTotalBudgetMs() {
-  const raw = Number(process.env.OPENAI_RECOVERY_TOTAL_BUDGET_MS ?? process.env.OPENAI_MED_SAFETY_TOTAL_BUDGET_MS ?? 55_000);
-  if (!Number.isFinite(raw)) return 55_000;
-  return Math.max(20_000, Math.min(55_000, Math.round(raw)));
+function resolveTotalBudgetMs(model?: string) {
+  const is54 = isGpt54Model(model ?? "");
+  const fallback = is54 ? 120_000 : 55_000;
+  const max = is54 ? 140_000 : 55_000;
+  const raw = Number(process.env.OPENAI_RECOVERY_TOTAL_BUDGET_MS ?? process.env.OPENAI_MED_SAFETY_TOTAL_BUDGET_MS ?? fallback);
+  if (!Number.isFinite(raw)) return fallback;
+  return Math.max(20_000, Math.min(max, Math.round(raw)));
 }
 
 function truncateError(raw: string, size = 220) {
@@ -146,6 +152,10 @@ function needsMoreOutputTokens(error: string) {
 
 function isEmptyTextError(error: string) {
   return String(error ?? "").toLowerCase().includes("openai_empty_text_model:");
+}
+
+function isUpstreamTimeoutError(error: string) {
+  return String(error ?? "").toLowerCase().includes("openai_timeout_upstream_model:");
 }
 
 function readString(value: unknown) {
@@ -416,7 +426,7 @@ async function postStructuredRequest(
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort("upstream_timeout"), resolveUpstreamTimeoutMs());
+  const timeout = setTimeout(() => controller.abort("upstream_timeout"), resolveUpstreamTimeoutMs(args.model));
   const onAbort = () => controller.abort("caller_aborted");
   args.signal.addEventListener("abort", onAbort, { once: true });
   const requestUrl = requestConfig.requestUrl;
@@ -552,7 +562,7 @@ async function postStructuredRequest(
 export async function runAIRecoveryStructuredRequest(args: StructuredRequestArgs): Promise<AIRecoveryOpenAIResult> {
   const apiKey = normalizeApiKey();
   const startedAt = Date.now();
-  const totalBudgetMs = resolveTotalBudgetMs();
+  const totalBudgetMs = resolveTotalBudgetMs(args.model);
   const retries = resolveNetworkRetryCount();
   const retryBaseMs = resolveNetworkRetryBaseMs();
   const baseUrls = resolveBaseUrls();
@@ -618,6 +628,7 @@ export async function runAIRecoveryStructuredRequest(args: StructuredRequestArgs
       }
 
       lastError = effectiveError;
+      if (isUpstreamTimeoutError(effectiveError)) break;
       if (!isRetryableError(effectiveError) || attempt >= retries) break;
 
       const delay = retryBaseMs * (attempt + 1);

@@ -161,17 +161,6 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     }
   };
 
-  const clearVisibleSession = () => {
-    setData((current) => {
-      if (!current) return current;
-      return {
-        ...current,
-        session: null,
-        stale: false,
-      };
-    });
-  };
-
   const buildAutoOrdersKey = (value: SessionData | null) => {
     const generatedAt = value?.session?.generatedAt;
     if (!value?.session?.brief || value.session.orders || !generatedAt) return null;
@@ -295,7 +284,6 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     const previousGeneratedAt = data?.session?.generatedAt ?? null;
     setGenerating(true);
     setError(null);
-    clearVisibleSession();
     try {
       const response = await fetch("/api/insights/recovery/ai/generate", {
         method: "POST",

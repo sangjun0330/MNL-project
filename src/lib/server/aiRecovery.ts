@@ -112,6 +112,11 @@ function isTransientOpenAIFallback(meta: AIRecoveryOpenAIMeta | null | undefined
   return Boolean(meta?.fallbackReason) && !didAIRecoveryReachOpenAI(meta);
 }
 
+function shouldRetryBriefFallback(meta: AIRecoveryOpenAIMeta | null | undefined) {
+  if (!isTransientOpenAIFallback(meta)) return false;
+  return !String(meta?.fallbackReason ?? "").includes("openai_timeout_upstream_model:");
+}
+
 function isStoredFallbackSession(snapshot: RecoverySnapshot, session: AIRecoverySlotPayload | null | undefined) {
   if (!session?.brief) return session?.status === "fallback" || Boolean(session?.openaiMeta?.fallbackReason);
   if (session.status === "fallback" || Boolean(session.openaiMeta?.fallbackReason)) return true;
@@ -2588,7 +2593,7 @@ export async function generateAIRecoverySession(args: {
     tier: subscription?.tier ?? null,
     signal: args.signal,
   });
-  if (isTransientOpenAIFallback(flow.openaiMeta)) {
+  if (shouldRetryBriefFallback(flow.openaiMeta)) {
     console.warn("[AIRecovery] generate_session_retrying_after_transient_fallback", {
       userId: safeUserLogId(args.userId),
       dateISO: args.dateISO,
