@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { BottomNav } from "@/components/shell/BottomNav";
 import { UiPreferencesBridge } from "@/components/system/UiPreferencesBridge";
+import { shouldPreferCandidateState } from "@/lib/appStateIntegrity";
 import { getSupabaseBrowserClient, signOut, useAuthState } from "@/lib/auth";
 import { hasMeaningfulAppState, readPreferredAppStateDraft } from "@/lib/appStateDraft";
 import { hydrateState } from "@/lib/store";
@@ -140,6 +141,30 @@ function GateErrorScreen({ onRetry }: { onRetry: () => void }) {
   );
 }
 
+function pickHydrationState(input: {
+  localDraft: { updatedAt: number; state: any } | null;
+  remoteState: any | null;
+  remoteUpdatedAt: number | null;
+}) {
+  const { localDraft, remoteState, remoteUpdatedAt } = input;
+  if (
+    localDraft &&
+    hasMeaningfulAppState(localDraft.state) &&
+    shouldPreferCandidateState(localDraft.state, remoteState, {
+      candidateUpdatedAt: localDraft.updatedAt,
+      baselineUpdatedAt: remoteUpdatedAt,
+    })
+  ) {
+    return localDraft.state;
+  }
+
+  if (remoteState && hasMeaningfulAppState(remoteState)) {
+    return remoteState;
+  }
+
+  return emptyState();
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -213,15 +238,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       writeBootstrapCache(scopedUserId, data);
       setBootstrapSettledUserId(scopedUserId);
       const localDraft = readPreferredAppStateDraft(scopedUserId);
-      if (
-        localDraft &&
-        hasMeaningfulAppState(localDraft.state) &&
-        (!data.updatedAt || localDraft.updatedAt > data.updatedAt)
-      ) {
-        hydrateState(localDraft.state);
-      } else {
-        hydrateState(data.consentCompleted && data.state ? data.state : emptyState());
-      }
+      hydrateState(
+        pickHydrationState({
+          localDraft,
+          remoteState: data.consentCompleted && data.state ? data.state : null,
+          remoteUpdatedAt: data.updatedAt,
+        })
+      );
       return data;
     } catch (error) {
       if (requestId === bootstrapRequestRef.current) {
@@ -295,15 +318,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       setBootstrap(cached);
       setBootstrapError(null);
       const localDraft = readPreferredAppStateDraft(auth.userId);
-      if (
-        localDraft &&
-        hasMeaningfulAppState(localDraft.state) &&
-        (!cached.updatedAt || localDraft.updatedAt > cached.updatedAt)
-      ) {
-        hydrateState(localDraft.state);
-      } else {
-        hydrateState(cached.consentCompleted && cached.state ? cached.state : emptyState());
-      }
+      hydrateState(
+        pickHydrationState({
+          localDraft,
+          remoteState: cached.consentCompleted && cached.state ? cached.state : null,
+          remoteUpdatedAt: cached.updatedAt,
+        })
+      );
     } else {
       setBootstrap(null);
       setBootstrapError(null);

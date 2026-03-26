@@ -1,0 +1,791 @@
+import { NextRequest } from "next/server";
+import { addDays, fromISODate, toISODate, todayISO, type ISODate } from "@/lib/date";
+import type { AIRecoveryPayload } from "@/lib/aiRecoveryContract";
+import type {
+  AIRecoveryPlannerModules,
+  AIRecoveryPlannerApiError,
+  AIRecoveryPlannerApiSuccess,
+  AIRecoveryPlannerPayload,
+} from "@/lib/aiRecoveryPlanner";
+import type { Language } from "@/lib/i18n";
+import { hasHealthInput } from "@/lib/healthRecords";
+import type { AppState } from "@/lib/model";
+import {
+  buildRecoveryOrderProgressId,
+  normalizeRecoveryPhase,
+  type RecoveryPhase,
+} from "@/lib/recoveryPhases";
+import type { PlannerContext } from "@/lib/recoveryPlanner";
+import {
+  buildRecoveryStateWindowPayload,
+  countHealthRecordedDaysFromRawPayload,
+  isRecord,
+  normalizeRecoveryRouteState,
+  safeHasCompletedServiceConsent,
+  safeLoadAIContent,
+  safeLoadSubscription,
+  safeLoadUserState,
+  safeReadUserId,
+  safeSaveAIContent,
+} from "@/lib/server/recoveryRouteRuntime";
+import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
+import type { Shift } from "@/lib/types";
+import type { Json } from "@/types/supabase";
+
+export const runtime = "edge";
+export const dynamic = "force-dynamic";
+// Pin Edge Function to US/EU regions so outbound OpenAI calls never originate
+// from Asian PoPs whose egress IPs may be blocked by OpenAI's region policy.
+export const preferredRegion = ["iad1", "sfo1", "fra1"];
+const DEFAULT_ORDER_COUNT = 3;
+
+function toLanguage(value: string | null): Language | null {
+  if (value === "ko" || value === "en") return value;
+  return null;
+}
+
+function normalizeRequestedOrderCount(value: unknown): number | null {
+  if (value == null || String(value).trim() === "") return DEFAULT_ORDER_COUNT;
+  const parsed = Math.round(Number(value));
+  if (!Number.isFinite(parsed)) return DEFAULT_ORDER_COUNT;
+  return Math.max(1, Math.min(5, parsed));
+}
+
+function readShift(schedule: AppState["schedule"], iso: ISODate): Shift | null {
+  const shift = schedule?.[iso] as Shift | undefined;
+  return shift ?? null;
+}
+
+function hasReliableEstimatedSignal(v: { engine?: { inputReliability?: number; daysSinceAnyInput?: number | null } } | null) {
+  if (!v) return false;
+  const reliability = v.engine?.inputReliability ?? 0;
+  const gap = v.engine?.daysSinceAnyInput ?? 99;
+  return reliability >= 0.45 && gap <= 2;
+}
+
+function collectRecordedDates(state: AppState): ISODate[] {
+  const dates = new Set<ISODate>();
+  const keys = new Set<string>([...Object.keys(state.bio ?? {}), ...Object.keys(state.emotions ?? {})]);
+  for (const raw of keys) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) continue;
+    const iso = raw as ISODate;
+    if (hasHealthInput(state.bio?.[iso] ?? null, state.emotions?.[iso] ?? null)) {
+      dates.add(iso);
+    }
+  }
+  return Array.from(dates).sort();
+}
+
+function bad(status: number, error: string) {
+  const safeError = String(error ?? "unknown_error")
+    .replace(/\s+/g, " ")
+    .replace(/[^\x20-\x7E가-힣ㄱ-ㅎㅏ-ㅣ.,:;!?()[\]{}'"`~@#$%^&*_\-+=/\\|<>]/g, "")
+    .slice(0, 220);
+  const body: AIRecoveryPlannerApiError = { ok: false, error: safeError || "unknown_error" };
+  return jsonNoStore(body, { status });
+}
+
+async function safeReadRecoveryOrderCompletedIds(userId: string, dateISO: ISODate): Promise<string[]> {
+  try {
+    const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!serviceRole || !supabaseUrl) return [];
+    const { readRecoveryOrderCompletedIds } = await import("@/lib/server/recoveryOrderStore");
+    return await readRecoveryOrderCompletedIds(userId, dateISO);
+  } catch {
+    return [];
+  }
+}
+
+function asLanguage(value: unknown): Language | null {
+  return value === "ko" || value === "en" ? value : null;
+}
+
+function asPlannerContext(value: unknown): PlannerContext | null {
+  if (!isRecord(value)) return null;
+  const focus = isRecord(value.focusFactor)
+    ? {
+        key: typeof value.focusFactor.key === "string" ? value.focusFactor.key : "",
+        label: typeof value.focusFactor.label === "string" ? value.focusFactor.label : "",
+        pct: typeof value.focusFactor.pct === "number" ? value.focusFactor.pct : 0,
+      }
+    : null;
+
+  return {
+    focusFactor: focus && focus.key && focus.label ? (focus as PlannerContext["focusFactor"]) : null,
+    primaryAction: typeof value.primaryAction === "string" ? value.primaryAction : null,
+    avoidAction: typeof value.avoidAction === "string" ? value.avoidAction : null,
+    nextDuty: typeof value.nextDuty === "string" ? (value.nextDuty as Shift) : null,
+    nextDutyDate: typeof value.nextDutyDate === "string" ? (value.nextDutyDate as ISODate) : null,
+    plannerTone:
+      value.plannerTone === "warning" || value.plannerTone === "noti" || value.plannerTone === "stable"
+        ? value.plannerTone
+        : "stable",
+    ordersTop3: Array.isArray(value.ordersTop3)
+      ? value.ordersTop3
+          .map((item, index) => {
+            if (!isRecord(item)) return null;
+            return {
+              rank: typeof item.rank === "number" ? item.rank : index + 1,
+              title: typeof item.title === "string" ? item.title : "",
+              text: typeof item.text === "string" ? item.text : "",
+            };
+          })
+          .filter((item): item is PlannerContext["ordersTop3"][number] => Boolean(item && item.title && item.text))
+      : [],
+  };
+}
+
+function asProfileSnapshot(value: unknown): AIRecoveryPlannerPayload["profileSnapshot"] | null {
+  if (!isRecord(value)) return null;
+  return {
+    chronotype: Number.isFinite(Number(value.chronotype)) ? Number(value.chronotype) : 0.5,
+    caffeineSensitivity: Number.isFinite(Number(value.caffeineSensitivity)) ? Number(value.caffeineSensitivity) : 1,
+  };
+}
+
+function normalizeProfileSnapshot(value: AIRecoveryPlannerPayload["profileSnapshot"]) {
+  const chronotypeRaw = Number(value?.chronotype ?? 0.5);
+  const sensitivityRaw = Number(value?.caffeineSensitivity ?? 1);
+  const profile = {
+    chronotype: Math.max(0, Math.min(1, Number.isFinite(chronotypeRaw) ? chronotypeRaw : 0.5)),
+    caffeineSensitivity: Math.max(0.5, Math.min(1.5, Number.isFinite(sensitivityRaw) ? sensitivityRaw : 1)),
+  };
+  return {
+    chronotype: Number(profile.chronotype.toFixed(2)),
+    caffeineSensitivity: Number(profile.caffeineSensitivity.toFixed(2)),
+  };
+}
+
+function asRecoveryPayload(candidate: unknown, fallbackLang: Language): AIRecoveryPayload | null {
+  if (!isRecord(candidate) || !isRecord(candidate.result)) return null;
+  if (typeof candidate.dateISO !== "string") return null;
+  const language = asLanguage(candidate.language) ?? fallbackLang;
+  const engine = candidate.engine === "rule" ? "rule" : "openai";
+  const generatedText = typeof candidate.generatedText === "string" ? candidate.generatedText : undefined;
+  if (engine === "openai" && !generatedText?.trim()) return null;
+  const plannerContext = asPlannerContext(candidate.plannerContext);
+  const profileSnapshot = asProfileSnapshot(candidate.profileSnapshot);
+  return {
+    dateISO: candidate.dateISO as ISODate,
+    language,
+    phase: normalizeRecoveryPhase(candidate.phase),
+    todayShift: (typeof candidate.todayShift === "string" ? candidate.todayShift : "OFF") as Shift,
+    nextShift: (typeof candidate.nextShift === "string" ? candidate.nextShift : null) as Shift | null,
+    todayVitalScore: typeof candidate.todayVitalScore === "number" ? candidate.todayVitalScore : null,
+    source: candidate.source === "local" ? "local" : "supabase",
+    engine,
+    model: typeof candidate.model === "string" ? candidate.model : null,
+    debug: typeof candidate.debug === "string" ? candidate.debug : null,
+    generatedText,
+    plannerContext: plannerContext ?? undefined,
+    profileSnapshot: profileSnapshot ?? undefined,
+    result: candidate.result as AIRecoveryPayload["result"],
+  };
+}
+
+function hasChecklistOrdersShape(value: unknown) {
+  if (!isRecord(value) || !isRecord(value.orders) || !Array.isArray(value.orders.items)) return false;
+  if (value.orders.items.length < 1 || value.orders.items.length > 5) return false;
+  return value.orders.items.every((item) => {
+    if (!isRecord(item)) return false;
+    return (
+      typeof item.id === "string" &&
+      item.id.length > 0 &&
+      typeof item.title === "string" &&
+      item.title.length > 0 &&
+      typeof item.body === "string" &&
+      item.body.length > 0 &&
+      typeof item.when === "string" &&
+      item.when.length > 0
+    );
+  });
+}
+
+function asPlannerPayload(candidate: unknown, fallbackLang: Language): AIRecoveryPlannerPayload | null {
+  if (!isRecord(candidate) || !isRecord(candidate.result)) return null;
+  if (typeof candidate.dateISO !== "string") return null;
+  if (!hasChecklistOrdersShape(candidate.result)) return null;
+  const language = asLanguage(candidate.language) ?? fallbackLang;
+  const engine = candidate.engine === "rule" ? "rule" : "openai";
+  const generatedText = typeof candidate.generatedText === "string" ? candidate.generatedText : undefined;
+  const explanationGeneratedText =
+    typeof candidate.explanationGeneratedText === "string" ? candidate.explanationGeneratedText : undefined;
+  if (engine === "openai" && (!generatedText?.trim() || !explanationGeneratedText?.trim())) return null;
+  const plannerContext = asPlannerContext(candidate.plannerContext);
+  const profileSnapshot = asProfileSnapshot(candidate.profileSnapshot);
+  return {
+    dateISO: candidate.dateISO as ISODate,
+    language,
+    phase: normalizeRecoveryPhase(candidate.phase),
+    requestedOrderCount: normalizeRequestedOrderCount(candidate.requestedOrderCount),
+    todayShift: (typeof candidate.todayShift === "string" ? candidate.todayShift : "OFF") as Shift,
+    nextShift: (typeof candidate.nextShift === "string" ? candidate.nextShift : null) as Shift | null,
+    todayVitalScore: typeof candidate.todayVitalScore === "number" ? candidate.todayVitalScore : null,
+    source: candidate.source === "local" ? "local" : "supabase",
+    engine,
+    model: typeof candidate.model === "string" ? candidate.model : null,
+    debug: typeof candidate.debug === "string" ? candidate.debug : null,
+    generatedText,
+    explanationGeneratedText,
+    plannerContext: plannerContext ?? undefined,
+    profileSnapshot: profileSnapshot ?? undefined,
+    result: candidate.result as AIRecoveryPlannerPayload["result"],
+  };
+}
+
+function isRequestedOrderCountCurrent(cached: number | null | undefined, requested: number | null) {
+  if (requested == null) return true;
+  return normalizeRequestedOrderCount(cached) === requested;
+}
+
+function describeNextDutyLabel(shift: Shift | null, language: Language) {
+  if (language === "en") {
+    if (shift === "D") return "the next day shift";
+    if (shift === "E") return "the next evening shift";
+    if (shift === "N") return "the next night shift";
+    if (shift === "M") return "the next middle shift";
+    return "the next duty";
+  }
+  if (shift === "D") return "다음 데이 근무";
+  if (shift === "E") return "다음 이브 근무";
+  if (shift === "N") return "다음 나이트 근무";
+  if (shift === "M") return "다음 미들 근무";
+  return "다음 근무";
+}
+
+function isPlannerContextCurrent(cached: PlannerContext | null | undefined, current: PlannerContext) {
+  if (!cached) return false;
+  if ((cached.focusFactor?.key ?? null) !== (current.focusFactor?.key ?? null)) return false;
+  if ((cached.primaryAction ?? null) !== (current.primaryAction ?? null)) return false;
+  if ((cached.avoidAction ?? null) !== (current.avoidAction ?? null)) return false;
+  if ((cached.nextDuty ?? null) !== (current.nextDuty ?? null)) return false;
+  if ((cached.nextDutyDate ?? null) !== (current.nextDutyDate ?? null)) return false;
+  if (cached.plannerTone !== current.plannerTone) return false;
+
+  const cachedOrders = cached.ordersTop3 ?? [];
+  const currentOrders = current.ordersTop3 ?? [];
+  if (cachedOrders.length !== currentOrders.length) return false;
+  return cachedOrders.every((item, index) => {
+    const target = currentOrders[index];
+    return Boolean(target && item.rank === target.rank && item.title === target.title && item.text === target.text);
+  });
+}
+
+function isProfileSnapshotCurrent(
+  cached: AIRecoveryPlannerPayload["profileSnapshot"] | null | undefined,
+  current: NonNullable<AIRecoveryPlannerPayload["profileSnapshot"]>
+) {
+  if (!cached) return false;
+  return (
+    Number(cached.chronotype.toFixed(2)) === current.chronotype &&
+    Number(cached.caffeineSensitivity.toFixed(2)) === current.caffeineSensitivity
+  );
+}
+
+function readPlannerVariants(raw: unknown, today: ISODate): Partial<Record<Language, AIRecoveryPlannerPayload>> {
+  if (!isRecord(raw)) return {};
+  const variantsNode = isRecord(raw.plannerVariants) ? raw.plannerVariants : null;
+  if (!variantsNode) return {};
+
+  const ko = asPlannerPayload(variantsNode.ko, "ko");
+  const en = asPlannerPayload(variantsNode.en, "en");
+  const variants: Partial<Record<Language, AIRecoveryPlannerPayload>> = {};
+  if (ko && ko.dateISO === today) variants.ko = ko;
+  if (en && en.dateISO === today) variants.en = en;
+  return variants;
+}
+
+function readRecoveryVariants(raw: unknown, today: ISODate): Partial<Record<Language, AIRecoveryPayload>> {
+  if (!isRecord(raw)) return {};
+  const variantsNode = isRecord(raw.variants) ? raw.variants : null;
+  if (!variantsNode) return {};
+
+  const ko = asRecoveryPayload(variantsNode.ko, "ko");
+  const en = asRecoveryPayload(variantsNode.en, "en");
+  const variants: Partial<Record<Language, AIRecoveryPayload>> = {};
+  if (ko && ko.dateISO === today) variants.ko = ko;
+  if (en && en.dateISO === today) variants.en = en;
+  return variants;
+}
+
+function readRecoveryPhasePayload(
+  raw: unknown,
+  today: ISODate,
+  lang: Language,
+  phase: RecoveryPhase
+): AIRecoveryPayload | null {
+  if (!isRecord(raw)) return phase === "start" ? readRecoveryVariants(raw, today)[lang] ?? null : null;
+  const phaseNode = isRecord(raw.recoveryPhaseVariants) ? raw.recoveryPhaseVariants : null;
+  const langNode = phaseNode && isRecord(phaseNode[lang]) ? phaseNode[lang] : null;
+  const direct = langNode ? asRecoveryPayload(langNode[phase], lang) : null;
+  if (direct && direct.dateISO === today && direct.engine === "openai") return direct;
+  const legacy = phase === "start" ? readRecoveryVariants(raw, today)[lang] ?? null : null;
+  return legacy?.engine === "openai" ? legacy : null;
+}
+
+function readPlannerPhasePayload(
+  raw: unknown,
+  today: ISODate,
+  lang: Language,
+  phase: RecoveryPhase
+): AIRecoveryPlannerPayload | null {
+  if (!isRecord(raw)) return phase === "start" ? readPlannerVariants(raw, today)[lang] ?? null : null;
+  const phaseNode = isRecord(raw.plannerPhaseVariants) ? raw.plannerPhaseVariants : null;
+  const langNode = phaseNode && isRecord(phaseNode[lang]) ? phaseNode[lang] : null;
+  const direct = langNode ? asPlannerPayload(langNode[phase], lang) : null;
+  if (direct && direct.dateISO === today && direct.engine === "openai") return direct;
+  const legacy = phase === "start" ? readPlannerVariants(raw, today)[lang] ?? null : null;
+  return legacy?.engine === "openai" ? legacy : null;
+}
+
+type RecoveryThreadSummary = {
+  startRecoveryHeadline?: string | null;
+  startFocusLabel?: string | null;
+  startPrimaryAction?: string | null;
+  startAvoidAction?: string | null;
+  totalStartOrderCount?: number;
+  completedStartOrderCount?: number;
+  completedStartOrders?: Array<{ id: string; title: string }>;
+  pendingStartOrders?: Array<{ id: string; title: string }>;
+}
+
+function buildRecoveryThread(
+  startPlanner: AIRecoveryPlannerPayload | null,
+  completedIds: string[]
+): RecoveryThreadSummary | null {
+  if (!startPlanner) return null;
+  const completed = new Set(completedIds);
+  const startOrders = startPlanner.result.orders.items ?? [];
+  const completedStartOrders = startOrders
+    .filter((item) => completed.has(buildRecoveryOrderProgressId("start", item.id)))
+    .map((item) => ({ id: item.id, title: item.title }));
+  const pendingStartOrders = startOrders
+    .filter((item) => !completed.has(buildRecoveryOrderProgressId("start", item.id)))
+    .map((item) => ({ id: item.id, title: item.title }));
+
+  return {
+    startRecoveryHeadline: startPlanner.result.explanation.recovery.headline ?? null,
+    startFocusLabel: startPlanner.plannerContext?.focusFactor?.label ?? null,
+    startPrimaryAction: startPlanner.plannerContext?.primaryAction ?? null,
+    startAvoidAction: startPlanner.plannerContext?.avoidAction ?? null,
+    totalStartOrderCount: startOrders.length,
+    completedStartOrderCount: completedStartOrders.length,
+    completedStartOrders,
+    pendingStartOrders,
+  };
+}
+
+async function handlePlanner(
+  req: NextRequest,
+  options?: { allowGenerate?: boolean; requestedOrderCount?: number | null; forceGenerate?: boolean; phase?: RecoveryPhase }
+) {
+  const allowGenerate = options?.allowGenerate ?? false;
+  const requestedOrderCount = normalizeRequestedOrderCount(options?.requestedOrderCount);
+  const forceGenerate = options?.forceGenerate ?? false;
+  const url = new URL(req.url);
+  const langHint = toLanguage(url.searchParams.get("lang"));
+  const phase = normalizeRecoveryPhase(options?.phase ?? url.searchParams.get("phase"));
+  const cacheOnly = !allowGenerate || url.searchParams.get("cacheOnly") === "1";
+
+  try {
+    const userId = await safeReadUserId(req);
+    if (!userId) return bad(401, "login_required");
+    if (!(await safeHasCompletedServiceConsent(userId))) return bad(403, "consent_required");
+
+    const subscription = await safeLoadSubscription(userId);
+    if (subscription && !subscription.entitlements?.recoveryPlannerAI) {
+      return bad(402, "paid_plan_required_recovery_planner_ai");
+    }
+
+    const row = await safeLoadUserState(userId);
+    if (!row?.payload) {
+      if (cacheOnly) return jsonNoStore({ ok: true, data: null } satisfies AIRecoveryPlannerApiSuccess);
+      return bad(404, "state_not_found");
+    }
+
+    const today = todayISO();
+
+    // ── FAST PATH: cacheOnly → DB 조회만, CPU 연산 완전 건너뜀 ──
+    // computeVitalsRange(historyStart→today)는 수백 날짜를 동기 처리하므로
+    // Cloudflare Workers CPU 시간 제한을 초과하면 try-catch 밖에서 Worker가
+    // 강제 종료되어 500이 반환됨. cacheOnly 요청은 캐시만 조회하고 즉시 반환한다.
+    if (cacheOnly) {
+      const rawPayload = isRecord(row.payload) ? (row.payload as Record<string, unknown>) : {};
+      const rawLang = isRecord(rawPayload.settings)
+        ? (rawPayload.settings as Record<string, unknown>).language
+        : null;
+      const lang = (langHint ??
+        (rawLang === "ko" || rawLang === "en" ? (rawLang as Language) : null) ??
+        "ko") as Language;
+
+      const aiContent = await safeLoadAIContent(userId);
+      if (aiContent && aiContent.dateISO === today) {
+        const cached = readPlannerPhasePayload(aiContent.data, today, lang, phase);
+        if (cached) return jsonNoStore({ ok: true, data: cached } satisfies AIRecoveryPlannerApiSuccess);
+      }
+      return jsonNoStore({ ok: true, data: null } satisfies AIRecoveryPlannerApiSuccess);
+    }
+
+    // ── FULL PATH: non-cacheOnly (POST) 전용 ──
+    const [
+      { getAIRecoveryModelForTier },
+      {
+        buildAfterWorkMissingLabels,
+        buildRecoveryPhaseState,
+        getAfterWorkReadiness,
+        stripStartPhaseDynamicInputs,
+        stripStartPhaseDynamicInputsFromVitals,
+      },
+      { buildPlannerContext, buildPlannerTimelinePreview, normalizeProfileSettings },
+      { computeVitalsRange },
+      { buildExplanationModule, buildFallbackModules },
+      { generateAIRecovery },
+    ] = await Promise.all([
+      import("@/lib/billing/plans"),
+      import("@/lib/recoveryPhases"),
+      import("@/lib/recoveryPlanner"),
+      import("@/lib/vitals"),
+      import("@/lib/aiRecoveryPlanner"),
+      import("@/lib/aiRecovery"),
+    ]);
+    const aiRecoveryModel = getAIRecoveryModelForTier(subscription?.tier ?? "pro");
+    const recordedDays = countHealthRecordedDaysFromRawPayload(row.payload);
+    if (recordedDays < 3) return bad(403, "insights_locked_min_3_days");
+    const vitalsLookbackISO = toISODate(addDays(fromISODate(today), -90));
+    const state = normalizeRecoveryRouteState(buildRecoveryStateWindowPayload(row.payload, vitalsLookbackISO), null);
+    const lang = (langHint ?? state.settings.language ?? "ko") as Language;
+    const readiness = getAfterWorkReadiness(state, today);
+    if (phase === "after_work" && !readiness.ready) {
+      return bad(409, `after_work_inputs_required:${buildAfterWorkMissingLabels(readiness.recordedLabels).slice(0, 3).join(",")}`);
+    }
+    const phaseState = buildRecoveryPhaseState(state, today, phase);
+
+    // computeVitalsRange는 start 파라미터와 무관하게 state의 가장 오래된 데이터부터
+    // 순차 계산(EMA warmup)한다. 전체 state를 그대로 전달하면 1년치 데이터를 처리해
+    // Cloudflare Workers CPU 시간 제한을 초과하므로, 90일 슬라이싱된 state를 사용한다.
+    const vitalsState = phaseState;
+
+    const start = toISODate(addDays(fromISODate(today), -13));
+    const vitals14 = computeVitalsRange({
+      state: vitalsState,
+      start,
+      end: today,
+      disableTodayCarryISO: phase === "start" ? today : null,
+    });
+    const inputDateSet = new Set<ISODate>();
+    for (let i = 0; i < 14; i++) {
+      const iso = toISODate(addDays(fromISODate(start), i));
+      const bio = phaseState.bio?.[iso] ?? null;
+      const emotion = phaseState.emotions?.[iso] ?? null;
+      if (hasHealthInput(bio, emotion)) inputDateSet.add(iso);
+    }
+
+    const start7 = toISODate(addDays(fromISODate(today), -6));
+    const vitals7 = vitals14.filter(
+      (v) => v.dateISO >= start7 && (inputDateSet.has(v.dateISO) || hasReliableEstimatedSignal(v))
+    );
+    const prevWeek = vitals14.filter(
+      (v) => v.dateISO < start7 && (inputDateSet.has(v.dateISO) || hasReliableEstimatedSignal(v))
+    );
+    const todayVitalCandidate = vitals14.find((v) => v.dateISO === today) ?? null;
+    const todayHasInput = inputDateSet.has(today) || hasReliableEstimatedSignal(todayVitalCandidate);
+    const todayShift = (readShift(phaseState.schedule, today) ?? todayVitalCandidate?.shift ?? "OFF") as Shift;
+    const phaseTodayVitalCandidate = phase === "start" ? stripStartPhaseDynamicInputs(todayVitalCandidate) : todayVitalCandidate;
+    const todayVital = todayHasInput && phaseTodayVitalCandidate ? { ...phaseTodayVitalCandidate, shift: todayShift } : null;
+    const recordedDates = collectRecordedDates(phaseState);
+    // 최대 90일만 처리: 전체 기록 처리 시 Cloudflare Workers CPU 시간 제한 초과
+    const ninetyDaysAgo = toISODate(addDays(fromISODate(today), -90));
+    const historyStart =
+      recordedDates[0] && recordedDates[0] < ninetyDaysAgo ? ninetyDaysAgo : (recordedDates[0] ?? today);
+    const historyDateSet = new Set(recordedDates);
+    const allVitalsRaw = computeVitalsRange({
+      state: vitalsState,
+      start: historyStart,
+      end: today,
+      disableTodayCarryISO: phase === "start" ? today : null,
+    }).filter(
+      (v) => historyDateSet.has(v.dateISO) || hasReliableEstimatedSignal(v)
+    );
+    const phaseVitals7 = phase === "start" ? stripStartPhaseDynamicInputsFromVitals(vitals7, today) : vitals7;
+    const phasePrevWeek = phase === "start" ? stripStartPhaseDynamicInputsFromVitals(prevWeek, today) : prevWeek;
+    const allVitals = phase === "start" ? stripStartPhaseDynamicInputsFromVitals(allVitalsRaw, today) : allVitalsRaw;
+
+    const plannerContext = buildPlannerContext({
+      pivotISO: today,
+      schedule: phaseState.schedule,
+      todayVital,
+      factorVitals: phaseVitals7.length ? phaseVitals7 : todayVital ? [todayVital] : [],
+      profile: phaseState.settings?.profile,
+    });
+    const nextShift = plannerContext.nextDuty;
+    const profile = normalizeProfileSettings(phaseState.settings?.profile);
+    const profileSnapshot = normalizeProfileSnapshot(profile);
+
+    const aiContent = await safeLoadAIContent(userId);
+    const cachedRecovery = aiContent && aiContent.dateISO === today ? readRecoveryPhasePayload(aiContent.data, today, lang, phase) : null;
+    const cachedStartPlanner =
+      aiContent && aiContent.dateISO === today ? readPlannerPhasePayload(aiContent.data, today, lang, "start") : null;
+    const startCompletedIds =
+      phase === "after_work" && cachedStartPlanner
+        ? await (async () => {
+            try {
+              return await safeReadRecoveryOrderCompletedIds(userId, today);
+            } catch {
+              return [];
+            }
+          })()
+        : [];
+    const recoveryThread = phase === "after_work" ? buildRecoveryThread(cachedStartPlanner, startCompletedIds) : null;
+    if (phase === "after_work" && !cachedStartPlanner) {
+      return bad(409, "start_recovery_required_before_after_work");
+    }
+    if (!forceGenerate && aiContent && aiContent.dateISO === today) {
+      const direct = readPlannerPhasePayload(aiContent.data, today, lang, phase);
+      const directIsCurrent =
+        direct &&
+        direct.phase === phase &&
+        isPlannerContextCurrent(direct.plannerContext, plannerContext) &&
+        isProfileSnapshotCurrent(direct.profileSnapshot, profileSnapshot) &&
+        isRequestedOrderCountCurrent(direct.requestedOrderCount, requestedOrderCount);
+
+      if (directIsCurrent) {
+        return jsonNoStore({ ok: true, data: direct } satisfies AIRecoveryPlannerApiSuccess);
+      }
+    }
+
+    try {
+      const {
+        generateAIRecoveryPlannerModulesWithOpenAI,
+        generateAIRecoveryWithOpenAI,
+      } = await import("@/lib/server/openaiRecovery");
+      let plannerDebug: string | null = null;
+      let explanationDebug: string | null = null;
+      let plannerModel: string | null = null;
+      let explanationResult: AIRecoveryPayload["result"];
+      let explanationGeneratedText: string | undefined;
+      let explanationModel: string | null = null;
+      const cachedRecoveryIsCurrent =
+        cachedRecovery &&
+        cachedRecovery.engine === "openai" &&
+        cachedRecovery.phase === phase &&
+        isPlannerContextCurrent(cachedRecovery.plannerContext, plannerContext) &&
+        isProfileSnapshotCurrent(cachedRecovery.profileSnapshot, profileSnapshot);
+
+      if (cachedRecoveryIsCurrent) {
+        explanationResult = cachedRecovery.result;
+        explanationGeneratedText = cachedRecovery.generatedText;
+        explanationModel = cachedRecovery.model;
+        explanationDebug = cachedRecovery.debug ?? null;
+      } else {
+        const explanationAI = await generateAIRecoveryWithOpenAI({
+          language: lang,
+          todayISO: today,
+          modelOverride: aiRecoveryModel,
+          phase,
+          todayShift,
+          nextShift,
+          todayVital,
+          vitals7: phaseVitals7,
+          prevWeekVitals: phasePrevWeek,
+          allVitals,
+          plannerContext,
+          profile,
+          recoveryThread,
+        });
+        explanationResult = explanationAI.result;
+        explanationGeneratedText = explanationAI.generatedText;
+        explanationModel = explanationAI.model;
+      }
+
+      let plannerModules: AIRecoveryPlannerModules;
+      let plannerGeneratedText: string | undefined;
+      const plannerAI = await generateAIRecoveryPlannerModulesWithOpenAI({
+        language: lang,
+        requestedOrderCount,
+        todayISO: today,
+        modelOverride: aiRecoveryModel,
+        phase,
+        todayShift,
+        nextShift,
+        todayVital,
+        vitals7: phaseVitals7,
+        prevWeekVitals: phasePrevWeek,
+        allVitals,
+        plannerContext,
+        profile,
+        recoveryThread,
+        recoveryResult: explanationResult,
+      });
+      plannerModules = plannerAI.result;
+      plannerGeneratedText = plannerAI.generatedText;
+      plannerModel = plannerAI.model;
+
+      const todayVitalScore = todayVital ? Math.round(Math.min(todayVital.body.value, todayVital.mental.ema)) : null;
+      const model = explanationModel ?? plannerModel ?? null;
+      const explanationPayload: AIRecoveryPayload = {
+        dateISO: today,
+        language: lang,
+        phase,
+        todayShift,
+        nextShift,
+        todayVitalScore,
+        source: "supabase",
+        engine: "openai",
+        model: explanationModel,
+        debug: explanationDebug,
+        generatedText: explanationGeneratedText,
+        plannerContext,
+        profileSnapshot,
+        result: explanationResult,
+      };
+      const payload: AIRecoveryPlannerPayload = {
+        dateISO: today,
+        language: lang,
+        phase,
+        requestedOrderCount,
+        todayShift,
+        nextShift,
+        todayVitalScore,
+        source: "supabase",
+        engine: "openai",
+        model,
+        debug: [plannerDebug, explanationDebug].filter(Boolean).join("|") || null,
+        generatedText: plannerGeneratedText,
+        explanationGeneratedText,
+        plannerContext,
+        profileSnapshot,
+        result: {
+          ...plannerModules,
+          explanation: buildExplanationModule(explanationResult, lang),
+        },
+      };
+
+      const aiContentRecord = isRecord(aiContent?.data) ? (aiContent?.data as Record<string, unknown>) : {};
+      const previousRecoveryPhaseVariants =
+        isRecord(aiContentRecord.recoveryPhaseVariants) ? (aiContentRecord.recoveryPhaseVariants as Record<string, unknown>) : {};
+      const previousPlannerPhaseVariants =
+        isRecord(aiContentRecord.plannerPhaseVariants) ? (aiContentRecord.plannerPhaseVariants as Record<string, unknown>) : {};
+      const previousRecoveryLangNode =
+        isRecord(previousRecoveryPhaseVariants[lang]) ? (previousRecoveryPhaseVariants[lang] as Record<string, unknown>) : {};
+      const previousPlannerLangNode =
+        isRecord(previousPlannerPhaseVariants[lang]) ? (previousPlannerPhaseVariants[lang] as Record<string, unknown>) : {};
+      const legacyRecoveryVariants =
+        isRecord(aiContentRecord.variants) ? (aiContentRecord.variants as Record<string, unknown>) : {};
+      const legacyPlannerVariants =
+        isRecord(aiContentRecord.plannerVariants) ? (aiContentRecord.plannerVariants as Record<string, unknown>) : {};
+
+      const saveError = await safeSaveAIContent(userId, today, lang, {
+        dateISO: today,
+        generatedAt: Date.now(),
+        recoveryPhaseVariants: {
+          ...previousRecoveryPhaseVariants,
+          [lang]: {
+            ...previousRecoveryLangNode,
+            [phase]: explanationPayload,
+          },
+        },
+        plannerPhaseVariants: {
+          ...previousPlannerPhaseVariants,
+          [lang]: {
+            ...previousPlannerLangNode,
+            [phase]: payload,
+          },
+        },
+        ...(phase === "start"
+          ? {
+              variants: {
+                ...legacyRecoveryVariants,
+                [lang]: explanationPayload,
+              },
+              plannerVariants: {
+                ...legacyPlannerVariants,
+                [lang]: payload,
+              },
+            }
+          : {}),
+      } as Json);
+      if (saveError) {
+        payload.debug = payload.debug ? `${payload.debug}|${saveError}` : saveError;
+      }
+
+      return jsonNoStore({ ok: true, data: payload } satisfies AIRecoveryPlannerApiSuccess);
+    } catch (generationError: any) {
+      const explanationResult = generateAIRecovery(todayVital, phaseVitals7, phasePrevWeek, nextShift, lang);
+      const timelinePreview = buildPlannerTimelinePreview(todayShift, todayVital, profile);
+      const plannerModules = buildFallbackModules({
+        language: lang,
+        plannerContext,
+        nextDutyLabel: describeNextDutyLabel(nextShift, lang),
+        timelinePreview,
+      });
+      const todayVitalScore = todayVital ? Math.round(Math.min(todayVital.body.value, todayVital.mental.ema)) : null;
+      const payload: AIRecoveryPlannerPayload = {
+        dateISO: today,
+        language: lang,
+        phase,
+        requestedOrderCount,
+        todayShift,
+        nextShift,
+        todayVitalScore,
+        source: "local",
+        engine: "rule",
+        model: null,
+        debug: typeof generationError?.message === "string" ? generationError.message : "rule_fallback",
+        plannerContext,
+        profileSnapshot,
+        result: {
+          ...plannerModules,
+          explanation: buildExplanationModule(explanationResult, lang),
+        },
+      };
+      return jsonNoStore({ ok: true, data: payload } satisfies AIRecoveryPlannerApiSuccess);
+    }
+  } catch (err: any) {
+    try {
+      console.error("[Planner] handle_failed", {
+        cacheOnly,
+        phase,
+        requestedOrderCount,
+        error: err?.message ?? err,
+      });
+    } catch {
+      // Ignore logging failure.
+    }
+    return jsonNoStore({ ok: true, data: null } satisfies AIRecoveryPlannerApiSuccess);
+  }
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    return await handlePlanner(req, { allowGenerate: false });
+  } catch (err: any) {
+    console.error("[Planner GET] unhandled", err?.message ?? err);
+    return jsonNoStore({ ok: true, data: null } satisfies AIRecoveryPlannerApiSuccess);
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const sameOriginError = sameOriginRequestError(req);
+    if (sameOriginError) return bad(403, sameOriginError);
+    let requestedOrderCount: number | null = null;
+    let forceGenerate = false;
+    let phase: RecoveryPhase | null = null;
+    const rawBody = await req.text().catch(() => "");
+    if (rawBody.trim()) {
+      try {
+        const body = JSON.parse(rawBody);
+        requestedOrderCount = normalizeRequestedOrderCount((body as { orderCount?: unknown } | null)?.orderCount);
+        forceGenerate = Boolean((body as { forceGenerate?: unknown } | null)?.forceGenerate);
+        phase = normalizeRecoveryPhase((body as { phase?: unknown } | null)?.phase);
+      } catch {
+        return bad(400, "invalid_json");
+      }
+    }
+    return await handlePlanner(req, { allowGenerate: true, requestedOrderCount, forceGenerate, phase: phase ?? undefined });
+  } catch (err: any) {
+    console.error("[Planner POST] unhandled", err?.message ?? err);
+    return jsonNoStore({ ok: true, data: null } satisfies AIRecoveryPlannerApiSuccess);
+  }
+}

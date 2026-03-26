@@ -9,6 +9,7 @@ import { defaultSettings, emptyState } from "@/lib/model";
 import type { Shift } from "@/lib/types";
 import { autoAdjustMenstrualSettings } from "@/lib/menstrual";
 import { sanitizeStatePayload } from "@/lib/stateSanitizer";
+import { purgeAllAppStateDrafts } from "@/lib/appStateDraft";
 
 const STORAGE_KEY_BASE = "rnest_app_state_v1";
 const RESET_VERSION_KEY = "rnest_reset_version";
@@ -162,6 +163,7 @@ export function purgeAllLocalState() {
     if (key && key.startsWith(STORAGE_KEY_BASE)) keys.push(key);
   }
   for (const key of keys) window.localStorage.removeItem(key);
+  purgeAllAppStateDrafts();
   window.localStorage.setItem(RESET_VERSION_KEY, RESET_VERSION);
   applyLoadedState(emptyState(), { preserveNotebook: false });
   emit();

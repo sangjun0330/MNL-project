@@ -1,4 +1,5 @@
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
+import { summarizeAppState } from "@/lib/appStateIntegrity";
 
 type UserStateRow = {
   userId: string;
@@ -136,15 +137,38 @@ function mergeScheduleSafely(nextPayload: Record<string, unknown>, existingPaylo
   };
 }
 
+type SuspiciousPayloadDrop = {
+  key: "schedule" | "notes" | "emotions" | "bio" | "shiftNames";
+  existingCount: number;
+  nextCount: number;
+};
+
+function isSuspiciousProtectedDrop(existingCount: number, nextCount: number) {
+  if (existingCount <= 0 || nextCount >= existingCount) return false;
+  if (nextCount === 0) return true;
+  return existingCount >= 6 && existingCount - nextCount >= 5 && nextCount <= Math.floor(existingCount * 0.35);
+}
+
 function mergeProtectedMaps(nextPayload: Record<string, unknown>, existingPayload: Record<string, unknown>) {
   const protectedKeys = ["schedule", "notes", "emotions", "bio", "shiftNames"] as const;
   const merged: Record<string, unknown> = { ...nextPayload };
+  const suspiciousDrops: SuspiciousPayloadDrop[] = [];
   for (const key of protectedKeys) {
     const nextCount = countRecordKeys(nextPayload[key]);
     const existingCount = countRecordKeys(existingPayload[key]);
     // Prevent accidental wipe: keep existing non-empty maps when incoming map is empty.
     if (nextCount === 0 && existingCount > 0) {
       merged[key] = existingPayload[key];
+      suspiciousDrops.push({ key, existingCount, nextCount });
+      continue;
+    }
+
+    if (isSuspiciousProtectedDrop(existingCount, nextCount)) {
+      merged[key] = {
+        ...(isRecord(existingPayload[key]) ? existingPayload[key] : {}),
+        ...(isRecord(nextPayload[key]) ? nextPayload[key] : {}),
+      };
+      suspiciousDrops.push({ key, existingCount, nextCount });
     }
   }
 
@@ -160,7 +184,7 @@ function mergeProtectedMaps(nextPayload: Record<string, unknown>, existingPayloa
       };
     }
   }
-  return merged;
+  return { merged, suspiciousDrops };
 }
 
 function preserveMenstrualSettingsIfNeeded(
@@ -221,14 +245,20 @@ export async function saveUserState(input: { userId: string; payload: any }): Pr
     existingPayload = existing.payload;
   }
 
-  // Safety guard: never overwrite existing non-empty user maps with an empty payload by accident.
-  if (
-    isRecord(nextPayload) &&
-    existingPayload &&
-    hasMeaningfulUserData(existingPayload) &&
-    !hasMeaningfulUserData(nextPayload)
-  ) {
-    nextPayload = mergeProtectedMaps(nextPayload, existingPayload);
+  // Safety guard: never overwrite existing non-empty user maps with empty map payloads by accident,
+  // even when the incoming payload still contains other meaningful domains like schedule.
+  if (isRecord(nextPayload) && existingPayload && hasMeaningfulUserData(existingPayload)) {
+    const protectedMerge = mergeProtectedMaps(nextPayload, existingPayload);
+    nextPayload = protectedMerge.merged;
+    if (protectedMerge.suspiciousDrops.length) {
+      console.warn("[UserState] prevented_suspicious_payload_drop", {
+        userId: input.userId.slice(0, 8),
+        drops: protectedMerge.suspiciousDrops,
+        before: summarizeAppState(existingPayload),
+        incoming: summarizeAppState(input.payload),
+        after: summarizeAppState(nextPayload),
+      });
+    }
   }
 
   // Partial payload writers can omit app-state domains entirely; keep the existing domains in that case.
