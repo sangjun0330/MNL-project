@@ -109,19 +109,19 @@ export function ScheduleRecordSheet({
   const shiftNameDebounce = useRef<any>(null);
   const skipShiftNameSync = useRef(true);
 
-  // ✅ 필수 4개
+  // ✅ 필수 4개 — 기본값 없이 null로 시작, 사용자가 직접 선택해야 저장됨
   const [sleepText, setSleepText] = useState<string>("");
-  const [stress, setStress] = useState<StressLevel>(1);
+  const [stress, setStress] = useState<StressLevel | null>(null);
   const [caffeineText, setCaffeineText] = useState<string>("");
-  const [mood, setMood] = useState<MoodScore>(3);
+  const [mood, setMood] = useState<MoodScore | null>(null);
 
-  // ✅ 추가 기록
+  // ✅ 추가 기록 — 기본값 없이 null로 시작
   const [showMore, setShowMore] = useState(false);
   const [napText, setNapText] = useState<string>("");
-  const [activity, setActivity] = useState<ActivityLevel>(1);
-  const [symptomSeverity, setSymptomSeverity] = useState<0 | 1 | 2 | 3>(0);
-  const [menstrualStatus, setMenstrualStatus] = useState<"none" | "pms" | "period">("none");
-  const [menstrualFlow, setMenstrualFlow] = useState<0 | 1 | 2 | 3>(0);
+  const [activity, setActivity] = useState<ActivityLevel | null>(null);
+  const [symptomSeverity, setSymptomSeverity] = useState<0 | 1 | 2 | 3 | null>(null);
+  const [menstrualStatus, setMenstrualStatus] = useState<"none" | "pms" | "period" | null>(null);
+  const [menstrualFlow, setMenstrualFlow] = useState<0 | 1 | 2 | 3 | null>(null);
   const [workEventTags, setWorkEventTags] = useState<string[]>([]);
   const [workEventCustomTag, setWorkEventCustomTag] = useState<string>("");
   const [workEventNote, setWorkEventNote] = useState<string>("");
@@ -302,25 +302,29 @@ export function ScheduleRecordSheet({
     setCustomShiftMode(Boolean(curShiftName?.trim()));
     skipShiftNameSync.current = true;
 
-    // 필수 4개
+    // 필수 4개 — 저장된 값이 있을 때만 표시, 없으면 null(미선택)
     const bio = curBio ?? {};
     setSleepText(bio.sleepHours == null ? "" : String(bio.sleepHours));
-    setStress((bio.stress ?? 1) as StressLevel);
+    setStress(bio.stress != null ? (bio.stress as StressLevel) : null);
     setCaffeineText(bio.caffeineMg == null ? "" : String(bio.caffeineMg));
-    setMood((curEmotion?.mood ?? 3) as MoodScore);
+    setMood(curEmotion?.mood != null ? (curEmotion.mood as MoodScore) : null);
     skipSleepSync.current = true;
     skipCaffeineSync.current = true;
 
-    // 추가 기록
+    // 추가 기록 — 저장된 값이 있을 때만 표시
     setNapText((bio as any).napHours == null ? "" : String((bio as any).napHours));
-    setActivity((bio.activity ?? 1) as ActivityLevel);
-    setSymptomSeverity((Number((bio as any).symptomSeverity ?? 0) as any) as 0 | 1 | 2 | 3);
+    setActivity(bio.activity != null ? (bio.activity as ActivityLevel) : null);
+    setSymptomSeverity((bio as any).symptomSeverity != null ? (Number((bio as any).symptomSeverity) as 0 | 1 | 2 | 3) : null);
     setMenstrualStatus(
       bio.menstrualStatus === "pms" || bio.menstrualStatus === "period"
         ? bio.menstrualStatus
-        : (Number((bio as any).menstrualFlow ?? 0) > 0 ? "period" : "none")
+        : (bio as any).menstrualFlow != null && Number((bio as any).menstrualFlow) > 0
+          ? "period"
+          : bio.menstrualStatus != null || (bio as any).menstrualFlow != null
+            ? "none"
+            : null
     );
-    setMenstrualFlow((clamp(Number((bio as any).menstrualFlow ?? 0), 0, 3) as any) as 0 | 1 | 2 | 3);
+    setMenstrualFlow((bio as any).menstrualFlow != null ? (clamp(Number((bio as any).menstrualFlow), 0, 3) as 0 | 1 | 2 | 3) : null);
     setWorkEventTags(Array.isArray((bio as any).workEventTags) ? normalizeWorkEventTags((bio as any).workEventTags as string[]) : []);
     setWorkEventCustomTag("");
     setWorkEventNote(typeof (bio as any).workEventNote === "string" ? String((bio as any).workEventNote) : "");
@@ -527,18 +531,20 @@ export function ScheduleRecordSheet({
   const setMenstrualStatusQuick = (value: string) => {
     const nextStatus = (value === "pms" || value === "period" ? value : "none") as "none" | "pms" | "period";
     setMenstrualStatus(nextStatus);
+    const currentFlow = menstrualFlow ?? 0;
     const nextFlow =
       nextStatus === "period"
-        ? (menstrualFlow === 0 ? 1 : menstrualFlow)
+        ? (currentFlow === 0 ? 1 : currentFlow)
         : 0;
-    if (nextFlow !== menstrualFlow) setMenstrualFlow(nextFlow);
+    if (nextFlow !== currentFlow) setMenstrualFlow(nextFlow);
     saveMenstrualNow(nextStatus, nextFlow);
   };
 
   const setMenstrualFlowQuick = (value: 0 | 1 | 2 | 3) => {
     setMenstrualFlow(value);
-    const nextStatus = value > 0 ? "period" : menstrualStatus;
-    if (nextStatus !== menstrualStatus) setMenstrualStatus(nextStatus);
+    const currentStatus = menstrualStatus ?? "none";
+    const nextStatus = value > 0 ? "period" : currentStatus;
+    if (nextStatus !== currentStatus) setMenstrualStatus(nextStatus);
     saveMenstrualNow(nextStatus, value);
   };
 
@@ -841,7 +847,7 @@ export function ScheduleRecordSheet({
               </div>
               <div className="mt-2 flex flex-wrap gap-2">
                 {[0, 0.5, 1, 1.5, 2, 3].map((h) => {
-                  const active = Number(napText) === h;
+                  const active = napText.trim() !== "" && Number(napText) === h;
                   return (
                     <button
                       key={h}
@@ -862,7 +868,7 @@ export function ScheduleRecordSheet({
             {/* 스트레스 */}
             <div className="mt-4">
               <div className="mb-2 text-[12px] font-semibold text-ios-muted">{t("스트레스")}</div>
-              <Segmented value={String(stress) as any} options={stressOptions as any} onChange={setStressQuick} />
+              <Segmented value={stress != null ? String(stress) : ("" as any)} options={stressOptions as any} onChange={setStressQuick} />
             </div>
 
             {/* 카페인 */}
@@ -878,7 +884,7 @@ export function ScheduleRecordSheet({
               <div className="mt-3 flex flex-wrap gap-2">
                 {[0, 1, 2, 3, 4].map((cups) => {
                   const mg = cups * 120;
-                  const active = Number(caffeineText) === mg;
+                  const active = caffeineText.trim() !== "" && Number(caffeineText) === mg;
                   return (
                     <button
                       key={cups}
@@ -919,7 +925,7 @@ export function ScheduleRecordSheet({
               <div className="mb-2 flex items-center justify-between gap-3">
                 <div className="min-w-0 text-[12px] font-semibold text-ios-muted">{t("기분")}</div>
                 <div className="shrink-0 text-[12px] font-semibold">
-                  {moodEmoji(mood)} {mood}/5
+                  {mood != null ? `${moodEmoji(mood)} ${mood}/5` : "—"}
                 </div>
               </div>
               <div className="grid grid-cols-5 gap-2">
@@ -1058,7 +1064,7 @@ export function ScheduleRecordSheet({
                 {/* 활동량 */}
                 <div>
                   <div className="mb-2 text-[12px] font-semibold text-ios-muted">{t("활동량")}</div>
-                  <Segmented value={String(activity) as any} options={activityOptions as any} onChange={setActivityQuick} />
+                  <Segmented value={activity != null ? String(activity) : ("" as any)} options={activityOptions as any} onChange={setActivityQuick} />
                 </div>
 
                 {/* 생리 증상 강도 */}
@@ -1070,7 +1076,7 @@ export function ScheduleRecordSheet({
                     </div>
                     <div className="grid grid-cols-4 gap-2">
                       {([0, 1, 2, 3] as const).map((v) => {
-                        const active = symptomSeverity === v;
+                        const active = symptomSeverity != null && symptomSeverity === v;
                         return (
                           <button
                             key={v}
@@ -1096,7 +1102,7 @@ export function ScheduleRecordSheet({
                       <div className="text-[11px] font-semibold text-ios-muted">{t("직접 기록이 우선 반영돼요")}</div>
                     </div>
                     <Segmented
-                      value={menstrualStatus as any}
+                      value={(menstrualStatus ?? "") as any}
                       options={menstrualStatusOptions as any}
                       onChange={setMenstrualStatusQuick}
                     />
@@ -1104,7 +1110,7 @@ export function ScheduleRecordSheet({
                       <div className="mb-2 text-[12px] font-semibold text-ios-muted">{t("출혈 강도")}</div>
                       <div className="grid grid-cols-4 gap-2">
                         {([0, 1, 2, 3] as const).map((v) => {
-                          const active = menstrualFlow === v;
+                          const active = menstrualFlow != null && menstrualFlow === v;
                           return (
                             <button
                               key={v}

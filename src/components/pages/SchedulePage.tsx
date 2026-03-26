@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { ISODate } from "@/lib/date";
 import { addDays, endOfMonth, formatKoreanDate, startOfMonth, toISODate, fromISODate, todayISO } from "@/lib/date";
 import { useAppStore } from "@/lib/store";
@@ -176,32 +176,37 @@ export function SchedulePage() {
     );
   }, [selected]);
 
-  // URL 파라미터로 자동 기록 열기
+  // URL 파라미터로 자동 기록 열기 — useSearchParams로 반응형
+  const searchParams = useSearchParams();
+  const openHealthLogParam = searchParams.get("openHealthLog");
+  const focusParam = searchParams.get("focus");
+
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-    const openHealthLog = params.get("openHealthLog");
-    if (!openHealthLog) return;
-    const focus = params.get("focus");
-    const guardKey = `${openHealthLog}:${focus ?? ""}`;
+    if (!openHealthLogParam) return;
+    const guardKey = `${openHealthLogParam}:${focusParam ?? ""}:${Date.now()}`;
     if (autoOpenGuard.current === guardKey) return;
     autoOpenGuard.current = guardKey;
     const today = todayISO();
     const yesterday = toISODate(addDays(fromISODate(today), -1));
     const iso =
-      openHealthLog === "today"
+      openHealthLogParam === "today"
         ? today
-        : openHealthLog === "yesterday"
+        : openHealthLogParam === "yesterday"
           ? yesterday
-          : /^\d{4}-\d{2}-\d{2}$/.test(openHealthLog)
-            ? (openHealthLog as ISODate)
+          : /^\d{4}-\d{2}-\d{2}$/.test(openHealthLogParam)
+            ? (openHealthLogParam as ISODate)
             : null;
     if (!iso) return;
     setSelected(iso);
-    setSleepFirstMode(iso === today && focus === "sleep");
-    setOpenLog(true);
-    window.history.replaceState(window.history.state, "", "/schedule");
-  }, []);
+    setSleepFirstMode(iso === today && focusParam === "sleep");
+    // 약간의 지연을 주어 컴포넌트 마운트 후 시트가 열리도록
+    requestAnimationFrame(() => {
+      setOpenLog(true);
+    });
+    if (typeof window !== "undefined") {
+      window.history.replaceState(window.history.state, "", "/schedule");
+    }
+  }, [openHealthLogParam, focusParam]);
 
   // 월간 범위
   const range = useMemo(() => ({
@@ -233,6 +238,13 @@ export function SchedulePage() {
     return m;
   }, [vitals, store.bio, store.emotions, canShowVitals]);
 
+  // ── 3교대 패턴 ON/OFF ──────────────────────────────────
+  const patternEnabled = Boolean(store.settings.schedulePatternEnabled ?? true);
+  const effectiveSchedule = useMemo(
+    () => (patternEnabled ? store.schedule : ({} as typeof store.schedule)),
+    [patternEnabled, store.schedule]
+  );
+
   // ── 월간 통계 ──────────────────────────────────────────
   const monthlyStats = useMemo(() => {
     const shiftCounts: Partial<Record<string, number>> = {};
@@ -246,7 +258,7 @@ export function SchedulePage() {
     for (let d = new Date(start); d <= end; d = addDays(d, 1)) {
       const iso = toISODate(d);
       totalDays++;
-      const shift = store.schedule[iso];
+      const shift = effectiveSchedule[iso];
       if (shift) shiftCounts[shift] = (shiftCounts[shift] ?? 0) + 1;
       const bio = store.bio?.[iso];
       const emo = store.emotions?.[iso];
@@ -257,10 +269,10 @@ export function SchedulePage() {
       }
     }
     return { shiftCounts, sleepAvg: sleepCount > 0 ? sleepSum / sleepCount : null, recordCount, totalDays };
-  }, [range, store.schedule, store.bio, store.emotions]);
+  }, [range, effectiveSchedule, store.bio, store.emotions]);
 
   // ── 선택된 날짜 데이터 ──────────────────────────────────
-  const selShift = store.schedule[selected];
+  const selShift = patternEnabled ? store.schedule[selected] : undefined;
   const selShiftName = store.shiftNames?.[selected];
   const selBio = store.bio?.[selected];
   const selEmotion = store.emotions[selected];
@@ -453,7 +465,7 @@ export function SchedulePage() {
       <MonthCalendar
         month={month}
         onMonthChange={setMonth}
-        schedule={store.schedule}
+        schedule={effectiveSchedule}
         shiftNames={store.shiftNames}
         notes={store.notes}
         bio={store.bio}

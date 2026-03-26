@@ -570,7 +570,31 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           syncClientRevisionsFromBootstrap(fallback);
         }
       } catch (error) {
-        throw error;
+        // POST failed (e.g. 500) — fall back to local consent completion
+        // so the user is never permanently blocked on the consent screen.
+        console.error("[AppShell] consent_complete_api_failed_fallback", {
+          message: (error as Error)?.message ?? String(error),
+        });
+        const fallback = normalizeBootstrapPayload({
+          onboardingCompleted: true,
+          consentCompleted: true,
+          hasStoredState: Boolean(resolvedBootstrap?.hasStoredState),
+          state: resolvedBootstrap?.state ?? null,
+          stateRevision: normalizeRevision(resolvedBootstrap?.stateRevision ?? resolvedBootstrap?.updatedAt),
+          bootstrapRevision: normalizeRevision(
+            resolvedBootstrap?.bootstrapRevision ??
+              resolvedBootstrap?.stateRevision ??
+              resolvedBootstrap?.updatedAt
+          ),
+          updatedAt: resolvedBootstrap?.updatedAt ?? null,
+          recoverySummary: resolvedBootstrap?.recoverySummary ?? null,
+          degraded: true,
+        } as BootstrapPayload);
+        setBootstrap(fallback);
+        if (auth?.userId) {
+          setCurrentAccountBootstrap(auth.userId, fallback);
+        }
+        syncClientRevisionsFromBootstrap(fallback);
       } finally {
         setBusyStage(null);
       }
