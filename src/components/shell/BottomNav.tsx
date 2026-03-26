@@ -127,8 +127,14 @@ export function BottomNav() {
                       if (activeHref === it.href) return;
                       event.preventDefault();
                       setPendingHref(it.href);
+                      // Fallback: if client-side navigation stalls (e.g. React error state),
+                      // force a hard navigation after a short timeout.
+                      const fallbackTimer = window.setTimeout(() => {
+                        window.location.href = it.href;
+                      }, 1500);
                       startTransition(() => {
                         router.push(it.href);
+                        window.clearTimeout(fallbackTimer);
                       });
                     }}
                     aria-current={active ? "page" : undefined}

@@ -261,7 +261,7 @@ function PaywallNotice() {
   return (
     <Surface>
       <div className="text-[22px] font-semibold tracking-[-0.03em] text-[#111827]">AI 맞춤회복은 Plus 또는 Pro에서 사용할 수 있어요.</div>
-      <p className="mt-3 text-[14px] leading-6 text-[#667085]">AI 해설과 오늘의 오더를 함께 볼 수 있어요.</p>
+      <p className="mt-3 text-[14px] leading-6 text-[#667085]">AI 해설과 맞춤 회복 추천을 볼 수 있어요.</p>
       <div className="mt-5 flex flex-wrap gap-3">
         <PillLink href="/settings/billing/upgrade">플랜 보기 ›</PillLink>
         <PillLink href="/insights/recovery" variant="outline">회복으로 돌아가기</PillLink>
@@ -346,7 +346,6 @@ export function InsightsAIRecoveryDetail({
   const response = activeData;
   const currentSession = response?.session ?? null;
   const brief = currentSession?.brief ?? null;
-  const ordersPayload = currentSession?.orders ?? null;
   const canRegenerateSession = response?.quota.canGenerateSession ?? !currentSession;
   const showGeneratingOverlay = Boolean(response?.gate.allowed && session.generating);
   const showGenerationControls = Boolean(response?.showGenerationControls);
@@ -379,8 +378,6 @@ export function InsightsAIRecoveryDetail({
     const nextPath = pathname || window.location.pathname;
     window.history.replaceState(window.history.state, "", nextQuery ? `${nextPath}?${nextQuery}` : nextPath);
   };
-
-  const ordersHref = slot === "postShift" ? "/insights/recovery/orders?slot=postShift" : "/insights/recovery/orders";
 
   const actionPanel = response?.gate.allowed && (!currentSession || showGenerationControls) ? (
     <RecoveryActionPanel
@@ -416,7 +413,7 @@ export function InsightsAIRecoveryDetail({
       <InsightDetailShell
         title="AI 맞춤회복"
         subtitle={formatKoreanDate(end)}
-        meta="AI 해설과 AI 오더는 Plus 또는 Pro에서 사용할 수 있어요."
+        meta="AI 맞춤회복은 Plus 또는 Pro에서 사용할 수 있어요."
         tone="navy"
         backHref="/insights/recovery"
       >
@@ -522,40 +519,12 @@ export function InsightsAIRecoveryDetail({
             </div>
           </div>
 
-          {ordersPayload ? (
-            <Surface>
-              <div className="text-[11px] font-semibold tracking-[0.18em] text-[#8C95A6]">TODAY ORDER</div>
-              <div className="mt-2 text-[23px] font-semibold tracking-[-0.04em] text-[#111827]">{ordersPayload.title ?? "오늘의 오더"}</div>
-              <div className="mt-4 break-keep text-[20px] font-semibold leading-8 tracking-[-0.04em] text-[#111827]">{ordersPayload.headline}</div>
-              <p className="mt-3 break-keep text-[14px] leading-6 text-[#667085]">{ordersPayload.summary}</p>
-              <div className="mt-5 flex flex-wrap gap-3">
-                <PillLink href={ordersHref}>오더 보기 ›</PillLink>
-              </div>
-            </Surface>
-          ) : brief ? (
-            <Surface>
-              <div className="text-[11px] font-semibold tracking-[0.18em] text-[#8C95A6]">TODAY ORDER</div>
-              <div className="mt-2 text-[23px] font-semibold tracking-[-0.04em] text-[#111827]">
-                {session.savingOrders ? "오늘 오더를 정리하고 있어요." : "오더를 아직 정리하는 중이에요."}
-              </div>
-              <p className="mt-3 break-keep text-[14px] leading-6 text-[#667085]">
-                해설은 먼저 표시했고, 오더는 별도 생성으로 이어 붙이고 있습니다. 몇 초 더 걸릴 수 있습니다.
-              </p>
-              {!session.savingOrders ? (
-                <div className="mt-5 flex flex-wrap gap-3">
-                  <PillButton variant="outline" onClick={() => void session.regenerateOrders()}>오더 다시 불러오기</PillButton>
-                  <PillLink href={ordersHref} variant="outline">오더 페이지 보기 ›</PillLink>
-                </div>
-              ) : null}
-            </Surface>
-          ) : null}
-
           {actionPanel}
         </>
       ) : !session.error && response?.gate.allowed && !session.loading ? (
         <Surface>
           <div className="text-[22px] font-semibold tracking-[-0.03em] text-[#111827]">아직 {slotLabel} 해설이 없어요.</div>
-          <p className="mt-3 text-[14px] leading-6 text-[#667085]">위 만들기 버튼을 누를 때만 AI가 호출되고, 생성이 끝나면 {slotLabel} 해설과 오더가 바로 아래에 정리됩니다.</p>
+          <p className="mt-3 text-[14px] leading-6 text-[#667085]">위 만들기 버튼을 누를 때만 AI가 호출되고, 생성이 끝나면 {slotLabel} 해설이 바로 아래에 정리됩니다.</p>
         </Surface>
       ) : null}
     </InsightDetailShell>

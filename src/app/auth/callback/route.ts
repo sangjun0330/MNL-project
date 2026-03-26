@@ -46,39 +46,47 @@ export async function GET(req: Request) {
   let authError = "";
 
   if (code) {
-    const supabase = await getRouteSupabaseClient();
-
-    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-    if (error) {
+    let supabase: Awaited<ReturnType<typeof getRouteSupabaseClient>> | null = null;
+    try {
+      supabase = await getRouteSupabaseClient();
+    } catch (clientErr) {
       authError = "oauth_exchange_failed";
-      console.error("[AuthCallback] exchangeCodeForSession failed: %s", String(error.message ?? error));
-    } else {
-      const email = data.user?.email ?? null;
-      if (!isAuthEmailAllowed(email)) {
-        authError = "unauthorized_email";
-        const masked = email ? email.replace(/(.{2}).*@/, "$1***@") : "(empty)";
-        console.warn("[AuthCallback] blocked sign-in for non-allowlisted email: %s", masked);
-        await supabase.auth.signOut();
-      }
-      const userId = data.user?.id;
-      if (userId && !authError && shouldRequireExistingAuthUser()) {
-        const exists = await hasExistingAppUser(userId);
-        if (!exists) {
-          authError = "unauthorized_new_user";
+      console.error("[AuthCallback] getRouteSupabaseClient failed: %s", String((clientErr as Error)?.message ?? clientErr));
+    }
+
+    if (supabase) {
+      const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+      if (error) {
+        authError = "oauth_exchange_failed";
+        console.error("[AuthCallback] exchangeCodeForSession failed: %s", String(error.message ?? error));
+      } else {
+        const email = data.user?.email ?? null;
+        if (!isAuthEmailAllowed(email)) {
+          authError = "unauthorized_email";
           const masked = email ? email.replace(/(.{2}).*@/, "$1***@") : "(empty)";
-          console.warn("[AuthCallback] blocked new user without existing app record: %s", masked);
+          console.warn("[AuthCallback] blocked sign-in for non-allowlisted email: %s", masked);
           await supabase.auth.signOut();
         }
-      }
-      if (userId && !authError) {
-        try {
-          await ensureUserRow(userId);
-        } catch {
-          // ignore user bootstrap errors (do not block login)
+        const userId = data.user?.id;
+        if (userId && !authError && shouldRequireExistingAuthUser()) {
+          const exists = await hasExistingAppUser(userId);
+          if (!exists) {
+            authError = "unauthorized_new_user";
+            const masked = email ? email.replace(/(.{2}).*@/, "$1***@") : "(empty)";
+            console.warn("[AuthCallback] blocked new user without existing app record: %s", masked);
+            await supabase.auth.signOut();
+          }
         }
-      } else if (!userId) {
-        authError = "oauth_user_missing";
-        console.error("[AuthCallback] no user returned after OAuth exchange");
+        if (userId && !authError) {
+          try {
+            await ensureUserRow(userId);
+          } catch {
+            // ignore user bootstrap errors (do not block login)
+          }
+        } else if (!userId) {
+          authError = "oauth_user_missing";
+          console.error("[AuthCallback] no user returned after OAuth exchange");
+        }
       }
     }
   }

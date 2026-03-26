@@ -1,4 +1,3 @@
-import Link from "next/link";
 import type { CSSProperties } from "react";
 import { cn } from "@/lib/cn";
 
@@ -38,13 +37,13 @@ export function InsightDetailShell({
   return (
     <div className={cn("mx-auto w-full max-w-[920px] px-3 pb-24 pt-6 sm:px-4", className)}>
       <div className="mb-4 flex items-center justify-between gap-3">
-        <Link
+        <a
           href={backHref}
           className="flex h-9 w-9 items-center justify-center rounded-full border border-ios-sep bg-white text-[18px] text-ios-text shadow-apple-sm"
           aria-label="Back"
         >
           ‹
-        </Link>
+        </a>
         <div className="flex h-9 min-w-[36px] items-center justify-center">{right}</div>
       </div>
 
