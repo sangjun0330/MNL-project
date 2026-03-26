@@ -1,9 +1,8 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import type { ReactElement, SVGProps } from "react";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/cn";
 import { useI18n } from "@/lib/useI18n";
 
@@ -62,10 +61,8 @@ const ITEMS: NavItem[] = [
 
 export function BottomNav() {
   const pathname = usePathname();
-  const router = useRouter();
   const [hide, setHide] = useState(false);
   const [pendingHref, setPendingHref] = useState<string | null>(null);
-  const [, startTransition] = useTransition();
   const { t } = useI18n();
 
   useEffect(() => {
@@ -112,7 +109,7 @@ export function BottomNav() {
                 const active = selectedHref === it.href;
                 const Icon = it.Icon;
                 return (
-                  <Link
+                  <a
                     key={it.href}
                     href={it.href}
                     className={cn(
@@ -121,27 +118,21 @@ export function BottomNav() {
                     )}
                     onPointerDown={() => {
                       if (activeHref !== it.href) setPendingHref(it.href);
-                      router.prefetch(it.href);
                     }}
                     onClick={(event) => {
-                      if (activeHref === it.href) return;
+                      if (activeHref === it.href) {
+                        event.preventDefault();
+                        return;
+                      }
                       event.preventDefault();
                       setPendingHref(it.href);
-                      // Fallback: if client-side navigation stalls (e.g. React error state),
-                      // force a hard navigation after a short timeout.
-                      const fallbackTimer = window.setTimeout(() => {
-                        window.location.href = it.href;
-                      }, 1500);
-                      startTransition(() => {
-                        router.push(it.href);
-                        window.clearTimeout(fallbackTimer);
-                      });
+                      window.location.assign(it.href);
                     }}
                     aria-current={active ? "page" : undefined}
                   >
                     <Icon className="rnest-nav-icon" aria-hidden="true" focusable="false" />
                     <span className="rnest-nav-label">{t(it.label)}</span>
-                  </Link>
+                  </a>
                 );
               })}
             </div>

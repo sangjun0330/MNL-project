@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import type { AIRecoverySlot } from "@/lib/aiRecovery";
 import { cn } from "@/lib/cn";
 
@@ -7,6 +8,7 @@ type AIRecoverySlotTabsProps = {
   value: AIRecoverySlot;
   onChange: (slot: AIRecoverySlot) => void;
   className?: string;
+  action?: ReactNode;
 };
 
 const SLOT_OPTIONS: Array<{ value: AIRecoverySlot; label: string }> = [
@@ -14,25 +16,28 @@ const SLOT_OPTIONS: Array<{ value: AIRecoverySlot; label: string }> = [
   { value: "postShift", label: "퇴근 후" },
 ];
 
-export function AIRecoverySlotTabs({ value, onChange, className }: AIRecoverySlotTabsProps) {
+export function AIRecoverySlotTabs({ value, onChange, className, action }: AIRecoverySlotTabsProps) {
   return (
-    <div className={cn("inline-flex rounded-full bg-[#F3F5F8] p-1", className)}>
-      {SLOT_OPTIONS.map((option) => {
-        const active = option.value === value;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            onClick={() => onChange(option.value)}
-            className={cn(
-              "rounded-full px-4 py-2 text-[13px] font-semibold tracking-[-0.01em] transition",
-              active ? "bg-white text-[#111827] shadow-[0_6px_18px_rgba(15,23,42,0.08)]" : "text-[#7A8597]"
-            )}
-          >
-            {option.label}
-          </button>
-        );
-      })}
+    <div className={cn("flex items-center justify-between gap-3", className)}>
+      <div className="inline-flex rounded-full bg-[#F3F5F8] p-1">
+        {SLOT_OPTIONS.map((option) => {
+          const active = option.value === value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => onChange(option.value)}
+              className={cn(
+                "rounded-full px-4 py-2 text-[13px] font-semibold tracking-[-0.01em] transition",
+                active ? "bg-white text-[#111827] shadow-[0_6px_18px_rgba(15,23,42,0.08)]" : "text-[#7A8597]"
+              )}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+      {action ? <div className="shrink-0">{action}</div> : null}
     </div>
   );
 }

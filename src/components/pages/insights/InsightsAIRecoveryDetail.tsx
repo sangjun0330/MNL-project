@@ -314,6 +314,21 @@ function PillButton({
   );
 }
 
+function OrderCheckButton({ href }: { href: string }) {
+  return (
+    <a
+      href={href}
+      className="inline-flex h-[52px] shrink-0 items-center justify-center gap-2 rounded-full border-2 border-[#8F83F7] bg-[rgba(244,240,255,0.92)] px-5 text-[15px] font-semibold tracking-[-0.03em] text-[#7A72E8] shadow-[0_10px_24px_rgba(122,114,232,0.10)] transition active:opacity-80 sm:h-[56px] sm:px-6 sm:text-[16px]"
+      aria-label="오더 확인하기"
+    >
+      <span>오더 확인하기</span>
+      <svg className="h-4 w-4 sm:h-[18px] sm:w-[18px]" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M7 4.5 12.5 10 7 15.5" />
+      </svg>
+    </a>
+  );
+}
+
 export function InsightsAIRecoveryDetail({
   initialSlot = "wake",
   initialData = null,
@@ -328,6 +343,7 @@ export function InsightsAIRecoveryDetail({
   const [slot, setSlot] = useState<AIRecoverySlot>(initialSlot);
   const [hydrated, setHydrated] = useState(false);
   const slotLabel = slot === "wake" ? "기상 후" : "퇴근 후";
+  const ordersHref = slot === "postShift" ? "/insights/recovery/orders?slot=postShift" : "/insights/recovery/orders";
   const hasInitialAccess = Boolean(initialData?.session || initialData?.hasAIEntitlement || initialData?.model);
   const insightsLocked = hydrated && !hasInitialAccess && isInsightsLocked(recordedDays);
   const aiEnabled = Boolean(initialData?.hasAIEntitlement) || (hydrated && billing.hasEntitlement("recoveryPlannerAI"));
@@ -438,7 +454,7 @@ export function InsightsAIRecoveryDetail({
       <AIRecoveryLoadingOverlay mode="recovery" open={showGeneratingOverlay} />
 
       <div className="px-1">
-        <AIRecoverySlotTabs value={slot} onChange={updateSlot} />
+        <AIRecoverySlotTabs value={slot} onChange={updateSlot} action={<OrderCheckButton href={ordersHref} />} />
       </div>
 
       {session.error ? (
