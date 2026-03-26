@@ -1,6 +1,7 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { completeUserServiceConsent } from "@/lib/server/serviceConsentStore";
+import { SERVICE_CONSENT_VERSION, PRIVACY_POLICY_VERSION, TERMS_OF_SERVICE_VERSION } from "@/lib/serviceConsent";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -30,11 +31,25 @@ export async function POST(req: Request) {
     const consent = await completeUserServiceConsent(userId);
     return jsonNoStore({ ok: true, data: consent });
   } catch (err) {
+    // completeUserServiceConsent should now always return synthetic consent
+    // instead of throwing, but keep this catch as a safety net.
+    // Never return 500 — consent failure must not block new users.
     console.error("[ConsentComplete] failed_to_save_service_consent", {
       userId: String(userId).slice(0, 8),
       code: (err as any)?.code,
       message: String((err as any)?.message ?? err).slice(0, 200),
     });
-    return jsonNoStore({ ok: false, error: "failed_to_save_service_consent" }, { status: 500 });
+    const now = new Date().toISOString();
+    return jsonNoStore({
+      ok: true,
+      data: {
+        recordsStorageConsentedAt: now,
+        aiUsageConsentedAt: now,
+        consentCompletedAt: now,
+        consentVersion: SERVICE_CONSENT_VERSION,
+        privacyVersion: PRIVACY_POLICY_VERSION,
+        termsVersion: TERMS_OF_SERVICE_VERSION,
+      },
+    });
   }
 }

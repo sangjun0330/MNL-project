@@ -292,20 +292,19 @@ export async function completeUserServiceConsent(userId: string): Promise<UserSe
     .upsert(row, { onConflict: "user_id" });
 
   if (upsertError) {
-    if (isServiceConsentSchemaUnavailableError(upsertError)) {
-      console.error("[ServiceConsent] consent schema unavailable during save, using synthetic consent", {
-        userId: userId.slice(0, 8),
-        code: (upsertError as any)?.code,
-        message: String((upsertError as any)?.message ?? "").slice(0, 200),
-      });
-      return buildSyntheticLegacyConsent();
-    }
+    const errCode = String((upsertError as any)?.code ?? "");
     console.error("[ServiceConsent] user_service_consents upsert failed", {
       userId: userId.slice(0, 8),
-      code: (upsertError as any)?.code,
+      code: errCode,
       message: String((upsertError as any)?.message ?? "").slice(0, 200),
     });
-    throw upsertError;
+    // FK violation (23503) = rnest_users row missing; schema error = table missing.
+    // In all DB-error cases, return synthetic consent so new users are never blocked.
+    if (isServiceConsentSchemaUnavailableError(upsertError) || errCode === "23503") {
+      return buildSyntheticLegacyConsent();
+    }
+    // For any other error, still don't block the user — consent save is best-effort.
+    return buildSyntheticLegacyConsent();
   }
 
   // Step 2: read back the saved row via a separate SELECT

@@ -470,6 +470,13 @@ export function InsightsAIRecoveryDetail({
 
       {!brief && !session.error && response?.gate.allowed ? actionPanel : null}
 
+      {!response && session.loading ? (
+        <Surface>
+          <div className="text-[18px] font-semibold tracking-[-0.03em] text-[#111827]">불러오는 중이에요.</div>
+          <p className="mt-3 text-[14px] leading-6 text-[#667085]">{slotLabel} 해설 데이터를 확인하고 있습니다.</p>
+        </Surface>
+      ) : null}
+
       {brief ? (
         <>
           <Surface>

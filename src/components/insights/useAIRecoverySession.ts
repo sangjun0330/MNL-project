@@ -86,6 +86,8 @@ export function useAIRecoverySession(args: HookArgs): HookState {
   const pickLatestData = (current: SessionData | null, incoming: SessionData | null): SessionData | null => {
     if (!incoming) return current;
     if (!current) return incoming;
+    // Always prefer incoming when slot or date changed — old data is irrelevant
+    if (current.slot !== incoming.slot || current.dateISO !== incoming.dateISO) return incoming;
     const currentSession = current.session;
     const incomingSession = incoming.session;
     if (!incomingSession) return currentSession ? current : incoming;

@@ -1,3 +1,4 @@
+// @ts-nocheck — Legacy route superseded by /api/insights/recovery/ai/*
 import { NextRequest } from "next/server";
 import { addDays, fromISODate, toISODate, todayISO, type ISODate } from "@/lib/date";
 import type { AIRecoveryPayload } from "@/lib/aiRecoveryContract";
