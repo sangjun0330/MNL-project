@@ -186,6 +186,7 @@ export function InsightsRecoveryOrdersDetail({
   const [recentlyCompletedIds, setRecentlyCompletedIds] = useState<string[]>([]);
   const [transientCompletedIds, setTransientCompletedIds] = useState<string[]>([]);
   const previousCompletionsRef = useRef<string[]>(responseCompletions);
+  const latestResponseCompletionsRef = useRef<string[]>(responseCompletions);
   const toggleTimersRef = useRef<number[]>([]);
   const toggleCompletion = session.toggleCompletion;
   const completionSet = useMemo(() => new Set(localCompletions), [localCompletions]);
@@ -200,6 +201,10 @@ export function InsightsRecoveryOrdersDetail({
   useEffect(() => {
     setSlot(initialSlot);
   }, [initialSlot]);
+
+  useEffect(() => {
+    latestResponseCompletionsRef.current = responseCompletions;
+  }, [responseCompletions]);
 
   useEffect(() => {
     const nextCompletions = responseCompletions;
@@ -221,11 +226,12 @@ export function InsightsRecoveryOrdersDetail({
   }, [responseCompletions]);
 
   useEffect(() => {
-    setLocalCompletions(responseCompletions);
+    const nextCompletions = latestResponseCompletionsRef.current;
+    setLocalCompletions(nextCompletions);
     setTransientCompletedIds([]);
     setRecentlyCompletedIds([]);
-    previousCompletionsRef.current = responseCompletions;
-  }, [currentSession?.generatedAt, end, responseCompletions, slot]);
+    previousCompletionsRef.current = nextCompletions;
+  }, [currentSession?.generatedAt, end, slot]);
 
   const handleToggleCompletion = useCallback((orderId: string) => {
     setLocalCompletions((current) => (current.includes(orderId) ? current : [...current, orderId]));

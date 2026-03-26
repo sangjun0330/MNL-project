@@ -69,6 +69,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
   const generateInFlightRef = useRef(false);
   const ordersInFlightRef = useRef(false);
   const togglingCompletionRef = useRef<string | null>(null);
+  const committedCompletionVersionRef = useRef(0);
 
   const key = `${args.dateISO}:${args.slot}`;
 
@@ -129,20 +130,55 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     return true;
   };
 
-  const mergeInteractiveState = (current: SessionData | null, incoming: SessionData | null): SessionData | null => {
+  const mergeCompletionLists = (current: string[] | null | undefined, incoming: string[] | null | undefined) => {
+    const next: string[] = [];
+    const seen = new Set<string>();
+    for (const item of current ?? []) {
+      if (typeof item !== "string" || !item || seen.has(item)) continue;
+      seen.add(item);
+      next.push(item);
+    }
+    for (const item of incoming ?? []) {
+      if (typeof item !== "string" || !item || seen.has(item)) continue;
+      seen.add(item);
+      next.push(item);
+    }
+    return next;
+  };
+
+  const mergeInteractiveState = (
+    current: SessionData | null,
+    incoming: SessionData | null,
+    preserveCommittedCompletions = false,
+  ): SessionData | null => {
     if (!current || !incoming) return incoming;
-    if (!togglingCompletionRef.current) return incoming;
+    if (!togglingCompletionRef.current && !preserveCommittedCompletions) return incoming;
     if (!isSameRenderedSession(current, incoming)) return incoming;
+    const mergedCompletions = mergeCompletionLists(current.completions, incoming.completions);
     return {
       ...incoming,
-      completions: current.completions,
-      orderStats: current.orderStats,
+      completions: mergedCompletions,
+      // Completion UI only supports additive checks, so never let an older
+      // session refetch reduce counters after a successful toggle.
+      orderStats: {
+        todayWakeCompleted: Math.max(current.orderStats.todayWakeCompleted, incoming.orderStats.todayWakeCompleted),
+        todayPostShiftCompleted: Math.max(current.orderStats.todayPostShiftCompleted, incoming.orderStats.todayPostShiftCompleted),
+        todayTotalCompleted: Math.max(current.orderStats.todayTotalCompleted, incoming.orderStats.todayTotalCompleted),
+        weekTotalCompleted: Math.max(current.orderStats.weekTotalCompleted, incoming.orderStats.weekTotalCompleted),
+      },
     };
   };
 
-  const adoptIncomingData = (incoming: SessionData | null) => {
+  const adoptIncomingData = (
+    incoming: SessionData | null,
+    options?: {
+      completionVersionAtStart?: number;
+    },
+  ) => {
     setData((current) => {
-      const merged = mergeInteractiveState(current, incoming);
+      const preserveCommittedCompletions =
+        options?.completionVersionAtStart != null && options.completionVersionAtStart !== committedCompletionVersionRef.current;
+      const merged = mergeInteractiveState(current, incoming, preserveCommittedCompletions);
       return pickLatestData(current, merged);
     });
   };
@@ -221,6 +257,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
 
   const load = async () => {
     const requestId = nextDataRequestId();
+    const completionVersionAtStart = committedCompletionVersionRef.current;
     if (!args.enabled) {
       setLoading(false);
       setData(null);
@@ -232,7 +269,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     try {
       const nextData = await fetchSessionView("load");
       if (!isCurrentDataRequest(requestId)) return;
-      adoptIncomingData(nextData);
+      adoptIncomingData(nextData, { completionVersionAtStart });
       const autoOrdersKey = buildAutoOrdersKey(nextData);
       if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && nextData?.quota.canRegenerateOrders) {
         autoOrdersRequestedRef.current.add(autoOrdersKey);
@@ -262,6 +299,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     if (ordersInFlightRef.current) return;
     ordersInFlightRef.current = true;
     const requestId = nextDataRequestId();
+    const completionVersionAtStart = committedCompletionVersionRef.current;
     setSavingOrders(true);
     if (!auto) setError(null);
     try {
@@ -286,14 +324,14 @@ export function useAIRecoverySession(args: HookArgs): HookState {
         throw new Error(String(json?.error ?? `http_${response.status}`));
       }
       if (!isCurrentDataRequest(requestId)) return;
-      adoptIncomingData(normalizeData(json.data));
+      adoptIncomingData(normalizeData(json.data), { completionVersionAtStart });
       void load();
     } catch (nextError) {
       if (!isCurrentDataRequest(requestId)) return;
       try {
         const recovered = await fetchSessionView(auto ? "orders_auto_recover" : "orders_recover");
         if (!isCurrentDataRequest(requestId)) return;
-        adoptIncomingData(recovered);
+        adoptIncomingData(recovered, { completionVersionAtStart });
         if (!auto) setError(null);
         return;
       } catch {}
@@ -315,6 +353,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     if (generateInFlightRef.current) return;
     generateInFlightRef.current = true;
     const requestId = nextDataRequestId();
+    const completionVersionAtStart = committedCompletionVersionRef.current;
     const previousGeneratedAt = data?.session?.generatedAt ?? null;
     setGenerating(true);
     setError(null);
@@ -342,7 +381,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       }
       if (!isCurrentDataRequest(requestId)) return;
       const nextData = normalizeData(json.data);
-      adoptIncomingData(nextData);
+      adoptIncomingData(nextData, { completionVersionAtStart });
       void load();
       const autoOrdersKey = buildAutoOrdersKey(nextData);
       if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && nextData?.quota.canRegenerateOrders) {
@@ -357,7 +396,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
         if (!isCurrentDataRequest(requestId)) return;
         const recoveredGeneratedAt = recovered?.session?.generatedAt ?? null;
         if (recovered?.session && (recoveredGeneratedAt !== previousGeneratedAt || previousGeneratedAt != null)) {
-          adoptIncomingData(recovered);
+          adoptIncomingData(recovered, { completionVersionAtStart });
           setError(null);
           const autoOrdersKey = buildAutoOrdersKey(recovered);
           if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && recovered?.quota.canRegenerateOrders) {
@@ -413,6 +452,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       }
       const completions = Array.isArray(json?.data?.completions) ? json.data?.completions ?? [] : [];
       const orderStats = json?.data?.orderStats ?? optimisticStats;
+      committedCompletionVersionRef.current += 1;
       setData((current) => (current ? { ...current, completions, orderStats } : current));
     } catch (nextError) {
       setData((current) => (current ? { ...current, completions: previous, orderStats: previousStats } : current));

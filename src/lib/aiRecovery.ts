@@ -178,6 +178,67 @@ export type AIRecoverySessionResponse = {
   };
 };
 
+function visibleRecoverySessionTimestamp(data: AIRecoverySessionResponse["data"] | null | undefined) {
+  return Date.parse(data?.session?.generatedAt ?? "") || 0;
+}
+
+export function pickPreferredAIRecoverySlot(args: {
+  requestedSlot?: AIRecoverySlot | null;
+  wake: AIRecoverySessionResponse["data"] | null;
+  postShift: AIRecoverySessionResponse["data"] | null;
+}) {
+  if (args.requestedSlot === "postShift") {
+    return {
+      slot: "postShift" as const,
+      data: args.postShift,
+    };
+  }
+  if (args.requestedSlot === "wake") {
+    return {
+      slot: "wake" as const,
+      data: args.wake,
+    };
+  }
+
+  const wakeHasSession = Boolean(args.wake?.session?.brief);
+  const postShiftHasSession = Boolean(args.postShift?.session?.brief);
+  if (postShiftHasSession && !wakeHasSession) {
+    return {
+      slot: "postShift" as const,
+      data: args.postShift,
+    };
+  }
+  if (wakeHasSession && !postShiftHasSession) {
+    return {
+      slot: "wake" as const,
+      data: args.wake,
+    };
+  }
+  if (wakeHasSession && postShiftHasSession) {
+    const postShiftTs = visibleRecoverySessionTimestamp(args.postShift);
+    const wakeTs = visibleRecoverySessionTimestamp(args.wake);
+    return postShiftTs >= wakeTs
+      ? {
+          slot: "postShift" as const,
+          data: args.postShift,
+        }
+      : {
+          slot: "wake" as const,
+          data: args.wake,
+        };
+  }
+  if (args.postShift?.gate.allowed && !args.wake?.gate.allowed) {
+    return {
+      slot: "postShift" as const,
+      data: args.postShift,
+    };
+  }
+  return {
+    slot: "wake" as const,
+    data: args.wake,
+  };
+}
+
 export function isAIRecoverySlot(value: unknown): value is AIRecoverySlot {
   return value === "wake" || value === "postShift";
 }

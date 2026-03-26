@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { AppShell } from "@/components/shell/AppShell";
 import { InsightsAIRecoveryDetail } from "@/components/pages/insights/InsightsAIRecoveryDetail";
-import type { AIRecoverySessionResponse, AIRecoverySlot } from "@/lib/aiRecovery";
+import { pickPreferredAIRecoverySlot, type AIRecoverySessionResponse, type AIRecoverySlot } from "@/lib/aiRecovery";
 import { todayISO } from "@/lib/date";
 
 export const runtime = "edge";
@@ -14,7 +14,8 @@ type PageProps = {
 export default async function Page({ searchParams }: PageProps) {
   const params = (await searchParams) ?? {};
   const rawSlot = Array.isArray(params.slot) ? params.slot[0] : params.slot;
-  const initialSlot: AIRecoverySlot = rawSlot === "postShift" ? "postShift" : "wake";
+  const requestedSlot: AIRecoverySlot | null = rawSlot === "postShift" ? "postShift" : rawSlot === "wake" ? "wake" : null;
+  let initialSlot: AIRecoverySlot = requestedSlot ?? "wake";
   let initialData: AIRecoverySessionResponse["data"] | null = null;
 
   try {
@@ -24,12 +25,35 @@ export default async function Page({ searchParams }: PageProps) {
     ]);
     const identity = await readAuthIdentityFromServer();
     if (identity.userId) {
-      initialData = (await readAIRecoverySessionView({
-        userId: identity.userId,
-        userEmail: identity.email,
-        dateISO: todayISO(),
-        slot: initialSlot,
-      })) as AIRecoverySessionResponse["data"];
+      if (requestedSlot) {
+        initialData = (await readAIRecoverySessionView({
+          userId: identity.userId,
+          userEmail: identity.email,
+          dateISO: todayISO(),
+          slot: requestedSlot,
+        })) as AIRecoverySessionResponse["data"];
+      } else {
+        const [wakeData, postShiftData] = (await Promise.all([
+          readAIRecoverySessionView({
+            userId: identity.userId,
+            userEmail: identity.email,
+            dateISO: todayISO(),
+            slot: "wake",
+          }),
+          readAIRecoverySessionView({
+            userId: identity.userId,
+            userEmail: identity.email,
+            dateISO: todayISO(),
+            slot: "postShift",
+          }),
+        ])) as [AIRecoverySessionResponse["data"], AIRecoverySessionResponse["data"]];
+        const preferred = pickPreferredAIRecoverySlot({
+          wake: wakeData,
+          postShift: postShiftData,
+        });
+        initialSlot = preferred.slot;
+        initialData = preferred.data;
+      }
     }
   } catch {}
 
