@@ -48,11 +48,29 @@ export async function GET(req: Request) {
   }
 
   try {
-    const [subscription, orders, purchaseSummary] = await Promise.all([
-      readSubscription(identity.userId),
-      listRecentBillingOrders(identity.userId, 12),
-      readBillingPurchaseSummary(identity.userId),
+    // readSubscription은 플랜 정보의 핵심 — 실패하면 catch로 이동
+    const subscription = await readSubscription(identity.userId);
+
+    // orders/summary는 부가 정보 — 실패해도 구독 상태는 정상 반환
+    const [orders, purchaseSummary] = await Promise.all([
+      listRecentBillingOrders(identity.userId, 12).catch((err) => {
+        console.error("[BillingSubscription] listRecentBillingOrders failed", {
+          userId: String(identity.userId).slice(0, 8),
+          code: (err as any)?.code,
+          message: String((err as any)?.message ?? err).slice(0, 200),
+        });
+        return [] as Awaited<ReturnType<typeof listRecentBillingOrders>>;
+      }),
+      readBillingPurchaseSummary(identity.userId).catch((err) => {
+        console.error("[BillingSubscription] readBillingPurchaseSummary failed", {
+          userId: String(identity.userId).slice(0, 8),
+          code: (err as any)?.code,
+          message: String((err as any)?.message ?? err).slice(0, 200),
+        });
+        return { totalPaidAmount: 0, subscriptionPaidAmount: 0, creditPaidAmount: 0, creditPurchasedUnits: 0 };
+      }),
     ]);
+
     const isPrivilegedTester = isPrivilegedRecoveryTesterIdentity({
       userId: identity.userId,
       email: identity.email,
@@ -81,12 +99,12 @@ export async function GET(req: Request) {
       },
     });
   } catch (err) {
-    console.error("[BillingSubscription] failed_to_read_subscription", {
+    // readSubscription 자체가 실패한 경우 — free tier 기본값 반환
+    console.error("[BillingSubscription] readSubscription failed", {
       userId: String(identity.userId).slice(0, 8),
       code: (err as any)?.code,
       message: String((err as any)?.message ?? err).slice(0, 200),
     });
-    // 500 대신 free tier 기본값 반환으로 클라이언트가 정상 동작 가능하게 함
     return NextResponse.json({
       ok: true,
       data: {
