@@ -375,6 +375,11 @@ function getState() {
   return state;
 }
 
+/** Hook 외부에서 현재 스토어 상태를 직접 읽어야 할 때 사용합니다 (구독 없음). */
+export function getAppState(): AppState {
+  return state;
+}
+
 function buildStoreSnapshot(s: AppState): AppStore {
   const store: AppStore = {
     selected: s.selected,

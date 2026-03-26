@@ -2,7 +2,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { AIRecoveryLoadingOverlay } from "@/components/insights/AIRecoveryLoadingOverlay";
 import { AIRecoverySlotTabs } from "@/components/insights/AIRecoverySlotTabs";
@@ -157,6 +157,7 @@ export function InsightsRecoveryOrdersDetail({
 }) {
   const { t } = useI18n();
   const pathname = usePathname();
+  const router = useRouter();
   const billing = useBillingAccess();
   const { end, recordedDays, todayShift, hasTodayShift } = useInsightsData();
   const [slot, setSlot] = useState<AIRecoverySlot>(initialSlot);
@@ -196,6 +197,12 @@ export function InsightsRecoveryOrdersDetail({
 
   useEffect(() => {
     setHydrated(true);
+  }, []);
+
+  // 페이지에 진입할 때마다 서버 데이터를 한 번 갱신해 앱 멈춤 현상 방지
+  useEffect(() => {
+    router.refresh();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

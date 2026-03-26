@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { addDays, fromISODate, toISODate, type ISODate } from "@/lib/date";
 import { getAIRecoveryErrorMessage, type AIRecoverySessionResponse, type AIRecoverySlot } from "@/lib/aiRecovery";
 import { serializeStateForSupabase } from "@/lib/statePersistence";
-import { useAppStore } from "@/lib/store";
+import { getAppState } from "@/lib/store";
 import type { AppState } from "@/lib/model";
 
 type SessionData = AIRecoverySessionResponse["data"];
@@ -35,7 +35,6 @@ async function readJson<T>(response: Response): Promise<T | null> {
 }
 
 export function useAIRecoverySession(args: HookArgs): HookState {
-  const store = useAppStore();
   const normalizeData = (value: SessionData | null | undefined): SessionData | null => {
     if (!value) return null;
     return {
@@ -70,6 +69,16 @@ export function useAIRecoverySession(args: HookArgs): HookState {
   const ordersInFlightRef = useRef(false);
   const togglingCompletionRef = useRef<string | null>(null);
   const committedCompletionVersionRef = useRef(0);
+
+  // Refs for stable toggleCompletion — always reflect latest values without re-creating the callback
+  const dataRef = useRef<SessionData | null>(data);
+  dataRef.current = data;
+  const enabledRef = useRef<boolean>(args.enabled ?? false);
+  enabledRef.current = args.enabled ?? false;
+  const slotRef = useRef<AIRecoverySlot>(args.slot);
+  slotRef.current = args.slot;
+  const dateISORef = useRef<ISODate>(args.dateISO);
+  dateISORef.current = args.dateISO;
 
   const key = `${args.dateISO}:${args.slot}`;
 
@@ -225,7 +234,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
 
   const buildStatePayload = () => {
     try {
-      return buildRecoveryStatePayload(store.getState());
+      return buildRecoveryStatePayload(getAppState());
     } catch {
       return null;
     }
@@ -413,26 +422,31 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     }
   };
 
-  const toggleCompletion = async (orderId: string, completed: boolean) => {
-    if (!args.enabled || !data) return;
+  // useCallback으로 안정적인 참조를 유지합니다.
+  // refs를 통해 항상 최신 data/slot/dateISO를 읽어 stale closure를 방지합니다.
+  const toggleCompletion = useCallback(async (orderId: string, completed: boolean) => {
+    const currentData = dataRef.current;
+    if (!enabledRef.current || !currentData) return;
     togglingCompletionRef.current = orderId;
     setTogglingCompletion(orderId);
     setError(null);
-    const previous = data.completions;
-    const previousStats = data.orderStats;
+    const previous = currentData.completions;
+    const previousStats = currentData.orderStats;
     const next = completed ? Array.from(new Set([...previous, orderId])) : previous.filter((item) => item !== orderId);
     const changed = previous.includes(orderId) !== next.includes(orderId);
     const delta = changed ? (completed ? 1 : -1) : 0;
+    const slot = slotRef.current;
     const optimisticStats =
       delta === 0
         ? previousStats
         : {
             ...previousStats,
-            todayWakeCompleted: previousStats.todayWakeCompleted + (args.slot === "wake" ? delta : 0),
-            todayPostShiftCompleted: previousStats.todayPostShiftCompleted + (args.slot === "postShift" ? delta : 0),
+            todayWakeCompleted: previousStats.todayWakeCompleted + (slot === "wake" ? delta : 0),
+            todayPostShiftCompleted: previousStats.todayPostShiftCompleted + (slot === "postShift" ? delta : 0),
             todayTotalCompleted: previousStats.todayTotalCompleted + delta,
             weekTotalCompleted: previousStats.weekTotalCompleted + delta,
           };
+    // 낙관적 업데이트: UI에 즉시 반영
     setData((current) => (current ? { ...current, completions: next, orderStats: optimisticStats } : current));
     try {
       const response = await fetch("/api/insights/recovery/ai/completions", {
@@ -441,7 +455,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
           "content-type": "application/json",
         },
         body: JSON.stringify({
-          dateISO: args.dateISO,
+          dateISO: dateISORef.current,
           orderId,
           completed,
         }),
@@ -455,13 +469,15 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       committedCompletionVersionRef.current += 1;
       setData((current) => (current ? { ...current, completions, orderStats } : current));
     } catch (nextError) {
+      // API 실패 시 낙관적 업데이트 롤백
       setData((current) => (current ? { ...current, completions: previous, orderStats: previousStats } : current));
-      setFriendlyError((nextError as any)?.message ?? nextError ?? "ai_recovery_completion_failed");
+      setError(getAIRecoveryErrorMessage((nextError as any)?.message ?? nextError ?? "ai_recovery_completion_failed"));
     } finally {
       togglingCompletionRef.current = null;
       setTogglingCompletion(null);
     }
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (initialData && initialData.dateISO === args.dateISO && initialData.slot === args.slot) {
