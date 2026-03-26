@@ -10,7 +10,7 @@ import {
 } from "@/lib/billing/plans";
 import { buildBillingEntitlements, type BillingEntitlements } from "@/lib/billing/entitlements";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
-import { ensureUserRow } from "@/lib/server/userStateStore";
+import { ensureUserRow } from "@/lib/server/userRowStore";
 import type { Json } from "@/types/supabase";
 
 export type BillingOrderStatus = "READY" | "DONE" | "FAILED" | "CANCELED";

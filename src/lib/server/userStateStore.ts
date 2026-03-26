@@ -1,4 +1,5 @@
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
+import { ensureUserRow } from "@/lib/server/userRowStore";
 import { summarizeAppState } from "@/lib/appStateIntegrity";
 
 type UserStateRow = {
@@ -208,22 +209,7 @@ function preserveMenstrualSettingsIfNeeded(
   };
 }
 
-export async function ensureUserRow(userId: string): Promise<void> {
-  const admin = getSupabaseAdmin();
-  const { error } = await admin
-    .from("rnest_users")
-    .upsert(
-      {
-        user_id: userId,
-        last_seen: new Date().toISOString(),
-      },
-      { onConflict: "user_id" }
-    );
-
-  if (error) {
-    throw error;
-  }
-}
+export { ensureUserRow };
 
 export async function saveUserState(input: { userId: string; payload: any }): Promise<void> {
   const admin = getSupabaseAdmin();

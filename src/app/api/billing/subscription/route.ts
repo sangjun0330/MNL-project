@@ -1,53 +1,78 @@
 import { NextResponse } from "next/server";
-import { listRecentBillingOrders, readBillingPurchaseSummary, readSubscription } from "@/lib/server/billingStore";
-import { getAIRecoveryModelForTier } from "@/lib/billing/plans";
-import { readAuthIdentityFromRequest } from "@/lib/server/readUserId";
-import { DEFAULT_BILLING_ENTITLEMENTS } from "@/lib/billing/entitlements";
-import { isPrivilegedRecoveryTesterIdentity } from "@/lib/server/authAccess";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-export async function GET(req: Request) {
-  const identity = await readAuthIdentityFromRequest(req);
-  if (!identity.userId) {
-    return NextResponse.json({
-      ok: true,
-      data: {
-        subscription: {
-          tier: "free",
-          status: "inactive",
-          startedAt: null,
-          currentPeriodEnd: null,
-          updatedAt: null,
-          customerKey: "",
-          cancelAtPeriodEnd: false,
-          cancelScheduledAt: null,
-          canceledAt: null,
-          cancelReason: null,
-          hasPaidAccess: false,
-          entitlements: DEFAULT_BILLING_ENTITLEMENTS,
-          aiRecoveryModel: null,
-          medSafetyQuota: {
-            timezone: "Asia/Seoul",
-            standard: { includedRemaining: 0, extraRemaining: 0, totalRemaining: 0 },
-            premium: { includedRemaining: 0, extraRemaining: 0, totalRemaining: 0 },
-            totalRemaining: 0,
-            recommendedDefaultSearchType: "standard",
-          },
+function emptyResponse() {
+  return {
+    ok: true,
+    data: {
+      subscription: {
+        tier: "free",
+        status: "inactive",
+        startedAt: null,
+        currentPeriodEnd: null,
+        updatedAt: null,
+        customerKey: "",
+        cancelAtPeriodEnd: false,
+        cancelScheduledAt: null,
+        canceledAt: null,
+        cancelReason: null,
+        hasPaidAccess: false,
+        entitlements: {
+          recoveryPlannerSummary: true,
+          recoveryPlannerFull: false,
+          recoveryPlannerAI: false,
+          advancedCalculators: true,
+          medSafety: false,
+          medSafetyImageQueries: false,
         },
-        orders: [],
-        purchaseSummary: {
-          totalPaidAmount: 0,
-          subscriptionPaidAmount: 0,
-          creditPaidAmount: 0,
-          creditPurchasedUnits: 0,
+        aiRecoveryModel: null,
+        medSafetyQuota: {
+          timezone: "Asia/Seoul",
+          standard: { includedRemaining: 0, extraRemaining: 0, totalRemaining: 0 },
+          premium: { includedRemaining: 0, extraRemaining: 0, totalRemaining: 0 },
+          totalRemaining: 0,
+          recommendedDefaultSearchType: "standard",
         },
       },
+      orders: [],
+      purchaseSummary: {
+        totalPaidAmount: 0,
+        subscriptionPaidAmount: 0,
+        creditPaidAmount: 0,
+        creditPurchasedUnits: 0,
+      },
+    },
+  };
+}
+
+export async function GET(req: Request) {
+  let identity: { userId: string; email: string | null } = { userId: "", email: null };
+  try {
+    const { readAuthIdentityFromRequest } = await import("@/lib/server/readUserId");
+    identity = await readAuthIdentityFromRequest(req);
+  } catch (err) {
+    console.error("[BillingSubscription] readAuthIdentity failed", {
+      code: (err as any)?.code,
+      message: String((err as any)?.message ?? err).slice(0, 200),
     });
+    return NextResponse.json(emptyResponse());
+  }
+
+  if (!identity.userId) {
+    return NextResponse.json(emptyResponse());
   }
 
   try {
+    const [
+      { listRecentBillingOrders, readBillingPurchaseSummary, readSubscription },
+      { isPrivilegedRecoveryTesterIdentity },
+    ] = await Promise.all([
+      import("@/lib/server/billingReadStore"),
+      import("@/lib/server/authAccess"),
+    ]);
+
     // readSubscription은 플랜 정보의 핵심 — 실패하면 catch로 이동
     const subscription = await readSubscription(identity.userId);
 
@@ -75,7 +100,7 @@ export async function GET(req: Request) {
       userId: identity.userId,
       email: identity.email,
     });
-    const effectiveModel = getAIRecoveryModelForTier(subscription.tier) ?? (isPrivilegedTester ? "gpt-5.4" : null);
+    const effectiveModel = subscription.aiRecoveryModel ?? (isPrivilegedTester ? "gpt-5.4" : null);
     const effectiveSubscription = isPrivilegedTester
       ? {
           ...subscription,
@@ -105,39 +130,6 @@ export async function GET(req: Request) {
       code: (err as any)?.code,
       message: String((err as any)?.message ?? err).slice(0, 200),
     });
-    return NextResponse.json({
-      ok: true,
-      data: {
-        subscription: {
-          tier: "free",
-          status: "inactive",
-          startedAt: null,
-          currentPeriodEnd: null,
-          updatedAt: null,
-          customerKey: "",
-          cancelAtPeriodEnd: false,
-          cancelScheduledAt: null,
-          canceledAt: null,
-          cancelReason: null,
-          hasPaidAccess: false,
-          entitlements: DEFAULT_BILLING_ENTITLEMENTS,
-          aiRecoveryModel: null,
-          medSafetyQuota: {
-            timezone: "Asia/Seoul",
-            standard: { includedRemaining: 0, extraRemaining: 0, totalRemaining: 0 },
-            premium: { includedRemaining: 0, extraRemaining: 0, totalRemaining: 0 },
-            totalRemaining: 0,
-            recommendedDefaultSearchType: "standard",
-          },
-        },
-        orders: [],
-        purchaseSummary: {
-          totalPaidAmount: 0,
-          subscriptionPaidAmount: 0,
-          creditPaidAmount: 0,
-          creditPurchasedUnits: 0,
-        },
-      },
-    });
+    return NextResponse.json(emptyResponse());
   }
 }
