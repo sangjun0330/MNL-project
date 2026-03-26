@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { AppShell } from "@/components/shell/AppShell";
 
 function PolicySection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -22,7 +21,6 @@ function BulletList({ items }: { items: React.ReactNode[] }) {
 
 export default function ShopPolicyPage() {
   return (
-    <AppShell>
       <div className="-mx-4 pb-24">
         <div className="border-b border-[#edf1f6] bg-white px-4 py-4">
           <div className="flex items-center gap-3">
@@ -180,6 +178,5 @@ export default function ShopPolicyPage() {
           </div>
         </div>
       </div>
-    </AppShell>
   );
 }

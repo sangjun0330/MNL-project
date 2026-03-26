@@ -1,5 +1,4 @@
 import { SocialGroupPage } from "@/components/pages/SocialGroupPage";
-import { AppShell } from "@/components/shell/AppShell";
 import { Suspense } from "react";
 
 export const runtime = "edge";
@@ -11,10 +10,8 @@ export default async function GroupDetailPage({
 }) {
   const { groupId } = await params;
   return (
-    <AppShell>
       <Suspense fallback={null}>
         <SocialGroupPage groupId={groupId} />
       </Suspense>
-    </AppShell>
   );
 }

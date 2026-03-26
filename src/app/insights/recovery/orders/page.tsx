@@ -1,5 +1,4 @@
 import { Suspense } from "react";
-import { AppShell } from "@/components/shell/AppShell";
 import { InsightsRecoveryOrdersDetail } from "@/components/pages/insights/InsightsRecoveryOrdersDetail";
 import { pickPreferredAIRecoverySlot, type AIRecoverySessionResponse, type AIRecoverySlot } from "@/lib/aiRecovery";
 import { todayISO } from "@/lib/date";
@@ -58,10 +57,8 @@ export default async function Page({ searchParams }: PageProps) {
   } catch {}
 
   return (
-    <AppShell>
       <Suspense fallback={null}>
         <InsightsRecoveryOrdersDetail initialSlot={initialSlot} initialData={initialData} />
       </Suspense>
-    </AppShell>
   );
 }

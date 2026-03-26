@@ -1,5 +1,4 @@
 import { notFound } from "next/navigation";
-import { AppShell } from "@/components/shell/AppShell";
 import { ShopProductDetailMount } from "@/components/shop/ShopProductDetailMount";
 import { loadShopCatalog } from "@/lib/server/shopCatalogStore";
 
@@ -26,8 +25,6 @@ export default async function Page(props: { params: Promise<{ productId: string 
   if (!product) notFound();
 
   return (
-    <AppShell>
       <ShopProductDetailMount product={product} />
-    </AppShell>
   );
 }

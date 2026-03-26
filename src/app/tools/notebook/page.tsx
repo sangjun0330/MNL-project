@@ -1,6 +1,5 @@
 import type { Metadata } from "next"
 import { ToolNotebookPage } from "@/components/pages/tools/ToolNotebookPage"
-import { AppShell } from "@/components/shell/AppShell"
 
 export const metadata: Metadata = {
   robots: {
@@ -12,8 +11,6 @@ export const metadata: Metadata = {
 
 export default function Page() {
   return (
-    <AppShell>
       <ToolNotebookPage />
-    </AppShell>
   )
 }

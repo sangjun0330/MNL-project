@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { AppShell } from "@/components/shell/AppShell";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -22,7 +21,6 @@ function BulletList({ items }: { items: React.ReactNode[] }) {
 
 export default function Page() {
   return (
-    <AppShell>
       <div className="mx-auto w-full max-w-[720px] px-4 pb-24 pt-6">
         <div className="rounded-[28px] border border-[#dbe4ef] bg-white p-6">
           <Link
@@ -264,6 +262,5 @@ export default function Page() {
           </Section>
         </div>
       </div>
-    </AppShell>
   );
 }

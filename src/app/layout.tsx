@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { PWARegister } from "@/components/PWARegister";
 import { AuthProvider } from "@/components/system/AuthProvider";
+import { AppShell } from "@/components/shell/AppShell";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://rnest.kr";
 const SHARE_TITLE = "RNest | Shift Worker Recovery Coach";
@@ -150,7 +151,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <AuthProvider>
           <PWARegister />
-          {children}
+          <AppShell>{children}</AppShell>
         </AuthProvider>
       </body>
     </html>
