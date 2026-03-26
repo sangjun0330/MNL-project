@@ -16,6 +16,9 @@ import { BatteryGauge } from "@/components/home/BatteryGauge";
 import { WeekStrip } from "@/components/home/WeekStrip";
 import { HomeSocialCard } from "@/components/home/HomeSocialCard";
 import type { AIRecoverySessionResponse } from "@/lib/aiRecovery";
+import { useAuthState } from "@/lib/auth";
+import { getClientCache, isClientCacheFresh, setClientCache } from "@/lib/clientCache";
+import { useClientSyncSnapshot } from "@/lib/clientSyncStore";
 
 function isReasonableISODate(v: any): v is ISODate {
   if (!isISODate(v)) return false;
@@ -61,6 +64,18 @@ function compareRecoveryDataDesc(a: RecoverySessionData, b: RecoverySessionData)
   return bTs - aTs;
 }
 
+type HomeRecoveryPreviewCacheValue = {
+  views: RecoverySessionData[];
+  revision: number | null;
+};
+
+const HOME_SHOP_CACHE_KEY = "home:shop-catalog";
+const HOME_SHOP_CACHE_TTL_MS = 1000 * 60 * 30;
+
+function buildHomeRecoveryPreviewCacheKey(userId: string | null | undefined, dateISO: ISODate) {
+  return `home:recovery-preview:${userId ?? "guest"}:${dateISO}`;
+}
+
 // ── Icons ────────────────────────────────────────────────────────
 
 function IconChart() {
@@ -104,7 +119,9 @@ function IconSparkle() {
 
 export default function Home() {
   const { t } = useI18n();
+  const { user } = useAuthState();
   const aiPreviewDateISO = todayISO();
+  const { stateRevision: homeDataRevision } = useClientSyncSnapshot();
   const store = useAppStoreSelector(
     (s) => ({
       selected: s.selected,
@@ -128,8 +145,14 @@ export default function Home() {
   );
 
   const [homeSelected, setHomeSelected] = useState<ISODate>(() => todayISO());
-  const [recoveryPreviewVersion, setRecoveryPreviewVersion] = useState(0);
-  const [homeRecoveryViews, setHomeRecoveryViews] = useState<RecoverySessionData[]>([]);
+  const homeRecoveryCacheKey = useMemo(
+    () => buildHomeRecoveryPreviewCacheKey(user?.userId ?? null, aiPreviewDateISO),
+    [aiPreviewDateISO, user?.userId]
+  );
+  const [homeRecoveryViews, setHomeRecoveryViews] = useState<RecoverySessionData[]>(() => {
+    const cached = getClientCache<HomeRecoveryPreviewCacheValue>(homeRecoveryCacheKey)?.data ?? null;
+    return cached?.views ?? [];
+  });
   useEffect(() => {
     const raw = (store.selected as any) ?? null;
     if (raw != null && !isReasonableISODate(raw)) {
@@ -199,6 +222,18 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
+    const cached = getClientCache<HomeRecoveryPreviewCacheValue>(homeRecoveryCacheKey)?.data ?? null;
+
+    if (cached?.views) {
+      setHomeRecoveryViews(cached.views);
+    }
+
+    if (cached && (cached.revision ?? null) === (homeDataRevision ?? null)) {
+      return () => {
+        cancelled = true;
+        controller.abort();
+      };
+    }
 
     const load = async () => {
       try {
@@ -221,13 +256,16 @@ export default function Home() {
         if (cancelled) return;
         const nextViews = [wakeJson?.data ?? null, postShiftJson?.data ?? null].filter(isRenderableRecoveryData).sort(compareRecoveryDataDesc);
         setHomeRecoveryViews(nextViews);
+        setClientCache<HomeRecoveryPreviewCacheValue>(homeRecoveryCacheKey, {
+          views: nextViews,
+          revision: homeDataRevision ?? null,
+        });
       } catch (error) {
         if (controller.signal.aborted || cancelled) return;
         console.warn("[Home] recovery_preview_load_failed", {
           message: error instanceof Error ? error.message : String(error),
           dateISO: aiPreviewDateISO,
         });
-        setHomeRecoveryViews([]);
       }
     };
 
@@ -237,21 +275,7 @@ export default function Home() {
       cancelled = true;
       controller.abort();
     };
-  }, [aiPreviewDateISO, recoveryPreviewVersion]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const refresh = () => setRecoveryPreviewVersion((current) => current + 1);
-    const handleVisibility = () => {
-      if (document.visibilityState === "visible") refresh();
-    };
-    window.addEventListener("focus", refresh);
-    document.addEventListener("visibilitychange", handleVisibility);
-    return () => {
-      window.removeEventListener("focus", refresh);
-      document.removeEventListener("visibilitychange", handleVisibility);
-    };
-  }, []);
+  }, [aiPreviewDateISO, homeDataRevision, homeRecoveryCacheKey]);
 
   const latestRecoveryView = useMemo(() => homeRecoveryViews[0] ?? null, [homeRecoveryViews]);
   const latestBriefHeadline = latestRecoveryView?.session?.brief?.headline?.trim() || null;
@@ -279,14 +303,24 @@ export default function Home() {
   const selectedDateLabel = useMemo(() => formatKoreanDate(homeSelected), [homeSelected]);
 
   // ── Shop catalog ──────────────────────────────────────────────
-  const [shopCatalog, setShopCatalog] = useState<ShopProduct[]>(SHOP_PRODUCTS);
+  const [shopCatalog, setShopCatalog] = useState<ShopProduct[]>(() => {
+    const cached = getClientCache<ShopProduct[]>(HOME_SHOP_CACHE_KEY);
+    return cached?.data?.length ? cached.data : SHOP_PRODUCTS;
+  });
   useEffect(() => {
     if (!deferredReady) return;
+    const cached = getClientCache<ShopProduct[]>(HOME_SHOP_CACHE_KEY);
+    if (cached?.data?.length) {
+      setShopCatalog(cached.data);
+    }
+    if (isClientCacheFresh(cached, HOME_SHOP_CACHE_TTL_MS)) return;
     fetch("/api/shop/catalog", { method: "GET", cache: "no-store" })
       .then((r) => r.json())
       .then((json) => {
         if (json?.ok && Array.isArray(json?.data?.products) && json.data.products.length > 0) {
-          setShopCatalog(json.data.products as ShopProduct[]);
+          const nextProducts = json.data.products as ShopProduct[];
+          setShopCatalog(nextProducts);
+          setClientCache(HOME_SHOP_CACHE_KEY, nextProducts);
         }
       })
       .catch(() => {/* 실패 시 기본 SHOP_PRODUCTS 유지 */});

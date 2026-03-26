@@ -19,12 +19,31 @@ type ConsentRow = {
   consent_version: string;
   privacy_version: string;
   terms_version: string;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
 type UserCreatedRow = {
   created_at: string | null;
   onboarding_completed_at: string | null;
+  updated_at?: string | null;
 };
+
+function toTimestamp(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string" || !value.trim()) return null;
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function maxTimestamp(values: Array<number | null | undefined>) {
+  let max: number | null = null;
+  for (const value of values) {
+    if (value == null || !Number.isFinite(value)) continue;
+    max = max == null ? value : Math.max(max, value);
+  }
+  return max;
+}
 
 function isServiceConsentSchemaUnavailableError(error: unknown) {
   const code = String((error as any)?.code ?? "").toUpperCase();
@@ -74,7 +93,7 @@ export async function loadUserServiceConsent(userId: string): Promise<UserServic
   const { data, error } = await admin
     .from("user_service_consents")
     .select(
-      "user_id, records_storage_consented_at, ai_usage_consented_at, consent_completed_at, consent_version, privacy_version, terms_version"
+      "user_id, records_storage_consented_at, ai_usage_consented_at, consent_completed_at, consent_version, privacy_version, terms_version, created_at, updated_at"
     )
     .eq("user_id", userId)
     .maybeSingle();
@@ -356,6 +375,8 @@ export async function loadUserBootstrap(userId: string): Promise<{
   hasStoredState: boolean;
   consent: UserServiceConsentSnapshot | null;
   state: unknown | null;
+  stateRevision: number | null;
+  bootstrapRevision: number | null;
   updatedAt: number | null;
 }> {
   const admin = getSupabaseAdmin();
@@ -365,7 +386,7 @@ export async function loadUserBootstrap(userId: string): Promise<{
   const [{ data: rawUserRow, error: userError }, initialConsent, stateRow] = await Promise.all([
     admin
       .from("rnest_users")
-      .select("created_at, onboarding_completed_at")
+      .select("created_at, onboarding_completed_at, updated_at")
       .eq("user_id", userId)
       .maybeSingle(),
     loadUserServiceConsent(userId),
@@ -384,6 +405,28 @@ export async function loadUserBootstrap(userId: string): Promise<{
     hasStoredState,
   });
   const consentCompleted = hasCompletedServiceConsent(consent);
+  const userRevision = maxTimestamp([toTimestamp(userRow?.updated_at ?? null), toTimestamp(userRow?.created_at ?? null)]);
+  const stateRevision = stateRow?.updatedAt ?? null;
+  let consentRevisionRow: Pick<ConsentRow, "updated_at" | "created_at"> | null = null;
+  if (consentCompleted) {
+    try {
+      const { data, error } = await admin
+        .from("user_service_consents")
+        .select("updated_at, created_at")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (!error) {
+        consentRevisionRow = (data as Pick<ConsentRow, "updated_at" | "created_at"> | null) ?? null;
+      }
+    } catch {
+      consentRevisionRow = null;
+    }
+  }
+  const consentRevision = maxTimestamp([
+    toTimestamp(consentRevisionRow?.updated_at ?? null),
+    toTimestamp(consentRevisionRow?.created_at ?? null),
+  ]);
+  const bootstrapRevision = maxTimestamp([userRevision, consentRevision, stateRevision]);
 
   return {
     onboardingCompleted:
@@ -401,6 +444,8 @@ export async function loadUserBootstrap(userId: string): Promise<{
             records: defaultRecordState(),
           }
         : null,
-    updatedAt: consentCompleted ? (stateRow?.updatedAt ?? null) : null,
+    stateRevision,
+    bootstrapRevision,
+    updatedAt: stateRevision,
   };
 }

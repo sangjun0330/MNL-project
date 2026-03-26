@@ -18,6 +18,7 @@ function degradedGetResponse() {
         records: { templates: {}, entries: {}, recent: [] },
         settings: null,
       },
+      stateRevision: null,
       updatedAt: null,
       degraded: true,
     },
@@ -33,7 +34,7 @@ function degradedGetResponse() {
 
 function localOnlySaveResponse() {
   return NextResponse.json(
-    { ok: true, syncedAt: null, degraded: true, localOnly: true },
+    { ok: true, syncedAt: null, stateRevision: null, degraded: true, localOnly: true },
     {
       status: 200,
       headers: {
@@ -85,6 +86,7 @@ export async function GET(req: Request) {
     return jsonNoStore({
       ok: true,
       state: sanitized,
+      stateRevision: row?.updatedAt ?? null,
       updatedAt: row?.updatedAt ?? null,
     });
   } catch (error) {
@@ -129,8 +131,12 @@ export async function POST(req: Request) {
       return localOnlySaveResponse();
     }
     const serialized = serializeStateForSupabase(state);
-    await saveUserState({ userId, payload: serialized });
-    return jsonNoStore({ ok: true, syncedAt: new Date().toISOString() });
+    const saved = await saveUserState({ userId, payload: serialized });
+    return jsonNoStore({
+      ok: true,
+      syncedAt: new Date().toISOString(),
+      stateRevision: saved.stateRevision,
+    });
   } catch (error) {
     try {
       console.error("[UserState] failed_to_save_state", {

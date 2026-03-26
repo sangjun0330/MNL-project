@@ -10,6 +10,13 @@ import type { Shift } from "@/lib/types";
 import { autoAdjustMenstrualSettings } from "@/lib/menstrual";
 import { sanitizeStatePayload } from "@/lib/stateSanitizer";
 import { purgeAllAppStateDrafts } from "@/lib/appStateDraft";
+import {
+  CLIENT_DATA_SCOPE_APP_STATE,
+  CLIENT_DATA_SCOPE_HOME_PREVIEW,
+  CLIENT_DATA_SCOPE_RECOVERY_PLANNER,
+  CLIENT_DATA_SCOPE_RECOVERY_SESSION,
+  emitClientDataInvalidation,
+} from "@/lib/clientDataEvents";
 
 const STORAGE_KEY_BASE = "rnest_app_state_v1";
 const RESET_VERSION_KEY = "rnest_reset_version";
@@ -41,6 +48,8 @@ function ssrSafeInitialState(): AppState {
 let state: AppState = ssrSafeInitialState();
 let version = 0;
 const listeners = new Set<() => void>();
+let hydrationReady = false;
+const hydrationListeners = new Set<() => void>();
 
 // useSyncExternalStore는 getSnapshot 반환값을 Object.is로 비교합니다.
 // 매 호출마다 "항상 새 객체"를 반환하면 React가 "값이 계속 바뀐다"고 판단해
@@ -52,6 +61,25 @@ let cachedStoreVersion = -1;
 function emit() {
   version += 1;
   for (const l of listeners) l();
+}
+
+function emitHydrationChange() {
+  for (const l of hydrationListeners) l();
+}
+
+function setHydrationReady(next: boolean) {
+  if (hydrationReady === next) return;
+  hydrationReady = next;
+  emitHydrationChange();
+}
+
+function invalidateDerivedClientData() {
+  emitClientDataInvalidation([
+    CLIENT_DATA_SCOPE_APP_STATE,
+    CLIENT_DATA_SCOPE_HOME_PREVIEW,
+    CLIENT_DATA_SCOPE_RECOVERY_PLANNER,
+    CLIENT_DATA_SCOPE_RECOVERY_SESSION,
+  ]);
 }
 
 function save() {}
@@ -133,6 +161,8 @@ function initializeStoreOnClient() {
 export function hydrateState(loaded: AppState) {
   if (!loaded) return;
   applyLoadedState(loaded, { preserveNotebook: true });
+  setHydrationReady(true);
+  invalidateDerivedClientData();
   emit();
 }
 
@@ -166,6 +196,7 @@ export function purgeAllLocalState() {
   purgeAllAppStateDrafts();
   window.localStorage.setItem(RESET_VERSION_KEY, RESET_VERSION);
   applyLoadedState(emptyState(), { preserveNotebook: false });
+  setHydrationReady(true);
   emit();
 }
 
@@ -190,6 +221,7 @@ function setState(patch: Partial<AppState>) {
 function setSettings(patch: Partial<AppSettings>) {
   const next = normalizeSettings({ ...state.settings, ...patch });
   setState({ settings: next });
+  invalidateDerivedClientData();
 }
 
 function setSelected(iso: ISODate) {
@@ -203,6 +235,7 @@ function setShiftForDate(iso: ISODate, shift: Shift) {
       [iso]: shift,
     },
   });
+  invalidateDerivedClientData();
 }
 
 function batchSetSchedule(patch: Record<ISODate, Shift>) {
@@ -212,6 +245,7 @@ function batchSetSchedule(patch: Record<ISODate, Shift>) {
       ...patch,
     },
   });
+  invalidateDerivedClientData();
 }
 
 function setShiftNameForDate(iso: ISODate, name: string) {
@@ -236,12 +270,14 @@ function setNoteForDate(iso: ISODate, note: string) {
       [iso]: note,
     },
   });
+  invalidateDerivedClientData();
 }
 
 function clearNoteForDate(iso: ISODate) {
   const next = { ...(state.notes ?? {}) };
   delete next[iso];
   setState({ notes: next });
+  invalidateDerivedClientData();
 }
 
 function setEmotionForDate(iso: ISODate, emo: EmotionEntry) {
@@ -271,6 +307,7 @@ function setEmotionForDate(iso: ISODate, emo: EmotionEntry) {
       [iso]: nextBio,
     },
   });
+  invalidateDerivedClientData();
 }
 
 function clearEmotionForDate(iso: ISODate) {
@@ -284,6 +321,7 @@ function clearEmotionForDate(iso: ISODate) {
     else delete nextBioMap[iso];
   }
   setState({ emotions: nextEmotions, bio: nextBioMap });
+  invalidateDerivedClientData();
 }
 
 function hasMeaningfulBioEntry(entry: BioInputs | null | undefined) {
@@ -355,12 +393,14 @@ function setBioForDate(iso: ISODate, patch: Partial<BioInputs>) {
     emotions: nextEmotions,
     settings: nextSettings,
   });
+  invalidateDerivedClientData();
 }
 
 function clearBioForDate(iso: ISODate) {
   const next = { ...(state.bio ?? {}) };
   delete next[iso];
   setState({ bio: next });
+  invalidateDerivedClientData();
 }
 
 function setMemoState(next: AppState["memo"]) {
@@ -378,6 +418,10 @@ function getState() {
 /** Hook 외부에서 현재 스토어 상태를 직접 읽어야 할 때 사용합니다 (구독 없음). */
 export function getAppState(): AppState {
   return state;
+}
+
+export function isAppStoreHydrated() {
+  return hydrationReady;
 }
 
 function buildStoreSnapshot(s: AppState): AppStore {
@@ -488,4 +532,19 @@ export function useAppStoreSelector<T>(
   }, []);
 
   return selected;
+}
+
+export function useAppStoreHydrated() {
+  useEffect(() => {
+    initializeStoreOnClient();
+  }, []);
+
+  return useSyncExternalStore(
+    (cb) => {
+      hydrationListeners.add(cb);
+      return () => hydrationListeners.delete(cb);
+    },
+    () => hydrationReady,
+    () => false
+  );
 }

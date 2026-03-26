@@ -478,6 +478,7 @@ async function safeLoadRecoveryDomains(userId: string): Promise<SafeLoadedRecove
     });
     return {
       payload: {},
+      stateRevision: null,
       aiRecoveryDaily: {},
       recoveryOrderCompletions: {},
       storageAvailable: false,
@@ -2507,6 +2508,7 @@ export async function generateAIRecoverySession(args: {
       hasAIEntitlement: Boolean(subscription?.isPrivilegedTester || (subscription?.hasPaidAccess && subscription?.entitlements.recoveryPlannerAI)),
       model: subscription?.aiRecoveryModel ?? null,
       tier: subscription?.tier ?? null,
+      stateRevision: loadedDomains.stateRevision ?? null,
     };
   }
 
@@ -2546,6 +2548,7 @@ export async function generateAIRecoverySession(args: {
       hasAIEntitlement: true,
       model: subscription?.aiRecoveryModel ?? null,
       tier: subscription?.tier ?? null,
+      stateRevision: loadedDomains.stateRevision ?? null,
     };
   }
 
@@ -2582,6 +2585,7 @@ export async function generateAIRecoverySession(args: {
       hasAIEntitlement: false,
       model: null,
       tier: subscription?.tier ?? null,
+      stateRevision: loadedDomains.stateRevision ?? null,
     };
   }
 
@@ -2627,14 +2631,16 @@ export async function generateAIRecoverySession(args: {
   const reusableExistingSession = existingRenderableSession;
   const nextQuota = buildGenerationQuota(subscription?.tier ?? null, session, Boolean(subscription?.isPrivilegedTester));
   const shouldPersistSession = canPersistSession && Boolean(renderableSession) && !isTransientOpenAIFallback(session.openaiMeta);
+  let nextStateRevision = loadedDomains.stateRevision ?? null;
   if (shouldPersistSession) {
     try {
-      await writeAIRecoverySlot({
+      const saved = await writeAIRecoverySlot({
         userId: args.userId,
         dateISO: args.dateISO,
         slot: args.slot,
         session: renderableSession!,
       });
+      nextStateRevision = saved.stateRevision;
     } catch (error) {
       console.error("[AIRecovery] storage_write_failed_returning_transient_session", {
         userId: args.userId.slice(0, 8),
@@ -2688,6 +2694,7 @@ export async function generateAIRecoverySession(args: {
     hasAIEntitlement: true,
     model,
     tier: subscription?.tier ?? null,
+    stateRevision: nextStateRevision,
   };
 }
 
@@ -2813,7 +2820,7 @@ export async function regenerateAIRecoveryOrders(args: {
       fallbackReason: storedSession.openaiMeta.fallbackReason,
     },
   });
-  await writeAIRecoverySlot({
+  const saved = await writeAIRecoverySlot({
     userId: args.userId,
     dateISO: args.dateISO,
     slot: args.slot,
@@ -2848,6 +2855,7 @@ export async function regenerateAIRecoveryOrders(args: {
     hasAIEntitlement: true,
     model,
     tier: subscription?.tier ?? null,
+    stateRevision: saved.stateRevision ?? loadedDomains.stateRevision ?? null,
   };
 }
 
@@ -2861,7 +2869,8 @@ export async function toggleAIRecoveryCompletion(args: {
   if (!orderId) {
     throw new Error("order_id_invalid");
   }
-  const { aiRecoveryDaily, recoveryOrderCompletions } = await safeLoadRecoveryDomains(args.userId);
+  const loadedDomains = await safeLoadRecoveryDomains(args.userId);
+  const { aiRecoveryDaily, recoveryOrderCompletions } = loadedDomains;
   const day = aiRecoveryDaily[args.dateISO];
   const allowedOrderIds = [
     ...(day?.wake?.orders?.items ?? []),
@@ -2870,10 +2879,11 @@ export async function toggleAIRecoveryCompletion(args: {
   if (!allowedOrderIds.includes(orderId)) {
     throw new Error("order_id_not_found");
   }
-  const nextCompletions = await writeAIRecoveryCompletions({
+  const nextCompletionWrite = await writeAIRecoveryCompletions({
     ...args,
     orderId,
   });
+  const nextCompletions = nextCompletionWrite.completions;
   const nextRecoveryOrderCompletions: SafeLoadedRecoveryDomains["recoveryOrderCompletions"] = {
     ...recoveryOrderCompletions,
     [args.dateISO]: nextCompletions,
@@ -2885,5 +2895,6 @@ export async function toggleAIRecoveryCompletion(args: {
       aiRecoveryDaily,
       recoveryOrderCompletions: nextRecoveryOrderCompletions,
     }),
+    stateRevision: nextCompletionWrite.stateRevision ?? loadedDomains.stateRevision ?? null,
   };
 }

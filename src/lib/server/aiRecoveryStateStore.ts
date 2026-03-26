@@ -50,6 +50,7 @@ export async function loadAIRecoveryDomains(userId: string) {
   const payload = isRecord(row?.payload) ? row.payload : {};
   return {
     payload,
+    stateRevision: row?.updatedAt ?? null,
     aiRecoveryDaily: normalizeDateMap<AIRecoveryDayPayload>(payload.aiRecoveryDaily),
     recoveryOrderCompletions: normalizeDateMap<string[]>(payload.recoveryOrderCompletions),
   };
@@ -84,14 +85,17 @@ export async function writeAIRecoverySlot(args: {
   const pruned = pruneAIRecoveryDaily(nextDaily);
   const keepDates = new Set(Object.keys(pruned).filter(isISODate));
   const prunedCompletions = pruneDateMap(recoveryOrderCompletions, keepDates);
-  await saveUserState({
+  const saved = await saveUserState({
     userId: args.userId,
     payload: {
       aiRecoveryDaily: pruned,
       recoveryOrderCompletions: prunedCompletions,
     },
   });
-  return pruned;
+  return {
+    aiRecoveryDaily: pruned,
+    stateRevision: saved.stateRevision,
+  };
 }
 
 export async function writeAIRecoveryCompletions(args: {
@@ -115,11 +119,14 @@ export async function writeAIRecoveryCompletions(args: {
   const keepDates = new Set(Object.keys(pruneAIRecoveryDaily(aiRecoveryDaily)).filter(isISODate));
   const pruned = pruneDateMap(next, keepDates);
 
-  await saveUserState({
+  const saved = await saveUserState({
     userId: args.userId,
     payload: {
       recoveryOrderCompletions: pruned,
     },
   });
-  return values;
+  return {
+    completions: values,
+    stateRevision: saved.stateRevision,
+  };
 }

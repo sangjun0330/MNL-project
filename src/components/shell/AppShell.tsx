@@ -8,9 +8,11 @@ import { UiPreferencesBridge } from "@/components/system/UiPreferencesBridge";
 import { shouldPreferCandidateState } from "@/lib/appStateIntegrity";
 import { getSupabaseBrowserClient, signOut, useAuthState } from "@/lib/auth";
 import { hasMeaningfulAppState, readPreferredAppStateDraft } from "@/lib/appStateDraft";
-import { hydrateState } from "@/lib/store";
+import { hydrateState, useAppStoreHydrated } from "@/lib/store";
 import { emptyState } from "@/lib/model";
 import { useI18n } from "@/lib/useI18n";
+import { clearClientCache, getClientCache, setClientCache } from "@/lib/clientCache";
+import { resetClientSyncSnapshot, updateClientSyncSnapshot } from "@/lib/clientSyncStore";
 import type { SyntheticEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
@@ -34,6 +36,11 @@ const ServiceConsentScreen = dynamic(
   { ssr: false }
 );
 
+const UserStateSyncBridge = dynamic(
+  () => import("@/components/system/UserStateSyncBridge").then((mod) => mod.UserStateSyncBridge),
+  { ssr: false }
+);
+
 const AUTH_INTERACTION_GUARD_ENABLED =
   process.env.NEXT_PUBLIC_AUTH_INTERACTION_GUARD_ENABLED !== "false";
 
@@ -42,6 +49,8 @@ type BootstrapPayload = {
   consentCompleted: boolean;
   hasStoredState: boolean;
   state: any | null;
+  stateRevision: number | null;
+  bootstrapRevision: number | null;
   updatedAt: number | null;
   degraded?: boolean;
 };
@@ -53,33 +62,103 @@ let bootstrapCache: {
   payload: BootstrapPayload;
 } | null = null;
 
+function bootstrapCacheKey(userId: string) {
+  return `bootstrap:${userId}`;
+}
+
+function normalizeRevision(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeBootstrapPayload(value: BootstrapPayload): BootstrapPayload {
+  const stateRevision = normalizeRevision(value.stateRevision ?? value.updatedAt);
+  const bootstrapRevision = normalizeRevision(value.bootstrapRevision ?? stateRevision);
+  return {
+    ...value,
+    stateRevision,
+    bootstrapRevision,
+    updatedAt: stateRevision,
+  };
+}
+
+function shouldAdoptBootstrap(current: BootstrapPayload | null, incoming: BootstrapPayload) {
+  if (!current) return true;
+  if (current.degraded && !incoming.degraded) return true;
+  if (!current.state && incoming.state) return true;
+  if (current.onboardingCompleted !== incoming.onboardingCompleted) return true;
+  if (current.consentCompleted !== incoming.consentCompleted) return true;
+
+  const currentBootstrapRevision = normalizeRevision(current.bootstrapRevision ?? current.stateRevision ?? current.updatedAt) ?? -1;
+  const incomingBootstrapRevision = normalizeRevision(incoming.bootstrapRevision ?? incoming.stateRevision ?? incoming.updatedAt) ?? -1;
+  if (incomingBootstrapRevision !== currentBootstrapRevision) {
+    return incomingBootstrapRevision > currentBootstrapRevision;
+  }
+
+  const currentStateRevision = normalizeRevision(current.stateRevision ?? current.updatedAt) ?? -1;
+  const incomingStateRevision = normalizeRevision(incoming.stateRevision ?? incoming.updatedAt) ?? -1;
+  if (incomingStateRevision !== currentStateRevision) {
+    return incomingStateRevision > currentStateRevision;
+  }
+
+  return false;
+}
+
+function isBootstrapPayload(value: unknown): value is BootstrapPayload {
+  if (!value || typeof value !== "object") return false;
+  const input = value as Partial<BootstrapPayload>;
+  return (
+    typeof input.onboardingCompleted === "boolean" &&
+    typeof input.consentCompleted === "boolean" &&
+    typeof input.hasStoredState === "boolean"
+  );
+}
+
 function readBootstrapCache(userId?: string | null) {
   if (!userId) return null;
   if (bootstrapCache?.userId === userId) return bootstrapCache.payload;
+  const persisted = getClientCache<BootstrapPayload>(bootstrapCacheKey(userId))?.data ?? null;
+  if (persisted && isBootstrapPayload(persisted)) {
+    const normalized = normalizeBootstrapPayload(persisted);
+    bootstrapCache = { userId, payload: normalized };
+    return normalized;
+  }
   try {
     if (typeof sessionStorage !== "undefined" && sessionStorage.getItem(`rnest_consent_${userId}`) === "1") {
-      return {
+      return normalizeBootstrapPayload({
         onboardingCompleted: true,
         consentCompleted: true,
         hasStoredState: false,
         state: null,
+        stateRevision: null,
+        bootstrapRevision: null,
         updatedAt: null,
-      } as BootstrapPayload;
+      } as BootstrapPayload);
     }
   } catch {}
   return null;
 }
 
 function writeBootstrapCache(userId: string, payload: BootstrapPayload) {
-  bootstrapCache = { userId, payload };
+  const normalized = normalizeBootstrapPayload(payload);
+  bootstrapCache = { userId, payload: normalized };
+  setClientCache(bootstrapCacheKey(userId), normalized);
   try {
-    if (typeof sessionStorage !== "undefined" && payload.consentCompleted) {
+    if (typeof sessionStorage !== "undefined" && normalized.consentCompleted) {
       sessionStorage.setItem(`rnest_consent_${userId}`, "1");
     }
   } catch {}
 }
 
 function clearBootstrapCache(userId?: string | null) {
+  if (userId) {
+    clearClientCache(bootstrapCacheKey(userId));
+    try {
+      if (typeof sessionStorage !== "undefined") {
+        sessionStorage.removeItem(`rnest_consent_${userId}`);
+      }
+    } catch {}
+  }
   if (!userId || bootstrapCache?.userId === userId) {
     bootstrapCache = null;
   }
@@ -165,11 +244,21 @@ function pickHydrationState(input: {
   return emptyState();
 }
 
+function syncClientRevisionsFromBootstrap(payload: BootstrapPayload | null) {
+  if (!payload) return;
+  updateClientSyncSnapshot({
+    stateRevision: normalizeRevision(payload.stateRevision ?? payload.updatedAt),
+    bootstrapRevision: normalizeRevision(payload.bootstrapRevision ?? payload.stateRevision ?? payload.updatedAt),
+  });
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { t } = useI18n();
   const { user: auth, status } = useAuthState();
+  const authLoading = status === "loading";
+  const storeHydrated = useAppStoreHydrated();
   const isAuthed = Boolean(auth?.userId);
   const isMedSafetyImmersive = pathname === "/tools/med-safety";
   const isNotebookImmersive = pathname === "/tools/notebook";
@@ -185,12 +274,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const [bootstrapSettledUserId, setBootstrapSettledUserId] = useState<string | null>(null);
   const [busyStage, setBusyStage] = useState<BusyStage>(null);
-  const [cacheReady, setCacheReady] = useState(false);
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const bootstrapRequestRef = useRef(0);
   const bootstrapRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cachedBootstrap = cacheReady ? readBootstrapCache(auth?.userId ?? null) : null;
+  const stateRefreshInFlightRef = useRef(false);
+  const cachedBootstrap = readBootstrapCache(auth?.userId ?? null);
   const resolvedBootstrap = bootstrap ?? cachedBootstrap;
+  const resolvedBootstrapRef = useRef<BootstrapPayload | null>(resolvedBootstrap);
+  resolvedBootstrapRef.current = resolvedBootstrap;
   const goToSettings = useCallback(() => {
     setLoginPromptOpen(false);
     if (!pathname?.startsWith("/settings")) {
@@ -208,9 +299,86 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
   }, [supabase]);
 
-  useEffect(() => {
-    setCacheReady(true);
+  const applyRemoteHydration = useCallback((scopedUserId: string, remoteState: any | null, remoteUpdatedAt: number | null) => {
+    const localDraft = readPreferredAppStateDraft(scopedUserId);
+    hydrateState(
+      pickHydrationState({
+        localDraft,
+        remoteState,
+        remoteUpdatedAt,
+      })
+    );
   }, []);
+
+  const refreshRemoteState = useCallback(async () => {
+    if (!auth?.userId || stateRefreshInFlightRef.current) return;
+    stateRefreshInFlightRef.current = true;
+    const scopedUserId = auth.userId;
+    try {
+      const authHeaders = await getAuthHeaders();
+      const res = await fetch("/api/user/state", {
+        method: "GET",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        cache: "no-store",
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(String(json?.error ?? "failed_to_load_state"));
+      }
+
+      const nextStateRevision = normalizeRevision(json?.stateRevision ?? json?.updatedAt);
+      const nextState = json?.state ?? null;
+      const nextDegraded = Boolean(json?.degraded);
+      const currentBootstrap = resolvedBootstrapRef.current;
+      const nextBootstrapRevision = Math.max(
+        currentBootstrap?.bootstrapRevision ?? Number.NEGATIVE_INFINITY,
+        nextStateRevision ?? Number.NEGATIVE_INFINITY
+      );
+      updateClientSyncSnapshot({
+        stateRevision: nextStateRevision,
+        bootstrapRevision: Number.isFinite(nextBootstrapRevision) ? nextBootstrapRevision : currentBootstrap?.bootstrapRevision ?? null,
+      });
+
+      const shouldAdoptState =
+        (currentBootstrap?.degraded && !nextDegraded) ||
+        (!currentBootstrap?.state && Boolean(nextState)) ||
+        (nextStateRevision != null &&
+          (normalizeRevision(currentBootstrap?.stateRevision ?? currentBootstrap?.updatedAt) == null ||
+            nextStateRevision > (normalizeRevision(currentBootstrap?.stateRevision ?? currentBootstrap?.updatedAt) ?? -1)));
+
+      if (!shouldAdoptState || !currentBootstrap) {
+        if (!currentBootstrap && nextState) {
+          applyRemoteHydration(scopedUserId, nextState, nextStateRevision);
+        }
+        return;
+      }
+
+      const nextBootstrap = normalizeBootstrapPayload({
+        ...currentBootstrap,
+        hasStoredState: currentBootstrap.hasStoredState || Boolean(nextState),
+        state: nextState ?? currentBootstrap.state,
+        stateRevision: nextStateRevision,
+        bootstrapRevision: Number.isFinite(nextBootstrapRevision) ? nextBootstrapRevision : currentBootstrap.bootstrapRevision,
+        updatedAt: nextStateRevision,
+        degraded: currentBootstrap.degraded && nextDegraded,
+      });
+      setBootstrap(nextBootstrap);
+      writeBootstrapCache(scopedUserId, nextBootstrap);
+      if (nextState) {
+        applyRemoteHydration(scopedUserId, nextState, nextStateRevision);
+      }
+    } catch (error) {
+      console.warn("[AppShell] failed_to_refresh_remote_state", {
+        userId: scopedUserId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      stateRefreshInFlightRef.current = false;
+    }
+  }, [applyRemoteHydration, auth?.userId, getAuthHeaders]);
 
   const loadBootstrap = useCallback(async (options?: { silent?: boolean }) => {
     if (!auth?.userId) return null;
@@ -237,52 +405,55 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         throw new Error(String(json?.error ?? "failed_to_load_bootstrap"));
       }
 
-      const data = (json?.data ?? null) as BootstrapPayload | null;
+      const data = json?.data ? normalizeBootstrapPayload(json.data as BootstrapPayload) : null;
       if (!data || requestId !== bootstrapRequestRef.current) return null;
-      setBootstrap(data);
-      writeBootstrapCache(scopedUserId, data);
+      syncClientRevisionsFromBootstrap(data);
+      const shouldAdopt = shouldAdoptBootstrap(resolvedBootstrapRef.current, data);
+      if (shouldAdopt) {
+        setBootstrap(data);
+        writeBootstrapCache(scopedUserId, data);
+        applyRemoteHydration(scopedUserId, data.state, data.stateRevision ?? data.updatedAt);
+      }
       setBootstrapSettledUserId(scopedUserId);
-      const localDraft = readPreferredAppStateDraft(scopedUserId);
-      hydrateState(
-        pickHydrationState({
-          localDraft,
-          remoteState: data.consentCompleted && data.state ? data.state : null,
-          remoteUpdatedAt: data.updatedAt,
-        })
-      );
       return data;
     } catch (error) {
       if (requestId === bootstrapRequestRef.current) {
         setBootstrapSettledUserId(scopedUserId);
         const localDraft = readPreferredAppStateDraft(scopedUserId);
         if (localDraft && hasMeaningfulAppState(localDraft.state)) {
-          const fallbackBootstrap = {
+          const fallbackBootstrap = normalizeBootstrapPayload({
             onboardingCompleted: true,
             consentCompleted: true,
             hasStoredState: true,
             consent: null,
             state: localDraft.state,
+            stateRevision: localDraft.updatedAt,
+            bootstrapRevision: localDraft.updatedAt,
             updatedAt: localDraft.updatedAt,
             degraded: true,
-          } as BootstrapPayload;
+          } as BootstrapPayload);
           setBootstrap(fallbackBootstrap);
           setBootstrapError(null);
           hydrateState(localDraft.state);
           writeBootstrapCache(scopedUserId, fallbackBootstrap);
+          syncClientRevisionsFromBootstrap(fallbackBootstrap);
           return fallbackBootstrap;
         }
-        const fallbackBootstrap = {
+        const fallbackBootstrap = normalizeBootstrapPayload({
           onboardingCompleted: true,
           consentCompleted: true,
           hasStoredState: false,
           consent: null,
           state: emptyState(),
+          stateRevision: null,
+          bootstrapRevision: null,
           updatedAt: null,
           degraded: true,
-        } as BootstrapPayload;
+        } as BootstrapPayload);
         setBootstrap(fallbackBootstrap);
         hydrateState(emptyState());
         writeBootstrapCache(scopedUserId, fallbackBootstrap);
+        syncClientRevisionsFromBootstrap(fallbackBootstrap);
         if (!silent) {
           console.error("[AppShell] failed_to_load_bootstrap_using_empty_fallback", {
             userId: scopedUserId,
@@ -298,7 +469,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         setBootstrapLoading(false);
       }
     }
-  }, [auth?.userId, getAuthHeaders]);
+  }, [applyRemoteHydration, auth?.userId, getAuthHeaders]);
 
   useEffect(() => {
     if (bootstrapRetryTimerRef.current) {
@@ -309,6 +480,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (!auth?.userId) {
       bootstrapRequestRef.current += 1;
       clearBootstrapCache();
+      resetClientSyncSnapshot();
       setBootstrap(null);
       setBootstrapLoading(false);
       setBootstrapError(null);
@@ -322,17 +494,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (cached) {
       setBootstrap(cached);
       setBootstrapError(null);
-      const localDraft = readPreferredAppStateDraft(auth.userId);
-      hydrateState(
-        pickHydrationState({
-          localDraft,
-          remoteState: cached.consentCompleted && cached.state ? cached.state : null,
-          remoteUpdatedAt: cached.updatedAt,
-        })
-      );
+      syncClientRevisionsFromBootstrap(cached);
+      if (cached.consentCompleted && cached.state) {
+        applyRemoteHydration(auth.userId, cached.state, cached.stateRevision ?? cached.updatedAt);
+      }
     } else {
       setBootstrap(null);
       setBootstrapError(null);
+      resetClientSyncSnapshot();
       const localDraft = readPreferredAppStateDraft(auth.userId);
       if (localDraft && hasMeaningfulAppState(localDraft.state)) {
         hydrateState(localDraft.state);
@@ -353,7 +522,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         bootstrapRetryTimerRef.current = null;
       }
     };
-  }, [auth?.userId, loadBootstrap, status]);
+  }, [applyRemoteHydration, auth?.userId, loadBootstrap, status]);
 
   useEffect(() => {
     if (!allowPrompt && loginPromptOpen) {
@@ -404,8 +573,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     !showOnboarding &&
     !resolvedBootstrap?.consentCompleted;
 
-  const canRenderContent = !isAuthed || isPolicyPage || Boolean(resolvedBootstrap?.consentCompleted);
-  const showBottomNav = !isNotebookImmersive && (!isAuthed || Boolean(resolvedBootstrap?.consentCompleted));
+  const canRenderAuthedContent = Boolean(resolvedBootstrap?.consentCompleted) && storeHydrated;
+  const canRenderContent = isPolicyPage || (!authLoading && (!isAuthed || canRenderAuthedContent));
+  const showBottomNav = !authLoading && !isNotebookImmersive && (!isAuthed || canRenderAuthedContent);
 
   const pageRef = useRef<HTMLDivElement>(null);
   const prevPathnameRef = useRef(pathname);
@@ -454,20 +624,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       if (result && !result.onboardingCompleted) {
         // POST failed and server still reports onboarding not done:
         // proceed anyway by marking it locally
-        const patched = { ...result, onboardingCompleted: true };
+        const patched = normalizeBootstrapPayload({ ...result, onboardingCompleted: true });
         setBootstrap(patched);
         writeBootstrapCache(auth.userId, patched);
+        syncClientRevisionsFromBootstrap(patched);
       }
     } catch {
       // Even loadBootstrap failed: create a minimal local state to unblock consent
-      const fallback: BootstrapPayload = {
+      const fallback = normalizeBootstrapPayload({
         onboardingCompleted: true,
         consentCompleted: false,
         hasStoredState: false,
         state: null,
+        stateRevision: null,
+        bootstrapRevision: null,
         updatedAt: null,
-      };
+      } as BootstrapPayload);
       setBootstrap(fallback);
+      writeBootstrapCache(auth.userId, fallback);
+      syncClientRevisionsFromBootstrap(fallback);
     }
     setBusyStage(null);
   }, [auth?.userId, busyStage, getAuthHeaders, loadBootstrap]);
@@ -492,16 +667,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         }
         const next = await loadBootstrap({ silent: true });
         if (!next?.consentCompleted) {
-          const fallback: BootstrapPayload = {
+          const fallback = normalizeBootstrapPayload({
             onboardingCompleted: true,
             consentCompleted: true,
             hasStoredState: Boolean(next?.hasStoredState ?? resolvedBootstrap?.hasStoredState),
             state: next?.state ?? resolvedBootstrap?.state ?? null,
+            stateRevision: normalizeRevision(next?.stateRevision ?? next?.updatedAt ?? resolvedBootstrap?.stateRevision ?? resolvedBootstrap?.updatedAt),
+            bootstrapRevision: normalizeRevision(
+              next?.bootstrapRevision ??
+                next?.stateRevision ??
+                next?.updatedAt ??
+                resolvedBootstrap?.bootstrapRevision ??
+                resolvedBootstrap?.stateRevision ??
+                resolvedBootstrap?.updatedAt
+            ),
             updatedAt: next?.updatedAt ?? resolvedBootstrap?.updatedAt ?? null,
             degraded: true,
-          };
+          } as BootstrapPayload);
           setBootstrap(fallback);
           writeBootstrapCache(auth.userId, fallback);
+          syncClientRevisionsFromBootstrap(fallback);
         }
       } catch (error) {
         throw error;
@@ -568,10 +753,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       ) : null}
-      {isAuthed && !isPolicyPage && (busyStage === "onboarding" || (bootstrapLoading && !resolvedBootstrap?.consentCompleted)) ? (
+      {!isPolicyPage && (authLoading || (isAuthed && (!storeHydrated || busyStage === "onboarding" || (bootstrapLoading && !resolvedBootstrap?.consentCompleted)))) ? (
         <GateLoadingScreen
-          message={loadingCopy.message}
-          detail={loadingCopy.detail}
+          message={
+            authLoading
+              ? "계정 상태를 확인하는 중..."
+              : isAuthed && resolvedBootstrap?.consentCompleted && !storeHydrated
+                ? "최근 상태를 준비하는 중..."
+                : loadingCopy.message
+          }
+          detail={
+            authLoading
+              ? "저장된 세션과 최근 동기화 데이터를 확인하고 있습니다."
+              : isAuthed && resolvedBootstrap?.consentCompleted && !storeHydrated
+                ? "저장된 화면 데이터를 먼저 적용하고 있습니다."
+                : loadingCopy.detail
+          }
         />
       ) : null}
       {isAuthed && !isPolicyPage && !bootstrapLoading && bootstrapError && !resolvedBootstrap?.consentCompleted ? (
@@ -596,6 +793,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             bootstrapSettledUserId === (auth?.userId ?? null) &&
             Boolean(resolvedBootstrap?.consentCompleted)
           }
+        />
+      ) : null}
+      {!isPolicyPage ? (
+        <UserStateSyncBridge
+          enabled={
+            isAuthed &&
+            bootstrapSettledUserId === (auth?.userId ?? null) &&
+            Boolean(resolvedBootstrap?.consentCompleted)
+          }
+          userId={auth?.userId ?? null}
+          onRefreshState={refreshRemoteState}
+          onRefreshBootstrap={() => loadBootstrap({ silent: true }).then(() => undefined)}
         />
       ) : null}
       <OnboardingGuide open={showOnboarding} onComplete={handleOnboardingComplete} />

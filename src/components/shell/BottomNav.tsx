@@ -1,8 +1,8 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import type { ReactElement, SVGProps } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import { useI18n } from "@/lib/useI18n";
 
@@ -61,8 +61,10 @@ const ITEMS: NavItem[] = [
 
 export function BottomNav() {
   const pathname = usePathname();
+  const router = useRouter();
   const [hide, setHide] = useState(false);
   const [pendingHref, setPendingHref] = useState<string | null>(null);
+  const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { t } = useI18n();
 
   useEffect(() => {
@@ -79,8 +81,27 @@ export function BottomNav() {
   }, []);
 
   useEffect(() => {
+    for (const item of ITEMS) {
+      router.prefetch(item.href);
+    }
+  }, [router]);
+
+  useEffect(() => {
+    if (fallbackTimerRef.current) {
+      clearTimeout(fallbackTimerRef.current);
+      fallbackTimerRef.current = null;
+    }
     setPendingHref(null);
   }, [pathname]);
+
+  useEffect(() => {
+    return () => {
+      if (fallbackTimerRef.current) {
+        clearTimeout(fallbackTimerRef.current);
+        fallbackTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const activeHref = useMemo(() => {
     const hit = ITEMS.find((it) =>
@@ -126,7 +147,16 @@ export function BottomNav() {
                       }
                       event.preventDefault();
                       setPendingHref(it.href);
-                      window.location.assign(it.href);
+                      if (fallbackTimerRef.current) {
+                        clearTimeout(fallbackTimerRef.current);
+                      }
+                      fallbackTimerRef.current = setTimeout(() => {
+                        if (window.location.pathname === it.href) return;
+                        window.location.assign(it.href);
+                      }, 900);
+                      startTransition(() => {
+                        router.push(it.href);
+                      });
                     }}
                     aria-current={active ? "page" : undefined}
                   >

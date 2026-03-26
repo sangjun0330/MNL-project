@@ -318,11 +318,11 @@ function OrderCheckButton({ href }: { href: string }) {
   return (
     <a
       href={href}
-      className="inline-flex h-[52px] shrink-0 items-center justify-center gap-2 rounded-full border-2 border-[#8F83F7] bg-[rgba(244,240,255,0.92)] px-5 text-[15px] font-semibold tracking-[-0.03em] text-[#7A72E8] shadow-[0_10px_24px_rgba(122,114,232,0.10)] transition active:opacity-80 sm:h-[56px] sm:px-6 sm:text-[16px]"
+      className="inline-flex h-[46px] shrink-0 items-center justify-center gap-2 rounded-full border-2 border-[#8F83F7] bg-[rgba(244,240,255,0.92)] px-4 text-[14px] font-semibold tracking-[-0.03em] text-[#7A72E8] shadow-[0_10px_24px_rgba(122,114,232,0.10)] transition active:opacity-80 sm:h-[50px] sm:px-5 sm:text-[15px]"
       aria-label="오더 확인하기"
     >
       <span>오더 확인하기</span>
-      <svg className="h-4 w-4 sm:h-[18px] sm:w-[18px]" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <svg className="h-[15px] w-[15px] sm:h-4 sm:w-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d="M7 4.5 12.5 10 7 15.5" />
       </svg>
     </a>

@@ -23,6 +23,8 @@ function degradedResponse() {
           records: { templates: {}, entries: {}, recent: [] },
           settings: null,
         },
+        stateRevision: null,
+        bootstrapRevision: null,
         updatedAt: null,
         degraded: true,
       },

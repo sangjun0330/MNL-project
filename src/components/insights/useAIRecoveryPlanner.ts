@@ -4,9 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AIRecoveryPlannerPayload } from "@/lib/aiRecoveryPlanner";
 import { todayISO } from "@/lib/date";
 import { getBrowserAuthHeaders, useAuthState } from "@/lib/auth";
+import { getClientCache, setClientCache } from "@/lib/clientCache";
+import { useClientSyncSnapshot } from "@/lib/clientSyncStore";
 import { useI18n } from "@/lib/useI18n";
-import { useInsightsData } from "@/components/insights/useInsightsData";
 import { DEFAULT_RECOVERY_PHASE, normalizeRecoveryPhase, type RecoveryPhase } from "@/lib/recoveryPhases";
+import { useAppStoreHydrated } from "@/lib/store";
 
 type FetchMode = "cache" | "generate";
 
@@ -30,6 +32,10 @@ type HookResult = {
 const inFlightGenerate = new Map<string, Promise<AIRecoveryPlannerPayload | null>>();
 const sessionDailyCache = new Map<string, AIRecoveryPlannerPayload>();
 const DEFAULT_ORDER_COUNT = 3;
+type CachedPlannerPayload = {
+  data: AIRecoveryPlannerPayload | null;
+  revision: number | null;
+};
 
 function clearPlannerPhaseCache(userId: string, lang: "ko" | "en", dateISO: string, phase: RecoveryPhase) {
   const prefix = `${userId}:${lang}:${dateISO}:${phase}:`;
@@ -56,6 +62,10 @@ function requestKey(
   requestedOrderCount?: number | null
 ) {
   return `${userId}:${lang}:${dateISO}:${phase}:${normalizeRequestedOrderCount(requestedOrderCount)}`;
+}
+
+function plannerCacheKey(key: string) {
+  return `recovery-planner:${key}`;
 }
 
 async function fetchAIRecoveryPlanner(
@@ -131,7 +141,8 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
   const phase = normalizeRecoveryPhase(options?.phase ?? DEFAULT_RECOVERY_PHASE);
   const { lang } = useI18n();
   const { user } = useAuthState();
-  const { state } = useInsightsData();
+  const storeHydrated = useAppStoreHydrated();
+  const { stateRevision } = useClientSyncSnapshot();
   const [remoteData, setRemoteData] = useState<AIRecoveryPlannerPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
@@ -161,7 +172,7 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
     }));
   }, [lang, phase, user?.userId]);
 
-  const isStoreHydrated = state.selected !== ("1970-01-01" as any);
+  const isStoreHydrated = storeHydrated;
 
   useEffect(() => {
     if (!enabled) {
@@ -176,28 +187,33 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
     const dateISO = todayISO();
     const currentRequestedOrderCount = manualGenerateState.orderCount;
     const key = requestKey(user?.userId ?? "guest", lang, dateISO, phase, currentRequestedOrderCount);
+    const persistedCache = getClientCache<CachedPlannerPayload>(plannerCacheKey(key))?.data ?? null;
     let active = true;
     const forceGenerate = mode === "generate" && manualGenerateState.count > 0;
     const requestedOrderCount = forceGenerate ? manualGenerateState.orderCount : null;
 
-    const fromSession = sessionDailyCache.get(key) ?? null;
+    const fromSession = sessionDailyCache.get(key) ?? persistedCache?.data ?? null;
     if (fromSession && fromSession.language === lang && !forceGenerate) {
       setRemoteData(fromSession);
       setError(null);
-      setGenerating(false);
-      setLoading(false);
-      return () => {
-        active = false;
-      };
+      if ((persistedCache?.revision ?? null) === (stateRevision ?? null)) {
+        setGenerating(false);
+        setLoading(false);
+        return () => {
+          active = false;
+        };
+      }
     }
     if (fromSession && fromSession.language !== lang) {
       sessionDailyCache.delete(key);
     }
+    if (!fromSession) {
+      setRemoteData(null);
+    }
 
-    setLoading(true);
+    setLoading(!fromSession);
     setGenerating(false);
     setError(null);
-    setRemoteData(null);
 
     const run = async () => {
       let cached: AIRecoveryPlannerPayload | null = null;
@@ -211,6 +227,10 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
 
         if (cached && cached.language === lang && cached.phase === phase && !forceGenerate) {
           sessionDailyCache.set(key, cached);
+          setClientCache<CachedPlannerPayload>(plannerCacheKey(key), {
+            data: cached,
+            revision: stateRevision ?? null,
+          });
           setRemoteData(cached);
           return;
         }
@@ -225,6 +245,10 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
         if (!active) return;
         if (generated && generated.language === lang && generated.phase === phase) {
           sessionDailyCache.set(key, generated);
+          setClientCache<CachedPlannerPayload>(plannerCacheKey(key), {
+            data: generated,
+            revision: stateRevision ?? null,
+          });
         }
         setRemoteData(generated ?? null);
       } catch (err: any) {
@@ -242,7 +266,7 @@ export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
     return () => {
       active = false;
     };
-  }, [autoGenerate, enabled, isStoreHydrated, lang, manualGenerateState.count, manualGenerateState.orderCount, mode, phase, retryCount, user?.userId]);
+  }, [autoGenerate, enabled, isStoreHydrated, lang, manualGenerateState.count, manualGenerateState.orderCount, mode, phase, retryCount, stateRevision, user?.userId]);
 
   return useMemo(
     () => ({

@@ -6,6 +6,7 @@ import { useAppStore } from "@/lib/store";
 import { writeAppStateDraft } from "@/lib/appStateDraft";
 import { sanitizeStatePayload } from "@/lib/stateSanitizer";
 import { serializeStateForSupabase } from "@/lib/statePersistence";
+import { getClientSyncSnapshot, updateClientSyncSnapshot } from "@/lib/clientSyncStore";
 
 const RETRY_BASE_MS = 800;
 const RETRY_MAX_MS = 8000;
@@ -16,6 +17,7 @@ type SaveOptions = {
 
 type SaveResult = {
   localOnly: boolean;
+  stateRevision: number | null;
 };
 
 export function CloudStateSync({ remoteEnabled = false }: { remoteEnabled?: boolean }) {
@@ -65,6 +67,7 @@ export function CloudStateSync({ remoteEnabled = false }: { remoteEnabled?: bool
 
       return {
         localOnly: Boolean(json?.localOnly || json?.degraded),
+        stateRevision: Number.isFinite(Number(json?.stateRevision)) ? Number(json?.stateRevision) : null,
       };
     },
     [getAuthHeaders]
@@ -106,6 +109,16 @@ export function CloudStateSync({ remoteEnabled = false }: { remoteEnabled?: bool
               queueSave(latestState, latestUserId);
             }, 30_000);
             return;
+          }
+          if (result.stateRevision != null) {
+            const current = getClientSyncSnapshot();
+            updateClientSyncSnapshot({
+              stateRevision: result.stateRevision,
+              bootstrapRevision:
+                current.bootstrapRevision == null
+                  ? result.stateRevision
+                  : Math.max(current.bootstrapRevision, result.stateRevision),
+            });
           }
           retryCountRef.current = 0;
           if (retryTimerRef.current) {

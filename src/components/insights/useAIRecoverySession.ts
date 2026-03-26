@@ -3,6 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { addDays, fromISODate, toISODate, type ISODate } from "@/lib/date";
 import { getAIRecoveryErrorMessage, type AIRecoverySessionResponse, type AIRecoverySlot } from "@/lib/aiRecovery";
+import { useAuthState } from "@/lib/auth";
+import { getClientCache, setClientCache } from "@/lib/clientCache";
+import { getClientSyncSnapshot, updateClientSyncSnapshot, useClientSyncSnapshot } from "@/lib/clientSyncStore";
+import {
+  CLIENT_DATA_SCOPE_HOME_PREVIEW,
+  CLIENT_DATA_SCOPE_RECOVERY_SESSION,
+  emitClientDataInvalidation,
+} from "@/lib/clientDataEvents";
 import { serializeStateForSupabase } from "@/lib/statePersistence";
 import { getAppState } from "@/lib/store";
 import type { AppState } from "@/lib/model";
@@ -34,7 +42,18 @@ async function readJson<T>(response: Response): Promise<T | null> {
   return response.json().catch(() => null);
 }
 
+type CachedSessionData = {
+  data: SessionData | null;
+  revision: number | null;
+};
+
+function buildSessionCacheKey(userId: string | null | undefined, dateISO: ISODate, slot: AIRecoverySlot) {
+  return `recovery-session:${userId ?? "guest"}:${dateISO}:${slot}`;
+}
+
 export function useAIRecoverySession(args: HookArgs): HookState {
+  const { user } = useAuthState();
+  const { stateRevision } = useClientSyncSnapshot();
   const normalizeData = (value: SessionData | null | undefined): SessionData | null => {
     if (!value) return null;
     return {
@@ -55,7 +74,9 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     } satisfies SessionData;
   };
 
-  const initialData = normalizeData(args.initialData);
+  const cacheKey = buildSessionCacheKey(user?.userId ?? null, args.dateISO, args.slot);
+  const cachedInitial = getClientCache<CachedSessionData>(cacheKey)?.data ?? null;
+  const initialData = normalizeData(args.initialData ?? cachedInitial?.data ?? null);
   const [data, setData] = useState<SessionData | null>(initialData);
   const [loading, setLoading] = useState(!initialData);
   const [generating, setGenerating] = useState(false);
@@ -81,6 +102,12 @@ export function useAIRecoverySession(args: HookArgs): HookState {
   dateISORef.current = args.dateISO;
 
   const key = `${args.dateISO}:${args.slot}`;
+  const persistCachedSession = (value: SessionData | null, revision = stateRevision ?? null) => {
+    setClientCache<CachedSessionData>(cacheKey, {
+      data: value,
+      revision,
+    });
+  };
 
   const nextDataRequestId = () => {
     dataRequestRef.current += 1;
@@ -264,7 +291,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     return normalizeData(json.data);
   };
 
-  const load = async () => {
+  const load = async (options?: { force?: boolean }) => {
     const requestId = nextDataRequestId();
     const completionVersionAtStart = committedCompletionVersionRef.current;
     if (!args.enabled) {
@@ -273,12 +300,27 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       setError(null);
       return;
     }
-    setLoading(true);
+    const cached = getClientCache<CachedSessionData>(cacheKey)?.data ?? null;
+    const cachedData = normalizeData(cached?.data ?? null);
+    const shouldRevalidate = options?.force === true || !cachedData || (cached?.revision ?? null) !== (stateRevision ?? null);
+
+    if (cachedData) {
+      adoptIncomingData(cachedData, { completionVersionAtStart });
+    }
+
+    if (!shouldRevalidate) {
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
+    setLoading(!cachedData);
     setError(null);
     try {
       const nextData = await fetchSessionView("load");
       if (!isCurrentDataRequest(requestId)) return;
       adoptIncomingData(nextData, { completionVersionAtStart });
+      persistCachedSession(nextData);
       const autoOrdersKey = buildAutoOrdersKey(nextData);
       if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && nextData?.quota.canRegenerateOrders) {
         autoOrdersRequestedRef.current.add(autoOrdersKey);
@@ -296,7 +338,9 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       }
     } catch (nextError) {
       if (!isCurrentDataRequest(requestId)) return;
-      setData(null);
+      if (!cachedData) {
+        setData(null);
+      }
       setFriendlyError((nextError as any)?.message ?? nextError ?? "ai_recovery_load_failed");
     } finally {
       setLoading(false);
@@ -333,14 +377,28 @@ export function useAIRecoverySession(args: HookArgs): HookState {
         throw new Error(String(json?.error ?? `http_${response.status}`));
       }
       if (!isCurrentDataRequest(requestId)) return;
-      adoptIncomingData(normalizeData(json.data), { completionVersionAtStart });
-      void load();
+      const nextData = normalizeData(json.data);
+      const nextStateRevision = Number.isFinite(Number(json.data?.stateRevision)) ? Number(json.data?.stateRevision) : null;
+      if (nextStateRevision != null) {
+        const currentSync = getClientSyncSnapshot();
+        updateClientSyncSnapshot({
+          stateRevision: nextStateRevision,
+          bootstrapRevision:
+            currentSync.bootstrapRevision == null
+              ? nextStateRevision
+              : Math.max(currentSync.bootstrapRevision, nextStateRevision),
+        });
+      }
+      adoptIncomingData(nextData, { completionVersionAtStart });
+      persistCachedSession(nextData, nextStateRevision ?? stateRevision ?? null);
+      emitClientDataInvalidation([CLIENT_DATA_SCOPE_RECOVERY_SESSION, CLIENT_DATA_SCOPE_HOME_PREVIEW]);
     } catch (nextError) {
       if (!isCurrentDataRequest(requestId)) return;
       try {
         const recovered = await fetchSessionView(auto ? "orders_auto_recover" : "orders_recover");
         if (!isCurrentDataRequest(requestId)) return;
         adoptIncomingData(recovered, { completionVersionAtStart });
+        persistCachedSession(recovered);
         if (!auto) setError(null);
         return;
       } catch {}
@@ -390,8 +448,20 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       }
       if (!isCurrentDataRequest(requestId)) return;
       const nextData = normalizeData(json.data);
+      const nextStateRevision = Number.isFinite(Number(json.data?.stateRevision)) ? Number(json.data?.stateRevision) : null;
+      if (nextStateRevision != null) {
+        const currentSync = getClientSyncSnapshot();
+        updateClientSyncSnapshot({
+          stateRevision: nextStateRevision,
+          bootstrapRevision:
+            currentSync.bootstrapRevision == null
+              ? nextStateRevision
+              : Math.max(currentSync.bootstrapRevision, nextStateRevision),
+        });
+      }
       adoptIncomingData(nextData, { completionVersionAtStart });
-      void load();
+      persistCachedSession(nextData, nextStateRevision ?? stateRevision ?? null);
+      emitClientDataInvalidation([CLIENT_DATA_SCOPE_RECOVERY_SESSION, CLIENT_DATA_SCOPE_HOME_PREVIEW]);
       const autoOrdersKey = buildAutoOrdersKey(nextData);
       if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && nextData?.quota.canRegenerateOrders) {
         autoOrdersRequestedRef.current.add(autoOrdersKey);
@@ -406,6 +476,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
         const recoveredGeneratedAt = recovered?.session?.generatedAt ?? null;
         if (recovered?.session && (recoveredGeneratedAt !== previousGeneratedAt || previousGeneratedAt != null)) {
           adoptIncomingData(recovered, { completionVersionAtStart });
+          persistCachedSession(recovered);
           setError(null);
           const autoOrdersKey = buildAutoOrdersKey(recovered);
           if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && recovered?.quota.canRegenerateOrders) {
@@ -460,14 +531,35 @@ export function useAIRecoverySession(args: HookArgs): HookState {
           completed,
         }),
       });
-      const json = await readJson<{ ok?: boolean; error?: string; data?: { completions?: string[]; orderStats?: SessionData["orderStats"] } }>(response);
+      const json = await readJson<{
+        ok?: boolean;
+        error?: string;
+        data?: { completions?: string[]; orderStats?: SessionData["orderStats"]; stateRevision?: number | null };
+      }>(response);
       if (!response.ok || !json?.ok) {
         throw new Error(String(json?.error ?? `http_${response.status}`));
       }
       const completions = Array.isArray(json?.data?.completions) ? json.data?.completions ?? [] : [];
       const orderStats = json?.data?.orderStats ?? optimisticStats;
+      const nextStateRevision = Number.isFinite(Number(json?.data?.stateRevision)) ? Number(json?.data?.stateRevision) : null;
+      const latestData = dataRef.current;
+      const nextData = latestData ? { ...latestData, completions, orderStats } : latestData;
       committedCompletionVersionRef.current += 1;
-      setData((current) => (current ? { ...current, completions, orderStats } : current));
+      setData(nextData);
+      if (nextData) {
+        persistCachedSession(nextData, nextStateRevision ?? stateRevision ?? null);
+      }
+      if (nextStateRevision != null) {
+        const currentSync = getClientSyncSnapshot();
+        updateClientSyncSnapshot({
+          stateRevision: nextStateRevision,
+          bootstrapRevision:
+            currentSync.bootstrapRevision == null
+              ? nextStateRevision
+              : Math.max(currentSync.bootstrapRevision, nextStateRevision),
+        });
+      }
+      emitClientDataInvalidation([CLIENT_DATA_SCOPE_RECOVERY_SESSION, CLIENT_DATA_SCOPE_HOME_PREVIEW]);
     } catch (nextError) {
       // API 실패 시 낙관적 업데이트 롤백
       setData((current) => (current ? { ...current, completions: previous, orderStats: previousStats } : current));
@@ -482,15 +574,16 @@ export function useAIRecoverySession(args: HookArgs): HookState {
   useEffect(() => {
     if (initialData && initialData.dateISO === args.dateISO && initialData.slot === args.slot) {
       setData((current) => pickLatestData(current, initialData));
+      persistCachedSession(initialData);
       setLoading(false);
       setError(null);
     }
-  }, [initialData, args.dateISO, args.slot]);
+  }, [initialData, args.dateISO, args.slot, cacheKey, stateRevision]);
 
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [args.dateISO, args.slot, args.enabled]);
+  }, [args.dateISO, args.slot, args.enabled, cacheKey, stateRevision]);
 
   return {
     data,

@@ -5,7 +5,13 @@ import { summarizeAppState } from "@/lib/appStateIntegrity";
 type UserStateRow = {
   userId: string;
   payload: any;
-  updatedAt: number;
+  updatedAt: number | null;
+};
+
+export type UserStateSaveResult = {
+  updatedAt: number | null;
+  stateRevision: number | null;
+  changed: boolean;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -19,6 +25,13 @@ function countRecordKeys(value: unknown): number {
 function toFiniteNumber(value: unknown): number | null {
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+function toTimestamp(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string" || !value.trim()) return null;
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function readMenstrualSettings(payload: unknown): Record<string, unknown> | null {
@@ -211,22 +224,25 @@ function preserveMenstrualSettingsIfNeeded(
 
 export { ensureUserRow };
 
-export async function saveUserState(input: { userId: string; payload: any }): Promise<void> {
+export async function saveUserState(input: { userId: string; payload: any }): Promise<UserStateSaveResult> {
   const admin = getSupabaseAdmin();
   const now = new Date().toISOString();
+  const nowTs = new Date(now).getTime();
   let nextPayload = input.payload;
   let existingPayloadRaw: unknown = null;
   let existingPayload: Record<string, unknown> | null = null;
+  let existingUpdatedAt: number | null = null;
 
   // Ensure parent row exists before writing child state row (FK-safe for first login).
   await ensureUserRow(input.userId);
 
   const { data: existing } = await admin
     .from("rnest_user_state")
-    .select("payload")
+    .select("payload, updated_at")
     .eq("user_id", input.userId)
     .maybeSingle();
   existingPayloadRaw = existing?.payload ?? null;
+  existingUpdatedAt = toTimestamp(existing?.updated_at ?? null);
   if (isRecord(existing?.payload)) {
     existingPayload = existing.payload;
   }
@@ -284,7 +300,11 @@ export async function saveUserState(input: { userId: string; payload: any }): Pr
 
   // Skip no-op writes to avoid unnecessary updated_at churn and revision row growth.
   if (existingPayloadRaw !== null && isJsonEqual(existingPayloadRaw, nextPayload)) {
-    return;
+    return {
+      updatedAt: existingUpdatedAt,
+      stateRevision: existingUpdatedAt,
+      changed: false,
+    };
   }
 
   const { error } = await admin
@@ -301,6 +321,12 @@ export async function saveUserState(input: { userId: string; payload: any }): Pr
   if (error) {
     throw error;
   }
+
+  return {
+    updatedAt: nowTs,
+    stateRevision: nowTs,
+    changed: true,
+  };
 }
 
 export async function loadUserState(userId: string): Promise<UserStateRow | null> {
@@ -320,6 +346,6 @@ export async function loadUserState(userId: string): Promise<UserStateRow | null
   return {
     userId: data.user_id,
     payload: data.payload,
-    updatedAt: data.updated_at ? new Date(data.updated_at).getTime() : Date.now(),
+    updatedAt: toTimestamp(data.updated_at),
   };
 }

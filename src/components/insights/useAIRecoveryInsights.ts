@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AIRecoveryPayload } from "@/lib/aiRecoveryContract";
 import { todayISO } from "@/lib/date";
-import { useInsightsData } from "@/components/insights/useInsightsData";
 import { getBrowserAuthHeaders, useAuthState } from "@/lib/auth";
+import { getClientCache, setClientCache } from "@/lib/clientCache";
+import { useClientSyncSnapshot } from "@/lib/clientSyncStore";
 import { DEFAULT_RECOVERY_PHASE, normalizeRecoveryPhase, type RecoveryPhase } from "@/lib/recoveryPhases";
 import { useI18n } from "@/lib/useI18n";
+import { useAppStoreHydrated } from "@/lib/store";
 
 type FetchMode = "cache" | "generate";
 
@@ -30,6 +32,10 @@ type HookResult = {
 
 const inFlightGenerate = new Map<string, Promise<AIRecoveryPayload | null>>();
 const sessionDailyCache = new Map<string, AIRecoveryPayload>();
+type CachedRecoveryInsightsPayload = {
+  data: AIRecoveryPayload | null;
+  revision: number | null;
+};
 
 function clearRecoveryPhaseCache(userId: string, lang: "ko" | "en", dateISO: string, phase: RecoveryPhase) {
   const prefix = `${userId}:${lang}:${dateISO}:${phase}`;
@@ -43,6 +49,10 @@ function clearRecoveryPhaseCache(userId: string, lang: "ko" | "en", dateISO: str
 
 function requestKey(userId: string, lang: "ko" | "en", dateISO: string, phase: RecoveryPhase) {
   return `${userId}:${lang}:${dateISO}:${phase}`;
+}
+
+function recoveryInsightsCacheKey(key: string) {
+  return `recovery-insights:${key}`;
 }
 
 async function fetchAIRecovery(
@@ -109,7 +119,8 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
   const phase = normalizeRecoveryPhase(options?.phase ?? DEFAULT_RECOVERY_PHASE);
   const { lang } = useI18n();
   const { user } = useAuthState();
-  const { state } = useInsightsData();
+  const isStoreHydrated = useAppStoreHydrated();
+  const { stateRevision } = useClientSyncSnapshot();
   const [remoteData, setRemoteData] = useState<AIRecoveryPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
@@ -133,8 +144,6 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
     setManualGenerateCount((c) => c + 1);
   }, [lang, phase, user?.userId]);
 
-  const isStoreHydrated = state.selected !== ("1970-01-01" as any);
-
   useEffect(() => {
     if (!enabled) {
       setRemoteData(null);
@@ -146,27 +155,32 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
     if (!isStoreHydrated) return;
     const dateISO = todayISO();
     const key = requestKey(user?.userId ?? "guest", lang, dateISO, phase);
+    const persistedCache = getClientCache<CachedRecoveryInsightsPayload>(recoveryInsightsCacheKey(key))?.data ?? null;
     let active = true;
     const forceGenerate = mode === "generate" && manualGenerateCount > 0;
 
-    const fromSession = sessionDailyCache.get(key) ?? null;
+    const fromSession = sessionDailyCache.get(key) ?? persistedCache?.data ?? null;
     if (fromSession && fromSession.language === lang && !forceGenerate) {
       setRemoteData(fromSession);
       setError(null);
-      setGenerating(false);
-      setLoading(false);
-      return () => {
-        active = false;
-      };
+      if ((persistedCache?.revision ?? null) === (stateRevision ?? null)) {
+        setGenerating(false);
+        setLoading(false);
+        return () => {
+          active = false;
+        };
+      }
     }
     if (fromSession && fromSession.language !== lang) {
       sessionDailyCache.delete(key);
     }
+    if (!fromSession) {
+      setRemoteData(null);
+    }
 
-    setLoading(true);
+    setLoading(!fromSession);
     setGenerating(false);
     setError(null);
-    setRemoteData(null);
 
     const run = async () => {
       let cached: AIRecoveryPayload | null = null;
@@ -180,6 +194,10 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
 
         if (cached && cached.language === lang && cached.phase === phase && !forceGenerate) {
           sessionDailyCache.set(key, cached);
+          setClientCache<CachedRecoveryInsightsPayload>(recoveryInsightsCacheKey(key), {
+            data: cached,
+            revision: stateRevision ?? null,
+          });
           setRemoteData(cached);
           return;
         }
@@ -196,6 +214,10 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
         if (!active) return;
         if (generated && generated.language === lang && generated.phase === phase) {
           sessionDailyCache.set(key, generated);
+          setClientCache<CachedRecoveryInsightsPayload>(recoveryInsightsCacheKey(key), {
+            data: generated,
+            revision: stateRevision ?? null,
+          });
         }
         setRemoteData(generated ?? null);
       } catch (err: any) {
@@ -213,7 +235,7 @@ export function useAIRecoveryInsights(options?: HookOptions): HookResult {
     return () => {
       active = false;
     };
-  }, [enabled, isStoreHydrated, lang, mode, phase, retryCount, autoGenerate, manualGenerateCount, user?.userId]);
+  }, [autoGenerate, enabled, isStoreHydrated, lang, manualGenerateCount, mode, phase, retryCount, stateRevision, user?.userId]);
 
   return useMemo(
     () => ({
