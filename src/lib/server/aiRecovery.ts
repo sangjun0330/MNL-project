@@ -289,7 +289,6 @@ function buildPromptHealthRow(state: AppState, iso: ISODate) {
     symptomSeverity: bio?.symptomSeverity ?? null,
     menstrualStatus: bio?.menstrualStatus ?? null,
     menstrualFlow: bio?.menstrualFlow ?? null,
-    shiftOvertimeHours: bio?.shiftOvertimeHours ?? null,
   };
 }
 
