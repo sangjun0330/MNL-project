@@ -8,10 +8,6 @@ import { isPrivilegedRecoveryTesterIdentity } from "@/lib/server/authAccess";
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-function bad(status: number, message: string) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
-
 export async function GET(req: Request) {
   const identity = await readAuthIdentityFromRequest(req);
   if (!identity.userId) {
@@ -84,7 +80,46 @@ export async function GET(req: Request) {
         purchaseSummary,
       },
     });
-  } catch {
-    return bad(500, "failed_to_read_subscription");
+  } catch (err) {
+    console.error("[BillingSubscription] failed_to_read_subscription", {
+      userId: String(identity.userId).slice(0, 8),
+      code: (err as any)?.code,
+      message: String((err as any)?.message ?? err).slice(0, 200),
+    });
+    // 500 대신 free tier 기본값 반환으로 클라이언트가 정상 동작 가능하게 함
+    return NextResponse.json({
+      ok: true,
+      data: {
+        subscription: {
+          tier: "free",
+          status: "inactive",
+          startedAt: null,
+          currentPeriodEnd: null,
+          updatedAt: null,
+          customerKey: "",
+          cancelAtPeriodEnd: false,
+          cancelScheduledAt: null,
+          canceledAt: null,
+          cancelReason: null,
+          hasPaidAccess: false,
+          entitlements: DEFAULT_BILLING_ENTITLEMENTS,
+          aiRecoveryModel: null,
+          medSafetyQuota: {
+            timezone: "Asia/Seoul",
+            standard: { includedRemaining: 0, extraRemaining: 0, totalRemaining: 0 },
+            premium: { includedRemaining: 0, extraRemaining: 0, totalRemaining: 0 },
+            totalRemaining: 0,
+            recommendedDefaultSearchType: "standard",
+          },
+        },
+        orders: [],
+        purchaseSummary: {
+          totalPaidAmount: 0,
+          subscriptionPaidAmount: 0,
+          creditPaidAmount: 0,
+          creditPurchasedUnits: 0,
+        },
+      },
+    });
   }
 }

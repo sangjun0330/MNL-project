@@ -39,14 +39,14 @@ function degradedResponse() {
 
 export async function GET(req: Request) {
   try {
-    const { jsonNoStore, sameOriginRequestError } = await import("@/lib/server/requestSecurity");
+    const { jsonNoStore } = await import("@/lib/server/requestSecurity");
     const { readUserIdFromRequest } = await import("@/lib/server/readUserId");
     const { loadUserBootstrap } = await import("@/lib/server/serviceConsentStore");
 
-    const originError = sameOriginRequestError(req);
-    if (originError) {
-      return jsonNoStore({ ok: false, error: originError }, { status: 403 });
-    }
+    // sameOriginRequestError 체크 제거:
+    // Referrer-Policy: no-referrer 설정으로 브라우저가 Referer 헤더를 전송하지 않아
+    // GET 요청은 Origin 헤더도 없어 항상 403이 반환됨.
+    // JWT Authorization 헤더가 이미 인증을 담당하므로 CSRF 체크는 불필요.
 
     const userId = await readUserIdFromRequest(req);
     if (!userId) {
