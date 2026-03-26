@@ -69,7 +69,7 @@ export function useInsightsData() {
   const end = todayISO();
   const start = toISODate(addDays(fromISODate(end), -6));
 
-  const vitals = useMemo(() => computeVitalsRange({ state, start, end }), [bio, emotions, schedule, settings, notes, start, end]);
+  const vitals = useMemo(() => computeVitalsRange({ state, start, end }), [state, start, end]);
   const vmap = useMemo(() => new Map(vitals.map((v) => [v.dateISO, v])), [vitals]);
   const recordedDateSet = useMemo(() => {
     const set = new Set<ISODate>();
@@ -126,7 +126,7 @@ export function useInsightsData() {
 
   const accuracy = useMemo(
     () => computePersonalizationAccuracy({ state, start, end, vitals }),
-    [bio, emotions, schedule, settings, notes, start, end, vitals]
+    [state, start, end, vitals]
   );
 
   const daysWithAnyInput = useMemo(() => {

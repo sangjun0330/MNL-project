@@ -20,6 +20,7 @@ function degradedGetResponse() {
       },
       stateRevision: null,
       updatedAt: null,
+      recoverySummary: null,
       degraded: true,
     },
     {
@@ -63,6 +64,7 @@ export async function GET(req: Request) {
     const { jsonNoStore } = await import("@/lib/server/requestSecurity");
     const { readUserIdFromRequest } = await import("@/lib/server/readUserId");
     const { userHasCompletedServiceConsent } = await import("@/lib/server/serviceConsentStore");
+    const { loadAIRecoverySummary } = await import("@/lib/server/aiRecoveryStateStore");
     const { ensureUserRow, loadUserState } = await import("@/lib/server/userStateStore");
     const { sanitizeStatePayload } = await import("@/lib/stateSanitizer");
     const { defaultMemoState, defaultRecordState } = await import("@/lib/notebook");
@@ -83,11 +85,13 @@ export async function GET(req: Request) {
           records: defaultRecordState(),
         }
       : null;
+    const recoverySummary = await loadAIRecoverySummary(userId);
     return jsonNoStore({
       ok: true,
       state: sanitized,
       stateRevision: row?.updatedAt ?? null,
       updatedAt: row?.updatedAt ?? null,
+      recoverySummary,
     });
   } catch (error) {
     try {

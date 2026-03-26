@@ -6,12 +6,13 @@ import { usePathname, useRouter } from "next/navigation";
 import { BottomNav } from "@/components/shell/BottomNav";
 import { UiPreferencesBridge } from "@/components/system/UiPreferencesBridge";
 import { shouldPreferCandidateState } from "@/lib/appStateIntegrity";
+import type { BootstrapPayload } from "@/lib/accountBootstrap";
 import { getSupabaseBrowserClient, signOut, useAuthState } from "@/lib/auth";
 import { hasMeaningfulAppState, readPreferredAppStateDraft } from "@/lib/appStateDraft";
-import { hydrateState, useAppStoreHydrated } from "@/lib/store";
+import { beginCurrentAccountSession, resetCurrentAccountResources, setCurrentAccountBootstrap } from "@/lib/currentAccountResourceStore";
+import { hydrateEmptyAppState, hydrateState, resetAppStoreForHydration, useAppStoreHydrated } from "@/lib/store";
 import { emptyState } from "@/lib/model";
 import { useI18n } from "@/lib/useI18n";
-import { clearClientCache, getClientCache, setClientCache } from "@/lib/clientCache";
 import { resetClientSyncSnapshot, updateClientSyncSnapshot } from "@/lib/clientSyncStore";
 import type { SyntheticEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -44,27 +45,7 @@ const UserStateSyncBridge = dynamic(
 const AUTH_INTERACTION_GUARD_ENABLED =
   process.env.NEXT_PUBLIC_AUTH_INTERACTION_GUARD_ENABLED !== "false";
 
-type BootstrapPayload = {
-  onboardingCompleted: boolean;
-  consentCompleted: boolean;
-  hasStoredState: boolean;
-  state: any | null;
-  stateRevision: number | null;
-  bootstrapRevision: number | null;
-  updatedAt: number | null;
-  degraded?: boolean;
-};
-
 type BusyStage = "onboarding" | "consent" | null;
-
-let bootstrapCache: {
-  userId: string;
-  payload: BootstrapPayload;
-} | null = null;
-
-function bootstrapCacheKey(userId: string) {
-  return `bootstrap:${userId}`;
-}
 
 function normalizeRevision(value: unknown) {
   const parsed = Number(value);
@@ -102,66 +83,6 @@ function shouldAdoptBootstrap(current: BootstrapPayload | null, incoming: Bootst
   }
 
   return false;
-}
-
-function isBootstrapPayload(value: unknown): value is BootstrapPayload {
-  if (!value || typeof value !== "object") return false;
-  const input = value as Partial<BootstrapPayload>;
-  return (
-    typeof input.onboardingCompleted === "boolean" &&
-    typeof input.consentCompleted === "boolean" &&
-    typeof input.hasStoredState === "boolean"
-  );
-}
-
-function readBootstrapCache(userId?: string | null) {
-  if (!userId) return null;
-  if (bootstrapCache?.userId === userId) return bootstrapCache.payload;
-  const persisted = getClientCache<BootstrapPayload>(bootstrapCacheKey(userId))?.data ?? null;
-  if (persisted && isBootstrapPayload(persisted)) {
-    const normalized = normalizeBootstrapPayload(persisted);
-    bootstrapCache = { userId, payload: normalized };
-    return normalized;
-  }
-  try {
-    if (typeof sessionStorage !== "undefined" && sessionStorage.getItem(`rnest_consent_${userId}`) === "1") {
-      return normalizeBootstrapPayload({
-        onboardingCompleted: true,
-        consentCompleted: true,
-        hasStoredState: false,
-        state: null,
-        stateRevision: null,
-        bootstrapRevision: null,
-        updatedAt: null,
-      } as BootstrapPayload);
-    }
-  } catch {}
-  return null;
-}
-
-function writeBootstrapCache(userId: string, payload: BootstrapPayload) {
-  const normalized = normalizeBootstrapPayload(payload);
-  bootstrapCache = { userId, payload: normalized };
-  setClientCache(bootstrapCacheKey(userId), normalized);
-  try {
-    if (typeof sessionStorage !== "undefined" && normalized.consentCompleted) {
-      sessionStorage.setItem(`rnest_consent_${userId}`, "1");
-    }
-  } catch {}
-}
-
-function clearBootstrapCache(userId?: string | null) {
-  if (userId) {
-    clearClientCache(bootstrapCacheKey(userId));
-    try {
-      if (typeof sessionStorage !== "undefined") {
-        sessionStorage.removeItem(`rnest_consent_${userId}`);
-      }
-    } catch {}
-  }
-  if (!userId || bootstrapCache?.userId === userId) {
-    bootstrapCache = null;
-  }
 }
 
 function GateLoadingScreen({ message, detail }: { message: string; detail: string }) {
@@ -278,10 +199,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const bootstrapRequestRef = useRef(0);
   const bootstrapRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stateRefreshInFlightRef = useRef(false);
-  const cachedBootstrap = readBootstrapCache(auth?.userId ?? null);
-  const resolvedBootstrap = bootstrap ?? cachedBootstrap;
-  const resolvedBootstrapRef = useRef<BootstrapPayload | null>(resolvedBootstrap);
-  resolvedBootstrapRef.current = resolvedBootstrap;
+  const resolvedBootstrap = bootstrap;
+  const resolvedBootstrapRef = useRef<BootstrapPayload | null>(bootstrap);
+  resolvedBootstrapRef.current = bootstrap;
   const goToSettings = useCallback(() => {
     setLoginPromptOpen(false);
     if (!pathname?.startsWith("/settings")) {
@@ -333,6 +253,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       const nextState = json?.state ?? null;
       const nextDegraded = Boolean(json?.degraded);
       const currentBootstrap = resolvedBootstrapRef.current;
+      const nextRecoverySummary = json?.recoverySummary ?? currentBootstrap?.recoverySummary ?? null;
       const nextBootstrapRevision = Math.max(
         currentBootstrap?.bootstrapRevision ?? Number.NEGATIVE_INFINITY,
         nextStateRevision ?? Number.NEGATIVE_INFINITY
@@ -363,12 +284,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         stateRevision: nextStateRevision,
         bootstrapRevision: Number.isFinite(nextBootstrapRevision) ? nextBootstrapRevision : currentBootstrap.bootstrapRevision,
         updatedAt: nextStateRevision,
+        recoverySummary: nextRecoverySummary,
         degraded: currentBootstrap.degraded && nextDegraded,
       });
       setBootstrap(nextBootstrap);
-      writeBootstrapCache(scopedUserId, nextBootstrap);
+      setCurrentAccountBootstrap(scopedUserId, nextBootstrap);
       if (nextState) {
         applyRemoteHydration(scopedUserId, nextState, nextStateRevision);
+      } else if (currentBootstrap?.consentCompleted) {
+        applyRemoteHydration(scopedUserId, emptyState(), nextStateRevision);
       }
     } catch (error) {
       console.warn("[AppShell] failed_to_refresh_remote_state", {
@@ -411,57 +335,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       const shouldAdopt = shouldAdoptBootstrap(resolvedBootstrapRef.current, data);
       if (shouldAdopt) {
         setBootstrap(data);
-        writeBootstrapCache(scopedUserId, data);
-        applyRemoteHydration(scopedUserId, data.state, data.stateRevision ?? data.updatedAt);
+        setCurrentAccountBootstrap(scopedUserId, data);
+        applyRemoteHydration(scopedUserId, data.state ?? emptyState(), data.stateRevision ?? data.updatedAt);
       }
       setBootstrapSettledUserId(scopedUserId);
+      setBootstrapError(null);
       return data;
     } catch (error) {
       if (requestId === bootstrapRequestRef.current) {
         setBootstrapSettledUserId(scopedUserId);
-        const localDraft = readPreferredAppStateDraft(scopedUserId);
-        if (localDraft && hasMeaningfulAppState(localDraft.state)) {
-          const fallbackBootstrap = normalizeBootstrapPayload({
-            onboardingCompleted: true,
-            consentCompleted: true,
-            hasStoredState: true,
-            consent: null,
-            state: localDraft.state,
-            stateRevision: localDraft.updatedAt,
-            bootstrapRevision: localDraft.updatedAt,
-            updatedAt: localDraft.updatedAt,
-            degraded: true,
-          } as BootstrapPayload);
-          setBootstrap(fallbackBootstrap);
-          setBootstrapError(null);
-          hydrateState(localDraft.state);
-          writeBootstrapCache(scopedUserId, fallbackBootstrap);
-          syncClientRevisionsFromBootstrap(fallbackBootstrap);
-          return fallbackBootstrap;
-        }
-        const fallbackBootstrap = normalizeBootstrapPayload({
-          onboardingCompleted: true,
-          consentCompleted: true,
-          hasStoredState: false,
-          consent: null,
-          state: emptyState(),
-          stateRevision: null,
-          bootstrapRevision: null,
-          updatedAt: null,
-          degraded: true,
-        } as BootstrapPayload);
-        setBootstrap(fallbackBootstrap);
-        hydrateState(emptyState());
-        writeBootstrapCache(scopedUserId, fallbackBootstrap);
-        syncClientRevisionsFromBootstrap(fallbackBootstrap);
+        setBootstrap(null);
+        setCurrentAccountBootstrap(scopedUserId, null);
+        setBootstrapError((error as Error)?.message ?? "failed_to_load_bootstrap");
         if (!silent) {
-          console.error("[AppShell] failed_to_load_bootstrap_using_empty_fallback", {
+          console.error("[AppShell] failed_to_load_bootstrap", {
             userId: scopedUserId,
             error: (error as Error)?.message ?? "failed_to_load_bootstrap",
           });
         }
-        setBootstrapError(null);
-        return fallbackBootstrap;
       }
       return null;
     } finally {
@@ -479,37 +370,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (status === "loading") return;
     if (!auth?.userId) {
       bootstrapRequestRef.current += 1;
-      clearBootstrapCache();
       resetClientSyncSnapshot();
+      resetCurrentAccountResources(null);
+      hydrateEmptyAppState();
       setBootstrap(null);
       setBootstrapLoading(false);
       setBootstrapError(null);
       setBootstrapSettledUserId(null);
       setBusyStage(null);
-      hydrateState(emptyState());
       return;
     }
+    beginCurrentAccountSession(auth.userId);
+    resetAppStoreForHydration();
+    resetClientSyncSnapshot();
     setBootstrapSettledUserId(null);
-    const cached = readBootstrapCache(auth.userId);
-    if (cached) {
-      setBootstrap(cached);
-      setBootstrapError(null);
-      syncClientRevisionsFromBootstrap(cached);
-      if (cached.consentCompleted && cached.state) {
-        applyRemoteHydration(auth.userId, cached.state, cached.stateRevision ?? cached.updatedAt);
-      }
-    } else {
-      setBootstrap(null);
-      setBootstrapError(null);
-      resetClientSyncSnapshot();
-      const localDraft = readPreferredAppStateDraft(auth.userId);
-      if (localDraft && hasMeaningfulAppState(localDraft.state)) {
-        hydrateState(localDraft.state);
-      }
-    }
+    setBootstrap(null);
+    setBootstrapError(null);
     const scopedUserId = auth.userId;
-    void loadBootstrap({ silent: Boolean(cached?.consentCompleted) }).then((result) => {
-      // 부트스트랩이 degraded로 반환되면 5초 후 자동 재시도
+    void loadBootstrap().then((result) => {
       if (result?.degraded && scopedUserId === auth?.userId) {
         bootstrapRetryTimerRef.current = setTimeout(() => {
           void loadBootstrap({ silent: true });
@@ -522,7 +400,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         bootstrapRetryTimerRef.current = null;
       }
     };
-  }, [applyRemoteHydration, auth?.userId, loadBootstrap, status]);
+  }, [auth?.userId, loadBootstrap, status]);
 
   useEffect(() => {
     if (!allowPrompt && loginPromptOpen) {
@@ -576,6 +454,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const canRenderAuthedContent = Boolean(resolvedBootstrap?.consentCompleted) && storeHydrated;
   const canRenderContent = isPolicyPage || (!authLoading && (!isAuthed || canRenderAuthedContent));
   const showBottomNav = !authLoading && !isNotebookImmersive && (!isAuthed || canRenderAuthedContent);
+  const accountBoundaryKey = auth?.userId ?? "guest";
 
   const pageRef = useRef<HTMLDivElement>(null);
   const prevPathnameRef = useRef(pathname);
@@ -626,7 +505,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         // proceed anyway by marking it locally
         const patched = normalizeBootstrapPayload({ ...result, onboardingCompleted: true });
         setBootstrap(patched);
-        writeBootstrapCache(auth.userId, patched);
+        setCurrentAccountBootstrap(auth.userId, patched);
         syncClientRevisionsFromBootstrap(patched);
       }
     } catch {
@@ -639,9 +518,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         stateRevision: null,
         bootstrapRevision: null,
         updatedAt: null,
+        recoverySummary: null,
       } as BootstrapPayload);
       setBootstrap(fallback);
-      writeBootstrapCache(auth.userId, fallback);
+      setCurrentAccountBootstrap(auth.userId, fallback);
       syncClientRevisionsFromBootstrap(fallback);
     }
     setBusyStage(null);
@@ -682,10 +562,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 resolvedBootstrap?.updatedAt
             ),
             updatedAt: next?.updatedAt ?? resolvedBootstrap?.updatedAt ?? null,
+            recoverySummary: next?.recoverySummary ?? resolvedBootstrap?.recoverySummary ?? null,
             degraded: true,
           } as BootstrapPayload);
           setBootstrap(fallback);
-          writeBootstrapCache(auth.userId, fallback);
+          setCurrentAccountBootstrap(auth.userId, fallback);
           syncClientRevisionsFromBootstrap(fallback);
         }
       } catch (error) {
@@ -699,8 +580,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const loadingCopy = bootstrapLoading
     ? {
-        message: "계정 상태를 확인하는 중...",
-        detail: "온보딩과 동의 여부를 불러오고 있습니다.",
+        message: "계정 동기화중입니다.",
+        detail: "계정별 데이터를 불러오고 있습니다.",
       }
     : busyStage === "onboarding"
       ? {
@@ -708,30 +589,32 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           detail: "바로 동의 화면으로 이동합니다.",
         }
       : {
-          message: t("데이터 동기화 중…"),
-          detail: t("로그인 데이터를 불러오는 중입니다."),
+          message: "계정 동기화중입니다.",
+          detail: "계정별 데이터를 불러오고 있습니다.",
         };
 
   return (
     <div className="min-h-dvh w-full bg-ios-bg">
       <UiPreferencesBridge />
-      <div className="safe-top" />
-      <div
-        className={`mx-auto w-full ${
-          isNotebookImmersive ? "max-w-none" : isMedSafetyImmersive ? "max-w-[1180px] px-3 sm:px-5" : "max-w-[720px] px-4"
-        } ${isNotebookImmersive ? "pb-0" : isMedSafetyImmersive ? "pb-[calc(24px+env(safe-area-inset-bottom))]" : "pb-[calc(96px+env(safe-area-inset-bottom))]"}`}
-        onPointerDownCapture={handleGuardedInteraction}
-        onKeyDownCapture={handleGuardedInteraction}
-      >
-        {canRenderContent ? (
-          isMedSafetyImmersive || isNotebookImmersive ? (
-            children
-          ) : (
-            <div ref={pageRef} className="rnest-page-enter">
-              {children}
-            </div>
-          )
-        ) : null}
+      <div key={accountBoundaryKey}>
+        <div className="safe-top" />
+        <div
+          className={`mx-auto w-full ${
+            isNotebookImmersive ? "max-w-none" : isMedSafetyImmersive ? "max-w-[1180px] px-3 sm:px-5" : "max-w-[720px] px-4"
+          } ${isNotebookImmersive ? "pb-0" : isMedSafetyImmersive ? "pb-[calc(24px+env(safe-area-inset-bottom))]" : "pb-[calc(96px+env(safe-area-inset-bottom))]"}`}
+          onPointerDownCapture={handleGuardedInteraction}
+          onKeyDownCapture={handleGuardedInteraction}
+        >
+          {canRenderContent ? (
+            isMedSafetyImmersive || isNotebookImmersive ? (
+              children
+            ) : (
+              <div ref={pageRef} className="rnest-page-enter">
+                {children}
+              </div>
+            )
+          ) : null}
+        </div>
       </div>
       {allowPrompt && loginPromptOpen ? (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-6 rnest-backdrop" data-auth-modal>
@@ -757,16 +640,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <GateLoadingScreen
           message={
             authLoading
-              ? "계정 상태를 확인하는 중..."
+              ? "계정 동기화중입니다."
               : isAuthed && resolvedBootstrap?.consentCompleted && !storeHydrated
-                ? "최근 상태를 준비하는 중..."
+                ? "계정 동기화중입니다."
                 : loadingCopy.message
           }
           detail={
             authLoading
-              ? "저장된 세션과 최근 동기화 데이터를 확인하고 있습니다."
+              ? "계정별 데이터를 불러오고 있습니다."
               : isAuthed && resolvedBootstrap?.consentCompleted && !storeHydrated
-                ? "저장된 화면 데이터를 먼저 적용하고 있습니다."
+                ? "계정별 데이터를 불러오고 있습니다."
                 : loadingCopy.detail
           }
         />
@@ -777,40 +660,42 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           void loadBootstrap();
         }} />
       ) : null}
-      {!isPolicyPage ? (
-        <CloudStateSync
-          remoteEnabled={
-            isAuthed &&
-            bootstrapSettledUserId === (auth?.userId ?? null) &&
-            Boolean(resolvedBootstrap?.consentCompleted)
-          }
-        />
-      ) : null}
-      {!isPolicyPage ? (
-        <CloudNotebookSync
-          remoteEnabled={
-            isAuthed &&
-            bootstrapSettledUserId === (auth?.userId ?? null) &&
-            Boolean(resolvedBootstrap?.consentCompleted)
-          }
-        />
-      ) : null}
-      {!isPolicyPage ? (
-        <UserStateSyncBridge
-          enabled={
-            isAuthed &&
-            bootstrapSettledUserId === (auth?.userId ?? null) &&
-            Boolean(resolvedBootstrap?.consentCompleted)
-          }
-          userId={auth?.userId ?? null}
-          onRefreshState={refreshRemoteState}
-          onRefreshBootstrap={() => loadBootstrap({ silent: true }).then(() => undefined)}
-        />
-      ) : null}
+      <div key={`${accountBoundaryKey}:system`}>
+        {!isPolicyPage ? (
+          <CloudStateSync
+            remoteEnabled={
+              isAuthed &&
+              bootstrapSettledUserId === (auth?.userId ?? null) &&
+              Boolean(resolvedBootstrap?.consentCompleted)
+            }
+          />
+        ) : null}
+        {!isPolicyPage ? (
+          <CloudNotebookSync
+            remoteEnabled={
+              isAuthed &&
+              bootstrapSettledUserId === (auth?.userId ?? null) &&
+              Boolean(resolvedBootstrap?.consentCompleted)
+            }
+          />
+        ) : null}
+        {!isPolicyPage ? (
+          <UserStateSyncBridge
+            enabled={
+              isAuthed &&
+              bootstrapSettledUserId === (auth?.userId ?? null) &&
+              Boolean(resolvedBootstrap?.consentCompleted)
+            }
+            userId={auth?.userId ?? null}
+            onRefreshState={refreshRemoteState}
+            onRefreshBootstrap={() => loadBootstrap({ silent: true }).then(() => undefined)}
+          />
+        ) : null}
+      </div>
       <OnboardingGuide open={showOnboarding} onComplete={handleOnboardingComplete} />
       {showConsent ? <ServiceConsentScreen onSubmit={handleConsentComplete} /> : null}
       <div className="safe-bottom" />
-      {showBottomNav ? <BottomNav /> : null}
+      {showBottomNav ? <BottomNav key={`${accountBoundaryKey}:bottom-nav`} /> : null}
     </div>
   );
 }

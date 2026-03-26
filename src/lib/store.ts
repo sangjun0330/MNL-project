@@ -166,6 +166,20 @@ export function hydrateState(loaded: AppState) {
   emit();
 }
 
+export function resetAppStoreForHydration() {
+  applyLoadedState(emptyState(), { preserveNotebook: false });
+  setHydrationReady(false);
+  invalidateDerivedClientData();
+  emit();
+}
+
+export function hydrateEmptyAppState() {
+  applyLoadedState(emptyState(), { preserveNotebook: false });
+  setHydrationReady(true);
+  invalidateDerivedClientData();
+  emit();
+}
+
 export function setStorageScope(userId?: string | null) {
   void userId;
 }

@@ -1,5 +1,5 @@
 import type { ISODate } from "@/lib/date";
-import { isISODate } from "@/lib/date";
+import { isISODate, todayISO } from "@/lib/date";
 import {
   AI_RECOVERY_RETENTION_DAYS,
   type AIRecoveryDaily,
@@ -7,6 +7,7 @@ import {
   type AIRecoverySlot,
   type AIRecoverySlotPayload,
 } from "@/lib/aiRecovery";
+import type { RecoverySummary } from "@/lib/accountBootstrap";
 import { loadUserState, saveUserState } from "@/lib/server/userStateStore";
 
 type RecoveryOrderCompletions = Record<ISODate, string[] | undefined>;
@@ -45,6 +46,70 @@ function pruneAIRecoveryDaily(domain: AIRecoveryDaily): AIRecoveryDaily {
   return pruneDateMap(domain);
 }
 
+function isRenderableSession(session: AIRecoverySlotPayload | null | undefined): session is AIRecoverySlotPayload {
+  return Boolean(session?.brief && session.status === "ready" && !session.openaiMeta?.fallbackReason);
+}
+
+function sortByGeneratedAtDesc(a: { slot: AIRecoverySlot; session: AIRecoverySlotPayload }, b: { slot: AIRecoverySlot; session: AIRecoverySlotPayload }) {
+  const aTs = Date.parse(a.session.generatedAt ?? "") || 0;
+  const bTs = Date.parse(b.session.generatedAt ?? "") || 0;
+  return bTs - aTs;
+}
+
+function buildTodaySlots(day: AIRecoveryDayPayload | undefined) {
+  const wakeReady = isRenderableSession(day?.wake);
+  const postShiftReady = isRenderableSession(day?.postShift);
+  return {
+    wakeReady,
+    postShiftReady,
+    allReady: wakeReady && postShiftReady,
+  };
+}
+
+export function buildAIRecoverySummary(args: {
+  dateISO?: ISODate;
+  aiRecoveryDaily: AIRecoveryDaily;
+  recoveryOrderCompletions: RecoveryOrderCompletions;
+}): RecoverySummary | null {
+  const dateISO = args.dateISO ?? todayISO();
+  const day = args.aiRecoveryDaily[dateISO];
+  const sessions = ([
+    day?.wake ? { slot: "wake" as const, session: day.wake } : null,
+    day?.postShift ? { slot: "postShift" as const, session: day.postShift } : null,
+  ].filter(Boolean) as Array<{ slot: AIRecoverySlot; session: AIRecoverySlotPayload }>).filter((entry) =>
+    isRenderableSession(entry.session)
+  );
+
+  if (!sessions.length) {
+    return {
+      dateISO,
+      headline: null,
+      latestSlot: null,
+      pendingOrderTitle: null,
+      ordersCompleted: false,
+      hasAnySession: false,
+      todaySlots: buildTodaySlots(day),
+    };
+  }
+
+  const latest = [...sessions].sort(sortByGeneratedAtDesc)[0] ?? null;
+  const withOrders = [...sessions]
+    .filter((entry) => (entry.session.orders?.items.length ?? 0) > 0)
+    .sort(sortByGeneratedAtDesc)[0] ?? latest;
+  const completions = new Set(Array.isArray(args.recoveryOrderCompletions[dateISO]) ? args.recoveryOrderCompletions[dateISO] ?? [] : []);
+  const pendingOrder = withOrders?.session.orders?.items.find((item) => !completions.has(item.id)) ?? null;
+
+  return {
+    dateISO,
+    headline: latest?.session.brief?.headline?.trim() || null,
+    latestSlot: latest?.slot ?? null,
+    pendingOrderTitle: pendingOrder?.body?.trim() || pendingOrder?.title?.trim() || null,
+    ordersCompleted: Boolean(withOrders?.session.orders?.items.length) && !pendingOrder,
+    hasAnySession: true,
+    todaySlots: buildTodaySlots(day),
+  };
+}
+
 export async function loadAIRecoveryDomains(userId: string) {
   const row = await loadUserState(userId);
   const payload = isRecord(row?.payload) ? row.payload : {};
@@ -54,6 +119,15 @@ export async function loadAIRecoveryDomains(userId: string) {
     aiRecoveryDaily: normalizeDateMap<AIRecoveryDayPayload>(payload.aiRecoveryDaily),
     recoveryOrderCompletions: normalizeDateMap<string[]>(payload.recoveryOrderCompletions),
   };
+}
+
+export async function loadAIRecoverySummary(userId: string, dateISO: ISODate = todayISO()) {
+  const { aiRecoveryDaily, recoveryOrderCompletions } = await loadAIRecoveryDomains(userId);
+  return buildAIRecoverySummary({
+    dateISO,
+    aiRecoveryDaily,
+    recoveryOrderCompletions,
+  });
 }
 
 export async function readAIRecoverySlot(args: {

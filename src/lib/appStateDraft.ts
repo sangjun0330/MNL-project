@@ -117,9 +117,8 @@ export function readAppStateDraft(userId: string | null): AppStateDraft | null {
 }
 
 export function readPreferredAppStateDraft(userId: string | null): AppStateDraft | null {
-  const scoped = readAppStateDraft(userId);
-  if (!userId || scoped) return scoped;
-  return readAppStateDraft(null);
+  if (!userId) return readAppStateDraft(null);
+  return readAppStateDraft(userId);
 }
 
 export function writeAppStateDraft(userId: string | null, rawState: unknown) {

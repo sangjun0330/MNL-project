@@ -7,9 +7,11 @@ import {
   type UserServiceConsentSnapshot,
 } from "@/lib/serviceConsent";
 import { ensureUserRow, loadUserState } from "@/lib/server/userStateStore";
+import { loadAIRecoverySummary } from "@/lib/server/aiRecoveryStateStore";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { sanitizeStatePayload } from "@/lib/stateSanitizer";
 import { defaultMemoState, defaultRecordState } from "@/lib/notebook";
+import type { RecoverySummary } from "@/lib/accountBootstrap";
 
 type ConsentRow = {
   user_id: string;
@@ -378,6 +380,7 @@ export async function loadUserBootstrap(userId: string): Promise<{
   stateRevision: number | null;
   bootstrapRevision: number | null;
   updatedAt: number | null;
+  recoverySummary: RecoverySummary | null;
 }> {
   const admin = getSupabaseAdmin();
 
@@ -427,6 +430,7 @@ export async function loadUserBootstrap(userId: string): Promise<{
     toTimestamp(consentRevisionRow?.created_at ?? null),
   ]);
   const bootstrapRevision = maxTimestamp([userRevision, consentRevision, stateRevision]);
+  const recoverySummary = consentCompleted ? await loadAIRecoverySummary(userId) : null;
 
   return {
     onboardingCompleted:
@@ -447,5 +451,6 @@ export async function loadUserBootstrap(userId: string): Promise<{
     stateRevision,
     bootstrapRevision,
     updatedAt: stateRevision,
+    recoverySummary,
   };
 }

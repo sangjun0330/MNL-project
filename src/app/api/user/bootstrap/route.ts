@@ -26,6 +26,7 @@ function degradedResponse() {
         stateRevision: null,
         bootstrapRevision: null,
         updatedAt: null,
+        recoverySummary: null,
         degraded: true,
       },
     },

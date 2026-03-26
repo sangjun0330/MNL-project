@@ -91,10 +91,7 @@ function writeLocalDraft(
 
 function readPreferredLocalDraft(userId: string | null) {
   if (!userId) return readLocalDraft(null);
-  const scoped = readLocalDraft(userId);
-  const guest = readLocalDraft(null);
-  if (guest?.dirty && (!scoped || guest.updatedAt > scoped.updatedAt)) return guest;
-  return scoped;
+  return readLocalDraft(userId);
 }
 
 export function CloudNotebookSync({ remoteEnabled = false }: { remoteEnabled?: boolean }) {

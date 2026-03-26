@@ -4,8 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { addDays, fromISODate, toISODate, type ISODate } from "@/lib/date";
 import { getAIRecoveryErrorMessage, type AIRecoverySessionResponse, type AIRecoverySlot } from "@/lib/aiRecovery";
 import { useAuthState } from "@/lib/auth";
-import { getClientCache, setClientCache } from "@/lib/clientCache";
 import { getClientSyncSnapshot, updateClientSyncSnapshot, useClientSyncSnapshot } from "@/lib/clientSyncStore";
+import { readCurrentAccountSession, storeCurrentAccountSession } from "@/lib/currentAccountResourceStore";
 import {
   CLIENT_DATA_SCOPE_HOME_PREVIEW,
   CLIENT_DATA_SCOPE_RECOVERY_SESSION,
@@ -42,13 +42,8 @@ async function readJson<T>(response: Response): Promise<T | null> {
   return response.json().catch(() => null);
 }
 
-type CachedSessionData = {
-  data: SessionData | null;
-  revision: number | null;
-};
-
-function buildSessionCacheKey(userId: string | null | undefined, dateISO: ISODate, slot: AIRecoverySlot) {
-  return `recovery-session:${userId ?? "guest"}:${dateISO}:${slot}`;
+function buildSessionResourceKey(dateISO: ISODate, slot: AIRecoverySlot) {
+  return `${dateISO}:${slot}`;
 }
 
 export function useAIRecoverySession(args: HookArgs): HookState {
@@ -74,9 +69,10 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     } satisfies SessionData;
   };
 
-  const cacheKey = buildSessionCacheKey(user?.userId ?? null, args.dateISO, args.slot);
-  const cachedInitial = getClientCache<CachedSessionData>(cacheKey)?.data ?? null;
-  const initialData = normalizeData(args.initialData ?? cachedInitial?.data ?? null);
+  const accountKey = user?.userId ?? null;
+  const resourceKey = buildSessionResourceKey(args.dateISO, args.slot);
+  const memoryEntry = readCurrentAccountSession(accountKey, resourceKey);
+  const initialData = normalizeData(args.initialData ?? memoryEntry?.data ?? null);
   const [data, setData] = useState<SessionData | null>(initialData);
   const [loading, setLoading] = useState(!initialData);
   const [generating, setGenerating] = useState(false);
@@ -102,12 +98,13 @@ export function useAIRecoverySession(args: HookArgs): HookState {
   dateISORef.current = args.dateISO;
 
   const key = `${args.dateISO}:${args.slot}`;
-  const persistCachedSession = (value: SessionData | null, revision = stateRevision ?? null) => {
-    setClientCache<CachedSessionData>(cacheKey, {
-      data: value,
-      revision,
-    });
-  };
+  const persistCachedSession = useCallback(
+    (value: SessionData | null, revision = stateRevision ?? null) => {
+      if (!accountKey) return;
+      storeCurrentAccountSession(accountKey, resourceKey, value, revision);
+    },
+    [accountKey, resourceKey, stateRevision]
+  );
 
   const nextDataRequestId = () => {
     dataRequestRef.current += 1;
@@ -300,8 +297,8 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       setError(null);
       return;
     }
-    const cached = getClientCache<CachedSessionData>(cacheKey)?.data ?? null;
-    const cachedData = normalizeData(cached?.data ?? null);
+    const cached = readCurrentAccountSession(accountKey, resourceKey);
+    const cachedData = normalizeData(cached?.data ?? dataRef.current ?? null);
     const shouldRevalidate = options?.force === true || !cachedData || (cached?.revision ?? null) !== (stateRevision ?? null);
 
     if (cachedData) {
@@ -573,17 +570,23 @@ export function useAIRecoverySession(args: HookArgs): HookState {
 
   useEffect(() => {
     if (initialData && initialData.dateISO === args.dateISO && initialData.slot === args.slot) {
-      setData((current) => pickLatestData(current, initialData));
+      setData((current) => pickLatestData(current?.dateISO === args.dateISO && current?.slot === args.slot ? current : null, initialData));
       persistCachedSession(initialData);
       setLoading(false);
       setError(null);
+      return;
     }
-  }, [initialData, args.dateISO, args.slot, cacheKey, stateRevision]);
+    if (dataRef.current?.dateISO !== args.dateISO || dataRef.current?.slot !== args.slot) {
+      setData(null);
+      setLoading(true);
+      setError(null);
+    }
+  }, [initialData, args.dateISO, args.slot, accountKey, resourceKey, persistCachedSession, stateRevision]);
 
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [args.dateISO, args.slot, args.enabled, cacheKey, stateRevision]);
+  }, [args.dateISO, args.slot, args.enabled, accountKey, resourceKey, stateRevision]);
 
   return {
     data,

@@ -15,10 +15,7 @@ import { useRecoveryPlanner } from "@/components/insights/useRecoveryPlanner";
 import { BatteryGauge } from "@/components/home/BatteryGauge";
 import { WeekStrip } from "@/components/home/WeekStrip";
 import { HomeSocialCard } from "@/components/home/HomeSocialCard";
-import type { AIRecoverySessionResponse } from "@/lib/aiRecovery";
-import { useAuthState } from "@/lib/auth";
-import { getClientCache, isClientCacheFresh, setClientCache } from "@/lib/clientCache";
-import { useClientSyncSnapshot } from "@/lib/clientSyncStore";
+import { useCurrentAccountResources } from "@/lib/currentAccountResourceStore";
 
 function isReasonableISODate(v: any): v is ISODate {
   if (!isISODate(v)) return false;
@@ -47,33 +44,6 @@ function cleanText(v?: string | null) {
   if (!v) return null;
   const out = String(v).replace(/\r\n/g, "\n").trim();
   return out || null;
-}
-
-type RecoverySessionData = AIRecoverySessionResponse["data"];
-
-function isRenderableRecoveryData(value: RecoverySessionData | null | undefined): value is RecoverySessionData {
-  if (!value?.session?.brief) return false;
-  if (value.session.status !== "ready") return false;
-  if (value.session.openaiMeta?.fallbackReason) return false;
-  return true;
-}
-
-function compareRecoveryDataDesc(a: RecoverySessionData, b: RecoverySessionData) {
-  const aTs = Date.parse(a.session?.generatedAt ?? "") || 0;
-  const bTs = Date.parse(b.session?.generatedAt ?? "") || 0;
-  return bTs - aTs;
-}
-
-type HomeRecoveryPreviewCacheValue = {
-  views: RecoverySessionData[];
-  revision: number | null;
-};
-
-const HOME_SHOP_CACHE_KEY = "home:shop-catalog";
-const HOME_SHOP_CACHE_TTL_MS = 1000 * 60 * 30;
-
-function buildHomeRecoveryPreviewCacheKey(userId: string | null | undefined, dateISO: ISODate) {
-  return `home:recovery-preview:${userId ?? "guest"}:${dateISO}`;
 }
 
 // ── Icons ────────────────────────────────────────────────────────
@@ -119,9 +89,8 @@ function IconSparkle() {
 
 export default function Home() {
   const { t } = useI18n();
-  const { user } = useAuthState();
   const aiPreviewDateISO = todayISO();
-  const { stateRevision: homeDataRevision } = useClientSyncSnapshot();
+  const currentAccountResources = useCurrentAccountResources();
   const store = useAppStoreSelector(
     (s) => ({
       selected: s.selected,
@@ -145,14 +114,6 @@ export default function Home() {
   );
 
   const [homeSelected, setHomeSelected] = useState<ISODate>(() => todayISO());
-  const homeRecoveryCacheKey = useMemo(
-    () => buildHomeRecoveryPreviewCacheKey(user?.userId ?? null, aiPreviewDateISO),
-    [aiPreviewDateISO, user?.userId]
-  );
-  const [homeRecoveryViews, setHomeRecoveryViews] = useState<RecoverySessionData[]>(() => {
-    const cached = getClientCache<HomeRecoveryPreviewCacheValue>(homeRecoveryCacheKey)?.data ?? null;
-    return cached?.views ?? [];
-  });
   useEffect(() => {
     const raw = (store.selected as any) ?? null;
     if (raw != null && !isReasonableISODate(raw)) {
@@ -219,81 +180,13 @@ export default function Home() {
   }, []);
 
   const planner = useRecoveryPlanner();
-  useEffect(() => {
-    let cancelled = false;
-    const controller = new AbortController();
-    const cached = getClientCache<HomeRecoveryPreviewCacheValue>(homeRecoveryCacheKey)?.data ?? null;
-
-    if (cached?.views) {
-      setHomeRecoveryViews(cached.views);
-    }
-
-    if (cached && (cached.revision ?? null) === (homeDataRevision ?? null)) {
-      return () => {
-        cancelled = true;
-        controller.abort();
-      };
-    }
-
-    const load = async () => {
-      try {
-        const [wakeRes, postShiftRes] = await Promise.all([
-          fetch(`/api/insights/recovery/ai?date=${aiPreviewDateISO}&slot=wake`, {
-            method: "GET",
-            cache: "no-store",
-            signal: controller.signal,
-          }),
-          fetch(`/api/insights/recovery/ai?date=${aiPreviewDateISO}&slot=postShift`, {
-            method: "GET",
-            cache: "no-store",
-            signal: controller.signal,
-          }),
-        ]);
-        const [wakeJson, postShiftJson] = await Promise.all([
-          wakeRes.json().catch(() => null),
-          postShiftRes.json().catch(() => null),
-        ]);
-        if (cancelled) return;
-        const nextViews = [wakeJson?.data ?? null, postShiftJson?.data ?? null].filter(isRenderableRecoveryData).sort(compareRecoveryDataDesc);
-        setHomeRecoveryViews(nextViews);
-        setClientCache<HomeRecoveryPreviewCacheValue>(homeRecoveryCacheKey, {
-          views: nextViews,
-          revision: homeDataRevision ?? null,
-        });
-      } catch (error) {
-        if (controller.signal.aborted || cancelled) return;
-        console.warn("[Home] recovery_preview_load_failed", {
-          message: error instanceof Error ? error.message : String(error),
-          dateISO: aiPreviewDateISO,
-        });
-      }
-    };
-
-    void load();
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [aiPreviewDateISO, homeDataRevision, homeRecoveryCacheKey]);
-
-  const latestRecoveryView = useMemo(() => homeRecoveryViews[0] ?? null, [homeRecoveryViews]);
-  const latestBriefHeadline = latestRecoveryView?.session?.brief?.headline?.trim() || null;
-  const latestOrdersSession = useMemo(
-    () =>
-      homeRecoveryViews.find((view) => Array.isArray(view.session?.orders?.items) && (view.session?.orders?.items.length ?? 0) > 0) ??
-      null,
-    [homeRecoveryViews]
-  );
-  const latestPendingOrder = useMemo(() => {
-    if (!latestOrdersSession?.session?.orders?.items?.length) return null;
-    const completed = new Set(latestOrdersSession.completions ?? []);
-    return latestOrdersSession.session.orders.items.find((item) => !completed.has(item.id)) ?? null;
-  }, [latestOrdersSession]);
-  const latestOrderTitle = latestPendingOrder?.body?.trim() || latestPendingOrder?.title?.trim() || null;
+  const recoverySummary = currentAccountResources.recoverySummary;
+  const latestBriefHeadline =
+    recoverySummary?.dateISO === aiPreviewDateISO ? recoverySummary.headline : null;
+  const latestOrderTitle =
+    recoverySummary?.dateISO === aiPreviewDateISO ? recoverySummary.pendingOrderTitle : null;
   const latestOrdersCompleted =
-    Boolean(latestOrdersSession?.session?.orders?.items?.length) &&
-    !latestPendingOrder;
+    recoverySummary?.dateISO === aiPreviewDateISO ? Boolean(recoverySummary.ordersCompleted) : false;
   const aiHeadline = useMemo(() => {
     if (planner.state === "needs_records") return t("기록이 쌓이면 맞춤회복 카드 구조가 여기에 표시됩니다.");
     if (planner.focusFactor?.label) return `오늘 맞춤회복 해설을 만들어 보세요!.`;
@@ -303,24 +196,15 @@ export default function Home() {
   const selectedDateLabel = useMemo(() => formatKoreanDate(homeSelected), [homeSelected]);
 
   // ── Shop catalog ──────────────────────────────────────────────
-  const [shopCatalog, setShopCatalog] = useState<ShopProduct[]>(() => {
-    const cached = getClientCache<ShopProduct[]>(HOME_SHOP_CACHE_KEY);
-    return cached?.data?.length ? cached.data : SHOP_PRODUCTS;
-  });
+  const [shopCatalog, setShopCatalog] = useState<ShopProduct[]>(SHOP_PRODUCTS);
   useEffect(() => {
     if (!deferredReady) return;
-    const cached = getClientCache<ShopProduct[]>(HOME_SHOP_CACHE_KEY);
-    if (cached?.data?.length) {
-      setShopCatalog(cached.data);
-    }
-    if (isClientCacheFresh(cached, HOME_SHOP_CACHE_TTL_MS)) return;
     fetch("/api/shop/catalog", { method: "GET", cache: "no-store" })
       .then((r) => r.json())
       .then((json) => {
         if (json?.ok && Array.isArray(json?.data?.products) && json.data.products.length > 0) {
           const nextProducts = json.data.products as ShopProduct[];
           setShopCatalog(nextProducts);
-          setClientCache(HOME_SHOP_CACHE_KEY, nextProducts);
         }
       })
       .catch(() => {/* 실패 시 기본 SHOP_PRODUCTS 유지 */});
