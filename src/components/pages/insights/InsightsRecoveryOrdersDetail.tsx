@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { AIRecoveryLoadingOverlay } from "@/components/insights/AIRecoveryLoadingOverlay";
@@ -30,9 +31,9 @@ function PillLink({
       ? `${base} border-2 border-[#B8B0E8] text-[#6B5CE7]`
       : `${base} bg-[#F0EEFA] text-[#6B5CE7]`;
   return (
-    <a href={href} className={cls} data-auth-allow>
+    <Link href={href} className={cls} prefetch={false}>
       {children}
-    </a>
+    </Link>
   );
 }
 
