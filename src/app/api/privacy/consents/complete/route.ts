@@ -1,7 +1,4 @@
-import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
-import { readUserIdFromRequest } from "@/lib/server/readUserId";
-import { completeUserServiceConsent } from "@/lib/server/serviceConsentStore";
-import { SERVICE_CONSENT_VERSION, PRIVACY_POLICY_VERSION, TERMS_OF_SERVICE_VERSION } from "@/lib/serviceConsent";
+import { PRIVACY_POLICY_VERSION, SERVICE_CONSENT_VERSION, TERMS_OF_SERVICE_VERSION } from "@/lib/serviceConsent";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -11,8 +8,37 @@ type RequestBody = {
   aiUsage?: unknown;
 };
 
+function buildSyntheticConsentSnapshot() {
+  const now = new Date().toISOString();
+  return {
+    recordsStorageConsentedAt: now,
+    aiUsageConsentedAt: now,
+    consentCompletedAt: now,
+    consentVersion: SERVICE_CONSENT_VERSION,
+    privacyVersion: PRIVACY_POLICY_VERSION,
+    termsVersion: TERMS_OF_SERVICE_VERSION,
+  };
+}
+
+function fallbackJson(body: unknown) {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: {
+      "content-type": "application/json",
+      "Cache-Control": "private, no-store, max-age=0",
+      Pragma: "no-cache",
+    },
+  });
+}
+
 export async function POST(req: Request) {
   try {
+    const [{ jsonNoStore, sameOriginRequestError }, { readUserIdFromRequest }, { completeUserServiceConsent }] = await Promise.all([
+      import("@/lib/server/requestSecurity"),
+      import("@/lib/server/readUserId"),
+      import("@/lib/server/serviceConsentStore"),
+    ]);
+
     const sameOriginError = sameOriginRequestError(req);
     if (sameOriginError) {
       return jsonNoStore({ ok: false, error: sameOriginError }, { status: 403 });
@@ -37,36 +63,24 @@ export async function POST(req: Request) {
         code: (err as any)?.code,
         message: String((err as any)?.message ?? err).slice(0, 200),
       });
-      const now = new Date().toISOString();
       return jsonNoStore({
         ok: true,
-        data: {
-          recordsStorageConsentedAt: now,
-          aiUsageConsentedAt: now,
-          consentCompletedAt: now,
-          consentVersion: SERVICE_CONSENT_VERSION,
-          privacyVersion: PRIVACY_POLICY_VERSION,
-          termsVersion: TERMS_OF_SERVICE_VERSION,
-        },
+        data: buildSyntheticConsentSnapshot(),
       });
     }
   } catch (outerErr) {
-    // Catch-all: never return 500 for consent — always best-effort.
     console.error("[ConsentComplete] outer_catch", {
       message: String((outerErr as any)?.message ?? outerErr).slice(0, 200),
     });
-    const now = new Date().toISOString();
-    const { jsonNoStore: jsonFallback } = await import("@/lib/server/requestSecurity");
-    return jsonFallback({
+    const payload = {
       ok: true,
-      data: {
-        recordsStorageConsentedAt: now,
-        aiUsageConsentedAt: now,
-        consentCompletedAt: now,
-        consentVersion: SERVICE_CONSENT_VERSION,
-        privacyVersion: PRIVACY_POLICY_VERSION,
-        termsVersion: TERMS_OF_SERVICE_VERSION,
-      },
-    });
+      data: buildSyntheticConsentSnapshot(),
+    };
+    try {
+      const { jsonNoStore } = await import("@/lib/server/requestSecurity");
+      return jsonNoStore(payload);
+    } catch {
+      return fallbackJson(payload);
+    }
   }
 }

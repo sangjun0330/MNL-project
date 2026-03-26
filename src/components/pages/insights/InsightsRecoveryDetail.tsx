@@ -69,7 +69,7 @@ export function InsightsRecoveryDetail() {
     <InsightDetailShell
       title="회복 플래너"
       subtitle={formatKoreanDate(end)}
-      meta="AI 회복 해설을 확인할 수 있어요."
+      meta="AI 회복 해설과 오늘 할 오더를 함께 볼 수 있어요."
       chips={
         <>
           {hasTodayShift ? <DetailChip color={DETAIL_ACCENTS.navy}>{shiftKo(todayShift)}</DetailChip> : null}
@@ -81,7 +81,7 @@ export function InsightsRecoveryDetail() {
         label="AI CUSTOMIZED RECOVERY"
         title="AI 맞춤회복"
         headline="오늘 기록과 최근 흐름으로 회복 포인트를 정리해 줘요."
-        summary="카테고리별 해설과 추천 행동을 바로 확인할 수 있어요."
+        summary="해설과 오늘의 오더 체크리스트를 바로 이어서 볼 수 있어요."
         chips={
           <>
             <DetailChip color={DETAIL_ACCENTS.navy}>AI 해설</DetailChip>
@@ -90,15 +90,30 @@ export function InsightsRecoveryDetail() {
         }
       />
 
+      <RecoverySkeletonLinkCard
+        href="/insights/recovery/orders"
+        label="TODAY ORDERS"
+        title="오늘의 오더"
+        headline="타이밍이 붙은 실행 문장으로 바로 확인해요."
+        summary="체크리스트를 열어 한 번에 하나씩 실행할 수 있어요."
+        chips={
+          <>
+            <DetailChip color={DETAIL_ACCENTS.navy}>실행 오더</DetailChip>
+            <DetailChip color={DETAIL_ACCENTS.mint}>체크리스트</DetailChip>
+          </>
+        }
+      />
+
       <DetailCard className="p-5 sm:p-6">
         <div className="text-[12px] font-semibold text-ios-sub">안내</div>
         <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-ios-text">지금 되는 것</div>
         <div className="mt-3 flex flex-wrap gap-2">
-          <DetailChip color={DETAIL_ACCENTS.mint}>AI 맞춤회복 해설</DetailChip>
-          <DetailChip color={DETAIL_ACCENTS.navy}>카테고리별 추천 행동</DetailChip>
+          <DetailChip color={DETAIL_ACCENTS.mint}>AI 해설 + 오더</DetailChip>
+          <DetailChip color={DETAIL_ACCENTS.navy}>오더 재생성</DetailChip>
+          <DetailChip color={DETAIL_ACCENTS.navy}>완료 체크 저장</DetailChip>
         </div>
         <p className="mt-3 text-[14px] leading-relaxed text-ios-sub">
-          AI 해설 결과는 기존 기록과 따로 안전하게 저장돼요.
+          AI 해설 결과와 오더 완료 상태는 기존 기록과 따로 안전하게 저장돼요.
         </p>
       </DetailCard>
     </InsightDetailShell>

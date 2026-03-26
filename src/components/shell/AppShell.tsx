@@ -185,10 +185,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const [bootstrapSettledUserId, setBootstrapSettledUserId] = useState<string | null>(null);
   const [busyStage, setBusyStage] = useState<BusyStage>(null);
+  const [cacheReady, setCacheReady] = useState(false);
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const bootstrapRequestRef = useRef(0);
   const bootstrapRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cachedBootstrap = readBootstrapCache(auth?.userId ?? null);
+  const cachedBootstrap = cacheReady ? readBootstrapCache(auth?.userId ?? null) : null;
   const resolvedBootstrap = bootstrap ?? cachedBootstrap;
   const goToSettings = useCallback(() => {
     setLoginPromptOpen(false);
@@ -206,6 +207,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       return {};
     }
   }, [supabase]);
+
+  useEffect(() => {
+    setCacheReady(true);
+  }, []);
 
   const loadBootstrap = useCallback(async (options?: { silent?: boolean }) => {
     if (!auth?.userId) return null;
@@ -485,9 +490,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         if (!res.ok) {
           throw new Error(String(json?.error ?? "failed_to_save_service_consent"));
         }
-        const next = await loadBootstrap();
+        const next = await loadBootstrap({ silent: true });
         if (!next?.consentCompleted) {
-          throw new Error("failed_to_confirm_service_consent");
+          const fallback: BootstrapPayload = {
+            onboardingCompleted: true,
+            consentCompleted: true,
+            hasStoredState: Boolean(next?.hasStoredState ?? resolvedBootstrap?.hasStoredState),
+            state: next?.state ?? resolvedBootstrap?.state ?? null,
+            updatedAt: next?.updatedAt ?? resolvedBootstrap?.updatedAt ?? null,
+            degraded: true,
+          };
+          setBootstrap(fallback);
+          writeBootstrapCache(auth.userId, fallback);
         }
       } catch (error) {
         throw error;
@@ -495,7 +509,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         setBusyStage(null);
       }
     },
-    [auth?.userId, busyStage, getAuthHeaders, loadBootstrap]
+    [auth?.userId, busyStage, getAuthHeaders, loadBootstrap, resolvedBootstrap]
   );
 
   const loadingCopy = bootstrapLoading

@@ -24,7 +24,8 @@ function isReasonableISODate(v: any): v is ISODate {
 }
 
 function greeting(): string {
-  const h = new Date().getHours();
+  const kst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const h = kst.getUTCHours();
   if (h >= 5 && h < 12) return "좋은 아침이에요";
   if (h >= 12 && h < 18) return "좋은 오후에요";
   if (h >= 18 && h < 22) return "좋은 저녁이에요";
@@ -254,11 +255,27 @@ export default function Home() {
 
   const latestRecoveryView = useMemo(() => homeRecoveryViews[0] ?? null, [homeRecoveryViews]);
   const latestBriefHeadline = latestRecoveryView?.session?.brief?.headline?.trim() || null;
+  const latestOrdersSession = useMemo(
+    () =>
+      homeRecoveryViews.find((view) => Array.isArray(view.session?.orders?.items) && (view.session?.orders?.items.length ?? 0) > 0) ??
+      null,
+    [homeRecoveryViews]
+  );
+  const latestPendingOrder = useMemo(() => {
+    if (!latestOrdersSession?.session?.orders?.items?.length) return null;
+    const completed = new Set(latestOrdersSession.completions ?? []);
+    return latestOrdersSession.session.orders.items.find((item) => !completed.has(item.id)) ?? null;
+  }, [latestOrdersSession]);
+  const latestOrderTitle = latestPendingOrder?.body?.trim() || latestPendingOrder?.title?.trim() || null;
+  const latestOrdersCompleted =
+    Boolean(latestOrdersSession?.session?.orders?.items?.length) &&
+    !latestPendingOrder;
   const aiHeadline = useMemo(() => {
     if (planner.state === "needs_records") return t("기록이 쌓이면 맞춤회복 카드 구조가 여기에 표시됩니다.");
     if (planner.focusFactor?.label) return `오늘 맞춤회복 해설을 만들어 보세요!.`;
     return t("오늘의 AI 해설을 만들어 보세요!");
   }, [planner.focusFactor?.label, planner.state, t]);
+  const plannerPreviewTitle = latestOrderTitle ?? (latestOrdersCompleted ? t("오늘 오더를 모두 완료했어요.") : t("오늘의 오더를 만들어 보세요!"));
   const selectedDateLabel = useMemo(() => formatKoreanDate(homeSelected), [homeSelected]);
 
   // ── Shop catalog ──────────────────────────────────────────────
@@ -407,6 +424,46 @@ export default function Home() {
           {latestBriefHeadline ?? aiHeadline}
         </p>
       </div>
+
+      {/* ── Recovery Planner Card ── */}
+      <Link
+        href="/insights/recovery/orders"
+        className="block rounded-[22px] px-4 py-4 shadow-apple-sm active:opacity-95"
+        style={{ background: "var(--rnest-card)" }}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5">
+            <span style={{ color: "var(--rnest-accent)" }}>
+              <IconSparkle />
+            </span>
+            <span
+              className="text-[11px] font-semibold uppercase tracking-widest"
+              style={{ color: "var(--rnest-muted)" }}
+            >
+              {t("회복 플래너")}
+            </span>
+          </div>
+          <span
+            className="shrink-0 rounded-full border px-3 py-1 text-[11px] font-medium"
+            style={{
+              borderColor: "var(--rnest-accent-border)",
+              color: "var(--rnest-accent)",
+            }}
+          >
+            {t("오늘 오더 보기")} ›
+          </span>
+        </div>
+
+        <div className="mt-4 text-[11px] font-semibold uppercase tracking-[0.18em]" style={{ color: "var(--rnest-muted)" }}>
+          {t("오늘의 오더")}
+        </div>
+        <p
+          className="mt-1 text-[17px] font-semibold leading-snug tracking-[-0.02em]"
+          style={{ color: "var(--rnest-text)" }}
+        >
+          {plannerPreviewTitle}
+        </p>
+      </Link>
 
       {/* ── Condition (compact) ── */}
       <div
