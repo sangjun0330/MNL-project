@@ -7,7 +7,7 @@ import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { AIRecoveryLoadingOverlay } from "@/components/insights/AIRecoveryLoadingOverlay";
 import { AIRecoverySlotTabs } from "@/components/insights/AIRecoverySlotTabs";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
-import { useAIRecoverySession } from "@/components/insights/useAIRecoverySession";
+import { useAIRecoveryRouteEntry, useAIRecoverySession } from "@/components/insights/useAIRecoverySession";
 import { INSIGHTS_MIN_DAYS, isInsightsLocked, useInsightsData } from "@/components/insights/useInsightsData";
 import { DetailChip, DETAIL_ACCENTS, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
 
@@ -15,7 +15,6 @@ import type { AIRecoveryBriefSection, AIRecoverySlot } from "@/lib/aiRecovery";
 import { cn } from "@/lib/cn";
 import { formatKoreanDate } from "@/lib/date";
 import { useI18n } from "@/lib/useI18n";
-import type { AIRecoverySessionResponse } from "@/lib/aiRecovery";
 
 type SectionCategory = AIRecoveryBriefSection["category"];
 type SectionSeverity = AIRecoveryBriefSection["severity"];
@@ -285,7 +284,7 @@ function PillLink({
       ? `${base} border-2 border-[#B8B0E8] text-[#6B5CE7]`
       : `${base} bg-[#F0EEFA] text-[#6B5CE7]`;
   return (
-    <Link href={href} className={cls} prefetch={false}>
+    <Link href={href} className={cls}>
       {children}
     </Link>
   );
@@ -316,7 +315,7 @@ function PillButton({
 
 function OrderCheckButton({ href }: { href: string }) {
   return (
-    <a
+    <Link
       href={href}
       className="inline-flex h-[46px] shrink-0 items-center justify-center gap-2 rounded-full border-2 border-[#8F83F7] bg-[rgba(244,240,255,0.92)] px-4 text-[14px] font-semibold tracking-[-0.03em] text-[#7A72E8] shadow-[0_10px_24px_rgba(122,114,232,0.10)] transition active:opacity-80 sm:h-[50px] sm:px-5 sm:text-[15px]"
       aria-label="오더 확인하기"
@@ -325,43 +324,49 @@ function OrderCheckButton({ href }: { href: string }) {
       <svg className="h-[15px] w-[15px] sm:h-4 sm:w-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d="M7 4.5 12.5 10 7 15.5" />
       </svg>
-    </a>
+    </Link>
   );
 }
 
 export function InsightsAIRecoveryDetail({
-  initialSlot = "wake",
-  initialData = null,
+  requestedSlot = null,
 }: {
-  initialSlot?: AIRecoverySlot;
-  initialData?: AIRecoverySessionResponse["data"] | null;
+  requestedSlot?: AIRecoverySlot | null;
 }) {
   const { t } = useI18n();
   const pathname = usePathname();
   const billing = useBillingAccess();
   const { end, recordedDays } = useInsightsData();
-  const [slot, setSlot] = useState<AIRecoverySlot>(initialSlot);
   const [hydrated, setHydrated] = useState(false);
-  const slotLabel = slot === "wake" ? "기상 후" : "퇴근 후";
-  const ordersHref = slot === "postShift" ? "/insights/recovery/orders?slot=postShift" : "/insights/recovery/orders";
-  const hasInitialAccess = Boolean(initialData?.session || initialData?.hasAIEntitlement || initialData?.model);
+  const entry = useAIRecoveryRouteEntry({
+    dateISO: end,
+    requestedSlot,
+  });
+  const [slot, setSlot] = useState<AIRecoverySlot | null>(requestedSlot);
+  const resolvedSlot = slot ?? entry.slot;
+  const slotLabel = resolvedSlot === "postShift" ? "퇴근 후" : "기상 후";
+  const ordersHref = resolvedSlot === "postShift" ? "/insights/recovery/orders?slot=postShift" : "/insights/recovery/orders";
+  const hasInitialAccess = Boolean(entry.initialData?.session || entry.initialData?.hasAIEntitlement || entry.initialData?.model);
   const insightsLocked = hydrated && !hasInitialAccess && isInsightsLocked(recordedDays);
-  const aiEnabled = Boolean(initialData?.hasAIEntitlement) || (hydrated && billing.hasEntitlement("recoveryPlannerAI"));
   const session = useAIRecoverySession({
     dateISO: end,
-    slot,
+    slot: resolvedSlot ?? "wake",
     autoGenerate: false,
-    enabled: !insightsLocked && aiEnabled,
-    initialData,
+    enabled: hydrated && !insightsLocked && Boolean(resolvedSlot),
+    initialData: entry.initialData,
   });
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
   const toggleSection = useCallback((category: string) => {
     setExpandedSections((current) => ({ ...current, [category]: !current[category] }));
   }, []);
-  const activeData = session.data?.slot === slot && session.data?.dateISO === end ? session.data : null;
+  const activeData = session.data?.slot === resolvedSlot && session.data?.dateISO === end ? session.data : null;
   const response = activeData;
   const currentSession = response?.session ?? null;
   const brief = currentSession?.brief ?? null;
+  const hasAIAccess =
+    response?.hasAIEntitlement ??
+    entry.initialData?.hasAIEntitlement ??
+    (!billing.loading && hydrated ? billing.hasEntitlement("recoveryPlannerAI") : false);
   const canRegenerateSession = response?.quota.canGenerateSession ?? !currentSession;
   const showGeneratingOverlay = Boolean(response?.gate.allowed && session.generating);
   const showGenerationControls = Boolean(response?.showGenerationControls);
@@ -376,15 +381,21 @@ export function InsightsAIRecoveryDetail({
   }, []);
 
   useEffect(() => {
-    setSlot(initialSlot);
-  }, [initialSlot]);
+    if (requestedSlot) {
+      setSlot(requestedSlot);
+      return;
+    }
+    if (entry.slot) {
+      setSlot((current) => current ?? entry.slot);
+    }
+  }, [entry.slot, requestedSlot]);
 
   useEffect(() => {
     setExpandedSections({});
-  }, [currentSession?.generatedAt, end, slot]);
+  }, [currentSession?.generatedAt, end, resolvedSlot]);
 
   const updateSlot = (nextSlot: AIRecoverySlot) => {
-    if (nextSlot === slot) return;
+    if (nextSlot === resolvedSlot) return;
     setSlot(nextSlot);
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
@@ -405,7 +416,7 @@ export function InsightsAIRecoveryDetail({
     />
   ) : null;
 
-  if (!hydrated && !initialData) {
+  if ((!hydrated && !entry.initialData) || (!resolvedSlot && entry.loading)) {
     return (
       <InsightDetailShell title="AI 맞춤회복" subtitle={formatKoreanDate(end)} meta="현재 상태를 확인하고 있어요." tone="navy" backHref="/insights/recovery">
         <Surface>
@@ -424,7 +435,7 @@ export function InsightsAIRecoveryDetail({
     );
   }
 
-  if (hydrated && !hasInitialAccess && !billing.loading && !billing.hasEntitlement("recoveryPlannerAI")) {
+  if (hydrated && !currentSession && !session.loading && !session.error && !hasAIAccess) {
     return (
       <InsightDetailShell
         title="AI 맞춤회복"
@@ -442,7 +453,7 @@ export function InsightsAIRecoveryDetail({
     <InsightDetailShell
       title="AI 맞춤회복"
       subtitle={formatKoreanDate(end)}
-      meta={response?.slotDescription ?? (slot === "wake" ? "전날 기록과 오늘 수면으로 하루 시작 회복 포인트를 정리합니다." : "오늘 기록을 바탕으로 퇴근 후 회복과 밤 전환 포인트를 정리합니다.")}
+      meta={response?.slotDescription ?? (resolvedSlot === "postShift" ? "오늘 기록을 바탕으로 퇴근 후 회복과 밤 전환 포인트를 정리합니다." : "전날 기록과 오늘 수면으로 하루 시작 회복 포인트를 정리합니다.")}
       tone="navy"
       backHref="/insights/recovery"
       chips={
@@ -454,7 +465,7 @@ export function InsightsAIRecoveryDetail({
       <AIRecoveryLoadingOverlay mode="recovery" open={showGeneratingOverlay} />
 
       <div className="px-1">
-        <AIRecoverySlotTabs value={slot} onChange={updateSlot} action={<OrderCheckButton href={ordersHref} />} />
+        <AIRecoverySlotTabs value={resolvedSlot ?? "wake"} onChange={updateSlot} action={<OrderCheckButton href={ordersHref} />} />
       </div>
 
       {session.error ? (

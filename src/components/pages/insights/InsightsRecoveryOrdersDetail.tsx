@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { AIRecoveryLoadingOverlay } from "@/components/insights/AIRecoveryLoadingOverlay";
 import { AIRecoverySlotTabs } from "@/components/insights/AIRecoverySlotTabs";
-import { useAIRecoverySession } from "@/components/insights/useAIRecoverySession";
+import { useAIRecoveryRouteEntry, useAIRecoverySession } from "@/components/insights/useAIRecoverySession";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { DetailCard, DetailChip, DETAIL_ACCENTS, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
 
@@ -14,7 +14,6 @@ import { INSIGHTS_MIN_DAYS, isInsightsLocked, shiftKo, useInsightsData } from "@
 import type { AIRecoveryOrder, AIRecoverySlot } from "@/lib/aiRecovery";
 import { formatKoreanDate } from "@/lib/date";
 import { useI18n } from "@/lib/useI18n";
-import type { AIRecoverySessionResponse } from "@/lib/aiRecovery";
 
 function PillLink({
   href,
@@ -31,7 +30,7 @@ function PillLink({
       ? `${base} border-2 border-[#B8B0E8] text-[#6B5CE7]`
       : `${base} bg-[#F0EEFA] text-[#6B5CE7]`;
   return (
-    <Link href={href} className={cls} prefetch={false}>
+    <Link href={href} className={cls}>
       {children}
     </Link>
   );
@@ -149,33 +148,39 @@ function StatPill({ label, value }: { label: string; value: string }) {
 }
 
 export function InsightsRecoveryOrdersDetail({
-  initialSlot = "wake",
-  initialData = null,
+  requestedSlot = null,
 }: {
-  initialSlot?: AIRecoverySlot;
-  initialData?: AIRecoverySessionResponse["data"] | null;
+  requestedSlot?: AIRecoverySlot | null;
 }) {
   const { t } = useI18n();
   const pathname = usePathname();
   const billing = useBillingAccess();
   const { end, recordedDays, todayShift, hasTodayShift } = useInsightsData();
-  const [slot, setSlot] = useState<AIRecoverySlot>(initialSlot);
   const [hydrated, setHydrated] = useState(false);
-  const slotLabel = slot === "wake" ? "기상 후" : "퇴근 후";
-  const aiHref = slot === "postShift" ? "/insights/recovery/ai?slot=postShift" : "/insights/recovery/ai";
-  const hasInitialAccess = Boolean(initialData?.session || initialData?.hasAIEntitlement || initialData?.model);
+  const entry = useAIRecoveryRouteEntry({
+    dateISO: end,
+    requestedSlot,
+  });
+  const [slot, setSlot] = useState<AIRecoverySlot | null>(requestedSlot);
+  const resolvedSlot = slot ?? entry.slot;
+  const slotLabel = resolvedSlot === "postShift" ? "퇴근 후" : "기상 후";
+  const aiHref = resolvedSlot === "postShift" ? "/insights/recovery/ai?slot=postShift" : "/insights/recovery/ai";
+  const hasInitialAccess = Boolean(entry.initialData?.session || entry.initialData?.hasAIEntitlement || entry.initialData?.model);
   const insightsLocked = hydrated && !hasInitialAccess && isInsightsLocked(recordedDays);
-  const aiEnabled = Boolean(initialData?.hasAIEntitlement) || (hydrated && billing.hasEntitlement("recoveryPlannerAI"));
   const session = useAIRecoverySession({
     dateISO: end,
-    slot,
+    slot: resolvedSlot ?? "wake",
     autoGenerate: false,
-    enabled: !insightsLocked && aiEnabled,
-    initialData,
+    enabled: hydrated && !insightsLocked && Boolean(resolvedSlot),
+    initialData: entry.initialData,
   });
-  const activeData = session.data?.slot === slot && session.data?.dateISO === end ? session.data : null;
+  const activeData = session.data?.slot === resolvedSlot && session.data?.dateISO === end ? session.data : null;
   const response = activeData;
   const currentSession = response?.session ?? null;
+  const hasAIAccess =
+    response?.hasAIEntitlement ??
+    entry.initialData?.hasAIEntitlement ??
+    (!billing.loading && hydrated ? billing.hasEntitlement("recoveryPlannerAI") : false);
   const ordersPayload = currentSession?.orders ?? null;
   const orders = useMemo(() => ordersPayload?.items ?? [], [ordersPayload?.items]);
   const responseCompletions = useMemo(() => response?.completions ?? [], [response?.completions]);
@@ -199,8 +204,14 @@ export function InsightsRecoveryOrdersDetail({
   }, []);
 
   useEffect(() => {
-    setSlot(initialSlot);
-  }, [initialSlot]);
+    if (requestedSlot) {
+      setSlot(requestedSlot);
+      return;
+    }
+    if (entry.slot) {
+      setSlot((current) => current ?? entry.slot);
+    }
+  }, [entry.slot, requestedSlot]);
 
   useEffect(() => {
     latestResponseCompletionsRef.current = responseCompletions;
@@ -231,7 +242,7 @@ export function InsightsRecoveryOrdersDetail({
     setTransientCompletedIds([]);
     setRecentlyCompletedIds([]);
     previousCompletionsRef.current = nextCompletions;
-  }, [currentSession?.generatedAt, end, slot]);
+  }, [currentSession?.generatedAt, end, resolvedSlot]);
 
   const handleToggleCompletion = useCallback((orderId: string) => {
     setLocalCompletions((current) => (current.includes(orderId) ? current : [...current, orderId]));
@@ -254,7 +265,7 @@ export function InsightsRecoveryOrdersDetail({
     };
   }, []);
 
-  if (!hydrated && !initialData) {
+  if ((!hydrated && !entry.initialData) || (!resolvedSlot && entry.loading)) {
     return (
       <InsightDetailShell title="오늘의 오더" subtitle={formatKoreanDate(end)} meta="현재 상태를 확인하고 있어요." backHref="/insights/recovery">
         <DetailCard className="p-5 sm:p-6">
@@ -273,7 +284,7 @@ export function InsightsRecoveryOrdersDetail({
     );
   }
 
-  if (hydrated && !hasInitialAccess && !billing.loading && !billing.hasEntitlement("recoveryPlannerAI")) {
+  if (hydrated && !currentSession && !session.loading && !session.error && !hasAIAccess) {
     return (
       <InsightDetailShell title="오늘의 오더" subtitle={formatKoreanDate(end)} meta="AI 오더는 Plus 또는 Pro에서 사용할 수 있어요." backHref="/insights/recovery">
         <PaywallNotice aiHref={aiHref} />
@@ -282,7 +293,7 @@ export function InsightsRecoveryOrdersDetail({
   }
 
   const updateSlot = (nextSlot: AIRecoverySlot) => {
-    if (nextSlot === slot) return;
+    if (nextSlot === resolvedSlot) return;
     setSlot(nextSlot);
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
@@ -297,7 +308,7 @@ export function InsightsRecoveryOrdersDetail({
     <InsightDetailShell
       title="오늘의 오더"
       subtitle={formatKoreanDate(end)}
-      meta={response?.slotDescription ?? (slot === "wake" ? "기상 후 바로 실행할 체크리스트를 보여줍니다." : "퇴근 후 바로 실행할 체크리스트를 보여줍니다.")}
+      meta={response?.slotDescription ?? (resolvedSlot === "postShift" ? "퇴근 후 바로 실행할 체크리스트를 보여줍니다." : "기상 후 바로 실행할 체크리스트를 보여줍니다.")}
       backHref="/insights/recovery"
       chips={
         <>
@@ -308,7 +319,7 @@ export function InsightsRecoveryOrdersDetail({
       <AIRecoveryLoadingOverlay mode="orders" open={showGeneratingOverlay} />
 
       <div className="px-1">
-        <AIRecoverySlotTabs value={slot} onChange={updateSlot} />
+        <AIRecoverySlotTabs value={resolvedSlot ?? "wake"} onChange={updateSlot} />
       </div>
 
       <DetailCard className="p-5 sm:p-6">

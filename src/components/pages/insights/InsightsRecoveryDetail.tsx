@@ -1,11 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
+import { warmAIRecoverySessionViews } from "@/components/insights/useAIRecoverySession";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { useRecoveryPlanner } from "@/components/insights/useRecoveryPlanner";
 import { useInsightsData, isInsightsLocked, INSIGHTS_MIN_DAYS, shiftKo } from "@/components/insights/useInsightsData";
 import { DetailCard, DetailChip, DETAIL_ACCENTS, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
+import { useAuthState } from "@/lib/auth";
+import { useClientSyncSnapshot } from "@/lib/clientSyncStore";
+import { useCurrentAccountResources } from "@/lib/currentAccountResourceStore";
 import { formatKoreanDate } from "@/lib/date";
 import { useI18n } from "@/lib/useI18n";
 
@@ -50,8 +55,31 @@ function RecoverySkeletonLinkCard({
 
 export function InsightsRecoveryDetail() {
   const { t } = useI18n();
+  const router = useRouter();
+  const { user } = useAuthState();
+  const { stateRevision } = useClientSyncSnapshot();
+  const currentAccountResources = useCurrentAccountResources();
   const { end, recordedDays, todayShift, hasTodayShift } = useInsightsData();
   const planner = useRecoveryPlanner();
+  const preferredSlot =
+    currentAccountResources.recoverySummary?.dateISO === end
+      ? currentAccountResources.recoverySummary.latestSlot ?? null
+      : null;
+
+  useEffect(() => {
+    const aiHref = preferredSlot === "postShift" ? "/insights/recovery/ai?slot=postShift" : "/insights/recovery/ai";
+    const ordersHref = preferredSlot === "postShift" ? "/insights/recovery/orders?slot=postShift" : "/insights/recovery/orders";
+    router.prefetch(aiHref);
+    router.prefetch(ordersHref);
+    void warmAIRecoverySessionViews({
+      accountKey: user?.userId ?? null,
+      dateISO: end,
+      preferredSlot,
+      stateRevision,
+    }).catch(() => {
+      // Ignore warmup failures; the detail routes will retry on entry.
+    });
+  }, [end, preferredSlot, router, stateRevision, user?.userId]);
 
   if (isInsightsLocked(recordedDays)) {
     return (

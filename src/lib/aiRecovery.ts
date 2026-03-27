@@ -175,7 +175,7 @@ export type AIRecoverySessionResponse = {
     hasAIEntitlement: boolean;
     model: string | null;
     tier: string | null;
-    stateRevision?: number | null;
+    stateRevision: number | null;
   };
 };
 

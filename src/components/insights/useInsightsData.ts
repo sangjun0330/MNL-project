@@ -5,7 +5,8 @@ import type { ISODate } from "@/lib/date";
 import { addDays, fromISODate, toISODate, todayISO } from "@/lib/date";
 import type { Shift } from "@/lib/types";
 import { inferMenstrualPosterior } from "@/lib/menstrualProbability";
-import { useAppStore } from "@/lib/store";
+import { emptyState } from "@/lib/model";
+import { useAppStoreSelector } from "@/lib/store";
 import { computeVitalsRange, type DailyVital } from "@/lib/vitals";
 import { computePersonalizationAccuracy, topFactors } from "@/lib/insightsV2";
 import { statusFromScore, vitalDisplayScore } from "@/lib/rnestInsight";
@@ -14,6 +15,7 @@ import { translate } from "@/lib/i18n";
 
 export const INSIGHTS_MIN_DAYS = 3;
 export const INSIGHTS_LOCK_ENABLED = true;
+const EMPTY_INSIGHTS_STATE = emptyState();
 
 export function isInsightsLocked(recordedDays: number) {
   return INSIGHTS_LOCK_ENABLED && recordedDays < INSIGHTS_MIN_DAYS;
@@ -63,8 +65,30 @@ function buildSyncLabel(percent: number, daysWithAnyInput: number) {
 }
 
 export function useInsightsData() {
-  const state = useAppStore();
-  const { bio, emotions, schedule, settings, notes } = state;
+  const [selected, schedule, shiftNames, notes, emotions, bio, settings] = useAppStoreSelector(
+    (store) => [store.selected, store.schedule, store.shiftNames, store.notes, store.emotions, store.bio, store.settings] as const,
+    (a, b) =>
+      a[0] === b[0] &&
+      a[1] === b[1] &&
+      a[2] === b[2] &&
+      a[3] === b[3] &&
+      a[4] === b[4] &&
+      a[5] === b[5] &&
+      a[6] === b[6]
+  );
+  const state = useMemo(
+    () => ({
+      ...EMPTY_INSIGHTS_STATE,
+      selected,
+      schedule,
+      shiftNames,
+      notes,
+      emotions,
+      bio,
+      settings,
+    }),
+    [bio, emotions, notes, schedule, selected, settings, shiftNames]
+  );
 
   const end = todayISO();
   const start = toISODate(addDays(fromISODate(end), -6));

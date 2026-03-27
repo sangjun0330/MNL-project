@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { ReactElement, SVGProps } from "react";
-import { startTransition, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/cn";
 import { useI18n } from "@/lib/useI18n";
 
@@ -64,7 +65,6 @@ export function BottomNav() {
   const router = useRouter();
   const [hide, setHide] = useState(false);
   const [pendingHref, setPendingHref] = useState<string | null>(null);
-  const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { t } = useI18n();
 
   useEffect(() => {
@@ -87,21 +87,8 @@ export function BottomNav() {
   }, [router]);
 
   useEffect(() => {
-    if (fallbackTimerRef.current) {
-      clearTimeout(fallbackTimerRef.current);
-      fallbackTimerRef.current = null;
-    }
     setPendingHref(null);
   }, [pathname]);
-
-  useEffect(() => {
-    return () => {
-      if (fallbackTimerRef.current) {
-        clearTimeout(fallbackTimerRef.current);
-        fallbackTimerRef.current = null;
-      }
-    };
-  }, []);
 
   const activeHref = useMemo(() => {
     const hit = ITEMS.find((it) =>
@@ -130,7 +117,7 @@ export function BottomNav() {
                 const active = selectedHref === it.href;
                 const Icon = it.Icon;
                 return (
-                  <a
+                  <Link
                     key={it.href}
                     href={it.href}
                     className={cn(
@@ -145,24 +132,13 @@ export function BottomNav() {
                         event.preventDefault();
                         return;
                       }
-                      event.preventDefault();
                       setPendingHref(it.href);
-                      if (fallbackTimerRef.current) {
-                        clearTimeout(fallbackTimerRef.current);
-                      }
-                      fallbackTimerRef.current = setTimeout(() => {
-                        if (window.location.pathname === it.href) return;
-                        window.location.assign(it.href);
-                      }, 900);
-                      startTransition(() => {
-                        router.push(it.href);
-                      });
                     }}
                     aria-current={active ? "page" : undefined}
                   >
                     <Icon className="rnest-nav-icon" aria-hidden="true" focusable="false" />
                     <span className="rnest-nav-label">{t(it.label)}</span>
-                  </a>
+                  </Link>
                 );
               })}
             </div>

@@ -2391,7 +2391,8 @@ export async function readAIRecoverySessionView(args: {
 }) {
   const dateISO = isISODate(args.dateISO ?? "") ? (args.dateISO as ISODate) : todayISO();
   const slot = args.slot === "postShift" ? "postShift" : "wake";
-  const { payload, aiRecoveryDaily, recoveryOrderCompletions } = await safeLoadRecoveryDomains(args.userId);
+  const loadedDomains = await safeLoadRecoveryDomains(args.userId);
+  const { payload, aiRecoveryDaily, recoveryOrderCompletions } = loadedDomains;
   const { gate, snapshot, subscription } = await resolveGate({
     userId: args.userId,
     userEmail: args.userEmail,
@@ -2399,13 +2400,15 @@ export async function readAIRecoverySessionView(args: {
     dateISO,
     payload,
   });
-  const { session, completions } = await safeReadRecoverySlot({ userId: args.userId, dateISO, slot });
+  const day = aiRecoveryDaily[dateISO];
+  const session = day?.[slot] ?? null;
+  const completions = Array.isArray(recoveryOrderCompletions[dateISO]) ? recoveryOrderCompletions[dateISO] ?? [] : [];
   const visibleSession =
     canRevealExistingSessionForGate(gate) && canRenderStoredSession(snapshot, session) ? normalizeStoredSession(snapshot, session) : null;
   const orderIds = visibleSession?.orders?.items.map((item) => item.id) ?? [];
   const filteredCompletions = filterCompletionIdsForOrders(completions, orderIds);
   const quota = buildGenerationQuota(subscription?.tier ?? null, session, Boolean(subscription?.isPrivilegedTester));
-  const todaySlots = buildTodaySlotStatus(aiRecoveryDaily[dateISO]);
+  const todaySlots = buildTodaySlotStatus(day);
   const orderStats = buildRecoveryOrderStats({
     dateISO,
     aiRecoveryDaily,
@@ -2434,6 +2437,7 @@ export async function readAIRecoverySessionView(args: {
     hasAIEntitlement: Boolean(subscription?.isPrivilegedTester || (subscription?.hasPaidAccess && subscription?.entitlements.recoveryPlannerAI)),
     model: subscription?.aiRecoveryModel ?? (subscription?.tier ? getAIRecoveryModelForTier(subscription.tier) : null),
     tier: subscription?.tier ?? null,
+    stateRevision: loadedDomains.stateRevision ?? null,
   };
 }
 

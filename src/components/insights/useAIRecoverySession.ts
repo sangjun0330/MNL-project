@@ -1,11 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { addDays, fromISODate, toISODate, type ISODate } from "@/lib/date";
-import { getAIRecoveryErrorMessage, type AIRecoverySessionResponse, type AIRecoverySlot } from "@/lib/aiRecovery";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { addDays, fromISODate, toISODate, todayISO, type ISODate } from "@/lib/date";
+import {
+  getAIRecoveryErrorMessage,
+  pickPreferredAIRecoverySlot,
+  type AIRecoverySessionResponse,
+  type AIRecoverySlot,
+} from "@/lib/aiRecovery";
 import { useAuthState } from "@/lib/auth";
 import { getClientSyncSnapshot, updateClientSyncSnapshot, useClientSyncSnapshot } from "@/lib/clientSyncStore";
-import { readCurrentAccountSession, storeCurrentAccountSession } from "@/lib/currentAccountResourceStore";
+import {
+  readCurrentAccountSession,
+  storeCurrentAccountSession,
+  useCurrentAccountResources,
+} from "@/lib/currentAccountResourceStore";
 import {
   CLIENT_DATA_SCOPE_HOME_PREVIEW,
   CLIENT_DATA_SCOPE_RECOVERY_SESSION,
@@ -38,6 +47,34 @@ type HookState = {
   toggleCompletion: (orderId: string, completed: boolean) => Promise<void>;
 };
 
+type RouteEntryArgs = {
+  dateISO: ISODate;
+  requestedSlot?: AIRecoverySlot | null;
+};
+
+type RouteEntryState = {
+  slot: AIRecoverySlot | null;
+  initialData: SessionData | null;
+  loading: boolean;
+  error: string | null;
+};
+
+type SessionPreloadArgs = {
+  accountKey: string | null;
+  dateISO: ISODate;
+  slot: AIRecoverySlot;
+  stateRevision: number | null;
+  force?: boolean;
+};
+
+type SessionPreloadRecord = {
+  promise: Promise<SessionData | null>;
+  createdAt: number;
+};
+
+const MAX_SESSION_PRELOAD_REQUESTS = 48;
+const sessionPreloadRequests = new Map<string, SessionPreloadRecord>();
+
 async function readJson<T>(response: Response): Promise<T | null> {
   return response.json().catch(() => null);
 }
@@ -46,33 +83,318 @@ function buildSessionResourceKey(dateISO: ISODate, slot: AIRecoverySlot) {
   return `${dateISO}:${slot}`;
 }
 
+function buildSessionPreloadKey(args: {
+  accountKey: string | null;
+  dateISO: ISODate;
+  slot: AIRecoverySlot;
+  stateRevision: number | null;
+}) {
+  return `${args.accountKey ?? "guest"}:${buildSessionResourceKey(args.dateISO, args.slot)}:${args.stateRevision ?? "none"}`;
+}
+
+function trimSessionPreloadRequests() {
+  if (sessionPreloadRequests.size <= MAX_SESSION_PRELOAD_REQUESTS) return;
+  const entries = [...sessionPreloadRequests.entries()].sort((a, b) => a[1].createdAt - b[1].createdAt);
+  for (const [key] of entries) {
+    if (sessionPreloadRequests.size <= MAX_SESSION_PRELOAD_REQUESTS) break;
+    sessionPreloadRequests.delete(key);
+  }
+}
+
+function normalizeSessionData(
+  value: SessionData | null | undefined,
+  defaults?: {
+    dateISO?: ISODate;
+    slot?: AIRecoverySlot;
+    hasAIEntitlement?: boolean;
+  }
+): SessionData | null {
+  if (!value) return null;
+  return {
+    ...value,
+    dateISO: value.dateISO ?? defaults?.dateISO ?? todayISO(),
+    slot: value.slot ?? defaults?.slot ?? "wake",
+    todaySlots: value.todaySlots ?? { wakeReady: false, postShiftReady: false, allReady: false },
+    orderStats:
+      value.orderStats ??
+      {
+        todayWakeCompleted: 0,
+        todayPostShiftCompleted: 0,
+        todayTotalCompleted: 0,
+        weekTotalCompleted: 0,
+      },
+    showGenerationControls: value.showGenerationControls ?? false,
+    hasAIEntitlement: value.hasAIEntitlement ?? defaults?.hasAIEntitlement ?? false,
+    stateRevision: value.stateRevision ?? null,
+  } satisfies SessionData;
+}
+
+function syncClientStateRevision(nextRevision: number | null | undefined) {
+  if (nextRevision == null) return;
+  const currentSync = getClientSyncSnapshot();
+  updateClientSyncSnapshot({
+    stateRevision: nextRevision,
+    bootstrapRevision:
+      currentSync.bootstrapRevision == null
+        ? nextRevision
+        : Math.max(currentSync.bootstrapRevision, nextRevision),
+  });
+}
+
+function primeAIRecoverySessionPreload(args: {
+  accountKey: string | null;
+  dateISO: ISODate;
+  slot: AIRecoverySlot;
+  stateRevision: number | null;
+  data: SessionData | null;
+}) {
+  const key = buildSessionPreloadKey(args);
+  sessionPreloadRequests.set(key, {
+    promise: Promise.resolve(args.data),
+    createdAt: Date.now(),
+  });
+  trimSessionPreloadRequests();
+}
+
+function registerLoadedAIRecoverySession(args: {
+  accountKey: string | null;
+  dateISO: ISODate;
+  slot: AIRecoverySlot;
+  stateRevision: number | null;
+  data: SessionData | null;
+}) {
+  syncClientStateRevision(args.stateRevision);
+  if (args.accountKey) {
+    storeCurrentAccountSession(args.accountKey, buildSessionResourceKey(args.dateISO, args.slot), args.data, args.stateRevision);
+  }
+  primeAIRecoverySessionPreload(args);
+}
+
+async function fetchAIRecoverySessionViewFromApi(args: {
+  dateISO: ISODate;
+  slot: AIRecoverySlot;
+  context: string;
+}) {
+  const response = await fetch(`/api/insights/recovery/ai?date=${args.dateISO}&slot=${args.slot}`, {
+    method: "GET",
+    cache: "no-store",
+  });
+  const json = await readJson<{ ok?: boolean; error?: string; detail?: string | null; data?: SessionData }>(response);
+  if (!response.ok || !json?.ok || !json.data) {
+    console.error(`[AIRecovery] client_${args.context}_failed`, {
+      status: response.status,
+      error: json?.error ?? null,
+      detail: json?.detail ?? null,
+      dateISO: args.dateISO,
+      slot: args.slot,
+    });
+    throw new Error(String(json?.error ?? `http_${response.status}`));
+  }
+  return normalizeSessionData(json.data, {
+    dateISO: args.dateISO,
+    slot: args.slot,
+  });
+}
+
+export function preloadAIRecoverySessionView(args: SessionPreloadArgs): Promise<SessionData | null> {
+  const key = buildSessionPreloadKey(args);
+  if (!args.force) {
+    const existing = sessionPreloadRequests.get(key);
+    if (existing) return existing.promise;
+  } else {
+    sessionPreloadRequests.delete(key);
+  }
+
+  let requestPromise: Promise<SessionData | null>;
+  requestPromise = fetchAIRecoverySessionViewFromApi({
+    dateISO: args.dateISO,
+    slot: args.slot,
+    context: args.force ? "preload_force" : "preload",
+  })
+    .then((data) => {
+      const nextStateRevision = data?.stateRevision ?? args.stateRevision ?? null;
+      registerLoadedAIRecoverySession({
+        accountKey: args.accountKey,
+        dateISO: args.dateISO,
+        slot: args.slot,
+        stateRevision: nextStateRevision,
+        data,
+      });
+      if (nextStateRevision !== args.stateRevision) {
+        primeAIRecoverySessionPreload({
+          accountKey: args.accountKey,
+          dateISO: args.dateISO,
+          slot: args.slot,
+          stateRevision: nextStateRevision,
+          data,
+        });
+      }
+      return data;
+    })
+    .catch((error) => {
+      const current = sessionPreloadRequests.get(key);
+      if (current?.promise === requestPromise) {
+        sessionPreloadRequests.delete(key);
+      }
+      throw error;
+    });
+
+  sessionPreloadRequests.set(key, {
+    promise: requestPromise,
+    createdAt: Date.now(),
+  });
+  trimSessionPreloadRequests();
+  return requestPromise;
+}
+
+export async function warmAIRecoverySessionViews(args: {
+  accountKey: string | null;
+  dateISO: ISODate;
+  preferredSlot: AIRecoverySlot | null;
+  stateRevision: number | null;
+}) {
+  if (!args.accountKey) return;
+  if (args.preferredSlot) {
+    await preloadAIRecoverySessionView({
+      accountKey: args.accountKey,
+      dateISO: args.dateISO,
+      slot: args.preferredSlot,
+      stateRevision: args.stateRevision,
+    });
+    return;
+  }
+  await Promise.all([
+    preloadAIRecoverySessionView({
+      accountKey: args.accountKey,
+      dateISO: args.dateISO,
+      slot: "wake",
+      stateRevision: args.stateRevision,
+    }),
+    preloadAIRecoverySessionView({
+      accountKey: args.accountKey,
+      dateISO: args.dateISO,
+      slot: "postShift",
+      stateRevision: args.stateRevision,
+    }),
+  ]);
+}
+
+export function useAIRecoveryRouteEntry(args: RouteEntryArgs): RouteEntryState {
+  const { user } = useAuthState();
+  const { stateRevision } = useClientSyncSnapshot();
+  const resources = useCurrentAccountResources();
+  const accountKey = user?.userId ?? null;
+  const summaryLatestSlot = useMemo(() => {
+    if (resources.recoverySummary?.dateISO !== args.dateISO) return null;
+    return resources.recoverySummary.latestSlot ?? null;
+  }, [args.dateISO, resources.recoverySummary?.dateISO, resources.recoverySummary?.latestSlot]);
+  const preferredSlot = args.requestedSlot ?? summaryLatestSlot;
+  const [state, setState] = useState<RouteEntryState>(() => ({
+    slot: preferredSlot,
+    initialData: null,
+    loading: !preferredSlot && Boolean(accountKey),
+    error: null,
+  }));
+
+  useEffect(() => {
+    if (preferredSlot) {
+      setState((current) => {
+        if (current.slot === preferredSlot && !current.loading && current.error == null && current.initialData == null) {
+          return current;
+        }
+        return {
+          slot: preferredSlot,
+          initialData: null,
+          loading: false,
+          error: null,
+        };
+      });
+      return;
+    }
+
+    if (!accountKey) {
+      setState({
+        slot: "wake",
+        initialData: null,
+        loading: false,
+        error: null,
+      });
+      return;
+    }
+
+    let cancelled = false;
+    setState((current) => ({
+      slot: current.slot,
+      initialData: current.initialData,
+      loading: true,
+      error: null,
+    }));
+
+    void Promise.all([
+      preloadAIRecoverySessionView({
+        accountKey,
+        dateISO: args.dateISO,
+        slot: "wake",
+        stateRevision,
+      }),
+      preloadAIRecoverySessionView({
+        accountKey,
+        dateISO: args.dateISO,
+        slot: "postShift",
+        stateRevision,
+      }),
+    ])
+      .then(([wake, postShift]) => {
+        if (cancelled) return;
+        const preferred = pickPreferredAIRecoverySlot({
+          wake,
+          postShift,
+        });
+        setState({
+          slot: preferred.slot,
+          initialData: preferred.data ?? null,
+          loading: false,
+          error: null,
+        });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setState({
+          slot: "wake",
+          initialData: null,
+          loading: false,
+          error: getAIRecoveryErrorMessage((error as Error)?.message ?? error ?? "ai_recovery_load_failed"),
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accountKey, args.dateISO, preferredSlot, stateRevision]);
+
+  return state;
+}
+
 export function useAIRecoverySession(args: HookArgs): HookState {
   const { user } = useAuthState();
   const { stateRevision } = useClientSyncSnapshot();
-  const normalizeData = (value: SessionData | null | undefined): SessionData | null => {
-    if (!value) return null;
-    return {
-      ...value,
-      dateISO: value.dateISO ?? args.dateISO,
-      slot: value.slot ?? args.slot,
-      todaySlots: value.todaySlots ?? { wakeReady: false, postShiftReady: false, allReady: false },
-      orderStats:
-        value.orderStats ??
-        {
-          todayWakeCompleted: 0,
-          todayPostShiftCompleted: 0,
-          todayTotalCompleted: 0,
-          weekTotalCompleted: 0,
-        },
-      showGenerationControls: value.showGenerationControls ?? false,
-      hasAIEntitlement: value.hasAIEntitlement ?? Boolean(args.enabled),
-    } satisfies SessionData;
-  };
-
   const accountKey = user?.userId ?? null;
   const resourceKey = buildSessionResourceKey(args.dateISO, args.slot);
   const memoryEntry = readCurrentAccountSession(accountKey, resourceKey);
-  const initialData = normalizeData(args.initialData ?? memoryEntry?.data ?? null);
+  const normalizeData = useCallback(
+    (value: SessionData | null | undefined) =>
+      normalizeSessionData(value, {
+        dateISO: args.dateISO,
+        slot: args.slot,
+        hasAIEntitlement: Boolean(args.enabled),
+      }),
+    [args.dateISO, args.enabled, args.slot]
+  );
+  const initialData = normalizeSessionData(args.initialData ?? memoryEntry?.data ?? null, {
+    dateISO: args.dateISO,
+    slot: args.slot,
+    hasAIEntitlement: Boolean(args.enabled),
+  });
   const [data, setData] = useState<SessionData | null>(initialData);
   const [loading, setLoading] = useState(!initialData);
   const [generating, setGenerating] = useState(false);
@@ -98,14 +420,6 @@ export function useAIRecoverySession(args: HookArgs): HookState {
   dateISORef.current = args.dateISO;
 
   const key = `${args.dateISO}:${args.slot}`;
-  const persistCachedSession = useCallback(
-    (value: SessionData | null, revision = stateRevision ?? null) => {
-      if (!accountKey) return;
-      storeCurrentAccountSession(accountKey, resourceKey, value, revision);
-    },
-    [accountKey, resourceKey, stateRevision]
-  );
-
   const nextDataRequestId = () => {
     dataRequestRef.current += 1;
     return dataRequestRef.current;
@@ -271,27 +585,10 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     return `${value.dateISO}:${value.slot}:${generatedAt}`;
   };
 
-  const fetchSessionView = async (context: string) => {
-    const response = await fetch(`/api/insights/recovery/ai?date=${args.dateISO}&slot=${args.slot}`, {
-      method: "GET",
-      cache: "no-store",
-    });
-    const json = await readJson<{ ok?: boolean; error?: string; detail?: string | null; data?: SessionData }>(response);
-    if (!response.ok || !json?.ok || !json.data) {
-      console.error(`[AIRecovery] client_${context}_failed`, {
-        status: response.status,
-        error: json?.error ?? null,
-        detail: json?.detail ?? null,
-      });
-      throw new Error(String(json?.error ?? `http_${response.status}`));
-    }
-    return normalizeData(json.data);
-  };
-
   const load = async (options?: { force?: boolean }) => {
     const requestId = nextDataRequestId();
     const completionVersionAtStart = committedCompletionVersionRef.current;
-    if (!args.enabled) {
+    if (!args.enabled || !accountKey) {
       setLoading(false);
       setData(null);
       setError(null);
@@ -314,10 +611,15 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     setLoading(!cachedData);
     setError(null);
     try {
-      const nextData = await fetchSessionView("load");
+      const nextData = await preloadAIRecoverySessionView({
+        accountKey,
+        dateISO: args.dateISO,
+        slot: args.slot,
+        stateRevision: stateRevision ?? null,
+        force: options?.force === true,
+      });
       if (!isCurrentDataRequest(requestId)) return;
       adoptIncomingData(nextData, { completionVersionAtStart });
-      persistCachedSession(nextData);
       const autoOrdersKey = buildAutoOrdersKey(nextData);
       if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && nextData?.quota.canRegenerateOrders) {
         autoOrdersRequestedRef.current.add(autoOrdersKey);
@@ -376,26 +678,33 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       if (!isCurrentDataRequest(requestId)) return;
       const nextData = normalizeData(json.data);
       const nextStateRevision = Number.isFinite(Number(json.data?.stateRevision)) ? Number(json.data?.stateRevision) : null;
-      if (nextStateRevision != null) {
-        const currentSync = getClientSyncSnapshot();
-        updateClientSyncSnapshot({
-          stateRevision: nextStateRevision,
-          bootstrapRevision:
-            currentSync.bootstrapRevision == null
-              ? nextStateRevision
-              : Math.max(currentSync.bootstrapRevision, nextStateRevision),
-        });
-      }
+      syncClientStateRevision(nextStateRevision);
       adoptIncomingData(nextData, { completionVersionAtStart });
-      persistCachedSession(nextData, nextStateRevision ?? stateRevision ?? null);
+      registerLoadedAIRecoverySession({
+        accountKey,
+        dateISO: args.dateISO,
+        slot: args.slot,
+        stateRevision: nextStateRevision ?? stateRevision ?? null,
+        data: nextData,
+      });
       emitClientDataInvalidation([CLIENT_DATA_SCOPE_RECOVERY_SESSION, CLIENT_DATA_SCOPE_HOME_PREVIEW]);
     } catch (nextError) {
       if (!isCurrentDataRequest(requestId)) return;
       try {
-        const recovered = await fetchSessionView(auto ? "orders_auto_recover" : "orders_recover");
+        const recovered = await fetchAIRecoverySessionViewFromApi({
+          dateISO: args.dateISO,
+          slot: args.slot,
+          context: auto ? "orders_auto_recover" : "orders_recover",
+        });
         if (!isCurrentDataRequest(requestId)) return;
         adoptIncomingData(recovered, { completionVersionAtStart });
-        persistCachedSession(recovered);
+        registerLoadedAIRecoverySession({
+          accountKey,
+          dateISO: args.dateISO,
+          slot: args.slot,
+          stateRevision: recovered?.stateRevision ?? stateRevision ?? null,
+          data: recovered,
+        });
         if (!auto) setError(null);
         return;
       } catch {}
@@ -446,18 +755,15 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       if (!isCurrentDataRequest(requestId)) return;
       const nextData = normalizeData(json.data);
       const nextStateRevision = Number.isFinite(Number(json.data?.stateRevision)) ? Number(json.data?.stateRevision) : null;
-      if (nextStateRevision != null) {
-        const currentSync = getClientSyncSnapshot();
-        updateClientSyncSnapshot({
-          stateRevision: nextStateRevision,
-          bootstrapRevision:
-            currentSync.bootstrapRevision == null
-              ? nextStateRevision
-              : Math.max(currentSync.bootstrapRevision, nextStateRevision),
-        });
-      }
+      syncClientStateRevision(nextStateRevision);
       adoptIncomingData(nextData, { completionVersionAtStart });
-      persistCachedSession(nextData, nextStateRevision ?? stateRevision ?? null);
+      registerLoadedAIRecoverySession({
+        accountKey,
+        dateISO: args.dateISO,
+        slot: args.slot,
+        stateRevision: nextStateRevision ?? stateRevision ?? null,
+        data: nextData,
+      });
       emitClientDataInvalidation([CLIENT_DATA_SCOPE_RECOVERY_SESSION, CLIENT_DATA_SCOPE_HOME_PREVIEW]);
       const autoOrdersKey = buildAutoOrdersKey(nextData);
       if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && nextData?.quota.canRegenerateOrders) {
@@ -468,12 +774,22 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       if (autoKey) autoRequestedRef.current.delete(autoKey);
       if (!isCurrentDataRequest(requestId)) return;
       try {
-        const recovered = await fetchSessionView("generate_recover");
+        const recovered = await fetchAIRecoverySessionViewFromApi({
+          dateISO: args.dateISO,
+          slot: args.slot,
+          context: "generate_recover",
+        });
         if (!isCurrentDataRequest(requestId)) return;
         const recoveredGeneratedAt = recovered?.session?.generatedAt ?? null;
         if (recovered?.session && (recoveredGeneratedAt !== previousGeneratedAt || previousGeneratedAt != null)) {
           adoptIncomingData(recovered, { completionVersionAtStart });
-          persistCachedSession(recovered);
+          registerLoadedAIRecoverySession({
+            accountKey,
+            dateISO: args.dateISO,
+            slot: args.slot,
+            stateRevision: recovered?.stateRevision ?? stateRevision ?? null,
+            data: recovered,
+          });
           setError(null);
           const autoOrdersKey = buildAutoOrdersKey(recovered);
           if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && recovered?.quota.canRegenerateOrders) {
@@ -544,17 +860,15 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       committedCompletionVersionRef.current += 1;
       setData(nextData);
       if (nextData) {
-        persistCachedSession(nextData, nextStateRevision ?? stateRevision ?? null);
-      }
-      if (nextStateRevision != null) {
-        const currentSync = getClientSyncSnapshot();
-        updateClientSyncSnapshot({
-          stateRevision: nextStateRevision,
-          bootstrapRevision:
-            currentSync.bootstrapRevision == null
-              ? nextStateRevision
-              : Math.max(currentSync.bootstrapRevision, nextStateRevision),
+        registerLoadedAIRecoverySession({
+          accountKey,
+          dateISO: dateISORef.current,
+          slot,
+          stateRevision: nextStateRevision ?? stateRevision ?? null,
+          data: nextData,
         });
+      } else {
+        syncClientStateRevision(nextStateRevision);
       }
       emitClientDataInvalidation([CLIENT_DATA_SCOPE_RECOVERY_SESSION, CLIENT_DATA_SCOPE_HOME_PREVIEW]);
     } catch (nextError) {
@@ -571,7 +885,13 @@ export function useAIRecoverySession(args: HookArgs): HookState {
   useEffect(() => {
     if (initialData && initialData.dateISO === args.dateISO && initialData.slot === args.slot) {
       setData((current) => pickLatestData(current?.dateISO === args.dateISO && current?.slot === args.slot ? current : null, initialData));
-      persistCachedSession(initialData);
+      registerLoadedAIRecoverySession({
+        accountKey,
+        dateISO: args.dateISO,
+        slot: args.slot,
+        stateRevision: initialData.stateRevision ?? stateRevision ?? null,
+        data: initialData,
+      });
       setLoading(false);
       setError(null);
       return;
@@ -581,7 +901,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       setLoading(true);
       setError(null);
     }
-  }, [initialData, args.dateISO, args.slot, accountKey, resourceKey, persistCachedSession, stateRevision]);
+  }, [initialData, args.dateISO, args.slot, accountKey, stateRevision]);
 
   useEffect(() => {
     void load();
