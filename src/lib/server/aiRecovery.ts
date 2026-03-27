@@ -254,9 +254,9 @@ function readDailyPersistedRow(state: AppState, iso: ISODate) {
   const emotion = state.emotions?.[iso] ?? null;
   const workEventTags = Array.isArray(bio?.workEventTags)
     ? bio.workEventTags
-        .map((item) => trimText(item, 40))
-        .filter(Boolean)
-        .slice(0, 8)
+      .map((item) => trimText(item, 40))
+      .filter(Boolean)
+      .slice(0, 8)
     : [];
   const workEventNote = trimText(bio?.workEventNote, 280);
   const note = trimText(state.notes?.[iso], 280);
@@ -1072,21 +1072,21 @@ function buildFallbackOrders(snapshot: RecoverySnapshot): AIRecoveryOrdersPayloa
   const items: AIRecoveryOrder[] = [
     focusCategory === "menstrual"
       ? {
-          id: buildOrderId(snapshot.slot, "warm_start", 0),
-          title: "따뜻한 시작 루틴",
-          body: "지금 물이나 미지근한 차를 먼저 마시고, 씻은 뒤 2분만 허리와 골반 주변을 천천히 풀어 주세요.",
-          when: "지금",
-          reason: `오늘은 ${data.today.menstrualLabel ?? "주기 흐름"} 구간이고 증상 강도도 ${data.today.symptomSeverity ?? 0}으로 기록돼 있어, 따뜻함과 수분으로 자극을 낮추는 시작이 회복 버퍼를 만들기 좋습니다.`,
-          chips: ["온기", "수분"],
-        }
+        id: buildOrderId(snapshot.slot, "warm_start", 0),
+        title: "따뜻한 시작 루틴",
+        body: "지금 물이나 미지근한 차를 먼저 마시고, 씻은 뒤 2분만 허리와 골반 주변을 천천히 풀어 주세요.",
+        when: "지금",
+        reason: `오늘은 ${data.today.menstrualLabel ?? "주기 흐름"} 구간이고 증상 강도도 ${data.today.symptomSeverity ?? 0}으로 기록돼 있어, 따뜻함과 수분으로 자극을 낮추는 시작이 회복 버퍼를 만들기 좋습니다.`,
+        chips: ["온기", "수분"],
+      }
       : {
-          id: buildOrderId(snapshot.slot, "light_wake_up", 0),
-          title: "빛으로 몸 깨우기",
-          body: "지금 물 한 컵을 마신 뒤 창가나 밝은 복도에서 3분만 서서 몸을 천천히 깨우세요.",
-          when: "지금",
-          reason: `오늘 수면은 ${data.today.sleepHours ?? 0}시간이지만 수면부채가 ${data.today.sleepDebtHours}시간 남아 있어, 강한 자극보다 부드러운 각성 전환이 집중력을 지키기 쉽습니다.`,
-          chips: ["빛", "수분"],
-        },
+        id: buildOrderId(snapshot.slot, "light_wake_up", 0),
+        title: "빛으로 몸 깨우기",
+        body: "지금 물 한 컵을 마신 뒤 창가나 밝은 복도에서 3분만 서서 몸을 천천히 깨우세요.",
+        when: "지금",
+        reason: `오늘 수면은 ${data.today.sleepHours ?? 0}시간이지만 수면부채가 ${data.today.sleepDebtHours}시간 남아 있어, 강한 자극보다 부드러운 각성 전환이 집중력을 지키기 쉽습니다.`,
+        chips: ["빛", "수분"],
+      },
     {
       id: buildOrderId(snapshot.slot, "short_mobility", 1),
       title: "2분 순환 깨우기",
@@ -1333,15 +1333,15 @@ function parseBriefJson(text: string, snapshot: RecoverySnapshot): AIRecoveryBri
   const prevAvgBattery = Number(weeklySummarySource?.prevAvgBattery);
   const topDrains = Array.isArray(weeklySummarySource?.topDrains)
     ? weeklySummarySource.topDrains
-        .map((item) => {
-          if (!isRecord(item)) return null;
-          const label = trimText(item.label, 40);
-          const pct = Number(item.pct);
-          if (!label || !Number.isFinite(pct)) return null;
-          return { label, pct };
-        })
-        .filter((item): item is { label: string; pct: number } => Boolean(item))
-        .slice(0, 3)
+      .map((item) => {
+        if (!isRecord(item)) return null;
+        const label = trimText(item.label, 40);
+        const pct = Number(item.pct);
+        if (!label || !Number.isFinite(pct)) return null;
+        return { label, pct };
+      })
+      .filter((item): item is { label: string; pct: number } => Boolean(item))
+      .slice(0, 3)
     : fallbackBrief.weeklySummary.topDrains;
   return {
     headline,
@@ -1544,66 +1544,38 @@ function buildProBriefPromptContext(slot: AIRecoverySlot) {
   if (slot === "postShift") {
     return {
       engine: "프리미엄 AI 퇴근 후 회복 해설 엔진",
-      stage: "퇴근 후 회복",
       goal:
-        "오늘 퇴근 직후 기준으로, 오늘 건강 정보와 어제까지 최근 14일 기록만 근거로 오늘 회복 우선순위를 짧고 정교하게 설명하세요. 데이터에 없는 오늘 상태를 오늘 사실처럼 해석하거나 예측하지 마세요.",
-      currentDataRule:
-        "오늘은 건강 정보 전체를 현재 데이터로 사용할 수 있고, 나머지 판단은 반드시 어제까지 최근 14일 데이터만 근거로 해야 합니다.",
-      missingDataRule: "데이터에 없는 오늘 상태를 오늘 상태처럼 해석하거나 예측하지 마세요.",
-      descriptionEvidenceRule:
+        "오늘 퇴근 직후 기준으로, 오늘 건강 정보와 어제까지 최근 14일 기록만 근거로 회복 우선순위를 짧고 정교하게 설명하세요. 데이터에 없는 오늘 상태는 오늘 상태처럼 추정하거나 단정하지 마세요.",
+      currentStage:
+        "지금은 퇴근 후 회복 단계입니다. 오늘은 건강 정보 전체를 현재 데이터로 사용할 수 있고, 나머지 판단은 반드시 어제까지 최근 14일 데이터만 근거로 해야 합니다. 데이터에 없는 오늘 상태는 오늘 상태처럼 해석하거나 예측하지 마세요.",
+      evidence:
         "가능하면 오늘 건강 정보 1개와 최근 14일 패턴 1개 이상을 함께 엮으세요.",
+      basis:
+        "짧게 쓰되, 근거 연결은 압축해서 보여주세요. 오늘 건강 정보는 현재 전환 상태의 근거로, 최근 14일 기록은 반복 패턴과 누적 부담의 근거로 사용하세요. plannerContext가 있으면 그 우선순위와 반드시 정렬하고, focusFactor 또는 primaryAction과 충돌하는 새 계획은 만들지 마세요. compoundAlert는 위험 요소 2개 이상이 동시에 뚜렷할 때만 작성하고, 아니면 null로 두세요.",
     } as const;
   }
   return {
     engine: "프리미엄 AI 기상 후 회복 해설 엔진",
-    stage: "기상 후 회복",
     goal:
-      "오늘 기상 직후 기준으로, 오늘 수면과 어제까지 최근 14일 기록만 근거로 오늘 회복 우선순위를 짧고 정교하게 설명하세요. 같은 날 스트레스·카페인·활동·기분·증상은 오늘 상태처럼 추정하거나 단정하지 마세요.",
-    currentDataRule:
-      "오늘은 수면 정보만 현재 데이터로 사용할 수 있고, 나머지 판단은 반드시 어제까지 최근 14일 데이터만 근거로 해야 합니다.",
-    missingDataRule:
-      "같은 날 스트레스·카페인·활동·기분·증상은 오늘 상태처럼 해석하거나 예측하지 마세요.",
-    descriptionEvidenceRule:
+      "오늘 기상 직후 기준으로, 오늘 수면과 어제까지 최근 14일 기록만 근거로 회복 우선순위를 짧고 정교하게 설명하세요. 같은 날 스트레스·카페인·활동·기분·증상은 오늘 상태처럼 추정하거나 단정하지 마세요.",
+    currentStage:
+      "지금은 기상 후 회복 단계입니다. 오늘은 수면 정보만 현재 데이터로 사용할 수 있고, 나머지 판단은 반드시 어제까지 최근 14일 데이터만 근거로 해야 합니다. 같은 날 스트레스·카페인·활동·기분·증상은 오늘 상태처럼 해석하거나 예측하지 마세요.",
+    evidence:
       "가능하면 오늘 수면 1개와 최근 14일 패턴 1개 이상을 함께 엮으세요.",
+    basis:
+      "짧게 쓰되, 근거 연결은 압축해서 보여주세요. 오늘 수면은 현재 시작 상태의 근거로, 최근 14일 기록은 반복 패턴과 누적 부담의 근거로 사용하세요. plannerContext가 있으면 그 우선순위와 반드시 정렬하고, focusFactor 또는 primaryAction과 충돌하는 새 계획은 만들지 마세요. compoundAlert는 위험 요소 2개 이상이 동시에 뚜렷할 때만 작성하고, 아니면 null로 두세요.",
   } as const;
 }
 
 function buildProBriefDeveloperPrompt(slot: AIRecoverySlot) {
   const context = buildProBriefPromptContext(slot);
   return [
-    `너는 교대근무 간호사를 위한 ${context.engine}입니다.`,
-    "",
-    "목표:",
-    context.goal,
-    "",
-    "출력 계약:",
+    `너는 교대근무 간호사를 위한 ${context.engine}입니다. ${context.goal}`,
     "반드시 제공된 JSON schema에 맞는 JSON 객체 하나만 출력하세요. 설명, 코드블록, 마크다운, 여분 텍스트는 금지합니다. 내부 시스템 용어, 계산식, 원시 필드명, ISO 날짜는 노출하지 말고 자연어만 사용하세요.",
-    "",
-    "문체 계약:",
-    "모든 서술은 한국어 존댓말로 작성하세요.",
-    "설명 문장은 반드시 '입니다/합니다'체로 쓰세요.",
-    "행동 문장은 반드시 '하세요/해주세요'체로 쓰세요.",
-    "'-다', 반말, 단정적 명령형, generic한 위로, 같은 의미 반복은 금지합니다.",
-    "",
-    "압축 원칙:",
-    "출력은 짧지만 얕지 않게 쓰되, 길게 풀지 말고 정보 밀도를 높여 쓰세요.",
-    "같은 근거를 다른 필드에서 반복하지 마세요.",
-    "수식어를 늘리지 말고 핵심 판단과 실행만 남기세요.",
-    "나열형 장문보다 압축된 한 문장을 우선하세요.",
-    "",
-    "필드 작성 규칙:",
-    "headline은 오늘 회복 전체를 관통하는 핵심 1문장만 작성하세요. 가능하면 18~32자 내외로 간결하게 쓰세요.",
-    `각 section.description은 왜 지금 중요한지 실제 데이터 2가지 이상을 연결한 1문장으로만 작성하세요. ${context.descriptionEvidenceRule} 길게 나열하지 말고 24~40자절 내외의 압축된 문장으로 쓰세요.`,
-    "각 section.tips는 정확히 2개만 작성하세요. 각 tip은 서로 겹치지 않는 행동 1개만 담은 1문장으로 쓰고, 시작 시점·시간·장소·방법 중 최소 2개가 드러나게 하세요. 이유 설명, 배경 해석, 기대 효과는 붙이지 마세요.",
-    "section.title은 짧고 구체적으로 쓰세요.",
-    "weeklySummary.personalInsight와 weeklySummary.nextWeekPreview는 서로 다른 내용의 1문장씩만 작성하세요. 각각 짧고 선명하게 쓰고, 군더더기 마무리는 넣지 마세요.",
-    "topDrains는 필요한 것만 간결하게 반영하세요.",
-    "",
-    "판단 규칙:",
-    "오늘 수면은 현재 시작 상태의 근거로 사용하고, 최근 14일 기록은 반복 패턴과 누적 부담의 근거로 사용하세요.",
-    "데이터에 없는 오늘 상태를 오늘 사실처럼 해석하거나 예측하지 마세요.",
-    "plannerContext가 있으면 그 우선순위와 반드시 정렬하고, focusFactor 또는 primaryAction과 충돌하는 새 계획은 만들지 마세요.",
-    "compoundAlert는 위험 요소 2개 이상이 동시에 뚜렷할 때만 작성하고, 아니면 null로 두세요.",
+    "모든 서술은 한국어 존댓말로 작성하세요. 설명 문장은 반드시 '입니다/합니다'체, 행동 문장은 반드시 '하세요/해주세요'체로 쓰세요. '-다', 반말, 단정적 명령형, generic한 위로, 반복 표현은 금지합니다.",
+    "headline은 오늘 회복 전체를 관통하는 핵심 1문장만 작성하세요. 각 section.description은 왜 지금 중요한지 실제 데이터 2가지 이상을 엮어 1문장으로 설명하세요. 실제 데이터 2가지 이상을 근거로 하되, 나열형 설명은 금지합니다. 각 section.tips는 정확히 2개만 작성하고, 서로 겹치지 않는 바로 실행 가능한 행동으로 쓰세요. tips에는 시작 시점·시간·장소·방법 중 최소 2개가 드러나야 합니다.",
+    context.basis,
+    "제공된 JSON schema에 맞는 JSON 객체 하나만 출력하라. 설명, 코드블록, 마크다운 금지.",
   ].join("\n");
 }
 
@@ -1680,7 +1652,7 @@ function buildPlusBriefUserPrompt(snapshot: RecoverySnapshot) {
     "headline은 문장을 두 개 이상 이어붙이지 말고, 문장 분리 부호도 한 문장 범위를 넘기지 말 것",
     "headline에는 가능하면 focusFactor 또는 primaryAction의 맥락을 자연스럽게 녹일 것",
     "sections는 고정 카테고리 순서대로 작성",
-    "필수 카테고리 순서: sleep, shift, caffeine, stress, activity",
+    "카테고리 순서이고 5개의 카테고리 중 중요도와 위험도가 높은 카테고리 4개만 작성하세요.: sleep, shift, caffeine, stress, activity",
     "menstrualCategoryVisible가 true면 menstrual을 caffeine 다음에 포함, false면 menstrual 제외",
     "같은 카테고리 중복 금지",
     "각 section.description은 왜 이 카테고리가 지금 중요한지 실제 데이터 2가지 이상에 기대어 1문장으로 설명",
@@ -1719,42 +1691,15 @@ function buildPlusBriefUserPrompt(snapshot: RecoverySnapshot) {
 function buildProBriefUserPrompt(snapshot: RecoverySnapshot) {
   const context = buildProBriefPromptContext(snapshot.slot);
   return [
-    "사용자의 기록과 계산된 회복 지표를 바탕으로 AI 맞춤회복 JSON을 작성하세요.",
-    "반드시 JSON 객체 하나만 출력하세요. 코드펜스, 설명문, 마크다운은 금지합니다.",
-    "",
-    `지금은 ${context.stage} 단계입니다.`,
-    context.currentDataRule,
-    context.missingDataRule,
-    "",
-    "plannerContext가 있으면 그 우선순위에 맞추고, focusFactor 또는 primaryAction과 충돌하는 새 계획은 만들지 마세요.",
-    "",
-    "headline은 전체를 관통하는 핵심 1문장만 작성하세요. 가능하면 plannerContext 맥락을 자연스럽게 녹이되 짧고 선명하게 쓰세요.",
-    "",
-    "sections는 고정 순서대로 작성하세요:",
-    "sleep, shift, caffeine, stress, activity",
-    "menstrualCategoryVisible가 true면 caffeine 다음에 menstrual을 포함하고, false면 제외하세요.",
-    "category 중복은 금지하며 값은 sleep, shift, caffeine, menstrual, stress, activity 중 하나만 사용하세요.",
-    "",
-    "각 section.description은 왜 지금 중요한지 실제 데이터 2가지 이상에 기대어 1문장으로 설명하세요.",
-    context.descriptionEvidenceRule,
-    "같은 근거를 길게 나열하지 말고 압축해서 쓰세요.",
-    "",
-    "각 section.tips는 정확히 2개만 작성하세요.",
-    "서로 겹치지 않는 실행 행동으로 쓰고, 각 tip은 행동 1개만 담으세요.",
-    "시작 시점·시간·장소·방법 중 최소 2개가 드러나게 작성하세요.",
-    "이유 설명, 기대 효과, 배경 해석은 쓰지 마세요.",
-    "",
+    "사용자의 기록과 계산된 회복 지표를 바탕으로 AI 맞춤회복 JSON을 작성하세요. 반드시 JSON 객체 하나만 출력하세요. 코드펜스, 설명문, 마크다운은 금지합니다.",
+    context.currentStage,
+    "headline은 전체를 관통하는 핵심 1문장만 작성하세요. 가능하면 plannerContext 맥락을 자연스럽게 녹이세요.",
+    "sections는 고정 순서대로 작성하되, 가장 중요도가 낮은 카테고리 하나는 제외하고 작성하세요: sleep, shift, caffeine, stress, activity. menstrualCategoryVisible가 true면 caffeine 다음에 menstrual을 포함하고, false면 제외하세요.",
+    `각 section.description은 왜 지금 중요한지 실제 데이터 2가지 이상에 기대어 1문장으로 설명하세요. ${context.evidence} 각 section.tips는 정확히 2개만 작성하고, 서로 겹치지 않는 실행 행동으로 쓰세요. tips에는 시작 시점·시간·장소·방법 중 최소 2개가 드러나야 합니다.`,
     "headline, compoundAlert.message, section.description, weeklySummary.personalInsight, weeklySummary.nextWeekPreview는 반드시 '입니다/합니다'체 한국어 존댓말로 작성하세요. section.tips는 반드시 '하세요/해주세요'체로 작성하세요. '-다', '-해라', '-가라', '-마라' 표현은 금지합니다.",
-    "",
     "generic한 문장, 의미 반복, 힘 빠진 마무리는 금지합니다. 수치는 Data JSON에 있는 값만 사용하고 임의 수치·임의 날짜·원시 필드명은 노출하지 마세요. 날짜는 '오늘', '내일', '다음 근무일', '최근 2주' 같은 자연어만 사용하세요.",
-    "",
-    "compoundAlert는 위험 요소 2개 이상이 동시에 뚜렷할 때만 작성하고 아니면 null로 작성하세요.",
-    "weeklySummary.personalInsight와 nextWeekPreview는 서로 다른 내용으로 작성하세요.",
-    "topDrains는 0~3개로 작성하세요.",
-    "",
+    "compoundAlert는 위험 요소 2개 이상이 동시에 뚜렷할 때만 작성하고 아니면 null로 작성하세요. weeklySummary.personalInsight와 nextWeekPreview는 서로 다른 내용으로 작성하고, topDrains는 0~3개로 작성하세요.",
     ...buildBriefPromptJsonShapeLines(),
-    "",
-    "아래는 최근 14일간 유저 건강정보 JSON 데이터입니다.",
     ...buildBriefPromptDataLines(snapshot, 14),
   ].join("\n");
 }
@@ -2111,7 +2056,7 @@ async function resolveGate(args: {
   const subscription = await readRecoverySubscriptionSnapshot(args.userId, args.userEmail);
   const hasAIEntitlement = Boolean(
     subscription?.isPrivilegedTester ||
-      (subscription?.hasPaidAccess && subscription?.entitlements.recoveryPlannerAI && subscription?.aiRecoveryModel)
+    (subscription?.hasPaidAccess && subscription?.entitlements.recoveryPlannerAI && subscription?.aiRecoveryModel)
   );
   if (!hasAIEntitlement) {
     return {
@@ -2450,10 +2395,10 @@ export async function readAIRecoverySessionView(args: {
     session: visibleSession,
     stale: Boolean(
       visibleSession &&
-        (!gate.allowed ||
-          visibleSession.inputSignature !== snapshot.inputSignature ||
-          visibleSession.language !== snapshot.language ||
-          visibleSession.promptVersion !== AI_RECOVERY_PROMPT_VERSION)
+      (!gate.allowed ||
+        visibleSession.inputSignature !== snapshot.inputSignature ||
+        visibleSession.language !== snapshot.language ||
+        visibleSession.promptVersion !== AI_RECOVERY_PROMPT_VERSION)
     ),
     completions: filteredCompletions,
     todaySlots,
