@@ -22,6 +22,16 @@ const AuthContext = createContext<AuthState | null>(null);
 
 let browserClient: ReturnType<typeof createBrowserClient<Database>> | null = null;
 
+function isRecoverableBrowserAuthError(error: unknown) {
+  const message = String((error as Error)?.message ?? error ?? "").toLowerCase();
+  return (
+    message.includes("invalid refresh token") ||
+    message.includes("refresh token not found") ||
+    message.includes("jwt") ||
+    message.includes("session missing")
+  );
+}
+
 export function getSupabaseBrowserClient(): ReturnType<typeof createBrowserClient<Database>> {
   if (browserClient) return browserClient;
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -46,6 +56,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let active = true;
+    type ServerSessionStatus = { available: boolean; userId: string | null };
 
     const sessionUserToAuthUser = (nextSession: Session): AuthUser => ({
       userId: nextSession.user.id,
@@ -53,7 +64,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       provider: (nextSession.user as { app_metadata?: { provider?: string } })?.app_metadata?.provider,
     });
 
-    const readServerSession = async (): Promise<{ available: boolean; userId: string | null }> => {
+    const readServerSession = async (): Promise<ServerSessionStatus> => {
       try {
         const response = await fetch("/api/auth/session", {
           method: "GET",
@@ -74,18 +85,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return { available: false, userId: null };
     };
 
-    const clearClientAuth = async () => {
-      try {
-        await fetch("/api/auth/logout", {
-          method: "POST",
-          credentials: "include",
-          cache: "no-store",
-        });
-      } catch {
-        // ignore
+    const clearClientAuth = async (options?: { localOnly?: boolean }) => {
+      if (!options?.localOnly) {
+        try {
+          await fetch("/api/auth/logout", {
+            method: "POST",
+            credentials: "include",
+            cache: "no-store",
+          });
+        } catch {
+          // ignore
+        }
       }
       try {
-        await supabase.auth.signOut({ scope: "global" });
+        await supabase.auth.signOut({ scope: options?.localOnly ? "local" : "global" });
       } catch {
         // ignore
       }
@@ -95,8 +108,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
     };
 
-    const syncAllowedSession = async (nextSession: Session | null) => {
-      const serverSession = await readServerSession();
+    const syncAllowedSession = async (nextSession: Session | null, prefetchedServerSession?: ServerSessionStatus) => {
+      const serverSession = prefetchedServerSession ?? (await readServerSession());
       if (!active) return;
 
       if (!nextSession?.user) {
@@ -125,9 +138,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
     };
 
-    supabase.auth.getSession().then(({ data }) => {
-      void syncAllowedSession(data.session ?? null);
-    });
+    void (async () => {
+      const serverSession = await readServerSession();
+      if (!active) return;
+
+      if (serverSession.available && !serverSession.userId) {
+        await clearClientAuth({ localOnly: true });
+        return;
+      }
+
+      try {
+        const { data } = await supabase.auth.getSession();
+        await syncAllowedSession(data.session ?? null, serverSession);
+      } catch (error) {
+        if (isRecoverableBrowserAuthError(error)) {
+          await clearClientAuth({ localOnly: true });
+          return;
+        }
+        if (!active) return;
+        setSession(null);
+        setUser(null);
+        setLoading(false);
+      }
+    })();
 
     const { data } = supabase.auth.onAuthStateChange((event, nextSession) => {
       void syncAllowedSession(nextSession ?? null);

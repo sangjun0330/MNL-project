@@ -189,7 +189,7 @@ export default function Home() {
     recoverySummary?.dateISO === aiPreviewDateISO ? Boolean(recoverySummary.ordersCompleted) : false;
   const aiHeadline = useMemo(() => {
     if (planner.state === "needs_records") return t("기록이 쌓이면 맞춤회복 카드 구조가 여기에 표시됩니다.");
-    if (planner.focusFactor?.label) return `오늘 맞춤회복 해설을 만들어 보세요!.`;
+    if (planner.focusFactor?.label) return `오늘 맞춤회복 해설을 만들어 보세요!`;
     return t("오늘의 AI 해설을 만들어 보세요!");
   }, [planner.focusFactor?.label, planner.state, t]);
   const plannerPreviewTitle = latestOrderTitle ?? (latestOrdersCompleted ? t("오늘 오더를 모두 완료했어요.") : t("오늘의 오더를 만들어 보세요!"));
@@ -207,7 +207,7 @@ export default function Home() {
           setShopCatalog(nextProducts);
         }
       })
-      .catch(() => {/* 실패 시 기본 SHOP_PRODUCTS 유지 */});
+      .catch(() => {/* 실패 시 기본 SHOP_PRODUCTS 유지 */ });
   }, [deferredReady]);
 
   // ── Shop recommendations ──────────────────────────────────────

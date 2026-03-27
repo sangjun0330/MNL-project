@@ -390,11 +390,16 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       }),
     [args.dateISO, args.enabled, args.slot]
   );
-  const initialData = normalizeSessionData(args.initialData ?? memoryEntry?.data ?? null, {
-    dateISO: args.dateISO,
-    slot: args.slot,
-    hasAIEntitlement: Boolean(args.enabled),
-  });
+  const initialSourceData = args.initialData ?? memoryEntry?.data ?? null;
+  const initialData = useMemo(
+    () =>
+      normalizeSessionData(initialSourceData, {
+        dateISO: args.dateISO,
+        slot: args.slot,
+        hasAIEntitlement: Boolean(args.enabled),
+      }),
+    [args.dateISO, args.enabled, args.slot, initialSourceData]
+  );
   const [data, setData] = useState<SessionData | null>(initialData);
   const [loading, setLoading] = useState(!initialData);
   const [generating, setGenerating] = useState(false);

@@ -15,7 +15,7 @@ export async function GET(req: Request) {
     } catch {
       // Best-effort cookie clearing.
     }
-    return jsonNoStore({ ok: false, error: "login_required" }, { status: 401 });
+    return jsonNoStore({ ok: true, authenticated: false, userId: null });
   }
-  return jsonNoStore({ ok: true, userId });
+  return jsonNoStore({ ok: true, authenticated: true, userId });
 }
