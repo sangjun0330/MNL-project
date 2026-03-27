@@ -890,13 +890,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
   useEffect(() => {
     if (initialData && initialData.dateISO === args.dateISO && initialData.slot === args.slot) {
       setData((current) => pickLatestData(current?.dateISO === args.dateISO && current?.slot === args.slot ? current : null, initialData));
-      registerLoadedAIRecoverySession({
-        accountKey,
-        dateISO: args.dateISO,
-        slot: args.slot,
-        stateRevision: initialData.stateRevision ?? stateRevision ?? null,
-        data: initialData,
-      });
+      syncClientStateRevision(initialData.stateRevision ?? null);
       setLoading(false);
       setError(null);
       return;
@@ -906,7 +900,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       setLoading(true);
       setError(null);
     }
-  }, [initialData, args.dateISO, args.slot, accountKey, stateRevision]);
+  }, [initialData, args.dateISO, args.slot]);
 
   useEffect(() => {
     void load();
