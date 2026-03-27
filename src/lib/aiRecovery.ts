@@ -1,7 +1,7 @@
 import type { ISODate } from "@/lib/date";
 import type { Shift } from "@/lib/types";
 
-export const AI_RECOVERY_PROMPT_VERSION = "2026-03-28.v14";
+export const AI_RECOVERY_PROMPT_VERSION = "2026-03-28.v15";
 export const AI_RECOVERY_RETENTION_DAYS = 8;
 export const AI_RECOVERY_ORDER_COUNT = 4;
 
@@ -27,15 +27,7 @@ export type AIRecoveryCompoundAlert = {
   message: string;
 };
 
-export type AIRecoveryTopDrain = {
-  label: string;
-  pct: number;
-};
-
 export type AIRecoveryWeeklySummary = {
-  avgBattery: number;
-  prevAvgBattery: number;
-  topDrains: AIRecoveryTopDrain[];
   personalInsight: string;
   nextWeekPreview: string;
 };

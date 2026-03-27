@@ -596,6 +596,50 @@ function getFixedBriefCategories(snapshot: RecoverySnapshot, data: ReturnType<ty
   ] satisfies AIRecoveryBriefSection["category"][];
 }
 
+const BRIEF_SECTION_TARGET_COUNT = 5;
+
+const BRIEF_SECTION_SEVERITY_WEIGHT: Record<AIRecoveryBriefSection["severity"], number> = {
+  warning: 2,
+  caution: 1,
+  info: 0,
+};
+
+function selectNormalizedBriefCategories(
+  snapshot: RecoverySnapshot,
+  byCategory: Map<AIRecoveryBriefSection["category"], AIRecoveryBriefSection>,
+  data: ReturnType<typeof buildStartRecoveryPromptData>
+) {
+  const fixedCategories = getFixedBriefCategories(snapshot, data);
+  const targetCount = Math.min(BRIEF_SECTION_TARGET_COUNT, fixedCategories.length);
+  const fixedOrder = new Map(fixedCategories.map((category, index) => [category, index] as const));
+  const rankCategories = (categories: AIRecoveryBriefSection["category"][]) =>
+    [...categories].sort((left, right) => {
+      const leftSeverity = resolveSectionSeverity(byCategory.get(left)?.severity, buildSectionSeverity(snapshot, left));
+      const rightSeverity = resolveSectionSeverity(byCategory.get(right)?.severity, buildSectionSeverity(snapshot, right));
+      const severityGap = BRIEF_SECTION_SEVERITY_WEIGHT[rightSeverity] - BRIEF_SECTION_SEVERITY_WEIGHT[leftSeverity];
+      if (severityGap !== 0) return severityGap;
+      return (fixedOrder.get(left) ?? 0) - (fixedOrder.get(right) ?? 0);
+    });
+
+  const providedCategories = fixedCategories.filter((category) => byCategory.has(category));
+  if (providedCategories.length === targetCount) return providedCategories;
+
+  const chosen = new Set<AIRecoveryBriefSection["category"]>();
+  const preferredCategories =
+    providedCategories.length > targetCount ? rankCategories(providedCategories).slice(0, targetCount) : providedCategories;
+  for (const category of preferredCategories) chosen.add(category);
+
+  if (chosen.size < targetCount) {
+    const remainingCategories = rankCategories(fixedCategories.filter((category) => !chosen.has(category)));
+    for (const category of remainingCategories) {
+      chosen.add(category);
+      if (chosen.size >= targetCount) break;
+    }
+  }
+
+  return fixedCategories.filter((category) => chosen.has(category)).slice(0, targetCount);
+}
+
 function getBriefCategoryTitle(category: AIRecoveryBriefSection["category"]) {
   switch (category) {
     case "sleep":
@@ -948,7 +992,7 @@ function buildNormalizedBriefSections(
     }
   }
 
-  return getFixedBriefCategories(snapshot, data).map((category) => {
+  return selectNormalizedBriefCategories(snapshot, byCategory, data).map((category) => {
     const source = byCategory.get(category);
     const fallbackTips = buildSectionTips(snapshot, category);
     return {
@@ -1000,9 +1044,6 @@ function buildFallbackBrief(snapshot: RecoverySnapshot): AIRecoveryBrief {
     compoundAlert: buildFallbackCompoundAlert(snapshot, data),
     sections: buildFallbackSections(snapshot, data),
     weeklySummary: {
-      avgBattery: data.weekly.avgVital7,
-      prevAvgBattery: data.weekly.avgVitalPrev7,
-      topDrains: snapshot.topFactorRows.slice(0, 3).map((item) => ({ label: item.label, pct: round1(item.pct) })),
       personalInsight:
         afterWork
           ? snapshot.plannerContext.focusFactor?.label != null
@@ -1329,28 +1370,11 @@ function parseBriefJson(text: string, snapshot: RecoverySnapshot): AIRecoveryBri
   const weeklySummarySource = isRecord(parsed.weeklySummary) ? parsed.weeklySummary : null;
   const personalInsight = trimText(weeklySummarySource?.personalInsight, 220) || fallbackBrief.weeklySummary.personalInsight;
   const nextWeekPreview = trimText(weeklySummarySource?.nextWeekPreview, 220) || fallbackBrief.weeklySummary.nextWeekPreview;
-  const avgBattery = Number(weeklySummarySource?.avgBattery);
-  const prevAvgBattery = Number(weeklySummarySource?.prevAvgBattery);
-  const topDrains = Array.isArray(weeklySummarySource?.topDrains)
-    ? weeklySummarySource.topDrains
-      .map((item) => {
-        if (!isRecord(item)) return null;
-        const label = trimText(item.label, 40);
-        const pct = Number(item.pct);
-        if (!label || !Number.isFinite(pct)) return null;
-        return { label, pct };
-      })
-      .filter((item): item is { label: string; pct: number } => Boolean(item))
-      .slice(0, 3)
-    : fallbackBrief.weeklySummary.topDrains;
   return {
     headline,
     compoundAlert,
     sections: normalizedSections,
     weeklySummary: {
-      avgBattery: Number.isFinite(avgBattery) ? round1(avgBattery) : fallbackBrief.weeklySummary.avgBattery,
-      prevAvgBattery: Number.isFinite(prevAvgBattery) ? round1(prevAvgBattery) : fallbackBrief.weeklySummary.prevAvgBattery,
-      topDrains,
       personalInsight,
       nextWeekPreview,
     },
@@ -1451,8 +1475,8 @@ function buildBriefSchema() {
       },
       sections: {
         type: "array",
-        minItems: 2,
-        maxItems: 6,
+        minItems: BRIEF_SECTION_TARGET_COUNT,
+        maxItems: BRIEF_SECTION_TARGET_COUNT,
         items: {
           type: "object",
           additionalProperties: false,
@@ -1475,24 +1499,10 @@ function buildBriefSchema() {
         type: "object",
         additionalProperties: false,
         properties: {
-          avgBattery: { type: "number" },
-          prevAvgBattery: { type: "number" },
-          topDrains: {
-            type: "array",
-            items: {
-              type: "object",
-              additionalProperties: false,
-              properties: {
-                label: { type: "string" },
-                pct: { type: "number" },
-              },
-              required: ["label", "pct"],
-            },
-          },
           personalInsight: { type: "string" },
           nextWeekPreview: { type: "string" },
         },
-        required: ["avgBattery", "prevAvgBattery", "topDrains", "personalInsight", "nextWeekPreview"],
+        required: ["personalInsight", "nextWeekPreview"],
       },
     },
     required: ["headline", "compoundAlert", "sections", "weeklySummary"],
@@ -1607,14 +1617,6 @@ function buildBriefPromptJsonShapeLines() {
     "}",
     "],",
     "\"weeklySummary\": {",
-    "\"avgBattery\": \"number\",",
-    "\"prevAvgBattery\": \"number\",",
-    "\"topDrains\": [",
-    "{",
-    "\"label\": \"string\",",
-    "\"pct\": \"number\"",
-    "}",
-    "],",
     "\"personalInsight\": \"string\",",
     "\"nextWeekPreview\": \"string\"",
     "}",
@@ -1652,7 +1654,7 @@ function buildPlusBriefUserPrompt(snapshot: RecoverySnapshot) {
     "headline은 문장을 두 개 이상 이어붙이지 말고, 문장 분리 부호도 한 문장 범위를 넘기지 말 것",
     "headline에는 가능하면 focusFactor 또는 primaryAction의 맥락을 자연스럽게 녹일 것",
     "sections는 고정 카테고리 순서대로 작성",
-    "카테고리 순서이고 5개의 카테고리 중 중요도와 위험도가 높은 카테고리 4개만 작성하세요.: sleep, shift, caffeine, stress, activity",
+    "카테고리 순서이고 6개의 카테고리 중 중요도와 위험도가 높은 카테고리 5개만 작성하세요.: sleep, shift, caffeine, stress, activity",
     "menstrualCategoryVisible가 true면 menstrual을 caffeine 다음에 포함, false면 menstrual 제외",
     "같은 카테고리 중복 금지",
     "각 section.description은 왜 이 카테고리가 지금 중요한지 실제 데이터 2가지 이상에 기대어 1문장으로 설명",
@@ -1681,7 +1683,6 @@ function buildPlusBriefUserPrompt(snapshot: RecoverySnapshot) {
     "sections.category 값은 sleep, shift, caffeine, menstrual, stress, activity 중에서만 선택",
     "sections는 위 고정 순서대로 배열",
     "weeklySummary.personalInsight와 weeklySummary.nextWeekPreview는 서로 다른 내용으로 작성",
-    "weeklySummary.topDrains는 0~3개",
     ...buildBriefPromptJsonShapeLines(),
     "",
     ...buildBriefPromptDataLines(snapshot, 7),
@@ -1694,11 +1695,11 @@ function buildProBriefUserPrompt(snapshot: RecoverySnapshot) {
     "사용자의 기록과 계산된 회복 지표를 바탕으로 AI 맞춤회복 JSON을 작성하세요. 반드시 JSON 객체 하나만 출력하세요. 코드펜스, 설명문, 마크다운은 금지합니다.",
     context.currentStage,
     "headline은 전체를 관통하는 핵심 1문장만 작성하세요. 가능하면 plannerContext 맥락을 자연스럽게 녹이세요.",
-    "sections는 고정 순서대로 작성하되, 가장 중요도가 낮은 카테고리 하나는 제외하고 작성하세요: sleep, shift, caffeine, stress, activity. menstrualCategoryVisible가 true면 caffeine 다음에 menstrual을 포함하고, false면 제외하세요.",
+    "sections는 고정 순서대로 작성하되, 가장 중요도와 위험도가 높은 섹션 5개만 작성하세요: sleep, shift, caffeine, stress, activity. menstrualCategoryVisible가 true면 caffeine 다음에 menstrual을 포함하고, false면 제외하세요.",
     `각 section.description은 왜 지금 중요한지 실제 데이터 2가지 이상에 기대어 1문장으로 설명하세요. ${context.evidence} 각 section.tips는 정확히 2개만 작성하고, 서로 겹치지 않는 실행 행동으로 쓰세요. tips에는 시작 시점·시간·장소·방법 중 최소 2개가 드러나야 합니다.`,
     "headline, compoundAlert.message, section.description, weeklySummary.personalInsight, weeklySummary.nextWeekPreview는 반드시 '입니다/합니다'체 한국어 존댓말로 작성하세요. section.tips는 반드시 '하세요/해주세요'체로 작성하세요. '-다', '-해라', '-가라', '-마라' 표현은 금지합니다.",
     "generic한 문장, 의미 반복, 힘 빠진 마무리는 금지합니다. 수치는 Data JSON에 있는 값만 사용하고 임의 수치·임의 날짜·원시 필드명은 노출하지 마세요. 날짜는 '오늘', '내일', '다음 근무일', '최근 2주' 같은 자연어만 사용하세요.",
-    "compoundAlert는 위험 요소 2개 이상이 동시에 뚜렷할 때만 작성하고 아니면 null로 작성하세요. weeklySummary.personalInsight와 nextWeekPreview는 서로 다른 내용으로 작성하고, topDrains는 0~3개로 작성하세요.",
+    "compoundAlert는 위험 요소 2개 이상이 동시에 뚜렷할 때만 작성하고 아니면 null로 작성하세요. weeklySummary.personalInsight와 nextWeekPreview는 서로 다른 내용으로 작성하세요.",
     ...buildBriefPromptJsonShapeLines(),
     ...buildBriefPromptDataLines(snapshot, 14),
   ].join("\n");

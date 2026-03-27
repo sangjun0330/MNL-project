@@ -405,7 +405,6 @@ function hasSameStructure(ko: AIRecoveryPayload, en: AIRecoveryPayload) {
   const koWeekly = ko.result.weeklySummary;
   const enWeekly = en.result.weeklySummary;
   if (Boolean(koWeekly) !== Boolean(enWeekly)) return false;
-  if (koWeekly && enWeekly && (koWeekly.topDrains ?? []).length !== (enWeekly.topDrains ?? []).length) return false;
   return true;
 }
 
@@ -425,9 +424,6 @@ function looksKoreanPayload(payload: AIRecoveryPayload) {
   if (payload.result.weeklySummary) {
     chunks.push(payload.result.weeklySummary.personalInsight ?? "");
     chunks.push(payload.result.weeklySummary.nextWeekPreview ?? "");
-    for (const drain of payload.result.weeklySummary.topDrains ?? []) {
-      chunks.push(drain.label ?? "");
-    }
   }
   const text = chunks.join(" ");
   const total = (text.match(/[A-Za-z가-힣]/g) ?? []).length;

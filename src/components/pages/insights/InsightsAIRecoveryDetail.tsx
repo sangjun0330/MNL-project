@@ -19,8 +19,6 @@ import { useI18n } from "@/lib/useI18n";
 type SectionCategory = AIRecoveryBriefSection["category"];
 type SectionSeverity = AIRecoveryBriefSection["severity"];
 
-const CATEGORY_ORDER: SectionCategory[] = ["sleep", "shift", "caffeine", "menstrual", "stress", "activity"];
-
 const CATEGORY_META: Record<
   SectionCategory,
   {
@@ -372,8 +370,12 @@ export function InsightsAIRecoveryDetail({
   const showGenerationControls = Boolean(response?.showGenerationControls);
   const sectionList = useMemo(() => {
     const sections = Array.isArray(brief?.sections) ? brief.sections : [];
-    const byCategory = new Map(sections.map((section) => [section.category, section] as const));
-    return CATEGORY_ORDER.map((category) => byCategory.get(category)).filter((section): section is AIRecoveryBriefSection => Boolean(section));
+    const seen = new Set<SectionCategory>();
+    return sections.filter((section) => {
+      if (seen.has(section.category)) return false;
+      seen.add(section.category);
+      return true;
+    }).slice(0, 5);
   }, [brief?.sections]);
 
   useEffect(() => {
