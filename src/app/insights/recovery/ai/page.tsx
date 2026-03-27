@@ -1,6 +1,8 @@
 import { InsightsAIRecoveryDetail } from "@/components/pages/insights/InsightsAIRecoveryDetail";
 import type { AIRecoverySlot } from "@/lib/aiRecovery";
 
+export const runtime = "edge";
+
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
