@@ -162,11 +162,13 @@ export function SettingsBillingUpgradePage() {
   const plusSummaryItems = [
     t("회복 플래너"),
     t("오더 화면"),
-    t("기본 검색 10회"),
+    `${t("기본 검색")} ${plusPlan.includedSearchCredits.standard}${t("회")}`,
+    `${t("프리미엄")} ${plusPlan.includedSearchCredits.premium}${t("회")}`,
     t("기본/프리미엄 구매"),
   ];
   const proSummaryItems = [
-    t("프리미엄 검색 100회"),
+    `${t("기본 검색")} ${proPlan.includedSearchCredits.standard}${t("회")}`,
+    `${t("프리미엄 검색")} ${proPlan.includedSearchCredits.premium}${t("회")}`,
     t("더 높은 품질의 AI 검색"),
     t("기본/프리미엄 구매"),
   ];
@@ -275,7 +277,7 @@ export function SettingsBillingUpgradePage() {
             <div className="mt-3 rounded-2xl border border-ios-sep bg-[#F7F7FA] px-3 py-2 text-[12.5px] text-ios-sub">
               <div className="text-[12px] font-semibold text-ios-text">{t("이용 안내")}</div>
               <ul className="mt-1 list-disc space-y-0.5 pl-4">
-                <li>{t("결제 즉시 30일 플랜이 활성화되고 기본 검색 10회가 포함됩니다.")}</li>
+                <li>{t("결제 즉시 30일 플랜이 활성화되고")} {t("기본 검색")} {plusPlan.includedSearchCredits.standard}{t("회")} + {t("프리미엄 검색")} {plusPlan.includedSearchCredits.premium}{t("회가 포함됩니다.")}</li>
                 <li>{t("AI 검색은 질문 1회당 1크레딧이 차감되며, 후속 질문도 동일하게 계산됩니다.")}</li>
                 <li>{t("기본 검색과 프리미엄 검색 크레딧을 모두 추가 구매할 수 있습니다.")}</li>
               </ul>
@@ -328,7 +330,7 @@ export function SettingsBillingUpgradePage() {
             <div className="mt-3 rounded-2xl border border-ios-sep bg-[#F7F7FA] px-3 py-2 text-[12.5px] text-ios-sub">
               <div className="text-[12px] font-semibold text-ios-text">{t("이용 안내")}</div>
               <ul className="mt-1 list-disc space-y-0.5 pl-4">
-                <li>{t("결제 즉시 30일 플랜이 활성화되고 프리미엄 검색 100회가 포함됩니다.")}</li>
+                <li>{t("결제 즉시 30일 플랜이 활성화되고")} {t("기본 검색")} {proPlan.includedSearchCredits.standard}{t("회")} + {t("프리미엄 검색")} {proPlan.includedSearchCredits.premium}{t("회가 포함됩니다.")}</li>
                 <li>{t("Plus 기능이 모두 포함되며, 더 높은 품질의 AI 회복 기능을 사용합니다.")}</li>
                 <li>{t("AI 검색은 질문 1회당 1크레딧이 차감되며, 기본 검색과 프리미엄 검색을 모두 추가 구매할 수 있습니다.")}</li>
               </ul>
@@ -427,7 +429,7 @@ export function SettingsBillingUpgradePage() {
                             </div>
                             {activeTier === "plus" && type === "premium" && creditPack.creditUnits === 30 ? (
                               <div className="mt-3 rounded-2xl border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-3 py-2 text-[11.5px] leading-5 text-[color:var(--rnest-accent)]">
-                                {t("프리미엄 검색을 자주 사용하신다면 Pro가 더 유리합니다. Pro에서는 프리미엄 검색 100회가 기본 포함됩니다.")}
+                                {t("프리미엄 검색을 자주 사용하신다면 Pro가 더 유리합니다. Pro에서는 기본 검색")} {proPlan.includedSearchCredits.standard}{t("회 + 프리미엄 검색")} {proPlan.includedSearchCredits.premium}{t("회가 기본 포함됩니다.")}
                               </div>
                             ) : null}
                             <button
