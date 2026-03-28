@@ -5,7 +5,7 @@ export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 const MED_SAFETY_RECENT_LIMIT_FREE = 5;
-const MED_SAFETY_RECENT_LIMIT_PRO = 10;
+const MED_SAFETY_RECENT_LIMIT_PRO = 20;
 const DEFAULT_MED_SAFETY_HISTORY_RETENTION_DAYS = 30;
 const MIN_MED_SAFETY_HISTORY_RETENTION_DAYS = 1;
 const MAX_MED_SAFETY_HISTORY_RETENTION_DAYS = 90;
