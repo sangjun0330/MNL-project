@@ -2,7 +2,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { AIRecoveryLoadingOverlay } from "@/components/insights/AIRecoveryLoadingOverlay";
 import { AIRecoverySlotTabs } from "@/components/insights/AIRecoverySlotTabs";
@@ -157,7 +157,6 @@ export function InsightsRecoveryOrdersDetail({
 }) {
   const { t } = useI18n();
   const pathname = usePathname();
-  const router = useRouter();
   const billing = useBillingAccess();
   const { end, recordedDays, todayShift, hasTodayShift } = useInsightsData();
   const [slot, setSlot] = useState<AIRecoverySlot>(initialSlot);
@@ -197,12 +196,6 @@ export function InsightsRecoveryOrdersDetail({
 
   useEffect(() => {
     setHydrated(true);
-  }, []);
-
-  // 페이지에 진입할 때마다 서버 데이터를 한 번 갱신해 앱 멈춤 현상 방지
-  useEffect(() => {
-    router.refresh();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -261,6 +254,25 @@ export function InsightsRecoveryOrdersDetail({
     };
   }, []);
 
+  // 해설(brief)은 완료됐지만 오더가 아직 작성되지 않은 상태 감지 — AI 페이지에서 바로 이동한 경우
+  const showOrdersPendingPopup = Boolean(
+    !session.loading &&
+    !session.savingOrders &&
+    currentSession?.brief &&
+    !ordersPayload &&
+    response?.gate.allowed,
+  );
+
+  const reloadRef = useRef(session.reload);
+  reloadRef.current = session.reload;
+
+  // 오더가 생성되기를 기다리는 동안 자동으로 폴링
+  useEffect(() => {
+    if (!showOrdersPendingPopup) return;
+    const interval = setInterval(() => void reloadRef.current(), 3_000);
+    return () => clearInterval(interval);
+  }, [showOrdersPendingPopup]);
+
   if (!hydrated && !initialData) {
     return (
       <InsightDetailShell title="오늘의 오더" subtitle={formatKoreanDate(end)} meta="현재 상태를 확인하고 있어요." backHref="/insights/recovery">
@@ -313,6 +325,23 @@ export function InsightsRecoveryOrdersDetail({
       }
     >
       <AIRecoveryLoadingOverlay mode="orders" open={showGeneratingOverlay} />
+
+      {/* 오더 생성 대기 팝업 — 해설 완료 직후 오더 페이지로 이동 시 표시 */}
+      {showOrdersPendingPopup && (
+        <div className="fixed bottom-[calc(88px+env(safe-area-inset-bottom))] left-0 right-0 z-40 flex justify-center px-4 pointer-events-none">
+          <div
+            className="w-full max-w-[680px] rounded-apple border border-[#E8E3F8] bg-white p-4 shadow-[0_8px_32px_rgba(107,92,231,0.14)] pointer-events-auto"
+          >
+            <div className="flex items-center gap-3">
+              <div className="h-5 w-5 flex-shrink-0 rounded-full border-2 border-[#6B5CE7]/20 border-t-[#6B5CE7] animate-spin" />
+              <div>
+                <div className="text-[15px] font-semibold text-ios-text">오더 생성중입니다</div>
+                <p className="text-[12px] leading-5 text-ios-sub">AI가 오더를 작성하고 있어요. 완료되면 자동으로 나타납니다.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="px-1">
         <AIRecoverySlotTabs value={slot} onChange={updateSlot} />
@@ -412,10 +441,12 @@ export function InsightsRecoveryOrdersDetail({
           <p className="mt-2 text-[13px] leading-6 text-ios-sub">완료한 오더는 아래에 남아 있고, 통계도 바로 반영됩니다.</p>
         </DetailCard>
       ) : !session.error && response?.gate.allowed ? (
-        <DetailCard className="p-5 sm:p-6">
-          <div className="text-[17px] font-bold tracking-[-0.02em] text-ios-text">아직 AI 오더가 없어요.</div>
-          <p className="mt-2 text-[13px] leading-6 text-ios-sub">AI 맞춤회복 페이지에서 {slotLabel} 만들기를 눌러 해설을 먼저 생성해 주세요.</p>
-        </DetailCard>
+        showOrdersPendingPopup ? null : (
+          <DetailCard className="p-5 sm:p-6">
+            <div className="text-[17px] font-bold tracking-[-0.02em] text-ios-text">아직 AI 오더가 없어요.</div>
+            <p className="mt-2 text-[13px] leading-6 text-ios-sub">AI 맞춤회복 페이지에서 {slotLabel} 만들기를 눌러 해설을 먼저 생성해 주세요.</p>
+          </DetailCard>
+        )
       ) : null}
 
       {completedOrders.length ? (

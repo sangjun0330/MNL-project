@@ -18,29 +18,29 @@ type AIRecoveryLoadingOverlayProps = {
 };
 
 /* ── Steps ─────────────────────────────────────────────────────────
- * recovery: 10 steps ≈ 105s total  (실제 AI 생성 ~90-120s)
- * orders:    7 steps ≈  56s total  (실제 AI 생성 ~45-60s)
+ * recovery: 10 steps ≈ 63s total  (실제 AI 생성 ~60-90s)
+ * orders:    6 steps ≈ 32s total  (실제 AI 생성 ~30-45s)
  * 마지막 단계는 overlay가 닫힐 때까지 무한 대기 (1 사이클만 돈다)
  * ────────────────────────────────────────────────────────────── */
 const STEPS: Record<LoadingMode, LoadingStep[]> = {
   recovery: [
-    { text: "최근 7일간의 건강 기록을 불러오고 있어요", durationMs: 9_000 },
-    { text: "수면 패턴과 회복 흐름을 분석하고 있어요", durationMs: 10_000 },
-    { text: "교대근무 리듬에 맞춰 컨디션을 평가하고 있어요", durationMs: 11_000 },
-    { text: "신체·정신 소모 신호를 정리하고 있어요", durationMs: 11_000 },
-    { text: "반복되는 피로 요인을 찾고 있어요", durationMs: 11_000 },
-    { text: "핵심 회복 포인트를 선별하고 있어요", durationMs: 11_000 },
-    { text: "근무 일정에 맞춘 회복 해설을 작성하고 있어요", durationMs: 12_000 },
-    { text: "실천 가능한 추천 행동을 다듬고 있어요", durationMs: 11_000 },
-    { text: "오더 흐름과 우선순위를 정리하고 있어요", durationMs: 10_000 },
+    { text: "최근 7일간의 건강 기록을 불러오고 있어요", durationMs: 6_000 },
+    { text: "수면 패턴과 회복 흐름을 분석하고 있어요", durationMs: 7_000 },
+    { text: "교대근무 리듬에 맞춰 컨디션을 평가하고 있어요", durationMs: 7_000 },
+    { text: "신체·정신 소모 신호를 정리하고 있어요", durationMs: 7_000 },
+    { text: "반복되는 피로 요인을 찾고 있어요", durationMs: 7_000 },
+    { text: "핵심 회복 포인트를 선별하고 있어요", durationMs: 7_000 },
+    { text: "근무 일정에 맞춘 회복 해설을 작성하고 있어요", durationMs: 8_000 },
+    { text: "실천 가능한 추천 행동을 다듬고 있어요", durationMs: 7_000 },
+    { text: "오더 흐름과 우선순위를 정리하고 있어요", durationMs: 7_000 },
     { text: "마무리하고 있어요, 거의 완료됐어요", durationMs: Infinity },
   ],
   orders: [
-    { text: "기존 맞춤회복 해설을 확인하고 있어요", durationMs: 8_000 },
-    { text: "컨디션 변화에 따라 실행 우선순위를 정하고 있어요", durationMs: 9_000 },
-    { text: "근무 일정에 맞춘 오더 문장을 작성하고 있어요", durationMs: 10_000 },
-    { text: "실천 타이밍과 순서를 맞추고 있어요", durationMs: 10_000 },
-    { text: "오더 완성도를 점검하고 있어요", durationMs: 10_000 },
+    { text: "기존 맞춤회복 해설을 확인하고 있어요", durationMs: 5_000 },
+    { text: "컨디션 변화에 따라 실행 우선순위를 정하고 있어요", durationMs: 6_000 },
+    { text: "근무 일정에 맞춘 오더 문장을 작성하고 있어요", durationMs: 7_000 },
+    { text: "실천 타이밍과 순서를 맞추고 있어요", durationMs: 7_000 },
+    { text: "오더 완성도를 점검하고 있어요", durationMs: 7_000 },
     { text: "최종 정리 중이에요, 거의 완료됐어요", durationMs: Infinity },
   ],
 };
@@ -48,6 +48,11 @@ const STEPS: Record<LoadingMode, LoadingStep[]> = {
 const TITLE: Record<LoadingMode, string> = {
   recovery: "맞춤회복을 준비하고 있어요",
   orders: "오더를 정리하고 있어요",
+};
+
+const ESTIMATE: Record<LoadingMode, string> = {
+  recovery: "보통 약 1분",
+  orders: "보통 약 30초",
 };
 
 export function AIRecoveryLoadingOverlay({ mode, open }: AIRecoveryLoadingOverlayProps) {
@@ -97,7 +102,7 @@ export function AIRecoveryLoadingOverlay({ mode, open }: AIRecoveryLoadingOverla
       if (idx >= steps.length - 1 || cancelled) return; // last step → stay forever
       const dur = steps[idx]!.durationMs;
       if (!isFinite(dur)) return; // safety: Infinity means stop
-      const fadeOutTime = dur - 300;
+      const fadeOutTime = dur - 200;
       timer = window.setTimeout(() => {
         if (cancelled) return;
         setStepFading(true);
@@ -106,7 +111,7 @@ export function AIRecoveryLoadingOverlay({ mode, open }: AIRecoveryLoadingOverla
           setCurrentIndex(idx + 1);
           setStepFading(false);
           advance(idx + 1);
-        }, 300);
+        }, 200);
       }, fadeOutTime);
     };
 
@@ -155,7 +160,7 @@ export function AIRecoveryLoadingOverlay({ mode, open }: AIRecoveryLoadingOverla
           )}
         >
           <div className="rnest-loading-breathe" style={{ overflow: "visible" }}>
-            <RNestMark className="h-[72px] w-[124px] text-[#161616]" />
+            <RNestMark className="h-[84px] w-[144px] text-[#161616]" />
           </div>
         </div>
 
@@ -211,7 +216,7 @@ export function AIRecoveryLoadingOverlay({ mode, open }: AIRecoveryLoadingOverla
           )}
         >
           <p className="text-center text-[13px] text-[#161616]/20">
-            보통 1~2분
+            {ESTIMATE[mode]}
           </p>
         </div>
       </div>
