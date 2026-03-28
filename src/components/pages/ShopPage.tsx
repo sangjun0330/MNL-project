@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
 
-import { startTransition, useDeferredValue, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { startTransition, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useAuthState } from "@/lib/auth";
@@ -140,9 +140,18 @@ export function ShopPage() {
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [orderMessage, setOrderMessage] = useState<string | null>(null);
   const [orderMessageTone, setOrderMessageTone] = useState<"error" | "notice">("notice");
+  const orderMessageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showOrderMessage = useCallback((msg: string, tone: "error" | "notice" = "notice") => {
+    if (orderMessageTimerRef.current) clearTimeout(orderMessageTimerRef.current);
+    setOrderMessage(msg);
+    setOrderMessageTone(tone);
+    orderMessageTimerRef.current = setTimeout(() => setOrderMessage(null), 4000);
+  }, []);
 
   // 검색/필터/정렬
   const [searchQuery, setSearchQuery] = useState("");
+  const deferredSearchQuery = useDeferredValue(searchQuery);
   const [sortKey, setSortKey] = useState<SortKey>("recommended");
   const [priceFilter, setPriceFilter] = useState<PriceFilter>("all");
   const [showFilter, setShowFilter] = useState(false);
@@ -224,9 +233,9 @@ export function ShopPage() {
     [catalog, deferredCategory, store.selected, store.schedule, store.bio, store.settings]
   );
 
-  // 검색 + 필터 + 정렬 적용
+  // 검색 + 필터 + 정렬 적용 (deferredSearchQuery로 입력 중 과도한 재계산 방지)
   const finalRecommendations = useMemo(() => {
-    const keyword = searchQuery.trim().toLowerCase();
+    const keyword = deferredSearchQuery.trim().toLowerCase();
     let result = filteredShopState.recommendations.filter((entry) => {
       const p = entry.product;
       if (!matchesPriceFilter(p, priceFilter)) return false;
@@ -254,7 +263,7 @@ export function ShopPage() {
     // "recommended" = 기본 순서 유지
 
     return result;
-  }, [filteredShopState.recommendations, priceFilter, searchQuery, sortKey, t]);
+  }, [filteredShopState.recommendations, priceFilter, deferredSearchQuery, sortKey, t]);
 
   const selectedDateLabel = useMemo(() => {
     const date = new Date(allShopState.selectedDate);
@@ -282,8 +291,7 @@ export function ShopPage() {
     e.stopPropagation();
     if (wishlistLoadingId === productId) return; // 이중 클릭 방지
     if (status !== "authenticated" || !user?.userId) {
-      setOrderMessageTone("error");
-      setOrderMessage(t("위시리스트는 로그인한 계정에 저장됩니다."));
+      showOrderMessage(t("위시리스트는 로그인한 계정에 저장됩니다."), "error");
       return;
     }
     setWishlistLoadingId(productId);
@@ -292,8 +300,7 @@ export function ShopPage() {
       const next = await toggleWishlist(productId, headers);
       setWishlist(next.ids);
     } catch {
-      setOrderMessageTone("error");
-      setOrderMessage(t("위시리스트 저장에 실패했습니다. 잠시 후 다시 시도해 주세요."));
+      showOrderMessage(t("위시리스트 저장에 실패했습니다. 잠시 후 다시 시도해 주세요."), "error");
     } finally {
       setWishlistLoadingId(null);
     }
@@ -404,7 +411,7 @@ export function ShopPage() {
                   <button
                     key={item.key}
                     type="button" data-auth-allow
-                    onClick={() => setSortKey(item.key)}
+                    onClick={() => { setSortKey(item.key); setShowFilter(false); }}
                     className={[
                       "rounded-full border-2 px-3 py-1.5 text-[12px] font-semibold transition",
                       sortKey === item.key ? "border-[#17324d] bg-[#d1deea] text-[#2f4d6a]" : "border-[#bfd0e1] bg-white text-[#60768d]",
@@ -428,7 +435,7 @@ export function ShopPage() {
                   <button
                     key={item.key}
                     type="button" data-auth-allow
-                    onClick={() => setPriceFilter(item.key)}
+                    onClick={() => { setPriceFilter(item.key); setShowFilter(false); }}
                     className={[
                       "rounded-full border-2 px-3 py-1.5 text-[12px] font-semibold transition",
                       priceFilter === item.key ? "border-[#17324d] bg-[#d1deea] text-[#2f4d6a]" : "border-[#bfd0e1] bg-white text-[#60768d]",
@@ -475,9 +482,11 @@ export function ShopPage() {
                       </div>
                     </div>
                   )}
-                  <div className="absolute bottom-4 right-4 rounded-full bg-black/12 px-3 py-1 text-[11px] font-semibold text-white">
-                    1 / {Math.max(1, featuredPrimary.product.imageUrls.length || 1)}
-                  </div>
+                  {featuredPrimary.product.imageUrls.length > 1 && (
+                    <div className="absolute bottom-4 right-4 rounded-full bg-black/12 px-3 py-1 text-[11px] font-semibold text-white">
+                      1 / {featuredPrimary.product.imageUrls.length}
+                    </div>
+                  )}
                   {featuredPrimary.product.outOfStock && (
                     <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-[32px]">
                       <span className="rounded-full bg-white/90 px-4 py-2 text-[13px] font-bold text-[#111827]">{t("품절")}</span>
@@ -487,7 +496,7 @@ export function ShopPage() {
                 <div className="px-4 py-5">
                   <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#8d99ab]">{t("오늘의 추천")}</div>
                   <div className="mt-3 text-[16px] font-bold leading-7 tracking-[-0.02em] text-[#111827]">{t(featuredPrimary.product.name)}</div>
-                  <div className="mt-2 text-[13px] leading-6 text-[#44556d]">{allShopState.focusSummary}</div>
+                  {allShopState.focusSummary ? <div className="mt-2 text-[13px] leading-6 text-[#44556d]">{allShopState.focusSummary}</div> : null}
                   <div className="mt-4 flex items-center gap-2">
                     {featuredPrimary.product.originalPriceKrw && featuredPrimary.product.priceKrw && featuredPrimary.product.originalPriceKrw > featuredPrimary.product.priceKrw ? (
                       <>
@@ -594,7 +603,7 @@ export function ShopPage() {
         {topSignals.length > 0 && !searchQuery ? (
           <div className="flex flex-wrap gap-2">
             {topSignals.map((signal) => (
-              <span key={signal.key} className="inline-flex rounded-full bg-[#eef4fb] px-3 py-1 text-[11px] font-semibold text-[#11294b]">
+              <span key={signal.key} className="inline-flex cursor-default select-none rounded-full bg-[#eef4fb] px-3 py-1 text-[11px] font-semibold text-[#11294b]">
                 {signal.label}
               </span>
             ))}
@@ -615,7 +624,7 @@ export function ShopPage() {
                 <HeartIcon filled={wishlist.includes(entry.product.id)} />
               </button>
               <Link href={`/shop/${encodeURIComponent(entry.product.id)}`} data-auth-allow className="block">
-                <div className="relative overflow-hidden rounded-[2px] bg-[#f3f5f7]">
+                <div className="relative overflow-hidden rounded-xl bg-[#f3f5f7]">
                   {entry.product.imageUrls[0] ? (
                     <img src={getShopImageSrc(entry.product.imageUrls[0])} alt={t(entry.product.name)} className="aspect-square w-full object-cover" referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.display = "none"; }} />
                   ) : (
@@ -664,14 +673,38 @@ export function ShopPage() {
           ))}
 
           {catalogLoading ? (
-            <div className="col-span-2 rounded-3xl border border-[#edf1f6] bg-white px-5 py-6 text-[13px] text-[#65748b]">{t("상품을 불러오는 중입니다.")}</div>
+            <>
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={`skel-${i}`} className="animate-pulse">
+                  <div className="aspect-square w-full rounded-xl bg-[#f0f0f3]" />
+                  <div className="mt-3 h-4 w-3/4 rounded bg-[#f0f0f3]" />
+                  <div className="mt-2 h-3 w-1/2 rounded bg-[#f0f0f3]" />
+                </div>
+              ))}
+            </>
           ) : null}
 
           {!catalogLoading && finalRecommendations.length === 0 ? (
-            <div className="col-span-2 rounded-3xl border border-[#edf1f6] bg-white px-5 py-6 text-[13px] text-[#65748b]">
-              {searchQuery
-                ? (lang === "en" ? `No products match "${searchQuery}".` : `"${searchQuery}"에 맞는 상품이 없습니다.`)
-                : t("현재 조건에 맞는 상품이 없습니다. 카테고리를 바꾸거나 잠시 후 다시 확인해 주세요.")}
+            <div className="col-span-2 flex flex-col items-center gap-3 py-12 text-center">
+              <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="17" cy="17" r="11" stroke="#bfd0e1" strokeWidth="2"/>
+                <path d="M25 25l7 7" stroke="#bfd0e1" strokeWidth="2" strokeLinecap="round"/>
+                <path d="M14 15h6M14 19h4" stroke="#bfd0e1" strokeWidth="1.5" strokeLinecap="round"/>
+              </svg>
+              <div className="text-[14px] font-semibold text-[#44556d]">
+                {searchQuery
+                  ? t("\"{query}\" 검색 결과가 없어요", { query: searchQuery })
+                  : t("해당 조건에 맞는 상품이 없어요")}
+              </div>
+              {(searchQuery || priceFilter !== "all" || sortKey !== "recommended") && (
+                <button
+                  type="button" data-auth-allow
+                  onClick={() => { setSearchQuery(""); setPriceFilter("all"); setSortKey("recommended"); }}
+                  className="rounded-full border border-[#bfd0e1] px-4 py-1.5 text-[12px] font-semibold text-[#65748b] transition hover:bg-[#f3f5f7]"
+                >
+                  {t("필터 초기화")}
+                </button>
+              )}
             </div>
           ) : null}
         </div>
