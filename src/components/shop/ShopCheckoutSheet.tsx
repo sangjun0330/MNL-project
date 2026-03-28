@@ -60,7 +60,8 @@ export function ShopCheckoutSheet({
     if (!open) return;
     setShippingConfirmed(false);
     setContactConfirmed(false);
-  }, [open, selectedAddressId, productTitle, quantity]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   return (
     <BottomSheet

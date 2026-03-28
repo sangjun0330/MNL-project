@@ -160,6 +160,9 @@ export function ShopCheckoutSuccessPage() {
           <>
             <div className="mt-3 text-[14px] font-semibold text-red-600">{t("승인 실패")}</div>
             <div className="mt-1 text-[12.5px] leading-6 text-ios-sub">{error}</div>
+            <div className="mt-3 rounded-[18px] border border-[#e8d9c0] bg-[#fef9f0] px-4 py-3 text-[12.5px] leading-6 text-[#8a6d3b]">
+              {t("카드사에서 결제가 승인된 경우 자동으로 취소 처리됩니다. 주문 내역에서 최종 상태를 확인해 주세요.")}
+            </div>
           </>
         ) : null}
 

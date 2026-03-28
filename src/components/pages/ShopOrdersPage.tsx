@@ -373,14 +373,17 @@ export function ShopOrdersPage() {
     const nextFilter = searchParams.get("filter");
     if (nextFilter === "all" || nextFilter === "active" || nextFilter === "closed") {
       setFilter(nextFilter);
+      setPage(1);
       return;
     }
     if (nextFilter === "progress" || nextFilter === "delivered") {
       setFilter("active");
+      setPage(1);
       return;
     }
     if (nextFilter === "refund" || nextFilter === "issue") {
       setFilter("closed");
+      setPage(1);
     }
   }, [searchParams]);
 
@@ -523,7 +526,7 @@ export function ShopOrdersPage() {
                 key={item.key}
                 type="button"
                 data-auth-allow
-                onClick={() => setFilter(item.key)}
+                onClick={() => { setFilter(item.key); setPage(1); }}
                 className={[
                   "rounded-3xl border px-3 py-3 text-[12px] font-semibold transition",
                   filter === item.key

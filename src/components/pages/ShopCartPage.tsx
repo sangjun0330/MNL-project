@@ -79,7 +79,7 @@ export function ShopCartPage() {
         const headers = await authHeaders();
         const [items, products, profileRes] = await Promise.all([
           getCart(headers),
-          fetchShopCatalog(),
+          fetchShopCatalog().catch(() => [] as ShopProduct[]),
           fetch("/api/shop/profile", {
             method: "GET",
             headers: { "content-type": "application/json", ...headers },
@@ -137,6 +137,8 @@ export function ShopCartPage() {
         .filter((item): item is CartLine => Boolean(item)),
     [cartItems, catalog]
   );
+
+  const phantomItemCount = cartItems.length - lines.length;
 
   useEffect(() => {
     const availableIds = lines.map((line) => line.product.id);
@@ -489,6 +491,11 @@ export function ShopCartPage() {
           </div>
         ) : (
           <>
+            {phantomItemCount > 0 ? (
+              <div className="rounded-[26px] border border-[#e8d9c0] bg-[#fef9f0] px-4 py-3 text-[12.5px] leading-6 text-[#8a6d3b]">
+                {t("장바구니에 담은 상품 중 현재 판매하지 않는 상품이 있어 목록에서 제외되었습니다.")}
+              </div>
+            ) : null}
             <div className="rounded-[28px] border border-[#dbe4ef] bg-white p-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -560,7 +567,7 @@ export function ShopCartPage() {
                               type="button"
                               data-auth-allow
                               onClick={() => void changeQuantity(line.product.id, line.item.quantity + 1)}
-                              disabled={savingProductId === line.product.id}
+                              disabled={savingProductId === line.product.id || (typeof line.product.stockCount === "number" && line.item.quantity >= line.product.stockCount)}
                               className={`h-10 w-10 px-0 text-[16px] ${SHOP_BUTTON_SECONDARY}`}
                             >
                               +
