@@ -2,6 +2,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useAuthState } from "@/lib/auth";
 import { authHeaders } from "@/lib/billing/client";
@@ -291,23 +292,32 @@ export function ShopPage() {
 
   return (
     <div className="-mx-4 pb-24">
-      {/* 준비중 오버레이 — 관리자 외 전체 차단 */}
-      {adminState !== "allowed" && (
-        <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-white/90 backdrop-blur-sm">
+      {/* 준비중 오버레이 — 관리자 외 전체 차단 (portal로 body에 마운트, 네비게이션바 제외) */}
+      {adminState !== "allowed" && typeof document !== "undefined" && createPortal(
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 60, zIndex: 9999, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.75)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)" }}>
           {adminState === "checking" ? (
             <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-[color:var(--rnest-accent)] border-t-transparent" />
           ) : (
-            <div className="flex flex-col items-center gap-4 px-8 text-center">
-              <div className="text-[42px]">🛍️</div>
-              <div className="text-[22px] font-extrabold tracking-[-0.02em] text-ios-text">
-                {t("준비 중입니다")}
+            <div className="flex flex-col items-center gap-5 px-8 text-center">
+              <svg width="56" height="56" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect width="56" height="56" rx="16" fill="#F0EEFF"/>
+                <path d="M18 20h20l-2.5 14a2 2 0 0 1-2 1.7H22.5a2 2 0 0 1-2-1.7L18 20Z" stroke="#7C6FE0" strokeWidth="1.8" strokeLinejoin="round"/>
+                <path d="M23 20c0-2.76 2.24-5 5-5s5 2.24 5 5" stroke="#7C6FE0" strokeWidth="1.8" strokeLinecap="round"/>
+                <circle cx="24" cy="27" r="1.2" fill="#7C6FE0"/>
+                <circle cx="32" cy="27" r="1.2" fill="#7C6FE0"/>
+              </svg>
+              <div>
+                <div className="text-[22px] font-extrabold tracking-[-0.02em] text-ios-text">
+                  {t("쇼핑 준비 중입니다")}
+                </div>
+                <p className="mt-2 max-w-[240px] text-[13.5px] leading-relaxed text-ios-sub">
+                  {t("더 나은 쇼핑 경험을 준비하고 있어요. 조금만 기다려 주세요.")}
+                </p>
               </div>
-              <p className="max-w-[260px] text-[14px] leading-relaxed text-ios-sub">
-                {t("쇼핑 서비스를 준비하고 있어요. 조금만 기다려 주세요.")}
-              </p>
             </div>
           )}
-        </div>
+        </div>,
+        document.body
       )}
 
       <div className="bg-[#102a43] px-4 py-3 text-center text-[12.5px] font-semibold text-white">
