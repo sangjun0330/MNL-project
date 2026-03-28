@@ -1359,7 +1359,7 @@ async function callResponsesApi(args: {
         },
         reasoning: { effort: reasoningEffort },
         max_output_tokens: maxOutputTokens,
-        tools: useWebSearch ? [{ type: "web_search_preview" }] : [],
+        tools: useWebSearch ? [{ type: "web_search_preview", search_context_size: "low" }] : [],
         store: storeResponses,
       };
   if (onTextDelta) body.stream = true;
@@ -2221,6 +2221,15 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         isPremiumSearch,
         hasImage: Boolean(params.imageDataUrl),
       });
+      // 웹 검색 활성 시 아웃풋 토큰 부스트: 검색 결과가 인풋을 크게 늘리므로
+      // 아웃풋 토큰 여유를 확보하여 답변 중간 절단을 방지한다.
+      if (isPremiumSearch) {
+        const maxOut = resolveMaxOutputTokens();
+        promptProfile = {
+          ...promptProfile,
+          outputTokenCandidates: promptProfile.outputTokenCandidates.map((t) => Math.min(maxOut, t + 3000)),
+        };
+      }
       const promptAssembly = assembleMedSafetyDeveloperPrompt(routeDecision, params.locale, {
         runtimeMode,
         hasImage: Boolean(params.imageDataUrl),
@@ -2229,7 +2238,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
       const baseDeveloperPrompt =
         runtimeMode === "hybrid_live" ? promptAssembly.developerPrompt : buildLegacyDeveloperPrompt(params.locale);
       const webSearchInstructions = isPremiumSearch
-        ? "\n\n[웹 검색 활용 지침]\n- 웹 검색을 통해 최신 임상 지침, 연구 데이터, 약물 정보를 적극적으로 활용한다.\n- 반드시 신뢰도 높고 공신력 있는 출처를 우선 참고한다: PubMed, WHO, NICE 가이드라인, UpToDate, Cochrane, 식품의약품안전처(MFDS), 대한의학회, 대한간호협회, 미국 FDA, 국내외 주요 의료기관 및 학술 데이터베이스.\n- 비공식 출처, 검증되지 않은 블로그, 상업적 의도가 명확한 사이트의 정보는 채택하지 않는다.\n- 검색 결과의 발행일을 확인하여 최신 정보를 우선하되, 최신성만으로 신뢰성을 판단하지 않는다.\n- 웹 검색 결과와 기존 임상 지식을 통합하여 가장 정확하고 신뢰할 수 있는 답변을 제공한다."
+        ? "\n\n[웹 검색 활용 지침]\n- 웹 검색은 기존 학습 데이터만으로 답하기 어렵거나 최신 가이드라인이 반드시 필요한 경우에만 수행하고, 검색 횟수는 최대 2회 이내로 최소화한다.\n- 반드시 신뢰도 높고 공신력 있는 출처를 우선 참고한다: PubMed, WHO, NICE 가이드라인, UpToDate, Cochrane, 식품의약품안전처(MFDS), 대한의학회, 대한간호협회, 미국 FDA, 국내외 주요 의료기관 및 학술 데이터베이스.\n- 비공식 출처, 검증되지 않은 블로그, 상업적 의도가 명확한 사이트의 정보는 채택하지 않는다.\n- 검색 결과의 발행일을 확인하여 최신 정보를 우선하되, 최신성만으로 신뢰성을 판단하지 않는다.\n- 웹 검색 결과와 기존 임상 지식을 통합하여 가장 정확하고 신뢰할 수 있는 답변을 제공한다."
         : "";
       const mainDeveloperPrompt = baseDeveloperPrompt + webSearchInstructions;
       const allowStreaming =
