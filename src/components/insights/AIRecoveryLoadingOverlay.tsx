@@ -159,7 +159,7 @@ export function AIRecoveryLoadingOverlay({ mode, open }: AIRecoveryLoadingOverla
             visible ? "translate-y-0 opacity-100" : "translate-y-4 opacity-0",
           )}
         >
-          <div className="rnest-loading-breathe" style={{ overflow: "visible" }}>
+          <div className="rnest-loading-breathe">
             <RNestMark className="h-[96px] w-[156px] text-[#161616]" />
           </div>
         </div>

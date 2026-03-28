@@ -36,7 +36,7 @@ function RNestGlyphPaths() {
 
 export function RNestMark({ className, title = "RNest" }: RNestLogoProps) {
   return (
-    <svg viewBox="-10 -8 260 160" fill="none" role="img" aria-label={title} className={cn("text-[#161616]", className)}>
+    <svg viewBox="-10 -8 260 160" fill="none" role="img" aria-label={title} className={cn("text-[#161616]", className)} style={{ overflow: "visible" }}>
       <RNestGlyphPaths />
     </svg>
   );
