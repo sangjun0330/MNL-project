@@ -52,7 +52,7 @@ const TITLE: Record<LoadingMode, string> = {
 
 const ESTIMATE: Record<LoadingMode, string> = {
   recovery: "보통 약 1분",
-  orders: "보통 약 30초",
+  orders: "보통 15초",
 };
 
 export function AIRecoveryLoadingOverlay({ mode, open }: AIRecoveryLoadingOverlayProps) {
