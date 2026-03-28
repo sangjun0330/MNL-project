@@ -632,6 +632,19 @@ function buildUserPromptWithContinuationMemory(userPrompt: string, memory: strin
   ].join("\n");
 }
 
+// 프리미엄 2-step 웹서치: Step 1 전용 프롬프트 빌더
+function buildPremiumPreSearchDeveloperPrompt(locale: "ko" | "en"): string {
+  return locale === "ko"
+    ? "너는 임상 정보 검색 전문가다. 주어진 임상 질문에 대해 최신 가이드라인, 약물 정보, 임상 근거를 웹 검색으로 조사한다. 검색은 필요한 경우에만 수행하고, 검색된 핵심 정보와 출처(PubMed, WHO, NICE, UpToDate, MFDS, 대한의학회, FDA 등 공신력 있는 기관)를 간략히 정리하여 반환한다. 비공식 출처나 상업성 사이트는 제외한다."
+    : "You are a clinical information search specialist. Search the web for the latest guidelines, drug information, and clinical evidence for the given query. Use authoritative sources only (PubMed, WHO, NICE, UpToDate, FDA, major medical societies). Return a brief summary of key findings with source references.";
+}
+
+function buildPremiumPreSearchUserPrompt(query: string, locale: "ko" | "en"): string {
+  return locale === "ko"
+    ? `다음 임상 질문에 대한 최신 근거와 가이드라인을 검색하고, 핵심 내용과 출처만 간략히 정리하라:\n\n${query}`
+    : `Search for the latest clinical evidence and guidelines for this question, then briefly summarize key findings with sources:\n\n${query}`;
+}
+
 function extractResponsesText(json: any): string {
   const chunks: string[] = [];
   const seen = new Set<string>();
@@ -2171,6 +2184,46 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
   const memoryAwareUserPrompt = buildUserPromptWithContinuationMemory(userPrompt, params.continuationMemory, params.locale);
   const startedAt = Date.now();
 
+  // ── 프리미엄 2-step 웹서치: Step 1 (유틸리티 모델이 서치 담당) ────────────
+  // 메인 모델(gpt-5.4)에서 웹서치를 허용하면 모델이 무제한으로 반복 검색한다.
+  // 대신 유틸리티 모델(gpt-5.2)이 먼저 검색하고 결과를 요약한 뒤,
+  // 메인 모델은 tools: [] (서치 없이) 그 맥락을 받아 최종 답변만 생성한다.
+  const effectiveIsPremium = isPremiumSearchModel(params.modelOverride);
+  let premiumPreSearchContext = "";
+  if (effectiveIsPremium && !params.signal.aborted) {
+    const preSearchUtilityModel = resolveInternalUtilityModel(params.modelOverride ?? MED_SAFETY_LOCKED_MODEL);
+    const preSearchApiBaseUrl = resolveApiBaseUrls()[0] ?? "https://api.openai.com/v1";
+    const preSearchTimeoutMs = Math.min(resolveUpstreamTimeoutMs(), 55_000);
+    const preSearchController = new AbortController();
+    const preSearchTimer = setTimeout(() => preSearchController.abort(), preSearchTimeoutMs);
+    const onParentAbort = () => preSearchController.abort();
+    params.signal.addEventListener("abort", onParentAbort);
+    try {
+      const preSearchAttempt = await callResponsesApi({
+        apiKey,
+        model: preSearchUtilityModel,
+        developerPrompt: buildPremiumPreSearchDeveloperPrompt(params.locale),
+        userPrompt: buildPremiumPreSearchUserPrompt(params.query, params.locale),
+        apiBaseUrl: preSearchApiBaseUrl,
+        signal: preSearchController.signal,
+        maxOutputTokens: 700,
+        upstreamTimeoutMs: preSearchTimeoutMs,
+        verbosity: "low",
+        reasoningEffort: "low",
+        storeResponses: false,
+        useWebSearch: true,
+      });
+      if (!preSearchAttempt.error && preSearchAttempt.text) {
+        premiumPreSearchContext = preSearchAttempt.text;
+      }
+    } catch {
+      // 실패 시 웹서치 없이 진행 (graceful fallback)
+    } finally {
+      clearTimeout(preSearchTimer);
+      params.signal.removeEventListener("abort", onParentAbort);
+    }
+  }
+
   let selectedModel = modelCandidates[0] ?? MED_SAFETY_LOCKED_MODEL;
   let lastError = "openai_request_failed";
   let lastRouteDecision: MedSafetyRouteDecision | null = null;
@@ -2238,10 +2291,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
       });
       const baseDeveloperPrompt =
         runtimeMode === "hybrid_live" ? promptAssembly.developerPrompt : buildLegacyDeveloperPrompt(params.locale);
-      const webSearchPrefix = isPremiumSearch
-        ? "[웹 검색 — 1회 엄격 제한]\n이 요청에서 웹 검색은 단 1회만 허용된다. 1회 검색 후 결과를 받으면 즉시 추가 검색 없이 답변을 완성한다. 2회 이상 검색하는 것은 절대 금지한다.\n신뢰도 높은 출처(PubMed, WHO, NICE, UpToDate, Cochrane, MFDS, 대한의학회, FDA 등 공신력 있는 기관)만 참고하고, 비공식 블로그·상업 사이트는 채택하지 않는다.\n\n"
-        : "";
-      const mainDeveloperPrompt = webSearchPrefix + baseDeveloperPrompt;
+      const mainDeveloperPrompt = baseDeveloperPrompt;
       const allowStreaming =
         Boolean(params.onTextDelta) &&
         modelIndex === 0 &&
@@ -2264,12 +2314,19 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         },
       });
       const primaryUserPrompt = shouldUseContinuationIds ? userPrompt : memoryAwareUserPrompt;
+      // Step 2: 메인 모델은 웹서치 없이 답변만 생성한다.
+      // pre-search context가 있으면 user prompt에 포함하여 최신 근거를 활용한다.
+      const augmentedUserPrompt = premiumPreSearchContext
+        ? (params.locale === "ko"
+          ? `${primaryUserPrompt}\n\n[웹 검색 참고 자료 — 답변 작성 시 아래 자료를 참고하라]\n${premiumPreSearchContext}`
+          : `${primaryUserPrompt}\n\n[Web Search Reference — Use the following context in your answer]\n${premiumPreSearchContext}`)
+        : primaryUserPrompt;
       const mainAttempt = await generateAnswerWithPrompt({
         apiKey,
         model: candidateModel,
         locale: params.locale,
         developerPrompt: mainDeveloperPrompt,
-        userPrompt: primaryUserPrompt,
+        userPrompt: augmentedUserPrompt,
         apiBaseUrl,
         imageDataUrl: params.imageDataUrl,
         previousResponseId,
@@ -2280,7 +2337,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         profile: promptProfile,
         onTextDelta: allowStreaming ? params.onTextDelta : undefined,
         allowStreaming,
-        useWebSearch: isPremiumSearch,
+        useWebSearch: false, // Step 2: 웹서치 없이 답변 생성 (Step 1에서 이미 검색 완료)
         networkRetries,
         networkRetryBaseMs,
       });
