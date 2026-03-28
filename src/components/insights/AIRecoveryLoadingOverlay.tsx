@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { RNestMark } from "@/components/brand/RNestLogo";
 import { cn } from "@/lib/cn";
 
 type LoadingMode = "recovery" | "orders";
@@ -160,7 +159,8 @@ export function AIRecoveryLoadingOverlay({ mode, open }: AIRecoveryLoadingOverla
           )}
         >
           <div className="rnest-loading-breathe">
-            <RNestMark className="h-[96px] w-[156px] text-[#161616]" />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/rnest-mark.png" alt="RNest" width={156} height={96} style={{ display: "block" }} />
           </div>
         </div>
 
