@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
 
-import { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { startTransition, useDeferredValue, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useAuthState } from "@/lib/auth";
@@ -118,6 +118,15 @@ export function ShopPage() {
     void check();
     return () => { active = false; };
   }, [status, user?.userId]);
+
+  // 오버레이 활성 시 스크롤 차단
+  const isBlocked = adminState !== "allowed";
+  useLayoutEffect(() => {
+    if (!isBlocked) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [isBlocked]);
 
   const store = useAppStoreSelector(
     (s) => ({ selected: s.selected, schedule: s.schedule, bio: s.bio, settings: s.settings }),
@@ -294,7 +303,7 @@ export function ShopPage() {
     <div className="-mx-4 pb-24">
       {/* 준비중 오버레이 — 관리자 외 전체 차단 (portal로 body에 마운트, 네비게이션바 제외) */}
       {adminState !== "allowed" && typeof document !== "undefined" && createPortal(
-        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 60, zIndex: 9999, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.75)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)" }}>
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 49, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.75)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)" }}>
           {adminState === "checking" ? (
             <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-[color:var(--rnest-accent)] border-t-transparent" />
           ) : (
