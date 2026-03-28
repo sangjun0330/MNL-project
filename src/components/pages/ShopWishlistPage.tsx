@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useAuthState } from "@/lib/auth";
 import { authHeaders } from "@/lib/billing/client";
 import { formatShopCurrency, formatShopPrice, getShopImageSrc, SHOP_PRODUCTS, type ShopProduct } from "@/lib/shop";
-import { getWishlist, removeFromWishlist } from "@/lib/shopClient";
+import { fetchShopCatalog, getWishlist, removeFromWishlist } from "@/lib/shopClient";
 import { SHOP_BUTTON_PRIMARY } from "@/lib/shopUi";
 import { useI18n } from "@/lib/useI18n";
 import { ShopBackLink } from "@/components/shop/ShopBackLink";
@@ -21,11 +21,8 @@ export function ShopWishlistPage() {
     // 최신 카탈로그 로드
     const run = async () => {
       try {
-        const res = await fetch("/api/shop/catalog", { method: "GET", cache: "no-store" });
-        const json = await res.json().catch(() => null);
-        if (res.ok && json?.ok && Array.isArray(json?.data?.products)) {
-          setCatalog(json.data.products as ShopProduct[]);
-        }
+        const products = await fetchShopCatalog();
+        setCatalog(products);
       } catch {
         // 기본 카탈로그 사용
       }

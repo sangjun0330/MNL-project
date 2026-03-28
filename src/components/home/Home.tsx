@@ -11,6 +11,7 @@ import { computeVitalsRange, vitalMapByISO } from "@/lib/vitals";
 import { useI18n } from "@/lib/useI18n";
 import { buildShopRecommendations, getShopImageSrc, formatShopPrice, SHOP_PRODUCTS } from "@/lib/shop";
 import type { ShopProduct } from "@/lib/shop";
+import { fetchShopCatalog } from "@/lib/shopClient";
 import { useRecoveryPlanner } from "@/components/insights/useRecoveryPlanner";
 import { BatteryGauge } from "@/components/home/BatteryGauge";
 import { WeekStrip } from "@/components/home/WeekStrip";
@@ -199,13 +200,9 @@ export default function Home() {
   const [shopCatalog, setShopCatalog] = useState<ShopProduct[]>(SHOP_PRODUCTS);
   useEffect(() => {
     if (!deferredReady) return;
-    fetch("/api/shop/catalog", { method: "GET", cache: "no-store" })
-      .then((r) => r.json())
-      .then((json) => {
-        if (json?.ok && Array.isArray(json?.data?.products) && json.data.products.length > 0) {
-          const nextProducts = json.data.products as ShopProduct[];
-          setShopCatalog(nextProducts);
-        }
+    fetchShopCatalog()
+      .then((products) => {
+        if (products.length > 0) setShopCatalog(products);
       })
       .catch(() => {/* 실패 시 기본 SHOP_PRODUCTS 유지 */ });
   }, [deferredReady]);

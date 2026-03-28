@@ -23,7 +23,7 @@ import {
   type ShopShippingAddress,
   type ShopShippingProfile,
 } from "@/lib/shopProfile";
-import { addToCart, getCart, getWishlist, loadShopClientState, markShopPartnerClick, markShopViewed, saveShopClientState, toggleWishlist } from "@/lib/shopClient";
+import { addToCart, fetchShopCatalog, getCart, getWishlist, loadShopClientState, markShopPartnerClick, markShopViewed, saveShopClientState, toggleWishlist } from "@/lib/shopClient";
 import { SHOP_BUTTON_ACTIVE, SHOP_BUTTON_PRIMARY } from "@/lib/shopUi";
 import { useI18n } from "@/lib/useI18n";
 import { ShopBackLink } from "@/components/shop/ShopBackLink";
@@ -188,11 +188,8 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
     if (allProducts && allProducts.length > 0) return;
     const run = async () => {
       try {
-        const res = await fetch("/api/shop/catalog", { method: "GET", cache: "no-store" });
-        const json = await res.json().catch(() => null);
-        if (res.ok && json?.ok && Array.isArray(json?.data?.products)) {
-          setCatalogProducts(json.data.products as ShopProduct[]);
-        }
+        const products = await fetchShopCatalog();
+        setCatalogProducts(products);
       } catch {
         // 무시
       }
@@ -846,8 +843,8 @@ export function ShopProductDetailPage({ product, allProducts }: { product: ShopP
                   {t("품절")}
                 </button>
               ) : product.checkoutEnabled && product.priceKrw ? (
-                <button type="button" data-auth-allow onClick={handleOpenCheckout} className={`h-14 flex-[1.2] text-[15px] ${PRIMARY_BUTTON}`}>
-                  {t("구매하기")}
+                <button type="button" data-auth-allow onClick={handleOpenCheckout} disabled={shippingLoading || checkoutLoading} className={`h-14 flex-[1.2] text-[15px] ${PRIMARY_BUTTON} ${shippingLoading || checkoutLoading ? "opacity-60" : ""}`}>
+                  {shippingLoading ? t("배송지 확인 중...") : t("구매하기")}
                 </button>
               ) : product.externalUrl ? (
                 <button

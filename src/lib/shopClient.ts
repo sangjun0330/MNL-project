@@ -1,7 +1,43 @@
+import type { ShopProduct } from "@/lib/shop";
+
 const SHOP_CLIENT_STATE_KEY = "rnest_shop_state_v2";
 const MAX_RECENT_PRODUCTS = 6;
 const LEGACY_WISHLIST_KEY = "rnest_shop_wishlist_v1";
 const MAX_WISHLIST_SIZE = 50;
+const CATALOG_CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
+
+let _catalogCache: { products: ShopProduct[]; fetchedAt: number } | null = null;
+let _catalogInflight: Promise<ShopProduct[]> | null = null;
+
+/** Fetch shop catalog with a 2-minute in-memory cache. */
+export async function fetchShopCatalog(): Promise<ShopProduct[]> {
+  if (_catalogCache && Date.now() - _catalogCache.fetchedAt < CATALOG_CACHE_TTL_MS) {
+    return _catalogCache.products;
+  }
+  if (_catalogInflight) return _catalogInflight;
+
+  _catalogInflight = (async () => {
+    try {
+      const res = await fetch("/api/shop/catalog", { method: "GET", cache: "no-store" });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok || !Array.isArray(json?.data?.products)) {
+        throw new Error(String(json?.error ?? `catalog_http_${res.status}`));
+      }
+      const products = json.data.products as ShopProduct[];
+      _catalogCache = { products, fetchedAt: Date.now() };
+      return products;
+    } finally {
+      _catalogInflight = null;
+    }
+  })();
+
+  return _catalogInflight;
+}
+
+/** Invalidate the catalog cache (e.g. after admin changes). */
+export function invalidateShopCatalogCache() {
+  _catalogCache = null;
+}
 
 export type ShopCartItem = {
   productId: string;
@@ -110,6 +146,9 @@ function readLegacyWishlist(): string[] {
   }
 }
 
+let _legacyMigrationFailCount = 0;
+const MAX_LEGACY_MIGRATION_RETRIES = 3;
+
 function clearLegacyWishlist() {
   if (typeof window === "undefined") return;
   try {
@@ -148,6 +187,7 @@ async function requestWishlist(
 
 export async function getWishlist(headers?: HeadersInit): Promise<string[]> {
   const result = await requestWishlist({ method: "GET", headers });
+  if (_legacyMigrationFailCount >= MAX_LEGACY_MIGRATION_RETRIES) return result.ids;
   const legacyIds = readLegacyWishlist();
   if (legacyIds.length === 0) return result.ids;
 
@@ -159,8 +199,10 @@ export async function getWishlist(headers?: HeadersInit): Promise<string[]> {
       body: { ids: merged },
     });
     clearLegacyWishlist();
+    _legacyMigrationFailCount = 0;
     return saved.ids;
   } catch {
+    _legacyMigrationFailCount++;
     return result.ids;
   }
 }

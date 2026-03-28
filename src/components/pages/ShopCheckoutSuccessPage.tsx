@@ -38,6 +38,7 @@ type ConfirmResult =
         approvedAt: string | null;
       };
       orders?: ConfirmedOrderSummary[];
+      partialFailureOrderIds?: string[];
     };
 
 async function authHeaders(): Promise<Record<string, string>> {
@@ -141,6 +142,7 @@ export function ShopCheckoutSuccessPage() {
   }, [status, paymentKey, orderId, parsedAmount, t]);
 
   const bundleOrders = result && result.mode === "bundle" && Array.isArray(result.orders) ? result.orders : [];
+  const partialFailureIds = result?.mode === "bundle" && Array.isArray(result.partialFailureOrderIds) ? result.partialFailureOrderIds : [];
   const primaryOrderHref =
     result?.mode === "single"
       ? `/shop/orders/${encodeURIComponent(result.order.orderId)}`
@@ -208,6 +210,11 @@ export function ShopCheckoutSuccessPage() {
         {!loading && !error && result?.mode === "bundle" ? (
           <>
             <div className="rnest-chip-accent mt-4 inline-flex px-3 py-1 text-[12px]">{t("묶음 주문 완료")}</div>
+            {partialFailureIds.length > 0 ? (
+              <div className="mt-3 rounded-[18px] border border-[#efc7be] bg-[#fff5f3] px-4 py-3 text-[12.5px] leading-6 text-[#b14a36]">
+                {t("묶음 결제는 완료되었으나 일부 주문의 내부 처리가 지연되고 있습니다. 잠시 후 주문 내역에서 상태를 다시 확인해 주세요.")}
+              </div>
+            ) : null}
             <div className="mt-4 rounded-[18px] border border-ios-sep bg-[#F7F7FA] p-4">
               <div className="text-[13px] text-ios-sub">{t("결제 묶음")}</div>
               <div className="mt-1 text-[20px] font-extrabold tracking-[-0.02em] text-ios-text">{t(result.bundle.displayName)}</div>

@@ -21,6 +21,7 @@ import { ShopBrandLogo } from "@/components/shop/ShopBrandLogo";
 import { useAppStoreSelector } from "@/lib/store";
 import { useI18n } from "@/lib/useI18n";
 import {
+  fetchShopCatalog,
   getCart,
   getWishlist,
   loadShopClientState,
@@ -205,11 +206,9 @@ export function ShopPage() {
       setCatalogLoading(true);
       setCatalogError(null);
       try {
-        const res = await fetch("/api/shop/catalog", { method: "GET", cache: "no-store" });
-        const json = await res.json().catch(() => null);
+        const products = await fetchShopCatalog();
         if (!active) return;
-        if (!res.ok || !json?.ok || !Array.isArray(json?.data?.products)) throw new Error(String(json?.error ?? `http_${res.status}`));
-        setCatalog(json.data.products as ShopProduct[]);
+        setCatalog(products);
       } catch {
         if (!active) return;
         setCatalog(SHOP_PRODUCTS);

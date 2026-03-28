@@ -14,7 +14,7 @@ import {
   type ShopShippingAddress,
   type ShopShippingProfile,
 } from "@/lib/shopProfile";
-import { clearCart, getCart, removeFromCart, updateCartQuantity, type ShopCartItem } from "@/lib/shopClient";
+import { clearCart, fetchShopCatalog, getCart, removeFromCart, updateCartQuantity, type ShopCartItem } from "@/lib/shopClient";
 import { SHOP_BUTTON_ACTIVE, SHOP_BUTTON_PRIMARY, SHOP_BUTTON_SECONDARY } from "@/lib/shopUi";
 import { useI18n } from "@/lib/useI18n";
 import { ShopBackLink } from "@/components/shop/ShopBackLink";
@@ -77,26 +77,21 @@ export function ShopCartPage() {
       setMessage(null);
       try {
         const headers = await authHeaders();
-        const [items, catalogRes, profileRes] = await Promise.all([
+        const [items, products, profileRes] = await Promise.all([
           getCart(headers),
-          fetch("/api/shop/catalog", { method: "GET", cache: "no-store" }),
+          fetchShopCatalog(),
           fetch("/api/shop/profile", {
             method: "GET",
             headers: { "content-type": "application/json", ...headers },
             cache: "no-store",
           }),
         ]);
-        const catalogJson = await catalogRes.json().catch(() => null);
         const profileJson = await profileRes.json().catch(() => null);
         if (!active) return;
-        if (!catalogRes.ok || !catalogJson?.ok || !Array.isArray(catalogJson?.data?.products)) {
-          throw new Error(String(catalogJson?.error ?? `catalog_http_${catalogRes.status}`));
-        }
         if (!profileRes.ok || !profileJson?.ok) {
           throw new Error(String(profileJson?.error ?? `profile_http_${profileRes.status}`));
         }
 
-        const products = catalogJson.data.products as ShopProduct[];
         const profileData = (profileJson?.data ?? {}) as ShopProfileResponse;
         const addresses = Array.isArray(profileData.addresses) ? profileData.addresses : [];
         const defaultAddressId =
