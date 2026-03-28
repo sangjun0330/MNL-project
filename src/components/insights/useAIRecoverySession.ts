@@ -610,6 +610,16 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     if (!shouldRevalidate) {
       setLoading(false);
       setError(null);
+      // 캐시 히트 시에도 brief만 있고 orders가 없는 경우 자동 생성을 트리거한다.
+      // (캐시 유효 판정으로 API 호출을 건너뛰면 아래 autoOrdersKey 체크에 도달하지 못하므로
+      //  여기서 별도로 처리해야 오더 로딩 오버레이와 자동 생성이 정상 작동한다.)
+      if (cachedData) {
+        const autoOrdersKey = buildAutoOrdersKey(cachedData);
+        if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && cachedData.quota.canRegenerateOrders) {
+          autoOrdersRequestedRef.current.add(autoOrdersKey);
+          void regenerateOrdersInternal(true);
+        }
+      }
       return;
     }
 

@@ -189,9 +189,12 @@ export function InsightsRecoveryOrdersDetail({
   const initiallyOrdersPending = Boolean(
     entry.initialData?.session?.brief && !entry.initialData?.session?.orders,
   );
-  // 초기 로딩 중 또는 오더 저장 중에 오버레이 표시 (팝업 없이 바로 전체화면 로딩)
-  const showGeneratingOverlay = Boolean(response?.gate.allowed && session.savingOrders) ||
-    Boolean(!session.error && initiallyOrdersPending && !ordersPayload && (session.loading || session.savingOrders));
+  // 오더 생성 중 또는 초기 로드 시 오더가 예상되는 동안 전체화면 로딩 오버레이 표시
+  // 첫 번째 조건: savingOrders=true 이면 오더가 실제로 생성 중 → gate.allowed 불필요
+  // 두 번째 조건: initiallyOrdersPending(brief만 있는 상태로 진입) + 아직 오더 없음 + 로딩 중
+  const showGeneratingOverlay =
+    Boolean(session.savingOrders && !ordersPayload) ||
+    Boolean(!session.error && initiallyOrdersPending && !ordersPayload && session.loading);
   const showGenerationControls = Boolean(response?.showGenerationControls);
   const [localCompletions, setLocalCompletions] = useState<string[]>(responseCompletions);
   const [recentlyCompletedIds, setRecentlyCompletedIds] = useState<string[]>([]);
