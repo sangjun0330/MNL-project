@@ -89,6 +89,35 @@ function matchesPriceFilter(product: ShopProduct, filter: PriceFilter): boolean 
 export function ShopPage() {
   const { t, lang } = useI18n();
   const { status, user } = useAuthState();
+
+  // 관리자 여부 확인 — 비관리자에게는 준비중 오버레이 표시
+  const [adminState, setAdminState] = useState<"checking" | "allowed" | "blocked">("checking");
+  useEffect(() => {
+    let active = true;
+    const check = async () => {
+      if (status === "loading") return;
+      if (status !== "authenticated" || !user?.userId) {
+        if (active) setAdminState("blocked");
+        return;
+      }
+      try {
+        const headers = await authHeaders();
+        const res = await fetch("/api/admin/billing/access", {
+          method: "GET",
+          headers: { "content-type": "application/json", ...headers },
+          cache: "no-store",
+        });
+        const json = await res.json().catch(() => null);
+        if (!active) return;
+        setAdminState(res.ok && json?.data?.isAdmin ? "allowed" : "blocked");
+      } catch {
+        if (active) setAdminState("blocked");
+      }
+    };
+    void check();
+    return () => { active = false; };
+  }, [status, user?.userId]);
+
   const store = useAppStoreSelector(
     (s) => ({ selected: s.selected, schedule: s.schedule, bio: s.bio, settings: s.settings }),
     (a, b) => a.selected === b.selected && a.schedule === b.schedule && a.bio === b.bio && a.settings === b.settings
@@ -262,6 +291,25 @@ export function ShopPage() {
 
   return (
     <div className="-mx-4 pb-24">
+      {/* 준비중 오버레이 — 관리자 외 전체 차단 */}
+      {adminState !== "allowed" && (
+        <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-white/90 backdrop-blur-sm">
+          {adminState === "checking" ? (
+            <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-[color:var(--rnest-accent)] border-t-transparent" />
+          ) : (
+            <div className="flex flex-col items-center gap-4 px-8 text-center">
+              <div className="text-[42px]">🛍️</div>
+              <div className="text-[22px] font-extrabold tracking-[-0.02em] text-ios-text">
+                {t("준비 중입니다")}
+              </div>
+              <p className="max-w-[260px] text-[14px] leading-relaxed text-ios-sub">
+                {t("쇼핑 서비스를 준비하고 있어요. 조금만 기다려 주세요.")}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="bg-[#102a43] px-4 py-3 text-center text-[12.5px] font-semibold text-white">
         {t("오늘 회복 흐름에 맞는 추천 상품과 구매 정보를 한눈에 확인하세요")}
       </div>
