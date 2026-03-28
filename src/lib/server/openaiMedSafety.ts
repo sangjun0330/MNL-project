@@ -2221,13 +2221,14 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         isPremiumSearch,
         hasImage: Boolean(params.imageDataUrl),
       });
-      // 웹 검색 활성 시 아웃풋 토큰 부스트: 검색 결과가 인풋을 크게 늘리므로
+      // 프리미엄 검색 아웃풋 토큰 부스트: 웹 검색 결과가 인풋을 크게 늘리므로
       // 아웃풋 토큰 여유를 확보하여 답변 중간 절단을 방지한다.
+      // 프리미엄 전용 상한(16000)을 별도로 사용하여 env var 캡에 걸리지 않도록 한다.
       if (isPremiumSearch) {
-        const maxOut = resolveMaxOutputTokens();
+        const premiumMaxOut = Math.max(resolveMaxOutputTokens(), 16000);
         promptProfile = {
           ...promptProfile,
-          outputTokenCandidates: promptProfile.outputTokenCandidates.map((t) => Math.min(maxOut, t + 3000)),
+          outputTokenCandidates: promptProfile.outputTokenCandidates.map((t) => Math.min(premiumMaxOut, t + 4000)),
         };
       }
       const promptAssembly = assembleMedSafetyDeveloperPrompt(routeDecision, params.locale, {
@@ -2237,10 +2238,10 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
       });
       const baseDeveloperPrompt =
         runtimeMode === "hybrid_live" ? promptAssembly.developerPrompt : buildLegacyDeveloperPrompt(params.locale);
-      const webSearchInstructions = isPremiumSearch
-        ? "\n\n[웹 검색 활용 지침]\n- 웹 검색은 기존 학습 데이터만으로 답하기 어렵거나 최신 가이드라인이 반드시 필요한 경우에만 수행하고, 검색 횟수는 최대 2회 이내로 최소화한다.\n- 반드시 신뢰도 높고 공신력 있는 출처를 우선 참고한다: PubMed, WHO, NICE 가이드라인, UpToDate, Cochrane, 식품의약품안전처(MFDS), 대한의학회, 대한간호협회, 미국 FDA, 국내외 주요 의료기관 및 학술 데이터베이스.\n- 비공식 출처, 검증되지 않은 블로그, 상업적 의도가 명확한 사이트의 정보는 채택하지 않는다.\n- 검색 결과의 발행일을 확인하여 최신 정보를 우선하되, 최신성만으로 신뢰성을 판단하지 않는다.\n- 웹 검색 결과와 기존 임상 지식을 통합하여 가장 정확하고 신뢰할 수 있는 답변을 제공한다."
+      const webSearchPrefix = isPremiumSearch
+        ? "[웹 검색 — 1회 엄격 제한]\n이 요청에서 웹 검색은 단 1회만 허용된다. 1회 검색 후 결과를 받으면 즉시 추가 검색 없이 답변을 완성한다. 2회 이상 검색하는 것은 절대 금지한다.\n신뢰도 높은 출처(PubMed, WHO, NICE, UpToDate, Cochrane, MFDS, 대한의학회, FDA 등 공신력 있는 기관)만 참고하고, 비공식 블로그·상업 사이트는 채택하지 않는다.\n\n"
         : "";
-      const mainDeveloperPrompt = baseDeveloperPrompt + webSearchInstructions;
+      const mainDeveloperPrompt = webSearchPrefix + baseDeveloperPrompt;
       const allowStreaming =
         Boolean(params.onTextDelta) &&
         modelIndex === 0 &&
