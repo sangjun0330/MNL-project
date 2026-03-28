@@ -18,6 +18,44 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+// ─── 날짜 기반 보존 기간 정책 ───────────────────────────────────────────────
+// stateSanitizer.ts 와 동일한 기준을 서버 저장 직전에도 적용해
+// DB가 절대 기준 기간을 초과하여 쌓이지 않도록 보장한다.
+const PAYLOAD_SCHEDULE_RETENTION_DAYS = 180; // schedule / shiftNames
+const PAYLOAD_HEALTH_RETENTION_DAYS = 90;    // bio / emotions / notes
+
+function payloadISOCutoff(daysBack: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - daysBack);
+  return d.toISOString().slice(0, 10);
+}
+
+function pruneDateEntries(map: Record<string, unknown>, cutoffISO: string): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(map)) {
+    if (key >= cutoffISO) out[key] = value;
+  }
+  return out;
+}
+
+function pruneAppStateDateMapsInPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  const scheduleCutoff = payloadISOCutoff(PAYLOAD_SCHEDULE_RETENTION_DAYS);
+  const healthCutoff   = payloadISOCutoff(PAYLOAD_HEALTH_RETENTION_DAYS);
+  const pruned: Record<string, unknown> = { ...payload };
+
+  for (const key of ["schedule", "shiftNames"] as const) {
+    if (isRecord(pruned[key])) {
+      pruned[key] = pruneDateEntries(pruned[key] as Record<string, unknown>, scheduleCutoff);
+    }
+  }
+  for (const key of ["notes", "bio", "emotions"] as const) {
+    if (isRecord(pruned[key])) {
+      pruned[key] = pruneDateEntries(pruned[key] as Record<string, unknown>, healthCutoff);
+    }
+  }
+  return pruned;
+}
+
 function countRecordKeys(value: unknown): number {
   return isRecord(value) ? Object.keys(value).length : 0;
 }
@@ -296,6 +334,12 @@ export async function saveUserState(input: { userId: string; payload: any }): Pr
     if (mergedPayload) {
       nextPayload = mergedPayload;
     }
+  }
+
+  // 날짜 기반 보존 기간 적용: 모든 merge 완료 후 최종적으로 오래된 날짜 항목을 정리.
+  // merge 보호 로직이 복원한 항목도 기준 기간 초과분은 이 단계에서 제거된다.
+  if (isRecord(nextPayload)) {
+    nextPayload = pruneAppStateDateMapsInPayload(nextPayload);
   }
 
   // Skip no-op writes to avoid unnecessary updated_at churn and revision row growth.

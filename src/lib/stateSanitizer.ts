@@ -11,6 +11,32 @@ import type { Shift } from "@/lib/types";
 const ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
 const SHIFT_SET = new Set<Shift>(["D", "E", "N", "M", "OFF", "VAC"]);
 
+// 보존 기간 설정
+// schedule/shiftNames: 180일 (근무 일정은 과거 6개월 + 미래 일정 모두 유지)
+// notes/bio/emotions: 90일 (건강·감정 기록은 분기 단위)
+const SCHEDULE_RETENTION_DAYS = 180;
+const HEALTH_RETENTION_DAYS = 90;
+
+function isoDateCutoff(daysBack: number): ISODate {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - daysBack);
+  return d.toISOString().slice(0, 10) as ISODate;
+}
+
+function pruneISODateMap<T>(
+  map: Record<ISODate, T | undefined>,
+  cutoffISO: ISODate
+): Record<ISODate, T | undefined> {
+  const out: Record<ISODate, T | undefined> = {};
+  for (const [key, value] of Object.entries(map)) {
+    // 기준 날짜 이상(미래 포함)만 보존 → 오래된 기록은 삭제
+    if (key >= cutoffISO) {
+      out[key as ISODate] = value;
+    }
+  }
+  return out;
+}
+
 function clamp(value: number, min: number, max: number) {
   const n = Number.isFinite(value) ? value : min;
   return Math.max(min, Math.min(max, n));
@@ -262,57 +288,65 @@ export function sanitizeStatePayload(raw: unknown): AppState {
   const loaded = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const base = emptyState();
 
+  const scheduleCutoff = isoDateCutoff(SCHEDULE_RETENTION_DAYS);
+  const healthCutoff = isoDateCutoff(HEALTH_RETENTION_DAYS);
+
   const scheduleRaw = loaded.schedule && typeof loaded.schedule === "object" ? (loaded.schedule as Record<string, unknown>) : {};
-  const schedule: Record<ISODate, Shift | undefined> = {};
+  const scheduleRaw2: Record<ISODate, Shift | undefined> = {};
   for (const [isoRaw, shiftRaw] of Object.entries(scheduleRaw)) {
     const iso = asIso(isoRaw);
     const shift = asShift(shiftRaw);
     if (!iso || !shift) continue;
-    schedule[iso] = shift;
+    scheduleRaw2[iso] = shift;
   }
+  const schedule = pruneISODateMap(scheduleRaw2, scheduleCutoff);
 
   const notesRaw = loaded.notes && typeof loaded.notes === "object" ? (loaded.notes as Record<string, unknown>) : {};
-  const notes: Record<ISODate, string | undefined> = {};
+  const notesRaw2: Record<ISODate, string | undefined> = {};
   for (const [isoRaw, noteRaw] of Object.entries(notesRaw)) {
     const iso = asIso(isoRaw);
     if (!iso || typeof noteRaw !== "string") continue;
     const note = noteRaw.trim();
     if (!note) continue;
-    notes[iso] = note.slice(0, 1000);
+    notesRaw2[iso] = note.slice(0, 1000);
   }
+  const notes = pruneISODateMap(notesRaw2, healthCutoff);
 
   const shiftNamesRaw =
     loaded.shiftNames && typeof loaded.shiftNames === "object" ? (loaded.shiftNames as Record<string, unknown>) : {};
-  const shiftNames: Record<ISODate, string | undefined> = {};
+  const shiftNamesRaw2: Record<ISODate, string | undefined> = {};
   for (const [isoRaw, nameRaw] of Object.entries(shiftNamesRaw)) {
     const iso = asIso(isoRaw);
     if (!iso || typeof nameRaw !== "string") continue;
     const name = nameRaw.trim();
     if (!name) continue;
-    shiftNames[iso] = name.slice(0, 40);
+    shiftNamesRaw2[iso] = name.slice(0, 40);
   }
+  const shiftNames = pruneISODateMap(shiftNamesRaw2, scheduleCutoff);
 
   const bioRaw = loaded.bio && typeof loaded.bio === "object" ? (loaded.bio as Record<string, unknown>) : {};
-  const bio: Record<ISODate, BioInputs | undefined> = {};
+  const bioRaw2: Record<ISODate, BioInputs | undefined> = {};
   for (const [isoRaw, bioEntryRaw] of Object.entries(bioRaw)) {
     const iso = asIso(isoRaw);
     if (!iso) continue;
     const bioEntry = sanitizeBio(bioEntryRaw);
     if (!bioEntry) continue;
-    bio[iso] = bioEntry;
+    bioRaw2[iso] = bioEntry;
   }
+  const bio = pruneISODateMap(bioRaw2, healthCutoff);
 
   const emotionsRaw =
     loaded.emotions && typeof loaded.emotions === "object" ? (loaded.emotions as Record<string, unknown>) : {};
-  const emotions: Record<ISODate, EmotionEntry | undefined> = {};
+  const emotionsRaw2: Record<ISODate, EmotionEntry | undefined> = {};
   for (const [isoRaw, emoRaw] of Object.entries(emotionsRaw)) {
     const iso = asIso(isoRaw);
     if (!iso) continue;
     const fallbackMood = bio[iso]?.mood ?? null;
     const emotion = sanitizeEmotion(emoRaw, fallbackMood);
     if (!emotion) continue;
-    emotions[iso] = emotion;
+    emotionsRaw2[iso] = emotion;
   }
+  const emotions = pruneISODateMap(emotionsRaw2, healthCutoff);
 
   const memo: RNestMemoState = sanitizeMemoState(loaded.memo);
   const records: RNestRecordState = sanitizeRecordState(loaded.records);
