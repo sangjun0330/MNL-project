@@ -1287,6 +1287,7 @@ async function callResponsesApi(args: {
   reasoningEffort: MedSafetyReasoningEffort;
   storeResponses: boolean;
   compatMode?: boolean;
+  useWebSearch?: boolean;
   onTextDelta?: TextDeltaHandler;
 }): Promise<ResponsesAttempt> {
   const {
@@ -1305,6 +1306,7 @@ async function callResponsesApi(args: {
     reasoningEffort,
     storeResponses,
     compatMode,
+    useWebSearch,
     onTextDelta,
   } = args;
   const requestConfig = resolveOpenAIResponsesRequestConfig({
@@ -1357,7 +1359,7 @@ async function callResponsesApi(args: {
         },
         reasoning: { effort: reasoningEffort },
         max_output_tokens: maxOutputTokens,
-        tools: [],
+        tools: useWebSearch ? [{ type: "web_search_preview" }] : [],
         store: storeResponses,
       };
   if (onTextDelta) body.stream = true;
@@ -1492,6 +1494,7 @@ async function generateAnswerWithPrompt(args: {
   profile: MedSafetyPromptProfile;
   onTextDelta?: TextDeltaHandler;
   allowStreaming?: boolean;
+  useWebSearch?: boolean;
   networkRetries: number;
   networkRetryBaseMs: number;
 }): Promise<{
@@ -1531,6 +1534,7 @@ async function generateAnswerWithPrompt(args: {
         verbosity: args.profile.verbosity,
         reasoningEffort,
         storeResponses: args.storeResponses,
+        useWebSearch: args.useWebSearch,
         onTextDelta: allowStreamDelta ? args.onTextDelta : undefined,
         retries: allowStreamDelta ? 0 : args.networkRetries,
         retryBaseMs: args.networkRetryBaseMs,
@@ -1651,6 +1655,7 @@ async function generateAnswerWithPrompt(args: {
     verbosity: args.profile.verbosity,
     reasoningEffort: rescueReasoningEffort,
     storeResponses: args.storeResponses,
+    useWebSearch: args.useWebSearch,
   });
   if (!statelessRescue.error && statelessRescue.text) {
     return {
@@ -2221,8 +2226,12 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         hasImage: Boolean(params.imageDataUrl),
         query: params.query,
       });
-      const mainDeveloperPrompt =
+      const baseDeveloperPrompt =
         runtimeMode === "hybrid_live" ? promptAssembly.developerPrompt : buildLegacyDeveloperPrompt(params.locale);
+      const webSearchInstructions = isPremiumSearch
+        ? "\n\n[웹 검색 활용 지침]\n- 웹 검색을 통해 최신 임상 지침, 연구 데이터, 약물 정보를 적극적으로 활용한다.\n- 반드시 신뢰도 높고 공신력 있는 출처를 우선 참고한다: PubMed, WHO, NICE 가이드라인, UpToDate, Cochrane, 식품의약품안전처(MFDS), 대한의학회, 대한간호협회, 미국 FDA, 국내외 주요 의료기관 및 학술 데이터베이스.\n- 비공식 출처, 검증되지 않은 블로그, 상업적 의도가 명확한 사이트의 정보는 채택하지 않는다.\n- 검색 결과의 발행일을 확인하여 최신 정보를 우선하되, 최신성만으로 신뢰성을 판단하지 않는다.\n- 웹 검색 결과와 기존 임상 지식을 통합하여 가장 정확하고 신뢰할 수 있는 답변을 제공한다."
+        : "";
+      const mainDeveloperPrompt = baseDeveloperPrompt + webSearchInstructions;
       const allowStreaming =
         Boolean(params.onTextDelta) &&
         modelIndex === 0 &&
@@ -2261,6 +2270,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         profile: promptProfile,
         onTextDelta: allowStreaming ? params.onTextDelta : undefined,
         allowStreaming,
+        useWebSearch: isPremiumSearch,
         networkRetries,
         networkRetryBaseMs,
       });
