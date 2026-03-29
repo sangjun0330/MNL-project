@@ -80,6 +80,7 @@ type PersistedMedSafetySession = {
   messages: Message[];
   input: string;
   lastContinuationToken: string | null;
+  lastContinuationSearchType: SearchCreditType | null;
   lastSubmittedQuery: string;
   showSessionDecisionPrompt: boolean;
   updatedAt: number;
@@ -142,6 +143,12 @@ function readPersistedMedSafetySession(storageKey: string): PersistedMedSafetySe
       messages,
       input: typeof parsed.input === "string" ? parsed.input : "",
       lastContinuationToken: typeof parsed.lastContinuationToken === "string" ? parsed.lastContinuationToken : null,
+      lastContinuationSearchType:
+        parsed.lastContinuationSearchType === "premium"
+          ? "premium"
+          : parsed.lastContinuationSearchType === "standard"
+            ? "standard"
+            : null,
       lastSubmittedQuery: typeof parsed.lastSubmittedQuery === "string" ? parsed.lastSubmittedQuery : "",
       showSessionDecisionPrompt: parsed.showSessionDecisionPrompt === true,
       updatedAt: Number(parsed.updatedAt) || Date.now(),
@@ -1092,6 +1099,7 @@ export function ToolMedSafetyPage() {
   const [streamingText, setStreamingText] = useState("");
   const [streamPhase, setStreamPhase] = useState<"idle" | "connecting" | "writing">("idle");
   const [lastContinuationToken, setLastContinuationToken] = useState<string | null>(null);
+  const [lastContinuationSearchType, setLastContinuationSearchType] = useState<SearchCreditType | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copyMessage, setCopyMessage] = useState("");
   const [lastSubmittedQuery, setLastSubmittedQuery] = useState("");
@@ -1189,6 +1197,7 @@ export function ToolMedSafetyPage() {
       setInput(persisted.input);
       setStreamingText("");
       setLastContinuationToken(persisted.lastContinuationToken);
+      setLastContinuationSearchType(persisted.lastContinuationSearchType);
       setError(null);
       setLastSubmittedQuery(persisted.lastSubmittedQuery);
       setSelectedImage(null);
@@ -1199,6 +1208,7 @@ export function ToolMedSafetyPage() {
       setInput("");
       setStreamingText("");
       setLastContinuationToken(null);
+      setLastContinuationSearchType(null);
       setError(null);
       setLastSubmittedQuery("");
       setSelectedImage(null);
@@ -1299,6 +1309,7 @@ export function ToolMedSafetyPage() {
       messages,
       input,
       lastContinuationToken,
+      lastContinuationSearchType,
       lastSubmittedQuery,
       showSessionDecisionPrompt,
       updatedAt: Date.now(),
@@ -1312,6 +1323,7 @@ export function ToolMedSafetyPage() {
     messages,
     input,
     lastContinuationToken,
+    lastContinuationSearchType,
     lastSubmittedQuery,
     showSessionDecisionPrompt,
     isLoading,
@@ -1330,6 +1342,7 @@ export function ToolMedSafetyPage() {
     setStreamingText("");
     setError(null);
     setLastContinuationToken(null);
+    setLastContinuationSearchType(null);
     setLastSubmittedQuery("");
     setSelectedImage(null);
     setSelectedImageName("");
@@ -1477,6 +1490,8 @@ export function ToolMedSafetyPage() {
       let response: Response | null = null;
       let normalizedData: AnalyzePayload | null = null;
       let finalError = "med_safety_analyze_failed";
+      const continuationTokenForRequest =
+        lastContinuationToken && lastContinuationSearchType === activeSearchType ? lastContinuationToken : null;
 
       for (let attempt = 0; attempt <= maxClientRetries; attempt += 1) {
         try {
@@ -1486,7 +1501,7 @@ export function ToolMedSafetyPage() {
               locale: lang,
               stream: true,
               searchType: activeSearchType,
-              continuationToken: lastContinuationToken ?? undefined,
+              continuationToken: continuationTokenForRequest ?? undefined,
               ...(imageToSend ? { imageDataUrl: imageToSend } : {}),
             },
             MED_SAFETY_CLIENT_TIMEOUT_MS
@@ -1562,6 +1577,7 @@ export function ToolMedSafetyPage() {
       };
       setMessages((prev) => (normalizedData.startedFreshSession ? [userMessage, assistantMessage] : [...prev, assistantMessage]));
       setLastContinuationToken(normalizedData.continuationToken ?? null);
+      setLastContinuationSearchType(normalizedData.continuationToken ? normalizedData.searchType : null);
       setShowSessionDecisionPrompt(true);
 
       if (normalizedData.source === "openai_fallback") {

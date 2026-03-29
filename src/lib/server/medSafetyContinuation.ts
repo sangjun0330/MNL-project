@@ -20,6 +20,19 @@ type MedSafetyContinuationPayloadV3 = {
   exp: number;
 };
 
+type MedSafetyContinuationSearchType = "standard" | "premium";
+
+type MedSafetyContinuationPayloadV4 = {
+  v: 4;
+  uid: string;
+  rid: string | null;
+  cid: string | null;
+  mdl: string | null;
+  st: MedSafetyContinuationSearchType | null;
+  iat: number;
+  exp: number;
+};
+
 const TOKEN_PREFIX = "msct1";
 const TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -28,6 +41,19 @@ function normalizeStateId(value: unknown) {
   if (!text) return null;
   if (!/^[A-Za-z0-9_-]{8,220}$/.test(text)) return null;
   return text;
+}
+
+function normalizeContinuationModel(value: unknown) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  if (!/^[A-Za-z0-9._:-]{3,120}$/.test(text)) return null;
+  return text;
+}
+
+function normalizeContinuationSearchType(value: unknown): MedSafetyContinuationSearchType | null {
+  const text = String(value ?? "").trim().toLowerCase();
+  if (text === "standard" || text === "premium") return text;
+  return null;
 }
 
 function base64UrlEncode(bytes: Uint8Array) {
@@ -70,16 +96,20 @@ export async function createMedSafetyContinuationToken(args: {
   userId: string;
   responseId?: string | null;
   conversationId?: string | null;
+  model?: string | null;
+  searchType?: MedSafetyContinuationSearchType | null;
   now?: number;
 }) {
   const secret = resolveContinuationSecret();
   if (!secret) return null;
 
-  const payload: MedSafetyContinuationPayloadV3 = {
-    v: 3,
+  const payload: MedSafetyContinuationPayloadV4 = {
+    v: 4,
     uid: String(args.userId ?? "").trim(),
     rid: normalizeStateId(args.responseId),
     cid: normalizeStateId(args.conversationId),
+    mdl: normalizeContinuationModel(args.model),
+    st: normalizeContinuationSearchType(args.searchType),
     iat: Number.isFinite(args.now) ? Number(args.now) : Date.now(),
     exp: (Number.isFinite(args.now) ? Number(args.now) : Date.now()) + TOKEN_TTL_MS,
   };
@@ -114,6 +144,7 @@ export async function readMedSafetyContinuationToken(args: { token?: string | nu
     const payload = JSON.parse(new TextDecoder().decode(plainBuffer)) as
       | MedSafetyContinuationPayloadV1
       | MedSafetyContinuationPayloadV3
+      | MedSafetyContinuationPayloadV4
       | Record<string, unknown>
       | null;
     if (!payload) return null;
@@ -122,13 +153,15 @@ export async function readMedSafetyContinuationToken(args: { token?: string | nu
     if (!Number.isFinite(Number(payload.exp)) || Number(payload.exp) < now) return null;
     if (String(payload.uid ?? "") !== userId) return null;
 
-    if (payload.v === 3 || payload.v === 1) {
+    if (payload.v === 4 || payload.v === 3 || payload.v === 1) {
       const previousResponseId = normalizeStateId(payload.rid);
       const conversationId = normalizeStateId(payload.cid);
       if (!previousResponseId && !conversationId) return null;
       return {
         previousResponseId,
         conversationId,
+        model: payload.v === 4 ? normalizeContinuationModel(payload.mdl) : null,
+        searchType: payload.v === 4 ? normalizeContinuationSearchType(payload.st) : null,
       };
     }
 

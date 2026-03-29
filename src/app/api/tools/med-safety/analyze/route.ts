@@ -388,6 +388,10 @@ function pickSearchType(raw: unknown, fallback: SearchCreditType): SearchCreditT
   return fallback;
 }
 
+function resolveMedSafetyModelForSearchType(searchType: SearchCreditType) {
+  return searchType === "premium" ? "gpt-5.4" : "gpt-5.2";
+}
+
 function estimateBase64Bytes(dataUrl: string) {
   const base64 = dataUrl.split(",", 2)[1] ?? "";
   if (!base64) return 0;
@@ -524,8 +528,12 @@ export async function POST(req: NextRequest) {
       token: continuationToken,
       userId,
     });
-    const previousResponseId = continuationState?.previousResponseId ?? undefined;
-    const conversationId = continuationState?.conversationId ?? undefined;
+    const requestedModel = resolveMedSafetyModelForSearchType(searchType);
+    const isCompatibleContinuation =
+      continuationState?.searchType === searchType &&
+      continuationState?.model === requestedModel;
+    const previousResponseId = isCompatibleContinuation ? continuationState?.previousResponseId ?? undefined : undefined;
+    const conversationId = isCompatibleContinuation ? continuationState?.conversationId ?? undefined : undefined;
     const runAnalyze = async (
       onTextDelta?: (delta: string) => void | Promise<void>,
     ) => {
@@ -538,7 +546,7 @@ export async function POST(req: NextRequest) {
         query,
         locale: "ko",
         imageDataUrl: imageDataUrl || undefined,
-        modelOverride: searchType === "premium" ? "gpt-5.4" : "gpt-5.2",
+        modelOverride: requestedModel,
         previousResponseId,
         conversationId,
         onTextDelta: effectiveOnTextDelta,
@@ -584,7 +592,7 @@ export async function POST(req: NextRequest) {
                   query,
                   locale: "en",
                   imageDataUrl: imageDataUrl || undefined,
-                  modelOverride: searchType === "premium" ? "gpt-5.4" : "gpt-5.2",
+                  modelOverride: requestedModel,
                   previousResponseId,
                   conversationId,
                   signal: abort.signal,
@@ -612,6 +620,8 @@ export async function POST(req: NextRequest) {
         userId,
         responseId: analyzedKo.openaiResponseId,
         conversationId: analyzedKo.openaiConversationId,
+        model: requestedModel,
+        searchType,
       });
       payloadKo.continuationToken = nextContinuationToken;
       payloadKo.startedFreshSession = false;
