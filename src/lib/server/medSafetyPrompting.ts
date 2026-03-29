@@ -507,7 +507,7 @@ function buildDefaultClauseDescriptors(locale: "ko" | "en"): MedSafetyPromptLine
         defaultClauseId: "default_opening_direct_answer",
       }),
       buildPromptLineDescriptor({
-        text: '"Quick distinction point": Give only a one-line key differentiator based on waveform, numeric value, or symptom. (One line only, without explanation)',
+        text: "For comparison questions, weave in the fastest practical distinction criterion naturally instead of forcing a rigid mini-block.",
         source: "default",
         section: "principles",
         coverageTags: ["fast_distinction_point"],
@@ -515,7 +515,7 @@ function buildDefaultClauseDescriptors(locale: "ko" | "en"): MedSafetyPromptLine
         defaultClauseId: "default_fast_distinction_point",
       }),
       buildPromptLineDescriptor({
-        text: '"Quick check sequence": Give a one-line 3-5 step check flow using arrows (→).',
+        text: "For action or response questions, include the bedside check sequence naturally in the flow when it materially changes the next step.",
         source: "default",
         section: "principles",
         coverageTags: ["quick_check_sequence"],
@@ -591,7 +591,7 @@ function buildDefaultClauseDescriptors(locale: "ko" | "en"): MedSafetyPromptLine
       defaultClauseId: "default_opening_direct_answer",
     }),
     buildPromptLineDescriptor({
-      text: "“빠른 구분 포인트”: 파형/수치/증상 기준으로 한 줄 핵심 특징만 제시한다. (설명 없이 한 줄)",
+      text: "비교/구분 질문에서는 실무에서 가장 빨리 구분되는 기준을 문맥에 맞게 자연스럽게 포함한다.",
       source: "default",
       section: "principles",
       coverageTags: ["fast_distinction_point"],
@@ -599,7 +599,7 @@ function buildDefaultClauseDescriptors(locale: "ko" | "en"): MedSafetyPromptLine
       defaultClauseId: "default_fast_distinction_point",
     }),
     buildPromptLineDescriptor({
-      text: "“빠른 확인 순서”: 3~5단계 확인 흐름을 화살표(→)로 한 줄로 제시한다.",
+      text: "행동/대응 질문에서는 bedside에서 확인할 순서를 흐름에 맞게 자연스럽게 포함한다.",
       source: "default",
       section: "principles",
       coverageTags: ["quick_check_sequence"],
@@ -1300,6 +1300,273 @@ function buildPromptBudgetFit(args: {
   } satisfies PromptBudgetFit;
 }
 
+// ---------------------------------------------------------------------------
+// Narrative prompt system (Phase 2+3 reform)
+// ---------------------------------------------------------------------------
+
+function buildRouteNarrativeKo(decision: MedSafetyRouteDecision, signals: MedSafetyQuestionSignals, hasImage: boolean): string {
+  const parts: string[] = [];
+
+  // 질문 유형 서술
+  const intentMap: Record<string, string> = {
+    knowledge: "임상 지식/정의 질문",
+    action: "즉시 행동/대응 질문",
+    compare: "비교/선택 질문",
+    numeric: "수치/해석 질문",
+    device: "장비/기구/알람 질문",
+  };
+  const intentLabel = intentMap[decision.intent] ?? "임상 질문";
+
+  // 도메인 서술
+  const domainParts: string[] = [];
+  if (signals.mentionsMedication) domainParts.push("약물");
+  if (signals.mentionsLineOrTube) domainParts.push("라인/튜브");
+  if (signals.mentionsVentilation || signals.mentionsABGA) domainParts.push("환기/ABGA");
+  if (signals.mentionsAlarm) domainParts.push("알람");
+  if (signals.mentionsCompatibility) domainParts.push("호환성");
+  if (signals.mentionsSetting) domainParts.push("세팅");
+  const domainLabel = domainParts.length ? domainParts.join(", ") + " 관련 " : "";
+
+  parts.push(`이 질문은 ${domainLabel}${intentLabel}이다.`);
+
+  // 위험도 + 명확성
+  if (decision.risk === "high") {
+    parts.push("위험도가 높으므로 즉시 중단/보고 기준과 escalation 신호를 먼저 제시한다.");
+  } else if (decision.risk === "medium") {
+    parts.push("주의가 필요한 상황이므로 안전 확인 포인트를 빠뜨리지 않는다.");
+  }
+
+  if (decision.entityClarity === "low") {
+    parts.push("대상이 완전히 특정되지 않았으므로 용량, 속도, 세팅값, 호환성을 단정하지 않고, 후보를 짧게 제시한 뒤 확인을 권고한다.");
+  } else if (decision.entityClarity === "medium") {
+    parts.push("대상이 한 후보로 기울지만 단정하기 어려우므로 전제를 짧게 밝힌 뒤 일반적이고 안전한 범위에서 답한다.");
+  }
+
+  // 보고/SBAR 필요
+  if (decision.communicationProfile === "script") {
+    parts.push("보고/노티 스크립트가 필요하므로 SBAR 형식의 실제 보고 예시 문장을 포함한다.");
+  } else if (decision.communicationProfile === "payload") {
+    parts.push("보고가 필요한 상황이므로 보고 시 전달할 데이터 묶음(mode/setting, 환자 상태, 핵심 수치, 확인 항목)을 정리한다.");
+  }
+
+  // 복합 문제
+  if (decision.pairedProblemNeed) {
+    parts.push("얽혀 있는 두 문제(예: 산소화 vs 환기)를 분리하여 각각의 원인과 대응을 구분한다.");
+  }
+
+  // 예외 조건
+  if (decision.exceptionProfile === "full") {
+    parts.push("주 추천이 깨지는 조건과 대안 경로를 짧게 분리해 제시한다.");
+  }
+
+  // 이미지
+  if (hasImage) {
+    parts.push("이미지가 포함되어 있으므로 이미지에서 관찰되는 내용을 답변에 연결한다.");
+  }
+
+  return parts.join(" ");
+}
+
+function buildRouteNarrativeEn(decision: MedSafetyRouteDecision, signals: MedSafetyQuestionSignals, hasImage: boolean): string {
+  const parts: string[] = [];
+
+  const intentMap: Record<string, string> = {
+    knowledge: "a clinical knowledge question",
+    action: "an immediate action/response question",
+    compare: "a comparison/selection question",
+    numeric: "a numeric interpretation question",
+    device: "an equipment/device/alarm question",
+  };
+  const intentLabel = intentMap[decision.intent] ?? "a clinical question";
+
+  const domainParts: string[] = [];
+  if (signals.mentionsMedication) domainParts.push("medication");
+  if (signals.mentionsLineOrTube) domainParts.push("lines/tubes");
+  if (signals.mentionsVentilation || signals.mentionsABGA) domainParts.push("ventilation/ABGA");
+  if (signals.mentionsAlarm) domainParts.push("alarms");
+  if (signals.mentionsCompatibility) domainParts.push("compatibility");
+  if (signals.mentionsSetting) domainParts.push("settings");
+  const domainLabel = domainParts.length ? `about ${domainParts.join(", ")} — ` : "";
+
+  parts.push(`This is ${intentLabel} ${domainLabel}.`);
+
+  if (decision.risk === "high") {
+    parts.push("Risk is high: present stop/report criteria and escalation triggers first.");
+  }
+  if (decision.entityClarity === "low") {
+    parts.push("The target entity is not fully identified — do not assert doses, rates, settings, or compatibility; offer candidates and recommend verification.");
+  } else if (decision.entityClarity === "medium") {
+    parts.push("The target entity is likely but not certain — state the assumption briefly, then answer within safe general bounds.");
+  }
+  if (decision.communicationProfile === "script") {
+    parts.push("Include an SBAR-style reporting script example.");
+  } else if (decision.communicationProfile === "payload") {
+    parts.push("Include the data bundle needed for clinician reporting.");
+  }
+  if (decision.pairedProblemNeed) {
+    parts.push("Separate the two linked problems (e.g. oxygenation vs ventilation) so each gets its own cause–response path.");
+  }
+  if (decision.exceptionProfile === "full") {
+    parts.push("Briefly separate when the main recommendation fails and what opens the alternative path.");
+  }
+  if (hasImage) {
+    parts.push("An image is attached — connect observations from the image to the answer.");
+  }
+
+  return parts.join(" ");
+}
+
+function buildRouteNarrative(decision: MedSafetyRouteDecision, locale: "ko" | "en", signals: MedSafetyQuestionSignals, hasImage: boolean): string {
+  return locale === "en"
+    ? buildRouteNarrativeEn(decision, signals, hasImage)
+    : buildRouteNarrativeKo(decision, signals, hasImage);
+}
+
+export function buildMustIncludeHints(decision: MedSafetyRouteDecision, signals: MedSafetyQuestionSignals, locale: "ko" | "en"): string[] {
+  const hints: string[] = [];
+
+  if (locale === "ko") {
+    if (decision.risk === "high") hints.push("즉시 중단/보고 기준");
+    if (decision.pairedProblemNeed) hints.push("두 문제의 분리 판단 (예: 산소화 vs 환기)");
+    if (decision.reversibleCauseNeed) hints.push("가역적 원인 확인 순서");
+    if (decision.reportingNeed && decision.communicationProfile !== "none") hints.push("보고 시 필요한 데이터 묶음");
+    if (decision.communicationProfile === "script") hints.push("실제 보고/노티 예시 문장");
+    if (decision.measurementGuardNeed && decision.entityClarity !== "high") hints.push("수치/세팅의 기관별 차이 주의");
+    if (decision.exceptionProfile !== "none") hints.push("주 추천이 적용되지 않는 예외 조건");
+    if (decision.falseWorseningNeed) hints.push("가짜 악화/측정 오류 배제법");
+    if (signals.asksImmediateAction || decision.intent === "action") hints.push("bedside에서 지금 확인/실행할 순서");
+    if (decision.intent === "compare") hints.push("실무에서 가장 빨리 구분하는 기준");
+  } else {
+    if (decision.risk === "high") hints.push("Immediate stop/report criteria");
+    if (decision.pairedProblemNeed) hints.push("Separate judgment for the two linked problems");
+    if (decision.reversibleCauseNeed) hints.push("Reversible cause check sequence");
+    if (decision.reportingNeed && decision.communicationProfile !== "none") hints.push("Data bundle for clinician reporting");
+    if (decision.communicationProfile === "script") hints.push("SBAR reporting script example");
+    if (decision.measurementGuardNeed && decision.entityClarity !== "high") hints.push("Site-specific measurement/setting caveats");
+    if (decision.exceptionProfile !== "none") hints.push("Exception conditions where main recommendation fails");
+    if (decision.falseWorseningNeed) hints.push("How to exclude artifact / measurement error");
+    if (signals.asksImmediateAction || decision.intent === "action") hints.push("Bedside check/action sequence");
+    if (decision.intent === "compare") hints.push("Fastest practical distinction criterion");
+  }
+
+  return hints.slice(0, 4);
+}
+
+function buildNarrativeDeveloperPromptKo(
+  decision: MedSafetyRouteDecision,
+  signals: MedSafetyQuestionSignals,
+  hasImage: boolean
+): string {
+  const routeNarrative = buildRouteNarrativeKo(decision, signals, hasImage);
+
+  const identityBlock = [
+    "너는 간호사 전용 임상 AI 어시스턴트다.",
+    "모든 답변의 최우선 목표는 간호사가 지금 이 상황에서 무엇을 이해해야 하고 무엇을 해야 하는지 빠르고 명확하게 전달하는 것이다.",
+    "교과서식 나열보다 임상 실무에서 바로 쓸 수 있는 정보를 우선하되, 핵심 차이와 판단 포인트가 기억되도록 실무형이면서 학습형으로 쓴다.",
+    "불확실한 내용은 추정하지 않으며, 위험 상황에서는 설명보다 행동과 escalation을 먼저 제시한다.",
+    "최종 기준은 기관 프로토콜, 의사 지시, 약제부 지침, 제조사 IFU다.",
+  ].join(" ");
+
+  const focusBlock = routeNarrative;
+
+  const outputLines: string[] = [
+    "답변은 제목 없는 결론 문단(1~3문장)으로 시작하고, 필요시 짧은 소제목으로 구분된 섹션을 이어간다.",
+    "각 소제목 아래 첫 줄은 해당 내용의 핵심을 한 문장으로 요약한 뒤 bullet으로 세부 내용을 둔다.",
+  ];
+
+  if (decision.answerDepth === "short" && decision.risk === "low") {
+    outputLines.push("이 질문은 단순하므로 결론 문단과 소제목 1~2개 이내로 짧게 끝낸다.");
+  } else if (decision.answerDepth === "detailed" || decision.risk === "high") {
+    outputLines.push("이 질문은 충분한 깊이가 필요하므로 임상적으로 중요한 내용은 잘리지 않도록 끝까지 쓰되, 같은 의미를 반복하지 않는다.");
+  } else {
+    outputLines.push("질문에 비해 과하지도 빈약하지도 않게, 필요한 범위에서만 구조화한다.");
+  }
+
+  outputLines.push(
+    "전체가 하나의 글로 자연스럽게 이어져야 한다.",
+    "마크다운 강조(**, ##, 백틱, 표, 코드블록)는 쓰지 않는다. 일반 텍스트와 bullet(-)만 사용한다.",
+    "한국어 존댓말로 쓴다.",
+    "내부 설계 용어(route, pack, artifact, contract)는 절대 출력하지 않는다.",
+  );
+
+  const sections = [
+    "[역할과 원칙]",
+    identityBlock,
+    "",
+    "[이 질문의 초점]",
+    focusBlock,
+    "",
+    "[출력 형태]",
+    ...outputLines,
+  ];
+
+  return sections.join("\n");
+}
+
+function buildNarrativeDeveloperPromptEn(
+  decision: MedSafetyRouteDecision,
+  signals: MedSafetyQuestionSignals,
+  hasImage: boolean
+): string {
+  const routeNarrative = buildRouteNarrativeEn(decision, signals, hasImage);
+
+  const identityBlock = [
+    "You are a clinical AI assistant for nurses.",
+    "The top priority of every answer is to tell the nurse, quickly and clearly, what this situation means and what to do next.",
+    "Favor information that can be used immediately in clinical practice over textbook explanation, while making the key distinction and decision point easy to remember — combining practical guidance with learning value.",
+    "Do not guess when details are uncertain; in risky situations, put action and escalation before explanation.",
+    "The final authority is local protocol, clinician orders, pharmacy guidance, and the manufacturer IFU.",
+  ].join(" ");
+
+  const focusBlock = routeNarrative;
+
+  const outputLines: string[] = [
+    "Begin with a titleless conclusion paragraph (1-3 sentences), then continue with short titled sections as needed.",
+    "The first line under each title summarizes the section's core point in one sentence, followed by bullet details.",
+  ];
+
+  if (decision.answerDepth === "short" && decision.risk === "low") {
+    outputLines.push("This is a simple question — keep it to the conclusion paragraph plus 1-2 short sections.");
+  } else if (decision.answerDepth === "detailed" || decision.risk === "high") {
+    outputLines.push("This question needs depth — write clinically important content to completion without repeating the same point.");
+  } else {
+    outputLines.push("Keep the answer neither excessive nor sparse — structure only what the question warrants.");
+  }
+
+  outputLines.push(
+    "The whole answer must flow as one continuous piece of writing.",
+    "Do not use markdown emphasis (**, ##, backticks, tables, code blocks). Use plain text and bullet dashes (-) only.",
+    "Write in natural bedside clinical English.",
+    "Do not expose internal planning language (route, pack, artifact, contract).",
+  );
+
+  const sections = [
+    "[ROLE AND PRINCIPLES]",
+    identityBlock,
+    "",
+    "[FOCUS FOR THIS QUESTION]",
+    focusBlock,
+    "",
+    "[OUTPUT SHAPE]",
+    ...outputLines,
+  ];
+
+  return sections.join("\n");
+}
+
+function buildNarrativeDeveloperPrompt(
+  decision: MedSafetyRouteDecision,
+  locale: "ko" | "en",
+  signals: MedSafetyQuestionSignals,
+  hasImage: boolean
+): string {
+  return locale === "en"
+    ? buildNarrativeDeveloperPromptEn(decision, signals, hasImage)
+    : buildNarrativeDeveloperPromptKo(decision, signals, hasImage);
+}
+
+// ---------------------------------------------------------------------------
+
 export function resolveMedSafetyRuntimeMode(): MedSafetyRuntimeMode {
   const raw = String(process.env.OPENAI_MED_SAFETY_RUNTIME_MODE ?? "hybrid_live").trim();
   return sanitizeOneOf(raw, MED_SAFETY_RUNTIME_MODES) ?? "hybrid_live";
@@ -1416,10 +1683,10 @@ export function buildPromptProfile(args: {
     verbosity: "medium",
     outputTokenCandidates: args.isPremiumSearch
       ? shortSimple
-        ? [8000, 6000, 5000]
+        ? [5000, 4000, 3200]
         : highRiskDetailed
-          ? [16000, 14000, 12000]
-          : [14000, 12000, 10000]
+          ? [10000, 8000, 6400]
+          : [8000, 6400, 5000]
       : shortSimple
         ? [3600, 3000, 2400]
         : highRiskDetailed
@@ -1448,6 +1715,25 @@ export function assembleMedSafetyDeveloperPrompt(
     optionalContractIds: candidateOptionalIds,
   };
   const basePrompt = buildFixedBasePrompt(locale);
+
+  // hybrid_live: use narrative prompt (Phase 2+3 reform)
+  // legacy / hybrid_shadow: keep old budget-fit sectioned prompt
+  if (options.runtimeMode === "hybrid_live") {
+    const narrativePrompt = buildNarrativeDeveloperPrompt(decision, locale, signals, Boolean(options.hasImage));
+    return {
+      developerPrompt: narrativePrompt,
+      basePrompt,
+      blueprint,
+      contractSet,
+      selectedContractIds: [...BASE_CONTRACT_IDS],
+      droppedContractIds: candidateOptionalIds,
+      basePromptChars: basePrompt.length,
+      finalPromptChars: narrativePrompt.length,
+      budgetClass,
+      budgetChars,
+    };
+  }
+
   const fit = buildPromptBudgetFit({
     locale,
     decision,

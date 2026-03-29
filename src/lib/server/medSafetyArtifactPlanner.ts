@@ -137,17 +137,15 @@ function inferLengthPlan(decision: MedSafetyInternalDecision, hasImage: boolean)
   return "standard" as const;
 }
 
-function shouldIncludeFastDistinctionPoint(decision: MedSafetyInternalDecision, signals: MedSafetyQuestionSignals) {
-  if (decision.intent === "compare") return true;
-  if (signals.mixedNumericAction || signals.asksSelection || signals.asksThreshold) return true;
-  if (signals.mentionsAlarm || signals.mentionsLineOrTube) return true;
+// Phase 2 reform: fixed-format "빠른 구분 포인트" and "빠른 확인 순서" are no longer
+// enforced. The narrative developer prompt lets the model decide the best structure
+// naturally. These functions now always return false so the projection and quality
+// gate do not penalise answers that omit these rigid subsections.
+function shouldIncludeFastDistinctionPoint(_decision: MedSafetyInternalDecision, _signals: MedSafetyQuestionSignals) {
   return false;
 }
 
-function shouldIncludeQuickCheckSequence(decision: MedSafetyInternalDecision, signals: MedSafetyQuestionSignals) {
-  if (decision.intent === "action") return true;
-  if (signals.bedsideSweep || signals.falseWorseningRisk || signals.preNotification) return true;
-  if (signals.mentionsAlarm || signals.mentionsLineOrTube || signals.mentionsSetting) return true;
+function shouldIncludeQuickCheckSequence(_decision: MedSafetyInternalDecision, _signals: MedSafetyQuestionSignals) {
   return false;
 }
 

@@ -99,24 +99,23 @@ function hasCardStructure(text: string) {
     .map((line) => line.trim())
     .filter(Boolean);
   let headings = 0;
+  let bulletLines = 0;
+  let narrativeLines = 0;
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? "";
     const next = lines[index + 1] ?? "";
-    if (!line || !next || /^[-*•·]\s+/.test(line) || /^[-*•·]\s+/.test(next)) continue;
+    if (!line) continue;
+    if (/^[-*•·]\s+/.test(line)) {
+      bulletLines += 1;
+      continue;
+    }
+    if (/[.。!?？！]$/.test(line)) narrativeLines += 1;
+    if (!next || /^[-*•·]\s+/.test(line) || /^[-*•·]\s+/.test(next)) continue;
     if (line.length <= 24 && !/[.。!?？！]$/.test(line)) headings += 1;
   }
-  return headings >= 2;
-}
-
-function hasFastDistinctionPoint(text: string) {
-  return /빠른\s*구분\s*포인트[^\n]*[:：][^\n]+/i.test(normalizeText(text));
-}
-
-function hasQuickCheckSequence(text: string) {
-  const normalized = normalizeText(text);
-  const match = normalized.match(/빠른\s*확인\s*순서[^\n]*[:：][^\n]+/i)?.[0] ?? "";
-  const arrowCount = (match.match(/→/g) ?? []).length;
-  return arrowCount >= 2 && arrowCount <= 4;
+  // Narrative answers may use either one clear section heading or a conclusion
+  // followed by compact lead+bullet structure without rigid card labels.
+  return headings >= 1 || (narrativeLines >= 2 && bulletLines >= 2);
 }
 
 function includesProtocolCaveat(text: string) {
@@ -213,14 +212,6 @@ function buildAtomicChecks(
     },
     { id: "card_structure", passed: decision.format === "short" ? true : hasCardStructure(normalized) },
     {
-      id: "fast_distinction_point_present",
-      passed: blueprint?.projection.needsFastDistinctionPoint ? hasFastDistinctionPoint(normalized) : true,
-    },
-    {
-      id: "quick_check_sequence_present",
-      passed: blueprint?.projection.needsQuickCheckSequence ? hasQuickCheckSequence(normalized) : true,
-    },
-    {
       id: "bedside_domain_coverage",
       passed: hasPack(blueprint, "bedside_pack") ? hasBedsideDomainCoverage(normalized) : true,
     },
@@ -291,8 +282,7 @@ function mapAtomicFailuresToFamilies(failed: MedSafetyAtomicQualityCheckId[], de
     families.add("exception_gap");
   }
   if (failed.includes("unsafe_specificity") || failed.includes("protocol_caveat_presence")) families.add("safety_gap");
-  if (failed.includes("card_structure") || failed.includes("fast_distinction_point_present")) families.add("structure_gap");
-  if (failed.includes("quick_check_sequence_present")) families.add("bedside_gap");
+  if (failed.includes("card_structure")) families.add("structure_gap");
   if (failed.includes("repetition_density") || failed.includes("verbosity_overshoot") || failed.includes("forbidden_followup")) {
     families.add("verbosity_gap");
   }

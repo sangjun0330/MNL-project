@@ -221,8 +221,6 @@ export const MED_SAFETY_ATOMIC_QUALITY_CHECK_IDS = [
   "direct_answer_top",
   "immediate_action_top",
   "card_structure",
-  "fast_distinction_point_present",
-  "quick_check_sequence_present",
   "bedside_domain_coverage",
   "reversible_cause_coverage",
   "false_worsening_exclusion",

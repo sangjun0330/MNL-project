@@ -4,6 +4,7 @@ import {
   assembleMedSafetyDeveloperPrompt,
   buildDeterministicRouteDecision,
   buildHeuristicQualityDecision,
+  buildMustIncludeHints,
   buildPromptProfile,
   buildQualityGateDeveloperPrompt,
   buildQualityGateUserPrompt,
@@ -23,6 +24,7 @@ import {
   type MedSafetyRouteDecision,
   type MedSafetyRuntimeMode,
 } from "@/lib/server/medSafetyPrompting";
+import { buildQuestionSignals, normalizeQuery } from "@/lib/server/medSafetySignalLexicon";
 
 export type ClinicalMode = "ward" | "er" | "icu";
 export type ClinicalSituation = "general" | "pre_admin" | "during_admin" | "event_response";
@@ -465,16 +467,11 @@ export const MED_SAFETY_LEGACY_DENSE_CORE_PROMPT_REFERENCE = [
   "- 불필요한 면책문구를 길게 반복하지 않는다.",
   "- 영어 의학용어가 필요하면 괄호로 짧게 병기할 수 있으나, 설명의 중심은 한국어로 둔다.",
   "",
-  "[카드 3단 구조 — 반드시 준수]",
-  "- 답변은 반드시 '카드 3단 구조'로 작성한다. 각 카드(섹션)는 다음 3개 층으로 구성된다:",
-  "  1층(태그): 짧은 소제목 한 줄. 예: 핵심, 지금 할 일, 핵심 관찰 포인트, 즉시 보고 신호, 질문에 대한 직접 답, 구분 포인트, 실무적으로는, 자세한 설명, 주의, 보고 기준 등.",
-  "  2층(리드): 해당 섹션의 핵심을 한 문장으로 요약한 일반 텍스트 리드 문장. bullet이 아닌 완결 문장이어야 한다.",
-  "  3층(본문): 세부 내용을 \"* \" 또는 \"- \" bullet, 또는 일반 텍스트 문장으로 이어간다.",
-  "- 첫 카드 앞에는 결론 문단을 별도 제목 없이 1~3문장으로 먼저 쓴다.",
-  "- 새 카드(섹션) 전에는 빈 줄 2개를 둔다.",
-  "- 각 카드의 첫 줄(리드)은 bullet로 시작하지 않는다.",
-  "- 카드 안의 작은 묶음 제목은 콜론/마침표 없는 짧은 한 줄로 쓰고 바로 아래에 bullet을 둔다.",
-  "- 소제목 없이 불릿만 나열하지 않는다. 내용이 2가지 이상의 주제를 다루면 반드시 소제목으로 분리한다.",
+  "[섹션 구조 원칙]",
+  "- 답변은 제목 없는 결론 문단으로 시작한다.",
+  "- 이후 내용은 필요할 때만 짧은 소제목으로 구분하되, 전체가 하나의 글처럼 자연스럽게 이어져야 한다.",
+  "- 각 소제목 아래 첫 줄은 해당 섹션의 핵심을 한 문장으로 요약하고, 필요하면 그 아래에 \"* \" 또는 \"- \" bullet로 세부 내용을 둔다.",
+  "- 소제목은 구체적으로 쓰고, 내용이 한 주제만 다루면 억지로 여러 카드로 쪼개지 않는다.",
   "",
   "[답변 길이 원칙]",
   "- 짧은 정의 질문은 짧게 끝낼 수 있어야 한다.",
@@ -497,16 +494,12 @@ function buildLegacyDeveloperPrompt(locale: "ko" | "en") {
     return [
       MED_SAFETY_LEGACY_DENSE_CORE_PROMPT_REFERENCE,
       "",
-      "[OUTPUT_RENDERING_OVERRIDE — CARD 3-LAYER STRUCTURE]",
+      "[OUTPUT_RENDERING_OVERRIDE — NATURAL SECTION FLOW]",
       "- The final answer must be usable as-is without any downstream rewriting.",
-      "- Every answer must follow a 'card 3-layer structure'. Each card (section) consists of:",
-      '  Layer 1 (tag): A short section title on its own line. Examples: "Key points", "What to do now", "Key observation points", "Immediate report signals", "Direct answer", "Distinction points", "In practice", "Detailed explanation", "Caution", "Reporting criteria".',
-      "  Layer 2 (lead): A single summary sentence of the section's core point. Must be a plain text sentence, NOT a bullet.",
-      '  Layer 3 (body): Detailed content using "* " or "- " bullets, or plain text sentences.',
-      "- Write a direct conclusion paragraph first with no title (1-3 sentences). This becomes the first card.",
-      "- Separate each new card (section) with 2 blank lines.",
-      "- The first line of each card (lead) must NOT start with a bullet.",
-      '- Do not use vague headings such as "Summary", "Details", or "Detailed explanation".',
+      "- Begin with a direct conclusion paragraph with no title (1-3 sentences).",
+      "- Use short section titles only when they improve scanning, and keep the whole answer flowing like one continuous piece of writing.",
+      "- The first line under each section title should summarize that section in one plain sentence, then bullets may follow if they add useful detail.",
+      '- Do not use vague headings such as "Summary" or "Details".',
       "- Do not use markdown emphasis such as **, __, backticks, ##, tables, or code blocks.",
       "- Keep enough detail to avoid truncating clinically important reasoning.",
       "",
@@ -517,16 +510,11 @@ function buildLegacyDeveloperPrompt(locale: "ko" | "en") {
   return [
     MED_SAFETY_LEGACY_DENSE_CORE_PROMPT_REFERENCE,
     "",
-    "[최종 출력 형식 고정 규칙 — 카드 3단 구조]",
+    "[최종 출력 형식 고정 규칙 — 자연스러운 섹션 흐름]",
     "- 최종 답변은 후처리 없이 실제 로그 원문으로 바로 써도 되는 형태로 작성한다.",
-    "- 답변은 반드시 '카드 3단 구조'로 작성한다. 각 카드(섹션)는 다음 3개 층으로 구성된다:",
-    "  1층(태그): 짧은 소제목 한 줄. 예: 핵심, 지금 할 일, 핵심 관찰 포인트, 즉시 보고 신호, 질문에 대한 직접 답, 구분 포인트, 실무적으로는, 자세한 설명, 주의, 보고 기준 등.",
-    "  2층(리드): 해당 섹션의 핵심을 한 문장으로 요약한 일반 텍스트 리드 문장. bullet이 아닌 완결 문장이어야 한다.",
-    "  3층(본문): 세부 내용을 \"* \" 또는 \"- \" bullet, 또는 일반 텍스트 문장으로 이어간다.",
-    "- 첫 카드 앞에는 결론 문단을 별도 제목 없이 1~3문장으로 먼저 쓴다.",
-    "- 새 카드(섹션) 전에는 빈 줄 2개를 둔다.",
-    "- 각 카드의 첫 줄(리드)은 bullet로 시작하지 않는다.",
-    "- 카드 안의 작은 묶음 제목은 콜론/마침표 없는 짧은 한 줄로 쓰고 바로 아래에 bullet을 둔다.",
+    "- 답변은 제목 없는 결론 문단으로 시작한다.",
+    "- 이후에는 필요할 때만 짧은 소제목으로 구분하되, 전체가 하나의 글처럼 자연스럽게 이어져야 한다.",
+    "- 각 소제목 아래 첫 줄은 해당 섹션의 핵심을 한 문장으로 요약하고, 필요하면 그 아래에 \"* \" 또는 \"- \" bullet로 세부 내용을 둔다.",
     '- 소제목은 내용에 맞는 구체 제목을 사용한다. "요약", "상세"처럼 두루뭉술한 제목은 쓰지 않는다.',
     "- 마크다운 강조(**, __, 백틱, ##, 표, 코드블록)는 쓰지 않는다.",
     "- 임상적으로 필요한 설명은 중간에 잘리지 않도록 충분히 끝까지 쓴다.",
@@ -1981,6 +1969,7 @@ async function runQualityGateAndRepair(args: {
   // to avoid a second premium-model request that cannot change the delivered answer.
   const shouldCallModelGate =
     args.allowRepair &&
+    heuristicDecision.verdict !== "pass" &&
     shouldRunQualityGate({
       decision: args.decision,
       isPremiumSearch: args.isPremiumSearch,
@@ -2043,7 +2032,8 @@ async function runQualityGateAndRepair(args: {
   };
   const allowSecondRepairPass =
     args.decision.risk === "high" &&
-    currentGateDecision.issues.some((issue) => ["notify_gap", "exception_gap", "safety_gap"].includes(issue));
+    currentGateDecision.criticalIssues.length > 0 &&
+    currentGateDecision.issues.some((issue) => ["safety_gap"].includes(issue));
   const maxRepairPasses = allowSecondRepairPass ? 2 : 1;
 
   for (let passIndex = 0; passIndex < maxRepairPasses; passIndex += 1) {
@@ -2063,7 +2053,10 @@ async function runQualityGateAndRepair(args: {
         }),
         apiBaseUrl: args.apiBaseUrl,
         signal: args.signal,
-        maxOutputTokens: args.profile.outputTokenCandidates[0] ?? 1200,
+        maxOutputTokens: Math.max(2400, Math.min(
+          args.profile.outputTokenCandidates[0] ?? 6000,
+          Math.ceil(normalizeText(currentAnswer).length / 2.5 * 1.4)
+        )),
         upstreamTimeoutMs: args.upstreamTimeoutMs,
         verbosity: args.profile.verbosity,
         reasoningEffort,
@@ -2151,6 +2144,19 @@ async function runQualityGateAndRepair(args: {
     totalUsage: sumUsages(gateUsageTotal, repairUsageTotal ?? lastRepairAttempt.usage),
     repaired: anyRepairAccepted,
   };
+}
+
+function appendMustIncludeHints(
+  userPrompt: string,
+  query: string,
+  decision: MedSafetyRouteDecision,
+  locale: "ko" | "en"
+): string {
+  const signals = buildQuestionSignals(normalizeQuery(query));
+  const hints = buildMustIncludeHints(decision, signals, locale);
+  if (hints.length === 0) return userPrompt;
+  const label = locale === "en" ? "Must include" : "반드시 포함";
+  return `${userPrompt}\n\n[${label}]\n${hints.map((h) => `- ${h}`).join("\n")}`;
 }
 
 export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise<OpenAIMedSafetyOutput> {
@@ -2246,7 +2252,11 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
           ...buildPromptDisciplineDiagnostics(routeDecision, promptProfile, promptAssembly),
         },
       });
-      const primaryUserPrompt = shouldUseContinuationIds ? userPrompt : memoryAwareUserPrompt;
+      const baseUserPrompt = shouldUseContinuationIds ? userPrompt : memoryAwareUserPrompt;
+      // Phase 3: inject must-include hints into user prompt for hybrid_live
+      const primaryUserPrompt = runtimeMode === "hybrid_live"
+        ? appendMustIncludeHints(baseUserPrompt, params.query, routeDecision, params.locale)
+        : baseUserPrompt;
       const mainAttempt = await generateAnswerWithPrompt({
         apiKey,
         model: candidateModel,
