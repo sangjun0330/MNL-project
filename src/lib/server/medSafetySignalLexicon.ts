@@ -4,9 +4,9 @@ export type IntentScoreMap = Record<MedSafetyIntent, number>;
 export type MedSafetyQuestionSignals = MedSafetyEvidenceSignals;
 
 const COMPARE_PATTERNS = [/차이/i, /구분/i, /\bvs\b/i, /헷갈/i, /어떤\s*걸/i];
-const NUMERIC_PATTERNS = [/정상\s*범위/i, /수치/i, /해석/i, /계산/i, /\bp\/f\b/i, /\babga\b/i];
+const NUMERIC_PATTERNS = [/정상\s*범위/i, /수치/i, /해석/i, /계산/i, /용량/i, /\bp\/f\b/i, /\babga\b/i];
 const DEVICE_PATTERNS = [/펌프/i, /라인/i, /카테터/i, /튜브/i, /회로/i, /알람/i, /\biabp\b/i, /\bpcv\b/i, /\bpeep\b/i];
-const ACTION_PATTERNS = [/어떻게/i, /대응/i, /조치/i, /먼저/i, /우선/i, /지금\s*할/i, /바로/i, /중단/i, /확인/i];
+const ACTION_PATTERNS = [/어떻게/i, /대응/i, /조치/i, /먼저/i, /우선/i, /지금\s*할/i, /바로/i, /중단/i, /확인/i, /시작/i, /제시해?\s*줘/i];
 const KNOWLEDGE_PATTERNS = [
   /뭐예요/i,
   /뭔가요/i,
@@ -93,6 +93,14 @@ export function hasEscalationLanguage(text: string) {
   return RISK_ESCALATION_PATTERNS.some((pattern) => pattern.test(text));
 }
 
+function stripFalsePositiveLineTerms(query: string) {
+  return normalizeText(query)
+    // "가이드라인" inside medication/guideline questions was being mistaken for
+    // a literal IV/monitoring line because of the bare /라인/ regex.
+    .replace(/가이드라인/gi, " ")
+    .replace(/guideline/gi, " ");
+}
+
 function extractQuestionTail(query: string) {
   const normalized = normalizeText(query);
   const segments = normalized
@@ -103,10 +111,11 @@ function extractQuestionTail(query: string) {
 }
 
 function buildBaseIntentScores(query: string): IntentScoreMap {
+  const lineSafeQuery = stripFalsePositiveLineTerms(query);
   return {
     compare: countPatternHits(query, COMPARE_PATTERNS),
     numeric: countPatternHits(query, NUMERIC_PATTERNS),
-    device: countPatternHits(query, DEVICE_PATTERNS),
+    device: countPatternHits(lineSafeQuery, DEVICE_PATTERNS),
     action: countPatternHits(query, ACTION_PATTERNS),
     knowledge: countPatternHits(query, KNOWLEDGE_PATTERNS),
   };
@@ -160,12 +169,13 @@ export function buildQuestionSignals(query: string): MedSafetyQuestionSignals {
   const intentScores = inferIntentScores(query);
   const topIntent = pickTopIntent(intentScores);
   const questionTail = extractQuestionTail(query);
+  const lineSafeQuery = stripFalsePositiveLineTerms(query);
   const intentFamiliesMatched = Object.values(intentScores).filter((score) => score > 0).length;
   const mentionsVentilation = countPatternHits(query, VENTILATION_PATTERNS) > 0;
   const mentionsABGA = countPatternHits(query, ABGA_PATTERNS) > 0;
   const mentionsOxygenation = countPatternHits(query, OXYGENATION_PATTERNS) > 0;
   const mentionsMedication = countPatternHits(query, MEDICATION_PATTERNS) > 0;
-  const mentionsLineOrTube = countPatternHits(query, LINE_TUBE_PATTERNS) > 0;
+  const mentionsLineOrTube = countPatternHits(lineSafeQuery, LINE_TUBE_PATTERNS) > 0;
   const mentionsCompatibility = countPatternHits(query, COMPATIBILITY_PATTERNS) > 0;
   const mentionsSetting = countPatternHits(query, SETTING_PATTERNS) > 0;
   const mentionsPatientState = countPatternHits(query, PATIENT_STATE_PATTERNS) > 0;
