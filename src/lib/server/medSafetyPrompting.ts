@@ -499,7 +499,7 @@ function buildDefaultClauseDescriptors(locale: "ko" | "en"): MedSafetyPromptLine
         defaultClauseId: "default_uncertainty_protocol",
       }),
       buildPromptLineDescriptor({
-        text: "Give the core answer within the first 1-2 sentences, and keep the wording short, readable, and non-repetitive.",
+        text: "Give the core answer within the first 1-2 sentences, and keep the wording short, readable, and non-repetitive without trimming essential clinical judgment, safety warnings, stop-report thresholds, or required exceptions.",
         source: "default",
         section: "principles",
         coverageTags: ["direct_answer_early", "brevity_and_readability"],
@@ -523,7 +523,7 @@ function buildDefaultClauseDescriptors(locale: "ko" | "en"): MedSafetyPromptLine
         defaultClauseId: "default_quick_check_sequence",
       }),
       buildPromptLineDescriptor({
-        text: "Add those two elements only when they are needed, and do not let them make the answer longer.",
+        text: "Add those two elements only when they are needed, do not let them make the answer longer, and do not force a low-priority explanatory point into a standalone section if it fits better inside a nearby core section.",
         source: "default",
         section: "principles",
         coverageTags: ["quick_elements_length_guard", "brevity_and_readability"],
@@ -583,7 +583,7 @@ function buildDefaultClauseDescriptors(locale: "ko" | "en"): MedSafetyPromptLine
       defaultClauseId: "default_uncertainty_protocol",
     }),
     buildPromptLineDescriptor({
-      text: "첫 1~2문장 안에 핵심 답을 주고, 반복 없이 짧고 읽기 쉽게 쓴다.",
+      text: "첫 1~2문장 안에 핵심 답을 주고, 반복 없이 짧고 읽기 쉽게 쓰되 중요한 임상 판단, 안전 경고, 중단/보고 기준, 필수 예외는 줄이지 않는다.",
       source: "default",
       section: "principles",
       coverageTags: ["direct_answer_early", "brevity_and_readability"],
@@ -607,7 +607,7 @@ function buildDefaultClauseDescriptors(locale: "ko" | "en"): MedSafetyPromptLine
       defaultClauseId: "default_quick_check_sequence",
     }),
     buildPromptLineDescriptor({
-      text: "두 요소는 필요할 때만 추가하고, 답변 길이를 늘리지 않는다.",
+      text: "두 요소는 필요할 때만 추가하고, 답변 길이를 늘리지 않는다. 우선순위가 낮은 설명성 포인트는 주변 핵심 섹션에 자연스럽게 흡수할 수 있으면 굳이 독립 섹션으로 만들지 않는다.",
       source: "default",
       section: "principles",
       coverageTags: ["quick_elements_length_guard", "brevity_and_readability"],
@@ -641,6 +641,20 @@ function buildBaseSpineDescriptors(locale: "ko" | "en"): MedSafetyPromptLineDesc
         coverageTags: ["locale_natural_language"],
         isQuestionSpecific: false,
       }),
+      buildPromptLineDescriptor({
+        text: "Default to one plain summary sentence followed by at most 2 bullets per section; allow a 3rd bullet only when risk, reporting, or exception boundaries would otherwise be underspecified.",
+        source: "base",
+        section: "output",
+        coverageTags: ["brevity_and_readability", "render_card_shape"],
+        isQuestionSpecific: false,
+      }),
+      buildPromptLineDescriptor({
+        text: "Keep each bullet to one sentence by default, stretching to 2 sentences only when that prevents clinically important loss.",
+        source: "base",
+        section: "output",
+        coverageTags: ["brevity_and_readability"],
+        isQuestionSpecific: false,
+      }),
     ];
   }
 
@@ -664,6 +678,20 @@ function buildBaseSpineDescriptors(locale: "ko" | "en"): MedSafetyPromptLineDesc
       source: "base",
       section: "output",
       coverageTags: ["locale_natural_language"],
+      isQuestionSpecific: false,
+    }),
+    buildPromptLineDescriptor({
+      text: "각 섹션은 핵심 요약 1문장 뒤에 기본 2개 이내 bullet로 정리하고, 위험도·보고 필요·예외 경계 때문에 부족해질 때만 3번째 bullet을 허용한다.",
+      source: "base",
+      section: "output",
+      coverageTags: ["brevity_and_readability", "render_card_shape"],
+      isQuestionSpecific: false,
+    }),
+    buildPromptLineDescriptor({
+      text: "각 bullet은 기본 1문장으로 쓰고, 임상적으로 중요한 내용이 빠질 때만 2문장까지 늘린다.",
+      source: "base",
+      section: "output",
+      coverageTags: ["brevity_and_readability"],
       isQuestionSpecific: false,
     }),
   ];
@@ -1471,18 +1499,24 @@ function buildNarrativeDeveloperPromptKo(
 
   const outputLines: string[] = [
     "답변은 제목 없는 결론 문단(1~3문장)으로 시작하고, 필요시 짧은 소제목으로 구분된 섹션을 이어간다.",
-    "각 소제목 아래 첫 줄은 해당 내용의 핵심을 한 문장으로 요약한 뒤 bullet으로 세부 내용을 둔다.",
+    "각 소제목 아래 첫 줄은 해당 내용의 핵심을 한 문장으로 요약한 뒤, 기본 2개 이내 bullet로 세부 내용을 둔다. 위험도·보고 필요·예외 경계 때문에 부족해질 때만 3번째 bullet을 허용한다.",
+    "각 bullet은 기본 1문장으로 쓰고, 임상적으로 중요한 내용이 빠질 때만 2문장까지 늘린다.",
   ];
 
   if (decision.answerDepth === "short" && decision.risk === "low") {
     outputLines.push("이 질문은 단순하므로 결론 문단과 소제목 1~2개 이내로 짧게 끝낸다.");
   } else if (decision.answerDepth === "detailed" || decision.risk === "high") {
-    outputLines.push("이 질문은 충분한 깊이가 필요하므로 임상적으로 중요한 내용은 잘리지 않도록 끝까지 쓰되, 같은 의미를 반복하지 않는다.");
+    outputLines.push("이 질문은 충분한 깊이가 필요하므로 임상적으로 중요한 내용은 잘리지 않도록 끝까지 쓰되, 같은 의미를 반복하지 않고 각 섹션을 약간 압축한다.");
   } else {
     outputLines.push("질문에 비해 과하지도 빈약하지도 않게, 필요한 범위에서만 구조화한다.");
   }
 
   outputLines.push(
+    decision.risk === "high"
+      ? "고위험 답변에서는 섹션 수를 줄이기보다 안전 보존을 우선하고, 즉시 행동, 안전 경고, 보고 기준, 필수 예외를 분명히 남긴다."
+      : "저위험/중등도 답변에서는 교육성 배경 설명, 부가 비교 설명, 반복되는 확인 포인트를 인접한 핵심 섹션에 짧게 흡수할 수 있다. 다만 결론, 즉시 행동, 안전 경고, 보고 기준, 고위험 예외 성격의 내용은 독립성을 유지한다.",
+    "같은 경고, 주의 문구, 근거를 여러 섹션에 반복하지 말고 가장 적절한 섹션 1곳에만 둔다.",
+    "배경 설명은 실제 행동을 바꾸는 범위까지만 짧게 두고, 중요한 임상 판단, 안전 경고, 중단/보고 기준, 필수 예외는 줄이지 않는다.",
     "전체가 하나의 글로 자연스럽게 이어져야 한다.",
     "마크다운 강조(**, ##, 백틱, 표, 코드블록)는 쓰지 않는다. 일반 텍스트와 bullet(-)만 사용한다.",
     "한국어 존댓말로 쓴다.",
@@ -1522,18 +1556,24 @@ function buildNarrativeDeveloperPromptEn(
 
   const outputLines: string[] = [
     "Begin with a titleless conclusion paragraph (1-3 sentences), then continue with short titled sections as needed.",
-    "The first line under each title summarizes the section's core point in one sentence, followed by bullet details.",
+    "The first line under each title summarizes the section's core point in one sentence, followed by up to 2 bullets by default; allow a 3rd bullet only when risk, reporting, or exception boundaries would otherwise be underspecified.",
+    "Keep each bullet to one sentence by default, stretching to 2 sentences only when that prevents clinically important loss.",
   ];
 
   if (decision.answerDepth === "short" && decision.risk === "low") {
     outputLines.push("This is a simple question — keep it to the conclusion paragraph plus 1-2 short sections.");
   } else if (decision.answerDepth === "detailed" || decision.risk === "high") {
-    outputLines.push("This question needs depth — write clinically important content to completion without repeating the same point.");
+    outputLines.push("This question needs depth — write clinically important content to completion, but keep each section slightly compressed and avoid repeating the same point.");
   } else {
     outputLines.push("Keep the answer neither excessive nor sparse — structure only what the question warrants.");
   }
 
   outputLines.push(
+    decision.risk === "high"
+      ? "In high-risk answers, preserve safety before reducing section count, and keep immediate actions, safety warnings, reporting boundaries, and required exceptions explicit."
+      : "In low or medium-risk answers, a lower-priority teaching, comparison, or repeated check point may be absorbed into a nearby core section instead of becoming a standalone section. Do not merge away the conclusion, immediate actions, safety warnings, reporting content, or high-risk exception boundaries.",
+    "Do not repeat the same warning, caveat, or rationale across multiple sections; keep it in the single section where it fits best.",
+    "Keep background explanation brief and only as far as it changes the next action, while leaving essential clinical judgment, safety warnings, stop-report thresholds, and required exceptions intact.",
     "The whole answer must flow as one continuous piece of writing.",
     "Do not use markdown emphasis (**, ##, backticks, tables, code blocks). Use plain text and bullet dashes (-) only.",
     "Write in natural bedside clinical English.",
