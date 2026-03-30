@@ -1,6 +1,6 @@
 import type { ISODate } from "@/lib/date";
 import { isISODate, todayISO } from "@/lib/date";
-import { isAIRecoverySlot } from "@/lib/aiRecovery";
+import { isAIRecoverySlot, normalizeAIRecoveryOrderGenerationOptions } from "@/lib/aiRecovery";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -30,12 +30,14 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => null);
     dateISO = isISODate(body?.dateISO ?? "") ? (body.dateISO as ISODate) : todayISO();
     slot = isAIRecoverySlot(body?.slot) ? body.slot : "wake";
+    const orderOptions = normalizeAIRecoveryOrderGenerationOptions(body?.orderOptions);
 
     const data = await regenerateAIRecoveryOrders({
       userId,
       userEmail,
       dateISO,
       slot,
+      orderOptions,
       signal: req.signal,
     });
     return jsonNoStore({ ok: true, data });

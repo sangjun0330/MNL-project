@@ -3,8 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { addDays, fromISODate, toISODate, todayISO, type ISODate } from "@/lib/date";
 import {
+  DEFAULT_AI_RECOVERY_ORDER_GENERATION_OPTIONS,
   getAIRecoveryErrorMessage,
+  normalizeAIRecoveryOrderGenerationOptions,
   pickPreferredAIRecoverySlot,
+  type AIRecoveryOrderGenerationOptions,
   type AIRecoverySessionResponse,
   type AIRecoverySlot,
 } from "@/lib/aiRecovery";
@@ -42,8 +45,8 @@ type HookState = {
   togglingCompletion: string | null;
   error: string | null;
   reload: () => Promise<void>;
-  generate: (force?: boolean) => Promise<void>;
-  regenerateOrders: () => Promise<void>;
+  generate: (force?: boolean, orderOptions?: AIRecoveryOrderGenerationOptions) => Promise<void>;
+  regenerateOrders: (orderOptions?: AIRecoveryOrderGenerationOptions) => Promise<void>;
   toggleCompletion: (orderId: string, completed: boolean) => Promise<void>;
 };
 
@@ -617,7 +620,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
         const autoOrdersKey = buildAutoOrdersKey(cachedData);
         if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && cachedData.quota.canRegenerateOrders) {
           autoOrdersRequestedRef.current.add(autoOrdersKey);
-          void regenerateOrdersInternal(true);
+          void regenerateOrdersInternal(true, DEFAULT_AI_RECOVERY_ORDER_GENERATION_OPTIONS);
         }
       }
       return;
@@ -638,7 +641,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       const autoOrdersKey = buildAutoOrdersKey(nextData);
       if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && nextData?.quota.canRegenerateOrders) {
         autoOrdersRequestedRef.current.add(autoOrdersKey);
-        void regenerateOrdersInternal(true);
+        void regenerateOrdersInternal(true, DEFAULT_AI_RECOVERY_ORDER_GENERATION_OPTIONS);
       }
       const shouldAutoGenerate =
         args.autoGenerate !== false &&
@@ -648,7 +651,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
         !autoRequestedRef.current.has(key);
       if (shouldAutoGenerate) {
         autoRequestedRef.current.add(key);
-        await generateInternal(Boolean(nextData.session), key);
+        await generateInternal(Boolean(nextData.session), DEFAULT_AI_RECOVERY_ORDER_GENERATION_OPTIONS, key);
       }
     } catch (nextError) {
       if (!isCurrentDataRequest(requestId)) return;
@@ -661,9 +664,10 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     }
   };
 
-  const regenerateOrdersInternal = async (auto = false) => {
+  const regenerateOrdersInternal = async (auto = false, orderOptions?: AIRecoveryOrderGenerationOptions) => {
     if (!args.enabled) return;
     if (ordersInFlightRef.current) return;
+    const normalizedOrderOptions = normalizeAIRecoveryOrderGenerationOptions(orderOptions);
     ordersInFlightRef.current = true;
     const requestId = nextDataRequestId();
     const completionVersionAtStart = committedCompletionVersionRef.current;
@@ -678,6 +682,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
         body: JSON.stringify({
           dateISO: args.dateISO,
           slot: args.slot,
+          orderOptions: normalizedOrderOptions,
         }),
       });
       const json = await readJson<{ ok?: boolean; error?: string; detail?: string | null; data?: SessionData }>(response);
@@ -736,9 +741,10 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     }
   };
 
-  const generateInternal = async (force = false, autoKey?: string) => {
+  const generateInternal = async (force = false, orderOptions?: AIRecoveryOrderGenerationOptions, autoKey?: string) => {
     if (!args.enabled) return;
     if (generateInFlightRef.current) return;
+    const normalizedOrderOptions = normalizeAIRecoveryOrderGenerationOptions(orderOptions);
     generateInFlightRef.current = true;
     const requestId = nextDataRequestId();
     const completionVersionAtStart = committedCompletionVersionRef.current;
@@ -783,7 +789,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       const autoOrdersKey = buildAutoOrdersKey(nextData);
       if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && nextData?.quota.canRegenerateOrders) {
         autoOrdersRequestedRef.current.add(autoOrdersKey);
-        void regenerateOrdersInternal(true);
+        void regenerateOrdersInternal(true, normalizedOrderOptions);
       }
     } catch (nextError) {
       if (autoKey) autoRequestedRef.current.delete(autoKey);
@@ -809,7 +815,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
           const autoOrdersKey = buildAutoOrdersKey(recovered);
           if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && recovered?.quota.canRegenerateOrders) {
             autoOrdersRequestedRef.current.add(autoOrdersKey);
-            void regenerateOrdersInternal(true);
+            void regenerateOrdersInternal(true, normalizedOrderOptions);
           }
           return;
         }
@@ -926,7 +932,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     error,
     reload: load,
     generate: generateInternal,
-    regenerateOrders: () => regenerateOrdersInternal(false),
+    regenerateOrders: (orderOptions?: AIRecoveryOrderGenerationOptions) => regenerateOrdersInternal(false, orderOptions),
     toggleCompletion,
   };
 }

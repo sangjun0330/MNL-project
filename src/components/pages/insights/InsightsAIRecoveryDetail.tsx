@@ -5,13 +5,19 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { AIRecoveryLoadingOverlay } from "@/components/insights/AIRecoveryLoadingOverlay";
+import { AIRecoveryOrderOptionsSheet } from "@/components/insights/AIRecoveryOrderOptionsSheet";
 import { AIRecoverySlotTabs } from "@/components/insights/AIRecoverySlotTabs";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { useAIRecoveryRouteEntry, useAIRecoverySession } from "@/components/insights/useAIRecoverySession";
 import { INSIGHTS_MIN_DAYS, isInsightsLocked, useInsightsData } from "@/components/insights/useInsightsData";
 import { DetailChip, DETAIL_ACCENTS, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
 
-import type { AIRecoveryBriefSection, AIRecoverySlot } from "@/lib/aiRecovery";
+import {
+  DEFAULT_AI_RECOVERY_ORDER_GENERATION_OPTIONS,
+  type AIRecoveryBriefSection,
+  type AIRecoveryOrderGenerationOptions,
+  type AIRecoverySlot,
+} from "@/lib/aiRecovery";
 import { cn } from "@/lib/cn";
 import { formatKoreanDate } from "@/lib/date";
 import { useI18n } from "@/lib/useI18n";
@@ -240,9 +246,11 @@ function RecoveryActionPanel({
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <div className="text-[11px] font-semibold tracking-[0.18em] text-[#8C95A6]">{hasSession ? "REGENERATE" : "CREATE"}</div>
-          <div className="mt-2 text-[22px] font-semibold tracking-[-0.04em] text-[#111827]">{hasSession ? `${slotLabel} 회복 해설 다시 만들기` : `${slotLabel} 회복 해설 만들기`}</div>
+          <div className="mt-2 text-[22px] font-semibold tracking-[-0.04em] text-[#111827]">{hasSession ? `${slotLabel} 회복 다시 만들기` : `${slotLabel} 회복 만들기`}</div>
           <p className="mt-2 break-keep text-[14px] leading-6 text-[#667085]">
-            {hasSession ? `${slotLabel} 해설이 이미 있으면 그대로 두고, 꼭 필요할 때만 다시 생성하세요.` : `AI는 버튼을 누를 때만 호출됩니다. ${slotLabel} 결과가 없으면 여기서 시작하세요.`}
+            {hasSession
+              ? `다시 만들기를 누르면 오더 개수와 레벨을 먼저 고른 뒤 ${slotLabel} 결과를 새로 생성합니다.`
+              : `버튼을 누르면 오더 개수와 레벨을 먼저 고른 뒤 AI가 호출됩니다. ${slotLabel} 결과가 없으면 여기서 시작하세요.`}
           </p>
         </div>
         <PillButton variant={hasSession ? "outline" : "primary"} disabled={disabled} onClick={onCreate}>
@@ -336,6 +344,10 @@ export function InsightsAIRecoveryDetail({
   const billing = useBillingAccess();
   const { end, recordedDays } = useInsightsData();
   const [hydrated, setHydrated] = useState(false);
+  const [orderOptionsSheetOpen, setOrderOptionsSheetOpen] = useState(false);
+  const [orderOptions, setOrderOptions] = useState<AIRecoveryOrderGenerationOptions>(() => ({
+    ...DEFAULT_AI_RECOVERY_ORDER_GENERATION_OPTIONS,
+  }));
   const entry = useAIRecoveryRouteEntry({
     dateISO: end,
     requestedSlot,
@@ -413,10 +425,15 @@ export function InsightsAIRecoveryDetail({
       slotLabel={slotLabel}
       hasSession={Boolean(currentSession)}
       disabled={session.generating || billing.loading || (Boolean(currentSession) && !canRegenerateSession)}
-      onCreate={() => void session.generate(true)}
+      onCreate={() => setOrderOptionsSheetOpen(true)}
       canRegenerate={canRegenerateSession}
     />
   ) : null;
+
+  const handleConfirmOrderGeneration = useCallback(() => {
+    setOrderOptionsSheetOpen(false);
+    void session.generate(true, orderOptions);
+  }, [orderOptions, session]);
 
   if ((!hydrated && !entry.initialData) || (!resolvedSlot && entry.loading)) {
     return (
@@ -469,6 +486,16 @@ export function InsightsAIRecoveryDetail({
       <div className="px-1">
         <AIRecoverySlotTabs value={resolvedSlot ?? "wake"} onChange={updateSlot} action={<OrderCheckButton href={ordersHref} />} />
       </div>
+
+      <AIRecoveryOrderOptionsSheet
+        open={orderOptionsSheetOpen}
+        onClose={() => setOrderOptionsSheetOpen(false)}
+        value={orderOptions}
+        onChange={setOrderOptions}
+        onConfirm={handleConfirmOrderGeneration}
+        busy={session.generating}
+        mode={currentSession ? "regenerate" : "create"}
+      />
 
       {session.error ? (
         <Surface className="border-[#F3D0D6] bg-[#FFF7F8]">

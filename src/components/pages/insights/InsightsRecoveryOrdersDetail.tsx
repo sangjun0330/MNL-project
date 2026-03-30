@@ -5,13 +5,19 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { AIRecoveryLoadingOverlay } from "@/components/insights/AIRecoveryLoadingOverlay";
+import { AIRecoveryOrderOptionsSheet } from "@/components/insights/AIRecoveryOrderOptionsSheet";
 import { AIRecoverySlotTabs } from "@/components/insights/AIRecoverySlotTabs";
 import { useAIRecoveryRouteEntry, useAIRecoverySession } from "@/components/insights/useAIRecoverySession";
 import { InsightsLockedNotice } from "@/components/insights/InsightsLockedNotice";
 import { DetailCard, DetailChip, DETAIL_ACCENTS, InsightDetailShell } from "@/components/pages/insights/InsightDetailShell";
 
 import { INSIGHTS_MIN_DAYS, isInsightsLocked, shiftKo, useInsightsData } from "@/components/insights/useInsightsData";
-import type { AIRecoveryOrder, AIRecoverySlot } from "@/lib/aiRecovery";
+import {
+  DEFAULT_AI_RECOVERY_ORDER_GENERATION_OPTIONS,
+  type AIRecoveryOrder,
+  type AIRecoveryOrderGenerationOptions,
+  type AIRecoverySlot,
+} from "@/lib/aiRecovery";
 import { formatKoreanDate } from "@/lib/date";
 import { useI18n } from "@/lib/useI18n";
 
@@ -157,6 +163,10 @@ export function InsightsRecoveryOrdersDetail({
   const billing = useBillingAccess();
   const { end, recordedDays, todayShift, hasTodayShift } = useInsightsData();
   const [hydrated, setHydrated] = useState(false);
+  const [orderOptionsSheetOpen, setOrderOptionsSheetOpen] = useState(false);
+  const [orderOptions, setOrderOptions] = useState<AIRecoveryOrderGenerationOptions>(() => ({
+    ...DEFAULT_AI_RECOVERY_ORDER_GENERATION_OPTIONS,
+  }));
   const entry = useAIRecoveryRouteEntry({
     dateISO: end,
     requestedSlot,
@@ -288,6 +298,11 @@ export function InsightsRecoveryOrdersDetail({
     return () => clearInterval(interval);
   }, [ordersSilentlyPending]);
 
+  const handleConfirmOrderGeneration = useCallback(() => {
+    setOrderOptionsSheetOpen(false);
+    void session.regenerateOrders(orderOptions);
+  }, [orderOptions, session]);
+
   if ((!hydrated && !entry.initialData) || (!resolvedSlot && entry.loading)) {
     return (
       <InsightDetailShell title="오늘의 오더" subtitle={formatKoreanDate(end)} meta="현재 상태를 확인하고 있어요." backHref="/insights/recovery">
@@ -345,6 +360,16 @@ export function InsightsRecoveryOrdersDetail({
         <AIRecoverySlotTabs value={resolvedSlot ?? "wake"} onChange={updateSlot} />
       </div>
 
+      <AIRecoveryOrderOptionsSheet
+        open={orderOptionsSheetOpen}
+        onClose={() => setOrderOptionsSheetOpen(false)}
+        value={orderOptions}
+        onChange={setOrderOptions}
+        onConfirm={handleConfirmOrderGeneration}
+        busy={session.savingOrders}
+        mode="regenerate"
+      />
+
       <DetailCard className="p-5 sm:p-6">
         <div className="text-[11px] font-semibold tracking-[0.18em] text-[color:var(--rnest-accent)]">ORDER STATS</div>
         <div className="mt-2 text-[20px] font-bold tracking-[-0.03em] text-ios-text">오늘 오더 성공 횟수</div>
@@ -368,11 +393,17 @@ export function InsightsRecoveryOrdersDetail({
             <div className="text-[10.5px] font-semibold tracking-[0.18em] text-[color:var(--rnest-accent)]">TODAY ORDERS</div>
             <div className="mt-1 text-[20px] font-bold tracking-[-0.03em] text-ios-text">{slotLabel} 오더 체크리스트</div>
             <p className="mt-2 text-[13px] leading-6 text-ios-sub">
-              {currentSession ? "타이밍과 이유가 붙은 실행 문장으로 바로 확인할 수 있어요." : "AI 호출은 해설 페이지의 만들기 버튼에서만 시작됩니다."}
+              {currentSession
+                ? "타이밍과 이유가 붙은 실행 문장으로 바로 확인할 수 있고, 다시 만들기에서 개수와 레벨도 다시 고를 수 있어요."
+                : "AI 호출은 해설 페이지의 만들기 버튼에서만 시작됩니다."}
             </p>
           </div>
           {currentSession && showGenerationControls ? (
-            <PillButton variant="outline" disabled={session.savingOrders || billing.loading || !canRegenerateOrders} onClick={() => void session.regenerateOrders()}>
+            <PillButton
+              variant="outline"
+              disabled={session.savingOrders || billing.loading || !canRegenerateOrders}
+              onClick={() => setOrderOptionsSheetOpen(true)}
+            >
               {session.savingOrders ? "만드는 중…" : "오더 다시 만들기"}
             </PillButton>
           ) : !currentSession ? (

@@ -6,6 +6,7 @@ import {
   filterCompletionIdsForOrders,
   getAIRecoverySlotDescription,
   getAIRecoverySlotLabel,
+  normalizeAIRecoveryOrderGenerationOptions,
   normalizeAIRecoveryLanguage,
   type AIRecoveryBrief,
   type AIRecoveryBriefSection,
@@ -17,6 +18,8 @@ import {
   type AIRecoveryLanguage,
   type AIRecoveryOpenAIMeta,
   type AIRecoveryOrder,
+  type AIRecoveryOrderGenerationLevel,
+  type AIRecoveryOrderGenerationOptions,
   type AIRecoveryOrdersPayload,
   type AIRecoverySlot,
   type AIRecoverySlotPayload,
@@ -1160,7 +1163,7 @@ function buildFallbackOrders(snapshot: RecoverySnapshot): AIRecoveryOrdersPayloa
   return {
     title: "오늘의 오더",
     headline: snapshot.plannerContext.primaryAction ?? "자극을 낮추는 가벼운 시작부터 잡아주세요.",
-    summary: "오늘 수면, 주간 배터리 흐름, 반복 소모 패턴을 함께 보면 아침에 마찰이 낮은 네 가지 행동부터 고르는 편이 맞습니다.",
+    summary: "오늘 수면, 주간 배터리 흐름, 반복 소모 패턴을 함께 보면 아침에 마찰이 낮은 시작 행동부터 고르는 편이 맞습니다.",
     items: items.slice(0, AI_RECOVERY_ORDER_COUNT),
   };
 }
@@ -1403,6 +1406,30 @@ function getDefaultOrderWhen(slot: AIRecoverySlot, index: number) {
   return labels[index] ?? labels[labels.length - 1];
 }
 
+function getOrderCountLabel(count: number) {
+  return `${count}개`;
+}
+
+function getOrderBodyConstraint(level: AIRecoveryOrderGenerationLevel) {
+  if (level === 1) {
+    return "body는 한 문장으로 끝내고 바로 체크 가능한 행동이어야 하며 시간·횟수·장소·조건 중 1개만 드러나게 작성하세요. 한 번에 바로 끝낼 수 있는 아주 단순한 오더를 우선하세요.";
+  }
+  return "body는 한 문장으로 끝내고 바로 체크 가능한 행동이어야 하며 시간·횟수·장소·조건 중 2개 이상이 가능하면 드러나야 합니다.";
+}
+
+function buildOrderLevelUserLines(level: AIRecoveryOrderGenerationLevel) {
+  if (level === 1) {
+    return [
+      "body 안에 시작 트리거를 넣어 언제 시작하는지 바로 보이게 하고, 시간/횟수/장소/조건 중 1개만 포함",
+      "각 item은 바로 시작해서 금방 끝낼 수 있는 단일 행동 위주로 작성",
+      "준비가 많거나 여러 단계를 이어야 하는 복잡한 오더는 피할 것",
+    ];
+  }
+  return [
+    "body 안에 시작 트리거를 넣어 언제 시작하는지 바로 보이게 하고, 가능하면 시간/횟수/장소/조건 중 2개 이상 포함",
+  ];
+}
+
 function parseOrderRecord(raw: unknown, slot: AIRecoverySlot, index: number): AIRecoveryOrder | null {
   if (!isRecord(raw)) return null;
   const body = trimText(raw.body, 220) || trimText(raw.action, 220) || trimText(raw.description, 220);
@@ -1424,7 +1451,7 @@ function isOrder(value: AIRecoveryOrder | null): value is AIRecoveryOrder {
   return Boolean(value);
 }
 
-function parseOrdersJson(text: string, slot: AIRecoverySlot): AIRecoveryOrdersPayload {
+function parseOrdersJson(text: string, slot: AIRecoverySlot, orderCount: number): AIRecoveryOrdersPayload {
   const parsed = parseLooseJson(text);
   if (!isRecord(parsed)) throw new Error("orders_not_object");
   const title = trimText(parsed.title, 80) || getDefaultOrdersTitle(slot);
@@ -1440,8 +1467,8 @@ function parseOrdersJson(text: string, slot: AIRecoverySlot): AIRecoveryOrdersPa
   const items = rawItems
     .map((item: unknown, index: number) => parseOrderRecord(item, slot, index))
     .filter(isOrder)
-    .slice(0, AI_RECOVERY_ORDER_COUNT);
-  if (items.length === 0) throw new Error("orders_items_missing");
+    .slice(0, orderCount);
+  if (items.length !== orderCount) throw new Error("orders_items_missing");
   return {
     title,
     headline,
@@ -1509,7 +1536,7 @@ function buildBriefSchema() {
   };
 }
 
-function buildOrdersSchema() {
+function buildOrdersSchema(orderCount: number) {
   return {
     type: "object",
     additionalProperties: false,
@@ -1519,8 +1546,8 @@ function buildOrdersSchema() {
       summary: { type: "string" },
       items: {
         type: "array",
-        minItems: AI_RECOVERY_ORDER_COUNT,
-        maxItems: AI_RECOVERY_ORDER_COUNT,
+        minItems: orderCount,
+        maxItems: orderCount,
         items: {
           type: "object",
           additionalProperties: false,
@@ -1709,25 +1736,30 @@ function buildBriefUserPrompt(snapshot: RecoverySnapshot, profile: RecoveryPromp
   return profile === "pro" ? buildProBriefUserPrompt(snapshot) : buildPlusBriefUserPrompt(snapshot);
 }
 
-function buildPlusOrdersDeveloperPrompt(slot: AIRecoverySlot) {
+function buildPlusOrdersDeveloperPrompt(slot: AIRecoverySlot, options: AIRecoveryOrderGenerationOptions) {
+  const countLabel = getOrderCountLabel(options.count);
+  const bodyConstraint = getOrderBodyConstraint(options.level);
   if (slot === "postShift") {
-    return "너는 RNest의 교대근무 간호사용 Plus AI 퇴근 후 오더 생성기입니다. 방금 생성된 AI 맞춤회복 해설을 최우선 기준으로 읽고, 해설의 우선순위를 실제 행동 오더 4개로 번역하세요. 해설에 없는 새 큰 계획을 만들지 말고, 해설의 핵심을 더 짧고 더 실행 가능한 문장으로 압축하세요. 지금은 퇴근 후 오더 단계입니다. 퇴근 직후, 집 도착 후, 잠들기 전으로 이어지는 낮은 마찰의 회복 오더를 우선 만드세요. JSON 하나만 반환하세요. headline은 오늘 밤 오더 흐름의 핵심 한 문장, summary는 왜 이 구성이 맞는지 한 문장, 각 item은 title, body, when, reason을 가져야 합니다. body는 한 문장으로 끝내고 바로 체크 가능한 행동이어야 하며 시간·횟수·장소·조건 중 2개 이상이 가능하면 드러나야 합니다. generic한 문장, 같은 행동 반복, 내부 시스템 용어와 원시 데이터 필드명 노출, ISO 날짜 직접 표기를 금지하세요. headline, summary, reason은 '입니다/합니다'체 한국어 존댓말로 작성하고, body는 반드시 '하세요/해주세요'체로 작성하세요. '-다'체와 명령형 반말은 금지하세요.";
+    return `너는 RNest의 교대근무 간호사용 Plus AI 퇴근 후 오더 생성기입니다. 방금 생성된 AI 맞춤회복 해설을 최우선 기준으로 읽고, 해설의 우선순위를 실제 행동 오더 ${countLabel}로 번역하세요. 해설에 없는 새 큰 계획을 만들지 말고, 해설의 핵심을 더 짧고 더 실행 가능한 문장으로 압축하세요. 지금은 퇴근 후 오더 단계입니다. 퇴근 직후, 집 도착 후, 잠들기 전으로 이어지는 낮은 마찰의 회복 오더를 우선 만드세요. JSON 하나만 반환하세요. headline은 오늘 밤 오더 흐름의 핵심 한 문장, summary는 왜 이 구성이 맞는지 한 문장, 각 item은 title, body, when, reason을 가져야 합니다. ${bodyConstraint} generic한 문장, 같은 행동 반복, 내부 시스템 용어와 원시 데이터 필드명 노출, ISO 날짜 직접 표기를 금지하세요. headline, summary, reason은 '입니다/합니다'체 한국어 존댓말로 작성하고, body는 반드시 '하세요/해주세요'체로 작성하세요. '-다'체와 명령형 반말은 금지하세요.`;
   }
-  return "너는 RNest의 교대근무 간호사용 Plus AI 기상 후 오더 생성기입니다. 방금 생성된 AI 맞춤회복 해설을 최우선 기준으로 읽고, 해설의 우선순위를 실제 행동 오더 4개로 번역하세요. 해설에 없는 새 큰 계획을 만들지 말고, 해설의 핵심을 더 짧고 더 실행 가능한 문장으로 압축하세요. 지금은 기상 후 오더 단계입니다. 아침에 바로 실행할 수 있는 낮은 마찰의 스타터 오더를 우선 만드세요. JSON 하나만 반환하세요. headline은 오늘 오더 흐름의 핵심 한 문장, summary는 왜 이 구성이 맞는지 한 문장, 각 item은 title, body, when, reason을 가져야 합니다. body는 한 문장으로 끝내고 바로 체크 가능한 행동이어야 하며 시간·횟수·장소·조건 중 2개 이상이 가능하면 드러나야 합니다. generic한 문장, 같은 행동 반복, 내부 시스템 용어와 원시 데이터 필드명 노출, ISO 날짜 직접 표기를 금지하세요. headline, summary, reason은 '입니다/합니다'체 한국어 존댓말로 작성하고, body는 반드시 '하세요/해주세요'체로 작성하세요. '-다'체와 명령형 반말은 금지하세요.";
+  return `너는 RNest의 교대근무 간호사용 Plus AI 기상 후 오더 생성기입니다. 방금 생성된 AI 맞춤회복 해설을 최우선 기준으로 읽고, 해설의 우선순위를 실제 행동 오더 ${countLabel}로 번역하세요. 해설에 없는 새 큰 계획을 만들지 말고, 해설의 핵심을 더 짧고 더 실행 가능한 문장으로 압축하세요. 지금은 기상 후 오더 단계입니다. 아침에 바로 실행할 수 있는 낮은 마찰의 스타터 오더를 우선 만드세요. JSON 하나만 반환하세요. headline은 오늘 오더 흐름의 핵심 한 문장, summary는 왜 이 구성이 맞는지 한 문장, 각 item은 title, body, when, reason을 가져야 합니다. ${bodyConstraint} generic한 문장, 같은 행동 반복, 내부 시스템 용어와 원시 데이터 필드명 노출, ISO 날짜 직접 표기를 금지하세요. headline, summary, reason은 '입니다/합니다'체 한국어 존댓말로 작성하고, body는 반드시 '하세요/해주세요'체로 작성하세요. '-다'체와 명령형 반말은 금지하세요.`;
 }
 
-function buildProOrdersDeveloperPrompt(slot: AIRecoverySlot) {
+function buildProOrdersDeveloperPrompt(slot: AIRecoverySlot, options: AIRecoveryOrderGenerationOptions) {
+  const countLabel = getOrderCountLabel(options.count);
+  const bodyConstraint = getOrderBodyConstraint(options.level);
   if (slot === "postShift") {
-    return "너는 RNest의 교대근무 간호사용 Pro AI 퇴근 후 오더 생성기입니다. 방금 생성된 Pro AI 맞춤회복 해설을 최우선 기준으로 읽고, 핵심 우선순위를 실제 행동 오더 4개로 정밀하게 번역하세요. 해설에 없는 새 건강 해석이나 새 큰 계획은 만들지 말고, 해설의 이유와 실행 타이밍이 더 선명하게 보이도록 압축하세요. 지금은 퇴근 후 오더 단계입니다. 퇴근 직후, 집 도착 후, 잠들기 전 흐름 안에서 저마찰 회복 오더를 우선 배치하세요. JSON 하나만 반환하세요. headline은 오늘 밤 오더 흐름의 핵심 한 문장, summary는 왜 이 4개가 맞는지 한 문장, 각 item은 title, body, when, reason을 가져야 합니다. body는 한 문장으로 끝내고 바로 체크 가능한 행동이어야 하며 시간·횟수·장소·조건 중 2개 이상이 보이게 작성하세요. generic한 문장, 같은 행동 반복, 내부 시스템 용어와 원시 데이터 필드명 노출, ISO 날짜 직접 표기를 금지하세요. headline, summary, reason은 '입니다/합니다'체 한국어 존댓말로 작성하고, body는 반드시 '하세요/해주세요'체로 작성하세요. '-다'체와 명령형 반말은 금지하세요.";
+    return `너는 RNest의 교대근무 간호사용 Pro AI 퇴근 후 오더 생성기입니다. 방금 생성된 Pro AI 맞춤회복 해설을 최우선 기준으로 읽고, 핵심 우선순위를 실제 행동 오더 ${countLabel}로 정밀하게 번역하세요. 해설에 없는 새 건강 해석이나 새 큰 계획은 만들지 말고, 해설의 이유와 실행 타이밍이 더 선명하게 보이도록 압축하세요. 지금은 퇴근 후 오더 단계입니다. 퇴근 직후, 집 도착 후, 잠들기 전 흐름 안에서 저마찰 회복 오더를 우선 배치하세요. JSON 하나만 반환하세요. headline은 오늘 밤 오더 흐름의 핵심 한 문장, summary는 왜 이 ${countLabel}가 맞는지 한 문장, 각 item은 title, body, when, reason을 가져야 합니다. ${bodyConstraint} generic한 문장, 같은 행동 반복, 내부 시스템 용어와 원시 데이터 필드명 노출, ISO 날짜 직접 표기를 금지하세요. headline, summary, reason은 '입니다/합니다'체 한국어 존댓말로 작성하고, body는 반드시 '하세요/해주세요'체로 작성하세요. '-다'체와 명령형 반말은 금지하세요.`;
   }
-  return "너는 RNest의 교대근무 간호사용 Pro AI 기상 후 오더 생성기입니다. 방금 생성된 Pro AI 맞춤회복 해설을 최우선 기준으로 읽고, 핵심 우선순위를 실제 행동 오더 4개로 정밀하게 번역하세요. 해설에 없는 새 건강 해석이나 새 큰 계획은 만들지 말고, 해설의 이유와 실행 타이밍이 더 선명하게 보이도록 압축하세요. 지금은 기상 후 오더 단계입니다. 아침에 바로 실행할 수 있는 낮은 마찰의 스타터 오더를 우선 만드세요. JSON 하나만 반환하세요. headline은 오늘 오더 흐름의 핵심 한 문장, summary는 왜 이 4개가 맞는지 한 문장, 각 item은 title, body, when, reason을 가져야 합니다. body는 한 문장으로 끝내고 바로 체크 가능한 행동이어야 하며 시간·횟수·장소·조건 중 2개 이상이 보이게 작성하세요. generic한 문장, 같은 행동 반복, 내부 시스템 용어와 원시 데이터 필드명 노출, ISO 날짜 직접 표기를 금지하세요. headline, summary, reason은 '입니다/합니다'체 한국어 존댓말로 작성하고, body는 반드시 '하세요/해주세요'체로 작성하세요. '-다'체와 명령형 반말은 금지하세요.";
+  return `너는 RNest의 교대근무 간호사용 Pro AI 기상 후 오더 생성기입니다. 방금 생성된 Pro AI 맞춤회복 해설을 최우선 기준으로 읽고, 핵심 우선순위를 실제 행동 오더 ${countLabel}로 정밀하게 번역하세요. 해설에 없는 새 건강 해석이나 새 큰 계획은 만들지 말고, 해설의 이유와 실행 타이밍이 더 선명하게 보이도록 압축하세요. 지금은 기상 후 오더 단계입니다. 아침에 바로 실행할 수 있는 낮은 마찰의 스타터 오더를 우선 만드세요. JSON 하나만 반환하세요. headline은 오늘 오더 흐름의 핵심 한 문장, summary는 왜 이 ${countLabel}가 맞는지 한 문장, 각 item은 title, body, when, reason을 가져야 합니다. ${bodyConstraint} generic한 문장, 같은 행동 반복, 내부 시스템 용어와 원시 데이터 필드명 노출, ISO 날짜 직접 표기를 금지하세요. headline, summary, reason은 '입니다/합니다'체 한국어 존댓말로 작성하고, body는 반드시 '하세요/해주세요'체로 작성하세요. '-다'체와 명령형 반말은 금지하세요.`;
 }
 
-function buildOrdersDeveloperPrompt(slot: AIRecoverySlot, profile: RecoveryPromptProfile) {
-  return profile === "pro" ? buildProOrdersDeveloperPrompt(slot) : buildPlusOrdersDeveloperPrompt(slot);
+function buildOrdersDeveloperPrompt(slot: AIRecoverySlot, profile: RecoveryPromptProfile, options: AIRecoveryOrderGenerationOptions) {
+  return profile === "pro" ? buildProOrdersDeveloperPrompt(slot, options) : buildPlusOrdersDeveloperPrompt(slot, options);
 }
 
-function buildPlusOrdersUserPrompt(snapshot: RecoverySnapshot, brief: AIRecoveryBrief) {
+function buildPlusOrdersUserPrompt(snapshot: RecoverySnapshot, brief: AIRecoveryBrief, options: AIRecoveryOrderGenerationOptions) {
+  const countLabel = getOrderCountLabel(options.count);
   return [
     "오늘의 오더 체크리스트용 JSON을 작성하세요.",
     "반드시 JSON 하나만 출력하세요. 코드펜스 금지, 설명문 금지.",
@@ -1735,7 +1767,7 @@ function buildPlusOrdersUserPrompt(snapshot: RecoverySnapshot, brief: AIRecovery
     "[목표]",
     "",
     "AI 맞춤회복을 실제 행동 체크리스트로 바꾸기",
-    "오늘 가장 중요한 오더를 4개로 맞춰 고르기",
+    `오늘 가장 중요한 오더를 ${countLabel}로 맞춰 고르기`,
     "타이밍 정보는 when과 reason에 자연스럽게 녹이기",
     "사용자가 지금 컨디션에서도 바로 실천할 수 있게 마찰을 낮추기",
     snapshot.slot === "postShift"
@@ -1743,7 +1775,7 @@ function buildPlusOrdersUserPrompt(snapshot: RecoverySnapshot, brief: AIRecovery
       : "하루를 시작할 때 바로 실행할 수 있는 스타터 오더가 되게 만들기",
     "[제약]",
     "",
-    "items 길이는 정확히 4",
+    `items 길이는 정확히 ${options.count}`,
     "id는 영어 snake_case",
     "title, headline, summary는 모두 비워 두지 말 것",
     "title은 카드 상단의 작은 맥락 라벨이므로 4~12자 수준으로 짧게",
@@ -1753,7 +1785,7 @@ function buildPlusOrdersUserPrompt(snapshot: RecoverySnapshot, brief: AIRecovery
     "headline, summary, reason은 반드시 '입니다/합니다'체 한국어 존댓말로 작성",
     "body는 반드시 '하세요/해주세요'체 한국어 존댓말로 작성",
     "'-다', '-해라', '-가라', '-마라' 같은 표현 금지",
-    "body 안에 시작 트리거를 넣어 언제 시작하는지 바로 보이게 하고, 가능하면 시간/횟수/장소/조건 중 2개 이상 포함",
+    ...buildOrderLevelUserLines(options.level),
     "when은 12자 안팎의 아주 짧은 타이밍 라벨만 사용",
     "reason은 body 아래에 붙는 근거 문장으로, 왜 지금 필요한지 brief의 우선순위와 연결해 한 문장으로 설명",
     "chips는 0~3개, 짧은 키워드만 사용",
@@ -1763,12 +1795,12 @@ function buildPlusOrdersUserPrompt(snapshot: RecoverySnapshot, brief: AIRecovery
     "작은 행동이지만 회복 효과가 크고 실수/소진을 줄이는 방향을 우선",
     "막연한 '쉬기/눕기/눈감기' 표현만 쓰지 말고, 왜 지금 그 행동을 해야 하는지 실행 장면이 보이게 작성",
     "'컨디션 관리하기', '회복하기', '휴식하기'처럼 generic한 제목/문장 금지",
-    "items가 3개 이상이면 집중·안전, 짧은 움직임, 정서 안정/수면 전환 중 최소 2개 이상 영역이 섞이게 구성",
+    options.count >= 3 ? "items가 3개 이상이면 집중·안전, 짧은 움직임, 정서 안정/수면 전환 중 최소 2개 이상 영역이 섞이게 구성" : null,
     snapshot.slot === "postShift"
       ? "퇴근 후 단계에서는 when이 '퇴근 직후', '집 도착 후', '잠들기 전' 쪽으로 자연스럽게 분산되게 구성"
       : "기상 후 단계에서는 when이 '지금', '출근 전', '근무 중' 쪽으로 자연스럽게 분산되게 구성",
     "같은 행동을 표현만 바꿔 중복 생성하지 말 것",
-    "brief에 없는 수치나 상태를 새로 만들지 말 것 [선택된 오더 개수] 4",
+    `brief에 없는 수치나 상태를 새로 만들지 말 것 [선택된 오더 개수] ${options.count}`,
     "",
     "[해설 기반 변환 규칙]",
     "아래 AI Recovery Brief JSON의 headline, sections, weeklySummary를 읽고 그대로 실행 가능한 오더로 바꿀 것",
@@ -1777,18 +1809,19 @@ function buildPlusOrdersUserPrompt(snapshot: RecoverySnapshot, brief: AIRecovery
     "",
     "[AI Recovery Brief JSON]",
     JSON.stringify(brief, null, 2),
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
-function buildProOrdersUserPrompt(snapshot: RecoverySnapshot, brief: AIRecoveryBrief) {
+function buildProOrdersUserPrompt(snapshot: RecoverySnapshot, brief: AIRecoveryBrief, options: AIRecoveryOrderGenerationOptions) {
+  const countLabel = getOrderCountLabel(options.count);
   return [
     "오늘의 Pro 오더 체크리스트용 JSON을 작성하세요.",
     "반드시 JSON 하나만 출력하세요. 코드펜스 금지, 설명문 금지.",
     "",
     "[목표]",
     "",
-    "Pro AI 맞춤회복 해설의 우선순위를 실제 행동 체크리스트 4개로 정밀하게 번역하기",
-    "오늘 가장 중요한 오더 4개만 남기기",
+    `Pro AI 맞춤회복 해설의 우선순위를 실제 행동 체크리스트 ${countLabel}로 정밀하게 번역하기`,
+    `오늘 가장 중요한 오더 ${countLabel}만 남기기`,
     "오더 문장만 봐도 시작 타이밍과 이유가 바로 연결되게 만들기",
     "사용자가 지금 컨디션에서도 바로 실천할 수 있게 마찰을 낮추기",
     snapshot.slot === "postShift"
@@ -1796,7 +1829,7 @@ function buildProOrdersUserPrompt(snapshot: RecoverySnapshot, brief: AIRecoveryB
       : "하루를 시작할 때 바로 실행할 수 있는 스타터 오더가 되게 만들기",
     "[제약]",
     "",
-    "items 길이는 정확히 4",
+    `items 길이는 정확히 ${options.count}`,
     "id는 영어 snake_case",
     "title, headline, summary는 모두 비워 두지 말 것",
     "title은 카드 상단의 작은 맥락 라벨이므로 4~12자 수준으로 짧게",
@@ -1806,7 +1839,7 @@ function buildProOrdersUserPrompt(snapshot: RecoverySnapshot, brief: AIRecoveryB
     "headline, summary, reason은 반드시 '입니다/합니다'체 한국어 존댓말로 작성",
     "body는 반드시 '하세요/해주세요'체 한국어 존댓말로 작성",
     "'-다', '-해라', '-가라', '-마라' 같은 표현 금지",
-    "body 안에 시작 트리거를 넣어 언제 시작하는지 바로 보이게 하고, 가능하면 시간/횟수/장소/조건 중 2개 이상 포함",
+    ...buildOrderLevelUserLines(options.level),
     "when은 12자 안팎의 아주 짧은 타이밍 라벨만 사용",
     "reason은 why 한 문장으로, brief의 우선순위와 직접 연결해 왜 지금 필요한지 설명",
     "chips는 0~3개, 짧은 키워드만 사용",
@@ -1819,7 +1852,7 @@ function buildProOrdersUserPrompt(snapshot: RecoverySnapshot, brief: AIRecoveryB
       ? "퇴근 후 단계에서는 when이 '퇴근 직후', '집 도착 후', '잠들기 전' 쪽으로 자연스럽게 분산되게 구성"
       : "기상 후 단계에서는 when이 '지금', '출근 전', '근무 중' 쪽으로 자연스럽게 분산되게 구성",
     "같은 행동을 표현만 바꿔 중복 생성하지 말 것",
-    "brief에 없는 수치나 상태를 새로 만들지 말 것 [선택된 오더 개수] 4",
+    `brief에 없는 수치나 상태를 새로 만들지 말 것 [선택된 오더 개수] ${options.count}`,
     "",
     "[해설 기반 변환 규칙]",
     "아래 AI Recovery Brief JSON의 headline, sections, weeklySummary를 읽고 그대로 실행 가능한 오더로 바꿀 것",
@@ -1831,8 +1864,8 @@ function buildProOrdersUserPrompt(snapshot: RecoverySnapshot, brief: AIRecoveryB
   ].join("\n");
 }
 
-function buildOrdersUserPrompt(snapshot: RecoverySnapshot, brief: AIRecoveryBrief, profile: RecoveryPromptProfile) {
-  return profile === "pro" ? buildProOrdersUserPrompt(snapshot, brief) : buildPlusOrdersUserPrompt(snapshot, brief);
+function buildOrdersUserPrompt(snapshot: RecoverySnapshot, brief: AIRecoveryBrief, profile: RecoveryPromptProfile, options: AIRecoveryOrderGenerationOptions) {
+  return profile === "pro" ? buildProOrdersUserPrompt(snapshot, brief, options) : buildPlusOrdersUserPrompt(snapshot, brief, options);
 }
 
 function buildJsonRepairDeveloperPrompt(schemaName: string, schema: Record<string, unknown>) {
@@ -2139,10 +2172,11 @@ function buildOrdersPromptRequest(args: {
   snapshot: RecoverySnapshot;
   brief: AIRecoveryBrief;
   profile: RecoveryPromptProfile;
+  orderOptions: AIRecoveryOrderGenerationOptions;
 }): RecoveryPromptRequest {
   return {
-    developerPrompt: buildOrdersDeveloperPrompt(args.snapshot.slot, args.profile),
-    userPrompt: buildOrdersUserPrompt(args.snapshot, args.brief, args.profile),
+    developerPrompt: buildOrdersDeveloperPrompt(args.snapshot.slot, args.profile, args.orderOptions),
+    userPrompt: buildOrdersUserPrompt(args.snapshot, args.brief, args.profile, args.orderOptions),
     reasoningEffort: resolveReasoningEffort(args.profile, "orders"),
     maxOutputTokens: resolveRecoveryFlowMaxOutputTokens("orders", args.profile),
     verbosity: "medium",
@@ -2678,6 +2712,7 @@ export async function regenerateAIRecoveryOrders(args: {
   userEmail?: string | null;
   dateISO: ISODate;
   slot: AIRecoverySlot;
+  orderOptions?: AIRecoveryOrderGenerationOptions;
   signal: AbortSignal;
 }) {
   const loadedDomains = await safeLoadRecoveryDomains(args.userId);
@@ -2699,6 +2734,7 @@ export async function regenerateAIRecoveryOrders(args: {
   const quota = buildGenerationQuota(subscription?.tier ?? null, storedSession, Boolean(subscription?.isPrivilegedTester));
   if (!quota.canRegenerateOrders) throw new Error("orders_generation_limit_reached");
   const brief = storedSession.brief!;
+  const orderOptions = normalizeAIRecoveryOrderGenerationOptions(args.orderOptions);
 
   const model = storedSession.model;
   const profile = resolveRecoveryPromptProfile(subscription?.tier ?? null, model);
@@ -2706,6 +2742,7 @@ export async function regenerateAIRecoveryOrders(args: {
     snapshot,
     brief,
     profile,
+    orderOptions,
   });
   const ordersResult = await runAIRecoveryStructuredRequest({
     model,
@@ -2713,7 +2750,7 @@ export async function regenerateAIRecoveryOrders(args: {
     developerPrompt: ordersRequest.developerPrompt,
     userPrompt: ordersRequest.userPrompt,
     schemaName: "ai_recovery_orders",
-    schema: buildOrdersSchema(),
+    schema: buildOrdersSchema(orderOptions.count),
     signal: args.signal,
     maxOutputTokens: ordersRequest.maxOutputTokens,
     verbosity: ordersRequest.verbosity,
@@ -2731,7 +2768,7 @@ export async function regenerateAIRecoveryOrders(args: {
 
   let orders: AIRecoveryOrdersPayload;
   try {
-    orders = parseOrdersJson(ordersResult.text, args.slot);
+    orders = parseOrdersJson(ordersResult.text, args.slot, orderOptions.count);
   } catch (error) {
     console.error("[AIRecovery] regenerate_orders_parse_failed", {
       model,
@@ -2743,7 +2780,7 @@ export async function regenerateAIRecoveryOrders(args: {
     const repairedOrders = await repairAIRecoveryJson({
       model,
       schemaName: "ai_recovery_orders",
-      schema: buildOrdersSchema(),
+      schema: buildOrdersSchema(orderOptions.count),
       rawText: ordersResult.text,
       signal: args.signal,
       maxOutputTokens: ordersRequest.maxOutputTokens,
@@ -2759,7 +2796,7 @@ export async function regenerateAIRecoveryOrders(args: {
       throw new Error(`ai_recovery_orders_failed:${repairedOrders.error}`);
     }
     try {
-      orders = parseOrdersJson(repairedOrders.text, args.slot);
+      orders = parseOrdersJson(repairedOrders.text, args.slot, orderOptions.count);
     } catch (repairParseError) {
       console.error("[AIRecovery] regenerate_orders_repair_parse_failed", {
         model,

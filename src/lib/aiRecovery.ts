@@ -3,7 +3,10 @@ import type { Shift } from "@/lib/types";
 
 export const AI_RECOVERY_PROMPT_VERSION = "2026-03-28.v15";
 export const AI_RECOVERY_RETENTION_DAYS = 8;
-export const AI_RECOVERY_ORDER_COUNT = 4;
+export const AI_RECOVERY_ORDER_COUNT_MIN = 1;
+export const AI_RECOVERY_ORDER_COUNT_MAX = 5;
+export const AI_RECOVERY_ORDER_COUNT_DEFAULT = 3;
+export const AI_RECOVERY_ORDER_COUNT = AI_RECOVERY_ORDER_COUNT_DEFAULT;
 
 export type AIRecoverySlot = "wake" | "postShift";
 export type AIRecoveryStatus = "ready" | "fallback" | "failed";
@@ -61,6 +64,18 @@ export type AIRecoveryTodaySlots = {
   wakeReady: boolean;
   postShiftReady: boolean;
   allReady: boolean;
+};
+
+export type AIRecoveryOrderGenerationLevel = 1 | 2;
+
+export type AIRecoveryOrderGenerationOptions = {
+  count: number;
+  level: AIRecoveryOrderGenerationLevel;
+};
+
+export const DEFAULT_AI_RECOVERY_ORDER_GENERATION_OPTIONS: AIRecoveryOrderGenerationOptions = {
+  count: AI_RECOVERY_ORDER_COUNT_DEFAULT,
+  level: 2,
 };
 
 export type AIRecoveryOrderStats = {
@@ -248,6 +263,24 @@ export function getAIRecoverySlotDescription(slot: AIRecoverySlot, todayShift: S
 
 export function normalizeAIRecoveryLanguage(value: unknown): AIRecoveryLanguage {
   return value === "en" ? "en" : "ko";
+}
+
+export function clampAIRecoveryOrderCount(value: unknown) {
+  const parsed = Math.round(Number(value));
+  if (!Number.isFinite(parsed)) return AI_RECOVERY_ORDER_COUNT_DEFAULT;
+  return Math.max(AI_RECOVERY_ORDER_COUNT_MIN, Math.min(AI_RECOVERY_ORDER_COUNT_MAX, parsed));
+}
+
+export function normalizeAIRecoveryOrderGenerationLevel(value: unknown): AIRecoveryOrderGenerationLevel {
+  return value === 1 ? 1 : 2;
+}
+
+export function normalizeAIRecoveryOrderGenerationOptions(value: unknown): AIRecoveryOrderGenerationOptions {
+  const raw = (value ?? {}) as { count?: unknown; level?: unknown };
+  return {
+    count: clampAIRecoveryOrderCount(raw.count),
+    level: normalizeAIRecoveryOrderGenerationLevel(raw.level),
+  };
 }
 
 export function filterCompletionIdsForOrders(completions: unknown, orderIds: string[]) {
