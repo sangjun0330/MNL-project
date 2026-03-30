@@ -1074,7 +1074,7 @@ function ThinkingIndicator({ streamPhase, query }: { streamPhase: "idle" | "conn
   return (
     <div className="min-w-0 flex-1">
       <div className="text-[14px] font-semibold text-[color:var(--rnest-accent)]">
-        {streamPhase === "connecting" ? "AI에 연결 중..." : messages[msgIndex]}
+        {streamPhase === "connecting" ? "AI 분석 중..." : messages[msgIndex]}
       </div>
       <div className="mt-2 flex items-center gap-1.5">
         <span className="inline-block h-2 w-2 animate-[bounce_1s_ease-in-out_infinite] rounded-full bg-[color:var(--rnest-accent)] opacity-60" />
