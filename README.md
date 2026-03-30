@@ -1,71 +1,220 @@
-# RNest • Shift Body Battery (PWA)
+# RNest
 
-간호사/간호대학생을 위한 **일정(3교대) 기반 회복/피로 인사이트** 웹 기반 앱입니다.  
-Google/Kakao 로그인으로 기록을 **계정에 안전하게 저장**하며, PWA로 설치하면 **모바일 앱처럼** 사용할 수 있어요.
+**교대 근무 간호사를 위한 회복·임상 AI 플랫폼**
 
-## 포함 기능 (v0.1)
-- ✅ 로그인 기반 동기화 : Google/Kakao 계정에 기록 저장 (앱 삭제/기기 변경에도 복원)
-- ✅ 홈(오늘 컨디션) : 회복 점수 + 추천 수면/카페인 컷오프 + 케어 멘트
-- ✅ 7일 피로 예보 : 숫자(0-100) + 위험/주의/양호 컬러
-- ✅ 근무표 입력 : 월 캘린더에서 날짜 탭 → D/E/N/OFF/VAC 선택
-- ✅ 선택 날짜 디테일 : 전날 복사 / 일정 변경
-- ✅ 인사이트 : 최근 14일 평균/최저/최고/위험일수 요약
-- ✅ 인사이트 잠금 : 건강 기록이 **7일 이상** 누적되어야 열림
-- ✅ PWA : manifest + service worker(프로덕션에서만 등록)
+RNest는 3교대 근무 환경에서 일하는 간호사가 피로를 관리하고 회복 패턴을 파악할 수 있도록 설계된 모바일 퍼스트 PWA입니다. 단순한 웰니스 앱이 아니라, 수면 부채·야간 근무·생리 주기·카페인 섭취 등 간호 직군의 현실을 반영한 회복 인사이트와 AI 임상 검색을 하나의 앱에서 제공합니다.
 
-## 실행 방법
-> Node.js 18+ 권장
+---
 
+## 핵심 기능
+
+### 홈 & 회복 대시보드
+- 오늘의 회복 점수(Body Battery) — 근무·수면·스트레스·카페인·생리주기를 통합한 0–100 점수
+- 추천 수면 시간 및 카페인 컷오프 시각 안내
+- 피로 예보 — 향후 7일/14일 근무 일정 기반 위험도 미리보기
+
+### 근무 일정 & 건강 기록
+- 월 캘린더 기반 3교대(Day/Evening/Night/Off/Vacation) 입력
+- 일별 건강 기록 — 수면, 감정, 컨디션, 메모
+- 180일치 일정 및 90일치 건강 기록 자동 보관
+
+### AI 회복 플래너 (Plus/Pro)
+- 근무 강도·피로 누적·수면 패턴을 분석한 AI 7일 회복 오더 생성
+- Pro 플랜: 14일 맞춤 회복 계획, gpt-5.4 기반 심층 분석
+
+### AI 임상 검색
+간호사가 현장에서 바로 쓸 수 있는 임상 AI 검색 서비스입니다.
+
+| 구분 | 모델 | 특징 |
+|------|------|------|
+| 기본 검색 | gpt-5.2 | 투약·용량·금기 등 빠른 확인 |
+| 프리미엄 검색 | gpt-5.4 | 복합 약물 상호작용·희귀 케이스 등 심층 해석 |
+
+- 약물, 기구, 수치, 처치, 절차 등 다양한 질문 유형 지원
+- 이미지 첨부 가능 (약물 포장지, 처방 스크린 등)
+- 대화 이어가기(Continuation) 지원
+- 민감 정보(개인 식별 정보) 입력 자동 차단
+
+### 노트북 & 간호사 계산기
+- 임상 메모 노트북 (실시간 클라우드 동기화)
+- 간호사 실무 계산기 — BMI, BSA, CrCl, GCS, Pediatric Dose, Fluid Balance, Unit Converter
+
+### 소셜 & 챌린지
+- 간호사 커뮤니티 그룹
+- 회복·건강 목표 챌린지 참여
+
+### 쇼핑몰 & 주문
+- 간호사 대상 상품 판매
+- TossPayments 기반 결제
+- 실시간 주문 상태 추적 (SweetTracker 배송 연동)
+- 다중 배송지 관리
+
+---
+
+## 요금제
+
+| 플랜 | 가격 | AI 임상 검색 | AI 회복 플래너 |
+|------|------|-------------|----------------|
+| Free | 무료 | 기본 2회 + 프리미엄 1회 체험 | - |
+| Plus | 9,900원/월 | 기본 20회 + 프리미엄 5회 포함 | 7일 회복 플래너 |
+| Pro | 16,900원/월 | 기본 50회 + 프리미엄 30회 포함 | 14일 맞춤 회복 계획 |
+
+**추가 크레딧 구매 (Plus/Pro)**
+
+| 상품 | 가격 |
+|------|------|
+| 기본 검색 10회 | 1,000원 |
+| 기본 검색 30회 | 2,500원 |
+| 프리미엄 검색 10회 | 1,500원 |
+| 프리미엄 검색 30회 | 3,900원 |
+
+---
+
+## 기술 스택
+
+| 영역 | 기술 |
+|------|------|
+| 프론트엔드 | Next.js 15 (App Router) + React 19 + TypeScript (strict) + Tailwind CSS |
+| 런타임 | Edge Runtime (Cloudflare/Vercel) |
+| 백엔드/DB | Supabase (PostgreSQL + RLS + Realtime + Storage) |
+| 인증 | Supabase Auth — Google / Kakao 소셜 로그인 |
+| AI | OpenAI Responses API (gpt-5.2 / gpt-5.4) |
+| AI 게이트웨이 | Cloudflare AI Gateway (선택) |
+| 결제 | TossPayments |
+| 배송 추적 | SweetTracker |
+| 이메일 | Resend |
+| 상태 관리 | Zustand |
+| PWA | manifest + service worker |
+
+---
+
+## 아키텍처 주요 파일
+
+```
+src/
+├── app/                          # Next.js App Router 페이지 & API 라우트
+│   └── api/
+│       ├── tools/med-safety/     # AI 임상 검색 API
+│       ├── billing/              # 구독·결제·크레딧 API
+│       ├── shop/                 # 쇼핑몰 주문·결제 API
+│       └── user/                 # 유저 상태 bootstrap/sync API
+├── components/
+│   ├── shell/AppShell.tsx        # 앱 부트스트랩 & 인증 게이트
+│   ├── pages/                    # 각 화면 페이지 컴포넌트
+│   ├── insights/                 # AI 회복 플래너 컴포넌트
+│   └── system/CloudStateSync.tsx # 건강 상태 클라우드 동기화
+├── lib/
+│   ├── store.ts                  # Zustand 글로벌 상태
+│   ├── model.ts                  # 앱 도메인 모델
+│   ├── auth.ts                   # 인증 흐름 (AuthProvider)
+│   ├── billing/
+│   │   ├── plans.ts              # 요금제·크레딧 정의 (단일 진실 소스)
+│   │   └── entitlements.ts       # 플랜별 권한 계산
+│   ├── bodyBattery.ts            # 회복 점수 알고리즘
+│   ├── rnestBatteryEngine.ts     # RNest 배터리 엔진
+│   └── server/
+│       ├── openaiMedSafety.ts    # AI 임상 검색 핵심 로직
+│       ├── medSafetyPrompting.ts # 임상 검색 프롬프트 빌더
+│       ├── billingStore.ts       # 결제·크레딧 DB 연산
+│       └── shopOrderStore.ts     # 주문 처리 로직
+└── supabase/migrations/          # DB 스키마 마이그레이션
+```
+
+---
+
+## 로컬 개발
+
+### 요구사항
+- Node.js 18+
+- npm
+
+### 설치 & 실행
 ```bash
 npm install
 npm run dev
 ```
+브라우저에서 `http://localhost:3000` 접속
 
-- 브라우저에서 http://localhost:3000 접속
-
-## 환경 변수 설정
-`.env.local`에 아래 값을 넣어주세요.
-
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `NEXT_PUBLIC_SITE_URL`
-- `AUTH_ALLOWED_EMAILS` (선택, 테스트 중 허용할 이메일만 `,` 또는 줄바꿈으로 지정)
-- `AUTH_REQUIRE_EXISTING_USER=true` (선택, 폐쇄 테스트에서 기존 앱 사용자만 재로그인 허용)
-
-Google 로그인은 앱 코드에서 직접 OAuth client id/secret을 읽지 않고, Supabase Dashboard의 `Authentication > Providers > Google` 설정을 사용합니다.
-
-- 로컬 개발에서는 현재 접속 중인 브라우저 origin(`http://localhost:3000` 등)을 우선 사용해 OAuth callback을 보냅니다.
-- `NEXT_PUBLIC_SITE_URL`은 메타데이터/이메일 링크용 기본 도메인으로도 쓰이므로 환경별로 맞게 관리해야 합니다.
-
-## 프로덕션 빌드
+### 빌드 확인
 ```bash
-npm run build
-npm start
+npm run build   # 프로덕션 빌드 (prebuild 클린업 포함)
+npm run lint    # ESLint
+npx tsc --noEmit  # 타입 체크
 ```
 
-## PWA(앱처럼 설치) 안내
-- iPhone(Safari): **공유 버튼 → “홈 화면에 추가”**
-- Android/Chrome: 주소창 메뉴 → “앱 설치” 또는 “홈 화면에 추가”
-
-> ⚠️ 서비스워커는 개발환경에서 캐시 혼선을 줄이기 위해 **production에서만 등록**됩니다.
-
-## 회복/피로 알고리즘(간단 버전)
-- 수면/근무/스트레스/카페인/생리주기/기분 정보를 통합해
-- 0–100 스케일의 “회복 지표”로 보여줍니다.
-
-> 이후 버전에서 “개인 수면 패턴/카페인 민감도” 설정만 추가해도 정확도가 크게 올라갑니다.
-
-## 커스터마이징 포인트
-- `src/lib/bodyBattery.ts` : 규칙(가중치/멘트/컷오프)을 병동/개인 스타일에 맞게 수정
-- `src/components/home/*` : UI(카드/캘린더/게이지) 커스터마이징
-- `public/icons/*` : 앱 아이콘 교체
+### 테스트 로그인 (개발 환경)
+```
+GET /api/dev/login?user=1&redirect=/path
+```
 
 ---
-Made for a clean, Apple-like aesthetic: soft shadows, generous spacing, subtle borders.
 
+## 환경 변수
 
-## 바디 배터리 알고리즘 (NurseBioRhythmAI 포팅)
-- `src/lib/bodyBattery.ts` 는 사용자가 제공한 Python `NurseBioRhythmAI`를 TypeScript로 포팅한 버전입니다.
-- 1시간 단위로 (Work/Rest/Sleep) 상태를 추정하고, **새벽 2~6시 생체리듬 페널티(peak 04:00)** 를 적용합니다.
-- 캘린더/예보 숫자는 근무시간대에서의 **최저 배터리**를 사용하여 위험도를 더 현실적으로 표시합니다.
+`.env.local`에 설정합니다.
+
+```env
+# Supabase
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+
+# 사이트 URL
+NEXT_PUBLIC_SITE_URL=
+
+# OpenAI
+OPENAI_API_KEY=
+
+# TossPayments
+TOSS_PAYMENTS_SECRET_KEY=
+NEXT_PUBLIC_TOSS_PAYMENTS_CLIENT_KEY=
+
+# SweetTracker (배송 추적)
+SWEETTRACKER_API_KEY=
+
+# Resend (이메일)
+RESEND_API_KEY=
+RESEND_FROM_EMAIL=
+
+# 선택: Cloudflare AI Gateway
+OPENAI_MED_SAFETY_BASE_URL=
+
+# 선택: 개발 접근 제한
+AUTH_ALLOWED_EMAILS=
+AUTH_REQUIRE_EXISTING_USER=true
+```
+
+---
+
+## PWA 설치
+
+- **iPhone (Safari):** 공유 버튼 → "홈 화면에 추가"
+- **Android / Chrome:** 주소창 메뉴 → "앱 설치"
+
+> 서비스워커는 캐시 혼선 방지를 위해 **production 빌드에서만 등록**됩니다.
+
+---
+
+## 데이터 보관 정책
+
+| 데이터 | 보관 기간 |
+|--------|----------|
+| 근무 일정 (schedule) | 180일 |
+| 교대명 (shiftNames) | 180일 |
+| 건강 기록 (bio, emotions, notes) | 90일 |
+| 상태 리비전 (revisions) | 최근 30개 |
+
+---
+
+## 보안 & 안전
+
+- 모든 민감 API는 same-origin 검증 + `Cache-Control: no-store` 적용
+- AI 임상 검색: 개인 식별 정보(이메일·전화번호·주민번호) 입력 자동 차단
+- 결제·크레딧 차감은 서비스 동의 완료 사용자에게만 허용
+- Supabase RLS(Row Level Security)로 사용자 데이터 격리
+
+---
+
+## 라이선스
+
+Private — All rights reserved.
