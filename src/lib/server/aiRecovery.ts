@@ -2183,6 +2183,94 @@ function buildOrdersPromptRequest(args: {
   };
 }
 
+async function runOpenAIOrdersFlow(args: {
+  snapshot: RecoverySnapshot;
+  brief: AIRecoveryBrief;
+  model: string;
+  tier: PlanTier | null | undefined;
+  signal: AbortSignal;
+  orderOptions: AIRecoveryOrderGenerationOptions;
+}) {
+  const profile = resolveRecoveryPromptProfile(args.tier, args.model);
+  const ordersRequest = buildOrdersPromptRequest({
+    snapshot: args.snapshot,
+    brief: args.brief,
+    profile,
+    orderOptions: args.orderOptions,
+  });
+  const ordersResult = await runAIRecoveryStructuredRequest({
+    model: args.model,
+    reasoningEffort: ordersRequest.reasoningEffort,
+    developerPrompt: ordersRequest.developerPrompt,
+    userPrompt: ordersRequest.userPrompt,
+    schemaName: "ai_recovery_orders",
+    schema: buildOrdersSchema(args.orderOptions.count),
+    signal: args.signal,
+    maxOutputTokens: ordersRequest.maxOutputTokens,
+    verbosity: ordersRequest.verbosity,
+  });
+
+  if (!ordersResult.ok) {
+    console.error("[AIRecovery] regenerate_orders_request_failed", {
+      model: args.model,
+      slot: args.snapshot.slot,
+      dateISO: args.snapshot.dateISO,
+      error: ordersResult.error,
+    });
+    throw new Error(`ai_recovery_orders_failed:${ordersResult.error}`);
+  }
+
+  try {
+    return {
+      orders: parseOrdersJson(ordersResult.text, args.snapshot.slot, args.orderOptions.count),
+      responseId: ordersResult.responseId,
+      usage: ordersResult.usage,
+    };
+  } catch (error) {
+    console.error("[AIRecovery] regenerate_orders_parse_failed", {
+      model: args.model,
+      slot: args.snapshot.slot,
+      dateISO: args.snapshot.dateISO,
+      responseId: ordersResult.responseId,
+      error: trimText((error as Error)?.message ?? error, 160),
+    });
+    const repairedOrders = await repairAIRecoveryJson({
+      model: args.model,
+      schemaName: "ai_recovery_orders",
+      schema: buildOrdersSchema(args.orderOptions.count),
+      rawText: ordersResult.text,
+      signal: args.signal,
+      maxOutputTokens: ordersRequest.maxOutputTokens,
+    });
+    if (!repairedOrders.ok) {
+      console.error("[AIRecovery] regenerate_orders_repair_failed", {
+        model: args.model,
+        slot: args.snapshot.slot,
+        dateISO: args.snapshot.dateISO,
+        responseId: ordersResult.responseId,
+        error: repairedOrders.error,
+      });
+      throw new Error(`ai_recovery_orders_failed:${repairedOrders.error}`);
+    }
+    try {
+      return {
+        orders: parseOrdersJson(repairedOrders.text, args.snapshot.slot, args.orderOptions.count),
+        responseId: repairedOrders.responseId ?? ordersResult.responseId,
+        usage: repairedOrders.usage ?? ordersResult.usage,
+      };
+    } catch (repairParseError) {
+      console.error("[AIRecovery] regenerate_orders_repair_parse_failed", {
+        model: args.model,
+        slot: args.snapshot.slot,
+        dateISO: args.snapshot.dateISO,
+        responseId: repairedOrders.responseId,
+        error: trimText((repairParseError as Error)?.message ?? repairParseError, 160),
+      });
+      throw new Error("ai_recovery_orders_failed:orders_repair_parse_failed");
+    }
+  }
+}
+
 async function runOpenAIBriefFlow(args: {
   snapshot: RecoverySnapshot;
   model: string;
@@ -2454,6 +2542,7 @@ export async function generateAIRecoverySession(args: {
   slot: AIRecoverySlot;
   force?: boolean;
   payloadOverride?: unknown;
+  orderOptions?: AIRecoveryOrderGenerationOptions;
   signal: AbortSignal;
 }) {
   let payload = args.payloadOverride ?? {};
@@ -2602,7 +2691,9 @@ export async function generateAIRecoverySession(args: {
     throw new Error("session_generation_limit_reached");
   }
 
-  let flow = await runOpenAIBriefFlow({
+  const orderOptions = normalizeAIRecoveryOrderGenerationOptions(args.orderOptions);
+
+  let flow: OpenAIFlowResult = await runOpenAIBriefFlow({
     snapshot,
     model,
     tier: subscription?.tier ?? null,
@@ -2616,7 +2707,7 @@ export async function generateAIRecoverySession(args: {
       model,
       reason: flow.openaiMeta.fallbackReason,
     });
-    const retriedFlow = await runOpenAIBriefFlow({
+    const retriedFlow: OpenAIFlowResult = await runOpenAIBriefFlow({
       snapshot,
       model,
       tier: subscription?.tier ?? null,
@@ -2634,6 +2725,29 @@ export async function generateAIRecoverySession(args: {
       });
       flow = retriedFlow;
     }
+  }
+  if (flow.status === "ready" && !flow.openaiMeta.fallbackReason) {
+    const ordersResult = await runOpenAIOrdersFlow({
+      snapshot,
+      brief: flow.brief,
+      model,
+      tier: subscription?.tier ?? null,
+      signal: args.signal,
+      orderOptions,
+    });
+    flow = {
+      ...flow,
+      orders: ordersResult.orders,
+      openaiMeta: {
+        ...flow.openaiMeta,
+        ordersResponseId: ordersResult.responseId ?? null,
+        usage: {
+          brief: flow.openaiMeta.usage.brief,
+          orders: ordersResult.usage,
+          total: combineAIRecoveryUsages(flow.openaiMeta.usage.brief, ordersResult.usage),
+        },
+      } as AIRecoveryOpenAIMeta,
+    } satisfies OpenAIFlowResult;
   }
   const session = normalizeStoredSession(snapshot, buildStoredSession({ snapshot, flow, previousSession: existingSession }));
   const renderableSession = canRenderStoredSession(snapshot, session) ? session : null;
@@ -2737,77 +2851,14 @@ export async function regenerateAIRecoveryOrders(args: {
   const orderOptions = normalizeAIRecoveryOrderGenerationOptions(args.orderOptions);
 
   const model = storedSession.model;
-  const profile = resolveRecoveryPromptProfile(subscription?.tier ?? null, model);
-  const ordersRequest = buildOrdersPromptRequest({
+  const ordersResult = await runOpenAIOrdersFlow({
     snapshot,
     brief,
-    profile,
+    model,
+    tier: subscription?.tier ?? null,
+    signal: args.signal,
     orderOptions,
   });
-  const ordersResult = await runAIRecoveryStructuredRequest({
-    model,
-    reasoningEffort: ordersRequest.reasoningEffort,
-    developerPrompt: ordersRequest.developerPrompt,
-    userPrompt: ordersRequest.userPrompt,
-    schemaName: "ai_recovery_orders",
-    schema: buildOrdersSchema(orderOptions.count),
-    signal: args.signal,
-    maxOutputTokens: ordersRequest.maxOutputTokens,
-    verbosity: ordersRequest.verbosity,
-  });
-
-  if (!ordersResult.ok) {
-    console.error("[AIRecovery] regenerate_orders_request_failed", {
-      model,
-      slot: args.slot,
-      dateISO: args.dateISO,
-      error: ordersResult.error,
-    });
-    throw new Error(`ai_recovery_orders_failed:${ordersResult.error}`);
-  }
-
-  let orders: AIRecoveryOrdersPayload;
-  try {
-    orders = parseOrdersJson(ordersResult.text, args.slot, orderOptions.count);
-  } catch (error) {
-    console.error("[AIRecovery] regenerate_orders_parse_failed", {
-      model,
-      slot: args.slot,
-      dateISO: args.dateISO,
-      responseId: ordersResult.responseId,
-      error: trimText((error as Error)?.message ?? error, 160),
-    });
-    const repairedOrders = await repairAIRecoveryJson({
-      model,
-      schemaName: "ai_recovery_orders",
-      schema: buildOrdersSchema(orderOptions.count),
-      rawText: ordersResult.text,
-      signal: args.signal,
-      maxOutputTokens: ordersRequest.maxOutputTokens,
-    });
-    if (!repairedOrders.ok) {
-      console.error("[AIRecovery] regenerate_orders_repair_failed", {
-        model,
-        slot: args.slot,
-        dateISO: args.dateISO,
-        responseId: ordersResult.responseId,
-        error: repairedOrders.error,
-      });
-      throw new Error(`ai_recovery_orders_failed:${repairedOrders.error}`);
-    }
-    try {
-      orders = parseOrdersJson(repairedOrders.text, args.slot, orderOptions.count);
-    } catch (repairParseError) {
-      console.error("[AIRecovery] regenerate_orders_repair_parse_failed", {
-        model,
-        slot: args.slot,
-        dateISO: args.dateISO,
-        responseId: repairedOrders.responseId,
-        error: trimText((repairParseError as Error)?.message ?? repairParseError, 160),
-      });
-      throw new Error("ai_recovery_orders_failed:orders_repair_parse_failed");
-    }
-  }
 
   const nextSession = normalizeStoredSession(snapshot, {
     ...storedSession,
@@ -2816,7 +2867,7 @@ export async function regenerateAIRecoveryOrders(args: {
       selectedCandidateIds: [],
       updatedAt: new Date().toISOString(),
     },
-    orders,
+    orders: ordersResult.orders,
     generationCounts: {
       ...readGenerationCounts(storedSession),
       orders: readGenerationCounts(storedSession).orders + 1,

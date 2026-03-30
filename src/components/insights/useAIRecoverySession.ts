@@ -824,6 +824,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
           slot: args.slot,
           force,
           state: buildStatePayload(),
+          orderOptions: normalizedOrderOptions,
         }),
       });
       const json = await readJson<{ ok?: boolean; error?: string; detail?: string | null; data?: SessionData }>(response);
