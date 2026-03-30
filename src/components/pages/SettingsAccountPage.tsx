@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { cn } from "@/lib/cn";
 import { getSupabaseBrowserClient, signInWithProvider, signOut, useAuthState } from "@/lib/auth";
+import { authHeaders } from "@/lib/billing/client";
 import { purgeAllLocalState } from "@/lib/store";
 import { useI18n } from "@/lib/useI18n";
 
@@ -125,7 +126,43 @@ export function SettingsAccountPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleteNeedsReauth, setDeleteNeedsReauth] = useState(false);
   const [deleteSuccess, setDeleteSuccess] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const deleteReady = deleteText.trim().toUpperCase() === "DELETE";
+
+  useEffect(() => {
+    let active = true;
+    if (status !== "authenticated" || !auth?.userId) {
+      setIsAdmin(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    const run = async () => {
+      try {
+        const headers = await authHeaders();
+        const res = await fetch("/api/admin/billing/access", {
+          method: "GET",
+          headers: {
+            "content-type": "application/json",
+            ...headers,
+          },
+          cache: "no-store",
+        });
+        const json = await res.json().catch(() => null);
+        if (!active) return;
+        setIsAdmin(Boolean(json?.ok && json?.data?.isAdmin));
+      } catch {
+        if (!active) return;
+        setIsAdmin(false);
+      }
+    };
+
+    void run();
+    return () => {
+      active = false;
+    };
+  }, [auth?.userId, status]);
 
   const onDeleteAccount = async () => {
     if (!deleteReady || deleteBusy) return;
@@ -200,16 +237,18 @@ export function SettingsAccountPage() {
             <div className="rounded-2xl bg-black/[0.04] px-3 py-2 text-[12px] text-ios-sub">
               {t("로그인된 계정에 기록이 안전하게 저장됩니다.")}
             </div>
-            <Link
-              href="/settings/account/shipping"
-              className="flex items-center justify-between rounded-2xl border border-ios-sep bg-[#f8fafc] px-4 py-3 text-left transition hover:bg-[#f3f6fa]"
-            >
-              <div>
-                <div className="text-[14px] font-semibold text-ios-text">{t("배송지 설정")}</div>
-                <div className="mt-1 text-[12px] text-ios-sub">{t("대한민국 주소 검색으로 정확하게 저장합니다.")}</div>
-              </div>
-              <span className="text-[18px] text-ios-sub">›</span>
-            </Link>
+            {isAdmin ? (
+              <Link
+                href="/settings/account/shipping"
+                className="flex items-center justify-between rounded-2xl border border-ios-sep bg-[#f8fafc] px-4 py-3 text-left transition hover:bg-[#f3f6fa]"
+              >
+                <div>
+                  <div className="text-[14px] font-semibold text-ios-text">{t("배송지 설정")}</div>
+                  <div className="mt-1 text-[12px] text-ios-sub">{t("대한민국 주소 검색으로 정확하게 저장합니다.")}</div>
+                </div>
+                <span className="text-[18px] text-ios-sub">›</span>
+              </Link>
+            ) : null}
             <div className="flex items-center gap-5 pt-2">
               <button
                 type="button"
