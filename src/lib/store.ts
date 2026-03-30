@@ -153,6 +153,7 @@ function initializeStoreOnClient() {
   if (typeof window === "undefined" || clientInitialized) return;
   purgeAllLocalStateIfNeeded();
   clientInitialized = true;
+  registerDebugBridge();
   if (state.selected !== SSR_SELECTED) return;
   state = { ...state, selected: todayISO() };
   emit();
@@ -432,6 +433,29 @@ function getState() {
 /** Hook 외부에서 현재 스토어 상태를 직접 읽어야 할 때 사용합니다 (구독 없음). */
 export function getAppState(): AppState {
   return state;
+}
+
+function registerDebugBridge() {
+  if (typeof window === "undefined" || process.env.NODE_ENV !== "development") return;
+  const win = window as Window &
+    typeof globalThis & {
+      __RNEST_DEBUG__?: Record<string, unknown>;
+    };
+  win.__RNEST_DEBUG__ = {
+    ...(win.__RNEST_DEBUG__ ?? {}),
+    store: {
+      getState,
+      hydrateState,
+      reset: hydrateEmptyAppState,
+      setSelected,
+      setSettings,
+      setShiftForDate,
+      batchSetSchedule,
+      setNoteForDate,
+      setEmotionForDate,
+      setBioForDate,
+    },
+  };
 }
 
 export function isAppStoreHydrated() {
