@@ -75,8 +75,18 @@ type SessionPreloadRecord = {
   createdAt: number;
 };
 
+type AutoOrdersRequestRecord = {
+  options: AIRecoveryOrderGenerationOptions;
+  status: "pending" | "completed";
+  updatedAt: number;
+};
+
 const MAX_SESSION_PRELOAD_REQUESTS = 48;
 const sessionPreloadRequests = new Map<string, SessionPreloadRecord>();
+const MAX_AUTO_ORDERS_REQUESTS = 64;
+// Track brief-without-orders sessions across hook instances so a later reload
+// cannot enqueue the same orders generation again with default options.
+const autoOrdersRequests = new Map<string, AutoOrdersRequestRecord>();
 
 async function readJson<T>(response: Response): Promise<T | null> {
   return response.json().catch(() => null);
@@ -102,6 +112,47 @@ function trimSessionPreloadRequests() {
     if (sessionPreloadRequests.size <= MAX_SESSION_PRELOAD_REQUESTS) break;
     sessionPreloadRequests.delete(key);
   }
+}
+
+function trimAutoOrdersRequests() {
+  if (autoOrdersRequests.size <= MAX_AUTO_ORDERS_REQUESTS) return;
+  const entries = [...autoOrdersRequests.entries()].sort((a, b) => a[1].updatedAt - b[1].updatedAt);
+  for (const [key] of entries) {
+    if (autoOrdersRequests.size <= MAX_AUTO_ORDERS_REQUESTS) break;
+    autoOrdersRequests.delete(key);
+  }
+}
+
+function getAutoOrdersRequestOptions(key: string): AIRecoveryOrderGenerationOptions {
+  const stored = autoOrdersRequests.get(key)?.options;
+  return normalizeAIRecoveryOrderGenerationOptions(stored ?? DEFAULT_AI_RECOVERY_ORDER_GENERATION_OPTIONS);
+}
+
+function beginAutoOrdersRequest(key: string, options?: AIRecoveryOrderGenerationOptions) {
+  const existing = autoOrdersRequests.get(key);
+  if (existing?.status === "pending" || existing?.status === "completed") return false;
+  autoOrdersRequests.set(key, {
+    options: normalizeAIRecoveryOrderGenerationOptions(options),
+    status: "pending",
+    updatedAt: Date.now(),
+  });
+  trimAutoOrdersRequests();
+  return true;
+}
+
+function settleAutoOrdersRequest(key: string, success: boolean) {
+  const existing = autoOrdersRequests.get(key);
+  if (!existing) return;
+  if (!success) {
+    autoOrdersRequests.delete(key);
+    return;
+  }
+  autoOrdersRequests.set(key, {
+    ...existing,
+    status: "completed",
+    updatedAt: Date.now(),
+  });
+  trimAutoOrdersRequests();
 }
 
 function normalizeSessionData(
@@ -410,7 +461,6 @@ export function useAIRecoverySession(args: HookArgs): HookState {
   const [togglingCompletion, setTogglingCompletion] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const autoRequestedRef = useRef(new Set<string>());
-  const autoOrdersRequestedRef = useRef(new Set<string>());
   const dataRequestRef = useRef(0);
   const generateInFlightRef = useRef(false);
   const ordersInFlightRef = useRef(false);
@@ -618,9 +668,11 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       //  여기서 별도로 처리해야 오더 로딩 오버레이와 자동 생성이 정상 작동한다.)
       if (cachedData) {
         const autoOrdersKey = buildAutoOrdersKey(cachedData);
-        if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && cachedData.quota.canRegenerateOrders) {
-          autoOrdersRequestedRef.current.add(autoOrdersKey);
-          void regenerateOrdersInternal(true, DEFAULT_AI_RECOVERY_ORDER_GENERATION_OPTIONS);
+        if (autoOrdersKey && cachedData.quota.canRegenerateOrders) {
+          const autoOrderOptions = getAutoOrdersRequestOptions(autoOrdersKey);
+          if (beginAutoOrdersRequest(autoOrdersKey, autoOrderOptions)) {
+            void regenerateOrdersInternal(true, autoOrderOptions, autoOrdersKey);
+          }
         }
       }
       return;
@@ -639,9 +691,11 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       if (!isCurrentDataRequest(requestId)) return;
       adoptIncomingData(nextData, { completionVersionAtStart });
       const autoOrdersKey = buildAutoOrdersKey(nextData);
-      if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && nextData?.quota.canRegenerateOrders) {
-        autoOrdersRequestedRef.current.add(autoOrdersKey);
-        void regenerateOrdersInternal(true, DEFAULT_AI_RECOVERY_ORDER_GENERATION_OPTIONS);
+      if (autoOrdersKey && nextData?.quota.canRegenerateOrders) {
+        const autoOrderOptions = getAutoOrdersRequestOptions(autoOrdersKey);
+        if (beginAutoOrdersRequest(autoOrdersKey, autoOrderOptions)) {
+          void regenerateOrdersInternal(true, autoOrderOptions, autoOrdersKey);
+        }
       }
       const shouldAutoGenerate =
         args.autoGenerate !== false &&
@@ -664,13 +718,18 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     }
   };
 
-  const regenerateOrdersInternal = async (auto = false, orderOptions?: AIRecoveryOrderGenerationOptions) => {
+  const regenerateOrdersInternal = async (
+    auto = false,
+    orderOptions?: AIRecoveryOrderGenerationOptions,
+    autoOrdersKey?: string | null,
+  ) => {
     if (!args.enabled) return;
     if (ordersInFlightRef.current) return;
     const normalizedOrderOptions = normalizeAIRecoveryOrderGenerationOptions(orderOptions);
     ordersInFlightRef.current = true;
     const requestId = nextDataRequestId();
     const completionVersionAtStart = committedCompletionVersionRef.current;
+    let autoOrdersSucceeded = false;
     setSavingOrders(true);
     if (!auto) setError(null);
     try {
@@ -700,6 +759,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       const nextStateRevision = Number.isFinite(Number(json.data?.stateRevision)) ? Number(json.data?.stateRevision) : null;
       syncClientStateRevision(nextStateRevision);
       adoptIncomingData(nextData, { completionVersionAtStart });
+      autoOrdersSucceeded = Boolean(nextData?.session?.orders?.items?.length);
       registerLoadedAIRecoverySession({
         accountKey,
         dateISO: args.dateISO,
@@ -725,6 +785,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
           stateRevision: recovered?.stateRevision ?? stateRevision ?? null,
           data: recovered,
         });
+        autoOrdersSucceeded = Boolean(recovered?.session?.orders?.items?.length);
         if (!auto) setError(null);
         return;
       } catch {}
@@ -736,6 +797,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
         setFriendlyError((nextError as any)?.message ?? nextError ?? "ai_recovery_orders_failed");
       }
     } finally {
+      if (autoOrdersKey) settleAutoOrdersRequest(autoOrdersKey, autoOrdersSucceeded);
       ordersInFlightRef.current = false;
       setSavingOrders(false);
     }
@@ -775,6 +837,11 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       }
       if (!isCurrentDataRequest(requestId)) return;
       const nextData = normalizeData(json.data);
+      const autoOrdersKey = buildAutoOrdersKey(nextData);
+      const shouldStartAutoOrders =
+        autoOrdersKey != null && nextData?.quota.canRegenerateOrders
+          ? beginAutoOrdersRequest(autoOrdersKey, normalizedOrderOptions)
+          : false;
       const nextStateRevision = Number.isFinite(Number(json.data?.stateRevision)) ? Number(json.data?.stateRevision) : null;
       syncClientStateRevision(nextStateRevision);
       adoptIncomingData(nextData, { completionVersionAtStart });
@@ -786,10 +853,8 @@ export function useAIRecoverySession(args: HookArgs): HookState {
         data: nextData,
       });
       emitClientDataInvalidation([CLIENT_DATA_SCOPE_RECOVERY_SESSION, CLIENT_DATA_SCOPE_HOME_PREVIEW]);
-      const autoOrdersKey = buildAutoOrdersKey(nextData);
-      if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && nextData?.quota.canRegenerateOrders) {
-        autoOrdersRequestedRef.current.add(autoOrdersKey);
-        void regenerateOrdersInternal(true, normalizedOrderOptions);
+      if (autoOrdersKey && shouldStartAutoOrders) {
+        void regenerateOrdersInternal(true, normalizedOrderOptions, autoOrdersKey);
       }
     } catch (nextError) {
       if (autoKey) autoRequestedRef.current.delete(autoKey);
@@ -803,6 +868,11 @@ export function useAIRecoverySession(args: HookArgs): HookState {
         if (!isCurrentDataRequest(requestId)) return;
         const recoveredGeneratedAt = recovered?.session?.generatedAt ?? null;
         if (recovered?.session && (recoveredGeneratedAt !== previousGeneratedAt || previousGeneratedAt != null)) {
+          const autoOrdersKey = buildAutoOrdersKey(recovered);
+          const shouldStartAutoOrders =
+            autoOrdersKey != null && recovered?.quota.canRegenerateOrders
+              ? beginAutoOrdersRequest(autoOrdersKey, normalizedOrderOptions)
+              : false;
           adoptIncomingData(recovered, { completionVersionAtStart });
           registerLoadedAIRecoverySession({
             accountKey,
@@ -812,10 +882,8 @@ export function useAIRecoverySession(args: HookArgs): HookState {
             data: recovered,
           });
           setError(null);
-          const autoOrdersKey = buildAutoOrdersKey(recovered);
-          if (autoOrdersKey && !autoOrdersRequestedRef.current.has(autoOrdersKey) && recovered?.quota.canRegenerateOrders) {
-            autoOrdersRequestedRef.current.add(autoOrdersKey);
-            void regenerateOrdersInternal(true, normalizedOrderOptions);
+          if (autoOrdersKey && shouldStartAutoOrders) {
+            void regenerateOrdersInternal(true, normalizedOrderOptions, autoOrdersKey);
           }
           return;
         }
