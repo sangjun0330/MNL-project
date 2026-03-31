@@ -6,6 +6,7 @@ import type { ISODate } from "@/lib/date";
 import { addDays, fromISODate, toISODate, todayISO } from "@/lib/date";
 import type { AppState, AppStore, AppSettings, BioInputs, EmotionEntry } from "@/lib/model";
 import { defaultSettings, emptyState } from "@/lib/model";
+import { syncEmotionMoodMirror } from "@/lib/mood";
 import type { Shift } from "@/lib/types";
 import { autoAdjustMenstrualSettings } from "@/lib/menstrual";
 import { sanitizeStatePayload } from "@/lib/stateSanitizer";
@@ -82,6 +83,10 @@ function invalidateDerivedClientData() {
   ]);
 }
 
+/**
+ * Store is the mutation source only.
+ * Persistent local draft + remote save are owned by CloudStateSync.
+ */
 function save() {}
 
 function normalizeSettings(raw: any): AppSettings {
@@ -390,15 +395,12 @@ function setBioForDate(iso: ISODate, patch: Partial<BioInputs>) {
 
   const nextSettings = adjusted ? { ...state.settings, menstrual: adjusted } : state.settings;
   const shouldSyncMood = patch.mood !== undefined;
-  const nextEmotions = shouldSyncMood
-    ? {
-        ...(state.emotions ?? {}),
-        [iso]: {
-          ...((state.emotions ?? {})[iso] ?? { mood: 3 as any }),
-          mood: (patch.mood == null ? 3 : patch.mood) as any,
-        },
-      }
-    : (state.emotions ?? {});
+  const nextEmotions = { ...(state.emotions ?? {}) };
+  if (shouldSyncMood) {
+    const mirroredEmotion = syncEmotionMoodMirror((state.emotions ?? {})[iso] ?? null, patch.mood ?? null);
+    if (mirroredEmotion) nextEmotions[iso] = mirroredEmotion;
+    else delete nextEmotions[iso];
+  }
   const nextBioMap = { ...(state.bio ?? {}) };
   if (hasMeaningfulBioEntry(nextBio)) nextBioMap[iso] = nextBio;
   else delete nextBioMap[iso];

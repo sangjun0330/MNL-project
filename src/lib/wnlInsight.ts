@@ -1,5 +1,6 @@
 // src/lib/wnlInsight.ts
 // Insight v2.x: UI helpers + palette + per-day Orders done state
+// Legacy compatibility helper module retained for old exports only.
 //
 // ✅ Backward compatible with older patch exports
 //   - shiftTimes

@@ -24,33 +24,31 @@ export type EmotionEntry = {
 };
 
 export type BioInputs = {
+  // Active ScheduleRecordSheet inputs
   sleepHours?: number | null; // 0..16
-  // v2.0: 낮잠(쪽잠) 시간
   napHours?: number | null; // 0..4
-  // deprecated: 저장/알고리즘 미사용 (UI 호환용 타입만 유지)
-  sleepQuality?: 1 | 2 | 3 | 4 | 5 | null;
-  // deprecated: 저장/알고리즘 미사용 (UI 호환용 타입만 유지)
-  sleepTiming?: "auto" | "night" | "day" | "mixed" | null;
   stress?: StressLevel | null; // 0..3
   activity?: ActivityLevel | null; // 0..3
   caffeineMg?: number | null; // 0..1000
-  // deprecated: 저장/알고리즘 미사용 (UI 호환용 타입만 유지)
-  caffeineLastAt?: string | null;
-  // deprecated: 저장/알고리즘 미사용 (UI 호환용 타입만 유지)
-  fatigueLevel?: number | null;
-  // mood는 emotions 분리 저장 대신 bio에 저장
+  // Compatibility field: current product still mirrors mood into bio for legacy readers.
   mood?: MoodScore | null; // 1..5
-  // v2.0: (여성) 통증/증상 강도
   // 0=없음, 1~3=강도
   symptomSeverity?: 0 | 1 | 2 | 3 | null;
   menstrualStatus?: "none" | "pms" | "period" | null;
   menstrualFlow?: 0 | 1 | 2 | 3 | null;
-  // deprecated: 저장/알고리즘 미사용 (UI 호환용 타입만 유지)
-  shiftOvertimeHours?: number | null;
   // v3.0: 근무 이벤트 태그(다중 선택 + 직접 입력)
   workEventTags?: string[] | null;
   // v3.0: 근무 이벤트 상세 메모
   workEventNote?: string | null;
+
+  // Compatibility-only / legacy-extended-log fields
+  // The primary ScheduleRecordSheet UI does not actively collect these values.
+  // They are still accepted for legacy payloads and the DailyLogSheet extended editor.
+  sleepQuality?: 1 | 2 | 3 | 4 | 5 | null;
+  sleepTiming?: "auto" | "night" | "day" | "mixed" | null;
+  caffeineLastAt?: string | null;
+  fatigueLevel?: number | null;
+  shiftOvertimeHours?: number | null;
 };
 
 export type ProfileSettings = {

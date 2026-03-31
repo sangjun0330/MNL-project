@@ -396,6 +396,7 @@ export function ToolMedSafetyRecentPage() {
     const summary = item.result.summary || "";
     const title = (item.result.title || query).slice(0, 80);
     const blocks = buildMedSafetyMemoBlocks({
+      layout: "brief",
       query,
       answer,
       summary,

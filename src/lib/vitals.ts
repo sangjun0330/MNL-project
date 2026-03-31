@@ -6,11 +6,15 @@ import type { MenstrualPhase } from "@/lib/menstrual";
 import { inferMenstrualPosterior, type MenstrualPosterior } from "@/lib/menstrualProbability";
 import type { AppState, BioInputs, EmotionEntry } from "@/lib/model";
 import { hasHealthInput } from "@/lib/healthRecords";
+import { readRecordedMood } from "@/lib/mood";
 import type { Shift } from "@/lib/types";
 import { defaultRNestState, stepRNestBatteryEngine } from "@/lib/rnestBatteryEngine";
 import { shiftTimes } from "@/lib/rnestInsight";
 
 export type RiskTone = "green" | "orange" | "red";
+
+export const RELIABLE_ESTIMATED_SIGNAL_MAX_GAP_DAYS = 2;
+export const RELIABLE_ESTIMATED_SIGNAL_MIN_RELIABILITY = 0.45;
 
 export type DailyVital = {
   dateISO: ISODate;
@@ -96,9 +100,31 @@ export type DailyVital = {
   };
 };
 
+type ReliableEstimatedSignalCandidate = {
+  engine?: {
+    inputReliability?: number;
+    daysSinceAnyInput?: number | null;
+  };
+} | null | undefined;
+
 function clamp(n: number, min: number, max: number) {
   const v = Number.isFinite(n) ? n : min;
   return Math.max(min, Math.min(max, v));
+}
+
+export function hasReliableEstimatedSignal(
+  candidate: ReliableEstimatedSignalCandidate,
+  opts?: {
+    maxGapDays?: number;
+    minReliability?: number;
+  }
+) {
+  if (!candidate) return false;
+  const gap = candidate.engine?.daysSinceAnyInput ?? 99;
+  const reliability = candidate.engine?.inputReliability ?? 0;
+  const maxGapDays = Math.max(0, Math.round(Number(opts?.maxGapDays ?? RELIABLE_ESTIMATED_SIGNAL_MAX_GAP_DAYS)));
+  const minReliability = clamp(Number(opts?.minReliability ?? RELIABLE_ESTIMATED_SIGNAL_MIN_RELIABILITY), 0, 1);
+  return gap <= maxGapDays && reliability >= minReliability;
 }
 
 function round1(n: number) {
@@ -329,7 +355,7 @@ export function computeVitalsRange(...args: any[]): DailyVital[] {
     const rawNap = bio.napHours ?? null;
     const rawStress: number | null = bio.stress ?? null;
     const rawActivity: number | null = bio.activity ?? null;
-    const rawMood = bio.mood ?? emotion?.mood ?? null;
+    const rawMood = readRecordedMood(bio, emotion);
     const rawCaffeineMg = bio.caffeineMg ?? null;
     const rawCaffeineLastAt: string | null = null;
     const rawSleepQuality = null;

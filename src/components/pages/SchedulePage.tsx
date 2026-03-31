@@ -7,6 +7,7 @@ import { addDays, endOfMonth, formatKoreanDate, startOfMonth, toISODate, fromISO
 import { useAppStore } from "@/lib/store";
 import { computeVitalsRange } from "@/lib/vitals";
 import { countHealthRecordedDays, hasHealthInput } from "@/lib/healthRecords";
+import { hasRecordedMood, readRecordedMood } from "@/lib/mood";
 import { SHIFT_LABELS, shiftColor } from "@/lib/types";
 import { cn } from "@/lib/cn";
 
@@ -240,10 +241,7 @@ export function SchedulePage() {
 
   // ── 3교대 패턴 ON/OFF ──────────────────────────────────
   const patternEnabled = Boolean(store.settings.schedulePatternEnabled ?? true);
-  const effectiveSchedule = useMemo(
-    () => (patternEnabled ? store.schedule : ({} as typeof store.schedule)),
-    [patternEnabled, store.schedule]
-  );
+  const effectiveSchedule = patternEnabled ? store.schedule : ({} as typeof store.schedule);
 
   // ── 월간 통계 ──────────────────────────────────────────
   const monthlyStats = useMemo(() => {
@@ -252,13 +250,14 @@ export function SchedulePage() {
     let sleepCount = 0;
     let recordCount = 0;
     let totalDays = 0;
+    const scheduleForStats = patternEnabled ? store.schedule : null;
 
     const start = fromISODate(range.start);
     const end = fromISODate(range.end);
     for (let d = new Date(start); d <= end; d = addDays(d, 1)) {
       const iso = toISODate(d);
       totalDays++;
-      const shift = effectiveSchedule[iso];
+      const shift = scheduleForStats?.[iso];
       if (shift) shiftCounts[shift] = (shiftCounts[shift] ?? 0) + 1;
       const bio = store.bio?.[iso];
       const emo = store.emotions?.[iso];
@@ -269,7 +268,7 @@ export function SchedulePage() {
       }
     }
     return { shiftCounts, sleepAvg: sleepCount > 0 ? sleepSum / sleepCount : null, recordCount, totalDays };
-  }, [range, effectiveSchedule, store.bio, store.emotions]);
+  }, [range, patternEnabled, store.schedule, store.bio, store.emotions]);
 
   // ── 선택된 날짜 데이터 ──────────────────────────────────
   const selShift = patternEnabled ? store.schedule[selected] : undefined;
@@ -280,7 +279,7 @@ export function SchedulePage() {
 
   const hasAnyRecord = !!(
     selShift || selBio?.sleepHours != null || selBio?.stress != null ||
-    selBio?.mood != null || selEmotion || selNote
+    hasRecordedMood(selBio ?? null, selEmotion ?? null) || selEmotion || selNote
   );
 
   // ── 캘린더 헤더에 들어갈 패턴·생리주기 아이콘 ─────────
@@ -425,11 +424,11 @@ export function SchedulePage() {
               </div>
             )}
             {/* 기분 */}
-            {(selBio?.mood != null || selEmotion) && (
+            {hasRecordedMood(selBio ?? null, selEmotion ?? null) && (
               <div className="flex items-center gap-2 text-[13px] text-ios-text">
                 <IconSmile />
                 <span>
-                  기분 {moodLabel(selBio?.mood ?? selEmotion?.mood ?? 3)}
+                  기분 {moodLabel(readRecordedMood(selBio ?? null, selEmotion ?? null) ?? 3)}
                   {selEmotion?.tags?.[0] && (
                     <span className="ml-1.5 text-ios-muted">{selEmotion.tags[0]}</span>
                   )}

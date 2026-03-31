@@ -2,6 +2,8 @@
 // Nurse Shift-Work Recovery Engine v3.0
 // - Implements SRI/CSI/SLF/MIF/CIF/MF based recovery model
 // - Deterministic and profile-aware
+// Legacy predecessor retained for audit/reference only.
+// Active production calculations go through src/lib/rnestBatteryEngine.ts.
 
 import type { ISODate } from "@/lib/date";
 import { diffDays } from "@/lib/date";

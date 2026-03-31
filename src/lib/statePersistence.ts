@@ -1,4 +1,5 @@
 import type { AppState } from "@/lib/model";
+import { readRecordedMood } from "@/lib/mood";
 import { sanitizeStatePayload } from "@/lib/stateSanitizer";
 import { defaultMemoState, defaultRecordState } from "@/lib/notebook";
 
@@ -49,9 +50,11 @@ export function serializeStateForSupabase(raw: unknown): AppState {
   ]);
 
   for (const iso of dateSet) {
-    const bio = (next.bio?.[iso as keyof typeof next.bio] ?? {}) as Record<string, unknown>;
-    const emotion = (next.emotions?.[iso as keyof typeof next.emotions] ?? {}) as Record<string, unknown>;
-    const mergedMood = bio.mood ?? emotion.mood ?? null;
+    const bioEntry = next.bio?.[iso as keyof typeof next.bio] ?? null;
+    const emotionEntry = next.emotions?.[iso as keyof typeof next.emotions] ?? null;
+    const bio = (bioEntry ?? {}) as Record<string, unknown>;
+    const emotion = (emotionEntry ?? {}) as Record<string, unknown>;
+    const mergedMood = readRecordedMood(bioEntry ?? null, emotionEntry ?? null);
     const fullBio: Record<string, unknown> = {};
     for (const key of BIO_FIELDS) {
       if (key === "mood") {

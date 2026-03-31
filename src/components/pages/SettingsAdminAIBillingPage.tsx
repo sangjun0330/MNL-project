@@ -178,7 +178,7 @@ export function SettingsAdminAIBillingPage() {
               <section className={`${CARD} mt-4`}>
                 <div className="text-[18px] font-bold text-ios-text">추가 구매/소진</div>
                 <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  <Metric label="Free 과거 구매 유저" value={`${summary.purchases.freeCreditPurchaseUsers}명`} hint="현재 정책상 Free 신규 구매는 비활성" />
+                  <Metric label="Free 구매 유저" value={`${summary.purchases.freeCreditPurchaseUsers}명`} hint="추가 크레딧 구매 완료 기준" />
                   <Metric label="Pro 프리미엄 추가 구매율" value={`${summary.purchases.proPremiumExtraPurchaseRatePct}%`} hint={`구매 유저 ${summary.purchases.proPremiumExtraPurchaseUsers}명`} />
                   <Metric label="Pro 기본 검색 구매율" value={`${summary.purchases.proStandardPurchaseRatePct}%`} hint={`구매 유저 ${summary.purchases.proStandardPurchaseUsers}명`} />
                   <Metric label="크레딧 결제 성공률" value={`${summary.conversion.creditPackPaymentConversionRatePct}%`} />

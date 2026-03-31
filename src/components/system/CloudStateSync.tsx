@@ -20,6 +20,11 @@ type SaveResult = {
   stateRevision: number | null;
 };
 
+/**
+ * CloudStateSync is the persistence owner.
+ * The store mutates in-memory app state; this component serializes, writes local drafts,
+ * and syncs the canonical payload to `/api/user/state`.
+ */
 export function CloudStateSync({ remoteEnabled = false }: { remoteEnabled?: boolean }) {
   const auth = useAuth();
   const { status } = useAuthState();

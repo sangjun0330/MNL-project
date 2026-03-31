@@ -6,6 +6,7 @@ import { formatKoreanDate } from "@/lib/date";
 import type { Shift } from "@/lib/types";
 import { shiftColor, SHIFT_LABELS } from "@/lib/types";
 import type { ActivityLevel, BioInputs, EmotionEntry, MoodScore, StressLevel } from "@/lib/model";
+import { readRecordedMood } from "@/lib/mood";
 import { useAppStore } from "@/lib/store";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Button } from "@/components/ui/Button";
@@ -81,6 +82,8 @@ export function DailyLogSheet({
   onClose: () => void;
   iso: ISODate;
 }) {
+  // Legacy extended logging sheet.
+  // This screen still collects compatibility fields such as sleepQuality/sleepTiming/caffeineLastAt.
   const store = useAppStore();
   const { t } = useI18n();
   const menstrualEnabled = Boolean(store.settings.menstrual?.enabled);
@@ -164,7 +167,7 @@ export function DailyLogSheet({
 
     const hasEmotion = !!curEmotion;
     setEnableEmotion(hasEmotion);
-    setMood((curEmotion?.mood ?? 3) as MoodScore);
+    setMood((readRecordedMood(curBio ?? null, curEmotion ?? null) ?? 3) as MoodScore);
     setTags(curEmotion?.tags ?? []);
     setEmotionNote(curEmotion?.note ?? "");
     setCustomTag("");

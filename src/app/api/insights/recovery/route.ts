@@ -1,4 +1,4 @@
-// @ts-nocheck — Legacy route superseded by /api/insights/recovery/ai/*
+// @ts-nocheck — Legacy compatibility route superseded by /api/insights/recovery/ai/*
 import { NextRequest } from "next/server";
 import { addDays, fromISODate, toISODate, todayISO, type ISODate } from "@/lib/date";
 import type { AIRecoveryApiError, AIRecoveryApiSuccess, AIRecoveryPayload } from "@/lib/aiRecoveryContract";
@@ -43,13 +43,6 @@ function toLanguage(value: string | null): Language | null {
 function readShift(schedule: AppState["schedule"], iso: ISODate): Shift | null {
   const shift = schedule?.[iso] as Shift | undefined;
   return shift ?? null;
-}
-
-function hasReliableEstimatedSignal(v: { engine?: { inputReliability?: number; daysSinceAnyInput?: number | null } } | null) {
-  if (!v) return false;
-  const reliability = v.engine?.inputReliability ?? 0;
-  const gap = v.engine?.daysSinceAnyInput ?? 99;
-  return reliability >= 0.45 && gap <= 2;
 }
 
 function collectRecordedDates(state: AppState): ISODate[] {
@@ -545,7 +538,7 @@ async function handleRecovery(
         stripStartPhaseDynamicInputsFromVitals,
       },
       { buildPlannerContext, normalizeProfileSettings },
-      { computeVitalsRange },
+      { computeVitalsRange, hasReliableEstimatedSignal },
       { generateAIRecovery },
     ] = await Promise.all([
       import("@/lib/billing/plans"),

@@ -181,12 +181,13 @@ export function InsightsPage() {
                 ? `${t("회복 포커스")} · ${planner.focusFactor.label}`
                 : t("오늘의 회복 우선순위를 확인해 보세요.")
             }
-            detail={t("맞춤회복과 오늘의 오더 화면 구조만 유지 중입니다.")}
+            detail={t("기록 기반 회복 포커스와 다음 듀티 기준으로 AI 해설·오늘의 오더 화면으로 이어집니다.")}
             chips={(
               <>
                 <DetailChip color={DETAIL_ACCENTS.mint}>{planner.nextDutyLabel}</DetailChip>
                 {planner.nextDuty ? <DetailChip color={DETAIL_ACCENTS.mint}>다음 {shiftKo(planner.nextDuty)}</DetailChip> : null}
-                <DetailChip color={DETAIL_ACCENTS.navy}>UI skeleton</DetailChip>
+                <DetailChip color={DETAIL_ACCENTS.navy}>{t("AI 해설")}</DetailChip>
+                <DetailChip color={DETAIL_ACCENTS.navy}>{t("오늘의 오더")}</DetailChip>
               </>
             )}
             valueColor={DETAIL_ACCENTS.mint}

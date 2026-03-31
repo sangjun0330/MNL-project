@@ -34,7 +34,7 @@ export function buildGuardianCard(v: DailyVital): SvgCard {
   const mental = Math.round(v.mental.ema);
 
   const tags = (v.emotion?.tags ?? []).slice(0, 4).join(" ");
-  const emoji = moodEmoji(v.emotion?.mood ?? 3);
+  const emoji = moodEmoji(v.inputs.mood ?? 3);
   const phase = v.menstrual.enabled && v.menstrual.dayInCycle ? `${v.menstrual.label} · D${v.menstrual.dayInCycle}` : "주기 미설정";
 
   const instr = careInstruction(v);

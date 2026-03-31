@@ -131,19 +131,6 @@ export function InsightsRecoveryDetail() {
           </>
         }
       />
-
-      <DetailCard className="p-5 sm:p-6">
-        <div className="text-[12px] font-semibold text-ios-sub">안내</div>
-        <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-ios-text">지금 되는 것</div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <DetailChip color={DETAIL_ACCENTS.mint}>AI 해설 + 오더</DetailChip>
-          <DetailChip color={DETAIL_ACCENTS.navy}>오더 재생성</DetailChip>
-          <DetailChip color={DETAIL_ACCENTS.navy}>완료 체크 저장</DetailChip>
-        </div>
-        <p className="mt-3 text-[14px] leading-relaxed text-ios-sub">
-          AI 해설 결과와 오더 완료 상태는 기존 기록과 따로 안전하게 저장돼요.
-        </p>
-      </DetailCard>
     </InsightDetailShell>
   );
 }

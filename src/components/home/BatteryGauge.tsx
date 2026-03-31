@@ -71,7 +71,7 @@ export function BatteryGauge({
       <div
         className={cn(
           "relative shrink-0",
-          isLarge ? "h-[106px] w-[106px] sm:h-[120px] sm:w-[120px]" : "h-[86px] w-[86px] sm:h-[100px] sm:w-[100px]"
+          isLarge ? "h-[118px] w-[118px] sm:h-[132px] sm:w-[132px]" : "h-[86px] w-[86px] sm:h-[100px] sm:w-[100px]"
         )}
       >
         <svg viewBox="0 0 120 120" className="h-full w-full">
@@ -94,12 +94,12 @@ export function BatteryGauge({
           <div
             className={cn(
               "font-semibold leading-none tracking-[-0.02em]",
-              isLarge ? "text-[24px] sm:text-[28px]" : "text-[20px] sm:text-[22px]"
+              isLarge ? "text-[26px] sm:text-[30px]" : "text-[20px] sm:text-[22px]"
             )}
           >
             {Math.round(pct)}
           </div>
-          <div className={cn("leading-none text-black/55", isLarge ? "mt-1.5 text-[11px]" : "mt-1 text-[10px]")}>
+          <div className={cn("leading-none text-black/55", isLarge ? "mt-2 text-[11.5px]" : "mt-1 text-[10px]")}>
             {label}
           </div>
         </div>

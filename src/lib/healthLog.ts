@@ -1,6 +1,7 @@
 
 import type { ISODate } from "@/lib/date";
 import type { AppState } from "@/lib/model";
+import { readRecordedMood } from "@/lib/mood";
 import type { Shift } from "@/lib/types";
 
 // ✅ 날짜별 로그 스냅샷(서버에 저장/동기화할 payload)
@@ -30,7 +31,7 @@ export type DailyHealthSnapshot = {
     workEventNote?: string | null;
   };
 
-  // 기분은 emotions에 저장되므로 따로 넣어도 됨(서버 분석 편의)
+  // 기분은 bio.mood를 canonical source로 읽고, emotions.mood는 compatibility mirror로만 본다.
   mood?: number | null;
 };
 
@@ -84,7 +85,7 @@ export function buildDailyHealthSnapshot(opts: {
   const note: string | undefined = notes?.[dateISO] ?? undefined;
 
   const bioRaw = bioMap?.[dateISO] ?? undefined;
-  const mood = (emotions?.[dateISO] as any)?.mood ?? null;
+  const mood = readRecordedMood(bioRaw ?? null, (emotions?.[dateISO] as any) ?? null);
 
   const bio = bioRaw
     ? {
