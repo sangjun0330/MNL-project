@@ -17,6 +17,20 @@ dist
 supabase/manual/restore_rnest_user_state_from_local.sql
 wnl_insights_redesign.zip
 
+# Internal reports / runbooks / recovery scripts — keep local only
+docs/health-record-engine-analysis-report.md
+docs/health-record-engine-remediation-plan.md
+docs/med-safety-prompt-reform-report.md
+docs/rnest-paid-plan-strategy-report.md
+docs/security-audit-report.md
+docs/supabase-storage-map.md
+supabase/manual/full-reset-rebuild-runbook.md
+supabase/manual/restore_rnest_user_state_runbook.md
+supabase/manual/restore_rnest_user_state_legacy_ids.sql
+scripts/recover-rnest-user-state-from-local.mjs
+scripts/recover-rnest-user-state-from-revision.mjs
+.github/workflows/deploy.yml
+
 playwright-report
 test-results
 public/runtime/vendor/web-llm/index.js
