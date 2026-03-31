@@ -245,7 +245,13 @@ export type MedSafetyEvidenceSignals = {
   mixedIntent: boolean;
   asksSelection: boolean;
   asksInterpretation: boolean;
+  asksConceptExplanation: boolean;
+  asksQuestionSolving: boolean;
+  asksImageInterpretation: boolean;
   asksThreshold: boolean;
+  explicitActionRequest: boolean;
+  hasStrongActionCue: boolean;
+  hasWeakActionCue: boolean;
   asksImmediateAction: boolean;
   asksTrendReview: boolean;
   needsEntityDisambiguation: boolean;

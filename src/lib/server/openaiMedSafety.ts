@@ -2160,9 +2160,10 @@ function appendMustIncludeHints(
   userPrompt: string,
   query: string,
   decision: MedSafetyRouteDecision,
-  locale: "ko" | "en"
+  locale: "ko" | "en",
+  hasImage = false
 ): string {
-  const signals = buildQuestionSignals(normalizeQuery(query));
+  const signals = buildQuestionSignals(normalizeQuery(query), { hasImage });
   const hints = buildMustIncludeHints(decision, signals, locale);
   if (hints.length === 0) return userPrompt;
   const label = locale === "en" ? "Must include" : "반드시 포함";
@@ -2265,7 +2266,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
       const baseUserPrompt = shouldUseContinuationIds ? userPrompt : memoryAwareUserPrompt;
       // Phase 3: inject must-include hints into user prompt for hybrid_live
       const primaryUserPrompt = runtimeMode === "hybrid_live"
-        ? appendMustIncludeHints(baseUserPrompt, params.query, routeDecision, params.locale)
+        ? appendMustIncludeHints(baseUserPrompt, params.query, routeDecision, params.locale, Boolean(params.imageDataUrl))
         : baseUserPrompt;
       const mainAttempt = await generateAnswerWithPrompt({
         apiKey,

@@ -132,12 +132,34 @@ function buildSecondaryIntentCluster(signals: MedSafetyQuestionSignals, primaryI
     .slice(0, 2);
 }
 
+function pickInterpretiveIntent(signals: MedSafetyQuestionSignals): MedSafetyIntent {
+  if (
+    signals.asksSelection &&
+    signals.intentScores.compare >= Math.max(signals.intentScores.numeric, signals.intentScores.device, signals.intentScores.knowledge)
+  ) {
+    return "compare";
+  }
+  if (
+    signals.intentScores.device > 0 &&
+    signals.intentScores.device >= Math.max(signals.intentScores.numeric, signals.intentScores.compare) &&
+    !signals.explicitActionRequest
+  ) {
+    return "device";
+  }
+  if (signals.asksInterpretation && signals.intentScores.numeric >= Math.max(signals.intentScores.device, signals.intentScores.compare)) {
+    return "numeric";
+  }
+  return "knowledge";
+}
+
 function deriveIntent(signals: MedSafetyQuestionSignals) {
   const top = pickTopIntent(signals.intentScores);
   let intent: MedSafetyIntent = top.topScore > 0 ? top.top : "knowledge";
+  const interpretiveBias = signals.asksConceptExplanation || signals.asksQuestionSolving || signals.asksImageInterpretation;
 
-  if (signals.preNotification || signals.asksImmediateAction) intent = "action";
+  if (signals.preNotification || signals.wantsScript || signals.explicitActionRequest) intent = "action";
   else if (signals.mixedNumericAction) intent = "action";
+  else if (interpretiveBias) intent = pickInterpretiveIntent(signals);
   else if (signals.asksSelection && signals.intentScores.compare >= signals.intentScores.numeric) intent = "compare";
   else if (signals.mentionsAlarm && signals.intentScores.device >= signals.intentScores.numeric) intent = "device";
 
@@ -158,7 +180,9 @@ function deriveRisk(signals: MedSafetyQuestionSignals, hasImage: boolean) {
   if (signals.mentionsSetting && signals.needsEntityDisambiguation) score += 1;
   if (signals.mentionsLineOrTube && signals.mentionsPatientState && signals.asksImmediateAction) score += 2;
   if (signals.subjectFocus === "device" && (signals.mentionsSetting || signals.mentionsPatientState)) score += 1;
-  if (hasImage) score += 1;
+  if (hasImage && (signals.asksImmediateAction || signals.mentionsAlarm || signals.mentionsSetting || signals.mentionsPatientState)) {
+    score += 1;
+  }
   if (score >= 5) return "high" satisfies MedSafetyRisk;
   if (score >= 2) return "medium" satisfies MedSafetyRisk;
   return "low" satisfies MedSafetyRisk;
@@ -177,7 +201,9 @@ function deriveEntityClarity(signals: MedSafetyQuestionSignals) {
 
 function deriveAnswerDepth(signals: MedSafetyQuestionSignals, risk: MedSafetyRisk, hasImage: boolean) {
   if (!hasImage && risk === "low" && !signals.mixedIntent && !signals.preNotification && !signals.pairedProblem) return "short" as const;
-  if (risk === "high" || signals.pairedProblem || signals.preNotification || hasImage) return "detailed" as const;
+  if (risk === "high" || signals.pairedProblem || signals.preNotification || (hasImage && !signals.asksQuestionSolving)) {
+    return "detailed" as const;
+  }
   return "standard" as const;
 }
 
@@ -275,7 +301,15 @@ function deriveConfidence(
   risk: MedSafetyRisk
 ) {
   if (entityClarity === "low") return "low" as const;
-  if (signals.mixedIntent || hasImage || signals.preNotification || signals.pairedProblem || risk === "high") return "medium" as const;
+  if (
+    signals.mixedIntent ||
+    signals.preNotification ||
+    signals.pairedProblem ||
+    risk === "high" ||
+    (hasImage && (signals.explicitActionRequest || signals.mentionsAlarm || signals.mentionsSetting || signals.needsEntityDisambiguation))
+  ) {
+    return "medium" as const;
+  }
   return "high" as const;
 }
 
@@ -320,7 +354,7 @@ function reconcileDecision(base: MedSafetyInternalDecision, signals: MedSafetyQu
 
 function synthesizeInternalDecision(input: RouteInput, refinement?: Partial<MedSafetyRouterRefinement>, source: "rules" | "model" = "rules") {
   const normalizedQuery = normalizeQuery(input.query);
-  const signals = buildQuestionSignals(normalizedQuery);
+  const signals = buildQuestionSignals(normalizedQuery, { hasImage: Boolean(input.imageDataUrl) });
   const { intent } = deriveIntent(signals);
   const risk = deriveRisk(signals, Boolean(input.imageDataUrl));
   const entityClarity = deriveEntityClarity(signals);
@@ -1332,18 +1366,51 @@ function buildPromptBudgetFit(args: {
 // Narrative prompt system (Phase 2+3 reform)
 // ---------------------------------------------------------------------------
 
-function buildRouteNarrativeKo(decision: MedSafetyRouteDecision, signals: MedSafetyQuestionSignals, hasImage: boolean): string {
-  const parts: string[] = [];
-
-  // 질문 유형 서술
-  const intentMap: Record<string, string> = {
+function describeIntentKo(decision: MedSafetyRouteDecision, signals: MedSafetyQuestionSignals, hasImage: boolean) {
+  if (decision.intent === "knowledge") {
+    if (signals.asksQuestionSolving) return hasImage ? "이미지 기반 문제 풀이/해설 질문" : "문제 풀이/해설 질문";
+    if (signals.asksImageInterpretation) return "이미지 기반 설명/판독 질문";
+    if (signals.asksConceptExplanation) return "임상 지식/설명 질문";
+  }
+  if (decision.intent === "numeric" && signals.asksImageInterpretation) return "이미지 포함 수치/해석 질문";
+  if (decision.intent === "device" && signals.asksImageInterpretation && !signals.explicitActionRequest) {
+    return "이미지 포함 장비/기구 판독 질문";
+  }
+  const intentMap: Record<MedSafetyRouteDecision["intent"], string> = {
     knowledge: "임상 지식/정의 질문",
     action: "즉시 행동/대응 질문",
     compare: "비교/선택 질문",
     numeric: "수치/해석 질문",
     device: "장비/기구/알람 질문",
   };
-  const intentLabel = intentMap[decision.intent] ?? "임상 질문";
+  return intentMap[decision.intent];
+}
+
+function describeIntentEn(decision: MedSafetyRouteDecision, signals: MedSafetyQuestionSignals, hasImage: boolean) {
+  if (decision.intent === "knowledge") {
+    if (signals.asksQuestionSolving) return hasImage ? "an image-based question-solving/explanation request" : "a question-solving/explanation request";
+    if (signals.asksImageInterpretation) return "an image-based explanation/reading request";
+    if (signals.asksConceptExplanation) return "a clinical explanation/definition question";
+  }
+  if (decision.intent === "numeric" && signals.asksImageInterpretation) return "an image-supported numeric interpretation question";
+  if (decision.intent === "device" && signals.asksImageInterpretation && !signals.explicitActionRequest) {
+    return "an image-supported equipment/device reading question";
+  }
+  const intentMap: Record<MedSafetyRouteDecision["intent"], string> = {
+    knowledge: "a clinical knowledge question",
+    action: "an immediate action/response question",
+    compare: "a comparison/selection question",
+    numeric: "a numeric interpretation question",
+    device: "an equipment/device/alarm question",
+  };
+  return intentMap[decision.intent];
+}
+
+function buildRouteNarrativeKo(decision: MedSafetyRouteDecision, signals: MedSafetyQuestionSignals, hasImage: boolean): string {
+  const parts: string[] = [];
+
+  // 질문 유형 서술
+  const intentLabel = describeIntentKo(decision, signals, hasImage);
 
   // 도메인 서술
   const domainParts: string[] = [];
@@ -1389,6 +1456,9 @@ function buildRouteNarrativeKo(decision: MedSafetyRouteDecision, signals: MedSaf
 
   // 이미지
   if (hasImage) {
+    if (signals.asksImageInterpretation && !signals.explicitActionRequest) {
+      parts.push("이미지 첨부는 관찰 근거를 연결하는 용도이며, 이미지 존재만으로 즉시 대응 질문으로 올리지 않는다.");
+    }
     parts.push("이미지가 포함되어 있으므로 이미지에서 관찰되는 내용을 답변에 연결한다.");
   }
 
@@ -1398,14 +1468,7 @@ function buildRouteNarrativeKo(decision: MedSafetyRouteDecision, signals: MedSaf
 function buildRouteNarrativeEn(decision: MedSafetyRouteDecision, signals: MedSafetyQuestionSignals, hasImage: boolean): string {
   const parts: string[] = [];
 
-  const intentMap: Record<string, string> = {
-    knowledge: "a clinical knowledge question",
-    action: "an immediate action/response question",
-    compare: "a comparison/selection question",
-    numeric: "a numeric interpretation question",
-    device: "an equipment/device/alarm question",
-  };
-  const intentLabel = intentMap[decision.intent] ?? "a clinical question";
+  const intentLabel = describeIntentEn(decision, signals, hasImage);
 
   const domainParts: string[] = [];
   if (signals.mentionsMedication) domainParts.push("medication");
@@ -1438,6 +1501,9 @@ function buildRouteNarrativeEn(decision: MedSafetyRouteDecision, signals: MedSaf
     parts.push("Briefly separate when the main recommendation fails and what opens the alternative path.");
   }
   if (hasImage) {
+    if (signals.asksImageInterpretation && !signals.explicitActionRequest) {
+      parts.push("Treat the image as observational evidence only, not as a reason by itself to upgrade the route to action.");
+    }
     parts.push("An image is attached — connect observations from the image to the answer.");
   }
 
@@ -1620,15 +1686,23 @@ export function buildDeterministicRouteDecision(input: RouteInput): MedSafetyRou
 }
 
 export function shouldUseTinyRouter(input: RouteInput, deterministic: MedSafetyRouteDecision) {
-  const signals = buildQuestionSignals(normalizeQuery(input.query));
+  const hasImage = Boolean(input.imageDataUrl);
+  const signals = buildQuestionSignals(normalizeQuery(input.query), { hasImage });
   return Boolean(
-    input.imageDataUrl ||
-      signals.mixedIntent ||
+    signals.mixedIntent ||
       (deterministic.risk === "high" && deterministic.entityClarity !== "high") ||
       (signals.mixedNumericAction && (signals.mentionsSetting || signals.mentionsPatientState || signals.mentionsAlarm || signals.mentionsLineOrTube)) ||
       signals.pairedProblem ||
       signals.preNotification ||
-      deterministic.confidence !== "high"
+      (!hasImage && deterministic.confidence !== "high") ||
+      (hasImage &&
+        (signals.explicitActionRequest ||
+          signals.mixedNumericAction ||
+          signals.mentionsAlarm ||
+          signals.mentionsSetting ||
+          signals.mentionsPatientState ||
+          signals.pairedProblem ||
+          signals.needsEntityDisambiguation))
   );
 }
 
@@ -1639,6 +1713,10 @@ export function buildTinyRouterDeveloperPrompt(locale: "ko" | "en") {
       "Return JSON only.",
       'Allowed keys: intentOverride, riskOverride, entityClarityOverride, urgencyOverride, detailProfileOverride, communicationProfileOverride, exceptionProfileOverride, pairedProblemOverride, reason.',
       "Use overrides only when the safer or more useful route clearly differs from the initial route.",
+      "Do not upgrade to action just because an image is attached.",
+      "Question-solving, explanation, definition, interpretation, and image-reading requests stay non-action unless the user explicitly asks what to do now or there is clear stop/report/escalation context.",
+      "You do not see image pixels here, only the signal summary. Do not infer acute deterioration from image existence alone.",
+      "If the route is plausibly correct, keep it.",
       "Do not rewrite the answer. Do not add extra keys.",
     ].join("\n");
   }
@@ -1647,16 +1725,44 @@ export function buildTinyRouterDeveloperPrompt(locale: "ko" | "en") {
     "반드시 JSON만 반환한다.",
     "허용 키: intentOverride, riskOverride, entityClarityOverride, urgencyOverride, detailProfileOverride, communicationProfileOverride, exceptionProfileOverride, pairedProblemOverride, reason",
     "초기 라우트보다 더 안전하거나 더 적합한 방향이 분명할 때만 override를 넣는다.",
+    "이미지가 첨부되었다는 이유만으로 intent를 action으로 올리지 않는다.",
+    "풀이, 해설, 설명, 정의, 해석, 판독, 이미지 관찰형 질문은 사용자가 지금 무엇을 할지 명시적으로 묻거나 stop/report/escalation 맥락이 분명할 때만 action으로 바꾼다.",
+    "여기서는 실제 이미지 픽셀을 보지 못하고 신호 요약만 본다. 이미지 존재만으로 급성 대응 상황을 추정하지 않는다.",
+    "초기 라우트가 충분히 타당하면 유지한다.",
     "답변을 쓰지 말고 추가 키도 넣지 않는다.",
   ].join("\n");
 }
 
+function buildTinyRouterSignalSummary(signals: MedSafetyQuestionSignals) {
+  return [
+    `scores=knowledge:${signals.intentScores.knowledge},action:${signals.intentScores.action},compare:${signals.intentScores.compare},numeric:${signals.intentScores.numeric},device:${signals.intentScores.device}`,
+    `explicitAction=${signals.explicitActionRequest ? "yes" : "no"}`,
+    `strongAction=${signals.hasStrongActionCue ? "yes" : "no"}`,
+    `weakAction=${signals.hasWeakActionCue ? "yes" : "no"}`,
+    `questionSolving=${signals.asksQuestionSolving ? "yes" : "no"}`,
+    `conceptExplanation=${signals.asksConceptExplanation ? "yes" : "no"}`,
+    `imageInterpretation=${signals.asksImageInterpretation ? "yes" : "no"}`,
+    `interpretation=${signals.asksInterpretation ? "yes" : "no"}`,
+    `preNotification=${signals.preNotification ? "yes" : "no"}`,
+    `alarm=${signals.mentionsAlarm ? "yes" : "no"}`,
+    `sudden=${signals.hasSuddenMarker ? "yes" : "no"}`,
+    `highRisk=${signals.hasHighRiskMarker ? "yes" : "no"}`,
+    `pairedProblem=${signals.pairedProblem ? "yes" : "no"}`,
+  ].join(" ");
+}
+
 export function buildTinyRouterUserPrompt(args: RouteInput & { deterministic?: MedSafetyRouteDecision | null }) {
+  const signals = buildQuestionSignals(normalizeQuery(args.query), { hasImage: Boolean(args.imageDataUrl) });
   const routeLine = args.deterministic ? buildCompactRouteSummary(args.deterministic) : "intent=unknown";
+  const top = pickTopIntent(signals.intentScores);
   return [
     `Question: ${normalizeText(args.query)}`,
     `Initial route: ${routeLine}`,
-    `Image: ${args.imageDataUrl ? "yes" : "no"}`,
+    `Image attached: ${args.imageDataUrl ? "yes" : "no"}`,
+    `Router sees image pixels here: no`,
+    `Top intents: primary=${top.top} secondary=${top.second} ambiguous=${top.isAmbiguous ? "yes" : "no"}`,
+    `Signal summary: ${buildTinyRouterSignalSummary(signals)}`,
+    "Override guard: switch to action only for explicit next-step asks or clear acute stop/report/escalation context.",
   ].join("\n");
 }
 
@@ -1685,7 +1791,7 @@ export function parseTinyRouterDecision(raw: string, fallback: MedSafetyRouteDec
       source: "model",
       reason: clampReason([fallback.reason, refinement.reason].filter(Boolean).join(", ")),
     },
-    buildQuestionSignals(normalizeQuery(""))
+    buildQuestionSignals(normalizeQuery(""), { hasImage: false })
   );
   return merged;
 }
@@ -1744,7 +1850,7 @@ export function assembleMedSafetyDeveloperPrompt(
   locale: "ko" | "en",
   options: PromptAssemblyOptions
 ): MedSafetyPromptAssembly {
-  const signals = buildQuestionSignals(normalizeQuery(options.query));
+  const signals = buildQuestionSignals(normalizeQuery(options.query), { hasImage: Boolean(options.hasImage) });
   const blueprint = buildMedSafetyPromptBlueprint(decision, {
     hasImage: options.hasImage,
     query: options.query,

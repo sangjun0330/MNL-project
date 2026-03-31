@@ -6,7 +6,26 @@ export type MedSafetyQuestionSignals = MedSafetyEvidenceSignals;
 const COMPARE_PATTERNS = [/차이/i, /구분/i, /\bvs\b/i, /헷갈/i, /어떤\s*걸/i];
 const NUMERIC_PATTERNS = [/정상\s*범위/i, /수치/i, /해석/i, /계산/i, /용량/i, /\bp\/f\b/i, /\babga\b/i];
 const DEVICE_PATTERNS = [/펌프/i, /라인/i, /카테터/i, /튜브/i, /회로/i, /알람/i, /\biabp\b/i, /\bpcv\b/i, /\bpeep\b/i];
-const ACTION_PATTERNS = [/어떻게/i, /대응/i, /조치/i, /먼저/i, /우선/i, /지금\s*할/i, /바로/i, /중단/i, /확인/i, /시작/i, /제시해?\s*줘/i];
+const ACTION_STRONG_PATTERNS = [
+  /대응/i,
+  /조치/i,
+  /처치/i,
+  /어떻게\s*(해야|해요|하나요|할까요|하죠)/i,
+  /뭐부터/i,
+  /무엇부터/i,
+  /우선\s*(뭘|무엇|해야|할)/i,
+  /먼저\s*(뭘|무엇|해야|할)/i,
+  /지금\s*할/i,
+  /즉시/i,
+  /바로/i,
+  /중단/i,
+  /멈추/i,
+  /보고\s*(해야|해요|하나요|할까요|드려야|드릴까요|할지)/i,
+  /호출/i,
+  /노티/i,
+  /sbar/i,
+];
+const ACTION_WEAK_PATTERNS = [/어떻게/i, /확인/i, /시작/i, /제시해?\s*줘/i];
 const KNOWLEDGE_PATTERNS = [
   /뭐예요/i,
   /뭔가요/i,
@@ -20,6 +39,9 @@ const KNOWLEDGE_PATTERNS = [
   /무슨\s*뜻/i,
   /어떤\s*건가요/i,
 ];
+const EXPLANATION_PATTERNS = [/설명/i, /의미/i, /무슨\s*뜻/i, /왜/i, /원리/i, /기전/i, /정의/i, /판독/i];
+const QUESTION_SOLVING_PATTERNS = [/풀이/i, /풀어/i, /해설/i, /정답/i, /오답/i, /문항/i, /퀴즈/i, /시험/i];
+const IMAGE_REFERENCE_PATTERNS = [/사진/i, /이미지/i, /첨부/i, /캡처/i, /스크린샷/i, /화면/i, /보이는/i, /보여/i, /보이/i, /파형/i, /소견/i, /모양/i];
 const SELECTION_PATTERNS = [/선택/i, /추천/i, /무엇을\s*먼저/i, /뭐가\s*낫/i];
 const INTERPRET_PATTERNS = [/해석/i, /의미/i, /시사/i, /왜/i];
 const THRESHOLD_PATTERNS = [/언제/i, /기준/i, /threshold/i, /보고\s*기준/i, /호출\s*기준/i, /노티/i];
@@ -55,8 +77,8 @@ const SUDDEN_PATTERNS = [/갑자기/i, /급격히/i, /방금/i, /지속되/i, /s
 const GENERIC_ENTITY_PATTERNS = [/이\s*약/i, /이\s*기구/i, /이거/i, /이게/i, /이\s*수치/i, /이\s*라인/i];
 const GENERIC_HEAD_NOUN_PATTERNS = [/약물?/i, /기구/i, /장비/i, /튜브/i, /라인/i, /펌프/i, /수치/i, /검사/i];
 const AMBIGUOUS_SHORT_ENTITY_PATTERNS = [/^[a-z0-9가-힣/+.-]{2,8}$/i];
-const RISK_ESCALATION_PATTERNS = [/즉시/i, /바로/i, /호출/i, /보고/i, /중단/i, /clamp/i, /산소/i, /분리/i];
-const ACTION_RESULT_PATTERNS = [/안\s*올라/i, /안\s*되/i, /떨어/i, /막히/i, /울리/i, /문제/i, /이상/i, /누출/i];
+const RISK_ESCALATION_PATTERNS = [/즉시/i, /바로/i, /호출/i, /보고\s*(기준|전|필요|해야|할)/i, /중단/i, /clamp/i, /산소/i, /분리/i];
+const ACTION_RESULT_PATTERNS = [/안\s*올라/i, /안\s*되/i, /떨어/i, /막히/i, /울리/i, /누출/i, /고장/i, /빠지/i, /새/i, /꺼지/i];
 
 export const FILLER_PATTERNS = [/상황에\s*따라/i, /일반적으로/i, /필요시/i, /추가로\s*고려/i, /도움이\s*될\s*수/i];
 
@@ -116,7 +138,7 @@ function buildBaseIntentScores(query: string): IntentScoreMap {
     compare: countPatternHits(query, COMPARE_PATTERNS),
     numeric: countPatternHits(query, NUMERIC_PATTERNS),
     device: countPatternHits(lineSafeQuery, DEVICE_PATTERNS),
-    action: countPatternHits(query, ACTION_PATTERNS),
+    action: countPatternHits(query, ACTION_STRONG_PATTERNS) * 2 + countPatternHits(query, ACTION_WEAK_PATTERNS),
     knowledge: countPatternHits(query, KNOWLEDGE_PATTERNS),
   };
 }
@@ -125,9 +147,13 @@ function adjustIntentByQuestionStructure(scores: IntentScoreMap, query: string):
   const adjusted = { ...scores };
   const tail = extractQuestionTail(query);
   const competingBaseMax = Math.max(scores.compare, scores.numeric, scores.device, scores.action);
+  const hasQuestionSolvingCue = countPatternHits(query, QUESTION_SOLVING_PATTERNS) > 0;
+  const hasExplanationCue = countPatternHits(query, EXPLANATION_PATTERNS) > 0;
 
-  if (countPatternHits(tail, ACTION_PATTERNS) > 0 || ACTION_RESULT_PATTERNS.some((pattern) => pattern.test(tail))) {
+  if (countPatternHits(tail, ACTION_STRONG_PATTERNS) > 0 || ACTION_RESULT_PATTERNS.some((pattern) => pattern.test(tail))) {
     adjusted.action += 2;
+  } else if (countPatternHits(tail, ACTION_WEAK_PATTERNS) > 0) {
+    adjusted.action += 1;
   }
   if (countPatternHits(tail, COMPARE_PATTERNS) > 0 || /(뭐가\s*다르|어떤\s*걸|뭐가\s*낫|구분)/i.test(tail)) {
     adjusted.compare += 2;
@@ -138,9 +164,11 @@ function adjustIntentByQuestionStructure(scores: IntentScoreMap, query: string):
   if (countPatternHits(tail, DEVICE_PATTERNS) > 0 && adjusted.action === scores.action) {
     adjusted.device += 1;
   }
-  if (countPatternHits(tail, KNOWLEDGE_PATTERNS) > 0 && competingBaseMax <= 1) {
+  if (countPatternHits(tail, [...KNOWLEDGE_PATTERNS, ...EXPLANATION_PATTERNS]) > 0 && competingBaseMax <= 1) {
     adjusted.knowledge += 2;
   }
+  if (hasQuestionSolvingCue) adjusted.knowledge += 2;
+  if (hasExplanationCue && competingBaseMax <= 2) adjusted.knowledge += 1;
   if (adjusted.knowledge === 0 && competingBaseMax === 0 && normalizeText(query).length > 0) {
     adjusted.knowledge = 1;
   }
@@ -165,7 +193,8 @@ export function pickTopIntent(scores: IntentScoreMap) {
   };
 }
 
-export function buildQuestionSignals(query: string): MedSafetyQuestionSignals {
+export function buildQuestionSignals(query: string, options: { hasImage?: boolean } = {}): MedSafetyQuestionSignals {
+  const hasImage = Boolean(options.hasImage);
   const intentScores = inferIntentScores(query);
   const topIntent = pickTopIntent(intentScores);
   const questionTail = extractQuestionTail(query);
@@ -184,14 +213,45 @@ export function buildQuestionSignals(query: string): MedSafetyQuestionSignals {
   const wantsScript = countPatternHits(query, SCRIPT_PATTERNS) > 0;
   const asksThreshold = countPatternHits(query, THRESHOLD_PATTERNS) > 0;
   const asksInterpretation = countPatternHits(query, INTERPRET_PATTERNS) > 0 || intentScores.numeric > 0;
-  const asksImmediateAction = countPatternHits(query, ACTION_PATTERNS) > 0 || ACTION_RESULT_PATTERNS.some((pattern) => pattern.test(questionTail));
+  const asksConceptExplanation = countPatternHits(query, [...KNOWLEDGE_PATTERNS, ...EXPLANATION_PATTERNS]) > 0 || intentScores.knowledge > 0;
+  const asksQuestionSolving = countPatternHits(query, QUESTION_SOLVING_PATTERNS) > 0;
+  const hasStrongActionCue = countPatternHits(query, ACTION_STRONG_PATTERNS) > 0;
+  const hasWeakActionCue = !hasStrongActionCue && countPatternHits(query, ACTION_WEAK_PATTERNS) > 0;
+  const hasActionResultCue = ACTION_RESULT_PATTERNS.some((pattern) => pattern.test(questionTail));
   const asksTrendReview = countPatternHits(query, TREND_PATTERNS) > 0;
   const bedsideSweep = countPatternHits(query, BEDSIDE_SWEEP_PATTERNS) > 0;
   const falseWorseningRisk = countPatternHits(query, FALSE_WORSENING_PATTERNS) > 0;
   const hasHighRiskMarker = countPatternHits(query, HIGH_RISK_PATTERNS) > 0;
   const hasSuddenMarker = countPatternHits(query, SUDDEN_PATTERNS) > 0;
-  const mixedNumericAction =
-    (intentScores.numeric > 0 || mentionsABGA) && (intentScores.action > 0 || preNotification || asksImmediateAction);
+  const acuteActionContext =
+    preNotification ||
+    mentionsAlarm ||
+    bedsideSweep ||
+    hasSuddenMarker ||
+    wantsScript ||
+    (mentionsPatientState && hasHighRiskMarker) ||
+    (mentionsLineOrTube && mentionsPatientState);
+  const parameterDecisionRequest =
+    /(몇으로|어느\s*정도로|어떤\s*값으로|얼마로).{0,10}(해야|해요|하나요|할까요|맞춰야|설정해야|둘까요|둘까)/i.test(query) &&
+    (mentionsSetting || mentionsMedication || mentionsCompatibility || mentionsLineOrTube || mentionsAlarm);
+  const explicitActionRequest =
+    hasStrongActionCue ||
+    parameterDecisionRequest ||
+    (hasWeakActionCue && acuteActionContext) ||
+    (/(지금|바로|즉시).{0,8}(뭘|무엇|어떻게|해야|할)/i.test(query) && !asksQuestionSolving);
+  const asksImmediateAction =
+    explicitActionRequest ||
+    (hasActionResultCue && (acuteActionContext || mentionsLineOrTube || mentionsVentilation || mentionsMedication));
+  const asksImageInterpretation =
+    hasImage &&
+    (countPatternHits(query, IMAGE_REFERENCE_PATTERNS) > 0 ||
+      asksInterpretation ||
+      asksConceptExplanation ||
+      asksQuestionSolving ||
+      intentScores.numeric > 0 ||
+      intentScores.device > 0 ||
+      intentScores.compare > 0);
+  const mixedNumericAction = (intentScores.numeric > 0 || mentionsABGA) && asksImmediateAction;
   const pairedProblem = (mentionsVentilation || mentionsABGA) && mentionsOxygenation;
 
   return {
@@ -203,7 +263,13 @@ export function buildQuestionSignals(query: string): MedSafetyQuestionSignals {
       topIntent.topScore - topIntent.secondScore <= 1,
     asksSelection: countPatternHits(query, SELECTION_PATTERNS) > 0 || intentScores.compare > 0,
     asksInterpretation,
+    asksConceptExplanation,
+    asksQuestionSolving,
+    asksImageInterpretation,
     asksThreshold,
+    explicitActionRequest,
+    hasStrongActionCue,
+    hasWeakActionCue,
     asksImmediateAction,
     asksTrendReview,
     needsEntityDisambiguation: includesGenericEntity(query) || isAmbiguousShortEntity(query),
