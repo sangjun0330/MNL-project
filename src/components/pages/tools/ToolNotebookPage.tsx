@@ -8,6 +8,7 @@ import {
   Calendar,
   CheckSquare,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Copy,
   Download,
@@ -162,6 +163,35 @@ function downloadTextFile(fileName: string, content: string, mimeType: string) {
   a.click()
   document.body.removeChild(a)
   window.URL.revokeObjectURL(url)
+}
+
+function openUrlWithAnchor(url: string, options?: { sameTab?: boolean }) {
+  if (typeof document === "undefined") return false
+  const href = String(url ?? "").trim()
+  if (!href) return false
+  const anchor = document.createElement("a")
+  anchor.style.display = "none"
+  anchor.href = href
+  if (options?.sameTab) {
+    anchor.target = "_self"
+  } else {
+    anchor.target = "_blank"
+    anchor.rel = "noopener noreferrer"
+  }
+  document.body.appendChild(anchor)
+  anchor.click()
+  document.body.removeChild(anchor)
+  return true
+}
+
+function shouldPreferSameTabForNotebookFileOpen() {
+  if (typeof window === "undefined") return false
+  const isStandalone =
+    window.matchMedia?.("(display-mode: standalone)")?.matches ||
+    Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone)
+  const isCompactViewport = window.matchMedia?.("(max-width: 767px)")?.matches ?? false
+  const isCoarsePointer = window.matchMedia?.("(pointer: coarse)")?.matches ?? false
+  return isStandalone || isCompactViewport || isCoarsePointer
 }
 
 const PDF_EXPORT_MARGIN_PT = 28
@@ -2527,73 +2557,134 @@ function GroupedBlockTypeMenuContent({
 }) {
   const groups = useMemo(() => resolveBlockTypeMenuGroups(availableTypes, intent), [availableTypes, intent])
   const [activeGroupId, setActiveGroupId] = useState<BlockTypeMenuGroupId | null>(() => findBlockTypeMenuGroupId(currentType, groups))
+  const [isCompactLayout, setIsCompactLayout] = useState(false)
+  const [showCompactTypeList, setShowCompactTypeList] = useState(false)
 
   useEffect(() => {
     setActiveGroupId(findBlockTypeMenuGroupId(currentType, groups))
+    setShowCompactTypeList(false)
   }, [currentType, groups])
 
-  const activeGroup = groups.find((group) => group.id === activeGroupId) ?? groups[0] ?? null
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const mediaQuery = window.matchMedia("(max-width: 767px)")
+    const applyLayout = () => setIsCompactLayout(mediaQuery.matches)
+    applyLayout()
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", applyLayout)
+      return () => mediaQuery.removeEventListener("change", applyLayout)
+    }
+    mediaQuery.addListener?.(applyLayout)
+    return () => mediaQuery.removeListener?.(applyLayout)
+  }, [])
 
-  return (
-    <div className="relative">
-      <div className="max-h-[calc(100vh-12rem)] overflow-y-auto py-1">
-        {groups.map((group) => (
-          <button
-            key={group.id}
-            type="button"
-            aria-label={group.label}
-            onMouseEnter={() => setActiveGroupId(group.id)}
-            onFocus={() => setActiveGroupId(group.id)}
-            onClick={() => setActiveGroupId(group.id)}
-            className={cn(
-              "flex w-full items-start gap-3 px-3 py-2 text-left transition-colors",
-              activeGroup?.id === group.id ? "bg-gray-50" : "hover:bg-gray-50"
-            )}
-          >
-            <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-ios-sub">
-              {renderBlockTypeGroupIcon(group.icon, "h-3.5 w-3.5")}
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-[13px] font-medium text-ios-text">{group.label}</span>
-              <span className="block text-[11px] text-ios-muted">{group.description}</span>
-            </span>
-            <ChevronRight className="mt-1 h-3.5 w-3.5 shrink-0 text-gray-300" />
-          </button>
-        ))}
-      </div>
-      {activeGroup && (
-        <div className="absolute left-full top-0 z-10 ml-2 w-56 max-w-[calc(100vw-7rem)] rounded-2xl border border-gray-200 bg-white py-1.5 shadow-[0_18px_40px_rgba(15,23,42,0.14)]">
-          <div className="border-b border-gray-100 px-3 py-2">
+  useEffect(() => {
+    if (!isCompactLayout) setShowCompactTypeList(false)
+  }, [isCompactLayout])
+
+  const activeGroup = groups.find((group) => group.id === activeGroupId) ?? groups[0] ?? null
+  const handleGroupSelect = useCallback(
+    (groupId: BlockTypeMenuGroupId) => {
+      setActiveGroupId(groupId)
+      if (isCompactLayout) setShowCompactTypeList(true)
+    },
+    [isCompactLayout]
+  )
+
+  const groupList = (
+    <div className="max-h-[calc(100vh-12rem)] overflow-y-auto py-1">
+      {groups.map((group) => (
+        <button
+          key={group.id}
+          type="button"
+          aria-label={group.label}
+          onMouseEnter={() => {
+            if (!isCompactLayout) setActiveGroupId(group.id)
+          }}
+          onFocus={() => {
+            if (!isCompactLayout) setActiveGroupId(group.id)
+          }}
+          onClick={() => handleGroupSelect(group.id)}
+          className={cn(
+            "flex w-full items-start gap-3 px-3 py-2 text-left transition-colors",
+            activeGroup?.id === group.id ? "bg-gray-50" : "hover:bg-gray-50"
+          )}
+        >
+          <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-ios-sub">
+            {renderBlockTypeGroupIcon(group.icon, "h-3.5 w-3.5")}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[13px] font-medium text-ios-text">{group.label}</span>
+            <span className="block text-[11px] text-ios-muted">{group.description}</span>
+          </span>
+          <ChevronRight className="mt-1 h-3.5 w-3.5 shrink-0 text-gray-300" />
+        </button>
+      ))}
+    </div>
+  )
+
+  const typeList = activeGroup ? (
+    <>
+      <div className="border-b border-gray-100 px-3 py-2">
+        <div className="flex items-center gap-2">
+          {isCompactLayout && (
+            <button
+              type="button"
+              aria-label="블록 그룹 목록으로 돌아가기"
+              onClick={() => setShowCompactTypeList(false)}
+              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-ios-sub transition-colors hover:bg-gray-100"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+          )}
+          <div className="min-w-0 flex-1">
             <div className="text-[12px] font-semibold text-ios-text">{activeGroup.label}</div>
             <div className="mt-0.5 text-[11px] text-ios-muted">
               {intent === "add" ? "이 그룹에서 추가할 블록" : "이 그룹으로 변경할 블록"}
             </div>
           </div>
-          <div className="max-h-[calc(100vh-14rem)] overflow-y-auto py-1">
-            {activeGroup.types.map((type) => (
-              <button
-                key={`${activeGroup.id}-${type}`}
-                type="button"
-                aria-label={blockTypeLabels[type]}
-                onClick={() => onSelect(type)}
-                className={cn(
-                  "flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] transition-colors",
-                  intent === "convert" && currentType === type
-                    ? "bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
-                    : "text-ios-text hover:bg-gray-50"
-                )}
-              >
-                <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-ios-sub">
-                  {renderBlockTypeIcon(type, "h-3 w-3")}
-                </span>
-                <span className="min-w-0 flex-1">{blockTypeLabels[type]}</span>
-                {intent === "convert" && currentType === type && (
-                  <span className="text-[11px] font-medium text-[color:var(--rnest-accent)]">현재</span>
-                )}
-              </button>
-            ))}
-          </div>
         </div>
+      </div>
+      <div className="max-h-[calc(100vh-14rem)] overflow-y-auto py-1">
+        {activeGroup.types.map((type) => (
+          <button
+            key={`${activeGroup.id}-${type}`}
+            type="button"
+            aria-label={blockTypeLabels[type]}
+            onClick={() => onSelect(type)}
+            className={cn(
+              "flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] transition-colors",
+              intent === "convert" && currentType === type
+                ? "bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
+                : "text-ios-text hover:bg-gray-50"
+            )}
+          >
+            <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-ios-sub">
+              {renderBlockTypeIcon(type, "h-3 w-3")}
+            </span>
+            <span className="min-w-0 flex-1">{blockTypeLabels[type]}</span>
+            {intent === "convert" && currentType === type && (
+              <span className="text-[11px] font-medium text-[color:var(--rnest-accent)]">현재</span>
+            )}
+          </button>
+        ))}
+      </div>
+    </>
+  ) : null
+
+  return (
+    <div className="relative">
+      {isCompactLayout ? (
+        <div className="w-full">{showCompactTypeList && activeGroup ? typeList : groupList}</div>
+      ) : (
+        <>
+          {groupList}
+          {activeGroup && (
+            <div className="absolute left-full top-0 z-10 ml-2 w-56 max-w-[calc(100vw-7rem)] rounded-2xl border border-gray-200 bg-white py-1.5 shadow-[0_18px_40px_rgba(15,23,42,0.14)]">
+              {typeList}
+            </div>
+          )}
+        </>
       )}
     </div>
   )
@@ -2623,7 +2714,7 @@ function BlockTypeMenu({
   return (
     <div
       ref={ref}
-      className="absolute left-0 top-full z-30 mt-1 w-60 rounded-2xl border border-gray-200 bg-white py-1.5 shadow-[0_18px_40px_rgba(15,23,42,0.14)]"
+      className="absolute left-0 top-full z-30 mt-1 w-[calc(100vw-5rem)] max-w-[20rem] rounded-2xl border border-gray-200 bg-white py-1.5 shadow-[0_18px_40px_rgba(15,23,42,0.14)] sm:w-60"
     >
       <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-ios-muted">
         추가할 블록
@@ -3633,7 +3724,7 @@ function InlineBlock({
             <Plus className="h-3.5 w-3.5" />
           </button>
           {showAddMenu && (
-            <div className="absolute left-0 top-full z-40 mt-2 w-60 max-w-[calc(100vw-6rem)] rounded-2xl border border-gray-200 bg-white py-1.5 shadow-[0_18px_40px_rgba(15,23,42,0.14)]">
+            <div className="absolute left-0 top-full z-40 mt-2 w-[calc(100vw-5rem)] max-w-[20rem] rounded-2xl border border-gray-200 bg-white py-1.5 shadow-[0_18px_40px_rgba(15,23,42,0.14)] sm:w-60">
               <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-ios-muted">
                 아래에 새 블록
               </div>
@@ -3717,7 +3808,7 @@ function InlineBlock({
             <GripVertical className="h-3.5 w-3.5" />
           </button>
           {showActionMenu && (
-            <div className="absolute left-0 top-full z-40 mt-2 w-60 max-w-[calc(100vw-6rem)] rounded-2xl border border-gray-200 bg-white py-1.5 shadow-[0_18px_40px_rgba(15,23,42,0.14)]">
+            <div className="absolute left-0 top-full z-40 mt-2 w-[calc(100vw-5rem)] max-w-[20rem] rounded-2xl border border-gray-200 bg-white py-1.5 shadow-[0_18px_40px_rgba(15,23,42,0.14)] sm:w-60">
               <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-ios-muted">
                 현재 블록 설정
               </div>
@@ -6610,12 +6701,46 @@ export function ToolNotebookPage() {
   }
 
   async function openAttachment(attachment: RNestMemoAttachment) {
+    const fallbackUrl = buildNotebookFileUrl(attachment.storagePath)
+    const preferSameTab = shouldPreferSameTabForNotebookFileOpen()
+    const popup = !preferSameTab && typeof window !== "undefined" ? window.open("", "_blank") : null
+
+    if (popup) {
+      try {
+        popup.opener = null
+        popup.document.title = attachment.name || "파일 여는 중"
+        popup.document.body.innerHTML =
+          '<div style="padding:24px;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif;color:#475569;">파일을 여는 중입니다...</div>'
+      } catch {
+        // Ignore cross-window access issues and fall back to navigation only.
+      }
+    }
+
     try {
       const url = await loadNotebookFileAccessUrl(attachment.storagePath)
-      window.open(url, "_blank", "noopener,noreferrer")
+      if (popup && !popup.closed) {
+        popup.location.replace(url)
+        return
+      }
+      if (preferSameTab) {
+        window.location.assign(url)
+        return
+      }
+      if (!openUrlWithAnchor(url)) {
+        window.location.assign(url)
+      }
     } catch {
-      const fallbackUrl = buildNotebookFileUrl(attachment.storagePath)
-      window.open(fallbackUrl, "_blank", "noopener,noreferrer")
+      if (popup && !popup.closed) {
+        popup.location.replace(fallbackUrl)
+        return
+      }
+      if (preferSameTab) {
+        window.location.assign(fallbackUrl)
+        return
+      }
+      if (!openUrlWithAnchor(fallbackUrl)) {
+        window.location.assign(fallbackUrl)
+      }
     }
   }
 

@@ -6,10 +6,11 @@ import type { ISODate } from "@/lib/date";
 import { addDays, endOfMonth, formatKoreanDate, startOfMonth, toISODate, fromISODate, todayISO } from "@/lib/date";
 import { useAppStore } from "@/lib/store";
 import { computeVitalsRange } from "@/lib/vitals";
-import { countHealthRecordedDays, hasHealthInput } from "@/lib/healthRecords";
+import { hasHealthInput } from "@/lib/healthRecords";
 import { hasRecordedMood, readRecordedMood } from "@/lib/mood";
 import { SHIFT_LABELS, shiftColor } from "@/lib/types";
 import { cn } from "@/lib/cn";
+import { vitalDisplayScore } from "@/lib/rnestInsight";
 
 import { Card } from "@/components/ui/Card";
 import { BottomSheet } from "@/components/ui/BottomSheet";
@@ -222,22 +223,32 @@ export function SchedulePage() {
     [store.schedule, store.notes, store.bio, store.emotions, store.settings, range.start, range.end]
   );
 
-  const recordedDays = useMemo(
-    () => countHealthRecordedDays({ bio: store.bio, emotions: store.emotions }),
-    [store.bio, store.emotions]
-  );
-  const canShowVitals = recordedDays >= 3;
-
   const riskColorByDate = useMemo(() => {
-    if (!canShowVitals) return {} as Record<ISODate, "green" | "orange" | "red">;
-    const m: Record<ISODate, "green" | "orange" | "red"> = {} as any;
-    for (const v of vitals) {
-      const bio = store.bio?.[v.dateISO] ?? null;
-      const emo = store.emotions?.[v.dateISO] ?? null;
-      if (hasHealthInput(bio as any, emo as any)) m[v.dateISO] = v.mental.tone;
+    const today = fromISODate(todayISO());
+    const monthEnd = endOfMonth(month);
+    const cutoffDate = monthEnd.getTime() < today.getTime() ? monthEnd : today;
+    const cutoffISO = toISODate(cutoffDate);
+
+    const candidates = vitals
+      .filter((v) => v.dateISO >= range.start && v.dateISO <= cutoffISO)
+      .filter((v) => {
+        const bio = store.bio?.[v.dateISO] ?? null;
+        const emo = store.emotions?.[v.dateISO] ?? null;
+        return hasHealthInput(bio as any, emo as any);
+      })
+      .map((v) => ({
+        iso: v.dateISO,
+        score: vitalDisplayScore(v),
+      }))
+      .sort((a, b) => (a.score !== b.score ? a.score - b.score : a.iso.localeCompare(b.iso)))
+      .slice(0, 3);
+
+    const m: Record<ISODate, "red"> = {} as Record<ISODate, "red">;
+    for (const candidate of candidates) {
+      m[candidate.iso] = "red";
     }
     return m;
-  }, [vitals, store.bio, store.emotions, canShowVitals]);
+  }, [month, range.start, store.bio, store.emotions, vitals]);
 
   // ── 3교대 패턴 ON/OFF ──────────────────────────────────
   const patternEnabled = Boolean(store.settings.schedulePatternEnabled ?? true);

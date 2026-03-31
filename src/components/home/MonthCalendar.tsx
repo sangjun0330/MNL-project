@@ -71,8 +71,6 @@ function phaseColor(phase: MenstrualPosterior["visualPhase"]) {
 
 function riskToneCellClass(tone: RiskTone | null) {
   if (tone === "red") return "bg-rose-50/80";
-  if (tone === "orange") return "bg-amber-50/80";
-  if (tone === "green") return "bg-emerald-50/70";
   return "";
 }
 
