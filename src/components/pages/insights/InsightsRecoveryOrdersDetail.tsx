@@ -284,20 +284,6 @@ export function InsightsRecoveryOrdersDetail({
     };
   }, []);
 
-  // 오더가 예상되지만 자동 생성이 아직 시작되지 않은 경우 조용히 폴링
-  const ordersSilentlyPending = Boolean(
-    initiallyOrdersPending && !ordersPayload && !session.loading && !session.savingOrders && !session.error,
-  );
-
-  const reloadRef = useRef(session.reload);
-  reloadRef.current = session.reload;
-
-  useEffect(() => {
-    if (!ordersSilentlyPending) return;
-    const interval = setInterval(() => void reloadRef.current(), 3_000);
-    return () => clearInterval(interval);
-  }, [ordersSilentlyPending]);
-
   const handleConfirmOrderGeneration = useCallback(() => {
     setOrderOptionsSheetOpen(false);
     void session.regenerateOrders(orderOptions);

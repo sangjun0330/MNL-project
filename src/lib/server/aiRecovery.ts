@@ -2542,7 +2542,6 @@ export async function generateAIRecoverySession(args: {
   slot: AIRecoverySlot;
   force?: boolean;
   payloadOverride?: unknown;
-  orderOptions?: AIRecoveryOrderGenerationOptions;
   signal: AbortSignal;
 }) {
   let payload = args.payloadOverride ?? {};
@@ -2691,8 +2690,6 @@ export async function generateAIRecoverySession(args: {
     throw new Error("session_generation_limit_reached");
   }
 
-  const orderOptions = normalizeAIRecoveryOrderGenerationOptions(args.orderOptions);
-
   let flow: OpenAIFlowResult = await runOpenAIBriefFlow({
     snapshot,
     model,
@@ -2725,29 +2722,6 @@ export async function generateAIRecoverySession(args: {
       });
       flow = retriedFlow;
     }
-  }
-  if (flow.status === "ready" && !flow.openaiMeta.fallbackReason) {
-    const ordersResult = await runOpenAIOrdersFlow({
-      snapshot,
-      brief: flow.brief,
-      model,
-      tier: subscription?.tier ?? null,
-      signal: args.signal,
-      orderOptions,
-    });
-    flow = {
-      ...flow,
-      orders: ordersResult.orders,
-      openaiMeta: {
-        ...flow.openaiMeta,
-        ordersResponseId: ordersResult.responseId ?? null,
-        usage: {
-          brief: flow.openaiMeta.usage.brief,
-          orders: ordersResult.usage,
-          total: combineAIRecoveryUsages(flow.openaiMeta.usage.brief, ordersResult.usage),
-        },
-      } as AIRecoveryOpenAIMeta,
-    } satisfies OpenAIFlowResult;
   }
   const session = normalizeStoredSession(snapshot, buildStoredSession({ snapshot, flow, previousSession: existingSession }));
   const renderableSession = canRenderStoredSession(snapshot, session) ? session : null;

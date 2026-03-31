@@ -1,6 +1,6 @@
 import type { ISODate } from "@/lib/date";
 import { isISODate, todayISO } from "@/lib/date";
-import { isAIRecoverySlot, normalizeAIRecoveryOrderGenerationOptions } from "@/lib/aiRecovery";
+import { isAIRecoverySlot } from "@/lib/aiRecovery";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -37,7 +37,6 @@ export async function POST(req: Request) {
     slot = isAIRecoverySlot(body?.slot) ? body.slot : "wake";
     const force = Boolean(body?.force);
     const payloadOverride = body?.state;
-    const orderOptions = normalizeAIRecoveryOrderGenerationOptions(body?.orderOptions);
     console.info("[AIRecovery] generate_route_received", {
       dateISO,
       slot,
@@ -52,7 +51,6 @@ export async function POST(req: Request) {
       slot,
       force,
       payloadOverride,
-      orderOptions,
       signal: req.signal,
     });
     return jsonNoStore({ ok: true, data });
