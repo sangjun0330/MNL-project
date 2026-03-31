@@ -2541,6 +2541,7 @@ function GroupedBlockTypeMenuContent({
           <button
             key={group.id}
             type="button"
+            aria-label={group.label}
             onMouseEnter={() => setActiveGroupId(group.id)}
             onFocus={() => setActiveGroupId(group.id)}
             onClick={() => setActiveGroupId(group.id)}
@@ -2573,6 +2574,7 @@ function GroupedBlockTypeMenuContent({
               <button
                 key={`${activeGroup.id}-${type}`}
                 type="button"
+                aria-label={blockTypeLabels[type]}
                 onClick={() => onSelect(type)}
                 className={cn(
                   "flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] transition-colors",
@@ -3306,6 +3308,7 @@ function InlineBlock({
   onChange,
   onDelete,
   onRemoveAttachment,
+  onRemoveGalleryAttachment,
   onOpenAttachment,
   onOpenDoc,
   onDuplicate,
@@ -3338,6 +3341,7 @@ function InlineBlock({
   onChange: (b: RNestMemoBlock) => void
   onDelete: () => void
   onRemoveAttachment: () => void
+  onRemoveGalleryAttachment: (attachmentId: string) => void
   onOpenAttachment: () => void
   onOpenDoc: (docId: string) => void
   onDuplicate: () => void
@@ -4367,12 +4371,8 @@ function InlineBlock({
                       )}
                       <button
                         type="button"
-                        onClick={() =>
-                          onChange({
-                            ...block,
-                            attachmentIds: (block.attachmentIds ?? []).filter((id) => id !== attachmentId),
-                          })
-                        }
+                        aria-label="갤러리 사진 제거"
+                        onClick={() => onRemoveGalleryAttachment(attachmentId)}
                         className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-white opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100"
                       >
                         <X className="h-3.5 w-3.5" />
@@ -6402,6 +6402,7 @@ export function ToolNotebookPage() {
     const target = targetOverride ?? pendingAssetTargetRef.current
     pendingAssetTargetRef.current = null
     if (files.length === 0 || !activeMemo || !target) return
+    const effectiveKind = target.kind ?? kind
     if (activeMemo.id !== target.docId) {
       setToast("메모가 바뀌어 업로드를 취소했습니다")
       return
@@ -6425,7 +6426,10 @@ export function ToolNotebookPage() {
         continue
       }
       try {
-        const uploaded = await uploadNotebookFile(file, kind === "attachment" ? deriveAttachmentKind(file, "file") : deriveAttachmentKind(file, "image"))
+        const uploaded = await uploadNotebookFile(
+          file,
+          effectiveKind === "attachment" ? deriveAttachmentKind(file, "file") : deriveAttachmentKind(file, "image")
+        )
         if ((uploaded.kind === "image" || uploaded.kind === "scan") && file.type.startsWith("image/")) {
           seedNotebookImagePreview(uploaded.storagePath, file)
         }
@@ -6444,7 +6448,7 @@ export function ToolNotebookPage() {
       const idx = doc.blocks.findIndex((block) => block.id === target.blockId)
       const insertAt = idx >= 0 ? idx + 1 : doc.blocks.length
       const nextBlocks = [...doc.blocks]
-      if (kind === "gallery") {
+      if (effectiveKind === "gallery") {
         const targetBlock = nextBlocks[idx]
         if (targetBlock?.type === "gallery") {
           nextBlocks[idx] = {
@@ -6466,11 +6470,11 @@ export function ToolNotebookPage() {
           insertAt,
           0,
           ...uploadedAttachments.map((attachment) =>
-            createMemoBlock(kind, {
-              text: kind === "image" ? "" : attachment.name,
+            createMemoBlock(effectiveKind, {
+              text: effectiveKind === "image" ? "" : attachment.name,
               attachmentId: attachment.id,
-              mediaWidth: kind === "image" ? 100 : undefined,
-              mediaOffsetX: kind === "image" ? 0 : undefined,
+              mediaWidth: effectiveKind === "image" ? 100 : undefined,
+              mediaOffsetX: effectiveKind === "image" ? 0 : undefined,
             })
           )
         )
@@ -6489,9 +6493,9 @@ export function ToolNotebookPage() {
       setToast(`${uploadedAttachments.length}개 업로드, ${failedCount}개 실패`)
     } else {
       setToast(
-        kind === "attachment"
+        effectiveKind === "attachment"
           ? `파일 ${uploadedAttachments.length}개를 추가했습니다`
-          : kind === "gallery"
+          : effectiveKind === "gallery"
             ? `갤러리에 사진 ${uploadedAttachments.length}개를 추가했습니다`
             : `사진 ${uploadedAttachments.length}개를 추가했습니다`
       )
@@ -6576,6 +6580,33 @@ export function ToolNotebookPage() {
     const removed = previousStoragePaths.filter((path) => !nextStoragePaths.includes(path))
     await cleanupAttachmentStoragePathsIfUnused(removed.length > 0 ? removed : [target.storagePath])
     setToast("첨부를 제거했습니다")
+  }
+
+  async function removeGalleryAttachmentById(blockId: string, attachmentId: string) {
+    if (!activeMemo) return
+    const target = activeMemo.attachments.find((attachment) => attachment.id === attachmentId)
+    if (!target) return
+
+    const previousStoragePaths = buildDocStoragePaths(activeMemo)
+    await updateActiveMemoContent((doc) =>
+      normalizeDocAttachments({
+        ...doc,
+        blocks: doc.blocks.map((block) =>
+          block.id === blockId && block.type === "gallery"
+            ? {
+                ...block,
+                attachmentIds: (block.attachmentIds ?? []).filter((id) => id !== attachmentId),
+              }
+            : block
+        ),
+      })
+    )
+
+    const nextDoc = store.getState().memo.documents[activeMemo.id]
+    const nextStoragePaths = nextDoc ? buildDocStoragePaths(nextDoc as RNestMemoDocument) : []
+    const removed = previousStoragePaths.filter((path) => !nextStoragePaths.includes(path))
+    await cleanupAttachmentStoragePathsIfUnused(removed.length > 0 ? removed : [target.storagePath])
+    setToast("갤러리 사진을 제거했습니다")
   }
 
   async function openAttachment(attachment: RNestMemoAttachment) {
@@ -8058,6 +8089,9 @@ export function ToolNotebookPage() {
                               } else {
                                 deleteBlock(block.id)
                               }
+                            }}
+                            onRemoveGalleryAttachment={(attachmentId) => {
+                              void removeGalleryAttachmentById(block.id, attachmentId)
                             }}
                             onOpenAttachment={() => {
                               if (attachment) openAttachment(attachment)
