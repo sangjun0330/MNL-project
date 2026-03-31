@@ -1501,51 +1501,90 @@ const inlineConvertBlockTypes: RNestMemoBlockType[] = [
   "recordView",
 ]
 
-type BlockTypeMenuGroupId = "text" | "list" | "emphasis" | "link" | "media" | "advanced"
 type BlockTypeMenuIntent = "add" | "convert"
+type BlockTypeMenuGroupId = string
+type BlockTypeMenuGroupIconId = "text" | "emphasis" | "link" | "media" | "table" | "view"
 type BlockTypeMenuGroupDefinition = {
   id: BlockTypeMenuGroupId
   label: string
   description: string
+  icon: BlockTypeMenuGroupIconId
   types: RNestMemoBlockType[]
 }
 
-const blockTypeMenuGroupDefinitions: BlockTypeMenuGroupDefinition[] = [
+const addBlockTypeMenuGroupDefinitions: BlockTypeMenuGroupDefinition[] = [
   {
-    id: "text",
-    label: "텍스트/구조",
-    description: "텍스트, 제목, 구분선",
-    types: ["paragraph", "heading", "divider"],
+    id: "add-text-list",
+    label: "텍스트/목록",
+    description: "텍스트, 제목, 글머리, 번호, 할 일, 토글",
+    icon: "text",
+    types: ["paragraph", "heading", "bulleted", "numbered", "checklist", "toggle"],
   },
   {
-    id: "list",
-    label: "목록",
-    description: "글머리, 번호, 체크, 토글",
-    types: ["bulleted", "numbered", "checklist", "toggle"],
-  },
-  {
-    id: "emphasis",
+    id: "add-emphasis",
     label: "강조",
     description: "콜아웃, 인용",
+    icon: "emphasis",
     types: ["callout", "quote"],
   },
   {
-    id: "link",
-    label: "링크/연결",
-    description: "링크, 문서 링크, 임베드",
-    types: ["bookmark", "pageLink", "embed"],
+    id: "add-link-insert",
+    label: "연결/삽입",
+    description: "링크, 코드, 문서 링크, 임베드",
+    icon: "link",
+    types: ["bookmark", "code", "pageLink", "embed"],
   },
   {
-    id: "media",
-    label: "미디어/파일",
-    description: "사진, 파일, 갤러리",
-    types: ["image", "attachment", "gallery"],
+    id: "add-media-record",
+    label: "미디어/기록",
+    description: "갤러리, 기록 보기, 사진, 파일",
+    icon: "media",
+    types: ["gallery", "recordView", "image", "attachment"],
   },
   {
-    id: "advanced",
-    label: "표/고급",
-    description: "표, 기록 보기, 코드",
-    types: ["table", "recordView", "code"],
+    id: "add-layout",
+    label: "구분/표",
+    description: "구분선, 표",
+    icon: "table",
+    types: ["divider", "table"],
+  },
+]
+
+const convertBlockTypeMenuGroupDefinitions: BlockTypeMenuGroupDefinition[] = [
+  {
+    id: "convert-text-list",
+    label: "텍스트/목록",
+    description: "텍스트, 제목, 글머리, 번호, 할 일, 토글",
+    icon: "text",
+    types: ["paragraph", "heading", "bulleted", "numbered", "checklist", "toggle"],
+  },
+  {
+    id: "convert-emphasis",
+    label: "강조",
+    description: "콜아웃, 인용",
+    icon: "emphasis",
+    types: ["callout", "quote"],
+  },
+  {
+    id: "convert-layout",
+    label: "구분/표",
+    description: "구분선, 표",
+    icon: "table",
+    types: ["divider", "table"],
+  },
+  {
+    id: "convert-link-insert",
+    label: "연결/삽입",
+    description: "링크, 코드, 문서 링크, 임베드",
+    icon: "link",
+    types: ["bookmark", "code", "pageLink", "embed"],
+  },
+  {
+    id: "convert-view",
+    label: "보기 블록",
+    description: "갤러리, 기록 보기",
+    icon: "view",
+    types: ["gallery", "recordView"],
   },
 ]
 
@@ -1847,32 +1886,41 @@ function renderBlockTypeIcon(type: RNestMemoBlockType, className = "h-3.5 w-3.5"
   }
 }
 
-function renderBlockTypeGroupIcon(groupId: BlockTypeMenuGroupId, className = "h-3.5 w-3.5") {
+function renderBlockTypeGroupIcon(iconId: BlockTypeMenuGroupIconId, className = "h-3.5 w-3.5") {
   const props = { className, strokeWidth: 1.8 }
-  switch (groupId) {
+  switch (iconId) {
     case "text":
       return <Type {...props} />
-    case "list":
-      return <List {...props} />
     case "emphasis":
       return <Lightbulb {...props} />
     case "link":
       return <Link2 {...props} />
     case "media":
       return <ImageIcon {...props} />
-    case "advanced":
+    case "table":
       return <Table2 {...props} />
+    case "view":
+      return <ReceiptText {...props} />
     default:
       return <Type {...props} />
   }
 }
 
-function resolveBlockTypeMenuGroups(availableTypes: RNestMemoBlockType[]) {
+function resolveBlockTypeMenuGroupDefinitions(intent: BlockTypeMenuIntent) {
+  return intent === "add" ? addBlockTypeMenuGroupDefinitions : convertBlockTypeMenuGroupDefinitions
+}
+
+function resolveBlockTypeMenuGroups(availableTypes: RNestMemoBlockType[], intent: BlockTypeMenuIntent) {
   const available = new Set(availableTypes)
-  return blockTypeMenuGroupDefinitions
+  const assigned = new Set<RNestMemoBlockType>()
+  return resolveBlockTypeMenuGroupDefinitions(intent)
     .map((group) => ({
       ...group,
-      types: group.types.filter((type) => available.has(type)),
+      types: group.types.filter((type) => {
+        if (!available.has(type) || assigned.has(type)) return false
+        assigned.add(type)
+        return true
+      }),
     }))
     .filter((group) => group.types.length > 0)
 }
@@ -2477,7 +2525,7 @@ function GroupedBlockTypeMenuContent({
   intent: BlockTypeMenuIntent
   onSelect: (type: RNestMemoBlockType) => void
 }) {
-  const groups = useMemo(() => resolveBlockTypeMenuGroups(availableTypes), [availableTypes])
+  const groups = useMemo(() => resolveBlockTypeMenuGroups(availableTypes, intent), [availableTypes, intent])
   const [activeGroupId, setActiveGroupId] = useState<BlockTypeMenuGroupId | null>(() => findBlockTypeMenuGroupId(currentType, groups))
 
   useEffect(() => {
@@ -2502,7 +2550,7 @@ function GroupedBlockTypeMenuContent({
             )}
           >
             <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-ios-sub">
-              {renderBlockTypeGroupIcon(group.id, "h-3.5 w-3.5")}
+              {renderBlockTypeGroupIcon(group.icon, "h-3.5 w-3.5")}
             </span>
             <span className="min-w-0 flex-1">
               <span className="block text-[13px] font-medium text-ios-text">{group.label}</span>
