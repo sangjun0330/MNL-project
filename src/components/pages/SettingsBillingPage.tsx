@@ -29,7 +29,7 @@ function parseBillingActionError(input: string | null, t: (key: string) => strin
   const text = String(input ?? "");
   if (!text) return t("요청 처리 중 오류가 발생했습니다.");
   if (text.includes("login_required")) return t("로그인이 필요합니다.");
-  if (text.includes("free_plan_credit_pack_not_allowed")) return t("Free 플랜은 추가 크레딧 구매가 제공되지 않습니다. Plus 또는 Pro로 업그레이드해 주세요.");
+  if (text.includes("free_plan_credit_pack_not_allowed")) return t("결제창을 열지 못했습니다. 잠시 후 다시 시도해 주세요.");
   if (text.includes("refundable_order_not_found")) return t("환불 가능한 결제 건을 찾지 못했습니다.");
   if (text.includes("order_not_refundable")) return t("현재 결제 건은 환불 요청을 접수할 수 없습니다.");
   if (text.includes("invalid_refund_request_state:")) return t("이미 처리 중이거나 철회할 수 없는 상태입니다.");
@@ -252,7 +252,7 @@ export function SettingsBillingPage() {
                     onClick={scrollToCreditSection}
                     className="text-[11.5px] font-semibold text-[color:var(--rnest-accent)] underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {t(isFreePlan ? "플랜 보기" : "구매 옵션 보기")}
+                    {t("구매 옵션 보기")}
                   </button>
                 </div>
                 <div className="mt-0.5 text-[18px] font-bold tracking-[-0.01em] text-ios-text">
@@ -314,81 +314,63 @@ export function SettingsBillingPage() {
             {actionNotice ? <div className="mt-2 text-[12px] text-[#0B7A3E]">{actionNotice}</div> : null}
           </section>
 
-          {isFreePlan ? (
-            <section id="search-credits" className={`${flatSurface} mt-4 p-6`}>
-              <div className="text-[13px] font-semibold text-ios-sub">{t("Free 체험")}</div>
-              <div className="mt-1 text-[24px] font-extrabold tracking-[-0.02em] text-ios-text">{t("AI 임상 검색 체험 크레딧")}</div>
-              <div className="mt-2 text-[13px] leading-6 text-ios-sub">
-                {t("Free 플랜에서는 매 30일마다 기본 검색 2회와 프리미엄 검색 1회가 제공됩니다. 추가 크레딧 구매는 제공되지 않습니다.")}
-              </div>
-              <div className="mt-4 rounded-[24px] border border-ios-sep bg-[#FAFAFC] p-4 text-[12.5px] leading-6 text-ios-sub">
-                <div>{t("이번 체험 구성")}: {t("기본 검색")} 2{t("회")} · {t("프리미엄 검색")} 1{t("회")}</div>
-                <div className="mt-1">{currentPeriodLabel}: {formatDateLabel(subscription?.currentPeriodEnd ?? null)}</div>
-                <div className="mt-1">{t("더 많은 검색이 필요하면 Plus 또는 Pro로 업그레이드해 주세요.")}</div>
-              </div>
-              <Link href={withReturnTo("/settings/billing/upgrade", returnTo)} className={`${flatButtonPrimary} mt-4`}>
-                {t("플랜 보기")}
-              </Link>
-            </section>
-          ) : (
-            <section id="search-credits" className={`${flatSurface} mt-4 p-6`}>
-              <div className="text-[13px] font-semibold text-ios-sub">{t("추가 크레딧 구매")}</div>
-              <div className="mt-1 text-[24px] font-extrabold tracking-[-0.02em] text-ios-text">{t("AI 임상 검색 크레딧")}</div>
-              <div className="mt-2 text-[13px] leading-6 text-ios-sub">
-                {t("필요한 만큼 충전해 두고 AI 검색에 바로 사용할 수 있습니다.")}
-              </div>
-              <div className="mt-4 space-y-4">
-                {([
-                  { type: "standard" as const, packs: standardCreditPacks },
-                  { type: "premium" as const, packs: premiumCreditPacks },
-                ]).map(({ type, packs }) => {
-                  const meta = getSearchCreditMeta(type);
-                  return (
-                    <div key={type} className="rounded-[24px] border border-ios-sep bg-[#FAFAFC] p-4">
-                      <div className="mb-3">
-                        <div className="text-[18px] font-bold tracking-[-0.02em] text-ios-text">{t(meta.title)}</div>
-                        <div className="mt-1 text-[12.5px] text-ios-sub">{t(meta.description)}</div>
-                      </div>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        {packs.map((creditPack) => (
-                          <div key={creditPack.id} className="rounded-[20px] border border-ios-sep bg-white p-4">
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{t(creditPack.title)}</div>
-                                <div className="mt-1 text-[12px] text-ios-sub">
-                                  {t(creditPack.creditUnits === 10 ? meta.purchaseHint : "자주 쓰는 분을 위한 넉넉한 묶음")}
-                                </div>
-                              </div>
-                              <div className="text-right">
-                                <div className="text-[19px] font-extrabold tracking-[-0.02em] text-ios-text">
-                                  {creditPack.priceKrw.toLocaleString("ko-KR")}
-                                  {t("원")}
-                                </div>
-                                <div className="text-[12px] text-ios-muted">
-                                  {creditPack.creditUnits}
-                                  {t("회")}
-                                </div>
+          <section id="search-credits" className={`${flatSurface} mt-4 p-6`}>
+            <div className="text-[13px] font-semibold text-ios-sub">{t("추가 크레딧 구매")}</div>
+            <div className="mt-1 text-[24px] font-extrabold tracking-[-0.02em] text-ios-text">{t("AI 임상 검색 크레딧")}</div>
+            <div className="mt-2 text-[13px] leading-6 text-ios-sub">
+              {t("필요한 만큼 충전해 두고 AI 검색에 바로 사용할 수 있습니다.")}
+            </div>
+            <div className="mt-4 space-y-4">
+              {([
+                { type: "standard" as const, packs: standardCreditPacks },
+                { type: "premium" as const, packs: premiumCreditPacks },
+              ]).map(({ type, packs }) => {
+                const meta = getSearchCreditMeta(type);
+                return (
+                  <div key={type} className="rounded-[24px] border border-ios-sep bg-[#FAFAFC] p-4">
+                    <div className="mb-3">
+                      <div className="text-[18px] font-bold tracking-[-0.02em] text-ios-text">{t(meta.title)}</div>
+                      <div className="mt-1 text-[12.5px] text-ios-sub">{t(meta.description)}</div>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {packs.map((creditPack) => (
+                        <div key={creditPack.id} className="rounded-[20px] border border-ios-sep bg-white p-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="text-[16px] font-bold tracking-[-0.02em] text-ios-text">{t(creditPack.title)}</div>
+                              <div className="mt-1 text-[12px] text-ios-sub">
+                                {t(creditPack.creditUnits === 10 ? meta.purchaseHint : "자주 쓰는 분을 위한 넉넉한 묶음")}
                               </div>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => startCreditCheckout(creditPack.id)}
-                              disabled={creditPaying}
-                              className={`${flatButtonPrimary} mt-4 w-full`}
-                            >
-                              {creditPaying && creditCheckoutProduct === creditPack.id
-                                ? t("결제창 준비 중...")
-                                : t("{title} 구매", { title: creditPack.title })}
-                            </button>
+                            <div className="text-right">
+                              <div className="text-[19px] font-extrabold tracking-[-0.02em] text-ios-text">
+                                {creditPack.priceKrw.toLocaleString("ko-KR")}
+                                {t("원")}
+                              </div>
+                              <div className="text-[12px] text-ios-muted">
+                                {creditPack.creditUnits}
+                                {t("회")}
+                              </div>
+                            </div>
                           </div>
-                        ))}
-                      </div>
+                          <button
+                            type="button"
+                            onClick={() => startCreditCheckout(creditPack.id)}
+                            disabled={creditPaying}
+                            className={`${flatButtonPrimary} mt-4 w-full`}
+                          >
+                            {creditPaying && creditCheckoutProduct === creditPack.id
+                              ? t("결제창 준비 중...")
+                              : t("{title} 구매", { title: creditPack.title })}
+                          </button>
+                        </div>
+                      ))}
                     </div>
-                  );
-                })}
-              </div>
-            </section>
-          )}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
         </>
       ) : null}
       <BillingCheckoutSheet

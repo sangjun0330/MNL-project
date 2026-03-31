@@ -1,20 +1,18 @@
 import type { BioInputs, EmotionEntry } from "@/lib/model";
+import { hasRecordedMood } from "@/lib/mood";
 
 function hasValue(v: unknown) {
   return v !== null && v !== undefined;
 }
 
 export function hasHealthInput(bio?: BioInputs | null, emotion?: EmotionEntry | null) {
-  // backward compatibility: old records may still keep mood in emotions
-  if (emotion && hasValue(emotion.mood)) return true;
-
+  if (hasRecordedMood(bio, emotion)) return true;
   if (!bio) return false;
 
   if (hasValue(bio.sleepHours)) return true;
   if (hasValue(bio.napHours)) return true;
   if (hasValue(bio.stress)) return true;
   if (hasValue(bio.activity)) return true;
-  if (hasValue(bio.mood)) return true;
   if (hasValue(bio.caffeineMg)) return true;
   if (hasValue(bio.symptomSeverity)) return true;
   if (hasValue(bio.menstrualStatus)) return true;

@@ -44,6 +44,7 @@ const EN_BASE: Record<string, string> = {
     "Please sign in from Settings to use all features.",
   "모든 기능을 사용하려면 로그인해야 합니다. 설정으로 이동해 주세요.":
     "Log in to use everything. Open Settings to continue.",
+  "플랜 업그레이드와 크레딧 구매는 로그인 후 가능합니다.": "Log in to upgrade plans or buy credits.",
   "데이터 동기화 중…": "Syncing your data...",
   "로그인 데이터를 불러오는 중입니다.": "Loading your account data.",
   "알 수 없음": "Unknown",
@@ -704,6 +705,7 @@ const EN_EXTRA: Record<string, string> = {
   "AI 맞춤회복은 유료 플랜 전용 기능입니다.\n플랜 업그레이드 페이지로 이동할까요?":
     "AI recovery is a paid-plan feature.\nMove to the plan upgrade page?",
   "플랜 보기": "View plans",
+  "구매 옵션 보기": "View purchase options",
   "확인 버튼을 누르면 플랜 업그레이드 페이지로 이동합니다.":
     "Tap Confirm to move to the plan upgrade page.",
   "AI가 현재 상태에 맞춘 맞춤회복을 분석하고 있습니다.":
@@ -994,6 +996,7 @@ const EN_EXTRA: Record<string, string> = {
   "AI 검색 1회당 1크레딧 차감 · 소진 전까지 유지": "1 credit is used per AI search · kept until exhausted",
   "소진 전까지 유지": "Kept until exhausted",
   "필요한 만큼 충전해 두고 AI 검색에 바로 사용할 수 있습니다.": "Top up as needed and use it right away for AI search.",
+  "결제 후 플랜 또는 크레딧이 바로 적용됩니다.": "Your plan or credits apply immediately after payment.",
   "결제 후 검색 크레딧이 즉시 충전되며, 사용 전까지 남은 수량이 유지됩니다.":
     "Search credits are charged immediately after payment and remain available until used.",
   "크레딧 {count}회 구매": "Buy {count} credits",
@@ -1141,6 +1144,8 @@ const EN_EXTRA: Record<string, string> = {
     "No AI search credits remaining. Buy a 10-credit pack and try again.",
   "AI 검색 잔여 크레딧이 없습니다. 추가 크레딧을 구매하거나 Plus/Pro 플랜 크레딧을 충전한 뒤 다시 시도해 주세요.":
     "No AI search credits remain. Buy extra credits or recharge with Plus/Pro plan credits and try again.",
+  "선택한 검색의 잔여 크레딧이 없습니다. 채팅바의 검색 선택에서 다른 검색으로 바꾸거나 추가 크레딧을 구매해 주세요.":
+    "No credits remain for the selected search. Switch to the other search type in the chat bar or buy extra credits.",
   "AI 검색 잔여 크레딧이 없습니다. 크레딧 10회를 구매하거나(무료/Pro), Pro는 다음날 자동 초기화 후 다시 시도해 주세요.":
     "No AI search credits remaining. Buy a 10-credit pack (Free/Pro), or if you are Pro, try again after tomorrow's automatic reset.",
   "남은 AI 검색 크레딧이 없습니다. 크레딧 10회를 구매하거나(무료/Pro), Pro는 다음날 자동 초기화 후 다시 이용해 주세요.":

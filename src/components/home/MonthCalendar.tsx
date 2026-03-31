@@ -28,8 +28,8 @@ type Props = {
   // 3교대 패턴을 적용한 시작일(이전 날짜에는 표시만 숨김)
   scheduleAppliedFrom?: ISODate | null;
 
+  // Risk tint contract used by SchedulePage.
   riskColorByDate?: Record<ISODate, RiskTone>;
-  lowScoreByDate?: Record<ISODate, boolean>;
   selected: ISODate;
   onSelect: (iso: ISODate) => void;
 
@@ -69,6 +69,13 @@ function phaseColor(phase: MenstrualPosterior["visualPhase"]) {
   return "transparent";
 }
 
+function riskToneCellClass(tone: RiskTone | null) {
+  if (tone === "red") return "bg-rose-50/80";
+  if (tone === "orange") return "bg-amber-50/80";
+  if (tone === "green") return "bg-emerald-50/70";
+  return "";
+}
+
 export function MonthCalendar({
   month,
   onMonthChange,
@@ -79,8 +86,7 @@ export function MonthCalendar({
   emotions,
   menstrual,
   scheduleAppliedFrom,
-  riskColorByDate: _riskColorByDate,
-  lowScoreByDate,
+  riskColorByDate,
   selected,
   onSelect,
   headerActions,
@@ -281,7 +287,7 @@ export function MonthCalendar({
             const iso = cell.iso;
             const isSelected = iso === selected;
             const isToday = iso === today;
-            const isLowScore = Boolean(cell.inMonth && lowScoreByDate?.[iso]);
+            const cellRiskTone = cell.inMonth ? (riskColorByDate?.[iso] ?? null) : null;
 
             const shift = schedule[iso];
             const shiftName = shiftNames?.[iso];
@@ -369,7 +375,7 @@ export function MonthCalendar({
                   "h-[92px] sm:h-[104px]",
                   "touch-manipulation select-none",
                   !cell.inMonth && "bg-white/70",
-                  isLowScore && "bg-rose-50/80",
+                  riskToneCellClass(cellRiskTone),
                   isSelected ? "z-10" : "hover:bg-ios-bg/60"
                 )}
               >

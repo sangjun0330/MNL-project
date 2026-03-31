@@ -31,6 +31,7 @@ import { buildBillingEntitlements } from "@/lib/billing/entitlements";
 import { getAIRecoveryModelForTier, type PlanTier } from "@/lib/billing/plans";
 import { countHealthRecordedDays, hasHealthInput } from "@/lib/healthRecords";
 import { computePersonalizationAccuracy, topFactors, type FactorKey } from "@/lib/insightsV2";
+import { readRecordedMood } from "@/lib/mood";
 import type { AppState, BioInputs, EmotionEntry } from "@/lib/model";
 import { buildRecoveryPhaseState } from "@/lib/recoveryPhases";
 import {
@@ -48,7 +49,7 @@ import { combineAIRecoveryUsages, runAIRecoveryStructuredRequest } from "@/lib/s
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { sanitizeStatePayload } from "@/lib/stateSanitizer";
 import type { Shift } from "@/lib/types";
-import { computeVitalsRange, type DailyVital } from "@/lib/vitals";
+import { computeVitalsRange, hasReliableEstimatedSignal, type DailyVital } from "@/lib/vitals";
 
 const INSIGHTS_MIN_DAYS = 3;
 type RecoverySnapshot = {
@@ -238,9 +239,7 @@ function buildRecoveryOrderStats(args: {
 }
 
 function normalizedMood(bio: BioInputs | null | undefined, emotion: EmotionEntry | null | undefined) {
-  if (bio?.mood != null) return bio.mood;
-  if (emotion?.mood != null) return emotion.mood;
-  return null;
+  return readRecordedMood(bio, emotion);
 }
 
 function shiftLabel(shift: Shift | null) {
@@ -1958,17 +1957,12 @@ function buildRecoverySnapshot(args: { payload: unknown; dateISO: ISODate; slot:
   }
   const vitalsRecorded = vitals.filter((vital) => {
     if (recordedDateSet.has(vital.dateISO)) return true;
-    const gap = vital.engine?.daysSinceAnyInput ?? 99;
-    const reliability = vital.engine?.inputReliability ?? 0;
-    return gap <= 2 && reliability >= 0.45;
+    return hasReliableEstimatedSignal(vital);
   });
   const todayVitalCandidate = vitalMap.get(args.dateISO) ?? null;
   const todayHasInput = (() => {
     if (recordedDateSet.has(args.dateISO)) return true;
-    if (!todayVitalCandidate) return false;
-    const gap = todayVitalCandidate.engine?.daysSinceAnyInput ?? 99;
-    const reliability = todayVitalCandidate.engine?.inputReliability ?? 0;
-    return gap <= 2 && reliability >= 0.45;
+    return hasReliableEstimatedSignal(todayVitalCandidate);
   })();
   const todayVital = todayHasInput ? todayVitalCandidate : null;
   const todayShift = (state.schedule?.[args.dateISO] as Shift | undefined) ?? todayVital?.shift ?? "OFF";

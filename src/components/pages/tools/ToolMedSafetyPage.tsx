@@ -1130,7 +1130,6 @@ export function ToolMedSafetyPage() {
 
   const medSafetyQuota = optimisticQuota ?? subscriptionMedSafetyQuota;
   const activeTier = subscription?.tier ?? "free";
-  const isFreePlan = activeTier === "free";
   const activeSearchType = selectedSearchType ?? medSafetyQuota?.recommendedDefaultSearchType ?? "standard";
   const activeSearchMeta = getSearchCreditMeta(activeSearchType);
   const selectedSearchQuota = getQuotaForSearchType(medSafetyQuota, activeSearchType);
@@ -1140,9 +1139,7 @@ export function ToolMedSafetyPage() {
   const standardQuotaRemaining = Math.max(0, Number(medSafetyQuota?.standard.totalRemaining ?? 0));
   const premiumQuotaRemaining = Math.max(0, Number(medSafetyQuota?.premium.totalRemaining ?? 0));
   const activePlanTitle = getPlanDefinition(activeTier).title;
-  const billingActionHref = isFreePlan
-    ? withReturnTo("/settings/billing/upgrade", "/tools/med-safety")
-    : `${withReturnTo("/settings/billing/upgrade", "/tools/med-safety")}#search-credits`;
+  const billingActionHref = `${withReturnTo("/settings/billing", "/tools/med-safety")}#search-credits`;
   const medSafetySessionStorageKey = buildMedSafetySessionStorageKey(user?.userId ?? null);
   const quotaKnown = authStatus === "authenticated" && !billingLoading && !!medSafetyQuota;
   const canAsk = authStatus === "authenticated" && (!quotaKnown || selectedQuotaRemaining > 0);
@@ -1443,16 +1440,8 @@ export function ToolMedSafetyPage() {
     if (quotaKnown && selectedQuotaRemaining <= 0) {
       setError(
         alternateQuotaRemaining > 0
-          ? t(
-              isFreePlan
-                ? "선택한 검색의 잔여 크레딧이 없습니다. 채팅바의 검색 선택에서 다른 검색으로 바꾸거나, 모두 소진했다면 Plus 또는 Pro로 업그레이드해 주세요."
-                : "선택한 검색의 잔여 크레딧이 없습니다. 채팅바의 검색 선택에서 다른 검색으로 바꾸거나 추가 크레딧을 구매해 주세요."
-            )
-          : t(
-              isFreePlan
-                ? "Free 체험 크레딧이 모두 소진되었습니다. Plus 또는 Pro로 업그레이드한 뒤 다시 시도해 주세요."
-                : "AI 검색 잔여 크레딧이 없습니다. 추가 크레딧을 구매하거나 Plus/Pro 플랜 크레딧을 충전한 뒤 다시 시도해 주세요."
-            )
+          ? t("선택한 검색의 잔여 크레딧이 없습니다. 채팅바의 검색 선택에서 다른 검색으로 바꾸거나 추가 크레딧을 구매해 주세요.")
+          : t("AI 검색 잔여 크레딧이 없습니다. 추가 크레딧을 구매하거나 Plus/Pro 플랜 크레딧을 충전한 뒤 다시 시도해 주세요.")
       );
       return;
     }
@@ -1549,16 +1538,8 @@ export function ToolMedSafetyPage() {
         if (String(finalError).toLowerCase().includes("insufficient_med_safety_credits")) {
           setError(
             alternateQuotaRemaining > 0
-              ? t(
-                  isFreePlan
-                    ? "선택한 검색의 잔여 크레딧이 없습니다. 채팅바의 검색 선택에서 다른 검색으로 바꾸거나, 모두 소진했다면 Plus 또는 Pro로 업그레이드해 주세요."
-                    : "선택한 검색의 잔여 크레딧이 없습니다. 채팅바의 검색 선택에서 다른 검색으로 바꾸거나 추가 크레딧을 구매해 주세요."
-                )
-              : t(
-                  isFreePlan
-                    ? "Free 체험 크레딧이 모두 소진되었습니다. Plus 또는 Pro로 업그레이드한 뒤 다시 시도해 주세요."
-                    : "AI 검색 잔여 크레딧이 없습니다. 추가 크레딧을 구매하거나 Plus/Pro 플랜 크레딧을 충전한 뒤 다시 시도해 주세요."
-                )
+              ? t("선택한 검색의 잔여 크레딧이 없습니다. 채팅바의 검색 선택에서 다른 검색으로 바꾸거나 추가 크레딧을 구매해 주세요.")
+              : t("AI 검색 잔여 크레딧이 없습니다. 추가 크레딧을 구매하거나 Plus/Pro 플랜 크레딧을 충전한 뒤 다시 시도해 주세요.")
           );
         } else {
           setError(parseErrorMessage(finalError, t));
@@ -1667,6 +1648,7 @@ export function ToolMedSafetyPage() {
     const title = (lastSubmittedQuery || query || t("AI 임상 검색 결과")).slice(0, 80)
 
     const blocks = buildMedSafetyMemoBlocks({
+      layout: "brief",
       query,
       answer,
       summary,
@@ -1743,7 +1725,7 @@ export function ToolMedSafetyPage() {
                   href={billingActionHref}
                   className="inline-flex h-10 items-center justify-center rounded-full border border-[#E8E8EC] bg-white px-4 text-[12.5px] font-semibold text-ios-text"
                 >
-                  {t(isFreePlan ? "플랜 보기" : "추가 크레딧 구매")}
+                  {t("추가 크레딧 구매")}
                 </Link>
                 {hasConversation && lastAssistantMessage ? (
                   <button type="button" onClick={() => void copyLatestAnswer()} className={SECONDARY_FLAT_BTN}>
@@ -1773,16 +1755,8 @@ export function ToolMedSafetyPage() {
               <div className="mt-4 rounded-[24px] border border-amber-200 bg-amber-50/92 px-4 py-3 text-[13px] font-semibold leading-6 text-amber-700">
                 <div>
                   {alternateQuotaRemaining > 0
-                    ? t(
-                        isFreePlan
-                          ? "선택한 검색 크레딧이 없습니다. 채팅바의 검색 선택에서 다른 검색으로 바꾸거나, 모두 소진했다면 Plus 또는 Pro로 업그레이드해 주세요."
-                          : "선택한 검색 크레딧이 없습니다. 채팅바의 검색 선택에서 다른 검색으로 바꾸거나 추가 크레딧을 구매해 주세요."
-                      )
-                    : t(
-                        isFreePlan
-                          ? "남은 Free 체험 크레딧이 없습니다. Plus 또는 Pro로 업그레이드한 뒤 다시 이용해 주세요."
-                          : "남은 AI 검색 크레딧이 없습니다. 추가 크레딧을 구매하거나 Plus/Pro 플랜 크레딧을 충전한 뒤 다시 이용해 주세요."
-                      )}
+                    ? t("선택한 검색의 잔여 크레딧이 없습니다. 채팅바의 검색 선택에서 다른 검색으로 바꾸거나 추가 크레딧을 구매해 주세요.")
+                    : t("남은 AI 검색 크레딧이 없습니다. 추가 크레딧을 구매하거나 Plus/Pro 플랜 크레딧을 충전한 뒤 다시 이용해 주세요.")}
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {alternateQuotaRemaining > 0 ? (
@@ -1798,7 +1772,7 @@ export function ToolMedSafetyPage() {
                     href={billingActionHref}
                     className="inline-flex h-10 items-center justify-center rounded-full border border-amber-300 bg-white px-4 text-[12.5px] font-semibold text-amber-700"
                   >
-                    {t(isFreePlan ? "플랜 보기" : "추가 크레딧 구매하기")}
+                    {t("추가 크레딧 구매")}
                   </Link>
                 </div>
               </div>

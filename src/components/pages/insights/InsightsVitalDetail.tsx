@@ -201,7 +201,7 @@ export function InsightsVitalDetail() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <DetailCard className="p-5">
           <div className="flex items-center justify-between gap-4">
-            <BatteryGauge value={body} label="Body" kind="body" />
+            <BatteryGauge value={body} label="Body" kind="body" size="large" />
             <div className="text-right">
               <div className="text-[13px] font-semibold text-ios-sub">{t("Body 변화")}</div>
               <div className="mt-2 text-[42px] font-extrabold tracking-[-0.03em] text-ios-text">{signed(bodyDelta)}</div>
@@ -211,7 +211,7 @@ export function InsightsVitalDetail() {
 
         <DetailCard className="p-5">
           <div className="flex items-center justify-between gap-4">
-            <BatteryGauge value={mental} label="Mental" kind="mental" />
+            <BatteryGauge value={mental} label="Mental" kind="mental" size="large" />
             <div className="text-right">
               <div className="text-[13px] font-semibold text-ios-sub">{t("Mental 변화")}</div>
               <div className="mt-2 text-[42px] font-extrabold tracking-[-0.03em] text-ios-text">{signed(mentalDelta)}</div>

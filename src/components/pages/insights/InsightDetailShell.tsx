@@ -1,4 +1,8 @@
+"use client";
+
 import type { CSSProperties } from "react";
+import { useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { cn } from "@/lib/cn";
 
 export const DETAIL_GRADIENTS = {
@@ -34,16 +38,39 @@ export function InsightDetailShell({
   backHref?: string;
   className?: string;
 }) {
+  const router = useRouter();
+  const handleBack = useCallback(() => {
+    if (typeof window !== "undefined") {
+      const sameOriginReferrer =
+        Boolean(document.referrer) &&
+        (() => {
+          try {
+            return new URL(document.referrer).origin === window.location.origin;
+          } catch {
+            return false;
+          }
+        })();
+
+      if (sameOriginReferrer && window.history.length > 1) {
+        router.back();
+        return;
+      }
+    }
+
+    router.replace(backHref);
+  }, [backHref, router]);
+
   return (
     <div className={cn("mx-auto w-full max-w-[920px] px-3 pb-24 pt-6 sm:px-4", className)}>
       <div className="mb-4 flex items-center justify-between gap-3">
-        <a
-          href={backHref}
+        <button
+          type="button"
+          onClick={handleBack}
           className="flex h-9 w-9 items-center justify-center rounded-full border border-ios-sep bg-white text-[18px] text-ios-text shadow-apple-sm"
           aria-label="Back"
         >
           ‹
-        </a>
+        </button>
         <div className="flex h-9 min-w-[36px] items-center justify-center">{right}</div>
       </div>
 

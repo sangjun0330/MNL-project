@@ -6,6 +6,7 @@ import { diffDays, formatKoreanDate, todayISO } from "@/lib/date";
 import type { ActivityLevel, MoodScore, StressLevel, EmotionEntry } from "@/lib/model";
 import type { Shift } from "@/lib/types";
 import { SHIFT_LABELS, shiftColor } from "@/lib/types";
+import { readRecordedMood } from "@/lib/mood";
 import { useAppStore } from "@/lib/store";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Button } from "@/components/ui/Button";
@@ -307,7 +308,8 @@ export function ScheduleRecordSheet({
     setSleepText(bio.sleepHours == null ? "" : String(bio.sleepHours));
     setStress(bio.stress != null ? (bio.stress as StressLevel) : null);
     setCaffeineText(bio.caffeineMg == null ? "" : String(bio.caffeineMg));
-    setMood(curEmotion?.mood != null ? (curEmotion.mood as MoodScore) : null);
+    const currentMood = readRecordedMood(curBio ?? null, curEmotion ?? null);
+    setMood(currentMood != null ? (currentMood as MoodScore) : null);
     skipSleepSync.current = true;
     skipCaffeineSync.current = true;
 

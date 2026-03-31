@@ -7,7 +7,7 @@ import type { Shift } from "@/lib/types";
 import { inferMenstrualPosterior } from "@/lib/menstrualProbability";
 import { emptyState } from "@/lib/model";
 import { useAppStoreSelector } from "@/lib/store";
-import { computeVitalsRange, type DailyVital } from "@/lib/vitals";
+import { computeVitalsRange, hasReliableEstimatedSignal, type DailyVital } from "@/lib/vitals";
 import { computePersonalizationAccuracy, topFactors } from "@/lib/insightsV2";
 import { statusFromScore, vitalDisplayScore } from "@/lib/rnestInsight";
 import { countHealthRecordedDays, hasHealthInput } from "@/lib/healthRecords";
@@ -109,9 +109,7 @@ export function useInsightsData() {
     () =>
       vitals.filter((v) => {
         if (recordedDateSet.has(v.dateISO)) return true;
-        const gap = v.engine?.daysSinceAnyInput ?? 99;
-        const reliability = v.engine?.inputReliability ?? 0;
-        return gap <= 2 && reliability >= 0.45;
+        return hasReliableEstimatedSignal(v);
       }),
     [vitals, recordedDateSet]
   );
@@ -119,10 +117,7 @@ export function useInsightsData() {
   const todayHasInput = useMemo(
     () => {
       if (recordedDateSet.has(end)) return true;
-      if (!todayVitalCandidate) return false;
-      const gap = todayVitalCandidate.engine?.daysSinceAnyInput ?? 99;
-      const reliability = todayVitalCandidate.engine?.inputReliability ?? 0;
-      return gap <= 2 && reliability >= 0.45;
+      return hasReliableEstimatedSignal(todayVitalCandidate);
     },
     [recordedDateSet, end, todayVitalCandidate]
   );

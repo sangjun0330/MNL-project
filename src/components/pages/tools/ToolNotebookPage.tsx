@@ -1447,6 +1447,108 @@ const slashCommands: SlashCommand[] = [
   { id: "duplicate", label: "블록 복제", description: "현재 블록을 복사", action: "duplicate" },
 ]
 
+const quickAddBlockTypes: RNestMemoBlockType[] = [
+  "paragraph",
+  "heading",
+  "bulleted",
+  "numbered",
+  "checklist",
+  "callout",
+  "quote",
+  "toggle",
+  "bookmark",
+  "divider",
+  "table",
+]
+
+const inlineAddBlockTypes: RNestMemoBlockType[] = [
+  "paragraph",
+  "heading",
+  "bulleted",
+  "numbered",
+  "checklist",
+  "callout",
+  "quote",
+  "toggle",
+  "bookmark",
+  "code",
+  "pageLink",
+  "embed",
+  "gallery",
+  "recordView",
+  "image",
+  "attachment",
+  "divider",
+  "table",
+]
+
+const inlineConvertBlockTypes: RNestMemoBlockType[] = [
+  "paragraph",
+  "heading",
+  "bulleted",
+  "numbered",
+  "checklist",
+  "callout",
+  "quote",
+  "toggle",
+  "bookmark",
+  "divider",
+  "table",
+  "code",
+  "pageLink",
+  "embed",
+  "gallery",
+  "recordView",
+]
+
+type BlockTypeMenuGroupId = "text" | "list" | "emphasis" | "link" | "media" | "advanced"
+type BlockTypeMenuIntent = "add" | "convert"
+type BlockTypeMenuGroupDefinition = {
+  id: BlockTypeMenuGroupId
+  label: string
+  description: string
+  types: RNestMemoBlockType[]
+}
+
+const blockTypeMenuGroupDefinitions: BlockTypeMenuGroupDefinition[] = [
+  {
+    id: "text",
+    label: "텍스트/구조",
+    description: "텍스트, 제목, 구분선",
+    types: ["paragraph", "heading", "divider"],
+  },
+  {
+    id: "list",
+    label: "목록",
+    description: "글머리, 번호, 체크, 토글",
+    types: ["bulleted", "numbered", "checklist", "toggle"],
+  },
+  {
+    id: "emphasis",
+    label: "강조",
+    description: "콜아웃, 인용",
+    types: ["callout", "quote"],
+  },
+  {
+    id: "link",
+    label: "링크/연결",
+    description: "링크, 문서 링크, 임베드",
+    types: ["bookmark", "pageLink", "embed"],
+  },
+  {
+    id: "media",
+    label: "미디어/파일",
+    description: "사진, 파일, 갤러리",
+    types: ["image", "attachment", "gallery"],
+  },
+  {
+    id: "advanced",
+    label: "표/고급",
+    description: "표, 기록 보기, 코드",
+    types: ["table", "recordView", "code"],
+  },
+]
+
 function renderMemoIcon(icon: string, className = "h-5 w-5") {
   const normalized = normalizeMemoIconId(icon)
   const props = { className, strokeWidth: 1.9 }
@@ -1743,6 +1845,44 @@ function renderBlockTypeIcon(type: RNestMemoBlockType, className = "h-3.5 w-3.5"
     default:
       return <Type {...props} />
   }
+}
+
+function renderBlockTypeGroupIcon(groupId: BlockTypeMenuGroupId, className = "h-3.5 w-3.5") {
+  const props = { className, strokeWidth: 1.8 }
+  switch (groupId) {
+    case "text":
+      return <Type {...props} />
+    case "list":
+      return <List {...props} />
+    case "emphasis":
+      return <Lightbulb {...props} />
+    case "link":
+      return <Link2 {...props} />
+    case "media":
+      return <ImageIcon {...props} />
+    case "advanced":
+      return <Table2 {...props} />
+    default:
+      return <Type {...props} />
+  }
+}
+
+function resolveBlockTypeMenuGroups(availableTypes: RNestMemoBlockType[]) {
+  const available = new Set(availableTypes)
+  return blockTypeMenuGroupDefinitions
+    .map((group) => ({
+      ...group,
+      types: group.types.filter((type) => available.has(type)),
+    }))
+    .filter((group) => group.types.length > 0)
+}
+
+function findBlockTypeMenuGroupId(
+  currentType: RNestMemoBlockType | undefined,
+  groups: ReturnType<typeof resolveBlockTypeMenuGroups>
+) {
+  if (!currentType) return groups[0]?.id ?? null
+  return groups.find((group) => group.types.includes(currentType))?.id ?? groups[0]?.id ?? null
 }
 
 function renderAttachmentIcon(kind: RNestMemoAttachment["kind"], className = "h-4 w-4") {
@@ -2326,12 +2466,97 @@ function CoverPicker({
 
 /* ─── block type menu ─────────────────────────────────────── */
 
+function GroupedBlockTypeMenuContent({
+  availableTypes,
+  currentType,
+  intent,
+  onSelect,
+}: {
+  availableTypes: RNestMemoBlockType[]
+  currentType?: RNestMemoBlockType
+  intent: BlockTypeMenuIntent
+  onSelect: (type: RNestMemoBlockType) => void
+}) {
+  const groups = useMemo(() => resolveBlockTypeMenuGroups(availableTypes), [availableTypes])
+  const [activeGroupId, setActiveGroupId] = useState<BlockTypeMenuGroupId | null>(() => findBlockTypeMenuGroupId(currentType, groups))
+
+  useEffect(() => {
+    setActiveGroupId(findBlockTypeMenuGroupId(currentType, groups))
+  }, [currentType, groups])
+
+  const activeGroup = groups.find((group) => group.id === activeGroupId) ?? groups[0] ?? null
+
+  return (
+    <div className="relative">
+      <div className="max-h-[calc(100vh-12rem)] overflow-y-auto py-1">
+        {groups.map((group) => (
+          <button
+            key={group.id}
+            type="button"
+            onMouseEnter={() => setActiveGroupId(group.id)}
+            onFocus={() => setActiveGroupId(group.id)}
+            onClick={() => setActiveGroupId(group.id)}
+            className={cn(
+              "flex w-full items-start gap-3 px-3 py-2 text-left transition-colors",
+              activeGroup?.id === group.id ? "bg-gray-50" : "hover:bg-gray-50"
+            )}
+          >
+            <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-ios-sub">
+              {renderBlockTypeGroupIcon(group.id, "h-3.5 w-3.5")}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-[13px] font-medium text-ios-text">{group.label}</span>
+              <span className="block text-[11px] text-ios-muted">{group.description}</span>
+            </span>
+            <ChevronRight className="mt-1 h-3.5 w-3.5 shrink-0 text-gray-300" />
+          </button>
+        ))}
+      </div>
+      {activeGroup && (
+        <div className="absolute left-full top-0 z-10 ml-2 w-56 max-w-[calc(100vw-7rem)] rounded-2xl border border-gray-200 bg-white py-1.5 shadow-[0_18px_40px_rgba(15,23,42,0.14)]">
+          <div className="border-b border-gray-100 px-3 py-2">
+            <div className="text-[12px] font-semibold text-ios-text">{activeGroup.label}</div>
+            <div className="mt-0.5 text-[11px] text-ios-muted">
+              {intent === "add" ? "이 그룹에서 추가할 블록" : "이 그룹으로 변경할 블록"}
+            </div>
+          </div>
+          <div className="max-h-[calc(100vh-14rem)] overflow-y-auto py-1">
+            {activeGroup.types.map((type) => (
+              <button
+                key={`${activeGroup.id}-${type}`}
+                type="button"
+                onClick={() => onSelect(type)}
+                className={cn(
+                  "flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] transition-colors",
+                  intent === "convert" && currentType === type
+                    ? "bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
+                    : "text-ios-text hover:bg-gray-50"
+                )}
+              >
+                <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-ios-sub">
+                  {renderBlockTypeIcon(type, "h-3 w-3")}
+                </span>
+                <span className="min-w-0 flex-1">{blockTypeLabels[type]}</span>
+                {intent === "convert" && currentType === type && (
+                  <span className="text-[11px] font-medium text-[color:var(--rnest-accent)]">현재</span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function BlockTypeMenu({
   currentType,
+  availableTypes = quickAddBlockTypes,
   onSelect,
   onClose,
 }: {
   currentType: RNestMemoBlockType
+  availableTypes?: RNestMemoBlockType[]
   onSelect: (t: RNestMemoBlockType) => void
   onClose: () => void
 }) {
@@ -2345,43 +2570,23 @@ function BlockTypeMenu({
     return () => document.removeEventListener("mousedown", handleClick)
   }, [onClose])
 
-  const types: RNestMemoBlockType[] = [
-    "paragraph",
-    "heading",
-    "bulleted",
-    "numbered",
-    "checklist",
-    "callout",
-    "quote",
-    "toggle",
-    "bookmark",
-    "divider",
-    "table",
-  ]
-
   return (
     <div
       ref={ref}
-      className="absolute left-0 top-full z-30 mt-1 w-48 rounded-xl border border-gray-200 bg-white py-1 shadow-lg"
+      className="absolute left-0 top-full z-30 mt-1 w-60 rounded-2xl border border-gray-200 bg-white py-1.5 shadow-[0_18px_40px_rgba(15,23,42,0.14)]"
     >
-      {types.map((type) => (
-        <button
-          key={type}
-          type="button"
-          onClick={() => { onSelect(type); onClose() }}
-          className={cn(
-            "flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] transition-colors",
-            type === currentType
-              ? "bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
-              : "text-ios-text hover:bg-gray-50"
-          )}
-        >
-          <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-gray-100 text-ios-sub">
-            {renderBlockTypeIcon(type, "h-3.5 w-3.5")}
-          </span>
-          {blockTypeLabels[type]}
-        </button>
-      ))}
+      <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-ios-muted">
+        추가할 블록
+      </div>
+      <GroupedBlockTypeMenuContent
+        availableTypes={availableTypes}
+        currentType={currentType}
+        intent="add"
+        onSelect={(type) => {
+          onSelect(type)
+          onClose()
+        }}
+      />
     </div>
   )
 }
@@ -3376,48 +3581,20 @@ function InlineBlock({
             <Plus className="h-3.5 w-3.5" />
           </button>
           {showAddMenu && (
-            <div className="absolute left-0 top-full z-40 mt-2 w-56 max-w-[calc(100vw-6rem)] rounded-2xl border border-gray-200 bg-white py-1.5 shadow-[0_18px_40px_rgba(15,23,42,0.14)]">
+            <div className="absolute left-0 top-full z-40 mt-2 w-60 max-w-[calc(100vw-6rem)] rounded-2xl border border-gray-200 bg-white py-1.5 shadow-[0_18px_40px_rgba(15,23,42,0.14)]">
               <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-ios-muted">
                 아래에 새 블록
               </div>
-              {(
-                [
-                  "paragraph",
-                  "heading",
-                  "bulleted",
-                  "numbered",
-                  "checklist",
-                  "callout",
-                  "quote",
-                  "toggle",
-                  "bookmark",
-                  "code",
-                  "pageLink",
-                  "embed",
-                  "gallery",
-                  "recordView",
-                  "image",
-                  "attachment",
-                  "divider",
-                  "table",
-                ] as RNestMemoBlockType[]
-              ).map((type) => (
-                <button
-                  key={`add-below-${type}`}
-                  type="button"
-                  onClick={() => {
-                    if (type === "image" || type === "attachment" || type === "gallery") onInsertAsset(type)
-                    else onAddAfter(type)
-                    setShowAddMenu(false)
-                  }}
-                  className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-ios-text transition-colors hover:bg-gray-50"
-                >
-                  <span className="inline-flex h-5 w-5 items-center justify-center rounded text-ios-sub">
-                    {renderBlockTypeIcon(type, "h-3 w-3")}
-                  </span>
-                  {blockTypeLabels[type]} 추가
-                </button>
-              ))}
+              <GroupedBlockTypeMenuContent
+                availableTypes={inlineAddBlockTypes}
+                currentType={block.type}
+                intent="add"
+                onSelect={(type) => {
+                  if (type === "image" || type === "attachment" || type === "gallery") onInsertAsset(type)
+                  else onAddAfter(type)
+                  setShowAddMenu(false)
+                }}
+              />
             </div>
           )}
         </div>
@@ -3488,33 +3665,19 @@ function InlineBlock({
             <GripVertical className="h-3.5 w-3.5" />
           </button>
           {showActionMenu && (
-            <div className="absolute left-0 top-full z-40 mt-2 w-56 max-w-[calc(100vw-6rem)] rounded-2xl border border-gray-200 bg-white py-1.5 shadow-[0_18px_40px_rgba(15,23,42,0.14)]">
+            <div className="absolute left-0 top-full z-40 mt-2 w-60 max-w-[calc(100vw-6rem)] rounded-2xl border border-gray-200 bg-white py-1.5 shadow-[0_18px_40px_rgba(15,23,42,0.14)]">
               <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-ios-muted">
                 현재 블록 설정
               </div>
-              {(Object.keys(blockTypeLabels) as RNestMemoBlockType[])
-                .filter((type) => !["image", "attachment", "unsupported", "pageSpacer"].includes(type))
-                .map((type) => (
-                  <button
-                    key={`convert-${type}`}
-                    type="button"
-                    onClick={() => {
-                      onTypeChange(type)
-                      setShowActionMenu(false)
-                    }}
-                    className={cn(
-                      "flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] transition-colors",
-                      type === block.type
-                        ? "bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
-                        : "text-ios-text hover:bg-gray-50"
-                    )}
-                  >
-                    <span className="inline-flex h-5 w-5 items-center justify-center rounded text-ios-sub">
-                      {renderBlockTypeIcon(type, "h-3 w-3")}
-                    </span>
-                    {blockTypeLabels[type]}로 변경
-                  </button>
-                ))}
+              <GroupedBlockTypeMenuContent
+                availableTypes={inlineConvertBlockTypes}
+                currentType={block.type}
+                intent="convert"
+                onSelect={(type) => {
+                  onTypeChange(type)
+                  setShowActionMenu(false)
+                }}
+              />
               <div className="mx-2 my-1 border-t border-gray-100" />
               <button
                 type="button"

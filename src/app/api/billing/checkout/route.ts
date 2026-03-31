@@ -111,9 +111,6 @@ export async function POST(req: Request) {
   if (product.kind === "credit_pack") {
     try {
       const current = await readSubscription(userId);
-      if (current.tier === "free") {
-        return bad(403, "free_plan_credit_pack_not_allowed");
-      }
       orderPlanTier = current.tier;
     } catch {
       return bad(500, "failed_to_read_subscription");

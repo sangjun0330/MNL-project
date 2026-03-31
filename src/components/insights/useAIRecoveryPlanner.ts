@@ -126,6 +126,10 @@ function getOrStartGenerate(
   return promise;
 }
 
+/**
+ * @deprecated Use `useAIRecoverySession()` and `/api/insights/recovery/ai/*` for active AI recovery flows.
+ * This hook remains as a compatibility layer for the legacy planner payload route.
+ */
 export function useAIRecoveryPlanner(options?: HookOptions): HookResult {
   const mode = options?.mode ?? "cache";
   const enabled = options?.enabled ?? true;
