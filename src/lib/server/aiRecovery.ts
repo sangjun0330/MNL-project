@@ -1205,9 +1205,12 @@ function readGenerationCounts(session: AIRecoverySlotPayload | null | undefined)
     ? ((session as { generationCounts?: Record<string, unknown> }).generationCounts ?? {})
     : null;
   if (!raw) {
+    const hasBrief = Boolean(session.brief) || Boolean(session.openaiMeta?.briefResponseId);
+    const hasOrders =
+      Boolean(session.orders?.items?.length) || Boolean(session.openaiMeta?.ordersResponseId);
     return {
-      brief: session.status === "ready" || Boolean(session.openaiMeta?.briefResponseId) ? 1 : 0,
-      orders: session.status === "ready" || Boolean(session.openaiMeta?.ordersResponseId) ? 1 : 0,
+      brief: hasBrief ? 1 : 0,
+      orders: hasOrders ? 1 : 0,
     };
   }
   let brief = Math.max(0, Math.round(Number(raw.brief) || 0));
@@ -1256,8 +1259,10 @@ function resolveRecoveryPromptProfile(tier: PlanTier | null | undefined, model: 
 }
 
 function resolveReasoningEffort(profile: RecoveryPromptProfile, kind: "brief" | "orders"): AIRecoveryEffort {
-  if (kind === "orders") return "low";
-  return profile === "pro" ? "medium" : "low";
+  // Recovery brief reliability matters more than extra reasoning depth here.
+  // gpt-5.4 brief calls with medium effort frequently hit the upstream timeout
+  // before orders generation can even begin.
+  return "low";
 }
 
 function readRecoveryMaxOutputEnv(name: string) {
@@ -1267,19 +1272,19 @@ function readRecoveryMaxOutputEnv(name: string) {
 }
 
 function resolveRecoveryFlowMaxOutputTokens(kind: "brief" | "orders", profile: RecoveryPromptProfile) {
-  const fallback = kind === "brief" ? (profile === "pro" ? 4800 : 3200) : profile === "pro" ? 1800 : 1400;
+  // Keep defaults aligned with .env.example. The previous implicit floor of
+  // 7200-8000 tokens for brief generation made recovery requests too slow and
+  // triggered upstream timeouts before the follow-up orders call.
+  const fallback = kind === "brief" ? 2200 : 1400;
   const explicit =
     readRecoveryMaxOutputEnv(kind === "brief" ? "OPENAI_RECOVERY_BRIEF_MAX_OUTPUT_TOKENS" : "OPENAI_RECOVERY_ORDERS_MAX_OUTPUT_TOKENS") ??
     readRecoveryMaxOutputEnv("OPENAI_RECOVERY_MAX_OUTPUT_TOKENS") ??
     fallback;
-  const scaled = Math.round(explicit * 1.5);
-  if (kind === "brief" && profile === "pro") {
-    return clamp(Math.max(scaled, 7200), 7200, 8000);
+  const normalized = Math.round(explicit);
+  if (kind === "brief") {
+    return clamp(normalized, 1800, profile === "pro" ? 3200 : 2800);
   }
-  if (kind === "orders" && profile === "pro") {
-    return clamp(Math.max(scaled, 2100), 2100, 3600);
-  }
-  return clamp(scaled, kind === "brief" ? 3600 : 1500, kind === "brief" ? 6300 : 3300);
+  return clamp(normalized, 1200, profile === "pro" ? 2200 : 1800);
 }
 
 function canRevealExistingSessionForGate(gate: AIRecoveryGate) {
