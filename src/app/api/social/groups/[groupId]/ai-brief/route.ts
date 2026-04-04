@@ -1,6 +1,6 @@
 import { jsonNoStore } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
-import { userHasCompletedServiceConsent } from "@/lib/server/serviceConsentStore";
+import { userHasSocialGroupAIBriefConsent } from "@/lib/server/socialGroupAIBriefAccess";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { parseSocialGroupId } from "@/lib/server/socialGroups";
 import { getCurrentGroupAIBrief } from "@/lib/server/socialGroupAIBrief";
@@ -16,15 +16,15 @@ export async function GET(
   try {
     const userId = await readUserIdFromRequest(req);
     if (!userId) return jsonNoStore({ ok: false, error: "login_required" }, { status: 401 });
-    if (!(await userHasCompletedServiceConsent(userId))) {
-      return jsonNoStore({ ok: false, error: "consent_required" }, { status: 403 });
-    }
 
     const { groupId: rawGroupId } = await params;
     groupId = parseSocialGroupId(rawGroupId) ?? 0;
     if (!groupId) return jsonNoStore({ ok: false, error: "invalid_group_id" }, { status: 400 });
 
     const admin = getSupabaseAdmin();
+    if (!(await userHasSocialGroupAIBriefConsent(admin, userId))) {
+      return jsonNoStore({ ok: false, error: "consent_required" }, { status: 403 });
+    }
     const response = await getCurrentGroupAIBrief({
       admin,
       groupId,

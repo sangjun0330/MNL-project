@@ -1,5 +1,6 @@
 import type { AIRecoveryUsage } from "@/lib/aiRecovery";
 import { normalizeOpenAIResponsesBaseUrl, resolveOpenAIResponsesRequestConfig } from "@/lib/server/openaiGateway";
+import type { SocialGroupAIBriefSnapshot } from "@/lib/server/socialGroupAIBriefModel";
 import type {
   SocialGroupAIBriefAction,
   SocialGroupAIBriefFinding,
@@ -7,64 +8,6 @@ import type {
   SocialGroupAIBriefTone,
   SocialGroupAIBriefWindow,
 } from "@/types/social";
-
-export type SocialGroupAIBriefSnapshot = {
-  week: {
-    startISO: string;
-    endISO: string;
-    label: string;
-  };
-  metrics: {
-    contributorCount: number;
-    optInCardCount: number;
-    avgBattery: number | null;
-    avgSleep: number | null;
-    avgMental: number | null;
-    avgStress: number | null;
-    avgActivity: number | null;
-    avgCaffeine: number | null;
-    warningCount: number;
-    dangerCount: number;
-    commonOffCount: number;
-    nightCountToday: number;
-    offCountToday: number;
-  };
-  hero: {
-    tone: SocialGroupAIBriefTone;
-    defaultHeadline: string;
-    defaultSubheadline: string;
-  };
-  findings: Array<{
-    id: string;
-    tone: SocialGroupAIBriefTone;
-    factLabel: string;
-    factText: string;
-    defaultTitle: string;
-    defaultBody: string;
-  }>;
-  actions: Array<{
-    id: string;
-    reason: string;
-    factText: string;
-    defaultTitle: string;
-    defaultBody: string;
-  }>;
-  windows: Array<{
-    dateISO: string;
-    label: string;
-    reason: string;
-  }>;
-  personalCards: Array<{
-    userId: string;
-    nickname: string;
-    avatarEmoji: string;
-    statusLabel: SocialGroupAIBriefPersonalCard["statusLabel"];
-    summaryFact: string;
-    actionFact: string;
-    defaultSummary: string;
-    defaultAction: string;
-  }>;
-};
 
 type SocialGroupAIBriefContent = {
   hero: {
@@ -79,6 +22,19 @@ type SocialGroupAIBriefContent = {
 };
 
 export type SocialGroupAIBriefAIResult =
+  | {
+      ok: true;
+      model: string;
+      usage: AIRecoveryUsage | null;
+      content: SocialGroupAIBriefContent;
+    }
+  | {
+      ok: false;
+      model: string;
+      error: string;
+    };
+
+type SocialGroupAIBriefRequestResult =
   | {
       ok: true;
       model: string;
@@ -297,8 +253,121 @@ function buildDeveloperPrompt() {
   ].join("\n");
 }
 
+function buildCompatDeveloperPrompt(snapshot: SocialGroupAIBriefSnapshot) {
+  return [
+    buildDeveloperPrompt(),
+    "",
+    "JSON 하나만 출력하라.",
+    "설명, 코드블록, 마크다운 금지.",
+    "아래 schema의 키 구조를 지켜라.",
+    JSON.stringify(buildSchema(snapshot)),
+  ].join("\n");
+}
+
 function buildUserPrompt(snapshot: SocialGroupAIBriefSnapshot) {
   return JSON.stringify(snapshot);
+}
+
+function shouldRetryWithCompat(error: string) {
+  return (
+    /openai_responses_400/i.test(error) ||
+    error === "openai_social_group_brief_invalid_json" ||
+    error === "openai_social_group_brief_empty_text" ||
+    error === "openai_social_group_brief_parse_failed"
+  );
+}
+
+async function postSocialGroupBriefRequest(args: {
+  snapshot: SocialGroupAIBriefSnapshot;
+  requestConfig: ReturnType<typeof resolveOpenAIResponsesRequestConfig>;
+  signal: AbortSignal;
+  compatMode?: boolean;
+}): Promise<SocialGroupAIBriefRequestResult> {
+  const compatMode = args.compatMode === true;
+  const response = await fetch(args.requestConfig.requestUrl, {
+    method: "POST",
+    headers: args.requestConfig.headers,
+    signal: args.signal,
+    body: JSON.stringify({
+      model: args.requestConfig.model,
+      input: [
+        {
+          role: "developer",
+          content: [
+            {
+              type: "input_text",
+              text: compatMode ? buildCompatDeveloperPrompt(args.snapshot) : buildDeveloperPrompt(),
+            },
+          ],
+        },
+        {
+          role: "user",
+          content: [{ type: "input_text", text: buildUserPrompt(args.snapshot) }],
+        },
+      ],
+      text: compatMode
+        ? {
+            format: { type: "text" },
+            verbosity: "low",
+          }
+        : {
+            format: {
+              type: "json_schema",
+              name: "social_group_brief",
+              schema: buildSchema(args.snapshot),
+              strict: true,
+            },
+          },
+      reasoning: {
+        effort: compatMode ? "low" : /^gpt-5\.4(?:$|[-_])/i.test(String(args.requestConfig.model)) ? "medium" : "low",
+      },
+      max_output_tokens: compatMode ? 2600 : 2200,
+      tools: [],
+      store: false,
+    }),
+  });
+
+  const raw = await response.text();
+  const json = safeJsonParse<any>(raw);
+  if (!response.ok) {
+    return {
+      ok: false,
+      model: args.requestConfig.model,
+      error: `openai_responses_${response.status}_social_group_brief`,
+    };
+  }
+  if (!json) {
+    return {
+      ok: false,
+      model: args.requestConfig.model,
+      error: "openai_social_group_brief_invalid_json",
+    };
+  }
+
+  const outputText = extractOutputText(json);
+  if (!outputText) {
+    return {
+      ok: false,
+      model: args.requestConfig.model,
+      error: "openai_social_group_brief_empty_text",
+    };
+  }
+
+  const parsed = safeJsonParse<any>(outputText);
+  if (!parsed) {
+    return {
+      ok: false,
+      model: args.requestConfig.model,
+      error: "openai_social_group_brief_parse_failed",
+    };
+  }
+
+  return {
+    ok: true,
+    model: args.requestConfig.model,
+    usage: readUsage(json?.usage),
+    content: mergeStructuredContent(args.snapshot, parsed),
+  };
 }
 
 function mergeStructuredContent(snapshot: SocialGroupAIBriefSnapshot, raw: any): SocialGroupAIBriefContent {
@@ -401,80 +470,25 @@ export async function generateSocialGroupBriefCopy(args: {
   args.signal.addEventListener("abort", onAbort, { once: true });
 
   try {
-    const response = await fetch(requestConfig.requestUrl, {
-      method: "POST",
-      headers: requestConfig.headers,
+    const primary = await postSocialGroupBriefRequest({
+      snapshot: args.snapshot,
+      requestConfig,
       signal: controller.signal,
-      body: JSON.stringify({
-        model: requestConfig.model,
-        input: [
-          {
-            role: "developer",
-            content: [{ type: "input_text", text: buildDeveloperPrompt() }],
-          },
-          {
-            role: "user",
-            content: [{ type: "input_text", text: buildUserPrompt(args.snapshot) }],
-          },
-        ],
-        text: {
-          format: {
-            type: "json_schema",
-            name: "social_group_brief",
-            schema: buildSchema(args.snapshot),
-            strict: true,
-          },
-        },
-        reasoning: {
-          effort: /^gpt-5\.4(?:$|[-_])/i.test(String(args.model)) ? "medium" : "low",
-        },
-        max_output_tokens: 2200,
-        tools: [],
-        store: false,
-      }),
+      compatMode: false,
     });
+    if (primary.ok) return primary;
 
-    const raw = await response.text();
-    const json = safeJsonParse<any>(raw);
-    if (!response.ok) {
-      return {
-        ok: false,
-        model: requestConfig.model,
-        error: `openai_responses_${response.status}_social_group_brief`,
-      };
-    }
-    if (!json) {
-      return {
-        ok: false,
-        model: requestConfig.model,
-        error: "openai_social_group_brief_invalid_json",
-      };
+    if (!shouldRetryWithCompat(primary.error)) {
+      return primary;
     }
 
-    const outputText = extractOutputText(json);
-    if (!outputText) {
-      return {
-        ok: false,
-        model: requestConfig.model,
-        error: "openai_social_group_brief_empty_text",
-      };
-    }
-
-    const parsed = safeJsonParse<any>(outputText);
-    if (!parsed) {
-      return {
-        ok: false,
-        model: requestConfig.model,
-        error: "openai_social_group_brief_parse_failed",
-      };
-    }
-
-    return {
-      ok: true,
-      model: requestConfig.model,
-      usage: readUsage(json?.usage),
-      content: mergeStructuredContent(args.snapshot, parsed),
-    };
+    const compat = await postSocialGroupBriefRequest({
+      snapshot: args.snapshot,
+      requestConfig,
+      signal: controller.signal,
+      compatMode: true,
+    });
+    return compat.ok ? compat : { ok: false, model: compat.model, error: compat.error || primary.error };
   } catch (error) {
     const message = String((error as any)?.message ?? error ?? "");
     const name = String((error as any)?.name ?? "");

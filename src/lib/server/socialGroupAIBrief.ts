@@ -1,14 +1,16 @@
 import { addDays, fromISODate, startOfWeekMonday, todayISO, toISODate } from "@/lib/date";
-import type { SubscriptionSnapshot } from "@/lib/server/billingReadStore";
-import { readSubscription } from "@/lib/server/billingReadStore";
-import { userHasCompletedServiceConsent } from "@/lib/server/serviceConsentStore";
 import {
   computeMemberWeeklyVitals,
   getSocialGroupById,
   loadSocialGroupProfileMap,
   normalizeSocialGroupRole,
 } from "@/lib/server/socialGroups";
-import type { SocialGroupAIBriefSnapshot } from "@/lib/server/openaiSocialGroupBrief";
+import {
+  readSocialGroupAIBriefConsentMap,
+  readSocialGroupAIBriefSubscription,
+  type SocialGroupAIBriefSubscriptionSnapshot,
+} from "@/lib/server/socialGroupAIBriefAccess";
+import type { SocialGroupAIBriefSnapshot } from "@/lib/server/socialGroupAIBriefModel";
 import type {
   HealthVisibility,
   MemberWeeklyVitals,
@@ -204,14 +206,30 @@ function compareCardCandidates(a: BriefMemberContext, b: BriefMemberContext) {
   return a.nickname.localeCompare(b.nickname, "ko");
 }
 
+function isSocialGroupAIBriefSchemaUnavailableError(error: unknown) {
+  const code = String((error as any)?.code ?? "").toUpperCase();
+  const message = String((error as any)?.message ?? "").toLowerCase();
+  return (
+    code === "42P01" ||
+    code === "42703" ||
+    code === "PGRST204" ||
+    code === "PGRST205" ||
+    message.includes("does not exist") ||
+    message.includes("schema cache") ||
+    message.includes("could not find the table") ||
+    message.includes("could not find the column")
+  );
+}
+
 async function readCachedSubscription(
+  admin: any,
   userId: string,
-  cache: Map<string, SubscriptionSnapshot | null>,
+  cache: Map<string, SocialGroupAIBriefSubscriptionSnapshot | null>,
   strict = false
 ) {
   if (cache.has(userId)) return cache.get(userId) ?? null;
   try {
-    const subscription = await readSubscription(userId);
+    const subscription = await readSocialGroupAIBriefSubscription(admin, userId, { strict });
     cache.set(userId, subscription);
     return subscription;
   } catch (error) {
@@ -226,10 +244,10 @@ async function loadViewerPrefs(args: {
   admin: any;
   groupId: number;
   userId: string;
-  subscriptionCache: Map<string, SubscriptionSnapshot | null>;
+  subscriptionCache: Map<string, SocialGroupAIBriefSubscriptionSnapshot | null>;
   strictSubscription?: boolean;
 }): Promise<ViewerPrefs> {
-  const [{ data: membership, error: membershipErr }, { data: pref }, { data: cardPref }, subscription] = await Promise.all([
+  const [membershipRes, prefRes, cardPrefRes, subscription] = await Promise.all([
     (args.admin as any)
       .from("rnest_social_group_members")
       .select("user_id")
@@ -247,10 +265,19 @@ async function loadViewerPrefs(args: {
       .eq("group_id", args.groupId)
       .eq("user_id", args.userId)
       .maybeSingle(),
-    readCachedSubscription(args.userId, args.subscriptionCache, args.strictSubscription === true),
+    readCachedSubscription(args.admin, args.userId, args.subscriptionCache, args.strictSubscription === true),
   ]);
 
+  const membership = membershipRes.data;
+  const membershipErr = membershipRes.error;
+  const pref = prefRes.data;
+  const prefErr = prefRes.error;
+  const cardPref = cardPrefRes.data;
+  const cardPrefErr = cardPrefRes.error;
+
   if (membershipErr) throw membershipErr;
+  if (prefErr) throw prefErr;
+  if (cardPrefErr && !isSocialGroupAIBriefSchemaUnavailableError(cardPrefErr)) throw cardPrefErr;
   if (!membership) {
     const error = new Error("not_group_member");
     (error as any).code = "not_group_member";
@@ -258,16 +285,16 @@ async function loadViewerPrefs(args: {
   }
 
   return {
-    hasEntitlement: subscription?.entitlements.socialGroupBrief === true,
+    hasEntitlement: subscription?.hasBriefAccess === true,
     healthShareEnabled: String(pref?.health_visibility ?? "hidden") === "full",
-    personalCardOptIn: cardPref?.personal_card_opt_in === true,
+    personalCardOptIn: !cardPrefErr && cardPref?.personal_card_opt_in === true,
   };
 }
 
 async function loadGroupBriefContext(args: {
   admin: any;
   groupId: number;
-  subscriptionCache: Map<string, SubscriptionSnapshot | null>;
+  subscriptionCache: Map<string, SocialGroupAIBriefSubscriptionSnapshot | null>;
 }): Promise<GroupBriefContext> {
   const group = await getSocialGroupById(args.admin, args.groupId);
   if (!group) {
@@ -284,7 +311,7 @@ async function loadGroupBriefContext(args: {
   if (memberErr) throw memberErr;
 
   const memberIds = (memberRows ?? []).map((row: any) => String(row.user_id)).filter(Boolean);
-  const [profileMap, { data: prefRows }, { data: stateRows }, { data: optInRows }] = await Promise.all([
+  const [profileMap, prefRes, stateRes, optInRes] = await Promise.all([
     loadSocialGroupProfileMap(args.admin, memberIds),
     (args.admin as any)
       .from("rnest_social_preferences")
@@ -299,6 +326,13 @@ async function loadGroupBriefContext(args: {
       .select("user_id, personal_card_opt_in")
       .eq("group_id", args.groupId),
   ]);
+  if (prefRes.error) throw prefRes.error;
+  if (stateRes.error) throw stateRes.error;
+  if (optInRes.error && !isSocialGroupAIBriefSchemaUnavailableError(optInRes.error)) throw optInRes.error;
+
+  const prefRows = prefRes.data ?? [];
+  const stateRows = stateRes.data ?? [];
+  const optInRows = optInRes.error ? [] : (optInRes.data ?? []);
 
   const prefMap = new Map<string, { scheduleVisibility: ScheduleVisibility; healthVisibility: HealthVisibility }>();
   for (const row of prefRows ?? []) {
@@ -319,13 +353,10 @@ async function loadGroupBriefContext(args: {
   }
 
   const subscriptions = await Promise.all(
-    memberIds.map(async (userId: string) => [userId, await readCachedSubscription(userId, args.subscriptionCache)] as const)
+    memberIds.map(async (userId: string) => [userId, await readCachedSubscription(args.admin, userId, args.subscriptionCache)] as const)
   );
-  const subscriptionMap = new Map<string, SubscriptionSnapshot | null>(subscriptions);
-  const consentPairs = await Promise.all(
-    memberIds.map(async (userId: string) => [userId, await userHasCompletedServiceConsent(userId)] as const)
-  );
-  const consentMap = new Map<string, boolean>(consentPairs);
+  const subscriptionMap = new Map<string, SocialGroupAIBriefSubscriptionSnapshot | null>(subscriptions);
+  const consentMap = await readSocialGroupAIBriefConsentMap(args.admin, memberIds);
 
   const week = getCurrentWeekWindow();
   const visibleOffSets: Set<string>[] = [];
@@ -357,7 +388,7 @@ async function loadGroupBriefContext(args: {
 
     const vitals = pref.healthVisibility === "full" ? computeMemberWeeklyVitals(payload, week.todayISO) : null;
     const profile = profileMap.get(userId);
-    const subscription: SubscriptionSnapshot | null = subscriptionMap.get(userId) ?? null;
+    const subscription: SocialGroupAIBriefSubscriptionSnapshot | null = subscriptionMap.get(userId) ?? null;
     const hasAIConsent = consentMap.get(userId) === true;
     return {
       userId,
@@ -368,8 +399,8 @@ async function loadGroupBriefContext(args: {
       healthVisibility: pref.healthVisibility,
       vitals,
       personalCardOptIn: optInMap.get(userId) === true,
-      hasPaidBriefAccess: subscription?.entitlements.socialGroupBrief === true,
-      hasProBriefAccess: subscription?.entitlements.socialGroupBrief === true && subscription?.tier === "pro" && subscription?.hasPaidAccess === true,
+      hasPaidBriefAccess: subscription?.hasBriefAccess === true,
+      hasProBriefAccess: subscription?.hasProBriefAccess === true,
       hasAIConsent,
     };
   });
@@ -414,19 +445,6 @@ async function loadGroupBriefContext(args: {
   };
 }
 
-function isMissingTableError(error: any): boolean {
-  const code = String(error?.code ?? "").toLowerCase();
-  const message = String(error?.message ?? "").toLowerCase();
-  return (
-    code === "42p01" ||
-    code === "pgrst204" ||
-    code === "pgrst205" ||
-    message.includes("does not exist") ||
-    message.includes("could not find the table") ||
-    message.includes("schema cache")
-  );
-}
-
 async function readBriefRow(admin: any, groupId: number, weekStartISO: string): Promise<SocialGroupAIBriefRow | null> {
   const { data, error } = await (admin as any)
     .from("rnest_social_group_ai_briefs")
@@ -434,10 +452,8 @@ async function readBriefRow(admin: any, groupId: number, weekStartISO: string): 
     .eq("group_id", groupId)
     .eq("week_start_iso", weekStartISO)
     .maybeSingle();
-  if (error) {
-    if (isMissingTableError(error)) return null;
-    throw error;
-  }
+  if (error && !isSocialGroupAIBriefSchemaUnavailableError(error)) throw error;
+  if (error) return null;
   return (data ?? null) as SocialGroupAIBriefRow | null;
 }
 
@@ -449,7 +465,7 @@ async function upsertBriefRow(admin: any, row: SocialGroupAIBriefRow) {
   const { error } = await (admin as any)
     .from("rnest_social_group_ai_briefs")
     .upsert(payload, { onConflict: "group_id,week_start_iso" });
-  if (error) throw error;
+  if (error && !isSocialGroupAIBriefSchemaUnavailableError(error)) throw error;
 }
 
 function buildSnapshot(context: GroupBriefContext): SocialGroupAIBriefSnapshot {
@@ -712,11 +728,11 @@ export async function generateGroupAIBriefArtifact(args: {
   admin?: any;
   groupId: number;
   generatorType: "cron" | "manual";
-  subscriptionCache?: Map<string, SubscriptionSnapshot | null>;
+  subscriptionCache?: Map<string, SocialGroupAIBriefSubscriptionSnapshot | null>;
   existingRow?: SocialGroupAIBriefRow | null;
 }): Promise<SocialGroupAIBriefRow | null> {
   const admin = args.admin;
-  const subscriptionCache = args.subscriptionCache ?? new Map<string, SubscriptionSnapshot | null>();
+  const subscriptionCache = args.subscriptionCache ?? new Map<string, SocialGroupAIBriefSubscriptionSnapshot | null>();
   const context = await loadGroupBriefContext({
     admin,
     groupId: args.groupId,
@@ -954,9 +970,9 @@ export async function getCurrentGroupAIBrief(args: {
   admin: any;
   groupId: number;
   userId: string;
-  subscriptionCache?: Map<string, SubscriptionSnapshot | null>;
+  subscriptionCache?: Map<string, SocialGroupAIBriefSubscriptionSnapshot | null>;
 }): Promise<SocialGroupAIBriefResponse> {
-  const subscriptionCache = args.subscriptionCache ?? new Map<string, SubscriptionSnapshot | null>();
+  const subscriptionCache = args.subscriptionCache ?? new Map<string, SocialGroupAIBriefSubscriptionSnapshot | null>();
   let viewer: ViewerPrefs | null = null;
   try {
     viewer = await loadViewerPrefs({
@@ -964,10 +980,10 @@ export async function getCurrentGroupAIBrief(args: {
       groupId: args.groupId,
       userId: args.userId,
       subscriptionCache,
+      strictSubscription: true,
     });
   } catch (error: any) {
     const code = String(error?.code ?? error?.message ?? "");
-    // Re-throw membership/group errors so the route can return proper 403/404
     if (code === "not_group_member" || code === "group_not_found") throw error;
     console.error(
       "[SocialGroupAIBrief] loadViewerPrefs failed group=%d userId=%s code=%s err=%s",
@@ -976,7 +992,6 @@ export async function getCurrentGroupAIBrief(args: {
       code,
       String(error?.message ?? error)
     );
-    // Return locked state on any other viewer-load failure
     return {
       state: "failed",
       generatedAt: null,
@@ -986,7 +1001,6 @@ export async function getCurrentGroupAIBrief(args: {
       errorCode: "group_ai_brief_viewer_load_failed",
     };
   }
-
   const week = getCurrentWeekWindow();
   let row: SocialGroupAIBriefRow | null = null;
   try {
@@ -1018,7 +1032,7 @@ export async function refreshCurrentGroupAIBrief(args: {
   groupId: number;
   userId: string;
 }): Promise<SocialGroupAIBriefResponse> {
-  const subscriptionCache = new Map<string, SubscriptionSnapshot | null>();
+  const subscriptionCache = new Map<string, SocialGroupAIBriefSubscriptionSnapshot | null>();
   const viewer = await loadViewerPrefs({
     admin: args.admin,
     groupId: args.groupId,
@@ -1070,7 +1084,7 @@ export async function readGroupAIBriefViewerPrefs(args: {
     admin: args.admin,
     groupId: args.groupId,
     userId: args.userId,
-    subscriptionCache: new Map<string, SubscriptionSnapshot | null>(),
+    subscriptionCache: new Map<string, SocialGroupAIBriefSubscriptionSnapshot | null>(),
     strictSubscription: false,
   });
   return {
@@ -1089,7 +1103,7 @@ export async function saveGroupAIBriefViewerPrefs(args: {
     admin: args.admin,
     groupId: args.groupId,
     userId: args.userId,
-    subscriptionCache: new Map<string, SubscriptionSnapshot | null>(),
+    subscriptionCache: new Map<string, SocialGroupAIBriefSubscriptionSnapshot | null>(),
     strictSubscription: false,
   });
 
@@ -1110,7 +1124,7 @@ export async function saveGroupAIBriefViewerPrefs(args: {
       },
       { onConflict: "group_id,user_id" }
     );
-  if (error) throw error;
+  if (error && !isSocialGroupAIBriefSchemaUnavailableError(error)) throw error;
 
   return {
     healthShareEnabled: viewer.healthShareEnabled,
@@ -1120,7 +1134,7 @@ export async function saveGroupAIBriefViewerPrefs(args: {
 
 export async function generateWeeklyGroupAIBriefs(args: { admin: any }) {
   const week = getCurrentWeekWindow();
-  const subscriptionCache = new Map<string, SubscriptionSnapshot | null>();
+  const subscriptionCache = new Map<string, SocialGroupAIBriefSubscriptionSnapshot | null>();
   const [{ data: existingRows, error: existingErr }, { data: memberRows, error: memberErr }] = await Promise.all([
     (args.admin as any)
       .from("rnest_social_group_ai_briefs")
@@ -1131,11 +1145,11 @@ export async function generateWeeklyGroupAIBriefs(args: { admin: any }) {
       .select("group_id")
       .order("group_id", { ascending: true }),
   ]);
-  if (existingErr) throw existingErr;
+  if (existingErr && !isSocialGroupAIBriefSchemaUnavailableError(existingErr)) throw existingErr;
   if (memberErr) throw memberErr;
 
   const existingGroupIds = new Set<number>(
-    (existingRows ?? []).map((row: any) => Number(row.group_id)).filter((value: number) => Number.isFinite(value))
+    ((existingErr ? [] : existingRows) ?? []).map((row: any) => Number(row.group_id)).filter((value: number) => Number.isFinite(value))
   );
   const candidateGroupIds: number[] = Array.from(
     new Set<number>(
