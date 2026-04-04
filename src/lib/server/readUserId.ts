@@ -50,25 +50,33 @@ export async function readAuthIdentityFromRequest(req: Request): Promise<ServerA
     // Bearer 토큰이 명시적으로 제공된 경우: 해당 토큰으로만 인증.
     // 토큰이 무효하더라도 cookie 기반 인증으로 폴스루하지 않아
     // 토큰 위조나 세션 혼용 공격을 방지한다.
-    const supabase = getBearerSupabaseClient();
-    const { data, error } = await supabase.auth.getUser(bearer);
+    try {
+      const supabase = getBearerSupabaseClient();
+      const { data, error } = await supabase.auth.getUser(bearer);
+      if (!error && data.user?.id && isAuthEmailAllowed(data.user.email ?? null)) {
+        return {
+          userId: data.user.id,
+          email: data.user.email ?? null,
+        };
+      }
+    } catch (error) {
+      console.error("[Auth] bearer auth lookup failed: %s", String((error as Error)?.message ?? error));
+    }
+    return { userId: "", email: null };
+  }
+
+  // Bearer 토큰이 없을 때만 cookie 기반 인증 시도
+  try {
+    const supabase = await getRouteSupabaseClient();
+    const { data, error } = await supabase.auth.getUser();
     if (!error && data.user?.id && isAuthEmailAllowed(data.user.email ?? null)) {
       return {
         userId: data.user.id,
         email: data.user.email ?? null,
       };
     }
-    return { userId: "", email: null };
-  }
-
-  // Bearer 토큰이 없을 때만 cookie 기반 인증 시도
-  const supabase = await getRouteSupabaseClient();
-  const { data } = await supabase.auth.getUser();
-  if (data.user?.id && isAuthEmailAllowed(data.user.email ?? null)) {
-    return {
-      userId: data.user.id,
-      email: data.user.email ?? null,
-    };
+  } catch (error) {
+    console.error("[Auth] cookie auth lookup failed: %s", String((error as Error)?.message ?? error));
   }
   return { userId: "", email: null };
 }
@@ -83,13 +91,17 @@ export async function readAuthIdentityFromServer(): Promise<ServerAuthIdentity> 
   const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!supabaseUrl || !supabaseAnon) return { userId: "", email: null };
 
-  const supabase = await getRouteSupabaseClient();
-  const { data } = await supabase.auth.getUser();
-  if (data.user?.id && isAuthEmailAllowed(data.user.email ?? null)) {
-    return {
-      userId: data.user.id,
-      email: data.user.email ?? null,
-    };
+  try {
+    const supabase = await getRouteSupabaseClient();
+    const { data, error } = await supabase.auth.getUser();
+    if (!error && data.user?.id && isAuthEmailAllowed(data.user.email ?? null)) {
+      return {
+        userId: data.user.id,
+        email: data.user.email ?? null,
+      };
+    }
+  } catch (error) {
+    console.error("[Auth] server auth lookup failed: %s", String((error as Error)?.message ?? error));
   }
   return { userId: "", email: null };
 }

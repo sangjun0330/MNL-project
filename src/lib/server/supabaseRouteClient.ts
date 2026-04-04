@@ -15,18 +15,18 @@ export async function getRouteSupabaseClient() {
 
   return createServerClient<Database>(supabaseUrl, supabaseAnon, {
     cookies: {
-      get(name: string) {
-        return cookieStore.get(name)?.value ?? null;
+      getAll() {
+        return cookieStore.getAll().map((cookie) => ({
+          name: cookie.name,
+          value: cookie.value,
+        }));
       },
-      set(name: string, value: string, options: CookieOptions) {
+      setAll(cookiesToSet: Array<{ name: string; value: string; options?: CookieOptions }>) {
         const store: any = cookieStore;
         if (typeof store.set !== "function") return;
-        store.set({ name, value, ...options });
-      },
-      remove(name: string, options: CookieOptions) {
-        const store: any = cookieStore;
-        if (typeof store.set !== "function") return;
-        store.set({ name, value: "", ...options });
+        for (const cookie of cookiesToSet) {
+          store.set(cookie);
+        }
       },
     },
   });

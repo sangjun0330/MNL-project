@@ -47,12 +47,19 @@ export async function GET(req: Request) {
 
   const supabase = createServerClient(supabaseUrl, supabaseAnon, {
     cookies: {
-      get: (name: string) => cookieStore.get(name)?.value ?? null,
-      set: (name: string, value: string, options: Record<string, unknown>) => {
-        pendingCookies.push({ name, value, options });
-      },
-      remove: (name: string, options: Record<string, unknown>) => {
-        pendingCookies.push({ name, value: "", options });
+      getAll: () =>
+        cookieStore.getAll().map((cookie) => ({
+          name: cookie.name,
+          value: cookie.value,
+        })),
+      setAll: (cookiesToSet: Array<{ name: string; value: string; options?: Record<string, unknown> }>) => {
+        for (const cookie of cookiesToSet) {
+          pendingCookies.push({
+            name: cookie.name,
+            value: cookie.value,
+            options: cookie.options ?? {},
+          });
+        }
       },
     },
   });
