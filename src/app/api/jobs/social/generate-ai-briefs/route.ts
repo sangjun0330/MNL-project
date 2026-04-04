@@ -1,7 +1,7 @@
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { generateWeeklyGroupAIBriefs } from "@/lib/server/socialGroupAIBrief";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 function readCronSecret() {
