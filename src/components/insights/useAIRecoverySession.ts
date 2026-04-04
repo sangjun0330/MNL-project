@@ -259,6 +259,15 @@ function getLatestAutoOrdersRequestKeyForSlot(accountKey: string | null, dateISO
   return listAutoOrdersRequestKeysForSlot(accountKey, dateISO, slot)[0] ?? null;
 }
 
+function pickRelevantAutoOrdersRequestKey(args: {
+  accountKey: string | null;
+  dateISO: ISODate;
+  slot: AIRecoverySlot;
+  sessionKey: string | null;
+}) {
+  return getLatestAutoOrdersRequestKeyForSlot(args.accountKey, args.dateISO, args.slot) ?? args.sessionKey;
+}
+
 function beginAutoOrdersRequest(key: string, options?: AIRecoveryOrderGenerationOptions) {
   const existing = getAutoOrdersRequestRecord(key);
   if (existing?.status === "pending" || existing?.status === "completed") return false;
@@ -623,8 +632,12 @@ export function useAIRecoverySession(args: HookArgs): HookState {
   const [savingOrders, setSavingOrders] = useState(false);
   const [pendingAutoOrders, setPendingAutoOrders] = useState(() => {
     if (hasSessionOrders(initialData)) return false;
-    const initialAutoOrdersKey =
-      buildAutoOrdersKey(initialData) ?? getLatestAutoOrdersRequestKeyForSlot(accountKey, args.dateISO, args.slot);
+    const initialAutoOrdersKey = pickRelevantAutoOrdersRequestKey({
+      accountKey,
+      dateISO: args.dateISO,
+      slot: args.slot,
+      sessionKey: buildAutoOrdersKey(initialData),
+    });
     if (!initialAutoOrdersKey) return false;
     const status = getAutoOrdersRequestStatus(initialAutoOrdersKey);
     return status === "pending" || status === "completed";
@@ -1158,7 +1171,12 @@ export function useAIRecoverySession(args: HookArgs): HookState {
   const pendingAutoOrdersKey = useMemo(
     () => {
       if (hasSessionOrders(data)) return null;
-      return buildAutoOrdersKey(data) ?? getLatestAutoOrdersRequestKeyForSlot(accountKey, args.dateISO, args.slot);
+      return pickRelevantAutoOrdersRequestKey({
+        accountKey,
+        dateISO: args.dateISO,
+        slot: args.slot,
+        sessionKey: buildAutoOrdersKey(data),
+      });
     },
     [accountKey, args.dateISO, args.slot, buildAutoOrdersKey, data]
   );
