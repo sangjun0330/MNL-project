@@ -373,12 +373,20 @@ export function InsightsAIRecoveryDetail({
   const response = activeData;
   const currentSession = response?.session ?? null;
   const brief = currentSession?.brief ?? null;
+  const hasRenderedOrders = Boolean(currentSession?.orders?.items?.length);
   const hasAIAccess =
     response?.hasAIEntitlement ??
     entry.initialData?.hasAIEntitlement ??
     (!billing.loading && hydrated ? billing.hasEntitlement("recoveryPlannerAI") : false);
   const canRegenerateSession = response?.quota.canGenerateSession ?? !currentSession;
-  const showGeneratingOverlay = Boolean(response?.gate.allowed && session.generating);
+  const overlayMode = session.generating ? "recovery" : "orders";
+  const showGeneratingOverlay = Boolean(
+    response?.gate.allowed &&
+    (
+      session.generating ||
+      ((session.savingOrders || session.pendingAutoOrders) && !hasRenderedOrders)
+    )
+  );
   const showGenerationControls = Boolean(response?.showGenerationControls);
   const sectionList = useMemo(() => {
     const sections = Array.isArray(brief?.sections) ? brief.sections : [];
@@ -481,7 +489,7 @@ export function InsightsAIRecoveryDetail({
         </>
       }
     >
-      <AIRecoveryLoadingOverlay mode="recovery" open={showGeneratingOverlay} />
+      <AIRecoveryLoadingOverlay mode={overlayMode} open={showGeneratingOverlay} />
 
       <div className="px-1">
         <AIRecoverySlotTabs value={resolvedSlot ?? "wake"} onChange={updateSlot} action={<OrderCheckButton href={ordersHref} />} />

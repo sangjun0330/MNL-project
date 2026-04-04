@@ -88,6 +88,8 @@ const MAX_AUTO_ORDERS_REQUESTS = 64;
 const AUTO_ORDERS_STORAGE_PREFIX = "rnest:ai-recovery:auto-orders:";
 const AUTO_ORDERS_PENDING_STALE_MS = 90_000;
 const AUTO_ORDERS_COMPLETED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const AUTO_ORDERS_RELOAD_RETRY_MS = 700;
+const AUTO_ORDERS_RELOAD_TIMEOUT_MS = 10_000;
 // Track brief-without-orders sessions across hook instances and full reloads
 // so a resumed page cannot enqueue the same orders generation with default options.
 const autoOrdersRequests = new Map<string, AutoOrdersRequestRecord>();
@@ -106,6 +108,14 @@ function subscribeAutoOrdersRequestChange(listener: () => void) {
 
 async function readJson<T>(response: Response): Promise<T | null> {
   return response.json().catch(() => null);
+}
+
+function hasSessionOrders(value: SessionData | null | undefined) {
+  return Boolean(value?.session?.orders?.items?.length);
+}
+
+function hasBriefWithoutOrders(value: SessionData | null | undefined) {
+  return Boolean(value?.session?.brief) && !hasSessionOrders(value);
 }
 
 function buildSessionResourceKey(dateISO: ISODate, slot: AIRecoverySlot) {
@@ -558,12 +568,13 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     [args.dateISO, args.enabled, args.slot, initialSourceData]
   );
 
-  function buildAutoOrdersKey(value: SessionData | null) {
-    const generatedAt = value?.session?.generatedAt;
-    if (!value?.session?.brief || value.session.orders || !generatedAt) return null;
-    if (value.session.status === "fallback" || value.session.openaiMeta?.fallbackReason) return null;
+  const buildAutoOrdersKey = useCallback((value: SessionData | null) => {
+    const session = value?.session;
+    const generatedAt = session?.generatedAt;
+    if (!session || !hasBriefWithoutOrders(value) || !generatedAt) return null;
+    if (session.status === "fallback" || session.openaiMeta?.fallbackReason) return null;
     return `${accountKey ?? "guest"}:${value.dateISO}:${value.slot}:${generatedAt}`;
-  }
+  }, [accountKey]);
 
   const [data, setData] = useState<SessionData | null>(initialData);
   const [loading, setLoading] = useState(!initialData);
@@ -582,6 +593,9 @@ export function useAIRecoverySession(args: HookArgs): HookState {
   const loadRef = useRef<(options?: { force?: boolean }) => Promise<void>>(async () => {});
   const togglingCompletionRef = useRef<string | null>(null);
   const committedCompletionVersionRef = useRef(0);
+  const autoOrdersReloadRef = useRef<{ key: string; promise: Promise<boolean> } | null>(null);
+  const autoOrdersRetryTimerRef = useRef<number | null>(null);
+  const autoOrdersRetryResolveRef = useRef<(() => void) | null>(null);
 
   // Refs for stable toggleCompletion — always reflect latest values without re-creating the callback
   const dataRef = useRef<SessionData | null>(data);
@@ -605,7 +619,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     setError(getAIRecoveryErrorMessage(value));
   };
 
-  const pickLatestData = (current: SessionData | null, incoming: SessionData | null): SessionData | null => {
+  const pickLatestData = useCallback((current: SessionData | null, incoming: SessionData | null): SessionData | null => {
     if (!incoming) return current;
     if (!current) return incoming;
     // Always prefer incoming when slot or date changed — old data is irrelevant
@@ -636,9 +650,9 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     if (!incomingOrdersId && currentOrdersId) return current;
 
     return incoming;
-  };
+  }, []);
 
-  const isSameRenderedSession = (current: SessionData | null, incoming: SessionData | null) => {
+  const isSameRenderedSession = useCallback((current: SessionData | null, incoming: SessionData | null) => {
     if (!current?.session || !incoming?.session) return false;
     if (current.dateISO !== incoming.dateISO || current.slot !== incoming.slot) return false;
     if ((current.session.generatedAt ?? "") !== (incoming.session.generatedAt ?? "")) return false;
@@ -649,9 +663,9 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     if ((currentBriefId || incomingBriefId) && currentBriefId !== incomingBriefId) return false;
     if ((currentOrdersId || incomingOrdersId) && currentOrdersId !== incomingOrdersId) return false;
     return true;
-  };
+  }, []);
 
-  const mergeCompletionLists = (current: string[] | null | undefined, incoming: string[] | null | undefined) => {
+  const mergeCompletionLists = useCallback((current: string[] | null | undefined, incoming: string[] | null | undefined) => {
     const next: string[] = [];
     const seen = new Set<string>();
     for (const item of current ?? []) {
@@ -665,9 +679,9 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       next.push(item);
     }
     return next;
-  };
+  }, []);
 
-  const mergeInteractiveState = (
+  const mergeInteractiveState = useCallback((
     current: SessionData | null,
     incoming: SessionData | null,
     preserveCommittedCompletions = false,
@@ -688,9 +702,9 @@ export function useAIRecoverySession(args: HookArgs): HookState {
         weekTotalCompleted: Math.max(current.orderStats.weekTotalCompleted, incoming.orderStats.weekTotalCompleted),
       },
     };
-  };
+  }, [isSameRenderedSession, mergeCompletionLists]);
 
-  const adoptIncomingData = (
+  const adoptIncomingData = useCallback((
     incoming: SessionData | null,
     options?: {
       completionVersionAtStart?: number;
@@ -702,7 +716,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       const merged = mergeInteractiveState(current, incoming, preserveCommittedCompletions);
       return pickLatestData(current, merged);
     });
-  };
+  }, [mergeInteractiveState, pickLatestData]);
 
   const listRequestDates = (pivotISO: ISODate, daysBefore: number, daysAfter: number) => {
     const pivot = fromISODate(pivotISO);
@@ -1094,33 +1108,114 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       setLoading(true);
       setError(null);
     }
-  }, [initialData, args.dateISO, args.slot]);
+  }, [initialData, args.dateISO, args.slot, pickLatestData]);
 
   const pendingAutoOrdersKey = useMemo(
     () => buildAutoOrdersKey(data),
-    [data, accountKey]
+    [buildAutoOrdersKey, data]
   );
 
   useEffect(() => {
     if (!args.enabled) {
+      if (autoOrdersRetryTimerRef.current != null) {
+        window.clearTimeout(autoOrdersRetryTimerRef.current);
+        autoOrdersRetryTimerRef.current = null;
+      }
+      autoOrdersRetryResolveRef.current?.();
+      autoOrdersRetryResolveRef.current = null;
+      autoOrdersReloadRef.current = null;
       setPendingAutoOrders(false);
       return;
     }
 
+    let cancelled = false;
+
+    const reloadCompletedAutoOrders = async (activeKey: string) => {
+      const startedAt = Date.now();
+
+      while (!cancelled) {
+        if (getAutoOrdersRequestStatus(activeKey) !== "completed") {
+          return hasSessionOrders(dataRef.current);
+        }
+
+        const sharedData = normalizeData(readCurrentAccountSession(accountKey, resourceKey)?.data ?? null);
+        if (hasSessionOrders(sharedData)) {
+          adoptIncomingData(sharedData);
+          return true;
+        }
+
+        await loadRef.current({ force: true });
+
+        const latestData = normalizeData(dataRef.current);
+        if (hasSessionOrders(latestData)) {
+          return true;
+        }
+
+        if (Date.now() - startedAt >= AUTO_ORDERS_RELOAD_TIMEOUT_MS) {
+          return false;
+        }
+
+        await new Promise<void>((resolve) => {
+          autoOrdersRetryResolveRef.current = () => {
+            autoOrdersRetryResolveRef.current = null;
+            autoOrdersRetryTimerRef.current = null;
+            resolve();
+          };
+          autoOrdersRetryTimerRef.current = window.setTimeout(() => {
+            autoOrdersRetryResolveRef.current?.();
+          }, AUTO_ORDERS_RELOAD_RETRY_MS);
+        });
+      }
+
+      return false;
+    };
+
     const syncPendingAutoOrders = () => {
       const currentData = dataRef.current;
       const status = pendingAutoOrdersKey ? getAutoOrdersRequestStatus(pendingAutoOrdersKey) : null;
+      const shouldKeepWaiting =
+        status === "pending" ||
+        (
+          status === "completed" &&
+          hasBriefWithoutOrders(currentData) &&
+          !ordersInFlightRef.current
+        );
+
+      setPendingAutoOrders(shouldKeepWaiting);
+
       const shouldReloadCompletedOrders =
         status === "completed" &&
-        Boolean(currentData?.session?.brief) &&
-        !currentData?.session?.orders &&
+        hasBriefWithoutOrders(currentData) &&
         !ordersInFlightRef.current;
 
-      setPendingAutoOrders(status === "pending");
-
-      if (shouldReloadCompletedOrders) {
-        void loadRef.current({ force: true });
+      if (!shouldReloadCompletedOrders || !pendingAutoOrdersKey) {
+        return;
       }
+
+      const existingReload = autoOrdersReloadRef.current;
+      if (existingReload?.key === pendingAutoOrdersKey) return;
+
+      const promise = reloadCompletedAutoOrders(pendingAutoOrdersKey).finally(() => {
+        if (autoOrdersReloadRef.current?.key === pendingAutoOrdersKey) {
+          autoOrdersReloadRef.current = null;
+        }
+        if (cancelled) return;
+        const latestData = normalizeData(dataRef.current);
+        const latestStatus = getAutoOrdersRequestStatus(pendingAutoOrdersKey);
+        const stillWaiting =
+          latestStatus === "pending" ||
+          (
+            latestStatus === "completed" &&
+            hasBriefWithoutOrders(latestData) &&
+            !ordersInFlightRef.current
+          );
+        setPendingAutoOrders(stillWaiting);
+      });
+
+      autoOrdersReloadRef.current = {
+        key: pendingAutoOrdersKey,
+        promise,
+      };
     };
 
     syncPendingAutoOrders();
@@ -1133,10 +1228,17 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     };
     window.addEventListener("storage", handleStorage);
     return () => {
+      cancelled = true;
+      if (autoOrdersRetryTimerRef.current != null) {
+        window.clearTimeout(autoOrdersRetryTimerRef.current);
+        autoOrdersRetryTimerRef.current = null;
+      }
+      autoOrdersRetryResolveRef.current?.();
+      autoOrdersRetryResolveRef.current = null;
       unsubscribe();
       window.removeEventListener("storage", handleStorage);
     };
-  }, [args.enabled, args.dateISO, args.slot, accountKey, pendingAutoOrdersKey]);
+  }, [accountKey, adoptIncomingData, args.enabled, normalizeData, pendingAutoOrdersKey, resourceKey]);
 
   useEffect(() => {
     void load();
