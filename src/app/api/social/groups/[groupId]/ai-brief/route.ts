@@ -5,25 +5,26 @@ import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { parseSocialGroupId } from "@/lib/server/socialGroups";
 import { getCurrentGroupAIBrief } from "@/lib/server/socialGroupAIBrief";
 
-export const runtime = "edge";
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ groupId: string }> }
 ) {
-  const userId = await readUserIdFromRequest(req);
-  if (!userId) return jsonNoStore({ ok: false, error: "login_required" }, { status: 401 });
-  if (!(await userHasCompletedServiceConsent(userId))) {
-    return jsonNoStore({ ok: false, error: "consent_required" }, { status: 403 });
-  }
-
-  const { groupId: rawGroupId } = await params;
-  const groupId = parseSocialGroupId(rawGroupId);
-  if (!groupId) return jsonNoStore({ ok: false, error: "invalid_group_id" }, { status: 400 });
-
-  const admin = getSupabaseAdmin();
+  let groupId = 0;
   try {
+    const userId = await readUserIdFromRequest(req);
+    if (!userId) return jsonNoStore({ ok: false, error: "login_required" }, { status: 401 });
+    if (!(await userHasCompletedServiceConsent(userId))) {
+      return jsonNoStore({ ok: false, error: "consent_required" }, { status: 403 });
+    }
+
+    const { groupId: rawGroupId } = await params;
+    groupId = parseSocialGroupId(rawGroupId) ?? 0;
+    if (!groupId) return jsonNoStore({ ok: false, error: "invalid_group_id" }, { status: 400 });
+
+    const admin = getSupabaseAdmin();
     const response = await getCurrentGroupAIBrief({
       admin,
       groupId,

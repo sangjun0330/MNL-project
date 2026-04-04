@@ -1,7 +1,7 @@
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { generateWeeklyGroupAIBriefs } from "@/lib/server/socialGroupAIBrief";
 
-export const runtime = "edge";
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function readCronSecret() {
@@ -40,8 +40,8 @@ async function runGenerate(req: Request) {
     return Response.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
 
-  const admin = getSupabaseAdmin();
   try {
+    const admin = getSupabaseAdmin();
     const result = await generateWeeklyGroupAIBriefs({ admin });
     return Response.json({ ok: true, data: result });
   } catch (error: any) {

@@ -8,10 +8,7 @@ import {
   loadSocialGroupProfileMap,
   normalizeSocialGroupRole,
 } from "@/lib/server/socialGroups";
-import {
-  generateSocialGroupBriefCopy,
-  type SocialGroupAIBriefSnapshot,
-} from "@/lib/server/openaiSocialGroupBrief";
+import type { SocialGroupAIBriefSnapshot } from "@/lib/server/openaiSocialGroupBrief";
 import type {
   HealthVisibility,
   MemberWeeklyVitals,
@@ -737,6 +734,7 @@ export async function generateGroupAIBriefArtifact(args: {
   const model = context.hasProEligibleMember ? "gpt-5.4" : "gpt-5.2";
   const controller = new AbortController();
   try {
+    const { generateSocialGroupBriefCopy } = await import("@/lib/server/openaiSocialGroupBrief");
     const aiResult = await generateSocialGroupBriefCopy({
       snapshot,
       model,
