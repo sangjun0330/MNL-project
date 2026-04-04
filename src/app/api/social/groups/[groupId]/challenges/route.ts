@@ -31,10 +31,11 @@ export async function GET(
   req: Request,
   { params }: { params: Promise<{ groupId: string }> }
 ) {
-  const sameOriginErr = sameOriginRequestError(req);
-  if (sameOriginErr) {
-    return jsonNoStore({ ok: false, error: sameOriginErr }, { status: 403 });
-  }
+  // GET read path:
+  // The app sets Referrer-Policy: no-referrer globally, so browser fetches often omit
+  // Referer and Origin on same-origin reads. Enforcing sameOriginRequestError here
+  // causes legitimate in-app challenge loads to fail with 403.
+  // Mutating routes keep same-origin checks; read-only routes rely on auth instead.
 
   const userId = await readUserIdFromRequest(req);
   if (!userId) return jsonNoStore({ ok: false, error: "login_required" }, { status: 401 });

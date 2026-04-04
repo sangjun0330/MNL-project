@@ -29,10 +29,10 @@ export async function GET(
   req: Request,
   { params }: { params: Promise<{ groupId: string; challengeId: string }> }
 ) {
-  const sameOriginErr = sameOriginRequestError(req);
-  if (sameOriginErr) {
-    return jsonNoStore({ ok: false, error: sameOriginErr }, { status: 403 });
-  }
+  // GET read path:
+  // The app uses Referrer-Policy: no-referrer, so same-origin browser fetches may not
+  // include Referer or Origin. Keeping sameOriginRequestError here breaks legitimate
+  // challenge detail loads from the client. State-changing routes still enforce it.
 
   const userId = await readUserIdFromRequest(req);
   if (!userId) return jsonNoStore({ ok: false, error: "login_required" }, { status: 401 });
